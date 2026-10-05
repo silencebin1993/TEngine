@@ -2072,6 +2072,7 @@ namespace GameLogic.Campaign.Regions
             // FG6-DEF-01 审查修复（P2）：炮塔的接入态不进内核快照——在第一步之前补回（读档接着跑与不存档一路跑一致）。
             Defense.TurretService.RestoreAfterLoad(state, _combat);
             Defense.DefenseService.RestoreAfterLoad(state, _combat); // FG6-DEF-02：防御结构单位的阵亡事件交给防御服务（单位与护盾随快照恢复）
+            Defense.SiegeService.RestoreAfterLoad(state, _combat); // FG6-DEF-05：按存档重设攻城剧场 / 职能表 / 集结点（内核快照不存这些配置），第一步之前
         }
 
         /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>

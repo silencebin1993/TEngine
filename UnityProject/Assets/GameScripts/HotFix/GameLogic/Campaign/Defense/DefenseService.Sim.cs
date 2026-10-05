@@ -409,8 +409,14 @@ namespace GameLogic.Campaign.Defense
         /// </summary>
         public static void OnConstructionCompleted(CampaignState state, BuildingRecord b)
         {
-            if (state == null || b == null || !DefenseCatalog.BlocksMovement(b.BuildingTypeId))
+            if (state == null || b == null)
             {
+                return;
+            }
+            if (!DefenseCatalog.BlocksMovement(b.BuildingTypeId))
+            {
+                // FG6-DEF-05：废墟重建完工（被摧毁 → 运转）重新挡路——普通建筑也立即标脏（与读档重建的镜像一致）。
+                MarkNavDirty(state, b);
                 return;
             }
             DefenseRecord r = Find(state, b.BuildingId);
@@ -422,6 +428,9 @@ namespace GameLogic.Campaign.Defense
             }
             MarkNavDirty(state, b);
         }
+
+        /// <summary>FG6-DEF-05：任何建筑挡不挡路变了（被摧毁成废墟 / 废墟重建完工）：占地所在区块下一步开头重新推进寻路镜像。</summary>
+        public static void MarkNavDirtyFor(CampaignState state, BuildingRecord b) => MarkNavDirty(state, b);
 
         /// <summary>屏障 / 闸门挡不挡路变了：占地格所在区块标成要重新推进寻路镜像（下一步开头生效）。</summary>
         private static void MarkNavDirty(CampaignState state, BuildingRecord b)

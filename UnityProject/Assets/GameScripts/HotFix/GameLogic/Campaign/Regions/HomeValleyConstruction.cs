@@ -1992,6 +1992,43 @@ namespace GameLogic.Campaign.Regions
             return planId;
         }
 
+        /// <summary>
+        /// FG6-DEF-05（承接 DEBT-FG3LOG05-12 / DEBT-FG6DEF03-02，FGR-DEF-015“被摧毁的……管线原地留下带设置的虚影”）：管线件被摧毁后留下保留原设置的虚影
+        /// （种类、等级、朝向、储罐模式 / 优先级、阀门开关、流体）。与传送带虚影同一份规划记录（PipePiece &gt; 0），占格网管线层；没有施工单：
+        /// 玩家在施工队列里点“重建”或自动重建规则（“传送带与物流节点”范围）才开工，建成时按原设置写回。返回规划 ID。
+        /// </summary>
+        public static string AddDestroyedPipeGhost(CampaignState state, GridCell cell, PipePieceKind kind, int tier, int dir, int settings, int fluid)
+        {
+            GridState grid = state.Grid;
+            string planId = "b" + grid.NextBeltPlanSerial.ToString(CultureInfo.InvariantCulture);
+            grid.NextBeltPlanSerial++;
+            var rec = new PlannedBeltRecord
+            {
+                PlanId = planId,
+                Tier = tier,
+                ScrapPerCell = Math.Max(0, HomeGridService.PipePieceCost(kind, tier)),
+                Xs = new[] { cell.X },
+                Ys = new[] { cell.Y },
+                Dirs = new[] { dir },
+                CellState = new[] { 0 },
+                Delivered = 0,
+                Destroyed = true,
+                RatioL = 1,
+                RatioR = 1,
+                PipePiece = (int)kind + 1,
+                PipeFluid = fluid,
+                PipeSettings = settings,
+            };
+            SetPlannedMarker(HomeGridService.MapFor(state), rec, cell);
+            PlannedBeltRecord[] old = grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
+            var next = new PlannedBeltRecord[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = rec;
+            grid.PlannedBelts = next;
+            Revision++;
+            return planId;
+        }
+
         /// <summary>被摧毁、等待确认重建的传送带虚影格数（施工队列“全部重建（N）”）。</summary>
         public static int DestroyedGhostCount(CampaignState state)
         {

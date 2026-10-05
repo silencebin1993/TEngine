@@ -67,7 +67,7 @@ namespace GameLogic.Campaign.Logistics
     /// 拓扑只在编辑之后重算（参照电网子网“拓扑变化时才重算”）；逐格循环（重算、格网层套用、渲染缓冲、存档）只在 AOT 内核里或只在建图 / 存档时发生。
     /// 悬停读数 O(1)（只读这一格与它所在网络的汇总）。
     /// </summary>
-    public static class PipeNetworkService
+    public static partial class PipeNetworkService
     {
         private static PipeKernel _kernel;
         private static PipeRenderer _renderer;
@@ -319,6 +319,7 @@ namespace GameLogic.Campaign.Logistics
                 }
             }
             ApplyGridLayer(state, HomeGridService.MapFor(state));
+            RestoreDamage(state); // FG6-DEF-05：管线件的耐久（只恢复内核里确实存在的格）
             LoadCount++;
         }
 
@@ -330,6 +331,8 @@ namespace GameLogic.Campaign.Logistics
             _kernel = null;
             _state = null;
             _preserveSaved = false;
+            DamageLost.Clear();
+            LastHit.Clear();
         }
 
         /// <summary>把内核里的管线件写进格网管线层（派生缓存，真相在内核；建图时套回）。O(格数)，只在建图 / 读档时。</summary>
@@ -678,6 +681,10 @@ namespace GameLogic.Campaign.Logistics
             if (r == PipeResult.Ok)
             {
                 HomeGridService.MapFor(state).SetPipe(cell, 0);
+                if (DamageLost.ContainsKey(cell))
+                {
+                    SetDamage(state, cell, 0); // FG6-DEF-05：件没了，耐久记录一并删掉（同一格重放是新件、满耐久）
+                }
             }
             return PipeOpResult.Kernel(r);
         }
@@ -951,6 +958,15 @@ namespace GameLogic.Campaign.Logistics
             if (c.Kind != PipePieceKind.Pipe)
             {
                 AppendPieceLines(sb, c);
+            }
+            string hp = HpLine(cell); // FG6-DEF-05：受损时写耐久（与传送带悬停一致）
+            if (hp.Length > 0)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append('\n');
+                }
+                sb.Append(hp);
             }
             int net = c.Kind == PipePieceKind.Valve ? (c.ValveFrom >= 0 ? c.ValveFrom : c.ValveTo) : c.Network;
             if (_kernel.TryGetNetworkInfo(net, out PipeNetInfo n))

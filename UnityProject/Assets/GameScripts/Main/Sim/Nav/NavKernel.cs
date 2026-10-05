@@ -384,7 +384,7 @@ namespace BinGames.Sim.Nav
         /// <paramref name="offsets"/> / <paramref name="counts"/> = 第 i 条路线在 points 里的位置。返回可达的条数。
         /// </summary>
         public int FlowRoutes(int cls, int2 min, int2 max, IReadOnlyList<int2> goals, IReadOnlyList<int2> extraBlocked, IReadOnlyList<int2> entries,
-            List<int2> points, int[] offsets, int[] counts, int[] costs)
+            List<int2> points, int[] offsets, int[] counts, int[] costs, IReadOnlyList<int2> breachCells = null, IReadOnlyList<int> breachPen = null)
         {
             points?.Clear();
             int ec = entries?.Count ?? 0;
@@ -393,6 +393,13 @@ namespace BinGames.Sim.Nav
             var en = ToNative(entries);
             var pts = new NativeList<int2>(256, Allocator.TempJob);
             var info = new NativeArray<int3>(math.max(1, ec), Allocator.TempJob);
+            int bc = math.min(breachCells?.Count ?? 0, breachPen?.Count ?? 0);
+            var bcells = ToNative(breachCells);
+            var bpen = new NativeArray<int>(math.max(1, bc), Allocator.TempJob);
+            for (int i = 0; i < bc; i++)
+            {
+                bpen[i] = breachPen[i];
+            }
             try
             {
                 new NavFlowRouteJob
@@ -409,6 +416,9 @@ namespace BinGames.Sim.Nav
                     EntryCount = ec,
                     Points = pts,
                     Info = info,
+                    Breach = bcells,
+                    BreachPen = bpen,
+                    BreachCount = bc,
                 }.Run();
                 int reachable = 0;
                 for (int i = 0; i < ec; i++)
@@ -447,6 +457,8 @@ namespace BinGames.Sim.Nav
                 en.Dispose();
                 pts.Dispose();
                 info.Dispose();
+                bcells.Dispose();
+                bpen.Dispose();
             }
         }
 

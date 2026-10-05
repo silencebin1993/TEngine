@@ -371,6 +371,10 @@ namespace GameLogic.EditorTools
                 case 403: StepRaidDirectorWarned(inStep); break;
                 case 404: StepRaidDirectorFlown(inStep); break;
                 case 405: StepRaidDirectorMap(inStep); break;
+                // FG6-DEF-05：攻城行为（测试捷径：200 台突袭在家园北面到达 → 按编成展开、职能图标、突袭路径叠加层真实按键开关、真实帧耗时 → 清场）
+                case 406: StepSiegeStart(inStep); break;
+                case 407: StepSiegeRunning(inStep); break;
+                case 408: StepSiegeCleared(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -4108,7 +4112,26 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "SigSaved", m.LogicId);
             SessionState.SetString(K + "SigSavedSite", Campaign.Regions.HomeValleyLayout.RegionId);
-            ClickWorld(m.View.transform.position);
+            {
+                // 机器被建筑挡住（镜头斜看，射线先打到建筑）时改用框选（攻城步骤让世界多走了十几秒，机器干活可能走到仓库边上）。
+                Camera cam0 = Camera.main;
+                bool blocked = false;
+                string hitName = "-";
+                if (cam0 != null && Physics.Raycast(cam0.ScreenPointToRay(cam0.WorldToScreenPoint(m.View.transform.position)), out RaycastHit h0, 500f))
+                {
+                    hitName = h0.collider.name;
+                    blocked = h0.collider.GetComponent<Campaign.Regions.MachineView>()?.Marker != m;
+                }
+                if (blocked)
+                {
+                    // 机器站在建筑边上被挡住（点到的是建筑）：改用框选（真实拖拽，框选按机器位置判定，不靠射线）——玩家点不中也会这样框。
+                    Vector3 mp = m.View.transform.position;
+                    Write($"  - {SigLabel(m.LogicId)} 被“{hitName}”挡住：改用拖框选中它");
+                    DragWorld(mp + new Vector3(-3f, 0f, -3f), mp + new Vector3(3f, 0f, 3f), 0);
+                    Next(178, $"存档前拖框选中 {SigLabel(m.LogicId)}");
+                    return;
+                }
+            }            ClickWorld(m.View.transform.position);
             Next(178, $"存档前左键点 {SigLabel(m.LogicId)}");
         }
 
@@ -4131,7 +4154,11 @@ namespace GameLogic.EditorTools
             int id = SessionState.GetInt(K + "SigSaved", 0);
             Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == id && CampaignSession.Current.SignalCore.UplinkMachineLogicId == id
                   && WorldView.Director.Mode == View.ViewMode.Direct,
-                $"存档前信号在 {SigLabel(id)} 里（{SessionState.GetString(K + "SigSavedSite", string.Empty)}，镜头直控）");
+                $"存档前信号在 {SigLabel(id)} 里（{SessionState.GetString(K + "SigSavedSite", string.Empty)}，镜头直控）" +
+                (Campaign.Signal.SignalPresence.CurrentMachineLogicId == id ? string.Empty
+                    : $"（诊断：信号在 {Campaign.Signal.SignalPresence.CurrentMachineLogicId}，接入校验 {Campaign.Signal.SignalUplinkService.Validate(CampaignSession.Current, id, out _)}，" +
+                      $"镜头 {WorldView.Director.Mode} 焦点 {CameraFocus()}，机器在 {(MachineRegistry.TryGetRecord(id, out MachineRecord mrec) ? mrec.WorldPosition.ToString() : "?")}，" +
+                      $"暂停 {GameClock.Paused}，模态 {InputRouter.ModalUiOpen}/{InputRouter.PanelModalOpen}，通知浮层 {Notifications.NotificationCenter.Toasts.Count} 条；接入失败 {Campaign.Signal.SignalUplinkService.LastFailure} / 取消 {Campaign.Signal.SignalUplinkService.LastCancel}，反馈“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”）"));
             BeginPauseSave();
         }
 
@@ -4768,6 +4795,15 @@ namespace GameLogic.EditorTools
             }
             Check(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive && Vector2.Distance(CameraFocus(), Campaign.Regions.HomeValleyLayout.Core.Position) < 1f,
                 $"Home：镜头回到归还核心（焦点 {CameraFocus()}）");
+            // FG6-DEF-05 起突袭到达家园后会真的展开攻城（拆墙、溅射到传送带）：这支只用来测行进标记、镜头飞跃与暂停的测试突袭用完就撤掉，
+            // 免得它在后面的步骤里到达、改动家园（攻城在 406～408 单独测，正式到达展开由 FgSiegeSelfCheck F1 / N4 覆盖）。
+            string transitId = SessionState.GetString(K + "RaidId", string.Empty);
+            CampaignState now = CampaignSession.Current;
+            if (now?.Raids?.InTransit != null)
+            {
+                now.Raids.InTransit = now.Raids.InTransit.Where(x => x == null || x.GroupId != transitId).ToArray();
+            }
+            Check(WorldTransitSystem.Find(now, transitId) == null, "测试捷径：撤掉测过行进与镜头的测试突袭（到达会展开攻城，改动后面步骤核对的家园）");
             SessionState.SetInt(K + "Shuttles", 0);
             Next(128, "在家园与远征之间来回飞跃（Tab 依次切换）");
         }
@@ -9777,6 +9813,165 @@ namespace GameLogic.EditorTools
                   && GameRoot.HomeValley?.LiveMachineCount == machinesBefore,
                 $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）" +
                 $"（清场后世界走了 {GameClock.Ticks - long.Parse(SessionState.GetString(K + "RaidClearTicks", "0"))} 步，暂停 {GameRoot.IsWorldPaused}，模态 {InputRouter.PanelModalOpen}，最近通知 {Notifications.NotificationCenter.History.LastOrDefault()?.Type?.Id}）");
+            Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
+        }
+
+        // ── FG6-DEF-05：攻城行为与寻路（真实 Play 帧：展开、职能图标、突袭路径叠加层、120 帧预算）──
+
+        private static void StepSiegeStart(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            if (state == null || home == null)
+            {
+                Finish("家园没有战斗内核（攻城）");
+                return;
+            }
+            // 测试捷径：一支已经到达家园北面约 150 米的突袭（200 台：突击 / 攻城 / 维修混编，带精英）；正式派出 → 行进 → 到达由 FgSiegeSelfCheck F1 / N4 覆盖。
+            Vector2 core = Campaign.Regions.HomeValleyLayout.Core.Position;
+            Vector2 want = core + new Vector2(0f, 150f);
+            GridCell gc = Campaign.Defense.SiegeService.NearestPassable(Campaign.Nav.NavService.CellOf(want.x, want.y), 16);
+            GridCell cp = HomeGridService.CorePivot(state);
+            TransitGroupRecord g = WorldTransitSystem.Dispatch(state, TransitGroupKind.Raid, "foundry", 200, gc.X, gc.Y + 40, cp.X, cp.Y);
+            g.Faction = "foundry";
+            g.UnitIds = new[] { "foundry.strider", "foundry.armorbot", "foundry.repairbot" };
+            g.UnitCounts = new[] { 120, 60, 20 };
+            g.EliteCounts = new[] { 6, 4, 0 };
+            g.TargetKind = Campaign.Defense.RaidDirectorService.TargetHome;
+            g.PosX = gc.X;
+            g.PosY = gc.Y;
+            g.RouteX = new[] { gc.X };
+            g.RouteY = new[] { gc.Y };
+            g.RouteIndex = 1;
+            g.RouteState = WorldTransitSystem.RouteFollowing;
+            g.State = TransitGroupState.Arrived;
+            g.ArrivedAtTick = GameClock.Ticks;
+            Campaign.BuildingRecord coreRec = state.BuildingRecords.FirstOrDefault(b => b != null && b.BuildingTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
+            SessionState.SetString(K + "SiegeGroup", g.GroupId);
+            SessionState.SetFloat(K + "SiegeCoreHp", coreRec?.Health ?? -1f);
+            SessionState.SetInt(K + "SiegeWasPaused", GameClock.Paused ? 1 : 0);
+            SessionState.SetFloat(K + "SiegeMaxFrameMs", 0f);
+            SessionState.SetFloat(K + "SiegeFrameMsSum", 0f);
+            SessionState.SetInt(K + "SiegeFrames", 0);
+            SessionState.SetFloat(K + "SiegeMaxKernelMs", 0f);
+            SessionState.SetInt(K + "SiegeOverlaySub", 0);
+            Vector2 camAt = CameraFocus();
+            SessionState.SetFloat(K + "SiegeCamX", camAt.x);
+            SessionState.SetFloat(K + "SiegeCamY", camAt.y);
+            SessionState.SetInt(K + "SiegeCamBack", 0);
+            Next(407, $"测试捷径：200 台突袭到达家园北面（{gc.X},{gc.Y}），下一步按编成展开；采样真实帧 8 秒");
+        }
+
+        private static void StepSiegeRunning(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            TransitGroupRecord g = WorldTransitSystem.Find(state, SessionState.GetString(K + "SiegeGroup", string.Empty));
+            if (home == null || g == null)
+            {
+                Finish("攻城：家园战斗内核或突袭队伍丢了");
+                return;
+            }
+            if (GameClock.Paused)
+            {
+                GameClock.SetPaused(false); // 突袭到达的告警可能自动暂停：冒烟要量跑起来的帧
+            }
+            float ms = Time.unscaledDeltaTime * 1000f;
+            bool newFrame = Time.frameCount != SessionState.GetInt(K + "SiegeLastFrame", -1);
+            SessionState.SetInt(K + "SiegeLastFrame", Time.frameCount);
+            if (inStep > 2 && newFrame)
+            {
+                SessionState.SetFloat(K + "SiegeMaxFrameMs", Mathf.Max(SessionState.GetFloat(K + "SiegeMaxFrameMs", 0f), ms));
+                SessionState.SetInt(K + "SiegeFrames", SessionState.GetInt(K + "SiegeFrames", 0) + 1);
+                SessionState.SetFloat(K + "SiegeFrameMsSum", SessionState.GetFloat(K + "SiegeFrameMsSum", 0f) + ms);
+                SessionState.SetFloat(K + "SiegeMaxKernelMs", Mathf.Max(SessionState.GetFloat(K + "SiegeMaxKernelMs", 0f), (float)home.LastKernelMs));
+            }
+            // 真实按键开突袭路径叠加层（直达键），过 1 秒核对、再按一次关掉。
+            int sub = SessionState.GetInt(K + "SiegeOverlaySub", 0);
+            if (sub == 0 && inStep > 3)
+            {
+                PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameLogic.View.OverlayService.ActionOf(GameLogic.View.OverlayKind.Raid)));
+                SessionState.SetInt(K + "SiegeOverlaySub", 1);
+                return;
+            }
+            if (sub == 1 && inStep > 4.5)
+            {
+                int routes = GameLogic.View.OverlayService.SiegeRouteLines;
+                string legend = GameLogic.View.OverlayService.Legend(GameLogic.View.OverlayKind.Raid);
+                Check(GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Raid && routes >= 1 && legend.Contains("突击"),
+                    $"突袭路径叠加层直达键：画出 {routes} 条攻城路线（沿内核流场追踪），图例多一行职能图标说明");
+                PressChordKeepMouse(GameSettings.KeyBindings.GetChord(GameLogic.View.OverlayService.ActionOf(GameLogic.View.OverlayKind.Raid)));
+                SessionState.SetInt(K + "SiegeOverlaySub", 2);
+                return;
+            }
+            if (inStep < 10)
+            {
+                return;
+            }
+            int alive = home.SiegeUnitCount;
+            BinGames.Sim.Combat.CombatRenderer r = home.Renderer;
+            int icons = 0;
+            if (r != null && r.IconInstances.IsCreated)
+            {
+                foreach (BinGames.Sim.Combat.CombatInstance ci in r.IconInstances)
+                {
+                    if (ci.B.y >= 14f && ci.B.y <= 17f)
+                    {
+                        icons++;
+                    }
+                }
+            }
+            int frames = SessionState.GetInt(K + "SiegeFrames", 0);
+            float avgMs = frames > 0 ? SessionState.GetFloat(K + "SiegeFrameMsSum", 0f) / frames : 0f;
+            float maxMs = SessionState.GetFloat(K + "SiegeMaxFrameMs", 0f);
+            Campaign.SiegeState st = Campaign.Defense.SiegeService.StateOf(state);
+            Write($"  - 攻城 8 真实秒：展开 {g.UnfoldedCount} 台、存活 {alive}；内核单步最长 {SessionState.GetFloat(K + "SiegeMaxKernelMs", 0f):F3} ms（含流场维护，最近一次维护 {home.LastSiegeMs:F3} ms）；" +
+                  $"真实帧 平均 {avgMs:F2} ms / 最长 {maxMs:F1} ms（{frames} 帧，-nographics 下只含 CPU；编辑器帧率上限 120）；职能图标实例 {icons} 个");
+            Check(g.Engaged && g.UnfoldedCount >= 190 && alive >= 180 && st != null && st.TheaterActive && icons == alive && frames >= 300 && GameLogic.View.OverlayService.Active != GameLogic.View.OverlayKind.Raid,
+                $"真实 Play 帧里 200 台突袭按编成展开攻城（{g.UnfoldedCount} 台，剧场开），每台头顶一个职能图标（{icons}/{alive}），叠加层已用直达键关掉");
+            PerfGate.Expect(true, $"攻城真实帧：平均 {avgMs:F2} ms（120 帧预算 8.33 ms，留 1% 抖动余量）",
+                new[] { PerfGate.Le(avgMs, 8.42, "攻城 200 台真实帧平均 ms") }, (ok, msg) => Check(ok, msg), Write);
+            CheckNoTextMarkers("攻城中的家园");
+            int removed = home.DespawnSiegeGroup(Campaign.Defense.SiegeService.KeyOf(g));
+            Next(408, $"清场（测试捷径）：移除 {removed} 台攻城单位，下一次对账按“全歼”结算、关剧场");
+        }
+
+        private static void StepSiegeCleared(double inStep)
+        {
+            if (inStep < 2)
+            {
+                return;
+            }
+            // 镜头回到攻城开始前的位置（叠加层直达键 Ctrl+Alt+7 等按键可能动过镜头），后面的“点家园机器接入”按原来的画面点。
+            var camBack = new Vector2(SessionState.GetFloat(K + "SiegeCamX", 0f), SessionState.GetFloat(K + "SiegeCamY", 0f));
+            if (SessionState.GetInt(K + "SiegeCamBack", 0) == 0)
+            {
+                SessionState.SetInt(K + "SiegeCamBack", 1);
+                if (Vector2.Distance(CameraFocus(), camBack) > 1f)
+                {
+                    Write($"  - 攻城步骤之后镜头在 {CameraFocus()}，飞回攻城前的 {camBack}");
+                    WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, camBack);
+                }
+                return;
+            }
+            if (inStep < 4 && Vector2.Distance(CameraFocus(), camBack) > 1f)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            Campaign.SiegeState st = Campaign.Defense.SiegeService.StateOf(state);
+            TransitGroupRecord g = WorldTransitSystem.Find(state, SessionState.GetString(K + "SiegeGroup", string.Empty));
+            Campaign.BuildingRecord coreRec = state.BuildingRecords.FirstOrDefault(b => b != null && b.BuildingTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
+            float coreBefore = SessionState.GetFloat(K + "SiegeCoreHp", -1f);
+            Check(home != null && g == null && st != null && !st.TheaterActive && home.SiegeStructUnitCount == 0 && home.SiegeUnitCount == 0
+                  && coreRec != null && coreRec.Health >= coreBefore - 0.01f,
+                $"清场后按“全歼”结算：队伍移除、剧场关、建筑结构单位移出内核；核心耐久没变（{coreBefore:F0} → {coreRec?.Health:F0}，敌人还没走到家园）");
+            GameClock.SetPaused(SessionState.GetInt(K + "SiegeWasPaused", 0) == 1);
             Next(177, "FG1-SIG-03：存档前先接入一台家园机器");
         }
 

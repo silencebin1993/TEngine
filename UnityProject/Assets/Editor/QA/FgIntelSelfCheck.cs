@@ -273,8 +273,8 @@ namespace GameLogic.EditorTools
 
         private static long ProducedOf(CampaignState s) => I(s)?.Produced ?? 0;
 
-        /// <summary>每 3 步（世界步节拍）走，直到产出数增加；返回用了多少步（-1 = 超时）。</summary>
-        private static long TicksUntilProduced(CampaignState s, int maxSeconds)
+        /// <summary>每 3 步（世界步节拍）走，直到产出数增加；返回用了多少步（-1 = 超时）。<paramref name="each"/> = 每 3 步之后做一次（例如击退到达的突袭）。</summary>
+        private static long TicksUntilProduced(CampaignState s, int maxSeconds, Action each = null)
         {
             long before = ProducedOf(s);
             long t0 = GameClock.Ticks;
@@ -282,6 +282,7 @@ namespace GameLogic.EditorTools
             while (GameClock.Ticks < limit)
             {
                 WorldSimulation.StepMany(3);
+                each?.Invoke();
                 if (ProducedOf(s) > before)
                 {
                     return GameClock.Ticks - t0;
@@ -289,6 +290,35 @@ namespace GameLogic.EditorTools
             }
             return -1;
         }
+
+        /// <summary>
+        /// 测试捷径：家园守住了到达的突袭——在家园展开攻城的突袭单位当场击毁（攻城本身由 FgSiegeSelfCheck 覆盖）。FG6-DEF-05 起突袭到达后真的攻城，
+        /// 监听站又是突袭的次要目标（FG-GAP-103），不击退的话报复突袭会把这座唯一的监听站拆掉，舰队片段就截获不下去——本段测的是破译顺序，不是守家。
+        /// </summary>
+        private static void RepelArrivedRaids(CampaignState s)
+        {
+            GameLogic.Campaign.Combat.CombatSite site = WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded ? WorldSimulation.Home.Combat : null;
+            if (site == null)
+            {
+                return;
+            }
+            var ids = new List<int>();
+            foreach (TransitGroupRecord g in WorldTransitSystem.Groups(s))
+            {
+                if (g == null || g.Kind != TransitGroupKind.Raid || !g.Engaged)
+                {
+                    continue;
+                }
+                site.SiegeRaiderIds(GameLogic.Campaign.Defense.SiegeService.KeyOf(g), ids);
+                foreach (int id in ids)
+                {
+                    site.Kernel.Kill(id, 0);
+                }
+                RaidsRepelled += ids.Count;
+            }
+        }
+
+        private static int RaidsRepelled;
 
         private static IntelRecord Latest(CampaignState s, string kind) =>
             (I(s)?.Records ?? Array.Empty<IntelRecord>()).Where(r => r.Kind == kind).OrderByDescending(r => r.Serial).FirstOrDefault();
@@ -566,7 +596,9 @@ namespace GameLogic.EditorTools
             // 第二幕：舰队片段按顺序，每个只截获一次；全部截获后写“都已截获”。
             // 击败主核心会引来铸造报复突袭（FG6-DEF-04 剧情触发），突袭预报优先级最高、会插队先破译：
             // 每个片段等到真的截获为止（最多再等两轮），插队产出的情报必须是突袭预报。
+            // FG6-DEF-05 起突袭到达后真的攻城、会拆监听站（次要目标）：这里让家园守住（RepelArrivedRaids，测试捷径），突袭预报照常插队。
             s.Progress.Act = 2;
+            RaidsRepelled = 0;
             var heard = new List<string>();
             var cutIns = new List<string>();
             for (int i = 0; i < IntelCatalog.Fragments.Count; i++)
@@ -574,7 +606,7 @@ namespace GameLogic.EditorTools
                 long fleetSerial = Latest(s, IntelCatalog.KindFleet)?.Serial ?? -1;
                 for (int attempt = 0; attempt < 3; attempt++)
                 {
-                    TicksUntilProduced(s, (int)fleet.DecipherSeconds + 30);
+                    TicksUntilProduced(s, (int)fleet.DecipherSeconds + 30, () => RepelArrivedRaids(s));
                     if ((Latest(s, IntelCatalog.KindFleet)?.Serial ?? -1) != fleetSerial)
                     {
                         break;
@@ -592,7 +624,11 @@ namespace GameLogic.EditorTools
             Expect(reasons && counterOk && bossNeeded && bossOk && bossGone && fleetOk && noWeather,
                 $"C FGR-RND-050 五类情报：第一幕没遭遇首领时只破译反制预览，其余各写原因（首领“{whyBoss}”、天气“{whyWeather}”、片段“{whyFleet}”、突袭“{whyRaid}”）；" +
                 $"反制预览与出发锁定同一算法（铸造前哨 = {expectAdapt}），有效 1 个游戏日；遭遇铸造主核心后破译首领弱点（“{Short(weakText)}”，数值来自首领常量）；" +
-                $"击败后旧情报标“目标已不在”、不再破译；第二幕舰队片段按顺序各截获一次（{string.Join(" → ", heard)}；期间插队 {cutIns.Count} 次：{(cutIns.Count == 0 ? "无" : string.Join("、", cutIns))}，只允许突袭预报）；天气在 FG7-ENV-03 前不出现");
+                $"击败后旧情报标“目标已不在”、不再破译；第二幕舰队片段按顺序各截获一次（{string.Join(" → ", heard)}；期间插队 {cutIns.Count} 次：{(cutIns.Count == 0 ? "无" : string.Join("、", cutIns))}，只允许突袭预报）；天气在 FG7-ENV-03 前不出现"
+                + $"（报复突袭到达后被击退 {RaidsRepelled} 台，测试捷径）"
+                + (fleetOk ? string.Empty : $"\n    诊断：监听站 {string.Join("/", PostIds.Select(id => HomeGridService.FindBuilding(s, id)?.ConstructionState.ToString() ?? "无"))}；"
+                                            + $"行进队伍 {string.Join("/", WorldTransitSystem.Groups(s).Where(x => x != null).Select(x => $"{x.GroupId}:{x.State}{(x.Engaged ? "E" : "")}{(x.SiegeRetreat ? "R" : "")}"))}；"
+                                            + $"攻城剧场 {GameLogic.Campaign.Defense.SiegeService.StateOf(s)?.TheaterActive}，摧毁建筑 {GameLogic.Campaign.Defense.SiegeService.StateOf(s)?.TotalDestroyedBuildings}"));
 
             // 优先级插队：反制预览破译到一半时来了突袭 → 先破译突袭预报，反制预览进度保留
             CampaignState p = NewWorld(5504, 1);

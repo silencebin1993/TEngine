@@ -335,8 +335,9 @@ namespace GameLogic.Campaign.Defense
         // ─────────────────────────────── 寻路挡路位（FGR-DEF-010 / 011）───────────────────────────────
 
         /// <summary>
-        /// 寻路推进区块时（<see cref="Nav.NavService"/>）：屏障 / 闸门的挡路位——建成的屏障挡全部类别，建成的闸门只挡敌方类别（写死的规则），
-        /// 还是虚影 / 已被摧毁的不挡。<paramref name="bits"/> 按占用编号 − 1 下标（默认全挡）。按建筑记录遍历（刚放下、还没轮到对账补记录的虚影也算），O(建筑数)，只在推进区块时。
+        /// 寻路推进区块时（<see cref="Nav.NavService"/>）：建筑的挡路位——建成的屏障挡全部类别，建成的闸门只挡敌方类别（写死的规则），还是虚影 / 已被摧毁的屏障与闸门不挡；
+        /// 普通建筑（含炮塔 / 其它防御建筑）建成的挡全部类别，废墟不挡，规划中 / 施工中的虚影不挡敌方类别（<see cref="NavBlockBitsOf"/>）。
+        /// <paramref name="bits"/> 按占用编号 − 1 下标（默认全挡）。按建筑记录遍历（刚放下、还没轮到对账补记录的虚影也算），O(建筑数)，只在推进区块时。
         /// </summary>
         public static void ApplyNavBlockBits(CampaignState s, HomeGridMap map, byte[] bits, int count)
         {
@@ -346,25 +347,46 @@ namespace GameLogic.Campaign.Defense
             }
             foreach (BuildingRecord b in s.BuildingRecords)
             {
-                if (b == null || !DefenseCatalog.BlocksMovement(b.BuildingTypeId))
+                if (b == null)
                 {
-                    continue; // 搬迁 / 升级目标虚影也按“还没建成”不挡路（NavBlockBitsOf 判 IsBuilt）
+                    continue;
+                }
+                byte v8 = NavBlockBitsOf(b);
+                if (v8 == NavConst.BlockAll)
+                {
+                    continue; // 默认就是全挡（建成的普通建筑 / 屏障）：不查占用编号
                 }
                 int v = map.OccupancyValueOf(b.BuildingId);
                 if (v <= 0 || v > count)
                 {
                     continue;
                 }
-                bits[v - 1] = NavBlockBitsOf(b);
+                bits[v - 1] = v8;
             }
         }
 
-        /// <summary>一座屏障 / 闸门此刻的挡路位（不是屏障 / 闸门 = 全挡）。</summary>
+        /// <summary>规划中 / 施工中的普通建筑虚影的挡路位：只放行敌方类别（己方机器照旧绕开施工现场）。</summary>
+        public const byte GhostBlockBits = (byte)(NavConst.BlockAll & ~(1 << NavConst.ClassHostile));
+
+        /// <summary>一座建筑此刻的挡路位（屏障 / 闸门按状态；普通建筑建成全挡、废墟不挡、虚影不挡敌方类别）。</summary>
         public static byte NavBlockBitsOf(BuildingRecord b)
         {
-            if (b == null || !DefenseCatalog.BlocksMovement(b.BuildingTypeId))
+            if (b == null)
             {
                 return NavConst.BlockAll;
+            }
+            if (!DefenseCatalog.BlocksMovement(b.BuildingTypeId))
+            {
+                // FG6-DEF-05（FGR-DEF-031“不允许靠完美迷宫让敌人永远走不到”）：被摧毁的建筑只剩废墟虚影，不再挡路——敌人拆开一座挡路的建筑就能从那里过去，
+                // 与被拆的屏障同一规则。
+                if (IsRuin(b))
+                {
+                    return 0;
+                }
+                // 复审修复（P1，同一条）：规划中 / 运料中 / 施工中的虚影（含搬迁 / 升级目标虚影）还不是战斗内核里能拆的结构单位（攻城只把建成的建筑放进内核），
+                // 挡敌方寻路就成了拆不掉的墙——用一圈不出料的虚影就能把核心围成“完美迷宫”。改为不挡敌方类别（与屏障虚影同口径：没建成就挡不住敌人）；
+                // 己方机器照旧绕开施工现场（不改既有施工 / 搬运行为）。完工那一刻立即标脏（OnConstructionCompleted），下一步开头开始挡路。
+                return IsBuilt(b) ? NavConst.BlockAll : GhostBlockBits;
             }
             if (!IsBuilt(b))
             {
@@ -372,6 +394,11 @@ namespace GameLogic.Campaign.Defense
             }
             return DefenseCatalog.KindOf(b.BuildingTypeId) == DefenseKind.Gate ? (byte)(1 << NavConst.ClassHostile) : NavConst.BlockAll;
         }
+
+        /// <summary>FG6-DEF-05：被摧毁、等待重建的建筑（废墟虚影；搬迁 / 升级目标虚影不算）。</summary>
+        public static bool IsRuin(BuildingRecord b) =>
+            b != null && (b.ConstructionState == BuildingConstructionState.Damaged || b.ConstructionState == BuildingConstructionState.Destroyed)
+                      && string.IsNullOrEmpty(b.RelocateFromId);
 
         // ─────────────────────────────── 陷阱：固件与铺设方式 ───────────────────────────────
 

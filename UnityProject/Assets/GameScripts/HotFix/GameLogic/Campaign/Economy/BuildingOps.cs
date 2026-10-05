@@ -597,6 +597,7 @@ namespace GameLogic.Campaign.Economy
             Revision++;
             HomeInventory.Touch();
             NotificationCenter.Post("building_destroyed", GameText.Format("building.notify.destroyed", NameOf(b)), new Vector3(b.Position.x, 0f, b.Position.y));
+            Defense.DefenseService.MarkNavDirtyFor(state, b); // FG6-DEF-05：被摧毁的建筑（废墟）不再挡路，下一步开头寻路镜像让开（攻城流场随之增量更新）。
             Defense.RepairDroneService.OnBuildingDestroyed(state, b); // FG6-DEF-03：维修无人机站被摧毁 = 出动中的无人机全部坠毁（当场结算）。
             StandingRuleService.OnBuildingDestroyed(state, b); // FG4-ECO-06：自动重建规则在下一个模拟步处理（没有玩家开的规则就只留虚影）。
         }

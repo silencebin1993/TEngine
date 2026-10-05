@@ -110,7 +110,11 @@ namespace GameLogic.View
         }
 
         public static string Name(OverlayKind k) => GameText.Get("overlay.name." + Slug(k));
-        public static string Legend(OverlayKind k) => GameText.Get("overlay.legend." + Slug(k));
+        public static string Legend(OverlayKind k) =>
+            k == OverlayKind.Raid && SiegeActive ? GameText.Get("overlay.legend.raid") + "\n" + GameText.Get("overlay.label.siege_legend") : GameText.Get("overlay.legend." + Slug(k));
+
+        /// <summary>FG6-DEF-05：家园正在被攻城（突袭路径叠加层的图例多一行职能图标与破墙框说明）。</summary>
+        private static bool SiegeActive => Campaign.Defense.SiegeService.StateOf(CampaignSession.Current)?.TheaterActive ?? false;
 
         /// <summary>8 种叠加层各自的直达动作（下标 = 叠加层 − 1；默认 Ctrl+Alt+1～8，可重绑）。</summary>
         private static readonly GameActionId[] DirectActions =
@@ -599,6 +603,106 @@ namespace GameLogic.View
                     World = new Vector3(p.x, 1f, p.y),
                     Text = GameText.Format("overlay.label.outpost", Mathf.RoundToInt(Vector2.Distance(p, corePos)), o.Garrison),
                     Tone = 1,
+                });
+            }
+            return DrawSiege(state, lines);
+        }
+
+        // ── FG6-DEF-05：攻城中的突袭——每种出场职能沿自己的流场从队伍当前位置画到目标（职能色粗线），正在被拆的墙画红粗框 + “正在拆：X” ──
+
+        private static readonly List<Unity.Mathematics.int2> SiegePath = new List<Unity.Mathematics.int2>(256);
+        private static readonly List<int> SiegeIds = new List<int>(64);
+
+        /// <summary>自检读：最近一次重画的攻城路线条数 / 破墙框个数。</summary>
+        public static int SiegeRouteLines { get; private set; }
+        public static int SiegeBreachMarkers { get; private set; }
+
+        private static int DrawSiege(CampaignState state, int lines)
+        {
+            SiegeRouteLines = 0;
+            SiegeBreachMarkers = 0;
+            HomeValleyController home = WorldSimulation.Home;
+            Campaign.Combat.CombatSite site = home != null && home.IsLoaded ? home.Combat : null;
+            if (site == null || !(Campaign.Defense.SiegeService.StateOf(state)?.TheaterActive ?? false))
+            {
+                return lines;
+            }
+            int cap = MaxMarkers;
+            int maxPoints = Math.Max(16, GridContent.TuningInt("overlay.max_markers") * 8);
+            foreach (TransitGroupRecord g in Campaign.Defense.SiegeService.SiegingGroups(state))
+            {
+                site.SiegeRaiderIds(Campaign.Defense.SiegeService.KeyOf(g), SiegeIds);
+                for (int role = 0; role < BinGames.Sim.Combat.CombatSiegeConst.RoleCount && lines < cap; role++)
+                {
+                    // 每种职能取 ID 最小的那台当代表（确定性）；撤退中的单位走撤退场（role 3）。
+                    int rep = -1;
+                    Vector2 at = default;
+                    foreach (int id in SiegeIds)
+                    {
+                        if ((rep < 0 || id < rep) && site.TryGetSiegeRaider(id, out Vector2 p, out BinGames.Sim.Combat.CombatSiegeUnit su, out _, out _, out _)
+                            && BinGames.Sim.Combat.CombatSiegeLogic.FieldRole(su) == role)
+                        {
+                            rep = id;
+                            at = p;
+                        }
+                    }
+                    if (rep < 0)
+                    {
+                        continue;
+                    }
+                    var cell = new Unity.Mathematics.int2(Mathf.FloorToInt(at.x + 0.5f), Mathf.FloorToInt(at.y + 0.5f));
+                    int field = role * 2;
+                    if (site.SiegeDistAt(field, cell) >= BinGames.Sim.Combat.CombatSiegeConst.Inf)
+                    {
+                        field++; // 开路到不了：走破墙场（路线画到要拆的那段墙）
+                    }
+                    int n = site.TraceSiegePath(field, cell, maxPoints, SiegePath);
+                    if (n < 2)
+                    {
+                        continue;
+                    }
+                    LineRenderer r = LineAt(lines++);
+                    Style(r, Campaign.Defense.SiegeCatalog.RoleColor(role), role == BinGames.Sim.Combat.CombatSiegeConst.RoleRetreat ? 0.5f : 0.9f, false);
+                    r.positionCount = n;
+                    for (int i = 0; i < n; i++)
+                    {
+                        r.SetPosition(i, new Vector3(SiegePath[i].x, 0.4f, SiegePath[i].y));
+                    }
+                    r.enabled = true;
+                    SiegeRouteLines++;
+                    Candidates.Add(new OverlayLabel
+                    {
+                        World = new Vector3(at.x, 1.3f, at.y),
+                        Text = GameText.Format("overlay.label.siege_route", Campaign.Defense.SiegeCatalog.RoleName(role < 3 ? (BinGames.Sim.Combat.CombatSiegeRole)(role + 1) : BinGames.Sim.Combat.CombatSiegeRole.None)),
+                        Tone = 2,
+                    });
+                }
+            }
+            for (int i = 0; i < site.SiegeBreachCount && lines < cap; i++)
+            {
+                string id = Campaign.Defense.SiegeService.BuildingIdOfUnit(state, site, site.SiegeBreachAt(i));
+                BuildingRecord b = id != null ? HomeGridService.FindBuilding(state, id) : null;
+                if (b == null || !GridContent.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.BuildingGrid bg))
+                {
+                    continue;
+                }
+                GridMath.FootprintBounds(new GridCell(b.GridX, b.GridY), bg.FootprintW, bg.FootprintH, GridMath.NormalizeRotation(b.Rotation), out GridCell lo, out GridCell hi);
+                LineRenderer r = LineAt(lines++);
+                Style(r, new Color(1f, 0.15f, 0.1f, 1f), 0.5f, true);
+                float pad = 0.75f;
+                Square[0] = new Vector3(lo.X - pad, 0.45f, lo.Y - pad);
+                Square[1] = new Vector3(hi.X + pad, 0.45f, lo.Y - pad);
+                Square[2] = new Vector3(hi.X + pad, 0.45f, hi.Y + pad);
+                Square[3] = new Vector3(lo.X - pad, 0.45f, hi.Y + pad);
+                r.positionCount = 4;
+                r.SetPositions(Square);
+                r.enabled = true;
+                SiegeBreachMarkers++;
+                Candidates.Add(new OverlayLabel
+                {
+                    World = new Vector3((lo.X + hi.X) * 0.5f, 1.5f, (lo.Y + hi.Y) * 0.5f),
+                    Text = GameText.Format("overlay.label.siege_breach", HomeGridService.DisplayName(b.BuildingTypeId)),
+                    Tone = 2,
                 });
             }
             return lines;

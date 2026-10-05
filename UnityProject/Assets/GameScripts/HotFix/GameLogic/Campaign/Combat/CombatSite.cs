@@ -1226,6 +1226,11 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
+            // FG6-DEF-05：建筑结构单位阵亡 = 建筑被摧毁、攻城单位走到集结点离场，交给攻城服务（CombatSite.Siege）。
+            if (TryHandleSiegeEvent(e))
+            {
+                return;
+            }
             switch (e.Kind)
             {
                 case CombatEventKind.Killed:
@@ -1790,6 +1795,8 @@ namespace GameLogic.Campaign.Combat
                 Renderer.Hologram = HologramRender;
                 // FG2-FW-03（FGR-FW-031）：头顶状态标签图标的形状 / 颜色来自 fg.TbStatusTag。
                 Renderer.SetStatusVisuals(NamedReactionCatalog.BuildStatusVisuals());
+                // FG6-DEF-05（FGR-DEF-030）：头顶职能图标的形状 / 颜色来自 fg.TbSiegeRole（攻城服务写入）。
+                Renderer.SetSiegeVisuals(SiegeRoleVisuals);
             }
             Renderer.Draw(Kernel, camera, alpha, double2.zero, _unitHeight);
             if (!_statusTagHookRaised && Renderer.LastIconInstances > 0)
@@ -1885,6 +1892,7 @@ namespace GameLogic.Campaign.Combat
             ClearTurretMaps();
             ClearDefenseMaps();
             ClearDroneMaps();
+            ClearSiegeMaps();
             for (int w = 0; w < Kernel.WeaponCount; w++)
             {
                 if (Kernel.TryGetWeapon(w, out CombatWeapon cw))
@@ -1912,7 +1920,7 @@ namespace GameLogic.Campaign.Combat
                 }
                 else if (v.Kind == CombatUnitKind.Structure && v.Faction == CombatFaction.Player)
                 {
-                    if (!RestoreDroneMap(v)) // FG6-DEF-03：外部键落在无人机区间的是维修无人机
+                    if (!RestoreSiegeMap(v) && !RestoreDroneMap(v)) // FG6-DEF-05：攻城建筑结构单位区间；FG6-DEF-03：外部键落在无人机区间的是维修无人机
                     {
                         RestoreDefenseMap(v);
                     }

@@ -88,6 +88,8 @@ namespace GameLogic.Campaign.Logistics
         private static readonly Dictionary<int, string> SinkOwnerNameKeys = new Dictionary<int, string>();
         /// <summary>FG3-LOG-03（FGR-LOG-027）：掉了耐久的格 → 掉了多少（存档 <see cref="BeltItemState.Damage"/> 的运行时索引，悬停 O(1)）。</summary>
         private static readonly Dictionary<GridCell, int> DamageLost = new Dictionary<GridCell, int>();
+        /// <summary>FG6-DEF-05（承接 DEBT-FG6DEF03-03）：受损的格最近一次挨打的统一时钟步（维修无人机突袭中先修挨打的格；存档在 <see cref="BeltDamageRecord.LastHitTick"/>）。</summary>
+        private static readonly Dictionary<GridCell, long> LastHit = new Dictionary<GridCell, long>();
 
         public static BeltKernel Kernel => _kernel;
         public static bool IsRunning => _kernel != null && !_kernel.IsDisposed;
@@ -237,6 +239,7 @@ namespace GameLogic.Campaign.Logistics
         private static void RestoreDamage(CampaignState state)
         {
             DamageLost.Clear();
+            LastHit.Clear();
             BeltDamageRecord[] recs = state.Belts?.Damage ?? Array.Empty<BeltDamageRecord>();
             var keep = new List<BeltDamageRecord>(recs.Length);
             foreach (BeltDamageRecord r in recs)
@@ -245,6 +248,10 @@ namespace GameLogic.Campaign.Logistics
                 if (r != null && r.Lost > 0 && _kernel.HasCell(r.X, r.Y))
                 {
                     DamageLost[new GridCell(r.X, r.Y)] = r.Lost;
+                    if (r.LastHitTick > 0)
+                    {
+                        LastHit[new GridCell(r.X, r.Y)] = r.LastHitTick;
+                    }
                     keep.Add(r);
                 }
             }
@@ -275,6 +282,7 @@ namespace GameLogic.Campaign.Logistics
         {
             BeltPortService.OnUnload();
             DamageLost.Clear();
+            LastHit.Clear();
             _renderer?.Dispose();
             _renderer = null;
             _kernel?.Dispose();
@@ -844,6 +852,7 @@ namespace GameLogic.Campaign.Logistics
             }
             int lost = (DamageLost.TryGetValue(cell, out int l) ? l : 0) + amount;
             result = BeltOpResult.Success;
+            LastHit[cell] = GameClock.Ticks; // FG6-DEF-05：记“最近挨打”（维修无人机突袭中先修它）
             if (lost < MaxHp(info.Tier))
             {
                 SetDamage(state, cell, lost);
@@ -876,6 +885,9 @@ namespace GameLogic.Campaign.Logistics
         /// <summary>FG6-DEF-03：这一格传送带掉了多少耐久（没受损 / 没有传送带 = 0）。O(1)。</summary>
         public static int DamageOf(GridCell cell) => DamageLost.TryGetValue(cell, out int l) ? l : 0;
 
+        /// <summary>FG6-DEF-05（DEBT-FG6DEF03-03）：这一格最近一次挨打的步（没有 = 0）。</summary>
+        public static long LastHitOf(GridCell cell) => LastHit.TryGetValue(cell, out long t) ? t : 0;
+
         /// <summary>FG6-DEF-03：全部受损的传送带格（按存档里的顺序，确定性）。维修无人机找目标用。</summary>
         public static void DamagedCells(CampaignState state, List<GridCell> into)
         {
@@ -898,7 +910,9 @@ namespace GameLogic.Campaign.Logistics
             else
             {
                 DamageLost.Remove(cell);
+                LastHit.Remove(cell);
             }
+            long hit = LastHit.TryGetValue(cell, out long lh) ? lh : 0;
             BeltItemState b = state.Belts;
             var list = new List<BeltDamageRecord>((b.Damage?.Length ?? 0) + 1);
             bool found = false;
@@ -914,6 +928,7 @@ namespace GameLogic.Campaign.Logistics
                     if (lost > 0)
                     {
                         r.Lost = lost;
+                        r.LastHitTick = hit;
                         list.Add(r);
                     }
                     continue;
@@ -922,7 +937,7 @@ namespace GameLogic.Campaign.Logistics
             }
             if (!found && lost > 0)
             {
-                list.Add(new BeltDamageRecord { X = cell.X, Y = cell.Y, Lost = lost });
+                list.Add(new BeltDamageRecord { X = cell.X, Y = cell.Y, Lost = lost, LastHitTick = hit });
             }
             b.Damage = list.ToArray();
         }

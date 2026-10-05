@@ -551,7 +551,7 @@ namespace GameLogic.Campaign.Defense
 
         private static void RepairStep(CampaignState state, RepairStationRecord rec, BuildingRecord station, DroneRecord d, TargetInfo t, float dt)
         {
-            float missing = t.IsBelt ? Mathf.Max(0f, t.Missing - d.Work) : t.Missing;
+            float missing = t.IsBelt || t.IsPipe ? Mathf.Max(0f, t.Missing - d.Work) : t.Missing;
             float amount = Mathf.Min(RepairDroneCatalog.RepairPerSecond * dt, missing);
             if (amount <= 0f)
             {
@@ -575,7 +575,7 @@ namespace GameLogic.Campaign.Defense
                 GuidanceHooks.Raise(GuidanceHooks.DefenseRepairDroneFirstRepair);
             }
             // 修满了没有：按这一步修好的量算（不再查一遍目标，热更层每步每架只查一次）。
-            bool full = t.IsBelt ? BeltNetworkService.DamageOf(t.Cell) <= 0 : t.Missing - done <= 0.01f;
+            bool full = t.IsBelt ? BeltNetworkService.DamageOf(t.Cell) <= 0 : t.IsPipe ? PipeNetworkService.DamageOf(t.Cell) <= 0 : t.Missing - done <= 0.01f;
             if (full)
             {
                 BeginReturn(d); // 修满：返航（下一次找目标时可以直接换目标）
@@ -649,6 +649,8 @@ namespace GameLogic.Campaign.Defense
         private struct TargetInfo
         {
             public bool IsBelt;
+            /// <summary>FG6-DEF-05（承接 DEBT-FG6DEF03-02）：管线件（键 "p:x,y"）。</summary>
+            public bool IsPipe;
             public BuildingRecord B;
             public GridCell Cell;
             public Vector2 Pos;
@@ -675,6 +677,10 @@ namespace GameLogic.Campaign.Defense
             {
                 return DefenseService.DurabilityOf(state, b);
             }
+            if (SiegeService.IsSiegeStructure(state, b))
+            {
+                return SiegeService.DurabilityOf(state, b); // FG6-DEF-05：攻城期间建筑在内核里
+            }
             return BuildingOps.Durability(b);
         }
 
@@ -699,17 +705,48 @@ namespace GameLogic.Campaign.Defense
                 BuildingRecord b = HomeGridService.FindBuilding(state, id);
                 return TryBuildingTarget(state, b, out t, checkOrders);
             }
-            if (key[0] == 'c')
+            if (key[0] == 'c' || key[0] == 'p')
             {
-                int comma = key.IndexOf(',');
-                if (comma < 0 || !int.TryParse(key.Substring(2, comma - 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out int x)
-                    || !int.TryParse(key.Substring(comma + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int y))
+                // 格坐标键（传送带 c: / 管线 p:）解析一次缓存起来：每步校验正在修的目标时不再切字符串（FG6-DEF-05 复测性能时顺带）。
+                if (!CellKeyCache.TryGetValue(key, out GridCell cell))
                 {
-                    return false;
+                    int comma = key.IndexOf(',');
+                    if (comma < 0 || !int.TryParse(key.Substring(2, comma - 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out int x)
+                        || !int.TryParse(key.Substring(comma + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int y))
+                    {
+                        return false;
+                    }
+                    cell = new GridCell(x, y);
+                    if (CellKeyCache.Count > 4096)
+                    {
+                        CellKeyCache.Clear();
+                    }
+                    CellKeyCache[key] = cell;
                 }
-                return TryBeltTarget(new GridCell(x, y), out t);
+                return key[0] == 'c' ? TryBeltTarget(cell, out t) : TryPipeTarget(cell, out t);
             }
             return false;
+        }
+
+        private static readonly Dictionary<string, GridCell> CellKeyCache = new Dictionary<string, GridCell>(StringComparer.Ordinal);
+
+        /// <summary>FG6-DEF-05（承接 DEBT-FG6DEF03-02“维修无人机可修管线”）：一格受损的管线件当维修目标（修满件数 = logistics.pipe.repair_kits）。</summary>
+        private static bool TryPipeTarget(GridCell cell, out TargetInfo t)
+        {
+            t = default;
+            int hp = PipeNetworkService.HpOf(cell);
+            if (hp < 0)
+            {
+                return false;
+            }
+            t.IsPipe = true;
+            t.Cell = cell;
+            t.Pos = new Vector2(cell.X, cell.Y);
+            t.Radius = 0.5f;
+            t.Hp = hp;
+            t.MaxHp = hp + PipeNetworkService.DamageOf(cell);
+            t.KitsPerFull = PipeNetworkService.RepairKitsPerPiece;
+            return true;
         }
 
         private static bool TryBuildingTarget(CampaignState state, BuildingRecord b, out TargetInfo t, bool checkOrders = true)
@@ -758,13 +795,13 @@ namespace GameLogic.Campaign.Defense
 
         private static float ApplyRepair(CampaignState state, TargetInfo t, DroneRecord d, float amount)
         {
-            if (t.IsBelt)
+            if (t.IsBelt || t.IsPipe)
             {
                 d.Work += amount;
                 int pts = Mathf.FloorToInt(d.Work + 1e-4f);
                 if (pts > 0)
                 {
-                    int fixedPts = BeltNetworkService.TryRepair(state, t.Cell, pts);
+                    int fixedPts = t.IsPipe ? PipeNetworkService.TryRepair(state, t.Cell, pts) : BeltNetworkService.TryRepair(state, t.Cell, pts);
                     d.Work = fixedPts < pts ? 0f : Mathf.Max(0f, d.Work - pts);
                 }
                 return amount;
@@ -778,6 +815,10 @@ namespace GameLogic.Campaign.Defense
             else if (DefenseService.IsDefense(b))
             {
                 done = DefenseService.Heal(state, b, amount);
+            }
+            else if (SiegeService.IsSiegeStructure(state, b))
+            {
+                done = SiegeService.Heal(state, b, amount); // FG6-DEF-05：攻城期间建筑在内核里，直接修内核耐久
             }
             else
             {
@@ -827,6 +868,10 @@ namespace GameLogic.Campaign.Defense
 
         public static string BeltKey(GridCell c) => "c:" + c.X.ToString(CultureInfo.InvariantCulture) + "," + c.Y.ToString(CultureInfo.InvariantCulture);
 
+        public static string PipeKey(GridCell c) => "p:" + c.X.ToString(CultureInfo.InvariantCulture) + "," + c.Y.ToString(CultureInfo.InvariantCulture);
+
+        private static readonly List<GridCell> PipeScratch = new List<GridCell>(16);
+
         /// <summary>全家园受损、可以由无人机修的目标（每次找目标算一次，各站按范围筛）。突袭进行中标出最近挨过打的。</summary>
         private static void BuildCandidates(CampaignState state)
         {
@@ -856,12 +901,31 @@ namespace GameLogic.Campaign.Defense
             {
                 if (TryBeltTarget(c, out TargetInfo t) && t.Worn)
                 {
+                    long hit = BeltNetworkService.LastHitOf(c);
                     Candidates.Add(new Candidate
                     {
                         Key = BeltKey(c),
                         Pos = t.Pos,
                         Frac = t.Hp / Mathf.Max(1f, t.MaxHp),
-                        Attacked = false,
+                        // FG6-DEF-05（承接 DEBT-FG6DEF03-03）：传送带记“最近挨打”，突袭中与建筑同样优先修。
+                        Attacked = raid && hit > 0 && now - hit <= window,
+                        KitsPerHp = t.KitsPerFull / Mathf.Max(1f, t.MaxHp),
+                        Missing = t.Missing,
+                    });
+                }
+            }
+            PipeNetworkService.DamagedCells(state, PipeScratch);
+            foreach (GridCell c in PipeScratch)
+            {
+                if (TryPipeTarget(c, out TargetInfo t) && t.Worn)
+                {
+                    long hit = PipeNetworkService.LastHitOf(c);
+                    Candidates.Add(new Candidate
+                    {
+                        Key = PipeKey(c),
+                        Pos = t.Pos,
+                        Frac = t.Hp / Mathf.Max(1f, t.MaxHp),
+                        Attacked = raid && hit > 0 && now - hit <= window,
                         KitsPerHp = t.KitsPerFull / Mathf.Max(1f, t.MaxHp),
                         Missing = t.Missing,
                     });

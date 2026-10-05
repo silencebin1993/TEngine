@@ -24,8 +24,10 @@ namespace BinGames.Sim.Combat
         /// （读取仍认 1～6：布区落在命中点、无人机伴飞、没有反伤、区域外观按“液池”、无人机无锚点）。
         /// 8 = FG2-E2E-01（FG-GAP-043）：武器追加“引信弹迹”标记（读取仍认 1～7：没有弹迹）。弹迹本身是表现，不进快照。
         /// 9 = FG6-DEF-01（FG06 FGR-DEF-002 / 004）：武器追加炮塔转速与每发补给；每个单位追加补给存量（读取仍认 1～8：转速 0 = 瞬间转向、不需要补给、存量 0）。
-        /// 10 = FG6-DEF-02（FG06 FGR-DEF-012）：追加护盾表（读取仍认 1～9：没有护盾，热更层按记录重新登记）。</summary>
-        public const int FormatVersion = 10;
+        /// 10 = FG6-DEF-02（FG06 FGR-DEF-012）：追加护盾表（读取仍认 1～9：没有护盾，热更层按记录重新登记）。
+        /// 11 = FG6-DEF-05（FG06 FGR-DEF-030～032）：每个单位追加攻城属性（职能 / 撤退 / 目标类别 / 所属队伍 / 占地 / 对建筑倍率 / 随队维修计时 / 破墙目标）；
+        /// 追加还没结算的溅射命中格（读取仍认 1～10：攻城属性为空、没有溅射）。流场不进快照：它是格网与结构单位的纯函数，读档后按同一输入重算（增量 = 全量，自检对照）。</summary>
+        public const int FormatVersion = 11;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -506,6 +508,9 @@ namespace BinGames.Sim.Combat
         CountKills = 1 << 23,
         /// <summary>FG6-DEF-01：血量在内核、但阵亡要交给热更层结算的单位（炮塔：阵亡 = 建筑被摧毁）。只在阵亡时发 <see cref="CombatEventKind.Killed"/>，受伤不逐次报告。</summary>
         ReportDeath = 1 << 24,
+        /// <summary>FG6-DEF-05：耐久不会被打到 0 以下（停在 <see cref="CombatSiegeConst.HealthFloor"/>，不阵亡）——归还核心：被打空的后果（战役失败）在 FG6-DEF-08，
+        /// 攻城期间敌人照常打它、耐久记成极小值（与 BuildingOps.CoreFloorHealth 同一口径）。</summary>
+        HealthFloor = 1 << 25,
     }
 
     /// <summary>己方机器的命令。与 Demo RegionSquadCommandSystem / HomeValleyMachineMarker 的语义逐条一致。</summary>
@@ -610,6 +615,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG6-DEF-01：带 <see cref="CombatUnitFlags.CountKills"/> 的单位（炮塔）打死了一个敌对单位（击杀数按它记，走玩法事件，不丢）。
         /// Unit=击杀者，Other=阵亡者，Code=1 表示阵亡者带 <see cref="CombatUnitFlags.Elite"/>。</summary>
         TurretKill = 18,
+        /// <summary>FG6-DEF-05（FGR-DEF-032）：撤退中的攻城单位走到集结点、离开家园（内核当场移除，不算阵亡）。Unit=单位，Other=所属队伍键（<see cref="CombatSiegeUnit.Group"/>）。</summary>
+        SiegeExited = 19,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -818,6 +825,8 @@ namespace BinGames.Sim.Combat
         public float Secondary;
         /// <summary>FG6-DEF-01：补给存量的初值（按“发”计；武器不需要补给时无意义）。</summary>
         public float Ammo;
+        /// <summary>FG6-DEF-05：攻城属性（突袭单位的职能 / 队伍、结构单位的目标类别 / 占地；全 0 = 不参与攻城）。</summary>
+        public CombatSiegeUnit Siege;
     }
 
     /// <summary>内核事件（40 字节）。</summary>
@@ -863,6 +872,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG6-DEF-01：补给存量（发）与朝向（炮塔的炮口朝向 = 装甲朝向）。</summary>
         public float Ammo;
         public float2 Facing;
+        /// <summary>FG6-DEF-05：攻城属性（职能 / 撤退 / 目标类别 / 队伍 / 占地 / 破墙目标）。</summary>
+        public CombatSiegeUnit Siege;
         public bool Alive => (Flags & CombatUnitFlags.Alive) != 0;
     }
 

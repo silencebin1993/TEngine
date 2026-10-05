@@ -41,6 +41,8 @@ namespace GameLogic.Campaign.Defense
         public const string TargetOutpost = "outpost";
 
         public const string EndWithdrawn = "withdrawn";
+        /// <summary>FG6-DEF-05：突袭部队被全歼（攻城服务在移除队伍前写进计划）。</summary>
+        public const string EndDestroyed = "destroyed";
         public const string EndGone = "gone";
         public const string EndMerged = "merged";
         public const string EndCancelled = "cancelled";

@@ -945,6 +945,11 @@ namespace BinGames.Sim.Nav
             int floodedTotal = 0;
             bool found = false;
             bool limit = false;
+            // FG6-DEF-05（关闭 DEBT-FG0ARCH06-10）：允许部分路线时，记下前几轮（完整搜完、只是被框挡住）的最优部分终点与抽象路线——
+            // 后一轮撞上展开上限被截断时，部分终点不劣于前一轮（展开数跨轮累计，截断那一轮可能只展开了几个节点）。
+            int prevBest = NavConst.NodeStart;
+            int prevBestH = hs;
+            var prevAbs = new NativeList<int>(partial ? 32 : 1, Allocator.Temp);
             // 搜索框只是剪枝：框里搜空了但有邻居被框挡掉（clipped），说明可能要绕出框（长河、悬崖），
             // 放大边距重搜，而不是直接报“完全阻断”。展开数跨轮累计，总量仍受 MaxExpansions 约束。
             for (int attempt = 0; ; attempt++)
@@ -1058,6 +1063,23 @@ namespace BinGames.Sim.Nav
                 {
                     break;
                 }
+                if (partial && best != NavConst.NodeStart && bestH < prevBestH)
+                {
+                    prevBest = best;
+                    prevBestH = bestH;
+                    prevAbs.Clear();
+                    int pc = best;
+                    int pg = 0;
+                    while (pc != NavConst.NodeStart && pg++ < 1_000_000)
+                    {
+                        prevAbs.Add(pc);
+                        if (!sc.From.TryGetValue(pc, out int pp))
+                        {
+                            break;
+                        }
+                        pc = pp;
+                    }
+                }
                 margin = margin * 2 + 4;
                 minCx = math.min(sc0.x, tc0.x) - margin;
                 maxCx = math.max(sc0.x, tc0.x) + margin;
@@ -1073,6 +1095,7 @@ namespace BinGames.Sim.Nav
             int endId;
             int2 partialCell = default;
             bool partialExtra = false;
+            bool usePrev = false;
             if (found)
             {
                 endId = NavConst.NodeGoal;
@@ -1086,7 +1109,14 @@ namespace BinGames.Sim.Nav
                 {
                     res.Reason = why;
                     sc.Cells.Clear();
+                    prevAbs.Dispose();
                     return;
+                }
+                if (limit && prevBest != NavConst.NodeStart && prevBestH < bestH)
+                {
+                    best = prevBest; // DEBT-FG0ARCH06-10：截断的这一轮不如前一轮，取前一轮的最优
+                    bestH = prevBestH;
+                    usePrev = true;
                 }
                 // 部分路线：候选一 = 起点区块里起点能走到的、离目标最近的格；候选二 = “离目标最近的入口”所在区块里从该入口能走到的、离目标最近的格。
                 // 取更近的（并列取起点区块：路更短）。不是只停在区块边界的入口上。
@@ -1107,6 +1137,7 @@ namespace BinGames.Sim.Nav
                 res.Reason = why;
                 if (!useNode)
                 {
+                    prevAbs.Dispose();
                     if (startBest.Equals(s))
                     {
                         sc.Cells.Clear();
@@ -1130,8 +1161,12 @@ namespace BinGames.Sim.Nav
 
             // 抽象路线（倒序取出再翻转）。
             sc.AbsPath.Clear();
-            int cur = endId;
+            int cur = usePrev ? NavConst.NodeStart : endId;
             int guard = 0;
+            if (usePrev)
+            {
+                sc.AbsPath.AddRange(prevAbs.AsArray());
+            }
             while (cur != NavConst.NodeStart && guard++ < 1_000_000)
             {
                 sc.AbsPath.Add(cur);
@@ -1141,6 +1176,7 @@ namespace BinGames.Sim.Nav
                 }
                 cur = prev;
             }
+            prevAbs.Dispose();
             for (int a = 0, b = sc.AbsPath.Length - 1; a < b; a++, b--)
             {
                 int tmp = sc.AbsPath[a];
@@ -1593,6 +1629,10 @@ namespace BinGames.Sim.Nav
         private static bool Open(ref NavGrid g, int cls, int2 min, NativeArray<byte> blocked, int w, int lx, int ly) =>
             blocked[ly * w + lx] == 0 && NavGridOps.Passable(ref g, min.x + lx, min.y + ly, cls);
 
+        /// <summary>FG6-DEF-05：破墙预览——墙格（<paramref name="pen"/> &gt; 0）当作可走、进入付破墙代价；其余同 <see cref="Open(ref NavGrid,int,int2,NativeArray{byte},int,int,int)"/>。</summary>
+        private static bool Open(ref NavGrid g, int cls, int2 min, NativeArray<byte> blocked, NativeArray<int> pen, int w, int lx, int ly) =>
+            pen[ly * w + lx] > 0 || Open(ref g, cls, min, blocked, w, lx, ly);
+
         // ─────────────────────────────── FG6-DEF-02：放置屏障时预览敌方路线（距离场 + 下坡追踪）───────────────────────────────
 
         /// <summary>
@@ -1602,7 +1642,15 @@ namespace BinGames.Sim.Nav
         /// 确定性：堆并列按格坐标决胜，下坡并列按固定方向顺序。O(区域格数 × log)，只在预览换格 / 换朝向时调用（主线程 Burst）。
         /// </summary>
         public static void FlowRoutes(ref NavGrid g, int cls, int2 min, int2 max, NativeArray<int2> goals, int goalCount, NativeArray<int2> extraBlocked, int extraCount,
-            NativeArray<int2> entries, int entryCount, NativeList<int2> points, NativeArray<int3> info)
+            NativeArray<int2> entries, int entryCount, NativeList<int2> points, NativeArray<int3> info) =>
+            FlowRoutes(ref g, cls, min, max, goals, goalCount, extraBlocked, extraCount, entries, entryCount, points, info, default, default, 0);
+
+        /// <summary>
+        /// 同上；FG6-DEF-05（承接 DEBT-FG6DEF02-04）：<paramref name="breachCount"/> &gt; 0 时是“破墙预览”——<paramref name="breach"/> 里的墙格（现有的、规划中的、假设的新墙）
+        /// 当作可走，进入付 <paramref name="breachPen"/> 的代价（与战斗内核破墙流场同一代价模型：基础 + 耐久档 × 每档），路线上第一段墙 = 完全堵死时敌人会拆的那段。
+        /// </summary>
+        public static void FlowRoutes(ref NavGrid g, int cls, int2 min, int2 max, NativeArray<int2> goals, int goalCount, NativeArray<int2> extraBlocked, int extraCount,
+            NativeArray<int2> entries, int entryCount, NativeList<int2> points, NativeArray<int3> info, NativeArray<int2> breach, NativeArray<int> breachPen, int breachCount)
         {
             int w = max.x - min.x + 1;
             int h = max.y - min.y + 1;
@@ -1617,6 +1665,7 @@ namespace BinGames.Sim.Nav
             int n = w * h;
             var dist = new NativeArray<int>(n, Allocator.Temp);
             var blocked = new NativeArray<byte>(n, Allocator.Temp);
+            var pen = new NativeArray<int>(n, Allocator.Temp);
             var heap = new NativeList<NavHeapItem>(1024, Allocator.Temp);
             for (int i = 0; i < n; i++)
             {
@@ -1630,6 +1679,14 @@ namespace BinGames.Sim.Nav
                     blocked[c.y * w + c.x] = 1;
                 }
             }
+            for (int i = 0; i < breachCount; i++)
+            {
+                int2 c = breach[i] - min;
+                if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h)
+                {
+                    pen[c.y * w + c.x] = math.max(1, breachPen[i]);
+                }
+            }
             for (int i = 0; i < goalCount; i++)
             {
                 int2 c = goals[i] - min;
@@ -1638,7 +1695,7 @@ namespace BinGames.Sim.Nav
                     continue;
                 }
                 int idx = c.y * w + c.x;
-                if (dist[idx] == 0 || !Open(ref g, cls, min, blocked, w, c.x, c.y))
+                if (dist[idx] == 0 || !Open(ref g, cls, min, blocked, pen, w, c.x, c.y))
                 {
                     continue;
                 }
@@ -1661,16 +1718,16 @@ namespace BinGames.Sim.Nav
                     int2 d = Dir8(k);
                     int nx = x + d.x;
                     int ny = y + d.y;
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h || !Open(ref g, cls, min, blocked, w, nx, ny))
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h || !Open(ref g, cls, min, blocked, pen, w, nx, ny))
                     {
                         continue;
                     }
-                    if (k >= 4 && (!Open(ref g, cls, min, blocked, w, nx, y) || !Open(ref g, cls, min, blocked, w, x, ny)))
+                    if (k >= 4 && (!Open(ref g, cls, min, blocked, pen, w, nx, y) || !Open(ref g, cls, min, blocked, pen, w, x, ny)))
                     {
                         continue;
                     }
                     int j = ny * w + nx;
-                    int nd = it.F + StepCost(ca, NavGridOps.CellAt(ref g, min.x + nx, min.y + ny), k >= 4);
+                    int nd = it.F + StepCost(ca, NavGridOps.CellAt(ref g, min.x + nx, min.y + ny), k >= 4) + pen[j];
                     if (nd < dist[j])
                     {
                         dist[j] = nd;
@@ -1701,11 +1758,11 @@ namespace BinGames.Sim.Nav
                         int2 d = Dir8(k);
                         int nx = cx + d.x;
                         int ny = cy + d.y;
-                        if (nx < 0 || ny < 0 || nx >= w || ny >= h || !Open(ref g, cls, min, blocked, w, nx, ny))
+                        if (nx < 0 || ny < 0 || nx >= w || ny >= h || !Open(ref g, cls, min, blocked, pen, w, nx, ny))
                         {
                             continue;
                         }
-                        if (k >= 4 && (!Open(ref g, cls, min, blocked, w, nx, cy) || !Open(ref g, cls, min, blocked, w, cx, ny)))
+                        if (k >= 4 && (!Open(ref g, cls, min, blocked, pen, w, nx, cy) || !Open(ref g, cls, min, blocked, pen, w, cx, ny)))
                         {
                             continue;
                         }
@@ -1728,6 +1785,7 @@ namespace BinGames.Sim.Nav
                 info[e] = new int3(start, points.Length - start, cost);
             }
             heap.Dispose();
+            pen.Dispose();
             blocked.Dispose();
             dist.Dispose();
         }
@@ -1749,10 +1807,14 @@ namespace BinGames.Sim.Nav
         public int EntryCount;
         public NativeList<int2> Points;
         public NativeArray<int3> Info;
+        /// <summary>FG6-DEF-05：破墙预览的墙格与破墙代价（<see cref="BreachCount"/> = 0 时是普通预览）。</summary>
+        [ReadOnly] public NativeArray<int2> Breach;
+        [ReadOnly] public NativeArray<int> BreachPen;
+        public int BreachCount;
 
         public void Execute()
         {
-            NavSearch.FlowRoutes(ref G, Class, Min, Max, Goals, GoalCount, Extra, ExtraCount, Entries, EntryCount, Points, Info);
+            NavSearch.FlowRoutes(ref G, Class, Min, Max, Goals, GoalCount, Extra, ExtraCount, Entries, EntryCount, Points, Info, Breach, BreachPen, BreachCount);
         }
     }
 

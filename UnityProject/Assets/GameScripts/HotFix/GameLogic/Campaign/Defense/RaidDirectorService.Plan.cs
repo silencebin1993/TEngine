@@ -977,9 +977,9 @@ namespace GameLogic.Campaign.Defense
             TransitGroupRecord g = WorldTransitSystem.Find(s, p.GroupId);
             if (g == null)
             {
-                // 队伍离场：撤回出发地（FG6-DEF-05 / 08 起还有“被消灭”）。
+                // 队伍离场：撤回出发地；FG6-DEF-05 起还有“被全歼”（攻城服务移除队伍前已写进 EndReason）。
                 p.State = StateEnded;
-                p.EndReason = p.ArrivedTick >= 0 ? EndWithdrawn : EndGone;
+                p.EndReason = p.EndReason == EndDestroyed ? EndDestroyed : p.ArrivedTick >= 0 ? EndWithdrawn : EndGone;
                 Touch();
                 return;
             }

@@ -577,8 +577,8 @@ namespace GameLogic.Campaign.Nav
         /// 热更层碰寻路内核只经本服务（DEBT-FG0ARCH06-07）。镜像没绑定时返回 -1。
         /// </summary>
         public static int FlowRoutes(int cls, int2 min, int2 max, IReadOnlyList<int2> goals, IReadOnlyList<int2> extraBlocked, IReadOnlyList<int2> entries,
-            List<int2> points, int[] offsets, int[] counts, int[] costs) =>
-            IsBound ? Kernel.FlowRoutes(cls, min, max, goals, extraBlocked, entries, points, offsets, counts, costs) : -1;
+            List<int2> points, int[] offsets, int[] counts, int[] costs, IReadOnlyList<int2> breachCells = null, IReadOnlyList<int> breachPen = null) =>
+            IsBound ? Kernel.FlowRoutes(cls, min, max, goals, extraBlocked, entries, points, offsets, counts, costs, breachCells, breachPen) : -1;
 
         /// <summary>FG6-DEF-02：镜像上这一格对某移动类别能不能走（来路预览找起点用）；镜像没绑定时 false。</summary>
         public static bool PassableNow(int x, int y, int cls) => IsBound && Kernel.Passable(x, y, cls);

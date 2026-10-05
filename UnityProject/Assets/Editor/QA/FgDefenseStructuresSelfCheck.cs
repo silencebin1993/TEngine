@@ -534,7 +534,7 @@ namespace GameLogic.EditorTools
                             && ResearchCatalog.TryGet("defense.barrier", out ResearchNodeDef nb) && nb.Unlocks.Contains("build:barrier_t1") && nb.Unlocks.Contains("build:gate")
                             && ResearchCatalog.TryGet("logistics.heat_trace", out ResearchNodeDef rd) && !rd.IsReady // FG6-DEF-03 防御分支已全部开放，“后续版本”改用伴热管（FG7-ENV-03）
                             && ResearchService.MigratedNodes().All(n => !n.Id.StartsWith("defense.", StringComparison.Ordinal));
-            Expect(sizes && tiers && power && machine && research && CombatConst.FormatVersion == 10,
+            Expect(sizes && tiers && power && machine && research && CombatConst.FormatVersion >= 10, // FG6-DEF-05 起内核快照升到格式 11（攻城属性）；格式 10 往返在 I3 单独测
                 $"A2 屏障 T1 / T2 / T3、闸门、陷阱 1×1、护盾 2×2（防御页签）；屏障耐久 {d1}/{d2}/{d3} 递增、升级路线 T1→T2→T3；屏障 / 闸门不用电、护盾 / 陷阱用电；" +
                 $"护盾状态机初始“充能”、过载 {over?.Seconds} 秒、吸收状态都有耗尽去向；研发 defense.barrier / shield / trap 已就绪并解锁（旧档迁移不送；“后续版本”的对照改用伴热管）；内核快照格式 {CombatConst.FormatVersion}" +
                 $"（{sizes}/{tiers}/{power}/{machine}/{research}）");
@@ -1522,7 +1522,8 @@ namespace GameLogic.EditorTools
             string domain = Json(DefenseService.StateOf(s));
             string sig = DefenseSignature(s, site);
             float stored = DefenseService.TrapStoredLiters(Rec(s, trap), Fluid("fuel"));
-            byte[] snap10 = site.Kernel.Serialize();
+            byte[] snap10 = site.Kernel.SerializeFormatForTests(10); // FG6-DEF-05 起当前格式是 11：格式 10 当作旧快照往返
+            byte[] snapCur = site.Kernel.Serialize();
             byte[] snap9 = site.Kernel.SerializeFormatForTests(9);
             ulong hash = site.Kernel.StateHash();
             int shields = site.ShieldCount;
@@ -1561,9 +1562,12 @@ namespace GameLogic.EditorTools
             CombatLoadResult r10 = k10.Load(snap10);
             using var k9 = new CombatKernel(cfg, 256);
             CombatLoadResult r9 = k9.Load(snap9);
+            using var kCur = new CombatKernel(cfg, 256);
+            CombatLoadResult rCur = kCur.Load(snapCur);
             Expect(CombatKernel.PeekFormat(snap10) == 10 && r10 == CombatLoadResult.Ok && k10.StateHash() == hash && k10.ShieldCount == shields && shields == 1
-                   && CombatKernel.PeekFormat(snap9) == 9 && r9 == CombatLoadResult.Ok && k9.ShieldCount == 0,
-                $"I3 战斗内核快照：格式 10 往返（{r10}）状态哈希一致、护盾 {k10.ShieldCount} 座；格式 9 的旧快照照常读（{r9}，没有护盾表 → 热更层按记录重新登记）");
+                   && CombatKernel.PeekFormat(snap9) == 9 && r9 == CombatLoadResult.Ok && k9.ShieldCount == 0
+                   && CombatKernel.PeekFormat(snapCur) == CombatConst.FormatVersion && rCur == CombatLoadResult.Ok && kCur.StateHash() == hash && kCur.ShieldCount == shields,
+                $"I3 战斗内核快照：当前格式 {CombatConst.FormatVersion} 往返（{rCur}）与格式 10 往返（{r10}）状态哈希一致、护盾 {k10.ShieldCount} 座；格式 9 的旧快照照常读（{r9}，没有护盾表 → 热更层按记录重新登记）");
 
             // 旧快照没有护盾表：状态机按记录重新登记（读档后的第一步）。
             ls.RemoveShield(DefenseService.Find(l, gen.BuildingId).Serial);

@@ -426,7 +426,7 @@ namespace GameLogic.EditorTools
             (int code, string output) = F.RunPython(F.LocateRepo(), "tools/cell_tables/fgdata.py --dump");
             var py = new HashSet<string>(output.Replace("\r", string.Empty).Split('\n')
                 .Where(l => l.StartsWith("RDT\t") || l.StartsWith("RDL\t") || l.StartsWith("RDD\t") || l.StartsWith("RDU\t") || l.StartsWith("RDC\t") || l.StartsWith("RDS\t")
-                            || l.StartsWith("CX\tcodex.raid."))
+                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1 比对
                 .Select(l => string.Join("\t", l.Split('\t').Select(Norm))));
             var rt = new HashSet<string>();
             foreach (GameConfig.fg.RaidTrigger r in t.TbRaidTrigger.DataList)
@@ -558,14 +558,16 @@ namespace GameLogic.EditorTools
             bool active = StandingRuleService.RaidActive(s);
             long arrivedAt = g?.ArrivedAtTick ?? 0;
             int withdrawn0 = NotifyCount("raid_withdrawn");
-            bool retreat = g != null && RunUntil(() => g.State == TransitGroupState.Retreating, 120)
-                           && g.RetreatTick - arrivedAt >= WorldTransitSystem.TimeLimitTicks - 1 && g.RetreatTick - arrivedAt <= WorldTransitSystem.TimeLimitTicks + 2
+            // FG6-DEF-05 起到达后展开攻城：到时间上限下撤退令（攻城单位走回集结点离场），全部离场后才并回行进队伍沿原路撤回——撤回时刻 = 时间上限 + 走回集结点的时间。
+            bool retreat = g != null && RunUntil(() => g.State == TransitGroupState.Retreating, 180)
+                           && g.Engaged && g.SiegeRetreatReason == SiegeService.ReasonTime
+                           && g.RetreatTick - arrivedAt >= WorldTransitSystem.TimeLimitTicks - 1 && g.RetreatTick - arrivedAt <= WorldTransitSystem.TimeLimitTicks + GameClock.TicksFor(90f)
                            && NotifyCount("raid_withdrawn") == withdrawn0 + 1 && !StandingRuleService.RaidActive(s) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.RaidFirstWithdrawn);
             bool gone = RunUntil(() => WorldTransitSystem.Find(s, p.GroupId) == null && RaidDirectorService.FindPlan(s, p.PlanId) == null, 900);
             RaidHistoryRecord h = RaidDirectorService.History(s).LastOrDefault();
             bool hist = gone && h != null && h.PlanId == p.PlanId && h.EndReason == RaidDirectorService.EndWithdrawn && h.ArrivedTick == arrivedAt
                         && (p.OriginKind != RaidDirectorService.OriginOutpost || WorldOutpostSystem.Find(s, p.OriginId).Garrison >= garrison0 - (g?.GarrisonTaken ?? 0));
-            Expect(active && retreat && hist, $"B3 到达即“突袭进行中”（战时预案 {active}）；停留 {g?.RetreatTick - arrivedAt} 步（时间上限 {WorldTransitSystem.TimeLimitTicks}）后沿原路撤回、发“突袭部队撤退”、" +
+            Expect(active && retreat && hist, $"B3 到达即“突袭进行中”（战时预案 {active}）；展开攻城，到时间上限 {WorldTransitSystem.TimeLimitTicks} 步下撤退令（{g?.SiegeRetreatReason}），走回集结点离场后（第 {g?.RetreatTick - arrivedAt} 步）沿原路撤回、发“突袭部队撤退”、" +
                                              $"突袭结束（{!StandingRuleService.RaidActive(s)}）；回到出发地离场，计划进历史（{h?.EndReason}），抽走的驻军还给据点");
 
             // B4：骚扰——第一次突袭之后、两次至少隔 3 天、最近 2 天没有突袭；只用骚扰也会出现的单位（minLevel 0）。

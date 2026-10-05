@@ -256,9 +256,9 @@ namespace GameLogic.Campaign.WorldSim
             for (int i = 0; i < groups.Length; i++)
             {
                 TransitGroupRecord g = groups[i];
-                if (g == null)
+                if (g == null || g.Intercepted)
                 {
-                    continue;
+                    continue; // FG6-DEF-05（DEBT-FG6DEF04-03）：被拦截、就地展开交战的队伍不推进（收拢后接着走）
                 }
                 if (g.State == TransitGroupState.Arrived)
                 {
@@ -339,7 +339,10 @@ namespace GameLogic.Campaign.WorldSim
         /// 开始撤退：沿来时的路线原路返回出发地（已走过的路点倒序 + 出发格），途中照常是星球上的聚合体（可以被追击，追击属于 FG6-DEF-05 / FG8）。
         /// FG6-DEF-04 之前的存档没有出发地记录：直接离场（如实通知）。发一条“突袭部队撤退”通知；战时预案下一步检查（突袭结束）。
         /// </summary>
-        public static void BeginRetreat(CampaignState state, TransitGroupRecord g)
+        public static void BeginRetreat(CampaignState state, TransitGroupRecord g) => BeginRetreat(state, g, null);
+
+        /// <summary>FG6-DEF-05：攻城部队撤出家园后并回行进队伍，沿原路回出发地——通知改写成 <paramref name="notifyText"/>（“N 台敌人撤出家园”），类型用攻城进展 raid_siege——撤退令已经发过一条 raid_withdrawn，同类型会合并成“2 支突袭部队撤退”误导玩家。</summary>
+        public static void BeginRetreat(CampaignState state, TransitGroupRecord g, string notifyText)
         {
             if (g == null || g.State == TransitGroupState.Retreating)
             {
@@ -351,7 +354,7 @@ namespace GameLogic.Campaign.WorldSim
             WithdrawalCount++;
             GuidanceHooks.Raise(GuidanceHooks.RaidFirstWithdrawn);
             string where = OriginName(g.OriginId);
-            NotificationCenter.Post("raid_withdrawn", GameText.Format("raid.withdrawn.notify", g.UnitCount.ToString(),
+            NotificationCenter.Post(notifyText != null ? "raid_siege" : "raid_withdrawn", notifyText ?? GameText.Format("raid.withdrawn.notify", g.UnitCount.ToString(),
                 GameClock.FormatGameDuration(stayed), string.IsNullOrEmpty(where) ? GameText.Get("raid.withdrawn.home") : where),
                 new Vector3((float)g.PosX, 0f, (float)g.PosY));
             if (!g.HasOrigin)
@@ -386,6 +389,36 @@ namespace GameLogic.Campaign.WorldSim
             g.TargetX = g.OriginX;
             g.TargetY = g.OriginY;
         }
+
+        /// <summary>FG6-DEF-05：队伍被全歼——从星球上移除（抽走的驻军不还给据点：都死了）。返回是否移除了。</summary>
+        public static bool RemoveDestroyed(CampaignState state, TransitGroupRecord g)
+        {
+            RaidState raids = state?.Raids;
+            if (raids?.InTransit == null || g == null)
+            {
+                return false;
+            }
+            var list = new List<TransitGroupRecord>(raids.InTransit.Length);
+            bool removed = false;
+            foreach (TransitGroupRecord x in raids.InTransit)
+            {
+                if (ReferenceEquals(x, g))
+                {
+                    removed = true;
+                    continue;
+                }
+                list.Add(x);
+            }
+            if (removed)
+            {
+                raids.InTransit = list.ToArray();
+                DestroyedCount++;
+            }
+            return removed;
+        }
+
+        /// <summary>FG6-DEF-05：被全歼的队伍数（统计 / 自检）。</summary>
+        public static int DestroyedCount { get; private set; }
 
         private static void StepRetreat(TransitGroupRecord g, float dt)
         {
@@ -847,6 +880,7 @@ namespace GameLogic.Campaign.WorldSim
             ArrivalCount = 0;
             WithdrawalCount = 0;
             RetreatsCompleted = 0;
+            DestroyedCount = 0;
             Finished.Clear();
         }
     }

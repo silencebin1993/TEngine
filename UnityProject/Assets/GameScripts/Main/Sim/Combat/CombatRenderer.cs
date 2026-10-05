@@ -45,6 +45,9 @@ namespace BinGames.Sim.Combat
         private NativeList<CombatInstance> _icons;
         private NativeArray<float2> _statusVisuals;
         private bool _hasStatusVisuals;
+        /// <summary>FG6-DEF-05（FGR-DEF-030）：头顶职能图标（4 项：突击 / 破坏 / 攻城 / 撤退中；x = 形状序号，y = 打包颜色）。与状态标签图标同一次绘制调用。</summary>
+        private NativeArray<float2> _siegeVisuals;
+        private bool _hasSiegeVisuals;
         private GraphicsBuffer _iconBuf;
         private MaterialPropertyBlock _iconProps;
         private MaterialPropertyBlock _unitProps;
@@ -83,6 +86,11 @@ namespace BinGames.Sim.Combat
             for (int b = 0; b < 32; b++)
             {
                 _statusVisuals[b] = new float2(-1f, 0f);
+            }
+            _siegeVisuals = new NativeArray<float2>(4, Allocator.Persistent);
+            for (int r = 0; r < 4; r++)
+            {
+                _siegeVisuals[r] = new float2(-1f, 0f);
             }
             if (SystemInfo.graphicsDeviceType == GraphicsDeviceType.Null)
             {
@@ -126,6 +134,25 @@ namespace BinGames.Sim.Combat
             _preparedRevision = int.MinValue;
         }
 
+        /// <summary>FG6-DEF-05：职能图标（热更层按 fg.TbSiegeRole 的形状 / 颜色写入一次）。</summary>
+        public void SetSiegeVisuals(float2[] visuals)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _hasSiegeVisuals = false;
+            for (int r = 0; r < 4; r++)
+            {
+                float2 v = visuals != null && r < visuals.Length ? visuals[r] : new float2(-1f, 0f);
+                _siegeVisuals[r] = v;
+                _hasSiegeVisuals |= v.x >= 0f;
+            }
+            _preparedRevision = int.MinValue;
+        }
+
+        public float2 SiegeVisualOf(int role) => role >= 0 && role < 4 && !_disposed ? _siegeVisuals[role] : new float2(-1f, 0f);
+
         public float2 StatusVisualOf(int bit) => bit >= 0 && bit < 32 && !_disposed ? _statusVisuals[bit] : new float2(-1f, 0f);
 
         /// <summary>每帧（只在观察这个地点时）：内核状态变了就重填缓冲并上传，然后提交至多四次绘制。</summary>
@@ -151,6 +178,10 @@ namespace BinGames.Sim.Combat
                 else
                 {
                     _icons.Clear();
+                }
+                if (_hasSiegeVisuals)
+                {
+                    kernel.PrepareSiegeIcons(_icons, _siegeVisuals, origin, IconSize);
                 }
                 _preparedRevision = kernel.Revision;
             }
@@ -276,6 +307,10 @@ namespace BinGames.Sim.Combat
             if (_statusVisuals.IsCreated)
             {
                 _statusVisuals.Dispose();
+            }
+            if (_siegeVisuals.IsCreated)
+            {
+                _siegeVisuals.Dispose();
             }
             if (_material != null)
             {

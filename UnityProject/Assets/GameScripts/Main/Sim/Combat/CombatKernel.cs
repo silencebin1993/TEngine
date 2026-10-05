@@ -32,7 +32,7 @@ namespace BinGames.Sim.Combat
     /// - 快照：<see cref="Serialize"/> / <see cref="Load"/>，二进制 + 校验和；状态哈希 <see cref="StateHash"/> 用于确定性与存读档逐位比对。
     /// 原生容器成对释放：<see cref="Dispose"/>。
     /// </summary>
-    public sealed class CombatKernel : IDisposable
+    public sealed partial class CombatKernel : IDisposable
     {
         private CombatData _d;
         private CombatEvent[] _drainBuffer = new CombatEvent[64];
@@ -480,6 +480,7 @@ namespace BinGames.Sim.Combat
                 Weapon = _d.Weapon[i],
                 Ammo = _d.Ammo[i],
                 Facing = _d.Armor[i].zw,
+                Siege = _d.Siege[i],
             };
         }
 
@@ -969,6 +970,8 @@ namespace BinGames.Sim.Combat
             }
             long t0 = Watch.ElapsedTicks;
             Watch.Start();
+            // FG6-DEF-05：攻城剧场维护（格子缓存与流场按本步之前的变化增量更新、补算需要的流场）在内核一步之前，单独计时（流场更新 ≤ 4 ms 的证据）。
+            MaintainSiege();
             var job = new CombatStepJob { D = _d, Dt = dt, Time = time };
             job.Run();
             Watch.Stop();
@@ -1539,6 +1542,22 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.Ammo[i]); // FG6-DEF-01（格式 9）
                 Mix(ref h, _d.Armor[i].z); // FG6-DEF-01：炮塔朝向（转速转出来的，属于模拟状态）
                 Mix(ref h, _d.Armor[i].w);
+                CombatSiegeUnit hsu = _d.Siege[i]; // FG6-DEF-05（格式 11）
+                Mix(ref h, hsu.Role);
+                Mix(ref h, hsu.Mode);
+                Mix(ref h, hsu.Cat);
+                Mix(ref h, hsu.Hold);
+                Mix(ref h, hsu.Group);
+                Mix(ref h, hsu.FootMin.x);
+                Mix(ref h, hsu.FootMin.y);
+                Mix(ref h, hsu.FootMax.x);
+                Mix(ref h, hsu.FootMax.y);
+                Mix(ref h, hsu.StructMult);
+                Mix(ref h, hsu.HealCd);
+                Mix(ref h, hsu.Breach);
+                Mix(ref h, hsu.GuardPost.x);
+                Mix(ref h, hsu.GuardPost.y);
+                Mix(ref h, hsu.GuardRadius);
                 CombatCommand c = _d.Cmd[i];
                 Mix(ref h, (int)c.Kind);
                 Mix(ref h, c.Target);
@@ -1625,6 +1644,13 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, sh.Absorbed);
                 Mix(ref h, sh.Hits);
                 Mix(ref h, sh.Depletions);
+            }
+            for (int q = 0; q < _d.SiegeState.Impacts.Length; q++)
+            {
+                CombatSiegeImpact im = _d.SiegeState.Impacts[q]; // FG6-DEF-05（格式 11）：还没结算的溅射命中
+                Mix(ref h, im.Cell.x);
+                Mix(ref h, im.Cell.y);
+                Mix(ref h, im.Damage);
             }
             Mix(ref h, _d.Gameplay.Length);
             Mix(ref h, s.NextNavSerial);
@@ -1800,6 +1826,26 @@ namespace BinGames.Sim.Combat
                 {
                     w.Write(_d.Ammo[i]);
                 }
+                // FG6-DEF-05（格式 11）：攻城属性。
+                if (format >= 11)
+                {
+                    CombatSiegeUnit su = _d.Siege[i];
+                    w.Write(su.Role);
+                    w.Write(su.Mode);
+                    w.Write(su.Cat);
+                    w.Write(su.Hold);
+                    w.Write(su.Group);
+                    w.Write(su.FootMin.x);
+                    w.Write(su.FootMin.y);
+                    w.Write(su.FootMax.x);
+                    w.Write(su.FootMax.y);
+                    w.Write(su.StructMult);
+                    w.Write(su.HealCd);
+                    w.Write(su.Breach);
+                    w.Write(su.GuardPost.x);
+                    w.Write(su.GuardPost.y);
+                    w.Write(su.GuardRadius);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -1867,6 +1913,18 @@ namespace BinGames.Sim.Combat
                     w.Write(sh.Absorbed);
                     w.Write(sh.Hits);
                     w.Write(sh.Depletions);
+                }
+            }
+            // FG6-DEF-05（格式 11）：还没结算的溅射命中（同样放在读法表之前）。
+            if (format >= 11)
+            {
+                w.Write(_d.SiegeState.Impacts.Length);
+                for (int q = 0; q < _d.SiegeState.Impacts.Length; q++)
+                {
+                    CombatSiegeImpact im = _d.SiegeState.Impacts[q];
+                    w.Write(im.Cell.x);
+                    w.Write(im.Cell.y);
+                    w.Write(im.Damage);
                 }
             }
             // FG2-FW-02（格式 3）：区域、回波、无人机。
@@ -2033,6 +2091,8 @@ namespace BinGames.Sim.Combat
             {
                 staging.Obstacles.Add(_d.Obstacles[i]);
             }
+            // FG6-DEF-05：攻城剧场配置是热更层写的（读档后热更层还会按存档重设一次）；格子缓存与流场在第一步维护时按读进来的状态重建。
+            staging.SiegeState.CopyConfigFrom(ref _d.SiegeState);
             _d.Dispose();
             _d = staging;
             FeedEpoch++;
@@ -2228,6 +2288,32 @@ namespace BinGames.Sim.Combat
                     return CombatLoadResult.InvalidValue;
                 }
                 sp.Ammo = ammo;
+                // FG6-DEF-05（格式 11）：攻城属性；更老的快照没有 = 不参与攻城。
+                if (format >= 11)
+                {
+                    var su = new CombatSiegeUnit
+                    {
+                        Role = r.ReadByte(),
+                        Mode = r.ReadByte(),
+                        Cat = r.ReadByte(),
+                        Hold = r.ReadByte(),
+                        Group = r.ReadInt32(),
+                        FootMin = new int2(r.ReadInt32(), r.ReadInt32()),
+                        FootMax = new int2(r.ReadInt32(), r.ReadInt32()),
+                        StructMult = r.ReadSingle(),
+                        HealCd = r.ReadSingle(),
+                        Breach = r.ReadInt32(),
+                        GuardPost = new double2(r.ReadDouble(), r.ReadDouble()),
+                        GuardRadius = r.ReadSingle(),
+                    };
+                    if (su.Role > (byte)CombatSiegeRole.Siege || su.Mode > (byte)CombatSiegeMode.Skirmish || su.Hold > 1 || (su.Cat & ~0x3F) != 0
+                        || !(su.StructMult >= 0f) || float.IsInfinity(su.StructMult) || float.IsNaN(su.HealCd) || float.IsInfinity(su.HealCd) || su.Breach < 0
+                        || !IsFinite(su.GuardPost) || !(su.GuardRadius >= 0f) || float.IsInfinity(su.GuardRadius))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    sp.Siege = su;
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -2368,6 +2454,25 @@ namespace BinGames.Sim.Combat
                         }
                     }
                     staging.Shields.Add(sh);
+                }
+            }
+            // FG6-DEF-05（格式 11）：还没结算的溅射命中（同格合并、上限 ImpactCap）。
+            if (format >= 11)
+            {
+                int imn = r.ReadInt32();
+                if (imn < 0 || imn > CombatSiegeConst.ImpactCap)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                for (int q = 0; q < imn; q++)
+                {
+                    var im = new CombatSiegeImpact { Cell = new int2(r.ReadInt32(), r.ReadInt32()), Damage = r.ReadSingle() };
+                    long key = ((long)im.Cell.x << 32) ^ (uint)im.Cell.y;
+                    if (!(im.Damage > 0f) || float.IsInfinity(im.Damage) || !staging.SiegeState.ImpactIndex.TryAdd(key, staging.SiegeState.Impacts.Length))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    staging.SiegeState.Impacts.Add(im);
                 }
             }
             if (format >= 3)

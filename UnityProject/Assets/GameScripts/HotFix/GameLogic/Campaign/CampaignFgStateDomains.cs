@@ -314,6 +314,18 @@ namespace GameLogic.Campaign
         public int X;
         public int Y;
         public int Lost;
+        /// <summary>FG6-DEF-05（承接 DEBT-FG6DEF03-03）：最近一次挨打的统一时钟步（0 = 旧档 / 没记）。维修无人机突袭中先修最近挨打的格。</summary>
+        public long LastHitTick;
+    }
+
+    /// <summary>FG6-DEF-05（承接 DEBT-FG3LOG05-12 / DEBT-FG6DEF03-02）：一格掉了耐久的管线件（与传送带同一做法：满耐久的不记）。</summary>
+    [Serializable]
+    public sealed class PipeDamageRecord
+    {
+        public int X;
+        public int Y;
+        public int Lost;
+        public long LastHitTick;
     }
 
     /// <summary>输入端口编号 → 所属建筑名字的文本键。</summary>
@@ -415,6 +427,9 @@ namespace GameLogic.Campaign
         public long TotalProducedOutMl;
         /// <summary>寒潮进行中（FGR-LOG-045 预留：FG7-ENV-03 的天气系统写它；本 Story 只保存，不产生结冰）。</summary>
         public bool ColdSnap;
+        /// <summary>FG6-DEF-05（承接 DEBT-FG3LOG05-12 / DEBT-FG6DEF03-02）：掉了耐久的管线件（满耐久的不记；唯一写入口 <see cref="Logistics.PipeNetworkService"/>）。
+        /// 只加字段：旧档没有 = 全部满耐久。</summary>
+        public PipeDamageRecord[] Damage = Array.Empty<PipeDamageRecord>();
     }
 
     /// <summary>
@@ -982,6 +997,9 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-04（FG06 FGR-DEF-020～024）：突袭导演——排定的突袭计划、阈值与周期触发的计时、最短间隔、各方向被摧毁的据点、突袭历史。
         /// 唯一写入口 <see cref="Defense.RaidDirectorService"/>。只加字段、不升域版本：旧档没有 = 导演第一次推进时按当前暴露补好（不追溯触发）。</summary>
         public RaidDirectorState Director = new RaidDirectorState();
+        /// <summary>FG6-DEF-05（FG06 FGR-DEF-030～032）：攻城——攻城剧场矩形、进了战斗内核的建筑（序号 ↔ 建筑 ID）、施工虚影的溅射伤害、破墙通知。
+        /// 唯一写入口 <see cref="Defense.SiegeService"/>。只加字段、不升域版本：旧档没有 = 没有进行中的攻城。</summary>
+        public SiegeState Siege = new SiegeState();
     }
 
     /// <summary>
@@ -1139,6 +1157,24 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-04 复审：行军途中重新要过路线时，之前已经走过的路点（含重新规划那一刻所在的格）：撤退时接在当前路线已走过的部分后面倒着走回去（真正的“原路”）。</summary>
         public int[] TrailX = Array.Empty<int>();
         public int[] TrailY = Array.Empty<int>();
+        // ── FG6-DEF-05：攻城（展开成战斗单位之后；聚合体本身停在集结点）──
+        /// <summary>展开成内核单位的台数、走回集结点离场的台数（损失 = 展开 − 活着 − 离场）。</summary>
+        public int UnfoldedCount;
+        public int ExitedCount;
+        /// <summary>集结点（格）：展开的位置，也是撤退的终点。</summary>
+        public int GatherX;
+        public int GatherY;
+        /// <summary>已下令撤退（时间上限 / 损失超过阈值）与原因（time / losses / regroup）。</summary>
+        public bool SiegeRetreat;
+        public string SiegeRetreatReason = string.Empty;
+        /// <summary>FG6-DEF-05 复审修复（B11 软锁保底）：下撤退令的步（-1 / 0 = 没有）；满 siege.retreat_max_seconds 还有单位走不回集结点（被困、拆不出去）就按离场收尾。</summary>
+        public long SiegeRetreatTick = -1;
+        /// <summary>FG6-DEF-05（DEBT-FG6DEF04-03）：行进途中被己方机器拦截、就地展开交战（不是到达家园的攻城）。</summary>
+        public bool Intercepted;
+        /// <summary>拦截交战中最后一次附近有己方机器的步（附近没人满 siege.regroup_seconds 就收拢继续走）。</summary>
+        public long LastContactTick = -1;
+        /// <summary>这次拦截开始的步（就地交战满 siege.intercept_max_seconds 判僵持收拢）；僵持收拢后改记收拢的步，这段时间内不再拦。-1 = 没有。</summary>
+        public long InterceptTick = -1;
     }
 
     /// <summary>事件导演（FG10）。</summary>
@@ -1923,6 +1959,7 @@ namespace GameLogic.Campaign
                     g.EliteCounts ??= Array.Empty<int>();
                     g.TrailX ??= Array.Empty<int>();
                     g.TrailY ??= Array.Empty<int>();
+                    g.SiegeRetreatReason ??= string.Empty;
                     if (g.TrailX.Length != g.TrailY.Length)
                     {
                         g.TrailX = Array.Empty<int>();
@@ -1931,6 +1968,7 @@ namespace GameLogic.Campaign
                 }
             }
             Defense.RaidDirectorService.EnsureState(s); // FG6-DEF-04：突袭导演域补成空域（旧档没有 = 第一次推进时按当前暴露补好，不追溯触发）。
+            Defense.SiegeService.EnsureState(s); // FG6-DEF-05：攻城域补成空域（旧档没有 = 没有进行中的攻城）。
             s.Raids.Outposts ??= Array.Empty<OutpostRecord>();
             s.Raids.Patrols ??= Array.Empty<PatrolRecord>();
             foreach (OutpostRecord o in s.Raids.Outposts)

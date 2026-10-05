@@ -250,6 +250,12 @@ namespace BinGames.Sim.Combat
                 Separate(ref d, ref grid, i, d.Speed[i], dt);
             }
 
+            // FG6-DEF-05（DEBT-FG4ECO07-02）：空闲的驻防机器守点交战（有命令时听命令：工单赶路、玩家命令优先）。
+            if (d.Siege[i].GuardRadius > 0f && d.Cmd[i].Kind == CombatCommandKind.None && d.Kind[i] == (byte)CombatUnitKind.Machine)
+            {
+                CombatSiegeLogic.StepGuard(ref d, ref grid, i, dt);
+            }
+
             CombatBehavior b = (CombatBehavior)d.Behavior[i];
             if (b == CombatBehavior.AutoEngage)
             {
@@ -786,6 +792,12 @@ namespace BinGames.Sim.Combat
         /// <summary>突袭者（FG06 原型）：扑向感知范围内的目标，进入射程开火；没有目标时朝目标点前进。每 0.5 游戏秒重选一次目标。</summary>
         private static void StepRaider(ref CombatData d, ref CombatGrid grid, int i, float dt)
         {
+            // FG6-DEF-05：有攻城属性的突袭单位在攻城剧场里按职能 / 流场 / 破墙 / 撤退行动（原型突袭者照旧走下面的规则）。
+            if (CombatSiegeLogic.UsesSiege(ref d, i))
+            {
+                CombatSiegeLogic.StepSiegeRaider(ref d, ref grid, i, dt);
+                return;
+            }
             int w = d.Weapon[i];
             int bp = d.BProfile[i];
             if (w < 0 || bp < 0)
@@ -857,7 +869,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>单位主动攻击（驻守开火 / 瞄准线 / 突袭者 / 炮塔）：弹体武器生成弹体，其余即时命中。</summary>
-        private static void UnitAttack(ref CombatData d, int i, int t, in CombatWeapon wp)
+        internal static void UnitAttack(ref CombatData d, int i, int t, in CombatWeapon wp)
         {
             // FG2-FW-02：与编队攻击 / 直控同一道开火门槛（格斗 / 力场的触及、过热迟滞）与同一份积热——驻守开火的炮塔也不例外。
             if (PreFireGate(ref d, i, t, wp) != CombatFireResult.Ok)
@@ -1192,6 +1204,20 @@ namespace BinGames.Sim.Combat
             }
             // FG2-FW-02：易伤状态（冻结等）统一在这里乘上——任何来源的伤害都吃。
             damage = math.max(0f, damage) * VulnMultiplier(ref d, t);
+            // FG6-DEF-05：攻城单位打带攻城类别的结构单位（建筑 / 炮塔 / 屏障）乘对建筑倍率，并在被打的那一侧记一次溅射命中（传送带 / 管线 / 施工虚影受波及）。
+            byte siegeCat = d.Siege[t].Cat;
+            if (siegeCat != 0 && attacker >= 0 && attacker < d.Count && d.Faction[attacker] != d.Faction[t])
+            {
+                float mult = d.Siege[attacker].StructMult;
+                if (mult > 0f)
+                {
+                    damage *= mult;
+                }
+                if (d.Faction[attacker] == (byte)CombatFaction.Hostile)
+                {
+                    CombatSiegeLogic.RecordImpact(ref d, t, attacker, damage);
+                }
+            }
             CombatCounters c = d.Counters[0];
             if (d.Faction[t] == (byte)CombatFaction.Player)
             {
@@ -1210,6 +1236,10 @@ namespace BinGames.Sim.Combat
                 return true;
             }
             float hp = math.max(0f, d.Hp[t] - damage);
+            if (hp <= 0f && d.Has(t, CombatUnitFlags.HealthFloor))
+            {
+                hp = CombatSiegeConst.HealthFloor; // FG6-DEF-05：归还核心不在内核里阵亡（被打空的后果在 FG6-DEF-08）
+            }
             d.Hp[t] = hp;
             if (d.Has(t, CombatUnitFlags.Report))
             {
@@ -1895,7 +1925,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>突袭者没有目标时沿路线走向目标点（到了就停；路线失败则原地待命，计数由寻路内核给出）。</summary>
-        private static void RaiderRouteMove(ref CombatData d, int i, float speed, float dt)
+        internal static void RaiderRouteMove(ref CombatData d, int i, float speed, float dt)
         {
             double2 pos = d.Pos[i];
             double2 home = d.Home[i];
@@ -1924,7 +1954,7 @@ namespace BinGames.Sim.Combat
         /// 分离（DEBT-FG0ARCH03-03）：同阵营、会移动的单位互相重叠时各自推开一半重叠量，每步至多 移动速度 × dt × SeparationFactor。
         /// 只看这一步开始时的位置（Prev），与遍历顺序无关；完全重合时按两者 ID 派生的固定方向推开。推开也受格网碰撞约束。
         /// </summary>
-        private static void Separate(ref CombatData d, ref CombatGrid grid, int i, float speed, float dt)
+        internal static void Separate(ref CombatData d, ref CombatGrid grid, int i, float speed, float dt)
         {
             if (d.Config.NavEnabled == 0 || d.Config.SeparationFactor <= 0f || d.Has(i, CombatUnitFlags.Possessed))
             {

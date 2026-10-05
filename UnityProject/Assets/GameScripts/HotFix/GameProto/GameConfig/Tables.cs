@@ -303,6 +303,22 @@ public partial class Tables
     /// </summary>
     public fg.TbShieldState TbShieldState {get; }
     /// <summary>
+    /// 攻城建筑类别
+    /// </summary>
+    public fg.TbSiegeCategory TbSiegeCategory {get; }
+    /// <summary>
+    /// 攻城职能
+    /// </summary>
+    public fg.TbSiegeRole TbSiegeRole {get; }
+    /// <summary>
+    /// 攻城职能目标
+    /// </summary>
+    public fg.TbSiegeTarget TbSiegeTarget {get; }
+    /// <summary>
+    /// 攻城单位参数
+    /// </summary>
+    public fg.TbSiegeUnit TbSiegeUnit {get; }
+    /// <summary>
     /// 开局布局
     /// </summary>
     public fg.TbStartLayout TbStartLayout {get; }
@@ -474,6 +490,10 @@ public partial class Tables
         TbRuleKind = new fg.TbRuleKind(loader("fg_tbrulekind"));
         TbRulePreset = new fg.TbRulePreset(loader("fg_tbrulepreset"));
         TbShieldState = new fg.TbShieldState(loader("fg_tbshieldstate"));
+        TbSiegeCategory = new fg.TbSiegeCategory(loader("fg_tbsiegecategory"));
+        TbSiegeRole = new fg.TbSiegeRole(loader("fg_tbsiegerole"));
+        TbSiegeTarget = new fg.TbSiegeTarget(loader("fg_tbsiegetarget"));
+        TbSiegeUnit = new fg.TbSiegeUnit(loader("fg_tbsiegeunit"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
@@ -576,6 +596,10 @@ public partial class Tables
         TbRuleKind.ResolveRef(this);
         TbRulePreset.ResolveRef(this);
         TbShieldState.ResolveRef(this);
+        TbSiegeCategory.ResolveRef(this);
+        TbSiegeRole.ResolveRef(this);
+        TbSiegeTarget.ResolveRef(this);
+        TbSiegeUnit.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);
         TbSurface.ResolveRef(this);

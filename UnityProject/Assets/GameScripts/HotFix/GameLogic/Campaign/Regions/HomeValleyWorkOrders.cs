@@ -2847,6 +2847,7 @@ namespace GameLogic.Campaign.Regions
                 : BuildingConstructionState.Operational;
             building.DisabledWhenDestroyed = false;
             building.Health = Economy.BuildingOps.MaxDurability(building.BuildingTypeId); // FG4-ECO-05：重建 / 修复后耐久回满（摧毁时为 0）。
+            Defense.DefenseService.OnConstructionCompleted(state, building); // FG6-DEF-05：废墟重建完工重新挡路（立即标脏，与读档重建的镜像一致）
             Economy.BuildingOps.Touch();
             BuildingVisualFeed.Mark(building); // FG3-LOG-09：修复完成，画面重画这一座
             // ER3-SOFTLOCK-01：紧急救援机的免费修复（见 TryCreateEmergencyRepair）没有事务 id，

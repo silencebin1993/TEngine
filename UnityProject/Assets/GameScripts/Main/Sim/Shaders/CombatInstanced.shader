@@ -5,6 +5,7 @@
 // _Kind = 1：弹体。沿飞行方向拉长的发光短线（长度取本步位移）。美术是占位（B22）。
 // _Kind = 2：FG2-FW-03 头顶状态标签图标（FGR-FW-031）。B = (边长, 形状序号, 打包颜色 0xRRGGBB, 30 + 叠层)。形状为主、颜色为辅（B15 色盲安全）：
 //            深色底板 + 按形状序号画的符号（▲●◆◇★▼■☆◎○※△□▽ 依次 0～13），底部小点 = 叠层数。
+//            FG6-DEF-05：同一路画头顶职能图标（14 上箭头 = 突击、15 闪电 = 破坏、16 城垛 = 攻城、17 下箭头 = 撤退中；叠层 0 = 不画小点）。
 // FG2-VFX-02（DEBT-FG2FW02-02）：区域与无人机（_Kind = 0 那一路里 B.w ≥ 20 的实例）。B = (半径, 剩余时间比例, 打包颜色 0xRRGGBB, 种类)。
 //            种类 20 液池（外移的波纹）/ 21 冲击波（随时间外扩的冲击环）/ 22 减速网（网格）/ 23 反应残留（斑点）；外圈一道 = 剩余时间。
 //            24 伴飞无人机（X 形机臂 + 四个旋翼环）/ 25 定点哨戒桩（三脚架 + 闪烁信标 + 六边形底座）。颜色 = 区域挂的状态标签色（火 / 酸 / 电……）或阵营色。
@@ -86,6 +87,14 @@ Shader "BinGames/CombatInstanced"
                 return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
             }
 
+            float sdSeg(float2 p, float2 a, float2 b)
+            {
+                float2 pa = p - a;
+                float2 ba = b - a;
+                float h = saturate(dot(pa, ba) / dot(ba, ba));
+                return length(pa - ba * h);
+            }
+
             float shapeSd(float2 p, int shape)
             {
                 float ring = 0.12;
@@ -109,6 +118,31 @@ Shader "BinGames/CombatInstanced"
                 }
                 if (shape == 11) return abs(sdTri(float2(p.x, p.y + 0.12), 0.72)) - ring * 0.8;
                 if (shape == 12) return abs(max(abs(p.x), abs(p.y)) - 0.56) - ring;
+                // FG6-DEF-05（FGR-DEF-030）职能图标：14 上箭头（突击）、15 闪电（破坏）、16 城垛（攻城）、17 下箭头（撤退中）。
+                if (shape == 14 || shape == 17)
+                {
+                    float2 q = shape == 17 ? float2(p.x, -p.y) : p;
+                    float head = sdTri(float2(q.x, q.y - 0.22), 0.5);
+                    float stem = max(abs(q.x) - 0.17, abs(q.y + 0.4) - 0.36);
+                    return min(head, stem);
+                }
+                if (shape == 15)
+                {
+                    float2 a = float2(0.32, 0.82), b = float2(-0.22, 0.04), c = float2(0.24, 0.04), e = float2(-0.3, -0.82);
+                    float s1 = sdSeg(p, a, b);
+                    float s2 = sdSeg(p, b, c);
+                    float s3 = sdSeg(p, c, e);
+                    return min(min(s1, s2), s3) - 0.13;
+                }
+                if (shape == 16)
+                {
+                    float base = max(abs(p.x) - 0.62, abs(p.y + 0.18) - 0.46);
+                    float m1 = max(abs(p.x + 0.44) - 0.16, abs(p.y - 0.42) - 0.2);
+                    float m2 = max(abs(p.x) - 0.16, abs(p.y - 0.42) - 0.2);
+                    float m3 = max(abs(p.x - 0.44) - 0.16, abs(p.y - 0.42) - 0.2);
+                    float gate = max(abs(p.x) - 0.16, abs(p.y + 0.42) - 0.22);
+                    return max(min(min(base, m1), min(m2, m3)), -gate);
+                }
                 return abs(sdTri(float2(p.x, -p.y + 0.12), 0.72)) - ring * 0.8;
             }
 

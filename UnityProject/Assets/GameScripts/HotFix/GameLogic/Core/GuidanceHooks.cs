@@ -372,6 +372,18 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-04：第一次点预警条（镜头飞到预计抵达点）。</summary>
         public const string RaidWarningFirstClick = "raid.warning_first_click";
 
+        /// <summary>FG6-DEF-05：第一次有突袭部队在家园展开成战斗单位（头顶职能图标、按职能选目标）。</summary>
+        public const string SiegeFirstUnfold = "siege.first_unfold";
+
+        /// <summary>FG6-DEF-05：第一次有敌人因为路被完全堵死而去拆最薄弱的那段墙。</summary>
+        public const string SiegeFirstBreach = "siege.first_breach";
+
+        /// <summary>FG6-DEF-05：第一次有攻城部队因为损失过大或到时间上限撤退。</summary>
+        public const string SiegeFirstRetreat = "siege.first_retreat";
+
+        /// <summary>FG6-DEF-05：第一次全歼一支突袭部队。</summary>
+        public const string SiegeFirstDestroyed = "siege.first_destroyed";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -421,6 +433,7 @@ namespace GameLogic.Core
             DefensePanelFirstOpen, DefenseRouteFirstPreview,
             DefenseRepairDroneFirstBuilt, DefenseRepairDroneFirstRepair, DefenseRepairDroneFirstLost, RulesRebuildZoneFirstDrawn, RulesRebuildFirstBelt,
             RaidFirstPlanned, RaidFirstWarning, RaidFirstAssembling, RaidFirstWithdrawn, RaidWarningFirstClick,
+            SiegeFirstUnfold, SiegeFirstBreach, SiegeFirstRetreat, SiegeFirstDestroyed,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

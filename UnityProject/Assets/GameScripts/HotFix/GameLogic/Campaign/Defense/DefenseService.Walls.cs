@@ -26,6 +26,13 @@ namespace GameLogic.Campaign.Defense
         public float MaxDetourMeters;
         /// <summary>有已知的来路（寻路镜像绑定且找到了来路起点）。</summary>
         public bool HasRoutes;
+        /// <summary>FG6-DEF-05（承接 DEBT-FG6DEF02-04）：来路起点里有已排定 / 正在行进 / 正在攻城的突袭的到达点（玩家已知的：已预警、有预报、地图上看得到的队伍）。</summary>
+        public bool FromRaids;
+        /// <summary>FG6-DEF-05：完全堵死时敌人会拆的那段墙（最短路线上最薄弱的一段；与战斗内核破墙流场同一代价模型）。没有 = null。</summary>
+        public string BreachName;
+        public GridCell BreachCell;
+        /// <summary>BreachName 对应的建筑（现有 / 规划中的墙）；是这次假设的新墙时为空。</summary>
+        public string BreachBuildingId;
 
         public void Clear()
         {
@@ -35,6 +42,10 @@ namespace GameLogic.Campaign.Defense
             Sealed = false;
             MaxDetourMeters = 0f;
             HasRoutes = false;
+            FromRaids = false;
+            BreachName = null;
+            BreachCell = default;
+            BreachBuildingId = null;
         }
 
         /// <summary>状态行的一句（当前语言）。</summary>
@@ -44,13 +55,12 @@ namespace GameLogic.Campaign.Defense
             {
                 return GameText.Get("build.wall.route_none");
             }
-            if (Sealed)
-            {
-                return GameText.Get("build.wall.route_sealed");
-            }
-            return MaxDetourMeters >= 0.5f
-                ? GameText.Format("build.wall.route_change", Mathf.RoundToInt(MaxDetourMeters))
-                : GameText.Get("build.wall.route_same");
+            string line = Sealed
+                ? BreachName != null ? GameText.Format("defense.preview.breach_target", BreachName) : GameText.Get("build.wall.route_sealed")
+                : MaxDetourMeters >= 0.5f
+                    ? GameText.Format("build.wall.route_change", Mathf.RoundToInt(MaxDetourMeters))
+                    : GameText.Get("build.wall.route_same");
+            return FromRaids ? line + " · " + GameText.Get("defense.preview.entries_planned") : line;
         }
     }
 
@@ -135,7 +145,7 @@ namespace GameLogic.Campaign.Defense
             }
             if (plan.Reason == null && preview)
             {
-                PreviewRoutes(s, plan.Cells, plan.Route);
+                PreviewRoutes(s, plan.Cells, plan.Route, typeId);
                 // 复审修复（P2，FGR-LOG-012）：整段放下后机器到不了哪些建筑（只警告，不阻止）；闸门放行己方单位，不检查。
                 if (DefenseCatalog.KindOf(typeId) != DefenseKind.Gate)
                 {
@@ -209,7 +219,7 @@ namespace GameLogic.Campaign.Defense
         /// 朝着最近的几个敌方据点方向的可走格（没有已知据点时取东南西北）；终点 = 核心外一圈。距离场与下坡追踪在 Burst（<see cref="NavService.FlowRoutes"/>）。
         /// 放下后不可达、放下前可达 = 堵死（预览线画放下前的来路到第一段新墙为止，敌人会攻击挡路的墙）。只在预览换格 / 换朝向时调用。经 NavService 碰寻路内核。
         /// </summary>
-        public static void PreviewRoutes(CampaignState s, IReadOnlyList<GridCell> newCells, RoutePreview into)
+        public static void PreviewRoutes(CampaignState s, IReadOnlyList<GridCell> newCells, RoutePreview into, string newType = null)
         {
             into.Clear();
             if (s == null || !NavService.IsBound || !ReferenceEquals(s, NavService.BoundState)
@@ -287,7 +297,7 @@ namespace GameLogic.Campaign.Defense
             }
             Entries.Clear();
             var core = new Vector2((coreMin.X + coreMax.X) * 0.5f, (coreMin.Y + coreMax.Y) * 0.5f);
-            foreach (Vector2 dir in SourceDirections(s, core))
+            foreach (Vector2 dir in SourceDirections(s, core, out into.FromRaids))
             {
                 if (TryEntryCell(core, dir, min, max, out int2 e) && !Entries.Contains(e))
                 {
@@ -358,10 +368,145 @@ namespace GameLogic.Campaign.Defense
                 }
                 into.Routes.Add(line);
             }
+            if (into.Sealed)
+            {
+                PreviewBreach(s, min, max, newCells, newType, n, costA, into);
+            }
             if (into.HasRoutes)
             {
                 GuidanceHooks.Raise(GuidanceHooks.DefenseRouteFirstPreview);
             }
+        }
+
+        private static readonly List<int2> BreachCells = new List<int2>(128);
+        private static readonly List<int> BreachPen = new List<int>(128);
+        private static readonly Dictionary<GridCell, int> BreachIndex = new Dictionary<GridCell, int>();
+        private static readonly List<string> BreachOwner = new List<string>(128);
+        private static readonly List<int2> SealedEntries = new List<int2>(4);
+        private static readonly List<int2> PointsBreach = new List<int2>(256);
+        private static readonly List<GridCell> BreachFoot = new List<GridCell>(4);
+
+        /// <summary>自检读：最近一次破墙预览计入的墙格数。</summary>
+        public static int LastBreachCells => BreachCells.Count;
+
+        /// <summary>
+        /// FG6-DEF-05（承接 DEBT-FG6DEF02-04）：放下后完全堵死的来路，按战斗内核破墙流场的代价模型（墙格可走、进入付 siege.breach_base_cost + 耐久档 × siege.breach_cost_per_band）
+        /// 再追踪一次：路线上第一段墙 = 突袭到了会拆的那段（最短路线上最薄弱的一段）；预览线改画到那段墙为止。墙 = 现有的屏障 / 闸门（按当前耐久）、规划中的虚影与这次的新墙（按满耐久）。
+        /// 距离场与追踪在 Burst（<see cref="NavService.FlowRoutes"/> 破墙模式），热更层只按墙数 O(墙格) 填表。
+        /// </summary>
+        private static void PreviewBreach(CampaignState s, int2 min, int2 max, IReadOnlyList<GridCell> newCells, string newType, int entryCount, int[] costAfter, RoutePreview into)
+        {
+            BreachCells.Clear();
+            BreachPen.Clear();
+            BreachIndex.Clear();
+            BreachOwner.Clear();
+            foreach (BuildingRecord b in s.BuildingRecords ?? Array.Empty<BuildingRecord>())
+            {
+                if (b == null || b.RegionId != HomeValleyLayout.RegionId || IsRuin(b))
+                {
+                    continue;
+                }
+                // 复审修复（P2，与内核破墙场同一口径）：内核里每个带攻城类别的结构单位都能被拆（屏障 / 闸门、炮塔与其它防御建筑、建成的普通建筑），
+                // 所以建成的建筑都算“可拆的墙”（按当前耐久）；规划中的屏障 / 闸门按满耐久（放下后会建成）。普通建筑的虚影不挡敌人（NavBlockBitsOf），不算墙。
+                bool planned = DefenseCatalog.BlocksMovement(b.BuildingTypeId) && IsPlannedBlocker(b);
+                if (!planned && !IsBuilt(b))
+                {
+                    continue;
+                }
+                float hp = planned ? Economy.BuildingOps.MaxDurability(b.BuildingTypeId) : RepairDroneService.DurabilityOf(s, b);
+                BreachFoot.Clear();
+                HomeGridService.FootprintOf(b, BreachFoot);
+                foreach (GridCell c in BreachFoot)
+                {
+                    AddBreachCell(c, hp, b.BuildingId, min, max);
+                }
+            }
+            if (newCells != null)
+            {
+                float hpNew = Economy.BuildingOps.MaxDurability(string.IsNullOrEmpty(newType) ? "barrier_t1" : newType);
+                foreach (GridCell c in newCells)
+                {
+                    AddBreachCell(c, hpNew, null, min, max);
+                }
+            }
+            SealedEntries.Clear();
+            var map = new List<int>(entryCount);
+            for (int i = 0, r = 0; i < entryCount; i++)
+            {
+                // into.Routes 只收了“放下前或放下后可达”的来路；这里按同样的顺序找出放下后到不了的那几条。
+                if (i >= Entries.Count)
+                {
+                    break;
+                }
+                bool counted = !(_beforeCost.Length > i && _beforeCost[i] < 0 && costAfter[i] < 0);
+                if (!counted)
+                {
+                    continue;
+                }
+                if (costAfter[i] < 0)
+                {
+                    SealedEntries.Add(Entries[i]);
+                    map.Add(r);
+                }
+                r++;
+            }
+            if (SealedEntries.Count == 0 || BreachCells.Count == 0)
+            {
+                return;
+            }
+            int m = SealedEntries.Count;
+            var off = new int[m];
+            var cnt = new int[m];
+            var cost = new int[m];
+            NavService.FlowRoutes(NavConst.ClassHostile, min, max, Goals, Extra, SealedEntries, PointsBreach, off, cnt, cost, BreachCells, BreachPen);
+            int bestCost = int.MaxValue;
+            for (int e = 0; e < m; e++)
+            {
+                if (cost[e] < 0)
+                {
+                    continue;
+                }
+                var line = new List<GridCell>(cnt[e]);
+                int hit = -1;
+                for (int p = 0; p < cnt[e]; p++)
+                {
+                    int2 c = PointsBreach[off[e] + p];
+                    var gc = new GridCell(c.x, c.y);
+                    line.Add(gc);
+                    if (BreachIndex.TryGetValue(gc, out int bi))
+                    {
+                        hit = bi;
+                        break; // 画到第一段墙为止：敌人在这里破墙
+                    }
+                }
+                if (hit < 0)
+                {
+                    continue;
+                }
+                into.Routes[map[e]] = line;
+                if (cost[e] < bestCost)
+                {
+                    bestCost = cost[e];
+                    int2 bc = BreachCells[hit];
+                    into.BreachCell = new GridCell(bc.x, bc.y);
+                    into.BreachBuildingId = BreachOwner[hit];
+                    BuildingRecord owner = BreachOwner[hit] != null ? HomeGridService.FindBuilding(s, BreachOwner[hit]) : null;
+                    into.BreachName = owner != null ? HomeGridService.DisplayName(owner.BuildingTypeId)
+                        : HomeGridService.DisplayName(string.IsNullOrEmpty(newType) ? "barrier_t1" : newType);
+                }
+            }
+        }
+
+        private static void AddBreachCell(GridCell c, float hp, string owner, int2 min, int2 max)
+        {
+            if (c.X < min.x || c.Y < min.y || c.X > max.x || c.Y > max.y || BreachIndex.ContainsKey(c))
+            {
+                return;
+            }
+            BreachIndex[c] = BreachCells.Count;
+            BreachCells.Add(new int2(c.X, c.Y));
+            BreachPen.Add(SiegeCatalog.BreachPenalty(hp));
+            BreachOwner.Add(owner);
         }
 
         private static int _beforeKey;
@@ -382,10 +527,62 @@ namespace GameLogic.Campaign.Defense
             return h;
         }
 
+        /// <summary>
+        /// FG6-DEF-05（承接 DEBT-FG6DEF02-04）：玩家已知的突袭到达点方向——正在攻城的队伍的集结点、地图上看得到的行进队伍的路线终点、已预警 / 有预报的计划的路线终点
+        /// （与突袭路径叠加层同一口径，不泄露玩家不知道的计划）。同方向（夹角小于约 14°）只算一条。返回加了几条。
+        /// </summary>
+        private static int RaidArrivalDirections(CampaignState s, Vector2 core, List<Vector2> dirs)
+        {
+            int before = dirs.Count;
+            long now = GameClock.Ticks;
+            foreach (TransitGroupRecord g in s.Raids?.InTransit ?? Array.Empty<TransitGroupRecord>())
+            {
+                if (g == null || g.Kind != TransitGroupKind.Raid || g.TargetKind != RaidDirectorService.TargetHome || g.State == TransitGroupState.Retreating)
+                {
+                    continue;
+                }
+                Vector2 at = g.Engaged ? new Vector2(g.GatherX, g.GatherY)
+                    : (g.RouteX?.Length ?? 0) > 0 ? new Vector2(g.RouteX[g.RouteX.Length - 1], g.RouteY[g.RouteY.Length - 1]) : new Vector2((float)g.PosX, (float)g.PosY);
+                AddDirection(dirs, at - core);
+            }
+            foreach (RaidPlanRecord p in RaidDirectorService.Plans(s))
+            {
+                if (p == null || (p.RouteX?.Length ?? 0) == 0 || dirs.Count >= DefenseCatalog.PreviewMaxRoutes)
+                {
+                    continue;
+                }
+                bool known = p.State == RaidDirectorService.StateWarned
+                             || p.State == RaidDirectorService.StateScheduled && RaidDirectorService.IntelKnown(s, p, now);
+                if (known)
+                {
+                    AddDirection(dirs, new Vector2(p.RouteX[p.RouteX.Length - 1], p.RouteY[p.RouteY.Length - 1]) - core);
+                }
+            }
+            return dirs.Count - before;
+        }
+
+        private static void AddDirection(List<Vector2> dirs, Vector2 d)
+        {
+            if (d.sqrMagnitude < 1e-4f || dirs.Count >= DefenseCatalog.PreviewMaxRoutes)
+            {
+                return;
+            }
+            d.Normalize();
+            foreach (Vector2 e in dirs)
+            {
+                if (Vector2.Dot(e, d) > 0.97f)
+                {
+                    return;
+                }
+            }
+            dirs.Add(d);
+        }
+
         /// <summary>敌人从哪些方向来：最近的几个敌方据点（按到核心的距离、再按 ID 排序，确定性；B25 按种子生成的据点）；没有据点时东南西北。</summary>
-        private static List<Vector2> SourceDirections(CampaignState s, Vector2 core)
+        private static List<Vector2> SourceDirections(CampaignState s, Vector2 core, out bool fromRaids)
         {
             var dirs = new List<Vector2>(DefenseCatalog.PreviewMaxRoutes);
+            fromRaids = RaidArrivalDirections(s, core, dirs) > 0;
             OutpostRecord[] outposts = s.Raids?.Outposts ?? Array.Empty<OutpostRecord>();
             var sorted = new List<OutpostRecord>(outposts.Length);
             foreach (OutpostRecord o in outposts)

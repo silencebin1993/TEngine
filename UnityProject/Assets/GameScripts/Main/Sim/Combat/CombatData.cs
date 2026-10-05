@@ -126,6 +126,8 @@ namespace BinGames.Sim.Combat
         public NativeList<float> StatusZoneSlow;
         /// <summary>FG6-DEF-01（格式 9）：补给存量（按发计；只有武器 AmmoPerShot &gt; 0 的单位用它）。</summary>
         public NativeList<float> Ammo;
+        /// <summary>FG6-DEF-05（格式 11）：攻城属性（突袭单位的职能 / 撤退 / 队伍 / 对建筑倍率 / 随队维修计时 / 破墙目标；结构单位的目标类别 / 占地）。</summary>
+        public NativeList<CombatSiegeUnit> Siege;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -165,6 +167,8 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatDrone> Drones;
         /// <summary>FG6-DEF-02：护盾（随快照进存档，格式 10）。</summary>
         public NativeList<CombatShield> Shields;
+        /// <summary>FG6-DEF-05：攻城剧场（流场、格子缓存、溅射命中）。流场不进快照（纯函数，读档重算）；溅射命中进快照（格式 11）。</summary>
+        public CombatSiegeData SiegeState;
 
         /// <summary>FG2-FW-03：具名标签反应规则（热更层按 fg.TbReaction 在建地点时写入，按 priority 排好序；不进存档——规则是内容，不是状态）。</summary>
         public NativeList<CombatReactionRule> Reactions;
@@ -240,6 +244,8 @@ namespace BinGames.Sim.Combat
                 StatusBitUntil = new NativeList<double>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
                 StatusZoneSlow = new NativeList<float>(capacity, Allocator.Persistent),
                 Ammo = new NativeList<float>(capacity, Allocator.Persistent),
+                Siege = new NativeList<CombatSiegeUnit>(capacity, Allocator.Persistent),
+                SiegeState = CombatSiegeData.Create(),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
                 NavSt = new NativeList<byte>(capacity, Allocator.Persistent),
@@ -331,6 +337,8 @@ namespace BinGames.Sim.Combat
             StatusBitUntil.Dispose();
             StatusZoneSlow.Dispose();
             Ammo.Dispose();
+            Siege.Dispose();
+            SiegeState.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
             NavSt.Dispose();
@@ -439,6 +447,7 @@ namespace BinGames.Sim.Combat
             }
             StatusZoneSlow.Add(0f);
             Ammo.Add(math.max(0f, s.Ammo));
+            Siege.Add(s.Siege);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -496,6 +505,7 @@ namespace BinGames.Sim.Combat
             }
             StatusZoneSlow[to] = StatusZoneSlow[from];
             Ammo[to] = Ammo[from];
+            Siege[to] = Siege[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -543,6 +553,7 @@ namespace BinGames.Sim.Combat
             StatusBitUntil.ResizeUninitialized(length * CombatConst.StatusBitStride);
             StatusZoneSlow.ResizeUninitialized(length);
             Ammo.ResizeUninitialized(length);
+            Siege.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);
@@ -566,6 +577,7 @@ namespace BinGames.Sim.Combat
             Traces.Clear();
             Drones.Clear();
             Shields.Clear();
+            SiegeState.ClearImpacts();
             Gameplay.Clear();
             Cues.Clear();
             RoutePts.Clear();

@@ -518,6 +518,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "SS" || f[0] == "TR"
                     // FG6-DEF-04 的突袭触发（RDT）、等级（RDL）、难度（RDD）、编成（RDU）、反制（RDC）、剧情（RDS）由 FgRaidDirectorSelfCheck A1 段逐字段比对。
                     || f[0] == "RDT" || f[0] == "RDL" || f[0] == "RDD" || f[0] == "RDU" || f[0] == "RDC" || f[0] == "RDS"
+                    // FG6-DEF-05 的攻城职能（SGR）、职能目标（SGT）、建筑类别（SGC）、攻城单位（SGU）由 FgSiegeSelfCheck A1 段逐字段比对。
+                    || f[0] == "SGR" || f[0] == "SGT" || f[0] == "SGC" || f[0] == "SGU"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;
