@@ -144,6 +144,21 @@ namespace GameLogic.Campaign.Defense
             return !string.IsNullOrEmpty(id) && UnitById.TryGetValue(id, out def);
         }
 
+        /// <summary>FG6-DEF-08：编成行的种类序号（表顺序下标 + 1；0 = 不在表里）。攻城单位的外部键带着它，被击毁时据此知道是哪种敌人。</summary>
+        public static int KindOf(RaidUnitDef def)
+        {
+            EnsureLoaded();
+            int i = def != null ? UnitList.IndexOf(def) : -1;
+            return i >= 0 ? i + 1 : 0;
+        }
+
+        /// <summary>FG6-DEF-08：种类序号 → 编成行（0 / 越界 = null）。</summary>
+        public static RaidUnitDef UnitOfKind(int kind)
+        {
+            EnsureLoaded();
+            return kind > 0 && kind <= UnitList.Count ? UnitList[kind - 1] : null;
+        }
+
         /// <summary>某阵营在给定等级下能出现的单位（表顺序）。</summary>
         public static void UnitsFor(string faction, int level, List<RaidUnitDef> into)
         {

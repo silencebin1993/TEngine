@@ -32,6 +32,8 @@ namespace GameLogic.Campaign.Economy
         Roster,
         /// <summary>没有位置的通知类条目：打开通知中心（历史里有这一条）。</summary>
         Notifications,
+        /// <summary>FG6-DEF-08：打开突袭历史面板并选中这一份结算（Arg = 结算序号）。</summary>
+        RaidResult,
     }
 
     /// <summary>离家报告的一行。</summary>
@@ -112,7 +114,7 @@ namespace GameLogic.Campaign.Economy
             BuildLogistics(deltas, into);
             BuildEntries(state, r, "weather", "away.section.weather", "away.weather.none", into);
             BuildMachines(state, r, into);
-            BuildEntries(state, r, "raid", "away.section.raid", "away.raid.none", into);
+            BuildRaids(state, r, into);
             BuildEntries(state, r, "event", "away.section.event", "away.event.none", into);
             BuildEntries(state, r, "research", "away.section.research", "away.research.none", into);
             BuildEntries(state, r, "buildings", "away.section.buildings", null, into);
@@ -137,7 +139,8 @@ namespace GameLogic.Campaign.Economy
             r.Produced.Length == 0 && r.Consumed.Length == 0 && starve.Count == 0 && r.Outages.Length == 0 && r.OutagesDropped == 0 && r.ShortSeconds == 0
             && r.Machines.Length == 0 && r.MachinesDropped == 0 && r.Entries.Length == 0 && r.EntriesDropped == 0 && r.RulesTotal == 0
             && d.FuelMl == 0 && d.FuelOuts == 0 && d.PumpedMl == 0 && d.DeliveredMl == 0 && d.FlushedMl == 0 && d.RemovedMl == 0 && d.Cleared == 0 && d.Discarded == 0 && d.Split == 0 && d.BeltIn == 0 && d.BeltOut == 0
-            && AwayReportService.MembersLost(r) == 0 && session == null;
+            && AwayReportService.MembersLost(r) == 0 && session == null
+            && Defense.RaidResultService.InWindow(CampaignSession.Current, r.StartTick, r.EndTick).Count == 0;
 
         // ── 生产 ─────────────────────────────────────────────────────────────
 
@@ -425,6 +428,28 @@ namespace GameLogic.Campaign.Economy
                 });
             }
             into.Add(new AwayLine { Text = GameText.Format("away.rule.count", r.RulesTotal), Action = AwayLineAction.Rules, Section = "rules" });
+        }
+
+        // ── 突袭（FG6-DEF-08 FGR-DEF-052：过程时间线、损失、谁贡献最大；FG4-ECO-09 的突袭通知条目照常列在后面）──────────
+
+        private static void BuildRaids(CampaignState state, AwayReportRecord r, List<AwayLine> into)
+        {
+            int entries = 0;
+            foreach (AwayEntryRecord e in r.Entries)
+            {
+                if (e != null && e.Section == "raid")
+                {
+                    entries++;
+                }
+            }
+            Title(into, "away.section.raid", "raid");
+            int raids = Defense.RaidResultService.AppendAway(state, r.StartTick, r.EndTick, into);
+            if (raids == 0 && entries == 0)
+            {
+                Dim(into, "away.raid.none", "raid");
+                return;
+            }
+            AddEntries(state, r, "raid", into);
         }
 
         // ── 通知转来的条目 ────────────────────────────────────────────────────

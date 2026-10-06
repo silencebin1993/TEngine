@@ -39,5 +39,33 @@ namespace GameLogic.Campaign.Defense
             b.Health = after;
             return after - before;
         }
+
+        /// <summary>
+        /// FG6-DEF-08 复修（FGT-DEF-009）：建筑记录的耐久被别处直接改过（机器维修完工回满、<see cref="BuildingOps.ApplyDamage"/>）之后立即推给内核并同步“上次推送值”，
+        /// 与 <see cref="TurretService.CommitRecord"/> 同一口径。内核上限与记录类型不一致（原地升级刚完工）时不推，留给下一次对账先按比例换算。O(1)。
+        /// </summary>
+        public static bool CommitRecord(CampaignState s, BuildingRecord b)
+        {
+            if (s == null || b == null || !IsBuilt(b))
+            {
+                return false;
+            }
+            DefenseRecord r = Find(s, b.BuildingId);
+            CombatSite site = HomeSite;
+            if (r == null || site == null || site.IsDisposed || !site.TryGetDefenseHealth(r.Serial, out _, out float kernelMax, out bool alive) || !alive)
+            {
+                return false;
+            }
+            float max = BuildingOps.MaxDurability(b.BuildingTypeId);
+            if (Mathf.Abs(kernelMax - max) > 0.01f)
+            {
+                return false;
+            }
+            float hp = Mathf.Clamp(b.Health, 1f, max);
+            site.SetDefenseHealth(r.Serial, hp, max);
+            b.Health = hp;
+            RuntimeOf(r).LastPushedHp = hp;
+            return true;
+        }
     }
 }

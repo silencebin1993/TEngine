@@ -76,6 +76,8 @@ namespace GameLogic.UI.Kit
             RosterButton = Bind(root, "PauseRoster", "pause.roster", RosterPanelUIToolkit.Open); // FG4-ECO-07
             // FG4-ECO-09（FGR-ECO-060“随时可以查看最近 3 份报告”）：离家报告盖在暂停菜单上面，关掉回到暂停菜单。
             AwayReportButton = Bind(root, "PauseAwayReport", "pause.away_report", AwayReportPanelUIToolkit.Open);
+            // FG6-DEF-08（FG06 第 4 节“突袭历史：可以回看结算”）：突袭历史盖在暂停菜单上面，关掉回到暂停菜单。
+            RaidHistoryButton = Bind(root, "PauseRaidHistory", "pause.raid_history", RaidResultPanelUIToolkit.Open);
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindReactionFeedback(root);
@@ -121,6 +123,7 @@ namespace GameLogic.UI.Kit
         public Button ItemsButton { get; private set; }
         public Button RulesButton { get; private set; }
         public Button RosterButton { get; private set; }
+        public Button RaidHistoryButton { get; private set; }
         public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;

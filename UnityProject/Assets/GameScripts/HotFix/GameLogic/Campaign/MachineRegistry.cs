@@ -570,6 +570,7 @@ namespace GameLogic.Campaign
             RosterRevision++;
             // FG4-ECO-09：离家报告“机器变化”（远征在外时记阵亡的时刻与地点）与告警“机器重伤”级（阵亡的不再算重伤）。
             Economy.AwayReportService.OnMachineDied(CampaignSession.Current, record, deathPosition);
+            Defense.RaidResultService.OnMachineDied(CampaignSession.Current, record, deathPosition); // FG6-DEF-08：攻城期间家园机器阵亡记进突袭结算的损失
             Regions.HomeValleyAlarms.OnMachineChanged(record, 0f);
             if (_logicToEntity.TryGetValue(logicId, out SimEntityId entity))
             {

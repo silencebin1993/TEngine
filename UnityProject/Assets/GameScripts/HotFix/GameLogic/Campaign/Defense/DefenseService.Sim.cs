@@ -139,6 +139,20 @@ namespace GameLogic.Campaign.Defense
         public static void RestoreAfterLoad(CampaignState state, CombatSite site)
         {
             CombatSite.DefenseEvent ??= OnKernelEvent;
+            if (state == null || site == null || site.IsDisposed)
+            {
+                return;
+            }
+            // FG6-DEF-08 复修（FGT-DEF-009）：耐久对账的“上次推送值”按存档里的建筑记录补回（与炮塔、攻城建筑同一口径）——
+            // 否则读档后第一次对账一律按“内核 → 记录”拉回，读档后、第一次对账前对记录的改动会被盖掉，与不存档连续跑分叉。
+            foreach (DefenseRecord r in All(state))
+            {
+                BuildingRecord b = r != null ? HomeGridService.FindBuilding(state, r.BuildingId) : null;
+                if (b != null && site.TryGetDefenseHealth(r.Serial, out _, out _, out bool alive) && alive)
+                {
+                    RuntimeOf(r).LastPushedHp = b.Health;
+                }
+            }
         }
 
         /// <summary>
@@ -1017,6 +1031,7 @@ namespace GameLogic.Campaign.Defense
             ReleaseTrapConsumer(r);
             if (b != null)
             {
+                RaidResultService.NoteLoss(state, RaidResultService.KindDefense, b.BuildingId, b.Position); // FG6-DEF-08：突袭结算的损失
                 DestroyBuilding(state, b);
                 if (DefenseCatalog.BlocksMovement(b.BuildingTypeId))
                 {
@@ -1047,7 +1062,11 @@ namespace GameLogic.Campaign.Defense
             BuildingOps.OnBuildingDestroyed(state, b);
         }
 
-        /// <summary>存档前（<see cref="WorldSimulation.SyncAllForSave"/>）：内核里的耐久写回建筑、护盾值 / 累计吸收写回记录（护盾本身随内核快照，流体随管线快照）。</summary>
+        /// <summary>
+        /// 存档前（<see cref="WorldSimulation.SyncAllForSave"/>）：护盾值 / 累计吸收写回记录（护盾本身随内核快照，流体随管线快照）。
+        /// FG6-DEF-08 复修（FGT-DEF-009）：结构耐久不再写回建筑——耐久随内核快照，记录保持上一次对账的值（被别处改过时已立即推给内核，<see cref="CommitRecord"/>），
+        /// 存档对模拟没有副作用；读档按记录补回“上次推送值”（<see cref="RestoreAfterLoad"/>）。
+        /// </summary>
         public static void WriteTo(CampaignState state)
         {
             CombatSite site = HomeSite;
@@ -1057,20 +1076,10 @@ namespace GameLogic.Campaign.Defense
             }
             foreach (DefenseRecord r in All(state))
             {
-                BuildingRecord b = r != null ? HomeGridService.FindBuilding(state, r.BuildingId) : null;
-                if (b == null)
+                if (r != null && HomeGridService.FindBuilding(state, r.BuildingId) != null)
                 {
-                    continue;
+                    PullShield(site, r);
                 }
-                if (site.TryGetDefenseHealth(r.Serial, out float hp, out _, out bool alive) && alive)
-                {
-                    b.Health = hp;
-                    if (Rt.TryGetValue(r.Serial, out Runtime rt))
-                    {
-                        rt.LastPushedHp = hp;
-                    }
-                }
-                PullShield(site, r);
             }
         }
     }

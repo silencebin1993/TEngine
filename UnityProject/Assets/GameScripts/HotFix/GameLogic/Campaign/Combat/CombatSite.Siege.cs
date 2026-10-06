@@ -12,7 +12,9 @@ namespace GameLogic.Campaign.Combat
     /// - 攻城剧场：矩形、职能表（目标类别位 + 偏好代价）、集结点（撤退的终点）。流场、按职能选目标、破墙、撤退都在内核（Main/Sim，Burst）。
     /// - 建筑结构单位：炮塔 / 防御建筑之外的建筑在攻城期间是内核里的己方结构单位（可被选中与命中、不动不开火、血量在内核、阵亡只报一次 = 建筑被摧毁；
     ///   不画圆片——建筑有自己的表现对象）。外部键 = −(<see cref="SiegeStructKeyBase"/> + 序号)，与防御（&gt; 0）、无人机（−100 万区间）、原型（−1）、攻城单位（−300 万区间）都不重叠。
-    /// - 攻城单位：突袭队伍展开的敌方单位（职能、精英、所属队伍）。外部键 = −(<see cref="SiegeRaiderKeyBase"/> + 队伍键)，阵亡即移除（匿名单位，不逐个报告）。
+    /// - 攻城单位：突袭队伍展开的敌方单位（职能、精英、所属队伍）。外部键 = −(<see cref="SiegeRaiderKeyBase"/> + 队伍键 × <see cref="SiegeKindStride"/> + 种类序号)（FG6-DEF-08 起编码敌人种类，序号 1～63，0 = 未知），阵亡即移除（匿名单位，不逐个报告）。
+    ///   边界：种类序号 ≥ <see cref="SiegeKindStride"/> 记“未知”（生成表时 fgdata_raidresult.validate 校验编成表行数 &lt; 64）；击毁事件经 float 的 Value2 传外部键的相反数，
+    ///   小于 2^24 才精确——队伍键须小于约 21.5 万（队伍键按派遣顺序递增，正常一局远达不到；超出时种类解码失败只记“未知”，不影响击毁数与残骸）。
     /// </summary>
     public sealed partial class CombatSite
     {
@@ -29,6 +31,23 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>攻城单位走到集结点离场（<see cref="CombatEventKind.SiegeExited"/>）。参数：地点、队伍键、事件。</summary>
         public static Action<CombatSite, int, CombatEvent> SiegeExitEvent;
+
+        /// <summary>FG6-DEF-08：攻城 / 拦截单位被击毁（<see cref="CombatEventKind.SiegeKilled"/>）交给突袭结算服务。参数：地点、事件。</summary>
+        public static Action<CombatSite, CombatEvent> SiegeKillEvent;
+
+        /// <summary>攻城单位外部键里编码的敌人种类：ExtKey = −(<see cref="SiegeRaiderKeyBase"/> + 队伍键 × <see cref="SiegeKindStride"/> + 种类序号)。</summary>
+        public const int SiegeKindStride = 64;
+
+        /// <summary>从攻城单位的外部键（相反数）解出敌人种类序号（1 起；0 = 旧档 / 未编码 / 对不上队伍键）。</summary>
+        public static int SiegeKindOf(int negExtKey, int groupKey)
+        {
+            int k = negExtKey - SiegeRaiderKeyBase;
+            if (k <= 0 || groupKey <= 0 || k / SiegeKindStride != groupKey)
+            {
+                return 0;
+            }
+            return k % SiegeKindStride;
+        }
 
         /// <summary>头顶职能图标（4 项：突击 / 破坏 / 攻城 / 撤退中；x = 形状序号，y = 打包颜色）。攻城服务按 fg.TbSiegeRole 写一次。</summary>
         public static float2[] SiegeRoleVisuals;
@@ -199,12 +218,14 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>生成一台攻城单位（敌方、突袭者行为、实例化画出来、阵亡即移除）。返回单位 ID。</summary>
         public int SpawnSiegeRaider(int groupKey, Vector2 at, Vector2 home, float radius, float speed, float health, float armorFraction,
-            int weapon, int profile, CombatSiegeRole role, bool elite, float structMult)
+            int weapon, int profile, CombatSiegeRole role, bool elite, float structMult, int kind = 0)
         {
             if (IsDisposed || groupKey <= 0)
             {
                 return 0;
             }
+            // FG6-DEF-08：外部键里带上敌人种类（RaidCatalog.Units 下标 + 1，0 = 不知道），被击毁时热更层据此记“击败过的敌人种类”（靶场解锁）与结算编成。
+            int kindCode = kind > 0 && kind < SiegeKindStride && groupKey < (int.MaxValue - SiegeRaiderKeyBase) / SiegeKindStride - 1 ? kind : 0;
             MarkPlaceholderVisuals();
             CombatUnitFlags flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled | CombatUnitFlags.Instanced
                                     | CombatUnitFlags.RemoveOnDeath;
@@ -214,7 +235,7 @@ namespace GameLogic.Campaign.Combat
             }
             return Kernel.Spawn(new CombatSpawn
             {
-                ExtKey = -(SiegeRaiderKeyBase + groupKey),
+                ExtKey = -(SiegeRaiderKeyBase + groupKey * SiegeKindStride + kindCode),
                 Kind = CombatUnitKind.Enemy,
                 Faction = CombatFaction.Hostile,
                 Behavior = CombatBehavior.Raider,
@@ -304,6 +325,9 @@ namespace GameLogic.Campaign.Combat
         public int TurretSerialOf(int unitId) => _unitTurret.TryGetValue(unitId, out int s) ? s : 0;
 
         public CombatSiegeStats SiegeStats => IsDisposed ? default : Kernel.SiegeStats;
+
+        /// <summary>FG6-DEF-08：内核累计读数（敌对 / 己方受到的伤害等，进内核快照）——突袭结算按“展开时基准、结束时差额”算造成 / 承受的伤害（玩法代码只经门面读，FG14 §5 硬约束 3）。</summary>
+        public CombatCounters KernelCounters => IsDisposed ? default : Kernel.Counters;
 
         public int4 SiegeRect => IsDisposed ? int4.zero : Kernel.SiegeRect;
 
@@ -402,6 +426,11 @@ namespace GameLogic.Campaign.Combat
             if (e.Kind == CombatEventKind.SiegeExited)
             {
                 SiegeExitEvent?.Invoke(this, e.Other, e);
+                return true;
+            }
+            if (e.Kind == CombatEventKind.SiegeKilled)
+            {
+                SiegeKillEvent?.Invoke(this, e);
                 return true;
             }
             if (e.Kind == CombatEventKind.Killed && _unitSiegeStruct.TryGetValue(e.Unit, out int serial))

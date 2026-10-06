@@ -393,6 +393,11 @@ namespace GameLogic.EditorTools
                 case 417: StepAwayAlertShown(inStep); break;
                 case 418: StepAwayStayed(inStep); break;
                 case 419: StepAwayJumpedHome(inStep); break;
+                // FG6-DEF-08：突袭结算通知 → 突袭历史面板 → Esc；失败页“读取最近自动存档”→ 世界读回（核心完好）→ 再次被毁 → 返回主菜单
+                case 420: StepRaidResultShown(inStep); break;
+                case 421: StepRaidResultClosed(inStep); break;
+                case 422: StepFailureReloaded(inStep); break;
+                case 423: StepFailureShownAgain(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -1423,6 +1428,16 @@ namespace GameLogic.EditorTools
             Check(awayClicked && awayOpen && awayClosed && toggled,
                 $"暂停菜单点“离家报告”：报告面板打开（{(arp == null ? "无" : arp.VisibleRowCount > 0 ? $"第 {arp.ShownSerial} 份，{arp.VisibleRowCount} 行" : arp.EmptyText)}），点关闭回到暂停菜单；" +
                 $"“远征回来时自动打开离家报告”开关关 / 开立即生效（{awayClicked}/{awayOpen}/{awayClosed}/{toggled}）");
+            // FG6-DEF-08（FG06 第 4 节“突袭历史”）：暂停菜单“突袭历史”→ 突袭历史面板（还没有突袭时写明空状态）→ 点关闭回到暂停菜单。
+            bool histClicked = ClickUitk("[PauseMenuHost]", "PauseRaidHistory");
+            UI.Kit.RaidResultPanelUIToolkit rrp = UI.Kit.RaidResultPanelUIToolkit.Instance;
+            rrp?.Refresh();
+            bool histOpen = rrp != null && UI.Kit.RaidResultPanelUIToolkit.IsOpen && rrp.PanelVisible
+                            && (rrp.VisibleRowCount > 0 || rrp.EmptyText == Localization.GameText.Get("raid.result.panel.none"))
+                            && !Localization.GameText.ContainsMarker(rrp.SummaryText + rrp.EmptyText + (rrp.VisibleRowCount > 0 ? rrp.RowText(0) : string.Empty));
+            bool histClosed = ClickUitk("[RaidResultHost]", "RaidResultClose") && !UI.Kit.RaidResultPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(histClicked && histOpen && histClosed,
+                $"暂停菜单点“突袭历史”：突袭历史面板打开（{(rrp == null ? "无" : rrp.VisibleRowCount > 0 ? rrp.SummaryText : rrp.EmptyText)}），点关闭回到暂停菜单（{histClicked}/{histOpen}/{histClosed}）");
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
@@ -10209,6 +10224,45 @@ namespace GameLogic.EditorTools
             Check(home != null && g == null && st != null && !st.TheaterActive && home.SiegeStructUnitCount == 0 && home.SiegeUnitCount == 0
                   && coreRec != null && coreRec.Health >= coreBefore - 0.01f,
                 $"清场后按“全歼”结算：队伍移除、剧场关、建筑结构单位移出内核；核心耐久没变（{coreBefore:F0} → {coreRec?.Health:F0}，敌人还没走到家园）");
+            // FG6-DEF-08（FGR-DEF-050）：这一波结算后发“突袭结算”通知；点通知的“打开”（与通知中心 / 弹出条同一个去处）→ 突袭历史面板显示这一份结算。
+            Notifications.NotificationEntry note = Notifications.NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "raid_result");
+            Check(note != null && Notifications.NotificationCenter.HasOpenHandler(note) && Notifications.NotificationCenter.TryOpen(note),
+                $"清场结算后发出“突袭结算”通知（“{note?.Text}”），点“打开”去突袭历史面板");
+            Next(420, "FG6-DEF-08：突袭历史面板显示刚结算的这一波");
+        }
+
+        // ── FG6-DEF-08：突袭结算通知 → 突袭历史面板（概要、过程、伤害、损失、贡献、战利品、残骸处理）→ Esc 关闭 ──
+
+        private static void StepRaidResultShown(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.RaidResultPanelUIToolkit p = UI.Kit.RaidResultPanelUIToolkit.Instance;
+            Campaign.RaidResultRecord latest = Campaign.Defense.RaidResultService.LatestEnded(CampaignSession.Current);
+            string rows = string.Empty;
+            for (int i = 0; p != null && i < p.VisibleRowCount && i < 40; i++)
+            {
+                rows += p.RowText(i) + "\n";
+            }
+            Check(UI.Kit.RaidResultPanelUIToolkit.IsOpen && p != null && p.PanelVisible && latest != null && p.ShownKey == "R" + latest.Serial
+                  && p.SummaryText.Contains(Campaign.Defense.RaidResultService.OutcomeText(latest)) && rows.Contains(Localization.GameText.Get("raid.result.sec.timeline"))
+                  && rows.Contains(Localization.GameText.Get("raid.result.sec.losses")) && rows.Contains(Localization.GameText.Get("raid.result.sec.wreck"))
+                  && !Localization.GameText.ContainsMarker(p.SummaryText + rows),
+                $"突袭历史面板显示刚结算的第 {latest?.Serial} 份：“{p?.SummaryText}”，{p?.VisibleRowCount} 行（过程 / 伤害 / 损失 / 贡献 / 战利品 / 残骸处理），共 {p?.ChoiceCount} 次突袭");
+            CheckNoTextMarkers("突袭历史面板");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(421, "Esc 关闭突袭历史面板");
+        }
+
+        private static void StepRaidResultClosed(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Check(!UI.Kit.RaidResultPanelUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen, "Esc 关闭突袭历史面板（不连带打开暂停菜单）");
             GameClock.SetPaused(SessionState.GetInt(K + "SiegeWasPaused", 0) == 1);
             Next(177, "FG1-SIG-03：存档前先接入一台家园机器");
         }
@@ -10474,6 +10528,56 @@ namespace GameLogic.EditorTools
             }
             Check(!PauseMenuUIToolkit.IsOpen && FailurePageShown(),
                 "失败页上按 Esc：不打开被失败页盖住的暂停菜单，失败页也不被关掉（只能用页面按钮离开）");
+            // FG6-DEF-08（FGR-DEF-053“提供读取自动存档的选项”）：失败页写着最近安全自动档，“读取最近自动存档”可点 → 读回本局存档槽。
+            UI.HomeValleyFailure.HomeValleyFailureUIToolkit fp = UI.HomeValleyFailure.HomeValleyFailureUIToolkit.Instance;
+            bool loadable = fp != null && fp.LoadButton != null && fp.LoadButton.enabledSelf && fp.LastSaveText.Contains("槽位")
+                            && CampaignSaveService.GetSlotMetadata(CampaignSession.ActiveSlotIndex).State == CampaignSlotState.Ready;
+            // 核心被摧毁之后不再写存档：失败页上再请求一次自动存档 → 被拒，槽位写入时刻不变（读回的正是失败前那一份安全档）。
+            string before = CampaignSaveService.GetSlotMetadata(CampaignSession.ActiveSlotIndex).WrittenAtUtc ?? string.Empty;
+            SaveResult refused = CampaignAutoSaveService.SaveAuto(SaveReason.HomeEntryComplete);
+            Check(refused.Outcome == SaveOutcome.CampaignLost && (CampaignSaveService.GetSlotMetadata(CampaignSession.ActiveSlotIndex).WrittenAtUtc ?? string.Empty) == before,
+                $"核心被摧毁之后自动存档被拒（{refused.Outcome}：“{refused.Message}”），槽位写入时刻不变");
+            Check(loadable && ClickUitk("[HomeValleyFailureHost]", "LoadAutosaveButton"),
+                $"失败页写“{fp?.LastSaveText}”，点“读取最近自动存档”");
+            Next(422, "点失败页“读取最近自动存档”");
+        }
+
+        private static void StepFailureReloaded(double inStep)
+        {
+            CampaignState cs = CampaignSession.Current;
+            bool back = cs != null && GameRoot.HomeValley != null && GameRoot.HomeValley.IsLoaded && !Campaign.Regions.HomeValleySoftlockGuard.IsCoreDestroyed(cs) && !FailurePageShown();
+            if (!back)
+            {
+                if (inStep > 30)
+                {
+                    Finish("点“读取最近自动存档”后 30 秒内世界没有读回（或核心仍是被摧毁状态）");
+                }
+                return;
+            }
+            if (inStep < 2)
+            {
+                return;
+            }
+            Check(UiEscapeStack.Count == 0 && !InputRouter.ModalUiOpen && !PauseMenuUIToolkit.IsOpen,
+                $"读取最近自动存档：世界读回（槽位 {CampaignSession.ActiveSlotIndex}，核心完好、失败页收起），没有残留的模态与 Esc 栈");
+            Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(cs);
+            Next(423, "测试捷径：读档后再让核心被毁一次，等失败页出现，再返回主菜单");
+        }
+
+        private static void StepFailureShownAgain(double inStep)
+        {
+            if (!FailurePageShown())
+            {
+                if (inStep > 10)
+                {
+                    Finish("读档后核心再次被毁，10 秒内没出现失败页");
+                }
+                return;
+            }
+            if (inStep < 1)
+            {
+                return;
+            }
             Check(ClickUitk("[HomeValleyFailureHost]", "BackToMenuButton"), "点失败页“返回主菜单”");
             Next(82, "点失败页“返回主菜单”");
         }

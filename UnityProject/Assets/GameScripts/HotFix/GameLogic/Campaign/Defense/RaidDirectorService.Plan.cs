@@ -934,6 +934,7 @@ namespace GameLogic.Campaign.Defense
                     : GameText.Format("raid.warning.notify", dir, target, eta);
             NotificationCenter.Post("raid_warning", text, new Vector3(p.ArriveX, 0f, p.ArriveY));
             GuidanceHooks.Raise(GuidanceHooks.RaidFirstWarning);
+            RaidResultService.OnRaidWarned(s, p); // FG6-DEF-08（FGR-DEF-053）：请求帧末自动存档一次（失败页的突袭前读档点）
             if (p.DepartTick > p.WarnTick)
             {
                 GuidanceHooks.Raise(GuidanceHooks.RaidFirstAssembling);

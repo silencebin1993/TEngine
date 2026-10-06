@@ -538,7 +538,9 @@ namespace GameLogic.Campaign.Economy
                 return false;
             }
             float max = MaxDurability(b.BuildingTypeId);
-            float before = Durability(b);
+            // FG6-DEF-08 复修（FGT-DEF-009）：炮塔 / 防御建筑 / 攻城中的建筑耐久以内核为准——从内核此刻的读数扣，扣完立即推回内核（下面 CommitRecordDurability），
+            // 不留“记录改了、等下一次对账才推”的差值（那样存档时刻会改变结果，且对账间隔里挨的打会被抹掉）。
+            float before = Defense.RepairDroneService.DurabilityOf(state, b);
             b.Health = Mathf.Max(0f, before - amount);
             b.LastHitTick = GameClock.Ticks; // FG6-DEF-03：维修无人机在突袭中先修正在挨打的目标
             Revision++;
@@ -549,12 +551,14 @@ namespace GameLogic.Campaign.Economy
                 {
                     // 核心被打到 0 的后果（失败）属于 FG6 / FG11，这里只记耐久：记极小值（显示 0、受损、可维修），不能记 0——0 会被旧存档兼容规则读成满耐久。
                     b.Health = CoreFloorHealth;
+                    Defense.RepairDroneService.CommitRecordDurability(state, b);
                     NotificationCenter.Post("building_damaged", GameText.Format("building.notify.damaged", NameOf(b), 0, Mathf.RoundToInt(max)),
                         new Vector3(b.Position.x, 0f, b.Position.y));
                     return false;
                 }
                 return HomeValleyPowerGrid.ApplyBuildingDestroyed(state, buildingId);
             }
+            Defense.RepairDroneService.CommitRecordDurability(state, b);
             if (before >= max - 0.01f)
             {
                 GuidanceHooks.Raise(GuidanceHooks.BuildingFirstDamaged);

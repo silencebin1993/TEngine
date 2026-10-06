@@ -1282,6 +1282,12 @@ namespace BinGames.Sim.Combat
             {
                 Gameplay(ref d, CombatEventKind.TurretKill, ks, d.Id[t], 0f, 0f, d.Pos[t], d.Has(t, CombatUnitFlags.Elite) ? (byte)1 : (byte)0, 0);
             }
+            // FG6-DEF-08（突袭结算 / 残骸 / 贡献）：攻城或拦截的敌方单位被击毁——一条不丢的玩法事件（O(1)；匿名单位本身仍按 RemoveOnDeath 移除）。
+            if (d.Siege[t].Role != 0 && d.Faction[t] != (byte)CombatFaction.Player)
+            {
+                Gameplay(ref d, CombatEventKind.SiegeKilled, t, killerId, d.Siege[t].Group, -(float)d.ExtKey[t], d.Pos[t], d.Siege[t].Role,
+                    d.Has(t, CombatUnitFlags.Elite) ? (byte)1 : (byte)0);
+            }
             if (d.Has(t, CombatUnitFlags.RemoveOnDeath))
             {
                 CombatScalars s = d.Scalars[0];

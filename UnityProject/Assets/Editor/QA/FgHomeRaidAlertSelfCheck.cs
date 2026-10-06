@@ -1267,10 +1267,10 @@ namespace GameLogic.EditorTools
                 RaidWarningHudUIToolkit hud = MountHud(out go);
                 hud.Refresh(force: true);
                 HomeRaidAlertView v = hud.Away;
-                bool floorLine = v.PanelVisible && v.CoreText == GameText.Format("raid.away.core_floor", 0, Mathf.RoundToInt(BuildingOps.MaxDurability(HomeValleyLayout.BuildingTypeCore)))
-                                 && v.CoreFillPercent < 1f;
-                // 失败规则的入口：FG6-DEF-08 把“核心被打空”接到这里（DEBT-FG6DEF07-01）；本自检直接调同一个入口，证明远征中也按失败规则处理。
-                HomeValleySoftlockGuard.DebugDestroyCore(s);
+                // FG6-DEF-08（DEBT-FG6DEF07-01 关闭）：攻城真实把核心打到耐久下限 = 归还核心被摧毁（攻城对账 RaidResultService.CheckCore），不再停在“耐久耗尽”——
+                // 这里不再调调试入口，直接断言上面那次真实攻城（远征中、无人观察）已经触发失败规则。
+                bool floorLine = HomeValleySoftlockGuard.IsCoreDestroyed(s) && RaidResultService.IsCoreLost(s) && v.PanelVisible
+                                 && v.CoreText == GameText.Get("raid.away.core_lost");
                 hud.Refresh(force: true);
                 HomeRaidAlertService.Evaluate(s, GameClock.Ticks, out HomeRaidAlert a);
                 bool lost = a.CoreLost && !a.Popup && v.CoreText == GameText.Get("raid.away.core_lost") && !v.JumpButton.enabledSelf && !v.PopupVisible
@@ -1282,9 +1282,9 @@ namespace GameLogic.EditorTools
                                    && HomeRaidAlertService.LastMessage == GameText.Format("raid.away.err_jump", GameText.Get("raid.away.core_lost"));
                 lost &= keyRejected;
                 Expect(floorLine && lost,
-                    $"N4 按失败规则：核心耐久耗尽时远征小窗写“{(floorLine ? GameText.Format("raid.away.core_floor", 0, Mathf.RoundToInt(BuildingOps.MaxDurability(HomeValleyLayout.BuildingTypeCore))) : v.CoreText)}”；" +
+                    $"N4 按失败规则：攻城真实打空核心 → 归还核心被摧毁（{floorLine}，远征小窗写“{v.CoreText}”）；" +
                     $"核心被摧毁（失败规则入口）后不再弹选择、跳回按钮禁用、快捷键 H 同样被拒（{keyRejected}）、写“{v.CoreText}”，家园仍在运行且失败判定成立（失败页的显示条件不看镜头在哪，FG0-ARCH-01；" +
-                    "由攻城真实打空核心 → 失败页的断言随 DEBT-FG6DEF07-01 在 FG6-DEF-08 补）");
+                    "失败页本身与“读取最近自动存档”由 FgRaidResultSelfCheck F 段断言）");
             }
             finally
             {

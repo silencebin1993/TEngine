@@ -408,6 +408,18 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-07：第一次在远征中对家园遇袭做出选择（跳回家园或留在远征队）。</summary>
         public const string RaidAwayFirstChoice = "raid.away_first_choice";
 
+        /// <summary>FG6-DEF-08（FGR-DEF-050）：第一次突袭结算（看结算、贡献与战利品的引导在 FG15-UX-04）。</summary>
+        public const string RaidFirstResult = "raid.first_result";
+
+        /// <summary>FG6-DEF-08：第一次打开突袭历史面板。</summary>
+        public const string RaidResultFirstOpen = "raid.result_first_open";
+
+        /// <summary>FG6-DEF-08（FGR-DEF-051）：第一次有敌人残骸落在战场上（残骸去向的引导）。</summary>
+        public const string RaidFirstWreck = "raid.first_wreck";
+
+        /// <summary>FG6-DEF-08（FGR-DEF-053）：第一次归还核心被突袭摧毁（失败页读自动存档的说明）。</summary>
+        public const string RaidFirstCoreLost = "raid.first_core_lost";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -460,6 +472,7 @@ namespace GameLogic.Core
             SiegeFirstUnfold, SiegeFirstBreach, SiegeFirstRetreat, SiegeFirstDestroyed,
             RaidHudFirstActive, RaidFirstSpectate, RaidFirstAutoPause, DefenseOverviewFirstOpen, DefenseFirstWeakPoint, RosterFirstPatrol,
             RaidAwayFirstAlert, RaidAwayFirstChoice,
+            RaidFirstResult, RaidResultFirstOpen, RaidFirstWreck, RaidFirstCoreLost,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

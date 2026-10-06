@@ -743,6 +743,31 @@ namespace GameLogic.Campaign.Regions
             return AnalysisOpResult.Ok(null);
         }
 
+        /// <summary>FG6-DEF-08（FGR-DEF-051“由机器搬去解析台”）：机器送来的残骸放进残骸缓存，返回放进去的份数（解析台不可用 / 缓存满 = 0，调用方把剩下的退回）。</summary>
+        public static int DepositWrecks(CampaignState state, int amount)
+        {
+            if (state == null || amount <= 0 || !BenchUsable(state))
+            {
+                return 0;
+            }
+            AnalysisBenchState a = Bench(state);
+            int put = Math.Max(0, Math.Min(amount, AnalysisCatalog.WreckBufferCap - a.WreckBuffer));
+            if (put > 0)
+            {
+                a.WreckBuffer += put;
+                HomeInventory.Touch();
+                ItemDistribution.Invalidate();
+            }
+            return put;
+        }
+
+        /// <summary>FG6-DEF-08：解析台残骸缓存还能放几份（解析台不可用 = 0）。</summary>
+        public static int WreckRoom(CampaignState state) =>
+            state != null && BenchUsable(state) ? Math.Max(0, AnalysisCatalog.WreckBufferCap - Bench(state).WreckBuffer) : 0;
+
+        /// <summary>FG6-DEF-08：解析台残骸缓存里现有几份。</summary>
+        public static int WreckBuffered(CampaignState state) => state != null ? Bench(state)?.WreckBuffer ?? 0 : 0;
+
         // ── 传送带入口（DEBT-FG3LOG03-01 解析台部分）──────────────────────────────
 
         public static bool IsBenchPort(string portKey) =>

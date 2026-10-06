@@ -120,8 +120,30 @@ namespace GameLogic.Campaign.Defense
         public static void RestoreAfterLoad(CampaignState state, CombatSite site)
         {
             CombatSite.TurretEvent ??= OnKernelEvent;
+            if (state == null || site == null || site.IsDisposed)
+            {
+                return;
+            }
+            // FG6-DEF-08 复修（FGT-DEF-009）：耐久对账的“上次推送值”按存档里的建筑记录补回（存档不改写记录，任何时刻推送值 = 记录）。
+            // 不补的话读档后第一次对账一律按“内核 → 记录”拉回，读档后、第一次对账前对记录的改动（维修回满）在不存档连续跑里会推给内核，读档后却被盖掉——两条路分叉。
+            foreach (TurretRecord t in All(state))
+            {
+                BuildingRecord tb = t != null ? HomeGridService.FindBuilding(state, t.BuildingId) : null;
+                if (tb != null && site.TryGetTurretState(t.Serial, out TurretUnitState tus) && tus.Alive)
+                {
+                    if (Rt.TryGetValue(t.Serial, out Runtime trt))
+                    {
+                        trt.LastPushedHp = tb.Health;
+                    }
+                    else
+                    {
+                        // 运行时缓存还没建（读档后第一次对账才按蓝图建）：先放一个只带推送值的占位，键对不上，第一次对账重建时把推送值带过去（RuntimeOf）。
+                        Rt[t.Serial] = new Runtime { Key = int.MinValue, LastPushedHp = tb.Health };
+                    }
+                }
+            }
             string id = TurretUplink.ActiveTurretId(state);
-            if (state == null || site == null || site.IsDisposed || string.IsNullOrEmpty(id))
+            if (string.IsNullOrEmpty(id))
             {
                 return;
             }
@@ -884,6 +906,7 @@ namespace GameLogic.Campaign.Defense
                 {
                     // 炮塔耐久归零 = 炮塔座被摧毁（FGR-ECO-013：留下虚影，可以重建；设置保留）。
                     BuildingRecord b = HomeGridService.FindBuilding(state, r.BuildingId);
+                    RaidResultService.NoteLoss(state, RaidResultService.KindTurret, r.BuildingId, b?.Position ?? Vector2.zero); // FG6-DEF-08：突袭结算的损失
                     site.RemoveTurretUnit(serial);
                     if (Rt.TryGetValue(serial, out Runtime rt))
                     {
@@ -904,26 +927,14 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
-        /// <summary>存档前（<see cref="WorldSimulation.SyncAllForSave"/>）：把内核里的耐久写回炮塔座建筑（受伤不丢）。热量 / 补给 / 朝向随家园内核快照，流体随管线快照。</summary>
+        /// <summary>
+        /// 存档前（<see cref="WorldSimulation.SyncAllForSave"/>）。FG6-DEF-08 复修（FGT-DEF-009）：不再把内核耐久写回炮塔座建筑——
+        /// 耐久本身随家园内核快照（受伤不丢），建筑记录保持上一次对账的值；记录被别处改过时已立即推给内核（<see cref="CommitRecord"/>），任何时刻“上次推送值 = 记录”。
+        /// 于是存档对模拟没有副作用（存与不存、存在哪一步都不改变结果），读档按记录补回推送值（<see cref="RestoreAfterLoad"/>）即与不存档逐位一致。
+        /// 热量 / 补给 / 朝向随家园内核快照，流体随管线快照。
+        /// </summary>
         public static void WriteTo(CampaignState state)
         {
-            CombatSite site = HomeSite;
-            if (state == null || site == null || site.IsDisposed)
-            {
-                return;
-            }
-            foreach (TurretRecord r in All(state))
-            {
-                BuildingRecord b = r != null ? HomeGridService.FindBuilding(state, r.BuildingId) : null;
-                if (b != null && site.TryGetTurretState(r.Serial, out TurretUnitState us) && us.Alive)
-                {
-                    b.Health = us.Health;
-                    if (Rt.TryGetValue(r.Serial, out Runtime rt))
-                    {
-                        rt.LastPushedHp = us.Health;
-                    }
-                }
-            }
         }
 
         // ─────────────────────────────── 状态与读数 ───────────────────────────────

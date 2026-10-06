@@ -44,6 +44,7 @@ namespace GameLogic.UI.Kit
         private DropdownField _filter;
         private DropdownField _batch;
         private Button _boost;
+        private Button _history;
         private Label _secList;
         private Label _empty;
         private ListView _list;
@@ -92,6 +93,8 @@ namespace GameLogic.UI.Kit
         public DropdownField FilterField => _filter;
         public DropdownField BatchField => _batch;
         public Button BoostButton => _boost;
+        /// <summary>FG6-DEF-08：“突袭历史”按钮（打开突袭历史与结算面板，盖在总览上面）。</summary>
+        public Button HistoryButton => _history;
         public Button CloseButton => _close;
         public ListView List => _list;
         public int CoverageBuilds { get; private set; }
@@ -170,6 +173,7 @@ namespace GameLogic.UI.Kit
             _filter = root.Q<DropdownField>("DefOvFilter");
             _batch = root.Q<DropdownField>("DefOvBatch");
             _boost = root.Q<Button>("DefOvBoost");
+            _history = root.Q<Button>("DefOvHistory");
             _secList = root.Q<Label>("DefOvSecList");
             _empty = root.Q<Label>("DefOvEmpty");
             _list = root.Q<ListView>("DefOvList");
@@ -187,6 +191,10 @@ namespace GameLogic.UI.Kit
             _close.clicked += () => SetOpen(false);
             _help.clicked += () => Progression.MechanicCodex.Open("codex.defense.overview");
             _boost.clicked += ClickBoost;
+            if (_history != null)
+            {
+                _history.clicked += RaidResultPanelUIToolkit.Open; // FG6-DEF-08（FG06 第 4 节“突袭历史：可以回看结算”）
+            }
             UiTooltip.Attach(_boost, () => new TooltipContent
             {
                 Title = GameText.Get("defov.boost.off"),
@@ -326,6 +334,10 @@ namespace GameLogic.UI.Kit
                 bool on = StandingRuleService.DefenseSupplyBoostConfigured(s, out int serial);
                 _boost.text = on ? GameText.Format("defov.boost.on", StandingRuleService.RuleLabel(s, serial)) : GameText.Get("defov.boost.off");
                 _boost.EnableInClassList("dov-btn-on", on);
+                if (_history != null)
+                {
+                    _history.text = GameText.Get("defov.history");
+                }
             }
             finally
             {

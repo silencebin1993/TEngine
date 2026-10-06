@@ -773,12 +773,13 @@ namespace GameLogic.EditorTools
             float meanDist = ids.Count == 0 ? 0f : ids.Average(id => Site.TryGetSiegeRaider(id, out Vector2 p, out _, out _, out _, out _) ? Vector2.Distance(p, CoreCenter(s)) : 0f);
             core.Health = 1f; // 把核心打到底：下一次对账推进内核
             Seconds(0.6f);
-            Seconds(8f);
+            StepUntil(() => HomeValleySoftlockGuard.IsCoreDestroyed(s), 8); // FG6-DEF-08：打到下限的那次对账判为被摧毁（判定当步核心单位仍在内核、停在下限）
             SiegeStructureRecord cr = SiegeService.FindRecord(s, core.BuildingId);
+            // FG6-DEF-08 起：核心在内核里仍不阵亡（耐久下限，单位还活着），攻城对账读到下限 = 归还核心被摧毁（战役失败，RaidResultService.CheckCore）。
             bool floor = cr != null && Site.TryGetSiegeStructHealth(cr.Serial, out float chp, out _, out bool calive) && calive && chp <= 1f
-                         && core.ConstructionState == BuildingConstructionState.Operational;
+                         && core.ConstructionState == BuildingConstructionState.Destroyed && RaidResultService.IsCoreLost(s);
             Expect(hit && meanDist < d0 && floor,
-                $"C1 突击型直扑归还核心：{d0:F0} 米外展开、平均走近到 {meanDist:F0} 米，核心耐久 {c0:F0} → {Durability(s, core):F1}；核心打到底也不在内核里阵亡（耐久下限，FG6-DEF-08 判失败）（{floor}）");
+                $"C1 突击型直扑归还核心：{d0:F0} 米外展开、平均走近到 {meanDist:F0} 米，核心耐久 {c0:F0} → {Durability(s, core):F1}；核心打到底在内核里不阵亡（耐久下限），攻城对账判为被摧毁、战役失败（FG6-DEF-08）（{floor}）");
 
             // C2 破坏：先打信号设施（电塔）与发电，不先打核心。
             s = NewWorld(7003);

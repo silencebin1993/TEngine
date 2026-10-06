@@ -22,6 +22,8 @@ namespace GameLogic.Campaign
         NoActiveCampaign = 4,
         /// <summary>FG0-SAVE-01：要覆盖的旧文件（Demo / 其他版本 / 读不出头部）另存保留失败，为了不丢存档放弃这次写入。</summary>
         PreserveFailed = 5,
+        /// <summary>FG6-DEF-08（FGR-DEF-053）：归还核心已被摧毁（战役失败）——不再写盘，保住最近的安全存档供失败页读取。</summary>
+        CampaignLost = 6,
     }
 
     [Serializable]

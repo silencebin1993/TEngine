@@ -63,15 +63,21 @@ namespace GameLogic.Campaign.Regions
         /// <summary>预留给未来战斗/围城系统的入口——当前没有真实调用方，仅供离线测试/Play Mode
         /// 手动验证"核心被毁→失败"这条规则本身。命名以 Debug 开头，标记它不是正式玩法入口
         /// （同工程既有的 <c>DebugForceDraft</c> 一类测试专用 API 命名约定）。</summary>
-        public static void DebugDestroyCore(CampaignState state)
+        public static void DebugDestroyCore(CampaignState state) => DestroyCore(state);
+
+        /// <summary>FG6-DEF-08（FGR-DEF-053）：归还核心被摧毁——正式入口（攻城中核心耐久被打到下限，<see cref="Defense.RaidResultService.CheckCore"/>）与调试入口共用。
+        /// 终态：家园冻结、失败页出现、之后不再写存档。返回是否这一次才被摧毁（已经是摧毁状态 / 没有核心时 false）。</summary>
+        public static bool DestroyCore(CampaignState state)
         {
             BuildingRecord core = FindBuilding(state, HomeValleyLayout.BuildingTypeCore);
-            if (core == null)
+            if (core == null || core.ConstructionState == BuildingConstructionState.Destroyed)
             {
-                return;
+                return false;
             }
             core.ConstructionState = BuildingConstructionState.Destroyed;
+            core.Health = 0f;
             BuildingVisualFeed.Mark(core);
+            return true;
         }
 
         private static void Evaluate(CampaignState state, Action<WorkOrderRecord> beginMovement)

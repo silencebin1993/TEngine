@@ -127,10 +127,10 @@ namespace GameLogic.EditorTools
                 Line($"  · 环境：Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，处理器 {SystemInfo.processorType.Trim()}（{SystemInfo.processorCount} 线程），" +
                      $"Burst {(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}；导演 / 编成 / 预警在热更层（Editor 下 Mono JIT，真机 HybridCLR 解释执行），寻路与预热在 AOT 内核；真机另测（FG15-SYS-02）");
                 Step(CheckData);
-                Step(CheckExposureJourney);
+                StepNoCoreLoss(CheckExposureJourney);
                 Step(CheckLevel4AndRearm);
                 Step(CheckWarnedUpgrade);
-                Step(CheckRetreatTrail);
+                StepNoCoreLoss(CheckRetreatTrail);
                 Step(CheckBudgetAndComposition);
                 Step(CheckCounter);
                 Step(CheckIntelForecast);
@@ -145,7 +145,7 @@ namespace GameLogic.EditorTools
                 Step(CheckTimingMatrix);
                 Step(CheckObservedEqualsUnobserved);
                 Step(CheckHud);
-                Step(CheckMapAndPanels);
+                StepNoCoreLoss(CheckMapAndPanels);
                 Step(CheckBackgroundLane);
                 Step(CheckPerformance);
                 foreach (string p in PerfLines)
@@ -172,6 +172,7 @@ namespace GameLogic.EditorTools
                 StrategicMapUIToolkit.Close();
                 IntelService.ResetSessionState();
                 RaidDirectorService.ResetSessionState();
+                RaidResultService.CoreLossDisabledForTests = false;
                 ResearchService.ResetForTests();
                 PowerEnvironment.ResetForTests();
                 HomeValleyPowerGrid.ResetForTests();
@@ -426,7 +427,7 @@ namespace GameLogic.EditorTools
             (int code, string output) = F.RunPython(F.LocateRepo(), "tools/cell_tables/fgdata.py --dump");
             var py = new HashSet<string>(output.Replace("\r", string.Empty).Split('\n')
                 .Where(l => l.StartsWith("RDT\t") || l.StartsWith("RDL\t") || l.StartsWith("RDD\t") || l.StartsWith("RDU\t") || l.StartsWith("RDC\t") || l.StartsWith("RDS\t")
-                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege") && !l.StartsWith("CX\tcodex.raid.hud") && !l.StartsWith("CX\tcodex.raid.away"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1，“突袭 HUD”“远征中家园遇袭”（FG6-DEF-07）归 FgUplinkHudSelfCheck 图鉴段比对
+                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege") && !l.StartsWith("CX\tcodex.raid.hud") && !l.StartsWith("CX\tcodex.raid.away") && !l.StartsWith("CX\tcodex.raid.result"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1，“突袭 HUD”“远征中家园遇袭”（FG6-DEF-07）归 FgUplinkHudSelfCheck 图鉴段比对
                 .Select(l => string.Join("\t", l.Split('\t').Select(Norm))));
             var rt = new HashSet<string>();
             foreach (GameConfig.fg.RaidTrigger r in t.TbRaidTrigger.DataList)
@@ -1871,6 +1872,23 @@ namespace GameLogic.EditorTools
             catch (Exception e)
             {
                 Fail($"{check.Method.Name} 抛异常：{e}");
+            }
+        }
+
+        /// <summary>
+        /// FG6-DEF-08：只给“攻城跑满时间上限撤退”的几段（家园没有防御、攻城跑满 1 游戏小时）关掉“核心打到下限 = 被摧毁”，否则核心先被打掉、家园冻结，测不到撤退；
+        /// 段结束立即复位，其余各段都在正式配置下跑。核心被摧毁由 FgRaidResultSelfCheck F2 覆盖。
+        /// </summary>
+        private static void StepNoCoreLoss(Action check)
+        {
+            RaidResultService.CoreLossDisabledForTests = true;
+            try
+            {
+                Step(check);
+            }
+            finally
+            {
+                RaidResultService.CoreLossDisabledForTests = false;
             }
         }
 

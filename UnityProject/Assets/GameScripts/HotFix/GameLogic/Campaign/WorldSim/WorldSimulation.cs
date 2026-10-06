@@ -162,6 +162,7 @@ namespace GameLogic.Campaign.WorldSim
             Defense.RepairDroneService.ResetSessionState(); // FG6-DEF-03：维修无人机的运行时缓存（候选目标、占用、首次钩子）按新会话重建
             Defense.DefenseService.ResetSessionState(); // FG6-DEF-02：防御建筑的运行时缓存（耐久推送、缺流体原因、护盾 / 陷阱清单）按新会话重建
             Defense.RaidDirectorService.ResetSessionState(); // FG6-DEF-04：突袭导演的会话统计清零（存档里的计划与计时不动）
+            Defense.RaidResultService.ResetSessionState(); // FG6-DEF-08：突袭结算的会话统计与待执行的预警自动存档清零（存档里的结算记录不动）
             Defense.SiegeService.ResetSessionState(); // FG6-DEF-05：攻城的运行时缓存（耐久推送、首次钩子、统计）按新会话重建；存档里的剧场与队伍不动
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
@@ -518,6 +519,8 @@ namespace GameLogic.Campaign.WorldSim
                     // FG6-DEF-05：攻城——到达的队伍展开、溅射每步结算至多 N 格、每 siege.sync_seconds 对账（建筑结构单位、撤退 / 全歼 / 收拢、破墙通知、拦截、驻防交战）；
                     // 只看步序号，与观察无关。逐单位的按职能选目标、流场、破墙、撤退在上面家园内核的一步里（Main/Sim，Burst）。
                     Defense.SiegeService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG6-DEF-08：残骸去向——每 raid.result.route_seconds 把仓库里的残骸开成送往解析台 / 回收站的送货单；只看步序号，与观察无关。
+                    Defense.RaidResultService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     CurrentSiteId = HomeValleyLayout.RegionId;
                 }
                 // FG4-ECO-01：物品库存采样（净速率），每 eco.flow.sample_seconds 游戏秒一次、只看步序号，与观察无关，O(物品种类)。

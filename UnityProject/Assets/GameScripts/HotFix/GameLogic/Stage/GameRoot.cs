@@ -384,6 +384,36 @@ namespace GameLogic.Stage
             GameModule.UI.ShowUIAsync<MainMenuUI>();
         }
 
+        /// <summary>
+        /// FG6-DEF-08（FGR-DEF-053“提供读取自动存档的选项”）：失败页的“读取最近自动存档”——收起世界（同 <see cref="EndRun"/> 的收摊，但不回主菜单），
+        /// 走与主菜单“读取”同一条恢复编排（<see cref="CampaignRestoreOrchestrator.Restore"/>）读回本局的存档槽，再按存档所在区域恢复世界。
+        /// 读档失败时回到主菜单（存档列表里能看到原因、能改读备份）。返回 <see cref="RestoreResult"/>（失败原因供失败页提示）。
+        /// </summary>
+        public static RestoreResult ReloadActiveSlot()
+        {
+            int slot = CampaignSession.ActiveSlotIndex;
+            UI.Kit.UiKitRuntime.CloseWorldUi();
+            WorldSimulation.UnloadAll();
+            _director?.EndCurrent();
+            CampaignSession.Clear();
+            GameClock.ResetSession();
+            RestoreResult result = slot >= 0
+                ? CampaignRestoreOrchestrator.Restore(slot)
+                : new RestoreResult(RestoreOutcome.Fail, RestoreStep.VersionAndChecksum, "没有活动存档槽", null, false, null);
+            if (!result.Success)
+            {
+                Log.Warning($"[GameRoot] 失败页读取自动存档失败：槽位 {slot}，{result.FailedStep}：{result.Message}");
+                GameModule.UI.ShowUIAsync<MainMenuUI>();
+                return result;
+            }
+            CampaignSession.Set(slot, result.State);
+            Campaign.Signal.FirmwareLibrary.OnCampaignEntered(result.State);
+            Log.Info($"[GameRoot] 失败页读取自动存档：槽位 {slot}，campaignId={result.State.CampaignId}");
+            ResumeCampaign();
+            SaveContentReconciler.RaiseLoadNotices(result.Notices);
+            return result;
+        }
+
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
         /// <summary>
         /// LookDev 对照沙盒入口（story-006）：抑制刷怪/阶段推进/玩家真实网格装配 Tick。
@@ -422,6 +452,8 @@ namespace GameLogic.Stage
             _director.Update(dt);
             // FG0-ARCH-01：整个世界（家园 + 远征地点 + 行进中的队伍）按统一时钟的固定步同时推进；镜头只决定玩家看哪里。
             WorldSimulation.Frame(Time.unscaledDeltaTime);
+            // FG6-DEF-08（FGR-DEF-053）：突袭预警请求的自动存档在帧末执行（不在模拟步中间写盘）；核心被摧毁后不再存。
+            Campaign.Defense.RaidResultService.FrameUpdate();
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();

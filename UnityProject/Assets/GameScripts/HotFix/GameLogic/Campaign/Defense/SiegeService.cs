@@ -112,6 +112,7 @@ namespace GameLogic.Campaign.Defense
         {
             CombatSite.SiegeStructEvent ??= OnStructKilled;
             CombatSite.SiegeExitEvent ??= OnUnitExited;
+            CombatSite.SiegeKillEvent ??= RaidResultService.OnKilled; // FG6-DEF-08：攻城 / 拦截单位被击毁 → 结算、残骸、贡献、靶场解锁
             if (CombatSite.SiegeRoleVisuals == null)
             {
                 CombatSite.SiegeRoleVisuals = SiegeCatalog.BuildRoleVisuals();
@@ -201,6 +202,11 @@ namespace GameLogic.Campaign.Defense
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             SyncCount++;
             SiegeState st = StateOf(state);
+            // FG6-DEF-08（FGR-DEF-053）：归还核心在内核里的耐久到下限 = 被摧毁（战役失败；家园随即冻结，之后的对账不再有意义）。
+            if (st.TheaterActive && RaidResultService.CheckCore(state, site))
+            {
+                return;
+            }
             CheckGroups(state, site);
             DespawnOrphans(state, site);
             bool any = false;
@@ -256,6 +262,7 @@ namespace GameLogic.Campaign.Defense
             ApplyExits(state, site);
             SyncStructures(state, site);
             ReactionAttribution.BeginRaid(state, g.GroupId);
+            RaidResultService.Begin(state, g, site); // FG6-DEF-08（FGR-DEF-050）：开这支队伍的结算（记下伤害读数、预警 / 到达 / 展开的过程）
             UnfoldCount++;
             TEngine.Log.Info($"[SiegeService] 突袭 {g.GroupId}（{g.Faction}）在 ({gather.X},{gather.Y}) 展开 {n} 台，第 {GameClock.Ticks} 步");
             Hook(GuidanceHooks.SiegeFirstUnfold);
@@ -399,7 +406,8 @@ namespace GameLogic.Campaign.Defense
                 EffectRange = u.HealRange,
                 CycleSeconds = u.HealCooldown,
             });
-            return site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult);
+            return site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult,
+                RaidCatalog.KindOf(def));
         }
 
         /// <summary>离 <paramref name="from"/> 最近的敌方可走格（按切比雪夫环、固定顺序；找不到 = 原格）。</summary>
@@ -636,6 +644,7 @@ namespace GameLogic.Campaign.Defense
             g.SiegeRetreatTick = GameClock.Ticks;
             RetreatOrders++;
             Hook(GuidanceHooks.SiegeFirstRetreat);
+            RaidResultService.OnRetreatOrdered(state, g, reason); // FG6-DEF-08：结算的过程时间线
             int pct = g.UnfoldedCount > 0 ? Mathf.RoundToInt(100f * lost / g.UnfoldedCount) : 0;
             double stayed = g.ArrivedAtTick >= 0 ? Math.Max(0, GameClock.Ticks - g.ArrivedAtTick) / (double)GameClock.StepHz : 0;
             string text = reason == ReasonLosses
@@ -671,6 +680,7 @@ namespace GameLogic.Campaign.Defense
         /// <summary>内核里这支队伍没有单位了：有离场的 → 并回行进队伍沿原路回据点；没有 → 被全歼。</summary>
         private static void Finish(CampaignState state, CombatSite site, TransitGroupRecord g)
         {
+            RaidResultService.End(state, g); // FG6-DEF-08（FGR-DEF-050“结束条件：敌人全灭或撤退”）：在队伍并回行进 / 被移除之前结算
             if (g.ExitedCount > 0)
             {
                 g.UnitCount = g.ExitedCount;
@@ -728,38 +738,26 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
-            // 读档时内核快照里没有的建筑结构单位（例如旧快照）：下一次对账补上；记录在案、内核里没有的单位不在这里补，免得改变读档那一刻的内核状态。
-        }
-
-        /// <summary>存档前：建筑结构单位在内核里的耐久写回建筑（单位本身随内核快照）。</summary>
-        public static void WriteTo(CampaignState state)
-        {
-            CombatSite site = HomeSite;
-            SiegeState st = StateOf(state);
-            if (state == null || site == null || site.IsDisposed || st == null)
-            {
-                return;
-            }
+            // FG6-DEF-08（FGT-DEF-009 修复）：耐久对账的“上次推给内核的值”按存档里的建筑记录补回（存档不改写记录，任何时刻推送值 = 记录）。
+            // 不补的话读档后第一次对账一律按“内核 → 记录”拉回：读档后才发生的维修（记录变了）在不存档连续跑里会推给内核，读档后却被内核的旧耐久盖掉——两条路分叉。
             foreach (SiegeStructureRecord r in st.Structures)
             {
                 BuildingRecord b = r != null ? HomeGridService.FindBuilding(state, r.BuildingId) : null;
-                if (b == null)
+                if (b != null)
                 {
-                    continue;
-                }
-                if (site.TryGetSiegeStructHealth(r.Serial, out float hp, out _, out bool alive) && alive && IsBuilt(b))
-                {
-                    float write = b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore && hp <= CombatSiegeConst.HealthFloor + 1e-6f ? BuildingOps.CoreFloorHealth : hp;
-                    if (Mathf.Abs(BuildingOps.Durability(b) - write) > 0.01f)
-                    {
-                        b.Health = write; // 有效耐久没变（记录里存着超过上限的旧值也算满）时不改记录
-                    }
-                    if (Rt.TryGetValue(r.Serial, out StructRt rt))
-                    {
-                        rt.LastPushedHp = b.Health;
-                    }
+                    RuntimeOf(r.Serial).LastPushedHp = BuildingOps.Durability(b);
                 }
             }
+            // 读档时内核快照里没有的建筑结构单位（例如旧快照）：下一次对账补上；记录在案、内核里没有的单位不在这里补，免得改变读档那一刻的内核状态。
+        }
+
+        /// <summary>
+        /// 存档前。FG6-DEF-08 复修（FGT-DEF-009）：不再把内核耐久写回建筑——建筑结构单位连同耐久随内核快照，记录保持上一次对账的值
+        /// （被别处改过时已立即推给内核，<see cref="CommitRecord"/>），存档对模拟没有副作用；读档按记录补回“上次推送值”（<see cref="RestoreAfterLoad"/>）。
+        /// 原来在这里写回：存档那一刻改了记录和推送值，存在哪一步（随倍速 / 帧率变）就会改变之后的对账与维修推送。
+        /// </summary>
+        public static void WriteTo(CampaignState state)
+        {
         }
 
         /// <summary>自检 / 确定性对照：攻城域与正在攻城的队伍的规范化快照。</summary>

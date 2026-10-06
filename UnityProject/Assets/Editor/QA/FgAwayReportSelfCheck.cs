@@ -641,11 +641,14 @@ namespace GameLogic.EditorTools
             int destroyedNotes = NoteCount("building_destroyed") - destroyedNotes0;
             bool raidPos = raid != null && raid.HasLocation && a.Raid != null && Mathf.Abs(raid.X - (float)a.Raid.TargetX) < 0.5f && Mathf.Abs(raid.Z - (float)a.Raid.TargetY) < 0.5f;
             bool rule = a.War != null && r.RulesTotal >= 1 && r.Rules.Any(e => e.Key == "rules.log.war_on" && e.Rule == a.War.Serial);
-            AwayLine raidLine = lines.FirstOrDefault(l => l.Section == "raid" && l.IsEntry);
+            // FG6-DEF-08 起突袭段先列这一波的结算（标题 / 过程 / 损失 / 贡献，点开看完整结算），通知转来的“突袭到达”条目在后面：按位置找那一条。
+            AwayLine raidLine = lines.FirstOrDefault(l => l.Section == "raid" && l.IsEntry && l.Action == AwayLineAction.Locate && a.Raid != null
+                                                         && Mathf.Abs(l.Pos.x - (float)a.Raid.TargetX) < 0.5f && Mathf.Abs(l.Pos.z - (float)a.Raid.TargetY) < 0.5f);
+            bool settlement = lines.Any(l => l.Section == "raid" && l.Action == AwayLineAction.RaidResult);
             AwayLine ruleLine = lines.FirstOrDefault(l => l.Section == "rules" && l.IsEntry && l.Text.Contains("R" + a.War?.Serial));
             Expect(destroyed.Length == destroyedNotes && destroyed.Length >= 1 && destroyed.All(e => e.Section == "buildings" && e.HasLocation) && raidPos && rule
-                   && raidLine != null && raidLine.Action == AwayLineAction.Locate && ruleLine != null && ruleLine.Action == AwayLineAction.Rules,
-                $"B6 事件：建筑被摧毁 {destroyed.Length} 条 = 离家期间的“建筑被摧毁”通知 {destroyedNotes} 条（带位置）；突袭到达带位置（{raidPos}）“{raidLine?.Text}”；" +
+                   && raidLine != null && raidLine.Action == AwayLineAction.Locate && ruleLine != null && ruleLine.Action == AwayLineAction.Rules && settlement,
+                $"B6 事件：建筑被摧毁 {destroyed.Length} 条 = 离家期间的“建筑被摧毁”通知 {destroyedNotes} 条（带位置）；突袭到达带位置（{raidPos}）“{raidLine?.Text}”，突袭段先列这一波的结算（{settlement}）；" +
                 $"常驻规则“战时预案”的动作进报告（{rule}）“{ruleLine?.Text}”");
             // 每一条都能点击：条目都有动作；标题与空状态不是条目；全部文字没有未解析的文本键。
             bool everyEntry = lines.All(l => l.IsEntry || l.Cls == "ar-row-title" || l.Cls == "ar-row-dim");

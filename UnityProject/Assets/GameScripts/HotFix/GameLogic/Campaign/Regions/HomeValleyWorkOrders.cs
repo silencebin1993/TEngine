@@ -2832,6 +2832,7 @@ namespace GameLogic.Campaign.Regions
                 Economy.ProductionStats.RecordUnits(state, Economy.ItemCatalog.Find(order.ReservedItemId), order.ReservedItemAmount, produced: false);
                 order.ReservedItemAmount = 0;
                 building.Health = Economy.BuildingOps.MaxDurability(building.BuildingTypeId);
+                Defense.RepairDroneService.CommitRecordDurability(state, building); // FG6-DEF-08 复修（FGT-DEF-009）：炮塔 / 防御 / 攻城中的建筑立即推给内核，不留待推差值
                 BuildingVisualFeed.Mark(building);
                 Economy.BuildingOps.Touch();
                 order.State = WorkOrderState.Completed;

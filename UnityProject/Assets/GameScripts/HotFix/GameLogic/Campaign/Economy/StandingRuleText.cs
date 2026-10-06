@@ -366,6 +366,11 @@ namespace GameLogic.Campaign.Economy
                     ? GameText.Format("roster.trace.repair", BuildingLabel(state, o.TargetId), o.Duration > 0f ? Math.Min(100, (int)Math.Round(o.Progress / o.Duration * 100f)) : 0)
                     : GameText.Format("roster.trace.garrison", BuildingLabel(state, o.TargetId));
             }
+            if (o != null && o.IssuerId == Defense.RaidResultService.DeliverIssuer)
+            {
+                // FG6-DEF-08（FGR-BASE-020）：按“残骸去向”派的送货单写明来源。
+                return GameText.Format("raid.result.trace.wreck", BuildingLabel(state, o.TargetId));
+            }
             if (o == null || o.RuleSerial <= 0)
             {
                 return null;

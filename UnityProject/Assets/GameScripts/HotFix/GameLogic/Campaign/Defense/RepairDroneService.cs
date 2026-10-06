@@ -684,6 +684,30 @@ namespace GameLogic.Campaign.Defense
             return BuildingOps.Durability(b);
         }
 
+        /// <summary>
+        /// FG6-DEF-08 复修（FGT-DEF-009）：建筑记录的耐久被别处直接改过之后调用——炮塔 / 防御建筑 / 攻城期间进了内核的建筑立即把记录推给内核（各自的 CommitRecord），
+        /// 其余建筑没有内核单位，什么也不做。调用方：<see cref="BuildingOps.ApplyDamage"/>、机器维修工单完工（HomeValleyWorkOrders）。O(1)。
+        /// </summary>
+        public static void CommitRecordDurability(CampaignState state, BuildingRecord b)
+        {
+            if (state == null || b == null)
+            {
+                return;
+            }
+            if (TurretService.IsTurret(b))
+            {
+                TurretService.CommitRecord(state, b);
+            }
+            else if (DefenseService.IsDefense(b))
+            {
+                DefenseService.CommitRecord(state, b);
+            }
+            else if (SiegeService.IsSiegeStructure(state, b))
+            {
+                SiegeService.CommitRecord(state, b);
+            }
+        }
+
         /// <summary>目标键 → 建筑 ID（每步校验目标时不分配字符串）。</summary>
         private static readonly Dictionary<string, string> TargetIdCache = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -1180,6 +1204,7 @@ namespace GameLogic.Campaign.Defense
             BuildingRecord b = HomeGridService.FindBuilding(state, rec.BuildingId);
             string text = GameText.Format("drone.notify.lost", b != null ? BuildingOps.NameOf(b) : rec.BuildingId);
             Vector2 at = new Vector2(d.X, d.Y);
+            RaidResultService.NoteLoss(state, RaidResultService.KindDrone, rec.BuildingId, at); // FG6-DEF-08：突袭结算的损失（记所属维修站）
             if (GameClock.Ticks >= rec.NotifyTick)
             {
                 rec.NotifyTick = GameClock.TickAfter(RepairDroneCatalog.NotifyCooldownSeconds);

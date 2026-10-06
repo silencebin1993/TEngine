@@ -2216,9 +2216,16 @@ namespace GameLogic.Campaign.Economy
                 return 0;
             }
             int put = 0;
-            if (ProductionService.TryGet(state, target.BuildingId, out ProductionService.Producer p))
+            if (target.BuildingTypeId == HomeValleyLayout.BuildingTypeAnalysisBench && itemId == AnalysisCatalog.WreckId)
             {
-                int room = Math.Max(0, ProductionService.InCapacity(p, item) - ProductionService.Count(p.Rec.In, itemId));
+                // FG6-DEF-08（FGR-DEF-051）：残骸送到解析台 = 放进残骸缓存（放不下的退回仓库）。
+                put = HomeValleyAnalysis.DepositWrecks(state, amount);
+            }
+            else if (ProductionService.TryGet(state, target.BuildingId, out ProductionService.Producer p))
+            {
+                // FG6-DEF-08 复修 P2：回收站的输入各种固体共用一个容量（与传送带进料 InCapacity − Total 同口径），其余生产建筑按同种物品数。
+                int used = p.Def != null && p.Def.Mode == ProducerMode.Recycler ? ProductionService.Total(p.Rec.In) : ProductionService.Count(p.Rec.In, itemId);
+                int room = Math.Max(0, ProductionService.InCapacity(p, item) - used);
                 put = Math.Min(room, amount);
                 if (put > 0)
                 {

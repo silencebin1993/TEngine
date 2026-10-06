@@ -512,6 +512,10 @@ namespace GameLogic.UI.Kit
                 case AwayLineAction.Notifications:
                     NotificationHudUIToolkit.OpenCenter();
                     break;
+                case AwayLineAction.RaidResult:
+                    // FG6-DEF-08：突袭段的标题 / 损失行 → 突袭历史面板里这一份结算。
+                    RaidResultPanelUIToolkit.OpenResult(int.TryParse(l.Arg, out int serial) ? serial : 0);
+                    break;
             }
             return true;
         }

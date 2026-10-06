@@ -617,6 +617,10 @@ namespace BinGames.Sim.Combat
         TurretKill = 18,
         /// <summary>FG6-DEF-05（FGR-DEF-032）：撤退中的攻城单位走到集结点、离开家园（内核当场移除，不算阵亡）。Unit=单位，Other=所属队伍键（<see cref="CombatSiegeUnit.Group"/>）。</summary>
         SiegeExited = 19,
+        /// <summary>FG6-DEF-08（FGR-DEF-050 / 051）：攻城 / 拦截单位（<see cref="CombatSiegeUnit.Role"/> ≠ 0 的敌方单位）被击毁——结算、残骸与贡献按它记（走玩法事件，不丢）。
+        /// Unit=阵亡者（随后按 <see cref="CombatUnitFlags.RemoveOnDeath"/> 移除），Other=击杀者（0 = 来源不明），Code=职能，Code2=1 表示精英，
+        /// Value=所属队伍键（<see cref="CombatSiegeUnit.Group"/>），Value2=阵亡者外部键的相反数（热更层从中解出敌人种类），Pos=阵亡位置。</summary>
+        SiegeKilled = 20,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>

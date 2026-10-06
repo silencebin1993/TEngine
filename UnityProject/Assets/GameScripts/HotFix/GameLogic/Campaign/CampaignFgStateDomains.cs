@@ -1000,6 +1000,9 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-05（FG06 FGR-DEF-030～032）：攻城——攻城剧场矩形、进了战斗内核的建筑（序号 ↔ 建筑 ID）、施工虚影的溅射伤害、破墙通知。
         /// 唯一写入口 <see cref="Defense.SiegeService"/>。只加字段、不升域版本：旧档没有 = 没有进行中的攻城。</summary>
         public SiegeState Siege = new SiegeState();
+        /// <summary>FG6-DEF-08（FG06 FGR-DEF-050～053）：突袭结算（伤害 / 击毁 / 反应占比 / 损失 / 贡献 / 战利品 / 时间线）、残骸去向、核心被摧毁与预警自动存档。
+        /// 唯一写入口 <see cref="Defense.RaidResultService"/>。只加字段、不升域版本：旧档没有 = 没有结算记录。</summary>
+        public RaidResultState Results = new RaidResultState();
     }
 
     /// <summary>

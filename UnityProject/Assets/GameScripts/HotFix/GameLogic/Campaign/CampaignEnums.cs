@@ -40,6 +40,8 @@ namespace GameLogic.Campaign
         BossEngageEnter = 6,
         /// <summary>自动点 6/6：导航信标启动前。TODO(ER7-BEACON-01)。</summary>
         BeaconLaunchEnter = 7,
+        /// <summary>FG6-DEF-08（FGR-DEF-053“提供读取自动存档的选项”）：突袭预警发出时（帧末、同一波一次），给核心被摧毁后的失败页一个突袭前的读档点。</summary>
+        RaidWarning = 8,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>

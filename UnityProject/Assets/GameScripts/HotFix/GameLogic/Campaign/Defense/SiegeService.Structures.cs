@@ -104,6 +104,35 @@ namespace GameLogic.Campaign.Defense
             return next - hp;
         }
 
+        /// <summary>
+        /// FG6-DEF-08 复修（FGT-DEF-009）：攻城期间进了内核的建筑，记录耐久被别处直接改过（机器维修完工回满、<see cref="BuildingOps.ApplyDamage"/>）之后立即推给内核并同步“上次推送值”，
+        /// 与对账里“记录被别处改过 → 推给内核”同一口径（核心不低于耐久下限）。不在内核里 / 上限对不上时不推。O(1)。
+        /// </summary>
+        public static bool CommitRecord(CampaignState state, BuildingRecord b)
+        {
+            SiegeStructureRecord r = FindRecord(state, b?.BuildingId);
+            CombatSite site = HomeSite;
+            if (r == null || site == null || site.IsDisposed || !IsBuilt(b) || !site.TryGetSiegeStructHealth(r.Serial, out _, out float kernelMax, out bool alive) || !alive)
+            {
+                return false;
+            }
+            float maxHp = BuildingOps.MaxDurability(b.BuildingTypeId);
+            if (Mathf.Abs(kernelMax - maxHp) > 0.01f)
+            {
+                return false;
+            }
+            bool core = b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore;
+            float recHp = BuildingOps.Durability(b);
+            float hp = Mathf.Clamp(recHp, core ? CombatSiegeConst.HealthFloor : 1f, maxHp);
+            site.SetSiegeStructHealth(r.Serial, hp, maxHp);
+            RuntimeOf(r.Serial).LastPushedHp = hp;
+            if (Mathf.Abs(recHp - hp) > 0.01f)
+            {
+                b.Health = hp;
+            }
+            return true;
+        }
+
         private static bool InTheater(SiegeState st, BuildingRecord b, out int2 lo, out int2 hi)
         {
             FootScratch.Clear();
@@ -337,6 +366,7 @@ namespace GameLogic.Campaign.Defense
             if (HomeValleyPowerGrid.ApplyBuildingDestroyed(state, b.BuildingId))
             {
                 st.TotalDestroyedBuildings++;
+                RaidResultService.NoteLoss(state, RaidResultService.KindBuilding, b.BuildingId, b.Position); // FG6-DEF-08：突袭结算的损失
             }
         }
 

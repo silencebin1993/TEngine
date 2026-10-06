@@ -15,9 +15,13 @@ namespace GameLogic.Campaign
     /// 区域切换中间写入"）之后，直接调用 <see cref="SaveAuto"/>，不做自动扫描/定时轮询。</summary>
     public static class CampaignAutoSaveService
     {
+        /// <summary>FG6-DEF-08：因核心已被摧毁而拒绝的存档次数（本进程；自检读）。</summary>
+        public static int BlockedSaves { get; private set; }
+
         /// <summary>在当前 <see cref="CampaignSession"/> 的活动槽位上执行一次自动存档。
         /// 没有活动战役时直接返回 <see cref="SaveOutcome.NoActiveCampaign"/>，不抛异常、不新建战役。</summary>
-        public static SaveResult SaveAuto(SaveReason reason)
+        /// <param name="toast">false = 调用方自己发更具体的提示（FG6-DEF-08 突袭预警自动存档），不再发通用的“自动存档”轻提示，免得一次存档两条提示。</param>
+        public static SaveResult SaveAuto(SaveReason reason, bool toast = true)
         {
             if (!CampaignSession.HasActiveCampaign)
             {
@@ -26,7 +30,7 @@ namespace GameLogic.Campaign
             }
 
             SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason);
-            if (result.Success)
+            if (result.Success && toast)
             {
                 // ER8-CONTENT-01：本作只有自动存档（SaveReason.Manual 仍是预留），每次写盘成功给一条轻提示，
                 // 玩家据此知道“现在退出不会丢进度”。
@@ -48,6 +52,15 @@ namespace GameLogic.Campaign
             if (state == null)
             {
                 return new SaveResult(SaveOutcome.NoActiveCampaign, "没有活动战役，跳过存档。");
+            }
+            // FG6-DEF-08 复修（P2 必败档）：核心的内核耐久已到下限、只是还没轮到攻城对账判定（≤ siege.sync_seconds）时同样拒绝——
+            // 否则这份档读回后第一次对账即判失败，失败页的“读取最近自动存档”会读到一份必败档。
+            if (Regions.HomeValleySoftlockGuard.IsCoreDestroyed(state) || Defense.RaidResultService.CoreAtFloor(state))
+            {
+                // FG6-DEF-08（FGR-DEF-053）：核心被摧毁之后不再写任何存档（自动档与“保存并返回主菜单”同一入口），失败页的“读取最近自动存档”才读得到突袭前的安全档。
+                BlockedSaves++;
+                TEngine.Log.Info($"[CampaignAutoSaveService] 归还核心已被摧毁，拒绝存档（{reason}）。");
+                return new SaveResult(SaveOutcome.CampaignLost, Localization.GameText.Get("save.blocked_core_lost"));
             }
             WorldSim.WorldSimulation.SyncAllForSave();
             MachineRegistry.ExportToCampaignState(state);
