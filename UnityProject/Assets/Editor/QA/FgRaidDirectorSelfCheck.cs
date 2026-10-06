@@ -427,7 +427,7 @@ namespace GameLogic.EditorTools
             (int code, string output) = F.RunPython(F.LocateRepo(), "tools/cell_tables/fgdata.py --dump");
             var py = new HashSet<string>(output.Replace("\r", string.Empty).Split('\n')
                 .Where(l => l.StartsWith("RDT\t") || l.StartsWith("RDL\t") || l.StartsWith("RDD\t") || l.StartsWith("RDU\t") || l.StartsWith("RDC\t") || l.StartsWith("RDS\t")
-                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege") && !l.StartsWith("CX\tcodex.raid.hud") && !l.StartsWith("CX\tcodex.raid.away") && !l.StartsWith("CX\tcodex.raid.result"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1，“突袭 HUD”“远征中家园遇袭”（FG6-DEF-07）归 FgUplinkHudSelfCheck 图鉴段比对
+                            || (l.StartsWith("CX\tcodex.raid.") && !l.StartsWith("CX\tcodex.raid.siege") && !l.StartsWith("CX\tcodex.raid.hud") && !l.StartsWith("CX\tcodex.raid.away") && !l.StartsWith("CX\tcodex.raid.result") && !l.StartsWith("CX\tcodex.raid.difficulty"))) // 图鉴“攻城行为”归 FgSiegeSelfCheck A1，“突袭 HUD”“远征中家园遇袭”（FG6-DEF-07）归 FgUplinkHudSelfCheck 图鉴段比对；“难度与突袭强度”（FG6-DEF-09）归 FgDifficultySelfCheck A1
                 .Select(l => string.Join("\t", l.Split('\t').Select(Norm))));
             var rt = new HashSet<string>();
             foreach (GameConfig.fg.RaidTrigger r in t.TbRaidTrigger.DataList)
@@ -440,7 +440,9 @@ namespace GameLogic.EditorTools
             }
             foreach (GameConfig.fg.RaidDifficulty r in t.TbRaidDifficulty.DataList)
             {
-                rt.Add(string.Join("\t", "RDD", r.Id, r.StoryOnly, Cell(r.Scale), Cell(r.Frequency), Cell(r.Warning), r.NameKey));
+                // FG6-DEF-09 在末尾追加了敌人耐久 / 伤害、静默夜间隔、事件频率、说明、自定义、顺序七列。
+                rt.Add(string.Join("\t", "RDD", r.Id, r.StoryOnly, Cell(r.Scale), Cell(r.Frequency), Cell(r.Warning), r.NameKey,
+                    Cell(r.EnemyHp), Cell(r.EnemyDamage), r.SilentNightDays, Cell(r.EventRate), r.DescKey, r.Custom, r.SortOrder));
             }
             foreach (GameConfig.fg.RaidUnit r in t.TbRaidUnit.DataList)
             {

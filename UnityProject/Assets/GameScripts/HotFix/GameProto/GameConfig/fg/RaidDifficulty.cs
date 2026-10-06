@@ -25,6 +25,13 @@ public sealed partial class RaidDifficulty : Luban.BeanBase
         Frequency = _buf.ReadFloat();
         Warning = _buf.ReadFloat();
         NameKey = _buf.ReadString();
+        EnemyHp = _buf.ReadFloat();
+        EnemyDamage = _buf.ReadFloat();
+        SilentNightDays = _buf.ReadInt();
+        EventRate = _buf.ReadFloat();
+        DescKey = _buf.ReadString();
+        Custom = _buf.ReadInt();
+        SortOrder = _buf.ReadInt();
     }
 
     public static RaidDifficulty DeserializeRaidDifficulty(ByteBuf _buf)
@@ -56,6 +63,34 @@ public sealed partial class RaidDifficulty : Luban.BeanBase
     /// 难度名称文本键
     /// </summary>
     public readonly string NameKey;
+    /// <summary>
+    /// 敌人耐久倍率(突袭部队展开成战斗单位时乘到生命上;FG16 第 3 节“敌人耐久和伤害”)
+    /// </summary>
+    public readonly float EnemyHp;
+    /// <summary>
+    /// 敌人伤害倍率(突袭部队展开时乘到武器伤害上)
+    /// </summary>
+    public readonly float EnemyDamage;
+    /// <summary>
+    /// 静默夜间隔(游戏日;静默夜系统 FG7-ENV-02 读取)
+    /// </summary>
+    public readonly int SilentNightDays;
+    /// <summary>
+    /// 事件频率倍率(事件导演 FG12-EVT-01 读取;FG16“少 / 标准 / 多”)
+    /// </summary>
+    public readonly float EventRate;
+    /// <summary>
+    /// 难度一句话说明文本键(新游戏 / 难度面板)
+    /// </summary>
+    public readonly string DescKey;
+    /// <summary>
+    /// 1=自定义:突袭频率 / 规模 / 预警由玩家用滑条设定(存档 RaidDifficultyState),本行三个倍率是滑条初值
+    /// </summary>
+    public readonly int Custom;
+    /// <summary>
+    /// 界面上的顺序
+    /// </summary>
+    public readonly int SortOrder;
    
     public const int __ID__ = -125020206;
     public override int GetTypeId() => __ID__;
@@ -73,6 +108,13 @@ public sealed partial class RaidDifficulty : Luban.BeanBase
         + "frequency:" + Frequency + ","
         + "warning:" + Warning + ","
         + "nameKey:" + NameKey + ","
+        + "enemyHp:" + EnemyHp + ","
+        + "enemyDamage:" + EnemyDamage + ","
+        + "silentNightDays:" + SilentNightDays + ","
+        + "eventRate:" + EventRate + ","
+        + "descKey:" + DescKey + ","
+        + "custom:" + Custom + ","
+        + "sortOrder:" + SortOrder + ","
         + "}";
     }
 }

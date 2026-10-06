@@ -1003,6 +1003,45 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-08（FG06 FGR-DEF-050～053）：突袭结算（伤害 / 击毁 / 反应占比 / 损失 / 贡献 / 战利品 / 时间线）、残骸去向、核心被摧毁与预警自动存档。
         /// 唯一写入口 <see cref="Defense.RaidResultService"/>。只加字段、不升域版本：旧档没有 = 没有结算记录。</summary>
         public RaidResultState Results = new RaidResultState();
+        /// <summary>FG6-DEF-09（FG06 FGR-DEF-060；FG15 FGR-SYS-081）：难度——开局难度、自定义滑条的三个倍率、游戏中途的修改记录（成就判定用）。
+        /// 当前难度 ID 仍是 <see cref="CampaignState.DifficultyId"/>（存档卡显示它）。唯一写入口 <see cref="Defense.DifficultyService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 开局难度按当前难度补、没有修改记录、自定义倍率按 ×1。</summary>
+        public RaidDifficultyState Difficulty = new RaidDifficultyState();
+    }
+
+    /// <summary>FG6-DEF-09：难度状态（见 <see cref="RaidState.Difficulty"/>）。</summary>
+    [Serializable]
+    public sealed class RaidDifficultyState
+    {
+        /// <summary>开局时的难度 ID（新建战役时写入；旧档读进来时按当前难度补）。</summary>
+        public string StartDifficultyId = string.Empty;
+        /// <summary>自定义难度的突袭频率 / 规模 / 预警时间倍率（按 difficulty.custom_step 取整；只在 DifficultyId = Custom 时生效）。</summary>
+        public float CustomFrequency = 1f;
+        public float CustomScale = 1f;
+        public float CustomWarning = 1f;
+        /// <summary>是否曾经离开过开局难度（修改记录被截断后仍永久保留；“全程严酷”成就据此判定）。</summary>
+        public bool EverLeftStart;
+        /// <summary>修改总次数（含已截断的更早记录）。</summary>
+        public int ChangeCount;
+        /// <summary>最近的修改记录（最多 difficulty.history_max 条，旧的在前）。</summary>
+        public DifficultyChangeRecord[] Changes = Array.Empty<DifficultyChangeRecord>();
+    }
+
+    /// <summary>FG6-DEF-09：一次难度修改。</summary>
+    [Serializable]
+    public sealed class DifficultyChangeRecord
+    {
+        public long Tick;
+        public string FromId = string.Empty;
+        public string ToId = string.Empty;
+        public float FromFrequency;
+        public float FromScale;
+        public float FromWarning;
+        public float ToFrequency;
+        public float ToScale;
+        public float ToWarning;
+        /// <summary>这次修改取消了几波还没发预警的普通突袭（改成建造者时）。</summary>
+        public int CancelledRaids;
     }
 
     /// <summary>
@@ -1977,6 +2016,7 @@ namespace GameLogic.Campaign
             }
             Defense.RaidDirectorService.EnsureState(s); // FG6-DEF-04：突袭导演域补成空域（旧档没有 = 第一次推进时按当前暴露补好，不追溯触发）。
             Defense.SiegeService.EnsureState(s); // FG6-DEF-05：攻城域补成空域（旧档没有 = 没有进行中的攻城）。
+            Defense.DifficultyService.EnsureState(s); // FG6-DEF-09：难度域补成空域（旧档没有 = 开局难度按当前难度、没有修改记录）；坏值钳回滑条范围。
             s.Raids.Outposts ??= Array.Empty<OutpostRecord>();
             s.Raids.Patrols ??= Array.Empty<PatrolRecord>();
             foreach (OutpostRecord o in s.Raids.Outposts)

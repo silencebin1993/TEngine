@@ -251,7 +251,8 @@ namespace GameLogic.Campaign.Defense
             var target = new Vector2((float)g.TargetX, (float)g.TargetY);
             ExtendTheater(state, site, new GridCell(gather.X, gather.Y), NavService.CellOf(g.TargetX, g.TargetY));
             BuildUnitList(g);
-            int n = SpawnUnits(site, key, gather, target, g.Faction);
+            // FG6-DEF-09（FG16 第 3 节“敌人耐久和伤害”）：按当前难度的突袭敌人倍率生成（建造者 ×0.8 / 标准 ×1 / 严酷 ×1.2；难度说明里公开写出）。
+            int n = SpawnUnits(site, key, gather, target, g.Faction, DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state));
             g.Engaged = true;
             g.UnfoldedCount = n;
             g.ExitedCount = 0;
@@ -324,7 +325,7 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
-        private static int SpawnUnits(CombatSite site, int key, GridCell gather, Vector2 target, string faction)
+        private static int SpawnUnits(CombatSite site, int key, GridCell gather, Vector2 target, string faction, float hpMul, float dmgMul)
         {
             int step = Math.Max(1, Mathf.RoundToInt(SiegeCatalog.SpawnSpacing));
             int placed = 0;
@@ -352,7 +353,7 @@ namespace GameLogic.Campaign.Defense
                         used.Add(k);
                         // 复审修复（P2）：编成下标与成功台数分开记——生成失败（内核满）丢的是这一台本身、下标照样前进，不再缩短编成、总丢掉表尾那台（精英 / 维修机）。
                         (RaidUnitDef def, bool elite) = UnitScratch[next++];
-                        if (SpawnOne(site, key, new Vector2(x, y), target, def, elite) > 0)
+                        if (SpawnOne(site, key, new Vector2(x, y), target, def, elite, hpMul, dmgMul) > 0)
                         {
                             placed++;
                         }
@@ -368,15 +369,16 @@ namespace GameLogic.Campaign.Defense
         }
 
         /// <summary>生成一台攻城单位（按 fg.TbSiegeUnit；表里没有这种敌人时按原型参数，并记问题）。</summary>
-        public static int SpawnOne(CombatSite site, int key, Vector2 at, Vector2 target, RaidUnitDef def, bool elite)
+        /// <remarks><paramref name="hpMul"/> / <paramref name="dmgMul"/> = 难度的突袭敌人耐久 / 伤害倍率（FG6-DEF-09，<see cref="DifficultyService.EnemyHealthMul"/>）。</remarks>
+        public static int SpawnOne(CombatSite site, int key, Vector2 at, Vector2 target, RaidUnitDef def, bool elite, float hpMul = 1f, float dmgMul = 1f)
         {
             CombatSiegeRole role = SiegeCatalog.RoleOf(def?.Role);
             if (role == CombatSiegeRole.None)
             {
                 role = CombatSiegeRole.Assault;
             }
-            float hpScale = SiegeCatalog.HpScale * (elite ? SiegeCatalog.EliteHpScale : 1f);
-            float dmgScale = elite ? SiegeCatalog.EliteDamageScale : 1f;
+            float hpScale = SiegeCatalog.HpScale * (elite ? SiegeCatalog.EliteHpScale : 1f) * Math.Max(0.05f, hpMul);
+            float dmgScale = (elite ? SiegeCatalog.EliteDamageScale : 1f) * Math.Max(0.05f, dmgMul);
             if (def == null || !SiegeCatalog.TryGetUnit(def.EnemyTypeId, out SiegeUnitDef u))
             {
                 CombatBench.Spec s = CombatBench.FromTuning();

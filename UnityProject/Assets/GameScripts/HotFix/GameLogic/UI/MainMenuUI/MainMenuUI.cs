@@ -1047,20 +1047,32 @@ namespace GameLogic
         {
             SetView(MenuView.NewGameSetup);
             UI.Kit.NewGamePanelUIToolkit.Open(
-                (seed, settings) => CreateNewCampaign(slotIndex, seed, settings),
+                (seed, settings, difficulty) => CreateNewCampaign(slotIndex, seed, settings, difficulty),
                 () => SetView(MenuView.Root));
         }
 
-        private void CreateNewCampaign(int slotIndex, int seed, Campaign.WorldGen.WorldSettings settings)
+        /// <summary>
+        /// 新建战役的存档状态（主菜单“开始”的建档部分；不保存、不进场景）。自检直接调用它覆盖“选严酷 / 自定义开局 → 写进存档”这条真实路径（FG6-DEF-09 复审 P2）。
+        /// </summary>
+        public static CampaignState BuildNewCampaignState(string campaignId, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty)
         {
-            string campaignId = Guid.NewGuid().ToString("N");
             // ER1-SAVE-02：种子由新游戏设置给出（默认一颗 CSPRNG 一次性种子，DEBT-ER1SAVE01-05）；
             // 之后全部确定性消费统一走 CampaignRandomService.CreateRng(state)。
-            CampaignState state = CampaignState.CreateNew(campaignId, "Standard", seed);
+            // FG6-DEF-09（FGR-DEF-060）：难度由新游戏设置给出（预设或自定义三个倍率），开局难度写进存档。
+            Campaign.Defense.DifficultyChoice chosen = Campaign.Defense.DifficultyService.Normalize(difficulty);
+            CampaignState state = CampaignState.CreateNew(campaignId, chosen.Id, seed);
+            Campaign.Defense.DifficultyService.ApplyNewGame(state, chosen);
             // FG3-GEN-01：世界设置与生成器版本（导入旧版本短码时 = 短码里的版本，保证世界相同）。
             Campaign.WorldGen.WorldGenService.ApplyNewGameWorld(state, seed, settings);
             // FG5-E2E-01（DEBT-FG5RND01-08）：新档开局带来的技术数据（过渡初值，够研究研发树开放前开局就能建造的内容；ADR-QA-022）。
             Campaign.Economy.ResearchService.ApplyNewGameStart(state);
+            return state;
+        }
+
+        private void CreateNewCampaign(int slotIndex, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty)
+        {
+            string campaignId = Guid.NewGuid().ToString("N");
+            CampaignState state = BuildNewCampaignState(campaignId, seed, settings, difficulty);
 
             SaveResult result = CampaignSaveService.Save(slotIndex, state, SaveReason.NewCampaign);
             if (!result.Success)

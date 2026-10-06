@@ -420,6 +420,12 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-08（FGR-DEF-053）：第一次归还核心被突袭摧毁（失败页读自动存档的说明）。</summary>
         public const string RaidFirstCoreLost = "raid.first_core_lost";
 
+        /// <summary>FG6-DEF-09（FGR-DEF-060）：第一次在游戏中打开难度面板（难度说明与中途修改的引导在 FG15-UX-04）。</summary>
+        public const string DifficultyFirstOpen = "difficulty.first_open";
+
+        /// <summary>FG6-DEF-09：第一次在游戏中途修改难度（修改记入存档、影响成就的说明）。</summary>
+        public const string DifficultyFirstChanged = "difficulty.first_changed";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -473,6 +479,7 @@ namespace GameLogic.Core
             RaidHudFirstActive, RaidFirstSpectate, RaidFirstAutoPause, DefenseOverviewFirstOpen, DefenseFirstWeakPoint, RosterFirstPatrol,
             RaidAwayFirstAlert, RaidAwayFirstChoice,
             RaidFirstResult, RaidResultFirstOpen, RaidFirstWreck, RaidFirstCoreLost,
+            DifficultyFirstOpen, DifficultyFirstChanged,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

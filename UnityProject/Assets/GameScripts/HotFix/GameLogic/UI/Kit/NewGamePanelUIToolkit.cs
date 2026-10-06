@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using GameConfig.fg;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Defense;
 using GameLogic.Campaign.WorldGen;
 using GameLogic.Core;
 using GameLogic.Localization;
@@ -31,7 +32,7 @@ namespace GameLogic.UI.Kit
         public static bool IsOpen { get; private set; }
 
         private static bool _pendingOpen;
-        private static Action<int, WorldSettings> _pendingStart;
+        private static Action<int, WorldSettings, DifficultyChoice> _pendingStart;
         private static Action _pendingBack;
 
         private VisualElement _root;
@@ -53,8 +54,10 @@ namespace GameLogic.UI.Kit
         private Button _back;
         private Button _start;
 
-        private Action<int, WorldSettings> _onStart;
+        private Action<int, WorldSettings, DifficultyChoice> _onStart;
         private Action _onBack;
+        private Label _difficultyTitle;
+        private readonly DifficultyPickerView _difficulty = new DifficultyPickerView();
         private int _version;
         private int[] _levels;
         private WorldSettings _importedLegacy;
@@ -82,6 +85,8 @@ namespace GameLogic.UI.Kit
         public TextField ShareField => _share;
         public Button LevelButton(int axis, int level) => axis >= 0 && axis < _levelButtons.Count && level >= 0 && level < _levelButtons[axis].Count ? _levelButtons[axis][level] : null;
         public int AxisRowCount => _levelButtons.Count;
+        /// <summary>FG6-DEF-09：难度选择（预设按钮 / 自定义滑条 / 公开说明）。</summary>
+        public DifficultyPickerView Difficulty => _difficulty;
 
         private void Awake()
         {
@@ -101,8 +106,12 @@ namespace GameLogic.UI.Kit
             base.OnDestroy();
         }
 
-        /// <summary>打开面板。<paramref name="onStart"/>（种子, 世界设置）= 玩家点“开始”；<paramref name="onBack"/> = “返回” / Esc。</summary>
-        public static void Open(Action<int, WorldSettings> onStart, Action onBack)
+        /// <summary>打开面板。<paramref name="onStart"/>（种子, 世界设置）= 玩家点“开始”；<paramref name="onBack"/> = “返回” / Esc。（不关心难度的旧调用方）</summary>
+        public static void Open(Action<int, WorldSettings> onStart, Action onBack) =>
+            Open(onStart == null ? null : new Action<int, WorldSettings, DifficultyChoice>((seed, settings, _) => onStart(seed, settings)), onBack);
+
+        /// <summary>FG6-DEF-09：打开面板，“开始”时连同玩家选的难度（预设或自定义三个倍率）一起交回。</summary>
+        public static void Open(Action<int, WorldSettings, DifficultyChoice> onStart, Action onBack)
         {
             if (Instance == null || Instance._root == null)
             {
@@ -155,6 +164,8 @@ namespace GameLogic.UI.Kit
             _feedback = root.Q<Label>("NewGameFeedback");
             _back = root.Q<Button>("NewGameBack");
             _start = root.Q<Button>("NewGameStart");
+            _difficultyTitle = root.Q<Label>("NewGameDifficultyTitle");
+            _difficulty.Bind(root, "NewGameDiff");
             _random.clicked += RandomSeed;
             _copy.clicked += CopyCode;
             _import.clicked += () => ImportCode();
@@ -194,6 +205,8 @@ namespace GameLogic.UI.Kit
             _feedback.text = string.Empty;
             BuildTexts();
             BuildAxes();
+            _difficulty.BuildPresets();
+            _difficulty.Set(DifficultyService.Preset(DifficultyService.Standard)); // FG6-DEF-09：默认标准难度
             _seed.SetValueWithoutNotify(CampaignRandomService.GenerateSeed().ToString(CultureInfo.InvariantCulture));
             OnInputChanged();
         }
@@ -205,6 +218,10 @@ namespace GameLogic.UI.Kit
             _random.text = GameText.Get("ui.newgame.random_seed");
             _settingsTitle.text = GameText.Get("ui.newgame.settings");
             _storyNote.text = GameText.Get("ui.newgame.story_note");
+            if (_difficultyTitle != null)
+            {
+                _difficultyTitle.text = GameText.Get("ui.newgame.difficulty");
+            }
             _shareTitle.text = GameText.Get("ui.newgame.share_code");
             _copy.text = GameText.Get("ui.newgame.copy_code");
             _import.text = GameText.Get("ui.newgame.import_code");
@@ -411,11 +428,12 @@ namespace GameLogic.UI.Kit
                 return;
             }
             WorldSettings settings = CurrentSettings();
-            Action<int, WorldSettings> start = _onStart;
+            DifficultyChoice difficulty = _difficulty.Choice;
+            Action<int, WorldSettings, DifficultyChoice> start = _onStart;
             _onStart = null;
             _onBack = null;
             SetOpen(false);
-            start?.Invoke(seed, settings);
+            start?.Invoke(seed, settings, difficulty);
         }
 
         /// <summary>“返回” / Esc：关面板，不创建任何存档。</summary>

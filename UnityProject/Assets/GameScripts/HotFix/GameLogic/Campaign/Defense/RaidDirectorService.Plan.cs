@@ -352,7 +352,7 @@ namespace GameLogic.Campaign.Defense
         /// <summary>预算（FG16 第 5 节）：等级基础值 × 幕系数 × 难度规模 × 间隔系数（第一次突袭再 × raid.first_raid_scale）；后日谈 = 基数 × 增长^n × 难度规模。</summary>
         public static int ComputeBudget(CampaignState s, RaidDirectorState d, RaidPlanRecord p)
         {
-            double scale = RaidCatalog.DifficultyScale(s.DifficultyId);
+            double scale = DifficultyService.Scale(s);
             double b;
             if (p.PostgameIndex >= 0)
             {
@@ -754,7 +754,7 @@ namespace GameLogic.Campaign.Defense
                 long earliest = GraceEndTick;
                 if (p.IntervalBaseTick >= 0)
                 {
-                    double gap = DayTicks(RaidCatalog.MinIntervalDays) * p.IntervalMul / RaidCatalog.DifficultyFrequency(s.DifficultyId);
+                    double gap = DayTicks(RaidCatalog.MinIntervalDays) * p.IntervalMul / DifficultyService.Frequency(s);
                     earliest = Math.Max(earliest, p.IntervalBaseTick + (long)Math.Round(gap));
                 }
                 if (arrive < earliest)
@@ -845,6 +845,9 @@ namespace GameLogic.Campaign.Defense
         {
             bool announced = absorbed.State == StateWarned;
             keeper.Budget += absorbed.Budget;
+            keeper.AbsorbedBudget += absorbed.Budget; // FG6-DEF-09：改成建造者时剧情一方去掉这部分；其他难度修改按比例一起缩放
+            var ids = new List<string>(keeper.AbsorbedIds ?? Array.Empty<string>()) { absorbed.PlanId };
+            keeper.AbsorbedIds = ids.ToArray();
             var trig = new List<string>(keeper.Triggers);
             foreach (string t in absorbed.Triggers)
             {
@@ -1017,7 +1020,7 @@ namespace GameLogic.Campaign.Defense
                 hist.Add(new RaidHistoryRecord
                 {
                     PlanId = p.PlanId, Wave = p.Wave, Trigger = p.Trigger, Faction = p.Faction, Level = p.Level, Units = p.UnitTotal,
-                    TargetKind = p.TargetKind, OriginKind = p.OriginKind, WarnTick = p.WarnTick, ArrivedTick = p.ArrivedTick, EndTick = tick,
+                    TargetKind = p.TargetKind, OriginKind = p.OriginKind, WarnTick = p.WarnTick, ArrivedTick = p.ArrivedTick, ArrivalTick = p.ArrivalTick, EndTick = tick,
                     EndReason = string.IsNullOrEmpty(p.EndReason) ? EndGone : p.EndReason,
                 });
             }

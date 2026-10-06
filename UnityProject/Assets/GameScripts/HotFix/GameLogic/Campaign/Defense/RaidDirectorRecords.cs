@@ -186,6 +186,12 @@ namespace GameLogic.Campaign
         /// 突袭预报记下产出时的序号（<see cref="IntelRecord.PlanRevision"/>），对不上 = 计划有变、预报已过时，监听站重新破译（FGT-DEF-004“与实际突袭一致”）。
         /// </summary>
         public int Revision;
+        /// <summary>
+        /// FG6-DEF-09：重叠合并时吸收进来的普通计划的预算（已含在 <see cref="Budget"/> 里）与计划 ID。中途改成“只有剧情突袭”（建造者）时剧情计划去掉这部分、
+        /// 归还第一次突袭名额、被吸收的计划改记“取消”（不再算最短间隔的参照）；其他难度修改按规模比例与 <see cref="Budget"/> 一起缩放（复审 P1：吸收的预算不丢）。旧档没有 = 0 / 空。
+        /// </summary>
+        public int AbsorbedBudget;
+        public string[] AbsorbedIds = Array.Empty<string>();
     }
 
     /// <summary>FG6-DEF-04：突袭历史的一条（FG06 第 4 节“突袭历史”；结算明细、贡献最大者由 FG6-DEF-08 追加字段）。</summary>
@@ -204,5 +210,7 @@ namespace GameLogic.Campaign
         public long ArrivedTick = -1;
         public long EndTick;
         public string EndReason = string.Empty;
+        /// <summary>FG6-DEF-09：排定的抵达步（-1 = 没排定；旧档没有）。中途改难度取消计划后，最短间隔的参照按它重算（已并波 / 途中被全歼的普通突袭也算，复审 P2）。</summary>
+        public long ArrivalTick = -1;
     }
 }

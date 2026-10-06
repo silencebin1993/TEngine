@@ -47,6 +47,7 @@ namespace GameLogic.UI.Kit
             Create<StatsPanelUIToolkit>("[StatsPanelHost]"); // FG2-FW-04：统计面板（战斗 · 反应伤害归因；FG4-ECO-08 加生产段，30076，暂停菜单之上）。
             Create<ReactionLogPanelUIToolkit>("[ReactionLogHost]"); // FG2-FW-04：反应记录（日志 / 伤害归因 / 反应图鉴，30077，暂停菜单之上）。
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
+            Create<DifficultyPanelUIToolkit>("[DifficultyHost]"); // FG6-DEF-09：难度与突袭强度（30081，暂停菜单与按键面板之上、新游戏设置之下）。
             Create<NewGamePanelUIToolkit>("[NewGameHost]"); // FG3-GEN-01：新游戏设置（30082，主菜单“新建”选好存档槽后打开）。
             Create<StrategicMapUIToolkit>("[StrategicMapHost]"); // FG3-GEN-01：战略地图（30050，HUD 之上、暂停菜单之下）。
             Create<MinimapHudUIToolkit>("[MinimapHost]"); // FG3-GEN-01：小地图（右下角 HUD，-2 层，不挡面板）。
@@ -85,6 +86,7 @@ namespace GameLogic.UI.Kit
             RosterPanelUIToolkit.Close();
             AwayReportPanelUIToolkit.Close();
             RaidResultPanelUIToolkit.Close(); // FG6-DEF-08
+            DifficultyPanelUIToolkit.Close(); // FG6-DEF-09
             ResearchTreePanelUIToolkit.Close();
             TestRangePanelUIToolkit.Close();
             TurretPanelUIToolkit.Close();

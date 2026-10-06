@@ -78,6 +78,18 @@ namespace GameLogic.UI.Kit
             AwayReportButton = Bind(root, "PauseAwayReport", "pause.away_report", AwayReportPanelUIToolkit.Open);
             // FG6-DEF-08（FG06 第 4 节“突袭历史：可以回看结算”）：突袭历史盖在暂停菜单上面，关掉回到暂停菜单。
             RaidHistoryButton = Bind(root, "PauseRaidHistory", "pause.raid_history", RaidResultPanelUIToolkit.Open);
+            // FG6-DEF-09（FGR-DEF-060“游戏中途可以修改”）：难度面板盖在暂停菜单上面，关掉回到暂停菜单；悬停写出当前难度。
+            DifficultyButton = Bind(root, "PauseDifficulty", "pause.difficulty", DifficultyPanelUIToolkit.Open);
+            if (DifficultyButton != null)
+            {
+                UiTooltip.Attach(DifficultyButton, () => new TooltipContent
+                {
+                    Title = GameText.Get("ui.difficulty.title"),
+                    Body = CampaignSession.Current != null
+                        ? GameText.Format("ui.difficulty.current", Campaign.Defense.DifficultyService.Label(CampaignSession.Current))
+                        : GameText.Get("ui.difficulty.no_campaign"),
+                });
+            }
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindReactionFeedback(root);
@@ -124,6 +136,7 @@ namespace GameLogic.UI.Kit
         public Button RulesButton { get; private set; }
         public Button RosterButton { get; private set; }
         public Button RaidHistoryButton { get; private set; }
+        public Button DifficultyButton { get; private set; }
         public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;

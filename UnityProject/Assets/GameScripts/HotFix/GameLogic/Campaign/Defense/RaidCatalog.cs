@@ -73,6 +73,7 @@ namespace GameLogic.Campaign.Defense
         private static readonly Dictionary<string, RaidTriggerDef> TriggerById = new Dictionary<string, RaidTriggerDef>(StringComparer.Ordinal);
         private static readonly Dictionary<int, RaidLevel> LevelByLevel = new Dictionary<int, RaidLevel>();
         private static readonly Dictionary<string, RaidDifficulty> DifficultyById = new Dictionary<string, RaidDifficulty>(StringComparer.Ordinal);
+        private static readonly List<RaidDifficulty> DifficultyList = new List<RaidDifficulty>(4);
         private static readonly List<RaidUnitDef> UnitList = new List<RaidUnitDef>(16);
         private static readonly Dictionary<string, RaidUnitDef> UnitById = new Dictionary<string, RaidUnitDef>(StringComparer.Ordinal);
         private static readonly List<RaidCounter> CounterList = new List<RaidCounter>(16);
@@ -250,6 +251,24 @@ namespace GameLogic.Campaign.Defense
             return DifficultyById.TryGetValue("Standard", out RaidDifficulty std) ? std : null;
         }
 
+        /// <summary>FG6-DEF-09：难度表里的全部行（三个预设 + 自定义），按界面顺序。</summary>
+        public static IReadOnlyList<RaidDifficulty> Difficulties
+        {
+            get
+            {
+                EnsureLoaded();
+                return DifficultyList;
+            }
+        }
+
+        /// <summary>FG6-DEF-09：表里有没有这个难度 ID（大小写敏感）。</summary>
+        public static bool HasDifficulty(string id)
+        {
+            EnsureLoaded();
+            return !string.IsNullOrEmpty(id) && DifficultyById.ContainsKey(id);
+        }
+
+        // 只按预设行读取（不含自定义滑条）；按存档读取统一走 DifficultyService（自定义时取存档里的三个倍率）。
         public static float DifficultyScale(string id) => Difficulty(id)?.Scale ?? 1f;
         public static float DifficultyFrequency(string id) => Math.Max(0.05f, Difficulty(id)?.Frequency ?? 1f);
         public static float DifficultyWarning(string id) => Math.Max(0.05f, Difficulty(id)?.Warning ?? 1f);
@@ -320,6 +339,7 @@ namespace GameLogic.Campaign.Defense
             TriggerById.Clear();
             LevelByLevel.Clear();
             DifficultyById.Clear();
+            DifficultyList.Clear();
             UnitList.Clear();
             UnitById.Clear();
             CounterList.Clear();
@@ -389,12 +409,19 @@ namespace GameLogic.Campaign.Defense
             {
                 foreach (RaidDifficulty row in difficulties.DataList)
                 {
-                    if (row == null || string.IsNullOrEmpty(row.Id) || row.Scale <= 0f || row.Frequency <= 0f || row.Warning <= 0f)
+                    if (row == null || string.IsNullOrEmpty(row.Id) || row.Scale <= 0f || row.Frequency <= 0f || row.Warning <= 0f
+                        || row.EnemyHp <= 0f || row.EnemyDamage <= 0f || row.EventRate <= 0f || row.SilentNightDays < 1 || DifficultyById.ContainsKey(row.Id))
                     {
-                        ProblemList.Add("fg.TbRaidDifficulty：空 ID 或倍率 ≤ 0");
+                        ProblemList.Add("fg.TbRaidDifficulty：空 / 重复 ID、倍率 ≤ 0 或静默夜间隔 < 1 日（" + (row?.Id ?? "空行") + "）");
                         continue;
                     }
                     DifficultyById[row.Id] = row;
+                    DifficultyList.Add(row);
+                }
+                DifficultyList.Sort((a, b) => a.SortOrder != b.SortOrder ? a.SortOrder.CompareTo(b.SortOrder) : string.CompareOrdinal(a.Id, b.Id));
+                if (!DifficultyById.ContainsKey("Standard"))
+                {
+                    ProblemList.Add("fg.TbRaidDifficulty：缺“标准”（Standard）行——存档里认不出的难度按它处理");
                 }
             }
             foreach (RaidUnit row in units.DataList)

@@ -858,6 +858,19 @@ namespace GameLogic.EditorTools
             p.ShareField.value = mine;
             bool importedMine = ClickUitk("[NewGameHost]", "NewGameImportCode") && p.SeedFieldText == SmokeSeedText && p.CurrentSettings().Id == SmokeSettings;
             Check(copied && importedOther && importedMine, $"复制短码 {mine}；导入别人的短码（种子 12345 + 宽松起始区）再导回自己的，种子与设置一起换");
+            // FG6-DEF-09（FGR-DEF-060）：难度段——默认标准（“▸”）、说明公开写出对敌人的加成；点“严酷”说明跟着变；点“自定义”出现三个滑条；
+            // 最后点回“标准”开局（冒烟后面的突袭步骤按标准难度的数值断言）。
+            UI.Kit.DifficultyPickerView dp = p.Difficulty;
+            string enemyStd = Localization.GameText.Format("difficulty.line.enemy", "1", "1");
+            bool diffDefault = dp != null && dp.PresetCount == 4 && dp.Choice.Id == Campaign.Defense.DifficultyService.Standard
+                               && dp.PresetButton("Standard").text.StartsWith("▸", StringComparison.Ordinal) && dp.DescriptionText.Contains(enemyStd) && !dp.CustomVisible;
+            bool diffHarsh = ClickUitk("[NewGameHost]", "DifficultyPreset_Harsh") && dp.Choice.Id == Campaign.Defense.DifficultyService.Harsh
+                             && dp.DescriptionText.Contains(Localization.GameText.Format("difficulty.line.enemy", "1.2", "1.2"));
+            bool diffCustom = ClickUitk("[NewGameHost]", "DifficultyPreset_Custom") && dp.CustomVisible && Math.Abs(dp.Choice.Scale - 1.3f) < 1e-4f;
+            bool diffBack = ClickUitk("[NewGameHost]", "DifficultyPreset_Standard") && dp.Choice.Id == Campaign.Defense.DifficultyService.Standard && !dp.CustomVisible;
+            Check(diffDefault && diffHarsh && diffCustom && diffBack,
+                $"新游戏难度段：默认“▸ 标准”、说明写出敌人耐久 / 伤害 ×1；点“严酷”说明换成 ×1.2；点“自定义”出现三个滑条（从严酷的 ×1.3 出发）；点回“标准”（{diffDefault}/{diffHarsh}/{diffCustom}/{diffBack}）");
+            CheckNoTextMarkers("新游戏设置（难度段）");
             bool started = ClickUitk("[NewGameHost]", "NewGameStart");
             Check(started && !NewGamePanelUIToolkit.IsOpen, "点“开始”：新游戏设置关闭，开新战役");
             Next(3, $"新游戏：种子 {SmokeSeedText}、世界设置 {SmokeSettings}");
@@ -1438,11 +1451,42 @@ namespace GameLogic.EditorTools
             bool histClosed = ClickUitk("[RaidResultHost]", "RaidResultClose") && !UI.Kit.RaidResultPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(histClicked && histOpen && histClosed,
                 $"暂停菜单点“突袭历史”：突袭历史面板打开（{(rrp == null ? "无" : rrp.VisibleRowCount > 0 ? rrp.SummaryText : rrp.EmptyText)}），点关闭回到暂停菜单（{histClicked}/{histOpen}/{histClosed}）");
+            SmokeDifficultyPanel();
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),
                 $"暂停菜单显示接入镜头设置：“{pm?.CameraZoomLabelText}”“{pm?.CameraFollowLabelText}”");
             Check(ClickUitk("[PauseMenuHost]", "PauseKeyBindings"), "点暂停菜单“按键设置”");
             Next(34, "点“按键设置”");
+        }
+
+        /// <summary>
+        /// FG6-DEF-09（FGR-DEF-060“游戏中途可以修改，修改记录在存档里”）：暂停菜单“难度”→ 难度面板（当前“标准”、四个按钮、公开说明、修改记录只有开局）→
+        /// 点“严酷”→“应用修改”→ 确认框（写明会记入存档）点“确认”→ 当前难度换成严酷、修改记录多一行；再改回“标准”（冒烟后面的突袭步骤按标准难度断言）→ 点关闭回到暂停菜单。
+        /// 全部走 UI Toolkit 按钮自己的 Clickable（与鼠标点击同一回调）。
+        /// </summary>
+        private static void SmokeDifficultyPanel()
+        {
+            CampaignState s = CampaignSession.Current;
+            bool clicked = ClickUitk("[PauseMenuHost]", "PauseDifficulty");
+            UI.Kit.DifficultyPanelUIToolkit dp = UI.Kit.DifficultyPanelUIToolkit.Instance;
+            bool open = dp != null && UI.Kit.DifficultyPanelUIToolkit.IsOpen && dp.PanelVisible && dp.Picker.PresetCount == 4
+                        && dp.CurrentText.Contains(Campaign.Defense.DifficultyService.Name(Campaign.Defense.DifficultyService.Standard)) && dp.HistoryRowCount == 2
+                        && Campaign.Defense.DifficultyService.StateOf(s)?.StartDifficultyId == Campaign.Defense.DifficultyService.Standard
+                        && !Localization.GameText.ContainsMarker(dp.CurrentText + dp.Picker.DescriptionText + dp.HistoryText(0) + dp.HistoryText(1));
+            int before = Campaign.Defense.DifficultyService.StateOf(s)?.ChangeCount ?? -1;
+            bool harshPick = ClickUitk("[DifficultyHost]", "DifficultyPreset_Harsh");
+            bool asked = ClickUitk("[DifficultyHost]", "DifficultyApply") && UiConfirmDialog.IsOpen
+                         && UiConfirmDialog.Current.Lines.Contains(Localization.GameText.Get("ui.difficulty.confirm_record"));
+            bool harsh = ClickUitk("[UiKitOverlayHost]", "ConfirmOk") && !UiConfirmDialog.IsOpen && s.DifficultyId == Campaign.Defense.DifficultyService.Harsh
+                         && Campaign.Defense.DifficultyService.StateOf(s).ChangeCount == before + 1 && dp.HistoryRowCount == 2
+                         && dp.HistoryText(1).Contains(Campaign.Defense.DifficultyService.Name("Harsh")) && dp.CurrentText.Contains(Campaign.Defense.DifficultyService.Name("Harsh"));
+            bool backPick = ClickUitk("[DifficultyHost]", "DifficultyPreset_Standard");
+            bool back = ClickUitk("[DifficultyHost]", "DifficultyApply") && ClickUitk("[UiKitOverlayHost]", "ConfirmOk") && s.DifficultyId == Campaign.Defense.DifficultyService.Standard
+                        && Campaign.Defense.DifficultyService.StateOf(s).ChangeCount == before + 2 && !Campaign.Defense.DifficultyService.KeptThroughout(s, Campaign.Defense.DifficultyService.Standard);
+            bool closed = ClickUitk("[DifficultyHost]", "DifficultyClose") && !UI.Kit.DifficultyPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(clicked && open && harshPick && asked && harsh && backPick && back && closed,
+                $"暂停菜单点“难度”：难度面板打开（{dp?.CurrentText}，修改记录 {dp?.HistoryRowCount} 行）；点“严酷”→“应用修改”→ 确认框写明记入存档 → 确认后当前难度为严酷、修改记录多一行；" +
+                $"改回标准（“全程标准”不再成立）；点关闭回到暂停菜单（{clicked}/{open}/{harshPick}/{asked}/{harsh}/{backPick}/{back}/{closed}）");
         }
 
         private static void StepKeyBindingsFromPause(double inStep)

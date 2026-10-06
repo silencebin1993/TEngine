@@ -173,6 +173,11 @@ namespace GameLogic.Campaign.Defense
                 p.GroupId ??= string.Empty;
                 p.MergedInto ??= string.Empty;
                 p.EndReason ??= string.Empty;
+                p.AbsorbedIds ??= Array.Empty<string>(); // FG6-DEF-09：旧档没有 = 没吸收过
+                if (p.AbsorbedBudget < 0)
+                {
+                    p.AbsorbedBudget = 0;
+                }
                 if (p.IntervalMul < 1f)
                 {
                     p.IntervalMul = 1f;
@@ -225,7 +230,7 @@ namespace GameLogic.Campaign.Defense
         public static long GraceEndTick => DayTicks(RaidCatalog.FirstRaidMinDays);
 
         /// <summary>最短预警（步，已乘难度预警倍率）。</summary>
-        public static long MinWarningTicks(CampaignState s) => HourTicks(RaidCatalog.MinWarningHours * RaidCatalog.DifficultyWarning(s?.DifficultyId));
+        public static long MinWarningTicks(CampaignState s) => HourTicks(RaidCatalog.MinWarningHours * DifficultyService.Warning(s));
 
         private static uint SeedOf(CampaignState s) => unchecked((uint)(s.World?.WorldSeed ?? s.RandomSeed));
 
@@ -255,8 +260,8 @@ namespace GameLogic.Campaign.Defense
                 }
             }
             long now = GameClock.Ticks;
-            d.Level4NextTick = exposure > Threshold(2) ? now + DayTicks(RaidCatalog.Level4PeriodDays / RaidCatalog.DifficultyFrequency(s.DifficultyId)) : -1;
-            d.HarassNextTick = Math.Max(now, GraceEndTick) + DayTicks(RaidCatalog.HarassMinIntervalDays / RaidCatalog.DifficultyFrequency(s.DifficultyId));
+            d.Level4NextTick = exposure > Threshold(2) ? now + DayTicks(RaidCatalog.Level4PeriodDays / DifficultyService.Frequency(s)) : -1;
+            d.HarassNextTick = Math.Max(now, GraceEndTick) + DayTicks(RaidCatalog.HarassMinIntervalDays / DifficultyService.Frequency(s));
             var fired = new List<string>(d.StoriesFired);
             foreach (GameConfig.fg.RaidStory st in RaidCatalog.Stories)
             {
@@ -302,7 +307,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (d.Level4NextTick < 0)
                 {
-                    d.Level4NextTick = GameClock.Ticks + DayTicks(RaidCatalog.Level4PeriodDays / RaidCatalog.DifficultyFrequency(s.DifficultyId));
+                    d.Level4NextTick = GameClock.Ticks + DayTicks(RaidCatalog.Level4PeriodDays / DifficultyService.Frequency(s));
                 }
             }
             else
@@ -444,7 +449,7 @@ namespace GameLogic.Campaign.Defense
                     Enqueue(d, RaidCatalog.TriggerStory, Math.Max(1, st.Level), st.Faction, st.Id);
                 }
             }
-            float freq = RaidCatalog.DifficultyFrequency(s.DifficultyId);
+            float freq = DifficultyService.Frequency(s);
             // 暴露超过 90：周期性 4 级。
             if (d.Level4NextTick >= 0 && tick >= d.Level4NextTick)
             {
@@ -504,7 +509,7 @@ namespace GameLogic.Campaign.Defense
                 Log.Warning($"[RaidDirector] 不认识的触发 {t.Kind}，跳过。");
                 return;
             }
-            if (RaidCatalog.StoryOnly(s.DifficultyId) && t.Kind != RaidCatalog.TriggerStory)
+            if (DifficultyService.StoryOnly(s) && t.Kind != RaidCatalog.TriggerStory)
             {
                 // FG16 第 3 节：建造者难度只有剧情突袭。
                 d.TriggersSkipped++;

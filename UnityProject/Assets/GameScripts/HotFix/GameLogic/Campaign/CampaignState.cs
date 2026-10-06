@@ -208,6 +208,14 @@ namespace GameLogic.Campaign
         /// 直接采用；其余经济/工作/建筑/区域集合按 Done 定义留空，等待 ER3/ER4/ER5 写入真实数据。</summary>
         public static CampaignState CreateNew(string campaignId, string difficultyId, int randomSeed)
         {
+            CampaignState s = NewState(campaignId, difficultyId, randomSeed);
+            // FG6-DEF-09（FG15 FGR-SYS-081“严酷通关按难度修改记录判定”）：开局难度写进存档；自定义倍率与修改记录由 DifficultyService 写。
+            s.Raids.Difficulty.StartDifficultyId = s.DifficultyId;
+            return s;
+        }
+
+        private static CampaignState NewState(string campaignId, string difficultyId, int randomSeed)
+        {
             return new CampaignState
             {
                 SchemaVersion = CampaignSaveService.CurrentSchemaVersion,
