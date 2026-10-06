@@ -430,6 +430,35 @@ namespace GameLogic.Campaign
         /// <summary>FG6-DEF-05（承接 DEBT-FG3LOG05-12 / DEBT-FG6DEF03-02）：掉了耐久的管线件（满耐久的不记；唯一写入口 <see cref="Logistics.PipeNetworkService"/>）。
         /// 只加字段：旧档没有 = 全部满耐久。</summary>
         public PipeDamageRecord[] Damage = Array.Empty<PipeDamageRecord>();
+        /// <summary>FG6-LOG-10（FGR-LOG-046）：管线被击穿后地上的液洼（唯一写入口 <see cref="Logistics.PipeLeakService"/>）。只加字段：旧档没有 = 没有液洼。
+        /// 液洼在战斗内核里的区域随家园地点快照进存档（格式 12），读档后按这里的记录对账。</summary>
+        public PipeLeakRecord[] Leaks = Array.Empty<PipeLeakRecord>();
+        public int NextLeakSerial = 1;
+    }
+
+    /// <summary>FG6-LOG-10（FGR-LOG-046）：一摊管线泄漏的液洼（一格管线最多一摊）。时间都按游戏步序号记（与观察、倍速无关）。</summary>
+    [Serializable]
+    public sealed class PipeLeakRecord
+    {
+        /// <summary>液洼编号（&gt; 0；内核区域的外部编号）。</summary>
+        public int Id;
+        /// <summary>破口所在的格。</summary>
+        public int X;
+        public int Y;
+        /// <summary>漏出来的流体（fg.TbFluid.id）。</summary>
+        public int Fluid;
+        /// <summary>0 = 还在漏（半径随时间扩大）；1 = 破口已堵上、正在消退；2 = 已整片反应成残留区域（燃油遇火 = 燃烧区）。</summary>
+        public int State;
+        /// <summary>开始扩大的步（还在漏：半径 = 初始 + (最大 − 初始) × 已漏时长 / 扩散时长）。</summary>
+        public long GrowTick;
+        /// <summary>进入当前阶段的步。</summary>
+        public long StateTick;
+        /// <summary>开始消退时的半径（米；消退：半径 = 本值 × (1 − 已消退时长 / 消退时长)）。</summary>
+        public float FromRadius;
+        /// <summary>已反应：反应规则下标（fg.TbReaction 标签反应按 priority 排序后的下标）、残留区域到期的步、残留区域是否带持续伤害（会烧坏设施）。</summary>
+        public int Rule = -1;
+        public long ReactUntilTick;
+        public bool Damaging;
     }
 
     /// <summary>
@@ -1888,6 +1917,8 @@ namespace GameLogic.Campaign
                 }
             }
             s.Pipes ??= new PipeFluidState();
+            s.Pipes.Damage ??= Array.Empty<PipeDamageRecord>();
+            Logistics.PipeLeakService.EnsureState(s); // FG6-LOG-10：液洼（旧档没有 = 没有液洼；坏记录丢弃）
             s.Power ??= new PowerGridState();
             s.Power.SubnetSerials ??= Array.Empty<int>();
             s.Power.SubnetAnchors ??= Array.Empty<string>();

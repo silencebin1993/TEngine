@@ -968,6 +968,15 @@ namespace GameLogic.Campaign.Logistics
                 }
                 sb.Append(hp);
             }
+            string leak = PipeLeakService.PipeHoverLines(state, cell); // FG6-LOG-10：被击穿正在漏、这一格的液洼读数
+            if (leak.Length > 0)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append('\n');
+                }
+                sb.Append(leak);
+            }
             int net = c.Kind == PipePieceKind.Valve ? (c.ValveFrom >= 0 ? c.ValveFrom : c.ValveTo) : c.Network;
             if (_kernel.TryGetNetworkInfo(net, out PipeNetInfo n))
             {

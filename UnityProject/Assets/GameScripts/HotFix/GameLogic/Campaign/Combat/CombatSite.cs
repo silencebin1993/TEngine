@@ -261,6 +261,8 @@ namespace GameLogic.Campaign.Combat
             c.FuseTraceSeconds = Math.Max(0f, Tuning("combat.fuse_trace_seconds", c.FuseTraceSeconds));
             // FG6-DEF-01（FGR-DEF-002）：有转速的炮塔对准到这个夹角以内才开火。
             c.TurretAimToleranceDeg = Math.Max(0.5f, Tuning("turret.aim_tolerance_deg", 6f));
+            // FG6-LOG-10（FGR-LOG-046）：管线泄漏的液洼整片反应（燃油遇火成燃烧区）后至少烧多少游戏秒。
+            c.LeakReactSeconds = Math.Max(0f, Tuning("logistics.leak.react_seconds", 12f));
             return c;
         }
 

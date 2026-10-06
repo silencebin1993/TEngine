@@ -14,7 +14,7 @@ namespace GameLogic.Campaign.Logistics
     /// FG6-DEF-05（承接 DEBT-FG3LOG05-12 / DEBT-FG6DEF03-02，FGR-DEF-015 列举的“管线”）：管线件的耐久——与传送带（FGR-LOG-027）同一做法。
     /// 满耐久的不记；掉了耐久的格进存档（<see cref="PipeFluidState.Damage"/>）。到 0 摧毁：件从内核移除（储罐存量 / 阀门缓冲随之流失），原位置留下保留设置的虚影
     /// （种类、等级、朝向、储罐模式与优先级、阀门开关、流体），排给自动重建规则（“传送带与物流节点”范围）。维修无人机可以修（按修好的比例收维修件）。
-    /// 破损泄漏（液洼与标签反应，FGR-LOG-046）在 FG6-LOG-10。伤害来源：攻城溅射（SiegeService），天气在 FG7。
+    /// 破损泄漏（液洼与标签反应，FGR-LOG-046）：击穿 / 摧毁时回调 <see cref="PipeLeakService.OnPipeHit"/>（FG6-LOG-10）。伤害来源：攻城溅射（SiegeService）、泄漏起火（PipeLeakService），天气在 FG7。
     /// </summary>
     public static partial class PipeNetworkService
     {
@@ -85,6 +85,7 @@ namespace GameLogic.Campaign.Logistics
             if (lost < max)
             {
                 SetDamage(state, cell, lost);
+                PipeLeakService.OnPipeHit(state, cell, info.Fluid, max - lost, max, destroyed: false); // FG6-LOG-10：击穿（耐久到阈值及以下）就漏
                 return false;
             }
             return DestroyPiece(state, cell, info, max, out result);
@@ -102,6 +103,7 @@ namespace GameLogic.Campaign.Logistics
             if (!result.Ok)
             {
                 SetDamage(state, cell, max - 1); // 拆不掉（会把两种流体接在一起）：留 1 点耐久，不凭空连通两网
+                PipeLeakService.OnPipeHit(state, cell, fluid, 1, max, destroyed: false); // FG6-LOG-10：停在 1 耐久也是击穿
                 return false;
             }
             SetDamage(state, cell, 0);
@@ -109,6 +111,7 @@ namespace GameLogic.Campaign.Logistics
             Economy.StandingRuleService.OnBeltGhost(state, ghostId);
             DestroyedPieces++;
             LastDestroyedLostMl = lostMl;
+            PipeLeakService.OnPipeHit(state, cell, fluid, 0, max, destroyed: true); // FG6-LOG-10：被打掉 = 破口处积起液洼（虚影还在、两侧还有同种流体时一直漏）
             GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstDestroyed);
             NotificationCenter.Post("failure", GameText.Format("pipe.destroyed.notify", cell.X, cell.Y, Liters(lostMl)), new Vector3(cell.X, 0f, cell.Y));
             return true;

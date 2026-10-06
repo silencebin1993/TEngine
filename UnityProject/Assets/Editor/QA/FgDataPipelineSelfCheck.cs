@@ -520,6 +520,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "RDT" || f[0] == "RDL" || f[0] == "RDD" || f[0] == "RDU" || f[0] == "RDC" || f[0] == "RDS"
                     // FG6-DEF-05 的攻城职能（SGR）、职能目标（SGT）、建筑类别（SGC）、攻城单位（SGU）由 FgSiegeSelfCheck A1 段逐字段比对。
                     || f[0] == "SGR" || f[0] == "SGT" || f[0] == "SGC" || f[0] == "SGU"
+                    // FG6-LOG-10 的流体泄漏（FLK）由 FgPipeLeakSelfCheck A1 段逐字段比对。
+                    || f[0] == "FLK"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

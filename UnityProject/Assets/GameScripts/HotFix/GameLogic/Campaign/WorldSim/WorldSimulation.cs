@@ -164,6 +164,7 @@ namespace GameLogic.Campaign.WorldSim
             Defense.RaidDirectorService.ResetSessionState(); // FG6-DEF-04：突袭导演的会话统计清零（存档里的计划与计时不动）
             Defense.RaidResultService.ResetSessionState(); // FG6-DEF-08：突袭结算的会话统计与待执行的预警自动存档清零（存档里的结算记录不动）
             Defense.SiegeService.ResetSessionState(); // FG6-DEF-05：攻城的运行时缓存（耐久推送、首次钩子、统计）按新会话重建；存档里的剧场与队伍不动
+            Logistics.PipeLeakService.ResetSessionState(); // FG6-LOG-10：液洼的运行时索引与统计按新会话重建；存档里的液洼记录不动（第一次有家园战斗地点时与内核对账）
             HomeValleyAlarms.ResetSessionState();
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算
@@ -519,6 +520,9 @@ namespace GameLogic.Campaign.WorldSim
                     // FG6-DEF-05：攻城——到达的队伍展开、溅射每步结算至多 N 格、每 siege.sync_seconds 对账（建筑结构单位、撤退 / 全歼 / 收拢、破墙通知、拦截、驻防交战）；
                     // 只看步序号，与观察无关。逐单位的按职能选目标、流场、破墙、撤退在上面家园内核的一步里（Main/Sim，Burst）。
                     Defense.SiegeService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG6-LOG-10（FGR-LOG-046）：管线泄漏液洼——取走内核本步的液洼反应（告警），每 logistics.leak.sync_seconds 对账（扩大 / 消退 / 残留到期 / 火烧坏设施）；
+                    // 只看步序号，与观察无关，O(液洼数)。逐单位挂标签、液洼遇火整片反应在上面家园内核的一步里（Main/Sim，Burst）。放在攻城之后：本步溅射打穿的管线本步就积起液洼。
+                    Logistics.PipeLeakService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG6-DEF-08：残骸去向——每 raid.result.route_seconds 把仓库里的残骸开成送往解析台 / 回收站的送货单；只看步序号，与观察无关。
                     Defense.RaidResultService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     CurrentSiteId = HomeValleyLayout.RegionId;

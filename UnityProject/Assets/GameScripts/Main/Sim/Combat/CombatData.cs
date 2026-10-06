@@ -161,6 +161,8 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatProjectile> Projectiles;
         /// <summary>FG2-FW-02：读法生成的区域、待结算回波、无人机（都随快照进存档）。</summary>
         public NativeList<CombatZone> Zones;
+        /// <summary>FG6-LOG-10：本步液洼整片反应的记录（x = 液洼编号，y = 反应规则下标）。热更层每步取走；不进快照（液洼区域本身的阶段在快照里，读档后热更层按阶段对账）。</summary>
+        public NativeList<int2> LeakReactions;
         public NativeList<CombatEcho> Echoes;
         /// <summary>FG2-E2E-01（FG-GAP-043）：引信弹迹（表现数据，按游戏时间到期；不进快照与哈希）。</summary>
         public NativeList<CombatShotTrace> Traces;
@@ -265,6 +267,7 @@ namespace BinGames.Sim.Combat
                 PoiReached = new NativeList<byte>(8, Allocator.Persistent),
                 Projectiles = new NativeList<CombatProjectile>(math.max(16, config.ProjectileCapacity), Allocator.Persistent),
                 Zones = new NativeList<CombatZone>(16, Allocator.Persistent),
+                LeakReactions = new NativeList<int2>(4, Allocator.Persistent),
                 Echoes = new NativeList<CombatEcho>(16, Allocator.Persistent),
                 Traces = new NativeList<CombatShotTrace>(16, Allocator.Persistent),
                 Drones = new NativeList<CombatDrone>(16, Allocator.Persistent),
@@ -358,6 +361,7 @@ namespace BinGames.Sim.Combat
             PoiReached.Dispose();
             Projectiles.Dispose();
             Zones.Dispose();
+            LeakReactions.Dispose();
             Echoes.Dispose();
             Traces.Dispose();
             Drones.Dispose();
@@ -573,6 +577,7 @@ namespace BinGames.Sim.Combat
             SlotOfId.Add(-1);
             Projectiles.Clear();
             Zones.Clear();
+            LeakReactions.Clear();
             Echoes.Clear();
             Traces.Clear();
             Drones.Clear();

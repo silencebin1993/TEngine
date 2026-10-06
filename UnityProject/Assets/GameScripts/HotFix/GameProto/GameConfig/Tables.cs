@@ -175,6 +175,10 @@ public partial class Tables
     /// </summary>
     public fg.TbFluid TbFluid {get; }
     /// <summary>
+    /// 流体泄漏
+    /// </summary>
+    public fg.TbFluidLeak TbFluidLeak {get; }
+    /// <summary>
     /// 熔合合并上限
     /// </summary>
     public fg.TbFusionMerge TbFusionMerge {get; }
@@ -458,6 +462,7 @@ public partial class Tables
         TbEcoItem = new fg.TbEcoItem(loader("fg_tbecoitem"));
         TbFirmwareKind = new fg.TbFirmwareKind(loader("fg_tbfirmwarekind"));
         TbFluid = new fg.TbFluid(loader("fg_tbfluid"));
+        TbFluidLeak = new fg.TbFluidLeak(loader("fg_tbfluidleak"));
         TbFusionMerge = new fg.TbFusionMerge(loader("fg_tbfusionmerge"));
         TbFusionRecipe = new fg.TbFusionRecipe(loader("fg_tbfusionrecipe"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
@@ -564,6 +569,7 @@ public partial class Tables
         TbEcoItem.ResolveRef(this);
         TbFirmwareKind.ResolveRef(this);
         TbFluid.ResolveRef(this);
+        TbFluidLeak.ResolveRef(this);
         TbFusionMerge.ResolveRef(this);
         TbFusionRecipe.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);

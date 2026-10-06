@@ -214,6 +214,7 @@ namespace GameLogic.Campaign.Regions
         {
             bool over = false;
             bool overPower = false;
+            bool overLeak = false;
             if (allowed && state != null && camera != null && !InputRouter.IsUiPointerBlocked())
             {
                 Vector3 screen = InputRouter.Reader.MousePosition;
@@ -289,7 +290,33 @@ namespace GameLogic.Campaign.Regions
                             _hoveringPower = true;
                             UiTooltip.HoverWorld(PowerHoverKey, new Vector2(screen.x, screen.y), _powerProvider);
                         }
+                        else if (PipeLeakService.AtPoint(state, new Vector2(hit.x, hit.z)) is PipeLeakRecord leak)
+                        {
+                            // FG6-LOG-10（FGR-LOG-046）：空地上的液洼——标签、阶段（还在漏 / 消退 / 已反应）、“有意设计的涌现玩法”提示。
+                            over = true;
+                            overLeak = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            ReleaseBeltHover();
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _leakHoverId = leak.Id;
+                            _hoveringLeak = true;
+                            UiTooltip.HoverWorld(LeakHoverKey, new Vector2(screen.x, screen.y), _leakProvider);
+                        }
                     }
+                }
+            }
+            if (!overLeak && _hoveringLeak)
+            {
+                _hoveringLeak = false;
+                _leakHoverId = 0;
+                if (UiTooltip.WorldKey == LeakHoverKey)
+                {
+                    UiTooltip.LeaveWorld();
                 }
             }
             if (!over && _hovering)
@@ -328,6 +355,24 @@ namespace GameLogic.Campaign.Regions
 
         private const int PipeHoverKey = -733;
         private const int PowerHoverKey = -734;
+        private const int LeakHoverKey = -735;
+        private bool _hoveringLeak;
+        private int _leakHoverId;
+        private Func<TooltipContent> _leakProviderCache;
+        private Func<TooltipContent> _leakProvider => _leakProviderCache ??= ProvideLeakHover;
+
+        /// <summary>悬停提示当前是否挂在液洼上（自检读）。</summary>
+        public bool HoveringLeak => _hoveringLeak;
+
+        private TooltipContent ProvideLeakHover()
+        {
+            if (!_hoveringLeak || _hoverState == null
+                || !PipeLeakService.TryDescribe(_hoverState, PipeLeakService.Find(_hoverState, _leakHoverId), out string title, out string body))
+            {
+                return null;
+            }
+            return new TooltipContent { Title = title, Body = body, Shortcut = GameActionId.OpenBuildMenu, CodexEntryId = "codex.logistics.leak" };
+        }
         private bool _hoveringPower;
         private string _powerHoverId;
         private Func<TooltipContent> _powerProviderCache;

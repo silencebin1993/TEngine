@@ -26,8 +26,9 @@ namespace BinGames.Sim.Combat
         /// 9 = FG6-DEF-01（FG06 FGR-DEF-002 / 004）：武器追加炮塔转速与每发补给；每个单位追加补给存量（读取仍认 1～8：转速 0 = 瞬间转向、不需要补给、存量 0）。
         /// 10 = FG6-DEF-02（FG06 FGR-DEF-012）：追加护盾表（读取仍认 1～9：没有护盾，热更层按记录重新登记）。
         /// 11 = FG6-DEF-05（FG06 FGR-DEF-030～032）：每个单位追加攻城属性（职能 / 撤退 / 目标类别 / 所属队伍 / 占地 / 对建筑倍率 / 随队维修计时 / 破墙目标）；
-        /// 追加还没结算的溅射命中格（读取仍认 1～10：攻城属性为空、没有溅射）。流场不进快照：它是格网与结构单位的纯函数，读档后按同一输入重算（增量 = 全量，自检对照）。</summary>
-        public const int FormatVersion = 11;
+        /// 追加还没结算的溅射命中格（读取仍认 1～10：攻城属性为空、没有溅射）。流场不进快照：它是格网与结构单位的纯函数，读档后按同一输入重算（增量 = 全量，自检对照）。
+        /// 12 = FG6-LOG-10（FG03 FGR-LOG-046）：区域种类追加“管线泄漏液洼”（<see cref="ZoneKindLeak"/>），区域追加阶段字节（液洼 / 已反应）（读取仍认 1～11：没有液洼，阶段 0）。</summary>
+        public const int FormatVersion = 12;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -59,6 +60,12 @@ namespace BinGames.Sim.Combat
         /// <summary>区域种类（<see cref="CombatZone.Kind"/>）。</summary>
         public const byte ZoneKindReading = 0;
         public const byte ZoneKindField = 1;
+        /// <summary>FG6-LOG-10（FGR-LOG-046）：管线被击穿后地上的液洼（不属于任何单位、中立：站进去的己方机器与敌人都挂上标签；
+        /// 遇到能和它的标签起反应、且这条反应会留下残留区域的标签时整片反应成残留区域）。由热更层按液洼记录登记 / 更新 / 移除，数量由热更层封顶，不占读法与场地的上限。</summary>
+        public const byte ZoneKindLeak = 2;
+        /// <summary>液洼区域的阶段（<see cref="CombatZone.Phase"/>）：0 = 液洼（挂流体标签）；1 = 已反应（整片变成反应的残留区域，到期消失）。</summary>
+        public const byte LeakPhasePuddle = 0;
+        public const byte LeakPhaseReacted = 1;
 
         /// <summary>FG2-E2E-01（FG-GAP-043）：同时留在画面上的引信弹迹上限（满了挤掉最老的一条；每条只活零点几游戏秒）。</summary>
         public const int TraceCapacity = 128;
@@ -338,9 +345,11 @@ namespace BinGames.Sim.Combat
         public CombatFaction Faction;
         /// <summary>FG2-VFX-02：画成什么样（只影响画面）。</summary>
         public CombatZoneLook Look;
-        /// <summary>FG6-DEF-02 复审修复：0 = 读法区域（武器 / 反应留下的），1 = 场地（陷阱发射器铺的）。两种各有自己的上限，场地铺满不挤掉读法区域。随快照（格式 10）。</summary>
+        /// <summary>FG6-DEF-02 复审修复：0 = 读法区域（武器 / 反应留下的），1 = 场地（陷阱发射器铺的）。两种各有自己的上限，场地铺满不挤掉读法区域。随快照（格式 10）。
+        /// FG6-LOG-10：2 = 管线泄漏液洼（<see cref="CombatConst.ZoneKindLeak"/>；<see cref="Owner"/> 存液洼编号的相反数，不归属任何单位）。</summary>
         public byte Kind;
-        public byte Pad1;
+        /// <summary>FG6-LOG-10：液洼区域的阶段（<see cref="CombatConst.LeakPhasePuddle"/> / <see cref="CombatConst.LeakPhaseReacted"/>）；其余区域恒为 0。随快照（格式 12）。</summary>
+        public byte Phase;
     }
 
     /// <summary>FG2-FW-02：一次待结算的回波（残影 / 节拍 / 追射 / 回旋）：到点后对同一目标再结算一次伤害与状态。</summary>
@@ -928,6 +937,8 @@ namespace BinGames.Sim.Combat
         public float FuseTraceSeconds;
         /// <summary>FG6-DEF-01（FGR-DEF-002）：有转速的炮塔，炮口朝向与目标方向夹角在这个度数以内才开火（fg.TbHomeTuning turret.aim_tolerance_deg）。0 = 内核默认 6°。</summary>
         public float TurretAimToleranceDeg;
+        /// <summary>FG6-LOG-10（FGR-LOG-046）：液洼整片反应成残留区域后至少持续多少游戏秒（fg.TbHomeTuning logistics.leak.react_seconds；与反应自己的残留时长取大）。0 = 只用反应的残留时长。</summary>
+        public float LeakReactSeconds;
 
         public static CombatConfig Default => new CombatConfig
         {

@@ -398,6 +398,10 @@ namespace GameLogic.EditorTools
                 case 421: StepRaidResultClosed(inStep); break;
                 case 422: StepFailureReloaded(inStep); break;
                 case 423: StepFailureShownAgain(inStep); break;
+                // FG6-LOG-10：管线破损泄漏（燃油管线被打穿 → 液洼与真实鼠标悬停 → 着火的敌人点燃成燃烧区、“泄漏起火”告警 → 拆掉管线后液洼消退；插在突袭原型清场之后、攻城之前）
+                case 424: StepLeakFormed(inStep); break;
+                case 425: StepLeakIgnited(inStep); break;
+                case 426: StepLeakCleared(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -9998,8 +10002,185 @@ namespace GameLogic.EditorTools
                   && GameRoot.HomeValley?.LiveMachineCount == machinesBefore,
                 $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）" +
                 $"（清场后世界走了 {GameClock.Ticks - long.Parse(SessionState.GetString(K + "RaidClearTicks", "0"))} 步，暂停 {GameRoot.IsWorldPaused}，模态 {InputRouter.PanelModalOpen}，最近通知 {Notifications.NotificationCenter.History.LastOrDefault()?.Type?.Id}）");
+            Next(424, "FG6-LOG-10：测试捷径——家园铺一段燃油管线并打穿一格，破口积起液洼；真实鼠标悬停读液洼");
+        }
+
+        // ── FG6-LOG-10：管线破损泄漏（击穿 → 液洼 → 悬停读数 → 着火的敌人点燃 → 燃烧区与“泄漏起火”告警 → 拆掉管线后液洼消退）──
+
+        private static void StepLeakFormed(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            if (state == null || home == null || !PipeNetworkService.IsRunning)
+            {
+                Finish("家园没有战斗内核或管线内核（管线泄漏）");
+                return;
+            }
+            if (SessionState.GetInt(K + "LeakSetup", 0) == 0)
+            {
+                // 测试捷径：在镜头附近按格网规则找一段 3 格空地铺燃油管线（正式铺设由 FG3-LOG-05 的冒烟步骤覆盖），第一格挂一个燃油供给者。
+                SessionState.SetInt(K + "LeakWasPaused", GameClock.Paused ? 1 : 0);
+                GameClock.SetPaused(false);
+                Vector2 focus = CameraFocus();
+                GridCell center = GridCell.FromWorld(focus);
+                for (int r = 2; r <= 24 && SessionState.GetInt(K + "LeakSetup", 0) == 0; r++)
+                {
+                    for (int dy = -r; dy <= r && SessionState.GetInt(K + "LeakSetup", 0) == 0; dy++)
+                    {
+                        for (int dx = -r; dx <= r; dx++)
+                        {
+                            var o = new GridCell(center.X + dx, center.Y + dy);
+                            var ground = new GridCell(o.X + 1, o.Y + 1);
+                            if (PipeNetworkService.Kernel.HasCell(ground.X, ground.Y) || BeltNetworkService.Kernel.HasCell(ground.X, ground.Y)
+                                || HomeGridService.BuildingAt(state, ground) != null)
+                            {
+                                continue;
+                            }
+                            var placed = new List<GridCell>();
+                            for (int i = 0; i < 3; i++)
+                            {
+                                var c = new GridCell(o.X + i, o.Y);
+                                if (!PipeNetworkService.TryPlace(state, c, PipePieceKind.Pipe, 0, 0).Ok)
+                                {
+                                    break;
+                                }
+                                placed.Add(c);
+                            }
+                            if (placed.Count < 3)
+                            {
+                                foreach (GridCell c in placed)
+                                {
+                                    PipeNetworkService.TryRemove(state, c, out _);
+                                }
+                                continue;
+                            }
+                            PipeNetworkService.Kernel.AddProducer(o.X, o.Y, PipeNetworkService.FluidId("fuel"), 1_000_000L, 1_000_000L);
+                            SessionState.SetInt(K + "LeakX", o.X);
+                            SessionState.SetInt(K + "LeakY", o.Y);
+                            SessionState.SetInt(K + "LeakSetup", 1);
+                            break;
+                        }
+                    }
+                }
+                if (SessionState.GetInt(K + "LeakSetup", 0) == 0)
+                {
+                    Check(false, "镜头附近找不到 3 格空地铺燃油管线（管线泄漏）");
+                    Next(406, "跳过管线泄漏步骤");
+                }
+                return;
+            }
+            var mid = new GridCell(SessionState.GetInt(K + "LeakX", 0) + 1, SessionState.GetInt(K + "LeakY", 0));
+            bool fuel = PipeNetworkService.Kernel.TryGetCellInfo(mid.X, mid.Y, out PipeCellInfo info) && info.Fluid == PipeNetworkService.FluidId("fuel");
+            if (!fuel && inStep < 4)
+            {
+                return;
+            }
+            PipeLeakRecord leak = PipeLeakService.At(state, mid);
+            if (leak == null && fuel)
+            {
+                int max = PipeNetworkService.MaxHp(PipePieceKind.Pipe, 0);
+                PipeNetworkService.TryDamage(state, mid, max - Mathf.FloorToInt(max * PipeLeakService.BreachRatio), out _);
+                leak = PipeLeakService.At(state, mid);
+            }
+            // 真实鼠标：先指着液洼里的空地（液洼悬停），再指着被击穿的管线（管线悬停里写着正在漏）。
+            var ground2 = new GridCell(mid.X, mid.Y + 1);
+            HoverWorld(new Vector3(ground2.X, 0f, ground2.Y));
+            bool shown = UiTooltip.IsVisible && UiTooltip.HoveringWorld && UiTooltip.Content != null && leak != null
+                         && UiTooltip.Content.Title == Localization.GameText.Format("leak.hover.title", PipeNetworkService.FluidName(leak.Fluid), leak.X, leak.Y);
+            if (!shown && inStep < 10)
+            {
+                return;
+            }
+            Notifications.NotificationEntry note = Notifications.NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "pipe_leak");
+            Write($"  - 管线泄漏：破口（{mid.X},{mid.Y}），液洼 {PipeLeakService.Count(state)} 摊，内核液洼区域 {home.LeakZoneCount} 块；悬停“{UiTooltip.Content?.Title}”/“{UiTooltip.Content?.Body?.Replace('\n', '/')}”");
+            Check(fuel && leak != null && leak.State == PipeLeakService.StateLeaking && home.TryGetLeak(leak.Id, out BinGames.Sim.Combat.CombatZone z) && z.Phase == 0
+                  && note != null && note.Members.LastOrDefault()?.HasLocation == true && Progression.MechanicCodex.IsUnlocked("codex.logistics.leak"),
+                $"燃油管线被打穿：破口积起燃油液洼（内核里是挂油污的中立区域）、发“管线泄漏”警告且可定位（“{note?.Text}”）、图鉴“管线泄漏与液洼”解锁");
+            Check(shown && UiTooltip.Content.Body.Contains(Localization.GameText.Get("leak.hover.design")) && UiTooltip.Content.CodexEntryId == "codex.logistics.leak",
+                "真实鼠标指着液洼：悬停写标签、半径、还在漏、“有意设计的玩法”提示，“?”跳图鉴“管线泄漏与液洼”");
+            CheckNoTextMarkers("液洼悬停");
+            Next(425, "着火的敌人站进燃油液洼（测试捷径：内核里放一个挂着燃烧的靶子）");
+        }
+
+        private static void StepLeakIgnited(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
+            var mid = new GridCell(SessionState.GetInt(K + "LeakX", 0) + 1, SessionState.GetInt(K + "LeakY", 0));
+            PipeLeakRecord leak = PipeLeakService.At(state, mid);
+            if (SessionState.GetInt(K + "LeakBurner", 0) == 0 && home != null)
+            {
+                SessionState.SetInt(K + "LeakFires", Notifications.NotificationCenter.History.Where(n => n.Type != null && n.Type.Id == "leak_fire").Sum(n => n.Count));
+                int id = home.Kernel.Spawn(new BinGames.Sim.Combat.CombatSpawn
+                {
+                    ExtKey = -1,
+                    Kind = BinGames.Sim.Combat.CombatUnitKind.Enemy,
+                    Faction = BinGames.Sim.Combat.CombatFaction.Hostile,
+                    Behavior = BinGames.Sim.Combat.CombatBehavior.None,
+                    Flags = BinGames.Sim.Combat.CombatUnitFlags.Alive | BinGames.Sim.Combat.CombatUnitFlags.Targetable | BinGames.Sim.Combat.CombatUnitFlags.Instanced
+                            | BinGames.Sim.Combat.CombatUnitFlags.RemoveOnDeath,
+                    Position = new Unity.Mathematics.double2(mid.X, mid.Y + 0.3),
+                    Home = new Unity.Mathematics.double2(mid.X, mid.Y + 0.3),
+                    Radius = 0.4f,
+                    Health = 100000f,
+                    MaxHealth = 100000f,
+                    Weapon = -1,
+                    BehaviorProfile = -1,
+                    Priority = 1,
+                });
+                home.Kernel.ApplyStatus(id, Campaign.Content.NamedReactionCatalog.BitOf("Fire"), 20f, 2f, 0f, 0f, 0);
+                SessionState.SetInt(K + "LeakBurner", id);
+                return;
+            }
+            bool lit = leak != null && leak.State == PipeLeakService.StateReacted;
+            if (!lit && inStep < 6)
+            {
+                return;
+            }
+            BinGames.Sim.Combat.CombatZone z = default;
+            bool zone = leak != null && home != null && home.TryGetLeak(leak.Id, out z);
+            int fires = Notifications.NotificationCenter.History.Where(n => n.Type != null && n.Type.Id == "leak_fire").Sum(n => n.Count);
+            Notifications.NotificationEntry note = Notifications.NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "leak_fire");
+            Write($"  - 液洼遇火：阶段 {leak?.State}，燃烧区半径 {z.Radius:F2} 米、标签 {z.StatusMask:X}，剩 {GameClock.SecondsUntil(leak?.ReactUntilTick ?? 0):F1} 秒；告警“{note?.Text}”");
+            Check(lit && zone && z.Phase == BinGames.Sim.Combat.CombatConst.LeakPhaseReacted && z.StatusMask == Campaign.Content.NamedReactionCatalog.BitOf("Fire") && leak.Damaging
+                  && fires > SessionState.GetInt(K + "LeakFires", 0) && note?.Members.LastOrDefault()?.HasLocation == true,
+                "卡片验收（真实 Play）：燃油液洼遇到着火的敌人 → 整片变成燃烧区，发“泄漏起火”告警（写明会烧坏管线、传送带与建筑，可定位）");
+            CheckNoTextMarkers("泄漏起火");
+            home?.Kernel.Despawn(SessionState.GetInt(K + "LeakBurner", 0));
+            Next(426, "拆掉这段管线（玩家不修了）：破口两侧封口，液洼开始消退");
+        }
+
+        private static void StepLeakCleared(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            int x0 = SessionState.GetInt(K + "LeakX", 0), y0 = SessionState.GetInt(K + "LeakY", 0);
+            if (SessionState.GetInt(K + "LeakRemoved", 0) == 0)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    var c = new GridCell(x0 + i, y0);
+                    PipeNetworkService.TryRemove(state, c, out _);
+                    if (HomeValleyConstructionGhostAt(state, c) is PlannedBeltRecord g)
+                    {
+                        Campaign.Regions.HomeValleyConstruction.RemoveDestroyedGhost(state, g.PlanId);
+                    }
+                }
+                SessionState.SetInt(K + "LeakRemoved", 1);
+                return;
+            }
+            bool settled = PipeLeakService.Records(state).All(r => r == null || r.State != PipeLeakService.StateLeaking);
+            if (!settled && inStep < 6)
+            {
+                return;
+            }
+            Check(settled, $"拆掉管线后没有还在漏的液洼（{PipeLeakService.Snapshot(state)}）：燃烧区烧完 / 液洼按 logistics.leak.fade_seconds 逐渐消退");
+            GameClock.SetPaused(SessionState.GetInt(K + "LeakWasPaused", 0) == 1);
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
+
+        private static PlannedBeltRecord HomeValleyConstructionGhostAt(CampaignState s, GridCell c) =>
+            (s.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>()).FirstOrDefault(p => p != null && p.Destroyed && p.PipePiece > 0 && p.Xs != null && p.Xs.Length > 0
+                                                                                          && p.Xs[0] == c.X && p.Ys[0] == c.Y);
 
         // ── FG6-DEF-05：攻城行为与寻路（真实 Play 帧：展开、职能图标、突袭路径叠加层、120 帧预算）──
 

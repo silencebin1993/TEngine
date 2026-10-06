@@ -303,7 +303,7 @@ namespace GameLogic.EditorTools
         private static bool CanPlace(CampaignState s, string type, GridCell c) =>
             HomeGridService.ValidatePlacement(s, type, c, 0, asPlayerPlacement: false, checkCost: false).Ok;
 
-        private static Vector2 CoreCenter(CampaignState s)
+        internal static Vector2 CoreCenter(CampaignState s)
         {
             HomeGridService.TryGetCoreBounds(s, out GridCell a, out GridCell b);
             return new Vector2((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
@@ -335,7 +335,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>离核心 <paramref name="dist"/> 格、敌方可走、而且能走到核心外围的一点（按 8 个方向依次试；B25 不写死坐标）。</summary>
-        private static Vector2 OutsidePoint(CampaignState s, float dist, int startDir = 0)
+        internal static Vector2 OutsidePoint(CampaignState s, float dist, int startDir = 0)
         {
             Vector2 c = CoreCenter(s);
             for (int k = 0; k < 16; k++)
@@ -355,7 +355,7 @@ namespace GameLogic.EditorTools
         /// 测试捷径：一支已经到达 <paramref name="at"/> 的突袭队伍（编成按参数；正式派出 → 沿地形行进 → 到达由 F 段的剧情突袭覆盖）。
         /// 下一步攻城服务按编成展开。
         /// </summary>
-        private static TransitGroupRecord Arrive(CampaignState s, Vector2 at, string faction, string[] ids, int[] counts, int[] elites = null, Vector2? origin = null)
+        internal static TransitGroupRecord Arrive(CampaignState s, Vector2 at, string faction, string[] ids, int[] counts, int[] elites = null, Vector2? origin = null)
         {
             GridCell core = HomeGridService.CorePivot(s);
             Vector2 o = origin ?? (at + (at - CoreCenter(s)).normalized * 60f);
@@ -550,7 +550,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>沿 <paramref name="from"/> → <paramref name="to"/> 连线（比例 <paramref name="f0"/>～<paramref name="f1"/>，两侧偏 0～4 格）找第一个能放 <paramref name="type"/> 的格并登记。</summary>
-        private static BuildingRecord PlaceNear(CampaignState s, string type, Vector2 from, Vector2 to, float f0, float f1)
+        internal static BuildingRecord PlaceNear(CampaignState s, string type, Vector2 from, Vector2 to, float f0, float f1)
         {
             Vector2 dir = (to - from).normalized;
             Vector2 side = new Vector2(-dir.y, dir.x);

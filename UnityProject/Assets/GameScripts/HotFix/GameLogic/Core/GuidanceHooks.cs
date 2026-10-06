@@ -372,6 +372,15 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-04：第一次点预警条（镜头飞到预计抵达点）。</summary>
         public const string RaidWarningFirstClick = "raid.warning_first_click";
 
+        /// <summary>FG6-LOG-10（FGR-LOG-046）：第一次有管线被击穿、漏出液洼。</summary>
+        public const string LogisticsLeakFirst = "logistics.leak.first";
+
+        /// <summary>FG6-LOG-10：第一次有液洼整片反应（燃油遇火成燃烧区；“连锁烧毁是有意设计”的引导在 FG15-UX-04）。</summary>
+        public const string LogisticsLeakFirstReact = "logistics.leak.first_react";
+
+        /// <summary>FG6-LOG-10：第一次有液洼在管线修好后消退干净。</summary>
+        public const string LogisticsLeakFirstFaded = "logistics.leak.first_faded";
+
         /// <summary>FG6-DEF-05：第一次有突袭部队在家园展开成战斗单位（头顶职能图标、按职能选目标）。</summary>
         public const string SiegeFirstUnfold = "siege.first_unfold";
 
@@ -480,6 +489,7 @@ namespace GameLogic.Core
             RaidAwayFirstAlert, RaidAwayFirstChoice,
             RaidFirstResult, RaidResultFirstOpen, RaidFirstWreck, RaidFirstCoreLost,
             DifficultyFirstOpen, DifficultyFirstChanged,
+            LogisticsLeakFirst, LogisticsLeakFirstReact, LogisticsLeakFirstFaded,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

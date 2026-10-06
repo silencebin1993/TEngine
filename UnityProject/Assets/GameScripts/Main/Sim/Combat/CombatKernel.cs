@@ -1210,6 +1210,82 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        // ─────────────────────────────── FG6-LOG-10 管线泄漏液洼 ───────────────────────────────
+
+        /// <summary>FG6-LOG-10（FGR-LOG-046）：登记或更新一块液洼（热更层的液洼记录 → 内核区域；还没反应的那块就地改位置 / 半径 / 标签，节拍相位不变）。
+        /// 同编号已经反应成残留区域时不动并返回 false。</summary>
+        public bool UpsertLeakZone(int leakId, double2 pos, float radius, uint statusMask)
+        {
+            if (!IsFinite(pos) || float.IsNaN(radius) || float.IsInfinity(radius))
+            {
+                return false;
+            }
+            bool ok = CombatLogic.UpsertLeakZone(ref _d, leakId, pos, radius, statusMask);
+            if (ok)
+            {
+                Touch();
+            }
+            return ok;
+        }
+
+        /// <summary>移除一块液洼（含已反应的残留区域）。返回移除的区域数。</summary>
+        public int RemoveLeakZone(int leakId)
+        {
+            int n = leakId > 0 ? CombatLogic.RemoveLeakZone(ref _d, leakId) : 0;
+            if (n > 0)
+            {
+                Touch();
+            }
+            return n;
+        }
+
+        /// <summary>编号为 <paramref name="leakId"/> 的液洼区域（还没反应或已反应、未到期）。</summary>
+        public bool TryGetLeakZone(int leakId, out CombatZone zone)
+        {
+            int owner = -leakId;
+            for (int z = 0; leakId > 0 && z < _d.Zones.Length; z++)
+            {
+                CombatZone zn = _d.Zones[z];
+                if (zn.Kind == CombatConst.ZoneKindLeak && zn.Owner == owner)
+                {
+                    zone = zn;
+                    return true;
+                }
+            }
+            zone = default;
+            return false;
+        }
+
+        /// <summary>此刻内核里的液洼区域数（含已反应的残留）。</summary>
+        public int LeakZoneCount
+        {
+            get
+            {
+                int n = 0;
+                for (int z = 0; z < _d.Zones.Length; z++)
+                {
+                    if (_d.Zones[z].Kind == CombatConst.ZoneKindLeak)
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
+
+        /// <summary>取走液洼整片反应的记录（x = 液洼编号，y = 反应规则下标），按发生先后。热更层每步调用。</summary>
+        public int DrainLeakReactions(List<int2> into)
+        {
+            into?.Clear();
+            int n = _d.LeakReactions.Length;
+            for (int k = 0; k < n; k++)
+            {
+                into?.Add(_d.LeakReactions[k]);
+            }
+            _d.LeakReactions.Clear();
+            return n;
+        }
+
         public bool TryGetEcho(int index, out CombatEcho echo)
         {
             if (index < 0 || index >= _d.Echoes.Length)
@@ -1605,6 +1681,11 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, zn.Until);
                 Mix(ref h, zn.NextTick);
                 Mix(ref h, zn.Owner);
+                if (zn.Kind == CombatConst.ZoneKindLeak)
+                {
+                    Mix(ref h, zn.StatusMask); // FG6-LOG-10：液洼的标签与阶段（反应前后标签不同）
+                    Mix(ref h, (int)zn.Phase);
+                }
             }
             for (int e = 0; e < _d.Echoes.Length; e++)
             {
@@ -1957,10 +2038,24 @@ namespace BinGames.Sim.Combat
 
         private void WriteReadings(BinaryWriter w, int format)
         {
-            w.Write(_d.Zones.Length);
+            // FG6-LOG-10（格式 12）：液洼区域只写进认识它的格式（写更老的格式时略过：旧格式没有这个区域种类，液洼由热更层按记录重新登记）。
+            bool leaks = format >= 12;
+            int zoneCount = 0;
+            for (int z = 0; z < _d.Zones.Length; z++)
+            {
+                if (leaks || _d.Zones[z].Kind != CombatConst.ZoneKindLeak)
+                {
+                    zoneCount++;
+                }
+            }
+            w.Write(zoneCount);
             for (int z = 0; z < _d.Zones.Length; z++)
             {
                 CombatZone zn = _d.Zones[z];
+                if (!leaks && zn.Kind == CombatConst.ZoneKindLeak)
+                {
+                    continue;
+                }
                 w.Write(zn.Pos.x);
                 w.Write(zn.Pos.y);
                 w.Write(zn.Radius);
@@ -1984,6 +2079,10 @@ namespace BinGames.Sim.Combat
                 if (format >= 10)
                 {
                     w.Write(zn.Kind); // FG6-DEF-02（格式 10）：读法区域 / 陷阱场地（各自的上限）
+                }
+                if (leaks)
+                {
+                    w.Write(zn.Phase); // FG6-LOG-10（格式 12）：液洼阶段（液洼 / 已反应）
                 }
             }
             w.Write(_d.Echoes.Length);
@@ -2554,7 +2653,10 @@ namespace BinGames.Sim.Combat
                 }
                 // FG6-DEF-02（格式 10）：区域种类（更老的快照没有陷阱场地 = 全是读法区域）。
                 zone.Kind = format >= 10 ? r.ReadByte() : CombatConst.ZoneKindReading;
-                if (zone.Kind > CombatConst.ZoneKindField)
+                // FG6-LOG-10（格式 12）：液洼区域与它的阶段（更老的快照没有液洼，阶段 0）。液洼不归属任何单位：Owner = 液洼编号的相反数（< 0）。
+                zone.Phase = format >= 12 ? r.ReadByte() : (byte)0;
+                if (zone.Kind > (format >= 12 ? CombatConst.ZoneKindLeak : CombatConst.ZoneKindField) || zone.Phase > CombatConst.LeakPhaseReacted
+                    || (zone.Kind != CombatConst.ZoneKindLeak && zone.Phase != 0) || (zone.Kind == CombatConst.ZoneKindLeak && zone.Owner >= 0))
                 {
                     return CombatLoadResult.InvalidValue;
                 }

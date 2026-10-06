@@ -1158,12 +1158,26 @@ namespace BinGames.Sim.Combat
                     {
                         zone.NextTick = now + zone.TickInterval;
                     }
+                    // FG6-LOG-10：液洼先看自己有没有遇上能起反应的标签（整片反应成残留区域），再按节拍给站在里面的单位挂标签。
+                    if (zone.Kind == CombatConst.ZoneKindLeak && zone.Phase == CombatConst.LeakPhasePuddle)
+                    {
+                        TryReactLeak(ref d, ref zone, z, now);
+                    }
                     int owner = d.SlotOf(zone.Owner);
                     byte want = zone.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
+                    // FG6-LOG-10：中立区域（液洼与它反应成的残留）对己方机器与敌人一视同仁；建筑 / 炮塔类结构单位不在这里结算
+                    // （它们挨的火由热更层按建筑耐久结算一次，避免内核与建筑记录各扣一遍）。
+                    bool neutral = zone.Faction == CombatFaction.Neutral;
                     int n = d.Count;
                     for (int k = 0; k < n; k++)
                     {
-                        if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                        if (neutral
+                                ? d.Faction[k] == (byte)CombatFaction.Neutral || d.Kind[k] == (byte)CombatUnitKind.Turret || d.Kind[k] == (byte)CombatUnitKind.Structure
+                                : d.Faction[k] != want)
+                        {
+                            continue;
+                        }
+                        if (!d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
                         {
                             continue;
                         }
@@ -1192,6 +1206,170 @@ namespace BinGames.Sim.Combat
                 d.Zones[write++] = d.Zones[z];
             }
             d.Zones.ResizeUninitialized(write);
+        }
+
+        // ─────────────────────────────── 液洼（FG6-LOG-10，FGR-LOG-046）───────────────────────────────
+
+        /// <summary>液洼区域的“长期存在”：由热更层移除（修好管线后逐渐缩小到 0）。</summary>
+        private const double LeakForeverSeconds = 1e9;
+
+        /// <summary>登记或更新编号为 <paramref name="leakId"/> 的液洼（还没反应的那块）：位置 / 半径 / 标签就地改写，节拍相位不变；不存在时新建（中立、长期存在，由热更层移除）。
+        /// 同编号的区域已经反应成残留时不动，返回 false。O(区域数)。</summary>
+        internal static bool UpsertLeakZone(ref CombatData d, int leakId, double2 pos, float radius, uint mask)
+        {
+            if (leakId <= 0 || !(radius > 0f) || mask == 0u)
+            {
+                return false;
+            }
+            int owner = -leakId;
+            for (int z = 0; z < d.Zones.Length; z++)
+            {
+                CombatZone zn = d.Zones[z];
+                if (zn.Kind != CombatConst.ZoneKindLeak || zn.Owner != owner)
+                {
+                    continue;
+                }
+                if (zn.Phase != CombatConst.LeakPhasePuddle)
+                {
+                    return false;
+                }
+                zn.Pos = pos;
+                zn.Radius = radius;
+                zn.StatusMask = mask;
+                d.Zones[z] = zn;
+                return true;
+            }
+            double now = d.Scalars[0].Time;
+            float interval = ZoneTickOf(ref d);
+            d.Zones.Add(new CombatZone
+            {
+                Pos = pos,
+                Radius = radius,
+                Born = now,
+                Until = now + LeakForeverSeconds,
+                NextTick = now + interval,
+                TickInterval = interval,
+                StatusMask = mask,
+                StatusSeconds = ZoneStatusSecondsOf(ref d),
+                Owner = owner,
+                Faction = CombatFaction.Neutral,
+                Look = CombatZoneLook.Pool,
+                Kind = CombatConst.ZoneKindLeak,
+                Phase = CombatConst.LeakPhasePuddle,
+            });
+            return true;
+        }
+
+        /// <summary>移除编号为 <paramref name="leakId"/> 的液洼区域（含已反应的残留）。返回移除了几块。O(区域数)。</summary>
+        internal static int RemoveLeakZone(ref CombatData d, int leakId)
+        {
+            int owner = -leakId;
+            int write = 0;
+            int removed = 0;
+            for (int z = 0; z < d.Zones.Length; z++)
+            {
+                CombatZone zn = d.Zones[z];
+                if (zn.Kind == CombatConst.ZoneKindLeak && zn.Owner == owner)
+                {
+                    removed++;
+                    continue;
+                }
+                d.Zones[write++] = zn;
+            }
+            d.Zones.ResizeUninitialized(write);
+            return removed;
+        }
+
+        /// <summary>
+        /// 液洼遇上反应（只在液洼的区域节拍上检查）：此刻和它重叠的其余区域（读法区域、陷阱场地、已反应的液洼；不含别的还没反应的液洼——两摊液体挨着不算）挂的标签，
+        /// 加上站在它里面的单位身上正在生效的标签，合起来是“遇到的标签”。按反应登记顺序找第一条：配料一半在液洼上、另一半在遇到的标签里、且这条反应会留下残留区域——
+        /// 整片液洼就地变成这条反应的残留区域（半径取液洼与残留的较大者；持续 max(残留时长, 液洼反应时长配置)；中立：站进去的己方机器与敌人都挨），
+        /// 记反应计数、发反应提示事件（与单位身上的反应同一套命名 / 反馈），并给热更层记一条液洼反应（告警、烧坏范围内的管线 / 传送带 / 建筑）。
+        /// 只靠倍率起作用的反应（短路、电解……）液洼本身不结算：站进液洼、挂上标签的单位挨打时照常触发。O(区域数 + 单位数)。
+        /// </summary>
+        private static void TryReactLeak(ref CombatData d, ref CombatZone leak, int self, double now)
+        {
+            if (d.Reactions.Length == 0)
+            {
+                return;
+            }
+            uint have = leak.StatusMask & ~CombatConst.StatusBitZoneSlow;
+            uint met = 0u;
+            for (int z = 0; z < d.Zones.Length; z++)
+            {
+                if (z == self)
+                {
+                    continue;
+                }
+                CombatZone o = d.Zones[z];
+                if (o.Until <= now || (o.Kind == CombatConst.ZoneKindLeak && o.Phase == CombatConst.LeakPhasePuddle))
+                {
+                    continue;
+                }
+                if (math.distance(o.Pos, leak.Pos) <= o.Radius + leak.Radius)
+                {
+                    met |= o.StatusMask;
+                }
+            }
+            int n = d.Count;
+            for (int k = 0; k < n; k++)
+            {
+                if (!d.IsAlive(k) || d.Status[k] == 0u || !d.StatusActive(k, now))
+                {
+                    continue;
+                }
+                if (math.distance(d.Pos[k], leak.Pos) <= leak.Radius + d.Radius[k])
+                {
+                    met |= d.Status[k];
+                }
+            }
+            met &= ~CombatConst.StatusBitZoneSlow;
+            if (met == 0u)
+            {
+                return;
+            }
+            for (int i = 0; i < d.Reactions.Length; i++)
+            {
+                CombatReactionRule rule = d.Reactions[i];
+                if (rule.Pair == 0u || rule.ResidueBit == 0u || rule.ResidueSeconds <= 0f || rule.ResidueRadius <= 0f)
+                {
+                    continue;
+                }
+                uint onPuddle = have & rule.Pair;
+                uint other = rule.Pair & ~onPuddle;
+                if (onPuddle == 0u || other == 0u || (met & other) != other)
+                {
+                    continue;
+                }
+                float rd = 0f, rs = 0f, rv = 0f;
+                uint rb = rule.ResidueBit;
+                while (rb != 0u)
+                {
+                    int b = math.tzcnt(rb);
+                    rb &= rb - 1u;
+                    MergeFx(d.StatusFx[b], ref rd, ref rs, ref rv);
+                }
+                float seconds = math.max(rule.ResidueSeconds, math.max(0f, d.Config.LeakReactSeconds));
+                leak.Phase = CombatConst.LeakPhaseReacted;
+                leak.StatusMask = rule.ResidueBit;
+                leak.StatusDps = rd;
+                leak.StatusSlow = rs;
+                leak.StatusVuln = rv;
+                leak.Radius = math.max(leak.Radius, rule.ResidueRadius);
+                leak.Born = now;
+                leak.Until = now + seconds;
+                leak.Look = CombatZoneLook.Residue;
+                d.ReactionCount[i] = d.ReactionCount[i] + 1;
+                d.ReactionLastPos[i] = leak.Pos;
+                d.ReactionLastSource[i] = 0;
+                d.ReactionLastTarget[i] = 0;
+                CombatCounters counters = d.Counters[0];
+                counters.ReactionsFired++;
+                d.Counters[0] = counters;
+                Cue(ref d, CombatEventKind.TagReaction, -1, 0, 0f, leak.Pos, (byte)i);
+                d.LeakReactions.Add(new int2(-leak.Owner, i));
+                return;
+            }
         }
 
         // ─────────────────────────────── 回波 ───────────────────────────────

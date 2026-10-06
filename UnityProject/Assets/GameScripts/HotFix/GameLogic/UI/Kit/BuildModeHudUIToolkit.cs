@@ -1062,6 +1062,13 @@ namespace GameLogic.UI.Kit
                 // FG3-LOG-03（FGR-LOG-081）：建造模式里指着已建成的传送带，状态行写悬停读数（战略视角由世界悬停提示显示同一份）。
                 status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + hoverTitle + "\n" + hoverBody;
             }
+            else if (string.IsNullOrEmpty(status) && mode.HasHover
+                     && Campaign.Logistics.PipeLeakService.AtPoint(state, new Vector2(mode.HoverCell.X, mode.HoverCell.Y)) is Campaign.PipeLeakRecord leak
+                     && Campaign.Logistics.PipeLeakService.TryDescribe(state, leak, out string leakTitle, out string leakBody))
+            {
+                // FG6-LOG-10（FGR-LOG-046）：建造模式里指着液洼覆盖的空地，状态行写液洼读数（标签、阶段、有意设计的提示；战略视角由世界悬停提示显示同一份）。
+                status = leakTitle + "\n" + leakBody;
+            }
             if (!string.IsNullOrEmpty(lastResult))
             {
                 status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + GameText.Format("ui.build.last_result", lastResult);
