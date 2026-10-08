@@ -297,7 +297,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             int cost = FirmwareRestoreService.CostOf(fwId);
             bool lineOk = req.Lines.Any(l => l.Contains(FwName(fwId)) && l.Contains(cost.ToString(CultureInfo.InvariantCulture)));
-            if (!lineOk || !req.Irreversible || St.TechData != c.GetInt("tech0"))
+            if (!lineOk || !req.Irreversible || St.TechData < c.GetInt("tech0")) // 确认前不扣：只看没少（实验室 / 解析台这期间可能入账技术数据）
             {
                 return StepOutcome.Fail($"确认框内容不对：{string.Join(" / ", req.Lines)}（不可撤销 {req.Irreversible}）；或确认前就扣了技术数据（{c.GetInt("tech0")} → {St.TechData}）");
             }

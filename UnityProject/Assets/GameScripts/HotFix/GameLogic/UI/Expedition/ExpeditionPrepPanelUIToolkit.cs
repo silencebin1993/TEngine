@@ -38,6 +38,7 @@ namespace GameLogic.UI.Expedition
         private Label _intelLabel;
         private Label _adaptationLabel;
         private Label _reinforcementForecastLabel;
+        private VisualElement _exposureRow;
         private Label _exposureLabel;
         // FG1-SIG-01：信号核摘要、“编辑信号核”入口与远征途中不能修改的提醒。
         private Label _signalCoreSummaryLabel;
@@ -101,6 +102,7 @@ namespace GameLogic.UI.Expedition
             _intelLabel = _root.Q<Label>("IntelLabel");
             _adaptationLabel = _root.Q<Label>("AdaptationLabel");
             _reinforcementForecastLabel = _root.Q<Label>("ReinforcementForecastLabel");
+            _exposureRow = _root.Q<VisualElement>("ExposureRow");
             _exposureLabel = _root.Q<Label>("ExposureLabel");
             _towerBroadcastOffToggle = _root.Q<Toggle>("TowerBroadcastOffToggle");
             _list = _root.Q<ScrollView>("MachineList");
@@ -215,6 +217,17 @@ namespace GameLogic.UI.Expedition
 
             _blockedLabel.style.display = snapshot.RegionReachable ? DisplayStyle.None : DisplayStyle.Flex;
             _body.style.display = snapshot.RegionReachable ? DisplayStyle.Flex : DisplayStyle.None;
+            // FG6-E2E-01（FG-GAP-112）：页脚在 Body 外，“关闭”始终可点；“确认出发”随 Body 一起隐藏（没有目标 / 远征队在外时不能出发）。
+            _departButton.style.display = snapshot.RegionReachable ? DisplayStyle.Flex : DisplayStyle.None;
+            // ER6-EXPOSE-01：暴露值 + 带宽实时展示，让玩家在出发前就能看到“关闭广播”的真实取舍。
+            // FG6-E2E-01（FG-GAP-112）：这一行在 Body 外——还没有出征目标、远征队在外时也能看暴露、开关广播（突袭节奏的唯一手动杠杆）。
+            _exposureRow.style.display = state != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (state != null)
+            {
+                _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +
+                    (state.SignalTowerBroadcastOff ? "（广播已关闭，−3带宽）" : string.Empty);
+                _towerBroadcastOffToggle.SetValueWithoutNotify(state.SignalTowerBroadcastOff);
+            }
             if (!snapshot.RegionReachable)
             {
                 _blockedLabel.text = snapshot.BlockedReason == "region-locked"
@@ -249,11 +262,6 @@ namespace GameLogic.UI.Expedition
             {
                 _reinforcementForecastLabel.AddToClassList("exp-reinforcement-visible");
             }
-
-            // ER6-EXPOSE-01：暴露值+带宽实时展示，让玩家在出发前就能看到"关闭广播"的真实取舍。
-            _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +
-                (state.SignalTowerBroadcastOff ? "（广播已关闭，−3带宽）" : string.Empty);
-            _towerBroadcastOffToggle.SetValueWithoutNotify(state.SignalTowerBroadcastOff);
 
             // FG1-SIG-01：出发前看得到带的是哪些固件，能直接去改，并被提醒“出发后远征途中不能改”。
             _signalCoreSummaryLabel.text = GameLogic.Campaign.Signal.SignalCoreService.SummaryText(state);

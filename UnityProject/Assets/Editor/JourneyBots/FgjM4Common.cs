@@ -160,9 +160,13 @@ namespace GameLogic.EditorTools.JourneyBots
             return false;
         }
 
+        /// <summary>FG6-E2E-01：规划时“只差研究（锁定）”也算能放（FGJ-M6 在研究精炼塔之前就规划精炼链）。只在规划调用期间打开，默认关。</summary>
+        internal static bool PlanLockedOk;
+
         internal static bool Placeable(CampaignState s, string typeId, GridCell pivot, int rot, ISet<long> avoid)
         {
-            if (!HomeGridService.ValidatePlacement(s, typeId, pivot, rot, checkCost: false).Ok)
+            GridPlacementResult r = HomeGridService.ValidatePlacement(s, typeId, pivot, rot, checkCost: false);
+            if (!r.Ok && !(PlanLockedOk && r.Reasons.All(x => x.Code == GridBlockReason.Locked)))
             {
                 return false;
             }
@@ -826,7 +830,7 @@ namespace GameLogic.EditorTools.JourneyBots
                                 continue;
                             }
                             float d = NearestDist(b.Type, b.Pivot, b.Rot, q);
-                            if (d < pickD && HomeGridService.ValidatePlacement(s, PoleT2, q, 0, checkCost: false).Ok)
+                            if (d < pickD && Placeable(s, PoleT2, q, 0, null))
                             {
                                 pickD = d;
                                 pick = q;

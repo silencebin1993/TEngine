@@ -379,6 +379,37 @@ namespace GameLogic.Campaign.Nav
         public static bool RouteClear(int2 start, IReadOnlyList<int2> points, int from, int cls) =>
             Kernel != null && Kernel.RouteClear(start, points, from, cls);
 
+        /// <summary>
+        /// FG6-E2E-01：这次地形变化（寻路内核的 Changed，下一次 ClearChanged 之前）有没有落在线段 <paramref name="a"/>–<paramref name="b"/> 外接框所在的区块里。
+        /// 碰不到的路段不可能被这次变化新挡住（格线上的格都在外接框里），行进队伍据此只重查碰得到的路段（<see cref="WorldSim.WorldTransitSystem.InvalidateRoutes"/>）。没绑定时按“碰得到”处理。
+        /// </summary>
+        public static bool ChangedNear(int2 a, int2 b)
+        {
+            if (!IsBound)
+            {
+                return true;
+            }
+            IReadOnlyList<long> changed = Kernel.Changed;
+            if (changed.Count == 0)
+            {
+                return false;
+            }
+            int size = Kernel.Config.ChunkSize;
+            int cx0 = NavGridOps.FloorDiv(Math.Min(a.x, b.x), size);
+            int cx1 = NavGridOps.FloorDiv(Math.Max(a.x, b.x), size);
+            int cy0 = NavGridOps.FloorDiv(Math.Min(a.y, b.y), size);
+            int cy1 = NavGridOps.FloorDiv(Math.Max(a.y, b.y), size);
+            for (int i = 0; i < changed.Count; i++)
+            {
+                NavGridOps.Unkey(changed[i], out int cx, out int cy);
+                if (cx >= cx0 && cx <= cx1 && cy >= cy0 && cy <= cy1)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>热更层的请求方（队伍、巡逻）发一条请求。</summary>
         public static void Request(int ownerTag, int ownerKey, int serial, byte cls, GridCell start, GridCell goal, bool allowPartial)
         {

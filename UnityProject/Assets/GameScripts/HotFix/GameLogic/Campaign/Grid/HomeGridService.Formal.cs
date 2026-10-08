@@ -499,6 +499,25 @@ namespace GameLogic.Campaign.Grid
             FootprintClaimed?.Invoke(state, footprint);
         }
 
+        private static readonly List<GridCell> CompletedCells = new List<GridCell>(16);
+
+        /// <summary>
+        /// FG6-E2E-01（FG-GAP-113）：施工完工（虚影 / 废墟 → 建成、开始挡己方机器）的那一刻，站在占地里的家园机器挪到最近的空格——与放置时让位同一入口（FG-GAP-015）。
+        /// 放置时已经让过位，但施工期间机器会被挤进虚影格（互相避让 / 刚好停在那里），不挪就被关在建好的墙或建筑里，之后的工单一直“路径卡住”（FGJ-M6R 抓到）。
+        /// 闸门放行己方单位，不挪。O(机器数)，只在完工那一刻。
+        /// </summary>
+        public static void ClaimCompletedFootprint(CampaignState state, BuildingRecord b)
+        {
+            if (state == null || b == null || Defense.DefenseCatalog.KindOf(b.BuildingTypeId) == Defense.DefenseKind.Gate
+                || !GridContent.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.BuildingGrid g))
+            {
+                return;
+            }
+            GridMath.FootprintCells(new GridCell(b.GridX, b.GridY), g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(b.Rotation), CompletedCells);
+            LastMachinesPushed = 0;
+            FootprintClaimed?.Invoke(state, CompletedCells);
+        }
+
         // ── 传送带：拖拽铺设与拆除（FGR-LOG-004、007）────────────────────────────────
 
         /// <summary>从 <paramref name="from"/> 到 <paramref name="to"/> 的传送带路径（自动转角）：先走相差更多的那个轴，再走另一个轴；

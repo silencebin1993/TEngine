@@ -26,6 +26,8 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM4ReverseJourney.Id, FgjM4ReverseJourney.Build }, // FG4-E2E-01：M4 反向旅程（IC-REQ-022 六类）
             { FgjM5Journey.Id, FgjM5Journey.Build }, // FG5-E2E-01：M5 出口旅程
             { FgjM5ReverseJourney.Id, FgjM5ReverseJourney.Build }, // FG5-E2E-01：M5 反向旅程（IC-REQ-022 六类）
+            { FgjM6Journey.Id, FgjM6Journey.Build }, // FG6-E2E-01：M6 出口旅程
+            { FgjM6ReverseJourney.Id, FgjM6ReverseJourney.Build }, // FG6-E2E-01：M6 反向旅程（IC-REQ-022 六类）
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;

@@ -18,7 +18,8 @@ namespace GameLogic.Campaign.WorldSim
     /// - 纯数据：队伍 = 人数 + 双精度格坐标 + 目标 + 速度 + 路线，存在 <see cref="RaidState.InTransit"/>，由 <see cref="WorldSimulation"/>
     ///   按统一时钟的固定步推进。**没有表现对象也照常推进**，镜头在不在旁边结果都一样（FGR-BASE-021）；表现层只读这里的位置。
     /// - 沿地形行进（FG0-ARCH-06）：出发后向寻路服务要一条路线（敌方类别，允许部分路线），按固定延迟拿到后沿路点走；
-    ///   路线中途被新建筑截断时从当前位置重新规划；通往核心的路被完全堵住时走到最近处停下，“突袭到达”通知里写明原因（攻城在 FG6-DEF-05）。
+    ///   路线中途被新建筑截断时重新规划（挡在脚下这一段立即从当前位置；挡在后面的路段走到挡点前的路点再规划，到达半径里的路段不算，见 <see cref="InvalidateRoutes"/>）；
+    ///   通往核心的路被完全堵住时走到最近处停下，“突袭到达”通知里写明原因（攻城在 FG6-DEF-05）。
     ///   寻路服务没有绑定（没有家园的自检场景）时退回直线。
     /// - 确定性：队伍 ID、寻路序号按存档里的计数递增（不用 GUID）；路线在固定的采纳步交到。
     /// - 出发点按种子生成的规划层取（领地中心朝家园方向的边缘），或从敌方据点出发（<see cref="DispatchRaidFromOutpost"/>，会唤醒据点）。
@@ -304,7 +305,7 @@ namespace GameLogic.Campaign.WorldSim
                         Arrive(g, blocked: true);
                         continue;
                 }
-                if (FollowRoute(g, g.Speed * (double)dt, arrival))
+                if (FollowRoute(g, g.Speed * (double)dt, arrival, recheck: true))
                 {
                     double ex = g.TargetX - g.PosX;
                     double ey = g.TargetY - g.PosY;
@@ -510,8 +511,9 @@ namespace GameLogic.Campaign.WorldSim
             return sum;
         }
 
-        /// <summary>沿路线走一步（一步里可以越过几个路点；途中进入到达半径就停在那里）。返回 true = 到达路线终点或进入到达半径。</summary>
-        private static bool FollowRoute(TransitGroupRecord g, double stepLen, double arrival)
+        /// <summary>沿路线走一步（一步里可以越过几个路点；途中进入到达半径就停在那里）。返回 true = 到达路线终点或进入到达半径。
+        /// <paramref name="recheck"/>（行军中、寻路服务已绑定）：每到一个路点查下一段还通不通，不通就停在这个路点、下一步从这里重新要路线（FG6-E2E-01，见 <see cref="InvalidateRoutes"/>）。</summary>
+        private static bool FollowRoute(TransitGroupRecord g, double stepLen, double arrival, bool recheck = false)
         {
             int n = g.RouteX?.Length ?? 0;
             double remaining = stepLen;
@@ -532,6 +534,12 @@ namespace GameLogic.Campaign.WorldSim
                     g.PosY = ty;
                     remaining -= d;
                     g.RouteIndex++;
+                    if (recheck && g.RouteIndex < n && !NextSegmentClear(g, arrival))
+                    {
+                        g.RouteState = RouteNeed; // 下一段被挡：停在这个路点，下一步从这里重新要路线
+                        WaypointReplans++;
+                        return false;
+                    }
                 }
                 else
                 {
@@ -663,29 +671,160 @@ namespace GameLogic.Campaign.WorldSim
 
         private static readonly List<int2> RouteScratch = new List<int2>(64);
 
-        /// <summary>地形变化后：剩余路线被挡的队伍从当前位置重新要路线。返回失效条数。</summary>
+        /// <summary>FG6-E2E-01：地形变化后路线被挡、但挡在后面的路段（不是脚下这一段）的次数——不立即重新要路线，走到挡点前的路点再重新规划（统计 / 自检）。</summary>
+        public static int DeferredInvalidations { get; private set; }
+
+        /// <summary>FG6-E2E-01：走到路点时发现下一段被挡、从这里重新要路线的次数（统计 / 自检）。</summary>
+        public static int WaypointReplans { get; private set; }
+
+        /// <summary>
+        /// 地形变化后：剩余路线被挡的队伍重新要路线。返回失效条数。
+        /// FG6-E2E-01（M6 出口性能基线“施工高峰”卡顿的根因修复；剖析见 ADR-QA-023 第 9 节）：
+        /// ① 只查这次变了的区块：路段的外接框碰不到这次变化的区块（<see cref="NavService.ChangedNear"/>），这一段不可能被新挡住，不查。原来每次地形变化都把每支队伍的整条剩余路线
+        ///    重查一遍——从队伍此刻所在格（路段中间，不在格点上）到下一个路点的直线和原来那段（从上一个路点出发）不是同一条格线，贴着障碍拐角时会误判“被挡”，
+        ///    远在上千格外的队伍于是因为家园附近一座虚影完工（虚影不挡敌方、完工挡，FG6-DEF-05：每次完工都是一次地形变化）当场从上千格外重新要整条路线；
+        ///    这条长路线落在常规寻路批次里，途经区块的抽象图都是冷的，采纳步主线程硬等 200～300 ms（一步卡顿）。
+        /// ② 只查队伍真的会走的那一段——进入到达半径就到达（<see cref="FollowRoute"/>），半径里的路段被新建筑挡住不算失效。
+        /// ③ 挡在脚下这一段（当前位置 → 下一个路点）才立即从当前位置重新要路线；挡在后面的路段先照原路走，走到挡点前的那个路点时
+        ///    （<see cref="NextSegmentClear"/>）再从那里重新要一段短路线（区块图热、几毫秒）。结果只取决于路线与格网，存读档、观察与否都一致。
+        /// </summary>
         public static int InvalidateRoutes(CampaignState state)
         {
             int n = 0;
+            double arrival = ArrivalRadius;
             foreach (TransitGroupRecord g in Groups(state))
             {
                 if (g == null || g.State != TransitGroupState.Marching || g.RouteState != RouteFollowing)
                 {
                     continue;
                 }
-                RouteScratch.Clear();
-                for (int k = g.RouteIndex; k < (g.RouteX?.Length ?? 0); k++)
-                {
-                    RouteScratch.Add(new int2(g.RouteX[k], g.RouteY[k]));
-                }
+                FillWalkPortion(g, arrival, WalkScratch);
                 GridCell c = NavService.CellOf(g.PosX, g.PosY);
-                if (!NavService.RouteClear(new int2(c.X, c.Y), RouteScratch, 0, NavConst.ClassHostile))
+                int2 prev = new int2(c.X, c.Y);
+                int blocked = -1;
+                for (int k = 0; k < WalkScratch.Count; k++)
                 {
-                    g.RouteState = RouteNeed;
-                    n++;
+                    int2 p = WalkScratch[k];
+                    if (NavService.ChangedNear(prev, p))
+                    {
+                        RouteScratch.Clear();
+                        RouteScratch.Add(p);
+                        if (!NavService.RouteClear(prev, RouteScratch, 0, NavConst.ClassHostile))
+                        {
+                            blocked = k;
+                            break;
+                        }
+                    }
+                    prev = p;
+                }
+                if (blocked < 0)
+                {
+                    continue;
+                }
+                n++;
+                if (blocked == 0)
+                {
+                    g.RouteState = RouteNeed; // 挡在脚下这一段：从当前位置重新要路线
+                }
+                else
+                {
+                    DeferredInvalidations++; // 挡在后面的路段：走到挡点前的路点再重新规划（FollowRoute → NextSegmentClear）
                 }
             }
             return n;
+        }
+
+        private static readonly List<int2> WalkScratch = new List<int2>(64);
+        /// <summary>
+        /// 队伍从当前位置起真的会走的路点（<paramref name="into"/>）：沿路线直到第一次进入到达半径为止，最后一点换成进入半径的那一格（与 <see cref="FollowRoute"/> 同一套几何）。
+        /// </summary>
+        private static void FillWalkPortion(TransitGroupRecord g, double arrival, List<int2> into)
+        {
+            into.Clear();
+            int n = Math.Min(g.RouteX?.Length ?? 0, g.RouteY?.Length ?? 0);
+            double px = g.PosX;
+            double py = g.PosY;
+            for (int k = Math.Max(0, g.RouteIndex); k < n; k++)
+            {
+                double qx = g.RouteX[k];
+                double qy = g.RouteY[k];
+                if (SegmentEntersArrival(px, py, qx, qy, g.TargetX, g.TargetY, arrival, out double ex, out double ey))
+                {
+                    GridCell e = NavService.CellOf(ex, ey);
+                    into.Add(new int2(e.X, e.Y));
+                    return;
+                }
+                into.Add(new int2(g.RouteX[k], g.RouteY[k]));
+                px = qx;
+                py = qy;
+            }
+        }
+
+        /// <summary>线段 p → q 是否进入以 t 为圆心、<paramref name="arrival"/> 为半径的圆（起点已在圆里也算），进入点写到 e。与 <see cref="PathUntilArrival"/> 同一套解法。</summary>
+        private static bool SegmentEntersArrival(double px, double py, double qx, double qy, double tx, double ty, double arrival, out double ex, out double ey)
+        {
+            ex = px;
+            ey = py;
+            double r2 = arrival * arrival;
+            double fx = px - tx;
+            double fy = py - ty;
+            double c = fx * fx + fy * fy - r2;
+            if (c <= 0)
+            {
+                return true;
+            }
+            double dx = qx - px;
+            double dy = qy - py;
+            double a = dx * dx + dy * dy;
+            if (a <= 1e-24)
+            {
+                return false;
+            }
+            double b = 2 * (fx * dx + fy * dy);
+            double disc = b * b - 4 * a * c;
+            if (disc < 0)
+            {
+                return false;
+            }
+            double t = (-b - Math.Sqrt(disc)) / (2 * a);
+            if (t < 0 || t > 1)
+            {
+                return false;
+            }
+            ex = px + t * dx;
+            ey = py + t * dy;
+            return true;
+        }
+
+        /// <summary>
+        /// FG6-E2E-01：行军中走到一个路点时查下一段（到下一个路点；进入到达半径的话只查到半径边上）还走不走得通——
+        /// 地形变化时挡在后面路段的那些路线（<see cref="InvalidateRoutes"/> 没有立即重新规划）在这里、离挡点最近的路点上重新要路线。O(一段的格数)。
+        /// </summary>
+        private static bool NextSegmentClear(TransitGroupRecord g, double arrival)
+        {
+            int n = Math.Min(g.RouteX?.Length ?? 0, g.RouteY?.Length ?? 0);
+            if (g.RouteIndex >= n || !NavService.IsBound)
+            {
+                return true;
+            }
+            double ax = g.TargetX - g.PosX;
+            double ay = g.TargetY - g.PosY;
+            if (Math.Sqrt(ax * ax + ay * ay) <= arrival)
+            {
+                return true;
+            }
+            double qx = g.RouteX[g.RouteIndex];
+            double qy = g.RouteY[g.RouteIndex];
+            int2 end = new int2(g.RouteX[g.RouteIndex], g.RouteY[g.RouteIndex]);
+            if (SegmentEntersArrival(g.PosX, g.PosY, qx, qy, g.TargetX, g.TargetY, arrival, out double ex, out double ey))
+            {
+                GridCell e = NavService.CellOf(ex, ey);
+                end = new int2(e.X, e.Y);
+            }
+            RouteScratch.Clear();
+            RouteScratch.Add(end);
+            GridCell c = NavService.CellOf(g.PosX, g.PosY);
+            return NavService.RouteClear(new int2(c.X, c.Y), RouteScratch, 0, NavConst.ClassHostile);
         }
 
         /// <summary>寻路快照读不了时：在等路线的队伍重新要（旧序号作废）。</summary>
@@ -893,6 +1032,8 @@ namespace GameLogic.Campaign.WorldSim
             WithdrawalCount = 0;
             RetreatsCompleted = 0;
             DestroyedCount = 0;
+            DeferredInvalidations = 0;
+            WaypointReplans = 0;
             Finished.Clear();
         }
     }

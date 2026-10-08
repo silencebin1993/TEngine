@@ -66,6 +66,8 @@ namespace GameLogic.UI.Kit
         public Button OverviewButton => _overview;
 
         private readonly List<string> _blueprintIds = new List<string>();
+        /// <summary>FG6-E2E-01（FG-GAP-115）：下拉每一行代表的版本（现在装的那张旧版本一行 + 同一张蓝图的最新版本另起一行，选它 = 换到最新版本）。</summary>
+        private readonly List<int> _blueprintRowVersions = new List<int>();
         private int _key;
         private float _nextReadings;
         private bool _suppress;
@@ -294,8 +296,9 @@ namespace GameLogic.UI.Kit
                 return;
             }
             TurretRecord r = TurretService.Find(CampaignSession.Current, BuildingId);
-            if (r != null && r.BlueprintId == _blueprintIds[i] && TurretService.TryGetReadout(CampaignSession.Current, BuildingId, out TurretReadout ro)
-                && ro.BlueprintVersion == ro.LatestVersion)
+            int rowVersion = i < _blueprintRowVersions.Count ? _blueprintRowVersions[i] : 0;
+            if (r != null && r.BlueprintId == _blueprintIds[i] && (rowVersion == r.BlueprintVersion
+                || TurretService.TryGetReadout(CampaignSession.Current, BuildingId, out TurretReadout ro) && ro.BlueprintVersion == ro.LatestVersion))
             {
                 return; // 选的就是现在装的（同一版本）：不算一次操作
             }
@@ -393,20 +396,33 @@ namespace GameLogic.UI.Kit
 
                 // 蓝图下拉：同一种炮塔座能装的（选中项 = 现在装的；现在装的不能用了也列出来，选别的就换掉）。
                 _blueprintIds.Clear();
+                _blueprintRowVersions.Clear();
                 var choices = new List<string>();
                 if (found)
                 {
-                    TurretService.BlueprintChoices(s, ro.Size, _blueprintIds);
-                    if (!string.IsNullOrEmpty(ro.BlueprintId) && !_blueprintIds.Contains(ro.BlueprintId))
+                    var usable = new List<string>();
+                    TurretService.BlueprintChoices(s, ro.Size, usable);
+                    var ids = new List<string>(usable);
+                    if (!string.IsNullOrEmpty(ro.BlueprintId) && !ids.Contains(ro.BlueprintId))
                     {
-                        _blueprintIds.Insert(0, ro.BlueprintId);
+                        ids.Insert(0, ro.BlueprintId);
                     }
-                    foreach (string id in _blueprintIds)
+                    foreach (string id in ids)
                     {
                         BlueprintRecord rec = Campaign.Blueprint.BlueprintEditorService.Find(s, id);
                         string name = TurretService.BlueprintName(rec);
                         int ver = id == ro.BlueprintId ? ro.BlueprintVersion : rec?.ActiveVersion ?? 0;
+                        _blueprintIds.Add(id);
+                        _blueprintRowVersions.Add(ver);
                         choices.Add(GameText.Format("turret.panel.blueprint_row", name, ver.ToString(CultureInfo.InvariantCulture))); // 同名由 Apply 去重
+                        // FG6-E2E-01（FG-GAP-115）：已建炮塔钉住建造时的版本；这张蓝图后来改出了新版本时，紧跟着列一行“同一张蓝图 · 最新版本”，选它就换到最新版本
+                        // （原来下拉里同一张蓝图只有一行、显示的是旧版本，重新选它不触发变化——已建的炮塔没有任何入口换到新版本）。
+                        if (id == ro.BlueprintId && rec != null && rec.ActiveVersion > ro.BlueprintVersion && usable.Contains(id))
+                        {
+                            _blueprintIds.Add(id);
+                            _blueprintRowVersions.Add(rec.ActiveVersion);
+                            choices.Add(GameText.Format("turret.panel.blueprint_row", name, rec.ActiveVersion.ToString(CultureInfo.InvariantCulture)));
+                        }
                     }
                 }
                 DropdownChoices.Apply(_blueprint, choices, GameText.Format("turret.panel.blueprint_none", found ? TurretCatalog.SizeName(ro.Size) : string.Empty));

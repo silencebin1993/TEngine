@@ -448,6 +448,8 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
+            // FG6-E2E-01（FG-GAP-113）：完工即挡己方机器——被挤进施工格的机器挪到最近的空格，不被关在墙 / 建筑里（闸门放行己方，不挪）。
+            HomeGridService.ClaimCompletedFootprint(state, b);
             if (!DefenseCatalog.BlocksMovement(b.BuildingTypeId))
             {
                 // FG6-DEF-05：废墟重建完工（被摧毁 → 运转）重新挡路——普通建筑也立即标脏（与读档重建的镜像一致）。

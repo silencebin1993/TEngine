@@ -64,9 +64,19 @@ namespace GameLogic.Stage
         }
 
         /// <summary>FG0-UX-01（FGR-UX-021）：通知触发的自动暂停。只在世界正在运行时暂停并返回 true。</summary>
-        private static bool AutoPauseForNotification()
+        private static bool AutoPauseForNotification() => Application.isPlaying && TryAutoPauseWorld();
+
+        /// <summary>通知自动暂停的判定与落点（<see cref="AutoPauseForNotification"/> 在 Play 里调它；[M6 出口] 自检在编辑模式下直接挂它做行为断言）：
+        /// 世界正在运行才暂停并返回 true；接入直控时不暂停（FG-GAP-114）。</summary>
+        public static bool TryAutoPauseWorld()
         {
-            if (!Application.isPlaying || !AnyRegionActive || IsWorldPaused)
+            if (!AnyRegionActive || IsWorldPaused)
+            {
+                return false;
+            }
+            // FG6-E2E-01（FG-GAP-114）：接入直控时不自动暂停——直控锁 1x、暂停键只在战略视角生效，自动暂停会把正在开的机器冻住而暂停键按不动
+            // （FGJ-M6R：开着机器冲向突袭部队时“攻城开始”自动暂停，世界停住、玩家只能先退出接入）。通知照常弹出、进历史。
+            if (GameClock.DirectLocked)
             {
                 return false;
             }
