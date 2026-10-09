@@ -43,7 +43,7 @@ namespace GameLogic.EditorTools
     /// G 施工：暂停下可规划不推进；0.5x / 1x / 2x 下完工所需游戏时间相同。
     /// H 存读档：格网字段与格网域真文件往返、占用重建一致、实例序号续编；旧 v2 存档（无格网字段）迁移。
     /// I 后台一致性：同一组规划操作经建造模式（观察）与直接调服务（不观察）结果逐字段一致（FGR-BASE-021）。
-    /// J 叠加层与界面：地形颜色 + 图案、迷雾变暗、核心通道；HUD 绑定真 UXML，中英文布局探针。
+    /// J 叠加层与界面：鼠标附近透明网格、范围与跟随；HUD 绑定真 UXML，中英文布局探针。
     /// K 性能：放置校验与建筑数无关；占用重建、区块生成耗时（Editor batchmode 数字）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>。
     /// </summary>
@@ -1167,34 +1167,43 @@ namespace GameLogic.EditorTools
             CampaignState s = NewHome(8100);
             var mode = new HomeValleyBuildMode();
             HomeValleyBuildMode.Bind(mode);
+            bool originalGridLines = GameSettings.BuildGridLinesEnabled;
             try
             {
+                GameSettings.SetBuildGridLinesEnabled(true);
                 mode.Open();
-                // FG0-ARCH-05：叠加层按区块分块、跟随镜头，贴图在工作线程画；这里同步补齐窗口再读像素（断言与 FG0-ARCH-04 相同）。
-                mode.CompleteOverlayNow(s);
-                GridCell? cliff = FindTerrain(s, "cliff", 36);
-                bool ok = mode.TerrainOverlay != null && mode.TerrainOverlay.TileCount > 0 && mode.TerrainOverlay.PlaceholderCount == 0;
-                string detail = "无贴图";
-                if (ok && cliff != null)
+                GridCell focus = new GridCell(-8, 26);
+                bool hiddenOnOpen = GameObject.Find("BuildLocalGrid") == null;
+                mode.SetHover(s, focus);
+                mode.UpdateTerrainOverlay(s, focus);
+                bool ok = mode.TryGetOverlayPixel(focus, 0, 3, out Color32 line)
+                    && mode.TryGetOverlayPixel(focus, 3, 3, out Color32 inner)
+                    && mode.TryGetOverlayPixel(new GridCell(focus.X + 4, focus.Y), 0, 3, out Color32 edge)
+                    && line.a > edge.a && edge.a > 0 && inner.a == 0
+                    && !mode.TryGetOverlayPixel(new GridCell(focus.X + 5, focus.Y), 0, 3, out _);
+                GridCell moved = new GridCell(20, -12);
+                mode.SetHover(s, moved);
+                mode.UpdateTerrainOverlay(s, moved);
+                GameObject grid = GameObject.Find("BuildLocalGrid");
+                ok &= grid != null && Vector3.Distance(grid.transform.position, new Vector3(moved.X, 0.03f, moved.Y)) < 0.001f
+                    && mode.TryGetOverlayPixel(moved, 0, 3, out _)
+                    && !mode.TryGetOverlayPixel(focus, 0, 3, out _)
+                    && grid.GetComponent<MeshRenderer>().sharedMaterial.mainTexture.width == 54
+                    && mode.TerrainOverlay.TileCount == 0 && mode.TerrainOverlay.PendingCount == 0;
+                Expect(hiddenOnOpen && ok, "建造网格：打开菜单不切换地貌；鼠标附近 9×9 格透明线条、格内透明、边缘渐隐；跟随鼠标，不创建全图区块贴图");
+                var pointerCameraGo = new GameObject("__fggrid_pointer_camera");
+                try
                 {
-                    Color32 Pixel(GridCell c, int px, int py)
-                    {
-                        if (!mode.TryGetOverlayPixel(c, px, py, out Color32 col))
-                        {
-                            ok = false;
-                        }
-                        return col;
-                    }
-                    ColorUtility.TryParseHtmlString(GridContent.Terrains.First(t => t.Id == "cliff").Color, out Color cliffColor);
-                    Color32 cc = cliffColor;
-                    Color32 plain = Pixel(cliff.Value, 2, 2);
-                    Color32 hatch = Pixel(cliff.Value, 3, 3);
-                    Color32 fog = Pixel(new GridCell(36, 36), 3, 2);
-                    Color32 reserve = Pixel(new GridCell(0, 4), 0, 0);
-                    ok = ok && Close(plain, cc) && hatch.r < plain.r && fog.r < 60 && fog.g < 60 && reserve.r > 200 && reserve.g > 180;
-                    detail = $"悬崖底色 {plain} 斜线 {hatch}；迷雾 {fog}；核心通道 {reserve}；贴图 {mode.TerrainOverlay.TileCount} 块";
+                    InputRouter.CaptureUiPointer(90001);
+                    mode.Tick(pointerCameraGo.AddComponent<Camera>(), s, true);
+                    Expect(!mode.HasHover && !mode.TryGetOverlayPixel(moved, 0, 3, out _),
+                        "建造网格：界面捕获鼠标时隐藏网格与旧悬停位置，避免继续显示上一个落点");
                 }
-                Expect(ok && cliff != null, $"地形叠加层由格网数据画出：悬崖 = 表颜色 + 斜线图案（色盲安全），迷雾变暗，核心通道黄框（{detail}）");
+                finally
+                {
+                    InputRouter.ReleaseUiPointer(90001);
+                    Object.DestroyImmediate(pointerCameraGo);
+                }
 
                 mode.Select("generator_2");
                 mode.SetHover(s, new GridCell(0, 3));
@@ -1282,12 +1291,11 @@ namespace GameLogic.EditorTools
             }
             finally
             {
+                GameSettings.SetBuildGridLinesEnabled(originalGridLines);
                 mode.Shutdown();
                 HomeValleyBuildMode.Unbind(mode);
             }
         }
-
-        private static bool Close(Color32 a, Color32 b) => Math.Abs(a.r - b.r) <= 3 && Math.Abs(a.g - b.g) <= 3 && Math.Abs(a.b - b.b) <= 3;
 
         // ── K. 性能 ──────────────────────────────────────────────────────────────
 

@@ -89,6 +89,8 @@ namespace GameLogic.UI.PrimitiveCraft
             }
 
             BindElements();
+            _root.pickingMode = PickingMode.Ignore;
+            UiEscapeStack.RegisterPage(this, _panel);
             WireEvents();
             SetPanelOpen(false);
         }
@@ -187,7 +189,22 @@ namespace GameLogic.UI.PrimitiveCraft
         private void SetPanelOpen(bool open)
         {
             GameRoot.HomeValley?.SetCraftStationPanelOpen(open);
+            SyncPanelOpen(GameRoot.HomeValley?.IsCraftStationPanelOpen == true);
             RefreshAll();
+        }
+
+        private void SyncPanelOpen(bool open)
+        {
+            _panel.EnableInClassList("craft-hidden", !open);
+            if (open)
+            {
+                GameLogic.Core.InputRouter.PushModal(this);
+            }
+            else
+            {
+                GameLogic.Core.InputRouter.PopModal(this);
+            }
+            UiEscapeStack.Sync(this, open, _escClose ??= () => SetPanelOpen(false));
         }
 
         /// <summary>FG0-UX-01（FGR-UX-001）：Esc 逐层返回——面板开着时在 Esc 栈里占一层（缓存委托，不每帧分配）。</summary>
@@ -204,14 +221,12 @@ namespace GameLogic.UI.PrimitiveCraft
             _entryToggleButton.parent.EnableInClassList("craft-hidden", !regionActive || HomeValleyBuildMode.Current?.IsOpen == true || Kit.UiEscapeStack.CurrentPage != null);
             if (!regionActive)
             {
-                _panel.EnableInClassList("craft-hidden", true);
-                UiEscapeStack.Sync(this, false, null);
+                SyncPanelOpen(false);
                 return;
             }
 
             bool open = GameRoot.HomeValley.IsCraftStationPanelOpen;
-            _panel.EnableInClassList("craft-hidden", !open);
-            UiEscapeStack.Sync(this, open, _escClose ??= () => SetPanelOpen(false));
+            SyncPanelOpen(open);
             if (!open)
             {
                 return;
@@ -368,6 +383,9 @@ namespace GameLogic.UI.PrimitiveCraft
 
         private void OnDestroy()
         {
+            GameRoot.HomeValley?.SetCraftStationPanelOpen(false);
+            GameLogic.Core.InputRouter.PopModal(this);
+            UiEscapeStack.UnregisterPage(this);
             if (_visualTree != null)
             {
                 GameModule.Resource.UnloadAsset(_visualTree);

@@ -2205,13 +2205,18 @@ namespace GameLogic.EditorTools
             }
             CampaignState state = CampaignSession.Current;
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
-            Campaign.Regions.WorldTerrainOverlay ov = mode?.TerrainOverlay;
+            Campaign.Regions.WorldTerrainOverlay ov = WorldPlanetView.Terrain;
             Campaign.WorldGen.WorldChunkStreamer streamer = state != null ? Campaign.Grid.HomeGridService.Streamer(state) : null;
             int r = Campaign.Grid.GridContent.TuningInt("world.view_radius_chunks");
             int tiles = (2 * r + 1) * (2 * r + 1);
-            Check(ov != null && ov.TileCount == tiles && ov.PlaceholderCount == 0 && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.GeneratingVisible
+            Check(WorldPlanetView.TerrainShown && ov != null && ov.TileCount == tiles && ov.PlaceholderCount == 0
+                  && mode?.TerrainOverlay != null && mode.TerrainOverlay.TileCount == 0
+                  && mode.TryGetOverlayPixel(mode.HoverCell, 0, 3, out Color32 gridLine) && gridLine.a > 0
+                  && mode.TryGetOverlayPixel(mode.HoverCell, 3, 3, out Color32 gridInner) && gridInner.a == 0
+                  && !mode.TryGetOverlayPixel(new Campaign.Grid.GridCell(mode.HoverCell.X + 5, mode.HoverCell.Y), 0, 3, out _)
+                  && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.GeneratingVisible
                   && streamer != null && streamer.UsesKernel && streamer.TotalIntegrated > 0,
-                $"地形叠加层按区块显示 {ov?.TileCount}/{tiles} 块、没有“生成中”占位（家园进入后已由工作线程预生成 {streamer?.TotalIntegrated} 块）；世界生成器 = {state?.Grid?.TerrainSourceId} v{state?.World?.GeneratorVersion}");
+                $"建造中保留原地貌 {ov?.TileCount}/{tiles} 块；鼠标附近叠加透明网格，远处没有网格；世界生成器 = {state?.Grid?.TerrainSourceId} v{state?.World?.GeneratorVersion}");
             SessionState.SetInt(K + "PanStartChunk", ov != null ? ov.WindowChunkX : int.MinValue);
             streamer?.ResetMetrics();
             InputRouter.DebugSetReader(new HeldReader { Held = GameSettings.KeyBindings.GetKey(GameActionId.StrategyPanRight), Mouse = _buildMouse });
@@ -2236,12 +2241,12 @@ namespace GameLogic.EditorTools
             }
             CampaignState state = CampaignSession.Current;
             Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
-            Campaign.Regions.WorldTerrainOverlay ov = mode?.TerrainOverlay;
+            Campaign.Regions.WorldTerrainOverlay ov = WorldPlanetView.Terrain;
             Campaign.WorldGen.WorldChunkStreamer streamer = state != null ? Campaign.Grid.HomeGridService.Streamer(state) : null;
             int startChunk = SessionState.GetInt(K + "PanStartChunk", int.MinValue);
             Camera cam = Camera.main;
             Check(ov != null && ov.WindowChunkX > startChunk && ov.PlaceholderCount == 0 && BuildModeHudUIToolkit.Instance != null && !BuildModeHudUIToolkit.Instance.GeneratingVisible,
-                $"镜头右移（x = {cam?.transform.position.x:F1}）跨过区块边界：叠加层窗口从区块 {startChunk} 跟到 {ov?.WindowChunkX}，新露出的区块已补齐、没有残留占位");
+                $"镜头右移（x = {cam?.transform.position.x:F1}）跨过区块边界：原地貌窗口从区块 {startChunk} 跟到 {ov?.WindowChunkX}，新露出的区块已补齐、没有残留占位");
             CheckPerf(streamer != null,
                 $"平移期间流式加载主线程每帧最多 {streamer?.MaxTickMs:F3} ms（真实 Play，影子工程 batchmode）",
                 PerfGate.Lt(streamer?.MaxTickMs ?? double.NaN, 16.0, "流式加载每帧最多 ms"));

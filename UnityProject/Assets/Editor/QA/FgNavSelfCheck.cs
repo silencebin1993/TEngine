@@ -1609,12 +1609,12 @@ namespace GameLogic.EditorTools
                 GameObject end = GameObject.Find($"SquadCommandDestination_{id}");
                 bool Matches(Vector2 destination)
                 {
-                    if (line == null || end == null || line.positionCount != 2)
+                    if (line == null || end == null || line.positionCount < 2)
                     {
                         return false;
                     }
                     Vector3 from = line.GetPosition(0);
-                    Vector3 to = line.GetPosition(1);
+                    Vector3 to = line.GetPosition(line.positionCount - 1);
                     Vector3 pin = end.transform.position;
                     return Vector2.Distance(new Vector2(from.x, from.z), marker.Position) < 0.001f
                         && Vector2.Distance(new Vector2(to.x, to.z), destination) < 0.001f
@@ -1626,6 +1626,7 @@ namespace GameLogic.EditorTools
                 bool stable = true;
                 bool neverBlocked = true;
                 int maxWaypoints = 0;
+                bool actualRouteShown = false;
                 var route = new List<double2>();
                 for (int step = 0; step < 30; step++)
                 {
@@ -1635,9 +1636,19 @@ namespace GameLogic.EditorTools
                     neverBlocked &= TryUnitPos(marker, out double2 p) && Passable(CellOf(p));
                     home.Combat.CopyRoute(marker.UnitId, route);
                     maxWaypoints = Math.Max(maxWaypoints, route.Count);
+                    if (route.Count > 0)
+                    {
+                        stable &= line.positionCount == route.Count + 1;
+                        for (int k = 0; k < route.Count; k++)
+                        {
+                            Vector3 point = line.GetPosition(k + 1);
+                            stable &= Vector2.Distance(new Vector2(point.x, point.z), new Vector2((float)route[k].x, (float)route[k].y)) < 0.001f;
+                        }
+                        actualRouteShown |= route.Count >= 2;
+                    }
                 }
-                Expect(stable && neverBlocked && maxWaypoints >= 2 && Vector2.Distance(marker.Position, start) > 0.1f,
-                    $"目的地指示线：后台生成绕核心路线（最多 {maxWaypoints} 路点）后线形不二次刷新，起点随机器移动，实际移动未踏入障碍");
+                Expect(stable && actualRouteShown && neverBlocked && maxWaypoints >= 2 && Vector2.Distance(marker.Position, start) > 0.1f,
+                    $"目的地指示线：完整显示绕核心的实际路线（最多 {maxWaypoints} 路点），逐点与内核一致，起点随机器移动，终点标记保持点击目标");
 
                 clickedAt = GameClock.Ticks;
                 home.SquadCommands.IssueMoveTo(start, paused: false);

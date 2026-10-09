@@ -22,7 +22,8 @@ namespace GameLogic.Campaign.Regions
     /// 每帧开销 O(贴图块数)，与建筑数、世界大小无关；贴图、材质、占位图成对创建 / 销毁。
     /// FG3-GEN-01（FG-GAP-021）：普通视角（terrainView）的贴图块不再是平面方片，而是 Burst 工作线程生成的**地貌起伏网格**
     /// （<see cref="JobBuildRelief"/>：悬崖隆起成山脊、水面下陷；可走的地面恒在 0 高度，单位 / 建筑 / 拾取仍按 0 高度平面），
-    /// 不透明、受光照（Standard），贴图照旧按格网数据画（每格 1 像素 + 双线性过滤，没有地格线）。建造模式的叠加层仍是半透明平面方片（地格参考线）。
+    /// 不透明、受光照（Standard），贴图照旧按格网数据画（每格 1 像素 + 双线性过滤，没有地格线）。
+    /// 建造模式使用 localGrid：仅在鼠标附近显示透明格线、边缘渐隐，不绘制地形底色或区块占位。
     /// </summary>
     public sealed class WorldTerrainOverlay : IDisposable
     {
@@ -75,8 +76,13 @@ namespace GameLogic.Campaign.Regions
         private int _windowRadius = -1;
         private int _chunkSize;
         private bool _disposed;
+        private readonly bool _localGrid;
+        private GameObject _localGridGo;
+        private Texture2D _localGridTexture;
+        private GridCell _localGridFocus;
+        public const int LocalGridRadius = 4;
 
-        /// <summary>FG3-LOG-01：建造叠加层画不画格线（建造模式每帧按设置写入；变化时各区块按新值重画）。普通视角恒不画。</summary>
+        /// <summary>FG3-LOG-01：画不画格线；局部参考模式关闭时隐藏面片。普通视角恒不画。</summary>
         public bool GridLines { get; set; } = true;
 
         /// <summary>FG3-LOG-08（FGR-LOG-080 污染叠加层）：按污染等级强调着色（每帧由 <see cref="GameLogic.View.OverlayService"/> 写入；变化时各区块按新值重画）。</summary>
@@ -204,11 +210,13 @@ namespace GameLogic.Campaign.Regions
         /// <param name="alpha">贴图不透明度（建造模式 0.55；FG0-ARCH-01 普通视角的地貌表现层更淡）。</param>
         /// <param name="height">贴图离地高度（普通视角放在建筑与机器下面）。</param>
         /// <param name="terrainView">true = 普通视角地貌（无地格参考线）；false = 建造模式叠加层（格线、图案、核心通道框）。</param>
-        public WorldTerrainOverlay(Transform parent, float alpha = 0.55f, float height = 0.03f, bool terrainView = false)
+        /// <param name="localGrid">仅显示 focus 周围 9×9 格透明参考，不生成或着色地形区块。</param>
+        public WorldTerrainOverlay(Transform parent, float alpha = 0.55f, float height = 0.03f, bool terrainView = false, bool localGrid = false)
         {
             _parent = parent;
             _height = height;
             _terrainView = terrainView;
+            _localGrid = localGrid && !terrainView;
             _relief = terrainView;
             _ppc = terrainView ? 1 : PixelsPerCell;
             if (_relief)
@@ -225,7 +233,62 @@ namespace GameLogic.Campaign.Regions
             {
                 _material = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, alpha) };
             }
-            _placeholder = BuildPlaceholder();
+            _placeholder = _localGrid ? null : BuildPlaceholder();
+        }
+
+        /// <summary>建造参考只画鼠标附近的透明格线，不绘制地形底色、不加载区块。</summary>
+        private void UpdateLocalGrid(GridCell focus)
+        {
+            if (!GridLines)
+            {
+                if (_localGridGo != null && _localGridGo.activeSelf)
+                {
+                    _localGridGo.SetActive(false);
+                    Revision++;
+                }
+                return;
+            }
+            if (_localGridGo == null)
+            {
+                int cells = LocalGridRadius * 2 + 1;
+                int size = cells * PixelsPerCell;
+                var pixels = new Color32[size * size];
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        if (x % PixelsPerCell != 0 && y % PixelsPerCell != 0) continue;
+                        float distance = Mathf.Max(Mathf.Abs((x + 0.5f) / size * 2f - 1f), Mathf.Abs((y + 0.5f) / size * 2f - 1f));
+                        byte alpha = (byte)(210f * (1f - Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.55f, 1f, distance))));
+                        pixels[y * size + x] = new Color32(195, 230, 240, alpha);
+                    }
+                }
+                _localGridTexture = new Texture2D(size, size, TextureFormat.RGBA32, false)
+                {
+                    name = "BuildLocalGrid", filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Clamp,
+                };
+                _localGridTexture.SetPixels32(pixels);
+                _localGridTexture.Apply(false, false);
+                _material.mainTexture = _localGridTexture;
+                _localGridGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                _localGridGo.name = "BuildLocalGrid";
+                SafeDestroy(_localGridGo.GetComponent<Collider>());
+                _localGridGo.transform.SetParent(_parent, false);
+                _localGridGo.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+                _localGridGo.transform.localScale = new Vector3(cells, cells, 1f);
+                MeshRenderer renderer = _localGridGo.GetComponent<MeshRenderer>();
+                renderer.sharedMaterial = _material;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+                Revision++;
+            }
+            if (!_localGridGo.activeSelf || _localGridFocus != focus)
+            {
+                _localGridGo.SetActive(true);
+                _localGridFocus = focus;
+                Revision++;
+            }
+            _localGridGo.transform.position = new Vector3(focus.X, _height, focus.Y);
         }
 
         /// <summary>占位用的平面网格（区块边长 × 区块边长，原点在区块左下角格的左下角，与起伏网格同一坐标系）。</summary>
@@ -272,6 +335,11 @@ namespace GameLogic.Campaign.Regions
         {
             if (_disposed || state == null)
             {
+                return;
+            }
+            if (_localGrid)
+            {
+                UpdateLocalGrid(focus);
                 return;
             }
             HomeGridMap map = HomeGridService.MapFor(state);
@@ -786,6 +854,16 @@ namespace GameLogic.Campaign.Regions
         public bool TryGetPixel(GridCell cell, int px, int py, out Color32 color)
         {
             color = default;
+            if (_localGrid)
+            {
+                int x = cell.X - _localGridFocus.X + LocalGridRadius;
+                int y = cell.Y - _localGridFocus.Y + LocalGridRadius;
+                int cells = LocalGridRadius * 2 + 1;
+                if (_localGridGo == null || !_localGridGo.activeSelf || x < 0 || y < 0 || x >= cells || y >= cells) return false;
+                color = _localGridTexture.GetPixel(x * PixelsPerCell + Mathf.Clamp(px, 0, PixelsPerCell - 1),
+                    y * PixelsPerCell + Mathf.Clamp(py, 0, PixelsPerCell - 1));
+                return true;
+            }
             if (_chunkSize <= 0)
             {
                 return false;
@@ -842,6 +920,10 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _disposed = true;
+            SafeDestroy(_localGridGo);
+            _localGridGo = null;
+            SafeDestroy(_localGridTexture);
+            _localGridTexture = null;
             ReleaseRetired(all: true);
             foreach (Tile t in _tiles.Values)
             {

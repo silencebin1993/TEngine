@@ -31,7 +31,7 @@ namespace GameLogic.Campaign.Regions
     ///
     /// 表现（占位，FG00 B22）：虚影逐格着色（绿 = 可放、红 = 不可放），不合法时再叠一个“叉”形（色盲安全，颜色之外有形状）；
     /// 端口用箭头（输出长箭头、输入短箭头）；拖拽路径逐格着色，第一处不合法的格子叠叉；框选画出框的四条边；
-    /// 地形叠加层（<see cref="WorldTerrainOverlay"/>）画格线（可关）、地形颜色 + 图案、迷雾变暗、污染斜线、核心通道黄框。
+    /// 建造参考层（<see cref="WorldTerrainOverlay"/>）仅在鼠标附近叠加透明格线（可关），保留原地貌。
     ///
     /// 状态只读写 <see cref="HomeGridService"/> / <see cref="BuildCatalog"/>；本类不保存任何需要进存档的东西（选择、朝向、拖拽是界面状态；
     /// 快捷栏在存档里、格线开关在本机设置里）。每帧开销与建筑数无关：鼠标换格 / 换朝向 / 状态变化时才重算一次校验。
@@ -171,6 +171,7 @@ namespace GameLogic.Campaign.Regions
         private readonly List<GameObject> _marks = new List<GameObject>(16);
         private GameObject _root;
         private WorldTerrainOverlay _terrain;
+        private int _generatingChunkCount;
 
         /// <summary>FG3-LOG-08：建造叠加层的地形贴图（自检读它的污染视图开关）。</summary>
         public WorldTerrainOverlay TerrainOverlayForTests => _terrain;
@@ -232,6 +233,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             IsOpen = true;
+            HasHover = false;
             ExitPlanModes();
             DemolishMode = false;
             RelocateMode = false;
@@ -1353,6 +1355,12 @@ namespace GameLogic.Campaign.Regions
             {
                 SetHover(state, cell);
             }
+            else if (camera != null && HasHover)
+            {
+                HasHover = false;
+                _previewKey = int.MinValue;
+                Revision++;
+            }
 
             if (InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
             {
@@ -1373,11 +1381,7 @@ namespace GameLogic.Campaign.Regions
 
             RefreshPreview(state);
             RefreshVisuals(state);
-            // 与世界流式加载共用地面焦点，倾斜镜头的位置不等于玩家正在观察的位置。
-            GridCell focus = camera != null
-                ? WorldSim.WorldView.CameraFocusCell(camera)
-                : HomeGridService.CorePivot(state);
-            UpdateTerrainOverlay(state, focus);
+            UpdateTerrainOverlay(state, HoverCell);
         }
 
         private void ConsumeHotbarKeys(CampaignState state)
@@ -1392,28 +1396,29 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>刷新地形叠加层（窗口跟随 <paramref name="focus"/>）；画面变化（含“生成中”区块数）时 Revision+1，建造栏据此刷新。</summary>
+        /// <summary>刷新鼠标附近的透明网格；鼠标被界面捕获或格线关闭时隐藏。</summary>
         public void UpdateTerrainOverlay(CampaignState state, GridCell focus, bool completeNow = false)
         {
             if (_terrain == null || state == null)
             {
                 return;
             }
-            _terrain.GridLines = GameSettings.BuildGridLinesEnabled; // FG3-LOG-01：格线开关（变化时各区块按新值重画）。
-            _terrain.PollutionView = GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution; // FG3-LOG-08：污染叠加层。
+            _terrain.GridLines = GameSettings.BuildGridLinesEnabled && (HasHover || completeNow);
+            _terrain.PollutionView = GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution;
             _terrain.Update(state, focus, completeNow);
-            if (_terrain.Revision != _terrainRevision)
+            if (_terrain.Revision != _terrainRevision || GeneratingChunkCount != _generatingChunkCount)
             {
                 _terrainRevision = _terrain.Revision;
+                _generatingChunkCount = GeneratingChunkCount;
                 Revision++;
-                if (_terrain.PendingCount > 0)
+                if (_generatingChunkCount > 0)
                 {
                     GuidanceHooks.Raise(GuidanceHooks.WorldFirstGenerating); // B14：只埋钩子，引导内容在 FG15-UX-04
                 }
             }
         }
 
-        /// <summary>自检用：同步补齐窗口内缺的区块并等贴图画完（正式流程从不这样做）。</summary>
+        /// <summary>自检用：立即刷新指定位置的局部透明网格，不生成地形区块。</summary>
         public void CompleteOverlayNow(CampaignState state, GridCell? focus = null) =>
             UpdateTerrainOverlay(state, focus ?? HomeGridService.CorePivot(state), completeNow: true);
 
@@ -1421,7 +1426,7 @@ namespace GameLogic.Campaign.Regions
         public WorldTerrainOverlay TerrainOverlay => _terrain;
 
         /// <summary>镜头周围还没生成好的区块数（建造栏显示“正在生成地形（N 个区块）…”）。</summary>
-        public int GeneratingChunkCount => _terrain?.PendingCount ?? 0;
+        public int GeneratingChunkCount => WorldSim.WorldPlanetView.Terrain?.PendingCount ?? 0;
 
         private static bool TryPointerCell(Camera camera, Vector3 screen, out GridCell cell)
         {
@@ -1787,7 +1792,7 @@ namespace GameLogic.Campaign.Regions
             _markMaterial = new Material(unlit) { color = new Color(0.95f, 0.45f, 0.1f, 0.55f) };
             _outMaterial = new Material(unlit) { color = new Color(1f, 0.6f, 0.1f, 0.95f) };
             _inMaterial = new Material(unlit) { color = new Color(0.2f, 0.85f, 0.95f, 0.95f) };
-            _terrain = new WorldTerrainOverlay(_root.transform);
+            _terrain = new WorldTerrainOverlay(_root.transform, localGrid: true);
             _terrainRevision = -1;
             _cross = new GameObject("GhostCross");
             _cross.transform.SetParent(_root.transform, false);

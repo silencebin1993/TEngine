@@ -1408,9 +1408,9 @@ namespace GameLogic.EditorTools
             {
                 GameSettings.SetBuildGridLinesEnabled(true);
                 mode.Open();
-                mode.CompleteOverlayNow(s);
                 GridCell core = HomeGridService.CorePivot(s);
                 GridCell probe = FindValid(s, "generator_2", new GridCell(core.X - 8, core.Y + 26), 10) ?? new GridCell(0, 30);
+                mode.CompleteOverlayNow(s, probe);
                 mode.TryGetOverlayPixel(probe, 0, 3, out Color32 lineOn);
                 mode.TryGetOverlayPixel(probe, 3, 3, out Color32 inner);
                 mode.Tick(null, s, true);
@@ -1418,15 +1418,16 @@ namespace GameLogic.EditorTools
                 mode.Tick(null, s, true);
                 Frame(reader);
                 bool off = !GameSettings.BuildGridLinesEnabled;
-                mode.CompleteOverlayNow(s);
-                mode.TryGetOverlayPixel(probe, 0, 3, out Color32 lineOff);
-                bool pixels = lineOn.r < inner.r && lineOff.r == inner.r && lineOff.g == inner.g;
+                mode.CompleteOverlayNow(s, probe);
+                bool hidden = !mode.TryGetOverlayPixel(probe, 0, 3, out _);
+                bool pixels = lineOn.a > 0 && inner.a == 0 && hidden;
                 reader.Press(KeyCode.G);
                 mode.Tick(null, s, true);
                 Frame(reader);
                 bool back = GameSettings.BuildGridLinesEnabled;
+                mode.CompleteOverlayNow(s, probe);
                 Expect(off && back && pixels && mode.TerrainOverlay.GridLines,
-                    $"按格线开关（默认 G）：叠加层格线像素 {lineOn} → 关掉后与格内同色 {lineOff}（格内 {inner}）；再按恢复；开关记在本机设置（普通视角地貌层始终不画格线，FG-GAP-021）");
+                    $"按格线开关（默认 G）：局部格线像素 {lineOn}、格内透明 {inner.a}；关闭后隐藏，再按恢复；开关记在本机设置");
             }
             finally
             {

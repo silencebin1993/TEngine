@@ -1529,6 +1529,8 @@ namespace GameLogic.EditorTools
             var mode = new HomeValleyBuildMode();
             HomeValleyBuildMode.Bind(mode);
             GameObject hudGo = null;
+            var terrainRoot = new GameObject("__fgworld_terrain");
+            var ov = new WorldTerrainOverlay(terrainRoot.transform);
             try
             {
                 mode.Open();
@@ -1537,10 +1539,10 @@ namespace GameLogic.EditorTools
                 HomeGridMap map = HomeGridService.MapFor(s);
                 var far = new GridCell(5000, 5000);
                 int syncBefore = map.SyncGeneratedCount;
-                mode.UpdateTerrainOverlay(s, far);
-                WorldTerrainOverlay ov = mode.TerrainOverlay;
+                mode.CompleteOverlayNow(s, far);
+                ov.Update(s, far);
                 ChunkAddress fa = GridMath.Address(far, 32);
-                bool allPlaceholder = ov.TileCount == tiles && ov.PlaceholderCount == tiles && mode.GeneratingChunkCount == tiles
+                bool allPlaceholder = ov.TileCount == tiles && ov.PlaceholderCount == tiles && ov.PendingCount == tiles
                                       && ov.ShownTexture(fa.ChunkX, fa.ChunkY) == ov.PlaceholderTexture;
 
                 var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Assets/GameRes/Raw/UI/UiKit/BuildModeHud.uxml");
@@ -1550,21 +1552,20 @@ namespace GameLogic.EditorTools
                 hud.BindView(root);
                 InputRouter.SetScope(InputScope.Strategy);
                 hud.Refresh();
-                bool hudShows = hud.GeneratingVisible && hud.GeneratingLabelText.Contains(tiles.ToString()) && hud.GeneratingLabelText.Contains("正在生成地形");
-                bool hook = GuidanceHooks.Known.Contains(GuidanceHooks.WorldFirstGenerating) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.WorldFirstGenerating);
-                Expect(allPlaceholder && hudShows && map.SyncGeneratedCount == syncBefore && hook,
-                    $"镜头飞到还没生成的地方：{ov.TileCount} 块叠加层全部显示“生成中”占位（灰底斜条纹），建造栏显示“{hud.GeneratingLabelText}”；叠加层没有在主线程同步生成任何区块；发出引导钩子“首次看到生成中”（B14）");
+                bool localOnly = mode.TerrainOverlay.TileCount == 0 && mode.GeneratingChunkCount == 0 && !hud.GeneratingVisible;
+                Expect(allPlaceholder && localOnly && map.SyncGeneratedCount == syncBefore,
+                    $"尚未生成的地方：地形绘制器的 {ov.TileCount} 块使用占位，不在主线程生成区块；建造参考仅是局部透明格线，不铺全图占位贴图");
 
                 // 流式加载在后台补齐 → 叠加层换成真实地形贴图，提示消失。
                 WorldChunkStreamer st = HomeGridService.Streamer(s);
                 int frames = 0;
                 var sw = new Stopwatch();
                 double maxOverlayMs = 0;
-                while ((ov.PlaceholderCount > 0 || mode.GeneratingChunkCount > 0) && frames < 600)
+                while ((ov.PlaceholderCount > 0 || ov.PendingCount > 0) && frames < 600)
                 {
                     st.Tick(far);
                     sw.Restart();
-                    mode.UpdateTerrainOverlay(s, far);
+                    ov.Update(s, far);
                     maxOverlayMs = Math.Max(maxOverlayMs, sw.Elapsed.TotalMilliseconds);
                     System.Threading.Thread.Sleep(2);
                     frames++;
@@ -1574,7 +1575,7 @@ namespace GameLogic.EditorTools
                 int idx = fc == null ? -1 : Array.IndexOf(fc.Terrain, (byte)0);
                 GridCell probe = new GridCell(fa.ChunkX * 32 + idx % 32, fa.ChunkY * 32 + idx / 32);
                 Color32 px = default;
-                bool pixelOk = idx >= 0 && mode.TryGetOverlayPixel(probe, 2, 2, out px);
+                bool pixelOk = idx >= 0 && ov.TryGetPixel(probe, 2, 2, out px);
                 ColorUtility.TryParseHtmlString(GridContent.Terrains.First(t => t.Code == 0).Color, out Color baseColor);
                 Color32 b32 = baseColor;
                 var fogged = new Color32((byte)(b32.r * 64 >> 8), (byte)(b32.g * 64 >> 8), (byte)(b32.b * 64 >> 8), 255);
@@ -1583,26 +1584,26 @@ namespace GameLogic.EditorTools
 
                 // 跟随镜头：移动两个区块，窗口跟着走，新露出的区块先占位再补齐。
                 var far2 = new GridCell(far.X + 64, far.Y);
-                mode.UpdateTerrainOverlay(s, far2);
+                ov.Update(s, far2);
                 bool moved = ov.WindowChunkX == fa.ChunkX + 2 && ov.HasTile(fa.ChunkX + 2 + r, fa.ChunkY) && !ov.HasTile(fa.ChunkX - r, fa.ChunkY);
-                int newPending = mode.GeneratingChunkCount;
+                int newPending = ov.PendingCount;
                 frames = 0;
-                while (mode.GeneratingChunkCount > 0 && frames < 600)
+                while (ov.PendingCount > 0 && frames < 600)
                 {
                     st.Tick(far2);
-                    mode.UpdateTerrainOverlay(s, far2);
+                    ov.Update(s, far2);
                     System.Threading.Thread.Sleep(2);
                     frames++;
                 }
-                Expect(moved && newPending > 0 && mode.GeneratingChunkCount == 0 && ov.TileCount == tiles,
+                Expect(moved && newPending > 0 && ov.PendingCount == 0 && ov.TileCount == tiles,
                     $"叠加层跟随镜头：焦点右移 2 个区块，窗口跟着移动（新露出 {newPending} 块先占位，{frames} 帧后补齐），块数保持 {tiles}");
 
                 // 地形修改后这一块重画。
                 GridCell target = new GridCell(far2.X, far2.Y);
-                mode.TryGetOverlayPixel(target, 2, 2, out Color32 beforePx);
+                ov.TryGetPixel(target, 2, 2, out Color32 beforePx);
                 map.SetTerrain(target, GridContent.TerrainCode("cliff"));
-                mode.CompleteOverlayNow(s, far2);
-                mode.TryGetOverlayPixel(target, 2, 2, out Color32 afterPx);
+                ov.Update(s, far2, completeNow: true);
+                ov.TryGetPixel(target, 2, 2, out Color32 afterPx);
                 Expect(!Near(beforePx, afterPx), $"地形被修改后这一块叠加层重画：{beforePx} → {afterPx}");
 
                 // 快速来回移动窗口：移出窗口时还没画完的贴图任务挂到待释放列表，完成后在后续帧释放（主线程不为回收等待工作线程）。
@@ -1611,14 +1612,14 @@ namespace GameLogic.EditorTools
                 {
                     map.SetTerrain(new GridCell(far.X + k, far.Y), GridContent.TerrainCode(k % 2 == 0 ? "water" : "cliff")); // 让两边窗口都有块要重画
                     map.SetTerrain(new GridCell(far2.X + k, far2.Y), GridContent.TerrainCode(k % 2 == 0 ? "cliff" : "water"));
-                    mode.UpdateTerrainOverlay(s, k % 2 == 0 ? far : far2);
+                    ov.Update(s, k % 2 == 0 ? far : far2);
                     maxRetiring = Math.Max(maxRetiring, ov.RetiringJobCount);
                 }
                 int settleFrames = 0;
                 while (ov.RetiringJobCount > 0 && settleFrames < 300)
                 {
                     System.Threading.Thread.Sleep(2);
-                    mode.UpdateTerrainOverlay(s, far2);
+                    ov.Update(s, far2);
                     settleFrames++;
                 }
                 Expect(ov.RetiringJobCount == 0,
@@ -1626,6 +1627,8 @@ namespace GameLogic.EditorTools
             }
             finally
             {
+                ov.Dispose();
+                Object.DestroyImmediate(terrainRoot);
                 mode.Close();
                 mode.Shutdown();
                 HomeValleyBuildMode.Unbind(mode);
