@@ -435,6 +435,12 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-09：第一次在游戏中途修改难度（修改记入存档、影响成就的说明）。</summary>
         public const string DifficultyFirstChanged = "difficulty.first_changed";
 
+        /// <summary>FG7-ENV-01（FGR-ENV-003）：第一次入夜（夜里太阳能不发电、画面变暗但 UI 不变、夜间亮度下限设置的引导在 FG15-UX-04）。</summary>
+        public const string EnvFirstNight = "env.first_night";
+
+        /// <summary>FG7-ENV-01（FGR-ENV-002 / FGU-26）：第一次打开日历面板。</summary>
+        public const string EnvCalendarFirstOpen = "env.calendar_first_open";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -490,6 +496,7 @@ namespace GameLogic.Core
             RaidFirstResult, RaidResultFirstOpen, RaidFirstWreck, RaidFirstCoreLost,
             DifficultyFirstOpen, DifficultyFirstChanged,
             LogisticsLeakFirst, LogisticsLeakFirstReact, LogisticsLeakFirstFaded,
+            EnvFirstNight, EnvCalendarFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

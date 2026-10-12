@@ -349,6 +349,27 @@ namespace GameLogic.Core
             return Math.Min(24 * 60 - 1, (int)Math.Floor(frac * 24 * 60 + 1e-6));
         }
 
+        /// <summary>FG7-ENV-01：当天的时刻（游戏小时，0 ≤ h &lt; 24，带小数；昼夜光照按它连续变化）。</summary>
+        public static double HourOfDay(double gameSeconds)
+        {
+            double sinceMidnight = gameSeconds + _startHour / 24.0 * _daySeconds;
+            double frac = sinceMidnight / _daySeconds - Math.Floor(sinceMidnight / _daySeconds);
+            return Math.Max(0.0, Math.Min(24.0 - 1e-9, frac * 24.0));
+        }
+
+        /// <summary>FG7-ENV-01：第 <paramref name="day"/> 日 <paramref name="hour"/> 点对应的游戏秒（日历按日排时间轴用；第 1 日开局前的时刻为负）。</summary>
+        public static double SecondsAt(int day, double hour) => ((day - 1) + hour / 24.0) * _daySeconds - _startHour / 24.0 * _daySeconds;
+
+        /// <summary>1 游戏小时是多少游戏秒（= day_seconds / 24）。</summary>
+        public static double HourSeconds => _daySeconds / 24.0;
+
+        /// <summary>FG7-ENV-01：当天时刻（游戏小时）写成“HH:MM”（日历时间轴上的事件时刻）。</summary>
+        public static string FormatHour(double hour)
+        {
+            int m = Math.Max(0, Math.Min(24 * 60 - 1, (int)Math.Floor(hour * 60.0 + 1e-4)));
+            return (m / 60).ToString("00", CultureInfo.InvariantCulture) + ":" + (m % 60).ToString("00", CultureInfo.InvariantCulture);
+        }
+
         public static string FormatHhMm(double gameSeconds)
         {
             int m = MinuteOfDay(gameSeconds);

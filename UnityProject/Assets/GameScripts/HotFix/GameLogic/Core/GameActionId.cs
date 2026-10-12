@@ -152,5 +152,7 @@
         SpectateRaid = 122,
         /// <summary>FG6-DEF-06 审查修复（B02）：观战时开 / 关“跟随战斗”（没在观战时 = 开始观战并跟随；战略上下文，默认 Ctrl+F）。与观战栏“跟随战斗”按钮同一入口。</summary>
         SpectateFollow = 123,
+        /// <summary>FG7-ENV-01（FGU-26 日历，FGR-ENV-002“点开是日历面板”）：打开 / 关闭日历（全部上下文，默认 Alt+L）。与世界时间条日历行同一入口。</summary>
+        OpenCalendar = 124,
     }
 }

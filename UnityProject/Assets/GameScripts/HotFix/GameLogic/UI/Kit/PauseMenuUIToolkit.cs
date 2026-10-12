@@ -92,6 +92,7 @@ namespace GameLogic.UI.Kit
             }
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
+            BindDisplay(root);
             BindReactionFeedback(root);
             _worldSeed = root.Q<Label>("PauseWorldSeed");
             _worldSettings = root.Q<Label>("PauseWorldSettings");
@@ -191,6 +192,62 @@ namespace GameLogic.UI.Kit
                 SyncCameraSliders();
             });
             SyncCameraSliders();
+        }
+
+        // ── FG7-ENV-01：画面——夜间亮度下限（FG07 FGR-ENV-003“设置里提供夜间亮度下限，保证可读性”）──
+        private Slider _nightFloor;
+        private Label _nightFloorLabel;
+
+        public Slider NightFloorSlider => _nightFloor;
+        public Button NightFloorResetButton { get; private set; }
+        public string NightFloorLabelText => _nightFloorLabel?.text ?? string.Empty;
+
+        private void BindDisplay(VisualElement root)
+        {
+            Label title = root.Q<Label>("PauseDisplayTitle");
+            if (title != null)
+            {
+                title.text = GameText.Get("pause.display_title");
+            }
+            _nightFloorLabel = root.Q<Label>("PauseNightFloorLabel");
+            _nightFloor = root.Q<Slider>("PauseNightFloor");
+            if (_nightFloor != null)
+            {
+                _nightFloor.lowValue = Settings.GameSettings.NightBrightnessMin;
+                _nightFloor.highValue = Settings.GameSettings.NightBrightnessMax;
+                _nightFloor.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetNightBrightnessFloor(evt.newValue);
+                    RefreshNightFloorLabel();
+                });
+                UiTooltip.Attach(_nightFloor, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.display_title"),
+                    Body = GameText.Format("pause.night_floor_tip", Percent(Settings.GameSettings.NightBrightnessFloor),
+                        Percent(Settings.GameSettings.NightBrightnessMin), Percent(Settings.GameSettings.NightBrightnessMax), Percent(Settings.GameSettings.NightBrightnessDefault)),
+                });
+            }
+            NightFloorResetButton = Bind(root, "PauseNightFloorReset", "pause.night_floor_reset", () =>
+            {
+                Settings.GameSettings.ResetNightBrightnessFloor();
+                SyncNightFloor();
+            });
+            SyncNightFloor();
+        }
+
+        /// <summary>夜间亮度滑条与标签按当前设置同步（打开菜单、恢复默认时）。</summary>
+        public void SyncNightFloor()
+        {
+            _nightFloor?.SetValueWithoutNotify(Settings.GameSettings.NightBrightnessFloor);
+            RefreshNightFloorLabel();
+        }
+
+        private void RefreshNightFloorLabel()
+        {
+            if (_nightFloorLabel != null)
+            {
+                _nightFloorLabel.text = GameText.Format("pause.night_floor", Percent(Settings.GameSettings.NightBrightnessFloor));
+            }
         }
 
         // ── FG2-FW-04：战斗反馈（FGR-FW-043“慢放和镜头推动都可以在设置里关闭”；卡片“慢放、镜头推动、弹字三个设置开关”；FGR-SYS-020 游戏性）──
@@ -310,6 +367,7 @@ namespace GameLogic.UI.Kit
                 }
                 RefreshWorldInfo();
                 SyncCameraSliders();
+                SyncNightFloor();
                 SyncReactionToggles();
             }
             else

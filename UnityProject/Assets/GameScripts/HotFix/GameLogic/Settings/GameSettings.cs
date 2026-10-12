@@ -52,6 +52,10 @@ namespace GameLogic.Settings
         /// <summary>FG4-ECO-09（FGR-ECO-060“远征回来时自动打开（可以在设置里关闭）”）：远征回来时自动打开离家报告（默认开；旧设置 JSON 没有这个字段时按默认补齐）。</summary>
         public bool AwayReportAutoOpen = true;
 
+        /// <summary>FG7-ENV-01（FG07 FGR-ENV-003“设置里提供夜间亮度下限，保证可读性”）：夜里画面最暗是白天的多少（0～1，范围 fg.TbUiTuning env.night_brightness_min / max）。
+        /// 初值 -1 = 没设过，按表里 env.night_brightness_default（旧设置 JSON 没有这个字段时同样按默认）。</summary>
+        public float NightBrightnessFloor = -1f;
+
         /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
         /// 读不懂的代码回落简体中文（<see cref="GameSettings.Language"/>）。旧设置 JSON 没有这个字段时按默认值补齐。</summary>
@@ -390,6 +394,27 @@ namespace GameLogic.Settings
 
         /// <summary>FG3-LOG-01（FG03 第 4 节“可以开关格线显示”）：建造模式叠加层画不画格线。本机偏好，跨战役保留。</summary>
         public static bool BuildGridLinesEnabled => Data.BuildGridLinesEnabled;
+
+        // ── FG7-ENV-01：夜间亮度下限（FGR-ENV-003）──
+        public static float NightBrightnessMin => UiTuningValues.Get("env.night_brightness_min");
+        public static float NightBrightnessMax => UiTuningValues.Get("env.night_brightness_max");
+        public static float NightBrightnessDefault => Mathf.Clamp(UiTuningValues.Get("env.night_brightness_default"), NightBrightnessMin, NightBrightnessMax);
+
+        /// <summary>夜里画面最暗是白天的多少（没设过 = 表里的默认值；读到的值总在范围内）。</summary>
+        public static float NightBrightnessFloor => Data.NightBrightnessFloor < 0f ? NightBrightnessDefault : Mathf.Clamp(Data.NightBrightnessFloor, NightBrightnessMin, NightBrightnessMax);
+
+        public static void SetNightBrightnessFloor(float value)
+        {
+            Data.NightBrightnessFloor = Mathf.Clamp(value, NightBrightnessMin, NightBrightnessMax);
+            Save();
+        }
+
+        /// <summary>恢复默认（写 -1 = 跟随表里的默认值）。</summary>
+        public static void ResetNightBrightnessFloor()
+        {
+            Data.NightBrightnessFloor = -1f;
+            Save();
+        }
 
         /// <summary>FG4-ECO-09：远征回来时是否自动打开离家报告。本机偏好，跨战役保留；关掉后报告照常生成，只发一条通知。</summary>
         public static bool AwayReportAutoOpen => Data.AwayReportAutoOpen;

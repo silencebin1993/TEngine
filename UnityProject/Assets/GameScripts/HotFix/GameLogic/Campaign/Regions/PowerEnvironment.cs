@@ -11,7 +11,7 @@ namespace GameLogic.Campaign.Regions
     /// </summary>
     public static class PowerEnvironment
     {
-        /// <summary>光照（0 = 夜晚 … 1 = 白天）。null = 昼夜系统还没接入（按白天）。FG7-ENV-01 负责赋值。</summary>
+        /// <summary>光照（0 = 夜晚 … 1 = 白天）。null = 昼夜系统没接入（按白天）。FG7-ENV-01 起由 <c>DayNightCycle.Install</c>（GameRoot.Startup）赋值；自检用 <see cref="ResetForTests"/> 隔离。</summary>
         public static Func<CampaignState, float> DaylightProvider;
 
         /// <summary>是否沙暴中。null = 天气系统还没接入（无沙暴）。FG7-ENV-03 负责赋值。</summary>

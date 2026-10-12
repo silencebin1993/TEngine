@@ -34,6 +34,8 @@ namespace GameLogic.UI.Kit
         private readonly Button[] _speeds = new Button[4];
         private Button _pause;
         private Label _status;
+        private Button _phase;
+        private Label _calExtra;
         private Label _focusTitle;
         private Button _labor;
         private ScrollView _focusList;
@@ -54,6 +56,10 @@ namespace GameLogic.UI.Kit
         public Button SpeedButton(int index) => index >= 0 && index < _speeds.Length ? _speeds[index] : null;
         public Button PauseButton => _pause;
         public Button LaborButton => _labor;
+        /// <summary>FG7-ENV-01：日历行（昼夜阶段 + 倒计时；点开日历面板）与静默夜 / 天气摘要。</summary>
+        public Button PhaseButton => _phase;
+        public string PhaseText => _phase?.text ?? string.Empty;
+        public string CalendarExtraText => _calExtra?.text ?? string.Empty;
         public string LaborText => _labor?.text ?? string.Empty;
 
         // ── FG4-ECO-08 资源顶栏（自检读点）──
@@ -113,7 +119,15 @@ namespace GameLogic.UI.Kit
             _focusTitle = root.Q<Label>("WorldFocusTitle");
             _focusList = root.Q<ScrollView>("WorldFocusList");
             _labor = root.Q<Button>("WorldLabor");
+            _phase = root.Q<Button>("WorldDayPhase");
+            _calExtra = root.Q<Label>("WorldCalendarExtra");
             _resRow = root.Q<VisualElement>("WorldResourceRow");
+            if (_phase != null)
+            {
+                // FG7-ENV-01（FGR-ENV-002“点开是日历面板”）：日历行点一下打开日历（与日历键同一入口）。
+                _phase.clicked += CalendarPanelUIToolkit.Open;
+                UiTooltip.Attach(_phase, PhaseTooltip);
+            }
             _resKey = 0;
             _resNext = 0;
             if (_labor != null)
@@ -244,6 +258,64 @@ namespace GameLogic.UI.Kit
 
             _focusTitle.text = GameText.Get("ui.world.focus.title");
             RebuildFocus(targets);
+            RefreshCalendarRow(state);
+        }
+
+        // ── FG7-ENV-01 日历行（FGR-ENV-002 / 003）──
+
+        /// <summary>“☀ 白天 · 2时06分后入夜”；静默夜 / 天气有来源时右侧写“静默夜 X 后”“当前天气”。随刷新键（游戏分钟、语言）更新，O(日历事件数)。</summary>
+        private void RefreshCalendarRow(CampaignState state)
+        {
+            if (_phase == null)
+            {
+                return;
+            }
+            double now = GameClock.GameSeconds;
+            Campaign.Env.DayPhase p = Campaign.Env.DayNightCycle.PhaseAt(now);
+            double left = Campaign.Env.DayNightCycle.NextChange(now, out bool toNight);
+            _phase.text = GameText.Format(toNight ? "env.hud.phase_to_night" : "env.hud.phase_to_day",
+                Campaign.Env.DayNightCycle.PhaseGlyph(p), Campaign.Env.DayNightCycle.PhaseName(p), Campaign.Env.CalendarService.ShortDuration(left));
+            SetClass(_phase, "wb-phase-night", p == Campaign.Env.DayPhase.Night);
+            if (_calExtra == null)
+            {
+                return;
+            }
+            double horizon = Campaign.Env.CalendarService.Days * GameClock.DaySeconds;
+            var sb = new StringBuilder();
+            if (Campaign.Env.CalendarService.TryNext(state, Campaign.Env.CalendarKind.SilentNight, now, horizon, out Campaign.Env.CalendarEntry silent))
+            {
+                sb.Append(silent.StartSeconds <= now
+                    ? GameText.Format("env.hud.silent_now", silent.Title)
+                    : GameText.Format("env.hud.silent_in", Campaign.Env.CalendarService.ShortDuration(silent.StartSeconds - now)));
+            }
+            if (Campaign.Env.CalendarService.TryNext(state, Campaign.Env.CalendarKind.Weather, now, GameClock.DaySeconds, out Campaign.Env.CalendarEntry weather))
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append("  ");
+                }
+                sb.Append(weather.StartSeconds <= now ? GameText.Format("env.hud.weather_now", weather.Title)
+                    : GameText.Format("env.hud.weather_next", weather.Title, Campaign.Env.CalendarService.ShortDuration(weather.StartSeconds - now)));
+            }
+            _calExtra.text = sb.ToString();
+            SetVisible(_calExtra, sb.Length > 0);
+        }
+
+        private TooltipContent PhaseTooltip()
+        {
+            double now = GameClock.GameSeconds;
+            Campaign.Env.DayPhase p = Campaign.Env.DayNightCycle.PhaseAt(now);
+            int light = Mathf.RoundToInt(Campaign.Env.DayNightCycle.Daylight(now) * 100f);
+            return new TooltipContent
+            {
+                Title = GameText.Get("env.hud.tip_title"),
+                Body = GameText.Format("env.hud.tip", Campaign.Env.DayNightCycle.PhaseName(p), light,
+                           GameClock.FormatHour(Campaign.Env.DayNightCycle.NightEndHour), GameClock.FormatHour(Campaign.Env.DayNightCycle.NightStartHour),
+                           Mathf.RoundToInt(Settings.GameSettings.NightBrightnessFloor * 100f), InputDisplay.ForAction(GameActionId.OpenCalendar))
+                       + (Campaign.Env.CalendarService.HasSource(Campaign.Env.CalendarKind.SilentNight) && Campaign.Env.CalendarService.HasSource(Campaign.Env.CalendarKind.Weather)
+                           ? string.Empty : "\n" + GameText.Get("env.cal.pending_kinds")),
+                Shortcut = GameActionId.OpenCalendar,
+            };
         }
 
         /// <summary>FG4-ECO-08：重建资源顶栏（自检可直接调用：<paramref name="force"/> = 忽略节流）。</summary>

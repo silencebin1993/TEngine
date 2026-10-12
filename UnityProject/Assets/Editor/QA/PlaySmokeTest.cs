@@ -4864,6 +4864,31 @@ namespace GameLogic.EditorTools
             Check(GameClock.Ticks.ToString() == SessionState.GetString(K + "PausedTicks", "") && raid != null
                   && raid.PosX.ToString("R") == SessionState.GetString(K + "PausedRaid", ""),
                 $"暂停期间时间轴不动（{GameClock.Ticks} 步），行进中的突袭也停住");
+            // FG7-ENV-01（FGR-ENV-002 / 003，FGU-26）：世界时间条的日历行（昼夜阶段 + 倒计时）→ 点开日历面板（今天起 N 个游戏日：时间轴 + 事件列表），
+            // “关闭”按钮关掉；昼夜已接到太阳能，场景方向光按光照与夜间亮度下限调光（暂停中照样能看日历）。
+            WorldBarReady(out WorldBarHudUIToolkit calBar);
+            string phase = calBar?.PhaseText ?? string.Empty;
+            bool phaseOk = phase.Contains("白天") || phase.Contains("黄昏") || phase.Contains("夜晚") || phase.Contains("黎明");
+            bool calClicked = ClickUitk("[WorldBarHost]", "WorldDayPhase");
+            CalendarPanelUIToolkit cal = CalendarPanelUIToolkit.Instance;
+            cal?.Refresh();
+            bool calOpen = CalendarPanelUIToolkit.IsOpen && cal != null && cal.PanelVisible && cal.DayRowCount == Campaign.Env.CalendarService.Days
+                           && cal.EventTexts.Any(t => t.Contains("入夜")) && cal.NowText.Contains("第 ");
+            Write($"  - 日历行：{phase}；日历面板 {cal?.DayRowCount} 天、{cal?.EventTexts.Count} 条事件；{cal?.NowText}");
+            Check(phaseOk && calClicked && calOpen, $"世界时间条日历行“{phase}”，点一下打开日历面板（{cal?.DayRowCount} 个游戏日，含今晚入夜）");
+            CheckNoTextMarkers("日历面板");
+            bool calClosed = ClickUitk("[CalendarHost]", "CalendarClose") && !CalendarPanelUIToolkit.IsOpen;
+            float expectLight = View.DayNightLighting.BrightnessFor(Campaign.Env.DayNightCycle.Daylight(GameClock.GameSeconds), GameSettings.NightBrightnessFloor);
+            bool lit = Campaign.Env.DayNightCycle.Installed && View.DayNightLighting.Sun != null && Mathf.Abs(View.DayNightLighting.Brightness - expectLight) < 0.01f;
+            // 夜里的实际调光由自检 L1 覆盖（冒烟不拨时钟，免得改动后续步骤的时间线）；这里核对真实场景的环境光模式不是 Skybox（否则环境光不随亮度变，只有方向光变暗），
+            // 以及夜里（光照 0）的目标亮度就是玩家设置的夜间亮度下限。
+            UnityEngine.Rendering.AmbientMode ambientMode = RenderSettings.ambientMode;
+            float floor = GameSettings.NightBrightnessFloor;
+            bool nightTarget = Mathf.Abs(View.DayNightLighting.BrightnessFor(0f, floor) - floor) < 1e-4f;
+            Write($"  - 昼夜光照：场景环境光模式 {ambientMode}，夜间亮度下限 {floor:P0}，夜里目标亮度 {View.DayNightLighting.BrightnessFor(0f, floor):F2}");
+            Check(calClosed && lit && nightTarget && ambientMode != UnityEngine.Rendering.AmbientMode.Skybox,
+                $"日历“关闭”按钮关掉日历；昼夜已接到太阳能，场景方向光“{View.DayNightLighting.Sun?.name}”亮度 {View.DayNightLighting.Brightness:F2}（应 {expectLight:F2}），" +
+                $"夜里目标亮度 = 下限 {floor:P0}，场景环境光模式 {ambientMode}（不是 Skybox，环境光随亮度调）");
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
             SessionState.SetInt(K + "UnpauseFrame", Time.frameCount);
             Next(127, "按 Space 继续");
@@ -6203,7 +6228,7 @@ namespace GameLogic.EditorTools
                         AddSmokeBuilding(state, "circuit_synth", "synth", c);
                         Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
                         BuildingRecord b = HomeGridService.FindBuilding(state, SmokeSynthId);
-                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        if (b != null && b.PowerState == BuildingPowerState.Powered && WorldPointClickable(b.Position, out _))
                         {
                             b.Health = Campaign.Economy.BuildingOps.MaxDurability("circuit_synth");
                             builtId = SmokeSynthId;
@@ -6416,7 +6441,8 @@ namespace GameLogic.EditorTools
                         AddSmokeBuilding(state, "listening_post", "post", c);
                         Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
                         BuildingRecord b = HomeGridService.FindBuilding(state, SmokePostId);
-                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        // 还要在画面上点得到（没被世界时间条 / 资源顶栏等界面挡住，与玩家一样只点看得见的建筑）。
+                        if (b != null && b.PowerState == BuildingPowerState.Powered && WorldPointClickable(b.Position, out _))
                         {
                             b.Health = Campaign.Economy.BuildingOps.MaxDurability("listening_post");
                             builtId = SmokePostId;
@@ -6451,7 +6477,9 @@ namespace GameLogic.EditorTools
             ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
             bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokePostId && bp.IntelButton != null
                           && ProductionPanelUIToolkit.Visible(bp.IntelButton) && bp.ReasonText.Contains("破译中") && bp.ReasonText.Contains("突袭预报");
-            Check(bpOpen, $"左键点建成的监听站打开它的通用面板：状态“{bp?.ReasonText}”，有“情报…”按钮");
+            BuildingRecord postRec = bpOpen ? null : HomeGridService.FindBuilding(CampaignSession.Current, SmokePostId);
+            string postDiag = postRec == null ? string.Empty : "（" + WorldClickDiag(postRec.Position) + "）";
+            Check(bpOpen, $"左键点建成的监听站打开它的通用面板：状态“{bp?.ReasonText}”，有“情报…”按钮{postDiag}");
             Check(ClickUitk("[ProductionPanelHost]", "PrIntel"), "通用面板上点“情报…”");
             Next(374, "情报面板打开：还没有情报（空状态），破译中");
         }
@@ -6582,7 +6610,7 @@ namespace GameLogic.EditorTools
                         AddSmokeBuilding(state, Campaign.Economy.BlackBoxService.TypeId, "gallery", c);
                         Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
                         BuildingRecord b = HomeGridService.FindBuilding(state, SmokeGalleryId);
-                        if (b != null && b.PowerState == BuildingPowerState.Powered)
+                        if (b != null && b.PowerState == BuildingPowerState.Powered && WorldPointClickable(b.Position, out _))
                         {
                             b.Health = Campaign.Economy.BuildingOps.MaxDurability(Campaign.Economy.BlackBoxService.TypeId);
                             builtId = SmokeGalleryId;
@@ -6630,7 +6658,9 @@ namespace GameLogic.EditorTools
             ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
             bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokeGalleryId && bp.BlackBoxButton != null
                           && ProductionPanelUIToolkit.Visible(bp.BlackBoxButton) && bp.ReasonText.Contains("分析中") && bp.ReasonText.Contains("Smoke纪念");
-            Check(bpOpen, $"左键点建成的陈列馆打开它的通用面板：状态“{bp?.ReasonText}”，有“陈列馆…”按钮");
+            BuildingRecord galRec = bpOpen ? null : HomeGridService.FindBuilding(CampaignSession.Current, SmokeGalleryId);
+            string galDiag = galRec == null ? string.Empty : "（" + WorldClickDiag(galRec.Position) + "）";
+            Check(bpOpen, $"左键点建成的陈列馆打开它的通用面板：状态“{bp?.ReasonText}”，有“陈列馆…”按钮{galDiag}");
             Check(ClickUitk("[ProductionPanelHost]", "PrBlackBox"), "通用面板上点“陈列馆…”");
             Next(380, "陈列馆面板打开（黑匣子页：分析中），点“纪念墙”页签");
         }
@@ -11042,6 +11072,56 @@ namespace GameLogic.EditorTools
                 DownFrame = Time.frameCount + 1,
                 UpFrame = Time.frameCount + 2,
             });
+        }
+
+        /// <summary>
+        /// FG7-ENV-01 修复轮：世界坐标 <paramref name="worldXZ"/> 在当前镜头下是否“玩家看得见、点得到”——在画面内（留 8 像素边），且没有被任何界面挡住
+        /// （与运行时世界输入同一判定 <see cref="GameLogic.UI.Common.UiWindowFocus.BlocksWorldPointerAt"/>）。测试捷径放建筑时用它挑位置：
+        /// 世界时间条多了日历行后，影子工程 640×480 画面上部的一格会落在资源顶栏下面，玩家点不到，测试也不该去点。
+        /// <paramref name="blocker"/> 返回挡住它的“面板宿主/元素”（没挡住为空）。
+        /// </summary>
+        private static bool WorldPointClickable(Vector2 worldXZ, out string blocker)
+        {
+            blocker = string.Empty;
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                return true;
+            }
+            Vector3 s = cam.WorldToScreenPoint(new Vector3(worldXZ.x, 0f, worldXZ.y));
+            if (s.z <= 0f || s.x < 8f || s.y < 8f || s.x > Screen.width - 8f || s.y > Screen.height - 8f)
+            {
+                blocker = "画面外";
+                return false;
+            }
+            var screenTopLeft = new Vector2(s.x, Screen.height - s.y);
+            var seen = new HashSet<IPanel>();
+            foreach (UIDocument doc in Object.FindObjectsByType<UIDocument>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                IPanel panel = doc.rootVisualElement?.panel;
+                if (panel == null || !seen.Add(panel))
+                {
+                    continue;
+                }
+                Vector2 p = RuntimePanelUtils.ScreenToPanel(panel, screenTopLeft);
+                if (GameLogic.UI.Common.UiWindowFocus.BlocksWorldPointerAt(panel, p))
+                {
+                    VisualElement picked = panel.Pick(p);
+                    blocker = $"{doc.gameObject.name}/{picked?.name}";
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>FG7-ENV-01 修复轮：世界点击没打开面板时的诊断——点的屏幕位置、是否被界面挡住（挡在哪个元素上）、建筑面板当前状态。</summary>
+        private static string WorldClickDiag(Vector2 worldXZ)
+        {
+            Camera cam = Camera.main;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(new Vector3(worldXZ.x, 0f, worldXZ.y)) : Vector3.zero;
+            WorldPointClickable(worldXZ, out string blocker);
+            return $"屏幕点 ({screen.x:F0},{screen.y:F0}) / 屏幕 {Screen.width}x{Screen.height}；挡住它的界面“{blocker}”；"
+                   + $"建筑面板 IsOpen={ProductionPanelUIToolkit.IsOpen} BuildingId={ProductionPanelUIToolkit.BuildingId}";
         }
 
         private sealed class ScriptedReader : IInputReader

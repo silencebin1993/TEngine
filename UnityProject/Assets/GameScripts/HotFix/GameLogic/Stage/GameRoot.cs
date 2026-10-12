@@ -180,6 +180,8 @@ namespace GameLogic.Stage
             // FG6-DEF-06（FGR-DEF-042）：“突袭到达”的自动暂停默认值 = 本存档前 3 次突袭（设置界面从主菜单起就要显示这个默认值）。
             Campaign.Defense.RaidDirectorService.EnsureArrivalAutoPauseRegistered();
             BindWorldProviders();
+            // FG7-ENV-01（FG-GAP-096）：昼夜接到太阳能——光照按统一时钟的游戏秒算（纯函数，观察与否一致）。
+            Campaign.Env.DayNightCycle.Install();
             UI.Kit.UiKitRuntime.Mount();
 
             Log.Info("[GameRoot] 启动完成。已注册阶段：Cell");
@@ -462,6 +464,8 @@ namespace GameLogic.Stage
             _director.Update(dt);
             // FG0-ARCH-01：整个世界（家园 + 远征地点 + 行进中的队伍）按统一时钟的固定步同时推进；镜头只决定玩家看哪里。
             WorldSimulation.Frame(Time.unscaledDeltaTime);
+            // FG7-ENV-01（FGR-ENV-003）：昼夜光照（只改场景光照，不碰界面；O(1)，亮度不变的帧不写）。不在世界里时恢复场景原光照。
+            View.DayNightLighting.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
             // FG6-DEF-08（FGR-DEF-053）：突袭预警请求的自动存档在帧末执行（不在模拟步中间写盘）；核心被摧毁后不再存。
             Campaign.Defense.RaidResultService.FrameUpdate();
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
