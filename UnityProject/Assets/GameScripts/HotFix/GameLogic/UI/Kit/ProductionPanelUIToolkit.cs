@@ -1378,6 +1378,13 @@ namespace GameLogic.UI.Kit
                 Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, _message.text);
                 return;
             }
+            // FG7-ENV-02（FGR-ENV-011）：静默夜期间会改到已建成的同类建筑时不弹确认框，直接写明原因（拒绝音与字幕由 SilentNightService 发出，只拒一次）。
+            if (ProductionService.CopyWouldChangeBuilt(p, others) && Campaign.Env.SilentNightService.RecipeLocked(state, out string locked))
+            {
+                _message.text = locked;
+                Refresh();
+                return;
+            }
             string id = BuildingId;
             var req = new ConfirmRequest
             {

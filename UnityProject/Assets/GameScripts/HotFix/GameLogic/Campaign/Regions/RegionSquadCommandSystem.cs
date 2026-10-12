@@ -743,7 +743,9 @@ namespace GameLogic.Campaign.Regions
             {
                 names.Append("…");
             }
-            string text = GameText.Format("signal.command.out_of_coverage", logicIds.Count.ToString(), names.ToString());
+            // FG7-ENV-02：静默夜期间是“远程命令不可用”，不是“在覆盖外”（同一条拒绝路径，原因不同）。
+            string text = GameText.Format(Env.SilentNightService.IsActiveNow() ? "signal.command.silent_night" : "signal.command.out_of_coverage",
+                logicIds.Count.ToString(), names.ToString());
             PushEvent(text);
             FeedbackCues.Raise(FeedbackCueId.Denied, text);
         }

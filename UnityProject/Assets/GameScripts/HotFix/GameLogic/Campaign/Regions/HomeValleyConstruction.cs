@@ -2130,6 +2130,10 @@ namespace GameLogic.Campaign.Regions
                 return string.Empty;
             }
             string reason = order.FailureReason;
+            if (order.State == WorkOrderState.Waiting && reason == Env.SilentNightService.HoldReason)
+            {
+                return Env.SilentNightService.HoldText(state); // FG7-ENV-02：静默夜期间新放的规划，等结束后开工。
+            }
             if (order.State == WorkOrderState.Waiting && reason != null && reason.StartsWith(MaterialsReasonPrefix, StringComparison.Ordinal))
             {
                 // FG4-ECO-11：卡住的是废料以外的材料（例如关键材料）时写明是哪种、从哪儿来。
@@ -2204,6 +2208,10 @@ namespace GameLogic.Campaign.Regions
         /// <summary>玩家改一张施工单的优先级（低 / 普通 / 高 / 最高）。机器领单时先按机器自己的工作偏好、再按这里、再按先后（ERD-WRK-002）。</summary>
         public static bool SetPriority(CampaignState state, string workOrderId, int priority)
         {
+            if (Env.SilentNightService.PriorityLocked(state, out _)) // FG7-ENV-02：静默夜期间不能改优先级（拒绝音 + 字幕写明原因）
+            {
+                return false;
+            }
             WorkOrderRecord o = HomeValleyWorkOrders.Find(state, workOrderId);
             if (o == null || o.Kind != WorkOrderKind.Build || !HomeValleyWorkOrders.IsActive(o))
             {
@@ -2227,6 +2235,10 @@ namespace GameLogic.Campaign.Regions
         /// </summary>
         public static int PrioritizeArea(CampaignState state, GridCell a, GridCell b)
         {
+            if (Env.SilentNightService.PriorityLocked(state, out _)) // FG7-ENV-02：静默夜期间不能改优先级（拒绝音 + 字幕写明原因）
+            {
+                return 0;
+            }
             if (state?.WorkOrders == null)
             {
                 return 0;

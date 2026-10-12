@@ -331,6 +331,10 @@ public partial class Tables
     /// </summary>
     public fg.TbStatusTag TbStatusTag {get; }
     /// <summary>
+    /// 风暴残骸
+    /// </summary>
+    public fg.TbStormDebris TbStormDebris {get; }
+    /// <summary>
     /// 表面
     /// </summary>
     public fg.TbSurface TbSurface {get; }
@@ -501,6 +505,7 @@ public partial class Tables
         TbSiegeUnit = new fg.TbSiegeUnit(loader("fg_tbsiegeunit"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
+        TbStormDebris = new fg.TbStormDebris(loader("fg_tbstormdebris"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
         TbTrapProfile = new fg.TbTrapProfile(loader("fg_tbtrapprofile"));
@@ -608,6 +613,7 @@ public partial class Tables
         TbSiegeUnit.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);
+        TbStormDebris.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
         TbTrapProfile.ResolveRef(this);

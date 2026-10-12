@@ -182,6 +182,8 @@ namespace GameLogic.Stage
             BindWorldProviders();
             // FG7-ENV-01（FG-GAP-096）：昼夜接到太阳能——光照按统一时钟的游戏秒算（纯函数，观察与否一致）。
             Campaign.Env.DayNightCycle.Install();
+            // FG7-ENV-02：静默夜接上接入判定、常驻规则“静默夜预案”的时间窗与日历来源；世界模拟开始按存档推进。
+            Campaign.Env.SilentNightService.Install();
             UI.Kit.UiKitRuntime.Mount();
 
             Log.Info("[GameRoot] 启动完成。已注册阶段：Cell");

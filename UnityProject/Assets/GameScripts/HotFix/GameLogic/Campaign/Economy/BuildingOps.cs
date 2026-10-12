@@ -287,6 +287,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TrySetPriority(CampaignState state, string buildingId, int priority, out string message)
         {
+            if (Env.SilentNightService.PriorityLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
             if (b == null || !HasPriority(b.BuildingTypeId))
             {

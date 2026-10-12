@@ -163,6 +163,8 @@ namespace GameLogic.Campaign.Regions
         private static void Append(CampaignState state, WorkOrderRecord order)
         {
             state.WorkOrders = (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Append(order).ToArray();
+            // FG7-ENV-02（FGR-ENV-011“新的施工规划：可以放虚影，但要等静默夜结束后才开工”）：静默夜期间新开的施工单记进暂缓名单。
+            Env.SilentNightService.OnBuildOrderCreated(state, order);
         }
 
         /// <summary>
@@ -226,6 +228,7 @@ namespace GameLogic.Campaign.Regions
                 return Localization.GameText.Format("build.return.cannot_store", HomeValleyConstruction.MaterialName(reason.Substring(UnsupportedResourcePrefix.Length)));
             }
             if (reason.StartsWith("order-already-active", StringComparison.Ordinal)) return "这项工作已经有机器在做";
+            if (reason == Env.SilentNightService.HoldReason) return Env.SilentNightService.HoldText(CampaignSession.Current);
             if (reason.StartsWith("not-damaged", StringComparison.Ordinal)) return "这座建筑没有损坏，不需要修复";
             if (reason.StartsWith("no-repair-profile", StringComparison.Ordinal)) return "这座建筑不能修复";
             if (reason.StartsWith("no-build-profile", StringComparison.Ordinal)) return "这里不能建造";
@@ -1451,6 +1454,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return WorkOrderOpResult.Fail($"order-already-active:{order.State}");
             }
+            if (Env.SilentNightService.IsConstructionHeld(state, order))
+            {
+                return WorkOrderOpResult.Fail(Env.SilentNightService.HoldReason); // FG7-ENV-02：静默夜期间新放的规划等结束后开工。
+            }
             int need = HomeValleyConstruction.MaterialsStillNeeded(state, order);
             // FG4-ECO-11：还缺的材料里有一种有货就能去取（废料以外的材料同样算）；都没货才拒绝，原因写卡住的那种。
             if (need > 0 && !HomeValleyConstruction.HasFetchableStock(state, order))
@@ -1512,6 +1519,13 @@ namespace GameLogic.Campaign.Regions
                     }
                     if (order.State == WorkOrderState.Ready && order.AssignedMachineLogicId == 0)
                     {
+                        // FG7-ENV-02：静默夜期间新放的施工规划不派机器，等结束（原因写进工单，施工队列 / 悬停照写）。
+                        if (Env.SilentNightService.IsConstructionHeld(state, order))
+                        {
+                            order.State = WorkOrderState.Waiting;
+                            order.FailureReason = Env.SilentNightService.HoldReason;
+                            continue;
+                        }
                         // FG3-LOG-02：取料腿的施工单在库存为 0 时不派机器（派过去也是空跑），转为等待材料；
                         // 返还物的搬运单在仓库放不下时同样等待，不让机器扛着货在核心门口干等。
                         if (order.Kind == WorkOrderKind.Build && order.Leg == 1 && !HomeValleyConstruction.HasFetchableStock(state, order)
@@ -2657,6 +2671,18 @@ namespace GameLogic.Campaign.Regions
 
         private static void TickWaiting(CampaignState state, WorkOrderRecord order, float dt)
         {
+            // FG7-ENV-02：静默夜暂缓的施工单——静默夜结束（暂缓名单清空）就回到待分配池，自动开工（FG07 第 5 节“结束后自动开工”）。
+            if (order.FailureReason == Env.SilentNightService.HoldReason)
+            {
+                if (!Env.SilentNightService.IsConstructionHeld(state, order))
+                {
+                    order.State = WorkOrderState.Ready;
+                    order.FailureReason = null;
+                    MarkAssignmentDirty();
+                    HomeValleyConstruction.Touch();
+                }
+                return;
+            }
             if (order.FailureReason == "path-blocked" || IsUnreachableReason(order.FailureReason))
             {
                 float waited = (WaitingWatch.TryGetValue(order.WorkOrderId, out float w) ? w : 0f) + dt;

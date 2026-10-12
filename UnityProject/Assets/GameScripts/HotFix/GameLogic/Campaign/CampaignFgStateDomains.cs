@@ -993,6 +993,39 @@ namespace GameLogic.Campaign
     public sealed class WeatherState
     {
         public int DomainVersion = 1;
+        /// <summary>FG7-ENV-02（FG07 FGR-ENV-010～015）：静默夜计划、进行中的静默夜、施工暂缓名单、风暴残骸与结束总结的基线。
+        /// 唯一写入口 <see cref="Env.SilentNightService"/>。只加字段、不升域版本：旧档没有 = 第一次推进时按当前游戏日排好下一次（不追溯）。</summary>
+        public SilentNightState SilentNight = new SilentNightState();
+    }
+
+    /// <summary>FG7-ENV-02：静默夜状态（见 <see cref="WeatherState.SilentNight"/>）。时刻一律是统一时钟的整数步（存读档逐位一致）。</summary>
+    [Serializable]
+    public sealed class SilentNightState
+    {
+        /// <summary>下一次（或正在进行的）静默夜在第几个游戏日的夜里（0 = 还没排）。</summary>
+        public int NextDay;
+        /// <summary>那一次的预警 / 开始 / 结束步（排定时按当时的调参算好写死，之后调参或难度变化只影响再下一次）。</summary>
+        public long WarnTick = -1;
+        public long StartTick = -1;
+        public long EndTick = -1;
+        /// <summary>这一次已经发过预警。</summary>
+        public bool Warned;
+        /// <summary>静默夜正在进行。</summary>
+        public bool Active;
+        /// <summary>已经开始过几次静默夜（第一次说明、风暴残骸编号的种子）。</summary>
+        public int Count;
+        /// <summary>静默夜期间新放的施工规划（工单 ID，按放下先后）：结束后才开工（FGR-ENV-011“新的施工规划”）。</summary>
+        public string[] HeldOrderIds = Array.Empty<string>();
+        /// <summary>开始那一刻突袭结算的下一个序号（结束总结只数这之后的结算）。</summary>
+        public int ResultSerialAtStart;
+        /// <summary>开始那一刻进入安全模式的远征机器（编号；结束总结与自检用）。</summary>
+        public int[] ExpeditionSafeIds = Array.Empty<int>();
+        /// <summary>风暴残骸地面物序号（地面物 ID 确定性，不用 GUID）。</summary>
+        public int NextDebrisSerial = 1;
+        /// <summary>最近一次静默夜留下的风暴残骸（地面物 ID）。</summary>
+        public string[] LastDebrisIds = Array.Empty<string>();
+        /// <summary>最近一次静默夜结束总结（已拼好的文字；日历 / 自检读）。</summary>
+        public string LastSummary = string.Empty;
     }
 
     /// <summary>突袭（FG06）。FG0-ARCH-01 起保存"行进中的队伍"（星球表面上的突袭部队，由 <see cref="WorldSim.WorldTransitSystem"/> 唯一写入）；

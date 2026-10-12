@@ -1481,7 +1481,23 @@ namespace GameLogic.Campaign.Economy
         /// <summary>
         /// 选刻录目标（<paramref name="firmwareId"/> 为空 = 取消、待机）。正在刻的那份作废、已扣的芯片基板退回输入缓存（不丢料）；记进“上一次的设置”。
         /// </summary>
-        public static bool TrySetBurnTarget(CampaignState state, string buildingId, string firmwareId, out string message)
+        public static bool TrySetBurnTarget(CampaignState state, string buildingId, string firmwareId, out string message) =>
+            // FG7-ENV-02（FGR-ENV-011“修改配方 | 不可用”）：刻录目标就是刻录台的配方，玩家入口在静默夜期间同样被拒。
+            !Env.SilentNightService.RecipeLocked(state, out message) && SetBurnTargetCore(state, buildingId, firmwareId, out message);
+
+        /// <summary>
+        /// FG7-ENV-02：给施工虚影写刻录目标（粘贴蓝图 / 撤销重做重放 / 复制设置到同类里的虚影）是施工规划，静默夜期间照常写；
+        /// 目标已建成时等同 <see cref="TrySetBurnTarget"/>（静默夜期间被拒），与 <see cref="TrySetRecipeForPlan"/> 同一口径。
+        /// </summary>
+        public static bool TrySetBurnTargetForPlan(CampaignState state, string buildingId, string firmwareId, out string message)
+        {
+            BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
+            return b != null && HomeValleyController.IsPlannedGhost(b)
+                ? SetBurnTargetCore(state, buildingId, firmwareId, out message)
+                : TrySetBurnTarget(state, buildingId, firmwareId, out message);
+        }
+
+        private static bool SetBurnTargetCore(CampaignState state, string buildingId, string firmwareId, out string message)
         {
             message = null;
             if (!TryGet(state, buildingId, out Producer p) || !p.IsBurner)
@@ -1670,29 +1686,26 @@ namespace GameLogic.Campaign.Economy
                 return 0;
             }
             var targets = new List<Producer>(SameTypeScratch);
+            // FG7-ENV-02（FGR-ENV-011）：静默夜期间要改到已建成的同类建筑时整次拒绝（一座都不改、只拒一次、返回原因），与复制设置粘贴同一口径；
+            // 只改到虚影（新的施工规划）时照常写。
+            if (CopyWouldChangeBuilt(p, targets) && Env.SilentNightService.RecipeLocked(state, out string locked))
+            {
+                message = locked;
+                return -1;
+            }
             int changed = 0;
             foreach (Producer o in targets)
             {
-                bool did;
-                if (p.IsBurner)
-                {
-                    did = o.Rec.BurnTarget != p.Rec.BurnTarget;
-                    if (did)
-                    {
-                        TrySetBurnTarget(state, o.Id, p.Rec.BurnTarget, out _);
-                    }
-                }
-                else
-                {
-                    did = !ReferenceEquals(o.Recipe, p.Recipe);
-                    if (did)
-                    {
-                        TrySetRecipe(state, o.Id, p.Recipe?.Id, out _);
-                    }
-                }
+                bool did = CopyDiffers(p, o);
                 if (did)
                 {
-                    changed++;
+                    did = p.IsBurner
+                        ? TrySetBurnTargetForPlan(state, o.Id, p.Rec.BurnTarget, out _)
+                        : TrySetRecipeForPlan(state, o.Id, p.Recipe?.Id, out _);
+                    if (did)
+                    {
+                        changed++;
+                    }
                 }
                 else
                 {
@@ -1702,6 +1715,30 @@ namespace GameLogic.Campaign.Economy
             GuidanceHooks.Raise(GuidanceHooks.EconomyFirstCopyToSameType);
             message = GameText.Format("prod.panel.copy_done", SettingText(p), changed, name, same);
             return changed;
+        }
+
+        /// <summary>“复制设置到同类建筑”会不会改到 <paramref name="o"/>（配方 / 刻录目标不同）。</summary>
+        private static bool CopyDiffers(Producer p, Producer o) =>
+            p.IsBurner ? (o.Rec.BurnTarget ?? string.Empty) != (p.Rec.BurnTarget ?? string.Empty) : !ReferenceEquals(o.Recipe, p.Recipe);
+
+        /// <summary>
+        /// FG7-ENV-02：这次“复制设置到同类建筑”会不会改到已建成（非虚影）的建筑——静默夜期间据此整次拒绝；
+        /// 生产面板在弹确认框之前也先问这里（被拒时不弹确认框）。
+        /// </summary>
+        public static bool CopyWouldChangeBuilt(Producer p, List<Producer> targets)
+        {
+            if (p == null || targets == null)
+            {
+                return false;
+            }
+            foreach (Producer o in targets)
+            {
+                if (o != null && CopyDiffers(p, o) && (o.Building == null || !HomeValleyController.IsPlannedGhost(o.Building)))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ── FG4-ECO-03：多个输入口（两种固体材料的配方：第 1 个输入口收第 1 种、第 2 个收第 2 种）────────────────────
@@ -2332,7 +2369,8 @@ namespace GameLogic.Campaign.Economy
         /// 输入缓存里新配方用不上的件、输入口缓存里的件退回仓库（放不下落地，机器之后搬走）；输入口改收新配方要的固体。
         /// </summary>
         public static bool TrySetRecipe(CampaignState state, string buildingId, string recipeId, out string message) =>
-            SetRecipeCore(state, buildingId, recipeId, remember: true, out message);
+            // FG7-ENV-02（FGR-ENV-011“修改配方 | 不可用（界面上显示原因）”）：玩家入口在静默夜期间被拒；常驻规则走 TrySetRecipeForRule，照常执行。
+            !Env.SilentNightService.RecipeLocked(state, out message) && SetRecipeCore(state, buildingId, recipeId, remember: true, out message);
 
         /// <summary>
         /// FG4-ECO-06：常驻规则接管 / 恢复配方走这里——与 <see cref="TrySetRecipe"/> 同一套切换（周期作废、料退回、输入口改收），
@@ -2340,6 +2378,19 @@ namespace GameLogic.Campaign.Economy
         /// </summary>
         public static bool TrySetRecipeForRule(CampaignState state, string buildingId, string recipeId, out string message) =>
             SetRecipeCore(state, buildingId, recipeId, remember: false, out message);
+
+        /// <summary>
+        /// FG7-ENV-02（FGR-ENV-011“新的施工规划：可以放虚影，结束后开工”）：给施工虚影写配方（粘贴蓝图 / 吸管放置 / 撤销重做重放虚影）是规划，
+        /// 不是修改已有建筑的配方——静默夜期间照常写（与 <see cref="TrySetRecipe"/> 同一套切换，同样记住上一次配方）。
+        /// 目标不是虚影（已建成）时等同 <see cref="TrySetRecipe"/>（静默夜期间被拒），不会成为绕过拦截的入口。
+        /// </summary>
+        public static bool TrySetRecipeForPlan(CampaignState state, string buildingId, string recipeId, out string message)
+        {
+            BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
+            return b != null && HomeValleyController.IsPlannedGhost(b)
+                ? SetRecipeCore(state, buildingId, recipeId, remember: true, out message)
+                : TrySetRecipe(state, buildingId, recipeId, out message);
+        }
 
         private static bool SetRecipeCore(CampaignState state, string buildingId, string recipeId, bool remember, out string message)
         {

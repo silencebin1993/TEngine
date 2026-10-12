@@ -318,6 +318,11 @@ namespace GameLogic.Campaign.Signal
         /// <summary>FGR-SIG-053：这台机器现在能不能收到远程命令（在与核心连通的覆盖里）。下命令时逐台现采样（O(覆盖源数)），不读定期评估的缓存。</summary>
         public static bool CanReceiveCommand(int logicId)
         {
+            // FG7-ENV-02（FGR-ENV-011“远程命令（编队命令、驻防调动）| 不可用”）：静默夜期间任何机器都收不到远程命令，继续执行最后的命令。
+            if (Env.SilentNightService.IsActiveNow())
+            {
+                return false;
+            }
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null)
             {
                 return true;

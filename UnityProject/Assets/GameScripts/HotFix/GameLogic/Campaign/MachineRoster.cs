@@ -261,6 +261,10 @@ namespace GameLogic.Campaign
         /// </summary>
         public static bool TrySetRole(CampaignState s, int logicId, MachineRole role, out string message)
         {
+            if (Env.SilentNightService.GarrisonLocked(s, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || s == null)
             {
                 message = GameText.Get("roster.err.unknown");
@@ -351,6 +355,10 @@ namespace GameLogic.Campaign
         /// <summary>批量改岗位（名册勾选）。返回改成功的台数；<paramref name="message"/> 汇总（“3 台改为「闲置」，1 台没改：#4 正在远征……”）。</summary>
         public static int TrySetRoles(CampaignState s, IReadOnlyList<int> logicIds, MachineRole role, out string message)
         {
+            if (Env.SilentNightService.GarrisonLocked(s, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return 0;
+            }
             if (logicIds == null || logicIds.Count == 0)
             {
                 message = GameText.Get("roster.err.batch_empty");
@@ -387,6 +395,10 @@ namespace GameLogic.Campaign
         /// <summary>驻防点（建筑 ID；空 = 归还核心）。驻防岗且有在办的名册驻防单时，按新的点重新派。</summary>
         public static bool TrySetGarrisonPoint(CampaignState s, int logicId, string buildingId, out string message)
         {
+            if (Env.SilentNightService.GarrisonLocked(s, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || s == null)
             {
                 message = GameText.Get("roster.err.unknown");
@@ -536,6 +548,10 @@ namespace GameLogic.Campaign
         /// </summary>
         public static bool TryAddPatrolPoint(CampaignState s, int logicId, string buildingId, out string message)
         {
+            if (Env.SilentNightService.GarrisonLocked(s, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || s == null)
             {
                 message = GameText.Get("roster.err.unknown");
@@ -576,6 +592,10 @@ namespace GameLogic.Campaign
         /// <summary>清空巡逻路线：机器回到守驻防点。</summary>
         public static bool TryClearPatrol(CampaignState s, int logicId, out string message)
         {
+            if (Env.SilentNightService.GarrisonLocked(s, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null)
             {
                 message = GameText.Get("roster.err.unknown");

@@ -441,6 +441,15 @@ namespace GameLogic.Core
         /// <summary>FG7-ENV-01（FGR-ENV-002 / FGU-26）：第一次打开日历面板。</summary>
         public const string EnvCalendarFirstOpen = "env.calendar_first_open";
 
+        /// <summary>FG7-ENV-02（FGR-ENV-015“第一次静默夜前给一次非阻塞的说明”）：第一次静默夜预警（会发生什么、要提前准备什么——引导内容在 FG15-UX-04）。</summary>
+        public const string EnvFirstSilentWarning = "env.first_silent_warning";
+
+        /// <summary>FG7-ENV-02：第一次静默夜开始（信号中断、远程命令不可用的说明）。</summary>
+        public const string EnvFirstSilentNight = "env.first_silent_night";
+
+        /// <summary>FG7-ENV-02（FGR-ENV-014）：第一次出现风暴残骸。</summary>
+        public const string EnvFirstStormDebris = "env.first_storm_debris";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -497,6 +506,7 @@ namespace GameLogic.Core
             DifficultyFirstOpen, DifficultyFirstChanged,
             LogisticsLeakFirst, LogisticsLeakFirstReact, LogisticsLeakFirstFaded,
             EnvFirstNight, EnvCalendarFirstOpen,
+            EnvFirstSilentWarning, EnvFirstSilentNight, EnvFirstStormDebris,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

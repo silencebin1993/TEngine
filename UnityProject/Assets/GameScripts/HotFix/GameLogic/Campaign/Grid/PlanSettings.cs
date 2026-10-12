@@ -205,7 +205,8 @@ namespace GameLogic.Campaign.Grid
                         recipeApplied = true;
                         if ((p.Rec.BurnTarget ?? string.Empty) != (fw ?? string.Empty))
                         {
-                            changed |= Economy.ProductionService.TrySetBurnTarget(state, b.BuildingId, fw, out _);
+                            // FG7-ENV-02：写虚影的刻录目标是施工规划（静默夜期间照常）；建成的仍走玩家入口（静默夜期间被拒）。
+                            changed |= Economy.ProductionService.TrySetBurnTargetForPlan(state, b.BuildingId, fw, out _);
                         }
                     }
                 }
@@ -216,7 +217,8 @@ namespace GameLogic.Campaign.Grid
                         recipeApplied = true;
                         if (p.Recipe != null)
                         {
-                            changed |= Economy.ProductionService.TrySetRecipe(state, b.BuildingId, null, out _);
+                            // FG7-ENV-02：写虚影的配方是施工规划（静默夜期间照常）；建成的建筑仍走玩家入口（静默夜期间被拒）。
+                            changed |= Economy.ProductionService.TrySetRecipeForPlan(state, b.BuildingId, null, out _);
                         }
                     }
                     else
@@ -227,7 +229,7 @@ namespace GameLogic.Campaign.Grid
                             recipeApplied = true;
                             if (!ReferenceEquals(p.Recipe, r))
                             {
-                                changed |= Economy.ProductionService.TrySetRecipe(state, b.BuildingId, rid, out _);
+                                changed |= Economy.ProductionService.TrySetRecipeForPlan(state, b.BuildingId, rid, out _);
                             }
                         }
                     }
@@ -432,6 +434,11 @@ namespace GameLogic.Campaign.Grid
                     reason = new GridReason(GridBlockReason.SettingsIncompatible, "plan.reason.incompatible", clip.SourceName ?? string.Empty, targetName);
                     return false;
                 }
+                if (TouchesSilentLocked(state, cell, b.BuildingId, Family.Power, clip.S0) && SilentLocked(state, out GridReason lockedB))
+                {
+                    reason = lockedB;
+                    return false; // FG7-ENV-02：整次粘贴被拒（不写半份、不记撤销），原因写明剩余时间
+                }
                 BuildingSettings(state, b, out int os0, out int os1, out int os2);
                 before = new Clip { Family = Family.Power, SourceName = targetName, S0 = Math.Max(1, os0), S1 = os1, S2 = os2 };
                 int priority = Math.Max(1, Math.Min(4, clip.S0));
@@ -450,8 +457,50 @@ namespace GameLogic.Campaign.Grid
                 reason = new GridReason(GridBlockReason.SettingsIncompatible, "plan.reason.incompatible", clip.SourceName ?? string.Empty, targetName);
                 return false;
             }
+            if (TouchesSilentLocked(state, cell, null, f, clip.S0) && SilentLocked(state, out GridReason lockedP))
+            {
+                reason = lockedP;
+                return false; // FG7-ENV-02：合流器 / 储罐优先级在静默夜期间不可改（与面板同一拦截）
+            }
             before = new Clip { Family = f, SourceName = targetName, S0 = s0, S1 = s1, S2 = s2 };
             return ApplyToPiece(state, cell, kind, clip.S0, clip.S1, clip.S2);
+        }
+
+        // ── FG7-ENV-02：静默夜期间的拦截（FGR-ENV-011“修改规则、配方、优先级 | 不可用（界面上显示原因）”）──
+
+        /// <summary>
+        /// 这份设置写到 (cell) 上那一件时，会不会改到静默夜期间锁住的设置：已建成的用电建筑（电力优先级；配方 / 刻录目标随复制设置一起写）、
+        /// 已建成的合流器（优先输入口）、已建成且带优先级的储罐。虚影 / 规划中的物流件是新的施工规划，不锁；分流器、阀门、储罐模式不在锁定范围（与面板一致）。
+        /// 复制设置粘贴（<see cref="TryApply"/>）与撤销 / 重做设置（PlanHistory.Replay）都先问这里：只拦玩家入口，建成时套用规划设置（HomeValleyConstruction）不经过这里。
+        /// </summary>
+        public static bool TouchesSilentLocked(CampaignState state, GridCell cell, string buildingId, Family family, int s0)
+        {
+            switch (family)
+            {
+                case Family.Power:
+                {
+                    BuildingRecord b = !string.IsNullOrEmpty(buildingId) ? HomeGridService.FindBuilding(state, buildingId) : HomeGridService.BuildingAt(state, cell);
+                    return b != null && !Regions.HomeValleyController.IsPlannedGhost(b);
+                }
+                case Family.Merger:
+                    return BeltNetworkService.IsRunning && BeltNetworkService.TryGetPiece(cell, out BeltNodeKind bk, out _) && bk == BeltNodeKind.Merger;
+                case Family.Tank:
+                    return ((s0 >> 4) & 15) != 0 && PipeNetworkService.IsRunning && PipeNetworkService.TryGetPiece(cell, out PipePieceKind pk, out _) && pk == PipePieceKind.Tank;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>静默夜期间拒绝这次写设置：返回 true 并给出原因（剩余时间）；拒绝音 + 字幕由 <see cref="Env.SilentNightService.EditLocked"/> 发出。不在静默夜返回 false。</summary>
+        public static bool SilentLocked(CampaignState state, out GridReason reason)
+        {
+            reason = GridReason.Of(GridBlockReason.Locked);
+            if (!Env.SilentNightService.PriorityLocked(state, out _))
+            {
+                return false;
+            }
+            reason = new GridReason(GridBlockReason.Locked, "env.silent.reject.priority", Env.SilentNightService.RemainingText(state));
+            return true;
         }
 
         /// <summary>把设置写到 (cell) 上的物流件：建成的走正式入口（分流器 / 合流器 / 储罐 / 阀门的设置接口），规划中的虚影写进规划（建成时生效）。</summary>

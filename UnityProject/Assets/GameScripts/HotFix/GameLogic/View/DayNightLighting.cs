@@ -60,18 +60,33 @@ namespace GameLogic.View
                 Restore();
                 return;
             }
-            Apply(DayNightCycle.Daylight(GameClock.GameSeconds));
+            double now = GameClock.GameSeconds;
+            Apply(DayNightCycle.Daylight(now), SilentNightService.DimFactor(Campaign.CampaignSession.Current, now));
         }
+
+        /// <summary>FG7-ENV-02（FGR-ENV-012“画面压暗”）：静默夜在昼夜亮度之上再乘 (1 − 压暗强度 × 淡入淡出系数)；压暗强度是玩家设置（<see cref="GameSettings.SilentNightDim"/>）。</summary>
+        public static float SilentFactor(float silentDim) => 1f - Mathf.Clamp01(GameSettings.SilentNightDim) * Mathf.Clamp01(silentDim);
+
+        /// <summary>按给定光照与静默夜压暗系数调光（自检直接调）。</summary>
+        public static bool Apply(float daylight, float silentDim)
+        {
+            _silent = silentDim;
+            return Apply(daylight);
+        }
+
+        private static float _silent;
 
         /// <summary>按给定光照调光（自检直接调）。返回这次是否真的写了光照。</summary>
         public static bool Apply(float daylight)
         {
+            float silent = _silent;
+            _silent = 0f; // 只对这一次调用生效（单参数入口 = 没有静默夜）。
             if (!EnsureSun())
             {
                 return false;
             }
             float floor = GameSettings.NightBrightnessFloor;
-            float b = BrightnessFor(daylight, floor);
+            float b = BrightnessFor(daylight, floor) * SilentFactor(silent);
             Color tint = Color.Lerp(NightTint, Color.white, Mathf.Clamp01(daylight));
             float eps = Math.Max(0.0005f, Tuning("env.light.apply_epsilon", 0.003f));
             bool settingsChanged = _lastSettingsRevision != GameSettings.Revision;

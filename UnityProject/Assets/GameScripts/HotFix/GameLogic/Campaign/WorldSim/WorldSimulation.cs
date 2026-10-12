@@ -542,6 +542,9 @@ namespace GameLogic.Campaign.WorldSim
                 }
                 // FG7-ENV-01：昼夜——整游戏秒检查是否跨过入夜 / 天亮（O(1)，只看步序号，与观察无关；光照与太阳能由游戏秒直接算出，没有存档状态）。
                 Env.DayNightCycle.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                // FG7-ENV-02：静默夜——比较存档里的预警 / 开始 / 结束步（O(1)；开始 / 结束那一步断链、远征队安全模式、突袭、风暴残骸），只看步序号，与观察无关。
+                // 放在安全模式退出判定之前：开始那一步进入安全模式的远征机器，本步的退出判定就读到“静默夜中”。
+                Env.SilentNightService.WorldStep(state, GameClock.Ticks);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
                 // FG1-SIG-06：常规裸跑固件的计次间隔到期（信号侧，按游戏时间，与观察无关），O(1)。

@@ -191,6 +191,9 @@ namespace GameLogic.UI.Expedition
         /// <summary>FG4-ECO-07：上次刷新时的劳动力提示（自检 / 冒烟读）。</summary>
         public static string LastLaborForecastText { get; private set; } = string.Empty;
 
+        /// <summary>FG7-ENV-02：最近一次刷新时的“跨过静默夜”提示（没有 = 空串；自检 / 冒烟读）。</summary>
+        public static string LastSilentCrossText { get; private set; } = string.Empty;
+
         private bool _reservePreselected;
 
         /// <summary>FG4-ECO-07（岗位“远征预备”）：面板打开时自动勾选远征预备的机器（不超过人数上限；不合格的不勾，Refresh 会清掉）。玩家照样可以取消勾选。</summary>
@@ -325,6 +328,13 @@ namespace GameLogic.UI.Expedition
             if (_forecastLabel != null)
             {
                 _forecastLabel.text = ExpeditionForecast.Describe(ExpeditionForecast.Compute(state, selectedArray, snapshot.Target));
+                // FG7-ENV-02（FGR-ENV-013“远征准备时，如果预计远征时间会跨过静默夜，给出提示”）：非阻塞提示，写明届时远征队会怎样。
+                string silentCross = GameLogic.Campaign.Env.SilentNightService.ExpeditionCrossText(state);
+                LastSilentCrossText = silentCross ?? string.Empty;
+                if (silentCross != null)
+                {
+                    _forecastLabel.text += "\n" + silentCross;
+                }
             }
 
             bool showReasons = validation.BlockingReasons.Length > 0 && _pendingInterruptLogicIds.Length == 0;

@@ -36,7 +36,11 @@ namespace GameLogic.UI.Kit
         private Label _status;
         private Button _phase;
         private Label _calExtra;
+        private Label _silentBanner;
         private Label _focusTitle;
+
+        /// <summary>FG7-ENV-02：静默夜横幅（自检 / 冒烟读）。</summary>
+        public string SilentBannerText => _silentBanner != null && !_silentBanner.ClassListContains("uk-hidden") ? _silentBanner.text : string.Empty;
         private Button _labor;
         private ScrollView _focusList;
         private readonly List<Button> _focusButtons = new List<Button>(4);
@@ -121,6 +125,15 @@ namespace GameLogic.UI.Kit
             _labor = root.Q<Button>("WorldLabor");
             _phase = root.Q<Button>("WorldDayPhase");
             _calExtra = root.Q<Label>("WorldCalendarExtra");
+            _silentBanner = root.Q<Label>("WorldSilentBanner");
+            if (_silentBanner != null)
+            {
+                UiTooltip.Attach(_silentBanner, () => new TooltipContent
+                {
+                    Title = GameText.Get("env.silent.banner_tip_title"),
+                    Body = GameText.Get("env.silent.banner_tip"),
+                });
+            }
             _resRow = root.Q<VisualElement>("WorldResourceRow");
             if (_phase != null)
             {
@@ -223,7 +236,7 @@ namespace GameLogic.UI.Kit
             _keyBuilder.Clear();
             _keyBuilder.Append(GameText.Language).Append('|').Append(GameClock.MinuteOfDay(GameClock.GameSeconds)).Append('|')
                 .Append(GameClock.DayOf(GameClock.GameSeconds)).Append('|').Append(GameClock.Revision).Append('|')
-                .Append(WorldView.ObservedSiteId).Append('|').Append(WorldView.LastFocusTargetId);
+                .Append(WorldView.ObservedSiteId).Append('|').Append(WorldView.LastFocusTargetId).Append('|').Append(Campaign.Env.SilentNightService.Revision);
             for (int i = 0; i < targets.Count; i++)
             {
                 _keyBuilder.Append('|').Append(targets[i].Id).Append(':').Append(targets[i].Label);
@@ -276,6 +289,16 @@ namespace GameLogic.UI.Kit
             _phase.text = GameText.Format(toNight ? "env.hud.phase_to_night" : "env.hud.phase_to_day",
                 Campaign.Env.DayNightCycle.PhaseGlyph(p), Campaign.Env.DayNightCycle.PhaseName(p), Campaign.Env.CalendarService.ShortDuration(left));
             SetClass(_phase, "wb-phase-night", p == Campaign.Env.DayPhase.Night);
+            // FG7-ENV-02（FGR-ENV-012）：静默夜期间顶部横幅“信号中断 · 剩余 X时Y分”（随游戏分钟刷新）。
+            if (_silentBanner != null)
+            {
+                bool silentNow = Campaign.Env.SilentNightService.IsActive(state);
+                if (silentNow)
+                {
+                    _silentBanner.text = GameText.Format("env.silent.banner", Campaign.Env.CalendarService.ShortDuration(Campaign.Env.SilentNightService.RemainingSeconds(state)));
+                }
+                SetVisible(_silentBanner, silentNow);
+            }
             if (_calExtra == null)
             {
                 return;
@@ -312,8 +335,7 @@ namespace GameLogic.UI.Kit
                 Body = GameText.Format("env.hud.tip", Campaign.Env.DayNightCycle.PhaseName(p), light,
                            GameClock.FormatHour(Campaign.Env.DayNightCycle.NightEndHour), GameClock.FormatHour(Campaign.Env.DayNightCycle.NightStartHour),
                            Mathf.RoundToInt(Settings.GameSettings.NightBrightnessFloor * 100f), InputDisplay.ForAction(GameActionId.OpenCalendar))
-                       + (Campaign.Env.CalendarService.HasSource(Campaign.Env.CalendarKind.SilentNight) && Campaign.Env.CalendarService.HasSource(Campaign.Env.CalendarKind.Weather)
-                           ? string.Empty : "\n" + GameText.Get("env.cal.pending_kinds")),
+                       + Campaign.Env.CalendarService.PendingKindsSuffix(),
                 Shortcut = GameActionId.OpenCalendar,
             };
         }

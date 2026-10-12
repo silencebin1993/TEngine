@@ -295,6 +295,10 @@ namespace GameLogic.UI.Kit
 
         public bool SetTankPriority(int priority)
         {
+            if (Campaign.Env.SilentNightService.PriorityLocked(CampaignSession.Current, out string locked)) // FG7-ENV-02：静默夜期间不能改优先级
+            {
+                return Report(false, locked);
+            }
             PipeOpResult r = PipeNetworkService.TrySetTankPriority(CampaignSession.Current, Cell, priority);
             return Report(r.Ok, r.Ok ? GameText.Format("logistics.pipepanel.changed", PipeNetworkService.PieceName(PipePieceKind.Tank, 0)) : r.Describe());
         }

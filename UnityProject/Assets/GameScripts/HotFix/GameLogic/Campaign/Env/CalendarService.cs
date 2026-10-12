@@ -95,6 +95,18 @@ namespace GameLogic.Campaign.Env
             return false;
         }
 
+        /// <summary>还没有来源的事件种类的说明（换行开头；都有了返回空串）：静默夜与天气都没有 / 只缺天气（FG7-ENV-02 注册静默夜后）。</summary>
+        public static string PendingKindsSuffix()
+        {
+            bool silent = HasSource(CalendarKind.SilentNight);
+            bool weather = HasSource(CalendarKind.Weather);
+            if (silent && weather)
+            {
+                return string.Empty;
+            }
+            return "\n" + GameText.Get(silent ? "env.cal.pending_weather" : "env.cal.pending_kinds");
+        }
+
         /// <summary>日历面板显示今天起几个游戏日（fg.TbHomeTuning env.calendar.days，初值 5）。</summary>
         public static int Days => Math.Max(1, Math.Min(14, GridContent.TryGetTuning("env.calendar.days", out float d) ? (int)Math.Round(d) : 5));
 

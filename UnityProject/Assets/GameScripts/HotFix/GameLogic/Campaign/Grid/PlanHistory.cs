@@ -763,6 +763,24 @@ namespace GameLogic.Campaign.Grid
             {
                 first--;
             }
+            // FG7-ENV-02（FGR-ENV-011“修改规则、配方、优先级 | 不可用（界面上显示原因）”）：这一步里有设置操作会改到静默夜期间锁住的设置
+            // （已建成建筑的电力优先级 / 配方、合流器 / 储罐优先级）→ 整步不撤销 / 不重做、写明原因；这一步留在原栈里，静默夜结束后照常可以撤销 / 重做。
+            for (int i = first; i < from.Count; i++)
+            {
+                PlanOpRecord sop = from[i];
+                if (sop == null || sop.Kind != (int)PlanOpKind.Settings)
+                {
+                    continue;
+                }
+                PlanEntryBlock block = redo ? sop.Entries : sop.Before;
+                int s0 = PlanEntries.CountOf(block) > 0 ? block.S0[0] : 0;
+                if (PlanSettings.TouchesSilentLocked(state, new GridCell(sop.X, sop.Y), sop.BuildingId, (PlanSettings.Family)sop.Flag, s0)
+                    && PlanSettings.SilentLocked(state, out GridReason locked))
+                {
+                    result.Text = locked.Describe();
+                    return result;
+                }
+            }
             var ops = from.GetRange(first, from.Count - first);
             from.RemoveRange(first, from.Count - first);
             _inflight = ops;

@@ -699,6 +699,10 @@ namespace GameLogic.UI.Kit
             {
                 return Report(false, GameText.Get("power.reason.not_found"));
             }
+            if (Campaign.Env.SilentNightService.PriorityLocked(state, out string locked)) // FG7-ENV-02：静默夜期间不能改电力优先级（FGR-ENV-011，写明原因）
+            {
+                return Report(false, locked);
+            }
             HomeValleyPowerGrid.GridResult r = HomeValleyPowerGrid.TrySetPriority(state, b.BuildingId, priority);
             return Report(r.Success, r.Success ? GameText.Format("power.panel.changed", MemberLabel(b), priority) : ReasonText(r.FailureReason));
         }

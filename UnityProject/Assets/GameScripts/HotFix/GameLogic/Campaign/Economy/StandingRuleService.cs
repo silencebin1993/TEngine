@@ -252,7 +252,39 @@ namespace GameLogic.Campaign.Economy
             {
                 d.NextCheckTick = ticksBefore + Math.Max(1L, (long)Math.Round(CheckSeconds * Math.Max(1, worldHz)));
             }
+            // FG7-ENV-02：静默夜预案“开始前 N 秒”要准时——定时检查是每游戏分钟一次，比 N 秒粗；下一次检查提前到最近的预案执行 / 恢复那一步（O(规则数)，只在检查步）。
+            long edge = NextSilentEdge(state, d, ticksBefore, worldHz);
+            if (edge > ticksBefore && edge < d.NextCheckTick)
+            {
+                d.NextCheckTick = edge;
+            }
             Evaluate(state);
+        }
+
+        /// <summary>启用的静默夜预案下一次要执行（开始前 N 秒）或恢复（静默夜结束）的那一步；没有返回 -1。</summary>
+        private static long NextSilentEdge(CampaignState state, StandingRuleState d, long after, int worldHz)
+        {
+            if (!TrySilentWindow(state, out long start, out long end))
+            {
+                return -1;
+            }
+            long best = -1;
+            foreach (StandingRuleRecord r in d.Rules)
+            {
+                if (r == null || !r.Enabled || r.Kind != KindSilent)
+                {
+                    continue;
+                }
+                long on = start - (long)r.Threshold * Math.Max(1, worldHz);
+                foreach (long t in new[] { on, end })
+                {
+                    if (t > after && (best < 0 || t < best))
+                    {
+                        best = t;
+                    }
+                }
+            }
+            return best;
         }
 
         /// <summary>立刻检查一次（下一个模拟步）。</summary>
@@ -308,6 +340,11 @@ namespace GameLogic.Campaign.Economy
         /// <summary>按类型新建一条规则（默认值来自 fg.TbRuleKind / 调参）；设置完整就直接启用，缺目标就先停用并写明（FGR-BASE-020：只有玩家显式设定的规则才执行）。</summary>
         public static bool TryCreate(CampaignState state, string kind, out StandingRuleRecord rule, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                rule = null;
+                return false;
+            }
             rule = null;
             StandingRuleState d = Domain(state);
             RuleKind k = KindRow(kind);
@@ -346,6 +383,11 @@ namespace GameLogic.Campaign.Economy
         /// <summary>从常用预设新建（物品 / 数值 / 配方 / 维修优先按预设；目标由玩家选）。</summary>
         public static bool TryCreateFromPreset(CampaignState state, string presetId, out StandingRuleRecord rule, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                rule = null;
+                return false;
+            }
             rule = null;
             RulePreset p = null;
             foreach (RulePreset x in Presets)
@@ -387,6 +429,11 @@ namespace GameLogic.Campaign.Economy
         /// <summary>复制（卡片“规则的复制”）：同样的设置，新编号，排在原规则正下方；先停用（两条一样的规则同时启用必然互相冲突），改好目标再启用。</summary>
         public static bool TryCopy(CampaignState state, int serial, out StandingRuleRecord copy, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                copy = null;
+                return false;
+            }
             copy = null;
             StandingRuleState d = Domain(state);
             StandingRuleRecord src = Find(state, serial);
@@ -434,6 +481,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>删除（面板先确认，B04）：它持有的改动先恢复原样，排队的重建等待一并撤掉。</summary>
         public static bool TryDelete(CampaignState state, int serial, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleState d = Domain(state);
             StandingRuleRecord r = Find(state, serial);
             if (r == null)
@@ -463,6 +514,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>启用 / 停用（可逆，不弹确认）。启用前设置必须完整；停用时它持有的改动恢复原样。</summary>
         public static bool TrySetEnabled(CampaignState state, int serial, bool enabled, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (r == null)
             {
@@ -501,6 +556,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>上移 / 下移一位（与相邻的规则交换优先级）。</summary>
         public static bool TryMove(CampaignState state, int serial, int delta, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleState d = Domain(state);
             List<StandingRuleRecord> list = Ordered(state);
             int i = list.FindIndex(x => x.Serial == serial);
@@ -584,6 +643,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TrySetItem(CampaignState state, int serial, string itemId, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindStock, KindSupply))
             {
@@ -604,6 +667,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TrySetThreshold(CampaignState state, int serial, int value, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             RuleKind k = r != null ? KindRow(r.Kind) : null;
             if (r == null || k == null || k.ThresholdKey == "none")
@@ -622,6 +689,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TrySetBatch(CampaignState state, int serial, int value, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindSupply))
             {
@@ -639,6 +710,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>库存维持：选工厂（只有一座）。配方自动换成这座工厂能做、产出该物品的第一条（多条时可再选）。</summary>
         public static bool TrySetFactory(CampaignState state, int serial, string buildingId, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindStock))
             {
@@ -661,6 +736,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TrySetRecipe(CampaignState state, int serial, string recipeId, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindStock))
             {
@@ -678,6 +757,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>加一个建筑目标（阈值补给对象 / 战时暂停 / 静默夜储能站 / 自动重建范围的建筑类型）。</summary>
         public static bool TryAddTarget(CampaignState state, int serial, string id, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindSupply, KindWar, KindSilent, KindRebuild))
             {
@@ -701,6 +784,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TryRemoveTarget(CampaignState state, int serial, string id, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (r == null || Array.IndexOf(r.Targets, id) < 0)
             {
@@ -715,6 +802,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TryAddMachine(CampaignState state, int serial, int logicId, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindSilent, KindRepair))
             {
@@ -737,6 +828,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TryRemoveMachine(CampaignState state, int serial, int logicId, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (r == null || Array.IndexOf(r.Machines, logicId) < 0)
             {
@@ -752,6 +847,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>静默夜驻防点 / 远征卸货的目的地（建筑 ID；空 = 归还核心 / 共用库存）。</summary>
         public static bool TrySetPoint(CampaignState state, int serial, string buildingId, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindSilent, KindUnload))
             {
@@ -774,6 +873,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TrySetBoost(CampaignState state, int serial, bool boost, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindWar))
             {
@@ -788,6 +891,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>开 / 关战时预案的“突袭时炮塔 / 陷阱补给优先”。</summary>
         public static bool TrySetDefenseSupplyBoost(CampaignState state, int serial, bool boost, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             if (!Editable(r, out message, KindWar))
             {
@@ -809,6 +916,11 @@ namespace GameLogic.Campaign.Economy
         /// </summary>
         public static bool ToggleDefenseSupplyBoost(CampaignState state, out bool nowOn, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                nowOn = false;
+                return false;
+            }
             nowOn = false;
             if (DefenseSupplyBoostConfigured(state, out _))
             {

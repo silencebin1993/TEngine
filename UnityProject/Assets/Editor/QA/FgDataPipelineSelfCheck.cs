@@ -522,6 +522,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "SGR" || f[0] == "SGT" || f[0] == "SGC" || f[0] == "SGU"
                     // FG6-LOG-10 的流体泄漏（FLK）由 FgPipeLeakSelfCheck A1 段逐字段比对。
                     || f[0] == "FLK"
+                    // FG7-ENV-02 的风暴残骸表（SD）由 FgSilentNightSelfCheck 逐字段比对。
+                    || f[0] == "SD"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

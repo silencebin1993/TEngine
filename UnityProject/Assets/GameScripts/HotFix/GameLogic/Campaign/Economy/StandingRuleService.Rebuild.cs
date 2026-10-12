@@ -295,6 +295,11 @@ namespace GameLogic.Campaign.Economy
         /// <summary>给自动重建规则圈一个重建区域（两角任意顺序，含两端；开着）。小于 rules.zone.min_cells 格 / 超过 rules.zone.max 个时拒绝并写原因。</summary>
         public static bool TryAddZone(CampaignState state, int serial, GridCell a, GridCell b, out RebuildZoneRecord zone, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                zone = null;
+                return false;
+            }
             zone = null;
             StandingRuleRecord r = Find(state, serial);
             if (r == null)
@@ -332,6 +337,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>打开 / 关掉一个重建区域（可逆，不弹确认）。打开后下一个模拟步补排区域里已经被摧毁的东西。</summary>
         public static bool TrySetZoneEnabled(CampaignState state, int serial, int zoneSerial, bool enabled, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             RebuildZoneRecord z = FindZone(r, zoneSerial);
             if (z == null)
@@ -347,6 +356,10 @@ namespace GameLogic.Campaign.Economy
 
         public static bool TryToggleZone(CampaignState state, int serial, int zoneSerial, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             RebuildZoneRecord z = FindZone(Find(state, serial), zoneSerial);
             if (z == null)
             {
@@ -359,6 +372,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>删掉一个重建区域（可逆的设置改动：区域可以重新圈，已经派出的重建单不撤）。</summary>
         public static bool TryRemoveZone(CampaignState state, int serial, int zoneSerial, out string message)
         {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
             StandingRuleRecord r = Find(state, serial);
             RebuildZoneRecord z = FindZone(r, zoneSerial);
             if (z == null)

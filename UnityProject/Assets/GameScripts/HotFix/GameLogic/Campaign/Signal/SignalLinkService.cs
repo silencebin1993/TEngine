@@ -378,6 +378,9 @@ namespace GameLogic.Campaign.Signal
 
         // ─────────────────────────────── 静默夜（预留接口，FG07 接入）───────────────────────────────
 
+        /// <summary>“静默夜开始”入口被调用的次数（FG7-ENV-02 自检：正式静默夜开始那一步调用且只调用一次）。</summary>
+        public static int SilentNightStartCalls { get; private set; }
+
         /// <summary>FG07 静默夜预警（开始前 N 秒）：HUD 与字幕提示“届时信号会被弹回归还核心”。信号在核心时也提示（玩家可能正准备接入）。</summary>
         public static void AnnounceSilentNight(float secondsUntilStart)
         {
@@ -394,17 +397,40 @@ namespace GameLogic.Campaign.Signal
         /// </summary>
         public static bool OnSilentNightStarted()
         {
+            SilentNightStartCalls++;
             SignalUplinkService.CancelPendingForLink(GameText.Get("signal.uplink.reason.silent_night"));
             CampaignState s = CampaignSession.Current;
             // FG5-RND-03（FG05 第 5 章）：信号在靶场的投影里 → 断链、弹回核心、投影消失。
             bool brokeProjection = Economy.TestRangeService.OnSilentNightStarted();
             int id = SignalUplinkService.CurrentMachine(s);
-            if (id == 0)
+            bool broke = brokeProjection;
+            if (id != 0)
             {
-                return brokeProjection;
+                RegionControlSystem control = RegionControlSystem.ForRegion(s.SignalCore.UplinkSiteId);
+                broke |= control != null && control.ForceBreak(RegionControlChangeReason.SilentNight);
             }
-            RegionControlSystem control = RegionControlSystem.ForRegion(s.SignalCore.UplinkSiteId);
-            return control != null && control.ForceBreak(RegionControlChangeReason.SilentNight);
+            if (broke)
+            {
+                // FG7-ENV-02（FGR-UX-021）：信号已弹回核心，玩家此刻不再接入任何机器 / 投影——直控锁（1x、FG-GAP-114“接入时不自动暂停”）在这一步就释放，
+                // 不等下一帧 WorldView.FrameBegin 按镜头模式刷新。否则同一步紧接着发的“静默夜开始”通知（默认自动暂停）会被当成“接入中”吞掉，
+                // 玩家恰好在机器里时这一次不暂停（冒烟 StepLinkSilentBroken 实测）。镜头下一帧发现受控机没了就退回战略视角（暂停中过渡照常推进），暂停键随即可用。
+                GameClock.SetDirectLocked(false);
+            }
+            return broke;
+        }
+
+        /// <summary>
+        /// FG7-ENV-02（FGR-ENV-013“远征中遇到静默夜：远征队进入安全模式，继续执行最后的命令”）：静默夜开始时远征地点的机器进入安全模式（原因 = 静默夜）。
+        /// 已在安全模式里的只改原因、重新计时；静默夜结束、断链条件都消失并持续 signal.safe_mode.exit_seconds 后由 <see cref="SimStep"/> 照常退出。
+        /// </summary>
+        public static bool EnterSafeModeForSilentNight(CampaignState s, int logicId)
+        {
+            if (s == null || !MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null || !rec.IsAlive)
+            {
+                return false;
+            }
+            EnterSafeMode(s, logicId, SignalLinkBreakReason.SilentNight);
+            return true;
         }
 
         // ─────────────────────────────── 安全模式（FGR-SIG-041）───────────────────────────────

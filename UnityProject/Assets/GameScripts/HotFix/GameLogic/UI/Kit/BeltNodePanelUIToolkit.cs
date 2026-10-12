@@ -402,6 +402,10 @@ namespace GameLogic.UI.Kit
             {
                 return false;
             }
+            if (Campaign.Env.SilentNightService.PriorityLocked(CampaignSession.Current, out string locked)) // FG7-ENV-02：静默夜期间不能改优先级
+            {
+                return Report(false, locked);
+            }
             BeltOpResult r = BeltNetworkService.TrySetMergerPriority(CampaignSession.Current, Cell, side);
             return Report(r.Ok, r.Ok ? GameText.Format("logistics.nodepanel.changed", BeltNetworkService.PieceName(_node.Kind, _node.Tier)) : r.Describe());
         }

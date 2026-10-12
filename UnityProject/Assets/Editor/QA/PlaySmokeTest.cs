@@ -3763,17 +3763,62 @@ namespace GameLogic.EditorTools
             }
             int m = SessionState.GetInt(K + "LinkM", 0);
             Check(Campaign.Signal.SignalPresence.CurrentMachineLogicId == m, $"接入 {SigLabel(m)}");
-            // 测试捷径：静默夜（FG07）还没有，走 FG1-SIG-04 预留的判定入口与“静默夜开始”事件入口。
-            Campaign.Signal.SignalUplinkService.SilentNightProvider = () => true;
-            Campaign.Signal.SignalLinkService.AnnounceSilentNight(0f);
-            bool broke = Campaign.Signal.SignalLinkService.OnSilentNightStarted();
-            Check(broke, "静默夜开始（预留接口）：接入中的信号被强制弹回");
-            Next(188, "测试捷径：静默夜开始");
+            // FG7-ENV-02：静默夜走正式流程——测试捷径只把下一次静默夜的日程排到眼前（0.5 游戏秒后预警、再 1 秒开始、持续 12 秒），
+            // 预警 / 开始（断链、安全模式、通知、横幅、默认自动暂停）/ 结束（风暴残骸、总结）全部由世界模拟的 SilentNightService.WorldStep 执行。
+            // 这一次不向突袭导演发触发（冒烟后面的步骤不想被突袭打断；突袭触发由 FgSilentNightSelfCheck R1 ⑧断言）。
+            Check(Campaign.Env.SilentNightService.Installed && Campaign.Signal.SignalUplinkService.SilentNightProvider != null,
+                "静默夜正式入口已接上（GameRoot.Startup：接入判定、常驻规则时间窗、日历来源）");
+            Campaign.Env.SilentNightService.ScheduleForTests(CampaignSession.Current, 0.5, 12.0, raid: false);
+            SessionState.SetInt(K + "SilentWarn0", Campaign.Env.SilentNightService.WarnCount);
+            SessionState.SetBool(K + "SilentResumed", false);
+            SessionState.SetBool(K + "SilentPauseSeen", false);
+            Next(188, "测试捷径：把下一次静默夜排到眼前（预警、开始、断链走正式流程）");
         }
 
         private static void StepLinkSilentBroken(double inStep)
         {
-            if (inStep < 1.5)
+            // FG7-ENV-02：先等静默夜按日程真的开始——开始时“静默夜开始”通知默认自动暂停（FGR-UX-021）；此刻玩家正接入着机器（直控），
+            // 信号弹回核心、直控锁当步释放，所以照样暂停。玩家看到暂停后等镜头回到战略视角（暂停中过渡照常推进；过渡中暂停键不生效），再按暂停键继续。
+            if (!SessionState.GetBool(K + "SilentResumed", false))
+            {
+                CampaignState cs0 = CampaignSession.Current;
+                if (!SessionState.GetBool(K + "SilentPauseSeen", false))
+                {
+                    if (!Campaign.Env.SilentNightService.IsActive(cs0))
+                    {
+                        if (inStep > 20.0)
+                        {
+                            Check(false, "静默夜没有按日程开始（20 真实秒）");
+                            SessionState.SetBool(K + "SilentResumed", true);
+                            SessionState.SetFloat(K + "SilentResumeAt", (float)inStep);
+                        }
+                        return;
+                    }
+                    Check(Campaign.Env.SilentNightService.WarnCount == SessionState.GetInt(K + "SilentWarn0", 0) + 1
+                          && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "silent_night_warning")
+                          && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "silent_night"),
+                        "静默夜按日程预警、开始（“静默夜预警”“静默夜开始”两条通知都在通知历史里）");
+                    Check(GameRoot.IsWorldPaused && !GameClock.DirectLocked,
+                        $"接入机器时遇到“静默夜开始”：默认自动暂停（FGR-UX-021），直控锁已释放（暂停 {GameRoot.IsWorldPaused}，直控锁 {GameClock.DirectLocked}）");
+                    SessionState.SetBool(K + "SilentPauseSeen", true);
+                    SessionState.SetFloat(K + "SilentPauseAt", (float)inStep);
+                    return;
+                }
+                bool strategyView = WorldView.Director.Mode == View.ViewMode.Strategy;
+                if (!strategyView && inStep < SessionState.GetFloat(K + "SilentPauseAt", 0f) + 5.0)
+                {
+                    return;
+                }
+                Check(strategyView && GameRoot.IsWorldPaused, $"暂停中镜头回到战略视角（{WorldView.Director.Mode}），世界仍暂停，按暂停键继续");
+                if (GameRoot.IsWorldPaused)
+                {
+                    PressKey(GameSettings.KeyBindings.GetKey(GameActionId.TogglePause));
+                }
+                SessionState.SetBool(K + "SilentResumed", true);
+                SessionState.SetFloat(K + "SilentResumeAt", (float)inStep);
+                return;
+            }
+            if (inStep < SessionState.GetFloat(K + "SilentResumeAt", 0f) + 0.8)
             {
                 return;
             }
@@ -3783,6 +3828,7 @@ namespace GameLogic.EditorTools
             VisualElement listItem = listBtn?.parent;
             if (!SessionState.GetBool(K + "LinkHover", false))
             {
+                Check(!GameRoot.IsWorldPaused, "按暂停键后世界继续运行（“静默夜开始”的自动暂停已解除）");
                 UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
                 string status = hud?.UplinkStatusText ?? string.Empty;
                 View.WorldBadge badge = View.SignalLinkView.BadgeFor(m);
@@ -3793,6 +3839,9 @@ namespace GameLogic.EditorTools
                 Check(Campaign.Signal.SignalLinkService.IsInSafeMode(CampaignSession.Current, m) && badge != null && badge.IsShowing
                       && badge.IconId == Campaign.Signal.SignalLinkService.SafeModeIconId,
                     $"{SigLabel(m)} 进入安全模式：头顶显示安全模式图标（贴图已加载：{badge?.IsShowing}）");
+                // FG7-ENV-02（FGR-ENV-012）：顶部横幅“信号中断”并显示剩余时间。
+                string silentBanner = UI.Kit.WorldBarHudUIToolkit.Instance?.SilentBannerText ?? string.Empty;
+                Check(silentBanner.Contains("信号中断") && silentBanner.Contains("剩余"), $"静默夜顶部横幅：“{silentBanner}”");
                 VisualElement tag = listItem?.Q<VisualElement>(className: "cmd-candidate-safe-tag");
                 Check(listBtn != null && listBtn.ClassListContains("cmd-candidate-btn-safe") && tag != null && tag.resolvedStyle.display == DisplayStyle.Flex
                       && tag.worldBound.xMin >= listBtn.worldBound.xMax - 0.5f,
@@ -3807,10 +3856,11 @@ namespace GameLogic.EditorTools
                     }
                 }
                 SessionState.SetBool(K + "LinkHover", true);
+                SessionState.SetFloat(K + "LinkHoverAt", (float)inStep);
                 return;
             }
             // 悬停提示约 0.4 真实秒后出现（UiKitOverlay 每帧 Tick）。
-            if (inStep < 2.5)
+            if (inStep < SessionState.GetFloat(K + "LinkHoverAt", 0f) + 1.0)
             {
                 return;
             }
@@ -3855,10 +3905,24 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            Check(Campaign.Signal.SignalPresence.AtCore && Campaign.Signal.SignalUplinkService.LastFailure == Campaign.Signal.UplinkFailure.SilentNight,
-                $"静默夜中接入被拒：“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”");
-            Campaign.Signal.SignalUplinkService.SilentNightProvider = null;
-            Next(191, "测试捷径：静默夜结束");
+            if (!SessionState.GetBool(K + "SilentRejectChecked", false))
+            {
+                Check(Campaign.Signal.SignalPresence.AtCore && Campaign.Signal.SignalUplinkService.LastFailure == Campaign.Signal.UplinkFailure.SilentNight,
+                    $"静默夜中接入被拒：“{Campaign.Signal.SignalUplinkService.LastFeedbackText}”");
+                SessionState.SetBool(K + "SilentRejectChecked", true);
+            }
+            // FG7-ENV-02：等静默夜按日程结束（正式流程）：结束总结通知、横幅消失。
+            CampaignState cs = CampaignSession.Current;
+            if (Campaign.Env.SilentNightService.IsActive(cs) && inStep < 30.0)
+            {
+                return;
+            }
+            SessionState.SetBool(K + "SilentRejectChecked", false);
+            string summary = Campaign.Env.SilentNightService.StateOf(cs)?.LastSummary ?? string.Empty;
+            Check(!Campaign.Env.SilentNightService.IsActive(cs) && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "silent_night_end")
+                  && summary.Contains("损失"),
+                $"静默夜按日程结束：结束总结通知“{summary}”");
+            Next(191, "静默夜结束（正式流程）");
         }
 
         private static void StepLinkSafeExited(double inStep)

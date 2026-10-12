@@ -55,6 +55,8 @@ namespace GameLogic.Settings
         /// <summary>FG7-ENV-01（FG07 FGR-ENV-003“设置里提供夜间亮度下限，保证可读性”）：夜里画面最暗是白天的多少（0～1，范围 fg.TbUiTuning env.night_brightness_min / max）。
         /// 初值 -1 = 没设过，按表里 env.night_brightness_default（旧设置 JSON 没有这个字段时同样按默认）。</summary>
         public float NightBrightnessFloor = -1f;
+        /// <summary>FG7-ENV-02（FG07 第 4 节“静默夜画面压暗强度”）：静默夜期间在昼夜亮度之上再暗多少（-1 = 跟随表里的默认值）。</summary>
+        public float SilentNightDim = -1f;
 
         /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
@@ -413,6 +415,26 @@ namespace GameLogic.Settings
         public static void ResetNightBrightnessFloor()
         {
             Data.NightBrightnessFloor = -1f;
+            Save();
+        }
+
+        // ── FG7-ENV-02：静默夜画面压暗强度（FG07 第 4 节）──
+        public static float SilentNightDimMin => UiTuningValues.Get("env.silent_dim_min");
+        public static float SilentNightDimMax => UiTuningValues.Get("env.silent_dim_max");
+        public static float SilentNightDimDefault => Mathf.Clamp(UiTuningValues.Get("env.silent_dim_default"), SilentNightDimMin, SilentNightDimMax);
+
+        /// <summary>静默夜期间画面在昼夜亮度之上再暗多少（没设过 = 表里的默认值；读到的值总在范围内）。</summary>
+        public static float SilentNightDim => Data.SilentNightDim < 0f ? SilentNightDimDefault : Mathf.Clamp(Data.SilentNightDim, SilentNightDimMin, SilentNightDimMax);
+
+        public static void SetSilentNightDim(float value)
+        {
+            Data.SilentNightDim = Mathf.Clamp(value, SilentNightDimMin, SilentNightDimMax);
+            Save();
+        }
+
+        public static void ResetSilentNightDim()
+        {
+            Data.SilentNightDim = -1f;
             Save();
         }
 

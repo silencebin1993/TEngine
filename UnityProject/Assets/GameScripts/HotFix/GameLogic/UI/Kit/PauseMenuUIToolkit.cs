@@ -233,6 +233,53 @@ namespace GameLogic.UI.Kit
                 SyncNightFloor();
             });
             SyncNightFloor();
+            // FG7-ENV-02（FG07 第 4 节“静默夜画面压暗强度”）
+            _silentDimLabel = root.Q<Label>("PauseSilentDimLabel");
+            _silentDim = root.Q<Slider>("PauseSilentDim");
+            if (_silentDim != null)
+            {
+                _silentDim.lowValue = Settings.GameSettings.SilentNightDimMin;
+                _silentDim.highValue = Settings.GameSettings.SilentNightDimMax;
+                _silentDim.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetSilentNightDim(evt.newValue);
+                    RefreshSilentDimLabel();
+                });
+                UiTooltip.Attach(_silentDim, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.display_title"),
+                    Body = GameText.Format("pause.silent_dim_tip", Percent(Settings.GameSettings.SilentNightDim),
+                        Percent(Settings.GameSettings.SilentNightDimMin), Percent(Settings.GameSettings.SilentNightDimMax), Percent(Settings.GameSettings.SilentNightDimDefault)),
+                });
+            }
+            SilentDimResetButton = Bind(root, "PauseSilentDimReset", "pause.silent_dim_reset", () =>
+            {
+                Settings.GameSettings.ResetSilentNightDim();
+                SyncSilentDim();
+            });
+            SyncSilentDim();
+        }
+
+        private Slider _silentDim;
+        private Label _silentDimLabel;
+
+        public Slider SilentDimSlider => _silentDim;
+        public Button SilentDimResetButton { get; private set; }
+        public string SilentDimLabelText => _silentDimLabel?.text ?? string.Empty;
+
+        /// <summary>静默夜压暗滑条与标签按当前设置同步（打开菜单、恢复默认时）。</summary>
+        public void SyncSilentDim()
+        {
+            _silentDim?.SetValueWithoutNotify(Settings.GameSettings.SilentNightDim);
+            RefreshSilentDimLabel();
+        }
+
+        private void RefreshSilentDimLabel()
+        {
+            if (_silentDimLabel != null)
+            {
+                _silentDimLabel.text = GameText.Format("pause.silent_dim", Percent(Settings.GameSettings.SilentNightDim));
+            }
         }
 
         /// <summary>夜间亮度滑条与标签按当前设置同步（打开菜单、恢复默认时）。</summary>
@@ -368,6 +415,7 @@ namespace GameLogic.UI.Kit
                 RefreshWorldInfo();
                 SyncCameraSliders();
                 SyncNightFloor();
+                SyncSilentDim();
                 SyncReactionToggles();
             }
             else

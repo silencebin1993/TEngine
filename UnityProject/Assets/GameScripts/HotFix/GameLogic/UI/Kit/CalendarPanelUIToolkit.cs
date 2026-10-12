@@ -336,10 +336,10 @@ namespace GameLogic.UI.Kit
             _title.text = GameText.Get("env.cal.title");
             _close.text = GameText.Get("env.cal.close");
             _legend.text = GameText.Get("env.cal.legend");
-            bool pending = !CalendarService.HasSource(CalendarKind.SilentNight) || !CalendarService.HasSource(CalendarKind.Weather);
             // 先展开 {act:…} 键位记号再填天数（{act:…} 不是 string.Format 的占位符，直接 Format 会出错）。
+            // FG7-ENV-02：静默夜来源注册后只写“天气预报将在后续版本加入”。
             _footer.text = InputDisplay.ExpandActionTokens(GameText.Get("env.cal.footer")).Replace("{0}", days.ToString(CultureInfo.InvariantCulture))
-                           + (pending ? "\n" + GameText.Get("env.cal.pending_kinds") : string.Empty);
+                           + CalendarService.PendingKindsSuffix();
             DetachMarks();
             _days.Clear();
             _nowLines.Clear();

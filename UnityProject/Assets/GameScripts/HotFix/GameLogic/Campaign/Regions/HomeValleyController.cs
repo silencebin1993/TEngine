@@ -766,6 +766,10 @@ namespace GameLogic.Campaign.Regions
         /// 轮询窗口。0＝该机器永久禁用这一类自动分配，不影响玩家直接点选下令（显式命令绕过偏好）。</summary>
         public static bool TrySetMachineWorkPriority(int logicId, WorkOrderKind kind, int priority)
         {
+            if (Env.SilentNightService.PriorityLocked(CampaignSession.Current, out _)) // FG7-ENV-02：静默夜期间不能改优先级（拒绝音 + 字幕写明原因）
+            {
+                return false;
+            }
             bool ok = MachineRegistry.TrySetWorkPriority(logicId, kind, priority);
             if (ok)
             {

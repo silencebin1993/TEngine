@@ -508,6 +508,10 @@ namespace GameLogic.UI.WorkOrder
                 // FG4-ECO-11 审查修复：卡住的是关键材料时写明是哪种、从哪里获得（原来一律写成“废料”）。
                 return HomeValleyConstruction.DescribeMaterialsReason(reason);
             }
+            if (reason == Campaign.Env.SilentNightService.HoldReason)
+            {
+                return Campaign.Env.SilentNightService.HoldText(Campaign.CampaignSession.Current); // FG7-ENV-02
+            }
             if (reason == HomeValleyConstruction.ReturnWaitReason || reason.StartsWith("storage-full", System.StringComparison.Ordinal))
             {
                 return "仓库已满，腾出仓位后自动继续";
