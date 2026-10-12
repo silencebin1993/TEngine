@@ -81,6 +81,9 @@ namespace BinGames.Sim.Combat
     public struct CombatData
     {
         public CombatConfig Config;
+        /// <summary>FG7-ENV-03（FGR-ENV-020“寒潮：散热 +30%”）：本地点所有武器散热额外加成（0 = 正常，0.3 = +30%）。
+        /// 派生量（热更层天气系统每游戏秒按存档里的天气写入），不进快照、不进状态哈希；读档后同一步重新写入。</summary>
+        public float DissipationBonus;
 
         // ── 单位（按槽位；槽位顺序 = 生成顺序，压实时保持相对顺序）──
         public NativeList<int> Id;

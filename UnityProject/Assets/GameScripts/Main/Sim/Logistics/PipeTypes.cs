@@ -10,8 +10,11 @@ namespace BinGames.Sim.Logistics
     /// </summary>
     public static class PipeConst
     {
-        /// <summary>管线等级数（T1、T2，FG03 第 10 章“管线吞吐 T1 600 升/分钟，T2 1,200”）。</summary>
-        public const int TierCount = 2;
+        /// <summary>管线等级数（T1、T2，FG03 第 10 章“管线吞吐 T1 600 升/分钟，T2 1,200”；FG7-ENV-03 加第 3 档 = 伴热管，吞吐按 T2、寒潮不结冰）。</summary>
+        public const int TierCount = 3;
+
+        /// <summary>FG7-ENV-03（FGR-LOG-045“升级为伴热管的管段不会结冰”）：伴热管的等级下标（吞吐与 T2 相同；地下管线口没有这一档）。</summary>
+        public const int HeatTracedTier = 2;
 
         /// <summary>流体编号上限（0 = 没有流体；1～<see cref="MaxFluid"/> = fg.TbFluid 的 id）。</summary>
         public const int MaxFluid = 200;
@@ -95,6 +98,8 @@ namespace BinGames.Sim.Logistics
         Empty = 16,
         /// <summary>泵在，但下游没人要（泵空转，不抽）。</summary>
         NoDemand = 32,
+        /// <summary>FG7-ENV-03（FGR-LOG-045）：寒潮里静止太久，结冰了（流动被阻断，寒潮结束自动解冻）。</summary>
+        Frozen = 64,
     }
 
     /// <summary>
@@ -249,6 +254,10 @@ namespace BinGames.Sim.Logistics
         public PipeNetIssue Issues;
         /// <summary>最近一次有流动时的内核步序号（结冰接口：流量为 0 的时长 = 当前步 − 它）。</summary>
         public long LastFlowStep;
+        /// <summary>FG7-ENV-03：网络里会结冰的管线格数（地上的 T1 / T2 管线；0 = 全是伴热管 / 地下管线 / 没有管线，不会结冰）。</summary>
+        public int FreezableCells;
+        /// <summary>FG7-ENV-03：上一步结冰了（流动被阻断）。</summary>
+        public bool Frozen;
     }
 
     /// <summary>外部消费者（后续建筑配方接入：FG4-ECO-02 / 03），挂在一格管线件上，按优先级分配。</summary>

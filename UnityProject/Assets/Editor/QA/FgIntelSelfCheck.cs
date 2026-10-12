@@ -370,11 +370,12 @@ namespace GameLogic.EditorTools
                          && IntelCatalog.StackBonus(ResearchCatalog.LabTypeId, 3) == 1f; // 没登记的建筑：每座独立、相加
             bool grid = GridContent.TryGetBuilding(Post, out GameConfig.fg.BuildingGrid g) && g.FootprintW == 3 && g.FootprintH == 3 && g.Category == "intel" && g.Placeable == 1
                         && g.UnlockRule == "research:signal.listening_post";
-            bool weather = IntelCatalog.TryGet(IntelCatalog.KindWeather, out IntelKindDef w) && !w.IsReady && w.ConditionKind == "tier" && w.ConditionArg == 2;
+            // FG7-ENV-03：天气系统上线，天气预报已开放（opensIn = none），仍要求工作中的监听站 T2。
+            bool weather = IntelCatalog.TryGet(IntelCatalog.KindWeather, out IntelKindDef w) && w.IsReady && w.ConditionKind == "tier" && w.ConditionArg == 2;
             bool fleet = IntelCatalog.TryGet(IntelCatalog.KindFleet, out IntelKindDef fk) && fk.ConditionKind == "act" && fk.ConditionArg == 2 && IntelCatalog.Fragments.Count >= 1;
             Expect(five && stack && grid && weather && fleet && HomeValleyLayout.PowerProfile.TryGetValue(Post, out var prof) && prof.PowerDemand > 0f,
                 $"A2 FGR-RND-050 五类情报按优先级（{string.Join(" → ", IntelCatalog.All.Select(k => k.Name))}）；FGR-RND-052 多座递减初值：第 1 座 100%、第 2 座 +50%、第 3 座 +25%、第 4 座起 0" +
-                "（未登记的建筑如仿真实验室每座独立相加）；监听站 3×3、建造菜单“情报”页、耗电、由研发节点解锁；天气要监听站 T2 且后续版本开放；舰队片段第二幕起");
+                "（未登记的建筑如仿真实验室每座独立相加）；监听站 3×3、建造菜单“情报”页、耗电、由研发节点解锁；天气要监听站 T2（FG7-ENV-03 起开放）；舰队片段第二幕起");
 
             // 研究门槛：节点要求保管库里有监听阵列核（不消耗），完成后建造菜单才放开（FG08 FGR-QST-020）。
             CampaignState s = NewWorld(5501, 0);
@@ -386,9 +387,10 @@ namespace GameLogic.EditorTools
             bool keys = ResearchService.KeysPresent(s, n);
             ResearchService.CompleteForTests(s, "signal.listening_post");
             bool unlocked = BuildCatalog.IsUnlocked(s, entry) && HomeInventory.Stock(s, ItemCatalog.Find("listening_array_core")) == 1;
-            bool t2Later = ResearchCatalog.TryGet("signal.listening_t2", out ResearchNodeDef t2) && !t2.IsReady && t2.OpensIn == "FG7-ENV-03";
+            // FG7-ENV-03：监听站 T2 节点开放，解锁 tier:listening_post.t2（原地升级，附带 3 日天气预报）。
+            bool t2Later = ResearchCatalog.TryGet("signal.listening_t2", out ResearchNodeDef t2) && t2.IsReady && string.IsNullOrEmpty(t2.OpensIn) && t2.Unlocks.Contains("tier:listening_post.t2");
             Expect(node && lockedBefore && keys && unlocked && t2Later,
-                $"A3 研究门槛：“信号 · 监听站”要求核心保管库里有监听阵列核（研究不消耗它）；完成前建造菜单锁定，完成后放开，关键材料仍在；“监听站 T2”节点在树上、写明后续版本开放（天气系统 FG7-ENV-03）；节点 {node} / 完成前锁定 {lockedBefore} / 材料齐全 {keys} / 完成后解锁 {unlocked} / T2 后续开放 {t2Later}");
+                $"A3 研究门槛：“信号 · 监听站”要求核心保管库里有监听阵列核（研究不消耗它）；完成前建造菜单锁定，完成后放开，关键材料仍在；“监听站 T2”节点已开放（FG7-ENV-03：解锁 T2 原地升级）；节点 {node} / 完成前锁定 {lockedBefore} / 材料齐全 {keys} / 完成后解锁 {unlocked} / T2 已开放 {t2Later}");
 
             string[] keysText =
             {
@@ -572,7 +574,7 @@ namespace GameLogic.EditorTools
             bool nWeather = IntelService.Needed(s, weather, now0, out string whyWeather);
             bool nFleet = IntelService.Needed(s, fleet, now0, out string whyFleet);
             bool nRaid = IntelService.Needed(s, raid, now0, out string whyRaid);
-            bool reasons = !nBoss && (whyBoss ?? "").Contains("遭遇") && !nWeather && (whyWeather ?? "").Contains("后续版本开放")
+            bool reasons = !nBoss && (whyBoss ?? "").Contains("遭遇") && !nWeather && (whyWeather ?? "").Contains("T2") // FG7-ENV-03：天气已开放，T1 监听站写“需要监听站 T2”
                            && !nFleet && (whyFleet ?? "").Contains("第 2 幕") && !nRaid && (whyRaid ?? "").Contains("没有正在逼近")
                            && IntelService.PickTarget(s, now0)?.Id == IntelCatalog.KindCounter;
             long t = TicksUntilProduced(s, 200);

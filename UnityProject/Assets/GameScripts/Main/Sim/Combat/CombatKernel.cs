@@ -35,6 +35,14 @@ namespace BinGames.Sim.Combat
     public sealed partial class CombatKernel : IDisposable
     {
         private CombatData _d;
+
+        /// <summary>FG7-ENV-03（寒潮散热 +30%）：本地点武器散热额外加成（0 = 正常）。派生量，热更层天气系统写；不进快照与状态哈希。</summary>
+        public float DissipationBonus
+        {
+            get => _d.DissipationBonus;
+            set => _d.DissipationBonus = value > 0f ? value : 0f;
+        }
+
         private CombatEvent[] _drainBuffer = new CombatEvent[64];
         /// <summary>没有绑定寻路镜像时用的空格网（Burst 作业要求原生容器都已创建）。</summary>
         private NavGrid _dummyNav;

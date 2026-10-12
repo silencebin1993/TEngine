@@ -240,6 +240,7 @@ namespace GameLogic.Campaign.Logistics
         {
             DamageLost.Clear();
             LastHit.Clear();
+            ResetDamageIndex();
             BeltDamageRecord[] recs = state.Belts?.Damage ?? Array.Empty<BeltDamageRecord>();
             var keep = new List<BeltDamageRecord>(recs.Length);
             foreach (BeltDamageRecord r in recs)
@@ -283,6 +284,7 @@ namespace GameLogic.Campaign.Logistics
             BeltPortService.OnUnload();
             DamageLost.Clear();
             LastHit.Clear();
+            ResetDamageIndex();
             _renderer?.Dispose();
             _renderer = null;
             _kernel?.Dispose();
@@ -861,6 +863,255 @@ namespace GameLogic.Campaign.Logistics
             DestroyCell(state, cell, info);
             return true;
         }
+
+        // FG7-ENV-03 审查修复（P1）：存档受损表（state.Belts.Damage）的“格 → 记录”索引（同一份记录对象）。表的数组引用变了（别的路径整表重建 / 读档）时，
+        // 下一次批量扣耐久前重建一遍；批量路径自己追加 / 压缩后同步引用。这样每分钟的酸雨只改动到的记录，不再整表重建。
+        private static readonly Dictionary<GridCell, BeltDamageRecord> DamageRecs = new Dictionary<GridCell, BeltDamageRecord>();
+        private static BeltDamageRecord[] _damageRecsRef;
+        private static readonly List<BeltDamageRecord> FreshRecs = new List<BeltDamageRecord>(64);
+        private static readonly List<GridCell> DoomCells = new List<GridCell>(16);
+        private static readonly List<BeltCellInfo> DoomInfos = new List<BeltCellInfo>(16);
+
+        private static void EnsureDamageIndex(BeltItemState b)
+        {
+            BeltDamageRecord[] arr = b.Damage ?? Array.Empty<BeltDamageRecord>();
+            if (ReferenceEquals(arr, _damageRecsRef))
+            {
+                return;
+            }
+            DamageRecs.Clear();
+            foreach (BeltDamageRecord r in arr)
+            {
+                if (r != null)
+                {
+                    var c = new GridCell(r.X, r.Y);
+                    if (!DamageRecs.ContainsKey(c))
+                    {
+                        DamageRecs[c] = r;
+                    }
+                }
+            }
+            _damageRecsRef = arr;
+        }
+
+        private static void ResetDamageIndex()
+        {
+            DamageRecs.Clear();
+            _damageRecsRef = null;
+        }
+
+        /// <summary>
+        /// FG7-ENV-03（酸雨按游戏分钟批量结算，FG07 第 7 节）：一次给很多格传送带扣耐久。
+        /// 审查修复（P1）：没到 0 的只改动到的那几条耐久记录（按索引原地改，新受损的整批追加一次：O(本批格数)，不再整表重建）；
+        /// 到 0 的整批摧毁（<see cref="DestroyCells"/>：结果与逐格 <see cref="TryDamage"/> 相同——物品落地、留虚影、排给常驻规则——但受损表只压缩一次、
+        /// 虚影数组只追加一次、地面物 / 搬运单各追加一次、通知合并成一条）。受损表顺序：原有的按原顺序、新受损的按本批顺序追加（确定性）。
+        /// 返回扣到的格数；被摧毁的格写进 <paramref name="destroyed"/>。
+        /// </summary>
+        public static int TryDamageBatch(CampaignState state, IReadOnlyList<GridCell> cells, IReadOnlyList<int> amounts, List<GridCell> destroyed)
+        {
+            if (cells == null || amounts == null || !CanEdit(state, out _))
+            {
+                return 0;
+            }
+            BeltItemState b = state.Belts;
+            EnsureDamageIndex(b);
+            FreshRecs.Clear();
+            DoomCells.Clear();
+            DoomInfos.Clear();
+            int hp0 = MaxHp(0), hp1 = MaxHp(1), hp2 = MaxHp(2);
+            int hit = 0;
+            long now = GameClock.Ticks;
+            for (int i = 0; i < cells.Count && i < amounts.Count; i++)
+            {
+                GridCell cell = cells[i];
+                int amount = amounts[i];
+                if (amount <= 0 || !_kernel.TryGetCellInfo(cell.X, cell.Y, out BeltCellInfo info))
+                {
+                    continue;
+                }
+                int lost = (DamageLost.TryGetValue(cell, out int l) ? l : 0) + amount;
+                hit++;
+                LastHit[cell] = now;
+                if (lost >= (info.Tier <= 0 ? hp0 : info.Tier == 1 ? hp1 : hp2))
+                {
+                    DoomCells.Add(cell);
+                    DoomInfos.Add(info);
+                    continue;
+                }
+                DamageLost[cell] = lost;
+                if (DamageRecs.TryGetValue(cell, out BeltDamageRecord r))
+                {
+                    r.Lost = lost;
+                    r.LastHitTick = now;
+                }
+                else
+                {
+                    r = new BeltDamageRecord { X = cell.X, Y = cell.Y, Lost = lost, LastHitTick = now };
+                    DamageRecs[cell] = r;
+                    FreshRecs.Add(r);
+                }
+            }
+            if (FreshRecs.Count > 0)
+            {
+                BeltDamageRecord[] old = b.Damage ?? Array.Empty<BeltDamageRecord>();
+                var next = new BeltDamageRecord[old.Length + FreshRecs.Count];
+                Array.Copy(old, next, old.Length);
+                FreshRecs.CopyTo(next, old.Length);
+                b.Damage = next;
+                _damageRecsRef = next;
+            }
+            if (DoomCells.Count > 0)
+            {
+                DestroyCells(state, DoomCells, DoomInfos, destroyed);
+            }
+            return hit;
+        }
+
+        /// <summary>
+        /// FG7-ENV-03 审查修复（P1）：一批同时耐久归零的格整批摧毁。每格的结果与 <see cref="DestroyCell"/> 相同（带上 / 地下的物品在原地落成地面物并开搬运单，
+        /// 传送带从内核移除，原位置留保留朝向、等级、节点设置的虚影，排给常驻规则），但：存档受损表只压缩一次、传送带虚影数组只追加一次、地面物与搬运单各追加一次、
+        /// 常驻规则事件只追加一次、通知合并成一条（只有一格时照旧发逐格那条）。O(本批格数 + 受损表 + 地面物 + 工单)，不再随格数平方增长。
+        /// </summary>
+        private static void DestroyCells(CampaignState state, List<GridCell> cells, List<BeltCellInfo> infos, List<GridCell> destroyed)
+        {
+            HomeGridMap map = HomeGridService.MapFor(state);
+            var clear = new HashSet<GridCell>();
+            var drops = new List<Regions.HomeValleyConstruction.HaulDrop>();
+            var ghostCells = new List<GridCell>();
+            var ghostDirs = new List<BeltDir>();
+            var ghostTiers = new List<int>();
+            var ghostIds = new List<string>();
+            var items = new List<ushort>(BeltConst.MaxSlots * 2);
+            var counts = new SortedDictionary<ushort, int>();
+            int done = 0, totalItems = 0, lastItems = 0;
+            GridCell first = default;
+            BeltNodeKind firstKind = BeltNodeKind.Belt;
+            int firstTier = 0;
+            // 先在拓扑干净时读齐每格的种类 / 节点设置 / 地下两端（TryGetNodeInfo 会触发拓扑重建：边拆边读，每读一次就整图重建一次）。
+            int m = cells.Count;
+            var kinds = new BeltNodeKind[m];
+            var nodes = new BeltNodeInfo[m];
+            var isNodes = new bool[m];
+            var unders = new bool[m];
+            var ents = new int2[m];
+            var exis = new int2[m];
+            for (int i = 0; i < m; i++)
+            {
+                _kernel.TryGetKind(cells[i].X, cells[i].Y, out kinds[i]);
+                isNodes[i] = kinds[i] != BeltNodeKind.Belt && _kernel.TryGetNodeInfo(cells[i].X, cells[i].Y, out nodes[i]);
+                unders[i] = _kernel.TryGetUndergroundEnds(cells[i].X, cells[i].Y, out ents[i], out exis[i], out _);
+            }
+            for (int i = 0; i < m; i++)
+            {
+                GridCell cell = cells[i];
+                BeltCellInfo info = infos[i];
+                BeltNodeKind kind = kinds[i];
+                BeltNodeInfo node = nodes[i];
+                bool isNode = isNodes[i];
+                bool under = unders[i];
+                int2 ent = ents[i], exi = exis[i];
+                items.Clear();
+                if (_kernel.RemoveCell(cell.X, cell.Y, items) != BeltResult.Ok)
+                {
+                    continue;
+                }
+                if (under)
+                {
+                    var a = new GridCell(ent.x, ent.y);
+                    var e = new GridCell(exi.x, exi.y);
+                    map.SetBelt(a, 0);
+                    map.SetBelt(e, 0);
+                    clear.Add(a);
+                    clear.Add(e);
+                }
+                else
+                {
+                    map.SetBelt(cell, 0);
+                    clear.Add(cell);
+                }
+                counts.Clear();
+                foreach (ushort it in items)
+                {
+                    counts[it] = counts.TryGetValue(it, out int n) ? n + 1 : 1;
+                }
+                var at = new Vector2(cell.X, cell.Y);
+                string wreck = "belt-wreck:" + cell.X.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + cell.Y.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":";
+                foreach (KeyValuePair<ushort, int> kv in counts)
+                {
+                    drops.Add(new Regions.HomeValleyConstruction.HaulDrop(at, BeltItems.ResourceOf(kv.Key), kv.Value, wreck + kv.Key.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                }
+                if (isNode)
+                {
+                    ghostIds.Add(Regions.HomeValleyConstruction.AddDestroyedNodeGhost(state, node)); // 物流节点（分流器 / 合流器 / 地下传送带）少，逐个建保留设置的虚影
+                }
+                else
+                {
+                    ghostCells.Add(cell);
+                    ghostDirs.Add(info.Dir);
+                    ghostTiers.Add(info.Tier);
+                }
+                if (done == 0)
+                {
+                    first = cell;
+                    firstKind = isNode ? kind : BeltNodeKind.Belt;
+                    firstTier = info.Tier;
+                }
+                done++;
+                totalItems += items.Count;
+                lastItems = items.Count;
+                destroyed?.Add(cell);
+            }
+            if (done == 0)
+            {
+                return;
+            }
+            // 耐久记录：这批格（地下传送带两端）一起删，存档受损表压缩一次。
+            foreach (GridCell c in clear)
+            {
+                DamageLost.Remove(c);
+                LastHit.Remove(c);
+                DamageRecs.Remove(c);
+            }
+            BeltItemState b = state.Belts;
+            BeltDamageRecord[] old = b.Damage ?? Array.Empty<BeltDamageRecord>();
+            var keep = new List<BeltDamageRecord>(old.Length);
+            foreach (BeltDamageRecord r in old)
+            {
+                if (r != null && !clear.Contains(new GridCell(r.X, r.Y)))
+                {
+                    keep.Add(r);
+                }
+            }
+            if (keep.Count != old.Length)
+            {
+                b.Damage = keep.ToArray();
+                _damageRecsRef = b.Damage;
+            }
+            Regions.HomeValleyConstruction.DropForHaulBatch(state, drops);
+            Regions.HomeValleyConstruction.AddDestroyedBeltGhosts(state, ghostCells, ghostDirs, ghostTiers, ghostIds);
+            // FG6-DEF-03（FGR-DEF-015）：排给常驻规则（开着的自动重建规则覆盖这些格时，下一个模拟步按原设置派施工单；没有玩家开的规则就只留虚影）。
+            Economy.StandingRuleService.OnBeltGhosts(state, ghostIds);
+            LastDestroyedItems = done == 1 ? lastItems : totalItems;
+            DestroyedCount += done;
+            GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstDestroyed);
+            var pos = new Vector3(first.X, 0f, first.Y);
+            if (done == 1)
+            {
+                NotificationCenter.Post("failure", firstKind != BeltNodeKind.Belt
+                    ? GameText.Format("logistics.destroyed.notify_piece", PieceName(firstKind, firstTier), first.X, first.Y, totalItems)
+                    : GameText.Format("logistics.destroyed.notify", first.X, first.Y, totalItems), pos);
+            }
+            else
+            {
+                LastBatchNotifyText = GameText.Format("logistics.destroyed.notify_batch", done, totalItems, first.X, first.Y);
+                BatchNotifyCount++;
+                NotificationCenter.Post("failure", LastBatchNotifyText, pos);
+            }
+        }
+
+        /// <summary>批量摧毁合并发出的通知条数与最近一条的文字（自检读）。</summary>
+        public static int BatchNotifyCount { get; private set; }
+        public static string LastBatchNotifyText { get; private set; } = string.Empty;
 
         /// <summary>
         /// FG6-DEF-03（承接 DEBT-FG3LOG03-05：维修无人机修传送带）：给一格受损的传送带恢复 <paramref name="amount"/> 点耐久（不超过满值）。

@@ -50,7 +50,7 @@ namespace GameLogic.EditorTools
     {
         public const string SceneId = "FG-PERF-LATE";
         /// <summary>场景搭法的版本：改了场景内容（数量、布局、种子）就 +1，旧基线只报告不判定。</summary>
-        public const int SceneVersion = 3;
+        public const int SceneVersion = 4; // v4（FG7-ENV-03）：静默夜 + 沙暴同时进行
         public const int Seed = 42;
         public const double RegressionLimit = 0.10;
 
@@ -227,6 +227,11 @@ namespace GameLogic.EditorTools
                 {
                     Fail("收尾 UnloadAll 抛异常：" + e.Message);
                 }
+                GameLogic.Campaign.Env.SilentNightService.ResetForTests();
+                GameLogic.Campaign.Env.WeatherService.ResetForTests();
+                GameLogic.Campaign.Signal.SignalUplinkService.ResetForTests();
+                GameLogic.Campaign.Env.CalendarService.ResetForTests();
+                PowerEnvironment.ResetForTests();
                 GameClock.ResetSession();
                 CameraDirector.RealDeltaTime = originalDelta;
                 NotificationCenter.AutoPauseHandler = originalAutoPause;
@@ -632,7 +637,16 @@ namespace GameLogic.EditorTools
                 Add(cur, "chunk_load_ms", "区块同步生成（每块）", "ms", sw.Elapsed.TotalMilliseconds / generated, true, 0.2);
             }
 
+            // 场景 v4（FG7-ENV-02 / 03，承接 DEBT-FG0QA01-03；FGR-SYS-043“后期大基地 + 最大规模突袭 + 沙暴 + 静默夜同时发生”）：
+            // 测试捷径只排日程——静默夜与沙暴都排到眼前、持续一个游戏小时以上，预警 / 开始 / 效果（断链、传送带减速、太阳能、炮塔探测、画面不计）走正式推进；
+            // 下面所有稳态测量都在两者同时进行时做。
+            GameLogic.Campaign.Env.SilentNightService.Install();
+            GameLogic.Campaign.Env.WeatherService.Install();
+            GameLogic.Campaign.Env.SilentNightService.ScheduleForTests(s, 0.2, 2 * GameClock.HourSeconds, raid: false);
+            GameLogic.Campaign.Env.WeatherService.ScheduleForTests(s, GameLogic.Campaign.Env.WeatherService.Sandstorm, 0.2, 2 * GameClock.HourSeconds);
             WorldSimulation.StepMany(120);
+            Expect(GameLogic.Campaign.Env.SilentNightService.IsActive(s) && GameLogic.Campaign.Env.WeatherService.IsSandstormNow(s) && BeltNetworkService.Kernel.ExposedSlowPercent > 0,
+                "场景 v4：静默夜与沙暴同时进行（静默夜断链中、露天传送带按沙暴减速），之后的测量都在这个状态下");
             CombatKernel ck = home.Combat.Kernel;
             BeltKernel bk = BeltNetworkService.Kernel;
             int buildings = s.BuildingRecords?.Length ?? 0;
@@ -785,7 +799,7 @@ namespace GameLogic.EditorTools
                  $"{(dirtyWindows > 0 ? $"（{allocWindows} 个窗口里 {dirtyWindows} 个发生过 GC，不计入）" : string.Empty)}；托管堆 {monoMb:F0} MB");
             Line($"  · 预算参照（FGR-SYS-042，推荐配置 60 帧、1x 一帧一步；Editor 数字不等于真机，不判定）：热更层 {hotfixPerStep:F2} / 4 ms{Over(hotfixPerStep, 4)}；" +
                  $"内核（物流 + 战斗）{combatPerStep + beltPerStep + pipePerStep:F2} / 6 ms{Over(combatPerStep + beltPerStep + pipePerStep, 6)}；每帧托管分配 {allocPerStep:F0} B（目标接近 0）");
-            Line("  · 场景里还没有的（不判定，见 DEBT-FG0QA01-*）：沙暴、静默夜（FG7-ENV-03 / 02）；远征队（FG8-EXP-02，行进队伍目前只有突袭）；GPU 帧时间（-nographics）");
+            Line("  · 场景里还没有的（不判定，见 DEBT-FG0QA01-*）：远征队（FG8-EXP-02，行进队伍目前只有突袭）；GPU 帧时间（-nographics）。v4 起静默夜与沙暴同时进行（FG7-ENV-03）");
 
             Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && pipeCells >= PipeCellTarget && turrets >= TurretTarget
                    && chunks >= ChunkTarget && transit >= TransitTarget,

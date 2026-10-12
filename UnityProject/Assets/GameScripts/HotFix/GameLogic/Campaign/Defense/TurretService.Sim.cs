@@ -403,10 +403,11 @@ namespace GameLogic.Campaign.Defense
             return w;
         }
 
-        private static float RangeMultiplier(BuildingRecord b)
+        /// <summary>射程倍率 = 炮塔座等级的射程倍率 × 天气（FG7-ENV-03：沙暴里露天炮塔探测距离 −20%，顶棚下不受影响，<see cref="Env.WeatherService.TurretRangeFactor"/>）。</summary>
+        private static float RangeMultiplier(CampaignState state, BuildingRecord b)
         {
             GameConfig.fg.BuildingTier t = BuildingOps.TierRow(b.BuildingTypeId, BuildingOps.TierOf(b));
-            return t != null && t.Value > 0f ? t.Value : 1f;
+            return (t != null && t.Value > 0f ? t.Value : 1f) * Env.WeatherService.TurretRangeFactor(state, b);
         }
 
         private static void SyncOne(CampaignState state, CombatSite site, TurretRecord r, BuildingRecord b)
@@ -535,7 +536,7 @@ namespace GameLogic.Campaign.Defense
         /// <summary>这座炮塔此刻的武器参数（按输入缓存：编译结果同一个对象、模式 / 等级倍率 / 补给 / 接入 / 反应抑制都没变就复用上一次的；变了标记“要推给内核”）。</summary>
         private static CombatWeapon WeaponOf(CampaignState state, Runtime rt, BlueprintCircuitPreview p, BuildingRecord b, int mode, bool needsSupply, bool uplinked)
         {
-            float mul = RangeMultiplier(b);
+            float mul = RangeMultiplier(state, b);
             bool suppress = SuppressReaction(state, p, uplinked);
             if (!ReferenceEquals(rt.WeaponFor, p) || rt.WeaponMode != mode || rt.WeaponRangeMul != mul || rt.WeaponSupply != needsSupply
                 || rt.WeaponUplinked != uplinked || rt.WeaponSuppress != suppress)
@@ -963,7 +964,7 @@ namespace GameLogic.Campaign.Defense
             TurretUnitState us = default;
             bool hasUnit = site != null && site.TryGetTurretState(r.Serial, out us);
             string mode = TurretCatalog.ModeName(r.TargetMode);
-            float range = rt.Profile.Range * RangeMultiplier(b);
+            float range = rt.Profile.Range * RangeMultiplier(state, b);
             string rangeText = Mathf.RoundToInt(range).ToString(CultureInfo.InvariantCulture);
             if (TurretUplink.IsUplinkedTo(state, r.BuildingId))
             {
@@ -1131,7 +1132,7 @@ namespace GameLogic.Campaign.Defense
             if (rt.Valid)
             {
                 BlueprintCircuitPreview p = ActivePreview(state, r, rt) ?? rt.Local;
-                CombatWeapon w = BuildWeapon(p, rt.Profile, RangeMultiplier(b), r.TargetMode, rt.Needs.Count > 0, ro.Uplinked, false);
+                CombatWeapon w = BuildWeapon(p, rt.Profile, RangeMultiplier(state, b), r.TargetMode, rt.Needs.Count > 0, ro.Uplinked, false);
                 ro.Range = w.Range;
                 ro.TurnRate = w.TurnRate;
                 ro.DamagePerShot = CombatSite.MachineHitDamage(p);
@@ -1192,7 +1193,7 @@ namespace GameLogic.Campaign.Defense
                 return 0f;
             }
             Runtime rt = RuntimeOf(state, r, b);
-            return rt.Valid ? rt.Profile.Range * RangeMultiplier(b) : 0f;
+            return rt.Valid ? rt.Profile.Range * RangeMultiplier(state, b) : 0f;
         }
     }
 }

@@ -224,6 +224,9 @@ namespace GameLogic.Campaign
         public bool Upgrade;
         /// <summary>升级前的等级（撤销 / 说明用）。</summary>
         public int FromTier;
+        /// <summary>FG7-ENV-03（FGR-ENV-030）：这份规划是顶棚（存在 <see cref="RoofState.Plans"/>，不在 <see cref="GridState.PlannedBelts"/>；不占格网任何层）。
+        /// 每格 = 一块 4×4 顶棚：Xs / Ys 是这一块里机器施工站的格（块 = 格坐标 ÷ 4 向下取整）；<see cref="ScrapPerCell"/> = 每块造价。</summary>
+        public bool Roof;
     }
 
     /// <summary>一块已探索的圆形区域（格网坐标）。</summary>
@@ -996,6 +999,77 @@ namespace GameLogic.Campaign
         /// <summary>FG7-ENV-02（FG07 FGR-ENV-010～015）：静默夜计划、进行中的静默夜、施工暂缓名单、风暴残骸与结束总结的基线。
         /// 唯一写入口 <see cref="Env.SilentNightService"/>。只加字段、不升域版本：旧档没有 = 第一次推进时按当前游戏日排好下一次（不追溯）。</summary>
         public SilentNightState SilentNight = new SilentNightState();
+        /// <summary>FG7-ENV-03（FG07 FGR-ENV-020 / 021）：天气排定与进行中的天气、酸雨结算进度。唯一写入口 <see cref="Env.WeatherService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 第一次推进时从当前游戏日起按种子排定（不追溯）。</summary>
+        public WeatherFrontState Fronts = new WeatherFrontState();
+        /// <summary>FG7-ENV-03（FGR-ENV-030）：顶棚（已建成的块、施工中的规划、是否隐藏）。唯一写入口 <see cref="Env.RoofService"/>。</summary>
+        public RoofState Roofs = new RoofState();
+    }
+
+    /// <summary>FG7-ENV-03：一段恶劣天气（排定后写死；时刻是统一时钟的整数步）。</summary>
+    [Serializable]
+    public sealed class WeatherFrontRecord
+    {
+        /// <summary>序号（确定性；随机数按 (世界种子, 序号) 取）。</summary>
+        public int Serial;
+        /// <summary>天气 ID（fg.TbWeather.id：acid_rain / sandstorm / cold_snap）。</summary>
+        public string Kind = string.Empty;
+        public long StartTick;
+        public long EndTick;
+        /// <summary>已经发过开始前的预警。</summary>
+        public bool Warned;
+    }
+
+    /// <summary>FG7-ENV-03：天气状态（见 <see cref="WeatherState.Fronts"/>）。</summary>
+    [Serializable]
+    public sealed class WeatherFrontState
+    {
+        /// <summary>已排定、还没结束的恶劣天气（按开始步升序；结束的移走）。</summary>
+        public WeatherFrontRecord[] Fronts = Array.Empty<WeatherFrontRecord>();
+        /// <summary>排定已经覆盖到哪一步（之后的天气还没排；-1 = 还没开始排）。</summary>
+        public long PlannedUntilTick = -1;
+        /// <summary>下一段（晴天或恶劣天气）排定用的随机数序号。</summary>
+        public int NextSerial = 1;
+        /// <summary>正在进行的天气（序号；0 = 晴）。</summary>
+        public int ActiveSerial;
+        /// <summary>正在进行的天气 ID（空 = 晴）。与 <see cref="ActiveSerial"/> 一起写。</summary>
+        public string ActiveKind = string.Empty;
+        /// <summary>酸雨：下一次按游戏分钟结算的步；这一段酸雨已经结算了几个游戏分钟（整数预算的分子，读档后接着算）。</summary>
+        public long NextBatchTick = -1;
+        public long AcidMinutes;
+        /// <summary>这一段天气期间受损的建筑 / 传送带格数、被摧毁的数量、结冰过的网络峰值（结束通知与离家报告用）。</summary>
+        public int DamagedBuildings;
+        public int DamagedBelts;
+        public int Destroyed;
+        public int FrozenPeak;
+        /// <summary>这一段酸雨里受损过的建筑 ID / 传送带格（(x &lt;&lt; 32) ^ y），去重用（读档后接着数）。</summary>
+        public string[] HitBuildings = Array.Empty<string>();
+        public long[] HitBelts = Array.Empty<long>();
+        /// <summary>上一次发“天气损伤”汇总通知的步（同一段酸雨里按 env.weather.damage_notify_hours 限频）。</summary>
+        public long LastDamageNotifyTick = -1;
+        /// <summary>已经开始过几段恶劣天气（第一次引导钩子、统计）。</summary>
+        public int Count;
+    }
+
+    /// <summary>FG7-ENV-03：一块已建成的顶棚（顶棚格坐标：格坐标 ÷ 4 向下取整；覆盖 [Bx×4, Bx×4+3] × [By×4, By×4+3]）。</summary>
+    [Serializable]
+    public sealed class RoofRecord
+    {
+        public int Bx;
+        public int By;
+    }
+
+    /// <summary>FG7-ENV-03：顶棚（见 <see cref="WeatherState.Roofs"/>）。</summary>
+    [Serializable]
+    public sealed class RoofState
+    {
+        /// <summary>已建成的顶棚块（按建成先后）。</summary>
+        public RoofRecord[] Built = Array.Empty<RoofRecord>();
+        /// <summary>施工中的顶棚规划（与传送带规划同一种记录，<see cref="PlannedBeltRecord.Roof"/> = true；每格 = 一块，Xs / Ys 是机器施工站的格）。</summary>
+        public PlannedBeltRecord[] Plans = Array.Empty<PlannedBeltRecord>();
+        public int NextPlanSerial = 1;
+        /// <summary>玩家用快捷键隐藏了顶棚（跟着存档走，同叠加层开关）。</summary>
+        public bool Hidden;
     }
 
     /// <summary>FG7-ENV-02：静默夜状态（见 <see cref="WeatherState.SilentNight"/>）。时刻一律是统一时钟的整数步（存读档逐位一致）。</summary>

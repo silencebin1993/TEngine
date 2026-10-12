@@ -236,7 +236,7 @@ namespace GameLogic.UI.Kit
             _keyBuilder.Clear();
             _keyBuilder.Append(GameText.Language).Append('|').Append(GameClock.MinuteOfDay(GameClock.GameSeconds)).Append('|')
                 .Append(GameClock.DayOf(GameClock.GameSeconds)).Append('|').Append(GameClock.Revision).Append('|')
-                .Append(WorldView.ObservedSiteId).Append('|').Append(WorldView.LastFocusTargetId).Append('|').Append(Campaign.Env.SilentNightService.Revision);
+                .Append(WorldView.ObservedSiteId).Append('|').Append(WorldView.LastFocusTargetId).Append('|').Append(Campaign.Env.SilentNightService.Revision).Append('|').Append(Campaign.Env.WeatherService.Revision);
             for (int i = 0; i < targets.Count; i++)
             {
                 _keyBuilder.Append('|').Append(targets[i].Id).Append(':').Append(targets[i].Label);
@@ -311,14 +311,14 @@ namespace GameLogic.UI.Kit
                     ? GameText.Format("env.hud.silent_now", silent.Title)
                     : GameText.Format("env.hud.silent_in", Campaign.Env.CalendarService.ShortDuration(silent.StartSeconds - now)));
             }
-            if (Campaign.Env.CalendarService.TryNext(state, Campaign.Env.CalendarKind.Weather, now, GameClock.DaySeconds, out Campaign.Env.CalendarEntry weather))
+            if (Campaign.Env.CalendarService.HasSource(Campaign.Env.CalendarKind.Weather))
             {
+                // FG7-ENV-03（FGR-ENV-002 当前天气和预报图标）：始终写当前天气（晴也写），后面接看得到的下一段（预报远近按监听站 T2 的天气预报）。
                 if (sb.Length > 0)
                 {
                     sb.Append("  ");
                 }
-                sb.Append(weather.StartSeconds <= now ? GameText.Format("env.hud.weather_now", weather.Title)
-                    : GameText.Format("env.hud.weather_next", weather.Title, Campaign.Env.CalendarService.ShortDuration(weather.StartSeconds - now)));
+                sb.Append(Campaign.Env.WeatherService.HudText(state, now));
             }
             _calExtra.text = sb.ToString();
             SetVisible(_calExtra, sb.Length > 0);

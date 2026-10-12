@@ -258,6 +258,53 @@ namespace GameLogic.UI.Kit
                 SyncSilentDim();
             });
             SyncSilentDim();
+            // FG7-ENV-03（FG07 第 4 节“天气视觉效果强度”）
+            _weatherFxLabel = root.Q<Label>("PauseWeatherFxLabel");
+            _weatherFx = root.Q<Slider>("PauseWeatherFx");
+            if (_weatherFx != null)
+            {
+                _weatherFx.lowValue = Settings.GameSettings.WeatherFxMin;
+                _weatherFx.highValue = Settings.GameSettings.WeatherFxMax;
+                _weatherFx.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetWeatherFx(evt.newValue);
+                    RefreshWeatherFxLabel();
+                });
+                UiTooltip.Attach(_weatherFx, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.display_title"),
+                    Body = GameText.Format("pause.weather_fx_tip", Percent(Settings.GameSettings.WeatherFx),
+                        Percent(Settings.GameSettings.WeatherFxMin), Percent(Settings.GameSettings.WeatherFxMax), Percent(Settings.GameSettings.WeatherFxDefault)),
+                });
+            }
+            WeatherFxResetButton = Bind(root, "PauseWeatherFxReset", "pause.weather_fx_reset", () =>
+            {
+                Settings.GameSettings.ResetWeatherFx();
+                SyncWeatherFx();
+            });
+            SyncWeatherFx();
+        }
+
+        private Slider _weatherFx;
+        private Label _weatherFxLabel;
+
+        public Slider WeatherFxSlider => _weatherFx;
+        public Button WeatherFxResetButton { get; private set; }
+        public string WeatherFxLabelText => _weatherFxLabel?.text ?? string.Empty;
+
+        /// <summary>FG7-ENV-03：天气视觉效果滑条与标签按当前设置同步（打开菜单、恢复默认时）。</summary>
+        public void SyncWeatherFx()
+        {
+            _weatherFx?.SetValueWithoutNotify(Settings.GameSettings.WeatherFx);
+            RefreshWeatherFxLabel();
+        }
+
+        private void RefreshWeatherFxLabel()
+        {
+            if (_weatherFxLabel != null)
+            {
+                _weatherFxLabel.text = GameText.Format("pause.weather_fx", Percent(Settings.GameSettings.WeatherFx));
+            }
         }
 
         private Slider _silentDim;
@@ -416,6 +463,7 @@ namespace GameLogic.UI.Kit
                 SyncCameraSliders();
                 SyncNightFloor();
                 SyncSilentDim();
+                SyncWeatherFx();
                 SyncReactionToggles();
             }
             else

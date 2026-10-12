@@ -708,6 +708,9 @@ namespace GameLogic.UI.Kit
                 // FG4-ECO-04（FG-GAP-082）：地下管线口单击放置，旋转定朝地下的方向。
                 case "pipe_underground":
                     return GameText.Format("ui.build.hint_pipe_underground", rotate, GameText.Get(tool.NameKey), Campaign.Logistics.PipeNetworkService.UndergroundSpan(tool.Tier));
+                // FG7-ENV-03（FGR-ENV-030）：顶棚按住拖拽框一片。
+                case "roof":
+                    return GameText.Format("ui.build.hint_roof", tool.ScrapPerCell);
                 default:
                     return GameText.Format("ui.build.hint_tool", rotate);
             }
@@ -727,6 +730,8 @@ namespace GameLogic.UI.Kit
                     return GameText.Format("ui.build.tool_cost_node", tool.ScrapPerCell);
                 case "underground":
                     return GameText.Format("ui.build.tool_cost_under", tool.ScrapPerCell, tool.ScrapPerCell * 2, BeltNetworkService.UndergroundSpan(tool.Tier));
+                case "roof":
+                    return GameText.Format("ui.build.tool_cost_roof", tool.ScrapPerCell); // FG7-ENV-03
                 default:
                     return GameText.Format("ui.build.tool_cost", tool.ScrapPerCell);
             }
@@ -855,7 +860,14 @@ namespace GameLogic.UI.Kit
             BeltPathPlan belt = mode.BeltPlan;
             DemolishBoxPlan box = mode.BoxPlan;
             _dragInfo.EnableInClassList("bm-cost-short", false);
-            if (belt != null && belt.Kind == BeltNodeKind.UndergroundIn)
+            if (mode.RoofPreview != null)
+            {
+                // FG7-ENV-03（FGR-ENV-030）：顶棚——新铺几块、已有几块跳过、要多少废料；不能放时写原因（未探索 / 超出上限 / 没解锁）。
+                SetVisible(_dragInfo, true);
+                _dragInfo.text = Campaign.Env.RoofService.PlanText(mode.RoofPreview);
+                _dragInfo.EnableInClassList("bm-cost-short", !mode.RoofPreview.Ok);
+            }
+            else if (belt != null && belt.Kind == BeltNodeKind.UndergroundIn)
             {
                 // FG3-LOG-04（FGR-LOG-023）：拖地下传送带时写这次的跨度、上限与两端的成本。
                 SetVisible(_dragInfo, true);
@@ -906,9 +918,10 @@ namespace GameLogic.UI.Kit
             else if (box != null)
             {
                 SetVisible(_dragInfo, true);
-                _dragInfo.text = box.Pipes > 0
+                _dragInfo.text = (box.Pipes > 0
                     ? GameText.Format("ui.build.box_info_pipes", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count - box.Pipes, box.Pipes)
-                    : GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count);
+                    : GameText.Format("ui.build.box_info", box.Max.X - box.Min.X + 1, box.Max.Y - box.Min.Y + 1, box.BuildingCount, box.Belts.Count))
+                    + (mode.BoxRoofBlocks > 0 ? GameText.Format("env.roof.demolish_part", mode.BoxRoofBlocks) : string.Empty); // FG7-ENV-03：框完整包住的顶棚一并拆
             }
             else if (mode.Drag == HomeValleyBuildMode.DragKind.CopyBox)
             {
@@ -992,7 +1005,15 @@ namespace GameLogic.UI.Kit
             GridPlacementResult preview = mode.Preview;
             // FG3-LOG-04：没在拖的时候，选中的工具也有指着哪一格的预览（放置前就能看到能不能放、朝向与进出口）。
             BeltPathPlan belt = mode.BeltPlan ?? mode.ToolPreview;
-            if (belt != null)
+            if (mode.RoofPreview != null)
+            {
+                if (!mode.RoofPreview.Ok)
+                {
+                    status = GameText.Format("ui.build.invalid", mode.RoofPreview.Reason);
+                    error = true;
+                }
+            }
+            else if (belt != null)
             {
                 if (!belt.Ok)
                 {
@@ -1068,6 +1089,11 @@ namespace GameLogic.UI.Kit
             {
                 // FG6-LOG-10（FGR-LOG-046）：建造模式里指着液洼覆盖的空地，状态行写液洼读数（标签、阶段、有意设计的提示；战略视角由世界悬停提示显示同一份）。
                 status = leakTitle + "\n" + leakBody;
+            }
+            if (mode.HasHover && mode.RoofPreview == null && state != null && Campaign.Env.RoofService.HoverText(state, mode.HoverCell) is string roofLine)
+            {
+                // FG7-ENV-03（FGR-ENV-030）：指着的格子在顶棚下——另起一行写明（下面照常可以建造、操作；隐藏顶棚的键）。
+                status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + roofLine;
             }
             if (!string.IsNullOrEmpty(lastResult))
             {

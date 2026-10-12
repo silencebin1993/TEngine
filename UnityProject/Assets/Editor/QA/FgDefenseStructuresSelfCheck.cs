@@ -532,11 +532,11 @@ namespace GameLogic.EditorTools
                            && DefenseCatalog.ShieldStates.Where(x => x.Absorbs).All(x => DefenseCatalog.TryGetState(x.OnDepleted, out _));
             bool research = new[] { "defense.barrier", "defense.shield", "defense.trap" }.All(id => ResearchCatalog.TryGet(id, out ResearchNodeDef n) && n.IsReady)
                             && ResearchCatalog.TryGet("defense.barrier", out ResearchNodeDef nb) && nb.Unlocks.Contains("build:barrier_t1") && nb.Unlocks.Contains("build:gate")
-                            && ResearchCatalog.TryGet("logistics.heat_trace", out ResearchNodeDef rd) && !rd.IsReady // FG6-DEF-03 防御分支已全部开放，“后续版本”改用伴热管（FG7-ENV-03）
+                            && ResearchCatalog.TryGet("environment.purifier_t2", out ResearchNodeDef rd) && !rd.IsReady // FG7-ENV-03 伴热管已开放，“后续版本”改用净化塔 T2（FG7-ENV-04）
                             && ResearchService.MigratedNodes().All(n => !n.Id.StartsWith("defense.", StringComparison.Ordinal));
             Expect(sizes && tiers && power && machine && research && CombatConst.FormatVersion >= 10, // FG6-DEF-05 起内核快照升到格式 11（攻城属性）；格式 10 往返在 I3 单独测
                 $"A2 屏障 T1 / T2 / T3、闸门、陷阱 1×1、护盾 2×2（防御页签）；屏障耐久 {d1}/{d2}/{d3} 递增、升级路线 T1→T2→T3；屏障 / 闸门不用电、护盾 / 陷阱用电；" +
-                $"护盾状态机初始“充能”、过载 {over?.Seconds} 秒、吸收状态都有耗尽去向；研发 defense.barrier / shield / trap 已就绪并解锁（旧档迁移不送；“后续版本”的对照改用伴热管）；内核快照格式 {CombatConst.FormatVersion}" +
+                $"护盾状态机初始“充能”、过载 {over?.Seconds} 秒、吸收状态都有耗尽去向；研发 defense.barrier / shield / trap 已就绪并解锁（旧档迁移不送；“后续版本”的对照改用净化塔 T2）；内核快照格式 {CombatConst.FormatVersion}" +
                 $"（{sizes}/{tiers}/{power}/{machine}/{research}）");
 
             string[] keys = t.TbLocText.DataList.Select(r => r.Key).Where(k => k.StartsWith("defense.", StringComparison.Ordinal) || k.StartsWith("shield.", StringComparison.Ordinal)

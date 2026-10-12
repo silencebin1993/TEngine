@@ -98,6 +98,10 @@ namespace BinGames.Sim.Logistics
         private int[] _nMinTier = new int[16];
         private int[] _nMinCount = new int[16];
         private byte[] _nMixed = new byte[16];
+        /// <summary>FG7-ENV-03（FGR-LOG-045）：网络里会结冰的管线格数（地上的 T1 / T2 管线；伴热管 = 等级 2、地下管线口不算）。</summary>
+        private int[] _nFreezable = new int[16];
+        /// <summary>FG7-ENV-03：网络上一步是否结冰（派生量：寒潮开关 + 静止步数 + 会结冰的格数，读档后按同样的输入重新得出）。</summary>
+        private byte[] _nFrozen = new byte[16];
         private int[] _nBx = new int[16];
         private int[] _nBy = new int[16];
         private long[] _nLastFlow = new long[16];
@@ -147,6 +151,7 @@ namespace BinGames.Sim.Logistics
 
         private bool _dirty = true;
         private int _noSupplyCount;
+        private int _frozenCount;
         private readonly Stopwatch _watch = new Stopwatch();
 
         public PipeKernel(PipeConfig config)
@@ -195,6 +200,26 @@ namespace BinGames.Sim.Logistics
         public double LastRebuildMs { get; private set; }
         /// <summary>最近一步“有需求却什么都没送到”的网络数（热更层 O(1) 读它发引导钩子）。</summary>
         public int LastNoSupplyNetworks { get; private set; }
+
+        /// <summary>FG7-ENV-03（FGR-LOG-045）：最近一步结冰的网络数（热更层 O(1) 读它发“管线结冰”警告）。</summary>
+        public int FrozenNetworks { get; private set; }
+
+        /// <summary>
+        /// FG7-ENV-03（FGR-LOG-045）：寒潮中，网络静止（没有流动）达到这么多内核步就结冰（0 = 没有寒潮，不结冰）。
+        /// 热更层的天气系统在寒潮开始 / 结束、读档后按存档里的寒潮开关设定（派生量，不进内核存档）；结冰在 <see cref="Step"/> 里逐网络判定，
+        /// 只看步序号与网络“最近一次有流动的步”（进存档），与帧率、倍速、观察无关。
+        /// </summary>
+        public long FreezeAfterSteps { get; private set; }
+
+        public void SetFreezeAfterSteps(long steps)
+        {
+            steps = Math.Max(0L, steps);
+            if (steps != FreezeAfterSteps)
+            {
+                FreezeAfterSteps = steps;
+                Revision++;
+            }
+        }
 
         public int NetworkCount
         {
@@ -354,6 +379,10 @@ namespace BinGames.Sim.Logistics
             if (kind > PipePieceKind.Underground)
             {
                 return PipeResult.InvalidArgument;
+            }
+            if (kind == PipePieceKind.Underground && tier >= PipeConst.HeatTracedTier)
+            {
+                return PipeResult.InvalidTier; // FG7-ENV-03：地下管线口只有 T1 / T2（埋在地下，不结冰，没有伴热档）
             }
             if (tier < 0 || tier >= PipeConst.TierCount)
             {
@@ -773,7 +802,7 @@ namespace BinGames.Sim.Logistics
         /// </summary>
         public PipeResult SetUndergroundPairTier(int x, int y, int tier)
         {
-            if (tier < 0 || tier >= PipeConst.TierCount)
+            if (tier < 0 || tier >= PipeConst.HeatTracedTier)
             {
                 return PipeResult.InvalidTier;
             }
@@ -1348,6 +1377,8 @@ namespace BinGames.Sim.Logistics
                 _nMinTier[n] = int.MaxValue;
                 _nMinCount[n] = 0;
                 _nMixed[n] = 0;
+                _nFreezable[n] = 0;
+                _nFrozen[n] = 0;
                 _nBx[n] = 0;
                 _nBy[n] = 0;
                 _nLastFlow[n] = -1;
@@ -1390,6 +1421,10 @@ namespace BinGames.Sim.Logistics
                         // 地下管线口按它的等级参与“最低等级限流”（地下段的吞吐与同等级管线相同）。
                         _nPipe[n]++;
                         int t = _tier[c];
+                        if (_kind[c] == (byte)PipePieceKind.Pipe && t < PipeConst.HeatTracedTier)
+                        {
+                            _nFreezable[n]++;
+                        }
                         if (firstTier < 0)
                         {
                             firstTier = t;
@@ -1602,11 +1637,13 @@ namespace BinGames.Sim.Logistics
                 _stepOut[t] = 0;
             }
             _noSupplyCount = 0;
+            _frozenCount = 0;
             for (int n = 0; n < _netCount; n++)
             {
                 Settle(n, s, cap0, cap1, pumpB, tankB, valveB, tankCap);
             }
             LastNoSupplyNetworks = _noSupplyCount;
+            FrozenNetworks = _frozenCount;
             StepIndex = s + 1;
             _watch.Stop();
             LastStepMs = _watch.Elapsed.TotalMilliseconds;
@@ -1654,6 +1691,19 @@ namespace BinGames.Sim.Logistics
                 }
             }
             long cap = _nPipe[n] > 0 ? (_nMinTier[n] <= 0 ? cap0 : cap1) : cap1;
+            // FG7-ENV-03（FGR-LOG-045）：寒潮中、网络静止达到 FreezeAfterSteps 步、还有会结冰的管线格 → 结冰，吞吐上限为 0（阻断流动）。
+            // 结冰后没有流动，静止时长继续增加，直到寒潮结束（FreezeAfterSteps = 0）自动解冻；与观察、倍速无关（只看步序号）。
+            bool frozen = FreezeAfterSteps > 0 && _nFreezable[n] > 0 && s - 1 - _nLastFlow[n] >= FreezeAfterSteps;
+            if (frozen)
+            {
+                cap = 0;
+                _frozenCount++;
+            }
+            if ((_nFrozen[n] != 0) != frozen)
+            {
+                _nFrozen[n] = (byte)(frozen ? 1 : 0);
+                Revision++; // 画面跟上（结冰的管线叠冰霜）
+            }
             // 供给
             long vS = 0, pS = 0, tS = 0;
             int sources = 0;
@@ -1933,6 +1983,10 @@ namespace BinGames.Sim.Logistics
             if (D == 0 && fill == 0 && (pS > 0 || rS > 0))
             {
                 issues |= (int)PipeNetIssue.NoDemand;
+            }
+            if (frozen)
+            {
+                issues = (issues & ~(int)PipeNetIssue.PipeLimited) | (int)PipeNetIssue.Frozen;
             }
             _nIssues[n] = issues;
             _aSupply[n] += S;
@@ -2239,6 +2293,8 @@ namespace BinGames.Sim.Logistics
                 StorageCapMl = storeCap,
                 Issues = (PipeNetIssue)_nIssues[net],
                 LastFlowStep = _nLastFlow[net],
+                FreezableCells = _nFreezable[net],
+                Frozen = _nFrozen[net] != 0,
             };
             return true;
         }
@@ -2600,6 +2656,10 @@ namespace BinGames.Sim.Logistics
                     {
                         flags |= 4;
                     }
+                    if (_kind[i] == (byte)PipePieceKind.Pipe && _tier[i] < PipeConst.HeatTracedTier && _net[i] >= 0 && _net[i] < _netCount && _nFrozen[_net[i]] != 0)
+                    {
+                        flags |= 16; // FG7-ENV-03：结冰的管线（着色器叠冰霜与冰晶花纹，颜色之外有形状，B15）
+                    }
                     if (_kind[i] == (byte)PipePieceKind.Underground && _partner[i] < 0)
                     {
                         flags |= 8; // 地下管线口没配对：着色器叠红色斜纹（颜色之外有花纹，B15）
@@ -2692,6 +2752,8 @@ namespace BinGames.Sim.Logistics
             Array.Resize(ref _nMinTier, cap);
             Array.Resize(ref _nMinCount, cap);
             Array.Resize(ref _nMixed, cap);
+            Array.Resize(ref _nFreezable, cap);
+            Array.Resize(ref _nFrozen, cap);
             Array.Resize(ref _nBx, cap);
             Array.Resize(ref _nBy, cap);
             Array.Resize(ref _nLastFlow, cap);

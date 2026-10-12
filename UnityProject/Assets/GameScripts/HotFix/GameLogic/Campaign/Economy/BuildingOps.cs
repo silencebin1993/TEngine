@@ -533,7 +533,10 @@ namespace GameLogic.Campaign.Economy
         /// 建筑受到伤害（FG6 突袭、FG7 天气、FG10 事件的接入点；本 Story 的负向测试经此入口）：耐久下降，效率不变；归零 = 摧毁（留下虚影）。
         /// 只对已建成的建筑生效（虚影 / 已摧毁的不再扣）。发“建筑受损”警告（同类聚合、可定位）。返回是否被摧毁。
         /// </summary>
-        public static bool ApplyDamage(CampaignState state, string buildingId, float amount)
+        public static bool ApplyDamage(CampaignState state, string buildingId, float amount) => ApplyDamage(state, buildingId, amount, notify: true);
+
+        /// <summary>FG7-ENV-03：<paramref name="notify"/> = false 时不发逐座的建筑受损通知（天气按游戏分钟批量结算，由天气系统发汇总通知；被摧毁照常通知）。</summary>
+        public static bool ApplyDamage(CampaignState state, string buildingId, float amount, bool notify)
         {
             BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
             if (b == null || amount <= 0f || HomeGridService.IsRelocationGhost(b)
@@ -556,8 +559,11 @@ namespace GameLogic.Campaign.Economy
                     // 核心被打到 0 的后果（失败）属于 FG6 / FG11，这里只记耐久：记极小值（显示 0、受损、可维修），不能记 0——0 会被旧存档兼容规则读成满耐久。
                     b.Health = CoreFloorHealth;
                     Defense.RepairDroneService.CommitRecordDurability(state, b);
-                    NotificationCenter.Post("building_damaged", GameText.Format("building.notify.damaged", NameOf(b), 0, Mathf.RoundToInt(max)),
+                    if (notify)
+                    {
+                        NotificationCenter.Post("building_damaged", GameText.Format("building.notify.damaged", NameOf(b), 0, Mathf.RoundToInt(max)),
                         new Vector3(b.Position.x, 0f, b.Position.y));
+                    }
                     return false;
                 }
                 return HomeValleyPowerGrid.ApplyBuildingDestroyed(state, buildingId);
@@ -566,6 +572,10 @@ namespace GameLogic.Campaign.Economy
             if (before >= max - 0.01f)
             {
                 GuidanceHooks.Raise(GuidanceHooks.BuildingFirstDamaged);
+            }
+            if (!notify)
+            {
+                return false;
             }
             NotificationCenter.Post("building_damaged", GameText.Format("building.notify.damaged", NameOf(b), Mathf.RoundToInt(b.Health), Mathf.RoundToInt(max)),
                 new Vector3(b.Position.x, 0f, b.Position.y));

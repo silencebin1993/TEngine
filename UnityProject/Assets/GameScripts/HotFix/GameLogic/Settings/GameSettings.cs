@@ -57,6 +57,8 @@ namespace GameLogic.Settings
         public float NightBrightnessFloor = -1f;
         /// <summary>FG7-ENV-02（FG07 第 4 节“静默夜画面压暗强度”）：静默夜期间在昼夜亮度之上再暗多少（-1 = 跟随表里的默认值）。</summary>
         public float SilentNightDim = -1f;
+        /// <summary>FG7-ENV-03（FG07 第 4 节“设置：天气视觉效果强度（沙暴可能影响可读性）”）：雨 / 沙 / 雪粒子与沙暴雾的强度（-1 = 跟随表里的默认值）。</summary>
+        public float WeatherFx = -1f;
 
         /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
@@ -435,6 +437,26 @@ namespace GameLogic.Settings
         public static void ResetSilentNightDim()
         {
             Data.SilentNightDim = -1f;
+            Save();
+        }
+
+        // ── FG7-ENV-03：天气视觉效果强度（FG07 第 4 节）──
+        public static float WeatherFxMin => UiTuningValues.Get("env.weather_fx_min");
+        public static float WeatherFxMax => UiTuningValues.Get("env.weather_fx_max");
+        public static float WeatherFxDefault => Mathf.Clamp(UiTuningValues.Get("env.weather_fx_default"), WeatherFxMin, WeatherFxMax);
+
+        /// <summary>天气画面（粒子与沙暴雾）的强度（没设过 = 表里的默认值；读到的值总在范围内）。只影响画面，天气效果不变。</summary>
+        public static float WeatherFx => Data.WeatherFx < 0f ? WeatherFxDefault : Mathf.Clamp(Data.WeatherFx, WeatherFxMin, WeatherFxMax);
+
+        public static void SetWeatherFx(float value)
+        {
+            Data.WeatherFx = Mathf.Clamp(value, WeatherFxMin, WeatherFxMax);
+            Save();
+        }
+
+        public static void ResetWeatherFx()
+        {
+            Data.WeatherFx = -1f;
             Save();
         }
 

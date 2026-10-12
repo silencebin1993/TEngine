@@ -477,7 +477,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             CombatWeapon wp = d.Weapons[w];
-            float rate = wp.Dissipation + (d.Has(i, CombatUnitFlags.HeatSink) ? wp.HeatSinkBonus : 0f);
+            float rate = (wp.Dissipation + (d.Has(i, CombatUnitFlags.HeatSink) ? wp.HeatSinkBonus : 0f)) * (1f + math.max(0f, d.DissipationBonus)); // FG7-ENV-03 寒潮散热加成
             float h = math.max(0f, d.Heat[i] - rate * dt);
             d.Heat[i] = h;
             if (d.Has(i, CombatUnitFlags.Overheated) && h < wp.RecoverBelow)

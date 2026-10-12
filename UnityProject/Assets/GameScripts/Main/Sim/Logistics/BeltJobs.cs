@@ -1810,4 +1810,78 @@ namespace BinGames.Sim.Logistics
             }
         }
     }
+
+    /// <summary>
+    /// FG7-ENV-03 审查修复（P1；FG07 第 7 节酸雨、FG00 B18 / FG14 §5“逐格循环只在 AOT”）：酸雨按游戏分钟的逐格整数预算。
+    /// 内核作业与热更层的建筑结算共用这两个函数（同一公式、同一浮点运算，结果逐位一致）。
+    /// </summary>
+    public static class BeltAcid
+    {
+        /// <summary>相位个数（游戏分钟）：同一等级、同一倍率的露天传送带按格错开到一小时的各个分钟，整点伤害与归零不会挤在同一分钟。</summary>
+        public const int PhaseCount = 60;
+
+        /// <summary>每格的确定性相位（0～59），只看坐标（与放置顺序、存读档、观察与否无关）。</summary>
+        public static int Phase(int x, int y)
+        {
+            uint h = (uint)x * 0x9E3779B1u ^ (uint)y * 0x85EBCA77u;
+            h ^= h >> 15;
+            h *= 0x2C1B3C6Du;
+            h ^= h >> 12;
+            h *= 0x297A2D39u;
+            h ^= h >> 15;
+            return (int)(h % PhaseCount);
+        }
+
+        /// <summary>第 k 个游戏分钟、每分钟 <paramref name="perMinute"/> 点的整数预算：前 k 分钟累计 = ⌊perMinute × k⌋（平均精确、存读档一致）。</summary>
+        public static int MinuteDamage(double perMinute, long k)
+        {
+            long a = (long)math.floor(perMinute * k + 1e-9);
+            long b = (long)math.floor(perMinute * (k - 1) + 1e-9);
+            long d = a - b;
+            return d <= 0 ? 0 : (int)d;
+        }
+    }
+
+    /// <summary>
+    /// FG7-ENV-03 审查修复（P1）：酸雨这一游戏分钟哪些传送带格有整点伤害。只看露天的地面格（地下段、顶棚下的格跳过），
+    /// 每格 kc = K + 相位；倍率 1 / 倍率 2 的伤害都算出来（污染倍率在地格数据里，由热更层只对输出的格查）。
+    /// 输出 z = a1 | a2 &lt;&lt; 10 | 等级 &lt;&lt; 20，规范顺序（确定性）。单线程，O(格数)。
+    /// </summary>
+    [BurstCompile(CompileSynchronously = true)]
+    internal struct JobBeltAcid : IJob
+    {
+        public long K;
+        public double P0;
+        public double P1;
+        public double P2;
+        [ReadOnly] public NativeArray<int> X;
+        [ReadOnly] public NativeArray<int> Y;
+        [ReadOnly] public NativeArray<byte> Tier;
+        [ReadOnly] public NativeArray<byte> Covered;
+        [ReadOnly] public NativeArray<byte> Kind;
+        public NativeList<int3> Hits;
+
+        public void Execute()
+        {
+            Hits.Clear();
+            int n = X.Length;
+            for (int i = 0; i < n; i++)
+            {
+                if (Covered[i] != 0 || Kind[i] == (byte)BeltNodeKind.Underground)
+                {
+                    continue;
+                }
+                int t = Tier[i];
+                double pm = t == 0 ? P0 : t == 1 ? P1 : P2;
+                long kc = K + BeltAcid.Phase(X[i], Y[i]);
+                int a1 = BeltAcid.MinuteDamage(pm, kc);
+                int a2 = BeltAcid.MinuteDamage(pm * 2.0, kc);
+                if (a1 <= 0 && a2 <= 0)
+                {
+                    continue;
+                }
+                Hits.Add(new int3(X[i], Y[i], math.min(a1, 1023) | (math.min(a2, 1023) << 10) | (t << 20)));
+            }
+        }
+    }
 }

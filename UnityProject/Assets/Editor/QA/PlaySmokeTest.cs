@@ -64,7 +64,9 @@ namespace GameLogic.EditorTools
     public static class PlaySmokeTest
     {
         private const string K = "BinGames.PlaySmoke.";
-        private const double TotalTimeoutSeconds = 480;
+        // FG7-ENV-03 修复轮：天气 / 顶棚步骤（427～430）加进来后整条流程约 510 秒，原上限 480 秒把末尾的撤离 / 离家报告步骤截掉了。
+        // 不删步骤、不减覆盖，上限调到 600 秒（tools/unity-play-smoke.sh 外层同步调到 720 秒）。
+        private const double TotalTimeoutSeconds = 600;
 
         static PlaySmokeTest()
         {
@@ -402,6 +404,12 @@ namespace GameLogic.EditorTools
                 case 424: StepLeakFormed(inStep); break;
                 case 425: StepLeakIgnited(inStep); break;
                 case 426: StepLeakCleared(inStep); break;
+                // FG7-ENV-03：天气与顶棚（测试捷径只排日程：一段酸雨排到眼前，预警 / 开始 / 世界时间条 / 画面 / 结束都走正式推进；建造模式选顶棚 →
+                // 真实鼠标拖出一片顶棚虚影（拖拽信息行）→ 真实按键 Ctrl+H 隐藏 / 显示顶棚 → Ctrl+Alt+9 开关“顶棚覆盖”叠加层 → 取消顶棚规划、等酸雨结束（转晴通知））
+                case 427: StepWeatherStarted(inStep); break;
+                case 428: StepRoofDragged(inStep); break;
+                case 429: StepRoofHiddenAndOverlay(inStep); break;
+                case 430: StepWeatherEnded(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -10274,6 +10282,205 @@ namespace GameLogic.EditorTools
             }
             Check(settled, $"拆掉管线后没有还在漏的液洼（{PipeLeakService.Snapshot(state)}）：燃烧区烧完 / 液洼按 logistics.leak.fade_seconds 逐渐消退");
             GameClock.SetPaused(SessionState.GetInt(K + "LeakWasPaused", 0) == 1);
+            Next(427, "FG7-ENV-03：测试捷径——把一段酸雨排到眼前（预警、开始、效果、结束走正式推进）");
+        }
+
+        // ── FG7-ENV-03：天气与顶棚（真实 Play 帧：天气按日程预警 / 开始、世界时间条、画面；建造模式真实鼠标拖顶棚、真实按键隐藏与叠加层）──
+
+        private static void StepWeatherStarted(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (SessionState.GetInt(K + "WxSetup", 0) == 0)
+            {
+                Check(Campaign.Env.WeatherService.Installed && Campaign.Regions.PowerEnvironment.SandstormProvider != null
+                      && Campaign.Env.CalendarService.HasSource(Campaign.Env.CalendarKind.Weather),
+                    "天气正式入口已接上（GameRoot.Startup：太阳能沙暴系数、日历来源）");
+                SessionState.SetInt(K + "WxWasPaused", GameClock.Paused ? 1 : 0);
+                GameClock.SetPaused(false);
+                SessionState.SetInt(K + "WxWarn0", Campaign.Env.WeatherService.WarnCount);
+                bool scheduled = Campaign.Env.WeatherService.ScheduleForTests(state, Campaign.Env.WeatherService.AcidRain, 1.0, 25.0);
+                Check(scheduled, "测试捷径：酸雨排到 1 游戏秒后开始、持续 25 游戏秒（只改日程）");
+                SessionState.SetInt(K + "WxSetup", 1);
+                return;
+            }
+            if (!Campaign.Env.WeatherService.IsActive(state, Campaign.Env.WeatherService.AcidRain))
+            {
+                if (inStep > 20.0)
+                {
+                    Check(false, "酸雨没有按日程开始（20 真实秒）");
+                    Next(430, "跳过顶棚步骤");
+                }
+                return;
+            }
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            UI.Kit.WorldBarHudUIToolkit bar = UI.Kit.WorldBarHudUIToolkit.Instance;
+            bar?.Refresh();
+            string row = bar?.CalendarExtraText ?? string.Empty;
+            Check(Campaign.Env.WeatherService.WarnCount == SessionState.GetInt(K + "WxWarn0", 0) + 1
+                  && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "weather_warning") && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "weather"),
+                "酸雨按日程预警、开始（“天气预警”“天气”两条通知都在通知历史里）");
+            Check(row.Contains("酸雨"), $"世界时间条日历行写当前天气：“{row}”");
+            Check(View.WeatherView.Kind == Campaign.Env.WeatherService.AcidRain && View.WeatherView.Strength > 0f && View.WeatherView.EmissionRate > 0f,
+                $"画面：酸雨粒子与淡雾（强度 {View.WeatherView.Strength:0.##}、发射率 {View.WeatherView.EmissionRate:0}/秒、雾 {View.WeatherView.FogDensity:0.####}）");
+            // 测试捷径：研究“环境 · 顶棚”（研发树的研究流程由 FG5-RND-01 的冒烟步骤覆盖）；打开建造模式并选中顶棚（建造菜单选条目由前面步骤覆盖）。
+            Campaign.Economy.ResearchService.CompleteForTests(state, "environment.roof");
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            SessionState.SetInt(K + "WxOpenedBuild", mode != null && !mode.IsOpen ? 1 : 0);
+            if (mode != null && !mode.IsOpen)
+            {
+                mode.Open();
+            }
+            mode?.Select(Campaign.Env.RoofService.ToolId);
+            Check(mode != null && mode.IsOpen && mode.SelectedIsRoof, "建造模式选中顶棚工具（建造菜单“环境”页）");
+            Next(428, "真实鼠标按住拖出一片顶棚（4×4 一块）");
+        }
+
+        private static void StepRoofDragged(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+            string info = hud?.DragInfoText ?? string.Empty;
+            // 修复轮（P2）：只记“还按着拖”的那几帧（松手后 HUD 换成对着已规划块的预览“新铺 0 块”，不能拿来证明拖的时候写了什么）。
+            Campaign.Regions.HomeValleyBuildMode dragMode = Campaign.Regions.HomeValleyBuildMode.Current;
+            if (info.Contains("顶棚") && dragMode != null && dragMode.Drag == Campaign.Regions.HomeValleyBuildMode.DragKind.RoofBox)
+            {
+                SessionState.SetString(K + "RoofDragInfo", info);
+            }
+            int sub = SessionState.GetInt(K + "RoofSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.4)
+                {
+                    return;
+                }
+                string hint = hud?.HintLabelText ?? string.Empty;
+                Check(hint.Contains("顶棚") && hint.Contains("拖拽"), $"建造栏提示行写顶棚怎么铺：“{hint}”");
+                // 在镜头焦点附近按格网规则找一块完整的空顶棚块（不写死坐标，B25）。
+                GridCell center = GridCell.FromWorld(CameraFocus());
+                int n = Campaign.Env.RoofService.BlockCells;
+                int cbx = Campaign.Env.RoofService.BlockOf(center.X), cby = Campaign.Env.RoofService.BlockOf(center.Y);
+                bool found = false;
+                for (int r = 0; r <= 6 && !found; r++)
+                {
+                    for (int dy = -r; dy <= r && !found; dy++)
+                    {
+                        for (int dx = -r; dx <= r && !found; dx++)
+                        {
+                            Campaign.Env.RoofPlan p = Campaign.Env.RoofService.PlanBox(state, new GridCell((cbx + dx) * n, (cby + dy) * n), new GridCell((cbx + dx) * n + n - 1, (cby + dy) * n + n - 1));
+                            if (p.Ok && p.New == 1)
+                            {
+                                SessionState.SetInt(K + "RoofBx", cbx + dx);
+                                SessionState.SetInt(K + "RoofBy", cby + dy);
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                if (!found)
+                {
+                    Check(false, "镜头附近找不到能铺顶棚的一块（都未探索或已有）");
+                    Next(430, "跳过顶棚步骤");
+                    return;
+                }
+                int bx = SessionState.GetInt(K + "RoofBx", 0), by = SessionState.GetInt(K + "RoofBy", 0);
+                DragWorld(new Vector3(bx * n + 0.5f, 0f, by * n + 0.5f), new Vector3(bx * n + n - 1.5f, 0f, by * n + n - 1.5f), 0);
+                SessionState.SetInt(K + "RoofSub", 1);
+                return;
+            }
+            if (inStep < 1.6)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(null);
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            int rbx = SessionState.GetInt(K + "RoofBx", 0), rby = SessionState.GetInt(K + "RoofBy", 0);
+            string seen = SessionState.GetString(K + "RoofDragInfo", string.Empty);
+            Check(Campaign.Env.RoofService.IsPlannedBlock(state, rbx, rby) && mode != null && mode.StatusText.Contains("顶棚") && seen.Contains("新铺 1 块"),
+                $"真实鼠标拖拽放下顶棚虚影（机器取料施工）：状态行“{mode?.StatusText?.Replace("\n", " / ")}”；拖的时候 HUD 写“{seen}”");
+            Check(View.RoofView.Visible && Math.Abs(View.RoofView.Alpha - View.RoofView.BuildAlpha) < 1e-4f,
+                $"建造模式里顶棚半透明（α {View.RoofView.Alpha}，{View.RoofView.Quads} 块），下面的东西看得见");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ToggleRoofs));
+            SessionState.SetInt(K + "RoofSub", 0);
+            Next(429, "真实按键 Ctrl+H 隐藏顶棚");
+        }
+
+        private static void StepRoofHiddenAndOverlay(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            int sub = SessionState.GetInt(K + "RoofHideSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.6)
+                {
+                    return;
+                }
+                Check(Campaign.Env.RoofService.Hidden(state) && !View.RoofView.Visible, "按 Ctrl+H：顶棚隐藏（不画），字幕写明怎么再显示");
+                PressChord(GameSettings.KeyBindings.GetChord(GameActionId.ToggleRoofs));
+                SessionState.SetInt(K + "RoofHideSub", 1);
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 1.2)
+                {
+                    return;
+                }
+                Check(!Campaign.Env.RoofService.Hidden(state) && View.RoofView.Visible, "再按 Ctrl+H：顶棚重新显示");
+                PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OverlayRoof));
+                SessionState.SetInt(K + "RoofHideSub", 2);
+                return;
+            }
+            if (sub == 2)
+            {
+                if (inStep < 1.9)
+                {
+                    return;
+                }
+                Check(View.OverlayService.Active == View.OverlayKind.Roof && View.OverlayService.Visible, $"按 Ctrl+Alt+9：打开“顶棚覆盖”叠加层（{View.OverlayService.DrawnMarkers} 个方框）");
+                PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OverlayRoof));
+                SessionState.SetInt(K + "RoofHideSub", 3);
+                return;
+            }
+            if (inStep < 2.6)
+            {
+                return;
+            }
+            Check(View.OverlayService.Active == View.OverlayKind.None, "再按 Ctrl+Alt+9：叠加层关闭");
+            SessionState.SetInt(K + "RoofHideSub", 0);
+            Next(430, "取消顶棚规划，等酸雨结束");
+        }
+
+        private static void StepWeatherEnded(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (SessionState.GetInt(K + "WxCleanup", 0) == 0)
+            {
+                // 清理：施工队列取消顶棚规划（材料全额退回），退出建造模式（是本段打开的才关）。
+                foreach (WorkOrderRecord o in (state.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Where(o => o != null && Campaign.Regions.HomeValleyConstruction.IsRoofPlan(o.TargetId)).ToList())
+                {
+                    Campaign.Grid.PlanHistory.CancelSite(state, o);
+                }
+                Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+                mode?.ClearSelection();
+                if (SessionState.GetInt(K + "WxOpenedBuild", 0) == 1)
+                {
+                    mode?.Close();
+                }
+                Check(Campaign.Env.RoofService.PlannedCount(state) == 0, "施工队列取消顶棚规划：规划与施工单一起消失");
+                SessionState.SetInt(K + "WxCleanup", 1);
+                return;
+            }
+            if (Campaign.Env.WeatherService.IsActive(state, Campaign.Env.WeatherService.AcidRain) && inStep < 40.0)
+            {
+                return;
+            }
+            Check(!Campaign.Env.WeatherService.IsActive(state, Campaign.Env.WeatherService.AcidRain)
+                  && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "weather_end"),
+                "酸雨按日程结束：转晴通知在通知历史里");
+            GameClock.SetPaused(SessionState.GetInt(K + "WxWasPaused", 0) == 1);
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

@@ -133,6 +133,20 @@ Shader "BinGames/PipeInstanced"
                     inside = Arms(p, mask, w);
                     float rim = inside * (1.0 - Arms(p, mask, w - 0.045));
                     col = lerp(fcol, dark, rim);
+                    if (tier > 1.5)
+                    {
+                        // FG7-ENV-03 伴热管（等级 2）：管壁一圈橙色斜纹电热带（颜色之外有花纹，B15；占位美术）。
+                        float band = rim * step(0.5, frac((p.x + p.y) * 7.0));
+                        col = lerp(col, float3(0.95, 0.45, 0.12), band);
+                    }
+                    if (Bit(flags, 4) > 0.5)
+                    {
+                        // FG7-ENV-03 结冰（flags 第 4 位）：整段蒙一层冰霜 + 冰晶十字纹（流动被阻断，寒潮结束自动解冻）。
+                        float2 g = frac(p * 5.0) - 0.5;
+                        float crystal = step(abs(g.x), 0.06) * step(abs(g.y), 0.32) + step(abs(g.y), 0.06) * step(abs(g.x), 0.32);
+                        col = lerp(col, float3(0.86, 0.94, 1.0), 0.6);
+                        col = lerp(col, float3(1.0, 1.0, 1.0), saturate(crystal) * 0.8);
+                    }
                 }
                 else if (kind < 1.5)
                 {

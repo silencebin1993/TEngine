@@ -1206,6 +1206,10 @@ namespace GameLogic.Campaign.Economy
                 {
                     return true; // FG6-DEF-03：研发树门控的规则类型（自动重建）从落地起就由研究门控（与表生成的 POST_TREE_NODES 同一口径）
                 }
+                if (Array.IndexOf(PostTreeUnlocks, u) >= 0)
+                {
+                    return true; // FG7-ENV-03：顶棚、伴热管、监听站 T2 是研发树开放之后才落地的内容
+                }
                 foreach (string type in PostTreeTypes)
                 {
                     if (u == "build:" + type || u.StartsWith("tier:" + type + ".", StringComparison.Ordinal))
@@ -1222,6 +1226,9 @@ namespace GameLogic.Campaign.Economy
             Defense.DefenseCatalog.BarrierT1, Defense.DefenseCatalog.BarrierT2, Defense.DefenseCatalog.BarrierT3, Defense.DefenseCatalog.GateTypeId,
             Defense.DefenseCatalog.ShieldTypeId, Defense.DefenseCatalog.TrapTypeId,
             Defense.RepairDroneCatalog.StationTypeId }; // FG6-DEF-03：维修无人机站
+
+        // FG7-ENV-03：按解锁条目精确匹配（监听站本身在研发树开放前就有，只有它的 T2 是新内容，不能按类型整个算）。
+        private static readonly string[] PostTreeUnlocks = { "build:" + Env.RoofService.ToolId, "build:pipe_t3", "tier:listening_post.t2" };
 
         // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────
 

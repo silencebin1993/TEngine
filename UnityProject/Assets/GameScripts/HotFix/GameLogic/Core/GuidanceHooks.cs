@@ -450,6 +450,18 @@ namespace GameLogic.Core
         /// <summary>FG7-ENV-02（FGR-ENV-014）：第一次出现风暴残骸。</summary>
         public const string EnvFirstStormDebris = "env.first_storm_debris";
 
+        /// <summary>FG7-ENV-03（FGR-ENV-021）：第一次天气预警。</summary>
+        public const string EnvFirstWeatherWarning = "env.first_weather_warning";
+
+        /// <summary>FG7-ENV-03（FGR-ENV-020；FG13 第一次天气 → 顶棚、净化）：第一次恶劣天气开始。</summary>
+        public const string EnvFirstWeather = "env.first_weather";
+
+        /// <summary>FG7-ENV-03（FGR-ENV-030）：第一次放下顶棚。</summary>
+        public const string EnvFirstRoof = "env.first_roof";
+
+        /// <summary>FG7-ENV-03（FGR-LOG-045）：第一次有管线结冰。</summary>
+        public const string EnvFirstPipeFrozen = "env.first_pipe_frozen";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -507,6 +519,7 @@ namespace GameLogic.Core
             LogisticsLeakFirst, LogisticsLeakFirstReact, LogisticsLeakFirstFaded,
             EnvFirstNight, EnvCalendarFirstOpen,
             EnvFirstSilentWarning, EnvFirstSilentNight, EnvFirstStormDebris,
+            EnvFirstWeatherWarning, EnvFirstWeather, EnvFirstRoof, EnvFirstPipeFrozen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

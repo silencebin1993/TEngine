@@ -390,9 +390,10 @@ namespace GameLogic.EditorTools
             string[] rt = ConfigSystem.Instance.Tables.TbBuildUpgrade.DataList.Select(r => string.Join("\t", "BU", r.FromId, r.ToId, r.Note)).ToArray();
             bool routes = GridContent.TryGetUpgrade("belt_t1", out string b2) && b2 == "belt_t2" && GridContent.TryGetUpgrade("power_pole", out string p2) && p2 == "power_pole_t2"
                           && !GridContent.TryGetUpgrade("belt_t3", out _) && !GridContent.TryGetUpgrade("splitter", out _)
-                          && GridContent.TryGetUpgrade("pipe_underground_t1", out string u2) && u2 == "pipe_underground_t2"; // FG4-ECO-10（DEBT-FG4ECO04-05）
-            Expect(code == 0 && src.Length == 9 && src.SequenceEqual(rt) && routes && GridContent.TryGetUpgrade("barrier_t1", out string w2) && w2 == "barrier_t2", // FG6-DEF-02：+ 屏障 T1→T2→T3
-                $"D1 升级路线表 fg.TbBuildUpgrade 与源数据 fgdata_plan.BUILD_UPGRADES 逐字段一致（{src.Length} 行：传送带 T1→T2→T3、地下 T1→T2→T3、管线 T1→T2、地下管线 T1→T2、电塔 T1→T2、屏障 T1→T2→T3；T3 / 分流器没有路线）" + (code == 0 ? string.Empty : "：" + Tail(output)));
+                          && GridContent.TryGetUpgrade("pipe_underground_t1", out string u2) && u2 == "pipe_underground_t2" // FG4-ECO-10（DEBT-FG4ECO04-05）
+                          && GridContent.TryGetUpgrade("pipe_t2", out string p3) && p3 == "pipe_t3" && !GridContent.TryGetUpgrade("pipe_t3", out _); // FG7-ENV-03：T2 → 伴热管（最高一级）
+            Expect(code == 0 && src.Length == 10 && src.SequenceEqual(rt) && routes && GridContent.TryGetUpgrade("barrier_t1", out string w2) && w2 == "barrier_t2", // FG6-DEF-02：+ 屏障 T1→T2→T3
+                $"D1 升级路线表 fg.TbBuildUpgrade 与源数据 fgdata_plan.BUILD_UPGRADES 逐字段一致（{src.Length} 行：传送带 T1→T2→T3、地下 T1→T2→T3、管线 T1→T2→伴热管、地下管线 T1→T2、电塔 T1→T2、屏障 T1→T2→T3；T3 / 伴热管 / 分流器没有路线）" + (code == 0 ? string.Empty : "：" + Tail(output)));
             bool tuning = PlanHistory.Depth == 50 && PlanningService.MaxEntries == 1024 && LayoutLibrary.Max == 64
                           && GridContent.TuningInt("plan.preview_max_tiles") == 1024 && GridContent.TuningInt("plan.thumbnail_px") == 64;
             Expect(tuning, "D1 调参入表：撤销栈 50 步（FGR-LOG-009 初值）、一次复制 / 一个布局最多 1024 件、布局库 64 个、粘贴预览最多画 1024 格、缩略图 64 像素");
@@ -1143,15 +1144,24 @@ namespace GameLogic.EditorTools
                 bool conserved = s.Scrap + GroundScrap(s) == total0 - 17;
                 Expect(done && belts && poleUp && conserved && (!items || BeltNetworkService.Kernel.ItemCount == itemsBefore),
                     $"G2 机器取来差额施工：传送带 / 地下两端 / 管线都变成 T2（物品不动：{itemsBefore} 件），电塔原地换成 T2（同一 ID、优先级 2 保留、投入 +5、覆盖 16 格），库存只少了差额 17（{total0} → {s.Scrap + GroundScrap(s)}）");
-                // 再框一次：T2 传送带能升 T3，管线已经最高。
+                // FG7-ENV-03：再框一次，T2 管线还能升成伴热管（每格差额 1）；升完之后伴热管才是最高一级。
+                mode.SetUpgradeMode(true);
+                mode.PointerDown(s, At(o, 0, 4));
+                mode.SetHover(s, At(o, 1, 4));
+                UpgradeBoxPlan heat = mode.UpgradePreview;
+                mode.PointerUp(s, At(o, 1, 4));
+                bool heatPlanned = heat != null && heat.Count == 2 && heat.Cost == 2;
+                bool heatDone = StepUntil(() => (s.Grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>()).All(p => !p.Upgrade), 900)
+                                && PipeNetworkService.TryGetPiece(At(o, 0, 4), out _, out int h1) && h1 == PipeConst.HeatTracedTier
+                                && PipeNetworkService.TryGetPiece(At(o, 1, 4), out _, out int h2) && h2 == PipeConst.HeatTracedTier;
                 mode.SetUpgradeMode(true);
                 mode.PointerDown(s, At(o, 0, 4));
                 mode.SetHover(s, At(o, 1, 4));
                 UpgradeBoxPlan top = mode.UpgradePreview;
                 mode.PointerUp(s, At(o, 1, 4));
-                Expect(top != null && top.Count == 0 && top.Refused == 2 && top.FirstRefusal?.Code == GridBlockReason.NoUpgrade && mode.StatusIsError
+                Expect(heatPlanned && heatDone && top != null && top.Count == 0 && top.Refused == 2 && top.FirstRefusal?.Code == GridBlockReason.NoUpgrade && mode.StatusIsError
                        && mode.StatusText.Contains("最高等级"),
-                    $"G3 负向：管线 T2 已经是最高等级——框里 2 件都不能升，写明原因“{mode.StatusText}”，不生成施工");
+                    $"G3 管线 T2 → 伴热管（{heat?.Count} 件、差额 {heat?.Cost}）机器施工升完 {heatDone}；负向：伴热管已经是最高等级——框里 2 件都不能升，写明原因“{mode.StatusText}”，不生成施工");
             }
             finally
             {

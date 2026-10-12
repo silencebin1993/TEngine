@@ -71,6 +71,34 @@ namespace GameLogic.Campaign.Economy
             Enqueue(state, new RuleEventRecord { Kind = EventBeltGhost, EntityId = planId, Tick = GameClock.Ticks });
         }
 
+        /// <summary>FG7-ENV-03 审查修复（P1）：一批 <see cref="OnBeltGhost"/>（酸雨同一分钟摧毁多格），待处理事件数组只追加一次。</summary>
+        public static void OnBeltGhosts(CampaignState state, IReadOnlyList<string> planIds)
+        {
+            if (state == null || planIds == null || planIds.Count == 0)
+            {
+                return;
+            }
+            StandingRuleState d = Domain(state);
+            if (d == null)
+            {
+                return;
+            }
+            var list = new List<RuleEventRecord>((d.Pending?.Length ?? 0) + planIds.Count);
+            if (d.Pending != null)
+            {
+                list.AddRange(d.Pending);
+            }
+            long tick = GameClock.Ticks;
+            foreach (string id in planIds)
+            {
+                if (!string.IsNullOrEmpty(id))
+                {
+                    list.Add(new RuleEventRecord { Kind = EventBeltGhost, EntityId = id, Tick = tick });
+                }
+            }
+            d.Pending = list.ToArray();
+        }
+
         /// <summary>下一个模拟步补排一次（有启用的自动重建规则时才记）。</summary>
         public static void RequestRebuildSweep(CampaignState state)
         {

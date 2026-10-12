@@ -703,6 +703,72 @@ namespace GameLogic.Campaign.Regions
         /// 仓库满时搬运单等待（<see cref="HomeValleyConstruction.ReturnWaitReason"/>，不占机器），腾出空间自动回到待分配池。
         /// 同一份地面物只生成一张。只用于本系统产生的返还（拆除、取消、被摧毁），不会替玩家去搬别的地面物（FGR-BASE-020）。
         /// </summary>
+        /// <summary>
+        /// FG7-ENV-03 审查修复（P1）：一批 <see cref="TryCreateHaulPool"/>（每份地面物一张系统返还搬运单，已有进行中的搬运单就不再开）。
+        /// ID 规则与逐个调用相同（<see cref="FreshOrderId"/> 的 “~2”“~3”……），但已有 ID / 目标用集合查、工单数组只追加一次（逐个调用每张都扫全部工单）。
+        /// 调用方保证这些地面物刚落地、确实存在。返回新开的张数。
+        /// </summary>
+        public static int TryCreateHaulPools(CampaignState state, IReadOnlyList<string> groundItemIds)
+        {
+            if (state == null || groundItemIds == null || groundItemIds.Count == 0)
+            {
+                return 0;
+            }
+            WorkOrderRecord[] old = state.WorkOrders ?? Array.Empty<WorkOrderRecord>();
+            var usedIds = new HashSet<string>(StringComparer.Ordinal);
+            var activeTargets = new HashSet<string>(StringComparer.Ordinal);
+            foreach (WorkOrderRecord o in old)
+            {
+                if (o == null)
+                {
+                    continue;
+                }
+                if (o.WorkOrderId != null)
+                {
+                    usedIds.Add(o.WorkOrderId);
+                }
+                if (o.Kind == WorkOrderKind.Haul && o.TargetId != null && !IsTerminal(o.State))
+                {
+                    activeTargets.Add(o.TargetId);
+                }
+            }
+            var fresh = new List<WorkOrderRecord>(groundItemIds.Count);
+            foreach (string gid in groundItemIds)
+            {
+                if (string.IsNullOrEmpty(gid) || !activeTargets.Add(gid))
+                {
+                    continue;
+                }
+                string baseId = gid + ":haul:auto";
+                string id = baseId;
+                for (int n = 2; usedIds.Contains(id); n++)
+                {
+                    id = baseId + "~" + n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                usedIds.Add(id);
+                WorkOrderRecord order = NewOrder(state, id, WorkOrderKind.Haul, gid, 0, resourceTransactionId: null, duration: 0f);
+                order.SourceId = gid;
+                order.DestinationId = DestinationCore;
+                order.IssuerId = "return";
+                order.State = WorkOrderState.Ready;
+                fresh.Add(order);
+            }
+            if (fresh.Count == 0)
+            {
+                return 0;
+            }
+            var next = new WorkOrderRecord[old.Length + fresh.Count];
+            Array.Copy(old, next, old.Length);
+            fresh.CopyTo(next, old.Length);
+            state.WorkOrders = next;
+            foreach (WorkOrderRecord o in fresh)
+            {
+                Env.SilentNightService.OnBuildOrderCreated(state, o); // 与 Append 同一口径（搬运单不受静默夜暂缓，这里立即返回）
+            }
+            MarkAssignmentDirty();
+            return fresh.Count;
+        }
+
         public static WorkOrderOpResult TryCreateHaulPool(CampaignState state, string groundItemId)
         {
             if (state == null || string.IsNullOrEmpty(groundItemId))
@@ -2921,7 +2987,9 @@ namespace GameLogic.Campaign.Regions
                 PlannedBeltRecord donePlan = HomeValleyConstruction.FindPlan(state, order.TargetId);
                 int cells = HomeValleyConstruction.BuiltCells(donePlan);
                 // FG3-LOG-04：分流器 / 合流器 / 地下传送带完工写它的名字，不写“传送带 N 格”。
-                string doneText = donePlan != null && donePlan.NodeKind != 0
+                string doneText = donePlan != null && donePlan.Roof
+                    ? GameLogic.Localization.GameText.Format("env.roof.done", cells.ToString(System.Globalization.CultureInfo.InvariantCulture)) // FG7-ENV-03
+                    : donePlan != null && donePlan.NodeKind != 0
                     ? GameLogic.Localization.GameText.Format("build.piece.done", HomeValleyConstruction.PieceName(donePlan))
                     : GameLogic.Localization.GameText.Format("build.belt.done", cells.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 Vector2 at = HomeValleyConstruction.SitePosition(state, order);

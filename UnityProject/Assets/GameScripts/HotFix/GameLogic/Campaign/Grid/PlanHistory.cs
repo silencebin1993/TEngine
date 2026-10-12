@@ -705,6 +705,11 @@ namespace GameLogic.Campaign.Grid
             {
                 return false;
             }
+            if (HomeValleyConstruction.IsRoofPlan(order.TargetId))
+            {
+                // FG7-ENV-03：顶棚规划取消不进撤销栈（顶棚不在规划条目体系里；重新拖一次即可），材料全额退回。
+                return HomeValleyConstruction.CancelSite(state, order);
+            }
             if (HomeValleyConstruction.IsBeltPlan(order.TargetId))
             {
                 PlannedBeltRecord p = HomeValleyConstruction.FindPlan(state, order.TargetId);

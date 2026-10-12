@@ -363,6 +363,14 @@ public partial class Tables
     /// </summary>
     public fg.TbUiTuning TbUiTuning {get; }
     /// <summary>
+    /// 天气
+    /// </summary>
+    public fg.TbWeather TbWeather {get; }
+    /// <summary>
+    /// 天气频率
+    /// </summary>
+    public fg.TbWeatherAct TbWeatherAct {get; }
+    /// <summary>
     /// 生成器版本
     /// </summary>
     public fg.TbWorldGenVersion TbWorldGenVersion {get; }
@@ -513,6 +521,8 @@ public partial class Tables
         TbTurretProfile = new fg.TbTurretProfile(loader("fg_tbturretprofile"));
         TbTurretTargetMode = new fg.TbTurretTargetMode(loader("fg_tbturrettargetmode"));
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
+        TbWeather = new fg.TbWeather(loader("fg_tbweather"));
+        TbWeatherAct = new fg.TbWeatherAct(loader("fg_tbweatheract"));
         TbWorldGenVersion = new fg.TbWorldGenVersion(loader("fg_tbworldgenversion"));
         TbWorldPreset = new fg.TbWorldPreset(loader("fg_tbworldpreset"));
         TbWorldSettingAxis = new fg.TbWorldSettingAxis(loader("fg_tbworldsettingaxis"));
@@ -621,6 +631,8 @@ public partial class Tables
         TbTurretProfile.ResolveRef(this);
         TbTurretTargetMode.ResolveRef(this);
         TbUiTuning.ResolveRef(this);
+        TbWeather.ResolveRef(this);
+        TbWeatherAct.ResolveRef(this);
         TbWorldGenVersion.ResolveRef(this);
         TbWorldPreset.ResolveRef(this);
         TbWorldSettingAxis.ResolveRef(this);

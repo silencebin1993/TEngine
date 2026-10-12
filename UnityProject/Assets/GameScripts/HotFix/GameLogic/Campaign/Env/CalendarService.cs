@@ -104,7 +104,8 @@ namespace GameLogic.Campaign.Env
             {
                 return string.Empty;
             }
-            return "\n" + GameText.Get(silent ? "env.cal.pending_weather" : "env.cal.pending_kinds");
+            // FG7-ENV-03：只有天气来源（自检里单独接天气时）只缺静默夜。
+            return "\n" + GameText.Get(silent ? "env.cal.pending_weather" : weather ? "env.cal.pending_silent" : "env.cal.pending_kinds");
         }
 
         /// <summary>日历面板显示今天起几个游戏日（fg.TbHomeTuning env.calendar.days，初值 5）。</summary>

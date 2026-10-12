@@ -287,6 +287,12 @@ namespace GameLogic.UI.Kit
             {
                 CalendarPanelUIToolkit.Toggle();
             }
+            // FG7-ENV-03（FGR-ENV-030“可以用快捷键隐藏顶棚”）：隐藏 / 显示顶棚（默认 Ctrl+H，战略与建造上下文）；开关跟着存档走，状态写在字幕里。
+            if (InputRouter.ConsumeContextAction(GameActionId.ToggleRoofs) && CampaignSession.Current != null)
+            {
+                Campaign.Env.RoofService.ToggleHidden(CampaignSession.Current);
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, Campaign.Env.RoofService.LastMessage);
+            }
             // FG6-DEF-06 审查修复（FG00 B02 键盘鼠标都能完成）：观战 / 停止观战（默认 Alt+V）、跟随战斗（默认 Ctrl+F）。只在战略上下文（面板开着时是界面上下文，不响应）；
             // 与观战栏按钮同一入口（RaidSpectateService.Toggle / ToggleFollow），没有到达的突袭时给“不行”的提示音，原因写在观战栏。
             if (InputRouter.ConsumeContextAction(GameActionId.SpectateRaid) && !Campaign.Defense.RaidSpectateService.Toggle(CampaignSession.Current))

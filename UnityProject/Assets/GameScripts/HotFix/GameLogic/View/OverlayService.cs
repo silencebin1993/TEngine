@@ -26,6 +26,8 @@ namespace GameLogic.View
         Signal = 6,
         Raid = 7,
         Construction = 8,
+        /// <summary>FG7-ENV-03（FG07 第 4 节：顶棚覆盖有叠加层）：哪些地方有顶棚（已建成 / 施工中）。</summary>
+        Roof = 9,
     }
 
     /// <summary>叠加层的世界标签（HUD 每帧投影到屏幕；只有 ≤ overlay.max_labels 条，离镜头近的优先）。</summary>
@@ -49,7 +51,7 @@ namespace GameLogic.View
     /// </summary>
     public static class OverlayService
     {
-        public const int KindCount = 8;
+        public const int KindCount = 9;
 
         private static OverlayKind _active;
         private static OverlayKind _last = OverlayKind.Signal;
@@ -105,6 +107,7 @@ namespace GameLogic.View
                 case OverlayKind.Signal: return "signal";
                 case OverlayKind.Raid: return "raid";
                 case OverlayKind.Construction: return "construction";
+                case OverlayKind.Roof: return "roof";
                 default: return "none";
             }
         }
@@ -121,6 +124,7 @@ namespace GameLogic.View
         {
             GameActionId.OverlayFlow, GameActionId.OverlayBlockage, GameActionId.OverlayPower, GameActionId.OverlayFluid,
             GameActionId.OverlayPollution, GameActionId.OverlaySignal, GameActionId.OverlayRaid, GameActionId.OverlayConstruction,
+            GameActionId.OverlayRoof,
         };
 
         public static GameActionId ActionOf(OverlayKind k) => k >= OverlayKind.Flow && (int)k <= KindCount ? DirectActions[(int)k - 1] : GameActionId.ToggleOverlay;
@@ -283,7 +287,7 @@ namespace GameLogic.View
             HomeValleyController home = WorldSimulation.Home;
             bool observed = state != null && home != null && home.IsLoaded && WorldView.IsObserved(HomeValleyLayout.RegionId);
             bool own = _active == OverlayKind.Flow || _active == OverlayKind.Blockage || _active == OverlayKind.Fluid
-                       || _active == OverlayKind.Raid || _active == OverlayKind.Construction;
+                       || _active == OverlayKind.Raid || _active == OverlayKind.Construction || _active == OverlayKind.Roof;
             Visible = observed && _active != OverlayKind.None;
             if (!observed || !own)
             {
@@ -386,6 +390,9 @@ namespace GameLogic.View
                     break;
                 case OverlayKind.Construction:
                     markers = DrawConstruction(state);
+                    break;
+                case OverlayKind.Roof:
+                    markers = DrawRoofs(state);
                     break;
             }
             for (int i = lines + markers; i < Lines.Count; i++)
@@ -737,6 +744,60 @@ namespace GameLogic.View
                     World = new Vector3(e.Position.x, 1.4f, e.Position.y),
                     Text = GameText.Format("overlay.label.construction", e.Name, e.Status),
                     Tone = tone,
+                });
+            }
+            return markers;
+        }
+
+        private static readonly List<Campaign.Env.RoofPlanBlock> RoofScratch = new List<Campaign.Env.RoofPlanBlock>(64);
+        private static readonly Dictionary<long, int> RoofPatch = new Dictionary<long, int>();
+
+        /// <summary>
+        /// FG7-ENV-03（FG07 第 4 节：顶棚覆盖叠加层）：每块顶棚一个方框——已建成 = 青色实线（框里的格子不受酸雨和沙暴影响），施工中 = 灰色细线；
+        /// 每 4×4 块一片（16×16 格）一个标签写这一片有几块。O(顶棚块数)，只在刷新点重建；超过 overlay.max_markers 的不画。
+        /// </summary>
+        private static int DrawRoofs(CampaignState state)
+        {
+            Campaign.Env.RoofService.CollectBlocks(state, RoofScratch);
+            int markers = 0;
+            int cap = MaxMarkers;
+            int n = Campaign.Env.RoofService.BlockCells;
+            RoofPatch.Clear();
+            foreach (Campaign.Env.RoofPlanBlock b in RoofScratch)
+            {
+                long patch = ((long)Campaign.Env.RoofService.FloorDiv(b.Bx, 4) << 32) ^ (uint)Campaign.Env.RoofService.FloorDiv(b.By, 4);
+                int packed = RoofPatch.TryGetValue(patch, out int v) ? v : 0;
+                RoofPatch[patch] = packed + (b.State == 0 ? 1 : 1 << 16);
+                if (markers >= cap)
+                {
+                    continue;
+                }
+                bool built = b.State == 0;
+                LineRenderer r = LineAt(markers++);
+                Style(r, built ? new Color(0.25f, 0.85f, 0.95f, 0.95f) : new Color(0.7f, 0.7f, 0.75f, 0.8f), built ? 0.3f : 0.15f, true);
+                float x0 = b.Bx * n - 0.5f, y0 = b.By * n - 0.5f, x1 = x0 + n, y1 = y0 + n;
+                Square[0] = new Vector3(x0 + 0.1f, 0.3f, y0 + 0.1f);
+                Square[1] = new Vector3(x1 - 0.1f, 0.3f, y0 + 0.1f);
+                Square[2] = new Vector3(x1 - 0.1f, 0.3f, y1 - 0.1f);
+                Square[3] = new Vector3(x0 + 0.1f, 0.3f, y1 - 0.1f);
+                r.positionCount = 4;
+                r.SetPositions(Square);
+                r.enabled = true;
+            }
+            foreach (KeyValuePair<long, int> kv in RoofPatch)
+            {
+                int px = (int)(kv.Key >> 32);
+                int py = (int)(uint)kv.Key;
+                int builtCount = kv.Value & 0xFFFF;
+                int planned = kv.Value >> 16;
+                float cx = px * 4 * n + 2 * n, cy = py * 4 * n + 2 * n;
+                Candidates.Add(new OverlayLabel
+                {
+                    World = new Vector3(cx, 1.4f, cy),
+                    Text = builtCount > 0
+                        ? GameText.Format("overlay.label.roof", builtCount) + (planned > 0 ? " · " + GameText.Format("overlay.label.roof_planned", planned) : string.Empty)
+                        : GameText.Format("overlay.label.roof_planned", planned),
+                    Tone = 0,
                 });
             }
             return markers;

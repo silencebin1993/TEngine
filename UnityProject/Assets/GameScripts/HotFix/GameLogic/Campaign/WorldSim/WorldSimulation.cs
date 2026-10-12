@@ -469,6 +469,8 @@ namespace GameLogic.Campaign.WorldSim
                 // FG1-SIG-07：覆盖网络按游戏时间分桶（每 signal.coverage.refresh_seconds）在步首统一重建连通、评估每台机器在不在覆盖里
                 // （逐单位在内核 Burst 作业里）——与是否被观察无关；同一步里后面的安全模式判定读的就是这次的结果。
                 Signal.SignalCoverageService.BeginStep(state);
+                // FG7-ENV-03：天气对传送带 / 管线 / 战斗内核的派生量（沙暴减速、寒潮结冰门槛与散热加成）与顶棚覆盖，在内核步进之前按存档对齐（O(1)；读档后第一步就一致）。
+                Env.WeatherService.PreStep(state);
                 if (Home != null && Home.IsLoaded)
                 {
                     CurrentSiteId = Home.SiteId;
@@ -545,6 +547,8 @@ namespace GameLogic.Campaign.WorldSim
                 // FG7-ENV-02：静默夜——比较存档里的预警 / 开始 / 结束步（O(1)；开始 / 结束那一步断链、远征队安全模式、突袭、风暴残骸），只看步序号，与观察无关。
                 // 放在安全模式退出判定之前：开始那一步进入安全模式的远征机器，本步的退出判定就读到“静默夜中”。
                 Env.SilentNightService.WorldStep(state, GameClock.Ticks);
+                // FG7-ENV-03：天气——排定、预警 / 开始 / 结束（O(1) 比较整数步），酸雨按游戏分钟批量结算，寒潮结冰告警（每游戏秒）；只看步序号，与观察无关。
+                Env.WeatherService.WorldStep(state, GameClock.Ticks);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
                 // FG1-SIG-06：常规裸跑固件的计次间隔到期（信号侧，按游戏时间，与观察无关），O(1)。

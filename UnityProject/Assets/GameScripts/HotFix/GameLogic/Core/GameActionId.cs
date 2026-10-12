@@ -154,5 +154,9 @@
         SpectateFollow = 123,
         /// <summary>FG7-ENV-01（FGU-26 日历，FGR-ENV-002“点开是日历面板”）：打开 / 关闭日历（全部上下文，默认 Alt+L）。与世界时间条日历行同一入口。</summary>
         OpenCalendar = 124,
+        /// <summary>FG7-ENV-03（FGR-ENV-030“可以用快捷键隐藏顶棚”）：隐藏 / 显示顶棚（战略与建造上下文，默认 Ctrl+H）。</summary>
+        ToggleRoofs = 125,
+        /// <summary>FG7-ENV-03（FG07 第 4 节“顶棚覆盖叠加层”）：叠加层直达——顶棚覆盖（默认 Ctrl+Alt+9）。</summary>
+        OverlayRoof = 126,
     }
 }

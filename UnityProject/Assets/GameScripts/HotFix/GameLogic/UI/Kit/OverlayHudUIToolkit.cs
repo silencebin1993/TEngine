@@ -246,7 +246,7 @@ namespace GameLogic.UI.Kit
             _off.SetEnabled(a != OverlayKind.None);
             _legend.text = a == OverlayKind.None ? GameText.Get("overlay.selector.no_legend") : OverlayService.Legend(a);
             _hint.text = GameText.Format("overlay.selector.hint", InputDisplay.ForAction(GameActionId.ToggleOverlay), InputDisplay.ForAction(GameActionId.OverlaySelector),
-                InputDisplay.ForAction(GameActionId.OverlayFlow), InputDisplay.ForAction(GameActionId.OverlayConstruction));
+                InputDisplay.ForAction(GameActionId.OverlayFlow), InputDisplay.ForAction(GameActionId.OverlayRoof)); // FG7-ENV-03：直达键到第 9 种（顶棚覆盖）
             _diag.text = GameText.Format("overlay.selector.diag", RootCauseDiagnosis.Reports.Count, InputDisplay.ForAction(GameActionId.OpenDiagnosis));
         }
 

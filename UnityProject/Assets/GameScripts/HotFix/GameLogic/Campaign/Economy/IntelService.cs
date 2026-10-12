@@ -571,13 +571,19 @@ namespace GameLogic.Campaign.Economy
                     }
                     return false;
                 case "tier":
-                    // 数据来源就绪时（天气系统，FG7-ENV-03）才会走到这里：要求工作中的监听站等级。
+                    // FG7-ENV-03：天气预报——要求工作中的监听站等级（T2）；没有有效的天气预报就需要破译（有效期内日历显示 3 日预报）。
                     if (WorkingTier(s) < k.ConditionArg)
                     {
                         why = wantWhy ? GameText.Format("intel.kind_state.need_tier", k.ConditionArg) : null;
                         return false;
                     }
-                    why = wantWhy ? GameText.Get("intel.kind_state.later") : null;
+                    // 审查修复（P2）：剩余有效期不足两次破译工时就允许重新破译——监听站 T2 在线时预报不断档（新的一条替换旧的）。
+                    if (!HasValid(s, k.Id, null, now, out long wl) || wl <= 2 * Math.Max(1L, GameClock.TicksFor(k.DecipherSeconds)))
+                    {
+                        subject = IntelCatalog.KindWeather;
+                        return true;
+                    }
+                    why = wantWhy ? Covered(wl) : null;
                     return false;
                 case "act":
                     if ((s.Progress?.Act ?? 1) < k.ConditionArg)
@@ -803,8 +809,13 @@ namespace GameLogic.Campaign.Economy
                     var heard = new List<string>(f.FragmentsHeard) { frag.Id };
                     f.FragmentsHeard = heard.ToArray();
                     break;
+                case "tier":
+                    // FG7-ENV-03（FGR-ENV-021）：天气预报——未来 env.weather.forecast_days 日的排定天气（内容在显示时由天气系统按同一份排定写出）。
+                    r.Subject = IntelCatalog.KindWeather;
+                    r.ExpiresTick = now + Math.Max(1, validity);
+                    break;
                 default:
-                    return null; // 天气（FG7-ENV-03 之前没有数据来源）
+                    return null;
             }
             r.Serial = f.NextSerial++;
             Replace(f, r);
@@ -1037,6 +1048,8 @@ namespace GameLogic.Campaign.Economy
                     }
                     return GameText.Format("intel.boss.line", b.Name, BossPhasesText(b), BossWeaknessText(b), GameText.Get(b.AdviceKey));
                 }
+                case IntelCatalog.KindWeather:
+                    return GameText.Format("intel.weather.line", Env.WeatherService.IntelSummary(s, r.ProducedTick));
                 case IntelCatalog.KindFleet:
                     return IntelCatalog.TryGetFragment(r.Subject, out IntelFragmentDef d) ? GameText.Format("intel.fragment.line", GameText.Get(d.TextKey)) : r.Subject;
                 default:

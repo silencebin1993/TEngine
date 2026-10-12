@@ -551,7 +551,7 @@ namespace GameLogic.Campaign.Logistics
                 case PipePieceKind.Tank: return GameText.Get("logistics.pipe.tank");
                 case PipePieceKind.Valve: return GameText.Get("logistics.pipe.valve");
                 case PipePieceKind.Underground: return GameText.Get(tier <= 0 ? "logistics.pipe.underground_t1" : "logistics.pipe.underground_t2");
-                default: return GameText.Get(tier <= 0 ? "logistics.pipe.t1" : "logistics.pipe.t2");
+                default: return GameText.Get(tier <= 0 ? "logistics.pipe.t1" : tier >= PipeConst.HeatTracedTier ? "logistics.pipe.t3" : "logistics.pipe.t2"); // FG7-ENV-03：等级 2 = 伴热管
             }
         }
 
@@ -774,7 +774,8 @@ namespace GameLogic.Campaign.Logistics
 
         // ── 结冰接口（FGR-LOG-045：本 Story 只预留游戏时钟接口，结冰规则由 FG7-ENV-03 寒潮接入）──────────────────
 
-        /// <summary>寒潮是否进行中（FG7-ENV-03 的天气系统调 <see cref="SetColdSnap"/> 写；进存档）。本 Story 不产生任何结冰效果。</summary>
+        /// <summary>寒潮是否进行中（FG7-ENV-03 的天气系统调 <see cref="SetColdSnap"/> 写；进存档）。结冰效果由内核按 <see cref="PipeKernel.FreezeAfterSteps"/> 判定
+        /// （天气系统每步开头按这个开关设定），静止 ≥ logistics.pipe.freeze_idle_hours 的网络阻断流动、画冰霜，寒潮结束自动解冻；伴热管 / 地下管线不结冰。</summary>
         public static bool ColdSnapActive => _state?.Pipes?.ColdSnap ?? false;
 
         public static void SetColdSnap(CampaignState state, bool active)
@@ -799,7 +800,12 @@ namespace GameLogic.Campaign.Logistics
             return steps / (double)_kernel.Config.StepHz / GameHourSeconds;
         }
 
-        /// <summary>结冰的判定条件是否满足（寒潮中 + 流量为 0 超过 logistics.pipe.freeze_idle_hours 个游戏小时）。预留给 FG7-ENV-03：本 Story 不据此阻断流动。</summary>
+        /// <summary>结冰的时间条件是否满足（寒潮中 + 流量为 0 超过 logistics.pipe.freeze_idle_hours 个游戏小时；还要有会结冰的管线格才真的结冰，见 <see cref="IsFrozen"/>）。</summary>
+        private static string FreezeIdleHoursText => GridContent.Tuning("logistics.pipe.freeze_idle_hours").ToString("0.##", CultureInfo.InvariantCulture);
+
+        /// <summary>FG7-ENV-03：这个网络此刻结冰了没有（内核上一步的判定：寒潮中、静止 ≥ 1 游戏小时、还有会结冰的管线格）。</summary>
+        public static bool IsFrozen(int net) => IsRunning && _kernel.TryGetNetworkInfo(net, out PipeNetInfo info) && info.Frozen;
+
         public static bool MeetsFreezeCondition(int net) =>
             ColdSnapActive && IdleGameHours(net) >= GridContent.Tuning("logistics.pipe.freeze_idle_hours");
 
@@ -816,6 +822,11 @@ namespace GameLogic.Campaign.Logistics
         public static string DescribeState(in PipeNetInfo n)
         {
             PipeNetIssue i = n.Issues;
+            if ((i & PipeNetIssue.Frozen) != 0 || n.Frozen)
+            {
+                // FG7-ENV-03（FGR-LOG-045）：结冰先说（流动被阻断是这时候唯一的根因）。
+                return GameText.Format("logistics.pipe.state.frozen", FreezeIdleHoursText);
+            }
             if ((i & PipeNetIssue.Empty) != 0)
             {
                 return GameText.Get("logistics.pipe.state.empty");
@@ -876,6 +887,14 @@ namespace GameLogic.Campaign.Logistics
             if (n.DeliveredLpm + n.BufferedLpm <= 0 && idle >= 0.01)
             {
                 sb.Append('\n').Append(GameText.Format("logistics.pipe.hover.idle", idle.ToString("0.##", CultureInfo.InvariantCulture)));
+            }
+            if (ColdSnapActive && !n.Frozen && n.PipeCells > 0)
+            {
+                // FG7-ENV-03（FGR-LOG-045）：寒潮里写明还要静止多久会结冰，或者这个网络不会结冰（全是伴热管 / 地下管线）。
+                double left = Math.Max(0.0, GridContent.Tuning("logistics.pipe.freeze_idle_hours") - idle);
+                sb.Append('\n').Append(n.FreezableCells > 0
+                    ? GameText.Format("logistics.pipe.hover.freeze_risk", left.ToString("0.##", CultureInfo.InvariantCulture))
+                    : GameText.Get("logistics.pipe.hover.freeze_safe"));
             }
         }
 

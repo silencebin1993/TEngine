@@ -339,7 +339,8 @@ namespace GameLogic.UI.Kit
             // 先展开 {act:…} 键位记号再填天数（{act:…} 不是 string.Format 的占位符，直接 Format 会出错）。
             // FG7-ENV-02：静默夜来源注册后只写“天气预报将在后续版本加入”。
             _footer.text = InputDisplay.ExpandActionTokens(GameText.Get("env.cal.footer")).Replace("{0}", days.ToString(CultureInfo.InvariantCulture))
-                           + CalendarService.PendingKindsSuffix();
+                           + CalendarService.PendingKindsSuffix()
+                + (CalendarService.HasSource(CalendarKind.Weather) ? "\n" + WeatherService.HorizonNote(CampaignSession.Current) : string.Empty); // FG7-ENV-03（FGR-ENV-021）：预报看得到多远、怎么看得更远
             DetachMarks();
             _days.Clear();
             _nowLines.Clear();

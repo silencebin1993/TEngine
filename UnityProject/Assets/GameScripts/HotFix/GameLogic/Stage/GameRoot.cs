@@ -184,6 +184,8 @@ namespace GameLogic.Stage
             Campaign.Env.DayNightCycle.Install();
             // FG7-ENV-02：静默夜接上接入判定、常驻规则“静默夜预案”的时间窗与日历来源；世界模拟开始按存档推进。
             Campaign.Env.SilentNightService.Install();
+            // FG7-ENV-03：天气接上太阳能的沙暴系数与日历来源；世界模拟开始按存档排定与推进天气、对齐内核派生量。
+            Campaign.Env.WeatherService.Install();
             UI.Kit.UiKitRuntime.Mount();
 
             Log.Info("[GameRoot] 启动完成。已注册阶段：Cell");
@@ -468,6 +470,9 @@ namespace GameLogic.Stage
             WorldSimulation.Frame(Time.unscaledDeltaTime);
             // FG7-ENV-01（FGR-ENV-003）：昼夜光照（只改场景光照，不碰界面；O(1)，亮度不变的帧不写）。不在世界里时恢复场景原光照。
             View.DayNightLighting.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
+            // FG7-ENV-03：天气画面（雨 / 沙 / 雪粒子、沙暴雾）与顶棚（建造视图半透明、可隐藏）。纯表现，每帧 O(1)，顶棚网格只在变化时重建。
+            View.WeatherView.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
+            View.RoofView.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
             // FG6-DEF-08（FGR-DEF-053）：突袭预警请求的自动存档在帧末执行（不在模拟步中间写盘）；核心被摧毁后不再存。
             Campaign.Defense.RaidResultService.FrameUpdate();
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。

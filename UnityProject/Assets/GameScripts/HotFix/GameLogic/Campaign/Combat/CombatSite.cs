@@ -84,6 +84,17 @@ namespace GameLogic.Campaign.Combat
         /// <summary>本地点的内核。**只给桥接层（Campaign/Combat/）与 Editor 自检 / 性能探针用**：热更层玩法代码一律经本类的门面方法碰内核
         /// （FG14 §5 硬约束 3），“战斗内核”自检的扫描段断言 Campaign/Combat/ 以外的热更代码没有直接访问它。</summary>
         public CombatKernel Kernel { get; private set; }
+
+        /// <summary>FG7-ENV-03（FGR-LOG-045 寒潮）：武器散热加成门面。天气服务每步开头调用；与内核当前值一致时不写（O(1)），
+        /// 内核重建（读档 / 进出家园）后第一次调用即对齐。热更玩法代码经此门面写内核，不直接碰 <see cref="Kernel"/>（FG14 §5 硬约束 3）。</summary>
+        public void SyncDissipationBonus(float bonus)
+        {
+            if (Kernel != null && !Mathf.Approximately(Kernel.DissipationBonus, bonus))
+            {
+                Kernel.DissipationBonus = bonus;
+            }
+        }
+
         public CombatSiteRules Rules { get; set; }
         public RegionSquadCommandSystem Squad { get; set; }
         public CombatTransformSync Sync { get; private set; }

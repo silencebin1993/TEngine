@@ -36,6 +36,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>传送带规划施工单的目标 ID 前缀（"beltplan:&lt;planId&gt;"）。</summary>
         public const string BeltPlanPrefix = "beltplan:";
 
+        /// <summary>FG7-ENV-03：顶棚规划施工单的目标 ID 前缀（"roofplan:&lt;planId&gt;"）。顶棚规划与传送带规划同一种记录、同一条施工流程（取料、逐块建成、取消全额退回），存在天气域里。</summary>
+        public const string RoofPlanPrefix = "roofplan:";
+
         /// <summary>格网传送带层里“规划中”的标记位（值 = 标记位 | 等级 + 1）。已建成的传送带层值是 1～3，不会与它相交。</summary>
         public const ushort PlannedBeltFlag = 0x80;
 
@@ -104,10 +107,25 @@ namespace GameLogic.Campaign.Regions
             return GameText.Get("build.material.other");
         }
 
-        public static bool IsBeltPlan(string targetId) => targetId != null && targetId.StartsWith(BeltPlanPrefix, StringComparison.Ordinal);
+        public static bool IsBeltPlan(string targetId) => targetId != null && (targetId.StartsWith(BeltPlanPrefix, StringComparison.Ordinal) || IsRoofPlan(targetId));
+
+        /// <summary>FG7-ENV-03：施工单目标是不是顶棚规划（也算传送带式规划：同一套逐格施工）。</summary>
+        public static bool IsRoofPlan(string targetId) => targetId != null && targetId.StartsWith(RoofPlanPrefix, StringComparison.Ordinal);
 
         public static PlannedBeltRecord FindPlan(CampaignState state, string targetId)
         {
+            if (IsRoofPlan(targetId))
+            {
+                string rid = targetId.Substring(RoofPlanPrefix.Length);
+                foreach (PlannedBeltRecord rp in state?.Weather?.Roofs?.Plans ?? Array.Empty<PlannedBeltRecord>())
+                {
+                    if (rp != null && rp.PlanId == rid)
+                    {
+                        return rp;
+                    }
+                }
+                return null;
+            }
             PlannedBeltRecord[] plans = state?.Grid?.PlannedBelts;
             if (plans == null || targetId == null)
             {
@@ -771,6 +789,110 @@ namespace GameLogic.Campaign.Regions
             return dropped;
         }
 
+        /// <summary>FG7-ENV-03 审查修复（P1）：一份要落地的物品（<see cref="DropForHaulBatch"/>）。</summary>
+        public readonly struct HaulDrop
+        {
+            public readonly Vector2 At;
+            public readonly string Resource;
+            public readonly int Amount;
+            public readonly string DropId;
+
+            public HaulDrop(Vector2 at, string resource, int amount, string dropId)
+            {
+                At = at;
+                Resource = resource;
+                Amount = amount;
+                DropId = dropId;
+            }
+        }
+
+        /// <summary>
+        /// FG7-ENV-03 审查修复（P1）：一批 <see cref="DropForHaul"/>（酸雨同一分钟摧毁多格传送带时用）。每份的结果与逐个调用相同——ID 撞号规则同 <see cref="FreshDropId"/>、
+        /// 每趟一份、可入库的开系统返还搬运单；但 ID 查重用一张集合、地面物数组只追加一次、搬运单整批开一次（逐个调用每份都扫全部地面物与工单，几百份同时落地是平方级）。
+        /// 返回落地的总件数。
+        /// </summary>
+        public static int DropForHaulBatch(CampaignState state, IReadOnlyList<HaulDrop> drops)
+        {
+            if (state == null || drops == null || drops.Count == 0)
+            {
+                return 0;
+            }
+            GroundItemRecord[] old = state.GroundItems ?? Array.Empty<GroundItemRecord>();
+            var taken = new HashSet<string>(StringComparer.Ordinal);
+            foreach (GroundItemRecord g in old)
+            {
+                AddTakenPrefixes(taken, g?.SalvageInstanceId);
+            }
+            var spawned = new List<GroundItemRecord>(drops.Count);
+            var haul = new List<string>(drops.Count);
+            int dropped = 0;
+            int carry = CarryPerTrip;
+            foreach (HaulDrop d in drops)
+            {
+                if (d.Amount <= 0 || string.IsNullOrEmpty(d.DropId))
+                {
+                    continue;
+                }
+                string baseId = d.DropId;
+                for (int n = 2; taken.Contains(baseId); n++)
+                {
+                    baseId = d.DropId + "#" + n.ToString(CultureInfo.InvariantCulture);
+                }
+                bool haulable = HomeValleyCargo.CanStore(d.Resource);
+                int chunk = haulable ? carry : d.Amount;
+                int left = d.Amount;
+                for (int part = 0; left > 0; part++)
+                {
+                    int n = Math.Min(chunk, left);
+                    string id = part == 0 ? baseId : baseId + "/" + part.ToString(CultureInfo.InvariantCulture);
+                    var item = new GroundItemRecord
+                    {
+                        GroundItemId = "ground:" + id,
+                        RegionId = HomeValleyLayout.RegionId,
+                        Position = d.At,
+                        ResourceType = d.Resource,
+                        Amount = n,
+                        SalvageInstanceId = id,
+                    };
+                    spawned.Add(item);
+                    AddTakenPrefixes(taken, id);
+                    dropped += n;
+                    if (haulable)
+                    {
+                        haul.Add(item.GroundItemId);
+                    }
+                    left -= n;
+                }
+            }
+            if (spawned.Count == 0)
+            {
+                return 0;
+            }
+            var next = new GroundItemRecord[old.Length + spawned.Count];
+            Array.Copy(old, next, old.Length);
+            spawned.CopyTo(next, old.Length);
+            state.GroundItems = next;
+            HomeValleyWorkOrders.TryCreateHaulPools(state, haul);
+            return dropped;
+        }
+
+        /// <summary>与 <see cref="Taken"/> 同一口径：已有 ID 本身与它在 ':' / '/' 前的每个前缀都算占用。</summary>
+        private static void AddTakenPrefixes(HashSet<string> taken, string sid)
+        {
+            if (string.IsNullOrEmpty(sid))
+            {
+                return;
+            }
+            taken.Add(sid);
+            for (int j = 0; j < sid.Length; j++)
+            {
+                if (sid[j] == ':' || sid[j] == '/')
+                {
+                    taken.Add(sid.Substring(0, j));
+                }
+            }
+        }
+
         /// <summary>“缺料”原因码（materials:缺:库存）→ 玩家文字（右键虚影被拒时显示，与施工状态同一写法）。</summary>
         public static string DescribeMaterialsReason(string reason)
         {
@@ -959,7 +1081,7 @@ namespace GameLogic.Campaign.Regions
             // FG3-LOG-04：地下传送带两端一起建成——一次施工单位 = 两端的材料与两格的工时；其余每格一个单位。
             int unitCells = IsUnderground(p) ? 2 : 1;
             int unitCost = p.ScrapPerCell * unitCells;
-            float sec = BeltSecondsPerCell * unitCells;
+            float sec = (p.Roof ? Env.RoofService.SecondsPerBlock : BeltSecondsPerCell) * unitCells;
             order.Duration = sec;
             int next = NextUnbuilt(p);
             if (next < 0)
@@ -987,7 +1109,10 @@ namespace GameLogic.Campaign.Regions
                     for (int k = 0; k < unitCells && next + k < p.CellState.Length; k++)
                     {
                         p.CellState[next + k] = 2;
-                        ClearPlannedMarker(HomeGridService.MapFor(state), new GridCell(p.Xs[next + k], p.Ys[next + k]));
+                        if (!p.Roof) // FG7-ENV-03：顶棚规划不占格网，不能清别人的规划标记
+                        {
+                            ClearPlannedMarker(HomeGridService.MapFor(state), new GridCell(p.Xs[next + k], p.Ys[next + k]));
+                        }
                     }
                 }
                 else
@@ -1048,6 +1173,10 @@ namespace GameLogic.Campaign.Regions
             if (p.PipePiece > 0)
             {
                 return CommitPipeCell(state, p, i);
+            }
+            if (p.Roof)
+            {
+                return Env.RoofService.CommitBlock(state, p, i); // FG7-ENV-03：一块顶棚建成
             }
             var cell = new GridCell(p.Xs[i], p.Ys[i]);
             HomeGridMap map = HomeGridService.MapFor(state);
@@ -1352,7 +1481,10 @@ namespace GameLogic.Campaign.Regions
                     if (p.CellState[i] == 0)
                     {
                         p.CellState[i] = 2;
-                        ClearPlannedMarker(map, new GridCell(p.Xs[i], p.Ys[i]));
+                        if (!p.Roof)
+                        {
+                            ClearPlannedMarker(map, new GridCell(p.Xs[i], p.Ys[i]));
+                        }
                     }
                 }
                 if (p.Delivered > 0)
@@ -1483,6 +1615,12 @@ namespace GameLogic.Campaign.Regions
 
         private static void RemovePlan(CampaignState state, PlannedBeltRecord p)
         {
+            if (p != null && p.Roof)
+            {
+                Env.RoofService.RemovePlan(state, p); // FG7-ENV-03：顶棚规划存在天气域里
+                Revision++;
+                return;
+            }
             PlannedBeltRecord[] old = state.Grid?.PlannedBelts;
             if (old == null)
             {
@@ -1910,7 +2048,8 @@ namespace GameLogic.Campaign.Regions
             : BaseName(p, p.Tier);
 
         private static string BaseName(PlannedBeltRecord p, int tier) =>
-            IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min((int)PipePieceKind.Underground, p.PipePiece - 1)), tier)
+            p.Roof ? GameText.Get("env.roof.name")
+            : IsPipePlan(p) ? PipeNetworkService.PieceName((PipePieceKind)Math.Max(0, Math.Min((int)PipePieceKind.Underground, p.PipePiece - 1)), tier)
             : BeltNetworkService.PieceName((BeltNodeKind)p.NodeKind, tier);
 
         private static string DestroyedStatus(PlannedBeltRecord p, int i) =>
@@ -1946,6 +2085,47 @@ namespace GameLogic.Campaign.Regions
             grid.PlannedBelts = next;
             Revision++;
             return planId;
+        }
+
+        /// <summary>
+        /// FG7-ENV-03 审查修复（P1）：一批 <see cref="AddDestroyedBeltGhost"/>（每格一份“被摧毁”的虚影，保留朝向与等级），规划数组只追加一次（逐格调用每次都复制整份规划表）。
+        /// 规划 ID 按传入顺序依次编号，写进 <paramref name="ids"/>。
+        /// </summary>
+        public static void AddDestroyedBeltGhosts(CampaignState state, IReadOnlyList<GridCell> cells, IReadOnlyList<BeltDir> dirs, IReadOnlyList<int> tiers, List<string> ids)
+        {
+            if (state?.Grid == null || cells == null || cells.Count == 0)
+            {
+                return;
+            }
+            GridState grid = state.Grid;
+            HomeGridMap map = HomeGridService.MapFor(state);
+            int[] cost = { Math.Max(0, HomeGridService.BeltCostPerCell(0)), Math.Max(0, HomeGridService.BeltCostPerCell(1)), Math.Max(0, HomeGridService.BeltCostPerCell(2)) };
+            PlannedBeltRecord[] old = grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>();
+            var next = new PlannedBeltRecord[old.Length + cells.Count];
+            Array.Copy(old, next, old.Length);
+            for (int i = 0; i < cells.Count; i++)
+            {
+                GridCell cell = cells[i];
+                int tier = tiers[i];
+                string planId = "b" + grid.NextBeltPlanSerial.ToString(CultureInfo.InvariantCulture);
+                grid.NextBeltPlanSerial++;
+                next[old.Length + i] = new PlannedBeltRecord
+                {
+                    PlanId = planId,
+                    Tier = tier,
+                    ScrapPerCell = tier >= 0 && tier < cost.Length ? cost[tier] : Math.Max(0, HomeGridService.BeltCostPerCell(tier)),
+                    Xs = new[] { cell.X },
+                    Ys = new[] { cell.Y },
+                    Dirs = new[] { (int)dirs[i] },
+                    CellState = new[] { 0 },
+                    Delivered = 0,
+                    Destroyed = true,
+                };
+                map.SetBelt(cell, (ushort)(PlannedBeltFlag | (tier + 1)));
+                ids?.Add(planId);
+            }
+            grid.PlannedBelts = next;
+            Revision++;
         }
 
         /// <summary>
@@ -2110,7 +2290,10 @@ namespace GameLogic.Campaign.Regions
                 }
                 int built = BuiltCells(p);
                 int total = built + UnbuiltCells(p);
-                return total == 0 ? 1f : (built + Mathf.Clamp01(order.Progress / BeltSecondsPerCell)) / total;
+                // FG7-ENV-03 审查修复（P2）：当前这一份的工时与 TickBeltPlan 同一口径（顶棚一块 = RoofService.SecondsPerBlock；地下传送带一份两格、工时 ×2）。
+                int unitCells = IsUnderground(p) ? 2 : 1;
+                float sec = (p.Roof ? Env.RoofService.SecondsPerBlock : BeltSecondsPerCell) * unitCells;
+                return total == 0 ? 1f : Mathf.Clamp01((built + Mathf.Clamp01(order.Progress / Mathf.Max(0.01f, sec)) * unitCells) / total);
             }
             return order.Duration <= 0f ? 0f : Mathf.Clamp01(order.Progress / order.Duration);
         }

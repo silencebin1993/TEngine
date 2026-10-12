@@ -1704,6 +1704,36 @@ namespace BinGames.Sim.Logistics
             }
         }
 
+        private NativeList<int3> _acidHits;
+
+        /// <summary>
+        /// FG7-ENV-03 审查修复（P1；FG07 第 7 节酸雨，FG00 B18 / FG14 §5：逐格循环只在 AOT）：第 <paramref name="k"/> 个酸雨游戏分钟（k ≥ 1）里有整点伤害的露天传送带格。
+        /// 地下段、顶棚下的格（<see cref="SetCovered"/>）不算；每格按坐标错开相位（<see cref="BeltAcid.Phase"/>，0～59 分钟），同一等级的带不会在同一分钟一起掉耐久、一起归零。
+        /// <paramref name="perMinuteT1"/>～<paramref name="perMinuteT3"/> = 倍率 1 时每格每分钟掉多少点（浮点；倍率 2 加倍）。
+        /// 输出（规范顺序，确定性）z = a1 | a2 &lt;&lt; 10 | 等级 &lt;&lt; 20：a1 / a2 = 倍率 1 / 倍率 2 下这一分钟掉的点数（只输出至少一个大于 0 的格）。
+        /// Burst 单线程 O(格数)；热更层只处理输出的格（每分钟约 格数 × 每分钟伤害率）。返回扫描的格数。
+        /// </summary>
+        public int CollectAcidHits(long k, double perMinuteT1, double perMinuteT2, double perMinuteT3, List<int3> into)
+        {
+            EnsureTopology();
+            into.Clear();
+            if (!_acidHits.IsCreated)
+            {
+                _acidHits = new NativeList<int3>(64, Allocator.Persistent);
+            }
+            new JobBeltAcid
+            {
+                K = k, P0 = perMinuteT1, P1 = perMinuteT2, P2 = perMinuteT3,
+                X = _x.AsArray(), Y = _y.AsArray(), Tier = _tier.AsArray(), Covered = _covered.AsArray(), Kind = _kind.AsArray(),
+                Hits = _acidHits,
+            }.Run();
+            for (int i = 0; i < _acidHits.Length; i++)
+            {
+                into.Add(_acidHits[i]);
+            }
+            return _x.Length;
+        }
+
         /// <summary>FG4-ECO-08（统计面板“分流器分出量”，DEBT-FG3LOG04-04）：全部活着的分流器所在格，按 (x, y) 升序。O(节点数)，只在面板刷新时调用。</summary>
         public void CollectSplitters(List<int2> into)
         {
@@ -2563,6 +2593,10 @@ namespace BinGames.Sim.Logistics
                 return;
             }
             _disposed = true;
+            if (_acidHits.IsCreated)
+            {
+                _acidHits.Dispose();
+            }
             _x.Dispose();
             _y.Dispose();
             _dir.Dispose();

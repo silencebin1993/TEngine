@@ -63,7 +63,17 @@ namespace GameLogic.Campaign.Regions
             Wall,
             /// <summary>FG6-DEF-03：重建区域模式下拉框（松开 = 圈一个区域；点区域里面一格 = 开 / 关）。</summary>
             ZoneBox,
+            /// <summary>FG7-ENV-03（FGR-ENV-030）：选中顶棚后按住左键框出一片（4×4 一块，对齐顶棚格；全有或全无）。</summary>
+            RoofBox,
         }
+
+        /// <summary>FG7-ENV-03：顶棚的放置预览（选中顶棚工具时：指着的那一块 / 拖出来的一片）；没选顶棚为 null。</summary>
+        public Env.RoofPlan RoofPreview { get; private set; }
+        private readonly Env.RoofPlan _roofBuffer = new Env.RoofPlan();
+        private int _roofPreviewKey = int.MinValue;
+
+        /// <summary>选中的是不是顶棚工具。</summary>
+        public bool SelectedIsRoof => SelectedToolId == Env.RoofService.ToolId;
 
         private static readonly GameActionId[] HotbarActions =
         {
@@ -753,6 +763,11 @@ namespace GameLogic.Campaign.Regions
                 BeginDrag(DragKind.ZoneBox, cell, state); // FG6-DEF-03：重建区域
                 return;
             }
+            if (SelectedIsRoof)
+            {
+                BeginDrag(DragKind.RoofBox, cell, state); // FG7-ENV-03：顶棚按住拖拽框一片（单击 = 一块）
+                return;
+            }
             if (SelectedToolId != null)
             {
                 BeginDrag(DragKind.Belt, cell, state);
@@ -840,6 +855,9 @@ namespace GameLogic.Campaign.Regions
                 case DragKind.Belt:
                     Report(PlanHistory.PlaceBeltPath(state, SelectedToolId, start, cell, HomeGridService.BeltDirOf(GhostRotation), PendingS0, PendingS1, PendingS2), state);
                     break;
+                case DragKind.RoofBox:
+                    CommitRoof(state, start, cell);
+                    break;
                 case DragKind.Wall:
                     CommitWall(state, start, cell, lastWall);
                     break;
@@ -855,7 +873,21 @@ namespace GameLogic.Campaign.Regions
                         ClickCell(state, cell);
                         break;
                     }
-                    CommitDemolishBox(state, HomeGridService.PlanDemolishBox(state, start, cell));
+                    {
+                        // FG7-ENV-03：框完整包住的顶棚块一并拆掉 / 取消（全额返还）；只碰到一部分的顶棚不动。
+                        // 审查修复（P1）：顶棚与建筑 / 传送带同一时机执行——要先确认时放进“确认”回调，点“取消”什么都不拆；框里只有顶棚时直接拆（没有要确认的东西）。
+                        DemolishBoxPlan dplan = HomeGridService.PlanDemolishBox(state, start, cell);
+                        int roofs = Env.RoofService.CountDemolishBox(state, start, cell);
+                        if (roofs > 0 && dplan.IsEmpty)
+                        {
+                            Env.RoofService.DemolishBox(state, start, cell);
+                            LastResult = new GridOpResult(GridOpResult.Kind.BatchDemolished, null);
+                            SetStatus(Env.RoofService.LastMessage, false);
+                            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+                            break;
+                        }
+                        CommitDemolishBox(state, dplan, roofs, start, cell);
+                    }
                     break;
                 case DragKind.PrioritizeBox:
                     CommitPrioritize(state, start, cell);
@@ -1001,6 +1033,23 @@ namespace GameLogic.Campaign.Regions
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
         }
 
+        /// <summary>FG7-ENV-03：顶棚拖拽收尾——全有或全无地放下顶棚虚影（机器取料施工），状态行写放了几块、多少废料或不能放的原因。</summary>
+        private void CommitRoof(CampaignState state, GridCell a, GridCell b)
+        {
+            int placed = Env.RoofService.PlaceBox(state, a, b);
+            _roofPreviewKey = int.MinValue;
+            if (placed > 0)
+            {
+                LastResult = new GridOpResult(GridOpResult.Kind.BeltsPlaced, null);
+                SetStatus(Env.RoofService.LastMessage, false);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.CommandAck, StatusText);
+                return;
+            }
+            LastResult = new GridOpResult(GridOpResult.Kind.Failed, null);
+            SetStatus(GameText.Format("ui.build.invalid", Env.RoofService.LastMessage), true);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+        }
+
         /// <summary>空闲状态下拖着搬迁的最小拖动距离（格）。</summary>
         public const int IdleDragMinCells = 2;
 
@@ -1042,11 +1091,16 @@ namespace GameLogic.Campaign.Regions
                 case DragKind.Belt:
                     BeltPlan = HomeGridService.PlanBeltPath(state, SelectedToolId, DragStart, end, HomeGridService.BeltDirOf(GhostRotation), _beltBuffer);
                     break;
+                case DragKind.RoofBox:
+                    RoofPreview = Env.RoofService.PlanBox(state, DragStart, end, _roofBuffer); // FG7-ENV-03
+                    _roofPreviewKey = int.MinValue;
+                    break;
                 case DragKind.Wall:
                     WallPlan = Defense.DefenseService.PlanWall(state, SelectedTypeId, DragStart, end, _wallBuffer);
                     break;
                 case DragKind.DemolishBox:
                     BoxPlan = HomeGridService.PlanDemolishBox(state, DragStart, end, _boxBuffer);
+                    BoxRoofBlocks = Env.RoofService.CountDemolishBox(state, DragStart, end); // FG7-ENV-03 审查修复：预览写会拆几块顶棚
                     break;
                 case DragKind.ClearBox:
                     ClearPlan = end == DragStart ? BeltClearService.PlanNetwork(state, end, _clearBuffer) : BeltClearService.PlanBox(state, DragStart, end, _clearBuffer);
@@ -1106,8 +1160,9 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>框选拆除收尾：空框给提示；超过 grid.batch_demolish_confirm 座或含关键建筑时先确认（写明数量与关键建筑名），否则直接执行。</summary>
-        private void CommitDemolishBox(CampaignState state, DemolishBoxPlan plan)
+        /// <summary>框选拆除收尾：空框给提示；超过 grid.batch_demolish_confirm 座或含关键建筑时先确认（写明数量与关键建筑名），否则直接执行。
+        /// FG7-ENV-03：<paramref name="roofs"/> &gt; 0 时框 [<paramref name="roofA"/>, <paramref name="roofB"/>] 完整包住的顶棚块与这一批同时拆（确认框里写明块数、不能撤销）。</summary>
+        private void CommitDemolishBox(CampaignState state, DemolishBoxPlan plan, int roofs = 0, GridCell roofA = default, GridCell roofB = default)
         {
             if (plan.IsEmpty)
             {
@@ -1123,6 +1178,7 @@ namespace GameLogic.Campaign.Regions
             if (!plan.NeedsConfirm && !tooBigToUndo)
             {
                 ReportBatch(PlanHistory.ExecuteDemolishBox(state, plan), plan, state);
+                DemolishBoxRoofs(state, roofs, roofA, roofB);
                 return;
             }
             int threshold = GridContent.TuningInt("grid.batch_demolish_confirm");
@@ -1137,6 +1193,7 @@ namespace GameLogic.Campaign.Regions
                     PendingBatchConfirm = false;
                     CampaignState s = CampaignSession.Current;
                     ReportBatch(PlanHistory.ExecuteDemolishBox(s, plan), plan, s);
+                    DemolishBoxRoofs(s, roofs, roofA, roofB);
                 },
                 OnCancel = () => PendingBatchConfirm = false,
             };
@@ -1158,6 +1215,10 @@ namespace GameLogic.Campaign.Regions
                 // FG3-LOG-05：框里的储罐有存量——拆除会排空、不返还。
                 req.Lines.Add(GameText.Format("ui.build.box_tank_line", (plan.TankFluidMl / 1000.0).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)));
             }
+            if (roofs > 0)
+            {
+                req.Lines.Add(GameText.Format("env.roof.demolish_confirm_line", roofs)); // FG7-ENV-03：顶棚同时拆、不能撤销
+            }
             plan.AppendPowerLines(req.Consequences); // FG3-LOG-06：拆完会断网 / 让建筑失去电网连接时写明（按整批拆完的拓扑）。
             if (tooBigToUndo)
             {
@@ -1171,6 +1232,19 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>框选拆除的确认框是否正在询问（自检用）。</summary>
         public bool PendingBatchConfirm { get; private set; }
+
+        /// <summary>拖拆除框时框完整包住的顶棚块数（FG7-ENV-03；HUD 拖框预览写“· N 块顶棚”）。</summary>
+        public int BoxRoofBlocks { get; private set; }
+
+        /// <summary>FG7-ENV-03 审查修复（P1）：框选拆除确认 / 直接执行之后，同一时机拆掉框完整包住的顶棚块（全额返还；顶棚拆除不进撤销栈，状态行写明）。</summary>
+        private void DemolishBoxRoofs(CampaignState state, int roofs, GridCell a, GridCell b)
+        {
+            if (roofs <= 0 || state == null || Env.RoofService.DemolishBox(state, a, b) <= 0)
+            {
+                return;
+            }
+            SetStatus(string.IsNullOrEmpty(StatusText) ? Env.RoofService.LastMessage : StatusText + "\n" + Env.RoofService.LastMessage, StatusIsError);
+        }
 
         private void ReportBatch(GridOpResult r, DemolishBoxPlan plan, CampaignState state)
         {
@@ -1524,6 +1598,42 @@ namespace GameLogic.Campaign.Regions
         /// </summary>
         private void RefreshToolPreview(CampaignState state)
         {
+            if (SelectedIsRoof)
+            {
+                // FG7-ENV-03：顶棚工具没在拖时预览指着的那一块（O(16)，换格 / 废料变化时才重算）；拖的时候预览在 RefreshDrag 里算。
+                if (ToolPreview != null)
+                {
+                    ToolPreview = null;
+                    _toolPreviewKey = int.MinValue;
+                }
+                if (Drag == DragKind.RoofBox)
+                {
+                    return;
+                }
+                if (!HasHover || state == null)
+                {
+                    if (RoofPreview != null)
+                    {
+                        RoofPreview = null;
+                        Revision++;
+                    }
+                    return;
+                }
+                int rkey = HashCode(HoverCell.X, HoverCell.Y, Env.RoofService.Revision, (int)state.Scrap);
+                if (rkey != _roofPreviewKey || RoofPreview == null)
+                {
+                    _roofPreviewKey = rkey;
+                    RoofPreview = Env.RoofService.PlanBox(state, HoverCell, HoverCell, _roofBuffer);
+                    Revision++;
+                }
+                return;
+            }
+            if (RoofPreview != null)
+            {
+                RoofPreview = null;
+                _roofPreviewKey = int.MinValue;
+                Revision++;
+            }
             if (SelectedToolId == null || Drag != DragKind.None || !HasHover || state == null)
             {
                 if (ToolPreview != null)
@@ -1741,6 +1851,14 @@ namespace GameLogic.Campaign.Regions
             // FG4-ECO-05（FGR-ECO-010）：所有建筑写通用状态与原因（生产建筑的状态也在这里；界面上另有形状标记，不只靠颜色）。
             Economy.BuildingStatus st = Economy.BuildingStatusService.Evaluate(state, b);
             text += "\n" + GameText.Format("prod.hover.line", GameText.Get(Economy.BuildingOps.UiStatusNameKey(st.Kind)), st.Reason.Replace("\n", " · "));
+            // FG7-ENV-03：酸雨 / 沙暴期间写明这座建筑在不在顶棚下（露天的会掉耐久 / 炮塔探测变短）。
+            string weather = Env.WeatherService.ActiveKind(state);
+            if (weather == Env.WeatherService.AcidRain || weather == Env.WeatherService.Sandstorm)
+            {
+                text += "\n" + (Env.RoofService.IsBuildingCovered(state, b)
+                    ? GameText.Get("env.weather.hover_covered")
+                    : GameText.Format("env.weather.hover_exposed", Env.WeatherService.NameOf(weather)));
+            }
             // FG3-LOG-06：和电网有关的建筑写它在哪个电网、有没有电、优先级与电网读数。
             if (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Disabled)
             {
