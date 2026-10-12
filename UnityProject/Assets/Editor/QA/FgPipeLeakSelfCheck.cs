@@ -1203,22 +1203,30 @@ namespace GameLogic.EditorTools
             var kernel = new List<double>();
             var frame = new List<double>();
             double maxSync = 0;
+            int syncs = 0;
             int steps = GameClock.StepHz * 10;
             for (int i = 0; i < steps; i++)
             {
+                int syncBefore = PipeLeakService.SyncCount;
                 long t0 = Stopwatch.GetTimestamp();
                 WorldSimulation.StepMany(1);
                 frame.Add((Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency);
                 kernel.Add(site.LastKernelMs);
-                maxSync = Math.Max(maxSync, PipeLeakService.LastSyncMs);
+                // 只取这一步里真的发生了的对账：LastSyncMs 在两次对账之间保持上一次的值，窗口开头读到的是热身（F.Seconds）最后一次对账、不在测量窗口里
+                // （FG6-E2E-01 修复轮：全量自检里读到热身那次 3.4 ms 判了失败，而同一窗口世界一步最长只有 0.84 ms——对账就在世界一步里，窗口内不可能超过它）。
+                if (PipeLeakService.SyncCount != syncBefore)
+                {
+                    syncs++;
+                    maxSync = Math.Max(maxSync, PipeLeakService.LastSyncMs);
+                }
             }
             double kAvg = kernel.Average(), fAvg = frame.Average(), fMax = frame.Max();
             double limitSync = GridContent.Tuning("logistics.leak.perf.sync_ms");
             int burning = PipeLeakService.Records(s).Count(r => r.State == PipeLeakService.StateReacted);
             PerfLines.Add($"{PipeLeakService.Count(s)} 摊液洼（{burning} 摊在燃烧）+ {site.Kernel.SlotCount} 个内核单位：内核单步平均 {kAvg:F3} ms；热更层液洼对账最长 {maxSync:F3} ms（阈值 {limitSync} ms）；" +
                           $"世界一步平均 {fAvg:F3} / 最长 {fMax:F3} ms（120 帧预算 8.33 ms / 帧；Editor batchmode 下 Mono，真机另测 FG15-SYS-02）");
-            PerfGate.Expect(PipeLeakService.Count(s) >= cap - 2,
-                $"P1 {PipeLeakService.Count(s)} 摊液洼（{burning} 摊在燃烧）+ 100 个站在液洼里的单位：热更层液洼对账最长 {maxSync:F3} ms（阈值 {limitSync} ms）、内核单步平均 {kAvg:F3} ms（阈值 {SiegeCatalog.PerfStepMs} ms）、世界一步平均 {fAvg:F3} ms（≤ 8.33 ms）",
+            PerfGate.Expect(PipeLeakService.Count(s) >= cap - 2 && syncs > 0,
+                $"P1 {PipeLeakService.Count(s)} 摊液洼（{burning} 摊在燃烧）+ 100 个站在液洼里的单位：热更层液洼对账最长 {maxSync:F3} ms（窗口内对账 {syncs} 次，阈值 {limitSync} ms）、内核单步平均 {kAvg:F3} ms（阈值 {SiegeCatalog.PerfStepMs} ms）、世界一步平均 {fAvg:F3} ms（≤ 8.33 ms）",
                 new[]
                 {
                     PerfGate.Le(maxSync, limitSync, "液洼对账最长 ms"),

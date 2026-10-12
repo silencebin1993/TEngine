@@ -1200,6 +1200,9 @@ namespace GameLogic.Campaign
         public int[] RouteX = Array.Empty<int>();
         public int[] RouteY = Array.Empty<int>();
         public int RouteIndex;
+        /// <summary>FG6-E2E-01：地形变化时查出路线后面某段被挡（不是脚下这一段）——走到这个路点下标（RouteIndex 增到它）时复查下一段，还挡着就从那里重新要路线；-1 = 没有。
+        /// 旧存档没有这个字段，读回来是 -1（照原路走，与修复前一致）。</summary>
+        public int ReplanAt = -1;
         /// <summary>到达时通往核心的路是完全堵住的（停在最近处；攻城在 FG6-DEF-05）。</summary>
         public bool Blocked;
         // ── FG6-DEF-04：突袭导演派出的队伍（测试 / 调试派出的队伍这些字段为空）──

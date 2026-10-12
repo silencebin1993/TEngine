@@ -44,7 +44,7 @@ namespace GameLogic.EditorTools
     /// A2. 旅程源码只走输入通道：不直接调防御 / 突袭 / 接入 / 规则 / 面板等业务方法；FGJ-M6R 的三处进度夹具（研究、剧情突袭、芯片基板）只在登记的夹具方法里，FGJ-M6 一处都没有。
     /// B. B25：FGJ-M6 的家园防线规划（回收站、实验室、精炼链、六座炮塔、护盾、屏障圈）在 5 个种子上都找得到、逐件过放置校验（只差研究的算过）、互不重叠；
     ///    防线放下之后，火墙按 4 个方向的抵达点都规划得出（改装离抵达点最近的炮塔 + 陷阱发射器 + 经缺口的燃油管线）；FGJ-M6R 的完全围死规划在 2 个种子上找得到。
-    /// B2. 防线规划守得住（FGT-DEF-001 / 003 / 005 合场，真实突袭导演 + 真实攻城 + 真实炮塔）：种子 42 与 1 上按 FGJ-M6 的规划布防、按旅程的广播开关节奏（五次），
+    /// B2. 防线规划守得住（FGT-DEF-001 / 003 / 005 合场，真实突袭导演 + 真实攻城 + 真实炮塔）：种子 42 与 1 上按 FGJ-M6 的规划布防、按旅程的广播开关节奏（四次：第三波排定后不再关，它在预警前并成 2 级），
     ///    三波突袭（都是 1 级）都守住、核心不丢；第二 / 三波有建筑损失（旅程要证明自动重建）。
     /// C. 缺口清零：门禁第一个里程碑是 M6 的缺口全部 Closed / 部分关闭、延后项全部 Closed / 部分关闭 / 顺延；本 Story 的登记与关闭在表里。
     /// D. 试玩包：FG-M6 的试玩脚本、通过标准对照表（FGR-BAL-061 M6：大多数人说突袭“紧张 / 有趣”而不是“烦”）、问卷与记录模板、问题清单模板齐全，目录登记“待用户试玩、不阻塞”。
@@ -139,15 +139,15 @@ namespace GameLogic.EditorTools
             {
                 ("造第一座炮塔（建造栏防御分类、默认蓝图、机器施工）", new[] { "m6_place1", "m6_built1" }),
                 ("挡住第一次（1 级）突袭：正式暴露触发、开局宽限、预警、到达、炮塔打退、结算面板", new[] { "exp_first", "w1_warn", "w1_arrive", "w1_end", "w1_close" }),
-                ("布置“漏油带 + 燃迹炮塔”火墙（按第一次突袭的抵达点：离抵达点最近的炮塔在炮塔面板换上燃迹新版本、旁边陷阱选漏油朝抵达点铺、燃油管线）", new[] { "ana_oil_ok", "ana_burn_ok", "cb_save", "fw_plan", "m6_place5", "fw_built", "fwt_bp", "trap_fw", "fw_lay" }),
-                ("炮塔阵地自动打出反应：第二、三波至少一波火墙打出爆燃（FGT-DEF-002）", new[] { "w3_end" }),
+                ("布置“漏油带 + 燃迹炮塔”火墙（按第一次突袭的抵达点：离抵达点最近的炮塔在炮塔面板换上燃迹新版本、旁边陷阱选漏油朝抵达点铺、燃油管线；要走地下管线时先研究）", new[] { "ana_oil_ok", "ana_burn_ok", "cb_save", "fw_plan", "fw_rt_q", "fw_ug_wait", "m6_place5", "fw_built", "fwt_bp", "trap_fw", "fw_lay" }),
+                ("炮塔阵地自动打出反应：第二波换了来路时按它的抵达点补一道火墙，第二、三波至少一波火墙打出爆燃（FGT-DEF-002）", new[] { "fw2_plan", "m6_place6", "fwt2_bp", "trap2_fw", "fw2_lay", "w3_end" }),
                 ("出发远征", new[] { "prep_open", "prep_pick", "prep_depart", "exp_up" }),
                 ("远征途中家园遇袭：跳回家园接入炮塔防守（开局给默认炮塔蓝图标好接入口，接入离来袭方向最近的那座）", new[] { "cb0_mark", "cb0_save", "w2_alert", "w2_jump", "w2_turret", "w2_uplink", "w2_fire", "w2_leave", "w2_back" }),
                 ("远征途中家园遇袭：信号留在远征队、家园自己守", new[] { "w3_alert", "w3_stay", "w3_end" }),
                 ("回来看离家报告里的突袭时间线", new[] { "evac_confirm", "away_open", "away_close" }),
                 ("被摧毁的建筑已经自动重建（研究 → 常驻规则 → 规则日志可追溯）", new[] { "wait_rebuild", "rules_new", "rebuilt" }),
                 ("回补：屏障圈拖拽、护盾、炮塔批量目标模式（DEBT-FG6DEF02-05 / 01-08）", new[] { "m6_walls", "m6_place4", "tm_mode" }),
-                ("回补：暴露上涨 → 突袭 → 防守走正式触发（DEBT-FG6DEF04-09）", new[] { "exp_first", "exp_off1", "exp_falling", "exp_on1", "w2_plan", "exp_off2", "exp_on2", "w3_plan", "exp_off3" }),
+                ("回补：暴露上涨 → 突袭 → 防守走正式触发（DEBT-FG6DEF04-09）", new[] { "exp_first", "exp_off1", "exp_falling", "exp_on1", "w2_plan", "exp_off2", "exp_on2", "w3_plan" }),
             };
             List<string> missing = Missing(m6, exit);
             Expect(Wellformed(m6) && missing.Count == 0 && m6.Seed == FgjM6Journey.TestSeed,
@@ -158,7 +158,7 @@ namespace GameLogic.EditorTools
                 ("路径失败（屏障圈没留闸门 → 放置预览警告机器到不了 → 改放闸门 → 敌方被圈死、己方放行）", new[] { "walls", "pf_hover", "pf_gate", "pf_built" }),
                 ("暂停与倍速（攻城中）", new[] { "ra_siege", "ra_pause", "ra_frozen", "ra_resume", "ra_half", "ra_triple", "ra_wall" }),
                 ("存读档（攻城中）", new[] { "rb_siege", "rb_esc", "rb_quit", "rb_menu", "rb_load", "rb_loaded", "rb_end" }),
-                ("断链（攻城中、敌人进射程、炮塔正在开火时禁用全部发电机 → 炮塔缺电、开火次数不再增加 → 逐台启用 → 来电、恢复开火）", new[] { "rc_list", "rc_siege", "rc_engage", "rc_off0", "rc_nopower", "rc_on0", "rc_power" }),
+                ("断链（目标死亡之后再请一波：攻城中按 0.5 倍速、敌人进射程、炮塔正在开火时禁用全部发电机 → 炮塔缺电、内核武器关、名下击毁与对敌伤害不再涨 → 逐台启用 → 来电、恢复开火）", new[] { "rp_gens", "rp_siege", "rp_half", "rp_engage", "rp_off0", "rp_nopower", "rp_on0", "rp_power" }),
                 ("目标死亡（接入的机器被打死、全灭应急打印）", new[] { "rc_send_a", "rc_charge", "rc_attack" }),
                 ("承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 回滚（复原 / 刻印父固件、合成台放在抵达点旁、正式熔合入队、攻城单位拆掉、回滚守恒、结算损失）", new[] { "fu_ana_ok", "fu_print_n2", "fu_plan", "fu_built", "fu_sim", "fu_formal", "fu_formal2", "rs_siege", "fu_rolled" }),
                 ("承接 DEBT-FG5RND06-03：真实突袭打死家园机器 → 黑匣子 → 陈列馆分析 → 研究（第三波打死接入的机器、陈列馆与实验室、研究排队、分析完入账、研究点）", new[] { "rc_charge", "bb_built", "bb_rt_q", "bb_done" }),
@@ -411,7 +411,8 @@ namespace GameLogic.EditorTools
                     ? "属于 FG-M6 的缺口全部 Closed / 部分关闭（剩余部分另有门禁），延后项全部 Closed / 部分关闭 / 顺延（顺延写明理由与新门禁）"
                     : $"FG-M6 出口前还开着：缺口 [{string.Join("、", openGaps)}]，延后项 [{string.Join("、", openDebts)}]");
             string[] mine = { "DEBT-FG6E2E01-01", "DEBT-FG6E2E01-02", "DEBT-FG6E2E01-03", "DEBT-FG6E2E01-04", "FG-GAP-111" };
-            string[] closedHere = { "DEBT-FG6DEF04-09", "DEBT-FG6DEF01-08", "DEBT-FG1E2E01-04", "DEBT-FG4E2E01-01", "DEBT-FG5E2E01-05", "DEBT-FG5RND06-03", "FG-GAP-112", "FG-GAP-113", "FG-GAP-114" };
+            string[] closedHere = { "DEBT-FG6DEF04-09", "DEBT-FG6DEF01-08", "DEBT-FG1E2E01-04", "DEBT-FG4E2E01-01", "DEBT-FG5E2E01-05", "DEBT-FG5RND06-03", "FG-GAP-112", "FG-GAP-113", "FG-GAP-114",
+                                    "FG-GAP-115", "FG-GAP-116", "DEBT-FG6E2E01-05" };
             List<string> notClosed = closedHere.Where(id => !status.TryGetValue(id, out string v) || !v.StartsWith("Closed", StringComparison.Ordinal)).ToList();
             bool registered = mine.All(status.ContainsKey);
             bool pending = status.TryGetValue("DEBT-FG6E2E01-01", out string p1) && p1.Contains("待用户");
@@ -512,7 +513,8 @@ namespace GameLogic.EditorTools
             int set = code.IndexOf("_towerBroadcastOffToggle.SetValueWithoutNotify(", StringComparison.Ordinal);
             Expect(inside.Count == 0 && show >= 0 && depart >= 0 && set >= 0 && show < early && set < early && depart < early,
                 $"UXML 里暴露行、“关闭广播”勾选框、“关闭”“确认出发”都在 Body 外（{string.Join("、", outside)}）；面板刷新在“没有出征目标 / 远征在外”提前返回之前就显示暴露行、同步开关、按目标显隐“确认出发”" +
-                (inside.Count == 0 ? string.Empty : "；还在 Body 里 / 缺：" + string.Join("、", inside)));            string gameRoot = ReadRepo("TEngine/UnityProject/Assets/GameScripts/HotFix/GameLogic/Stage/GameRoot.cs") ?? string.Empty;
+                (inside.Count == 0 ? string.Empty : "；还在 Body 里 / 缺：" + string.Join("、", inside)));
+            string gameRoot =ReadRepo("TEngine/UnityProject/Assets/GameScripts/HotFix/GameLogic/Stage/GameRoot.cs") ?? string.Empty;
             string autoPause = MethodBodyAny(StripComments(gameRoot), "TryAutoPauseWorld") ?? string.Empty;
             Expect(autoPause.Contains("GameClock.DirectLocked") && autoPause.IndexOf("GameClock.DirectLocked", StringComparison.Ordinal) < autoPause.IndexOf("SetWorldPaused(true)", StringComparison.Ordinal),
                 "FG-GAP-114（源码守护；行为断言见 H4）：通知自动暂停的判定 TryAutoPauseWorld 在接入直控（GameClock.DirectLocked）时不暂停——直控锁 1x、暂停键只在战略视角生效");
@@ -895,11 +897,21 @@ namespace GameLogic.EditorTools
             public float CoreMin = float.MaxValue;
             public string Toggles = string.Empty;
             public string Firewall;
+            /// <summary>火墙在模拟里真建出来之后（陷阱漏油一条线 + 改装炮塔换燃迹）：内核爆燃次数、第二 / 三波结算里记的爆燃次数、
+            /// 见到过身上带“油”标签的突袭单位最多几台、改装那座炮塔的击毁数、陷阱铺了几轮。</summary>
+            public string FwTrapId;
+            public string FwTurretId;
+            public int Deflag0;
+            public int Deflag;
+            public int DeflagInResults;
+            public int OiledMax;
+            public int FwKills;
+            public long TrapLays;
         }
 
         /// <summary>
         /// 按 FGJ-M6 的规划把家园防线直接登记成建成的（测试捷径：放置 / 施工由旅程从正式入口走），按旅程的广播开关节奏推进到第 7.4 日：
-        /// 第一次突袭排定后关广播 → 第一波预警时开 → 第二波排定后关 → 第二波预警时开 → 第三波排定后关。返回三波的计划与结算。
+        /// 第一次突袭排定后关广播 → 第一波预警时开 → 第二波排定后关 → 第二波预警时开（之后不再关：第三波在预警前并成 2 级）。返回三波的计划与结算。
         /// </summary>
         private static RaidRun RunDefensePlan(int seed, out string why)
         {
@@ -912,6 +924,7 @@ namespace GameLogic.EditorTools
                 return null;
             }
             PlaceHomePlan(s, hp);
+            TurretService.TrySetModeBatch(s, (int)BinGames.Sim.Combat.CombatTargetMode.SiegeFirst); // FGJ-M6 tm_mode：全部炮塔“先打正在破坏建筑的”
             var run = new RaidRun();
             var turrets = hp.Plan.Buildings.Where(b => b.Type == FgjM6Common.Turret).Select(b => (b.Key, b.Pivot)).ToList();
             var others = new List<GridCell> { hp.Refinery.AcidPipe, hp.Refinery.Pump };
@@ -947,6 +960,10 @@ namespace GameLogic.EditorTools
                         var at = new Vector2((float)first.ArriveX, (float)first.ArriveY);
                         FgjM6Common.FirewallPlan fw = FgjM6Common.PlanFirewallNear(s, at, turrets, hp.Refinery.Tank, hp.Refinery.FuelPipe, others, out string fwhy, belts);
                         run.Firewall = fw != null ? $"抵达点 {at} → 改装 {fw.TurretKey}、管线 {fw.Pipe.Count} 格、油膜带离抵达点 {fw.Cover:F1} 米" : "✗ " + fwhy;
+                        if (fw != null)
+                        {
+                            BuildFirewallForTests(s, fw, run);
+                        }
                     }
                     CampaignExposureLedger.SetTowerBroadcastOff(s, false);
                     phase = 2;
@@ -965,13 +982,13 @@ namespace GameLogic.EditorTools
                     phase = 4;
                     run.Toggles += $"开@{GameClock.Ticks} ";
                 }
-                else if (phase == 4 && third != null && third.State >= RaidDirectorService.StateScheduled)
-                {
-                    CampaignExposureLedger.SetTowerBroadcastOff(s, true); // FGJ-M6 exp_off3：第三波排定后关，不让它在预警前并成 2 级
-                    phase = 5;
-                    run.Toggles += $"关@{GameClock.Ticks} ";
-                }
+                // 修复轮续：火墙真起作用后，FGJ-M6 第三波排定后不再关广播（上一版的 exp_off3 去掉）——家园照常高耗电、暴露继续涨，第三波在预警前并成 2 级，
+                // 由两道火墙 + 炮塔 + 护盾 + 屏障守住，并留下被摧毁的建筑给自动重建（1 级的第三波在火墙下一座都拆不掉，“自动重建”就无从证明）。
                 run.CoreMin = Mathf.Min(run.CoreMin, core.Health);
+                if (run.FwTurretId != null)
+                {
+                    run.OiledMax = Math.Max(run.OiledMax, OiledRaiders());
+                }
                 foreach (RaidPlanRecord p in RaidDirectorService.Plans(s))
                 {
                     if (p != null && p.State >= RaidDirectorService.StateScheduled && seenPlans.Add(p.PlanId))
@@ -992,7 +1009,85 @@ namespace GameLogic.EditorTools
                     break;
                 }
             }
+            if (run.FwTurretId != null)
+            {
+                run.Deflag = DeflagCount() - run.Deflag0;
+                foreach (RaidResultRecord r in run.Results.OrderBy(x => x.EndTick).Skip(1))
+                {
+                    run.DeflagInResults += r.Reactions?.Where(x => x != null && x.ReactionId != null && x.ReactionId.Contains("deflagr")).Sum(x => x.Count) ?? 0;
+                    run.FwKills += r.Contrib.Where(x => x.Kind == "turret" && x.Id == run.FwTurretId).Sum(x => x.Kills);
+                }
+                run.TrapLays = DefenseService.Find(s, run.FwTrapId)?.TrapLays ?? 0;
+            }
             return run;
+        }
+
+        private const string BpBurnM6 = "bp_m6x_burn";
+
+        /// <summary>
+        /// 测试捷径（复审 P1“火墙始终没接敌”的回归守护）：按火墙规划把陷阱发射器登记成建成的（漏油、一条线、朝规划方向），管线终点那一格放一段管线、挂一个燃油供给点
+        /// （省掉精炼链与管线施工——这些由 FGJ-M6 走正式入口），改装的那座炮塔换上燃迹蓝图（与 FgDefenseStructuresSelfCheck G 同一个写法）。之后的突袭、选目标、开火、场地、反应全是正式流程。
+        /// </summary>
+        private static void BuildFirewallForTests(CampaignState s, FgjM6Common.FirewallPlan fw, RaidRun run)
+        {
+            s.UnlockedContentIds = (s.UnlockedContentIds ?? Array.Empty<string>()).Concat(new[] { Burn, Oil }).Distinct().ToArray(); // 旅程里由解析台数据复原解锁
+            BuildingRecord trap = Register(s, FgjM6Common.Trap, fw.TrapAt, fw.TrapRot);
+            DefenseService.TrySetTrapFirmware(s, trap.BuildingId, Oil);
+            DefenseService.TrySetTrapPattern(s, trap.BuildingId, DefenseCatalog.PatternLine);
+            GameLogic.Campaign.Logistics.PipeNetworkService.TryPlace(s, fw.PipeEnd, BinGames.Sim.Logistics.PipePieceKind.Pipe, 0, 0);
+            GameLogic.Campaign.Logistics.PipeNetworkService.Kernel.AddProducer(fw.PipeEnd.X, fw.PipeEnd.Y, GameLogic.Campaign.Logistics.PipeNetworkService.FluidId("fuel"), 5_000_000, 5_000_000); // 5000 升：旅程里是精炼塔持续出油（720 升 / 分钟），这里够铺满到第 7.4 日
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, ComponentCatalog.CompGunId, null, null, new[] { Burn });
+            BlueprintVersionRecord version = board.ToVersion(1, 0f);
+            s.BlueprintRecords = (s.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != BpBurnM6)
+                .Append(new BlueprintRecord { BlueprintId = BpBurnM6, DisplayName = "燃迹炮塔", ActiveVersion = 1, Versions = new[] { version } }).ToArray();
+            BuildingRecord tur = s.BuildingRecords.FirstOrDefault(b => b != null && b.BuildingTypeId == FgjM6Common.Turret && b.GridX == fw.TurretAt.X && b.GridY == fw.TurretAt.Y);
+            if (tur != null)
+            {
+                TurretService.TryAssignBlueprint(s, tur.BuildingId, BpBurnM6);
+            }
+            HomeValleyPowerGrid.Recompute(s);
+            DefenseService.Sync(s);
+            TurretService.Sync(s);
+            run.FwTrapId = trap.BuildingId;
+            run.FwTurretId = tur?.BuildingId;
+            run.Deflag0 = DeflagCount();
+        }
+
+        private static int DeflagCount()
+        {
+            CombatSite site = Site;
+            if (site == null)
+            {
+                return 0;
+            }
+            for (int i = 0; i < NamedReactionCatalog.TagRules.Count; i++)
+            {
+                if (NamedReactionCatalog.TagRules[i].Id == "reaction_deflagrate")
+                {
+                    return site.Kernel.ReactionCountOf(i);
+                }
+            }
+            return 0;
+        }
+
+        /// <summary>家园内核里身上带“油”标签的突袭单位数。</summary>
+        private static int OiledRaiders()
+        {
+            CombatSite site = Site;
+            uint oil = NamedReactionCatalog.BitOf("Oil");
+            if (site == null || oil == 0u)
+            {
+                return 0;
+            }
+            int n = 0;
+            foreach ((int id, Vector2 _) in FgjM6Common.Raiders())
+            {
+                if (site.Kernel.TryGetStatus(id, out uint mask, out _, out _, out _, out _) && (mask & oil) != 0)
+                {
+                    n++;
+                }
+            }
+            return n;
         }
 
         /// <summary>测试捷径：把 FGJ-M6 的家园规划直接登记成建成的（建筑、发电机 2、精炼塔 / 废液池、屏障圈；真实放置 / 施工由旅程走正式入口）。</summary>
@@ -1023,7 +1118,7 @@ namespace GameLogic.EditorTools
         }
         private static void CheckDefensePlanHolds()
         {
-            Line("  · B2. FGJ-M6 的防线规划守得住（真实导演 + 真实攻城 + 真实炮塔 / 护盾 / 屏障；种子 42 与 1，按旅程的广播开关节奏推进到第 7.4 日）");
+            Line("  · B2. FGJ-M6 的防线规划守得住（真实导演 + 真实攻城 + 真实炮塔 / 护盾 / 屏障；种子 42 与 1，按旅程的广播开关节奏推进到第 7.4 日）；火墙按第一次突袭的真实抵达点建出来后，之后的突袭里打出爆燃（FGT-DEF-002 阵地反应）");
             foreach (int seed in new[] { 42, 1 })
             {
                 var sw = Stopwatch.StartNew();
@@ -1037,12 +1132,18 @@ namespace GameLogic.EditorTools
                 List<RaidResultRecord> results = run.Results.OrderBy(r => r.EndTick).ToList();
                 int losses = results.Skip(1).Sum(r => r.LostBuildings + r.LostTurrets + r.LostDefenses);
                 bool first = p1 != null && p1.Level == 1 && p1.Trigger == RaidCatalog.TriggerExposure && p1.ArrivalTick >= RaidDirectorService.GraceEndTick;
-                bool three = results.Count >= 3 && results.Take(3).All(r => r.Outcome != "core_lost") && results.Take(3).Max(r => r.Level) <= 1;
+                // 前两波 1 级；第三波排定后不再关广播，预警前并成 2 级也要守住（修复轮续，见 RunDefensePlan 注释）。
+                bool three = results.Count >= 3 && results.Take(3).All(r => r.Outcome != "core_lost") && results.Take(2).Max(r => r.Level) <= 1 && results[2].Level <= 2;
                 bool fwOk = run.Firewall != null && !run.Firewall.StartsWith("✗", StringComparison.Ordinal);
-                Expect(!run.CoreLost && first && three && (losses > 0 || seed != FgjM6Journey.TestSeed) && fwOk,
+                string fwRun = run.FwTurretId == null ? "火墙没建" :
+                    $"火墙实建后：内核爆燃 {run.Deflag} 次、第二 / 三波结算记爆燃 {run.DeflagInResults} 次、带“油”标签的突袭单位最多 {run.OiledMax} 台、改装炮塔击毁 {run.FwKills}、陷阱铺 {run.TrapLays} 轮";
+                // 修复轮续（复审 P1“火墙始终没接敌”的回归守护）：火墙按第一次突袭的真实抵达点建出来（陷阱漏油一条线 + 改装炮塔换燃迹），之后的突袭里必须打出爆燃——内核计数与第二 / 三波结算都 > 0。
+                // 上一版这里要求“种子 42 第二 / 三波有建筑损失（给自动重建留活）”：火墙真起作用后模拟里两波都没有损失，这条预测与“火墙有效”互相冲突，改为只记录；旅程里的自动重建由 FGJ-M6 rebuilt 自己核对。
+                bool fwDeflag = run.FwTurretId != null && run.Deflag > 0 && run.DeflagInResults > 0;
+                Expect(!run.CoreLost && first && three && fwOk && fwDeflag,
                     $"种子 {seed}：三波都守住、核心不丢（核心耐久最低 {run.CoreMin:F0}）；首袭 {p1?.Level} 级 {p1?.Trigger}、抵达第 {p1?.ArrivalTick} 步（宽限终点 {RaidDirectorService.GraceEndTick}）；" +
                     $"结算 [{string.Join("；", results.Select(r => $"{r.PlanId} {r.Level} 级 {RaidResultService.OutcomeText(r)} 击毁 {r.Killed}/{r.Unfolded} 损失 {RaidResultService.LossTotal(r)}"))}]；" +
-                    $"第二 / 三波建筑损失 {losses} 座（旅程种子 {FgjM6Journey.TestSeed} 上要 > 0，给自动重建留活）；广播开关 {run.Toggles}；火墙按第一次突袭的真实抵达点规划：{run.Firewall ?? "没算（第一次突袭没预警）"}（{sw.Elapsed.TotalSeconds:F0} 秒）");
+                    $"第二 / 三波建筑损失 {losses} 座（只记录）；广播开关 {run.Toggles}；火墙按第一次突袭的真实抵达点规划：{run.Firewall ?? "没算（第一次突袭没预警）"}；{fwRun}（{sw.Elapsed.TotalSeconds:F0} 秒）");
             }
         }
 

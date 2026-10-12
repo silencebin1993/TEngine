@@ -349,10 +349,12 @@ namespace GameLogic.Campaign.Nav
                 {
                     invalid += home.InvalidateBlockedRoutes();
                 }
+                IndexChanged(); // 这一轮的变化区块建成集合 + 外接框，行进队伍逐段查 ChangedNear 时不再逐个扫变化列表
                 invalid += WorldTransitSystem.InvalidateRoutes(state);
                 invalid += WorldOutpostSystem.InvalidateRoutes(state);
                 Kernel.Invalidated += invalid;
                 Kernel.ClearChanged();
+                ClearChangedIndex();
                 InvalidationPasses++;
             }
             if (home != null)
@@ -399,6 +401,34 @@ namespace GameLogic.Campaign.Nav
             int cx1 = NavGridOps.FloorDiv(Math.Max(a.x, b.x), size);
             int cy0 = NavGridOps.FloorDiv(Math.Min(a.y, b.y), size);
             int cy1 = NavGridOps.FloorDiv(Math.Max(a.y, b.y), size);
+            if (_changedIndexed && _ciSourceCount == changed.Count)
+            {
+                // FG6-E2E-01 修复轮续（M6 出口性能基线“读性能测试存档”超 2 倍的根因）：读档 / 区块生成时一轮里会有几百个区块变化，
+                // 逐段扫整个变化列表是 O(路段数 × 变化区块数)；改为先用这一轮变化的外接框整段排除，再只查路段外接框里的区块（通常 1～2 块）。
+                if (cx1 < _ciMinX || cx0 > _ciMaxX || cy1 < _ciMinY || cy0 > _ciMaxY)
+                {
+                    return false;
+                }
+                int ox0 = Math.Max(cx0, _ciMinX);
+                int ox1 = Math.Min(cx1, _ciMaxX);
+                int oy0 = Math.Max(cy0, _ciMinY);
+                int oy1 = Math.Min(cy1, _ciMaxY);
+                long area = (long)(ox1 - ox0 + 1) * (oy1 - oy0 + 1);
+                if (area <= ChangedIndex.Count)
+                {
+                    for (int cy = oy0; cy <= oy1; cy++)
+                    {
+                        for (int cx = ox0; cx <= ox1; cx++)
+                        {
+                            if (ChangedIndex.Contains(NavGridOps.Key(cx, cy)))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+            }
             for (int i = 0; i < changed.Count; i++)
             {
                 NavGridOps.Unkey(changed[i], out int cx, out int cy);
@@ -408,6 +438,42 @@ namespace GameLogic.Campaign.Nav
                 }
             }
             return false;
+        }
+
+        private static readonly HashSet<long> ChangedIndex = new HashSet<long>();
+        private static bool _changedIndexed;
+        private static int _ciSourceCount;
+        private static int _ciMinX, _ciMaxX, _ciMinY, _ciMaxY;
+
+        /// <summary>一轮失效检查开始时调一次（<see cref="BeginStep"/>）：把这一轮变化的区块建成集合与外接框，供 <see cref="ChangedNear"/> 查。O(变化区块数)。</summary>
+        private static void IndexChanged()
+        {
+            ChangedIndex.Clear();
+            _changedIndexed = false;
+            if (!IsBound)
+            {
+                return;
+            }
+            IReadOnlyList<long> changed = Kernel.Changed;
+            _ciMinX = _ciMinY = int.MaxValue;
+            _ciMaxX = _ciMaxY = int.MinValue;
+            for (int i = 0; i < changed.Count; i++)
+            {
+                ChangedIndex.Add(changed[i]);
+                NavGridOps.Unkey(changed[i], out int cx, out int cy);
+                _ciMinX = Math.Min(_ciMinX, cx);
+                _ciMaxX = Math.Max(_ciMaxX, cx);
+                _ciMinY = Math.Min(_ciMinY, cy);
+                _ciMaxY = Math.Max(_ciMaxY, cy);
+            }
+            _ciSourceCount = changed.Count;
+            _changedIndexed = true;
+        }
+
+        private static void ClearChangedIndex()
+        {
+            ChangedIndex.Clear();
+            _changedIndexed = false;
         }
 
         /// <summary>热更层的请求方（队伍、巡逻）发一条请求。</summary>

@@ -155,6 +155,7 @@ namespace GameLogic.Campaign.WorldSim
                     g.RouteX = (int[])plan.RouteX.Clone();
                     g.RouteY = (int[])plan.RouteY.Clone();
                     g.RouteIndex = 0;
+                    g.ReplanAt = -1;
                     g.RouteState = RouteFollowing;
                     g.NavReason = plan.NavReason;
                 }
@@ -386,6 +387,7 @@ namespace GameLogic.Campaign.WorldSim
             g.RouteX = xs;
             g.RouteY = ys;
             g.RouteIndex = 0;
+            g.ReplanAt = -1;
             g.RouteState = RouteFollowing;
             g.TargetX = g.OriginX;
             g.TargetY = g.OriginY;
@@ -512,7 +514,9 @@ namespace GameLogic.Campaign.WorldSim
         }
 
         /// <summary>沿路线走一步（一步里可以越过几个路点；途中进入到达半径就停在那里）。返回 true = 到达路线终点或进入到达半径。
-        /// <paramref name="recheck"/>（行军中、寻路服务已绑定）：每到一个路点查下一段还通不通，不通就停在这个路点、下一步从这里重新要路线（FG6-E2E-01，见 <see cref="InvalidateRoutes"/>）。</summary>
+        /// <paramref name="recheck"/>（行军中）：走到地形变化时记下的复查点（<see cref="TransitGroupRecord.ReplanAt"/>，挡点前的那个路点）时查下一段还通不通，
+        /// 不通就停在这个路点、下一步从这里重新要路线；已经不挡了就清掉复查点照原路走（FG6-E2E-01，见 <see cref="InvalidateRoutes"/>）。
+        /// 没有复查点的队伍不逐段查——格线检查与寻路的平滑路段不完全一致，逐段查会在没有任何地形变化时误判“被挡”、多要一次路线、晚到几步（[整个世界] 种子无关自检抓到）。</summary>
         private static bool FollowRoute(TransitGroupRecord g, double stepLen, double arrival, bool recheck = false)
         {
             int n = g.RouteX?.Length ?? 0;
@@ -534,11 +538,15 @@ namespace GameLogic.Campaign.WorldSim
                     g.PosY = ty;
                     remaining -= d;
                     g.RouteIndex++;
-                    if (recheck && g.RouteIndex < n && !NextSegmentClear(g, arrival))
+                    if (recheck && g.ReplanAt >= 0 && g.RouteIndex >= g.ReplanAt && g.RouteIndex < n)
                     {
-                        g.RouteState = RouteNeed; // 下一段被挡：停在这个路点，下一步从这里重新要路线
-                        WaypointReplans++;
-                        return false;
+                        g.ReplanAt = -1;
+                        if (!NextSegmentClear(g, arrival))
+                        {
+                            g.RouteState = RouteNeed; // 下一段被挡：停在这个路点，下一步从这里重新要路线
+                            WaypointReplans++;
+                            return false;
+                        }
                     }
                 }
                 else
@@ -567,6 +575,7 @@ namespace GameLogic.Campaign.WorldSim
             g.NavSerial = raids.NextNavSerial++;
             g.RouteState = RouteAwaiting;
             g.RouteIndex = 0;
+            g.ReplanAt = -1;
             g.RouteX = Array.Empty<int>();
             g.RouteY = Array.Empty<int>();
             NavService.Request(NavService.OwnerTransit, KeyOf(g), g.NavSerial, NavConst.ClassHostile,
@@ -658,6 +667,7 @@ namespace GameLogic.Campaign.WorldSim
                 g.RouteX = xs;
                 g.RouteY = ys;
                 g.RouteIndex = 0;
+                g.ReplanAt = -1;
                 g.RouteState = RouteFollowing;
                 g.NavReason = r.Status == NavStatus.Partial ? (int)r.Reason : 0;
             }
@@ -685,8 +695,9 @@ namespace GameLogic.Campaign.WorldSim
         ///    远在上千格外的队伍于是因为家园附近一座虚影完工（虚影不挡敌方、完工挡，FG6-DEF-05：每次完工都是一次地形变化）当场从上千格外重新要整条路线；
         ///    这条长路线落在常规寻路批次里，途经区块的抽象图都是冷的，采纳步主线程硬等 200～300 ms（一步卡顿）。
         /// ② 只查队伍真的会走的那一段——进入到达半径就到达（<see cref="FollowRoute"/>），半径里的路段被新建筑挡住不算失效。
-        /// ③ 挡在脚下这一段（当前位置 → 下一个路点）才立即从当前位置重新要路线；挡在后面的路段先照原路走，走到挡点前的那个路点时
-        ///    （<see cref="NextSegmentClear"/>）再从那里重新要一段短路线（区块图热、几毫秒）。结果只取决于路线与格网，存读档、观察与否都一致。
+        /// ③ 挡在脚下这一段（当前位置 → 下一个路点）才立即从当前位置重新要路线；挡在后面的路段先照原路走，把挡点前的那个路点记成复查点
+        ///    （<see cref="TransitGroupRecord.ReplanAt"/>，进存档），走到那里（<see cref="NextSegmentClear"/>）还挡着再从那里重新要一段短路线（区块图热、几毫秒）。
+        ///    结果只取决于路线与格网，存读档、观察与否都一致。
         /// </summary>
         public static int InvalidateRoutes(CampaignState state)
         {
@@ -725,10 +736,14 @@ namespace GameLogic.Campaign.WorldSim
                 if (blocked == 0)
                 {
                     g.RouteState = RouteNeed; // 挡在脚下这一段：从当前位置重新要路线
+                    g.ReplanAt = -1;
                 }
                 else
                 {
-                    DeferredInvalidations++; // 挡在后面的路段：走到挡点前的路点再重新规划（FollowRoute → NextSegmentClear）
+                    // 挡在后面的路段（走过的路点 RouteIndex + blocked - 1 → RouteIndex + blocked 那一段）：走到挡点前的路点再复查、重新规划（FollowRoute → NextSegmentClear）。
+                    int at = g.RouteIndex + blocked;
+                    g.ReplanAt = g.ReplanAt >= 0 ? Math.Min(g.ReplanAt, at) : at;
+                    DeferredInvalidations++;
                 }
             }
             return n;

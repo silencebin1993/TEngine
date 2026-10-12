@@ -173,50 +173,62 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("fu_formal", "点“正式熔合…”，确认框点“确认”：入队（两枚父固件被预留，芯片基板 ×2 与技术数据记在任务上）", 20, null, c => TickFormalQueued(c, 1), retries: 1),
                 S("fu_pick3", "（第一项入队后）看固件 A / B 还是过载 / 液氮，不是就重新选", 15, null, TickPickPair, retries: 1),
                 S("fu_formal2", "再点一次“正式熔合…”、确认：第二项排在后面（这台合成台上一共 60 游戏秒的熔合）", 20, null, c => TickFormalQueued(c, 2), retries: 1),
-                S("rs_siege", "部队到达、展开攻城（合成台就在抵达点旁边）", 400, null, c => TickSieging(c, "rs")),
+                // 修复轮 r1 续：合成台面板是模态面板，开着时暂停键归面板（InputRouter.Owns 让位），攻城展开那一刻的自动暂停（raid_siege）就按不掉、世界冻住——
+                // 玩家排完熔合先关面板，再等部队展开（熔合在合成台上照常进行，不靠面板开着）。
+                S("fu_close2", "按 Esc 关掉合成台面板（通用面板也关）：两项熔合在合成台上照常进行", 15, null, c => M.TickCloseAll(c, () => !FusionPanelUIToolkit.IsOpen, "合成台面板"), retries: 1),
+                S("fu_build_close3", "按建造键关闭建造模式（开着的话）", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+                S("rs_siege", "部队到达、展开攻城（合成台就在抵达点旁边；展开时自动暂停就按暂停键继续）", 400, null, c => TickSieging(c, "rs")),
                 S("fu_rolled", "攻城单位拆掉正在熔合的电路合成台：熔合事务回滚——父固件预留释放、芯片基板与技术数据退回、通知“熔合中止”；突袭结算记下合成台这处损失", 300, null, TickRaidRolledBack),
-                S("fu_close2", "按 Esc 关掉还开着的合成台面板", 15, null, c => M.TickCloseAll(c, () => !FusionPanelUIToolkit.IsOpen, "合成台面板"), retries: 1),
                 S("rs_fast", "按 3 倍速键", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
                 S("rs_end", "这一波结束（只结算一次）", 400, null, c => TickRaidOver(c, "rs")),
                 S("rs_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建", 600, null, TickWallRestored),
 
-                // ── 5. 断链（第三波攻城中、敌人进了圈里炮塔的射程、炮塔正在开火时断电 → 停火 → 逐台启用 → 恢复开火）──
+                // ── 6. 目标死亡（第三波：两台家园机器先开到抵达点；部队快到时接入第一台、一展开就冲进敌群）──
                 S("rc_fix", "进度夹具：剧情节点再触发一波", 10, ApplyRaidFixture, c => TickRaidRequested(c, "rc")),
                 S("rc_warn", "等预警", 600, null, c => TickWarned(c, "rc")),
-                S("rc_list", "记下现在还在发电的发电机（开局那台、圈里的发电机 2）与还活着的家园机器", 10, null, TickListGens),
-                S("rc_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rc")),
-                S("rc_engage", "敌人进了圈里炮塔的射程，炮塔正在开火（数着两座炮塔的开火次数）", 180, null, TickTurretsEngaged),
-                GenOpen("rc_gen0", 0), GenToggle("rc_off0", 0, true), GenClose("rc_close0", 0),
-                GenOpen("rc_gen1", 1), GenToggle("rc_off1", 1, true), GenClose("rc_close1", 1),
-                GenOpen("rc_gen2", 2), GenToggle("rc_off2", 2, true), GenClose("rc_close2", 2),
-                S("rc_nopower", "断链：家园断电——炮塔状态写明缺电；敌人还在射程里，开火次数不再增加", 90, null, TickTurretsNoPower),
-                GenOpen("rc_gen_on0", 0), GenToggle("rc_on0", 0, false), GenClose("rc_closeon0", 0),
-                GenOpen("rc_gen_on1", 1), GenToggle("rc_on1", 1, false), GenClose("rc_closeon1", 1),
-                GenOpen("rc_gen_on2", 2), GenToggle("rc_on2", 2, false), GenClose("rc_closeon2", 2),
-                S("rc_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("rc_power", "来电：炮塔恢复有电，敌人还在射程里就接着开火（开火次数又增加）", 120, null, TickTurretsPowered),
-
-                // ── 6. 目标死亡（两台机器先开到抵达点；部队一到就接入第一台冲进敌群）──
+                S("rc_list", "记下还活着的家园机器（前几波里可能已有机器阵亡、应急打印过），至多两台", 10, null, TickListVictims),
                 S("rc_sel_a0", "左键点第一台家园机器", 20, c => FgjM1Journey.ClickMachine(c, "victimA"), c => FgjM1Journey.TickSelected(c, "victimA"), retries: 4),
                 S("rc_send_a", "右键点预警条写的抵达点（右键地面 = 移动）：它从闸门出圈去迎敌", 30, c => RightClickArrival(c, "victimA"), c => TickSentToArrival(c, "victimA"), retries: 2),
                 S("rc_sel_b0", "左键点第二台家园机器（只剩一台就跳过）", 20, c => { if (c.GetInt("victimB") > 0) { FgjM1Journey.ClickMachine(c, "victimB"); } },
                     c => c.GetInt("victimB") > 0 ? FgjM1Journey.TickSelected(c, "victimB") : StepOutcome.Done("只剩一台机器，跳过"), retries: 4),
                 S("rc_send_b", "右键点抵达点：第二台也去", 30, c => RightClickArrival(c, "victimB"), c => TickSentToArrival(c, "victimB"), retries: 2),
-                S("rc_charge", "部队一到：左键点第一台、按接入键（直控）冲进敌群——机器被打死，信号回到归还核心或弹到最近能接入的机器（原因写明），黑匣子回收；这一波打完还活着就再来一波", 1500, null, TickUplinkedDies),
+                S("rc_charge", "部队离抵达不到 30 游戏秒时左键点第一台、按接入键（直控）等着，部队一展开就冲进敌群（直控中攻城展开不自动暂停，FG-GAP-114）——机器被打死，信号回到归还核心或弹到最近能接入的机器（原因写明），黑匣子回收；这一波打完它还活着就再请一波", 1500, null, TickUplinkedDies),
                 S("rc_sel_b", "看还有哪些家园机器活着（第一台阵亡后信号回核心或弹到另一台）", 10, null, c => StepOutcome.Done($"还活着的家园机器：{string.Join("、", Victims(c).Where(MachineAlive).Select(FgjM1Journey.Label))}（信号在 {(SignalPresence.AtCore ? "归还核心" : FgjM1Journey.Label(SignalPresence.CurrentMachineLogicId))}）")),
                 S("rc_attack", "剩下的家园机器：信号在谁身上就直控它开进敌群，否则左键选中、右键点进攻的敌人（右键敌人 = 攻击）——都被打死、家园机器全灭 → 应急打印一台机器救回家园；这一波打完还有活着的就再来一波", 1500, null, TickWipedAndPrinted, retries: 1),
-                S("rc_back", "第三波（含加的几波）结束：结算记着阵亡的家园机器，炮塔照常守住", 400, null, TickPowerBack),
+                S("rc_back", "第三波（含加的几波）结束：结算记着阵亡的家园机器，炮塔照常守住", 400, null, TickThirdWaveBack),
+                S("rc_leave", "信号还在机器上（阵亡后弹到了别的机器、处于直控）就按接入键离开：信号回到归还核心、镜头回战略视角（建造与通用面板要在战略视角里）", 15,
+                    c => { if (!SignalPresence.AtCore) { JourneyInput.ReleaseKeys(); JourneyInput.PressAction(GameActionId.ToggleCameraView); } }, TickBackToStrategy, retries: 2),
+
+                // ── 5. 断链（再请一波：攻城中按 0.5 倍速，敌人进了圈里炮塔的射程、炮塔正在开火时断电 → 停火 → 逐台启用 → 恢复开火）──
+                // 修复轮续：断链放在目标死亡之后的单独一波——放在同一波的前半段时，断电那十几秒里敌人在圈外多活一阵，两台在圈外修建筑的家园机器先被打死，目标死亡就没有机器可接入（续跑实测）。
+                S("rp_fix", "进度夹具：剧情节点再触发一波", 10, ApplyRaidFixture, c => TickRaidRequested(c, "rp")),
+                S("rp_warn", "等预警", 600, null, c => TickWarned(c, "rp")),
+                S("rp_gens", "记下现在还在发电的发电机（开局那台、圈里的发电机 2）", 10, null, TickListGens),
+                S("rp_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rp")),
+                S("rp_half", "按 0.5 倍速键（断链要在交战中做：3 倍速下这一波 20 秒就被炮塔打完，放慢世界、留出在发电机上操作的时间）", 10, c => JourneyInput.PressAction(GameActionId.SpeedHalf), c => TickSpeedIs(c, 0.5f), retries: 1),
+                S("rp_engage", "敌人进了圈里炮塔的射程，炮塔正在开火（内核武器开着、炮塔名下击毁或对敌伤害在涨）", 180, null, TickTurretsEngaged),
+                GenOpen("rp_gen0", 0), GenToggle("rp_off0", 0, true), GenClose("rp_close0", 0),
+                GenOpen("rp_gen1", 1), GenToggle("rp_off1", 1, true), GenClose("rp_close1", 1),
+                GenOpen("rp_gen2", 2), GenToggle("rp_off2", 2, true), GenClose("rp_close2", 2),
+                S("rp_nopower", "断链：家园断电——炮塔状态写明缺电、内核武器关掉；敌人还在射程里，炮塔名下击毁与对敌伤害都不再涨", 90, null, TickTurretsNoPower),
+                GenOpen("rp_gen_on0", 0), GenToggle("rp_on0", 0, false), GenClose("rp_closeon0", 0),
+                GenOpen("rp_gen_on1", 1), GenToggle("rp_on1", 1, false), GenClose("rp_closeon1", 1),
+                GenOpen("rp_gen_on2", 2), GenToggle("rp_on2", 2, false), GenClose("rp_closeon2", 2),
+                S("rp_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+                S("rp_power", "来电：炮塔恢复有电、内核武器打开，敌人还在射程里就接着开火（炮塔名下击毁或对敌伤害又涨）", 120, null, TickTurretsPowered),
+                S("rp_fast", "按 3 倍速键", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
+                S("rp_end", "这一波被炮塔打退（只结算一次）", 400, null, c => TickRaidOver(c, "rp")),
 
                 // ── 承接 DEBT-FG5RND06-03：真实突袭打死家园机器 → 黑匣子 → 陈列馆分析 → 技术数据 → 研究 ──
                 S("bb_plan", "看地形：在核心配电范围里规划黑匣子陈列馆与仿真实验室（电不够就加发电机 2）", 30, null, TickBlackBoxPlan),
                 S("bb_build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("bb_place", "放陈列馆、仿真实验室（电不够时连同发电机 2）", 200, null, c => P.TickActions(c, "bbp", 40), retries: 2),
                 S("bb_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("bb_built", "机器取料施工：陈列馆、实验室建成接电（陈列馆开始分析第三波阵亡机器的黑匣子）", 900, null, c => M.TickBuilt(c, new[] { "gallery", "lab" }, Array.Empty<string>(), true, "陈列馆与实验室")),
+                S("bb_built", "机器取料施工：陈列馆、实验室建成接电（陈列馆开始分析被突袭打死的家园机器的黑匣子）", 900, null, c => M.TickBuilt(c, new[] { "gallery", "lab" }, Array.Empty<string>(), true, "陈列馆与实验室")),
                 S("bb_rt_open", "按研发树键（默认 K）打开研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, true), c => M.TickTreeOpen(c, true), retries: 1),
                 S("bb_rt_q", "点“工业”分支、左键点“工业 · 实验室 T2”排进研究队列（仿真实验室把技术数据换成研究点）", 15, null, c => M.TickQueueNode(c, NodeLabT2), retries: 2),
                 S("bb_rt_close", "再按研发树键关闭研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, false), c => M.TickTreeOpen(c, false), retries: 1),
-                S("bb_done", "陈列馆分析完第三波阵亡机器的一个黑匣子：技术数据 +20 逐点入账（统计“黑匣子”收入），这期间实验室取技术数据换研究点", 1500, null, TickBlackBoxResearched),
+                S("bb_done", "陈列馆分析完一台被真实突袭打死的家园机器的黑匣子（按队列先后，前几波阵亡的排在前面）：技术数据 +20 逐点入账（统计“黑匣子”收入），这期间实验室取技术数据换研究点", 1500, null, TickBlackBoxResearched),
             },
         };
 
@@ -422,8 +434,16 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.Set("gens.t" + i.ToString(CultureInfo.InvariantCulture), gens[i].BuildingTypeId);
                 P.SetP(c, "gens.p" + i.ToString(CultureInfo.InvariantCulture), new GridCell(gens[i].GridX, gens[i].GridY));
             }
-            // 第三波要打死的家园机器：此刻还活着的（前两波里可能已有机器阵亡、应急打印过），至多两台。
-            List<MachineRecord> alive = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId).OrderBy(m => m.LogicId).ToList();
+            return StepOutcome.Done($"还在发电的发电机 {gens.Count} 台：{string.Join("、", gens.Select(b => $"{BuildingOps.NameOf(b)} {D.Cell(new GridCell(b.GridX, b.GridY))}"))}；{P.PowerLine(St)}");
+        }
+
+        private static List<MachineRecord> HomeMachinesAlive() =>
+            MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId).OrderBy(m => m.LogicId).ToList();
+
+        /// <summary>第三波要打死的家园机器：此刻还活着的（前两波里可能已有机器阵亡、应急打印过），至多两台。</summary>
+        private static StepOutcome TickListVictims(JourneyContext c)
+        {
+            List<MachineRecord> alive = HomeMachinesAlive();
             c.Set("victims", string.Join(",", alive.Select(m => m.LogicId.ToString(CultureInfo.InvariantCulture))));
             if (alive.Count == 0)
             {
@@ -431,8 +451,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             c.SetInt("victimA", alive[0].LogicId);
             c.SetInt("victimB", alive.Count > 1 ? alive[1].LogicId : 0);
-            return StepOutcome.Done($"还在发电的发电机 {gens.Count} 台：{string.Join("、", gens.Select(b => $"{BuildingOps.NameOf(b)} {D.Cell(new GridCell(b.GridX, b.GridY))}"))}；{P.PowerLine(St)}；" +
-                                    $"家园机器 {string.Join("、", alive.Select(m => FgjM1Journey.Label(m.LogicId)))}");
+            return StepOutcome.Done($"家园机器 {string.Join("、", alive.Select(m => FgjM1Journey.Label(m.LogicId)))}");
         }
 
         private static StepOutcome OnGen(JourneyContext c, int i, Func<string, GridCell, StepOutcome> act)
@@ -1032,8 +1051,15 @@ namespace GameLogic.EditorTools.JourneyBots
             return FgjM3Common.SinceMs(c, "tg") < 1500 ? StepOutcome.Wait : StepOutcome.Retry($"点“{(disable ? "禁用" : "启用")}”没生效：" + JourneyInput.LastUiFailure);
         }
 
+        private static int SiegeNotes() => NotificationCenter.History.Count(e => e.Type?.Id == "raid_siege");
+
         private static StepOutcome TickUplinkedDies(JourneyContext c)
         {
+            // FG-GAP-114 行为核对：机器接入直控期间世界有没有被（攻城开始的）自动暂停——放在按暂停键继续之前看。
+            if (SignalPresence.CurrentMachineLogicId == c.GetInt("victimA") && c.GetInt("victimA") > 0 && GameClock.Paused)
+            {
+                c.SetInt("rc.pausedUp", 1);
+            }
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
             int a = c.GetInt("victimA");
@@ -1064,9 +1090,20 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 c.SetInt("bOnline", bounced && now == c.GetInt("victimB") ? 1 : 0);
                 bool box = BlackBoxService.Find(s, a) != null;
+                // FG-GAP-114：部队展开时它已经接入直控（下一波临近时先接入）——世界不该被“攻城开始”自动暂停，通知照常进历史。
+                string gap114 = string.Empty;
+                if (c.GetInt("rc.preUp") == 1)
+                {
+                    int notes = SiegeNotes() - c.GetInt("rc.siegeNotes0");
+                    if (c.GetInt("rc.pausedUp") == 1 || notes <= 0)
+                    {
+                        return StepOutcome.Fail($"直控中攻城展开：世界被自动暂停 {c.GetInt("rc.pausedUp") == 1}、“攻城开始”通知新增 {notes} 条（FG-GAP-114 应为不暂停、通知照常进历史）");
+                    }
+                    gap114 = $"；部队展开时它正接入直控：世界没有被自动暂停、“攻城开始”通知照常进历史（+{notes}，FG-GAP-114）";
+                }
                 return box
                     ? StepOutcome.Done($"{FgjM1Journey.Label(a)} 被突袭部队打死：信号{(bounced ? "弹到最近能接入的 " + FgjM1Journey.Label(now) : "回到归还核心")}（“{fb}”）；黑匣子回收进陈列馆队列" +
-                                       (c.GetInt("aEarly") > 0 ? $"（{FgjM1Journey.Label(c.GetInt("aEarly"))} 在接入之前已被打死）" : string.Empty) + $"；第三波共 {(c.Get("rc.plans") ?? string.Empty).Split(',').Length} 波")
+                                       (c.GetInt("aEarly") > 0 ? $"（{FgjM1Journey.Label(c.GetInt("aEarly"))} 在接入之前已被打死）" : string.Empty) + $"；第三波共 {(c.Get("rc.plans") ?? string.Empty).Split(',').Length} 波" + gap114)
                     : StepOutcome.Fail($"{FgjM1Journey.Label(a)} 阵亡了但黑匣子没回收");
             }
             List<(int Id, Vector2 Pos)> raiders = D.Raiders();
@@ -1090,21 +1127,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 if (!up)
                 {
-                    // 部队到了：左键点它、按接入键（玩家的做法）。
-                    if (GameRoot.HomeValley.SelectedMachineLogicId != a)
-                    {
-                        if (NowMs() - c.GetLong(FgjM3Common.SK(c, "selAt")) > 1500)
-                        {
-                            c.SetLong(FgjM3Common.SK(c, "selAt"), NowMs());
-                            FgjM1Journey.ClickMachine(c, "victimA");
-                        }
-                        return StepOutcome.Wait;
-                    }
-                    if (NowMs() - c.GetLong(FgjM3Common.SK(c, "keyAt")) > 2000)
-                    {
-                        c.SetLong(FgjM3Common.SK(c, "keyAt"), NowMs());
-                        JourneyInput.PressAction(GameActionId.ToggleCameraView);
-                    }
+                    UplinkVictim(c, a); // 部队到了：左键点它、按接入键（玩家的做法）
                     return StepOutcome.Wait;
                 }
                 if (!JourneyInput.Holding)
@@ -1115,7 +1138,26 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 return StepOutcome.Wait;
             }
-            // 没有敌人在场：接入着就先退出（直控锁 1x，等下一波太慢），这一波打完它还活着就再请一波。
+            // 没有敌人在场。下一波离抵达不到 30 游戏秒（或已经到了、正在展开）：先接入、原地等着（直控锁 1x）——
+            // 部队一展开就集火，等它们到了再去选中、按接入键，残血的机器常常来不及接入就被打死（修复轮续跑实测）。
+            TransitGroupRecord next = RaidGroup(c.Get("rc.plan"));
+            bool incoming = RaidResultService.FindByPlan(s, c.Get("rc.plan")) == null && next != null
+                            && (next.State != TransitGroupState.Marching || GameLogic.Campaign.WorldSim.WorldTransitSystem.EtaSeconds(next) <= 30);
+            if (incoming)
+            {
+                if (!up)
+                {
+                    UplinkVictim(c, a);
+                }
+                else if (c.GetInt("rc.preUp") == 0)
+                {
+                    c.SetInt("rc.preUp", 1);
+                    c.SetInt("rc.siegeNotes0", SiegeNotes());
+                    c.Log($"下一波离抵达不到 30 游戏秒：{FgjM1Journey.Label(a)} 已接入直控，在原地等部队展开（{GameClock.Speed}x）");
+                }
+                return StepOutcome.Wait;
+            }
+            // 这一波打完了：接入着就先退出（直控锁 1x，等下一波筹备太慢），它还活着就再请一波。
             if (up)
             {
                 if (NowMs() - c.GetLong(FgjM3Common.SK(c, "leaveAt")) > 2000)
@@ -1128,6 +1170,29 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             CallAnotherWaveIfNeeded(c);
             return StepOutcome.Wait;
+        }
+
+        /// <summary>选中接入的那台（左键点它）、按接入键（玩家的做法；按键间隔 2 秒，等上一下生效）。</summary>
+        private static void UplinkVictim(JourneyContext c, int a)
+        {
+            if (SignalPresence.CurrentMachineLogicId == a)
+            {
+                return;
+            }
+            if (GameRoot.HomeValley.SelectedMachineLogicId != a)
+            {
+                if (NowMs() - c.GetLong(FgjM3Common.SK(c, "selAt")) > 1500)
+                {
+                    c.SetLong(FgjM3Common.SK(c, "selAt"), NowMs());
+                    FgjM1Journey.ClickMachine(c, "victimA");
+                }
+                return;
+            }
+            if (NowMs() - c.GetLong(FgjM3Common.SK(c, "keyAt")) > 2000)
+            {
+                c.SetLong(FgjM3Common.SK(c, "keyAt"), NowMs());
+                JourneyInput.PressAction(GameActionId.ToggleCameraView);
+            }
         }
 
         /// <summary>直控开车时屏障圈挡在中间：机器在圈里、敌人在圈外（或反过来）就先开到闸门里侧一格、再到外侧一格，再朝敌人开（玩家也得从闸门出去）。</summary>
@@ -1289,19 +1354,10 @@ namespace GameLogic.EditorTools.JourneyBots
             JourneyInput.Click(at, 1);
         }
 
-        private static StepOutcome TickPowerBack(JourneyContext c)
+        private static StepOutcome TickThirdWaveBack(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
-            BuildingRecord t = P.Bld(c, "t1");
-            if (t != null && t.PowerState == BuildingPowerState.Powered)
-            {
-                c.SetInt("pw.seen", 1);
-            }
-            if (t == null || c.GetInt("pw.seen") == 0)
-            {
-                return c.StepElapsed < 60 ? StepOutcome.Wait : StepOutcome.Fail($"启用发电机后炮塔一直没电：{t?.PowerState}；{P.PowerLine(s)}");
-            }
             if (RaidResultService.IsCoreLost(s))
             {
                 return StepOutcome.Fail("归还核心被摧毁");
@@ -1311,15 +1367,12 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Wait;
             }
-            int turretKills = r.Contrib.Where(x => x.Kind == "turret").Sum(x => x.Kills);
+            int turretKills = RcResults(c).Sum(x => x.Contrib.Where(k => k.Kind == "turret").Sum(k => k.Kills));
             int victims = Math.Max(1, Victims(c).Count);
             int lost = RcResults(c).Sum(x => x.LostMachines);
-            // 来电后炮塔恢复（有电、状态不再写缺电）；这一波剩下的时间（攻城一个游戏小时）里打没打到人看来电时敌人还剩多少，只记录不硬性要求。
-            string reason = BuildingStatusService.Evaluate(s, t).Reason ?? string.Empty;
-            string gens = string.Join("、", St.BuildingRecords.Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && (b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator || b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator2)).Select(b => $"{BuildingOps.NameOf(b)} {b.ConstructionState}"));
             return lost >= victims
-                ? StepOutcome.Done($"启用发电机那一刻炮塔来电恢复（现在 {t.PowerState}，状态“{reason.Replace("\n", " / ")}”；发电机 [{gens}]；这一波炮塔击毁 {turretKills} 台）：{D.ResultLine(r)}")
-                : StepOutcome.Fail($"这一波结算不对（应记 {victims} 台机器损失、炮塔来电恢复）：炮塔 {t.PowerState}“{reason}”；{D.ResultLine(r)}");
+                ? StepOutcome.Done($"第三波（含加的几波）结束：结算记着阵亡的家园机器 {lost} 台（应 ≥ {victims}），炮塔击毁 {turretKills} 台、核心没丢：{D.ResultLine(r)}")
+                : StepOutcome.Fail($"第三波结算不对（应记 {victims} 台机器损失）：{D.ResultLine(r)}");
         }
 
         // ── 承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 回滚 ─────────────────────────────
@@ -1504,6 +1557,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Retry("确认后队列里没有这项熔合：" + p?.MessageText);
             }
             c.Set("fu.job" + n.ToString(CultureInfo.InvariantCulture), job.JobId);
+            // 入队时记在任务上的芯片基板与技术数据（任务做完后记录上的这两个数会清零；回滚核对守恒时按这里记的算“做完的那项照常消耗”）。
+            c.SetInt("fu.jsub" + n.ToString(CultureInfo.InvariantCulture), job.Substrate);
+            c.SetLong("fu.jtech" + n.ToString(CultureInfo.InvariantCulture), job.Tech);
             int reserved = St.PrimitiveChips?.Count(x => x != null && x.ReservedByTransactionId == job.JobId) ?? 0;
             return reserved == 2
                 ? StepOutcome.Done($"第 {n} 项入队：{FusionService.StateText(job)}（{job.Duration:0.#} 秒）；两枚父固件被这项预留、芯片基板 {job.Substrate} 件与技术数据 {job.Tech} 记在任务上")
@@ -1549,14 +1605,26 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             List<FusionJobRecord> rolled = jobs.Where(j => j.State == FusionJobState.RolledBack).ToList();
             List<FusionJobRecord> done = jobs.Where(j => j.State == FusionJobState.Done).ToList();
+            // 做完的那项照常消耗：按入队时记下的芯片基板 / 技术数据算（第 i 项 = fu.job{i+1}）。
+            int doneSub = 0;
+            long doneTech = 0;
+            for (int i = 0; i < jobs.Count; i++)
+            {
+                if (jobs[i].State == FusionJobState.Done)
+                {
+                    string k = (i + 1).ToString(CultureInfo.InvariantCulture);
+                    doneSub += c.GetInt("fu.jsub" + k);
+                    doneTech += c.GetLong("fu.jtech" + k);
+                }
+            }
             bool reasons = rolled.Count > 0 && rolled.All(j => j.Reason == "destroyed");
             bool chips = rolled.All(j => PrimitiveInventory.Find(s, j.PartA) is PrimitiveChipRecord ca && string.IsNullOrEmpty(ca.ReservedByTransactionId)
                                          && PrimitiveInventory.Find(s, j.PartB) is PrimitiveChipRecord cb && string.IsNullOrEmpty(cb.ReservedByTransactionId))
                          && M.ChipCount(FirmwareCatalog.FwOverloadId) == c.GetInt("fu.a0") - done.Count && M.ChipCount(FwPartner) == c.GetInt("fu.b0") - done.Count;
             int sub = SubstrateTotal();
-            bool subOk = sub == c.GetInt("fu.sub0") - done.Sum(j => j.Substrate);
+            bool subOk = sub == c.GetInt("fu.sub0") - doneSub;
             long exp = TechDataFlow.ExpenseOf(s, TechDataFlow.Fusion);
-            bool techOk = exp == c.GetLong("fu.exp0") + done.Sum(j => j.Tech);
+            bool techOk = exp == c.GetLong("fu.exp0") + doneTech;
             bool note = NotificationCenter.History.Skip(c.GetInt("fu.notes0")).Any(e => e.Type?.Id == "fusion_rolled_back");
             RaidResultRecord rr = RaidResultService.FindByPlan(s, c.Get("rs.plan"));
             bool loss = rr != null && rr.Losses.Any(x => x.Id == b.BuildingId);
@@ -1566,41 +1634,95 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             return reasons && chips && subOk && techOk && note && loss
                 ? StepOutcome.Done($"突袭部队拆掉了正在熔合的合成台（{b.ConstructionState}）：回滚 {rolled.Count} 项（{string.Join("、", rolled.Select(j => FusionService.StateText(j)))}，原因“被毁”）、完成 {done.Count} 项；" +
-                                   $"父固件预留释放（过载 {M.ChipCount(FirmwareCatalog.FwOverloadId)}、液氮 {M.ChipCount(FwPartner)} 枚）；芯片基板总量 {c.GetInt("fu.sub0")} → {sub}、熔合的技术数据支出 {c.GetLong("fu.exp0")} → {exp}（回滚的全额退回）；" +
+                                   $"父固件预留释放（过载 {M.ChipCount(FirmwareCatalog.FwOverloadId)}、液氮 {M.ChipCount(FwPartner)} 枚）；芯片基板总量 {c.GetInt("fu.sub0")} → {sub}、熔合的技术数据支出 {c.GetLong("fu.exp0")} → {exp}（回滚的全额退回{(done.Count > 0 ? $"，做完的 {done.Count} 项照常消耗芯片基板 {doneSub}、技术数据 {doneTech}" : string.Empty)}）；" +
                                    $"通知“熔合中止”；突袭结算记下合成台这处损失（{D.ResultLine(rr)}）")
                 : StepOutcome.Fail($"回滚不完整：原因 {reasons}、固件 {chips}、芯片基板 {subOk}（{c.GetInt("fu.sub0")} → {sub}）、技术数据 {techOk}（{c.GetLong("fu.exp0")} → {exp}）、通知 {note}、结算损失 {loss}；[{string.Join("；", jobs.Select(j => j.State + "/" + j.Reason))}]");
         }
 
-        // ── 断链：数着圈里两座炮塔的开火次数（内核里炮塔下一发的时刻往后跳一次 = 开了一发）────────────────
+        // ── 断链：圈里两座炮塔在不在开火 ─────────────────────────────────────────────────────────────
+        // 修复轮续：上一版数内核单位读数里炮塔“下一发的时刻”跳了几次——续跑实测内核给炮塔单位的这个读数一直是 0，开火次数永远是 0（这一段从没跑到过）。
+        // 改用三样读数一起判：① 内核里炮塔的武器开关（TurretService：建成且有电才开，关着内核不让它开火）；② 这一波突袭结算里记在这两座炮塔名下的击毁数；
+        // ③ 家园战斗内核的累计对敌伤害（突袭结算“造成伤害”同一个读数）——家园机器这时在圈里待命，只有它们离敌人都远（> 12 米）时这份伤害才只可能来自炮塔。
 
-        private static bool TurretView(JourneyContext c, string key, out BinGames.Sim.Combat.CombatUnitView v)
+        private const float MachineReach = 12f;
+
+        private static bool TurretWeapon(JourneyContext c, string key, out bool enabled)
         {
-            v = default;
+            enabled = false;
             BuildingRecord b = P.Bld(c, key);
             TurretRecord t = b != null ? TurretService.Find(St, b.BuildingId) : null;
             CombatSite site = D.HomeSite;
-            return t != null && site != null && site.TryGetTurretUnit(t.Serial, out int unit) && site.Kernel.TryGetUnit(unit, out v);
+            if (t == null || site == null || !site.TryGetTurretState(t.Serial, out TurretUnitState us) || !us.Alive)
+            {
+                return false;
+            }
+            enabled = us.WeaponEnabled;
+            return true;
         }
 
-        /// <summary>每帧调：两座炮塔各自“下一发的时刻”往后跳了几次（= 开了几发），累计在旅程变量里；返回两座合计。</summary>
-        private static int SampleFire(JourneyContext c)
+        private static string WeaponLine(JourneyContext c) =>
+            string.Join("、", new[] { "t1", "t2" }.Select(k => TurretWeapon(c, k, out bool on) ? $"{P.Bld(c, k)?.BuildingId} 内核武器{(on ? "开" : "关")}" : $"{k} 不在内核"));
+
+        /// <summary>家园战斗内核的累计对敌伤害（突袭结算“造成伤害”同一个读数）。</summary>
+        private static long DealtNow()
         {
-            int total = 0;
-            foreach (string k in new[] { "t1", "t2" })
+            CombatSite site = D.HomeSite;
+            return site != null && !site.IsDisposed ? site.KernelCounters.DamageToHostile : 0;
+        }
+
+        /// <summary>断链这一波（rp）的突袭结算里记在圈里两座炮塔名下的击毁数。</summary>
+        private static int TurretKills(JourneyContext c)
+        {
+            RaidResultRecord r = RaidResultService.FindByPlan(St, c.Get("rp.plan"));
+            if (r == null)
             {
-                string key = "fire." + k;
-                if (TurretView(c, k, out BinGames.Sim.Combat.CombatUnitView v))
-                {
-                    string last = c.Get(key + ".at");
-                    if (!string.IsNullOrEmpty(last) && double.TryParse(last, NumberStyles.Float, CultureInfo.InvariantCulture, out double prev) && v.NextFireAt > prev + 1e-6)
-                    {
-                        c.SetInt(key, c.GetInt(key) + 1);
-                    }
-                    c.Set(key + ".at", v.NextFireAt.ToString("R", CultureInfo.InvariantCulture));
-                }
-                total += c.GetInt(key);
+                return 0;
             }
-            return total;
+            var ids = new HashSet<string>(new[] { "t1", "t2" }.Select(k => P.Bld(c, k)?.BuildingId).Where(x => !string.IsNullOrEmpty(x)));
+            return r.Contrib.Where(x => x != null && x.Kind == "turret" && ids.Contains(x.Id)).Sum(x => x.Kills);
+        }
+
+        /// <summary>还活着的家园机器离最近的突袭单位多远（没有机器或没有敌人时 float.MaxValue）。</summary>
+        private static float MachineToRaider(JourneyContext c)
+        {
+            float best = float.MaxValue;
+            List<(int Id, Vector2 Pos)> raiders = D.Raiders();
+            CombatSite site = D.HomeSite;
+            if (site == null || raiders.Count == 0)
+            {
+                return best;
+            }
+            foreach (MachineRecord m in HomeMachinesAlive())
+            {
+                if (!site.TryGetMachinePosition(m.LogicId, out Vector2 mp))
+                {
+                    continue;
+                }
+                foreach ((int _, Vector2 pos) in raiders)
+                {
+                    best = Mathf.Min(best, Vector2.Distance(mp, pos));
+                }
+            }
+            return best;
+        }
+
+        private static string Dist(float d) => d >= float.MaxValue / 2 ? "—" : $"{d:F1} 米";
+
+        /// <summary>记下开火证据的基准（<paramref name="tag"/>：炮塔名下击毁数、内核累计对敌伤害）。</summary>
+        private static void MarkFire(JourneyContext c, string tag)
+        {
+            c.SetInt(FgjM3Common.SK(c, tag + ".k0"), TurretKills(c));
+            c.SetLong(FgjM3Common.SK(c, tag + ".d0"), DealtNow());
+        }
+
+        /// <summary>从基准到现在圈里炮塔开过火的证据：名下击毁数涨了，或者对敌伤害涨了而家园机器离敌人都远（伤害只可能来自炮塔）。</summary>
+        private static bool FiredSince(JourneyContext c, string tag, out string what)
+        {
+            int kills = TurretKills(c) - c.GetInt(FgjM3Common.SK(c, tag + ".k0"));
+            long hit = DealtNow() - c.GetLong(FgjM3Common.SK(c, tag + ".d0"));
+            float mr = MachineToRaider(c);
+            what = $"炮塔名下击毁 +{kills}、对敌伤害 +{hit}（家园机器离敌最近 {Dist(mr)}）";
+            return kills > 0 || hit > 0 && mr > MachineReach;
         }
 
         /// <summary>圈里两座炮塔的射程里有没有在场的突袭单位（射程取炮塔读数，没读到按 18 米）。</summary>
@@ -1616,7 +1738,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     continue;
                 }
-                float range = TurretService.TryGetReadout(St, b.BuildingId, out TurretReadout ro) && ro.Range > 0.5f ? ro.Range : 18f;
+                float r0 = TurretService.RangeOfTurret(St, b.BuildingId); // 只读：炮塔面板读数同一个射程（含等级倍率）
+                float range = r0 > 0.5f ? r0 : 18f;
                 if (range > 0.5f)
                 {
                     c.Set("t.range", range.ToString("R", CultureInfo.InvariantCulture));
@@ -1631,30 +1754,49 @@ namespace GameLogic.EditorTools.JourneyBots
             return any;
         }
 
+        /// <summary>断链段每 10 真实秒记一行：在场突袭单位、两座炮塔的内核武器开关、炮塔名下击毁、内核累计对敌伤害、家园机器离敌多远、倍速。</summary>
+        private static void LogEngage(JourneyContext c, string tag)
+        {
+            int tick = (int)(c.StepElapsed / 10);
+            if (tick <= c.GetInt(FgjM3Common.SK(c, "dlog")))
+            {
+                return;
+            }
+            c.SetInt(FgjM3Common.SK(c, "dlog"), tick);
+            RaiderInRange(c, out float near);
+            c.Log($"{tag}：在场突袭单位 {D.Raiders().Count}（离炮塔最近 {Dist(near)}）；{WeaponLine(c)}；炮塔名下击毁 {TurretKills(c)}；内核累计对敌伤害 {DealtNow()}；" +
+                  $"家园机器离敌最近 {Dist(MachineToRaider(c))}；{GameClock.Speed}x{(GameClock.Paused ? "（暂停）" : string.Empty)}");
+        }
+
         private static StepOutcome TickTurretsEngaged(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
-            int fire = SampleFire(c);
+            LogEngage(c, "交战");
             if (!FgjM3Common.Done(c, "e0"))
             {
-                c.SetInt(FgjM3Common.SK(c, "f0"), fire);
+                MarkFire(c, "e");
                 FgjM3Common.Mark(c, "e0");
                 return StepOutcome.Wait;
             }
             bool inRange = RaiderInRange(c, out float near);
-            int shots = fire - c.GetInt(FgjM3Common.SK(c, "f0"));
-            if (inRange && shots > 0)
+            bool armed = TurretWeapon(c, "t1", out bool w1) && TurretWeapon(c, "t2", out bool w2) && w1 && w2;
+            bool fired = FiredSince(c, "e", out string what);
+            if (inRange && armed && fired)
             {
-                return StepOutcome.Done($"敌人进了圈里炮塔的射程（最近 {near:F1} 米），两座炮塔在开火（这几秒开了 {shots} 发）；{P.PowerLine(St)}");
+                return StepOutcome.Done($"敌人进了圈里炮塔的射程（最近 {near:F1} 米），{WeaponLine(c)}、正在开火（{what}）；{GameClock.Speed}x；{P.PowerLine(St)}");
             }
-            return c.StepElapsed < 170 ? StepOutcome.Wait : StepOutcome.Fail($"等不到敌人进射程、炮塔开火：射程里有敌人 {inRange}（最近 {near:F1} 米）、开火 {shots} 发");
+            if (D.Raiders().Count == 0 && c.StepElapsed > 5)
+            {
+                return StepOutcome.Fail($"敌人进射程之前（或刚进就）这一波已经没有在场单位（{what}）：断链得在交战中做");
+            }
+            return c.StepElapsed < 170 ? StepOutcome.Wait : StepOutcome.Fail($"等不到敌人进射程、炮塔开火：射程里有敌人 {inRange}（最近 {Dist(near)}）、{WeaponLine(c)}、{what}");
         }
 
         private static StepOutcome TickTurretsNoPower(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
+            LogEngage(c, "断电");
             CampaignState s = St;
-            int fire = SampleFire(c);
             var lines = new List<string>();
             bool allOff = true;
             foreach (string k in new[] { "t1", "t2" })
@@ -1665,13 +1807,13 @@ namespace GameLogic.EditorTools.JourneyBots
                     return StepOutcome.Fail("炮塔不见了");
                 }
                 string reason = BuildingStatusService.Evaluate(s, t).Reason ?? string.Empty;
-                bool off = t.PowerState != BuildingPowerState.Powered && reason.Contains("没有电");
-                allOff &= off;
-                lines.Add($"{t.BuildingId}：{t.PowerState}，“{reason.Replace("\n", " / ")}”");
+                bool weaponOff = TurretWeapon(c, k, out bool on) && !on;
+                allOff &= t.PowerState != BuildingPowerState.Powered && reason.Contains("没有电") && weaponOff;
+                lines.Add($"{t.BuildingId}：{t.PowerState}、内核武器{(weaponOff ? "关" : "开")}，“{reason.Replace("\n", " / ")}”");
             }
             if (!allOff)
             {
-                return c.StepElapsed < 50 ? StepOutcome.Wait : StepOutcome.Fail("禁用发电机后炮塔仍有电（或状态没写缺电）：" + string.Join("；", lines));
+                return c.StepElapsed < 50 ? StepOutcome.Wait : StepOutcome.Fail("禁用发电机后炮塔仍有电（或状态没写缺电、内核武器没关）：" + string.Join("；", lines));
             }
             long now = GameClock.Ticks;
             if (!FgjM3Common.Done(c, "off"))
@@ -1683,7 +1825,8 @@ namespace GameLogic.EditorTools.JourneyBots
             long since = now - c.GetLong(FgjM3Common.SK(c, "offAt"));
             if (since < GameClock.StepHz)
             {
-                c.SetInt(FgjM3Common.SK(c, "f0"), fire); // 断电后先等 1 游戏秒（已经出膛的那一发不算），从这里开始数
+                MarkFire(c, "n"); // 断电后先等 1 游戏秒（已经出膛的弹体落地），从这里开始看
+                c.Set(FgjM3Common.SK(c, "mr"), float.MaxValue.ToString("R", CultureInfo.InvariantCulture));
                 return StepOutcome.Wait;
             }
             if (RaiderInRange(c, out float near))
@@ -1691,59 +1834,75 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.SetInt(FgjM3Common.SK(c, "seen"), c.GetInt(FgjM3Common.SK(c, "seen")) + 1);
                 c.Set(FgjM3Common.SK(c, "near"), near.ToString("F1", CultureInfo.InvariantCulture));
             }
-            int shots = fire - c.GetInt(FgjM3Common.SK(c, "f0"));
-            if (shots > 0)
+            float mr = Mathf.Min(MachineToRaider(c), float.Parse(c.Get(FgjM3Common.SK(c, "mr")), CultureInfo.InvariantCulture));
+            c.Set(FgjM3Common.SK(c, "mr"), mr.ToString("R", CultureInfo.InvariantCulture));
+            int kills = TurretKills(c) - c.GetInt(FgjM3Common.SK(c, "n.k0"));
+            long hit = DealtNow() - c.GetLong(FgjM3Common.SK(c, "n.d0"));
+            if (kills > 0 || hit > 0 && mr > MachineReach)
             {
-                return StepOutcome.Fail($"断电后炮塔还在开火（{shots} 发）：" + string.Join("；", lines));
+                return StepOutcome.Fail($"断电后炮塔还在开火（炮塔名下击毁 +{kills}、对敌伤害 +{hit}，家园机器离敌最近 {Dist(mr)}）：" + string.Join("；", lines));
             }
             if (since < GameClock.StepHz * 6)
             {
                 return StepOutcome.Wait;
             }
+            string other = hit > 0 ? $"；这几秒的对敌伤害 +{hit} 来自圈里的家园机器（离敌最近 {Dist(mr)}），炮塔名下击毁不变" : "；对敌伤害一点没涨";
             return c.GetInt(FgjM3Common.SK(c, "seen")) > 0
-                ? StepOutcome.Done($"家园断电：{P.PowerLine(s)}；炮塔停火 [{string.Join("；", lines)}]——敌人就在射程里（最近 {c.Get(FgjM3Common.SK(c, "near"))} 米），{since / (double)GameClock.StepHz - 1:F1} 游戏秒里两座炮塔一发没开（开火累计停在 {fire}）")
+                ? StepOutcome.Done($"家园断电：{P.PowerLine(s)}；炮塔停火 [{string.Join("；", lines)}]——敌人就在射程里（最近 {c.Get(FgjM3Common.SK(c, "near"))} 米），" +
+                                   $"{since / (double)GameClock.StepHz - 1:F1} 游戏秒里两座炮塔名下击毁一台没涨{other}")
                 : StepOutcome.Fail($"断电这几秒射程里没有敌人，停火看不出来：{string.Join("；", lines)}");
         }
 
         private static StepOutcome TickTurretsPowered(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
+            LogEngage(c, "来电");
             CampaignState s = St;
-            int fire = SampleFire(c);
             var lines = new List<string>();
             bool all = true;
             foreach (string k in new[] { "t1", "t2" })
             {
                 BuildingRecord t = P.Bld(c, k);
                 string reason = t != null ? BuildingStatusService.Evaluate(s, t).Reason ?? string.Empty : "不见了";
-                all &= t != null && t.PowerState == BuildingPowerState.Powered && !reason.Contains("没有电");
-                lines.Add($"{t?.BuildingId}：{t?.PowerState}，“{reason.Replace("\n", " / ")}”");
+                bool weaponOn = TurretWeapon(c, k, out bool on) && on;
+                all &= t != null && t.PowerState == BuildingPowerState.Powered && !reason.Contains("没有电") && weaponOn;
+                lines.Add($"{t?.BuildingId}：{t?.PowerState}、内核武器{(weaponOn ? "开" : "关")}，“{reason.Replace("\n", " / ")}”");
             }
             if (!all)
             {
-                return c.StepElapsed < 50 ? StepOutcome.Wait : StepOutcome.Fail("启用发电机后炮塔还是没电：" + string.Join("；", lines) + "；" + P.PowerLine(s));
+                return c.StepElapsed < 50 ? StepOutcome.Wait : StepOutcome.Fail("启用发电机后炮塔还是没电（或内核武器没开）：" + string.Join("；", lines) + "；" + P.PowerLine(s));
             }
             c.SetInt("pw.seen", 1);
             if (!FgjM3Common.Done(c, "on"))
             {
-                c.SetInt(FgjM3Common.SK(c, "f0"), fire);
+                MarkFire(c, "p");
                 FgjM3Common.Mark(c, "on");
                 return StepOutcome.Wait;
             }
             bool inRange = RaiderInRange(c, out float near);
-            int shots = fire - c.GetInt(FgjM3Common.SK(c, "f0"));
-            if (shots > 0)
+            if (FiredSince(c, "p", out string what))
             {
-                return StepOutcome.Done($"来电：{P.PowerLine(s)}；炮塔恢复 [{string.Join("；", lines)}]，接着开火（来电后 {shots} 发；射程里有敌人 {inRange}，最近 {near:F1} 米）");
+                return StepOutcome.Done($"来电：{P.PowerLine(s)}；炮塔恢复 [{string.Join("；", lines)}]，接着开火（{what}；射程里有敌人 {inRange}，最近 {Dist(near)}）");
             }
             if (D.Raiders().Count == 0)
             {
                 return StepOutcome.Fail("来电时这一波已经没有在场的敌人，恢复开火看不出来：" + string.Join("；", lines));
             }
-            return c.StepElapsed < 110 ? StepOutcome.Wait : StepOutcome.Fail($"来电后炮塔一直没开火（射程里有敌人 {inRange}，最近 {near:F1} 米）：" + string.Join("；", lines));
+            return c.StepElapsed < 110 ? StepOutcome.Wait : StepOutcome.Fail($"来电后炮塔一直没开火（{what}；射程里有敌人 {inRange}，最近 {Dist(near)}）：" + string.Join("；", lines));
         }
 
         // ── 承接 DEBT-FG5RND06-03：黑匣子 → 陈列馆分析 → 技术数据 → 研究 ─────────────────────────────
+
+        private static StepOutcome TickBackToStrategy(JourneyContext c)
+        {
+            if (c.StepElapsed < 1.2)
+            {
+                return StepOutcome.Wait;
+            }
+            return SignalPresence.AtCore && GameLogic.Campaign.WorldSim.WorldView.Director.Mode == GameLogic.View.ViewMode.Strategy
+                ? StepOutcome.Done("信号在归还核心、镜头在战略视角")
+                : StepOutcome.Retry($"按接入键后信号还在 {FgjM1Journey.Label(SignalPresence.CurrentMachineLogicId)} 上");
+        }
 
         private static StepOutcome TickBlackBoxPlan(JourneyContext c)
         {
@@ -1771,8 +1930,27 @@ namespace GameLogic.EditorTools.JourneyBots
             acts.Add(P.ActB(plan.B("gallery")));
             acts.Add(P.ActB(plan.B("lab")));
             P.SetActions(c, "bbp", acts);
-            int boxes = Victims(c).Count(id => BlackBoxService.Find(s, id) != null);
-            return StepOutcome.Done($"规划：{M.Describe(plan, HomeGridService.CorePivot(s))}；陈列馆队列里第三波阵亡机器的黑匣子 {boxes} 个");
+            List<(int Id, string Wave)> killed = RaidKilledMachines();
+            int boxes = killed.Count(k => BlackBoxService.Find(s, k.Id) != null);
+            return StepOutcome.Done($"规划：{M.Describe(plan, HomeGridService.CorePivot(s))}；被真实突袭打死的家园机器 {killed.Count} 台（{string.Join("、", killed.Select(k => FgjM1Journey.Label(k.Id) + "：" + k.Wave))}），陈列馆队列里它们的黑匣子 {boxes} 个");
+        }
+
+        /// <summary>这一局里被真实突袭打死的家园机器（记在各波突袭结算的损失里）与是哪一波。</summary>
+        private static List<(int Id, string Wave)> RaidKilledMachines()
+        {
+            var list = new List<(int, string)>();
+            var seen = new HashSet<int>();
+            foreach (RaidResultRecord r in RaidResultService.All(St).Where(x => x != null).OrderBy(x => x.Serial))
+            {
+                foreach (RaidLossRecord l in r.Losses.Where(x => x != null && x.Kind == "machine"))
+                {
+                    if (int.TryParse(l.Id, NumberStyles.Integer, CultureInfo.InvariantCulture, out int id) && seen.Add(id))
+                    {
+                        list.Add((id, RaidResultService.WaveLabel(r)));
+                    }
+                }
+            }
+            return list;
         }
 
         private static StepOutcome TickBlackBoxResearched(JourneyContext c)
@@ -1787,7 +1965,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 FgjM3Common.Mark(c, "b0");
                 return StepOutcome.Wait;
             }
-            List<BlackBoxRecord> boxes = Victims(c).Select(id => BlackBoxService.Find(s, id)).Where(x => x != null).ToList();
+            // 修复轮续：陈列馆按队列先后分析，排在前面的是前几波里被突袭打死的机器——它们同样是“真实突袭打死家园机器”（记在那一波结算的损失里），任一台分析完都算。
+            List<(int Id, string Wave)> killed = RaidKilledMachines();
+            List<BlackBoxRecord> boxes = killed.Select(k => BlackBoxService.Find(s, k.Id)).Where(x => x != null).ToList();
             BlackBoxRecord done = boxes.FirstOrDefault(x => x.Done);
             long income = TechDataFlow.IncomeOf(s, TechDataFlow.BlackBox) - c.GetLong(FgjM3Common.SK(c, "inc0"));
             long points = (s.Research?.PointsProduced ?? 0) - c.GetLong(FgjM3Common.SK(c, "pts0"));
@@ -1803,7 +1983,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 return StepOutcome.Wait;
             }
-            return StepOutcome.Done($"{FgjM1Journey.Label(done.MachineLogicId)}（第三波被突袭部队打死）的黑匣子分析完：技术数据 +{done.PointsGranted}（统计“黑匣子”收入 +{income}）；" +
+            string wave = killed.FirstOrDefault(k => k.Id == done.MachineLogicId).Wave;
+            return StepOutcome.Done($"{FgjM1Journey.Label(done.MachineLogicId)}（{wave}被突袭部队打死，记在那一波结算的损失里）的黑匣子分析完：技术数据 +{done.PointsGranted}（统计“黑匣子”收入 +{income}）；" +
                                    $"同一时期仿真实验室取了 {lab} 件技术数据、研究点 +{points}（技术数据进同一个库存，研究照常用上）");
         }
 

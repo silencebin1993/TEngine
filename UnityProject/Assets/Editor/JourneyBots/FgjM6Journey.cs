@@ -27,7 +27,8 @@ namespace GameLogic.EditorTools.JourneyBots
     /// 突袭全部由正式触发产生（暴露越过阈值 → 突袭导演排定 → 预警 → 行进 → 到达 → 攻城；DEBT-FG6DEF04-09），没有任何突袭夹具。
     /// 暴露由家园的高功率生产推高；旅程像玩家一样用远征准备面板的“关闭信号塔主动广播”（FG01 / FG16 的降暴露手段）控制节奏：
     /// 第一次突袭排定后关广播（不让暴露冲过 90 引来周期性 4 级突袭），第一波预警后开广播（引来第二波），第二波排定后、出发远征前关广播，
-    /// 跳回家园防守第二波时再开广播（引来第三波）。为什么必须这样做见 ADR-QA-023 第 2 节（干跑实测：不降暴露第 6～7 日必来 4 级 66 台把核心打空）。
+    /// 跳回家园防守第二波时再开广播（引来第三波），之后不再关：补好火墙后第三波在预警前并成 2 级也守得住，还会拆掉建筑给自动重建留活（修复轮续）。
+    /// 为什么前面必须这样做见 ADR-QA-023 第 3 节（干跑实测：不降暴露第 6～7 日必来 4 级 66 台把核心打空）。
     /// 家园防线位置全部按种子地形现找（<see cref="FgjM6Common.PlanHome"/>，B25）；火墙按第一次突袭时玩家在预警条上看到的来袭方向规划。
     /// </summary>
     public static partial class FgjM6Journey
@@ -120,7 +121,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 TotalTimeoutSeconds = 6300,
                 OnFinish = Cleanup,
                 Version = 2,
-                CheckpointAfter = new[] { "m6_built2", "ready", "fw_ready" },
+                CheckpointAfter = new[] { "m6_built2", "ready", "fw_ready", "away_close" },
                 Steps = steps,
             };
         }

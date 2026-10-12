@@ -5,6 +5,7 @@ using System.Linq;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Defense;
 using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Grid;
@@ -46,21 +47,30 @@ namespace GameLogic.EditorTools.JourneyBots
 
             // ── 火墙：漏油带 + 燃迹炮塔 ──
             S("fw_plan", "按第一次突袭预警条上的抵达点（敌人在那里展开攻城）规划火墙：离抵达点最近的那座炮塔改装成燃迹炮塔，它旁边放陷阱发射器、朝抵达点铺油膜带（越过屏障铺到圈外），燃油管线从储罐经屏障圈的缺口接过去", 30, null, TickFirewallPlan),
+            // 修复轮续（FGJ-M6 完整跑在 m6_place5 失败：“尚未解锁：需要先研究‘物流 · 地下管线’”）：管线要从屏障 / 供料带底下穿时，先在研发树排这一项（6 研究点）、等研究完再放。
+            S("fw_rt_open", "要走地下管线、还没研究时：按研发树键打开研发树（不需要就跳过）", 10,
+                c => { if (c.GetInt("fw.ug") == 1) { JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, true); } },
+                c => c.GetInt("fw.ug") == 0 ? StepOutcome.Done("不用地下管线（或已研究），跳过") : M.TickTreeOpen(c, true), retries: 1),
+            S("fw_rt_q", "点“物流”分支、左键点“物流 · 地下管线”排进研究队列", 30, null,
+                c => c.GetInt("fw.ug") == 0 ? StepOutcome.Done("跳过") : D.TickQueueAll(c, new[] { D.NodeUnderground }), retries: 2),
+            S("fw_rt_close", "再按研发树键关闭研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, false),
+                c => c.GetInt("fw.ug") == 0 && !ResearchTreePanelUIToolkit.IsOpen ? StepOutcome.Done("跳过") : M.TickTreeOpen(c, false), retries: 1),
+            S("fw_ug_wait", "等研究：物流 · 地下管线", 900, null, c => c.GetInt("fw.ug") == 0 ? StepOutcome.Done("跳过") : D.TickResearched(c, D.NodeUnderground)),
             S("build_open5", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
             S("m6_place5", "放燃油管线（按住左键分段拖，经缺口进圈）、陷阱发射器（旋转键转向抵达点）", 200, null,
                 c => P.TickActions(c, "m6f", 40), retries: 2),
             S("build_close5", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-            S("fw_built", "机器取料施工：燃油管线、陷阱发射器建成接电", 900, null, TickFirewallBuilt),
+            S("fw_built", "机器取料施工：燃油管线、陷阱发射器建成接电", 900, null, c => TickFirewallBuilt(c)),
             S("fwt_open", "建造模式里左键点离抵达点最近的那座炮塔，通用面板上点“炮塔…”：炮塔面板打开", 30, null,
                 c => M.TickSubPanel(c, "fwt", "PrTurret", () => TurretPanelUIToolkit.IsOpen, "炮塔面板打开"), retries: 2),
-            S("fwt_bp", "炮塔面板“蓝图”下拉：已建的炮塔还钉在建造时的旧版本，选同一张蓝图的新版本那一行（燃迹 + 接入口）：立即换上燃迹、从管线进燃油", 20, null, TickTurretUpgraded, retries: 1),
+            S("fwt_bp", "炮塔面板“蓝图”下拉：已建的炮塔还钉在建造时的旧版本，选同一张蓝图的新版本那一行（燃迹 + 接入口）：立即换上燃迹、从管线进燃油", 20, null, c => TickTurretUpgraded(c), retries: 1),
             S("fwt_close", "Esc 关掉炮塔面板与通用面板", 15, null, c => M.TickCloseAll(c, () => !TurretPanelUIToolkit.IsOpen, "炮塔面板"), retries: 1),
             S("trap_open", "建造模式里左键点陷阱发射器，通用面板上点“陷阱…”：防御面板打开", 30, null,
                 c => M.TickSubPanel(c, "trap", "PrDefense", () => DefensePanelUIToolkit.IsOpen, "防御面板（陷阱发射器）打开"), retries: 2),
-            S("trap_fw", "固件下拉选“漏油”，铺设方式点“一条线”：发射器开始沿朝向铺油膜带", 20, null, TickTrapConfigured, retries: 1),
+            S("trap_fw", "固件下拉选“漏油”，铺设方式点“一条线”：发射器开始沿朝向铺油膜带", 20, null, c => TickTrapConfigured(c), retries: 1),
             S("trap_close", "Esc 关掉防御面板与通用面板", 15, null, c => M.TickCloseAll(c, () => !DefensePanelUIToolkit.IsOpen, "防御面板"), retries: 1),
             S("fw_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-            S("fw_lay", "火墙在工作：陷阱发射器一轮轮铺油膜带（消耗燃油），燃迹炮塔补给装满", 120, null, TickFirewallWorking),
+            S("fw_lay", "火墙在工作：陷阱发射器一轮轮铺油膜带（消耗燃油），燃迹炮塔补给装满", 120, null, c => TickFirewallWorking(c)),
 
             // ── 第二波排定后关广播，出发远征 ──
             S("w2_plan", "暴露回到 30 以上：突袭导演排定第二波（普通 1 级，按最短间隔排在第一波之后至少 1 个游戏日）", 900, null, TickSecondPlanned),
@@ -84,7 +94,41 @@ namespace GameLogic.EditorTools.JourneyBots
             S("w2_leave", "按接入键离开炮塔：信号回到归还核心", 10, c => JourneyInput.PressAction(GameActionId.ToggleCameraView), TickTurretLeft, retries: 1),
             S("w3_plan", "留在家园等第三波排定（按 3 倍速键；暴露回到 30 以上，导演按最短间隔排在第二波之后至少 1 个游戏日）", 900,
                 c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), TickThirdPlanned),
-            S("exp_off3", "左键点信号塔，勾上“关闭信号塔主动广播”（第三波已排定；不让暴露在它预警前涨过 60、并成 2 级），点“关闭”", 60, null, c => D.TickBroadcast(c, true), retries: 2),
+            // 修复轮续：第三波排定后不再关广播（上一版的 exp_off3 去掉）——补好火墙之后家园照常高耗电，暴露继续涨，第三波在预警前并成 2 级；
+            // 1 级的第三波在两道火墙下一座建筑都拆不掉（续跑实测：全部击毁、损失 0、爆燃 61 次），“被摧毁的建筑已经自动重建”就无从证明。
+            // ── 补火墙（修复轮续：第二波的抵达点和第一波不同——种子 42 第一波从西南来、第二波从西北来，西南那道油膜带离第二波抵达点 9 米多，敌人踩不到油；
+            //    玩家在家看到这一点，在第二波抵达点旁补一道：离它最近的炮塔也换上燃迹、旁边放陷阱发射器朝抵达点铺油，燃油从第一道火墙的管线接过去）──
+            S("fw2_plan", "第二波的抵达点不在第一道油膜带旁时：按第二波的抵达点再规划一道火墙（离它最近的炮塔改装成燃迹、旁边放陷阱发射器朝抵达点铺油膜带，燃油管线从第一道火墙的管线接过去）；在旁边就跳过", 30, null, TickFirewall2Plan),
+            S("fw2s_open", "补火墙的废料不够时：按建造键打开建造模式（够就跳过）", 10, c => { if (c.GetInt("fwDemo") == 1) { FgjM3Common.PressBuild(true); } },
+                c => c.GetInt("fwDemo") == 0 ? StepOutcome.Done("跳过") : FgjM3Common.TickBuild(c, true), retries: 1),
+            S("fw2s_demo", "按拆除模式键（默认 X）", 10, c => { if (c.GetInt("fwDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, true); } },
+                c => c.GetInt("fwDemo") == 0 ? StepOutcome.Done("跳过") : c.StepElapsed < 0.4 ? StepOutcome.Wait : FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("进入拆除模式") : StepOutcome.Retry("没进拆除模式"), retries: 1),
+            S("fw2s_ask", "左键点第二座仿真实验室（研究都做完了）：标记拆除（有后果时先弹确认框写明）", 20, null, c => TickLabDemolishAsk(c, "fwDemo"), retries: 2),
+            S("fw2s_ok", "弹了确认框就点“确认”：机器上门拆、全额返还废料", 10, c => { if (c.GetInt("fwDemo") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } },
+                c => TickLabMarked(c, "fwDemo"), retries: 1),
+            S("fw2s_demo_off", "再按拆除模式键退出", 10, c => { if (c.GetInt("fwDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, false); } },
+                c => c.GetInt("fwDemo") == 0 || !FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("退出拆除模式") : c.StepElapsed < 0.4 ? StepOutcome.Wait : StepOutcome.Retry("没退出"), retries: 1),
+            S("fw2s_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+            S("fw2_scrap", "等废料够补火墙（拆实验室返还 + 回收站拆残骸）", 600, null, c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : TickScrapFor(c, c.GetInt("fw2.need"))),
+            S("build_open6", "按建造键打开建造模式", 10, c => { if (c.GetInt("fw2.on") == 1) { FgjM3Common.PressBuild(true); } },
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : FgjM3Common.TickBuild(c, true), retries: 1),
+            S("m6_place6", "放燃油管线（从第一道火墙的管线接出，按住左键分段拖）、陷阱发射器（旋转键转向第二波抵达点）", 200, null,
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : P.TickActions(c, "m6f2", 40), retries: 2),
+            S("build_close6", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+            S("fw2_built", "机器取料施工：第二道火墙的管线、陷阱发射器建成接电", 900, null,
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : TickFirewallBuilt(c, "trap2", "fwt2", "path.fuelb")),
+            S("fwt2_open", "建造模式里左键点离第二波抵达点最近的那座炮塔，通用面板上点“炮塔…”", 30, null,
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : M.TickSubPanel(c, "fwt2", "PrTurret", () => TurretPanelUIToolkit.IsOpen, "炮塔面板打开"), retries: 2),
+            S("fwt2_bp", "炮塔面板“蓝图”下拉选同一张蓝图的新版本那一行（燃迹 + 接入口）", 20, null,
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : TickTurretUpgraded(c, "fwt2"), retries: 1),
+            S("fwt2_close", "Esc 关掉炮塔面板与通用面板", 15, null, c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : M.TickCloseAll(c, () => !TurretPanelUIToolkit.IsOpen, "炮塔面板"), retries: 1),
+            S("trap2_open", "建造模式里左键点第二台陷阱发射器，通用面板上点“陷阱…”", 30, null,
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : M.TickSubPanel(c, "trap2", "PrDefense", () => DefensePanelUIToolkit.IsOpen, "防御面板（陷阱发射器）打开"), retries: 2),
+            S("trap2_fw", "固件下拉选“漏油”，铺设方式点“一条线”", 20, null, c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : TickTrapConfigured(c, "trap2"), retries: 1),
+            S("trap2_close", "Esc 关掉防御面板与通用面板", 15, null, c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : M.TickCloseAll(c, () => !DefensePanelUIToolkit.IsOpen, "防御面板"), retries: 1),
+            S("fw2_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+            S("fw2_lay", "第二道火墙在工作：陷阱发射器铺油膜带，燃迹炮塔补给装满", 120, null,
+                c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : TickFirewallWorking(c, "trap2", "fwt2")),
             S("w2_back", "按跳回上一台机器键（默认 J）：跨地点远距离跳转回远征队", 30, c => JourneyInput.PressAction(GameActionId.JumpPreviousMachine), TickJumpedBack, retries: 2),
 
             // ── 第三波：留在远征队，家园自己守 ──
@@ -101,11 +145,11 @@ namespace GameLogic.EditorTools.JourneyBots
             S("away_close", "点“关闭”关闭离家报告", 10, c => FgjM1Journey.ClickUi(c, D.AwayHost, "AwayReportClose"), TickAwayClosed, retries: 1),
             // ── 废料不够重建：拆掉一座用不着的实验室换废料（研究都做完了；拆除全额返还投入）──
             S("scr_open", "废料不够重建时：按建造键打开建造模式（够就跳过）", 10, c => { if (NeedScrap(c)) { FgjM3Common.PressBuild(true); } },
-                c => !NeedScrap(c) ? StepOutcome.Done($"废料 {St.Scrap} 够重建，不用拆") : FgjM3Common.TickBuild(c, true), retries: 1),
+                c => !NeedScrap(c) ? StepOutcome.Done($"废料 {St.Scrap} 够重建（等料的要 {c.GetInt("scrNeed")}），不用拆") : FgjM3Common.TickBuild(c, true), retries: 1),
             S("scr_demo", "按拆除模式键（默认 X）", 10, c => { if (c.GetInt("scrDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, true); } },
                 c => c.GetInt("scrDemo") == 0 ? StepOutcome.Done("跳过") : c.StepElapsed < 0.4 ? StepOutcome.Wait : FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("进入拆除模式") : StepOutcome.Retry("没进拆除模式"), retries: 1),
-            S("scr_ask", "左键点第二座仿真实验室：标记拆除（有后果时先弹确认框写明）", 20, null, TickLabDemolishAsk, retries: 2),
-            S("scr_ok", "弹了确认框就点“确认”：实验室标记拆除，机器上门拆、全额返还废料", 10, c => { if (c.GetInt("scrDemo") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, TickLabMarked, retries: 1),
+            S("scr_ask", "左键点一座用不着的仿真实验室（第二座还在就点第二座，补火墙时拆掉了就点第一座）：标记拆除（有后果时先弹确认框写明）", 20, null, c => TickLabDemolishAsk(c), retries: 2),
+            S("scr_ok", "弹了确认框就点“确认”：实验室标记拆除，机器上门拆、全额返还废料", 10, c => { if (c.GetInt("scrDemo") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c), retries: 1),
             S("scr_demo_off", "再按拆除模式键退出、按建造键关闭建造模式", 10, c => { if (c.GetInt("scrDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, false); } },
                 c => c.GetInt("scrDemo") == 0 || !FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("退出拆除模式") : c.StepElapsed < 0.4 ? StepOutcome.Wait : StepOutcome.Retry("没退出"), retries: 1),
             S("scr_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
@@ -175,6 +219,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private static StepOutcome TickRaidEnded(JourneyContext c, string planKey, string resKey, bool openPanel)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
+            LogFirewall(c, planKey == "plan3" ? "第三波" : "第一波", 20);
             FgjM3Common.SampleFrame();
             CampaignState s = St;
             if (!openPanel && WorldView.ObservedSiteId == HomeValleyLayout.RegionId)
@@ -269,6 +314,64 @@ namespace GameLogic.EditorTools.JourneyBots
             return !RaidResultPanelUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen ? StepOutcome.Done("Esc 关闭突袭历史面板（暂停菜单没开）") : StepOutcome.Retry("突袭历史面板还开着（或弹出了暂停菜单）");
         }
 
+        /// <summary>
+        /// 火墙在突袭期间的读数（每 <paramref name="every"/> 真实秒记一行）：陷阱发射器状态行与累计铺了几轮、改装炮塔的补给行、精炼塔状态行、
+        /// 家园内核里带“油”标签的场地块数与突袭单位数、内核爆燃累计。火墙还没建就不记。
+        /// </summary>
+        private static void LogFirewall(JourneyContext c, string tag, int every = 30)
+        {
+            string trapId = c.Get("trap.id");
+            if (string.IsNullOrEmpty(trapId))
+            {
+                return;
+            }
+            long now = (long)(Time.realtimeSinceStartup / every);
+            if (now <= c.GetLong("fwlog.at"))
+            {
+                return;
+            }
+            c.SetLong("fwlog.at", now);
+            CampaignState s = St;
+            BuildingRecord trap = HomeGridService.FindBuilding(s, trapId);
+            string trapLine = trap == null ? "（陷阱发射器不见了）" : BuildingStatusService.Evaluate(s, trap).Reason?.Replace("\n", " / ");
+            long lays = DefenseService.Find(s, trapId)?.TrapLays ?? 0;
+            string supply = (TurretService.SupplyLine(s, c.Get("fwt.id")) ?? string.Empty).Replace("\n", " ");
+            BuildingRecord tower = P.BuildingAtPivot(s, P.Tower, P.P(c, "ref.tower"));
+            string towerLine = tower == null ? "（精炼塔不见了）" : BuildingStatusService.Evaluate(s, tower).Reason?.Replace("\n", " / ");
+            CombatSite site = D.HomeSite;
+            uint oil = NamedReactionCatalog.BitOf("Oil");
+            int oilZones = 0;
+            int oiled = 0;
+            int deflag = 0;
+            if (site != null && !site.IsDisposed)
+            {
+                for (int i = 0; i < site.Kernel.ZoneCount; i++)
+                {
+                    if (site.Kernel.TryGetZone(i, out BinGames.Sim.Combat.CombatZone z) && (z.StatusMask & oil) != 0)
+                    {
+                        oilZones++;
+                    }
+                }
+                foreach ((int id, Vector2 _) in D.Raiders())
+                {
+                    if (site.Kernel.TryGetStatus(id, out uint mask, out _, out _, out _, out _) && (mask & oil) != 0)
+                    {
+                        oiled++;
+                    }
+                }
+                for (int i = 0; i < NamedReactionCatalog.TagRules.Count; i++)
+                {
+                    if (NamedReactionCatalog.TagRules[i].Id == "reaction_deflagrate")
+                    {
+                        deflag = site.Kernel.ReactionCountOf(i);
+                    }
+                }
+            }
+            string trap2 = c.Get("trap2.id");
+            string second = string.IsNullOrEmpty(trap2) ? string.Empty : $"第二道陷阱累计铺 {DefenseService.Find(s, trap2)?.TrapLays ?? 0} 轮、补给“{(TurretService.SupplyLine(s, c.Get("fwt2.id")) ?? string.Empty).Replace("\n", " ")}”；";
+            c.Log($"火墙读数（{tag}）：{second}陷阱“{trapLine}”、累计铺 {lays} 轮；燃迹炮塔补给“{supply}”；精炼塔“{towerLine}”；带油场地 {oilZones} 块、带油突袭单位 {oiled} 台（在场 {D.Raiders().Count}）；内核爆燃累计 {deflag}");
+        }
+
         /// <summary>火墙打出的阵地反应：<paramref name="plans"/> 这几波结算里“爆燃”（油 + 火，reaction_deflagrate）的次数。</summary>
         private static string DeflagrationLine(CampaignState s, IEnumerable<string> plans, out int n)
         {
@@ -331,7 +434,9 @@ namespace GameLogic.EditorTools.JourneyBots
             var turrets = D.TurretKeys.Select(k => (k, P.P(c, k))).ToList();
             // FG6-E2E-01 修复轮（复审 P1“火墙始终没接敌”）：火墙按真实来路放。第一轮按“管线最短的一侧”放在储罐那边（东），三波都从西边来、一次都没接敌；
             // 现在挑离抵达点最近的那座已建炮塔改装（不另造炮塔，废料只花在陷阱发射器与管线上），陷阱发射器贴着它朝抵达点铺油膜带。
-            D.FirewallPlan fw = D.PlanFirewallNear(s, arrival, turrets, P.P(c, "ref.tank"), P.P(c, "ref.fuel"), others, out string why);
+            // 已铺的回收站供料带：管线跨不过去时可以从带底下穿（种子 7 那种供料带横穿屏障圈的格局；[M6 出口] B 段 5 个种子 × 4 个方向守护）。
+            List<GridCell> belts = P.LoadPath(c, "path.r_recycler");
+            D.FirewallPlan fw = D.PlanFirewallNear(s, arrival, turrets, P.P(c, "ref.tank"), P.P(c, "ref.fuel"), others, out string why, belts);
             if (fw == null)
             {
                 return StepOutcome.Fail($"火墙规划不出来（抵达点 {arrival}）：{why}");
@@ -346,13 +451,14 @@ namespace GameLogic.EditorTools.JourneyBots
             int under = 0;
             if (fw.Underground)
             {
-                // 缺口被传送带占着：圈外一段管线 → 一对地下管线口从屏障底下穿进圈（圈外口朝里、圈里口朝外，旋转键转向）→ 圈里一段管线。
+                // 缺口被传送带占着：储罐那边一段管线 → 一对地下管线口从屏障（或横穿圈里的供料带）底下穿过去（近储罐的口朝对面、对面的口朝回来，旋转键转向）→ 另一边一段管线。
+                string under0 = fw.UnderBelt ? "供料带" : "屏障";
                 P.SavePath(c, "path.fuel1", fw.PipeOut);
                 P.SavePath(c, "path.fuel2", fw.PipeIn);
-                acts.Add(P.ActQ(P.PipeT1, "path.fuel1", $"燃油管线圈外一段（{fw.PipeOut.Count} 格）：储罐 → 屏障外侧"));
-                acts.Add(P.ActT(D.UndergroundPipeTool, fw.UnderOut, fw.UnderDir, $"地下管线口（圈外 {D.Cell(fw.UnderOut)}，朝{FgjM3Common.DirName(fw.UnderDir)}）"));
-                acts.Add(P.ActT(D.UndergroundPipeTool, fw.UnderIn, (fw.UnderDir + 2) & 3, $"地下管线口（圈里 {D.Cell(fw.UnderIn)}，朝{FgjM3Common.DirName((fw.UnderDir + 2) & 3)}）"));
-                acts.Add(P.ActQ(P.PipeT1, "path.fuel2", $"燃油管线圈里一段（{fw.PipeIn.Count} 格）→ 炮塔与陷阱发射器之间"));
+                acts.Add(P.ActQ(P.PipeT1, "path.fuel1", $"燃油管线第一段（{fw.PipeOut.Count} 格）：储罐 → {under0}这一侧"));
+                acts.Add(P.ActT(D.UndergroundPipeTool, fw.UnderOut, fw.UnderDir, $"地下管线口（{under0}这一侧 {D.Cell(fw.UnderOut)}，朝{FgjM3Common.DirName(fw.UnderDir)}）"));
+                acts.Add(P.ActT(D.UndergroundPipeTool, fw.UnderIn, (fw.UnderDir + 2) & 3, $"地下管线口（{under0}那一侧 {D.Cell(fw.UnderIn)}，朝{FgjM3Common.DirName((fw.UnderDir + 2) & 3)}）"));
+                acts.Add(P.ActQ(P.PipeT1, "path.fuel2", $"燃油管线第二段（{fw.PipeIn.Count} 格）→ 炮塔与陷阱发射器之间"));
                 under = 2;
             }
             else
@@ -361,19 +467,117 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             acts.Add(P.ActB(trap));
             P.SetActions(c, "m6f", acts);
+            c.SetInt("fw.ug", fw.Underground && !ResearchService.IsCompleted(s, D.NodeUnderground) ? 1 : 0);
             int scrapNeed = (fw.Pipe.Count - under) * PlanEntries.CostOf(P.PipeT1) + under * PlanEntries.CostOf(D.UndergroundPipeTool) + PlanEntries.CostOf(D.Trap);
             return StepOutcome.Done($"火墙（抵达点 {arrival}，相对核心 {rel}）：改装 {fw.TurretKey} {D.Cell(fw.TurretAt)}（离抵达点 {Vector2.Distance(new Vector2(fw.TurretAt.X + 0.5f, fw.TurretAt.Y + 0.5f), arrival):F1} 米）；" +
                                     $"陷阱发射器 {D.Cell(fw.TrapAt)} 朝{FgjM3Common.DirName(fw.TrapRot / 90)}，油膜带离抵达点 {fw.Cover:F1} 米；燃油管线 {fw.Pipe.Count - under} 格到 {D.Cell(fw.PipeEnd)}" +
-                                    (fw.Underground ? $"（{D.Cell(fw.UnderOut)} → {D.Cell(fw.UnderIn)} 一对地下管线口从屏障底下穿进圈）" : string.Empty) + $"；要废料约 {scrapNeed}（现有 {s.Scrap}）");
+                                    (fw.Underground ? $"（{D.Cell(fw.UnderOut)} → {D.Cell(fw.UnderIn)} 一对地下管线口从{(fw.UnderBelt ? "供料带" : "屏障")}底下穿过去）" : string.Empty) + $"；要废料约 {scrapNeed}（现有 {s.Scrap}）" +
+                                    (c.GetInt("fw.ug") == 1 ? "；地下管线还没研究：先在研发树排“物流 · 地下管线”" : string.Empty));
         }
 
-        private static StepOutcome TickFirewallBuilt(JourneyContext c)
+        /// <summary>一台陷阱发射器的“一条线”油膜带离某点最近多远（按场地中心算）。</summary>
+        private static float LineCover(BuildingRecord trap, Vector2 at)
+        {
+            var centers = new List<Vector2>();
+            DefenseService.FieldCenters(trap, DefenseCatalog.PatternLine, centers);
+            return centers.Count == 0 ? float.MaxValue : centers.Min(x => Vector2.Distance(x, at));
+        }
+
+        /// <summary>
+        /// 补火墙规划：第二波的抵达点（预警条上那一行，玩家跳回家园时看过）离第一道油膜带超过 3.5 米时，按它再规划一道——离它最近的另一座炮塔改装、旁边放陷阱发射器，
+        /// 燃油管线可以从第一道火墙已铺的管线旁接出（同一张燃油管网）。不需要补就把后面几步标成跳过。
+        /// </summary>
+        private static StepOutcome TickFirewall2Plan(JourneyContext c)
+        {
+            if (c.StepElapsed < 0.5)
+            {
+                return StepOutcome.Wait;
+            }
+            CampaignState s = St;
+            BuildingRecord trap1 = HomeGridService.FindBuilding(s, c.Get("trap.id"));
+            string ax = c.Get("ap2.x");
+            if (string.IsNullOrEmpty(ax) || trap1 == null)
+            {
+                return StepOutcome.Fail($"补火墙：第二波预警时没记下抵达点 {string.IsNullOrEmpty(ax)}、第一道火墙的陷阱发射器 {trap1 != null}");
+            }
+            var a2 = new Vector2(float.Parse(ax, CultureInfo.InvariantCulture), float.Parse(c.Get("ap2.y"), CultureInfo.InvariantCulture));
+            float cover1 = LineCover(trap1, a2);
+            if (cover1 <= 3.5f)
+            {
+                c.SetInt("fw2.on", 0);
+                return StepOutcome.Done($"第二波抵达点 {a2} 就在第一道油膜带旁（{cover1:F1} 米），不用补");
+            }
+            GridCell used = P.P(c, "fwt");
+            var turrets = D.TurretKeys.Select(k => (k, P.P(c, k))).Where(x => x.Item2 != used).ToList();
+            var others = new List<GridCell> { P.P(c, "ref.acid"), P.P(c, "ref.pump") };
+            others.AddRange(P.LoadPath(c, "path.crude"));
+            List<GridCell> belts = P.LoadPath(c, "path.r_recycler");
+            var fuelNet = new List<GridCell>(P.LoadPath(c, "path.fuel"));
+            D.FirewallPlan fw = D.PlanFirewallNear(s, a2, turrets, P.P(c, "ref.tank"), P.P(c, "ref.fuel"), others, out string why, belts, fuelNet, beltsFirst: true);
+            if (fw == null)
+            {
+                return StepOutcome.Fail($"补火墙规划不出来（第二波抵达点 {a2}）：{why}");
+            }
+            var trap = new P.Placed { Key = "trap2", Type = D.Trap, Pivot = fw.TrapAt, Rot = fw.TrapRot, Label = D.Name(D.Trap) + "（第二道）" };
+            var fwt = new P.Placed { Key = "fwt2", Type = D.Turret, Pivot = fw.TurretAt, Rot = 0, Label = $"离第二波抵达点最近的炮塔（{fw.TurretKey}）" };
+            P.Remember(c, trap);
+            P.Remember(c, fwt);
+            P.SavePath(c, "path.fuelb", fw.Pipe);
+            var acts = new List<string>();
+            int under = 0;
+            if (fw.Underground)
+            {
+                P.SavePath(c, "path.fuelb1", fw.PipeOut);
+                P.SavePath(c, "path.fuelb2", fw.PipeIn);
+                acts.Add(P.ActQ(P.PipeT1, "path.fuelb1", $"第二道燃油管线第一段（{fw.PipeOut.Count} 格）"));
+                acts.Add(P.ActT(D.UndergroundPipeTool, fw.UnderOut, fw.UnderDir, $"地下管线口（{D.Cell(fw.UnderOut)}，朝{FgjM3Common.DirName(fw.UnderDir)}）"));
+                acts.Add(P.ActT(D.UndergroundPipeTool, fw.UnderIn, (fw.UnderDir + 2) & 3, $"地下管线口（{D.Cell(fw.UnderIn)}，朝{FgjM3Common.DirName((fw.UnderDir + 2) & 3)}）"));
+                acts.Add(P.ActQ(P.PipeT1, "path.fuelb2", $"第二道燃油管线第二段（{fw.PipeIn.Count} 格）→ 炮塔与陷阱发射器之间"));
+                under = 2;
+            }
+            else
+            {
+                acts.Add(P.ActQ(P.PipeT1, "path.fuelb", $"第二道燃油管线（{fw.Pipe.Count} 格）：从第一道火墙的管线接到炮塔与陷阱发射器之间"));
+            }
+            acts.Add(P.ActB(trap));
+            P.SetActions(c, "m6f2", acts);
+            int need = (fw.Pipe.Count - under) * PlanEntries.CostOf(P.PipeT1) + under * PlanEntries.CostOf(D.UndergroundPipeTool) + PlanEntries.CostOf(D.Trap);
+            c.SetInt("fw2.on", 1);
+            c.SetInt("fw2.need", need);
+            // 废料不够：研究都做完了，像后面重建时那样拆掉第二座实验室换废料（拆除全额返还）。
+            bool demo = s.Scrap < need && P.Bld(c, "lab2") != null;
+            c.SetInt("fwDemo", demo ? 1 : 0);
+            return StepOutcome.Done($"第二波抵达点 {a2} 离第一道油膜带 {cover1:F1} 米（踩不到油）：补一道——改装 {fw.TurretKey} {D.Cell(fw.TurretAt)}（离抵达点 {Vector2.Distance(new Vector2(fw.TurretAt.X + 0.5f, fw.TurretAt.Y + 0.5f), a2):F1} 米）；" +
+                                   $"陷阱发射器 {D.Cell(fw.TrapAt)} 朝{FgjM3Common.DirName(fw.TrapRot / 90)}，油膜带离抵达点 {fw.Cover:F1} 米；燃油管线 {fw.Pipe.Count - under} 格到 {D.Cell(fw.PipeEnd)}" +
+                                   (fw.Underground ? $"（{D.Cell(fw.UnderOut)} → {D.Cell(fw.UnderIn)} 一对地下管线口从{(fw.UnderBelt ? "供料带" : "屏障")}底下穿过去）" : string.Empty) + $"；要废料约 {need}（现有 {s.Scrap}）" +
+                                   (demo ? "；废料不够：先拆掉第二座仿真实验室（研究都做完了，全额返还）" : string.Empty));
+        }
+
+        /// <summary>废料够 <paramref name="need"/> 了就过（回收站把敌方残骸拆成废料）；每 30 秒记一行。</summary>
+        private static StepOutcome TickScrapFor(JourneyContext c, int need)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
-            bool trap = P.BuildingReady(s, D.Trap, P.P(c, "trap"), out BuildingRecord tb);
-            bool tur = P.BuildingReady(s, D.Turret, P.P(c, "fwt"), out BuildingRecord ub);
-            List<GridCell> pipe = P.LoadPath(c, "path.fuel");
+            if (s.Scrap >= need)
+            {
+                return StepOutcome.Done($"废料 {s.Scrap} ≥ {need}");
+            }
+            int tick = (int)(c.StepElapsed / 30);
+            if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
+            {
+                c.SetInt(FgjM3Common.SK(c, "log"), tick);
+                c.Log($"等废料：{s.Scrap} / {need}（回收站拆残骸）");
+            }
+            return StepOutcome.Wait;
+        }
+
+        private static StepOutcome TickFirewallBuilt(JourneyContext c, string trapKey = "trap", string turretKey = "fwt", string pathKey = "path.fuel")
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            CampaignState s = St;
+            bool trap = P.BuildingReady(s, D.Trap, P.P(c, trapKey), out BuildingRecord tb);
+            bool tur = P.BuildingReady(s, D.Turret, P.P(c, turretKey), out BuildingRecord ub);
+            List<GridCell> pipe = P.LoadPath(c, pathKey);
             bool pipes = P.RouteBuilt(s, pipe, false);
             if (!trap || !tur || !pipes)
             {
@@ -391,14 +595,14 @@ namespace GameLogic.EditorTools.JourneyBots
                 return c.StepElapsed < 60 ? StepOutcome.Wait : StepOutcome.Fail($"火墙建成了但没电：陷阱 {tb.PowerState}、炮塔 {ub.PowerState}；{P.PowerLine(s)}");
             }
             TurretRecord r = TurretService.Find(s, ub.BuildingId);
-            c.Set("trap.id", tb.BuildingId);
-            c.Set("fwt.id", ub.BuildingId);
+            c.Set(trapKey + ".id", tb.BuildingId);
+            c.Set(turretKey + ".id", ub.BuildingId);
             return StepOutcome.Done($"火墙的陷阱发射器 {tb.BuildingId}（朝{FgjM3Common.DirName((int)GridMath.FacingOf(GridMath.NormalizeRotation(tb.Rotation)))}）与燃油管线 {pipe.Count} 格建成接电；" +
                                    $"要改装的炮塔 {ub.BuildingId} 还装着 v{r?.BlueprintVersion}（建造时的版本；蓝图现役 v{c.GetInt("bpBurn")}）");
         }
 
         /// <summary>炮塔面板“蓝图”下拉选同一张蓝图的新版本那一行（FG-GAP-115：已建炮塔换到新版本的入口）——与玩家在弹出菜单里点那一项同一个 ChangeEvent 回调。</summary>
-        private static StepOutcome TickTurretUpgraded(JourneyContext c)
+        private static StepOutcome TickTurretUpgraded(JourneyContext c, string turretKey = "fwt")
         {
             CampaignState s = St;
             TurretPanelUIToolkit p = TurretPanelUIToolkit.Instance;
@@ -406,7 +610,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail("炮塔面板没开");
             }
-            TurretRecord r = TurretService.Find(s, c.Get("fwt.id"));
+            TurretRecord r = TurretService.Find(s, c.Get(turretKey + ".id"));
             int want = c.GetInt("bpBurn");
             if (r != null && r.BlueprintVersion == want)
             {
@@ -414,7 +618,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     return FgjM3Common.Done(c, "pick") ? StepOutcome.Wait : StepOutcome.Fail($"还没选就已经是 v{want}（这座炮塔建造时就装了新版本？）");
                 }
-                string supply = TurretService.SupplyLine(s, c.Get("fwt.id")) ?? string.Empty;
+                string supply = TurretService.SupplyLine(s, c.Get(turretKey + ".id")) ?? string.Empty;
                 return StepOutcome.Done($"蓝图下拉 [{string.Join(" / ", p.BlueprintChoices)}] 选“{p.BlueprintField?.value}”：这座炮塔换上 v{r.BlueprintVersion}（燃迹 + 接入口）；“{p.MessageText}”；补给“{supply.Replace("\n", " ")}”");
             }
             if (FgjM3Common.Done(c, "pick"))
@@ -437,7 +641,7 @@ namespace GameLogic.EditorTools.JourneyBots
             FgjM3Common.Mark(c, "pick");
             return StepOutcome.Wait;
         }
-        private static StepOutcome TickTrapConfigured(JourneyContext c)
+        private static StepOutcome TickTrapConfigured(JourneyContext c, string trapKey = "trap")
         {
             CampaignState s = St;
             DefensePanelUIToolkit p = DefensePanelUIToolkit.Instance;
@@ -446,7 +650,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail("防御面板没开或没有陷阱一段");
             }
             p.Refresh(force: true);
-            DefenseRecord r = DefenseService.Find(s, c.Get("trap.id"));
+            DefenseRecord r = DefenseService.Find(s, c.Get(trapKey + ".id"));
             if (r != null && r.TrapFirmware == D.FwOil && FgjM3Common.Done(c, "line"))
             {
                 if (FgjM3Common.SinceMs(c, "line") < 800)
@@ -492,25 +696,25 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Wait;
         }
 
-        private static StepOutcome TickFirewallWorking(JourneyContext c)
+        private static StepOutcome TickFirewallWorking(JourneyContext c, string trapKey = "trap", string turretKey = "fwt")
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
-            DefenseRecord r = DefenseService.Find(s, c.Get("trap.id"));
-            TurretRecord t = TurretService.Find(s, c.Get("fwt.id"));
+            DefenseRecord r = DefenseService.Find(s, c.Get(trapKey + ".id"));
+            TurretRecord t = TurretService.Find(s, c.Get(turretKey + ".id"));
             if (c.GetInt(FgjM3Common.SK(c, "l0set")) == 0)
             {
                 c.SetInt(FgjM3Common.SK(c, "l0set"), 1);
                 c.SetLong(FgjM3Common.SK(c, "l0"), r?.TrapLays ?? 0);
             }
             long lays = (r?.TrapLays ?? 0) - c.GetLong(FgjM3Common.SK(c, "l0"));
-            string supply = TurretService.SupplyLine(s, c.Get("fwt.id")) ?? string.Empty;
+            string supply = TurretService.SupplyLine(s, c.Get(turretKey + ".id")) ?? string.Empty;
             bool fed = t != null && t.ConsumerIds.Length > 0;
             if (lays >= 3 && fed)
             {
                 return StepOutcome.Done($"陷阱发射器又铺了 {lays} 轮油膜带（累计 {r.TrapLays} 轮，消耗燃油）；燃迹炮塔挂上管线补给（“{supply.Replace("\n", " ")}”）");
             }
-            return c.StepElapsed < 110 ? StepOutcome.Wait : StepOutcome.Fail($"火墙没在工作：铺了 {lays} 轮、炮塔管线消费者 {t?.ConsumerIds.Length}（“{supply}”）；陷阱状态“{BuildingStatusService.Evaluate(s, HomeGridService.FindBuilding(s, c.Get("trap.id"))).Reason}”");
+            return c.StepElapsed < 110 ? StepOutcome.Wait : StepOutcome.Fail($"火墙没在工作：铺了 {lays} 轮、炮塔管线消费者 {t?.ConsumerIds.Length}（“{supply}”）；陷阱状态“{BuildingStatusService.Evaluate(s, HomeGridService.FindBuilding(s, c.Get(trapKey + ".id"))).Reason}”");
         }
 
         private static StepOutcome TickSecondPlanned(JourneyContext c)
@@ -539,6 +743,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>第三波：第二波之外的、由暴露触发的普通突袭排定了（1 级；与第二波抵达相隔至少最短间隔）。</summary>
         private static StepOutcome TickThirdPlanned(JourneyContext c)
         {
+            LogFirewall(c, "等第三波排定", 60);
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
             string p2id = c.Get("plan2");
@@ -597,6 +802,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static StepOutcome TickAwayAlert(JourneyContext c, string planKey)
         {
+            LogFirewall(c, planKey == "plan3" ? "等第三波预警" : "等第二波预警", 60);
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
             RaidPlanRecord p = planKey == "plan3" && string.IsNullOrEmpty(c.Get("plan3"))
@@ -652,6 +858,12 @@ namespace GameLogic.EditorTools.JourneyBots
             CampaignState s = St;
             RaidPlanRecord p2 = RaidDirectorService.FindPlan(s, c.Get("plan2"));
             Vector2 at = p2 != null ? new Vector2((float)p2.ArriveX, (float)p2.ArriveY) : D.CoreCenter(s);
+            if (p2 != null)
+            {
+                // 第二波预警条上的抵达点：这一波打完计划记录就清掉了，补火墙（fw2_plan）要用。
+                c.Set("ap2.x", at.x.ToString("R", CultureInfo.InvariantCulture));
+                c.Set("ap2.y", at.y.ToString("R", CultureInfo.InvariantCulture));
+            }
             BuildingRecord best = null;
             foreach (BuildingRecord b in s.BuildingRecords)
             {
@@ -733,6 +945,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// </summary>
         private static StepOutcome TickManualFire(JourneyContext c)
         {
+            LogFirewall(c, "第二波", 15);
             JourneyCommon.ResumeIfAutoPaused(c);
             FgjM3Common.SampleFrame();
             CampaignState s = St;
@@ -923,7 +1136,11 @@ namespace GameLogic.EditorTools.JourneyBots
             return !AwayReportPanelUIToolkit.IsOpen ? StepOutcome.Done("点“关闭”：离家报告关闭") : StepOutcome.Retry("离家报告还开着：" + FgjM1Journey.UiFail(c));
         }
 
-        /// <summary>两波里被摧毁、还没重建好的东西在等料，而废料不够（回收站拆的废墟有限，敌方残骸送回收站出得慢）：要拆一座用不着的建筑换废料。</summary>
+        /// <summary>
+        /// 两波里被摧毁、还在等料（还没开出重建单）的东西要多少废料（按建筑面板“重建”写的价钱），而仓库里不够（回收站拆的废墟有限，敌方残骸送回收站出得慢）：要拆一座用不着的建筑换废料。
+        /// 修复轮续：补火墙时已经拆掉第二座实验室的话拆第一座（研究都做完了，拆除全额返还）——上一版这时直接跳过，种子 42 发电机重建要 60、仓库只有 47，规则一直“等材料”，
+        /// 暴露涨过 90 后第四波来把核心拆了（续跑实测，重建诊断 R2 日志尾“废料不够：重建要 60，仓库里有 47”）。
+        /// </summary>
         private static bool NeedScrap(JourneyContext c)
         {
             if (c.GetInt("scrDecided") == 1)
@@ -931,32 +1148,47 @@ namespace GameLogic.EditorTools.JourneyBots
                 return c.GetInt("scrDemo") == 1;
             }
             CampaignState s = St;
-            bool waiting = false;
+            int need = 0;
             foreach (string k in new[] { "res2", "res3" })
             {
                 RaidResultRecord r = RaidResultService.Find(s, c.GetInt(k));
                 foreach (RaidLossRecord x in r?.Losses ?? Array.Empty<RaidLossRecord>())
                 {
                     BuildingRecord b = x.Kind == "building" || x.Kind == "turret" || x.Kind == "defense" ? HomeGridService.FindBuilding(s, x.Id) : null;
-                    waiting |= b != null && b.ConstructionState != BuildingConstructionState.Operational;
+                    if (b != null && b.ConstructionState == BuildingConstructionState.Damaged && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null)
+                    {
+                        need += Math.Max(0, BuildingOps.RebuildScrapFor(b));
+                    }
                 }
             }
-            bool need = waiting && s.Scrap < 60;
+            bool demo = need > 0 && s.Scrap < need && P.Bld(c, ScrapLabKey(c)) != null;
+            c.SetInt("scrNeed", need);
             c.SetInt("scrDecided", 1);
-            c.SetInt("scrDemo", need ? 1 : 0);
-            return need;
+            c.SetInt("scrDemo", demo ? 1 : 0);
+            return demo;
         }
 
-        private static StepOutcome TickLabDemolishAsk(JourneyContext c)
+        /// <summary>拆来换废料的实验室：第二座还在就拆第二座；补火墙时已经拆掉了就拆第一座（M6 的研究都做完了）。</summary>
+        private static string ScrapLabKey(JourneyContext c) => P.Bld(c, "lab2") != null ? "lab2" : "lab1";
+
+        private static string ScrapLabName(string key) => key == "lab2" ? "第二座仿真实验室" : "第一座仿真实验室";
+
+        private static StepOutcome TickLabDemolishAsk(JourneyContext c, string flag = "scrDemo")
         {
-            if (c.GetInt("scrDemo") == 0)
+            if (c.GetInt(flag) == 0)
             {
                 return StepOutcome.Done("跳过");
             }
-            BuildingRecord lab = P.Bld(c, "lab2");
+            string key = c.Get(flag + ".lab");
+            if (string.IsNullOrEmpty(key))
+            {
+                key = ScrapLabKey(c);
+                c.Set(flag + ".lab", key);
+            }
+            BuildingRecord lab = P.Bld(c, key);
             if (lab == null)
             {
-                return StepOutcome.Fail("第二座仿真实验室不见了");
+                return StepOutcome.Fail($"{ScrapLabName(key)}不见了");
             }
             c.Set("scrLab", lab.BuildingId);
             c.SetInt("scrScrap0", St.Scrap);
@@ -971,7 +1203,7 @@ namespace GameLogic.EditorTools.JourneyBots
             if (HomeGridService.IsMarkedForDemolish(St, lab.BuildingId))
             {
                 // 没有要确认的后果（不断谁的电、不切断谁的路）就直接标记拆除，状态行写明。
-                return StepOutcome.Done($"拆除模式点第二座实验室：直接标记拆除（“{HomeValleyBuildMode.Current?.StatusText?.Replace("\n", " / ")}”），机器上门拆、全额返还");
+                return StepOutcome.Done($"拆除模式点{ScrapLabName(key)}：直接标记拆除（“{HomeValleyBuildMode.Current?.StatusText?.Replace("\n", " / ")}”），机器上门拆、全额返还");
             }
             ConfirmRequest r = UiConfirmDialog.Current;
             if (r == null)
@@ -981,9 +1213,9 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done($"确认框“{r.Title}”：{string.Join("；", r.Consequences.Concat(r.Lines))}");
         }
 
-        private static StepOutcome TickLabMarked(JourneyContext c)
+        private static StepOutcome TickLabMarked(JourneyContext c, string flag = "scrDemo")
         {
-            if (c.GetInt("scrDemo") == 0)
+            if (c.GetInt(flag) == 0)
             {
                 return StepOutcome.Done("跳过");
             }
@@ -1048,8 +1280,40 @@ namespace GameLogic.EditorTools.JourneyBots
                 string sites = string.Join("；", lost.Select(x => HomeGridService.FindBuilding(s, x.Id)).Where(b => b != null && b.ConstructionState != BuildingConstructionState.Operational)
                     .Select(b => HomeValleyConstruction.TryDescribeSite(s, new GridCell(b.GridX, b.GridY), out string st, out string sb) ? $"{st}：{sb?.Replace("\n", " / ")}" : $"{BuildingOps.NameOf(b)}：不在施工队列"));
                 c.Log($"等重建：[{string.Join("；", waiting)}]；施工点 [{sites}]；残骸去向 {RaidResultService.RouteText(RaidResultService.StateOf(s)?.WreckRouting ?? 0)}；{D.WorkDiag(s)}");
+                c.Log($"    重建诊断：{RebuildDiag(s, rule)}");
             }
             return StepOutcome.Wait;
+        }
+
+        /// <summary>等重建太久时的诊断：时钟有没有在走、家园内核步数、每台家园机器的内核状态（血量 / 行为 / 命令 / 标志）、在办工单的目标与机器、规则日志尾与待处理事件。</summary>
+        private static string RebuildDiag(CampaignState s, int rule)
+        {
+            var parts = new List<string>
+            {
+                $"时钟 第 {GameClock.Ticks} 步（{GameClock.GameSeconds:F0} 游戏秒）暂停 {GameClock.Paused} 倍速 {GameClock.Speed:0.##} 接入锁 {GameClock.DirectLocked} 观察 {WorldView.ObservedSiteId}",
+            };
+            CombatSite site = D.HomeSite;
+            parts.Add(site == null ? "家园内核 无" : $"家园内核 {site.Kernel.Steps} 步");
+            foreach (MachineRecord m in MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId))
+            {
+                if (site != null && site.TryGetMachineUnit(m.LogicId, out int unit) && site.Kernel.TryGetUnit(unit, out BinGames.Sim.Combat.CombatUnitView v))
+                {
+                    parts.Add($"{FgjM1Journey.Label(m.LogicId)} 内核 HP {v.Health:F0}/{v.MaxHealth:F0} {v.Behavior} 命令 {v.Command}→{v.CommandPos.x:F1},{v.CommandPos.y:F1} 标志 {v.Flags}");
+                }
+                else
+                {
+                    parts.Add($"{FgjM1Journey.Label(m.LogicId)} 不在家园内核");
+                }
+            }
+            foreach (WorkOrderRecord o in (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Where(o => o != null && o.State != WorkOrderState.Completed && o.State != WorkOrderState.Cancelled).Take(6))
+            {
+                parts.Add($"单 {o.Kind}/{o.State} 目标 {o.TargetId} 来源 {o.SourceId} 去向 {o.DestinationId} 机器 {o.AssignedMachineLogicId}{(string.IsNullOrEmpty(o.FailureReason) ? string.Empty : " " + o.FailureReason)}");
+            }
+            StandingRuleState d = StandingRuleService.Domain(s);
+            IEnumerable<RuleLogRecord> tail = (d?.Log ?? Array.Empty<RuleLogRecord>()).Where(e => e != null && e.Rule == rule).Reverse().Take(3);
+            parts.Add($"R{rule} 日志尾 [{string.Join(" | ", tail.Select(e => $"第 {e.Tick} 步 {e.Key}({string.Join(",", e.Args ?? Array.Empty<string>())})"))}]");
+            parts.Add($"待处理事件 {d?.Pending?.Length ?? 0}（{string.Join(",", (d?.Pending ?? Array.Empty<RuleEventRecord>()).Select(p => p.Kind + ":" + p.EntityId))}）");
+            return string.Join("；", parts);
         }
     }
 }

@@ -45,6 +45,8 @@ namespace GameLogic.EditorTools.JourneyBots
         internal const string NodeTrap = "defense.trap";
         internal const string NodeDrone = "defense.repair_drone";
         internal const string NodeRebuild = "defense.auto_rebuild";
+        /// <summary>物流 · 地下管线（6 研究点、无前置）：火墙的燃油管线要从屏障 / 供料带底下穿过去时先研究。</summary>
+        internal const string NodeUnderground = "logistics.pipe_underground";
         internal const string FwOil = "fw_oilleak";
         internal const string FwBurn = "fw_burntrail";
         internal const string TurretHost = "[TurretPanelHost]";
@@ -648,6 +650,8 @@ namespace GameLogic.EditorTools.JourneyBots
             public GridCell UnderOut;
             public GridCell UnderIn;
             public int UnderDir;
+            /// <summary>那一对地下管线口跨过的是传送带（回收站供料带横穿屏障圈时），不是屏障。</summary>
+            public bool UnderBelt;
         }
 
         /// <summary>
@@ -655,10 +659,11 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 挑离抵达点最近的那座已建轻型炮塔（在屏障圈里，射程 18 米罩得住圈外抵达点）改装成燃迹炮塔（炮塔面板蓝图下拉换到“燃迹 + 接入口”的新版本，不另造炮塔、不另花废料），
         /// 它旁边一格放陷阱发射器、朝抵达点铺油膜带（“一条线” 8 米，越过屏障铺到圈外敌人站的地方），两者之间那一格是燃油管线的终点。
         /// 燃油管线从储罐边接出来（不碰原油 / 酸液两张管网）：能直接铺过去就直接铺；被屏障圈隔开（缺口被传送带占着）时用一对地下管线口从屏障底下穿进圈
-        /// （圈外一口朝里、圈里一口朝外，跨度以内自动配对）。按废料（管线格 + 地下口）+ 油膜带离抵达点的距离挑最省的。失败返回 null 与原因。
+        /// （圈外一口朝里、圈里一口朝外，跨度以内自动配对）；还接不过去（回收站供料带横穿圈里、把储罐和炮塔隔在两半）再试从传送带底下穿（<paramref name="extraAvoid"/> 里的带格）。
+        /// 按废料（管线格 + 地下口）+ 油膜带离抵达点的距离挑最省的。失败返回 null 与原因。
         /// </summary>
         internal static FirewallPlan PlanFirewallNear(CampaignState s, Vector2 arrival, IList<(string Key, GridCell Pivot)> turrets, GridCell tank, GridCell fuelPipe,
-            IEnumerable<GridCell> otherNets, out string why, IEnumerable<GridCell> extraAvoid = null)
+            IEnumerable<GridCell> otherNets, out string why, IEnumerable<GridCell> extraAvoid = null, IEnumerable<GridCell> fuelNet = null, bool beltsFirst = false)
         {
             why = null;
             HashSet<long> avoid = P.BaseAvoid(s);
@@ -678,7 +683,8 @@ namespace GameLogic.EditorTools.JourneyBots
             bool PipeCell(GridCell c, PipePieceKind kind) =>
                 !keepOut.Contains(P.Key(c)) && HomeGridService.ValidatePipeCell(s, c, kind).Ok && PipeNetworkService.SourceFluidAt(s, c) == 0;
             var starts = new List<GridCell>();
-            foreach (GridCell n in new[] { tank, fuelPipe })
+            // fuelNet（补火墙时传已铺的燃油管线）：新管线也可以从它旁边接出（同一张燃油管网）。
+            foreach (GridCell n in new[] { tank, fuelPipe }.Concat(fuelNet ?? Array.Empty<GridCell>()))
             {
                 for (int k = 0; k < 4; k++)
                 {
@@ -729,6 +735,28 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                 }
             }
+            // 修复轮 r1 续（[M6 出口] B 段种子 7 朝北失败）：回收站供料带横穿屏障圈时把圈里分成两半，储罐那一半铺不到另一半的炮塔——
+            // 屏障底下穿不过去时，第二轮再试从传送带底下穿（一对地下管线口跨过一格宽的带，两个方向都试）。传送带格来自 extraAvoid（规划里的带，旅程传已铺的回收站供料带）。
+            var beltCrossings = new List<(GridCell O, GridCell I, int Dir, GridCell GO, GridCell GI)>();
+            var beltSet = new HashSet<long>((extraAvoid ?? Array.Empty<GridCell>()).Select(P.Key));
+            foreach (GridCell w in extraAvoid ?? Array.Empty<GridCell>())
+            {
+                for (int k = 0; k < 4; k++)
+                {
+                    GridCell o = P.Step(w, k);
+                    GridCell i = P.Step(w, (k + 2) & 3);
+                    if (beltSet.Contains(P.Key(o)) || beltSet.Contains(P.Key(i)))
+                    {
+                        continue; // 顺着带走的方向不是“跨过去”
+                    }
+                    GridCell go = P.Step(o, k);
+                    GridCell gi = P.Step(i, (k + 2) & 3);
+                    if (span >= 1 && PipeCell(o, PipePieceKind.Underground) && PipeCell(i, PipePieceKind.Underground) && PipeCell(go, PipePieceKind.Pipe) && PipeCell(gi, PipePieceKind.Pipe))
+                    {
+                        beltCrossings.Add((o, i, (k + 2) & 3, go, gi));
+                    }
+                }
+            }
             var r1Cache = new Dictionary<int, List<GridCell>>();
             List<GridCell> Route(GridCell goal, ISet<long> ko)
             {
@@ -747,111 +775,127 @@ namespace GameLogic.EditorTools.JourneyBots
             FirewallPlan best = null;
             float bestScore = float.MaxValue;
             var tried = new List<string>();
-            foreach ((string key, GridCell pivot) in turrets.OrderBy(t => Vector2.Distance(TurretCenter(t.Pivot), arrival)).Take(3))
+            List<(GridCell O, GridCell I, int Dir, GridCell GO, GridCell GI)> wallCrossings = crossings;
+            // beltsFirst（补火墙）：第一轮就把“从供料带底下穿”一起比较（要接的已铺管线可能在供料带另一侧，只穿屏障的方案找得到但贵得多）。
+            for (int pass = beltsFirst && beltCrossings.Count > 0 ? 1 : 0; pass < 2 && best == null; pass++)
             {
-                List<GridCell> fp = P.Footprint(Turret, pivot, 0);
-                var fpSet = new HashSet<long>(fp.Select(P.Key));
-                int spots = 0;
-                int found = 0;
-                foreach (GridCell f in fp)
+                if (pass == 1)
                 {
-                    for (int k = 0; k < 4; k++)
+                    if (beltCrossings.Count == 0)
                     {
-                        GridCell end = P.Step(f, k);
-                        if (fpSet.Contains(P.Key(end)) || !PipeCell(end, PipePieceKind.Pipe))
+                        break;
+                    }
+                    crossings = wallCrossings.Concat(beltCrossings).ToList();
+                    r1Cache.Clear();
+                    tried.Clear();
+                }
+                foreach ((string key, GridCell pivot) in turrets.OrderBy(t => Vector2.Distance(TurretCenter(t.Pivot), arrival)).Take(3))
+                {
+                    List<GridCell> fp = P.Footprint(Turret, pivot, 0);
+                    var fpSet = new HashSet<long>(fp.Select(P.Key));
+                    int spots = 0;
+                    int found = 0;
+                    foreach (GridCell f in fp)
+                    {
+                        for (int k = 0; k < 4; k++)
                         {
-                            continue;
-                        }
-                        for (int j = 0; j < 4; j++)
-                        {
-                            GridCell trap = P.Step(end, j);
-                            if (fpSet.Contains(P.Key(trap)) || !P.Placeable(s, Trap, trap, 0, avoid))
+                            GridCell end = P.Step(f, k);
+                            if (fpSet.Contains(P.Key(end)) || !PipeCell(end, PipePieceKind.Pipe))
                             {
                                 continue;
                             }
-                            // 朝向：四个方向里油膜带（陷阱中心起 len 米）离抵达点最近的那个。
-                            int rot = -1;
-                            float cover = float.MaxValue;
-                            for (int r = 0; r < 4; r++)
+                            for (int j = 0; j < 4; j++)
                             {
-                                var a = new Vector2(trap.X, trap.Y);
-                                Vector2 b = a + new Vector2(DX[r], DY[r]) * len;
-                                float dd = SegmentDistance(arrival, a, b);
-                                if (dd < cover)
-                                {
-                                    cover = dd;
-                                    rot = r;
-                                }
-                            }
-                            if (cover > 3.5f)
-                            {
-                                continue;
-                            }
-                            spots++;
-                            var ko = new HashSet<long>(keepOut) { P.Key(trap) };
-                            List<GridCell> direct = Route(end, ko);
-                            if (direct != null)
-                            {
-                                found++;
-                                float score = direct.Count * pipeCost + cover * 4f;
-                                if (score < bestScore)
-                                {
-                                    bestScore = score;
-                                    best = new FirewallPlan { TrapAt = trap, TrapRot = rot * 90, TurretAt = pivot, TurretKey = key, PipeEnd = end, Pipe = direct, Cover = cover };
-                                }
-                                continue;
-                            }
-                            // 直接铺不过去：试离储罐 + 离这座炮塔近的几处屏障底下穿过去。
-                            var order = Enumerable.Range(0, crossings.Count)
-                                .OrderBy(x => Mathf.Abs(crossings[x].O.X - tank.X) + Mathf.Abs(crossings[x].O.Y - tank.Y) + Mathf.Abs(crossings[x].I.X - end.X) + Mathf.Abs(crossings[x].I.Y - end.Y))
-                                .Take(24);
-                            foreach (int x in order)
-                            {
-                                (GridCell o, GridCell i, int dir, GridCell go, GridCell gi) = crossings[x];
-                                if (i == trap || go == trap || gi == trap)
+                                GridCell trap = P.Step(end, j);
+                                if (fpSet.Contains(P.Key(trap)) || !P.Placeable(s, Trap, trap, 0, avoid))
                                 {
                                     continue;
                                 }
-                                if (!r1Cache.TryGetValue(x, out List<GridCell> r1))
+                                // 朝向：四个方向里油膜带（陷阱中心起 len 米）离抵达点最近的那个。
+                                int rot = -1;
+                                float cover = float.MaxValue;
+                                for (int r = 0; r < 4; r++)
                                 {
-                                    var ko1 = new HashSet<long>(keepOut) { P.Key(o), P.Key(i) };
-                                    r1 = Route(go, ko1);
-                                    r1Cache[x] = r1;
-                                }
-                                if (r1 == null || r1.Contains(trap) || r1.Contains(end))
-                                {
-                                    continue;
-                                }
-                                var ko2 = new HashSet<long>(keepOut) { P.Key(trap), P.Key(o), P.Key(i) };
-                                foreach (GridCell c1 in r1)
-                                {
-                                    ko2.Add(P.Key(c1));
-                                }
-                                List<GridCell> r2 = gi == end ? new List<GridCell> { gi } : P.PlanRoute(s, gi, end, 0, -1, ko2, 16, P.PipeOk(s));
-                                if (r2 == null)
-                                {
-                                    continue;
-                                }
-                                found++;
-                                float score = (r1.Count + r2.Count) * pipeCost + 2 * underCost + cover * 4f;
-                                if (score < bestScore)
-                                {
-                                    bestScore = score;
-                                    best = new FirewallPlan
+                                    var a = new Vector2(trap.X, trap.Y);
+                                    Vector2 b = a + new Vector2(DX[r], DY[r]) * len;
+                                    float dd = SegmentDistance(arrival, a, b);
+                                    if (dd < cover)
                                     {
-                                        TrapAt = trap, TrapRot = rot * 90, TurretAt = pivot, TurretKey = key, PipeEnd = end, Cover = cover,
-                                        Pipe = r1.Concat(new[] { o, i }).Concat(r2).ToList(), PipeOut = r1, PipeIn = r2, UnderOut = o, UnderIn = i, UnderDir = dir, Underground = true,
-                                    };
+                                        cover = dd;
+                                        rot = r;
+                                    }
+                                }
+                                if (cover > 3.5f)
+                                {
+                                    continue;
+                                }
+                                spots++;
+                                var ko = new HashSet<long>(keepOut) { P.Key(trap) };
+                                List<GridCell> direct = Route(end, ko);
+                                if (direct != null)
+                                {
+                                    found++;
+                                    float score = direct.Count * pipeCost + cover * 4f;
+                                    if (score < bestScore)
+                                    {
+                                        bestScore = score;
+                                        best = new FirewallPlan { TrapAt = trap, TrapRot = rot * 90, TurretAt = pivot, TurretKey = key, PipeEnd = end, Pipe = direct, Cover = cover };
+                                    }
+                                    continue;
+                                }
+                                // 直接铺不过去：试离储罐 + 离这座炮塔近的几处屏障底下穿过去。
+                                var order = Enumerable.Range(0, crossings.Count)
+                                    .OrderBy(x => Mathf.Abs(crossings[x].O.X - tank.X) + Mathf.Abs(crossings[x].O.Y - tank.Y) + Mathf.Abs(crossings[x].I.X - end.X) + Mathf.Abs(crossings[x].I.Y - end.Y))
+                                    .Take(24);
+                                foreach (int x in order)
+                                {
+                                    (GridCell o, GridCell i, int dir, GridCell go, GridCell gi) = crossings[x];
+                                    if (i == trap || go == trap || gi == trap)
+                                    {
+                                        continue;
+                                    }
+                                    if (!r1Cache.TryGetValue(x, out List<GridCell> r1))
+                                    {
+                                        var ko1 = new HashSet<long>(keepOut) { P.Key(o), P.Key(i) };
+                                        r1 = Route(go, ko1);
+                                        r1Cache[x] = r1;
+                                    }
+                                    if (r1 == null || r1.Contains(trap) || r1.Contains(end))
+                                    {
+                                        continue;
+                                    }
+                                    var ko2 = new HashSet<long>(keepOut) { P.Key(trap), P.Key(o), P.Key(i) };
+                                    foreach (GridCell c1 in r1)
+                                    {
+                                        ko2.Add(P.Key(c1));
+                                    }
+                                    List<GridCell> r2 = gi == end ? new List<GridCell> { gi } : P.PlanRoute(s, gi, end, 0, -1, ko2, 16, P.PipeOk(s));
+                                    if (r2 == null)
+                                    {
+                                        continue;
+                                    }
+                                    found++;
+                                    float score = (r1.Count + r2.Count) * pipeCost + 2 * underCost + cover * 4f;
+                                    if (score < bestScore)
+                                    {
+                                        bestScore = score;
+                                        best = new FirewallPlan
+                                        {
+                                            TrapAt = trap, TrapRot = rot * 90, TurretAt = pivot, TurretKey = key, PipeEnd = end, Cover = cover,
+                                            Pipe = r1.Concat(new[] { o, i }).Concat(r2).ToList(), PipeOut = r1, PipeIn = r2, UnderOut = o, UnderIn = i, UnderDir = dir, Underground = true,
+                                            UnderBelt = x >= wallCrossings.Count,
+                                        };
+                                    }
                                 }
                             }
                         }
                     }
+                    tried.Add($"{key} {Cell(pivot)}（离抵达点 {Vector2.Distance(TurretCenter(pivot), arrival):F1} 米）：旁边能放陷阱且油膜带罩得住抵达点的位置 {spots} 处、管线接得过去的方案 {found} 个");
                 }
-                tried.Add($"{key} {Cell(pivot)}（离抵达点 {Vector2.Distance(TurretCenter(pivot), arrival):F1} 米）：旁边能放陷阱且油膜带罩得住抵达点的位置 {spots} 处、管线接得过去的方案 {found} 个");
             }
             if (best == null)
             {
-                why = $"离抵达点最近的三座炮塔都改不成火墙（屏障底下能穿管线的位置 {crossings.Count} 处）：" + string.Join("；", tried);
+                why = $"离抵达点最近的三座炮塔都改不成火墙（屏障底下能穿管线的位置 {wallCrossings.Count} 处、传送带底下 {beltCrossings.Count} 处）：" + string.Join("；", tried);
             }
             return best;
         }
