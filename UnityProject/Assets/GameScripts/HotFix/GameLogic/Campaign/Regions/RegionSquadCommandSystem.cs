@@ -636,7 +636,9 @@ namespace GameLogic.Campaign.Regions
             {
                 WarnIfRouteLeavesCoverage(targetPosition);
             }
-            if (paused)
+            // FG7-E2E-01 修复轮 1：暂停中同样——一台都没接到、而且有机器是被拒的（覆盖外 / 静默夜，静默夜开始默认自动暂停）时，
+            // 不补“已排队（0 台）”和确认音，命令栏最新一行保留拒绝原因（B06 / B07，与不暂停分支同一口径）。
+            if (paused && (started > 0 || _outScratch.Count == 0))
             {
                 if (started > 0)
                 {
@@ -710,7 +712,9 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             ReportOutOfCoverage(_outScratch);
-            if (!pending)
+            // FG7-E2E-01（FGJ-M7 静默夜右键地面抓到）：一台都没接到、而且有机器是被拒的（覆盖外 / 静默夜）时，不再补一行“已下达（0 台）”——
+            // 它排在拒绝原因后面，命令栏最新一行只剩“已下达（0 台）”，玩家看不到为什么没动（B06）。
+            if (!pending && (started > 0 || _outScratch.Count == 0))
             {
                 PushEvent($"{KindLabel(kind)} 已下达（{started} 台）。");
                 if (firstStarted != 0)

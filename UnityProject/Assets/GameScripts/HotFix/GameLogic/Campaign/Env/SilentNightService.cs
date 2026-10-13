@@ -280,6 +280,28 @@ namespace GameLogic.Campaign.Env
             Revision++;
         }
 
+        /// <summary>
+        /// 测试捷径（FG7-E2E-01 出口旅程 FGJ-M7）：把下一次静默夜改排到第 <paramref name="day"/> 日的夜里——与正式排定走同一个 <c>Plan</c>，
+        /// 预警时刻、开始时刻（入夜后 start_offset_hours）、持续时间、预警提前量都与正式完全相同，只改日期（正式间隔 5 日，1x 下第一次要等约 100 分钟）。
+        /// 预警 / 开始 / 结束及其效果全部由 <see cref="WorldStep"/> 照正式流程执行，结束后照常按间隔排下一次。正在进行、或那天的预警已过时不改（返回 false）。
+        /// </summary>
+        public static bool PlanDayForTests(CampaignState s, int day)
+        {
+            SilentNightState d = StateOf(s);
+            if (d == null || d.Active || day < 1)
+            {
+                return false;
+            }
+            PlanTicks(day, out long warn, out _, out _);
+            if (warn <= GameClock.Ticks)
+            {
+                return false;
+            }
+            Plan(d, day);
+            Revision++;
+            return true;
+        }
+
         // ── 推进 ─────────────────────────────────────────────────────────────────
 
         /// <summary>世界模拟每步调用（<c>WorldSimulation.StepOnce</c>）：O(1) 比较整数步；预警 / 开始 / 结束那一步做对应的事。只看步序号与存档，与观察无关。</summary>

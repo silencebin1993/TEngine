@@ -251,7 +251,7 @@ namespace GameLogic.EditorTools
             return s;
         }
 
-        private sealed class Rig
+        internal sealed class Rig
         {
             public BuildingRecord Tower;
             public GridCell Pivot;
@@ -260,7 +260,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>核心配电半径内一块 3×6 的空地：北半边放净化塔（3×3），南口外铺两格管线，最南一格挂测试供冷却液点（相当于“上游有调配站 / 储罐”）。按种子地形找（B25）。</summary>
-        private static Rig LayTower(CampaignState s, string key, bool feed, long liters = 4000, GridCell? pivotOverride = null)
+        internal static Rig LayTower(CampaignState s, string key, bool feed, long liters = 4000, GridCell? pivotOverride = null)
         {
             GridCell pivot;
             if (pivotOverride.HasValue)
@@ -288,12 +288,12 @@ namespace GameLogic.EditorTools
             return rig;
         }
 
-        private static void Feed(Rig r, long liters)
+        internal static void Feed(Rig r, long liters)
         {
             r.Feed = PipeNetworkService.Kernel.AddProducer(r.FeedCell.X, r.FeedCell.Y, PipeNetworkService.FluidId("coolant"), Math.Max(1000L, liters * 1000L), liters * 1000L);
         }
 
-        private static void StopFeed(Rig r)
+        internal static void StopFeed(Rig r)
         {
             if (r.Feed >= 0)
             {

@@ -433,11 +433,107 @@ namespace GameLogic.EditorTools
             }
             long bytes = new FileInfo(CampaignSaveService.SlotPath(Slot)).Length;
             Add(cur, "save_ms", "写性能测试存档（整局同步 + 序列化 + 写盘）", "ms", sw.Elapsed.TotalMilliseconds, true, 20);
+            // FG7-E2E-01 修复轮 1：分项诊断会再做一整次同步 / 导出 / JSON / 写盘，产生大量托管垃圾，夹在 save_ms 与 load_ms 之间会抬高读档测量——
+            // 只在显式要求诊断时跑（BINGAMES_PERF_DIAG=1 bash tools/unity-perf-baseline.sh），跑完先回收再继续正式测量。
+            if (Env("BINGAMES_PERF_DIAG") == "1")
+            {
+                ReportSaveBreakdown(s);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
             Add(cur, "save_kb", "性能测试存档大小", "KB", bytes / 1024.0, true, 16);
             ExpectPerf(bytes / 1024.0 / 1024.0 <= SaveMbBudget,
                 $"FGR-SYS-005 绝对门槛：后期存档 {bytes / 1024.0 / 1024.0:F2} MB ≤ {SaveMbBudget} MB，写存档 {sw.Elapsed.TotalMilliseconds:F0} ms ≤ {SaveMsBudget} ms（Editor）",
                 PerfGate.Le(sw.Elapsed.TotalMilliseconds, SaveMsBudget, "写存档 ms"));
             return true;
+        }
+
+        /// <summary>
+        /// FG7-E2E-01：写存档的分项耗时与存档里各部分的大小（只报告、不判定、不进基线）——正式测量（save_ms）之后在另一个槽位按同一顺序再走一遍，
+        /// 用来定位写存档 / 存档体积变化落在哪一段（v3 → v4 写存档 +135% 的根因定位）。
+        /// </summary>
+        private static void ReportSaveBreakdown(CampaignState s)
+        {
+            const int diagSlot = 2;
+            var sw = Stopwatch.StartNew();
+            WorldSimulation.SyncAllForSave();
+            double sync = sw.Elapsed.TotalMilliseconds;
+            sw.Restart();
+            MachineRegistry.ExportToCampaignState(s);
+            double export = sw.Elapsed.TotalMilliseconds;
+            sw.Restart();
+            WorldGenService.CaptureDiffs(s);
+            double diffs = sw.Elapsed.TotalMilliseconds;
+            sw.Restart();
+            s.NormalizeForSave();
+            double normalize = sw.Elapsed.TotalMilliseconds;
+            sw.Restart();
+            string json = JsonUtility.ToJson(s);
+            double toJson = sw.Elapsed.TotalMilliseconds;
+            sw.Restart();
+            SaveResult again = CampaignSaveService.Save(diagSlot, s, SaveReason.Manual);
+            double whole = sw.Elapsed.TotalMilliseconds;
+            Line($"  · 写存档分项（只报告，另一个槽位重走一遍）：整局同步 {sync:F1} ms、导出机器 {export:F1}、区块差异 {diffs:F1}、规整 {normalize:F1}、JSON 序列化 {toJson:F1}、" +
+                 $"整个 CampaignSaveService.Save {whole:F1} ms（{(again.Success ? "成功" : again.Message)}）");
+            Line($"  · 存档内容：JSON {json.Length / 1024.0:F0} KB；已探索圆 {s.Grid?.Explored?.Length ?? 0} 个、区块差异 {s.World?.ChunkDiffs?.Length ?? 0} 块" +
+                 $"（差异文本 {(s.World?.ChunkDiffs ?? Array.Empty<ChunkDiffRecord>()).Sum(d => d?.DiffPayload?.Length ?? 0) / 1024.0:F0} KB）、地面物 {s.GroundItems?.Length ?? 0}、工单 {s.WorkOrders?.Length ?? 0}");
+            // 顶层字段按 JSON 文本长度排序取前 8（括号深度扫描，只认顶层键）。
+            var sizes = new List<(string key, int len)>();
+            int depth = 0;
+            int keyStart = -1;
+            string curKey = null;
+            int valStart = -1;
+            bool inStr = false;
+            for (int i = 0; i < json.Length; i++)
+            {
+                char ch = json[i];
+                if (inStr)
+                {
+                    if (ch == '\\')
+                    {
+                        i++;
+                    }
+                    else if (ch == '"')
+                    {
+                        inStr = false;
+                        if (depth == 1 && keyStart >= 0 && curKey == null)
+                        {
+                            curKey = json.Substring(keyStart + 1, i - keyStart - 1);
+                        }
+                    }
+                    continue;
+                }
+                if (ch == '"')
+                {
+                    inStr = true;
+                    if (depth == 1 && curKey == null)
+                    {
+                        keyStart = i;
+                    }
+                }
+                else if (ch == ':' && depth == 1 && curKey != null && valStart < 0)
+                {
+                    valStart = i + 1;
+                }
+                else if (ch == '{' || ch == '[')
+                {
+                    depth++;
+                }
+                else if (ch == '}' || ch == ']')
+                {
+                    depth--;
+                }
+                if (depth == 1 && (ch == ',' || i == json.Length - 2) && curKey != null && valStart >= 0)
+                {
+                    sizes.Add((curKey, i - valStart));
+                    curKey = null;
+                    keyStart = -1;
+                    valStart = -1;
+                }
+            }
+            Line("  · 存档顶层字段（KB）：" + string.Join("、", sizes.OrderByDescending(x => x.len).Take(8).Select(x => $"{x.key} {x.len / 1024.0:F0}")));
+            File.Delete(CampaignSaveService.SlotPath(diagSlot));
         }
 
         private static int AddBuildings(CampaignState s, GridCell core, int target)
@@ -603,9 +699,11 @@ namespace GameLogic.EditorTools
                 Fail("读性能测试存档失败：" + r.Message);
                 return false;
             }
+            double restoreOnlyMs = sw.Elapsed.TotalMilliseconds;
             CampaignSession.Set(RunSlot, r.State);
             HomeValleyController home = WorldSimulation.LoadHome(resume: true);
             sw.Stop();
+            Line($"  · 读档分项（只报告）：恢复存档 {restoreOnlyMs:F1} ms、载入家园 {sw.Elapsed.TotalMilliseconds - restoreOnlyMs:F1} ms；已探索圆 {r.State?.Grid?.Explored?.Length ?? 0} 个");
             if (home == null || !home.IsLoaded || home.Combat == null || !BeltNetworkService.IsRunning)
             {
                 Fail("读性能测试存档后家园 / 战斗内核 / 传送带内核没有载入");
