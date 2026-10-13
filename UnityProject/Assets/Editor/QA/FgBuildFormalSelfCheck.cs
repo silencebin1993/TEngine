@@ -450,13 +450,13 @@ namespace GameLogic.EditorTools
             // FG6-DEF-01：防御类有了轻型 / 重型炮塔；空分类改用环境（FG7 才有内容）。
             BuildCatalog.List("defense", null, list);
             bool defense = list.Select(x => x.Id).SequenceEqual(new[] { "turret_light", "turret_heavy", "barrier_t1", "barrier_t2", "barrier_t3", "gate", "shield_gen", "trap_emitter", "repair_drone_station" }); // FG6-DEF-02：+ 屏障 T1～T3、闸门、护盾发生器、陷阱发射器；FG6-DEF-03：+ 维修无人机站
-            // FG7-ENV-03：环境类有了顶棚；空分类改用仓储（还没有条目）。
+            // FG7-ENV-03：环境类有了顶棚；空分类改用仓储（还没有条目）。FG7-ENV-04：+ 净化塔（建筑）。
             BuildCatalog.List("environment", null, list);
-            bool envRoof = list.Count == 1 && list[0].Id == "roof" && list[0].IsTool;
+            bool envRoof = list.Count == 2 && list.Any(x => x.Id == "roof" && x.IsTool) && list.Any(x => x.Id == "purifier" && !x.IsTool);
             BuildCatalog.List("storage", null, list);
             bool emptyCat = list.Count == 0 && envRoof;
             Expect(logistics && energy && signal && defense && emptyCat && BuildCatalog.FirstNonEmptyCategory() == "logistics",
-                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3、管线 T1 / T2、泵、储罐、阀门、地下管线 T1 / T2（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类是轻型 / 重型炮塔、屏障 T1～T3、闸门、护盾发生器、陷阱发射器、维修无人机站（{defense}）；环境类是顶棚（FG7-ENV-03）、仓储类暂时为空；默认打开第一个有条目的分类");
+                $"分类：物流里依次有传送带 T1 / T2 / T3、分流器、合流器、地下传送带 T1 / T2 / T3、管线 T1 / T2、泵、储罐、阀门、地下管线 T1 / T2（实际 {logisticsIds}）、能源里有发电机、信号里有信号中继塔；防御类是轻型 / 重型炮塔、屏障 T1～T3、闸门、护盾发生器、陷阱发射器、维修无人机站（{defense}）；环境类是顶棚（FG7-ENV-03）与净化塔（FG7-ENV-04）、仓储类暂时为空；默认打开第一个有条目的分类");
 
             BuildCatalog.List("defense", "中继", list);
             bool byName = list.Count == 1 && list[0].Id == "signal_relay";

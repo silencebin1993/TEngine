@@ -426,6 +426,13 @@ namespace GameLogic.UI.Kit
             Chip(n++, GameText.Format("topbar.research", state.Research?.Points ?? 0), ItemCatalog.NameOf("research_points"),
                 GameText.Format("research.topbar.tip", ResearchService.StatusText(state), InputDisplay.ForAction(GameActionId.OpenResearch)), null, null,
                 ResearchTreePanelUIToolkit.Open, null);
+            // FG7-ENV-04（FGR-ENV-042）：“已归还 N 格”（世界无限没有百分比）；悬停写口径与下一个里程碑，点一下打开日历（里程碑与已达成的奖励在日历页脚）。
+            Chip(n++, GameText.Format("topbar.returned", Campaign.Env.PurificationService.ReturnedArea(state).ToString("N0", CultureInfo.InvariantCulture)),
+                GameText.Get("topbar.returned_title"),
+                // 三行（口径 / 下一个里程碑 / 操作）由代码按行拼接：文本表里不放换行（fgdata.py --dump 快照按行比对）。
+                GameText.Get("topbar.returned_tip") + "\n" + Campaign.Env.PurificationService.NextMilestoneText(state) + "\n"
+                + GameText.Format("topbar.returned_tip_hint", InputDisplay.ForAction(GameActionId.OpenCalendar), InputDisplay.ForAction(GameActionId.OverlayPollution)),
+                null, null, CalendarPanelUIToolkit.Open, null);
             Chip(n++, GameText.Format("topbar.exposure", Mathf.RoundToInt(state.SignalExposure), Mathf.RoundToInt(CampaignExposureLedger.MaxExposure)),
                 GameText.Get("topbar.exposure_title"), GameText.Format("topbar.exposure_tip", InputDisplay.ForAction(GameActionId.OpenExposure)), null, null,
                 SignalCore.SignalCoreHudUIToolkit.OpenExposure, null);

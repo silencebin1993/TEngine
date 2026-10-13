@@ -615,6 +615,9 @@ namespace GameLogic.Campaign.Grid
             int warnLevel = GridContent.TuningInt("grid.pollution_warn_level");
             int lightPolluted = 0;
             int lightLevel = 0;
+            // FG7-ENV-04（FGR-ENV-040 / FGR-LOG-012）：2 级及以上不能建造，只豁免净化塔（传送带走自己的逐格校验，本来就不拦）。
+            bool pollutionExempt = Env.PurificationService.IsPollutionExempt(typeId);
+            int exemptLevel = 0;
             for (int i = 0; i < r.Cells.Count; i++)
             {
                 GridCell c = r.Cells[i];
@@ -649,7 +652,11 @@ namespace GameLogic.Campaign.Grid
                     requiredFound = true;
                 }
                 byte p = chunk.Pollution[idx];
-                if (p >= blockLevel)
+                if (p >= blockLevel && pollutionExempt)
+                {
+                    exemptLevel = Math.Max(exemptLevel, p);
+                }
+                else if (p >= blockLevel)
                 {
                     r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
                     ok = false;
@@ -723,6 +730,15 @@ namespace GameLogic.Campaign.Grid
             if (lightPolluted > 0)
             {
                 r.Warnings.Add(Localization.GameText.Format("grid.warn.pollution", lightPolluted, lightLevel));
+            }
+            if (exemptLevel > 0)
+            {
+                r.Notes.Add(Localization.GameText.Format("purify.place.exempt", exemptLevel)); // FG7-ENV-04：净化塔压在重污染上是允许的，写明（不是警告）
+            }
+            if (pollutionExempt)
+            {
+                // 修复轮 1（FG00 B06 / B11）：塔可以压在重污染上，管线不能——冷却液口外那一格 2 级以上时警告（旋转 / 放到边缘），不让玩家照提示放进死局。
+                Env.PurificationService.AddIntakeWarning(state, typeId, pivot, r.Rotation, r.Warnings);
             }
 
             if (restoreBatch)

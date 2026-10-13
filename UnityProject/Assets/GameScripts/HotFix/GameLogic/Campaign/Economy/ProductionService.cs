@@ -83,6 +83,12 @@ namespace GameLogic.Campaign.Economy
         NoFuel,
         /// <summary>FG4-ECO-04 燃油发电机：不在任何电力覆盖里（发出的电送不出去，所以不烧油）。</summary>
         GeneratorUnconnected,
+        /// <summary>FG7-ENV-04 净化塔：正在净化（前沿在第几环、下一次降级还要多久，由 <see cref="Env.PurificationService"/> 现算）。</summary>
+        WorkingPurify,
+        /// <summary>FG7-ENV-04 净化塔：范围内已全部 0 级，继续维持净化区（酸雨豁免）。</summary>
+        PurifyDone,
+        /// <summary>FG7-ENV-04 净化塔：缺冷却液，净化暂停（卡片负向）。</summary>
+        NoCoolant,
     }
 
     /// <summary>
@@ -189,6 +195,8 @@ namespace GameLogic.Campaign.Economy
             }
         }
         public static IReadOnlyList<Producer> All => Ordered;
+        /// <summary>当前索引是按哪个战役建的（FG7-ENV-04 净化区查询据此判断能不能直接用索引，不触发重建）。</summary>
+        public static CampaignState IndexedState => _state;
         /// <summary>自检：最近一次有废墟格拆完变成空地的格子数（累计）。</summary>
         public static int RuinCellsDepleted { get; private set; }
 
@@ -290,7 +298,11 @@ namespace GameLogic.Campaign.Economy
                     // FG4-ECO-03（卡片“配方选择记住上一次的设置”）：新建的同类建筑沿用玩家上一次给这类建筑选的配方 / 刻录目标（面板写明“沿用了上一次的选择”）。
                     ApplyMemory(state, def, rec);
                     // FG00 B14：第一次放下采集 / 加工 / 制造建筑（引导内容在 FG15-UX-04；图鉴“采集建筑”“加工建筑”“制造建筑”随之解锁）。
-                    if (def.Mode != ProducerMode.Generator)
+                    if (def.Mode == ProducerMode.Purifier)
+                    {
+                        GuidanceHooks.Raise(GuidanceHooks.EnvFirstPurifier); // FG7-ENV-04：第一次放下净化塔（图鉴“净化塔”随之解锁）
+                    }
+                    else if (def.Mode != ProducerMode.Generator)
                     {
                         GuidanceHooks.Raise(def.Mode == ProducerMode.Recycler || def.Mode == ProducerMode.Drill || def.Mode == ProducerMode.Pump
                             ? GuidanceHooks.EconomyGatheringFirstPlaced
@@ -672,6 +684,11 @@ namespace GameLogic.Campaign.Economy
                     else
                     {
                         ok = k.TryGetConsumer(h, out PipeConsumerInfo ci) && ci.X == f.PipeCell.X && ci.Y == f.PipeCell.Y && ci.Fluid == f.FluidId;
+                        // FG7-ENV-04：净化塔原地升级后冷却液用量变了——抽取速率与机内容量跟着重登（口里的冷却液先退回建筑，再放回去，不丢）。
+                        if (ok && p.Def.Mode == ProducerMode.Purifier)
+                        {
+                            ok = ci.LitersPerMinute == ConsumerLpm(p, f.Def) && ci.CapacityMl == FluidCapacityMl(p, f.Def);
+                        }
                     }
                 }
                 if (ok)
@@ -732,6 +749,11 @@ namespace GameLogic.Campaign.Economy
                 // FG4-ECO-04 燃油发电机：机内燃油 = inBatches 秒满负荷的量（120 升/分钟 × 30 秒 = 60 升）。
                 return GeneratorBufferMl(p);
             }
+            if (p.Def.Mode == ProducerMode.Purifier)
+            {
+                // FG7-ENV-04 净化塔：机内冷却液 = inBatches 秒这一级用量。
+                return PurifierBufferMl(p);
+            }
             if (port.Fluid == null)
             {
                 return 0;
@@ -763,6 +785,12 @@ namespace GameLogic.Campaign.Economy
                 // 燃油进口按满负荷烧油速率 × eco.prod.fluid_intake_factor 取（缓存满了就不再要，不会多抽）。
                 double f = Math.Max(1.0, GridContent.Tuning("eco.prod.fluid_intake_factor"));
                 return Math.Max(1, (int)Math.Ceiling(p.Def.FluidLpm * f));
+            }
+            if (p.Def.Mode == ProducerMode.Purifier)
+            {
+                // FG7-ENV-04：冷却液进口按这一级用量 × eco.prod.fluid_intake_factor 取（缓存满了就不再要）。
+                double f = Math.Max(1.0, GridContent.Tuning("eco.prod.fluid_intake_factor"));
+                return Math.Max(1, (int)Math.Ceiling(PurifierLpm(p) * f));
             }
             double best = 0;
             foreach (RecipeDef r in p.Def.Recipes)
@@ -966,6 +994,11 @@ namespace GameLogic.Campaign.Economy
             p.WorkedThisStep = false;
             BuildingRecord b = p.Building;
             AccrueTheory(state, p, ticks, worldHz);
+            if (p.Def.Mode == ProducerMode.Purifier)
+            {
+                // FG7-ENV-04：先当作“没在净化”，只有下面真的有电有冷却液时 StepPurifier 才置回（施工中 / 受损 / 关停 / 缺电都不算净化区）。
+                p.Rec.PurifySupplied = false;
+            }
             switch (b.ConstructionState)
             {
                 case BuildingConstructionState.Operational:
@@ -998,6 +1031,11 @@ namespace GameLogic.Campaign.Economy
             if (!Powered(b))
             {
                 Set(p, ProdState.NoPower, b.PowerState == BuildingPowerState.Brownout ? ProdReason.PowerBrownout : ProdReason.PowerUnconnected);
+                return;
+            }
+            if (p.Def.Mode == ProducerMode.Purifier)
+            {
+                StepPurifier(state, p, ticks, worldHz);
                 return;
             }
             long budget = ticks;
@@ -1096,7 +1134,8 @@ namespace GameLogic.Campaign.Economy
                         Set(p, ProdState.NoResource, ProdReason.NoVein);
                         return false;
                     }
-                    int amount = Math.Max(1, p.Def.CycleAmount);
+                    // FG7-ENV-04（归还 20,000 格的奖励）：压在稀土富矿范围里稀土矿脉上的提取钻每份产出 × purify.rich_ore.yield_mult。
+                    int amount = Math.Max(1, p.Def.CycleAmount) * Env.PurificationService.DrillYieldMult(state, p);
                     int have = Count(r.Out, p.VeinOre.Id);
                     int cap = OutCapacity(p, p.VeinOre);
                     if (have + amount > cap)
@@ -1388,6 +1427,77 @@ namespace GameLogic.Campaign.Economy
 
         /// <summary>自检读：累计发生过几次燃油耗尽。</summary>
         public static int FuelOutCount { get; private set; }
+
+        // ── FG7-ENV-04：净化塔 ───────────────────────────────────────────────
+
+        /// <summary>这一级每分钟用冷却液几升：T1 = fg.TbProducer.fluidLpm，T2 / T3 × purify.coolant_mult_t2 / t3。</summary>
+        public static double PurifierLpm(Producer p)
+        {
+            int tier = BuildingOps.TierOf(p.Building);
+            double mult = tier >= 3 ? Math.Max(1.0, GridContent.Tuning("purify.coolant_mult_t3"))
+                : tier == 2 ? Math.Max(1.0, GridContent.Tuning("purify.coolant_mult_t2")) : 1.0;
+            return Math.Max(0.001, p.Def.FluidLpm * mult);
+        }
+
+        /// <summary>机内冷却液容量（毫升）= inBatches 秒这一级的用量。</summary>
+        public static long PurifierBufferMl(Producer p) =>
+            Math.Max(1000L, (long)Math.Round(PurifierLpm(p) * 1000.0 * Math.Max(1, p.Def.InBatches) / 60.0));
+
+        /// <summary>机内现有冷却液（毫升）：口已登记 = 管线内核里的消费者缓存；没登记 = 建筑自己留着的。</summary>
+        public static long PurifierCoolantMl(Producer p) => GeneratorFuelMl(p);
+
+        /// <summary>
+        /// 净化塔（FG07 FGR-ENV-041；卡片负向“净化塔缺冷却液”）：有电时（上面 StepOne 已判过）按这一级的用量从机内取冷却液，精确累计到毫升
+        /// （零头记在 <see cref="ProducerRecord.Progress"/>，单位 毫升 × 60 × 世界频率），与推进粒度、倍速、观察无关。
+        /// 取够了 = 这段时间在净化：<see cref="Env.PurificationService.Accrue"/> 推进净化进度（满 purify.hours_per_level 游戏小时降一环 1 级）。
+        /// 取不够 = 缺冷却液：暂停净化（已净化的格子不变、进度保留），状态“缺流体”写明原因与接口在哪，这一段发一次“净化暂停”通知；接上后自动继续。
+        /// </summary>
+        private static void StepPurifier(CampaignState state, Producer p, int ticks, int worldHz)
+        {
+            ItemDef coolant = p.Fluids.Length > 0 ? p.Fluids[0].Fluid : null;
+            int h = p.Fluids.Length > 0 ? p.Rec.FluidHandles[0] : -1;
+            PipeKernel k = PipeNetworkService.IsRunning ? PipeNetworkService.Kernel : null;
+            long buffer = h >= 0 && k != null ? k.ConsumerBuffer(h) : 0;
+            long perMinute = (long)Math.Round(PurifierLpm(p) * 1000.0);
+            long denom = 60L * Math.Max(1, worldHz);
+            long num = p.Rec.Progress + perMinute * ticks;
+            long want = num / denom;
+            bool supplied;
+            if (want > buffer || (want == 0 && buffer <= 0))
+            {
+                // 不够这段时间用（或机内一滴没有）：一滴也不取——这段时间不算净化，冷却液留着等补满（全有或全无，账目守恒）。
+                supplied = false;
+            }
+            else
+            {
+                long took = want > 0 ? k.TakeConsumerBuffer(h, want) : 0;
+                p.Rec.Progress = num - took * denom;
+                p.Rec.CoolantUsedMl += took;
+                ProductionStats.RecordFluidMl(state, coolant, took, produced: false); // FG4-ECO-08：净化用冷却液 = 消耗
+                supplied = took == want;
+            }
+            if (!supplied)
+            {
+                Set(p, ProdState.MissingFluid, ProdReason.NoCoolant, coolant, 0, Math.Max(1L, want), buffer);
+                if (!p.Rec.PurifyStallNotified)
+                {
+                    p.Rec.PurifyStallNotified = true;
+                    PurifyStallCount++;
+                    string label = Feedback.FeedbackCues.BuildingLabel(p.Id);
+                    NotificationCenter.Post("purify_stalled", Env.PurificationService.StalledNotifyText(state, p, label) ?? GameText.Format("purify.notify.stalled", label),
+                        new Vector3(p.Building.Position.x, 0f, p.Building.Position.y));
+                }
+                return;
+            }
+            p.Rec.PurifyStallNotified = false;
+            p.Rec.PurifySupplied = true;
+            p.WorkedThisStep = true;
+            Env.PurificationService.Accrue(state, p, ticks);
+            Set(p, ProdState.Working, Env.PurificationService.IsDone(state, p) ? ProdReason.PurifyDone : ProdReason.WorkingPurify);
+        }
+
+        /// <summary>自检读：累计发过几次“净化暂停”（缺冷却液）。</summary>
+        public static int PurifyStallCount { get; private set; }
 
         private static void StepWaste(Producer p)
         {
@@ -3131,6 +3241,12 @@ namespace GameLogic.Campaign.Economy
                     return GameText.Format("prod.reason.no_fuel", FluidPortHint(p, 0) ?? string.Empty);
                 case ProdReason.GeneratorUnconnected:
                     return GameText.Get("prod.reason.generator_unconnected");
+                case ProdReason.WorkingPurify:
+                case ProdReason.PurifyDone:
+                    return Env.PurificationService.WorkingText(state, p);
+                case ProdReason.NoCoolant:
+                    // 修复轮 1：冷却液口外那一格被重污染挡住（管线铺不过去）时写明挪到边缘，不再让玩家去接一条铺不了的管线。
+                    return GameText.Format("prod.reason.no_coolant", Env.PurificationService.IntakeHint(state, p) ?? FluidPortHint(p, 0) ?? string.Empty);
                 case ProdReason.MissingFluid:
                     return Join(GameText.Format("eco.reason.missing_input", p.ReasonItem?.Name ?? string.Empty, RecipeBook.Amount(p.ReasonItem, p.ReasonNeed),
                         RecipeBook.Amount(p.ReasonItem, p.ReasonHave)), FluidPortHint(p, p.ReasonPort));
@@ -3288,6 +3404,18 @@ namespace GameLogic.Campaign.Economy
                         Set(p, p.Rec.Fueled ? ProdState.Idle : ProdState.MissingFluid, p.Rec.Fueled ? ProdReason.GeneratorIdle : ProdReason.NoFuel,
                             p.Fluids.Length > 0 ? p.Fluids[0].Fluid : null, 0);
                     }
+                    else if (p.Def.Mode == ProducerMode.Purifier && Powered(b))
+                    {
+                        // FG7-ENV-04：还没推进过的净化塔按存档里“上一步在不在净化”给状态（不推进任何东西）。
+                        if (p.Rec.PurifySupplied)
+                        {
+                            Set(p, ProdState.Working, ProdReason.WorkingPurify);
+                        }
+                        else
+                        {
+                            Set(p, ProdState.MissingFluid, ProdReason.NoCoolant, p.Fluids.Length > 0 ? p.Fluids[0].Fluid : null, 0);
+                        }
+                    }
                     else if (!Powered(b))
                     {
                         Set(p, ProdState.NoPower, b.PowerState == BuildingPowerState.Brownout ? ProdReason.PowerBrownout : ProdReason.PowerUnconnected);
@@ -3348,7 +3476,17 @@ namespace GameLogic.Campaign.Economy
                     bool useRare = r > m;
                     notes.Add(GameText.Format("prod.preview.vein", GameText.Get(useRare ? "grid.terrain.ore_rare.name" : "grid.terrain.ore_metal.name"),
                         useRare ? r : m, ItemCatalog.NameOf(useRare ? "rare_earth_ore" : "metal_ore")));
+                    // FG7-ENV-04：压在稀土富矿范围里时写明产出加倍。
+                    if (useRare && Env.PurificationService.DepositAt(state, cells) is RichDepositRecord dep)
+                    {
+                        notes.Add(GameText.Format("purify.cal.deposit", dep.X, dep.Y, dep.Radius, Env.PurificationService.RichYieldMult));
+                    }
                 }
+            }
+            else if (def.Mode == ProducerMode.Purifier)
+            {
+                // FG7-ENV-04：净化塔的放置预览——半径内多少格要净化、大约多久（按 T1 半径、只算有电有冷却液的时间）。
+                Env.PurificationService.AddPlacementNotes(state, typeId, cells, notes);
             }
             else if (def.Mode == ProducerMode.Pump)
             {

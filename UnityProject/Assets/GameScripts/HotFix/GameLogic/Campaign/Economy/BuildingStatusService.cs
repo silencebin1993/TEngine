@@ -188,7 +188,8 @@ namespace GameLogic.Campaign.Economy
             }
             if (type == HomeValleyLayout.BuildingTypeSignalTower)
             {
-                float r = BuildingOps.TierOf(b) >= 2 ? Signal.SignalCoverageService.TowerT2Radius : Signal.SignalCoverageService.TowerRadius;
+                float r = (BuildingOps.TierOf(b) >= 2 ? Signal.SignalCoverageService.TowerT2Radius : Signal.SignalCoverageService.TowerRadius)
+                          * Signal.SignalCoverageService.HomeRadiusFactor(state); // FG7-ENV-04：归还 50,000 格的信号覆盖加成
                 return new BuildingStatus(BuildingStatusKind.Working, "signal", GameText.Format("bs.reason.working_signal", Mathf.RoundToInt(r)));
             }
             if (type == Signal.OverrideArrayService.TypeId)
@@ -228,7 +229,7 @@ namespace GameLogic.Campaign.Economy
             if (type == HomeValleyLayout.BuildingTypeSignalRelay)
             {
                 return new BuildingStatus(BuildingStatusKind.Working, "relay",
-                    GameText.Format("bs.reason.working_relay", Mathf.RoundToInt(Signal.SignalCoverageService.RelayTowerRadius)));
+                    GameText.Format("bs.reason.working_relay", Mathf.RoundToInt(Signal.SignalCoverageService.RelayTowerRadius * Signal.SignalCoverageService.HomeRadiusFactor(state))));
             }
             if (HomeValleyPowerGrid.IsStorageType(type))
             {

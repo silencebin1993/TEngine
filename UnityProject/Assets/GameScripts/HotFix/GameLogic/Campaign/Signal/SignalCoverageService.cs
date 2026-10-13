@@ -199,6 +199,12 @@ namespace GameLogic.Campaign.Signal
         public static int CutCount { get; private set; }
         public static double LastEvaluateMs { get; private set; }
 
+        /// <summary>FG7-ENV-04（FGR-ENV-042 归还 50,000 格“信号覆盖 +10%”）：家园覆盖源（核心 / 信号塔 / 中继塔）半径的倍率，由 <see cref="Env.PurificationService.Install"/> 接上；null = 1。
+        /// 倍率变了时调用方 <see cref="Invalidate"/>，下一次取样按新半径重建。</summary>
+        public static Func<CampaignState, float> HomeRadiusFactorProvider;
+
+        public static float HomeRadiusFactor(CampaignState state) => Math.Max(0.1f, HomeRadiusFactorProvider?.Invoke(state) ?? 1f);
+
         public static float CoreRadius => Tuning("signal.coverage.core_radius", 150f);
         public static float TowerRadius => Tuning("signal.coverage.tower_radius", 300f);
         public static float TowerT2Radius => Tuning("signal.coverage.tower_t2_radius", 500f);
@@ -651,7 +657,8 @@ namespace GameLogic.Campaign.Signal
                 BuildingRecord coreRecord = buildings != null && _coreIndex >= 0 && _coreIndex < buildings.Length ? buildings[_coreIndex] : null;
                 // 核心建筑记录（格网唯一计算的几何中心）优先；没有记录时（只建了战役的测试）按开局布局的核心锚点。
                 Vector2 corePos = coreRecord != null ? coreRecord.Position : (state != null ? HomeValleyLayout.Core.Position : Vector2.zero);
-                net.Sources.Add(new Source { Center = corePos, Radius = CoreRadius, Kind = SignalCoverageSourceKind.Core, BuildingId = coreRecord?.BuildingId, Parent = -1 });
+                float homeFactor = HomeRadiusFactor(state); // FG7-ENV-04：归还 50,000 格的信号覆盖加成
+                net.Sources.Add(new Source { Center = corePos, Radius = CoreRadius * homeFactor, Kind = SignalCoverageSourceKind.Core, BuildingId = coreRecord?.BuildingId, Parent = -1 });
                 if (buildings != null)
                 {
                     for (int k = 0; k < TowerIndices.Count; k++)
@@ -664,7 +671,7 @@ namespace GameLogic.Campaign.Signal
                             continue;
                         }
                         int tier = TowerTierProvider?.Invoke(b) ?? Economy.BuildingOps.TierOf(b); // FG4-ECO-05：信号塔原地升级后的等级（DEBT-FG1SIG04-03）。
-                        net.Sources.Add(new Source { Center = b.Position, Radius = tier >= 2 ? TowerT2Radius : TowerRadius, Kind = SignalCoverageSourceKind.Tower, BuildingId = b.BuildingId, Parent = -1 });
+                        net.Sources.Add(new Source { Center = b.Position, Radius = (tier >= 2 ? TowerT2Radius : TowerRadius) * homeFactor, Kind = SignalCoverageSourceKind.Tower, BuildingId = b.BuildingId, Parent = -1 });
                     }
                     for (int k = 0; k < RelayTowerIndices.Count; k++)
                     {
@@ -674,7 +681,7 @@ namespace GameLogic.Campaign.Signal
                         {
                             continue;
                         }
-                        net.Sources.Add(new Source { Center = b.Position, Radius = RelayTowerRadius, Kind = SignalCoverageSourceKind.RelayTower, BuildingId = b.BuildingId, Parent = -1 });
+                        net.Sources.Add(new Source { Center = b.Position, Radius = RelayTowerRadius * homeFactor, Kind = SignalCoverageSourceKind.RelayTower, BuildingId = b.BuildingId, Parent = -1 });
                     }
                 }
             }

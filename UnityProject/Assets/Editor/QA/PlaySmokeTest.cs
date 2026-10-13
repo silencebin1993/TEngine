@@ -410,6 +410,10 @@ namespace GameLogic.EditorTools
                 case 428: StepRoofDragged(inStep); break;
                 case 429: StepRoofHiddenAndOverlay(inStep); break;
                 case 430: StepWeatherEnded(inStep); break;
+                // FG7-ENV-04：污染与净化塔（真实按键 Ctrl+Alt+5 打开污染叠加层 → 顶栏“已归还 N 格”→ 建造模式选净化塔，真实鼠标指向一块重污染地（测试捷径：把那块地设成 2 级）→
+                // 状态行写“净化塔可以建在重污染地上”与格子的污染等级 / 影响、预览可放 → 取消选择、再按 Ctrl+Alt+5 关叠加层）
+                case 431: StepPollutionOverlay(inStep); break;
+                case 432: StepPollutionClosed(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -10481,6 +10485,256 @@ namespace GameLogic.EditorTools
                   && Notifications.NotificationCenter.History.Any(e => e?.Type?.Id == "weather_end"),
                 "酸雨按日程结束：转晴通知在通知历史里");
             GameClock.SetPaused(SessionState.GetInt(K + "WxWasPaused", 0) == 1);
+            Next(431, "FG7-ENV-04：真实按键 Ctrl+Alt+5 打开污染叠加层，建造菜单“环境”页点选净化塔，真实鼠标指向重污染地并放下一座");
+        }
+
+        // ── FG7-ENV-04：污染与净化塔（真实 Play 帧：污染叠加层快捷键、顶栏归还面积、建造模式里净化塔对重污染地的预览与格子悬停）──
+
+        private static void StepPollutionOverlay(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            int sub = SessionState.GetInt(K + "PolSub", 0);
+            if (sub == 0)
+            {
+                if (inStep < 0.3)
+                {
+                    return;
+                }
+                PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OverlayPollution));
+                SessionState.SetInt(K + "PolSub", 1);
+                return;
+            }
+            if (sub == 1)
+            {
+                if (inStep < 0.9)
+                {
+                    return;
+                }
+                InputRouter.DebugSetReader(null);
+                Check(View.OverlayService.Active == View.OverlayKind.Pollution && View.OverlayService.Visible && Campaign.Env.PurificationService.Installed,
+                    $"按 Ctrl+Alt+5：打开污染叠加层（地形按等级上色，净化塔范围圈 {View.OverlayService.DrawnPurifiers} 座）；净化正式入口已接上");
+                UI.Kit.WorldBarHudUIToolkit bar = UI.Kit.WorldBarHudUIToolkit.Instance;
+                string chip = string.Empty;
+                for (int i = 0; bar != null && i < bar.ResourceChipCount; i++)
+                {
+                    if (bar.ResourceChipText(i).Contains("已归还"))
+                    {
+                        chip = bar.ResourceChipText(i);
+                    }
+                }
+                Check(chip.Contains("已归还") && chip.Contains("格"), $"顶栏写归还面积：“{chip}”");
+                // 打开建造模式（B 键的真实路径由 FG0-ARCH-04 段覆盖）；下一拍点建造菜单“环境”页签与净化塔条目（本 Story 新增的真实菜单路径）。
+                Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+                SessionState.SetInt(K + "PolOpenedBuild", mode != null && !mode.IsOpen ? 1 : 0);
+                if (mode != null && !mode.IsOpen)
+                {
+                    mode.Open();
+                }
+                if (mode == null || !mode.IsOpen)
+                {
+                    PolAbort("建造模式没有打开，跳过净化塔放置");
+                    return;
+                }
+                SessionState.SetInt(K + "PolSub", 2);
+                return;
+            }
+            if (sub == 2)
+            {
+                if (inStep < 1.3)
+                {
+                    return;
+                }
+                int envTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "environment");
+                BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+                bool tab = envTab >= 0 && ClickUitk("[BuildModeHudHost]", "BuildCat" + envTab) && hud != null && hud.SelectedCategoryId == "environment";
+                Check(tab, $"点建造菜单“环境”分类页签（第 {envTab} 个，当前 {hud?.SelectedCategoryId}）");
+                if (!tab)
+                {
+                    PolAbort("“环境”页签点不开，跳过净化塔放置");
+                    return;
+                }
+                SessionState.SetInt(K + "PolSub", 3);
+                return;
+            }
+            if (sub == 3)
+            {
+                if (inStep < 1.7)
+                {
+                    return;
+                }
+                BuildModeHudUIToolkit hud = BuildModeHudUIToolkit.Instance;
+                int idx = -1;
+                for (int i = 0; hud != null && i < hud.ItemCount; i++)
+                {
+                    if (hud.ItemId(i) == "purifier")
+                    {
+                        idx = i;
+                    }
+                }
+                Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+                bool picked = idx >= 0 && ClickUitk("[BuildModeHudHost]", "BuildItem" + idx) && mode != null && mode.SelectedTypeId == "purifier";
+                Check(picked, $"点“环境”页里的净化塔条目（第 {idx} 项“{hud?.ItemText(idx).Replace("\n", " ")}”）：建造模式选中 {mode?.SelectedTypeId}");
+                if (!picked)
+                {
+                    PolAbort("建造菜单里选不中净化塔，跳过放置");
+                    return;
+                }
+                // 按种子地形找一块能放净化塔的地（不写死坐标，B25）：先在镜头附近、再以归还核心为中心扩大范围，跳过迷雾；找不到时打印各候选被拒的原因。
+                var why = new Dictionary<string, int>();
+                GridCell? at = FindPurifierSpot(state, GridCell.FromWorld(CameraFocus()), 24, why);
+                if (at == null && state != null)
+                {
+                    at = FindPurifierSpot(state, Campaign.Grid.HomeGridService.CorePivot(state), 40, why);
+                }
+                if (at == null)
+                {
+                    PolAbort("镜头附近与核心 40 格内都找不到能放净化塔的地：" + string.Join("、", why.OrderByDescending(kv => kv.Value).Take(4).Select(kv => $"{kv.Key} {kv.Value} 处")));
+                    return;
+                }
+                // 测试捷径：把这块地设成 2 级污染（研究与真实净化由 FgPurificationSelfCheck 覆盖）；镜头移到这块地上方，保证真实鼠标能指到。
+                var cells = new List<GridCell>();
+                Campaign.Grid.GridMath.FootprintCells(at.Value, 3, 3, 0, cells);
+                Campaign.Grid.HomeGridMap map = Campaign.Grid.HomeGridService.MapFor(state);
+                SessionState.SetString(K + "PolCells", string.Join(";", cells.Select(c => $"{c.X},{c.Y},{map.GetPollution(c)}")));
+                foreach (GridCell c in cells)
+                {
+                    map.SetPollution(c, 2);
+                }
+                Vector2 camBefore = CameraFocus();
+                SessionState.SetFloat(K + "PolCamX", camBefore.x);
+                SessionState.SetFloat(K + "PolCamY", camBefore.y);
+                SessionState.SetFloat(K + "PolCamSize", WorldView.Director.StrategyOrthographicSize);
+                SessionState.SetInt(K + "PolCamMoved", 1);
+                WorldView.Director.SetStrategyView(new Unity.Mathematics.float2(at.Value.X, at.Value.Y), WorldView.Director.StrategyOrthographicSize);
+                HoverWorld(new Vector3(at.Value.X, 0f, at.Value.Y));
+                SessionState.SetInt(K + "PolX", at.Value.X);
+                SessionState.SetInt(K + "PolY", at.Value.Y);
+                SessionState.SetInt(K + "PolSub", 4);
+                return;
+            }
+            GridCell pol = new GridCell(SessionState.GetInt(K + "PolX", 0), SessionState.GetInt(K + "PolY", 0));
+            Campaign.Regions.HomeValleyBuildMode m = Campaign.Regions.HomeValleyBuildMode.Current;
+            if (sub == 4)
+            {
+                if (inStep < 2.5)
+                {
+                    return;
+                }
+                string status = BuildModeHudUIToolkit.Instance?.StatusLabelText ?? string.Empty;
+                Campaign.Grid.GridPlacementResult preview = m?.Preview;
+                Check(m != null && m.SelectedTypeId == "purifier" && m.HasHover && m.HoverCell == pol && preview != null && preview.TypeId == "purifier" && preview.Ok
+                      && status.Contains("净化塔可以建在重污染地上") && status.Contains("污染 2 级"),
+                    $"真实鼠标指向 2 级污染地 {pol}（悬停 {m?.HoverCell}）：净化塔预览可放、状态行写明豁免与格子的等级 / 影响：“{status.Replace("\n", " / ")}”");
+                ClickWorld(new Vector3(pol.X, 0f, pol.Y));
+                SessionState.SetInt(K + "PolSub", 5);
+                return;
+            }
+            if (inStep < 3.1)
+            {
+                return;
+            }
+            BuildingRecord placed = state != null ? Campaign.Grid.HomeGridService.BuildingAt(state, pol) : null;
+            WorkOrderRecord order = placed != null ? state.WorkOrders?.FirstOrDefault(o => o != null && o.TargetId == placed.BuildingId && o.Kind == WorkOrderKind.Build) : null;
+            Check(placed != null && placed.BuildingTypeId == "purifier" && placed.ConstructionState != BuildingConstructionState.Operational && order != null && GhostVisual(placed) != null,
+                $"左键放下净化塔：重污染地上出现规划中的净化塔虚影与施工单（{placed?.BuildingTypeId} {placed?.ConstructionState}，工单 {order?.State}）");
+            // 夹具还原：施工队列取消这座净化塔的规划（材料全额退回），不影响后面的步骤。
+            if (order != null)
+            {
+                Campaign.Grid.PlanHistory.CancelSite(state, order);
+            }
+            Check(placed == null || Campaign.Grid.HomeGridService.BuildingAt(state, pol) == null, "施工队列取消净化塔规划：虚影与施工单一起消失");
+            PolCleanup(m);
+            Next(432, "再按 Ctrl+Alt+5 关污染叠加层");
+        }
+
+        /// <summary>本段中途失败：记一条失败，同样做收尾（退出建造模式、关叠加层），后面的步骤不受残留状态影响。</summary>
+        private static void PolAbort(string why)
+        {
+            Check(false, why);
+            PolCleanup(Campaign.Regions.HomeValleyBuildMode.Current);
+            Next(432, "收尾：退出建造模式，再按 Ctrl+Alt+5 关污染叠加层");
+        }
+
+        private static void PolCleanup(Campaign.Regions.HomeValleyBuildMode m)
+        {
+            m?.ClearSelection();
+            if (SessionState.GetInt(K + "PolOpenedBuild", 0) == 1)
+            {
+                m?.Close();
+            }
+            InputRouter.DebugSetReader(null);
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OverlayPollution));
+            SessionState.SetInt(K + "PolSub", 0);
+        }
+
+        /// <summary>从 <paramref name="from"/> 起一圈圈向外（切比雪夫半径 ≤ <paramref name="radius"/>）找净化塔能放的枢轴格；跳过迷雾（不为找地去生成区块）。
+        /// 被拒的候选按首条原因计数写进 <paramref name="why"/>，失败时打印。</summary>
+        private static GridCell? FindPurifierSpot(CampaignState state, GridCell from, int radius, Dictionary<string, int> why)
+        {
+            if (state == null)
+            {
+                return null;
+            }
+            Campaign.Grid.HomeGridMap map = Campaign.Grid.HomeGridService.MapFor(state);
+            for (int r = 0; r <= radius; r++)
+            {
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r)
+                        {
+                            continue;
+                        }
+                        var c = new GridCell(from.X + dx, from.Y + dy);
+                        string key;
+                        if (!map.IsExploredNoLoad(c))
+                        {
+                            key = "Fog";
+                        }
+                        else
+                        {
+                            Campaign.Grid.GridPlacementResult res = Campaign.Grid.HomeGridService.ValidatePlacement(state, "purifier", c, 0);
+                            if (res.Ok)
+                            {
+                                return c;
+                            }
+                            key = res.Reasons.Count > 0 ? res.Reasons[0].Code.ToString() : "?";
+                        }
+                        why[key] = why.TryGetValue(key, out int n) ? n + 1 : 1;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static void StepPollutionClosed(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(null);
+            CampaignState state = CampaignSession.Current;
+            // 夹具还原：那块地的污染改回原样。
+            Campaign.Grid.HomeGridMap map = Campaign.Grid.HomeGridService.MapFor(state);
+            foreach (string part in SessionState.GetString(K + "PolCells", string.Empty).Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] f = part.Split(',');
+                if (f.Length == 3)
+                {
+                    map.SetPollution(new Campaign.Grid.GridCell(int.Parse(f[0]), int.Parse(f[1])), byte.Parse(f[2]));
+                }
+            }
+            SessionState.SetString(K + "PolCells", string.Empty);
+            if (SessionState.GetInt(K + "PolCamMoved", 0) == 1)
+            {
+                // 镜头还原到本段开始前的位置（后面的步骤按原来的镜头找地方）。
+                WorldView.Director.SetStrategyView(new Unity.Mathematics.float2(SessionState.GetFloat(K + "PolCamX", 0f), SessionState.GetFloat(K + "PolCamY", 0f)),
+                    SessionState.GetFloat(K + "PolCamSize", WorldView.Director.StrategyOrthographicSize));
+                SessionState.SetInt(K + "PolCamMoved", 0);
+            }
+            Check(View.OverlayService.Active == View.OverlayKind.None, "再按 Ctrl+Alt+5：污染叠加层关闭");
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

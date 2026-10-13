@@ -1095,6 +1095,12 @@ namespace GameLogic.UI.Kit
                 // FG7-ENV-03（FGR-ENV-030）：指着的格子在顶棚下——另起一行写明（下面照常可以建造、操作；隐藏顶棚的键）。
                 status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + roofLine;
             }
+            if (mode.HasHover && state != null && mode.RoofPreview == null
+                && Campaign.Env.PurificationService.StatusLine(state, mode.HoverCell, GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution) is string pollutionLine)
+            {
+                // FG7-ENV-04（FGR-ENV-040“悬停格子显示等级和影响”）：指着的格子有污染 / 是净化回来的 / 污染叠加层开着——写等级、影响、哪座净化塔在净化与多久降到 0 级。
+                status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + pollutionLine;
+            }
             if (!string.IsNullOrEmpty(lastResult))
             {
                 status = (string.IsNullOrEmpty(status) ? string.Empty : status + "\n") + GameText.Format("ui.build.last_result", lastResult);

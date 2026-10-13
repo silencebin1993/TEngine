@@ -215,6 +215,7 @@ namespace GameLogic.Campaign.Regions
             bool over = false;
             bool overPower = false;
             bool overLeak = false;
+            bool overPollution = false;
             if (allowed && state != null && camera != null && !InputRouter.IsUiPointerBlocked())
             {
                 Vector3 screen = InputRouter.Reader.MousePosition;
@@ -307,7 +308,31 @@ namespace GameLogic.Campaign.Regions
                             _hoveringLeak = true;
                             UiTooltip.HoverWorld(LeakHoverKey, new Vector2(screen.x, screen.y), _leakProvider);
                         }
+                        else if (GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution)
+                        {
+                            // FG7-ENV-04（FGR-ENV-040“悬停格子显示等级和影响”）：污染叠加层开着时，空地也有悬停——等级、影响、净化进度（不开叠加层时普通视角不打扰，没有地格表现）。
+                            over = true;
+                            overPollution = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            ReleaseBeltHover();
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _hoveringPollution = true;
+                            UiTooltip.HoverWorld(PollutionHoverKey, new Vector2(screen.x, screen.y), _pollutionProvider);
+                        }
                     }
+                }
+            }
+            if (!overPollution && _hoveringPollution)
+            {
+                _hoveringPollution = false;
+                if (UiTooltip.WorldKey == PollutionHoverKey)
+                {
+                    UiTooltip.LeaveWorld();
                 }
             }
             if (!overLeak && _hoveringLeak)
@@ -356,6 +381,22 @@ namespace GameLogic.Campaign.Regions
         private const int PipeHoverKey = -733;
         private const int PowerHoverKey = -734;
         private const int LeakHoverKey = -735;
+        private const int PollutionHoverKey = -736;
+        private bool _hoveringPollution;
+        private Func<TooltipContent> _pollutionProviderCache;
+        private Func<TooltipContent> _pollutionProvider => _pollutionProviderCache ??= ProvidePollutionHover;
+
+        /// <summary>悬停提示当前是否挂在污染叠加层下的格子上（自检读）。</summary>
+        public bool HoveringPollution => _hoveringPollution;
+
+        private TooltipContent ProvidePollutionHover()
+        {
+            if (!_hoveringPollution || _hoverState == null || !Env.PurificationService.TryDescribeCell(_hoverState, _hoverCell, out string title, out string body))
+            {
+                return null;
+            }
+            return new TooltipContent { Title = title, Body = body, Shortcut = GameActionId.OverlayPollution, CodexEntryId = "codex.env.pollution" };
+        }
         private bool _hoveringLeak;
         private int _leakHoverId;
         private Func<TooltipContent> _leakProviderCache;

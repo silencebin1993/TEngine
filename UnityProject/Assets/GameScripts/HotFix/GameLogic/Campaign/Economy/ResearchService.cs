@@ -1228,7 +1228,8 @@ namespace GameLogic.Campaign.Economy
             Defense.RepairDroneCatalog.StationTypeId }; // FG6-DEF-03：维修无人机站
 
         // FG7-ENV-03：按解锁条目精确匹配（监听站本身在研发树开放前就有，只有它的 T2 是新内容，不能按类型整个算）。
-        private static readonly string[] PostTreeUnlocks = { "build:" + Env.RoofService.ToolId, "build:pipe_t3", "tier:listening_post.t2" };
+        private static readonly string[] PostTreeUnlocks = { "build:" + Env.RoofService.ToolId, "build:pipe_t3", "tier:listening_post.t2",
+            "tier:purifier.t2", "tier:purifier.t3" }; // FG7-ENV-04：净化塔 T2 / T3
 
         // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────
 

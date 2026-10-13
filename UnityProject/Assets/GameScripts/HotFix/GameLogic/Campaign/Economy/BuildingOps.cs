@@ -959,6 +959,7 @@ namespace GameLogic.Campaign.Economy
                         }
                         return true;
                     case ProducerMode.Generator:
+                    case ProducerMode.Purifier: // FG7-ENV-04：净化塔的输入 = 冷却液（流体口），建筑面板“上游”按它找调配站
                         if (inputs)
                         {
                             foreach (ProductionService.FluidRt f in p.Fluids)

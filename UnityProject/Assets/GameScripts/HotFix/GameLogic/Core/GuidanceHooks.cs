@@ -462,6 +462,21 @@ namespace GameLogic.Core
         /// <summary>FG7-ENV-03（FGR-LOG-045）：第一次有管线结冰。</summary>
         public const string EnvFirstPipeFrozen = "env.first_pipe_frozen";
 
+        /// <summary>FG7-ENV-04（FGR-ENV-040）：第一次看到污染（打开污染叠加层 / 建造被污染拦下）。</summary>
+        public const string EnvFirstPollutionSeen = "env.first_pollution_seen";
+
+        /// <summary>FG7-ENV-04（FGR-ENV-041）：第一次放下净化塔。</summary>
+        public const string EnvFirstPurifier = "env.first_purifier";
+
+        /// <summary>FG7-ENV-04（FGR-ENV-042）：第一次有格子被净化回 0 级（归还面积从 0 起涨）。</summary>
+        public const string EnvFirstPurified = "env.first_purified";
+
+        /// <summary>FG7-ENV-04（FGR-ENV-042）：第一次达成归还面积里程碑。</summary>
+        public const string EnvFirstReturnMilestone = "env.first_return_milestone";
+
+        /// <summary>FG7-ENV-04（FGR-ENV-043）：第一次遇到再污染。</summary>
+        public const string EnvFirstRepollution = "env.first_repollution";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -520,6 +535,7 @@ namespace GameLogic.Core
             EnvFirstNight, EnvCalendarFirstOpen,
             EnvFirstSilentWarning, EnvFirstSilentNight, EnvFirstStormDebris,
             EnvFirstWeatherWarning, EnvFirstWeather, EnvFirstRoof, EnvFirstPipeFrozen,
+            EnvFirstPollutionSeen, EnvFirstPurifier, EnvFirstPurified, EnvFirstReturnMilestone, EnvFirstRepollution,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

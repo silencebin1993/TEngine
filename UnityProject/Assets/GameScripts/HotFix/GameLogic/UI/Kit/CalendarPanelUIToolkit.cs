@@ -316,6 +316,9 @@ namespace GameLogic.UI.Kit
         {
             var sb = new StringBuilder(64 + entries.Count * 24);
             sb.Append(today).Append('|').Append(days).Append('|').Append(lang);
+            // FG7-ENV-04：页脚的归还面积段（已归还格数、里程碑 / 稀土富矿变化）跟着刷新。
+            CampaignState cs = CampaignSession.Current;
+            sb.Append('|').Append(PurificationService.ReturnedArea(cs)).Append('#').Append(cs?.Weather?.Purification?.Reached?.Length ?? 0);
             double minuteSeconds = GameClock.HourSeconds / 60.0;
             foreach (CalendarEntry e in entries)
             {
@@ -340,7 +343,8 @@ namespace GameLogic.UI.Kit
             // FG7-ENV-02：静默夜来源注册后只写“天气预报将在后续版本加入”。
             _footer.text = InputDisplay.ExpandActionTokens(GameText.Get("env.cal.footer")).Replace("{0}", days.ToString(CultureInfo.InvariantCulture))
                            + CalendarService.PendingKindsSuffix()
-                + (CalendarService.HasSource(CalendarKind.Weather) ? "\n" + WeatherService.HorizonNote(CampaignSession.Current) : string.Empty); // FG7-ENV-03（FGR-ENV-021）：预报看得到多远、怎么看得更远
+                + (CalendarService.HasSource(CalendarKind.Weather) ? "\n" + WeatherService.HorizonNote(CampaignSession.Current) : string.Empty) // FG7-ENV-03（FGR-ENV-021）：预报看得到多远、怎么看得更远
+                + "\n" + PurificationService.CalendarText(CampaignSession.Current); // FG7-ENV-04（FGR-ENV-042）：已归还 N 格、下一个里程碑、已达成的奖励、稀土富矿
             DetachMarks();
             _days.Clear();
             _nowLines.Clear();

@@ -155,6 +155,10 @@ namespace GameLogic.View
             {
                 _last = k;
                 GuidanceHooks.Raise(GuidanceHooks.OverlayFirstOpen);
+                if (k == OverlayKind.Pollution)
+                {
+                    GuidanceHooks.Raise(GuidanceHooks.EnvFirstPollutionSeen); // FG7-ENV-04：第一次打开污染叠加层（图鉴“污染”随之解锁）
+                }
             }
             ApplyViews();
             Persist();
@@ -287,7 +291,8 @@ namespace GameLogic.View
             HomeValleyController home = WorldSimulation.Home;
             bool observed = state != null && home != null && home.IsLoaded && WorldView.IsObserved(HomeValleyLayout.RegionId);
             bool own = _active == OverlayKind.Flow || _active == OverlayKind.Blockage || _active == OverlayKind.Fluid
-                       || _active == OverlayKind.Raid || _active == OverlayKind.Construction || _active == OverlayKind.Roof;
+                       || _active == OverlayKind.Raid || _active == OverlayKind.Construction || _active == OverlayKind.Roof
+                       || _active == OverlayKind.Pollution; // FG7-ENV-04：污染叠加层另画净化塔的范围与净化前沿（地形着色照旧由地形层画）
             Visible = observed && _active != OverlayKind.None;
             if (!observed || !own)
             {
@@ -393,6 +398,9 @@ namespace GameLogic.View
                     break;
                 case OverlayKind.Roof:
                     markers = DrawRoofs(state);
+                    break;
+                case OverlayKind.Pollution:
+                    markers = DrawPurifiers(state);
                     break;
             }
             for (int i = lines + markers; i < Lines.Count; i++)
@@ -801,6 +809,72 @@ namespace GameLogic.View
                 });
             }
             return markers;
+        }
+
+        private const int CircleSegments = 48;
+        private static readonly Vector3[] Circle = new Vector3[CircleSegments];
+
+        /// <summary>FG7-ENV-04：本帧画了几座净化塔的范围圈（自检读）。</summary>
+        public static int DrawnPurifiers { get; private set; }
+
+        /// <summary>
+        /// FG7-ENV-04（FG07 第 4 节“污染、净化进度都有叠加层”）：污染叠加层上每座净化塔画两圈——范围（正在净化 = 绿色实线，暂停 = 灰色细线）与净化前沿那一环（黄色细线，净化完不画），
+        /// 标签写塔名、半径、第几环 / 已净化完 / 暂停原因；核心处一个标签写“已归还 N 格”。O(净化塔数 × 48)，只在刷新点重建；超过 overlay.max_markers 的不画。
+        /// </summary>
+        private static int DrawPurifiers(CampaignState state)
+        {
+            int markers = 0;
+            int cap = MaxMarkers;
+            int drawn = 0;
+            foreach (Campaign.Economy.ProductionService.Producer p in Campaign.Env.PurificationService.PurifiersOf(state))
+            {
+                if (p?.Building == null || markers + 2 > cap)
+                {
+                    continue;
+                }
+                BuildingRecord b = p.Building;
+                int radius = Campaign.Env.PurificationService.RadiusOf(b);
+                bool supplied = p.Rec != null && p.Rec.PurifySupplied;
+                Campaign.Env.PurificationService.FrontOf(state, b, out int front, out int rings, out int stepsLeft);
+                LineRenderer r = LineAt(markers++);
+                Style(r, supplied ? new Color(0.3f, 0.9f, 0.45f, 0.95f) : new Color(0.65f, 0.65f, 0.7f, 0.85f), supplied ? 0.3f : 0.15f, true);
+                SetCircle(r, b.GridX, b.GridY, radius + 0.5f);
+                if (stepsLeft > 0 && front < rings)
+                {
+                    LineRenderer f = LineAt(markers++);
+                    Style(f, new Color(0.98f, 0.85f, 0.25f, 0.95f), 0.15f, true);
+                    SetCircle(f, b.GridX, b.GridY, Mathf.Max(0.5f, front));
+                }
+                drawn++;
+                string name = Campaign.Economy.BuildingOps.NameOf(b);
+                string text = !supplied
+                    ? GameText.Format("overlay.label.purifier_paused", name, Campaign.Economy.ProductionService.ReasonText(state, p).Split('\n')[0])
+                    : stepsLeft == 0
+                        ? GameText.Format("overlay.label.purifier_done", name, radius)
+                        : GameText.Format("overlay.label.purifier", name, radius, front + 1, rings);
+                Candidates.Add(new OverlayLabel { World = new Vector3(b.Position.x, 1.6f, b.Position.y), Text = text, Tone = (byte)(supplied ? 0 : 1) });
+            }
+            GridCell core = HomeGridService.CorePivot(state);
+            Candidates.Add(new OverlayLabel
+            {
+                World = new Vector3(core.X, 2.2f, core.Y),
+                Text = GameText.Format("overlay.label.returned", Campaign.Env.PurificationService.ReturnedArea(state).ToString("N0", System.Globalization.CultureInfo.InvariantCulture)),
+                Tone = 0,
+            });
+            DrawnPurifiers = drawn;
+            return markers;
+        }
+
+        private static void SetCircle(LineRenderer r, float cx, float cy, float radius)
+        {
+            for (int i = 0; i < CircleSegments; i++)
+            {
+                float a = i * Mathf.PI * 2f / CircleSegments;
+                Circle[i] = new Vector3(cx + Mathf.Cos(a) * radius, 0.3f, cy + Mathf.Sin(a) * radius);
+            }
+            r.positionCount = CircleSegments;
+            r.SetPositions(Circle);
+            r.enabled = true;
         }
 
         /// <summary>施工方框的颜色与线宽：施工中 = 绿细、等材料 = 黄粗、没有机器 / 走不到 = 橙粗、排队 / 取料途中 = 灰细、被摧毁待重建 = 红粗。</summary>

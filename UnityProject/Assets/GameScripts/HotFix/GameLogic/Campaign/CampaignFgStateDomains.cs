@@ -948,6 +948,15 @@ namespace GameLogic.Campaign
         /// <summary>FG4-ECO-09（离家报告的瓶颈）：这座建筑在第 <see cref="AwaySerial"/> 份离家报告期间缺每种物品的世界步数（随生产步 O(1) 累加，结算时汇总）。</summary>
         public int AwaySerial;
         public ItemStackRecord[] AwayStarve = Array.Empty<ItemStackRecord>();
+        /// <summary>FG7-ENV-04 净化塔：已累计、还没换成一次降级的“有电有冷却液”世界步数（满 purify.hours_per_level 游戏小时降一环 1 级；读档后接着同一进度）。</summary>
+        public long PurifyTicks;
+        /// <summary>FG7-ENV-04 净化塔：上一个生产步是否有电有冷却液在净化（净化区 = 这类塔的范围；进存档，读档后第一步酸雨结算就与一直跑的一致）。</summary>
+        public bool PurifySupplied;
+        /// <summary>FG7-ENV-04 净化塔：累计降级的格次（每格降 1 级记 1）与累计用掉的冷却液（毫升；本步零头记在 <see cref="Progress"/>，单位 毫升 × 60 × 世界频率）。</summary>
+        public long PurifiedLevels;
+        public long CoolantUsedMl;
+        /// <summary>FG7-ENV-04 净化塔：这一段缺冷却液已经发过“净化暂停”通知（接上后清掉，下次断供再发一次）。</summary>
+        public bool PurifyStallNotified;
     }
 
     /// <summary>FG4-ECO-05：生产统计的一桶（游戏时钟的第 <see cref="Index"/> 桶）。</summary>
@@ -1004,6 +1013,40 @@ namespace GameLogic.Campaign
         public WeatherFrontState Fronts = new WeatherFrontState();
         /// <summary>FG7-ENV-03（FGR-ENV-030）：顶棚（已建成的块、施工中的规划、是否隐藏）。唯一写入口 <see cref="Env.RoofService"/>。</summary>
         public RoofState Roofs = new RoofState();
+        /// <summary>FG7-ENV-04（FGR-ENV-040～043）：归还面积里程碑、稀土富矿、受污染的建筑、净化 / 再污染统计。唯一写入口 <see cref="Env.PurificationService"/>。
+        /// 污染格网本身在格网区块里（随区块生成、被改过的格子随区块差异进存档）；净化塔的进度在 <see cref="ProducerRecord"/>。只加字段、不升域版本：旧档没有 = 空。</summary>
+        public PurificationState Purification = new PurificationState();
+    }
+
+    /// <summary>FG7-ENV-04：污染与净化（见 <see cref="WeatherState.Purification"/>）。</summary>
+    [Serializable]
+    public sealed class PurificationState
+    {
+        /// <summary>已达成的归还面积里程碑（fg.TbReturnMilestone.id，按达成先后）与达成时的世界步。奖励由它派生（天气损伤、信号覆盖），达成后一直有效。</summary>
+        public string[] Reached = Array.Empty<string>();
+        public long[] ReachedTicks = Array.Empty<long>();
+        /// <summary>揭示过的稀土富矿（归还 20,000 格的奖励）。</summary>
+        public RichDepositRecord[] RichDeposits = Array.Empty<RichDepositRecord>();
+        /// <summary>处于“受污染”状态的建筑 ID（被再污染的格子上的建筑；天气损伤加倍，所在格子全部净化到 0 级后解除）。按进入先后。</summary>
+        public string[] Contaminated = Array.Empty<string>();
+        /// <summary>统计：净化塔累计降级的格次、再污染累计升级的格次、再污染次数。</summary>
+        public long LevelsPurified;
+        public long LevelsRaised;
+        public int Repollutions;
+        /// <summary>统计面板的趋势（B13）：每个游戏小时记一次归还面积（最多保留 purify 的 25 个样本），与记录时的游戏小时序号。</summary>
+        public long[] AreaSamples = Array.Empty<long>();
+        public long SampleHour = -1;
+    }
+
+    /// <summary>FG7-ENV-04：一处稀土富矿（圆心格与半径；范围内压在稀土矿脉上的提取钻产出 × purify.rich_ore.yield_mult）。</summary>
+    [Serializable]
+    public sealed class RichDepositRecord
+    {
+        public int X;
+        public int Y;
+        public int Radius;
+        /// <summary>来自哪个里程碑（fg.TbReturnMilestone.id）。</summary>
+        public string Source = string.Empty;
     }
 
     /// <summary>FG7-ENV-03：一段恶劣天气（排定后写死；时刻是统一时钟的整数步）。</summary>

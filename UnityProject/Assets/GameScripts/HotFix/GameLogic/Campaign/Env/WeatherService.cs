@@ -54,7 +54,7 @@ namespace GameLogic.Campaign.Env
 
         public static bool Installed => _installed;
 
-        /// <summary>FG7-ENV-04 的净化区接口：这一格在净化区里（不受酸雨损伤）。null = 净化塔还没有（FG7-ENV-04 落地时赋值，DEBT-FG7ENV03-02）。</summary>
+        /// <summary>FG7-ENV-04 的净化区接口：这一格在净化区里（不受酸雨损伤）。由 <see cref="PurificationService.Install"/> 赋值（正在净化的塔的半径之内）；null = 没接（自检复位后）。</summary>
         public static Func<CampaignState, GridCell, bool> PurifiedProvider;
 
         // ── 统计（自检读）──
@@ -670,12 +670,13 @@ namespace GameLogic.Campaign.Env
             return next;
         }
 
-        /// <summary>倍率 1 时每分钟掉最大耐久的多少点（浮点）：最大耐久 × 每小时百分比 / 6000。</summary>
-        public static double PerMinute(double maxHp) => maxHp * AcidPctPerHour / 6000.0;
+        /// <summary>倍率 1 时每分钟掉最大耐久的多少点（浮点）：最大耐久 × 每小时百分比 × 系数 / 6000。
+        /// FG7-ENV-04：<paramref name="factor"/> = 归还面积里程碑的全局天气损伤系数（5,000 格 = 0.75，<see cref="PurificationService.WeatherDamageFactor"/>）。</summary>
+        public static double PerMinute(double maxHp, double factor = 1.0) => maxHp * AcidPctPerHour * Math.Max(0.0, factor) / 6000.0;
 
-        /// <summary>第 k 个游戏分钟这一类目标该掉多少点（整数预算：前 k 分钟累计 = floor(最大耐久 × 每小时百分比 × 倍率 × k / 6000)，平均精确、存读档一致）。
+        /// <summary>第 k 个游戏分钟这一类目标该掉多少点（整数预算：前 k 分钟累计 = floor(最大耐久 × 每小时百分比 × 倍率 × 系数 × k / 6000)，平均精确、存读档一致）。
         /// 与传送带内核的逐格结算同一个函数（<see cref="BeltAcid.MinuteDamage"/>）。</summary>
-        public static int MinuteDamage(double maxHp, int mult, long k) => BeltAcid.MinuteDamage(PerMinute(maxHp) * mult, k);
+        public static int MinuteDamage(double maxHp, int mult, long k, double factor = 1.0) => BeltAcid.MinuteDamage(PerMinute(maxHp, factor) * mult, k);
 
         /// <summary>按建筑 ID 的确定性相位（0～59 个游戏分钟；FNV-1a，跨运行时一致）。按 ID 缓存（每分钟不重算字符串哈希）。</summary>
         private static int Phase(string id)
@@ -713,6 +714,8 @@ namespace GameLogic.Campaign.Env
             int buildings = 0;
             int belts = 0;
             float minPct = 1f;
+            // FG7-ENV-04：归还面积里程碑的全局天气损伤系数（这一分钟算一次）。
+            double factor = PurificationService.WeatherDamageFactor(state);
             // 建筑与炮塔（核心不算：归还核心不会被天气打坏；虚影 / 被摧毁 / 搬迁目标不扣）。复制一份列表：摧毁会改建筑表。
             BuildingRecord[] records = state.BuildingRecords ?? Array.Empty<BuildingRecord>();
             foreach (BuildingRecord b in records)
@@ -726,11 +729,13 @@ namespace GameLogic.Campaign.Env
                 float bmax = BuildingOps.MaxDurability(b.BuildingTypeId);
                 // 每座建筑按 ID 错开相位：整点伤害分散到一小时的各个分钟（平均仍精确每游戏小时 1%；确定性，与存读档无关）。
                 long kb = k + Phase(b.BuildingId);
-                if (MinuteDamage(bmax, 2, kb) <= 0)
+                if (MinuteDamage(bmax, 2, kb, factor) <= 0)
                 {
                     continue; // 这一分钟连加倍的都没有整点伤害：不查地格（平时大多数分钟都在这里跳过）
                 }
-                int amount = MinuteDamage(bmax, Mult(state, pivot), kb);
+                // FG7-ENV-04（FGR-ENV-043）：被再污染、处于“受污染”状态的建筑天气损伤加倍（直到所在格子重新净化到 0 级）。
+                int mult = PurificationService.IsContaminated(state, b.BuildingId) ? 2 : Mult(state, pivot);
+                int amount = MinuteDamage(bmax, mult, kb, factor);
                 if (amount <= 0 || RoofService.IsBuildingCovered(state, b) || Purified(state, pivot))
                 {
                     continue;
@@ -758,7 +763,8 @@ namespace GameLogic.Campaign.Env
             if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
             {
                 BeltSweepCount++;
-                BeltNetworkService.Kernel.CollectAcidHits(k, PerMinute(BeltNetworkService.MaxHp(0)), PerMinute(BeltNetworkService.MaxHp(1)), PerMinute(BeltNetworkService.MaxHp(2)), BeltCells);
+                BeltNetworkService.Kernel.CollectAcidHits(k, PerMinute(BeltNetworkService.MaxHp(0), factor), PerMinute(BeltNetworkService.MaxHp(1), factor),
+                    PerMinute(BeltNetworkService.MaxHp(2), factor), BeltCells);
                 BeltCandidates += BeltCells.Count;
                 MaxBeltCandidates = Math.Max(MaxBeltCandidates, BeltCells.Count);
                 BatchCells.Clear();

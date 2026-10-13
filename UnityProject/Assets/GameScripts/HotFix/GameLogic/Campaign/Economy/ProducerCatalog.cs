@@ -21,6 +21,9 @@ namespace GameLogic.Campaign.Economy
         /// <summary>FG4-ECO-04 燃油发电机（FG04 第 3.3 节“燃烧燃油，供电 300”）：燃油从流体输入口进来，按电网负荷烧；发电本身由电网 HomeValleyPowerGrid 结算。
         /// <see cref="ProducerDef.FluidLpm"/> = 满负荷每分钟烧几升；<see cref="ProducerDef.InBatches"/> = 机内能存几秒满负荷的燃油。</summary>
         Generator = 5,
+        /// <summary>FG7-ENV-04 净化塔（FG07 FGR-ENV-041）：冷却液从流体输入口进来，有电时按等级用量持续消耗，期间推进净化（<see cref="Env.PurificationService"/>）。
+        /// <see cref="ProducerDef.FluidLpm"/> = T1 每分钟用几升；<see cref="ProducerDef.InBatches"/> = 机内能存几秒满速用量。</summary>
+        Purifier = 6,
     }
 
     /// <summary>一个流体端口（fg.TbBuildingFluidPort 一行的运行时视图）。</summary>
@@ -230,6 +233,7 @@ namespace GameLogic.Campaign.Economy
                 case "waste": mode = ProducerMode.Waste; return true;
                 case "pump": mode = ProducerMode.Pump; return true;
                 case "generator": mode = ProducerMode.Generator; return true;
+                case "purifier": mode = ProducerMode.Purifier; return true;
                 default: mode = ProducerMode.Recipe; return false;
             }
         }
@@ -366,6 +370,12 @@ namespace GameLogic.Campaign.Economy
                         return "燃油发电机要有满负荷烧油速率与机内存油秒数，不用配方";
                     }
                     break;
+                case ProducerMode.Purifier:
+                    if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.InBatches < 1)
+                    {
+                        return "净化塔要有冷却液用量与机内存量秒数，不用配方";
+                    }
+                    break;
             }
             if (r.VibrationPerMinute < 0f)
             {
@@ -420,6 +430,10 @@ namespace GameLogic.Campaign.Economy
             if (def.Mode == ProducerMode.Generator && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
             {
                 return "燃油发电机要有且只有一个收某种流体（燃油）的输入口";
+            }
+            if (def.Mode == ProducerMode.Purifier && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
+            {
+                return "净化塔要有且只有一个收某种流体（冷却液）的输入口";
             }
             return null;
         }

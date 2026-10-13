@@ -291,6 +291,10 @@ public partial class Tables
     /// </summary>
     public fg.TbResearchNode TbResearchNode {get; }
     /// <summary>
+    /// 归还里程碑
+    /// </summary>
+    public fg.TbReturnMilestone TbReturnMilestone {get; }
+    /// <summary>
     /// 机器岗位
     /// </summary>
     public fg.TbRosterRole TbRosterRole {get; }
@@ -503,6 +507,7 @@ public partial class Tables
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbResearchBranch = new fg.TbResearchBranch(loader("fg_tbresearchbranch"));
         TbResearchNode = new fg.TbResearchNode(loader("fg_tbresearchnode"));
+        TbReturnMilestone = new fg.TbReturnMilestone(loader("fg_tbreturnmilestone"));
         TbRosterRole = new fg.TbRosterRole(loader("fg_tbrosterrole"));
         TbRuleKind = new fg.TbRuleKind(loader("fg_tbrulekind"));
         TbRulePreset = new fg.TbRulePreset(loader("fg_tbrulepreset"));
@@ -613,6 +618,7 @@ public partial class Tables
         TbRemovedContent.ResolveRef(this);
         TbResearchBranch.ResolveRef(this);
         TbResearchNode.ResolveRef(this);
+        TbReturnMilestone.ResolveRef(this);
         TbRosterRole.ResolveRef(this);
         TbRuleKind.ResolveRef(this);
         TbRulePreset.ResolveRef(this);

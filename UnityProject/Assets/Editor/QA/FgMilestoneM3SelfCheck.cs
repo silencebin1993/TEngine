@@ -433,7 +433,7 @@ namespace GameLogic.EditorTools
         /// </summary>
         private static void CheckTerrainWritersGuard()
         {
-            Line("  · C2. DEBT-FG3GEN01-08 守护：改地形 / 污染的生产代码只在已登记的写入口（FG4-ECO-02 回收站），且地图底图覆盖被改过的格子");
+            Line("  · C2. DEBT-FG3GEN01-08 守护：改地形 / 污染的生产代码只在已登记的写入口（FG4-ECO-02 回收站、FG7-ENV-04 净化 / 再污染），且地图底图覆盖被改过的格子");
             string root = RepoRoot();
             if (root == null)
             {
@@ -456,7 +456,9 @@ namespace GameLogic.EditorTools
             }
             string reg = ReadRepo("production/design/full-game/FG-GAP-REGISTER.md") ?? string.Empty;
             string row = reg.Split('\n').FirstOrDefault(l => l.StartsWith("| DEBT-FG3GEN01-08 ", StringComparison.Ordinal)) ?? string.Empty;
-            string[] allowed = { "ProductionService.cs" };
+            // FG7-ENV-04：净化塔降级 / 化工再污染的写入口（PurificationService）——同样走 HomeGridMap.SetPollution，区块差异进存档、TerrainEditRevision 触发底图按覆盖表重画（DEBT-FG3GEN01-08 的机制），
+            // 底图随净化变化由 FgPurificationSelfCheck M1 断言。
+            string[] allowed = { "ProductionService.cs", "PurificationService.cs" };
             List<string> unknown = writers.Where(w => !allowed.Contains(w)).ToList();
             string mapCode = ReadRepo("TEngine/UnityProject/Assets/GameScripts/HotFix/GameLogic/UI/Kit/WorldMapShared.cs") ?? string.Empty;
             bool overlay = mapCode.Contains("CollectCellOverrides") && mapCode.Contains("TerrainEditRevision");

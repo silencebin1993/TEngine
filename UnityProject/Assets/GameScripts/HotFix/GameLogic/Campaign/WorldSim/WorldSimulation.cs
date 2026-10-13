@@ -549,6 +549,8 @@ namespace GameLogic.Campaign.WorldSim
                 Env.SilentNightService.WorldStep(state, GameClock.Ticks);
                 // FG7-ENV-03：天气——排定、预警 / 开始 / 结束（O(1) 比较整数步），酸雨按游戏分钟批量结算，寒潮结冰告警（每游戏秒）；只看步序号，与观察无关。
                 Env.WeatherService.WorldStep(state, GameClock.Ticks);
+                // FG7-ENV-04：归还面积里程碑与“受污染”解除（每游戏秒 O(1) 比较；净化本身在上面的生产步里按游戏时间推进），只看步序号，与观察无关。
+                Env.PurificationService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。
                 Signal.SignalUplinkService.SimStep(state);
                 // FG1-SIG-06：常规裸跑固件的计次间隔到期（信号侧，按游戏时间，与观察无关），O(1)。

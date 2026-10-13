@@ -964,7 +964,7 @@ namespace GameLogic.UI.Kit
         private void RefreshProgress(ProductionService.Producer p)
         {
             // 废液池、流体泵是连续工作（没有“一个周期”），不显示进度条。
-            bool show = p.Def.Mode != ProducerMode.Waste && p.Def.Mode != ProducerMode.Pump && p.Def.Mode != ProducerMode.Generator;
+            bool show = p.Def.Mode != ProducerMode.Waste && p.Def.Mode != ProducerMode.Pump && p.Def.Mode != ProducerMode.Generator; // 净化塔显示（离下一次降级的进度）
             _progressBox.EnableInClassList("bn-hidden", !show);
             if (!show)
             {
@@ -972,6 +972,18 @@ namespace GameLogic.UI.Kit
             }
             ProducerRecord r = p.Rec;
             float hz = Mathf.Max(1, GameClock.StepHz);
+            if (p.Def.Mode == ProducerMode.Purifier)
+            {
+                // FG7-ENV-04：净化塔的进度条 = 离下一次降级还差多少（只算有电有冷却液的时间；暂停时写原因，进度保留）。
+                long st = Campaign.Env.PurificationService.StepTicks;
+                float pp = st > 0 ? Mathf.Clamp01((float)r.PurifyTicks / st) : 0f;
+                ProgressFillPercent = pp * 100f;
+                _progress.text = r.PurifySupplied || p.State == ProdState.None
+                    ? GameText.Format("prod.panel.purify_progress", Mathf.RoundToInt(pp * 100f), Campaign.Env.CalendarService.ShortDuration(Campaign.Env.PurificationService.SecondsToNextStep(r)))
+                    : GameText.Format("prod.panel.purify_paused", ProductionService.StateText(p));
+                _fill.style.width = Length.Percent(ProgressFillPercent);
+                return;
+            }
             if (r.Running && r.Duration > 0)
             {
                 float pct = Mathf.Clamp01((float)r.Progress / r.Duration);
@@ -1122,6 +1134,25 @@ namespace GameLogic.UI.Kit
                     if (HomeValleyPowerGrid.TryDescribeBuilding(state, p.Building, out string power))
                     {
                         _sb.Append('\n').Append(power);
+                    }
+                    break;
+                }
+                case ProducerMode.Purifier:
+                {
+                    // FG7-ENV-04：净化塔——半径（等级）、冷却液用量与机内存量、累计降级；下一行写净化前沿与全部净化完的预计时间（或已全部净化完）。
+                    _sb.Append(GameText.Format("prod.panel.purifier", Campaign.Env.PurificationService.RadiusOf(p.Building), BuildingOps.TierOf(p.Building),
+                        ProductionService.PurifierLpm(p).ToString("0.#", CultureInfo.InvariantCulture),
+                        (ProductionService.PurifierCoolantMl(p) / 1000).ToString(CultureInfo.InvariantCulture),
+                        (ProductionService.PurifierBufferMl(p) / 1000).ToString(CultureInfo.InvariantCulture),
+                        p.Rec.PurifiedLevels.ToString(CultureInfo.InvariantCulture)));
+                    Campaign.Env.PurificationService.FrontOf(state, p.Building, out int front, out int rings, out int stepsLeft);
+                    _sb.Append('\n').Append(stepsLeft == 0
+                        ? GameText.Get("prod.panel.purify_done")
+                        : GameText.Format("prod.panel.purify_front", front + 1, rings,
+                            Campaign.Env.CalendarService.ShortDuration(Campaign.Env.PurificationService.SecondsToFinish(state, p.Building, p.Rec))));
+                    if (HomeValleyPowerGrid.TryDescribeBuilding(state, p.Building, out string ppower))
+                    {
+                        _sb.Append('\n').Append(ppower);
                     }
                     break;
                 }

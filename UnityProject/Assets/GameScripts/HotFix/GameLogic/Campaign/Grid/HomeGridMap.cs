@@ -274,6 +274,7 @@ namespace GameLogic.Campaign.Grid
             TerrainEditRevision++;
             if (records == null)
             {
+                ReturnedCells = RecountReturnedCells();
                 return;
             }
             foreach (ChunkDiffRecord r in records)
@@ -288,6 +289,8 @@ namespace GameLogic.Campaign.Grid
             {
                 ApplySavedDiff(c);
             }
+            // FG7-ENV-04：归还面积按读进来的差异精确重算（之后区块被生成、套用差异时不再改变它）。
+            ReturnedCells = RecountReturnedCells();
         }
 
         private void ApplySavedDiff(Chunk chunk)
@@ -459,7 +462,64 @@ namespace GameLogic.Campaign.Grid
                 return;
             }
             Touch(c);
+            byte old = c.Pollution[i];
             c.Pollution[i] = v;
+            // FG7-ENV-04（FGR-ENV-042）：归还面积 = 生成时有污染、现在是 0 级的格子数，在唯一写入口里增量维护（O(1)，与区块加载无关）。
+            if (c.BasePollution[i] > 0)
+            {
+                if (old > 0 && v == 0)
+                {
+                    ReturnedCells++;
+                }
+                else if (old == 0 && v > 0)
+                {
+                    ReturnedCells--;
+                }
+            }
+        }
+
+        /// <summary>
+        /// FG7-ENV-04（FGR-ENV-042）：已归还的面积——生成时污染 &gt; 0、现在是 0 级的格子数（世界无限没有分母，所以不用百分比）。
+        /// 在 <see cref="SetPollution"/> 里增量维护；读档设差异时按 <see cref="RecountReturnedCells"/> 精确重算。区块流式加载 / 回收不改变它（B24：镜头在哪都一样）。
+        /// </summary>
+        public long ReturnedCells { get; private set; }
+
+        /// <summary>
+        /// 从头数一遍归还面积：已加载的已修改区块逐格比对生成基线（基线 &gt; 0 且现在 0），没加载的按存档差异（污染位被改过且现在 0 = 基线必然 &gt; 0）。
+        /// O(已修改区块 × 区块格数)，只在读档与自检时调用。
+        /// </summary>
+        public long RecountReturnedCells()
+        {
+            long n = 0;
+            foreach (Chunk c in _chunks.Values)
+            {
+                if (!c.Modified || c.BasePollution == null)
+                {
+                    continue;
+                }
+                for (int i = 0; i < c.Pollution.Length; i++)
+                {
+                    if (c.BasePollution[i] > 0 && c.Pollution[i] == 0)
+                    {
+                        n++;
+                    }
+                }
+            }
+            foreach (KeyValuePair<long, string> kv in _savedDiffs)
+            {
+                if (_chunks.ContainsKey(kv.Key) || !WorldDiffCodec.TryDecode(kv.Value, ChunkSize, _diffScratch, out _))
+                {
+                    continue;
+                }
+                foreach (ChunkCellDiff d in _diffScratch)
+                {
+                    if ((d.Mask & ChunkCellDiff.PollutionBit) != 0 && d.Pollution == 0)
+                    {
+                        n++;
+                    }
+                }
+            }
+            return n;
         }
 
         // ── 传送带 / 管线（FG0-ARCH-02 / FG3-LOG-05 写入）─────────────────────────────

@@ -949,6 +949,7 @@ namespace GameLogic.UI.Kit
             _section.text = GameText.Get("stats.section.flow");
             _footer.text = Hint("stats.flow.footer");
             FlowEnergyStats.Build(state, _flowLines);
+            Campaign.Env.PurificationService.BuildStatsLines(state, _flowLines); // FG7-ENV-04（B19 / B13）：环境 · 净化与归还面积（含最近 24 游戏小时趋势）
             _count.text = string.Empty;
             foreach ((string text, string cls) in _flowLines)
             {

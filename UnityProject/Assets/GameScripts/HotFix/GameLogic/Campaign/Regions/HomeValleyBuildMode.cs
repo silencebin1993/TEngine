@@ -1859,6 +1859,11 @@ namespace GameLogic.Campaign.Regions
                     ? GameText.Get("env.weather.hover_covered")
                     : GameText.Format("env.weather.hover_exposed", Env.WeatherService.NameOf(weather)));
             }
+            // FG7-ENV-04（FGR-ENV-043）：被再污染的建筑写明“受污染”（天气损伤加倍、怎么恢复）。
+            if (Env.PurificationService.BuildingHoverLine(state, b) is string contaminated)
+            {
+                text += "\n" + contaminated;
+            }
             // FG3-LOG-06：和电网有关的建筑写它在哪个电网、有没有电、优先级与电网读数。
             if (b.ConstructionState == BuildingConstructionState.Operational || b.ConstructionState == BuildingConstructionState.Disabled)
             {
