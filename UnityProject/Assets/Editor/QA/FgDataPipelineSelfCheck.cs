@@ -398,16 +398,26 @@ namespace GameLogic.EditorTools
             // Unity 的 Mono 不实现 GC.GetAllocatedBytesForCurrentThread（恒为 0，第一次跑时被下面的对照抓到），
             // 改用托管堆已用字节。它是按堆块计的粗粒度读数（编辑器其它线程也会贡献几百 KB 噪声），所以按"平均每次"判：
             // 100 万次命中若每次分配哪怕一个最小对象（≥16 B），堆增量至少 16 MB；容差 2 MB = 平均每次 < 2 B，只有零分配才过得去。
-            GC.Collect();
-            long before = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
-            var sw = Stopwatch.StartNew();
+            // DEBT-FGTOOL01-02（FG7-ENV-05 复现后按该条的承接方向先做“多窗口取最小”）：同进程其它线程的分配会混进计量窗口（只会让读数偏大）；
+            // 连测最多 3 个窗口、取最小的那个——GameText.Get 若真的每次分配，3 个窗口都会 ≥ 16 MB，取最小不会放过；条件（< 2 MB）不变。
             int len = 0;
-            for (int i = 0; i < n; i++)
+            long hitAlloc = long.MaxValue;
+            var windows = new List<long>(3);
+            var sw = new Stopwatch();
+            for (int w = 0; w < 3 && hitAlloc >= 2 * 1024 * 1024; w++)
             {
-                len += GameText.Get(keys[i % keys.Length]).Length;
+                GC.Collect();
+                long before = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+                sw.Restart();
+                for (int i = 0; i < n; i++)
+                {
+                    len += GameText.Get(keys[i % keys.Length]).Length;
+                }
+                sw.Stop();
+                long delta = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() - before;
+                windows.Add(delta);
+                hitAlloc = Math.Min(hitAlloc, delta);
             }
-            sw.Stop();
-            long hitAlloc = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() - before;
             double nsPerGet = sw.Elapsed.TotalMilliseconds * 1e6 / n;
 
             // 对照：同样的计量方式下，留住 20 万个新拼的串（约 8 MB）必须超过同一容差——证明计量能看见这个量级。
@@ -437,7 +447,7 @@ namespace GameLogic.EditorTools
 
             Line($"  · 实测（Editor batchmode）：GameText.Get 命中 {nsPerGet:F0} ns/次、{n} 次堆增量 {hitAlloc} B（对照 20 万个串 +{ctlAlloc} B）；" +
                  $"PowerProfile 读取 {profile.Elapsed.TotalMilliseconds * 1e6 / n:F0} ns/次；全部 Luban 表重载 {load.Elapsed.TotalMilliseconds:F1} ms（校验和 {len + sum}）");
-            Expect(ctlAlloc > 2 * 1024 * 1024 && hitAlloc < 2 * 1024 * 1024, $"GameText.Get 命中路径不分配（{n} 次堆增量 {hitAlloc} B，容差 2 MB 即平均每次 < 2 B；对照留住 20 万个串 +{ctlAlloc} B 证明计量有效）");
+            Expect(ctlAlloc > 2 * 1024 * 1024 && hitAlloc < 2 * 1024 * 1024, $"GameText.Get 命中路径不分配（{n} 次堆增量 {hitAlloc} B（各窗口 {string.Join(" / ", windows)} B，取最小），容差 2 MB 即平均每次 < 2 B；对照留住 20 万个串 +{ctlAlloc} B 证明计量有效）");
             ExpectPerf(true, $"GameText.Get 命中 {nsPerGet:F0} ns/次 < 2 µs（每帧上百个标签也可忽略）", PerfGate.Lt(nsPerGet, 2000, "GameText.Get ns/次"));
         }
 
@@ -526,6 +536,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "SD"
                     // FG7-ENV-04 的归还里程碑表（RM）由 FgPurificationSelfCheck D1 段逐字段比对。
                     || f[0] == "RM"
+                    // FG7-ENV-05 的遗迹距离环（RLR）、区域危害（HZD）由 FgExplorationSelfCheck D1 段逐字段比对。
+                    || f[0] == "RLR" || f[0] == "HZD"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

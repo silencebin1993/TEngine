@@ -58,6 +58,19 @@ namespace GameLogic.UI.Kit
         private Button _markerDelete;
         private Label _feedback;
         private Label _hint;
+        // FG7-ENV-05：遗迹面板、悬停说明、危害图例。
+        private VisualElement _relicEditor;
+        private Label _relicTitle;
+        private Label _relicBody;
+        private Button _relicRecover;
+        private Button _relicRecoverAll;
+        private Label _hover;
+        private Label _legendTitle;
+        private Label _legendHint;
+        private readonly VisualElement[] _legendRows = new VisualElement[4];
+        private readonly VisualElement[] _legendSwatches = new VisualElement[4];
+        private readonly Label[] _legendNames = new Label[4];
+        private string _selectedRelic;
 
         private WorldMapIconPool _icons;
         private readonly WorldMapModel _model = new WorldMapModel();
@@ -65,6 +78,14 @@ namespace GameLogic.UI.Kit
         private WorldMapView _view;
         private float _nextModel;
         private int _modelKey;
+        // FG7-ENV-05 审查修复（P2，帧率下限 120）：平移 / 缩放时模型每帧重建，可回收遗迹数（O(已发现遗迹 ×（已探索圆 + 已回收 + 工单）)）不跟着每帧重算——
+        // 按探索域版本号缓存，最多每 ModelRefreshSeconds 重算一次（工单被取消 / 完工这类不改版本号的变化在一个节流周期内跟上）；打开地图、点按钮时强制重算。
+        private CampaignState _recoverableState;
+        private int _recoverableRevision = int.MinValue;
+        private float _recoverableAt = float.NegativeInfinity;
+        private int _recoverableCount;
+        // 图例跟着探索域版本号刷新：第二幕领地在地图开着时被揭开，图例行马上补上领地名。
+        private int _legendRevision = int.MinValue;
         private string _selectedMarker;
         private readonly Vector2[] _cameraQuad = new Vector2[4];
         private readonly Vector2[] _farCameraQuad = new Vector2[4];
@@ -95,6 +116,26 @@ namespace GameLogic.UI.Kit
         public VisualElement Canvas => _canvas;
         public TextField MarkerNoteField => _markerNote;
         public Button MarkerDeleteButton => _markerDelete;
+        public string SelectedRelic => _selectedRelic;
+        public bool RelicPanelVisible => _relicEditor != null && !_relicEditor.ClassListContains("uk-hidden");
+        public string RelicPanelText => (_relicTitle?.text ?? string.Empty) + "\n" + (_relicBody?.text ?? string.Empty);
+        public Button RelicRecoverButton => _relicRecover;
+        public Button RelicRecoverAllButton => _relicRecoverAll;
+        public string HoverText => _hover?.text ?? string.Empty;
+        public int LegendRowsVisible
+        {
+            get
+            {
+                int n = 0;
+                foreach (VisualElement r in _legendRows)
+                {
+                    n += r != null && !r.ClassListContains("uk-hidden") ? 1 : 0;
+                }
+                return n;
+            }
+        }
+        public string LegendText(int i) => i >= 0 && i < _legendNames.Length && _legendNames[i] != null ? _legendNames[i].text : string.Empty;
+        public Color LegendColor(int i) => i >= 0 && i < _legendSwatches.Length && _legendSwatches[i] != null ? _legendSwatches[i].style.backgroundColor.value : Color.clear;
         public static int OpenCount { get; private set; }
         public static int FlyCount { get; private set; }
 
@@ -236,6 +277,23 @@ namespace GameLogic.UI.Kit
             _markerDelete = root.Q<Button>("MarkerDelete");
             _feedback = root.Q<Label>("MapFeedback");
             _hint = root.Q<Label>("MapHint");
+            _relicEditor = root.Q<VisualElement>("RelicEditor");
+            _relicTitle = root.Q<Label>("RelicTitle");
+            _relicBody = root.Q<Label>("RelicBody");
+            _relicRecover = root.Q<Button>("RelicRecover");
+            _hover = root.Q<Label>("MapHover");
+            _legendTitle = root.Q<Label>("HazardLegendTitle");
+            _legendHint = root.Q<Label>("HazardLegendHint");
+            for (int i = 0; i < _legendRows.Length; i++)
+            {
+                string n = i.ToString(CultureInfo.InvariantCulture);
+                _legendRows[i] = root.Q<VisualElement>("HazardRow" + n);
+                _legendSwatches[i] = root.Q<VisualElement>("HazardSwatch" + n);
+                _legendNames[i] = root.Q<Label>("HazardName" + n);
+            }
+            _relicRecover.clicked += () => RecoverSelectedRelic();
+            _relicRecoverAll = root.Q<Button>("RelicRecoverAll");
+            _relicRecoverAll.clicked += () => RecoverAllRelics();
             _icons = new WorldMapIconPool(_iconLayer, labels: true);
             _texture ??= new WorldMapTexture(Mathf.Max(64, (int)GridContent.Tuning("map.texture_size")));
             _close.clicked += () => SetOpen(false);
@@ -278,7 +336,10 @@ namespace GameLogic.UI.Kit
                 InputRouter.PushModal(this);
                 UiEscapeStack.Push(this, () => SetOpen(false));
                 _selectedMarker = null;
+                _selectedRelic = null;
                 _feedback.text = string.Empty;
+                _hover.text = string.Empty;
+                RefreshRelicPanel(forceCount: true);
                 CenterOnCamera();
                 ApplyPendingCenter();
                 _modelKey = 0;
@@ -401,6 +462,34 @@ namespace GameLogic.UI.Kit
                 _filters[i].text = on ? "▸ " + name : name;
                 _filters[i].EnableInClassList("wg-filter-off", !on);
             }
+            RefreshLegend();
+        }
+
+        /// <summary>FG7-ENV-05（FGR-ENV-060“危害区在地图上有明确标记和图例”）：每种危害一行——颜色块 + “名称（所在领地）”；颜色之外写名称（B15）。
+        /// 审查修复（P2，FGR-GEN-022 不剧透）：地图上还不显示的领地（后幕、玩家没亲自探索到）只写危害名，不写领地名——与地图圈、悬停的隐藏规则同一个判定。</summary>
+        private void RefreshLegend()
+        {
+            _legendTitle.text = GameText.Get("ui.map.legend.title");
+            _legendHint.text = GameText.Get("ui.map.legend.hint");
+            _legendRevision = Campaign.Env.HomeExplorationService.Revision;
+            IReadOnlyList<GameConfig.fg.Hazard> rows = Campaign.Env.HomeExplorationService.Hazards;
+            CampaignState state = CampaignSession.Current;
+            WorldPlan plan = state != null ? WorldGenService.PlanFor(state) : null;
+            for (int i = 0; i < _legendRows.Length; i++)
+            {
+                bool show = i < rows.Count;
+                _legendRows[i].EnableInClassList("uk-hidden", !show);
+                if (!show)
+                {
+                    continue;
+                }
+                GameConfig.fg.Hazard h = rows[i];
+                PlannedTerritory t = plan?.Find(h.TerritoryId);
+                _legendSwatches[i].style.backgroundColor = Campaign.Env.HomeExplorationService.HazardColor(h); // 数据驱动的运行时颜色（表里的图例色）
+                _legendNames[i].text = t != null && Campaign.Env.HomeExplorationService.TerritoryVisible(state, t)
+                    ? Campaign.Env.HomeExplorationService.HazardTitleZone(h, t)
+                    : GameText.Get(h.NameKey);
+            }
         }
 
         public void ToggleFilter(WorldMapLayer layer)
@@ -450,7 +539,7 @@ namespace GameLogic.UI.Kit
             PlaceTexture();
             float now = Time.realtimeSinceStartup;
             int key = HashCode.Combine(Math.Round(_view.CenterX, 1), Math.Round(_view.CenterY, 1), Math.Round(_view.HalfWidth, 1), _view.CanvasWidth, _view.CanvasHeight,
-                WorldMapFilters.Revision, HashCode.Combine(WorldMapMarkers.Revision, (int)GameText.Language, Campaign.Economy.IntelService.Revision));
+                WorldMapFilters.Revision, HashCode.Combine(WorldMapMarkers.Revision, (int)GameText.Language, Campaign.Economy.IntelService.Revision, Campaign.Env.HomeExplorationService.Revision));
             if (force || key != _modelKey || now >= _nextModel)
             {
                 _modelKey = key;
@@ -463,6 +552,11 @@ namespace GameLogic.UI.Kit
                 double cpp = _view.CellsPerCanvasPixel;
                 _scale.text = GameText.Format("ui.map.scale", cpp.ToString(cpp < 10 ? "0.0" : "0", CultureInfo.InvariantCulture));
                 RefreshMarkerEditor();
+                RefreshRelicPanel(forceCount: force);
+                if (_legendRevision != Campaign.Env.HomeExplorationService.Revision)
+                {
+                    RefreshLegend();
+                }
             }
         }
 
@@ -526,7 +620,12 @@ namespace GameLogic.UI.Kit
 
         private void OnPointerMove(PointerMoveEvent evt)
         {
-            if (!_pointerDown || _pointerButton != 0)
+            if (!_pointerDown)
+            {
+                HoverAt(evt.localPosition); // FG7-ENV-05：没按键时指着哪里就说明哪里（危害区 / 遗迹点）。
+                return;
+            }
+            if (_pointerButton != 0)
             {
                 return;
             }
@@ -576,8 +675,21 @@ namespace GameLogic.UI.Kit
             if (marker != null)
             {
                 _selectedMarker = marker;
+                _selectedRelic = null;
                 _modelKey = 0;
                 RefreshMarkerEditor();
+                RefreshRelicPanel();
+                return;
+            }
+            // FG7-ENV-05（FGR-ENV-051）：点在遗迹点上 = 选中它（右侧面板写距离环、状态，可以派空闲机器回收），不飞过去、不关地图。
+            string relic = ItemNear(canvasPoint, 10f, WorldMapItemKind.Relic);
+            if (relic != null)
+            {
+                _selectedRelic = relic;
+                _selectedMarker = null;
+                _modelKey = 0;
+                RefreshMarkerEditor();
+                RefreshRelicPanel();
                 return;
             }
             Vector2 cell = _view.ToCell(canvasPoint);
@@ -608,6 +720,149 @@ namespace GameLogic.UI.Kit
             _modelKey = 0;
             RefreshMarkerEditor();
             return m;
+        }
+
+        /// <summary>FG7-ENV-05：画布上离 <paramref name="canvasPoint"/> 最近、<paramref name="radius"/> 像素内的某类图标。</summary>
+        private string ItemNear(Vector2 canvasPoint, float radius, WorldMapItemKind kind)
+        {
+            string best = null;
+            float bestD = radius;
+            foreach (WorldMapItem item in _model.Items)
+            {
+                if (item.Kind != kind)
+                {
+                    continue;
+                }
+                float d = Vector2.Distance(_view.ToCanvas(item.X, item.Y), canvasPoint);
+                if (d <= bestD)
+                {
+                    bestD = d;
+                    best = item.Id;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// FG7-ENV-05（FGR-ENV-060“悬停说明效果和应对办法”）：指针在画布上 <paramref name="canvasPoint"/>——指着遗迹点图标写遗迹说明，
+        /// 否则指着地图上显示的危害区（领地 / 外圈危害带）写名称、效果、应对办法；都不是就清空。指针事件与自检同一入口。
+        /// </summary>
+        public void HoverAt(Vector2 canvasPoint)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _hover == null)
+            {
+                return;
+            }
+            string relic = ItemNear(canvasPoint, 10f, WorldMapItemKind.Relic);
+            if (relic != null && Campaign.Env.HomeExplorationService.TryDescribeRelic(state, relic, out string rt, out string rb))
+            {
+                _hover.text = rt + "\n" + rb;
+                return;
+            }
+            Vector2 cell = _view.ToCell(canvasPoint);
+            if (WorldMapFilters.IsOn(WorldMapLayer.Territory)
+                && Campaign.Env.HomeExplorationService.TryDescribeHazard(state, Mathf.RoundToInt(cell.x), Mathf.RoundToInt(cell.y), out string title, out string body))
+            {
+                _hover.text = title + "\n" + body;
+                return;
+            }
+            _hover.text = string.Empty;
+        }
+
+        /// <summary>FG7-ENV-05：右侧遗迹面板——选中的遗迹点的说明与“派空闲机器回收”按钮（能回收且没人在回收时可点）。</summary>
+        private void RefreshRelicPanel(bool forceCount = false)
+        {
+            if (_relicEditor == null)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            // 批量：全部已发现、还没回收、也没人在回收的遗迹点（没有时按钮变灰，文字写 0 处）。
+            int recoverable = RecoverableCount(state, forceCount);
+            _relicRecoverAll.text = GameText.Format("ui.map.relic.recover_all", recoverable);
+            _relicRecoverAll.SetEnabled(recoverable > 0);
+            string title = null;
+            string body = null;
+            bool show = _selectedRelic != null && state != null && Campaign.Env.HomeExplorationService.TryDescribeRelic(state, _selectedRelic, out title, out body);
+            _relicEditor.EnableInClassList("uk-hidden", !show);
+            if (!show)
+            {
+                return;
+            }
+            _relicTitle.text = title;
+            _relicBody.text = body;
+            _relicRecover.text = GameText.Get("ui.map.relic.recover");
+            bool can = Campaign.Env.HomeExplorationService.CheckRecoverable(state, _selectedRelic, out _) == null
+                       && Campaign.Env.HomeExplorationService.ActiveOrder(state, _selectedRelic) == null;
+            _relicRecover.SetEnabled(can);
+        }
+
+        /// <summary>可回收遗迹数（缓存见 <see cref="_recoverableRevision"/>）。</summary>
+        private int RecoverableCount(CampaignState state, bool force)
+        {
+            if (state == null)
+            {
+                return 0;
+            }
+            float now = Time.realtimeSinceStartup;
+            if (force || !ReferenceEquals(state, _recoverableState) || _recoverableRevision != Campaign.Env.HomeExplorationService.Revision
+                || now - _recoverableAt >= ModelRefreshSeconds)
+            {
+                _recoverableCount = Campaign.Env.HomeExplorationService.RecoverableRelics(state).Count;
+                _recoverableState = state;
+                _recoverableRevision = Campaign.Env.HomeExplorationService.Revision; // 补登会推进版本号：取算完之后的
+                _recoverableAt = now;
+                RecoverableRecounts++;
+            }
+            return _recoverableCount;
+        }
+
+        /// <summary>自检读：可回收遗迹数实际重算了几次（平移 / 缩放不应每帧重算）。</summary>
+        public int RecoverableRecounts { get; private set; }
+
+        /// <summary>FG7-ENV-05：“派空闲机器回收”（按钮与自检同一入口）：进待分配池；拒绝时拒绝音 + 原因，成功时写在反馈行。</summary>
+        public bool RecoverSelectedRelic()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _selectedRelic == null)
+            {
+                return false;
+            }
+            HomeValleyWorkOrders.WorkOrderOpResult r = Campaign.Env.HomeExplorationService.OrderRecovery(state, _selectedRelic, 0);
+            if (!r.Success)
+            {
+                string why = HomeValleyWorkOrders.DescribeCommandFailure(r.FailureReason);
+                _feedback.text = why;
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, why);
+            }
+            else
+            {
+                Campaign.Env.HomeExplorationService.TryGetRelic(state, _selectedRelic, out Campaign.Env.HomeExplorationService.RelicInfo info);
+                _feedback.text = GameText.Format("relic.order.pool", Campaign.Env.HomeExplorationService.RingName(info.Ring));
+            }
+            _modelKey = 0;
+            RefreshRelicPanel(forceCount: true);
+            return r.Success;
+        }
+
+        /// <summary>FG7-ENV-05（B02 批量）：“派机器回收全部已发现的遗迹”（按钮与自检同一入口）。返回下了几张回收单。</summary>
+        public int RecoverAllRelics()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return 0;
+            }
+            int n = Campaign.Env.HomeExplorationService.OrderAllRecoveries(state);
+            _feedback.text = n > 0 ? GameText.Format("relic.order.pool_all", n) : GameText.Get("relic.reason.none_recoverable");
+            if (n == 0)
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, _feedback.text);
+            }
+            _modelKey = 0;
+            RefreshRelicPanel(forceCount: true);
+            return n;
         }
 
         private string MarkerNear(Vector2 canvasPoint, float radius)

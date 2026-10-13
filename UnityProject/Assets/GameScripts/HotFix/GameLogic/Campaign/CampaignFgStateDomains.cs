@@ -128,6 +128,27 @@ namespace GameLogic.Campaign
         public int OverlayActive;
         /// <summary>FG3-LOG-08：最近一次打开的叠加层（叠加层切换键 O 关着时按它重新打开）。0 = 从没打开过（按“信号覆盖”，与 FG1-SIG-07 的 O 键一致）。</summary>
         public int OverlayLast;
+        /// <summary>FG7-ENV-05（FGR-ENV-050 / 051 / 060）：家园探索——发现过 / 回收过的遗迹点、揭开过的危害。唯一写入口 <see cref="Env.HomeExplorationService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 空域，第一次揭开新区域前按已探索区域静默补登（不补发通知）。</summary>
+        public HomeExplorationState Exploration;
+    }
+
+    /// <summary>FG7-ENV-05：家园探索（见 <see cref="GridState.Exploration"/>）。遗迹点 ID = 生成器点位 ID（relic:分布格X:分布格Y，只取决于种子，B25）。</summary>
+    [Serializable]
+    public sealed class HomeExplorationState
+    {
+        /// <summary>已按开局 / 旧档的已探索区域补登过（之后只有新揭开的才发通知）。</summary>
+        public bool Baselined;
+        /// <summary>发现过的遗迹点（被揭开的先后）与发现时的世界步。</summary>
+        public string[] RelicsFound = Array.Empty<string>();
+        public long[] RelicsFoundTicks = Array.Empty<long>();
+        /// <summary>回收过的遗迹点（完工先后）与完工时的世界步。</summary>
+        public string[] RelicsRecovered = Array.Empty<string>();
+        public long[] RelicsRecoveredTicks = Array.Empty<long>();
+        /// <summary>统计：回收遗迹累计得到的技术数据。</summary>
+        public long TechData;
+        /// <summary>揭开过的危害（fg.TbHazard.id）：第一次揭开发通知；更后幕的领地揭开后在地图上显示。</summary>
+        public string[] HazardsSeen = Array.Empty<string>();
     }
 
     /// <summary>
@@ -2044,6 +2065,12 @@ namespace GameLogic.Campaign
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
             s.Grid.TerrainSourceId ??= string.Empty;
+            s.Grid.Exploration ??= new HomeExplorationState();
+            s.Grid.Exploration.RelicsFound ??= Array.Empty<string>();
+            s.Grid.Exploration.RelicsFoundTicks ??= Array.Empty<long>();
+            s.Grid.Exploration.RelicsRecovered ??= Array.Empty<string>();
+            s.Grid.Exploration.RelicsRecoveredTicks ??= Array.Empty<long>();
+            s.Grid.Exploration.HazardsSeen ??= Array.Empty<string>();
             if (s.Grid.NextInstanceSerial < 2)
             {
                 s.Grid.NextInstanceSerial = 2;

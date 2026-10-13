@@ -272,6 +272,7 @@ namespace GameLogic.Campaign.Grid
             state.Grid.LayoutVersion = LayoutVersion;
             // FG3-GEN-01（FGR-GEN-030、034）：家园区的零散侦察巢登记成据点（v2 世界；幂等）。
             WorldGenService.SeedHomeZoneOutposts(state);
+            // FG7-ENV-05：开局探索圆里的遗迹点 / 危害不在这里补登（此刻世界状态可能还没写完）——第一次揭开新区域前由 RevealArea 静默补登。
         }
 
         /// <summary>
@@ -288,6 +289,8 @@ namespace GameLogic.Campaign.Grid
             int cx = Mathf.RoundToInt(center.x);
             int cy = Mathf.RoundToInt(center.y);
             int r = Mathf.FloorToInt(radius);
+            // FG7-ENV-05：先按已有的已探索圆补登遗迹 / 危害（新战役开局圆、旧档；不发通知），再追加新圆——只有新揭开的才发通知。
+            Env.HomeExplorationService.EnsureBaseline(state);
             ExploredAreaRecord[] areas = state.Grid.Explored ?? Array.Empty<ExploredAreaRecord>();
             foreach (ExploredAreaRecord a in areas)
             {
@@ -312,6 +315,8 @@ namespace GameLogic.Campaign.Grid
                 _map.SetExplored(state.Grid.Explored);
             }
             RevealCount++;
+            // FG7-ENV-05（FGR-ENV-051 / 060）：新揭开的遗迹点 / 危害记进存档并发通知。
+            Env.HomeExplorationService.OnAreaRevealed(state, cx, cy, r);
             return true;
         }
 

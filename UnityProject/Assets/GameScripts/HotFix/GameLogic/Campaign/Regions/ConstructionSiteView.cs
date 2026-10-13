@@ -216,6 +216,7 @@ namespace GameLogic.Campaign.Regions
             bool overPower = false;
             bool overLeak = false;
             bool overPollution = false;
+            bool overRelic = false;
             if (allowed && state != null && camera != null && !InputRouter.IsUiPointerBlocked())
             {
                 Vector3 screen = InputRouter.Reader.MousePosition;
@@ -308,6 +309,23 @@ namespace GameLogic.Campaign.Regions
                             _hoveringLeak = true;
                             UiTooltip.HoverWorld(LeakHoverKey, new Vector2(screen.x, screen.y), _leakProvider);
                         }
+                        else if (Env.HomeExplorationService.RelicAt(state, new Vector2(hit.x, hit.z)) is string relicId)
+                        {
+                            // FG7-ENV-05（FGR-ENV-051）：已探索的遗迹点——环名、距离、能否回收（工期 / 技术数据）/ 谁在回收 / 已回收与背景资料、怎么下令。
+                            over = true;
+                            overRelic = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            ReleaseBeltHover();
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _relicHoverId = relicId;
+                            _hoveringRelic = true;
+                            UiTooltip.HoverWorld(RelicHoverKey, new Vector2(screen.x, screen.y), _relicProvider);
+                        }
                         else if (GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution)
                         {
                             // FG7-ENV-04（FGR-ENV-040“悬停格子显示等级和影响”）：污染叠加层开着时，空地也有悬停——等级、影响、净化进度（不开叠加层时普通视角不打扰，没有地格表现）。
@@ -325,6 +343,15 @@ namespace GameLogic.Campaign.Regions
                             UiTooltip.HoverWorld(PollutionHoverKey, new Vector2(screen.x, screen.y), _pollutionProvider);
                         }
                     }
+                }
+            }
+            if (!overRelic && _hoveringRelic)
+            {
+                _hoveringRelic = false;
+                _relicHoverId = null;
+                if (UiTooltip.WorldKey == RelicHoverKey)
+                {
+                    UiTooltip.LeaveWorld();
                 }
             }
             if (!overPollution && _hoveringPollution)
@@ -382,6 +409,24 @@ namespace GameLogic.Campaign.Regions
         private const int PowerHoverKey = -734;
         private const int LeakHoverKey = -735;
         private const int PollutionHoverKey = -736;
+        private const int RelicHoverKey = -737;
+        private bool _hoveringRelic;
+        private string _relicHoverId;
+        private Func<TooltipContent> _relicProviderCache;
+        private Func<TooltipContent> _relicProvider => _relicProviderCache ??= ProvideRelicHover;
+
+        /// <summary>FG7-ENV-05：悬停提示当前挂在哪个遗迹点上（自检读；没有为 null）。</summary>
+        public string HoveringRelicId => _hoveringRelic ? _relicHoverId : null;
+
+        private TooltipContent ProvideRelicHover()
+        {
+            if (!_hoveringRelic || _hoverState == null || !Env.HomeExplorationService.TryDescribeRelic(_hoverState, _relicHoverId, out string title, out string body))
+            {
+                return null;
+            }
+            return new TooltipContent { Title = title, Body = body, CodexEntryId = "codex.env.exploration" };
+        }
+
         private bool _hoveringPollution;
         private Func<TooltipContent> _pollutionProviderCache;
         private Func<TooltipContent> _pollutionProvider => _pollutionProviderCache ??= ProvidePollutionHover;

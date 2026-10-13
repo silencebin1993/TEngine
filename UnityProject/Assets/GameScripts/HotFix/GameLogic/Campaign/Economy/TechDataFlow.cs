@@ -16,6 +16,8 @@ namespace GameLogic.Campaign.Economy
         public const string Analysis = "analysis";
         public const string Wreck = "wreck";
         public const string BlackBox = "blackbox";
+        /// <summary>FG7-ENV-05：家园遗迹回收（事务号 relic-recover:…）。</summary>
+        public const string Relic = "relic";
         public const string Lab = "lab";
         public const string FusionSim = "fusion_sim";
         public const string Fusion = "fusion";
@@ -24,7 +26,7 @@ namespace GameLogic.Campaign.Economy
         public const string Other = "other";
 
         /// <summary>收入的来源（统计面板按这个顺序列）。</summary>
-        public static readonly string[] IncomeSources = { Analysis, Wreck, BlackBox, Other };
+        public static readonly string[] IncomeSources = { Analysis, Wreck, BlackBox, Relic, Other };
 
         /// <summary>支出的去处（统计面板按这个顺序列）。</summary>
         public static readonly string[] ExpenseSinks = { Lab, FusionSim, Fusion, Restore, Blueprint, Other };
@@ -51,6 +53,10 @@ namespace GameLogic.Campaign.Economy
             if (transactionId.StartsWith(BlackBoxService.InstancePrefix, StringComparison.Ordinal))
             {
                 return BlackBox;
+            }
+            if (transactionId.StartsWith(Env.HomeExplorationService.TxPrefix, StringComparison.Ordinal))
+            {
+                return Relic;
             }
             if (transactionId.StartsWith("firmware_restore_tx_", StringComparison.Ordinal))
             {

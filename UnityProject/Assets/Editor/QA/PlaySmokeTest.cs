@@ -414,6 +414,11 @@ namespace GameLogic.EditorTools
                 // 状态行写“净化塔可以建在重污染地上”与格子的污染等级 / 影响、预览可放 → 取消选择、再按 Ctrl+Alt+5 关叠加层）
                 case 431: StepPollutionOverlay(inStep); break;
                 case 432: StepPollutionClosed(inStep); break;
+                // FG7-ENV-05：迷雾、探索与遗迹（测试捷径：把最近的遗迹点那一小片揭开 = 机器走到那里；“发现遗迹点”通知 → 真实地图键打开战略地图：危害图例 4 行、
+                // 点遗迹点图标出面板 → 真实点击“派空闲机器回收”→ 工单进待分配池 → 再按地图键关闭、取消这张回收单（夹具还原））
+                case 433: StepRelicRevealed(inStep); break;
+                case 434: StepRelicMapRecover(inStep); break;
+                case 435: StepRelicCleanup(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -10735,6 +10740,94 @@ namespace GameLogic.EditorTools
                 SessionState.SetInt(K + "PolCamMoved", 0);
             }
             Check(View.OverlayService.Active == View.OverlayKind.None, "再按 Ctrl+Alt+5：污染叠加层关闭");
+            Next(433, "FG7-ENV-05：测试捷径——揭开最近的遗迹点那一小片（= 机器走到那里），收到“发现遗迹点”通知");
+        }
+
+        // ── FG7-ENV-05：迷雾、探索与遗迹（真实 Play 帧：揭开通知、战略地图危害图例、遗迹面板与“派空闲机器回收”按钮）──
+
+        private static void StepRelicRevealed(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
+            var relics = new List<Campaign.WorldGen.WorldFeature>();
+            Campaign.WorldGen.WorldGenQuery.FeaturesIn(state, core.X - 400, core.Y - 400, core.X + 400, core.Y + 400, relics);
+            Campaign.WorldGen.WorldFeature relic = relics.Where(f => f.Kind == Campaign.WorldGen.WorldFeatureKind.Relic && !Campaign.Env.HomeExplorationService.IsRecovered(state, f.Id))
+                .OrderBy(f => f.Distance).FirstOrDefault();
+            if (relic == null)
+            {
+                Check(false, "家园 400 格内没有遗迹点（世界生成按种子分布，每 64 格分布格 16%）");
+                Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
+                return;
+            }
+            Campaign.Grid.HomeGridMap map = Campaign.Grid.HomeGridService.MapFor(state);
+            bool wasFog = !map.IsExploredNoLoad(new Campaign.Grid.GridCell(relic.X, relic.Y));
+            int before = Notifications.NotificationCenter.History.Where(e => e?.Type?.Id == "relic_found").Sum(e => e.Count);
+            Campaign.Grid.HomeGridService.RevealArea(state, new Vector2(relic.X, relic.Y), 10f);
+            int after = Notifications.NotificationCenter.History.Where(e => e?.Type?.Id == "relic_found").Sum(e => e.Count);
+            Check(Campaign.Env.HomeExplorationService.IsFound(state, relic.Id) && (!wasFog || after == before + 1),
+                $"遗迹点 {relic.Id}（{relic.X}, {relic.Y}，离核心 {relic.Distance} 格）被揭开：记为发现，原在迷雾里 {wasFog} 时发一条“发现遗迹点”通知（{before} → {after}）");
+            SessionState.SetString(K + "RelicId", relic.Id);
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
+            Next(434, "按地图键打开战略地图：危害图例；点遗迹点图标 → 遗迹面板 → 点“派空闲机器回收”");
+        }
+
+        private static void StepRelicMapRecover(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            string relicId = SessionState.GetString(K + "RelicId", string.Empty);
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            bool open = StrategicMapUIToolkit.IsOpen && map != null && map.PanelVisible;
+            Check(open, "按地图键打开战略地图");
+            if (!open || !Campaign.Env.HomeExplorationService.TryGetRelic(state, relicId, out Campaign.Env.HomeExplorationService.RelicInfo info))
+            {
+                Next(435, "收尾：取消回收单");
+                return;
+            }
+            Check(map.LegendRowsVisible == 4 && Enumerable.Range(0, 4).All(i => map.LegendText(i).Length > 0),
+                $"战略地图右侧危害图例 {map.LegendRowsVisible} 行：{string.Join(" / ", Enumerable.Range(0, 4).Select(i => map.LegendText(i)))}");
+            // 测试捷径：地图视图对准遗迹点（拖动平移的真实路径由 FG3-GEN-01 段覆盖），再用指针入口点它的图标。
+            map.SetViewForTests(info.X, info.Y, 120, map.View.CanvasWidth, map.View.CanvasHeight);
+            map.Tick(force: true);
+            map.ClickAt(map.View.ToCanvas(info.X, info.Y));
+            bool panel = map.SelectedRelic == relicId && map.RelicPanelVisible && StrategicMapUIToolkit.IsOpen;
+            Check(panel, $"点地图上的遗迹点图标：右侧遗迹面板“{map.RelicPanelText.Replace("\n", " / ")}”");
+            bool clicked = panel && ClickUitk("[StrategicMapHost]", "RelicRecover");
+            WorkOrderRecord order = Campaign.Env.HomeExplorationService.ActiveOrder(state, relicId);
+            Check(clicked && order != null && order.Kind == WorkOrderKind.Salvage && map.FeedbackText.Length > 0,
+                $"真实点击“派空闲机器回收”：回收单进待分配池（{order?.State}，机器 {order?.AssignedMachineLogicId}），反馈“{map.FeedbackText}”");
+            CheckNoTextMarkers("战略地图（遗迹面板 / 危害图例）");
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
+            Next(435, "再按地图键关闭，取消这张回收单（夹具还原）");
+        }
+
+        private static void StepRelicCleanup(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            string relicId = SessionState.GetString(K + "RelicId", string.Empty);
+            if (StrategicMapUIToolkit.IsOpen && StrategicMapUIToolkit.Instance != null)
+            {
+                StrategicMapUIToolkit.Instance.SetOpen(false);
+            }
+            WorkOrderRecord order = Campaign.Env.HomeExplorationService.ActiveOrder(state, relicId);
+            if (order != null)
+            {
+                Campaign.Regions.HomeValleyWorkOrders.CancelOrder(state, order.WorkOrderId, Vector2.zero);
+            }
+            Check(!StrategicMapUIToolkit.IsOpen && Campaign.Env.HomeExplorationService.ActiveOrder(state, relicId) == null,
+                "战略地图已关闭；回收单取消（遗迹不算回收、不发技术数据），不影响后面的步骤");
+            SessionState.SetString(K + "RelicId", string.Empty);
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

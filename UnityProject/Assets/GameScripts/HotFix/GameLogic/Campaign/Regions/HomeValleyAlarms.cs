@@ -605,7 +605,7 @@ namespace GameLogic.Campaign.Regions
                 if (order.FailureReason == "path-blocked")
                 {
                     severity = Severity.WorkBlocked;
-                    message = GameText.Format("alarm.work.blocked", WorkKindName(order.Kind));
+                    message = GameText.Format("alarm.work.blocked", WorkKindName(order));
                 }
                 else if (order.FailureReason != null && order.FailureReason.StartsWith("storage-full", StringComparison.Ordinal))
                 {
@@ -637,6 +637,20 @@ namespace GameLogic.Campaign.Regions
             {
                 _seen.IntersectWith(stillActive); // 离开告警状态的订单从记忆移除，允许未来重新告警。
             }
+        }
+
+        /// <summary>这张工单的显示名：遗迹回收单（FG7-ENV-05，复用拆解种类、目标 = 遗迹点）写“回收遗迹”，与工作面板同一判定；其余按种类。</summary>
+        public static string WorkKindName(WorkOrderRecord order)
+        {
+            if (order == null)
+            {
+                return GameText.Get("alarm.kind.other");
+            }
+            if (order.Kind == WorkOrderKind.Salvage && Env.HomeExplorationService.IsRelicId(order.TargetId))
+            {
+                return GameText.Get("relic.work.label");
+            }
+            return WorkKindName(order.Kind);
         }
 
         /// <summary>工单种类的显示名（文本键）。</summary>

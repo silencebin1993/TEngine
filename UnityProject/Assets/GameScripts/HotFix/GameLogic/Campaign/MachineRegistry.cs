@@ -855,6 +855,9 @@ namespace GameLogic.Campaign
                 DeathTick = Math.Max(0L, src.DeathTick),
                 DeathRegionId = string.IsNullOrEmpty(src.DeathRegionId) ? null : src.DeathRegionId,
                 DeathPosition = src.DeathPosition,
+                // FG7-ENV-05：机器探索沿路采样的上一个检查点（读档后接着从同一点补探索）。旧档缺字段 = 没有检查点。
+                ExploreLast = src.ExploreLast,
+                ExploreHasLast = src.ExploreHasLast,
                 IsAlive = src.IsAlive,
                 IsInFactory = src.IsInFactory,
                 IsDeployed = src.IsDeployed,

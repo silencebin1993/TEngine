@@ -37,6 +37,7 @@ namespace GameLogic.Campaign.WorldSim
         private static Material _outpostMaterial;
         private static Material _patrolMaterial;
         private static Material _relicMaterial;
+        private static Material _relicDoneMaterial;
         private static bool _placeholderLogged;
         private static TerrainProfile _pcgProfile;
         private static int _pcgLoadEpoch;
@@ -229,7 +230,7 @@ namespace GameLogic.Campaign.WorldSim
                 return;
             }
             // 只在镜头移动超过 8 格、探索范围变化或换战役时重查（点位查询按分布格缓存；这里连查询本身也不每帧做）。
-            if (ReferenceEquals(state, _relicState) && map.ExploredRevision == _relicExploredRevision
+            if (ReferenceEquals(state, _relicState) && map.ExploredRevision == _relicExploredRevision && Env.HomeExplorationService.Revision == _relicStatusRevision
                 && Math.Abs(focus.X - _relicFocus.X) < 8 && Math.Abs(focus.Y - _relicFocus.Y) < 8)
             {
                 foreach (string id in RelicIds)
@@ -241,8 +242,10 @@ namespace GameLogic.Campaign.WorldSim
             _relicState = state;
             _relicFocus = focus;
             _relicExploredRevision = map.ExploredRevision;
+            _relicStatusRevision = Env.HomeExplorationService.Revision;
             RelicIds.Clear();
             VisibleRelicMarkerCount = 0;
+            RecoveredRelicMarkerCount = 0;
             if (WorldGen.WorldGenService.ContextFor(state) == null)
             {
                 return;
@@ -287,9 +290,32 @@ namespace GameLogic.Campaign.WorldSim
                     go.SetActive(true);
                 }
                 go.transform.position = new Vector3(f.X, 0f, f.Y);
+                // FG7-ENV-05：回收过的遗迹点换成矮一截的灰色方尖碑（形状 + 颜色两种区分，B15）。
+                bool done = Env.HomeExplorationService.IsRecovered(state, f.Id);
+                Transform obelisk = go.transform.childCount > 0 ? go.transform.GetChild(0) : null;
+                if (obelisk != null)
+                {
+                    obelisk.localScale = done ? new Vector3(0.9f, 1.6f, 0.9f) : new Vector3(0.9f, 4f, 0.9f);
+                    obelisk.localPosition = new Vector3(0f, done ? 0.8f : 2f, 0f);
+                    Renderer rr = obelisk.GetComponent<Renderer>();
+                    Material want = done ? _relicDoneMaterial : _relicMaterial;
+                    if (rr != null && want != null && rr.sharedMaterial != want)
+                    {
+                        rr.sharedMaterial = want;
+                    }
+                }
+                if (done)
+                {
+                    RecoveredRelicMarkerCount++;
+                }
                 VisibleRelicMarkerCount++;
             }
         }
+
+        /// <summary>FG7-ENV-05：当前画出来的“已回收”遗迹点标记数（自检读）。</summary>
+        public static int RecoveredRelicMarkerCount { get; private set; }
+
+        private static int _relicStatusRevision = -1;
 
         /// <summary>FG3-GEN-01：当前画出来的遗迹点标记数（自检：迷雾外不画）。</summary>
         public static int VisibleRelicMarkerCount { get; private set; }
@@ -384,6 +410,7 @@ namespace GameLogic.Campaign.WorldSim
             _outpostMaterial = new Material(shader) { color = new Color(0.45f, 0.12f, 0.35f) };
             _patrolMaterial = new Material(shader) { color = new Color(0.72f, 0.22f, 0.55f) };
             _relicMaterial = new Material(shader) { color = new Color(0.86f, 0.78f, 0.45f) };
+            _relicDoneMaterial = new Material(shader) { color = new Color(0.42f, 0.44f, 0.46f) };
         }
 
         private static async UniTask LoadPcgProfileAsync(int epoch)
@@ -452,7 +479,14 @@ namespace GameLogic.Campaign.WorldSim
                 UnityObjects.Release(_relicMaterial);
                 _relicMaterial = null;
             }
+            if (_relicDoneMaterial != null)
+            {
+                UnityObjects.Release(_relicDoneMaterial);
+                _relicDoneMaterial = null;
+            }
             VisibleRelicMarkerCount = 0;
+            RecoveredRelicMarkerCount = 0;
+            _relicStatusRevision = -1;
             RelicIds.Clear();
             _relicState = null;
             VisibleOutpostMarkerCount = 0;

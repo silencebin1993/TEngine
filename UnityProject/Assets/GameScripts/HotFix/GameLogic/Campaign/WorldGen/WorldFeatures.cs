@@ -64,6 +64,7 @@ namespace GameLogic.Campaign.WorldGen
             int my0 = (int)WorldGenMath.FloorDiv(minY, c);
             int mx1 = (int)WorldGenMath.FloorDiv(maxX, c);
             int my1 = (int)WorldGenMath.FloorDiv(maxY, c);
+            Prefetch(ctx, mx0, my0, mx1, my1);
             for (int my = my0; my <= my1; my++)
             {
                 for (int mx = mx0; mx <= mx1; mx++)
@@ -113,20 +114,14 @@ namespace GameLogic.Campaign.WorldGen
                 return;
             }
             WorldGenVersion v = ctx.Row;
-            uint seed = unchecked((uint)ctx.Seed);
-            int c = v.PoiCellSize;
-            int margin = Math.Max(0, Math.Min(v.PoiEdgeMargin, c / 2 - 1));
-            int span = Math.Max(1, c - 2 * margin);
             relic = null;
             nest = null;
 
-            uint hr = WorldGenMath.Hash(seed, mx, my, RelicSalt);
-            if ((hr & 0xFFFFu) < (uint)Math.Min(65536, WorldTerrainSource.Q(v.RelicChance)))
+            if (RelicCandidate(ctx, mx, my, out int rx, out int ry))
             {
-                uint hp = WorldGenMath.Hash(seed, mx, my, RelicSalt ^ 0x9E3779B9u);
-                int x = mx * c + margin + (int)((hr >> 16) % (uint)span);
-                int y = my * c + margin + (int)((hp >> 16) % (uint)span);
-                if (Distance(ctx, x, y) > v.RelicCoreExclusion && TryWalkable(ctx, ref x, ref y, out bool shifted))
+                int x = rx;
+                int y = ry;
+                if (TryWalkable(ctx, ref x, ref y, out bool shifted))
                 {
                     relic = new WorldFeature
                     {
@@ -135,18 +130,14 @@ namespace GameLogic.Campaign.WorldGen
                 }
             }
 
-            int noOutpost = ctx.Plan?.StartReport?.NoOutpostRadius ?? WorldTerrainSource.ScaledRadius(v.StartNoOutpostRadius, ctx.Settings);
-            uint hn = WorldGenMath.Hash(seed, mx, my, NestSalt);
-            uint chanceQ = (uint)Math.Min(65536, (int)(((long)WorldTerrainSource.Q(v.NestChance) * WorldTerrainSource.Q(ctx.Settings?.OutpostDensity ?? 1f)) >> 16));
-            if ((hn & 0xFFFFu) < chanceQ)
+            int noOutpost = NoOutpostRadius(ctx);
+            if (NestCandidate(ctx, mx, my, out int nx, out int ny))
             {
-                uint hp = WorldGenMath.Hash(seed, mx, my, NestSalt ^ 0x9E3779B9u);
-                int x = mx * c + margin + (int)((hn >> 16) % (uint)span);
-                int y = my * c + margin + (int)((hp >> 16) % (uint)span);
-                int d = Distance(ctx, x, y);
-                if (d > noOutpost && d <= v.HomeZoneRadius && TryWalkable(ctx, ref x, ref y, out bool shifted))
+                int x = nx;
+                int y = ny;
+                if (TryWalkable(ctx, ref x, ref y, out bool shifted))
                 {
-                    d = Distance(ctx, x, y);
+                    int d = Distance(ctx, x, y);
                     if (d > noOutpost && d <= v.HomeZoneRadius)
                     {
                         int tier = Math.Min(Math.Max(1, v.NestMaxTier), 1 + Math.Max(0, d - noOutpost) / Math.Max(1, v.NestTierDistance));
@@ -160,6 +151,112 @@ namespace GameLogic.Campaign.WorldGen
             ctx.FeatureCache[key] = (relic, nest);
         }
 
+        private static int NoOutpostRadius(WorldGenContext ctx) =>
+            ctx.Plan?.StartReport?.NoOutpostRadius ?? WorldTerrainSource.ScaledRadius(ctx.Row.StartNoOutpostRadius, ctx.Settings);
+
+        /// <summary>分布格 (mx, my) 的遗迹点原定落点（概率命中、且离核心超过排除半径）；不命中返回 false。纯函数。</summary>
+        private static bool RelicCandidate(WorldGenContext ctx, int mx, int my, out int x, out int y)
+        {
+            WorldGenVersion v = ctx.Row;
+            uint seed = unchecked((uint)ctx.Seed);
+            int c = v.PoiCellSize;
+            int margin = Math.Max(0, Math.Min(v.PoiEdgeMargin, c / 2 - 1));
+            int span = Math.Max(1, c - 2 * margin);
+            x = y = 0;
+            uint hr = WorldGenMath.Hash(seed, mx, my, RelicSalt);
+            if ((hr & 0xFFFFu) >= (uint)Math.Min(65536, WorldTerrainSource.Q(v.RelicChance)))
+            {
+                return false;
+            }
+            uint hp = WorldGenMath.Hash(seed, mx, my, RelicSalt ^ 0x9E3779B9u);
+            x = mx * c + margin + (int)((hr >> 16) % (uint)span);
+            y = my * c + margin + (int)((hp >> 16) % (uint)span);
+            return Distance(ctx, x, y) > v.RelicCoreExclusion;
+        }
+
+        /// <summary>分布格 (mx, my) 的侦察巢原定落点（概率 × 据点密度命中、且在家园区的环里）；不命中返回 false。纯函数。</summary>
+        private static bool NestCandidate(WorldGenContext ctx, int mx, int my, out int x, out int y)
+        {
+            WorldGenVersion v = ctx.Row;
+            uint seed = unchecked((uint)ctx.Seed);
+            int c = v.PoiCellSize;
+            int margin = Math.Max(0, Math.Min(v.PoiEdgeMargin, c / 2 - 1));
+            int span = Math.Max(1, c - 2 * margin);
+            x = y = 0;
+            uint hn = WorldGenMath.Hash(seed, mx, my, NestSalt);
+            uint chanceQ = (uint)Math.Min(65536, (int)(((long)WorldTerrainSource.Q(v.NestChance) * WorldTerrainSource.Q(ctx.Settings?.OutpostDensity ?? 1f)) >> 16));
+            if ((hn & 0xFFFFu) >= chanceQ)
+            {
+                return false;
+            }
+            uint hp = WorldGenMath.Hash(seed, mx, my, NestSalt ^ 0x9E3779B9u);
+            x = mx * c + margin + (int)((hn >> 16) % (uint)span);
+            y = my * c + margin + (int)((hp >> 16) % (uint)span);
+            int d = Distance(ctx, x, y);
+            return d > NoOutpostRadius(ctx) && d <= v.HomeZoneRadius;
+        }
+
+        /// <summary>
+        /// FG7-ENV-05 性能（结果不变）：矩形里还没算过的分布格，先把所有候选落点一次性批量采样（一个 Burst 任务），
+        /// 落点本身可走的点位就不必再逐个采样；不可走的仍按原螺旋规则逐个挪位。只预取落点地形，点位的生成规则与 <see cref="CellFeatures"/> 完全相同。
+        /// </summary>
+        private static void Prefetch(WorldGenContext ctx, int mx0, int my0, int mx1, int my1)
+        {
+            if (!ReferenceEquals(_centerCtx, ctx))
+            {
+                CenterKnown.Clear();
+                _centerCtx = ctx;
+            }
+            PrefetchXs.Clear();
+            PrefetchYs.Clear();
+            for (int my = my0; my <= my1; my++)
+            {
+                for (int mx = mx0; mx <= mx1; mx++)
+                {
+                    long key = ((long)mx << 32) | (uint)my;
+                    if (ctx.FeatureCache.ContainsKey(key))
+                    {
+                        continue;
+                    }
+                    if (RelicCandidate(ctx, mx, my, out int rx, out int ry) && !CenterKnown.ContainsKey(PointKey(rx, ry)))
+                    {
+                        PrefetchXs.Add(rx);
+                        PrefetchYs.Add(ry);
+                    }
+                    if (NestCandidate(ctx, mx, my, out int nx, out int ny) && !CenterKnown.ContainsKey(PointKey(nx, ny)))
+                    {
+                        PrefetchXs.Add(nx);
+                        PrefetchYs.Add(ny);
+                    }
+                }
+            }
+            int n = PrefetchXs.Count;
+            if (n < 2)
+            {
+                return;
+            }
+            int[] xs = PrefetchXs.ToArray();
+            int[] ys = PrefetchYs.ToArray();
+            var terrain = new byte[n];
+            WorldGenKernel.SampleCells(in ctx.Source.Params, ctx.Source.Rects, ctx.Source.Zones, xs, ys, n, terrain);
+            for (int i = 0; i < n; i++)
+            {
+                CenterKnown[PointKey(xs[i], ys[i])] = terrain[i];
+            }
+        }
+
+        private static long PointKey(int x, int y) => ((long)x << 32) | (uint)y;
+
+        private static readonly List<int> PrefetchXs = new List<int>(64);
+        private static readonly List<int> PrefetchYs = new List<int>(64);
+        /// <summary>预取过的落点地形（按上下文；只在 TryWalkable 里读一次就删掉，不长期占内存）。</summary>
+        private static readonly Dictionary<long, byte> CenterKnown = new Dictionary<long, byte>();
+        private static WorldGenContext _centerCtx;
+
+        private static readonly int[] CenterXs = new int[1];
+        private static readonly int[] CenterYs = new int[1];
+        private static readonly byte[] CenterTerrain = new byte[1];
+
         private static int Distance(WorldGenContext ctx, int x, int y)
         {
             long dx = x - ctx.Core.X;
@@ -171,6 +268,28 @@ namespace GameLogic.Campaign.WorldGen
         private static bool TryWalkable(WorldGenContext ctx, ref int x, ref int y, out bool shifted)
         {
             shifted = false;
+            byte cliffCode = ctx.Source.Params.CodeCliff;
+            byte waterCode = ctx.Source.Params.CodeWater;
+            // FG7-ENV-05 性能（结果不变）：绝大多数落点本身就可走——先看落点这一格（矩形查询时已批量预取，否则单独采样一格），可走就直接返回；
+            // 不可走才采样整个螺旋。此前每个点位都把螺旋里的 (2r+1)² 格全部采样一遍（主线程逐格噪声），一次揭开 300 格要几十毫秒。
+            long pk = PointKey(x, y);
+            byte center;
+            if (ReferenceEquals(_centerCtx, ctx) && CenterKnown.TryGetValue(pk, out byte known))
+            {
+                center = known;
+                CenterKnown.Remove(pk);
+            }
+            else
+            {
+                CenterXs[0] = x;
+                CenterYs[0] = y;
+                WorldGenKernel.SampleCells(in ctx.Source.Params, ctx.Source.Rects, ctx.Source.Zones, CenterXs, CenterYs, 1, CenterTerrain);
+                center = CenterTerrain[0];
+            }
+            if (center != cliffCode && center != waterCode)
+            {
+                return true;
+            }
             int r = Math.Max(0, ctx.Row.PoiShiftRadius);
             int n = (2 * r + 1) * (2 * r + 1);
             var xs = new int[n];

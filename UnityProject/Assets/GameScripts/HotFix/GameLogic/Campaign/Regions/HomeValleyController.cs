@@ -2399,7 +2399,8 @@ namespace GameLogic.Campaign.Regions
             Ray ray = _camera.ScreenPointToRay(pointer);
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
-                return false;
+                // FG7-ENV-05（FGR-ENV-051）：遗迹点标记没有碰撞体、远处地面也可能没有——按 0 高度平面取点，点中已探索的遗迹点 = 派这台机器回收。
+                return TryContextRelic(moving, state, ray);
             }
             Vector3 destination = hit.point;
 
@@ -2423,7 +2424,8 @@ namespace GameLogic.Campaign.Regions
                           || buildSiteId != null || wreckageNodeId != null || groundItemId != null;
             if (!isWork)
             {
-                return false;
+                // FG7-ENV-05：没点中建筑 / 残骸 / 地面物时，再看点中的是不是可回收的遗迹点（按射线打到的地面点找，与悬停同一个点）。
+                return clicked == null && buildingTypeIdHit == null && TryContextRelicAt(moving, state, new Vector2(hit.point.x, hit.point.z));
             }
 
             // FG1-SIG-07（FGR-SIG-053）：覆盖外的机器收不到派工（也是远程命令），继续执行最后的命令；点中的是工作目标所以不再按“移动”处理。
@@ -2487,6 +2489,73 @@ namespace GameLogic.Campaign.Regions
             CommandHaul(moving, destination, groundItemId, state);
             return true;
         }
+
+        /// <summary>射线没打到任何碰撞体时（远处没有地面碰撞体）：按射线与 0 高度平面的交点找遗迹点，见 <see cref="TryContextRelicAt"/>。</summary>
+        private bool TryContextRelic(HomeValleyMachineMarker moving, CampaignState state, Ray ray)
+        {
+            if (moving == null || state == null || Mathf.Abs(ray.direction.y) < 1e-4f)
+            {
+                return false;
+            }
+            float t = -ray.origin.y / ray.direction.y;
+            if (t <= 0f)
+            {
+                return false;
+            }
+            Vector3 p = ray.origin + ray.direction * t;
+            return TryContextRelicAt(moving, state, new Vector2(p.x, p.z));
+        }
+
+        /// <summary>
+        /// FG7-ENV-05（FGR-ENV-051“探索后可以派机器回收”；RTS 右键情境命令）：<paramref name="point"/> 附近（relic.pick_radius 格）有**可回收**的遗迹点 →
+        /// 派这台机器去回收（与右键残骸 = 拆解同一套下令模板：覆盖外收不到命令、先取消战略命令、出厂、换目标守卫），返回 true。
+        /// 审查修复（P1，FGR-BASE-020）：不是可回收目标时返回 false，由调用方按“移动”处理，而且在动机器现有命令之前就判断——
+        /// 已回收的遗迹点（灰色矮碑永远留在原地）、别的机器正在回收的遗迹点都不吞右键移动、不取消机器手上的工单；
+        /// 这台机器自己已经在回收它时返回 true 但什么都不改（不打断、不重复下令）。待分配池里还没人领的回收单照常交给这台机器。
+        /// </summary>
+        private bool TryContextRelicAt(HomeValleyMachineMarker moving, CampaignState state, Vector2 point)
+        {
+            if (moving == null || state == null)
+            {
+                return false;
+            }
+            string relicId = Env.HomeExplorationService.RelicAt(state, point, skipRecovered: true);
+            if (relicId == null || Env.HomeExplorationService.CheckRecoverable(state, relicId, out Env.HomeExplorationService.RelicInfo info) != null)
+            {
+                return false;
+            }
+            if (info.Order != null)
+            {
+                if (info.Order.AssignedMachineLogicId == moving.LogicId)
+                {
+                    return true;
+                }
+                if (info.Order.State != WorkOrderState.Ready)
+                {
+                    return false;
+                }
+            }
+            if (!Signal.SignalCoverageService.CanReceiveCommand(moving.LogicId))
+            {
+                SquadCommands.ReportOutOfCoverage(new[] { moving.LogicId });
+                return true;
+            }
+            SquadCommands.CancelCommandFor(moving.LogicId);
+            if (MachineRegistry.TryGetRecord(moving.LogicId, out MachineRecord rec) && rec.IsInFactory)
+            {
+                HomeValleyFactory.ReleaseFromFactory(moving.LogicId);
+            }
+            Vector2 at = Env.HomeExplorationService.PositionOf(state, relicId);
+            CommandWork(moving, new Vector3(at.x, 0f, at.y), relicId,
+                () => Env.HomeExplorationService.OrderRecovery(state, relicId, moving.LogicId), "回收遗迹 " + relicId);
+            return true;
+        }
+
+        /// <summary>FG7-ENV-05：自检入口——与右键同一条路径（射线 = 镜头到遗迹点的连线）。</summary>
+        public bool ContextRelicForTests(HomeValleyMachineMarker moving, Ray ray) => TryContextRelic(moving, CampaignSession.Current, ray);
+
+        /// <summary>FG7-ENV-05：自检读——家园机器句柄（与模拟步里机器探索用的是同一份）。</summary>
+        public IReadOnlyList<HomeValleyMachineMarker> MachineMarkersForTests => _machineMarkers;
 
         /// <summary>"换目标"守卫：点选新工作前，若该机器已经在办一个指向**不同**目标的订单（还在
         /// 赶路或正在工作），先按玩家取消处理——否则旧订单会被静默丢弃在 Reserved/InProgress，货舱/

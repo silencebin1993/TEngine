@@ -216,6 +216,32 @@ namespace BinGames.Sim.WorldGen
         }
     }
 
+    /// <summary>
+    /// FG7-ENV-05：按生成器逐点采样一批格子的地形（与区块生成同一个纯函数）——点位挪位、稀土落点等零散查询用。
+    /// 此前是 AOT 托管循环；放进 Burst 后一次揭开 300 格找遗迹点从几十毫秒降到几毫秒，结果逐字节相同。
+    /// </summary>
+    [BurstCompile(CompileSynchronously = true)]
+    public struct JobSampleCells : IJob
+    {
+        public WorldGenParams Params;
+        [ReadOnly] public NativeArray<WorldGenRect> Rects;
+        public int RectCount;
+        [ReadOnly] public NativeArray<WorldGenZone> Zones;
+        public int ZoneCount;
+        [ReadOnly] public NativeArray<int> Xs;
+        [ReadOnly] public NativeArray<int> Ys;
+        [WriteOnly] public NativeArray<byte> Terrain;
+
+        public void Execute()
+        {
+            for (int i = 0; i < Terrain.Length; i++)
+            {
+                WorldGenMath.Sample(in Params, Xs[i], Ys[i], Rects, RectCount, Zones, ZoneCount, out byte t, out _);
+                Terrain[i] = t;
+            }
+        }
+    }
+
     /// <summary>地貌起伏网格的参数（FG3-GEN-01，FG-GAP-021）。只是表现：可走的地面永远在 0 高度。</summary>
     public struct ReliefParams
     {

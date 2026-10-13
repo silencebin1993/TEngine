@@ -191,6 +191,10 @@ public partial class Tables
     /// </summary>
     public fg.TbGridTerrain TbGridTerrain {get; }
     /// <summary>
+    /// 区域危害
+    /// </summary>
+    public fg.TbHazard TbHazard {get; }
+    /// <summary>
     /// 家园与格网调参
     /// </summary>
     public fg.TbHomeTuning TbHomeTuning {get; }
@@ -278,6 +282,10 @@ public partial class Tables
     /// 配方行
     /// </summary>
     public fg.TbRecipeIo TbRecipeIo {get; }
+    /// <summary>
+    /// 遗迹距离环
+    /// </summary>
+    public fg.TbRelicRing TbRelicRing {get; }
     /// <summary>
     /// 已移除内容
     /// </summary>
@@ -482,6 +490,7 @@ public partial class Tables
         TbFusionMerge = new fg.TbFusionMerge(loader("fg_tbfusionmerge"));
         TbFusionRecipe = new fg.TbFusionRecipe(loader("fg_tbfusionrecipe"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
+        TbHazard = new fg.TbHazard(loader("fg_tbhazard"));
         TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
         TbIntelBoss = new fg.TbIntelBoss(loader("fg_tbintelboss"));
@@ -504,6 +513,7 @@ public partial class Tables
         TbReaction = new fg.TbReaction(loader("fg_tbreaction"));
         TbRecipe = new fg.TbRecipe(loader("fg_tbrecipe"));
         TbRecipeIo = new fg.TbRecipeIo(loader("fg_tbrecipeio"));
+        TbRelicRing = new fg.TbRelicRing(loader("fg_tbrelicring"));
         TbRemovedContent = new fg.TbRemovedContent(loader("fg_tbremovedcontent"));
         TbResearchBranch = new fg.TbResearchBranch(loader("fg_tbresearchbranch"));
         TbResearchNode = new fg.TbResearchNode(loader("fg_tbresearchnode"));
@@ -593,6 +603,7 @@ public partial class Tables
         TbFusionMerge.ResolveRef(this);
         TbFusionRecipe.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);
+        TbHazard.ResolveRef(this);
         TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);
         TbIntelBoss.ResolveRef(this);
@@ -615,6 +626,7 @@ public partial class Tables
         TbReaction.ResolveRef(this);
         TbRecipe.ResolveRef(this);
         TbRecipeIo.ResolveRef(this);
+        TbRelicRing.ResolveRef(this);
         TbRemovedContent.ResolveRef(this);
         TbResearchBranch.ResolveRef(this);
         TbResearchNode.ResolveRef(this);

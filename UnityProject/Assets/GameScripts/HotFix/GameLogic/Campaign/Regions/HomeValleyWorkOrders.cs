@@ -1067,6 +1067,46 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
+        // ── 遗迹回收（FG7-ENV-05，FGR-ENV-051“探索后可以派机器回收”）──────────────────
+        // 与拆除同理复用 WorkOrderKind.Salvage（ERD-WRK-001 kind 是封闭集合；“到现场干 N 秒”就是拆解的语义），TargetId = 遗迹点 ID（relic:…）：
+        // ResolveWorkPosition / CompleteSalvage 按前缀分流，工作面板、看门狗、分配引擎、取消、接入打断全部原样复用。
+        // 校验（迷雾、已回收、已有人在回收）在 Env.HomeExplorationService.OrderRecovery；这里只建单。
+
+        /// <summary>FG7-ENV-05：建一张遗迹回收单。<paramref name="machineLogicId"/> = 0 进待分配池（空闲的搬运机领取），否则指定这台机器。</summary>
+        public static WorkOrderOpResult TryCreateRelicRecovery(CampaignState state, string relicId, int machineLogicId, float duration)
+        {
+            if (!Env.HomeExplorationService.IsRelicId(relicId))
+            {
+                return WorkOrderOpResult.Fail("relic-not-found");
+            }
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Salvage, relicId);
+            if (existing != null)
+            {
+                if (existing.State != WorkOrderState.Ready || machineLogicId == 0)
+                {
+                    return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+                }
+                return ReassignExisting(state, existing, machineLogicId);
+            }
+            if (machineLogicId != 0)
+            {
+                MachineCheck check = CheckMachine(machineLogicId, WorkOrderKind.Salvage);
+                if (!check.Ok)
+                {
+                    return WorkOrderOpResult.Fail(check.FailureReason);
+                }
+            }
+            string workOrderId = relicId + ":recover:" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, relicId, machineLogicId, resourceTransactionId: null, duration: Math.Max(0.1f, duration));
+            if (machineLogicId == 0)
+            {
+                order.State = WorkOrderState.Ready;
+            }
+            Append(state, order);
+            MarkAssignmentDirty();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
         // ── Haul（地面物两阶段搬运，复用 HomeValleyCargo 的票据 API）──────────────────
 
         public static WorkOrderOpResult TryCreateHaul(CampaignState state, string groundItemId, int machineLogicId)
@@ -2667,6 +2707,10 @@ namespace GameLogic.Campaign.Regions
                     // FG4-ECO-11 审查修复：关键材料（核心保管库物品）的取料点是归还核心，不是最近的仓库。
                     return order.Leg == 1 ? HomeValleyConstruction.FetchPosition(state, order, site) : site;
                 case WorkOrderKind.Salvage:
+                    if (Env.HomeExplorationService.IsRelicId(order.TargetId))
+                    {
+                        return Env.HomeExplorationService.PositionOf(state, order.TargetId); // FG7-ENV-05：遗迹回收走到遗迹点。
+                    }
                     if (order.TargetId == HomeValleyLayout.Wreckage1NodeId)
                     {
                         return HomeValleyLayout.Wreckage1.Position;
@@ -3131,6 +3175,15 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="WorkOrderRecord"/> 上加一个额外字段区分"这是哪种 Salvage"。</summary>
         private static void CompleteSalvage(CampaignState state, WorkOrderRecord order)
         {
+            if (Env.HomeExplorationService.IsRelicId(order.TargetId))
+            {
+                // FG7-ENV-05：遗迹回收完工——记为已回收、技术数据入账、背景资料通知（重复完工不重复发放）。
+                Env.HomeExplorationService.CompleteRecovery(state, order);
+                order.State = WorkOrderState.Completed;
+                MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
+                MarkAssignmentDirty();
+                return;
+            }
             if (order.TargetId == HomeValleyLayout.Wreckage1NodeId || order.TargetId == HomeValleyLayout.Wreckage2NodeId)
             {
                 CompleteWreckageSalvage(state, order);

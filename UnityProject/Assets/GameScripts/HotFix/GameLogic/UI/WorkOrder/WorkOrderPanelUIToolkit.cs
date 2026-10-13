@@ -277,11 +277,14 @@ namespace GameLogic.UI.WorkOrder
                 row.style.display = DisplayStyle.Flex;
                 // ER8-CONTENT-01 AC-THEME-001：类型/状态此前直接 ToString()（Haul、InProgress 等英文枚举名），
                 // 原因列直接显示原因码（machine-died、storage-full:need=…）——全部改为玩家文字。
-                row.Q<Label>("Kind").text = KindText(order.Kind);
+                // FG7-ENV-05：遗迹回收单（拆解单、目标 = 遗迹点）写“回收遗迹 / 距离环名（x, y）”，不写“拆解 / 残骸”。
+                bool relicOrder = Campaign.Env.HomeExplorationService.IsRelicId(order.TargetId);
+                row.Q<Label>("Kind").text = relicOrder ? GameLogic.Localization.GameText.Get("relic.work.label") : KindText(order.Kind);
                 // ER4-CONTENT-01：建筑类目标改显机械内容目录 DisplayName（如"发电机"），
                 // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标按工单类型给通用称呼。
                 string targetLabel = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
-                string targetText = targetLabel == order.TargetId ? FallbackTargetText(order.Kind) : targetLabel;
+                string targetText = relicOrder ? RelicTargetText(order.TargetId)
+                    : targetLabel == order.TargetId ? FallbackTargetText(order.Kind) : targetLabel;
                 // FG4-ECO-06（FGR-ECO-031 可追溯）：规则派的补给 / 送修 / 驻防写清做什么，规则派出或改动过的单子附“由规则 R3 触发”。
                 CampaignState ruleState = CampaignSession.Current;
                 string ruleTarget = GameLogic.Campaign.Economy.StandingRuleService.DescribeRuleOrderTarget(ruleState, order);
@@ -532,6 +535,14 @@ namespace GameLogic.UI.WorkOrder
                 case "path-blocked": return "路径受阻，正在等待通行";
                 default: return "暂时受阻";
             }
+        }
+
+        private static string RelicTargetText(string relicId)
+        {
+            CampaignState s = CampaignSession.Current;
+            return s != null && Campaign.Env.HomeExplorationService.TryGetRelic(s, relicId, out Campaign.Env.HomeExplorationService.RelicInfo info)
+                ? GameLogic.Localization.GameText.Format("relic.hover.title", Campaign.Env.HomeExplorationService.RingName(info.Ring), info.X, info.Y)
+                : GameLogic.Localization.GameText.Get("world.poi.relic");
         }
 
         private static string FallbackTargetText(WorkOrderKind kind)

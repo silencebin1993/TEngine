@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using BinGames.Sim.WorldGen;
 using GameConfig.fg;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Env;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Signal;
 using GameLogic.Campaign.WorldGen;
@@ -105,6 +106,8 @@ namespace GameLogic.UI.Kit
         public double X;
         public double Y;
         public string Label;
+        /// <summary>FG7-ENV-05：遗迹点已回收（图标换成空心灰色）。</summary>
+        public bool Done;
     }
 
     /// <summary>地图上的圆（领地范围 + 危害带、信号覆盖）。</summary>
@@ -117,6 +120,9 @@ namespace GameLogic.UI.Kit
         public float OuterRadius;
         public string Label;
         public bool Connected;
+        /// <summary>FG7-ENV-05（FGR-ENV-060）：领地的危害（fg.TbHazard.id）与图例颜色；外圈危害带画成带刻度的圈（形状 + 颜色，B15）。</summary>
+        public string HazardId;
+        public Color Tint;
     }
 
     /// <summary>地图上的线（突袭路线：队伍 → 目标）。</summary>
@@ -198,14 +204,21 @@ namespace GameLogic.UI.Kit
                     foreach (PlannedTerritory t in plan.Territories)
                     {
                         // 阵营领地按幕显示（任务与情报引导玩家按幕推进，FGR-GEN-022）；白潮滩头预留区揭示前没有任何提示（FGR-GEN-041）。
-                        if (!t.IsFaction || t.Act > act)
+                        // FG7-ENV-05：更后幕的领地，玩家亲自探索到它（揭开过它的危害）后也显示。
+                        if (!t.IsFaction || (t.Act > act && !HomeExplorationService.TerritoryVisible(state, t)))
                         {
                             continue;
                         }
+                        Hazard hz = HomeExplorationService.HazardForTerritory(t.Id);
                         string label = GameText.Format("ui.map.territory_label", GameText.Get(t.NameKey));
+                        if (hz != null)
+                        {
+                            label = GameText.Format("ui.map.territory_hazard", label, GameText.Get(hz.NameKey));
+                        }
                         Circles.Add(new WorldMapCircle
                         {
                             Layer = WorldMapLayer.Territory, X = t.CenterX, Y = t.CenterY, Radius = t.Radius, OuterRadius = t.OuterRadius, Label = label,
+                            HazardId = hz?.Id, Tint = HomeExplorationService.HazardColor(hz),
                         });
                         if (view.Contains(t.CenterX, t.CenterY, margin))
                         {
@@ -298,7 +311,15 @@ namespace GameLogic.UI.Kit
                 {
                     if (f.Kind == WorldFeatureKind.Relic && map.IsExploredNoLoad(new GridCell(f.X, f.Y)))
                     {
-                        Add(WorldMapItemKind.Relic, WorldMapLayer.Relics, f.Id, f.X, f.Y, GameText.Get("world.poi.relic"));
+                        // FG7-ENV-05：标签写距离环与状态（回收中 / 已回收），已回收的图标换样式。
+                        string label = HomeExplorationService.MapLabel(state, f, out bool done);
+                        Add(WorldMapItemKind.Relic, WorldMapLayer.Relics, f.Id, f.X, f.Y, label);
+                        if (done)
+                        {
+                            WorldMapItem last = Items[Items.Count - 1];
+                            last.Done = true;
+                            Items[Items.Count - 1] = last;
+                        }
                     }
                 }
             }
@@ -315,6 +336,19 @@ namespace GameLogic.UI.Kit
                         {
                             Add(WorldMapItemKind.Resource, WorldMapLayer.Resources, "res:" + i.Item, sx, sy,
                                 GameText.Format("ui.map.guarantee", GameText.Get(i.NameKey)));
+                        }
+                    }
+                }
+                // FG7-ENV-05（DEBT-FG7ENV04-05）：归还 20,000 格揭示的稀土富矿在地图 / 小地图上有专门的图标与标签（产出倍数）。
+                RichDepositRecord[] rich = PurificationService.StateOf(state)?.RichDeposits;
+                if (rich != null)
+                {
+                    int mult = Math.Max(1, GridContent.TuningInt("purify.rich_ore.yield_mult"));
+                    foreach (RichDepositRecord d in rich)
+                    {
+                        if (d != null && view.Contains(d.X, d.Y, margin) && map.IsExploredNoLoad(new GridCell(d.X, d.Y)))
+                        {
+                            Add(WorldMapItemKind.Resource, WorldMapLayer.Resources, "rich:" + d.X + ":" + d.Y, d.X, d.Y, GameText.Format("ui.map.rich_ore", mult));
                         }
                     }
                 }
@@ -630,14 +664,17 @@ namespace GameLogic.UI.Kit
                 }
                 if (c.Layer == WorldMapLayer.Territory)
                 {
+                    // FG7-ENV-05（FGR-ENV-060）：领地圈按危害的图例颜色画；外圈危害带 = 半透明宽带 + 外缘刻度（形状区分，不只靠颜色，B15）。
+                    Color tint = c.HazardId != null ? c.Tint : new Color(0.92f, 0.45f, 0.35f, 1f);
                     if (c.OuterRadius > c.Radius)
                     {
                         p.lineWidth = Mathf.Max(2f, (float)((c.OuterRadius - c.Radius) / cpp));
-                        p.strokeColor = new Color(0.85f, 0.55f, 0.2f, 0.35f);
+                        p.strokeColor = new Color(tint.r, tint.g, tint.b, 0.3f);
                         Circle(p, center, (float)((c.Radius + c.OuterRadius) * 0.5 / cpp));
+                        Ticks(p, center, (float)(c.OuterRadius / cpp), new Color(tint.r, tint.g, tint.b, 0.85f));
                     }
                     p.lineWidth = 2f;
-                    p.strokeColor = new Color(0.92f, 0.45f, 0.35f, 0.9f);
+                    p.strokeColor = new Color(tint.r, tint.g, tint.b, 0.9f);
                     Circle(p, center, r);
                 }
                 else
@@ -689,6 +726,27 @@ namespace GameLogic.UI.Kit
             p.BeginPath();
             p.Arc(c, r, 0f, 360f);
             p.Stroke();
+        }
+
+        /// <summary>FG7-ENV-05：外圈危害带外缘的刻度（24 道朝外的短线），半径太小时不画。</summary>
+        private static void Ticks(Painter2D p, Vector2 c, float r, Color color)
+        {
+            if (r < 12f)
+            {
+                return;
+            }
+            p.lineWidth = 1.5f;
+            p.strokeColor = color;
+            float len = Mathf.Clamp(r * 0.06f, 3f, 8f);
+            for (int i = 0; i < 24; i++)
+            {
+                float a = i * (Mathf.PI * 2f / 24f);
+                var d = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                p.BeginPath();
+                p.MoveTo(c + d * r);
+                p.LineTo(c + d * (r + len));
+                p.Stroke();
+            }
         }
 
         /// <summary>镜头视野在地面上的四角（格网 XZ）：视口四角的射线与 0 高度平面相交；取不到时返回 false。</summary>
@@ -774,6 +832,7 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-own", item.Kind == WorldMapItemKind.OwnCluster);
                 e.EnableInClassList("wg-icon-outpost", item.Kind == WorldMapItemKind.Outpost);
                 e.EnableInClassList("wg-icon-relic", item.Kind == WorldMapItemKind.Relic);
+                e.EnableInClassList("wg-icon-relic-done", item.Kind == WorldMapItemKind.Relic && item.Done);
                 e.EnableInClassList("wg-icon-resource", item.Kind == WorldMapItemKind.Resource);
                 e.EnableInClassList("wg-icon-group", item.Kind == WorldMapItemKind.Group);
                 e.EnableInClassList("wg-icon-marker", item.Kind == WorldMapItemKind.Marker);

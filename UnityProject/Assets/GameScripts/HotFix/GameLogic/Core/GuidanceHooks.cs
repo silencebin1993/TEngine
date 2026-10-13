@@ -477,6 +477,18 @@ namespace GameLogic.Core
         /// <summary>FG7-ENV-04（FGR-ENV-043）：第一次遇到再污染。</summary>
         public const string EnvFirstRepollution = "env.first_repollution";
 
+        /// <summary>FG7-ENV-05（FGR-ENV-051）：第一次发现遗迹点（被探索揭开）。</summary>
+        public const string EnvFirstRelicFound = "env.first_relic_found";
+
+        /// <summary>FG7-ENV-05（FGR-ENV-051）：第一次回收遗迹。</summary>
+        public const string EnvFirstRelicRecovered = "env.first_relic_recovered";
+
+        /// <summary>FG7-ENV-05（FGR-ENV-060）：第一次揭开危害区。</summary>
+        public const string EnvFirstHazardSeen = "env.first_hazard_seen";
+
+        /// <summary>FG7-ENV-05（FGR-ENV-050）：第一次因迷雾不能建造。</summary>
+        public const string EnvFirstFogBlocked = "env.first_fog_blocked";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -536,6 +548,7 @@ namespace GameLogic.Core
             EnvFirstSilentWarning, EnvFirstSilentNight, EnvFirstStormDebris,
             EnvFirstWeatherWarning, EnvFirstWeather, EnvFirstRoof, EnvFirstPipeFrozen,
             EnvFirstPollutionSeen, EnvFirstPurifier, EnvFirstPurified, EnvFirstReturnMilestone, EnvFirstRepollution,
+            EnvFirstRelicFound, EnvFirstRelicRecovered, EnvFirstHazardSeen, EnvFirstFogBlocked,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -675,6 +675,11 @@ namespace GameLogic.Campaign.Regions
                 if (!r.Success)
                 {
                     GuidanceHooks.Raise(GuidanceHooks.FirstBlockedPlacement);
+                    // FG7-ENV-05（FGR-ENV-050）：第一次被迷雾拦下（图鉴“迷雾、探索与遗迹点”解锁；引导内容在 FG15-UX-04）。
+                    if (r.Placement != null && r.Placement.Reasons.Exists(x => x.Code == GridBlockReason.Fog))
+                    {
+                        GuidanceHooks.Raise(GuidanceHooks.EnvFirstFogBlocked);
+                    }
                 }
                 return Report(r, state);
             }

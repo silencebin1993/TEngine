@@ -348,20 +348,40 @@ namespace BinGames.Sim.WorldGen
         /// <summary>FG3-GEN-01：一批格子的地形（遗迹点 / 侦察巢落位就近挪位时用；与区块生成同一个纯函数）。</summary>
         public static void SampleCells(in WorldGenParams p, WorldGenRect[] rects, WorldGenZone[] zones, int[] xs, int[] ys, int count, byte[] terrain)
         {
-            var r = ToNative(rects, Allocator.Temp);
-            var z = ToNative(zones, Allocator.Temp);
+            if (count <= 0)
+            {
+                return;
+            }
+            // FG7-ENV-05 性能（结果不变：同一个纯整数采样函数）：逐格采样放进 Burst（当前线程同步运行），此前是 AOT 托管循环。
+            var r = ToNative(rects, Allocator.TempJob);
+            var z = ToNative(zones, Allocator.TempJob);
+            var nx = new NativeArray<int>(count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+            var ny = new NativeArray<int>(count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+            var nt = new NativeArray<byte>(count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
             try
             {
-                for (int i = 0; i < count; i++)
+                NativeArray<int>.Copy(xs, nx, count);
+                NativeArray<int>.Copy(ys, ny, count);
+                new JobSampleCells
                 {
-                    WorldGenMath.Sample(in p, xs[i], ys[i], r, rects?.Length ?? 0, z, zones?.Length ?? 0, out byte t, out _);
-                    terrain[i] = t;
-                }
+                    Params = p,
+                    Rects = r,
+                    RectCount = rects?.Length ?? 0,
+                    Zones = z,
+                    ZoneCount = zones?.Length ?? 0,
+                    Xs = nx,
+                    Ys = ny,
+                    Terrain = nt,
+                }.Run();
+                NativeArray<byte>.Copy(nt, terrain, count);
             }
             finally
             {
                 r.Dispose();
                 z.Dispose();
+                nx.Dispose();
+                ny.Dispose();
+                nt.Dispose();
             }
         }
 

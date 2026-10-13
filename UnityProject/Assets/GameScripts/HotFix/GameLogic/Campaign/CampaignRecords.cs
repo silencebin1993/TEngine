@@ -169,6 +169,15 @@ namespace GameLogic.Campaign
         /// <summary>阵亡位置（该地点的平面坐标，米）。</summary>
         public Vector2 DeathPosition;
 
+        // ── FG7-ENV-05（FGR-ENV-050“机器走到的地方被探索”）：机器探索沿路采样的上一个检查点。唯一写入口 Grid.MachineExploration。
+        // 进存档：读档后接着从同一个点沿路补探索，与一直跑的结果一致。只加字段、不升存档版本：旧档缺字段 = 没有检查点（下一次检查只看脚下）。
+
+        /// <summary>上一次被机器探索检查时的位置（家园平面坐标）。</summary>
+        public Vector2 ExploreLast;
+
+        /// <summary><see cref="ExploreLast"/> 是否有效。</summary>
+        public bool ExploreHasLast;
+
         public bool IsAlive;
         public bool IsInFactory;
         public bool IsDeployed;
