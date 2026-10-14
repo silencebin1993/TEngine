@@ -27,8 +27,6 @@ Tools/GameEventSourceGenerator/SourceGenerator/obj
 
 # OpenSpec 数据在 UnityProject/openspec，应入库（根 BinGames 用 junction 镜像）
 
-# 运行时日志、IDE 生成的解决方案、Unity AI 生成器的个人设置：每次打开都会变，不入库
-UnityProject/Assets/UnityMCP/Log/
-UnityProject/Assets/UnityMCP/Log.meta
+# IDE 生成的解决方案、Unity AI 生成器的个人设置：每次打开都会变，不入库（MCP 日志目录见 UnityProject/.gitignore）
 UnityProject/*.slnx
 UnityProject/UserSettings/AI.*/

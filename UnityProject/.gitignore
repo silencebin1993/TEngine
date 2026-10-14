@@ -106,3 +106,7 @@ Temp/bin/check/
 # 测试 / MCP / 验收截图 — 禁止入库；证据放 BinGames 根 production/qa/evidence/
 [Aa]ssets/[Ss]creenshots/
 [Aa]ssets/[Ss]creenshots.meta
+
+# MCP for Unity 运行日志目录，每次连接都会写，不入库（放在 .meta 放行规则之后才生效）
+/[Aa]ssets/UnityMCP/
+/[Aa]ssets/UnityMCP.meta
