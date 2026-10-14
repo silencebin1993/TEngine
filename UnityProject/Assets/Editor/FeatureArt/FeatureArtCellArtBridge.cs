@@ -78,6 +78,19 @@ namespace BinGames.EditorTools.FeatureArt
         public static string SummonCellArtId(string key) => SummonMap.TryGetValue(key, out var id) ? id : null;
         public static string EnemyCellArtId(string visKey) => EnemyMap.TryGetValue(visKey, out var id) ? id : null;
 
+        public static void DrawImage(FeatureArtBindingWindow window, string cellArtId, string titleZh = null)
+        {
+            if (window?.Registry == null)
+            {
+                EditorGUILayout.HelpBox("源文件登记未加载。", MessageType.None);
+                return;
+            }
+            var asset = window.GetWorkingAsset(cellArtId, titleZh);
+            DrawPathCard(window, asset, "图标", asset.concept, rel => asset.concept = rel,
+                false, null, Mathf.Min(180f, FeatureArtGui.Width), false);
+            if (FeatureArtGui.Button("在源文件库打开")) window.JumpToSourceLibrary(cellArtId);
+        }
+
         public static void DrawViews(
             FeatureArtBindingWindow window,
             string cellArtId,
@@ -174,7 +187,8 @@ namespace BinGames.EditorTools.FeatureArt
                 }
             }
 
-            FeatureArtHunyuanGenerate.DrawButton(window, asset, generateTarget);
+            if (generateTarget?.bindKind == "InstancedMesh" || generateTarget?.bindKind == "PooledPrefab")
+                FeatureArtHunyuanGenerate.DrawButton(window, asset, generateTarget);
         }
 
         static void TryAddView(FeatureArtBindingWindow window, CellArtAsset asset, string cellArtId, string pending)
@@ -210,7 +224,7 @@ namespace BinGames.EditorTools.FeatureArt
             float cardW,
             bool offerSend)
         {
-            const float Thumb = 72f;
+            var thumbSize = label == "图标" ? Mathf.Min(160f, cardW) : 72f;
             using (new EditorGUILayout.VerticalScope(GUILayout.Width(cardW), GUILayout.MaxWidth(cardW), GUILayout.ExpandWidth(false)))
             {
                 EditorGUILayout.LabelField(label, EditorStyles.centeredGreyMiniLabel, GUILayout.Width(cardW));
@@ -218,9 +232,9 @@ namespace BinGames.EditorTools.FeatureArt
                     ? null
                     : FeatureArtAssetCache.Load<Texture2D>(CellArtRegistryService.AssetPathOf(rel));
                 var thumb = GUILayoutUtility.GetRect(
-                    Thumb, Thumb,
-                    GUILayout.Width(Thumb),
-                    GUILayout.Height(Thumb),
+                    thumbSize, thumbSize,
+                    GUILayout.Width(thumbSize),
+                    GUILayout.Height(thumbSize),
                     GUILayout.ExpandWidth(false));
                 if (Event.current.type == EventType.Repaint)
                 {

@@ -30,6 +30,8 @@ namespace BinGames.EditorTools.FeatureArt
         int _documentsRevision = -1, _documentsStructureRevision = -1;
         string[] _effectiveSources;
         bool _showDocuments;
+        bool _showIcon, _showNodeDetails, _showBindingSettings;
+        static readonly string[] ResourceTabs = { "基础模型", "图标" };
         static readonly string[] BindKinds = { "InstancedMesh", "PooledPrefab", "MaterialOverride", "Image", "Texture", "AnimationClip", "AudioClip", "AssetReference" };
         static readonly string[] BindLabels = { "模型 / 网格 / 预制体", "池化特效预制体", "材质", "图标 / 图片", "贴图 / VAT", "动画片段", "音频", "其他资源" };
 
@@ -44,13 +46,33 @@ namespace BinGames.EditorTools.FeatureArt
         [OnInspectorGUI]
         void Draw()
         {
-            PrepareChoices();
             using (new EditorGUILayout.VerticalScope(GUILayout.Width(FeatureArtGui.Width)))
             {
-                if (_node == null) DrawWorkspace();
-                else DrawNode();
-                DrawAdd();
+                var icon = _window.IconForModel(_node);
+                if (icon != null)
+                {
+                    var selected = GUILayout.Toolbar(_showIcon ? 1 : 0, ResourceTabs, GUILayout.Width(FeatureArtGui.Width));
+                    if ((selected == 1) != _showIcon)
+                    {
+                        (_showIcon ? _window.WorkspacePage(icon) : this).ReleaseChoices();
+                        _showIcon = selected == 1;
+                        _window.Repaint();
+                        GUIUtility.ExitGUI();
+                    }
+                    if (_showIcon) { _window.WorkspacePage(icon).DrawContent(); return; }
+                }
+                DrawContent();
             }
+        }
+
+        internal void SelectResource(string nodeId) => _showIcon = nodeId != NodeId;
+
+        void DrawContent()
+        {
+            PrepareChoices();
+            if (_node == null) DrawWorkspace();
+            else DrawNode();
+            if (!_window.IsImageNode(_node) || _showNodeDetails) DrawAdd();
         }
 
         void DrawWorkspace()
@@ -131,15 +153,33 @@ namespace BinGames.EditorTools.FeatureArt
         void DrawNode()
         {
             EditorGUILayout.LabelField(_node.title, EditorStyles.boldLabel);
+            var imageOnly = _window.IsImageNode(_node);
+            if (imageOnly)
+            {
+                EditorGUI.BeginChangeCheck();
+                _node.requirementStatus = FeatureArtGui.Field("需求状态", _node.requirementStatus);
+                _node.notes = TextArea("图标制作说明", _node.notes);
+                if (EditorGUI.EndChangeCheck()) Changed(false);
+                DrawProductionLink();
+                DrawSource();
+                EditorGUILayout.Space();
+                DrawSlot();
+                _showNodeDetails = EditorGUILayout.Foldout(_showNodeDetails, "需求与管理", true);
+                if (!_showNodeDetails) return;
+            }
             using (new EditorGUI.DisabledScope(true)) FeatureArtGui.Field("稳定标识", _node.id);
             EditorGUI.BeginChangeCheck();
+            if (imageOnly) _node.sourceId = FeatureArtGui.Field("源登记标识", _node.sourceId, true);
             var title = FeatureArtGui.Field("名称", _node.title);
             if (title != _node.title) { _node.title = title; _window.Workspace.InvalidateStructure(); }
             _node.kind = FeatureArtGui.Field("类型（自定义）", _node.kind);
             _node.designId = FeatureArtGui.Field("设计标识", _node.designId);
             _node.faction = FeatureArtGui.Field("阵营", _node.faction);
-            _node.requirementStatus = FeatureArtGui.Field("需求状态", _node.requirementStatus);
-            _node.notes = TextArea("制作说明", _node.notes);
+            if (!imageOnly)
+            {
+                _node.requirementStatus = FeatureArtGui.Field("需求状态", _node.requirementStatus);
+                _node.notes = TextArea("制作说明", _node.notes);
+            }
             if (!ReferenceEquals(_sourceList, _node.designSources) || _sourceRevision != _window.Workspace.ContentRevision)
             {
                 _sourceRevision = _window.Workspace.ContentRevision;
@@ -154,12 +194,7 @@ namespace BinGames.EditorTools.FeatureArt
             }
             if (EditorGUI.EndChangeCheck()) Changed(false);
             DrawDocuments();
-            if (FeatureArtGui.Button("加入 / 查看出图顺序"))
-            {
-                FeatureArtProduction.Add(_window.Workspace, _node.id, _node.kind);
-                _window.MarkWorkspaceDirty();
-                _window.JumpToProduction(_node.id);
-            }
+            if (!imageOnly) DrawProductionLink();
             EditorGUILayout.LabelField("依赖资源", EditorStyles.boldLabel);
             for (var i = 0; i < _node.dependencyIds.Count; i++)
                 using (new EditorGUILayout.HorizontalScope())
@@ -194,16 +229,31 @@ namespace BinGames.EditorTools.FeatureArt
                 }
             }
 
-            EditorGUILayout.Space();
-            DrawSource();
-            EditorGUILayout.Space();
-            DrawSlot();
+            if (!imageOnly)
+            {
+                EditorGUILayout.Space();
+                DrawSource();
+                EditorGUILayout.Space();
+                DrawSlot();
+            }
             if (_children.Count > 0)
             {
                 EditorGUILayout.LabelField("下级资源", EditorStyles.boldLabel);
                 foreach (var child in _children)
-                    if (FeatureArtGui.Button(child.title + "（" + child.kind + "）")) _window.SelectWorkspaceNode(child);
+                {
+                    if (_window.ModelForIcon(child) != null) continue;
+                    var childTitle = _window.IconForModel(child) != null ? child.title.Replace("基础模型", "基础模型与图标") : child.title;
+                    if (FeatureArtGui.Button(childTitle + "（" + child.kind + "）")) _window.SelectWorkspaceNode(child);
+                }
             }
+        }
+
+        void DrawProductionLink()
+        {
+            if (!FeatureArtGui.Button("加入 / 查看出图顺序")) return;
+            FeatureArtProduction.Add(_window.Workspace, _node.id, _node.kind);
+            _window.MarkWorkspaceDirty();
+            _window.JumpToProduction(_node.id);
         }
 
         void DrawParent()
@@ -236,10 +286,14 @@ namespace BinGames.EditorTools.FeatureArt
 
         void DrawSource()
         {
-            EditorGUILayout.LabelField("概念图与源文件", EditorStyles.boldLabel);
-            EditorGUI.BeginChangeCheck();
-            _node.sourceId = FeatureArtGui.Field("源登记标识", _node.sourceId, true);
-            if (EditorGUI.EndChangeCheck()) Changed(false);
+            var imageOnly = _window.IsImageNode(_node);
+            EditorGUILayout.LabelField(imageOnly ? "图标图片" : "概念图与源文件", EditorStyles.boldLabel);
+            if (!imageOnly)
+            {
+                EditorGUI.BeginChangeCheck();
+                _node.sourceId = FeatureArtGui.Field("源登记标识", _node.sourceId, true);
+                if (EditorGUI.EndChangeCheck()) Changed(false);
+            }
             if (string.IsNullOrEmpty(_node.sourceId))
             {
                 if (GUILayout.Button("为此节点建立源登记"))
@@ -249,12 +303,36 @@ namespace BinGames.EditorTools.FeatureArt
                 }
                 return;
             }
-            FeatureArtCellArtBridge.DrawViews(_window, _node.sourceId, _node.title, _window.FindSlot(_node.slotId));
+            if (imageOnly) FeatureArtCellArtBridge.DrawImage(_window, _node.sourceId, _node.title);
+            else FeatureArtCellArtBridge.DrawViews(_window, _node.sourceId, _node.title, _window.FindSlot(_node.slotId));
         }
 
         void DrawSlot()
         {
-            EditorGUILayout.LabelField("成品绑定", EditorStyles.boldLabel);
+            var imageOnly = _window.IsImageNode(_node);
+            EditorGUILayout.LabelField(imageOnly ? "图标绑定" : "成品绑定", EditorStyles.boldLabel);
+            var slot = _window.FindSlot(_node.slotId);
+            if (imageOnly) _showBindingSettings = EditorGUILayout.Foldout(_showBindingSettings, "绑定设置与交付要求", true);
+            if (!imageOnly || _showBindingSettings || slot == null)
+                slot = DrawSlotSettings(imageOnly);
+            if (slot == null) return;
+            if (imageOnly)
+            {
+                EditorGUI.BeginChangeCheck();
+                slot.prompt = TextArea("图标生成提示词", slot.prompt);
+                if (EditorGUI.EndChangeCheck()) _window.MarkDirty();
+                if (slot.bindKind != "Image")
+                {
+                    EditorGUILayout.HelpBox("此图标关联的绑定槽不是图片类型，请在绑定设置中关联图片槽。", MessageType.Warning);
+                    return;
+                }
+            }
+            _window.DrawBindField(slot);
+            FeatureArtGui.Label("当前绑定：" + (string.IsNullOrEmpty(slot.location) ? "未绑定" : slot.location));
+        }
+
+        FeatureArtSlot DrawSlotSettings(bool imageOnly)
+        {
             var current = Array.IndexOf(_slotIds, _node.slotId ?? "");
             var next = FeatureArtGui.Popup("关联绑定槽", Math.Max(0, current), _slotLabels);
             if (next != current)
@@ -267,11 +345,11 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 if (GUILayout.Button("新建成品绑定槽"))
                 {
-                    if (_window.Data == null) { _window.LogError("绑定表未加载，无法新建槽。"); return; }
+                    if (_window.Data == null) { _window.LogError("绑定表未加载，无法新建槽。"); return null; }
                     slot = new FeatureArtSlot
                     {
-                        id = "custom." + _node.id, domain = "custom", key = _node.id, role = "mesh",
-                        titleZh = _node.title, bindKind = "InstancedMesh", folderHint = _window.Workspace.outputFolder,
+                        id = "custom." + _node.id, domain = "custom", key = _node.id, role = imageOnly ? "icon" : "mesh",
+                        titleZh = _node.title, bindKind = imageOnly ? "Image" : "InstancedMesh", folderHint = _window.Workspace.outputFolder,
                         location = "", package = "",
                     };
                     _window.Data.slots.Add(slot);
@@ -279,7 +357,7 @@ namespace BinGames.EditorTools.FeatureArt
                     _window.MarkDirty();
                     Changed(false);
                 }
-                return;
+                return null;
             }
             using (new EditorGUI.DisabledScope(true)) FeatureArtGui.Field("槽标识", slot.id);
             EditorGUI.BeginChangeCheck();
@@ -292,7 +370,8 @@ namespace BinGames.EditorTools.FeatureArt
                 slot.role = FeatureArtGui.Field("角色", slot.role);
             }
             var kindIndex = Array.IndexOf(BindKinds, slot.bindKind);
-            if (kindIndex >= 0)
+            if (imageOnly) EditorGUILayout.LabelField("成品类型", "图标 / 图片");
+            else if (kindIndex >= 0)
             {
                 var selectedKind = FeatureArtGui.Popup("成品类型", kindIndex, BindLabels);
                 // 已绑定时先清空再改类型，避免留下类型不匹配的旧 location。
@@ -311,10 +390,9 @@ namespace BinGames.EditorTools.FeatureArt
             slot.expected = TextArea("交付要求", slot.expected);
             slot.constraints = TextArea("制作约束", slot.constraints);
             slot.look = TextArea("外观说明", slot.look);
-            slot.prompt = TextArea("生成提示词", slot.prompt);
+            if (!imageOnly) slot.prompt = TextArea("生成提示词", slot.prompt);
             if (EditorGUI.EndChangeCheck()) _window.MarkDirty();
-            _window.DrawBindField(slot);
-            FeatureArtGui.Label("当前绑定：" + (string.IsNullOrEmpty(slot.location) ? "未绑定" : slot.location));
+            return slot;
         }
 
         void DrawAdd()
@@ -341,6 +419,8 @@ namespace BinGames.EditorTools.FeatureArt
         // Layout, repaint and focus events reuse these arrays until their underlying data changes.
         internal void ReleaseChoices()
         {
+            var icon = _window.IconForModel(_node);
+            if (icon != null) _window.WorkspacePage(icon).ReleaseChoices();
             _choicesRevision = _dependencyCount = _slotRevision = -1;
             _parentIds = _parentLabels = _dependencyIds = _dependencyLabels = _slotIds = _slotLabels = null;
             _children = _archived = null;

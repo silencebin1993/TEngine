@@ -312,17 +312,47 @@ namespace BinGames.EditorTools.FeatureArt
                     if (parent.archived) { hidden = true; break; }
                     parent = Workspace.Find(parent.parentId);
                 }
-                if (!hidden)
-                    tree.Add(Workspace.MenuPath(node), WorkspacePage(node), StatusIcon(FindSlot(node.slotId)));
+                if (!hidden && ModelForIcon(node) == null)
+                {
+                    var path = Workspace.MenuPath(node);
+                    if (IconForModel(node) != null)
+                    {
+                        var separator = path.LastIndexOf('/');
+                        path = path.Substring(0, separator + 1) + path.Substring(separator + 1).Replace("基础模型", "基础模型与图标");
+                    }
+                    tree.Add(path, WorkspacePage(node), StatusIcon(FindSlot(node.slotId)));
+                }
             }
             return FinishTree(tree);
         }
 
-        FeatureArtWorkspacePage WorkspacePage(FeatureArtNode node)
+        internal FeatureArtWorkspacePage WorkspacePage(FeatureArtNode node)
         {
             var id = node?.id ?? "";
             if (!_workspacePages.TryGetValue(id, out var page)) _workspacePages[id] = page = new FeatureArtWorkspacePage(this, node);
             return page;
+        }
+
+        internal bool IsImageNode(FeatureArtNode node) => node != null &&
+            (node.kind == "图标" || FindSlot(node.slotId)?.bindKind == "Image");
+
+        internal FeatureArtNode IconForModel(FeatureArtNode node)
+        {
+            if (node == null || node.archived || string.IsNullOrEmpty(node.parentId) ||
+                node.kind != "成品模型" || !(node.title ?? "").EndsWith("基础模型", StringComparison.Ordinal) ||
+                FindSlot(node.slotId)?.bindKind != "InstancedMesh" || Workspace.Children(node.id).Count != 0) return null;
+            var siblings = Workspace.Children(node.parentId).Where(n => !n.archived).ToArray();
+            var models = siblings.Where(n => n.kind == "成品模型" &&
+                (n.title ?? "").EndsWith("基础模型", StringComparison.Ordinal) &&
+                FindSlot(n.slotId)?.bindKind == "InstancedMesh").ToArray();
+            var icons = siblings.Where(IsImageNode).ToArray();
+            return models.Length == 1 && icons.Length == 1 && Workspace.Children(icons[0].id).Count == 0 ? icons[0] : null;
+        }
+
+        internal FeatureArtNode ModelForIcon(FeatureArtNode node)
+        {
+            if (!IsImageNode(node) || node.archived || string.IsNullOrEmpty(node.parentId)) return null;
+            return Workspace.Children(node.parentId).FirstOrDefault(model => ReferenceEquals(IconForModel(model), node));
         }
 
         OdinMenuTree FinishTree(OdinMenuTree tree)
@@ -335,6 +365,11 @@ namespace BinGames.EditorTools.FeatureArt
                         item.Toggled = _expandedNodes.TryGetValue(page.NodeId, out var expanded) ? expanded : page.NodeId == "";
                 }
                 if (item.Value is FeatureArtWorkspacePage workspacePage) _workspaceMenuItems[workspacePage.NodeId] = item;
+            }
+            foreach (var node in Workspace.nodes)
+            {
+                var model = ModelForIcon(node);
+                if (model != null && _workspaceMenuItems.TryGetValue(model.id, out var item)) _workspaceMenuItems[node.id] = item;
             }
 
             tree.Selection.SelectionChanged += changeType =>
@@ -712,6 +747,7 @@ namespace BinGames.EditorTools.FeatureArt
         public void SelectWorkspaceNode(FeatureArtNode node)
         {
             if (node == null) return;
+            WorkspacePage(ModelForIcon(node) ?? node).SelectResource(node.id);
             if (!_treeRebuildQueued && _workspaceMenuItems.TryGetValue(node.id, out var item))
             {
                 SelectWorkspaceItem(item);
