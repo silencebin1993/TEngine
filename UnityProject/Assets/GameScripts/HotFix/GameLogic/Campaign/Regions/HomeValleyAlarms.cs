@@ -646,9 +646,9 @@ namespace GameLogic.Campaign.Regions
             {
                 return GameText.Get("alarm.kind.other");
             }
-            if (order.Kind == WorkOrderKind.Salvage && Env.HomeExplorationService.IsRelicId(order.TargetId))
+            if (order.Kind == WorkOrderKind.Salvage && Env.HomeExplorationService.IsPoiId(order.TargetId))
             {
-                return GameText.Get("relic.work.label");
+                return Env.HomeExplorationService.WorkLabel(order.TargetId); // FG8-GEN-02：回收遗迹 / 打开缓存 / 读取终端
             }
             return WorkKindName(order.Kind);
         }

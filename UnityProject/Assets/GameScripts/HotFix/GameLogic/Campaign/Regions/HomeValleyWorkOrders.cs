@@ -1075,7 +1075,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>FG7-ENV-05：建一张遗迹回收单。<paramref name="machineLogicId"/> = 0 进待分配池（空闲的搬运机领取），否则指定这台机器。</summary>
         public static WorkOrderOpResult TryCreateRelicRecovery(CampaignState state, string relicId, int machineLogicId, float duration)
         {
-            if (!Env.HomeExplorationService.IsRelicId(relicId))
+            if (!Env.HomeExplorationService.IsPoiId(relicId))
             {
                 return WorkOrderOpResult.Fail("relic-not-found");
             }
@@ -2707,9 +2707,9 @@ namespace GameLogic.Campaign.Regions
                     // FG4-ECO-11 审查修复：关键材料（核心保管库物品）的取料点是归还核心，不是最近的仓库。
                     return order.Leg == 1 ? HomeValleyConstruction.FetchPosition(state, order, site) : site;
                 case WorkOrderKind.Salvage:
-                    if (Env.HomeExplorationService.IsRelicId(order.TargetId))
+                    if (Env.HomeExplorationService.IsPoiId(order.TargetId))
                     {
-                        return Env.HomeExplorationService.PositionOf(state, order.TargetId); // FG7-ENV-05：遗迹回收走到遗迹点。
+                        return Env.HomeExplorationService.PositionOf(state, order.TargetId); // FG7-ENV-05：遗迹回收走到遗迹点（FG8-GEN-02：缓存 / 终端同理）。
                     }
                     if (order.TargetId == HomeValleyLayout.Wreckage1NodeId)
                     {
@@ -3175,9 +3175,9 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="WorkOrderRecord"/> 上加一个额外字段区分"这是哪种 Salvage"。</summary>
         private static void CompleteSalvage(CampaignState state, WorkOrderRecord order)
         {
-            if (Env.HomeExplorationService.IsRelicId(order.TargetId))
+            if (Env.HomeExplorationService.IsPoiId(order.TargetId))
             {
-                // FG7-ENV-05：遗迹回收完工——记为已回收、技术数据入账、背景资料通知（重复完工不重复发放）。
+                // FG7-ENV-05：遗迹回收完工（FG8-GEN-02：资源缓存 / 旧终端同一分支，按点位种类发奖励）——记为已回收、技术数据入账、背景资料通知（重复完工不重复发放）。
                 Env.HomeExplorationService.CompleteRecovery(state, order);
                 order.State = WorkOrderState.Completed;
                 MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);

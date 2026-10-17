@@ -67,7 +67,12 @@ namespace GameLogic.Campaign.Env
         public static int BuildingHits { get; private set; }
         public static int BeltHits { get; private set; }
         public static double LastBatchMs { get; private set; }
+        /// <summary>中途没有赶上垃圾回收的批次里最慢的一次（这一批自己的耗时）。</summary>
         public static double MaxBatchMs { get; private set; }
+        /// <summary>FG8-GEN-02 修复轮（DEBT-FG8EXP02-08）：中途发生了垃圾回收的批次单列——回收是整个进程的停顿，长短取决于整个托管堆
+        /// （Editor 全量自检跑到后面堆很大），与这一批做了什么无关；只记次数与其中最慢的一次，不混进 <see cref="MaxBatchMs"/>。</summary>
+        public static int GcBatchCount { get; private set; }
+        public static double MaxGcBatchMs { get; private set; }
         public static int FrozenNotifyCount { get; private set; }
         /// <summary>FG7-ENV-03 审查修复：内核交回热更层的传送带格累计数（这一分钟有整点伤害的露天格）、一分钟里交回最多的一次、一分钟里摧毁最多的一次。</summary>
         public static long BeltCandidates { get; private set; }
@@ -77,8 +82,8 @@ namespace GameLogic.Campaign.Env
         /// <summary>自检：清零“最慢一次 / 最多一次”的统计（分段量性能）。</summary>
         public static void ResetBatchStats()
         {
-            LastBatchMs = MaxBatchMs = 0;
-            MaxBeltCandidates = MaxBeltsDestroyed = 0;
+            LastBatchMs = MaxBatchMs = MaxGcBatchMs = 0;
+            MaxBeltCandidates = MaxBeltsDestroyed = GcBatchCount = 0;
         }
 
         /// <summary>正式入口（<c>GameRoot.Startup</c>）：接上太阳能的沙暴系数、日历来源。幂等。</summary>
@@ -707,6 +712,7 @@ namespace GameLogic.Campaign.Env
         private static void AcidBatch(CampaignState state, WeatherFrontState d, long k)
         {
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            int gc0 = System.GC.CollectionCount(0);
             BatchCount++;
             EnsureHitSets(d);
             NewHitIds.Clear();
@@ -816,7 +822,15 @@ namespace GameLogic.Campaign.Env
             }
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             LastBatchMs = ms;
-            MaxBatchMs = Math.Max(MaxBatchMs, ms);
+            if (System.GC.CollectionCount(0) != gc0)
+            {
+                GcBatchCount++;
+                MaxGcBatchMs = Math.Max(MaxGcBatchMs, ms);
+            }
+            else
+            {
+                MaxBatchMs = Math.Max(MaxBatchMs, ms);
+            }
         }
 
         // ── 寒潮：结冰告警（FGR-LOG-045“结冰时有视觉效果和警告”）──

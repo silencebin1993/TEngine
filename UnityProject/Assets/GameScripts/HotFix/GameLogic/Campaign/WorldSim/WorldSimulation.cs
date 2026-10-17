@@ -34,6 +34,56 @@ namespace GameLogic.Campaign.WorldSim
         public static FracturedCityController FracturedCity { get; private set; }
         public static FoundryOutpostController FoundryOutpost { get; private set; }
 
+        /// <summary>FG8-GEN-02（FGR-GEN-042）：已载入的室内场地（表面 ID → 地点；有机器在里面才载入，全部离开 / 全灭后卸载）。</summary>
+        private static readonly SortedDictionary<string, InteriorSiteController> Interiors = new SortedDictionary<string, InteriorSiteController>(StringComparer.Ordinal);
+        private static readonly List<InteriorSiteController> InteriorScratch = new List<InteriorSiteController>(2);
+
+        public static InteriorSiteController Interior(string surfaceId) =>
+            surfaceId != null && Interiors.TryGetValue(surfaceId, out InteriorSiteController c) ? c : null;
+
+        public static IEnumerable<InteriorSiteController> LoadedInteriors
+        {
+            get
+            {
+                foreach (InteriorSiteController c in Interiors.Values)
+                {
+                    if (c != null && c.IsLoaded)
+                    {
+                        yield return c;
+                    }
+                }
+            }
+        }
+
+        /// <summary>把机器转进室内场地（没载入就载入；读档恢复时 <paramref name="resume"/> = true，从战斗快照恢复）。家园继续运行。</summary>
+        public static InteriorSiteController LoadInterior(string surfaceId, IEnumerable<int> logicIds, bool resume)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || !InteriorSiteService.IsInteriorSurface(surfaceId))
+            {
+                return null;
+            }
+            EnsureSession(state);
+            if (!Interiors.TryGetValue(surfaceId, out InteriorSiteController site) || site == null)
+            {
+                site = new InteriorSiteController(surfaceId);
+                Interiors[surfaceId] = site;
+            }
+            site.Enter(logicIds, resume);
+            BindLivePositions();
+            return site;
+        }
+
+        /// <summary>卸载室内场地（里面没有机器了 / 世界卸载）。</summary>
+        public static void UnloadInterior(string surfaceId, bool dropRecord)
+        {
+            if (Interiors.TryGetValue(surfaceId ?? string.Empty, out InteriorSiteController site) && site != null)
+            {
+                site.Exit(dropRecord);
+                Interiors.Remove(surfaceId);
+            }
+        }
+
         /// <summary>正在执行模拟步的地点 ID（只在某个地点的 SimStep 期间非空）——通知与反馈时刻据此记下“发生在哪个地点”。</summary>
         public static string CurrentSiteId { get; private set; }
 
@@ -93,12 +143,32 @@ namespace GameLogic.Campaign.WorldSim
                 {
                     SitesScratch.Add(FoundryOutpost);
                 }
+                foreach (InteriorSiteController c in Interiors.Values)
+                {
+                    if (c != null && c.IsLoaded)
+                    {
+                        SitesScratch.Add(c);
+                    }
+                }
                 return SitesScratch;
             }
         }
 
         public static bool AnyLoaded =>
-            (Home != null && Home.IsLoaded) || (FracturedCity != null && FracturedCity.IsLoaded) || (FoundryOutpost != null && FoundryOutpost.IsLoaded);
+            (Home != null && Home.IsLoaded) || (FracturedCity != null && FracturedCity.IsLoaded) || (FoundryOutpost != null && FoundryOutpost.IsLoaded)
+            || AnyInteriorLoaded();
+
+        private static bool AnyInteriorLoaded()
+        {
+            foreach (InteriorSiteController c in Interiors.Values)
+            {
+                if (c != null && c.IsLoaded)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         public static IWorldSite FindSite(string siteId)
         {
@@ -118,7 +188,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 return FoundryOutpost;
             }
-            return null;
+            return Interior(siteId);
         }
 
         public static bool IsSiteLoaded(string siteId) => FindSite(siteId)?.IsLoaded ?? false;
@@ -201,6 +271,7 @@ namespace GameLogic.Campaign.WorldSim
             // 原来只在 InitializeNewGrid 里登记，但寻路服务先建格网（NavService.Bind → MapFor）走了旧档迁移分支、把布局版本写掉了，
             // InitializeNewGrid 提前返回——主菜单新建的 v2 战役一个侦察巢都没有，突袭只能从迷雾外来。v0 / v1 世界没有点位分布，什么也不做。
             WorldGen.WorldGenService.SeedHomeZoneOutposts(state);
+            WorldGen.WorldGenService.SeedTerritoryOutposts(state); // FG8-GEN-02：阵营领地据点与零散前哨（v3 世界；幂等）
             NavService.AfterSitesLoaded(state);
             if (Home.IsLoaded)
             {
@@ -258,6 +329,16 @@ namespace GameLogic.Campaign.WorldSim
         {
             FracturedCity?.Exit(evacuateSuccess: false);
             FoundryOutpost?.Exit(evacuateSuccess: false);
+            // FG8-GEN-02：室内场地按“暂离”卸载（战斗快照保留在存档里，读档后从快照恢复）。
+            InteriorScratch.Clear();
+            InteriorScratch.AddRange(Interiors.Values);
+            foreach (InteriorSiteController c in InteriorScratch)
+            {
+                c?.Exit(dropRecord: false);
+            }
+            Interiors.Clear();
+            InteriorScratch.Clear();
+            InteriorSiteService.ResetSession();
             Economy.TestRangeService.ResetSessionState(); // FG5-RND-03：靶场的仿真地点随世界卸载释放（投影不存档，不记结果）。
             Home?.Exit();
             BeltNetworkService.Unload();
@@ -336,6 +417,10 @@ namespace GameLogic.Campaign.WorldSim
                 if (rec.RegionId == HomeValleyLayout.RegionId)
                 {
                     return Home != null && Home.IsLoaded ? Home.LivePosition(logicId) : null;
+                }
+                if (Interiors.TryGetValue(rec.RegionId ?? string.Empty, out InteriorSiteController inside))
+                {
+                    return inside != null && inside.IsLoaded ? inside.LivePosition(logicId) : null; // FG8-GEN-02：室内场地
                 }
             }
             Vector2? p = Home != null && Home.IsLoaded ? Home.LivePosition(logicId) : null;
@@ -494,6 +579,15 @@ namespace GameLogic.Campaign.WorldSim
                 {
                     CurrentSiteId = FoundryOutpost.SiteId;
                     FoundryOutpost.SimStep(dt);
+                }
+                // FG8-GEN-02（FGR-ARC-002 / FGR-GEN-042）：室内场地与地表同一步推进（按表面 ID 的固定顺序，与观察无关）。
+                foreach (InteriorSiteController c in Interiors.Values)
+                {
+                    if (c != null && c.IsLoaded)
+                    {
+                        CurrentSiteId = c.SiteId;
+                        c.SimStep(dt);
+                    }
                 }
                 // 行进中的队伍在星球表面（家园所在的表面）上。
                 CurrentSiteId = HomeValleyLayout.RegionId;

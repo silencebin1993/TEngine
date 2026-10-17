@@ -680,6 +680,11 @@ namespace GameLogic.Campaign.Regions
                     {
                         GuidanceHooks.Raise(GuidanceHooks.EnvFirstFogBlocked);
                     }
+                    // FG8-GEN-02：第一次因室内入口保护范围被拦（图鉴“室内场地”解锁；引导内容在 FG15-UX-04）。
+                    if (r.Placement != null && r.Placement.Reasons.Exists(x => x.Code == GridBlockReason.EntranceProtect))
+                    {
+                        GuidanceHooks.Raise(GuidanceHooks.WorldFirstEntranceBlocked);
+                    }
                 }
                 return Report(r, state);
             }

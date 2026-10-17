@@ -73,8 +73,42 @@ namespace GameLogic.Campaign.Regions
         public static IReadOnlyList<Vector2> DefaultRoute(CampaignState state, ExpeditionDepartureService.ExpeditionTarget target) =>
             ExpeditionSiteAnchors.Route(state, target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId);
 
-        /// <summary>给定路线返回经过的危害带（没有 = null）。默认空：目的地的危害数据还没接入（DEBT-FG8EXP01-04）。</summary>
-        public static Func<CampaignState, IReadOnlyList<Vector2>, HazardHit?> HazardProbe;
+        /// <summary>给定路线返回经过的危害（没有 = null）。默认 = <see cref="DefaultHazardProbe"/>（FG8-GEN-02 接入领地外圈危害带与领地内危害区，DEBT-FG8EXP01-04）；自检可以换。</summary>
+        public static Func<CampaignState, IReadOnlyList<Vector2>, HazardHit?> HazardProbe = DefaultHazardProbe;
+
+        /// <summary>
+        /// FG8-GEN-02（DEBT-FG8EXP01-04）：沿真实行军路线每 4 格采样一次，第一处落在外圈危害带 / 领地内危害区里的点给出“危害名（所在领地）”与后果——
+        /// 后果写 fg.TbHazard 的效果说明；效果机制还没随阵营内容开放时如实附上“当前只作标记”（DEBT-FG7ENV05-01）。只在检查单生成时调用，O(路线长度 / 4 × 领地数)。
+        /// </summary>
+        public static HazardHit? DefaultHazardProbe(CampaignState state, IReadOnlyList<Vector2> route)
+        {
+            if (state == null || route == null || route.Count < 2 || WorldGen.WorldGenService.PlanFor(state) == null)
+            {
+                return null;
+            }
+            for (int i = 1; i < route.Count; i++)
+            {
+                Vector2 a = route[i - 1];
+                Vector2 b = route[i];
+                float len = Vector2.Distance(a, b);
+                int n = Mathf.Max(1, Mathf.CeilToInt(len / 4f));
+                for (int k = 0; k <= n; k++)
+                {
+                    Vector2 p = Vector2.Lerp(a, b, (float)k / n);
+                    GameConfig.fg.Hazard h = Env.HomeExplorationService.HazardAt(state, Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.y), visibleOnly: false, out WorldGen.PlannedTerritory t, out bool belt);
+                    if (h == null || t == null)
+                    {
+                        continue;
+                    }
+                    string name = belt
+                        ? GameText.Format("hazard.hover.title_belt", GameText.Get(t.HazardKey), GameText.Get(t.NameKey))
+                        : Env.HomeExplorationService.HazardTitleZone(h, t);
+                    string consequence = GameText.Get(h.EffectKey) + "；" + GameText.Get("hazard.hover.pending");
+                    return new HazardHit(name, consequence);
+                }
+            }
+            return null;
+        }
 
         /// <summary>生成检查单。<paramref name="snap"/> 必须是同一时刻 <see cref="ExpeditionDepartureService.BuildPrepSnapshot"/> 的结果。
         /// 面板已经算好的校验与劳动力预告可以传进来（<paramref name="validation"/> / <paramref name="laborText"/> + <paramref name="laborDrops"/>），不重复扫描机器。</summary>
@@ -144,6 +178,11 @@ namespace GameLogic.Campaign.Regions
                     {
                         reminders.Add(new Item("coverage", GameText.Format("exp.check.rem.coverage", Mathf.CeilToInt(outside))));
                     }
+                }
+                // FG8-GEN-02（DEBT-FG8EXP02-02）：按锚点判定地点内部覆盖时（signal.coverage.site_root_mode = 2），入口不在与核心连通的覆盖里 → 到了地点也收不到命令。
+                if (SignalCoverageService.SiteRootMode >= 2 && !SignalCoverageService.SiteRootConnected(state, site))
+                {
+                    reminders.Add(new Item("site-root", GameText.Format("signal.site.anchor_uncovered", GameText.Get(ExpeditionTextKeys.SiteNameKey(site)))));
                 }
                 HazardHit? hazard = HazardProbe?.Invoke(state, route);
                 if (hazard.HasValue && !string.IsNullOrEmpty(hazard.Value.Name))

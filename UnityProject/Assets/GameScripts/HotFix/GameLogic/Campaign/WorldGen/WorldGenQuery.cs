@@ -20,7 +20,7 @@ namespace GameLogic.Campaign.WorldGen
         public GridCell Core { get; internal set; }
         public WorldPlan Plan { get; internal set; }
         public WorldTerrainSource Source { get; internal set; }
-        internal readonly Dictionary<long, (WorldFeature relic, WorldFeature nest)> FeatureCache = new Dictionary<long, (WorldFeature, WorldFeature)>();
+        internal readonly Dictionary<long, WorldFeature[]> FeatureCache = new Dictionary<long, WorldFeature[]>();
 
         /// <summary>这个世界的全部生成身份（自检 / 存档卡）。</summary>
         public string Identity => string.Concat(Seed.ToString(System.Globalization.CultureInfo.InvariantCulture), "|v", Version.ToString(System.Globalization.CultureInfo.InvariantCulture),

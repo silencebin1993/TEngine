@@ -217,6 +217,7 @@ namespace GameLogic.Campaign.Regions
             bool overLeak = false;
             bool overPollution = false;
             bool overRelic = false;
+            bool overAnchor = false;
             if (allowed && state != null && camera != null && !InputRouter.IsUiPointerBlocked())
             {
                 Vector3 screen = InputRouter.Reader.MousePosition;
@@ -326,6 +327,22 @@ namespace GameLogic.Campaign.Regions
                             _hoveringRelic = true;
                             UiTooltip.HoverWorld(RelicHoverKey, new Vector2(screen.x, screen.y), _relicProvider);
                         }
+                        else if (InteriorSiteService.TryDescribeAnchorAt(state, new Vector2(hit.x, hit.z), out _anchorTitle, out _anchorBody))
+                        {
+                            // FG8-GEN-02（FGR-GEN-024 / 042）：手工锚点——远征地点 / 首领场地 / 室内入口的名字、入口位置、怎么进（室内入口：进入半径与入口保护范围）。
+                            over = true;
+                            overAnchor = true;
+                            if (_hovering && UiTooltip.WorldKey == HoverKey)
+                            {
+                                UiTooltip.LeaveWorld();
+                            }
+                            _hovering = false;
+                            ReleaseBeltHover();
+                            _hoverState = state;
+                            _hoverCell = cell;
+                            _hoveringAnchor = true;
+                            UiTooltip.HoverWorld(AnchorHoverKey, new Vector2(screen.x, screen.y), _anchorProvider);
+                        }
                         else if (GameLogic.View.OverlayService.Active == GameLogic.View.OverlayKind.Pollution)
                         {
                             // FG7-ENV-04（FGR-ENV-040“悬停格子显示等级和影响”）：污染叠加层开着时，空地也有悬停——等级、影响、净化进度（不开叠加层时普通视角不打扰，没有地格表现）。
@@ -350,6 +367,14 @@ namespace GameLogic.Campaign.Regions
                 _hoveringRelic = false;
                 _relicHoverId = null;
                 if (UiTooltip.WorldKey == RelicHoverKey)
+                {
+                    UiTooltip.LeaveWorld();
+                }
+            }
+            if (!overAnchor && _hoveringAnchor)
+            {
+                _hoveringAnchor = false;
+                if (UiTooltip.WorldKey == AnchorHoverKey)
                 {
                     UiTooltip.LeaveWorld();
                 }
@@ -410,6 +435,17 @@ namespace GameLogic.Campaign.Regions
         private const int LeakHoverKey = -735;
         private const int PollutionHoverKey = -736;
         private const int RelicHoverKey = -737;
+        private const int AnchorHoverKey = -738;
+        private bool _hoveringAnchor;
+        private string _anchorTitle;
+        private string _anchorBody;
+        private Func<TooltipContent> _anchorProviderCache;
+        private Func<TooltipContent> _anchorProvider => _anchorProviderCache ??= () =>
+            _hoveringAnchor ? new TooltipContent { Title = _anchorTitle, Body = _anchorBody, CodexEntryId = "codex.world.interior" } : null;
+
+        /// <summary>FG8-GEN-02：悬停提示当前是否挂在手工锚点上（自检读）。</summary>
+        public bool HoveringAnchor => _hoveringAnchor;
+        public string AnchorHoverTitle => _hoveringAnchor ? _anchorTitle : null;
         private bool _hoveringRelic;
         private string _relicHoverId;
         private Func<TooltipContent> _relicProviderCache;

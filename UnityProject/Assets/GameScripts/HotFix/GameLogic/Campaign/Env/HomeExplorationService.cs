@@ -35,9 +35,15 @@ namespace GameLogic.Campaign.Env
     {
         public const string RelicPrefix = "relic:";
         public const string TxPrefix = "relic-recover:";
+        /// <summary>FG8-GEN-02：读取旧终端的技术数据事务号前缀（统计面板“读取旧终端”行，TechDataFlow.Terminal）。</summary>
+        public const string TerminalTxPrefix = "poi-read:";
         public const string NotifyRelicFound = "relic_found";
         public const string NotifyRelicRecovered = "relic_recovered";
         public const string NotifyHazardFound = "hazard_found";
+        /// <summary>FG8-GEN-02：资源缓存 / 旧终端（生成器点位，cache:分布格X:分布格Y / term:…）。与遗迹点同一条“发现 → 右键派机器 → 完工发奖励”的流程。</summary>
+        public const string CachePrefix = WorldFeatures.CachePrefix;
+        public const string TerminalPrefix = WorldFeatures.TerminalPrefix;
+        public const string NotifyPoiFound = "poi_found";
 
         /// <summary>状态变化计数（地图 / 世界标记据此重画）。</summary>
         public static int Revision { get; private set; } = 1;
@@ -47,6 +53,9 @@ namespace GameLogic.Campaign.Env
         public static int RelicNotices { get; private set; }
         public static int HazardNotices { get; private set; }
         public static int RecoveredCount { get; private set; }
+        /// <summary>FG8-GEN-02：发现资源缓存 / 旧终端的通知次数、打开 / 读取完工次数。</summary>
+        public static int PoiNotices { get; private set; }
+        public static int PoiDoneCount { get; private set; }
         public static double LastRevealMs { get; private set; }
         public static double MaxRevealMs { get; private set; }
 
@@ -84,7 +93,7 @@ namespace GameLogic.Campaign.Env
         public static void ResetForTests()
         {
             _loaded = false;
-            FoundCount = RelicNotices = HazardNotices = RecoveredCount = 0;
+            FoundCount = RelicNotices = HazardNotices = RecoveredCount = PoiNotices = PoiDoneCount = 0;
             LastRevealMs = MaxRevealMs = 0;
             Revision++;
         }
@@ -160,9 +169,18 @@ namespace GameLogic.Campaign.Env
 
         public static bool IsRelicId(string id) => id != null && id.StartsWith(RelicPrefix, StringComparison.Ordinal);
 
-        public static bool IsFound(CampaignState s, string relicId) => Array.IndexOf(StateOf(s)?.RelicsFound ?? Array.Empty<string>(), relicId) >= 0;
+        /// <summary>FG8-GEN-02：资源缓存或旧终端的点位 ID。</summary>
+        public static bool IsCacheOrTerminalId(string id) =>
+            id != null && (id.StartsWith(CachePrefix, StringComparison.Ordinal) || id.StartsWith(TerminalPrefix, StringComparison.Ordinal));
 
-        public static bool IsRecovered(CampaignState s, string relicId) => Array.IndexOf(StateOf(s)?.RelicsRecovered ?? Array.Empty<string>(), relicId) >= 0;
+        /// <summary>可以派机器去“回收”的点位（遗迹点、资源缓存、旧终端）：工单复用拆解种类、目标 = 点位 ID，按前缀分流到本类。</summary>
+        public static bool IsPoiId(string id) => IsRelicId(id) || IsCacheOrTerminalId(id);
+
+        public static bool IsFound(CampaignState s, string relicId) =>
+            Array.IndexOf((IsCacheOrTerminalId(relicId) ? StateOf(s)?.PoisFound : StateOf(s)?.RelicsFound) ?? Array.Empty<string>(), relicId) >= 0;
+
+        public static bool IsRecovered(CampaignState s, string relicId) =>
+            Array.IndexOf((IsCacheOrTerminalId(relicId) ? StateOf(s)?.PoisDone : StateOf(s)?.RelicsRecovered) ?? Array.Empty<string>(), relicId) >= 0;
 
         public static bool HazardSeen(CampaignState s, string hazardId) => Array.IndexOf(StateOf(s)?.HazardsSeen ?? Array.Empty<string>(), hazardId) >= 0;
 
@@ -220,6 +238,8 @@ namespace GameLogic.Campaign.Env
             int limit = Math.Max(1, (int)Math.Round(Tuning("relic.notify_max", 6f)));
             int posted = 0;
             int more = 0;
+            int postedPoi = 0;
+            int morePoi = 0;
             if (WorldGenService.ContextFor(s) != null)
             {
                 Scratch.Clear();
@@ -227,6 +247,37 @@ namespace GameLogic.Campaign.Env
                 long r2 = (long)radius * radius;
                 foreach (WorldFeature f in Scratch)
                 {
+                    if (f.Kind == WorldFeatureKind.Cache || f.Kind == WorldFeatureKind.Terminal)
+                    {
+                        // FG8-GEN-02：资源缓存 / 旧终端——揭开时记为已发现，通知（同类聚合）写名字、位置、怎么下令。
+                        long px = f.X - cx;
+                        long py = f.Y - cy;
+                        if (px * px + py * py > (long)radius * radius || Array.IndexOf(st.PoisFound, f.Id) >= 0)
+                        {
+                            continue;
+                        }
+                        st.PoisFound = Append(st.PoisFound, f.Id);
+                        Revision++;
+                        if (notify)
+                        {
+                            FoundCount++;
+                            if (postedPoi < limit)
+                            {
+                                postedPoi++;
+                                PoiNotices++;
+                                NotificationCenter.Post(NotifyPoiFound,
+                                    GameText.Format(f.Kind == WorldFeatureKind.Cache ? "cache.notify.found" : "terminal.notify.found",
+                                        GameText.Get(f.Kind == WorldFeatureKind.Cache ? "world.poi.cache" : "world.poi.terminal"), f.X, f.Y, f.Distance),
+                                    new Vector3(f.X, 0f, f.Y));
+                            }
+                            else
+                            {
+                                morePoi++;
+                            }
+                            GuidanceHooks.Raise(GuidanceHooks.WorldFirstPoiFound);
+                        }
+                        continue;
+                    }
                     if (f.Kind != WorldFeatureKind.Relic)
                     {
                         continue;
@@ -268,7 +319,15 @@ namespace GameLogic.Campaign.Env
                 RelicNotices++;
                 NotificationCenter.Post(NotifyRelicFound, GameText.Format("relic.notify.found_more", more), new Vector3(cx, 0f, cy));
             }
+            if (morePoi > 0)
+            {
+                // 资源缓存 / 旧终端与遗迹点各自计数、各自合成（“又发现 N 个遗迹点”里不混进缓存与终端）。
+                PoiNotices++;
+                NotificationCenter.Post(NotifyPoiFound, GameText.Format("poi.notify.found_more", morePoi), new Vector3(cx, 0f, cy));
+            }
             ScanHazards(s, st, cx, cy, radius, notify);
+            // FG8-GEN-02（FGR-GEN-040）：揭开的范围伸进外延区时，那里的零散前哨按需登记成据点（“从第 0 步起一直在休眠”，与揭开先后无关）。
+            WorldGenService.RegisterRevealedOuter(s, cx, cy, radius);
         }
 
         private static void ScanHazards(CampaignState s, HomeExplorationState st, int cx, int cy, int radius, bool notify)
@@ -324,13 +383,20 @@ namespace GameLogic.Campaign.Env
             public bool Explored;
             public bool Recovered;
             public WorkOrderRecord Order;
+            /// <summary>FG8-GEN-02：点位种类（遗迹点 / 资源缓存 / 旧终端）与所在领地的模板（领地之外为 null）。</summary>
+            public WorldFeatureKind Kind;
+            public TerritoryTemplate Template;
+            /// <summary>机器到场后要干多少游戏秒、完工发多少技术数据 / 废料。</summary>
+            public float Seconds;
+            public int TechData;
+            public int Scrap;
         }
 
         /// <summary>按点位 ID（relic:分布格X:分布格Y）取遗迹点：重算这个分布格（纯函数 + 缓存），不存在返回 false。</summary>
         public static bool TryGetRelic(CampaignState s, string relicId, out RelicInfo info)
         {
             info = default;
-            if (s == null || !IsRelicId(relicId))
+            if (s == null || !IsPoiId(relicId))
             {
                 return false;
             }
@@ -339,31 +405,66 @@ namespace GameLogic.Campaign.Env
             {
                 return false;
             }
-            string[] parts = relicId.Split(':');
-            if (parts.Length != 3 || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int mx)
-                                  || !int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int my))
-            {
-                return false;
-            }
-            WorldFeatures.CellFeatures(ctx, mx, my, out WorldFeature relic, out _);
-            if (relic == null || relic.Id != relicId)
+            // 重算这个分布格（纯函数 + 缓存）；ID 与点位种类都要对得上。
+            WorldFeature relic = WorldFeatures.FindById(ctx, relicId);
+            if (relic == null || (relic.Kind != WorldFeatureKind.Relic && relic.Kind != WorldFeatureKind.Cache && relic.Kind != WorldFeatureKind.Terminal))
             {
                 return false;
             }
             HomeGridMap map = HomeGridService.MapFor(s);
+            TerritoryTemplate tpl = relic.TerritoryId != null ? ctx.Plan?.TemplateFor(relic.TerritoryId) : null;
             info = new RelicInfo
             {
                 Id = relic.Id,
                 X = relic.X,
                 Y = relic.Y,
                 Distance = relic.Distance,
-                Ring = RingFor(relic.Distance),
+                Ring = relic.Kind == WorldFeatureKind.Relic ? RingFor(relic.Distance) : null,
                 Explored = map.IsExploredNoLoad(new GridCell(relic.X, relic.Y)),
                 Recovered = IsRecovered(s, relic.Id),
                 Order = ActiveOrder(s, relic.Id),
+                Kind = relic.Kind,
+                Template = tpl,
             };
+            Rewards(ref info);
             return true;
         }
+
+        /// <summary>FG8-GEN-02：点位的工期与奖励——遗迹点按距离环；缓存按所在领地的模板（外延区：基数 + 每千格加成，越远越多；领地之间：scatter.cache_scrap）；终端按模板。</summary>
+        private static void Rewards(ref RelicInfo info)
+        {
+            switch (info.Kind)
+            {
+                case WorldFeatureKind.Cache:
+                    if (info.Template != null)
+                    {
+                        info.Scrap = Math.Max(1, info.Template.CacheScrap);
+                        info.Seconds = Math.Max(0.1f, info.Template.CacheSeconds);
+                    }
+                    else
+                    {
+                        float baseScrap = Tuning("outer.cache_scrap_base", 80f);
+                        float per = Tuning("outer.cache_scrap_per_1000", 40f);
+                        info.Scrap = Math.Max(1, Mathf.RoundToInt(baseScrap + per * info.Distance / 1000f));
+                        info.Seconds = Math.Max(0.1f, Tuning("outer.cache_seconds", 14f));
+                    }
+                    break;
+                case WorldFeatureKind.Terminal:
+                    info.TechData = Math.Max(1, info.Template?.TerminalTech ?? 1);
+                    info.Seconds = Math.Max(0.1f, info.Template?.TerminalSeconds ?? 16f);
+                    break;
+                default:
+                    info.TechData = Math.Max(0, info.Ring?.TechData ?? 0);
+                    info.Seconds = Math.Max(0.1f, info.Ring?.RecoverSeconds ?? 0.1f);
+                    break;
+            }
+        }
+
+        /// <summary>点位的显示名：遗迹点 = 距离环名；资源缓存 / 旧终端 = 种类名。</summary>
+        public static string PoiName(in RelicInfo info) =>
+            info.Kind == WorldFeatureKind.Cache ? GameText.Get("world.poi.cache")
+            : info.Kind == WorldFeatureKind.Terminal ? GameText.Get("world.poi.terminal")
+            : RingName(info.Ring);
 
         public static Vector2 PositionOf(CampaignState s, string relicId) =>
             TryGetRelic(s, relicId, out RelicInfo info) ? new Vector2(info.X, info.Y) : HomeValleyLayout.Core.Position;
@@ -388,7 +489,7 @@ namespace GameLogic.Campaign.Env
             float bestD = radius * radius;
             foreach (WorldFeature f in Scratch)
             {
-                if (f.Kind != WorldFeatureKind.Relic)
+                if (f.Kind != WorldFeatureKind.Relic && f.Kind != WorldFeatureKind.Cache && f.Kind != WorldFeatureKind.Terminal)
                 {
                     continue;
                 }
@@ -429,7 +530,8 @@ namespace GameLogic.Campaign.Env
         /// <summary>背景资料：按遗迹点 ID 的稳定哈希挑距离环里的一条（同一遗迹点永远同一条，与读档 / 平台无关）。</summary>
         public static string LoreFor(RelicInfo info)
         {
-            string[] keys = info.Ring?.LoreKeys?.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
+            string source = info.Kind == WorldFeatureKind.Terminal ? info.Template?.TerminalLoreKeys : info.Ring?.LoreKeys;
+            string[] keys = source?.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
             if (keys.Length == 0)
             {
                 return string.Empty;
@@ -446,6 +548,15 @@ namespace GameLogic.Campaign.Env
         public static string MapLabel(CampaignState s, WorldFeature f, out bool recovered)
         {
             recovered = IsRecovered(s, f.Id);
+            if (f.Kind == WorldFeatureKind.Cache || f.Kind == WorldFeatureKind.Terminal)
+            {
+                string poi = GameText.Get(f.Kind == WorldFeatureKind.Cache ? "world.poi.cache" : "world.poi.terminal");
+                if (recovered)
+                {
+                    return GameText.Format(f.Kind == WorldFeatureKind.Cache ? "ui.map.cache.opened" : "ui.map.terminal.read", poi);
+                }
+                return ActiveOrder(s, f.Id) != null ? GameText.Format("ui.map.relic.ordered", poi) : poi;
+            }
             string name = RingName(RingFor(f.Distance));
             if (recovered)
             {
@@ -462,10 +573,32 @@ namespace GameLogic.Campaign.Env
             {
                 return false;
             }
-            title = GameText.Format("relic.hover.title", RingName(info.Ring), info.X, info.Y);
+            title = GameText.Format("relic.hover.title", PoiName(info), info.X, info.Y);
             var sb = new StringBuilder(160);
             sb.Append(GameText.Format("relic.hover.distance", info.Distance));
             sb.Append('\n');
+            if (info.Kind == WorldFeatureKind.Cache || info.Kind == WorldFeatureKind.Terminal)
+            {
+                bool cache = info.Kind == WorldFeatureKind.Cache;
+                if (info.Recovered)
+                {
+                    sb.Append(cache ? GameText.Format("cache.hover.opened", info.Scrap) : GameText.Format("terminal.hover.read", info.TechData, LoreFor(info)));
+                }
+                else if (info.Order != null)
+                {
+                    string who = info.Order.AssignedMachineLogicId > 0
+                        ? GameText.Format("relic.hover.ordered_machine", MachineNaming.Short(info.Order.AssignedMachineLogicId))
+                        : GameText.Get("relic.hover.ordered_pool");
+                    sb.Append(GameText.Format("relic.hover.ordered", who));
+                }
+                else
+                {
+                    sb.Append(cache ? GameText.Format("cache.hover.available", Num(info.Seconds), info.Scrap) : GameText.Format("terminal.hover.available", Num(info.Seconds), info.TechData));
+                    sb.Append('\n').Append(GameText.Get("cache.hover.hint"));
+                }
+                body = sb.ToString();
+                return true;
+            }
             if (info.Recovered)
             {
                 sb.Append(GameText.Format("relic.hover.recovered", info.Ring?.TechData ?? 0, LoreFor(info)));
@@ -503,7 +636,7 @@ namespace GameLogic.Campaign.Env
             {
                 return GameText.Get("relic.reason.recovered");
             }
-            if (info.Ring == null)
+            if (info.Kind == WorldFeatureKind.Relic && info.Ring == null)
             {
                 return GameText.Get("relic.reason.missing");
             }
@@ -525,13 +658,14 @@ namespace GameLogic.Campaign.Env
             {
                 return HomeValleyWorkOrders.WorkOrderOpResult.Fail(HomeValleyWorkOrders.GridFailurePrefix + reason);
             }
-            HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateRelicRecovery(s, relicId, machineLogicId, Math.Max(0.1f, info.Ring.RecoverSeconds));
+            HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateRelicRecovery(s, relicId, machineLogicId, Math.Max(0.1f, info.Seconds));
             if (r.Success)
             {
                 Revision++;
-                string name = RingName(info.Ring);
+                string name = PoiName(info);
+                string machineKey = info.Kind == WorldFeatureKind.Cache ? "cache.order.machine" : info.Kind == WorldFeatureKind.Terminal ? "terminal.order.machine" : "relic.order.machine";
                 FeedbackCues.Raise(FeedbackCueId.CommandAck, machineLogicId > 0
-                    ? GameText.Format("relic.order.machine", MachineNaming.Short(machineLogicId), name)
+                    ? GameText.Format(machineKey, MachineNaming.Short(machineLogicId), name)
                     : GameText.Format("relic.order.pool", name));
             }
             return r;
@@ -550,7 +684,7 @@ namespace GameLogic.Campaign.Env
             EnsureBaseline(s);
             foreach (string id in st.RelicsFound)
             {
-                if (CheckRecoverable(s, id, out RelicInfo info) == null && info.Order == null)
+                if (IsRelicId(id) && CheckRecoverable(s, id, out RelicInfo info) == null && info.Order == null)
                 {
                     list.Add(id);
                 }
@@ -565,7 +699,7 @@ namespace GameLogic.Campaign.Env
             foreach (string id in RecoverableRelics(s))
             {
                 string reason = CheckRecoverable(s, id, out RelicInfo info);
-                if (reason == null && HomeValleyWorkOrders.TryCreateRelicRecovery(s, id, 0, Math.Max(0.1f, info.Ring.RecoverSeconds)).Success)
+                if (reason == null && HomeValleyWorkOrders.TryCreateRelicRecovery(s, id, 0, Math.Max(0.1f, info.Seconds)).Success)
                 {
                     n++;
                 }
@@ -588,6 +722,10 @@ namespace GameLogic.Campaign.Env
             if (st == null || order == null || !TryGetRelic(s, order.TargetId, out RelicInfo info) || info.Recovered)
             {
                 return 0;
+            }
+            if (info.Kind == WorldFeatureKind.Cache || info.Kind == WorldFeatureKind.Terminal)
+            {
+                return CompletePoi(s, st, info);
             }
             st.RelicsRecovered = Append(st.RelicsRecovered, info.Id);
             st.RelicsRecoveredTicks = Append(st.RelicsRecoveredTicks, GameClock.Ticks);
@@ -612,6 +750,53 @@ namespace GameLogic.Campaign.Env
             GuidanceHooks.Raise(GuidanceHooks.EnvFirstRelicRecovered);
             return amount;
         }
+
+        /// <summary>
+        /// FG8-GEN-02：资源缓存 / 旧终端完工。缓存：废料放在缓存原地成为地面物（事务号 = 点位 ID，天然幂等），开系统搬运单进待分配池
+        /// （与风暴残骸、拆除返还同一套：仓库满时等待，腾出空间自动继续）；终端：技术数据入账（事务号 poi-read:ID）+ 一条记录。返回发了多少（废料或技术数据）。
+        /// </summary>
+        private static int CompletePoi(CampaignState s, HomeExplorationState st, RelicInfo info)
+        {
+            st.PoisDone = Append(st.PoisDone, info.Id);
+            PoiDoneCount++;
+            Revision++;
+            string name = PoiName(info);
+            if (info.Kind == WorldFeatureKind.Cache)
+            {
+                int amount = Math.Max(1, info.Scrap);
+                GroundItemRecord g = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, new Vector2(info.X, info.Y), CampaignEconomyLedger.ResourceScrap, amount, info.Id);
+                if (g != null)
+                {
+                    HomeValleyWorkOrders.TryCreateHaulPool(s, g.GroundItemId);
+                }
+                st.CacheScrap += amount;
+                NotificationCenter.Post(NotifyRelicRecovered, GameText.Format("cache.notify.opened", name, info.X, info.Y, amount), new Vector3(info.X, 0f, info.Y));
+                FeedbackCues.Raise(FeedbackCueId.Pickup);
+                return amount;
+            }
+            int tech = Math.Max(0, info.TechData);
+            string tx = TerminalTxPrefix + info.Id;
+            if (tech > 0 && CampaignEconomyLedger.Find(s, tx) == null)
+            {
+                CampaignEconomyLedger.ProposeProduce(s, tx, info.Id, CampaignEconomyLedger.ResourceTechData, tech);
+                CampaignEconomyLedger.Reserve(s, tx);
+                CampaignEconomyLedger.MarkRunning(s, tx);
+                if (CampaignEconomyLedger.Commit(s, tx).Success)
+                {
+                    st.TerminalTechData += tech;
+                    HomeInventory.Touch();
+                }
+            }
+            NotificationCenter.Post(NotifyRelicRecovered, GameText.Format("terminal.notify.read", name, info.X, info.Y, tech, LoreFor(info)), new Vector3(info.X, 0f, info.Y));
+            FeedbackCues.Raise(FeedbackCueId.AnalysisComplete);
+            return tech;
+        }
+
+        /// <summary>FG8-GEN-02：工单显示名（“回收遗迹 / 打开缓存 / 读取终端”）。</summary>
+        public static string WorkLabel(string targetId) =>
+            targetId != null && targetId.StartsWith(CachePrefix, StringComparison.Ordinal) ? GameText.Get("cache.work.label")
+            : targetId != null && targetId.StartsWith(TerminalPrefix, StringComparison.Ordinal) ? GameText.Get("terminal.work.label")
+            : GameText.Get("relic.work.label");
 
         // ── 区域危害（FGR-ENV-060）──────────────────────────────────────────────
 
@@ -685,6 +870,16 @@ namespace GameLogic.Campaign.Env
             PlannedTerritory t = plan.TerritoryAt(x, y);
             if (t != null && t.IsFaction && (!visibleOnly || TerritoryVisible(s, t)))
             {
+                // FG8-GEN-02（FGR-GEN-023；DEBT-FG7ENV05-02）：有领地模板的世界（v3 起），领地里只有模板分布的危害区才算危害；
+                // 没有模板的旧世界（v1 / v2）仍按整块领地标记（与此前一致）。
+                if (plan.HasTemplates && plan.TemplateFor(t.Id) != null)
+                {
+                    PlannedHazardZone z = plan.HazardZoneAt(x, y);
+                    if (z == null || z.TerritoryId != t.Id)
+                    {
+                        return null;
+                    }
+                }
                 Hazard h = HazardForTerritory(t.Id);
                 if (h != null)
                 {

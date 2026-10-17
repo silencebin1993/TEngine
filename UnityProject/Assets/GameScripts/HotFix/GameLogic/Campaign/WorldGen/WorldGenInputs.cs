@@ -83,6 +83,44 @@ namespace GameLogic.Campaign.WorldGen
                 parts.Add(Part(pre + "settings[" + v.SettingSet + "]", sb.ToString()));
             }
 
+            // FG8-GEN-02（生成器 v3 起）：版本行的模板 / 锚点 / 零散前哨列、领地模板集合里决定生成结果的列（地貌风格、危害区、点位概率与等级、
+            // 巡逻、净空）、锚点集合（含行序）、锚点用到的模板点位（A 类，随版本走）。奖励与工期（缓存废料、终端技术数据、读取秒数、记录文本）不影响生成，不列出。
+            // v1 / v2 行没有这些集合，不列出——它们的清单与此前的基准逐字相同。
+            if (WorldGenContent.HasTerritoryContent(v))
+            {
+                parts.Add(Part(pre + "version.fg8", Join(v.TemplateSet, v.AnchorSet, Q(v.ScatterOutpostChance), v.ScatterTierDistance, v.OutpostMaxTier,
+                    v.OuterZoneDistance, Q(v.OuterOutpostChance), Q(v.OuterCacheChance))));
+                sb.Clear();
+                foreach (TerritoryTemplate t in WorldGenContent.TemplatesFor(v))
+                {
+                    sb.Append(Join(t.TerritoryId, t.StyleTerrain1, Q(t.StyleBonus1), t.StyleTerrain2, Q(t.StyleBonus2), t.HazardZones, t.HazardRadiusMin, t.HazardRadiusMax,
+                        Q(t.HazardRadialMax), Q(t.OutpostEdgeChance), Q(t.OutpostCenterChance), t.OutpostTierEdge, t.OutpostTierCenter, t.GarrisonPerTier, t.PatrolEvery,
+                        t.PatrolRadius, Q(t.CacheChance), Q(t.TerminalChance), Q(t.RelicFactor), Q(t.SideChance), t.AnchorClearance)).Append(';');
+                }
+                parts.Add(Part(pre + "templates[" + v.TemplateSet + "]", sb.ToString()));
+                sb.Clear();
+                var templates = new SortedSet<string>(System.StringComparer.Ordinal);
+                foreach (AnchorSite a in WorldGenContent.AnchorsFor(v))
+                {
+                    sb.Append(Join(a.Id, a.TerritoryId, a.Kind, a.TemplateId, Q(a.RadialMin), Q(a.RadialMax), a.AngleMode, a.JitterDeg, a.FootprintRadius, a.BlendWidth,
+                        a.SurfaceId, a.EntryRadius, a.ProtectRadius, a.MinGap)).Append(';');
+                    if (WorldGenContent.HasSet(a.TemplateId))
+                    {
+                        templates.Add(a.TemplateId);
+                    }
+                }
+                parts.Add(Part(pre + "anchors[" + v.AnchorSet + "]", sb.ToString()));
+                sb.Clear();
+                foreach (string tid in templates)
+                {
+                    foreach (AnchorTemplatePoint p in WorldGenContent.TemplatePoints(tid))
+                    {
+                        sb.Append(Join(tid, p.PointId, p.Kind, Q(p.LocalX), Q(p.LocalY), Q(p.Radius))).Append(';');
+                    }
+                }
+                parts.Add(Part(pre + "template_points", sb.ToString()));
+            }
+
             parts.Add(Part("grid.chunk_size", GridContent.TuningInt("grid.chunk_size").ToString(CultureInfo.InvariantCulture)));
             sb.Clear();
             foreach (string id in TerrainIds)

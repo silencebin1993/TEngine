@@ -2580,10 +2580,12 @@ namespace GameLogic.EditorTools
             // 登记后不预走步（settleSteps: 0）：唤醒可能就发生在紧接着的那几步里，逐步计数要从登记后的第一步开始。
             int evalBefore = WorldOutpostSystem.Evaluations;
             int start = WorldOutpostSystem.WakesProcessed;
+            // FG8-GEN-02（生成器 v3）起世界里还有按种子生成的领地据点 / 零散前哨：它们若也在这台机器的唤醒范围里，会一起进同一个分帧队列（同一预算）。
+            var others = WorldOutpostSystem.Outposts(s).Where(o => !ids.Contains(o) && o.Dormant && !o.Destroyed).ToList();
             int machineId = SpawnHomeMachine(s, new Vector2(p.X + 16, p.Y + 4), settleSteps: 0);
             var perStep = new List<int>();
             int last = start;
-            for (int i = 0; i < 200 && WorldOutpostSystem.WakesProcessed - start < 10; i++)
+            for (int i = 0; i < 200 && WorldOutpostSystem.WakesProcessed - start < 10 + others.Count(o => !o.Dormant); i++)
             {
                 WorldSimulation.StepMany(1);
                 int now = WorldOutpostSystem.WakesProcessed;
@@ -2596,10 +2598,11 @@ namespace GameLogic.EditorTools
             int perStepCap = WorldOutpostSystem.WakesPerStep;
             double budget = NavService.Tuning("outpost.wake_budget_ms", 2f);
             PerfLines.Add($"据点唤醒：单个唤醒（补算增援 + 巡逻）最长 {WorldOutpostSystem.MaxWakeMs:F4} ms（预算 {budget} ms）；10 个同时符合条件分 {perStep.Count} 步处理（{string.Join("+", perStep)}）");
-            ExpectPerf(allDormant && perStep.Sum() == 10 && perStep.All(n => n <= perStepCap) && perStep.Count >= 3 && ids.All(o => !o.Dormant),
-                $"唤醒分帧：10 个据点同时符合唤醒条件，每步至多 {perStepCap} 个（{string.Join("+", perStep)}），单个唤醒最长 {WorldOutpostSystem.MaxWakeMs:F4} ms ≤ {budget} ms（FG17 休眠唤醒行）" +
+            int othersWoke = others.Count(o => !o.Dormant);
+            ExpectPerf(allDormant && perStep.Sum() == 10 + othersWoke && perStep.All(n => n <= perStepCap) && perStep.Count >= 3 && ids.All(o => !o.Dormant),
+                $"唤醒分帧：10 个据点同时符合唤醒条件（另有 {othersWoke} 个按种子生成的领地据点也在唤醒范围里，同一队列），每步至多 {perStepCap} 个（{string.Join("+", perStep)}），单个唤醒最长 {WorldOutpostSystem.MaxWakeMs:F4} ms ≤ {budget} ms（FG17 休眠唤醒行）" +
                 Why((allDormant, "机器出现前并非全部休眠"),
-                    (perStep.Sum() == 10 && ids.All(o => !o.Dormant),
+                    (perStep.Sum() == 10 + othersWoke && ids.All(o => !o.Dormant),
                         $"只唤醒 {perStep.Sum()} 个、仍休眠 {ids.Count(o => o.Dormant)} 个；机器实时位置 " +
                         (MachineRegistry.TryGetLivePosition(machineId, out Vector2 mp) ? $"({mp.x:F1},{mp.y:F1})" : "无") + $"（下令落点 ({p.X + 16},{p.Y + 4})）；" +
                         $"休眠判定 {WorldOutpostSystem.Evaluations - evalBefore} 次；排队 {s.Raids?.PendingWakeIds?.Length}；据点唤醒次数 {string.Join(",", ids.Select(o => o.WakeCount))}"),

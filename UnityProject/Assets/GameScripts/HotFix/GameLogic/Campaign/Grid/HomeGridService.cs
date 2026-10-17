@@ -272,6 +272,7 @@ namespace GameLogic.Campaign.Grid
             state.Grid.LayoutVersion = LayoutVersion;
             // FG3-GEN-01（FGR-GEN-030、034）：家园区的零散侦察巢登记成据点（v2 世界；幂等）。
             WorldGenService.SeedHomeZoneOutposts(state);
+            WorldGenService.SeedTerritoryOutposts(state); // FG8-GEN-02：阵营领地据点与零散前哨（v3 世界；幂等）
             // FG7-ENV-05：开局探索圆里的遗迹点 / 危害不在这里补登（此刻世界状态可能还没写完）——第一次揭开新区域前由 RevealArea 静默补登。
         }
 
@@ -702,6 +703,19 @@ namespace GameLogic.Campaign.Grid
                         break;
                     }
                 }
+                // FG8-GEN-02（卡片负向“室内入口被己方建筑堵住 → 入口保护范围内禁止建造，并说明原因”）：与上面同一套逐格校验，不另写判定。
+                for (int k = 0; k < EntranceGuards.Count; k++)
+                {
+                    EntranceGuard e = EntranceGuards[k];
+                    long ex = c.X - e.X;
+                    long ey = c.Y - e.Y;
+                    if (ex * ex + ey * ey <= (long)e.Radius * e.Radius)
+                    {
+                        r.Add(new GridReason(GridBlockReason.EntranceProtect, "grid.reason.entrance_protect", e.NameKey, e.Radius.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                        ok = false;
+                        break;
+                    }
+                }
                 r.CellOk.Add(ok);
             }
 
@@ -919,9 +933,72 @@ namespace GameLogic.Campaign.Grid
         }
 
         /// <param name="ignoreOwner">正在旋转 / 搬迁的建筑：它自己的出口不挡它自己（出口会跟着它走，新位置的出口另行校验）。</param>
+        /// <summary>FG8-GEN-02：室内入口的保护圈（入口格 + 半径 + 入口名文本键）。随障碍表一起收集：规划层没变时只是几次拷贝（入口只有一两个）。</summary>
+        private readonly struct EntranceGuard
+        {
+            public readonly int X;
+            public readonly int Y;
+            public readonly int Radius;
+            public readonly string NameKey;
+
+            public EntranceGuard(int x, int y, int radius, string nameKey)
+            {
+                X = x;
+                Y = y;
+                Radius = radius;
+                NameKey = nameKey;
+            }
+        }
+
+        private static readonly List<EntranceGuard> EntranceGuards = new List<EntranceGuard>(4);
+
+        /// <summary>FG8-GEN-02：这一格在不在某个室内入口的保护范围里（自检 / 悬停说明用；放置校验在逐格循环里同一判定）。返回入口的锚点。</summary>
+        public static WorldGen.PlannedAnchor EntranceGuardAt(CampaignState state, GridCell c)
+        {
+            WorldGen.WorldPlan plan = WorldGenService.PlanFor(state);
+            if (plan == null)
+            {
+                return null;
+            }
+            foreach (WorldGen.PlannedAnchor a in plan.Anchors)
+            {
+                if (!a.IsIndoorEntrance || a.ProtectRadius <= 0)
+                {
+                    continue;
+                }
+                Vector2 at = WorldGen.TerritoryAnchorChecks.EntryOf(state, a);
+                long ex = c.X - Mathf.RoundToInt(at.x);
+                long ey = c.Y - Mathf.RoundToInt(at.y);
+                if (ex * ex + ey * ey <= (long)a.ProtectRadius * a.ProtectRadius)
+                {
+                    return a;
+                }
+            }
+            return null;
+        }
+
+        private static void CollectEntranceGuards(CampaignState state)
+        {
+            EntranceGuards.Clear();
+            WorldGen.WorldPlan plan = WorldGenService.PlanFor(state);
+            if (plan == null)
+            {
+                return;
+            }
+            foreach (WorldGen.PlannedAnchor a in plan.Anchors)
+            {
+                if (a.IsIndoorEntrance && a.ProtectRadius > 0)
+                {
+                    Vector2 at = WorldGen.TerritoryAnchorChecks.EntryOf(state, a);
+                    EntranceGuards.Add(new EntranceGuard(Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y), a.ProtectRadius, a.Row.NameKey));
+                }
+            }
+        }
+
         private static void CollectObstacles(CampaignState state, string ignoreOwner, string ignoreOwner2)
         {
             Obstacles.Clear();
+            CollectEntranceGuards(state);
             RegionRecord region = null;
             if (state.RegionRecords != null)
             {

@@ -83,6 +83,10 @@ namespace GameLogic.Campaign.Feedback
         ExpeditionMarchArrived,
         ExpeditionMarchEncounter,
         ExpeditionMarchHazard,
+        // ── FG8-GEN-02（FG17 第 4 节、FGR-GEN-042）：远征队进入敌方领地、进出室内场地 ──
+        ExpeditionMarchTerritory,
+        InteriorEnter,
+        InteriorExit,
 
         Max,
     }

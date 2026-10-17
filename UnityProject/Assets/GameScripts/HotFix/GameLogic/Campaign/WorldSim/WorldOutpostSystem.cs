@@ -52,12 +52,35 @@ namespace GameLogic.Campaign.WorldSim
         public static double MaxWakeMs { get; private set; }
         public static int Evaluations { get; private set; }
 
+        // FG8-GEN-02（DEBT-FG0ARCH06-06）：醒着的据点列表与空间桶索引——每步只推进醒着的据点（休眠的不再被遍历），
+        // 地图 / 星球标记与休眠判定按桶粗筛。都是纯缓存：结果与逐个遍历完全相同（排序不影响：每个据点的推进互不依赖）。
+        private static OutpostRecord[] _awakeSource;
+        private static int _awakeStamp = -1;
+        private static int _stateStamp;
+        private static readonly List<OutpostRecord> AwakeList = new List<OutpostRecord>(32);
+        private static OutpostRecord[] _bucketSource;
+        private static readonly Dictionary<long, List<OutpostRecord>> Buckets = new Dictionary<long, List<OutpostRecord>>();
+        private static readonly HashSet<long> OwnBuckets = new HashSet<long>();
+        private static readonly Dictionary<long, List<Vector2>> OwnByBucket = new Dictionary<long, List<Vector2>>();
+        private static readonly List<List<Vector2>> OwnListPool = new List<List<Vector2>>(16);
+
+        /// <summary>自检读点：休眠判定里真正做了逐个距离比较的据点数（粗筛后）、最近一次每步推进的醒着据点数。</summary>
+        public static int LastExactChecks { get; private set; }
+        public static int LastSteppedOutposts { get; private set; }
+
+        public static int BucketCells => Math.Max(16, (int)Math.Round(Tuning("outpost.bucket_cells", 128f)));
+
         /// <summary>接到一个战役（新建 / 读档）时清零会话态。</summary>
         public static void ResetSession()
         {
             _lastSteppedTick = -1;
             ById.Clear();
             _indexed = null;
+            _awakeSource = null;
+            _awakeStamp = -1;
+            _stateStamp++;
+            _bucketSource = null;
+            Buckets.Clear();
             WakesProcessed = 0;
             SleepsApplied = 0;
             LastWakeMs = 0;
@@ -70,6 +93,39 @@ namespace GameLogic.Campaign.WorldSim
 
         public static IReadOnlyList<PatrolRecord> Patrols(CampaignState state) =>
             (IReadOnlyList<PatrolRecord>)state?.Raids?.Patrols ?? Array.Empty<PatrolRecord>();
+
+        private static PatrolRecord[] _patrolIndexSource;
+        private static readonly Dictionary<string, List<PatrolRecord>> PatrolIndex = new Dictionary<string, List<PatrolRecord>>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// FG8-GEN-02（DEBT-FG0ARCH06-08）：某个据点的巡逻（地图按视野里的据点找它们的巡逻，与巡逻总数无关）。索引跟着巡逻数组重建（数组只在增减巡逻时整体替换）。
+        /// </summary>
+        public static void PatrolsOf(CampaignState state, string outpostId, List<PatrolRecord> into)
+        {
+            PatrolRecord[] all = state?.Raids?.Patrols;
+            if (!ReferenceEquals(all, _patrolIndexSource))
+            {
+                _patrolIndexSource = all;
+                PatrolIndex.Clear();
+                for (int i = 0; all != null && i < all.Length; i++)
+                {
+                    PatrolRecord p = all[i];
+                    if (p == null || string.IsNullOrEmpty(p.OutpostId))
+                    {
+                        continue;
+                    }
+                    if (!PatrolIndex.TryGetValue(p.OutpostId, out List<PatrolRecord> list))
+                    {
+                        PatrolIndex[p.OutpostId] = list = new List<PatrolRecord>(1);
+                    }
+                    list.Add(p);
+                }
+            }
+            if (outpostId != null && PatrolIndex.TryGetValue(outpostId, out List<PatrolRecord> found))
+            {
+                into.AddRange(found);
+            }
+        }
 
         public static OutpostRecord Find(CampaignState state, string outpostId)
         {
@@ -163,6 +219,104 @@ namespace GameLogic.Campaign.WorldSim
             return o;
         }
 
+        /// <summary>
+        /// FG8-GEN-02（FGR-GEN-023、034、040；DEBT-FG0ARCH06-01）：把生成器分布的一个据点（阵营领地的主力据点 / 领地之间与外延区的零散前哨）登记成据点。
+        /// 据点 ID = 点位 ID（按分布格，确定，幂等：已登记的返回原记录）。驻军 = 等级 × 每级驻军，上限再 +2；带巡逻的派一支（折返点离据点 <paramref name="patrolRadius"/> 格）。
+        /// <b>“从第 0 步起一直在休眠”</b>：出生步 = 0、增援点落在 0 + k × 间隔、初始即休眠——无论在开局一次登记，还是外延区在被揭开时才按需登记，
+        /// 被唤醒时都按确定性规则从第 0 步补算，结果与“开局就登记、一直在模拟”逐字段一致（FGR-GEN-002 与访问顺序无关）。
+        /// </summary>
+        public static OutpostRecord SpawnGenerated(CampaignState state, WorldGen.WorldFeature f, int garrisonPerTier, int patrolRadius)
+        {
+            if (state == null || f == null || f.Kind != WorldGen.WorldFeatureKind.Outpost)
+            {
+                return null;
+            }
+            OutpostRecord existing = Find(state, f.Id);
+            if (existing != null)
+            {
+                return existing;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            RaidState raids = state.Raids;
+            OutpostRecord o = BuildGenerated(f, garrisonPerTier);
+            // 不占用 NextOutpostSerial（测试捷径 SpawnOutpost 的“outpost-N”编号与此前一致）。
+            var list = new List<OutpostRecord>(raids.Outposts ?? Array.Empty<OutpostRecord>()) { o };
+            raids.Outposts = list.ToArray();
+            _stateStamp++;
+            if (f.Patrol)
+            {
+                SpawnPatrol(state, o, patrolRadius);
+            }
+            return o;
+        }
+
+        /// <summary>同 <see cref="SpawnGenerated"/>，一次登记一批（外延区揭开一大片时只换一次数组；不派巡逻——零散前哨不巡逻）。已登记的跳过。返回登记了几个。</summary>
+        public static int SpawnGeneratedMany(CampaignState state, List<WorldGen.WorldFeature> features, int garrisonPerTier)
+        {
+            if (state == null || features == null || features.Count == 0)
+            {
+                return 0;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            RaidState raids = state.Raids;
+            List<OutpostRecord> list = null;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (WorldGen.WorldFeature f in features)
+            {
+                if (f == null || f.Kind != WorldGen.WorldFeatureKind.Outpost || Find(state, f.Id) != null || !seen.Add(f.Id))
+                {
+                    continue;
+                }
+                list ??= new List<OutpostRecord>(raids.Outposts ?? Array.Empty<OutpostRecord>());
+                list.Add(BuildGenerated(f, garrisonPerTier));
+            }
+            if (list == null)
+            {
+                return 0;
+            }
+            int added = list.Count - (raids.Outposts?.Length ?? 0);
+            raids.Outposts = list.ToArray();
+            _stateStamp++;
+            return added;
+        }
+
+        private static OutpostRecord BuildGenerated(WorldGen.WorldFeature f, int garrisonPerTier)
+        {
+            long interval = Math.Max(1L, (long)Math.Round(Tuning("outpost.reinforce_interval_days", 3f) * GameClock.DaySeconds * GameClock.StepHz));
+            int tier = Math.Max(1, f.Tier);
+            int per = Math.Max(1, garrisonPerTier);
+            return new OutpostRecord
+            {
+                OutpostId = f.Id,
+                TerritoryId = f.FactionId ?? string.Empty,
+                Kind = f.TerritoryId != null ? KindTerritory : f.Outer ? KindOuter : KindScatter,
+                Tier = tier,
+                CellX = f.X,
+                CellY = f.Y,
+                GarrisonCap = per * tier + 2,
+                Garrison = per * tier,
+                ReinforceIntervalTicks = interval,
+                NextReinforceTick = interval,
+                SimTick = 0,
+                Dormant = true,
+                DormantSinceTick = 0,
+                LastWakeReason = string.Empty,
+            };
+        }
+
+        /// <summary>据点种类（OutpostRecord.Kind）：家园区侦察巢 / 阵营领地的主力据点 / 领地之间的零散前哨 / 外延区前哨。领地控制度（FG8-EXP-03）只数 territory。</summary>
+        public const string KindScoutNest = "scout_nest";
+        public const string KindTerritory = "territory";
+        public const string KindScatter = "scatter";
+        public const string KindOuter = "outer";
+
+        /// <summary>
+        /// 按种子生成的据点（领地主力 / 零散前哨 / 外延区，FG8-GEN-02）：“从第 0 步起就在、一直休眠”。它们的巡逻路线按需请求——据点醒着才要路线，
+        /// 路线视为第 0 步就绪（进度按已模拟的步数补上），所以与何时第一次醒来、是否被观察都无关（FGR-BASE-021）；开局不必为几十支远处巡逻一起算路线、
+        /// 占住寻路工作线程（FG17 性能：200 个单位同时请求路线时主线程不等工作线程）。
+        /// </summary>
+        public static bool IsGenerated(OutpostRecord o) => o != null && (o.Kind == KindTerritory || o.Kind == KindScatter || o.Kind == KindOuter);
+
         /// <summary>在某个领地里（规划层按种子给出的领地中心）放一个据点（测试捷径；B25：位置来自种子，不是固定坐标）。</summary>
         public static OutpostRecord SpawnOutpostInTerritory(CampaignState state, string territoryId, bool withPatrol, long reinforceIntervalTicks = 0)
         {
@@ -174,14 +328,14 @@ namespace GameLogic.Campaign.WorldSim
             return SpawnOutpost(state, territoryId, new GridCell(t.CenterX, t.CenterY), withPatrol, reinforceIntervalTicks);
         }
 
-        private static PatrolRecord SpawnPatrol(CampaignState state, OutpostRecord o)
+        private static PatrolRecord SpawnPatrol(CampaignState state, OutpostRecord o, int radiusCells = 0)
         {
             RaidState raids = state.Raids;
             int serial = raids.NextPatrolSerial++;
             uint seed = unchecked((uint)(state.World?.WorldSeed ?? state.RandomSeed));
             uint h = WorldGenMath.Hash(seed, serial, o.CellX ^ o.CellY, 0x50415452u); // "PATR"
             double ang = (h & 0xFFFF) / 65536.0 * 2.0 * Math.PI;
-            double r = Math.Max(2.0, Tuning("outpost.patrol_radius_cells", 24f));
+            double r = Math.Max(2.0, radiusCells > 0 ? radiusCells : Tuning("outpost.patrol_radius_cells", 24f));
             var p = new PatrolRecord
             {
                 PatrolId = "patrol-" + serial,
@@ -225,11 +379,14 @@ namespace GameLogic.Campaign.WorldSim
             }
             // 2. 按距离唤醒的据点：每步至多 N 个（分帧进行）。
             ProcessWakeQueue(state, tick, WakesPerStep);
-            // 3. 活跃据点推进这一步。
+            // 3. 活跃据点推进这一步（FG8-GEN-02：只遍历醒着的据点列表，休眠的不再逐个跳过——DEBT-FG0ARCH06-06）。
             if (outposts != null)
             {
-                foreach (OutpostRecord o in outposts)
+                List<OutpostRecord> awake = AwakeOutposts(outposts);
+                LastSteppedOutposts = awake.Count;
+                for (int ai = 0; ai < awake.Count; ai++)
                 {
+                    OutpostRecord o = awake[ai];
                     if (o == null || o.Destroyed || (o.Dormant && !o.AlwaysSimulate))
                     {
                         continue;
@@ -267,7 +424,7 @@ namespace GameLogic.Campaign.WorldSim
                     {
                         continue; // FG6-DEF-04：据点被摧毁，巡逻停在原地（巡逻与己方交战、清剿在 FG8）。
                     }
-                    if (p.RouteState == RouteNeed)
+                    if (p.RouteState == RouteNeed && !(IsGenerated(o) && o.Dormant && !o.AlwaysSimulate))
                     {
                         RequestPatrolRoute(state, p, o);
                     }
@@ -336,16 +493,21 @@ namespace GameLogic.Campaign.WorldSim
                 return;
             }
             Evaluations++;
+            _stateStamp++; // 外部改过 AlwaysSimulate 的（自检）在下一步按新状态重建醒着列表
             CollectOwnPositions(state, OwnScratch);
             double wake = DormantDistance;
             double sleep = wake + WakeHysteresis;
+            // FG8-GEN-02（DEBT-FG0ARCH06-06）：己方实体按桶归类（O(己方实体)），每个据点只和离它 sleep 以内的桶比距离——
+            // 远处整片外延区的据点一次桶距离比较就判定“远”，不再逐个对全部己方实体开方。结果与逐个比较完全相同（桶外的实体一定更远）。
+            BucketOwn(OwnScratch);
+            int exact = 0;
             foreach (OutpostRecord o in outposts)
             {
                 if (o == null || o.AlwaysSimulate || o.Destroyed)
                 {
                     continue;
                 }
-                double d = MinDistance(o.CellX, o.CellY, OwnScratch, sleep);
+                double d = MinDistanceBucketed(o.CellX, o.CellY, sleep, ref exact);
                 if (!o.Dormant && d > sleep)
                 {
                     o.Dormant = true;
@@ -356,6 +518,144 @@ namespace GameLogic.Campaign.WorldSim
                 else if (o.Dormant && d <= wake)
                 {
                     EnqueueWake(state, o.OutpostId, WakeProximity);
+                }
+            }
+            LastExactChecks = exact;
+        }
+
+        private static void BucketOwn(List<Vector2> own)
+        {
+            foreach (List<Vector2> l in OwnByBucket.Values)
+            {
+                l.Clear();
+                OwnListPool.Add(l);
+            }
+            OwnByBucket.Clear();
+            OwnBuckets.Clear();
+            int b = BucketCells;
+            for (int i = 0; i < own.Count; i++)
+            {
+                long key = BucketKey((int)Math.Floor(own[i].x / b), (int)Math.Floor(own[i].y / b));
+                if (!OwnByBucket.TryGetValue(key, out List<Vector2> list))
+                {
+                    if (OwnListPool.Count > 0)
+                    {
+                        list = OwnListPool[OwnListPool.Count - 1];
+                        OwnListPool.RemoveAt(OwnListPool.Count - 1);
+                    }
+                    else
+                    {
+                        list = new List<Vector2>(8);
+                    }
+                    OwnByBucket[key] = list;
+                    OwnBuckets.Add(key);
+                }
+                list.Add(own[i]);
+            }
+        }
+
+        /// <summary>离最近己方实体的距离；只有离据点 <paramref name="cutoff"/> 以内的桶参与逐个比较，超出返回 double.MaxValue（与逐个比较的判定一致）。</summary>
+        private static double MinDistanceBucketed(int x, int y, double cutoff, ref int exact)
+        {
+            int b = BucketCells;
+            double best = double.MaxValue;
+            foreach (KeyValuePair<long, List<Vector2>> kv in OwnByBucket)
+            {
+                int bx = (int)(kv.Key >> 32);
+                int by = (int)(kv.Key & 0xFFFFFFFFL);
+                double minX = (double)bx * b;
+                double minY = (double)by * b;
+                double ddx = x < minX ? minX - x : x > minX + b ? x - (minX + b) : 0.0;
+                double ddy = y < minY ? minY - y : y > minY + b ? y - (minY + b) : 0.0;
+                if (ddx * ddx + ddy * ddy > cutoff * cutoff)
+                {
+                    continue;
+                }
+                exact++;
+                double d = MinDistance(x, y, kv.Value, cutoff);
+                if (d < best)
+                {
+                    best = d;
+                }
+            }
+            return best;
+        }
+
+        private static long BucketKey(int bx, int by) => ((long)bx << 32) | (uint)by;
+
+        /// <summary>醒着（或常驻模拟）、没被摧毁的据点（数组换了或状态变了才重建；顺序 = 数组顺序）。</summary>
+        private static List<OutpostRecord> AwakeOutposts(OutpostRecord[] all)
+        {
+            if (!ReferenceEquals(all, _awakeSource) || _awakeStamp != _stateStamp)
+            {
+                AwakeList.Clear();
+                foreach (OutpostRecord o in all)
+                {
+                    if (o != null && !o.Destroyed && (!o.Dormant || o.AlwaysSimulate))
+                    {
+                        AwakeList.Add(o);
+                    }
+                }
+                _awakeSource = all;
+                _awakeStamp = _stateStamp;
+            }
+            return AwakeList;
+        }
+
+        /// <summary>
+        /// FG8-GEN-02（DEBT-FG0ARCH06-06“表现层每帧对全部巡逻先算位置再剔除”）：离 (<paramref name="x"/>, <paramref name="y"/>) 切比雪夫距离 <paramref name="radius"/> 以内的据点
+        /// （按空间桶查，O(覆盖的桶 + 结果数)，与据点总数无关；据点位置不变，桶只在据点数组换了时重建）。追加到 <paramref name="into"/>。
+        /// </summary>
+        public static void OutpostsNear(CampaignState state, float x, float y, float radius, List<OutpostRecord> into)
+        {
+            OutpostRecord[] all = state?.Raids?.Outposts;
+            if (all == null || all.Length == 0)
+            {
+                return;
+            }
+            int b = BucketCells;
+            if (!ReferenceEquals(all, _bucketSource))
+            {
+                foreach (List<OutpostRecord> l in Buckets.Values)
+                {
+                    l.Clear();
+                }
+                Buckets.Clear();
+                foreach (OutpostRecord o in all)
+                {
+                    if (o == null)
+                    {
+                        continue;
+                    }
+                    long key = BucketKey((int)Math.Floor((double)o.CellX / b), (int)Math.Floor((double)o.CellY / b));
+                    if (!Buckets.TryGetValue(key, out List<OutpostRecord> list))
+                    {
+                        list = new List<OutpostRecord>(4);
+                        Buckets[key] = list;
+                    }
+                    list.Add(o);
+                }
+                _bucketSource = all;
+            }
+            int bx0 = (int)Math.Floor((x - radius) / b);
+            int by0 = (int)Math.Floor((y - radius) / b);
+            int bx1 = (int)Math.Floor((x + radius) / b);
+            int by1 = (int)Math.Floor((y + radius) / b);
+            for (int by = by0; by <= by1; by++)
+            {
+                for (int bx = bx0; bx <= bx1; bx++)
+                {
+                    if (!Buckets.TryGetValue(BucketKey(bx, by), out List<OutpostRecord> list))
+                    {
+                        continue;
+                    }
+                    foreach (OutpostRecord o in list)
+                    {
+                        if (Math.Abs(o.CellX - x) <= radius && Math.Abs(o.CellY - y) <= radius)
+                        {
+                            into.Add(o);
+                        }
+                    }
                 }
             }
         }
@@ -463,6 +763,7 @@ namespace GameLogic.Campaign.WorldSim
             Watch.Restart();
             CatchUp(state, o, target);
             o.Dormant = false;
+            _stateStamp++;
             o.WakeCount++;
             o.LastWakeTick = target;
             o.LastWakeReason = reason ?? string.Empty;
@@ -492,6 +793,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             DequeueWake(state, outpostId);
             o.Destroyed = true;
+            _stateStamp++;
             o.DestroyedTick = GameClock.Ticks;
             o.Garrison = 0;
             Defense.RaidDirectorService.OnOutpostDestroyed(state, o);
@@ -562,6 +864,12 @@ namespace GameLogic.Campaign.WorldSim
                 p.ProgressMilli = 0;
                 p.RouteState = p.LoopMilli > 0 ? RouteReady : RouteFailed;
                 p.RouteReadyTick = tick;
+                if (IsGenerated(o) && p.LoopMilli > 0)
+                {
+                    // 按需路线（见 IsGenerated）：视为第 0 步就绪；进度 = 速度 × 据点已模拟到的步数（醒着 = 到这一步为止，休眠 = 到休眠那一刻，之后由补算接上）。
+                    p.RouteReadyTick = 0;
+                    p.ProgressMilli = (long)(((decimal)p.SpeedMilliPerTick * Math.Max(0L, o.SimTick)) % p.LoopMilli);
+                }
                 p.NavReason = r.Status == NavStatus.Partial ? (int)r.Reason : 0;
             }
             else

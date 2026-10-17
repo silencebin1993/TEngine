@@ -113,6 +113,12 @@ namespace BinGames.Sim.WorldGen
         public const int Belt = 2;
         /// <summary>起始区保证点（圆盘）：强制为 Code 地形（FGR-GEN-031 局部重生成）。</summary>
         public const int Stamp = 3;
+        /// <summary>FG8-GEN-02（生成器 v3）领地地貌风格（圆盘，半径 = Radius）：Code 地形的噪声阈值在圆心下降 ValueQ、到圆周线性降到 0
+        /// （“越往领地中心，地貌越接近该阵营的风格”，FGR-GEN-021）。v1 / v2 世界没有这种形状。</summary>
+        public const int Style = 4;
+        /// <summary>FG8-GEN-02（生成器 v3）手工锚点的平整范围（圆盘，半径 = Radius）：里面强制为 Code 地形（悬崖 / 水面 / 河道都让开，FG17 第 5 节
+        /// “锚点与悬崖、水域冲突 → 平整地形”）；外面 HazardWidth 格的过渡带里悬崖与水面的出现概率从 0 渐变回正常（FGR-GEN-024“边缘与周围地形平滑过渡”）。</summary>
+        public const int Flatten = 5;
     }
 
     /// <summary>强制为可建空地的矩形（起始区保护），闭区间。</summary>
@@ -254,6 +260,12 @@ namespace BinGames.Sim.WorldGen
             bool river = false;
             bool ford = false;
             int stampCode = -1;
+            // FG8-GEN-02（v3）：领地地貌风格与锚点平整范围。没有这两种形状时（v1 / v2）下面这些量保持原值，采样结果逐位不变。
+            int cliffT = p.CliffT;
+            int waterT = p.WaterT;
+            int ruinT = oreT;
+            int flattenCode = -1;
+            int blendF = One; // 过渡带里离平整范围最近的相对位置（0 = 紧挨平整范围，One = 过渡带外缘 / 不在任何过渡带里）
             for (int i = 0; i < zoneCount; i++)
             {
                 WorldGenZone z = zones[i];
@@ -268,6 +280,65 @@ namespace BinGames.Sim.WorldGen
                     if (sx * sx + sy * sy <= (long)z.Radius * z.Radius)
                     {
                         stampCode = z.Code;
+                    }
+                    continue;
+                }
+                if (z.Kind == WorldGenZoneKind.Style)
+                {
+                    long sx = x - z.CenterX;
+                    long sy = y - z.CenterY;
+                    long d2s = sx * sx + sy * sy;
+                    long rr = z.Radius;
+                    if (rr > 0 && d2s < rr * rr)
+                    {
+                        int ds = Isqrt(d2s);
+                        int bonus = (int)((long)z.ValueQ * (rr - ds) / rr);
+                        if (z.Code == p.CodeCliff)
+                        {
+                            cliffT = math.max(One / 2, cliffT - bonus);
+                        }
+                        else if (z.Code == p.CodeWater)
+                        {
+                            waterT = math.max(One / 2, waterT - bonus);
+                        }
+                        else if (z.Code == p.CodeOreMetal)
+                        {
+                            metalT = math.max(One / 2, metalT - bonus);
+                        }
+                        else if (z.Code == p.CodeOreRare)
+                        {
+                            rareBeltT = math.max(One / 2, rareBeltT - bonus);
+                        }
+                        else if (z.Code == p.CodeRuin)
+                        {
+                            ruinT = math.max(One / 2, ruinT - bonus);
+                        }
+                        else if (z.Code == p.CodeOil)
+                        {
+                            oilT = math.max(One / 2, oilT - bonus);
+                        }
+                    }
+                    continue;
+                }
+                if (z.Kind == WorldGenZoneKind.Flatten)
+                {
+                    long sx = x - z.CenterX;
+                    long sy = y - z.CenterY;
+                    long d2f = sx * sx + sy * sy;
+                    long rf = z.Radius;
+                    if (d2f <= rf * rf)
+                    {
+                        flattenCode = z.Code;
+                    }
+                    else if (z.HazardWidth > 0)
+                    {
+                        long outer = rf + z.HazardWidth;
+                        if (d2f <= outer * outer)
+                        {
+                            int df = Isqrt(d2f);
+                            int f = (int)(((long)(df - rf) << 16) / z.HazardWidth);
+                            blendF = math.min(blendF, math.clamp(f, 0, One));
+                        }
                     }
                     continue;
                 }
@@ -298,12 +369,18 @@ namespace BinGames.Sim.WorldGen
                 }
             }
             bool flat = p.FlatRadius > 0 && dist <= p.FlatRadius;
+            if (blendF < One)
+            {
+                // 平整范围外的过渡带：悬崖与水面的阈值从“完全没有”（紧挨平整范围）线性回到正常（过渡带外缘）。
+                cliffT += (int)(((long)(One - cliffT) * (One - blendF)) >> 16);
+                waterT += (int)(((long)(One - waterT) * (One - blendF)) >> 16);
+            }
 
-            if (!flat && Noise(seed, x, y, 1u, p.ScaleCliffQ) > p.CliffT)
+            if (!flat && Noise(seed, x, y, 1u, p.ScaleCliffQ) > cliffT)
             {
                 terrain = p.CodeCliff;
             }
-            else if (Noise(seed, x, y, 2u, p.ScaleCliffQ) > p.WaterT)
+            else if (Noise(seed, x, y, 2u, p.ScaleCliffQ) > waterT)
             {
                 terrain = p.CodeWater;
             }
@@ -315,7 +392,7 @@ namespace BinGames.Sim.WorldGen
             {
                 terrain = p.CodeOreRare;
             }
-            else if (Noise(seed, x, y, 5u, p.ScaleRuinQ) > oreT)
+            else if (Noise(seed, x, y, 5u, p.ScaleRuinQ) > ruinT)
             {
                 terrain = p.CodeRuin;
             }
@@ -326,11 +403,16 @@ namespace BinGames.Sim.WorldGen
             if (river)
             {
                 // 河道是水面；浅滩是可走可建的河床（保证领地之间可达，FGT-GEN-004）。浅滩也清掉河道里的悬崖。
-                terrain = ford ? p.CodeBuildable : p.CodeWater;
+                // FG8-GEN-02：锚点过渡带的内半圈里河道也是浅滩（平整范围不被河道截断）。
+                terrain = ford || blendF < One / 2 ? p.CodeBuildable : p.CodeWater;
             }
             if (stampCode >= 0)
             {
                 terrain = (byte)stampCode; // 起始区保证点（FGR-GEN-031 局部重生成）：只覆盖这一项的圆盘。
+            }
+            if (flattenCode >= 0)
+            {
+                terrain = (byte)flattenCode; // FG8-GEN-02：锚点平整范围（悬崖、水面、河道、矿脉一律让开）。
             }
 
             // 污染：局部浓淡（噪声）+ 离核心越远越高 + 阵营领地内部加重 + 外圈危害带（FGR-GEN-030、021）。

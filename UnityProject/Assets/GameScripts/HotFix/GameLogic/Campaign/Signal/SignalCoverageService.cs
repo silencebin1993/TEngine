@@ -130,6 +130,10 @@ namespace GameLogic.Campaign.Signal
             public readonly List<float3> LastBfsCircles = new List<float3>(8);
             public readonly List<byte> LastBfsKinds = new List<byte>(8);
             public ulong Signature;
+            /// <summary>FG8-GEN-02（DEBT-FG8EXP02-02）：上次连通计算时根是否接得上（远征地点按锚点判定时可能接不上）；变了不能沿用缓存。</summary>
+            public int LastRoots = -1;
+            /// <summary>本次的根数：家园恒 1；远征地点 1 = 根（接入点）连着核心，0 = 断开（锚点不在核心连通的覆盖里）。</summary>
+            public int Roots = 1;
 
             public Net(string siteId)
             {
@@ -214,6 +218,39 @@ namespace GameLogic.Campaign.Signal
         public static float EdgeWarnCells => Tuning("signal.coverage.edge_warn_cells", 15f);
         public static float RefreshSeconds => Tuning("signal.coverage.refresh_seconds", 0.5f);
 
+        /// <summary>
+        /// FG8-GEN-02（DEBT-FG8EXP02-02；FGR-EXP-011 / FGR-SIG-053）：远征地点内部覆盖的根规则——signal.coverage.site_root_mode：
+        /// 1（默认，沿用 FG1-SIG-07）= 远征接入点视为由派遣连回核心，恒连通；2 = 接入点（地点入口）在星球上的锚点必须落在与核心连通的覆盖里，否则整个地点断开
+        /// （地点里的机器收不到命令、不能接入，只执行最后的命令；回到覆盖后自动恢复）。切到 2 要不要做、什么时候做是玩法节奏取舍（前中期远征要先铺中继），待用户定。
+        /// </summary>
+        public static int SiteRootMode => SiteRootModeOverrideForTests ?? Math.Max(1, (int)Math.Round(Tuning("signal.coverage.site_root_mode", 1f)));
+
+        /// <summary>自检注入：覆盖根模式（null = 读调参）。</summary>
+        public static int? SiteRootModeOverrideForTests;
+
+        /// <summary>远征地点的根此刻接不接得上（模式 1 恒为 true；模式 2 看锚点在不在家园网络的已连通覆盖圆里；锚点还没定时按接不上算）。</summary>
+        public static bool SiteRootConnected(CampaignState state, string siteId)
+        {
+            if (SiteRootMode < 2 || siteId == HomeValleyLayout.RegionId)
+            {
+                return true;
+            }
+            if (!Regions.ExpeditionSiteAnchors.TryGet(state, siteId, out Vector2 anchor))
+            {
+                return false;
+            }
+            foreach (float3 c in HomeNet.ConnectedCircles)
+            {
+                float dx = anchor.x - c.x;
+                float dy = anchor.y - c.y;
+                if (dx * dx + dy * dy <= c.z * c.z)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>这个地点有没有覆盖边界：家园所在的星球表面与两个远征地点都有；不认识的地点（自检里的临时地点）没有。</summary>
         public static bool IsBoundedSite(string regionId) => NetFor(regionId) != null;
 
@@ -290,7 +327,14 @@ namespace GameLogic.Campaign.Signal
             }
             if (!any)
             {
-                return SignalCoverageSample.Unbounded; // 根永远是第 0 个且连通，走不到这里；防御：不让整个地点变成“覆盖外”。
+                if (net.Roots == 0 && sources.Count > 0)
+                {
+                    // FG8-GEN-02（DEBT-FG8EXP02-02，模式 2）：远征地点的根（入口锚点）不在与核心连通的覆盖里——整个地点都在覆盖之外。
+                    Source root = sources[0];
+                    float m = Mathf.Min(-1f, root.Radius - Vector2.Distance(position, root.Center) - root.Radius);
+                    return new SignalCoverageSample(false, true, m, root.Center, root.Radius, root.Kind);
+                }
+                return SignalCoverageSample.Unbounded; // 根连通时它永远是第 0 个且连通，走不到这里；防御：不让整个地点变成“覆盖外”。
             }
             return new SignalCoverageSample(bestMargin >= 0f, true, bestMargin, best.Center, best.Radius, best.Kind);
         }
@@ -606,6 +650,8 @@ namespace GameLogic.Campaign.Signal
             {
                 net.Sources.Clear();
                 CollectSources(state, buildings, net);
+                // FG8-GEN-02（DEBT-FG8EXP02-02）：远征地点内部的根接不接得上（家园网络先算，这里读它的连通结果）。
+                net.Roots = net == HomeNet ? 1 : SiteRootConnected(state, net.SiteId) ? 1 : 0;
                 changed |= Connect(net);
             }
             if (changed)
@@ -721,7 +767,7 @@ namespace GameLogic.Campaign.Signal
                 Source s = net.Sources[i];
                 net.Circles.Add(new float3(s.Center.x, s.Center.y, s.Radius));
             }
-            bool reuse = n == net.LastBfsCircles.Count;
+            bool reuse = n == net.LastBfsCircles.Count && net.LastRoots == net.Roots;
             for (int i = 0; reuse && i < n; i++)
             {
                 float3 a = net.Circles[i];
@@ -741,7 +787,20 @@ namespace GameLogic.Campaign.Signal
                     net.ConnectedBuf = new byte[Math.Max(n, net.ConnectedBuf.Length * 2)];
                     net.ParentBuf = new int[net.ConnectedBuf.Length];
                 }
-                SignalNetKernel.Connect(net.Circles, 1, net.ConnectedBuf, net.ParentBuf);
+                if (net.Roots > 0)
+                {
+                    SignalNetKernel.Connect(net.Circles, 1, net.ConnectedBuf, net.ParentBuf);
+                }
+                else
+                {
+                    // 根断开：整个地点的覆盖都不连通（中继模块也接不上——它们要立在已连通的覆盖里）。
+                    for (int i = 0; i < n; i++)
+                    {
+                        net.ConnectedBuf[i] = 0;
+                        net.ParentBuf[i] = -1;
+                    }
+                }
+                net.LastRoots = net.Roots;
                 BfsCount++;
                 net.LastBfsCircles.Clear();
                 net.LastBfsCircles.AddRange(net.Circles);

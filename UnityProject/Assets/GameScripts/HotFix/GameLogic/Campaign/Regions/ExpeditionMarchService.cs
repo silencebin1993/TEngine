@@ -81,6 +81,8 @@ namespace GameLogic.Campaign.Regions
         public static int CommandRejectCount { get; private set; }
         public static int EncounterCueCount { get; private set; }
         public static int HazardCueCount { get; private set; }
+        /// <summary>FG8-GEN-02：“进入敌方领地”提醒次数（自检读）。</summary>
+        public static int TerritoryCueCount { get; private set; }
         public static int EdgeCueCount { get; private set; }
         public static int CoverageCueCount { get; private set; }
         public static int HaltCueCount { get; private set; }
@@ -851,6 +853,19 @@ namespace GameLogic.Campaign.Regions
                     GameText.Format("exp.cue.hazard_detail", GameText.Get(belt.HazardKey)));
             }
             m.HazardZoneId = zone;
+            // FG8-GEN-02（DEBT-FG8EXP02-05；FG08 第 7 节 / FG17 第 4 节）：队伍中心进入阵营领地时提醒一次“进入 ××”（领地名 + 介绍），离开后复位；只提示、不改命令（FGR-BASE-020）。存档去重。
+            PlannedTerritory inside = WorldGenQuery.TerritoryAt(s, Mathf.FloorToInt(center.x), Mathf.FloorToInt(center.y));
+            string territory = inside != null && inside.IsFaction ? inside.Id : string.Empty;
+            m.TerritoryId ??= string.Empty;
+            if (territory.Length > 0 && territory != m.TerritoryId)
+            {
+                TerritoryCueCount++;
+                GameConfig.fg.TerritoryTemplate tpl = WorldGenQuery.Plan(s)?.TemplateFor(territory);
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ExpeditionMarchTerritory, center,
+                    GameText.Format("exp.cue.territory_detail", GameText.Get(inside.NameKey), tpl != null ? GameText.Get(tpl.IntroKey) : string.Empty));
+                GuidanceHooks.Raise(GuidanceHooks.WorldFirstTerritoryEntered);
+            }
+            m.TerritoryId = territory;
 
             float r2 = EncounterRadius * EncounterRadius;
             IReadOnlyList<OutpostRecord> outposts = WorldOutpostSystem.Outposts(s);

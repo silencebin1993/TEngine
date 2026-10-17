@@ -492,6 +492,18 @@ namespace GameLogic.Core
         /// <summary>FG7-ENV-05（FGR-ENV-050）：第一次因迷雾不能建造。</summary>
         public const string EnvFirstFogBlocked = "env.first_fog_blocked";
 
+        /// <summary>FG8-GEN-02（FG17 第 4 节）：第一次进入阵营领地（名称提示出现）。</summary>
+        public const string WorldFirstTerritoryEntered = "world.first_territory_entered";
+
+        /// <summary>FG8-GEN-02（FGR-GEN-042）：第一次进入室内场地。</summary>
+        public const string WorldFirstInteriorEntered = "world.first_interior_entered";
+
+        /// <summary>FG8-GEN-02（FGR-GEN-023）：第一次发现资源缓存 / 旧终端。</summary>
+        public const string WorldFirstPoiFound = "world.first_poi_found";
+
+        /// <summary>FG8-GEN-02（卡片负向“室内入口被堵”）：第一次在室内入口保护范围里建造被拒。</summary>
+        public const string WorldFirstEntranceBlocked = "world.first_entrance_blocked";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -552,6 +564,7 @@ namespace GameLogic.Core
             EnvFirstWeatherWarning, EnvFirstWeather, EnvFirstRoof, EnvFirstPipeFrozen,
             EnvFirstPollutionSeen, EnvFirstPurifier, EnvFirstPurified, EnvFirstReturnMilestone, EnvFirstRepollution,
             EnvFirstRelicFound, EnvFirstRelicRecovered, EnvFirstHazardSeen, EnvFirstFogBlocked,
+            WorldFirstTerritoryEntered, WorldFirstInteriorEntered, WorldFirstPoiFound, WorldFirstEntranceBlocked,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

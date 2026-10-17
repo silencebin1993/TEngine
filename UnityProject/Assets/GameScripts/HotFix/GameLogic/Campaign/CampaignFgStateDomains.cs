@@ -34,6 +34,31 @@ namespace GameLogic.Campaign
         /// <summary>FG3-GEN-01（FG17 第 4、6 节）：玩家在战略地图上加的标记与备注。唯一写入口 <c>WorldGen.WorldMapMarkers</c>。</summary>
         public MapMarkerRecord[] MapMarkers = Array.Empty<MapMarkerRecord>();
         public int NextMapMarkerSerial = 1;
+        /// <summary>FG8-GEN-02：外延区以内的阵营领地主力据点与领地之间的零散前哨已经登记成据点（新战役一次，幂等；外延区的按揭开范围按需登记）。</summary>
+        public bool TerritoryOutpostsSeeded;
+        /// <summary>FG8-GEN-02（FGR-GEN-090）：手工锚点从家园出发的可达性校验结果（开局用层级寻路校验一次，之后只读；规划层本身不存档）。
+        /// 唯一写入口 <c>WorldGen.TerritoryAnchorChecks</c>。</summary>
+        public AnchorCheckRecord[] AnchorChecks = Array.Empty<AnchorCheckRecord>();
+        /// <summary>FG8-GEN-02：存档时镜头正看着的室内场地（表面 ID；不在室内为空串）。只决定读档后镜头放在哪里，不影响模拟。</summary>
+        public string InteriorFocusId = string.Empty;
+    }
+
+    /// <summary>FG8-GEN-02：一个手工锚点的可达性校验结果。</summary>
+    [Serializable]
+    public sealed class AnchorCheckRecord
+    {
+        public string AnchorId = string.Empty;
+        /// <summary>0 = 待校验；1 = 可达（入口就在规划的位置）；2 = 原定入口走不到，已挪到平整范围里最近的可达点；3 = 从核心出发一条路线都没有（写日志，入口照规划位置显示并说明）。</summary>
+        public int State;
+        /// <summary>校验后实际使用的入口（格）。</summary>
+        public int X;
+        public int Y;
+        /// <summary>从核心到入口的路线长度（格）。</summary>
+        public float RouteLength;
+        /// <summary>发过几次寻路请求（含没交回结果的重发）与最近一次的请求序号。</summary>
+        public int Attempts;
+        public int Serial;
+        public string Note = string.Empty;
     }
 
     /// <summary>FG3-GEN-01：战略地图上的一个玩家标记（表面 + 格网坐标 + 备注）。</summary>
@@ -191,6 +216,8 @@ namespace GameLogic.Campaign
         public long ArrivalRetryTick;
         /// <summary>当前所在危害带的领地 ID（没有 = 空串；进入时提醒一次，离开后复位）。</summary>
         public string HazardZoneId = string.Empty;
+        /// <summary>FG8-GEN-02：队伍中心当前所在的阵营领地 ID（不在领地里 = 空串；进入时提醒一次“进入 ××”，离开后复位）。</summary>
+        public string TerritoryId = string.Empty;
         /// <summary>途中已提醒过的敌方据点 / 巡逻 ID（每个只提醒一次，读档后不重复）。</summary>
         public string[] EncounteredIds = Array.Empty<string>();
     }
@@ -254,6 +281,12 @@ namespace GameLogic.Campaign
         public long TechData;
         /// <summary>揭开过的危害（fg.TbHazard.id）：第一次揭开发通知；更后幕的领地揭开后在地图上显示。</summary>
         public string[] HazardsSeen = Array.Empty<string>();
+        /// <summary>FG8-GEN-02：发现过的资源缓存 / 旧终端（点位 ID cache:… / term:…，揭开先后）；打开 / 读取过的（完工先后）。与遗迹点分开记，遗迹统计不变。</summary>
+        public string[] PoisFound = Array.Empty<string>();
+        public string[] PoisDone = Array.Empty<string>();
+        /// <summary>FG8-GEN-02 统计：打开缓存累计得到的废料、读取终端累计得到的技术数据。</summary>
+        public long CacheScrap;
+        public long TerminalTechData;
     }
 
     /// <summary>
@@ -2165,6 +2198,8 @@ namespace GameLogic.Campaign
             s.World ??= new WorldGenState();
             s.World.ChunkDiffs ??= Array.Empty<ChunkDiffRecord>();
             s.World.MapMarkers ??= Array.Empty<MapMarkerRecord>();
+            s.World.AnchorChecks ??= Array.Empty<AnchorCheckRecord>(); // FG8-GEN-02：旧存档没有这一项
+            s.World.InteriorFocusId ??= string.Empty;
             s.Progress ??= new CampaignProgressState();
             s.Clock ??= new GameClockState();
             s.Grid ??= new GridState();
@@ -2176,6 +2211,8 @@ namespace GameLogic.Campaign
             s.Grid.Exploration.RelicsRecovered ??= Array.Empty<string>();
             s.Grid.Exploration.RelicsRecoveredTicks ??= Array.Empty<long>();
             s.Grid.Exploration.HazardsSeen ??= Array.Empty<string>();
+            s.Grid.Exploration.PoisFound ??= Array.Empty<string>(); // FG8-GEN-02：旧档没有缓存 / 终端
+            s.Grid.Exploration.PoisDone ??= Array.Empty<string>();
             // FG8-EXP-01：旧档没有远征队字段 = 空队（默认名、颜色 0、空名单）。
             s.Grid.ExpeditionTeam ??= new ExpeditionTeamState();
             s.Grid.ExpeditionTeam.Name ??= string.Empty;

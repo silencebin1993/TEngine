@@ -130,6 +130,14 @@ namespace GameLogic.Campaign.Regions
             uint h = WorldGenMath.Hash(seed, KeyOf(siteId), attempt, AnchorSalt);
             PlannedTerritory t = WorldGenQuery.Plan(s)?.Find(TerritoryIdOf(siteId));
             territoryId = t?.Id ?? string.Empty;
+            // FG8-GEN-02：生成器 v3 起 Demo 两张手工地图的关键部分是规划层的锚点模板（平整过的地面、入口朝向家园）——第 0 次试探就是模板的入口，
+            // 远征队行军的目的地与星球上嵌入的模板是同一个点（卡片“以这两个锚点为入口位置，不另算一套”）。入口走不到时照旧换下一个候选 / 挪到最近可达点。
+            PlannedAnchor planned = attempt == 0 ? WorldGen.TerritoryAnchorChecks.AnchorOfSite(s, siteId) : null;
+            if (planned != null)
+            {
+                territoryId = planned.Territory?.Id ?? territoryId;
+                return new GridCell(planned.EntryX, planned.EntryY);
+            }
             if (t != null)
             {
                 int toCore = WorldPlan.RadialAngle(core.X - t.CenterX, core.Y - t.CenterY);

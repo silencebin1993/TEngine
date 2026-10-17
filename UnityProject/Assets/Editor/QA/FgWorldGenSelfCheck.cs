@@ -692,7 +692,8 @@ namespace GameLogic.EditorTools
             HomeGridService.Invalidate();
             LoadResult loaded = CampaignSaveService.Load(1);
             string fp2 = loaded.Success ? WorldGenService.PlanFor(loaded.State).Fingerprint() : "读档失败";
-            Expect(saved.Success && loaded.Success && fp2 == fp && !json.Contains("clarity") && !json.Contains("overclock") && !json.Contains("white_tide"),
+            // FG8-GEN-02（生成器 v3）起领地据点记所属阵营 ID（运行时状态，要进存档），所以改查规划层自己的字段名：领地圆的外圈 / 危害带宽 / 方位角都不在文件里。
+            Expect(saved.Success && loaded.Success && fp2 == fp && !json.Contains("OuterRadius") && !json.Contains("HazardWidth") && !json.Contains("AngleDeg") && !json.Contains("white_tide"),
                 "规划层不进存档（文件里没有领地坐标），读档后按种子重算，与存档前逐项相同");
             PlannedTerritory clarity = plan.Find("clarity");
             PlannedTerritory silent = plan.Find("silent");
@@ -1843,6 +1844,15 @@ namespace GameLogic.EditorTools
             buf.WriteInt(P("riverOutwardMaxAngle", v.RiverOutwardMaxAngle));
             buf.WriteInt(P("riverWidenTotal", v.RiverWidenTotal));
             buf.WriteInt(P("relicCoreExclusion", v.RelicCoreExclusion));
+            // FG8-GEN-02 新增列（顺序 = 表列顺序；v1 / v2 行是 none / 0）。
+            buf.WriteString(P("templateSet", v.TemplateSet));
+            buf.WriteString(P("anchorSet", v.AnchorSet));
+            buf.WriteFloat(P("scatterOutpostChance", v.ScatterOutpostChance));
+            buf.WriteInt(P("scatterTierDistance", v.ScatterTierDistance));
+            buf.WriteInt(P("outpostMaxTier", v.OutpostMaxTier));
+            buf.WriteInt(P("outerZoneDistance", v.OuterZoneDistance));
+            buf.WriteFloat(P("outerOutpostChance", v.OuterOutpostChance));
+            buf.WriteFloat(P("outerCacheChance", v.OuterCacheChance));
             buf.WriteString(P("note", v.Note));
         }
 

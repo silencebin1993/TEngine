@@ -540,13 +540,36 @@ namespace GameLogic.EditorTools
             // D2：预警发出（倒计时、方向、目标，定位到预计抵达点）→ 出发 → 沿排定路线行进 → 到达时刻 = 计划抵达。
             int warn0 = NotifyCount("raid_warning");
             bool skipped = SkipIdle(s, p.WarnTick - 2);
-            bool warned = skipped && RunUntil(() => p.State >= RaidDirectorService.StateWarned, 10) && NotifyCount("raid_warning") == warn0 + 1
+            // FG8-GEN-02 起出发地常是按种子生成、一直休眠的领地据点：休眠据点的驻军字段停在休眠那一刻，出发时先按规则补算再抽兵（FG17 休眠唤醒）。
+            // 所以“出发前的驻军”逐步取出发前一步的只读补算值（与唤醒补算同一规则），而不是休眠时的旧字段；集结 0 步时预警与出发相邻，也要逐步取。
+            int garrison0 = 0;
+            void PeekOrigin()
+            {
+                if (p.OriginKind == RaidDirectorService.OriginOutpost && p.State < RaidDirectorService.StateDeparted)
+                {
+                    WorldOutpostSystem.Peek(s, WorldOutpostSystem.Find(s, p.OriginId), out garrison0, out _);
+                }
+            }
+            for (int i = 0; skipped && i < 10 * GameClock.StepHz && p.State < RaidDirectorService.StateWarned; i++)
+            {
+                PeekOrigin();
+                WorldSimulation.StepMany(1);
+            }
+            bool warned = skipped && p.State >= RaidDirectorService.StateWarned && NotifyCount("raid_warning") == warn0 + 1
                           && GameSettings.HasSeenGuidanceHook(GuidanceHooks.RaidFirstWarning)
                           && LastNotify("raid_warning").Contains(RaidDirectorService.DirectionText(p));
             NotificationEntry wn = NotificationCenter.History.Where(e => e.Type?.Id == "raid_warning").OrderByDescending(e => e.Id).FirstOrDefault();
             bool located = wn?.Latest != null && wn.Latest.HasLocation && Vector2.Distance(new Vector2(wn.Latest.Location.x, wn.Latest.Location.z), new Vector2(p.ArriveX, p.ArriveY)) < 1f;
-            int garrison0 = p.OriginKind == RaidDirectorService.OriginOutpost ? WorldOutpostSystem.Find(s, p.OriginId).Garrison : 0;
-            bool departed = RunUntil(() => p.State >= RaidDirectorService.StateDeparted, 300);
+            if (p.State < RaidDirectorService.StateDeparted)
+            {
+                RunUntil(() => GameClock.Ticks >= p.DepartTick - 20 || p.State >= RaidDirectorService.StateDeparted, 300);
+            }
+            for (int i = 0; i < 600 && p.State < RaidDirectorService.StateDeparted; i++)
+            {
+                PeekOrigin();
+                WorldSimulation.StepMany(1);
+            }
+            bool departed = p.State >= RaidDirectorService.StateDeparted;
             TransitGroupRecord g = WorldTransitSystem.Find(s, p.GroupId);
             bool group = departed && g != null && g.PlanId == p.PlanId && g.Faction == "foundry" && g.UnitCount == p.UnitTotal && g.RouteState == WorldTransitSystem.RouteFollowing
                          && g.RouteX.Length == p.RouteX.Length && g.UnitIds.SequenceEqual(p.UnitIds) && g.HasOrigin
@@ -554,7 +577,8 @@ namespace GameLogic.EditorTools
             bool arrived = g != null && RunUntil(() => g.State != TransitGroupState.Marching, 600);
             bool onTime = arrived && Math.Abs(g.ArrivedAtTick - p.ArrivalTick) <= 2 && g.ArrivedAtTick - p.WarnTick >= minWarn;
             Expect(warned && located && group && onTime,
-                $"D2 预警：发出“{Short(LastNotify("raid_warning"))}”（定位到预计抵达点 {located}）；出发时派出带计划编号与编成的队伍、沿排定的地形路线走（据点驻军随队 {g?.GarrisonTaken} 台）；" +
+                $"D2 预警：发出“{Short(LastNotify("raid_warning"))}”（定位到预计抵达点 {located}）；出发时派出带计划编号与编成的队伍、沿排定的地形路线走（据点驻军随队 {g?.GarrisonTaken} 台，出发地 {p.OriginKind}:{p.OriginId} 出发前驻军 {garrison0} → 出发后 {(p.OriginKind == RaidDirectorService.OriginOutpost ? WorldOutpostSystem.Find(s, p.OriginId)?.Garrison ?? -1 : 0)}）；" +
+                $"预警 {warned} / 定位 {located} / 队伍 {group} / 准时 {onTime}；" +
                 $"实际到达 {g?.ArrivedAtTick}，计划 {p.ArrivalTick}（预警到到达 {g?.ArrivedAtTick - p.WarnTick} 步 ≥ {minWarn}）");
 
             // B3：到达 = 突袭开始（战时预案判定）；外围停留到时间上限（1 游戏小时）→ 沿原路撤回出发地 → 离场；计划结束进历史。

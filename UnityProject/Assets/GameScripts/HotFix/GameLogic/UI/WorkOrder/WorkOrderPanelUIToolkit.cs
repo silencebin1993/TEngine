@@ -278,8 +278,9 @@ namespace GameLogic.UI.WorkOrder
                 // ER8-CONTENT-01 AC-THEME-001：类型/状态此前直接 ToString()（Haul、InProgress 等英文枚举名），
                 // 原因列直接显示原因码（machine-died、storage-full:need=…）——全部改为玩家文字。
                 // FG7-ENV-05：遗迹回收单（拆解单、目标 = 遗迹点）写“回收遗迹 / 距离环名（x, y）”，不写“拆解 / 残骸”。
-                bool relicOrder = Campaign.Env.HomeExplorationService.IsRelicId(order.TargetId);
-                row.Q<Label>("Kind").text = relicOrder ? GameLogic.Localization.GameText.Get("relic.work.label") : KindText(order.Kind);
+                // FG8-GEN-02：资源缓存 / 旧终端同一条流程，写“打开缓存 / 读取终端”。
+                bool relicOrder = Campaign.Env.HomeExplorationService.IsPoiId(order.TargetId);
+                row.Q<Label>("Kind").text = relicOrder ? Campaign.Env.HomeExplorationService.WorkLabel(order.TargetId) : KindText(order.Kind);
                 // ER4-CONTENT-01：建筑类目标改显机械内容目录 DisplayName（如"发电机"），
                 // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标按工单类型给通用称呼。
                 string targetLabel = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
@@ -541,7 +542,7 @@ namespace GameLogic.UI.WorkOrder
         {
             CampaignState s = CampaignSession.Current;
             return s != null && Campaign.Env.HomeExplorationService.TryGetRelic(s, relicId, out Campaign.Env.HomeExplorationService.RelicInfo info)
-                ? GameLogic.Localization.GameText.Format("relic.hover.title", Campaign.Env.HomeExplorationService.RingName(info.Ring), info.X, info.Y)
+                ? GameLogic.Localization.GameText.Format("relic.hover.title", Campaign.Env.HomeExplorationService.PoiName(info), info.X, info.Y)
                 : GameLogic.Localization.GameText.Get("world.poi.relic");
         }
 

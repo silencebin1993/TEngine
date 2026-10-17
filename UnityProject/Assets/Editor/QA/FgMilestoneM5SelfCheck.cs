@@ -703,7 +703,7 @@ namespace GameLogic.EditorTools
             string Exp(string sink, long v) => GameText.Format("stats.research.expense", GameText.Get("stats.research.sink." + sink), v.ToString(System.Globalization.CultureInfo.InvariantCulture));
             bool rows = lines.Any(l => l.Text == Inc(TechDataFlow.BlackBox, 20)) && lines.Any(l => l.Text == Inc(TechDataFlow.Analysis, 12)) && lines.Any(l => l.Text == Exp(TechDataFlow.Restore, 4))
                         && lines.Any(l => l.Text == Exp(TechDataFlow.Lab, 3)) && lines.Count(l => l.Cls == "st-row-title") == 5
-                        && lines.Any(l => l.Text.Contains("370")) && TechDataFlow.IncomeSources.Length + TechDataFlow.ExpenseSinks.Length == 11;
+                        && lines.Any(l => l.Text.Contains("370")) && TechDataFlow.IncomeSources.Length + TechDataFlow.ExpenseSinks.Length == 12; // FG8-GEN-02：+ 收入来源“读取旧终端”
             // FG7-ENV-05：收入来源加了“遗迹回收”（4 → 5 个）。
             Expect(rows, $"F3 统计面板“研发”页 {lines.Count} 行：技术数据（库存 / 开局带来 / 收入 / 支出）+ 5 个来源 + 6 个去向、研究、熔合、情报、黑匣子五段；例：“{lines.FirstOrDefault(l => l.Text == Inc(TechDataFlow.BlackBox, 20)).Text}”");
 

@@ -276,6 +276,12 @@ namespace GameLogic.Campaign.WorldSim
                 TargetsScratch.Add(new FocusTarget("site:" + exp.SiteId, exp.SiteId, exp.DefaultFocus,
                     GameText.Format("ui.world.focus.expedition", name, exp.LiveMachineCount.ToString(CultureInfo.InvariantCulture)), false));
             }
+            // FG8-GEN-02（FGR-GEN-042）：有机器在里面的室内场地（关注点条 / Tab 切过去 = 进出室内的过渡之外的另一条路：镜头直接看室内）。
+            foreach (InteriorSiteController inside in WorldSimulation.LoadedInteriors)
+            {
+                TargetsScratch.Add(new FocusTarget("site:" + inside.SiteId, inside.SiteId, inside.DefaultFocus,
+                    GameText.Format("ui.world.focus.interior", InteriorSiteService.SurfaceName(inside.SiteId), inside.LiveMachineCount.ToString(CultureInfo.InvariantCulture)), false));
+            }
             // FG8-EXP-02（FGR-EXP-012）：星球上行军中的远征队（地点还没载入）：关注点条 / Tab 也能切到它（镜头飞到队伍中心）。
             if (home != null && home.IsLoaded && Regions.ExpeditionMarchService.TryTeamCenter(state, out Vector2 teamAt, out _))
             {

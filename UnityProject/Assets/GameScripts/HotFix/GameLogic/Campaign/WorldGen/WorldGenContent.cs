@@ -9,8 +9,9 @@ namespace GameLogic.Campaign.WorldGen
     public static class WorldGenVersions
     {
         /// <summary>新战役使用的生成器版本。**任何会改变生成结果的改动都必须新增 fg.TbWorldGenVersion 的一行并把它加 1**；
-        /// 旧行不许改（FgWorldGenSelfCheck 的回归哈希守护）。v2 = FG3-GEN-01（起始区四级保证、河流与矿带、分项世界设置、遗迹点与侦察巢）。</summary>
-        public const int Current = 2;
+        /// 旧行不许改（FgWorldGenSelfCheck 的回归哈希守护）。v2 = FG3-GEN-01（起始区四级保证、河流与矿带、分项世界设置、遗迹点与侦察巢）；
+        /// v3 = FG8-GEN-02（领地模板、手工锚点与室内入口、领地之间与外延区的零散前哨和缓存）。</summary>
+        public const int Current = 3;
 
         /// <summary>0 = 尚未启用程序生成：FG0-ARCH-05 之前的存档，地形来自 FG0-ARCH-04 的原型来源（GridTerrainPrototype，保留为旧版本路径）。</summary>
         public const int LegacyPrototype = 0;
@@ -42,6 +43,9 @@ namespace GameLogic.Campaign.WorldGen
         private static TbWorldStartClear _startClear;
         private static TbWorldStartGuarantee _guarantees;
         private static TbWorldSettingAxis _axes;
+        private static TbTerritoryTemplate _templates;
+        private static TbAnchorSite _anchors;
+        private static TbAnchorTemplatePoint _templatePoints;
         private static bool _loaded;
         private static bool _overridden;
         private static string _loadError;
@@ -125,6 +129,93 @@ namespace GameLogic.Campaign.WorldGen
         }
 
         public static bool HasSet(string set) => !string.IsNullOrEmpty(set) && set != NoSet;
+
+        /// <summary>FG8-GEN-02：这个版本有没有领地模板 / 手工锚点（v1 / v2 没有）。</summary>
+        public static bool HasTerritoryContent(WorldGenVersion v) => v != null && HasSet(v.TemplateSet) && HasSet(v.AnchorSet);
+
+        /// <summary>FG8-GEN-02：版本行引用的领地模板（表顺序）；没有时返回空表。</summary>
+        public static List<TerritoryTemplate> TemplatesFor(WorldGenVersion v)
+        {
+            RequireLoaded();
+            var list = new List<TerritoryTemplate>();
+            if (v == null || !HasSet(v.TemplateSet))
+            {
+                return list;
+            }
+            foreach (TerritoryTemplate t in _templates.DataList)
+            {
+                if (t.Set == v.TemplateSet)
+                {
+                    list.Add(t);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>FG8-GEN-02：版本行引用的手工锚点（表顺序 = 放置顺序 = 子种子序号）；没有时返回空表。</summary>
+        public static List<AnchorSite> AnchorsFor(WorldGenVersion v)
+        {
+            RequireLoaded();
+            var list = new List<AnchorSite>();
+            if (v == null || !HasSet(v.AnchorSet))
+            {
+                return list;
+            }
+            foreach (AnchorSite a in _anchors.DataList)
+            {
+                if (a.Set == v.AnchorSet)
+                {
+                    list.Add(a);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>FG8-GEN-02：一个锚点模板的全部点位（表顺序）；none / 不存在返回空表。</summary>
+        public static List<AnchorTemplatePoint> TemplatePoints(string templateId)
+        {
+            RequireLoaded();
+            var list = new List<AnchorTemplatePoint>();
+            if (!HasSet(templateId))
+            {
+                return list;
+            }
+            foreach (AnchorTemplatePoint p in _templatePoints.DataList)
+            {
+                if (p.Template == templateId)
+                {
+                    list.Add(p);
+                }
+            }
+            return list;
+        }
+
+        public static IReadOnlyList<TerritoryTemplate> TemplateRows
+        {
+            get
+            {
+                RequireLoaded();
+                return _templates.DataList;
+            }
+        }
+
+        public static IReadOnlyList<AnchorSite> AnchorRows
+        {
+            get
+            {
+                RequireLoaded();
+                return _anchors.DataList;
+            }
+        }
+
+        public static IReadOnlyList<AnchorTemplatePoint> TemplatePointRows
+        {
+            get
+            {
+                RequireLoaded();
+                return _templatePoints.DataList;
+            }
+        }
 
         /// <summary>版本行引用的起始区平地快照矩形（相对核心，按序号）；<paramref name="variant"/> = standard / relaxed。</summary>
         public static List<WorldStartClear> StartClearFor(WorldGenVersion v, string variant)
@@ -293,6 +384,9 @@ namespace GameLogic.Campaign.WorldGen
             _startClear = null;
             _guarantees = null;
             _axes = null;
+            _templates = null;
+            _anchors = null;
+            _templatePoints = null;
             _loadError = null;
             Revision++;
             EnsureLoaded();
@@ -300,7 +394,8 @@ namespace GameLogic.Campaign.WorldGen
 
         /// <summary>测试注入：用构造出来的表替换真实表（传 null 的沿用真实表）。用完必须 <see cref="ResetForTests"/>。</summary>
         public static void OverrideForTests(TbWorldGenVersion versions = null, TbWorldPreset presets = null, TbSurface surfaces = null,
-            TbTerritory territories = null, TbWorldStartGuarantee guarantees = null, TbWorldSettingAxis axes = null, TbWorldStartClear startClear = null)
+            TbTerritory territories = null, TbWorldStartGuarantee guarantees = null, TbWorldSettingAxis axes = null, TbWorldStartClear startClear = null,
+            TbTerritoryTemplate templates = null, TbAnchorSite anchors = null, TbAnchorTemplatePoint templatePoints = null)
         {
             Reload();
             _overridden = true;
@@ -311,6 +406,9 @@ namespace GameLogic.Campaign.WorldGen
             _guarantees = guarantees ?? _guarantees;
             _axes = axes ?? _axes;
             _startClear = startClear ?? _startClear;
+            _templates = templates ?? _templates;
+            _anchors = anchors ?? _anchors;
+            _templatePoints = templatePoints ?? _templatePoints;
             Revision++;
         }
 
@@ -320,7 +418,7 @@ namespace GameLogic.Campaign.WorldGen
         {
             EnsureLoaded();
             if (_loadError != null || _versions == null || _presets == null || _surfaces == null || _territories == null
-                || _startClear == null || _guarantees == null || _axes == null)
+                || _startClear == null || _guarantees == null || _axes == null || _templates == null || _anchors == null || _templatePoints == null)
             {
                 throw new InvalidOperationException($"世界生成表不可用：{_loadError ?? "未知原因"}");
             }
@@ -343,10 +441,13 @@ namespace GameLogic.Campaign.WorldGen
                 _startClear = tables?.TbWorldStartClear;
                 _guarantees = tables?.TbWorldStartGuarantee;
                 _axes = tables?.TbWorldSettingAxis;
+                _templates = tables?.TbTerritoryTemplate;
+                _anchors = tables?.TbAnchorSite;
+                _templatePoints = tables?.TbAnchorTemplatePoint;
                 if (_versions == null || _presets == null || _surfaces == null || _territories == null
-                    || _startClear == null || _guarantees == null || _axes == null)
+                    || _startClear == null || _guarantees == null || _axes == null || _templates == null || _anchors == null || _templatePoints == null)
                 {
-                    _loadError = "配置表 fg.TbWorldGenVersion / TbWorldPreset / TbSurface / TbTerritory / TbWorldStartClear / TbWorldStartGuarantee / TbWorldSettingAxis 不存在";
+                    _loadError = "配置表 fg.TbWorldGenVersion / TbWorldPreset / TbSurface / TbTerritory / TbWorldStartClear / TbWorldStartGuarantee / TbWorldSettingAxis / TbTerritoryTemplate / TbAnchorSite / TbAnchorTemplatePoint 不存在";
                 }
             }
             catch (Exception ex)

@@ -79,6 +79,9 @@ namespace GameLogic.Campaign.Grid
         // ── FG6-DEF-01（只追加）──
         /// <summary>这种炮塔座没有能装的炮塔蓝图（先在蓝图编辑器里用固定底盘配一张，主组件决定轻型 / 重型）。</summary>
         TurretNoBlueprint,
+        // ── FG8-GEN-02（只追加）──
+        /// <summary>FG8-GEN-02（卡片负向“室内入口被己方建筑堵住”）：室内入口的保护范围里不能建造（保持通道畅通）。</summary>
+        EntranceProtect,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -148,6 +151,8 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.TooManyEntries: return new GridReason(code, "plan.reason.too_many_plain");
                 // FG6-DEF-01：带参数（轻型 / 重型）的由 TurretService.HasPlaceableBlueprint 构造，这里给无参数时的稳定文本。
                 case GridBlockReason.TurretNoBlueprint: return new GridReason(code, "turret.reason.no_blueprint_plain");
+                // FG8-GEN-02：带参数（入口名、保护半径）的由 HomeGridService.ValidatePlacement 构造，这里给无参数时的稳定文本。
+                case GridBlockReason.EntranceProtect: return new GridReason(code, "grid.reason.entrance_protect_plain");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }

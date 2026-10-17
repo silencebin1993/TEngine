@@ -38,6 +38,11 @@ namespace GameLogic.Campaign.WorldSim
         private static Material _patrolMaterial;
         private static Material _relicMaterial;
         private static Material _relicDoneMaterial;
+        private static Material _cacheMaterial;
+        private static Material _terminalMaterial;
+        private static Material _anchorMaterial;
+        private static Material _gateMaterial;
+        private static Material _protectMaterial;
         private static bool _placeholderLogged;
         private static TerrainProfile _pcgProfile;
         private static int _pcgLoadEpoch;
@@ -167,6 +172,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             TickOutpostMarkers(state, focus, radius);
             TickRelicMarkers(state, focus, radius);
+            TickAnchorMarkers(state, focus, radius);
             GoneScratch.Clear();
             foreach (KeyValuePair<string, GameObject> kv in Markers)
             {
@@ -194,24 +200,36 @@ namespace GameLogic.Campaign.WorldSim
             {
                 return;
             }
-            foreach (OutpostRecord o in WorldOutpostSystem.Outposts(state))
+            // FG8-GEN-02（DEBT-FG0ARCH06-06）：按空间桶只取镜头附近的据点（与据点总数无关）；巡逻只算据点在附近的那些（巡逻走不出折返半径）。
+            NearScratch.Clear();
+            float patrolReach = radius + 2f * Mathf.Max(24f, PatrolReachCells);
+            WorldOutpostSystem.OutpostsNear(state, focus.X, focus.Y, patrolReach, NearScratch);
+            foreach (OutpostRecord o in NearScratch)
             {
-                if (o == null)
+                if (Math.Abs(o.CellX - focus.X) <= radius && Math.Abs(o.CellY - focus.Y) <= radius)
                 {
-                    continue;
+                    PlaceOutpostMarker(o.OutpostId, o.CellX, o.CellY, focus, radius, map, isPatrol: false);
                 }
-                PlaceOutpostMarker(o.OutpostId, o.CellX, o.CellY, focus, radius, map, isPatrol: false);
-            }
-            foreach (PatrolRecord p in WorldOutpostSystem.Patrols(state))
-            {
-                if (p == null)
+                // 巡逻按据点索引取（与巡逻总数无关，审查 P2）。
+                PatrolScratch.Clear();
+                WorldOutpostSystem.PatrolsOf(state, o.OutpostId, PatrolScratch);
+                foreach (PatrolRecord p in PatrolScratch)
                 {
-                    continue;
+                    if (p == null)
+                    {
+                        continue;
+                    }
+                    Vector2 at = WorldOutpostSystem.PeekPatrolPosition(state, p);
+                    PlaceOutpostMarker(p.PatrolId, at.x, at.y, focus, radius, map, isPatrol: true);
                 }
-                Vector2 at = WorldOutpostSystem.PeekPatrolPosition(state, p);
-                PlaceOutpostMarker(p.PatrolId, at.x, at.y, focus, radius, map, isPatrol: true);
             }
+            PatrolScratch.Clear();
+            NearScratch.Clear();
         }
+
+        private static readonly List<OutpostRecord> NearScratch = new List<OutpostRecord>(32);
+        private static readonly List<PatrolRecord> PatrolScratch = new List<PatrolRecord>(8);
+        private static float PatrolReachCells => GridContent.TryGetTuning("outpost.patrol_radius_cells", out float r) ? Math.Max(r, 32f) : 32f;
 
         private static readonly List<WorldGen.WorldFeature> FeatureScratch = new List<WorldGen.WorldFeature>(16);
 
@@ -255,7 +273,8 @@ namespace GameLogic.Campaign.WorldSim
             WorldGen.WorldGenQuery.FeaturesIn(state, focus.X - r, focus.Y - r, focus.X + r, focus.Y + r, FeatureScratch);
             foreach (WorldGen.WorldFeature f in FeatureScratch)
             {
-                if (f.Kind != WorldGen.WorldFeatureKind.Relic)
+                // FG8-GEN-02：资源缓存（矮宽箱）/ 旧终端（细高柱）与遗迹点（方尖碑）同一套标记：迷雾外不画、完工后变矮变灰（形状 + 颜色，B15）。
+                if (f.Kind != WorldGen.WorldFeatureKind.Relic && f.Kind != WorldGen.WorldFeatureKind.Cache && f.Kind != WorldGen.WorldFeatureKind.Terminal)
                 {
                     continue;
                 }
@@ -282,7 +301,8 @@ namespace GameLogic.Campaign.WorldSim
                     body.transform.localPosition = new Vector3(0f, 2f, 0f);
                     body.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
                     body.transform.localScale = new Vector3(0.9f, 4f, 0.9f);
-                    body.GetComponent<Renderer>().sharedMaterial = _relicMaterial;
+                    body.GetComponent<Renderer>().sharedMaterial = f.Kind == WorldGen.WorldFeatureKind.Cache ? _cacheMaterial
+                        : f.Kind == WorldGen.WorldFeatureKind.Terminal ? _terminalMaterial : _relicMaterial;
                     Markers[f.Id] = go;
                 }
                 if (!go.activeSelf)
@@ -295,10 +315,14 @@ namespace GameLogic.Campaign.WorldSim
                 Transform obelisk = go.transform.childCount > 0 ? go.transform.GetChild(0) : null;
                 if (obelisk != null)
                 {
-                    obelisk.localScale = done ? new Vector3(0.9f, 1.6f, 0.9f) : new Vector3(0.9f, 4f, 0.9f);
-                    obelisk.localPosition = new Vector3(0f, done ? 0.8f : 2f, 0f);
+                    Vector3 full = f.Kind == WorldGen.WorldFeatureKind.Cache ? new Vector3(2.2f, 1.2f, 1.6f)
+                        : f.Kind == WorldGen.WorldFeatureKind.Terminal ? new Vector3(0.6f, 3f, 0.6f) : new Vector3(0.9f, 4f, 0.9f);
+                    Vector3 low = new Vector3(full.x, Mathf.Min(full.y, 1.6f) * 0.5f, full.z);
+                    obelisk.localScale = done ? low : full;
+                    obelisk.localPosition = new Vector3(0f, (done ? low.y : full.y) * 0.5f, 0f);
                     Renderer rr = obelisk.GetComponent<Renderer>();
-                    Material want = done ? _relicDoneMaterial : _relicMaterial;
+                    Material want = done ? _relicDoneMaterial : f.Kind == WorldGen.WorldFeatureKind.Cache ? _cacheMaterial
+                        : f.Kind == WorldGen.WorldFeatureKind.Terminal ? _terminalMaterial : _relicMaterial;
                     if (rr != null && want != null && rr.sharedMaterial != want)
                     {
                         rr.sharedMaterial = want;
@@ -310,6 +334,110 @@ namespace GameLogic.Campaign.WorldSim
                 }
                 VisibleRelicMarkerCount++;
             }
+        }
+
+        /// <summary>FG8-GEN-02：当前画出来的锚点标记数（自检读：迷雾外不画、预留区永不画）。</summary>
+        public static int VisibleAnchorMarkerCount { get; private set; }
+
+        /// <summary>
+        /// FG8-GEN-02（FGR-GEN-024 / 042）：手工锚点在星球上的占位外形（B22）：模板的每个点位一个矮方块（Demo 地点的关键部分：入口光环、终端、节点、大门、主核心……），
+        /// 室内入口是一座深色门框 + 入口保护范围的淡色地圈（说明“这一圈不能建造”）。只画镜头附近、已探索的；预留区永远不画（FGR-GEN-041）。纯表现，不改状态。
+        /// </summary>
+        private static void TickAnchorMarkers(CampaignState state, GridCell focus, float radius)
+        {
+            VisibleAnchorMarkerCount = 0;
+            HomeGridMap map = HomeGridService.BoundMap(state);
+            WorldGen.WorldPlan plan = WorldGen.WorldGenService.PlanFor(state);
+            if (map == null || plan == null)
+            {
+                return;
+            }
+            foreach (WorldGen.PlannedAnchor a in plan.Anchors)
+            {
+                if (a.IsReserve)
+                {
+                    continue;
+                }
+                Vector2 entry = WorldGen.TerritoryAnchorChecks.EntryOf(state, a);
+                float reach = radius + a.FootprintRadius;
+                if (Math.Abs(a.OriginX - focus.X) > reach || Math.Abs(a.OriginY - focus.Y) > reach
+                    || !map.IsExploredNoLoad(new GridCell(Mathf.RoundToInt(entry.x), Mathf.RoundToInt(entry.y))))
+                {
+                    continue;
+                }
+                string id = "anchor:" + a.Id;
+                LiveScratch.Add(id);
+                // 入口挪过位（可达校验之后）就按新位置重建门框与保护圈：画出来的禁建圈与建造校验 / 点入口用的是同一个点（审查 P2）。
+                bool stale = Markers.TryGetValue(id, out GameObject go) && go != null
+                             && (!AnchorMarkerEntry.TryGetValue(id, out Vector2 builtAt) || (builtAt - entry).sqrMagnitude > 0.01f);
+                if (stale)
+                {
+                    UnityObjects.Release(go);
+                    go = null;
+                }
+                if (go == null)
+                {
+                    go = BuildAnchorMarker(a, entry);
+                    Markers[id] = go;
+                    AnchorMarkerEntry[id] = entry;
+                }
+                if (!go.activeSelf)
+                {
+                    go.SetActive(true);
+                }
+                VisibleAnchorMarkerCount++;
+            }
+        }
+
+        /// <summary>每个锚点标记建好时用的入口位置（入口挪位后据此重建）。</summary>
+        private static readonly Dictionary<string, Vector2> AnchorMarkerEntry = new Dictionary<string, Vector2>(StringComparer.Ordinal);
+
+        private static GameObject BuildAnchorMarker(WorldGen.PlannedAnchor a, Vector2 entry)
+        {
+            var go = new GameObject("AnchorMarker_" + a.Id);
+            go.transform.SetParent(_root.transform, false);
+            go.transform.position = Vector3.zero;
+            foreach (WorldGen.PlannedAnchorPoint p in a.Points)
+            {
+                GameObject part = GameObject.CreatePrimitive(p.Kind == "entry" ? PrimitiveType.Cylinder : PrimitiveType.Cube);
+                UnityObjects.Release(part.GetComponent<Collider>());
+                part.name = "Point_" + p.PointId;
+                part.transform.SetParent(go.transform, false);
+                Vector2 at = p.Kind == "entry" ? entry : new Vector2(p.X, p.Y);
+                float size = Mathf.Max(1f, p.Radius * 1.4f);
+                float h = p.Kind == "gate" ? 4f : p.Kind == "core" ? 3f : p.Kind == "entry" ? 0.05f : 1.4f;
+                part.transform.position = new Vector3(at.x, h * 0.5f, at.y);
+                part.transform.localScale = p.Kind == "entry" ? new Vector3(size * 2f, 0.05f, size * 2f) : new Vector3(size, h, size);
+                part.GetComponent<Renderer>().sharedMaterial = a.IsIndoorEntrance && p.Kind == "entry" ? _gateMaterial : _anchorMaterial;
+            }
+            if (a.IsIndoorEntrance)
+            {
+                // 门框（两根立柱 + 门楣），朝向背离家园的一侧。
+                float rad = a.ForwardDeg * Mathf.Deg2Rad;
+                var side = new Vector2(Mathf.Sin(rad), -Mathf.Cos(rad));
+                for (int k = -1; k <= 1; k += 2)
+                {
+                    GameObject post = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    UnityObjects.Release(post.GetComponent<Collider>());
+                    post.name = "GatePost";
+                    post.transform.SetParent(go.transform, false);
+                    Vector2 pp = entry + side * (2.2f * k);
+                    post.transform.position = new Vector3(pp.x, 2f, pp.y);
+                    post.transform.localScale = new Vector3(0.8f, 4f, 0.8f);
+                    post.GetComponent<Renderer>().sharedMaterial = _gateMaterial;
+                }
+                if (a.ProtectRadius > 0)
+                {
+                    GameObject ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    UnityObjects.Release(ring.GetComponent<Collider>());
+                    ring.name = "ProtectRing";
+                    ring.transform.SetParent(go.transform, false);
+                    ring.transform.position = new Vector3(entry.x, 0.02f, entry.y);
+                    ring.transform.localScale = new Vector3(a.ProtectRadius * 2f, 0.01f, a.ProtectRadius * 2f);
+                    ring.GetComponent<Renderer>().sharedMaterial = _protectMaterial;
+                }
+            }
+            return go;
         }
 
         /// <summary>FG7-ENV-05：当前画出来的“已回收”遗迹点标记数（自检读）。</summary>
@@ -411,6 +539,11 @@ namespace GameLogic.Campaign.WorldSim
             _patrolMaterial = new Material(shader) { color = new Color(0.72f, 0.22f, 0.55f) };
             _relicMaterial = new Material(shader) { color = new Color(0.86f, 0.78f, 0.45f) };
             _relicDoneMaterial = new Material(shader) { color = new Color(0.42f, 0.44f, 0.46f) };
+            _cacheMaterial = new Material(shader) { color = new Color(0.78f, 0.58f, 0.3f) };
+            _terminalMaterial = new Material(shader) { color = new Color(0.5f, 0.8f, 0.85f) };
+            _anchorMaterial = new Material(shader) { color = new Color(0.55f, 0.55f, 0.58f) };
+            _gateMaterial = new Material(shader) { color = new Color(0.16f, 0.14f, 0.22f) };
+            _protectMaterial = new Material(shader) { color = new Color(0.95f, 0.85f, 0.4f, 0.35f) };
         }
 
         private static async UniTask LoadPcgProfileAsync(int epoch)
@@ -484,6 +617,16 @@ namespace GameLogic.Campaign.WorldSim
                 UnityObjects.Release(_relicDoneMaterial);
                 _relicDoneMaterial = null;
             }
+            // FG8-GEN-02：缓存 / 终端 / 锚点 / 室内入口的材质成对释放。
+            foreach (Material m in new[] { _cacheMaterial, _terminalMaterial, _anchorMaterial, _gateMaterial, _protectMaterial })
+            {
+                if (m != null)
+                {
+                    UnityObjects.Release(m);
+                }
+            }
+            _cacheMaterial = _terminalMaterial = _anchorMaterial = _gateMaterial = _protectMaterial = null;
+            VisibleAnchorMarkerCount = 0;
             VisibleRelicMarkerCount = 0;
             RecoveredRelicMarkerCount = 0;
             _relicStatusRevision = -1;

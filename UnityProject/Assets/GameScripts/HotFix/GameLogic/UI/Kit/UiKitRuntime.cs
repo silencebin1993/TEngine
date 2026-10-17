@@ -51,6 +51,7 @@ namespace GameLogic.UI.Kit
             Create<DifficultyPanelUIToolkit>("[DifficultyHost]"); // FG6-DEF-09：难度与突袭强度（30081，暂停菜单与按键面板之上、新游戏设置之下）。
             Create<NewGamePanelUIToolkit>("[NewGameHost]"); // FG3-GEN-01：新游戏设置（30082，主菜单“新建”选好存档槽后打开）。
             Create<StrategicMapUIToolkit>("[StrategicMapHost]"); // FG3-GEN-01：战略地图（30050，HUD 之上、暂停菜单之下）。
+            Create<WorldPlacesHudUIToolkit>("[WorldPlacesHost]"); // FG8-GEN-02：领地名称提示、室内进出过渡、室内入口 / 出口面板（30052，战略地图之上、暂停菜单之下）。
             Create<MinimapHudUIToolkit>("[MinimapHost]"); // FG3-GEN-01：小地图（右下角 HUD，-2 层，不挡面板）。
             Create<ConstructionQueuePanelUIToolkit>("[ConstructionQueueHost]"); // FG3-LOG-02：施工队列（30045，通知之上、字幕之下）。
             Create<BeltPortPanelUIToolkit>("[BeltPortHost]"); // FG3-LOG-03：建筑端口面板（30046，施工队列之上、字幕之下）。
@@ -108,6 +109,7 @@ namespace GameLogic.UI.Kit
             ProductionPanelUIToolkit.Close();
             OverlayHudUIToolkit.CloseSelector();
             StrategicMapUIToolkit.Close();
+            WorldPlacesHudUIToolkit.Instance?.SetPanel(null, false); // FG8-GEN-02
             NewGamePanelUIToolkit.Close();
             GameLogic.Campaign.Feedback.ReactionPopups.Clear();
             GameLogic.Campaign.Feedback.CameraNudge.Reset();

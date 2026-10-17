@@ -237,9 +237,8 @@ namespace GameLogic.Stage
         /// </summary>
         public static void ReenterHomeValley()
         {
-            HomeValleyController home = WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded
-                ? WorldSimulation.Home
-                : WorldSimulation.LoadHome(resume: true);
+            bool reloaded = WorldSimulation.Home == null || !WorldSimulation.Home.IsLoaded;
+            HomeValleyController home = reloaded ? WorldSimulation.LoadHome(resume: true) : WorldSimulation.Home;
             if (home != null && home.IsLoaded)
             {
                 // 没有远征地点在运行时，世界的“当前地点”就是家园（读档恢复据此决定镜头放在哪里；与 Demo 回家园重新进入时写入的值一致）。
@@ -248,6 +247,12 @@ namespace GameLogic.Stage
                     CampaignSession.Current.CurrentRegionId = HomeValleyLayout.RegionId;
                 }
                 WorldView.Observe(home.SiteId);
+                // FG8-GEN-02 修复轮 2（审查 P1）：家园是这里重新载入的（出发 / 到达事务回滚读回了档）——存档里有机器在室内场地的，室内一起恢复，
+                // 与主菜单读档（ResumeCampaign）同一入口；存档时镜头正看着室内就放回室内。家园本来就在运行时室内也一直在运行，不碰。
+                if (reloaded)
+                {
+                    Campaign.Regions.InteriorSiteService.ResumeAll(CampaignSession.Current);
+                }
                 // FG1-SIG-03：出发失败回滚到出发前档（读档）后也经这里重进家园——存档时信号在家园机器里就回到那台（幂等，平时是空操作）。
                 Campaign.Signal.SignalUplinkService.RestoreAfterLoad();
             }
@@ -279,6 +284,8 @@ namespace GameLogic.Stage
             }
             string region = ResolveResumeRegion(CampaignSession.Current);
             HomeValleyController home = WorldSimulation.LoadHome(resume: true);
+            // FG8-GEN-02（FGR-GEN-042）：存档时有机器在室内场地里的，室内一起恢复（从战斗快照；存档时正看着室内就把镜头放回去）。
+            Campaign.Regions.InteriorSiteService.ResumeAll(CampaignSession.Current);
             if (region == FracturedCityLayout.RegionId)
             {
                 ResumeFracturedCity();
@@ -299,7 +306,8 @@ namespace GameLogic.Stage
                 }
                 Log.Warning("[GameRoot] 读档恢复铸造前哨外围未能载入，镜头回到归还谷地。");
             }
-            if (home != null && home.IsLoaded)
+            bool interiorObserved = WorldView.ObservedSite is Campaign.Regions.InteriorSiteController inside && inside.IsLoaded;
+            if (home != null && home.IsLoaded && !interiorObserved)
             {
                 WorldView.Observe(home.SiteId);
             }

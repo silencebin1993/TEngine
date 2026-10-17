@@ -538,6 +538,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "RM"
                     // FG7-ENV-05 的遗迹距离环（RLR）、区域危害（HZD）由 FgExplorationSelfCheck D1 段逐字段比对。
                     || f[0] == "RLR" || f[0] == "HZD"
+                    // FG8-GEN-02 的领地模板（TTP）、手工锚点（ANC）、锚点模板点位（ATP）由 FgTerritorySelfCheck A1 段逐字段比对。
+                    || f[0] == "TTP" || f[0] == "ANC" || f[0] == "ATP"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

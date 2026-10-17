@@ -101,6 +101,47 @@ namespace GameLogic.Campaign.WorldGen
         public int HomeZoneRadius { get; private set; }
         public int MinAngleDeg { get; private set; }
 
+        /// <summary>FG8-GEN-02（生成器 v3 起）：手工锚点（表顺序）；v1 / v2 为空。</summary>
+        public readonly List<PlannedAnchor> Anchors = new List<PlannedAnchor>();
+        /// <summary>FG8-GEN-02：领地内危害区；v1 / v2 为空（那时危害按整块领地标记）。</summary>
+        public readonly List<PlannedHazardZone> HazardZones = new List<PlannedHazardZone>();
+        /// <summary>FG8-GEN-02：领地 ID → 这个版本的领地模板；v1 / v2 为空。</summary>
+        public readonly Dictionary<string, TerritoryTemplate> Templates = new Dictionary<string, TerritoryTemplate>(StringComparer.Ordinal);
+
+        /// <summary>这个规划层有没有领地模板（生成器 v3 起）。</summary>
+        public bool HasTemplates => Templates.Count > 0;
+
+        public PlannedAnchor FindAnchor(string id)
+        {
+            foreach (PlannedAnchor a in Anchors)
+            {
+                if (a.Id == id)
+                {
+                    return a;
+                }
+            }
+            return null;
+        }
+
+        public TerritoryTemplate TemplateFor(string territoryId) =>
+            territoryId != null && Templates.TryGetValue(territoryId, out TerritoryTemplate t) ? t : null;
+
+        /// <summary>FG8-GEN-02：格子所在的领地内危害区（没有返回 null）。O(危害区数)。</summary>
+        public PlannedHazardZone HazardZoneAt(int x, int y)
+        {
+            for (int i = 0; i < HazardZones.Count; i++)
+            {
+                PlannedHazardZone z = HazardZones[i];
+                long dx = x - z.CenterX;
+                long dy = y - z.CenterY;
+                if (dx * dx + dy * dy <= (long)z.Radius * z.Radius)
+                {
+                    return z;
+                }
+            }
+            return null;
+        }
+
         /// <summary>给生成内核的形状：领地圆（阵营领地与白潮滩头；危害带宽度 0 的没有外圈），v2 起再加河流段、矿带与起始区保证点
         /// （<see cref="WorldGenZoneKind"/>）。v1 只有领地，与 FG0-ARCH-05 逐字节相同。</summary>
         public WorldGenZone[] Zones { get; private set; } = Array.Empty<WorldGenZone>();
@@ -190,6 +231,10 @@ namespace GameLogic.Campaign.WorldGen
             if (StartReport != null)
             {
                 sb.Append(StartReport.Fingerprint());
+            }
+            if (Anchors.Count > 0 || HazardZones.Count > 0)
+            {
+                TerritoryPlanner.AppendFingerprint(this, sb); // FG8-GEN-02（v3 起；v1 / v2 没有锚点与危害区，指纹逐字不变）
             }
             return sb.ToString();
         }
@@ -329,6 +374,8 @@ namespace GameLogic.Campaign.WorldGen
             // FG3-GEN-01：河流与矿带（版本行没有它们时什么也不加 —— v1 只有领地，结果不变）。
             plan.PlanRivers(seed, version, zones);
             plan.PlanBelts(seed, version, zones);
+            // FG8-GEN-02（v3 起）：手工锚点（平整范围）、领地地貌风格、领地内危害区。版本行没有模板 / 锚点集合时什么也不做（v1 / v2 结果不变）。
+            TerritoryPlanner.Plan(plan, seed, version, zones);
             plan.NaturalZones = zones.ToArray();
             plan.Zones = plan.NaturalZones;
             return plan;

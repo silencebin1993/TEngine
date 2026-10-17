@@ -99,6 +99,14 @@ public partial class Tables
     /// </summary>
     public fg.TbAnalysisLore TbAnalysisLore {get; }
     /// <summary>
+    /// 手工锚点
+    /// </summary>
+    public fg.TbAnchorSite TbAnchorSite {get; }
+    /// <summary>
+    /// 锚点模板点位
+    /// </summary>
+    public fg.TbAnchorTemplatePoint TbAnchorTemplatePoint {get; }
+    /// <summary>
     /// 机器材料
     /// </summary>
     public fg.TbAssemblyMaterial TbAssemblyMaterial {get; }
@@ -355,6 +363,10 @@ public partial class Tables
     /// </summary>
     public fg.TbTerritory TbTerritory {get; }
     /// <summary>
+    /// 领地模板
+    /// </summary>
+    public fg.TbTerritoryTemplate TbTerritoryTemplate {get; }
+    /// <summary>
     /// 陷阱参数
     /// </summary>
     public fg.TbTrapProfile TbTrapProfile {get; }
@@ -467,6 +479,8 @@ public partial class Tables
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
         TbAnalysisKind = new fg.TbAnalysisKind(loader("fg_tbanalysiskind"));
         TbAnalysisLore = new fg.TbAnalysisLore(loader("fg_tbanalysislore"));
+        TbAnchorSite = new fg.TbAnchorSite(loader("fg_tbanchorsite"));
+        TbAnchorTemplatePoint = new fg.TbAnchorTemplatePoint(loader("fg_tbanchortemplatepoint"));
         TbAssemblyMaterial = new fg.TbAssemblyMaterial(loader("fg_tbassemblymaterial"));
         TbBeltFilterPreset = new fg.TbBeltFilterPreset(loader("fg_tbbeltfilterpreset"));
         TbBuildCategory = new fg.TbBuildCategory(loader("fg_tbbuildcategory"));
@@ -531,6 +545,7 @@ public partial class Tables
         TbStormDebris = new fg.TbStormDebris(loader("fg_tbstormdebris"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
+        TbTerritoryTemplate = new fg.TbTerritoryTemplate(loader("fg_tbterritorytemplate"));
         TbTrapProfile = new fg.TbTrapProfile(loader("fg_tbtrapprofile"));
         TbTurretFluid = new fg.TbTurretFluid(loader("fg_tbturretfluid"));
         TbTurretProfile = new fg.TbTurretProfile(loader("fg_tbturretprofile"));
@@ -580,6 +595,8 @@ public partial class Tables
         TbStructuralTriggerHookParams.ResolveRef(this);
         TbAnalysisKind.ResolveRef(this);
         TbAnalysisLore.ResolveRef(this);
+        TbAnchorSite.ResolveRef(this);
+        TbAnchorTemplatePoint.ResolveRef(this);
         TbAssemblyMaterial.ResolveRef(this);
         TbBeltFilterPreset.ResolveRef(this);
         TbBuildCategory.ResolveRef(this);
@@ -644,6 +661,7 @@ public partial class Tables
         TbStormDebris.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
+        TbTerritoryTemplate.ResolveRef(this);
         TbTrapProfile.ResolveRef(this);
         TbTurretFluid.ResolveRef(this);
         TbTurretProfile.ResolveRef(this);

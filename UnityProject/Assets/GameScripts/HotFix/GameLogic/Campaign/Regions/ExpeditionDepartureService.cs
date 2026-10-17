@@ -137,7 +137,7 @@ namespace GameLogic.Campaign.Regions
         /// 核心维修（Core 从未出现在 <see cref="HomeValleyLayout.RepairProfile"/> 里，实测确认核心在
         /// 当前内容锁定表下不会进入可修复的 Damaged 态，"打断核心抢修"这个设想在现有产品范围内根本
         /// 不会发生，用它当判定条件是空判据）。</summary>
-        private static bool IsUninterruptibleOrder(WorkOrderRecord order) =>
+        internal static bool IsUninterruptibleOrder(WorkOrderRecord order) =>
             order != null && order.Kind == WorkOrderKind.Repair && string.IsNullOrEmpty(order.ResourceTransactionId);
 
         /// <summary>FG8-EXP-01（FGR-EXP-001 提醒“机器伤势”）：生命低于重伤线（<c>exp.check.severe_health_pct</c> × 最大生命）。

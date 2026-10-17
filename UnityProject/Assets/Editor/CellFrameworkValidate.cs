@@ -536,6 +536,9 @@ namespace GameLogic.EditorTools
             // FG8-EXP-02 行军、远程指挥与覆盖（FG08 FGR-EXP-010～012、FGR-SIG-053；FGT-EXP-002 / 012）：锚点（种子 / 可达）、出发事务与回滚、真实行军到达、观察 / 倍速 / 暂停一致、
             // 行军中存读档、覆盖内外命令与接入、途中静默夜 / 家园遇袭、地形绕行与截断、到达失败回滚、界面（世界栏 / 战略地图 / 名册 / 跟随）、旧档兼容。
             Seg("FgExpeditionMarchSelfCheck", FgExpeditionMarchSelfCheck.Run);
+            // FG8-GEN-02 阵营领地与室内场地（FG17 FGR-GEN-021～024、040、042、090；FGT-GEN-004 / 006）：数据、生成器 v3 与旧版本存档、规划层规则（3 个种子）、
+            // 锚点冲突重试、可达性（3 个种子）、领地内容与据点登记、外延区按需登记、缓存 / 终端、入口保护、室内进出 / 倍速 / 存读档、名称提示、检查单危害、地点覆盖根、Demo 模板回归、性能、布局探针。
+            Seg("FgTerritorySelfCheck", FgTerritorySelfCheck.Run);
             // FG7-E2E-01：M7 出口——FGJ-M7 登记覆盖里程碑原文与 DEBT-FG7ENV05-07、断点；旅程源码只走输入通道、两处日程捷径只在 ApplyScheduleFixture；
             // PlanDayForTests 与正式排定同一套时刻 / 时长；命令栏全部被拒时最新一行是原因；IC-REQ-022 六类反向（真实系统：缺冷却液、回收机被摧毁、静默夜断网、
             // 静默夜 + 酸雨中暂停与 0.5x / 3x、静默夜 + 酸雨 + 缺液中真文件存读档 FGT-ENV-008、遗迹被悬崖围住）；缺口清零；FG-M7 试玩包；FGT-ENV-001～008 映射。

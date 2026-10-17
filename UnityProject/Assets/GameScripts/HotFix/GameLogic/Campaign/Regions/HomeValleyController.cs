@@ -2281,6 +2281,10 @@ namespace GameLogic.Campaign.Regions
             Ray ray = _camera.ScreenPointToRay(pointer);
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
+                if (TryClickEntrance(ray))
+                {
+                    return;
+                }
                 ClearMachineSelection();
                 return;
             }
@@ -2293,6 +2297,11 @@ namespace GameLogic.Campaign.Regions
                 _selected = marker;
                 _selected.SetSelected(true);
                 SquadCommands.SelectSingle(marker.LogicId, additive); // 单点选中同步进战略命令的选择集。
+                return;
+            }
+            // FG8-GEN-02（FGR-GEN-042）：左键点室内入口（入口标记没有碰撞体，按射线与地面的交点找）= 打开进入面板；机器优先（站在入口上的机器照常点选）。
+            if (TryClickEntrance(ray))
+            {
                 return;
             }
 
@@ -2331,6 +2340,32 @@ namespace GameLogic.Campaign.Regions
                 ClearMachineSelection();
             }
         }
+
+        /// <summary>FG8-GEN-02：射线与 0 高度地面的交点附近（interior.pick_radius 格）有室内入口 → 请求打开入口面板，返回 true。</summary>
+        private static bool TryClickEntrance(Ray ray)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || Mathf.Abs(ray.direction.y) < 1e-4f)
+            {
+                return false;
+            }
+            float t = -ray.origin.y / ray.direction.y;
+            if (t <= 0f)
+            {
+                return false;
+            }
+            Vector3 g = ray.origin + ray.direction * t;
+            WorldGen.PlannedAnchor a = InteriorSiteService.EntranceAt(state, new Vector2(g.x, g.z));
+            if (a == null || !HomeGridService.MapFor(state).IsExploredNoLoad(new GridCell(Mathf.RoundToInt(g.x), Mathf.RoundToInt(g.z))))
+            {
+                return false; // 迷雾里的入口不响应（不泄露情报）
+            }
+            InteriorSiteService.RequestEntrancePanel(a.Id);
+            return true;
+        }
+
+        /// <summary>FG8-GEN-02：自检入口——与左键同一条路径（射线 = 镜头到地面点的连线）。</summary>
+        public static bool ClickEntranceForTests(Ray ray) => TryClickEntrance(ray);
 
         private static bool IsOperational(string buildingTypeId)
         {

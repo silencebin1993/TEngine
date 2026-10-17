@@ -12,6 +12,8 @@ namespace GameLogic.Campaign.WorldSim
         /// <summary>Demo 遗留的手工区域（破碎都市、铸造前哨外围）：独立的小表面、局部坐标。
         /// FG8-GEN-02 把它们迁到星球上的阵营领地前，进出它们与进出室内一样是“切换表面”（DEBT-FG0ARCH01-01）。</summary>
         LegacyRegion = 1,
+        /// <summary>FG8-GEN-02（FGR-GEN-010 / 042）：室内场地（地下中继大厅、数据中心）——从领地里的地表入口进入的有限小表面，进出时有过渡。</summary>
+        Interior = 2,
     }
 
     /// <summary>

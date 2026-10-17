@@ -147,7 +147,7 @@ namespace GameLogic.EditorTools
             {
                 // 还原全部全局替身（RunAll 里后面的段不受本段影响）。
                 ExpeditionChecklistService.RouteProvider = ExpeditionChecklistService.DefaultRoute; // FG8-EXP-02：默认就是真实路线，复位成默认（不是清空）
-                ExpeditionChecklistService.HazardProbe = null;
+                ExpeditionChecklistService.HazardProbe = ExpeditionChecklistService.DefaultHazardProbe; // FG8-GEN-02：默认就是真实危害数据，复位成默认（不是清空）
                 RegionSquadCommandSystem.RealTime = originalRealTime;
                 CameraDirector.RealDeltaTime = originalDelta;
                 SignalCoverageService.OverrideForTests = null;
@@ -417,7 +417,7 @@ namespace GameLogic.EditorTools
                 s.BuildingRecords = buildingsBefore;
                 SignalCoverageService.Invalidate();
                 ExpeditionChecklistService.RouteProvider = ExpeditionChecklistService.DefaultRoute;
-                ExpeditionChecklistService.HazardProbe = null;
+                ExpeditionChecklistService.HazardProbe = ExpeditionChecklistService.DefaultHazardProbe; // FG8-GEN-02：默认就是真实危害数据，复位成默认（不是清空）
             }
         }
 

@@ -431,5 +431,93 @@ namespace GameLogic.Campaign.WorldGen
             }
             return n;
         }
+
+        // ── 阵营领地的主力据点、领地之间与外延区的零散前哨（FG8-GEN-02：FGR-GEN-023、034、040；DEBT-FG0ARCH06-01 剩余部分）──────────
+
+        /// <summary>
+        /// 新战役（v3 起）：把外延区以内的据点——阵营领地里按模板分布的主力据点（部分派巡逻）与领地之间的零散前哨——登记成据点
+        /// （据点 ID = 点位 ID，“从第 0 步起一直在休眠”，见 <see cref="WorldSim.WorldOutpostSystem.SpawnGenerated"/>）。幂等（WorldGenState.TerritoryOutpostsSeeded）。
+        /// 外延区（离核心 outerZoneDistance 以外）无限延伸，那里的前哨在被揭开时才按需登记（<see cref="RegisterRevealedOuter"/>）。
+        /// v1 / v2 世界没有模板，什么也不做（旧存档读回后据点与此前完全相同）。
+        /// </summary>
+        public static int SeedTerritoryOutposts(CampaignState state)
+        {
+            if (state?.World == null || state.World.TerritoryOutpostsSeeded || !UsesWorldGen(state))
+            {
+                return 0;
+            }
+            WorldGenContext ctx = ContextFor(state);
+            if (!WorldFeatures.TerritoryEnabled(ctx))
+            {
+                return 0;
+            }
+            state.World.TerritoryOutpostsSeeded = true;
+            int n = 0;
+            foreach (WorldFeature f in WorldFeatures.InnerOutposts(ctx))
+            {
+                if (SpawnFeatureOutpost(state, ctx, f))
+                {
+                    n++;
+                }
+            }
+            Log.Info($"[WorldGenService] 种子 {state.World.WorldSeed}：登记阵营领地据点与零散前哨 {n} 个（外延区按揭开范围按需登记）。");
+            return n;
+        }
+
+        /// <summary>
+        /// FG8-GEN-02（FGR-GEN-040 无限外延）：揭开一个圆（<see cref="Env.HomeExplorationService.OnAreaRevealed"/> 调用）时，把圆外 outer.reveal_margin_cells 以内
+        /// 落在外延区里的零散前哨登记成据点。点位是（种子, 分布格）的纯函数、登记即“从第 0 步起一直在休眠”，所以先去哪里、什么时候揭开都不改变结果。
+        /// 规则对首领是否已被击败无条件成立：更远处没探索的区块里永远可能有该阵营的新前哨（FGR-GEN-040 第 2 条）。O(圆覆盖的分布格)。
+        /// </summary>
+        public static int RegisterRevealedOuter(CampaignState state, int cx, int cy, int radius)
+        {
+            WorldGenContext ctx = ContextFor(state);
+            if (state == null || !WorldFeatures.TerritoryEnabled(ctx))
+            {
+                return 0;
+            }
+            int margin = Math.Max(0, (int)Math.Round(GridContent.TryGetTuning("outer.reveal_margin_cells", out float m) ? m : 96f));
+            int r = Math.Max(0, radius) + margin;
+            long dx = cx - ctx.Core.X;
+            long dy = cy - ctx.Core.Y;
+            if (WorldGenMath.Isqrt(dx * dx + dy * dy) + r < ctx.Row.OuterZoneDistance)
+            {
+                return 0; // 圆整个在外延区以内：那里的据点开局已经登记过了。
+            }
+            var list = new List<WorldFeature>();
+            WorldFeatures.Query(ctx, cx - r, cy - r, cx + r, cy + r, list);
+            long r2 = (long)r * r;
+            OuterScratch.Clear();
+            foreach (WorldFeature f in list)
+            {
+                if (f.Kind != WorldFeatureKind.Outpost || !f.Outer)
+                {
+                    continue;
+                }
+                long fx = f.X - cx;
+                long fy = f.Y - cy;
+                if (fx * fx + fy * fy <= r2)
+                {
+                    OuterScratch.Add(f);
+                }
+            }
+            int per = Math.Max(1, (int)Math.Round(GridContent.TryGetTuning("outpost.nest_garrison_per_tier", out float g) ? g : 2f));
+            int n = WorldSim.WorldOutpostSystem.SpawnGeneratedMany(state, OuterScratch, per); // 外延区的零散前哨不派巡逻
+            OuterScratch.Clear();
+            return n;
+        }
+
+        private static readonly List<WorldFeature> OuterScratch = new List<WorldFeature>(32);
+
+        private static bool SpawnFeatureOutpost(CampaignState state, WorldGenContext ctx, WorldFeature f)
+        {
+            if (WorldSim.WorldOutpostSystem.Find(state, f.Id) != null)
+            {
+                return false;
+            }
+            TerritoryTemplate tpl = f.TerritoryId != null ? ctx.Plan.TemplateFor(f.TerritoryId) : null;
+            int per = tpl?.GarrisonPerTier ?? Math.Max(1, (int)Math.Round(GridContent.TryGetTuning("outpost.nest_garrison_per_tier", out float g) ? g : 2f));
+            return WorldSim.WorldOutpostSystem.SpawnGenerated(state, f, per, tpl?.PatrolRadius ?? 0) != null;
+        }
     }
 }

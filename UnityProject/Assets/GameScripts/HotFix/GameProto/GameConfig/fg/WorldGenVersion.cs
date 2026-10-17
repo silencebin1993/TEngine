@@ -78,6 +78,14 @@ public sealed partial class WorldGenVersion : Luban.BeanBase
         RiverOutwardMaxAngle = _buf.ReadInt();
         RiverWidenTotal = _buf.ReadInt();
         RelicCoreExclusion = _buf.ReadInt();
+        TemplateSet = _buf.ReadString();
+        AnchorSet = _buf.ReadString();
+        ScatterOutpostChance = _buf.ReadFloat();
+        ScatterTierDistance = _buf.ReadInt();
+        OutpostMaxTier = _buf.ReadInt();
+        OuterZoneDistance = _buf.ReadInt();
+        OuterOutpostChance = _buf.ReadFloat();
+        OuterCacheChance = _buf.ReadFloat();
         Note = _buf.ReadString();
     }
 
@@ -323,6 +331,38 @@ public sealed partial class WorldGenVersion : Luban.BeanBase
     /// </summary>
     public readonly int RelicCoreExclusion;
     /// <summary>
+    /// 领地模板集合(fg.TbTerritoryTemplate 的 set);none=没有领地模板(v1/v2)
+    /// </summary>
+    public readonly string TemplateSet;
+    /// <summary>
+    /// 手工锚点集合(fg.TbAnchorSite 的 set);none=没有手工锚点(v1/v2)
+    /// </summary>
+    public readonly string AnchorSet;
+    /// <summary>
+    /// 领地之间(家园区外、外延区内、不在领地里)每个分布格出现零散前哨的概率(再乘据点密度)
+    /// </summary>
+    public readonly float ScatterOutpostChance;
+    /// <summary>
+    /// 零散前哨离核心每远这么多格强一级(FGR-GEN-032)
+    /// </summary>
+    public readonly int ScatterTierDistance;
+    /// <summary>
+    /// 零散前哨 / 外延区前哨的最高等级
+    /// </summary>
+    public readonly int OutpostMaxTier;
+    /// <summary>
+    /// 外延区起点离核心的距离(格,FGR-GEN-040 初值 2500)
+    /// </summary>
+    public readonly int OuterZoneDistance;
+    /// <summary>
+    /// 外延区每个分布格出现零散前哨的概率(再乘据点密度;越远越强)
+    /// </summary>
+    public readonly float OuterOutpostChance;
+    /// <summary>
+    /// 外延区每个分布格出现资源缓存的概率(越远奖励越高)
+    /// </summary>
+    public readonly float OuterCacheChance;
+    /// <summary>
     /// 这一版改了什么
     /// </summary>
     public readonly string Note;
@@ -396,6 +436,14 @@ public sealed partial class WorldGenVersion : Luban.BeanBase
         + "riverOutwardMaxAngle:" + RiverOutwardMaxAngle + ","
         + "riverWidenTotal:" + RiverWidenTotal + ","
         + "relicCoreExclusion:" + RelicCoreExclusion + ","
+        + "templateSet:" + TemplateSet + ","
+        + "anchorSet:" + AnchorSet + ","
+        + "scatterOutpostChance:" + ScatterOutpostChance + ","
+        + "scatterTierDistance:" + ScatterTierDistance + ","
+        + "outpostMaxTier:" + OutpostMaxTier + ","
+        + "outerZoneDistance:" + OuterZoneDistance + ","
+        + "outerOutpostChance:" + OuterOutpostChance + ","
+        + "outerCacheChance:" + OuterCacheChance + ","
         + "note:" + Note + ","
         + "}";
     }

@@ -130,6 +130,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPcg);
                 Step(CheckPerformanceAndClock);
                 Step(CheckV2Frozen);
+                Step(CheckV3Frozen);
                 Step(CheckLayoutProbes);
             }
             catch (Exception e)
@@ -435,7 +436,9 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             WorldGenVersion v2 = WorldGenContent.Version(2);
-            Expect(WorldGenVersions.Current == 2 && WorldGenContent.Versions.Count == 2 && v2.StartFlatRadius == 12 && v2.StartFlatPollution == 1
+            // FG8-GEN-02 起最新是 v3（领地模板 / 锚点，由 FgTerritorySelfCheck 守护）；这里只守 v2 行本身不变，版本数不再写死。
+            Expect(WorldGenVersions.Current >= 2 && WorldGenContent.Versions.Count >= 2 && WorldGenContent.Versions.Max(x => x.Version) == WorldGenVersions.Current
+                   && v2.StartFlatRadius == 12 && v2.StartFlatPollution == 1
                    && v2.StartNoOutpostRadius == 64 && v2.GuaranteeSet == "g2" && v2.SettingSet == "a2" && v2.StartClearSet == "c1" && v2.TerritorySet == "t1"
                    && v2.PresetSet == WorldGenContent.NoSet && WorldGenContent.Version(1).StartClearSet == "c1" && WorldGenContent.Version(1).GuaranteeSet == WorldGenContent.NoSet,
                 "生成器 v2 行入表：起始区第 1 级 12 格 / 污染 ≤ 1、第 3 级 64 格无据点、保证集合 g2、分项设置 a2、起始区快照 c1、领地集合沿用 t1；v1 行只多了快照 c1（其余新列不生效）");
@@ -1143,13 +1146,14 @@ namespace GameLogic.EditorTools
             WorldGenContext ctx = WorldGenService.ContextFor(s);
             List<WorldFeature> nests = WorldFeatures.HomeZoneNests(ctx);
             OutpostRecord[] outposts = WorldOutpostSystem.Outposts(s).ToArray();
-            bool seeded = s.World.HomeOutpostsSeeded && outposts.Length == nests.Count && nests.Count > 0
+            // FG8-GEN-02（生成器 v3）起开局还登记阵营领地据点 / 零散前哨（FgTerritorySelfCheck E3），这里只数侦察巢。
+            bool seeded = s.World.HomeOutpostsSeeded && outposts.Count(o => o.Kind == WorldOutpostSystem.KindScoutNest) == nests.Count && nests.Count > 0
                           && nests.All(f => outposts.Any(o => o.OutpostId == f.Id && o.CellX == f.X && o.CellY == f.Y && o.Kind == "scout_nest" && o.Tier == f.Tier
                                                                && o.Garrison == Math.Min(o.GarrisonCap, 2 * f.Tier)));
             int again = WorldGenService.SeedHomeZoneOutposts(s);
-            Expect(s.World.WorldSeed == seed && s.RandomSeed == seed && s.World.GeneratorVersion == 2 && s.World.WorldSettingsId == ExtremeCode && seeded && again == 0
+            Expect(s.World.WorldSeed == seed && s.RandomSeed == seed && s.World.GeneratorVersion == WorldGenVersions.Current && s.World.WorldSettingsId == ExtremeCode && seeded && again == 0
                    && s.BuildingRecords.Any(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore),
-                $"新战役（主菜单同一入口 ApplyNewGameWorld）：种子 / 生成器 v2 / 世界设置 {ExtremeCode} 写进存档域；家园控制器播种开局建筑，并把家园区 {nests.Count} 个侦察巢登记成据点" +
+                $"新战役（主菜单同一入口 ApplyNewGameWorld）：种子 / 生成器 v{WorldGenVersions.Current}（当前版本）/ 世界设置 {ExtremeCode} 写进存档域；家园控制器播种开局建筑，并把家园区 {nests.Count} 个侦察巢登记成据点" +
                 "（据点 ID = 点位 ID、坐标 / 等级 / 驻军 = 等级 × 2 一致）；再登记一次什么也不加（幂等）");
 
             string NestKey(CampaignState st) => string.Join(";", WorldOutpostSystem.Outposts(st).Select(o => $"{o.OutpostId}@{o.CellX},{o.CellY}t{o.Tier}g{o.Garrison}/{o.GarrisonCap}"));
@@ -1178,7 +1182,7 @@ namespace GameLogic.EditorTools
                 CampaignSession.Set(1, l);
                 WorldGenContext lc = WorldGenService.ContextFor(l);
                 MapMarkerRecord lm = WorldMapMarkers.All(l).FirstOrDefault();
-                same = l.World.WorldSettingsId == ExtremeCode && l.World.GeneratorVersion == 2 && l.World.HomeOutpostsSeeded
+                same = l.World.WorldSettingsId == ExtremeCode && l.World.GeneratorVersion == WorldGenVersions.Current && l.World.HomeOutpostsSeeded
                        && WorldOutpostSystem.Outposts(l).Count == outposts.Length && lm != null && lm.Note == "这里有废墟" && lm.CellX == 55 && l.World.NextMapMarkerSerial == 2
                        && lc.Plan.FullFingerprint() == fp && HashOf(lc.Source, 0, 0) == h00
                        && HomeGridService.MapFor(l).GetTerrain(new GridCell(70, 70)) == GridContent.TerrainCode("water")
@@ -1256,9 +1260,9 @@ namespace GameLogic.EditorTools
                 NewGamePanelUIToolkit.Open((sd, st) => { started++; gotSeed = sd; gotSettings = st; }, () => backed++);
                 bool opened = NewGamePanelUIToolkit.IsOpen && panel.PanelVisible && panel.SeedFieldText == "777" && panel.AxisRowCount == 5
                               && WorldSettings.TryDecodeShareCode(panel.ShareFieldText, out int ds, out WorldSettings dset, out int dv) == WorldSettings.ShareError.None
-                              && ds == 777 && dv == 2 && dset.Id == WorldGenContent.DefaultPresetId && panel.GeneratorText.Contains("v2")
+                              && ds == 777 && dv == WorldGenVersions.Current && dset.Id == WorldGenContent.DefaultPresetId && panel.GeneratorText.Contains("v" + WorldGenVersions.Current)
                               && panel.LevelButton(0, 1).text.StartsWith("▸", StringComparison.Ordinal) && InputRouter.ModalUiOpen;
-                Expect(opened, $"新游戏设置打开：默认种子来自 CampaignRandomService（旅程固定种子 777 生效），五个分项各一排按钮（标准档有“▸”），分享短码 {panel.ShareFieldText} 随之生成，生成器 v2，模态");
+                Expect(opened, $"新游戏设置打开：默认种子来自 CampaignRandomService（旅程固定种子 777 生效），五个分项各一排按钮（标准档有“▸”），分享短码 {panel.ShareFieldText} 随之生成，生成器 v{WorldGenVersions.Current}（当前版本），模态");
 
                 InvokeClickable(panel.RandomButton);
                 bool randomChanged = panel.SeedFieldText != "777" && panel.TryCurrentSeed(out _, out bool fromText) && !fromText;
@@ -1309,7 +1313,7 @@ namespace GameLogic.EditorTools
                     "导入：别人的短码（种子 -4242 + 宽松起始区）一键换好种子与设置；生成器 v1 的短码切到 v1（分项按钮收起、写明与短码一致）；“开始”把（种子, 设置）交回主菜单并关面板");
 
                 NewGamePanelUIToolkit.Open((sd, st) => started++, () => backed++);
-                bool reset = panel.Version == 2 && panel.AxisRowCount == 5 && panel.CurrentSettings().Id == WorldGenContent.DefaultPresetId;
+                bool reset = panel.Version == WorldGenVersions.Current && panel.AxisRowCount == 5 && panel.CurrentSettings().Id == WorldGenContent.DefaultPresetId;
                 UiEscapeStack.CloseTop();
                 Expect(reset && backed == 1 && started == 1 && !NewGamePanelUIToolkit.IsOpen,
                     "再次打开回到当前版本、全部标准档；Esc（Esc 栈）= 返回：交回主菜单、不开始、不写任何存档");
@@ -1948,10 +1952,10 @@ namespace GameLogic.EditorTools
             (-7, 0xB964BA316DBD9362UL),
         };
 
-        private static string FeatureFingerprint(int seed)
+        private static string FeatureFingerprint(int seed, int version = 2)
         {
             var list = new List<WorldFeature>();
-            WorldFeatures.Query(Ctx(seed), -600, -600, 600, 600, list);
+            WorldFeatures.Query(Ctx(seed, version: version), -600, -600, 600, 600, list);
             var sb = new System.Text.StringBuilder();
             foreach (WorldFeature f in list)
             {
@@ -1959,6 +1963,93 @@ namespace GameLogic.EditorTools
                     .Append(',').Append(f.Shifted ? 1 : 0).Append(';');
             }
             return sb.ToString();
+        }
+
+        /// <summary>v3 生成输入（<see cref="WorldGenInputs.Manifest"/>(3) 中以 v3. 开头的部分：版本行 FG8 列、领地模板 tt3、锚点 as3、模板点位）的摘要基准。**已有行永远不许改**。</summary>
+        private static readonly (string part, ulong digest)[] InputBaselineV3 =
+        {
+            // 2026-10-17 FG8-GEN-02 发布 v3 时记录（同日修复轮改了 as3 两张 Demo 地图的原点区间，v3.anchors 重记；v3 尚未发布）。v2 原有的部分（领地 t1、起始区快照、保证集合 g2、分项设置 a2、版本行 FG3 列）摘要与 v2 基准逐位相同；版本行因版本号不同而不同。
+            ("v3.version", 0x87EB6C7CF94418E3UL),
+            ("v3.territories[t1]", 0x2C40043172F1C2EEUL),
+            ("v3.presets[none]", 0xCBF29CE484222325UL),
+            ("v3.start_protection.standard", 0xEBD23BD380D71E1EUL),
+            ("v3.start_protection.relaxed", 0xF02E541F754A6148UL),
+            ("v3.version.fg3", 0x9B4A335DBDB2DA32UL),
+            ("v3.guarantees[g2]", 0x0971E13C86E0A632UL),
+            ("v3.settings[a2]", 0xBBFA81E4238B7089UL),
+            ("v3.version.fg8", 0xCDFFADF215CAA5B8UL),
+            ("v3.templates[tt3]", 0x71C93921ECBBE0BAUL),
+            ("v3.anchors[as3]", 0xC3AE309D20ECFCF8UL),
+            ("v3.template_points", 0x5E6057095494BC19UL),
+        };
+
+        /// <summary>v3 规划层完整指纹（v2 的全部 + 手工锚点 + 领地危害区）的摘要基准。</summary>
+        private static readonly (int seed, ulong digest)[] PlanBaselineV3 =
+        {
+            // 2026-10-17 FG8-GEN-02 发布 v3 时记录（v2 指纹 + 6 个锚点 + 18 个领地危害区）；同日修复轮（入口离领地边界至少一个平整半径、Demo 原点 0.55～0.75 倍半径）重记。
+            (1, 0x7F3C2FA6599C9C38UL),
+            (42, 0x9DC9C888419AF904UL),
+            (-7, 0xCB080BCF5D0032A5UL),
+        };
+
+        /// <summary>v3 点位分布指纹（遗迹点 + 侦察巢 + 领地据点 / 资源缓存 / 旧终端 / 支线地点 + 零散前哨，±600 格）的摘要基准。</summary>
+        private static readonly (int seed, ulong digest)[] FeatureBaselineV3 =
+        {
+            // 2026-10-17 FG8-GEN-02 发布 v3 时记录（三个种子 ±600 格共 231 个点位，v2 是 173 个）；同日修复轮锚点挪位后重记（230 个点位，种子 42 不变）。
+            (1, 0x15B01C8608FC9B14UL),
+            (42, 0x59721CDA284B0640UL),
+            (-7, 0xFE13473D4949F360UL),
+        };
+
+        /// <summary>FGT-GEN-006（FG8-GEN-02）：v3 冻结基准——生成输入清单、规划层完整指纹、点位分布指纹三层，与 v2 同一套守法。</summary>
+        private static void CheckV3Frozen()
+        {
+            var wrong = new List<string>();
+            List<KeyValuePair<string, string>> parts = WorldGenInputs.Manifest(3).Where(kv => kv.Key.StartsWith("v3.", StringComparison.Ordinal)).ToList();
+            foreach (KeyValuePair<string, string> kv in parts)
+            {
+                ulong d = WorldGenInputs.Digest(kv.Value);
+                int i = Array.FindIndex(InputBaselineV3, b => b.part == kv.Key);
+                if (i < 0)
+                {
+                    wrong.Add($"缺基准 (\"{kv.Key}\", 0x{d:X16}UL)");
+                }
+                else if (InputBaselineV3[i].digest != d)
+                {
+                    wrong.Add($"{kv.Key} 基准 0x{InputBaselineV3[i].digest:X16} 实际 0x{d:X16}");
+                }
+            }
+            var planWrong = new List<string>();
+            var featureWrong = new List<string>();
+            int featureCount = 0;
+            foreach (int seed in new[] { 1, 42, -7 })
+            {
+                ulong pd = WorldGenInputs.Digest(Ctx(seed, version: 3).Plan.FullFingerprint());
+                int pi = Array.FindIndex(PlanBaselineV3, b => b.seed == seed);
+                if (pi < 0)
+                {
+                    planWrong.Add($"缺基准 ({seed}, 0x{pd:X16}UL)");
+                }
+                else if (PlanBaselineV3[pi].digest != pd)
+                {
+                    planWrong.Add($"种子 {seed}：基准 0x{PlanBaselineV3[pi].digest:X16} 实际 0x{pd:X16}");
+                }
+                string ffp = FeatureFingerprint(seed, 3);
+                featureCount += ffp.Split(';').Length - 1;
+                ulong fd = WorldGenInputs.Digest(ffp);
+                int fi = Array.FindIndex(FeatureBaselineV3, b => b.seed == seed);
+                if (fi < 0)
+                {
+                    featureWrong.Add($"缺基准 ({seed}, 0x{fd:X16}UL)");
+                }
+                else if (FeatureBaselineV3[fi].digest != fd)
+                {
+                    featureWrong.Add($"种子 {seed}：基准 0x{FeatureBaselineV3[fi].digest:X16} 实际 0x{fd:X16}");
+                }
+            }
+            Expect(wrong.Count == 0 && parts.Count >= 4 && planWrong.Count == 0 && featureWrong.Count == 0 && featureCount > 173,
+                $"FGT-GEN-006 生成器 v3 冻结基准：生成输入清单 {parts.Count} 个 v3 部分、规划层完整指纹（种子 1 / 42 / -7）、点位分布指纹（±600 格共 {featureCount} 个点位，比 v2 的 173 个多出领地内容）与基准逐个一致" +
+                (wrong.Count + planWrong.Count + featureWrong.Count == 0 ? string.Empty : "——" + string.Join("；", wrong.Concat(planWrong).Concat(featureWrong))));
         }
 
         private static void CheckV2Frozen()
@@ -1985,7 +2076,7 @@ namespace GameLogic.EditorTools
             var planWrong = new List<string>();
             foreach (int seed in new[] { 1, 42, -7 })
             {
-                string fp = Ctx(seed).Plan.FullFingerprint();
+                string fp = Ctx(seed, version: 2).Plan.FullFingerprint();
                 ulong d = WorldGenInputs.Digest(fp);
                 int i = Array.FindIndex(PlanBaselineV2, b => b.seed == seed);
                 if (i < 0)

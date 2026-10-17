@@ -38,6 +38,8 @@ namespace GameLogic.Campaign.Nav
         public const int OwnerRaidPlan = 4;
         /// <summary>FG8-EXP-02 第 0 批：远征地点锚点的可达性校验（从归还核心到候选点，玩家通行类别；走后台通道，发出后当场取回，见 <see cref="Regions.ExpeditionSiteAnchors.EnsureResolved"/>）。</summary>
         public const int OwnerExpedition = 5;
+        /// <summary>FG8-GEN-02（FGR-GEN-090）：手工锚点 / 室内入口的可达性校验（从归还核心到入口，玩家通行类别；后台通道发出后当场取回，见 <see cref="WorldGen.TerritoryAnchorChecks"/>）。</summary>
+        public const int OwnerAnchorCheck = 6;
 
         public static NavKernel Kernel { get; private set; }
         public static CampaignState BoundState { get; private set; }

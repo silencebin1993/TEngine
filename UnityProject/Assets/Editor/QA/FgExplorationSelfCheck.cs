@@ -300,6 +300,23 @@ namespace GameLogic.EditorTools
         private static string AllDetails(string typeId) =>
             string.Join(" | ", NotificationCenter.History.Where(e => e?.Type != null && e.Type.Id == typeId).Select(e => e.Latest?.Detail ?? string.Empty));
 
+        /// <summary>
+        /// 领地危害的取样点：有领地模板的世界（FG8-GEN-02 起，生成器 v3）领地里只有模板分布的危害区算危害（FGR-GEN-023），取这块领地第一个危害区的圆心；
+        /// 没有模板的旧世界（v1 / v2）整块领地都算，取领地中心（与 FG7-ENV-05 一致）。
+        /// </summary>
+        private static Vector2Int HazardProbe(WorldPlan plan, PlannedTerritory t)
+        {
+            if (plan != null && plan.HasTemplates && plan.TemplateFor(t.Id) != null)
+            {
+                PlannedHazardZone z = plan.HazardZones.FirstOrDefault(h => h.TerritoryId == t.Id);
+                if (z != null)
+                {
+                    return new Vector2Int(z.CenterX, z.CenterY);
+                }
+            }
+            return new Vector2Int(t.CenterX, t.CenterY);
+        }
+
         private static List<WorldFeature> Relics(CampaignState s, int half)
         {
             GridCell c = HomeGridService.CorePivot(s);
@@ -757,7 +774,8 @@ namespace GameLogic.EditorTools
                 var faction = plan.Territories.Where(t => t.IsFaction).ToList();
                 bool zones = faction.Count == 4 && faction.All(t =>
                 {
-                    Hazard h = HomeExplorationService.HazardAt(s, t.CenterX, t.CenterY, false, out PlannedTerritory at, out bool belt);
+                    Vector2Int hp = HazardProbe(plan, t);
+                    Hazard h = HomeExplorationService.HazardAt(s, hp.x, hp.y, false, out PlannedTerritory at, out bool belt);
                     return h != null && h == HomeExplorationService.HazardForTerritory(t.Id) && at == t && !belt;
                 });
                 var belted = faction.Where(t => t.HazardWidth > 0).ToList();
@@ -770,7 +788,8 @@ namespace GameLogic.EditorTools
                 bool outside = HomeExplorationService.HazardAt(s, HomeGridService.CorePivot(s).X, HomeGridService.CorePivot(s).Y, false, out _, out _) == null;
                 PlannedTerritory act1 = faction.First(t => t.Act == 1);
                 PlannedTerritory act2 = faction.First(t => t.Act == 2 && t.HazardWidth > 0);
-                bool desc1 = HomeExplorationService.TryDescribeHazard(s, act1.CenterX, act1.CenterY, out string t1, out string b1);
+                Vector2Int p1 = HazardProbe(plan, act1);
+                bool desc1 = HomeExplorationService.TryDescribeHazard(s, p1.x, p1.y, out string t1, out string b1);
                 Hazard h1 = HomeExplorationService.HazardForTerritory(act1.Id);
                 bool text1 = desc1 && t1.Contains(GameText.Get(h1.NameKey)) && t1.Contains(GameText.Get(act1.NameKey)) && b1.Contains(GameText.Get(h1.EffectKey))
                              && b1.Contains(GameText.Get(h1.CounterKey)) && b1.Contains(GameText.Get("hazard.hover.pending"));
@@ -1094,7 +1113,8 @@ namespace GameLogic.EditorTools
                 // 悬停：指着第一幕领地中心 → 危害名、效果、应对；指着核心 → 清空。
                 PlannedTerritory act1 = WorldGenService.PlanFor(s).Territories.First(t => t.IsFaction && t.Act == 1);
                 Hazard h1 = HomeExplorationService.HazardForTerritory(act1.Id);
-                panel.HoverAt(panel.View.ToCanvas(act1.CenterX, act1.CenterY));
+                Vector2Int hp1 = HazardProbe(WorldGenService.PlanFor(s), act1);
+                panel.HoverAt(panel.View.ToCanvas(hp1.x, hp1.y));
                 string hover = panel.HoverText;
                 panel.HoverAt(panel.View.ToCanvas(HomeGridService.CorePivot(s).X + 3, HomeGridService.CorePivot(s).Y + 3));
                 bool hoverOk = hover.Contains(GameText.Get(h1.NameKey)) && hover.Contains(GameText.Get(h1.EffectKey)) && hover.Contains(GameText.Get(h1.CounterKey))
@@ -1169,7 +1189,7 @@ namespace GameLogic.EditorTools
                 // 英文。
                 GameSettings.SetLanguage(GameLanguage.En);
                 HomeExplorationService.TryDescribeRelic(s, relic.Id, out string et, out string eb);
-                HomeExplorationService.TryDescribeHazard(s, act1.CenterX, act1.CenterY, out string ht, out string hb);
+                HomeExplorationService.TryDescribeHazard(s, hp1.x, hp1.y, out string ht, out string hb);
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 Expect(eb.Contains("cells from the core") && hb.Contains("Effect:") && hb.Contains("Counter:"), $"U1 英文：遗迹 “{et}” / 危害 “{ht}” 的说明都有英文");
 

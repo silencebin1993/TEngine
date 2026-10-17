@@ -614,6 +614,12 @@ namespace GameLogic.EditorTools
             double lead = arrival + g.Speed * GameClock.StepSeconds * 2.5; // 第 3 步到达
             g.PosX = g.TargetX - dx / dist * lead;
             g.PosY = g.TargetY - dy / dist * lead;
+            // 夹具：队伍沿排定路线走（朝当前路点，不是直奔目标）；把它摆到目标正前方后，路线也换成“直达目标”的一段，
+            // 这样到达恰好落在第 3 步（本段测的是步内暂停，不是路线几何——FG8-GEN-02 起领地改了地形，路线最后几个路点的方向随之不同）。
+            g.RouteX = new[] { (int)Math.Round(g.TargetX) };
+            g.RouteY = new[] { (int)Math.Round(g.TargetY) };
+            g.RouteIndex = 0;
+            g.ReplanAt = -1;
             long pausedAt = -1;
             Func<bool> original = NotificationCenter.AutoPauseHandler;
             NotificationCenter.AutoPauseHandler = () =>
@@ -642,7 +648,8 @@ namespace GameLogic.EditorTools
                 long refunded = GameClock.Ticks - afterPause;
                 Expect(stopped && held && refunded > 0,
                     $"步内自动暂停（3x、突袭在第 {pausedAt - before + 1} 步到达）：暂停停在触发的那一步（{before}→{afterPause}，没有把本帧剩下的步跑完），" +
-                    $"暂停期间不动（{held}）；继续后退回的 {refunded} 步照常执行（不丢时间）");
+                    $"暂停期间不动（{held}）；继续后退回的 {refunded} 步照常执行（不丢时间）" +
+                    (stopped ? string.Empty : $"——触发步 {pausedAt}，队伍 {g.GroupId} 状态 {g.State}、离目标 {Math.Sqrt((g.TargetX - g.PosX) * (g.TargetX - g.PosX) + (g.TargetY - g.PosY) * (g.TargetY - g.PosY)):F1} 格（到达半径 {arrival}）、速度 {g.Speed:F2}、路线 {g.RouteState}"));
 
                 WorldView.FocusOn(g.GroupId);
                 for (int i = 0; i < 12; i++)

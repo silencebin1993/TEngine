@@ -172,6 +172,13 @@ namespace GameLogic.Campaign.Feedback
             Add(MarchCue(FeedbackCueId.ExpeditionMarchArrived, "sfx_expedition_depart", "arrived", "远征队到达目的地", FeedbackTone.Info, 5f));
             Add(MarchCue(FeedbackCueId.ExpeditionMarchEncounter, "sfx_alarm_warning", "encounter", "行军途中发现敌人", FeedbackTone.Warning, 6f));
             Add(MarchCue(FeedbackCueId.ExpeditionMarchHazard, "sfx_alarm_warning", "hazard", "远征队进入危害带", FeedbackTone.Warning, 5f));
+            // FG8-GEN-02（FG08 第 7 节 / FG17 第 4 节）：远征队进入敌方领地（正文 = 领地名 + 介绍）。
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchTerritory, "sfx_objective_new", "territory", "远征队进入敌方领地", FeedbackTone.Info, 5f));
+            // FG8-GEN-02（FGR-GEN-042）：进出室内场地（画面另有过渡遮罩与面板文字，B07 三通道）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorEnter, SfxId = "sfx_expedition_depart", Tag = "室内", Caption = "进入室内场地", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.enter",
+                Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-GEN-02 室内进出（FGR-GEN-042）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorExit, SfxId = "sfx_evacuate", Tag = "室内", Caption = "回到地表", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.exit",
+                Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-GEN-02 室内进出（FGR-GEN-042）" });
 
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });

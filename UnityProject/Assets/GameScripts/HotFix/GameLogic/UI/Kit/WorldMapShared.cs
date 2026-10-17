@@ -100,6 +100,14 @@ namespace GameLogic.UI.Kit
         Expedition,
         /// <summary>FG8-EXP-02：远征目的地锚点（远征队在外时标出要走到哪里）。</summary>
         ExpeditionGoal,
+        /// <summary>FG8-GEN-02（FGR-GEN-024 / 042）：手工锚点——远征地点、首领场地、室内入口（领地图层；标签写名字与种类）。</summary>
+        Anchor,
+        /// <summary>FG8-GEN-02（FGR-GEN-023）：资源缓存（遗迹图层；已打开的换样式）。</summary>
+        Cache,
+        /// <summary>FG8-GEN-02（FGR-GEN-023）：旧终端（遗迹图层；已读取的换样式）。</summary>
+        Terminal,
+        /// <summary>FG8-GEN-02（DEBT-FG0ARCH06-08）：敌方巡逻（据点图层；标签写人数，路线还在规划时写“正在规划路线…”）。</summary>
+        Patrol,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -234,6 +242,34 @@ namespace GameLogic.UI.Kit
                             Add(WorldMapItemKind.Territory, WorldMapLayer.Territory, "territory:" + t.Id, t.CenterX, t.CenterY, label);
                         }
                     }
+                    // FG8-GEN-02（FGR-GEN-023；DEBT-FG7ENV05-02）：领地里按模板分布的危害区（同一图例颜色的小圈；只画已显示领地里、已探索的）。
+                    foreach (PlannedHazardZone z in plan.HazardZones)
+                    {
+                        PlannedTerritory zt = plan.Find(z.TerritoryId);
+                        if (zt == null || (zt.Act > act && !HomeExplorationService.TerritoryVisible(state, zt)) || !map.IsExploredNoLoad(new GridCell(z.CenterX, z.CenterY)))
+                        {
+                            continue;
+                        }
+                        Hazard hz = HomeExplorationService.HazardForTerritory(zt.Id);
+                        Circles.Add(new WorldMapCircle
+                        {
+                            Layer = WorldMapLayer.Territory, X = z.CenterX, Y = z.CenterY, Radius = z.Radius, OuterRadius = z.Radius,
+                            Label = hz != null ? GameText.Format("ui.map.hazard_zone", GameText.Get(hz.NameKey), GameText.Get(zt.NameKey)) : string.Empty,
+                            HazardId = hz?.Id, Tint = HomeExplorationService.HazardColor(hz),
+                        });
+                    }
+                    // FG8-GEN-02（FGR-GEN-024 / 042）：手工锚点（按表的 mapAct 幕次显示；预留区永远不显示，FGR-GEN-041）。
+                    foreach (PlannedAnchor a in plan.Anchors)
+                    {
+                        if (a.IsReserve || a.Row.MapAct > act || !view.Contains(a.EntryX, a.EntryY, margin))
+                        {
+                            continue;
+                        }
+                        Vector2 at = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, a);
+                        bool moved = Campaign.WorldGen.TerritoryAnchorChecks.IsMoved(state, a.Id);
+                        string name = GameText.Format("anchor.hover.title", GameText.Get(a.Row.NameKey), GameText.Get(a.KindKey));
+                        Add(WorldMapItemKind.Anchor, WorldMapLayer.Territory, "anchor:" + a.Id, at.x, at.y, moved ? GameText.Format("ui.map.anchor.moved", name) : name);
+                    }
                 }
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Signal))
@@ -299,15 +335,32 @@ namespace GameLogic.UI.Kit
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Outposts))
             {
-                foreach (OutpostRecord o in WorldOutpostSystem.Outposts(state))
+                // FG8-GEN-02（DEBT-FG0ARCH06-06 / 08）：按空间桶只取视野里的据点（与据点总数无关）；标签写阵营、种类、等级与驻军（休眠的按只读补算现算，不改状态）。
+                _outposts.Clear();
+                WorldOutpostSystem.OutpostsNear(state, (float)view.CenterX, (float)view.CenterY, (float)(Math.Max(view.HalfWidth, view.HalfHeight) + margin), _outposts);
+                foreach (OutpostRecord o in _outposts)
                 {
-                    if (o == null || !view.Contains(o.CellX, o.CellY, margin) || !map.IsExploredNoLoad(new GridCell(o.CellX, o.CellY)))
+                    if (o == null || o.Destroyed || !view.Contains(o.CellX, o.CellY, margin) || !map.IsExploredNoLoad(new GridCell(o.CellX, o.CellY)))
                     {
                         continue;
                     }
-                    string label = o.Kind == "scout_nest" ? GameText.Format("world.poi.scout_nest", Math.Max(1, o.Tier)) : GameText.Get("ui.map.filter.outposts");
-                    Add(WorldMapItemKind.Outpost, WorldMapLayer.Outposts, o.OutpostId, o.CellX, o.CellY, label);
+                    Add(WorldMapItemKind.Outpost, WorldMapLayer.Outposts, o.OutpostId, o.CellX, o.CellY, OutpostLabel(state, o));
+                    // 这个据点的巡逻（巡逻在据点附近折返；只画站在已探索格上的）。
+                    _patrols.Clear();
+                    WorldOutpostSystem.PatrolsOf(state, o.OutpostId, _patrols);
+                    foreach (PatrolRecord p in _patrols)
+                    {
+                        int px = (int)Math.Round(p.PosX);
+                        int py = (int)Math.Round(p.PosY);
+                        if (!view.Contains(px, py, margin) || !map.IsExploredNoLoad(new GridCell(px, py)))
+                        {
+                            continue;
+                        }
+                        Add(WorldMapItemKind.Patrol, WorldMapLayer.Outposts, p.PatrolId, p.PosX, p.PosY, PatrolLabel(p));
+                    }
                 }
+                _outposts.Clear();
+                _patrols.Clear();
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Relics) && WorldGenService.ContextFor(state) != null)
             {
@@ -320,11 +373,13 @@ namespace GameLogic.UI.Kit
                 }
                 foreach (WorldFeature f in _features)
                 {
-                    if (f.Kind == WorldFeatureKind.Relic && map.IsExploredNoLoad(new GridCell(f.X, f.Y)))
+                    bool poi = f.Kind == WorldFeatureKind.Cache || f.Kind == WorldFeatureKind.Terminal;
+                    if ((f.Kind == WorldFeatureKind.Relic || poi) && map.IsExploredNoLoad(new GridCell(f.X, f.Y)))
                     {
-                        // FG7-ENV-05：标签写距离环与状态（回收中 / 已回收），已回收的图标换样式。
+                        // FG7-ENV-05：标签写距离环与状态（回收中 / 已回收），已回收的图标换样式。FG8-GEN-02：资源缓存 / 旧终端同一图层，各自的图标与状态。
                         string label = HomeExplorationService.MapLabel(state, f, out bool done);
-                        Add(WorldMapItemKind.Relic, WorldMapLayer.Relics, f.Id, f.X, f.Y, label);
+                        WorldMapItemKind kind = f.Kind == WorldFeatureKind.Cache ? WorldMapItemKind.Cache : f.Kind == WorldFeatureKind.Terminal ? WorldMapItemKind.Terminal : WorldMapItemKind.Relic;
+                        Add(kind, WorldMapLayer.Relics, f.Id, f.X, f.Y, label);
                         if (done)
                         {
                             WorldMapItem last = Items[Items.Count - 1];
@@ -384,6 +439,28 @@ namespace GameLogic.UI.Kit
                 Items.Sort((a, b) => ((a.X - cx) * (a.X - cx) + (a.Y - cy) * (a.Y - cy)).CompareTo((b.X - cx) * (b.X - cx) + (b.Y - cy) * (b.Y - cy)));
                 Items.RemoveRange(maxIcons, Items.Count - maxIcons);
             }
+        }
+
+        private readonly List<OutpostRecord> _outposts = new List<OutpostRecord>(32);
+        private readonly List<PatrolRecord> _patrols = new List<PatrolRecord>(4);
+
+        /// <summary>FG8-GEN-02（DEBT-FG0ARCH06-08）：据点标签——“静默据点（3 级）（驻军 6）”/“铸造零散前哨（5 级）”/“侦察巢（2 级）”。驻军按只读补算（Peek，观察不改变结果）。</summary>
+        /// <summary>巡逻的地图标签：“敌方巡逻（3 台）”；路线还在规划（刚醒来的据点）时追加“正在规划路线…”。</summary>
+        public static string PatrolLabel(PatrolRecord p)
+        {
+            string label = GameText.Format("outpost.patrol.marker", GameText.Get("outpost.patrol.name"), Math.Max(1, p.UnitCount));
+            return p.RouteState == WorldOutpostSystem.RouteAwaiting ? label + " · " + GameText.Get("nav.route.awaiting") : label;
+        }
+
+        public static string OutpostLabel(CampaignState state, OutpostRecord o)
+        {
+            string faction = !string.IsNullOrEmpty(o.TerritoryId) && GameText.Has(Campaign.WorldGen.TerritoryPlanner.FactionKey(o.TerritoryId)) ? GameText.Get(Campaign.WorldGen.TerritoryPlanner.FactionKey(o.TerritoryId)) : string.Empty;
+            string name = o.Kind == WorldOutpostSystem.KindScoutNest ? GameText.Format("world.poi.scout_nest", Math.Max(1, o.Tier))
+                : o.Kind == WorldOutpostSystem.KindTerritory ? GameText.Format("world.poi.outpost", faction, Math.Max(1, o.Tier))
+                : o.Kind == WorldOutpostSystem.KindScatter || o.Kind == WorldOutpostSystem.KindOuter ? GameText.Format("world.poi.scatter_outpost", faction, Math.Max(1, o.Tier))
+                : GameText.Get("outpost.name");
+            WorldOutpostSystem.Peek(state, o, out int garrison, out _);
+            return GameText.Format("outpost.marker", name, garrison);
         }
 
         private void Add(WorldMapItemKind kind, WorldMapLayer layer, string id, double x, double y, string label, Color tint = default)
@@ -885,8 +962,12 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-home", item.Kind == WorldMapItemKind.Home);
                 e.EnableInClassList("wg-icon-own", item.Kind == WorldMapItemKind.OwnCluster);
                 e.EnableInClassList("wg-icon-outpost", item.Kind == WorldMapItemKind.Outpost);
+                e.EnableInClassList("wg-icon-patrol", item.Kind == WorldMapItemKind.Patrol);
                 e.EnableInClassList("wg-icon-relic", item.Kind == WorldMapItemKind.Relic);
-                e.EnableInClassList("wg-icon-relic-done", item.Kind == WorldMapItemKind.Relic && item.Done);
+                e.EnableInClassList("wg-icon-relic-done", (item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal) && item.Done);
+                e.EnableInClassList("wg-icon-cache", item.Kind == WorldMapItemKind.Cache);
+                e.EnableInClassList("wg-icon-terminal", item.Kind == WorldMapItemKind.Terminal);
+                e.EnableInClassList("wg-icon-anchor", item.Kind == WorldMapItemKind.Anchor);
                 e.EnableInClassList("wg-icon-resource", item.Kind == WorldMapItemKind.Resource);
                 e.EnableInClassList("wg-icon-group", item.Kind == WorldMapItemKind.Group);
                 e.EnableInClassList("wg-icon-marker", item.Kind == WorldMapItemKind.Marker);
@@ -904,7 +985,8 @@ namespace GameLogic.UI.Kit
                 bool showLabel = _labels && (item.Kind == WorldMapItemKind.Home || item.Kind == WorldMapItemKind.OwnCluster || item.Kind == WorldMapItemKind.Marker || item.Kind == WorldMapItemKind.Outpost
                                             || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory
                                             || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning
-                                            || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal);
+                                            || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal
+                                            || item.Kind == WorldMapItemKind.Anchor || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)
                 {

@@ -424,6 +424,15 @@ namespace GameLogic.EditorTools
                 case 433: StepRelicRevealed(inStep); break;
                 case 434: StepRelicMapRecover(inStep); break;
                 case 435: StepRelicCleanup(inStep); break;
+                // FG8-GEN-02：室内场地进出（测试捷径：一台家园机器开到地下中继大厅入口旁、入口附近视为有中继覆盖；真实鼠标点入口 → 入口面板“进入”→ 过渡、镜头切到室内 →
+                // 机器到出口旁 → 真实鼠标点出口 → 出口面板“离开”→ 回到地表入口旁、室内自动卸载 → 夹具还原）
+                case 439: StepInteriorPrepare(inStep); break;
+                case 440: StepInteriorEntranceClick(inStep); break;
+                case 441: StepInteriorEnterPanel(inStep); break;
+                case 442: StepInteriorEntered(inStep); break;
+                case 443: StepInteriorExitClick(inStep); break;
+                case 444: StepInteriorExitPanel(inStep); break;
+                case 445: StepInteriorExited(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -4755,6 +4764,9 @@ namespace GameLogic.EditorTools
                 $"出发 = 沿地形行军：准备面板关闭、没有载入远征地点、镜头不动（焦点移动 {moved:0.0} 格，飞行 {flights}/{flies} 次、切换关注地点 {switches} 次、自动跟随 {WorldView.Director.IsFollowing}）；世界栏远征行军条“{bar}”");
             Check(hud != null && InvokeClickable(hud.MarchFollowButton) && WorldView.FollowingExpedition, "点行军条“跟随远征队”：镜头跟着远征队");
             Check(hud != null && InvokeClickable(hud.SpeedButton(3)), "点 3 倍速");
+            // FG8-GEN-02：记下出发时的领地名称提示次数与“进入领地”通知条数，到达时核对途中进入了破碎都市所在的阵营领地。
+            SessionState.SetInt(K + "MarchBanner0", WorldPlacesHudUIToolkit.Instance?.BannerShowCount ?? 0);
+            SessionState.SetInt(K + "MarchTerritoryNotes0", NotifyMemberCount("territory_entered"));
             // 行军途中不碰鼠标（指针在画面外）：边缘平移会按“玩家自己平移镜头”停止跟随。
             InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
             Next(66, "跟随远征队、3 倍速，等它沿地形走到目的地");
@@ -4794,6 +4806,12 @@ namespace GameLogic.EditorTools
             bool notified = GameLogic.Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "expedition_march");
             Check(inSite && followedIn && notified,
                 $"沿地形走到目的地后进入破碎都市（{inSite}）：玩家在跟随，镜头跟进地点（{followedIn}）；到达通知（{notified}）");
+            // FG8-GEN-02（DEBT-FG8EXP02-05，FG08 第 7 节 / FG17 第 4 节）：破碎都市嵌在静默领地里——跟随途中顶部弹出领地名称提示，行军记一条“进入领地”通知、存档字段记下当前领地。
+            int bannerShown = (WorldPlacesHudUIToolkit.Instance?.BannerShowCount ?? 0) - SessionState.GetInt(K + "MarchBanner0", 0);
+            int territoryNotes = NotifyMemberCount("territory_entered") - SessionState.GetInt(K + "MarchTerritoryNotes0", 0);
+            string marchTerritory = Campaign.Regions.ExpeditionMarchService.Current(s)?.TerritoryId ?? string.Empty;
+            Check(bannerShown > 0 && territoryNotes > 0 && marchTerritory.Length > 0,
+                $"途中进入阵营领地：顶部领地名称提示 {bannerShown} 次（最近一次“{WorldPlacesHudUIToolkit.Instance?.BannerTitleText}”），“进入领地”通知 {territoryNotes} 条，行军记下当前领地“{marchTerritory}”");
             WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
             InvokeClickable(hud?.SpeedButton(1));
             // 正式撤离（与撤离面板“确认撤离”同一个事务）→ 远征队状态“已返回”，再接原来的出征步骤。
@@ -11038,7 +11056,7 @@ namespace GameLogic.EditorTools
             if (relic == null)
             {
                 Check(false, "家园 400 格内没有遗迹点（世界生成按种子分布，每 64 格分布格 16%）");
-                Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
+                Next(439, "FG8-GEN-02：室内场地进出（地下中继大厅入口）");
                 return;
             }
             Campaign.Grid.HomeGridMap map = Campaign.Grid.HomeGridService.MapFor(state);
@@ -11106,6 +11124,191 @@ namespace GameLogic.EditorTools
             Check(!StrategicMapUIToolkit.IsOpen && Campaign.Env.HomeExplorationService.ActiveOrder(state, relicId) == null,
                 "战略地图已关闭；回收单取消（遗迹不算回收、不发技术数据），不影响后面的步骤");
             SessionState.SetString(K + "RelicId", string.Empty);
+            Next(439, "FG8-GEN-02：测试捷径——一台家园机器开到地下中继大厅入口旁（入口附近视为有中继覆盖），镜头飞过去");
+        }
+
+        // ── FG8-GEN-02：室内场地进出（FGR-GEN-042；真实鼠标点入口 / 出口 → 面板“进入 / 离开”按钮 → 过渡 → 镜头切换）──────────────────
+
+        private static Campaign.Combat.CombatSite HomeCombat() => WorldSimulation.Home?.Combat;
+
+        private static int NotifyMemberCount(string typeId) => Notifications.NotificationCenter.History
+            .Where(e => e?.Type?.Id == typeId).Sum(e => e.Members.Count);
+
+        private static void StepInteriorPrepare(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.WorldGen.PlannedAnchor gate = Campaign.Regions.InteriorSiteService.EntranceFor(state, "relay_hall");
+            int machine = HomeMachines().FirstOrDefault(id => HomeCombat() != null && HomeCombat().TryGetMachineUnit(id, out _)
+                                                              && !Campaign.Regions.ExpeditionMarchService.IsMarchMember(state, id));
+            if (gate == null || machine <= 0 || !MachineRegistry.TryGetRecord(machine, out MachineRecord rec))
+            {
+                Check(false, $"室内场地：地下中继大厅入口 {gate?.Id ?? "（世界里没有）"}、可用的家园机器 {machine}");
+                Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
+                return;
+            }
+            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, gate);
+            // 测试捷径（= 机器走到入口旁、入口附近有中继覆盖）：揭开入口一带，机器瞬移到入口旁 entryRadius 格内（不压在入口标记上，免得点到机器）。
+            Campaign.Grid.HomeGridService.RevealArea(state, e, gate.ProtectRadius + 10f);
+            Campaign.Signal.SignalCoverageService.OverrideForTests = (site, pos) => (pos - e).sqrMagnitude <= 30f * 30f
+                ? new Campaign.Signal.SignalCoverageSample(true, true, 50f, pos, 80f, Campaign.Signal.SignalCoverageSourceKind.RelayTower)
+                : (Campaign.Signal.SignalCoverageSample?)null;
+            Campaign.Signal.SignalCoverageService.Invalidate();
+            Vector2 back = MachineRegistry.TryGetLivePosition(machine, out Vector2 live) ? live : rec.WorldPosition;
+            // 真实点世界栏“暂停”（战略暂停下照常点入口、开面板、下“进入”）：免得这台机器手上的工作单在镜头飞过去的这两秒里把它带走。
+            WorldBarHudUIToolkit bar = WorldBarHudUIToolkit.Instance;
+            bool pausedByUs = !GameClock.Paused && InvokeClickable(bar?.PauseButton) && GameClock.Paused;
+            SessionState.SetInt(K + "InteriorPaused", pausedByUs ? 1 : 0);
+            SessionState.SetInt(K + "InteriorMachine", machine);
+            SessionState.SetString(K + "InteriorBack", back.x.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + back.y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SessionState.SetInt(K + "InteriorNotes0", NotifyMemberCount("interior_transit"));
+            SessionState.SetInt(K + "InteriorEnter0", Campaign.Regions.InteriorSiteService.EnterCount);
+            if (HomeCombat().TryGetMachineUnit(machine, out int unit))
+            {
+                HomeCombat().SetUnitPosition(unit, e + new Vector2(2.5f, 2f));
+            }
+            // 等镜头飞过去时指针放在画面外（与行军跟随同一做法）：影子工程里真实指针停在 (0,0) 角上，会按边缘平移把镜头一直往西南推。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, e);
+            Write($"  - 入口 {gate.Id}（{e.x:0}, {e.y:0}），机器 {MachineNaming.Short(machine)} 开到入口旁");
+            Next(440, "镜头飞到入口后，真实鼠标左键点入口标记");
+        }
+
+        private static void StepInteriorEntranceClick(double inStep)
+        {
+            if (inStep < 1.6)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, Campaign.Regions.InteriorSiteService.EntranceFor(state, "relay_hall"));
+            bool clickable = WorldPointClickable(e, out string blocker);
+            Check(clickable, $"入口标记在画面里、没被界面挡住（{(clickable ? "可点" : WorldClickDiag(e))}）");
+            ClickWorld(new Vector3(e.x, 0f, e.y));
+            SessionState.SetString(K + "InteriorClickDiag", WorldClickDiag(e) + (clickable ? string.Empty : "；挡住：" + blocker));
+            Next(441, "入口面板：写入口名、旁边的机器；点“进入”");
+        }
+
+        private static void StepInteriorEnterPanel(double inStep)
+        {
+            if (inStep < 0.4)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(null);
+            WorldPlacesHudUIToolkit hud = WorldPlacesHudUIToolkit.Instance;
+            string name = Campaign.Regions.InteriorSiteService.SurfaceName("relay_hall");
+            bool open = WorldPlacesHudUIToolkit.PanelOpen && hud != null && hud.PanelTitleText.Contains(name) && hud.GoEnabled;
+            Check(open, $"真实鼠标点入口：入口面板“{hud?.PanelTitleText}”/“{hud?.PanelNearText?.Replace("\n", " ")}”，“{hud?.GoText}”可点（{hud?.GoEnabled}）" +
+                        (open ? string.Empty : $"——原因“{hud?.PanelReasonText}”；{SessionState.GetString(K + "InteriorClickDiag", string.Empty)}"));
+            bool clicked = open && ClickUitk("[WorldPlacesHost]", "EntranceGo");
+            Check(clicked, "真实点击入口面板“进入”（战略暂停中）");
+            if (SessionState.GetInt(K + "InteriorPaused", 0) == 1)
+            {
+                InvokeClickable(WorldBarHudUIToolkit.Instance?.PauseButton);
+                Check(!GameClock.Paused, "再点世界栏“暂停”继续（室内与地表一起运行）");
+            }
+            // FG8-GEN-02 修复轮：点完面板按钮把指针放回画面外。上一轮这里交回真实指针（影子工程里停在 (0,0) 角上），进室内、对准出口的 2.4 秒里
+            // 边缘平移把镜头一路推向西南，出口跑到画面右上角的资源顶栏下面，真实点击落在顶栏上（冒烟 _v_smoke.log:1067）。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
+            Next(442, "进入：自动存档、机器转进室内、过渡、镜头切到地下中继大厅");
+        }
+
+        private static void StepInteriorEntered(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            int machine = SessionState.GetInt(K + "InteriorMachine", 0);
+            Campaign.Regions.InteriorSiteController site = WorldSimulation.Interior("relay_hall");
+            bool inside = MachineRegistry.TryGetRecord(machine, out MachineRecord rec) && rec.RegionId == "relay_hall";
+            bool observed = WorldView.IsObserved("relay_hall");
+            int views = Object.FindObjectsByType<Campaign.Regions.MachineView>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
+                .Count(v => v.Marker != null && site != null && v.Marker.Site == site.Combat);
+            bool root = GameObject.Find("[InteriorRoot_relay_hall]") != null;
+            int notes = NotifyMemberCount("interior_transit") - SessionState.GetInt(K + "InteriorNotes0", 0);
+            int entered = Campaign.Regions.InteriorSiteService.EnterCount - SessionState.GetInt(K + "InteriorEnter0", 0);
+            Check(site != null && inside && observed && views >= 1 && root && notes == 1 && entered == 1 && Campaign.Regions.InteriorSiteService.TransitionText.Contains(Campaign.Regions.InteriorSiteService.SurfaceName("relay_hall")),
+                $"进入地下中继大厅：机器转进室内（{inside}），镜头切过去（{observed}），室内表现对象 {views} 个、场地根节点 {root}，过渡“{Campaign.Regions.InteriorSiteService.TransitionText}”，通知中心“室内进出” {notes} 条");
+            CheckNoTextMarkers("室内场地");
+            if (site != null && site.Combat.TryGetMachineUnit(machine, out int unit))
+            {
+                // 测试捷径（= 机器在室内走到出口旁）：瞬移到出口旁 exitRadius 格内（不压在出口标记上），镜头对准出口。
+                site.Combat.SetUnitPosition(unit, site.ExitPoint + new Vector2(2.5f, 2f));
+                WorldView.FlyTo("relay_hall", site.ExitPoint);
+            }
+            Next(443, "镜头对准出口后，真实鼠标左键点出口标记");
+        }
+
+        private static void StepInteriorExitClick(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            Campaign.Regions.InteriorSiteController site = WorldSimulation.Interior("relay_hall");
+            if (site == null)
+            {
+                Check(false, "室内场地已不在（机器全部阵亡或被卸载）");
+                Next(445, "收尾");
+                return;
+            }
+            Vector2 x = site.ExitPoint;
+            // 与入口同一条件：出口标记在画面里、没被界面挡住，玩家才点得到（挡住时诊断写出屏幕点与挡住它的界面）。
+            bool clickable = WorldPointClickable(x, out string blocker);
+            Check(clickable, $"出口标记在画面里、没被界面挡住（{(clickable ? "可点" : WorldClickDiag(x))}）");
+            SessionState.SetString(K + "InteriorClickDiag", WorldClickDiag(x) + (clickable ? string.Empty : "；挡住：" + blocker));
+            ClickWorld(new Vector3(x.x, 0f, x.y));
+            Next(444, "出口面板：点“离开”");
+        }
+
+        private static void StepInteriorExitPanel(double inStep)
+        {
+            if (inStep < 0.4)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(null);
+            WorldPlacesHudUIToolkit hud = WorldPlacesHudUIToolkit.Instance;
+            bool open = WorldPlacesHudUIToolkit.PanelOpen && hud != null && hud.GoEnabled;
+            Check(open, $"真实鼠标点出口：出口面板“{hud?.PanelTitleText}”/“{hud?.PanelNearText?.Replace("\n", " ")}”，“{hud?.GoText}”可点（{hud?.GoEnabled}）" +
+                        (open ? string.Empty : $"——原因“{hud?.PanelReasonText}”；{SessionState.GetString(K + "InteriorClickDiag", string.Empty)}"));
+            Check(open && ClickUitk("[WorldPlacesHost]", "EntranceGo"), "真实点击出口面板“离开”");
+            Next(445, "离开：回到地表入口旁、室内空了自动卸载、镜头回家园");
+        }
+
+        private static void StepInteriorExited(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            int machine = SessionState.GetInt(K + "InteriorMachine", 0);
+            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, Campaign.Regions.InteriorSiteService.EntranceFor(state, "relay_hall"));
+            bool back = MachineRegistry.TryGetRecord(machine, out MachineRecord rec) && rec.RegionId == Campaign.Regions.HomeValleyLayout.RegionId
+                        && MachineRegistry.TryGetLivePosition(machine, out Vector2 live) && Vector2.Distance(live, e) < 20f;
+            bool unloaded = WorldSimulation.Interior("relay_hall") == null && GameObject.Find("[InteriorRoot_relay_hall]") == null;
+            bool home = WorldView.IsObserved(Campaign.Regions.HomeValleyLayout.RegionId);
+            int notes = NotifyMemberCount("interior_transit") - SessionState.GetInt(K + "InteriorNotes0", 0);
+            Check(back && unloaded && home && notes == 2,
+                $"离开室内：机器回到地表入口旁（{back}），室内空了自动卸载（{unloaded}），镜头回到家园（{home}），通知中心“室内进出”共 {notes} 条");
+            // 夹具还原：机器放回原位，撤掉覆盖注入。
+            string[] f = SessionState.GetString(K + "InteriorBack", "0,0").Split(',');
+            var origin = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
+            if (HomeCombat() != null && HomeCombat().TryGetMachineUnit(machine, out int unit))
+            {
+                HomeCombat().SetUnitPosition(unit, origin);
+            }
+            Campaign.Signal.SignalCoverageService.OverrideForTests = null;
+            Campaign.Signal.SignalCoverageService.Invalidate();
+            Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 
