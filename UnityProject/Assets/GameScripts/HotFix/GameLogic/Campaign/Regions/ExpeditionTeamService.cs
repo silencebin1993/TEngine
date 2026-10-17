@@ -112,7 +112,7 @@ namespace GameLogic.Campaign.Regions
         public static string ColorName(int index) =>
             Localization.GameText.Get("exp.team.color." + Math.Clamp(index, 0, Palette.Length - 1));
 
-        /// <summary>记下这次编成 / 派出的名单（去重、保持先后、最多 <see cref="ExpeditionDepartureService.MaxRosterSize"/> 台）。
+        /// <summary>记下这次编成 / 派出的名单（去重、保持先后；没有固定人数上限，人数只受派遣时的带宽约束）。
         /// 派遣事务成功后调用一次（只记名单，不改机器状态）。</summary>
         public static void RememberMembers(CampaignState s, IEnumerable<int> logicIds)
         {
@@ -121,8 +121,17 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            team.Members = logicIds.Distinct().Take(ExpeditionDepartureService.MaxRosterSize).ToArray();
+            team.Members = logicIds.Distinct().ToArray();
         }
+
+        /// <summary>FG8-EXP-01 Opus 返工：“编成远征队”入口（名册 / 战略地图）请求派遣准备面板带入名单的事件（参数 int[]，空数组 = 按常规预选）。
+        /// 跨模块走 GameEvent（不再用静态字段转交）：面板已开时立即套用；面板正从关到开时在打开那一帧套用；面板没开则丢弃——
+        /// 名单不会残留到下一次无关的打开，也不会跨存档。</summary>
+        public const string ComposeRequestedEvent = "Expedition.ComposeRequested";
+
+        /// <summary>入口调用：先打开派遣准备面板（<see cref="HomeValleyController.SetExpeditionPrepPanelOpen"/>），再发这个事件。</summary>
+        public static void RequestCompose(IReadOnlyCollection<int> logicIds) =>
+            TEngine.GameEvent.Send(ComposeRequestedEvent, logicIds == null ? Array.Empty<int>() : logicIds.ToArray());
 
         /// <summary>上次记下的名单（副本；只返回仍是存活家园机器的 LogicId，已阵亡 / 已远征的不回填）。</summary>
         public static int[] RememberedMembers(CampaignState s)

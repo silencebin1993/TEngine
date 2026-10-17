@@ -1122,7 +1122,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     var ids = new List<int> { a, b };
                     ids.AddRange(combo);
-                    if (ExpeditionDepartureService.ValidateRoster(s, ids).Success)
+                    if (FgjM1Journey.PlayerLikeRoster(s, ids))
                     {
                         chosen = ids;
                         break;

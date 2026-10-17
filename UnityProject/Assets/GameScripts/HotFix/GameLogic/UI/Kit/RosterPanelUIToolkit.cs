@@ -12,7 +12,6 @@ using GameLogic.Localization;
 using GameLogic.Settings;
 using GameLogic.Stage;
 using GameLogic.UI.Common;
-using GameLogic.UI.Expedition;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -350,7 +349,7 @@ namespace GameLogic.UI.Kit
             _batchRole.RegisterValueChangedCallback(evt => OnBatchPicked(evt.newValue));
             _detailRole.RegisterValueChangedCallback(evt => OnDetailRolePicked(evt.newValue));
             _detailPoint.RegisterValueChangedCallback(evt => OnPointPicked(evt.newValue));
-            _nameField.maxLength = MachineNaming.MaxLength + 8; // 多留几个字：超长时给出“最多 N 个字”的说明，而不是静默截断。
+            _nameField.maxLength = MachineNaming.InputMaxLength; // 多留几个字：超长时给出“最多 N 个字”的说明，而不是静默截断。
             _root.RegisterCallback<PointerDownEvent>(evt =>
             {
                 if (evt.target == _root)
@@ -367,7 +366,7 @@ namespace GameLogic.UI.Kit
         private static CampaignState Session => CampaignSession.Current;
 
         /// <summary>FG8-EXP-01 修复轮（卡片结果“从名册编成远征队”）：把名册里勾选的机器带进派遣准备面板（没有勾选＝常规预选），并收起名册。
-        /// 派遣准备面板只在家园里可开；不在家园时按钮不做任何事。</summary>
+        /// 派遣准备面板只在家园里可开；不在家园时按钮显示“回家园后可用”（原因写在按钮上，B06）。</summary>
         private void ComposeExpedition()
         {
             HomeValleyController hv = GameRoot.HomeValley;
@@ -375,9 +374,12 @@ namespace GameLogic.UI.Kit
             {
                 return;
             }
-            ExpeditionPrepPanelUIToolkit.RequestCompose(_selected.ToArray());
-            hv.SetExpeditionPrepPanelOpen(true);
+            // FG8-EXP-01 Opus 返工：经 GameEvent 交名单（面板已开时立即套用；不再用静态字段转交）。
+            // 返工第 2 轮：先收起名册（整页）再打开派遣准备面板，派遣准备面板收到名单时当即入 Esc 栈，不与名册的出栈交错。
+            int[] ids = _selected.ToArray();
             SetOpen(false);
+            hv.SetExpeditionPrepPanelOpen(true);
+            ExpeditionTeamService.RequestCompose(ids);
         }
 
         public void SetOpen(bool open)
@@ -451,6 +453,8 @@ namespace GameLogic.UI.Kit
             h.Add(state);
             h.Add(TurretMode);
             h.Add(Campaign.Defense.TurretService.Revision);
+            // FG8-EXP-01：“编成远征队”按钮的可用 / 原因文字随是否在家园立即更新（不等定时重读）。
+            h.Add(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive);
             int key = h.ToHashCode();
             if (key == _lastKey && now < _nextReread)
             {
@@ -595,10 +599,11 @@ namespace GameLogic.UI.Kit
             _memorial.text = GameText.Get("blackbox.panel.memorial_open");
             if (_composeExpedition != null)
             {
-                _composeExpedition.text = GameText.Get("exp.compose.button");
-                // 派遣准备面板只在家园可开：不在家园时按钮置灰，不再点了没反应（FG8-EXP-01 修复轮 P2）。
+                // 派遣准备面板只在家园可开：不在家园时按钮置灰，并在按钮文字上写明原因（B06“不能做要给原因”）。
                 HomeValleyController hv = GameRoot.HomeValley;
-                _composeExpedition.SetEnabled(hv != null && hv.IsActive);
+                bool atHome = hv != null && hv.IsActive;
+                _composeExpedition.text = GameText.Get(atHome ? "exp.compose.button" : "exp.compose.button_home_only");
+                _composeExpedition.SetEnabled(atHome);
             }
             if (_turretsBtn != null)
             {

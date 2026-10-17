@@ -63,6 +63,17 @@ namespace GameLogic.Campaign.Regions
             }).ToArray();
         }
 
+        /// <summary>铸造前哨外围解锁条件 1：保存过跨派系蓝图（<see cref="RecomputeUnlock"/> 与派遣检查单的“目的地未开放”文字共用）。</summary>
+        public static bool UnlockCrossFactionSaved(CampaignState state) =>
+            state?.EventLedger != null &&
+            state.EventLedger.Any(e => e.EventId != null && e.EventId.StartsWith("exposure:cross_faction_firmware:"));
+
+        /// <summary>铸造前哨外围解锁条件 2：一台 ERC-003 完成回厂改造（蓝图已不是出厂默认；同上共用）。</summary>
+        public static bool UnlockErc003Retrofitted() =>
+            MachineRegistry.AllRecords.Any(m =>
+                m != null && m.IsAlive && m.ChassisId == HomeValleyLayout.Erc003ChassisId &&
+                m.BlueprintId != HomeValleyLayout.BlueprintErc003Id);
+
         /// <summary>DEMO-CONTENT-LOCK.md 行12："`foundry_outpost`……首次跨派系蓝图已保存且 ERC-003
         /// 已改造"。与 <see cref="HomeValleySignal.RecomputeUnlock"/> 同一结构（Locked→Available 单向
         /// 终态、EventLedger 一次性反馈）。
@@ -82,17 +93,7 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
 
-            bool crossFactionSaved = state.EventLedger != null &&
-                state.EventLedger.Any(e => e.EventId != null && e.EventId.StartsWith("exposure:cross_faction_firmware:"));
-            if (!crossFactionSaved)
-            {
-                return false;
-            }
-
-            bool erc003Retrofitted = MachineRegistry.AllRecords.Any(m =>
-                m.IsAlive && m.ChassisId == HomeValleyLayout.Erc003ChassisId &&
-                m.BlueprintId != HomeValleyLayout.BlueprintErc003Id);
-            if (!erc003Retrofitted)
+            if (!UnlockCrossFactionSaved(state) || !UnlockErc003Retrofitted())
             {
                 return false;
             }

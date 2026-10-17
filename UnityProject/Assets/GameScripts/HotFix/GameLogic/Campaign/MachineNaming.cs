@@ -24,6 +24,10 @@ namespace GameLogic.Campaign
         /// <summary>名字最多多少个字（fg.TbHomeTuning roster.name_max_length；缺行时 16）。</summary>
         public static int MaxLength => Math.Max(4, GridContent.TryGetTuning("roster.name_max_length", out float v) ? (int)Math.Round(v) : 16);
 
+        /// <summary>改名输入框的长度上限（FG8-EXP-01：名册与远征队共用）：比 <see cref="MaxLength"/> 多留几个字，
+        /// 超长时由 <see cref="Validate"/> 给出“最多 N 个字”的原因，而不是被输入框静默截断。</summary>
+        public static int InputMaxLength => MaxLength + 8;
+
         public enum NameError
         {
             None = 0,

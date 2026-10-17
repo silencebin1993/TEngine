@@ -10,7 +10,6 @@ using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Settings;
 using GameLogic.Stage;
-using GameLogic.UI.Expedition;
 using GameLogic.View;
 using TEngine;
 using UnityEngine;
@@ -323,7 +322,7 @@ namespace GameLogic.UI.Kit
         public static bool HasWorldMap(CampaignState state) => state != null && WorldGenService.ContextFor(state) != null;
 
         /// <summary>FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：打开派遣准备面板（目的地在面板里指定），并收起地图。
-        /// 派遣准备面板只在家园里可开；不在家园时按钮不做任何事。</summary>
+        /// 派遣准备面板只在家园里可开；不在家园时按钮显示“回家园后可用”（原因写在按钮上，B06）。</summary>
         private void ComposeExpedition()
         {
             HomeValleyController hv = GameRoot.HomeValley;
@@ -331,9 +330,11 @@ namespace GameLogic.UI.Kit
             {
                 return;
             }
-            ExpeditionPrepPanelUIToolkit.RequestCompose(null);
-            hv.SetExpeditionPrepPanelOpen(true);
+            // FG8-EXP-01 Opus 返工：地图上没有机器选中（DEBT-FG8EXP01-10），交空名单＝按常规预选；面板已开时不动当前勾选。
+            // 返工第 2 轮：先收起地图（整页）再打开派遣准备面板（同名册入口，派遣准备面板收到请求时当即入 Esc 栈）。
             SetOpen(false);
+            hv.SetExpeditionPrepPanelOpen(true);
+            ExpeditionTeamService.RequestCompose(null);
         }
 
         public void SetOpen(bool open)
@@ -475,10 +476,11 @@ namespace GameLogic.UI.Kit
             _hint.text = InputDisplay.ExpandActionTokens(GameText.Get("ui.map.hint"));
             if (_composeExpedition != null)
             {
-                _composeExpedition.text = GameText.Get("exp.compose.button");
-                // 派遣准备面板只在家园可开：不在家园时按钮置灰，不再点了没反应（FG8-EXP-01 修复轮 P2）。
+                // 派遣准备面板只在家园可开：不在家园时按钮置灰，并在按钮文字上写明原因（B06“不能做要给原因”）。
                 HomeValleyController hv = GameRoot.HomeValley;
-                _composeExpedition.SetEnabled(hv != null && hv.IsActive);
+                bool atHome = hv != null && hv.IsActive;
+                _composeExpedition.text = GameText.Get(atHome ? "exp.compose.button" : "exp.compose.button_home_only");
+                _composeExpedition.SetEnabled(atHome);
             }
             for (int i = 0; i < _filters.Length; i++)
             {

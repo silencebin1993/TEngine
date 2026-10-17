@@ -37,9 +37,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>战役目标 OBJ-04（"至少 3 台机器可以出征"）与 journey 机器人使用的名单门槛，不是派遣硬约束。</summary>
         public const int MinRosterSize = 3;
         /// <summary>FG8-EXP-01（FGR-EXP-001 硬约束 / FG08:40）：派遣硬约束“至少一台机器”。
-        /// <see cref="ValidateRoster"/> 与检查单共用它；与 <see cref="MinRosterSize"/> 分开，避免改动 OBJ-04 战役目标。</summary>
+        /// <see cref="ValidateRoster"/> 与检查单共用它；与 <see cref="MinRosterSize"/> 分开，避免改动 OBJ-04 战役目标。
+        /// FG8-EXP-01 Opus 返工：没有固定人数上限（Demo 的 5 台上限已删除），人数只受信号带宽约束（FGR-EXP-001“人数在信号带宽允许范围内”）。</summary>
         public const int MinDepartureSize = 1;
-        public const int MaxRosterSize = 5;
 
         /// <summary>ER6-REGION-01：本类此前硬编码目标破碎都市（DIGEST 已登记的已知缺口），现推广为
         /// 支持第二次出征目标铸造前哨外围。None＝两区域都还 Locked（还没修信号塔/生产 ERC-003，或
@@ -53,12 +53,9 @@ namespace GameLogic.Campaign.Regions
             FoundryOutpost = 2,
         }
 
-        /// <summary>目标解析唯一入口——铸造前哨外围一旦解锁（DEMO-CONTENT-LOCK.md §4.2 前置："跨派系
-        /// 蓝图已保存且 ERC-003 已改造"，<see cref="FoundryOutpostRegion.RecomputeUnlock"/> 真实判定），
-        /// 后续出征即以它为目标；玩家不会再被要求回破碎都市（该区域已完成"带回两件技术"的一次性
-        /// 目标，DEMO-CONTENT-LOCK.md §4.4 OBJ-05～07 是线性推进，不循环）。</summary>
         /// <summary>FG8-EXP-01 修复轮（卡片结果“指定目的地”）：可派的目的地＝当前非 Locked 的区域，
-        /// 按默认优先级排序（铸造前哨外围在前，与旧的自动解析一致）。派遣准备面板的目的地下拉框只列这些。</summary>
+        /// 按默认优先级排序（铸造前哨外围在前，与旧的自动解析一致）。派遣准备面板的目的地下拉框只列这些；
+        /// 已清理的破碎都市仍列出（可以再派，ADR-EXP-001 第 6 节待用户复核）。</summary>
         public static ExpeditionTarget[] ReachableTargets(CampaignState state)
         {
             if (state == null)
@@ -95,10 +92,11 @@ namespace GameLogic.Campaign.Regions
             return reachable[0];
         }
 
-        /// <summary>FG8-EXP-01 修复轮（FGR-EXP-001 硬约束“目的地已探索或在迷雾边缘”）：区域级口径。
+        /// <summary>FG8-EXP-01（FGR-EXP-001 硬约束“目的地已探索或在迷雾边缘”）：区域级近似。
         /// 区域站点是局部坐标、不在家园网格上，没有世界区块掩码可查，因此按区域状态分三档：
-        /// 深迷雾＝Locked（硬拦，检查单写“destination-in-fog”）；迷雾边缘＝Available（已揭示、尚未进入过，可派，检查单提醒）；
-        /// 已探索＝Active / Cleared（可派）。地图级迷雾边缘（区块探索掩码）未接入，见 DEBT-FG8EXP01-06。</summary>
+        /// 未开放＝Locked（硬拦；Locked 只由进度条件决定，与探索无关，所以检查单写的是真实解锁条件，不叫玩家去探索）；
+        /// 迷雾边缘＝Available（已开放、尚未进入过，可派，检查单提醒）；已探索＝Active / Cleared（可派）。
+        /// 地图级迷雾边缘（区块探索掩码）未接入，见 DEBT-FG8EXP01-06（承接 FG8-EXP-02）。</summary>
         public enum DestinationFog
         {
             DeepFog = 0,
@@ -123,8 +121,8 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>"主作战组件"＝会伤敌的主组件（连射器/切割束/铸造重炮）。维修束是主组件但
-        /// "只修友军不能伤敌"（DEMO-CONTENT-LOCK.md §5），不算战斗力，出征队伍全员维修束应当仍被
-        /// "无武器"拦截。</summary>
+        /// "只修友军不能伤敌"（DEMO-CONTENT-LOCK.md §5），不算战斗力。FG8-EXP-01 Opus 返工起“没有主武器”是检查单
+        /// 提醒（遇敌无法还手），不再拦出发。</summary>
         private static readonly HashSet<string> WeaponPrimaryIds = new HashSet<string>
         {
             ComponentCatalog.CompGunId, ComponentCatalog.CompBeamId, ComponentCatalog.CompCannonId,
@@ -142,17 +140,20 @@ namespace GameLogic.Campaign.Regions
         private static bool IsUninterruptibleOrder(WorkOrderRecord order) =>
             order != null && order.Kind == WorkOrderKind.Repair && string.IsNullOrEmpty(order.ResourceTransactionId);
 
-        /// <summary>FG8-EXP-01（FGR-EXP-001 硬约束 / 检查单“伤势”）：生命低于派遣下限（<c>exp.check.min_health_pct</c> × 最大生命）的机器不能派遣，先送修。
-        /// 唯一判定点：<see cref="BuildIntel"/> 的可派资格与 <see cref="ValidateRoster"/> 的硬约束共用它。</summary>
-        public static bool IsTooDamaged(MachineRecord record)
+        /// <summary>FG8-EXP-01（FGR-EXP-001 提醒“机器伤势”）：生命低于重伤线（<c>exp.check.severe_health_pct</c> × 最大生命）。
+        /// Opus 返工：按规格这是**提醒**（可以无视），不拦派遣；检查单逐台点名并写明后果，面板状态栏也标出。唯一判定点。</summary>
+        public static bool IsSeverelyDamaged(MachineRecord record)
         {
             if (record == null || record.MaxHealth <= 0f)
             {
                 return false;
             }
-            float pct = GameLogic.Campaign.Grid.GridContent.TryGetTuning("exp.check.min_health_pct", out float v) ? v : 0.25f;
-            return record.Health < record.MaxHealth * pct;
+            return record.Health < record.MaxHealth * SeverePct;
         }
+
+        /// <summary>重伤线（0～1，Luban 调参 <c>exp.check.severe_health_pct</c>）。</summary>
+        public static float SeverePct =>
+            GameLogic.Campaign.Grid.GridContent.TryGetTuning("exp.check.severe_health_pct", out float v) ? v : 0.25f;
 
         // ── 单机情报（面板展示 + 校验共用同一份解析结果，不允许面板和校验各算一套数字）───────
 
@@ -234,13 +235,12 @@ namespace GameLogic.Campaign.Regions
             bool uninterruptible = IsUninterruptibleOrder(activeOrder);
 
             bool inHomeRegion = record.RegionId == HomeValleyLayout.RegionId;
-            bool tooDamaged = IsTooDamaged(record);
-            bool eligible = record.IsAlive && inHomeRegion && !record.IsInFactory && !uninterruptible && !tooDamaged;
+            // FG8-EXP-01 Opus 返工：伤势只是提醒（FGR-EXP-001），不影响可派资格；不可派的只有“此刻不在可派位置”的机器。
+            bool eligible = record.IsAlive && inHomeRegion && !record.IsInFactory && !uninterruptible;
             string ineligibleReason = eligible ? null
                 : !record.IsAlive ? "dead"
                 : !inHomeRegion ? "already-deployed:" + record.RegionId
                 : record.IsInFactory ? "in-factory"
-                : tooDamaged ? "too-damaged"
                 : "busy-uninterruptible:" + activeOrder.WorkOrderId;
 
             return new MachineIntel(record.LogicId, record.DisplayNumber, record.ChassisId, record.BlueprintId,
@@ -478,7 +478,10 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>逐项列出全部阻塞原因（不是发现第一条就短路返回）——DEMO-IMPLEMENTATION-SPEC.md
+        /// <summary>FG8-EXP-01 Opus 返工：硬约束按 FGR-EXP-001 只有“至少一台”“人数在带宽允许范围内”（目的地由 <see cref="TryDepart"/> 的
+        /// <see cref="ResolveTarget"/> 判定）；另外拦“机器此刻不在可派位置”（已阵亡 / 不在家园 / 在工厂 / 不可中断的抢修 / 重复 / 不存在）。
+        /// Demo 的人数上限 5、无武器、无货舱、本卡初版的伤势下限都已改为检查单提醒（<see cref="ExpeditionChecklistService"/>），不再拦。
+        /// 逐项列出全部阻塞原因（不是发现第一条就短路返回）——DEMO-IMPLEMENTATION-SPEC.md
         /// §出征准备"失败时逐项列出阻塞，不只禁用按钮"。<see cref="RosterValidation.BusyInterruptibleLogicIds"/>
         /// 非空且 <see cref="RosterValidation.BlockingReasons"/> 为空时，调用方（UI/<see cref="TryDepart"/>）
         /// 应先走确认中断流程，不是硬阻塞。</summary>
@@ -490,10 +493,6 @@ namespace GameLogic.Campaign.Regions
             if (selectedLogicIds.Count < MinDepartureSize)
             {
                 reasons.Add($"roster-too-small:need>={MinDepartureSize}:have={selectedLogicIds.Count}");
-            }
-            if (selectedLogicIds.Count > MaxRosterSize)
-            {
-                reasons.Add($"roster-too-large:max={MaxRosterSize}:have={selectedLogicIds.Count}");
             }
 
             var seen = new HashSet<int>();
@@ -536,13 +535,6 @@ namespace GameLogic.Campaign.Regions
                     reasons.Add($"machine-busy-uninterruptible:{logicId}:{intel.CurrentWorkOrderId}");
                     continue;
                 }
-                // FG8-EXP-01：伤势过重（生命低于派遣下限）不能派遣，先送修。
-                if (IsTooDamaged(record))
-                {
-                    reasons.Add($"machine-too-damaged:{logicId}");
-                    continue;
-                }
-
                 totalCargo += intel.CargoSlots;
                 totalBandwidth += intel.BandwidthCost;
                 hasWeapon |= intel.HasWeapon;
@@ -556,14 +548,6 @@ namespace GameLogic.Campaign.Regions
             if (totalBandwidth > bandwidthCapacity)
             {
                 reasons.Add($"bandwidth-exceeded:need={totalBandwidth:F0}:cap={bandwidthCapacity:F0}");
-            }
-            if (!hasWeapon)
-            {
-                reasons.Add("no-weapon");
-            }
-            if (totalCargo <= 0)
-            {
-                reasons.Add("no-cargo-capacity");
             }
 
             return new RosterValidation(reasons.Count == 0, reasons.ToArray(), busyInterruptible.ToArray(),

@@ -943,7 +943,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 foreach (IEnumerable<int> combo in FgjM1Journey.Combos(eligible, ExpeditionDepartureService.MinRosterSize))
                 {
                     List<int> ids = combo.ToList();
-                    if (ExpeditionDepartureService.ValidateRoster(s, ids).Success)
+                    if (FgjM1Journey.PlayerLikeRoster(s, ids))
                     {
                         chosen = ids;
                         break;

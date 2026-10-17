@@ -144,7 +144,7 @@ namespace GameLogic.Campaign
         public string Name = string.Empty;
         /// <summary>远征队颜色下标（0 起，见 <see cref="Regions.ExpeditionTeamService.ColorCount"/>）。</summary>
         public int ColorIndex;
-        /// <summary>上次编成 / 派出的机器 LogicId（去重，最多 <see cref="Regions.ExpeditionDepartureService.MaxRosterSize"/> 台）。</summary>
+        /// <summary>上次编成 / 派出的机器 LogicId（去重；没有固定上限，派遣人数只受带宽约束）。</summary>
         public int[] Members = Array.Empty<int>();
     }
 

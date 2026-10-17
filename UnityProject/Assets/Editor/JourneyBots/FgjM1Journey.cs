@@ -827,7 +827,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     var ids = new List<int> { cannon };
                     ids.AddRange(combo);
-                    if (ExpeditionDepartureService.ValidateRoster(s, ids).Success)
+                    if (FgjM1Journey.PlayerLikeRoster(s, ids))
                     {
                         chosen = ids;
                         break;
@@ -889,6 +889,14 @@ namespace GameLogic.EditorTools.JourneyBots
             return allOn && reasons.Length == 0
                 ? StepOutcome.Done($"勾选 {string.Join("、", roster.Select(Label))}：“{summary}”")
                 : StepOutcome.Fail($"勾选后名单不对：全部勾上 {allOn}；“{summary}”“{reasons}”");
+        }
+
+        /// <summary>像玩家一样挑名单：能出发（硬约束全过），并且队里有主武器、有货舱——FG8-EXP-01 起“没有武器 / 没有货舱”只是检查单提醒、
+        /// 不再拦出发，旅程机器人照样只派能打、能带回战利品的队伍（与正常玩家读提醒后的选择一致）。</summary>
+        internal static bool PlayerLikeRoster(CampaignState s, List<int> ids)
+        {
+            ExpeditionDepartureService.RosterValidation v = ExpeditionDepartureService.ValidateRoster(s, ids);
+            return v.Success && v.HasWeapon && v.TotalCargoSlots > 0;
         }
 
         internal static IEnumerable<IEnumerable<int>> Combos(List<int> items, int k)

@@ -511,6 +511,9 @@ namespace GameLogic.EditorTools
                     case 158: StepSignalPrepPanel(inStep); break;
                     case 159: StepSignalFromPrep(inStep); break;
                     case 160: StepSignalPrepDone(inStep); break;
+                    case 436: StepPrepRosterCompose(inStep); break; // FG8-EXP-01 返工第 2 轮：从名册编成远征队（玩家真实路径）
+                    case 437: StepPrepComposed(inStep); break;
+                    case 438: StepPrepDeselected(inStep); break; // 返工第 3 轮：取消勾选后过帧再读摘要（面板下一次刷新才重写标签）
                     case 155: StepSignalExpeditionOpened(inStep); break;
                     case 156: StepSignalExpeditionDenied(inStep); break;
                     case 157: StepSignalExpeditionClosed(inStep); break;
@@ -4515,30 +4518,118 @@ namespace GameLogic.EditorTools
             Check(teamName == Localization.GameText.Get("exp.team.default_name") && teamColor == Localization.GameText.Get("exp.team.color.0")
                   && !Localization.GameText.ContainsMarker(teamName + teamColor),
                 $"远征准备面板的远征队行：队名“{teamName}”、颜色“{teamColor}”（新战役默认值）");
-            // FG8-EXP-01 修复轮：颜色必须真的画出来（色块颜色 = 所选颜色；允许 1 级字节舍入误差），
-            // 检查单提醒区有内容（新战役劳动力预告恒在），空名单时硬约束原因写在面板上（真实 UI 文字）。
+            // FG8-EXP-01：颜色必须真的画出来（色块颜色 = 所选颜色；允许 1 级字节舍入误差），
+            // 检查单提醒区与检查单服务一致（有提醒才有标题；Opus 返工：劳动力只在下降时才提醒），空名单时硬约束原因写在面板上、出发按钮置灰（真实 UI 文字）。
             CampaignState expState = CampaignSession.Current;
             Color32 swatch = SwatchColorOf("[HomeValleyExpeditionPrepHost]", "TeamColorSwatch");
             Color32 wantSwatch = Campaign.Regions.ExpeditionTeamService.ColorOf(Campaign.Regions.ExpeditionTeamService.ColorIndexOf(expState));
             bool swatchMatches = Math.Abs(swatch.r - wantSwatch.r) <= 1 && Math.Abs(swatch.g - wantSwatch.g) <= 1 && Math.Abs(swatch.b - wantSwatch.b) <= 1 && swatch.a > 0;
             Check(swatchMatches, $"远征准备面板的颜色色块与所选颜色一致（色块 {swatch.r},{swatch.g},{swatch.b} / 应为 {wantSwatch.r},{wantSwatch.g},{wantSwatch.b}）");
             string checklistRemind = LabelText("[HomeValleyExpeditionPrepHost]", "ChecklistRemindLabel");
-            Check(checklistRemind.Contains(Localization.GameText.Get("exp.check.remind.header")) && !Localization.GameText.ContainsMarker(checklistRemind),
-                $"派遣检查单提醒区有内容（新战役劳动力预告）：“{checklistRemind.Replace('\n', ' ')}”");
-            if (expState != null && Campaign.MachineRoster.ReserveIds(expState).Count == 0
-                && Campaign.Regions.ExpeditionTeamService.RememberedMembers(expState).Length == 0)
+            UI.Expedition.ExpeditionPrepPanelUIToolkit prepPanel = UI.Expedition.ExpeditionPrepPanelUIToolkit.Instance;
+            int[] prepSelected = prepPanel != null ? prepPanel.SelectedIdsForTests : Array.Empty<int>();
+            Campaign.Regions.ExpeditionChecklistService.Checklist expChecklist = Campaign.Regions.ExpeditionChecklistService.Build(
+                expState, prepSelected, Campaign.Regions.ExpeditionDepartureService.BuildPrepSnapshot(expState));
+            bool headerShown = checklistRemind.Contains(Localization.GameText.Get("exp.check.remind.header"));
+            Check(prepPanel != null && headerShown == (expChecklist.Reminders.Length > 0) && !Localization.GameText.ContainsMarker(checklistRemind),
+                $"派遣检查单提醒区与检查单一致（{expChecklist.Reminders.Length} 条提醒）：“{checklistRemind.Replace('\n', ' ')}”");
+            if (prepSelected.Length == 0)
             {
-                // 没有预选机器 = 名单为空：硬约束“至少选 1 台”必须写在面板上（ReasonsLabel），不能只在出发按钮里拦。
+                // 名单为空：硬约束“至少选 1 台”必须写在面板上（ReasonsLabel），出发按钮置灰。
                 string reasons = LabelText("[HomeValleyExpeditionPrepHost]", "ReasonsLabel");
-                Check(reasons.Contains("无法出发"), $"空名单时面板写出硬约束原因：“{reasons.Replace('\n', ' ')}”");
+                string wantReason = Localization.GameText.Format("exp.panel.blocked",
+                    Localization.GameText.Format("exp.check.hard.too_small", Campaign.Regions.ExpeditionDepartureService.MinDepartureSize));
+                Check(reasons == wantReason && prepPanel != null && !prepPanel.DepartButton.enabledSelf,
+                    $"空名单时面板写出硬约束原因“{reasons.Replace('\n', ' ')}”，出发按钮置灰");
             }
+            // FG8-EXP-01 Opus 返工（卡片结果“从名册编成远征队”），按玩家真实路径分三步走（每步之间过若干帧）：
+            // 派遣准备面板开着时打开名册（名册是整页，派遣准备面板随之收起）→ 名册里勾一台能派的机器、真实点击“编成远征队”
+            // → 名册收起、派遣准备面板重新打开并带入这台 → 点“编辑信号核”。返工第 2 轮：原先在同一帧里打开名册并编成，
+            // 掩盖了“派遣准备面板要到下一帧才回 Esc 栈”的问题（2026-10-17 冒烟：信号核一闪即关）。
+            UI.Kit.RosterPanelUIToolkit.Open();
+            Check(UI.Kit.RosterPanelUIToolkit.IsOpen && GameRoot.HomeValley != null && !GameRoot.HomeValley.IsExpeditionPrepPanelOpen,
+                "派遣准备面板开着时打开名册：名册打开，派遣准备面板（互斥整页）随之收起");
+            Next(436, "打开名册（准备从名册编成远征队）");
+        }
+
+        private static void StepPrepRosterCompose(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState expState = CampaignSession.Current;
+            UI.Kit.RosterPanelUIToolkit rosterPanel = UI.Kit.RosterPanelUIToolkit.Instance;
+            rosterPanel?.Refresh();
+            int composeId = Campaign.Regions.ExpeditionDepartureService.BuildPrepSnapshot(expState).Machines
+                .Where(m => m.Eligible).Select(m => m.LogicId).FirstOrDefault();
+            Toggle rosterToggle = rosterPanel != null ? rosterPanel.RowSelect(rosterPanel.RowIndexOf(composeId)) : null;
+            if (rosterToggle != null)
+            {
+                rosterToggle.value = true;
+            }
+            bool composeClicked = ClickUitk("[RosterPanelHost]", "RosterComposeExpedition");
+            SessionState.SetInt(K + "ComposeId", composeId);
+            Check(composeId != 0 && rosterToggle != null && composeClicked && !UI.Kit.RosterPanelUIToolkit.IsOpen
+                  && GameRoot.HomeValley != null && GameRoot.HomeValley.IsExpeditionPrepPanelOpen,
+                $"名册里勾 #{composeId} 点“编成远征队”：名册收起，派遣准备面板重新打开");
+            rosterPanel?.SelectNone();
+            Next(437, "点名册的“编成远征队”");
+        }
+
+        private static void StepPrepComposed(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            int composeId = SessionState.GetInt(K + "ComposeId", 0);
+            UI.Expedition.ExpeditionPrepPanelUIToolkit prepPanel = UI.Expedition.ExpeditionPrepPanelUIToolkit.Instance;
+            int[] afterCompose = prepPanel != null ? prepPanel.SelectedIdsForTests : Array.Empty<int>();
+            Check(prepPanel != null && prepPanel.PanelVisible && UI.Kit.UiEscapeStack.Contains(prepPanel)
+                  && afterCompose.Length == 1 && afterCompose[0] == composeId,
+                $"派遣准备面板带入名册勾选的 #{composeId}（选中 {string.Join(",", afterCompose)}），并回到 Esc 栈");
+            // FG4-ECO-07（FGR-ECO-042）+ FG8-EXP-01：带入 1 台后的劳动力预告。劳动力会下降时写进检查单的“劳动力”提醒（带后果），
+            // 不在摘要行重复；不下降时写在摘要行。两处都读真实 UI 标签，期望文字与面板同一个计算（MachineRoster.LaborForecastText）。
+            CampaignState expState = CampaignSession.Current;
+            string laborWant = MachineRoster.LaborForecastText(expState, afterCompose, out bool laborDrops);
+            string summaryNow = LabelText("[HomeValleyExpeditionPrepHost]", "SummaryLabel");
+            string remindNow = LabelText("[HomeValleyExpeditionPrepHost]", "ChecklistRemindLabel");
+            bool laborShownRight = laborDrops
+                ? remindNow.Contains(Localization.GameText.Format("exp.check.rem.labor", laborWant)) && !summaryNow.Contains(laborWant)
+                : summaryNow.Contains(laborWant);
+            Check(laborWant.Contains("劳动力") && laborShownRight && !Localization.GameText.ContainsMarker(summaryNow + remindNow),
+                $"带入 1 台后劳动力预告写在{(laborDrops ? "检查单提醒（摘要行不重复）" : "摘要行")}：“{laborWant}”（提醒区“{remindNow.Replace('\n', ' ')}”）");
+            // 玩家取消这一台的勾选（真实 Toggle 回调）。面板要到下一次刷新才重写标签，所以下一步隔几帧再读。
+            Toggle prepToggle = prepPanel != null ? prepPanel.RowToggleOf(composeId) : null;
+            if (prepToggle != null)
+            {
+                prepToggle.value = false;
+            }
+            Check(prepToggle != null, $"派遣准备面板里找得到 #{composeId} 的勾选框并取消勾选");
+            Next(438, "取消名册带入的这一台");
+        }
+
+        private static void StepPrepDeselected(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            UI.Expedition.ExpeditionPrepPanelUIToolkit prepPanel = UI.Expedition.ExpeditionPrepPanelUIToolkit.Instance;
+            int[] selectedNow = prepPanel != null ? prepPanel.SelectedIdsForTests : Array.Empty<int>();
             // FG8-EXP-01 修复轮（卡片结果“指定目的地”）：目的地下拉框节点存在；区域未解锁时面板只隐藏 Body，节点仍在。
             string destination = FieldText<DropdownField>("[HomeValleyExpeditionPrepHost]", "DestinationDropdown");
             Check(destination != "（节点没找到）" && !Localization.GameText.ContainsMarker(destination),
                 $"远征准备面板有“目的地”下拉框（当前“{destination}”）");
-            // FG4-ECO-07（FGR-ECO-042）：远征准备提示出发后家园劳动力的变化（没勾选机器时“劳动力不变”）。
+            // FG4-ECO-07（FGR-ECO-042）：远征准备提示出发后家园劳动力的变化（没勾选机器时“劳动力不变”，写在摘要行）；
+            // 玩家改了勾选后，入口带入的来源说明随之消失（不留过期说明）。
             string labor = LabelText("[HomeValleyExpeditionPrepHost]", "SummaryLabel");
-            Check(labor.Contains("劳动力") && !Localization.GameText.ContainsMarker(labor), $"远征准备面板写出发后家园劳动力：“{labor.Replace('\n', ' ')}”");
+            string laborSame = MachineRoster.LaborForecastText(CampaignSession.Current, Array.Empty<int>());
+            string composeNotice = prepPanel != null ? prepPanel.ComposeNoticeForTests : "（面板没找到）";
+            Check(selectedNow.Length == 0 && labor.Contains("劳动力") && labor.Contains(laborSame) && string.IsNullOrEmpty(composeNotice)
+                  && !Localization.GameText.ContainsMarker(labor),
+                $"取消勾选后远征准备面板写出发后家园劳动力：“{labor.Replace('\n', ' ')}”（选中 {selectedNow.Length} 台）");
             Check(ClickUitk("[HomeValleyExpeditionPrepHost]", "SignalCoreEditButton"), "点远征准备面板的“编辑信号核”");
             Next(159, "点“编辑信号核”");
         }

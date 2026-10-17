@@ -112,8 +112,13 @@ namespace GameLogic.Campaign.Regions
         private const float ClickPickRadius = 1.6f;
         private const int MaxRecentEvents = 24;
         private const int MaxRingVisuals = 32;
-        /// <summary>FG8-EXP-01（FG13 第 5 节）：两次按下同一个调用键的间隔不超过这个秒数，即视为"连按两次"→镜头飞到编组。</summary>
-        public const float GroupDoubleTapSeconds = 0.35f;
+        /// <summary>FG8-EXP-01（FG13 第 5 节）：两次按下同一个调用键的间隔不超过这个秒数，即视为"连按两次"→镜头飞到编组。
+        /// 读 Luban 调参 <c>squad.group_double_tap_seconds</c>（缺省 0.35 真实秒）。</summary>
+        public static float GroupDoubleTapSeconds =>
+            GameLogic.Campaign.Grid.GridContent.TryGetTuning("squad.group_double_tap_seconds", out float v) && v > 0f ? v : 0.35f;
+
+        /// <summary>编组连按判定用的真实时间来源（默认 <see cref="Time.unscaledTime"/>；batchmode 自检在同一编辑器帧里驱动多帧，注入后才能测“超时不算”）。</summary>
+        public static Func<float> RealTime = () => Time.unscaledTime;
 
         private RegionSquadCommandContext _ctx;
         private int _lastRecallSlot;
@@ -411,7 +416,7 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (InputRouter.ConsumeAction(GroupActionFor(slot), InputScope.Strategy))
                 {
-                    float now = Time.unscaledTime;
+                    float now = RealTime();
                     bool doubleTap = IsGroupDoubleTap(_lastRecallSlot, _lastRecallTime, slot, now);
                     // 连按第二下之后清掉记录，第三下重新算，不会一直触发镜头。
                     _lastRecallSlot = doubleTap ? 0 : slot;

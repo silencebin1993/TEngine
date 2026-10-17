@@ -63,6 +63,18 @@ namespace GameLogic.Campaign.Regions
         public static RegionRecord Find(CampaignState state) =>
             state?.RegionRecords?.FirstOrDefault(r => r.RegionId == SilentRuinsRegionId);
 
+        /// <summary>破碎都市解锁条件 1：家园信号塔已修好并运转（<see cref="RecomputeUnlock"/> 与派遣检查单的“目的地未开放”文字共用）。</summary>
+        public static bool UnlockTowerOperational(CampaignState state) =>
+            state?.BuildingRecords?.Any(b =>
+                b.RegionId == HomeValleyLayout.RegionId &&
+                b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower &&
+                b.ConstructionState == BuildingConstructionState.Operational) ?? false;
+
+        /// <summary>破碎都市解锁条件 2：家园里有一台存活的 ERC-003 战斗履带（同上共用）。</summary>
+        public static bool UnlockHasErc003() =>
+            MachineRegistry.AllRecords.Any(m =>
+                m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId && m.ChassisId == HomeValleyLayout.Erc003ChassisId);
+
         /// <summary>逐帧重判解锁条件（家园侧建筑/机器数量个位数，O(1) 量级，不违反热更层性能纪律）。
         /// 条件满足前保持 Locked，不臆造中间态；条件一旦满足就是终态（不会因为信号塔之后又停电而
         /// 重新锁上——"解锁"是玩家已经达成过的历史事实，同 <see cref="RegionState"/> 其余状态机
@@ -77,18 +89,7 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
 
-            bool towerOperational = state.BuildingRecords?.Any(b =>
-                b.RegionId == HomeValleyLayout.RegionId &&
-                b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower &&
-                b.ConstructionState == BuildingConstructionState.Operational) ?? false;
-            if (!towerOperational)
-            {
-                return false;
-            }
-
-            bool hasErc003 = MachineRegistry.AllRecords.Any(m =>
-                m.IsAlive && m.RegionId == HomeValleyLayout.RegionId && m.ChassisId == HomeValleyLayout.Erc003ChassisId);
-            if (!hasErc003)
+            if (!UnlockTowerOperational(state) || !UnlockHasErc003())
             {
                 return false;
             }

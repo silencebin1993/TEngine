@@ -897,11 +897,15 @@ namespace GameLogic.Campaign
         /// <summary>
         /// 远征准备的提示（FGR-ECO-042）：“出发后家园劳动力 5 → 2，施工速度约下降 60%”。施工速度按劳动岗台数等比例估算（每台机器一次只做一张单）。
         /// </summary>
-        public static string LaborForecastText(CampaignState s, IReadOnlyCollection<int> selected)
+        public static string LaborForecastText(CampaignState s, IReadOnlyCollection<int> selected) => LaborForecastText(s, selected, out _);
+
+        /// <summary>FG8-EXP-01：同上，并给出劳动力是否真的下降（派遣检查单只在下降时列“劳动力”提醒；一次计算，面板与检查单共用）。</summary>
+        public static string LaborForecastText(CampaignState s, IReadOnlyCollection<int> selected, out bool drops)
         {
             var leaving = new HashSet<int>(selected ?? Array.Empty<int>());
             LaborCount before = ComputeLabor(s);
             LaborCount after = ComputeLabor(s, leaving);
+            drops = after.Labor < before.Labor;
             if (before.Labor == after.Labor)
             {
                 return GameText.Format("roster.labor.forecast_same", before.Labor);
