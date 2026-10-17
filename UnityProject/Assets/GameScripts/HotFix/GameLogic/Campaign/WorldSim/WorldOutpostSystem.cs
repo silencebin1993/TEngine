@@ -79,6 +79,7 @@ namespace GameLogic.Campaign.WorldSim
             _awakeSource = null;
             _awakeStamp = -1;
             _stateStamp++;
+            Revision++;
             _bucketSource = null;
             Buckets.Clear();
             WakesProcessed = 0;
@@ -195,6 +196,7 @@ namespace GameLogic.Campaign.WorldSim
             raids.NextOutpostSerial++;
             var list = new List<OutpostRecord>(raids.Outposts ?? Array.Empty<OutpostRecord>()) { o };
             raids.Outposts = list.ToArray();
+            Revision++;
             if (withPatrol)
             {
                 SpawnPatrol(state, o);
@@ -243,9 +245,12 @@ namespace GameLogic.Campaign.WorldSim
             var list = new List<OutpostRecord>(raids.Outposts ?? Array.Empty<OutpostRecord>()) { o };
             raids.Outposts = list.ToArray();
             _stateStamp++;
+            Revision++;
             if (f.Patrol)
             {
-                SpawnPatrol(state, o, patrolRadius);
+                // FG8-EXP-03：重建时按它重新派巡逻——与 SpawnPatrol 同一默认值（模板半径为 0 时取 outpost.patrol_radius_cells），重建后的巡逻与初次生成的一样（复审 P2）。
+                o.PatrolRadius = EffectivePatrolRadius(patrolRadius);
+                SpawnPatrol(state, o, o.PatrolRadius);
             }
             return o;
         }
@@ -277,6 +282,7 @@ namespace GameLogic.Campaign.WorldSim
             int added = list.Count - (raids.Outposts?.Length ?? 0);
             raids.Outposts = list.ToArray();
             _stateStamp++;
+            Revision++;
             return added;
         }
 
@@ -301,6 +307,7 @@ namespace GameLogic.Campaign.WorldSim
                 Dormant = true,
                 DormantSinceTick = 0,
                 LastWakeReason = string.Empty,
+                PatrolRadius = -1, // 带巡逻的由 SpawnGenerated 改写成实际半径
             };
         }
 
@@ -309,6 +316,11 @@ namespace GameLogic.Campaign.WorldSim
         public const string KindTerritory = "territory";
         public const string KindScatter = "scatter";
         public const string KindOuter = "outer";
+        /// <summary>FG8-EXP-03：已收复领地里定期刷新的精英残部（不增援、不巡逻、不算控制度、不作突袭出发地）。</summary>
+        public const string KindRemnant = "remnant";
+
+        /// <summary>FG8-EXP-03：据点集合的版本（摧毁 / 重建 / 新登记 / 移除巡逻时 +1；领地控制度据此重算，平时 O(1)）。</summary>
+        public static int Revision { get; private set; } = 1;
 
         /// <summary>
         /// 按种子生成的据点（领地主力 / 零散前哨 / 外延区，FG8-GEN-02）：“从第 0 步起就在、一直休眠”。它们的巡逻路线按需请求——据点醒着才要路线，
@@ -328,6 +340,41 @@ namespace GameLogic.Campaign.WorldSim
             return SpawnOutpost(state, territoryId, new GridCell(t.CenterX, t.CenterY), withPatrol, reinforceIntervalTicks);
         }
 
+        /// <summary>巡逻折返半径（格）：给了正数用它，否则 outpost.patrol_radius_cells；至少 2 格。</summary>
+        private static int EffectivePatrolRadius(int radiusCells) =>
+            Math.Max(2, radiusCells > 0 ? radiusCells : (int)Math.Round(Tuning("outpost.patrol_radius_cells", 24f)));
+
+        /// <summary>
+        /// 旧档（FG8-EXP-03 之前登记的据点 PatrolRadius = 0）补域：有巡逻的按巡逻折返点离据点的距离补回半径，没有的记 −1（不派）。
+        /// 只处理 PatrolRadius == 0 的记录，补过一次就不再进来（每条记录一次 O(巡逻)）。
+        /// </summary>
+        public static void BackfillPatrolRadius(CampaignState state)
+        {
+            OutpostRecord[] all = state?.Raids?.Outposts;
+            if (all == null)
+            {
+                return;
+            }
+            foreach (OutpostRecord o in all)
+            {
+                if (o == null || o.PatrolRadius != 0)
+                {
+                    continue;
+                }
+                o.PatrolRadius = -1;
+                foreach (PatrolRecord p in state.Raids.Patrols ?? Array.Empty<PatrolRecord>())
+                {
+                    if (p != null && p.OutpostId == o.OutpostId)
+                    {
+                        double dx = p.TurnX - o.CellX;
+                        double dy = p.TurnY - o.CellY;
+                        o.PatrolRadius = Math.Max(2, (int)Math.Round(Math.Sqrt(dx * dx + dy * dy)));
+                        break;
+                    }
+                }
+            }
+        }
+
         private static PatrolRecord SpawnPatrol(CampaignState state, OutpostRecord o, int radiusCells = 0)
         {
             RaidState raids = state.Raids;
@@ -335,7 +382,7 @@ namespace GameLogic.Campaign.WorldSim
             uint seed = unchecked((uint)(state.World?.WorldSeed ?? state.RandomSeed));
             uint h = WorldGenMath.Hash(seed, serial, o.CellX ^ o.CellY, 0x50415452u); // "PATR"
             double ang = (h & 0xFFFF) / 65536.0 * 2.0 * Math.PI;
-            double r = Math.Max(2.0, radiusCells > 0 ? radiusCells : Tuning("outpost.patrol_radius_cells", 24f));
+            double r = EffectivePatrolRadius(radiusCells);
             var p = new PatrolRecord
             {
                 PatrolId = "patrol-" + serial,
@@ -399,7 +446,8 @@ namespace GameLogic.Campaign.WorldSim
                     {
                         if (tick >= o.NextReinforceTick)
                         {
-                            if (o.Garrison < o.GarrisonCap)
+                            // FG8-EXP-03：平定后不再增援；驻军展开迎战期间也不增长（增援点照常前进，与补算逐位一致）。
+                            if (o.Garrison < o.GarrisonCap && !o.ReinforceStopped && !o.Engaged)
                             {
                                 o.Garrison++;
                                 o.ReinforcementsApplied++;
@@ -432,6 +480,10 @@ namespace GameLogic.Campaign.WorldSim
                     {
                         continue;
                     }
+                    if (p.Engaged)
+                    {
+                        continue; // FG8-EXP-03：巡逻展开迎战期间停在原地（单位在家园战斗内核里交战）。
+                    }
                     if (p.RouteState == RouteReady && p.RouteReadyTick <= tick && p.LoopMilli > 0)
                     {
                         p.ProgressMilli = (p.ProgressMilli + p.SpeedMilliPerTick) % p.LoopMilli;
@@ -454,7 +506,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 long k = (last - o.NextReinforceTick) / interval + 1;
                 long room = Math.Max(0, o.GarrisonCap - o.Garrison);
-                long add = Math.Min(k, room);
+                long add = o.ReinforceStopped ? 0 : Math.Min(k, room); // FG8-EXP-03：平定后增援点照常前进、不加人
                 o.Garrison += (int)add;
                 o.ReinforcementsApplied += add;
                 o.NextReinforceTick += k * interval;
@@ -508,7 +560,7 @@ namespace GameLogic.Campaign.WorldSim
                     continue;
                 }
                 double d = MinDistanceBucketed(o.CellX, o.CellY, sleep, ref exact);
-                if (!o.Dormant && d > sleep)
+                if (!o.Dormant && d > sleep && !o.Engaged) // FG8-EXP-03：驻军展开迎战期间不休眠（收拢后照常判定）
                 {
                     o.Dormant = true;
                     o.DormantSinceTick = o.SimTick;
@@ -794,9 +846,13 @@ namespace GameLogic.Campaign.WorldSim
             DequeueWake(state, outpostId);
             o.Destroyed = true;
             _stateStamp++;
+            Revision++;
             o.DestroyedTick = GameClock.Ticks;
             o.Garrison = 0;
-            Defense.RaidDirectorService.OnOutpostDestroyed(state, o);
+            o.DestroyCount++;
+            o.Engaged = false;
+            // 复审 P1：精英残部不是突袭出发地（Plan 也排除它），打掉它不降频；其余据点记下方位，重建时减回（计数 = 当前处于摧毁状态的出发地据点数）。
+            o.RaidOctant = o.Kind == KindRemnant ? -1 : Defense.RaidDirectorService.OnOutpostDestroyed(state, o);
             return true;
         }
 
@@ -1001,7 +1057,7 @@ namespace GameLogic.Campaign.WorldSim
             if (o.NextReinforceTick <= last)
             {
                 long k = (last - o.NextReinforceTick) / interval + 1;
-                garrison = (int)Math.Min(o.GarrisonCap, o.Garrison + k);
+                garrison = o.ReinforceStopped ? o.Garrison : (int)Math.Min(o.GarrisonCap, o.Garrison + k);
                 nextReinforceTick = o.NextReinforceTick + k * interval;
             }
         }
@@ -1020,6 +1076,150 @@ namespace GameLogic.Campaign.WorldSim
             long progress = (long)(((decimal)p.ProgressMilli + (decimal)p.SpeedMilliPerTick * count) % p.LoopMilli);
             PositionAt(p, o, progress, out double x, out double y);
             return new Vector2((float)x, (float)y);
+        }
+
+        // ─────────────────────────────── FG8-EXP-03：平定、重建、巡逻撤离、精英残部 ───────────────────────────────
+
+        /// <summary>醒着的据点（每步推进的那些；迎战检查只看它们——休眠的离己方实体都很远，不可能有机器走近）。</summary>
+        public static IReadOnlyList<OutpostRecord> Awake(CampaignState state)
+        {
+            OutpostRecord[] all = state?.Raids?.Outposts;
+            return all == null || all.Length == 0 ? (IReadOnlyList<OutpostRecord>)Array.Empty<OutpostRecord>() : AwakeOutposts(all);
+        }
+
+        /// <summary>
+        /// 首领被击败（领地平定）：这个据点不再增援。休眠中的先按确定性规则补算到“现在”（之前的增援照算），再停——之后无论何时醒来，
+        /// 补算的结果都与“一直在模拟”逐位一致（FGR-BASE-021）。幂等。
+        /// </summary>
+        public static bool StopReinforcement(CampaignState state, OutpostRecord o)
+        {
+            if (state == null || o == null || o.ReinforceStopped)
+            {
+                return false;
+            }
+            if (o.Dormant && !o.AlwaysSimulate && !o.Destroyed)
+            {
+                CatchUp(state, o, CatchUpTarget());
+            }
+            o.ReinforceStopped = true;
+            return true;
+        }
+
+        /// <summary>
+        /// 阵营增援重建一个被摧毁的据点（FGR-EXP-022“被摧毁的据点有可能重建”）：驻军 = <paramref name="garrison"/>，增援点接回原来的网格（出生步 + k × 间隔），
+        /// 从“现在”起按休眠处理（离己方实体近的下一次休眠判定就会醒来）；生成时带巡逻、巡逻已被歼灭的重新派一支。返回是否重建了。
+        /// </summary>
+        public static bool Rebuild(CampaignState state, string outpostId, int garrison)
+        {
+            OutpostRecord o = Find(state, outpostId);
+            if (o == null || !o.Destroyed)
+            {
+                return false;
+            }
+            long now = CatchUpTarget();
+            long interval = Math.Max(1, o.ReinforceIntervalTicks);
+            o.Destroyed = false;
+            o.DestroyedTick = -1;
+            o.Engaged = false;
+            o.UnfoldedCount = 0;
+            o.Garrison = Math.Max(1, Math.Min(o.GarrisonCap, garrison));
+            o.NextReinforceTick = (now / interval + 1) * interval;
+            o.SimTick = now;
+            o.Dormant = !o.AlwaysSimulate;
+            o.DormantSinceTick = now;
+            o.RebuildCount++;
+            if (o.RaidOctant >= 0)
+            {
+                Defense.RaidDirectorService.OnOutpostRebuilt(state, o.RaidOctant);
+                o.RaidOctant = -1;
+            }
+            _stateStamp++;
+            Revision++;
+            if (o.PatrolRadius > 0)
+            {
+                bool hasPatrol = false;
+                foreach (PatrolRecord p in Patrols(state))
+                {
+                    if (p != null && p.OutpostId == o.OutpostId)
+                    {
+                        hasPatrol = true;
+                        break;
+                    }
+                }
+                if (!hasPatrol)
+                {
+                    SpawnPatrol(state, o, o.PatrolRadius);
+                }
+            }
+            return true;
+        }
+
+        /// <summary>移除符合条件的巡逻（领地收复时敌方巡逻撤离、巡逻被歼灭）。返回移除了几支。</summary>
+        public static int RemovePatrols(CampaignState state, Func<PatrolRecord, bool> match)
+        {
+            PatrolRecord[] all = state?.Raids?.Patrols;
+            if (all == null || all.Length == 0 || match == null)
+            {
+                return 0;
+            }
+            var keep = new List<PatrolRecord>(all.Length);
+            foreach (PatrolRecord p in all)
+            {
+                if (p != null && !match(p))
+                {
+                    keep.Add(p);
+                }
+            }
+            int removed = all.Length - keep.Count;
+            if (removed > 0)
+            {
+                state.Raids.Patrols = keep.ToArray();
+                Revision++;
+            }
+            return removed;
+        }
+
+        /// <summary>
+        /// 已收复领地里的一批精英残部（FGR-EXP-022）：作为一个据点登记在 <paramref name="cell"/>（不增援、不巡逻、不算控制度），醒着出生，
+        /// 离己方实体远的下一次休眠判定就睡下。ID 由调用方按（领地, 序号）给出，确定。已存在的返回原记录。
+        /// </summary>
+        public static OutpostRecord SpawnRemnant(CampaignState state, string remnantId, string territoryId, GridCell cell, int tier, int count)
+        {
+            if (state == null || string.IsNullOrEmpty(remnantId))
+            {
+                return null;
+            }
+            OutpostRecord existing = Find(state, remnantId);
+            if (existing != null)
+            {
+                return existing;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            long now = CatchUpTarget();
+            long interval = Math.Max(1L, (long)Math.Round(Tuning("outpost.reinforce_interval_days", 3f) * GameClock.DaySeconds * GameClock.StepHz));
+            var o = new OutpostRecord
+            {
+                OutpostId = remnantId,
+                TerritoryId = territoryId ?? string.Empty,
+                Kind = KindRemnant,
+                Tier = Math.Max(1, tier),
+                CellX = cell.X,
+                CellY = cell.Y,
+                Garrison = Math.Max(1, count),
+                GarrisonCap = Math.Max(1, count),
+                ReinforceIntervalTicks = interval,
+                NextReinforceTick = (now / interval + 1) * interval,
+                SimTick = now,
+                Dormant = false,
+                LastWakeReason = string.Empty,
+                ReinforceStopped = true,
+                PatrolRadius = -1,
+            };
+            var list = new List<OutpostRecord>(state.Raids.Outposts ?? Array.Empty<OutpostRecord>()) { o };
+            state.Raids.Outposts = list.ToArray();
+            _stateStamp++;
+            Revision++;
+            return o;
         }
 
         /// <summary>醒着的巡逻所在区块（“行进中的巡逻”所在区块完整模拟，FGR-GEN-052 第 1 条）。</summary>

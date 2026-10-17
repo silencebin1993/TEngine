@@ -370,16 +370,31 @@ namespace GameLogic.Campaign.Defense
 
         /// <summary>FG6-DEF-04（FGR-GEN-034）：据点被摧毁（<see cref="WorldSim.WorldOutpostSystem.MarkDestroyed"/> 调用）——记下它相对家园的方位，
         /// 从那个方向出发的突袭最短间隔 ×(1 + raid.destroyed_outpost_interval_bonus × 个数)。还没出发、从这个据点出发的计划在出发时改道（见 Depart）。</summary>
-        public static void OnOutpostDestroyed(CampaignState s, OutpostRecord o)
+        /// <returns>记进的方位（0～7；−1 = 没记）。FG8-EXP-03：调用方保证同一据点在“摧毁状态”期间只调一次（重建时 <see cref="OnOutpostRebuilt"/> 减回），精英残部不调。</returns>
+        public static int OnOutpostDestroyed(CampaignState s, OutpostRecord o)
         {
             if (s?.Raids == null || o == null)
             {
-                return;
+                return -1;
             }
             EnsureState(s);
             Grid.GridCell core = Grid.HomeGridService.CorePivot(s);
             int oct = Economy.IntelService.Octant(o.CellX - core.X, o.CellY - core.Y);
             s.Raids.Director.DestroyedByOctant[oct]++;
+            Revision++;
+            return oct;
+        }
+
+        /// <summary>FG8-EXP-03（复审 P1）：被摧毁的据点被阵营增援重建——这个方向又多了一个出发地，摧毁时加的降频减回（不低于 0）。</summary>
+        public static void OnOutpostRebuilt(CampaignState s, int octant)
+        {
+            if (s?.Raids == null || octant < 0 || octant >= 8)
+            {
+                return;
+            }
+            EnsureState(s);
+            int[] a = s.Raids.Director.DestroyedByOctant;
+            a[octant] = Math.Max(0, a[octant] - 1);
             Revision++;
         }
 

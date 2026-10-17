@@ -239,6 +239,7 @@ namespace GameLogic.Campaign.WorldSim
             HomeValleyCombatTargets.ResetSessionState();
             HomeValleyFactory.ResetSessionState(); // FG4-ECO-03：装配站等料指纹与输入口堵塞提示按新会话重算
             WorldOutpostSystem.ResetSession();
+            TerritoryControlService.ResetSession(); // FG8-EXP-03：领地控制的会话统计与缓存（存档里的领地记录不动）
             NavService.ResetCounters();
             ActiveChunkSet.Clear();
             _objectiveTimer = 0;
@@ -599,6 +600,8 @@ namespace GameLogic.Campaign.WorldSim
                 WorldOutpostSystem.Step(state, GameClock.Ticks);
                 // FG6-DEF-04：突袭导演（触发 → 排定 → 预警 → 出发 → 跟踪），在队伍与据点之后：本步派出的队伍下一步起行进。只看步序号，与观察无关，O(计划数)。
                 Defense.RaidDirectorService.WorldStep(state, GameClock.Ticks);
+                // FG8-EXP-03：领地控制（控制度、首领 → 平定、收复、阵营增援重建、精英残部、骚扰），每 territory.control.sync_seconds 一次 O(领地数)；只看步序号，与观察无关。
+                TerritoryControlService.WorldStep(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。
@@ -628,6 +631,8 @@ namespace GameLogic.Campaign.WorldSim
                     // FG6-DEF-05：攻城——到达的队伍展开、溅射每步结算至多 N 格、每 siege.sync_seconds 对账（建筑结构单位、撤退 / 全歼 / 收拢、破墙通知、拦截、驻防交战）；
                     // 只看步序号，与观察无关。逐单位的按职能选目标、流场、破墙、撤退在上面家园内核的一步里（Main/Sim，Burst）。
                     Defense.SiegeService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG8-EXP-03：据点 / 巡逻迎战（机器走近 → 就地展开、全灭 → 摧毁 / 歼灭与掉落、没人 → 收拢），每 siege.sync_seconds 一次 O(醒着的据点 + 巡逻)；逐单位交战在上面的家园内核里。
+                    TerritoryControlService.CombatStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG6-LOG-10（FGR-LOG-046）：管线泄漏液洼——取走内核本步的液洼反应（告警），每 logistics.leak.sync_seconds 对账（扩大 / 消退 / 残留到期 / 火烧坏设施）；
                     // 只看步序号，与观察无关，O(液洼数)。逐单位挂标签、液洼遇火整片反应在上面家园内核的一步里（Main/Sim，Burst）。放在攻城之后：本步溅射打穿的管线本步就积起液洼。
                     Logistics.PipeLeakService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

@@ -433,6 +433,11 @@ namespace GameLogic.EditorTools
                 case 443: StepInteriorExitClick(inStep); break;
                 case 444: StepInteriorExitPanel(inStep); break;
                 case 445: StepInteriorExited(inStep); break;
+                // FG8-EXP-03：领地据点迎战与摧毁（测试捷径：一台家园机器开到离核心最近的静默领地据点旁；真实 Play 帧里据点醒来、驻军就地展开迎战 →
+                // 测试捷径打掉展开的敌人 → 据点被摧毁、废料留在原地、战略地图领地标签的控制度下降 → 夹具还原）
+                case 446: StepTerritoryEngagePrepare(inStep); break;
+                case 447: StepTerritoryEngaged(inStep); break;
+                case 448: StepTerritoryDestroyed(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -11307,6 +11312,108 @@ namespace GameLogic.EditorTools
             }
             Campaign.Signal.SignalCoverageService.OverrideForTests = null;
             Campaign.Signal.SignalCoverageService.Invalidate();
+            Next(446, "FG8-EXP-03：测试捷径——一台家园机器开到最近的静默领地据点旁");
+        }
+
+        // ── FG8-EXP-03：领地据点迎战与摧毁（真实 Play 帧）──
+
+        private static void StepTerritoryEngagePrepare(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
+            OutpostRecord o = WorldOutpostSystem.Outposts(state)
+                .Where(x => x.Kind == WorldOutpostSystem.KindTerritory && x.TerritoryId == "silent" && !x.Destroyed && x.Garrison > 0)
+                .OrderBy(x => (x.CellX - core.X) * (double)(x.CellX - core.X) + (x.CellY - core.Y) * (double)(x.CellY - core.Y)).ThenBy(x => x.OutpostId, StringComparer.Ordinal)
+                .FirstOrDefault();
+            int machine = HomeMachines().FirstOrDefault(id => HomeCombat() != null && HomeCombat().TryGetMachineUnit(id, out _)
+                                                              && !Campaign.Regions.ExpeditionMarchService.IsMarchMember(state, id));
+            if (o == null || machine <= 0 || !MachineRegistry.TryGetRecord(machine, out MachineRecord rec) || !HomeCombat().TryGetMachineUnit(machine, out int unit))
+            {
+                Check(false, $"领地迎战：静默领地据点 {o?.OutpostId ?? "（没有）"}、可用的家园机器 {machine}");
+                WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
+                Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
+                return;
+            }
+            var at = new Vector2(o.CellX, o.CellY);
+            Vector2 dir = (new Vector2(core.X, core.Y) - at).normalized;
+            Vector2 back = MachineRegistry.TryGetLivePosition(machine, out Vector2 live) ? live : rec.WorldPosition;
+            SessionState.SetInt(K + "TerrMachine", machine);
+            SessionState.SetString(K + "TerrOutpost", o.OutpostId);
+            SessionState.SetString(K + "TerrBack", back.x.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + back.y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            SessionState.SetInt(K + "TerrControl0", Campaign.WorldSim.TerritoryControlService.Find(state, "silent")?.Control ?? -1);
+            SessionState.SetInt(K + "TerrAlerts0", NotifyMemberCount(Campaign.WorldSim.TerritoryControlService.NotifyAlert));
+            Campaign.Grid.HomeGridService.RevealArea(state, at, 30f);
+            HomeCombat().SetUnitPosition(unit, at + dir * 10f);
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, at);
+            Write($"  - 静默据点 {o.OutpostId}（{o.CellX}, {o.CellY}，驻军 {o.Garrison}），机器 {MachineNaming.Short(machine)} 开到 10 格外");
+            Next(447, "据点醒来、驻军就地展开迎战");
+        }
+
+        private static void StepTerritoryEngaged(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            OutpostRecord o = WorldOutpostSystem.Find(state, SessionState.GetString(K + "TerrOutpost", string.Empty));
+            bool engaged = o != null && o.Engaged && HomeCombat() != null && HomeCombat().CountSiegeGroup(o.EngageKey) > 0;
+            if (!engaged && inStep < 8.0)
+            {
+                return;
+            }
+            int units = engaged ? HomeCombat().CountSiegeGroup(o.EngageKey) : 0;
+            int alerts = NotifyMemberCount(Campaign.WorldSim.TerritoryControlService.NotifyAlert) - SessionState.GetInt(K + "TerrAlerts0", 0);
+            Check(engaged && alerts >= 1, $"领地迎战：机器走近后据点醒来、驻军 {units} 台就地展开成敌人（{engaged}），通知中心“领地交战” +{alerts}");
+            if (engaged)
+            {
+                // 测试捷径（= 玩家的机器把展开的敌人打光）：逐台打掉。
+                var at = new Vector2(o.CellX, o.CellY);
+                for (int i = 0; i < 64 && HomeCombat().CountSiegeGroup(o.EngageKey) > 0; i++)
+                {
+                    int u = HomeCombat().FindNearestHostile(at, 80f);
+                    if (u <= 0)
+                    {
+                        break;
+                    }
+                    HomeCombat().Kernel.Damage(u, 1e7f, 0);
+                }
+            }
+            Next(448, "驻军全灭 → 据点被摧毁、废料留在原地、控制度下降");
+        }
+
+        private static void StepTerritoryDestroyed(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            string id = SessionState.GetString(K + "TerrOutpost", string.Empty);
+            OutpostRecord o = WorldOutpostSystem.Find(state, id);
+            if ((o == null || !o.Destroyed) && inStep < 4.0)
+            {
+                return;
+            }
+            GroundItemRecord loot = Campaign.Regions.HomeValleyCargo.FindGroundItemBySalvageId(state, Campaign.WorldSim.TerritoryControlService.LootPrefix + id + ":1");
+            int c0 = SessionState.GetInt(K + "TerrControl0", -1);
+            int c1 = Campaign.WorldSim.TerritoryControlService.Find(state, "silent")?.Control ?? -1;
+            Campaign.WorldGen.PlannedTerritory t = Campaign.WorldGen.WorldGenService.PlanFor(state)?.Find("silent");
+            string label = t != null ? Campaign.WorldSim.TerritoryControlService.MapLabel(state, t) : string.Empty;
+            var model = new UI.Kit.WorldMapModel();
+            if (t != null)
+            {
+                model.Collect(state, new UI.Kit.WorldMapView { CenterX = t.CenterX, CenterY = t.CenterY, HalfWidth = t.OuterRadius * 2, CanvasWidth = 800, CanvasHeight = 800 }, 500);
+            }
+            bool onMap = label.Length > 0 && model.Circles.Any(c => c.Label != null && c.Label.StartsWith(label, StringComparison.Ordinal)) && label.Contains("控制度 " + c1 + "%");
+            Check(o != null && o.Destroyed && loot != null && loot.Amount > 0 && c1 >= 0 && c1 < c0 && onMap,
+                $"据点被摧毁：{id} 已摧毁（{o?.Destroyed}），废料 {loot?.Amount} 留在原地，静默领地控制度 {c0}% → {c1}%，战略地图领地标签“{label}”（{onMap}）");
+            // 夹具还原：机器放回原位，镜头回到核心。
+            int machine = SessionState.GetInt(K + "TerrMachine", 0);
+            string[] f = SessionState.GetString(K + "TerrBack", "0,0").Split(',');
+            var origin = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
+            if (HomeCombat() != null && HomeCombat().TryGetMachineUnit(machine, out int unit))
+            {
+                HomeCombat().SetUnitPosition(unit, origin);
+            }
+            InputRouter.DebugSetReader(null);
             Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
             WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");

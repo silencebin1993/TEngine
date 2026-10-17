@@ -96,6 +96,35 @@ namespace GameLogic.Campaign.WorldSim
             return Dispatch(state, TransitGroupKind.Raid, o.TerritoryId, take, o.CellX, o.CellY, core.X, core.Y);
         }
 
+        /// <summary>
+        /// FG8-EXP-03（卡片负向“玩家在敌控领地里建设：允许，但会持续被攻击”）：领地据点派一支骚扰部队，目标是玩家在这片领地里的建筑群
+        /// （到达后与“前哨站目标”的突袭同一套展开、攻城、撤退；抽走的驻军撤回时还给据点）。驻军不够（至少留 1 台守家）时如实失败。
+        /// </summary>
+        public static TransitGroupRecord DispatchHarass(CampaignState state, OutpostRecord o, string faction, int unitCount, double toX, double toY, out string failure)
+        {
+            failure = null;
+            if (state == null || o == null || o.Destroyed || o.Engaged)
+            {
+                failure = "outpost-unavailable";
+                return null;
+            }
+            WorldOutpostSystem.WakeNow(state, o.OutpostId, WorldOutpostSystem.WakeRaid);
+            int take = Math.Min(Math.Max(1, unitCount), o.Garrison - 1);
+            if (take <= 0)
+            {
+                failure = "garrison-too-small:" + o.Garrison;
+                return null;
+            }
+            o.Garrison -= take;
+            TransitGroupRecord g = Dispatch(state, TransitGroupKind.Raid, faction, take, o.CellX, o.CellY, toX, toY);
+            g.Faction = faction ?? string.Empty;
+            g.OutpostId = o.OutpostId;
+            g.GarrisonTaken = take;
+            g.TargetKind = Defense.RaidDirectorService.TargetOutpost;
+            g.Harass = true;
+            return g;
+        }
+
         /// <summary>突袭部队的行进速度（格 / 游戏秒，transit.raid_speed_cells_per_second）——导演算预警时间与队伍推进用同一个值。</summary>
         public static float RaidSpeed => Math.Max(0.01f, GameClock.TuningOr("transit.raid_speed_cells_per_second", 1.5f));
 
@@ -118,7 +147,7 @@ namespace GameLogic.Campaign.WorldSim
             if (plan.OriginKind == Defense.RaidDirectorService.OriginOutpost)
             {
                 OutpostRecord o = WorldOutpostSystem.Find(state, plan.OriginId);
-                if (o != null && !o.Destroyed)
+                if (o != null && !o.Destroyed && !o.Engaged) // FG8-EXP-03：驻军正展开迎战时不抽人（人数在内核里，收拢时按幸存者回写）
                 {
                     WorldOutpostSystem.WakeNow(state, o.OutpostId, WorldOutpostSystem.WakeRaid);
                     take = Math.Min(plan.UnitTotal, Math.Max(0, o.Garrison - 1));

@@ -265,7 +265,8 @@ namespace GameLogic.Campaign.Defense
             double max = RaidCatalog.OriginMaxDistance;
             foreach (OutpostRecord o in WorldOutpostSystem.Outposts(s))
             {
-                if (o == null || o.Destroyed || FactionOfOutpost(s, o) != p.Faction)
+                // FG8-EXP-03：精英残部不作突袭出发地（它们只在已收复领地里等玩家来刷）。
+                if (o == null || o.Destroyed || o.Kind == WorldOutpostSystem.KindRemnant || FactionOfOutpost(s, o) != p.Faction)
                 {
                     continue;
                 }

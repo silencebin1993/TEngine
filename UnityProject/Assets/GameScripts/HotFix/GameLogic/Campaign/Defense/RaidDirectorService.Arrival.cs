@@ -62,7 +62,7 @@ namespace GameLogic.Campaign.Defense
         {
             EnsureState(s);
             RaidDirectorState d = StateOf(s);
-            if (d == null || g == null || g.Kind != TransitGroupKind.Raid)
+            if (d == null || g == null || g.Kind != TransitGroupKind.Raid || g.Harass) // FG8-EXP-03 复审 P2：领地骚扰不是突袭波次
             {
                 _lastArrivalNewWave = false;
                 return false;

@@ -1345,6 +1345,9 @@ namespace GameLogic.Campaign
         /// 当前难度 ID 仍是 <see cref="CampaignState.DifficultyId"/>（存档卡显示它）。唯一写入口 <see cref="Defense.DifficultyService"/>。
         /// 只加字段、不升域版本：旧档没有 = 开局难度按当前难度补、没有修改记录、自定义倍率按 ×1。</summary>
         public RaidDifficultyState Difficulty = new RaidDifficultyState();
+        /// <summary>FG8-EXP-03（FG08 FGR-EXP-021 / 022）：领地控制度、平定 / 收复、阵营增援、精英残部、骚扰。唯一写入口 <see cref="WorldSim.TerritoryControlService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 第一次推进时按当前据点补好（敌控、按此刻的据点算控制度）。</summary>
+        public TerritoryControlState Territory = new TerritoryControlState();
     }
 
     /// <summary>FG6-DEF-09：难度状态（见 <see cref="RaidState.Difficulty"/>）。</summary>
@@ -1418,6 +1421,71 @@ namespace GameLogic.Campaign
         /// 唯一写入口 <see cref="WorldSim.WorldOutpostSystem.MarkDestroyed"/>（交战摧毁由 FG8-EXP-03 调用）。</summary>
         public bool Destroyed;
         public long DestroyedTick = -1;
+
+        // ── FG8-EXP-03（FGR-EXP-022）：增援停止、迎战、重建。增援停止 / 重建由 WorldOutpostSystem 写，迎战字段（Engaged / EngageKey / UnfoldedCount / LastContactTick / EngageTick）由 TerritoryControlService 写。只加字段：旧档没有 = 都是默认值。──
+        /// <summary>阵营首领被击败（领地平定）后不再增援：驻军不再按增援点增长（增援点照常前进，补算逐位一致）。</summary>
+        public bool ReinforceStopped;
+        /// <summary>驻军已就地展开成家园战斗内核里的敌人（己方机器走近）；展开期间驻军不增长。</summary>
+        public bool Engaged;
+        /// <summary>迎战时内核里这一组敌人的队伍键（领地控制服务分配，确定；0 = 还没分配）。</summary>
+        public int EngageKey;
+        public int UnfoldedCount;
+        public long LastContactTick = -1;
+        /// <summary>上一次展开 / 僵持收拢的步（僵持收拢后 territory.engage.max_seconds 内不再展开）。</summary>
+        public long EngageTick = -1;
+        /// <summary>被摧毁过几次 / 被阵营增援重建过几次（掉落事务号、统计）。</summary>
+        public int DestroyCount;
+        public int RebuildCount;
+        /// <summary>生成时带巡逻的据点：巡逻折返半径（格；重建时按它重新派巡逻）。−1 = 不派巡逻；0 = FG8-EXP-03 之前的旧档（补域时按现存巡逻的折返点补回，没有巡逻 = −1）。</summary>
+        public int PatrolRadius;
+        /// <summary>复审 P1：这次摧毁记进突袭导演哪个方位（0～7；−1 = 没记——没被摧毁、精英残部、旧档）。重建时按它减回，同一据点同一时刻最多只算一次，
+        /// “摧毁 → 重建 → 再摧毁”不会无上限地压低突袭频率。</summary>
+        public int RaidOctant = -1;
+    }
+
+    /// <summary>
+    /// FG8-EXP-03（FGR-EXP-022）：领地控制——每个阵营领地一条（控制度、敌控 / 平定中 / 已收复、首领是否被击败、增援 / 精英残部 / 骚扰的下一次步）。
+    /// 唯一写入口 <see cref="WorldSim.TerritoryControlService"/>。挂在 <see cref="RaidState.Territory"/>：据点本身已在 <see cref="RaidState.Outposts"/>，
+    /// 地形 / 污染变化走区块差异（FGR-GEN-060 只记被改过的区块），这里只放每个领地一条的小记录（不另建存档格式）。
+    /// </summary>
+    [Serializable]
+    public sealed class TerritoryControlState
+    {
+        public TerritoryControlRecord[] Records = Array.Empty<TerritoryControlRecord>();
+        /// <summary>迎战队伍键的下一个序号（键 = <c>TerritoryControlService.KeyBase</c> + 序号，与突袭队伍键不重叠）。</summary>
+        public int NextEngageSerial = 1;
+        /// <summary>精英残部的下一个序号（据点 ID = remnant:领地:序号）。</summary>
+        public int NextRemnantSerial = 1;
+        /// <summary>统计：玩家摧毁的据点 / 歼灭的巡逻 / 击溃的精英残部、阵营重建的据点、派出的骚扰部队。</summary>
+        public int OutpostsDestroyed;
+        public int PatrolsRouted;
+        public int RemnantsRouted;
+        public int OutpostsRebuilt;
+        public int HarassSent;
+    }
+
+    /// <summary>FG8-EXP-03：一个阵营领地的控制状态。</summary>
+    [Serializable]
+    public sealed class TerritoryControlRecord
+    {
+        public string TerritoryId = string.Empty;
+        /// <summary>0 = 敌控；1 = 平定中（首领被击败，不再增援）；2 = 已收复（控制度低于阈值：巡逻撤离、可以放心建设，精英残部定期刷新）。</summary>
+        public int Status;
+        /// <summary>控制度 0～100（活跃的领地主力据点等级之和 ÷ 全部领地主力据点等级之和；没有任何领地据点 = 100、不会变）。派生量，存档只为显示与通知。</summary>
+        public int Control = 100;
+        public bool LeaderDefeated;
+        public long LeaderDefeatedTick = -1;
+        public long ReclaimedTick = -1;
+        /// <summary>下一次阵营增援（敌控时；固定网格 k × 间隔）与已经增援过几次。</summary>
+        public long NextReinforceTick = -1;
+        public int Reinforcements;
+        /// <summary>下一次精英残部刷新（已收复后）与当前这一批的据点 ID（空 = 没有活着的）。</summary>
+        public long NextEliteTick = -1;
+        public string RemnantId = string.Empty;
+        public int EliteWaves;
+        /// <summary>下一次骚扰检查与最近一支骚扰部队的队伍 ID（还在途中 / 攻城时不再派）。</summary>
+        public long NextHarassTick = -1;
+        public string HarassGroupId = string.Empty;
     }
 
     /// <summary>
@@ -1448,6 +1516,13 @@ namespace GameLogic.Campaign
         public long RouteReadyTick = -1;
         public double PosX;
         public double PosY;
+
+        // ── FG8-EXP-03：巡逻迎战（己方机器走近时就地展开；全灭 = 巡逻被歼灭，从列表里移除）。只加字段。──
+        public bool Engaged;
+        public int EngageKey;
+        public int UnfoldedCount;
+        public long LastContactTick = -1;
+        public long EngageTick = -1;
     }
 
     /// <summary>
@@ -1533,6 +1608,8 @@ namespace GameLogic.Campaign
         public int[] EliteCounts = Array.Empty<int>();
         /// <summary>目标种类（home / outpost）。</summary>
         public string TargetKind = string.Empty;
+        /// <summary>FG8-EXP-03：领地据点派出的骚扰部队（不是突袭导演排的一波：到达不计“已到达波次”、不占“前 3 次突袭自动暂停”名额）。只加字段：旧档 = false。</summary>
+        public bool Harass;
         /// <summary>FG6-DEF-05 把到达的队伍展开成战斗单位后置真：撤退由攻城逻辑接管，不再按聚合体的时间上限撤退。</summary>
         public bool Engaged;
         /// <summary>开始撤退的步（-1 = 没有撤退）。</summary>
@@ -2400,6 +2477,8 @@ namespace GameLogic.Campaign
             }
             s.Raids.PendingWakeIds ??= Array.Empty<string>();
             s.Raids.PendingWakeReasons ??= Array.Empty<string>();
+            WorldSim.WorldOutpostSystem.BackfillPatrolRadius(s); // FG8-EXP-03 复审 P2：旧档据点补巡逻半径（重建时补派巡逻）。
+            WorldSim.TerritoryControlService.EnsureState(s); // FG8-EXP-03：领地控制域补成空域（旧档没有 = 第一次推进时按当前据点补好）。
             Defense.TurretService.EnsureState(s); // FG6-DEF-01：炮塔域补成空域（旧档没有 = 没有炮塔）；坏值钳回合法范围。
             Defense.DefenseService.EnsureState(s); // FG6-DEF-02：防御建筑域补成空域（旧档没有 = 没有屏障 / 闸门 / 护盾 / 陷阱）；坏值钳回。
             Defense.RepairDroneService.EnsureState(s); // FG6-DEF-03：维修无人机站域补成空（旧档没有 = 没有维修无人机站）；坏值钳回、重复序号重编。

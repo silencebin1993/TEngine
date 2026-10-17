@@ -363,6 +363,10 @@ public partial class Tables
     /// </summary>
     public fg.TbTerritory TbTerritory {get; }
     /// <summary>
+    /// 领地控制
+    /// </summary>
+    public fg.TbTerritoryControl TbTerritoryControl {get; }
+    /// <summary>
     /// 领地模板
     /// </summary>
     public fg.TbTerritoryTemplate TbTerritoryTemplate {get; }
@@ -545,6 +549,7 @@ public partial class Tables
         TbStormDebris = new fg.TbStormDebris(loader("fg_tbstormdebris"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
+        TbTerritoryControl = new fg.TbTerritoryControl(loader("fg_tbterritorycontrol"));
         TbTerritoryTemplate = new fg.TbTerritoryTemplate(loader("fg_tbterritorytemplate"));
         TbTrapProfile = new fg.TbTrapProfile(loader("fg_tbtrapprofile"));
         TbTurretFluid = new fg.TbTurretFluid(loader("fg_tbturretfluid"));
@@ -661,6 +666,7 @@ public partial class Tables
         TbStormDebris.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
+        TbTerritoryControl.ResolveRef(this);
         TbTerritoryTemplate.ResolveRef(this);
         TbTrapProfile.ResolveRef(this);
         TbTurretFluid.ResolveRef(this);

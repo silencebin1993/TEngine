@@ -950,6 +950,7 @@ namespace GameLogic.UI.Kit
             _footer.text = Hint("stats.flow.footer");
             FlowEnergyStats.Build(state, _flowLines);
             Campaign.Env.PurificationService.BuildStatsLines(state, _flowLines); // FG7-ENV-04（B19 / B13）：环境 · 净化与归还面积（含最近 24 游戏小时趋势）
+            Campaign.WorldSim.TerritoryControlService.BuildStatsLines(state, _flowLines); // FG8-EXP-03（B19）：领地 · 控制度与状态、摧毁 / 歼灭 / 击溃 / 重建 / 骚扰累计
             _count.text = string.Empty;
             foreach ((string text, string cls) in _flowLines)
             {

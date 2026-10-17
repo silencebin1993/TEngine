@@ -472,12 +472,31 @@ namespace GameLogic.Campaign.WorldSim
                     TEngine.Log.Info("[WorldPlanetView] " + GameLogic.Localization.GameText.Get("outpost.placeholder"));
                 }
             }
-            if (!go.activeSelf)
+            bool wasActive = go.activeSelf;
+            if (!wasActive)
             {
                 go.SetActive(true);
             }
-            go.transform.position = new Vector3(x, 0f, y);
+            // FG8-EXP-03（DEBT-FG8GEN02-07）：巡逻标记按最快 outpost.patrol_view_catchup 格/秒追上逻辑位置——据点刚醒来、路线交回后巡逻跳到折返位置时，
+            // 画面上是快速滑过去而不是瞬移；相差超过 outpost.patrol_view_snap（读档 / 镜头跳到别处）才直接放过去。只改表现，不改模拟。
+            Vector3 shown = go.transform.position;
+            Vector2 placed = isPatrol && wasActive ? SmoothPatrol(new Vector2(shown.x, shown.z), new Vector2(x, y), View.CameraDirector.RealDeltaTime()) : new Vector2(x, y);
+            go.transform.position = new Vector3(placed.x, 0f, placed.y);
             VisibleOutpostMarkerCount++;
+        }
+
+        /// <summary>FG8-EXP-03（DEBT-FG8GEN02-07）：巡逻标记这一帧画在哪——朝逻辑位置最多走 catchup × dt 格；相差超过 snap 格直接放过去。纯函数（自检直接断言）。</summary>
+        public static Vector2 SmoothPatrol(Vector2 shown, Vector2 target, float dt)
+        {
+            float d = Vector2.Distance(shown, target);
+            float snap = GridContent.TryGetTuning("outpost.patrol_view_snap", out float sv) && sv > 0f ? sv : 120f;
+            float speed = GridContent.TryGetTuning("outpost.patrol_view_catchup", out float cv) && cv > 0f ? cv : 12f;
+            float step = speed * Mathf.Max(0f, dt);
+            if (d <= step || d > snap || d < 1e-4f)
+            {
+                return target;
+            }
+            return shown + (target - shown) / d * step;
         }
 
         private static GameObject CreateOutpostMarker(string id, bool isPatrol)

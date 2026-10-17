@@ -581,7 +581,7 @@ namespace GameLogic.Campaign.Defense
                         break;
                     }
                 }
-                if (!owned)
+                if (!owned && !TerritoryControlService.OwnsKey(state, key)) // FG8-EXP-03：正在迎战的据点 / 巡逻也是主人
                 {
                     site.DespawnSiegeGroup(key);
                     OrphansRemoved++;

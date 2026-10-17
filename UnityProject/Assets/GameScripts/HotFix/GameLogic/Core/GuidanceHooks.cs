@@ -504,6 +504,21 @@ namespace GameLogic.Core
         /// <summary>FG8-GEN-02（卡片负向“室内入口被堵”）：第一次在室内入口保护范围里建造被拒。</summary>
         public const string WorldFirstEntranceBlocked = "world.first_entrance_blocked";
 
+        /// <summary>FG8-EXP-03（FGR-EXP-022）：第一次摧毁阵营领地里的据点（控制度下降）。</summary>
+        public const string WorldFirstOutpostDestroyed = "world.first_outpost_destroyed";
+
+        /// <summary>FG8-EXP-03（FGR-EXP-022）：第一次有领地进入平定（首领被击败）。</summary>
+        public const string WorldFirstTerritoryPacified = "world.first_territory_pacified";
+
+        /// <summary>FG8-EXP-03（FGR-EXP-022）：第一次收复领地。</summary>
+        public const string WorldFirstTerritoryReclaimed = "world.first_territory_reclaimed";
+
+        /// <summary>FG8-EXP-03（FGR-EXP-022）：第一次在已收复的领地里出现精英残部。</summary>
+        public const string WorldFirstEliteRemnant = "world.first_elite_remnant";
+
+        /// <summary>FG8-EXP-03（卡片负向“在敌控领地里建设”）：第一次因为在敌控领地里有建筑而被据点骚扰。</summary>
+        public const string WorldFirstTerritoryHarassed = "world.first_territory_harassed";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -565,6 +580,7 @@ namespace GameLogic.Core
             EnvFirstPollutionSeen, EnvFirstPurifier, EnvFirstPurified, EnvFirstReturnMilestone, EnvFirstRepollution,
             EnvFirstRelicFound, EnvFirstRelicRecovered, EnvFirstHazardSeen, EnvFirstFogBlocked,
             WorldFirstTerritoryEntered, WorldFirstInteriorEntered, WorldFirstPoiFound, WorldFirstEntranceBlocked,
+            WorldFirstOutpostDestroyed, WorldFirstTerritoryPacified, WorldFirstTerritoryReclaimed, WorldFirstEliteRemnant, WorldFirstTerritoryHarassed,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

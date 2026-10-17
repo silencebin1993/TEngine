@@ -227,7 +227,8 @@ namespace GameLogic.UI.Kit
                             continue;
                         }
                         Hazard hz = HomeExplorationService.HazardForTerritory(t.Id);
-                        string label = GameText.Format("ui.map.territory_label", GameText.Get(t.NameKey));
+                        // FG8-EXP-03（FGR-EXP-022“战略地图上显示每个领地的范围、控制度和状态”）：有领地据点的写“控制度 N% · 敌控 / 平定中 / 已收复”；旧世界（没有领地据点）仍写“待侦察”。
+                        string label = TerritoryControlService.MapLabel(state, t);
                         if (hz != null)
                         {
                             label = GameText.Format("ui.map.territory_hazard", label, GameText.Get(hz.NameKey));
@@ -454,11 +455,7 @@ namespace GameLogic.UI.Kit
 
         public static string OutpostLabel(CampaignState state, OutpostRecord o)
         {
-            string faction = !string.IsNullOrEmpty(o.TerritoryId) && GameText.Has(Campaign.WorldGen.TerritoryPlanner.FactionKey(o.TerritoryId)) ? GameText.Get(Campaign.WorldGen.TerritoryPlanner.FactionKey(o.TerritoryId)) : string.Empty;
-            string name = o.Kind == WorldOutpostSystem.KindScoutNest ? GameText.Format("world.poi.scout_nest", Math.Max(1, o.Tier))
-                : o.Kind == WorldOutpostSystem.KindTerritory ? GameText.Format("world.poi.outpost", faction, Math.Max(1, o.Tier))
-                : o.Kind == WorldOutpostSystem.KindScatter || o.Kind == WorldOutpostSystem.KindOuter ? GameText.Format("world.poi.scatter_outpost", faction, Math.Max(1, o.Tier))
-                : GameText.Get("outpost.name");
+            string name = TerritoryControlService.OutpostName(o); // FG8-EXP-03：与领地交战通知同一套名字（含精英残部）
             WorldOutpostSystem.Peek(state, o, out int garrison, out _);
             return GameText.Format("outpost.marker", name, garrison);
         }
