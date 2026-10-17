@@ -34,7 +34,11 @@ namespace GameLogic.Campaign.Regions
     /// 本类调用它、不重复实现。</summary>
     public static class ExpeditionDepartureService
     {
+        /// <summary>战役目标 OBJ-04（"至少 3 台机器可以出征"）与 journey 机器人使用的名单门槛，不是派遣硬约束。</summary>
         public const int MinRosterSize = 3;
+        /// <summary>FG8-EXP-01（FGR-EXP-001 硬约束 / FG08:40）：派遣硬约束“至少一台机器”。
+        /// <see cref="ValidateRoster"/> 与检查单共用它；与 <see cref="MinRosterSize"/> 分开，避免改动 OBJ-04 战役目标。</summary>
+        public const int MinDepartureSize = 1;
         public const int MaxRosterSize = 5;
 
         /// <summary>ER6-REGION-01：本类此前硬编码目标破碎都市（DIGEST 已登记的已知缺口），现推广为
@@ -53,23 +57,69 @@ namespace GameLogic.Campaign.Regions
         /// 蓝图已保存且 ERC-003 已改造"，<see cref="FoundryOutpostRegion.RecomputeUnlock"/> 真实判定），
         /// 后续出征即以它为目标；玩家不会再被要求回破碎都市（该区域已完成"带回两件技术"的一次性
         /// 目标，DEMO-CONTENT-LOCK.md §4.4 OBJ-05～07 是线性推进，不循环）。</summary>
-        public static ExpeditionTarget ResolveTarget(CampaignState state)
+        /// <summary>FG8-EXP-01 修复轮（卡片结果“指定目的地”）：可派的目的地＝当前非 Locked 的区域，
+        /// 按默认优先级排序（铸造前哨外围在前，与旧的自动解析一致）。派遣准备面板的目的地下拉框只列这些。</summary>
+        public static ExpeditionTarget[] ReachableTargets(CampaignState state)
         {
             if (state == null)
             {
-                return ExpeditionTarget.None;
+                return Array.Empty<ExpeditionTarget>();
             }
+            var list = new List<ExpeditionTarget>(2);
             RegionRecord foundry = FoundryOutpostRegion.Find(state);
             if (foundry != null && foundry.State != RegionState.Locked)
             {
-                return ExpeditionTarget.FoundryOutpost;
+                list.Add(ExpeditionTarget.FoundryOutpost);
             }
             RegionRecord fractured = FracturedCityRegion.Find(state);
             if (fractured != null && fractured.State != RegionState.Locked)
             {
-                return ExpeditionTarget.SilentRuins;
+                list.Add(ExpeditionTarget.SilentRuins);
             }
-            return ExpeditionTarget.None;
+            return list.ToArray();
+        }
+
+        /// <summary>目标解析：<paramref name="requested"/> 有值且仍可派（<see cref="ReachableTargets"/> 含它）时以它为目标（玩家在面板里指定的），
+        /// 否则回落到默认优先级（与旧行为一致）；没有任何可派区域＝None。</summary>
+        public static ExpeditionTarget ResolveTarget(CampaignState state, ExpeditionTarget? requested = null)
+        {
+            ExpeditionTarget[] reachable = ReachableTargets(state);
+            if (reachable.Length == 0)
+            {
+                return ExpeditionTarget.None;
+            }
+            if (requested.HasValue && Array.IndexOf(reachable, requested.Value) >= 0)
+            {
+                return requested.Value;
+            }
+            return reachable[0];
+        }
+
+        /// <summary>FG8-EXP-01 修复轮（FGR-EXP-001 硬约束“目的地已探索或在迷雾边缘”）：区域级口径。
+        /// 区域站点是局部坐标、不在家园网格上，没有世界区块掩码可查，因此按区域状态分三档：
+        /// 深迷雾＝Locked（硬拦，检查单写“destination-in-fog”）；迷雾边缘＝Available（已揭示、尚未进入过，可派，检查单提醒）；
+        /// 已探索＝Active / Cleared（可派）。地图级迷雾边缘（区块探索掩码）未接入，见 DEBT-FG8EXP01-06。</summary>
+        public enum DestinationFog
+        {
+            DeepFog = 0,
+            FogEdge = 1,
+            Explored = 2,
+        }
+
+        public static DestinationFog ClassifyDestination(CampaignState state, ExpeditionTarget target)
+        {
+            if (state == null)
+            {
+                return DestinationFog.DeepFog;
+            }
+            RegionRecord region = target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostRegion.Find(state)
+                : target == ExpeditionTarget.SilentRuins ? FracturedCityRegion.Find(state)
+                : null;
+            if (region == null || region.State == RegionState.Locked)
+            {
+                return DestinationFog.DeepFog;
+            }
+            return region.State == RegionState.Available ? DestinationFog.FogEdge : DestinationFog.Explored;
         }
 
         /// <summary>"主作战组件"＝会伤敌的主组件（连射器/切割束/铸造重炮）。维修束是主组件但
@@ -91,6 +141,18 @@ namespace GameLogic.Campaign.Regions
         /// 不会发生，用它当判定条件是空判据）。</summary>
         private static bool IsUninterruptibleOrder(WorkOrderRecord order) =>
             order != null && order.Kind == WorkOrderKind.Repair && string.IsNullOrEmpty(order.ResourceTransactionId);
+
+        /// <summary>FG8-EXP-01（FGR-EXP-001 硬约束 / 检查单“伤势”）：生命低于派遣下限（<c>exp.check.min_health_pct</c> × 最大生命）的机器不能派遣，先送修。
+        /// 唯一判定点：<see cref="BuildIntel"/> 的可派资格与 <see cref="ValidateRoster"/> 的硬约束共用它。</summary>
+        public static bool IsTooDamaged(MachineRecord record)
+        {
+            if (record == null || record.MaxHealth <= 0f)
+            {
+                return false;
+            }
+            float pct = GameLogic.Campaign.Grid.GridContent.TryGetTuning("exp.check.min_health_pct", out float v) ? v : 0.25f;
+            return record.Health < record.MaxHealth * pct;
+        }
 
         // ── 单机情报（面板展示 + 校验共用同一份解析结果，不允许面板和校验各算一套数字）───────
 
@@ -172,11 +234,13 @@ namespace GameLogic.Campaign.Regions
             bool uninterruptible = IsUninterruptibleOrder(activeOrder);
 
             bool inHomeRegion = record.RegionId == HomeValleyLayout.RegionId;
-            bool eligible = record.IsAlive && inHomeRegion && !record.IsInFactory && !uninterruptible;
+            bool tooDamaged = IsTooDamaged(record);
+            bool eligible = record.IsAlive && inHomeRegion && !record.IsInFactory && !uninterruptible && !tooDamaged;
             string ineligibleReason = eligible ? null
                 : !record.IsAlive ? "dead"
                 : !inHomeRegion ? "already-deployed:" + record.RegionId
                 : record.IsInFactory ? "in-factory"
+                : tooDamaged ? "too-damaged"
                 : "busy-uninterruptible:" + activeOrder.WorkOrderId;
 
             return new MachineIntel(record.LogicId, record.DisplayNumber, record.ChassisId, record.BlueprintId,
@@ -277,7 +341,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>面板展示用的整份快照。<paramref name="state"/> 为空或区域尚未 Available 时
         /// <see cref="PrepSnapshot.RegionReachable"/> 为假并给出 <see cref="PrepSnapshot.BlockedReason"/>，
         /// 面板据此只显示"未解锁"而不是空列表。</summary>
-        public static PrepSnapshot BuildPrepSnapshot(CampaignState state)
+        public static PrepSnapshot BuildPrepSnapshot(CampaignState state, ExpeditionTarget? requested = null)
         {
             if (state == null)
             {
@@ -285,7 +349,7 @@ namespace GameLogic.Campaign.Regions
                     ExpeditionTarget.None, null, AdaptationCatalog.None, null, null, null, null, false, null);
             }
 
-            ExpeditionTarget target = ResolveTarget(state);
+            ExpeditionTarget target = ResolveTarget(state, requested);
             if (WorldSim.WorldSimulation.ActiveExpedition != null)
             {
                 // FG0-ARCH-01：派遣不再退出家园，玩家可以在远征途中回家园打开远征准备——同一时刻只允许一支远征队在外
@@ -423,9 +487,9 @@ namespace GameLogic.Campaign.Regions
             var reasons = new List<string>();
             selectedLogicIds ??= Array.Empty<int>();
 
-            if (selectedLogicIds.Count < MinRosterSize)
+            if (selectedLogicIds.Count < MinDepartureSize)
             {
-                reasons.Add($"roster-too-small:need>={MinRosterSize}:have={selectedLogicIds.Count}");
+                reasons.Add($"roster-too-small:need>={MinDepartureSize}:have={selectedLogicIds.Count}");
             }
             if (selectedLogicIds.Count > MaxRosterSize)
             {
@@ -470,6 +534,12 @@ namespace GameLogic.Campaign.Regions
                 if (intel.BusyUninterruptible)
                 {
                     reasons.Add($"machine-busy-uninterruptible:{logicId}:{intel.CurrentWorkOrderId}");
+                    continue;
+                }
+                // FG8-EXP-01：伤势过重（生命低于派遣下限）不能派遣，先送修。
+                if (IsTooDamaged(record))
+                {
+                    reasons.Add($"machine-too-damaged:{logicId}");
                     continue;
                 }
 
@@ -568,7 +638,7 @@ namespace GameLogic.Campaign.Regions
         /// 控制恢复（战略镜头，见下）→ 解冻。任一步异常/失败 → 从"出发前档"回滚（
         /// <see cref="CampaignRestoreOrchestrator.Restore"/>）+ 重新进入归还谷地，不解冻前不返回。
         /// 只有全部步骤成功才 <c>region.ExpeditionCount += 1</c>。</summary>
-        public static DepartureResult TryDepart(IReadOnlyList<int> selectedLogicIds, bool interruptConfirmed)
+        public static DepartureResult TryDepart(IReadOnlyList<int> selectedLogicIds, bool interruptConfirmed, ExpeditionTarget? requested = null)
         {
             CampaignState precheckState = CampaignSession.Current;
             if (precheckState == null)
@@ -581,7 +651,7 @@ namespace GameLogic.Campaign.Regions
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "expedition-underway" }, null);
             }
 
-            ExpeditionTarget target = ResolveTarget(precheckState);
+            ExpeditionTarget target = ResolveTarget(precheckState, requested);
             if (target == ExpeditionTarget.None)
             {
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "region-locked" }, null);
@@ -674,6 +744,9 @@ namespace GameLogic.Campaign.Regions
                     // 同一次远征（地点 + 第几次出发）只记一次。
                     CampaignExposureLedger.GrantAlienTechForExpedition(state, manifest, regionAfter.RegionId, regionAfter.ExpeditionCount);
                 }
+
+                // ── FG8-EXP-01：远征队记下这次派出的名单（只记名单，不改机器状态；随下面的出发后存档落盘）──
+                ExpeditionTeamService.RememberMembers(state, manifest);
 
                 // ── FG4-ECO-09：离家报告从出发成功的这一刻开始记（下面的出发后存档把它存进去）──────────────
                 Economy.AwayReportService.Begin(state,

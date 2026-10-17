@@ -10,6 +10,7 @@ using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Settings;
 using GameLogic.Stage;
+using GameLogic.UI.Expedition;
 using GameLogic.View;
 using TEngine;
 using UnityEngine;
@@ -46,6 +47,8 @@ namespace GameLogic.UI.Kit
         private Label _title;
         private Label _scale;
         private Button _close;
+        /// <summary>FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：标题栏“编成远征队”按钮。</summary>
+        private Button _composeExpedition;
         private readonly Button[] _filters = new Button[8];
         private VisualElement _canvas;
         private VisualElement _textureLayer;
@@ -297,6 +300,8 @@ namespace GameLogic.UI.Kit
             _icons = new WorldMapIconPool(_iconLayer, labels: true);
             _texture ??= new WorldMapTexture(Mathf.Max(64, (int)GridContent.Tuning("map.texture_size")));
             _close.clicked += () => SetOpen(false);
+            _composeExpedition = root.Q<Button>("MapComposeExpedition");
+            _composeExpedition.clicked += ComposeExpedition;
             _markerDelete.clicked += DeleteSelectedMarker;
             _markerNote.RegisterValueChangedCallback(evt => SetSelectedMarkerNote(evt.newValue));
             _vector.generateVisualContent += ctx => WorldMapVectorLayer.Draw(ctx, _model, _view, _hasCameraQuad ? _cameraQuad : null);
@@ -316,6 +321,20 @@ namespace GameLogic.UI.Kit
 
         /// <summary>这份战役有没有战略地图：生成器世界（v1 起）有；旧版本原型地形（生成器版本 0）没有——地图键回退打开任务日志（兼战役地图）。</summary>
         public static bool HasWorldMap(CampaignState state) => state != null && WorldGenService.ContextFor(state) != null;
+
+        /// <summary>FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：打开派遣准备面板（目的地在面板里指定），并收起地图。
+        /// 派遣准备面板只在家园里可开；不在家园时按钮不做任何事。</summary>
+        private void ComposeExpedition()
+        {
+            HomeValleyController hv = GameRoot.HomeValley;
+            if (hv == null || !hv.IsActive)
+            {
+                return;
+            }
+            ExpeditionPrepPanelUIToolkit.RequestCompose(null);
+            hv.SetExpeditionPrepPanelOpen(true);
+            SetOpen(false);
+        }
 
         public void SetOpen(bool open)
         {
@@ -454,6 +473,13 @@ namespace GameLogic.UI.Kit
             _close.text = GameText.Get("ui.map.close");
             _markerDelete.text = GameText.Get("ui.map.marker_delete");
             _hint.text = InputDisplay.ExpandActionTokens(GameText.Get("ui.map.hint"));
+            if (_composeExpedition != null)
+            {
+                _composeExpedition.text = GameText.Get("exp.compose.button");
+                // 派遣准备面板只在家园可开：不在家园时按钮置灰，不再点了没反应（FG8-EXP-01 修复轮 P2）。
+                HomeValleyController hv = GameRoot.HomeValley;
+                _composeExpedition.SetEnabled(hv != null && hv.IsActive);
+            }
             for (int i = 0; i < _filters.Length; i++)
             {
                 WorldMapLayer layer = (WorldMapLayer)i;

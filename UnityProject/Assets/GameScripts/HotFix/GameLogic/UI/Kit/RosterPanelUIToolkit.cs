@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Economy;
@@ -11,6 +12,7 @@ using GameLogic.Localization;
 using GameLogic.Settings;
 using GameLogic.Stage;
 using GameLogic.UI.Common;
+using GameLogic.UI.Expedition;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -151,6 +153,8 @@ namespace GameLogic.UI.Kit
         /// <summary>FG5-RND-06（FGU-40）：“纪念墙…”——关掉名册、打开陈列馆面板的纪念墙页（不需要先建陈列馆）。</summary>
         public Button MemorialButton => _memorial;
         private Button _memorial;
+        /// <summary>FG8-EXP-01 修复轮（卡片结果“从名册编成远征队”）：工具条“编成远征队”按钮。</summary>
+        private Button _composeExpedition;
         public Button DetailBackButton => _detailBack;
         public Button DetailJumpButton => _detailJump;
         public Button CloseButton => _close;
@@ -318,6 +322,8 @@ namespace GameLogic.UI.Kit
             _selectAll.clicked += SelectAllShown;
             _selectNone.clicked += SelectNone;
             _memorial.clicked += OpenMemorial;
+            _composeExpedition = root.Q<Button>("RosterComposeExpedition");
+            _composeExpedition.clicked += ComposeExpedition;
             _pageTurrets = root.Q<VisualElement>("RosterPageTurrets");
             _turretsBtn = root.Q<Button>("RosterTurrets");
             _turretsBack = root.Q<Button>("RosterTurretsBack");
@@ -359,6 +365,20 @@ namespace GameLogic.UI.Kit
         }
 
         private static CampaignState Session => CampaignSession.Current;
+
+        /// <summary>FG8-EXP-01 修复轮（卡片结果“从名册编成远征队”）：把名册里勾选的机器带进派遣准备面板（没有勾选＝常规预选），并收起名册。
+        /// 派遣准备面板只在家园里可开；不在家园时按钮不做任何事。</summary>
+        private void ComposeExpedition()
+        {
+            HomeValleyController hv = GameRoot.HomeValley;
+            if (hv == null || !hv.IsActive)
+            {
+                return;
+            }
+            ExpeditionPrepPanelUIToolkit.RequestCompose(_selected.ToArray());
+            hv.SetExpeditionPrepPanelOpen(true);
+            SetOpen(false);
+        }
 
         public void SetOpen(bool open)
         {
@@ -573,6 +593,13 @@ namespace GameLogic.UI.Kit
             _selectAll.text = GameText.Get("roster.panel.select_all");
             _selectNone.text = GameText.Get("roster.panel.select_none");
             _memorial.text = GameText.Get("blackbox.panel.memorial_open");
+            if (_composeExpedition != null)
+            {
+                _composeExpedition.text = GameText.Get("exp.compose.button");
+                // 派遣准备面板只在家园可开：不在家园时按钮置灰，不再点了没反应（FG8-EXP-01 修复轮 P2）。
+                HomeValleyController hv = GameRoot.HomeValley;
+                _composeExpedition.SetEnabled(hv != null && hv.IsActive);
+            }
             if (_turretsBtn != null)
             {
                 _turretsBtn.text = GameText.Format("roster.tab.turrets_count", Campaign.Defense.TurretService.All(Session).Count);

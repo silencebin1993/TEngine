@@ -988,6 +988,8 @@ namespace GameLogic.EditorTools
             bool on = ClickUitk("[StrategicMapHost]", "MapFilter4");
             map.Tick(force: true);
             Check(off && homeHidden && on && map.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home), "点“己方”筛选按钮：归还核心图标隐藏，再点恢复");
+            // FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：标题栏入口节点存在（点击会收起地图并打开派遣准备面板，此处只查接线节点，不点）。
+            Check(UitkExists("[StrategicMapHost]", "MapComposeExpedition"), "战略地图标题栏有“编成远征队”按钮（FG8-EXP-01 修复轮入口）");
             // 己方建筑群与前哨（FGR-GEN-080）：核心以外的每个建筑群，在视野里就有图标（核心那一群由核心图标代表）。
             var clusters = WorldMapOwnClusters.For(CampaignSession.Current);
             int ownInView = clusters.Count(c => !c.ContainsCore && map.View.Contains(c.X, c.Y, map.View.HalfWidth * 0.1));
@@ -2314,6 +2316,14 @@ namespace GameLogic.EditorTools
             UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
             UnityEngine.UIElements.Button b = doc?.rootVisualElement?.Q<UnityEngine.UIElements.Button>(buttonName);
             return InvokeClickable(b);
+        }
+
+        /// <summary>FG8-EXP-01 修复轮：只查 UI Toolkit 节点是否存在（不点击，用来断言新入口已接进界面）。</summary>
+        private static bool UitkExists(string hostName, string elementName)
+        {
+            GameObject host = GameObject.Find(hostName);
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            return doc?.rootVisualElement?.Q<UnityEngine.UIElements.VisualElement>(elementName) != null;
         }
 
         /// <summary>向 UI Toolkit 元素派发一次指针事件（位置为面板坐标），与真实鼠标经过同一条派发链（含根上的 TrickleDown 回调）；
@@ -4499,6 +4509,33 @@ namespace GameLogic.EditorTools
             string reminder = LabelText("[HomeValleyExpeditionPrepHost]", "SignalCoreReminderLabel");
             Check(summary.Contains(Localization.GameText.Get("firmware.fw_overload.name")) && reminder == Localization.GameText.Get("signal.core.expedition_reminder"),
                 $"远征准备面板显示“{summary}”并提前提醒“{reminder}”");
+            // FG8-EXP-01（FGR-EXP-001 / FGU-31）：远征队改名 / 颜色行存在且显示默认值（新战役没改过名），缺键标记不出现。
+            string teamName = FieldText<TextField>("[HomeValleyExpeditionPrepHost]", "TeamNameField");
+            string teamColor = FieldText<DropdownField>("[HomeValleyExpeditionPrepHost]", "TeamColorDropdown");
+            Check(teamName == Localization.GameText.Get("exp.team.default_name") && teamColor == Localization.GameText.Get("exp.team.color.0")
+                  && !Localization.GameText.ContainsMarker(teamName + teamColor),
+                $"远征准备面板的远征队行：队名“{teamName}”、颜色“{teamColor}”（新战役默认值）");
+            // FG8-EXP-01 修复轮：颜色必须真的画出来（色块颜色 = 所选颜色；允许 1 级字节舍入误差），
+            // 检查单提醒区有内容（新战役劳动力预告恒在），空名单时硬约束原因写在面板上（真实 UI 文字）。
+            CampaignState expState = CampaignSession.Current;
+            Color32 swatch = SwatchColorOf("[HomeValleyExpeditionPrepHost]", "TeamColorSwatch");
+            Color32 wantSwatch = Campaign.Regions.ExpeditionTeamService.ColorOf(Campaign.Regions.ExpeditionTeamService.ColorIndexOf(expState));
+            bool swatchMatches = Math.Abs(swatch.r - wantSwatch.r) <= 1 && Math.Abs(swatch.g - wantSwatch.g) <= 1 && Math.Abs(swatch.b - wantSwatch.b) <= 1 && swatch.a > 0;
+            Check(swatchMatches, $"远征准备面板的颜色色块与所选颜色一致（色块 {swatch.r},{swatch.g},{swatch.b} / 应为 {wantSwatch.r},{wantSwatch.g},{wantSwatch.b}）");
+            string checklistRemind = LabelText("[HomeValleyExpeditionPrepHost]", "ChecklistRemindLabel");
+            Check(checklistRemind.Contains(Localization.GameText.Get("exp.check.remind.header")) && !Localization.GameText.ContainsMarker(checklistRemind),
+                $"派遣检查单提醒区有内容（新战役劳动力预告）：“{checklistRemind.Replace('\n', ' ')}”");
+            if (expState != null && Campaign.MachineRoster.ReserveIds(expState).Count == 0
+                && Campaign.Regions.ExpeditionTeamService.RememberedMembers(expState).Length == 0)
+            {
+                // 没有预选机器 = 名单为空：硬约束“至少选 1 台”必须写在面板上（ReasonsLabel），不能只在出发按钮里拦。
+                string reasons = LabelText("[HomeValleyExpeditionPrepHost]", "ReasonsLabel");
+                Check(reasons.Contains("无法出发"), $"空名单时面板写出硬约束原因：“{reasons.Replace('\n', ' ')}”");
+            }
+            // FG8-EXP-01 修复轮（卡片结果“指定目的地”）：目的地下拉框节点存在；区域未解锁时面板只隐藏 Body，节点仍在。
+            string destination = FieldText<DropdownField>("[HomeValleyExpeditionPrepHost]", "DestinationDropdown");
+            Check(destination != "（节点没找到）" && !Localization.GameText.ContainsMarker(destination),
+                $"远征准备面板有“目的地”下拉框（当前“{destination}”）");
             // FG4-ECO-07（FGR-ECO-042）：远征准备提示出发后家园劳动力的变化（没勾选机器时“劳动力不变”）。
             string labor = LabelText("[HomeValleyExpeditionPrepHost]", "SummaryLabel");
             Check(labor.Contains("劳动力") && !Localization.GameText.ContainsMarker(labor), $"远征准备面板写出发后家园劳动力：“{labor.Replace('\n', ' ')}”");
@@ -6820,6 +6857,8 @@ namespace GameLogic.EditorTools
             bool open = UI.Kit.RosterPanelUIToolkit.IsOpen && rop != null && rop.PanelVisible && rop.MemorialButton != null
                         && rop.MemorialButton.text == Localization.GameText.Get("blackbox.panel.memorial_open");
             Check(open, $"按 N 打开机器名册，有“{rop?.MemorialButton?.text}”按钮");
+            // FG8-EXP-01 修复轮（卡片结果“从名册编成远征队”）：工具条入口节点存在（点击会收起名册并打开派遣准备面板，此处只查接线节点，不点）。
+            Check(UitkExists("[RosterPanelHost]", "RosterComposeExpedition"), "机器名册工具条有“编成远征队”按钮（FG8-EXP-01 修复轮入口）");
             Check(ClickUitk("[RosterPanelHost]", "RosterMemorial"), "机器名册上点“纪念墙…”");
             Next(384, "陈列馆面板直接打开在纪念墙页；Esc 关闭");
         }
@@ -11646,6 +11685,24 @@ namespace GameLogic.EditorTools
             UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
             Label label = doc?.rootVisualElement?.Q<Label>(labelName);
             return label != null ? label.text ?? string.Empty : "（节点没找到）";
+        }
+
+        /// <summary>FG8-EXP-01：读颜色色块的背景色（节点没找到返回全 0，断言会失败）。</summary>
+        private static Color32 SwatchColorOf(string hostName, string elementName)
+        {
+            GameObject host = GameObject.Find(hostName);
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            UnityEngine.UIElements.VisualElement el = doc?.rootVisualElement?.Q<UnityEngine.UIElements.VisualElement>(elementName);
+            return el != null ? (Color32)el.style.backgroundColor.value : default(Color32);
+        }
+
+        /// <summary>FG8-EXP-01：读输入框 / 下拉框的当前值（节点没找到返回“（节点没找到）”，与 <see cref="LabelText"/> 同口径）。</summary>
+        private static string FieldText<T>(string hostName, string fieldName) where T : BaseField<string>
+        {
+            GameObject host = GameObject.Find(hostName);
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            T field = doc?.rootVisualElement?.Q<T>(fieldName);
+            return field != null ? field.value ?? string.Empty : "（节点没找到）";
         }
 
         /// <summary>模拟按下一次键：只在下一帧报告按下。</summary>

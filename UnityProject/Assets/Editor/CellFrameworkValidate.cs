@@ -530,6 +530,9 @@ namespace GameLogic.EditorTools
             // 覆盖半径变大后迷雾跟着揭开；机器沿走过的路探索（补缝、瞬移不补、真实行走）；遗迹点发现与通知（开局不补发、去重、合并、种子决定）；回收（右键 / 地图派空闲机器、
             // 技术数据、背景资料、统计、标记）；区域危害（领地 / 危害带、悬停、第一次揭开通知）；负向矩阵；暂停与 0.5x～3x、观察一致、真文件存读档；界面（图例 / 悬停 / 遗迹面板、探针）；性能。
             Seg("FgExplorationSelfCheck", FgExplorationSelfCheck.Run);
+            // FG8-EXP-01 派遣检查单（FG08 FGR-EXP-001）：硬约束（伤势 / 迷雾深处 / 带宽超限）拦得住、出发被拒且不改世界；提醒（覆盖 / 货舱 / 静默夜 / 劳动力 / 伤势偏重 / 反制）按真实条件出现；
+            // 远征队改名 / 设颜色 / 名单记忆 / 旧档兼容；真实派遣后真文件存读档；派遣准备面板布局探针。
+            Seg("FgExpeditionChecklistSelfCheck", FgExpeditionChecklistSelfCheck.Run);
             // FG7-E2E-01：M7 出口——FGJ-M7 登记覆盖里程碑原文与 DEBT-FG7ENV05-07、断点；旅程源码只走输入通道、两处日程捷径只在 ApplyScheduleFixture；
             // PlanDayForTests 与正式排定同一套时刻 / 时长；命令栏全部被拒时最新一行是原因；IC-REQ-022 六类反向（真实系统：缺冷却液、回收机被摧毁、静默夜断网、
             // 静默夜 + 酸雨中暂停与 0.5x / 3x、静默夜 + 酸雨 + 缺液中真文件存读档 FGT-ENV-008、遗迹被悬崖围住）；缺口清零；FG-M7 试玩包；FGT-ENV-001～008 映射。

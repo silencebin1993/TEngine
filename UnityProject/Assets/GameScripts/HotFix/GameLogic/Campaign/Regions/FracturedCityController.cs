@@ -1048,6 +1048,8 @@ namespace GameLogic.Campaign.Regions
                 FindHostileNear = FindEnemyHostileNear,
                 ResolveHostile = ResolveEnemyHostile,
                 Site = _combat,
+                // FG8-EXP-01（FG13）：连按两次编组键 → 镜头飞到编组中心。
+                FlyCameraTo = p => { _cameraDirector?.FlyStrategyTo(new float2(p.x, p.y), GameLogic.View.CameraDirector.TransitionSeconds); },
                 HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = AttackRange,
                 AttackCooldownSeconds = CombatSite.MachineAttackInterval, // fg.TbHomeTuning combat.machine.attack_interval（与即时命中武器的冷却同一个数）

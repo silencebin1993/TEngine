@@ -49,12 +49,25 @@ namespace GameLogic.UI.Expedition
         private Label _summaryLabel;
         private Label _forecastLabel;
         private Label _reasonsLabel;
+        // FG8-EXP-01：派遣检查单的提醒、远征队改名与颜色。
+        private Label _checklistRemindLabel;
+        private TextField _teamNameField;
+        private DropdownField _teamColorDropdown;
+        private Label _teamNameErrorLabel;
+        /// <summary>FG8-EXP-01：队名行的颜色色块（颜色只显示名字不够看，色块让玩家一眼认出所选颜色）。</summary>
+        private VisualElement _teamColorSwatch;
         private VisualElement _interruptSection;
         private Label _interruptLabel;
         private Button _confirmInterruptButton;
         private Button _cancelInterruptButton;
         private Button _departButton;
         private Button _closeButton;
+        // FG8-EXP-01 修复轮（卡片结果“指定目的地”）：目的地下拉框只列可派区域；_destinationChoice 为 null＝默认优先级。
+        private DropdownField _destinationDropdown;
+        private ExpeditionDepartureService.ExpeditionTarget? _destinationChoice;
+        private ExpeditionDepartureService.ExpeditionTarget[] _destinationOptions = System.Array.Empty<ExpeditionDepartureService.ExpeditionTarget>();
+        /// <summary>名册 / 战略地图“编成远征队”入口登记的名单；面板下一次打开时一次性取用（取用即清空）。</summary>
+        private static int[] _pendingCompose;
 
         private readonly List<TemplateContainer> _rowPool = new List<TemplateContainer>(MaxRows);
         private readonly List<ExpeditionDepartureService.MachineIntel> _liveCache =
@@ -121,6 +134,48 @@ namespace GameLogic.UI.Expedition
             _signalCoreEditButton.clicked += () => Kit.UiEscapeStack.OpenChild(this,
                 GameLogic.Campaign.Signal.SignalCoreService.RequestPanelOpen);
 
+            // FG8-EXP-01：远征队改名（回车或离开输入框提交，校验与机器改名同一套）、设颜色（选项一次写入，之后只 SetValueWithoutNotify）。
+            _checklistRemindLabel = _root.Q<Label>("ChecklistRemindLabel");
+            _teamNameField = _root.Q<TextField>("TeamNameField");
+            _teamColorDropdown = _root.Q<DropdownField>("TeamColorDropdown");
+            _teamNameErrorLabel = _root.Q<Label>("TeamNameErrorLabel");
+            _teamColorSwatch = _root.Q<VisualElement>("TeamColorSwatch");
+            _teamNameField.RegisterCallback<FocusOutEvent>(_ => CommitTeamName());
+            _teamNameField.RegisterCallback<KeyDownEvent>(evt =>
+            {
+                if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
+                {
+                    CommitTeamName();
+                }
+            });
+            var colorNames = new List<string>();
+            for (int c = 0; c < ExpeditionTeamService.ColorCount; c++)
+            {
+                colorNames.Add(ExpeditionTeamService.ColorName(c));
+            }
+            DropdownChoices.Apply(_teamColorDropdown, colorNames, string.Empty);
+            _teamColorDropdown.RegisterValueChangedCallback(evt =>
+            {
+                int index = _teamColorDropdown.choices.IndexOf(evt.newValue);
+                CampaignState state = CampaignSession.Current;
+                if (state != null && index >= 0)
+                {
+                    ExpeditionTeamService.TrySetColor(state, index);
+                }
+            });
+
+            // FG8-EXP-01 修复轮：目的地下拉框（选中即生效；选项由 Refresh 按可派区域刷新）。
+            _destinationDropdown = _root.Q<DropdownField>("DestinationDropdown");
+            _destinationDropdown.RegisterValueChangedCallback(evt =>
+            {
+                int index = _destinationDropdown.choices.IndexOf(evt.newValue);
+                if (index >= 0 && index < _destinationOptions.Length)
+                {
+                    _destinationChoice = _destinationOptions[index];
+                    _refreshTimer = 0f;
+                }
+            });
+
             for (int i = 0; i < MaxRows; i++)
             {
                 TemplateContainer row = _rowTemplate.CloneTree();
@@ -168,13 +223,26 @@ namespace GameLogic.UI.Expedition
                     // 不带着上次的半成品状态，避免"上次勾了 3 台这次莫名其妙又选中"的困惑。
                     _selected.Clear();
                     _pendingInterruptLogicIds = System.Array.Empty<int>();
+                    _destinationChoice = null;
                 }
                 _wasOpen = false;
                 return;
             }
             if (!_wasOpen)
             {
-                PreselectReserves();
+                // FG8-EXP-01 修复轮：从名册 / 战略地图“编成远征队”进来时带入所选机器（取用即清空）；否则按常规预选。
+                if (_pendingCompose != null)
+                {
+                    ApplyCompose(_pendingCompose);
+                    _pendingCompose = null;
+                }
+                else
+                {
+                    PreselectReserves();
+                    PreselectTeamMembers();
+                }
+                // FG8-EXP-01：第一次打开派遣检查单（只埋钩子，引导内容在 FG15-UX-04）。
+                GameLogic.Core.GuidanceHooks.Raise(GameLogic.Core.GuidanceHooks.ExpeditionChecklistFirstOpen);
             }
             _wasOpen = true;
 
@@ -187,6 +255,122 @@ namespace GameLogic.UI.Expedition
 
             Refresh();
         }
+
+        /// <summary>FG8-EXP-01 修复轮（卡片结果“从名册或战略地图编成远征队”）：名册 / 战略地图的“编成远征队”入口调用。
+        /// 只登记名单，由面板下一次打开时取用；<paramref name="logicIds"/> 为空＝按常规预选（远征预备 / 上次名单）。</summary>
+        public static void RequestCompose(IReadOnlyList<int> logicIds)
+        {
+            _pendingCompose = logicIds != null && logicIds.Count > 0 ? logicIds.ToArray() : null;
+        }
+
+        /// <summary>自检 / 冒烟读：当前尚未取用的入口名单（没有 = null）。</summary>
+        public static int[] PendingComposeForTests => _pendingCompose;
+
+        /// <summary>入口带入的名单：整单替换（不叠加预选），不超过人数上限；不合格的由 Refresh 清掉，玩家照样可以改。</summary>
+        private void ApplyCompose(int[] logicIds)
+        {
+            _selected.Clear();
+            foreach (int id in logicIds)
+            {
+                if (_selected.Count >= ExpeditionDepartureService.MaxRosterSize)
+                {
+                    break;
+                }
+                _selected.Add(id);
+            }
+            _reservePreselected = false;
+            _teamPreselected = false;
+        }
+
+        /// <summary>FG8-EXP-01 修复轮（FGR-EXP-001 负向：目的地在迷雾深处）：区域未解锁时面板“无法出发”区的整段文字。
+        /// 硬约束文字与检查单 <see cref="ExpeditionChecklistService.Build"/> 同源；静态，自检 / 冒烟可直接读（不必起面板）。</summary>
+        public static string ComposeBlockedText(CampaignState state, ExpeditionDepartureService.PrepSnapshot snap)
+        {
+            string text = snap.BlockedReason == "region-locked"
+                ? "尚无可出击目标：修复信号塔并生产 ERC-003 战斗履带后再来（第二次出征需先带回并解析\n静默技术、保存跨派系蓝图且完成 ERC-003 回厂改造）。"
+                : snap.BlockedReason == "expedition-underway"
+                    ? GameLogic.Localization.GameText.Get("expedition.reason.underway") // FG0-ARCH-01：远征在外时家园照常运行、可以回来看，但不能再派第二支。
+                    : "没有活动战役。";
+            if (snap.BlockedReason == "region-locked" && state != null)
+            {
+                ExpeditionChecklistService.Checklist fog = ExpeditionChecklistService.Build(state, System.Array.Empty<int>(), snap);
+                foreach (ExpeditionChecklistService.Item item in fog.Hard)
+                {
+                    text += "\n" + HardText(item);
+                }
+            }
+            return text;
+        }
+
+        /// <summary>FG8-EXP-01 修复轮（FGR-EXP-001 负向：伤势过重的机器）：快照里可以留在名单里的机器编号
+        /// ＝能派，或只是伤势过重（留着，由检查单硬约束写明原因）。静态，自检可直接读。</summary>
+        public static int[] SelectableIds(ExpeditionDepartureService.PrepSnapshot snap) =>
+            snap.Machines.Where(IsSelectable).Select(m => m.LogicId).ToArray();
+
+        /// <summary>目的地显示名（与面板目标名同一套文字）。</summary>
+        public static string DestinationName(ExpeditionDepartureService.ExpeditionTarget target) =>
+            target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost ? "铸造前哨外围" : "破碎都市";
+
+        /// <summary>目的地下拉框的一项：区域名；迷雾边缘的区域加“（迷雾边缘）”标注（尚未进入过）。</summary>
+        public static string DestinationOptionLabel(CampaignState state, ExpeditionDepartureService.ExpeditionTarget target)
+        {
+            string name = DestinationName(target);
+            return ExpeditionDepartureService.ClassifyDestination(state, target) == ExpeditionDepartureService.DestinationFog.FogEdge
+                ? name + "（迷雾边缘）"
+                : name;
+        }
+
+        /// <summary>FG8-EXP-01：面板打开且还没有勾选时，预选远征队上次派出的名单（不合格的由 Refresh 清掉；玩家照样可以改）。</summary>
+        private void PreselectTeamMembers()
+        {
+            _teamPreselected = false;
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _selected.Count > 0)
+            {
+                return;
+            }
+            foreach (int id in ExpeditionTeamService.RememberedMembers(state))
+            {
+                _selected.Add(id);
+                _teamPreselected = true;
+            }
+        }
+
+        /// <summary>FG8-EXP-01：本次打开时是否按远征队名单预选了机器（summary 写明来源用）。</summary>
+        private bool _teamPreselected;
+
+        /// <summary>FG8-EXP-01：提交队名。空白 = 恢复默认名；校验失败保留原名并在输入框下方给出原因（与机器改名同一套文案）。</summary>
+        private void CommitTeamName()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || _teamNameField == null)
+            {
+                return;
+            }
+            string raw = _teamNameField.value;
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                ExpeditionTeamService.ResetName(state);
+                _teamNameErrorLabel.text = string.Empty;
+            }
+            else if (ExpeditionTeamService.TryRename(state, raw, out string message))
+            {
+                _teamNameErrorLabel.text = string.Empty;
+            }
+            else
+            {
+                _teamNameErrorLabel.text = message;
+            }
+            _teamNameField.SetValueWithoutNotify(ExpeditionTeamService.DisplayName(state));
+        }
+
+        /// <summary>FG8-EXP-01：名单里“可以留着”的机器＝能派，或只是伤势过重（留着以便显示硬约束原因）。</summary>
+        private static bool IsSelectable(ExpeditionDepartureService.MachineIntel m) =>
+            m.Eligible || m.IneligibleReason == "too-damaged";
+
+        /// <summary>硬约束的显示文字：带文本的（伤势 / 迷雾）用它；其余原因码沿用 <see cref="DescribeReason"/>。</summary>
+        private static string HardText(ExpeditionChecklistService.Item item) =>
+            !string.IsNullOrEmpty(item.Text) && item.Text != item.Code ? item.Text : DescribeReason(item.Code);
 
         /// <summary>FG4-ECO-07：上次刷新时的劳动力提示（自检 / 冒烟读）。</summary>
         public static string LastLaborForecastText { get; private set; } = string.Empty;
@@ -213,10 +397,28 @@ namespace GameLogic.UI.Expedition
             }
         }
 
+        /// <summary>FG8-EXP-01 修复轮：刷新目的地下拉框。选项只列可派区域（非 Locked）；只有一个可派时禁用（唯一目标，仍显示）。</summary>
+        private void RefreshDestinationChoices(CampaignState state, ExpeditionDepartureService.ExpeditionTarget current)
+        {
+            ExpeditionDepartureService.ExpeditionTarget[] options = ExpeditionDepartureService.ReachableTargets(state);
+            _destinationOptions = options;
+            var labels = options.Select(t => DestinationOptionLabel(state, t)).ToList();
+            if (!_destinationDropdown.choices.SequenceEqual(labels))
+            {
+                DropdownChoices.Apply(_destinationDropdown, labels, string.Empty);
+            }
+            int index = System.Array.IndexOf(options, current);
+            if (index >= 0)
+            {
+                _destinationDropdown.SetValueWithoutNotify(labels[index]);
+            }
+            _destinationDropdown.SetEnabled(options.Length > 1);
+        }
+
         private void Refresh()
         {
             CampaignState state = CampaignSession.Current;
-            ExpeditionDepartureService.PrepSnapshot snapshot = ExpeditionDepartureService.BuildPrepSnapshot(state);
+            ExpeditionDepartureService.PrepSnapshot snapshot = ExpeditionDepartureService.BuildPrepSnapshot(state, _destinationChoice);
 
             _blockedLabel.style.display = snapshot.RegionReachable ? DisplayStyle.None : DisplayStyle.Flex;
             _body.style.display = snapshot.RegionReachable ? DisplayStyle.Flex : DisplayStyle.None;
@@ -233,18 +435,14 @@ namespace GameLogic.UI.Expedition
             }
             if (!snapshot.RegionReachable)
             {
-                _blockedLabel.text = snapshot.BlockedReason == "region-locked"
-                    ? "尚无可出击目标：修复信号塔并生产 ERC-003 战斗履带后再来（第二次出征需先带回并解析\n静默技术、保存跨派系蓝图且完成 ERC-003 回厂改造）。"
-                    : snapshot.BlockedReason == "expedition-underway"
-                        ? GameLogic.Localization.GameText.Get("expedition.reason.underway") // FG0-ARCH-01：远征在外时家园照常运行、可以回来看，但不能再派第二支。
-                        : "没有活动战役。";
+                _blockedLabel.text = ComposeBlockedText(state, snapshot);
                 return;
             }
 
+            RefreshDestinationChoices(state, snapshot.Target);
+
             // ER6-REGION-01：目标名/文案不再硬编码破碎都市——第二次出征以后目标固定切到铸造前哨外围。
-            string targetName = snapshot.Target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost
-                ? "铸造前哨外围"
-                : "破碎都市";
+            string targetName = DestinationName(snapshot.Target);
             string objectiveLine = string.IsNullOrEmpty(snapshot.ObjectivePreviewText)
                 ? string.Empty
                 : "\n目标：" + snapshot.ObjectivePreviewText;
@@ -271,8 +469,25 @@ namespace GameLogic.UI.Expedition
             _signalCoreEditButton.text = GameLogic.Localization.GameText.Get("signal.core.edit");
             _signalCoreReminderLabel.text = GameLogic.Localization.GameText.Get("signal.core.expedition_reminder");
 
+            // FG8-EXP-01：远征队名与颜色（输入框正在编辑时不覆盖，免得打到一半被刷掉）。
+            if (state != null)
+            {
+                bool editingName = _teamNameField.panel?.focusController?.focusedElement == _teamNameField;
+                if (!editingName)
+                {
+                    _teamNameField.SetValueWithoutNotify(ExpeditionTeamService.DisplayName(state));
+                }
+                int colorIndex = ExpeditionTeamService.ColorIndexOf(state);
+                _teamColorDropdown.SetValueWithoutNotify(ExpeditionTeamService.ColorName(colorIndex));
+                if (_teamColorSwatch != null)
+                {
+                    _teamColorSwatch.style.backgroundColor = new StyleColor((Color)ExpeditionTeamService.ColorOf(colorIndex));
+                }
+            }
+
             // 勾选集里已经不再存在/不再合法的 LogicId 清掉（机器阵亡/被移出家园等）。
-            var validIds = new HashSet<int>(snapshot.Machines.Where(m => m.Eligible).Select(m => m.LogicId));
+            // FG8-EXP-01：伤势过重的已勾选机器保留在名单里，由检查单给出硬约束原因，不再静默取消勾选。
+            var validIds = new HashSet<int>(SelectableIds(snapshot));
             _selected.RemoveWhere(id => !validIds.Contains(id));
 
             _liveCache.Clear();
@@ -308,21 +523,25 @@ namespace GameLogic.UI.Expedition
                 row.Q<Label>("Status").text = DescribeStatus(m) + (MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord roleRec)
                     ? GameLogic.Localization.GameText.Get("rules.sep_dot") + MachineRoster.RoleName(MachineRoster.EffectiveRole(state, roleRec)) : string.Empty);
 
+                // 伤势过重的机器不能新勾选；已经在名单里的仍显示为勾选且可取消，原因由检查单硬约束写明。
                 Toggle toggle = row.Q<Toggle>("Select");
-                toggle.SetEnabled(m.Eligible);
-                toggle.SetValueWithoutNotify(m.Eligible && _selected.Contains(m.LogicId));
+                bool canTick = m.Eligible || (IsSelectable(m) && _selected.Contains(m.LogicId));
+                toggle.SetEnabled(canTick);
+                toggle.SetValueWithoutNotify(canTick && _selected.Contains(m.LogicId));
             }
 
             int[] selectedArray = _selected.ToArray();
             ExpeditionDepartureService.RosterValidation validation =
                 ExpeditionDepartureService.ValidateRoster(state, selectedArray);
 
-            _summaryLabel.text = $"已选 {selectedArray.Length}/{ExpeditionDepartureService.MinRosterSize}～" +
-                $"{ExpeditionDepartureService.MaxRosterSize}｜货位 {validation.TotalCargoSlots}" +
+            _summaryLabel.text = $"已选 {selectedArray.Length}/{ExpeditionDepartureService.MaxRosterSize}" +
+                $"（至少 {ExpeditionDepartureService.MinDepartureSize} 台）｜货位 {validation.TotalCargoSlots}" +
                 $"（建议≥{snapshot.MinRecommendedCargoSlots}）｜带宽 {validation.TotalBandwidth:F0}/{validation.BandwidthCapacity:F0}" +
                 $"｜武器 {(validation.HasWeapon ? "有" : "无")}" +
                 // FG4-ECO-07（FGR-ECO-042）：出发后家园劳动力的变化（“5 → 2，施工速度约下降 60%”），远征预备的机器开面板时自动勾选。
-                "\n" + MachineRoster.LaborForecastText(state, selectedArray) + (_reservePreselected ? "\n" + GameLogic.Localization.GameText.Get("roster.expedition.reserve_hint") : string.Empty);
+                "\n" + MachineRoster.LaborForecastText(state, selectedArray) + (_reservePreselected ? "\n" + GameLogic.Localization.GameText.Get("roster.expedition.reserve_hint") : string.Empty)
+                // FG8-EXP-01（FGR-BASE-020）：远征队名单自动预选时写明来源，玩家能看出勾选从哪来。
+                + (_teamPreselected ? "\n" + GameLogic.Localization.GameText.Get("exp.team.preselect_hint") : string.Empty);
             LastLaborForecastText = MachineRoster.LaborForecastText(state, selectedArray);
             // DEBT-ER5EXP01-01：总火力/维修能力/风险此前只有“武器 有/无”，现在按真实装配与目标区域敌情计算。
             if (_forecastLabel != null)
@@ -337,8 +556,12 @@ namespace GameLogic.UI.Expedition
                 }
             }
 
-            bool showReasons = validation.BlockingReasons.Length > 0 && _pendingInterruptLogicIds.Length == 0;
-            _reasonsLabel.text = showReasons ? "无法出发：" + string.Join("；", validation.BlockingReasons.Select(DescribeReason)) : string.Empty;
+            // FG8-EXP-01：派遣检查单。硬约束与出发事务同一份结果（Blocked 即不能派）；提醒可以无视，每条后面写着后果。
+            ExpeditionChecklistService.Checklist checklist = ExpeditionChecklistService.Build(state, selectedArray, snapshot);
+            bool showReasons = checklist.Blocked && _pendingInterruptLogicIds.Length == 0;
+            _reasonsLabel.text = showReasons ? "无法出发：" + string.Join("；", checklist.Hard.Select(HardText)) : string.Empty;
+            _checklistRemindLabel.text = checklist.Reminders.Length == 0 ? string.Empty
+                : GameLogic.Localization.GameText.Get("exp.check.remind.header") + "\n· " + string.Join("\n· ", checklist.Reminders.Select(r => r.Text));
             _reasonsLabel.RemoveFromClassList("exp-reasons-visible");
             if (showReasons)
             {
@@ -396,6 +619,11 @@ namespace GameLogic.UI.Expedition
             {
                 return "阵亡";
             }
+            // FG8-EXP-01：伤势低于派遣下限（硬约束，先送修）。
+            if (m.IneligibleReason == "too-damaged")
+            {
+                return GameLogic.Localization.GameText.Get("exp.status.too_damaged");
+            }
             return m.IneligibleReason ?? string.Empty;
         }
 
@@ -403,7 +631,7 @@ namespace GameLogic.UI.Expedition
         {
             if (reason.StartsWith("roster-too-small"))
             {
-                return $"至少选 {ExpeditionDepartureService.MinRosterSize} 台";
+                return $"至少选 {ExpeditionDepartureService.MinDepartureSize} 台";
             }
             if (reason.StartsWith("roster-too-large"))
             {
@@ -455,7 +683,7 @@ namespace GameLogic.UI.Expedition
         {
             int[] selected = _selected.ToArray();
             ExpeditionDepartureService.DepartureResult result =
-                ExpeditionDepartureService.TryDepart(selected, interruptConfirmed: false);
+                ExpeditionDepartureService.TryDepart(selected, interruptConfirmed: false, requested: _destinationChoice);
             HandleDepartureResult(result);
         }
 
@@ -463,7 +691,7 @@ namespace GameLogic.UI.Expedition
         {
             int[] selected = _selected.ToArray();
             ExpeditionDepartureService.DepartureResult result =
-                ExpeditionDepartureService.TryDepart(selected, interruptConfirmed: true);
+                ExpeditionDepartureService.TryDepart(selected, interruptConfirmed: true, requested: _destinationChoice);
             HandleDepartureResult(result);
         }
 

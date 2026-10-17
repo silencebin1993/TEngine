@@ -131,6 +131,21 @@ namespace GameLogic.Campaign
         /// <summary>FG7-ENV-05（FGR-ENV-050 / 051 / 060）：家园探索——发现过 / 回收过的遗迹点、揭开过的危害。唯一写入口 <see cref="Env.HomeExplorationService"/>。
         /// 只加字段、不升域版本：旧档没有 = 空域，第一次揭开新区域前按已探索区域静默补登（不补发通知）。</summary>
         public HomeExplorationState Exploration;
+        /// <summary>FG8-EXP-01（FGR-EXP-001 / FGU-31）：远征队——名字、颜色、上次派出的名单。唯一写入口 <see cref="Regions.ExpeditionTeamService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 空队（名字空串＝显示默认名，颜色 0，名单空）。</summary>
+        public ExpeditionTeamState ExpeditionTeam;
+    }
+
+    /// <summary>FG8-EXP-01：远征队（见 <see cref="GridState.ExpeditionTeam"/>）。名单只记“上次派出 / 编成的机器 LogicId”，不是运行中的远征状态。</summary>
+    [Serializable]
+    public sealed class ExpeditionTeamState
+    {
+        /// <summary>远征队名字（经 <see cref="MachineNaming.Validate"/> 同一套规则；空串 = 默认名）。</summary>
+        public string Name = string.Empty;
+        /// <summary>远征队颜色下标（0 起，见 <see cref="Regions.ExpeditionTeamService.ColorCount"/>）。</summary>
+        public int ColorIndex;
+        /// <summary>上次编成 / 派出的机器 LogicId（去重，最多 <see cref="Regions.ExpeditionDepartureService.MaxRosterSize"/> 台）。</summary>
+        public int[] Members = Array.Empty<int>();
     }
 
     /// <summary>FG7-ENV-05：家园探索（见 <see cref="GridState.Exploration"/>）。遗迹点 ID = 生成器点位 ID（relic:分布格X:分布格Y，只取决于种子，B25）。</summary>
@@ -2071,6 +2086,10 @@ namespace GameLogic.Campaign
             s.Grid.Exploration.RelicsRecovered ??= Array.Empty<string>();
             s.Grid.Exploration.RelicsRecoveredTicks ??= Array.Empty<long>();
             s.Grid.Exploration.HazardsSeen ??= Array.Empty<string>();
+            // FG8-EXP-01：旧档没有远征队字段 = 空队（默认名、颜色 0、空名单）。
+            s.Grid.ExpeditionTeam ??= new ExpeditionTeamState();
+            s.Grid.ExpeditionTeam.Name ??= string.Empty;
+            s.Grid.ExpeditionTeam.Members ??= Array.Empty<int>();
             if (s.Grid.NextInstanceSerial < 2)
             {
                 s.Grid.NextInstanceSerial = 2;

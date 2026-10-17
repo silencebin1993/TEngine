@@ -94,6 +94,8 @@ namespace GameLogic.Campaign.Regions
         /// <summary>右键情境命令的宿主钩子（屏幕坐标）：点中工作目标（建筑 / 残骸 / 地面物品 / 建造位）时由宿主派工并返回 true；
         /// 返回 false（或为 null）时右键按“地面 = 移动”处理。攻击判定在它之前（右键敌人永远是攻击）。</summary>
         public Func<Vector3, bool> ContextCommand;
+        /// <summary>FG8-EXP-01：双击编组键时把镜头飞到点位（宿主接战略镜头，如 <c>CameraDirector.FlyStrategyTo</c>）。null = 不飞镜头。</summary>
+        public Action<Vector2> FlyCameraTo;
         /// <summary>FG0-ARCH-03：本地点的战斗内核（编队命令的执行在内核里：移动、避障、受阻判定、接战距离、攻击冷却、开火规则）。</summary>
         public GameLogic.Campaign.Combat.CombatSite Site;
         /// <summary>敌对目标 ID → 内核单位 ID（0 = 不存在）。</summary>
@@ -110,8 +112,12 @@ namespace GameLogic.Campaign.Regions
         private const float ClickPickRadius = 1.6f;
         private const int MaxRecentEvents = 24;
         private const int MaxRingVisuals = 32;
+        /// <summary>FG8-EXP-01（FG13 第 5 节）：两次按下同一个调用键的间隔不超过这个秒数，即视为"连按两次"→镜头飞到编组。</summary>
+        public const float GroupDoubleTapSeconds = 0.35f;
 
         private RegionSquadCommandContext _ctx;
+        private int _lastRecallSlot;
+        private float _lastRecallTime = float.NegativeInfinity;
 
         private readonly List<int> _selection = new List<int>(32);
         private readonly Dictionary<int, List<int>> _groups = new Dictionary<int, List<int>>(9);
@@ -405,7 +411,16 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (InputRouter.ConsumeAction(GroupActionFor(slot), InputScope.Strategy))
                 {
+                    float now = Time.unscaledTime;
+                    bool doubleTap = IsGroupDoubleTap(_lastRecallSlot, _lastRecallTime, slot, now);
+                    // 连按第二下之后清掉记录，第三下重新算，不会一直触发镜头。
+                    _lastRecallSlot = doubleTap ? 0 : slot;
+                    _lastRecallTime = now;
                     RecallGroup(slot);
+                    if (doubleTap)
+                    {
+                        FocusGroup(slot);
+                    }
                     return;
                 }
             }
@@ -457,6 +472,51 @@ namespace GameLogic.Campaign.Regions
         }
 
         public int GroupSize(int slot) => _groups.TryGetValue(slot, out List<int> members) ? members.Count : 0;
+
+        /// <summary>FG8-EXP-01：连按两次同一编组键的判定（纯函数，供自检直接测）。
+        /// <paramref name="lastSlot"/> 为 0 表示没有可配对的上一下。</summary>
+        public static bool IsGroupDoubleTap(int lastSlot, float lastTime, int slot, float now) =>
+            lastSlot != 0 && lastSlot == slot && now - lastTime <= GroupDoubleTapSeconds && now >= lastTime;
+
+        /// <summary>FG8-EXP-01：多个点位的中心（没有点 = null）。编组镜头取在场成员的中心。</summary>
+        public static Vector2? CentroidOf(IReadOnlyList<Vector2> points)
+        {
+            if (points == null || points.Count == 0)
+            {
+                return null;
+            }
+            Vector2 sum = Vector2.zero;
+            for (int i = 0; i < points.Count; i++)
+            {
+                sum += points[i];
+            }
+            return sum / points.Count;
+        }
+
+        /// <summary>FG8-EXP-01（FG13 第 5 节“连按两次编组键 → 镜头飞到编组”）：把镜头飞到编组在场成员的中心。
+        /// 没有在场成员时不动镜头、返回 false；镜头由宿主经 <see cref="RegionSquadCommandContext.FlyCameraTo"/> 执行。</summary>
+        public bool FocusGroup(int slot)
+        {
+            if (_ctx == null || !_groups.TryGetValue(slot, out List<int> members) || _ctx.FlyCameraTo == null)
+            {
+                return false;
+            }
+            var points = new List<Vector2>(members.Count);
+            foreach (HomeValleyMachineMarker marker in _ctx.Markers)
+            {
+                if (marker != null && members.Contains(marker.LogicId) && _ctx.IsEligible(marker.LogicId))
+                {
+                    points.Add(marker.Position);
+                }
+            }
+            Vector2? center = CentroidOf(points);
+            if (!center.HasValue)
+            {
+                return false;
+            }
+            _ctx.FlyCameraTo(center.Value);
+            return true;
+        }
 
         // ── 命令：武装 + 确认点击 / 立即命令 ────────────────────────────
 

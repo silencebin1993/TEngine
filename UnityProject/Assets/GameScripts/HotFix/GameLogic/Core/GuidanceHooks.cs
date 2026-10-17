@@ -39,6 +39,9 @@ namespace GameLogic.Core
         /// <summary>FG1-SIG-02：第一次在电路编辑器里遇到接入口（标出接入口，或打开带接入口的蓝图）。引导内容在 FG15-UX-04：指向双态预览，“接入后会变成这样”。</summary>
         public const string CircuitUplinkFirstSeen = "circuit.uplink.first_seen";
 
+        /// <summary>FG8-EXP-01：第一次打开派遣检查单（引导内容在 FG15-UX-04：硬约束拦得住、提醒可以无视、后果写在每一条后面）。</summary>
+        public const string ExpeditionChecklistFirstOpen = "expedition.checklist.first_open";
+
         /// <summary>FG1-SIG-03：第一次接入一台机器（过渡完成、插入固件）。</summary>
         public const string SignalFirstUplink = "signal.uplink.first_commit";
 
@@ -494,7 +497,7 @@ namespace GameLogic.Core
         {
             NotificationCenterFirstOpen, KeyBindingsFirstOpen, PauseMenuFirstOpen,
             FirstUrgentNotification, FirstAutoPause, FirstReservedAction,
-            BuildModeFirstOpen, FirstPlacement, FirstBlockedPlacement,
+            BuildModeFirstOpen, FirstPlacement, FirstBlockedPlacement, ExpeditionChecklistFirstOpen,
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
             LogisticsFirstBelt, LogisticsFirstBlocked,
