@@ -574,6 +574,11 @@ namespace GameLogic.EditorTools
         private static bool Depart(int[] roster, out string why)
         {
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             why = dep.Outcome == ExpeditionDepartureService.DepartureOutcome.Success ? null : $"{dep.Outcome}：{string.Join("，", dep.Reasons ?? Array.Empty<string>())}";
             return why == null;
         }

@@ -628,6 +628,25 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>FG8-EXP-02（FGR-EXP-010“行进速度取决于最慢的那台”）：改单位的移动速度（格/秒；随内核快照存档）。单位不存在或速度不合法返回 false。</summary>
+        public bool SetSpeed(int id, float speed)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || !(speed > 0f) || float.IsInfinity(speed))
+            {
+                return false;
+            }
+            _d.Speed[i] = speed;
+            return true;
+        }
+
+        /// <summary>单位当前的移动速度（格/秒）；单位不存在返回 0。</summary>
+        public float SpeedOf(int id)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 0f : _d.Speed[i];
+        }
+
         public bool SetUnitWeapon(int id, int weapon)
         {
             int i = _d.SlotOf(id);

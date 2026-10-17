@@ -355,6 +355,11 @@ namespace GameLogic.EditorTools
             a.Gen1 = s.BuildingRecords.FirstOrDefault(b => b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator);
             a.Gen2 = s.BuildingRecords.FirstOrDefault(b => b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator2);
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(a.Roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             if (dep.Outcome != ExpeditionDepartureService.DepartureOutcome.Success)
             {
                 a.Failure = $"真实出发失败（{dep.Outcome}：{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）";
@@ -811,6 +816,11 @@ namespace GameLogic.EditorTools
                 ruins.State = RegionState.Locked;
             }
             ExpeditionDepartureService.DepartureResult blocked = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (blocked.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             bool noReport = blocked.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && !AwayReportService.IsOpen(s) && AwayReportService.Recent(s).Count == 0;
             if (ruins != null)
             {
@@ -819,6 +829,11 @@ namespace GameLogic.EditorTools
             Expect(noReport, $"C1 负向：出发被拦（{string.Join("，", blocked.Reasons ?? Array.Empty<string>())}）→ 不开离家报告");
             // 家园没有产线、没有事：出发后马上撤离。
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             WorldSimulation.StepMany(GameClock.StepHz / 2);
             ExpeditionReturnService.ReturnResult ret = ExpeditionReturnService.TryConfirmEvacuation();
             CampaignState now = CampaignSession.Current;
@@ -1376,6 +1391,11 @@ namespace GameLogic.EditorTools
             HomeValleyPowerGrid.Recompute(s);
             int[] roster = PrepareDeparture(s);
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             if (dep.Outcome != ExpeditionDepartureService.DepartureOutcome.Success)
             {
                 Fail($"K 真实出发失败（{dep.Outcome}：{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）");

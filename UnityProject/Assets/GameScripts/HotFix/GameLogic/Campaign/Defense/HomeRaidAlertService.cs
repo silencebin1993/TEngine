@@ -205,7 +205,15 @@ namespace GameLogic.Campaign.Defense
 
         // ─────────────────────────────── 判定 ───────────────────────────────
 
-        /// <summary>玩家在不在远征：家园在运行、有远征地点载入、镜头不在家园。</summary>
+        /// <summary>行军中镜头焦点离归还核心超过这么远（格）也算在远征（FG8-EXP-02 / DEBT-FG6DEF07-06）。</summary>
+        public static float MarchFocusCells => Mathf.Max(1f, Tuning("raid.away.march_focus_cells", 150f));
+
+        /// <summary>
+        /// 玩家在不在远征：家园在运行，并且
+        /// - 有远征地点载入、镜头不在家园；或
+        /// - 远征队在家园所在的星球表面上行军（FG8-EXP-02，地点还没载入）、镜头焦点离归还核心超过 raid.away.march_focus_cells 格（镜头跟着远征队走远了，DEBT-FG6DEF07-06）。
+        /// 只读镜头焦点与行军记录，O(1)；不改任何模拟（判定只决定弹不弹决策条）。
+        /// </summary>
         public static bool IsAway(CampaignState s)
         {
             if (AwayOverrideForTests != null)
@@ -213,11 +221,24 @@ namespace GameLogic.Campaign.Defense
                 return AwayOverrideForTests();
             }
             IWorldSite home = WorldSimulation.Home;
-            if (s == null || home == null || !home.IsLoaded || WorldSimulation.ActiveExpedition == null)
+            if (s == null || home == null || !home.IsLoaded)
             {
                 return false;
             }
-            return !WorldView.IsObserved(home.SiteId);
+            if (WorldSimulation.ActiveExpedition != null)
+            {
+                return !WorldView.IsObserved(home.SiteId);
+            }
+            if (!ExpeditionMarchService.IsMarching(s) || !WorldView.IsObserved(home.SiteId) || WorldView.Director == null)
+            {
+                return false;
+            }
+            var focus = WorldView.Director.StrategyFocus;
+            Vector2 core = HomeValleyLayout.Core.Position;
+            float dx = focus.x - core.x;
+            float dy = focus.y - core.y;
+            float r = MarchFocusCells;
+            return dx * dx + dy * dy > r * r;
         }
 
         /// <summary>目标是家园、已预警或已到达的各波（按“已到达优先、再按抵达时间”排序；共享列表，调用方不要留着）。O(计划数)。</summary>

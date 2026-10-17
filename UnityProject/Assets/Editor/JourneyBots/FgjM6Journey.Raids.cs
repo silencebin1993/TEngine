@@ -79,7 +79,7 @@ namespace GameLogic.EditorTools.JourneyBots
             S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
                 FgjM1Journey.TickPrepOpen, retries: 2),
             S("prep_pick", "勾选出征名单（两台新机 + 一台满足人数）", 20, c => { c.SetInt("wetM", c.GetInt("m1")); c.SetInt("shockM", c.GetInt("m2")); }, FgjM2Common.TickRosterPicked),
-            S("prep_depart", "点“出发”（有在办工作时确认中断）", 30, c => FgjM1Journey.ClickUi(c, D.PrepHost, "DepartButton"), FgjM1Journey.TickDeparted, retries: 1),
+            S("prep_depart", "点“出发”（有在办工作时确认中断）", 200, c => FgjM1Journey.ClickUi(c, D.PrepHost, "DepartButton"), FgjM1Journey.TickDeparted, retries: 1),
             S("exp_up", "机器列表点第一台新机：接入（信号跟着远征队）", 25, c => { c.SetInt("other", c.GetInt("m1")); FgjM1Journey.ClickMachineList(c, c.GetInt("m1")); }, TickUplinkedFc, retries: 3),
 
             // ── 第二波：跳回家园接入炮塔防守 ──

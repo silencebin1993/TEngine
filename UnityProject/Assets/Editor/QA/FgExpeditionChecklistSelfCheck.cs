@@ -35,7 +35,7 @@ namespace GameLogic.EditorTools
     /// <summary>FG8-EXP-01（FG08 FGR-EXP-001 派遣检查单；FGU-31；验收 FGT-EXP-001）自检，Opus 返工版：
     /// - 硬约束只有至少一台 / 带宽 / 目的地（区域没开放时写真实的解锁条件），出发事务同样拒绝且不改世界；没有固定人数上限；
     /// - 伤势、无武器、货舱、劳动力、静默夜、反制、迷雾边缘都是提醒（不拦派遣，后果写明），真实派遣能成功；
-    /// - “路线走出覆盖 / 危害带”在当前世界结构下没有真实路线：断言真实状态下不出现（未交付，DEBT-FG8EXP01-03 / 04），接口用真实覆盖几何另测；
+    /// - “路线走出覆盖”（FG8-EXP-02 交付 DEBT-FG8EXP01-03）：真实路线 = 核心到目的地锚点的层级寻路路线，覆盖外时出现、沿路线铺中继后消失（D8）；危害带仍是接口（DEBT-FG8EXP01-04）；
     /// - 正式入口：编组键连按两次（假键盘 → TickInput → 镜头焦点到编组中心）、名册“编成远征队”按钮（真 UXML，面板关 / 已开 / 关闭清空 / 换存档丢弃）、
     ///   目的地下拉框 → 出发按钮 → TryDepart 的目标、队名框失焦；全部新文字走文本键（中英两列都有、UXML 无字面）；
     /// - 远征队改名 / 颜色 / 名单记忆、旧档兼容、真实派遣后真文件存读档；布局探针。
@@ -146,7 +146,7 @@ namespace GameLogic.EditorTools
             finally
             {
                 // 还原全部全局替身（RunAll 里后面的段不受本段影响）。
-                ExpeditionChecklistService.RouteProvider = null;
+                ExpeditionChecklistService.RouteProvider = ExpeditionChecklistService.DefaultRoute; // FG8-EXP-02：默认就是真实路线，复位成默认（不是清空）
                 ExpeditionChecklistService.HazardProbe = null;
                 RegionSquadCommandSystem.RealTime = originalRealTime;
                 CameraDirector.RealDeltaTime = originalDelta;
@@ -267,6 +267,11 @@ namespace GameLogic.EditorTools
                 $"D4 重伤（生命 {(severe - 0.004f) * 100f:F1}%）只是提醒：校验通过、不拦、检查单写“{item.Text}”、仍可勾选（{v.Success}/{!cl.Blocked}/{eligible}）");
 
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             bool away = dep.Success && WorldSimulation.ActiveExpedition != null && Rec(b) != null && Rec(b).RegionId != HomeValleyLayout.RegionId;
             Expect(away, $"D5 带着重伤机器真实派遣成功（{dep.Outcome}{(dep.Success ? string.Empty : "：" + string.Join("，", dep.Reasons))}），重伤机器已离开家园");
         }
@@ -303,6 +308,11 @@ namespace GameLogic.EditorTools
             bool panelSame = panelText == after;
             int homeBefore = HomeMachines().Count;
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             bool unchanged = dep.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && WorldSimulation.ActiveExpedition == null && HomeMachines().Count == homeBefore;
             bool refusedText = dep.Reasons.Length > 0 && ExpeditionChecklistService.DescribeHard(dep.Reasons[0]) == after;
             Expect(cl.Blocked && truthful && flips && panelSame && unchanged && refusedText,
@@ -339,6 +349,11 @@ namespace GameLogic.EditorTools
                                  && cl.Hard[0].Text.Contains(cap.ToString("F0"));
             ExpeditionDepartureService.RosterValidation fits = ExpeditionDepartureService.ValidateRoster(s, ids.Take(over - 1).ToList());
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(tooMany, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             Expect(cap < fullCap && tooMany.Count == over && over <= 6 && !v.Success && onlyBandwidth && fits.Success
                    && dep.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && WorldSimulation.ActiveExpedition == null,
                 $"D7 负向：关闭广播后带宽 {cap:F0}，{over} 台被单独拦下（唯一硬约束“{cl.Hard.FirstOrDefault().Text}”），{over - 1} 台可派；出发被拒、没有远征在外");
@@ -352,39 +367,104 @@ namespace GameLogic.EditorTools
             int a = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -4f));
             int[] roster = { a };
             ExpeditionDepartureService.PrepSnapshot snap = ExpeditionDepartureService.BuildPrepSnapshot(s);
-            ExpeditionChecklistService.Checklist real = ExpeditionChecklistService.Build(s, roster, snap);
-            bool notDelivered = ExpeditionChecklistService.RouteProvider == null && !real.Reminders.Any(r => r.Code == "coverage" || r.Code == "hazard");
-            Expect(notDelivered, "D8 未交付如实：当前世界结构下没有家园→目的地的真实路线（RouteProvider 为空），“路线走出覆盖 / 危害带”两条提醒在真实状态下不出现（DEBT-FG8EXP01-03 / -04，承接 FG8-EXP-02）——本条不计为交付");
-
             string site = snap.Target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId;
-            Vector2 uplink = SignalCoverageService.ExpeditionUplinkPosition(site);
+            BuildingRecord[] buildingsBefore = s.BuildingRecords;
             try
             {
-                // 真实覆盖几何：接入点覆盖圈之外的一条路线（不注入 OverrideForTests）。
-                ExpeditionChecklistService.RouteProvider = (st, t) => new[] { uplink, uplink + new Vector2(0f, -400f) };
-                float outside = SignalCoverageService.RouteOutsideLength(site, new[] { uplink, uplink + new Vector2(0f, -400f) }, out _);
-                ExpeditionChecklistService.Checklist far = ExpeditionChecklistService.Build(s, roster, snap);
-                ExpeditionChecklistService.Item cov = far.Reminders.FirstOrDefault(r => r.Code == "coverage");
-                ExpeditionChecklistService.RouteProvider = (st, t) => new[] { uplink, uplink + new Vector2(0f, -10f) };
-                ExpeditionChecklistService.Checklist near = ExpeditionChecklistService.Build(s, roster, snap);
-                bool quietNear = !near.Reminders.Any(r => r.Code == "coverage");
-                Expect(outside > 0f && cov.Text == GameText.Format("exp.check.rem.coverage", Mathf.CeilToInt(outside)) && quietNear && !far.Blocked,
-                    $"D8b 接口（真实覆盖几何，不注入采样）：路线走出覆盖约 {outside:F0} 格时出现提醒“{cov.Text}”，在覆盖内时没有（{quietNear}），只是提醒不拦");
+                // D8（FG8-EXP-02 交付 DEBT-FG8EXP01-03）：真实路线 = 从归还核心到目的地锚点的层级寻路路线（星球格），按与核心连通的覆盖网采样——不注入采样、不换路线。
+                // 只有归还核心的 150 格覆盖（信号塔这一段先停下：它的 300 格覆盖可能刚好盖住较近的锚点，这里要的是“走出覆盖”的那一种世界）。
+                var towerStates = new List<(BuildingRecord B, BuildingConstructionState St)>();
+                foreach (BuildingRecord b in s.BuildingRecords)
+                {
+                    if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)
+                    {
+                        towerStates.Add((b, b.ConstructionState));
+                        b.ConstructionState = BuildingConstructionState.Damaged;
+                    }
+                }
+                SignalCoverageService.Invalidate();
+                ExpeditionChecklistService.Checklist real = ExpeditionChecklistService.Build(s, roster, snap);
+                IReadOnlyList<Vector2> route = ExpeditionChecklistService.RouteProvider?.Invoke(s, snap.Target);
+                float outside = route != null ? SignalCoverageService.RouteOutsideLength(HomeValleyLayout.RegionId, route, out _) : 0f;
+                ExpeditionChecklistService.Item cov = real.Reminders.FirstOrDefault(r => r.Code == "coverage");
+                bool appears = ExpeditionSiteAnchors.IsResolved(s, site) && route != null && route.Count >= 2 && outside > 0f
+                               && cov.Text == GameText.Format("exp.check.rem.coverage", Mathf.CeilToInt(outside)) && !real.Blocked;
+                // 不出现：沿这条路线铺一串已建成的信号中继塔（场景夹具：记录直接登记为已建成，玩家亲手铺中继由 FG1-SIG-07 覆盖）→ 整条路线都在连通的覆盖里 → 提醒消失。
+                int relays = PlaceRelayChain(s, route);
+                ExpeditionChecklistService.Checklist relayed = ExpeditionChecklistService.Build(s, roster, snap);
+                float outsideAfter = route != null ? SignalCoverageService.RouteOutsideLength(HomeValleyLayout.RegionId, route, out _) : -1f;
+                bool gone = relays > 0 && outsideAfter == 0f && !relayed.Reminders.Any(r => r.Code == "coverage");
+                Expect(appears && gone,
+                    $"D8 真实路线下出现 / 不出现：核心→锚点路线 {(route?.Count ?? 0)} 个路点、约 {outside:F0} 格在覆盖外时提醒“{cov.Text}”（只提醒不拦）；沿路线铺 {relays} 座中继塔后覆盖外 {outsideAfter:F0} 格、提醒消失（{gone}）");
+                s.BuildingRecords = buildingsBefore;
+                foreach ((BuildingRecord B, BuildingConstructionState St) t in towerStates)
+                {
+                    t.B.ConstructionState = t.St;
+                }
+                SignalCoverageService.Invalidate();
 
-                ExpeditionChecklistService.HazardProbe = (st, route) => new ExpeditionChecklistService.HazardHit("酸沼", null);
+                ExpeditionChecklistService.HazardProbe = (st, rt) => new ExpeditionChecklistService.HazardHit("酸沼", null);
                 ExpeditionChecklistService.Item hz = ExpeditionChecklistService.Build(s, roster, snap).Reminders.FirstOrDefault(r => r.Code == "hazard");
-                ExpeditionChecklistService.HazardProbe = (st, route) => new ExpeditionChecklistService.HazardHit("酸沼", "护甲被腐蚀");
+                ExpeditionChecklistService.HazardProbe = (st, rt) => new ExpeditionChecklistService.HazardHit("酸沼", "护甲被腐蚀");
                 ExpeditionChecklistService.Item hz2 = ExpeditionChecklistService.Build(s, roster, snap).Reminders.FirstOrDefault(r => r.Code == "hazard");
-                ExpeditionChecklistService.HazardProbe = (st, route) => null;
+                ExpeditionChecklistService.HazardProbe = (st, rt) => null;
                 bool noneWhenClear = !ExpeditionChecklistService.Build(s, roster, snap).Reminders.Any(r => r.Code == "hazard");
                 Expect(hz.Text == GameText.Format("exp.check.rem.hazard", "酸沼", GameText.Get("exp.check.rem.hazard_default")) && hz2.Text != null && hz2.Text.EndsWith("护甲被腐蚀", StringComparison.Ordinal) && noneWhenClear,
                     $"D9b 危害带接口：没给后果时用默认后果“{hz.Text}”（不再以冒号结尾），给了就用它；没有危害时不出现");
             }
             finally
             {
-                ExpeditionChecklistService.RouteProvider = null;
+                s.BuildingRecords = buildingsBefore;
+                SignalCoverageService.Invalidate();
+                ExpeditionChecklistService.RouteProvider = ExpeditionChecklistService.DefaultRoute;
                 ExpeditionChecklistService.HazardProbe = null;
             }
+        }
+
+        /// <summary>
+        /// 场景夹具（FG8-EXP-02 D8）：沿路线每 150 格登记一座已建成的信号中继塔（第一座离起点 140 格，在归还核心的 150 格覆盖里；相邻两座在彼此的 200 格覆盖里），
+        /// 终点再放一座——整条链与核心连通。只登记建筑记录（不占格、不挡路），覆盖服务按记录建覆盖源。返回放了几座。
+        /// </summary>
+        internal static int PlaceRelayChain(CampaignState s, IReadOnlyList<Vector2> route, string tag = "fgexp_relay")
+        {
+            if (route == null || route.Count < 2)
+            {
+                return 0;
+            }
+            var spots = new List<Vector2>();
+            float next = 140f;
+            float walked = 0f;
+            for (int i = 1; i < route.Count; i++)
+            {
+                float len = Vector2.Distance(route[i - 1], route[i]);
+                while (len > 1e-3f && walked + len >= next)
+                {
+                    spots.Add(Vector2.Lerp(route[i - 1], route[i], (next - walked) / len));
+                    next += 150f;
+                }
+                walked += len;
+            }
+            spots.Add(route[route.Count - 1]);
+            var records = new List<BuildingRecord>(s.BuildingRecords ?? Array.Empty<BuildingRecord>());
+            for (int i = 0; i < spots.Count; i++)
+            {
+                var cell = new GridCell(Mathf.RoundToInt(spots[i].x), Mathf.RoundToInt(spots[i].y));
+                records.Add(new BuildingRecord
+                {
+                    BuildingId = HomeValleyLayout.RegionId + ":" + tag + "_" + i,
+                    BuildingTypeId = HomeValleyLayout.BuildingTypeSignalRelay,
+                    RegionId = HomeValleyLayout.RegionId,
+                    GridX = cell.X,
+                    GridY = cell.Y,
+                    Position = spots[i],
+                    Health = 100f,
+                    ConstructionState = BuildingConstructionState.Operational,
+                    PowerState = BuildingPowerState.NotApplicable,
+                });
+            }
+            s.BuildingRecords = records.ToArray();
+            SignalCoverageService.Invalidate();
+            return spots.Count;
         }
 
         /// <summary>提醒：货舱（含 0）、无武器、劳动力只在下降时、静默夜、反制（真实快照一致性 + 有反制时的文字）、伤势偏重；空名单不出队伍类提醒。</summary>
@@ -492,6 +572,11 @@ namespace GameLogic.EditorTools
                 && ExpeditionChecklistService.DescribeHard("transaction-failed-rolled-back:probe-boom") == GameText.Get("exp.check.hard.transaction_failed")
                 && ExpeditionChecklistService.DescribeHard("transaction-failed-rollback-also-failed:probe-boom") == GameText.Get("exp.check.hard.rollback_failed");
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(new[] { a }, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             Expect(!one.HasWeapon && one.Success && none.BlockingReasons.Any(r => r.StartsWith("roster-too-small", StringComparison.Ordinal)) && rawCodesHidden
                    && dep.Success && WorldSimulation.ActiveExpedition != null,
                 $"D12 至少一台：单台没有主武器的 ERC-001 校验通过并真实派遣成功（{dep.Outcome}），空名单被拦；拒绝文字不露原因码（{rawCodesHidden}）");
@@ -962,11 +1047,16 @@ namespace GameLogic.EditorTools
                 int ruinsBefore = ruins.ExpeditionCount;
                 int foundryBefore = foundry.ExpeditionCount;
                 bool clicked = Click(prep.DepartButton);
-                bool wentRuins = clicked && WorldSimulation.ActiveExpedition != null && GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded
+                // FG8-EXP-02：出发 = 沿地形行军——往破碎都市的锚点走、准备面板关闭、镜头不动；本段后面要在远征地点里接着测，测试快进到达（正式到达事务）。
+                GameLogic.Campaign.ExpeditionMarchState march = ExpeditionMarchService.Current(CampaignSession.Current);
+                bool marching = clicked && march != null && march.Phase == ExpeditionMarchService.PhaseOutbound && march.SiteId == FracturedCityLayout.RegionId
+                                && !hv.IsExpeditionPrepPanelOpen && WorldSimulation.ActiveExpedition == null;
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+                bool wentRuins = marching && WorldSimulation.ActiveExpedition != null && GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded
                                  && FracturedCityRegion.Find(CampaignSession.Current).ExpeditionCount == ruinsBefore + 1
                                  && FoundryOutpostRegion.Find(CampaignSession.Current).ExpeditionCount == foundryBefore;
                 Expect(picked && titled && wentRuins,
-                    $"D22 正式入口：目的地下拉框选“{ruinsLabel}”（默认是铸造前哨）→ 标题“{prep.TitleText}”→ 点“确认出发”→ 去的是破碎都市（破碎都市出击 +1、铸造前哨不变：{wentRuins}）");
+                    $"D22 正式入口：目的地下拉框选“{ruinsLabel}”（默认是铸造前哨）→ 标题“{prep.TitleText}”→ 点“确认出发”→ 往破碎都市行军、面板关闭（{marching}）→ 到达后进的是破碎都市（破碎都市出击 +1、铸造前哨不变：{wentRuins}）");
 
                 // 派出后镜头在远征地点（家园没被观察）：名册的“编成远征队”置灰并在文字上写明原因（B06）；回家园恢复。
                 VisualElement rroot = FgProductionSelfCheck.MountUxml(UiKitFolder + "RosterPanel.uxml", out rgo);
@@ -1081,6 +1171,11 @@ namespace GameLogic.EditorTools
             ExpeditionTeamService.TryRename(s, "铁锤队", out _);
             ExpeditionTeamService.TrySetColor(s, 3);
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             if (!dep.Success)
             {
                 Fail($"E7 前提失败：真实派遣未成功（{dep.Outcome}：{string.Join("，", dep.Reasons)}）");

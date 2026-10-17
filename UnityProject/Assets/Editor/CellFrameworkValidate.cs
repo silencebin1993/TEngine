@@ -533,6 +533,9 @@ namespace GameLogic.EditorTools
             // FG8-EXP-01 派遣检查单（FG08 FGR-EXP-001，Opus 返工）：硬约束只有至少一台 / 带宽 / 目的地（未开放写真实解锁条件），出发被拒且不改世界；伤势 / 武器 / 货舱 / 劳动力 / 静默夜 / 反制 / 迷雾边缘是提醒；
             // 覆盖与危害带如实未交付（接口按真实几何测）；正式入口（编组双击、名册编成、目的地下拉 → 出发、队名失焦）；文本键中英两列；远征队与真文件存读档；布局探针。
             Seg("FgExpeditionChecklistSelfCheck", FgExpeditionChecklistSelfCheck.Run);
+            // FG8-EXP-02 行军、远程指挥与覆盖（FG08 FGR-EXP-010～012、FGR-SIG-053；FGT-EXP-002 / 012）：锚点（种子 / 可达）、出发事务与回滚、真实行军到达、观察 / 倍速 / 暂停一致、
+            // 行军中存读档、覆盖内外命令与接入、途中静默夜 / 家园遇袭、地形绕行与截断、到达失败回滚、界面（世界栏 / 战略地图 / 名册 / 跟随）、旧档兼容。
+            Seg("FgExpeditionMarchSelfCheck", FgExpeditionMarchSelfCheck.Run);
             // FG7-E2E-01：M7 出口——FGJ-M7 登记覆盖里程碑原文与 DEBT-FG7ENV05-07、断点；旅程源码只走输入通道、两处日程捷径只在 ApplyScheduleFixture；
             // PlanDayForTests 与正式排定同一套时刻 / 时长；命令栏全部被拒时最新一行是原因；IC-REQ-022 六类反向（真实系统：缺冷却液、回收机被摧毁、静默夜断网、
             // 静默夜 + 酸雨中暂停与 0.5x / 3x、静默夜 + 酸雨 + 缺液中真文件存读档 FGT-ENV-008、遗迹被悬崖围住）；缺口清零；FG-M7 试玩包；FGT-ENV-001～008 映射。

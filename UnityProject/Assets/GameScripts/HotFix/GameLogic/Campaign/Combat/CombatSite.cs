@@ -1765,6 +1765,16 @@ namespace GameLogic.Campaign.Combat
 
         public bool ClearCommand(int unitId) => !IsDisposed && Kernel.ClearCommand(unitId);
 
+        /// <summary>FG8-EXP-02：改单位移动速度（行军时整队按最慢的那台走；随内核快照存档）。</summary>
+        public bool SetUnitSpeed(int unitId, float speed) => !IsDisposed && Kernel.SetSpeed(unitId, speed);
+
+        /// <summary>单位当前移动速度（格/秒；单位不存在为 0）。</summary>
+        public float UnitSpeed(int unitId) => IsDisposed ? 0f : Kernel.SpeedOf(unitId);
+
+        /// <summary>FG8-EXP-02：某点半径内有没有存活、可被瞄准的敌对单位（远征队“交战中”判定；逐单位扫描在内核里）。</summary>
+        public bool HostileNear(Vector2 position, float radius) =>
+            !IsDisposed && Kernel.FindNearest(new double2(position.x, position.y), radius, CombatFaction.Hostile) != 0;
+
         /// <summary>直控移动输入（每帧由被观察的地点写入；零向量 = 停）。</summary>
         public void SetDirectInput(int unitId, Vector2 direction)
         {

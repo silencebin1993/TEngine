@@ -350,7 +350,8 @@ namespace GameLogic.Campaign.Regions
             }
 
             ExpeditionTarget target = ResolveTarget(state, requested);
-            if (WorldSim.WorldSimulation.ActiveExpedition != null)
+            // FG8-EXP-02：远征在外 = 星球上行军中或远征地点已载入（行军阶段地点还没载入，只看地点会漏判）。
+            if (ExpeditionMarchService.IsAway(state))
             {
                 // FG0-ARCH-01：派遣不再退出家园，玩家可以在远征途中回家园打开远征准备——同一时刻只允许一支远征队在外
                 // （多支远征属于 FG8-EXP-01，FG-GAP-016），给出明确原因而不是让按钮静默失效。
@@ -617,10 +618,9 @@ namespace GameLogic.Campaign.Regions
         /// 冻结输入 → 中断已确认的在办工作单（"按 WorkOrder 规则交还/保留货物"＝复用
         /// <see cref="HomeValleyWorkOrders.CancelOrder"/> 既有的资源退款+货舱落地行为）→
         /// 自动安全存档（同时是"出发前档"）→ 出发快照（选中名单，用于日志/后续步骤）→
-        /// 区域卸载（<see cref="HomeValleyController.Exit"/>）/载入（<see cref="GameLogic.Stage.GameRoot.StartFracturedCity"/>）→
-        /// 机器生成/装配登记（<see cref="FracturedCityController.Enter"/> 内部完成，见该类）→
-        /// 控制恢复（战略镜头，见下）→ 解冻。任一步异常/失败 → 从"出发前档"回滚（
-        /// <see cref="CampaignRestoreOrchestrator.Restore"/>）+ 重新进入归还谷地，不解冻前不返回。
+        /// FG8-EXP-02：开始行军（<see cref="ExpeditionMarchService.Begin"/>：成员留在星球上，沿层级寻路走向目的地锚点；
+        /// 到达后才在步末的到达事务里载入远征地点，那一步另有自己的到达前档与回滚）→ 出发后存档 → 解冻。
+        /// 任一步异常/失败（含行军开不起来）→ 从"出发前档"回滚（<see cref="CampaignRestoreOrchestrator.Restore"/>）+ 重新进入归还谷地，不解冻前不返回。
         /// 只有全部步骤成功才 <c>region.ExpeditionCount += 1</c>。</summary>
         public static DepartureResult TryDepart(IReadOnlyList<int> selectedLogicIds, bool interruptConfirmed, ExpeditionTarget? requested = null)
         {
@@ -630,7 +630,8 @@ namespace GameLogic.Campaign.Regions
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "no-active-campaign" }, null);
             }
 
-            if (WorldSim.WorldSimulation.ActiveExpedition != null)
+            // FG8-EXP-02：远征在外（已在地点，或还在星球上行军 / 返程）时不能再派。
+            if (ExpeditionMarchService.IsAway(precheckState))
             {
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "expedition-underway" }, null);
             }
@@ -645,6 +646,19 @@ namespace GameLogic.Campaign.Regions
             if (!validation.Success)
             {
                 return new DepartureResult(DepartureOutcome.Blocked, validation.BlockingReasons, null);
+            }
+
+            // FG8-EXP-02：远征队要沿地形走到目的地锚点——锚点还在寻路校验中 / 根本走不到时不能出发（说明原因，不进事务）。
+            string targetSiteId = target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId;
+            ExpeditionSiteAnchors.EnsureResolved(precheckState);
+            if (!ExpeditionSiteAnchors.IsResolved(precheckState, targetSiteId))
+            {
+                return new DepartureResult(DepartureOutcome.Blocked,
+                    new[] { ExpeditionSiteAnchors.IsFailed(precheckState, targetSiteId) ? "destination-unreachable" : "destination-pending" }, null);
+            }
+            if (WorldSim.WorldSimulation.Home == null || !WorldSim.WorldSimulation.Home.IsLoaded)
+            {
+                return new DepartureResult(DepartureOutcome.Blocked, new[] { "home-not-loaded" }, null);
             }
 
             if (validation.BusyInterruptibleLogicIds.Length > 0 && !interruptConfirmed)
@@ -694,31 +708,17 @@ namespace GameLogic.Campaign.Regions
                 // 与下方 OBJ 完成结算是两条独立触发线，见 CampaignObjectiveTracker.OnDeparted 类注释。
                 CampaignObjectiveTracker.OnDeparted(state, target);
 
-                // ── FG0-ARCH-01：派遣——家园**不退出**、继续运行；只载入远征地点（机器生成 / 装配登记在 Enter 内），镜头飞过去 ──
-                RegionRecord regionAfter;
-                string targetLabel;
-                if (target == ExpeditionTarget.FoundryOutpost)
+                // ── FG8-EXP-02：派遣 = 出发行军。家园**不退出**、继续运行；成员留在星球表面上，沿层级寻路走向目的地锚点，
+                // 全部走到后才在步末的到达事务里载入远征地点（ExpeditionMarchService）。镜头不动（玩家想看就点“跟随远征队”）。
+                // 行军开不起来（锚点 / 家园 / 成员状态在校验后变了）= 事务失败：抛出，整体回滚到出发前档。──
+                if (!ExpeditionMarchService.Begin(state, targetSiteId, manifest, out string marchFailure))
                 {
-                    GameRoot.StartFoundryOutpost(manifest);
-                    if (GameRoot.FoundryOutpost == null || !GameRoot.FoundryOutpost.IsLoaded)
-                    {
-                        throw new InvalidOperationException("FoundryOutpostController.Enter 未能载入（区域状态在校验后被并发改变？）。");
-                    }
-                    regionAfter = FoundryOutpostRegion.Find(state);
-                    targetLabel = "铸造前哨外围";
+                    throw new InvalidOperationException("march-begin-failed:" + marchFailure);
                 }
-                else
-                {
-                    GameRoot.StartFracturedCity(manifest);
-                    if (GameRoot.FracturedCity == null || !GameRoot.FracturedCity.IsLoaded)
-                    {
-                        throw new InvalidOperationException("FracturedCityController.Enter 未能激活（区域状态在校验后被并发改变？）。");
-                    }
-                    regionAfter = FracturedCityRegion.Find(state);
-                    targetLabel = "破碎都市";
-                }
+                RegionRecord regionAfter = target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostRegion.Find(state) : FracturedCityRegion.Find(state);
+                string targetLabel = target == ExpeditionTarget.FoundryOutpost ? "铸造前哨外围" : "破碎都市";
 
-                // ── 只有整个切换成功才增加 expeditionCount ──────────────────────────
+                // ── 出发事务提交才增加 expeditionCount（与 FG8-EXP-01 同一时刻：中途被召回也算一次出击）──────────
                 if (regionAfter != null)
                 {
                     regionAfter.ExpeditionCount += 1;
@@ -733,19 +733,12 @@ namespace GameLogic.Campaign.Regions
                 ExpeditionTeamService.RememberMembers(state, manifest);
 
                 // ── FG4-ECO-09：离家报告从出发成功的这一刻开始记（下面的出发后存档把它存进去）──────────────
-                Economy.AwayReportService.Begin(state,
-                    regionAfter?.RegionId ?? (target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId), manifest);
+                Economy.AwayReportService.Begin(state, regionAfter?.RegionId ?? targetSiteId, manifest);
 
-                // ── 控制恢复：新区域固定以战略视角开场、无遗留直控目标（见
-                // FracturedCityController/FoundryOutpostController.SetupCameraDirector 的
-                // startInStrategy:true），本步骤无需额外动作，这里只显式记一条日志确认该不变量，
-                // 供故障注入测试断言。────────────────────────────────────────────
-                Log.Info($"[ExpeditionDepartureService] 出发成功：{manifest.Length} 台机器进入{targetLabel}，" +
+                Log.Info($"[ExpeditionDepartureService] 出发成功：{manifest.Length} 台机器出发前往{targetLabel}（沿地形行军，到达后进入地点），" +
                     $"第 {regionAfter?.ExpeditionCount ?? -1} 次出击。");
 
-                // 立即把 ExpeditionCount 增量也持久化，不必等下一次自然存档点才落盘
-                // （FracturedCityController.Enter 内部已经存过一次，这里的改动在那之后发生，
-                // 需要再存一次才不会在存读档间产生"内存比磁盘新"的窗口）。
+                // 出发后确认存档：行军记录、成员的内核命令、ExpeditionCount 增量一起落盘（读档后行军接着走）。
                 SaveResult postResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
                 if (!postResult.Success)
                 {
@@ -756,6 +749,8 @@ namespace GameLogic.Campaign.Regions
                 InputRouter.SetModalUi(false);
                 // ER8-CONTENT-01：出发事务提交成功的唯一出口。
                 Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionDepart, $"{selectedLogicIds.Count} 台机器");
+                // 第一次派遣的引导钩子（内容在 FG15-UX-04）：出发这一刻（行军前原先在载入地点时发）。
+                GuidanceHooks.Raise(GuidanceHooks.WorldFirstDispatch);
                 return new DepartureResult(DepartureOutcome.Success, null, null);
             }
             catch (Exception e)
@@ -793,7 +788,7 @@ namespace GameLogic.Campaign.Regions
 
             CampaignSession.Set(slotIndex, restore.State);
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(restore.State); // FG2-FW-05：与读档一致，补解锁图鉴
-            GameRoot.ResumeHomeValley();
+            GameRoot.ReenterHomeValley(); // FG8-EXP-02：回滚只发生在运行中的世界里，重进家园不做主菜单启动（与 ResumeHomeValley 同一段）
             Log.Info("[ExpeditionDepartureService] 已回滚到出发前档并重新进入归还谷地，未复制任何机器/货物/奖励。");
             return true;
         }

@@ -73,6 +73,16 @@ namespace GameLogic.Campaign.Feedback
         ReadingThorns,
         // ── FG4-ECO-10（FGR-ECO-070）：家园机器少于 2 台时归还核心免费打印一台搬运机（沿用 ER3-SOFTLOCK-01 的“核心应急”通知类型） ──
         EmergencyPrint,
+        // ── FG8-EXP-02（FGR-EXP-010 / 011 / 012、FG08 §7）：远征队行军——走出 / 回到信号覆盖、快走出覆盖、路线被截断、到达失败、返回家园、到达地点、途中遇敌、进入危害带 ──
+        ExpeditionMarchOutOfCoverage,
+        ExpeditionMarchBackInCoverage,
+        ExpeditionMarchEdge,
+        ExpeditionMarchHalted,
+        ExpeditionMarchArrivalFailed,
+        ExpeditionMarchReturned,
+        ExpeditionMarchArrived,
+        ExpeditionMarchEncounter,
+        ExpeditionMarchHazard,
 
         Max,
     }

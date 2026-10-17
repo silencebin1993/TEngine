@@ -171,9 +171,24 @@ namespace GameLogic.Campaign
             return r != null ? r.AutoActions == 1 : m.Role != MachineRole.Idle;
         }
 
-        public static bool IsHome(MachineRecord m) => m != null && m.RegionId == HomeValleyLayout.RegionId;
+        /// <summary>在家园（FG8-EXP-02：正在星球上行军的远征队成员虽然还在家园所在的星球表面上，但已出门——不算在家园：名册“远征中”、劳动力不计、驻防维持器不拉它回来）。</summary>
+        public static bool IsHome(MachineRecord m) => m != null && m.RegionId == HomeValleyLayout.RegionId && !Regions.ExpeditionMarchService.IsMarchMember(m.LogicId);
 
-        /// <summary>活着、不在家园 = 远征中。</summary>
+        /// <summary>FG8-EXP-02（FGR-EXP-012“远征队状态在机器名册上可见”）：名册的“在哪里”——家园 / 远征队（五态之一）/ 外出。</summary>
+        public static string PlaceText(CampaignState s, MachineRecord m)
+        {
+            if (IsHome(m))
+            {
+                return GameText.Get("roster.place.home");
+            }
+            if (m != null && m.IsAlive && Regions.ExpeditionMarchService.IsTeamMember(s, m.LogicId))
+            {
+                return GameText.Format("exp.roster.place", GameText.Get(Regions.ExpeditionMarchService.StatusTextKey(Regions.ExpeditionMarchService.StatusOf(s))));
+            }
+            return GameText.Get("roster.place.away");
+        }
+
+        /// <summary>活着、不在家园（在远征地点里，或正在星球上行军）= 远征中。</summary>
         public static bool IsAway(MachineRecord m) => m != null && m.IsAlive && !IsHome(m);
 
         /// <summary>手上有送修单（规则或名册派的）。</summary>

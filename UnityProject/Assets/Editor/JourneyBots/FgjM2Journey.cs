@@ -126,7 +126,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
                     FgjM1Journey.TickPrepOpen, retries: 2),
                 S("prep_pick", "勾选出征名单（组合的两台 + 再一台满足人数）", 20, null, FgjM2Common.TickRosterPicked),
-                S("prep_depart", "点“出发”（有在办工作时确认中断）", 30, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), FgjM1Journey.TickDeparted, retries: 1),
+                S("prep_depart", "点“出发”（有在办工作时确认中断）", 200, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), FgjM1Journey.TickDeparted, retries: 1),
                 S("fc_sel_a", "左键点冷却液机", 20, c => FgjM2Common.ClickFc(c, c.GetInt("wetM"), false), c => FgjM2Common.TickFcSelection(c, c.GetInt("wetM")), retries: 4),
                 S("fc_sel_b", "按住 Shift 左键点电弧机（加选）", 20, c => FgjM2Common.ClickFc(c, c.GetInt("shockM"), true),
                     c => FgjM2Common.TickFcSelection(c, c.GetInt("wetM"), c.GetInt("shockM")), retries: 4),

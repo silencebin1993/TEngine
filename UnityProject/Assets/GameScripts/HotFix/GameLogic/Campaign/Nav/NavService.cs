@@ -36,6 +36,8 @@ namespace GameLogic.Campaign.Nav
         public const int OwnerPatrol = 3;
         /// <summary>FG6-DEF-04：突袭导演的计划（排定突袭时沿地形算行进时间 = 预警时间；走后台长路线通道，见 <see cref="StartBackground"/>）。</summary>
         public const int OwnerRaidPlan = 4;
+        /// <summary>FG8-EXP-02 第 0 批：远征地点锚点的可达性校验（从归还核心到候选点，玩家通行类别；走后台通道，发出后当场取回，见 <see cref="Regions.ExpeditionSiteAnchors.EnsureResolved"/>）。</summary>
+        public const int OwnerExpedition = 5;
 
         public static NavKernel Kernel { get; private set; }
         public static CampaignState BoundState { get; private set; }

@@ -178,10 +178,11 @@ namespace GameLogic.Campaign.Signal
         /// <summary>自检注入“远征是否在外”；为 null 时读真实世界（<see cref="WorldSim.WorldSimulation.ActiveExpedition"/>）。</summary>
         public static Func<bool> ExpeditionUnderwayOverrideForTests;
 
-        /// <summary>有远征地点在外（与“同一时刻只允许一支远征队”同一判据，ExpeditionDepartureService）。</summary>
+        /// <summary>远征在外（星球上行军中或远征地点已载入；与“同一时刻只允许一支远征队”同一判据 <see cref="Regions.ExpeditionMarchService.IsAway"/>）。
+        /// FG8-EXP-02：行军阶段远征地点还没载入，只看地点会让信号核在远征途中能改（FGR-SIG-011 回归）。</summary>
         public static bool ExpeditionUnderway => ExpeditionUnderwayOverrideForTests != null
             ? ExpeditionUnderwayOverrideForTests()
-            : WorldSim.WorldSimulation.ActiveExpedition != null;
+            : Regions.ExpeditionMarchService.IsAway(CampaignSession.Current);
 
         /// <summary>现在能不能修改信号核（装、卸、换位、切换预设）。不能时给出原因。</summary>
         public static bool CanEdit(CampaignState s, out SignalCoreResult denial)

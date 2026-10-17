@@ -190,7 +190,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
                     FgjM1Journey.TickPrepOpen, retries: 2),
                 S("prep_pick", "勾选出征名单（三台）", 20, null, FgjM3Common.TickRosterAny),
-                S("prep_depart", "点“出发”：镜头飞到破碎都市，家园没人看着", 30, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1),
+                S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随），家园没人看着", 200, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1),
                 S("away", "在破碎都市待一会儿（60 游戏秒以上），这期间家园一直没人观察", 120, null, TickAway),
                 S("uplink", "机器列表点一台远征机器：接入", 25, c => FgjM1Journey.ClickMachineList(c, c.GetInt("other")), TickUplinked, retries: 3),
                 S("evac_hold", "开到撤离点按住交互键（默认 E）打开撤离清单", 40, c => JourneyInput.HoldAction(GameActionId.Interact, 1.6), FgjM1Journey.TickEvacPanel, retries: 3),

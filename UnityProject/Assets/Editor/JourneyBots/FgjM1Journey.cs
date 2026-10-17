@@ -111,7 +111,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 // ── 第 3 步：远征（破碎都市，见类注释）──
                 S("prep_open", "左键点信号塔打开远征准备面板", 15, c => ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen), TickPrepOpen, retries: 2),
                 S("prep_pick", "勾选出征名单（重炮机 + 另外两台，满足人数 / 带宽 / 货位）", 20, null, TickRosterPicked),
-                S("prep_depart", "点“出发”（有在办工作时确认中断）", 30, c => ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1),
+                S("prep_depart", "点“出发”（有在办工作时确认中断）", 200, c => ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1),
 
                 // ── 第 4 步：接入重炮机，看到形变，打出熔穿过载 ──
                 S("up_cannon", "机器列表点重炮机：跨地点远距离跳转后接入，机身形变", 25, c => ClickMachineList(c, c.GetInt("cannon")), TickCannonUplinked, retries: 3),
@@ -938,6 +938,17 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     return StepOutcome.Wait;
                 }
+                // FG8-EXP-02：行军时点过 3 倍速的，到了地点点回 1 倍速（后面的步骤按 1 倍速写的）。
+                if (c.GetInt("marchFollowed") == 1 && c.GetInt("marchSpeedBack") == 0)
+                {
+                    c.SetInt("marchSpeedBack", 1);
+                    UnityEngine.UIElements.Button normal = JourneyInput.FindUitk<UnityEngine.UIElements.Button>("[WorldBarHost]", "WorldSpeed1");
+                    if (normal != null && JourneyInput.IsClickable(normal))
+                    {
+                        JourneyInput.ClickElement(normal);
+                    }
+                    return StepOutcome.Wait;
+                }
                 List<int> roster = Roster(c);
                 bool all = roster.All(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.RegionId == FracturedCityLayout.RegionId);
                 return all && GameRoot.FracturedCity.Combat != null && GameRoot.FracturedCity.Combat.MachineCount == roster.Count
@@ -946,6 +957,30 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (c.StepElapsed < 1)
             {
+                return StepOutcome.Wait;
+            }
+            // FG8-EXP-02：出发 = 沿地形行军（面板关闭、远征队往目的地锚点走，全部走到后才进入地点）。像玩家一样：点世界栏行军条的“跟随远征队”、点 3 倍速，
+            // 跟着它走到目的地——玩家在跟随时，到达那一刻镜头跟进地点（上面 FcActive 分支接着判）。
+            if (ExpeditionMarchService.IsMarching(CampaignSession.Current))
+            {
+                if (c.GetInt("marchFollowed") == 0)
+                {
+                    UnityEngine.UIElements.Button follow = JourneyInput.FindUitk<UnityEngine.UIElements.Button>("[WorldBarHost]", "WorldMarchFollow");
+                    if (follow != null && JourneyInput.IsClickable(follow) && JourneyInput.ClickElement(follow))
+                    {
+                        c.SetInt("marchFollowed", 1);
+                        UnityEngine.UIElements.Button triple = JourneyInput.FindUitk<UnityEngine.UIElements.Button>("[WorldBarHost]", "WorldSpeed3");
+                        if (triple != null && JourneyInput.IsClickable(triple))
+                        {
+                            JourneyInput.ClickElement(triple);
+                        }
+                        c.Log("出发 = 沿地形行军：点“跟随远征队”、3 倍速，跟着走到目的地");
+                    }
+                }
+                if (c.StepElapsed > 190)
+                {
+                    return StepOutcome.Fail($"远征队 190 秒内没走到目的地（{ExpeditionMarchService.StatusOf(CampaignSession.Current)}，预计 {ExpeditionMarchService.EtaSeconds(CampaignSession.Current):0} 游戏秒）");
+                }
                 return StepOutcome.Wait;
             }
             // 有在办工作的机器：面板出现“中断确认”，像玩家一样点确认。

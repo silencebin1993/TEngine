@@ -252,6 +252,8 @@ namespace GameLogic.Campaign.Regions
                     FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
                 }
                 GameRoot.ResumeHomeValley();
+                // FG8-EXP-02（FGR-EXP-012）：远征队状态 → 已返回（撤离仍是瞬间回家；走回家园与到家结算归 FG8-EXP-05，DEBT-FG8EXP02-04）。
+                ExpeditionMarchService.OnLeftSite(state, wiped: false);
                 // FG4-ECO-09（FGR-ECO-060）：离家报告在撤离事务提交、回到家园时结算（下面的结算后存档把它存进去；界面按设置自动打开）。
                 Economy.AwayReportService.End(state, Economy.AwayReportService.OutcomeEvacuated);
 
@@ -307,6 +309,8 @@ namespace GameLogic.Campaign.Regions
                     FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
                 }
                 GameRoot.ResumeHomeValley();
+                // FG8-EXP-02：全灭放弃 → 没有远征在外（待命）。
+                ExpeditionMarchService.OnLeftSite(state, wiped: true);
                 // FG4-ECO-09：全灭放弃同样结算离家报告（远征队全部损失写进“机器变化”）。
                 Economy.AwayReportService.End(state, Economy.AwayReportService.OutcomeWiped);
 

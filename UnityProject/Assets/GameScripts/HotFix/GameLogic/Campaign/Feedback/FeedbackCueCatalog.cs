@@ -109,6 +109,20 @@ namespace GameLogic.Campaign.Feedback
                 defs[(int)d.Id] = d;
             }
 
+            // FG8-EXP-02：行军提示（标签 exp.cue.tag，正文 exp.cue.<名>；字面值只在文本表没载入时兜底）。
+            FeedbackCueDef MarchCue(FeedbackCueId id, string sfx, string cue, string caption, FeedbackTone tone, float seconds) => new FeedbackCueDef
+            {
+                Id = id,
+                SfxId = sfx,
+                Tag = "出征",
+                Caption = caption,
+                TagKey = "exp.cue.tag",
+                CaptionKey = "exp.cue." + cue,
+                Tone = tone,
+                CaptionSeconds = seconds,
+                RequirementNote = "FG8-EXP-02 行军提示（FGR-EXP-010 / 011 / 012）",
+            };
+
             // ── AC-AUD-001 十一类 ─────────────────────────────────────────────
             // FG1-HUD-01（FG-GAP-011 / FG-GAP-044）：0.2 的玩家动作叫“接入”——接入提交的音效 + 字幕（形变随之出声）；标签 / 正文走文本键。
             Add(new FeedbackCueDef { Id = FeedbackCueId.Takeover, SfxId = "sfx_takeover", Tag = "接入", Caption = "已接入", TagKey = "feedback.tag.uplink", CaptionKey = "feedback.caption.uplink", Tone = FeedbackTone.Good, CaptionSeconds = 3f, MinIntervalSeconds = 0.3f, RequirementNote = "AC-AUD-001 接管（0.2 = 接入）；FG-GAP-044" });
@@ -148,6 +162,16 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.Pickup, SfxId = "sfx_pickup", Tag = "装载", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 3f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionDepart, SfxId = "sfx_expedition_depart", Tag = "出征", Caption = "远征队出发", Tone = FeedbackTone.Info, CaptionSeconds = 4f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.Evacuate, SfxId = "sfx_evacuate", Tag = "撤离", Caption = "远征队已返回归还谷地", Tone = FeedbackTone.Good, CaptionSeconds = 4f });
+            // FG8-EXP-02（FGR-EXP-010 / 011 / 012、FG08 §7）：行军提示。标签 / 正文走文本键（exp.cue.*，fgdata_expedition.py）；字面值只在文本表没载入时兜底。
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchOutOfCoverage, "sfx_alarm_warning", "out_of_coverage", "远征队走出信号覆盖：只执行最后的命令", FeedbackTone.Warning, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchBackInCoverage, "sfx_command_ack", "back_in_coverage", "远征队回到信号覆盖：可以下新命令", FeedbackTone.Info, 4f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchEdge, "sfx_alarm_warning", "edge", "远征队快要走出信号覆盖", FeedbackTone.Warning, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchHalted, "sfx_alarm_warning", "halted", "远征队的路线被截断，原地待命", FeedbackTone.Warning, 6f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchArrivalFailed, "sfx_failure", "arrival_failed", "远征队没能进入目的地，在集结点待命", FeedbackTone.Danger, 6f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchReturned, "sfx_evacuate", "returned", "远征队回到家园", FeedbackTone.Good, 4f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchArrived, "sfx_expedition_depart", "arrived", "远征队到达目的地", FeedbackTone.Info, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchEncounter, "sfx_alarm_warning", "encounter", "行军途中发现敌人", FeedbackTone.Warning, 6f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchHazard, "sfx_alarm_warning", "hazard", "远征队进入危害带", FeedbackTone.Warning, 5f));
 
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });

@@ -410,7 +410,9 @@ namespace GameLogic.Campaign.Env
             var safe = new List<int>(4);
             foreach (MachineRecord m in MachineRegistry.AllRecords)
             {
-                if (m != null && m.IsAlive && !m.IsInFactory && !string.IsNullOrEmpty(m.RegionId) && m.RegionId != HomeValleyLayout.RegionId)
+                // FG8-EXP-02：正在星球上行军的远征队成员同样是“远征队”（FGR-ENV-013）。
+                if (m != null && m.IsAlive && !m.IsInFactory && !string.IsNullOrEmpty(m.RegionId)
+                    && (m.RegionId != HomeValleyLayout.RegionId || Regions.ExpeditionMarchService.IsMarchMember(state, m.LogicId)))
                 {
                     safe.Add(m.LogicId);
                 }

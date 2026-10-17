@@ -146,6 +146,96 @@ namespace GameLogic.Campaign
         public int ColorIndex;
         /// <summary>上次编成 / 派出的机器 LogicId（去重；没有固定上限，派遣人数只受带宽约束）。</summary>
         public int[] Members = Array.Empty<int>();
+        /// <summary>FG8-EXP-02：这支远征队此刻在外的行军（<see cref="ExpeditionMarchState.Phase"/> = 0 表示没有远征在外）。唯一写入口 <see cref="Regions.ExpeditionMarchService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 0 = 待命（读档时正在远征地点里的旧档由 <see cref="Regions.ExpeditionMarchService.Reconcile"/> 补成“在地点”）。</summary>
+        public ExpeditionMarchState March = new ExpeditionMarchState();
+        /// <summary>FG8-EXP-02 第 0 批（FG8-GEN-02“远征地点迁入星球格网”的最小部分前移）：两个远征地点在星球表面上的锚点——
+        /// 按世界种子确定、经层级寻路校验从家园可达。唯一写入口 <see cref="Regions.ExpeditionSiteAnchors"/>。只加字段：旧档没有 = 读档后重新解析。</summary>
+        public ExpeditionSiteAnchorRecord[] Anchors = Array.Empty<ExpeditionSiteAnchorRecord>();
+    }
+
+    /// <summary>
+    /// FG8-EXP-02（FGR-EXP-010 行军、FGR-EXP-011 远程指挥与覆盖、FGR-EXP-012 远征队状态）：远征队在星球表面上的运行记录。
+    /// 成员在行军中仍是家园所在星球表面上的真实机器（家园战斗内核里的单位：真实寻路、真实交战、能被接入），这里只记“这是一支远征队”与它的命令 / 提醒去重；
+    /// 位置、路线、血量都在内核与机器记录里，随内核快照进存档。全部字段进存档。
+    /// </summary>
+    [Serializable]
+    public sealed class ExpeditionMarchState
+    {
+        /// <summary>0 = 没有远征在外；1 = 去程（星球上，往目的地锚点走）；2 = 在远征地点里（地点已载入）；3 = 返程（星球上，往家园走）；4 = 已返回（记录保留到下一次出发，显示“已返回”）。</summary>
+        public int Phase;
+        /// <summary>目的地地点（<see cref="Regions.FracturedCityLayout.RegionId"/> / <see cref="Regions.FoundryOutpostLayout.RegionId"/>）。</summary>
+        public string SiteId = string.Empty;
+        /// <summary>出发时的名单（LogicId 升序；阵亡的留在名单里，只按存活的算）。</summary>
+        public int[] Members = Array.Empty<int>();
+        /// <summary>行军速度（格/秒，出发时取名单里最慢的那台；初值见 <see cref="Regions.ExpeditionMarchService.ChassisSpeed"/>）。</summary>
+        public float Speed;
+        /// <summary>最后一条远征命令（<see cref="Regions.ExpeditionMarchService.Command"/>：0 前进 / 1 待命 / 2 返回）。覆盖外只执行它。</summary>
+        public int Command;
+        /// <summary>出发那一刻有成员还没进家园战斗内核（刚出厂）：下一步补下命令。</summary>
+        public bool OrdersPending;
+        /// <summary>出发的世界步、当前阶段开始的世界步（耗时、提示用）。</summary>
+        public long DepartTick;
+        public long PhaseTick;
+        /// <summary>整队是否在与核心连通的覆盖里（全部存活成员都在 = 真；按内核每 0.5 秒的评估）。用于进出覆盖的提醒去重。</summary>
+        public bool InCoverage = true;
+        /// <summary>“快走出覆盖”的提醒已发（余量回升后复位）。</summary>
+        public bool EdgeWarned;
+        /// <summary>有成员身边有敌对单位（交战中）。每秒刷新。</summary>
+        public bool Engaged;
+        /// <summary>停下的原因：0 没停；1 路线被截断（寻路只到最近可达点）；2 到达但没能进入远征地点（已回滚；队伍照最后的“前进”在集结点等候，到 <see cref="ArrivalRetryTick"/> 自动重试）。</summary>
+        public int Halted;
+        /// <summary>上一次到达失败的原因码（<see cref="Regions.ExpeditionTextKeys.ReasonCodes"/>；同一原因重试再失败不重复提示；进入成功 / 玩家改命令时清空）。</summary>
+        public string ArrivalFailReason = string.Empty;
+        /// <summary>到达失败后按最后的“前进”自动重试进入的世界步（只看步序号，与观察无关；FG00 B11 不软锁）。</summary>
+        public long ArrivalRetryTick;
+        /// <summary>当前所在危害带的领地 ID（没有 = 空串；进入时提醒一次，离开后复位）。</summary>
+        public string HazardZoneId = string.Empty;
+        /// <summary>途中已提醒过的敌方据点 / 巡逻 ID（每个只提醒一次，读档后不重复）。</summary>
+        public string[] EncounteredIds = Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// FG8-EXP-02 第 0 批（FG17 FGR-GEN-024 放置规则的最小部分）：一个远征地点在星球表面上的锚点。
+    /// 候选点只由（世界种子, 地点, 第几次试探）和规划层的领地决定；可达性用层级寻路（从归还核心出发、允许部分路线）校验：
+    /// 能走到就取寻路给出的实际终点；走不到时取最近可达点（仍在领地内才算合格），换下一个候选；全部不合格时取离领地最近的那个可达点并记日志（FGR-GEN-090）。
+    /// </summary>
+    [Serializable]
+    public sealed class ExpeditionSiteAnchorRecord
+    {
+        public string SiteId = string.Empty;
+        /// <summary>所在领地（规划层 <see cref="WorldGen.PlannedTerritory.Id"/>；没有规划层的旧原型世界为空串）。</summary>
+        public string TerritoryId = string.Empty;
+        /// <summary>0 = 待定（正在寻路校验）；1 = 已定；2 = 失败（从核心出发一条路线都没有）。</summary>
+        public int State;
+        /// <summary>第几次试探（0 起）与发过的请求序号（后台通道当场取回）。</summary>
+        public int Attempt;
+        public int Serial;
+        /// <summary>当前候选点（格）。</summary>
+        public int CandidateX;
+        public int CandidateY;
+        /// <summary>锚点（格；State = 1 时有效）。</summary>
+        public int X;
+        public int Y;
+        /// <summary>锚点被挪到了最近可达点（候选点本身走不到）。</summary>
+        public bool Moved;
+        /// <summary>所有候选都不在领地内可达，取了离领地最近的可达点（已记日志）。</summary>
+        public bool Fallback;
+        /// <summary>从归还核心到锚点的路线（格，层级寻路给出的路点；检查单“路线走出覆盖”、预计时间都按它算）。</summary>
+        public int[] RouteX = Array.Empty<int>();
+        public int[] RouteY = Array.Empty<int>();
+        /// <summary>路线长度（格）。</summary>
+        public float RouteLength;
+        /// <summary>试探过程中离领地最近的可达点（兜底用）。</summary>
+        public bool HasBest;
+        public int BestX;
+        public int BestY;
+        public float BestGap = float.MaxValue;
+        public int[] BestRouteX = Array.Empty<int>();
+        public int[] BestRouteY = Array.Empty<int>();
+        public float BestRouteLength;
+        /// <summary>解析日志（挪位 / 兜底的原因；不给玩家看）。</summary>
+        public string Note = string.Empty;
     }
 
     /// <summary>FG7-ENV-05：家园探索（见 <see cref="GridState.Exploration"/>）。遗迹点 ID = 生成器点位 ID（relic:分布格X:分布格Y，只取决于种子，B25）。</summary>
@@ -2090,6 +2180,13 @@ namespace GameLogic.Campaign
             s.Grid.ExpeditionTeam ??= new ExpeditionTeamState();
             s.Grid.ExpeditionTeam.Name ??= string.Empty;
             s.Grid.ExpeditionTeam.Members ??= Array.Empty<int>();
+            // FG8-EXP-02：旧档没有行军 / 锚点字段 = 待命 / 读档后重新解析锚点。
+            s.Grid.ExpeditionTeam.March ??= new ExpeditionMarchState();
+            s.Grid.ExpeditionTeam.March.SiteId ??= string.Empty;
+            s.Grid.ExpeditionTeam.March.Members ??= Array.Empty<int>();
+            s.Grid.ExpeditionTeam.March.HazardZoneId ??= string.Empty;
+            s.Grid.ExpeditionTeam.March.EncounteredIds ??= Array.Empty<string>();
+            s.Grid.ExpeditionTeam.Anchors ??= Array.Empty<ExpeditionSiteAnchorRecord>();
             if (s.Grid.NextInstanceSerial < 2)
             {
                 s.Grid.NextInstanceSerial = 2;

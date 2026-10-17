@@ -519,6 +519,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return true;
             }
+            // FG8-EXP-02：正在星球上行军的远征队成员听远征命令（FGR-BASE-020）：工作单分配与常驻规则都不派它，即使它此刻停着（待命 / 已走到集结点）。
+            if (ExpeditionMarchService.IsMarchMember(logicId))
+            {
+                return true;
+            }
             if (_combat == null || !_combat.TryGetMachineMarker(logicId, out HomeValleyMachineMarker m) || m.Site == null
                 || !m.Site.TryGetCommand(m.UnitId, out BinGames.Sim.Combat.CombatCommand cmd) || cmd.Kind == BinGames.Sim.Combat.CombatCommandKind.None)
             {

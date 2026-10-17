@@ -933,6 +933,11 @@ namespace GameLogic.EditorTools
             CampaignState s2 = NewWorld(737374, dispatch: true);
             var roster = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId).Select(m => m.LogicId).ToArray();
             ExpeditionDepartureService.DepartureResult again = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (again.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             ExpeditionDepartureService.PrepSnapshot snap = ExpeditionDepartureService.BuildPrepSnapshot(s2);
             Expect(again.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && again.Reasons.Contains("expedition-underway")
                    && !snap.RegionReachable && snap.BlockedReason == "expedition-underway" && WorldSimulation.FracturedCity.IsLoaded,
@@ -1296,6 +1301,11 @@ namespace GameLogic.EditorTools
                 .OrderByDescending(m => m.ChassisId == HomeValleyLayout.Erc003ChassisId).ThenByDescending(m => m.LogicId)
                 .Take(3).Select(m => m.LogicId).ToArray();
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             if (dep.Outcome != ExpeditionDepartureService.DepartureOutcome.Success)
             {
                 Fail($"种子 {seed}：真实派遣事务没有成功（{dep.Outcome}：{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）");

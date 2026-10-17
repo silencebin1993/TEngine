@@ -5,6 +5,7 @@ using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Env;
 using GameLogic.Campaign.Grid;
+using GameLogic.Campaign.Regions;
 using GameLogic.Campaign.Signal;
 using GameLogic.Campaign.WorldGen;
 using GameLogic.Campaign.WorldSim;
@@ -95,6 +96,10 @@ namespace GameLogic.UI.Kit
         RaidForecast,
         /// <summary>FG6-DEF-04：突袭预警（没有情报时也画：箭尾在来袭方向上，标签写方向与倒计时；FGR-DEF-024 地图上的来袭方向箭头）。</summary>
         RaidWarning,
+        /// <summary>FG8-EXP-02（FGR-EXP-010 / 012）：星球上行军中的远征队（队伍颜色；标签写名字 · 状态 · 预计到达时间；路线由矢量层画）。</summary>
+        Expedition,
+        /// <summary>FG8-EXP-02：远征目的地锚点（远征队在外时标出要走到哪里）。</summary>
+        ExpeditionGoal,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -108,6 +113,8 @@ namespace GameLogic.UI.Kit
         public string Label;
         /// <summary>FG7-ENV-05：遗迹点已回收（图标换成空心灰色）。</summary>
         public bool Done;
+        /// <summary>FG8-EXP-02：图标底色（远征队 = 队伍颜色）；a = 0 = 按样式类。</summary>
+        public Color Tint;
     }
 
     /// <summary>地图上的圆（领地范围 + 危害带、信号覆盖）。</summary>
@@ -134,6 +141,8 @@ namespace GameLogic.UI.Kit
         public double Y1;
         /// <summary>FG5-RND-05：突袭预报箭头（红色粗线，终点画箭头），不是队伍路线。</summary>
         public bool Forecast;
+        /// <summary>FG8-EXP-02：线条颜色（远征队路线 = 队伍颜色）；a = 0 = 默认橙色（突袭路线）。</summary>
+        public Color Tint;
     }
 
     /// <summary>地图视图：中心（格）+ 横向半宽（格）+ 画布像素尺寸。格 ↔ 画布像素（画布 y 向下，格 +Y = 北 = 向上）。</summary>
@@ -251,6 +260,8 @@ namespace GameLogic.UI.Kit
                     string label = GameText.Format(c.IsOutpost ? "ui.map.own_outpost" : "ui.map.own_cluster", c.Count);
                     Add(WorldMapItemKind.OwnCluster, WorldMapLayer.Own, c.Id, c.X, c.Y, label);
                 }
+                // FG8-EXP-02（FGR-EXP-010 / 012，FG08 第 7 节“战略地图：己方远征队、路线、预计到达时间”）：己方队伍，不受迷雾限制。
+                CollectExpedition(state, view, margin);
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Groups))
             {
@@ -375,9 +386,52 @@ namespace GameLogic.UI.Kit
             }
         }
 
-        private void Add(WorldMapItemKind kind, WorldMapLayer layer, string id, double x, double y, string label)
+        private void Add(WorldMapItemKind kind, WorldMapLayer layer, string id, double x, double y, string label, Color tint = default)
         {
-            Items.Add(new WorldMapItem { Kind = kind, Layer = layer, Id = id, X = x, Y = y, Label = label });
+            Items.Add(new WorldMapItem { Kind = kind, Layer = layer, Id = id, X = x, Y = y, Label = label, Tint = tint });
+        }
+
+        private readonly List<Vector2> _expRoute = new List<Vector2>(64);
+
+        /// <summary>
+        /// FG8-EXP-02：远征队在外——星球上行军时画剩余路线（队伍颜色的折线，每段一条线）、队伍图标（名字 · 状态 · 预计到达时间）和目的地锚点；
+        /// 在远征地点里时只画目的地锚点（标签写地点名）。O(路线点数)。
+        /// </summary>
+        private void CollectExpedition(CampaignState state, in WorldMapView view, double margin)
+        {
+            GameLogic.Campaign.ExpeditionMarchState m = ExpeditionMarchService.Current(state);
+            int phase = m?.Phase ?? ExpeditionMarchService.PhaseNone;
+            if (phase != ExpeditionMarchService.PhaseOutbound && phase != ExpeditionMarchService.PhaseReturning && phase != ExpeditionMarchService.PhaseAtSite)
+            {
+                return;
+            }
+            Color team = ExpeditionTeamService.ColorOf(ExpeditionTeamService.ColorIndexOf(state));
+            if (ExpeditionSiteAnchors.TryGet(state, m.SiteId, out Vector2 goal) && view.Contains(goal.x, goal.y, margin))
+            {
+                Add(WorldMapItemKind.ExpeditionGoal, WorldMapLayer.Own, "expedition-goal:" + m.SiteId, goal.x, goal.y,
+                    GameText.Format("exp.map.destination", GameText.Get(ExpeditionTextKeys.SiteNameKey(m.SiteId))));
+            }
+            if (phase == ExpeditionMarchService.PhaseAtSite || !ExpeditionMarchService.TryTeamCenter(state, out Vector2 at, out _))
+            {
+                return;
+            }
+            if (ExpeditionMarchService.CopyRoute(state, _expRoute) >= 2)
+            {
+                for (int k = 0; k + 1 < _expRoute.Count; k++)
+                {
+                    Lines.Add(new WorldMapLine { X0 = _expRoute[k].x, Y0 = _expRoute[k].y, X1 = _expRoute[k + 1].x, Y1 = _expRoute[k + 1].y, Tint = team });
+                }
+            }
+            if (!view.Contains(at.x, at.y, margin))
+            {
+                return;
+            }
+            ExpeditionMarchService.TeamStatus st = ExpeditionMarchService.StatusOf(state);
+            double eta = ExpeditionMarchService.EtaSeconds(state);
+            string etaText = st == ExpeditionMarchService.TeamStatus.Standby ? GameText.Get("exp.map.eta_hold")
+                : eta >= 0 ? GameText.Format("exp.map.eta", GameLogic.Core.GameClock.FormatGameDuration(eta)) : GameText.Get("exp.map.eta_planning");
+            Add(WorldMapItemKind.Expedition, WorldMapLayer.Own, "expedition:" + m.SiteId, at.x, at.y,
+                GameText.Format("exp.map.label", ExpeditionTeamService.DisplayName(state), GameText.Get(ExpeditionMarchService.StatusTextKey(st)), etaText), team);
         }
 
         /// <summary>
@@ -689,7 +743,7 @@ namespace GameLogic.UI.Kit
                 Vector2 a = view.ToCanvas(l.X0, l.Y0);
                 Vector2 b = view.ToCanvas(l.X1, l.Y1);
                 p.lineWidth = l.Forecast ? 3f : 2f;
-                p.strokeColor = l.Forecast ? new Color(0.95f, 0.25f, 0.2f, 0.95f) : new Color(0.95f, 0.55f, 0.25f, 0.9f);
+                p.strokeColor = l.Forecast ? new Color(0.95f, 0.25f, 0.2f, 0.95f) : l.Tint.a > 0f ? l.Tint : new Color(0.95f, 0.55f, 0.25f, 0.9f);
                 p.BeginPath();
                 p.MoveTo(a);
                 p.LineTo(b);
@@ -839,13 +893,18 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-marker-selected", item.Kind == WorldMapItemKind.Marker && item.Id == selectedMarkerId);
                 e.EnableInClassList("wg-icon-territory", item.Kind == WorldMapItemKind.Territory);
                 e.EnableInClassList("wg-icon-forecast", item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning);
+                e.EnableInClassList("wg-icon-expedition", item.Kind == WorldMapItemKind.Expedition);
+                e.EnableInClassList("wg-icon-expedition-goal", item.Kind == WorldMapItemKind.ExpeditionGoal);
+                // FG8-EXP-02：远征队图标的底色 = 队伍颜色（数据驱动的运行时颜色，UI Toolkit 红线 2 允许）；其余图标清掉，按样式类。
+                e.style.backgroundColor = item.Tint.a > 0f ? new StyleColor(item.Tint) : new StyleColor(StyleKeyword.Null);
                 e.EnableInClassList("uk-hidden", false);
                 e.style.left = at.x;
                 e.style.top = at.y;
                 Label t = _texts[n];
                 bool showLabel = _labels && (item.Kind == WorldMapItemKind.Home || item.Kind == WorldMapItemKind.OwnCluster || item.Kind == WorldMapItemKind.Marker || item.Kind == WorldMapItemKind.Outpost
                                             || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory
-                                            || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning);
+                                            || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning
+                                            || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)
                 {

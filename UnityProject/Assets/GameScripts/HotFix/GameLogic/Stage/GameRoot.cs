@@ -228,6 +228,15 @@ namespace GameLogic.Stage
             {
                 Startup();
             }
+            ReenterHomeValley();
+        }
+
+        /// <summary>
+        /// FG8-EXP-02：事务回滚（出发 / 远征到达失败，读回事务前的档）之后重进家园——与 <see cref="ResumeHomeValley"/> 同一段，只是不做“从主菜单进入”的启动：
+        /// 回滚只会发生在已经运行的世界里（出发 / 到达都是世界里的动作），启动早已完成。
+        /// </summary>
+        public static void ReenterHomeValley()
+        {
             HomeValleyController home = WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded
                 ? WorldSimulation.Home
                 : WorldSimulation.LoadHome(resume: true);

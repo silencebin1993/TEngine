@@ -38,6 +38,16 @@ namespace GameLogic.UI.Kit
         private Label _calExtra;
         private Label _silentBanner;
         private Label _focusTitle;
+        // FG8-EXP-02（FGR-EXP-011 / 012）：远征行军条——队伍色块、名字 · 状态 · 预计到达时间、远程命令、跟随 / 前往、停下与被拒的原因。
+        private VisualElement _marchRow;
+        private VisualElement _marchSwatch;
+        private Label _marchStatus;
+        private Button _marchAdvance;
+        private Button _marchHold;
+        private Button _marchReturn;
+        private Button _marchFollow;
+        private Label _marchReason;
+        private string _marchFailure;
 
         /// <summary>FG7-ENV-02：静默夜横幅（自检 / 冒烟读）。</summary>
         public string SilentBannerText => _silentBanner != null && !_silentBanner.ClassListContains("uk-hidden") ? _silentBanner.text : string.Empty;
@@ -58,6 +68,17 @@ namespace GameLogic.UI.Kit
         public int FocusButtonCount => _focusButtons.Count;
         public IReadOnlyList<Button> FocusButtons => _focusButtons;
         public Button SpeedButton(int index) => index >= 0 && index < _speeds.Length ? _speeds[index] : null;
+
+        /// <summary>FG8-EXP-02：远征行军条（自检 / 冒烟读）。</summary>
+        public bool MarchRowShown => _marchRow != null && !_marchRow.ClassListContains("uk-hidden") && BarVisible;
+        public string MarchStatusText => _marchStatus?.text ?? string.Empty;
+        public string MarchReasonText => _marchReason != null && !_marchReason.ClassListContains("uk-hidden") ? _marchReason.text : string.Empty;
+        public Color MarchSwatchColor => _marchSwatch != null ? _marchSwatch.resolvedStyle.backgroundColor : default;
+        public Color MarchSwatchStyleColor => _marchSwatch != null ? _marchSwatch.style.backgroundColor.value : default;
+        public Button MarchAdvanceButton => _marchAdvance;
+        public Button MarchHoldButton => _marchHold;
+        public Button MarchReturnButton => _marchReturn;
+        public Button MarchFollowButton => _marchFollow;
         public Button PauseButton => _pause;
         public Button LaborButton => _labor;
         /// <summary>FG7-ENV-01：日历行（昼夜阶段 + 倒计时；点开日历面板）与静默夜 / 天气摘要。</summary>
@@ -135,6 +156,7 @@ namespace GameLogic.UI.Kit
                 });
             }
             _resRow = root.Q<VisualElement>("WorldResourceRow");
+            BindMarch(root);
             if (_phase != null)
             {
                 // FG7-ENV-01（FGR-ENV-002“点开是日历面板”）：日历行点一下打开日历（与日历键同一入口）。
@@ -232,6 +254,9 @@ namespace GameLogic.UI.Kit
             // FG4-ECO-08：资源顶栏（固定 / 语言变化立刻重建，否则每 eco.topbar.refresh_seconds 真实秒一次；O(固定物品 + 电网数)）。
             RefreshResources(state);
 
+            // FG8-EXP-02：远征行军条（状态 / 预计到达时间每次刷新都可能变，不走下面的刷新键；O(成员数)）。
+            RefreshMarch(state);
+
             IReadOnlyList<WorldView.FocusTarget> targets = WorldView.FocusTargets(state);
             _keyBuilder.Clear();
             _keyBuilder.Append(GameText.Language).Append('|').Append(GameClock.MinuteOfDay(GameClock.GameSeconds)).Append('|')
@@ -273,6 +298,153 @@ namespace GameLogic.UI.Kit
             RebuildFocus(targets);
             RefreshCalendarRow(state);
         }
+
+        // ── FG8-EXP-02 远征行军条（FGR-EXP-011 / 012）──
+
+        private void BindMarch(VisualElement root)
+        {
+            _marchRow = root.Q<VisualElement>("WorldMarchRow");
+            _marchSwatch = root.Q<VisualElement>("WorldMarchSwatch");
+            _marchStatus = root.Q<Label>("WorldMarchStatus");
+            _marchAdvance = root.Q<Button>("WorldMarchAdvance");
+            _marchHold = root.Q<Button>("WorldMarchHold");
+            _marchReturn = root.Q<Button>("WorldMarchReturn");
+            _marchFollow = root.Q<Button>("WorldMarchFollow");
+            _marchReason = root.Q<Label>("WorldMarchReason");
+            if (_marchAdvance == null || _marchHold == null || _marchReturn == null || _marchFollow == null)
+            {
+                return;
+            }
+            _marchAdvance.clicked += () => IssueMarch(ExpeditionMarchService.Command.Advance);
+            _marchHold.clicked += () => IssueMarch(ExpeditionMarchService.Command.Hold);
+            _marchReturn.clicked += () => IssueMarch(ExpeditionMarchService.Command.Return);
+            _marchFollow.clicked += () =>
+            {
+                WorldView.ToggleFollowExpedition();
+                RefreshMarch(CampaignSession.Current);
+            };
+            UiTooltip.Attach(_marchAdvance, () => MarchTip("exp.cmd.advance", "exp.cmd.tip.advance"));
+            UiTooltip.Attach(_marchHold, () => MarchTip("exp.cmd.hold", "exp.cmd.tip.hold"));
+            UiTooltip.Attach(_marchReturn, () => MarchTip("exp.cmd.return", "exp.cmd.tip.return"));
+            UiTooltip.Attach(_marchFollow, () => new TooltipContent { Title = _marchFollow.text, Body = GameText.Get("exp.follow.started") });
+        }
+
+        private static TooltipContent MarchTip(string titleKey, string bodyKey) => new TooltipContent
+        {
+            Title = GameText.Get(titleKey),
+            Body = GameText.Get(bodyKey) + "\n" + GameText.Get("exp.cmd.tip.coverage"),
+        };
+
+        /// <summary>远征命令按钮（FGR-EXP-011）：覆盖内生效；覆盖外 / 静默夜被拒并写明原因（拒绝音 + 字幕 + 行军条原因行），队伍继续执行最后的命令。</summary>
+        public void IssueMarch(ExpeditionMarchService.Command cmd)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (ExpeditionMarchService.IssueCommand(state, cmd, out string failure))
+            {
+                _marchFailure = null;
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck);
+            }
+            else
+            {
+                _marchFailure = failure ?? "unknown";
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, GameText.Get(ExpeditionTextKeys.ReasonKey(_marchFailure)));
+            }
+            RefreshMarch(state);
+        }
+
+        /// <summary>
+        /// 远征行军条（FGR-EXP-012 五态常显）：“名字 · 状态 · 预计到达时间 / 集结进度 / 所在地点”；星球上行军时显示三个远程命令，覆盖外 / 静默夜时按钮禁用、原因行写明并附最后的命令；
+        /// 路线截断 / 到达失败写明怎么办；跟随按钮在地点里变成“前往远征地点”。O(成员数)，只在刷新时调用。
+        /// </summary>
+        private void RefreshMarch(CampaignState state)
+        {
+            if (_marchRow == null || _marchStatus == null || state == null)
+            {
+                return;
+            }
+            ExpeditionMarchState m = ExpeditionMarchService.Current(state);
+            int phase = m?.Phase ?? ExpeditionMarchService.PhaseNone;
+            ExpeditionMarchService.TeamStatus status = ExpeditionMarchService.StatusOf(state);
+            string name = ExpeditionTeamService.DisplayName(state);
+            string statusText = GameText.Get(ExpeditionMarchService.StatusTextKey(status));
+            bool onPlanet = phase == ExpeditionMarchService.PhaseOutbound || phase == ExpeditionMarchService.PhaseReturning;
+            string text;
+            if (onPlanet)
+            {
+                int near = ExpeditionMarchService.ArrivedCount(state, out int alive);
+                double eta = ExpeditionMarchService.EtaSeconds(state);
+                text = near > 0 && near < alive && m.Command != (int)ExpeditionMarchService.Command.Hold
+                    ? GameText.Format("exp.march.bar_rally", name, statusText, near, alive)
+                    : eta >= 0
+                        ? GameText.Format("exp.march.bar_eta", name, statusText, GameClock.FormatGameDuration(eta))
+                        : GameText.Format("exp.march.bar", name, statusText);
+            }
+            else if (phase == ExpeditionMarchService.PhaseAtSite)
+            {
+                text = GameText.Format("exp.march.bar_site", name, statusText, GameText.Get(ExpeditionTextKeys.SiteNameKey(m.SiteId)));
+            }
+            else
+            {
+                text = GameText.Format("exp.march.bar", name, statusText);
+            }
+            if (_marchStatus.text != text)
+            {
+                _marchStatus.text = text;
+            }
+            if (_marchSwatch != null)
+            {
+                _marchSwatch.style.backgroundColor = new StyleColor((Color)ExpeditionTeamService.ColorOf(ExpeditionTeamService.ColorIndexOf(state)));
+            }
+            SetVisible(_marchAdvance, onPlanet);
+            SetVisible(_marchHold, onPlanet);
+            SetVisible(_marchReturn, onPlanet);
+            bool canCommand = ExpeditionMarchService.CanCommand(state, out string why);
+            _marchAdvance?.SetEnabled(canCommand);
+            _marchHold?.SetEnabled(canCommand);
+            _marchReturn?.SetEnabled(canCommand);
+            if (_marchAdvance != null)
+            {
+                _marchAdvance.text = GameText.Get("exp.cmd.advance");
+                _marchHold.text = GameText.Get("exp.cmd.hold");
+                _marchReturn.text = GameText.Get("exp.cmd.return");
+            }
+            bool atSite = phase == ExpeditionMarchService.PhaseAtSite;
+            SetVisible(_marchFollow, onPlanet || atSite);
+            if (_marchFollow != null)
+            {
+                _marchFollow.text = atSite ? GameText.Get("exp.cmd.goto_site") : GameText.Get("exp.cmd.follow");
+                SetClass(_marchFollow, "wb-focus-current", WorldView.FollowingExpedition);
+            }
+            if (canCommand)
+            {
+                _marchFailure = null; // 能下令了：上一次被拒的原因已经过时。
+            }
+            string reason = null;
+            if (onPlanet)
+            {
+                string code = _marchFailure ?? (canCommand ? null : why);
+                if (code != null)
+                {
+                    reason = GameText.Get(ExpeditionTextKeys.ReasonKey(code)) + "  " + GameText.Format("exp.march.last_order", GameText.Get(CommandKey((ExpeditionMarchService.Command)m.Command)));
+                }
+                else if (m.Halted == ExpeditionMarchService.HaltRouteTruncated)
+                {
+                    reason = GameText.Get("exp.march.halted.route");
+                }
+                else if (m.Halted == ExpeditionMarchService.HaltArrivalFailed)
+                {
+                    reason = GameText.Format("exp.march.halted.arrival", GameText.Get(ExpeditionTextKeys.ReasonKey(m.ArrivalFailReason)));
+                }
+            }
+            SetVisible(_marchReason, reason != null);
+            if (reason != null && _marchReason != null && _marchReason.text != reason)
+            {
+                _marchReason.text = reason;
+            }
+        }
+
+        private static string CommandKey(ExpeditionMarchService.Command cmd) =>
+            cmd == ExpeditionMarchService.Command.Hold ? "exp.cmd.hold" : cmd == ExpeditionMarchService.Command.Return ? "exp.cmd.return" : "exp.cmd.advance";
 
         // ── FG7-ENV-01 日历行（FGR-ENV-002 / 003）──
 

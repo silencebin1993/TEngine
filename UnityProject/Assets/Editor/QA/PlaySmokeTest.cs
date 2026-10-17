@@ -66,7 +66,8 @@ namespace GameLogic.EditorTools
         private const string K = "BinGames.PlaySmoke.";
         // FG7-ENV-03 修复轮：天气 / 顶棚步骤（427～430）加进来后整条流程约 510 秒，原上限 480 秒把末尾的撤离 / 离家报告步骤截掉了。
         // 不删步骤、不减覆盖，上限调到 600 秒（tools/unity-play-smoke.sh 外层同步调到 720 秒）。
-        private const double TotalTimeoutSeconds = 600;
+        // FG8-EXP-02：正式派遣改为沿地形行军（步骤 64～67，3 倍速下约 20～40 秒真实时间），上限调到 660 秒（外层同步调到 780 秒）。
+        private const double TotalTimeoutSeconds = 660;
 
         static PlaySmokeTest()
         {
@@ -168,6 +169,10 @@ namespace GameLogic.EditorTools
                     case 80: StepFailureShown(inStep); break;
                     case 81: StepFailureEsc(inStep); break;
                     case 82: StepFailureBackToMenu(inStep); break;
+                    case 64: StepMarchPick(inStep); break; // FG8-EXP-02：正式派遣 = 沿地形行军
+                    case 65: StepMarchDepart(inStep); break;
+                    case 66: StepMarchFollow(inStep); break;
+                    case 67: StepMarchArrived(inStep); break;
                     case 7: StepRuins(inStep); break;
                     case 38: StepWornRepairOrdered(inStep); break;
                     case 39: StepWornRepairDone(inStep); break;
@@ -4653,8 +4658,151 @@ namespace GameLogic.EditorTools
             }
             Check(!UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && GameRoot.HomeValley.IsExpeditionPrepPanelOpen && !PauseMenuUIToolkit.IsOpen,
                 "Esc 逐层返回：信号核面板关闭，远征准备面板还开着");
-            GameRoot.HomeValley.SetExpeditionPrepPanelOpen(false);
             InputRouter.DebugSetReader(null);
+
+            // FG8-EXP-02（本 Story 新增的玩家可见路径）：正式派遣 = 沿地形行军。远征准备面板里勾一台 ERC-001（轮式）、点“确认出发”→ 面板关闭、
+            // 世界栏远征行军条“行军中”、镜头不动 → 点行军条“跟随远征队”、3 倍速 → 走到目的地锚点 → 镜头跟进远征地点 → 正式撤离回家园 → 接原来的出征步骤
+            // （第 7 步起要全部家园机器都在地点里，仍用原来的测试捷径派遣）。
+            RegionRecord ruins = Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current);
+            if (ruins != null && ruins.State == RegionState.Locked)
+            {
+                ruins.State = RegionState.Available; // 测试捷径：破碎都市解锁（真实解锁条件由 FG8-EXP-01 / M1 旅程覆盖）
+            }
+            UI.Expedition.ExpeditionPrepPanelUIToolkit prep = UI.Expedition.ExpeditionPrepPanelUIToolkit.Instance;
+            prep?.RefreshNowForTests();
+            // 目的地下拉框选“破碎都市”（玩家的正式操作；铸造前哨若已开放，默认会是它）。
+            string ruinsLabel = UI.Expedition.ExpeditionPrepPanelUIToolkit.DestinationOptionLabel(CampaignSession.Current,
+                Campaign.Regions.ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            if (prep?.DestinationField != null && prep.DestinationField.choices.Contains(ruinsLabel) && prep.DestinationField.value != ruinsLabel)
+            {
+                prep.DestinationField.value = ruinsLabel;
+                prep.RefreshNowForTests();
+            }
+            int marcher = HomeMachines().Where(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.ChassisId == Campaign.Regions.HomeValleyLayout.Erc001ChassisId && !r.IsInFactory
+                                && !Campaign.Signal.SignalUplinkService.IsUplinked(CampaignSession.Current, id))
+                .OrderBy(id => id).FirstOrDefault();
+            Toggle pick = prep != null && marcher != 0 ? prep.RowToggleOf(marcher) : null;
+            if (pick != null)
+            {
+                pick.value = true;
+            }
+            SessionState.SetInt(K + "Marcher", marcher);
+            SessionState.SetInt(K + "MarchConfirm", 0);
+            Check(pick != null, $"远征准备面板里勾选一台搬运机 #{marcher}（正式派遣）");
+            Next(64, "勾选一台搬运机，准备正式派遣");
+        }
+
+        private static void StepMarchPick(double inStep)
+        {
+            if (inStep < 0.4)
+            {
+                return;
+            }
+            UI.Expedition.ExpeditionPrepPanelUIToolkit prep = UI.Expedition.ExpeditionPrepPanelUIToolkit.Instance;
+            string title = prep != null ? prep.TitleText : string.Empty;
+            Check(prep != null && prep.DepartButton.enabledSelf && title == Localization.GameText.Format("exp.panel.title", Localization.GameText.Get("exp.dest.ruins")),
+                $"远征准备面板：目的地破碎都市（“{title}”）、“确认出发”可点");
+            // 验“镜头不动”之前把光标放到窗口外（与本冒烟其他验镜头的步骤同一做法）：上一步把输入还给了真实鼠标，准备面板（模态）一关，
+            // 影子编辑器里的真实光标停在画面角上就会触发边缘推屏（2026-10-17 验证失败：0.5 秒推了 26.6 格，不是出发流程动了镜头）。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
+            SessionState.SetString(K + "MarchFocus", WorldView.Director.StrategyFocus.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture) + "," + WorldView.Director.StrategyFocus.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            // 不抢镜头的直接证据：出发前后镜头飞行次数、WorldView 飞行 / 切换关注地点次数都不变，也没有开始跟随。
+            SessionState.SetInt(K + "MarchFlights", WorldView.Director.FlightCount);
+            SessionState.SetInt(K + "MarchFlyCount", WorldView.FlyCount);
+            SessionState.SetInt(K + "MarchObserveSwitch", WorldView.ObserveSwitchCount);
+            Check(ClickUitk("[HomeValleyExpeditionPrepHost]", "DepartButton"), "点“确认出发”");
+            Next(65, "点“确认出发”（正式出发事务）");
+        }
+
+        private static void StepMarchDepart(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            // 这台机器手上有在办工作时面板先要确认中断（正式流程）：点确认，留在这一步。
+            UIDocument prepDoc = GameObject.Find("[HomeValleyExpeditionPrepHost]")?.GetComponent<UIDocument>();
+            UnityEngine.UIElements.Button confirmBtn = prepDoc?.rootVisualElement?.Q<UnityEngine.UIElements.Button>("ConfirmInterruptButton");
+            bool interruptShown = confirmBtn != null && (confirmBtn.parent?.ClassListContains("exp-interrupt-section-visible") == true
+                                                         || confirmBtn.parent?.parent?.ClassListContains("exp-interrupt-section-visible") == true);
+            if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsExpeditionPrepPanelOpen && interruptShown && inStep < 1.5
+                && SessionState.GetInt(K + "MarchConfirm", 0) == 0 && InvokeClickable(confirmBtn))
+            {
+                SessionState.SetInt(K + "MarchConfirm", 1);
+                Write("  - 这台机器有在办工作：点“确认中断并出发”");
+            }
+            if (inStep < 1.5 && GameRoot.HomeValley != null && GameRoot.HomeValley.IsExpeditionPrepPanelOpen)
+            {
+                return;
+            }
+            CampaignState s = CampaignSession.Current;
+            GameLogic.Campaign.ExpeditionMarchState m = Campaign.Regions.ExpeditionMarchService.Current(s);
+            int marcher = SessionState.GetInt(K + "Marcher", 0);
+            string[] f = SessionState.GetString(K + "MarchFocus", "0,0").Split(',');
+            var before = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
+            float moved = Vector2.Distance(before, new Vector2(WorldView.Director.StrategyFocus.x, WorldView.Director.StrategyFocus.y));
+            bool marching = m != null && m.Phase == Campaign.Regions.ExpeditionMarchService.PhaseOutbound && m.Members.Contains(marcher)
+                            && WorldSimulation.ActiveExpedition == null && !GameRoot.HomeValley.IsExpeditionPrepPanelOpen;
+            int flights = WorldView.Director.FlightCount - SessionState.GetInt(K + "MarchFlights", 0);
+            int flies = WorldView.FlyCount - SessionState.GetInt(K + "MarchFlyCount", 0);
+            int switches = WorldView.ObserveSwitchCount - SessionState.GetInt(K + "MarchObserveSwitch", 0);
+            bool noHijack = WorldView.ObservedSiteId == Campaign.Regions.HomeValleyLayout.RegionId && moved < 1f
+                            && flights == 0 && flies == 0 && switches == 0 && !WorldView.Director.IsFollowing;
+            WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
+            hud?.Refresh();
+            string bar = hud?.MarchStatusText ?? string.Empty;
+            Check(marching && noHijack && hud != null && hud.MarchRowShown && bar.Contains(Localization.GameText.Get("exp.state.marching")),
+                $"出发 = 沿地形行军：准备面板关闭、没有载入远征地点、镜头不动（焦点移动 {moved:0.0} 格，飞行 {flights}/{flies} 次、切换关注地点 {switches} 次、自动跟随 {WorldView.Director.IsFollowing}）；世界栏远征行军条“{bar}”");
+            Check(hud != null && InvokeClickable(hud.MarchFollowButton) && WorldView.FollowingExpedition, "点行军条“跟随远征队”：镜头跟着远征队");
+            Check(hud != null && InvokeClickable(hud.SpeedButton(3)), "点 3 倍速");
+            // 行军途中不碰鼠标（指针在画面外）：边缘平移会按“玩家自己平移镜头”停止跟随。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
+            Next(66, "跟随远征队、3 倍速，等它沿地形走到目的地");
+        }
+
+        private static void StepMarchFollow(double inStep)
+        {
+            CampaignState s = CampaignSession.Current;
+            GameLogic.Campaign.ExpeditionMarchState m = Campaign.Regions.ExpeditionMarchService.Current(s);
+            bool arrived = m != null && m.Phase == Campaign.Regions.ExpeditionMarchService.PhaseAtSite && WorldSimulation.ActiveExpedition?.SiteId == Campaign.Regions.FracturedCityLayout.RegionId;
+            if (!arrived)
+            {
+                if (inStep > 150)
+                {
+                    InputRouter.DebugSetReader(null);
+                    double eta = Campaign.Regions.ExpeditionMarchService.EtaSeconds(s);
+                    Check(false, $"远征队 150 秒内没有走到目的地（阶段 {m?.Phase}、停下 {m?.Halted}、预计 {eta:0} 游戏秒）");
+                    Next(67, "（行军超时，继续后面的步骤）");
+                }
+                return;
+            }
+            Next(67, "远征队到达目的地");
+        }
+
+        private static void StepMarchArrived(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(null);
+            CampaignState s = CampaignSession.Current;
+            int marcher = SessionState.GetInt(K + "Marcher", 0);
+            bool inSite = WorldSimulation.ActiveExpedition?.SiteId == Campaign.Regions.FracturedCityLayout.RegionId
+                          && MachineRegistry.TryGetRecord(marcher, out MachineRecord rec) && rec.RegionId == Campaign.Regions.FracturedCityLayout.RegionId;
+            bool followedIn = WorldView.ObservedSiteId == Campaign.Regions.FracturedCityLayout.RegionId;
+            bool notified = GameLogic.Notifications.NotificationCenter.History.Any(e => e.Type?.Id == "expedition_march");
+            Check(inSite && followedIn && notified,
+                $"沿地形走到目的地后进入破碎都市（{inSite}）：玩家在跟随，镜头跟进地点（{followedIn}）；到达通知（{notified}）");
+            WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
+            InvokeClickable(hud?.SpeedButton(1));
+            // 正式撤离（与撤离面板“确认撤离”同一个事务）→ 远征队状态“已返回”，再接原来的出征步骤。
+            Campaign.Regions.ExpeditionReturnService.ReturnResult ret = Campaign.Regions.ExpeditionReturnService.TryConfirmEvacuation();
+            GameLogic.Campaign.ExpeditionMarchState m = Campaign.Regions.ExpeditionMarchService.Current(CampaignSession.Current);
+            Check(ret.Success && m.Phase == Campaign.Regions.ExpeditionMarchService.PhaseReturned && MachineRegistry.TryGetRecord(marcher, out MachineRecord back)
+                  && back.RegionId == Campaign.Regions.HomeValleyLayout.RegionId,
+                $"正式撤离回家园：远征队状态“{Localization.GameText.Get(Campaign.Regions.ExpeditionMarchService.StatusTextKey(Campaign.Regions.ExpeditionMarchService.StatusOf(CampaignSession.Current)))}”");
+            GameRoot.HomeValley.SetExpeditionPrepPanelOpen(false);
 
             int[] roster = HomeMachines();
             UnlockLikeDeparture(Campaign.Regions.FracturedCityRegion.Find(CampaignSession.Current),

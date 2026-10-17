@@ -421,6 +421,11 @@ namespace GameLogic.EditorTools
             atHome?.Invoke(s);
             sc.Roster = PrepareDeparture(s);
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(sc.Roster, true);
+            // FG8-EXP-02：出发 = 沿地形行军；本段要在远征地点里接着测——测试快进到达（走正式的到达事务；行军本身由 FgExpeditionMarchSelfCheck 真实推进验证）。
+            if (dep.Success)
+            {
+                ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
+            }
             if (dep.Outcome != ExpeditionDepartureService.DepartureOutcome.Success)
             {
                 sc.Failure = $"真实出发失败（{dep.Outcome}：{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）";

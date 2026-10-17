@@ -276,6 +276,15 @@ namespace GameLogic.Campaign.WorldSim
                 TargetsScratch.Add(new FocusTarget("site:" + exp.SiteId, exp.SiteId, exp.DefaultFocus,
                     GameText.Format("ui.world.focus.expedition", name, exp.LiveMachineCount.ToString(CultureInfo.InvariantCulture)), false));
             }
+            // FG8-EXP-02（FGR-EXP-012）：星球上行军中的远征队（地点还没载入）：关注点条 / Tab 也能切到它（镜头飞到队伍中心）。
+            if (home != null && home.IsLoaded && Regions.ExpeditionMarchService.TryTeamCenter(state, out Vector2 teamAt, out _))
+            {
+                Regions.ExpeditionMarchService.TeamStatus st = Regions.ExpeditionMarchService.StatusOf(state);
+                double eta = Regions.ExpeditionMarchService.EtaSeconds(state);
+                string etaText = eta >= 0 ? GameText.Format("exp.map.eta", GameClock.FormatGameDuration(eta)) : GameText.Get("exp.map.eta_planning");
+                TargetsScratch.Add(new FocusTarget(ExpeditionFocusId, home.SiteId, teamAt,
+                    GameText.Format("exp.focus.march", Regions.ExpeditionTeamService.DisplayName(state), GameText.Get(Regions.ExpeditionMarchService.StatusTextKey(st)), etaText), false));
+            }
             if (home != null && home.IsLoaded)
             {
                 foreach (TransitGroupRecord g in WorldTransitSystem.Groups(state))
@@ -423,10 +432,68 @@ namespace GameLogic.Campaign.WorldSim
                 bool ok = site == _observedId && TrySelectionCenter(site, out c, out _, out _);
                 return (ok, ok ? new float2(c.x, c.y) : float2.zero);
             });
+            _followExpedition = false; // FG8-EXP-02：跟随的是选中对象，不是远征队。
             FollowStartCount++;
             string who = count > 1 ? GameText.Format("camera.follow.group", count) : Signal.SignalPresence.MachineLabel(first);
             Signal.SignalUplinkService.PushFeedback(GameText.Format("camera.follow.started", who, InputDisplay.ForAction(GameActionId.FollowSelection)));
             return true;
+        }
+
+        /// <summary>FG8-EXP-02：关注点条里“行军中的远征队”这一项的 ID。</summary>
+        public const string ExpeditionFocusId = "expedition:march";
+
+        private static bool _followExpedition;
+
+        /// <summary>镜头正在跟随远征队（玩家点了“跟随远征队”且还没停：平移镜头、飞去别处、再点一次都会停）。到达远征地点时据此决定镜头跟不跟进（不抢镜头）。</summary>
+        public static bool FollowingExpedition => _followExpedition && DirectorInstance.IsFollowing;
+
+        /// <summary>
+        /// 镜头一键跟随远征队（FG8-EXP-02 必须同时交付）：星球上行军时跟随队伍中心（每帧现取存活成员的实时位置，O(成员数)）；
+        /// 远征队已在远征地点里时镜头切过去（“前往远征地点”）；正在跟随时再点一次停止。没有远征在外时说明原因（不静默）。
+        /// </summary>
+        public static bool ToggleFollowExpedition()
+        {
+            if (FollowingExpedition)
+            {
+                DirectorInstance.StopFollow();
+                _followExpedition = false;
+                Signal.SignalUplinkService.PushFeedback(GameText.Get("exp.follow.stopped"));
+                return false;
+            }
+            CampaignState state = CampaignSession.Current;
+            GameLogic.Campaign.ExpeditionMarchState m = Regions.ExpeditionMarchService.Current(state);
+            if (m != null && m.Phase == Regions.ExpeditionMarchService.PhaseAtSite && WorldSimulation.IsSiteLoaded(m.SiteId))
+            {
+                _followExpedition = false;
+                return Observe(m.SiteId);
+            }
+            IWorldSite home = WorldSimulation.Home;
+            if (home == null || !home.IsLoaded || !Regions.ExpeditionMarchService.TryTeamCenter(state, out Vector2 at, out _))
+            {
+                Signal.SignalUplinkService.PushFeedback(GameText.Get("exp.follow.none"));
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, GameText.Get("exp.follow.none"));
+                return false;
+            }
+            if (!Observe(home.SiteId))
+            {
+                return false;
+            }
+            // 队伍可能已在已探索区域外：先把它放进镜头可平移范围（与远距离跳转同一做法），跟随本身把镜头带过去。
+            PinPlanet(at);
+            _lastFocusTargetId = ExpeditionFocusId;
+            bool started = DirectorInstance.StartFollow(() =>
+            {
+                Vector2 c = Vector2.zero;
+                bool ok = _observedId == HomeValleyLayout.RegionId && Regions.ExpeditionMarchService.TryTeamCenter(CampaignSession.Current, out c, out _);
+                return (ok, ok ? new float2(c.x, c.y) : float2.zero);
+            });
+            _followExpedition = started;
+            if (started)
+            {
+                FollowStartCount++;
+                Signal.SignalUplinkService.PushFeedback(GameText.Get("exp.follow.started"));
+            }
+            return started;
         }
 
         /// <summary>地点里选中的机器（编队框选集合优先，没有时取家园单选）的实时位置中心。</summary>
@@ -601,6 +668,7 @@ namespace GameLogic.Campaign.WorldSim
         /// <summary>离开世界（回主菜单 / 自检之间）：解绑镜头并复位输入，清空地点记忆，销毁星球表现层。</summary>
         public static void Reset()
         {
+            _followExpedition = false;
             if (DirectorInstance.IsBound)
             {
                 DirectorInstance.Unbind(resetInput: true);

@@ -808,7 +808,9 @@ namespace GameLogic.UI.Expedition
                     _selected.Clear();
                     _pendingInterruptLogicIds = System.Array.Empty<int>();
                     _composeNotice = string.Empty;
-                    // FG0-ARCH-01：镜头已飞到远征地点（家园继续运行），HomeValley.IsActive 立即为 false，Tick() 会自动隐藏本面板。
+                    // FG8-EXP-02：派遣 = 出发行军——家园照常运行、镜头不动（不抢镜头），远征队沿地形走向目的地：关闭本面板，
+                    // 状态、预计到达时间、远程命令与“跟随远征队”在世界栏的远征行军条上。
+                    GameRoot.HomeValley?.SetExpeditionPrepPanelOpen(false);
                     break;
                 case ExpeditionDepartureService.DepartureOutcome.NeedsInterruptConfirmation:
                     _pendingInterruptLogicIds = result.InterruptibleLogicIds;

@@ -17,10 +17,11 @@ namespace GameLogic.Campaign.Regions
     /// 另外“机器此刻不在可派位置”（已阵亡 / 不在家园 / 在工厂 / 不可中断的抢修）照样拦并写明——那不是派遣规则，是这台机器去不了。
     /// 提醒：目的地在迷雾边缘、路线走出覆盖、货舱低于建议（含没有货舱）、没有主武器、跨过静默夜、家园劳动力下降、敌方反制、机器伤势（重伤 / 偏重）、路线经过危害带。
     ///
-    /// ── 尚未交付（登记 DEBT，不冒充完成）──
-    /// 当前世界结构下家园到远征地点没有真实路线（远征地点是独立站点、没有星球坐标，FG8-EXP-02 负责行军路线），
-    /// 所以 <see cref="RouteProvider"/> 默认为空：“路线走出覆盖”与“路线经过危害带”两条提醒现在**不会出现**
-    /// （DEBT-FG8EXP01-03 / -04，承接 FG8-EXP-02；危害数据另需 FG8-GEN-02）。接口已按真实覆盖几何测试（自检 D8 / D9b）。
+    /// ── 路线（FG8-EXP-02 交付 DEBT-FG8EXP01-03）──
+    /// <see cref="RouteProvider"/> 默认 = 从归还核心到目的地锚点的真实层级寻路路线（<see cref="ExpeditionSiteAnchors.Route"/>，星球格），
+    /// “路线走出覆盖”按家园所在星球表面、与核心连通的覆盖网沿路线采样——中继铺到哪里、提醒就跟着变（真实几何，不注入覆盖）。
+    /// 锚点还在校验中时没有路线，这条提醒暂不出现（出发会被“目的地路线计算中”拦下）。
+    /// “路线经过危害带”仍待危害数据（DEBT-FG8EXP01-04，承接 FG8-GEN-02），<see cref="HazardProbe"/> 默认为空。
     /// </summary>
     public static class ExpeditionChecklistService
     {
@@ -65,9 +66,12 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>真实行军路线（目的地站点局部坐标，起点在前）。默认空：当前没有家园到目的地的路线，覆盖 / 危害两条提醒不计算。
-        /// FG8-EXP-02 接入层级寻路的行军路线后赋值（DEBT-FG8EXP01-03）。</summary>
-        public static Func<CampaignState, ExpeditionDepartureService.ExpeditionTarget, IReadOnlyList<Vector2>> RouteProvider;
+        /// <summary>真实行军路线（星球格，起点 = 归还核心，终点 = 目的地锚点）。默认 = <see cref="ExpeditionSiteAnchors.Route"/>（FG8-EXP-02）；自检可以换。</summary>
+        public static Func<CampaignState, ExpeditionDepartureService.ExpeditionTarget, IReadOnlyList<Vector2>> RouteProvider = DefaultRoute;
+
+        /// <summary>默认路线：从归还核心到目的地锚点的层级寻路路线（锚点未定时 null）。</summary>
+        public static IReadOnlyList<Vector2> DefaultRoute(CampaignState state, ExpeditionDepartureService.ExpeditionTarget target) =>
+            ExpeditionSiteAnchors.Route(state, target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId);
 
         /// <summary>给定路线返回经过的危害带（没有 = null）。默认空：目的地的危害数据还没接入（DEBT-FG8EXP01-04）。</summary>
         public static Func<CampaignState, IReadOnlyList<Vector2>, HazardHit?> HazardProbe;
@@ -87,7 +91,8 @@ namespace GameLogic.Campaign.Regions
                 return new Checklist(hard.ToArray(), reminders.ToArray());
             }
 
-            // ── 硬约束 3：目的地（区域级近似）。区域都没开放时写真实的解锁条件；远征队在外时写明等它回来。──
+            // ── 硬约束 3：目的地（区域级近似）。区域都没开放时写真实的解锁条件；远征队在外时写明等它回来。
+            // FG8-EXP-02：目的地锚点还在寻路校验 / 走不到时同样不能派（出发事务同一判据）。──
             if (!snap.RegionReachable)
             {
                 if (snap.BlockedReason == "region-locked")
@@ -114,19 +119,27 @@ namespace GameLogic.Campaign.Regions
                 ? FoundryOutpostLayout.RegionId
                 : FracturedCityLayout.RegionId;
 
+            // ── 硬约束（FG8-EXP-02）：目的地锚点——远征队要沿地形走过去的终点——还在寻路校验中 / 从家园走不到（与出发事务同一判据）──
+            ExpeditionSiteAnchors.EnsureResolved(state);
+            if (!ExpeditionSiteAnchors.IsResolved(state, site))
+            {
+                string code = ExpeditionSiteAnchors.IsFailed(state, site) ? "destination-unreachable" : "destination-pending";
+                hard.Add(new Item(code, DescribeHard(code)));
+            }
+
             // ── 提醒：目的地在迷雾边缘（已开放、尚未进入过）──
             if (ExpeditionDepartureService.ClassifyDestination(state, target) == ExpeditionDepartureService.DestinationFog.FogEdge)
             {
                 reminders.Add(new Item("destination-fog-edge", GameText.Get("exp.check.rem.fog_edge")));
             }
 
-            // ── 提醒：路线走出覆盖 / 经过危害带（需要真实路线；没有路线时不出现，见类注释）──
+            // ── 提醒：路线走出覆盖 / 经过危害带（真实路线在星球表面上：按家园所在表面、与核心连通的覆盖网采样，FGR-SIG-053）──
             IReadOnlyList<Vector2> route = RouteProvider?.Invoke(state, target);
             if (route != null && route.Count >= 2)
             {
-                if (SignalCoverageService.IsBoundedSite(site))
+                if (SignalCoverageService.IsBoundedSite(HomeValleyLayout.RegionId))
                 {
-                    float outside = SignalCoverageService.RouteOutsideLength(site, route, out _);
+                    float outside = SignalCoverageService.RouteOutsideLength(HomeValleyLayout.RegionId, route, out _);
                     if (outside > 0f)
                     {
                         reminders.Add(new Item("coverage", GameText.Format("exp.check.rem.coverage", Mathf.CeilToInt(outside))));
@@ -266,6 +279,19 @@ namespace GameLogic.Campaign.Regions
             if (reason == "no-active-campaign")
             {
                 return GameText.Get("exp.check.hard.no_campaign");
+            }
+            // FG8-EXP-02：行军的终点与家园状态。
+            if (reason == "destination-pending")
+            {
+                return GameText.Get("exp.check.hard.destination_pending");
+            }
+            if (reason == "destination-unreachable")
+            {
+                return GameText.Get("exp.check.hard.destination_unreachable");
+            }
+            if (reason == "home-not-loaded")
+            {
+                return GameText.Get("exp.check.hard.home_not_loaded");
             }
             // 出发事务失败：存档结果 / 异常原文已由 TryDepart 写进日志，玩家只看玩家语言（FG8-EXP-01 返工第 1 轮修复）。
             if (reason.StartsWith("autosave-failed", StringComparison.Ordinal))

@@ -722,7 +722,7 @@ namespace GameLogic.UI.Kit
                 safeLabel.text = safe ? GameText.Get("roster.row.safe_mode") : string.Empty;
                 safeLabel.tooltip = safe ? SignalLinkService.SafeModeTooltip(state, m.LogicId) : string.Empty;
                 safeLabel.EnableInClassList("uk-hidden", !safe);
-                string where = MachineRoster.IsHome(m) ? GameText.Get("roster.place.home") : GameText.Get("roster.place.away");
+                string where = MachineRoster.PlaceText(state, m); // FG8-EXP-02：远征队成员写远征队状态
                 row.Q<Label>("RoInfo").text = GameText.Format("roster.row.injury", MachineRoster.InjuryPercent(m)) + sep
                     + GameText.Format("roster.row.exp", m.ExperienceFlags?.Length ?? 0, m.JobsCompleted, m.KillCount) + sep
                     + GameText.Format("roster.row.where", where)
@@ -857,7 +857,7 @@ namespace GameLogic.UI.Kit
                 : (Campaign.Blueprint.BlueprintEditorService.Find(state, m.BlueprintId)?.DisplayName ?? m.BlueprintId);
             string port = GameText.Get(UplinkHudModel.HasUplinkPort(state, m.LogicId) ? "machine.detail.port_yes" : "machine.detail.port_no");
             MachineRoster.Status st = MachineRoster.StatusOf(state, m);
-            string where = MachineRoster.IsHome(m) ? GameText.Get("roster.place.home") : GameText.Get("roster.place.away");
+            string where = MachineRoster.PlaceText(state, m); // FG8-EXP-02：远征队成员写远征队状态
             string injuries = m.InjuryFlags != null && m.InjuryFlags.Length > 0 ? MachineInjury.DescribeAll(m.InjuryFlags) : GameText.Get("machine.detail.injury_none");
             var lines = new List<string>
             {

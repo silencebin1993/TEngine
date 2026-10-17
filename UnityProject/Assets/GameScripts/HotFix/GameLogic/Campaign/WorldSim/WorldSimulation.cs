@@ -366,6 +366,11 @@ namespace GameLogic.Campaign.WorldSim
             for (int i = 0; i < steps; i++)
             {
                 StepOnce(state);
+                if (!ReferenceEquals(state, CampaignSession.Current))
+                {
+                    // FG8-EXP-02：步末事务（远征到达）失败、整体回滚到存档 = 换了一份战役状态：这一帧剩下的步不再拿旧状态推进，下一帧按新状态继续。
+                    return;
+                }
                 if (GameClock.Paused)
                 {
                     // 步内触发了暂停（紧急通知自动暂停等）：停在这一步，剩下的步退回累计量，继续后再执行。
@@ -403,6 +408,10 @@ namespace GameLogic.Campaign.WorldSim
             for (int i = 0; i < count; i++)
             {
                 StepOnce(state);
+                if (!ReferenceEquals(state, CampaignSession.Current))
+                {
+                    return; // FG8-EXP-02：步末事务失败回滚换了战役状态（同 Frame）。
+                }
             }
         }
 
@@ -489,6 +498,9 @@ namespace GameLogic.Campaign.WorldSim
                 // 行进中的队伍在星球表面（家园所在的表面）上。
                 CurrentSiteId = HomeValleyLayout.RegionId;
                 WorldTransitSystem.Step(state, dt);
+                // FG8-EXP-02：远征队在星球上的行军（锚点解析、到达 / 回家判定、覆盖 / 交战 / 遇敌提示）。成员是家园内核里的真实单位（上面 Home.SimStep 已推进移动与交战），
+                // 这里只做判定与事务排队（到达事务在步末执行）；只看步序号，与观察无关，O(成员数)。
+                Regions.ExpeditionMarchService.WorldStep(state, dt);
                 // FG0-ARCH-06：敌方据点与巡逻（休眠判定、分帧唤醒、活跃的推进一步）。
                 WorldOutpostSystem.Step(state, GameClock.Ticks);
                 // FG6-DEF-04：突袭导演（触发 → 排定 → 预警 → 出发 → 跟踪），在队伍与据点之后：本步派出的队伍下一步起行进。只看步序号，与观察无关，O(计划数)。
@@ -540,7 +552,8 @@ namespace GameLogic.Campaign.WorldSim
                     // FG4-ECO-06：常驻规则——排队事件每步处理（O(事件数)），条件按 rules.check_seconds 定时检查（不每帧遍历建筑）；只看步序号，与观察无关。
                     Economy.StandingRuleService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG4-ECO-09：离家报告与远征状态对齐（O(1)）：旧档读档时正在远征却没有报告 → 从此刻开一份；报告开着但远征已不在 → 按“其它方式结束”结算。
-                    Economy.AwayReportService.Reconcile(state, ActiveExpedition?.SiteId);
+                    // FG8-EXP-02：星球上行军的远征也算在外（行军阶段还没有远征地点载入）。
+                    Economy.AwayReportService.Reconcile(state, ActiveExpedition?.SiteId ?? Regions.ExpeditionMarchService.AwaySiteId(state));
                 }
                 // FG7-ENV-01：昼夜——整游戏秒检查是否跨过入夜 / 天亮（O(1)，只看步序号，与观察无关；光照与太阳能由游戏秒直接算出，没有存档状态）。
                 Env.DayNightCycle.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
