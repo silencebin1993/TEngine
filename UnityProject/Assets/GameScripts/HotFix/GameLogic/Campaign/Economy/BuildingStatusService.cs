@@ -156,6 +156,11 @@ namespace GameLogic.Campaign.Economy
                 // FG6-DEF-02：屏障 / 闸门 = 挡路中；护盾 = 护盾值 / 充能 / 过载倒计时 / 重启 / 离线；陷阱 = 铺设中 / 没装固件 / 缺流体（缺什么、怎么办）。
                 return Defense.DefenseService.StatusOf(state, b);
             }
+            if (type == Regions.DropPodService.StationTypeId)
+            {
+                // FG8-DROP-01：投送站——舱（在站 / 冷却 / 在飞 / 容纳）、燃油、投送距离、自动补满；没有舱 / 没有燃油（接错流体）写明怎么办。缺电 / 禁用 / 虚影 / 被毁由上面的通用状态先报。
+                return Regions.DropPodService.StatusOf(state, b);
+            }
             if (type == Defense.RepairDroneCatalog.StationTypeId)
             {
                 // FG6-DEF-03：维修无人机站——维修中（修谁、几架出动）/ 待命 / 缺维修件 / 补充无人机（倒计时或缺废料）。缺电 / 禁用 / 虚影 / 被毁由上面的通用状态先报。

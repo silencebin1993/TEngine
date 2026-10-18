@@ -232,6 +232,74 @@ namespace GameLogic.UI.Kit
             Instance?.SetOpen(false);
         }
 
+        // ── FG8-DROP-01（FGU-46 目标选择）：选点模式——投送站面板“在地图上选落点 / 回收点…”打开地图，悬停写预览（距离 / 飞行时间 / 燃油 / 能不能降落），
+        // 左键选定（回到面板），右键 / Esc / 关闭取消（也回到面板）。选点模式下不飞镜头、不加标记。──
+        private static string _pickHintKey;
+        private static Func<Vector2, string> _pickPreview;
+        private static Action<Vector2> _pickDone;
+        private static Action _pickCancel;
+        private static Vector2Int _pickHoverCell = new Vector2Int(int.MinValue, int.MinValue);
+
+        /// <summary>选点模式进行中（自检读）。</summary>
+        public static bool PickActive => _pickDone != null;
+        public static int PickCount { get; private set; }
+
+        /// <summary>打开地图进入选点模式，以 <paramref name="center"/> 为中心（视野放得下大半个投送距离）。</summary>
+        public static void BeginPick(string hintKey, Vector2 center, Func<Vector2, string> preview, Action<Vector2> onPick, Action onCancel)
+        {
+            _pickHintKey = hintKey;
+            _pickPreview = preview;
+            _pickDone = onPick;
+            _pickCancel = onCancel;
+            _pickHoverCell = new Vector2Int(int.MinValue, int.MinValue);
+            OpenCentered(center.x, center.y, Math.Max(200.0, Campaign.Regions.DropPodService.RangeCells * 0.6));
+            if (Instance != null && IsOpen)
+            {
+                Instance.RefreshTexts();
+            }
+            else if (Instance != null && Instance._root != null)
+            {
+                EndPick(cancelled: true); // 地图打不开（没有星球世界 / 不在世界里）：直接回到面板
+            }
+        }
+
+        /// <summary>整体收起世界界面（回主菜单 / 读档 / 失败页）时调：清掉选点状态、不执行取消回调（不会在拆场途中把投送站面板重新打开）。</summary>
+        public static void ClearPick() => EndPick(cancelled: false);
+
+        private static void EndPick(bool cancelled)
+        {
+            Action cancel = _pickCancel;
+            _pickHintKey = null;
+            _pickPreview = null;
+            _pickDone = null;
+            _pickCancel = null;
+            if (cancelled)
+            {
+                cancel?.Invoke();
+            }
+        }
+
+        /// <summary>选点模式下点了画布上一点：退出选点、关地图、把这一格交给面板。自检与指针同一入口。</summary>
+        public void PickAt(Vector2 canvasPoint)
+        {
+            Action<Vector2> done = _pickDone;
+            if (done == null)
+            {
+                return;
+            }
+            Vector2 cell = _view.ToCell(canvasPoint);
+            _pickDone = null;
+            _pickCancel = null;
+            _pickPreview = null;
+            _pickHintKey = null;
+            PickCount++;
+            SetOpen(false);
+            done(cell);
+        }
+
+        /// <summary>自检：某一格在画布上的坐标（选点 / 悬停按格算）。</summary>
+        public Vector2 CanvasOf(Vector2 cell) => _view.ToCanvas(cell.x, cell.y);
+
         public static void Toggle()
         {
             if (IsOpen)
@@ -372,6 +440,10 @@ namespace GameLogic.UI.Kit
                 UiEscapeStack.Remove(this);
                 _pointerDown = false;
                 _dragging = false;
+                if (PickActive)
+                {
+                    EndPick(cancelled: true); // FG8-DROP-01：选点中关掉地图 = 取消，回到投送站面板
+                }
             }
         }
 
@@ -473,7 +545,7 @@ namespace GameLogic.UI.Kit
             _title.text = GameText.Get("ui.map.title");
             _close.text = GameText.Get("ui.map.close");
             _markerDelete.text = GameText.Get("ui.map.marker_delete");
-            _hint.text = InputDisplay.ExpandActionTokens(GameText.Get("ui.map.hint"));
+            _hint.text = PickActive && !string.IsNullOrEmpty(_pickHintKey) ? GameText.Get(_pickHintKey) : InputDisplay.ExpandActionTokens(GameText.Get("ui.map.hint"));
             if (_composeExpedition != null)
             {
                 // 派遣准备面板只在家园可开：不在家园时按钮置灰，并在按钮文字上写明原因（B06“不能做要给原因”）。
@@ -567,7 +639,8 @@ namespace GameLogic.UI.Kit
             PlaceTexture();
             float now = Time.realtimeSinceStartup;
             int key = HashCode.Combine(Math.Round(_view.CenterX, 1), Math.Round(_view.CenterY, 1), Math.Round(_view.HalfWidth, 1), _view.CanvasWidth, _view.CanvasHeight,
-                WorldMapFilters.Revision, HashCode.Combine(WorldMapMarkers.Revision, (int)GameText.Language, Campaign.Economy.IntelService.Revision, Campaign.Env.HomeExplorationService.Revision));
+                WorldMapFilters.Revision, HashCode.Combine(WorldMapMarkers.Revision, (int)GameText.Language, Campaign.Economy.IntelService.Revision, Campaign.Env.HomeExplorationService.Revision,
+                    Campaign.Regions.DropPodService.Revision, PickActive));
             if (force || key != _modelKey || now >= _nextModel)
             {
                 _modelKey = key;
@@ -685,7 +758,11 @@ namespace GameLogic.UI.Kit
                 _dragging = false;
                 return;
             }
-            if (evt.button == 1)
+            if (evt.button == 1 && PickActive)
+            {
+                SetOpen(false); // FG8-DROP-01：选点模式下右键 = 取消
+            }
+            else if (evt.button == 1)
             {
                 AddMarkerAt(evt.localPosition);
             }
@@ -699,6 +776,11 @@ namespace GameLogic.UI.Kit
         /// <summary>左键单击：点在标记上 = 选中编辑备注；否则镜头飞过去（0.5 秒）并关地图。自检与指针同一入口。</summary>
         public void ClickAt(Vector2 canvasPoint)
         {
+            if (PickActive)
+            {
+                PickAt(canvasPoint);
+                return;
+            }
             string marker = MarkerNear(canvasPoint, 10f);
             if (marker != null)
             {
@@ -782,6 +864,18 @@ namespace GameLogic.UI.Kit
             {
                 return;
             }
+            if (PickActive && _pickPreview != null)
+            {
+                // FG8-DROP-01：选点模式下悬停写投送 / 回收预览（按格缓存：同一格不重算着陆条件）。
+                Vector2 pc = _view.ToCell(canvasPoint);
+                var key = new Vector2Int(Mathf.RoundToInt(pc.x), Mathf.RoundToInt(pc.y));
+                if (key != _pickHoverCell)
+                {
+                    _pickHoverCell = key;
+                    _hover.text = _pickPreview(new Vector2(key.x, key.y));
+                }
+                return;
+            }
             string relic = ItemNear(canvasPoint, 10f, WorldMapItemKind.Relic);
             if (relic != null && Campaign.Env.HomeExplorationService.TryDescribeRelic(state, relic, out string rt, out string rb))
             {
@@ -789,6 +883,13 @@ namespace GameLogic.UI.Kit
                 return;
             }
             Vector2 cell = _view.ToCell(canvasPoint);
+            // FG8-DROP-01：指着敌方防空覆盖（红色区域，与 WorldMapModel 画圈同一口径：已探明的防空）写是哪个据点（迷雾里的据点不写名字）、投送舱不能在这里着陆。
+            if (WorldMapFilters.IsOn(WorldMapLayer.Outposts) && Campaign.Regions.DropPodService.AntiAirAt(state, cell.x, cell.y) is OutpostRecord aa
+                && Campaign.Regions.DropPodService.IsAntiAirKnown(state, aa))
+            {
+                _hover.text = GameText.Format("ui.map.antiair_hover", Campaign.Regions.DropPodService.OutpostLabel(state, aa));
+                return;
+            }
             if (WorldMapFilters.IsOn(WorldMapLayer.Territory)
                 && Campaign.Env.HomeExplorationService.TryDescribeHazard(state, Mathf.RoundToInt(cell.x), Mathf.RoundToInt(cell.y), out string title, out string body))
             {

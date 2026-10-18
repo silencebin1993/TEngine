@@ -336,7 +336,7 @@ namespace GameLogic.EditorTools
             // FG6-DEF-01：再加轻型 / 重型炮塔座 T1～T3（17 行；T2 / T3 的研究门槛同样由改表脚本回写）。
             // FG7-ENV-03：再加监听站 T1 / T2（19 行；T2 = 3 日天气预报，研究门槛 signal.listening_t2 由改表脚本回写）。
             // FG7-ENV-04：再加净化塔 T1～T3（22 行；T2 / T3 的研究门槛 environment.purifier_t2 / _t3 由改表脚本回写）。
-            Expect(code == 0 && bs.Length >= 28 && bs.SequenceEqual(rs) && bt.Length == 22 && bt.SequenceEqual(rt),
+            Expect(code == 0 && bs.Length >= 28 && bs.SequenceEqual(rs) && bt.Length == 24 /* FG8-DROP-01：+ 投送站 T1 / T2 */ && bt.SequenceEqual(rt),
                 $"A1 fg.TbBuildingService（{bs.Length} 行）与 fg.TbBuildingTier（{bt.Length} 行）与源数据 fgdata_buildops 逐字段一致" + (code == 0 ? string.Empty : "：" + FgProductionSelfCheck.Tail(output)));
             var missing = ConfigSystem.Instance.Tables.TbBuilding.DataList.Where(b => BuildingOps.Service(b.TypeId) == null).Select(b => b.TypeId).ToList();
             var badCodex = ConfigSystem.Instance.Tables.TbBuildingService.DataList.Where(r => !ConfigSystem.Instance.Tables.TbCodexEntry.DataList.Any(c => c.Id == r.CodexId)).Select(r => r.TypeId).ToList();

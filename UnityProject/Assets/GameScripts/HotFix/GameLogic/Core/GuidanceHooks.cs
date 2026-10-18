@@ -519,6 +519,20 @@ namespace GameLogic.Core
         /// <summary>FG8-EXP-03（卡片负向“在敌控领地里建设”）：第一次因为在敌控领地里有建筑而被据点骚扰。</summary>
         public const string WorldFirstTerritoryHarassed = "world.first_territory_harassed";
 
+        // ── FG8-DROP-01：投送站与投送舱（FG13 第 207 行“第一次解锁投送：投送站、防空限制”；只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次建成投送站。</summary>
+        public const string DropStationFirstBuilt = "drop.first_station_built";
+        /// <summary>第一次打开投送站面板。</summary>
+        public const string DropPanelFirstOpen = "drop.first_panel_open";
+        /// <summary>第一次发射投送舱。</summary>
+        public const string DropFirstLaunch = "drop.first_launch";
+        /// <summary>第一次投送舱着陆（机器 / 货物落地）。</summary>
+        public const string DropFirstLanded = "drop.first_landed";
+        /// <summary>第一次呼叫回收。</summary>
+        public const string DropFirstRecall = "drop.first_recall";
+        /// <summary>第一次因为敌方防空覆盖被拒（防空限制）。</summary>
+        public const string DropFirstAntiAirRejected = "drop.first_antiair_rejected";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -581,6 +595,7 @@ namespace GameLogic.Core
             EnvFirstRelicFound, EnvFirstRelicRecovered, EnvFirstHazardSeen, EnvFirstFogBlocked,
             WorldFirstTerritoryEntered, WorldFirstInteriorEntered, WorldFirstPoiFound, WorldFirstEntranceBlocked,
             WorldFirstOutpostDestroyed, WorldFirstTerritoryPacified, WorldFirstTerritoryReclaimed, WorldFirstEliteRemnant, WorldFirstTerritoryHarassed,
+            DropStationFirstBuilt, DropPanelFirstOpen, DropFirstLaunch, DropFirstLanded, DropFirstRecall, DropFirstAntiAirRejected,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

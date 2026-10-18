@@ -1194,6 +1194,54 @@ namespace GameLogic.Campaign.Regions
             Log.Warning("[ExpeditionMarchService] 远征队在行军途中全部失去行动能力。");
         }
 
+        /// <summary>FG8-DROP-01：经投送舱回收返回的远征次数（自检读）。</summary>
+        public static int PodReturnCount { get; private set; }
+
+        /// <summary>
+        /// FG8-DROP-01（FGR-EXP-015“回收是正式的撤离方式”）：行军中的成员上了投送舱——离开行军名单（不再接远征命令）；名单上没有还在星球上的存活成员时 = 远征经投送舱返回：
+        /// 离家报告按“返回”结算（卸货在舱落回投送站时按远征卸货规则做）。不在行军中 / 不是成员时什么都不做。
+        /// </summary>
+        public static void OnMembersBoardedPod(CampaignState s, IReadOnlyList<int> ids)
+        {
+            ExpeditionMarchState m = Current(s);
+            if (m?.Members == null || ids == null || ids.Count == 0 || (m.Phase != PhaseOutbound && m.Phase != PhaseReturning))
+            {
+                return;
+            }
+            var keep = new List<int>(m.Members.Length);
+            bool any = false;
+            foreach (int id in m.Members)
+            {
+                bool boarded = false;
+                for (int i = 0; i < ids.Count; i++)
+                {
+                    boarded |= ids[i] == id;
+                }
+                if (boarded)
+                {
+                    any = true;
+                    continue;
+                }
+                keep.Add(id);
+            }
+            if (!any)
+            {
+                return;
+            }
+            m.Members = keep.ToArray();
+            if (AlivePlanetMembers(s).Count > 0)
+            {
+                return;
+            }
+            SetPhase(m, PhaseReturned);
+            m.Halted = HaltNone;
+            m.Command = (int)Command.Advance;
+            PodReturnCount++;
+            Economy.AwayReportService.End(s, Economy.AwayReportService.OutcomeEvacuated);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionMarchReturned, GameText.Get("exp.cue.returned_by_pod"));
+            Log.Info("[ExpeditionMarchService] 远征队全部登上投送舱，按“返回”结算。");
+        }
+
         /// <summary>离开远征地点（<see cref="ExpeditionReturnService"/> 撤离 / 全灭放弃之后调用）：撤离 = 已返回；全灭放弃 = 没有远征在外。</summary>
         public static void OnLeftSite(CampaignState s, bool wiped)
         {

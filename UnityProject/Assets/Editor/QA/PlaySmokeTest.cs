@@ -438,6 +438,15 @@ namespace GameLogic.EditorTools
                 case 446: StepTerritoryEngagePrepare(inStep); break;
                 case 447: StepTerritoryEngaged(inStep); break;
                 case 448: StepTerritoryDestroyed(inStep); break;
+                // FG8-DROP-01：投送站与投送舱（测试捷径：研发 + 一座建成有电的投送站 + 舱 / 燃油 + 站旁一台机器；真实鼠标点投送站 → 通用面板“投送站…” →
+                // 面板点机器行、“在地图上选落点…” → 战略地图选点模式（悬停预览、指针入口点落点）→ “发射” → 真实 Play 帧里舱飞到落点放下机器 → 夹具还原）
+                case 449: StepDropPrepare(inStep); break;
+                case 450: StepDropBuildingPanel(inStep); break;
+                case 451: StepDropPanelOpened(inStep); break;
+                case 452: StepDropPick(inStep); break;
+                case 453: StepDropLanded(inStep); break;
+                case 454: StepDropRecallPick(inStep); break;
+                case 455: StepDropRecalled(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -11416,6 +11425,316 @@ namespace GameLogic.EditorTools
             InputRouter.DebugSetReader(null);
             Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
             WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
+            SessionState.SetInt(K + "DropSub", 0);
+            Next(449,"FG8-DROP-01：测试捷径——研发投送站，核心旁一座建成有电的投送站（2 舱、燃油）与站旁一台机器");
+        }
+
+        // ── FG8-DROP-01：投送站与投送舱（真实 Play 帧：通用面板入口、投送站面板、战略地图选点、发射与着陆）──
+
+        private const string SmokeDropStationId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_power_drop_station";
+
+        private static void StepDropPrepare(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            // 验证修复轮：夹具放好后先把镜头飞到投送站（玩家要点它也得先看到它），等镜头到位再真实点击；
+            // 上一版放完立即按核心镜头点，站在 r=10～40 格外落到画面外（屏幕点 y=501 / 480），点击没落到任何建筑。
+            if (SessionState.GetInt(K + "DropSub", 0) == 1)
+            {
+                StepDropClickStation(inStep);
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            SessionState.SetInt(K + "DropWasPaused", GameClock.Paused ? 1 : 0);
+            GameClock.SetPaused(true);
+            // 测试捷径：研发“远征 · 投送站”记为已研究（研究流程由 FgResearchSelfCheck 覆盖），核心附近一座接得上电网的建成投送站（机器施工由 FgDropPodSelfCheck / 建造段覆盖）。
+            Campaign.Economy.ResearchService.CompleteForTests(state, "expedition.drop_station");
+            string stationId = null;
+            for (int r = 10; r <= 40 && stationId == null; r += 2)
+            {
+                GridCell? c = SmokeFreeSpot(state, Campaign.Regions.DropPodService.StationTypeId, r, r);
+                if (!c.HasValue)
+                {
+                    continue;
+                }
+                AddSmokeBuilding(state, Campaign.Regions.DropPodService.StationTypeId, "drop_station", c.Value);
+                Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                BuildingRecord b = HomeGridService.FindBuilding(state, SmokeDropStationId);
+                if (b != null && b.PowerState == BuildingPowerState.Powered)
+                {
+                    b.Health = Campaign.Economy.BuildingOps.MaxDurability(b.BuildingTypeId);
+                    stationId = SmokeDropStationId;
+                    break;
+                }
+                state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeDropStationId).ToArray();
+                HomeGridService.MapFor(state);
+                Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            }
+            BuildingRecord st = HomeGridService.FindBuilding(state, SmokeDropStationId);
+            int machine = 0;
+            Vector2 target = default;
+            bool found = false;
+            if (st != null)
+            {
+                Campaign.Regions.DropPodService.Sync(state);
+                DropStationRecord rec = Campaign.Regions.DropPodService.FindStation(state, st.BuildingId);
+                rec.HeldFuelMl = 600_000;
+                Campaign.Economy.HomeInventory.Add(state, Campaign.Economy.ItemCatalog.Find(Campaign.Regions.DropPodService.PodItemId), 2, clampToSpace: false);
+                Campaign.Regions.DropPodService.LoadPods(state, rec, st, 2);
+                Vector2 at = Campaign.Regions.DropPodService.GroundSpot(state, st.Position, 0, 5f);
+                MachineOpResult spawned = MachineRegistry.SpawnMachine(Campaign.Regions.HomeValleyLayout.Erc001ChassisId, Campaign.Regions.HomeValleyLayout.BlueprintErc001Id,
+                    Campaign.Regions.HomeValleyLayout.RegionId, at, 100f, 100f);
+                machine = spawned.Success ? spawned.LogicId : 0;
+                if (machine > 0 && MachineRegistry.TryGetRecord(machine, out MachineRecord mr))
+                {
+                    MachineNaming.TryRename(machine, "Smoke投送", out _);
+                    mr.WorkPriorities ??= WorkPriorities.Default();
+                    foreach (WorkOrderKind kind in Enum.GetValues(typeof(WorkOrderKind)))
+                    {
+                        mr.WorkPriorities.Set(kind, 0); // 站着不动，不被工单派走
+                    }
+                }
+                // 测试捷径：揭开核心外 250～420 格的一片，按着陆条件找一个落点（按种子地形找，不写死坐标）。
+                for (float d = 250f; d <= 420f && !found; d += 20f)
+                {
+                    for (int a = 0; a < 24 && !found; a++)
+                    {
+                        float ang = (a * 15f + d) * Mathf.Deg2Rad;
+                        Vector2 p = st.Position + new Vector2(Mathf.Cos(ang), Mathf.Sin(ang)) * d;
+                        p = new Vector2(Mathf.Round(p.x), Mathf.Round(p.y));
+                        HomeGridService.RevealArea(state, p, 30f);
+                        if (Campaign.Regions.DropPodService.CheckLanding(state, p.x, p.y, out _) == null)
+                        {
+                            target = p;
+                            found = true;
+                        }
+                    }
+                }
+            }
+            SessionState.SetInt(K + "DropMachine", machine);
+            SessionState.SetString(K + "DropTarget", target.x.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + target.y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Check(st != null && machine > 0 && found && Campaign.Regions.DropPodService.PodCount(state, SmokeDropStationId) == 2,
+                $"测试捷径：建成有电的投送站 {stationId}（2 舱、600 升燃油），站旁一台机器 {machine}，落点 {target}（已揭开、能降落）");
+            GameClock.SetPaused(false);
+            if (st == null)
+            {
+                Next(450, "左键点投送站打开通用面板，点“投送站…”");
+                return;
+            }
+            // 等镜头飞过去时指针放在画面外（与室内入口 / 行军跟随同一做法）：影子工程里真实指针停在 (0,0) 角上，会按边缘平移把镜头推走。
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, st.Position);
+            // 左键点建筑打开通用面板是建造模式空闲状态的入口（HomeValleyBuildMode.PointerDown/PointerUp → OpenPortPanel，FG4-ECO-05）：
+            // 与维修无人机站 / 电路合成台等段同一测试捷径，建造模式没开就先打开（按 B 打开建造模式由建造段覆盖），收尾时还原。
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            SessionState.SetInt(K + "DropOpenedBuild", mode != null && !mode.IsOpen ? 1 : 0);
+            if (mode != null && !mode.IsOpen)
+            {
+                mode.Open();
+            }
+            SessionState.SetInt(K + "DropSub", 1);
+            SessionState.SetFloat(K + "DropFlyAt", (float)inStep);
+        }
+
+        /// <summary>验证修复轮：镜头飞到投送站后，确认它在画面里、没被界面挡住，再用真实鼠标左键点它。</summary>
+        private static void StepDropClickStation(double inStep)
+        {
+            if (inStep < SessionState.GetFloat(K + "DropFlyAt", 0f) + 1.6f)
+            {
+                return;
+            }
+            SessionState.SetInt(K + "DropSub", 0);
+            BuildingRecord st = HomeGridService.FindBuilding(CampaignSession.Current, SmokeDropStationId);
+            if (st != null)
+            {
+                bool clickable = WorldPointClickable(st.Position, out _);
+                Check(clickable, $"镜头飞到投送站后，它在画面里、没被界面挡住（{(clickable ? "可点" : WorldClickDiag(st.Position))}）");
+                ClickWorld(new Vector3(st.Position.x, 0f, st.Position.y));
+            }
+            Next(450, "左键点投送站打开通用面板，点“投送站…”");
+        }
+
+        private static void StepDropBuildingPanel(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            GameClock.SetPaused(true);
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            bool bpOpen = ProductionPanelUIToolkit.IsOpen && bp != null && ProductionPanelUIToolkit.BuildingId == SmokeDropStationId && bp.DropButton != null
+                          && ProductionPanelUIToolkit.Visible(bp.DropButton) && bp.ReasonText.Contains("投送舱");
+            BuildingRecord rec = bpOpen ? null : HomeGridService.FindBuilding(CampaignSession.Current, SmokeDropStationId);
+            string diag = rec == null ? string.Empty : "（" + WorldClickDiag(rec.Position) + "）";
+            Check(bpOpen, $"左键点投送站打开它的通用面板：状态“{FirstLine(bp?.ReasonText)}”，有“投送站…”按钮{diag}");
+            Check(ClickUitk("[ProductionPanelHost]", "PrDrop"), "通用面板上点“投送站…”");
+            Next(451, "投送站面板打开：点站旁机器行、点“在地图上选落点…”");
+        }
+
+        private static void StepDropPanelOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            DropStationPanelUIToolkit panel = DropStationPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            int machine = SessionState.GetInt(K + "DropMachine", 0);
+            int row = -1;
+            for (int i = 0; panel != null && i < panel.MachineRowCount; i++)
+            {
+                if (panel.MachineRowId(i) == machine)
+                {
+                    row = i;
+                }
+            }
+            bool open = DropStationPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && DropStationPanelUIToolkit.BuildingId == SmokeDropStationId
+                        && panel.StatusText.Contains("投送舱") && panel.StatusText.Contains("燃油") && row >= 0;
+            Check(open, $"投送站面板打开：状态“{FirstLine(panel?.StatusText)}”，站旁机器行“{(row >= 0 ? panel.MachineRowText(row) : "（没有）")}”");
+            CheckNoTextMarkers("投送站面板");
+            bool picked = row >= 0 && InvokeClickable(panel.MachineRowButton(row)) && panel.Selected.Contains(machine);
+            Check(picked, "点机器行：选上（☑）");
+            Check(ClickUitk("[DropStationHost]", "DropPickTarget"), "点“在地图上选落点…”");
+            Next(452, "战略地图选点模式：悬停看预览，点落点，回到面板点“发射”");
+        }
+
+        private static void StepDropPick(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            string[] f = SessionState.GetString(K + "DropTarget", "0,0").Split(',');
+            var target = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
+            bool picking = StrategicMapUIToolkit.IsOpen && StrategicMapUIToolkit.PickActive && map != null && map.PanelVisible && !DropStationPanelUIToolkit.IsOpen
+                           && LabelText("[StrategicMapHost]", "MapHint").Contains("选择投送落点");
+            Check(picking, $"战略地图进入选点模式，提示“{LabelText("[StrategicMapHost]", "MapHint")}”");
+            if (map == null)
+            {
+                Next(453, "等投送舱着陆");
+                return;
+            }
+            // 测试捷径：地图视图对准落点（拖动平移的真实路径由 FG3-GEN-01 段覆盖），再用指针入口悬停 / 点它。
+            map.SetViewForTests(target.x, target.y, 200, map.View.CanvasWidth, map.View.CanvasHeight);
+            map.Tick(force: true);
+            map.HoverAt(map.View.ToCanvas(target.x, target.y));
+            string hover = map.HoverText;
+            map.ClickAt(map.View.ToCanvas(target.x, target.y));
+            DropStationPanelUIToolkit panel = DropStationPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            bool back = !StrategicMapUIToolkit.IsOpen && DropStationPanelUIToolkit.IsOpen && panel != null && panel.Target.HasValue && panel.PreviewLabel.Contains("燃油");
+            Check(hover.Contains("单程") && hover.Contains("燃油") && back,
+                $"悬停落点写预览“{FirstLine(hover)}”；点落点回到投送站面板，预览“{FirstLine(panel?.PreviewLabel)}”");
+            CheckNoTextMarkers("投送站面板（预览）");
+            GameClock.SetPaused(false);
+            int machine = SessionState.GetInt(K + "DropMachine", 0);
+            bool launched = ClickUitk("[DropStationHost]", "DropLaunch") && MachineRegistry.TryGetRecord(machine, out MachineRecord mr)
+                            && mr.RegionId == Campaign.Regions.DropPodService.InPodRegionId;
+            Check(launched, $"点“发射”：机器进舱起飞（反馈“{panel?.MessageText}”）");
+            Next(453, "真实 Play 帧里投送舱飞到落点、放下机器");
+        }
+
+        private static void StepDropLanded(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            int machine = SessionState.GetInt(K + "DropMachine", 0);
+            bool onPlanet = MachineRegistry.TryGetRecord(machine, out MachineRecord mr) && mr.RegionId == Campaign.Regions.HomeValleyLayout.RegionId;
+            if (!onPlanet && inStep < 40.0)
+            {
+                if (GameClock.Paused)
+                {
+                    GameClock.SetPaused(false); // 揭开落点那一片时的发现通知可能触发自动暂停：等舱飞的这段时间保持世界在走
+                }
+                return;
+            }
+            string[] f = SessionState.GetString(K + "DropTarget", "0,0").Split(',');
+            var target = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
+            Vector2 at = MachineRegistry.TryGetLivePosition(machine, out Vector2 live) ? live : mr?.WorldPosition ?? Vector2.zero;
+            DropStationPanelUIToolkit panel = DropStationPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            Check(onPlanet && Vector2.Distance(at, target) <= Campaign.Regions.DropPodService.FlatRadius + 2f && (panel?.FlyingText ?? string.Empty).Contains("返程"),
+                $"投送舱在落点着陆、放下机器（离落点 {Vector2.Distance(at, target):0.0} 格，{inStep:0.0} 秒），面板写舱返程“{FirstLine(panel?.FlyingText)}”");
+            // FG8-DROP-01 第 1 轮修复：呼叫回收的玩家入口（FGR-EXP-015）——面板“在地图上选回收点…”。
+            Check(ClickUitk("[DropStationHost]", "DropPickRecall"), "点“在地图上选回收点…”");
+            Next(454, "战略地图选回收点：悬停看回收预览，点刚着陆的机器所在处，回到面板点“呼叫回收”");
+        }
+
+        private static void StepDropRecallPick(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            StrategicMapUIToolkit map = StrategicMapUIToolkit.Instance;
+            string[] f = SessionState.GetString(K + "DropTarget", "0,0").Split(',');
+            var target = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
+            bool picking = StrategicMapUIToolkit.IsOpen && StrategicMapUIToolkit.PickActive && map != null && map.PanelVisible && !DropStationPanelUIToolkit.IsOpen
+                           && LabelText("[StrategicMapHost]", "MapHint").Contains("选择回收点");
+            Check(picking, $"战略地图进入回收选点模式，提示“{LabelText("[StrategicMapHost]", "MapHint")}”");
+            if (map == null)
+            {
+                Next(455, "等回收的舱接回机器");
+                return;
+            }
+            // 测试捷径：地图视图对准回收点（同投送选点），再用指针入口悬停 / 点它。
+            map.SetViewForTests(target.x, target.y, 200, map.View.CanvasWidth, map.View.CanvasHeight);
+            map.Tick(force: true);
+            map.HoverAt(map.View.ToCanvas(target.x, target.y));
+            string hover = map.HoverText;
+            map.ClickAt(map.View.ToCanvas(target.x, target.y));
+            DropStationPanelUIToolkit panel = DropStationPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            bool back = !StrategicMapUIToolkit.IsOpen && DropStationPanelUIToolkit.IsOpen && panel != null && panel.RecallPoint.HasValue
+                        && panel.RecallPreviewLabel.Contains("接回机器 1 台") && panel.RecallButton.enabledSelf;
+            Check(hover.Contains("接回机器") && back,
+                $"悬停回收点写预览“{FirstLine(hover)}”；点它回到投送站面板，回收预览“{FirstLine(panel?.RecallPreviewLabel)}”，“呼叫回收”可点");
+            CheckNoTextMarkers("投送站面板（回收预览）");
+            GameClock.SetPaused(false);
+            bool called = ClickUitk("[DropStationHost]", "DropRecallGo") && (panel?.MessageText ?? string.Empty).Contains("飞去回收");
+            Check(called, $"点“呼叫回收”：投送舱起飞去接（反馈“{panel?.MessageText}”）");
+            Next(455, "真实 Play 帧里回收的舱飞到回收点接上机器、飞回站旁卸下");
+        }
+
+        private static void StepDropRecalled(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            int machine = SessionState.GetInt(K + "DropMachine", 0);
+            BuildingRecord st = HomeGridService.FindBuilding(state, SmokeDropStationId);
+            bool onPlanet = MachineRegistry.TryGetRecord(machine, out MachineRecord mr) && mr.RegionId == Campaign.Regions.HomeValleyLayout.RegionId;
+            Vector2 at = MachineRegistry.TryGetLivePosition(machine, out Vector2 live) ? live : mr?.WorldPosition ?? Vector2.zero;
+            bool home = onPlanet && st != null && Vector2.Distance(at, st.Position) < 16f;
+            if (!home && inStep < 60.0)
+            {
+                if (GameClock.Paused)
+                {
+                    GameClock.SetPaused(false);
+                }
+                return;
+            }
+            DropStationPanelUIToolkit panel = DropStationPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            Check(home, $"回收的投送舱接上机器、飞回投送站旁卸下（离站 {(st != null ? Vector2.Distance(at, st.Position) : -1f):0.0} 格，{inStep:0.0} 秒）");
+            ClickUitk("[DropStationHost]", "DropClose");
+            // 夹具还原：机器放回核心旁、拆掉测试投送站（站里的舱退回仓库），镜头回到核心。
+            if (HomeCombat() != null && HomeCombat().TryGetMachineUnit(machine, out int unit))
+            {
+                HomeCombat().SetUnitPosition(unit, Campaign.Regions.HomeValleyLayout.Core.Position + new Vector2(4f, -8f));
+            }
+            state.BuildingRecords = state.BuildingRecords.Where(x => x.BuildingId != SmokeDropStationId).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
+            WorldView.FlyTo(Campaign.Regions.HomeValleyLayout.RegionId, new Vector2(core.X, core.Y));
+            if (SessionState.GetInt(K + "DropOpenedBuild", 0) == 1 && Campaign.Regions.HomeValleyBuildMode.Current is { IsOpen: true } bm)
+            {
+                bm.Close(); // 还原：建造模式是本段为点投送站打开的
+            }
+            SessionState.SetInt(K + "DropOpenedBuild", 0);
+            GameClock.SetPaused(SessionState.GetInt(K + "DropWasPaused", 0) == 1);
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

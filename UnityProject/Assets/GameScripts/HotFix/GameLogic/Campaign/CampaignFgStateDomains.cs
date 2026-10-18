@@ -159,6 +159,83 @@ namespace GameLogic.Campaign
         /// <summary>FG8-EXP-01（FGR-EXP-001 / FGU-31）：远征队——名字、颜色、上次派出的名单。唯一写入口 <see cref="Regions.ExpeditionTeamService"/>。
         /// 只加字段、不升域版本：旧档没有 = 空队（名字空串＝显示默认名，颜色 0，名单空）。</summary>
         public ExpeditionTeamState ExpeditionTeam;
+        /// <summary>FG8-DROP-01（FGR-EXP-013～016）：投送站与投送舱（站里的油、在站 / 冷却 / 在飞的舱、载荷、航线）。唯一写入口 <see cref="Regions.DropPodService"/>。
+        /// 只加字段、不升域版本：旧档没有 = 空域（没有投送站）。</summary>
+        public DropPodState Drop;
+    }
+
+    /// <summary>FG8-DROP-01：投送站与投送舱的存档域（见 <see cref="GridState.Drop"/>）。全部字段进存档；航线只按步序号推进，读档后接着飞。</summary>
+    [Serializable]
+    public sealed class DropPodState
+    {
+        public DropStationRecord[] Stations = Array.Empty<DropStationRecord>();
+        /// <summary>全部投送舱（在站、冷却、在飞都在这里；舱归属 <see cref="DropPodRecord.StationId"/>）。</summary>
+        public DropPodRecord[] Pods = Array.Empty<DropPodRecord>();
+        public int NextPodSerial = 1;
+        /// <summary>发射批次编号（一次“发射 / 呼叫回收”= 一批，通知与面板按批合并）。</summary>
+        public int NextGroupSerial = 1;
+        /// <summary>已探明的敌方防空（据点 ID）：瞄准时（选点悬停 / 发射被拒）或投送舱在落点被防空逼回时探明，之后即使据点格还在迷雾里，战略地图也画出它的红色区域（拒绝与红区同一口径，FGR-EXP-014 / B06）。</summary>
+        public string[] KnownAntiAir = Array.Empty<string>();
+        // ── 统计（面板与离家报告读）──
+        public int Launches;
+        public int Recalls;
+        public int Delivered;
+        public int Recovered;
+        public int Diverted;
+        public int Aborted;
+    }
+
+    /// <summary>FG8-DROP-01：一座投送站（燃油缓存、自动补满开关、统计）。</summary>
+    [Serializable]
+    public sealed class DropStationRecord
+    {
+        public string BuildingId = string.Empty;
+        /// <summary>没有接上管线消费者时留在站里的燃油（毫升）；接着的那部分在管线内核的消费者缓存里（随管线快照存档）。</summary>
+        public long HeldFuelMl;
+        /// <summary>管线内核里的燃油消费者（0 = 没接上管线）。</summary>
+        public int ConsumerId;
+        /// <summary>仓库里有投送舱时自动装进站里补满（玩家可在投送站面板关掉；FGR-BASE-020 来源可追溯）。</summary>
+        public bool AutoFill = true;
+        public int Launches;
+        /// <summary>站的中心（星球格；对账时更新）。建筑记录被拆掉后，退回的舱放不下时落在这里。</summary>
+        public float X;
+        public float Y;
+    }
+
+    /// <summary>FG8-DROP-01：一个投送舱。位置按（起点、终点、出发步、到达步）线性插值，不逐帧写坐标。</summary>
+    [Serializable]
+    public sealed class DropPodRecord
+    {
+        public int Serial;
+        /// <summary>归属的投送站（建筑 ID；改降后改成新的那一座）。</summary>
+        public string StationId = string.Empty;
+        /// <summary>0 在站待命；1 冷却中（在站）；2 去程（飞往落点 / 回收点）；3 返程（飞回投送站）。</summary>
+        public int State;
+        /// <summary>0 无；1 投送；2 回收。</summary>
+        public int Mission;
+        public float FromX;
+        public float FromY;
+        public float ToX;
+        public float ToY;
+        public long StartTick;
+        /// <summary>这一程着陆完成的步（飞行 + 着陆）。</summary>
+        public long ArriveTick;
+        public long CooldownUntilTick;
+        /// <summary>任务落点 / 回收点（去程的终点；返程时保留，面板写“从哪里回来”）。</summary>
+        public float TargetX;
+        public float TargetY;
+        /// <summary>舱里的机器（0 = 没有）。在舱里时机器记录的区域是 <see cref="Regions.DropPodService.InPodRegionId"/>。</summary>
+        public int MachineId;
+        public string CargoItem = string.Empty;
+        public int CargoAmount;
+        /// <summary>回收：呼叫时指定要接的机器（0 = 接地面上的货物）。</summary>
+        public int RecallMachineId;
+        /// <summary>这次任务已付的燃油（毫升，往返）。</summary>
+        public long FuelMl;
+        /// <summary>批次（同一次发射 / 回收）。</summary>
+        public int Group;
+        /// <summary>最近一次改降 / 中止的原因码（空 = 没有）。</summary>
+        public string Note = string.Empty;
     }
 
     /// <summary>FG8-EXP-01：远征队（见 <see cref="GridState.ExpeditionTeam"/>）。名单只记“上次派出 / 编成的机器 LogicId”，不是运行中的远征状态。</summary>
@@ -2482,6 +2559,7 @@ namespace GameLogic.Campaign
             Defense.TurretService.EnsureState(s); // FG6-DEF-01：炮塔域补成空域（旧档没有 = 没有炮塔）；坏值钳回合法范围。
             Defense.DefenseService.EnsureState(s); // FG6-DEF-02：防御建筑域补成空域（旧档没有 = 没有屏障 / 闸门 / 护盾 / 陷阱）；坏值钳回。
             Defense.RepairDroneService.EnsureState(s); // FG6-DEF-03：维修无人机站域补成空（旧档没有 = 没有维修无人机站）；坏值钳回、重复序号重编。
+            Regions.DropPodService.EnsureState(s); // FG8-DROP-01：投送站与投送舱域补成空域（旧档没有 = 没有投送站）；坏值钳回、重复序号重编。
             if (s.Raids.NextNavSerial < 1)
             {
                 s.Raids.NextNavSerial = 1;

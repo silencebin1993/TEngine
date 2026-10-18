@@ -274,7 +274,7 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             IReadOnlyList<ItemDef> items = ItemCatalog.Items;
-            Expect(ItemCatalog.LoadError == null && ItemCatalog.Problems.Count == 0 && ItemCatalog.RejectedRecipes.Count == 0 && items.Count == 31 && ItemCatalog.Recipes.Count == 15,
+            Expect(ItemCatalog.LoadError == null && ItemCatalog.Problems.Count == 0 && ItemCatalog.RejectedRecipes.Count == 0 && items.Count == 32 && ItemCatalog.Recipes.Count == 16,
                 $"A1 物品表 fg.TbEcoItem {items.Count} 种、配方 fg.TbRecipe {ItemCatalog.Recipes.Count} 条全部通过载入检查（问题 {ItemCatalog.Problems.Count} 条）" +
                 (ItemCatalog.Problems.Count > 0 ? "：" + string.Join("；", ItemCatalog.Problems.Take(4)) : string.Empty));
 
@@ -283,7 +283,7 @@ namespace GameLogic.EditorTools
             {
                 ("raw", new[] { "scrap", "metal_ore", "rare_earth_ore" }),
                 ("intermediate", new[] { "alloy", "part", "structural", "electronic", "precision_part", "chip_substrate", "repair_kit" }),
-                ("product", new[] { "combat_component", "structure_module", "firmware_chip", "machine" }),
+                ("product", new[] { "combat_component", "structure_module", "drop_pod", "firmware_chip", "machine" }),
                 ("endgame", new[] { "megastructure_part" }),
                 ("expedition", new[] { "unparsed_module", "encrypted_firmware", "data_core", "enemy_wreck", "human_legacy" }), // FG5-RND-02：敌方残骸
                 ("key", new[] { "listening_array_core", "furnace_heart", "reactor_core", "supercomputer_core" }),
@@ -311,7 +311,7 @@ namespace GameLogic.EditorTools
             bool solidsOnBelt = items.Where(d => d.Form == ItemForm.Solid).All(d => d.BeltId != 0) && items.Where(d => d.BeltId != 0).Select(d => d.BeltId).Distinct().Count() == items.Count(d => d.BeltId != 0)
                                 && Def("scrap").BeltId == BeltItems.ScrapId;
             Expect(missing.Count == 0 && digital && vault && fluidMap && solidsOnBelt,
-                $"A2 FGR-ECO-001 全部入表（31 种，按层级；FG5-RND-02 加敌方残骸）：数字资源（技术数据、研究点）不占物理空间、不上传送带；关键材料 4 种与人类遗产在核心保管库、不上传送带；" +
+                $"A2 FGR-ECO-001 全部入表（32 种，按层级；FG5-RND-02 加敌方残骸，FG8-DROP-01 加投送舱）：数字资源（技术数据、研究点）不占物理空间、不上传送带；关键材料 4 种与人类遗产在核心保管库、不上传送带；" +
                 $"5 种流体与 fg.TbFluid 一一对应；固体都有唯一的传送带编号、废料 = logistics.item.scrap_id（{BeltItems.ScrapId}）" +
                 (missing.Count > 0 ? "；缺 / 层级不对：" + string.Join("、", missing) : string.Empty));
 
@@ -331,6 +331,7 @@ namespace GameLogic.EditorTools
                 ("firmware_chip", "firmware_burner", "chip_substrate×1", "firmware_chip×1", "", 20f, "firmware"),
                 ("combat_component", "component_workshop", "part×2,electronic×1", "combat_component×1", "", 6f, "component_table"),
                 ("structure_module", "component_workshop", "structural×2,part×1", "structure_module×1", "", 6f, "component_table"),
+                ("drop_pod", "component_workshop", "structural×4,electronic×2", "drop_pod×1", "", 20f, "fixed"), // FG8-DROP-01：投送舱
                 ("machine", "assembly_station", "structural×4,part×4,electronic×2,combat_component×1", "machine×1", "", 60f, "blueprint"),
                 ("megastructure_part", "megastructure_factory", "precision_part×4,structural×4,electronic×2,coolant×200", "megastructure_part×1", "", 30f, "fixed"),
             };
@@ -344,9 +345,9 @@ namespace GameLogic.EditorTools
                     wrong.Add(rs.Id);
                 }
             }
-            bool provisional = ItemCatalog.Recipes.Where(r => r.Provisional).Select(r => r.Id).OrderBy(x => x).SequenceEqual(new[] { "combat_component", "machine", "structure_module" });
+            bool provisional = ItemCatalog.Recipes.Where(r => r.Provisional).Select(r => r.Id).OrderBy(x => x).SequenceEqual(new[] { "combat_component", "drop_pod", "machine", "structure_module" });
             Expect(wrong.Count == 0 && provisional,
-                "A3 FGR-ECO-002 的 15 条配方逐条与设计文档一致（建筑、输入、产出、副产品酸液 20、1x 秒数、类型）；只有作战组件 / 结构模块 / 机器三条标为“初值待定”（文档写“按组件表 / 按蓝图”）" +
+                "A3 FGR-ECO-002 的 15 条配方 + FG8-DROP-01 投送舱共 16 条逐条与设计文档一致（建筑、输入、产出、副产品酸液 20、1x 秒数、类型）；只有作战组件 / 结构模块 / 机器 / 投送舱四条标为“初值待定”（文档写“按组件表 / 按蓝图”；投送舱 FG08 只写“由组件工坊生产”）" +
                 (wrong.Count > 0 ? "；不一致：" + string.Join("、", wrong) : string.Empty));
 
             // 源数据 ↔ 运行时表逐字段。
@@ -454,7 +455,7 @@ namespace GameLogic.EditorTools
             int recipeEntries = MechanicCodex.CountIn(MechanicCodex.TabRecipe);
             ItemCatalog.ResetForTests();
             int restored = MechanicCodex.CountIn(MechanicCodex.TabRecipe);
-            Expect(recipeEntries == 1 && restored == 15, $"B2 被拒的配方不出现在图鉴配方页签（坏表 {recipeEntries} 条，恢复后 {restored} 条）");
+            Expect(recipeEntries == 1 && restored == 16 /* FG8-DROP-01：+投送舱 */, $"B2 被拒的配方不出现在图鉴配方页签（坏表 {recipeEntries} 条，恢复后 {restored} 条）");
         }
 
         // ── C 配方执行（FGT-ECO-001 数据部分）────────────────────────────────────────
@@ -1190,7 +1191,7 @@ namespace GameLogic.EditorTools
             int itemEntries = MechanicCodex.CountIn(MechanicCodex.TabItem);
             int recipeEntries = MechanicCodex.CountIn(MechanicCodex.TabRecipe);
             bool links = alloyEntry.Links.Contains(MechanicCodex.RecipeEntryId("alloy_ore")) && alloyEntry.Links.Contains(MechanicCodex.RecipeEntryId("part"));
-            Expect(itemEntries == 31 && recipeEntries == 15 /* FG5-RND-02：+敌方残骸 */ && alloyBody.Contains("从哪来") && alloyBody.Contains("精炼炉") && alloyBody.Contains("拿去干什么") && alloyBody.Contains("零件工坊")
+            Expect(itemEntries == 32 && recipeEntries == 16 /* FG5-RND-02：+敌方残骸；FG8-DROP-01：+投送舱 */ && alloyBody.Contains("从哪来") && alloyBody.Contains("精炼炉") && alloyBody.Contains("拿去干什么") && alloyBody.Contains("零件工坊")
                    && alloyBody.Contains("现有：14") && fuelBody.Contains("副产品：酸液 20 升") && fuelBody.Contains("以现在的家园库存") && machineBody.Contains("按蓝图") && machineBody.Contains("初值")
                    && links && coreLocked && MechanicCodex.IsUnlocked(MechanicCodex.ItemEntryId("alloy")) && MechanicCodex.IsUnlocked(MechanicCodex.ItemEntryId("furnace_heart")),
                 $"H4 图鉴：物品 {itemEntries} 条、配方 {recipeEntries} 条（卡片“每种物品和配方都有图鉴条目”）；合金写明从哪来（精炼炉）、拿去干什么（零件工坊……）与现有数量；" +

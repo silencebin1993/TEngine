@@ -229,6 +229,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.BlackBoxService.ResetSessionState(); // FG5-RND-06：陈列馆索引、“第一座陈列馆建成”钩子标记按新会话重来
             Economy.IntelService.ResetSessionState(); // FG5-RND-05：监听站索引、“第一座监听站建成”钩子标记按新会话重来 // FG5-RND-04：界面反馈与“第一座合成台建成”钩子标记按新会话重来；绑定刻录台的熔合接口
             Defense.TurretService.ResetSessionState(); // FG6-DEF-01：炮塔的运行时缓存（编译结果、补给原因）按新会话重建；存档里的炮塔记录不动
+            Regions.DropPodService.ResetSessionState(); // FG8-DROP-01：投送舱的运行时缓存（下一个事件步、首次钩子）按新会话重建；存档里的站与舱不动
             Defense.RepairDroneService.ResetSessionState(); // FG6-DEF-03：维修无人机的运行时缓存（候选目标、占用、首次钩子）按新会话重建
             Defense.DefenseService.ResetSessionState(); // FG6-DEF-02：防御建筑的运行时缓存（耐久推送、缺流体原因、护盾 / 陷阱清单）按新会话重建
             Defense.RaidDirectorService.ResetSessionState(); // FG6-DEF-04：突袭导演的会话统计清零（存档里的计划与计时不动）
@@ -623,6 +624,8 @@ namespace GameLogic.Campaign.WorldSim
                     // FG6-DEF-01：炮塔对账（建成 / 摧毁 / 断电 / 换蓝图 / 管线补给装填），每 turret.sync_seconds 游戏秒一次；只看步序号，与观察无关，O(炮塔数)。
                     // 逐发 / 逐弹体 / 选目标在家园战斗内核的一步里（上面 Home.SimStep）。
                     Defense.TurretService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG8-DROP-01：投送站与投送舱（对账 / 燃油 / 自动补满 / 返程改降每 drop.sync_seconds 一次 O(建筑数 + 站数)；着陆、冷却按事件步，O(1) 到事件步才 O(舱数)）。只看步序号，与观察无关。
+                    Regions.DropPodService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG6-DEF-02：护盾状态机每步推进（O(护盾数)），防御建筑每 defense.sync_seconds 对账、陷阱每 trap.lay_seconds 铺一轮；只看步序号，与观察无关。
                     // 逐弹体的护盾吸收、场地节拍在上面家园内核的一步里。
                     Defense.DefenseService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

@@ -108,6 +108,10 @@ namespace GameLogic.UI.Kit
         Terminal,
         /// <summary>FG8-GEN-02（DEBT-FG0ARCH06-08）：敌方巡逻（据点图层；标签写人数，路线还在规划时写“正在规划路线…”）。</summary>
         Patrol,
+        /// <summary>FG8-DROP-01：在飞的投送舱（己方图层；标签写编号 · 载荷 · 剩余时间；航线由矢量层画）。</summary>
+        DropPod,
+        /// <summary>FG8-DROP-01：投送舱去程的落点 / 回收点。</summary>
+        DropTarget,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -135,6 +139,8 @@ namespace GameLogic.UI.Kit
         public float OuterRadius;
         public string Label;
         public bool Connected;
+        /// <summary>FG8-DROP-01（FGR-EXP-014）：敌方防空覆盖（红色区域，投送舱不能着陆）。</summary>
+        public bool AntiAir;
         /// <summary>FG7-ENV-05（FGR-ENV-060）：领地的危害（fg.TbHazard.id）与图例颜色；外圈危害带画成带刻度的圈（形状 + 颜色，B15）。</summary>
         public string HazardId;
         public Color Tint;
@@ -299,6 +305,8 @@ namespace GameLogic.UI.Kit
                 }
                 // FG8-EXP-02（FGR-EXP-010 / 012，FG08 第 7 节“战略地图：己方远征队、路线、预计到达时间”）：己方队伍，不受迷雾限制。
                 CollectExpedition(state, view, margin);
+                // FG8-DROP-01：在飞的投送舱（航线 + 图标 + 去程落点）。
+                CollectDrops(state, view, margin);
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Groups))
             {
@@ -333,6 +341,17 @@ namespace GameLogic.UI.Kit
                 }
                 // FG6-DEF-04（FGR-DEF-024 预警界面：地图上的来袭方向箭头）：已发预警、还没有有效预报的突袭也画一支方向箭头（只画方向，不泄露迷雾里的位置）。
                 CollectWarnings(state, core, view, margin);
+            }
+            if (WorldMapFilters.IsOn(WorldMapLayer.Outposts) || StrategicMapUIToolkit.PickActive)
+            {
+                // FG8-DROP-01（FGR-EXP-014“地图上用红色区域标出”）：铸造 / 白潮据点的防空覆盖（已探明的：据点格已探索，或瞄准 / 被拒 / 被逼回时探明；视野里的，与据点总数无关）。
+                // 投送选点模式下即使关了据点图层也画（选点时必须看得见哪里会被拒）。
+                Campaign.Regions.DropPodService.AntiAirCircles(state, (float)view.CenterX, (float)view.CenterY, (float)(Math.Max(view.HalfWidth, view.HalfHeight) + margin), _antiAir);
+                foreach ((Vector2 c, float r, string _) in _antiAir)
+                {
+                    Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Outposts, X = c.x, Y = c.y, Radius = r, OuterRadius = r, AntiAir = true });
+                }
+                _antiAir.Clear();
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Outposts))
             {
@@ -466,6 +485,28 @@ namespace GameLogic.UI.Kit
         }
 
         private readonly List<Vector2> _expRoute = new List<Vector2>(64);
+        private readonly List<(Vector2 Center, float Radius, string OutpostId)> _antiAir = new List<(Vector2, float, string)>(8);
+        private readonly List<(int Serial, Vector2 Pos, Vector2 To, bool Returning, string Label)> _drops = new List<(int, Vector2, Vector2, bool, string)>(8);
+
+        /// <summary>FG8-DROP-01：在飞的投送舱——剩余航线（直线）、舱图标（编号 · 载荷 · 剩余时间）、去程的落点。O(舱数)。</summary>
+        private void CollectDrops(CampaignState state, in WorldMapView view, double margin)
+        {
+            Campaign.Regions.DropPodService.FlyingForView(state, _drops);
+            var tint = new Color(0.98f, 0.82f, 0.3f, 0.95f);
+            foreach ((int serial, Vector2 pos, Vector2 to, bool returning, string label) in _drops)
+            {
+                Lines.Add(new WorldMapLine { X0 = pos.x, Y0 = pos.y, X1 = to.x, Y1 = to.y, Tint = tint });
+                if (view.Contains(pos.x, pos.y, margin))
+                {
+                    Add(WorldMapItemKind.DropPod, WorldMapLayer.Own, "drop-pod:" + serial, pos.x, pos.y, label);
+                }
+                if (!returning && view.Contains(to.x, to.y, margin))
+                {
+                    Add(WorldMapItemKind.DropTarget, WorldMapLayer.Own, "drop-target:" + serial, to.x, to.y, GameText.Get("drop.map.target"));
+                }
+            }
+            _drops.Clear();
+        }
 
         /// <summary>
         /// FG8-EXP-02：远征队在外——星球上行军时画剩余路线（队伍颜色的折线，每段一条线）、队伍图标（名字 · 状态 · 预计到达时间）和目的地锚点；
@@ -805,6 +846,18 @@ namespace GameLogic.UI.Kit
                     p.strokeColor = new Color(tint.r, tint.g, tint.b, 0.9f);
                     Circle(p, center, r);
                 }
+                else if (c.AntiAir)
+                {
+                    // FG8-DROP-01：防空覆盖 = 半透明红色实心圆 + 红色描边 + 外缘刻度（形状区分，不只靠颜色，B15）。
+                    p.fillColor = new Color(0.95f, 0.18f, 0.15f, 0.18f);
+                    p.BeginPath();
+                    p.Arc(center, r, 0f, 360f);
+                    p.Fill();
+                    p.lineWidth = 2f;
+                    p.strokeColor = new Color(0.95f, 0.22f, 0.18f, 0.9f);
+                    Circle(p, center, r);
+                    Ticks(p, center, r, new Color(0.95f, 0.22f, 0.18f, 0.9f));
+                }
                 else
                 {
                     p.lineWidth = 1f;
@@ -973,6 +1026,8 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-forecast", item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning);
                 e.EnableInClassList("wg-icon-expedition", item.Kind == WorldMapItemKind.Expedition);
                 e.EnableInClassList("wg-icon-expedition-goal", item.Kind == WorldMapItemKind.ExpeditionGoal);
+                e.EnableInClassList("wg-icon-drop-pod", item.Kind == WorldMapItemKind.DropPod);
+                e.EnableInClassList("wg-icon-drop-target", item.Kind == WorldMapItemKind.DropTarget);
                 // FG8-EXP-02：远征队图标的底色 = 队伍颜色（数据驱动的运行时颜色，UI Toolkit 红线 2 允许）；其余图标清掉，按样式类。
                 e.style.backgroundColor = item.Tint.a > 0f ? new StyleColor(item.Tint) : new StyleColor(StyleKeyword.Null);
                 e.EnableInClassList("uk-hidden", false);
@@ -982,7 +1037,7 @@ namespace GameLogic.UI.Kit
                 bool showLabel = _labels && (item.Kind == WorldMapItemKind.Home || item.Kind == WorldMapItemKind.OwnCluster || item.Kind == WorldMapItemKind.Marker || item.Kind == WorldMapItemKind.Outpost
                                             || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory
                                             || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning
-                                            || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal
+                                            || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal || item.Kind == WorldMapItemKind.DropPod
                                             || item.Kind == WorldMapItemKind.Anchor || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)

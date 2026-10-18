@@ -440,8 +440,8 @@ namespace GameLogic.EditorTools
             // FG3-LOG-03：物流里有三级传送带，T1 排第一。FG3-LOG-04：其后是分流器、合流器与三级地下传送带（共 8 项，全是工具）。
             // FG3-LOG-05：+ 管线 T1 / T2、泵、储罐、阀门。FG4-ECO-04（FG-GAP-082）：+ 地下管线 T1 / T2。
             string[] logisticsOrder = { "belt_t1", "belt_t2", "belt_t3", "splitter", "merger", "underground_t1", "underground_t2", "underground_t3", "pipe_t1", "pipe_t2", "pump", "tank", "valve",
-                "pipe_underground_t1", "pipe_underground_t2", "pipe_t3" }; // FG7-ENV-03：+ 伴热管
-            bool logistics = list.Select(x => x.Id).SequenceEqual(logisticsOrder) && list.All(x => x.IsTool);
+                "pipe_underground_t1", "pipe_underground_t2", "pipe_t3", "drop_station" }; // FG7-ENV-03：+ 伴热管；FG8-DROP-01：+ 投送站（FG04 建筑全表“物流”，是建筑不是工具）
+            bool logistics = list.Select(x => x.Id).SequenceEqual(logisticsOrder) && list.All(x => x.IsTool == (x.Id != "drop_station"));
             string logisticsIds = string.Join(",", list.Select(x => x.Id));
             BuildCatalog.List("energy", null, list);
             bool energy = list.Any(e => e.Id == "generator_2");
@@ -1602,7 +1602,7 @@ namespace GameLogic.EditorTools
                 hud.BindView(root);
                 mode.Open();
                 hud.Refresh();
-                bool tabs = hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.CategoryText(0).Contains("物流（16）") && hud.ItemCount == 16
+                bool tabs = hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.CategoryText(0).Contains("物流（17）") && hud.ItemCount == 17 /* FG8-DROP-01：+ 投送站 */
                             && hud.ItemText(0).Contains("传送带 T1") && hud.ItemText(0).Contains("每格 1 废料"); // FG3-LOG-03：T1 / T2 / T3 三级；FG3-LOG-04：+ 分流器、合流器、三级地下带；FG3-LOG-05：+ 两级管线、泵、储罐、阀门；FG4-ECO-04：+ 两级地下管线
                 Expect(tabs, $"建造菜单：12 个分类页签（“{hud.CategoryText(0)}”），默认物流，条目“{hud.ItemText(0).Replace("\n", " ")}”");
 
@@ -1622,7 +1622,7 @@ namespace GameLogic.EditorTools
                 hud.SetSearch("没有这种东西");
                 bool noMatch = hud.ItemCount == 0 && hud.EmptyText.Contains("没有找到");
                 hud.SelectCategory("logistics");
-                bool cleared = hud.ItemCount == 16 && hud.ItemId(0) == "belt_t1";
+                bool cleared = hud.ItemCount == 17 && hud.ItemId(0) == "belt_t1";
                 Expect(search && noMatch && cleared, $"搜索“中继”→ 1 项（“{hud.CaptionText}”）；查不到给说明；点分类页签清掉搜索回到分类");
 
                 mode.Select("generator_2");

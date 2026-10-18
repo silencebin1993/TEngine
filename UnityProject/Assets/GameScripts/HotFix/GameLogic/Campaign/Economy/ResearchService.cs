@@ -1225,7 +1225,8 @@ namespace GameLogic.Campaign.Economy
         private static readonly string[] PostTreeTypes = { ResearchCatalog.LabTypeId, Defense.TurretCatalog.LightTypeId, Defense.TurretCatalog.HeavyTypeId,
             Defense.DefenseCatalog.BarrierT1, Defense.DefenseCatalog.BarrierT2, Defense.DefenseCatalog.BarrierT3, Defense.DefenseCatalog.GateTypeId,
             Defense.DefenseCatalog.ShieldTypeId, Defense.DefenseCatalog.TrapTypeId,
-            Defense.RepairDroneCatalog.StationTypeId }; // FG6-DEF-03：维修无人机站
+            Defense.RepairDroneCatalog.StationTypeId, // FG6-DEF-03：维修无人机站
+            Regions.DropPodService.StationTypeId }; // FG8-DROP-01：投送站（与它的 T2）
 
         // FG7-ENV-03：按解锁条目精确匹配（监听站本身在研发树开放前就有，只有它的 T2 是新内容，不能按类型整个算）。
         private static readonly string[] PostTreeUnlocks = { "build:" + Env.RoofService.ToolId, "build:pipe_t3", "tier:listening_post.t2",

@@ -39,6 +39,7 @@ namespace GameLogic.UI.Kit
             Create<DefenseOverviewPanelUIToolkit>("[DefenseOverviewHost]"); // FG6-DEF-06：防御总览（30062，炮塔面板 30063 / 防御面板 30064 之下：从总览点开的面板盖在它上面）。
             Create<TurretPanelUIToolkit>("[TurretPanelHost]");
             Create<DefensePanelUIToolkit>("[DefensePanelHost]"); // FG6-DEF-02：护盾 / 陷阱 / 屏障面板（30064，炮塔面板之上、暂停菜单之下：“?”打开的图鉴盖在它上面）。 // FG6-DEF-01：炮塔（30063，建筑面板 30042 之上、暂停菜单之下：“?”打开的图鉴盖在它上面）。
+            Create<DropStationPanelUIToolkit>("[DropStationHost]"); // FG8-DROP-01：投送站（30058，战略地图 30050 / 地点提示 30052 之上、日历与暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<BlackBoxPanelUIToolkit>("[BlackBoxPanelHost]"); // FG5-RND-06：黑匣子陈列馆 / 纪念墙（30065，情报之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<IntelPanelUIToolkit>("[IntelPanelHost]"); // FG5-RND-05：情报面板（30066，合成台之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<FusionPanelUIToolkit>("[FusionPanelHost]"); // FG5-RND-04：电路合成台 / 配方书（30067，靶场之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
@@ -71,6 +72,8 @@ namespace GameLogic.UI.Kit
         /// 由 <c>GameRoot.EndRun</c>（唯一回菜单出口）调用；主菜单自己的按键面板在回菜单之后才会再打开，不受影响。</summary>
         public static void CloseWorldUi()
         {
+            // FG8-DROP-01：先清掉战略地图的选点状态（不执行取消回调），否则后面关地图时取消回调会把投送站面板重新打开。
+            StrategicMapUIToolkit.ClearPick();
             if (UiDragDrop.IsDragging)
             {
                 UiDragDrop.Cancel();
@@ -99,6 +102,7 @@ namespace GameLogic.UI.Kit
             FusionPanelUIToolkit.Close();
             IntelPanelUIToolkit.Close();
             BlackBoxPanelUIToolkit.Close();
+            DropStationPanelUIToolkit.Close();
             ConstructionQueuePanelUIToolkit.Close();
             BeltPortPanelUIToolkit.Close();
             BeltNodePanelUIToolkit.Close();

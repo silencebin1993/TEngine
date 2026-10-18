@@ -435,6 +435,11 @@ namespace GameLogic.Campaign.Signal
             {
                 return UplinkFailure.NotFound;
             }
+            // FG8-DROP-01（DEBT-FG1SIG03-02）：机器在投送舱里（在飞 / 刚落回站里还没卸下）= 投送途中，先于覆盖 / 地点判定写这个原因（舱里不在任何地点的内核里）。
+            if (rec.IsAlive && ((InDeliveryProvider != null && InDeliveryProvider(logicId)) || Regions.DropPodService.IsInPod(s, logicId)))
+            {
+                return UplinkFailure.InDelivery;
+            }
             UplinkFailure pre = TargetStateFailure(rec, logicId, null);
             if (pre != UplinkFailure.None)
             {

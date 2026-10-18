@@ -124,6 +124,9 @@ namespace GameLogic.UI.Kit
         /// <summary>FG5-RND-06：黑匣子陈列馆的“陈列馆…”按钮（只在陈列馆上显示）。</summary>
         private Button _blackBox;
         public Button BlackBoxButton => _blackBox;
+        /// <summary>FG8-DROP-01：投送站 → 投送站面板（FGU-46）。</summary>
+        private Button _drop;
+        public Button DropButton => _drop;
         private Button _diagnose;
         private Button _clear;
         private Label _message;
@@ -338,6 +341,7 @@ namespace GameLogic.UI.Kit
             _fusion = root.Q<Button>("PrFusion");
             _intel = root.Q<Button>("PrIntel");
             _blackBox = root.Q<Button>("PrBlackBox");
+            _drop = root.Q<Button>("PrDrop");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
             _message = root.Q<Label>("PrMessage");
@@ -353,6 +357,7 @@ namespace GameLogic.UI.Kit
             _fusion.clicked += OpenFusion;
             _intel.clicked += OpenIntel;
             _blackBox.clicked += OpenBlackBox;
+            _drop.clicked += OpenDrop;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
             _copy.clicked += AskCopySettings;
@@ -520,6 +525,7 @@ namespace GameLogic.UI.Kit
             _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
             _intel.EnableInClassList("bn-hidden", !IntelService.IsPost(b));
             _blackBox.EnableInClassList("bn-hidden", !BlackBoxService.IsGallery(b));
+            _drop.EnableInClassList("bn-hidden", !Campaign.Regions.DropPodService.IsStation(b));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
 
@@ -534,6 +540,7 @@ namespace GameLogic.UI.Kit
             _fusion.text = GameText.Get("fusion.panel.open");
             _intel.text = GameText.Get("intel.panel.open");
             _blackBox.text = GameText.Get("blackbox.panel.open");
+            _drop.text = GameText.Get("drop.panel.open");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
             _hint.text = GameText.Get("prod.panel.hint");
@@ -1466,6 +1473,18 @@ namespace GameLogic.UI.Kit
         {
             SetOpen(false);
             IntelPanelUIToolkit.Open(null);
+        }
+
+        /// <summary>FG8-DROP-01：投送站 → 打开投送站面板（舱、燃油、装载、落点 / 回收点、在飞的舱，FGU-46）。</summary>
+        public void OpenDrop()
+        {
+            string id = BuildingId;
+            if (!Campaign.Regions.DropPodService.IsStation(HomeGridService.FindBuilding(CampaignSession.Current, id)))
+            {
+                return; // 只有投送站才有“投送站…”（按钮在别的建筑上隐藏；这里再挡一次，防止旧建筑 ID 打开投送站面板）
+            }
+            SetOpen(false);
+            DropStationPanelUIToolkit.Open(id);
         }
 
         /// <summary>FG5-RND-06：黑匣子陈列馆 → 打开陈列馆面板（黑匣子页；纪念墙在同一面板，FGU-40）。</summary>

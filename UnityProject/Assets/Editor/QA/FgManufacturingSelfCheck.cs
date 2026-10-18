@@ -458,7 +458,7 @@ namespace GameLogic.EditorTools
             Expect(grid, "A1 四座制造建筑入表（FG04 第 3.3 节占地：零件工坊 / 电子组装台 / 固件刻录台 3×3、组件工坊 4×4）：建造菜单“制造”页签、耗电、造价；电子组装台与组件工坊两个输入口（两种材料各走一个口），固件刻录台没有物品输出口");
             bool recipes = ProducerCatalog.TryGet("parts_workshop", out ProducerDef pw) && pw.Recipes.Select(r => r.Id).SequenceEqual(new[] { "part", "structural", "repair_kit" }) && pw.FixedRecipe == null
                            && ProducerCatalog.TryGet("electronics_bench", out ProducerDef eb) && eb.Recipes.Select(r => r.Id).SequenceEqual(new[] { "electronic", "precision_part", "chip_substrate" })
-                           && ProducerCatalog.TryGet("component_workshop", out ProducerDef cw) && cw.Recipes.Select(r => r.Id).SequenceEqual(new[] { "combat_component", "structure_module" })
+                           && ProducerCatalog.TryGet("component_workshop", out ProducerDef cw) && cw.Recipes.Select(r => r.Id).SequenceEqual(new[] { "combat_component", "structure_module", "drop_pod" })
                            && ProducerCatalog.TryGet("firmware_burner", out ProducerDef fb) && fb.FixedRecipe?.Id == "firmware_chip" && fb.FixedRecipe.Kind == ProductionService.RecipeKindFirmware
                            && ProducerCatalog.Problems.Count == 0
                            && GridContent.PortsOf("assembly_station").Any(p => p.Id == "assembly_station.in0" && p.Role == "prod");
