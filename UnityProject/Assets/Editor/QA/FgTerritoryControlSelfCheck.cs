@@ -290,7 +290,8 @@ namespace GameLogic.EditorTools
                 $"C1 迎战（DEBT-FG3GEN01-05）：机器开到静默据点 10 格内 → 据点醒来、驻军 {garrison} 台就地展开成家园战斗内核里的敌人（内核 {inKernel} 台，队伍键 {o.EngageKey}）；" +
                 $"攻城对账不把它当孤儿清掉（{afterSync}）；交战通知；迎战期间不休眠");
 
-            int ground0 = s.GroundItems?.Length ?? 0;
+            // FG8-LOOT-01 起野外击毁另按掉落表留残骸 / 材料（FieldLootService，前缀 fieldloot:，由 FgLootProtocolSelfCheck 断言）；这里只数据点本身的废料堆。
+            int ground0 = (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Count(g => !IsFieldLoot(g));
             int before = TerritoryControlService.Find(s, "silent").Control;
             KillGroup(site, at, o.EngageKey);
             bool destroyed = RunUntil(() => o.Destroyed, GameClock.StepHz * 3);
@@ -299,7 +300,7 @@ namespace GameLogic.EditorTools
             bool haul = loot != null && s.WorkOrders.Any(w => w.Kind == WorkOrderKind.Haul && w.TargetId == loot.GroundItemId);
             int after = TerritoryControlService.Find(s, "silent").Control;
             string detail = LatestMember(TerritoryControlService.NotifyAlert)?.DetailText ?? string.Empty;
-            Expect(destroyed && loot != null && loot.Amount == scrap && Vector2.Distance(loot.Position, at) < 0.5f && haul && (s.GroundItems?.Length ?? 0) == ground0 + 1
+            Expect(destroyed && loot != null && loot.Amount == scrap && Vector2.Distance(loot.Position, at) < 0.5f && haul && (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Count(g => !IsFieldLoot(g)) == ground0 + 1
                    && after < before && after == TerritoryControlService.ComputeControl(s, "silent", out _, out _) && detail.Contains($"{before}% → {after}%")
                    && s.Raids.Director.DestroyedByOctant.Sum() == octants + 1 && GameSettings.HasSeenGuidanceHook(GuidanceHooks.WorldFirstOutpostDestroyed),
                 $"C2 驻军全灭 = 据点被摧毁：废料 {loot?.Amount}（等级 × {TerritoryControlService.ScrapPerTier}）掉在据点原地并开搬运单（{haul}），控制度 {before}% → {after}%（通知“{detail}”），" +
@@ -309,6 +310,9 @@ namespace GameLogic.EditorTools
             Expect(TerritoryControlService.IsEngageKey(o.EngageKey) && expectTypes.Count > 0 && expectTypes.All(x => defeated.Contains(x)),
                 $"C2b（复审 P1）迎战队伍键 {o.EngageKey} 落在击毁事件 float 精确范围内：打掉的驻军按种类记进“击败过的敌人种类”（{string.Join("、", expectTypes)} → 已记 {string.Join("、", defeated)}），对应靶子解锁（FGR-RND-030）");
         }
+
+        private static bool IsFieldLoot(GroundItemRecord g) =>
+            g?.SalvageInstanceId != null && g.SalvageInstanceId.StartsWith(FieldLootService.SalvagePrefix, StringComparison.Ordinal);
 
         /// <summary>这片领地驻军编成里的敌人种类（fg.TbRaidUnit → EnemyTypeId）。</summary>
         private static List<string> GarrisonEnemyTypes(string territoryId)

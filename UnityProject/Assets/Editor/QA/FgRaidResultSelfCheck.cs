@@ -13,6 +13,7 @@ using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Defense;
 using GameLogic.Campaign.Economy;
+using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Nav;
@@ -995,8 +996,10 @@ namespace GameLogic.EditorTools
             long gotF = results.Sum(r => Loot(r, AnalysisCatalog.EncryptedFirmwareId));
             int physM = HomeInventory.Stock(s, AnalysisCatalog.UnparsedModuleId) - modules0
                         + WreckPilesOf(s, ItemCatalog.ResourceTypeOf(AnalysisCatalog.UnparsedModuleId));
+            // FG8-LOOT-01（FG-GAP-110）：加密固件掉落带身份，直接变成固件库里的未破解芯片（来源 raiddrop:），不再进仓库。
             int physF = HomeInventory.Stock(s, AnalysisCatalog.EncryptedFirmwareId) - firmware0
-                        + WreckPilesOf(s, ItemCatalog.ResourceTypeOf(AnalysisCatalog.EncryptedFirmwareId));
+                        + WreckPilesOf(s, ItemCatalog.ResourceTypeOf(AnalysisCatalog.EncryptedFirmwareId))
+                        + (s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Count(c => c != null && c.SourceSalvageId != null && c.SourceSalvageId.StartsWith("raiddrop:", StringComparison.Ordinal));
             bool rate = kills == 160 && (expectM + expectF) <= kills * 0.1;
             Expect(rate && gotM == expectM && gotF == expectF && physM == gotM && physF == gotF && RaidResultService.StateOf(s).TotalDrops == gotM + gotF,
                 $"C5 少量掉落（FGR-DEF-051“少数情况”）：{kills} 次击毁掉了未解析模块 {gotM} 件、加密固件 {gotF} 件，与按（世界种子, 结算序号, 第几次击毁）重算的期望 {expectM} / {expectF} 逐件一致（确定性）；" +

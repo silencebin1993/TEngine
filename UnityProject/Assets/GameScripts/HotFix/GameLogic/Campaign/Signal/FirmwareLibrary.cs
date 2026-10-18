@@ -566,6 +566,7 @@ namespace GameLogic.Campaign.Signal
                 protocol += "  " + GameText.Get("signal.core.raw_tag");
             }
             sb.AppendLine(GameText.Format("fwlib.detail.protocol", protocol));
+            sb.AppendLine(Economy.ItemProtocol.FirmwareDetailLine(s, firmwareId)); // FG8-LOOT-01：写明“需要解析（破解前可裸跑）”或“可直接使用”
             sb.AppendLine(GameText.Format("fwlib.detail.rarity", GameText.Get("firmware.rarity." + row.Rarity)));
             // FG4-ECO-04（DEBT-FG2FW01-02 范围变更）：不再显示每发耗电（{1} 位置留空）。
             sb.AppendLine(GameText.Format("fwlib.detail.numbers", Math.Max(1, row.Load).ToString(CultureInfo.InvariantCulture),

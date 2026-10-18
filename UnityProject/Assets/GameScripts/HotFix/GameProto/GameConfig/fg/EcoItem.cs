@@ -32,6 +32,7 @@ public sealed partial class EcoItem : Luban.BeanBase
         Shape = _buf.ReadString();
         SortOrder = _buf.ReadInt();
         RecycleScrap = _buf.ReadInt();
+        Protocol = _buf.ReadString();
     }
 
     public static EcoItem DeserializeEcoItem(ByteBuf _buf)
@@ -91,6 +92,10 @@ public sealed partial class EcoItem : Luban.BeanBase
     /// 回收站分解一件得到的废料(FG4-ECO-02;只有固体&gt;0;少于做它花掉的废料当量,FG16 FGR-BAL-050)
     /// </summary>
     public readonly int RecycleScrap;
+    /// <summary>
+    /// 协议(FG8-LOOT-01 FGR-LOOT-001):own己方/neutral中立=直接使用;enemy敌方加密=必须送解析台(敌方固件破解前可由信号核裸跑)
+    /// </summary>
+    public readonly string Protocol;
    
     public const int __ID__ = -1736529417;
     public override int GetTypeId() => __ID__;
@@ -115,6 +120,7 @@ public sealed partial class EcoItem : Luban.BeanBase
         + "shape:" + Shape + ","
         + "sortOrder:" + SortOrder + ","
         + "recycleScrap:" + RecycleScrap + ","
+        + "protocol:" + Protocol + ","
         + "}";
     }
 }

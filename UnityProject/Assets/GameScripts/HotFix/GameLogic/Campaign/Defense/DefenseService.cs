@@ -477,6 +477,10 @@ namespace GameLogic.Campaign.Defense
             }
             if (!ValidateTrapFirmware(s, firmwareId, out TrapProfileDef prof, out DefenseFailure f, out string msg))
             {
+                if (!FirmwareKinds.CanInstall(s, firmwareId, FirmwareHost.Trap, out string rawKey) && FirmwareKinds.IsRawReason(rawKey))
+                {
+                    Economy.ItemProtocol.NoteRejected(); // FG8-LOOT-01：玩家给陷阱装未破解的敌方固件被拒 → 第一次被拒绝的引导钩子
+                }
                 return DefenseOpResult.Fail(f, msg);
             }
             if (r.TrapFirmware != firmwareId)

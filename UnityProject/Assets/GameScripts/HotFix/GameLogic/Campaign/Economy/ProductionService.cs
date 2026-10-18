@@ -1157,6 +1157,26 @@ namespace GameLogic.Campaign.Economy
             return false;
         }
 
+        /// <summary>FG8-LOOT-01：回收站拒收的敌方加密物品件数（自检读点，本进程累计）。</summary>
+        public static int RecyclerRejectedEncrypted { get; private set; }
+
+        /// <summary>FG8-LOOT-01：回收站输入缓存里的一份敌方加密物品原样退回仓库（放不下的落在回收站旁，开搬运单），给出说明。只在回收站开工判定时调用，O(1)。</summary>
+        private static void RejectEncrypted(CampaignState state, Producer p, ItemStackRecord stack, ItemDef item)
+        {
+            int n = stack.Amount;
+            stack.Amount = 0;
+            int stored = HomeInventory.Add(state, item, n);
+            Vector2 at = new Vector2(p.Building.Position.x, p.Building.Position.y);
+            if (stored < n)
+            {
+                HomeValleyConstruction.ReturnMaterials(state, at, item.ResourceType, n - stored,
+                    "recycler-reject:" + p.Building.BuildingId + ":" + RecyclerRejectedEncrypted.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            RecyclerRejectedEncrypted += n;
+            ItemProtocol.NoteRejected();
+            Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure, at, GameText.Format("loot.reject.recycler", item.Name));
+        }
+
         private static bool TryStartRecycler(CampaignState state, Producer p, int worldHz)
         {
             ProducerRecord r = p.Rec;
@@ -1165,6 +1185,15 @@ namespace GameLogic.Campaign.Economy
             int cap = OutCapacity(p, scrap);
             // 先分解输入口送来的固体（FGR-ECO-071），没有时再拆脚下的废墟。
             ItemStackRecord first = FirstNonEmpty(r.In);
+            // FG8-LOOT-01（FGR-LOOT-001 负向“试图直接使用加密物品”）：敌方加密物品不能直接回收——整份退回仓库（放不下的落在回收站旁由机器搬回），
+            // 不分解、不丢失、不卡住输入口；说明写明去解析台。
+            // 修复第 1 轮（审查 P1）：输入缓存可以混装（容量按总量算），连着几份敌方物品时要一直退回，直到取到非敌方物品或取空——
+            // 此前只判一次，第二份敌方物品会被当普通固体分解掉。每次退回都把那一份清零，循环最多走 r.In 的份数次。
+            while (first != null && ItemCatalog.TryGet(first.ItemId, out ItemDef enemyItem) && enemyItem.Protocol == ItemProtocolKind.Enemy)
+            {
+                RejectEncrypted(state, p, first, enemyItem);
+                first = FirstNonEmpty(r.In);
+            }
             if (first != null)
             {
                 // 物品表里没有的编号（表删掉了某种物品）：当作 1 件废料分解，不卡住输入口。

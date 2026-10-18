@@ -183,6 +183,13 @@ namespace GameLogic.Campaign.Regions
                 return StoreResult.Fail($"unsupported-resource-type:{ticket.ResourceType}");
             }
 
+            // FG8-LOOT-01（FGR-LOOT-001 两种去向）：带身份的敌方加密物品按协议交付——加密固件变成固件库里的未破解芯片（不占仓库），
+            // 未解析模块 / 数据核心进仓库并登记解析身份；交付不了（仓库放不下）时照常走下面的“仓满放回地面”，身份留着。
+            if (Economy.FieldLootService.TryDeliverHaul(state, ticket.SalvageInstanceId, ticket.ResourceType, ticket.Amount))
+            {
+                return StoreResult.Ok();
+            }
+
             int available = GetAvailableSpace(state, ticket.ResourceType);
             if (available < ticket.Amount)
             {

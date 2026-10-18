@@ -547,6 +547,12 @@ namespace GameLogic.Core
         /// <summary>第一次有前哨站被全部摧毁（不导致战役失败）。</summary>
         public const string OutpostFirstWiped = "outpost.first_wiped";
 
+        // ── FG8-LOOT-01：物品协议与两种去向（只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次在野外拿到掉落（材料或敌方物品落地）。引导内容：协议图标怎么看、敌方加密物品送解析台；图鉴“物品协议与两种去向”随之解锁。</summary>
+        public const string LootFirstFieldDrop = "loot.first_field_drop";
+        /// <summary>第一次有敌方加密物品被拒绝直接使用（回收站退回 / 装配被拒）。引导内容：为什么不能用、去解析台。</summary>
+        public const string LootFirstEncryptedRejected = "loot.first_encrypted_rejected";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -611,6 +617,7 @@ namespace GameLogic.Core
             WorldFirstOutpostDestroyed, WorldFirstTerritoryPacified, WorldFirstTerritoryReclaimed, WorldFirstEliteRemnant, WorldFirstTerritoryHarassed,
             DropStationFirstBuilt, DropPanelFirstOpen, DropFirstLaunch, DropFirstLanded, DropFirstRecall, DropFirstAntiAirRejected,
             OutpostFirstFounded, OutpostPanelFirstOpen, OutpostFirstRenamed, OutpostFirstLabor, OutpostFirstPack, OutpostFirstWiped,
+            LootFirstFieldDrop, LootFirstEncryptedRejected,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

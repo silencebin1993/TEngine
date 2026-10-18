@@ -936,10 +936,13 @@ namespace GameLogic.UI.Kit
         }
 
         private static string RowName(FirmwareLibraryRow r) =>
-            (r.Kind == FirmwareKind.Core ? "◆ " : "● ") + r.Name + (r.Raw ? "  " + GameText.Get("signal.core.raw_tag") : string.Empty);
+            // 修复第 1 轮（审查 P2）：行首用协议图标（■ 己方 / ● 中立 / ▲ 敌方，FG8-LOOT-01），不再给所有非核心固件一律画“●”（与中立协议图标冲突）；核心固件仍是 ◆。
+            (r.Kind == FirmwareKind.Core ? "◆ " : Campaign.Economy.ItemProtocol.Glyph(Campaign.Economy.ItemProtocol.OfFirmware(r.FirmwareId)) + " ") + r.Name + (r.Raw ? "  " + GameText.Get("signal.core.raw_tag") : string.Empty);
 
         private static string RowMeta(CampaignState s, FirmwareLibraryRow r) =>
-            GameText.Get(CategoryTextKey(r.Category)) + " · " + FirmwareLibrary.LocationText(s, r);
+            GameText.Get(CategoryTextKey(r.Category)) + " · " + FirmwareLibrary.LocationText(s, r)
+            // FG8-LOOT-01：未破解的敌方固件在行上写明“需要解析”（▲ 图标已在名字后）。
+            + (r.Raw ? " · " + Campaign.Economy.ItemProtocol.DestinationShort(Campaign.Economy.ItemDestination.NeedsAnalysisOrRaw) : string.Empty);
 
         /// <summary>一行的完整文字（名称 · 类别与位置 · 锁定），自检与读屏用。</summary>
         public static string DescribeRow(CampaignState s, FirmwareLibraryRow r) =>

@@ -1104,6 +1104,11 @@ namespace GameLogic.Campaign.WorldSim
                     HomeValleyWorkOrders.TryCreateHaulPool(s, g.GroundItemId);
                 }
             }
+            if (!remnant)
+            {
+                // FG8-LOOT-01（FGR-LOOT-010“据点：材料、少量组件；摧毁时可能掉数据核心”）：按掉落表 outpost 行另掷一份（与上面的等级废料并存）。
+                Economy.FieldLootService.OnOutpostDestroyed(s, FactionOf(s, o), at);
+            }
             var where = new Vector3(o.CellX, 0f, o.CellY);
             if (remnant)
             {

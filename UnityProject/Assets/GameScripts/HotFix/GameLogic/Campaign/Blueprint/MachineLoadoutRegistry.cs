@@ -204,6 +204,20 @@ namespace GameLogic.Campaign.Blueprint
             return true;
         }
 
+        /// <summary>FG8-LOOT-01（DEBT-FG2VFX02-04 拆解钳回收加成）：这台机器登记的装配里主组件是什么（没登记 / 蓝图不可解析 / 没有主组件时返回 false）。
+        /// O(该蓝图的版本数)，只在击毁事件里调用，不按帧。</summary>
+        public static bool TryGetPrimaryId(CampaignState state, int machineLogicId, out string primaryId)
+        {
+            primaryId = null;
+            if (!_entries.TryGetValue(machineLogicId, out Entry entry))
+            {
+                return false;
+            }
+            BlueprintVersionRecord versionRecord = BlueprintEditorService.Find(state, entry.BlueprintId)?.Versions?.FirstOrDefault(v => v.Version == entry.Version);
+            primaryId = versionRecord?.PrimaryId;
+            return !string.IsNullOrEmpty(primaryId);
+        }
+
         /// <summary>FG1-SIG-07：当前登记了装配的全部机器（中继模块索引在整表清空后重建时用；只在登记表整体变化时调用）。</summary>
         public static IEnumerable<int> RegisteredMachines => _entries.Keys;
 

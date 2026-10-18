@@ -22,6 +22,7 @@ namespace GameLogic.Campaign.Economy
             var sb = new StringBuilder();
             sb.AppendLine(GameText.Get(item.DescKey));
             sb.AppendLine(GameText.Format("codex.item.form", RecipeBook.FormText(item)));
+            sb.AppendLine(ItemProtocol.DetailLine(item)); // FG8-LOOT-01（FGR-LOOT-001）：协议与去向
             sb.AppendLine();
             sb.AppendLine(GameText.Get("codex.item.source_title"));
             sb.AppendLine(GameText.Get(item.SourceKey));

@@ -391,6 +391,22 @@ namespace GameLogic.Campaign.Signal
             !IsCore(contentId) && FirmwareCatalog.TryGet(contentId, out MechanicalContentDef def)
             && (!string.IsNullOrEmpty(def.LegacyFacadeId) || CarrierReadings.HasReading(contentId));
 
+        /// <summary>FG8-LOOT-01：<see cref="CanInstall"/> 的拒绝原因是不是“未破解的敌方固件”（玩家装配被拒时触发第一次被拒绝的引导钩子）。</summary>
+        /// 逐个列出完整文本键（与 CanInstall 的三种未破解返回值 + 电路保存校验的 raw_in_circuit 一致），不用前缀匹配。
+        public static bool IsRawReason(string reasonKey)
+        {
+            switch (reasonKey)
+            {
+                case "signal.reason.raw_signal_only":
+                case "signal.reason.raw_turret":
+                case "signal.reason.raw_trap":
+                case "signal.reason.raw_in_circuit":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         /// <summary>稳定原因码（<c>CircuitOpResult.Code</c>）：由 <see cref="CanInstall"/> 的文本键映射，调用方按码分支时不会把“不是固件”误判成“未破解”。</summary>
         public static string InstallFailureCode(string reasonKey)
         {

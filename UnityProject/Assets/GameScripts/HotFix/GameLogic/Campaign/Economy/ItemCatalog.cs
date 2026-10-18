@@ -22,6 +22,17 @@ namespace GameLogic.Campaign.Economy
         Entity = 4,
     }
 
+    /// <summary>FG8-LOOT-01（FG08 FGR-LOOT-001）：物品协议（fg.TbEcoItem.protocol），决定带回来以后的去向。</summary>
+    public enum ItemProtocolKind : byte
+    {
+        /// <summary>己方：自产的中间品、成品、组件、固件、机器——直接使用。</summary>
+        Own = 0,
+        /// <summary>中立：原料、人类遗产、关键材料、流体、数字资源、敌方残骸——直接使用。</summary>
+        Neutral = 1,
+        /// <summary>敌方加密：未解析模块、敌方加密固件、数据核心——必须送解析台；敌方固件破解前可以由信号核裸跑。</summary>
+        Enemy = 2,
+    }
+
     /// <summary>配方行的角色（fg.TbRecipeIo.role）。</summary>
     public enum RecipeRole : byte
     {
@@ -54,6 +65,8 @@ namespace GameLogic.Campaign.Economy
         public bool CodexAlwaysOpen;
         /// <summary>FG4-ECO-02（FGR-ECO-071）：回收站分解一件得到的废料（只有固体 &gt; 0；少于做它花掉的废料当量，FG16 FGR-BAL-050）。</summary>
         public int RecycleScrap;
+        /// <summary>FG8-LOOT-01（FGR-LOOT-001）：协议。固件芯片这件物品是 Own，单枚芯片的协议按固件本身逐件判定（<see cref="ItemProtocol.OfFirmware"/>）。</summary>
+        public ItemProtocolKind Protocol = ItemProtocolKind.Neutral;
 
         public bool IsBelt => BeltId != 0;
         public string Name => GameText.Get(NameKey);
@@ -126,6 +139,8 @@ namespace GameLogic.Campaign.Economy
             public int SortOrder;
             /// <summary>FG4-ECO-02：回收站分解一件得到的废料。</summary>
             public int RecycleScrap;
+            /// <summary>FG8-LOOT-01：协议 own / neutral / enemy。</summary>
+            public string Protocol;
         }
 
         public struct RecipeRow
@@ -344,7 +359,7 @@ namespace GameLogic.Campaign.Economy
                         {
                             Id = r.Id, BeltId = r.BeltId, Form = r.Form, Tier = r.Tier, FluidId = r.FluidId, NameKey = r.NameKey, DescKey = r.DescKey,
                             SourceKey = r.SourceKey, UseKey = r.UseKey, Color = r.Color, Shape = r.Shape, SortOrder = r.SortOrder,
-                            RecycleScrap = r.RecycleScrap,
+                            RecycleScrap = r.RecycleScrap, Protocol = r.Protocol,
                         });
                     }
                     foreach (GameConfig.fg.Recipe r in t.TbRecipe.DataList)
@@ -418,6 +433,12 @@ namespace GameLogic.Campaign.Economy
                     d.Problems.Add($"物品 {r.Id}：形态 {r.Form} 不认识");
                     continue;
                 }
+                if (!TryParseProtocol(r.Protocol, out ItemProtocolKind protocol))
+                {
+                    // FG8-LOOT-01：每件物品都必须有协议（FGR-LOOT-001）；缺了 / 拼错的整行拒绝，不让一件敌方物品被当成“可直接使用”。
+                    d.Problems.Add($"物品 {r.Id}：协议 {r.Protocol ?? "(空)"} 不认识（own / neutral / enemy）");
+                    continue;
+                }
                 if (r.BeltId < 0 || r.BeltId > 999 || (r.BeltId != 0) != (form == ItemForm.Solid))
                 {
                     d.Problems.Add($"物品 {r.Id}：只有固体上传送带（beltId {r.BeltId}，形态 {r.Form}）");
@@ -453,6 +474,7 @@ namespace GameLogic.Campaign.Economy
                     CodexAlwaysOpen = r.Tier != "expedition" && r.Tier != "key" && r.Tier != "endgame",
                     // FG4-ECO-02：只有固体能进回收站；表里给非固体写了数也按 0（不会把流体“分解”成废料）。
                     RecycleScrap = form == ItemForm.Solid ? Math.Max(0, r.RecycleScrap) : 0,
+                    Protocol = protocol,
                 };
                 if (!string.IsNullOrEmpty(r.Color) && ColorUtility.TryParseHtmlString(r.Color, out Color c))
                 {
@@ -612,6 +634,18 @@ namespace GameLogic.Campaign.Economy
                 case "digital": form = ItemForm.Digital; return true;
                 case "entity": form = ItemForm.Entity; return true;
                 default: form = ItemForm.Solid; return false;
+            }
+        }
+
+        /// <summary>FG8-LOOT-01：协议文本 → 枚举（own / neutral / enemy）。</summary>
+        public static bool TryParseProtocol(string text, out ItemProtocolKind protocol)
+        {
+            switch (text)
+            {
+                case "own": protocol = ItemProtocolKind.Own; return true;
+                case "neutral": protocol = ItemProtocolKind.Neutral; return true;
+                case "enemy": protocol = ItemProtocolKind.Enemy; return true;
+                default: protocol = ItemProtocolKind.Neutral; return false;
             }
         }
 

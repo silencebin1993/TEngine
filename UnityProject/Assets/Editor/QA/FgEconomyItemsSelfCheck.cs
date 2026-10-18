@@ -355,7 +355,7 @@ namespace GameLogic.EditorTools
             string[] src = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("IT\t") || l.StartsWith("RC\t") || l.StartsWith("RI\t")).ToArray();
             GameConfig.Tables t = ConfigSystem.Instance.Tables;
             var rt = new List<string>();
-            rt.AddRange(t.TbEcoItem.DataList.Select(r => string.Join("\t", "IT", r.Id, r.BeltId, r.Form, r.Tier, r.FluidId, r.NameKey, r.DescKey, r.SourceKey, r.UseKey, r.Color, r.Shape, r.SortOrder, r.RecycleScrap)));
+            rt.AddRange(t.TbEcoItem.DataList.Select(r => string.Join("\t", "IT", r.Id, r.BeltId, r.Form, r.Tier, r.FluidId, r.NameKey, r.DescKey, r.SourceKey, r.UseKey, r.Color, r.Shape, r.SortOrder, r.RecycleScrap, r.Protocol)));
             rt.AddRange(t.TbRecipe.DataList.Select(r => string.Join("\t", "RC", r.Id, r.NameKey, r.Building, r.BuildingNameKey, FloatRepr(r.Seconds), r.Kind, r.Provisional, r.SortOrder)));
             rt.AddRange(t.TbRecipeIo.DataList.Select(r => string.Join("\t", "RI", r.Id, r.Recipe, r.Item, r.Amount, r.Role)));
             Expect(code == 0 && src.Length == rt.Count && src.SequenceEqual(rt),
@@ -409,7 +409,7 @@ namespace GameLogic.EditorTools
             ItemCatalog.ItemRow Item(string id, int belt, string form, int fluid = 0) => new ItemCatalog.ItemRow
             {
                 Id = id, BeltId = belt, Form = form, Tier = "raw", FluidId = fluid, NameKey = "item.scrap.name", DescKey = "item.scrap.desc", SourceKey = "item.scrap.source",
-                UseKey = "item.scrap.use", Color = "#808080", Shape = "square", SortOrder = belt,
+                UseKey = "item.scrap.use", Color = "#808080", Shape = "square", SortOrder = belt, Protocol = "neutral", // FG8-LOOT-01：每行都要有协议
             };
             var items = new List<ItemCatalog.ItemRow>
             {

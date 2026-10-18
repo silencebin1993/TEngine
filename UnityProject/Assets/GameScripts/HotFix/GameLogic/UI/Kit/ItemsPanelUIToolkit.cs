@@ -42,6 +42,8 @@ namespace GameLogic.UI.Kit
             public VisualElement Icon;
             public Label Name;
             public Label Amount;
+            /// <summary>FG8-LOOT-01：协议角标（图标 + 文字）。</summary>
+            public Label Protocol;
             public long Total;
         }
 
@@ -126,6 +128,19 @@ namespace GameLogic.UI.Kit
                 if (t.Item.Id == itemId)
                 {
                     return t.Name.text;
+                }
+            }
+            return string.Empty;
+        }
+
+        /// <summary>FG8-LOOT-01：某种物品格子上的协议角标文字（“▲ 敌方加密 · 需要解析”）。</summary>
+        public string TileProtocolText(string itemId)
+        {
+            foreach (Tile t in _tiles)
+            {
+                if (t.Item.Id == itemId)
+                {
+                    return t.Protocol.text;
                 }
             }
             return string.Empty;
@@ -317,6 +332,7 @@ namespace GameLogic.UI.Kit
                 }
                 t.Name.text = t.Item.Name;
                 t.Amount.text = ItemHover.AmountText(t.Item, t.Total);
+                t.Protocol.text = ProtocolTileText(t.Item, state);
                 t.Root.EnableInClassList("ip-tile-zero", t.Total <= 0);
                 t.Root.EnableInClassList("uk-hidden", HeldOnly && t.Total <= 0);
             }
@@ -402,8 +418,12 @@ namespace GameLogic.UI.Kit
                 t.Name.AddToClassList("ip-name");
                 t.Amount = new Label();
                 t.Amount.AddToClassList("ip-amount");
+                t.Protocol = new Label();
+                t.Protocol.AddToClassList("ip-protocol");
+                t.Protocol.EnableInClassList("ip-protocol-enemy", ItemProtocol.Of(item) == ItemProtocolKind.Enemy);
                 texts.Add(t.Name);
                 texts.Add(t.Amount);
+                texts.Add(t.Protocol);
                 t.Root.Add(box);
                 t.Root.Add(texts);
                 ItemDef captured = item;
@@ -413,6 +433,36 @@ namespace GameLogic.UI.Kit
                 _tiles.Add(t);
             }
             _builtCatalogRevision = ItemCatalog.Revision;
+        }
+
+        /// <summary>FG8-LOOT-01（FGR-LOOT-001“界面上用图标加文字标明协议”）：格子上的协议角标 + 去向短文字。</summary>
+        public static string ProtocolTileText(ItemDef item) => ProtocolTileText(item, null);
+
+        /// <summary>
+        /// 格子上的协议角标。修复第 1 轮（审查 P2）：“固件芯片”格子的数量含固件库里未破解的敌方芯片（需要解析），
+        /// 有未破解芯片时在角标后补“▲×N 需要解析”，不把它们一并算成“可直接使用”。只在面板打开刷新时对这一格数一遍芯片。
+        /// </summary>
+        public static string ProtocolTileText(ItemDef item, CampaignState state)
+        {
+            string text = ItemProtocol.Badge(ItemProtocol.Of(item)) + GameText.Get("rules.sep_dot") + ItemProtocol.DestinationShort(ItemProtocol.DestinationOf(item));
+            int raw = item != null && item.Id == ItemCatalog.FirmwareChipId ? RawChipCount(state) : 0;
+            return raw > 0
+                ? text + GameText.Get("rules.sep_dot") + ItemProtocol.GlyphEnemy + "×" + raw.ToString(System.Globalization.CultureInfo.InvariantCulture) + " "
+                  + ItemProtocol.DestinationShort(ItemDestination.NeedsAnalysis)
+                : text;
+        }
+
+        private static int RawChipCount(CampaignState state)
+        {
+            int n = 0;
+            foreach (PrimitiveChipRecord c in state?.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
+            {
+                if (c != null && Campaign.Signal.FirmwareKinds.IsRaw(state, c.CardDefId))
+                {
+                    n++;
+                }
+            }
+            return n;
         }
 
         /// <summary>点图标：打开这种物品的图鉴条目（不解锁：没拿到的远征物 / 关键材料仍是剪影 + 获取途径）。</summary>
@@ -436,7 +486,8 @@ namespace GameLogic.UI.Kit
             var c = new TooltipContent
             {
                 Title = item.Name,
-                Body = ItemHover.TotalLine(state, item, v) + (bonus != null ? "\n" + bonus : string.Empty) + "\n" + ItemHover.RateLine(state, item) + "\n" + RecipeBook.FormText(item),
+                Body = ItemHover.TotalLine(state, item, v) + (bonus != null ? "\n" + bonus : string.Empty) + "\n" + ItemHover.RateLine(state, item) + "\n" + RecipeBook.FormText(item)
+                       + "\n" + ItemProtocol.DetailLine(item), // FG8-LOOT-01：详情写明“需要解析”或“可直接使用”
                 CodexEntryId = MechanicCodex.ItemEntryId(item.Id),
                 CodexEntry = InputDisplay.ExpandActionTokens(GameText.Get("item.hover.codex")),
             };

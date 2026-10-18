@@ -2007,11 +2007,36 @@ namespace GameLogic.Campaign
         public string[] SlotContentIds = Array.Empty<string>();
     }
 
-    /// <summary>掉落数据包（FG08）。</summary>
+    /// <summary>掉落数据包（FG08）。FG8-LOOT-01 起记野外普通掉落的确定性序号与地上敌方物品的身份；三选一数据包由 FG8-LOOT-02 加在这里。</summary>
     [Serializable]
     public sealed class LootPacketState
     {
         public int DomainVersion = 1;
+        /// <summary>FG8-LOOT-01：野外击毁了第几个敌人（掉落按“世界种子 + 这个序号 + 行号”确定；读档后接着编，存读档前后同一结果）。</summary>
+        public long FieldKills;
+        /// <summary>FG8-LOOT-01：第几个敌方据点被摧毁（据点掉落的确定性序号）。</summary>
+        public long OutpostLoots;
+        /// <summary>FG8-LOOT-01：地上（或正被机器搬着）的敌方加密物品的身份——搬进家园时按它登记（加密固件变成固件库里的未破解芯片，其余进仓库并登记解析身份）。
+        /// 条数上限 fg.TbHomeTuning loot.tags_max（超出丢最早的身份，物品本身不丢）。唯一写入口 <see cref="Economy.FieldLootService"/>。</summary>
+        public LootGroundTagRecord[] GroundTags = Array.Empty<LootGroundTagRecord>();
+        /// <summary>统计：野外掉落生成的地面堆数、其中敌方加密物品件数、拆解钳多回收的废料 / 残骸件数。</summary>
+        public int TotalDrops;
+        public int TotalEnemyItems;
+        public int ClawBonusItems;
+    }
+
+    /// <summary>FG8-LOOT-01：地上一件带身份的敌方加密物品（按地面物的回收实例 ID 对应）。</summary>
+    [Serializable]
+    public sealed class LootGroundTagRecord
+    {
+        public string SalvageId = string.Empty;
+        public string ItemId = string.Empty;
+        /// <summary>身份：加密固件 = 固件 ID；未解析模块 = 组件 / 模块 ID；数据核心 = fg.TbAnalysisLore.id。</summary>
+        public string TargetId = string.Empty;
+        /// <summary>来源（field = 野外击毁、outpost = 据点被摧毁）与阵营键。</summary>
+        public string Origin = string.Empty;
+        public string Faction = string.Empty;
+        public long Tick;
     }
 
     /// <summary>统计（FG15 统计面板 / FG16 试玩数据）。</summary>

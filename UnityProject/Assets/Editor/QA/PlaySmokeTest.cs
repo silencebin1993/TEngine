@@ -1404,9 +1404,13 @@ namespace GameLogic.EditorTools
             bool itemsOpen = ip != null && UI.Kit.ItemsPanelUIToolkit.IsOpen && ip.PanelVisible && allTiles == Campaign.Economy.ItemCatalog.Items.Count;
             bool heldToggle = ClickUitk("[ItemsPanelHost]", "ItemsPanelHeld") && ip != null && ip.HeldOnly && ip.VisibleTileCount < allTiles && ip.VisibleTileCount > 0
                               && ClickUitk("[ItemsPanelHost]", "ItemsPanelHeld") && !ip.HeldOnly;
+            // FG8-LOOT-01（FGR-LOOT-001）：每个格子用图标 + 文字标明协议与去向（▲敌方加密 = 需要解析；■己方 / ●中立 = 可直接使用）。
+            string protoEnemy = ip?.TileProtocolText(Campaign.Economy.AnalysisCatalog.UnparsedModuleId) ?? string.Empty;
+            string protoOwn = ip?.TileProtocolText("alloy") ?? string.Empty;
+            bool protocolBadges = protoEnemy.Contains("▲") && protoOwn.Contains("■") && protoEnemy != protoOwn && !Localization.GameText.ContainsMarker(protoEnemy + protoOwn);
             bool itemsClosed = ClickUitk("[ItemsPanelHost]", "ItemsPanelClose") && !UI.Kit.ItemsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
-            Check(itemsClicked && itemsOpen && heldToggle && itemsClosed,
-                $"暂停菜单点“物资”：物资面板打开（{ip?.CountText}，{allTiles} 格），“只看持有的”可切，点关闭回到暂停菜单");
+            Check(itemsClicked && itemsOpen && heldToggle && protocolBadges && itemsClosed,
+                $"暂停菜单点“物资”：物资面板打开（{ip?.CountText}，{allTiles} 格），协议角标（未解析模块“{protoEnemy}”、合金“{protoOwn}”），“只看持有的”可切，点关闭回到暂停菜单");
             // FG4-ECO-06（FGU-15）：暂停菜单“常驻规则”→ 规则面板（新战役默认一条“远征卸货”）；从常用预设新建（下拉框选中即生效）、点“编辑”、日志页签、
             // 行内删除先确认、点关闭回到暂停菜单。
             bool rulesClicked = ClickUitk("[PauseMenuHost]", "PauseRules");

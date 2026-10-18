@@ -574,10 +574,13 @@ namespace GameLogic.Campaign.Defense
                     break;
                 }
             }
+            var at = new Vector2((float)e.Pos.x, (float)e.Pos.y);
             if (g == null || !SiegeService.IsSieging(g))
             {
+                // 行进途中的拦截战与领地驻军 / 巡逻迎战：不进家园的突袭结算；FG8-LOOT-01（FG-GAP-109）起按野外掉落表留残骸与掉落（FieldLootService）。
+                FieldLootService.OnFieldKill(s, site, def, e.Code2 == 1, at, e.Other);
                 Stat(t0);
-                return; // 行进途中的拦截战：不进家园结算、不留残骸（ADR-DEF-008 §残骸）
+                return;
             }
             RaidResultRecord r = OpenFor(s, g.GroupId) ?? Begin(s, g, site);
             if (r == null)
@@ -593,9 +596,9 @@ namespace GameLogic.Campaign.Defense
             }
             AddAmount(ref r.KilledKinds, def?.Id ?? "unknown", 1);
             Credit(s, site, r, e.Other, elite);
-            var at = new Vector2((float)e.Pos.x, (float)e.Pos.y);
-            AddWreck(s, st, r, at, elite ? WreckPerElite : WreckPerUnit);
-            RollDrops(s, st, r, at, elite);
+            // FG8-LOOT-01（DEBT-FG2VFX02-04）：拆解钳击毁时残骸多回收。
+            AddWreck(s, st, r, at, FieldLootService.ApplyClaw(elite ? WreckPerElite : WreckPerUnit, FieldLootService.ClawMultiplier(s, site, e.Other)));
+            RollDrops(s, st, r, at, elite, def?.Faction ?? g.Faction);
             Revision++;
             Stat(t0);
         }
@@ -747,7 +750,7 @@ namespace GameLogic.Campaign.Defense
         }
 
         /// <summary>确定性掉落：按（世界种子, 结算序号, 第几次击毁）派生，存读档 / 观察与否一致。掉落走解析台的唯一发放入口（先进仓库，放不下的落在原地由机器搬回）。</summary>
-        private static void RollDrops(CampaignState s, RaidResultState st, RaidResultRecord r, Vector2 at, bool elite)
+        private static void RollDrops(CampaignState s, RaidResultState st, RaidResultRecord r, Vector2 at, bool elite, string faction)
         {
             float mult = elite ? DropEliteMult : 1f;
             uint seed = unchecked((uint)(s.World?.WorldSeed ?? s.RandomSeed));
@@ -755,22 +758,38 @@ namespace GameLogic.Campaign.Defense
             double b = WorldGenMath.Hash(seed, r.Serial, r.Killed, 0x52524632u) / 4294967296.0;
             if (a < DropModuleChance * mult)
             {
-                Drop(s, st, r, AnalysisCatalog.UnparsedModuleId, at);
+                Drop(s, st, r, AnalysisCatalog.UnparsedModuleId, at, faction, seed, 0);
             }
             if (b < DropFirmwareChance * mult)
             {
-                Drop(s, st, r, AnalysisCatalog.EncryptedFirmwareId, at);
+                Drop(s, st, r, AnalysisCatalog.EncryptedFirmwareId, at, faction, seed, 1);
             }
         }
 
-        private static void Drop(CampaignState s, RaidResultState st, RaidResultRecord r, string itemId, Vector2 at)
+        private static void Drop(CampaignState s, RaidResultState st, RaidResultRecord r, string itemId, Vector2 at, string faction, uint seed, int slot)
         {
-            // 身份（是哪个模块 / 哪种固件）由掉落表决定，掉落表在 FG8-LOOT-01（DEBT-FG5RND02-01）；这里按“身份不明”发放，解析时按重复解析给技术数据。
-            if (HomeValleyAnalysis.Acquire(s, itemId, string.Empty, "raid", 1, at) > 0)
+            // FG8-LOOT-01（FG-GAP-110 / DEBT-FG5RND02-01）：身份按野外掉落表同一套规则（加密固件 = 这个阵营杂兵残骸来源的敌方固件；未解析模块 = 该阵营的组件池），
+            // 按（世界种子, 结算序号, 第几次击毁）确定；加密固件变成固件库里的未破解芯片（破解前可以裸跑），未解析模块进仓库并登记身份。
+            string target = DropIdentity(itemId, faction, seed, r.Serial * 1024 + r.Killed, slot);
+            string sid = "raiddrop:" + r.Serial.ToString(CultureInfo.InvariantCulture) + ":" + r.Killed.ToString(CultureInfo.InvariantCulture) + ":" + slot.ToString(CultureInfo.InvariantCulture);
+            if (FieldLootService.DeliverEnemyItem(s, itemId, target, FieldLootService.OriginRaid, at, sid) > 0)
             {
                 st.TotalDrops++;
                 AddAmount(ref r.Loot, itemId, 1);
             }
+        }
+
+        /// <summary>突袭掉落的身份：取野外杂兵同一物品、同一阵营的掉落行的身份规则（没有对应行时身份不明）。</summary>
+        public static string DropIdentity(string itemId, string faction, uint seed, int key, int slot)
+        {
+            foreach (LootDropDef row in LootCatalog.Rows)
+            {
+                if (row.Item?.Id == itemId && row.AppliesTo(LootCatalog.SourceMinion, faction))
+                {
+                    return FieldLootService.PickIdentity(row, faction, seed, key, slot, 0x52414944u);
+                }
+            }
+            return string.Empty;
         }
 
         // ── 损失 ─────────────────────────────────────────────────────────────

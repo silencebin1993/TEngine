@@ -652,6 +652,10 @@ namespace GameLogic.Campaign.Blueprint
             // （信号核 / 机器 / 炮塔）；原因码按失败原因映射（不是固件 → firmware_unknown，未破解 → raw_signal_only，无机器实现 → firmware_no_machine_impl）。
             if (!FirmwareKinds.CanInstall(state, firmwareId, host, out string reasonKey))
             {
+                if (FirmwareKinds.IsRawReason(reasonKey))
+                {
+                    Economy.ItemProtocol.NoteRejected(); // FG8-LOOT-01：装配未破解的敌方固件被拒 → 第一次被拒绝的引导钩子
+                }
                 return CircuitOpResult.Fail(FirmwareKinds.InstallFailureCode(reasonKey), GameText.Format(reasonKey, FirmwareKinds.DisplayName(firmwareId) ?? firmwareId));
             }
             if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def))

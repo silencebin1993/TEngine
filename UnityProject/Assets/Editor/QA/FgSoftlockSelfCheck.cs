@@ -41,7 +41,7 @@ namespace GameLogic.EditorTools
     /// B FGT-ECO-005 旅程：清空所有机器和废料 → 当天应急打印 → 应急产废料攒到回收站造价 → 真实建造菜单放回收站 → 打印的搬运机施工 → 回收站工作、应急产废料结束；第二天再打印、够 2 台后不再打印；
     /// C 应急打印与产废料的负向矩阵（机器够、今天已打印、核心被毁、废料 &gt; 0、回收站在工作 / 输出堵塞、出生点被占、Demo 紧急救援机的分层、读档不再补发开局机器、只剩战斗履带也打印、能施工的都在远征时照旧派救援机）；
     /// D 传送带闭环卡死（警告一次、告警栏、清带恢复、物品减少重新计时、非闭环不报、接上更小坐标的支线不丢计时）；E 施工 / 维修目标到不了（被围住警告与原因、告警栏、拆掉一面恢复、能到的不报）；
-    /// F FGR-ECO-071：任何固体都能经传送带进回收站分解、任何流体都能经管线进废液池销毁；FGT-ECO-006 副产品无处可去 → 原因与引导钩子 → 接上废液池恢复；固体副产品指向回收站；
+    /// F FGR-ECO-071：任何非加密固体都能经传送带进回收站分解（敌方加密固体被整份退回仓库、不丢失，FG8-LOOT-01）、任何流体都能经管线进废液池销毁；FGT-ECO-006 副产品无处可去 → 原因与引导钩子 → 接上废液池恢复；固体副产品指向回收站；
     /// G 顶栏流体存量（DEBT-FG4ECO08-03）；H 地下管线成对升级（DEBT-FG4ECO04-05）；I 真文件存读档接着跑一致；J 暂停与 0.5x～3x；K 观察 / 不观察一致；L 性能。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgSoftlockSelfCheck）。
     /// </summary>
@@ -60,7 +60,18 @@ namespace GameLogic.EditorTools
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
-            int fail = Run(report);
+            // FG8-LOOT-01 修复第 1 轮（审查 P2）：单段入口与全量 / --segment 入口同口径——旧段按研发树开放前的规则跑（CellFrameworkValidate 同款开关），跑完关闭。
+            bool gates = GameLogic.Campaign.Economy.ResearchGate.LegacyGatesOpenForTests;
+            GameLogic.Campaign.Economy.ResearchGate.LegacyGatesOpenForTests = true;
+            int fail;
+            try
+            {
+                fail = Run(report);
+            }
+            finally
+            {
+                GameLogic.Campaign.Economy.ResearchGate.LegacyGatesOpenForTests = gates;
+            }
             report.AppendLine(fail == 0 ? "全部通过" : $"失败 {fail} 项");
             Debug.Log(report.ToString());
             if (Application.isBatchMode)
@@ -866,9 +877,27 @@ namespace GameLogic.EditorTools
             bool laid = FgProductionSelfCheck.Belts(s, outBelt, BeltDir.East, 2) && FgProductionSelfCheck.Belts(s, At(r, -3, 0), BeltDir.East, 2);
             int sink = FgProductionSelfCheck.TestSink(s, At(outBelt, 2, 0));
             FgProductionSelfCheck.Resync(s);
-            var solids = ItemCatalog.Items.Where(d => d.Form == ItemForm.Solid && d.BeltId != 0).ToList();
+            var allSolids = ItemCatalog.Items.Where(d => d.Form == ItemForm.Solid && d.BeltId != 0).ToList();
+            // FG8-LOOT-01（FGR-LOOT-001 负向 / ADR-LOOT-001 第 6 节第 4 条）：敌方加密物品不能直接回收——回收站整份退回仓库（放不下的落地由机器搬回），
+            // 不分解、不丢失、不卡住输入口。它们仍“有去处”（解析台），这里逐一断言被退回，不计入分解。
+            var solids = allSolids.Where(d => d.Protocol != ItemProtocolKind.Enemy).ToList();
+            var enemy = allSolids.Where(d => d.Protocol == ItemProtocolKind.Enemy).ToList();
             var bad = new List<string>();
+            var lost = new List<string>();
             long expected = 0;
+            foreach (ItemDef item in enemy)
+            {
+                long before = p.Rec.ItemsRecycled;
+                int rej0 = ProductionService.RecyclerRejectedEncrypted;
+                int held0 = HomeInventory.Stock(s, item) + GroundAmount(s, item);
+                BeltResult put = BeltNetworkService.Kernel.InsertItem(At(r, -3, 0).X, At(r, -3, 0).Y, item.BeltId);
+                bool back = put == BeltResult.Ok && StepUntil(() => ProductionService.RecyclerRejectedEncrypted == rej0 + 1, 30);
+                int held = HomeInventory.Stock(s, item) + GroundAmount(s, item);
+                if (!back || held != held0 + 1 || p.Rec.ItemsRecycled != before || ProductionService.Count(p.Rec.In, item.Id) != 0)
+                {
+                    lost.Add($"{item.Id}（退回 {held - held0} 件、分解 {p.Rec.ItemsRecycled - before} 件）");
+                }
+            }
             foreach (ItemDef item in solids)
             {
                 long before = p.Rec.ItemsRecycled;
@@ -885,9 +914,15 @@ namespace GameLogic.EditorTools
             long delivered = si.Consumed + si.Buffered + FgProductionSelfCheck.OnBelts(outBelt, BeltDir.East, 2) + FgProductionSelfCheck.PortPending(s, rec, "recycler.out0")
                              + ProductionService.Count(p.Rec.Out, ItemCatalog.ScrapId);
             Expect(laid && solids.Count >= 10 && bad.Count == 0 && p.Rec.ItemsRecycled == solids.Count && delivered == expected,
-                $"F1 FGR-ECO-071“任何固体都可以送进回收站分解为废料”：物品表里全部 {solids.Count} 种上传送带的固体逐一用传送带送进回收站，每一种都被收下、分解（{p.Rec.ItemsRecycled} 件），" +
+                $"F1 FGR-ECO-071“任何固体都可以送进回收站分解为废料”：物品表里 {solids.Count} 种上传送带的非加密固体逐一用传送带送进回收站，每一种都被收下、分解（{p.Rec.ItemsRecycled} 件），" +
                 $"得到的废料 {delivered} = 各自回收产出之和 {expected}" + (bad.Count == 0 ? string.Empty : $"（没被收下：{string.Join("、", bad)}）"));
+            Expect(enemy.Count >= 3 && lost.Count == 0,
+                $"F1b FG8-LOOT-01 负向：{enemy.Count} 种敌方加密固体（{string.Join("、", enemy.Select(x => x.Id))}）经传送带送进回收站——不分解，整份退回仓库 / 落地搬回，" +
+                "不丢失、输入口不被卡住（后面的普通固体照常分解）" + (lost.Count == 0 ? string.Empty : $"（异常：{string.Join("、", lost)}）"));
         }
+
+        private static int GroundAmount(CampaignState s, ItemDef item) =>
+            (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Where(g => g != null && g.ResourceType == item.ResourceType).Sum(g => g.Amount);
 
         private static void CheckAnyFluidToWastePond()
         {
@@ -1060,7 +1095,10 @@ namespace GameLogic.EditorTools
             bool layer = map.GetPipe(a) == PipeNetworkService.LayerValue(PipePieceKind.Underground, 1) && map.GetPipe(b) == PipeNetworkService.LayerValue(PipePieceKind.Underground, 1);
             Expect(laid && linked && planned && done && fa.Tier == 1 && fb.Tier == 1 && fa.UndergroundLinked && fa.PartnerX == b.X && fl.Tier == 0 && layer && scrap0 - s.Scrap == 6,
                 $"H1 关闭 DEBT-FG4ECO04-05：框选升级把已配对的一对地下管线 T1 → T2 当一件（差额 2 × 3 = 6 废料），没配对的那一口拒绝（“{plan.FirstRefusal?.Describe()}”）；" +
-                $"机器施工后两口都是 T2、仍互相配对、格网层同步；没配对的口不动");
+                $"机器施工后两口都是 T2、仍互相配对、格网层同步；没配对的口不动" +
+                $"（铺设 {laid}、配对 {linked}、计划 {planned}（件 {g?.Pieces}、格 {g?.Cells.Count}、费用 {plan.Cost}、拒绝 {plan.Refused}）、施工 {done}（单 {planId ?? "无"}）、" +
+                $"等级 {fa.Tier}/{fb.Tier}/{fl.Tier}、格网层 {layer}、扣废料 {scrap0 - s.Scrap}）" +
+                (planned ? string.Empty : $"【只框这一对时的原因：{UpgradePlanner.Plan(s, a, b).FirstRefusal?.Describe() ?? "无"}；管线运行 {PipeNetworkService.IsRunning}】"));
             // 负向：内核拒绝没配对的口 / 跨度装不下的等级。
             PipeResult unpaired = k.SetUndergroundPairTier(lone.X, lone.Y, 1);
             PipeResult wrongKind = k.SetUndergroundPairTier(At(o.Value, 5, 2).X, At(o.Value, 5, 2).Y, 1);
