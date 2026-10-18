@@ -469,6 +469,17 @@ namespace GameLogic.Campaign.Regions
                     PlaceMachine(state, pod.MachineId, GroundSpot(state, target, NextSlot(pod.Group), 0f));
                     pod.MachineId = 0;
                 }
+                if (pod.CargoAmount > 0 && pod.ConstructionPack)
+                {
+                    // FG8-OUT-01（FGR-EXP-018）：施工包——先倒进落点附近还缺这种材料的施工现场，剩下的照常落在地上。
+                    int poured = WorldSim.OwnOutpostService.PourPack(state, target, pod.CargoItem, pod.CargoAmount);
+                    pod.CargoAmount -= poured;
+                    if (poured > 0)
+                    {
+                        WorldSim.OwnOutpostService.CountPackLanded(state);
+                    }
+                }
+                pod.ConstructionPack = false;
                 if (pod.CargoAmount > 0)
                 {
                     Vector2 spot = GroundSpot(state, target, NextSlot(pod.Group), 0f);
@@ -476,6 +487,7 @@ namespace GameLogic.Campaign.Regions
                     pod.CargoItem = string.Empty;
                     pod.CargoAmount = 0;
                 }
+                pod.CargoItem = pod.CargoAmount > 0 ? pod.CargoItem : string.Empty;
                 d.Delivered++;
                 if (first)
                 {

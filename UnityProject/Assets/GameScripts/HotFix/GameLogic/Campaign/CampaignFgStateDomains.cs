@@ -162,6 +162,47 @@ namespace GameLogic.Campaign
         /// <summary>FG8-DROP-01（FGR-EXP-013～016）：投送站与投送舱（站里的油、在站 / 冷却 / 在飞的舱、载荷、航线）。唯一写入口 <see cref="Regions.DropPodService"/>。
         /// 只加字段、不升域版本：旧档没有 = 空域（没有投送站）。</summary>
         public DropPodState Drop;
+        /// <summary>FG8-OUT-01（FGR-EXP-017～019）：己方前哨站（离核心 300 格以外的建筑群自动归为前哨站）——编号、名字、上次的位置与座数、全毁通知标记。
+        /// 唯一写入口 <see cref="WorldSim.OwnOutpostService"/>。只加字段、不升域版本：旧档没有 = 空域，第一次对账时按现有建筑群静默补登（不补发“建立前哨站”通知）。</summary>
+        public OwnOutpostState OwnOutposts;
+    }
+
+    /// <summary>FG8-OUT-01：己方前哨站的存档域（见 <see cref="GridState.OwnOutposts"/>）。前哨站本身由建筑群推导（不设第二个核心），这里只存需要跨读档稳定的东西。</summary>
+    [Serializable]
+    public sealed class OwnOutpostState
+    {
+        public OwnOutpostRecord[] Outposts = Array.Empty<OwnOutpostRecord>();
+        /// <summary>下一个前哨站编号（单调递增，默认名“前哨站 N”用它；读档后接着往后编）。</summary>
+        public int NextSerial = 1;
+        /// <summary>已经补登过（旧档第一次对账静默补登，之后新出现的建筑群才发“建立前哨站”通知）。</summary>
+        public bool Seeded;
+        // ── 统计（总览与离家报告读）──
+        public int Founded;
+        public int WipedOut;
+        public int PacksDelivered;
+        public int PackUnitsPoured;
+        public int BeltUnitsPoured;
+    }
+
+    /// <summary>FG8-OUT-01：一个己方前哨站。</summary>
+    [Serializable]
+    public sealed class OwnOutpostRecord
+    {
+        /// <summary>稳定编号（"op-N"），机器的“前哨劳动”岗位、离家报告的分组、突袭目标都按它认。</summary>
+        public string OutpostId = string.Empty;
+        public int Serial;
+        /// <summary>玩家起的名字（空 = 默认名“前哨站 N”）。唯一写入口 <see cref="WorldSim.OwnOutpostService.TryRename"/>。</summary>
+        public string CustomName = string.Empty;
+        /// <summary>认领建筑群用的锚点建筑（群里 ID 最小的那座；被拆后按上次位置就近重新认领并换锚点）。</summary>
+        public string AnchorBuildingId = string.Empty;
+        /// <summary>上一次对账时建筑群的平均位置（星球格）与座数 / 完好座数。</summary>
+        public float X;
+        public float Y;
+        public int Count;
+        public int Intact;
+        public long FoundedTick;
+        /// <summary>全部建筑都已被摧毁（废墟）时只通知一次；有建筑修好 / 重建后清掉，下次全毁再通知。</summary>
+        public bool WipedNotified;
     }
 
     /// <summary>FG8-DROP-01：投送站与投送舱的存档域（见 <see cref="GridState.Drop"/>）。全部字段进存档；航线只按步序号推进，读档后接着飞。</summary>
@@ -236,6 +277,8 @@ namespace GameLogic.Campaign
         public int Group;
         /// <summary>最近一次改降 / 中止的原因码（空 = 没有）。</summary>
         public string Note = string.Empty;
+        /// <summary>FG8-OUT-01（FGR-EXP-018“投送舱送施工包”）：这一舱货物是施工包——着陆时先倒进落点附近还缺这种材料的施工现场，剩下的才落在地上。只加字段（旧档 = false = 普通货物）。</summary>
+        public bool ConstructionPack;
     }
 
     /// <summary>FG8-EXP-01：远征队（见 <see cref="GridState.ExpeditionTeam"/>）。名单只记“上次派出 / 编成的机器 LogicId”，不是运行中的远征状态。</summary>
@@ -2130,6 +2173,8 @@ namespace GameLogic.Campaign
     [Serializable]
     public sealed class AwayEntryRecord
     {
+        /// <summary>FG8-OUT-01（卡片“前哨站的统计和离家报告分组”）：发生在哪个己方前哨站（记账那一刻按位置认定；空 = 家园 / 不在前哨站）。只加字段。</summary>
+        public string OutpostId = string.Empty;
         public string Section = string.Empty;
         public string TypeId = string.Empty;
         public string Detail = string.Empty;
@@ -2559,6 +2604,7 @@ namespace GameLogic.Campaign
             Defense.TurretService.EnsureState(s); // FG6-DEF-01：炮塔域补成空域（旧档没有 = 没有炮塔）；坏值钳回合法范围。
             Defense.DefenseService.EnsureState(s); // FG6-DEF-02：防御建筑域补成空域（旧档没有 = 没有屏障 / 闸门 / 护盾 / 陷阱）；坏值钳回。
             Defense.RepairDroneService.EnsureState(s); // FG6-DEF-03：维修无人机站域补成空（旧档没有 = 没有维修无人机站）；坏值钳回、重复序号重编。
+            WorldSim.OwnOutpostService.EnsureState(s); // FG8-OUT-01：己方前哨站域补成空域（旧档没有 = 第一次对账时静默补登）；坏值钳回、重复编号去掉。
             Regions.DropPodService.EnsureState(s); // FG8-DROP-01：投送站与投送舱域补成空域（旧档没有 = 没有投送站）；坏值钳回、重复序号重编。
             if (s.Raids.NextNavSerial < 1)
             {

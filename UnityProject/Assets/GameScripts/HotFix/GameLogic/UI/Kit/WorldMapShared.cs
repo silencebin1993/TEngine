@@ -294,13 +294,18 @@ namespace GameLogic.UI.Kit
             {
                 Add(WorldMapItemKind.Home, WorldMapLayer.Own, "home", core.X, core.Y, GameText.Get("ui.map.home"));
                 // FGR-GEN-080“己方建筑群与前哨”：按聚合好的建筑群出图标（O(群数)；聚合只在建筑增删时重做，见 WorldMapOwnClusters）。
-                foreach (WorldMapOwnClusters.Cluster c in WorldMapOwnClusters.For(state))
+                IReadOnlyList<WorldMapOwnClusters.Cluster> owns = WorldMapOwnClusters.For(state);
+                for (int ci = 0; ci < owns.Count; ci++)
                 {
+                    WorldMapOwnClusters.Cluster c = owns[ci];
                     if (c.ContainsCore || !view.Contains(c.X, c.Y, margin))
                     {
                         continue;
                     }
-                    string label = GameText.Format(c.IsOutpost ? "ui.map.own_outpost" : "ui.map.own_cluster", c.Count);
+                    // FG8-OUT-01：已经归为前哨站的建筑群写前哨站的名字（玩家可以改名）。
+                    OwnOutpostRecord op = c.IsOutpost ? OwnOutpostService.OwnerOfCluster(state, ci) : null;
+                    string label = op != null ? GameText.Format("ui.map.own_outpost_named", OwnOutpostService.NameOf(op), c.Count)
+                        : GameText.Format(c.IsOutpost ? "ui.map.own_outpost" : "ui.map.own_cluster", c.Count);
                     Add(WorldMapItemKind.OwnCluster, WorldMapLayer.Own, c.Id, c.X, c.Y, label);
                 }
                 // FG8-EXP-02（FGR-EXP-010 / 012，FG08 第 7 节“战略地图：己方远征队、路线、预计到达时间”）：己方队伍，不受迷雾限制。

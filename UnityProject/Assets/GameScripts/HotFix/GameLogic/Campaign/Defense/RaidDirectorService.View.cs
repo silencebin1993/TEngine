@@ -109,6 +109,12 @@ namespace GameLogic.Campaign.Defense
         {
             if (p?.TargetKind == TargetOutpost)
             {
+                // FG8-OUT-01：目标是正式前哨站时写它的名字与座数（“前哨站「北坡」（4 座）”）；旧档里按地图建筑群认定的目标（own:…）照旧按群找座数。
+                OwnOutpostRecord own = OwnOutpostService.Find(CampaignSession.Current, p.TargetId);
+                if (own != null)
+                {
+                    return GameText.Format("raid.target.outpost_named", OwnOutpostService.NameOf(own), own.Count);
+                }
                 int count = 0;
                 foreach (WorldMapOwnClusters.Cluster c in WorldMapOwnClusters.For(CampaignSession.Current))
                 {

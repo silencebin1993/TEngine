@@ -77,6 +77,9 @@ namespace GameLogic.UI.Kit
         private readonly List<MachineRole> _batchIds = new List<MachineRole>();
         private readonly List<MachineRole> _detailRoleIds = new List<MachineRole>();
         private readonly List<string> _pointIds = new List<string>();
+        /// <summary>FG8-OUT-01：驻防点那一行此刻在选“常驻前哨站”（岗位是前哨劳动）。</summary>
+        private bool _pointOutpostMode;
+        public bool DetailPointIsOutpost => _pointOutpostMode;
 
         private int? _lastKey;
         private double _nextReread;
@@ -811,11 +814,23 @@ namespace GameLogic.UI.Kit
                 : MachineRoster.RoleDesc(effective);
             _detailRoleNote.text = note;
             bool garrison = m.IsAlive && m.Role == MachineRole.Garrison && MachineRoster.IsHome(m);
-            _detailPointRow.EnableInClassList("uk-hidden", !garrison);
+            // FG8-OUT-01：前哨劳动在同一行选“常驻前哨站”（前哨站不在了时写明，等重新指定）。
+            bool outpost = m.IsAlive && m.Role == MachineRole.OutpostLabor && MachineRoster.IsHome(m);
+            _pointOutpostMode = outpost;
+            _detailPointRow.EnableInClassList("uk-hidden", !garrison && !outpost);
             if (garrison)
             {
                 _detailPointLabel.text = GameText.Get("roster.detail.point_label");
                 FillPoints(state, m);
+            }
+            else if (outpost)
+            {
+                _detailPointLabel.text = GameText.Get("roster.detail.outpost_label");
+                FillOutposts(state, m);
+                if (MachineRoster.OutpostMissing(state, m))
+                {
+                    _detailRoleNote.text = GameText.Get("roster.outpost.missing");
+                }
             }
             if (_patrolRow != null)
             {
@@ -827,6 +842,31 @@ namespace GameLogic.UI.Kit
                 }
             }
             _detailInfo.text = DetailText(state, m);
+        }
+
+        /// <summary>FG8-OUT-01：前哨劳动的“常驻前哨站”下拉框（全部前哨站，按编号；当前没指定 / 已不在 = 提示项）。</summary>
+        private void FillOutposts(CampaignState state, MachineRecord m)
+        {
+            var labels = new List<string>();
+            _pointIds.Clear();
+            var list = new List<OwnOutpostRecord>(Campaign.WorldSim.OwnOutpostService.All(state));
+            list.Sort((a, b) => a.Serial.CompareTo(b.Serial));
+            if (Campaign.WorldSim.OwnOutpostService.Find(state, m.OutpostId) == null)
+            {
+                _pointIds.Add(string.Empty);
+                labels.Add(GameText.Get("roster.outpost.pick"));
+            }
+            foreach (OwnOutpostRecord o in list)
+            {
+                _pointIds.Add(o.OutpostId);
+                labels.Add(Campaign.WorldSim.OwnOutpostService.NameOf(o));
+            }
+            DropdownChoices.Apply(_detailPoint, labels, labels.Count > 0 ? labels[0] : string.Empty);
+            int at = _pointIds.IndexOf(m.OutpostId ?? string.Empty);
+            if (_detailPoint.choices.Count > 0)
+            {
+                _detailPoint.SetValueWithoutNotify(_detailPoint.choices[at >= 0 ? at : 0]);
+            }
         }
 
         private void FillPoints(CampaignState state, MachineRecord m)
@@ -1098,6 +1138,16 @@ namespace GameLogic.UI.Kit
             int at = _detailPoint.choices.IndexOf(label);
             if (DetailLogicId == 0 || at < 0 || at >= _pointIds.Count)
             {
+                return;
+            }
+            if (_pointOutpostMode)
+            {
+                if (string.IsNullOrEmpty(_pointIds[at]))
+                {
+                    return; // 提示项
+                }
+                bool okOutpost = MachineRoster.TrySetOutpost(Session, DetailLogicId, _pointIds[at], out string outpostMessage);
+                SayDetail(okOutpost, outpostMessage);
                 return;
             }
             bool ok = MachineRoster.TrySetGarrisonPoint(Session, DetailLogicId, _pointIds[at], out string message);

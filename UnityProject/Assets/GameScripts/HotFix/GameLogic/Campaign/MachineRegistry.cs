@@ -844,6 +844,7 @@ namespace GameLogic.Campaign
                 CustomName = MachineNaming.Sanitize(src.CustomName),
                 RolePointId = string.IsNullOrEmpty(src.RolePointId) ? null : src.RolePointId,
                 RoleOrderId = string.IsNullOrEmpty(src.RoleOrderId) ? null : src.RoleOrderId,
+                OutpostId = string.IsNullOrEmpty(src.OutpostId) ? null : src.OutpostId, // FG8-OUT-01：前哨劳动常驻的前哨站（旧档缺字段 = 没指定）。
                 // FG6-DEF-06：驻防巡逻点与当前巡逻进度（旧档缺字段 = 不巡逻）。
                 PatrolPoints = src.PatrolPoints == null || src.PatrolPoints.Length == 0 ? null : (string[])src.PatrolPoints.Clone(),
                 PatrolIndex = Math.Max(0, src.PatrolIndex),

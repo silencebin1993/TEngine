@@ -533,6 +533,20 @@ namespace GameLogic.Core
         /// <summary>第一次因为敌方防空覆盖被拒（防空限制）。</summary>
         public const string DropFirstAntiAirRejected = "drop.first_antiair_rejected";
 
+        // ── FG8-OUT-01：前哨站与远程施工（FG13 第 207 行一类“第一次……”引导；只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次出现己方前哨站（离核心 300 格以外的建筑群）。</summary>
+        public const string OutpostFirstFounded = "outpost.first_founded";
+        /// <summary>第一次打开前哨站总览。</summary>
+        public const string OutpostPanelFirstOpen = "outpost.first_panel_open";
+        /// <summary>第一次给前哨站改名。</summary>
+        public const string OutpostFirstRenamed = "outpost.first_renamed";
+        /// <summary>第一次把机器设为前哨劳动（常驻某个前哨站）。</summary>
+        public const string OutpostFirstLabor = "outpost.first_labor";
+        /// <summary>第一次有施工包直接倒进施工现场。</summary>
+        public const string OutpostFirstPack = "outpost.first_pack";
+        /// <summary>第一次有前哨站被全部摧毁（不导致战役失败）。</summary>
+        public const string OutpostFirstWiped = "outpost.first_wiped";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -596,6 +610,7 @@ namespace GameLogic.Core
             WorldFirstTerritoryEntered, WorldFirstInteriorEntered, WorldFirstPoiFound, WorldFirstEntranceBlocked,
             WorldFirstOutpostDestroyed, WorldFirstTerritoryPacified, WorldFirstTerritoryReclaimed, WorldFirstEliteRemnant, WorldFirstTerritoryHarassed,
             DropStationFirstBuilt, DropPanelFirstOpen, DropFirstLaunch, DropFirstLanded, DropFirstRecall, DropFirstAntiAirRejected,
+            OutpostFirstFounded, OutpostPanelFirstOpen, OutpostFirstRenamed, OutpostFirstLabor, OutpostFirstPack, OutpostFirstWiped,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

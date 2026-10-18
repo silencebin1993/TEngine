@@ -48,6 +48,7 @@ namespace GameLogic.UI.Kit
         private Button _close;
         /// <summary>FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：标题栏“编成远征队”按钮。</summary>
         private Button _composeExpedition;
+        private Button _outposts;
         private readonly Button[] _filters = new Button[8];
         private VisualElement _canvas;
         private VisualElement _textureLayer;
@@ -369,6 +370,11 @@ namespace GameLogic.UI.Kit
             _close.clicked += () => SetOpen(false);
             _composeExpedition = root.Q<Button>("MapComposeExpedition");
             _composeExpedition.clicked += ComposeExpedition;
+            _outposts = root.Q<Button>("MapOutposts");
+            if (_outposts != null)
+            {
+                _outposts.clicked += OpenOutposts;
+            }
             _markerDelete.clicked += DeleteSelectedMarker;
             _markerNote.RegisterValueChangedCallback(evt => SetSelectedMarkerNote(evt.newValue));
             _vector.generateVisualContent += ctx => WorldMapVectorLayer.Draw(ctx, _model, _view, _hasCameraQuad ? _cameraQuad : null);
@@ -391,6 +397,13 @@ namespace GameLogic.UI.Kit
 
         /// <summary>FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：打开派遣准备面板（目的地在面板里指定），并收起地图。
         /// 派遣准备面板只在家园里可开；不在家园时按钮显示“回家园后可用”（原因写在按钮上，B06）。</summary>
+        /// <summary>FG8-OUT-01（FGU-47）：地图上的“前哨站”按钮——收起地图（整页）再打开前哨站总览。</summary>
+        public void OpenOutposts()
+        {
+            SetOpen(false);
+            OutpostOverviewPanelUIToolkit.Open();
+        }
+
         private void ComposeExpedition()
         {
             HomeValleyController hv = GameRoot.HomeValley;
@@ -546,6 +559,10 @@ namespace GameLogic.UI.Kit
             _close.text = GameText.Get("ui.map.close");
             _markerDelete.text = GameText.Get("ui.map.marker_delete");
             _hint.text = PickActive && !string.IsNullOrEmpty(_pickHintKey) ? GameText.Get(_pickHintKey) : InputDisplay.ExpandActionTokens(GameText.Get("ui.map.hint"));
+            if (_outposts != null)
+            {
+                _outposts.text = InputDisplay.ExpandActionTokens(GameText.Get("outpost.map.button")); // FG8-OUT-01
+            }
             if (_composeExpedition != null)
             {
                 // 派遣准备面板只在家园可开：不在家园时按钮置灰，并在按钮文字上写明原因（B06“不能做要给原因”）。

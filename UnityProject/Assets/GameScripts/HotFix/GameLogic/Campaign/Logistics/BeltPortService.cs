@@ -45,6 +45,8 @@ namespace GameLogic.Campaign.Logistics
             public bool Store;
             /// <summary>FG4-ECO-02：生产建筑自己的输入 / 输出缓存（role = prod，转移由 <see cref="Economy.ProductionService.PumpPort"/> 做）。</summary>
             public bool Prod;
+            /// <summary>FG8-OUT-01：施工现场输入口（建筑虚影的占地边上、有传送带末端正对着它；收到的施工材料直接进现场，建成 / 取消后删掉）。</summary>
+            public bool Site;
             /// <summary>端口所在的建筑格。</summary>
             public GridCell PortCell;
             /// <summary>端口朝外的方向（随建筑旋转）。</summary>
@@ -163,6 +165,154 @@ namespace GameLogic.Campaign.Logistics
 
         private static string KeyOf(string buildingId, string portKey) => buildingId + "|" + portKey;
 
+        // ── FG8-OUT-01：施工现场输入口（FGR-EXP-018“材料可以用传送带铺过去”）────────────────
+        //  建筑虚影（施工中、还没建成）的占地边上任何一格，只要外侧有一段传送带的末端正对着它，就在那一格登记一个输入口（每座虚影最多 SiteInletMax 个）：
+        //  带上的施工材料（废料 / 这座建筑要的额外材料）直接进现场，现场不缺这种 / 已经齐了就不收（带停下，原因写“下游已满”）；
+        //  虚影建成 / 取消 / 被拆后输入口删掉，缓存里的物品退回仓库（放不下落地 + 搬运单，同建筑端口）。端口键 = "site:x:y:朝向"，读档按键还原。
+
+        public const string SitePortPrefix = "site:";
+        private const int SiteInletMax = 4;
+        private static readonly List<(GridCell Cell, GridDir Face)> SiteScratch = new List<(GridCell, GridDir)>(4);
+
+        /// <summary>这座建筑虚影现在登记着几个施工现场输入口（总览 / 自检读）。</summary>
+        public static int SiteInletCount(string buildingId)
+        {
+            int n = 0;
+            foreach (Binding b in Bindings)
+            {
+                if (b.Site && b.BuildingId == buildingId && b.PortId >= 0)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>该不该有施工现场输入口：家园里的建筑虚影（搬迁虚影不花材料，不要）。</summary>
+        private static bool IsSiteActive(BuildingRecord b) =>
+            b != null && b.RegionId == HomeValleyLayout.RegionId && HomeValleyController.IsPlannedGhost(b)
+            && !(HomeGridService.IsRelocationGhost(b) && b.ConstructionRequired <= 0 && !HomeValleyConstruction.HasExtras(b))
+            && GridContent.TryGetBuilding(b.BuildingTypeId, out _);
+
+        private static string SiteKey(GridCell cell, GridDir face) =>
+            SitePortPrefix + cell.X.ToString(CultureInfo.InvariantCulture) + ":" + cell.Y.ToString(CultureInfo.InvariantCulture) + ":" + ((int)face).ToString(CultureInfo.InvariantCulture);
+
+        private static bool TryParseSiteKey(string key, out GridCell cell, out GridDir face)
+        {
+            cell = default;
+            face = GridDir.N;
+            if (key == null || !key.StartsWith(SitePortPrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            string[] parts = key.Substring(SitePortPrefix.Length).Split(':');
+            if (parts.Length != 3 || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int x)
+                || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int y)
+                || !int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int f) || f < 0 || f > 3)
+            {
+                return false;
+            }
+            cell = new GridCell(x, y);
+            face = (GridDir)f;
+            return true;
+        }
+
+        private static Binding MakeSite(string buildingId, GridCell cell, GridDir face, BeltPortBindingRecord rec)
+        {
+            Vector2Int v = GridMath.DirVector(face);
+            return new Binding
+            {
+                PortId = rec?.PortId ?? -1,
+                BuildingId = buildingId,
+                PortKey = SiteKey(cell, face),
+                IsOutput = false,
+                Site = true,
+                PortCell = cell,
+                Face = face,
+                BeltCell = new GridCell(cell.X + v.x, cell.Y + v.y),
+                Record = rec,
+            };
+        }
+
+        /// <summary>虚影占地边上、外侧有传送带末端正对着的格子（按 北边 → 南边 → 西边 → 东边、坐标升序，最多 SiteInletMax 个）。O(周长)。</summary>
+        private static void CollectSiteInlets(BuildingRecord b, List<(GridCell Cell, GridDir Face)> into)
+        {
+            into.Clear();
+            if (!BeltNetworkService.IsRunning || !GridContent.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.BuildingGrid g))
+            {
+                return;
+            }
+            GridMath.FootprintBounds(new GridCell(b.GridX, b.GridY), g.FootprintW, g.FootprintH, GridMath.NormalizeRotation(b.Rotation), out GridCell min, out GridCell max);
+            BeltKernel k = BeltNetworkService.Kernel;
+            for (int x = min.X; x <= max.X; x++)
+            {
+                TrySiteInlet(k, x, max.Y, GridDir.N, into);
+            }
+            for (int x = min.X; x <= max.X; x++)
+            {
+                TrySiteInlet(k, x, min.Y, GridDir.S, into);
+            }
+            for (int y = min.Y; y <= max.Y; y++)
+            {
+                TrySiteInlet(k, min.X, y, GridDir.W, into);
+            }
+            for (int y = min.Y; y <= max.Y; y++)
+            {
+                TrySiteInlet(k, max.X, y, GridDir.E, into);
+            }
+        }
+
+        private static void TrySiteInlet(BeltKernel k, int px, int py, GridDir face, List<(GridCell Cell, GridDir Face)> into)
+        {
+            if (into.Count >= SiteInletMax)
+            {
+                return;
+            }
+            Vector2Int v = GridMath.DirVector(face);
+            int bx = px + v.x, by = py + v.y;
+            // 外侧那一格是普通传送带、方向正对着占地（= 朝向的反方向）。
+            if (k.TryGetKind(bx, by, out BeltNodeKind kind) && kind == BeltNodeKind.Belt && k.TryGetCellInfo(bx, by, out BeltCellInfo info)
+                && (int)info.Dir == BeltDirs.Opposite((int)face))
+            {
+                into.Add((new GridCell(px, py), face));
+            }
+        }
+
+        private static bool BindSite(CampaignState state, BuildingRecord b, GridCell cell, GridDir face)
+        {
+            Binding bind = MakeSite(b.BuildingId, cell, face, null);
+            int id = AllocateId(state);
+            string nameKey = FgContentTables.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.Building brow) ? brow.NameKey : null;
+            BeltOpResult r = BeltNetworkService.TryAddSink(state, id, cell, SinkBuffer, 0, nameKey, 0, (byte)face, BeltConst.AcceptAnyOneKind);
+            if (!r.Ok)
+            {
+                _retryPending = true;
+                return false;
+            }
+            bind.PortId = id;
+            bind.Record = new BeltPortBindingRecord { PortId = id, BuildingId = b.BuildingId, PortKey = bind.PortKey, Filter = FilterAll };
+            BeltPortBindingRecord[] old = state.Belts.PortBindings ?? Array.Empty<BeltPortBindingRecord>();
+            var next = new BeltPortBindingRecord[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = bind.Record;
+            state.Belts.PortBindings = next;
+            _indexed = next;
+            int at = Bindings.Count;
+            while (at > 0 && Bindings[at - 1].PortId > id)
+            {
+                at--;
+            }
+            Bindings.Insert(at, bind);
+            ById[id] = bind;
+            ByKey[KeyOf(bind.BuildingId, bind.PortKey)] = bind;
+            Revision++;
+            SiteInletsBound++;
+            return true;
+        }
+
+        /// <summary>登记过的施工现场输入口数（自检读）。</summary>
+        public static int SiteInletsBound { get; private set; }
+
         /// <summary>按存档里的绑定表重建运行时索引（只在绑定表换了时，O(端口数)）。</summary>
         private static void RebuildIndex(CampaignState state)
         {
@@ -180,6 +330,15 @@ namespace GameLogic.Campaign.Logistics
             foreach (BeltPortBindingRecord r in _indexed)
             {
                 BuildingRecord b = r != null ? HomeGridService.FindBuilding(state, r.BuildingId) : null;
+                if (r != null && TryParseSiteKey(r.PortKey, out GridCell siteCell, out GridDir siteFace))
+                {
+                    // FG8-OUT-01：施工现场输入口按端口键还原（虚影已经不在时下一次对账解绑、退回物品）。
+                    Binding site = MakeSite(r.BuildingId, siteCell, siteFace, r);
+                    Bindings.Add(site);
+                    ById[site.PortId] = site;
+                    ByKey[KeyOf(site.BuildingId, site.PortKey)] = site;
+                    continue;
+                }
                 BuildingPort row = FindRow(b?.BuildingTypeId, r?.PortKey);
                 if (b == null || row == null)
                 {
@@ -335,6 +494,24 @@ namespace GameLogic.Campaign.Logistics
                     }
                 }
             }
+            // 1b) FG8-OUT-01：建筑虚影的施工现场输入口（外侧有传送带末端正对着的占地边格）。
+            foreach (BuildingRecord b in records)
+            {
+                if (!IsSiteActive(b))
+                {
+                    continue;
+                }
+                CollectSiteInlets(b, SiteScratch);
+                foreach ((GridCell cell, GridDir face) in SiteScratch)
+                {
+                    string key = KeyOf(b.BuildingId, SiteKey(cell, face));
+                    DesiredKeys.Add(key);
+                    if (!ByKey.ContainsKey(key) && BindSite(state, b, cell, face))
+                    {
+                        added++;
+                    }
+                }
+            }
             // 2) 不该启用的（建筑不在 / 不运转 / 表里没有这个端口了）：删掉，物品退回。
             Scratch.Clear();
             foreach (Binding bind in Bindings)
@@ -415,6 +592,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return h;
             }
+            bool ghosts = false;
             for (int i = 0; i < records.Length; i++)
             {
                 BuildingRecord b = records[i];
@@ -430,6 +608,13 @@ namespace GameLogic.Campaign.Logistics
                 h = Mix(h, (ulong)(uint)b.GridY);
                 h = Mix(h, (ulong)(uint)GridMath.NormalizeRotation(b.Rotation));
                 h = Mix(h, (ulong)(uint)(b.RelocateFromId?.GetHashCode() ?? 0));
+                ghosts |= HomeValleyController.IsPlannedGhost(b);
+            }
+            if (ghosts && BeltNetworkService.IsRunning)
+            {
+                // FG8-OUT-01：有建筑虚影时，传送带拓扑变了（铺到 / 拆掉正对现场的带）也要重新对账施工现场输入口。
+                h = Mix(h, (ulong)(uint)BeltNetworkService.Kernel.CellCount);
+                h = Mix(h, (ulong)(uint)BeltNetworkService.Kernel.RebuildCount);
             }
             return Mix(h, (ulong)(uint)records.Length);
         }
@@ -578,6 +763,11 @@ namespace GameLogic.Campaign.Logistics
             int warehouse = -1;
             foreach (Binding bind in Bindings)
             {
+                if (bind.Site)
+                {
+                    PumpSite(state, bind, k);
+                    continue;
+                }
                 if ((!bind.Store && !bind.Prod) || bind.Record == null || !k.TryGetPortCounts(bind.PortId, out int pending, out int buffered, out ushort kind))
                 {
                     continue;
@@ -652,6 +842,37 @@ namespace GameLogic.Campaign.Logistics
             PumpCount++;
             LastPumpMs = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         }
+
+        /// <summary>FG8-OUT-01：施工现场输入口的缓存进现场（只收这座虚影还缺的那种材料；不缺 / 已齐就留在缓存里，带停下）。O(1)。</summary>
+        private static void PumpSite(CampaignState state, Binding bind, BeltKernel k)
+        {
+            if (bind.Record == null || !k.TryGetPortCounts(bind.PortId, out int _, out int buffered, out ushort kind) || buffered <= 0)
+            {
+                return;
+            }
+            BuildingRecord b = HomeValleyConstruction.FindBuildingFast(state, bind.BuildingId);
+            if (b == null || !HomeValleyController.IsPlannedGhost(b))
+            {
+                return; // 虚影没了：下一次对账解绑、退回仓库
+            }
+            string resource = BeltItems.ResourceOf(kind != 0 ? kind : BeltItems.ScrapId);
+            int n = Math.Min(buffered, HomeValleyConstruction.SiteNeed(b, resource));
+            if (n <= 0)
+            {
+                return;
+            }
+            int got = k.TakeFromSink(bind.PortId, n);
+            int put = HomeValleyConstruction.DeliverToSite(state, b, resource, got);
+            if (put < got)
+            {
+                HomeValleyConstruction.ReturnMaterials(state, b.Position, resource, got - put, "port:" + bind.PortId.ToString(CultureInfo.InvariantCulture) + ":site:" + GameClock.Ticks.ToString(CultureInfo.InvariantCulture));
+            }
+            WorldSim.OwnOutpostService.CountBeltPoured(state, put);
+            SitePoured += put;
+        }
+
+        /// <summary>经施工现场输入口送进现场的材料累计（自检读）。</summary>
+        public static long SitePoured { get; private set; }
 
         /// <summary>“全部可存物品”的下一种：按物品表顺序，从 <paramref name="after"/> 的下一种开始找第一种有库存的（转一圈都没有返回 0）。O(物品种类)，只在一批推完时调用。</summary>
         private static ushort NextStocked(CampaignState state, ushort after, int keep = 0)

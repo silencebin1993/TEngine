@@ -281,6 +281,12 @@ namespace GameLogic.UI.Kit
             {
                 DefenseOverviewPanelUIToolkit.Toggle();
             }
+            // FG8-OUT-01（FGU-47）：前哨站总览键（默认 Alt+U，全部上下文，可重绑）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同统计键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenOutposts)
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(OutpostOverviewPanelUIToolkit.Order))
+            {
+                OutpostOverviewPanelUIToolkit.Toggle();
+            }
             // FG7-ENV-01（FGR-ENV-002 / FGU-26）：日历键（默认 Alt+L，全部上下文，可重绑）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同统计键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCalendar)
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(CalendarPanelUIToolkit.Order))

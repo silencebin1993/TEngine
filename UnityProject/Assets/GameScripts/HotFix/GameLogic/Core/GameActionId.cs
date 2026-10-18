@@ -158,5 +158,7 @@
         ToggleRoofs = 125,
         /// <summary>FG7-ENV-03（FG07 第 4 节“顶棚覆盖叠加层”）：叠加层直达——顶棚覆盖（默认 Ctrl+Alt+9）。</summary>
         OverlayRoof = 126,
+        /// <summary>FG8-OUT-01（FGU-47 前哨站总览）：打开 / 关闭前哨站总览（各前哨站的建筑、供电、防御、补给、覆盖是否连通；全部上下文，默认 Alt+U）。</summary>
+        OpenOutposts = 127,
     }
 }

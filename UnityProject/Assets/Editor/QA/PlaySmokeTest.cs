@@ -447,6 +447,10 @@ namespace GameLogic.EditorTools
                 case 453: StepDropLanded(inStep); break;
                 case 454: StepDropRecallPick(inStep); break;
                 case 455: StepDropRecalled(inStep); break;
+                // FG8-OUT-01：前哨站与总览（测试捷径：离核心约 340 格放 3 座建成建筑；真实 Play 帧里世界步对账自动归为前哨站 →
+                // 快捷键打开前哨站总览、看行与汇总 → 输入框改名点“改名” → 关闭 → 夹具还原）
+                case 456: StepOutpostPrepare(inStep); break;
+                case 457: StepOutpostPanel(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -11735,6 +11739,146 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "DropOpenedBuild", 0);
             GameClock.SetPaused(SessionState.GetInt(K + "DropWasPaused", 0) == 1);
+            Next(456, "FG8-OUT-01：测试捷径——离核心约 340 格放 3 座建成建筑，等世界步对账归为前哨站");
+        }
+
+        // ── FG8-OUT-01：前哨站与总览（真实 Play 帧：世界步对账自动归组、快捷键打开总览、改名）──
+
+        private static void StepOutpostPrepare(double inStep)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                Finish("没有战役（前哨站）");
+                return;
+            }
+            if (inStep < 0.2)
+            {
+                return;
+            }
+            if (SessionState.GetString(K + "OutpostIds", string.Empty).Length == 0)
+            {
+                // 测试捷径：按种子地形在离核心约 340 格找一片空地（先揭开），直接登记 3 座建成的发电机 2（远程施工流程由 FgOutpostSelfCheck 覆盖）。
+                string ids = SmokePlaceOutpost(state);
+                Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+                SessionState.SetString(K + "OutpostIds", ids);
+                SessionState.SetInt(K + "OutpostWasPaused", GameClock.Paused ? 1 : 0);
+                GameClock.SetPaused(false);
+                Check(ids.Split(',').Length == 3, $"测试捷径：离核心约 340 格放了 3 座建成的发电机 2（{ids}）");
+                return;
+            }
+            bool formed = OwnOutpostService.All(state).Count > 0;
+            if (!formed && inStep < 8.0)
+            {
+                if (GameClock.Paused)
+                {
+                    GameClock.SetPaused(false);
+                }
+                return;
+            }
+            // 审查修复（FG8-OUT-01 第 1 轮，play-smoke 457 步的真因）：上一步末尾 WorldView.FlyTo 把镜头送回核心，飞行过渡（camera.fly_seconds = 0.5 真实秒）期间
+            // 输入上下文是“无”（CameraDirector.BeginTransition / PublishInputScope：过渡期间冻结冲突输入，所有快捷键含“全部上下文”的面板键都让位，FG0-UX-01 的既有设计）；
+            // 上一版对账后 0.2 秒就按 Alt+U，按键落在过渡里被丢掉、面板没开。等镜头停下（上下文就绪）再按——与玩家看着镜头停下再按一致；不加重试，一次按键必须打开。
+            if (InputRouter.ActiveContext == InputContext.None && inStep < 8.0)
+            {
+                return;
+            }
+            OwnOutpostRecord o = OwnOutpostService.All(state).FirstOrDefault();
+            Check(formed && o != null && o.Count == 3 && OwnOutpostService.DistanceFromCore(state, o) > 300f,
+                $"真实 Play 帧里世界步对账：离核心约 {(o != null ? OwnOutpostService.DistanceFromCore(state, o) : 0f):0} 格的 3 座建筑自动归为“{OwnOutpostService.NameOf(o)}”（{inStep:0.0} 秒）");
+            SessionState.SetString(K + "OutpostPressCtx", InputRouter.ActiveContext.ToString());
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OpenOutposts));
+            Next(457, $"按 {InputDisplay.ForAction(GameActionId.OpenOutposts)} 打开前哨站总览");
+        }
+
+        /// <summary>测试捷径：离核心约 340 格、按种子地形找能放下 3 座发电机 2 的一片，登记 3 座建成的；返回它们的 ID（逗号分隔，找不到返回空串）。</summary>
+        private static string SmokePlaceOutpost(CampaignState state)
+        {
+            Campaign.Grid.GridCell core = Campaign.Grid.HomeGridService.CorePivot(state);
+            string type = Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2;
+            GameConfig.fg.BuildingGrid g = Campaign.Grid.GridContent.Building(type);
+            for (int a = 0; a < 36; a++)
+            {
+                float ang = a * 10f * Mathf.Deg2Rad;
+                var center = new Vector2(core.X + Mathf.Cos(ang) * 340f, core.Y + Mathf.Sin(ang) * 340f);
+                Campaign.Grid.HomeGridService.RevealArea(state, center, 40f);
+                var placed = new List<BuildingRecord>();
+                for (int r = 0; r <= 18 && placed.Count < 3; r += 3)
+                {
+                    for (int k = 0; k < 12 && placed.Count < 3; k++)
+                    {
+                        float t = k * 30f * Mathf.Deg2Rad;
+                        var c = new Campaign.Grid.GridCell(Mathf.RoundToInt(center.x + Mathf.Cos(t) * r), Mathf.RoundToInt(center.y + Mathf.Sin(t) * r));
+                        if (!Campaign.Grid.HomeGridService.ValidatePlacement(state, type, c, 0, asPlayerPlacement: false, checkCost: false).Ok)
+                        {
+                            continue;
+                        }
+                        var rec = new BuildingRecord
+                        {
+                            BuildingId = Campaign.Regions.HomeValleyLayout.RegionId + ":smoke_outpost_" + placed.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            BuildingTypeId = type,
+                            RegionId = Campaign.Regions.HomeValleyLayout.RegionId,
+                            GridX = c.X,
+                            GridY = c.Y,
+                            Position = Campaign.Grid.GridMath.FootprintCenter(c, g.FootprintW, g.FootprintH, 0),
+                            Health = 100f,
+                            ConstructionState = BuildingConstructionState.Operational,
+                            PowerState = BuildingPowerState.NotApplicable,
+                            PowerPriority = 1,
+                            Inventory = Array.Empty<CargoEntry>(),
+                            QueueIds = Array.Empty<string>(),
+                        };
+                        state.BuildingRecords = state.BuildingRecords.Append(rec).ToArray();
+                        Campaign.Grid.HomeGridService.MapFor(state);
+                        placed.Add(rec);
+                    }
+                }
+                if (placed.Count == 3)
+                {
+                    return string.Join(",", placed.Select(x => x.BuildingId));
+                }
+                state.BuildingRecords = state.BuildingRecords.Where(x => !placed.Contains(x)).ToArray();
+                Campaign.Grid.HomeGridService.MapFor(state);
+            }
+            return string.Empty;
+        }
+
+        private static void StepOutpostPanel(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            OutpostOverviewPanelUIToolkit panel = OutpostOverviewPanelUIToolkit.Instance;
+            // 审查修复：先读打开状态（Refresh 不管面板开没开都会填文字，不能拿文字证明面板开着），再逐项断言、各自写出真实值。
+            bool isOpen = OutpostOverviewPanelUIToolkit.IsOpen;
+            bool visible = panel != null && panel.PanelVisible;
+            Check(isOpen && visible,
+                $"按 {InputDisplay.ForAction(GameActionId.OpenOutposts)} 打开前哨站总览：IsOpen={isOpen}、面板可见={visible}（按键时输入上下文 {SessionState.GetString(K + "OutpostPressCtx", "?")}，现在 {InputRouter.ActiveContext}；" +
+                $"键盘让位 {InputRouter.KeyboardSuppressed}；更高层模态 {UiKitPanelHost.AnyModalAbove(OutpostOverviewPanelUIToolkit.Order)}；确认框 {UiConfirmDialog.IsOpen}）");
+            panel?.Refresh(force: true);
+            string detail = panel?.DetailText ?? string.Empty;
+            Check(panel != null && panel.RowsShown >= 1 && detail.Contains("供电") && detail.Contains("信号"),
+                $"前哨站总览列表与详情：{panel?.RowsShown ?? 0} 行；详情含“供电”{detail.Contains("供电")}、含“信号”{detail.Contains("信号")}（“{FirstLine(detail)}”）");
+            Check(panel != null && panel.SummaryText.Contains("前哨站"), $"前哨站总览汇总：“{FirstLine(panel?.SummaryText)}”");
+            CheckNoTextMarkers("前哨站总览");
+            if (panel != null)
+            {
+                panel.NameField.value = "冒烟哨";
+            }
+            bool renamed = OutpostOverviewPanelUIToolkit.IsOpen && ClickUitk("[OutpostOverviewHost]", "OpRename") && OwnOutpostService.All(state).Any(o => OwnOutpostService.NameOf(o) == "冒烟哨");
+            Check(renamed, $"总览开着时输入框写“冒烟哨”点“改名”：前哨站改名（反馈“{panel?.MessageText}”）");
+            bool wasOpen = OutpostOverviewPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible;
+            bool closed = wasOpen && ClickUitk("[OutpostOverviewHost]", "OpClose") && !OutpostOverviewPanelUIToolkit.IsOpen && !panel.PanelVisible;
+            Check(closed, $"总览开着（{wasOpen}）时点“关闭”收起前哨站总览");
+            // 夹具还原：拆掉测试建筑（下一次对账前哨站随之删除）。
+            var ids = new HashSet<string>(SessionState.GetString(K + "OutpostIds", string.Empty).Split(','));
+            state.BuildingRecords = state.BuildingRecords.Where(x => !ids.Contains(x.BuildingId)).ToArray();
+            HomeGridService.MapFor(state);
+            Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
+            SessionState.SetString(K + "OutpostIds", string.Empty);
+            GameClock.SetPaused(SessionState.GetInt(K + "OutpostWasPaused", 0) == 1);
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

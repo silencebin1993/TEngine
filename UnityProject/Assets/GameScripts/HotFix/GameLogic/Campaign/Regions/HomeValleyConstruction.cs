@@ -279,6 +279,74 @@ namespace GameLogic.Campaign.Regions
             return need;
         }
 
+        /// <summary>FG8-OUT-01：一座建筑虚影还缺多少这种材料（不看施工单；施工包 / 传送带施工现场输入口直接往现场里送时用）。</summary>
+        public static int SiteNeed(BuildingRecord b, string resourceType)
+        {
+            if (b == null || string.IsNullOrEmpty(resourceType))
+            {
+                return 0;
+            }
+            if (resourceType == CampaignEconomyLedger.ResourceScrap)
+            {
+                return Math.Max(0, b.ConstructionRequired - b.ConstructionDelivered);
+            }
+            int n = Economy.BuildMaterials.SiteCount(b);
+            int need = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (string.Equals(b.ExtraMaterialIds[i], resourceType, StringComparison.Ordinal))
+                {
+                    need += Math.Max(0, b.ExtraRequired[i] - b.ExtraDelivered[i]);
+                }
+            }
+            return need;
+        }
+
+        /// <summary>
+        /// FG8-OUT-01（FGR-EXP-018“材料可以由机器走过去运，也可以用传送带铺过去，或者用投送舱送施工包”）：不经机器，直接把材料送进建筑虚影（施工包着陆 / 传送带施工现场输入口）。
+        /// 最多送到还缺的量为止，返回实际送进的数量。送进的材料与机器运到的同一笔“现场材料”：取消虚影全额退回、被摧毁按进度掉落（守恒不变）。等料的施工单下一次分配时回池。
+        /// </summary>
+        public static int DeliverToSite(CampaignState state, BuildingRecord b, string resourceType, int amount)
+        {
+            int need = SiteNeed(b, resourceType);
+            int put = Math.Min(Math.Max(0, amount), need);
+            if (put <= 0)
+            {
+                return 0;
+            }
+            if (resourceType == CampaignEconomyLedger.ResourceScrap)
+            {
+                b.ConstructionDelivered += put;
+            }
+            else
+            {
+                int left = put;
+                int n = Economy.BuildMaterials.SiteCount(b);
+                for (int i = 0; i < n && left > 0; i++)
+                {
+                    if (string.Equals(b.ExtraMaterialIds[i], resourceType, StringComparison.Ordinal))
+                    {
+                        int k = Math.Min(left, Math.Max(0, b.ExtraRequired[i] - b.ExtraDelivered[i]));
+                        b.ExtraDelivered[i] += k;
+                        left -= k;
+                    }
+                }
+            }
+            // FG8-OUT-01 审查修复：与机器送到的第一笔材料一样，虚影收到材料就从“规划”转为“施工中”，并刷新可视（否则画面仍显示“规划”）。
+            if (b.ConstructionState == BuildingConstructionState.Planned)
+            {
+                b.ConstructionState = BuildingConstructionState.Building;
+                BuildingVisualFeed.Mark(b);
+            }
+            DirectDelivered += put;
+            Revision++;
+            HomeValleyWorkOrders.MarkAssignmentDirty();
+            return put;
+        }
+
+        /// <summary>FG8-OUT-01：不经机器直接送进现场的材料累计（自检读）。</summary>
+        public static long DirectDelivered { get; private set; }
+
         /// <summary>这个现场还缺的材料种类，按取料顺序（废料在前，其余按表顺序）写进 <paramref name="into"/>（资源类型）。O(材料种类)，调用方复用列表。</summary>
         public static void NeededMaterials(CampaignState state, WorkOrderRecord order, List<string> into)
         {
@@ -617,8 +685,16 @@ namespace GameLogic.Campaign.Regions
                     ReturnMaterials(state, machine.WorldPosition, CampaignEconomyLedger.ResourceScrap, amount, order.WorkOrderId + ":orphan:" + order.FetchCount);
                     return;
                 }
-                b.ConstructionDelivered += amount;
-                if (b.ConstructionState == BuildingConstructionState.Planned)
+                // FG8-OUT-01 审查修复（守恒）：机器在路上时，施工包 / 传送带施工现场输入口可能已经把现场补满（DeliverToSite 只看现场缺口，不扣在途货舱）。
+                // 放进去的最多到还缺的量，多出来的退回仓库（放不下的落地加搬运单），与额外材料分支同一做法；否则建成时 RecordBuilt 会把超出部分记成消耗、凭空消失。
+                int put = Math.Min(amount, Math.Max(0, b.ConstructionRequired - b.ConstructionDelivered));
+                b.ConstructionDelivered += put;
+                if (amount > put)
+                {
+                    ReturnMaterials(state, machine.WorldPosition, CampaignEconomyLedger.ResourceScrap, amount - put,
+                        order.WorkOrderId + ":surplus:" + order.FetchCount.ToString(CultureInfo.InvariantCulture));
+                }
+                if (put > 0 && b.ConstructionState == BuildingConstructionState.Planned)
                 {
                     b.ConstructionState = BuildingConstructionState.Building;
                     BuildingVisualFeed.Mark(b);
@@ -643,8 +719,10 @@ namespace GameLogic.Campaign.Regions
                 int left = c.Amount;
                 if (b != null && c.ResourceType == CampaignEconomyLedger.ResourceScrap)
                 {
-                    b.ConstructionDelivered += left;
-                    left = 0;
+                    // FG8-OUT-01 审查修复（守恒）：同 Deposit——最多放到还缺的量，多出来的走下面的退回。
+                    int put0 = Math.Min(left, Math.Max(0, b.ConstructionRequired - b.ConstructionDelivered));
+                    b.ConstructionDelivered += put0;
+                    left -= put0;
                 }
                 for (int i = 0; i < n && left > 0; i++)
                 {

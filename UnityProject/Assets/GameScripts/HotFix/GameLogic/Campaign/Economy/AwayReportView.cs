@@ -119,6 +119,7 @@ namespace GameLogic.Campaign.Economy
             BuildEntries(state, r, "research", "away.section.research", "away.research.none", into);
             BuildEntries(state, r, "buildings", "away.section.buildings", null, into);
             BuildRules(state, r, into);
+            BuildOutposts(state, r, into);
             if (session != null)
             {
                 Title(into, "away.section.combat", "combat");
@@ -437,7 +438,7 @@ namespace GameLogic.Campaign.Economy
             int entries = 0;
             foreach (AwayEntryRecord e in r.Entries)
             {
-                if (e != null && e.Section == "raid")
+                if (e != null && e.Section == "raid" && !InOutpost(e))
                 {
                     entries++;
                 }
@@ -459,7 +460,7 @@ namespace GameLogic.Campaign.Economy
             int count = 0;
             foreach (AwayEntryRecord e in r.Entries)
             {
-                if (e != null && e.Section == section)
+                if (e != null && e.Section == section && !InOutpost(e))
                 {
                     count++;
                 }
@@ -481,11 +482,62 @@ namespace GameLogic.Campaign.Economy
         {
             foreach (AwayEntryRecord e in r.Entries)
             {
-                if (e == null || e.Section != section)
+                if (e == null || e.Section != section || InOutpost(e))
                 {
                     continue;
                 }
                 into.Add(EntryLine(e));
+            }
+        }
+
+        /// <summary>FG8-OUT-01：这一条发生在前哨站里（归到“前哨站”分组，不重复出现在家园的分段里）。</summary>
+        private static bool InOutpost(AwayEntryRecord e) => e != null && !string.IsNullOrEmpty(e.OutpostId);
+
+        /// <summary>
+        /// FG8-OUT-01（卡片“前哨站的统计和离家报告分组”）：离家期间发生在各前哨站的事件（突袭、建筑受损 / 被毁、全毁、电力……）按前哨站分组列出，
+        /// 每组开头一行写这个前哨站现在的状况（立着 / 共几座、前哨劳动几台）。前哨站已经不在了时写“已不存在”。按第一次出现的顺序。
+        /// </summary>
+        private static void BuildOutposts(CampaignState state, AwayReportRecord r, List<AwayLine> into)
+        {
+            List<string> order = null;
+            foreach (AwayEntryRecord e in r.Entries)
+            {
+                if (InOutpost(e) && (order == null || !order.Contains(e.OutpostId)))
+                {
+                    (order ??= new List<string>(2)).Add(e.OutpostId);
+                }
+            }
+            if (order == null)
+            {
+                return;
+            }
+            Title(into, "away.section.outpost", "outpost");
+            foreach (string id in order)
+            {
+                OwnOutpostRecord o = WorldSim.OwnOutpostService.Find(state, id);
+                int n = 0;
+                foreach (AwayEntryRecord e in r.Entries)
+                {
+                    n += e != null && e.OutpostId == id ? 1 : 0;
+                }
+                string head = o != null
+                    ? GameText.Format("away.outpost.head", WorldSim.OwnOutpostService.NameOf(o), n, o.Intact, o.Count, WorldSim.OwnOutpostService.LaborCount(state, id))
+                    : GameText.Format("away.outpost.head_gone", id, n);
+                into.Add(new AwayLine
+                {
+                    Text = head, Action = o != null ? AwayLineAction.Locate : AwayLineAction.Notifications, HasPos = o != null,
+                    RegionId = Regions.HomeValleyLayout.RegionId, Pos = o != null ? new Vector3(o.X, 0f, o.Y) : Vector3.zero, Section = "outpost",
+                    Cls = o != null && o.Intact == 0 && o.Count > 0 ? "ar-row-warn" : null,
+                });
+                foreach (AwayEntryRecord e in r.Entries)
+                {
+                    if (e != null && e.OutpostId == id)
+                    {
+                        AwayLine line = EntryLine(e);
+                        line.Section = "outpost";
+                        into.Add(line);
+                    }
+                }
             }
         }
 

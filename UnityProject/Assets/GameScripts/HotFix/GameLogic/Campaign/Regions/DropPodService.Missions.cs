@@ -281,7 +281,12 @@ namespace GameLogic.Campaign.Regions
         // ─────────────────────────────── 发射 / 回收 ───────────────────────────────
 
         /// <summary>发射（投送站面板“发射”）：按预览校验，通过后扣燃油、装舱（机器离开地面进舱、货物出库）、起飞。被拒时出拒绝音与原因，不改世界。</summary>
-        public static bool TryLaunch(CampaignState s, string stationId, Vector2 target, IReadOnlyList<int> machines, string cargoItem, int cargoAmount, out DropPreview p)
+        public static bool TryLaunch(CampaignState s, string stationId, Vector2 target, IReadOnlyList<int> machines, string cargoItem, int cargoAmount, out DropPreview p) =>
+            TryLaunch(s, stationId, target, machines, cargoItem, cargoAmount, false, out p);
+
+        /// <summary>FG8-OUT-01：<paramref name="constructionPack"/> = 货物是施工包（着陆时先倒进落点附近还缺这种材料的施工现场，见 <see cref="WorldSim.OwnOutpostService.PourPack"/>）。</summary>
+        public static bool TryLaunch(CampaignState s, string stationId, Vector2 target, IReadOnlyList<int> machines, string cargoItem, int cargoAmount, bool constructionPack,
+            out DropPreview p)
         {
             p = Preview(s, stationId, target, machines, cargoItem, cargoAmount);
             if (!p.Ok)
@@ -315,6 +320,7 @@ namespace GameLogic.Campaign.Regions
                     int take = Math.Min(CargoUnits, left);
                     pod.CargoItem = item.Id;
                     pod.CargoAmount = take;
+                    pod.ConstructionPack = constructionPack;
                     left -= take;
                     Depart(pod, MissionDelivery, b.Position, target, perPod, group);
                 }

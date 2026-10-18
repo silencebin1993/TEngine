@@ -558,6 +558,10 @@ namespace GameLogic.Campaign.Economy
             {
                 Append(ref r.Entries, new AwayEntryRecord
                 {
+                    // FG8-OUT-01：发生在前哨站里的事件按前哨站分组（记账那一刻按位置认定，O(1)）。
+                    OutpostId = member.HasLocation && (string.IsNullOrEmpty(member.RegionId) || member.RegionId == Regions.HomeValleyLayout.RegionId)
+                        ? WorldSim.OwnOutpostService.OutpostIdAt(state, new Vector2(member.Location.x, member.Location.z)) ?? string.Empty
+                        : string.Empty,
                     Section = def.AwaySection,
                     TypeId = def.Id,
                     Detail = member.Detail ?? string.Empty,

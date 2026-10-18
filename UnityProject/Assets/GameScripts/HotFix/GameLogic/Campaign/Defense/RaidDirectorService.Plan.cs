@@ -211,21 +211,24 @@ namespace GameLogic.Campaign.Defense
             double prox = RaidCatalog.TargetProximityCells;
             int minB = RaidCatalog.TargetOutpostMinBuildings;
             var picks = new List<(string Id, double X, double Y, double W, int Count)>(4);
-            foreach (WorldMapOwnClusters.Cluster c in WorldMapOwnClusters.For(s))
+            // FG8-OUT-01（关闭 DEBT-FG6DEF04-14）：目标改读正式的前哨站实体（稳定编号、名字）；按“还立着的建筑”计座数——
+            // 全毁的前哨站（只剩废墟 / 虚影）不再被选为目标，建筑修好 / 重建后恢复。先对账一次（与世界步同一入口，确定、与观察无关）。
+            OwnOutpostService.Sync(s);
+            foreach (OwnOutpostRecord o in OwnOutpostService.All(s))
             {
-                if (!c.IsOutpost || c.Count < minB)
+                if (o == null || o.Intact < minB)
                 {
                     continue;
                 }
                 double edge = 1e9;
                 if (terr != null)
                 {
-                    double dx = c.X - terr.CenterX;
-                    double dy = c.Y - terr.CenterY;
+                    double dx = o.X - terr.CenterX;
+                    double dy = o.Y - terr.CenterY;
                     edge = Math.Max(0, Math.Sqrt(dx * dx + dy * dy) - terr.OuterRadius);
                 }
-                double w = c.Count / 10.0 * (1.0 + prox / (prox + edge));
-                picks.Add((c.Id, c.X, c.Y, w, c.Count));
+                double w = o.Intact / 10.0 * (1.0 + prox / (prox + edge));
+                picks.Add((o.OutpostId, o.X, o.Y, w, o.Intact));
             }
             if (picks.Count == 0)
             {

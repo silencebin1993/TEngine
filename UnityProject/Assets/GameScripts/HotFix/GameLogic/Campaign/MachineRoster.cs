@@ -33,6 +33,9 @@ namespace GameLogic.Campaign
         /// <summary>岗位 / 驻防点变更版本号（界面据此重建）。</summary>
         public static int Revision { get; private set; } = 1;
 
+        /// <summary>FG8-OUT-01：前哨站合并 / 删除改了机器的常驻前哨站时，界面跟着重建。</summary>
+        public static void Touch() => Revision++;
+
         /// <summary>有没有己方前哨站（FG8-OUT-01 接上；之前恒为“没有”，前哨劳动一律拒绝并说明）。</summary>
         public static Func<CampaignState, bool> HasOutpostProvider;
 
@@ -179,7 +182,9 @@ namespace GameLogic.Campaign
         {
             if (IsHome(m))
             {
-                return GameText.Get("roster.place.home");
+                // FG8-OUT-01：人在某个己方前哨站里时写前哨站的名字（前哨劳动常驻的那个，或路过的任一个）。
+                string op = WorldSim.OwnOutpostService.OutpostIdAt(s, MachineRegistry.TryGetLivePosition(m.LogicId, out Vector2 live) ? live : m.WorldPosition);
+                return op != null ? GameText.Format("roster.place.outpost", WorldSim.OwnOutpostService.NameOf(s, op)) : GameText.Get("roster.place.home");
             }
             if (m != null && m.IsAlive && Regions.ExpeditionMarchService.IsTeamMember(s, m.LogicId))
             {
@@ -265,7 +270,64 @@ namespace GameLogic.Campaign
             return GameText.Get("roster.garrison.path_blocked");
         }
 
-        public static bool HasOutpost(CampaignState s) => HasOutpostProvider != null && HasOutpostProvider(s);
+        /// <summary>FG8-OUT-01：有没有己方前哨站（自检可注入 <see cref="HasOutpostProvider"/>；正式流程读 <see cref="WorldSim.OwnOutpostService"/>）。</summary>
+        public static bool HasOutpost(CampaignState s) => HasOutpostProvider != null ? HasOutpostProvider(s) : WorldSim.OwnOutpostService.HasAny(s);
+
+        /// <summary>FG8-OUT-01：这台前哨劳动机器常驻的前哨站（岗位不是前哨劳动、没指定或那个前哨站已经不在了 → null）。</summary>
+        public static OwnOutpostRecord OutpostOf(CampaignState s, MachineRecord m) =>
+            m != null && m.Role == MachineRole.OutpostLabor ? WorldSim.OwnOutpostService.Find(s, m.OutpostId) : null;
+
+        /// <summary>
+        /// FG8-OUT-01（FGR-ECO-040“前哨劳动：常驻某个前哨站”）：这台机器按前哨劳动接活——岗位是前哨劳动、常驻的前哨站还在。
+        /// 它只接工作地点在这个前哨站里的劳动工作单（施工 / 搬运 / 拆解 / 维修，同劳动岗的确定性分配），没活时回前哨站驻点待命（<see cref="KeepRoles"/>）。
+        /// </summary>
+        public static bool TakesOutpostLabor(CampaignState s, MachineRecord m) => OutpostOf(s, m) != null;
+
+        /// <summary>前哨劳动的机器常驻的前哨站已经不在了（建筑都拆掉了）：停下待命，名册写明，等玩家重新指定。</summary>
+        public static bool OutpostMissing(CampaignState s, MachineRecord m) =>
+            m != null && m.Role == MachineRole.OutpostLabor && !string.IsNullOrEmpty(m.OutpostId) && WorldSim.OwnOutpostService.Find(s, m.OutpostId) == null;
+
+        /// <summary>
+        /// FG8-OUT-01：给前哨劳动的机器指定常驻的前哨站（名册详情的“常驻前哨站”下拉框、总览面板的“派驻”都走这里）。岗位不是前哨劳动时一并改成前哨劳动（同 <see cref="TrySetRole"/> 的检查）。
+        /// 成功：让出不在这个前哨站里的工单（交还待分配池）、机器停下，下一次派工评估按新前哨站接活 / 回驻点。失败什么都不改，<paramref name="message"/> 写原因。
+        /// </summary>
+        public static bool TrySetOutpost(CampaignState s, int logicId, string outpostId, out string message)
+        {
+            OwnOutpostRecord o = WorldSim.OwnOutpostService.Find(s, outpostId);
+            if (o == null)
+            {
+                message = GameText.Get("outpost.err.unknown");
+                return false;
+            }
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null)
+            {
+                message = GameText.Get("roster.err.unknown");
+                return false;
+            }
+            if (m.Role != MachineRole.OutpostLabor)
+            {
+                if (!TrySetRole(s, logicId, MachineRole.OutpostLabor, out message))
+                {
+                    return false;
+                }
+            }
+            else if (m.OutpostId == outpostId)
+            {
+                message = GameText.Format("roster.outpost.same", MachineNaming.Short(m), WorldSim.OwnOutpostService.NameOf(o));
+                return false;
+            }
+            if (m.OutpostId != outpostId)
+            {
+                HomeValleyWorkOrders.ReleaseForRoleChange(s, logicId, MachineRole.OutpostLabor);
+                m.OutpostId = outpostId;
+                m.RoleOrderId = null;
+                Revision++;
+                HomeValleyWorkOrders.MarkAssignmentDirty();
+            }
+            GuidanceHooks.Raise(GuidanceHooks.OutpostFirstLabor);
+            message = GameText.Format("roster.outpost.ok", MachineNaming.Short(m), WorldSim.OwnOutpostService.NameOf(o));
+            return true;
+        }
 
         // ── 改岗位 ───────────────────────────────────────────────────────────────
 
@@ -317,7 +379,9 @@ namespace GameLogic.Campaign
                 return TrySendToRepair(s, m, out message);
             }
             bool resumeGarrison = role == MachineRole.Garrison && (GarrisonSuspended(s, m) || GarrisonBlocked(s, m));
-            if (current == role && !resumeGarrison)
+            // FG8-OUT-01：前哨劳动但常驻的前哨站不在了 / 没指定 / 回驻点受阻或被玩家接管 → 再设一次 = 重新指定最近的前哨站并恢复回驻点。
+            bool resumeOutpost = role == MachineRole.OutpostLabor && (OutpostOf(s, m) == null || OutpostStationSuspended(s, m) || OutpostStationBlocked(s, m));
+            if (current == role && !resumeGarrison && !resumeOutpost)
             {
                 message = GameText.Format("roster.err.same", who, RoleName(role));
                 return false;
@@ -329,6 +393,18 @@ namespace GameLogic.Campaign
             Revision++;
             HomeValleyWorkOrders.MarkAssignmentDirty();
             GuidanceHooks.Raise(GuidanceHooks.RosterFirstRoleChange);
+            if (role == MachineRole.OutpostLabor)
+            {
+                // FG8-OUT-01：没指定过 / 原来的前哨站不在了 → 常驻离它最近的前哨站（名册详情可以换），消息写明是哪一个。
+                OwnOutpostRecord o = WorldSim.OwnOutpostService.Find(s, m.OutpostId) ?? WorldSim.OwnOutpostService.Nearest(s, m.WorldPosition);
+                m.OutpostId = o?.OutpostId;
+                if (o != null)
+                {
+                    GuidanceHooks.Raise(GuidanceHooks.OutpostFirstLabor);
+                    message = GameText.Format("roster.ok.outpost_labor", who, WorldSim.OwnOutpostService.NameOf(o));
+                    return true;
+                }
+            }
             message = GameText.Format("roster.ok.role", who, RoleName(role));
             return true;
         }
@@ -753,7 +829,7 @@ namespace GameLogic.Campaign
             {
                 return 0;
             }
-            int issued = 0;
+            int issued = KeepOutpostStations(s, takenByPlayer);
             List<MachineRecord> garrison = null;
             foreach (MachineRecord m in MachineRegistry.AllRecords)
             {
@@ -828,6 +904,79 @@ namespace GameLogic.Campaign
             }
             return issued;
         }
+
+        /// <summary>FG8-OUT-01：前哨劳动回驻点单的发起方（工单面板写“前哨劳动回驻点”）。</summary>
+        public const string OutpostIssuer = "outpost";
+
+        /// <summary>回驻点单被玩家接管过（接入 / 下了别的命令）：不再拉回驻点，直到它接了前哨里的活或在名册里重设。</summary>
+        public static bool OutpostStationSuspended(CampaignState s, MachineRecord m)
+        {
+            WorkOrderRecord o = m == null || string.IsNullOrEmpty(m.RoleOrderId) ? null : HomeValleyWorkOrders.Find(s, m.RoleOrderId);
+            return o != null && o.IssuerId == OutpostIssuer && o.State == WorkOrderState.Cancelled && o.FailureReason == HomeValleyWorkOrders.PlayerTookOverReason;
+        }
+
+        /// <summary>上一张回驻点单到不了驻点而失败：不再补派（否则每次评估一张新单、一条“无法到达”通知），直到重设或换前哨站。</summary>
+        public static bool OutpostStationBlocked(CampaignState s, MachineRecord m)
+        {
+            WorkOrderRecord o = m == null || string.IsNullOrEmpty(m.RoleOrderId) ? null : HomeValleyWorkOrders.Find(s, m.RoleOrderId);
+            return o != null && o.IssuerId == OutpostIssuer && o.State == WorkOrderState.Failed
+                   && (HomeValleyWorkOrders.IsUnreachableReason(o.FailureReason) || o.FailureReason == HomeValleyWorkOrders.PathBlockedReason);
+        }
+
+        /// <summary>
+        /// FG8-OUT-01（“前哨劳动：常驻某个前哨站”）：前哨劳动的机器没活干、而且人不在自己的前哨站里（离驻点超过 outpost.station_radius 格）——开一张回驻点单
+        /// （驻防同一种工单，发起方“前哨劳动”），走回前哨站驻点待命；到了之后这张单挂着，派工评估给它前哨里的活时让出（<c>HomeValleyWorkOrders.TickAssignment</c>）。
+        /// 玩家接管过 / 到不了：不补派（同驻防的处理）。O(机器数)，只在派工评估时跑，与观察无关。
+        /// </summary>
+        private static int KeepOutpostStations(CampaignState s, Func<int, bool> takenByPlayer)
+        {
+            List<MachineRecord> list = null;
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m != null && m.Role == MachineRole.OutpostLabor && m.IsAlive && IsHome(m) && !m.IsInFactory && !string.IsNullOrEmpty(m.OutpostId))
+                {
+                    (list ??= new List<MachineRecord>()).Add(m);
+                }
+            }
+            if (list == null)
+            {
+                return 0;
+            }
+            list.Sort((a, b) => a.LogicId.CompareTo(b.LogicId));
+            int issued = 0;
+            float radius = WorldSim.OwnOutpostService.StationRadius;
+            foreach (MachineRecord m in list)
+            {
+                if ((takenByPlayer != null && takenByPlayer(m.LogicId)) || Signal.SignalCoverageService.IsMachineOutOfCoverage(m.LogicId)
+                    || HomeValleyWorkOrders.FindActiveOrderForMachine(s, m.LogicId) != null || OutpostStationSuspended(s, m) || OutpostStationBlocked(s, m))
+                {
+                    continue;
+                }
+                OwnOutpostRecord o = OutpostOf(s, m);
+                BuildingRecord station = o != null ? WorldSim.OwnOutpostService.StationBuilding(s, o) : null;
+                if (station == null)
+                {
+                    continue;
+                }
+                Vector2 at = MachineRegistry.TryGetLivePosition(m.LogicId, out Vector2 live) ? live : m.WorldPosition;
+                if ((at - station.Position).sqrMagnitude <= radius * radius || WorldSim.OwnOutpostService.OutpostIdAt(s, at) == o.OutpostId)
+                {
+                    continue; // 已经在自己的前哨站里：原地待命（不来回走）
+                }
+                string id = "outpost-station-" + m.LogicId.ToString(CultureInfo.InvariantCulture) + "-" + GameClock.Ticks.ToString(CultureInfo.InvariantCulture);
+                HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateGarrison(s, id, m.LogicId, station.BuildingId, 0, OutpostIssuer);
+                if (r.Success)
+                {
+                    m.RoleOrderId = r.WorkOrderId;
+                    issued++;
+                    OutpostStationOrders++;
+                }
+            }
+            return issued;
+        }
+
+        /// <summary>开过的回驻点单数（自检读）。</summary>
+        public static int OutpostStationOrders { get; private set; }
 
         // ── 劳动力（顶栏、远征准备）──────────────────────────────────────────────
 

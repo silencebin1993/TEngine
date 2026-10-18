@@ -2065,6 +2065,18 @@ namespace GameLogic.Campaign.Regions
             CreateSelfOrder(state, workOrderId, WorkOrderKind.Garrison, machineLogicId,
                 string.IsNullOrEmpty(pointBuildingId) ? HomeValleyLayout.RegionId + ":" + HomeValleyLayout.BuildingTypeCore : pointBuildingId, ruleSerial, issuer);
 
+        /// <summary>FG8-OUT-01：前哨劳动在驻点待命挂着的回驻点单（驻防同一种工单，发起方 <see cref="MachineRoster.OutpostIssuer"/>）。</summary>
+        public static bool IsOutpostStation(WorkOrderRecord o) => o != null && o.Kind == WorkOrderKind.Garrison && o.IssuerId == MachineRoster.OutpostIssuer;
+
+        /// <summary>FG8-OUT-01：回驻点单因为接了前哨里的活而收工的原因。</summary>
+        public const string OutpostWorkReason = "outpost-work";
+
+        /// <summary>FG8-OUT-01：前哨劳动的机器从派工评估领到的活（自检读）。</summary>
+        public static int OutpostLaborAssignments { get; private set; }
+
+        /// <summary>每张待派工单所属的前哨站（与 ReadyPositions 平行；没有 = null）。</summary>
+        private static readonly List<string> ReadyOutposts = new List<string>(16);
+
         /// <summary>FG4-ECO-07：名册派的送修 / 驻防单的发起方（工单面板写“由名册送修 / 名册岗位驻防”）。</summary>
         public const string RosterIssuer = "roster";
 
@@ -2096,7 +2108,7 @@ namespace GameLogic.Campaign.Regions
             // FG4-ECO-07 审查修复（P0）：调用方传入的 ID 只是基础 ID（名册按“机器 + 时钟步”拼，暂停中时钟不走会重复）——撞号时追加序号，调用方以返回的 ID 为准。
             workOrderId = FreshOrderId(state, workOrderId);
             WorkOrderRecord current = FindActiveOrderForMachine(state, machineLogicId);
-            if (current != null && IsRuleSelfKind(current.Kind) && current.IssuerId == RosterIssuer)
+            if (current != null && IsRuleSelfKind(current.Kind) && (current.IssuerId == RosterIssuer || current.IssuerId == MachineRoster.OutpostIssuer))
             {
                 // FG4-ECO-07：名册岗位驻防 / 送修被规则或名册新的送修替下——不算玩家接管，替下它的单子结束后岗位维持器再派它回驻防点。
                 EndSelfOrder(current, RoleYieldReason);
@@ -2196,8 +2208,10 @@ namespace GameLogic.Campaign.Regions
             {
                 bool rosterGarrison = current.Kind == WorkOrderKind.Garrison && current.IssuerId == RosterIssuer;
                 bool rosterRepair = current.Kind == WorkOrderKind.MachineRepair && current.IssuerId == RosterIssuer;
+                // FG8-OUT-01：前哨劳动的回驻点单只属于这个岗位 / 这个前哨站——改任何岗位、换前哨站都结束它。
+                bool outpostStation = current.Kind == WorkOrderKind.Garrison && current.IssuerId == MachineRoster.OutpostIssuer;
                 // 名册送修 = 玩家在名册里选的“维修中”：玩家在名册里改选别的岗位就是不修了（取消）；规则派的送修只在改为闲置时取消。
-                if (newRole == MachineRole.Idle || rosterRepair || (rosterGarrison && newRole != MachineRole.Garrison))
+                if (newRole == MachineRole.Idle || rosterRepair || outpostStation || (rosterGarrison && newRole != MachineRole.Garrison))
                 {
                     EndSelfOrder(current, "role-changed");
                     return true;
@@ -2390,7 +2404,9 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 // FG4-ECO-07（FGR-ECO-040 / FGR-BASE-020）：只有“劳动”岗的机器接工作单；驻防 / 远征预备 / 闲置……一律不接（玩家直接下的命令不受影响）。
-                if (!MachineRoster.TakesLabor(machine))
+                // FG8-OUT-01：“前哨劳动”岗也接，但只接自己前哨站里的活（下面按工作地点筛）；在驻点待命挂着的回驻点单可以让出。
+                bool outpostLabor = !MachineRoster.TakesLabor(machine) && MachineRoster.TakesOutpostLabor(state, machine);
+                if (!MachineRoster.TakesLabor(machine) && !outpostLabor)
                 {
                     continue;
                 }
@@ -2398,7 +2414,8 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                if (FindActiveOrderForMachine(state, machine.LogicId) != null)
+                WorkOrderRecord holding = FindActiveOrderForMachine(state, machine.LogicId);
+                if (holding != null && !(outpostLabor && IsOutpostStation(holding)))
                 {
                     continue;
                 }
@@ -2417,9 +2434,18 @@ namespace GameLogic.Campaign.Regions
 
             // FG3-LOG-09：工作地点与机器无关，每张待派工单每轮只解析一次（改前每台空闲机器 × 每张工单各解析一次）。
             ReadyPositions.Clear();
+            ReadyOutposts.Clear();
+            bool anyOutpostLabor = false;
+            foreach (MachineRecord m in idleMachines)
+            {
+                anyOutpostLabor |= m.Role == MachineRole.OutpostLabor;
+            }
             foreach (WorkOrderRecord order in readyOrders)
             {
-                ReadyPositions.Add(ResolveWorkPosition(state, order));
+                Vector2 wp = ResolveWorkPosition(state, order);
+                ReadyPositions.Add(wp);
+                // FG8-OUT-01：工单属于哪个前哨站（施工按现场、不按取料腿的仓库；其余按工作地点）。只有有前哨劳动的机器在候选里才算，O(1) 一张。
+                ReadyOutposts.Add(anyOutpostLabor ? WorldSim.OwnOutpostService.OutpostIdAt(state, order.Kind == WorkOrderKind.Build ? HomeValleyConstruction.SitePosition(state, order) : wp) : null);
             }
 
             foreach (MachineRecord machine in idleMachines)
@@ -2449,6 +2475,10 @@ namespace GameLogic.Campaign.Regions
                     {
                         continue; // 0＝该机器对这一类工作永久禁用（不影响玩家直接点选下令）。
                     }
+                    if (machine.Role == MachineRole.OutpostLabor && !MachineRoster.TakesLabor(machine) && ReadyOutposts[oi] != machine.OutpostId)
+                    {
+                        continue; // FG8-OUT-01：前哨劳动只接自己前哨站里的活（家园与别的前哨站的活留给劳动岗 / 那里的前哨劳动）。
+                    }
 
                     float distance = Vector2.Distance(fromPos, ReadyPositions[oi]);
                     if (best == null || IsBetterCandidate(categoryPriority, order, distance, bestCategoryPriority, best, bestDistance))
@@ -2464,9 +2494,19 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
 
+                WorkOrderRecord station = FindActiveOrderForMachine(state, machine.LogicId);
+                if (station != null && IsOutpostStation(station))
+                {
+                    EndSelfOrder(station, OutpostWorkReason); // FG8-OUT-01：在驻点待命的前哨劳动接活——回驻点单收工，干完活维持器再派回驻点。
+                }
                 WorkOrderOpResult assigned = ReassignExisting(state, best, machine.LogicId);
                 if (assigned.Success)
                 {
+                    if (machine.Role == MachineRole.OutpostLabor)
+                    {
+                        machine.RoleOrderId = null; // 接了前哨里的活 = 回驻点的“玩家接管 / 受阻”暂停解除
+                        OutpostLaborAssignments++;
+                    }
                     beginAssignedMovement(best);
                 }
             }

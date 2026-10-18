@@ -138,6 +138,10 @@ namespace GameLogic.Campaign
         /// <summary>名册为这台机器开的最近一张驻防 / 送修工单（岗位维持器据此判断“玩家接管过就不再拉回去”）。</summary>
         public string RoleOrderId;
 
+        /// <summary>FG8-OUT-01（FGR-ECO-040“前哨劳动：常驻某个前哨站”）：“前哨劳动”岗位常驻的己方前哨站（<see cref="OwnOutpostRecord.OutpostId"/>；空 = 没指定）。
+        /// 唯一写入口 <see cref="MachineRoster.TrySetRole"/> / <see cref="MachineRoster.TrySetOutpost"/>（前哨站合并时由 <see cref="WorldSim.OwnOutpostService"/> 改指向）。只加字段、不升存档版本。</summary>
+        public string OutpostId;
+
         /// <summary>
         /// FG6-DEF-06（FGR-DEF-043“按玩家画的巡逻路线巡逻”，承接 DEBT-FG4ECO07-02）：驻防岗的巡逻点（建筑 ID，按顺序；空 / null = 守在驻防点不巡逻）。
         /// 路线 = 驻防点 → 巡逻点 1 → … → 回到驻防点，循环。唯一写入口 <see cref="MachineRoster.TryAddPatrolPoint"/> / <see cref="MachineRoster.TryClearPatrol"/>。只加字段、不升存档版本。
