@@ -2271,6 +2271,8 @@ namespace GameLogic.Campaign.Economy
             int total = 0;
             foreach (int id in machines ?? Array.Empty<int>())
             {
+                // FG8-LOOT-02：野外分拣装进货舱的物品按同一条规则卸下（按协议入库：加密固件进固件库、模块 / 数据核心登记解析身份）。
+                total += LootPickService.UnloadHeld(state, id, at);
                 if (!MachineRegistry.TryGetRecord(id, out MachineRecord m) || !m.IsAlive || m.Cargo == null || m.Cargo.Length == 0)
                 {
                     continue;

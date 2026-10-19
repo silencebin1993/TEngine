@@ -583,6 +583,8 @@ namespace GameLogic.Campaign
             // FG5-RND-06：黑匣子（家园阵亡直接回收进陈列馆队列；远征阵亡掉在阵亡处；这台机器携带的别人的黑匣子也掉在原地），
             // 阵亡通知（反馈时刻 MachineDestroyed → 通知 machine_destroyed）正文里附黑匣子的去向。
             string blackBox = Economy.BlackBoxService.OnMachineDied(CampaignSession.Current, record, deathPosition);
+            // FG8-LOOT-02（FGR-LOOT-022）：它携带的三选一数据包转给同队机器（没有就留在原地、永不消失）；货舱里分拣得到的物品掉在原地。
+            Economy.LootPickService.OnMachineDied(CampaignSession.Current, record, deathPosition);
             string caption = string.IsNullOrEmpty(blackBox)
                 ? GameLogic.Localization.GameText.Format("machine.feedback.destroyed", MachineNaming.Short(record))
                 : GameLogic.Localization.GameText.Format("machine.feedback.destroyed_bb", MachineNaming.Short(record), blackBox);

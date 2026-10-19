@@ -451,6 +451,11 @@ namespace GameLogic.EditorTools
                 // 快捷键打开前哨站总览、看行与汇总 → 输入框改名点“改名” → 关闭 → 夹具还原）
                 case 456: StepOutpostPrepare(inStep); break;
                 case 457: StepOutpostPanel(inStep); break;
+                // FG8-LOOT-02：三选一数据包（测试捷径：给家园核心旁的一台机器发一个待分拣数据包；面板不自己弹出 → 真实点顶栏“待分拣 ×1” → 面板三张候选卡 →
+                // 在家园直接点“选这个”入库、没选的转技术数据 → Esc 关闭 → 顶栏计数消失）
+                case 458: StepLootPickPrepare(inStep); break;
+                case 459: StepLootPickPanel(inStep); break;
+                case 460: StepLootPickClosed(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -11883,6 +11888,79 @@ namespace GameLogic.EditorTools
             Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
             SessionState.SetString(K + "OutpostIds", string.Empty);
             GameClock.SetPaused(SessionState.GetInt(K + "OutpostWasPaused", 0) == 1);
+            Next(458, "FG8-LOOT-02：测试捷径——给核心旁的一台机器发一个待分拣数据包，点顶栏“待分拣 ×1”");
+        }
+
+        private static void StepLootPickPrepare(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            MachineRecord holder = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && Campaign.Economy.LootPickService.AtDepot(state, m))
+                .OrderBy(m => m.LogicId).FirstOrDefault();
+            Check(holder != null, $"家园核心 / 仓库旁有一台存活的机器可以携带数据包（{holder?.LogicId}）");
+            if (holder == null)
+            {
+                Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
+                return;
+            }
+            int before = Campaign.Economy.LootPickService.Count(state);
+            Campaign.LootPackageRecord p = Campaign.Economy.LootPickService.Grant(state, Campaign.Economy.LootPickService.SourceElite, "silent", holder.LogicId,
+                Campaign.Regions.HomeValleyLayout.RegionId, holder.WorldPosition);
+            SessionState.SetString(K + "LootPacket", p?.PacketId ?? string.Empty);
+            SessionState.SetString(K + "LootTech", ((long)state.TechData).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
+            hud?.Refresh();
+            string count = hud?.PacketCountText ?? string.Empty;
+            Check(p != null && p.Candidates.Length == 3 && Campaign.Economy.LootPickService.Count(state) == before + 1 && !LootPickPanelUIToolkit.IsOpen
+                  && count == Localization.GameText.Format("loot.pick.hud", before + 1),
+                $"得到数据包不弹面板（{!LootPickPanelUIToolkit.IsOpen}），顶栏显示“{count}”");
+            Check(ClickUitk("[WorldBarHost]", "WorldPacketCount"), "点顶栏“待分拣 ×1”");
+            Next(459, "待分拣面板：三张候选卡、在家园可以直接选，点“选这个”，Esc 关闭");
+        }
+
+        private static void StepLootPickPanel(double inStep)
+        {
+            if (inStep < 0.6)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            LootPickPanelUIToolkit panel = LootPickPanelUIToolkit.Instance;
+            bool isOpen = LootPickPanelUIToolkit.IsOpen;
+            panel?.Refresh(force: true);
+            string id = SessionState.GetString(K + "LootPacket", string.Empty);
+            Check(isOpen && panel != null && panel.PanelVisible && panel.CurrentPacketId == id,
+                $"点顶栏计数打开待分拣面板：IsOpen={isOpen}、当前数据包 {panel?.CurrentPacketId}（期望 {id}）");
+            bool cards = panel != null && Enumerable.Range(0, 3).All(i => panel.CardName(i).Length > 0 && panel.CardMeta(i).Contains("占货舱") && panel.CardCompare(i).StartsWith("对比"));
+            Check(cards && panel.ChooseEnabled(0) && panel.ReasonText.Length == 0 && panel.WhereText.Contains("入库"),
+                $"三张候选卡（“{panel?.CardName(0)}”：“{panel?.CardMeta(0)}”；“{panel?.CardCompare(0)}”），在家园可以直接选（去向“{panel?.WhereText}”）");
+            CheckNoTextMarkers("待分拣面板");
+            int tech = panel != null ? Campaign.Economy.LootPickService.LeftoverTechIf(Campaign.Economy.LootPickService.Find(state, id), 0) : 0;
+            long tech0 = long.Parse(SessionState.GetString(K + "LootTech", "0"), System.Globalization.CultureInfo.InvariantCulture);
+            bool picked = ClickUitk("[LootPickPanelHost]", "LootPickChoose0") && Campaign.Economy.LootPickService.Find(state, id) == null;
+            Check(picked && (long)state.TechData >= tech0 + tech && (panel?.MessageText ?? string.Empty).Contains("已选"),
+                $"点“选这个”：数据包分拣完成、没选的转为技术数据 +{tech}（反馈“{panel?.MessageText}”）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            SessionState.SetString(K + "LootPacket", string.Empty);
+            Next(460, "待分拣面板：Esc 关闭后面板收起、顶栏计数消失");
+        }
+
+        private static void StepLootPickClosed(double inStep)
+        {
+            if (inStep < 0.4)
+            {
+                return;
+            }
+            CampaignState state = CampaignSession.Current;
+            WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
+            hud?.Refresh();
+            string count = hud?.PacketCountText ?? string.Empty;
+            bool none = Campaign.Economy.LootPickService.Count(state) == 0 && Campaign.Economy.LootPickService.HeldCount(state) == 0;
+            Check(!LootPickPanelUIToolkit.IsOpen && none && count.Length == 0,
+                $"Esc 关闭待分拣面板（IsOpen={LootPickPanelUIToolkit.IsOpen}）；没有数据包、货舱里也没有分拣物品时顶栏计数隐藏（“{count}”）");
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

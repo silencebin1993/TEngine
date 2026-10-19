@@ -2023,6 +2023,93 @@ namespace GameLogic.Campaign
         public int TotalDrops;
         public int TotalEnemyItems;
         public int ClawBonusItems;
+
+        // ── FG8-LOOT-02 三选一与保底（FGR-LOOT-020～022）。只加字段、不升域版本：旧档没有 = 空 / 0。唯一写入口 Economy.LootPickService。──
+        /// <summary>待分拣的数据包（携带着的 + 留在地上的）。分拣后移走；数据包永不消失（D-13，<see cref="Economy.KeyItemRetention"/>），没有条数上限。</summary>
+        public LootPackageRecord[] Packets = Array.Empty<LootPackageRecord>();
+        /// <summary>在野外战略暂停中分拣、装进机器货舱的物品（回到家园按“远征卸货”规则卸下；机器阵亡时掉在原地）。</summary>
+        public LootHeldRecord[] Held = Array.Empty<LootHeldRecord>();
+        /// <summary>三选一的选择记录（最近 loot.pick.log_max 条；远征结算 FG8-EXP-05 读）。</summary>
+        public LootPickLogRecord[] Picks = Array.Empty<LootPickLogRecord>();
+        /// <summary>见过的候选（种类 + 物品 + 身份的键）：从没见过的候选标“新”。</summary>
+        public string[] SeenKeys = Array.Empty<string>();
+        /// <summary>下一个数据包的序号（候选按“世界种子 + 序号 + 候选位”确定；读档后接着编）。</summary>
+        public long NextPacketSerial = 1;
+        /// <summary>保底计数：连续多少个数据包没有出现稀有及以上（≥ loot.pick.pity 时下一个必有一个稀有位）。</summary>
+        public int NoRareStreak;
+        /// <summary>统计：生成 / 分拣的数据包数、保底触发次数、没选的候选转成的技术数据。</summary>
+        public int PacketsMade;
+        public int PacketsResolved;
+        public int PityHits;
+        public long LeftoverTech;
+    }
+
+    /// <summary>FG8-LOOT-02：一个待分拣数据包。</summary>
+    [Serializable]
+    public sealed class LootPackageRecord
+    {
+        public string PacketId = string.Empty;
+        public long Serial;
+        /// <summary>来源：elite（精英被击毁）/ event（事件完成，FG10）/ boss（首领，另加的一个）。</summary>
+        public string Source = string.Empty;
+        /// <summary>阵营键（候选池 = 该阵营池 + 通用池；空 = 只用通用池）。</summary>
+        public string Faction = string.Empty;
+        public long Tick;
+        /// <summary>携带它的机器（LogicId；0 = 在地上）。数据包跟着远征队走、不占货舱（FGR-LOOT-022）。</summary>
+        public int Holder;
+        /// <summary>在地上时的地点与位置（格）。地上的数据包永不消失，己方机器走近就捡起来。</summary>
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
+        /// <summary>这一包是保底包（有一个候选位强制抽稀有及以上）。</summary>
+        public bool Pity;
+        public LootCandidateRecord[] Candidates = Array.Empty<LootCandidateRecord>();
+    }
+
+    /// <summary>FG8-LOOT-02：数据包里的一个候选（生成时就定下，存读档前后一致）。</summary>
+    [Serializable]
+    public sealed class LootCandidateRecord
+    {
+        /// <summary>fg.TbLootPick.id。</summary>
+        public string RowId = string.Empty;
+        /// <summary>item / firmware / firmware_cracked / module / core。</summary>
+        public string Kind = string.Empty;
+        public string ItemId = string.Empty;
+        /// <summary>身份：固件 ID / 组件 ID / 背景资料 ID；普通物品为空。</summary>
+        public string TargetId = string.Empty;
+        public int Amount;
+        /// <summary>common / fine / rare / prototype。</summary>
+        public string Tier = string.Empty;
+    }
+
+    /// <summary>FG8-LOOT-02：野外分拣后装在某台机器货舱里的一件（一份）物品。</summary>
+    [Serializable]
+    public sealed class LootHeldRecord
+    {
+        /// <summary>唯一 ID（"pick:" + 数据包 ID）：入库幂等、掉在地上时当回收实例 ID 用。</summary>
+        public string HeldId = string.Empty;
+        public int Machine;
+        public string Kind = string.Empty;
+        public string ItemId = string.Empty;
+        public string TargetId = string.Empty;
+        public int Amount;
+        public int Space;
+        public string Faction = string.Empty;
+    }
+
+    /// <summary>FG8-LOOT-02：一次三选一的选择记录。</summary>
+    [Serializable]
+    public sealed class LootPickLogRecord
+    {
+        public string PacketId = string.Empty;
+        public string Source = string.Empty;
+        public string Faction = string.Empty;
+        public string ChosenRowId = string.Empty;
+        public string ChosenTier = string.Empty;
+        /// <summary>depot = 直接入库；cargo = 装进货舱。</summary>
+        public string Destination = string.Empty;
+        public int TechData;
+        public long Tick;
     }
 
     /// <summary>FG8-LOOT-01：地上一件带身份的敌方加密物品（按地面物的回收实例 ID 对应）。</summary>

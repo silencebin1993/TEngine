@@ -256,6 +256,8 @@ namespace GameLogic.UI.Kit
 
             // FG8-EXP-02：远征行军条（状态 / 预计到达时间每次刷新都可能变，不走下面的刷新键；O(成员数)）。
             RefreshMarch(state);
+            // FG8-LOOT-02：待分拣数据包计数（只在数量 / 语言变化时改文字，O(1)）。
+            RefreshPackets(state);
 
             IReadOnlyList<WorldView.FocusTarget> targets = WorldView.FocusTargets(state);
             _keyBuilder.Clear();
@@ -311,6 +313,13 @@ namespace GameLogic.UI.Kit
             _marchReturn = root.Q<Button>("WorldMarchReturn");
             _marchFollow = root.Q<Button>("WorldMarchFollow");
             _marchReason = root.Q<Label>("WorldMarchReason");
+            // FG8-LOOT-02：待分拣数据包计数（点开待分拣面板；悬停写现在能不能分拣）。
+            _packets = root.Q<Button>("WorldPacketCount");
+            if (_packets != null)
+            {
+                _packets.clicked += LootPickPanelUIToolkit.Open;
+                UiTooltip.Attach(_packets, PacketTip);
+            }
             if (_marchAdvance == null || _marchHold == null || _marchReturn == null || _marchFollow == null)
             {
                 return;
@@ -327,6 +336,61 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_marchHold, () => MarchTip("exp.cmd.hold", "exp.cmd.tip.hold"));
             UiTooltip.Attach(_marchReturn, () => MarchTip("exp.cmd.return", "exp.cmd.tip.return"));
             UiTooltip.Attach(_marchFollow, () => new TooltipContent { Title = _marchFollow.text, Body = GameText.Get("exp.follow.started") });
+        }
+
+        private Button _packets;
+        private int _packetKey = -1;
+
+        /// <summary>自检读点：顶栏“待分拣 ×N”。</summary>
+        public string PacketCountText => _packets != null && !_packets.ClassListContains("uk-hidden") ? _packets.text : string.Empty;
+        public Button PacketButton => _packets;
+
+        /// <summary>顶栏文字：“待分拣 ×N”、“待分拣 ×N · 货舱 ×M”或只剩货舱物品时“货舱里 ×M”。</summary>
+        public static string PacketLabel(int packets, int held) =>
+            packets > 0 ? (held > 0 ? GameText.Format("loot.pick.hud.both", packets, held) : GameText.Format("loot.pick.hud", packets)) : GameText.Format("loot.pick.hud.held", held);
+
+        private static TooltipContent PacketTip()
+        {
+            CampaignState s = CampaignSession.Current;
+            if (LootPickService.Count(s) == 0)
+            {
+                return new TooltipContent { Title = GameText.Get("loot.pick.title"), Body = GameText.Format("loot.pick.hud.held_tip", LootPickService.HeldCount(s)) };
+            }
+            int ready = LootPickService.ReadyCount(s);
+            string why = null;
+            if (ready == 0)
+            {
+                foreach (LootPackageRecord p in LootPickService.Packets(s))
+                {
+                    LootPickService.CanProcess(s, p, out why, out _);
+                    break;
+                }
+            }
+            return new TooltipContent
+            {
+                Title = GameText.Get("loot.pick.title"),
+                Body = ready > 0 ? GameText.Format("loot.pick.hud.ready", ready) : GameText.Format("loot.pick.hud.wait", GameText.Get(why ?? "loot.pick.reason.none")),
+            };
+        }
+
+        /// <summary>顶栏数据包计数：只在数量 / 语言变化时改文字。O(1)。</summary>
+        private void RefreshPackets(CampaignState state)
+        {
+            if (_packets == null)
+            {
+                return;
+            }
+            int n = LootPickService.Count(state);
+            int h = LootPickService.HeldCount(state);
+            int key = HashCode.Combine(n, h, (int)GameText.Language);
+            if (key == _packetKey)
+            {
+                return;
+            }
+            _packetKey = key;
+            // 有待分拣的数据包，或货舱里还有分拣得到的物品（没有数据包时也要能点开面板查看 / 入库 / 丢弃）。
+            SetVisible(_packets, n > 0 || h > 0);
+            _packets.text = PacketLabel(n, h);
         }
 
         private static TooltipContent MarchTip(string titleKey, string bodyKey) => new TooltipContent

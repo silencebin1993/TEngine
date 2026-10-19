@@ -553,6 +553,14 @@ namespace GameLogic.Core
         /// <summary>第一次有敌方加密物品被拒绝直接使用（回收站退回 / 装配被拒）。引导内容：为什么不能用、去解析台。</summary>
         public const string LootFirstEncryptedRejected = "loot.first_encrypted_rejected";
 
+        // ── FG8-LOOT-02：三选一与保底（只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次得到待分拣数据包。引导内容：数据包不在战斗中弹出、顶栏计数、回家园 / 战略暂停时分拣；图鉴“三选一数据包”随之解锁。</summary>
+        public const string LootFirstPacket = "loot.first_packet";
+        /// <summary>第一次分拣（选了一个候选）。引导内容：没选的转为技术数据、稀有度与保底、货舱占用。</summary>
+        public const string LootFirstPick = "loot.first_pick";
+        /// <summary>第一次有数据包因为携带的机器阵亡又没有同队机器而留在原地。引导内容：数据包永不消失、派机器去取回。</summary>
+        public const string LootFirstPacketDropped = "loot.first_packet_dropped";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -618,6 +626,7 @@ namespace GameLogic.Core
             DropStationFirstBuilt, DropPanelFirstOpen, DropFirstLaunch, DropFirstLanded, DropFirstRecall, DropFirstAntiAirRejected,
             OutpostFirstFounded, OutpostPanelFirstOpen, OutpostFirstRenamed, OutpostFirstLabor, OutpostFirstPack, OutpostFirstWiped,
             LootFirstFieldDrop, LootFirstEncryptedRejected,
+            LootFirstPacket, LootFirstPick, LootFirstPacketDropped,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

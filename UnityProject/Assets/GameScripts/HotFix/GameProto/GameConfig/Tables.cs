@@ -231,6 +231,10 @@ public partial class Tables
     /// </summary>
     public fg.TbLootDrop TbLootDrop {get; }
     /// <summary>
+    /// 三选一候选池
+    /// </summary>
+    public fg.TbLootPick TbLootPick {get; }
+    /// <summary>
     /// 机械敌人
     /// </summary>
     public fg.TbMechEnemy TbMechEnemy {get; }
@@ -520,6 +524,7 @@ public partial class Tables
         TbIntelKind = new fg.TbIntelKind(loader("fg_tbintelkind"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbLootDrop = new fg.TbLootDrop(loader("fg_tblootdrop"));
+        TbLootPick = new fg.TbLootPick(loader("fg_tblootpick"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
@@ -638,6 +643,7 @@ public partial class Tables
         TbIntelKind.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbLootDrop.ResolveRef(this);
+        TbLootPick.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);

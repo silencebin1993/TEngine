@@ -226,6 +226,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.ResearchService.ResetSessionState(); // FG5-RND-01：实验室索引、效果缓存、阵营分支缓存按新战役重建
             Economy.TestRangeService.ResetSessionState(); // FG5-RND-03：仿真投影是运行时状态（不存档），换战役 / 读档时清掉
             Economy.FusionService.ResetSessionState();
+            Economy.LootPickService.ResetSessionState(); // FG8-LOOT-02：数据包的会话统计与“可以分拣了”提示去重（存档里的数据包不动）
             Economy.BlackBoxService.ResetSessionState(); // FG5-RND-06：陈列馆索引、“第一座陈列馆建成”钩子标记按新会话重来
             Economy.IntelService.ResetSessionState(); // FG5-RND-05：监听站索引、“第一座监听站建成”钩子标记按新会话重来 // FG5-RND-04：界面反馈与“第一座合成台建成”钩子标记按新会话重来；绑定刻录台的熔合接口
             Defense.TurretService.ResetSessionState(); // FG6-DEF-01：炮塔的运行时缓存（编译结果、补给原因）按新会话重建；存档里的炮塔记录不动
@@ -639,6 +640,8 @@ namespace GameLogic.Campaign.WorldSim
                     Defense.SiegeService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG8-EXP-03：据点 / 巡逻迎战（机器走近 → 就地展开、全灭 → 摧毁 / 歼灭与掉落、没人 → 收拢），每 siege.sync_seconds 一次 O(醒着的据点 + 巡逻)；逐单位交战在上面的家园内核里。
                     TerritoryControlService.CombatStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG8-LOOT-02：三选一数据包——携带者对账、地上的数据包被走近的机器捡起、回到家园时提示可以分拣；每 loot.pick.check_seconds 一次（只看步序号，与观察无关），没有数据包时 O(1)。
+                    Economy.LootPickService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG6-LOG-10（FGR-LOG-046）：管线泄漏液洼——取走内核本步的液洼反应（告警），每 logistics.leak.sync_seconds 对账（扩大 / 消退 / 残留到期 / 火烧坏设施）；
                     // 只看步序号，与观察无关，O(液洼数)。逐单位挂标签、液洼遇火整片反应在上面家园内核的一步里（Main/Sim，Burst）。放在攻城之后：本步溅射打穿的管线本步就积起液洼。
                     Logistics.PipeLeakService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

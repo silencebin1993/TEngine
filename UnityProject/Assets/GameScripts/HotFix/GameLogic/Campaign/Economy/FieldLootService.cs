@@ -91,6 +91,11 @@ namespace GameLogic.Campaign.Economy
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             TotalMs += ms;
             MaxMs = Math.Max(MaxMs, ms);
+            if (elite)
+            {
+                // FG8-LOOT-02（FGR-LOOT-010 / 020）：精英另生成一个待分拣数据包（不在战斗中弹出；耗时另记在 LootPickService）。
+                LootPickService.OnEliteKilled(s, site, def?.Faction ?? string.Empty, at, killerUnit);
+            }
         }
 
         /// <summary>敌方据点被摧毁（驻军全灭，TerritoryControlService 调用）：按 outpost 行掷材料、少量组件、可能的数据核心。</summary>
@@ -224,6 +229,21 @@ namespace GameLogic.Campaign.Economy
                 GameText.Format("loot.drop.enemy_item", item.Name, ItemProtocol.DestinationShort(ItemDestination.NeedsAnalysis)));
         }
 
+        /// <summary>FG8-LOOT-02：三选一分拣得到、又落在地上的敌方物品（丢弃 / 携带机器阵亡）登记身份——之后与野外掉落同一条搬运交付路径。</summary>
+        internal static void TagGround(CampaignState s, string salvageId, string itemId, string targetId, string origin, string faction)
+        {
+            LootPacketState st = StateOf(s);
+            if (st == null || string.IsNullOrEmpty(salvageId) || FindTag(st, salvageId) >= 0)
+            {
+                return;
+            }
+            AddTag(s, st, new LootGroundTagRecord
+            {
+                SalvageId = salvageId, ItemId = itemId ?? string.Empty, TargetId = targetId ?? string.Empty, Origin = origin ?? string.Empty, Faction = faction ?? string.Empty,
+                Tick = GameClock.Ticks,
+            });
+        }
+
         private static void AddTag(CampaignState s, LootPacketState st, LootGroundTagRecord tag)
         {
             int max = LootCatalog.TagsMax;
@@ -312,6 +332,10 @@ namespace GameLogic.Campaign.Economy
             LootGroundTagRecord tag = st.GroundTags[i];
             if (tag.ItemId == AnalysisCatalog.EncryptedFirmwareId && FirmwareKinds.IsFirmware(tag.TargetId))
             {
+                if (tag.Origin == LootPickService.OriginPrototype)
+                {
+                    HomeValleyAnalysis.CrackFirmwareContent(s, tag.TargetId); // FG8-LOOT-02：原型刻录数据落地后再搬回，仍按“已破解”入库
+                }
                 for (int k = 0; k < amount; k++)
                 {
                     GrantChip(s, k == 0 ? id : id + "#" + k.ToString(CultureInfo.InvariantCulture), tag.TargetId);

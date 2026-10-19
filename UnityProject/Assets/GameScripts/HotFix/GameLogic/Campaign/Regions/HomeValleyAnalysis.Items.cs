@@ -664,6 +664,22 @@ namespace GameLogic.Campaign.Regions
             return false;
         }
 
+        /// <summary>
+        /// FG8-LOOT-02（三选一的“原型刻录数据”）：一种敌方固件不经解析台直接算作已破解——与解析台破解芯片同一写法（按内容写解锁表、通知裸跑服务），
+        /// 同种固件所有实例一起去掉加密标记。已经破解过返回 false。
+        /// </summary>
+        internal static bool CrackFirmwareContent(CampaignState state, string firmwareId)
+        {
+            if (state == null || !FirmwareKinds.IsFirmware(firmwareId) || !FirmwareKinds.IsRaw(state, firmwareId))
+            {
+                return false;
+            }
+            Unlock(state, firmwareId);
+            RawFirmwareService.OnCracked(state, firmwareId);
+            FirmwareKinds.NotifyCrackStateChanged();
+            return true;
+        }
+
         private static void Unlock(CampaignState state, string contentId)
         {
             state.UnlockedContentIds ??= Array.Empty<string>();
