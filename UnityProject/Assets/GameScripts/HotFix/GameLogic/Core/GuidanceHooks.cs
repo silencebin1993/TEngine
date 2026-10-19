@@ -561,6 +561,16 @@ namespace GameLogic.Core
         /// <summary>第一次有数据包因为携带的机器阵亡又没有同队机器而留在原地。引导内容：数据包永不消失、派机器去取回。</summary>
         public const string LootFirstPacketDropped = "loot.first_packet_dropped";
 
+        // ── FG8-LOOT-03：货舱、自动拾取、阵亡掉落（只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次有机器货舱满了（自动拾取 / 转移 / 分拣因为放不下被拒，或装满）。引导内容：丢弃、在战略暂停中转移给队友、带搬运轮式 / 货舱结构模块。</summary>
+        public const string LootFirstCargoFull = "loot.first_cargo_full";
+        /// <summary>第一次自动拾取。引导内容：按物品开关（设置里）、关键材料与黑匣子始终拾取、家园附近交给搬运单。</summary>
+        public const string LootFirstAutoPickup = "loot.first_auto_pickup";
+        /// <summary>第一次在机器之间转移货物。</summary>
+        public const string LootFirstCargoTransfer = "loot.first_cargo_transfer";
+        /// <summary>第一次打开货舱面板。</summary>
+        public const string LootFirstCargoOpen = "loot.first_cargo_open";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -627,6 +637,7 @@ namespace GameLogic.Core
             OutpostFirstFounded, OutpostPanelFirstOpen, OutpostFirstRenamed, OutpostFirstLabor, OutpostFirstPack, OutpostFirstWiped,
             LootFirstFieldDrop, LootFirstEncryptedRejected,
             LootFirstPacket, LootFirstPick, LootFirstPacketDropped,
+            LootFirstCargoFull, LootFirstAutoPickup, LootFirstCargoTransfer, LootFirstCargoOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -41,6 +41,7 @@ namespace GameLogic.UI.Kit
             Create<DefensePanelUIToolkit>("[DefensePanelHost]"); // FG6-DEF-02：护盾 / 陷阱 / 屏障面板（30064，炮塔面板之上、暂停菜单之下：“?”打开的图鉴盖在它上面）。 // FG6-DEF-01：炮塔（30063，建筑面板 30042 之上、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<OutpostOverviewPanelUIToolkit>("[OutpostOverviewHost]"); // FG8-OUT-01：前哨站总览（30059，投送站 30058 之上、日历 30061 与暂停菜单之下：“?”打开的图鉴、“派驻机器”打开的名册盖在它上面）。
             Create<DropStationPanelUIToolkit>("[DropStationHost]"); // FG8-DROP-01：投送站（30058，战略地图 30050 / 地点提示 30052 之上、日历与暂停菜单之下：“?”打开的图鉴盖在它上面）。
+            Create<CargoPanelUIToolkit>("[CargoPanelHost]"); // FG8-LOOT-03：货舱（30083，暂停菜单之上——从暂停菜单“货舱”打开，关掉回到暂停菜单；“?”打开的图鉴、“自动拾取设置…”回到暂停菜单前先关掉本面板）。
             Create<LootPickPanelUIToolkit>("[LootPickPanelHost]"); // FG8-LOOT-02：待分拣数据包（30060，投送站 / 前哨站总览之上、日历与暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<BlackBoxPanelUIToolkit>("[BlackBoxPanelHost]"); // FG5-RND-06：黑匣子陈列馆 / 纪念墙（30065，情报之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<IntelPanelUIToolkit>("[IntelPanelHost]"); // FG5-RND-05：情报面板（30066，合成台之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
@@ -105,6 +106,7 @@ namespace GameLogic.UI.Kit
             IntelPanelUIToolkit.Close();
             BlackBoxPanelUIToolkit.Close();
             LootPickPanelUIToolkit.Close(); // FG8-LOOT-02
+            CargoPanelUIToolkit.Close(); // FG8-LOOT-03
             DropStationPanelUIToolkit.Close();
             OutpostOverviewPanelUIToolkit.Close(); // FG8-OUT-01
             ConstructionQueuePanelUIToolkit.Close();

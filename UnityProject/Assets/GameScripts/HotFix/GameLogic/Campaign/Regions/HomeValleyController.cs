@@ -42,6 +42,10 @@ namespace GameLogic.Campaign.Regions
         public bool IsActive => IsLoaded && WorldView.IsObserved(SiteId);
 
         private GameObject _root;
+        private readonly GameLogic.View.GroundLootVisuals _lootVisuals = new GameLogic.View.GroundLootVisuals();
+
+        /// <summary>FG8-LOOT-03：地上战利品的地面外观（自检读点）。</summary>
+        public GameLogic.View.GroundLootVisuals LootVisuals => _lootVisuals;
         private Camera _camera;
         /// <summary>家园机器的逻辑句柄（战斗内核单位的门面，不是表现对象；FG0-ARCH-03）。</summary>
         private readonly List<HomeValleyMachineMarker> _machineMarkers = new List<HomeValleyMachineMarker>(4);
@@ -1549,6 +1553,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
+            // FG8-LOOT-03（FG-GAP-104）：地上的数据包 / 黑匣子的地面外观（地面物——含阵亡 / 丢弃掉落的货——走下面已有的地面物外观）。版本变了才对账。
+            _lootVisuals.Sync(state, HomeValleyLayout.RegionId, _root.transform, includeGround: false);
             _siteView.BeginFrame(state); // FG3-LOG-02：现场 → 施工单索引（工单数组或施工修订号变了才重建），下面逐座刷新虚影进度 O(1)。
             bool cvd = GameSettings.ColorblindSafeIconsEnabled;
             bool recordsChanged = !ReferenceEquals(_visualsRecordsRef, state.BuildingRecords);
@@ -2840,6 +2846,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (_root != null)
             {
+                _lootVisuals.Clear();
                 GameLogic.View.UnityObjects.Release(_root);
                 _root = null;
             }

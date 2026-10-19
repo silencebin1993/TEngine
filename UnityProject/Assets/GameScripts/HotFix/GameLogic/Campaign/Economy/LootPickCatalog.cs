@@ -82,32 +82,60 @@ namespace GameLogic.Campaign.Economy
 
         // ── 货舱空间（FGR-LOOT-030；FG8-LOOT-03 的货舱界面沿用）──
 
-        /// <summary>一份物品占几格货舱：材料每 loot.cargo.material_per_space 件 1 格（向上取整）；固件 1、组件 3、数据核心 2、未解析模块 3、人类遗产 2、黑匣子 1（初值）。</summary>
+        /// <summary>FG8-LOOT-03：材料每这么多件占 1 格（loot.cargo.material_per_space）。</summary>
+        public static int MaterialPerSpace => Math.Max(1, (int)Math.Round(Tuning("loot.cargo.material_per_space", 10f)));
+
+        /// <summary>按“件”占空间的物品每件占几格（固件 1、组件 3、数据核心 2、未解析模块 3、人类遗产 2、黑匣子 1，初值）；不是这类（= 材料）返回 false。
+        /// <see cref="IsPerUnit"/> 与 <see cref="SpaceOf"/> 共用这一张表，加新的按件物品只改这里。</summary>
+        private static bool TryPerUnitSpace(string itemId, out int per)
+        {
+            switch (itemId)
+            {
+                case AnalysisCatalog.EncryptedFirmwareId:
+                case ItemCatalog.FirmwareChipId:
+                    per = (int)Math.Round(Tuning("loot.cargo.firmware", 1f));
+                    return true;
+                case AnalysisCatalog.UnparsedModuleId:
+                    per = (int)Math.Round(Tuning("loot.cargo.module", 3f));
+                    return true;
+                case AnalysisCatalog.DataCoreId:
+                    per = (int)Math.Round(Tuning("loot.cargo.core", 2f));
+                    return true;
+                case "combat_component":
+                case "structure_module":
+                case "drop_pod":
+                    per = (int)Math.Round(Tuning("loot.cargo.component", 3f));
+                    return true;
+                case "human_legacy":
+                    per = (int)Math.Round(Tuning("loot.cargo.legacy", 2f));
+                    return true;
+                case BlackBoxService.ContentId:
+                    per = (int)Math.Round(Tuning("loot.cargo.blackbox", 1f));
+                    return true;
+            }
+            per = 0;
+            return false;
+        }
+
+        /// <summary>FG8-LOOT-03：这种物品按“件”占空间（固件 / 组件 / 数据核心 / 未解析模块 / 人类遗产 / 黑匣子）；否则是材料，按每 N 件 1 格（可以拆开装）。</summary>
+        public static bool IsPerUnit(string itemId) => TryPerUnitSpace(itemId, out _);
+
+        /// <summary>FG8-LOOT-03：货舱记录是不是“材料”（普通物品、按件数计空间、可以拆开装 / 同机同种合并成一条）。</summary>
+        public static bool IsBulk(string kind, string itemId) => kind == KindItem && !IsPerUnit(itemId);
+
+        /// <summary>一份物品占几格货舱：材料每 loot.cargo.material_per_space 件 1 格（向上取整；同一台机器的同种材料按总件数算，见 LootPickService.UsedSpace）；
+        /// 按件计的物品见 <see cref="TryPerUnitSpace"/>。</summary>
         public static int SpaceOf(string itemId, int amount)
         {
             if (amount <= 0)
             {
                 return 0;
             }
-            switch (itemId)
+            if (TryPerUnitSpace(itemId, out int unit))
             {
-                case AnalysisCatalog.EncryptedFirmwareId:
-                case ItemCatalog.FirmwareChipId:
-                    return amount * (int)Math.Round(Tuning("loot.cargo.firmware", 1f));
-                case AnalysisCatalog.UnparsedModuleId:
-                    return amount * (int)Math.Round(Tuning("loot.cargo.module", 3f));
-                case AnalysisCatalog.DataCoreId:
-                    return amount * (int)Math.Round(Tuning("loot.cargo.core", 2f));
-                case "combat_component":
-                case "structure_module":
-                case "drop_pod":
-                    return amount * (int)Math.Round(Tuning("loot.cargo.component", 3f));
-                case "human_legacy":
-                    return amount * (int)Math.Round(Tuning("loot.cargo.legacy", 2f));
-                case BlackBoxService.ContentId:
-                    return amount * (int)Math.Round(Tuning("loot.cargo.blackbox", 1f));
+                return amount * unit;
             }
-            int per = Math.Max(1, (int)Math.Round(Tuning("loot.cargo.material_per_space", 10f)));
+            int per = MaterialPerSpace;
             return (amount + per - 1) / per;
         }
 

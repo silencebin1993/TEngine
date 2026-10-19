@@ -319,7 +319,10 @@ namespace GameLogic.Campaign.Economy
             }
             BlackBoxState f = EnsureBox(s);
             string region = string.IsNullOrEmpty(m.RegionId) ? HomeValleyLayout.RegionId : m.RegionId;
-            bool home = IsHome(region);
+            // FG8-LOOT-03（FGR-EXP-032“机器阵亡时，它货舱里的东西和黑匣子掉在原地”；FGR-RND-060“远征时由其他机器带回”）：
+            // 在外的远征队成员在家园所在星球上、家园 / 带仓库的前哨站范围外阵亡，也算远征阵亡——黑匣子掉在原地，队友走近自动捡起，带回家园即回收（CargoService）。
+            bool planetField = IsHome(region) && Regions.ExpeditionMarchService.IsTeamMember(s, m.LogicId) && !LootPickService.IsDepotPosition(s, region, at);
+            bool home = IsHome(region) && !planetField;
             long now = GameClock.Ticks;
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
@@ -360,7 +363,9 @@ namespace GameLogic.Campaign.Economy
                 return GameText.Get(WorkingCount(s) > 0 ? "blackbox.where.home_gallery" : "blackbox.where.home_no_gallery");
             }
             GuidanceHooks.Raise(GuidanceHooks.BlackBoxFirstLeftBehind);
-            return GameText.Format("blackbox.where.field", PlaceName(region));
+            return planetField
+                ? GameText.Format("blackbox.where.planet", Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y))
+                : GameText.Format("blackbox.where.field", PlaceName(region));
         }
 
         /// <summary>撤离结算里一件关键物被带回（ResolveExtraction 把它标成 Recovered 之后调）：是黑匣子 → 进陈列馆队列。不是黑匣子时不做事。</summary>

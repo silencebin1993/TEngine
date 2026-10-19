@@ -1416,6 +1416,27 @@ namespace GameLogic.EditorTools
             bool itemsClosed = ClickUitk("[ItemsPanelHost]", "ItemsPanelClose") && !UI.Kit.ItemsPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(itemsClicked && itemsOpen && heldToggle && protocolBadges && itemsClosed,
                 $"暂停菜单点“物资”：物资面板打开（{ip?.CountText}，{allTiles} 格），协议角标（未解析模块“{protoEnemy}”、合金“{protoOwn}”），“只看持有的”可切，点关闭回到暂停菜单");
+            // FG8-LOOT-03（FGU-35）：暂停菜单“货舱”→ 货舱面板（新战役没有在外的远征队：写空状态与空间规则说明）；点关闭回到暂停菜单。
+            // 设置段里的“自动拾取（远征队）”按物品开关：每种掉落物一个开关，取消勾选立即进存档，再勾回。
+            bool cargoClicked = ClickUitk("[PauseMenuHost]", "PauseCargo");
+            UI.Kit.CargoPanelUIToolkit cgp = UI.Kit.CargoPanelUIToolkit.Instance;
+            cgp?.Refresh(force: true);
+            bool cargoOpen = cgp != null && UI.Kit.CargoPanelUIToolkit.IsOpen && cgp.PanelVisible && cgp.TeamText.Length > 0 && cgp.AutoText.StartsWith("自动拾取")
+                             && !Localization.GameText.ContainsMarker(cgp.TeamText + cgp.AutoText + cgp.EmptyText + cgp.TargetText);
+            bool cargoClosed = ClickUitk("[CargoPanelHost]", "CargoClose") && !UI.Kit.CargoPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            PauseMenuUIToolkit pmAuto = PauseMenuUIToolkit.Instance;
+            int autoN = pmAuto?.AutoPickupToggleCount ?? 0;
+            UnityEngine.UIElements.Toggle autoT = pmAuto?.AutoPickupToggle("metal_ore");
+            bool autoFlip = false;
+            if (autoT != null && autoT.value)
+            {
+                autoT.value = false;
+                bool offNow = !Campaign.Economy.CargoService.IsAutoPickup(CampaignSession.Current, "metal_ore");
+                autoT.value = true;
+                autoFlip = offNow && Campaign.Economy.CargoService.IsAutoPickup(CampaignSession.Current, "metal_ore");
+            }
+            Check(cargoClicked && cargoOpen && cargoClosed && autoN == Campaign.Economy.CargoService.AutoPickupItems().Count && autoN > 0 && autoFlip,
+                $"暂停菜单点“货舱”：货舱面板打开（“{cgp?.TeamText}”，“{cgp?.AutoText}”），点关闭回到暂停菜单；设置段“自动拾取”有 {autoN} 个物品开关，取消 / 勾回金属矿立即生效（{autoFlip}）");
             // FG4-ECO-06（FGU-15）：暂停菜单“常驻规则”→ 规则面板（新战役默认一条“远征卸货”）；从常用预设新建（下拉框选中即生效）、点“编辑”、日志页签、
             // 行内删除先确认、点关闭回到暂停菜单。
             bool rulesClicked = ClickUitk("[PauseMenuHost]", "PauseRules");

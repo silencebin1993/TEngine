@@ -49,7 +49,7 @@ namespace GameLogic.UI.Kit
         /// <summary>FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：标题栏“编成远征队”按钮。</summary>
         private Button _composeExpedition;
         private Button _outposts;
-        private readonly Button[] _filters = new Button[8];
+        private readonly Button[] _filters = new Button[9]; // FG8-LOOT-03：第 9 个 = 地上的战利品
         private VisualElement _canvas;
         private VisualElement _textureLayer;
         private VisualElement _vector;

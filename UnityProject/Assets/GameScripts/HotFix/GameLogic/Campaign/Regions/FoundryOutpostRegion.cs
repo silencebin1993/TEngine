@@ -658,6 +658,9 @@ namespace GameLogic.Campaign.Regions
             item.Position = default;
             Log.Info($"[FoundryOutpostRegion] {item.ContentId} 已装入机器 {carrierLogicId} 货舱。");
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, $"{Feedback.FeedbackCues.QuestItemName(item.ContentId)} → {Feedback.FeedbackCues.MachineLabel(carrierLogicId)} 货舱");
+            // FG8-LOOT-03：关键物 / 黑匣子从地上装进货舱——通知货舱面板、顶栏和地面外观重建（数组引用没变，靠修订号）。
+            Economy.LootPickService.Touch();
+            Economy.BlackBoxService.Touch();
             return ActionResult.Ok();
         }
 

@@ -235,21 +235,17 @@ namespace GameLogic.Campaign.Regions
 
         // ── 出发校验：货位需求计算（DEMO-CONTENT-LOCK.md §2.3）────────────────────
 
-        /// <summary>单件货物占用的货位数。废料按 <see cref="HomeValleyLayout.ScrapUnitsPerCargoSlot"/>
-        /// 向上取整（不足一箱也占 1 位，40 的整数倍每 40 占 1 位）；其余资源类型（完整模块/终端数据盒/
-        /// 核心数据）按"件"计，不管数量，每种占 1 位——本 Story 只有废料是真实可产出的资源类型，其余
-        /// 类型的换算规则先落数据，供 ER4-CONTENT-01 之后的真实模块/数据盒复用。</summary>
+        /// <summary>一份货物占用的货舱空间（FG8-LOOT-03 起与正式版货舱同一规则：<see cref="Economy.LootPickCatalog.SpaceOf"/>）。</summary>
         public static int SlotsForCargo(string resourceType, int amount)
         {
             if (amount <= 0)
             {
                 return 0;
             }
-            if (resourceType == CampaignEconomyLedger.ResourceScrap)
-            {
-                return (int)Math.Ceiling(amount / (double)HomeValleyLayout.ScrapUnitsPerCargoSlot);
-            }
-            return 1;
+            // FG8-LOOT-03（FGR-LOOT-030）：Demo 的“废料每 40 占 1 位、其余每种 1 位”换成正式版的唯一空间规则（材料每 10 件 1 格、固件 1、组件 3……），
+            // 与货舱界面、自动拾取、转移、三选一同一组函数（Economy.LootPickCatalog.SpaceOf），不另起一套格子。
+            string itemId = Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) ? def.Id : resourceType;
+            return Economy.LootPickCatalog.SpaceOf(itemId, amount);
         }
 
         public readonly struct LoadoutCheckResult

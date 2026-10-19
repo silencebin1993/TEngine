@@ -42,6 +42,10 @@ namespace GameLogic.Campaign.Regions
         public void SetEvacPanelOpen(bool open) => IsEvacPanelOpen = open;
 
         private GameObject _root;
+        private readonly GameLogic.View.GroundLootVisuals _lootVisuals = new GameLogic.View.GroundLootVisuals();
+
+        /// <summary>FG8-LOOT-03：地上战利品的地面外观（自检读点）。</summary>
+        public GameLogic.View.GroundLootVisuals LootVisuals => _lootVisuals;
         private Camera _camera;
         /// <summary>FG0-ARCH-01：镜头归全局镜头管理器（<see cref="WorldView"/>）；本地点被观察时借用。</summary>
         private CameraDirector _cameraDirector => IsActive && WorldView.Director.IsBound ? WorldView.Director : null;
@@ -1341,6 +1345,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            // FG8-LOOT-03（FG-GAP-104）：地上的数据包 / 黑匣子/ 地面物的地面外观（版本变了才对账）。
+            _lootVisuals.Sync(state, FoundryOutpostLayout.RegionId, _root.transform, includeGround: true);
             RegionRecord region = FoundryOutpostRegion.Find(state);
 
             RefreshColor("Poi_" + FoundryOutpostLayout.Crate1Id, CrateColor(state, FoundryOutpostLayout.Crate1Id));
@@ -1391,6 +1397,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (_root != null)
             {
+                _lootVisuals.Clear();
                 GameLogic.View.UnityObjects.Release(_root);
                 _root = null;
             }

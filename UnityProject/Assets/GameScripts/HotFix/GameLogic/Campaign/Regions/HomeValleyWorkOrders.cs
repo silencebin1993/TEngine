@@ -1221,7 +1221,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             int available = HomeValleyCargo.GetAvailableSpace(state, cargo.ResourceType);
-            if (available < cargo.Amount)
+            // FG8-LOOT-03（关闭 DEBT-FG8LOOT01-06）：带身份的加密固件交付时进固件库、不占仓库，仓库满也照常交付。
+            if (available < cargo.Amount && !Economy.FieldLootService.NeedsNoStorage(state, order.SourceId))
             {
                 order.State = WorkOrderState.Waiting;
                 order.FailureReason = $"storage-full:need={cargo.Amount}:have={available}";
@@ -1831,7 +1832,8 @@ namespace GameLogic.Campaign.Regions
         {
             GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
             return item != null && HomeValleyCargo.CanStore(item.ResourceType)
-                   && HomeValleyCargo.GetAvailableSpace(state, item.ResourceType) >= item.Amount;
+                   && (HomeValleyCargo.GetAvailableSpace(state, item.ResourceType) >= item.Amount
+                       || Economy.FieldLootService.NeedsNoStorage(state, item.SalvageInstanceId)); // FG8-LOOT-03：加密固件不占仓库
         }
 
         // ── ER3-WRK-02：确定性自动分配 ───────────────────────────────────────────

@@ -86,7 +86,7 @@ namespace GameLogic.Campaign.Economy
         private static void EnsureFresh(CampaignState state)
         {
             // 不含 HomeInventory.Revision（见类注释：端口每个内核步都会改库存，跟着失效就成了每步重建）。
-            int key = HashCode.Combine(state != null ? state.GetHashCode() : 0, ItemCatalog.Revision, BeltPortService.Revision);
+            int key = HashCode.Combine(state != null ? state.GetHashCode() : 0, ItemCatalog.Revision, BeltPortService.Revision, LootPickService.Revision);
             double now = RealTime();
             if (key == _key && now - _builtAt < RefreshSeconds && Views.Count > 0)
             {
@@ -150,6 +150,14 @@ namespace GameLogic.Campaign.Economy
                             Cargo[d.Id] = (Cargo.TryGetValue(d.Id, out long n) ? n : 0) + c.Amount;
                         }
                     }
+                }
+            }
+            // FG8-LOOT-03（关闭 DEBT-FG8LOOT02-07）：野外分拣 / 自动拾取装在远征机器货舱里的货（LootPacketState.Held）也算“机器货舱”。
+            foreach (LootHeldRecord h in state?.LootPackets?.Held ?? Array.Empty<LootHeldRecord>())
+            {
+                if (h != null && h.Amount > 0 && !string.IsNullOrEmpty(h.ItemId) && MachineRegistry.TryGetRecord(h.Machine, out MachineRecord hm) && hm != null && hm.IsAlive)
+                {
+                    Cargo[h.ItemId] = (Cargo.TryGetValue(h.ItemId, out long n) ? n : 0) + h.Amount;
                 }
             }
             if (state != null && PipeNetworkService.IsRunning && ReferenceEquals(PipeNetworkService.BoundState, state))

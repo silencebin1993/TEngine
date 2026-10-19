@@ -217,7 +217,7 @@ namespace GameLogic.Campaign.Content
                 AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                 IconId = "icon_struct_cargo",
                 ModelId = "primitive:capsule",
-                ActionId = "HomeValleyLayout.MachineCargoSlots / HomeValleyCargo.SlotsForCargo — 已在 ER3-STO-01 用真实出征货位校验验证（ERC-001=4货位含货舱）",
+                ActionId = "LootPickCatalog.CapacityOf（底盘 + 货舱结构模块另加 loot.cargo.cap.module）/ LootPickCatalog.SpaceOf — FG8-LOOT-03 货舱、出发检查单、自动拾取同一组函数",
                 VfxId = "vfx_none_placeholder",
                 SfxId = "",
                 PreviewId = "preview_struct_cargo",

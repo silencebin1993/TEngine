@@ -27,6 +27,8 @@ namespace GameLogic.UI.Kit
         Groups = 5,
         Markers = 6,
         Signal = 7,
+        /// <summary>FG8-LOOT-03（FG-GAP-104）：地上的战利品——数据包、黑匣子、阵亡 / 丢弃掉落的货、关键材料。</summary>
+        Loot = 8,
     }
 
     /// <summary>地图筛选（战略地图与小地图共用，会话内有效）。</summary>
@@ -35,10 +37,10 @@ namespace GameLogic.UI.Kit
         public static readonly WorldMapLayer[] All =
         {
             WorldMapLayer.Territory, WorldMapLayer.Outposts, WorldMapLayer.Relics, WorldMapLayer.Resources,
-            WorldMapLayer.Own, WorldMapLayer.Groups, WorldMapLayer.Markers, WorldMapLayer.Signal,
+            WorldMapLayer.Own, WorldMapLayer.Groups, WorldMapLayer.Markers, WorldMapLayer.Signal, WorldMapLayer.Loot,
         };
 
-        private static readonly bool[] On = { true, true, true, true, true, true, true, true };
+        private static readonly bool[] On = { true, true, true, true, true, true, true, true, true };
 
         public static int Revision { get; private set; } = 1;
 
@@ -75,6 +77,7 @@ namespace GameLogic.UI.Kit
                 case WorldMapLayer.Own: return "ui.map.filter.own";
                 case WorldMapLayer.Groups: return "ui.map.filter.groups";
                 case WorldMapLayer.Markers: return "ui.map.filter.markers";
+                case WorldMapLayer.Loot: return "ui.map.filter.loot";
                 default: return "ui.map.filter.signal";
             }
         }
@@ -112,6 +115,10 @@ namespace GameLogic.UI.Kit
         DropPod,
         /// <summary>FG8-DROP-01：投送舱去程的落点 / 回收点。</summary>
         DropTarget,
+        /// <summary>FG8-LOOT-03（FG-GAP-104）：地上的战利品（标签写是什么、在哪个敌方领地内）。</summary>
+        Loot,
+        /// <summary>FG8-LOOT-03：地上的黑匣子（与普通战利品不同样式）。</summary>
+        LootBlackBox,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -456,6 +463,19 @@ namespace GameLogic.UI.Kit
                     Add(WorldMapItemKind.Marker, WorldMapLayer.Markers, m.MarkerId, m.CellX, m.CellY, string.IsNullOrEmpty(m.Note) ? name : name + "：" + m.Note);
                 }
             }
+            if (WorldMapFilters.IsOn(WorldMapLayer.Loot))
+            {
+                // FG8-LOOT-03（FG-GAP-104）：地上的战利品——自己的机器掉的 / 丢的，不受迷雾限制。O(数据包 + 关键物 + 地面物)。
+                Campaign.Economy.CargoService.CollectGroundMarkers(state, _loot);
+                foreach (Campaign.Economy.CargoService.GroundMarker g in _loot)
+                {
+                    if (view.Contains(g.X, g.Y, margin))
+                    {
+                        Add(g.Kind == "blackbox" ? WorldMapItemKind.LootBlackBox : WorldMapItemKind.Loot, WorldMapLayer.Loot, g.Id, g.X, g.Y, g.Label);
+                    }
+                }
+                _loot.Clear();
+            }
             // 图标过多时按离视野中心的距离取近的（maxIcons，map.max_icons）。
             if (Items.Count > maxIcons)
             {
@@ -467,6 +487,7 @@ namespace GameLogic.UI.Kit
         }
 
         private readonly List<OutpostRecord> _outposts = new List<OutpostRecord>(32);
+        private readonly List<Campaign.Economy.CargoService.GroundMarker> _loot = new List<Campaign.Economy.CargoService.GroundMarker>(16);
         private readonly List<PatrolRecord> _patrols = new List<PatrolRecord>(4);
 
         /// <summary>FG8-GEN-02（DEBT-FG0ARCH06-08）：据点标签——“静默据点（3 级）（驻军 6）”/“铸造零散前哨（5 级）”/“侦察巢（2 级）”。驻军按只读补算（Peek，观察不改变结果）。</summary>
@@ -1033,6 +1054,8 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-expedition-goal", item.Kind == WorldMapItemKind.ExpeditionGoal);
                 e.EnableInClassList("wg-icon-drop-pod", item.Kind == WorldMapItemKind.DropPod);
                 e.EnableInClassList("wg-icon-drop-target", item.Kind == WorldMapItemKind.DropTarget);
+                e.EnableInClassList("wg-icon-loot", item.Kind == WorldMapItemKind.Loot); // FG8-LOOT-03
+                e.EnableInClassList("wg-icon-loot-blackbox", item.Kind == WorldMapItemKind.LootBlackBox);
                 // FG8-EXP-02：远征队图标的底色 = 队伍颜色（数据驱动的运行时颜色，UI Toolkit 红线 2 允许）；其余图标清掉，按样式类。
                 e.style.backgroundColor = item.Tint.a > 0f ? new StyleColor(item.Tint) : new StyleColor(StyleKeyword.Null);
                 e.EnableInClassList("uk-hidden", false);
@@ -1043,7 +1066,8 @@ namespace GameLogic.UI.Kit
                                             || item.Kind == WorldMapItemKind.Resource || item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Territory
                                             || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning
                                             || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal || item.Kind == WorldMapItemKind.DropPod
-                                            || item.Kind == WorldMapItemKind.Anchor || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal);
+                                            || item.Kind == WorldMapItemKind.Anchor || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal
+                                            || item.Kind == WorldMapItemKind.Loot || item.Kind == WorldMapItemKind.LootBlackBox);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)
                 {

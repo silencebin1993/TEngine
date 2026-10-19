@@ -2042,6 +2042,21 @@ namespace GameLogic.Campaign
         public int PacketsResolved;
         public int PityHits;
         public long LeftoverTech;
+
+        // ── FG8-LOOT-03 货舱、自动拾取、阵亡掉落（FGR-LOOT-030、FGR-EXP-032）。只加字段、不升域版本：旧档没有 = 空 / 0（全部物品开着自动拾取）。唯一写入口 Economy.CargoService。──
+        /// <summary>关掉自动拾取的物品（fg.TbEcoItem.id，升序）。默认全部开着；关键材料始终拾取、不在这里。进存档：自动拾取影响世界结果，读档 / 换机器后一致。</summary>
+        public string[] AutoPickupOff = Array.Empty<string>();
+        /// <summary>自动拾取 / 拆开转移生成的货舱记录序号（"cargo:" + 序号；确定性、读档后接着编）。</summary>
+        public long NextCargoSerial = 1;
+        /// <summary>玩家刚丢弃的货（回收实例 ID）：附近还有队员时不被自动拾取捡回去，队员都走开（loot.cargo.discard_clear_radius 格外）后清掉。条数上限 loot.cargo.discard_max。</summary>
+        public string[] CargoDiscarded = Array.Empty<string>();
+        /// <summary>已经提示过“快满 / 已满”的机器与提示到的级别（1 = 快满、2 = 已满；一一对应）。降下来就移走，之后再满再提示。</summary>
+        public int[] CargoWarned = Array.Empty<int>();
+        public int[] CargoWarnLevels = Array.Empty<int>();
+        /// <summary>统计：自动拾取的份数、机器之间转移的次数、丢弃的次数。</summary>
+        public int CargoAutoPicked;
+        public int CargoTransfers;
+        public int CargoDiscards;
     }
 
     /// <summary>FG8-LOOT-02：一个待分拣数据包。</summary>

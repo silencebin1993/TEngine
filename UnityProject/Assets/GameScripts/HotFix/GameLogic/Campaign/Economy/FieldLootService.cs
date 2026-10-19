@@ -301,6 +301,23 @@ namespace GameLogic.Campaign.Economy
             return cut >= 0 ? id.Substring(0, cut) : id;
         }
 
+        /// <summary>FG8-LOOT-03：地上带身份的敌方物品被自动拾取装进货舱——身份随货舱记录走，地面身份表里这一条移走（掉回地上时由货舱掉落重新登记）。</summary>
+        internal static void TakeTag(CampaignState s, string salvageId)
+        {
+            LootPacketState st = StateOf(s);
+            if (st != null)
+            {
+                RemoveTag(st, Normalize(salvageId));
+            }
+        }
+
+        /// <summary>FG8-LOOT-01 债 DEBT-FG8LOOT01-06（FG8-LOOT-03 关闭）：这件搬运中的货交付时不占仓库（带身份的加密固件 → 固件库里的未破解芯片），搬运单不必等仓库空间。</summary>
+        public static bool NeedsNoStorage(CampaignState s, string salvageId)
+        {
+            LootGroundTagRecord tag = TagOf(s, salvageId);
+            return tag != null && tag.ItemId == AnalysisCatalog.EncryptedFirmwareId && FirmwareKinds.IsFirmware(tag.TargetId);
+        }
+
         private static void RemoveTag(LootPacketState st, string salvageId)
         {
             int i = FindTag(st, salvageId);

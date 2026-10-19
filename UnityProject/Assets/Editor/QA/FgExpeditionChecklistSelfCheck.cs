@@ -480,9 +480,10 @@ namespace GameLogic.EditorTools
             RegionRecord region = FracturedCityRegion.Find(s);
             int suggested = ExpeditionDepartureService.MinRecommendedCargoSlots(snap.Target, region);
 
-            // 单台 ERC-003（货舱 1，有枪）：货舱提醒带实际与建议值；没有“无武器”提醒。
+            // 单台 ERC-003（有枪；FG8-LOOT-03 起货舱容量与货舱面板同一规则 LootPickCatalog.CapacityOf——战斗履带 4 格，低于建议）：货舱提醒带实际与建议值；没有“无武器”提醒。
             ExpeditionChecklistService.Checklist solo = ExpeditionChecklistService.Build(s, new[] { c }, snap);
-            bool cargoShown = solo.Reminders.Any(r => r.Code == "cargo" && r.Text == GameText.Format("exp.check.rem.cargo", 1, suggested));
+            int soloCap = MachineRegistry.TryGetRecord(c, out MachineRecord cRec) ? LootPickCatalog.CapacityOf(s, cRec) : -1;
+            bool cargoShown = soloCap > 0 && soloCap < suggested && solo.Reminders.Any(r => r.Code == "cargo" && r.Text == GameText.Format("exp.check.rem.cargo", soloCap, suggested));
             bool armed = !solo.Reminders.Any(r => r.Code == "no_weapon");
             // 单台 ERC-001（没有主武器）：“无武器”提醒，后果写明。
             ExpeditionChecklistService.Checklist unarmed = ExpeditionChecklistService.Build(s, new[] { a }, snap);
@@ -493,7 +494,7 @@ namespace GameLogic.EditorTools
                               && empty.Hard[0].Text == GameText.Format("exp.check.hard.too_small", ExpeditionDepartureService.MinDepartureSize)
                               && !empty.Reminders.Any(r => r.Code == "cargo" || r.Code == "no_weapon" || r.Code == "labor" || r.Code == "damaged");
             Expect(cargoShown && armed && noWeapon && emptyQuiet,
-                $"D9 货舱提醒（单台 1/建议 {suggested}，{cargoShown}）、有枪不提无武器（{armed}）、无武器提醒且不拦（{noWeapon}）、空名单只有“至少 1 台”硬约束（{emptyQuiet}）");
+                $"D9 货舱提醒（单台 {soloCap}/建议 {suggested}，{cargoShown}）、有枪不提无武器（{armed}）、无武器提醒且不拦（{noWeapon}）、空名单只有“至少 1 台”硬约束（{emptyQuiet}）");
 
             // 劳动力：只有真的下降才提醒（与 LaborForecastText 的判定一致）；派出全部家园机器时一定下降。
             List<int> all = HomeMachines().Select(m => m.LogicId).ToList();

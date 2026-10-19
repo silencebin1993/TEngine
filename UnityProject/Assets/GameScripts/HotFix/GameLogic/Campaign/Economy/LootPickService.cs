@@ -64,6 +64,9 @@ namespace GameLogic.Campaign.Economy
         /// <summary>任何数据包 / 货舱物品变了 +1（顶栏、面板据此刷新）。</summary>
         public static int Revision { get; private set; } = 1;
 
+        /// <summary>FG8-LOOT-03：货舱记录（<see cref="CargoService"/> 的转移 / 丢弃 / 自动拾取 / 开关）变了，界面与地图跟着刷新。</summary>
+        internal static void Touch() => Revision++;
+
         private static int _lastDepotReady = -1;
         private static long _lastGotCueTick = -1;
         private static readonly List<LootPickDef> PoolScratch = new List<LootPickDef>(96);
@@ -332,6 +335,11 @@ namespace GameLogic.Campaign.Economy
 
         private static string RegionOf(MachineRecord m) => string.IsNullOrEmpty(m?.RegionId) ? HomeValleyLayout.RegionId : m.RegionId;
 
+        /// <summary>FG8-LOOT-03：机器的实时位置（取不到用记录值）与所在地点，货舱转移 / 自动拾取与本类同一口径。</summary>
+        public static Vector2 PositionOfMachine(MachineRecord m) => PositionOf(m);
+
+        public static string RegionOfMachine(MachineRecord m) => RegionOf(m);
+
         /// <summary>某地点 <paramref name="radius"/> 格内最近的存活己方机器（排除 <paramref name="except"/>；同距离按 LogicId 小的）。O(机器数)。</summary>
         public static int NearestMachine(string regionId, Vector2 at, float radius, int except)
         {
@@ -394,6 +402,27 @@ namespace GameLogic.Campaign.Economy
         }
 
         private static readonly List<Vector2> DepotScratch = new List<Vector2>(16);
+
+        /// <summary>FG8-LOOT-03：运转中的归还核心与仓库的位置（“在家园 / 带仓库的前哨站”的判定点，与 <see cref="AtDepot(CampaignState, MachineRecord)"/> 同源）。</summary>
+        public static void CollectDepotPositions(CampaignState s, List<Vector2> into) => CollectDepots(s, into);
+
+        /// <summary>FG8-LOOT-03：家园所在星球上的这个位置在不在家园 / 带仓库的前哨站范围内（阵亡位置判定用，不要求机器活着）。O(建筑数)。</summary>
+        public static bool IsDepotPosition(CampaignState s, string regionId, Vector2 at)
+        {
+            if (s == null || (!string.IsNullOrEmpty(regionId) && regionId != HomeValleyLayout.RegionId))
+            {
+                return false;
+            }
+            CollectDepots(s, DepotScratch);
+            float r2 = LootPickCatalog.DepotRadius * LootPickCatalog.DepotRadius;
+            bool inside = false;
+            foreach (Vector2 d in DepotScratch)
+            {
+                inside |= (d - at).sqrMagnitude <= r2;
+            }
+            DepotScratch.Clear();
+            return inside;
+        }
         private static readonly List<(int Id, string Region, Vector2 Pos)> MachineScratch = new List<(int, string, Vector2)>(64);
 
         /// <summary>运转中的归还核心与仓库的位置（O(建筑数)；对账时每次只收集一遍）。</summary>
@@ -492,11 +521,13 @@ namespace GameLogic.Campaign.Economy
                 return;
             }
             var keep = new List<LootHeldRecord>(st.Held.Length);
+            int dropped = 0;
             foreach (LootHeldRecord h in st.Held)
             {
                 if (h != null && h.Machine == m.LogicId)
                 {
                     DropOnGround(s, h, RegionOf(m), at);
+                    dropped++;
                 }
                 else if (h != null)
                 {
@@ -507,6 +538,12 @@ namespace GameLogic.Campaign.Economy
             {
                 st.Held = keep.ToArray();
                 Revision++;
+            }
+            if (dropped > 0)
+            {
+                // FG8-LOOT-03（FGR-EXP-032）：阵亡通知写明货舱里的东西掉在哪里（可点击定位），地图上有标记。
+                NotificationCenter.Post(CargoService.NotifyType, GameText.Format("cargo.dropped", MachineNaming.Short(m), dropped, Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y)),
+                    new Vector3(at.x, 0f, at.y));
             }
         }
 
@@ -713,7 +750,37 @@ namespace GameLogic.Campaign.Economy
 
         public static int SpaceOf(LootCandidateRecord c) => c == null ? 0 : LootPickCatalog.SpaceOf(c.ItemId, c.Amount);
 
-        /// <summary>一台机器货舱已用的空间：分拣得到的物品 + 机器货舱里的其它货物（施工材料等，按同一套占用）。</summary>
+        /// <summary>FG8-LOOT-03：一台机器货舱里某种材料（<see cref="LootPickCatalog.IsBulk"/>）的分拣 / 拾取记录合计件数。</summary>
+        public static int HeldBulkAmount(CampaignState s, int machine, string itemId)
+        {
+            int n = 0;
+            foreach (LootHeldRecord h in StateOf(s)?.Held ?? Array.Empty<LootHeldRecord>())
+            {
+                if (h != null && h.Machine == machine && h.ItemId == itemId && LootPickCatalog.IsBulk(h.Kind, h.ItemId))
+                {
+                    n += Math.Max(0, h.Amount);
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FG8-LOOT-03：同机同种材料里排在第 <paramref name="index"/> 条之前的记录合计件数；前面没有同组记录（它是组里第一条）返回 -1。</summary>
+        public static int BulkAmountBefore(LootHeldRecord[] held, int index)
+        {
+            LootHeldRecord h = held[index];
+            int n = -1;
+            for (int j = 0; j < index; j++)
+            {
+                LootHeldRecord x = held[j];
+                if (x != null && x.Machine == h.Machine && x.ItemId == h.ItemId && LootPickCatalog.IsBulk(x.Kind, x.ItemId))
+                {
+                    n = Math.Max(0, n) + Math.Max(0, x.Amount);
+                }
+            }
+            return n;
+        }
+
+        /// <summary>一台机器货舱已用的空间：分拣 / 自动拾取得到的物品 + 机器货舱里的其它货物（施工材料等，按同一套占用）+ 携带的关键物 / 黑匣子（FG8-LOOT-03）。</summary>
         public static int UsedSpace(CampaignState s, MachineRecord m)
         {
             if (m == null)
@@ -721,15 +788,40 @@ namespace GameLogic.Campaign.Economy
                 return 0;
             }
             int used = 0;
-            foreach (LootHeldRecord h in StateOf(s)?.Held ?? Array.Empty<LootHeldRecord>())
+            // FGR-LOOT-030“材料每 10 个占 1”：同一台机器上的同种材料按总件数向上取整（只在每组第一条记录上算一次），不是每条记录各自取整。
+            // O(该机记录数²)，货舱记录只有几条到几十条。
+            LootHeldRecord[] held = StateOf(s)?.Held ?? Array.Empty<LootHeldRecord>();
+            for (int i = 0; i < held.Length; i++)
             {
-                used += h != null && h.Machine == m.LogicId ? h.Space : 0;
+                LootHeldRecord h = held[i];
+                if (h == null || h.Machine != m.LogicId)
+                {
+                    continue;
+                }
+                if (!LootPickCatalog.IsBulk(h.Kind, h.ItemId))
+                {
+                    used += h.Space;
+                    continue;
+                }
+                if (BulkAmountBefore(held, i) >= 0)
+                {
+                    continue;
+                }
+                used += LootPickCatalog.SpaceOf(h.ItemId, HeldBulkAmount(s, m.LogicId, h.ItemId));
             }
             foreach (CargoEntry c in m.Cargo ?? Array.Empty<CargoEntry>())
             {
                 if (c != null && c.Amount > 0)
                 {
                     used += LootPickCatalog.SpaceOf(ItemCatalog.TryGetByResource(c.ResourceType, out ItemDef d) ? d.Id : c.ResourceType, c.Amount);
+                }
+            }
+            // FG8-LOOT-03（FGR-LOOT-030“黑匣子占 1”）：携带中的关键物 / 黑匣子也占货舱。
+            foreach (RegionQuestItemRecord q in s?.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
+            {
+                if (q != null && q.State == RegionQuestItemState.Carried && q.CarrierLogicId == m.LogicId)
+                {
+                    used += LootPickCatalog.SpaceOf(q.ContentId, 1);
                 }
             }
             return used;
@@ -1178,6 +1270,9 @@ namespace GameLogic.Campaign.Economy
                     return GameText.Format("loot.pick.name.item", ItemCatalog.Find(c.ItemId)?.Name ?? c.ItemId, c.Amount);
             }
         }
+
+        /// <summary>FG8-LOOT-03：货舱物品的显示名（货舱界面 / 拾取提示）。</summary>
+        public static string HeldNameOf(LootHeldRecord h) => h == null ? string.Empty : HeldName(h);
 
         private static string HeldName(LootHeldRecord h) =>
             CandidateName(new LootCandidateRecord { Kind = h.Kind, ItemId = h.ItemId, TargetId = h.TargetId, Amount = h.Amount });

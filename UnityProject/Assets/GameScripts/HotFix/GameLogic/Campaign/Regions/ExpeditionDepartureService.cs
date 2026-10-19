@@ -212,7 +212,8 @@ namespace GameLogic.Campaign.Regions
         /// 读的是同一份底层数据，只是不经过那张登记表的中间状态。</summary>
         public static MachineIntel BuildIntel(CampaignState state, MachineRecord record)
         {
-            HomeValleyLayout.MachineCargoSlots.TryGetValue(record.ChassisId, out int cargoSlots);
+            // FG8-LOOT-03（FGR-LOOT-030“货舱容量来自底盘和货舱结构模块”）：与货舱界面、自动拾取同一个容量（不再读 Demo 的每型货位表）。
+            int cargoSlots = Economy.LootPickCatalog.CapacityOf(state, record);
             HomeValleyLayout.MachineBandwidthCost.TryGetValue(record.ChassisId, out float baseBandwidth);
 
             // 总带宽＝机型基础占用（HomeValleyLayout.MachineBandwidthCost）+ 装配额外加成
@@ -447,11 +448,14 @@ namespace GameLogic.Campaign.Regions
         /// "ExpeditionCount&lt;=0 即 5 货位"的判据，按 <paramref name="target"/> 直接分流。</summary>
         public static int MinRecommendedCargoSlots(ExpeditionTarget target, RegionRecord region)
         {
+            // FG8-LOOT-03：建议容量换成正式版货舱空间单位（初值在 fg.TbHomeTuning expedition.cargo.suggest_*，FG16 调参）。
+            float first = Grid.GridContent.TryGetTuning("expedition.cargo.suggest_first", out float f) ? f : 16f;
+            float later = Grid.GridContent.TryGetTuning("expedition.cargo.suggest", out float l) ? l : 12f;
             if (target == ExpeditionTarget.FoundryOutpost)
             {
-                return 4;
+                return Math.Max(1, (int)Math.Round(later));
             }
-            return (region?.ExpeditionCount ?? 0) <= 0 ? 5 : 4;
+            return Math.Max(1, (int)Math.Round((region?.ExpeditionCount ?? 0) <= 0 ? first : later));
         }
 
         // ── 出发校验 ─────────────────────────────────────────────────────────────

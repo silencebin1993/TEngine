@@ -258,6 +258,7 @@ namespace GameLogic.UI.Kit
             RefreshMarch(state);
             // FG8-LOOT-02：待分拣数据包计数（只在数量 / 语言变化时改文字，O(1)）。
             RefreshPackets(state);
+            RefreshCargo(state); // FG8-LOOT-03
 
             IReadOnlyList<WorldView.FocusTarget> targets = WorldView.FocusTargets(state);
             _keyBuilder.Clear();
@@ -320,6 +321,13 @@ namespace GameLogic.UI.Kit
                 _packets.clicked += LootPickPanelUIToolkit.Open;
                 UiTooltip.Attach(_packets, PacketTip);
             }
+            // FG8-LOOT-03：全队货舱读数（点开货舱面板；快满 / 已满写在文字里）。
+            _cargo = root.Q<Button>("WorldCargo");
+            if (_cargo != null)
+            {
+                _cargo.clicked += CargoPanelUIToolkit.Open;
+                UiTooltip.Attach(_cargo, () => new TooltipContent { Title = GameText.Get("cargo.title"), Body = GameText.Get("cargo.hud_tip") });
+            }
             if (_marchAdvance == null || _marchHold == null || _marchReturn == null || _marchFollow == null)
             {
                 return;
@@ -340,6 +348,38 @@ namespace GameLogic.UI.Kit
 
         private Button _packets;
         private int _packetKey = -1;
+        private Button _cargo;
+        private int _cargoKey = -1;
+        private readonly List<int> _cargoMachines = new List<int>();
+
+        /// <summary>自检读点：顶栏“货舱 N / M”。</summary>
+        public string CargoText => _cargo != null && !_cargo.ClassListContains("uk-hidden") ? _cargo.text : string.Empty;
+        public Button CargoButton => _cargo;
+
+        /// <summary>FG8-LOOT-03：顶栏全队货舱——远征队在外或有机器装着货时显示“货舱 已用 / 容量（· 快满了 / · 已满）”。只在货舱版本 / 游戏秒 / 语言变了时重算（O(列出的机器 × 货舱行)）。</summary>
+        private void RefreshCargo(CampaignState state)
+        {
+            if (_cargo == null)
+            {
+                return;
+            }
+            int key = HashCode.Combine(CargoService.Revision, GameClock.Ticks / Math.Max(1, GameClock.StepHz), (int)GameText.Language, state != null ? state.GetHashCode() : 0);
+            if (key == _cargoKey)
+            {
+                return;
+            }
+            _cargoKey = key;
+            CargoService.PanelMachines(state, _cargoMachines);
+            bool show = state != null && (CargoService.TeamOut(state) || _cargoMachines.Count > 0);
+            SetVisible(_cargo, show);
+            if (!show)
+            {
+                return;
+            }
+            int level = CargoService.Totals(state, _cargoMachines, out int used, out int cap);
+            _cargo.text = GameText.Format("cargo.hud", used, cap, CargoService.LevelSuffix(level));
+            _cargo.EnableInClassList("wb-cargo-warn", level > 0);
+        }
 
         /// <summary>自检读点：顶栏“待分拣 ×N”。</summary>
         public string PacketCountText => _packets != null && !_packets.ClassListContains("uk-hidden") ? _packets.text : string.Empty;

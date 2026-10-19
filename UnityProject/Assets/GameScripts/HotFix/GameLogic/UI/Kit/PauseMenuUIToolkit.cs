@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using GameLogic.Campaign;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Stage;
+using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace GameLogic.UI.Kit
@@ -71,6 +73,8 @@ namespace GameLogic.UI.Kit
             StatsButton = Bind(root, "PauseStats", "pause.stats", StatsPanelUIToolkit.Open);
             // FG4-ECO-01：物资面板盖在暂停菜单上面，关掉回到暂停菜单。
             ItemsButton = Bind(root, "PauseItems", "pause.items", ItemsPanelUIToolkit.Open);
+            // FG8-LOOT-03（FGU-35）：货舱面板（盖在暂停菜单上面，关掉回到暂停菜单）。
+            CargoButton = Bind(root, "PauseCargo", "pause.cargo", CargoPanelUIToolkit.Open);
             // FG4-ECO-06（FGU-15）：常驻规则面板盖在暂停菜单上面，关掉回到暂停菜单。
             RulesButton = Bind(root, "PauseRules", "pause.rules", RulesPanelUIToolkit.Open);
             RosterButton = Bind(root, "PauseRoster", "pause.roster", RosterPanelUIToolkit.Open); // FG4-ECO-07
@@ -94,6 +98,7 @@ namespace GameLogic.UI.Kit
             BindCamera(root);
             BindDisplay(root);
             BindReactionFeedback(root);
+            BindAutoPickup(root);
             _worldSeed = root.Q<Label>("PauseWorldSeed");
             _worldSettings = root.Q<Label>("PauseWorldSettings");
             Button copy = Bind(root, "PauseCopySeed", "ui.pause.copy_seed", CopySeed);
@@ -134,6 +139,7 @@ namespace GameLogic.UI.Kit
         public Button CodexButton => _codexButton;
         public Button StatsButton { get; private set; }
         public Button ItemsButton { get; private set; }
+        public Button CargoButton { get; private set; }
         public Button RulesButton { get; private set; }
         public Button RosterButton { get; private set; }
         public Button RaidHistoryButton { get; private set; }
@@ -397,6 +403,104 @@ namespace GameLogic.UI.Kit
             return t;
         }
 
+        // ── FG8-LOOT-03：自动拾取开关（FGR-LOOT-030“按材料种类开关自动拾取”；接在已有设置段里，不另开设置入口）──
+        private ScrollView _body;
+        private Label _autoTitle;
+        private Label _autoHint;
+        private VisualElement _autoList;
+        private readonly List<Toggle> _autoToggles = new List<Toggle>();
+        private readonly List<string> _autoIds = new List<string>();
+
+        public Button AutoPickupResetButton { get; private set; }
+        public int AutoPickupToggleCount => _autoIds.Count;
+        public Toggle AutoPickupToggle(string itemId)
+        {
+            int i = _autoIds.IndexOf(itemId);
+            return i >= 0 ? _autoToggles[i] : null;
+        }
+        public string AutoPickupHintText => _autoHint?.text ?? string.Empty;
+
+        private void BindAutoPickup(VisualElement root)
+        {
+            _body = root.Q<ScrollView>("PauseBody");
+            _autoTitle = root.Q<Label>("PauseAutoTitle");
+            _autoHint = root.Q<Label>("PauseAutoHint");
+            _autoList = root.Q<VisualElement>("PauseAutoList");
+            AutoPickupResetButton = Bind(root, "PauseAutoReset", "pause.auto_reset", () =>
+            {
+                Campaign.Economy.CargoService.ResetAutoPickup(CampaignSession.Current);
+                SyncAutoPickup();
+            });
+            SyncAutoPickup();
+        }
+
+        /// <summary>按物品表重建 / 同步自动拾取开关（打开菜单、恢复默认时）。没有战役时开关禁用并写明原因。</summary>
+        public void SyncAutoPickup()
+        {
+            if (_autoList == null)
+            {
+                return;
+            }
+            CampaignState s = CampaignSession.Current;
+            if (_autoTitle != null)
+            {
+                _autoTitle.text = GameText.Get("pause.auto_title");
+            }
+            if (_autoHint != null)
+            {
+                _autoHint.text = s != null ? GameText.Get("pause.auto_hint") : GameText.Get("pause.auto_no_campaign");
+            }
+            IReadOnlyList<Campaign.Economy.ItemDef> items = Campaign.Economy.CargoService.AutoPickupItems();
+            while (_autoToggles.Count < items.Count)
+            {
+                var t = new Toggle();
+                t.AddToClassList("uk-toggle-row");
+                int index = _autoToggles.Count;
+                t.RegisterValueChangedCallback(evt =>
+                {
+                    if (index < _autoIds.Count)
+                    {
+                        Campaign.Economy.CargoService.SetAutoPickup(CampaignSession.Current, _autoIds[index], evt.newValue);
+                    }
+                });
+                UiTooltip.Attach(t, () => new TooltipContent
+                {
+                    Title = t.label,
+                    Body = index < _autoIds.Count
+                        ? GameText.Format("pause.auto_tip", Campaign.Economy.ItemCatalog.NameOf(_autoIds[index]), Mathf.RoundToInt(Campaign.Economy.CargoService.PickupRadius))
+                        : string.Empty,
+                });
+                _autoList.Add(t);
+                _autoToggles.Add(t);
+            }
+            _autoIds.Clear();
+            for (int i = 0; i < _autoToggles.Count; i++)
+            {
+                Toggle t = _autoToggles[i];
+                bool shown = i < items.Count;
+                t.EnableInClassList("uk-hidden", !shown);
+                if (!shown)
+                {
+                    continue;
+                }
+                _autoIds.Add(items[i].Id);
+                t.name = "PauseAuto_" + items[i].Id;
+                t.label = GameText.Format("pause.auto_item", items[i].Name);
+                t.SetValueWithoutNotify(Campaign.Economy.CargoService.IsAutoPickup(s, items[i].Id));
+                t.SetEnabled(s != null);
+            }
+            AutoPickupResetButton?.SetEnabled(s != null);
+        }
+
+        /// <summary>货舱面板“自动拾取设置…”：滚到自动拾取段。</summary>
+        public void ScrollToAutoPickup()
+        {
+            if (_body != null && _autoTitle != null)
+            {
+                _body.ScrollTo(_autoTitle);
+            }
+        }
+
         /// <summary>三个开关按当前设置同步（打开菜单、恢复默认时）。</summary>
         public void SyncReactionToggles()
         {
@@ -465,6 +569,7 @@ namespace GameLogic.UI.Kit
                 SyncSilentDim();
                 SyncWeatherFx();
                 SyncReactionToggles();
+                SyncAutoPickup();
             }
             else
             {
