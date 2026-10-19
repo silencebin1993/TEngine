@@ -48,6 +48,7 @@ namespace GameLogic.UI.Expedition
         private Button _abandonButton;
 
         private readonly List<TemplateContainer> _rowPool = new List<TemplateContainer>(MaxRows);
+        private int _leftKey;
         private float _refreshTimer;
 
         private async void Start()
@@ -192,9 +193,15 @@ namespace GameLogic.UI.Expedition
             {
                 _reactionShareLabel.text = ReactionShareText(state, snapshot.RegionId);
             }
-            _groundLabel.text = snapshot.GroundScrapItemCount > 0
-                ? $"遗留货物：地面仍有 {snapshot.GroundScrapItemCount} 处未装载物资（撤离后不自动入账）"
-                : "遗留货物：无";
+            // FG8-EXP-05（FGR-EXP-032“离开一片区域前，界面会列出地上还没捡的战利品”）：逐条列出地上还没捡的东西与回收倒计时（关键物 / 黑匣子 / 数据包永不消失）。
+            // 只在地上的东西 / 关键物 / 货舱版本、游戏分钟（倒计时）或语言变了时重算（O(地面物)），不每 0.2 秒扫。
+            int leftKey = System.HashCode.Combine(state?.GroundItems, state?.RegionQuestItems, Campaign.Economy.CargoService.Revision, Campaign.Economy.BlackBoxService.Revision,
+                GameLogic.Core.GameClock.Ticks / System.Math.Max(1, GameLogic.Core.GameClock.StepHz * 60), (int)GameLogic.Localization.GameText.Language, snapshot.RegionId);
+            if (leftKey != _leftKey)
+            {
+                _leftKey = leftKey;
+                _groundLabel.text = Campaign.Economy.ExpeditionSettlementService.LeftListText(state, snapshot.RegionId);
+            }
 
             for (int i = 0; i < MaxRows; i++)
             {
@@ -223,9 +230,10 @@ namespace GameLogic.UI.Expedition
                 row.Q<Label>("Status").text = GameLogic.Localization.GameText.Format(m.IsAlive ? "expedition.return.row_status_alive" : "expedition.return.row_status_dead", signalExp);
             }
 
+            // FG8-EXP-05：撤离 = 从地点入口走回家园、到家才结算；全灭 = 东西留在原地（处理说明，FGR-EXP-031 / 032）。
             _summaryLabel.text = snapshot.IsWipe
-                ? $"全队 {snapshot.Roster.Length} 台机器全部失去战斗/移动能力，已无法继续远征。已装车关键物随全灭结算为丢失，已归档的技术与家园不受影响。"
-                : $"幸存 {aliveCount} 台，阵亡 {deadCount} 台。确认撤离后，幸存机器携带的关键物视为已带回，未装车的物资留在原地。";
+                ? GameLogic.Localization.GameText.Format("settle.site.wipe_summary", snapshot.Roster.Length)
+                : GameLogic.Localization.GameText.Format("settle.site.evac_summary", aliveCount, deadCount);
         }
 
         /// <summary>FG2-FW-04：撤离报告里这一场远征的反应伤害占比（自检直接调，与面板同一段文字）。</summary>

@@ -1563,6 +1563,7 @@ namespace GameLogic.EditorTools
             // 三种重算分开量：①只改状态（完工 / 损毁 / 修复 / 关停 / 旋转：记录数组不变，沿用分配顺序）；
             // ②游戏中最重的一种：新增一座建筑（放虚影），记录数组换了，在上一次顺序上增量插入；③首次绑定 / 读档：整体按字符串重排（一次性，载入时）。
             // 门槛：②③在 Editor 都不超过半帧；②（游戏进行中会发生）的热更层按解释执行折算后也要留出大半帧。
+            var maxMs = new double[3];
             Measure(0, out double recomputeMs, out double kernelMs, out double assembleMs, out double applyMs, out bool reused);
             Measure(1, out double addMs, out double addKernelMs, out double addAssembleMs, out double addApplyMs, out bool incremental);
             Measure(2, out double fullMs, out double fullKernelMs, out double fullAssembleMs, out double fullApplyMs, out bool fullOk);
@@ -1573,17 +1574,21 @@ namespace GameLogic.EditorTools
             double deviceFullMs = fullKernelMs + fullHotMs * HotfixInterpretFactor;
             var sw = new Stopwatch();
 
+            // FG8-EXP-05 修复第 4 轮（审查 P1：全量 unity-validate 里 F11 连续两次超 2 倍、单段复测通过）：测量与前序自检段留下的状态隔离——
+            // 每种路径先跑一次不计时的预热（增量插入 / 整体重排各自的首次 JIT 不计入），每个样本前先 GC.Collect + WaitForPendingFinalizers（前序段的堆垃圾不在计时里回收），
+            // 取 N 个样本的中位数（按单次总耗时取中位样本，内核 / 组装 / 写回取同一样本），最大值另记进性能明细，不隐藏偶发尖峰。代码路径与阈值都不变。
             void Measure(int mode, out double total_, out double kernel_, out double assemble_, out double apply_, out bool path_)
             {
-                total_ = kernel_ = assemble_ = apply_ = 0.0;
                 path_ = true;
-                for (int i = 0; i < N; i++)
+                var samples = new List<(double total, double kernel, double assemble, double apply)>(N);
+                for (int i = -1; i < N; i++)
                 {
                     if (mode == 1)
                     {
                         var grown = new List<BuildingRecord>(s.BuildingRecords);
-                        var at = new GridCell(core.X + 62 + (i * 7) % (side * 10), core.Y + 3 + (i * 13) % (side * 10));
-                        grown.Add(Fixture(kinds[i % kinds.Length], "perf_add_" + i, at));
+                        int k = i < 0 ? N : i;
+                        var at = new GridCell(core.X + 62 + (k * 7) % (side * 10), core.Y + 3 + (k * 13) % (side * 10));
+                        grown.Add(Fixture(kinds[k % kinds.Length], i < 0 ? "perf_add_warm" : "perf_add_" + i, at));
                         s.BuildingRecords = grown.ToArray();
                     }
                     else if (mode == 2)
@@ -1591,20 +1596,27 @@ namespace GameLogic.EditorTools
                         HomeValleyPowerGrid.ForgetOrderForTests();
                         s.BuildingRecords = (BuildingRecord[])s.BuildingRecords.Clone();
                     }
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
                     long t0 = Stopwatch.GetTimestamp();
                     HomeValleyPowerGrid.Recompute(s);
-                    total_ += (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
-                    kernel_ += HomeValleyPowerGrid.LastKernelRebuildMs;
-                    assemble_ += HomeValleyPowerGrid.LastAssembleMs;
-                    apply_ += HomeValleyPowerGrid.LastApplyMs;
+                    double ms = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
                     path_ &= mode == 0 ? HomeValleyPowerGrid.LastAssembleReusedOrder
                         : mode == 1 ? HomeValleyPowerGrid.LastAssembleIncremental
                         : !HomeValleyPowerGrid.LastAssembleReusedOrder && !HomeValleyPowerGrid.LastAssembleIncremental;
+                    if (i < 0)
+                    {
+                        continue; // 预热样本不计
+                    }
+                    samples.Add((ms, HomeValleyPowerGrid.LastKernelRebuildMs, HomeValleyPowerGrid.LastAssembleMs, HomeValleyPowerGrid.LastApplyMs));
                 }
-                total_ /= N;
-                kernel_ /= N;
-                assemble_ /= N;
-                apply_ /= N;
+                samples.Sort((x, y) => x.total.CompareTo(y.total));
+                var mid = samples[samples.Count / 2];
+                total_ = mid.total;
+                kernel_ = mid.kernel;
+                assemble_ = mid.assemble;
+                apply_ = mid.apply;
+                maxMs[mode] = samples[samples.Count - 1].total;
             }
             // 增量插入的顺序必须和整体重排逐位相同（分配顺序 = 结算结果，AC-ECO-004）。
             HomeValleyPowerGrid.GridSummary incr = HomeValleyPowerGrid.Recompute(s);
@@ -1636,7 +1648,8 @@ namespace GameLogic.EditorTools
                                 && new HashSet<string>(cachedSum.UnconnectedBuildingIds).SetEquals(fullSum.UnconnectedBuildingIds) && cachedSum.SubnetCount == fullSum.SubnetCount;
             PerfLines.Add($"家园（{total} 座建筑，其中 {side * side} 座电塔，{subnets} 个电网）：只改状态的一次重算 {recomputeMs:F3} ms（内核 {kernelMs:F3}、热更层组装 {assembleMs:F3}、写回 {applyMs:F3}）；" +
                           $"新增一座建筑（增量插入）{addMs:F3} ms（内核 {addKernelMs:F3}、组装 {addAssembleMs:F3}、写回 {addApplyMs:F3}）；首次绑定 / 读档（整体重排）{fullMs:F3} ms（组装 {fullAssembleMs:F3}）；" +
-                          $"热更层按 HybridCLR 解释执行 ×{HotfixInterpretFactor} 折算的真机估计：新增建筑 {deviceEstimateMs:F3} ms、读档 {deviceFullMs:F3} ms；稳态世界步里电网平均 {perStepUs:F2} µs/步");
+                          $"热更层按 HybridCLR 解释执行 ×{HotfixInterpretFactor} 折算的真机估计：新增建筑 {deviceEstimateMs:F3} ms、读档 {deviceFullMs:F3} ms；稳态世界步里电网平均 {perStepUs:F2} µs/步；" +
+                          $"以上为预热后、每样本前 GC 隔离的 {N} 次中位数，最大值：只改状态 {maxMs[0]:F3} ms、新增一座 {maxMs[1]:F3} ms、读档重排 {maxMs[2]:F3} ms");
             ExpectPerf(total >= 800 && reused && incremental && fullOk && sameOrder && steady,
                 $"F11 性能（FG03 第 7 节 800 座建筑；120 帧整帧预算 8.3 ms）：{total} 座建筑的家园只改状态的重算 {recomputeMs:F3} ms（沿用分配顺序）、新增一座建筑 {addMs:F3} ms（增量插入，顺序与整体重排逐位相同）、" +
                 $"读档整体重排 {fullMs:F3} ms（阈值都是 {RecomputeBudgetMs} ms = 半帧，只在拓扑 / 状态变化点）；新增建筑的热更层 {addHotMs:F3} ms ×{HotfixInterpretFactor} 折算真机 {deviceEstimateMs:F3} ms（阈值 {DeviceRecomputeBudgetMs} ms）；" +

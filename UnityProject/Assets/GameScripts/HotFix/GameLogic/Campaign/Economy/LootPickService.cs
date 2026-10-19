@@ -563,6 +563,8 @@ namespace GameLogic.Campaign.Economy
             {
                 FieldLootService.TagGround(s, h.HeldId, h.ItemId, h.TargetId, h.Kind == LootPickCatalog.KindCracked ? OriginPrototype : OriginPick, h.Faction);
             }
+            // FG8-EXP-05（FGR-EXP-032）：阵亡 / 丢弃掉在地上的货——普通战利品 1 个游戏日后被敌方回收，关键材料永不消失（KeyItemRetention）。
+            GroundLootExpiry.Stamp(s, g, h.ItemId);
             if (region == HomeValleyLayout.RegionId)
             {
                 HomeValleyWorkOrders.TryCreateHaulPool(s, g.GroundItemId);
@@ -979,6 +981,7 @@ namespace GameLogic.Campaign.Economy
             log.Add(new LootPickLogRecord
             {
                 PacketId = p.PacketId, Source = p.Source, Faction = p.Faction, ChosenRowId = c.RowId, ChosenTier = c.Tier, Destination = dest, TechData = tech, Tick = GameClock.Ticks,
+                Holder = p.Holder,
             });
             st.Picks = log.ToArray();
             st.PacketsResolved++;
@@ -1042,7 +1045,10 @@ namespace GameLogic.Campaign.Economy
         /// 远征队回到家园（StandingRuleService 的“远征卸货”规则开着时，对每台返回的机器调用）：这台机器货舱里分拣得到的物品全部入库。返回卸下的件数。
         /// 规则关着时不调用——货留在货舱里（FGR-BASE-020），面板“货舱里”一栏照常列出，机器在仓库旁时玩家可以逐件点“入库”（<see cref="TryStoreHeld"/>）。
         /// </summary>
-        public static int UnloadHeld(CampaignState s, int machineId, Vector2 at)
+        public static int UnloadHeld(CampaignState s, int machineId, Vector2 at) => UnloadHeld(s, machineId, at, null);
+
+        /// <summary>FG8-EXP-05：同上；<paramref name="needsAnalysis"/> 不为空时把卸下的、需要解析的敌方物品（未解析模块 / 数据核心，每件一个物品 ID）追加进去，供“送到解析台”排队。</summary>
+        public static int UnloadHeld(CampaignState s, int machineId, Vector2 at, List<string> needsAnalysis)
         {
             LootPacketState st = StateOf(s);
             if (st == null || st.Held.Length == 0)
@@ -1057,6 +1063,13 @@ namespace GameLogic.Campaign.Economy
                 {
                     Deliver(s, h.Kind, h.ItemId, h.TargetId, h.Amount, h.Faction, at, h.HeldId);
                     n += Math.Max(1, h.Amount);
+                    if (needsAnalysis != null && (h.Kind == LootPickCatalog.KindModule || h.Kind == LootPickCatalog.KindCore))
+                    {
+                        for (int k = 0; k < Math.Max(1, h.Amount); k++)
+                        {
+                            needsAnalysis.Add(h.ItemId);
+                        }
+                    }
                 }
                 else if (h != null)
                 {

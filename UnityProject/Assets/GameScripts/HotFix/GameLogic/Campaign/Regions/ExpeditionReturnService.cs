@@ -235,15 +235,16 @@ namespace GameLogic.Campaign.Regions
             try
             {
                 MarkExperienceAndInjuryBeforeExit(state, active.RegionId);
-                // FG4-ECO-06：返回的机器（撤离前还活着、在远征地点的）——远征卸货规则在下一个模拟步卸它们的货舱。
+                // 撤离的机器（撤离前还活着、在远征地点的），按编号排好（出现在地点入口时三台一排的站位用同一顺序）。
                 List<int> returning = MachineRegistry.AllRecords.Where(m => m != null && m.RegionId == active.RegionId && m.IsAlive)
                     .Select(m => m.LogicId).OrderBy(id => id).ToList();
                 // FG2-FW-04：这一场远征的反应伤害归因到此结束（存档；统计 / 离家报告读它）。
                 Combat.ReactionAttribution.CloseExpedition(state, active.RegionId);
+                // FG8-EXP-05（关闭 DEBT-FG8EXP02-01；FGR-EXP-031 / 050）：撤离 = 离开地点、出现在星球上的地点入口，沿地形走回家园 / 带仓库的前哨站，**到家才结算**
+                // （携带的关键物到家才带回、离家报告到家才结算、货舱到家才按远征卸货规则卸下，都在 ExpeditionMarchService.ReturnHome）。
+                // 没能撤离的机器携带的关键物按 D-13 掉在原地（Exit 里的 ResolveExtraction）。
                 active.Exit(true);
-                Economy.StandingRuleService.OnExpeditionReturned(state, returning);
-                // ER6-LOOP-01：撤离事务已提交（active.Exit 内部完成 ResolveExtraction），OBJ-05/07 的
-                // "战利品判定发生在撤离事务提交时"字面要求就是这一刻，不等回到家园下一帧。
+                // ER6-LOOP-01：撤离事务已提交；关键物到家才 Recovered（OBJ-05/07 的战利品判定随之推迟到到家那一刻，见 ADR-EXP-007）。
                 CampaignObjectiveTracker.Recompute(state);
                 // ER7-FAIL-01：主动撤离（非全灭）如果 Boss 还没打完（Phase!=Destroyed），本次尝试作废，
                 // 下次进核心分区重新开始，不允许带着半血 Boss 状态跨出击继续磨。
@@ -252,10 +253,8 @@ namespace GameLogic.Campaign.Regions
                     FoundryOutpostCoreBoss.ResetToPreBossState(state, FoundryOutpostRegion.Find(state));
                 }
                 GameRoot.ResumeHomeValley();
-                // FG8-EXP-02（FGR-EXP-012）：远征队状态 → 已返回（撤离仍是瞬间回家；走回家园与到家结算归 FG8-EXP-05，DEBT-FG8EXP02-04）。
-                ExpeditionMarchService.OnLeftSite(state, wiped: false);
-                // FG4-ECO-09（FGR-ECO-060）：离家报告在撤离事务提交、回到家园时结算（下面的结算后存档把它存进去；界面按设置自动打开）。
-                Economy.AwayReportService.End(state, Economy.AwayReportService.OutcomeEvacuated);
+                // FG8-EXP-05：远征队状态 → 返程中（从地点入口走回家园；到家结算）。
+                ExpeditionMarchService.BeginReturnFromSite(state, active.RegionId, returning);
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
                 if (!saveResult.Success)
@@ -311,8 +310,11 @@ namespace GameLogic.Campaign.Regions
                 GameRoot.ResumeHomeValley();
                 // FG8-EXP-02：全灭放弃 → 没有远征在外（待命）。
                 ExpeditionMarchService.OnLeftSite(state, wiped: true);
-                // FG4-ECO-09：全灭放弃同样结算离家报告（远征队全部损失写进“机器变化”）。
-                Economy.AwayReportService.End(state, Economy.AwayReportService.OutcomeWiped);
+                // FG8-EXP-05（FGR-EXP-031 / 032）：全灭结算——货物、黑匣子、关键物、数据包留在地点里（列进结算，下次远征可以再取），普通战利品带回收倒计时。
+                AwayReportRecord rec = Economy.ExpeditionSettlementService.Settle(state, Economy.ExpeditionSettlementService.ViaWiped, Array.Empty<int>());
+                // FG4-ECO-09：全灭放弃同样结算离家报告（远征队全部损失写进“机器变化”）。修复第 4 轮：有成员先随投送舱生还时结算已改按“随投送舱返回”，报告写“返回”。
+                Economy.AwayReportService.End(state, rec?.Settlement?.Via == Economy.ExpeditionSettlementService.ViaPod
+                    ? Economy.AwayReportService.OutcomeEvacuated : Economy.AwayReportService.OutcomeWiped);
 
                 SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionResolutionComplete);
                 if (!saveResult.Success)
@@ -328,7 +330,8 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>必须在 Controller.Exit 之前调用——之后存活机器的
+        /// <summary>FG8-EXP-05：撤离时只记“参加过远征”与伤势；“生还归来”与累计远征次数在到家结算时记（<see cref="Economy.ExpeditionSettlementService.Settle"/>，途中全灭的不算生还）。
+        /// 必须在 Controller.Exit 之前调用——之后存活机器的
         /// <see cref="MachineRecord.RegionId"/> 已经被改写回家园，"当前还在本区域"这个筛选条件会失效。
         /// 全员（含阵亡者）记一次 <see cref="MachineExperienceFlags.Expedition"/>（"首次参与远征"与
         /// 是否生还无关）；只有存活者额外记 <see cref="MachineExperienceFlags.Returned"/>、递增
@@ -349,9 +352,6 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                MachineRegistry.TryMarkExperience(m.LogicId, MachineExperienceFlags.Returned);
-                MachineRegistry.RecordExpeditionCompleted(m.LogicId);
-
                 if (m.MaxHealth > 0f && m.Health < m.MaxHealth * InjuredHealthFraction)
                 {
                     // FG1-HUD-01 修复轮：存文本键 + 参数，显示时按当前语言翻译（MachineInjury.Describe）。

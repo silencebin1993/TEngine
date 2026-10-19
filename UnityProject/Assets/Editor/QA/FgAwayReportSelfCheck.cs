@@ -590,6 +590,11 @@ namespace GameLogic.EditorTools
             long splitTotal = bk != null && bk.TryGetNodeInfo(sp.X, sp.Y, out BeltNodeInfo spi) ? spi.SentL + spi.SentR : -1;
             long scansBeforeEnd = AwayReportService.CloseScans;
             ExpeditionReturnService.ReturnResult ret = ExpeditionReturnService.TryConfirmEvacuation();
+            // FG8-EXP-05：撤离 = 从地点入口沿地形走回家园、到家才结算；本段在家园里接着测——测试快进到家（走正式的到家结算；返程本身由 FgExpeditionSettlementSelfCheck 真实推进验证）。
+            if (ret.Success)
+            {
+                ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current);
+            }
             now = CampaignSession.Current;
             List<AwayReportRecord> recent = AwayReportService.Recent(now);
             AwayReportRecord r = recent.FirstOrDefault();
@@ -743,7 +748,9 @@ namespace GameLogic.EditorTools
                 // 点阵亡行：定位到阵亡的地点，打开名册里这台机器的详情。
                 AwayReportPanelUIToolkit.Open();
                 panel.Refresh();
-                int deadRow = Enumerable.Range(0, panel.VisibleRowCount).FirstOrDefault(i => panel.Line(i).LogicId == a.Killed && panel.Line(i).Action == AwayLineAction.Machine);
+                // FG8-EXP-05：最前面的“远征结算”一段也有这台机器的经历行（打开名册详情、不定位）；这里点的是“机器变化”段的阵亡行。
+                int deadRow = Enumerable.Range(0, panel.VisibleRowCount).FirstOrDefault(i => panel.Line(i).LogicId == a.Killed && panel.Line(i).Action == AwayLineAction.Machine
+                                                                                              && panel.Line(i).Section == "machines");
                 located.Clear();
                 bool clickedDead = panel.Line(deadRow)?.LogicId == a.Killed && Click(panel.RowButton(deadRow)) && located.Count == 1 && located[0].Region == FracturedCityLayout.RegionId;
                 RosterPanelUIToolkit.Close();
@@ -836,6 +843,11 @@ namespace GameLogic.EditorTools
             }
             WorldSimulation.StepMany(GameClock.StepHz / 2);
             ExpeditionReturnService.ReturnResult ret = ExpeditionReturnService.TryConfirmEvacuation();
+            // FG8-EXP-05：撤离 = 从地点入口沿地形走回家园、到家才结算；本段在家园里接着测——测试快进到家（走正式的到家结算；返程本身由 FgExpeditionSettlementSelfCheck 真实推进验证）。
+            if (ret.Success)
+            {
+                ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current);
+            }
             CampaignState now = CampaignSession.Current;
             AwayReportRecord r = AwayReportService.Recent(now).FirstOrDefault();
             var lines = new List<AwayLine>();
@@ -849,10 +861,13 @@ namespace GameLogic.EditorTools
                 panel.SetRowTemplateForTests(AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(UiKitFolder + "AwayReportRow.uxml"));
                 AwayReportPanelUIToolkit.Open();
                 panel.Refresh();
-                bool shown = panel.ShowingEmptyReport && panel.VisibleRowCount == 1 && panel.RowText(0).Contains("一切照旧") && !panel.RowButton(0).enabledSelf
-                             && panel.SummaryText.Contains("撤离回家");
-                Expect(dep.Outcome == ExpeditionDepartureService.DepartureOutcome.Success && ret.Success && empty && lines.Count == 1 && shown,
-                    $"C2 负向（卡片“离家期间什么都没发生时的空报告”）：报告照常生成，只写一行“{lines.FirstOrDefault()?.Text}”，概要照常；面板显示同一行（不可点）");
+                // FG8-EXP-05：远征结算一段在最前面（远征本身有结局、耗时、经历）；家园这边什么都没发生 → 其后只写一行“一切照旧”。
+                List<AwayLine> home = lines.Where(l => l.Section != AwayReportView.SectionSettle).ToList();
+                int last = panel.VisibleRowCount - 1;
+                bool shown = !panel.ShowingEmptyReport && panel.VisibleRowCount == lines.Count && last >= 0 && panel.RowText(last).Contains("一切照旧") && !panel.RowButton(last).enabledSelf
+                             && panel.RowText(0) == GameText.Get("settle.section") && panel.SummaryText.Contains("撤离回家");
+                Expect(dep.Outcome == ExpeditionDepartureService.DepartureOutcome.Success && ret.Success && !empty && r.HasSettlement && home.Count == 1 && home[0].Text.Contains("一切照旧") && shown,
+                    $"C2 负向（卡片“离家期间什么都没发生时的空报告”）：报告照常生成，远征结算一段之后家园部分只写一行“{home.FirstOrDefault()?.Text}”，概要照常；面板显示同样的行（“一切照旧”不可点）");
                 AwayReportPanelUIToolkit.Close();
             }
             finally
@@ -867,9 +882,15 @@ namespace GameLogic.EditorTools
                 MachineRegistry.ApplyDamage(victim, 1e6f);
             }
             var laterLines = new List<AwayLine>();
-            bool stillEmpty = r != null && AwayReportView.Build(CampaignSession.Current, r, laterLines) && laterLines.Count == 1 && laterLines[0].Text.Contains("一切照旧");
+            if (r != null)
+            {
+                AwayReportView.Build(CampaignSession.Current, r, laterLines);
+            }
+            List<AwayLine> laterHome = laterLines.Where(l => l.Section != AwayReportView.SectionSettle).ToList();
+            bool stillEmpty = r != null && laterHome.Count == 1 && laterHome[0].Text.Contains("一切照旧")
+                              && laterLines.Any(l => l.Section == AwayReportView.SectionSettle && l.LogicId == victim && l.Text.Contains("生还归来"));
             Expect(victim > 0 && r.TeamSettled && r.MembersLost == 0 && stillEmpty,
-                $"C2b 负向（历史报告）：空报告结算后名单里的第 {victim} 号阵亡，这份报告仍只写“{laterLines.FirstOrDefault()?.Text}”（固化损失 {r?.MembersLost} 台）");
+                $"C2b 负向（历史报告）：空报告结算后名单里的第 {victim} 号阵亡，这份报告家园部分仍只写“{laterHome.FirstOrDefault()?.Text}”、远征结算里它仍是“生还归来”（固化损失 {r?.MembersLost} 台）");
             // 从来没有报告：面板写明去处。
             CampaignState blank = NewWorld(9112);
             VisualElement root2 = FgProductionSelfCheck.MountUxml(UiKitFolder + "AwayReportPanel.uxml", out GameObject go2);
@@ -1324,6 +1345,11 @@ namespace GameLogic.EditorTools
             AwayEvents(a, withCombat: false);
             GameClock.SetSpeed(1f);
             ExpeditionReturnService.ReturnResult ret = ExpeditionReturnService.TryConfirmEvacuation();
+            // FG8-EXP-05：撤离 = 从地点入口沿地形走回家园、到家才结算；本段在家园里接着测——测试快进到家（走正式的到家结算；返程本身由 FgExpeditionSettlementSelfCheck 真实推进验证）。
+            if (ret.Success)
+            {
+                ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current);
+            }
             return ret.Success ? Snap(CampaignSession.Current) : "撤离失败：" + ret.FailureReason;
         }
 

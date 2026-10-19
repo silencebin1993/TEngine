@@ -644,6 +644,30 @@ namespace GameLogic.Campaign.Regions
             pod.ArriveTick = now + Math.Max(1, GameClock.TicksFor(LegSeconds(Vector2.Distance(from, dest))));
         }
 
+        /// <summary>FG8-EXP-05 修复第 2 轮：投送舱落地时带回的区域关键物 / 黑匣子 / 遗产件数（自检读）。</summary>
+        public static int QuestItemsLanded { get; private set; }
+
+        /// <summary>
+        /// FG8-EXP-05 修复第 2 轮（审查 P1，关闭 DEBT-FG8DROP01-01 的后半段）：被回收的机器随舱落回投送站——投送站是正式的回收落点，
+        /// 它携带的区域关键物 / 黑匣子 / 遗产在落地这一刻带回（<see cref="Economy.CargoService.DeliverQuestItem"/>：区域标 Cleared、目标推进、黑匣子进陈列馆、遗产入保管库），
+        /// 不再依赖投送站离核心 / 仓库是否在 loot.pick.depot_radius 以内。O(区域关键物)，只在落地这一刻。
+        /// </summary>
+        private static void DeliverCarriedQuestItems(CampaignState state, int logicId)
+        {
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || !m.IsAlive)
+            {
+                return;
+            }
+            foreach (RegionQuestItemRecord q in state.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
+            {
+                if (q != null && q.State == RegionQuestItemState.Carried && q.CarrierLogicId == logicId)
+                {
+                    Economy.CargoService.DeliverQuestItem(state, q, m);
+                    QuestItemsLanded++;
+                }
+            }
+        }
+
         /// <summary>回到站里：机器在站旁下舱（回收的按远征卸货规则卸货），货物入库（放不下的落在站旁），之后冷却。站的建筑记录没了（拆掉）：在原地卸下，舱变回物品。</summary>
         private static void OnReturnArrive(CampaignState state, DropPodRecord pod, long now)
         {
@@ -661,6 +685,9 @@ namespace GameLogic.Campaign.Regions
                 {
                     ReturnedScratch.Add(id);
                     d.Recovered++;
+                    // 修复第 3 轮（审查 P1）：远征还没结束（分批接回、其余成员还在外面）时，先把这台记进进行中的结算（货舱货按远征卸货规则），再带回关键物。
+                    Economy.ExpeditionSettlementService.OnMemberLanded(state, id);
+                    DeliverCarriedQuestItems(state, id);
                 }
             }
             if (pod.CargoAmount > 0 && ItemCatalog.TryGet(pod.CargoItem, out ItemDef item))

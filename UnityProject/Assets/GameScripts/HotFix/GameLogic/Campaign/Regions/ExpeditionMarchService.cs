@@ -213,7 +213,8 @@ namespace GameLogic.Campaign.Regions
             }
             if (m.Phase == PhaseReturning)
             {
-                goal = HomeValleyLayout.Core.Position;
+                // FG8-EXP-05：返程去下令那一刻最近的家园 / 带仓库的前哨站（旧档没有 = 归还核心）。
+                goal = m.HasReturnGoal ? new Vector2(m.ReturnX, m.ReturnY) : HomeValleyLayout.Core.Position;
                 return true;
             }
             return ExpeditionSiteAnchors.TryGet(s, m.SiteId, out goal);
@@ -462,6 +463,10 @@ namespace GameLogic.Campaign.Regions
                 m.Phase = phase;
                 m.PhaseTick = GameClock.Ticks;
             }
+            if (cmd == Command.Return)
+            {
+                ChooseReturnGoal(s, m);
+            }
             m.Command = (int)cmd;
             m.Halted = HaltNone;
             m.ArrivalFailReason = string.Empty; // 玩家重新下了令：之后再没进去照常提示
@@ -571,6 +576,8 @@ namespace GameLogic.Campaign.Regions
             m.ArrivalRetryTick = 0;
             m.HazardZoneId = string.Empty;
             m.EncounteredIds = Array.Empty<string>();
+            m.VisitedSite = false; // FG8-EXP-05：这一趟还没进过地点
+            m.HasReturnGoal = false;
             m.OrdersPending = !IssueOrders(s, m);
             BeginFaultInjectionForTests?.Invoke();
             BeginCount++;
@@ -652,6 +659,7 @@ namespace GameLogic.Campaign.Regions
             }
             SetPhase(m, PhaseAtSite);
             m.Halted = HaltNone;
+            m.VisitedSite = true; // FG8-EXP-05：结算只在进过地点时列地点里留下的东西
         }
 
         private static void SetPhase(ExpeditionMarchState m, int phase)
@@ -740,6 +748,12 @@ namespace GameLogic.Campaign.Regions
                 {
                     home.SetUnitSpeed(unit, m.Speed);
                 }
+            }
+            if (returning && m.HasReturnGoal && !DepotStillThere(s, new Vector2(m.ReturnX, m.ReturnY)))
+            {
+                // FG8-EXP-05：要去的那座仓库途中被毁 / 拆了：改去下一处最近的家园 / 带仓库的前哨站（不替玩家改命令，命令仍是“返回”）。
+                ChooseReturnGoal(s, m);
+                m.OrdersPending = true;
             }
             EvaluateCoverage(m, members);
             m.Engaged = AnyEngaged(home, members);
@@ -975,6 +989,7 @@ namespace GameLogic.Campaign.Regions
             {
                 SetPhase(m, PhaseAtSite);
                 m.Halted = HaltNone;
+                m.VisitedSite = true; // FG8-EXP-05
                 IWorldSite site = siteId == FoundryOutpostLayout.RegionId
                     ? (IWorldSite)WorldSimulation.LoadFoundryOutpost(alive, resume: false)
                     : WorldSimulation.LoadFracturedCity(alive, resume: false);
@@ -989,6 +1004,7 @@ namespace GameLogic.Campaign.Regions
                         }
                     }
                     SetPhase(m, PhaseOutbound);
+                    m.VisitedSite = false;
                     FailArrival(s, m, "site-unavailable");
                     return;
                 }
@@ -1155,6 +1171,9 @@ namespace GameLogic.Campaign.Regions
         private static void ReturnHome(CampaignState s, ExpeditionMarchState m, CombatSite home, IReadOnlyList<int> members)
         {
             var returning = new List<int>(members);
+            // FG8-EXP-05（FGR-EXP-050）：到家才结算——携带的关键物在这里带回、写远征结算（带回的物品、三选一、任务、线索、暴露、耗时、经历、留在原地的东西），
+            // 然后结算离家报告、按远征卸货规则卸货。
+            Economy.ExpeditionSettlementService.Settle(s, Economy.ExpeditionSettlementService.ViaFoot, returning);
             foreach (int id in returning)
             {
                 if (home.TryGetMachineUnit(id, out int unit))
@@ -1187,11 +1206,26 @@ namespace GameLogic.Campaign.Regions
         /// <summary>行军途中全部阵亡：远征结束（离家报告按全灭结算、全灭提示）。阵亡掉落、黑匣子照家园机器阵亡的正式流程（FG8-EXP-05 / LOOT-03 补全灭结算）。</summary>
         private static void OnWipedOnPlanet(CampaignState s, ExpeditionMarchState m)
         {
+            // FG8-EXP-05（FGR-EXP-031 / 032，承接 DEBT-FG8EXP02-04）：行军途中全灭——货物、黑匣子、关键物、数据包已在阵亡那一刻掉在原地（KeyItemRetention），
+            // 结算里列出留在原地的东西与回收倒计时、写明全灭的处理（远征结算 + 离家报告），提示写明“东西留在原地、可以再派队取回”。
+            AwayReportRecord rec = Economy.ExpeditionSettlementService.Settle(s, Economy.ExpeditionSettlementService.ViaWiped, Array.Empty<int>());
+            // 修复第 4 轮（审查 P1）：分批接回、有成员已随投送舱生还（落地或还在舱里）时，星球上其余成员阵亡不算全灭——结算改按“随投送舱返回”，离家报告写“返回”。
+            if (rec?.Settlement?.Via == Economy.ExpeditionSettlementService.ViaPod)
+            {
+                SetPhase(m, PhaseReturned);
+                m.Halted = HaltNone;
+                m.Command = (int)Command.Advance;
+                PodReturnCount++;
+                Economy.AwayReportService.End(s, Economy.AwayReportService.OutcomeEvacuated);
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionMarchReturned, GameText.Get("exp.cue.returned_by_pod"));
+                Log.Info("[ExpeditionMarchService] 星球上的远征成员全部失去行动能力，其余成员已随投送舱返回，按“返回”结算。");
+                return;
+            }
             SetPhase(m, PhaseNone);
             m.Halted = HaltNone;
             WipedCount++;
             Economy.AwayReportService.End(s, Economy.AwayReportService.OutcomeWiped);
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionWiped, GameText.Get("exp.cue.wiped_on_march"));
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionWiped, GameText.Get("exp.cue.wiped_on_march") + GameText.Get("settle.wipe.cue_tail"));
             Log.Warning("[ExpeditionMarchService] 远征队在行军途中全部失去行动能力。");
         }
 
@@ -1234,6 +1268,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            // FG8-EXP-05：投送舱接回 = 一种返回（FGR-EXP-031）：最后一台登舱时结算（货舱里的货、携带的关键物随舱返回，落回投送站时按远征卸货规则卸下 / 带回）。
+            Economy.ExpeditionSettlementService.Settle(s, Economy.ExpeditionSettlementService.ViaPod, Economy.AwayReportService.Current(s)?.Members);
             SetPhase(m, PhaseReturned);
             m.Halted = HaltNone;
             m.Command = (int)Command.Advance;
@@ -1242,6 +1278,137 @@ namespace GameLogic.Campaign.Regions
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionMarchReturned, GameText.Get("exp.cue.returned_by_pod"));
             Log.Info("[ExpeditionMarchService] 远征队全部登上投送舱，按“返回”结算。");
         }
+
+        /// <summary>FG8-EXP-05：从远征地点撤离、开始走回家园的次数（自检读）。</summary>
+        public static int SiteReturnCount { get; private set; }
+
+        /// <summary>
+        /// FG8-EXP-05（关闭 DEBT-FG8EXP02-01；FGR-EXP-031“命令远征队走回家园或前哨站”、FGR-EXP-050“回到家园……时结算”）：从远征地点撤离之后，
+        /// 幸存者出现在星球上的地点入口（锚点旁，三台一排），状态“返程中”，沿地形走回最近的家园 / 带仓库的前哨站（层级寻路，与行军同一套），到家才结算。
+        /// 由 <see cref="ExpeditionReturnService.TryConfirmEvacuation"/> 在地点卸载、家园恢复之后调用；成员的位置在恢复家园前已写到锚点旁（<see cref="ExitPosition"/>）。
+        /// 途中可以被拦截、全灭（按全灭结算，东西留在原地），也可以呼叫投送舱接回（DEBT-FG8DROP01-01：地点里的队伍先撤离到入口，再从入口被接回）。
+        /// </summary>
+        public static void BeginReturnFromSite(CampaignState s, string siteId, IReadOnlyList<int> survivors)
+        {
+            if (s?.Grid?.ExpeditionTeam == null)
+            {
+                return;
+            }
+            ExpeditionMarchState m = s.Grid.ExpeditionTeam.March ??= new ExpeditionMarchState();
+            var ids = new List<int>(survivors ?? Array.Empty<int>());
+            ids.Sort();
+            m.SiteId = siteId ?? m.SiteId;
+            m.Members = ids.ToArray();
+            SetPhase(m, PhaseReturning);
+            m.Command = (int)Command.Return;
+            m.Halted = HaltNone;
+            m.ArrivalFailReason = string.Empty;
+            m.Speed = MarchSpeed(ids);
+            m.InCoverage = true;
+            m.EdgeWarned = false;
+            m.Engaged = false;
+            m.HazardZoneId = string.Empty;
+            m.VisitedSite = true;
+            m.HasReturnGoal = false;
+            ChooseReturnGoal(s, m);
+            m.OrdersPending = true; // 成员刚在家园内核里出现，下一步补下“返回”的内核命令
+            SiteReturnCount++;
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionMarchReturned, GameText.Format("settle.cue.walking_home", ids.Count));
+            Log.Info($"[ExpeditionMarchService] 远征队从 {siteId} 撤离：{ids.Count} 台从地点入口走回家园（到家才结算）。");
+        }
+
+        /// <summary>FG8-EXP-05：撤离出来的第 <paramref name="index"/> 台在星球上的位置（地点入口锚点旁三台一排；锚点不在时归还核心旁）。</summary>
+        public static Vector2 ExitPosition(CampaignState s, string siteId, int index) =>
+            (ExpeditionSiteAnchors.TryGet(s, siteId, out Vector2 anchor) ? anchor : HomeValleyLayout.Core.Position + new Vector2(2f, -2f)) + FormationOffset(index);
+
+        /// <summary>返程目的地：离队伍中心最近的家园 / 带仓库的前哨站（核心或仓库；同距离按建筑顺序）。O(建筑数)，只在下令 / 目的地消失时。</summary>
+        private static void ChooseReturnGoal(CampaignState s, ExpeditionMarchState m)
+        {
+            Vector2 from = HomeValleyLayout.Core.Position;
+            if (TryTeamCenter(s, out Vector2 c, out _))
+            {
+                from = c;
+            }
+            else if (m.Members != null && m.Members.Length > 0 && MachineRegistry.TryGetRecord(m.Members[0], out MachineRecord rec) && rec != null)
+            {
+                from = rec.WorldPosition;
+            }
+            DepotScratch.Clear();
+            Economy.LootPickService.CollectDepotPositions(s, DepotScratch);
+            Vector2 best = HomeValleyLayout.Core.Position;
+            float bestD = (best - from).sqrMagnitude;
+            foreach (Vector2 d in DepotScratch)
+            {
+                float dd = (d - from).sqrMagnitude;
+                if (dd < bestD - 1e-3f)
+                {
+                    bestD = dd;
+                    best = d;
+                }
+            }
+            DepotScratch.Clear();
+            m.HasReturnGoal = true;
+            m.ReturnX = best.x;
+            m.ReturnY = best.y;
+        }
+
+        private static readonly List<Vector2> DepotScratch = new List<Vector2>(8);
+
+        private static bool DepotStillThere(CampaignState s, Vector2 at)
+        {
+            if ((at - HomeValleyLayout.Core.Position).sqrMagnitude < 0.01f)
+            {
+                return true;
+            }
+            DepotScratch.Clear();
+            Economy.LootPickService.CollectDepotPositions(s, DepotScratch);
+            bool found = false;
+            foreach (Vector2 d in DepotScratch)
+            {
+                found |= (d - at).sqrMagnitude < 0.01f;
+            }
+            DepotScratch.Clear();
+            return found;
+        }
+
+#if UNITY_EDITOR
+        // 修复第 2 轮（审查 P2）：只在编辑器里编译，玩家构建没有这条瞬移回家的入口。
+        /// <summary>
+        /// 自检专用快进（正式代码没有调用点）：返程中的远征队直接放到返程目的地旁，然后走与正式到家同一条结算（<see cref="ReturnHome"/>）。
+        /// 给“撤离后在家园里接着测”的既有自检与冒烟用；返程本身由 FgExpeditionSettlementSelfCheck 真实推进验证。返回是否已结算为“已返回”。
+        /// </summary>
+        public static bool ReturnNowForTests(CampaignState s)
+        {
+            ExpeditionMarchState m = Current(s);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            if (m == null || m.Phase != PhaseReturning || home == null || !TryGetGoal(s, out Vector2 goal))
+            {
+                return false;
+            }
+            var ids = new List<int>(AlivePlanetMembers(s));
+            if (ids.Count == 0)
+            {
+                OnWipedOnPlanet(s, m);
+                return false;
+            }
+            for (int k = 0; k < ids.Count; k++)
+            {
+                Vector2 at = goal + FormationOffset(k);
+                if (home.TryGetMachineMarker(ids[k], out HomeValleyMachineMarker marker))
+                {
+                    home.ClearCommand(marker.UnitId);
+                    home.SetUnitPosition(marker.UnitId, at);
+                }
+                if (MachineRegistry.TryGetRecord(ids[k], out MachineRecord rec))
+                {
+                    rec.WorldPosition = at;
+                }
+            }
+            m.OrdersPending = false;
+            ReturnHome(s, m, home, ids);
+            return Current(s) is { Phase: PhaseReturned };
+        }
+#endif
 
         /// <summary>离开远征地点（<see cref="ExpeditionReturnService"/> 撤离 / 全灭放弃之后调用）：撤离 = 已返回；全灭放弃 = 没有远征在外。</summary>
         public static void OnLeftSite(CampaignState s, bool wiped)

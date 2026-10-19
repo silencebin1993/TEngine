@@ -389,14 +389,16 @@ namespace GameLogic.Campaign.Regions
                     // 携带的关键物标记 Recovered。改读 MachineRegistry.AllRecords（权威实时来源）。
                     List<int> survivors = MachineRegistry.AllRecords
                         .Where(m => m != null && m.RegionId == FracturedCityLayout.RegionId && m.IsAlive)
-                        .Select(m => m.LogicId).ToList();
-                    FracturedCityRegion.ResolveExtraction(state, survivors);
+                        .Select(m => m.LogicId).OrderBy(id => id).ToList();
+                    // FG8-EXP-05（FGR-EXP-031 / 050）：幸存者携带的关键物跟着机器走回家园、到家才带回（deliverSurvivors: false）；没能撤离的按 D-13 掉在原地。
+                    FracturedCityRegion.ResolveExtraction(state, survivors, deliverSurvivors: false);
                     foreach (int logicId in survivors)
                     {
                         if (MachineRegistry.TryGetRecord(logicId, out MachineRecord record))
                         {
                             MachineRegistry.MoveToRegion(record, HomeValleyLayout.RegionId);
-                            record.WorldPosition = HomeValleyLayout.Core.Position + new Vector2(2f, -2f);
+                            // FG8-EXP-05：出现在星球上的地点入口（锚点旁三台一排），随后沿地形走回家园（ExpeditionMarchService.BeginReturnFromSite）。
+                            record.WorldPosition = ExpeditionMarchService.ExitPosition(state, SiteId, survivors.IndexOf(logicId));
                         }
                     }
                 }

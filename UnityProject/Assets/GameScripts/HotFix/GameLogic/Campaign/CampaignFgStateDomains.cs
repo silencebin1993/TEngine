@@ -340,6 +340,13 @@ namespace GameLogic.Campaign
         public string TerritoryId = string.Empty;
         /// <summary>途中已提醒过的敌方据点 / 巡逻 ID（每个只提醒一次，读档后不重复）。</summary>
         public string[] EncounteredIds = Array.Empty<string>();
+        /// <summary>FG8-EXP-05（FGR-EXP-031 / 050“走回家园或前哨站”）：返程的目的地——下“返回家园”或从远征地点撤离那一刻离队伍最近的家园 / 带仓库的前哨站（核心或仓库的位置）。
+        /// 没有（旧档）= 归还核心。那座仓库途中被毁时改去下一处最近的。</summary>
+        public bool HasReturnGoal;
+        public float ReturnX;
+        public float ReturnY;
+        /// <summary>FG8-EXP-05：这一趟去过远征地点（从地点撤离后走回家园）。</summary>
+        public bool VisitedSite;
     }
 
     /// <summary>
@@ -1874,6 +1881,9 @@ namespace GameLogic.Campaign
         /// 突袭结束恢复默认（turret.supply.pipe_priority / trap.pipe_priority）。只加字段：旧档 = 关。
         /// </summary>
         public bool BoostDefenseSupply;
+        /// <summary>FG8-EXP-05（关闭 DEBT-FG4ECO06-04；FGR-EXP-050“货物按远征卸货规则送到仓库或解析台”）：远征卸货时，需要解析的敌方物品（未解析模块 / 数据核心）
+        /// 卸下后直接排进解析台队列（解析台满 / 没建 / 不能用时留在仓库，写明原因）。只加字段：旧档 / 新规则默认关。</summary>
+        public bool SendToAnalysis;
         public long LastFiredTick = -1;
         public int FireCount;
         /// <summary>条件现在成立、正在执行（库存维持 / 战时 / 静默夜；用来只在开始与结束时各写一条日志）。</summary>
@@ -2155,6 +2165,8 @@ namespace GameLogic.Campaign
         public string Destination = string.Empty;
         public int TechData;
         public long Tick;
+        /// <summary>FG8-EXP-05 修复第 2 轮：分拣时数据包的携带机器（0 = 地上 / 旧档）。远征结算只收本次成员做的三选一。</summary>
+        public int Holder;
     }
 
     /// <summary>FG8-LOOT-01：地上一件带身份的敌方加密物品（按地面物的回收实例 ID 对应）。</summary>
@@ -2278,6 +2290,102 @@ namespace GameLogic.Campaign
         public int RulesTotal;
         /// <summary>远征的反应伤害归因场次（FG2-FW-04；GAP-055 远征段）。空 = 没有。</summary>
         public string ReactionSessionId = string.Empty;
+        /// <summary>FG8-EXP-05（FGR-EXP-050“暴露变化”）：出发时的暴露值与游戏秒（旧档的报告没有 = HasStart 假，结算时不写暴露变化）。</summary>
+        public bool HasStart;
+        public float ExposureAtStart;
+        public float PlaySecondsAtStart;
+        /// <summary>FG8-EXP-05：远征结算（回到家园 / 带仓库的前哨站、投送舱接回、全灭时写；JsonUtility 不存 null，用标志位 + 常驻对象）。
+        /// 远征途中带回的关键物在带回那一刻就记进 <see cref="ExpeditionSettlementRecord.Items"/>（与观察无关，FGR-BASE-021）。</summary>
+        public bool HasSettlement;
+        public ExpeditionSettlementRecord Settlement = new ExpeditionSettlementRecord();
+    }
+
+    /// <summary>FG8-EXP-05（FGR-EXP-050 远征结算）：一次远征的结算。唯一写入口 <c>Economy.ExpeditionSettlementService</c>。</summary>
+    [Serializable]
+    public sealed class ExpeditionSettlementRecord
+    {
+        /// <summary>怎么结束的：foot = 走回家园 / 带仓库的前哨站；pod = 投送舱接回；wiped = 全灭（行军途中 / 远征地点里）。</summary>
+        public string Via = string.Empty;
+        /// <summary>带回的物品（货舱里的、携带的关键物 / 黑匣子 / 遗产、数据包）与去处。</summary>
+        public SettleItemRecord[] Items = Array.Empty<SettleItemRecord>();
+        /// <summary>这次远征里做的三选一（<see cref="LootPacketState.Picks"/> 里出发之后的那些）。</summary>
+        public LootPickLogRecord[] Picks = Array.Empty<LootPickLogRecord>();
+        /// <summary>远征期间完成 / 失败的任务（ObjectiveRecord.ObjectiveId 与结局）。</summary>
+        public SettleQuestRecord[] Quests = Array.Empty<SettleQuestRecord>();
+        /// <summary>远征期间生成的熔合线索（<see cref="FusionClueRecord.Serial"/>）。</summary>
+        public int[] Clues = Array.Empty<int>();
+        public float ExposureStart;
+        public float ExposureEnd;
+        public bool HasExposure;
+        /// <summary>机器经历：每台的结局与累计远征次数（结算那一刻固化）。</summary>
+        public SettleMachineRecord[] Machines = Array.Empty<SettleMachineRecord>();
+        /// <summary>没带走、留在原地的东西（普通战利品带回收倒计时；关键物 / 黑匣子 / 遗产 / 数据包永不消失）。</summary>
+        public SettleLeftRecord[] Left = Array.Empty<SettleLeftRecord>();
+        public int LeftMore;
+        /// <summary>“远征卸货”规则关着：货留在机器货舱里（FGR-BASE-020，写明原因）。</summary>
+        public bool CargoKept;
+        /// <summary>数据包：带回 / 留在原地的个数（带回的回家后分拣）。</summary>
+        public int PacketsHome;
+        /// <summary>
+        /// 修复第 3 轮（审查 P1）：远征还没结束时就随投送舱落回投送站的成员（分批接回）。它们的货舱货与携带的关键物在落地那一刻记进 <see cref="Items"/>，
+        /// 远征结束时的结算不再重复记它们的货（只记机器经历与数据包）。旧档没有这个字段 = 空。
+        /// </summary>
+        public int[] Landed = Array.Empty<int>();
+    }
+
+    /// <summary>FG8-EXP-05：带回的一份东西。</summary>
+    [Serializable]
+    public sealed class SettleItemRecord
+    {
+        /// <summary>cargo = 货舱里分拣 / 拾取的货（Kind 写在 <see cref="CargoKind"/>）；key = 区域关键物；box = 黑匣子；heritage = 人类遗产。</summary>
+        public string Kind = string.Empty;
+        public string CargoKind = string.Empty;
+        /// <summary>物品 ID（货）或区域关键物的内容 ID / 回收实例 ID。</summary>
+        public string ItemId = string.Empty;
+        public string TargetId = string.Empty;
+        public int Amount;
+        /// <summary>去处：warehouse（仓库 / 共用库存）/ firmware（固件库）/ analysis（解析台队列）/ analysis_wait（进仓库，等解析）/ cargo（留在货舱里）/
+        /// pod（随投送舱返回，落地后卸货）/ vault（核心保管库）/ gallery（陈列馆）/ recovered（已带回）。</summary>
+        public string Dest = string.Empty;
+        /// <summary>修复第 2 轮（审查 P1）：“送到解析台”的实际结果已回写（卸货那一步按 TryEnqueueItem 的真实结果改 <see cref="Dest"/>）。旧档没有这个字段 = false。</summary>
+        public bool Confirmed;
+        /// <summary>没能排进解析台的原因码（HomeValleyAnalysis 的失败原因；<see cref="Dest"/> = analysis_wait 时显示）。</summary>
+        public string Reason = string.Empty;
+    }
+
+    /// <summary>FG8-EXP-05：远征期间的一条任务进度。</summary>
+    [Serializable]
+    public sealed class SettleQuestRecord
+    {
+        public string ObjectiveId = string.Empty;
+        /// <summary><see cref="ObjectiveState"/>（Completed / Failed）。</summary>
+        public int State;
+    }
+
+    /// <summary>FG8-EXP-05：一台远征机器的经历更新。</summary>
+    [Serializable]
+    public sealed class SettleMachineRecord
+    {
+        public int LogicId;
+        public bool Alive;
+        /// <summary>结算后这台机器累计完成的远征次数。</summary>
+        public int Expeditions;
+        public bool Injured;
+    }
+
+    /// <summary>FG8-EXP-05：留在原地的一份东西（结算时固化；位置 = 星球格 / 地点格）。</summary>
+    [Serializable]
+    public sealed class SettleLeftRecord
+    {
+        /// <summary>loot = 普通战利品；key = 区域关键物 / 关键材料；box = 黑匣子；heritage = 人类遗产；packet = 数据包。</summary>
+        public string Kind = string.Empty;
+        public string ItemId = string.Empty;
+        public int Amount;
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
+        /// <summary>被敌方回收的统一时钟步（0 = 永不消失）。</summary>
+        public long ExpireTick;
     }
 
     /// <summary>FG4-ECO-09：一座建筑在离家期间缺一种物品的累计步数。</summary>

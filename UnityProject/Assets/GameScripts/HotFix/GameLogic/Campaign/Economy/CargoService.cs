@@ -718,6 +718,10 @@ namespace GameLogic.Campaign.Economy
             if (boxes)
             {
                 changed |= RecoverBoxes(s);
+                if (_interiorGround)
+                {
+                    changed |= InteriorPickup(s, state);
+                }
             }
             Members.Clear();
             if (team)
@@ -766,59 +770,198 @@ namespace GameLogic.Campaign.Economy
 
         private static bool AnyPlanetBox(CampaignState s)
         {
+            _interiorGround = false;
+            bool any = false;
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
                 // FG8-EXP-04：人类遗产与黑匣子同一套（带回家园即入库、地上的远征队员走近自动捡起）。
-                if (q != null && (BlackBoxService.IsBlackBox(q) || Env.HeritageService.IsHeritage(q)) && (q.State == RegionQuestItemState.Carried || (q.State == RegionQuestItemState.OnGround && q.RegionId == HomeValleyLayout.RegionId)))
+                // FG8-EXP-05：所有区域关键物（KeyItemRetention：Demo 任务物 / 缓存 / 核心数据）同一套——从远征地点撤离后跟着队伍走回家园，到家即带回；
+                // 在星球上掉落的由走近的队员捡起。室内场地里地上的关键物（DEBT-FG8EXP04-07）由在室内的己方机器走近捡起。
+                if (q == null || !KeyItemRetention.NeverExpires(KeyItemRetention.OfQuestItem(q)))
                 {
-                    return true;
+                    continue;
+                }
+                if (q.State == RegionQuestItemState.Carried)
+                {
+                    any = true;
+                }
+                else if (q.State == RegionQuestItemState.OnGround)
+                {
+                    if (q.RegionId == HomeValleyLayout.RegionId)
+                    {
+                        any = true;
+                    }
+                    else if (InteriorSiteService.IsInteriorSurface(q.RegionId))
+                    {
+                        _interiorGround = true;
+                        any = true;
+                    }
                 }
             }
-            return false;
+            return any;
         }
 
-        /// <summary>黑匣子回到家园：携带者在家园 / 带仓库的前哨站（或地上的就在那里）→ 标 Recovered、进陈列馆队列。</summary>
+        private static bool _interiorGround;
+
+        /// <summary>
+        /// 关键物回到家园：携带者在家园 / 带仓库的前哨站（或地上的就在那里）→ 带回（<see cref="DeliverQuestItem"/>）。
+        /// 携带中但携带者不在家园所在星球上（还在远征地点 / 室内里）的不碰——它们走出来、走回家才算。
+        /// </summary>
         private static bool RecoverBoxes(CampaignState s)
         {
             bool changed = false;
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                bool heritage = Env.HeritageService.IsHeritage(q);
-                if (q == null || (!BlackBoxService.IsBlackBox(q) && !heritage))
+                if (q == null || !KeyItemRetention.NeverExpires(KeyItemRetention.OfQuestItem(q)))
                 {
                     continue;
                 }
                 bool home = false;
-                string who = null;
+                MachineRecord carrier = null;
                 if (q.State == RegionQuestItemState.Carried && Alive(q.CarrierLogicId, out MachineRecord c) && !c.IsInFactory)
                 {
                     home = InDepot(LootPickService.RegionOfMachine(c), LootPickService.PositionOfMachine(c));
-                    who = MachineNaming.Short(c);
+                    carrier = c;
                 }
                 else if (q.State == RegionQuestItemState.OnGround && q.RegionId == HomeValleyLayout.RegionId)
                 {
                     home = InDepot(q.RegionId, q.Position);
                 }
-                if (!home)
+                if (home)
                 {
-                    continue;
-                }
-                q.State = RegionQuestItemState.Recovered;
-                q.CarrierLogicId = 0;
-                if (heritage)
-                {
-                    // FG8-EXP-04：遗产带回核心 / 仓库附近 → 存入核心保管库并按类别生效（通知由遗产服务发）。
-                    Env.HeritageService.OnDelivered(s, q);
+                    DeliverQuestItem(s, q, carrier);
                     changed = true;
+                }
+            }
+            return changed;
+        }
+
+        /// <summary>FG8-EXP-05：室内场地里被捡起的关键物件数（自检读）。</summary>
+        public static int InteriorPicked { get; private set; }
+
+        private static readonly List<MachineRecord> InteriorScratch = new List<MachineRecord>(8);
+
+        /// <summary>
+        /// FG8-EXP-05（关闭 DEBT-FG8EXP04-07）：室内场地（FG8-GEN-02）地上的关键物 / 遗产 / 黑匣子——同一室内里存活、不在工厂、货舱放得下的己方机器走到 loot.cargo.pickup_radius 格内就捡起
+        /// （最近的、同距离按 LogicId 小的；与星球上的自动拾取同一判定）。之后照常跟着机器：走出室内、带回家园 / 带仓库的前哨站即带回（<see cref="RecoverBoxes"/>）。
+        /// 只在有室内地上关键物时做，O(机器数 + 这类关键物 × 室内机器数)；只看步序号，与观察无关。
+        /// </summary>
+        private static bool InteriorPickup(CampaignState s, LootPacketState st)
+        {
+            bool changed = false;
+            float r2 = PickupRadius * PickupRadius;
+            bool listed = false;
+            foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
+            {
+                if (q == null || q.State != RegionQuestItemState.OnGround || !KeyItemRetention.NeverExpires(KeyItemRetention.OfQuestItem(q))
+                    || !InteriorSiteService.IsInteriorSurface(q.RegionId) || IsDiscarded(st, q.SalvageInstanceId))
+                {
                     continue;
                 }
+                if (!listed)
+                {
+                    // 修复第 2 轮（审查 P2）：每次检查只扫一遍机器记录，挑出在室内的存活机器（通常 0～几台）；之后每件物品只看这几台，
+                    // 整体 O(机器数 + 室内关键物 × 室内机器数)，不再是 O(关键物 × 全部机器)。没有机器在室内时直接结束。
+                    listed = true;
+                    InteriorScratch.Clear();
+                    foreach (MachineRecord m in MachineRegistry.AllRecords)
+                    {
+                        if (m != null && m.IsAlive && !m.IsInFactory && InteriorSiteService.IsInteriorSurface(m.RegionId))
+                        {
+                            InteriorScratch.Add(m);
+                        }
+                    }
+                }
+                if (InteriorScratch.Count == 0)
+                {
+                    break;
+                }
+                int space = LootPickCatalog.SpaceOf(q.ContentId, 1);
+                MachineRecord best = null;
+                float bestD = r2;
+                foreach (MachineRecord m in InteriorScratch)
+                {
+                    if (m.RegionId != q.RegionId)
+                    {
+                        continue;
+                    }
+                    float d = (LootPickService.PositionOfMachine(m) - q.Position).sqrMagnitude;
+                    if (d > r2 || Free(s, m) < space)
+                    {
+                        continue;
+                    }
+                    if (best == null || d < bestD - 1e-4f || (Math.Abs(d - bestD) <= 1e-4f && m.LogicId < best.LogicId))
+                    {
+                        best = m;
+                        bestD = d;
+                    }
+                }
+                if (best == null)
+                {
+                    continue;
+                }
+                q.State = RegionQuestItemState.Carried;
+                q.CarrierLogicId = best.LogicId;
+                InteriorPicked++;
+                BlackBoxService.Touch();
+                Env.HeritageService.Touch();
+                Env.HeritageService.CancelStalePickup(s, q, null);
+                Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Pickup, q.Position, GameText.Format("cargo.picked", MachineNaming.Short(best), QuestName(q)));
+                q.Position = default;
+                changed = true;
+            }
+            return changed;
+        }
+
+        /// <summary>FG8-EXP-05：带回过几件区域关键物（自检读）。</summary>
+        public static int QuestDelivered { get; private set; }
+
+        /// <summary>
+        /// 一件区域关键物被带回家园（携带者走进家园 / 带仓库的前哨站，或远征队到家结算，或地上的就在家园范围内）：
+        /// 人类遗产 → 核心保管库；黑匣子 → 陈列馆队列；Demo 任务物 / 缓存 / 核心数据 → Recovered（区域关键物齐了标记 Cleared、敌方加密固件变成芯片、目标重算）。
+        /// 远征队成员带回的记进本次远征的结算（<see cref="ExpeditionSettlementService.NoteQuestItem"/>）。幂等：已经 Recovered 的不再处理。
+        /// </summary>
+        public static void DeliverQuestItem(CampaignState s, RegionQuestItemRecord q, MachineRecord carrier)
+        {
+            if (s == null || q == null || q.State == RegionQuestItemState.Recovered || q.State == RegionQuestItemState.Lost)
+            {
+                return;
+            }
+            // 修复第 3 轮（审查 P1）：分批用投送舱接回时，先登舱的成员已离开行军名单（OnMembersBoardedPod），但它随舱落地带回的东西仍属于这次远征（ExpeditionSettlementService.IsSettlingMember）。
+            bool team = carrier != null && (ExpeditionMarchService.IsTeamMember(s, carrier.LogicId) || ExpeditionSettlementService.IsSettlingMember(s, carrier.LogicId));
+            string who = carrier != null ? MachineNaming.Short(carrier) : null;
+            q.State = RegionQuestItemState.Recovered;
+            q.CarrierLogicId = 0;
+            QuestDelivered++;
+            if (team)
+            {
+                ExpeditionSettlementService.NoteQuestItem(s, q);
+            }
+            if (Env.HeritageService.IsHeritage(q))
+            {
+                // FG8-EXP-04：遗产带回核心 / 仓库附近 → 存入核心保管库并按类别生效（通知由遗产服务发）。
+                Env.HeritageService.OnDelivered(s, q);
+                return;
+            }
+            if (BlackBoxService.IsBlackBox(q))
+            {
                 BlackBoxService.OnRecovered(s, q);
                 int id = BlackBoxService.LogicIdOf(q);
                 string box = GameText.Format("cargo.blackbox", MachineRegistry.TryGetRecord(id, out MachineRecord dead) && dead != null ? MachineNaming.Short(dead) : "#" + id);
                 NotificationCenter.Post(NotifyType, who != null ? GameText.Format("cargo.bb.recovered", who, box) : GameText.Format("cargo.bb.recovered_ground", box));
-                changed = true;
+                return;
             }
-            return changed;
+            // Demo 区域任务物 / 可选缓存 / 核心数据（与撤离结算 ResolveExtraction 的“撤离成功”分支同一组结果）。
+            if (HomeValleyAnalysis.YieldTable.ContainsKey(q.ContentId ?? string.Empty))
+            {
+                HomeValleyAnalysis.NoteEnemyItemSeen(s); // FG5-RND-02：第一次拿到敌方物品的引导钩子
+            }
+            FracturedCityRegion.ApplyRecoveredEffects(s);
+            FoundryOutpostRegion.ApplyRecoveredEffects(s);
+            CampaignObjectiveTracker.Recompute(s);
+            BlackBoxService.Touch();
+            string name = Feedback.FeedbackCues.QuestItemName(q.ContentId);
+            NotificationCenter.Post(NotifyType, who != null ? GameText.Format("settle.key_recovered", who, name) : GameText.Format("settle.key_recovered_ground", name));
         }
 
         private static bool ClearDiscardMarks(CampaignState s, LootPacketState st)
@@ -1018,10 +1161,10 @@ namespace GameLogic.Campaign.Economy
                 s.GroundItems = keep.ToArray();
                 CancelHauls(s, removed);
             }
-            // 地上的黑匣子（始终拾取，占 1 格；家园星球上的——远征地点里的沿用“装载”交互）。
+            // 地上的黑匣子 / 关键物（始终拾取，占 1 格；家园星球上的——远征地点里的沿用“装载”交互）。FG8-EXP-05：所有区域关键物都按 KeyItemRetention 始终拾取。
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (q == null || !(BlackBoxService.IsBlackBox(q) || Env.HeritageService.IsHeritage(q)) || q.State != RegionQuestItemState.OnGround || q.RegionId != HomeValleyLayout.RegionId
+                if (q == null || !KeyItemRetention.NeverExpires(KeyItemRetention.OfQuestItem(q)) || q.State != RegionQuestItemState.OnGround || q.RegionId != HomeValleyLayout.RegionId
                     || IsDiscarded(st, q.SalvageInstanceId) || !NearAnyMember(q.RegionId, q.Position))
                 {
                     continue;
@@ -1078,7 +1221,7 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>被自动拾取整份拿走的地面物：还没装上车的搬运单（待分配 / 赶路中 / 等待）取消，不让家园机器白跑一趟。</summary>
-        private static void CancelHauls(CampaignState s, List<string> groundIds)
+        internal static void CancelHauls(CampaignState s, List<string> groundIds)
         {
             WorkOrderRecord[] orders = s.WorkOrders;
             if (orders == null)

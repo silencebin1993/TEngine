@@ -668,7 +668,11 @@ namespace GameLogic.Campaign.Regions
         /// 只交付数据层结算（ER6-REGION-01 将在此基础上加撤离确认 UI/封锁门三灯显示，同
         /// ER5-REGION-01→ER5-RETURN-01 先例）。区域 Cleared 条件是"铸造重炮模块已 Recovered"（三种
         /// 可选缓存不影响 Cleared 判定，"可选缓存不阻断核心门"，DEMO-CONTENT-LOCK.md §4.2第3条）。</summary>
-        public static void ResolveExtraction(CampaignState state, IReadOnlyCollection<int> survivingLogicIds)
+        /// <remarks>FG8-EXP-05（FGR-EXP-031 / 050 “走回家园、到家才结算”）：<paramref name="deliverSurvivors"/> = false 时（从地点撤离、队伍还要沿地形走回家园）
+        /// 幸存者携带的关键物留在 Carried、跟着机器走，到家才由 <see cref="Economy.CargoService.DeliverQuestItem"/> 带回；其余照旧分流。
+        /// 携带者还活着、但不在本次幸存名单里（已经在别处，例如先一步走回星球的队员）→ 不碰，等它自己到家结算。
+        /// 携带者没能撤离 → 按 <see cref="Economy.KeyItemRetention"/> 掉在原地（D-13，不再判遗失）。</remarks>
+        public static void ResolveExtraction(CampaignState state, IReadOnlyCollection<int> survivingLogicIds, bool deliverSurvivors = true)
         {
             RegionRecord region = Find(state);
             if (region == null || state.RegionQuestItems == null)
@@ -684,6 +688,16 @@ namespace GameLogic.Campaign.Regions
                 if (item.State != RegionQuestItemState.Carried)
                 {
                     continue;
+                }
+                bool survived = survivors.Contains(item.CarrierLogicId);
+                if (survived && !deliverSurvivors)
+                {
+                    continue; // FG8-EXP-05：跟着幸存者走回家园，到家才结算
+                }
+                if (!survived && MachineRegistry.TryGetRecord(item.CarrierLogicId, out MachineRecord elsewhere) && elsewhere != null && elsewhere.IsAlive
+                    && elsewhere.RegionId != RegionId && !Env.HeritageService.IsHeritage(item))
+                {
+                    continue; // FG8-EXP-05：携带者还活着、已经不在这片区域（例如先一步走回星球的队员）——不碰，等它自己到家结算
                 }
                 // FG8-EXP-04（FGT-EXP-008）：人类遗产按携带者所在区域结算（遗产的 RegionId 是捡起它的地方，不一定是这里）。
                 if (Env.HeritageService.ResolveExtractionItem(state, item, RegionId, survivors.Contains(item.CarrierLogicId)))
@@ -719,6 +733,17 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             region.LostQuestSalvageIds = lost.ToArray();
+            ApplyRecoveredEffects(state);
+        }
+
+        /// <summary>FG8-EXP-05：关键物带回之后的结果（撤离结算与“走回家园、到家带回”共用）：带回的敌方加密固件变成芯片、关键物齐了标记 Cleared。幂等。</summary>
+        public static void ApplyRecoveredEffects(CampaignState state)
+        {
+            RegionRecord region = Find(state);
+            if (region == null || state?.RegionQuestItems == null)
+            {
+                return;
+            }
             // FG1-SIG-06（FGR-SIG-060）：带回的敌方加密固件变成一枚未破解固件芯片（可以放进信号核裸跑；数据盒照旧送解析台破解）。
             Signal.RawFirmwareService.GrantRecovered(state);
 

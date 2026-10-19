@@ -205,6 +205,7 @@ namespace GameLogic.Campaign.Economy
                 st.TotalDrops++;
             }
             HomeValleyWorkOrders.TryCreateHaulPool(s, pile.GroundItemId); // 幂等：同一堆只有一张
+            GroundLootExpiry.Stamp(s, pile, item.Id); // FG8-EXP-05：普通战利品 1 个游戏日后被敌方回收（关键材料不会）
             GuidanceHooks.Raise(HookFirstFieldDrop);
         }
 
@@ -223,6 +224,7 @@ namespace GameLogic.Campaign.Economy
             st.TotalDrops++;
             st.TotalEnemyItems++;
             HomeValleyWorkOrders.TryCreateHaulPool(s, g.GroundItemId);
+            GroundLootExpiry.Stamp(s, g, item.Id); // FG8-EXP-05
             GuidanceHooks.Raise(HookFirstFieldDrop);
             // 稀有掉落给一条带位置的反馈（材料不刷屏）：写明协议去向“需要解析”。
             Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Pickup, at,

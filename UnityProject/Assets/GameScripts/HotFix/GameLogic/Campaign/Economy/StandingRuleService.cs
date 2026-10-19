@@ -469,6 +469,7 @@ namespace GameLogic.Campaign.Economy
                 PointId = src.PointId,
                 BoostRepair = src.BoostRepair,
                 BoostDefenseSupply = src.BoostDefenseSupply, // FG6-DEF-06
+                SendToAnalysis = src.SendToAnalysis, // FG8-EXP-05
                 Zones = CopyZones(d, src.Zones), // FG6-DEF-03：重建区域一起复制（新编号）
             };
             Append(d, copy);
@@ -2269,10 +2270,11 @@ namespace GameLogic.Campaign.Economy
             BuildingRecord dest = string.IsNullOrEmpty(r.PointId) ? null : HomeGridService.FindBuilding(state, r.PointId);
             Vector2 at = dest?.Position ?? HomeValleyLayout.Core.Position;
             int total = 0;
+            List<string> analyze = r.SendToAnalysis ? new List<string>() : null;
             foreach (int id in machines ?? Array.Empty<int>())
             {
                 // FG8-LOOT-02：野外分拣装进货舱的物品按同一条规则卸下（按协议入库：加密固件进固件库、模块 / 数据核心登记解析身份）。
-                total += LootPickService.UnloadHeld(state, id, at);
+                total += LootPickService.UnloadHeld(state, id, at, analyze);
                 if (!MachineRegistry.TryGetRecord(id, out MachineRecord m) || !m.IsAlive || m.Cargo == null || m.Cargo.Length == 0)
                 {
                     continue;
@@ -2301,6 +2303,87 @@ namespace GameLogic.Campaign.Economy
             {
                 Fired(state, r, "rules.log.unload_empty", null, LabelArg(r.Serial));
             }
+            if (analyze != null && analyze.Count > 0)
+            {
+                SendUnloadedToAnalysis(state, r, analyze, machines);
+            }
+        }
+
+        /// <summary>FG8-EXP-05：“远征卸货”勾了“送到解析台”的被排进解析台的件数 / 没能排进去的件数（自检读）。</summary>
+        public static int UnloadAnalyzed { get; private set; }
+        public static int UnloadAnalyzeFailed { get; private set; }
+
+        /// <summary>
+        /// FG8-EXP-05（关闭 DEBT-FG4ECO06-04；FGR-EXP-050“货物按远征卸货规则送到仓库或解析台”）：刚卸下的需要解析的敌方物品排进解析台队列。
+        /// 解析台没建 / 不能用 / 队列满时留在仓库（身份已登记，之后照样可以手动送去），规则日志写明原因（FGR-BASE-020 可追溯）。
+        /// </summary>
+        private static void SendUnloadedToAnalysis(CampaignState state, StandingRuleRecord r, List<string> itemIds, int[] machines)
+        {
+            int ok = 0;
+            string fail = null;
+            int failed = 0;
+            var queued = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (string itemId in itemIds)
+            {
+                HomeValleyAnalysis.AnalysisOpResult res = HomeValleyAnalysis.TryEnqueueItem(state, itemId, null);
+                if (res.Success)
+                {
+                    ok++;
+                    string k = itemId ?? string.Empty;
+                    queued[k] = (queued.TryGetValue(k, out int n) ? n : 0) + 1;
+                }
+                else
+                {
+                    failed++;
+                    fail ??= res.FailureReason;
+                }
+            }
+            UnloadAnalyzed += ok;
+            UnloadAnalyzeFailed += failed;
+            if (ok > 0)
+            {
+                AddLog(state, r.Serial, "rules.log.unload_analysis", null, LabelArg(r.Serial), ok.ToString(CultureInfo.InvariantCulture));
+            }
+            if (failed > 0)
+            {
+                AddLog(state, r.Serial, "rules.log.unload_analysis_fail", null, LabelArg(r.Serial), failed.ToString(CultureInfo.InvariantCulture),
+                    "@raw:" + HomeValleyAnalysis.ReasonText(fail ?? "unknown"));
+            }
+            // FG8-EXP-05 修复第 2 轮（审查 P1）：远征结算里按开关预填的“解析台队列”按真实结果回写（没排进去的改成“仓库，等解析”并写明原因）。
+            ExpeditionSettlementService.OnUnloadAnalyzed(state, machines, queued, fail ?? "unknown");
+        }
+
+        /// <summary>FG8-EXP-05：现在会执行的“远征卸货”规则（启用的、优先级最高的那条）；没有 = 玩家关掉了，货留在货舱里。</summary>
+        public static StandingRuleRecord ActiveUnloadRule(CampaignState state)
+        {
+            if (state == null)
+            {
+                return null;
+            }
+            foreach (StandingRuleRecord x in Ordered(state))
+            {
+                if (x.Enabled && x.Kind == KindUnload)
+                {
+                    return x;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>FG8-EXP-05：开 / 关“远征卸货”的“需要解析的物品送到解析台”。</summary>
+        public static bool TrySetUnloadAnalysis(CampaignState state, int serial, bool on, out string message)
+        {
+            if (Env.SilentNightService.RulesLocked(state, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
+            {
+                return false;
+            }
+            StandingRuleRecord r = Find(state, serial);
+            if (!Editable(r, out message, KindUnload))
+            {
+                return false;
+            }
+            r.SendToAnalysis = on;
+            return Edited(state, r, out message);
         }
 
         // ── 工单回调（HomeValleyWorkOrders）─────────────────────────────────────────

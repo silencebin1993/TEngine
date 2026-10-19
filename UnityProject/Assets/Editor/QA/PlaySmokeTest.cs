@@ -173,6 +173,8 @@ namespace GameLogic.EditorTools
                     case 65: StepMarchDepart(inStep); break;
                     case 66: StepMarchFollow(inStep); break;
                     case 67: StepMarchArrived(inStep); break;
+                    case 470: StepWalkHome(inStep); break; // FG8-EXP-05：撤离后从地点入口沿地形走回家园、到家结算
+                    case 471: StepWalkedHome(inStep); break;
                     case 7: StepRuins(inStep); break;
                     case 38: StepWornRepairOrdered(inStep); break;
                     case 39: StepWornRepairDone(inStep); break;
@@ -4499,7 +4501,9 @@ namespace GameLogic.EditorTools
             bool away = GameRoot.FracturedCity != null && GameRoot.FracturedCity.IsLoaded && Campaign.Economy.AwayReportService.IsOpen(CampaignSession.Current);
             Check(away, "远征在外：离家报告在记（进行中）");
             Campaign.Regions.ExpeditionReturnService.ReturnResult evac = Campaign.Regions.ExpeditionReturnService.TryConfirmEvacuation();
-            Check(evac.Success, $"正式撤离事务：远征队回到家园（{evac.FailureReason ?? "成功"}）");
+            // FG8-EXP-05：撤离后从地点入口走回家园、到家才结算；本段要接着测“回来时离家报告自动打开”——测试快进到家（走正式的到家结算，真实返程由第 470 步覆盖）。
+            bool walked = evac.Success && Campaign.Regions.ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current);
+            Check(evac.Success && walked, $"正式撤离事务：远征队回到家园（{evac.FailureReason ?? "成功"}；到家结算 {walked}）");
             Next(344, "正式撤离事务：回到归还谷地，等离家报告自动打开");
         }
 
@@ -4912,12 +4916,86 @@ namespace GameLogic.EditorTools
                 $"途中进入阵营领地：顶部领地名称提示 {bannerShown} 次（最近一次“{WorldPlacesHudUIToolkit.Instance?.BannerTitleText}”），“进入领地”通知 {territoryNotes} 条，行军记下当前领地“{marchTerritory}”");
             WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
             InvokeClickable(hud?.SpeedButton(1));
-            // 正式撤离（与撤离面板“确认撤离”同一个事务）→ 远征队状态“已返回”，再接原来的出征步骤。
+            // FG8-EXP-05：撤离前地点面板列出“留在原地的东西”（FGR-EXP-032 离开一片区域前列出地上还没捡的战利品）。
+            string leftList = Campaign.Economy.ExpeditionSettlementService.LeftListText(s, Campaign.Regions.FracturedCityLayout.RegionId);
+            Check(leftList.StartsWith("留在原地") && !Localization.GameText.ContainsMarker(leftList), $"撤离前列出留在原地的东西：“{(leftList.Length > 80 ? leftList.Substring(0, 80) : leftList)}”");
+            // 正式撤离（与撤离面板“确认撤离”同一个事务）→ FG8-EXP-05：远征队从地点入口出现在星球上、状态“返程中”，沿地形走回家园，到家才结算。
             Campaign.Regions.ExpeditionReturnService.ReturnResult ret = Campaign.Regions.ExpeditionReturnService.TryConfirmEvacuation();
-            GameLogic.Campaign.ExpeditionMarchState m = Campaign.Regions.ExpeditionMarchService.Current(CampaignSession.Current);
-            Check(ret.Success && m.Phase == Campaign.Regions.ExpeditionMarchService.PhaseReturned && MachineRegistry.TryGetRecord(marcher, out MachineRecord back)
-                  && back.RegionId == Campaign.Regions.HomeValleyLayout.RegionId,
-                $"正式撤离回家园：远征队状态“{Localization.GameText.Get(Campaign.Regions.ExpeditionMarchService.StatusTextKey(Campaign.Regions.ExpeditionMarchService.StatusOf(CampaignSession.Current)))}”");
+            CampaignState after = CampaignSession.Current;
+            GameLogic.Campaign.ExpeditionMarchState m = Campaign.Regions.ExpeditionMarchService.Current(after);
+            bool atEntrance = MachineRegistry.TryGetRecord(marcher, out MachineRecord back) && back.RegionId == Campaign.Regions.HomeValleyLayout.RegionId
+                              && Campaign.Regions.ExpeditionSiteAnchors.TryGet(after, Campaign.Regions.FracturedCityLayout.RegionId, out Vector2 anchor)
+                              && Vector2.Distance(back.WorldPosition, anchor) < 12f;
+            bool reportOpen = Campaign.Economy.AwayReportService.IsOpen(after);
+            Check(ret.Success && m != null && m.Phase == Campaign.Regions.ExpeditionMarchService.PhaseReturning && atEntrance && reportOpen,
+                $"正式撤离：远征队从地点入口出现在星球上（{atEntrance}），状态“{Localization.GameText.Get(Campaign.Regions.ExpeditionMarchService.StatusTextKey(Campaign.Regions.ExpeditionMarchService.StatusOf(after)))}”，离家报告仍在记（到家才结算 {reportOpen}）");
+            InvokeClickable(hud?.SpeedButton(3));
+            InputRouter.DebugSetReader(new ScriptedReader { Mouse = new Vector3(-10f, -10f, 0f) });
+            Next(470, "FG8-EXP-05：3 倍速，等远征队沿地形走回家园（到家才结算）");
+        }
+
+        /// <summary>FG8-EXP-05：撤离后的返程——等它沿地形走回家园（最长 150 真实秒，3 倍速）；行军条写“返程中”。</summary>
+        private static void StepWalkHome(double inStep)
+        {
+            CampaignState s = CampaignSession.Current;
+            GameLogic.Campaign.ExpeditionMarchState m = Campaign.Regions.ExpeditionMarchService.Current(s);
+            if (inStep < 1.0)
+            {
+                WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
+                hud?.Refresh();
+                if (SessionState.GetInt(K + "WalkBarChecked", 0) == 0)
+                {
+                    SessionState.SetInt(K + "WalkBarChecked", 1);
+                    string bar = hud?.MarchStatusText ?? string.Empty;
+                    Check(bar.Contains(Localization.GameText.Get("exp.state.returning")), $"返程途中世界栏远征行军条“{bar}”");
+                }
+                return;
+            }
+            bool home = m != null && m.Phase == Campaign.Regions.ExpeditionMarchService.PhaseReturned;
+            if (!home)
+            {
+                if (inStep > 150)
+                {
+                    double eta = Campaign.Regions.ExpeditionMarchService.EtaSeconds(s);
+                    Check(false, $"远征队 150 秒内没有走回家园（阶段 {m?.Phase}、停下 {m?.Halted}、预计 {eta:0} 游戏秒）");
+                    Campaign.Regions.ExpeditionMarchService.ReturnNowForTests(s); // 超时只为让后面的步骤能接着跑（失败已记）
+                    Next(471, "（返程超时，继续后面的步骤）");
+                }
+                return;
+            }
+            Next(471, "远征队走回家园");
+        }
+
+        /// <summary>FG8-EXP-05：到家结算——离家报告里有“远征结算”一段（结局、带回、三选一、任务、线索、暴露、经历、留在原地），再接原来的出征步骤。</summary>
+        private static void StepWalkedHome(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            InputRouter.DebugSetReader(null);
+            // 返程为省时间开了 3 倍速（上一步）；到家后点回 1 倍速，后面的步骤（编队攻击、状态标签、Tab 跟到行进中的突袭）都按 1 倍速的真实秒数设计。
+            // 2026-10-19 验证失败：没点回去，3 倍速一直带到后面，状态标签在光标停上去之前就过期、突袭跑出镜头追赶容差。
+            WorldBarHudUIToolkit speedHud = WorldBarHudUIToolkit.Instance;
+            Check(speedHud != null && InvokeClickable(speedHud.SpeedButton(1)) && Mathf.Approximately(GameClock.Speed, 1f),
+                $"到家后点回 1 倍速（当前 {GameClock.Speed:0.##}x）");
+            CampaignState s = CampaignSession.Current;
+            Campaign.AwayReportRecord latest = Campaign.Economy.AwayReportService.Recent(s).FirstOrDefault();
+            var lines = new List<Campaign.Economy.AwayLine>();
+            if (latest != null)
+            {
+                Campaign.Economy.AwayReportView.Build(s, latest, lines);
+            }
+            bool settled = latest != null && latest.HasSettlement && latest.Settlement.Via == Campaign.Economy.ExpeditionSettlementService.ViaFoot;
+            bool section = lines.Any(l => l.Section == Campaign.Economy.AwayReportView.SectionSettle && l.Text == Localization.GameText.Get("settle.section"))
+                           && lines.Any(l => l.Section == Campaign.Economy.AwayReportView.SectionSettle && l.Action == Campaign.Economy.AwayLineAction.Machine)
+                           && !lines.Any(l => Localization.GameText.ContainsMarker(l.Text));
+            Check(settled && section && !Campaign.Economy.AwayReportService.IsOpen(s),
+                $"到家才结算：离家报告结算（{settled}），最前面是“远征结算”一段（{section}，{lines.Count(l => l.Section == Campaign.Economy.AwayReportView.SectionSettle)} 行）");
+            if (UI.Kit.AwayReportPanelUIToolkit.IsOpen)
+            {
+                UI.Kit.AwayReportPanelUIToolkit.Close();
+            }
             GameRoot.HomeValley.SetExpeditionPrepPanelOpen(false);
 
             int[] roster = HomeMachines();

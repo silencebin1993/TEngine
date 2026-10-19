@@ -439,10 +439,34 @@ namespace GameLogic.UI.Kit
             Body = GameText.Get(bodyKey) + "\n" + GameText.Get("exp.cmd.tip.coverage"),
         };
 
+        /// <summary>FG8-EXP-05：“返回家园”的二次确认（附近地上还有没捡的东西时，第一次点只列清单）。自检读。</summary>
+        public string ReturnConfirmText => _returnConfirm;
+        private string _returnConfirm;
+        private float _returnConfirmUntil;
+
+        /// <summary>二次确认的有效时间（真实秒；表 expedition.leave.confirm_seconds，常数只作兜底）。</summary>
+        public static float ReturnConfirmSeconds => Campaign.Grid.GridContent.TryGetTuning("expedition.leave.confirm_seconds", out float v) && v > 0f ? v : 8f;
+
         /// <summary>远征命令按钮（FGR-EXP-011）：覆盖内生效；覆盖外 / 静默夜被拒并写明原因（拒绝音 + 字幕 + 行军条原因行），队伍继续执行最后的命令。</summary>
         public void IssueMarch(ExpeditionMarchService.Command cmd)
         {
             CampaignState state = CampaignSession.Current;
+            // FG8-EXP-05（FGR-EXP-032“离开一片区域前，界面会列出地上还没捡的战利品”）：去程中下“返回家园”而附近地上还有没捡的东西时，
+            // 第一次点只在行军条上列出清单与回收倒计时，8 秒内再点一次才真的返回（玩家知道要丢下什么）。命令被拒（覆盖外等）不走这里。
+            if (cmd == ExpeditionMarchService.Command.Return)
+            {
+                bool armed = _returnConfirm != null && Time.unscaledTime <= _returnConfirmUntil;
+                ExpeditionMarchState cur = ExpeditionMarchService.Current(state);
+                if (!armed && cur != null && cur.Phase == ExpeditionMarchService.PhaseOutbound && ExpeditionMarchService.CanCommand(state, out _)
+                    && Campaign.Economy.ExpeditionSettlementService.LeaveWarning(state, out string warn))
+                {
+                    _returnConfirm = warn;
+                    _returnConfirmUntil = Time.unscaledTime + ReturnConfirmSeconds;
+                    RefreshMarch(state);
+                    return;
+                }
+            }
+            _returnConfirm = null;
             if (ExpeditionMarchService.IssueCommand(state, cmd, out string failure))
             {
                 _marchFailure = null;
@@ -524,7 +548,15 @@ namespace GameLogic.UI.Kit
                 _marchFailure = null; // 能下令了：上一次被拒的原因已经过时。
             }
             string reason = null;
-            if (onPlanet)
+            if (_returnConfirm != null && Time.unscaledTime > _returnConfirmUntil)
+            {
+                _returnConfirm = null; // 确认过期
+            }
+            if (onPlanet && _returnConfirm != null)
+            {
+                reason = _returnConfirm;
+            }
+            else if (onPlanet)
             {
                 string code = _marchFailure ?? (canCommand ? null : why);
                 if (code != null)

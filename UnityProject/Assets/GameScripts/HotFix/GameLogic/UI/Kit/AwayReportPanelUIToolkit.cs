@@ -512,6 +512,12 @@ namespace GameLogic.UI.Kit
                 case AwayLineAction.Notifications:
                     NotificationHudUIToolkit.OpenCenter();
                     break;
+                case AwayLineAction.Cargo:
+                    CargoPanelUIToolkit.Open(); // FG8-EXP-05：货留在货舱里 → 货舱面板
+                    break;
+                case AwayLineAction.LootPick:
+                    LootPickPanelUIToolkit.Open(); // FG8-EXP-05：带回的数据包 → 三选一面板
+                    break;
                 case AwayLineAction.RaidResult:
                     // FG6-DEF-08：突袭段的标题 / 损失行 → 突袭历史面板里这一份结算。
                     RaidResultPanelUIToolkit.OpenResult(int.TryParse(l.Arg, out int serial) ? serial : 0);

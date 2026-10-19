@@ -375,6 +375,11 @@ namespace GameLogic.Campaign
         public string ResourceType;
         public int Amount;
         public string SalvageInstanceId;
+        /// <summary>FG8-EXP-05（FGR-EXP-032“没被带走的普通战利品留在地上，1 个游戏日后被敌方回收并消失”）：到期被回收的统一时钟步。
+        /// 0 = 不会消失（家园物流的地面物、关键材料、旧档里已有的地面物）。只由 <see cref="Economy.GroundLootExpiry"/> 写。</summary>
+        public long ExpireTick;
+        /// <summary>FG8-EXP-05：到期前的“快要被回收”提示已发（每堆一次；进存档，读档不重复提示）。</summary>
+        public bool ExpireWarned;
     }
 
     /// <summary>ER4-PRIM-05 STORY-EXECUTION-CARDS.md 第1条"低威胁残骸靶"——归还谷地范围内的静止

@@ -672,8 +672,16 @@ namespace GameLogic.UI.Kit
             if (kind == StandingRuleService.KindWar)
             {
                 Show(_rowBoost);
+                _boostSupply.EnableInClassList("uk-hidden", false);
                 _boost.text = GameText.Get(r.BoostRepair ? "rules.edit.boost_on" : "rules.edit.boost_off");
                 _boostSupply.text = GameText.Get(r.BoostDefenseSupply ? "rules.edit.boost_supply_on" : "rules.edit.boost_supply_off");
+            }
+            else if (kind == StandingRuleService.KindUnload)
+            {
+                // FG8-EXP-05（关闭 DEBT-FG4ECO06-04）：远征卸货的第二个去处——需要解析的物品卸下后直接排进解析台。复用同一行的开关按钮。
+                Show(_rowBoost);
+                _boostSupply.EnableInClassList("uk-hidden", true);
+                _boost.text = GameText.Get(r.SendToAnalysis ? "rules.edit.analysis_on" : "rules.edit.analysis_off");
             }
             if (kind == StandingRuleService.KindRebuild)
             {
@@ -1135,7 +1143,9 @@ namespace GameLogic.UI.Kit
             {
                 return;
             }
-            bool ok = StandingRuleService.TrySetBoost(Session, r.Serial, !r.BoostRepair, out string message);
+            bool ok = r.Kind == StandingRuleService.KindUnload
+                ? StandingRuleService.TrySetUnloadAnalysis(Session, r.Serial, !r.SendToAnalysis, out string message) // FG8-EXP-05
+                : StandingRuleService.TrySetBoost(Session, r.Serial, !r.BoostRepair, out message);
             Say(ok, message);
         }
 

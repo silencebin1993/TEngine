@@ -228,6 +228,7 @@ namespace GameLogic.Campaign.WorldSim
             Economy.FusionService.ResetSessionState();
             Economy.LootPickService.ResetSessionState(); // FG8-LOOT-02：数据包的会话统计与“可以分拣了”提示去重（存档里的数据包不动）
             Economy.CargoService.ResetSessionState(); // FG8-LOOT-03：货舱的会话统计（存档里的货舱记录不动）
+            Economy.GroundLootExpiry.ResetSessionState(); // FG8-EXP-05：地上战利品到期的缓存（最近的到期步）随世界重置
             Economy.BlackBoxService.ResetSessionState(); // FG5-RND-06：陈列馆索引、“第一座陈列馆建成”钩子标记按新会话重来
             Economy.IntelService.ResetSessionState(); // FG5-RND-05：监听站索引、“第一座监听站建成”钩子标记按新会话重来 // FG5-RND-04：界面反馈与“第一座合成台建成”钩子标记按新会话重来；绑定刻录台的熔合接口
             Defense.TurretService.ResetSessionState(); // FG6-DEF-01：炮塔的运行时缓存（编译结果、补给原因）按新会话重建；存档里的炮塔记录不动
@@ -646,6 +647,8 @@ namespace GameLogic.Campaign.WorldSim
                     Economy.LootPickService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG8-LOOT-03：货舱——在外的远征队自动拾取、黑匣子带回家园即回收、快满 / 已满提示；每 loot.cargo.check_seconds 一次（只看步序号，与观察无关），没有在外的队伍时 O(1)。
                     Economy.CargoService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG8-EXP-05（FGR-EXP-032）：地上的普通战利品 1 个游戏日后被敌方回收（到期前提示一次）；平时 O(1)，到了最近的到期步才扫一遍地面物。只看步序号，与观察无关。
+                    Economy.GroundLootExpiry.WorldStep(state, GameClock.Ticks);
                     // FG8-EXP-04（FGR-GEN-033）：剧情遗产所在遗迹点的可达校验（层级寻路，借用空闲的后台通道；走不到就改挑下一处）。只看步序号；全部有结论后 O(遗产数) 早退。
                     Env.HeritageService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG6-LOG-10（FGR-LOG-046）：管线泄漏液洼——取走内核本步的液洼反应（告警），每 logistics.leak.sync_seconds 对账（扩大 / 消退 / 残留到期 / 火烧坏设施）；

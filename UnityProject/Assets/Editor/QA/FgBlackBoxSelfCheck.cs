@@ -662,6 +662,11 @@ namespace GameLogic.EditorTools
             bool pickA = FracturedCityRegion.TryCollectQuestItem(s, qa.SalvageInstanceId, c).Success;
             bool pickB = FracturedCityRegion.TryCollectQuestItem(s, qb.SalvageInstanceId, c).Success;
             ExpeditionReturnService.ReturnResult ret = ExpeditionReturnService.TryConfirmEvacuation();
+            // FG8-EXP-05：撤离 = 从地点入口沿地形走回家园、到家才结算；本段在家园里接着测——测试快进到家（走正式的到家结算；返程本身由 FgExpeditionSettlementSelfCheck 真实推进验证）。
+            if (ret.Success)
+            {
+                ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current);
+            }
             s = CampaignSession.Current;
             qa = Item(s, a);
             qb = Item(s, b);
@@ -692,6 +697,11 @@ namespace GameLogic.EditorTools
             Kill(a);
             Vector2 at = Item(s, a).Position;
             ExpeditionReturnService.ReturnResult ret = ExpeditionReturnService.TryConfirmEvacuation();
+            // FG8-EXP-05：撤离 = 从地点入口沿地形走回家园、到家才结算；本段在家园里接着测——测试快进到家（走正式的到家结算；返程本身由 FgExpeditionSettlementSelfCheck 真实推进验证）。
+            if (ret.Success)
+            {
+                ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current);
+            }
             s = CampaignSession.Current;
             RegionQuestItemRecord q = Item(s, a);
             bool stayed = ret.Success && q != null && q.State == RegionQuestItemState.OnGround && q.RegionId == FracturedCityLayout.RegionId
@@ -711,6 +721,10 @@ namespace GameLogic.EditorTools
             bool stillThere = departed && q.State == RegionQuestItemState.OnGround && HasLoadCandidate(a);
             bool picked = departed && FracturedCityRegion.TryCollectQuestItem(s, q.SalvageInstanceId, again[0]).Success;
             ExpeditionReturnService.ReturnResult ret2 = departed ? ExpeditionReturnService.TryConfirmEvacuation() : default;
+            if (ret2.Success)
+            {
+                ExpeditionMarchService.ReturnNowForTests(CampaignSession.Current); // FG8-EXP-05：快进到家结算
+            }
             s = CampaignSession.Current;
             q = Item(s, a);
             bool back = departed && ret2.Success && q.State == RegionQuestItemState.Recovered && BlackBoxService.Find(s, a) != null;
@@ -719,7 +733,7 @@ namespace GameLogic.EditorTools
                 (departed ? string.Empty : $"；第二次出征失败：{why}"));
         }
 
-        /// <summary>E3 负向：携带者活着、但不在撤离幸存名单里（失去行动能力 / 没能撤离）→ 黑匣子掉在携带者的位置，不 Lost（其它关键物照旧 Lost）。</summary>
+        /// <summary>E3 负向：携带者活着、但不在撤离幸存名单里（失去行动能力 / 没能撤离）→ 黑匣子掉在携带者的位置，不 Lost（FG8-EXP-05 起其它关键物同样掉在原地，D-13）。</summary>
         private static void CheckCarrierLeftBehind()
         {
             CampaignState s = NewWorld(9608, 0);
@@ -789,14 +803,19 @@ namespace GameLogic.EditorTools
             var other = new RegionQuestItemRecord { SalvageInstanceId = "e5:other", RegionId = region, ContentId = "e5_other", State = RegionQuestItemState.Carried, CarrierLogicId = dead };
             s.RegionQuestItems = s.RegionQuestItems.Concat(new[] { other }).ToArray();
             int carried = BlackBoxService.CarriedNonBoxItems(s);
-            string both = BlackBoxService.WipeDetail(s, region, carried);
+            // FG8-EXP-05（D-13，关闭 FG-GAP-133）：全灭结算不再判遗失——携带中的其它关键物按 KeyItemRetention 掉在携带者倒下的地方。
+            FracturedCityRegion.ResolveExtraction(s, Array.Empty<int>());
+            bool otherKept = other.State == RegionQuestItemState.OnGround && other.RegionId == region
+                             && !(FracturedCityRegion.Find(s)?.LostQuestSalvageIds ?? Array.Empty<string>()).Contains(other.SalvageInstanceId);
+            string both = BlackBoxService.WipeDetail(s, region, BlackBoxService.CarriedNonBoxItems(s));
             GameSettings.SetLanguage(GameLanguage.En);
             string bothEn = BlackBoxService.WipeDetail(s, region, carried);
             GameSettings.SetLanguage(GameLanguage.ZhCn);
             s.RegionQuestItems = s.RegionQuestItems.Where(x => x != other).ToArray();
-            bool ok = none == null && boxesOnly == "黑匣子留在原地，下次远征可以再取" && carried == 1
-                      && both == "携带中的 1 件关键物已遗失；黑匣子留在原地，下次远征可以再取" && bothEn.Contains("black boxes stay where they fell");
-            Expect(ok, $"E5 全灭字幕：没有关键物 → 只显示默认正文（{none ?? "null"}）；只有黑匣子 → “{boxesOnly}”；还带着 1 件别的关键物 → “{both}” / “{bothEn}”（文本键，中英文）");
+            bool ok = none == null && boxesOnly == "黑匣子留在原地，下次远征可以再取" && carried == 0 && otherKept
+                      && both == "1 件关键物、1 个黑匣子留在这片区域的地上（永不消失），下次远征可以再取" && bothEn.Contains("stay on the ground here");
+            Expect(ok, $"E5 全灭字幕：没有关键物 → 只显示默认正文（{none ?? "null"}）；只有黑匣子 → “{boxesOnly}”；还带着 1 件别的关键物 → 不再判遗失（会遗失的 {carried} 件，掉在原地 {otherKept}），" +
+                $"字幕“{both}” / “{bothEn}”（文本键，中英文；FG8-EXP-05 D-13）");
         }
 
         // ── F 纪念墙 ──────────────────────────────────────────────────────────

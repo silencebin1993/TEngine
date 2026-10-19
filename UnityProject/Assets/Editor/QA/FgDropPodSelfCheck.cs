@@ -244,7 +244,8 @@ namespace GameLogic.EditorTools
         private static CombatSite Site => WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded ? WorldSimulation.Home.Combat : null;
 
         /// <summary>一个有电的家园，研发“远征 · 投送站”已研究，核心附近按种子地形放一座建成、有电的投送站（B25），站里 <paramref name="pods"/> 个舱、<paramref name="fuelLiters"/> 升油。</summary>
-        private static CampaignState NewWorld(int seed, out BuildingRecord station, bool observe = true, int pods = 4, float fuelLiters = 1000f, bool research = true)
+        /// <summary>FG8-EXP-05 的结算自检也用它搭“有投送站的世界”（从远征地点入口呼叫回收）。</summary>
+        internal static CampaignState NewWorld(int seed, out BuildingRecord station, bool observe = true, int pods = 4, float fuelLiters = 1000f, bool research = true)
         {
             HomeValleyPowerGrid.ResetForTests();
             PowerEnvironment.ResetForTests();
@@ -436,7 +437,7 @@ namespace GameLogic.EditorTools
         private static bool StepUntil(Func<bool> done, int maxGameSeconds) => FgProductionSelfCheck.StepUntil(done, maxGameSeconds);
 
         /// <summary>逐步走到 <paramref name="tick"/>（含），确定性地停在事件步之后。</summary>
-        private static void StepTo(long tick)
+        internal static void StepTo(long tick)
         {
             while (GameClock.Ticks < tick)
             {

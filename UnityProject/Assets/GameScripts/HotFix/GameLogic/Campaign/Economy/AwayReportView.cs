@@ -34,6 +34,10 @@ namespace GameLogic.Campaign.Economy
         Notifications,
         /// <summary>FG6-DEF-08：打开突袭历史面板并选中这一份结算（Arg = 结算序号）。</summary>
         RaidResult,
+        /// <summary>FG8-EXP-05：打开货舱面板（货留在货舱里时）。</summary>
+        Cargo,
+        /// <summary>FG8-EXP-05：打开三选一面板（带回的数据包待分拣）。</summary>
+        LootPick,
     }
 
     /// <summary>离家报告的一行。</summary>
@@ -103,10 +107,15 @@ namespace GameLogic.Campaign.Economy
             }
             List<AwayStarveRecord> starve = AwayReportService.CollectStarve(state, r, clear: false);
             ReactionSessionRecord session = AwayReportService.FindReactionSession(state, r);
+            // FG8-EXP-05（FGR-EXP-050）：远征结算在最前面（带回什么、做了什么、留下了什么）；其后才是家园在离家期间的报告。
+            if (r.HasSettlement)
+            {
+                BuildSettlement(state, r, into);
+            }
             if (IsEmpty(r, deltas, starve, session))
             {
                 into.Add(new AwayLine { Text = GameText.Get("away.panel.empty_report"), Cls = "ar-row-dim", Section = "empty" });
-                return true;
+                return !r.HasSettlement;
             }
             BuildProduction(state, r, into);
             BuildBottlenecks(state, r, starve, into);
@@ -575,6 +584,214 @@ namespace GameLogic.Campaign.Economy
                 }
             }
             return 0;
+        }
+
+        // ── FG8-EXP-05 远征结算 ──────────────────────────────────────────────
+
+        public const string SectionSettle = "settle";
+
+        /// <summary>
+        /// 远征结算段（FGR-EXP-050）：结局与耗时 → 带回的物品（去处）→ 数据包 → 三选一记录 → 任务进度 → 熔合线索 → 暴露变化 → 机器经历 → 留在原地的东西（倒计时 / 永不消失）→ 全灭说明。
+        /// 每一块没有内容时写一行空状态（说明“没有”，不是缺这一块）。O(结算条目)，只在面板重建时。
+        /// </summary>
+        public static void BuildSettlement(CampaignState state, AwayReportRecord r, List<AwayLine> into)
+        {
+            ExpeditionSettlementRecord st = r.Settlement;
+            if (st == null)
+            {
+                return;
+            }
+            Title(into, "settle.section", SectionSettle);
+            string via = GameText.Get("settle.via." + (string.IsNullOrEmpty(st.Via) ? ExpeditionSettlementService.ViaFoot : st.Via));
+            long end = r.EndTick >= 0 ? r.EndTick : GameClock.Ticks;
+            into.Add(new AwayLine
+            {
+                Text = GameText.Format("settle.head", via, AwayReportService.SiteName(r.RegionId), AwayReportService.Duration(end - r.StartTick)),
+                Action = AwayLineAction.Roster, Section = SectionSettle, Cls = st.Via == ExpeditionSettlementService.ViaWiped ? "ar-row-warn" : null,
+            });
+            // 带回的物品
+            int shown = 0;
+            foreach (SettleItemRecord it in st.Items ?? Array.Empty<SettleItemRecord>())
+            {
+                if (it == null)
+                {
+                    continue;
+                }
+                shown++;
+                bool cargo = it.Kind == ExpeditionSettlementService.KindCargo;
+                into.Add(new AwayLine
+                {
+                    Text = GameText.Format("settle.item.row", ItemName(state, it),
+                        it.Dest == ExpeditionSettlementService.DestAnalysisWait && !string.IsNullOrEmpty(it.Reason)
+                            ? GameText.Format("settle.dest.analysis_fail", HomeValleyAnalysis.ReasonText(it.Reason)) // 修复第 2 轮：没能排进解析台时写明原因
+                            : GameText.Get("settle.dest." + (string.IsNullOrEmpty(it.Dest) ? "warehouse" : it.Dest))),
+                    Action = cargo && it.Dest == ExpeditionSettlementService.DestCargo ? AwayLineAction.Cargo
+                        : cargo && ItemCatalog.TryGet(it.ItemId, out _) ? AwayLineAction.StatsItem : AwayLineAction.Notifications,
+                    Arg = it.ItemId ?? string.Empty, Section = SectionSettle,
+                });
+            }
+            if (shown == 0)
+            {
+                Dim(into, "settle.items.none", SectionSettle);
+            }
+            if (st.CargoKept)
+            {
+                into.Add(new AwayLine { Text = GameText.Get("settle.cargo_kept"), Action = AwayLineAction.Cargo, Section = SectionSettle, Cls = "ar-row-warn" });
+            }
+            if (st.PacketsHome > 0)
+            {
+                into.Add(new AwayLine { Text = GameText.Format("settle.packets", st.PacketsHome), Action = AwayLineAction.LootPick, Section = SectionSettle });
+            }
+            // 三选一
+            if ((st.Picks?.Length ?? 0) == 0)
+            {
+                Dim(into, "settle.picks.none", SectionSettle);
+            }
+            foreach (LootPickLogRecord p in st.Picks ?? Array.Empty<LootPickLogRecord>())
+            {
+                if (p == null)
+                {
+                    continue;
+                }
+                LootPickDef def = LootPickCatalog.Find(p.ChosenRowId);
+                string name = def != null
+                    ? LootPickService.CandidateName(new LootCandidateRecord { Kind = def.Kind, ItemId = def.Item?.Id, TargetId = def.Target, Amount = Math.Max(1, def.Min) })
+                    : GameText.Get("settle.pick.unknown");
+                into.Add(new AwayLine
+                {
+                    Text = GameText.Format("settle.pick.row", GameText.Get("settle.pick.src." + (string.IsNullOrEmpty(p.Source) ? "elite" : p.Source)), name,
+                        LootPickService.RarityName(p.ChosenTier), GameText.Get(p.Destination == "cargo" ? "settle.pick.to_cargo" : "settle.pick.to_depot"), p.TechData),
+                    Action = AwayLineAction.Notifications, Section = SectionSettle,
+                });
+            }
+            // 任务进度
+            if ((st.Quests?.Length ?? 0) == 0)
+            {
+                Dim(into, "settle.quests.none", SectionSettle);
+            }
+            foreach (SettleQuestRecord q in st.Quests ?? Array.Empty<SettleQuestRecord>())
+            {
+                if (q == null)
+                {
+                    continue;
+                }
+                ObjectiveRecord o = FindObjective(state, q.ObjectiveId);
+                string title = o != null ? CampaignObjectiveTracker.QuestTitle(o) : q.ObjectiveId;
+                bool failed = q.State == (int)ObjectiveState.Failed;
+                into.Add(new AwayLine
+                {
+                    Text = GameText.Format(failed ? "settle.quest.failed" : "settle.quest.done", title),
+                    Action = AwayLineAction.Notifications, Section = SectionSettle, Cls = failed ? "ar-row-warn" : null,
+                });
+            }
+            // 熔合线索
+            if ((st.Clues?.Length ?? 0) == 0)
+            {
+                Dim(into, "settle.clues.none", SectionSettle);
+            }
+            foreach (int serial in st.Clues ?? Array.Empty<int>())
+            {
+                FusionClueRecord c = FindClue(state, serial);
+                into.Add(new AwayLine
+                {
+                    Text = GameText.Format("settle.clue.row", c != null ? FusionService.ClueText(state, c) : "#" + serial.ToString(CultureInfo.InvariantCulture)),
+                    Action = AwayLineAction.Notifications, Section = SectionSettle,
+                });
+            }
+            // 暴露变化
+            if (st.HasExposure)
+            {
+                float d = st.ExposureEnd - st.ExposureStart;
+                string delta = (d > 0.05f ? "+" : string.Empty) + d.ToString("0.#", CultureInfo.InvariantCulture);
+                into.Add(new AwayLine
+                {
+                    Text = GameText.Format("settle.exposure", st.ExposureStart.ToString("0.#", CultureInfo.InvariantCulture), st.ExposureEnd.ToString("0.#", CultureInfo.InvariantCulture), delta),
+                    Action = AwayLineAction.Notifications, Section = SectionSettle, Cls = d > 0.05f ? "ar-row-warn" : null,
+                });
+            }
+            // 机器经历
+            foreach (SettleMachineRecord m in st.Machines ?? Array.Empty<SettleMachineRecord>())
+            {
+                if (m == null)
+                {
+                    continue;
+                }
+                string who = MachineNaming.Short(m.LogicId);
+                string text = m.Alive
+                    ? GameText.Format(m.Injured ? "settle.machine.back_injured" : "settle.machine.back", who, m.Expeditions)
+                    : GameText.Format("settle.machine.lost", who);
+                into.Add(new AwayLine { Text = text, Action = AwayLineAction.Machine, LogicId = m.LogicId, Section = SectionSettle, Cls = m.Alive ? null : "ar-row-warn" });
+            }
+            // 留在原地的东西
+            int left = (st.Left?.Length ?? 0) + st.LeftMore;
+            into.Add(new AwayLine { Text = left > 0 ? GameText.Format("settle.left.title", left) : GameText.Get("settle.left.none"), Cls = left > 0 ? "ar-row-title" : "ar-row-dim", Section = SectionSettle });
+            foreach (SettleLeftRecord e in st.Left ?? Array.Empty<SettleLeftRecord>())
+            {
+                if (e == null)
+                {
+                    continue;
+                }
+                // 家园所在星球上的点击定位；远征地点里的（地点没载入时镜头去不了）点开通知中心（阵亡 / 掉落通知里有它掉在哪），不假装能定位。
+                bool planet = string.IsNullOrEmpty(e.RegionId) || e.RegionId == HomeValleyLayout.RegionId;
+                into.Add(new AwayLine
+                {
+                    Text = ExpeditionSettlementService.LeftText(state, e), Action = planet ? AwayLineAction.Locate : AwayLineAction.Notifications, HasPos = planet, RegionId = e.RegionId,
+                    Pos = new Vector3(e.X, 0f, e.Y), Section = SectionSettle, Cls = e.ExpireTick > 0 ? "ar-row-warn" : null,
+                });
+            }
+            if (st.LeftMore > 0)
+            {
+                into.Add(new AwayLine { Text = GameText.Format("settle.left.more", st.LeftMore), Cls = "ar-row-dim", Section = SectionSettle });
+            }
+            // 全灭说明（FGR-EXP-031；卡片“全灭时的处理说明”）
+            if (st.Via == ExpeditionSettlementService.ViaWiped)
+            {
+                Title(into, "settle.wipe.title", SectionSettle);
+                into.Add(new AwayLine { Text = GameText.Get("settle.wipe.explain_items"), Cls = "ar-row-dim", Section = SectionSettle });
+                into.Add(new AwayLine { Text = GameText.Get("settle.wipe.explain_expire"), Cls = "ar-row-dim", Section = SectionSettle });
+                into.Add(new AwayLine { Text = GameText.Get("settle.wipe.explain_signal"), Cls = "ar-row-dim", Section = SectionSettle });
+            }
+        }
+
+        /// <summary>带回的一份东西的名字（货舱的货按种类拼；关键物按回收实例 ID 找）。</summary>
+        public static string ItemName(CampaignState state, SettleItemRecord it)
+        {
+            if (it.Kind == ExpeditionSettlementService.KindCargo)
+            {
+                return LootPickService.CandidateName(new LootCandidateRecord { Kind = it.CargoKind, ItemId = it.ItemId, TargetId = it.TargetId, Amount = it.Amount });
+            }
+            foreach (RegionQuestItemRecord q in state?.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
+            {
+                if (q != null && q.SalvageInstanceId == it.TargetId)
+                {
+                    return ExpeditionSettlementService.QuestName(q);
+                }
+            }
+            return Feedback.FeedbackCues.QuestItemName(it.ItemId);
+        }
+
+        private static ObjectiveRecord FindObjective(CampaignState state, string id)
+        {
+            foreach (ObjectiveRecord o in state?.ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
+            {
+                if (o != null && o.ObjectiveId == id)
+                {
+                    return o;
+                }
+            }
+            return null;
+        }
+
+        private static FusionClueRecord FindClue(CampaignState state, int serial)
+        {
+            foreach (FusionClueRecord c in state?.Research?.Fusion?.Clues ?? Array.Empty<FusionClueRecord>())
+            {
+                if (c != null && c.Serial == serial)
+                {
+                    return c;
+                }
+            }
+            return null;
         }
 
         private static void Title(List<AwayLine> into, string key, string section, int arg = -1) =>

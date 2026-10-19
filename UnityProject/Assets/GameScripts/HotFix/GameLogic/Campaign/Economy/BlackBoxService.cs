@@ -324,6 +324,7 @@ namespace GameLogic.Campaign.Economy
             bool planetField = IsHome(region) && Regions.ExpeditionMarchService.IsTeamMember(s, m.LogicId) && !LootPickService.IsDepotPosition(s, region, at);
             bool home = IsHome(region) && !planetField;
             long now = GameClock.Ticks;
+            int keyDropped = 0;
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
                 if (IsBlackBox(q) && q.State == RegionQuestItemState.Carried && q.CarrierLogicId == m.LogicId)
@@ -340,6 +341,23 @@ namespace GameLogic.Campaign.Economy
                         q.Position = at;
                     }
                 }
+                else if (q != null && q.State == RegionQuestItemState.Carried && q.CarrierLogicId == m.LogicId && !Env.HeritageService.IsHeritage(q)
+                    && KeyItemRetention.StaysOnWipe(KeyItemRetention.OfQuestItem(q)))
+                {
+                    // FG8-EXP-05（FGR-EXP-032“机器阵亡时，它货舱里的东西掉在原地”；D-13；关闭 FG-GAP-133）：携带的其它关键物（Demo 任务物 / 缓存 / 核心数据）
+                    // 掉在阵亡处，不随机器一起消失、不再等到撤离结算判遗失；远征地点里可以“装载”，星球上的队友走近自动捡起（CargoService），家园范围内直接带回。
+                    // 人类遗产由 HeritageService.OnMachineDied 自己处理（同一条 D-13）。
+                    q.State = RegionQuestItemState.OnGround;
+                    q.CarrierLogicId = 0;
+                    q.RegionId = region;
+                    q.Position = at;
+                    keyDropped++;
+                }
+            }
+            if (keyDropped > 0)
+            {
+                NotificationCenter.Post(CargoService.NotifyType, GameText.Format("settle.key_dropped", MachineNaming.Short(m), keyDropped, PlaceName(region),
+                    Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y)), new Vector3(at.x, 0f, at.y));
             }
             RegionQuestItemRecord own = FindItem(s, m.LogicId);
             if (own == null)
@@ -385,7 +403,8 @@ namespace GameLogic.Campaign.Economy
         public static bool DropFromCarrier(CampaignState s, RegionQuestItemRecord q)
         {
             // FG8-EXP-04：人类遗产同样永不丢失（掉在携带者最后的位置，下次再取）。
-            if (!IsBlackBox(q) && !Env.HeritageService.IsHeritage(q))
+            // FG8-EXP-05（D-13，关闭 FG-GAP-133）：是否留在原地只由 KeyItemRetention 判定——区域关键物全部留在原地，不再判遗失。
+            if (q == null || !KeyItemRetention.StaysOnWipe(KeyItemRetention.OfQuestItem(q)))
             {
                 return false;
             }
@@ -797,42 +816,56 @@ namespace GameLogic.Campaign.Economy
             return n;
         }
 
-        /// <summary>全部黑匣子条目数（区域里的 + 已回收的）。</summary>
-        /// <summary>远征全灭结算前：还被携带着的非黑匣子关键物数（全灭时携带者都已阵亡，携带的黑匣子已由 <see cref="OnMachineDied"/> 掉在原地）。O(关键物条数)，只在全灭那一刻。</summary>
+        /// <summary>
+        /// 远征全灭结算前：还被携带着、按 D-13 会遗失的关键物件数（FG8-EXP-05 起区域关键物全部 <see cref="KeyItemRetention.StaysOnWipe"/>，所以恒为 0；
+        /// 保留这个入口给全灭字幕，规则以后若有“会遗失的携带物”也只改 KeyItemRetention）。O(关键物条数)，只在全灭那一刻。
+        /// </summary>
         public static int CarriedNonBoxItems(CampaignState s)
         {
             int n = 0;
             foreach (RegionQuestItemRecord q in s?.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                n += q != null && q.State == RegionQuestItemState.Carried && !IsBlackBox(q) && !Env.HeritageService.IsHeritage(q) ? 1 : 0; // FG8-EXP-04：遗产同样不丢
+                n += q != null && q.State == RegionQuestItemState.Carried && !KeyItemRetention.StaysOnWipe(KeyItemRetention.OfQuestItem(q)) ? 1 : 0;
             }
             return n;
         }
 
         /// <summary>
-        /// 远征全灭字幕的补充说明（当前语言）：携带中的其它关键物遗失了几件 / 这片区域地面上有黑匣子留着、下次远征可以再取（黑匣子永不丢失，ADR-RND-006）。
+        /// 远征全灭字幕的补充说明（当前语言）：这片区域地上留着的关键物 / 黑匣子（永不消失，下次远征可以再取；D-13、FGR-EXP-032）。
         /// 两样都没有时返回 null（只显示默认正文）。O(关键物条数)，只在全灭那一刻。
         /// </summary>
         public static string WipeDetail(CampaignState s, string regionId, int carriedLost)
         {
-            bool boxes = false;
+            int boxes = 0;
+            int keys = 0;
             foreach (RegionQuestItemRecord q in s?.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (IsBlackBox(q) && q.State == RegionQuestItemState.OnGround && q.RegionId == regionId)
+                if (q == null || q.State != RegionQuestItemState.OnGround || q.RegionId != regionId)
                 {
-                    boxes = true;
-                    break;
+                    continue;
                 }
-            }
-            if (carriedLost > 0 && boxes)
-            {
-                return GameText.Format("blackbox.wipe.items_lost_boxes_left", carriedLost);
+                if (IsBlackBox(q))
+                {
+                    boxes++;
+                }
+                else
+                {
+                    keys++;
+                }
             }
             if (carriedLost > 0)
             {
-                return GameText.Format("blackbox.wipe.items_lost", carriedLost);
+                return GameText.Format(boxes > 0 ? "blackbox.wipe.items_lost_boxes_left" : "blackbox.wipe.items_lost", carriedLost);
             }
-            return boxes ? GameText.Get("blackbox.wipe.boxes_left") : null;
+            if (keys > 0 && boxes > 0)
+            {
+                return GameText.Format("blackbox.wipe.keys_boxes_left", keys, boxes);
+            }
+            if (keys > 0)
+            {
+                return GameText.Format("blackbox.wipe.keys_left", keys);
+            }
+            return boxes > 0 ? GameText.Get("blackbox.wipe.boxes_left") : null;
         }
 
         public static int BoxCount(CampaignState s)

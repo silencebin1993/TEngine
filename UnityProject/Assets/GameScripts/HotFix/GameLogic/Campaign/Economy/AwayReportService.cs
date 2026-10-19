@@ -48,6 +48,9 @@ namespace GameLogic.Campaign.Economy
 
         /// <summary>任何报告数据变了 +1（界面据此决定是否重建；记账热路径里只在条目增删时自增）。</summary>
         public static int Revision { get; private set; } = 1;
+
+        /// <summary>FG8-EXP-05：报告内容变了（远征结算写进来、途中带回的关键物记进来）——面板据此重建。</summary>
+        public static void Touch() => Revision++;
         /// <summary>记账钩子被调用的次数（进行中的报告才计；性能自检读）。</summary>
         public static long HookCalls { get; private set; }
         /// <summary>结算时逐建筑 / 逐机器扫描的累计次数（自检据此证明“只在结算时扫描”）。</summary>
@@ -152,6 +155,10 @@ namespace GameLogic.Campaign.Economy
                 Outcome = OutcomeOpen,
             };
             r.Members = ToArray(members);
+            // FG8-EXP-05（FGR-EXP-050）：结算要写“暴露变化”与“远征期间的任务进度”，出发时记下基准。
+            r.HasStart = true;
+            r.ExposureAtStart = state.SignalExposure;
+            r.PlaySecondsAtStart = state.PlaySeconds;
             ReadTotals(state, out r.BaseFuelMl, out r.BaseFuelOuts, out r.BasePumpedMl, out r.BaseDeliveredMl, out r.BaseFlushedMl, out r.BaseRemovedMl,
                 out r.BaseCleared, out r.BaseDiscarded, out r.BaseSplit, out r.BaseBeltIn, out r.BaseBeltOut);
             d.Open = r;
