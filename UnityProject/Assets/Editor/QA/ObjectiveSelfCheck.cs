@@ -136,7 +136,8 @@ namespace GameLogic.EditorTools
 
             CampaignObjectiveTracker.Recompute(state);
             CampaignObjectiveTracker.Recompute(state);
-            Expect(FeedbackCues.CountOf(FeedbackCueId.ObjectiveActivated) == 1 && state.ObjectiveRecords.Length == 1,
+            // FG8-QST-01：家园指引等数据驱动任务与 OBJ 同一份记录（DefId 非空），这里只数 OBJ 目标链的记录；任务记录的不重复另由 FgQuestSelfCheck 断言。
+            Expect(FeedbackCues.CountOf(FeedbackCueId.ObjectiveActivated) == 1 && state.ObjectiveRecords.Count(r => !CampaignObjectiveTracker.IsQuestRecord(r)) == 1,
                 "重复重算不重复提示、不重复建记录");
 
             SetBuilding(state, HomeValleyLayout.BuildingTypeGenerator, BuildingConstructionState.Operational, BuildingPowerState.NotApplicable);

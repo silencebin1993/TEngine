@@ -287,6 +287,13 @@ namespace GameLogic.UI.Kit
             {
                 OutpostOverviewPanelUIToolkit.Toggle();
             }
+            // FG8-QST-01（FGR-QST-003“一键让镜头飞过去”）：镜头依次飞到追踪栏里的任务（默认 Alt+Q，战略上下文，可重绑）。飞过去本身就是视觉反馈（确认音）；
+            // 飞不了（追踪栏是空的 / 任务没有地点）时用“任务动态”字幕 + 通知说明原因与怎么追踪（B06）。
+            if (InputRouter.ConsumeContextAction(GameActionId.FocusQuest) && CampaignSession.Current != null)
+            {
+                bool flew = Campaign.CampaignObjectiveTracker.FocusNextTracked(CampaignSession.Current, out string questMsg);
+                Campaign.Feedback.FeedbackCues.Raise(flew ? Campaign.Feedback.FeedbackCueId.CommandAck : Campaign.Feedback.FeedbackCueId.QuestUpdate, questMsg);
+            }
             // FG7-ENV-01（FGR-ENV-002 / FGU-26）：日历键（默认 Alt+L，全部上下文，可重绑）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同统计键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCalendar)
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(CalendarPanelUIToolkit.Order))

@@ -160,5 +160,7 @@
         OverlayRoof = 126,
         /// <summary>FG8-OUT-01（FGU-47 前哨站总览）：打开 / 关闭前哨站总览（各前哨站的建筑、供电、防御、补给、覆盖是否连通；全部上下文，默认 Alt+U）。</summary>
         OpenOutposts = 127,
+        /// <summary>FG8-QST-01（FGR-QST-003“追踪中的任务……可以一键让镜头飞过去”）：镜头依次飞到追踪栏里的任务（战略上下文，默认 Alt+Q）。与追踪栏 / 任务日志的“飞过去”按钮同一入口。</summary>
+        FocusQuest = 128,
     }
 }

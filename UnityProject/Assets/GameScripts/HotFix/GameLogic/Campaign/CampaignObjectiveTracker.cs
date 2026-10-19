@@ -32,7 +32,7 @@ namespace GameLogic.Campaign
     /// 每个目标的完成事件 id 是 <c>objective_complete:{campaignId}:{objectiveId}</c>，经
     /// <see cref="CampaignEventLedger.TryGrant"/> 幂等——重复调用 <see cref="Recompute"/>（多个调用点
     /// 天然会重复触发，见下）、重复读档都不会二次记录/二次推进阶段/二次发奖（AC-CAM-001 字面要求）。</summary>
-    public static class CampaignObjectiveTracker
+    public static partial class CampaignObjectiveTracker
     {
         /// <summary>ER8 收尾（DEBT-ER6LOOP01-01 / AC-CAM-001“OBJ-01～10 均有持久 ObjectiveRecord”）：
         /// OBJ-01～04 此前没有任何记录与判定（类注释里说的“派生快照”实际不存在）。完成判定用
@@ -85,6 +85,9 @@ namespace GameLogic.Campaign
             RecomputeObj09(state);
             RecomputeObj10(state);
             SupersedeSkipped(state);
+            // FG8-QST-01（FGR-QST-005“在现有目标追踪后端上扩展，保留其幂等判定”）：数据驱动任务（fg.TbQuest）在同一个入口里判定，
+            // 同样只读既有权威字段、幂等写（见 CampaignObjectiveTracker.Quests.cs）。
+            RecomputeQuests(state);
         }
 
         /// <summary>目标链严格线性：某个后续目标已经开始（进行中或已完成）时，它前面仍未完成的目标视为
@@ -195,7 +198,9 @@ namespace GameLogic.Campaign
             // ER8：新目标出现的那一刻给提示（Locked→Active 只发生一次；读档时已是 Active 不会重复）。
             if (!silent)
             {
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ObjectiveActivated, CampaignObjectiveCatalog.TitleOf(objectiveId));
+                // FG8-QST-01（DEBT-FG0UX01-12 目标类）：带上这一步在哪里做（第一项未完成清单的位置 / 远征地点在星球上的锚点），点通知可以定位。
+                Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.ObjectiveActivated, CampaignObjectiveCatalog.LocationOf(state, objectiveId),
+                    CampaignObjectiveCatalog.TitleOf(objectiveId));
             }
         }
 
@@ -262,7 +267,8 @@ namespace GameLogic.Campaign
             Log.Info($"[CampaignObjectiveTracker] {objectiveId} 已完成{(silent ? "（被后续目标超越，静默补记）" : string.Empty)}。");
             if (!silent)
             {
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ObjectiveComplete, CampaignObjectiveCatalog.TitleOf(objectiveId));
+                Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.ObjectiveComplete, CampaignObjectiveCatalog.LocationOf(state, objectiveId),
+                    CampaignObjectiveCatalog.TitleOf(objectiveId));
             }
         }
 

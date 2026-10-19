@@ -657,7 +657,7 @@ namespace GameLogic.UI.Kit
             float now = Time.realtimeSinceStartup;
             int key = HashCode.Combine(Math.Round(_view.CenterX, 1), Math.Round(_view.CenterY, 1), Math.Round(_view.HalfWidth, 1), _view.CanvasWidth, _view.CanvasHeight,
                 WorldMapFilters.Revision, HashCode.Combine(WorldMapMarkers.Revision, (int)GameText.Language, Campaign.Economy.IntelService.Revision, Campaign.Env.HomeExplorationService.Revision,
-                    Campaign.Regions.DropPodService.Revision, PickActive));
+                    Campaign.Regions.DropPodService.Revision, PickActive, Campaign.CampaignObjectiveTracker.QuestRevision));
             if (force || key != _modelKey || now >= _nextModel)
             {
                 _modelKey = key;

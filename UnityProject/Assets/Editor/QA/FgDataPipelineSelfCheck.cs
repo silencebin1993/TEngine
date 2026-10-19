@@ -540,6 +540,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "RLR" || f[0] == "HZD"
                     // FG8-GEN-02 的领地模板（TTP）、手工锚点（ANC）、锚点模板点位（ATP）由 FgTerritorySelfCheck A1 段逐字段比对。
                     || f[0] == "TTP" || f[0] == "ANC" || f[0] == "ATP"
+                    // FG8-QST-01 的任务表（QST）与关键材料表（KEY）由 FgQuestSelfCheck A0 段逐字段比对。
+                    || f[0] == "QST" || f[0] == "KEY"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

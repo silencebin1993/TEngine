@@ -52,6 +52,9 @@ namespace GameLogic.Settings
         /// <summary>FG4-ECO-09（FGR-ECO-060“远征回来时自动打开（可以在设置里关闭）”）：远征回来时自动打开离家报告（默认开；旧设置 JSON 没有这个字段时按默认补齐）。</summary>
         public bool AwayReportAutoOpen = true;
 
+        /// <summary>FG8-QST-01（FGR-QST-001“家园指引……可以在设置里关闭”）：家园指引任务（默认开；旧设置 JSON 没有这个字段时按默认补齐）。</summary>
+        public bool HomeGuideQuestsEnabled = true;
+
         /// <summary>FG7-ENV-01（FG07 FGR-ENV-003“设置里提供夜间亮度下限，保证可读性”）：夜里画面最暗是白天的多少（0～1，范围 fg.TbUiTuning env.night_brightness_min / max）。
         /// 初值 -1 = 没设过，按表里 env.night_brightness_default（旧设置 JSON 没有这个字段时同样按默认）。</summary>
         public float NightBrightnessFloor = -1f;
@@ -462,6 +465,19 @@ namespace GameLogic.Settings
 
         /// <summary>FG4-ECO-09：远征回来时是否自动打开离家报告。本机偏好，跨战役保留；关掉后报告照常生成，只发一条通知。</summary>
         public static bool AwayReportAutoOpen => Data.AwayReportAutoOpen;
+
+        /// <summary>FG8-QST-01：家园指引任务开关（本机偏好，跨战役保留）。关掉后这类任务不出现、不判定、不发通知；已经拿到的奖励不收回，重新打开接着进行。</summary>
+        public static bool HomeGuideQuestsEnabled => Data.HomeGuideQuestsEnabled;
+
+        public static void SetHomeGuideQuestsEnabled(bool enabled)
+        {
+            if (Data.HomeGuideQuestsEnabled == enabled)
+            {
+                return;
+            }
+            Data.HomeGuideQuestsEnabled = enabled;
+            Save();
+        }
 
         public static void SetAwayReportAutoOpen(bool enabled)
         {

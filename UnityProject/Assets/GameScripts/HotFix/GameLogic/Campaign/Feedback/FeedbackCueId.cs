@@ -88,6 +88,16 @@ namespace GameLogic.Campaign.Feedback
         InteriorEnter,
         InteriorExit,
 
+        // ── FG8-QST-01 任务（FGR-QST-001～004；B07 三通道：声音 + 字幕 + 可定位通知“任务动态 / 任务警告”）──
+        /// <summary>新任务出现 / 发现支线。</summary>
+        QuestNew,
+        /// <summary>任务完成。</summary>
+        QuestComplete,
+        /// <summary>任务进展（接取、到达地点、货运车出现、放弃、重新开始、领取奖励）。</summary>
+        QuestUpdate,
+        /// <summary>任务警告（快到期、失败、货运车受到攻击）。</summary>
+        QuestAlert,
+
         Max,
     }
 

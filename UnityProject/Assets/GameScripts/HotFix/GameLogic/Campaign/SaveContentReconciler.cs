@@ -350,6 +350,81 @@ namespace GameLogic.Campaign
             return fresh;
         }
 
+        /// <summary>
+        /// FG8-QST-01（DEBT-FG0SAVE01-07 任务物品类；FGR-SYS-004）：
+        /// 1) 区域任务物（<see cref="CampaignState.RegionQuestItems"/>，黑匣子除外）的内容 ID 在 fg.TbRemovedContent 里登记为 quest_item：还没带回的（在地上 / 装在车上 / 丢失待补发）
+        ///    按 scrapRefund 转成废料、记录移除；已经带回的只是历史记录（目标早已结算），原样保留。按内容 ID 各通知一次。
+        /// 2) 进行中 / 可接取的任务引用的任务定义已不在 fg.TbQuest：标为失败（原因“游戏更新移除了这个任务”），让出追踪栏，各通知一次。
+        /// </summary>
+        public static SaveNoticeRecord[] ReconcileQuests(CampaignState state, int fromContentVersion, int toContentVersion)
+        {
+            if (state == null)
+            {
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            string now = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+            var notices = new List<SaveNoticeRecord>();
+            RegionQuestItemRecord[] items = state.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>();
+            var deadIds = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (RegionQuestItemRecord q in items)
+            {
+                if (q != null && q.State != RegionQuestItemState.Recovered && !Economy.BlackBoxService.IsBlackBox(q)
+                    && TryGetRemoved(q.ContentId, out RemovedContent row) && row.Kind == "quest_item")
+                {
+                    deadIds.Add(q.ContentId);
+                }
+            }
+            if (deadIds.Count > 0)
+            {
+                EnsureLoaded();
+                if (_loadError != null)
+                {
+                    Log.Error($"[SaveContentReconciler] 已移除内容表不可用（{_loadError}），任务物品暂不转换，原样保留。");
+                }
+                else
+                {
+                    var keep = new List<RegionQuestItemRecord>(items.Length);
+                    var counts = new Dictionary<string, (int Count, string First)>(StringComparer.Ordinal);
+                    foreach (RegionQuestItemRecord q in items)
+                    {
+                        if (q != null && deadIds.Contains(q.ContentId) && q.State != RegionQuestItemState.Recovered && !Economy.BlackBoxService.IsBlackBox(q))
+                        {
+                            counts.TryGetValue(q.ContentId, out (int Count, string First) c);
+                            counts[q.ContentId] = (c.Count + 1, c.First ?? q.SalvageInstanceId);
+                            continue;
+                        }
+                        keep.Add(q);
+                    }
+                    state.RegionQuestItems = keep.ToArray();
+                    foreach (string id in deadIds)
+                    {
+                        TryGetRemoved(id, out RemovedContent row);
+                        int n = counts.TryGetValue(id, out (int Count, string First) c) ? c.Count : 0;
+                        int scrap = Math.Max(0, row?.ScrapRefund ?? 0) * n;
+                        state.Scrap += scrap;
+                        notices.Add(NewNotice($"content-removed:quest_item:{id}:{c.First}", "save.notice.quest_item_removed",
+                            new[] { NameKeyOf(id), n.ToString(CultureInfo.InvariantCulture), scrap.ToString(CultureInfo.InvariantCulture) }, fromContentVersion, toContentVersion, now));
+                    }
+                }
+            }
+            var removed = new List<string>();
+            CampaignObjectiveTracker.ReconcileRemovedQuests(state, removed);
+            foreach (string defId in removed)
+            {
+                notices.Add(NewNotice($"content-removed:quest:{defId}", "save.notice.quest_removed", new[] { defId }, fromContentVersion, toContentVersion, now));
+            }
+            if (notices.Count == 0)
+            {
+                return Array.Empty<SaveNoticeRecord>();
+            }
+            SaveHistoryState history = state.SaveHistory;
+            var existing = new HashSet<string>(history.Notices.Select(n => n.NoticeId), StringComparer.Ordinal);
+            SaveNoticeRecord[] fresh = notices.Where(n => existing.Add(n.NoticeId)).ToArray();
+            history.Notices = history.Notices.Concat(fresh).ToArray();
+            return fresh;
+        }
+
         /// <summary>解析身份在当前游戏里还在不在：空身份（身份不明）算在；未解析模块 = 内容目录里有；加密固件 = 固件表里有；数据核心 = 资料表里有。</summary>
         public static bool IsLiveAnalysisTarget(string itemId, string targetId)
         {

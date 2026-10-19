@@ -967,6 +967,45 @@ namespace GameLogic.Campaign
         public float StartedAtPlaySeconds;
         public float CompletedAtPlaySeconds;
         public string EventId;
+
+        // ── FG8-QST-01（FGR-QST-001～005）：数据驱动任务（fg.TbQuest）与 OBJ-01～10 同一份记录、同一个重算入口（CampaignObjectiveTracker）。
+        // 只加字段、不升存档版本：旧档的 OBJ 记录这些字段读回默认值（DefId 空 = Demo 目标链），行为不变。
+
+        /// <summary>任务定义（fg.TbQuest.id）；空 = Demo 目标链 OBJ-01～10（定义在 CampaignObjectiveCatalog）。支线实例的 ObjectiveId = side:&lt;支线地点ID&gt;。</summary>
+        public string DefId;
+        /// <summary>任务地点（支线地点 / 领地中心 / 归还核心……按 fg.TbQuest.anchor 在任务出现时按种子解析一次，之后不变，B25）。</summary>
+        public bool HasAnchor;
+        public int AnchorX;
+        public int AnchorY;
+        /// <summary>支线地点 ID（side:分布格X:分布格Y）或领地 ID。</summary>
+        public string SiteId;
+        /// <summary>判定目标（摧毁据点类 = 据点 ID，在任务出现时选定）。</summary>
+        public string TargetId;
+        /// <summary>目标据点在任务出现时的被摧毁次数（据点被阵营重建后再摧毁也算完成，不靠“现在是否被摧毁”）。</summary>
+        public int TargetBaseline;
+        /// <summary>任务出现 / 本次尝试开始的统一时钟步。</summary>
+        public long OfferedTick = -1;
+        /// <summary>到期的统一时钟步（-1 = 没有时限；按 fg.TbQuest.timerFrom 在出现或到达地点时写死）。</summary>
+        public long DeadlineTick = -1;
+        public bool DeadlineWarned;
+        /// <summary>阶段：0 = 去地点；1 = 已到达（护送：货运车已出现）。</summary>
+        public int Stage;
+        /// <summary>护送的货运车（MachineRecord.LogicId；0 = 还没出现）。</summary>
+        public int EscortLogicId;
+        /// <summary>货运车上一次报告受攻击时的耐久百分比（每掉 25% 报一次，不刷屏）。</summary>
+        public int EscortHullReported = 100;
+        /// <summary>“夺回数据 / 取回蓝图”：已在地点累计停留的统一时钟步（走开就暂停，不清零）。</summary>
+        public long HoldTicks;
+        /// <summary>失败原因文本键（quest.fail.*）。</summary>
+        public string FailReasonKey;
+        /// <summary>第几次尝试（主线失败后重新开始 +1；从 1 起）。</summary>
+        public int Attempt = 1;
+        /// <summary>完成 / 失败 / 放弃那一刻的统一时钟步。</summary>
+        public long EndedTick = -1;
+        /// <summary>追踪栏顺序（0 = 没在追踪；1 起按追踪先后，最多 quest.track_max 个）。</summary>
+        public int TrackOrder;
+        /// <summary>奖励已经发放（主线 / 支线完成即发；家园指引完成后在任务日志里点“领取”——不打乱玩家正在进行的经济节奏）。</summary>
+        public bool RewardClaimed;
     }
 
     /// <summary>CampaignState.controlHandoff 的骨架占位。字段形状对齐现有

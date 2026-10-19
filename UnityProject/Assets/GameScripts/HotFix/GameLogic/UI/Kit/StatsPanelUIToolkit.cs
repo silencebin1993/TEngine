@@ -951,6 +951,7 @@ namespace GameLogic.UI.Kit
             FlowEnergyStats.Build(state, _flowLines);
             Campaign.Env.PurificationService.BuildStatsLines(state, _flowLines); // FG7-ENV-04（B19 / B13）：环境 · 净化与归还面积（含最近 24 游戏小时趋势）
             Campaign.WorldSim.TerritoryControlService.BuildStatsLines(state, _flowLines); // FG8-EXP-03（B19）：领地 · 控制度与状态、摧毁 / 歼灭 / 击溃 / 重建 / 骚扰累计
+            Campaign.CampaignObjectiveTracker.BuildStatsLines(state, _flowLines); // FG8-QST-01（B19）：任务 · 完成 / 失败 / 放弃 / 重新开始 / 进行中
             _count.text = string.Empty;
             foreach ((string text, string cls) in _flowLines)
             {

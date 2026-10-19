@@ -2,7 +2,9 @@ using System;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Core;
+using GameLogic.Localization;
 using GameLogic.Settings;
+using GameLogic.UI.Kit;
 using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
@@ -31,6 +33,22 @@ namespace GameLogic.UI.Objective
             string.IsNullOrEmpty(ItemStatus[index]) ? ItemLabels[index] : ItemLabels[index] + "：" + ItemStatus[index];
     }
 
+    /// <summary>FG8-QST-01（FGU-36）：追踪栏要显示的内容（纯数据，<see cref="ObjectiveHudUIToolkit.ComposeTracker"/> 填写，自检直接断言）。</summary>
+    public sealed class QuestTrackerView
+    {
+        public const int Slots = 3;
+
+        public bool Visible;
+        public bool Collapsed;
+        public string Title = string.Empty;
+        public string ToggleText = string.Empty;
+        public int Count;
+        public readonly string[] Ids = new string[Slots];
+        public readonly string[] Texts = new string[Slots];
+        public readonly bool[] Warn = new bool[Slots];
+        public readonly bool[] CanFly = new bool[Slots];
+    }
+
     /// <summary>ER8 收尾（DEBT-ER6LOOP01-01 / AC-CAM-001 / ERD-UI-002）：常驻“当前目标”条。
     /// 只读 <see cref="CampaignObjectiveTracker.CurrentObjectiveId"/> 与 <see cref="CampaignObjectiveCatalog"/>，
     /// 不做任何判定；归还谷地与两个远征区域都显示，主菜单不显示。</summary>
@@ -52,6 +70,23 @@ namespace GameLogic.UI.Objective
         private readonly Label[] _texts = new Label[ObjectiveHudView.ItemSlots];
         private readonly ObjectiveHudView _view = new ObjectiveHudView();
         private float _refreshTimer;
+
+        // FG8-QST-01：追踪栏
+        private VisualElement _tracker;
+        private Label _trackerTitle;
+        private Button _trackerToggle;
+        private readonly VisualElement[] _trackRows = new VisualElement[QuestTrackerView.Slots];
+        private readonly Label[] _trackTexts = new Label[QuestTrackerView.Slots];
+        private readonly Button[] _trackFly = new Button[QuestTrackerView.Slots];
+        private readonly QuestTrackerView _trackerView = new QuestTrackerView();
+
+        /// <summary>自检：追踪栏视图与按钮。</summary>
+        public QuestTrackerView TrackerView => _trackerView;
+        public Button TrackerToggleButton => _trackerToggle;
+        public Button TrackFlyButton(int i) => i >= 0 && i < _trackFly.Length ? _trackFly[i] : null;
+        public string TrackRowText(int i) => i >= 0 && i < _trackTexts.Length ? _trackTexts[i]?.text : null;
+        public bool TrackRowShown(int i) => i >= 0 && i < _trackRows.Length && _trackRows[i] != null && !_trackRows[i].ClassListContains("obj-item-hidden");
+        public bool TrackerShown => _tracker != null && !_tracker.ClassListContains("obj-hidden");
 
         private async void Start()
         {
@@ -79,7 +114,12 @@ namespace GameLogic.UI.Objective
                 return;
             }
             root.pickingMode = PickingMode.Ignore;
+            BindView(root);
+        }
 
+        /// <summary>绑定界面元素（运行时由 Start 调用；自检挂上 UXML 后直接调用）。</summary>
+        public void BindView(VisualElement root)
+        {
             _panel = root.Q<VisualElement>("ObjectiveHudRoot");
             _title = root.Q<Label>("ObjectiveTitle");
             _region = root.Q<Label>("ObjectiveRegion");
@@ -91,6 +131,128 @@ namespace GameLogic.UI.Objective
                 _marks[i] = root.Q<Label>("ObjectiveItemMark" + i);
                 _texts[i] = root.Q<Label>("ObjectiveItemText" + i);
             }
+            _tracker = root.Q<VisualElement>("QuestTracker");
+            _trackerTitle = root.Q<Label>("QuestTrackerTitle");
+            _trackerToggle = root.Q<Button>("QuestTrackerToggle");
+            if (_trackerToggle != null)
+            {
+                _trackerToggle.clicked += () =>
+                {
+                    CampaignState s = CampaignSession.Current;
+                    CampaignObjectiveTracker.SetTrackerCollapsed(s, !(s?.Quests?.TrackerCollapsed ?? false));
+                    RefreshTracker(s);
+                };
+            }
+            for (int i = 0; i < QuestTrackerView.Slots; i++)
+            {
+                _trackRows[i] = root.Q<VisualElement>("QuestTrackRow" + i);
+                _trackTexts[i] = root.Q<Label>("QuestTrackText" + i);
+                _trackFly[i] = root.Q<Button>("QuestTrackFly" + i);
+                int slot = i;
+                if (_trackFly[i] != null)
+                {
+                    _trackFly[i].clicked += () => FlySlot(slot);
+                    UiTooltip.Attach(_trackFly[i], () => new TooltipContent
+                    {
+                        Title = GameText.Get("quest.btn.fly"),
+                        Body = InputDisplay.ExpandActionTokens(GameText.Get("quest.hud.fly_tip")),
+                    });
+                }
+            }
+        }
+
+        private void FlySlot(int slot)
+        {
+            CampaignState s = CampaignSession.Current;
+            string id = slot < _trackerView.Count ? _trackerView.Ids[slot] : null;
+            if (s != null && id != null)
+            {
+                CampaignObjectiveTracker.TryFlyTo(s, id, out string msg);
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck, msg);
+            }
+        }
+
+        /// <summary>FG8-QST-01：按当前战役状态刷新追踪栏（运行时每 0.25 秒；自检直接调用）。</summary>
+        public void RefreshTracker(CampaignState state)
+        {
+            ComposeTracker(state, _trackerView);
+            if (_tracker == null)
+            {
+                return;
+            }
+            _tracker.EnableInClassList("obj-hidden", !_trackerView.Visible);
+            if (!_trackerView.Visible)
+            {
+                return;
+            }
+            _trackerTitle.text = _trackerView.Title;
+            _trackerToggle.text = _trackerView.ToggleText;
+            for (int i = 0; i < QuestTrackerView.Slots; i++)
+            {
+                bool used = !_trackerView.Collapsed && i < _trackerView.Count;
+                _trackRows[i].EnableInClassList("obj-item-hidden", !used);
+                if (!used)
+                {
+                    continue;
+                }
+                _trackTexts[i].text = _trackerView.Texts[i];
+                _trackRows[i].EnableInClassList("qt-warn", _trackerView.Warn[i]);
+                _trackFly[i].text = GameText.Get("quest.hud.fly");
+                _trackFly[i].SetEnabled(_trackerView.CanFly[i]);
+            }
+        }
+
+        /// <summary>追踪栏内容：最多 3 个追踪中的任务（按追踪先后），每行“标题：进度 · 距离 · 剩余时限”；没有追踪任何任务时不显示；收起时只留标题行。</summary>
+        public static void ComposeTracker(CampaignState state, QuestTrackerView view)
+        {
+            view.Visible = false;
+            view.Count = 0;
+            if (state == null)
+            {
+                return;
+            }
+            var list = new System.Collections.Generic.List<ObjectiveRecord>(4);
+            CampaignObjectiveTracker.TrackedQuests(state, list);
+            if (list.Count == 0)
+            {
+                return;
+            }
+            view.Visible = true;
+            view.Collapsed = state.Quests?.TrackerCollapsed ?? false;
+            int max = Mathf.Min(QuestTrackerView.Slots, CampaignObjectiveTracker.TrackMax);
+            view.Title = GameText.Format("quest.hud.title", list.Count, max);
+            view.ToggleText = view.Collapsed ? GameText.Format("quest.hud.expand", list.Count) : GameText.Get("quest.hud.collapse");
+            Vector2 focus = DistanceOrigin(state);
+            for (int i = 0; i < list.Count && i < QuestTrackerView.Slots; i++)
+            {
+                ObjectiveRecord r = list[i];
+                var parts = new System.Collections.Generic.List<string>(3) { CampaignObjectiveTracker.ProgressText(state, r) };
+                Vector2? at = CampaignObjectiveTracker.QuestLocation(state, r);
+                if (at.HasValue)
+                {
+                    parts.Add(GameText.Format("quest.hud.dist", Mathf.RoundToInt((at.Value - focus).magnitude)));
+                }
+                double? left = CampaignObjectiveTracker.RemainingSeconds(r);
+                bool warn = CampaignObjectiveTracker.IsWarningTime(r);
+                if (left.HasValue)
+                {
+                    parts.Add(GameText.Format(warn ? "quest.hud.time_warn" : "quest.hud.time", QuestCatalog.FormatRemaining(left.Value)));
+                }
+                view.Ids[i] = r.ObjectiveId;
+                view.Texts[i] = GameText.Format("quest.hud.row", CampaignObjectiveTracker.QuestTitle(r), string.Join(" · ", parts));
+                view.Warn[i] = warn;
+                view.CanFly[i] = at.HasValue;
+                view.Count = i + 1;
+            }
+        }
+
+        /// <summary>距离从哪里量：镜头在星球上时量镜头焦点，否则量归还核心。</summary>
+        private static Vector2 DistanceOrigin(CampaignState state)
+        {
+            Campaign.Grid.GridCell c = Campaign.WorldSim.WorldView.ObservedSite != null
+                ? Campaign.WorldSim.WorldView.PlanetFocusCell
+                : Campaign.Grid.HomeGridService.CorePivot(state);
+            return new Vector2(c.X, c.Y);
         }
 
         /// <summary>FG0-ARCH-01：在游戏世界里（任一地点已载入）就显示——镜头在哪个地点都一样。</summary>
@@ -106,6 +268,7 @@ namespace GameLogic.UI.Objective
             if (state == null || !AnyRegionActive())
             {
                 _panel.AddToClassList("obj-hidden");
+                _tracker?.AddToClassList("obj-hidden");
                 return;
             }
 
@@ -117,6 +280,7 @@ namespace GameLogic.UI.Objective
             _refreshTimer = RefreshIntervalSeconds;
             Compose(state, _view);
             Render();
+            RefreshTracker(state);
         }
 
         private void Render()

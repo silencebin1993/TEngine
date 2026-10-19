@@ -682,6 +682,12 @@ namespace GameLogic.Campaign
                 {
                     notices = notices.Concat(analysisNotices).ToArray();
                 }
+                // FG8-QST-01（DEBT-FG0SAVE01-07 任务物品类）：已移除的区域任务物转废料；引用已移除任务定义的任务标为失败。
+                SaveNoticeRecord[] questNotices = SaveContentReconciler.ReconcileQuests(state, envelope.ContentVersion, CurrentContentVersion);
+                if (questNotices.Length > 0)
+                {
+                    notices = notices.Concat(questNotices).ToArray();
+                }
             }
             catch (Exception e)
             {

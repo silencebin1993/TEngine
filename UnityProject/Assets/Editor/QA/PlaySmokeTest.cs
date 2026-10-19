@@ -982,6 +982,41 @@ namespace GameLogic.EditorTools
             {
                 SessionState.SetInt(K + "Errors", SessionState.GetInt(K + "Errors", 0) + 1);
             }
+            // FG8-QST-01（FGU-36）：三栏任务面板——进行中有 Demo 目标与家园指引，关键材料清单齐全；点选一行家园指引（真实点击事件）→ 点“追踪”（按钮的真实回调）→ 进追踪栏。
+            MissionLogUIToolkit questLog = MissionLogUIToolkit.Instance;
+            CampaignState questState = CampaignSession.Current;
+            if (questLog != null && questState != null)
+            {
+                questLog.Render(questState);
+                int guideRow = -1;
+                for (int i = 0; i < questLog.RowCount(0); i++)
+                {
+                    QuestRowView v = questLog.RowView(0, i);
+                    if (v.Selectable && CampaignObjectiveTracker.IsGuide(CampaignObjectiveTracker.FindQuest(questState, v.Id)))
+                    {
+                        guideRow = i;
+                        break;
+                    }
+                }
+                Check(!string.IsNullOrEmpty(questLog.ColumnTitle(0)) && !string.IsNullOrEmpty(questLog.ColumnTitle(1)) && !string.IsNullOrEmpty(questLog.ColumnTitle(2))
+                      && questLog.RowCount(0) >= 2 && guideRow >= 0 && questLog.KeyRowCount == QuestCatalog.KeyMaterials.Count && questLog.KeyRowCount >= 6,
+                    $"任务日志三栏：{questLog.ColumnTitle(0)} / {questLog.ColumnTitle(1)} / {questLog.ColumnTitle(2)}，关键材料清单 {questLog.KeyRowCount} 行");
+                if (guideRow >= 0)
+                {
+                    VisualElement row = questLog.RowElement(0, guideRow);
+                    using (ClickEvent ce = ClickEvent.GetPooled())
+                    {
+                        ce.target = row;
+                        row.SendEvent(ce);
+                    }
+                    string picked = questLog.Selected;
+                    bool clicked = InvokeClickable(questLog.TrackButton);
+                    ObjectiveRecord tr = CampaignObjectiveTracker.FindQuest(questState, picked);
+                    Check(clicked && tr != null && tr.TrackOrder > 0 && CampaignObjectiveTracker.IsGuide(tr),
+                        $"点选家园指引“{CampaignObjectiveTracker.QuestTitle(tr)}”→ 点“追踪”：进了追踪栏（{questLog.MessageText}）");
+                    SessionState.SetString(K + "QuestTracked", CampaignObjectiveTracker.QuestTitle(tr) ?? string.Empty);
+                }
+            }
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(6, "按取消键关闭任务日志");
         }
@@ -997,6 +1032,10 @@ namespace GameLogic.EditorTools
             {
                 SessionState.SetInt(K + "Errors", SessionState.GetInt(K + "Errors", 0) + 1);
             }
+            // FG8-QST-01：刚追踪的家园指引出现在 HUD 追踪栏（目标条下方，运行时每 0.25 秒刷新）。
+            string trackedTitle = SessionState.GetString(K + "QuestTracked", string.Empty);
+            string trackRow = LabelText("[ObjectiveHudHost]", "QuestTrackText0");
+            Check(trackedTitle.Length > 0 && trackRow.Contains(trackedTitle), $"HUD 追踪栏第一行：“{trackRow}”");
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenMap));
             Next(237, "按地图键（默认 M）");
         }

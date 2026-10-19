@@ -694,6 +694,8 @@ namespace GameLogic.Campaign.WorldSim
             GameClock.CommitStep(state);
             StepsExecuted++;
 
+            // FG8-QST-01：到达 / 停留 / 护送 / 时限类任务每 quest.check_seconds 判定一次——只看步序号（与存档 / 读档 / 观察无关），没有任务状态时 O(1)。
+            CampaignObjectiveTracker.WorldStep(state, GameClock.Ticks);
             _objectiveTimer -= dt;
             if (_objectiveTimer <= 0)
             {

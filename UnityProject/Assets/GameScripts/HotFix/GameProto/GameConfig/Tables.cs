@@ -223,6 +223,10 @@ public partial class Tables
     /// </summary>
     public fg.TbIntelKind TbIntelKind {get; }
     /// <summary>
+    /// 关键材料
+    /// </summary>
+    public fg.TbKeyMaterial TbKeyMaterial {get; }
+    /// <summary>
     /// 本地化文本
     /// </summary>
     public fg.TbLocText TbLocText {get; }
@@ -258,6 +262,10 @@ public partial class Tables
     /// 生产参数
     /// </summary>
     public fg.TbProducer TbProducer {get; }
+    /// <summary>
+    /// 任务
+    /// </summary>
+    public fg.TbQuest TbQuest {get; }
     /// <summary>
     /// 突袭反制
     /// </summary>
@@ -522,6 +530,7 @@ public partial class Tables
         TbIntelBoss = new fg.TbIntelBoss(loader("fg_tbintelboss"));
         TbIntelFragment = new fg.TbIntelFragment(loader("fg_tbintelfragment"));
         TbIntelKind = new fg.TbIntelKind(loader("fg_tbintelkind"));
+        TbKeyMaterial = new fg.TbKeyMaterial(loader("fg_tbkeymaterial"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbLootDrop = new fg.TbLootDrop(loader("fg_tblootdrop"));
         TbLootPick = new fg.TbLootPick(loader("fg_tblootpick"));
@@ -531,6 +540,7 @@ public partial class Tables
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbPowerSource = new fg.TbPowerSource(loader("fg_tbpowersource"));
         TbProducer = new fg.TbProducer(loader("fg_tbproducer"));
+        TbQuest = new fg.TbQuest(loader("fg_tbquest"));
         TbRaidCounter = new fg.TbRaidCounter(loader("fg_tbraidcounter"));
         TbRaidDifficulty = new fg.TbRaidDifficulty(loader("fg_tbraiddifficulty"));
         TbRaidLevel = new fg.TbRaidLevel(loader("fg_tbraidlevel"));
@@ -641,6 +651,7 @@ public partial class Tables
         TbIntelBoss.ResolveRef(this);
         TbIntelFragment.ResolveRef(this);
         TbIntelKind.ResolveRef(this);
+        TbKeyMaterial.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbLootDrop.ResolveRef(this);
         TbLootPick.ResolveRef(this);
@@ -650,6 +661,7 @@ public partial class Tables
         TbPowerNode.ResolveRef(this);
         TbPowerSource.ResolveRef(this);
         TbProducer.ResolveRef(this);
+        TbQuest.ResolveRef(this);
         TbRaidCounter.ResolveRef(this);
         TbRaidDifficulty.ResolveRef(this);
         TbRaidLevel.ResolveRef(this);

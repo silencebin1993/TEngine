@@ -278,6 +278,17 @@ namespace GameLogic.Campaign.Env
                         }
                         continue;
                     }
+                    if (f.Kind == WorldFeatureKind.SideSite)
+                    {
+                        // FG8-QST-01（DEBT-FG8GEN02-03）：领地里的支线地点被揭开 → 按（种子, 地点）抽一种支线，记为“可接取”（幂等；补登时不发通知）。
+                        long sx = f.X - cx;
+                        long sy = f.Y - cy;
+                        if (sx * sx + sy * sy <= (long)radius * radius)
+                        {
+                            CampaignObjectiveTracker.OnSideSiteRevealed(s, f, notify);
+                        }
+                        continue;
+                    }
                     if (f.Kind != WorldFeatureKind.Relic)
                     {
                         continue;

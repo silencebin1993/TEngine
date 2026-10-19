@@ -193,6 +193,12 @@ namespace GameLogic.Campaign
         Locked = 0,
         Active = 1,
         Completed = 2,
+        /// <summary>FG8-QST-01（FGR-QST-004）：失败（时限到期、护送目标被毁……）。失败原因记在 <see cref="ObjectiveRecord.FailReasonKey"/>；主线可以重新开始（回到 Active）。</summary>
+        Failed = 3,
+        /// <summary>FG8-QST-01（FGR-QST-003）：玩家放弃的支线（主线不能放弃）。</summary>
+        Abandoned = 4,
+        /// <summary>FG8-QST-01（FGT-EXP-009“接取”）：发现了、还没接取的支线（在任务日志“进行中”栏里点“接取”；接取前不判定、不计时）。</summary>
+        Available = 5,
     }
 
     /// <summary>ER7-CORE-01 STORY-EXECUTION-CARDS.md："Boss 状态仅 Locked→Shielded→Phase1→

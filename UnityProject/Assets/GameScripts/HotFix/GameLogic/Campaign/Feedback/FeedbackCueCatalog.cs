@@ -209,6 +209,15 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveActivated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "新目标", Caption = string.Empty, Tone = FeedbackTone.Info, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 目标 HUD/日志" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyRescue, SfxId = "sfx_emergency_rescue", Tag = "紧急救援", Caption = "所有工作机都已损失，核心派出紧急救援机", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "AC-ECO-011 紧急救援" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveComplete, SfxId = "sfx_objective_complete", Tag = "目标完成", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 完成事件" });
+            // FG8-QST-01（FGR-QST-001～004，FG08 第 7 节“任务更新时发通知”）：任务的四种时刻（声音借用目标 / 警报的短音，正式音效随美术阶段替换，DEBT-FG8QST01-05）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestNew, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+                Tone = FeedbackTone.Info, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-QST-01 新任务 / 发现支线" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestComplete, SfxId = "sfx_objective_complete", Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+                Tone = FeedbackTone.Good, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-QST-01 任务完成" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestUpdate, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Volume = 0.6f, Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+                Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.3f, RequirementNote = "FG8-QST-01 任务进展" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestAlert, SfxId = "sfx_alarm_warning", Volume = 0.7f, Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+                Tone = FeedbackTone.Warning, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-QST-01 任务警告 / 失败（FGR-QST-004）" });
 
             return defs;
         }

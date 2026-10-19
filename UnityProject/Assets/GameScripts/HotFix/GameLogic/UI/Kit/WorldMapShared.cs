@@ -119,6 +119,10 @@ namespace GameLogic.UI.Kit
         Loot,
         /// <summary>FG8-LOOT-03：地上的黑匣子（与普通战利品不同样式）。</summary>
         LootBlackBox,
+        /// <summary>FG8-QST-01（FGR-QST-003；DEBT-FG3GEN01-06 任务点）：进行中 / 可接取任务的地点（标记图层；标签写任务名）。</summary>
+        Quest,
+        /// <summary>FG8-QST-01：追踪中的任务（更醒目的样式，标签前加 ◆）。</summary>
+        QuestTracked,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -461,6 +465,26 @@ namespace GameLogic.UI.Kit
                     }
                     string name = GameText.Format("ui.map.marker_default", m.Serial);
                     Add(WorldMapItemKind.Marker, WorldMapLayer.Markers, m.MarkerId, m.CellX, m.CellY, string.IsNullOrEmpty(m.Note) ? name : name + "：" + m.Note);
+                }
+            }
+            if (WorldMapFilters.IsOn(WorldMapLayer.Markers))
+            {
+                // FG8-QST-01（FGR-QST-003“追踪中的任务在战略地图上有标记”；FG08 第 7 节“未完成任务”）：进行中 / 可接取的任务地点，追踪中的换样式。
+                // 任务地点是按种子解析的（不受迷雾限制：任务本身就是告诉玩家去哪里）。O(任务数)。
+                foreach (ObjectiveRecord r in state.ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
+                {
+                    if (!CampaignObjectiveTracker.IsQuestRecord(r) || !CampaignObjectiveTracker.IsOpen(r) || CampaignObjectiveTracker.IsHidden(r))
+                    {
+                        continue;
+                    }
+                    Vector2? at = CampaignObjectiveTracker.QuestLocation(state, r);
+                    if (!at.HasValue || !view.Contains(at.Value.x, at.Value.y, margin))
+                    {
+                        continue;
+                    }
+                    bool tracked = r.TrackOrder > 0 && r.State == ObjectiveState.Active;
+                    Add(tracked ? WorldMapItemKind.QuestTracked : WorldMapItemKind.Quest, WorldMapLayer.Markers, "quest:" + r.ObjectiveId, at.Value.x, at.Value.y,
+                        GameText.Format(tracked ? "ui.map.quest_tracked" : "ui.map.quest", CampaignObjectiveTracker.QuestTitle(r)));
                 }
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Loot))
@@ -1056,6 +1080,8 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-drop-target", item.Kind == WorldMapItemKind.DropTarget);
                 e.EnableInClassList("wg-icon-loot", item.Kind == WorldMapItemKind.Loot); // FG8-LOOT-03
                 e.EnableInClassList("wg-icon-loot-blackbox", item.Kind == WorldMapItemKind.LootBlackBox);
+                e.EnableInClassList("wg-icon-quest", item.Kind == WorldMapItemKind.Quest); // FG8-QST-01
+                e.EnableInClassList("wg-icon-quest-tracked", item.Kind == WorldMapItemKind.QuestTracked);
                 // FG8-EXP-02：远征队图标的底色 = 队伍颜色（数据驱动的运行时颜色，UI Toolkit 红线 2 允许）；其余图标清掉，按样式类。
                 e.style.backgroundColor = item.Tint.a > 0f ? new StyleColor(item.Tint) : new StyleColor(StyleKeyword.Null);
                 e.EnableInClassList("uk-hidden", false);
@@ -1067,7 +1093,8 @@ namespace GameLogic.UI.Kit
                                             || item.Kind == WorldMapItemKind.RaidForecast || item.Kind == WorldMapItemKind.RaidWarning
                                             || item.Kind == WorldMapItemKind.Expedition || item.Kind == WorldMapItemKind.ExpeditionGoal || item.Kind == WorldMapItemKind.DropPod
                                             || item.Kind == WorldMapItemKind.Anchor || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal
-                                            || item.Kind == WorldMapItemKind.Loot || item.Kind == WorldMapItemKind.LootBlackBox);
+                                            || item.Kind == WorldMapItemKind.Loot || item.Kind == WorldMapItemKind.LootBlackBox
+                                            || item.Kind == WorldMapItemKind.Quest || item.Kind == WorldMapItemKind.QuestTracked);
                 t.EnableInClassList("uk-hidden", !showLabel);
                 if (showLabel)
                 {

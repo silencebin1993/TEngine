@@ -36,7 +36,7 @@ public sealed partial class RemovedContent : Luban.BeanBase
     /// </summary>
     public readonly string Id;
     /// <summary>
-    /// 内容类别:primitive_chip/building/analysis
+    /// 内容类别:primitive_chip/building/analysis/quest_item
     /// </summary>
     public readonly string Kind;
     /// <summary>

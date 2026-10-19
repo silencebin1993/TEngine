@@ -137,6 +137,37 @@ namespace GameLogic.Campaign
             return true;
         }
 
+        /// <summary>FG8-QST-01（DEBT-FG0UX01-12 目标类、FGR-QST-003 地图标记）：某个 OBJ 目标在星球上的位置——在家园做的取第一项未完成清单的位置
+        /// （这一步不在具体位置上就取下一项有位置的；全部没有 = null），在远征地点做的取该地点在星球上的锚点（FG8-EXP-02 锚点，按种子解析；还没解析时取信号塔）。</summary>
+        public static Vector2? LocationOf(CampaignState state, string objectiveId)
+        {
+            ObjectiveDef def = Get(objectiveId);
+            if (def == null || state == null)
+            {
+                return null;
+            }
+            if (def.RegionId != HomeValleyLayout.RegionId)
+            {
+                if (Regions.ExpeditionSiteAnchors.TryGet(state, def.RegionId, out Vector2 anchor))
+                {
+                    return anchor;
+                }
+                return BuildingPosition(state, HomeValleyLayout.BuildingTypeSignalTower);
+            }
+            for (int i = 0; i < def.Items.Length; i++)
+            {
+                if (!def.Items[i].IsDone(state))
+                {
+                    Vector2? at = def.Items[i].HomeLocation?.Invoke(state);
+                    if (at.HasValue)
+                    {
+                        return at;
+                    }
+                }
+            }
+            return null;
+        }
+
         /// <summary>同一关键物可能有多条记录（丢失后恢复柜补发新实例）：按 已带回 &gt; 已装车 &gt; 在地面 &gt; 已丢失
         /// 取最能代表现状的一条（撤离面板与目标条同一口径）；从未出现过返回 null。</summary>
         public static RegionQuestItemRecord BestQuestItem(CampaignState state, string contentId) =>

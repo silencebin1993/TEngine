@@ -357,6 +357,9 @@ namespace GameLogic.UI.Kit
         /// <summary>FG4-ECO-09：暂停菜单“离家报告”按钮与“远征回来时自动打开离家报告”开关（FGR-ECO-060“可以在设置里关闭”）。</summary>
         public Button AwayReportButton { get; private set; }
         public Toggle AwayAutoOpenToggle => _awayAutoOpen;
+        /// <summary>FG8-QST-01：家园指引任务开关（自检读）。</summary>
+        public Toggle HomeGuideToggle => _homeGuide;
+        private Toggle _homeGuide;
         private Toggle _reactionSlowMotion;
         private Toggle _reactionNudge;
 
@@ -387,6 +390,8 @@ namespace GameLogic.UI.Kit
             ReactionLogButton = Bind(root, "PauseReactionLog", "pause.reaction_log", ReactionLogPanelUIToolkit.Open);
             _awayAutoOpen = BindToggle(root, "PauseAwayAutoOpen", "pause.away_auto", Settings.GameSettings.SetAwayReportAutoOpen,
                 () => InputDisplay.ExpandActionTokens(GameText.Get("away.panel.auto_open_tip")));
+            _homeGuide = BindToggle(root, "PauseHomeGuide", "pause.home_guide", Settings.GameSettings.SetHomeGuideQuestsEnabled,
+                () => GameText.Get("pause.home_guide_tip"));
             SyncReactionToggles();
         }
 
@@ -506,6 +511,7 @@ namespace GameLogic.UI.Kit
         {
             _reactionPopups?.SetValueWithoutNotify(Settings.GameSettings.ReactionPopupsEnabled);
             _awayAutoOpen?.SetValueWithoutNotify(Settings.GameSettings.AwayReportAutoOpen);
+            _homeGuide?.SetValueWithoutNotify(Settings.GameSettings.HomeGuideQuestsEnabled);
             _reactionSlowMotion?.SetValueWithoutNotify(Settings.GameSettings.ReactionSlowMotionEnabled);
             _reactionNudge?.SetValueWithoutNotify(Settings.GameSettings.ReactionCameraNudgeEnabled);
         }

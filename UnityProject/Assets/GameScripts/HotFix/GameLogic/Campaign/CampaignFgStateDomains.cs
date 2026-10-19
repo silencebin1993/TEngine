@@ -1764,11 +1764,21 @@ namespace GameLogic.Campaign
         public int DomainVersion = 1;
     }
 
-    /// <summary>任务（FG08）。</summary>
+    /// <summary>任务（FG08）。FG8-QST-01：任务本身的状态在 <see cref="CampaignState.ObjectiveRecords"/>（与 OBJ-01～10 同一份记录，CampaignObjectiveTracker 唯一写入口）；
+    /// 这里只放跨任务的簿记。只加字段、不升域版本：旧档读进来是默认值（第一次检查时按已探索区域补登支线地点，不发通知）。</summary>
     [Serializable]
     public sealed class QuestState
     {
         public int DomainVersion = 1;
+        /// <summary>已经按已探索区域补登过支线地点（旧档 / 开局探索圆里的支线地点不补发通知）。</summary>
+        public bool SideBaselined;
+        /// <summary>追踪栏折叠（FG08 第 7 节“追踪栏可以折叠”）。</summary>
+        public bool TrackerCollapsed;
+        /// <summary>统计（B19）：完成 / 失败 / 放弃 / 重新开始的次数。</summary>
+        public int Completed;
+        public int Failed;
+        public int Abandoned;
+        public int Restarted;
     }
 
     /// <summary>

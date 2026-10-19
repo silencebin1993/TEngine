@@ -571,6 +571,21 @@ namespace GameLogic.Core
         /// <summary>第一次打开货舱面板。</summary>
         public const string LootFirstCargoOpen = "loot.first_cargo_open";
 
+        // ── FG8-QST-01：任务系统与面板（只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次出现新任务（主线 / 家园指引 / 接取支线）。引导内容：任务日志键、三栏、追踪栏。</summary>
+        public const string QuestFirstNew = "quest.first_new";
+        /// <summary>第一次把任务固定到追踪栏。引导内容：最多 3 个、地图标记、一键飞过去。</summary>
+        public const string QuestFirstTrack = "quest.first_track";
+        public const string QuestFirstComplete = "quest.first_complete";
+        /// <summary>第一次有任务失败。引导内容：失败原因、主线可以重新开始。</summary>
+        public const string QuestFirstFailed = "quest.first_failed";
+        public const string QuestFirstLogOpen = "quest.first_log_open";
+        /// <summary>第一次发现支线地点。引导内容：在任务日志里接取。</summary>
+        public const string QuestFirstSideFound = "quest.first_side_found";
+        /// <summary>第一次有护送货运车出现。引导内容：它是你的机器，开回家园或带仓库的前哨站，被毁则失败。</summary>
+        public const string QuestFirstEscort = "quest.first_escort";
+        public const string QuestFirstTimeWarning = "quest.first_time_warning";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -638,6 +653,7 @@ namespace GameLogic.Core
             LootFirstFieldDrop, LootFirstEncryptedRejected,
             LootFirstPacket, LootFirstPick, LootFirstPacketDropped,
             LootFirstCargoFull, LootFirstAutoPickup, LootFirstCargoTransfer, LootFirstCargoOpen,
+            QuestFirstNew, QuestFirstTrack, QuestFirstComplete, QuestFirstFailed, QuestFirstLogOpen, QuestFirstSideFound, QuestFirstEscort, QuestFirstTimeWarning,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>
