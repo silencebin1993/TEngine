@@ -646,6 +646,11 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
+                // FG8-EXP-04（FGT-EXP-008）：人类遗产单独结算——撤离成功直接入库生效；携带者不在这片区域就不碰；没撤离的掉在原地。
+                if (Env.HeritageService.ResolveExtractionItem(state, item, RegionId, survivors.Contains(item.CarrierLogicId)))
+                {
+                    continue;
+                }
                 if (survivors.Contains(item.CarrierLogicId))
                 {
                     item.State = RegionQuestItemState.Recovered;

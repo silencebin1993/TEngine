@@ -407,6 +407,26 @@ namespace GameLogic.Campaign
         /// <summary>FG8-GEN-02 统计：打开缓存累计得到的废料、读取终端累计得到的技术数据。</summary>
         public long CacheScrap;
         public long TerminalTechData;
+        /// <summary>FG8-EXP-04（FGR-GEN-033“手工设计的遗产每个世界各出现一次”）：遗产放在哪处遗迹点（遗产ID ↔ 遗迹点 ID，同一下标）。
+        /// 第一次需要时按（种子, 遗产ID）在生成器给出的遗迹点里挑好后写进来，之后不再变；表里新增的遗产下次补挑（不动已挑好的）。</summary>
+        public string[] HeritageIds = Array.Empty<string>();
+        public string[] HeritageRelics = Array.Empty<string>();
+        /// <summary>挑遗迹点时用的世界身份（种子 | 版本 | 设置 | 核心）：身份变了（理论上不会）就整组重挑。</summary>
+        public string HeritageWorld = string.Empty;
+        /// <summary>FG8-EXP-04 修复轮（FGR-GEN-033“剧情需要的遗产保证可以到达”）：剧情遗产所在遗迹点的可达校验结论（与 <see cref="HeritageIds"/> 同一下标；0 待校验 / 1 可达 / 3 换了几次仍走不到），
+        /// 以及校验走不到、被换掉的遗迹点（“遗产ID@遗迹点ID”，换掉的先后；之后挑选时跳过这些遗迹点）。非剧情遗产不校验（恒 0）。</summary>
+        public int[] HeritageReach = Array.Empty<int>();
+        public string[] HeritageReachRejected = Array.Empty<string>();
+        /// <summary>正在算的那一条可达校验（遗迹点 ID，空 = 没有）、它的采纳步、提前取出的结果（0 还在后台通道上 / 1 到得了 / 2 到不了；存档前或让出通道时取出）与寻路状态码。</summary>
+        public string HeritageReachRelic = string.Empty;
+        public long HeritageReachTick;
+        public int HeritageReachResult;
+        public int HeritageReachStatus;
+        /// <summary>已存入核心保管库的遗产（入库先后）与入库时的世界步。遗产在世界里的位置（留在遗迹 / 装在货舱）记在区域关键物（human_legacy，heritage:遗产ID）。</summary>
+        public string[] HeritageObtained = Array.Empty<string>();
+        public long[] HeritageObtainedTicks = Array.Empty<long>();
+        /// <summary>统计：数据档案累计给出的技术数据。</summary>
+        public long HeritageTechData;
     }
 
     /// <summary>
@@ -2549,6 +2569,14 @@ namespace GameLogic.Campaign
             s.Grid.Exploration.HazardsSeen ??= Array.Empty<string>();
             s.Grid.Exploration.PoisFound ??= Array.Empty<string>(); // FG8-GEN-02：旧档没有缓存 / 终端
             s.Grid.Exploration.PoisDone ??= Array.Empty<string>();
+            s.Grid.Exploration.HeritageIds ??= Array.Empty<string>(); // FG8-EXP-04：旧档没有人类遗产
+            s.Grid.Exploration.HeritageRelics ??= Array.Empty<string>();
+            s.Grid.Exploration.HeritageWorld ??= string.Empty;
+            s.Grid.Exploration.HeritageReach ??= Array.Empty<int>();
+            s.Grid.Exploration.HeritageReachRejected ??= Array.Empty<string>();
+            s.Grid.Exploration.HeritageReachRelic ??= string.Empty;
+            s.Grid.Exploration.HeritageObtained ??= Array.Empty<string>();
+            s.Grid.Exploration.HeritageObtainedTicks ??= Array.Empty<long>();
             // FG8-EXP-01：旧档没有远征队字段 = 空队（默认名、颜色 0、空名单）。
             s.Grid.ExpeditionTeam ??= new ExpeditionTeamState();
             s.Grid.ExpeditionTeam.Name ??= string.Empty;

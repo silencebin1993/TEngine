@@ -46,7 +46,7 @@ namespace GameLogic.View
                     boxesDown++;
                 }
             }
-            int key = HashCode.Combine(LootPickService.Revision, BlackBoxService.Revision, s.RegionQuestItems, s.LootPackets?.Packets, includeGround ? s.GroundItems : null, root, boxesDown);
+            int key = HashCode.Combine(LootPickService.Revision, BlackBoxService.Revision ^ (Campaign.Env.HeritageService.Revision * 397), s.RegionQuestItems, s.LootPackets?.Packets, includeGround ? s.GroundItems : null, root, boxesDown);
             if (key == _key)
             {
                 return;
@@ -63,7 +63,17 @@ namespace GameLogic.View
             }
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (q == null || q.State != RegionQuestItemState.OnGround || q.RegionId != regionId || !BlackBoxService.IsBlackBox(q))
+                if (q == null || q.State != RegionQuestItemState.OnGround || q.RegionId != regionId)
+                {
+                    continue;
+                }
+                if (Campaign.Env.HeritageService.IsHeritage(q))
+                {
+                    // FG8-EXP-04（B05 状态可见）：地上的人类遗产（留在遗迹 / 携带者阵亡掉下）占位标记：浅金色方块，美术阶段替换（DEBT-FG8EXP04-02）。
+                    Ensure("heritage_" + q.SalvageInstanceId, root, new Vector3(q.Position.x, 0.35f, q.Position.y), PrimitiveType.Cube, new Vector3(0.55f, 0.7f, 0.55f), new Color(0.95f, 0.82f, 0.45f));
+                    continue;
+                }
+                if (!BlackBoxService.IsBlackBox(q))
                 {
                     continue;
                 }

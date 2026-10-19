@@ -542,6 +542,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "TTP" || f[0] == "ANC" || f[0] == "ATP"
                     // FG8-QST-01 的任务表（QST）与关键材料表（KEY）由 FgQuestSelfCheck A0 段逐字段比对。
                     || f[0] == "QST" || f[0] == "KEY"
+                    // FG8-EXP-04 的人类遗产表（HER）由 FgHeritageSelfCheck A 段逐字段比对。
+                    || f[0] == "HER"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

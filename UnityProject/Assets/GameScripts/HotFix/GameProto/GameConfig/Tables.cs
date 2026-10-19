@@ -203,6 +203,10 @@ public partial class Tables
     /// </summary>
     public fg.TbHazard TbHazard {get; }
     /// <summary>
+    /// 人类遗产
+    /// </summary>
+    public fg.TbHeritage TbHeritage {get; }
+    /// <summary>
     /// 家园与格网调参
     /// </summary>
     public fg.TbHomeTuning TbHomeTuning {get; }
@@ -525,6 +529,7 @@ public partial class Tables
         TbFusionRecipe = new fg.TbFusionRecipe(loader("fg_tbfusionrecipe"));
         TbGridTerrain = new fg.TbGridTerrain(loader("fg_tbgridterrain"));
         TbHazard = new fg.TbHazard(loader("fg_tbhazard"));
+        TbHeritage = new fg.TbHeritage(loader("fg_tbheritage"));
         TbHomeTuning = new fg.TbHomeTuning(loader("fg_tbhometuning"));
         TbInputAction = new fg.TbInputAction(loader("fg_tbinputaction"));
         TbIntelBoss = new fg.TbIntelBoss(loader("fg_tbintelboss"));
@@ -646,6 +651,7 @@ public partial class Tables
         TbFusionRecipe.ResolveRef(this);
         TbGridTerrain.ResolveRef(this);
         TbHazard.ResolveRef(this);
+        TbHeritage.ResolveRef(this);
         TbHomeTuning.ResolveRef(this);
         TbInputAction.ResolveRef(this);
         TbIntelBoss.ResolveRef(this);

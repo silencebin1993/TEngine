@@ -82,6 +82,9 @@ namespace GameLogic.Campaign.Grid
         // ── FG8-GEN-02（只追加）──
         /// <summary>FG8-GEN-02（卡片负向“室内入口被己方建筑堵住”）：室内入口的保护范围里不能建造（保持通道畅通）。</summary>
         EntranceProtect,
+        // ── FG8-EXP-04（只追加）──
+        /// <summary>FG-GAP-127：没回收的遗迹点（或留着人类遗产的地方）周围不能建造——免得自己的建筑把回收入口堵死、机器走不到。</summary>
+        RelicSite,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -153,6 +156,8 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.TurretNoBlueprint: return new GridReason(code, "turret.reason.no_blueprint_plain");
                 // FG8-GEN-02：带参数（入口名、保护半径）的由 HomeGridService.ValidatePlacement 构造，这里给无参数时的稳定文本。
                 case GridBlockReason.EntranceProtect: return new GridReason(code, "grid.reason.entrance_protect_plain");
+                // FG8-EXP-04（FG-GAP-127）：带参数（遗迹点坐标）的由 HomeGridService.ValidatePlacement 构造，这里给无参数时的稳定文本。
+                case GridBlockReason.RelicSite: return new GridReason(code, "grid.reason.relic_site_plain");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }

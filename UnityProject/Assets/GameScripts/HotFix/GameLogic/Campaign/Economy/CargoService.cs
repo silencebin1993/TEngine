@@ -254,6 +254,10 @@ namespace GameLogic.Campaign.Economy
 
         private static string QuestName(RegionQuestItemRecord q)
         {
+            if (Env.HeritageService.IsHeritage(q))
+            {
+                return GameText.Format("heritage.cargo.name", Env.HeritageService.Name(Env.HeritageService.Find(Env.HeritageService.HeritageIdOf(q.SalvageInstanceId))));
+            }
             if (BlackBoxService.IsBlackBox(q))
             {
                 int id = BlackBoxService.LogicIdOf(q);
@@ -764,7 +768,8 @@ namespace GameLogic.Campaign.Economy
         {
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (q != null && BlackBoxService.IsBlackBox(q) && (q.State == RegionQuestItemState.Carried || (q.State == RegionQuestItemState.OnGround && q.RegionId == HomeValleyLayout.RegionId)))
+                // FG8-EXP-04：人类遗产与黑匣子同一套（带回家园即入库、地上的远征队员走近自动捡起）。
+                if (q != null && (BlackBoxService.IsBlackBox(q) || Env.HeritageService.IsHeritage(q)) && (q.State == RegionQuestItemState.Carried || (q.State == RegionQuestItemState.OnGround && q.RegionId == HomeValleyLayout.RegionId)))
                 {
                     return true;
                 }
@@ -778,7 +783,8 @@ namespace GameLogic.Campaign.Economy
             bool changed = false;
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (q == null || !BlackBoxService.IsBlackBox(q))
+                bool heritage = Env.HeritageService.IsHeritage(q);
+                if (q == null || (!BlackBoxService.IsBlackBox(q) && !heritage))
                 {
                     continue;
                 }
@@ -799,6 +805,13 @@ namespace GameLogic.Campaign.Economy
                 }
                 q.State = RegionQuestItemState.Recovered;
                 q.CarrierLogicId = 0;
+                if (heritage)
+                {
+                    // FG8-EXP-04：遗产带回核心 / 仓库附近 → 存入核心保管库并按类别生效（通知由遗产服务发）。
+                    Env.HeritageService.OnDelivered(s, q);
+                    changed = true;
+                    continue;
+                }
                 BlackBoxService.OnRecovered(s, q);
                 int id = BlackBoxService.LogicIdOf(q);
                 string box = GameText.Format("cargo.blackbox", MachineRegistry.TryGetRecord(id, out MachineRecord dead) && dead != null ? MachineNaming.Short(dead) : "#" + id);
@@ -1008,7 +1021,7 @@ namespace GameLogic.Campaign.Economy
             // 地上的黑匣子（始终拾取，占 1 格；家园星球上的——远征地点里的沿用“装载”交互）。
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (q == null || !BlackBoxService.IsBlackBox(q) || q.State != RegionQuestItemState.OnGround || q.RegionId != HomeValleyLayout.RegionId
+                if (q == null || !(BlackBoxService.IsBlackBox(q) || Env.HeritageService.IsHeritage(q)) || q.State != RegionQuestItemState.OnGround || q.RegionId != HomeValleyLayout.RegionId
                     || IsDiscarded(st, q.SalvageInstanceId) || !NearAnyMember(q.RegionId, q.Position))
                 {
                     continue;
@@ -1028,6 +1041,8 @@ namespace GameLogic.Campaign.Economy
                 q.CarrierLogicId = by;
                 st.CargoAutoPicked++;
                 BlackBoxService.Touch();
+                Env.HeritageService.Touch();
+                Env.HeritageService.CancelStalePickup(s, q, null); // FG8-EXP-04：遗产被队员顺手捡起 → 还没完工的取回单作废（不白跑）
                 changed = true;
                 GuidanceHooks.Raise(GuidanceHooks.LootFirstAutoPickup);
                 Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Pickup, q.Position, GameText.Format("cargo.picked", MachineNaming.Short(picker), QuestName(q)));

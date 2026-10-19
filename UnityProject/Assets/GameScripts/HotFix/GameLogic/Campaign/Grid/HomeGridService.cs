@@ -617,6 +617,7 @@ namespace GameLogic.Campaign.Grid
             CollectObstacles(state, ignoreBuildingId, ignoreBuildingId2);
             bool restoreBatch = _obstacleBatch && (ignoreBuildingId != null || ignoreBuildingId2 != null);
             GridMath.FootprintCells(pivot, g.FootprintW, g.FootprintH, r.Rotation, r.Cells);
+            CollectRelicGuards(state, r.Cells);
             int worldLimit = GridContent.TuningInt("world.coord_limit");
             int warnLevel = GridContent.TuningInt("grid.pollution_warn_level");
             int lightPolluted = 0;
@@ -699,6 +700,21 @@ namespace GameLogic.Campaign.Grid
                     if (Math.Max(Math.Abs(c.X - o.Cell.X), Math.Abs(c.Y - o.Cell.Y)) <= o.Radius)
                     {
                         r.Add(new GridReason(GridBlockReason.Obstacle, "grid.reason.obstacle", o.NameKey));
+                        ok = false;
+                        break;
+                    }
+                }
+                // FG8-EXP-04（FG-GAP-127）：没回收的遗迹点 / 留着人类遗产的地方周围 relic.block_radius 格不能建造（与入口保护同一套逐格校验）。
+                for (int k = 0; k < RelicGuards.Count; k++)
+                {
+                    GridCell rg = RelicGuards[k];
+                    if (Math.Max(Math.Abs(c.X - rg.X), Math.Abs(c.Y - rg.Y)) <= _relicGuardRadius)
+                    {
+                        // 还没发现的遗迹点只给不带坐标的原因（审查 P2：不泄露迷雾里的点位）。
+                        r.Add(k < RelicGuardKnown.Count && RelicGuardKnown[k]
+                            ? new GridReason(GridBlockReason.RelicSite, "grid.reason.relic_site",
+                                rg.X.ToString(System.Globalization.CultureInfo.InvariantCulture), rg.Y.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                            : GridReason.Of(GridBlockReason.RelicSite));
                         ok = false;
                         break;
                     }
@@ -993,6 +1009,31 @@ namespace GameLogic.Campaign.Grid
                     EntranceGuards.Add(new EntranceGuard(Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y), a.ProtectRadius, a.Row.NameKey));
                 }
             }
+        }
+
+        private static readonly List<GridCell> RelicGuards = new List<GridCell>(4);
+        private static readonly List<bool> RelicGuardKnown = new List<bool>(4);
+        private static int _relicGuardRadius = 1;
+
+        /// <summary>FG8-EXP-04（FG-GAP-127）：这次放置的占地方框（外扩 relic.block_radius）里挡建造的遗迹点 / 地上的遗产。O(方框里的分布格 + 关键物数)。</summary>
+        private static void CollectRelicGuards(CampaignState state, List<GridCell> cells)
+        {
+            RelicGuards.Clear();
+            RelicGuardKnown.Clear();
+            if (state == null || cells == null || cells.Count == 0)
+            {
+                return;
+            }
+            _relicGuardRadius = Math.Max(0, GridContent.TuningInt("relic.block_radius"));
+            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
+            foreach (GridCell c in cells)
+            {
+                minX = Math.Min(minX, c.X);
+                minY = Math.Min(minY, c.Y);
+                maxX = Math.Max(maxX, c.X);
+                maxY = Math.Max(maxY, c.Y);
+            }
+            Env.HeritageService.BlockingPointsIn(state, minX - _relicGuardRadius, minY - _relicGuardRadius, maxX + _relicGuardRadius, maxY + _relicGuardRadius, RelicGuards, RelicGuardKnown);
         }
 
         private static void CollectObstacles(CampaignState state, string ignoreOwner, string ignoreOwner2)

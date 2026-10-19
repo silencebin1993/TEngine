@@ -64,6 +64,9 @@ namespace GameLogic.UI.SignalCore
         private Label _title;
         private Label _status;
         private Button _close;
+        // FG8-EXP-04：归还核心面板 → 核心保管库。
+        private Button _vault;
+        public Button VaultButton => _vault;
         private Label _lock;
         private Label _hint;
         private Label _slotsTitle;
@@ -269,6 +272,7 @@ namespace GameLogic.UI.SignalCore
             _title = root.Q<Label>("SignalCoreTitle");
             _status = root.Q<Label>("SignalCoreStatus");
             _close = root.Q<Button>("SignalCoreClose");
+            _vault = root.Q<Button>("SignalCoreVault");
             _lock = root.Q<Label>("SignalCoreLock");
             _hint = root.Q<Label>("SignalCoreHint");
             _slotsTitle = root.Q<Label>("SignalSlotsTitle");
@@ -303,6 +307,10 @@ namespace GameLogic.UI.SignalCore
             UiTooltip.Attach(_jumpPrev, JumpPrevTooltip);
             UiTooltip.Attach(_coverageToggle, CoverageTooltip);
             _close.clicked += () => SetOpen(false);
+            if (_vault != null)
+            {
+                _vault.clicked += OpenVault;
+            }
             _unequip.clicked += () => Apply(SignalCoreService.TryUnequip(CampaignSession.Current, _selectedSlot));
             _moveUp.clicked += () => Apply(SignalCoreService.TrySwapSlots(CampaignSession.Current, _selectedSlot, _selectedSlot - 1), _selectedSlot - 1);
             _equip.clicked += () => Apply(SignalCoreService.TryEquip(CampaignSession.Current, _selectedPartId, _selectedSlot));
@@ -489,6 +497,13 @@ namespace GameLogic.UI.SignalCore
             Refresh();
         }
 
+        /// <summary>FG8-EXP-04：“保管库…”——关掉归还核心面板，打开核心保管库（收集页）。</summary>
+        public void OpenVault()
+        {
+            SetOpen(false);
+            UI.Kit.HeritageVaultPanelUIToolkit.Open(UI.Kit.HeritageVaultPanelUIToolkit.TabCollection);
+        }
+
         public void SetOpen(bool open)
         {
             if (_panel == null)
@@ -600,6 +615,10 @@ namespace GameLogic.UI.SignalCore
             _title.text = GameText.Get("signal.core.title");
             _status.text = GameText.Format("signal.core.slot_count", equipped, unlocked);
             _close.text = GameText.Get("signal.core.close");
+            if (_vault != null)
+            {
+                _vault.text = GameText.Get("heritage.panel.open");
+            }
             SetVisible(_lock, locked);
             _lock.text = locked ? GameText.Get("signal.reason.expedition") : string.Empty;
             _hint.text = GameText.Get("signal.core.hint");

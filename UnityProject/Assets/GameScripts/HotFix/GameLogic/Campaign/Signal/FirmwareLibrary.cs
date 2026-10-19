@@ -616,6 +616,7 @@ namespace GameLogic.Campaign.Signal
             PrimitiveInventory.OriginEncrypted => "fwlib.origin.encrypted",
             PrimitiveInventory.OriginCraft => "fwlib.origin.craft",
             PrimitiveInventory.OriginBurn => "fwlib.origin.burn",
+            PrimitiveInventory.OriginHeritage => "fwlib.origin.heritage", // FG8-EXP-04
             _ => "fwlib.origin.unknown",
         });
 

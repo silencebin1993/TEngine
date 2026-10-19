@@ -352,6 +352,17 @@ namespace GameLogic.EditorTools
                     case 383: StepBlackBoxRosterOpened(inStep); break;
                     case 384: StepBlackBoxRosterMemorial(inStep); break;
                     case 385: StepBlackBoxRosterClosed(inStep); break;
+                    // FG8-EXP-04：按回到归还核心键 → 左键点归还核心 → 建筑通用面板“保管库…” → 核心保管库（收集页 → 展柜页）→ Esc；
+                    // 第二个入口（正常模式的主入口）：建造菜单键退出建造模式 → 左键点归还核心 = 归还核心面板 → 页眉“保管库…” → 核心保管库 → Esc → 重新打开建造模式。
+                    case 465: StepVaultFocusCore(inStep); break;
+                    case 461: StepVaultBuildingPanel(inStep); break;
+                    case 462: StepVaultOpened(inStep); break;
+                    case 463: StepVaultShowcase(inStep); break;
+                    case 464: StepVaultClosed(inStep); break;
+                    case 466: StepVaultSignalCoreEntry(inStep); break;
+                    case 467: StepVaultSignalCoreOpened(inStep); break;
+                    case 468: StepVaultSignalCoreClosed(inStep); break;
+                    case 469: StepVaultBuildModeRestored(inStep); break;
                     // FG6-DEF-01：建造菜单“防御”页签选轻型炮塔（建造栏炮塔蓝图下拉 + 射程）→ 悬停时地面射程圈 → 单击放下虚影 → 右键取消 → 点建成的炮塔 →
                     // 建筑面板“炮塔…”→ 炮塔面板（标题、蓝图、五个模式按钮、射程圈）→ 点“最低耐久”立即生效 → Esc → 清理测试炮塔与虚影。
                     case 386: StepTurretPicked(inStep); break;
@@ -7243,6 +7254,210 @@ namespace GameLogic.EditorTools
             HomeGridService.MapFor(state);
             Campaign.Regions.HomeValleyPowerGrid.Recompute(state);
             GameClock.SetPaused(SessionState.GetInt(K + "BbWasPaused", 0) == 1);
+            // FG8-EXP-04：接着按回到归还核心键把镜头对准核心（玩家真实路径：镜头不在核心附近时先回核心，再左键点它）。
+            // 验证修复轮：原来直接点核心的世界坐标，镜头不在核心上时屏幕点落在画面外（(644,557) / 640x480），不是玩家能做的点击。
+            PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.FocusHomeCore));
+            Next(465, "FG8-EXP-04：按回到归还核心键，镜头对准归还核心");
+        }
+
+        // ── FG8-EXP-04：核心保管库（人类遗产展柜与收集进度）──
+
+        private static BuildingRecord SmokeCoreRecord()
+        {
+            CampaignState state = CampaignSession.Current;
+            return state?.BuildingRecords?.FirstOrDefault(x => x != null && x.BuildingTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
+        }
+
+        /// <summary>FG8-EXP-04 验证修复轮：UI Toolkit 按钮是否“玩家看得见、点得到”——已挂在面板上、自己和父节点都没隐藏、有布局尺寸，
+        /// 且整块落在面板根的范围里（不在画面外）。ClickUitk 是直接触发，不查这些，所以点之前先用它断言。</summary>
+        private static bool UitkInView(VisualElement e, out string why)
+        {
+            why = string.Empty;
+            if (e == null || e.panel == null)
+            {
+                why = "按钮不存在或没挂在面板上";
+                return false;
+            }
+            for (VisualElement x = e; x != null; x = x.parent)
+            {
+                if (x.resolvedStyle.display == DisplayStyle.None || x.resolvedStyle.visibility == Visibility.Hidden || x.ClassListContains("uk-hidden") || x.ClassListContains("bn-hidden"))
+                {
+                    why = $"按钮或其父节点“{x.name}”被隐藏";
+                    return false;
+                }
+            }
+            Rect b = e.worldBound;
+            Rect root = e.panel.visualTree.worldBound;
+            if (float.IsNaN(b.width) || b.width < 1f || b.height < 1f)
+            {
+                why = $"按钮没有布局尺寸 {b}";
+                return false;
+            }
+            if (b.xMin < root.xMin - 0.5f || b.yMin < root.yMin - 0.5f || b.xMax > root.xMax + 0.5f || b.yMax > root.yMax + 0.5f)
+            {
+                why = $"按钮 {b} 超出画面 {root}";
+                return false;
+            }
+            return true;
+        }
+
+        private static void StepVaultFocusCore(double inStep)
+        {
+            if (inStep < 1.2)
+            {
+                return;
+            }
+            BuildingRecord core = SmokeCoreRecord();
+            string blocker = string.Empty;
+            bool visible = core != null && WorldPointClickable(core.Position, out blocker);
+            Check(visible, $"按回到归还核心键：镜头焦点 {CameraFocus()}，归还核心在画面内、没被界面挡住{(visible || core == null ? string.Empty : "（" + WorldClickDiag(core.Position) + "）")}");
+            if (core != null)
+            {
+                ClickWorld(new Vector3(core.Position.x, 0f, core.Position.y));
+            }
+            Next(461, "左键点归还核心打开它的通用面板，点“保管库…”");
+        }
+
+        private static void StepVaultBuildingPanel(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            ProductionPanelUIToolkit bp = ProductionPanelUIToolkit.Instance;
+            BuildingRecord core = SmokeCoreRecord();
+            string why = string.Empty;
+            bool open = ProductionPanelUIToolkit.IsOpen && bp != null && core != null && ProductionPanelUIToolkit.BuildingId == core.BuildingId
+                        && bp.VaultButton != null && ProductionPanelUIToolkit.Visible(bp.VaultButton) && UitkInView(bp.VaultButton, out why)
+                        && bp.VaultButton.text == Localization.GameText.Get("heritage.panel.open");
+            string diag = open || core == null ? string.Empty : "（" + why + "；" + WorldClickDiag(core.Position) + "）";
+            Check(open, $"左键点归还核心打开它的通用面板，有“{bp?.VaultButton?.text}”按钮且在画面内{diag}");
+            Check(open && ClickUitk("[ProductionPanelHost]", "PrVault"), "通用面板上点“保管库…”");
+            Next(462, "核心保管库打开（收集页：约 20 件人类遗产与收集进度），点“展柜”页签");
+        }
+
+        private static void StepVaultOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            HeritageVaultPanelUIToolkit panel = HeritageVaultPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            int total = Campaign.Env.HeritageService.All.Count;
+            bool open = HeritageVaultPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && panel.CurrentTab == HeritageVaultPanelUIToolkit.TabCollection
+                        && !UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && !ProductionPanelUIToolkit.IsOpen && LabelText("[HeritageVaultHost]", "HeritageTitle") == Localization.GameText.Get("heritage.vault.title")
+                        && total >= 16 && panel.RowCount == total && panel.StatusText.Contains("/ " + total);
+            Check(open, $"核心保管库打开（收集页 {panel?.RowCount}/{total} 行）：“{FirstLine(panel?.StatusText)}”；第一行“{FirstLine(panel?.RowText(0))}”");
+            CheckNoTextMarkers("核心保管库（收集页）");
+            Check(ClickUitk("[HeritageVaultHost]", "HeritageTabShowcase"), "点“展柜”页签");
+            Next(463, "展柜页（已入库的纪念物；没有时写空状态）；Esc 关闭");
+        }
+
+        private static void StepVaultShowcase(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            HeritageVaultPanelUIToolkit panel = HeritageVaultPanelUIToolkit.Instance;
+            panel?.Refresh(force: true);
+            bool showcase = HeritageVaultPanelUIToolkit.IsOpen && panel != null && panel.CurrentTab == HeritageVaultPanelUIToolkit.TabShowcase
+                            && (panel.RowCount > 0 || panel.EmptyText == Localization.GameText.Get("heritage.vault.empty_showcase"));
+            Check(showcase, $"展柜页：{(panel != null && panel.RowCount > 0 ? FirstLine(panel.RowText(0)) : "空状态“" + panel?.EmptyText + "”")}");
+            CheckNoTextMarkers("核心保管库（展柜页）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(464, "Esc 关闭核心保管库");
+        }
+
+        private static void StepVaultClosed(double inStep)
+        {
+            if (inStep < 0.5)
+            {
+                return;
+            }
+            Check(!HeritageVaultPanelUIToolkit.IsOpen && !UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && !ProductionPanelUIToolkit.IsOpen, "Esc 关闭核心保管库");
+            // 第二个入口：正常模式（不在建造模式）左键点归还核心 = 归还核心面板（HomeValleyController FG1-SIG-01），页眉“保管库…”。
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            bool wasOpen = mode != null && mode.IsOpen;
+            SessionState.SetInt(K + "VaultBuildWasOpen", wasOpen ? 1 : 0);
+            SessionState.SetInt(K + "VaultBuildReopen", 0);
+            if (wasOpen)
+            {
+                PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+            }
+            Next(466, "第二个入口：按建造菜单键退出建造模式，左键点归还核心打开归还核心面板");
+        }
+
+        private static void StepVaultSignalCoreEntry(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            BuildingRecord core = SmokeCoreRecord();
+            string blocker = string.Empty;
+            bool ready = (mode == null || !mode.IsOpen) && core != null && WorldPointClickable(core.Position, out blocker);
+            Check(ready, $"退出建造模式（{(mode != null && mode.IsOpen ? "仍在建造模式" : "已退出")}），归还核心在画面内、没被界面挡住{(ready || core == null ? string.Empty : "（" + WorldClickDiag(core.Position) + "）")}");
+            if (core != null)
+            {
+                ClickWorld(new Vector3(core.Position.x, 0f, core.Position.y));
+            }
+            Next(467, "左键点归还核心打开归还核心面板，页眉点“保管库…”");
+        }
+
+        private static void StepVaultSignalCoreOpened(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            UI.SignalCore.SignalCoreHudUIToolkit hud = UI.SignalCore.SignalCoreHudUIToolkit.Instance;
+            string why = string.Empty;
+            bool open = UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && hud != null && hud.PanelVisible && hud.VaultButton != null
+                        && hud.VaultButton.text == Localization.GameText.Get("heritage.panel.open") && UitkInView(hud.VaultButton, out why);
+            Check(open, $"左键点归还核心打开归还核心面板，页眉有“{hud?.VaultButton?.text}”按钮且在画面内（{Screen.width}x{Screen.height}）{(open ? string.Empty : "：" + why)}");
+            Check(open && ClickUitk("[SignalCoreHost]", "SignalCoreVault"), "归还核心面板页眉点“保管库…”");
+            Next(468, "核心保管库打开（归还核心面板已关闭）；Esc 关闭");
+        }
+
+        private static void StepVaultSignalCoreClosed(double inStep)
+        {
+            if (inStep < 0.8)
+            {
+                return;
+            }
+            HeritageVaultPanelUIToolkit panel = HeritageVaultPanelUIToolkit.Instance;
+            bool open = HeritageVaultPanelUIToolkit.IsOpen && panel != null && panel.PanelVisible && !UI.SignalCore.SignalCoreHudUIToolkit.IsOpen
+                        && panel.CurrentTab == HeritageVaultPanelUIToolkit.TabCollection;
+            Check(open, $"从归还核心面板进入核心保管库：收集页打开、归还核心面板关闭（{panel?.RowCount} 行）");
+            PressKeyKeepMouse(KeyCode.Escape);
+            Next(469, "Esc 关闭核心保管库（归还核心面板入口），重新打开建造模式");
+        }
+
+        private static void StepVaultBuildModeRestored(double inStep)
+        {
+            bool wasOpen = SessionState.GetInt(K + "VaultBuildWasOpen", 0) == 1;
+            bool reopened = SessionState.GetInt(K + "VaultBuildReopen", 0) == 1;
+            if (!reopened && inStep >= 0.5)
+            {
+                Check(!HeritageVaultPanelUIToolkit.IsOpen && !UI.SignalCore.SignalCoreHudUIToolkit.IsOpen && !PauseMenuUIToolkit.IsOpen,
+                    "Esc 关闭核心保管库（归还核心面板入口），没有连带打开暂停菜单");
+                if (wasOpen)
+                {
+                    PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenBuildMenu));
+                }
+                SessionState.SetInt(K + "VaultBuildReopen", 1);
+                return;
+            }
+            if (!reopened || inStep < 1.5)
+            {
+                return;
+            }
+            SessionState.SetInt(K + "VaultBuildReopen", 0);
+            Campaign.Regions.HomeValleyBuildMode mode = Campaign.Regions.HomeValleyBuildMode.Current;
+            Check(!wasOpen || (mode != null && mode.IsOpen), "按建造菜单键重新打开建造模式（接后面的炮塔步骤）");
             Next(386, "FG6-DEF-01：建造菜单“防御”页签选轻型炮塔（建造栏炮塔蓝图下拉与射程）");
         }
 

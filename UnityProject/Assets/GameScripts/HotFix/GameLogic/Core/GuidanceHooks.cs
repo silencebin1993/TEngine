@@ -566,6 +566,11 @@ namespace GameLogic.Core
         public const string LootFirstCargoFull = "loot.first_cargo_full";
         /// <summary>第一次自动拾取。引导内容：按物品开关（设置里）、关键材料与黑匣子始终拾取、家园附近交给搬运单。</summary>
         public const string LootFirstAutoPickup = "loot.first_auto_pickup";
+        // FG8-EXP-04：人类遗产（找到 / 留在原地 / 入库 / 第一次打开核心保管库）。
+        public const string HeritageFirstFound = "heritage.first_found";
+        public const string HeritageFirstLeftBehind = "heritage.first_left_behind";
+        public const string HeritageFirstDelivered = "heritage.first_delivered";
+        public const string HeritageVaultFirstOpen = "heritage.vault_first_open";
         /// <summary>第一次在机器之间转移货物。</summary>
         public const string LootFirstCargoTransfer = "loot.first_cargo_transfer";
         /// <summary>第一次打开货舱面板。</summary>
@@ -654,6 +659,7 @@ namespace GameLogic.Core
             LootFirstPacket, LootFirstPick, LootFirstPacketDropped,
             LootFirstCargoFull, LootFirstAutoPickup, LootFirstCargoTransfer, LootFirstCargoOpen,
             QuestFirstNew, QuestFirstTrack, QuestFirstComplete, QuestFirstFailed, QuestFirstLogOpen, QuestFirstSideFound, QuestFirstEscort, QuestFirstTimeWarning,
+            HeritageFirstFound, HeritageFirstLeftBehind, HeritageFirstDelivered, HeritageVaultFirstOpen,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

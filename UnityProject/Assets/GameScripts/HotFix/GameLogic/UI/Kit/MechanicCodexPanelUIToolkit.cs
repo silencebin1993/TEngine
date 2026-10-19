@@ -174,6 +174,7 @@ namespace GameLogic.UI.Kit
             _tabButtons.Add(root.Q<Button>("CodexTabItem")); // FG4-ECO-01
             _tabButtons.Add(root.Q<Button>("CodexTabRecipe"));
             _tabButtons.Add(root.Q<Button>("CodexTabResearch")); // FG5-RND-01
+            _tabButtons.Add(root.Q<Button>("CodexTabHeritage")); // FG8-EXP-04：人类遗产（收集页）
             _tabs = new UiTabs(_tabButtons, i => SelectTab(MechanicCodex.Tabs[i]));
             _search = new UiSearchBox(root.Q<TextField>("CodexSearch"), root.Q<Label>("CodexSearchPlaceholder"), root.Q<Button>("CodexSearchClear"),
                 "codex.panel.search", SetSearch);
@@ -380,6 +381,7 @@ namespace GameLogic.UI.Kit
             MechanicCodex.TabItem => "codex.tab.item",
             MechanicCodex.TabRecipe => "codex.tab.recipe",
             MechanicCodex.TabResearch => "codex.tab.research", // FG5-RND-01
+            MechanicCodex.TabHeritage => "codex.tab.heritage", // FG8-EXP-04
             _ => "codex.tab.system",
         };
 

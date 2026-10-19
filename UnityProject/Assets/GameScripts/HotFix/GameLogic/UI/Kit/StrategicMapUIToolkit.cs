@@ -939,8 +939,12 @@ namespace GameLogic.UI.Kit
             _relicTitle.text = title;
             _relicBody.text = body;
             _relicRecover.text = GameText.Get("ui.map.relic.recover");
-            bool can = Campaign.Env.HomeExplorationService.CheckRecoverable(state, _selectedRelic, out _) == null
-                       && Campaign.Env.HomeExplorationService.ActiveOrder(state, _selectedRelic) == null;
+            // FG8-EXP-04：已回收、但还留着人类遗产的遗迹点 = 派空闲机器去取（目标换成那件遗产）。
+            string target = Campaign.Env.HomeExplorationService.ResolveTarget(state, _selectedRelic);
+            bool pickup = Campaign.Env.HeritageService.IsInstanceId(target);
+            bool can = (pickup ? Campaign.Env.HeritageService.CheckPickup(state, target, out _) == null
+                               : Campaign.Env.HomeExplorationService.CheckRecoverable(state, target, out _) == null)
+                       && Campaign.Env.HomeExplorationService.ActiveOrder(state, target) == null;
             _relicRecover.SetEnabled(can);
         }
 

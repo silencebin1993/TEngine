@@ -792,6 +792,7 @@ namespace GameLogic.Campaign.Regions
 
             CampaignSession.Set(slotIndex, restore.State);
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(restore.State); // FG2-FW-05：与读档一致，补解锁图鉴
+            GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(restore.State); // FG8-EXP-04
             GameRoot.ReenterHomeValley(); // FG8-EXP-02：回滚只发生在运行中的世界里，重进家园不做主菜单启动（与 ResumeHomeValley 同一段）
             Log.Info("[ExpeditionDepartureService] 已回滚到出发前档并重新进入归还谷地，未复制任何机器/货物/奖励。");
             return true;

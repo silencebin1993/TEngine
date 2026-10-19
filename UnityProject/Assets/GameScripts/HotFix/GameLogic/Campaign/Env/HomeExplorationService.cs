@@ -174,7 +174,23 @@ namespace GameLogic.Campaign.Env
             id != null && (id.StartsWith(CachePrefix, StringComparison.Ordinal) || id.StartsWith(TerminalPrefix, StringComparison.Ordinal));
 
         /// <summary>可以派机器去“回收”的点位（遗迹点、资源缓存、旧终端）：工单复用拆解种类、目标 = 点位 ID，按前缀分流到本类。</summary>
-        public static bool IsPoiId(string id) => IsRelicId(id) || IsCacheOrTerminalId(id);
+        public static bool IsPoiId(string id) => IsRelicId(id) || IsCacheOrTerminalId(id) || HeritageService.IsInstanceId(id);
+
+        /// <summary>
+        /// FG8-EXP-04：玩家指着的目标换成真正要干的活——已回收的遗迹里还留着人类遗产（货舱装不下 / 携带者阵亡掉在这里）时，目标 = 那件遗产（取回单）。其余原样返回。
+        /// </summary>
+        public static string ResolveTarget(CampaignState s, string id)
+        {
+            if (IsRelicId(id) && IsRecovered(s, id) && TryGetRelic(s, id, out RelicInfo info))
+            {
+                RegionQuestItemRecord left = HeritageService.LeftAtRelic(s, info.X, info.Y);
+                if (left != null)
+                {
+                    return left.SalvageInstanceId;
+                }
+            }
+            return id;
+        }
 
         public static bool IsFound(CampaignState s, string relicId) =>
             Array.IndexOf((IsCacheOrTerminalId(relicId) ? StateOf(s)?.PoisFound : StateOf(s)?.RelicsFound) ?? Array.Empty<string>(), relicId) >= 0;
@@ -478,7 +494,8 @@ namespace GameLogic.Campaign.Env
             : RingName(info.Ring);
 
         public static Vector2 PositionOf(CampaignState s, string relicId) =>
-            TryGetRelic(s, relicId, out RelicInfo info) ? new Vector2(info.X, info.Y) : HomeValleyLayout.Core.Position;
+            HeritageService.IsInstanceId(relicId) ? HeritageService.PositionOf(s, relicId)
+            : TryGetRelic(s, relicId, out RelicInfo info) ? new Vector2(info.X, info.Y) : HomeValleyLayout.Core.Position;
 
         /// <summary>离 <paramref name="p"/> 最近、在 <paramref name="radius"/> 格内、已经探索过的遗迹点（右键 / 悬停用；迷雾里的不返回，不泄露情报）。
         /// <paramref name="skipRecovered"/>：跳过已回收的（右键派工用——已回收的灰碑不是工作目标，旁边还有没回收的就取那一处；悬停不跳过，照样显示“已回收 + 背景资料”）。</summary>
@@ -571,7 +588,8 @@ namespace GameLogic.Campaign.Env
             string name = RingName(RingFor(f.Distance));
             if (recovered)
             {
-                return GameText.Format("ui.map.relic.recovered", name);
+                // FG8-EXP-04：遗产留在这处遗迹里（货舱装不下）时地图上写明，玩家知道还要回来取。
+                return GameText.Format(HeritageService.LeftAtRelic(s, f.X, f.Y) != null ? "ui.map.relic.heritage_left" : "ui.map.relic.recovered", name);
             }
             return ActiveOrder(s, f.Id) != null ? GameText.Format("ui.map.relic.ordered", name) : name;
         }
@@ -613,6 +631,21 @@ namespace GameLogic.Campaign.Env
             if (info.Recovered)
             {
                 sb.Append(GameText.Format("relic.hover.recovered", info.Ring?.TechData ?? 0, LoreFor(info)));
+                RegionQuestItemRecord left = HeritageService.LeftAtRelic(s, info.X, info.Y);
+                if (left != null)
+                {
+                    // FG8-EXP-04（卡片负向“遗迹里的物品因货舱满而装不下：留在原地，下次可取”）：悬停写明留着什么、要空几格、取要几秒。
+                    WorkOrderRecord pick = ActiveOrder(s, left.SalvageInstanceId);
+                    sb.Append('\n').Append(GameText.Format("relic.hover.heritage_left", HeritageService.Display(HeritageService.Find(HeritageService.HeritageIdOf(left.SalvageInstanceId))),
+                        HeritageService.Space, Num(HeritageService.PickupSeconds)));
+                    if (pick != null)
+                    {
+                        string who = pick.AssignedMachineLogicId > 0
+                            ? GameText.Format("relic.hover.ordered_machine", MachineNaming.Short(pick.AssignedMachineLogicId))
+                            : GameText.Get("relic.hover.ordered_pool");
+                        sb.Append('\n').Append(GameText.Format("relic.hover.ordered", who));
+                    }
+                }
             }
             else if (info.Order != null)
             {
@@ -660,6 +693,11 @@ namespace GameLogic.Campaign.Env
         /// </summary>
         public static HomeValleyWorkOrders.WorkOrderOpResult OrderRecovery(CampaignState s, string relicId, int machineLogicId)
         {
+            relicId = ResolveTarget(s, relicId);
+            if (HeritageService.IsInstanceId(relicId))
+            {
+                return OrderHeritagePickup(s, relicId, machineLogicId);
+            }
             string reason = CheckRecoverable(s, relicId, out RelicInfo info);
             if (reason == null && info.Order != null && (machineLogicId == 0 || info.Order.State != WorkOrderState.Ready))
             {
@@ -682,6 +720,32 @@ namespace GameLogic.Campaign.Env
             return r;
         }
 
+        /// <summary>FG8-EXP-04：遗产取回单（目标 = 遗产实例，工期 heritage.pickup_seconds；与遗迹回收同一种工单、同一套派工）。</summary>
+        private static HomeValleyWorkOrders.WorkOrderOpResult OrderHeritagePickup(CampaignState s, string instanceId, int machineLogicId)
+        {
+            string reason = HeritageService.CheckPickup(s, instanceId, out _);
+            WorkOrderRecord existing = ActiveOrder(s, instanceId);
+            if (reason == null && existing != null && (machineLogicId == 0 || existing.State != WorkOrderState.Ready))
+            {
+                reason = GameText.Get("relic.reason.ordered");
+            }
+            if (reason != null)
+            {
+                return HomeValleyWorkOrders.WorkOrderOpResult.Fail(HomeValleyWorkOrders.GridFailurePrefix + reason);
+            }
+            HomeValleyWorkOrders.WorkOrderOpResult r = HomeValleyWorkOrders.TryCreateRelicRecovery(s, instanceId, machineLogicId, HeritageService.PickupSeconds);
+            if (r.Success)
+            {
+                Revision++;
+                HeritageService.Touch();
+                string place = HeritageService.Display(HeritageService.Find(HeritageService.HeritageIdOf(instanceId)));
+                FeedbackCues.Raise(FeedbackCueId.CommandAck, machineLogicId > 0
+                    ? GameText.Format("relic.order.heritage", MachineNaming.Short(machineLogicId), place)
+                    : GameText.Format("relic.order.heritage_pool", place));
+            }
+            return r;
+        }
+
         /// <summary>FG7-ENV-05（B02 批量）：已发现、已探索、没回收、也没人在回收的遗迹点（按发现先后）。O(发现过的遗迹点数)，只在地图刷新（按版本号 + 节流缓存）/ 点按钮时算。
         /// 审查修复（P2）：先补登（幂等）——旧档读回后还没揭开过新区域时，已探索区域里的遗迹点也算进来，与地图图标 / 右键单个回收的说法一致。</summary>
         public static List<string> RecoverableRelics(CampaignState s)
@@ -700,6 +764,14 @@ namespace GameLogic.Campaign.Env
                     list.Add(id);
                 }
             }
+            // FG8-EXP-04：留在家园星球地上、还没人去取的人类遗产也算（“派机器回收全部”一并派取回单）。
+            foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
+            {
+                if (HeritageService.IsHeritage(q) && HeritageService.CheckPickup(s, q.SalvageInstanceId, out _) == null && ActiveOrder(s, q.SalvageInstanceId) == null)
+                {
+                    list.Add(q.SalvageInstanceId);
+                }
+            }
             return list;
         }
 
@@ -709,8 +781,11 @@ namespace GameLogic.Campaign.Env
             int n = 0;
             foreach (string id in RecoverableRelics(s))
             {
-                string reason = CheckRecoverable(s, id, out RelicInfo info);
-                if (reason == null && HomeValleyWorkOrders.TryCreateRelicRecovery(s, id, 0, Math.Max(0.1f, info.Seconds)).Success)
+                bool pickup = HeritageService.IsInstanceId(id);
+                RelicInfo info = default;
+                string reason = pickup ? HeritageService.CheckPickup(s, id, out _) : CheckRecoverable(s, id, out info);
+                float seconds = pickup ? HeritageService.PickupSeconds : Math.Max(0.1f, info.Seconds);
+                if (reason == null && HomeValleyWorkOrders.TryCreateRelicRecovery(s, id, 0, seconds).Success)
                 {
                     n++;
                 }
@@ -730,6 +805,15 @@ namespace GameLogic.Campaign.Env
         public static int CompleteRecovery(CampaignState s, WorkOrderRecord order)
         {
             HomeExplorationState st = StateOf(s);
+            if (st != null && order != null && HeritageService.IsInstanceId(order.TargetId))
+            {
+                // FG8-EXP-04：遗产取回单完工——装得下就装进货舱，装不下继续留在原地并说明。
+                HeritageService.CompletePickup(s, order);
+                Revision++;
+                return 0;
+            }
+            // FG8-EXP-04：先给遗产挑好遗迹点（幂等；必须在把这处遗迹记为已回收之前，挑选结果才与回收先后无关）。
+            HeritageService.EnsurePlaced(s);
             if (st == null || order == null || !TryGetRelic(s, order.TargetId, out RelicInfo info) || info.Recovered)
             {
                 return 0;
@@ -759,6 +843,8 @@ namespace GameLogic.Campaign.Env
                 GameText.Format("relic.notify.recovered", RingName(info.Ring), info.X, info.Y, amount, LoreFor(info)), new Vector3(info.X, 0f, info.Y));
             FeedbackCues.Raise(FeedbackCueId.AnalysisComplete);
             GuidanceHooks.Raise(GuidanceHooks.EnvFirstRelicRecovered);
+            // FG8-EXP-04（FGR-EXP-040）：这处遗迹放着人类遗产 → 装进回收它的机器的货舱（装不下留在原地）。
+            HeritageService.OnRelicRecovered(s, info.Id, info.X, info.Y, RingName(info.Ring), order.AssignedMachineLogicId);
             return amount;
         }
 
@@ -805,7 +891,8 @@ namespace GameLogic.Campaign.Env
 
         /// <summary>FG8-GEN-02：工单显示名（“回收遗迹 / 打开缓存 / 读取终端”）。</summary>
         public static string WorkLabel(string targetId) =>
-            targetId != null && targetId.StartsWith(CachePrefix, StringComparison.Ordinal) ? GameText.Get("cache.work.label")
+            HeritageService.IsInstanceId(targetId) ? GameText.Get("heritage.work.label")
+            : targetId != null && targetId.StartsWith(CachePrefix, StringComparison.Ordinal) ? GameText.Get("cache.work.label")
             : targetId != null && targetId.StartsWith(TerminalPrefix, StringComparison.Ordinal) ? GameText.Get("terminal.work.label")
             : GameText.Get("relic.work.label");
 

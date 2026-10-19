@@ -29,6 +29,8 @@ namespace GameLogic.Progression
         Recipe = 4,
         /// <summary>FG5-RND-01：研究节点（fg.TbResearchNode 生成）。</summary>
         Research = 5,
+        /// <summary>FG8-EXP-04：人类遗产（fg.TbHeritage 生成；“人类遗产”页签 = 图鉴收集页）。</summary>
+        Heritage = 6,
     }
 
     /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。FG2-FW-05：固件 / 反应条目由各自的表生成，
@@ -73,15 +75,18 @@ namespace GameLogic.Progression
         public const string TabItem = "item";
         public const string TabRecipe = "recipe";
         public const string TabResearch = "research";
+        /// <summary>FG8-EXP-04（FGR-EXP-040“图鉴有收集页”）：人类遗产页签——约 20 件遗产，未收集的显示剪影 + 类别与第几幕的提示，页签上写已收集 / 总数。</summary>
+        public const string TabHeritage = "heritage";
 
         /// <summary>页签顺序（界面按这个顺序画标签）。</summary>
-        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction, TabItem, TabRecipe, TabResearch };
+        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction, TabItem, TabRecipe, TabResearch, TabHeritage };
 
         public const string FirmwarePrefix = "fw:";
         public const string ReactionPrefix = "reaction:";
         public const string ItemPrefix = "item:";
         public const string RecipePrefix = "recipe:";
         public const string ResearchPrefix = "research:";
+        public const string HeritagePrefix = Campaign.Env.HeritageService.CodexPrefix;
 
         /// <summary>FG5-RND-01（FG05 第 4 节“所有研究节点都有图鉴条目”）：研究节点条目 ID（“research:” + 节点 ID）。</summary>
         public static string ResearchEntryId(string nodeId) => string.IsNullOrEmpty(nodeId) ? null : ResearchPrefix + nodeId;
@@ -233,6 +238,8 @@ namespace GameLogic.Progression
                     return Campaign.Economy.EconomyCodex.RecipeBody(e.ContentId, state);
                 case MechanicCodexKind.Research:
                     return Campaign.Economy.ResearchText.Detail(state, Campaign.Economy.ResearchCatalog.Find(e.ContentId));
+                case MechanicCodexKind.Heritage:
+                    return Campaign.Env.HeritageService.CodexBody(e.ContentId);
                 default:
                     return GameLogic.Localization.GameText.Get(e.BodyKey);
             }
@@ -267,6 +274,9 @@ namespace GameLogic.Progression
                     Campaign.Economy.ResearchNodeDef rn = Campaign.Economy.ResearchCatalog.Find(e.ContentId);
                     return GameLogic.Localization.GameText.Format("codex.research.node.locked",
                         rn != null ? GameLogic.Localization.GameText.Format("research.branch.closed", rn.Branch.Name) : string.Empty);
+                case MechanicCodexKind.Heritage:
+                    // 没收集的遗产不剧透名字与故事，只写类别与第几幕范围的遗迹里。
+                    return Campaign.Env.HeritageService.CodexHint(e.ContentId);
                 case MechanicCodexKind.Item:
                     // 没拿到的物品不剧透名字与用途，只写获取途径（表里的来源文字）。
                     return GameLogic.Localization.GameText.Format("codex.item.locked_hint", GameLogic.Localization.GameText.Get(e.HintKey));
@@ -629,6 +639,36 @@ namespace GameLogic.Progression
                 _byId[e.Id] = e;
             }
             AddResearchEntries();
+            AddHeritageEntries();
+        }
+
+        /// <summary>FG8-EXP-04：按人类遗产表生成“人类遗产”页签的条目（遗产入库时由 <see cref="Campaign.Env.HeritageService"/> 解锁，跨存档）。</summary>
+        private static void AddHeritageEntries()
+        {
+            int order = 600000;
+            foreach (GameConfig.fg.Heritage h in Campaign.Env.HeritageService.All)
+            {
+                string id = Campaign.Env.HeritageService.CodexIdOf(h.Id);
+                if (_byId.ContainsKey(id))
+                {
+                    continue;
+                }
+                var e = new MechanicCodexEntry
+                {
+                    Kind = MechanicCodexKind.Heritage,
+                    ContentId = h.Id,
+                    Id = id,
+                    Tab = TabHeritage,
+                    TitleKey = h.NameKey,
+                    BodyKey = h.DescKey,
+                    HintKey = h.DescKey,
+                    SortOrder = order + h.SortOrder,
+                    Links = new[] { "codex.heritage" },
+                    AlwaysOpen = false,
+                };
+                _entries.Add(e);
+                _byId[e.Id] = e;
+            }
         }
 
         /// <summary>

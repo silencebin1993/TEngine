@@ -1090,6 +1090,7 @@ namespace GameLogic
             CampaignSession.Set(slotIndex, state);
             // FG2-FW-05：订阅芯片入账 → 图鉴解锁，并按本存档补解锁（开局播种的芯片）。
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(state);
+            GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(state); // FG8-EXP-04：遗产挑遗迹点、图鉴补解锁
             Log.Info($"[MainMenuUI] 新战役已创建：campaignId={campaignId} slot={slotIndex} phase={state.CampaignPhase}");
 
             // ER2-SCENE-01：新战役进入归还谷地正式场景。GameApp.MountGameplayUi() 幂等，
@@ -1133,6 +1134,7 @@ namespace GameLogic
             CampaignSession.Set(slotIndex, result.State);
             // FG2-FW-05：读档后按本存档补解锁图鉴（旧存档里已持有的芯片），悬停提示的图鉴链接不再显示“？？？”。
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(result.State);
+            GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(result.State); // FG8-EXP-04
             Log.Info($"[MainMenuUI] 已读取战役：campaignId={result.State.CampaignId} slot={slotIndex} " +
                 $"phase={result.State.CampaignPhase}");
 

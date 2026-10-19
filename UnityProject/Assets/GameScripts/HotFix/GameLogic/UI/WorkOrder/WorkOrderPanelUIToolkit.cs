@@ -541,6 +541,13 @@ namespace GameLogic.UI.WorkOrder
         private static string RelicTargetText(string relicId)
         {
             CampaignState s = CampaignSession.Current;
+            if (s != null && Campaign.Env.HeritageService.IsInstanceId(relicId))
+            {
+                // FG8-EXP-04：取回单写“类别「名称」（x, y）”。
+                Vector2 at = Campaign.Env.HeritageService.PositionOf(s, relicId);
+                return GameLogic.Localization.GameText.Format("relic.hover.title",
+                    Campaign.Env.HeritageService.Display(Campaign.Env.HeritageService.Find(Campaign.Env.HeritageService.HeritageIdOf(relicId))), Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y));
+            }
             return s != null && Campaign.Env.HomeExplorationService.TryGetRelic(s, relicId, out Campaign.Env.HomeExplorationService.RelicInfo info)
                 ? GameLogic.Localization.GameText.Format("relic.hover.title", Campaign.Env.HomeExplorationService.PoiName(info), info.X, info.Y)
                 : GameLogic.Localization.GameText.Get("world.poi.relic");

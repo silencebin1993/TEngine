@@ -40,6 +40,8 @@ namespace GameLogic.Campaign.Nav
         public const int OwnerExpedition = 5;
         /// <summary>FG8-GEN-02（FGR-GEN-090）：手工锚点 / 室内入口的可达性校验（从归还核心到入口，玩家通行类别；后台通道发出后当场取回，见 <see cref="WorldGen.TerritoryAnchorChecks"/>）。</summary>
         public const int OwnerAnchorCheck = 6;
+        /// <summary>FG8-EXP-04（FGR-GEN-033）：剧情遗产所在遗迹点的可达校验（从归还核心到遗迹点，玩家通行类别；后台通道，按固定步数之后取回，见 <see cref="Env.HeritageService.WorldStep"/>）。</summary>
+        public const int OwnerHeritageReach = 7;
 
         public static NavKernel Kernel { get; private set; }
         public static CampaignState BoundState { get; private set; }
@@ -511,6 +513,15 @@ namespace GameLogic.Campaign.Nav
             {
                 return false;
             }
+            // FG8-EXP-04：剧情遗产可达校验只“借用”空闲通道——别的请求方要用时让出来（那一条先算完取出，不丢结果），不推迟突袭计划 / 锚点校验。
+            if (ownerTag != OwnerHeritageReach && Kernel.BackgroundActive && Kernel.BackgroundOwnerTag == OwnerHeritageReach)
+            {
+                Env.HeritageService.StashReach(BoundState); // 先算完取出、记进存档（原采纳步照常交到），再让出
+                if (Kernel.BackgroundActive)
+                {
+                    Kernel.CancelBackground();
+                }
+            }
             SyncGridChanges();
             return Kernel.StartBackground(new NavRequest
             {
@@ -525,7 +536,10 @@ namespace GameLogic.Campaign.Nav
             });
         }
 
-        public static bool BackgroundActive => IsBound && Kernel.BackgroundActive;
+        /// <summary>后台通道正被占着（剧情遗产可达校验借用时不算：它会让出来，见 <see cref="StartBackground"/>）。</summary>
+        public static bool BackgroundActive => IsBound && Kernel.BackgroundActive && Kernel.BackgroundOwnerTag != OwnerHeritageReach;
+        /// <summary>后台通道上有一条在算（不论谁的）。</summary>
+        public static bool BackgroundHeld => IsBound && Kernel.BackgroundActive;
         public static int BackgroundOwnerKey => IsBound ? Kernel.BackgroundOwnerKey : -1;
         public static int BackgroundOwnerTag => IsBound ? Kernel.BackgroundOwnerTag : -1;
         public static int BackgroundSerial => IsBound ? Kernel.BackgroundSerial : 0;

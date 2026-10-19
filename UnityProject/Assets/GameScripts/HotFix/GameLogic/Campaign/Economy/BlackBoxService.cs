@@ -384,7 +384,8 @@ namespace GameLogic.Campaign.Economy
         /// </summary>
         public static bool DropFromCarrier(CampaignState s, RegionQuestItemRecord q)
         {
-            if (!IsBlackBox(q))
+            // FG8-EXP-04：人类遗产同样永不丢失（掉在携带者最后的位置，下次再取）。
+            if (!IsBlackBox(q) && !Env.HeritageService.IsHeritage(q))
             {
                 return false;
             }
@@ -803,7 +804,7 @@ namespace GameLogic.Campaign.Economy
             int n = 0;
             foreach (RegionQuestItemRecord q in s?.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                n += q != null && q.State == RegionQuestItemState.Carried && !IsBlackBox(q) ? 1 : 0;
+                n += q != null && q.State == RegionQuestItemState.Carried && !IsBlackBox(q) && !Env.HeritageService.IsHeritage(q) ? 1 : 0; // FG8-EXP-04：遗产同样不丢
             }
             return n;
         }

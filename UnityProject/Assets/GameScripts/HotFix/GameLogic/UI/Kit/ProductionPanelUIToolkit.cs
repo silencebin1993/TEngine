@@ -124,6 +124,9 @@ namespace GameLogic.UI.Kit
         /// <summary>FG5-RND-06：黑匣子陈列馆的“陈列馆…”按钮（只在陈列馆上显示）。</summary>
         private Button _blackBox;
         public Button BlackBoxButton => _blackBox;
+        // FG8-EXP-04：归还核心 → 核心保管库（人类遗产展柜与收集进度）。
+        private Button _vault;
+        public Button VaultButton => _vault;
         /// <summary>FG8-DROP-01：投送站 → 投送站面板（FGU-46）。</summary>
         private Button _drop;
         public Button DropButton => _drop;
@@ -341,6 +344,7 @@ namespace GameLogic.UI.Kit
             _fusion = root.Q<Button>("PrFusion");
             _intel = root.Q<Button>("PrIntel");
             _blackBox = root.Q<Button>("PrBlackBox");
+            _vault = root.Q<Button>("PrVault");
             _drop = root.Q<Button>("PrDrop");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
@@ -357,6 +361,7 @@ namespace GameLogic.UI.Kit
             _fusion.clicked += OpenFusion;
             _intel.clicked += OpenIntel;
             _blackBox.clicked += OpenBlackBox;
+            _vault.clicked += OpenVault;
             _drop.clicked += OpenDrop;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
@@ -525,6 +530,7 @@ namespace GameLogic.UI.Kit
             _fusion.EnableInClassList("bn-hidden", !FusionService.IsSynth(b));
             _intel.EnableInClassList("bn-hidden", !IntelService.IsPost(b));
             _blackBox.EnableInClassList("bn-hidden", !BlackBoxService.IsGallery(b));
+            _vault.EnableInClassList("bn-hidden", b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore);
             _drop.EnableInClassList("bn-hidden", !Campaign.Regions.DropPodService.IsStation(b));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
@@ -540,6 +546,7 @@ namespace GameLogic.UI.Kit
             _fusion.text = GameText.Get("fusion.panel.open");
             _intel.text = GameText.Get("intel.panel.open");
             _blackBox.text = GameText.Get("blackbox.panel.open");
+            _vault.text = GameText.Get("heritage.panel.open");
             _drop.text = GameText.Get("drop.panel.open");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
@@ -1485,6 +1492,18 @@ namespace GameLogic.UI.Kit
             }
             SetOpen(false);
             DropStationPanelUIToolkit.Open(id);
+        }
+
+        /// <summary>FG8-EXP-04：归还核心 → 打开核心保管库（收集页；展柜在同一面板）。</summary>
+        public void OpenVault()
+        {
+            BuildingRecord b = HomeGridService.FindBuilding(CampaignSession.Current, BuildingId);
+            if (b == null || b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore)
+            {
+                return; // 只有归还核心才有“保管库…”（按钮在别的建筑上隐藏；这里再挡一次）
+            }
+            SetOpen(false);
+            HeritageVaultPanelUIToolkit.Open(HeritageVaultPanelUIToolkit.TabCollection);
         }
 
         /// <summary>FG5-RND-06：黑匣子陈列馆 → 打开陈列馆面板（黑匣子页；纪念墙在同一面板，FGU-40）。</summary>

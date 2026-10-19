@@ -1091,6 +1091,7 @@ namespace GameLogic.Campaign.Regions
             }
             CampaignSession.Set(slot, restore.State);
             Signal.FirmwareLibrary.OnCampaignEntered(restore.State);
+            Env.HeritageService.OnCampaignEntered(restore.State); // FG8-EXP-04
             GameRoot.ReenterHomeValley();
             ExpeditionMarchState m = Current(restore.State);
             if (m != null && m.Phase == PhaseOutbound)

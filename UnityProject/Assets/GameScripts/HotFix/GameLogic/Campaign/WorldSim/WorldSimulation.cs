@@ -395,6 +395,7 @@ namespace GameLogic.Campaign.WorldSim
             Combat.CombatSites.WriteTo(CampaignSession.Current);
             // FG6-DEF-04：突袭导演在后台长路线通道里还没到采纳步的那条路线，取出来存进计划（读档后在同一采纳步交到）。
             Defense.RaidDirectorService.WriteTo(CampaignSession.Current);
+            Env.HeritageService.StashReach(CampaignSession.Current); // FG8-EXP-04：在算的剧情遗产可达校验先取出结果存进存档（读档后在同一采纳步交到）
             // FG0-ARCH-06：寻路内核的排队请求、待采纳结果、还没同步的格网变化写进 NavState（读档接着跑与不存档一致）。
             NavService.WriteTo(CampaignSession.Current);
         }
@@ -645,6 +646,8 @@ namespace GameLogic.Campaign.WorldSim
                     Economy.LootPickService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG8-LOOT-03：货舱——在外的远征队自动拾取、黑匣子带回家园即回收、快满 / 已满提示；每 loot.cargo.check_seconds 一次（只看步序号，与观察无关），没有在外的队伍时 O(1)。
                     Economy.CargoService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
+                    // FG8-EXP-04（FGR-GEN-033）：剧情遗产所在遗迹点的可达校验（层级寻路，借用空闲的后台通道；走不到就改挑下一处）。只看步序号；全部有结论后 O(遗产数) 早退。
+                    Env.HeritageService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG6-LOG-10（FGR-LOG-046）：管线泄漏液洼——取走内核本步的液洼反应（告警），每 logistics.leak.sync_seconds 对账（扩大 / 消退 / 残留到期 / 火烧坏设施）；
                     // 只看步序号，与观察无关，O(液洼数)。逐单位挂标签、液洼遇火整片反应在上面家园内核的一步里（Main/Sim，Burst）。放在攻城之后：本步溅射打穿的管线本步就积起液洼。
                     Logistics.PipeLeakService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

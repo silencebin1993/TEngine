@@ -2568,18 +2568,43 @@ namespace GameLogic.Campaign.Regions
             {
                 return false;
             }
-            string relicId = Env.HomeExplorationService.RelicAt(state, point, skipRecovered: true);
-            if (relicId == null || Env.HomeExplorationService.CheckRecoverable(state, relicId, out Env.HomeExplorationService.RelicInfo info) != null)
+            // FG8-EXP-04：留在地上的人类遗产（遗迹里装不下 / 携带者阵亡掉落）优先——右键它 = 派这台机器去取；
+            // 已回收、但还留着遗产的遗迹点同样换成取回单（ResolveTarget）。
+            string relicId = Env.HeritageService.GroundAt(state, point) ?? Env.HomeExplorationService.RelicAt(state, point, skipRecovered: true);
+            if (relicId == null)
+            {
+                string recovered = Env.HomeExplorationService.RelicAt(state, point);
+                string resolved = recovered != null ? Env.HomeExplorationService.ResolveTarget(state, recovered) : null;
+                relicId = resolved != null && Env.HeritageService.IsInstanceId(resolved) ? resolved : null;
+            }
+            WorkOrderRecord existingOrder;
+            if (relicId == null)
             {
                 return false;
             }
-            if (info.Order != null)
+            if (Env.HeritageService.IsInstanceId(relicId))
             {
-                if (info.Order.AssignedMachineLogicId == moving.LogicId)
+                if (Env.HeritageService.CheckPickup(state, relicId, out _) != null)
+                {
+                    return false;
+                }
+                existingOrder = Env.HomeExplorationService.ActiveOrder(state, relicId);
+            }
+            else
+            {
+                if (Env.HomeExplorationService.CheckRecoverable(state, relicId, out Env.HomeExplorationService.RelicInfo info) != null)
+                {
+                    return false;
+                }
+                existingOrder = info.Order;
+            }
+            if (existingOrder != null)
+            {
+                if (existingOrder.AssignedMachineLogicId == moving.LogicId)
                 {
                     return true;
                 }
-                if (info.Order.State != WorkOrderState.Ready)
+                if (existingOrder.State != WorkOrderState.Ready)
                 {
                     return false;
                 }
@@ -2596,7 +2621,7 @@ namespace GameLogic.Campaign.Regions
             }
             Vector2 at = Env.HomeExplorationService.PositionOf(state, relicId);
             CommandWork(moving, new Vector3(at.x, 0f, at.y), relicId,
-                () => Env.HomeExplorationService.OrderRecovery(state, relicId, moving.LogicId), "回收遗迹 " + relicId);
+                () => Env.HomeExplorationService.OrderRecovery(state, relicId, moving.LogicId), (Env.HeritageService.IsInstanceId(relicId) ? "取回遗产 " : "回收遗迹 ") + relicId);
             return true;
         }
 

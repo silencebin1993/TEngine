@@ -681,7 +681,16 @@ namespace GameLogic.Campaign.Regions
 
             foreach (RegionQuestItemRecord item in state.RegionQuestItems)
             {
-                if (item.RegionId != RegionId || item.State != RegionQuestItemState.Carried)
+                if (item.State != RegionQuestItemState.Carried)
+                {
+                    continue;
+                }
+                // FG8-EXP-04（FGT-EXP-008）：人类遗产按携带者所在区域结算（遗产的 RegionId 是捡起它的地方，不一定是这里）。
+                if (Env.HeritageService.ResolveExtractionItem(state, item, RegionId, survivors.Contains(item.CarrierLogicId)))
+                {
+                    continue;
+                }
+                if (item.RegionId != RegionId)
                 {
                     continue;
                 }

@@ -443,6 +443,7 @@ namespace GameLogic.Stage
             }
             CampaignSession.Set(slot, result.State);
             Campaign.Signal.FirmwareLibrary.OnCampaignEntered(result.State);
+            Campaign.Env.HeritageService.OnCampaignEntered(result.State); // FG8-EXP-04
             Log.Info($"[GameRoot] 失败页读取自动存档：槽位 {slot}，campaignId={result.State.CampaignId}");
             ResumeCampaign();
             SaveContentReconciler.RaiseLoadNotices(result.Notices);

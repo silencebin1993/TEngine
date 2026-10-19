@@ -30,6 +30,8 @@ namespace GameLogic.Campaign.Primitive
         public const string OriginCraft = "craft";
         /// <summary>FG4-ECO-03：固件刻录台刻出来的（FGR-FW-060 的正式来源）。</summary>
         public const string OriginBurn = "burn";
+        /// <summary>FG8-EXP-04：人类遗产里的预制固件（人类协议，带回即可用）。</summary>
+        public const string OriginHeritage = "heritage";
 
         /// <summary>任何实例的“锁定 / 移除 / 新增”都会让它加一（固件库面板据此立即刷新；存档不记）。</summary>
         public static int Revision { get; private set; } = 1;
@@ -595,6 +597,38 @@ namespace GameLogic.Campaign.Primitive
             };
             state.PrimitiveChips = (state.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Append(record).ToArray();
             AppendLedger(state, "FirmwareChipBurn", record.PartId, firmwareId);
+            Acquired(state, firmwareId);
+            return record.PartId;
+        }
+
+        /// <summary>
+        /// FG8-EXP-04（FGR-EXP-040“预制固件：人类协议的固件，可以直接使用”）：人类遗产入库时放一枚固件芯片进存放（满了进“待领取”，不丢）。
+        /// 按来源实例幂等（同一件遗产只发一枚）。返回芯片实例 ID（已发过返回原来那枚）。
+        /// </summary>
+        public static string GrantHeritageFirmware(CampaignState state, string sourceId, string firmwareId)
+        {
+            if (state == null || string.IsNullOrEmpty(firmwareId) || string.IsNullOrEmpty(sourceId))
+            {
+                return null;
+            }
+            state.PrimitiveChips ??= Array.Empty<PrimitiveChipRecord>();
+            PrimitiveChipRecord existing = state.PrimitiveChips.FirstOrDefault(p => p != null && p.SourceSalvageId == sourceId);
+            if (existing != null)
+            {
+                return existing.PartId;
+            }
+            var record = new PrimitiveChipRecord
+            {
+                PartId = NewPartId(),
+                CardDefId = firmwareId,
+                SourceSalvageId = sourceId,
+                State = IsFull(state) ? PrimitiveChipState.Pending : PrimitiveChipState.Bag,
+                DraftSlot = -1,
+                Origin = OriginHeritage,
+                AcquiredTick = NowTick(state),
+            };
+            state.PrimitiveChips = state.PrimitiveChips.Append(record).ToArray();
+            AppendLedger(state, "FirmwareChipHeritage", record.PartId, firmwareId);
             Acquired(state, firmwareId);
             return record.PartId;
         }
