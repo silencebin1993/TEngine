@@ -571,6 +571,18 @@ namespace GameLogic.Core
         public const string HeritageFirstLeftBehind = "heritage.first_left_behind";
         public const string HeritageFirstDelivered = "heritage.first_delivered";
         public const string HeritageVaultFirstOpen = "heritage.vault_first_open";
+
+        // ── FG9-NAR-01：叙事投放框架与资料库（FG11 FGR-NAR-001～003；只埋钩子，引导内容在 FG15-UX-04）──
+        /// <summary>第一次有资料收进资料库（引导内容：资料库在哪、怎么筛选、阅读不暂停）。</summary>
+        public const string NarrativeFirstEntry = "narrative.first_entry";
+        /// <summary>第一次打开资料库。</summary>
+        public const string NarrativeLibraryFirstOpen = "narrative.library_first_open";
+        /// <summary>第一次播放演出（引导内容：可以跳过，之后能在资料库重看）。</summary>
+        public const string NarrativeFirstCutscene = "narrative.first_cutscene";
+        /// <summary>第一次跳过演出。</summary>
+        public const string NarrativeFirstSkip = "narrative.first_skip";
+        /// <summary>第一次在资料库重看演出。</summary>
+        public const string NarrativeFirstReplay = "narrative.first_replay";
         /// <summary>第一次在机器之间转移货物。</summary>
         public const string LootFirstCargoTransfer = "loot.first_cargo_transfer";
         /// <summary>第一次打开货舱面板。</summary>
@@ -660,6 +672,7 @@ namespace GameLogic.Core
             LootFirstCargoFull, LootFirstAutoPickup, LootFirstCargoTransfer, LootFirstCargoOpen,
             QuestFirstNew, QuestFirstTrack, QuestFirstComplete, QuestFirstFailed, QuestFirstLogOpen, QuestFirstSideFound, QuestFirstEscort, QuestFirstTimeWarning,
             HeritageFirstFound, HeritageFirstLeftBehind, HeritageFirstDelivered, HeritageVaultFirstOpen,
+            NarrativeFirstEntry, NarrativeLibraryFirstOpen, NarrativeFirstCutscene, NarrativeFirstSkip, NarrativeFirstReplay,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

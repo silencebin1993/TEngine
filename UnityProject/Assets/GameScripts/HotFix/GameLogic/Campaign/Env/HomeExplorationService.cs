@@ -558,6 +558,13 @@ namespace GameLogic.Campaign.Env
         /// <summary>背景资料：按遗迹点 ID 的稳定哈希挑距离环里的一条（同一遗迹点永远同一条，与读档 / 平台无关）。</summary>
         public static string LoreFor(RelicInfo info)
         {
+            string key = LoreKeyFor(info);
+            return key.Length == 0 ? string.Empty : GameText.Get(key);
+        }
+
+        /// <summary>背景资料的文本键（同一遗迹点永远同一条；没有资料 = 空串）。FG9-NAR-01：旧终端读到的记录按这个键收进资料库。</summary>
+        public static string LoreKeyFor(RelicInfo info)
+        {
             string source = info.Kind == WorldFeatureKind.Terminal ? info.Template?.TerminalLoreKeys : info.Ring?.LoreKeys;
             string[] keys = source?.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
             if (keys.Length == 0)
@@ -569,7 +576,7 @@ namespace GameLogic.Campaign.Env
             {
                 h = (h ^ c) * 16777619u;
             }
-            return GameText.Get(keys[(int)(h % (uint)keys.Length)].Trim());
+            return keys[(int)(h % (uint)keys.Length)].Trim();
         }
 
         /// <summary>地图图标的标签：环名 + 状态（已回收 / 回收中）。</summary>
@@ -843,6 +850,12 @@ namespace GameLogic.Campaign.Env
                 GameText.Format("relic.notify.recovered", RingName(info.Ring), info.X, info.Y, amount, LoreFor(info)), new Vector3(info.X, 0f, info.Y));
             FeedbackCues.Raise(FeedbackCueId.AnalysisComplete);
             GuidanceHooks.Raise(GuidanceHooks.EnvFirstRelicRecovered);
+            // FG9-NAR-01 审查修复（FGR-NAR-001“遗迹里的文字日志”、FGR-NAR-003“收录所有已获得的文本”）：遗迹点的背景资料同样收进资料库“数据终端”（同一条只收一次）。
+            string relicLoreKey = LoreKeyFor(info);
+            if (relicLoreKey.Length > 0)
+            {
+                TEngine.GameEvent.Send(Narrative.NarrativeService.FeedEvent, Narrative.NarrativeCatalog.TriggerTerminal + relicLoreKey);
+            }
             // FG8-EXP-04（FGR-EXP-040）：这处遗迹放着人类遗产 → 装进回收它的机器的货舱（装不下留在原地）。
             HeritageService.OnRelicRecovered(s, info.Id, info.X, info.Y, RingName(info.Ring), order.AssignedMachineLogicId);
             return amount;
@@ -886,6 +899,12 @@ namespace GameLogic.Campaign.Env
             }
             NotificationCenter.Post(NotifyRelicRecovered, GameText.Format("terminal.notify.read", name, info.X, info.Y, tech, LoreFor(info)), new Vector3(info.X, 0f, info.Y));
             FeedbackCues.Raise(FeedbackCueId.AnalysisComplete);
+            // FG9-NAR-01（FGR-NAR-001 数据终端）：读到的记录收进资料库（同一条只收一次）。
+            string loreKey = LoreKeyFor(info);
+            if (loreKey.Length > 0)
+            {
+                TEngine.GameEvent.Send(Narrative.NarrativeService.FeedEvent, Narrative.NarrativeCatalog.TriggerTerminal + loreKey);
+            }
             return tech;
         }
 

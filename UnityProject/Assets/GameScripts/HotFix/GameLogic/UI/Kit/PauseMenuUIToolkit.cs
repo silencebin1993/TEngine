@@ -67,6 +67,8 @@ namespace GameLogic.UI.Kit
             });
             // FG1-HUD-01（FGU-05）：图鉴入口——机制图鉴盖在暂停菜单上面，关掉回到暂停菜单。
             _codexButton = Bind(root, "PauseCodex", "pause.codex", () => GameLogic.Progression.MechanicCodex.Open(null, unlock: false));
+            // FG9-NAR-01（FGU-38）：资料库盖在暂停菜单上面，关掉回到暂停菜单；按钮文字带未读条数（打开菜单时刷新）。
+            LibraryButton = Bind(root, "PauseLibrary", "pause.library", NarrativeLibraryPanelUIToolkit.OpenFromMenu);
             // FG2-FW-05（FGU-20）：固件库入口——盖在暂停菜单上面，关掉回到暂停菜单。
             FirmwareButton = Bind(root, "PauseFirmware", "pause.firmware", FirmwareLibraryPanelUIToolkit.Open);
             // FG2-FW-04（卡片“伤害归因进入统计面板”）：统计面板盖在暂停菜单上面，关掉回到暂停菜单。
@@ -97,6 +99,7 @@ namespace GameLogic.UI.Kit
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindDisplay(root);
+            BindNarrativeText(root);
             BindReactionFeedback(root);
             BindAutoPickup(root);
             _worldSeed = root.Q<Label>("PauseWorldSeed");
@@ -293,6 +296,98 @@ namespace GameLogic.UI.Kit
 
         private Slider _weatherFx;
         private Label _weatherFxLabel;
+
+        // ── FG9-NAR-01：文本与字幕（FG11 第 8 节“文本显示速度、字幕大小可以设置”；FGR-UX-060 字幕大小）──
+        private Slider _textSpeed;
+        private Label _textSpeedLabel;
+        private Slider _subtitleScale;
+        private Label _subtitleScaleLabel;
+
+        public Button LibraryButton { get; private set; }
+        public Slider TextSpeedSlider => _textSpeed;
+        public Slider SubtitleScaleSlider => _subtitleScale;
+        public Button TextResetButton { get; private set; }
+        public string TextSpeedLabelText => _textSpeedLabel?.text ?? string.Empty;
+        public string SubtitleScaleLabelText => _subtitleScaleLabel?.text ?? string.Empty;
+
+        private void BindNarrativeText(VisualElement root)
+        {
+            Label title = root.Q<Label>("PauseTextTitle");
+            if (title != null)
+            {
+                title.text = GameText.Get("pause.text_title");
+            }
+            _textSpeedLabel = root.Q<Label>("PauseTextSpeedLabel");
+            _textSpeed = root.Q<Slider>("PauseTextSpeed");
+            if (_textSpeed != null)
+            {
+                _textSpeed.lowValue = Settings.GameSettings.NarrativeTextSpeedMin;
+                _textSpeed.highValue = Settings.GameSettings.NarrativeTextSpeedMax;
+                _textSpeed.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetNarrativeTextSpeed(evt.newValue);
+                    RefreshNarrativeTextLabels();
+                });
+                UiTooltip.Attach(_textSpeed, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.text_title"),
+                    Body = GameText.Format("pause.text_speed_tip", Whole(Settings.GameSettings.NarrativeTextSpeed), Whole(Settings.GameSettings.NarrativeTextSpeedMin),
+                        Whole(Settings.GameSettings.NarrativeTextSpeedMax), Whole(Settings.GameSettings.NarrativeTextSpeedDefault)),
+                });
+            }
+            _subtitleScaleLabel = root.Q<Label>("PauseSubtitleScaleLabel");
+            _subtitleScale = root.Q<Slider>("PauseSubtitleScale");
+            if (_subtitleScale != null)
+            {
+                _subtitleScale.lowValue = Settings.GameSettings.SubtitleScaleMin;
+                _subtitleScale.highValue = Settings.GameSettings.SubtitleScaleMax;
+                _subtitleScale.RegisterValueChangedCallback(evt =>
+                {
+                    Settings.GameSettings.SetSubtitleScale(evt.newValue);
+                    RefreshNarrativeTextLabels();
+                });
+                UiTooltip.Attach(_subtitleScale, () => new TooltipContent
+                {
+                    Title = GameText.Get("pause.text_title"),
+                    Body = GameText.Format("pause.subtitle_scale_tip", Percent(Settings.GameSettings.SubtitleScale), Percent(Settings.GameSettings.SubtitleScaleMin),
+                        Percent(Settings.GameSettings.SubtitleScaleMax), Percent(Settings.GameSettings.SubtitleScaleDefault)),
+                });
+            }
+            TextResetButton = Bind(root, "PauseTextReset", "pause.text_reset", () =>
+            {
+                Settings.GameSettings.ResetNarrativeText();
+                SyncNarrativeText();
+            });
+            SyncNarrativeText();
+        }
+
+        /// <summary>文本与字幕两个滑条、两个标签与“资料库”按钮的未读条数按当前设置 / 当前战役同步（打开菜单、恢复默认时）。</summary>
+        public void SyncNarrativeText()
+        {
+            _textSpeed?.SetValueWithoutNotify(Settings.GameSettings.NarrativeTextSpeed);
+            _subtitleScale?.SetValueWithoutNotify(Settings.GameSettings.SubtitleScale);
+            RefreshNarrativeTextLabels();
+            if (LibraryButton != null)
+            {
+                SyncLibraryButton();
+            }
+        }
+
+        private void RefreshNarrativeTextLabels()
+        {
+            if (_textSpeedLabel != null)
+            {
+                _textSpeedLabel.text = Settings.GameSettings.NarrativeTextInstant
+                    ? GameText.Get("pause.text_speed_instant")
+                    : GameText.Format("pause.text_speed", Whole(Settings.GameSettings.NarrativeTextSpeed));
+            }
+            if (_subtitleScaleLabel != null)
+            {
+                _subtitleScaleLabel.text = GameText.Format("pause.subtitle_scale", Percent(Settings.GameSettings.SubtitleScale));
+            }
+        }
+
+        private static string Whole(float v) => UnityEngine.Mathf.RoundToInt(v).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         public Slider WeatherFxSlider => _weatherFx;
         public Button WeatherFxResetButton { get; private set; }
@@ -574,6 +669,7 @@ namespace GameLogic.UI.Kit
                 SyncNightFloor();
                 SyncSilentDim();
                 SyncWeatherFx();
+                SyncNarrativeText();
                 SyncReactionToggles();
                 SyncAutoPickup();
             }
@@ -692,7 +788,22 @@ namespace GameLogic.UI.Kit
             {
                 _wasPausedBeforeOpen = true;
                 SetOpen(false);
+                return;
             }
+            // FG9-NAR-01 审查修复（B05 状态可见）：从暂停菜单进资料库读过 / 全部标为已读后回来，“资料库（N 条未读）”跟着资料库版本号刷新（O(1) 比较，变了才重算）。
+            if (IsOpen && LibraryButton != null && _narrativeRevSeen != Narrative.NarrativeService.Revision)
+            {
+                SyncLibraryButton();
+            }
+        }
+
+        private int _narrativeRevSeen = -1;
+
+        private void SyncLibraryButton()
+        {
+            _narrativeRevSeen = Narrative.NarrativeService.Revision;
+            int unread = Narrative.NarrativeService.UnreadCount(CampaignSession.Current);
+            LibraryButton.text = unread > 0 ? GameText.Format("pause.library_unread", unread) : GameText.Get("pause.library");
         }
 
         protected override void OnDestroy()

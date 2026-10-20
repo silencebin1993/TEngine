@@ -464,6 +464,9 @@ namespace GameLogic.EditorTools
                 $"B3 固件库里的未破解芯片（{fw2}）送去破解：同一种不能重复排队；破解后芯片原样留在原处（{chipState}）、不消耗；已破解的再送被拒（“这枚固件已经破解”）");
 
             // 数据核心：首次 / 重复
+            // FG9-NAR-01（DEBT-FG5RND02-04）：首次解读的资料经叙事事件收进资料库（本段临时订阅，结束后取消，不影响后面的段）。
+            bool narrativeWasListening = GameLogic.Narrative.NarrativeService.Listening;
+            GameLogic.Narrative.NarrativeService.EnsureListening();
             HomeValleyAnalysis.Acquire(s, AnalysisCatalog.DataCoreId, lore, "test", 2);
             int techC0 = s.TechData;
             HomeValleyAnalysis.AnalysisOpResult d1 = HomeValleyAnalysis.TryEnqueueItem(s, AnalysisCatalog.DataCoreId, null);
@@ -475,8 +478,15 @@ namespace GameLogic.EditorTools
             HomeValleyAnalysis.AnalysisOpResult d2 = HomeValleyAnalysis.TryEnqueueItem(s, AnalysisCatalog.DataCoreId, null);
             bool dd2 = d2.Success && RunToEnd(s, d2.QueueItemId) && s.Research.Analysis.LoreRead.Length == 1 && s.TechData == techC0 + kc.TechFirst + kc.TechRepeat;
             int intelAfter = s.Research.Intel?.Records?.Length ?? 0;
-            Expect(dd1 && dd2 && Stock(s, AnalysisCatalog.DataCoreId) == 0 && HomeValleyAnalysis.LoreLine(s).Contains(AnalysisCatalog.Lore[0].Title),
-                $"B4 数据核心（{lore}）：首次技术数据 +{kc.TechFirst} 并解读一份资料（资料栏写出标题）；重复只给技术数据 +{kc.TechRepeat}；两件都被消耗");
+            string loreEntry = GameLogic.Narrative.NarrativeCatalog.TryGetByTrigger(GameLogic.Narrative.NarrativeCatalog.TriggerAnalysis + lore, out GameLogic.Narrative.NarrativeEntryDef loreDef) ? loreDef.Id : null;
+            bool archived = loreEntry != null && GameLogic.Narrative.NarrativeService.Has(s, loreEntry)
+                            && s.Progress.Narrative.Count(r => r.Id == loreEntry) == 1;
+            if (!narrativeWasListening)
+            {
+                GameLogic.Narrative.NarrativeService.StopListeningForTests();
+            }
+            Expect(dd1 && dd2 && Stock(s, AnalysisCatalog.DataCoreId) == 0 && HomeValleyAnalysis.LoreLine(s).Contains(AnalysisCatalog.Lore[0].Title) && archived,
+                $"B4 数据核心（{lore}）：首次技术数据 +{kc.TechFirst} 并解读一份资料（资料栏写出标题）；重复只给技术数据 +{kc.TechRepeat}；两件都被消耗；首次解读的资料收进资料库（{loreEntry}，只收一次，FG9-NAR-01）{archived}");
             Expect(intelFirst && intelAfter == intel0 + 1,
                 $"B4b FG5-RND-05（FGR-RND-021 情报部分）：首次解读数据核心附带一条情报（{IntelCatalog.KindName(coreIntel?.Kind)}，来源“数据核心”），重复解读不再给（情报 {intel0} → {intelAfter}）");
 

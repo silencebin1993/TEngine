@@ -808,6 +808,8 @@ namespace GameLogic.Campaign.Economy
                     r.ExpiresTick = now + Math.Max(1, validity);
                     var heard = new List<string>(f.FragmentsHeard) { frag.Id };
                     f.FragmentsHeard = heard.ToArray();
+                    // FG9-NAR-01（FGR-NAR-001 监听截获，DEBT-FG5RND05-04）：截获的舰队片段收进资料库。
+                    TEngine.GameEvent.Send(Narrative.NarrativeService.FeedEvent, Narrative.NarrativeCatalog.TriggerIntel + frag.Id);
                     break;
                 case "tier":
                     // FG7-ENV-03（FGR-ENV-021）：天气预报——未来 env.weather.forecast_days 日的排定天气（内容在显示时由天气系统按同一份排定写出）。

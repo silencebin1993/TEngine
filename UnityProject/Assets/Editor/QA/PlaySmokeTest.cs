@@ -175,6 +175,7 @@ namespace GameLogic.EditorTools
                     case 67: StepMarchArrived(inStep); break;
                     case 470: StepWalkHome(inStep); break; // FG8-EXP-05：撤离后从地点入口沿地形走回家园、到家结算
                     case 471: StepWalkedHome(inStep); break;
+                    case 472: StepOpeningCutscene(inStep); break; // FG9-NAR-01：新游戏开场演出“苏醒”（接管画面 → 跳过要确认 → 收进资料库）
                     case 7: StepRuins(inStep); break;
                     case 38: StepWornRepairOrdered(inStep); break;
                     case 39: StepWornRepairDone(inStep); break;
@@ -864,7 +865,7 @@ namespace GameLogic.EditorTools
             // 有空槽时“新建”直接开新战役（不经过槽位列表）；三槽全满才弹覆盖确认。
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
             {
-                Next(4, $"新建直接进入归还谷地（{inStep:F0} 秒）");
+                Next(472, $"新建直接进入归还谷地（{inStep:F0} 秒）");
                 return;
             }
             Button confirm = FindActiveButton("m_btn_ConfirmYes");
@@ -954,13 +955,50 @@ namespace GameLogic.EditorTools
         {
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
             {
-                Next(4, $"进入归还谷地（{inStep:F0} 秒）");
+                Next(472, $"进入归还谷地（{inStep:F0} 秒）");
                 return;
             }
             if (inStep > 120)
             {
                 Finish("120 秒内没进入归还谷地");
             }
+        }
+
+        /// <summary>
+        /// FG9-NAR-01（FG11 FGR-NAR-002、第 8 / 9 节）：新游戏进入归还谷地后，开场演出“苏醒”接管画面（世界暂停、逐字字幕、存档里记着待播）；
+        /// 点“跳过”（真实按钮回调）→ 首次观看弹确认 → 点确认框的“跳过”（真实按钮）→ 演出结束、世界恢复、收进资料库。
+        /// </summary>
+        private static void StepOpeningCutscene(double inStep)
+        {
+            UI.Kit.NarrativeCutscenePlayerUIToolkit player = UI.Kit.NarrativeCutscenePlayerUIToolkit.Instance;
+            if (!UI.Kit.NarrativeCutscenePlayerUIToolkit.IsShowing)
+            {
+                if (inStep > 30)
+                {
+                    Finish("进入归还谷地 30 秒内没有出现开场演出“苏醒”");
+                }
+                return;
+            }
+            if (inStep < 1.0)
+            {
+                return;
+            }
+            CampaignState s = CampaignSession.Current;
+            LoadResult disk = CampaignSaveService.Load(CampaignSession.ActiveSlotIndex);
+            string shown = player.LineText;
+            Check(GameRoot.IsWorldPaused && shown.Length > 0 && player.TitleText == Localization.GameText.Get("narrative.node.wake.title")
+                  && !Localization.GameText.ContainsMarker(shown + player.TitleText + player.HintText + player.SkipButton.text + player.NextButton.text)
+                  && disk.Success && disk.State.Progress.PendingCutscene == Narrative.NarrativeService.WakeId && disk.State.LastSaveReason == SaveReason.CutsceneEnter,
+                $"开场演出“{player.TitleText}”接管画面：世界暂停、字幕“{shown}”、开始前自动存档（存档里记着待播，原因 CutsceneEnter）");
+            CheckNoTextMarkers("开场演出");
+            bool skip = ClickUitk("[NarrativeCutsceneHost]", "NcSkip");
+            bool asked = UiConfirmDialog.IsOpen && UiConfirmDialog.Current?.Title == Localization.GameText.Get("narrative.cutscene.skip_title");
+            bool confirmed = ClickUitk("[UiKitOverlayHost]", "ConfirmOk");
+            bool filed = !UI.Kit.NarrativeCutscenePlayerUIToolkit.IsShowing && !GameRoot.IsWorldPaused && s != null
+                         && Narrative.NarrativeService.Has(s, Narrative.NarrativeService.WakeId) && s.Progress.PendingCutscene.Length == 0;
+            Check(skip && asked && confirmed && filed,
+                $"点“跳过演出”：首次观看先弹确认 {asked}；点确认框“跳过”→ 演出结束、世界恢复运行、“苏醒”收进资料库（可重看）{filed}");
+            Next(4, "开场演出已跳过，回到归还谷地");
         }
 
         private static void StepHomeSoak(double inStep)
@@ -1354,6 +1392,19 @@ namespace GameLogic.EditorTools
             bool codexClosed = ClickUitk("[MechanicCodexHost]", "CodexClose") && !UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(codexClicked && codexOpen && codexClosed,
                 $"暂停菜单点“图鉴”：机制图鉴打开（{codex?.ItemCount} 条，当前“{codexTitle}”），点关闭回到暂停菜单");
+            // FG9-NAR-01（FGU-38、FGR-NAR-003）：暂停菜单“资料库”→ 资料库盖在暂停菜单上面，有开场演出“苏醒”（可重看）；剧情回顾页列出它；点关闭回到暂停菜单。
+            // 暂停菜单“文本与字幕”两个滑条在界面里。
+            bool libClicked = ClickUitk("[PauseMenuHost]", "PauseLibrary");
+            UI.Kit.NarrativeLibraryPanelUIToolkit lib = UI.Kit.NarrativeLibraryPanelUIToolkit.Instance;
+            bool libOpen = lib != null && UI.Kit.NarrativeLibraryPanelUIToolkit.IsOpen && lib.PanelVisible
+                           && Enumerable.Range(0, lib.RowCount).Any(i => lib.RowId(i) == Narrative.NarrativeService.WakeId)
+                           && !Localization.GameText.ContainsMarker(lib.TitleText + lib.CountText + lib.FooterText + lib.TabEntriesText);
+            bool libRecap = ClickUitk("[NarrativeLibraryHost]", "NlTabRecap") && lib != null && lib.RowCount >= 1 && lib.RowId(0) == Narrative.NarrativeService.WakeId;
+            ClickUitk("[NarrativeLibraryHost]", "NlTabEntries");
+            bool libClosed = ClickUitk("[NarrativeLibraryHost]", "NlClose") && !UI.Kit.NarrativeLibraryPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            bool textSettings = UitkExists("[PauseMenuHost]", "PauseTextSpeed") && UitkExists("[PauseMenuHost]", "PauseSubtitleScale") && UitkExists("[PauseMenuHost]", "PauseTextReset");
+            Check(libClicked && libOpen && libRecap && libClosed && textSettings,
+                $"暂停菜单点“资料库”：资料库打开（{lib?.CountText}，有开场演出“苏醒”）{libOpen}、剧情回顾列出它 {libRecap}、点关闭回到暂停菜单 {libClosed}；“文本与字幕”滑条在界面里 {textSettings}");
             // FG2-FW-05（FGU-20）：暂停菜单“固件库”→ 固件库盖在暂停菜单上面；此时还没有固件芯片时显示空状态说明；点关闭回到暂停菜单。
             bool fwClicked = ClickUitk("[PauseMenuHost]", "PauseFirmware");
             UI.Kit.FirmwareLibraryPanelUIToolkit fwlib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;

@@ -68,6 +68,14 @@ namespace GameLogic.Campaign.Regions
         }
 
         private const float UnitArriveRadius = 1.5f;
+        /// <summary>
+        /// FG9-NAR-01：远征队到达远征地点（参数：地点 ID）。叙事框架据此投放“第一次到达这个地点”的剧情节点。
+        /// 审查修复（P1）：在载入地点<b>之前</b>发出，这样地点 Enter 里的自动存档已经带着这条资料（中途退出读档不会缺节点）；
+        /// 载入失败时紧接着发 <see cref="SiteArrivalRevertedEvent"/> 撤回。
+        /// </summary>
+        public const string SiteArrivedEvent = "Expedition.SiteArrived";
+        /// <summary>FG9-NAR-01 审查修复：到达事务在载入地点时失败（队伍退回途中），撤回刚才 <see cref="SiteArrivedEvent"/> 投放的内容（参数：地点 ID）。</summary>
+        public const string SiteArrivalRevertedEvent = "Expedition.SiteArrivalReverted";
         private const float GuardArriveRadius = 0.3f;
 
         // ── 自检读点 ──
@@ -1084,6 +1092,9 @@ namespace GameLogic.Campaign.Regions
                 SetPhase(m, PhaseAtSite);
                 m.Halted = HaltNone;
                 m.VisitedSite = true; // FG8-EXP-05
+                // FG9-NAR-01（FGR-NAR-010“第一次远征破碎都市 / 第一次进入铸造前哨”）：叙事投放按地点触发（资料库同一条只收一次）。
+                // 必须在载入地点之前：地点 Enter 会自动存档，存档里要已经有这条（审查修复 P1）；载入失败在下面撤回，异常则整档回滚。
+                GameEvent.Send(SiteArrivedEvent, siteId);
                 IWorldSite site = siteId == FoundryOutpostLayout.RegionId
                     ? (IWorldSite)WorldSimulation.LoadFoundryOutpost(alive, resume: false)
                     : WorldSimulation.LoadFracturedCity(alive, resume: false);
@@ -1099,6 +1110,7 @@ namespace GameLogic.Campaign.Regions
                     }
                     SetPhase(m, PhaseOutbound);
                     m.VisitedSite = false;
+                    GameEvent.Send(SiteArrivalRevertedEvent, siteId);
                     FailArrival(s, m, "site-unavailable");
                     return;
                 }
@@ -1202,6 +1214,7 @@ namespace GameLogic.Campaign.Regions
             CampaignSession.Set(slot, restore.State);
             Signal.FirmwareLibrary.OnCampaignEntered(restore.State);
             Env.HeritageService.OnCampaignEntered(restore.State); // FG8-EXP-04
+            GameLogic.Narrative.NarrativeService.OnCampaignEntered(restore.State); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
             GameRoot.ReenterHomeValley();
             ExpeditionMarchState m = Current(restore.State);
             if (m != null && m.Phase == PhaseOutbound)

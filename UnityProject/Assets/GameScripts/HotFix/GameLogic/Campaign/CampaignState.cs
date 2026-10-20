@@ -361,6 +361,9 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
             Notifications.Entries = Notifications.Entries
                 .OrderBy(r => r.Id).ToArray();
+            // FG9-NAR-01：资料库按收到的先后排序、去掉空记录（同一状态同一字节）。
+            Progress.Narrative = Progress.Narrative.Where(r => r != null && !string.IsNullOrEmpty(r.Id))
+                .OrderBy(r => r.Serial).ThenBy(r => r.Id, StringComparer.Ordinal).ToArray();
             Combat.Sites = Combat.Sites
                 .Where(r => r != null).OrderBy(r => r.SiteId, StringComparer.Ordinal).ToArray();
             SaveHistory.Notices = SaveHistory.Notices

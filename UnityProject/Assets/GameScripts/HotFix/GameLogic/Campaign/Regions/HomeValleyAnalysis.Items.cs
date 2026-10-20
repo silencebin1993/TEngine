@@ -610,6 +610,8 @@ namespace GameLogic.Campaign.Regions
                     Array.Copy(a.LoreRead, read, a.LoreRead.Length);
                     read[a.LoreRead.Length] = target;
                     a.LoreRead = read;
+                    // FG9-NAR-01（DEBT-FG5RND02-04）：第一次解读的数据核心资料收进资料库（数据终端类文字日志）。
+                    TEngine.GameEvent.Send(Narrative.NarrativeService.FeedEvent, Narrative.NarrativeCatalog.TriggerAnalysis + target);
                 }
                 tech = def == null ? 0 : first ? def.TechFirst : def.TechRepeat;
                 text = first ? GameText.Format("analysis.result.core_first", lore.Title, tech) : GameText.Format("analysis.result.core_repeat", tech);

@@ -101,12 +101,19 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive)
             {
+                // FG9-NAR-01：新游戏进谷地的第一帧开场演出“苏醒”接管画面（暂停世界、登记模态）。像玩家一样点“跳过演出”并确认，等演出结束、世界恢复运行再往下走。
+                StepOutcome? cut = TickDismissCutscene(c);
+                if (cut.HasValue)
+                {
+                    return cut.Value;
+                }
                 if (c.StepElapsed < 3)
                 {
                     return StepOutcome.Wait;
                 }
                 c.SetInt("slot", CampaignSession.ActiveSlotIndex);
-                return StepOutcome.Done($"进入归还谷地（存档槽 {CampaignSession.ActiveSlotIndex + 1}）");
+                string note = c.GetInt("cutsceneSkipped") == 1 ? "；开场演出已用“跳过演出”按钮跳过（确认框点“跳过”）" : string.Empty;
+                return StepOutcome.Done($"进入归还谷地（存档槽 {CampaignSession.ActiveSlotIndex + 1}）{note}");
             }
             UnityEngine.UI.Button confirm = JourneyInput.FindActiveButton("m_btn_ConfirmYes");
             if (confirm != null)
@@ -122,6 +129,48 @@ namespace GameLogic.EditorTools.JourneyBots
                 JourneyInput.ClickUgui(slot);
                 c.Log("出现存档槽列表，点槽位 1");
             }
+            return StepOutcome.Wait;
+        }
+
+        /// <summary>
+        /// FG9-NAR-01：有首次演出在播（或待播、播放器下一帧就接管）时，用真实按钮跳过它：点“跳过演出”（NcSkip）→ 首次观看的确认框点“跳过”（ConfirmOk），
+        /// 再等演出结束、世界恢复运行。返回 null = 没有演出要处理（调用方继续）；否则返回本帧结果。读档后接着播的待播演出也适用。
+        /// </summary>
+        public static StepOutcome? TickDismissCutscene(JourneyContext c)
+        {
+            CampaignState s = CampaignSession.Current;
+            bool showing = UI.Kit.NarrativeCutscenePlayerUIToolkit.IsShowing;
+            bool pending = Narrative.NarrativeService.PendingCutscene(s) != null;
+            if (!showing && !pending)
+            {
+                if (c.GetInt("cutsceneClicked") == 1 && GameClock.Paused && c.GetInt("cutsceneWaitResume") < 10)
+                {
+                    // 演出刚结束：世界恢复运行是在同一帧里做的；多等几帧防止旅程在恢复之前读到暂停。
+                    c.SetInt("cutsceneWaitResume", c.GetInt("cutsceneWaitResume") + 1);
+                    return StepOutcome.Wait;
+                }
+                return null;
+            }
+            if (!showing)
+            {
+                return c.StepElapsed > 30 ? StepOutcome.Fail("有待播的演出，但 30 秒内播放器没有接管画面") : StepOutcome.Wait;
+            }
+            if (UI.Kit.UiConfirmDialog.IsOpen)
+            {
+                if (!JourneyInput.ClickUitk("[UiKitOverlayHost]", "ConfirmOk"))
+                {
+                    return StepOutcome.Retry("点确认框“跳过”失败：" + JourneyInput.LastUiFailure);
+                }
+                c.SetInt("cutsceneSkipped", 1);
+                c.Log("跳过演出的确认框出现，点“跳过”");
+                return StepOutcome.Wait;
+            }
+            if (!JourneyInput.ClickUitk("[NarrativeCutsceneHost]", "NcSkip"))
+            {
+                return StepOutcome.Retry("点“跳过演出”失败：" + JourneyInput.LastUiFailure);
+            }
+            c.SetInt("cutsceneClicked", 1);
+            c.Log("开场演出接管画面，点“跳过演出”");
             return StepOutcome.Wait;
         }
 

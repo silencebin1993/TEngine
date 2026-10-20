@@ -62,6 +62,11 @@ namespace GameLogic.Settings
         public float SilentNightDim = -1f;
         /// <summary>FG7-ENV-03（FG07 第 4 节“设置：天气视觉效果强度（沙暴可能影响可读性）”）：雨 / 沙 / 雪粒子与沙暴雾的强度（-1 = 跟随表里的默认值）。</summary>
         public float WeatherFx = -1f;
+        /// <summary>FG9-NAR-01（FG11 第 8 节 / FGR-UX-060“文本显示速度、字幕大小可以设置”）：演出字幕逐字出现的速度（每真实秒几个字；-1 = 跟随表里的默认值，
+        /// 范围 fg.TbUiTuning narrative.text_speed_min / max，拉到最大 = 整行立即出现）。旧设置 JSON 没有这个字段时按默认补齐。</summary>
+        public float NarrativeTextSpeed = -1f;
+        /// <summary>FG9-NAR-01：字幕大小（乘在演出字幕与资料库正文的基准字号上；-1 = 默认，范围 narrative.subtitle_scale_min / max）。</summary>
+        public float SubtitleScale = -1f;
 
         /// <summary>FG0-DATA-01（FGR-ARC-006）：界面语言代码，见 <see cref="GameLogic.Localization.GameLanguageCodes"/>。
         /// 存语言代码而不是枚举整数——以后加语言、调整枚举顺序都不会把老玩家的设置读成别的语言；
@@ -460,6 +465,44 @@ namespace GameLogic.Settings
         public static void ResetWeatherFx()
         {
             Data.WeatherFx = -1f;
+            Save();
+        }
+
+        // ── FG9-NAR-01：文本显示速度与字幕大小（FG11 第 8 节、FGR-UX-060）──
+        public static float NarrativeTextSpeedMin => UiTuningValues.Get("narrative.text_speed_min");
+        public static float NarrativeTextSpeedMax => UiTuningValues.Get("narrative.text_speed_max");
+        public static float NarrativeTextSpeedDefault => Mathf.Clamp(UiTuningValues.Get("narrative.text_speed_default"), NarrativeTextSpeedMin, NarrativeTextSpeedMax);
+
+        /// <summary>演出字幕每真实秒显示几个字（没设过 = 表里的默认值；读到的值总在范围内）。等于最大值时整行立即出现。只影响显示，不影响剧情推进。</summary>
+        public static float NarrativeTextSpeed => Data.NarrativeTextSpeed < 0f ? NarrativeTextSpeedDefault : Mathf.Clamp(Data.NarrativeTextSpeed, NarrativeTextSpeedMin, NarrativeTextSpeedMax);
+
+        /// <summary>文本显示速度拉到最大 = 整行立即出现。</summary>
+        public static bool NarrativeTextInstant => NarrativeTextSpeed >= NarrativeTextSpeedMax - 0.001f;
+
+        public static void SetNarrativeTextSpeed(float value)
+        {
+            Data.NarrativeTextSpeed = Mathf.Clamp(value, NarrativeTextSpeedMin, NarrativeTextSpeedMax);
+            Save();
+        }
+
+        public static float SubtitleScaleMin => UiTuningValues.Get("narrative.subtitle_scale_min");
+        public static float SubtitleScaleMax => UiTuningValues.Get("narrative.subtitle_scale_max");
+        public static float SubtitleScaleDefault => Mathf.Clamp(UiTuningValues.Get("narrative.subtitle_scale_default"), SubtitleScaleMin, SubtitleScaleMax);
+
+        /// <summary>字幕大小倍率（演出字幕与资料库正文；没设过 = 默认；总在范围内）。</summary>
+        public static float SubtitleScale => Data.SubtitleScale < 0f ? SubtitleScaleDefault : Mathf.Clamp(Data.SubtitleScale, SubtitleScaleMin, SubtitleScaleMax);
+
+        public static void SetSubtitleScale(float value)
+        {
+            Data.SubtitleScale = Mathf.Clamp(value, SubtitleScaleMin, SubtitleScaleMax);
+            Save();
+        }
+
+        /// <summary>文本与字幕两项恢复默认。</summary>
+        public static void ResetNarrativeText()
+        {
+            Data.NarrativeTextSpeed = -1f;
+            Data.SubtitleScale = -1f;
             Save();
         }
 

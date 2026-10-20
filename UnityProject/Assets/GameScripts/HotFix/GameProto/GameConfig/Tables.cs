@@ -251,6 +251,14 @@ public partial class Tables
     /// </summary>
     public fg.TbMechEnemy TbMechEnemy {get; }
     /// <summary>
+    /// 资料库条目
+    /// </summary>
+    public fg.TbNarrativeEntry TbNarrativeEntry {get; }
+    /// <summary>
+    /// 演出字幕
+    /// </summary>
+    public fg.TbNarrativeLine TbNarrativeLine {get; }
+    /// <summary>
     /// 通知分级
     /// </summary>
     public fg.TbNotifyTier TbNotifyTier {get; }
@@ -545,6 +553,8 @@ public partial class Tables
         TbLootDrop = new fg.TbLootDrop(loader("fg_tblootdrop"));
         TbLootPick = new fg.TbLootPick(loader("fg_tblootpick"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
+        TbNarrativeEntry = new fg.TbNarrativeEntry(loader("fg_tbnarrativeentry"));
+        TbNarrativeLine = new fg.TbNarrativeLine(loader("fg_tbnarrativeline"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
@@ -668,6 +678,8 @@ public partial class Tables
         TbLootDrop.ResolveRef(this);
         TbLootPick.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
+        TbNarrativeEntry.ResolveRef(this);
+        TbNarrativeLine.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
         TbPowerNode.ResolveRef(this);

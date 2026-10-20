@@ -93,6 +93,29 @@ namespace GameLogic.Campaign
         public int Act = 1;
         public bool IsPostgame;
         public bool IsSandbox;
+        /// <summary>FG9-NAR-01（FGR-NAR-003 / FGR-UX-051“资料库按存档保存”）：本存档已收进资料库的条目（收到的先后、幕、日、已读）。
+        /// 唯一写入口 <c>GameLogic.Narrative.NarrativeService</c>。新存档为空——不会看到其他存档的剧情。</summary>
+        public NarrativeEntryRecord[] Narrative = Array.Empty<NarrativeEntryRecord>();
+        /// <summary>FG9-NAR-01（FG11 第 9 节“揭示演出中退出游戏 → 读档后回到演出前的自动存档”）：已触发、还没看完 / 跳过的首次演出（空 = 没有）。
+        /// 演出开始前的自动存档里它不为空，读档后演出重新播放；看完或跳过才收进资料库并清空。</summary>
+        public string PendingCutscene = string.Empty;
+        /// <summary>下一条资料库记录的序号（收到的先后，单调递增）。</summary>
+        public int NarrativeSerial = 1;
+    }
+
+    /// <summary>FG9-NAR-01：资料库里的一条记录（条目内容在 fg.TbNarrativeEntry，存档只记“收到了哪条、何时、在哪一幕、读过没有”）。</summary>
+    [Serializable]
+    public sealed class NarrativeEntryRecord
+    {
+        public string Id;
+        /// <summary>收到的先后（剧情回顾按它排列）。</summary>
+        public int Serial;
+        /// <summary>收进资料库时归到第几幕（条目写明幕的按条目，0 = 收到时战役所在的幕）。</summary>
+        public int Act;
+        /// <summary>收到时的统一时钟步数与游戏日。</summary>
+        public long Tick;
+        public int Day;
+        public bool Read;
     }
 
     /// <summary>统一游戏时钟（FGR-ARC-009 / FGR-ENV-001）。唯一写入口 <see cref="Core.GameClock"/>（FG0-ARCH-01 起每个模拟步写一次）。
@@ -2665,6 +2688,12 @@ namespace GameLogic.Campaign
             s.World.AnchorChecks ??= Array.Empty<AnchorCheckRecord>(); // FG8-GEN-02：旧存档没有这一项
             s.World.InteriorFocusId ??= string.Empty;
             s.Progress ??= new CampaignProgressState();
+            s.Progress.Narrative ??= Array.Empty<NarrativeEntryRecord>(); // FG9-NAR-01：旧存档没有资料库 = 空资料库
+            s.Progress.PendingCutscene ??= string.Empty;
+            if (s.Progress.NarrativeSerial < 1)
+            {
+                s.Progress.NarrativeSerial = 1;
+            }
             s.Clock ??= new GameClockState();
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();

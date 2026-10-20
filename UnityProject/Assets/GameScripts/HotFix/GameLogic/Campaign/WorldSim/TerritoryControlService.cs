@@ -59,6 +59,8 @@ namespace GameLogic.Campaign.WorldSim
         public const string NotifyAlert = "territory_alert";
         public const string LootPrefix = "outpost-loot:";
         public const string MemoPrefix = "territory_reclaimed.";
+        /// <summary>FG9-NAR-01：这片领地的首领被击败（参数：领地 ID）。叙事框架据此投放剧情节点（FGR-NAR-010“击败寂听主脑 / 铸造主核心”）。</summary>
+        public const string LeaderDefeatedEvent = "World.LeaderDefeated";
         public const string RuleNone = "none";
         /// <summary>领地状态变化时发（参数 = 领地 ID）。地图 / 面板据此刷新。</summary>
         public const string ChangedEvent = "TerritoryControl.Changed";
@@ -472,6 +474,7 @@ namespace GameLogic.Campaign.WorldSim
             NotificationCenter.Post(NotifyStatus, GameText.Format("territory.notify.pacified", name, row != null ? GameText.Get(row.LeaderNameKey) : string.Empty, ReclaimBelow),
                 CenterOf(s, r.TerritoryId));
             GuidanceHooks.Raise(GuidanceHooks.WorldFirstTerritoryPacified);
+            GameEvent.Send(LeaderDefeatedEvent, r.TerritoryId);
             GameEvent.Send(ChangedEvent, r.TerritoryId);
             Log.Info($"[TerritoryControlService] {r.TerritoryId} 首领被击败，进入平定（控制度 {r.Control}%），第 {tick} 步");
         }

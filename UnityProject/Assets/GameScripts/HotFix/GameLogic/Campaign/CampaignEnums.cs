@@ -42,6 +42,8 @@ namespace GameLogic.Campaign
         BeaconLaunchEnter = 7,
         /// <summary>FG6-DEF-08（FGR-DEF-053“提供读取自动存档的选项”）：突袭预警发出时（帧末、同一波一次），给核心被摧毁后的失败页一个突袭前的读档点。</summary>
         RaidWarning = 8,
+        /// <summary>FG9-NAR-01（FG11 第 9 节“揭示演出中退出游戏 → 读档后回到演出前的自动存档”）：首次演出开始播放前（存档里记着待播的演出，读档后重新播放）。</summary>
+        CutsceneEnter = 9,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>
