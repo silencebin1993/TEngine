@@ -311,9 +311,42 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>FG0-DATA-01：敌人显示名 = fg.TbMechEnemy.nameKey 经 GameText 取当前语言；键缺失显示 ⟦key⟧。</summary>
-        private static string EnemyName(string enemyTypeId) =>
-            Localization.GameText.Get(FgContentTables.Enemy(enemyTypeId).NameKey);
+        /// <summary>
+        /// FG9-DATA-01：出征情报的敌人一栏——按编成表 base 行出现的敌人类型（保持编成顺序）逐类写“名称 x存活数（HP耐久，特征）”。
+        /// 区域还没播种（首次进入前）时按编成数展示（“没播种”不等于“没有敌人”）；已播种后是真实存活数。
+        /// 名称 / 特征来自文本键（fg.TbMechEnemy.nameKey / traitKey），耐久来自表 × 难度倍率。O(编成行 + 区域敌人)，只在开面板时调用。
+        /// </summary>
+        public static string BuildEnemyIntel(CampaignState state, string regionId)
+        {
+            var order = new List<string>();
+            var planned = new Dictionary<string, int>();
+            foreach (GameConfig.fg.EnemyEncounter enc in EnemyDefs.Encounters(regionId, EnemyDefs.ConditionBase))
+            {
+                if (!planned.ContainsKey(enc.EnemyTypeId))
+                {
+                    order.Add(enc.EnemyTypeId);
+                    planned[enc.EnemyTypeId] = 0;
+                }
+                planned[enc.EnemyTypeId]++;
+            }
+            bool seeded = state?.RegionEnemies != null && state.RegionEnemies.Any(e => e != null && e.RegionId == regionId);
+            var parts = new List<string>();
+            foreach (string typeId in order)
+            {
+                if (!EnemyDefs.TryGet(typeId, out GameConfig.fg.MechEnemy row))
+                {
+                    continue;
+                }
+                int count = seeded ? state.RegionEnemies.Count(e => e != null && e.RegionId == regionId && e.EnemyTypeId == typeId && e.IsAlive) : planned[typeId];
+                string name = Localization.GameText.Get(row.NameKey);
+                string hp = EnemyDefs.SeedHealth(state, row).ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
+                string trait = EnemyDefs.TraitText(row);
+                parts.Add(trait == null
+                    ? Localization.GameText.Format("expedition.intel.enemy_plain", name, count, hp)
+                    : Localization.GameText.Format("expedition.intel.enemy", name, count, hp, trait));
+            }
+            return string.Join(Localization.GameText.Get("expedition.intel.sep"), parts);
+        }
 
         /// <summary>ER6-ADAPT-01：三份面板快照共用同一份反制情报计算——"面板显示与出发时锁定必须是
         /// 同一套算法"，不允许面板自己再算一遍。<paramref name="state"/> 为 null 时直接给 None 默认值，
@@ -380,22 +413,8 @@ namespace GameLogic.Campaign.Regions
             if (target == ExpeditionTarget.FoundryOutpost)
             {
                 RegionRecord foundry = FoundryOutpostRegion.Find(state);
-                bool enemiesSeeded = state.RegionEnemies != null &&
-                    state.RegionEnemies.Any(e => e.RegionId == FoundryOutpostLayout.RegionId);
-                int aliveArmorBots = enemiesSeeded
-                    ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.ArmorBotId && e.IsAlive)
-                    : 2;
-                int aliveStriders = enemiesSeeded
-                    ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.StriderId && e.IsAlive)
-                    : 1;
-                int aliveRepairBots = enemiesSeeded
-                    ? state.RegionEnemies.Count(e => e.RegionId == FoundryOutpostLayout.RegionId && e.EnemyTypeId == EnemyCatalog.RepairBotId && e.IsAlive)
-                    : 1;
-                // FG0-DATA-01：敌人名走文本键（fg.TbMechEnemy.nameKey → GameText），生命/减伤读 fg.TbMechEnemy；
-                // 其余情报措辞是 Demo 遗留文案，统一在 FG15-UX-03 迁移到文本键。
-                string foundryIntel = $"{EnemyName(EnemyCatalog.ArmorBotId)} x{aliveArmorBots}（HP{FoundryOutpostLayout.ArmorBotMaxHealth:F0}，正面减伤{FoundryOutpostLayout.ArmorBotFrontalReductionPct * 100f:F0}%）｜" +
-                    $"{EnemyName(EnemyCatalog.StriderId)} x{aliveStriders}（HP{FoundryOutpostLayout.StriderMaxHealth:F0}，1秒瞄准线）｜" +
-                    $"{EnemyName(EnemyCatalog.RepairBotId)} x{aliveRepairBots}（HP{FoundryOutpostLayout.RepairBotMaxHealth:F0}）";
+                // FG9-DATA-01：情报按编成表 base 行与敌人表生成（名称 / 耐久 / 特征全部走表与文本键），不再逐 ID 拼字符串。
+                string foundryIntel = BuildEnemyIntel(state, FoundryOutpostLayout.RegionId);
 
                 // ER6-ADAPT-01：第二次出征起（目标已切到铸造前哨外围）才有"上次战斗暴露"这个前提——
                 // 见 EnemyAdaptationService 类注释范围裁决，第一次出征（破碎都市）恒 None，走下面的
@@ -415,15 +434,7 @@ namespace GameLogic.Campaign.Regions
             // RegionEnemies 尚未播种（EnsureEnemiesSeeded 在 FracturedCityController.Enter 内），
             // 此时展示固定编制而不是"x0"——"没播种"不等于"这个区域没有敌人"，否则第一次准备面板
             // 会误导玩家以为区域已清空。已播种后展示真实存活数，随敌人被击破递减。
-            bool ruinsEnemiesSeeded = state.RegionEnemies != null && state.RegionEnemies.Any(e => e.RegionId == FracturedCityLayout.RegionId);
-            int aliveScouts = ruinsEnemiesSeeded
-                ? state.RegionEnemies.Count(e => e.RegionId == FracturedCityLayout.RegionId && e.EnemyTypeId == EnemyCatalog.ScoutId && e.IsAlive)
-                : 2;
-            int aliveJammers = ruinsEnemiesSeeded
-                ? state.RegionEnemies.Count(e => e.RegionId == FracturedCityLayout.RegionId && e.EnemyTypeId == EnemyCatalog.JammerId && e.IsAlive)
-                : 1;
-            string intel = $"{EnemyName(EnemyCatalog.ScoutId)} x{aliveScouts}（HP{FracturedCityLayout.ScoutMaxHealth:F0}，标记周期8秒）｜" +
-                $"{EnemyName(EnemyCatalog.JammerId)} x{aliveJammers}（HP{FracturedCityLayout.JammerMaxHealth:F0}，干扰半径{FracturedCityLayout.JammerRadius:F0}米）";
+            string intel = BuildEnemyIntel(state, FracturedCityLayout.RegionId);
 
             // ER6-ADAPT-01：第一次出征（破碎都市）没有"上次战斗"这个前提，恒 None——不调用
             // EnemyAdaptationService.ComputeAdaptation，直接用 None 的文案兜底（AC-ADP-001"无历史为

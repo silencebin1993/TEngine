@@ -597,7 +597,8 @@ namespace GameLogic.Campaign.Signal
 
         /// <summary>干扰场判定（与破碎都市接管上下文同一个函数；其余地点没有干扰机制）。不依赖地点控制器，未被观察时同样成立。</summary>
         public static bool IsJammedAt(CampaignState s, string regionId, Vector2 position) =>
-            regionId == FracturedCityLayout.RegionId && s != null && FracturedCityRegion.IsPositionJammed(s, position);
+            s != null && ((regionId == FracturedCityLayout.RegionId && FracturedCityRegion.IsPositionJammed(s, position))
+                          || EnemyJamFields.IsJammed(s, regionId, position)); // FG9-DATA-01（FG-GAP-049）：干扰机按职能的干扰场。
 
         // ─────────────────────────────── 工具 ───────────────────────────────
 

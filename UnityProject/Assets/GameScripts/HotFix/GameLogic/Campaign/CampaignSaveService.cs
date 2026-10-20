@@ -662,6 +662,8 @@ namespace GameLogic.Campaign
 
             CampaignFgStateDomains.EnsureAll(state);
             state.SchemaVersion = chain.TargetVersion;
+            // FG9-DATA-01：旧档里首领部件的类型 boss_node / boss_core 改写成敌人表 ID（幂等）。
+            Content.EnemyDefs.UpgradeLegacyTypeIds(state);
 
             // FG0-ARCH-05（FGR-GEN-061 / 060）：生成器版本比本版本游戏新 → 版本更新（Newer）；已知表面的区块差异损坏 → 正文损坏。
             if (!WorldGen.WorldGenService.ValidateForLoad(state, out SaveFailureReason worldReason, out string worldMessage))

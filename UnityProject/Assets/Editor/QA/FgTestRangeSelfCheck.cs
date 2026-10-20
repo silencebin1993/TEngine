@@ -517,8 +517,8 @@ namespace GameLogic.EditorTools
                 return;
             }
             // 高速靶需要先击败静默侦察机；集群靶需要静默干扰机（直接记一次击败，解锁路径本身在 H 段）。
-            TestRangeService.NoteEnemyDefeated(s, EnemyCatalog.ScoutId);
-            TestRangeService.NoteEnemyDefeated(s, EnemyCatalog.JammerId);
+            TestRangeService.NoteEnemyDefeated(s, "enemy_scout");
+            TestRangeService.NoteEnemyDefeated(s, "enemy_jammer");
             SetLayout(s, range.BuildingId, "range.fast", "range.swarm", "range.fast", "range.basic", "range.fast", "range.swarm", "range.fast", "range.basic");
             for (int i = 0; i < 6; i++)
             {
@@ -934,7 +934,7 @@ namespace GameLogic.EditorTools
             FoundryOutpostRegion.EnsureRegionRecordSeeded(s);
             var bot = new RegionEnemyRecord
             {
-                EnemyInstanceId = "range_test_armorbot", RegionId = FoundryOutpostLayout.RegionId, EnemyTypeId = EnemyCatalog.ArmorBotId,
+                EnemyInstanceId = "range_test_armorbot", RegionId = FoundryOutpostLayout.RegionId, EnemyTypeId = "enemy_armorbot",
                 Position = Vector2.zero, Health = 0f, MaxHealth = 160f, IsAlive = false,
             };
             s.RegionEnemies = (s.RegionEnemies ?? Array.Empty<RegionEnemyRecord>()).Append(bot).ToArray();
@@ -950,17 +950,17 @@ namespace GameLogic.EditorTools
             // 旧档补记：区域记录里已经击毁的敌人（含主核心 boss_core → enemy_core_boss）读档时补成“击败过”。
             CampaignState old = FgProductionSelfCheck.NewWorld(9318, true, 300);
             old.RegionEnemies = (old.RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
-                .Append(new RegionEnemyRecord { EnemyInstanceId = "x1", EnemyTypeId = FoundryOutpostLayout.BossCoreTypeId, IsAlive = false })
-                .Append(new RegionEnemyRecord { EnemyInstanceId = "x2", EnemyTypeId = EnemyCatalog.ScoutId, IsAlive = true }).ToArray();
+                .Append(new RegionEnemyRecord { EnemyInstanceId = "x1", EnemyTypeId = "boss_core", IsAlive = false }) // FG9-DATA-01：旧档类型
+                .Append(new RegionEnemyRecord { EnemyInstanceId = "x2", EnemyTypeId = "enemy_scout", IsAlive = true }).ToArray();
             old.Research.Range = null;
             TestRangeService.EnsureState(old);
-            bool backfill = old.Research.Range.DefeatedEnemyTypes.SequenceEqual(new[] { EnemyCatalog.CoreBossId })
+            bool backfill = old.Research.Range.DefeatedEnemyTypes.SequenceEqual(new[] { "enemy_core_boss" })
                             && TestRangeService.IsUnlocked(old, shield) && !TestRangeService.IsUnlocked(old, TestRangeCatalog.Targets.First(d => d.Archetype == RangeTargetArchetype.Fast));
             Expect(backfill, $"H2 旧档迁移：区域记录里已击毁的主核心补记为击败过 → 护盾靶解锁；还活着的侦察机不算（{string.Join(",", old.Research.Range.DefeatedEnemyTypes)}）");
 
             // 五种原型的行为（同一台连射器投影，各打 25 游戏秒，比每发伤害）。
             CampaignState w = NewWorld(9328, out range);
-            foreach (string e in new[] { EnemyCatalog.ArmorBotId, EnemyCatalog.ScoutId, EnemyCatalog.JammerId, EnemyCatalog.RepairBotId })
+            foreach (string e in new[] { "enemy_armorbot", "enemy_scout", "enemy_jammer", "enemy_repairbot" })
             {
                 TestRangeService.NoteEnemyDefeated(w, e);
             }
@@ -1141,7 +1141,7 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            TestRangeService.NoteEnemyDefeated(s, EnemyCatalog.ArmorBotId);
+            TestRangeService.NoteEnemyDefeated(s, "enemy_armorbot");
             SetLayout(s, range.BuildingId, "range.heavy", "", "range.basic");
             RangeOpResult save = TestRangeService.SavePreset(s, range.BuildingId, "重甲测试");
             SetLayout(s, range.BuildingId, "range.basic");
@@ -1176,7 +1176,7 @@ namespace GameLogic.EditorTools
             {
                 return "no-range";
             }
-            TestRangeService.NoteEnemyDefeated(s, EnemyCatalog.ScoutId);
+            TestRangeService.NoteEnemyDefeated(s, "enemy_scout");
             SetLayout(s, range.BuildingId, "range.basic", "range.fast", "range.basic", "range.basic");
             TestRangeService.ProjectBlueprint(s, range.BuildingId, BpWet);
             TestRangeService.ProjectBlueprint(s, range.BuildingId, BpCannon);
@@ -1294,7 +1294,7 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            TestRangeService.NoteEnemyDefeated(s, EnemyCatalog.ArmorBotId);
+            TestRangeService.NoteEnemyDefeated(s, "enemy_armorbot");
             VisualElement root = FgProductionSelfCheck.MountUxml(UiKitFolder + "TestRangePanel.uxml", out GameObject go);
             TestRangePanelUIToolkit.InWorldOverrideForTests = true;
             try
@@ -1401,7 +1401,7 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            TestRangeService.NoteEnemyDefeated(s, EnemyCatalog.JammerId);
+            TestRangeService.NoteEnemyDefeated(s, "enemy_jammer");
             string sw = "range.swarm";
             SetLayout(s, range.BuildingId, sw, sw, sw, sw, sw, sw, sw, sw);
             for (int i = 0; i < 6; i++)

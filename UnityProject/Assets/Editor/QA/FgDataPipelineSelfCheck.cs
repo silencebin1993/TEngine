@@ -101,7 +101,7 @@ namespace GameLogic.EditorTools
             Expect(t.TbLocText.DataList.Count >= 14 && GameText.Count == t.TbLocText.DataList.Count,
                 $"文本表 {t.TbLocText.DataList.Count} 条，GameText 可查 {GameText.Count} 条");
             Expect(FgContentTables.Buildings.Count == 43, $"建筑表 43 行（FG8-DROP-01 + 投送站；FG7-ENV-04 + 净化塔；FG6-DEF-03 + 维修无人机站；FG6-DEF-02 + 屏障 T1～T3、闸门、护盾发生器、陷阱发射器；Demo 8 种建筑 + 第二座发电机 + FG1-SIG-07 信号中继塔 + FG3-LOG-06 电塔 T1 / T2 + FG4-ECO-02 七座采集 / 加工建筑 + FG4-ECO-03 四座制造建筑 + FG4-ECO-04 三座能源建筑 + FG4-ECO-11 超控阵列 + FG5-RND-01 仿真实验室 + FG5-RND-03 靶场 + FG5-RND-04 电路合成台 + FG5-RND-05 监听站 + FG5-RND-06 黑匣子陈列馆 + FG6-DEF-01 轻型 / 重型炮塔座），实际 {FgContentTables.Buildings.Count}");
-            Expect(FgContentTables.Enemies.Count == 6, $"机械敌人表 6 行（Demo 6 类敌人），实际 {FgContentTables.Enemies.Count}");
+            Expect(FgContentTables.Enemies.Count == 7, $"机械敌人表 7 行（Demo 6 类敌人 + FG9-DATA-01 主核心供能节点），实际 {FgContentTables.Enemies.Count}");
         }
 
         // ── 文本端到端 ───────────────────────────────────────────────────────
@@ -222,15 +222,15 @@ namespace GameLogic.EditorTools
         {
             Expect(Mathf.Approximately(FoundryOutpostLayout.ArmorBotMaxHealth, 160f) && Mathf.Approximately(FoundryOutpostLayout.MainCoreMaxHealth, 600f)
                 && Mathf.Approximately(FracturedCityLayout.ScoutMaxHealth, 70f), "敌人生命读表：护甲机 160、主核心 600、侦察机 70");
-            Expect(Mathf.Approximately(EnemyCatalog.ComputeFrontalArmorReducedDamage(100f, true), 60f)
-                && Mathf.Approximately(EnemyCatalog.ComputeFrontalArmorReducedDamage(100f, false), 100f), "护甲机正面减伤读表 0.4：100 → 60，侧后不减");
+            Expect(Mathf.Approximately(100f * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct), 60f),
+                "护甲机正面减伤读表 0.4：100 → 60（FG9-DATA-01：这里只核对数据管线读到的表值；正面减伤 / 侧后不减的真实命中结算由 FgCombatKernelSelfCheck 的内核护甲命中断言验证）");
 
             RegionEnemyRecord scout = SeedAndKillScout(out int realLoot);
             Expect(scout != null && Mathf.Approximately(scout.MaxHealth, 70f), $"生产入口（破碎都市播种）侦察机 MaxHealth = {scout?.MaxHealth}");
             Expect(realLoot == 15, $"生产入口（击破掉落）侦察机掉落废料 {realLoot}（表值 15）");
             CampaignState foundry = CampaignState.CreateNew("fg0-data-01-foundry", "Standard", 9);
             FoundryOutpostRegion.EnsureEnemiesSeeded(foundry);
-            RegionEnemyRecord armor = foundry.RegionEnemies.FirstOrDefault(e => e.EnemyTypeId == EnemyCatalog.ArmorBotId);
+            RegionEnemyRecord armor = foundry.RegionEnemies.FirstOrDefault(e => e.EnemyTypeId == "enemy_armorbot");
             Expect(armor != null && Mathf.Approximately(armor.MaxHealth, 160f), $"生产入口（铸造前哨播种）护甲机 MaxHealth = {armor?.MaxHealth}");
 
             FgContentTables.OverrideForTests(BuildingTable(r => r), EnemyTable(row => row.Id switch
@@ -242,7 +242,7 @@ namespace GameLogic.EditorTools
             RegionEnemyRecord injectedScout = SeedAndKillScout(out int injectedLoot);
             Expect(injectedScout != null && Mathf.Approximately(injectedScout.MaxHealth, 123f) && injectedLoot == 17,
                 $"改表后播种生命 {injectedScout?.MaxHealth}（期望 123）、掉落 {injectedLoot}（期望 17）");
-            Expect(Mathf.Approximately(EnemyCatalog.ComputeFrontalArmorReducedDamage(100f, true), 75f), "改表后护甲机正面减伤 0.25：100 → 75");
+            Expect(Mathf.Approximately(100f * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct), 75f), "改表后护甲机正面减伤 0.25：100 → 75");
             FgContentTables.ResetForTests();
         }
 
@@ -250,7 +250,7 @@ namespace GameLogic.EditorTools
         {
             CampaignState state = CampaignState.CreateNew("fg0-data-01-ruins", "Standard", 8);
             FracturedCityRegion.EnsureEnemiesSeeded(state);
-            RegionEnemyRecord scout = state.RegionEnemies.FirstOrDefault(e => e.EnemyTypeId == EnemyCatalog.ScoutId);
+            RegionEnemyRecord scout = state.RegionEnemies.FirstOrDefault(e => e.EnemyTypeId == "enemy_scout");
             loot = -1;
             if (scout == null)
             {
@@ -294,7 +294,7 @@ namespace GameLogic.EditorTools
                     problems.Add($"{row.TypeId}: 文本键 {row.NameKey} 不存在");
                 }
             }
-            foreach (KeyValuePair<string, MechanicalContentDef> kv in EnemyCatalog.All)
+            foreach (KeyValuePair<string, MechanicalContentDef> kv in EnemyDefs.ContentDefs) // FG9-DATA-01：敌人目录由表生成
             {
                 if (!FgContentTables.TryGetEnemy(kv.Key, out MechEnemy row))
                 {
@@ -667,19 +667,17 @@ namespace GameLogic.EditorTools
 
         private static TbMechEnemy EnemyTable(Func<EnemyRow, EnemyRow> edit)
         {
-            EnemyRow[] rows = ConfigSystem.Instance.Tables.TbMechEnemy.DataList
-                .Select(e => edit(new EnemyRow(e.Id, e.NameKey, e.MaxHp, e.FrontalDamageReduction, e.ScrapLoot))).ToArray();
-            var buf = new ByteBuf();
-            buf.WriteSize(rows.Length);
-            foreach (EnemyRow r in rows)
+            // FG9-DATA-01：敌人表加了职能 / 读法 / 武器……等列，按真实行整行复制，只改这五列（FgEnemyTableKit 回读校验字段顺序）。
+            return FgEnemyTableKit.Enemies(v =>
             {
-                buf.WriteString(r.Id);
-                buf.WriteString(r.NameKey);
-                buf.WriteFloat(r.MaxHp);
-                buf.WriteFloat(r.Frontal);
-                buf.WriteInt(r.Loot);
-            }
-            return new TbMechEnemy(buf);
+                EnemyRow r = edit(new EnemyRow((string)v["Id"], (string)v["NameKey"], (float)v["MaxHp"], (float)v["FrontalDamageReduction"], (int)v["ScrapLoot"]));
+                v["Id"] = r.Id;
+                v["NameKey"] = r.NameKey;
+                v["MaxHp"] = r.MaxHp;
+                v["FrontalDamageReduction"] = r.Frontal;
+                v["ScrapLoot"] = r.Loot;
+                return true;
+            });
         }
 
         private static ByteBuf BuildingBuf(IReadOnlyList<BuildingRow> rows)

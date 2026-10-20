@@ -153,10 +153,16 @@ namespace GameLogic.Campaign.Economy
             {
                 foreach (RegionEnemyRecord e in s.RegionEnemies)
                 {
-                    if (e != null && !e.IsAlive && !string.IsNullOrEmpty(e.EnemyTypeId) && e.EnemyTypeId != FoundryOutpostLayout.BossNodeTypeId)
+                    // FG9-DATA-01：区域记录的类型就是敌人表 ID（旧档的 boss_core / boss_node 读档时已改写）；首领的设施（职能 structure）不算“一种敌人”。
+                    string typeId = e?.EnemyTypeId;
+                    if (typeId != null && EnemyDefs.LegacyTypeIds.TryGetValue(typeId, out string upgraded))
                     {
-                        // 主核心在区域记录里的类型是 boss_core，敌人表里是 enemy_core_boss（同一个敌人）。
-                        AddDefeated(r, e.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId ? EnemyCatalog.CoreBossId : e.EnemyTypeId);
+                        typeId = upgraded;
+                    }
+                    if (e != null && !e.IsAlive && !string.IsNullOrEmpty(typeId)
+                        && !(EnemyDefs.TryGet(typeId, out GameConfig.fg.MechEnemy row) && EnemyDefs.IsStructure(row)))
+                    {
+                        AddDefeated(r, typeId);
                     }
                 }
             }

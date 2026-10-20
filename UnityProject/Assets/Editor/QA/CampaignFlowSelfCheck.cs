@@ -79,13 +79,13 @@ namespace GameLogic.EditorTools
             CampaignState state = CampaignState.CreateNew("flow-selfcheck-forecast", "Standard", 4);
             FracturedCityRegion.EnsureEnemiesSeeded(state);
             SumAlive(state, FracturedCityLayout.RegionId, out int ruinsCount, out float ruinsHealth);
-            ExpeditionForecast.EstimateGarrison(ExpeditionDepartureService.ExpeditionTarget.SilentRuins, out int estCount, out float estHealth);
+            ExpeditionForecast.EstimateGarrison(state, ExpeditionDepartureService.ExpeditionTarget.SilentRuins, out int estCount, out float estHealth);
             Expect(ruinsCount == estCount && Mathf.Approximately(ruinsHealth, estHealth),
                 $"破碎都市估算编制与真实播种一致（估算 {estCount} 个/{estHealth:F0}，实际 {ruinsCount} 个/{ruinsHealth:F0}）");
 
             FoundryOutpostRegion.EnsureEnemiesSeeded(state);
             SumAlive(state, FoundryOutpostLayout.RegionId, out int foundryCount, out float foundryHealth);
-            ExpeditionForecast.EstimateGarrison(ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost, out int estFoundryCount, out float estFoundryHealth);
+            ExpeditionForecast.EstimateGarrison(state, ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost, out int estFoundryCount, out float estFoundryHealth);
             Expect(foundryCount == estFoundryCount && Mathf.Approximately(foundryHealth, estFoundryHealth),
                 $"铸造前哨外围估算编制与真实播种一致（估算 {estFoundryCount} 个/{estFoundryHealth:F0}，实际 {foundryCount} 个/{foundryHealth:F0}）");
 

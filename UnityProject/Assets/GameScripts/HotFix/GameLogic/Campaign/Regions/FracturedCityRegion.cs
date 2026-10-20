@@ -83,31 +83,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             state.RegionEnemies ??= Array.Empty<RegionEnemyRecord>();
-            SeedIfMissing(FracturedCityLayout.Scout1SpawnId, EnemyCatalog.ScoutId,
-                FracturedCityLayout.Scout1Spawn.Position, FracturedCityLayout.ScoutMaxHealth);
-            SeedIfMissing(FracturedCityLayout.Scout2SpawnId, EnemyCatalog.ScoutId,
-                FracturedCityLayout.Scout2Spawn.Position, FracturedCityLayout.ScoutMaxHealth);
-            SeedIfMissing(FracturedCityLayout.JammerSpawnId, EnemyCatalog.JammerId,
-                FracturedCityLayout.JammerSpawn.Position, FracturedCityLayout.JammerMaxHealth);
-
-            void SeedIfMissing(string instanceId, string typeId, Vector2 position, float maxHealth)
-            {
-                if (FindEnemy(state, instanceId) != null)
-                {
-                    return;
-                }
-                state.RegionEnemies = state.RegionEnemies.Append(new RegionEnemyRecord
-                {
-                    EnemyInstanceId = instanceId,
-                    RegionId = RegionId,
-                    EnemyTypeId = typeId,
-                    Position = position,
-                    Health = maxHealth,
-                    MaxHealth = maxHealth,
-                    IsAlive = true,
-                    CycleCooldownRemaining = FracturedCityLayout.ScoutMarkIntervalSeconds,
-                }).ToArray();
-            }
+            // FG9-DATA-01：编成（哪个锚点是什么敌人、初始周期）来自 fg.TbEnemyEncounter，耐久来自 fg.TbMechEnemy × 难度倍率。
+            RegionEnemySites.SeedEncounters(state, RegionId, EnemyDefs.ConditionBase);
         }
 
         /// <summary>ER5-SILENT-01 起：本方法只做"警戒等级缓慢衰减"这一项与具体敌人无关的背景行为。
@@ -157,7 +134,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             // ER7-CORE-01：Boss 节点/主核心是"护盾/阶段"语义，委托 FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口）。
-            if (enemy.EnemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemy.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
+            if (EnemyDefs.HasTag(enemy.EnemyTypeId, EnemyDefs.TagExternalHealth)) // FG9-DATA-01：按标签路由到首领状态机。
             {
                 (bool bossOk, string bossReason) = FoundryOutpostCoreBoss.ApplyDamage(state, enemy, damage);
                 CombatSite bossSite = CombatSites.Get(enemy.RegionId);
@@ -207,9 +184,12 @@ namespace GameLogic.Campaign.Regions
 
         private static void SpawnEnemyLoot(CampaignState state, RegionEnemyRecord enemy)
         {
-            int amount = enemy.EnemyTypeId == EnemyCatalog.JammerId
-                ? FracturedCityLayout.JammerScrapLoot
-                : FracturedCityLayout.ScoutScrapLoot;
+            // FG9-DATA-01：掉落废料按敌人表 scrapLoot（表里缺这一行就不掉，并已在生成时可见报错）。
+            int amount = EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy row) ? row.ScrapLoot : 0;
+            if (amount <= 0)
+            {
+                return;
+            }
             HomeValleyCargo.SpawnGroundItem(state, RegionId, enemy.Position,
                 CampaignEconomyLedger.ResourceScrap, amount, enemy.EnemyInstanceId + ":scrap");
             Log.Info($"[FracturedCityRegion] 敌人 {enemy.EnemyInstanceId} 掉落 {amount} 废料。");

@@ -20,6 +20,7 @@ namespace GameLogic.Campaign.Content
     {
         private static TbBuilding _buildings;
         private static TbMechEnemy _enemies;
+        private static TbEnemyEncounter _encounters;
         private static bool _loaded;
         private static bool _overridden;
         private static string _loadError;
@@ -73,6 +74,23 @@ namespace GameLogic.Campaign.Content
             return row;
         }
 
+        /// <summary>FG9-DATA-01：Demo 两个区域的敌人编成（fg.TbEnemyEncounter）。表不存在返回空列表（调用方按“缺编成”可见报错）。</summary>
+        public static IReadOnlyList<EnemyEncounter> Encounters
+        {
+            get
+            {
+                EnsureLoaded();
+                return (IReadOnlyList<EnemyEncounter>)_encounters?.DataList ?? Array.Empty<EnemyEncounter>();
+            }
+        }
+
+        public static bool TryGetEncounter(string instanceId, out EnemyEncounter row)
+        {
+            EnsureLoaded();
+            row = null;
+            return instanceId != null && _encounters != null && _encounters.DataMap.TryGetValue(instanceId, out row) && row != null;
+        }
+
         public static bool TryGetEnemy(string enemyTypeId, out MechEnemy row)
         {
             EnsureLoaded();
@@ -98,6 +116,7 @@ namespace GameLogic.Campaign.Content
             _loaded = false;
             _buildings = null;
             _enemies = null;
+            _encounters = null;
             _loadError = null;
             Revision++;
             EnsureLoaded();
@@ -105,12 +124,14 @@ namespace GameLogic.Campaign.Content
 
         /// <summary>测试注入：用构造出来的表替换真实表，证明生产代码确实经表取值（改表 → 行为跟着变）。
         /// 任一参数为 null 表示模拟"该表没加载上"。用完必须 <see cref="ResetForTests"/>。</summary>
-        public static void OverrideForTests(TbBuilding buildings, TbMechEnemy enemies, string loadError = null)
+        /// <remarks>FG9-DATA-01：<paramref name="encounters"/> 为 null 时沿用真实编成表（多数测试只改敌人表）。</remarks>
+        public static void OverrideForTests(TbBuilding buildings, TbMechEnemy enemies, string loadError = null, TbEnemyEncounter encounters = null)
         {
             _overridden = true;
             _loaded = true;
             _buildings = buildings;
             _enemies = enemies;
+            _encounters = encounters ?? RealEncounters();
             _loadError = loadError ?? (buildings == null || enemies == null ? "测试注入：内容表为空" : null);
             Revision++;
         }
@@ -118,6 +139,18 @@ namespace GameLogic.Campaign.Content
         public static void ResetForTests()
         {
             Reload();
+        }
+
+        private static TbEnemyEncounter RealEncounters()
+        {
+            try
+            {
+                return ConfigSystem.Instance.Tables?.TbEnemyEncounter;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private static void RequireLoaded()
@@ -141,6 +174,7 @@ namespace GameLogic.Campaign.Content
                 GameConfig.Tables tables = ConfigSystem.Instance.Tables;
                 _buildings = tables?.TbBuilding;
                 _enemies = tables?.TbMechEnemy;
+                _encounters = tables?.TbEnemyEncounter;
                 if (_buildings == null || _enemies == null)
                 {
                     _loadError = "配置表 fg.TbBuilding / fg.TbMechEnemy 不存在";

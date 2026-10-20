@@ -1862,7 +1862,7 @@ namespace GameLogic.EditorTools
                 {
                     EnemyInstanceId = id,
                     RegionId = FracturedCityLayout.RegionId,
-                    EnemyTypeId = EnemyCatalog.ScoutId,
+                    EnemyTypeId = "enemy_scout",
                     Position = new Vector2(-38f + (i % 20) * 4f, 30f + (i / 20) * 4f),
                     Health = 10f,
                     MaxHealth = 10f,

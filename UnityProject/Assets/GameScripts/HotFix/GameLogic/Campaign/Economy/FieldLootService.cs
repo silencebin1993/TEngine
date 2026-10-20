@@ -86,7 +86,12 @@ namespace GameLogic.Campaign.Economy
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             long serial = ++st.FieldKills;
             float mult = ClawMultiplier(s, site, killerUnit);
-            Roll(s, st, elite ? LootCatalog.SourceElite : LootCatalog.SourceMinion, def?.Faction ?? string.Empty, at, serial, 0u, mult, OriginField);
+            // FG9-DATA-01：掉落倾向来自敌人表 lootSource（精英标记优先；表里写 none 的敌人不掷普通掉落）。
+            string source = elite ? LootCatalog.SourceElite : Content.EnemyDefs.LootSourceOf(def?.EnemyTypeId, LootCatalog.SourceMinion);
+            if (source != null)
+            {
+                Roll(s, st, source, def?.Faction ?? string.Empty, at, serial, 0u, mult, OriginField);
+            }
             KillEvents++;
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             TotalMs += ms;

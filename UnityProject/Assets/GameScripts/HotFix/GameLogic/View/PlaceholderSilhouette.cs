@@ -25,8 +25,12 @@ namespace GameLogic.View
         /// <summary>剪影部件的父节点名（自检按它取部件）。</summary>
         public const string PartsName = "Silhouette";
 
+        /// <summary>FG9-DATA-01：阵营来自敌人表 faction（静默 → 天线轮廓；其它阵营暂用铸造的方正轮廓，正式剪影在美术阶段替换）。</summary>
         public static Faction FactionOfEnemy(string enemyTypeId) =>
-            enemyTypeId == EnemyCatalog.ScoutId || enemyTypeId == EnemyCatalog.JammerId ? Faction.Silent : Faction.Foundry;
+            EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy row) && row.Faction == EnemyDefs.FactionSilent ? Faction.Silent : Faction.Foundry;
+
+        private static string SilhouetteOf(string enemyTypeId) =>
+            EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy row) ? row.Silhouette : null;
 
         /// <summary>给玩家机器挂剪影。<paramref name="hitbox"/> 是原来的胶囊（中心在其自身原点、高 2、半径 0.5）。</summary>
         public static void ApplyMachine(GameObject hitbox, Renderer hitboxRenderer, string machineChassisId)
@@ -58,16 +62,17 @@ namespace GameLogic.View
             }
         }
 
-        /// <summary>给敌人挂剪影（阵营由敌人类型决定）。</summary>
+        /// <summary>给敌人挂剪影（FG9-DATA-01：阵营与剪影键来自敌人表 faction / silhouette，不按敌人 ID）。</summary>
         public static void ApplyEnemy(GameObject hitbox, Renderer hitboxRenderer, string enemyTypeId)
         {
             Transform parts = Begin(hitbox, hitboxRenderer);
             Material mat = hitboxRenderer.sharedMaterial;
+            string silhouette = SilhouetteOf(enemyTypeId);
             if (FactionOfEnemy(enemyTypeId) == Faction.Silent)
             {
                 Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.9f, 0f), new Vector3(0.55f, 0.03f, 0.55f));
                 Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.05f, 0f), new Vector3(0.16f, 0.75f, 0.16f));
-                if (enemyTypeId == EnemyCatalog.JammerId)
+                if (silhouette == "silent_ring")
                 {
                     Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.55f, 0f), new Vector3(0.95f, 0.03f, 0.95f));
                     Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, 0.85f, 0f), Vector3.one * 0.3f);
@@ -79,20 +84,20 @@ namespace GameLogic.View
                 return;
             }
 
-            if (enemyTypeId == FoundryOutpostLayout.BossNodeTypeId)
+            if (silhouette == "foundry_node")
             {
                 Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.1f, 0f), new Vector3(1.1f, 0.9f, 1.1f));
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 1.0f, 0f), new Vector3(0.5f, 0.4f, 0.5f));
                 return;
             }
-            if (enemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
+            if (silhouette == "foundry_reactor")
             {
                 // 主核心：圆形反应堆塔（粗圆柱基座 + 顶部球体），俯视是圆，与方正的车辆/铸造机都不同。
                 Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.4f, 0f), new Vector3(1.7f, 0.6f, 1.7f));
                 Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, 0.55f, 0f), Vector3.one * 0.9f);
                 return;
             }
-            if (enemyTypeId == EnemyCatalog.StriderId)
+            if (silhouette == "foundry_strider")
             {
                 // 步进炮：两条腿把机身架高，前伸长炮管。
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.05f, 0f), new Vector3(1.2f, 0.7f, 1.0f));
@@ -103,11 +108,11 @@ namespace GameLogic.View
             }
             // 铸造通用：方正高块体（比玩家车辆高一截、窄一圈）。
             Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.33f, 0f), new Vector3(1.2f, 1.3f, 1.1f));
-            if (enemyTypeId == EnemyCatalog.ArmorBotId)
+            if (silhouette == "foundry_shield")
             {
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.35f, 0.62f), new Vector3(1.5f, 1.2f, 0.16f));
             }
-            else if (enemyTypeId == EnemyCatalog.RepairBotId)
+            else if (silhouette == "foundry_cross")
             {
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.4f, 0f), new Vector3(0.8f, 0.12f, 0.22f));
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.4f, 0f), new Vector3(0.22f, 0.12f, 0.8f));

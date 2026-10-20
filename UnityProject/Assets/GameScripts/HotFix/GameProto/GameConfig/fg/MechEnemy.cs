@@ -24,6 +24,39 @@ public sealed partial class MechEnemy : Luban.BeanBase
         MaxHp = _buf.ReadFloat();
         FrontalDamageReduction = _buf.ReadFloat();
         ScrapLoot = _buf.ReadInt();
+        Faction = _buf.ReadString();
+        Role = _buf.ReadString();
+        Tier = _buf.ReadString();
+        Behavior = _buf.ReadString();
+        Tags = _buf.ReadString();
+        Speed = _buf.ReadFloat();
+        Radius = _buf.ReadFloat();
+        WeaponRange = _buf.ReadFloat();
+        WeaponDamage = _buf.ReadFloat();
+        WeaponCooldown = _buf.ReadFloat();
+        WeaponAim = _buf.ReadFloat();
+        SenseRange = _buf.ReadFloat();
+        CycleSeconds = _buf.ReadFloat();
+        EffectSeconds = _buf.ReadFloat();
+        EffectRange = _buf.ReadFloat();
+        EffectAmount = _buf.ReadFloat();
+        FleeTrigger = _buf.ReadFloat();
+        Leash = _buf.ReadFloat();
+        PatrolRadius = _buf.ReadFloat();
+        PatrolFreq = _buf.ReadFloat();
+        FrontalHalfAngleDeg = _buf.ReadFloat();
+        DescKey = _buf.ReadString();
+        WeaknessKey = _buf.ReadString();
+        TraitKey = _buf.ReadString();
+        Components = _buf.ReadString();
+        LootSource = _buf.ReadString();
+        KeyDrop = _buf.ReadString();
+        RaidPoints = _buf.ReadInt();
+        IconId = _buf.ReadString();
+        Silhouette = _buf.ReadString();
+        ViewColor = _buf.ReadString();
+        SfxId = _buf.ReadString();
+        VfxId = _buf.ReadString();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -40,7 +73,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string NameKey;
     /// <summary>
-    /// 最大生命
+    /// 最大生命(耐久)
     /// </summary>
     public readonly float MaxHp;
     /// <summary>
@@ -51,6 +84,138 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 击破掉落废料,0=不走普通废料掉落
     /// </summary>
     public readonly int ScrapLoot;
+    /// <summary>
+    /// 阵营:silent/foundry/clarity/overclock/fleet
+    /// </summary>
+    public readonly string Faction;
+    /// <summary>
+    /// 职能(头顶图标/情报):scout/jammer/artillery/armor/support/boss/structure
+    /// </summary>
+    public readonly string Role;
+    /// <summary>
+    /// 层级:normal/elite/boss(elite 生成时带内核精英标记;boss 先于其它敌人结算)
+    /// </summary>
+    public readonly string Tier;
+    /// <summary>
+    /// 行为读法(EnemyBehaviorReadings):none/patrol_mark/jam_field/hold_fire/telegraph/repair
+    /// </summary>
+    public readonly string Behavior;
+    /// <summary>
+    /// 标签(逗号分隔):structure/external_health/silent_fire/adapt_heat;none=没有
+    /// </summary>
+    public readonly string Tags;
+    /// <summary>
+    /// 移动速度(米/秒),0=不移动
+    /// </summary>
+    public readonly float Speed;
+    /// <summary>
+    /// 碰撞半径(米)
+    /// </summary>
+    public readonly float Radius;
+    /// <summary>
+    /// 武器射程(米),0=没有武器
+    /// </summary>
+    public readonly float WeaponRange;
+    /// <summary>
+    /// 武器每发伤害(难度倍率另乘),没有武器写0
+    /// </summary>
+    public readonly float WeaponDamage;
+    /// <summary>
+    /// 武器冷却(秒),没有武器写0
+    /// </summary>
+    public readonly float WeaponCooldown;
+    /// <summary>
+    /// 瞄准线秒数(telegraph 两段式),0=即时
+    /// </summary>
+    public readonly float WeaponAim;
+    /// <summary>
+    /// 感知/标记距离(米),0=不感知
+    /// </summary>
+    public readonly float SenseRange;
+    /// <summary>
+    /// 周期(秒):标记间隔/治疗间隔,0=没有周期
+    /// </summary>
+    public readonly float CycleSeconds;
+    /// <summary>
+    /// 效果持续(秒):标记时长,0=没有
+    /// </summary>
+    public readonly float EffectSeconds;
+    /// <summary>
+    /// 效果半径(米):干扰场半径/治疗距离,0=没有
+    /// </summary>
+    public readonly float EffectRange;
+    /// <summary>
+    /// 效果量:每次治疗量,0=没有
+    /// </summary>
+    public readonly float EffectAmount;
+    /// <summary>
+    /// 受威胁后撤的触发距离(米),0=不后撤
+    /// </summary>
+    public readonly float FleeTrigger;
+    /// <summary>
+    /// 牵引半径(米,后撤/巡逻不超出牵引中心这个距离),0=不移动
+    /// </summary>
+    public readonly float Leash;
+    /// <summary>
+    /// 无威胁时的巡逻摆动半径(米),0=不巡逻
+    /// </summary>
+    public readonly float PatrolRadius;
+    /// <summary>
+    /// 巡逻摆动频率,0=不巡逻
+    /// </summary>
+    public readonly float PatrolFreq;
+    /// <summary>
+    /// 正面锥半角(度):正面减伤/侧后加成的判定
+    /// </summary>
+    public readonly float FrontalHalfAngleDeg;
+    /// <summary>
+    /// 图鉴描述文本键
+    /// </summary>
+    public readonly string DescKey;
+    /// <summary>
+    /// 图鉴弱点(应对)文本键
+    /// </summary>
+    public readonly string WeaknessKey;
+    /// <summary>
+    /// 出征情报特征文本键({0}=周期秒,{1}=效果半径,{2}=正面减伤%,{3}=瞄准秒,{4}=治疗量);none=只写名称与耐久
+    /// </summary>
+    public readonly string TraitKey;
+    /// <summary>
+    /// 敌方组件与固件(fg.TbCombatComponent.id / fg.TbFirmwareKind.id,逗号分隔);none=只用内置武器(Demo 敌人)
+    /// </summary>
+    public readonly string Components;
+    /// <summary>
+    /// 掉落倾向(fg.TbLootDrop.source):minion/elite;none=不掷野外普通掉落(首领奖励另算)
+    /// </summary>
+    public readonly string LootSource;
+    /// <summary>
+    /// 首次击破掉落的关键物 contentId;none=没有
+    /// </summary>
+    public readonly string KeyDrop;
+    /// <summary>
+    /// 突袭点数(fg.TbRaidUnit.points 由此派生),0=不进突袭编成
+    /// </summary>
+    public readonly int RaidPoints;
+    /// <summary>
+    /// 头顶标记/图鉴图标ID(GameRes/Raw/UI/Icons)
+    /// </summary>
+    public readonly string IconId;
+    /// <summary>
+    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor
+    /// </summary>
+    public readonly string Silhouette;
+    /// <summary>
+    /// 占位颜色(#RRGGBB)
+    /// </summary>
+    public readonly string ViewColor;
+    /// <summary>
+    /// 开火/行为音效ID
+    /// </summary>
+    public readonly string SfxId;
+    /// <summary>
+    /// 行为特效ID(占位)
+    /// </summary>
+    public readonly string VfxId;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -67,6 +232,39 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "maxHp:" + MaxHp + ","
         + "frontalDamageReduction:" + FrontalDamageReduction + ","
         + "scrapLoot:" + ScrapLoot + ","
+        + "faction:" + Faction + ","
+        + "role:" + Role + ","
+        + "tier:" + Tier + ","
+        + "behavior:" + Behavior + ","
+        + "tags:" + Tags + ","
+        + "speed:" + Speed + ","
+        + "radius:" + Radius + ","
+        + "weaponRange:" + WeaponRange + ","
+        + "weaponDamage:" + WeaponDamage + ","
+        + "weaponCooldown:" + WeaponCooldown + ","
+        + "weaponAim:" + WeaponAim + ","
+        + "senseRange:" + SenseRange + ","
+        + "cycleSeconds:" + CycleSeconds + ","
+        + "effectSeconds:" + EffectSeconds + ","
+        + "effectRange:" + EffectRange + ","
+        + "effectAmount:" + EffectAmount + ","
+        + "fleeTrigger:" + FleeTrigger + ","
+        + "leash:" + Leash + ","
+        + "patrolRadius:" + PatrolRadius + ","
+        + "patrolFreq:" + PatrolFreq + ","
+        + "frontalHalfAngleDeg:" + FrontalHalfAngleDeg + ","
+        + "descKey:" + DescKey + ","
+        + "weaknessKey:" + WeaknessKey + ","
+        + "traitKey:" + TraitKey + ","
+        + "components:" + Components + ","
+        + "lootSource:" + LootSource + ","
+        + "keyDrop:" + KeyDrop + ","
+        + "raidPoints:" + RaidPoints + ","
+        + "iconId:" + IconId + ","
+        + "silhouette:" + Silhouette + ","
+        + "viewColor:" + ViewColor + ","
+        + "sfxId:" + SfxId + ","
+        + "vfxId:" + VfxId + ","
         + "}";
     }
 }

@@ -148,8 +148,7 @@ namespace GameLogic.Campaign.Defense
                 string name = p.UnitIds[i];
                 if (RaidCatalog.TryGetUnit(p.UnitIds[i], out RaidUnitDef u))
                 {
-                    string key = "enemy." + u.EnemyTypeId.Replace("enemy_", string.Empty) + ".name";
-                    name = GameText.Has(key) ? GameText.Get(key) : u.EnemyTypeId;
+                    name = Content.EnemyDefs.NameOf(u.EnemyTypeId); // FG9-DATA-01：敌人名取敌人表 nameKey（不再按 ID 拼文本键）。
                 }
                 int elite = i < p.EliteCounts.Length ? p.EliteCounts[i] : 0;
                 sb.Append(elite > 0

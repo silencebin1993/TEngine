@@ -581,6 +581,10 @@ namespace GameLogic.EditorTools
             // IC-REQ-022 六类反向（真实系统：覆盖外失联与中继恢复、投送站缺燃油与管线恢复、回收舱在飞时目标阵亡与货物舱捡回、行军 + 投送中暂停 / 0.5x / 3x / 观察一致 FGT-EXP-012、
             // 领地内行军 + 投送途中真文件存读档 FGT-EXP-011、锚点被围截断与投送舱接回）；领地片段 3 个种子（名称提示 + 室内进出）、领地控制完整链、遗产远程回收；缺口清零；FG-M8 试玩包；FGT-EXP-001～012 映射。
             Seg("FgMilestoneM8SelfCheck", FgMilestoneM8SelfCheck.Run);
+            // FG9-DATA-01 敌人入表（FG09 FGR-FAC-001、FG14 FGR-ARC-005；FGT-FAC-001）：全部敌人从表加载、无残留硬编码字典、读法与导表脚本一致、Demo 金标回归、
+            // 按读法 / 标签而非 ID（新 ID 敌人只加表行即可生成 / 干扰 / 掉落）、负向矩阵（缺行 / 缺字段 / 读法 / 标签 / 锚点 → 不生成 + 可见报错）、
+            // 干扰机按职能的干扰场（FG-GAP-049）、难度倍率（DEBT-FG6DEF09-01）、旧档首领类型改写与存读档、暂停与 0.5x～3x、干扰判据性能。
+            Seg("FgEnemyTableSelfCheck", FgEnemyTableSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

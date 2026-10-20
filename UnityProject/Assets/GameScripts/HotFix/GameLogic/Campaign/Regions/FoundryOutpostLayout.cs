@@ -61,7 +61,7 @@ namespace GameLogic.Campaign.Regions
         public const string FlankerSpawnId = "fo_flanker";
         /// <summary>ER6-ADAPT-01："JammerSupport 多一组干扰支援组"——同上，锁定为
         /// <see cref="AdaptationCatalog.JammerSupport"/> 时条件播种，敌类型复用既有
-        /// <see cref="EnemyCatalog.JammerId"/>（"敌方现有技术树内编制变化"，不新造敌人）。</summary>
+        /// 静默干扰机（编成表 fg.TbEnemyEncounter 的 adaptation_jammer_support 行；"敌方现有技术树内编制变化"，不新造敌人）。</summary>
         public const string JammerSupportSpawnId = "fo_jammer_support";
 
         // ── 关键物内容 ID ────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ namespace GameLogic.Campaign.Regions
         public static readonly Anchor JammerSupportSpawn = new Anchor(JammerSupportSpawnId, new Vector2(14f, 4f), 1.5f);
         /// <summary>侧袭单位固定朝向——面朝战场中央（约朝入口/回收点连线方向），供
         /// <see cref="FoundryOutpostRegion.IsFrontalHit"/> 复用既有护甲机正面判定框架。</summary>
-        public static readonly Vector2 FlankerFacing = new Vector2(1f, -0.6f).normalized;
+        public static Vector2 FlankerFacing => EnemyDefs.FacingOf(FlankerSpawnId); // FG9-DATA-01：编成表 facingX/Y。
 
         /// <summary>ER6-REGION-01："物理碰撞"边界——门锁定时，任何机器（直控 WASD/编队 Move 命令
         /// 目的地）都不能越过这条 Y 线进入核心分区，与 X 坐标无关（不给"绕路"留一个有限宽度的缺口，
@@ -147,60 +147,72 @@ namespace GameLogic.Campaign.Regions
         /// <summary>主核心固定朝向——面朝入口方向（散热口在背面）。Phase2"侧后+20%"判定复用与
         /// 护甲机 <see cref="FoundryOutpostRegion.IsFrontalHit"/> 同一锥角框架，但语义相反（背后是
         /// 弱点而非减伤区）。</summary>
-        public static readonly Vector2 MainCoreFacing = new Vector2(0f, -1f);
-        public const float MainCoreFrontalHalfAngleDeg = 75f; // 与护甲机同一量级，锥角外＝侧后。
+        public static Vector2 MainCoreFacing => EnemyDefs.FacingOf(MainCoreId); // FG9-DATA-01：编成表 facingX/Y。
+        public static float MainCoreFrontalHalfAngleDeg => At(MainCoreId).FrontalHalfAngleDeg; // 锥角外＝侧后（fg.TbMechEnemy）。
 
-        /// <summary>两供能节点共用的 EnemyTypeId——本身不是 <see cref="Content.EnemyCatalog"/> 目录条目
-        /// （节点是设施不是敌人角色，无需图鉴/AI 权限等内容层字段），只是 <see cref="RegionEnemyRecord"/>
-        /// 复用其 Health/MaxHealth/IsAlive/CycleCooldownRemaining 字段+既有伤害结算管线（含铸造重炮/
-        /// 熔穿过载）时的判别标签，唯一消费方 <see cref="Regions.FoundryOutpostCoreBoss"/>。</summary>
-        public const string BossNodeTypeId = "boss_node";
-        public const string BossCoreTypeId = "boss_core";
+        /// <summary>首领状态机自己的部件类型（两供能节点 / 主核心）。FG9-DATA-01 起它们是敌人表条目（enemy_core_node / enemy_core_boss），
+        /// 类型由编成表的首领行决定；旧档里的 boss_node / boss_core 读档时改写（<see cref="EnemyDefs.UpgradeLegacyTypeIds"/>）。
+        /// 唯一消费方是 <see cref="Regions.FoundryOutpostCoreBoss"/> 的阶段 / 伤害判定（状态机身份，不是按 ID 的行为特例）。</summary>
+        public static string BossNodeTypeId => EnemyDefs.EncounterTypeOf(RegionId, CoreNode1Id);
+        public static string BossCoreTypeId => EnemyDefs.EncounterTypeOf(RegionId, MainCoreId);
 
         // ── Boss 数值（DEMO-CONTENT-LOCK.md §4.3 逐字）─────────────────────────
-        public const float NodeMaxHealth = 100f;
-        public static float MainCoreMaxHealth => FgContentTables.Enemy(EnemyCatalog.CoreBossId).MaxHp; // FG0-DATA-01：fg.TbMechEnemy。
+        /// <summary>按编成行取该实例的敌人表行。编成行缺失（EncounterTypeOf 报错）或敌人行缺失 / 不完整（TryGetValid 报错）时
+        /// 先发“内容表错误”可见通知，再抛 <see cref="System.InvalidOperationException"/>——首领 / 布局数值不拿默认值顶替
+        /// （0 耐久的首领会被当成已击破，比停下更糟），与“不生成默认替身”同一策略。</summary>
+        private static GameConfig.fg.MechEnemy At(string instanceId)
+        {
+            _ = EnemyDefs.Rows; // 内容表整体没加载上：照旧抛“正式版内容表不可用”的可读错误（不是缺行，不发缺行通知）。
+            string typeId = EnemyDefs.EncounterTypeOf(RegionId, instanceId);
+            if (typeId != null && EnemyDefs.TryGetValid(RegionId, instanceId, typeId, out GameConfig.fg.MechEnemy row))
+            {
+                return row;
+            }
+            throw new System.InvalidOperationException($"铸造前哨布局数值缺内容表行：编成 {instanceId} → 敌人 {typeId ?? "(编成行缺失)"}（已发内容表错误通知）");
+        }
+        public static float NodeMaxHealth => At(CoreNode1Id).MaxHp; // FG9-DATA-01：fg.TbMechEnemy（enemy_core_node）。
+        public static float MainCoreMaxHealth => At(MainCoreId).MaxHp; // fg.TbMechEnemy（enemy_core_boss）。
         public const float Phase1TransitionHealthFraction = 0.6f; // "降至60%时……Transition"。
         public const float TransitionDurationSeconds = 5f;
         public const float Phase2BackHitBonusPct = 0.2f; // "侧后+20%"。
         // 主核心自卫攻击（Phase1/Phase2 生效，Transition 不攻击）——DEMO-CONTENT-LOCK.md 未点名具体
         // 数字，按铸造步进炮同一量级取保守 judgment call（同 FoundryOutpostEnemyAi 类注释先例）。
-        public const float CoreAttackRange = 16f;
-        public const float CoreAttackDamage = 18f;
-        public const float CoreAttackCooldownSeconds = 2f;
+        public static float CoreAttackRange => At(MainCoreId).WeaponRange;
+        public static float CoreAttackDamage => At(MainCoreId).WeaponDamage;
+        public static float CoreAttackCooldownSeconds => At(MainCoreId).WeaponCooldown;
 
         // ── 敌人 HP：FG0-DATA-01 起唯一真相是 Luban 表 fg.TbMechEnemy（tools/cell_tables/fgdata.py）──────
-        public static float ArmorBotMaxHealth => FgContentTables.Enemy(EnemyCatalog.ArmorBotId).MaxHp;
-        public static float StriderMaxHealth => FgContentTables.Enemy(EnemyCatalog.StriderId).MaxHp;
-        public static float RepairBotMaxHealth => FgContentTables.Enemy(EnemyCatalog.RepairBotId).MaxHp;
+        public static float ArmorBotMaxHealth => At(ArmorBotLeftSpawnId).MaxHp;
+        public static float StriderMaxHealth => At(StriderSpawnId).MaxHp;
+        public static float RepairBotMaxHealth => At(RepairBotSpawnId).MaxHp;
         public const int CrateScrapAmount = 40; // DEMO-CONTENT-LOCK.md §4.2第3条"三箱各40废料"。
         public const float PoiDiscoveryRadius = 8f;
 
         // ── ER6-FOUNDRY-01：敌人 AI 调校（数值来源见 FoundryOutpostEnemyAi 类注释——
         // DEMO-CONTENT-LOCK.md §5 只给了 HP/正面减伤40%/1秒瞄准线三个数字，其余是本 Story 按
         // FracturedCityLayout 既有敌人调校同一保守量级取的judgment call，非文档摘录）───────
-        public static float ArmorBotFrontalReductionPct => FgContentTables.Enemy(EnemyCatalog.ArmorBotId).FrontalDamageReduction; // fg.TbMechEnemy，与 EnemyCatalog.ComputeFrontalArmorReducedDamage 同源。
-        public const float ArmorBotFrontalHalfAngleDeg = 75f; // "正面"锥角——供攻击方向判定是否命中正面。
-        public static readonly Vector2 ArmorBotLeftFacing = new Vector2(0.4f, -1f).normalized; // 朝向入口/掩体前方。
-        public static readonly Vector2 ArmorBotRightFacing = new Vector2(-0.4f, -1f).normalized;
-        public const float ArmorBotAttackRange = 9f;
-        public const float ArmorBotAttackDamage = 10f;
-        public const float ArmorBotAttackCooldownSeconds = 1.6f;
-        public static int ArmorBotScrapLoot => FgContentTables.Enemy(EnemyCatalog.ArmorBotId).ScrapLoot;
+        public static float ArmorBotFrontalReductionPct => At(ArmorBotLeftSpawnId).FrontalDamageReduction;
+        public static float ArmorBotFrontalHalfAngleDeg => At(ArmorBotLeftSpawnId).FrontalHalfAngleDeg; // "正面"锥角——供攻击方向判定是否命中正面。
+        public static Vector2 ArmorBotLeftFacing => EnemyDefs.FacingOf(ArmorBotLeftSpawnId); // 朝向入口/掩体前方（编成表 facingX/Y）。
+        public static Vector2 ArmorBotRightFacing => EnemyDefs.FacingOf(ArmorBotRightSpawnId);
+        public static float ArmorBotAttackRange => At(ArmorBotLeftSpawnId).WeaponRange;
+        public static float ArmorBotAttackDamage => At(ArmorBotLeftSpawnId).WeaponDamage;
+        public static float ArmorBotAttackCooldownSeconds => At(ArmorBotLeftSpawnId).WeaponCooldown;
+        public static int ArmorBotScrapLoot => At(ArmorBotLeftSpawnId).ScrapLoot;
 
-        public const float StriderAimSeconds = 1f; // EnemyCatalog.StriderId ValuesSummary 字面数字。
-        public const float StriderAttackRange = 14f;
-        public const float StriderAttackDamage = 20f; // "重炮回收点"驻守单位，伤害量级高于护甲机自卫攻击。
-        public const float StriderAttackCooldownSeconds = 2.5f; // 开火后到下一次可以重新瞄准的冷却。
-        public static int StriderScrapLoot => FgContentTables.Enemy(EnemyCatalog.StriderId).ScrapLoot;
+        public static float StriderAimSeconds => At(StriderSpawnId).WeaponAim; // 瞄准线秒数。
+        public static float StriderAttackRange => At(StriderSpawnId).WeaponRange;
+        public static float StriderAttackDamage => At(StriderSpawnId).WeaponDamage;
+        public static float StriderAttackCooldownSeconds => At(StriderSpawnId).WeaponCooldown; // 开火后到下一次可以重新瞄准的冷却。
+        public static int StriderScrapLoot => At(StriderSpawnId).ScrapLoot;
 
-        public const float RepairBotMoveSpeed = 2.4f;
-        public const float RepairBotHealRange = 6f;
-        public const float RepairBotHealAmount = 15f;
-        public const float RepairBotHealCooldownSeconds = 3f;
-        public const float RepairBotFleeTriggerRange = 5f; // 玩家进入此距离，维修机后撤（支援单位不硬扛）。
-        public const float RepairBotFleeLeash = 6f;
-        public static int RepairBotScrapLoot => FgContentTables.Enemy(EnemyCatalog.RepairBotId).ScrapLoot;
+        public static float RepairBotMoveSpeed => At(RepairBotSpawnId).Speed;
+        public static float RepairBotHealRange => At(RepairBotSpawnId).EffectRange;
+        public static float RepairBotHealAmount => At(RepairBotSpawnId).EffectAmount;
+        public static float RepairBotHealCooldownSeconds => At(RepairBotSpawnId).CycleSeconds;
+        public static float RepairBotFleeTriggerRange => At(RepairBotSpawnId).FleeTrigger; // 玩家进入此距离，维修机后撤。
+        public static float RepairBotFleeLeash => At(RepairBotSpawnId).Leash;
+        public static int RepairBotScrapLoot => At(RepairBotSpawnId).ScrapLoot;
 
         // 直控攻击（同 FracturedCityLayout.DirectAttackRange/DirectAttackAimHalfAngleDeg 同一设计语言）：
         public const float DirectAttackRange = 14f;

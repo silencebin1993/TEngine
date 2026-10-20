@@ -1182,9 +1182,7 @@ namespace GameLogic.Campaign.Regions
                     _combat.BindView(enemyUnit, go.transform, 1f); // 位置每帧由内核插值写入（FrameRender）。
                 }
                 Renderer renderer = go.GetComponent<Renderer>();
-                Color baseColor = enemy.EnemyTypeId == EnemyCatalog.JammerId
-                    ? new Color(0.6f, 0.15f, 0.55f)
-                    : new Color(0.75f, 0.35f, 0.15f);
+                Color baseColor = EnemyBaseColor(enemy.EnemyTypeId); // FG9-DATA-01：敌人表 viewColor。
                 renderer.sharedMaterial = ViewMaterials.Standard(enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
                 // AC-THEME-002：静默阵营细高“天线”剪影（胶囊只留作命中盒）。
                 PlaceholderSilhouette.ApplyEnemy(go, renderer, enemy.EnemyTypeId);
@@ -1198,13 +1196,14 @@ namespace GameLogic.Campaign.Regions
 
                 // ER5-SILENT-01：侦察机的"扫描线"非听觉反馈——初始禁用，命中标记那一帧短暂显示
                 // （见 TriggerScanPulse），满足 AC-ACC-002"失去听觉时有扫描线/边界/图标"。
-                if (enemy.EnemyTypeId == EnemyCatalog.ScoutId)
+                // FG9-DATA-01：扫描线挂在“巡逻标记”读法的敌人上（按读法，不按 ID），半径 = 表 senseRange。
+                if (EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy scanRow) && scanRow.Behavior == EnemyDefs.BehaviorPatrolMark)
                 {
                     GameObject pulse = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
                     pulse.name = "ScanPulse_" + enemy.EnemyInstanceId;
                     pulse.transform.SetParent(_root.transform, false);
                     pulse.transform.position = new Vector3(enemy.Position.x, 0.03f, enemy.Position.y);
-                    pulse.transform.localScale = new Vector3(FracturedCityLayout.ScoutMarkRange * 2f, 0.02f, FracturedCityLayout.ScoutMarkRange * 2f);
+                    pulse.transform.localScale = new Vector3(scanRow.SenseRange * 2f, 0.02f, scanRow.SenseRange * 2f);
                     GameLogic.View.UnityObjects.Release(pulse.GetComponent<Collider>());
                     Renderer pulseRenderer = pulse.GetComponent<Renderer>();
                     pulseRenderer.sharedMaterial = ViewMaterials.Standard(new Color(0.95f, 0.85f, 0.2f, 0.35f));
@@ -1311,9 +1310,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            Color baseColor = enemy.EnemyTypeId == EnemyCatalog.JammerId
-                ? new Color(0.6f, 0.15f, 0.55f)
-                : new Color(0.75f, 0.35f, 0.15f);
+            Color baseColor = EnemyBaseColor(enemy.EnemyTypeId);
             RefreshColor("Enemy_" + enemy.EnemyInstanceId, enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
             if (_enemyBadges.TryGetValue(enemy.EnemyInstanceId, out WorldBadge badge) && badge != null)
             {
@@ -1385,15 +1382,12 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标。Boss 节点/主核心不是内容目录条目，统一用主核心图标。</summary>
-        private static string EnemyBadgeIcon(string enemyTypeId)
-        {
-            if (enemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
-            {
-                return ContentIcons.IconIdFor(EnemyCatalog.CoreBossId);
-            }
-            return ContentIcons.IconIdFor(enemyTypeId);
-        }
+        /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标（FG9-DATA-01 起来自敌人表 iconId）。</summary>
+        private static string EnemyBadgeIcon(string enemyTypeId) => ContentIcons.IconIdFor(enemyTypeId);
+
+        /// <summary>FG9-DATA-01：占位颜色来自敌人表 viewColor。</summary>
+        private static Color EnemyBaseColor(string enemyTypeId) =>
+            EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy row) ? EnemyDefs.ViewColor(row) : Color.magenta;
 
         /// <summary>ER8-CONTENT-01：敌人头顶标记，按 EnemyInstanceId 索引。</summary>
         private readonly Dictionary<string, WorldBadge> _enemyBadges = new Dictionary<string, WorldBadge>();

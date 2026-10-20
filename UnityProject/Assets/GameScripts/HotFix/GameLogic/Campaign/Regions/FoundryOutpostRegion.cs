@@ -116,14 +116,8 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             state.RegionEnemies ??= Array.Empty<RegionEnemyRecord>();
-            SeedIfMissing(FoundryOutpostLayout.ArmorBotLeftSpawnId, EnemyCatalog.ArmorBotId,
-                FoundryOutpostLayout.ArmorBotLeftSpawn.Position, FoundryOutpostLayout.ArmorBotMaxHealth);
-            SeedIfMissing(FoundryOutpostLayout.ArmorBotRightSpawnId, EnemyCatalog.ArmorBotId,
-                FoundryOutpostLayout.ArmorBotRightSpawn.Position, FoundryOutpostLayout.ArmorBotMaxHealth);
-            SeedIfMissing(FoundryOutpostLayout.StriderSpawnId, EnemyCatalog.StriderId,
-                FoundryOutpostLayout.StriderSpawn.Position, FoundryOutpostLayout.StriderMaxHealth);
-            SeedIfMissing(FoundryOutpostLayout.RepairBotSpawnId, EnemyCatalog.RepairBotId,
-                FoundryOutpostLayout.RepairBotSpawn.Position, FoundryOutpostLayout.RepairBotMaxHealth);
+            // FG9-DATA-01：基线编成来自 fg.TbEnemyEncounter（base 行），耐久来自 fg.TbMechEnemy × 难度倍率。
+            RegionEnemySites.SeedEncounters(state, RegionId, EnemyDefs.ConditionBase);
 
             // ER6-ADAPT-01：基线4只敌人播种完成后，按本区域已锁定的 AdaptationId 增/撤反制增援槽位
             // （Flanker/JammerSupport 各一组）。必须在基线播种之后调用，保证幂等 SeedIfMissing 不受
@@ -133,31 +127,11 @@ namespace GameLogic.Campaign.Regions
             // ER7-CORE-01：90暴露核心入口增援——ER6-ADAPT-01 当时只预告，本方法是真正的实装点
             // （独立于上面 Flanker/JammerSupport 那条 adaptation 增援槽位，"不把它伪装成adaptation"）。
             ReconcileCoreReinforcement(state, Find(state));
-
-            void SeedIfMissing(string instanceId, string typeId, Vector2 position, float maxHealth)
-            {
-                if (FindEnemy(state, instanceId) != null)
-                {
-                    return;
-                }
-                state.RegionEnemies = state.RegionEnemies.Append(new RegionEnemyRecord
-                {
-                    EnemyInstanceId = instanceId,
-                    RegionId = RegionId,
-                    EnemyTypeId = typeId,
-                    Position = position,
-                    Health = maxHealth,
-                    MaxHealth = maxHealth,
-                    IsAlive = true,
-                    CycleCooldownRemaining = 0f,
-                    SecondaryTimer = 0f,
-                }).ToArray();
-            }
         }
 
         /// <summary>ER6-ADAPT-01：反制增援槽位的唯一增/撤入口——<see cref="RegionRecord.AdaptationId"/>
-        /// 决定当前应该存在哪一个（Flanker→护甲机类型的 <see cref="FoundryOutpostLayout.FlankerSpawnId"/>，
-        /// JammerSupport→复用 <see cref="EnemyCatalog.JammerId"/> 的 <see cref="FoundryOutpostLayout.JammerSupportSpawnId"/>，
+        /// 决定当前应该存在哪一个（Flanker→编成表 adaptation_flanker 行，JammerSupport→adaptation_jammer_support 行，
+        /// 敌人类型与位置都来自 fg.TbEnemyEncounter，
         /// None/HeatResistant→都不需要）。每次 <see cref="EnsureEnemiesSeeded"/>（即每次真实 Enter，包含
         /// resume）调用一遍：已存在且类型匹配则不动（保留其当前血量/存活状态，不是每次重置）；不该存在
         /// 的槽位如果还留着（同一 foundry_outpost 跨多次出征、适应从 Flanker 换成 JammerSupport 等场景）
@@ -170,41 +144,39 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            string requiredInstanceId = region.AdaptationId switch
+            // FG9-DATA-01 修复轮：反制增援按编成表 condition 列播种 / 撤除（一个反制可以对应任意多行编成），不再按写死的实例 ID。
+            string requiredCondition = region.AdaptationId switch
             {
-                AdaptationCatalog.Flanker => FoundryOutpostLayout.FlankerSpawnId,
-                AdaptationCatalog.JammerSupport => FoundryOutpostLayout.JammerSupportSpawnId,
+                AdaptationCatalog.Flanker => EnemyDefs.ConditionFlanker,
+                AdaptationCatalog.JammerSupport => EnemyDefs.ConditionJammerSupport,
                 _ => null,
             };
 
-            RemoveAdaptiveSlotIfStale(state, FoundryOutpostLayout.FlankerSpawnId,
-                keep: requiredInstanceId == FoundryOutpostLayout.FlankerSpawnId);
-            RemoveAdaptiveSlotIfStale(state, FoundryOutpostLayout.JammerSupportSpawnId,
-                keep: requiredInstanceId == FoundryOutpostLayout.JammerSupportSpawnId);
+            RemoveAdaptiveRowsIfStale(state, EnemyDefs.ConditionFlanker, keep: requiredCondition == EnemyDefs.ConditionFlanker);
+            RemoveAdaptiveRowsIfStale(state, EnemyDefs.ConditionJammerSupport, keep: requiredCondition == EnemyDefs.ConditionJammerSupport);
 
-            if (requiredInstanceId == null || FindEnemy(state, requiredInstanceId) != null)
+            if (requiredCondition == null)
             {
-                return; // 当前适应不需要增援槽位，或需要的槽位已经存在（类型经上面两步保证正确）。
+                return; // 当前适应不需要增援。
             }
 
-            bool isJammer = requiredInstanceId == FoundryOutpostLayout.JammerSupportSpawnId;
-            string enemyTypeId = isJammer ? EnemyCatalog.JammerId : EnemyCatalog.ArmorBotId;
-            Vector2 position = isJammer ? FoundryOutpostLayout.JammerSupportSpawn.Position : FoundryOutpostLayout.FlankerSpawn.Position;
-            float maxHealth = isJammer ? FracturedCityLayout.JammerMaxHealth : FoundryOutpostLayout.ArmorBotMaxHealth;
-
-            state.RegionEnemies = (state.RegionEnemies ?? Array.Empty<RegionEnemyRecord>()).Append(new RegionEnemyRecord
+            int added = RegionEnemySites.SeedEncounters(state, RegionId, requiredCondition);
+            if (added > 0)
             {
-                EnemyInstanceId = requiredInstanceId,
-                RegionId = RegionId,
-                EnemyTypeId = enemyTypeId,
-                Position = position,
-                Health = maxHealth,
-                MaxHealth = maxHealth,
-                IsAlive = true,
-                CycleCooldownRemaining = 0f,
-                SecondaryTimer = 0f,
-            }).ToArray();
-            Log.Info($"[FoundryOutpostRegion] 反制增援已布防：{requiredInstanceId}（{enemyTypeId}），对应适应 {region.AdaptationId}。");
+                Log.Info($"[FoundryOutpostRegion] 反制增援已布防：{added} 个（编成条件 {requiredCondition}），对应适应 {region.AdaptationId}。");
+            }
+        }
+
+        private static void RemoveAdaptiveRowsIfStale(CampaignState state, string condition, bool keep)
+        {
+            if (keep)
+            {
+                return;
+            }
+            foreach (GameConfig.fg.EnemyEncounter enc in EnemyDefs.Encounters(RegionId, condition))
+            {
+                RemoveAdaptiveSlotIfStale(state, enc.Id, keep: false);
+            }
         }
 
         private static void RemoveAdaptiveSlotIfStale(CampaignState state, string instanceId, bool keep)
@@ -244,18 +216,7 @@ namespace GameLogic.Campaign.Regions
                 state.RegionEnemies = state.RegionEnemies.Where(e => e.EnemyInstanceId != FoundryOutpostLayout.CoreReinforcementSpawnId).ToArray();
                 return;
             }
-            state.RegionEnemies = (state.RegionEnemies ?? Array.Empty<RegionEnemyRecord>()).Append(new RegionEnemyRecord
-            {
-                EnemyInstanceId = FoundryOutpostLayout.CoreReinforcementSpawnId,
-                RegionId = RegionId,
-                EnemyTypeId = EnemyCatalog.ArmorBotId,
-                Position = FoundryOutpostLayout.CoreReinforcementSpawn.Position,
-                Health = FoundryOutpostLayout.ArmorBotMaxHealth,
-                MaxHealth = FoundryOutpostLayout.ArmorBotMaxHealth,
-                IsAlive = true,
-                CycleCooldownRemaining = 0f,
-                SecondaryTimer = 0f,
-            }).ToArray();
+            RegionEnemySites.SeedEncounters(state, RegionId, EnemyDefs.ConditionCoreReinforcement);
             Log.Info("[FoundryOutpostRegion] 信号暴露突破90：核心入口增援护甲机已布防（出发页预告已兑现）。");
         }
 
@@ -287,7 +248,8 @@ namespace GameLogic.Campaign.Regions
             }
 
             // ER7-CORE-01：节点/主核心是"护盾/阶段"语义，全部委托 FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口）。
-            if (enemy.EnemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemy.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
+            // FG9-DATA-01：按敌人表标签 external_health（血量真相在首领状态机）路由，不按 ID。
+            if (EnemyDefs.HasTag(enemy.EnemyTypeId, EnemyDefs.TagExternalHealth))
             {
                 (bool bossOk, string bossReason) = FoundryOutpostCoreBoss.ApplyDamage(state, enemy, damage);
                 CombatSite bossSite = CombatSites.Get(RegionId);
@@ -334,30 +296,31 @@ namespace GameLogic.Campaign.Regions
             Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
         }
 
-        /// <summary>DEMO-CONTENT-LOCK.md §4.1第4条"步进炮首次击破必产生铸造重炮模块"——只在步进炮
-        /// 死亡且此前从未产出过该关键物时掉落（同类型敌人理论上只有一个实例，天然幂等；仍显式判重，
-        /// 防御与 <see cref="FracturedCityRegion.TryDestroyListeningNode"/> 同一纪律）。其余敌类型/
-        /// 重复击破（结构上不会发生，防御性写法）只掉普通废料。</summary>
+        /// <summary>DEMO-CONTENT-LOCK.md §4.1第4条"步进炮首次击破必产生铸造重炮模块"——FG9-DATA-01 起按敌人表 keyDrop 列：
+        /// 带关键掉落的敌人死亡且该关键物此前从未产出过时掉落（显式判重，与 <see cref="FracturedCityRegion.TryDestroyListeningNode"/> 同一纪律）。
+        /// 普通废料按表 scrapLoot（Demo 的“其它敌人掉 10”兜底删除：干扰支援从此按表掉 20）。</summary>
         private static void SpawnEnemyLoot(CampaignState state, RegionEnemyRecord enemy)
         {
-            if (enemy.EnemyTypeId == EnemyCatalog.StriderId)
+            if (!EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy row))
+            {
+                return;
+            }
+            if (!string.IsNullOrEmpty(row.KeyDrop) && row.KeyDrop != EnemyDefs.None)
             {
                 bool alreadyDropped = state.RegionQuestItems != null &&
-                    state.RegionQuestItems.Any(q => q.ContentId == FoundryOutpostLayout.CannonModuleContentId);
+                    state.RegionQuestItems.Any(q => q.ContentId == row.KeyDrop);
                 if (!alreadyDropped)
                 {
-                    SpawnQuestItemOnGround(state, FoundryOutpostLayout.CannonModuleContentId, enemy.Position);
-                    Log.Info("[FoundryOutpostRegion] 步进炮已阵亡：铸造重炮模块已掉落。");
+                    SpawnQuestItemOnGround(state, row.KeyDrop, enemy.Position);
+                    Log.Info($"[FoundryOutpostRegion] {enemy.EnemyInstanceId} 已阵亡：关键物 {row.KeyDrop} 已掉落。");
                 }
             }
 
-            int amount = enemy.EnemyTypeId switch
+            int amount = row.ScrapLoot;
+            if (amount <= 0)
             {
-                EnemyCatalog.StriderId => FoundryOutpostLayout.StriderScrapLoot,
-                EnemyCatalog.ArmorBotId => FoundryOutpostLayout.ArmorBotScrapLoot,
-                EnemyCatalog.RepairBotId => FoundryOutpostLayout.RepairBotScrapLoot,
-                _ => 10,
-            };
+                return;
+            }
             HomeValleyCargo.SpawnGroundItem(state, RegionId, enemy.Position,
                 CampaignEconomyLedger.ResourceScrap, amount, enemy.EnemyInstanceId + ":scrap");
         }
@@ -407,17 +370,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return new Vector2(0f, -1f);
             }
-            if (enemy.EnemyInstanceId == FoundryOutpostLayout.FlankerSpawnId)
-            {
-                return FoundryOutpostLayout.FlankerFacing;
-            }
-            if (enemy.EnemyInstanceId == FoundryOutpostLayout.CoreReinforcementSpawnId)
-            {
-                return new Vector2(0f, -1f); // 面朝入口方向（同护甲机驻守语义，朝来袭方向）。
-            }
-            return enemy.EnemyInstanceId == FoundryOutpostLayout.ArmorBotLeftSpawnId
-                ? FoundryOutpostLayout.ArmorBotLeftFacing
-                : FoundryOutpostLayout.ArmorBotRightFacing;
+            return EnemyDefs.FacingOf(enemy.EnemyInstanceId); // FG9-DATA-01：编成表 facingX/Y（没有编成行朝 -Y）。
         }
 
         /// <summary>唯一攻击结算入口（编队攻击命令在内核里走同一段规则；本方法是直控点击的入口）。

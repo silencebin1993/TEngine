@@ -64,12 +64,14 @@ namespace GameLogic.Campaign.Regions
         public const float CameraBoundsHalfExtentX = 24f;
         public const float CameraBoundsHalfExtentZ = 30f;
 
-        // ── 数值调校（唯一真相：ER4-CONTENT-01 EnemyCatalog + DEMO-CONTENT-LOCK.md §4.1，不重复发明）──
-        // FG0-DATA-01：敌人生命 / 掉落来自 Luban 表 fg.TbMechEnemy（tools/cell_tables/fgdata.py），不再写死常量。
-        public static float ScoutMaxHealth => FgContentTables.Enemy(EnemyCatalog.ScoutId).MaxHp;
-        public const float ScoutMarkIntervalSeconds = 8f;
-        public static float JammerMaxHealth => FgContentTables.Enemy(EnemyCatalog.JammerId).MaxHp;
-        public const float JammerRadius = 12f; // 同上。
+        // ── 敌人数值：FG9-DATA-01 起唯一真相是 Luban 表 fg.TbMechEnemy（tools/cell_tables/fgdata_enemy.py），
+        // 哪个实例是什么敌人由编成表 fg.TbEnemyEncounter 决定；以下只是按本区域实例取表的派生视图（自检与情报沿用这些名字）。──
+        private static GameConfig.fg.MechEnemy At(string instanceId) => EnemyDefs.Get(EnemyDefs.EncounterTypeOf(RegionId, instanceId));
+        public static float ScoutMaxHealth => At(Scout1SpawnId).MaxHp;
+        public static float ScoutMarkIntervalSeconds => At(Scout1SpawnId).CycleSeconds;
+        public static float JammerMaxHealth => At(JammerSpawnId).MaxHp;
+        /// <summary>干扰半径（表 effectRange）：监听节点的干扰场沿用干扰机同一半径（Demo“守节点”语义）。</summary>
+        public static float JammerRadius => At(JammerSpawnId).EffectRange;
         public const float ListeningNodeMaxHealth = 50f; // 内容锁定表未点名具体 HP，取与静默侦察机同量级。
         public const float ControlJamGraceSeconds = 2f; // "原已受控机器在2秒宽限后回弹"。
         public const int CrateScrapAmount = 40; // DEMO-CONTENT-LOCK.md §4.1第3条"周围三箱各40废料"。
@@ -78,19 +80,19 @@ namespace GameLogic.Campaign.Regions
         // ── ER5-SILENT-01：敌人 AI 调校（数值来源见 FracturedCityEnemyAi 类注释——DEMO-CONTENT-LOCK.md
         // §5 只给了 HP/标记间隔/干扰半径，未点名武器伤害/射程/移动速度，以下是本 Story 按既有连射器
         // 数值量级（8伤害/0.45秒冷却）向下取的保守默认值，非文档摘录）───────────────────────
-        public const float ScoutMarkRange = 10f; // 侦察机标记距离，超出或被遮挡（"不魔法穿墙"）不生效。
-        public const float ScoutFleeTriggerRange = 6f; // 玩家进入此距离，侦察机后撤（"后撤"字面行为）。
-        public const float ScoutFleeLeash = 5f; // 后撤不超过出生点这个半径，避免越界闯入干扰机/其它锚点。
-        public const float ScoutPatrolRadius = 2.5f; // 无威胁时的巡逻摆动半径。
-        public const float ScoutMoveSpeed = 2.2f;
-        public static int ScoutScrapLoot => FgContentTables.Enemy(EnemyCatalog.ScoutId).ScrapLoot; // 击破掉落（正式货物链 HomeValleyCargo.SpawnGroundItem），fg.TbMechEnemy。
+        public static float ScoutMarkRange => At(Scout1SpawnId).SenseRange; // 侦察机标记距离，超出或被遮挡（"不魔法穿墙"）不生效。
+        public static float ScoutFleeTriggerRange => At(Scout1SpawnId).FleeTrigger; // 玩家进入此距离，侦察机后撤。
+        public static float ScoutFleeLeash => At(Scout1SpawnId).Leash; // 后撤不超过出生点这个半径。
+        public static float ScoutPatrolRadius => At(Scout1SpawnId).PatrolRadius; // 无威胁时的巡逻摆动半径。
+        public static float ScoutMoveSpeed => At(Scout1SpawnId).Speed;
+        public static int ScoutScrapLoot => At(Scout1SpawnId).ScrapLoot; // 击破掉落（正式货物链 HomeValleyCargo.SpawnGroundItem）。
 
-        public const float JammerAttackRange = 8f; // 驻守节点的防御性攻击——干扰机唯一会主动开火的敌人。
-        public const float JammerAttackDamage = 6f;
-        public const float JammerAttackCooldownSeconds = 2.5f;
-        public static int JammerScrapLoot => FgContentTables.Enemy(EnemyCatalog.JammerId).ScrapLoot;
+        public static float JammerAttackRange => At(JammerSpawnId).WeaponRange; // 驻守节点的防御性攻击。
+        public static float JammerAttackDamage => At(JammerSpawnId).WeaponDamage;
+        public static float JammerAttackCooldownSeconds => At(JammerSpawnId).WeaponCooldown;
+        public static int JammerScrapLoot => At(JammerSpawnId).ScrapLoot;
 
-        public const float MarkDurationSeconds = 10f; // 标记状态持续时间，干扰机可提前清除或自然过期。
+        public static float MarkDurationSeconds => At(Scout1SpawnId).EffectSeconds; // 标记状态持续时间，干扰机可提前清除或自然过期。
 
         // 直控攻击（玩家WASD+左键瞄准），同 HomeValleyCombatTargets.TryFindTargetInAim 同一设计语言：
         public const float DirectAttackRange = 12f;

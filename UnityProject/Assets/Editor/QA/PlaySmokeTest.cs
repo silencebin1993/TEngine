@@ -5020,7 +5020,7 @@ namespace GameLogic.EditorTools
             Write($"  - 目标条第 2 项：{item}；备注行：{note}");
             Check(item.Contains("：在地面") || item.Contains("：已装上") || item.Contains("：摧毁监听节点后掉落"), "远征中目标条写出关键物现状或获得方式");
             Write($"  - 世界特效活动中 {VfxActive()} 个");
-            CheckEnemiesFromTable(Campaign.Regions.FracturedCityLayout.RegionId, Campaign.Content.EnemyCatalog.ScoutId);
+            CheckEnemiesFromTable(Campaign.Regions.FracturedCityLayout.RegionId, "enemy_scout");
             CheckNoTextMarkers("破碎都市");
             // FG0-ARCH-03：远征战斗在战斗内核里——编队攻击（与战略命令栏 / 热键同一个 IssueAttack 入口）打驻守的干扰机。
             Campaign.Regions.FracturedCityController city = GameRoot.FracturedCity;
@@ -5538,7 +5538,7 @@ namespace GameLogic.EditorTools
             }
             bool active = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive;
             Write($"  - 铸造前哨激活：{active}；目标条：{ObjectiveTitle()}；剪影 {CountNamed("Silhouette")} 个；世界特效活动中 {VfxActive()} 个");
-            CheckEnemiesFromTable(Campaign.Regions.FoundryOutpostLayout.RegionId, Campaign.Content.EnemyCatalog.ArmorBotId);
+            CheckEnemiesFromTable(Campaign.Regions.FoundryOutpostLayout.RegionId, "enemy_armorbot");
             CheckNoTextMarkers("铸造前哨");
             GameRoot.FoundryOutpost?.Exit(evacuateSuccess: false);
             GameRoot.ResumeHomeValley();
@@ -13116,11 +13116,21 @@ namespace GameLogic.EditorTools
         /// <summary>FG0-DATA-01：Play 模式下区域播种的敌人生命来自 fg.TbMechEnemy。</summary>
         private static void CheckEnemiesFromTable(string regionId, string enemyTypeId)
         {
-            float expected = Campaign.Content.FgContentTables.Enemy(enemyTypeId).MaxHp;
-            RegionEnemyRecord[] enemies = CampaignSession.Current?.RegionEnemies?
+            CampaignState state = CampaignSession.Current;
+            float expected = Campaign.Content.EnemyDefs.SeedHealth(state, Campaign.Content.FgContentTables.Enemy(enemyTypeId));
+            RegionEnemyRecord[] enemies = state?.RegionEnemies?
                 .Where(e => e != null && e.RegionId == regionId && e.EnemyTypeId == enemyTypeId).ToArray() ?? Array.Empty<RegionEnemyRecord>();
             Check(enemies.Length > 0 && enemies.All(e => Mathf.Approximately(e.MaxHealth, expected)),
-                $"{enemyTypeId} 播种 {enemies.Length} 个，MaxHealth 全部等于表值 {expected}");
+                $"{enemyTypeId} 播种 {enemies.Length} 个，MaxHealth 全部等于表值 × 难度倍率 {expected}");
+            // FG9-DATA-01（FGT-FAC-001）：正式入口进区域后，该区域每个敌人都来自敌人表、表行完整、都进了战斗内核；没有“内容表错误”。
+            RegionEnemyRecord[] all = state?.RegionEnemies?.Where(e => e != null && e.RegionId == regionId).ToArray() ?? Array.Empty<RegionEnemyRecord>();
+            Campaign.Combat.CombatSite site = Campaign.Combat.CombatSites.Get(regionId);
+            string[] bad = all.Where(e => !Campaign.Content.EnemyDefs.TryGet(e.EnemyTypeId, out GameConfig.fg.MechEnemy row)
+                                         || Campaign.Content.EnemyDefs.ProblemsFor(row).Count > 0
+                                         || (site != null && !site.TryGetEnemyUnit(e.EnemyInstanceId, out _)))
+                .Select(e => e.EnemyInstanceId + ":" + e.EnemyTypeId).ToArray();
+            Check(all.Length > 0 && bad.Length == 0 && Campaign.Content.EnemyDefs.ReportedCount == 0,
+                $"FG9-DATA-01：{regionId} 的 {all.Length} 个敌人全部来自敌人表且进了战斗内核（异常 {string.Join(",", bad)}；内容表错误通知 {Campaign.Content.EnemyDefs.ReportedCount} 条）");
         }
 
         private static Transform FindNamed(string name) =>

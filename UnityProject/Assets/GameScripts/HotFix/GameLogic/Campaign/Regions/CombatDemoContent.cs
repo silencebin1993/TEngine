@@ -12,47 +12,12 @@ using UnityEngine;
 namespace GameLogic.Campaign.Regions
 {
     /// <summary>
-    /// FG0-ARCH-03：Demo 战斗内容 → 战斗内核数据的唯一翻译处（“与 Demo 战斗规则一致”）。
-    /// 每一种 Demo 敌人的行为、武器、护甲、牵引点都在这里按 Demo 常量（FracturedCityLayout / FoundryOutpostLayout / fg.TbMechEnemy）给出；
-    /// 内核按这些数据跑 Demo 原来的逐敌人 AI（原 FracturedCityEnemyAi / FoundryOutpostEnemyAi / FoundryOutpostCoreBoss.TickCoreAttack 已删除）。
-    /// 按标签与接口入表属于 FG9-DATA-01（DEBT-FG0DATA01-02）。
+    /// FG0-ARCH-03 起区域敌人与战斗内核的对账 / 首领标志同步处。FG9-DATA-01 起敌人的内核模板不再在这里逐 ID 翻译：
+    /// 全部经 <see cref="EnemySpawnBuilder"/> 按敌人表（fg.TbMechEnemy 的读法 + 标签 + 数值）与编成表生成（DEBT-FG0DATA01-02 / DEBT-FG0ARCH03-05 关闭）。
     /// </summary>
     public static class CombatDemoContent
     {
-        private const float EnemyRadius = 0.8f;
-
-        private static CombatSpawn Base(CombatBehavior behavior, CombatUnitKind kind, CombatUnitFlags extra)
-        {
-            return new CombatSpawn
-            {
-                Kind = kind,
-                Faction = CombatFaction.Hostile,
-                Behavior = behavior,
-                Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | extra,
-                Radius = EnemyRadius,
-                Weapon = -1,
-                BehaviorProfile = -1,
-                Priority = 1,
-                ArmorHalfAngleDeg = 90f,
-                ArmorFacing = new float2(0f, -1f),
-            };
-        }
-
-        private static int Weapon(CombatSite site, float range, float damage, float cooldown, float aim = 0f)
-        {
-            return site.WeaponIndex(new CombatWeapon
-            {
-                Mode = CombatWeaponMode.Instant,
-                HasOutput = 1,
-                Range = range,
-                Damage = damage,
-                Cooldown = cooldown,
-                AimSeconds = aim,
-                TargetMode = CombatTargetMode.Nearest,
-            });
-        }
-
-        /// <summary>Demo 敌人记录 → 内核单位模板。认不出的敌人类型返回 false（记日志，不静默替身）。</summary>
+        /// <summary>敌人记录 → 内核单位模板（表驱动，见 <see cref="EnemySpawnBuilder"/>）。表行缺失 / 不完整时可见报错并返回 false（不生成默认替身）。</summary>
         public static bool TryTemplate(CombatSite site, CampaignState state, RegionEnemyRecord e, out CombatSpawn spawn)
         {
             spawn = default;
@@ -60,110 +25,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return false;
             }
-            if (e.RegionId == FracturedCityLayout.RegionId)
-            {
-                if (e.EnemyTypeId == EnemyCatalog.ScoutId)
-                {
-                    spawn = Base(CombatBehavior.Scout, CombatUnitKind.Enemy, CombatUnitFlags.Report | CombatUnitFlags.NeedsLos);
-                    spawn.BehaviorProfile = site.ProfileIndex(new CombatBehaviorProfile
-                    {
-                        Speed = FracturedCityLayout.ScoutMoveSpeed,
-                        FleeTrigger = FracturedCityLayout.ScoutFleeTriggerRange,
-                        Leash = FracturedCityLayout.ScoutFleeLeash,
-                        PatrolRadius = FracturedCityLayout.ScoutPatrolRadius,
-                        PatrolFreq = 0.6f,
-                        SenseRange = FracturedCityLayout.ScoutMarkRange,
-                        CycleSeconds = FracturedCityLayout.ScoutMarkIntervalSeconds,
-                        EffectSeconds = FracturedCityLayout.MarkDurationSeconds,
-                    });
-                    Vector2 home = e.EnemyInstanceId == FracturedCityLayout.Scout1SpawnId
-                        ? FracturedCityLayout.Scout1Spawn.Position
-                        : FracturedCityLayout.Scout2Spawn.Position;
-                    spawn.Home = new double2(home.x, home.y);
-                    return true;
-                }
-                if (e.EnemyTypeId == EnemyCatalog.JammerId)
-                {
-                    spawn = Base(CombatBehavior.Jammer, CombatUnitKind.Enemy, CombatUnitFlags.Report | CombatUnitFlags.NeedsLos | CombatUnitFlags.WeaponEnabled);
-                    spawn.Weapon = Weapon(site, FracturedCityLayout.JammerAttackRange, FracturedCityLayout.JammerAttackDamage, FracturedCityLayout.JammerAttackCooldownSeconds);
-                    spawn.BehaviorProfile = site.ProfileIndex(new CombatBehaviorProfile { EffectRange = FracturedCityLayout.JammerRadius });
-                    spawn.Home = new double2(e.Position.x, e.Position.y);
-                    return true;
-                }
-            }
-            else if (e.RegionId == FoundryOutpostLayout.RegionId)
-            {
-                if (e.EnemyTypeId == FoundryOutpostLayout.BossNodeTypeId)
-                {
-                    spawn = Base(CombatBehavior.None, CombatUnitKind.Structure, CombatUnitFlags.ExternalHealth);
-                    spawn.Radius = 2f;
-                    spawn.Home = new double2(e.Position.x, e.Position.y);
-                    return true;
-                }
-                if (e.EnemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
-                {
-                    spawn = Base(CombatBehavior.HoldFire, CombatUnitKind.Structure,
-                        CombatUnitFlags.ExternalHealth | CombatUnitFlags.NeedsLos | CombatUnitFlags.SilentFire);
-                    spawn.Priority = 0; // Demo：首领（主核心）先于其它敌人结算。
-                    spawn.Radius = 3f;
-                    spawn.Weapon = Weapon(site, FoundryOutpostLayout.CoreAttackRange, FoundryOutpostLayout.CoreAttackDamage, FoundryOutpostLayout.CoreAttackCooldownSeconds);
-                    spawn.ArmorFraction = 0f;
-                    spawn.ArmorHalfAngleDeg = FoundryOutpostLayout.MainCoreFrontalHalfAngleDeg;
-                    spawn.ArmorFacing = new float2(FoundryOutpostLayout.MainCoreFacing.x, FoundryOutpostLayout.MainCoreFacing.y);
-                    spawn.Home = new double2(e.Position.x, e.Position.y);
-                    return true;
-                }
-                if (e.EnemyTypeId == EnemyCatalog.ArmorBotId)
-                {
-                    spawn = Base(CombatBehavior.HoldFire, CombatUnitKind.Enemy, CombatUnitFlags.Report | CombatUnitFlags.NeedsLos | CombatUnitFlags.WeaponEnabled);
-                    spawn.Weapon = Weapon(site, FoundryOutpostLayout.ArmorBotAttackRange, FoundryOutpostLayout.ArmorBotAttackDamage, FoundryOutpostLayout.ArmorBotAttackCooldownSeconds);
-                    spawn.ArmorFraction = FoundryOutpostLayout.ArmorBotFrontalReductionPct;
-                    spawn.ArmorHalfAngleDeg = FoundryOutpostLayout.ArmorBotFrontalHalfAngleDeg;
-                    Vector2 facing = FoundryOutpostRegion.ArmorFacingOf(e);
-                    spawn.ArmorFacing = new float2(facing.x, facing.y);
-                    RegionRecord region = FoundryOutpostRegion.Find(state);
-                    if (region != null && region.AdaptationId == AdaptationCatalog.HeatResistant)
-                    {
-                        spawn.Flags |= CombatUnitFlags.HeatResistant;
-                    }
-                    spawn.Home = new double2(e.Position.x, e.Position.y);
-                    return true;
-                }
-                if (e.EnemyTypeId == EnemyCatalog.StriderId)
-                {
-                    spawn = Base(CombatBehavior.Telegraph, CombatUnitKind.Enemy, CombatUnitFlags.Report | CombatUnitFlags.NeedsLos | CombatUnitFlags.WeaponEnabled);
-                    spawn.Weapon = Weapon(site, FoundryOutpostLayout.StriderAttackRange, FoundryOutpostLayout.StriderAttackDamage,
-                        FoundryOutpostLayout.StriderAttackCooldownSeconds, FoundryOutpostLayout.StriderAimSeconds);
-                    spawn.Home = new double2(e.Position.x, e.Position.y);
-                    return true;
-                }
-                if (e.EnemyTypeId == EnemyCatalog.RepairBotId)
-                {
-                    spawn = Base(CombatBehavior.Repair, CombatUnitKind.Enemy, CombatUnitFlags.Report);
-                    spawn.BehaviorProfile = site.ProfileIndex(new CombatBehaviorProfile
-                    {
-                        Speed = FoundryOutpostLayout.RepairBotMoveSpeed,
-                        FleeTrigger = FoundryOutpostLayout.RepairBotFleeTriggerRange,
-                        Leash = FoundryOutpostLayout.RepairBotFleeLeash,
-                        EffectRange = FoundryOutpostLayout.RepairBotHealRange,
-                        EffectAmount = FoundryOutpostLayout.RepairBotHealAmount,
-                        CycleSeconds = FoundryOutpostLayout.RepairBotHealCooldownSeconds,
-                    });
-                    // Demo：维修机（包括阶段过渡召唤的那台）后撤都以常规维修机出生点为牵引中心。
-                    spawn.Home = new double2(FoundryOutpostLayout.RepairBotSpawn.Position.x, FoundryOutpostLayout.RepairBotSpawn.Position.y);
-                    return true;
-                }
-                if (e.EnemyTypeId == EnemyCatalog.JammerId)
-                {
-                    // ER6-ADAPT-01 干扰支援：驻守 + 自卫攻击（不清标记）。
-                    spawn = Base(CombatBehavior.HoldFire, CombatUnitKind.Enemy, CombatUnitFlags.Report | CombatUnitFlags.NeedsLos | CombatUnitFlags.WeaponEnabled);
-                    spawn.Weapon = Weapon(site, FracturedCityLayout.JammerAttackRange, FracturedCityLayout.JammerAttackDamage, FracturedCityLayout.JammerAttackCooldownSeconds);
-                    spawn.Home = new double2(e.Position.x, e.Position.y);
-                    return true;
-                }
-            }
-            Log.Error($"[CombatDemoContent] 认不出的敌人 {e.EnemyInstanceId}（{e.EnemyTypeId}，区域 {e.RegionId}）：不进战斗内核（不生成默认替身）。");
-            return false;
+            return EnemySpawnBuilder.TryBuild(site, state, e, RegionEnemySites.For(e.RegionId), out spawn);
         }
 
         /// <summary>

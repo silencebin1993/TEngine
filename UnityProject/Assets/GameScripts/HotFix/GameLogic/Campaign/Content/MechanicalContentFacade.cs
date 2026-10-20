@@ -7,7 +7,7 @@ namespace GameLogic.Campaign.Content
 {
     /// <summary>ER4-CONTENT-01：封闭内容目录的聚合查询入口。STORY-EXECUTION-CARDS.md 第1条要求"建立
     /// 封闭目录"，本类把 <see cref="ChassisCatalog"/>/<see cref="ComponentCatalog"/>/
-    /// <see cref="FirmwareCatalog"/>/<see cref="MechanicalReactionCatalog"/>/<see cref="EnemyCatalog"/>/
+    /// <see cref="FirmwareCatalog"/>/<see cref="MechanicalReactionCatalog"/>/<see cref="EnemyDefs"/>（FG9-DATA-01 起敌人表）/
     /// <see cref="BuildingCatalog"/> 六张表合成一份可整体审计的集合（3+4+2+4+6+2+6+8=35 条），
     /// 并提供真实生产代码（<c>WorkOrderPanelUIToolkit</c> 等）可以直接调用的展示名解析。</summary>
     public static class MechanicalContentFacade
@@ -20,7 +20,8 @@ namespace GameLogic.Campaign.Content
             get
             {
                 // FG2-FW-02：组件 / 底盘子表也按表与语言生成（新作战组件、固定底盘），版本合在一起。
-                int rev = FirmwareCatalog.Revision * 7919 + ComponentCatalog.Revision * 131 + ChassisCatalog.Revision;
+                // FG9-DATA-01：敌人子表由 fg.TbMechEnemy 与文本键生成，版本一并合入。
+                int rev = FirmwareCatalog.Revision * 7919 + ComponentCatalog.Revision * 131 + ChassisCatalog.Revision + EnemyDefs.ContentRevision * 104729;
                 if (_all == null || rev != _allRevision)
                 {
                     _all = BuildAll();
@@ -53,7 +54,7 @@ namespace GameLogic.Campaign.Content
             Merge(ComponentCatalog.All);
             Merge(FirmwareCatalog.All);
             Merge(MechanicalReactionCatalog.All);
-            Merge(EnemyCatalog.All);
+            Merge(EnemyDefs.ContentDefs);
             Merge(BuildingCatalog.All);
             return merged;
         }

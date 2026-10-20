@@ -746,7 +746,8 @@ namespace GameLogic.Campaign.Regions
                 GetPossessed = () => _possessed,
                 SetPossessed = SetPossessedMarker,
                 IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
-                IsPositionJammed = null, // 铸造前哨外围没有干扰机制（干扰是破碎都市专属）。
+                // FG9-DATA-01（FG-GAP-049）：干扰机按职能自带干扰场（反制“干扰支援”调来的那台在这里真的干扰信号）。
+                IsPositionJammed = pos => EnemyJamFields.IsJammed(CampaignSession.Current, FoundryOutpostLayout.RegionId, pos),
                 SquadCommands = SquadCommands,
                 OnPossessCommitted = OnControlPossessCommitted,
                 OnReleased = null,
@@ -1218,6 +1219,8 @@ namespace GameLogic.Campaign.Regions
                 renderer.sharedMaterial = ViewMaterials.Standard(enemy.IsAlive ? baseColor : new Color(0.25f, 0.25f, 0.25f));
                 // AC-THEME-002：铸造阵营方正厚重剪影；供能节点/主核心是大块结构（胶囊只留作命中盒）。
                 PlaceholderSilhouette.ApplyEnemy(go, renderer, enemy.EnemyTypeId);
+                // FG9-DATA-01（FG-GAP-049）：干扰场读法的敌人画出干扰范围（半径 = 表 effectRange），阵亡时隐藏（B05/B07 状态可见）。
+                AttachJamFieldRing(go, enemy);
 
                 // ER8-CONTENT-01 AC-ACC-002：敌人头顶的类型标记（倒三角＝敌方，角标圆点/方块＝静默/铸造阵营），
                 // 敌我不再只靠胶囊体颜色区分。胶囊体等比缩放，标记直接挂在它下面随之移动。
@@ -1228,18 +1231,29 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        private static Color EnemyBaseColor(string enemyTypeId)
+        /// <summary>干扰范围圈的子物体名（自检按它找）。</summary>
+        public const string JamFieldRingName = "JamField";
+
+        private static void AttachJamFieldRing(GameObject enemyView, RegionEnemyRecord enemy)
         {
-            if (enemyTypeId == EnemyCatalog.ArmorBotId)
+            if (!EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy row) || row.Behavior != EnemyDefs.BehaviorJamField
+                || !(row.EffectRange > 0f) || RegionEnemySites.For(enemy.RegionId).AnchoredJamField)
             {
-                return new Color(0.5f, 0.45f, 0.15f); // 厚甲：暗黄铜。
+                return;
             }
-            if (enemyTypeId == EnemyCatalog.StriderId)
-            {
-                return new Color(0.7f, 0.25f, 0.1f); // 重炮：橙红。
-            }
-            return new Color(0.2f, 0.55f, 0.4f); // 维修机：青绿（区别于攻击单位的暖色系）。
+            GameObject ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            ring.name = JamFieldRingName;
+            GameLogic.View.UnityObjects.Release(ring.GetComponent<Collider>());
+            ring.transform.SetParent(enemyView.transform, false);
+            ring.transform.localPosition = new Vector3(0f, -0.97f, 0f);
+            ring.transform.localScale = new Vector3(row.EffectRange * 2f, 0.01f, row.EffectRange * 2f);
+            ring.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(new Color(0.6f, 0.15f, 0.55f, 0.25f));
+            ring.SetActive(enemy.IsAlive);
         }
+
+        /// <summary>FG9-DATA-01：占位颜色来自敌人表 viewColor（厚甲暗黄铜、重炮橙红、维修机青绿……）。</summary>
+        private static Color EnemyBaseColor(string enemyTypeId) =>
+            EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy row) ? EnemyDefs.ViewColor(row) : Color.magenta;
 
         private void BuildMachineView(HomeValleyMachineMarker marker, MachineRecord machine)
         {
@@ -1339,6 +1353,11 @@ namespace GameLogic.Campaign.Regions
             {
                 badge.SetVisible(enemy.IsAlive);
             }
+            Transform ring = _root.transform.Find("Enemy_" + enemy.EnemyInstanceId + "/" + JamFieldRingName);
+            if (ring != null)
+            {
+                ring.gameObject.SetActive(enemy.IsAlive);
+            }
         }
 
         private void SyncWorldVisuals(CampaignState state)
@@ -1362,15 +1381,8 @@ namespace GameLogic.Campaign.Regions
             // FG0-ARCH-03：敌人位置由内核每帧插值写入（FrameRender）；颜色 / 头顶标记在阵亡事件时刷新（RefreshEnemyView），不每帧扫全部敌人。
         }
 
-        /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标。Boss 节点/主核心不是内容目录条目，统一用主核心图标。</summary>
-        private static string EnemyBadgeIcon(string enemyTypeId)
-        {
-            if (enemyTypeId == FoundryOutpostLayout.BossNodeTypeId || enemyTypeId == FoundryOutpostLayout.BossCoreTypeId)
-            {
-                return ContentIcons.IconIdFor(EnemyCatalog.CoreBossId);
-            }
-            return ContentIcons.IconIdFor(enemyTypeId);
-        }
+        /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标（FG9-DATA-01 起来自敌人表 iconId，供能节点的表行也写主核心图标）。</summary>
+        private static string EnemyBadgeIcon(string enemyTypeId) => ContentIcons.IconIdFor(enemyTypeId);
 
         /// <summary>ER8-CONTENT-01：敌人头顶标记，按 EnemyInstanceId 索引。</summary>
         private readonly Dictionary<string, WorldBadge> _enemyBadges = new Dictionary<string, WorldBadge>();

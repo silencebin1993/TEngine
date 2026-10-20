@@ -671,7 +671,7 @@ namespace GameLogic.Campaign
         // ── ER7-CORE-01：Boss 战 FSM/计时/一次性标记——只在 FoundryOutpost 的 RegionRecord 上有意义
         // （同 AdaptationId/CoreGateUnlocked 先例，共享类但只对特定区域字段有效）。两供能节点+主核心
         // 的 HP/存活本身**不**在这里重复记账——它们就是三条 <see cref="RegionEnemyRecord"/>
-        // （EnemyTypeId="boss_node"/"boss_core"），复用该类型已有的 Health/MaxHealth/IsAlive/
+        // （EnemyTypeId = 敌人表 enemy_core_node / enemy_core_boss；FG9-DATA-01 前旧档是 boss_node / boss_core，读档改写），复用该类型已有的 Health/MaxHealth/IsAlive/
         // CycleCooldownRemaining 字段与既有 <see cref="Regions.FoundryOutpostRegion.TryDamageEnemy"/>/
         // <see cref="Regions.CannonCombat.TryFire"/> 伤害结算路径（含铸造重炮/熔穿过载），不新造第二套
         // 伤害管线。唯一写入口全部集中在 Regions.FoundryOutpostCoreBoss，不在别处散落改这些字段。──
@@ -729,7 +729,7 @@ namespace GameLogic.Campaign
     {
         public string EnemyInstanceId;
         public string RegionId;
-        /// <summary><see cref="Content.EnemyCatalog"/> 的条目 id（如 enemy_scout/enemy_jammer）。</summary>
+        /// <summary>敌人表 fg.TbMechEnemy 的 id（如 enemy_scout / enemy_jammer；FG9-DATA-01 起首领部件也是表 id）。</summary>
         public string EnemyTypeId;
         public Vector2 Position;
         public float Health;

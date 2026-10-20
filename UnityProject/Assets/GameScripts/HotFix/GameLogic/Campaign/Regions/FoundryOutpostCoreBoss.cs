@@ -105,12 +105,8 @@ namespace GameLogic.Campaign.Regions
                     && e.EnemyInstanceId != FoundryOutpostLayout.MainCoreId)
                 .ToArray();
 
-            SpawnBossRecord(state, FoundryOutpostLayout.CoreNode1Id, FoundryOutpostLayout.BossNodeTypeId,
-                FoundryOutpostLayout.CoreNode1.Position, FoundryOutpostLayout.NodeMaxHealth);
-            SpawnBossRecord(state, FoundryOutpostLayout.CoreNode2Id, FoundryOutpostLayout.BossNodeTypeId,
-                FoundryOutpostLayout.CoreNode2.Position, FoundryOutpostLayout.NodeMaxHealth);
-            SpawnBossRecord(state, FoundryOutpostLayout.MainCoreId, FoundryOutpostLayout.BossCoreTypeId,
-                FoundryOutpostLayout.MainCore.Position, FoundryOutpostLayout.MainCoreMaxHealth);
+            // FG9-DATA-01：首领部件来自编成表 boss 行（两供能节点 + 主核心），耐久 = 敌人表 × 难度倍率。
+            RegionEnemySites.SeedEncounters(state, FoundryOutpostRegion.RegionId, EnemyDefs.ConditionBoss);
 
             region.CoreTransitionEndAtPlaySeconds = 0f;
             region.CoreTransitionRepairBotSummoned = false;
@@ -132,22 +128,6 @@ namespace GameLogic.Campaign.Regions
             }
 
             Log.Info("[FoundryOutpostCoreBoss] Boss 战已初始化：两供能节点+主核心就位。");
-        }
-
-        private static void SpawnBossRecord(CampaignState state, string instanceId, string typeId, Vector2 position, float maxHealth)
-        {
-            state.RegionEnemies = state.RegionEnemies.Append(new RegionEnemyRecord
-            {
-                EnemyInstanceId = instanceId,
-                RegionId = FoundryOutpostRegion.RegionId,
-                EnemyTypeId = typeId,
-                Position = position,
-                Health = maxHealth,
-                MaxHealth = maxHealth,
-                IsAlive = true,
-                CycleCooldownRemaining = 0f,
-                SecondaryTimer = 0f,
-            }).ToArray();
         }
 
         /// <summary>唯一伤害/阶段转换判定入口——<paramref name="target"/> 的存活/EnemyTypeId 已由
@@ -199,7 +179,7 @@ namespace GameLogic.Campaign.Regions
                 else if (s == CoreBossState.Phase2 && target.Health <= 0f && target.IsAlive)
                 {
                     target.IsAlive = false;
-                    Economy.TestRangeService.NoteEnemyDefeated(state, Content.EnemyCatalog.CoreBossId); // FG5-RND-03：击败主核心解锁护盾靶。
+                    Economy.TestRangeService.NoteEnemyDefeated(state, target.EnemyTypeId); // FG5-RND-03：击败主核心解锁护盾靶（类型即敌人表 ID）。
                     TryTransition(state, region, CoreBossState.Destroyed);
                     DropCoreDataOnce(state, region);
                 }
@@ -235,17 +215,12 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>复用既有 <see cref="EnemyCatalog.RepairBotId"/> 类型——召唤出的维修机与外围驻守的
-        /// 那台使用同一套 AI（<see cref="FoundryOutpostEnemyAi.Tick"/> 已有的 RepairBotId 分支自动
-        /// 接管，不新写第二套维修机行为）。</summary>
+        /// <summary>编成表 boss_summon 行（铸造维修机）——召唤出的维修机与外围驻守的那台是同一行敌人表、同一个读法，
+        /// 不新写第二套维修机行为。</summary>
         private static void SummonTransitionRepairBot(CampaignState state)
         {
-            if (FoundryOutpostRegion.FindEnemy(state, FoundryOutpostLayout.CoreRepairBotSummonId) != null)
-            {
-                return; // 双重防御：正常流程不会重复调用（受 CoreTransitionRepairBotSummoned 保护）。
-            }
-            SpawnBossRecord(state, FoundryOutpostLayout.CoreRepairBotSummonId, EnemyCatalog.RepairBotId,
-                FoundryOutpostLayout.CoreRepairBotSummon.Position, FoundryOutpostLayout.RepairBotMaxHealth);
+            // 防重入：正常流程受 CoreTransitionRepairBotSummoned 保护；SeedEncounters 本身对已存在的实例幂等（按编成表 boss_summon 全部行，不看写死的实例 ID）。
+            RegionEnemySites.SeedEncounters(state, FoundryOutpostRegion.RegionId, EnemyDefs.ConditionBossSummon);
             Log.Info("[FoundryOutpostCoreBoss] Transition：已召唤一台维修机支援（一次性，不会再召第二台）。");
         }
 
@@ -315,12 +290,14 @@ namespace GameLogic.Campaign.Regions
             }
 
             CoreBossState before = GetState(region);
+            // 一次性召唤物（编成表 boss_summon 行）撤走。
+            var summoned = new HashSet<string>(EnemyDefs.Encounters(FoundryOutpostRegion.RegionId, EnemyDefs.ConditionBossSummon).Select(enc => enc.Id));
             state.RegionEnemies = (state.RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
-                .Where(e => e.EnemyInstanceId != FoundryOutpostLayout.CoreRepairBotSummonId) // 一次性召唤物，撤走。
+                .Where(e => e != null && !summoned.Contains(e.EnemyInstanceId))
                 .ToArray();
-            ResetBossRecord(state, FoundryOutpostLayout.CoreNode1Id, FoundryOutpostLayout.NodeMaxHealth);
-            ResetBossRecord(state, FoundryOutpostLayout.CoreNode2Id, FoundryOutpostLayout.NodeMaxHealth);
-            ResetBossRecord(state, FoundryOutpostLayout.MainCoreId, FoundryOutpostLayout.MainCoreMaxHealth);
+            ResetBossRecord(state, FoundryOutpostLayout.CoreNode1Id);
+            ResetBossRecord(state, FoundryOutpostLayout.CoreNode2Id);
+            ResetBossRecord(state, FoundryOutpostLayout.MainCoreId);
 
             region.CoreState = null; // Locked——下次越线重新 EnsureInitialized，天然拿到满血全新一轮。
             region.CoreTransitionEndAtPlaySeconds = 0f;
@@ -334,13 +311,14 @@ namespace GameLogic.Campaign.Regions
                 "恢复满血，下次进入核心分区重新开始，不跨出击磨血。");
         }
 
-        private static void ResetBossRecord(CampaignState state, string instanceId, float maxHealth)
+        private static void ResetBossRecord(CampaignState state, string instanceId)
         {
             RegionEnemyRecord record = FoundryOutpostRegion.FindEnemy(state, instanceId);
-            if (record == null)
+            if (record == null || !EnemyDefs.TryGet(record.EnemyTypeId, out GameConfig.fg.MechEnemy row))
             {
                 return;
             }
+            float maxHealth = EnemyDefs.SeedHealth(state, row); // FG9-DATA-01：敌人表 × 难度倍率（与播种同一口径）。
             record.Health = maxHealth;
             record.MaxHealth = maxHealth;
             record.IsAlive = true;

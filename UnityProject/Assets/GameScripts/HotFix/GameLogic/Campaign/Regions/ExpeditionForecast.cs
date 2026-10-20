@@ -94,9 +94,9 @@ namespace GameLogic.Campaign.Regions
             {
                 foreach (RegionEnemyRecord enemy in state.RegionEnemies)
                 {
+                    // FG9-DATA-01：首领（层级 boss：主核心与供能节点）不计入外围驻军估算——按敌人表层级，不按 ID。
                     if (enemy != null && enemy.RegionId == regionId && enemy.IsAlive
-                        && enemy.EnemyTypeId != FoundryOutpostLayout.BossNodeTypeId
-                        && enemy.EnemyTypeId != FoundryOutpostLayout.BossCoreTypeId)
+                        && !(Content.EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy row) && Content.EnemyDefs.IsBoss(row)))
                     {
                         enemyCount++;
                         enemyHealth += enemy.Health;
@@ -105,7 +105,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (enemyCount == 0 && regionId != null && !HasAnyRecordFor(state, regionId))
             {
-                EstimateGarrison(target, out enemyCount, out enemyHealth);
+                EstimateGarrison(state, target, out enemyCount, out enemyHealth);
                 estimated = true;
             }
 
@@ -133,24 +133,38 @@ namespace GameLogic.Campaign.Regions
             return risk;
         }
 
-        /// <summary>尚未进入过的区域按播种编制估算（与 EnsureEnemiesSeeded 同一批常量；自检对账）。</summary>
-        public static void EstimateGarrison(ExpeditionDepartureService.ExpeditionTarget target, out int count, out float health)
+        /// <summary>尚未进入过的区域按播种编制估算（与 EnsureEnemiesSeeded 同一张编成表、同一个耐久口径
+        /// <see cref="Content.EnemyDefs.SeedHealth"/>——含难度敌人耐久倍率；自检对账）。</summary>
+        public static void EstimateGarrison(CampaignState state, ExpeditionDepartureService.ExpeditionTarget target, out int count, out float health)
         {
             switch (target)
             {
                 case ExpeditionDepartureService.ExpeditionTarget.SilentRuins:
-                    count = 3;
-                    health = FracturedCityLayout.ScoutMaxHealth * 2f + FracturedCityLayout.JammerMaxHealth;
+                    SumBase(state, FracturedCityLayout.RegionId, out count, out health);
                     return;
                 case ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost:
-                    count = 4;
-                    health = FoundryOutpostLayout.ArmorBotMaxHealth * 2f + FoundryOutpostLayout.StriderMaxHealth
-                             + FoundryOutpostLayout.RepairBotMaxHealth;
+                    SumBase(state, FoundryOutpostLayout.RegionId, out count, out health);
                     return;
                 default:
                     count = 0;
                     health = 0f;
                     return;
+            }
+        }
+
+        /// <summary>FG9-DATA-01：按编成表 base 行与敌人表估算（与 EnsureEnemiesSeeded 同一张编成表；
+        /// 耐久走播种同一口径 SeedHealth = 表 maxHp × 难度倍率，与敌情行 / 已播种分支一致）。</summary>
+        private static void SumBase(CampaignState state, string regionId, out int count, out float health)
+        {
+            count = 0;
+            health = 0f;
+            foreach (GameConfig.fg.EnemyEncounter enc in Content.EnemyDefs.Encounters(regionId, Content.EnemyDefs.ConditionBase))
+            {
+                if (Content.EnemyDefs.TryGet(enc.EnemyTypeId, out GameConfig.fg.MechEnemy row))
+                {
+                    count++;
+                    health += Content.EnemyDefs.SeedHealth(state, row);
+                }
             }
         }
 

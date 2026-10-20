@@ -128,7 +128,7 @@ namespace GameLogic.EditorTools
                 (ComponentCatalog.CompCannonId, "icon_comp_cannon"),
                 ("organ_focus", "icon_chip_focus"),
                 ("organ_focus_plus", "icon_chip_focus_plus"),
-                (EnemyCatalog.JammerId, "icon_enemy_jammer"),
+                ("enemy_jammer", "icon_enemy_jammer"),
                 ("not_a_content_id", null),
             };
             var wrong = new List<string>();
