@@ -855,10 +855,9 @@ namespace GameLogic.Campaign.Regions
             HomeValleyWorkOrders.MarkAssignmentDirty();
         }
 
-        /// <summary>把归还谷地的具体绑定接进共享的 <see cref="RegionControlSystem"/>；归还谷地没有
-        /// 干扰机制，<see cref="RegionControlContext.IsPositionJammed"/> 留 null——SignalJammed/
-        /// Suspended 两个分支在本区域永远不会触发，这是区域差异，不是遗漏（同 <c>CancelWorkIfAny</c>
-        /// 在 <see cref="SetupSquadCommands"/> 的既有先例：破碎都市传 null 是同一处理方式的镜像）。</summary>
+        /// <summary>把归还谷地的具体绑定接进共享的 <see cref="RegionControlSystem"/>。FG9-FAC-01 起家园也有干扰：突袭 / 迎战的静默干扰机
+        /// （攻城单位带 JamEmitter）展开干扰场，<see cref="RegionControlContext.IsPositionJammed"/> 走与远征地点同一个判据
+        /// <see cref="Signal.SignalLinkService.IsJammedAt"/>（没有干扰机时恒为 false，行为与此前一致）。</summary>
         private void SetupControlSystem()
         {
             Control.Bind(new RegionControlContext
@@ -868,7 +867,8 @@ namespace GameLogic.Campaign.Regions
                 GetPossessed = () => _possessed,
                 SetPossessed = SetPossessedMarker,
                 IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
-                IsPositionJammed = null,
+                // FG9-FAC-01（DEBT-FG6DEF05-04）：突袭来的静默干扰机带干扰场——场内的机器 / 炮塔接入被拒、被接入的按宽限断链（与远征地点同一判据）。
+                IsPositionJammed = pos => Signal.SignalLinkService.IsJammedAt(CampaignSession.Current, HomeValleyLayout.RegionId, pos),
                 SquadCommands = SquadCommands,
                 OnPossessCommitted = OnControlPossessCommitted,
                 OnReleased = OnControlReleased,
@@ -894,7 +894,7 @@ namespace GameLogic.Campaign.Regions
                 GetPossessed = () => _possessed,
                 GateCheck = () =>
                 {
-                    // 归还谷地没有干扰机制（Control 绑定时 IsPositionJammed 传 null），不会有 Suspended
+                    // 归还谷地平时没有干扰（FG9-FAC-01 起只有突袭干扰机在场时才有，判据见 SetupControlSystem），一般不会有 Suspended
                     // 态。DEBT-ER5INT01-03：MachineLostControl 判定口与 FracturedCityController 同款
                     // 理由，见该处注释——"控制彻底丢失"由 Tick() 顶部 possessed==null 分支统一处理为
                     // NoControlledUnit，效果一致。
@@ -2089,6 +2089,7 @@ namespace GameLogic.Campaign.Regions
             Defense.TurretService.RestoreAfterLoad(state, _combat);
             Defense.DefenseService.RestoreAfterLoad(state, _combat); // FG6-DEF-02：防御结构单位的阵亡事件交给防御服务（单位与护盾随快照恢复）
             Defense.SiegeService.RestoreAfterLoad(state, _combat); // FG6-DEF-05：按存档重设攻城剧场 / 职能表 / 集结点（内核快照不存这些配置），第一步之前
+            Env.EmNoiseService.RestoreAfterLoad(state, _combat); // FG9-FAC-01：静默领地的噪声发射器（没被摧毁的补上，已摧毁的移除）
         }
 
         /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>

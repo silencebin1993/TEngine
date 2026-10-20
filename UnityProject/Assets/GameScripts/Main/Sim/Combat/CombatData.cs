@@ -131,6 +131,8 @@ namespace BinGames.Sim.Combat
         public NativeList<float> Ammo;
         /// <summary>FG6-DEF-05（格式 11）：攻城属性（突袭单位的职能 / 撤退 / 队伍 / 对建筑倍率 / 随队维修计时 / 破墙目标；结构单位的目标类别 / 占地）。</summary>
         public NativeList<CombatSiegeUnit> Siege;
+        /// <summary>FG9-FAC-01（格式 13）：静默专属语法的每单位状态（潜伏 / 偏折场 / 断链束）。</summary>
+        public NativeList<CombatSilentUnit> Silent;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -172,6 +174,8 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatDrone> Drones;
         /// <summary>FG6-DEF-02：护盾（随快照进存档，格式 10）。</summary>
         public NativeList<CombatShield> Shields;
+        /// <summary>FG9-FAC-01：本步展开中的偏折场（敌方单位槽位；每步末尾重算，不进快照——由每单位的 <see cref="Silent"/> 状态派生）。</summary>
+        public NativeList<int> DeflectActive;
         /// <summary>FG6-DEF-05：攻城剧场（流场、格子缓存、溅射命中）。流场不进快照（纯函数，读档重算）；溅射命中进快照（格式 11）。</summary>
         public CombatSiegeData SiegeState;
 
@@ -250,6 +254,7 @@ namespace BinGames.Sim.Combat
                 StatusZoneSlow = new NativeList<float>(capacity, Allocator.Persistent),
                 Ammo = new NativeList<float>(capacity, Allocator.Persistent),
                 Siege = new NativeList<CombatSiegeUnit>(capacity, Allocator.Persistent),
+                Silent = new NativeList<CombatSilentUnit>(capacity, Allocator.Persistent),
                 SiegeState = CombatSiegeData.Create(),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
@@ -275,6 +280,7 @@ namespace BinGames.Sim.Combat
                 Traces = new NativeList<CombatShotTrace>(16, Allocator.Persistent),
                 Drones = new NativeList<CombatDrone>(16, Allocator.Persistent),
                 Shields = new NativeList<CombatShield>(4, Allocator.Persistent),
+                DeflectActive = new NativeList<int>(4, Allocator.Persistent),
                 Reactions = new NativeList<CombatReactionRule>(CombatConst.MaxReactions, Allocator.Persistent),
                 StatusFx = new NativeArray<CombatStatusFx>(32, Allocator.Persistent),
                 ReactionCount = new NativeArray<int>(CombatConst.MaxReactions, Allocator.Persistent),
@@ -344,6 +350,7 @@ namespace BinGames.Sim.Combat
             StatusZoneSlow.Dispose();
             Ammo.Dispose();
             Siege.Dispose();
+            Silent.Dispose();
             SiegeState.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
@@ -369,6 +376,7 @@ namespace BinGames.Sim.Combat
             Traces.Dispose();
             Drones.Dispose();
             Shields.Dispose();
+            DeflectActive.Dispose();
             Reactions.Dispose();
             StatusFx.Dispose();
             ReactionCount.Dispose();
@@ -455,6 +463,7 @@ namespace BinGames.Sim.Combat
             StatusZoneSlow.Add(0f);
             Ammo.Add(math.max(0f, s.Ammo));
             Siege.Add(s.Siege);
+            Silent.Add(default);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -513,6 +522,7 @@ namespace BinGames.Sim.Combat
             StatusZoneSlow[to] = StatusZoneSlow[from];
             Ammo[to] = Ammo[from];
             Siege[to] = Siege[from];
+            Silent[to] = Silent[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -561,6 +571,7 @@ namespace BinGames.Sim.Combat
             StatusZoneSlow.ResizeUninitialized(length);
             Ammo.ResizeUninitialized(length);
             Siege.ResizeUninitialized(length);
+            Silent.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);
@@ -585,6 +596,7 @@ namespace BinGames.Sim.Combat
             Traces.Clear();
             Drones.Clear();
             Shields.Clear();
+            DeflectActive.Clear();
             SiegeState.ClearImpacts();
             Gameplay.Clear();
             Cues.Clear();

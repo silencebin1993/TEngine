@@ -595,6 +595,10 @@ namespace GameLogic.Stage
             var coreBossHudHost = new GameObject("[CoreBossHudHost]");
             Object.DontDestroyOnLoad(coreBossHudHost);
             coreBossHudHost.AddComponent<UI.CoreBoss.CoreBossHudUIToolkit>();
+            // FG9-FAC-01：寂听主脑首领 HUD（名称 / 阶段 / 阶段分界血条 / 节点波形 / 偏折场 / 全频静默倒计时 / 上次止步阶段），独立 GameObject，只在看着地下中继大厅时可见。
+            var silentMindHudHost = new GameObject("[SilentMindHudHost]");
+            Object.DontDestroyOnLoad(silentMindHudHost);
+            silentMindHudHost.AddComponent<UI.SilentMind.SilentMindHudUIToolkit>();
             // ER7-BEACON-01：信标启动二次确认面板，同样独立 GameObject（同一条 UIDocument 唯一性
             // 纪律），只在归还谷地激活且玩家对着已建成的信标按 E 时可见（见该类 Update()）。
             var beaconLaunchHost = new GameObject("[BeaconLaunchPanelHost]");

@@ -231,6 +231,10 @@ public partial class Tables
     /// </summary>
     public fg.TbIntelKind TbIntelKind {get; }
     /// <summary>
+    /// 室内点位
+    /// </summary>
+    public fg.TbInteriorPoint TbInteriorPoint {get; }
+    /// <summary>
     /// 关键材料
     /// </summary>
     public fg.TbKeyMaterial TbKeyMaterial {get; }
@@ -548,6 +552,7 @@ public partial class Tables
         TbIntelBoss = new fg.TbIntelBoss(loader("fg_tbintelboss"));
         TbIntelFragment = new fg.TbIntelFragment(loader("fg_tbintelfragment"));
         TbIntelKind = new fg.TbIntelKind(loader("fg_tbintelkind"));
+        TbInteriorPoint = new fg.TbInteriorPoint(loader("fg_tbinteriorpoint"));
         TbKeyMaterial = new fg.TbKeyMaterial(loader("fg_tbkeymaterial"));
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbLootDrop = new fg.TbLootDrop(loader("fg_tblootdrop"));
@@ -673,6 +678,7 @@ public partial class Tables
         TbIntelBoss.ResolveRef(this);
         TbIntelFragment.ResolveRef(this);
         TbIntelKind.ResolveRef(this);
+        TbInteriorPoint.ResolveRef(this);
         TbKeyMaterial.ResolveRef(this);
         TbLocText.ResolveRef(this);
         TbLootDrop.ResolveRef(this);

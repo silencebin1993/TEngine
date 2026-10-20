@@ -271,6 +271,20 @@ namespace GameLogic.Campaign.Regions
         public override void OnKeyedTargetDamaged(CombatSite site, string key, float damage, float healthAfter, int attackerLogicId, bool killed)
         {
             CampaignState state = CampaignSession.Current;
+            if (Env.EmNoiseService.IsEmitterKey(key))
+            {
+                // FG9-FAC-01：电磁噪声发射器被打空——这一片噪声消失（受伤只在内核里扣，不另记）。
+                if (killed)
+                {
+                    FeedbackCues.RaiseAt(FeedbackCueId.EnemyDestroyed, site.TryGetEnemyPosition(key, out Vector2 at) ? at : Vector2.zero);
+                    Env.EmNoiseService.OnEmitterDestroyed(state, key);
+                }
+                else
+                {
+                    FeedbackCues.RaiseAt(FeedbackCueId.EnemyHit, site.TryGetEnemyPosition(key, out Vector2 hit) ? hit : Vector2.zero);
+                }
+                return;
+            }
             if (state == null || key != HomeValleyCombatTargets.LowThreatTargetId)
             {
                 return;

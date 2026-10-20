@@ -40,6 +40,22 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>FG9-FAC-01：室内场地（地下中继大厅）的场地信息——锚点 = fg.TbInteriorPoint 按当前世界落位（<see cref="RelayHallLayout"/>），干扰机自带干扰场。</summary>
+        private sealed class InteriorSite : IEnemySiteContext
+        {
+            public InteriorSite(string regionId)
+            {
+                RegionId = regionId;
+            }
+
+            public string RegionId { get; }
+            public bool AnchoredJamField => false;
+            public string AdaptationIdFor(CampaignState state) => null;
+
+            public bool TryAnchor(string anchorId, out Vector2 position) => RelayHallLayout.TryPoint(CampaignSession.Current, anchorId, out position);
+        }
+
+        private static readonly Dictionary<string, InteriorSite> Interiors = new Dictionary<string, InteriorSite>();
         private static Site _fractured;
         private static Site _foundry;
         /// <summary>没有布局的地点共用的通用场地（无锚点、无反制、干扰机自带干扰场）：按区域缓存，信号干扰判定每次查询不再新建对象。</summary>
@@ -72,6 +88,15 @@ namespace GameLogic.Campaign.Regions
             if (regionId == FoundryOutpostLayout.RegionId)
             {
                 return _foundry ??= new Site(regionId, Foundry(), FoundryOutpostRegion.Find, anchoredJam: false);
+            }
+            if (regionId != null && RelayHallLayout.IsInteriorWithPoints(regionId))
+            {
+                if (!Interiors.TryGetValue(regionId, out InteriorSite interior))
+                {
+                    interior = new InteriorSite(regionId);
+                    Interiors[regionId] = interior;
+                }
+                return interior;
             }
             string key = regionId ?? string.Empty;
             if (!Generic.TryGetValue(key, out Site generic))

@@ -29,16 +29,24 @@ namespace GameLogic.Campaign.Content
         public const string BehaviorHoldFire = "hold_fire";
         public const string BehaviorTelegraph = "telegraph";
         public const string BehaviorRepair = "repair";
+        /// <summary>FG9-FAC-01（FGR-FAC-008）：偏折场（磁暴棱柱、寂听主脑阶段二）/ 伏击（回声猎手）/ 断链束（寂听者）。</summary>
+        public const string BehaviorDeflect = "deflect";
+        public const string BehaviorStalk = "stalk";
+        public const string BehaviorSever = "sever";
 
         // ── 标签（fg.TbMechEnemy.tags）──
         public const string TagStructure = "structure";
         public const string TagExternalHealth = "external_health";
         public const string TagSilentFire = "silent_fire";
         public const string TagAdaptHeat = "adapt_heat";
-        public static readonly string[] KnownTags = { TagStructure, TagExternalHealth, TagSilentFire, TagAdaptHeat };
+        /// <summary>FG9-FAC-01：诱饵中继（信号接触列表里的假信号点）；监听节点（范围内核心固件发动时暴露 × effectAmount）。</summary>
+        public const string TagDecoy = "decoy";
+        public const string TagListenAmp = "listen_amp";
+        public static readonly string[] KnownTags = { TagStructure, TagExternalHealth, TagSilentFire, TagAdaptHeat, TagDecoy, TagListenAmp };
 
         // ── 职能 / 层级 / 阵营 ──
         public const string RoleStructure = "structure";
+        public const string RoleBoss = "boss";
         public const string TierNormal = "normal";
         public const string TierElite = "elite";
         public const string TierBoss = "boss";
@@ -51,6 +59,11 @@ namespace GameLogic.Campaign.Content
         public const string ConditionCoreReinforcement = "core_reinforcement";
         public const string ConditionBoss = "boss";
         public const string ConditionBossSummon = "boss_summon";
+        /// <summary>FG9-FAC-01：首领阶段性召唤（可以多行）；静默反制锁定为某对策时追加的编成（FGR-FAC-004）。</summary>
+        public const string ConditionBossWave = "boss_wave";
+        public const string ConditionCounterDeflect = "counter_deflect";
+        public const string ConditionCounterListen = "counter_listen";
+        public const string ConditionCounterJam = "counter_jam";
 
         public const string None = "none";
         public const string NotifyContentError = "content_error";

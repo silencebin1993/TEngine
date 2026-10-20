@@ -180,6 +180,24 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorExit, SfxId = "sfx_evacuate", Tag = "室内", Caption = "回到地表", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.exit",
                 Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-GEN-02 室内进出（FGR-GEN-042）" });
 
+            // FG9-FAC-01（FGR-FAC-002 / 008 ①）：静默专属行为与寂听主脑的预警（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG9FAC01-04）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentReveal, SfxId = "sfx_signal_jam", Tag = "静默", Caption = "静默单位现形：展桅预警", TagKey = "silent.cue.tag",
+                CaptionKey = "silent.cue.reveal", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.8f, RequirementNote = "FG9-FAC-01 静默潜伏现形（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentDeflect, SfxId = "sfx_alarm_warning", Tag = "静默", Caption = "偏折场展开预警", TagKey = "silent.cue.tag",
+                CaptionKey = "silent.cue.deflect", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG9-FAC-01 偏折场（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentReflect, SfxId = "sfx_hit_armor", Tag = "静默", Caption = "射弹被偏折场反弹", TagKey = "silent.cue.tag",
+                CaptionKey = "silent.cue.reflect", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-01 偏折反弹" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSever, SfxId = "sfx_signal_jam", Tag = "静默", Caption = "断链束照射：信号被强制断开", TagKey = "silent.cue.tag",
+                CaptionKey = "silent.cue.sever", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-01 寂听者断链束" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentRelayJump, SfxId = "sfx_objective_new", Tag = "首领", Caption = "中继节点亮起：主脑即将转移", TagKey = "boss.silent.cue.tag",
+                CaptionKey = "boss.silent.cue.jump", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-01 中继跳转预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSilenceWarn, SfxId = "sfx_alarm_warning", Shake = 0.2f, Tag = "首领", Caption = "全频静默即将开始",
+                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
+                RequirementNote = "FG9-FAC-01 阶段三情报预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSilence, SfxId = "sfx_signal_jam", Shake = 0.45f, Tag = "首领", Caption = "全频静默：全场断链",
+                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
+                RequirementNote = "FG9-FAC-01 阶段三全频静默" });
+
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
             // FG0-SAVE-01：读档后的内容迁移通知（正文由 SaveContentReconciler.Render 走文本键生成），停留更久。

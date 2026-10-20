@@ -69,6 +69,9 @@ namespace GameLogic.Campaign.Economy
         public const string KindWeather = "weather";
         public const string KindFleet = "fleet_fragment";
         public const string BossRuleFoundryCore = "foundry_core";
+        /// <summary>FG9-FAC-01：寂听主脑（遭遇 = 首领战开始过；击败 = 状态机“已击败”）。情报主题 ID = 规则名。</summary>
+        public const string BossRuleSilentMind = "silent_mind";
+        public const string BossIdSilentMind = "silent_mind";
 
         private static readonly List<IntelKindDef> Kinds = new List<IntelKindDef>(8);
         private static readonly Dictionary<string, IntelKindDef> KindById = new Dictionary<string, IntelKindDef>(StringComparer.Ordinal);
@@ -334,7 +337,7 @@ namespace GameLogic.Campaign.Economy
                     {
                         continue;
                     }
-                    if (row.Rule != BossRuleFoundryCore)
+                    if (row.Rule != BossRuleFoundryCore && row.Rule != BossRuleSilentMind)
                     {
                         ProblemList.Add($"fg.TbIntelBoss {row.Id}：规则 {row.Rule} 代码里没有");
                         continue;

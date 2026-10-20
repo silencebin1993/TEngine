@@ -723,10 +723,12 @@ namespace GameLogic.Campaign.Economy
         }
 
         public static bool BossEncountered(CampaignState s, IntelBossDef b) =>
-            b?.Rule == IntelCatalog.BossRuleFoundryCore && FoundryOutpostCoreBoss.IsInitialized(FoundryOutpostRegion.Find(s));
+            (b?.Rule == IntelCatalog.BossRuleFoundryCore && FoundryOutpostCoreBoss.IsInitialized(FoundryOutpostRegion.Find(s)))
+            || (b?.Rule == IntelCatalog.BossRuleSilentMind && SilentMindBoss.WasEncountered(s)); // FG9-FAC-01
 
         public static bool BossDefeated(CampaignState s, IntelBossDef b) =>
-            b?.Rule == IntelCatalog.BossRuleFoundryCore && FoundryOutpostCoreBoss.GetState(FoundryOutpostRegion.Find(s)) == CoreBossState.Destroyed;
+            (b?.Rule == IntelCatalog.BossRuleFoundryCore && FoundryOutpostCoreBoss.GetState(FoundryOutpostRegion.Find(s)) == CoreBossState.Destroyed)
+            || (b?.Rule == IntelCatalog.BossRuleSilentMind && SilentMindBoss.IsDefeated(s)); // FG9-FAC-01
 
         /// <summary>当前幕能截获、还没截获的第一个舰队片段。</summary>
         public static IntelFragmentDef NextFragment(CampaignState s)
@@ -770,6 +772,16 @@ namespace GameLogic.Campaign.Economy
             return Produce(s, k, SourceDataCore, now);
         }
 
+        /// <summary>自检用：立即按指定的一类产出一条情报（与监听站破译完成走同一个产出函数，来源记监听站）。</summary>
+        public static IntelRecord ProduceForTests(CampaignState s, string kindId)
+        {
+            if (s == null || EnsureIntel(s) == null || !IntelCatalog.TryGet(kindId, out IntelKindDef k))
+            {
+                return null;
+            }
+            return Produce(s, k, SourcePost, GameClock.Ticks);
+        }
+
         private static IntelRecord Produce(CampaignState s, IntelKindDef k, string source, long now)
         {
             IntelState f = StateOf(s);
@@ -787,6 +799,13 @@ namespace GameLogic.Campaign.Economy
                     r.Subject = SubjectExpedition;
                     r.Regions = new[] { FracturedCityLayout.RegionId, FoundryOutpostLayout.RegionId };
                     r.Adaptations = new[] { Content.AdaptationCatalog.None, EnemyAdaptationService.ComputeAdaptation(s) };
+                    // FG9-FAC-01（FGR-FAC-004“情报面板可以看到当前的反制和下一次更新的预测”）：世界里有静默阵营时，附上地下中继大厅当天锁定的对策与下一次日切的预测。
+                    if (WorldGen.WorldGenService.PlanFor(s)?.TemplateFor("silent") != null)
+                    {
+                        r.HasSilentCounter = true;
+                        r.SilentCounter = SilentCounterService.Locked(s);
+                        r.SilentCounterNext = SilentCounterService.Preview(s);
+                    }
                     r.ExpiresTick = now + Math.Max(1, validity);
                     break;
                 case "boss":
@@ -1040,6 +1059,10 @@ namespace GameLogic.Campaign.Economy
                         Content.AdaptationCatalog.AdaptationInfo info = Content.AdaptationCatalog.Describe(id);
                         parts.Add(GameText.Format("intel.counter.region", site, info.DisplayName, info.CounterHintText));
                     }
+                    if (r.HasSilentCounter)
+                    {
+                        parts.Add(SilentCounterService.IntelLine(r.SilentCounter, r.SilentCounterNext)); // FG9-FAC-01（FGR-FAC-004）
+                    }
                     return string.Join(GameText.Get("intel.list_sep"), parts);
                 }
                 case IntelCatalog.KindBoss:
@@ -1061,12 +1084,18 @@ namespace GameLogic.Campaign.Economy
 
         /// <summary>首领阶段机制：数值来自首领本身的常量（单一真相）。</summary>
         public static string BossPhasesText(IntelBossDef b) =>
-            GameText.Format(b.PhasesKey, Mathf.RoundToInt(FoundryOutpostLayout.Phase1TransitionHealthFraction * 100f),
-                Mathf.RoundToInt(FoundryOutpostLayout.TransitionDurationSeconds), Mathf.RoundToInt(FoundryOutpostLayout.CoreLockoutWarnSeconds));
+            b?.Rule == IntelCatalog.BossRuleSilentMind
+                // FG9-FAC-01：寂听主脑——跳转间隔、静默门槛、预警、静默时长都来自 boss.silent.* 调参（单一真相）。
+                ? GameText.Format(b.PhasesKey, Mathf.RoundToInt(SilentMindBoss.JumpSeconds), Mathf.RoundToInt(SilentMindBoss.Phase2HpFraction * 100f),
+                    Mathf.RoundToInt(SilentMindBoss.SilenceWarnSeconds), Mathf.RoundToInt(SilentMindBoss.SilenceSeconds))
+                : GameText.Format(b.PhasesKey, Mathf.RoundToInt(FoundryOutpostLayout.Phase1TransitionHealthFraction * 100f),
+                    Mathf.RoundToInt(FoundryOutpostLayout.TransitionDurationSeconds), Mathf.RoundToInt(FoundryOutpostLayout.CoreLockoutWarnSeconds));
 
         public static string BossWeaknessText(IntelBossDef b) =>
-            GameText.Format(b.WeaknessKey, Mathf.RoundToInt(FoundryOutpostLayout.Phase2BackHitBonusPct * 100f),
-                Mathf.RoundToInt(FoundryOutpostLayout.MainCoreFrontalHalfAngleDeg * 2f));
+            b?.Rule == IntelCatalog.BossRuleSilentMind
+                ? GameText.Format(b.WeaknessKey, SilentMindBoss.RealNodeLabel(CampaignSession.Current), SilentMindBoss.ExposedDamageMult.ToString("0.#"))
+                : GameText.Format(b.WeaknessKey, Mathf.RoundToInt(FoundryOutpostLayout.Phase2BackHitBonusPct * 100f),
+                    Mathf.RoundToInt(FoundryOutpostLayout.MainCoreFrontalHalfAngleDeg * 2f));
 
         /// <summary>列表一行：[标记] 类名 · 有效（剩多久）/ 已过时（原因） · 来源，换行接内容。</summary>
         public static string RowText(CampaignState s, IntelRecord r, long now)
@@ -1273,7 +1302,8 @@ namespace GameLogic.Campaign.Economy
                     .Append(r.Faction).Append('|').Append(r.Units).Append('|').Append(r.DirX.ToString("F4", CultureInfo.InvariantCulture)).Append(',')
                     .Append(r.DirY.ToString("F4", CultureInfo.InvariantCulture)).Append('|').Append(r.WindowFromTick).Append('-').Append(r.WindowToTick).Append('|')
                     .Append(string.Join(",", r.Regions)).Append('|').Append(string.Join(",", r.Adaptations)).Append('|').Append(r.Counter).Append('|').Append(r.TargetKind)
-                    .Append('|').Append(r.Level).Append('|').Append(r.PlanRevision).Append(';');
+                    .Append('|').Append(r.Level).Append('|').Append(r.PlanRevision).Append('|').Append(r.HasSilentCounter).Append(':').Append(r.SilentCounter).Append(':')
+                    .Append(r.SilentCounterNext).Append(';');
             }
             return sb.ToString();
         }

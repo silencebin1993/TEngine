@@ -27,8 +27,10 @@ namespace BinGames.Sim.Combat
         /// 10 = FG6-DEF-02（FG06 FGR-DEF-012）：追加护盾表（读取仍认 1～9：没有护盾，热更层按记录重新登记）。
         /// 11 = FG6-DEF-05（FG06 FGR-DEF-030～032）：每个单位追加攻城属性（职能 / 撤退 / 目标类别 / 所属队伍 / 占地 / 对建筑倍率 / 随队维修计时 / 破墙目标）；
         /// 追加还没结算的溅射命中格（读取仍认 1～10：攻城属性为空、没有溅射）。流场不进快照：它是格网与结构单位的纯函数，读档后按同一输入重算（增量 = 全量，自检对照）。
-        /// 12 = FG6-LOG-10（FG03 FGR-LOG-046）：区域种类追加“管线泄漏液洼”（<see cref="ZoneKindLeak"/>），区域追加阶段字节（液洼 / 已反应）（读取仍认 1～11：没有液洼，阶段 0）。</summary>
-        public const int FormatVersion = 12;
+        /// 12 = FG6-LOG-10（FG03 FGR-LOG-046）：区域种类追加“管线泄漏液洼”（<see cref="ZoneKindLeak"/>），区域追加阶段字节（液洼 / 已反应）（读取仍认 1～11：没有液洼，阶段 0）。
+        /// 13 = FG9-FAC-01（FG09 FGR-FAC-008 静默专属语法）：行为参数追加潜伏 / 偏折场 / 断链束参数；每个单位追加静默状态（<see cref="CombatSilentUnit"/>：潜伏、现形倒计时、
+        /// 偏折场阶段与计时、断链束目标与累计）（读取仍认 1～12：参数为 0 = 没有这些行为，状态为空）。</summary>
+        public const int FormatVersion = 13;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -453,6 +455,9 @@ namespace BinGames.Sim.Combat
         Raider = 7,
         /// <summary>家园训练靶自动交战（Demo ER4-PRIM-05）：空闲、未被接入的机器在射程内按间隔请求一次对训练靶的攻击（结算在热更层）。</summary>
         AutoEngage = 8,
+        /// <summary>FG9-FAC-01（回声猎手，FGR-FAC-008“静默潜伏”）：在出生点潜伏伏击；感知范围内出现己方机器（优先装有信号中继的）就现形（预警）、追上去，
+        /// 进入射程后按瞄准线两段式出手；目标丢失后回到出生点重新潜伏（不超出牵引半径追击）。</summary>
+        Stalker = 9,
     }
 
     /// <summary>单位状态位。</summary>
@@ -520,6 +525,35 @@ namespace BinGames.Sim.Combat
         /// <summary>FG6-DEF-05：耐久不会被打到 0 以下（停在 <see cref="CombatSiegeConst.HealthFloor"/>，不阵亡）——归还核心：被打空的后果（战役失败）在 FG6-DEF-08，
         /// 攻城期间敌人照常打它、耐久记成极小值（与 BuildingOps.CoreFloorHealth 同一口径）。</summary>
         HealthFloor = 1 << 25,
+        /// <summary>FG9-FAC-01（FGR-FAC-008“静默潜伏”）：潜伏中——不能被远程锁定（索敌 / 编队攻击 / 直控点击都选不中），小地图与头顶标记隐藏；
+        /// 范围伤害（区域 / 力场 / 溅射……）照常命中并立即现形。由内核按行为参数 <see cref="CombatBehaviorProfile.LurkSeconds"/> 写（静止够久进入、移动 / 开火 / 受伤 / 被侦测退出）。</summary>
+        Stealthed = 1 << 26,
+        /// <summary>FG9-FAC-01：偏折场可以运转（带偏折场参数的单位生成时置位；首领由状态机按阶段开关——寂听主脑只在阶段二展开全场偏折场）。</summary>
+        DeflectArmed = 1 << 27,
+        /// <summary>FG9-FAC-01（回声猎手“优先攻击装有信号中继的机器”；潜伏单位被信号中继覆盖揭示）：己方机器的结构槽是信号中继模块（热更层按装配写）。</summary>
+        SignalRelay = 1 << 28,
+        /// <summary>FG9-FAC-01（DEBT-FG6DEF05-04 干扰部分）：攻城中的干扰机自带信号干扰场（半径 = 行为参数 EffectRange）——家园里场内的机器 / 炮塔接入被拒、被接入的断链。</summary>
+        JamEmitter = 1 << 29,
+    }
+
+    /// <summary>
+    /// FG9-FAC-01（FG09 FGR-FAC-008 静默专属语法）：每个单位的静默状态（随快照进存档，格式 13）。全 0 = 没有静默行为。
+    /// 潜伏：<see cref="Still"/> 累计静止秒数，够 <see cref="CombatBehaviorProfile.LurkSeconds"/> 进入潜伏；现形后 <see cref="Reveal"/> 倒计时（展桅预警，期间不开火）。
+    /// 偏折场：<see cref="Deflect"/> 0 = 关闭（间隙）、1 = 预警、2 = 展开；<see cref="DeflectT"/> = 当前阶段还剩几秒。
+    /// 断链束：<see cref="SeverTarget"/> 正在照射的己方机器（单位 ID），<see cref="SeverT"/> 累计照射秒数（负数 = 断链后的冷却）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatSilentUnit
+    {
+        public byte Deflect;
+        public byte Pad0;
+        public short Pad1;
+        public float Still;
+        public float Reveal;
+        public float DeflectT;
+        public int SeverTarget;
+        public float SeverT;
     }
 
     /// <summary>己方机器的命令。与 Demo RegionSquadCommandSystem / HomeValleyMachineMarker 的语义逐条一致。</summary>
@@ -630,6 +664,9 @@ namespace BinGames.Sim.Combat
         /// Unit=阵亡者（随后按 <see cref="CombatUnitFlags.RemoveOnDeath"/> 移除），Other=击杀者（0 = 来源不明），Code=职能，Code2=1 表示精英，
         /// Value=所属队伍键（<see cref="CombatSiegeUnit.Group"/>），Value2=阵亡者外部键的相反数（热更层从中解出敌人种类），Pos=阵亡位置。</summary>
         SiegeKilled = 20,
+        /// <summary>FG9-FAC-01（寂听者“断链束”）：断链束持续照射被接入的机器满 <see cref="CombatBehaviorProfile.SeverSeconds"/> 秒——热更层强制断链（走玩法事件，不丢）。
+        /// Unit=被照射的机器，Other=照射者。</summary>
+        LinkSevered = 21,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -657,6 +694,12 @@ namespace BinGames.Sim.Combat
         TagReaction = 42,
         /// <summary>FG6-DEF-02：护盾吸收了一发弹体（Other=护盾序号，Value=吸收的伤害，Pos=入圈点，Code=1 表示这一发把护盾打空）。</summary>
         ShieldAbsorb = 43,
+        /// <summary>FG9-FAC-01：偏折场开始预警（Unit=展开者，Value=半径，Value2 不用，Pos=圆心，Code=1 预警 / 2 展开 / 0 收起）。</summary>
+        DeflectPhase = 44,
+        /// <summary>FG9-FAC-01：一发射弹被偏折场反弹（Unit=展开者，Other=被反弹伤到的开火者 ID（弹体反弹时为 0），Value=反弹伤害，Pos=反弹点）。</summary>
+        Reflected = 45,
+        /// <summary>FG9-FAC-01：潜伏状态变化（Unit=单位，Code=1 进入潜伏 / 0 现形）。</summary>
+        StealthChanged = 46,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -682,6 +725,8 @@ namespace BinGames.Sim.Combat
         Invulnerable = 12,
         /// <summary>FG6-DEF-01（FGR-DEF-004）：武器每发要消耗补给（流体类固件的流体），单位的补给存量不够一发——停火（原因由热更层按缺哪种流体写明）。</summary>
         NoAmmo = 13,
+        /// <summary>FG9-FAC-01：目标在潜伏中，不能被远程锁定（用范围伤害、标记器或信号中继揭示）。</summary>
+        Hidden = 14,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -803,6 +848,24 @@ namespace BinGames.Sim.Combat
         public float EffectAmount;
         /// <summary>效果范围（维修距离 / 干扰清标记半径）。</summary>
         public float EffectRange;
+
+        // ── FG9-FAC-01 静默专属语法（全 0 = 没有；格式 13 起进快照）──
+        /// <summary>静默潜伏：静止（不移动、不开火）这么多秒后进入潜伏；0 = 不潜伏。</summary>
+        public float LurkSeconds;
+        /// <summary>现形预警（展桅）：现形后这么多秒内不开火（≥ 0.8 秒，FGR-FAC-008 ①）。</summary>
+        public float RevealSeconds;
+        /// <summary>侦测距离：装有信号中继或标记器的己方机器在这个距离内时不能潜伏、已潜伏的立即现形。</summary>
+        public float RevealRange;
+        /// <summary>偏折场：半径（米，0 = 没有）、预警秒数、展开秒数、间隙秒数、反弹比例（射弹伤害 × 本值打回开火者）。</summary>
+        public float DeflectRadius;
+        public float DeflectWarn;
+        public float DeflectUp;
+        public float DeflectGap;
+        public float DeflectReflect;
+        /// <summary>断链束：射程（米，0 = 没有）、持续照射多少秒强制断链、断链后的冷却秒数。</summary>
+        public float SeverRange;
+        public float SeverSeconds;
+        public float SeverCooldown;
     }
 
     /// <summary>生成一个单位的参数。</summary>
@@ -887,6 +950,8 @@ namespace BinGames.Sim.Combat
         public float2 Facing;
         /// <summary>FG6-DEF-05：攻城属性（职能 / 撤退 / 目标类别 / 队伍 / 占地 / 破墙目标）。</summary>
         public CombatSiegeUnit Siege;
+        /// <summary>FG9-FAC-01：静默状态（潜伏 / 偏折场 / 断链束）。</summary>
+        public CombatSilentUnit Silent;
         public bool Alive => (Flags & CombatUnitFlags.Alive) != 0;
     }
 
@@ -984,6 +1049,8 @@ namespace BinGames.Sim.Combat
         public long ReadingRefused;
         /// <summary>FG2-FW-03（格式 4）：具名标签反应触发总次数。</summary>
         public long ReactionsFired;
+        /// <summary>FG9-FAC-01（格式 13）：被偏折场反弹的己方射弹次数（即时 / 重炮 / 弹体合计）。</summary>
+        public long ShotsReflected;
     }
 
     /// <summary>渲染实例（32 字节，与 CombatInstanced.shader 一致）：A = (当前 x, 当前 z, 上一步 x, 上一步 z)，B = (半径, 血量比例, 阵营, 种类)。</summary>

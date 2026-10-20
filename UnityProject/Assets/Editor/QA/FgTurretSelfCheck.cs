@@ -683,7 +683,7 @@ namespace GameLogic.EditorTools
             Hostile(site, c + Dir(30f) * 5f, 6f, 6f);
             Hostile(site, c + Dir(150f) * 6f, 6f, 6f);
             Hostile(site, c + Dir(270f) * 7f, 6f, 6f, 0f, CombatUnitFlags.Elite);
-            bool killed = StepUntil(() => site.Kernel.CountAlive(CombatFaction.Hostile) == 0, 20);
+            bool killed = StepUntil(() => site.Kernel.CountAlive(CombatFaction.Hostile, CombatUnitKind.Enemy) == 0, 20); // FG9-FAC-01：家园内核里还有静默领地的噪声发射器（敌方结构），只数本段生成的敌人
             Seconds(0.5f);
             TurretReadout ro2 = Readout(s, t);
             Expect(killed && r.KillCount == k0 + 3 && r.EliteKills == 1 && ro2.Kills == r.KillCount && TurretService.StateOf(s).TotalKills == total0 + 3
@@ -1178,7 +1178,7 @@ namespace GameLogic.EditorTools
                 $"G1 炮塔改名（与建筑同一入口）：读数、反应日志 / 弹字的名字一起改（内核标签“{arg}”）；过长的名字被拒（“{longMsg}”）");
 
             Hostile(site, t.Position + Dir(10f) * 5f, 5f, 5f);
-            StepUntil(() => site.Kernel.CountAlive(CombatFaction.Hostile) == 0, 15);
+            StepUntil(() => site.Kernel.CountAlive(CombatFaction.Hostile, CombatUnitKind.Enemy) == 0, 15);
             Seconds(0.5f);
 
             // 名册“炮塔”分类：每座一行（名字 · 状态 · 模式 · 击毁），点一行打开炮塔面板；炮塔不是机器记录（不能参加远征）。

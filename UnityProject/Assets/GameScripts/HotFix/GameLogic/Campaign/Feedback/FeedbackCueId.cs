@@ -98,6 +98,15 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>任务警告（快到期、失败、货运车受到攻击）。</summary>
         QuestAlert,
 
+        // ── FG9-FAC-01 静默专属语法与寂听主脑（FGR-FAC-002 / 008 ①：每条专属行为与大威力攻击都有 ≥ 0.8 秒的视觉 + 声音预警）──
+        SilentReveal,
+        SilentDeflect,
+        SilentReflect,
+        SilentSever,
+        SilentRelayJump,
+        SilentSilenceWarn,
+        SilentSilence,
+
         Max,
     }
 

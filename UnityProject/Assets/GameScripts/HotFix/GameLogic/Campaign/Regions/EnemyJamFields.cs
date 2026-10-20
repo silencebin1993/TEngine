@@ -24,6 +24,15 @@ namespace GameLogic.Campaign.Regions
         /// <summary>某地点某坐标是否被干扰机的干扰场覆盖。</summary>
         public static bool IsJammed(CampaignState state, string regionId, Vector2 position)
         {
+            if (regionId == HomeValleyLayout.RegionId)
+            {
+                // FG9-FAC-01（DEBT-FG6DEF05-04）：家园里的干扰源是突袭 / 迎战的攻城干扰机（匿名内核单位，带 JamEmitter），按内核单位判定。
+                CombatSite home = CombatSites.Get(regionId);
+                if (home != null && home.AnyJamFieldAt(position))
+                {
+                    return true;
+                }
+            }
             List<(RegionEnemyRecord rec, float radius)> list = SourcesOf(state, regionId);
             if (list == null || list.Count == 0 || RegionEnemySites.For(regionId).AnchoredJamField)
             {

@@ -426,13 +426,16 @@ namespace GameLogic.Campaign.Combat
         /// FG1-SIG-07（FGR-SIG-053）：按“与归还核心连通的覆盖圆”评估本地点每台己方机器在不在覆盖里（逐单位在内核 Burst 作业里做），
         /// 把状态变了的机器（LogicId，true = 回到覆盖）追加到 <paramref name="changes"/>。世界模拟按游戏时间定期调用，与是否被观察无关。
         /// </summary>
-        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<(int LogicId, bool Covered)> changes)
+        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<(int LogicId, bool Covered)> changes) => EvaluateCoverage(sources, changes, null, 1f);
+
+        /// <summary>FG9-FAC-01：同上，带电磁噪声圆（噪声区内覆盖半径 × <paramref name="noiseMult"/>）。</summary>
+        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<(int LogicId, bool Covered)> changes, IReadOnlyList<float3> noise, float noiseMult)
         {
             if (IsDisposed)
             {
                 return 0;
             }
-            Kernel.EvaluateCoverage(sources, _coverageChanges);
+            Kernel.EvaluateCoverage(sources, _coverageChanges, noise, noiseMult);
             int n = 0;
             for (int i = 0; i < _coverageChanges.Count; i++)
             {
@@ -576,6 +579,8 @@ namespace GameLogic.Campaign.Combat
             MachineWeaponInfo info = ResolveMachineWeapon(state, logicId);
             Kernel.SetUnitWeapon(unit, info.WeaponIndex);
             Kernel.SetFlag(unit, CombatUnitFlags.HeatSink, HasHeatSink(state, logicId));
+            // FG9-FAC-01：装着信号中继模块的机器——回声猎手优先刺杀它，潜伏单位在它附近现形。
+            Kernel.SetFlag(unit, CombatUnitFlags.SignalRelay, Signal.SignalCoverageService.IsRelayMachine(logicId));
             // FG1-SIG-03：门控只跟着“信号带进来的核心固件反应”走。新参数不带门控反应（冷却中压住的行、离开后的本地配置）时，
             // 内核里“已发动、等冷却下发”的标记一并清掉；仍是门控行时保留（发动事件还没被处理的那几步里不能再发动）。
             Kernel.SetFlag(unit, CombatUnitFlags.ReactionGated, info.ReactionGated);
@@ -781,7 +786,10 @@ namespace GameLogic.Campaign.Combat
         public int ProfileIndex(in CombatBehaviorProfile p)
         {
             string key = string.Join("|", p.Speed, p.FleeTrigger, p.Leash, p.PatrolRadius, p.PatrolFreq, p.SenseRange, p.CycleSeconds,
-                p.EffectSeconds, p.EffectAmount, p.EffectRange);
+                p.EffectSeconds, p.EffectAmount, p.EffectRange,
+                // FG9-FAC-01：静默专属语法参数也进键（不同潜伏 / 偏折 / 断链参数不会并成一行）
+                p.LurkSeconds, p.RevealSeconds, p.RevealRange, p.DeflectRadius, p.DeflectWarn, p.DeflectUp, p.DeflectGap, p.DeflectReflect,
+                p.SeverRange, p.SeverSeconds, p.SeverCooldown);
             if (_profileIndex.TryGetValue(key, out int idx) && idx < Kernel.ProfileCount)
             {
                 return idx;
@@ -1447,6 +1455,15 @@ namespace GameLogic.Campaign.Combat
                     }
                     return;
                 }
+                case CombatEventKind.LinkSevered:
+                {
+                    // FG9-FAC-01（寂听者“断链束”）：照射满时长——被接入的机器强制断链（不丢的玩法事件）。
+                    if (_unitMachine.TryGetValue(e.Unit, out int severedLogicId))
+                    {
+                        SilentCombatFeedback.OnLinkSevered(this, state, severedLogicId, new Vector2((float)e.Pos.x, (float)e.Pos.y));
+                    }
+                    return;
+                }
                 case CombatEventKind.RawFirmwareFired:
                 {
                     // FG1-SIG-06（FGR-SIG-061）：信号裸跑的未破解常规固件发动一次——暴露按它结算（不丢的玩法事件）。
@@ -1523,6 +1540,12 @@ namespace GameLogic.Campaign.Combat
                 case CombatEventKind.ShieldAbsorb:
                     // FG6-DEF-02（B07）：护盾吸收一发弹体——占位沿用“命中装甲”的音效与命中点特效（提示事件有每步上限，B17）；打空那一发的过载通知由防御服务发。
                     FeedbackCues.RaiseAt(FeedbackCueId.ArmorHit, at);
+                    return;
+                case CombatEventKind.StealthChanged:
+                case CombatEventKind.DeflectPhase:
+                case CombatEventKind.Reflected:
+                    // FG9-FAC-01（FGR-FAC-008 ①）：潜伏现形 / 偏折场预警 / 反弹——声音 + 字幕 + 画面（画面由地点表现订阅 SilentCombatFeedback.Changed 刷新）。
+                    SilentCombatFeedback.OnCue(this, e, at);
                     return;
                 case CombatEventKind.TagReaction:
                 {
@@ -1654,6 +1677,8 @@ namespace GameLogic.Campaign.Combat
                 }
                 case CombatFireResult.NoAmmo:
                     return GameText.Get("turret.fire.no_ammo"); // FG6-DEF-01：每发要补给的武器（炮塔的流体类固件）补给不够一发
+                case CombatFireResult.Hidden:
+                    return GameText.Get("combat.fire.hidden"); // FG9-FAC-01：目标潜伏中，不能远程锁定
                 default:
                     return string.Empty;
             }
@@ -1663,6 +1688,32 @@ namespace GameLogic.Campaign.Combat
         // FG14 §5 硬约束 3：热更层碰内核的唯一入口是桥接层——战斗内核的桥接层就是 Campaign/Combat/（CombatSite / CombatSites / CombatBench），
         // 对应细胞阶段的 SimBridge、传送带的 BeltNetworkService。控制器、区域规则、编队命令、机器句柄只调下面这些方法；
         // Kernel 属性只留给 Editor 自检与性能探针做白盒断言，“战斗内核”自检的扫描段守护这条边界。
+
+        /// <summary>FG9-FAC-01：单位的静默状态与行为参数（潜伏 / 偏折场 / 断链束；表现层与 HUD 读）。没有该单位 = false。</summary>
+        public bool TryGetUnitSilent(int unitId, out CombatSilentUnit silent, out CombatBehaviorProfile profile)
+        {
+            silent = default;
+            profile = default;
+            if (IsDisposed || !Kernel.TryGetSilent(unitId, out silent))
+            {
+                return false;
+            }
+            Kernel.TryGetProfileOf(unitId, out profile);
+            return true;
+        }
+
+        /// <summary>FG9-FAC-01（DEBT-FG6DEF05-04）：某点是否在攻城干扰机的干扰场里（逐单位扫描在内核）。</summary>
+        public bool AnyJamFieldAt(Vector2 point) => !IsDisposed && Kernel.AnyJamFieldAt(new double2(point.x, point.y));
+
+        /// <summary>FG9-FAC-01：单位此刻是否带着己方标记器打上的标记（首领节点的“信号波形”只对被标记的节点显示）。</summary>
+        public bool IsUnitMarked(int unitId) =>
+            !IsDisposed && Kernel.TryGetUnit(unitId, out CombatUnitView v) && v.MarkedUntil > Kernel.Time;
+
+        /// <summary>FG9-FAC-01（自检 / 首领对账）：把单位的偏折场拨到某一阶段与剩余秒数。</summary>
+        public bool SetDeflectPhase(int unitId, byte phase, float seconds) => !IsDisposed && Kernel.SetDeflectPhase(unitId, phase, seconds);
+
+        /// <summary>FG9-FAC-01：被偏折场反弹的己方射弹累计次数（内核计数，随快照）。</summary>
+        public long ShotsReflected => IsDisposed ? 0 : Kernel.Counters.ShotsReflected;
 
         /// <summary>本地点内核里存活的己方机器数（全灭检测、画面对账；O(1) 次调用）。</summary>
         public int CountAliveMachines() => IsDisposed ? 0 : Kernel.CountAlive(CombatFaction.Player, CombatUnitKind.Machine);

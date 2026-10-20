@@ -23,6 +23,10 @@ namespace GameLogic.Campaign.Signal
         SilentNight = 3,
         /// <summary>被接入的机器阵亡（沿用死亡回弹；没有合适的回弹目标就回到归还核心）。</summary>
         MachineDestroyed = 4,
+        /// <summary>FG9-FAC-01：寂听主脑阶段三“全频静默”——首领场地里全场断链（期间接入被拒，机器只运行本地常规固件）。</summary>
+        BossSilence = 5,
+        /// <summary>FG9-FAC-01：寂听者的“断链束”持续照射被接入的机器满时长，强制断链。</summary>
+        Severed = 6,
     }
 
     /// <summary>跨模块事件 <see cref="SignalLinkService.LinkBrokenEvent"/> 的载荷：一次断链。</summary>
@@ -151,8 +155,34 @@ namespace GameLogic.Campaign.Signal
             SignalLinkBreakReason.Jammed => GameText.Get("signal.link.reason_name.jammed"),
             SignalLinkBreakReason.SilentNight => GameText.Get("signal.link.reason_name.silent_night"),
             SignalLinkBreakReason.MachineDestroyed => GameText.Get("signal.link.reason_name.destroyed"),
+            SignalLinkBreakReason.BossSilence => GameText.Get("signal.link.reason_name.boss_silence"),
+            SignalLinkBreakReason.Severed => GameText.Get("signal.link.reason_name.severed"),
             _ => string.Empty,
         };
+
+        /// <summary>
+        /// FG9-FAC-01：某个地点此刻是否整场处于“全频静默”（寂听主脑阶段三；默认问 <see cref="Regions.SilentMindBoss"/>，自检可替换提供者）。
+        /// 静默中该地点任何位置都按“干扰”判（接入被拒、安全模式不退出），与是否被观察无关。
+        /// </summary>
+        public static Func<CampaignState, string, bool> SiteSilencedProvider;
+
+        public static bool IsSiteSilenced(CampaignState s, string regionId) =>
+            s != null && regionId != null && (SiteSilencedProvider != null ? SiteSilencedProvider(s, regionId) : Regions.SilentMindBoss.IsSilencing(s, regionId));
+
+        /// <summary>
+        /// FG9-FAC-01：强制断链之外的“进入安全模式”入口（全频静默时地点里的全部机器、断链束断开的那一台；原因写明是哪一种）。
+        /// 已在安全模式里的只改原因、重新计时；条件消失并持续 signal.safe_mode.exit_seconds 后由 <see cref="SimStep"/> 照常退出。
+        /// </summary>
+        public static bool EnterSafeModeFor(CampaignState s, int logicId, SignalLinkBreakReason reason)
+        {
+            if (s == null || reason == SignalLinkBreakReason.None || reason == SignalLinkBreakReason.MachineDestroyed
+                || !MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null || !rec.IsAlive)
+            {
+                return false;
+            }
+            EnterSafeMode(s, logicId, reason);
+            return true;
+        }
 
         /// <summary>机器列表按钮上的安全模式说明（进入原因 + 行为 + 恢复条件）。</summary>
         public static string SafeModeTooltip(CampaignState s, int logicId)
@@ -598,7 +628,8 @@ namespace GameLogic.Campaign.Signal
         /// <summary>干扰场判定（与破碎都市接管上下文同一个函数；其余地点没有干扰机制）。不依赖地点控制器，未被观察时同样成立。</summary>
         public static bool IsJammedAt(CampaignState s, string regionId, Vector2 position) =>
             s != null && ((regionId == FracturedCityLayout.RegionId && FracturedCityRegion.IsPositionJammed(s, position))
-                          || EnemyJamFields.IsJammed(s, regionId, position)); // FG9-DATA-01（FG-GAP-049）：干扰机按职能的干扰场。
+                          || EnemyJamFields.IsJammed(s, regionId, position) // FG9-DATA-01（FG-GAP-049）：干扰机按职能的干扰场。
+                          || IsSiteSilenced(s, regionId)); // FG9-FAC-01：寂听主脑全频静默——整场按干扰判
 
         // ─────────────────────────────── 工具 ───────────────────────────────
 

@@ -57,6 +57,9 @@ public sealed partial class MechEnemy : Luban.BeanBase
         ViewColor = _buf.ReadString();
         SfxId = _buf.ReadString();
         VfxId = _buf.ReadString();
+        WarnSeconds = _buf.ReadFloat();
+        LurkSeconds = _buf.ReadFloat();
+        RevealRange = _buf.ReadFloat();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -201,7 +204,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string IconId;
     /// <summary>
-    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor
+    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay
     /// </summary>
     public readonly string Silhouette;
     /// <summary>
@@ -216,6 +219,18 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 行为特效ID(占位)
     /// </summary>
     public readonly string VfxId;
+    /// <summary>
+    /// 专属行为预警秒数(偏折场预警 / 潜伏现形展桅 / 中继跳转亮起);0=没有专属行为
+    /// </summary>
+    public readonly float WarnSeconds;
+    /// <summary>
+    /// 静默潜伏:静止多少秒进入潜伏(不能被远程锁定,范围伤害命中即现形);0=不潜伏
+    /// </summary>
+    public readonly float LurkSeconds;
+    /// <summary>
+    /// 潜伏侦测距离(米):装有信号中继或标记器的机器在这个距离内时不能潜伏、已潜伏的现形;0=只有受伤/移动/开火才现形
+    /// </summary>
+    public readonly float RevealRange;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -265,6 +280,9 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "viewColor:" + ViewColor + ","
         + "sfxId:" + SfxId + ","
         + "vfxId:" + VfxId + ","
+        + "warnSeconds:" + WarnSeconds + ","
+        + "lurkSeconds:" + LurkSeconds + ","
+        + "revealRange:" + RevealRange + ","
         + "}";
     }
 }

@@ -399,7 +399,15 @@ namespace BinGames.Sim.Combat
             int id = s.NextId++;
             s.Revision++;
             _d.Scalars[0] = s;
-            _d.Append(spawn, id);
+            int slot = _d.Append(spawn, id);
+            // FG9-FAC-01：带偏折场的单位从“间隙”起算（刚生成、刚上电都要先走满一段间隙，再预警、再展开）。
+            int bp = spawn.BehaviorProfile;
+            if (bp >= 0 && bp < _d.Profiles.Length && _d.Profiles[bp].DeflectRadius > 0f)
+            {
+                CombatSilentUnit sl = _d.Silent[slot];
+                sl.DeflectT = _d.Profiles[bp].DeflectGap;
+                _d.Silent[slot] = sl;
+            }
             return id;
         }
 
@@ -489,7 +497,72 @@ namespace BinGames.Sim.Combat
                 Ammo = _d.Ammo[i],
                 Facing = _d.Armor[i].zw,
                 Siege = _d.Siege[i],
+                Silent = _d.Silent[i],
             };
+        }
+
+        // ─────────────────────────────── FG9-FAC-01 静默专属语法 ───────────────────────────────
+
+        /// <summary>
+        /// FG9-FAC-01（DEBT-FG6DEF05-04）：某点是否在任一存活的敌方干扰源（<see cref="CombatUnitFlags.JamEmitter"/>，半径 = 行为参数 EffectRange）的干扰场里。
+        /// O(单位数)，逐单位扫描在 AOT；热更层只在接入判定 / 被接入的那一台每帧问一次。
+        /// </summary>
+        public bool AnyJamFieldAt(double2 point)
+        {
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)CombatFaction.Hostile || !_d.Has(i, CombatUnitFlags.JamEmitter))
+                {
+                    continue;
+                }
+                int bp = _d.BProfile[i];
+                float r = bp >= 0 && bp < _d.Profiles.Length ? _d.Profiles[bp].EffectRange : 0f;
+                if (r > 0f && math.distancesq(_d.Pos[i], point) <= (double)r * r)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>FG9-FAC-01：单位的静默状态（不存在 = false）。</summary>
+        public bool TryGetSilent(int id, out CombatSilentUnit silent)
+        {
+            int i = _d.SlotOf(id);
+            silent = i >= 0 ? _d.Silent[i] : default;
+            return i >= 0;
+        }
+
+        /// <summary>FG9-FAC-01：单位的行为参数（没有 = false）。</summary>
+        public bool TryGetProfileOf(int id, out CombatBehaviorProfile profile)
+        {
+            int i = _d.SlotOf(id);
+            int bp = i >= 0 ? _d.BProfile[i] : -1;
+            bool ok = bp >= 0 && bp < _d.Profiles.Length;
+            profile = ok ? _d.Profiles[bp] : default;
+            return ok;
+        }
+
+        /// <summary>FG9-FAC-01：上一步末尾展开中的偏折场个数与第 k 个（单位 ID）。</summary>
+        public int ActiveDeflectCount => _d.DeflectActive.Length;
+
+        public int ActiveDeflectUnit(int k) => k >= 0 && k < _d.DeflectActive.Length && _d.DeflectActive[k] < _d.Count ? _d.Id[_d.DeflectActive[k]] : 0;
+
+        /// <summary>FG9-FAC-01（首领状态机对账 / 测试夹具）：把单位的偏折场拨到某一阶段与剩余秒数。</summary>
+        public bool SetDeflectPhase(int id, byte phase, float seconds)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || phase > 2 || !(seconds >= 0f))
+            {
+                return false;
+            }
+            CombatSilentUnit sl = _d.Silent[i];
+            sl.Deflect = phase;
+            sl.DeflectT = seconds;
+            _d.Silent[i] = sl;
+            CombatLogic.RebuildDeflectActive(ref _d);
+            Touch();
+            return true;
         }
 
         // ─────────────────────────────── FG6-DEF-01 炮塔 ───────────────────────────────
@@ -844,7 +917,7 @@ namespace BinGames.Sim.Combat
             float cosHalf = math.cos(math.radians(halfAngleDeg));
             for (int i = 0; i < _d.Count; i++)
             {
-                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable))
+                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable) || _d.Has(i, CombatUnitFlags.Stealthed))
                 {
                     continue;
                 }
@@ -869,7 +942,7 @@ namespace BinGames.Sim.Combat
             double bestDist = radius;
             for (int i = 0; i < _d.Count; i++)
             {
-                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable))
+                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable) || _d.Has(i, CombatUnitFlags.Stealthed))
                 {
                     continue;
                 }
@@ -1009,6 +1082,7 @@ namespace BinGames.Sim.Combat
 
         private NativeList<float3> _coverageSources;
         private NativeList<int2> _coverageChanges;
+        private NativeList<float3> _coverageNoise;
 
         /// <summary>
         /// FG1-SIG-07（FGR-SIG-053）：按热更层给出的“与归还核心连通的覆盖圆”（x, y = 圆心格坐标，z = 半径格数）评估每台己方机器在不在覆盖里，
@@ -1016,7 +1090,13 @@ namespace BinGames.Sim.Combat
         /// 逐单位 O(机器数 × 覆盖源数) 在 Burst 作业里做（CLAUDE.md 架构 4：逐单位 O(N) 只在 AOT）；世界模拟按游戏时间定期调用，与是否被观察无关。
         /// 已阵亡的单位不评估（保持原标志）。返回变化条数。
         /// </summary>
-        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<int2> changes)
+        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<int2> changes) => EvaluateCoverage(sources, changes, null, 1f);
+
+        /// <summary>
+        /// FG9-FAC-01（静默危害“电磁噪声”：噪声区内信号覆盖 -30%）：同上，另给噪声圆（x, y, 半径）——机器在任一噪声圆里时，每个覆盖源的有效半径 × <paramref name="noiseMult"/>。
+        /// 与热更层的单点采样同一口径（SignalCoverageService.Sample）。
+        /// </summary>
+        public int EvaluateCoverage(IReadOnlyList<float3> sources, List<int2> changes, IReadOnlyList<float3> noise, float noiseMult)
         {
             changes?.Clear();
             if (!_d.IsCreated)
@@ -1027,6 +1107,15 @@ namespace BinGames.Sim.Combat
             {
                 _coverageSources = new NativeList<float3>(16, Allocator.Persistent);
                 _coverageChanges = new NativeList<int2>(16, Allocator.Persistent);
+                _coverageNoise = new NativeList<float3>(8, Allocator.Persistent);
+            }
+            _coverageNoise.Clear();
+            if (noise != null)
+            {
+                for (int i = 0; i < noise.Count; i++)
+                {
+                    _coverageNoise.Add(noise[i]);
+                }
             }
             _coverageSources.Clear();
             if (sources != null)
@@ -1037,7 +1126,7 @@ namespace BinGames.Sim.Combat
                 }
             }
             _coverageChanges.Clear();
-            var job = new CombatCoverageJob { D = _d, Sources = _coverageSources, Changes = _coverageChanges };
+            var job = new CombatCoverageJob { D = _d, Sources = _coverageSources, Changes = _coverageChanges, Noise = _coverageNoise, NoiseMult = noiseMult };
             job.Run();
             int n = _coverageChanges.Length;
             if (changes != null)
@@ -1066,6 +1155,10 @@ namespace BinGames.Sim.Combat
             if (_coverageChanges.IsCreated)
             {
                 _coverageChanges.Dispose();
+            }
+            if (_coverageNoise.IsCreated)
+            {
+                _coverageNoise.Dispose();
             }
         }
 
@@ -1645,6 +1738,13 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, _d.Ammo[i]); // FG6-DEF-01（格式 9）
                 Mix(ref h, _d.Armor[i].z); // FG6-DEF-01：炮塔朝向（转速转出来的，属于模拟状态）
                 Mix(ref h, _d.Armor[i].w);
+                CombatSilentUnit hsl = _d.Silent[i]; // FG9-FAC-01（格式 13）
+                Mix(ref h, hsl.Deflect);
+                Mix(ref h, hsl.Still);
+                Mix(ref h, hsl.Reveal);
+                Mix(ref h, hsl.DeflectT);
+                Mix(ref h, hsl.SeverTarget);
+                Mix(ref h, hsl.SeverT);
                 CombatSiegeUnit hsu = _d.Siege[i]; // FG6-DEF-05（格式 11）
                 Mix(ref h, hsu.Role);
                 Mix(ref h, hsu.Mode);
@@ -1825,7 +1925,7 @@ namespace BinGames.Sim.Combat
             w.Write(_d.Profiles.Length);
             for (int i = 0; i < _d.Profiles.Length; i++)
             {
-                WriteProfile(w, _d.Profiles[i]);
+                WriteProfile(w, _d.Profiles[i], format);
             }
             w.Write(_d.Pois.Length);
             for (int i = 0; i < _d.Pois.Length; i++)
@@ -1953,6 +2053,17 @@ namespace BinGames.Sim.Combat
                     w.Write(su.GuardPost.x);
                     w.Write(su.GuardPost.y);
                     w.Write(su.GuardRadius);
+                }
+                // FG9-FAC-01（格式 13）：静默状态。
+                if (format >= 13)
+                {
+                    CombatSilentUnit sl = _d.Silent[i];
+                    w.Write(sl.Deflect);
+                    w.Write(sl.Still);
+                    w.Write(sl.Reveal);
+                    w.Write(sl.DeflectT);
+                    w.Write(sl.SeverTarget);
+                    w.Write(sl.SeverT);
                 }
             }
 
@@ -2221,6 +2332,7 @@ namespace BinGames.Sim.Combat
             staging.SiegeState.CopyConfigFrom(ref _d.SiegeState);
             _d.Dispose();
             _d = staging;
+            CombatLogic.RebuildDeflectActive(ref _d); // FG9-FAC-01：展开中的偏折场由每单位状态派生，读档后重算。
             FeedEpoch++;
             return CombatLoadResult.Ok;
         }
@@ -2278,7 +2390,12 @@ namespace BinGames.Sim.Combat
             }
             for (int i = 0; i < pn; i++)
             {
-                staging.Profiles.Add(ReadProfile(r));
+                CombatBehaviorProfile rp = ReadProfile(r, format);
+                if (!ProfileValid(rp))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Profiles.Add(rp);
             }
             int qn = r.ReadInt32();
             if (qn < 0 || qn > 1 << 16)
@@ -2440,6 +2557,22 @@ namespace BinGames.Sim.Combat
                     }
                     sp.Siege = su;
                 }
+                // FG9-FAC-01（格式 13）：静默状态；更老的快照没有 = 全 0（没有静默行为）。
+                CombatSilentUnit silent = default;
+                if (format >= 13)
+                {
+                    silent.Deflect = r.ReadByte();
+                    silent.Still = r.ReadSingle();
+                    silent.Reveal = r.ReadSingle();
+                    silent.DeflectT = r.ReadSingle();
+                    silent.SeverTarget = r.ReadInt32();
+                    silent.SeverT = r.ReadSingle();
+                    if (silent.Deflect > 2 || !NonNeg(silent.Still) || !NonNeg(silent.Reveal) || float.IsNaN(silent.DeflectT) || float.IsInfinity(silent.DeflectT)
+                        || silent.SeverTarget < 0 || float.IsNaN(silent.SeverT) || float.IsInfinity(silent.SeverT))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -2465,6 +2598,7 @@ namespace BinGames.Sim.Combat
                 staging.StatusSource[slot] = statusSource;
                 staging.StatusStacks[slot] = stacks;
                 staging.StatusZoneSlow[slot] = zoneSlow;
+                staging.Silent[slot] = silent;
                 uint sb = status;
                 int bi = 0;
                 while (sb != 0u)
@@ -2826,6 +2960,10 @@ namespace BinGames.Sim.Combat
             {
                 w.Write(c.ReactionsFired);
             }
+            if (format >= 13)
+            {
+                w.Write(c.ShotsReflected);
+            }
         }
 
         private static CombatCounters ReadCounters(BinaryReader r, int format)
@@ -2841,6 +2979,10 @@ namespace BinGames.Sim.Combat
             if (format >= 4)
             {
                 c.ReactionsFired = r.ReadInt64();
+            }
+            if (format >= 13)
+            {
+                c.ShotsReflected = r.ReadInt64();
             }
             return c;
         }
@@ -3104,7 +3246,7 @@ namespace BinGames.Sim.Combat
             JumpMax = r.ReadInt32(),
         };
 
-        private static void WriteProfile(BinaryWriter w, in CombatBehaviorProfile p)
+        private static void WriteProfile(BinaryWriter w, in CombatBehaviorProfile p, int format)
         {
             w.Write(p.Speed);
             w.Write(p.FleeTrigger);
@@ -3116,21 +3258,68 @@ namespace BinGames.Sim.Combat
             w.Write(p.EffectSeconds);
             w.Write(p.EffectAmount);
             w.Write(p.EffectRange);
+            if (format >= 13)
+            {
+                // FG9-FAC-01（格式 13）：静默专属语法参数。
+                w.Write(p.LurkSeconds);
+                w.Write(p.RevealSeconds);
+                w.Write(p.RevealRange);
+                w.Write(p.DeflectRadius);
+                w.Write(p.DeflectWarn);
+                w.Write(p.DeflectUp);
+                w.Write(p.DeflectGap);
+                w.Write(p.DeflectReflect);
+                w.Write(p.SeverRange);
+                w.Write(p.SeverSeconds);
+                w.Write(p.SeverCooldown);
+            }
         }
 
-        private static CombatBehaviorProfile ReadProfile(BinaryReader r) => new CombatBehaviorProfile
+        /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
+        private static bool ProfileValid(in CombatBehaviorProfile p)
         {
-            Speed = r.ReadSingle(),
-            FleeTrigger = r.ReadSingle(),
-            Leash = r.ReadSingle(),
-            PatrolRadius = r.ReadSingle(),
-            PatrolFreq = r.ReadSingle(),
-            SenseRange = r.ReadSingle(),
-            CycleSeconds = r.ReadSingle(),
-            EffectSeconds = r.ReadSingle(),
-            EffectAmount = r.ReadSingle(),
-            EffectRange = r.ReadSingle(),
-        };
+            if (!NonNeg(p.LurkSeconds) || !NonNeg(p.RevealSeconds) || !NonNeg(p.RevealRange) || !NonNeg(p.DeflectRadius) || !NonNeg(p.DeflectWarn)
+                || !NonNeg(p.DeflectUp) || !NonNeg(p.DeflectGap) || !NonNeg(p.DeflectReflect) || !NonNeg(p.SeverRange) || !NonNeg(p.SeverSeconds)
+                || !NonNeg(p.SeverCooldown))
+            {
+                return false;
+            }
+            return p.DeflectRadius <= 0f || (p.DeflectWarn > 0f && p.DeflectUp > 0f && p.DeflectGap > 0f);
+        }
+
+        private static bool NonNeg(float f) => f >= 0f && !float.IsInfinity(f);
+
+        private static CombatBehaviorProfile ReadProfile(BinaryReader r, int format)
+        {
+            var p = new CombatBehaviorProfile
+            {
+                Speed = r.ReadSingle(),
+                FleeTrigger = r.ReadSingle(),
+                Leash = r.ReadSingle(),
+                PatrolRadius = r.ReadSingle(),
+                PatrolFreq = r.ReadSingle(),
+                SenseRange = r.ReadSingle(),
+                CycleSeconds = r.ReadSingle(),
+                EffectSeconds = r.ReadSingle(),
+                EffectAmount = r.ReadSingle(),
+                EffectRange = r.ReadSingle(),
+            };
+            if (format >= 13)
+            {
+                p.LurkSeconds = r.ReadSingle();
+                p.RevealSeconds = r.ReadSingle();
+                p.RevealRange = r.ReadSingle();
+                p.DeflectRadius = r.ReadSingle();
+                p.DeflectWarn = r.ReadSingle();
+                p.DeflectUp = r.ReadSingle();
+                p.DeflectGap = r.ReadSingle();
+                p.DeflectReflect = r.ReadSingle();
+                p.SeverRange = r.ReadSingle();
+                p.SeverSeconds = r.ReadSingle();
+                p.SeverCooldown = r.ReadSingle();
+            }
+            return p;
+        }
     }
 
     /// <summary>渲染缓冲（Burst）：实例化单位与弹体。</summary>
@@ -3324,10 +3513,14 @@ namespace BinGames.Sim.Combat
         public CombatData D;
         [ReadOnly] public NativeList<float3> Sources;
         public NativeList<int2> Changes;
+        /// <summary>FG9-FAC-01：电磁噪声圆（x, y, 半径）与噪声区内的覆盖半径倍率。</summary>
+        [ReadOnly] public NativeList<float3> Noise;
+        public float NoiseMult;
 
         public void Execute()
         {
             int n = Sources.Length;
+            int nn = Noise.IsCreated ? Noise.Length : 0;
             for (int i = 0; i < D.Count; i++)
             {
                 if (!D.IsAlive(i) || D.Faction[i] != (byte)CombatFaction.Player || D.Kind[i] != (byte)CombatUnitKind.Machine)
@@ -3336,12 +3529,25 @@ namespace BinGames.Sim.Combat
                 }
                 double2 p = D.Pos[i];
                 bool covered = false;
+                double mult = 1.0;
+                for (int q = 0; q < nn; q++)
+                {
+                    float3 z = Noise[q];
+                    double ndx = p.x - z.x;
+                    double ndy = p.y - z.y;
+                    if (ndx * ndx + ndy * ndy <= (double)z.z * z.z)
+                    {
+                        mult = NoiseMult;
+                        break;
+                    }
+                }
                 for (int k = 0; k < n; k++)
                 {
                     float3 s = Sources[k];
                     double dx = p.x - s.x;
                     double dy = p.y - s.y;
-                    if (dx * dx + dy * dy <= (double)s.z * s.z)
+                    double rr = s.z * mult;
+                    if (dx * dx + dy * dy <= rr * rr)
                     {
                         covered = true;
                         break;

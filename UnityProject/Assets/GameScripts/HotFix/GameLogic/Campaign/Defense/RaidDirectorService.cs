@@ -406,6 +406,10 @@ namespace GameLogic.Campaign.Defense
                 RegionRecord r = FoundryOutpostRegion.Find(s);
                 return r != null && FoundryOutpostCoreBoss.GetState(r) == CoreBossState.Destroyed;
             }
+            if (rule == RaidCatalog.StoryRuleSilentMind)
+            {
+                return SilentMindBoss.IsDefeated(s); // FG9-FAC-01
+            }
             return false;
         }
 

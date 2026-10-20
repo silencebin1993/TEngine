@@ -400,16 +400,47 @@ namespace GameLogic.Campaign.Defense
                 ProjectileSpeed = u.ProjectileSpeed,
                 ProjectileRadius = u.ProjectileRadius,
             });
-            int profile = site.ProfileIndex(new CombatBehaviorProfile
+            var bp = new CombatBehaviorProfile
             {
                 Speed = u.Speed,
                 SenseRange = u.Range,
                 EffectAmount = u.HealAmount,
                 EffectRange = u.HealRange,
                 CycleSeconds = u.HealCooldown,
-            });
-            return site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult,
+            };
+            // FG9-FAC-01（DEBT-FG6DEF05-04 的静默部分）：攻城中的静默单位照样带专属语法——偏折场（磁暴棱柱）、静默潜伏（回声猎手）的参数取敌人表（同一份读法），
+            // 内核按行为参数在攻城单位身上结算（与区域里同一套规则，FGR-FAC-003）。
+            bool deflect = false;
+            bool jam = false;
+            if (def != null && Content.EnemyDefs.TryGet(def.EnemyTypeId, out GameConfig.fg.MechEnemy row))
+            {
+                if (row.Behavior == Content.EnemyDefs.BehaviorJamField && row.EffectRange > 0f && u.HealRange <= 0f)
+                {
+                    bp.EffectRange = row.EffectRange; // 干扰场半径（敌人表；与区域里的干扰机同一个数）
+                    jam = true;
+                }
+                if (row.Behavior == Content.EnemyDefs.BehaviorDeflect)
+                {
+                    if (EnemyBehaviorReadings.TryGet(row.Behavior, out IEnemyBehaviorReading reading))
+                    {
+                        reading.FillProfile(row, ref bp);
+                        deflect = true;
+                    }
+                }
+                EnemySilentParams.ApplyLurk(row, ref bp);
+            }
+            int profile = site.ProfileIndex(bp);
+            int unit = site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult,
                 RaidCatalog.KindOf(def));
+            if (deflect && unit > 0)
+            {
+                site.SetUnitFlag(unit, CombatUnitFlags.DeflectArmed, true);
+            }
+            if (jam && unit > 0)
+            {
+                site.SetUnitFlag(unit, CombatUnitFlags.JamEmitter, true); // 干扰机压制信号塔一带：场内炮塔 / 机器接入被拒（FG09 第 4 章“突袭特点”）
+            }
+            return unit;
         }
 
         /// <summary>离 <paramref name="from"/> 最近的敌方可走格（按切比雪夫环、固定顺序；找不到 = 原格）。</summary>

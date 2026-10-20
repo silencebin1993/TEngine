@@ -74,6 +74,8 @@ namespace GameLogic.Campaign.Combat
                 case "leash": return row.Leash;
                 case "patrolRadius": return row.PatrolRadius;
                 case "patrolFreq": return row.PatrolFreq;
+                case "warnSeconds": return row.WarnSeconds;
+                case "lurkSeconds": return row.LurkSeconds;
                 default: throw new ArgumentException("EnemyBehaviorReading.Column：未知列 " + col);
             }
         }
@@ -157,11 +159,90 @@ namespace GameLogic.Campaign.Combat
         }
     }
 
+    /// <summary>
+    /// FG9-FAC-01（FGR-FAC-008“信号干扰 / 静默潜伏”之外的偏折）：偏折场——驻守开火 + 按 间隙(cycleSeconds) → 预警(warnSeconds) → 展开(effectSeconds) 循环的偏折场，
+    /// 半径 effectRange，场内的己方射弹被反弹（伤害 × effectAmount 打回开火者）。磁暴棱柱；寂听主脑阶段二（展开开关由首领状态机控制）。
+    /// </summary>
+    public sealed class DeflectReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorDeflect;
+        public override CombatBehavior Kernel => CombatBehavior.HoldFire;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "effectRange", "effectSeconds", "cycleSeconds", "effectAmount", "warnSeconds" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            p.DeflectRadius = row.EffectRange;
+            p.DeflectWarn = row.WarnSeconds;
+            p.DeflectUp = row.EffectSeconds;
+            p.DeflectGap = row.CycleSeconds;
+            p.DeflectReflect = row.EffectAmount;
+        }
+    }
+
+    /// <summary>FG9-FAC-01（FGR-FAC-008“静默潜伏”）：伏击——在出生点潜伏，感知范围内出现机器（装有信号中继的优先）就现形预警、追击，瞄准线后出手（回声猎手）。</summary>
+    public sealed class StalkReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorStalk;
+        public override CombatBehavior Kernel => CombatBehavior.Stalker;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "senseRange", "leash", "weaponRange", "weaponDamage", "weaponCooldown", "weaponAim", "warnSeconds", "lurkSeconds" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            p.Speed = row.Speed;
+            p.SenseRange = row.SenseRange;
+            p.Leash = row.Leash;
+        }
+    }
+
+    /// <summary>FG9-FAC-01（FGR-FAC-008“信号干扰”，寂听者“断链束”）：驻守开火 + 持续照射被接入的机器 effectSeconds 秒强制断链（射程 effectRange，冷却 cycleSeconds）。</summary>
+    public sealed class SeverReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorSever;
+        public override CombatBehavior Kernel => CombatBehavior.HoldFire;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "effectRange", "effectSeconds", "cycleSeconds", "weaponRange", "weaponDamage", "weaponCooldown" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            p.SeverRange = row.EffectRange;
+            p.SeverSeconds = row.EffectSeconds;
+            p.SeverCooldown = row.CycleSeconds;
+        }
+    }
+
+    /// <summary>
+    /// FG9-FAC-01：任何读法都可以叠加“静默潜伏”（表 lurkSeconds &gt; 0）：静止够久进入潜伏，现形预警 = warnSeconds，侦测距离 = revealRange。
+    /// 与读法自己的参数合并进同一份内核行为参数（<see cref="EnemySpawnBuilder"/> 与攻城单位生成共用）。
+    /// </summary>
+    public static class EnemySilentParams
+    {
+        public static bool HasLurk(MechEnemy row) => row != null && row.LurkSeconds > 0f;
+
+        public static void ApplyLurk(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            if (!HasLurk(row))
+            {
+                return;
+            }
+            p.LurkSeconds = row.LurkSeconds;
+            p.RevealSeconds = row.WarnSeconds;
+            p.RevealRange = row.RevealRange;
+        }
+
+        /// <summary>偏折场生成时就能运转（首领的偏折场由状态机按阶段打开，不在这里置位）。</summary>
+        public static bool ArmsDeflect(MechEnemy row) =>
+            row != null && row.Behavior == EnemyDefs.BehaviorDeflect && !EnemyDefs.HasTag(row, EnemyDefs.TagExternalHealth);
+    }
+
     /// <summary>读法注册表（键 = fg.TbMechEnemy.behavior）。</summary>
     public static class EnemyBehaviorReadings
     {
         private static readonly Dictionary<string, IEnemyBehaviorReading> Map = Build(
-            new StillReading(), new PatrolMarkReading(), new JamFieldReading(), new HoldFireReading(), new TelegraphReading(), new RepairReading());
+            new StillReading(), new PatrolMarkReading(), new JamFieldReading(), new HoldFireReading(), new TelegraphReading(), new RepairReading(),
+            new DeflectReading(), new StalkReading(), new SeverReading());
 
         private static Dictionary<string, IEnemyBehaviorReading> Build(params IEnemyBehaviorReading[] readings)
         {

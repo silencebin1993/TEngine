@@ -113,6 +113,11 @@ namespace GameLogic.EditorTools
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 CampaignSaveService.SaveDirectoryOverrideForTests = _dir;
                 Directory.CreateDirectory(_dir);
+                // 从默认设置起跑（结束时还原原设置）：本机设置里“见过的引导钩子”会让图鉴条目不写盘就算解锁（MechanicCodex.EnsureUnlocked 的老玩家补解锁），
+                // 别的自检先跑过、留下“见过液洼钩子”时 G3（图鉴文件跨存档共享）会因为没有写盘而失败——与段的先后无关才对（FG9-FAC-01 复跑时发现）。
+                PlayerPrefs.DeleteKey(SettingsPrefsKey);
+                GameSettings.Load();
+                GameSettings.SetLanguage(GameLanguage.ZhCn);
                 MechanicCodex.FilePathOverrideForTests = Path.Combine(_dir, "codex.json");
                 MechanicCodex.Reload();
                 CameraDirector.RealDeltaTime = () => 0.05f;
@@ -609,7 +614,7 @@ namespace GameLogic.EditorTools
             byte[] bad = CorruptLeakOwner(cur);
             using var c = new CombatKernel(k.Config, 64);
             CombatLoadResult rc = bad != null ? c.Load(bad) : CombatLoadResult.Ok;
-            Expect(CombatKernel.PeekFormat(cur) == CombatConst.FormatVersion && CombatConst.FormatVersion == 12 && same && oldOk && bad != null && rc != CombatLoadResult.Ok,
+            Expect(CombatKernel.PeekFormat(cur) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 12 && same && oldOk && bad != null && rc != CombatLoadResult.Ok,
                 $"K4 内核快照格式 12：液洼与已反应的燃烧区（阶段 / 标签）往返、状态哈希一致（{same}）；写格式 11 时略过液洼、旧格式照常读（{oldOk}，由热更层按记录重新登记）；" +
                 $"液洼外部编号被改坏 → 整份拒绝（{rc}）");
         }
@@ -1096,8 +1101,11 @@ namespace GameLogic.EditorTools
             // D-17：机制图鉴跨存档共享——新建另一局、从磁盘重读图鉴文件后，“管线泄漏与液洼”仍是解锁的。
             NewWorld(7423);
             MechanicCodex.Reload();
-            bool shared = MechanicCodex.IsUnlocked("codex.logistics.leak") && File.Exists(MechanicCodex.FilePath) && PipeLeakService.Count(CampaignSession.Current) == 0;
-            Expect(shared, $"G3 D-17 图鉴机制条目跨存档共享：新建另一局（没有液洼）并从磁盘重读图鉴文件后，“管线泄漏与液洼”仍解锁（{shared}）");
+            bool unlockedAgain = MechanicCodex.IsUnlocked("codex.logistics.leak");
+            bool fileThere = File.Exists(MechanicCodex.FilePath);
+            int leaksNow = PipeLeakService.Count(CampaignSession.Current);
+            bool shared = unlockedAgain && fileThere && leaksNow == 0;
+            Expect(shared, $"G3 D-17 图鉴机制条目跨存档共享：新建另一局（没有液洼）并从磁盘重读图鉴文件后，“管线泄漏与液洼”仍解锁（{shared}：解锁 {unlockedAgain} / 文件 {fileThere} / 新局液洼 {leaksNow}）");
         }
 
         private static string RunTiming(int seed, bool observe, float speed, bool pauseFirst, out bool pausedHeld)

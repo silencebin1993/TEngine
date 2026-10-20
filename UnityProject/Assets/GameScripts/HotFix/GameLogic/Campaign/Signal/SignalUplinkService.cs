@@ -1384,6 +1384,8 @@ namespace GameLogic.Campaign.Signal
             // FG1-SIG-06（FGR-SIG-070 / 061）：核心固件发动计暴露（+0.5）；这枚核心固件未破解（信号裸跑）时按裸跑计（+2）。
             // 与冷却同一时刻、同一次冷却只计一次（冷却中的回声在上面已经返回）。
             CampaignExposureLedger.GrantCoreFire(s, fw, FirmwareKinds.IsRaw(s, fw));
+            // FG9-FAC-01：静默的监听节点——范围内核心固件发动，暴露按节点倍率再计（“暴露翻倍”）；当天核心固件发动次数进静默反制。
+            Regions.SilentCounterService.OnCoreFired(s, fw, FirmwareKinds.IsRaw(s, fw), logicId);
             Revision++;
             if (logicId > 0)
             {

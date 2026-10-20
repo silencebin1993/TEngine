@@ -310,6 +310,8 @@ namespace GameLogic.Campaign.Signal
             Source best = default;
             List<Source> sources = net.Sources;
             int self = selfLogicId > 0 && RelayMachines.Contains(selfLogicId) ? FindModuleSource(sources, selfLogicId) : -1;
+            // FG9-FAC-01（静默危害“电磁噪声”）：采样点在生效中的噪声区里——每个覆盖源的有效半径 × hazard.emi_noise.coverage_mult（-30%），与内核逐机器评估同一口径。
+            float noise = regionId == HomeValleyLayout.RegionId ? Env.EmNoiseService.CoverageFactorAt(CampaignSession.Current, position) : 1f;
             for (int i = 0; i < sources.Count; i++)
             {
                 Source src = sources[i];
@@ -317,7 +319,7 @@ namespace GameLogic.Campaign.Signal
                 {
                     continue;
                 }
-                float margin = src.Radius - Vector2.Distance(position, src.Center);
+                float margin = src.Radius * noise - Vector2.Distance(position, src.Center);
                 if (!any || margin > bestMargin)
                 {
                     any = true;
@@ -336,7 +338,7 @@ namespace GameLogic.Campaign.Signal
                 }
                 return SignalCoverageSample.Unbounded; // 根连通时它永远是第 0 个且连通，走不到这里；防御：不让整个地点变成“覆盖外”。
             }
-            return new SignalCoverageSample(bestMargin >= 0f, true, bestMargin, best.Center, best.Radius, best.Kind);
+            return new SignalCoverageSample(bestMargin >= 0f, true, bestMargin, best.Center, best.Radius * noise, best.Kind);
         }
 
         private static int FindModuleSource(List<Source> sources, int logicId)
@@ -934,7 +936,10 @@ namespace GameLogic.Campaign.Signal
                     continue;
                 }
                 ChangeScratch.Clear();
-                site.EvaluateCoverage(net.ConnectedCircles, ChangeScratch);
+                // FG9-FAC-01：星球表面的电磁噪声区（静默领地危害；发射器被摧毁的那一片不算）。
+                bool planet = net.SiteId == HomeValleyLayout.RegionId;
+                site.EvaluateCoverage(net.ConnectedCircles, ChangeScratch, planet ? Env.EmNoiseService.ActiveCircles(state) : null,
+                    planet ? Env.EmNoiseService.CoverageMult : 1f);
                 bool primed = PrimedSites.TryGetValue(net.SiteId, out CombatSite seen) && ReferenceEquals(seen, site);
                 PrimedSites[net.SiteId] = site;
                 if (!primed || ChangeScratch.Count == 0)

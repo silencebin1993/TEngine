@@ -56,9 +56,14 @@ namespace GameLogic.Campaign.Regions
         private CameraDirector _cameraDirector => IsActive && WorldView.Director.IsBound ? WorldView.Director : null;
         private const float AttackRange = 8f;
 
+        /// <summary>FG9-FAC-01：有手工点位的室内（地下中继大厅）的敌人与首领内容；没有点位的室内（数据中心，FG11-BOSS-01）为 null。</summary>
+        private readonly RelayHallContent _content;
+        public RelayHallContent Content => _content;
+
         public InteriorSiteController(string surfaceId)
         {
             SiteId = surfaceId;
+            _content = RelayHallLayout.IsInteriorWithPoints(surfaceId) ? new RelayHallContent(surfaceId) : null;
             GameConfig.fg.Surface s = WorldGenContent.Surface(surfaceId);
             int chunk = GridContent.TuningInt("grid.chunk_size");
             Width = Math.Max(1, s.WidthChunks) * chunk;
@@ -90,11 +95,12 @@ namespace GameLogic.Campaign.Regions
             BuildObstacles(state);
             TransportIn(logicIds);
             RegisterLoadouts(state);
-            _combat = CombatSites.Open(SiteId, state, resume, new InteriorCombatRules(), out bool restored);
+            _combat = CombatSites.Open(SiteId, state, resume, _content != null ? _content.Rules : new InteriorCombatRules(), out bool restored);
             _combat.Squad = SquadCommands;
             _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
             SyncCombatMachines(state);
             _combat.RefreshAllMachineWeapons(state);
+            _content?.OnOpened(state, _combat, resume, restored); // FG9-FAC-01：大厅的敌人、首领开战（新进入时）、伏笔地点
             SetupCameraProfile();
             SetupSquadCommands();
             SetupControl();
@@ -184,6 +190,8 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             _combat?.FlushPendingEvents();
             SyncLiveStateBackToRecords();
+            // FG9-FAC-01：全灭（_unloadQueued）或全员撤出（删快照）时首领战没打完就复位；读档 / 世界卸载（不删快照）不复位。
+            _content?.OnUnloaded(state, dropRecord, _unloadQueued);
             DestroyVisuals();
             SquadCommands.ReleaseVisuals();
             CombatSites.Close(SiteId, state, dropRecord);
@@ -259,6 +267,7 @@ namespace GameLogic.Campaign.Regions
                 Control.Tick(GameClock.FrameStepSeconds);
             }
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
+            _content?.FrameUpdate(CampaignSession.Current);
         }
 
         /// <summary>固定模拟步——无论镜头在不在这里都执行（FGR-BASE-021），不读取观察状态。</summary>
@@ -270,6 +279,7 @@ namespace GameLogic.Campaign.Regions
             }
             SquadCommands.TickSim(dt);
             _combat?.Step(dt, GameClock.GameSeconds);
+            _content?.SimStep(CampaignSession.Current); // FG9-FAC-01：首领状态机（与观察无关）
             // 室内一台存活机器都不剩（全部阵亡）：本步提交后卸载（战斗快照删除），镜头若在这里就回到地表。内核计数 O(1)；记录侧只在名册变了才数。
             if (_combat != null && !_unloadQueued && _combat.CountAliveMachines() == 0)
             {
@@ -443,11 +453,12 @@ namespace GameLogic.Campaign.Regions
                 SafePoint = ExitPoint + new Vector2(0f, 3f),
                 Obstacles = _obstacles,
                 ClampDestination = ClampInside,
-                FindHostileNear = (p, r) => null, // 首领内容随 FG9-FAC-01 / FG11-BOSS-01
-                ResolveHostile = id => null,
+                // FG9-FAC-01：右键敌人 = 攻击（地下中继大厅）；没有内容的室内（数据中心）没有敌人，FG11-BOSS-01 接上。
+                FindHostileNear = (p, r) => _content?.FindHostileNear(p, r),
+                ResolveHostile = id => _content?.ResolveHostile(id),
                 Site = _combat,
                 FlyCameraTo = p => { _cameraDirector?.FlyStrategyTo(new float2(p.x, p.y), CameraDirector.TransitionSeconds); },
-                HostileUnit = id => 0,
+                HostileUnit = id => _content != null ? _content.HostileUnit(id) : 0,
                 AttackRange = AttackRange,
                 AttackCooldownSeconds = CombatSite.MachineAttackInterval,
             };
@@ -463,7 +474,7 @@ namespace GameLogic.Campaign.Regions
                 GetPossessed = () => _possessed,
                 SetPossessed = SetPossessedMarker,
                 IsCameraTransitioning = () => _cameraDirector != null && _cameraDirector.Mode == ViewMode.Transition,
-                IsPositionJammed = pos => false,
+                IsPositionJammed = pos => Signal.SignalLinkService.IsJammedAt(CampaignSession.Current, SiteId, pos), // FG9-FAC-01：干扰机 / 全频静默
                 SquadCommands = SquadCommands,
                 OnPossessCommitted = id =>
                 {
@@ -611,6 +622,7 @@ namespace GameLogic.Campaign.Regions
             {
                 _squadCtx.VisualRoot = _root;
             }
+            _content?.BuildVisuals(state, _root.transform);
         }
 
         private void Box(string name, Vector3 at, Vector3 size, Color color, bool collider)
@@ -650,6 +662,7 @@ namespace GameLogic.Campaign.Regions
 
         private void DestroyVisuals()
         {
+            _content?.DestroyVisuals();
             foreach (HomeValleyMachineMarker m in _machineMarkers)
             {
                 m?.DetachView();

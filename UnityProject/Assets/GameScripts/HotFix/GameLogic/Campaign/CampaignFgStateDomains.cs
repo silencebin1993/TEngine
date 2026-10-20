@@ -1085,6 +1085,11 @@ namespace GameLogic.Campaign
         // ── 敌方反制预览 ──
         public string[] Regions = Array.Empty<string>();
         public string[] Adaptations = Array.Empty<string>();
+        /// <summary>FG9-FAC-01（FGR-FAC-004）：这条反制预览带着地下中继大厅的静默反制——产出时当天锁定的对策与下一次日切的预测（编成条件；空串 = 没有针对性反制）。
+        /// 旧档没有 = false（不写这一行）。</summary>
+        public bool HasSilentCounter;
+        public string SilentCounter = string.Empty;
+        public string SilentCounterNext = string.Empty;
     }
 
     /// <summary>FG5-RND-05：一类情报的破译进度（千分之一倍率 × 统一时钟步数；一座监听站一步 = 1000）与累计产出。</summary>
@@ -2673,6 +2678,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications),
             new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav),
             new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01 / 02（物品、流体与配方：仓库物资、核心保管库、净速率采样；生产建筑、废墟储量、家园震动）", s => s.Economy),
+            new DomainInfo(nameof(CampaignState.Factions), "FG9-FAC-01 起（阵营扩充：寂听主脑首领战、电磁噪声发射器、阵营反制每日锁定、室内伏笔地点）", s => s.Factions),
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>
@@ -2695,6 +2701,14 @@ namespace GameLogic.Campaign
                 s.Progress.NarrativeSerial = 1;
             }
             s.Clock ??= new GameClockState();
+            // FG9-FAC-01：旧档没有阵营扩充域 = 空域（首领未遭遇、发射器全在、反制未锁定）。
+            s.Factions ??= new FactionState();
+            s.Factions.SilentBoss ??= new SilentBossRecord();
+            s.Factions.NoiseEmittersDestroyed ??= Array.Empty<string>();
+            s.Factions.NoiseZonesNoticed ??= Array.Empty<string>();
+            s.Factions.SilentCounterId ??= string.Empty;
+            s.Factions.PoisRead ??= Array.Empty<string>();
+            s.Factions.SilentBoss.CounterId ??= string.Empty;
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
             s.Grid.TerrainSourceId ??= string.Empty;

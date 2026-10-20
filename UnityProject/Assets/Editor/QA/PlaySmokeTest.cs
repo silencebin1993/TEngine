@@ -10778,6 +10778,10 @@ namespace GameLogic.EditorTools
             }
             Campaign.Combat.CombatBench.Spec spec = Campaign.Combat.CombatBench.PerfSpec();
             Vector2 center = Campaign.Regions.HomeValleyLayout.Core.Position + new Vector2(0f, 160f);
+            // FG9-FAC-01：家园内核里本来就有具名的敌方结构单位（噪声发射器，EmNoiseService：Kind=Structure、带外部键），它们不是原型单位、清场不移除；
+            // 生成前先记下家园原有的敌方单位数（按种类），清场后按“原型突袭者回到生成前的数目”判定，具名结构单独核对。
+            SessionState.SetInt(K + "RaidHostileEnemyBefore", home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Enemy));
+            SessionState.SetInt(K + "RaidHostileStructBefore", home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Structure));
             Campaign.Combat.CombatBench.SpawnPerfScenario(home, center, 200, 80, spec);
             // 镜头留在家园（性能场景在北面 160 米：突袭者感知 60 米，碰不到家园的机器，不影响后面的存档流程）。
             SessionState.SetString(K + "RaidTicks", GameClock.Ticks.ToString());
@@ -10818,16 +10822,23 @@ namespace GameLogic.EditorTools
             int maxProj = SessionState.GetInt(K + "RaidMaxProj", 0);
             int frames = SessionState.GetInt(K + "RaidFrames", 0);
             float avgMs = frames > 0 ? SessionState.GetFloat(K + "RaidFrameMsSum", 0f) / frames : 0f;
-            int raiders = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile);
+            int hostiles = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile);
+            int raiders = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Enemy);
+            int structs = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Structure);
             int turrets = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret);
             BinGames.Sim.Combat.CombatRenderer r = home.Renderer;
-            Write($"  - 突袭原型 8 真实秒：内核 {ticks} 步，弹体峰值 {maxProj} 枚，存活突袭者 {raiders}、炮塔 {turrets}；内核单步 {home.LastKernelMs:F3} ms；" +
+            Write($"  - 突袭原型 8 真实秒：内核 {ticks} 步，弹体峰值 {maxProj} 枚，存活突袭者 {raiders}、炮塔 {turrets}（家园另有具名敌方结构 {structs} 座：噪声发射器等；敌方合计 {hostiles}）；内核单步 {home.LastKernelMs:F3} ms；" +
                   $"真实帧 平均 {avgMs:F1} ms / 最长 {SessionState.GetFloat(K + "RaidMaxFrameMs", 0f):F1} ms（{frames} 帧，-nographics 下只含 CPU）；" +
                   $"实例 {r?.LastUnitInstances} 单位 + {r?.LastProjectileInstances} 弹体，{(r != null && r.GpuAvailable ? "GPU 绘制" : "无图形设备：" + r?.GpuUnavailableReason)}");
-            Check(ticks >= 400 && maxProj >= 1500 && raiders >= 150 && turrets >= 60 && r != null && r.LastUnitInstances == raiders + turrets && r.LastProjectileInstances == home.Kernel.ProjectileCount,
-                $"真实 Play 帧里家园战斗内核跑着 {raiders} 个突袭者、{turrets} 座炮塔、峰值 {maxProj} 枚弹体（≥ 1,500），实例化缓冲与内核一致");
+            // 实例化缓冲画的是全部带 Instanced 标志的单位：突袭者 + 炮塔 + 家园的具名敌方结构（噪声发射器也走实例化绘制）。
+            Check(ticks >= 400 && maxProj >= 1500 && raiders >= 150 && turrets >= 60 && r != null && r.LastUnitInstances == hostiles + turrets && r.LastProjectileInstances == home.Kernel.ProjectileCount,
+                $"真实 Play 帧里家园战斗内核跑着 {raiders} 个突袭者、{turrets} 座炮塔、峰值 {maxProj} 枚弹体（≥ 1,500），实例化缓冲与内核一致（{r?.LastUnitInstances} = 敌方 {hostiles} + 炮塔 {turrets}）");
             CheckNoTextMarkers("家园突袭原型");
             int removed = Campaign.Combat.CombatBench.ClearPrototypeUnits(home);
+            int structsAfter = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Structure);
+            Check(structsAfter == structs,
+                $"清场只移除匿名原型单位：家园具名敌方结构（噪声发射器等）清场前后都是 {structs} → {structsAfter} 座");
+            SessionState.SetInt(K + "RaidHostileStructAtClear", structsAfter);
             SessionState.SetString(K + "RaidClearTicks", GameClock.Ticks.ToString());
             Next(142, $"清场：移除 {removed} 个原型单位，剩下的弹体飞完即消失");
         }
@@ -10840,10 +10851,17 @@ namespace GameLogic.EditorTools
             }
             Campaign.Combat.CombatSite home = GameRoot.HomeValley?.Combat;
             int machinesBefore = SessionState.GetInt(K + "RaidHomeMachines", -1);
-            Check(home != null && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile) == 0 && home.Kernel.ProjectileCount == 0
-                  && home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret) == 0
+            // FG9-FAC-01：只数敌方“单位”（Kind=Enemy，突袭者）——家园的具名敌方结构（噪声发射器）本来就在、不是原型单位；它的数目在清场那一步单独核对。
+            int enemyBefore = SessionState.GetInt(K + "RaidHostileEnemyBefore", 0);
+            int enemies = home?.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Enemy) ?? -1;
+            int structs = home?.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Structure) ?? -1;
+            int turretsLeft = home?.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret) ?? -1;
+            Check(home != null && enemies == enemyBefore && home.Kernel.ProjectileCount == 0
+                  && turretsLeft == 0
                   && GameRoot.HomeValley?.LiveMachineCount == machinesBefore,
-                $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）" +
+                $"原型单位清场后弹体飞完消失（剩 {home?.Kernel.ProjectileCount} 枚），突袭者回到生成前的 {enemyBefore} 个（现 {enemies}）、炮塔剩 {turretsLeft} 座，" +
+                $"家园具名敌方结构 {SessionState.GetInt(K + "RaidHostileStructBefore", -1)} → {structs} 座（噪声发射器，不属于原型），" +
+                $"家园机器数不变（{machinesBefore} → {GameRoot.HomeValley?.LiveMachineCount} 台；此时远征队仍在外）" +
                 $"（清场后世界走了 {GameClock.Ticks - long.Parse(SessionState.GetString(K + "RaidClearTicks", "0"))} 步，暂停 {GameRoot.IsWorldPaused}，模态 {InputRouter.PanelModalOpen}，最近通知 {Notifications.NotificationCenter.History.LastOrDefault()?.Type?.Id}）");
             Next(424, "FG6-LOG-10：测试捷径——家园铺一段燃油管线并打穿一格，破口积起液洼；真实鼠标悬停读液洼");
         }
@@ -11667,6 +11685,21 @@ namespace GameLogic.EditorTools
             Check(site != null && inside && observed && views >= 1 && root && notes == 1 && entered == 1 && Campaign.Regions.InteriorSiteService.TransitionText.Contains(Campaign.Regions.InteriorSiteService.SurfaceName("relay_hall")),
                 $"进入地下中继大厅：机器转进室内（{inside}），镜头切过去（{observed}），室内表现对象 {views} 个、场地根节点 {root}，过渡“{Campaign.Regions.InteriorSiteService.TransitionText}”，通知中心“室内进出” {notes} 条");
             CheckNoTextMarkers("室内场地");
+            // FG9-FAC-01：大厅里有首领与守卫（按表播种、有表现对象），进门即开战（阶段一·藏身），首领 HUD 可见且写出阶段（真实 Play 帧里的 UI Toolkit 面板）。
+            Transform content = GameObject.Find("[InteriorRoot_relay_hall]")?.transform.Find("[RelayHallContent]");
+            int enemyViews = 0;
+            if (content != null)
+            {
+                foreach (Transform ch in content)
+                {
+                    enemyViews += ch.name.StartsWith("Enemy_", System.StringComparison.Ordinal) ? 1 : 0;
+                }
+            }
+            Campaign.Regions.SilentMindPhase bossPhase = Campaign.Regions.SilentMindBoss.PhaseOf(state);
+            bool hud = GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastVisible
+                       && GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Contains(Campaign.Regions.SilentMindBoss.PhaseName(Campaign.Regions.SilentMindPhase.Hiding));
+            Check(bossPhase == Campaign.Regions.SilentMindPhase.Hiding && enemyViews >= 12 && hud,
+                $"地下中继大厅的首领战（FG9-FAC-01）：寂听主脑进门即开战（{bossPhase}），大厅敌人表现对象 {enemyViews} 个，首领 HUD 可见并写出阶段（{hud}：“{GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Split('\n')[0]}”）");
             if (site != null && site.Combat.TryGetMachineUnit(machine, out int unit))
             {
                 // 测试捷径（= 机器在室内走到出口旁）：瞬移到出口旁 exitRadius 格内（不压在出口标记上），镜头对准出口。
@@ -11729,6 +11762,11 @@ namespace GameLogic.EditorTools
             int notes = NotifyMemberCount("interior_transit") - SessionState.GetInt(K + "InteriorNotes0", 0);
             Check(back && unloaded && home && notes == 2,
                 $"离开室内：机器回到地表入口旁（{back}），室内空了自动卸载（{unloaded}），镜头回到家园（{home}），通知中心“室内进出”共 {notes} 条");
+            // FG9-FAC-01：首领战没打完全员撤出 → 首领复位到开战前，记下止步阶段（ER7-FAIL-01 同一语义）。
+            Campaign.Regions.SilentMindPhase after = Campaign.Regions.SilentMindBoss.PhaseOf(state);
+            int last = Campaign.Regions.SilentMindBoss.Record(state)?.LastReachedPhase ?? -1;
+            Check(after == Campaign.Regions.SilentMindPhase.Dormant && last == (int)Campaign.Regions.SilentMindPhase.Hiding,
+                $"撤出地下中继大厅后寂听主脑复位（{after}），记下上次止步于{Campaign.Regions.SilentMindBoss.PhaseName((Campaign.Regions.SilentMindPhase)Math.Max(0, last))}");
             // 夹具还原：机器放回原位，撤掉覆盖注入。
             string[] f = SessionState.GetString(K + "InteriorBack", "0,0").Split(',');
             var origin = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));

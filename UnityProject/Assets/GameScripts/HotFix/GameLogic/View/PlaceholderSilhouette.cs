@@ -77,6 +77,55 @@ namespace GameLogic.View
                     Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.55f, 0f), new Vector3(0.95f, 0.03f, 0.95f));
                     Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, 0.85f, 0f), Vector3.one * 0.3f);
                 }
+                // FG9-FAC-01 静默扩充（低矮、吸波、天线密集；B15 形状区分，占位几何体）
+                else if (silhouette == "silent_node")
+                {
+                    // 监听节点：低矮方座 + 三根天线
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.6f, 0f), new Vector3(1.4f, 0.5f, 1.4f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(-0.4f, 0.3f, 0f), new Vector3(0.08f, 0.9f, 0.08f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0.4f, 0.3f, 0f), new Vector3(0.08f, 0.9f, 0.08f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.5f, 0.4f), new Vector3(0.08f, 1.1f, 0.08f));
+                }
+                else if (silhouette == "silent_prism")
+                {
+                    // 磁暴棱柱：竖立的菱形棱柱
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.2f, 0f), new Vector3(0.6f, 1.2f, 0.6f), new Vector3(0f, 45f, 0f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.95f, 0f), new Vector3(0.9f, 0.03f, 0.9f));
+                }
+                else if (silhouette == "silent_hunter")
+                {
+                    // 回声猎手：贴地的扁平楔形 + 一根收起的短桅
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.7f, 0.1f), new Vector3(0.9f, 0.25f, 1.4f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.3f, -0.4f), new Vector3(0.06f, 0.35f, 0.06f));
+                }
+                else if (silhouette == "silent_decoy" || silhouette == "silent_relay")
+                {
+                    // 诱饵中继 / 中继节点：细高中继塔 + 顶部环
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.4f, 0f), new Vector3(0.12f, 1.2f, 0.12f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 1.5f, 0f), new Vector3(0.7f, 0.03f, 0.7f));
+                    if (silhouette == "silent_relay")
+                    {
+                        Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.6f, 0f), new Vector3(1.6f, 0.4f, 1.6f));
+                    }
+                }
+                else if (silhouette == "silent_listener")
+                {
+                    // 寂听者：高瘦主体 + 前伸的断链束发射管
+                    Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, 0.85f, 0f), Vector3.one * 0.55f);
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.85f, 0.6f), new Vector3(0.1f, 0.5f, 0.1f), new Vector3(90f, 0f, 0f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 1.4f, 0f), new Vector3(1.2f, 0.03f, 1.2f));
+                }
+                else if (silhouette == "silent_mind")
+                {
+                    // 寂听主脑：宽大低平的碟形主体 + 密集天线环
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.5f, 0f), new Vector3(3.2f, 0.4f, 3.2f));
+                    Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, 0.2f, 0f), new Vector3(2.2f, 0.9f, 2.2f));
+                    for (int k = 0; k < 6; k++)
+                    {
+                        float a = k * Mathf.PI / 3f;
+                        Part(parts, mat, PrimitiveType.Cylinder, new Vector3(Mathf.Cos(a) * 1.4f, 0.9f, Mathf.Sin(a) * 1.4f), new Vector3(0.07f, 0.8f, 0.07f));
+                    }
+                }
                 else
                 {
                     Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, 0.85f, 0f), Vector3.one * 0.5f);

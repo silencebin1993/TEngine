@@ -608,6 +608,10 @@ namespace GameLogic.Campaign.WorldSim
                 Defense.RaidDirectorService.WorldStep(state, GameClock.Ticks);
                 // FG8-EXP-03：领地控制（控制度、首领 → 平定、收复、阵营增援重建、精英残部、骚扰），每 territory.control.sync_seconds 一次 O(领地数)；只看步序号，与观察无关。
                 TerritoryControlService.WorldStep(state, GameClock.Ticks);
+                // FG9-FAC-01（FGR-FAC-004）：静默反制每个游戏日锁定一次（日切那一步；平时 O(1)）。
+                Regions.SilentCounterService.WorldStep(state);
+                // FG9-FAC-01：电磁噪声——信号所在的机器第一次进入某片噪声区时提示（每游戏秒一次，O(生效区数)）。
+                Env.EmNoiseService.WorldStep(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。

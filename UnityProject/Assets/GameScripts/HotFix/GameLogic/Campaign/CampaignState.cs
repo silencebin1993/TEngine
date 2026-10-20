@@ -190,6 +190,8 @@ namespace GameLogic.Campaign
         public ResearchState Research = new ResearchState();
         public WeatherState Weather = new WeatherState();
         public RaidState Raids = new RaidState();
+        /// <summary>FG9-FAC-01：阵营扩充（寂听主脑首领战、电磁噪声发射器、阵营反制的每日锁定、室内伏笔地点）。</summary>
+        public FactionState Factions = new FactionState();
         public DirectorEventState DirectorEvents = new DirectorEventState();
         public QuestState Quests = new QuestState();
         public StandingRuleState StandingRules = new StandingRuleState();

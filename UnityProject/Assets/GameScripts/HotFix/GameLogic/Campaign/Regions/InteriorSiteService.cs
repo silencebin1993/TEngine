@@ -385,6 +385,31 @@ namespace GameLogic.Campaign.Regions
             return n;
         }
 
+        /// <summary>
+        /// FG9-FAC-01（FG09 第 10 节“情报会提前警告”、FGR-FAC-006“监听站可以提前提供首领弱点”）：入口面板 / 悬停说明里的首领一行（以换行开头；没有首领的室内为空）。
+        /// 有效的首领弱点情报 → 写出三个阶段（含“阶段三 20 秒全场断链，只跑本地常规固件”）；没有 → 提示先建监听站。另写上次止步的阶段与“已击败”。
+        /// </summary>
+        public static string BossPreview(CampaignState s, string surfaceId)
+        {
+            if (s == null || surfaceId != SilentMindBoss.SiteId)
+            {
+                return string.Empty;
+            }
+            if (SilentMindBoss.IsDefeated(s))
+            {
+                return "\n" + GameText.Get("boss.silent.notify.defeated");
+            }
+            string line = "\n" + GameText.Get(SilentMindBoss.RealNodeKnown(s) ? "boss.silent.entrance.preview" : "boss.silent.entrance.unknown");
+            // FGR-FAC-004 / B05：当天锁定的静默反制（开战时按它追加编成）——进门之前就能看到大厅今天会多带什么（只读，不改状态）。
+            line += "\n" + GameText.Format("boss.silent.entrance.counter", SilentCounterService.CounterName(SilentCounterService.PeekLocked(s)));
+            int last = SilentMindBoss.Record(s)?.LastReachedPhase ?? 0;
+            if (last > 0)
+            {
+                line += "\n" + GameText.Format("boss.silent.hud.last_phase", SilentMindBoss.PhaseName((SilentMindPhase)last));
+            }
+            return line;
+        }
+
         public static string SurfaceName(string surfaceId) =>
             WorldGenContent.TryGetSurface(surfaceId, out GameConfig.fg.Surface s) ? GameText.Get(s.NameKey) : surfaceId;
 
@@ -422,6 +447,10 @@ namespace GameLogic.Campaign.Regions
                 sb.Append(GameText.Format("anchor.hover.entry", Mathf.RoundToInt(e.x), Mathf.RoundToInt(e.y), dist)).Append('\n');
                 sb.Append(a.IsIndoorEntrance ? GameText.Format("anchor.hover.indoor", a.EntryRadius, a.ProtectRadius)
                     : a.IsDemoSite ? GameText.Get("anchor.hover.demo") : GameText.Get("anchor.hover.boss"));
+                if (a.IsIndoorEntrance)
+                {
+                    sb.Append(BossPreview(s, a.SurfaceId));
+                }
                 int st = TerritoryAnchorChecks.StateOf(s, a);
                 if (st == TerritoryAnchorChecks.StateMoved)
                 {

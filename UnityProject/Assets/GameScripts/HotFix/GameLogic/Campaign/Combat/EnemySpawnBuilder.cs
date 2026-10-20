@@ -80,6 +80,10 @@ namespace GameLogic.Campaign.Combat
             {
                 flags |= CombatUnitFlags.Elite;
             }
+            if (EnemySilentParams.ArmsDeflect(row))
+            {
+                flags |= CombatUnitFlags.DeflectArmed; // FG9-FAC-01：偏折场生成时就运转（首领的由状态机按阶段开关）
+            }
 
             Vector2 facing = EnemyDefs.FacingOf(e.EnemyInstanceId);
             spawn = new CombatSpawn
@@ -109,10 +113,11 @@ namespace GameLogic.Campaign.Combat
                     TargetMode = CombatTargetMode.Nearest,
                 });
             }
-            if (reading.NeedsProfile)
+            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row))
             {
                 var profile = new CombatBehaviorProfile();
                 reading.FillProfile(row, ref profile);
+                EnemySilentParams.ApplyLurk(row, ref profile); // FG9-FAC-01：静默潜伏可以叠加在任何读法上
                 spawn.BehaviorProfile = site.ProfileIndex(profile);
             }
             Vector2 home = e.Position;

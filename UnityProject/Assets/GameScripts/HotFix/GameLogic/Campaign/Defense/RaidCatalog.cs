@@ -66,6 +66,8 @@ namespace GameLogic.Campaign.Defense
         public const string TriggerPurification = "purification";
         public const string TriggerHarass = "harass";
         public const string StoryRuleFoundryCore = "foundry_core";
+        /// <summary>FG9-FAC-01：寂听主脑被击败（静默领地平定、静默报复突袭）。</summary>
+        public const string StoryRuleSilentMind = "silent_mind";
         /// <summary>化工阵营（针对净化塔的触发固定由它发动，FG09）。</summary>
         public const string FactionChemical = "clarity";
 
@@ -463,7 +465,7 @@ namespace GameLogic.Campaign.Defense
             {
                 foreach (RaidStory row in stories.DataList)
                 {
-                    if (row == null || string.IsNullOrEmpty(row.Id) || row.Rule != StoryRuleFoundryCore || row.Level < 1)
+                    if (row == null || string.IsNullOrEmpty(row.Id) || (row.Rule != StoryRuleFoundryCore && row.Rule != StoryRuleSilentMind) || row.Level < 1)
                     {
                         ProblemList.Add($"fg.TbRaidStory {row?.Id}：规则不认识或等级 < 1");
                         continue;

@@ -227,7 +227,7 @@ namespace GameLogic.UI.Kit
                 return;
             }
             _title.text = GameText.Format("anchor.hover.title", GameText.Get(a.Row.NameKey), GameText.Get(a.KindKey));
-            _desc.text = GameText.Get(a.Row.DescKey);
+            _desc.text = GameText.Get(a.Row.DescKey) + InteriorSiteService.BossPreview(CampaignSession.Current, a.SurfaceId); // FG9-FAC-01：首领情报提前警告
             List<int> nearIn = InteriorSiteService.MachinesNearEntrance(s, a);
             _near.text = GameText.Format("ui.interior.near", a.EntryRadius, nearIn.Count);
             string info = GameText.Get("ui.interior.info");

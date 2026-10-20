@@ -49,6 +49,7 @@ namespace BinGames.Sim.Combat
 
             MaybeCompact(ref d);
             MaybeCompactRoutes(ref d);
+            RebuildDeflectActive(ref d); // FG9-FAC-01：压实可能挪了槽位
 
             int n = d.Count;
             for (int i = 0; i < n; i++)
@@ -90,6 +91,9 @@ namespace BinGames.Sim.Combat
                     StepHostileUnit(ref d, ref grid, i, dt);
                 }
             }
+            // 4a. FG9-FAC-01：静默专属语法（潜伏 / 偏折场 / 断链束）。
+            StepSilent(ref d, ref grid, dt);
+            RebuildDeflectActive(ref d);
             grid.Dispose();
 
             // 5. 弹体
@@ -300,9 +304,9 @@ namespace BinGames.Sim.Combat
             if (cmd.Kind == CombatCommandKind.Attack)
             {
                 int t = d.SlotOf(cmd.Target);
-                if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable))
+                if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || d.Has(t, CombatUnitFlags.Stealthed))
                 {
-                    reason = CombatEndReason.TargetLost;
+                    reason = CombatEndReason.TargetLost; // FG9-FAC-01：目标潜伏 = 不能再远程锁定
                     return true;
                 }
                 cmd.Pos = d.Pos[t];
@@ -511,6 +515,9 @@ namespace BinGames.Sim.Combat
                 case CombatBehavior.Raider:
                     StepRaider(ref d, ref grid, i, dt);
                     break;
+                case CombatBehavior.Stalker:
+                    StepStalker(ref d, ref grid, i, dt);
+                    break;
             }
         }
 
@@ -538,6 +545,10 @@ namespace BinGames.Sim.Combat
             if (t < 0)
             {
                 return;
+            }
+            if (SilentHold(ref d, i))
+            {
+                return; // FG9-FAC-01：潜伏中先现形（展桅预警），预警结束才开火
             }
             // FG6-DEF-01（FGR-DEF-002）：有转速的炮塔先转向目标，炮口对准（夹角在容差内）才开火；没对准时冷却保持就绪，下一步接着转（目标按模式重新选）。
             if (wp.TurnRate > 0f && !TurnToward(ref d, i, d.Pos[t], wp.TurnRate * dt))
@@ -624,6 +635,10 @@ namespace BinGames.Sim.Combat
             if (t < 0)
             {
                 return;
+            }
+            if (SilentHold(ref d, i))
+            {
+                return; // FG9-FAC-01
             }
             d.Secondary[i] = wp.AimSeconds;
             Cue(ref d, CombatEventKind.Telegraph, i, d.Id[t], 0f, d.Pos[i], 0);
@@ -871,10 +886,29 @@ namespace BinGames.Sim.Combat
         /// <summary>单位主动攻击（驻守开火 / 瞄准线 / 突袭者 / 炮塔）：弹体武器生成弹体，其余即时命中。</summary>
         internal static void UnitAttack(ref CombatData d, int i, int t, in CombatWeapon wp)
         {
+            // FG9-FAC-01（FGR-FAC-008“移动或开火时展开现形”、① 专属行为 ≥ 0.8 秒预警）：带潜伏参数的敌方单位不会从潜伏里直接出手——
+            // 潜伏中要开火 → 这一次只现形（开始展桅预警），预警（RevealSeconds）没结束之前也不出手。伏击 / 驻守 / 瞄准线三条路径选定目标时已经先查过；
+            // 突袭者（含行进拦截的就地交战）与攻城单位走到这里才第一次查（调用方已重置冷却：预警结束后的下一个冷却点再出手）。没有潜伏参数的单位 O(1) 直接放行。
+            if (d.Faction[i] == (byte)CombatFaction.Hostile && SilentHold(ref d, i))
+            {
+                return;
+            }
             // FG2-FW-02：与编队攻击 / 直控同一道开火门槛（格斗 / 力场的触及、过热迟滞）与同一份积热——驻守开火的炮塔也不例外。
             if (PreFireGate(ref d, i, t, wp) != CombatFireResult.Ok)
             {
                 return;
+            }
+            if (d.Faction[i] == (byte)CombatFaction.Hostile)
+            {
+                SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露
+            }
+            else if (wp.Mode != CombatWeaponMode.Projectile && TryReflectInstant(ref d, i, t, wp.Damage, wp))
+            {
+                CombatCounters rc = d.Counters[0];
+                rc.ShotsFired++;
+                d.Counters[0] = rc;
+                AddShotHeat(ref d, i, wp);
+                return; // FG9-FAC-01：炮塔的射弹打进偏折场，被反弹
             }
             if (d.Faction[i] == (byte)CombatFaction.Hostile)
             {
@@ -989,6 +1023,10 @@ namespace BinGames.Sim.Combat
             {
                 return CombatFireResult.NotHostile;
             }
+            if (d.Has(t, CombatUnitFlags.Stealthed))
+            {
+                return CombatFireResult.Hidden; // FG9-FAC-01：潜伏中不能被远程锁定
+            }
             int w = d.Weapon[a];
             if (w < 0 || w >= d.Weapons.Length)
             {
@@ -1015,6 +1053,14 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             RawFired(ref d, a, t);
             AddShotHeat(ref d, a, wp);
+            if (wp.Mode != CombatWeaponMode.Projectile && TryReflectInstant(ref d, a, t, wp.Damage, wp))
+            {
+                if (IsCharged(wp))
+                {
+                    d.NextFireAt[a] = d.Scalars[0].Time + EffectiveCooldown(wp);
+                }
+                return CombatFireResult.Ok; // FG9-FAC-01：射弹载体打进偏折场，被反弹回开火者
+            }
             if (d.Kind[a] == (byte)CombatUnitKind.Turret)
             {
                 // FG6-DEF-01（FGR-DEF-005）：被接入的炮塔由玩家亲自瞄准开火——炮口朝向跟着这一发转过去（画面读它）。
@@ -1102,6 +1148,10 @@ namespace BinGames.Sim.Combat
             {
                 d.Set(a, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
+            }
+            if (TryReflectInstant(ref d, a, t, wp.Damage, wp))
+            {
+                return CombatFireResult.Ok; // FG9-FAC-01：重炮打进偏折场，被反弹回开火者
             }
             // 基础伤害不受过载影响；过载只改积热与穿甲（Demo CannonCombat 类注释）。FG2-FW-02：固件读法（穿甲、伤害倍率、增幅……）同一处结算。
             float pierce = (!overload || d.Has(t, CombatUnitFlags.HeatResistant)) ? 0f : wp.PierceBonus;
@@ -1201,6 +1251,10 @@ namespace BinGames.Sim.Combat
             if (!d.IsAlive(t) || d.Has(t, CombatUnitFlags.Invulnerable))
             {
                 return false;
+            }
+            if (d.Has(t, CombatUnitFlags.Stealthed))
+            {
+                RevealSlot(ref d, t); // FG9-FAC-01：潜伏中被范围伤害命中——立即现形，并照常结算伤害
             }
             // FG2-FW-02：易伤状态（冻结等）统一在这里乘上——任何来源的伤害都吃。
             damage = math.max(0f, damage) * VulnMultiplier(ref d, t);
@@ -1356,7 +1410,7 @@ namespace BinGames.Sim.Combat
                     for (int e = start; e < start + count; e++)
                     {
                         int k = grid.Slots[e];
-                        if (k == i || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                        if (k == i || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || d.Has(k, CombatUnitFlags.Stealthed))
                         {
                             continue;
                         }
@@ -1502,6 +1556,11 @@ namespace BinGames.Sim.Combat
                 pr.Prev = pr.Pos;
                 double2 next = pr.Pos + (double2)(pr.Vel * dt);
                 pr.Life -= dt;
+                if (pr.Faction == CombatFaction.Player && d.DeflectActive.Length > 0 && TryReflectProjectile(ref d, ref pr, next))
+                {
+                    d.Projectiles[write++] = pr; // FG9-FAC-01：被偏折场反弹，下一步起按敌方弹体飞回去
+                    continue;
+                }
                 byte want = pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
                 // 线段 prev→next 与单位圆（半径 = 单位半径 + 弹体半径）求最早交点。
                 double reach = pr.Radius + maxR;

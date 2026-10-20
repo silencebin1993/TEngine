@@ -223,11 +223,14 @@ namespace GameLogic.EditorTools
                 .All(h => GuidanceHooks.Known.Contains(h));
             bool notify = t.TbNotifyType.GetOrDefault("territory_status")?.AwaySection == "event" && t.TbNotifyType.GetOrDefault("territory_alert")?.AwaySection == "raid";
             bool codex = t.TbCodexEntry.GetOrDefault("codex.world.control") != null;
+            // FG9-FAC-01：静默 = 寂听主脑（剧情规则 silent_mind）；澄净 / 超频待首领 Story。
             bool rules = t.TbTerritoryControl.GetOrDefault("foundry")?.LeaderRule == RaidCatalog.StoryRuleFoundryCore
-                         && t.TbTerritoryControl.DataList.All(r => r.LeaderRule == TerritoryControlService.RuleNone || r.LeaderRule == RaidCatalog.StoryRuleFoundryCore);
+                         && t.TbTerritoryControl.GetOrDefault("silent")?.LeaderRule == RaidCatalog.StoryRuleSilentMind
+                         && t.TbTerritoryControl.DataList.All(r => r.LeaderRule == TerritoryControlService.RuleNone || r.LeaderRule == RaidCatalog.StoryRuleFoundryCore
+                                                                   || r.LeaderRule == RaidCatalog.StoryRuleSilentMind);
             Expect(tune && initial && hooks && notify && codex && rules,
                 $"A3 调参入表（初值：收复阈值 {TerritoryControlService.ReclaimBelow}、增援每 {TerritoryControlService.ReinforceDays} 天、精英残部每 {TerritoryControlService.EliteDays} 天）、五个引导钩子（内容归 FG15-UX-04）、" +
-                $"两种通知类型（离家报告“事件 / 突袭”段）、图鉴、首领规则（铸造 = 主核心，其余待首领 Story）：调参 {tune} / 初值 {initial} / 钩子 {hooks} / 通知 {notify} / 图鉴 {codex} / 规则 {rules}");
+                $"两种通知类型（离家报告“事件 / 突袭”段）、图鉴、首领规则（铸造 = 主核心、静默 = 寂听主脑，其余待首领 Story）：调参 {tune} / 初值 {initial} / 钩子 {hooks} / 通知 {notify} / 图鉴 {codex} / 规则 {rules}");
         }
 
         // ── B 控制度 ─────────────────────────────────────────────────────────────

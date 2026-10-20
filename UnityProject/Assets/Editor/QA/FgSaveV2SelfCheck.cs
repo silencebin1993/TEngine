@@ -153,7 +153,9 @@ namespace GameLogic.EditorTools
             // FG0-ARCH-06 新增第 19 个域 Nav（星球表面寻路内核的排队请求与待采纳结果；读档接着跑与不存档一致）。
             // FG3-LOG-06 新增第 20 个域 Power（电网编号、曲线、储能存量）。
             // FG4-ECO-01 新增第 21 个域 Economy（仓库物资、核心保管库、净速率采样）。
-            Expect(fields.Length == 21 && fields.Contains("Combat") && fields.Contains("Nav") && fields.Contains("Power") && fields.Contains("Economy") && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
+            // FG9-FAC-01 新增第 22 个域 Factions（寂听主脑首领战、噪声发射器、阵营反制每日锁定、室内伏笔地点）。
+            Expect(fields.Length == 22 && fields.Contains("Combat") && fields.Contains("Nav") && fields.Contains("Power") && fields.Contains("Economy") && fields.Contains("Factions")
+                   && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
                 $"CampaignState 上 {fields.Length} 个状态域全部登记且写明承接 Story（{string.Join("、", fields)}）");
 
             // 旧正文缺域（比如 v2 早期存档还没有某个域）：读档补空域，不是 null。
