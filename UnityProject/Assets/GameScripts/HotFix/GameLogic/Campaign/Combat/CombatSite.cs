@@ -789,7 +789,13 @@ namespace GameLogic.Campaign.Combat
                 p.EffectSeconds, p.EffectAmount, p.EffectRange,
                 // FG9-FAC-01：静默专属语法参数也进键（不同潜伏 / 偏折 / 断链参数不会并成一行）
                 p.LurkSeconds, p.RevealSeconds, p.RevealRange, p.DeflectRadius, p.DeflectWarn, p.DeflectUp, p.DeflectGap, p.DeflectReflect,
-                p.SeverRange, p.SeverSeconds, p.SeverCooldown);
+                p.SeverRange, p.SeverSeconds, p.SeverCooldown,
+                // FG9-FAC-02 修复轮：铸造专属语法参数也进键——此前漏了，主核心（坚守开火 + 对空齐射）会和同读法、无齐射的行并成一行，对空形态从不开火
+                p.SalvoCount, p.SalvoGap, p.SalvoReload, p.SalvoWarn, p.SalvoRadius, p.SalvoMode,
+                p.MineMax, p.MineCycle, p.MineRadius, p.MineDamage, p.MineFuse, p.MineLife,
+                p.ReloadRange, p.ReloadRate,
+                p.ChargeSpeed, p.ChargeWarn, p.ChargeSeconds, p.ChargeCooldown, p.ChargeKnock, p.TurnRate,
+                p.DeploySeconds, p.MinRange);
             if (_profileIndex.TryGetValue(key, out int idx) && idx < Kernel.ProfileCount)
             {
                 return idx;
@@ -1547,6 +1553,10 @@ namespace GameLogic.Campaign.Combat
                     // FG9-FAC-01（FGR-FAC-008 ①）：潜伏现形 / 偏折场预警 / 反弹——声音 + 字幕 + 画面（画面由地点表现订阅 SilentCombatFeedback.Changed 刷新）。
                     SilentCombatFeedback.OnCue(this, e, at);
                     return;
+                case CombatEventKind.FoundryCue:
+                    // FG9-FAC-02（FGR-FAC-008 ①）：齐射预警 / 对空拦截 / 空爆 / 雷区 / 冲锋蓄力 / 架炮驻锄——声音 + 字幕 + 画面。
+                    FoundryCombatFeedback.OnCue(this, e, at);
+                    return;
                 case CombatEventKind.TagReaction:
                 {
                     // FG2-FW-03（FGR-FW-041 / 042）：开放命名的反应报出机械名；未开放的照样生效，只是不显示名字。
@@ -1679,6 +1689,8 @@ namespace GameLogic.Campaign.Combat
                     return GameText.Get("turret.fire.no_ammo"); // FG6-DEF-01：每发要补给的武器（炮塔的流体类固件）补给不够一发
                 case CombatFireResult.Hidden:
                     return GameText.Get("combat.fire.hidden"); // FG9-FAC-01：目标潜伏中，不能远程锁定
+                case CombatFireResult.AreaOnly:
+                    return GameText.Get("combat.fire.area_only"); // FG9-FAC-02：子母雷只能用范围伤害 / 牵引引爆
                 default:
                     return string.Empty;
             }
@@ -1835,6 +1847,47 @@ namespace GameLogic.Campaign.Combat
             if (!IsDisposed)
             {
                 Kernel.SetBackHitBonus(unitId, bonus);
+            }
+        }
+
+        // ── FG9-FAC-02 铸造专属语法 ──
+
+        /// <summary>主核心阶段三·对空形态：按行为参数的齐射只打空中目标（首领状态机写）。</summary>
+        public bool SetAirMode(int unitId, bool on) => !IsDisposed && Kernel.SetAirMode(unitId, on);
+
+        /// <summary>换一个单位的武器（狂暴：开火间隔缩短）。</summary>
+        public bool SetUnitWeapon(int unitId, in CombatWeapon weapon) => !IsDisposed && Kernel.SetUnitWeapon(unitId, WeaponIndex(weapon));
+
+        public bool TryGetUnitWeapon(int unitId, out CombatWeapon weapon)
+        {
+            weapon = default;
+            return !IsDisposed && Kernel.TryGetUnitWeapon(unitId, out weapon);
+        }
+
+        public bool TryGetFoundry(int unitId, out CombatFoundryUnit foundry)
+        {
+            foundry = default;
+            return !IsDisposed && Kernel.TryGetFoundry(unitId, out foundry);
+        }
+
+        /// <summary>熔渣热区（派生量；家园 / 星球内核按规划层的危害区写入）。</summary>
+        public void SetSlagZones(IReadOnlyList<float3> circles, float mult)
+        {
+            if (!IsDisposed)
+            {
+                Kernel.SetSlagZones(circles, mult);
+            }
+        }
+
+        public int MineCount => IsDisposed ? 0 : Kernel.CountMines();
+
+        public int MineAt(int k) => IsDisposed ? 0 : Kernel.MineAt(k);
+
+        public void SetMineCap(int cap)
+        {
+            if (!IsDisposed)
+            {
+                Kernel.MineCap = cap;
             }
         }
 

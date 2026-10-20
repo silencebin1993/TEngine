@@ -33,6 +33,11 @@ namespace GameLogic.Campaign.Content
         public const string BehaviorDeflect = "deflect";
         public const string BehaviorStalk = "stalk";
         public const string BehaviorSever = "sever";
+        /// <summary>FG9-FAC-02（FGR-FAC-008 铸造专属语法）：齐射弹幕（对空高炮 / 空爆炮台）、布雷（布雷车）、装填（装填机）、正面推进冲锋（攻城重甲）。</summary>
+        public const string BehaviorSalvo = "salvo";
+        public const string BehaviorMinelay = "minelay";
+        public const string BehaviorReload = "reload";
+        public const string BehaviorCharge = "charge";
 
         // ── 标签（fg.TbMechEnemy.tags）──
         public const string TagStructure = "structure";
@@ -42,7 +47,11 @@ namespace GameLogic.Campaign.Content
         /// <summary>FG9-FAC-01：诱饵中继（信号接触列表里的假信号点）；监听节点（范围内核心固件发动时暴露 × effectAmount）。</summary>
         public const string TagDecoy = "decoy";
         public const string TagListenAmp = "listen_amp";
-        public static readonly string[] KnownTags = { TagStructure, TagExternalHealth, TagSilentFire, TagAdaptHeat, TagDecoy, TagListenAmp };
+        /// <summary>FG9-FAC-02：齐射只打空中目标；齐射在目标处空爆；武器按“组件与固件”列装配（DEBT-FG9DATA01-02）。</summary>
+        public const string TagAntiAir = "anti_air";
+        public const string TagAirburst = "airburst";
+        public const string TagAssembled = "assembled";
+        public static readonly string[] KnownTags = { TagStructure, TagExternalHealth, TagSilentFire, TagAdaptHeat, TagDecoy, TagListenAmp, TagAntiAir, TagAirburst, TagAssembled };
 
         // ── 职能 / 层级 / 阵营 ──
         public const string RoleStructure = "structure";
@@ -51,6 +60,7 @@ namespace GameLogic.Campaign.Content
         public const string TierElite = "elite";
         public const string TierBoss = "boss";
         public const string FactionSilent = "silent";
+        public const string FactionFoundry = "foundry";
 
         // ── 编成条件（fg.TbEnemyEncounter.condition）──
         public const string ConditionBase = "base";
@@ -64,6 +74,10 @@ namespace GameLogic.Campaign.Content
         public const string ConditionCounterDeflect = "counter_deflect";
         public const string ConditionCounterListen = "counter_listen";
         public const string ConditionCounterJam = "counter_jam";
+        /// <summary>FG9-FAC-02：铸造前哨核心区的对空阵地（每次进场都补齐，不进出发预测）；铸造反制锁定为“对空加强 / 雷区”时追加的编成。</summary>
+        public const string ConditionBattery = "battery";
+        public const string ConditionCounterAntiAir = "counter_antiair";
+        public const string ConditionCounterMinefield = "counter_minefield";
 
         public const string None = "none";
         public const string NotifyContentError = "content_error";

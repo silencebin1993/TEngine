@@ -579,7 +579,7 @@ namespace GameLogic.EditorTools
                            && IntelService.PickTarget(s, now0)?.Id == IntelCatalog.KindCounter;
             long t = TicksUntilProduced(s, 200);
             IntelRecord counter = Latest(s, IntelCatalog.KindCounter);
-            string expectAdapt = EnemyAdaptationService.ComputeAdaptation(s);
+            string expectAdapt = FoundryCounterService.AdaptationPart(FoundryCounterService.PeekLocked(s)); // FG9-FAC-02：与出发时锁定同一个值
             bool counterOk = t > 0 && counter != null && counter.Source == IntelService.SourcePost && counter.Regions.Contains(FoundryOutpostLayout.RegionId)
                              && counter.Adaptations[Array.IndexOf(counter.Regions, FoundryOutpostLayout.RegionId)] == expectAdapt
                              && counter.ExpiresTick - counter.ProducedTick == GameClock.TicksFor(1200)

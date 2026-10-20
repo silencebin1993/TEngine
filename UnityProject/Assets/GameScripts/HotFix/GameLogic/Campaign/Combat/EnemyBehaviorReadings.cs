@@ -76,6 +76,12 @@ namespace GameLogic.Campaign.Combat
                 case "patrolFreq": return row.PatrolFreq;
                 case "warnSeconds": return row.WarnSeconds;
                 case "lurkSeconds": return row.LurkSeconds;
+                // FG9-FAC-02
+                case "salvoCount": return row.SalvoCount;
+                case "salvoGap": return row.SalvoGap;
+                case "chargeSpeed": return row.ChargeSpeed;
+                case "turnRate": return row.TurnRate;
+                case "maxPlaced": return row.MaxPlaced;
                 default: throw new ArgumentException("EnemyBehaviorReading.Column：未知列 " + col);
             }
         }
@@ -237,12 +243,132 @@ namespace GameLogic.Campaign.Combat
             row != null && row.Behavior == EnemyDefs.BehaviorDeflect && !EnemyDefs.HasTag(row, EnemyDefs.TagExternalHealth);
     }
 
+    /// <summary>FG9-FAC-02（FGR-FAC-008“齐射弹幕”）：对空高炮 / 空爆炮台——装填 → 装填完成灯（预警）→ 一轮多发；标签 anti_air = 只打空中目标，airburst = 在目标处空爆。</summary>
+    public sealed class SalvoReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorSalvo;
+        public override CombatBehavior Kernel => CombatBehavior.Salvo;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "weaponRange", "weaponDamage", "weaponCooldown", "cycleSeconds", "warnSeconds", "salvoCount", "salvoGap" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p) => EnemyFoundryParams.Apply(row, ref p);
+    }
+
+    /// <summary>FG9-FAC-02：布雷车——在牵引中心附近巡逻、受威胁后撤，每 cycleSeconds 秒铺一颗子母雷（effectRange / effectAmount / warnSeconds / maxPlaced）。</summary>
+    public sealed class MinelayReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorMinelay;
+        public override CombatBehavior Kernel => CombatBehavior.MineLayer;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "leash", "cycleSeconds", "effectRange", "effectAmount", "warnSeconds", "maxPlaced" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p) => EnemyFoundryParams.Apply(row, ref p);
+    }
+
+    /// <summary>FG9-FAC-02：装填机——effectRange 内友军火炮装填额外加快 effectAmount 倍；受威胁后撤、否则回到牵引中心。</summary>
+    public sealed class ReloadReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorReload;
+        public override CombatBehavior Kernel => CombatBehavior.Loader;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "speed", "leash", "effectRange", "effectAmount" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p) => EnemyFoundryParams.Apply(row, ref p);
+    }
+
+    /// <summary>FG9-FAC-02（FGR-FAC-008“正面推进”）：攻城重甲——转向受限、只沿正面推进；目标在正前方时蓄力 warnSeconds、以 chargeSpeed 冲锋 effectSeconds 秒（撞击 = 武器伤害、击退 effectAmount 米）、冷却 cycleSeconds；贴身用武器。</summary>
+    public sealed class ChargeReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorCharge;
+        public override CombatBehavior Kernel => CombatBehavior.Charger;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "senseRange", "cycleSeconds", "effectSeconds", "warnSeconds", "chargeSpeed", "turnRate", "weaponRange", "weaponDamage", "weaponCooldown" };
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p) => EnemyFoundryParams.Apply(row, ref p);
+    }
+
+    /// <summary>
+    /// FG9-FAC-02：把敌人表里的铸造专属语法参数翻译成内核行为参数（齐射 / 布雷 / 装填 / 冲锋 / 架炮驻锄 / 盲区）。按列是否 &gt; 0 决定，不认识任何敌人 ID（IC-REQ-012）：
+    /// 任何读法都可以叠加架炮驻锄（deploySeconds）、盲区（minRange）、齐射（salvoCount，首领的对空形态也读它）、布雷（maxPlaced）。
+    /// 区域生成（<see cref="EnemySpawnBuilder"/>）与攻城单位生成（SiegeService.SpawnOne）共用。
+    /// </summary>
+    public static class EnemyFoundryParams
+    {
+        public static bool Has(MechEnemy row) =>
+            row != null && (row.SalvoCount > 0f || row.MaxPlaced > 0f || row.DeploySeconds > 0f || row.MinRange > 0f
+                            || row.Behavior == EnemyDefs.BehaviorReload || row.Behavior == EnemyDefs.BehaviorCharge);
+
+        public static void Apply(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            if (row == null)
+            {
+                return;
+            }
+            if (row.SalvoCount > 0f)
+            {
+                p.SalvoCount = row.SalvoCount;
+                p.SalvoGap = row.SalvoGap;
+                p.SalvoReload = row.CycleSeconds;
+                p.SalvoWarn = row.WarnSeconds;
+                bool burst = EnemyDefs.HasTag(row, EnemyDefs.TagAirburst);
+                p.SalvoRadius = burst ? row.EffectRange : 0f;
+                p.SalvoMode = burst ? 2f : 1f;
+            }
+            if (row.MaxPlaced > 0f)
+            {
+                p.MineMax = row.MaxPlaced;
+                p.MineCycle = row.CycleSeconds;
+                p.MineRadius = row.EffectRange;
+                p.MineDamage = row.EffectAmount;
+                p.MineFuse = row.WarnSeconds;
+                p.MineLife = MineLifeSeconds;
+            }
+            if (row.Behavior == EnemyDefs.BehaviorMinelay)
+            {
+                p.Speed = row.Speed;
+                p.Leash = row.Leash;
+                p.FleeTrigger = row.FleeTrigger;
+                p.PatrolRadius = row.PatrolRadius;
+                p.PatrolFreq = row.PatrolFreq;
+            }
+            if (row.Behavior == EnemyDefs.BehaviorReload)
+            {
+                p.Speed = row.Speed;
+                p.Leash = row.Leash;
+                p.FleeTrigger = row.FleeTrigger;
+                p.ReloadRange = row.EffectRange;
+                p.ReloadRate = row.EffectAmount;
+            }
+            if (row.Behavior == EnemyDefs.BehaviorCharge)
+            {
+                p.Speed = row.Speed;
+                p.SenseRange = row.SenseRange;
+                p.Leash = row.Leash;
+                p.TurnRate = row.TurnRate;
+                p.ChargeSpeed = row.ChargeSpeed;
+                p.ChargeWarn = row.WarnSeconds;
+                p.ChargeSeconds = row.EffectSeconds;
+                p.ChargeCooldown = row.CycleSeconds;
+                p.ChargeKnock = row.EffectAmount;
+            }
+            p.DeploySeconds = row.DeploySeconds;
+            p.MinRange = row.MinRange;
+        }
+
+        /// <summary>子母雷存活秒数（fg.TbHomeTuning foundry.mine.life_seconds）。</summary>
+        public static float MineLifeSeconds => Grid.GridContent.TryGetTuning("foundry.mine.life_seconds", out float v) && v > 0f ? v : 90f;
+    }
+
     /// <summary>读法注册表（键 = fg.TbMechEnemy.behavior）。</summary>
     public static class EnemyBehaviorReadings
     {
         private static readonly Dictionary<string, IEnemyBehaviorReading> Map = Build(
             new StillReading(), new PatrolMarkReading(), new JamFieldReading(), new HoldFireReading(), new TelegraphReading(), new RepairReading(),
-            new DeflectReading(), new StalkReading(), new SeverReading());
+            new DeflectReading(), new StalkReading(), new SeverReading(),
+            new SalvoReading(), new MinelayReading(), new ReloadReading(), new ChargeReading());
 
         private static Dictionary<string, IEnemyBehaviorReading> Build(params IEnemyBehaviorReading[] readings)
         {

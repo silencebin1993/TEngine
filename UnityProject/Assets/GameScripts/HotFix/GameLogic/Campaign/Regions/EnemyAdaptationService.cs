@@ -141,9 +141,13 @@ namespace GameLogic.Campaign.Regions
             {
                 return AdaptationCatalog.None;
             }
-            string id = ComputeAdaptation(state);
+            // FG9-FAC-02（FGR-FAC-004）：反制改为每个游戏日锁定——出发时取当天的锁定值（当天第一次查询时按这一刻的构筑锁定，之后同一天不再变）。
+            // 四态（耐热 / 侧袭 / 干扰支援）写进 AdaptationId（Demo 编成与情报沿用），新增的“对空加强 / 雷区”只写 FoundryCounterId。
+            string counter = FoundryCounterService.Locked(state);
+            string id = FoundryCounterService.AdaptationPart(counter);
             region.AdaptationId = id;
-            Log.Info($"[EnemyAdaptationService] 敌方反制已锁定：{id}（暴露{state.SignalExposure:F0}，" +
+            region.FoundryCounterId = counter ?? string.Empty;
+            Log.Info($"[EnemyAdaptationService] 敌方反制已锁定：{id}（铸造当天锁定 {counter}，暴露{state.SignalExposure:F0}，" +
                 $"第{region.ExpeditionCount + 1}次出击）。");
             return id;
         }

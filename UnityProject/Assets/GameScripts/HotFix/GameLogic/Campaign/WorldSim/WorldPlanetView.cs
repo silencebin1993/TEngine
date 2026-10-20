@@ -410,6 +410,25 @@ namespace GameLogic.Campaign.WorldSim
                 part.transform.localScale = p.Kind == "entry" ? new Vector3(size * 2f, 0.05f, size * 2f) : new Vector3(size, h, size);
                 part.GetComponent<Renderer>().sharedMaterial = a.IsIndoorEntrance && p.Kind == "entry" ? _gateMaterial : _anchorMaterial;
             }
+            // FG9-FAC-02（FG17 FGR-GEN-024 手工锚点：铸造的对空阵地）：铸造前哨核心区的对空炮位（fg.TbSitePoint，不是生成输入）——星球上画出朝天的炮管，
+            // 揭示前就能看到“炮口朝天的阵地”（伏笔）；防空覆盖同一位置（DropPodService.FoundryBattery）。
+            if (a.Id == Regions.FoundryOutpostLayout.RegionId)
+            {
+                foreach (Regions.FoundryOutpostLayout.Anchor g in Regions.FoundryOutpostLayout.BatteryPoints())
+                {
+                    WorldGen.TerritoryPlanner.ToWorld(a, g.Position.x, g.Position.y, out int gx, out int gy);
+                    for (int k = -1; k <= 1; k += 2)
+                    {
+                        GameObject barrel = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                        UnityObjects.Release(barrel.GetComponent<Collider>());
+                        barrel.name = "AaBarrel_" + g.Id;
+                        barrel.transform.SetParent(go.transform, false);
+                        barrel.transform.position = new Vector3(gx + k * 0.6f, 3f, gy);
+                        barrel.transform.localScale = new Vector3(0.4f, 3f, 0.4f);
+                        barrel.GetComponent<Renderer>().sharedMaterial = _anchorMaterial;
+                    }
+                }
+            }
             if (a.IsIndoorEntrance)
             {
                 // 门框（两根立柱 + 门楣），朝向背离家园的一侧。

@@ -89,6 +89,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return 0f;
             }
+            if (o.OutpostId == BatteryOutpostId)
+            {
+                return Tuning("drop.antiair.radius_battery", 60f); // FG9-FAC-02：铸造前哨核心区的对空阵地
+            }
             float baseR = o.TerritoryId == "foundry" ? Tuning("drop.antiair.radius_foundry", 70f)
                 : o.TerritoryId == "white_tide" ? Tuning("drop.antiair.radius_white_tide", 55f) : 0f;
             return baseR <= 0f ? 0f : baseR + Mathf.Max(0, o.Tier - 1) * Tuning("drop.antiair.radius_per_tier", 5f);
@@ -425,6 +429,17 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             OutpostScratch.Clear();
+            // FG9-FAC-02（FGR-EXP-014“对空高炮会阻止投送舱在其覆盖范围内着陆”）：铸造前哨核心区的对空阵地（还有对空高炮存活时）。
+            OutpostRecord battery = FoundryBattery(s);
+            if (battery != null)
+            {
+                float rb = AntiAirRadius(battery);
+                float db = Vector2.Distance(new Vector2(battery.CellX, battery.CellY), new Vector2(x, y));
+                if (rb > 0f && db <= rb && db < best)
+                {
+                    hit = battery;
+                }
+            }
             return hit;
         }
 
@@ -446,6 +461,12 @@ namespace GameLogic.Campaign.Regions
                 }
             }
             OutpostScratch.Clear();
+            OutpostRecord battery = FoundryBattery(s);
+            if (battery != null && AntiAirRadius(battery) > 0f && IsAntiAirKnown(s, battery)
+                && Vector2.Distance(new Vector2(battery.CellX, battery.CellY), new Vector2(cx, cy)) <= radius + AntiAirRadius(battery))
+            {
+                into.Add((new Vector2(battery.CellX, battery.CellY), AntiAirRadius(battery), battery.OutpostId));
+            }
         }
 
         /// <summary>据点格已探索（玩家见过这座据点）。</summary>
@@ -500,7 +521,76 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>给玩家看的据点名：据点格已探索写名字，还在迷雾里写“未探明的敌方据点”（不泄露迷雾里的据点）。</summary>
         public static string OutpostLabel(CampaignState s, OutpostRecord o) =>
-            IsOutpostSeen(s, o) ? TerritoryControlService.OutpostName(o) : GameText.Get("drop.outpost.unknown");
+            o != null && o.OutpostId == BatteryOutpostId ? GameText.Get("world.anchor.point.aa_battery")
+            : IsOutpostSeen(s, o) ? TerritoryControlService.OutpostName(o) : GameText.Get("drop.outpost.unknown");
+
+        // ── FG9-FAC-02：铸造前哨核心区的对空阵地（不是据点记录：按星球锚点与 fg.TbSitePoint 的炮位落位，存活与否看地点里的对空高炮）──
+
+        public const string BatteryOutpostId = "aa_battery:foundry_outpost";
+        private static OutpostRecord _battery;
+        private static WorldGen.WorldPlan _batteryPlan;
+
+        /// <summary>对空阵地的“防空源”（圆心 = 炮位在星球上的中点；Destroyed = 地点里的对空高炮都已被摧毁）。星球上没有铸造前哨锚点 / 表里没有炮位 = null。O(炮位数)。</summary>
+        public static OutpostRecord FoundryBattery(CampaignState s)
+        {
+            WorldGen.WorldPlan plan = s != null ? WorldGen.WorldGenService.PlanFor(s) : null;
+            if (plan == null)
+            {
+                return null;
+            }
+            if (!ReferenceEquals(plan, _batteryPlan))
+            {
+                _batteryPlan = plan;
+                _battery = null;
+                IReadOnlyList<FoundryOutpostLayout.Anchor> guns = FoundryOutpostLayout.BatteryPoints();
+                foreach (WorldGen.PlannedAnchor a in plan.Anchors)
+                {
+                    if (a == null || a.Id != FoundryOutpostLayout.RegionId || guns.Count == 0)
+                    {
+                        continue;
+                    }
+                    long sx = 0, sy = 0;
+                    foreach (FoundryOutpostLayout.Anchor g in guns)
+                    {
+                        WorldGen.TerritoryPlanner.ToWorld(a, g.Position.x, g.Position.y, out int wx, out int wy);
+                        sx += wx;
+                        sy += wy;
+                    }
+                    _battery = new OutpostRecord
+                    {
+                        OutpostId = BatteryOutpostId,
+                        TerritoryId = a.Territory?.Id ?? "foundry",
+                        CellX = (int)(sx / guns.Count),
+                        CellY = (int)(sy / guns.Count),
+                        Tier = 1,
+                    };
+                }
+            }
+            if (_battery == null)
+            {
+                return null;
+            }
+            _battery.Destroyed = !BatteryAlive(s);
+            return _battery;
+        }
+
+        /// <summary>对空阵地还有对空高炮存活（地点还没去过、炮位还没播种 = 存活）。</summary>
+        public static bool BatteryAlive(CampaignState s)
+        {
+            foreach (GameConfig.fg.EnemyEncounter enc in Content.EnemyDefs.Encounters(FoundryOutpostLayout.RegionId, Content.EnemyDefs.ConditionBattery))
+            {
+                if (!Content.EnemyDefs.HasTag(enc.EnemyTypeId, Content.EnemyDefs.TagAntiAir))
+                {
+                    continue;
+                }
+                RegionEnemyRecord rec = FoundryOutpostRegion.FindEnemy(s, enc.Id);
+                if (rec == null || rec.IsAlive)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         private static OutpostRecord EnemyOutpostNear(CampaignState s, float x, float y)
         {

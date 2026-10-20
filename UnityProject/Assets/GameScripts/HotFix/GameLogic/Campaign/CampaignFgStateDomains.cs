@@ -1090,6 +1090,10 @@ namespace GameLogic.Campaign
         public bool HasSilentCounter;
         public string SilentCounter = string.Empty;
         public string SilentCounterNext = string.Empty;
+        /// <summary>FG9-FAC-02（FGR-FAC-004）：同上，铸造前哨的铸造反制（AdaptationCatalog.* / counter_antiair / counter_minefield；空串 = 没有）。旧档没有 = false。</summary>
+        public bool HasFoundryCounter;
+        public string FoundryCounter = string.Empty;
+        public string FoundryCounterNext = string.Empty;
     }
 
     /// <summary>FG5-RND-05：一类情报的破译进度（千分之一倍率 × 统一时钟步数；一座监听站一步 = 1000）与累计产出。</summary>
@@ -2709,6 +2713,8 @@ namespace GameLogic.Campaign
             s.Factions.SilentCounterId ??= string.Empty;
             s.Factions.PoisRead ??= Array.Empty<string>();
             s.Factions.SilentBoss.CounterId ??= string.Empty;
+            s.Factions.FoundryCounterId ??= string.Empty; // FG9-FAC-02
+            s.Factions.SlagZonesNoticed ??= Array.Empty<string>();
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
             s.Grid.TerrainSourceId ??= string.Empty;

@@ -1219,6 +1219,9 @@ namespace GameLogic.EditorTools
             Place(site, mo, new Vector2(-30f, -20f));
             Place(site, mc, new Vector2(-32f, -20f));
             site.Kernel.SetCycle(su, 0.02f, 0f);
+            // FG9-FAC-02（ADR-FAC-003）：步进炮第一次发现目标先放下驻锄 1 秒（架炮驻锄），架好之后才是 Demo 的 1 秒瞄准线两段式。
+            WorldSimulation.StepMany(GameClock.StepHz + 2);
+            site.Kernel.SetCycle(su, 0.02f, 0f);
             float hpR = Hp(mr);
             WorldSimulation.StepMany(30); // 瞄准中
             float midAim = Hp(mr);
@@ -1339,6 +1342,11 @@ namespace GameLogic.EditorTools
             Expect(Mathf.Abs(frontDmg - d) < 0.01f && Mathf.Abs(backDmg - d * (1f + FoundryOutpostLayout.Phase2BackHitBonusPct)) < 0.01f,
                 $"阶段二弱点：正面 {frontDmg:F2}、侧后 {backDmg:F2}（= 正面 × {1f + FoundryOutpostLayout.Phase2BackHitBonusPct}）");
 
+            // FG9-FAC-02：阶段二的伤害最多把主核心打到阶段三门槛，进入对空形态（Demo 的阶段原样保留，新增阶段三）。
+            FoundryOutpostRegion.TryDamageEnemy(s, core.EnemyInstanceId, 99999f);
+            bool antiAir = FoundryOutpostCoreBoss.GetState(region) == CoreBossState.AntiAir
+                           && Mathf.Abs(core.Health - core.MaxHealth * FoundryOutpostCoreBoss.Phase3HealthFraction) < 0.01f;
+            Expect(antiAir, $"阶段二 → 阶段三·对空形态：耐久停在门槛 {core.Health:F0}（{FoundryOutpostCoreBoss.Phase3HealthFraction:P0}），阶段 {FoundryOutpostCoreBoss.GetState(region)}");
             // 摧毁主核心 → 已摧毁 + 核心数据盒掉落一次。
             FoundryOutpostRegion.TryDamageEnemy(s, core.EnemyInstanceId, 99999f);
             bool destroyed = FoundryOutpostCoreBoss.GetState(region) == CoreBossState.Destroyed;

@@ -75,6 +75,11 @@ namespace GameLogic.Campaign.Regions
             {
                 yield return (a.Id, a.Position);
             }
+            // FG9-FAC-02：核心区对空阵地与反制 / 狂暴出生点（fg.TbSitePoint）。
+            foreach (FoundryOutpostLayout.Anchor a in FoundryOutpostLayout.SitePoints())
+            {
+                yield return (a.Id, a.Position);
+            }
         }
 
         /// <summary>按区域取场地信息（O(1)，布局锚点首次用到时建一次表）。</summary>

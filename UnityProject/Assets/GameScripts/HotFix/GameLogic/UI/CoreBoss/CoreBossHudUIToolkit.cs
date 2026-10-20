@@ -2,6 +2,7 @@ using System.Linq;
 using Cysharp.Threading.Tasks;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
@@ -31,8 +32,22 @@ namespace GameLogic.UI.CoreBoss
         private VisualElement _node2Fill;
         private Label _heatLabel;
         private Label _lockoutWarningLabel;
+        // FG9-FAC-02：阶段分界、阶段三 / 狂暴说明、场地边界倒计时、精英血条、上次止步阶段
+        private VisualElement _markTransition;
+        private VisualElement _markAntiAir;
+        private Label _stageLabel;
+        private Label _arenaLabel;
+        private VisualElement _eliteRow;
+        private Label _eliteLabel;
+        private VisualElement _eliteFill;
+        private Label _lastPhaseLabel;
 
         private float _refreshTimer;
+
+        /// <summary>FG9-FAC-02 修复轮：冒烟 / 自检读——UXML 里的节点是否全部绑上（名字取错会静默不显示），最近一帧是否可见、写了什么。</summary>
+        public static bool LastBound { get; private set; }
+        public static bool LastVisible { get; private set; }
+        public static string LastText { get; private set; } = string.Empty;
 
         private async void Start()
         {
@@ -61,6 +76,17 @@ namespace GameLogic.UI.CoreBoss
                 return;
             }
 
+            LastBound = Bind(_root);
+        }
+
+        /// <summary>按 UXML 节点名绑定（运行时 Start 与自检共用同一个入口）。返回 true = 全部节点都找到了。</summary>
+        public bool Bind(VisualElement root)
+        {
+            _root = root;
+            if (_root == null)
+            {
+                return false;
+            }
             _panel = _root.Q<VisualElement>("CoreBossHudRoot");
             _phaseLabel = _root.Q<Label>("PhaseLabel");
             _coreHealthFill = _root.Q<VisualElement>("CoreHealthFill");
@@ -69,6 +95,17 @@ namespace GameLogic.UI.CoreBoss
             _node2Fill = _root.Q<VisualElement>("Node2Fill");
             _heatLabel = _root.Q<Label>("HeatLabel");
             _lockoutWarningLabel = _root.Q<Label>("LockoutWarningLabel");
+            _markTransition = _root.Q<VisualElement>("MarkTransition");
+            _markAntiAir = _root.Q<VisualElement>("MarkAntiAir");
+            _stageLabel = _root.Q<Label>("StageLabel");
+            _arenaLabel = _root.Q<Label>("ArenaLabel");
+            _eliteRow = _root.Q<VisualElement>("EliteRow");
+            _eliteLabel = _root.Q<Label>("EliteLabel");
+            _eliteFill = _root.Q<VisualElement>("EliteFill");
+            _lastPhaseLabel = _root.Q<Label>("LastPhaseLabel");
+            return _panel != null && _phaseLabel != null && _coreHealthFill != null && _coreHealthLabel != null && _node1Fill != null && _node2Fill != null
+                   && _heatLabel != null && _lockoutWarningLabel != null && _markTransition != null && _markAntiAir != null && _stageLabel != null
+                   && _arenaLabel != null && _eliteRow != null && _eliteLabel != null && _eliteFill != null && _lastPhaseLabel != null;
         }
 
         private void Update()
@@ -81,14 +118,7 @@ namespace GameLogic.UI.CoreBoss
             FoundryOutpostController fo = GameRoot.FoundryOutpost;
             CampaignState state = CampaignSession.Current;
             RegionRecord region = fo != null && fo.IsActive && state != null ? FoundryOutpostRegion.Find(state) : null;
-            bool visible = region != null && FoundryOutpostCoreBoss.IsInitialized(region);
-
-            _panel.RemoveFromClassList("boss-root-visible");
-            if (visible)
-            {
-                _panel.AddToClassList("boss-root-visible");
-            }
-            if (!visible)
+            if (!ApplyVisible(region))
             {
                 return;
             }
@@ -103,16 +133,57 @@ namespace GameLogic.UI.CoreBoss
             Refresh(state, region);
         }
 
+        /// <summary>FG9-FAC-02：首领战失败过（有“上次止步于”）时，进场后也显示，重试前就能看到上次止步的阶段（FG09 第 9 节）。</summary>
+        private bool ApplyVisible(RegionRecord region)
+        {
+            bool visible = region != null && (FoundryOutpostCoreBoss.IsInitialized(region) || !string.IsNullOrEmpty(region.CoreLastReachedState));
+            LastVisible = visible;
+            _panel.RemoveFromClassList("boss-root-visible");
+            if (visible)
+            {
+                _panel.AddToClassList("boss-root-visible");
+            }
+            return visible;
+        }
+
+        /// <summary>立即刷新一次（不等 0.2 秒节流）：自检用真实 UXML 绑定后逐阶段读标签内容。返回是否可见。</summary>
+        public bool RefreshNow(CampaignState state, RegionRecord region)
+        {
+            if (_panel == null || state == null || !ApplyVisible(region))
+            {
+                return false;
+            }
+            Refresh(state, region);
+            return true;
+        }
+
         private void Refresh(CampaignState state, RegionRecord region)
         {
-            _phaseLabel.text = "主核心：" + FoundryOutpostCoreBoss.DisplayPhaseText(region);
+            _phaseLabel.text = GameText.Format("boss.foundry.hud.title", FoundryOutpostCoreBoss.DisplayPhaseText(region));
 
             RegionEnemyRecord core = FoundryOutpostRegion.FindEnemy(state, FoundryOutpostLayout.MainCoreId);
             if (core != null)
             {
                 float pct = core.MaxHealth > 0f ? Mathf.Clamp01(core.Health / core.MaxHealth) : 0f;
                 _coreHealthFill.style.width = new Length(pct * 100f, LengthUnit.Percent);
-                _coreHealthLabel.text = $"核心 HP {core.Health:F0}/{core.MaxHealth:F0}";
+                _coreHealthLabel.text = GameText.Format("boss.foundry.hud.hp", core.Health.ToString("F0"), core.MaxHealth.ToString("F0"));
+            }
+            // FGR-FAC-006：血条上标出阶段分界（阶段一 → 过渡、阶段二 → 对空形态）。
+            if (_markTransition != null)
+            {
+                _markTransition.style.left = new Length(FoundryOutpostLayout.Phase1TransitionHealthFraction * 100f, LengthUnit.Percent);
+            }
+            if (_markAntiAir != null)
+            {
+                _markAntiAir.style.left = new Length(FoundryOutpostCoreBoss.Phase3HealthFraction * 100f, LengthUnit.Percent);
+            }
+            RefreshStage(state, region);
+            RefreshElite(state);
+            if (_lastPhaseLabel != null)
+            {
+                _lastPhaseLabel.text = !string.IsNullOrEmpty(region.CoreLastReachedState) && System.Enum.TryParse(region.CoreLastReachedState, out CoreBossState last)
+                    ? GameText.Format("boss.foundry.hud.last_phase", FoundryOutpostCoreBoss.PhaseName(last))
+                    : string.Empty;
             }
 
             SetNodeFill(_node1Fill, FoundryOutpostRegion.FindEnemy(state, FoundryOutpostLayout.CoreNode1Id));
@@ -125,8 +196,9 @@ namespace GameLogic.UI.CoreBoss
                 .OrderByDescending(m => m.WeaponHeat)
                 .FirstOrDefault();
             _heatLabel.text = hottest != null
-                ? $"重炮热量 {MachineNaming.Short(hottest)}：{hottest.WeaponHeat:F0}/{FracturedCityLayout.WeaponHeatOverheatThreshold:F0}" +
-                  (hottest.IsWeaponOverheated ? "（过热停火）" : string.Empty)
+                ? GameText.Format("boss.foundry.hud.heat", MachineNaming.Short(hottest), hottest.WeaponHeat.ToString("F0"),
+                      FracturedCityLayout.WeaponHeatOverheatThreshold.ToString("F0")) +
+                  (hottest.IsWeaponOverheated ? GameText.Get("boss.foundry.hud.overheated") : string.Empty)
                 : string.Empty;
 
             bool lockoutVisible = region.CoreLockoutWarnAtPlaySeconds > 0f && !region.CoreLockoutActive;
@@ -135,14 +207,79 @@ namespace GameLogic.UI.CoreBoss
             if (lockoutVisible || lockoutActive)
             {
                 _lockoutWarningLabel.AddToClassList("boss-lockout-warning-visible");
-                _lockoutWarningLabel.text = lockoutActive
-                    ? "区域封锁已生效：核心分区入口已锁死，无法退回外围。"
-                    : "警告：核心分区即将封锁，2秒后无法退回外围！";
+                _lockoutWarningLabel.text = GameText.Get(lockoutActive ? "boss.foundry.hud.lockout_active" : "boss.foundry.hud.lockout_warn");
             }
             else
             {
                 _lockoutWarningLabel.text = string.Empty;
             }
+            LastText = string.Join("\n", _phaseLabel.text, _coreHealthLabel.text, _stageLabel?.text, _arenaLabel?.text,
+                _eliteRow != null && _eliteRow.style.display.value == DisplayStyle.Flex ? _eliteLabel?.text : string.Empty, _lastPhaseLabel?.text);
+        }
+
+        /// <summary>FG9-FAC-02：阶段二常显阶段三情报；对空形态倒计时；狂暴开火倍率；场地边界倒计时。</summary>
+        private void RefreshStage(CampaignState state, RegionRecord region)
+        {
+            CoreBossState s = FoundryOutpostCoreBoss.GetState(region);
+            string stage;
+            switch (s)
+            {
+                case CoreBossState.Phase2:
+                    stage = GameText.Format("boss.foundry.hud.next_phase", Mathf.RoundToInt(FoundryOutpostCoreBoss.Phase3HealthFraction * 100f).ToString(),
+                        Mathf.RoundToInt(FoundryOutpostCoreBoss.AntiAirSeconds).ToString());
+                    break;
+                case CoreBossState.AntiAir:
+                    stage = GameText.Format("boss.foundry.hud.antiair", FoundryOutpostCoreBoss.ExposedDamageMult.ToString("0.##"),
+                        Mathf.Max(0f, region.CoreAntiAirEndAtPlaySeconds - state.PlaySeconds).ToString("F0"));
+                    break;
+                case CoreBossState.Berserk:
+                    stage = GameText.Format("boss.foundry.hud.berserk", FoundryOutpostCoreBoss.BerserkCooldownMult.ToString("0.##"));
+                    break;
+                default:
+                    stage = string.Empty;
+                    break;
+            }
+            if (_stageLabel != null)
+            {
+                _stageLabel.text = stage;
+            }
+            if (_arenaLabel != null)
+            {
+                _arenaLabel.text = FoundryOutpostCoreBoss.IsFighting(region) && region.CoreArenaOutsideSeconds > 0f
+                    ? GameText.Format("boss.foundry.hud.arena_leave", Mathf.Max(0f, FoundryOutpostCoreBoss.ArenaLeaveSeconds - region.CoreArenaOutsideSeconds).ToString("F0"))
+                    : string.Empty;
+            }
+        }
+
+        /// <summary>FG09 第 9 节“精英和首领的血条显示名称和阶段”：本地点存活的精英（敌人表层级 elite）的名字与耐久（取第一台）。</summary>
+        private void RefreshElite(CampaignState state)
+        {
+            if (_eliteRow == null)
+            {
+                return;
+            }
+            RegionEnemyRecord elite = null;
+            if (state.RegionEnemies != null)
+            {
+                foreach (RegionEnemyRecord e in state.RegionEnemies)
+                {
+                    if (e != null && e.IsAlive && e.RegionId == FoundryOutpostLayout.RegionId
+                        && Campaign.Content.EnemyDefs.TryGet(e.EnemyTypeId, out GameConfig.fg.MechEnemy row) && Campaign.Content.EnemyDefs.IsElite(row))
+                    {
+                        elite = e;
+                        break;
+                    }
+                }
+            }
+            _eliteRow.style.display = elite != null ? DisplayStyle.Flex : DisplayStyle.None;
+            if (elite == null)
+            {
+                return;
+            }
+            _eliteLabel.text = GameText.Format("boss.foundry.hud.elite", Campaign.Content.EnemyDefs.NameOf(elite.EnemyTypeId), elite.Health.ToString("F0"),
+                elite.MaxHealth.ToString("F0"));
+            float pct = elite.MaxHealth > 0f ? Mathf.Clamp01(elite.Health / elite.MaxHealth) : 0f;
+            _eliteFill.style.width = new Length(pct * 100f, LengthUnit.Percent);
         }
 
         private static void SetNodeFill(VisualElement fill, RegionEnemyRecord node)

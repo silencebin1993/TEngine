@@ -60,6 +60,14 @@ public sealed partial class MechEnemy : Luban.BeanBase
         WarnSeconds = _buf.ReadFloat();
         LurkSeconds = _buf.ReadFloat();
         RevealRange = _buf.ReadFloat();
+        SalvoCount = _buf.ReadFloat();
+        SalvoGap = _buf.ReadFloat();
+        MinRange = _buf.ReadFloat();
+        DeploySeconds = _buf.ReadFloat();
+        RearBonus = _buf.ReadFloat();
+        ChargeSpeed = _buf.ReadFloat();
+        TurnRate = _buf.ReadFloat();
+        MaxPlaced = _buf.ReadFloat();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -204,7 +212,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string IconId;
     /// <summary>
-    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay
+    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy
     /// </summary>
     public readonly string Silhouette;
     /// <summary>
@@ -231,6 +239,38 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 潜伏侦测距离(米):装有信号中继或标记器的机器在这个距离内时不能潜伏、已潜伏的现形;0=只有受伤/移动/开火才现形
     /// </summary>
     public readonly float RevealRange;
+    /// <summary>
+    /// 齐射弹幕:一轮几发(整数;首领的对空形态也读它);0=不齐射
+    /// </summary>
+    public readonly float SalvoCount;
+    /// <summary>
+    /// 齐射弹幕:一轮里每发之间的间隔(秒)
+    /// </summary>
+    public readonly float SalvoGap;
+    /// <summary>
+    /// 高抛曲射的近距盲区(米):目标比这更近就打不到;0=没有盲区
+    /// </summary>
+    public readonly float MinRange;
+    /// <summary>
+    /// 架炮驻锄:开火前放下支腿、抬升炮口要多少秒(架设中被击退 / 冻结就回到未架设);0=不用架设
+    /// </summary>
+    public readonly float DeploySeconds;
+    /// <summary>
+    /// 背部弱点:从侧后命中时伤害额外 +本值(0.5=+50%);0=没有
+    /// </summary>
+    public readonly float RearBonus;
+    /// <summary>
+    /// 正面推进冲锋:冲锋速度(米/秒);0=不冲锋
+    /// </summary>
+    public readonly float ChargeSpeed;
+    /// <summary>
+    /// 转向速度(度/秒;正面推进:转向半径大);0=瞬间转向
+    /// </summary>
+    public readonly float TurnRate;
+    /// <summary>
+    /// 布雷:同时最多几颗雷(整数);0=不布雷
+    /// </summary>
+    public readonly float MaxPlaced;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -283,6 +323,14 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "warnSeconds:" + WarnSeconds + ","
         + "lurkSeconds:" + LurkSeconds + ","
         + "revealRange:" + RevealRange + ","
+        + "salvoCount:" + SalvoCount + ","
+        + "salvoGap:" + SalvoGap + ","
+        + "minRange:" + MinRange + ","
+        + "deploySeconds:" + DeploySeconds + ","
+        + "rearBonus:" + RearBonus + ","
+        + "chargeSpeed:" + ChargeSpeed + ","
+        + "turnRate:" + TurnRate + ","
+        + "maxPlaced:" + MaxPlaced + ","
         + "}";
     }
 }

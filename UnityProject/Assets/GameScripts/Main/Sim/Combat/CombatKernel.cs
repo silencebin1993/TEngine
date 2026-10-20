@@ -408,6 +408,14 @@ namespace BinGames.Sim.Combat
                 sl.DeflectT = _d.Profiles[bp].DeflectGap;
                 _d.Silent[slot] = sl;
             }
+            // FG9-FAC-02：齐射单位的第一次装填 = 出生时的初始周期（编成表 initialCycle）；布雷车的第一颗雷在半个间隔后。
+            if (bp >= 0 && bp < _d.Profiles.Length && (_d.Profiles[bp].SalvoCount > 0f || _d.Profiles[bp].MineMax > 0f))
+            {
+                CombatFoundryUnit fu = _d.Foundry[slot];
+                fu.SalvoT = math.max(0f, spawn.Cycle);
+                fu.LayT = _d.Profiles[bp].MineCycle * 0.5f;
+                _d.Foundry[slot] = fu;
+            }
             return id;
         }
 
@@ -565,6 +573,92 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        // ─────────────────────────────── FG9-FAC-02 铸造专属语法 ───────────────────────────────
+
+        /// <summary>FG9-FAC-02：单位的铸造状态（不存在 = false）。</summary>
+        public bool TryGetFoundry(int id, out CombatFoundryUnit foundry)
+        {
+            int i = _d.SlotOf(id);
+            foundry = i >= 0 ? _d.Foundry[i] : default;
+            return i >= 0;
+        }
+
+        /// <summary>FG9-FAC-02（铸造主核心阶段三·对空形态）：打开 / 关闭单位的对空模式（按行为参数的齐射只打空中目标）。首领状态机在阶段变化时写。</summary>
+        public bool SetAirMode(int id, bool on)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                return false;
+            }
+            CombatFoundryUnit f = _d.Foundry[i];
+            byte v = on ? (byte)1 : (byte)0;
+            if (f.AirMode == v)
+            {
+                return true;
+            }
+            f.AirMode = v;
+            if (!on)
+            {
+                f.Salvo = 0;
+                f.SalvoLeft = 0;
+                f.SalvoTarget = 0;
+            }
+            _d.Foundry[i] = f;
+            Touch();
+            return true;
+        }
+
+        /// <summary>FG9-FAC-02（熔渣热区“区内散热 -30%”）：写入熔渣热区的圆（x, y, 半径）与区内散热倍率。派生量，不进快照；读档后沿用。</summary>
+        public void SetSlagZones(IReadOnlyList<float3> circles, float mult)
+        {
+            _d.SlagZones.Clear();
+            if (circles != null)
+            {
+                for (int k = 0; k < circles.Count; k++)
+                {
+                    _d.SlagZones.Add(circles[k]);
+                }
+            }
+            _d.SlagMult = mult > 0f ? math.min(1f, mult) : 1f;
+        }
+
+        public int SlagZoneCount => _d.SlagZones.Length;
+
+        /// <summary>FG9-FAC-02：本地点子母雷上限（0 = 默认 12）。</summary>
+        public int MineCap
+        {
+            get => _d.MineCap > 0 ? _d.MineCap : CombatLogic.DefaultMineCap;
+            set => _d.MineCap = math.max(0, value);
+        }
+
+        /// <summary>FG9-FAC-02：本地点存活的子母雷数（O(单位)，只给自检 / 表现对账用）。</summary>
+        public int CountMines()
+        {
+            int c = 0;
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (_d.IsAlive(i) && _d.Behavior[i] == (byte)CombatBehavior.Mine)
+                {
+                    c++;
+                }
+            }
+            return c;
+        }
+
+        /// <summary>FG9-FAC-02：第 k 颗存活子母雷的单位 ID（顺序 = 槽位顺序；不存在 = 0）。</summary>
+        public int MineAt(int k)
+        {
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (_d.IsAlive(i) && _d.Behavior[i] == (byte)CombatBehavior.Mine && k-- == 0)
+                {
+                    return _d.Id[i];
+                }
+            }
+            return 0;
+        }
+
         // ─────────────────────────────── FG6-DEF-01 炮塔 ───────────────────────────────
 
         /// <summary>FG6-DEF-01（FGR-DEF-004）：设置单位的补给存量（按发；热更层从管线消费者的缓存装填）。返回 false = 单位不存在或值不合法。</summary>
@@ -720,6 +814,16 @@ namespace BinGames.Sim.Combat
             return i < 0 ? 0f : _d.Speed[i];
         }
 
+        /// <summary>FG9-FAC-02：单位当前武器的参数（没有武器 = false）。</summary>
+        public bool TryGetUnitWeapon(int id, out CombatWeapon weapon)
+        {
+            int i = _d.SlotOf(id);
+            int w = i >= 0 ? _d.Weapon[i] : -1;
+            bool ok = w >= 0 && w < _d.Weapons.Length;
+            weapon = ok ? _d.Weapons[w] : default;
+            return ok;
+        }
+
         public bool SetUnitWeapon(int id, int weapon)
         {
             int i = _d.SlotOf(id);
@@ -740,6 +844,13 @@ namespace BinGames.Sim.Combat
             }
             _d.BackHit[i] = bonus;
             return true;
+        }
+
+        /// <summary>只读：内核结算侧后加成时对这个单位用的倍率（弹体 / 读法命中同一个函数）。不存在 = 1。</summary>
+        public float BackMultiplierOf(int id, double2 attackerPos)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 1f : CombatLogic.BackMultiplier(ref _d, i, attackerPos);
         }
 
         public bool SetDirectInput(int id, float2 dir)
@@ -917,7 +1028,7 @@ namespace BinGames.Sim.Combat
             float cosHalf = math.cos(math.radians(halfAngleDeg));
             for (int i = 0; i < _d.Count; i++)
             {
-                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable) || _d.Has(i, CombatUnitFlags.Stealthed))
+                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable) || _d.Has(i, CombatUnitFlags.Stealthed) || _d.Has(i, CombatUnitFlags.AreaOnly))
                 {
                     continue;
                 }
@@ -942,7 +1053,7 @@ namespace BinGames.Sim.Combat
             double bestDist = radius;
             for (int i = 0; i < _d.Count; i++)
             {
-                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable) || _d.Has(i, CombatUnitFlags.Stealthed))
+                if (!_d.IsAlive(i) || _d.Faction[i] != (byte)faction || !_d.Has(i, CombatUnitFlags.Targetable) || _d.Has(i, CombatUnitFlags.Stealthed) || _d.Has(i, CombatUnitFlags.AreaOnly))
                 {
                     continue;
                 }
@@ -1745,6 +1856,30 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, hsl.DeflectT);
                 Mix(ref h, hsl.SeverTarget);
                 Mix(ref h, hsl.SeverT);
+                CombatFoundryUnit hfu = _d.Foundry[i]; // FG9-FAC-02（格式 14）
+                Mix(ref h, hfu.Salvo);
+                Mix(ref h, hfu.Deploy);
+                Mix(ref h, hfu.Charge);
+                Mix(ref h, hfu.AirMode);
+                Mix(ref h, hfu.MineState);
+                Mix(ref h, hfu.SalvoT);
+                Mix(ref h, hfu.SalvoLeft);
+                Mix(ref h, hfu.SalvoTarget);
+                Mix(ref h, hfu.DeployT);
+                Mix(ref h, hfu.ChargeT);
+                Mix(ref h, hfu.ChargeDir.x);
+                Mix(ref h, hfu.ChargeDir.y);
+                Mix(ref h, hfu.ChargeSeq);
+                Mix(ref h, hfu.MineT);
+                Mix(ref h, hfu.MineLife);
+                Mix(ref h, hfu.LayT);
+                // 修复轮：同样写进快照、会改变结算的字段（架炮锚点、一次冲锋只撞一次、每个布雷者的雷数上限、装填光环同步不叠加）。
+                Mix(ref h, hfu.AnchorPos.x);
+                Mix(ref h, hfu.AnchorPos.y);
+                Mix(ref h, hfu.RamBy);
+                Mix(ref h, hfu.RamSeq);
+                Mix(ref h, hfu.MineOwner);
+                Mix(ref h, hfu.BoostStep);
                 CombatSiegeUnit hsu = _d.Siege[i]; // FG6-DEF-05（格式 11）
                 Mix(ref h, hsu.Role);
                 Mix(ref h, hsu.Mode);
@@ -2065,6 +2200,11 @@ namespace BinGames.Sim.Combat
                     w.Write(sl.SeverTarget);
                     w.Write(sl.SeverT);
                 }
+                // FG9-FAC-02（格式 14）：铸造状态。
+                if (format >= 14)
+                {
+                    WriteFoundry(w, _d.Foundry[i]);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -2330,6 +2470,13 @@ namespace BinGames.Sim.Combat
             }
             // FG6-DEF-05：攻城剧场配置是热更层写的（读档后热更层还会按存档重设一次）；格子缓存与流场在第一步维护时按读进来的状态重建。
             staging.SiegeState.CopyConfigFrom(ref _d.SiegeState);
+            // FG9-FAC-02：熔渣热区与地雷上限是派生量（热更层写），读档沿用当前的。
+            for (int i = 0; i < _d.SlagZones.Length; i++)
+            {
+                staging.SlagZones.Add(_d.SlagZones[i]);
+            }
+            staging.SlagMult = _d.SlagMult;
+            staging.MineCap = _d.MineCap;
             _d.Dispose();
             _d = staging;
             CombatLogic.RebuildDeflectActive(ref _d); // FG9-FAC-01：展开中的偏折场由每单位状态派生，读档后重算。
@@ -2573,6 +2720,16 @@ namespace BinGames.Sim.Combat
                         return CombatLoadResult.InvalidValue;
                     }
                 }
+                // FG9-FAC-02（格式 14）：铸造状态；更老的快照没有 = 全 0（没有铸造行为）。
+                CombatFoundryUnit foundry = default;
+                if (format >= 14)
+                {
+                    foundry = ReadFoundry(r);
+                    if (!FoundryValid(foundry))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -2599,6 +2756,7 @@ namespace BinGames.Sim.Combat
                 staging.StatusStacks[slot] = stacks;
                 staging.StatusZoneSlow[slot] = zoneSlow;
                 staging.Silent[slot] = silent;
+                staging.Foundry[slot] = foundry;
                 uint sb = status;
                 int bi = 0;
                 while (sb != 0u)
@@ -2964,6 +3122,14 @@ namespace BinGames.Sim.Combat
             {
                 w.Write(c.ShotsReflected);
             }
+            if (format >= 14)
+            {
+                w.Write(c.Salvos);
+                w.Write(c.AirIntercepts);
+                w.Write(c.MinesLaid);
+                w.Write(c.MinesDetonated);
+                w.Write(c.Charges);
+            }
         }
 
         private static CombatCounters ReadCounters(BinaryReader r, int format)
@@ -2983,6 +3149,14 @@ namespace BinGames.Sim.Combat
             if (format >= 13)
             {
                 c.ShotsReflected = r.ReadInt64();
+            }
+            if (format >= 14)
+            {
+                c.Salvos = r.ReadInt64();
+                c.AirIntercepts = r.ReadInt64();
+                c.MinesLaid = r.ReadInt64();
+                c.MinesDetonated = r.ReadInt64();
+                c.Charges = r.ReadInt64();
             }
             return c;
         }
@@ -3273,6 +3447,32 @@ namespace BinGames.Sim.Combat
                 w.Write(p.SeverSeconds);
                 w.Write(p.SeverCooldown);
             }
+            if (format >= 14)
+            {
+                // FG9-FAC-02（格式 14）：铸造专属语法参数。
+                w.Write(p.SalvoCount);
+                w.Write(p.SalvoGap);
+                w.Write(p.SalvoReload);
+                w.Write(p.SalvoWarn);
+                w.Write(p.SalvoRadius);
+                w.Write(p.SalvoMode);
+                w.Write(p.MineMax);
+                w.Write(p.MineCycle);
+                w.Write(p.MineRadius);
+                w.Write(p.MineDamage);
+                w.Write(p.MineFuse);
+                w.Write(p.MineLife);
+                w.Write(p.ReloadRange);
+                w.Write(p.ReloadRate);
+                w.Write(p.ChargeSpeed);
+                w.Write(p.ChargeWarn);
+                w.Write(p.ChargeSeconds);
+                w.Write(p.ChargeCooldown);
+                w.Write(p.ChargeKnock);
+                w.Write(p.TurnRate);
+                w.Write(p.DeploySeconds);
+                w.Write(p.MinRange);
+            }
         }
 
         /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
@@ -3284,10 +3484,79 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
+            // FG9-FAC-02：铸造参数同样不得为负；齐射有发数时间隔与装填必须为正（否则一步里无限连发）。
+            if (!NonNeg(p.SalvoCount) || !NonNeg(p.SalvoGap) || !NonNeg(p.SalvoReload) || !NonNeg(p.SalvoWarn) || !NonNeg(p.SalvoRadius) || !NonNeg(p.SalvoMode) || !NonNeg(p.MineMax) || !NonNeg(p.MineCycle) || !NonNeg(p.MineRadius) || !NonNeg(p.MineDamage) || !NonNeg(p.MineFuse) || !NonNeg(p.MineLife) || !NonNeg(p.ReloadRange) || !NonNeg(p.ReloadRate) || !NonNeg(p.ChargeSpeed) || !NonNeg(p.ChargeWarn) || !NonNeg(p.ChargeSeconds) || !NonNeg(p.ChargeCooldown) || !NonNeg(p.ChargeKnock) || !NonNeg(p.TurnRate) || !NonNeg(p.DeploySeconds) || !NonNeg(p.MinRange))
+            {
+                return false;
+            }
+            if (p.SalvoCount > 0f && (p.SalvoGap <= 0f || p.SalvoReload <= 0f))
+            {
+                return false;
+            }
             return p.DeflectRadius <= 0f || (p.DeflectWarn > 0f && p.DeflectUp > 0f && p.DeflectGap > 0f);
         }
 
         private static bool NonNeg(float f) => f >= 0f && !float.IsInfinity(f);
+
+        private static bool Finite(float f) => !float.IsNaN(f) && !float.IsInfinity(f);
+
+        private static void WriteFoundry(BinaryWriter w, in CombatFoundryUnit f)
+        {
+            w.Write(f.Salvo);
+            w.Write(f.Deploy);
+            w.Write(f.Charge);
+            w.Write(f.AirMode);
+            w.Write(f.MineState);
+            w.Write(f.SalvoT);
+            w.Write(f.SalvoLeft);
+            w.Write(f.SalvoTarget);
+            w.Write(f.DeployT);
+            w.Write(f.AnchorPos.x);
+            w.Write(f.AnchorPos.y);
+            w.Write(f.ChargeT);
+            w.Write(f.ChargeDir.x);
+            w.Write(f.ChargeDir.y);
+            w.Write(f.ChargeSeq);
+            w.Write(f.RamBy);
+            w.Write(f.RamSeq);
+            w.Write(f.MineT);
+            w.Write(f.MineLife);
+            w.Write(f.MineOwner);
+            w.Write(f.LayT);
+            w.Write(f.BoostStep);
+        }
+
+        private static CombatFoundryUnit ReadFoundry(BinaryReader r) => new CombatFoundryUnit
+        {
+            Salvo = r.ReadByte(),
+            Deploy = r.ReadByte(),
+            Charge = r.ReadByte(),
+            AirMode = r.ReadByte(),
+            MineState = r.ReadByte(),
+            SalvoT = r.ReadSingle(),
+            SalvoLeft = r.ReadInt32(),
+            SalvoTarget = r.ReadInt32(),
+            DeployT = r.ReadSingle(),
+            AnchorPos = new double2(r.ReadDouble(), r.ReadDouble()),
+            ChargeT = r.ReadSingle(),
+            ChargeDir = new float2(r.ReadSingle(), r.ReadSingle()),
+            ChargeSeq = r.ReadInt32(),
+            RamBy = r.ReadInt32(),
+            RamSeq = r.ReadInt32(),
+            MineT = r.ReadSingle(),
+            MineLife = r.ReadSingle(),
+            MineOwner = r.ReadInt32(),
+            LayT = r.ReadSingle(),
+            BoostStep = r.ReadInt64(),
+        };
+
+        /// <summary>FG9-FAC-02：读回的铸造状态必须在取值范围内（阶段字节、发数非负、计时有限）。</summary>
+        private static bool FoundryValid(in CombatFoundryUnit f) =>
+            f.Salvo <= 2 && f.Deploy <= 2 && f.Charge <= 2 && f.AirMode <= 1 && f.MineState <= 1 && f.SalvoLeft >= 0 && f.SalvoLeft <= 64
+            && f.SalvoTarget >= 0 && f.ChargeSeq >= 0 && f.RamBy >= 0 && f.RamSeq >= 0 && f.MineOwner >= 0
+            && Finite(f.SalvoT) && Finite(f.DeployT) && Finite(f.ChargeT) && Finite(f.ChargeDir.x) && Finite(f.ChargeDir.y) && Finite(f.MineT)
+            && Finite(f.MineLife) && Finite(f.LayT) && !double.IsNaN(f.AnchorPos.x) && !double.IsNaN(f.AnchorPos.y)
+            && !double.IsInfinity(f.AnchorPos.x) && !double.IsInfinity(f.AnchorPos.y);
 
         private static CombatBehaviorProfile ReadProfile(BinaryReader r, int format)
         {
@@ -3318,6 +3587,31 @@ namespace BinGames.Sim.Combat
                 p.SeverSeconds = r.ReadSingle();
                 p.SeverCooldown = r.ReadSingle();
             }
+            if (format >= 14)
+            {
+                p.SalvoCount = r.ReadSingle();
+                p.SalvoGap = r.ReadSingle();
+                p.SalvoReload = r.ReadSingle();
+                p.SalvoWarn = r.ReadSingle();
+                p.SalvoRadius = r.ReadSingle();
+                p.SalvoMode = r.ReadSingle();
+                p.MineMax = r.ReadSingle();
+                p.MineCycle = r.ReadSingle();
+                p.MineRadius = r.ReadSingle();
+                p.MineDamage = r.ReadSingle();
+                p.MineFuse = r.ReadSingle();
+                p.MineLife = r.ReadSingle();
+                p.ReloadRange = r.ReadSingle();
+                p.ReloadRate = r.ReadSingle();
+                p.ChargeSpeed = r.ReadSingle();
+                p.ChargeWarn = r.ReadSingle();
+                p.ChargeSeconds = r.ReadSingle();
+                p.ChargeCooldown = r.ReadSingle();
+                p.ChargeKnock = r.ReadSingle();
+                p.TurnRate = r.ReadSingle();
+                p.DeploySeconds = r.ReadSingle();
+                p.MinRange = r.ReadSingle();
+            }
             return p;
         }
     }
@@ -3343,10 +3637,18 @@ namespace BinGames.Sim.Combat
                 double2 p = D.Pos[i] - Origin;
                 double2 q = D.Prev[i] - Origin;
                 float hp = D.MaxHp[i] > 0f ? math.saturate(D.Hp[i] / D.MaxHp[i]) : 1f;
+                float r = D.Radius[i];
+                if (D.Behavior[i] == (byte)CombatBehavior.Mine)
+                {
+                    // FG9-FAC-02（“雷区有标记”）：子母雷按爆炸半径画（雷区范围一眼可见；引信燃烧时血量比例画成 0 = 闪烁色）。
+                    int bp = D.BProfile[i];
+                    r = bp >= 0 && bp < D.Profiles.Length && D.Profiles[bp].MineRadius > 0f ? D.Profiles[bp].MineRadius : r;
+                    hp = D.Foundry[i].MineState != 0 ? 0f : 1f;
+                }
                 Units.Add(new CombatInstance
                 {
                     A = new float4((float)p.x, (float)p.y, (float)q.x, (float)q.y),
-                    B = new float4(D.Radius[i], hp, D.Faction[i], D.Kind[i]),
+                    B = new float4(r, hp, D.Faction[i], D.Kind[i]),
                 });
             }
             Projectiles.Clear();

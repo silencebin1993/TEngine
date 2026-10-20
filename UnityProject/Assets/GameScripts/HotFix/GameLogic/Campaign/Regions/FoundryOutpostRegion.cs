@@ -5,6 +5,7 @@ using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Localization;
+using GameLogic.Notifications;
 using TEngine;
 using UnityEngine;
 
@@ -118,6 +119,8 @@ namespace GameLogic.Campaign.Regions
             state.RegionEnemies ??= Array.Empty<RegionEnemyRecord>();
             // FG9-DATA-01：基线编成来自 fg.TbEnemyEncounter（base 行），耐久来自 fg.TbMechEnemy × 难度倍率。
             RegionEnemySites.SeedEncounters(state, RegionId, EnemyDefs.ConditionBase);
+            // FG9-FAC-02：核心区对空阵地（伏笔：炮口朝天）——每次进场都补齐（旧档第一次进场时补上；已被摧毁的记录保留阵亡状态，不复活）。
+            RegionEnemySites.SeedEncounters(state, RegionId, EnemyDefs.ConditionBattery);
 
             // ER6-ADAPT-01：基线4只敌人播种完成后，按本区域已锁定的 AdaptationId 增/撤反制增援槽位
             // （Flanker/JammerSupport 各一组）。必须在基线播种之后调用，保证幂等 SeedIfMissing 不受
@@ -154,6 +157,16 @@ namespace GameLogic.Campaign.Regions
 
             RemoveAdaptiveRowsIfStale(state, EnemyDefs.ConditionFlanker, keep: requiredCondition == EnemyDefs.ConditionFlanker);
             RemoveAdaptiveRowsIfStale(state, EnemyDefs.ConditionJammerSupport, keep: requiredCondition == EnemyDefs.ConditionJammerSupport);
+            // FG9-FAC-02（FGR-FAC-004）：铸造反制新增的两种对策（对空加强 = 空爆炮台、雷区 = 布雷车），按出发时锁定的 FoundryCounterId 增 / 撤，同一纪律。
+            string fgCounter = region.FoundryCounterId == EnemyDefs.ConditionCounterAntiAir || region.FoundryCounterId == EnemyDefs.ConditionCounterMinefield
+                ? region.FoundryCounterId : null;
+            RemoveAdaptiveRowsIfStale(state, EnemyDefs.ConditionCounterAntiAir, keep: fgCounter == EnemyDefs.ConditionCounterAntiAir);
+            RemoveAdaptiveRowsIfStale(state, EnemyDefs.ConditionCounterMinefield, keep: fgCounter == EnemyDefs.ConditionCounterMinefield);
+            if (fgCounter != null && RegionEnemySites.SeedEncounters(state, RegionId, fgCounter) > 0)
+            {
+                Log.Info($"[FoundryOutpostRegion] 铸造反制增援已布防（编成条件 {fgCounter}）。");
+                NotificationCenter.Post("foundry_boss", GameText.Format("foundry.counter.notify", FoundryCounterService.CounterName(fgCounter)));
+            }
 
             if (requiredCondition == null)
             {
@@ -861,9 +874,25 @@ namespace GameLogic.Campaign.Regions
                 (region.AdaptationId == AdaptationCatalog.Flanker || region.AdaptationId == AdaptationCatalog.JammerSupport);
             bool hasCoreReinforcement = allEnemies.Any(e => e.EnemyInstanceId == FoundryOutpostLayout.CoreReinforcementSpawnId);
             int expectedOutskirtsCount = 4 + (hasAdaptiveSlot ? 1 : 0) + (hasCoreReinforcement ? 1 : 0);
+            // FG9-FAC-02：对空阵地（battery）、铸造反制追加（counter_antiair / counter_minefield）、狂暴精英（boss_wave）单独核对，不计入外围基线。
+            var fg = new HashSet<string>();
+            foreach (string cond in new[] { EnemyDefs.ConditionBattery, EnemyDefs.ConditionCounterAntiAir, EnemyDefs.ConditionCounterMinefield, EnemyDefs.ConditionBossWave })
+            {
+                foreach (GameConfig.fg.EnemyEncounter enc in EnemyDefs.Encounters(RegionId, cond))
+                {
+                    fg.Add(enc.Id);
+                }
+            }
             int outskirtsCount = allEnemies.Count(e =>
                 e.EnemyInstanceId != FoundryOutpostLayout.CoreNode1Id && e.EnemyInstanceId != FoundryOutpostLayout.CoreNode2Id &&
-                e.EnemyInstanceId != FoundryOutpostLayout.MainCoreId && e.EnemyInstanceId != FoundryOutpostLayout.CoreRepairBotSummonId);
+                e.EnemyInstanceId != FoundryOutpostLayout.MainCoreId && e.EnemyInstanceId != FoundryOutpostLayout.CoreRepairBotSummonId
+                && !fg.Contains(e.EnemyInstanceId));
+            int batteryExpected = EnemyDefs.Encounters(RegionId, EnemyDefs.ConditionBattery).Count;
+            int batteryCount = allEnemies.Count(e => EnemyDefs.Encounters(RegionId, EnemyDefs.ConditionBattery).Any(b => b.Id == e.EnemyInstanceId));
+            if (region != null && region.State != RegionState.Locked && batteryCount != batteryExpected && batteryCount != 0)
+            {
+                violations.Add($"铸造前哨对空阵地敌人实例数应为 {batteryExpected}，实际 {batteryCount}。");
+            }
             if (outskirtsCount != expectedOutskirtsCount)
             {
                 violations.Add($"铸造前哨外围（不含核心分区）敌人实例数应为 {expectedOutskirtsCount}（基线4" +

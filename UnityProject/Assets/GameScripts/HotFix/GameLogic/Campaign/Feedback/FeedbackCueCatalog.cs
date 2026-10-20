@@ -198,6 +198,31 @@ namespace GameLogic.Campaign.Feedback
                 TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-01 阶段三全频静默" });
 
+            // FG9-FAC-02（FGR-FAC-002 / 008 ①）：铸造专属行为与主核心阶段三的预警（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG9FAC02-01）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundrySalvoWarn, SfxId = "sfx_alarm_warning", Tag = "铸造", Caption = "装填完成灯亮起：齐射即将开火", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.salvo_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG9-FAC-02 齐射弹幕预警（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryIntercept, SfxId = "sfx_hit_armor", Tag = "铸造", Caption = "对空拦截：无人机 / 弹体被击落", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.intercept", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-02 对空高炮 / 对空形态拦截" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryAirburst, SfxId = "sfx_enemy_cannon", Shake = 0.15f, Tag = "铸造", Caption = "空爆弹在头顶炸开", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.airburst", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG9-FAC-02 空爆炮台" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryMineArmed, SfxId = "sfx_alarm_warning", Tag = "铸造", Caption = "踩到子母雷：引信已触发", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.mine_armed", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG9-FAC-02 子母雷引信预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryMineBlast, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "铸造", Caption = "子母雷爆炸", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.mine_blast", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG9-FAC-02 子母雷" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryCharge, SfxId = "sfx_alarm_warning", Shake = 0.15f, Tag = "铸造", Caption = "攻城重甲蓄力：冲锋即将开始", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.charge", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-02 正面推进冲锋蓄力" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryDeploy, SfxId = "sfx_objective_new", Tag = "铸造", Caption = "步进炮放下驻锄：即将开火", TagKey = "foundry.cue.tag",
+                CaptionKey = "foundry.cue.deploy", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG9-FAC-02 架炮驻锄" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossAntiAir, SfxId = "sfx_alarm_warning", Shake = 0.4f, Tag = "首领", Caption = "主核心炮口转向天空",
+                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.antiair", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
+                RequirementNote = "FG9-FAC-02 主核心阶段三·对空形态（剧情时刻）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossBerserk, SfxId = "sfx_alarm_warning", Shake = 0.35f, Tag = "首领", Caption = "主核心狂暴",
+                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.berserk", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
+                RequirementNote = "FG9-FAC-02 主核心狂暴" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossArenaReset, SfxId = "sfx_objective_new", Tag = "首领", Caption = "主核心复位：耐久恢复",
+                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.arena_reset", Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
+                RequirementNote = "FG9-FAC-02 场地边界（FGR-FAC-006）" });
+
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
             // FG0-SAVE-01：读档后的内容迁移通知（正文由 SaveContentReconciler.Render 走文本键生成），停留更久。

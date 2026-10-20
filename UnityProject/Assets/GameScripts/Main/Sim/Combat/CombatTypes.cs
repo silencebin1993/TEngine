@@ -29,8 +29,10 @@ namespace BinGames.Sim.Combat
         /// 追加还没结算的溅射命中格（读取仍认 1～10：攻城属性为空、没有溅射）。流场不进快照：它是格网与结构单位的纯函数，读档后按同一输入重算（增量 = 全量，自检对照）。
         /// 12 = FG6-LOG-10（FG03 FGR-LOG-046）：区域种类追加“管线泄漏液洼”（<see cref="ZoneKindLeak"/>），区域追加阶段字节（液洼 / 已反应）（读取仍认 1～11：没有液洼，阶段 0）。
         /// 13 = FG9-FAC-01（FG09 FGR-FAC-008 静默专属语法）：行为参数追加潜伏 / 偏折场 / 断链束参数；每个单位追加静默状态（<see cref="CombatSilentUnit"/>：潜伏、现形倒计时、
-        /// 偏折场阶段与计时、断链束目标与累计）（读取仍认 1～12：参数为 0 = 没有这些行为，状态为空）。</summary>
-        public const int FormatVersion = 13;
+        /// 偏折场阶段与计时、断链束目标与累计）（读取仍认 1～12：参数为 0 = 没有这些行为，状态为空）。
+        /// 14 = FG9-FAC-02（FG09 FGR-FAC-008 铸造专属语法）：行为参数追加齐射 / 布雷 / 装填 / 冲锋 / 架炮驻锄 / 盲区参数；每个单位追加铸造状态（<see cref="CombatFoundryUnit"/>）；
+        /// 计数追加齐射 / 对空拦截 / 布雷 / 引爆 / 冲锋次数（读取仍认 1～13：参数为 0 = 没有这些行为，状态与计数为 0）。</summary>
+        public const int FormatVersion = 14;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -458,6 +460,17 @@ namespace BinGames.Sim.Combat
         /// <summary>FG9-FAC-01（回声猎手，FGR-FAC-008“静默潜伏”）：在出生点潜伏伏击；感知范围内出现己方机器（优先装有信号中继的）就现形（预警）、追上去，
         /// 进入射程后按瞄准线两段式出手；目标丢失后回到出生点重新潜伏（不超出牵引半径追击）。</summary>
         Stalker = 9,
+        /// <summary>FG9-FAC-02（对空高炮 / 空爆炮台，FGR-FAC-008“齐射弹幕”）：固定；装填 → 装填完成灯（预警）→ 一轮多发齐射。参数 Salvo*；
+        /// SalvoMode 1 = 只打空中目标（己方无人机与飞行中的弹体），2 = 在目标处空爆（半径内地面单位受伤、无人机被击落）。</summary>
+        Salvo = 10,
+        /// <summary>FG9-FAC-02（布雷车）：在牵引中心附近巡逻、受威胁后撤；铺雷由行为参数 Mine* 决定（任何行为都可以带，攻城单位也一样）。</summary>
+        MineLayer = 11,
+        /// <summary>FG9-FAC-02：一颗子母雷（布雷车在内核里铺下的结构单位）：己方单位进入半径 → 引信预警 → 爆炸；被任何伤害打到或被挪动 → 提前引爆；存活时长 MineLife。</summary>
+        Mine = 12,
+        /// <summary>FG9-FAC-02（攻城重甲，FGR-FAC-008“正面推进”）：转向受限、只沿正面推进；目标在正前方时蓄力 → 冲锋（撞到的己方单位受伤并被击退）→ 冷却；贴身时用武器攻击。</summary>
+        Charger = 13,
+        /// <summary>FG9-FAC-02（装填机）：受威胁后撤、否则回到牵引中心；装填光环由行为参数 Reload* 决定（任何行为都可以带）。</summary>
+        Loader = 14,
     }
 
     /// <summary>单位状态位。</summary>
@@ -534,6 +547,45 @@ namespace BinGames.Sim.Combat
         SignalRelay = 1 << 28,
         /// <summary>FG9-FAC-01（DEBT-FG6DEF05-04 干扰部分）：攻城中的干扰机自带信号干扰场（半径 = 行为参数 EffectRange）——家园里场内的机器 / 炮塔接入被拒、被接入的断链。</summary>
         JamEmitter = 1 << 29,
+        /// <summary>FG9-FAC-02（子母雷）：不能被单体锁定（索敌 / 编队攻击 / 直控点击都选不中，开火结果 <see cref="CombatFireResult.AreaOnly"/>）；范围伤害与牵引照常作用（会提前引爆）。</summary>
+        AreaOnly = 1u << 30,
+    }
+
+    /// <summary>
+    /// FG9-FAC-02（FG09 FGR-FAC-008 铸造专属语法）：每个单位的铸造状态（随快照进存档，格式 14）。全 0 = 没有铸造行为。
+    /// 齐射：<see cref="Salvo"/> 0 = 装填（<see cref="SalvoT"/> 还剩几秒）、1 = 装填完成灯预警、2 = 齐射中（还剩 <see cref="SalvoLeft"/> 发，SalvoT = 下一发）；<see cref="SalvoTarget"/> 预警时锁定的目标。
+    /// 架炮驻锄：<see cref="Deploy"/> 0 = 未架设、1 = 架设中（<see cref="DeployT"/>）、2 = 已架设；<see cref="AnchorPos"/> = 开始架设的位置（被挪开就回到未架设）。
+    /// 冲锋：<see cref="Charge"/> 0 = 推进、1 = 蓄力、2 = 冲锋中（<see cref="ChargeT"/>、方向 <see cref="ChargeDir"/>、第几次 <see cref="ChargeSeq"/>）；被撞者记 <see cref="RamBy"/> / <see cref="RamSeq"/>（一次冲锋只撞一次）。
+    /// 对空形态：<see cref="AirMode"/> = 1 时（热更层按首领阶段写）这个单位按齐射参数只打空中目标。
+    /// 地雷：<see cref="MineState"/> 0 = 待触发、1 = 引信燃烧（<see cref="MineT"/>）；<see cref="MineLife"/> 剩余存活秒数；<see cref="MineOwner"/> 铺雷者 ID。
+    /// 布雷 / 装填：<see cref="LayT"/> 下一颗雷的倒计时；<see cref="BoostStep"/> 最近一次被装填机加速的步序号（同一步不叠加）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatFoundryUnit
+    {
+        public byte Salvo;
+        public byte Deploy;
+        public byte Charge;
+        public byte AirMode;
+        public byte MineState;
+        public byte Pad0;
+        public short Pad1;
+        public float SalvoT;
+        public int SalvoLeft;
+        public int SalvoTarget;
+        public float DeployT;
+        public double2 AnchorPos;
+        public float ChargeT;
+        public float2 ChargeDir;
+        public int ChargeSeq;
+        public int RamBy;
+        public int RamSeq;
+        public float MineT;
+        public float MineLife;
+        public int MineOwner;
+        public float LayT;
+        public long BoostStep;
     }
 
     /// <summary>
@@ -700,6 +752,9 @@ namespace BinGames.Sim.Combat
         Reflected = 45,
         /// <summary>FG9-FAC-01：潜伏状态变化（Unit=单位，Code=1 进入潜伏 / 0 现形）。</summary>
         StealthChanged = 46,
+        /// <summary>FG9-FAC-02：铸造专属语法的提示（Unit=行为者，Other=目标 / 被撞者，Value=预警秒数或半径，Pos=位置）。
+        /// Code：1 齐射装填完成灯（预警，Code2 = 1 对空 / 2 空爆）、2 对空拦截、3 空爆、4 子母雷引信触发、5 子母雷爆炸、6 冲锋蓄力、7 步进炮开始架设、8 铺下一颗雷、9 冲锋撞击。</summary>
+        FoundryCue = 47,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -727,6 +782,8 @@ namespace BinGames.Sim.Combat
         NoAmmo = 13,
         /// <summary>FG9-FAC-01：目标在潜伏中，不能被远程锁定（用范围伤害、标记器或信号中继揭示）。</summary>
         Hidden = 14,
+        /// <summary>FG9-FAC-02：目标只能被范围伤害 / 牵引作用（子母雷）。</summary>
+        AreaOnly = 15,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -866,6 +923,35 @@ namespace BinGames.Sim.Combat
         public float SeverRange;
         public float SeverSeconds;
         public float SeverCooldown;
+
+        // ── FG9-FAC-02 铸造专属语法（全 0 = 没有；格式 14 起进快照）──
+        /// <summary>齐射弹幕：一轮几发（0 = 不齐射）、每发间隔、装填秒数、装填完成灯预警秒数（≥ 0.8）、空爆半径、模式（1 = 只打空中目标，2 = 空爆）。</summary>
+        public float SalvoCount;
+        public float SalvoGap;
+        public float SalvoReload;
+        public float SalvoWarn;
+        public float SalvoRadius;
+        public float SalvoMode;
+        /// <summary>布雷：同时最多几颗（0 = 不布雷）、间隔、触发与爆炸半径、伤害、引信秒数（≥ 0.8）、每颗存活秒数。</summary>
+        public float MineMax;
+        public float MineCycle;
+        public float MineRadius;
+        public float MineDamage;
+        public float MineFuse;
+        public float MineLife;
+        /// <summary>装填光环：半径（0 = 没有）、额外装填速度（0.6 = 冷却多走 60%）。</summary>
+        public float ReloadRange;
+        public float ReloadRate;
+        /// <summary>冲锋：速度（0 = 不冲锋）、蓄力秒数（≥ 0.8）、冲锋持续、冷却、击退米数、转向速度（度/秒；正面推进）。</summary>
+        public float ChargeSpeed;
+        public float ChargeWarn;
+        public float ChargeSeconds;
+        public float ChargeCooldown;
+        public float ChargeKnock;
+        public float TurnRate;
+        /// <summary>架炮驻锄：开火前架设秒数（0 = 不用架设）；高抛曲射近距盲区（米，0 = 没有）。</summary>
+        public float DeploySeconds;
+        public float MinRange;
     }
 
     /// <summary>生成一个单位的参数。</summary>
@@ -1051,6 +1137,12 @@ namespace BinGames.Sim.Combat
         public long ReactionsFired;
         /// <summary>FG9-FAC-01（格式 13）：被偏折场反弹的己方射弹次数（即时 / 重炮 / 弹体合计）。</summary>
         public long ShotsReflected;
+        /// <summary>FG9-FAC-02（格式 14）：齐射轮数、对空拦截（击落无人机 + 弹体）、铺雷、引爆（含提前引爆）、冲锋次数。</summary>
+        public long Salvos;
+        public long AirIntercepts;
+        public long MinesLaid;
+        public long MinesDetonated;
+        public long Charges;
     }
 
     /// <summary>渲染实例（32 字节，与 CombatInstanced.shader 一致）：A = (当前 x, 当前 z, 上一步 x, 上一步 z)，B = (半径, 血量比例, 阵营, 种类)。</summary>

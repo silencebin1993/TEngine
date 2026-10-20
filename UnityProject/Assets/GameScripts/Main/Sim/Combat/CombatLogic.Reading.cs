@@ -1555,7 +1555,7 @@ namespace BinGames.Sim.Combat
                 int n = d.Count;
                 for (int k = 0; k < n; k++)
                 {
-                    if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                    if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || d.Has(k, CombatUnitFlags.AreaOnly))
                     {
                         continue;
                     }

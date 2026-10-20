@@ -412,8 +412,27 @@ namespace GameLogic.Campaign.Defense
             // 内核按行为参数在攻城单位身上结算（与区域里同一套规则，FGR-FAC-003）。
             bool deflect = false;
             bool jam = false;
+            float rear = 0f;
+            bool eliteTier = false;
             if (def != null && Content.EnemyDefs.TryGet(def.EnemyTypeId, out GameConfig.fg.MechEnemy row))
             {
+                // FG9-FAC-02（攻城中的铸造专属语法）：布雷车照样铺雷、装填机照样给攻城火炮加速装填（参数取敌人表，与区域同一份；冲锋 / 齐射只在区域与地点里）；
+                // 攻城重甲的背部弱点照常结算；敌人表层级是精英的单位本身就带精英标记（FG6-DEF-01“精英优先”有真目标）。
+                if (row.MaxPlaced > 0f || row.Behavior == Content.EnemyDefs.BehaviorReload)
+                {
+                    var fp = new CombatBehaviorProfile();
+                    EnemyFoundryParams.Apply(row, ref fp);
+                    bp.MineMax = fp.MineMax;
+                    bp.MineCycle = fp.MineCycle;
+                    bp.MineRadius = fp.MineRadius;
+                    bp.MineDamage = fp.MineDamage * dmgScale;
+                    bp.MineFuse = fp.MineFuse;
+                    bp.MineLife = fp.MineLife;
+                    bp.ReloadRange = fp.ReloadRange;
+                    bp.ReloadRate = fp.ReloadRate;
+                }
+                rear = Math.Max(0f, row.RearBonus);
+                eliteTier = Content.EnemyDefs.IsElite(row);
                 if (row.Behavior == Content.EnemyDefs.BehaviorJamField && row.EffectRange > 0f && u.HealRange <= 0f)
                 {
                     bp.EffectRange = row.EffectRange; // 干扰场半径（敌人表；与区域里的干扰机同一个数）
@@ -439,6 +458,14 @@ namespace GameLogic.Campaign.Defense
             if (jam && unit > 0)
             {
                 site.SetUnitFlag(unit, CombatUnitFlags.JamEmitter, true); // 干扰机压制信号塔一带：场内炮塔 / 机器接入被拒（FG09 第 4 章“突袭特点”）
+            }
+            if (rear > 0f && unit > 0)
+            {
+                site.SetBackHitBonus(unit, rear);
+            }
+            if (eliteTier && !elite && unit > 0)
+            {
+                site.SetUnitFlag(unit, CombatUnitFlags.Elite, true);
             }
             return unit;
         }

@@ -798,13 +798,21 @@ namespace GameLogic.Campaign.Economy
                 case "expedition":
                     r.Subject = SubjectExpedition;
                     r.Regions = new[] { FracturedCityLayout.RegionId, FoundryOutpostLayout.RegionId };
-                    r.Adaptations = new[] { Content.AdaptationCatalog.None, EnemyAdaptationService.ComputeAdaptation(s) };
+                    // FG9-FAC-02 修复（FGR-FAC-004）：铸造前哨的反制与出发时锁定同一个值（当天锁定的 Demo 四态部分），不再按实时构筑重算。
+                    r.Adaptations = new[] { Content.AdaptationCatalog.None, FoundryCounterService.AdaptationPart(FoundryCounterService.Locked(s)) };
                     // FG9-FAC-01（FGR-FAC-004“情报面板可以看到当前的反制和下一次更新的预测”）：世界里有静默阵营时，附上地下中继大厅当天锁定的对策与下一次日切的预测。
                     if (WorldGen.WorldGenService.PlanFor(s)?.TemplateFor("silent") != null)
                     {
                         r.HasSilentCounter = true;
                         r.SilentCounter = SilentCounterService.Locked(s);
                         r.SilentCounterNext = SilentCounterService.Preview(s);
+                    }
+                    // FG9-FAC-02（FGR-FAC-004）：世界里有铸造阵营时，附上铸造前哨当天锁定的对策与下一次日切的预测。
+                    if (WorldGen.WorldGenService.PlanFor(s)?.TemplateFor("foundry") != null)
+                    {
+                        r.HasFoundryCounter = true;
+                        r.FoundryCounter = FoundryCounterService.Locked(s);
+                        r.FoundryCounterNext = FoundryCounterService.Preview(s);
                     }
                     r.ExpiresTick = now + Math.Max(1, validity);
                     break;
@@ -1047,8 +1055,16 @@ namespace GameLogic.Campaign.Economy
                 case IntelCatalog.KindCounter:
                 {
                     var parts = new List<string>(r.Regions.Length);
+                    bool foundryWritten = false;
                     for (int i = 0; i < r.Regions.Length; i++)
                     {
+                        if (r.HasFoundryCounter && r.Regions[i] == FoundryOutpostLayout.RegionId)
+                        {
+                            // FG9-FAC-02：铸造前哨只写当天锁定的那一行（含对空加强 / 雷区与下一次预测），不再另写一行四态（避免两行互相矛盾）。
+                            parts.Add(FoundryCounterService.IntelLine(r.FoundryCounter, r.FoundryCounterNext));
+                            foundryWritten = true;
+                            continue;
+                        }
                         string site = Combat.CombatSites.SiteName(r.Regions[i]);
                         string id = i < r.Adaptations.Length ? r.Adaptations[i] : Content.AdaptationCatalog.None;
                         if (string.IsNullOrEmpty(id) || id == Content.AdaptationCatalog.None)
@@ -1062,6 +1078,10 @@ namespace GameLogic.Campaign.Economy
                     if (r.HasSilentCounter)
                     {
                         parts.Add(SilentCounterService.IntelLine(r.SilentCounter, r.SilentCounterNext)); // FG9-FAC-01（FGR-FAC-004）
+                    }
+                    if (r.HasFoundryCounter && !foundryWritten)
+                    {
+                        parts.Add(FoundryCounterService.IntelLine(r.FoundryCounter, r.FoundryCounterNext)); // FG9-FAC-02（FGR-FAC-004）
                     }
                     return string.Join(GameText.Get("intel.list_sep"), parts);
                 }
@@ -1089,7 +1109,9 @@ namespace GameLogic.Campaign.Economy
                 ? GameText.Format(b.PhasesKey, Mathf.RoundToInt(SilentMindBoss.JumpSeconds), Mathf.RoundToInt(SilentMindBoss.Phase2HpFraction * 100f),
                     Mathf.RoundToInt(SilentMindBoss.SilenceWarnSeconds), Mathf.RoundToInt(SilentMindBoss.SilenceSeconds))
                 : GameText.Format(b.PhasesKey, Mathf.RoundToInt(FoundryOutpostLayout.Phase1TransitionHealthFraction * 100f),
-                    Mathf.RoundToInt(FoundryOutpostLayout.TransitionDurationSeconds), Mathf.RoundToInt(FoundryOutpostLayout.CoreLockoutWarnSeconds));
+                    Mathf.RoundToInt(FoundryOutpostLayout.TransitionDurationSeconds), Mathf.RoundToInt(FoundryOutpostLayout.CoreLockoutWarnSeconds),
+                    // FG9-FAC-02：阶段三·对空形态的门槛与时长、狂暴（boss.foundry.* 调参，单一真相）。
+                    Mathf.RoundToInt(FoundryOutpostCoreBoss.Phase3HealthFraction * 100f), Mathf.RoundToInt(FoundryOutpostCoreBoss.AntiAirSeconds));
 
         public static string BossWeaknessText(IntelBossDef b) =>
             b?.Rule == IntelCatalog.BossRuleSilentMind
@@ -1303,7 +1325,7 @@ namespace GameLogic.Campaign.Economy
                     .Append(r.DirY.ToString("F4", CultureInfo.InvariantCulture)).Append('|').Append(r.WindowFromTick).Append('-').Append(r.WindowToTick).Append('|')
                     .Append(string.Join(",", r.Regions)).Append('|').Append(string.Join(",", r.Adaptations)).Append('|').Append(r.Counter).Append('|').Append(r.TargetKind)
                     .Append('|').Append(r.Level).Append('|').Append(r.PlanRevision).Append('|').Append(r.HasSilentCounter).Append(':').Append(r.SilentCounter).Append(':')
-                    .Append(r.SilentCounterNext).Append(';');
+                    .Append(r.SilentCounterNext).Append(':').Append(r.HasFoundryCounter).Append(':').Append(r.FoundryCounter).Append(':').Append(r.FoundryCounterNext).Append(';');
             }
             return sb.ToString();
         }

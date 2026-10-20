@@ -95,8 +95,10 @@ namespace GameLogic.Campaign.Regions
                 foreach (RegionEnemyRecord enemy in state.RegionEnemies)
                 {
                     // FG9-DATA-01：首领（层级 boss：主核心与供能节点）不计入外围驻军估算——按敌人表层级，不按 ID。
+                    // FG9-FAC-02：核心区对空阵地（编成条件 battery，只打空中目标、守在首领场地里）同样不计入外围驻军估算。
                     if (enemy != null && enemy.RegionId == regionId && enemy.IsAlive
-                        && !(Content.EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy row) && Content.EnemyDefs.IsBoss(row)))
+                        && !(Content.EnemyDefs.TryGet(enemy.EnemyTypeId, out GameConfig.fg.MechEnemy row) && Content.EnemyDefs.IsBoss(row))
+                        && !(Content.EnemyDefs.TryEncounter(enemy.EnemyInstanceId, out GameConfig.fg.EnemyEncounter enc) && enc.Condition == Content.EnemyDefs.ConditionBattery))
                     {
                         enemyCount++;
                         enemyHealth += enemy.Health;

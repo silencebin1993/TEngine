@@ -301,6 +301,19 @@ namespace GameLogic.Campaign.Regions
             RecomputeCoreGateIfInputsChanged(state);
             TickCoreZoneEntry(state);
             FoundryOutpostCoreBoss.Tick(state, dt); // 首领阶段状态机（O(1)）；主核心开火在内核里。
+            // FG9-FAC-02（FGR-FAC-006 场地边界）：机器全部离开核心区超过 20 秒 → 主核心复位并恢复本阶段耐久（内核 O(机器) 查询，Burst 外两次常数调用）。
+            if (_combat != null && FoundryOutpostCoreBoss.TickArena(state, dt, _combat.CountAliveMachines() > 0,
+                    _combat.AnyMachineBeyondY(FoundryOutpostLayout.CoreGateBlockLineY)))
+            {
+                foreach (string id in new[] { FoundryOutpostLayout.CoreNode1Id, FoundryOutpostLayout.CoreNode2Id, FoundryOutpostLayout.MainCoreId })
+                {
+                    RegionEnemyRecord rec = FoundryOutpostRegion.FindEnemy(state, id);
+                    if (rec != null)
+                    {
+                        _combat.SyncEnemyFromRecord(rec);
+                    }
+                }
+            }
             SyncEnemyRosterIfChanged(state);          // 首领初始化 / 召唤替换了记录数组时才对账。
             CombatDemoContent.SyncBossFlags(_combat, state); // 阶段 → 内核标志（O(3)）。
             FoundryOutpostRegion.TickEnemies(state, dt); // 警戒值衰减（O(1)）。
@@ -1138,6 +1151,10 @@ namespace GameLogic.Campaign.Regions
             BuildAnchorVisual(FoundryOutpostLayout.ArmorPierceCache, PrimitiveType.Cube, CacheColor(state, FoundryOutpostLayout.ArmorPierceCacheId), 0.6f, false);
             BuildAnchorVisual(FoundryOutpostLayout.CoreGate, PrimitiveType.Cube, GateColor(state), 1.5f, false);
             BuildEnemyVisuals(state);
+            // FG9-FAC-02（FGR-FAC-008 ①“视觉 + 声音预警”）：齐射装填完成灯 / 冲锋蓄力 / 架炮驻锄 → 对应敌人闪警示色（事件驱动，不每帧扫敌人）。
+            FoundryCombatFeedback.Changed -= OnFoundryCue;
+            FoundryCombatFeedback.Changed += OnFoundryCue;
+            _coreVisualState = (CoreBossState)(-1);
 
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
@@ -1379,6 +1396,7 @@ namespace GameLogic.Campaign.Regions
             RefreshColor("Poi_" + FoundryOutpostLayout.CoreGateId, GateColor(state));
 
             // FG0-ARCH-03：敌人位置由内核每帧插值写入（FrameRender）；颜色 / 头顶标记在阵亡事件时刷新（RefreshEnemyView），不每帧扫全部敌人。
+            TickFoundryVisuals(state);
         }
 
         /// <summary>ER8-CONTENT-01：敌人类型 → 头顶标记图标（FG9-DATA-01 起来自敌人表 iconId，供能节点的表行也写主核心图标）。</summary>
@@ -1397,8 +1415,73 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        // ── FG9-FAC-02 铸造专属语法的画面预警 ──
+
+        /// <summary>警示闪色：敌人实例 ID → 到期的真实时间。</summary>
+        private readonly Dictionary<string, float> _warnFlashes = new Dictionary<string, float>();
+        private readonly List<string> _flashScratch = new List<string>();
+        private CoreBossState _coreVisualState = (CoreBossState)(-1);
+        private static readonly Color WarnFlashColor = new Color(1f, 0.85f, 0.2f);
+        private static readonly Color AntiAirCoreColor = new Color(0.45f, 0.75f, 1f);
+
+        /// <summary>自检读：当前在闪警示色的敌人数。</summary>
+        public int WarnFlashCount => _warnFlashes.Count;
+
+        private void OnFoundryCue(CombatSite site, int unit, byte code)
+        {
+            if (_root == null || !ReferenceEquals(site, _combat))
+            {
+                return;
+            }
+            if (code != FoundryCombatFeedback.CodeSalvoWarn && code != FoundryCombatFeedback.CodeChargeWindup && code != FoundryCombatFeedback.CodeDeploy)
+            {
+                return;
+            }
+            if (_combat.TryGetEnemyOfUnit(unit, out string id))
+            {
+                RefreshColor("Enemy_" + id, WarnFlashColor);
+                _warnFlashes[id] = Time.unscaledTime + 1.2f;
+            }
+        }
+
+        private void TickFoundryVisuals(CampaignState state)
+        {
+            if (_warnFlashes.Count > 0)
+            {
+                _flashScratch.Clear();
+                foreach (KeyValuePair<string, float> kv in _warnFlashes)
+                {
+                    if (Time.unscaledTime >= kv.Value)
+                    {
+                        _flashScratch.Add(kv.Key);
+                    }
+                }
+                foreach (string id in _flashScratch)
+                {
+                    _warnFlashes.Remove(id);
+                    RefreshEnemyView(id);
+                }
+            }
+            // 阶段三·对空形态：主核心换成天蓝色（所有炮口朝天）；阶段变了才刷新。
+            CoreBossState cs = FoundryOutpostCoreBoss.GetState(FoundryOutpostRegion.Find(state));
+            if (cs != _coreVisualState)
+            {
+                _coreVisualState = cs;
+                if (cs == CoreBossState.AntiAir)
+                {
+                    RefreshColor("Enemy_" + FoundryOutpostLayout.MainCoreId, AntiAirCoreColor);
+                }
+                else
+                {
+                    RefreshEnemyView(FoundryOutpostLayout.MainCoreId);
+                }
+            }
+        }
+
         private void DestroyVisuals()
         {
+            FoundryCombatFeedback.Changed -= OnFoundryCue;
+            _warnFlashes.Clear();
             foreach (HomeValleyMachineMarker marker in _machineMarkers)
             {
                 marker?.DetachView();

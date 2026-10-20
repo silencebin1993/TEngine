@@ -1025,7 +1025,10 @@ namespace GameLogic.Campaign.Env
             body = GameText.Format("hazard.hover.effect", GameText.Get(h.EffectKey)) + "\n"
                    + GameText.Format("hazard.hover.counter", GameText.Get(h.CounterKey)) + "\n"
                    // FG9-FAC-01：电磁噪声的效果已经接入（覆盖 -30%、发射器可摧毁）——写生效 / 已清除，不再写“只作标记”。其余危害仍归各阵营卡。
-                   + (h.Id == EmNoiseService.HazardId && !belt ? EmNoiseService.HoverLine(s, x, y) : GameText.Get("hazard.hover.pending"));
+                   + (h.Id == EmNoiseService.HazardId && !belt ? EmNoiseService.HoverLine(s, x, y)
+                       // FG9-FAC-02：熔渣热区的效果已经接入（区内武器散热 -30%，战斗内核逐单位结算）。
+                       : h.Id == SlagHeatService.HazardId && !belt ? SlagHeatService.HoverLine()
+                       : GameText.Get("hazard.hover.pending"));
             return true;
         }
 

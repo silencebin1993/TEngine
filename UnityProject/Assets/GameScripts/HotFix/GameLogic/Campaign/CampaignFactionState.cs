@@ -30,6 +30,12 @@ namespace GameLogic.Campaign
 
         /// <summary>已读取的室内伏笔地点（fg.TbInteriorPoint.id）。</summary>
         public string[] PoisRead = Array.Empty<string>();
+
+        /// <summary>FG9-FAC-02：铸造反制（FGR-FAC-004：每个游戏日更新一次并锁定；唯一写入口 <c>Regions.FoundryCounterService</c>）。</summary>
+        public int FoundryCounterDay;
+        public string FoundryCounterId = string.Empty;
+        /// <summary>FG9-FAC-02：已经提示过“进入熔渣热区”的危害区（同一片只提示一次）。</summary>
+        public string[] SlagZonesNoticed = Array.Empty<string>();
     }
 
     /// <summary>

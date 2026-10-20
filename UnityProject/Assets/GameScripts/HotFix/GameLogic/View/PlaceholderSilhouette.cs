@@ -155,6 +155,63 @@ namespace GameLogic.View
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0f, 0.85f), new Vector3(0.22f, 0.22f, 1.3f));
                 return;
             }
+            // ── FG9-FAC-02 铸造扩充（厚重、履带、炮塔；B15 形状区分，占位几何体，美术阶段替换 DEBT-FG9FAC02-01）──
+            if (silhouette == "foundry_aa")
+            {
+                // 对空高炮：低矮炮座 + 两根竖直朝天的长炮管（伏笔“平时炮口朝天”）。
+                Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.65f, 0f), new Vector3(1.6f, 0.35f, 1.6f));
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.15f, 0f), new Vector3(0.9f, 0.6f, 0.9f));
+                Part(parts, mat, PrimitiveType.Cylinder, new Vector3(-0.22f, 1.1f, 0f), new Vector3(0.14f, 1.1f, 0.14f));
+                Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0.22f, 1.1f, 0f), new Vector3(0.14f, 1.1f, 0.14f));
+                return;
+            }
+            if (silhouette == "foundry_airburst")
+            {
+                // 空爆炮台：方形炮塔 + 四联装短管（斜指前上方）。
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.5f, 0f), new Vector3(1.5f, 0.6f, 1.5f));
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.05f, 0f), new Vector3(1.0f, 0.5f, 1.0f));
+                for (int k = 0; k < 4; k++)
+                {
+                    float x = (k % 2 == 0 ? -0.18f : 0.18f);
+                    float y = (k < 2 ? 0.2f : 0.42f);
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(x, y, 0.55f), new Vector3(0.1f, 0.4f, 0.1f), new Vector3(60f, 0f, 0f));
+                }
+                return;
+            }
+            if (silhouette == "foundry_minelayer")
+            {
+                // 布雷车：低矮履带车身 + 尾部斜置的布雷滑槽。
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.55f, 0f), new Vector3(1.3f, 0.5f, 1.6f));
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(-0.7f, -0.7f, 0f), new Vector3(0.18f, 0.3f, 1.7f));
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0.7f, -0.7f, 0f), new Vector3(0.18f, 0.3f, 1.7f));
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.2f, -0.9f), new Vector3(0.5f, 0.12f, 0.7f), new Vector3(-25f, 0f, 0f));
+                return;
+            }
+            if (silhouette == "foundry_loader")
+            {
+                // 装填机：小车身 + 背上一排弹筒。
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.6f, 0f), new Vector3(1.0f, 0.45f, 1.2f));
+                for (int k = -1; k <= 1; k++)
+                {
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(k * 0.28f, -0.1f, 0f), new Vector3(0.22f, 0.3f, 0.22f));
+                }
+                return;
+            }
+            if (silhouette == "foundry_siege_heavy")
+            {
+                // 攻城重甲：巨型摇臂履带机（四条摇臂腿，末端各一个短履带舱；灰模 02-3）+ 正面厚装甲板 + 背部散热口。
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.2f, 0f), new Vector3(2.4f, 1.2f, 2.6f));
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.2f, 1.4f), new Vector3(2.7f, 1.5f, 0.25f));
+                for (int k = 0; k < 4; k++)
+                {
+                    float x = k % 2 == 0 ? -1.5f : 1.5f;
+                    float z = k < 2 ? 1.0f : -1.0f;
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(x, -0.4f, z), new Vector3(0.3f, 0.9f, 0.3f), new Vector3(0f, 0f, x < 0f ? 20f : -20f));
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(x * 1.15f, -0.85f, z), new Vector3(0.5f, 0.35f, 0.9f));
+                }
+                Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.55f, -1.35f), new Vector3(1.4f, 0.5f, 0.1f)); // 背部散热口
+                return;
+            }
             // 铸造通用：方正高块体（比玩家车辆高一截、窄一圈）。
             Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.33f, 0f), new Vector3(1.2f, 1.3f, 1.1f));
             if (silhouette == "foundry_shield")

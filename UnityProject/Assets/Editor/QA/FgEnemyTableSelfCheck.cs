@@ -384,6 +384,10 @@ namespace GameLogic.EditorTools
             };
             var repairProfile = new CombatBehaviorProfile { Speed = 2.4f, FleeTrigger = 5f, Leash = 6f, EffectRange = 6f, EffectAmount = 15f, CycleSeconds = 3f };
             var jamProfile = new CombatBehaviorProfile { EffectRange = 12f };
+            // FG9-FAC-02 有意改变（ADR-FAC-003 第 1 节 / 第 9 节第 9 条）：步进炮补上铸造专属语法“架炮驻锄 1 秒 + 近距盲区 4 米”；
+            // 主核心带阶段三·对空形态的齐射参数（只在对空形态打开，其余阶段行为与 Demo 相同）。
+            var striderProfile = new CombatBehaviorProfile { DeploySeconds = 1f, MinRange = 4f };
+            var coreProfile = new CombatBehaviorProfile { SalvoCount = 6f, SalvoGap = 0.3f, SalvoReload = 3f, SalvoWarn = 0.8f, SalvoMode = 1f };
             Vector2 down = new Vector2(0f, -1f);
             CombatUnitFlags rl = AT | CombatUnitFlags.Report | CombatUnitFlags.NeedsLos;
             CombatUnitFlags rlw = rl | CombatUnitFlags.WeaponEnabled;
@@ -394,7 +398,7 @@ namespace GameLogic.EditorTools
                 new Vector2(0.4f, -1f).normalized, new Vector2(-9f, -2f), 1);
             yield return new Golden("fo_armorbot_right", CombatBehavior.HoldFire, CombatUnitKind.Enemy, rlw, 0.8f, 160f, 0f, new[] { 9f, 10f, 1.6f, 0f }, null, 0.4f, 75f,
                 new Vector2(-0.4f, -1f).normalized, new Vector2(9f, -2f), 1);
-            yield return new Golden("fo_strider", CombatBehavior.Telegraph, CombatUnitKind.Enemy, rlw, 0.8f, 110f, 0f, new[] { 14f, 20f, 2.5f, 1f }, null, 0f, 90f, down,
+            yield return new Golden("fo_strider", CombatBehavior.Telegraph, CombatUnitKind.Enemy, rlw, 0.8f, 110f, 0f, new[] { 14f, 20f, 2.5f, 1f }, striderProfile, 0f, 90f, down,
                 new Vector2(0f, 8f), 1);
             yield return new Golden("fo_repairbot", CombatBehavior.Repair, CombatUnitKind.Enemy, AT | CombatUnitFlags.Report, 0.8f, 80f, 0f, null, repairProfile, 0f, 90f, down,
                 new Vector2(4f, 2f), 1);
@@ -403,7 +407,7 @@ namespace GameLogic.EditorTools
             yield return new Golden("fo_core_node_2", CombatBehavior.None, CombatUnitKind.Structure, AT | CombatUnitFlags.ExternalHealth, 2f, 100f, 0f, null, null, 0f, 90f, down,
                 new Vector2(7f, 38f), 1);
             yield return new Golden("fo_main_core", CombatBehavior.HoldFire, CombatUnitKind.Structure,
-                AT | CombatUnitFlags.ExternalHealth | CombatUnitFlags.NeedsLos | CombatUnitFlags.SilentFire, 3f, 600f, 0f, new[] { 16f, 18f, 2f, 0f }, null, 0f, 75f, down,
+                AT | CombatUnitFlags.ExternalHealth | CombatUnitFlags.NeedsLos | CombatUnitFlags.SilentFire, 3f, 600f, 0f, new[] { 16f, 18f, 2f, 0f }, coreProfile, 0f, 75f, down,
                 new Vector2(0f, 45f), 0);
             yield return new Golden("fo_flanker", CombatBehavior.HoldFire, CombatUnitKind.Enemy, rlw, 0.8f, 160f, 0f, new[] { 9f, 10f, 1.6f, 0f }, null, 0.4f, 75f,
                 new Vector2(1f, -0.6f).normalized, new Vector2(-14f, 4f), 1);

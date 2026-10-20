@@ -107,8 +107,11 @@ namespace GameLogic.EditorTools
             health = 0f;
             foreach (RegionEnemyRecord e in state.RegionEnemies ?? new RegionEnemyRecord[0])
             {
+                // FG9-FAC-02：核心区对空阵地（编成条件 battery）不是外围驻军（与 ExpeditionForecast 同一口径）。
                 if (e != null && e.RegionId == regionId && e.IsAlive
-                    && e.EnemyTypeId != FoundryOutpostLayout.BossNodeTypeId && e.EnemyTypeId != FoundryOutpostLayout.BossCoreTypeId)
+                    && e.EnemyTypeId != FoundryOutpostLayout.BossNodeTypeId && e.EnemyTypeId != FoundryOutpostLayout.BossCoreTypeId
+                    && !(GameLogic.Campaign.Content.EnemyDefs.TryEncounter(e.EnemyInstanceId, out GameConfig.fg.EnemyEncounter enc)
+                         && enc.Condition == GameLogic.Campaign.Content.EnemyDefs.ConditionBattery))
                 {
                     count++;
                     health += e.Health;

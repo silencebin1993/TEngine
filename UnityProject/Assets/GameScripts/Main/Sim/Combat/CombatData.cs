@@ -84,6 +84,11 @@ namespace BinGames.Sim.Combat
         /// <summary>FG7-ENV-03（FGR-ENV-020“寒潮：散热 +30%”）：本地点所有武器散热额外加成（0 = 正常，0.3 = +30%）。
         /// 派生量（热更层天气系统每游戏秒按存档里的天气写入），不进快照、不进状态哈希；读档后同一步重新写入。</summary>
         public float DissipationBonus;
+        /// <summary>FG9-FAC-02（熔渣热区“区内散热 -30%”）：熔渣热区的圆（x, y, 半径）与区内散热倍率。派生量（热更层按规划层的危害区写入），不进快照、不进状态哈希。</summary>
+        public NativeList<float3> SlagZones;
+        public float SlagMult;
+        /// <summary>FG9-FAC-02：本地点同时存在的子母雷上限（派生量，热更层按调参写；0 = 默认 12）。</summary>
+        public int MineCap;
 
         // ── 单位（按槽位；槽位顺序 = 生成顺序，压实时保持相对顺序）──
         public NativeList<int> Id;
@@ -133,6 +138,8 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatSiegeUnit> Siege;
         /// <summary>FG9-FAC-01（格式 13）：静默专属语法的每单位状态（潜伏 / 偏折场 / 断链束）。</summary>
         public NativeList<CombatSilentUnit> Silent;
+        /// <summary>FG9-FAC-02：每单位的铸造专属语法状态（齐射 / 架炮驻锄 / 冲锋 / 地雷 / 装填；随快照进存档，格式 14）。</summary>
+        public NativeList<CombatFoundryUnit> Foundry;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -255,6 +262,8 @@ namespace BinGames.Sim.Combat
                 Ammo = new NativeList<float>(capacity, Allocator.Persistent),
                 Siege = new NativeList<CombatSiegeUnit>(capacity, Allocator.Persistent),
                 Silent = new NativeList<CombatSilentUnit>(capacity, Allocator.Persistent),
+                Foundry = new NativeList<CombatFoundryUnit>(capacity, Allocator.Persistent),
+                SlagZones = new NativeList<float3>(4, Allocator.Persistent),
                 SiegeState = CombatSiegeData.Create(),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
@@ -351,6 +360,8 @@ namespace BinGames.Sim.Combat
             Ammo.Dispose();
             Siege.Dispose();
             Silent.Dispose();
+            Foundry.Dispose();
+            SlagZones.Dispose();
             SiegeState.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
@@ -464,6 +475,7 @@ namespace BinGames.Sim.Combat
             Ammo.Add(math.max(0f, s.Ammo));
             Siege.Add(s.Siege);
             Silent.Add(default);
+            Foundry.Add(default);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -523,6 +535,7 @@ namespace BinGames.Sim.Combat
             Ammo[to] = Ammo[from];
             Siege[to] = Siege[from];
             Silent[to] = Silent[from];
+            Foundry[to] = Foundry[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -572,6 +585,7 @@ namespace BinGames.Sim.Combat
             Ammo.ResizeUninitialized(length);
             Siege.ResizeUninitialized(length);
             Silent.ResizeUninitialized(length);
+            Foundry.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);

@@ -218,6 +218,10 @@ namespace GameLogic.Campaign
         Transition = 3,
         Phase2 = 4,
         Destroyed = 5,
+        /// <summary>FG9-FAC-02：阶段三·对空形态（所有炮口转向天空、核心暴露 15 秒，只打空中目标）。追加在末尾，存档按名字存，不重排。</summary>
+        AntiAir = 6,
+        /// <summary>FG9-FAC-02：对空形态之后恢复并狂暴（开火间隔缩短、精英攻城重甲增援），打到 0 → 已摧毁。</summary>
+        Berserk = 7,
     }
 
     /// <summary>ER1-SAVE-01：存档槽四态（STORY-EXECUTION-CARDS.md #ER1-SAVE-01 第一条）。</summary>

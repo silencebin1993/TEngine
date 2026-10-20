@@ -361,8 +361,19 @@ namespace GameLogic.Campaign.Regions
                 return (AdaptationCatalog.None, noneInfo.DisplayName, noneInfo.SourceText, noneInfo.HazardText,
                     noneInfo.CounterHintText, false, null);
             }
-            string adaptationId = EnemyAdaptationService.ComputeAdaptation(state);
+            // FG9-FAC-02（FGR-FAC-004）：与出发时锁定同一个值——当天的铸造反制（只读预览，不锁定）。
+            string counter = FoundryCounterService.PeekLocked(state);
+            string adaptationId = FoundryCounterService.AdaptationPart(counter);
             AdaptationCatalog.AdaptationInfo info = AdaptationCatalog.Describe(adaptationId);
+            if (counter == Content.EnemyDefs.ConditionCounterAntiAir || counter == Content.EnemyDefs.ConditionCounterMinefield)
+            {
+                // 新增的两种对策（对空加强 / 雷区）：名称 / 来源 / 应对走文本键（Demo 四态的文案仍在 AdaptationCatalog）。
+                bool aa = counter == Content.EnemyDefs.ConditionCounterAntiAir;
+                info = new AdaptationCatalog.AdaptationInfo(counter, FoundryCounterService.CounterName(counter), Localization.GameText.Get("foundry.counter.source"),
+                    Localization.GameText.Get(aa ? "foundry.counter.antiair.hazard" : "foundry.counter.minefield.hazard"),
+                    Localization.GameText.Get(aa ? "foundry.counter.antiair.hint" : "foundry.counter.minefield.hint"));
+                adaptationId = counter;
+            }
             bool reinforcement = CampaignExposureLedger.HasReachedCoreReinforcement(state);
             string reinforcementText = reinforcement
                 ? "信号暴露已突破90：下一次进攻核心分区时，入口会额外增援一台铸造护甲机布防" +

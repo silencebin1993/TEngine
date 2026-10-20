@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using BinGames.Sim.Combat;
 using GameConfig.fg;
 using GameLogic.Campaign.Content;
@@ -99,25 +100,19 @@ namespace GameLogic.Campaign.Combat
                 ArmorFraction = row.FrontalDamageReduction,
                 ArmorHalfAngleDeg = row.FrontalHalfAngleDeg,
                 ArmorFacing = new float2(facing.x, facing.y),
+                BackHitBonus = Mathf.Max(0f, row.RearBonus), // FG9-FAC-02：背部散热口弱点（攻城重甲：侧后命中 +50%）
             };
             if (hasWeapon)
             {
-                spawn.Weapon = site.WeaponIndex(new CombatWeapon
-                {
-                    Mode = CombatWeaponMode.Instant,
-                    HasOutput = 1,
-                    Range = row.WeaponRange,
-                    Damage = row.WeaponDamage * DifficultyService.EnemyDamageMul(state),
-                    Cooldown = row.WeaponCooldown,
-                    AimSeconds = row.WeaponAim,
-                    TargetMode = CombatTargetMode.Nearest,
-                });
+                spawn.Weapon = site.WeaponIndex(WeaponOf(state, row));
             }
-            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row))
+            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row))
             {
                 var profile = new CombatBehaviorProfile();
                 reading.FillProfile(row, ref profile);
                 EnemySilentParams.ApplyLurk(row, ref profile); // FG9-FAC-01：静默潜伏可以叠加在任何读法上
+                EnemyFoundryParams.Apply(row, ref profile);     // FG9-FAC-02：架炮驻锄 / 盲区 / 齐射 / 布雷可以叠加在任何读法上
+                profile.MineDamage *= DifficultyService.EnemyDamageMul(state);
                 spawn.BehaviorProfile = site.ProfileIndex(profile);
             }
             Vector2 home = e.Position;
@@ -128,6 +123,53 @@ namespace GameLogic.Campaign.Combat
             }
             spawn.Home = new double2(home.x, home.y);
             return true;
+        }
+
+        /// <summary>
+        /// 敌人的武器：数值（射程 / 伤害 × 难度 / 冷却 / 瞄准线）来自敌人表。FG9-FAC-02（DEBT-FG9DATA01-02 的铸造部分）：带 assembled 标签的敌人
+        /// 按“组件与固件”列装配——第一个作战组件决定载体与投送（撞角 = 格斗扇形、炮管 = 射弹……），固件按玩家同一套读法表翻译（<see cref="CarrierReadings.Build(string, string, string, IReadOnlyList{string}, bool)"/>，FGR-FAC-003 同一套规则）。
+        /// </summary>
+        public static CombatWeapon WeaponOf(CampaignState state, MechEnemy row)
+        {
+            var w = new CombatWeapon
+            {
+                Mode = CombatWeaponMode.Instant,
+                HasOutput = 1,
+                Range = row.WeaponRange,
+                Damage = row.WeaponDamage * DifficultyService.EnemyDamageMul(state),
+                Cooldown = row.WeaponCooldown,
+                AimSeconds = row.WeaponAim,
+                TargetMode = CombatTargetMode.Nearest,
+            };
+            if (EnemyDefs.HasTag(row, EnemyDefs.TagAssembled) && TryAssembly(row, out string component, out List<string> firmware))
+            {
+                w.Reading = CarrierReadings.Build(component, null, null, firmware, damageFromCompile: false);
+            }
+            return w;
+        }
+
+        /// <summary>“组件与固件”列拆成主作战组件（fg.TbCombatComponent）与固件（fg.TbFirmwareKind）。没有作战组件 = false。</summary>
+        public static bool TryAssembly(MechEnemy row, out string component, out List<string> firmware)
+        {
+            component = null;
+            firmware = new List<string>(2);
+            if (row == null || string.IsNullOrEmpty(row.Components) || row.Components == EnemyDefs.None)
+            {
+                return false;
+            }
+            foreach (string raw in row.Components.Split(','))
+            {
+                string id = raw.Trim();
+                if (component == null && CarrierReadings.TryGetComponent(id, out _))
+                {
+                    component = id;
+                }
+                else if (Signal.FirmwareKinds.CategoryOf(id) != Signal.FirmwareCategory.Unknown)
+                {
+                    firmware.Add(id);
+                }
+            }
+            return component != null;
         }
     }
 }

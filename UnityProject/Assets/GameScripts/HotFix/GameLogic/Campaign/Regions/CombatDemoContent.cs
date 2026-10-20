@@ -71,7 +71,8 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>首领阶段 → 内核标志（O(3)）：供能节点只在护盾阶段可伤；主核心只在阶段一 / 二可伤并开火；阶段二侧后 +20%。</summary>
+        /// <summary>首领阶段 → 内核标志（O(3)）：供能节点只在护盾阶段可伤；主核心在阶段一 / 二 / 对空形态 / 狂暴可伤；
+        /// 对地开火只在阶段一 / 二 / 狂暴（对空形态改为只打空中目标，FG9-FAC-02）；阶段二与狂暴侧后 +20%；狂暴开火间隔缩短。</summary>
         public static void SyncBossFlags(CombatSite site, CampaignState state)
         {
             if (site == null || state == null)
@@ -80,7 +81,8 @@ namespace GameLogic.Campaign.Regions
             }
             RegionRecord region = FoundryOutpostRegion.Find(state);
             CoreBossState s = FoundryOutpostCoreBoss.GetState(region);
-            bool coreActive = s == CoreBossState.Phase1 || s == CoreBossState.Phase2;
+            bool coreVulnerable = s == CoreBossState.Phase1 || s == CoreBossState.Phase2 || s == CoreBossState.AntiAir || s == CoreBossState.Berserk;
+            bool groundFire = s == CoreBossState.Phase1 || s == CoreBossState.Phase2 || s == CoreBossState.Berserk;
             if (site.TryGetEnemyUnit(FoundryOutpostLayout.CoreNode1Id, out int n1))
             {
                 site.SetUnitFlag(n1, CombatUnitFlags.Invulnerable, s != CoreBossState.Shielded);
@@ -91,9 +93,23 @@ namespace GameLogic.Campaign.Regions
             }
             if (site.TryGetEnemyUnit(FoundryOutpostLayout.MainCoreId, out int core))
             {
-                site.SetUnitFlag(core, CombatUnitFlags.Invulnerable, !coreActive);
-                site.SetUnitFlag(core, CombatUnitFlags.WeaponEnabled, coreActive);
-                site.SetBackHitBonus(core, s == CoreBossState.Phase2 ? FoundryOutpostLayout.Phase2BackHitBonusPct : 0f);
+                site.SetUnitFlag(core, CombatUnitFlags.Invulnerable, !coreVulnerable);
+                site.SetUnitFlag(core, CombatUnitFlags.WeaponEnabled, groundFire);
+                site.SetBackHitBonus(core, FoundryOutpostCoreBoss.HasBackHitBonus(s) ? FoundryOutpostLayout.Phase2BackHitBonusPct : 0f);
+                // FG9-FAC-02：阶段三·对空形态——所有炮口转向天空（内核按敌人表的齐射参数只打无人机与飞行中的弹体）。
+                site.SetAirMode(core, s == CoreBossState.AntiAir);
+                // 狂暴：开火间隔 × boss.foundry.berserk_cooldown_mult（其余阶段恢复敌人表原值）。武器参数没变时 O(1) 跳过。
+                if (EnemyDefs.TryGet(FoundryOutpostLayout.BossCoreTypeId, out GameConfig.fg.MechEnemy row) && row.WeaponRange > 0f
+                    && site.TryGetUnitWeapon(core, out CombatWeapon current))
+                {
+                    float want = row.WeaponCooldown * (s == CoreBossState.Berserk ? FoundryOutpostCoreBoss.BerserkCooldownMult : 1f);
+                    if (!Mathf.Approximately(current.Cooldown, want))
+                    {
+                        CombatWeapon w = EnemySpawnBuilder.WeaponOf(state, row);
+                        w.Cooldown = want;
+                        site.SetUnitWeapon(core, w);
+                    }
+                }
             }
         }
 

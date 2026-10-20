@@ -686,6 +686,25 @@ namespace GameLogic.Campaign
         public float CoreLockoutWarnAtPlaySeconds;
         public bool CoreLockoutActive;
 
+        // ── FG9-FAC-02：主核心阶段三·对空形态 / 狂暴 / 场地边界 / 奖励 / 铸造反制（旧档全为默认值 = 没发生过）──
+        /// <summary>对空形态结束（恢复并狂暴）的 PlaySeconds 时间戳；0 = 未进入。</summary>
+        public float CoreAntiAirEndAtPlaySeconds;
+        /// <summary>当前阶段开始时主核心的耐久（场地边界复位时恢复到这个值，FGR-FAC-006）。</summary>
+        public float CorePhaseStartHealth;
+        /// <summary>玩家的机器全部离开核心区累计了多少游戏秒（回到核心区清零；满 boss.foundry.arena_leave_seconds 秒复位一次）。</summary>
+        public float CoreArenaOutsideSeconds;
+        /// <summary>场地边界复位的次数（自检 / HUD 读）。</summary>
+        public int CoreArenaResets;
+        /// <summary>狂暴时的精英增援（编成表 boss_wave 行）已经派出（每次挑战一次）。</summary>
+        public bool CoreBerserkWaveSummoned;
+        /// <summary>首领战失败（全灭 / 撤离）时止步的阶段（CoreBossState 名；空 = 没有失败过）。重试前显示“上次止步于第几阶段”。</summary>
+        public string CoreLastReachedState;
+        /// <summary>击败奖励（核心固件“过载”“电容蓄力”、三选一数据包、领地平定）已发放（只发一次）。</summary>
+        public bool CoreRewardsGranted;
+        /// <summary>FGR-FAC-004：本次出发时锁定的铸造反制（当天的锁定值：AdaptationCatalog.* 或 counter_antiair / counter_minefield；空 = 没有）。
+        /// 四态里的耐热 / 侧袭 / 干扰支援同时写进 <see cref="AdaptationId"/>（Demo 编成与情报沿用），新增的两种只写这里。</summary>
+        public string FoundryCounterId;
+
         /// <summary>ER6-EXPOSE-01 旧字段（Demo“一次远征中每累计30秒直控+5”）。FG1-SIG-06 起接入时长不再计入暴露：
         /// 不再累计，出发与旧档迁移（<see cref="CampaignExposureLedger.MigrateLegacy"/>）时清零；只为旧档兼容保留。</summary>
         public float DirectControlAccumulatedSeconds;

@@ -359,9 +359,12 @@ namespace GameLogic.EditorTools
 
             FoundryOutpostCoreBoss.TryTransition(state, region, CoreBossState.Transition);
             FoundryOutpostCoreBoss.TryTransition(state, region, CoreBossState.Phase2);
+            // FG9-FAC-02：阶段二之后先进阶段三·对空形态（阶段二不能直接摧毁），对空形态出“炮口转向天空”。
+            bool skipRejected = !FoundryOutpostCoreBoss.TryTransition(state, region, CoreBossState.Destroyed);
+            FoundryOutpostCoreBoss.TryTransition(state, region, CoreBossState.AntiAir);
             FoundryOutpostCoreBoss.TryTransition(state, region, CoreBossState.Destroyed);
-            Expect(FeedbackCues.CountOf(FeedbackCueId.BossDestroyed) == 1,
-                "Boss：摧毁主核心出“主核心已摧毁”");
+            Expect(skipRejected && FeedbackCues.CountOf(FeedbackCueId.FoundryBossAntiAir) == 1 && FeedbackCues.CountOf(FeedbackCueId.BossDestroyed) == 1,
+                "Boss：阶段二不能直接跳到摧毁（被拒）；对空形态出“主核心炮口转向天空”；摧毁主核心出“主核心已摧毁”");
         }
 
         private static void CheckSettingsBridge()

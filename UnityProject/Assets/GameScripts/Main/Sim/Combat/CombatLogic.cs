@@ -93,6 +93,8 @@ namespace BinGames.Sim.Combat
             }
             // 4a. FG9-FAC-01：静默专属语法（潜伏 / 偏折场 / 断链束）。
             StepSilent(ref d, ref grid, dt);
+            // 4b. FG9-FAC-02：铸造专属语法里与行为无关的部分（装填光环、铺雷、对空形态的齐射）。
+            StepFoundry(ref d, ref grid, dt);
             RebuildDeflectActive(ref d);
             grid.Dispose();
 
@@ -304,9 +306,9 @@ namespace BinGames.Sim.Combat
             if (cmd.Kind == CombatCommandKind.Attack)
             {
                 int t = d.SlotOf(cmd.Target);
-                if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || d.Has(t, CombatUnitFlags.Stealthed))
+                if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || d.Has(t, CombatUnitFlags.Stealthed) || d.Has(t, CombatUnitFlags.AreaOnly))
                 {
-                    reason = CombatEndReason.TargetLost; // FG9-FAC-01：目标潜伏 = 不能再远程锁定
+                    reason = CombatEndReason.TargetLost; // FG9-FAC-01：目标潜伏 = 不能再远程锁定；FG9-FAC-02：子母雷不能被单体锁定
                     return true;
                 }
                 cmd.Pos = d.Pos[t];
@@ -482,6 +484,7 @@ namespace BinGames.Sim.Combat
             }
             CombatWeapon wp = d.Weapons[w];
             float rate = (wp.Dissipation + (d.Has(i, CombatUnitFlags.HeatSink) ? wp.HeatSinkBonus : 0f)) * (1f + math.max(0f, d.DissipationBonus)); // FG7-ENV-03 寒潮散热加成
+            rate *= SlagFactor(ref d, i); // FG9-FAC-02：熔渣热区内散热 -30%
             float h = math.max(0f, d.Heat[i] - rate * dt);
             d.Heat[i] = h;
             if (d.Has(i, CombatUnitFlags.Overheated) && h < wp.RecoverBelow)
@@ -517,6 +520,20 @@ namespace BinGames.Sim.Combat
                     break;
                 case CombatBehavior.Stalker:
                     StepStalker(ref d, ref grid, i, dt);
+                    break;
+                // FG9-FAC-02 铸造专属语法（CombatLogic.Foundry.cs）
+                case CombatBehavior.Salvo:
+                    StepSalvoUnit(ref d, ref grid, i, dt);
+                    break;
+                case CombatBehavior.MineLayer:
+                case CombatBehavior.Loader:
+                    StepSupportMove(ref d, ref grid, i, dt);
+                    break;
+                case CombatBehavior.Mine:
+                    StepMine(ref d, i, dt);
+                    break;
+                case CombatBehavior.Charger:
+                    StepCharger(ref d, ref grid, i, dt);
                     break;
             }
         }
@@ -604,6 +621,11 @@ namespace BinGames.Sim.Combat
             }
             CombatWeapon wp = d.Weapons[w];
             bool los = d.Has(i, CombatUnitFlags.NeedsLos);
+            // FG9-FAC-02（FGR-FAC-008“架炮驻锄”）：开火前先放下驻锄；架设中被击退 / 冻结就回到未架设、重新计时（FG09 第 10 节负向）。
+            if (DeployHold(ref d, ref grid, i, dt, wp, los))
+            {
+                return;
+            }
             if (d.Secondary[i] > 0f)
             {
                 float sec = d.Secondary[i] - dt;
@@ -614,6 +636,10 @@ namespace BinGames.Sim.Combat
                 }
                 int locked = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), los, wp.TargetMode);
                 d.Cycle[i] = EffectiveCooldown(wp);
+                if (locked >= 0 && InBlindSpot(ref d, i, locked))
+                {
+                    locked = -1; // FG9-FAC-02（“高抛曲射”）：目标贴进近距盲区，这一发打不到（瞄准线白亮）
+                }
                 if (locked >= 0)
                 {
                     Cue(ref d, CombatEventKind.Telegraph, i, d.Id[locked], 0f, d.Pos[i], 2);
@@ -632,9 +658,9 @@ namespace BinGames.Sim.Combat
                 return;
             }
             int t = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), los, wp.TargetMode);
-            if (t < 0)
+            if (t < 0 || InBlindSpot(ref d, i, t))
             {
-                return;
+                return; // FG9-FAC-02：最近的目标在近距盲区里——不瞄准（贴身就是应对）
             }
             if (SilentHold(ref d, i))
             {
@@ -1027,6 +1053,10 @@ namespace BinGames.Sim.Combat
             {
                 return CombatFireResult.Hidden; // FG9-FAC-01：潜伏中不能被远程锁定
             }
+            if (d.Has(t, CombatUnitFlags.AreaOnly))
+            {
+                return CombatFireResult.AreaOnly; // FG9-FAC-02：子母雷只能被范围伤害 / 牵引引爆
+            }
             int w = d.Weapon[a];
             if (w < 0 || w >= d.Weapons.Length)
             {
@@ -1410,7 +1440,8 @@ namespace BinGames.Sim.Combat
                     for (int e = start; e < start + count; e++)
                     {
                         int k = grid.Slots[e];
-                        if (k == i || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || d.Has(k, CombatUnitFlags.Stealthed))
+                        if (k == i || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || d.Has(k, CombatUnitFlags.Stealthed)
+                            || d.Has(k, CombatUnitFlags.AreaOnly))
                         {
                             continue;
                         }

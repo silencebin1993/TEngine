@@ -5590,6 +5590,26 @@ namespace GameLogic.EditorTools
             bool active = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive;
             Write($"  - 铸造前哨激活：{active}；目标条：{ObjectiveTitle()}；剪影 {CountNamed("Silhouette")} 个；世界特效活动中 {VfxActive()} 个");
             CheckEnemiesFromTable(Campaign.Regions.FoundryOutpostLayout.RegionId, "enemy_armorbot");
+            // FG9-FAC-02：核心区对空阵地（伏笔“炮口朝天”）随入场就位——编成表 battery 行全部有记录、进战斗内核、画出了表现对象（剪影）。
+            {
+                CampaignState fs = CampaignSession.Current;
+                int rows = 0, recs = 0, kernel = 0, views = 0;
+                foreach (GameConfig.fg.EnemyEncounter enc in Campaign.Content.EnemyDefs.Encounters(Campaign.Regions.FoundryOutpostLayout.RegionId,
+                             Campaign.Content.EnemyDefs.ConditionBattery))
+                {
+                    rows++;
+                    recs += fs?.RegionEnemies != null && fs.RegionEnemies.Any(e => e != null && e.EnemyInstanceId == enc.Id) ? 1 : 0;
+                    kernel += GameRoot.FoundryOutpost?.Combat != null && GameRoot.FoundryOutpost.Combat.TryGetEnemyUnit(enc.Id, out _) ? 1 : 0;
+                    views += GameObject.Find("Enemy_" + enc.Id) != null ? 1 : 0;
+                }
+                Check(rows >= 3 && recs == rows && kernel == rows && views == rows,
+                    $"铸造前哨核心区对空阵地就位：编成 {rows} 行、记录 {recs}、战斗内核 {kernel}、表现对象 {views}（FG9-FAC-02 对空高炮炮口朝天的伏笔）");
+                // FG9-FAC-02 修复轮：真实 Play 帧里首领 HUD 的 UXML 节点（阶段行、边界倒计时、精英血条、上次止步）全部绑上；还没越过核心区大门时不显示。
+                // 各阶段的标签内容由 FgFoundryFactionSelfCheck C1b / C4c / C5c / C6b / C8b 用同一个绑定入口逐阶段断言。
+                bool hudBound = GameLogic.UI.CoreBoss.CoreBossHudUIToolkit.LastBound;
+                bool hudHidden = !GameLogic.UI.CoreBoss.CoreBossHudUIToolkit.LastVisible;
+                Check(hudBound && hudHidden, $"铸造主核心 HUD（UI Toolkit）在真实 Play 帧里节点全部绑上（{hudBound}），首领战开始前不显示（{hudHidden}）");
+            }
             CheckNoTextMarkers("铸造前哨");
             GameRoot.FoundryOutpost?.Exit(evacuateSuccess: false);
             GameRoot.ResumeHomeValley();

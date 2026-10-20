@@ -243,6 +243,66 @@ namespace GameLogic.Campaign.Regions
             yield return CoreReinforcementSpawn;
         }
 
+        // ── FG9-FAC-02：v3 之后新增的手工点位（fg.TbSitePoint：核心区对空阵地、反制 / 狂暴出生点）──
+        // 不是世界生成输入（v3 的模板点位已冻结），不进 Demo 布局的 AllAnchors（兴趣点 / 障碍 / 星球模板对照都保持 Demo 原样）；
+        // 编成表按点位 ID 播种（RegionEnemySites），星球上的对空阵地标记 / 防空覆盖按同一局部坐标落位（FGR-GEN-024）。
+        public const string SitePointKindBattery = "battery";
+
+        private static List<Anchor> _sitePoints;
+        private static List<Anchor> _batteryPoints;
+        private static object _sitePointSource;
+
+        /// <summary>本地点在 fg.TbSitePoint 里的全部点位（表没加载 = 空）。</summary>
+        public static IReadOnlyList<Anchor> SitePoints()
+        {
+            EnsureSitePoints();
+            return _sitePoints;
+        }
+
+        /// <summary>对空阵地的炮位（kind = battery）。</summary>
+        public static IReadOnlyList<Anchor> BatteryPoints()
+        {
+            EnsureSitePoints();
+            return _batteryPoints;
+        }
+
+        private static void EnsureSitePoints()
+        {
+            GameConfig.fg.TbSitePoint table = null;
+            try
+            {
+                table = ConfigSystem.Instance.Tables?.TbSitePoint;
+            }
+            catch (System.Exception)
+            {
+                table = null;
+            }
+            if (_sitePoints != null && ReferenceEquals(table, _sitePointSource))
+            {
+                return;
+            }
+            _sitePointSource = table;
+            _sitePoints = new List<Anchor>();
+            _batteryPoints = new List<Anchor>();
+            if (table == null)
+            {
+                return;
+            }
+            foreach (GameConfig.fg.SitePoint p in table.DataList)
+            {
+                if (p == null || p.Site != RegionId)
+                {
+                    continue;
+                }
+                var a = new Anchor(p.PointId, new Vector2(p.LocalX, p.LocalY), p.Radius);
+                _sitePoints.Add(a);
+                if (p.Kind == SitePointKindBattery)
+                {
+                    _batteryPoints.Add(a);
+                }
+            }
+        }
+
         public static IEnumerable<string> AllPoiIds()
         {
             foreach (Anchor a in AllAnchors())
@@ -257,7 +317,7 @@ namespace GameLogic.Campaign.Regions
         {
             var violations = new List<string>();
             var anchors = new List<Anchor>(AllAnchors());
-
+            anchors.AddRange(SitePoints()); // FG9-FAC-02：新增点位与 Demo 锚点同一套净空 / 相机边界规则
             for (int i = 0; i < anchors.Count; i++)
             {
                 for (int j = i + 1; j < anchors.Count; j++)

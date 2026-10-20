@@ -107,6 +107,18 @@ namespace GameLogic.Campaign.Feedback
         SilentSilenceWarn,
         SilentSilence,
 
+        // ── FG9-FAC-02 铸造专属语法与主核心阶段三（FGR-FAC-002 / 008 ①：每条专属行为都有 ≥ 0.8 秒的视觉 + 声音预警）──
+        FoundrySalvoWarn,
+        FoundryIntercept,
+        FoundryAirburst,
+        FoundryMineArmed,
+        FoundryMineBlast,
+        FoundryCharge,
+        FoundryDeploy,
+        FoundryBossAntiAir,
+        FoundryBossBerserk,
+        FoundryBossArenaReset,
+
         Max,
     }
 

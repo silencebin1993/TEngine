@@ -101,7 +101,7 @@ namespace GameLogic.EditorTools
             Expect(t.TbLocText.DataList.Count >= 14 && GameText.Count == t.TbLocText.DataList.Count,
                 $"文本表 {t.TbLocText.DataList.Count} 条，GameText 可查 {GameText.Count} 条");
             Expect(FgContentTables.Buildings.Count == 43, $"建筑表 43 行（FG8-DROP-01 + 投送站；FG7-ENV-04 + 净化塔；FG6-DEF-03 + 维修无人机站；FG6-DEF-02 + 屏障 T1～T3、闸门、护盾发生器、陷阱发射器；Demo 8 种建筑 + 第二座发电机 + FG1-SIG-07 信号中继塔 + FG3-LOG-06 电塔 T1 / T2 + FG4-ECO-02 七座采集 / 加工建筑 + FG4-ECO-03 四座制造建筑 + FG4-ECO-04 三座能源建筑 + FG4-ECO-11 超控阵列 + FG5-RND-01 仿真实验室 + FG5-RND-03 靶场 + FG5-RND-04 电路合成台 + FG5-RND-05 监听站 + FG5-RND-06 黑匣子陈列馆 + FG6-DEF-01 轻型 / 重型炮塔座），实际 {FgContentTables.Buildings.Count}");
-            Expect(FgContentTables.Enemies.Count == 14, $"机械敌人表 14 行（Demo 6 类敌人 + FG9-DATA-01 主核心供能节点 + FG9-FAC-01 静默 4 类新单位、精英寂听者、寂听主脑与中继节点），实际 {FgContentTables.Enemies.Count}");
+            Expect(FgContentTables.Enemies.Count == 19, $"机械敌人表 19 行（Demo 6 类敌人 + FG9-DATA-01 主核心供能节点 + FG9-FAC-01 静默 4 类新单位、精英寂听者、寂听主脑与中继节点 + FG9-FAC-02 铸造 4 类新单位与精英攻城重甲），实际 {FgContentTables.Enemies.Count}");
         }
 
         // ── 文本端到端 ───────────────────────────────────────────────────────

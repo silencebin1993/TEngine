@@ -379,6 +379,10 @@ public partial class Tables
     /// </summary>
     public fg.TbSiegeUnit TbSiegeUnit {get; }
     /// <summary>
+    /// 地点点位
+    /// </summary>
+    public fg.TbSitePoint TbSitePoint {get; }
+    /// <summary>
     /// 开局布局
     /// </summary>
     public fg.TbStartLayout TbStartLayout {get; }
@@ -589,6 +593,7 @@ public partial class Tables
         TbSiegeRole = new fg.TbSiegeRole(loader("fg_tbsiegerole"));
         TbSiegeTarget = new fg.TbSiegeTarget(loader("fg_tbsiegetarget"));
         TbSiegeUnit = new fg.TbSiegeUnit(loader("fg_tbsiegeunit"));
+        TbSitePoint = new fg.TbSitePoint(loader("fg_tbsitepoint"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbStormDebris = new fg.TbStormDebris(loader("fg_tbstormdebris"));
@@ -715,6 +720,7 @@ public partial class Tables
         TbSiegeRole.ResolveRef(this);
         TbSiegeTarget.ResolveRef(this);
         TbSiegeUnit.ResolveRef(this);
+        TbSitePoint.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);
         TbStormDebris.ResolveRef(this);
