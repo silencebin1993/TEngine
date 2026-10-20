@@ -474,6 +474,41 @@ namespace GameLogic.Campaign.Combat
             return Kernel.TryGetPosition(unitId, out position);
         }
 
+        /// <summary>FG8-E2E-01：按内核单位号查询是否存活（桥接层查询，Campaign/Combat/ 以外不直接碰内核，FG14 §5 硬约束 3）。</summary>
+        public bool IsUnitAlive(int unitId) => unitId > 0 && Kernel != null && !Kernel.IsDisposed && Kernel.IsAlive(unitId);
+
+        /// <summary>
+        /// FG8-E2E-01 复审修复（P1）：这台机器当前装配能不能打出伤害——重炮，或主武器有攻击出口（与内核 FireAt 的 NoWeapon / NoCombatOutput 判定同源）。
+        /// AI 教义的自卫交战只交给能开火的成员（没有攻击出口的搬运机不被派去追敌）。机器不在本地点返回 false。
+        /// </summary>
+        public bool CanMachineAttack(int logicId)
+        {
+            if (IsDisposed || !_machineUnit.TryGetValue(logicId, out int unit) || !Kernel.TryGetUnit(unit, out CombatUnitView v)
+                || !Kernel.TryGetWeapon(v.Weapon, out CombatWeapon w))
+            {
+                return false;
+            }
+            return w.Mode == CombatWeaponMode.Cannon || w.HasOutput != 0;
+        }
+
+        /// <summary>FG8-E2E-01 复审修复：这台机器此刻是否被接入（直控）——内核 Possessed 标志（受控机不执行编队命令，也不交给教义）。</summary>
+        public bool IsMachinePossessed(int logicId) =>
+            !IsDisposed && _machineUnit.TryGetValue(logicId, out int unit) && Kernel.TryGetUnit(unit, out CombatUnitView v) && (v.Flags & CombatUnitFlags.Possessed) != 0;
+
+        /// <summary>FG8-E2E-01 复审修复：机器当前的驻防点与守点半径（半径 0 = 不守点；内核守点教义 StepGuard 用它）。机器不在本地点返回 false。</summary>
+        public bool TryGetMachineGuard(int logicId, out Vector2 post, out float radius)
+        {
+            post = default;
+            radius = 0f;
+            if (IsDisposed || !_machineUnit.TryGetValue(logicId, out int unit) || !Kernel.TryGetSiegeUnit(unit, out CombatSiegeUnit su))
+            {
+                return false;
+            }
+            post = new Vector2((float)su.GuardPost.x, (float)su.GuardPost.y);
+            radius = su.GuardRadius;
+            return true;
+        }
+
         public void SetUnitPosition(int unitId, Vector2 position) => Kernel?.SetPosition(unitId, new double2(position.x, position.y));
 
         /// <summary>工作赶路命令的“目标”字段在内核里不参与规则（WorkMove 只看目标点），用来记“这条赶路带到达回调”：

@@ -223,6 +223,10 @@ namespace GameLogic.Campaign.Defense
                 {
                     continue;
                 }
+                if (ExpeditionMarchService.ManagesGuard(state, m.LogicId))
+                {
+                    continue; // FG8-E2E-01 复审修复：行军中的远征成员由远征行军按 AI 教义管守点（自卫交战），这里不清零
+                }
                 bool guard = false;
                 Vector2 post = default;
                 if (m.Role == MachineRole.Garrison && (HomeValleyWorkOrders.TakenByPlayer == null || !HomeValleyWorkOrders.TakenByPlayer(m.LogicId)))

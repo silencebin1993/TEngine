@@ -544,6 +544,51 @@ namespace GameLogic.EditorTools.JourneyBots
             return true;
         }
 
+        /// <summary>
+        /// FG8-E2E-01：在控件里指定的一点（控件本地坐标）派发一次左键按下 + 抬起——战略地图画布这类“点哪里就是哪里”的控件（投送落点 / 回收点）。
+        /// 与 <see cref="ClickElement"/> 同样先核对这一点拾取到的是它自己（或它的子元素）、没被别的面板挡住；光标先移到这一点上（悬停预览）。
+        /// </summary>
+        public static bool ClickElementAt(VisualElement e, Vector2 localPoint)
+        {
+            LastUiTransient = false;
+            if (e == null)
+            {
+                LastUiFailure = "控件不存在";
+                return false;
+            }
+            SyncLayout(e);
+            if (!IsClickable(e))
+            {
+                LastUiFailure = $"控件 {e.name} 被禁用、隐藏或不在面板上（{WhyNotClickable(e)}）";
+                return false;
+            }
+            IPanel panel = e.panel;
+            Vector2 at = e.LocalToWorld(localPoint);
+            if (!e.worldBound.Contains(at))
+            {
+                LastUiFailure = $"点 {at} 不在控件 {e.name} 的范围 {e.worldBound} 里";
+                return false;
+            }
+            VisualElement top = panel.Pick(at);
+            if (top == null || (top != e && !e.Contains(top)))
+            {
+                LastUiFailure = $"控件 {e.name} 上的点 {at} 被同一面板上的 {Describe(top)} 挡住";
+                return false;
+            }
+            string cover = CoveredByOtherPanel(panel, at);
+            if (cover != null)
+            {
+                LastUiFailure = $"控件 {e.name} 上的点被排序更高的面板上的 {cover} 挡住";
+                return false;
+            }
+            SendPointer(panel, at, EventType.MouseMove);
+            SendPointer(panel, at, EventType.MouseDown);
+            SendPointer(panel, at, EventType.MouseUp);
+            UitkClicks++;
+            LastUiFailure = string.Empty;
+            return true;
+        }
+
         /// <summary>本次会话里在 UI Toolkit 面板上按住左键拖动（拖画布平移）的次数。</summary>
         public static int UitkDrags { get; private set; }
 

@@ -146,6 +146,7 @@ namespace GameLogic.EditorTools
                 Step(CheckObstacleAndTruncation);
                 Step(CheckArrivalFailure);
                 Step(CheckEncountersAndHazard);
+                Step(CheckSelfDefense);
                 Step(CheckUi);
                 Step(CheckLegacySave);
                 foreach (string p in PerfLines)
@@ -1227,6 +1228,124 @@ namespace GameLogic.EditorTools
         // ─────────────────────────────── 工具 ───────────────────────────────
 
         /// <summary>新世界：家园载入、破碎都市解锁（测试捷径：直接置 Available；真实解锁由 FG1 / FG5 覆盖）。信号塔不修（覆盖只有归还核心的 150 格）。</summary>
+        // ── M21 星球上的交战（FG8-E2E-01 修复：FGJ-M8 实跑发现远征队对驻军 / 精英 / 巡逻不还手、右键敌人只会移动）──
+
+        /// <summary>
+        /// M21：（a）行军中（在执行“前进”）身边的精英残部醒来交战，行军中的成员不改道（不替玩家改命令）；（b）“待命”的成员按 AI 教义对 engage_radius 内最近的敌人下内核攻击命令、
+        /// 真的把它打死（内核击毁事件 → 野外掉落 + 精英数据包）；（c）右键敌人 = 攻击也认家园战斗内核里的敌对单位（选中 → 右键敌人位置 → 攻击命令、目标就是这个单位）。
+        /// </summary>
+        private static void CheckSelfDefense()
+        {
+            CampaignState s = NewWorld(5121);
+            int a = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -6f));
+            int b = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(6f, -6f));
+            WorldSimulation.StepMany(3);
+            ExpeditionSiteAnchors.EnsureResolved(s);
+            FgExpeditionChecklistSelfCheck.PlaceRelayChain(s, ExpeditionSiteAnchors.Route(s, FracturedCityLayout.RegionId), "fgmarch_relay_d");
+            ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(new[] { a, b }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            if (!dep.Success)
+            {
+                Fail($"M21 前提：出发失败（{dep.Outcome}：{string.Join("；", dep.Reasons ?? Array.Empty<string>())}）");
+                return;
+            }
+            CampaignState now = CampaignSession.Current;
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            ExpeditionSiteAnchors.TryGet(now, FracturedCityLayout.RegionId, out Vector2 anchor);
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            RaidUnitDef def = RaidCatalog.Units.Where(u => u != null && u.Faction == "silent").OrderBy(u => u.Id, StringComparer.Ordinal).FirstOrDefault() ?? RaidCatalog.Units.First();
+
+            // （a）行军中：身边刷一处 1 台精英的残部（与正式精英残部同一入口），它醒来交战；行军中的成员不改道（仍往锚点走、不下自卫命令）。
+            ExpeditionMarchService.TryTeamCenter(now, out Vector2 center, out _);
+            GridCell rc = SiegeService.NearestPassable(new GridCell(Mathf.RoundToInt(center.x + 6f), Mathf.RoundToInt(center.y)), 6);
+            OutpostRecord remnant = WorldOutpostSystem.SpawnRemnant(now, "remnant:silent:fgmarch_m21", "silent", rc, 1, 1);
+            int sd0 = ExpeditionMarchService.SelfDefenseCount;
+            int packets0 = LootPickService.Count(now);
+            long kills0 = FieldLootService.KillEvents;
+            bool woke = StepUntil(() => remnant != null && remnant.Engaged && home.CountSiegeGroup(remnant.EngageKey) > 0, GameClock.StepHz * 6, 5);
+            WorldSimulation.StepMany(GameClock.StepHz);
+            bool keepMarching = woke && CommandTowards(home, a, anchor, 6f) && CommandTowards(home, b, anchor, 6f) && ExpeditionMarchService.SelfDefenseCount == sd0;
+
+            // （b）待命：能开火的成员按 AI 教义（内核守点教义）交战并真的把它打死（击毁事件 → 野外掉落 + 精英数据包）。
+            // 复审修复（P1）的负向断言：没有攻击出口的 ERC-001 不交给教义（不接攻击命令、不设守点，“待命”的守备命令一直保留）；
+            // 交战的成员不离开守备点超过 engage_radius（追击有边界）；打完回到守备点并恢复“待命”。
+            bool held = ExpeditionMarchService.IssueCommand(now, ExpeditionMarchService.Command.Hold, out string why);
+            WorldSimulation.StepMany(2);
+            int ua = Unit(home, a);
+            int ub = Unit(home, b);
+            bool capable = home.CanMachineAttack(a) && !home.CanMachineAttack(b);
+            Vector2 postA = home.TryGetCommand(ua, out CombatCommand ga) && ga.Kind == CombatCommandKind.Guard ? new Vector2((float)ga.Pos.x, (float)ga.Pos.y) : default;
+            float radius = ExpeditionMarchService.EngageRadius;
+            float maxAway = 0f;
+            bool bBad = false;
+            bool bDead = false;
+            int bSamples = 0;
+            string bWhy = null;
+            void Watch()
+            {
+                if (home.TryGetMachinePosition(a, out Vector2 pa))
+                {
+                    maxAway = Mathf.Max(maxAway, Vector2.Distance(pa, postA));
+                }
+                if (!home.IsUnitAlive(ub))
+                {
+                    bDead = true; // 被精英打毁（不是教义问题）：之后不再采样
+                    return;
+                }
+                if (home.TryGetMachinePosition(b, out Vector2 pbb) && home.FindNearestHostile(pbb, radius) > 0)
+                {
+                    bSamples++; // 旧实现在这种时刻会给它下攻击命令
+                }
+                bool hasB = home.TryGetCommand(ub, out CombatCommand cbb);
+                bool bAttack = hasB && cbb.Kind == CombatCommandKind.Attack;
+                bool bGuardCmd = hasB && cbb.Kind == CombatCommandKind.Guard;
+                bool bPost = home.TryGetMachineGuard(b, out _, out float rb) && rb > 0f;
+                if ((bAttack || bPost || !bGuardCmd) && bWhy == null)
+                {
+                    bWhy = $"命令 {(hasB ? cbb.Kind.ToString() : "无")}、守点半径 {rb:0.0}";
+                }
+                bBad |= bAttack || bPost || !bGuardCmd;
+            }
+            bool engaged = StepUntil(() =>
+            {
+                Watch();
+                return home.TryGetMachineGuard(a, out Vector2 pg, out float rg) && rg > 0f && Vector2.Distance(pg, postA) < 0.5f
+                       && (!home.TryGetCommand(ua, out CombatCommand c0) || c0.Kind == CombatCommandKind.None);
+            }, GameClock.StepHz * 20, 5);
+            bool killed = StepUntil(() =>
+            {
+                Watch();
+                return remnant != null && remnant.Destroyed;
+            }, GameClock.StepHz * 60, 10);
+            bool byMachine = FieldLootService.KillEvents > kills0 && LootPickService.Count(now) > packets0;
+            bool restored = StepUntil(() =>
+            {
+                Watch();
+                return home.TryGetCommand(ua, out CombatCommand c1) && c1.Kind == CombatCommandKind.Guard && DistanceToGoal(home, a, postA) <= 2f;
+            }, GameClock.StepHz * 30, 10);
+            bool bounded = maxAway <= radius + 1.5f;
+            Expect(remnant != null && woke && keepMarching && held && capable && engaged && killed && byMachine && ExpeditionMarchService.SelfDefenseCount > sd0,
+                $"M21 星球上的交战（AI 教义自卫）：行军途中身边的精英残部醒来交战（{woke}），行军中的成员不改道（仍往锚点走 {keepMarching}）；下“待命”后（{held}{(held ? string.Empty : "：" + why)}）" +
+                $"能开火的成员把守备点让给内核守点教义（{engaged}，半径 {radius:0} 格，自卫 {ExpeditionMarchService.SelfDefenseCount - sd0} 成员·秒）并把它打死（残部击溃 {killed}；击毁事件走野外掉落、精英留下数据包 {byMachine}）；开火能力判定 {capable}");
+            Expect(capable && !bBad && bSamples >= 3 && bounded && restored,
+                $"M21 负向（复审 P1）：没有攻击出口的 ERC-001 不接攻击命令、不设守点、“待命”守备命令一直保留（{!bBad}{(bWhy != null ? "：" + bWhy : string.Empty)}{(bDead ? "；ERC-001 中途被精英打毁，之后不采样" : string.Empty)}；它身边 {radius:0} 格内有敌人的采样 {bSamples} 次，至少 3 次）；交战成员离守备点最远 {maxAway:0.0} 格（上限 {radius + 1.5f:0.0}，{bounded}）；" +
+                $"打完回到守备点 2 格内并恢复“待命”（{restored}）");
+
+            // （c）右键敌人 = 攻击：核心旁一台家园机器（在覆盖里），选中它、右键敌人位置 → 攻击命令，目标就是那个内核单位。
+            HomeValleyController hv = WorldSimulation.Home;
+            int e = Spawn(now, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(-6f, -8f));
+            WorldSimulation.StepMany(3);
+            home.TryGetMachinePosition(e, out Vector2 pb);
+            int u3 = SiegeService.SpawnOne(home, 990003, pb + new Vector2(10f, 0f), pb + new Vector2(10f, 0f), def, false);
+            home.TryGetUnitPosition(u3, out double2 p3);
+            hv.SquadCommands.ClearSelection();
+            hv.SquadCommands.SelectSingle(e);
+            hv.SquadCommands.IssueContextCommand(Vector3.zero, new Vector2((float)p3.x, (float)p3.y), false);
+            bool rcAttack = home.TryGetCommand(Unit(home, e), out CombatCommand cb) && cb.Kind == CombatCommandKind.Attack && cb.Target == u3;
+            hv.SquadCommands.ClearSelection();
+            Expect(u3 > 0 && rcAttack,
+                $"M21 右键敌人 = 攻击（FG-GAP-022）也认家园战斗内核里的敌对单位：选中 {MachineNaming.Short(e)} 右键敌人 → {cb.Kind} 命令，目标 {cb.Target}（应为 {u3}）");
+        }
+
         private static CampaignState NewWorld(int seed)
         {
             WorldSimulation.UnloadAll();

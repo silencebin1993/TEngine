@@ -86,6 +86,8 @@ namespace GameLogic.Campaign.Regions
         public static int EdgeCueCount { get; private set; }
         public static int CoverageCueCount { get; private set; }
         public static int HaltCueCount { get; private set; }
+        /// <summary>FG8-E2E-01：AI 教义自卫交战下达的内核攻击命令次数（自检读）。</summary>
+        public static int SelfDefenseCount { get; private set; }
         public static string LastRejectReason { get; private set; }
 
         /// <summary>
@@ -756,13 +758,15 @@ namespace GameLogic.Campaign.Regions
                 m.OrdersPending = true;
             }
             EvaluateCoverage(m, members);
+            bool doctrineBusy = MaintainSelfDefense(home, m, members);
             m.Engaged = AnyEngaged(home, members);
             if (TryTeamCenter(s, out Vector2 center, out _))
             {
                 EvaluateEncounters(s, m, center);
             }
             // 截断：在执行“前进 / 返回”、没人还有命令在跑、又没全部走到 → 路线被截断（寻路只到最近可达点 / 被挡），原地停下等新命令。
-            if ((advancing || returning) && !m.OrdersPending && idle == alive && near < alive && m.Halted == HaltNone)
+            // 复审修复：成员正被自卫教义占用（交战中 / 打完走回驻防点）时命令为空是正常的，不算截断。
+            if ((advancing || returning) && !m.OrdersPending && !doctrineBusy && idle == alive && near < alive && m.Halted == HaltNone)
             {
                 m.Halted = HaltRouteTruncated;
                 HaltCueCount++;
@@ -770,6 +774,96 @@ namespace GameLogic.Campaign.Regions
                     GameText.Format("exp.cue.halted_detail", alive - near));
                 Log.Warning($"[ExpeditionMarchService] 远征队路线被截断：{alive - near} 台没能走到目的地，原地待命（等新命令）。");
             }
+        }
+
+        /// <summary>
+        /// FG8-E2E-01（FGJ-M8 实跑发现：星球上的远征队对据点驻军 / 精英残部 / 巡逻完全不还手——家园内核的自动交战只认 Demo 的低威胁训练靶）：
+        /// AI 教义的自卫交战，复用内核守点教义（FG6-DEF-05 StepGuard：有武器才开火、射程外只在守点半径内靠近、半径内没敌人回驻防点）。
+        /// 复审修复（P1）：不再由热更层直接下内核攻击命令——没有攻击出口的成员会接到一条永远完不成的攻击、追击没有边界、“待命”被顶掉、命令栏刷拒绝行。现在每游戏秒：
+        /// 被接入（直控）或当前装配打不出伤害（<see cref="CombatSite.CanMachineAttack"/>）的成员不交给教义（清掉守点，“待命”的守备命令原样保留）；
+        /// 正在执行命令（玩家的移动 / 攻击、行军的前进 / 返回）的成员清掉守点、听命令；没有命令的成员（走到了站位、被截断停下）驻防点 = 停下的位置（已在守点就不改），
+        /// 半径 expedition.march.engage_radius；“待命”的成员驻防点 = 守备点：守备点半径内出现敌人时让出守备命令交给教义，敌人没了按原守备点恢复“待命”。
+        /// 只看步序号（每游戏秒），与观察无关；O(成员数) 次 AOT 查询。不改行军命令（<see cref="ExpeditionMarchState.Command"/>）。
+        /// 返回：有成员正被教义占用（驻防点半径内有敌人，或打完还在走回驻防点）——这时不判“路线被截断”。
+        /// </summary>
+        private static bool MaintainSelfDefense(CombatSite home, ExpeditionMarchState m, IReadOnlyList<int> members)
+        {
+            float radius = EngageRadius;
+            bool hold = m.Command == (int)Command.Hold;
+            bool busy = false;
+            for (int i = 0; i < members.Count; i++)
+            {
+                int id = members[i];
+                if (!home.TryGetMachineUnit(id, out int unit) || !home.TryGetMachinePosition(id, out Vector2 p))
+                {
+                    continue;
+                }
+                home.TryGetMachineGuard(id, out Vector2 post, out float guardRadius);
+                if (home.IsMachinePossessed(id) || !home.CanMachineAttack(id))
+                {
+                    if (guardRadius > 0f)
+                    {
+                        home.SetMachineGuard(id, default, 0f);
+                    }
+                    continue;
+                }
+                bool hasCommand = home.TryGetCommand(unit, out CombatCommand cmd) && cmd.Kind != CombatCommandKind.None;
+                if (hasCommand && cmd.Kind != CombatCommandKind.Guard)
+                {
+                    if (guardRadius > 0f)
+                    {
+                        home.SetMachineGuard(id, default, 0f); // 听命令；驻防点会过时，命令做完后按停下的位置重设
+                    }
+                    continue;
+                }
+                if (hasCommand)
+                {
+                    // “待命”：守备点半径内有敌人 → 让出守备命令，交给内核守点教义（同一守备点、同一半径）。
+                    var guardPost = new Vector2((float)cmd.Pos.x, (float)cmd.Pos.y);
+                    if (home.FindNearestHostile(guardPost, radius) > 0)
+                    {
+                        home.SetMachineGuard(id, guardPost, radius);
+                        home.ClearCommand(unit);
+                        SelfDefenseCount++;
+                        busy = true;
+                    }
+                    continue;
+                }
+                if (guardRadius <= 0f)
+                {
+                    home.SetMachineGuard(id, p, radius);
+                    post = p;
+                }
+                if (home.FindNearestHostile(post, radius) > 0)
+                {
+                    SelfDefenseCount++;
+                    busy = true;
+                }
+                else if (hold)
+                {
+                    // 敌人没了：按原守备点恢复“待命”（玩家最后一条命令仍是“待命”）。
+                    home.IssueCommand(unit, CombatCommandKind.Guard, post, 0, GuardArriveRadius, HomeValleyCombatTargets.EngageRange,
+                        CombatSite.MachineAttackInterval, GameClock.Paused);
+                }
+                else if ((p - post).sqrMagnitude > SelfDefenseHomeSlack * SelfDefenseHomeSlack)
+                {
+                    busy = true; // 打完正走回驻防点
+                }
+            }
+            return busy;
+        }
+
+        /// <summary>离驻防点这么远（格）还算“在走回驻防点”（内核守点教义离驻防点 1 格内就停）。</summary>
+        private const float SelfDefenseHomeSlack = 1.5f;
+
+        /// <summary>
+        /// FG8-E2E-01 复审修复：行军中（前进 / 返回阶段）星球上的远征成员由本服务按 AI 教义管守点（<see cref="MaintainSelfDefense"/>），
+        /// 攻城服务的驻防对账（只给驻防机器设守点、其余清零）跳过它们。O(成员数)。
+        /// </summary>
+        public static bool ManagesGuard(CampaignState s, int logicId)
+        {
+            ExpeditionMarchState m = Current(s);
+            return m?.Members != null && (m.Phase == PhaseOutbound || m.Phase == PhaseReturning) && Array.IndexOf(m.Members, logicId) >= 0;
         }
 
         private static bool AnyEngaged(CombatSite site, IReadOnlyList<int> members)
@@ -1181,6 +1275,7 @@ namespace GameLogic.Campaign.Regions
                     home.SetUnitSpeed(unit, HomeValleyMachineMarker.MoveSpeed);
                     home.ClearCommand(unit);
                 }
+                home.SetMachineGuard(id, default, 0f); // 回到家园：不再按远征的自卫教义守点
             }
             SetPhase(m, PhaseReturned);
             m.Halted = HaltNone;

@@ -577,6 +577,10 @@ namespace GameLogic.EditorTools
             // PlanDayForTests 与正式排定同一套时刻 / 时长；命令栏全部被拒时最新一行是原因；IC-REQ-022 六类反向（真实系统：缺冷却液、回收机被摧毁、静默夜断网、
             // 静默夜 + 酸雨中暂停与 0.5x / 3x、静默夜 + 酸雨 + 缺液中真文件存读档 FGT-ENV-008、遗迹被悬崖围住）；缺口清零；FG-M7 试玩包；FGT-ENV-001～008 映射。
             Seg("FgMilestoneM7SelfCheck", FgMilestoneM7SelfCheck.Run);
+            // FG8-E2E-01：M8 出口——FGJ-M8 登记覆盖里程碑原文八段、断点；旅程源码只走输入通道、五处夹具只在登记的方法；FGJ-M1～M6 出发与 FGJ-M8 共用跟随行军检查；
+            // IC-REQ-022 六类反向（真实系统：覆盖外失联与中继恢复、投送站缺燃油与管线恢复、回收舱在飞时目标阵亡与货物舱捡回、行军 + 投送中暂停 / 0.5x / 3x / 观察一致 FGT-EXP-012、
+            // 领地内行军 + 投送途中真文件存读档 FGT-EXP-011、锚点被围截断与投送舱接回）；领地片段 3 个种子（名称提示 + 室内进出）、领地控制完整链、遗产远程回收；缺口清零；FG-M8 试玩包；FGT-EXP-001～012 映射。
+            Seg("FgMilestoneM8SelfCheck", FgMilestoneM8SelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

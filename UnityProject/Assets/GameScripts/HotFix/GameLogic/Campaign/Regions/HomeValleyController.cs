@@ -2197,7 +2197,7 @@ namespace GameLogic.Campaign.Regions
                 Site = _combat,
                 // FG8-EXP-01（FG13）：连按两次编组键 → 镜头飞到编组中心（战略视角，与远程指挥同一台镜头）。
                 FlyCameraTo = p => { _cameraDirector?.FlyStrategyTo(new float2(p.x, p.y), GameLogic.View.CameraDirector.TransitionSeconds); },
-                HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
+                HostileUnit = id => TryParseKernelHostile(id, out int ku) ? ku : _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = HomeValleyCombatTargets.EngageRange,
                 AttackCooldownSeconds = CombatSite.MachineAttackInterval, // fg.TbHomeTuning combat.machine.attack_interval（与即时命中武器的冷却同一个数）
                 ContextCommand = TryContextWorkForSelection,
@@ -2228,18 +2228,41 @@ namespace GameLogic.Campaign.Regions
         {
             CampaignState state = CampaignSession.Current;
             CombatTargetRecord target = HomeValleyCombatTargets.Find(state, HomeValleyCombatTargets.LowThreatTargetId);
-            if (target == null || target.Health <= 0f || Vector2.Distance(worldPoint, target.Position) > pickRadius)
+            if (target != null && target.Health > 0f && Vector2.Distance(worldPoint, target.Position) <= pickRadius)
             {
-                return null;
+                return new RegionHostileInfo(target.TargetId, target.Position, true);
             }
-            return new RegionHostileInfo(target.TargetId, target.Position, target.Health > 0f);
+            // FG8-E2E-01（FGJ-M8 实跑发现：右键星球上的据点驻军 / 精英残部 / 巡逻 / 拦截中的突袭只会变成“移动”）：
+            // 右键敌人 = 攻击（FG-GAP-022 RTS 口径）也认家园战斗内核里的敌对单位（一次 AOT 最近点查询）。
+            int unit = _combat != null ? _combat.FindNearestHostile(worldPoint, pickRadius) : 0;
+            if (unit > 0 && _combat.TryGetUnitPosition(unit, out Unity.Mathematics.double2 p))
+            {
+                return new RegionHostileInfo(KernelHostilePrefix + unit.ToString(System.Globalization.CultureInfo.InvariantCulture), new Vector2((float)p.x, (float)p.y), true);
+            }
+            return null;
         }
 
         private RegionHostileInfo? ResolveLowThreatHostile(string hostileId)
         {
+            if (TryParseKernelHostile(hostileId, out int unit))
+            {
+                bool alive = _combat != null && _combat.IsUnitAlive(unit);
+                Vector2 at = alive && _combat.TryGetUnitPosition(unit, out Unity.Mathematics.double2 p) ? new Vector2((float)p.x, (float)p.y) : Vector2.zero;
+                return new RegionHostileInfo(hostileId, at, alive);
+            }
             CampaignState state = CampaignSession.Current;
             CombatTargetRecord target = HomeValleyCombatTargets.Find(state, hostileId);
             return target == null ? (RegionHostileInfo?)null : new RegionHostileInfo(target.TargetId, target.Position, target.Health > 0f);
+        }
+
+        /// <summary>FG8-E2E-01：右键攻击的目标是家园战斗内核里的敌对单位时，敌人 ID 写成这个前缀 + 内核单位号（只在本次命令里用，不进存档）。</summary>
+        private const string KernelHostilePrefix = "unit:";
+
+        private static bool TryParseKernelHostile(string hostileId, out int unit)
+        {
+            unit = 0;
+            return hostileId != null && hostileId.StartsWith(KernelHostilePrefix, StringComparison.Ordinal)
+                   && int.TryParse(hostileId.Substring(KernelHostilePrefix.Length), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out unit) && unit > 0;
         }
 
         // ── 机器选择 / 点选移动 / 到点自动干活 / WASD 接管 ────────────────────
