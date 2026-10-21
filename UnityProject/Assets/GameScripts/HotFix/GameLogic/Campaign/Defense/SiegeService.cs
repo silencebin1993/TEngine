@@ -356,6 +356,8 @@ namespace GameLogic.Campaign.Defense
                         if (SpawnOne(site, key, new Vector2(x, y), target, def, elite, hpMul, dmgMul) > 0)
                         {
                             placed++;
+                            // FG9-UX-01（FGR-FAC-005）：突袭攻城单位来到家园 = 遭遇（家园观察与否结果一致，FGR-BASE-021）。
+                            Progression.MechanicCodex.OnEnemyEncountered(def?.EnemyTypeId);
                         }
                         else
                         {

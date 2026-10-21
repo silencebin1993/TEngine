@@ -1725,7 +1725,13 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>离 <paramref name="pos"/> 最近、在 <paramref name="radius"/>（另加单位半径）内的活单位 ID（悬停读数用）；<paramref name="withStatus"/> 时只找身上有标签的。没有返回 0。O(单位数)，在 AOT 内核里。</summary>
-        public int PickUnit(double2 pos, float radius, bool withStatus)
+        public int PickUnit(double2 pos, float radius, bool withStatus) => PickUnit(pos, radius, withStatus, false);
+
+        /// <summary>
+        /// 同上；<paramref name="skipHidden"/> 时跳过玩家看不见的非己方单位：静默潜伏（<see cref="CombatUnitFlags.Stealthed"/>，“直控点击都选不中”）
+        /// 与不可选中（没有 <see cref="CombatUnitFlags.Targetable"/>，例如藏身 / 休眠阶段的首领本体）。悬停读数用（FG9-UX-01：看到它才算遭遇）。
+        /// </summary>
+        public int PickUnit(double2 pos, float radius, bool withStatus, bool skipHidden)
         {
             double now = _d.Scalars[0].Time;
             int best = 0;
@@ -1733,6 +1739,11 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.Count; i++)
             {
                 if (!_d.IsAlive(i))
+                {
+                    continue;
+                }
+                if (skipHidden && _d.Faction[i] != (byte)CombatFaction.Player
+                    && (_d.Has(i, CombatUnitFlags.Stealthed) || !_d.Has(i, CombatUnitFlags.Targetable)))
                 {
                     continue;
                 }

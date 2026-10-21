@@ -62,6 +62,9 @@ namespace GameLogic.Narrative
         private static readonly List<string> ProblemList = new List<string>();
         private static bool _loaded;
 
+        /// <summary>FG9-UX-01：每次（重新）载入 +1（图鉴的资料库页签据此重建条目）。</summary>
+        public static int Revision { get; private set; } = 1;
+
         public static IReadOnlyList<NarrativeEntryDef> All
         {
             get
@@ -113,6 +116,7 @@ namespace GameLogic.Narrative
                 return;
             }
             _loaded = true;
+            Revision++;
             ById.Clear();
             ByTrigger.Clear();
             List.Clear();

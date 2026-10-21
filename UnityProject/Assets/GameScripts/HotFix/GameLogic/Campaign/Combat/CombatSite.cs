@@ -1310,6 +1310,8 @@ namespace GameLogic.Campaign.Combat
                         Rules?.OnKeyedTargetDamaged(this, killedKey, 0f, 0f, _unitMachine.TryGetValue(e.Other, out int keyedKiller) ? keyedKiller : 0, true);
                         return;
                     }
+                    // FG9-UX-01（FGR-FAC-005）：被击毁 = 遭遇，首次遭遇解锁图鉴，O(1)。放在首领（血量在热更层，ExternalHealth）的提前返回之前：首领级被打空同样解锁。
+                    Progression.MechanicCodex.OnEnemyEncountered(rec?.EnemyTypeId);
                     if (rec == null || !rec.IsAlive || !Kernel.TryGetUnit(e.Unit, out CombatUnitView v) || (v.Flags & CombatUnitFlags.ExternalHealth) != 0)
                     {
                         return;
@@ -1338,6 +1340,7 @@ namespace GameLogic.Campaign.Combat
                         return;
                     }
                     rec.Health = e.Value2;
+                    Progression.MechanicCodex.OnEnemyEncountered(rec.EnemyTypeId); // FG9-UX-01（FGR-FAC-005）：交上火 = 遭遇，O(1)
                     if (e.Value2 > 0f)
                     {
                         rec.Position = new Vector2((float)e.Pos.x, (float)e.Pos.y);
@@ -1362,12 +1365,16 @@ namespace GameLogic.Campaign.Combat
                         if (MachineRegistry.TryGetRecord(logicId, out MachineRecord mrec) && mrec.IsAlive && mrec.RegionId == SiteId
                             && mrec.FactionId == MachinePlayerFaction)
                         {
+                            // FG9-UX-01（FGR-FAC-005）：敌人打中己方机器 = 遭遇（攻击者的敌人记录走同一个索引，O(1)）。
+                            Progression.MechanicCodex.OnEnemyEncountered(FindEnemyRecord(state, e.Other)?.EnemyTypeId);
                             MachineRegistry.ApplyDamage(logicId, e.Value);
                             SyncMachineHealth(mrec);
                         }
                         return;
                     }
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);
+                    // FG9-UX-01（FGR-FAC-005）：首领级敌人（ExternalHealth）受伤只走伤害请求、不发 Damaged——交上火同样算遭遇，O(1)。
+                    Progression.MechanicCodex.OnEnemyEncountered(rec?.EnemyTypeId);
                     if (rec != null && Rules != null)
                     {
                         Rules.ApplyExternalEnemyDamage(this, rec, e.Value);

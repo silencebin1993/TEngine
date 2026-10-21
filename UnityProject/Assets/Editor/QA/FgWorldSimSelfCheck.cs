@@ -96,6 +96,7 @@ namespace GameLogic.EditorTools
             Func<bool> originalAutoPause = NotificationCenter.AutoPauseHandler;
             Func<string> originalCueSite = FeedbackCues.SiteProvider;
             Func<string> originalCueObserved = FeedbackCues.ObservedSiteProvider;
+            string originalCodexPath = GameLogic.Progression.MechanicCodex.FilePathOverrideForTests;
             _dir = Path.Combine(Path.GetTempPath(), "bingames-fgsim-selfcheck-" + Guid.NewGuid().ToString("N"));
             _reader = new FakeReader();
             try
@@ -109,6 +110,10 @@ namespace GameLogic.EditorTools
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 CampaignSaveService.SaveDirectoryOverrideForTests = _dir;
                 Directory.CreateDirectory(_dir);
+                // FG9-UX-01：图鉴是跨存档的元进度（D-17），不属于某一遍的世界状态。每一遍都从同一份空白图鉴开始（见 ResetCodexForPass），
+                // 否则第一遍首次遭遇解锁并发出“图鉴新增”后，后面几遍因为已解锁而不再发，通知条数随遍序（不是随观察）不同。
+                GameLogic.Progression.MechanicCodex.FilePathOverrideForTests = Path.Combine(_dir, "codex.json");
+                ResetCodexForPass();
                 InputRouter.DebugSetReader(_reader);
                 CameraDirector.RealDeltaTime = () => 0.05f;
                 NotificationCenter.AutoPauseHandler = null;
@@ -163,6 +168,9 @@ namespace GameLogic.EditorTools
                 HomeGridService.Invalidate();
                 WorldGenKernel_ReleaseAll();
                 CampaignSaveService.SaveDirectoryOverrideForTests = null;
+                GameLogic.Progression.MechanicCodex.FilePathOverrideForTests = originalCodexPath;
+                GameLogic.Progression.MechanicCodex.Reload();
+                GameLogic.Progression.MechanicCodex.ResetContentForTests();
                 MachineRegistry.ResetForNewCampaign();
                 GameSettings.SetLanguage(originalLanguage);
                 UiEscapeStack.Clear();
@@ -517,6 +525,13 @@ namespace GameLogic.EditorTools
                 (ad.Count > 0 ? "；差异：" + string.Join(" | ", ad.Take(6)) : string.Empty));
             Expect(expeditionMoved && expeditionEngaged,
                 $"远征侧真的在动（不是空转）：{expeditionEffect}；A / B / C / D 四遍逐字段一致即“有没有人看着，远征打得一样”");
+            // FG9-UX-01（FGR-FAC-005 / FGR-BASE-021）：首次遭遇由战斗内核事件判定，不看镜头——每一遍都从空白图鉴起步，无头的 C 与镜头不在远征地点的 D
+            // 发出的“图鉴新增”通知条数与一直在看的 A 相同，且确实发生过（不是四遍都为 0 的空转）。
+            long codexA = Parse(a, "·notify." + GameLogic.Progression.MechanicCodex.NotifyType);
+            long codexC = Parse(c, "·notify." + GameLogic.Progression.MechanicCodex.NotifyType);
+            long codexD = Parse(d, "·notify." + GameLogic.Progression.MechanicCodex.NotifyType);
+            Expect(codexA > 0 && codexA == codexC && codexA == codexD,
+                $"首次遭遇解锁图鉴不依赖观察：A / C（无头）/ D（镜头离开远征地点）各从空白图鉴起步，“图鉴新增”通知 {codexA} / {codexC} / {codexD} 条");
 
             // 三件事都真的发生了（不是空转）：家园生产完成 / 工单完成、远征地点里有战斗或推进、突袭到达。
             bool produced = Parse(a, "·machines.home") > homeMachines || !string.Equals(FactoryDigestFrom(a), factoryBefore, StringComparison.Ordinal);
@@ -1464,10 +1479,23 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>每一遍都从出发存档的一份新拷贝读档（运行中的自动存档写进拷贝槽，不污染出发存档），按主菜单“继续”的顺序恢复整个世界。</summary>
+        /// <summary>FG9-UX-01：把图鉴（跨存档元进度）恢复到同一份空白起点：删临时图鉴文件、清内存解锁集合与本局遭遇去重。</summary>
+        private static void ResetCodexForPass()
+        {
+            string path = GameLogic.Progression.MechanicCodex.FilePathOverrideForTests;
+            if (path != null && File.Exists(path))
+            {
+                File.Delete(path);
+            }
+            GameLogic.Progression.MechanicCodex.Reload();
+            GameLogic.Progression.MechanicCodex.ResetContentForTests();
+        }
+
         private static void RestoreBaseline(string observe)
         {
             WorldSimulation.UnloadAll();
             GameClock.ResetSession();
+            ResetCodexForPass();
             File.Copy(CampaignSaveService.SlotPath(Slot), CampaignSaveService.SlotPath(RunSlot), true);
             string bak = CampaignSaveService.SlotPath(RunSlot) + ".bak";
             if (File.Exists(bak))

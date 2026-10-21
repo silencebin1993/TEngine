@@ -451,6 +451,21 @@ namespace GameLogic.EditorTools
 
         private static void Seconds(float sec) => FgProductionSelfCheck.Seconds(sec);
 
+        /// <summary>FG9-UX-01：图鉴回到空白（临时图鉴文件删掉重读、清本局遭遇去重）。图鉴跨存档，不随 NewWorld 复位。</summary>
+        private static void FreshCodex()
+        {
+            string codexFile = MechanicCodex.FilePathOverrideForTests;
+            if (codexFile != null && File.Exists(codexFile))
+            {
+                File.Delete(codexFile);
+            }
+            MechanicCodex.Reload();
+            MechanicCodex.ResetContentForTests();
+        }
+
+        private static string UnlockedEnemies() =>
+            string.Join(",", EnemyDefs.Rows.Where(r => MechanicCodex.IsUnlocked(MechanicCodex.EnemyEntryId(r.Id))).Select(r => r.Id));
+
         private static bool StepUntil(Func<bool> done, int maxGameSeconds) => FgProductionSelfCheck.StepUntil(done, maxGameSeconds);
 
         private static string Json(object o) => o == null ? "null" : JsonUtility.ToJson(o);
@@ -1147,6 +1162,8 @@ namespace GameLogic.EditorTools
             unfolded = false;
             CampaignState s = NewWorld(seed, observe);
             PassGrace(s);
+            // FG9-UX-01（复审修复 P1）：图鉴是跨存档的元进度（不在存档里），每遍都从同一份空白图鉴起步，再比较攻城单位来到时的首次遭遇解锁。
+            FreshCodex();
             OwnOutpostRecord o = MakeOutpost(s, out Vector2 c, buildings: 4);
             if (o == null)
             {
@@ -1175,6 +1192,9 @@ namespace GameLogic.EditorTools
             }
             sb.Append("g=").Append((int)g.State).Append(':').Append(g.UnitCount).Append(":unf=").Append(SiegeService.UnfoldCount - unfold0).Append(":t=").Append(GameClock.Ticks);
             sb.Append(":lost=").Append(RaidResultService.IsCoreLost(s));
+            // 攻城单位不是区域敌人记录（交火走具名目标路径、不解锁），图鉴里的敌人条目只能来自 SiegeService 展开时的首次遭遇。
+            sb.Append(":codex=").Append(UnlockedEnemies());
+            sb.Append(":codexNotes=").Append(MechanicCodex.NotifyCount);
             return sb.ToString();
         }
 
@@ -1182,8 +1202,8 @@ namespace GameLogic.EditorTools
         {
             string seen = RaidScenario(8111, true, 60f, out bool u1);
             string unseen = RaidScenario(8111, false, 60f, out bool u2);
-            Expect(seen == unseen && u1 && u2 && !seen.StartsWith("no-", StringComparison.Ordinal) && seen.Contains("lost=False"),
-                "F4 负向“前哨站被突袭时玩家在远处（后台一致）”/ FGR-BASE-021：突袭部队到达前哨站展开攻城（复用 FG6 的攻城与家园战斗内核结算），镜头在 / 不在家园各跑 60 游戏秒，前哨建筑耐久 / 状态、队伍状态 / 人数逐字段一致，核心没丢" +
+            Expect(seen == unseen && u1 && u2 && !seen.StartsWith("no-", StringComparison.Ordinal) && seen.Contains("lost=False") && seen.Contains(":codex=enemy_"),
+                "F4 负向“前哨站被突袭时玩家在远处（后台一致）”/ FGR-BASE-021：突袭部队到达前哨站展开攻城（复用 FG6 的攻城与家园战斗内核结算），镜头在 / 不在家园各跑 60 游戏秒，前哨建筑耐久 / 状态、队伍状态 / 人数逐字段一致，核心没丢；FG9-UX-01：攻城单位展开即首次遭遇，两遍解锁的敌人条目与“图鉴新增”通知数一致且不为空" +
                 (seen == unseen ? string.Empty : $"\n观察：{seen}\n不观察：{unseen}"));
         }
 
@@ -1212,11 +1232,14 @@ namespace GameLogic.EditorTools
                 OriginX = Mathf.RoundToInt(origin.x), OriginY = Mathf.RoundToInt(origin.y),
             };
             int before = SiegeService.InterceptCount;
+            FreshCodex();
             TransitGroupRecord g = WorldTransitSystem.DispatchPlanned(s, plan);
             bool intercepted = g != null && StepUntil(() => g.Intercepted || SiegeService.InterceptCount > before, 120);
             float fromHome = Vector2.Distance(PosOf(guard), new Vector2(core.X, core.Y));
-            Expect(guard != 0 && intercepted && fromHome > 300f,
-                $"F5 DEBT-FG6DEF05-05（星球部分）：离核心 {fromHome:0} 格、前哨站外侧的一台己方机器拦下行进中冲着前哨站来的突袭（就地展开交战 {intercepted}），与家园范围内同一套拦截规则");
+            // FG9-UX-01（FGR-FAC-005）：被拦截就地展开 = 己方机器遇上了它们，首次遭遇解锁（攻城单位不是区域敌人记录，只能从展开处解锁）。
+            string seenEnemies = UnlockedEnemies();
+            Expect(guard != 0 && intercepted && fromHome > 300f && seenEnemies.Length > 0,
+                $"F5 DEBT-FG6DEF05-05（星球部分）：离核心 {fromHome:0} 格、前哨站外侧的一台己方机器拦下行进中冲着前哨站来的突袭（就地展开交战 {intercepted}），与家园范围内同一套拦截规则；FG9-UX-01：拦截展开即首次遭遇，图鉴解锁 {seenEnemies}");
         }
 
         // ── G 离家报告分组 ─────────────────────────────────────────────────────────

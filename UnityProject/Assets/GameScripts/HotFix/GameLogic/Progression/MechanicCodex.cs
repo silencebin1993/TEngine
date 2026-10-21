@@ -31,6 +31,26 @@ namespace GameLogic.Progression
         Research = 5,
         /// <summary>FG8-EXP-04：人类遗产（fg.TbHeritage 生成；“人类遗产”页签 = 图鉴收集页）。</summary>
         Heritage = 6,
+        /// <summary>FG9-UX-01：作战组件 / 结构模块（内容目录 MechanicalContentFacade 的组件类）。</summary>
+        Component = 7,
+        /// <summary>FG9-UX-01：底盘（ChassisCatalog）。</summary>
+        Chassis = 8,
+        /// <summary>FG9-UX-01：建筑与建造工具（建造目录 BuildCatalog = fg.TbBuildingGrid + fg.TbBuildTool）。</summary>
+        Building = 9,
+        /// <summary>FG9-UX-01：状态标签（fg.TbStatusTag 的主标签，kind=status）。</summary>
+        StatusTag = 10,
+        /// <summary>FG9-UX-01（FGR-FAC-005）：敌人（fg.TbMechEnemy），首次遭遇解锁。</summary>
+        Enemy = 11,
+        /// <summary>FG9-UX-01：阵营。</summary>
+        Faction = 12,
+        /// <summary>FG9-UX-01：区域（fg.TbTerritory 的领地），第一次进入解锁。</summary>
+        Region = 13,
+        /// <summary>FG9-UX-01：事件页签的天气（fg.TbWeather），第一次经历解锁。</summary>
+        Weather = 14,
+        /// <summary>FG9-UX-01：事件页签的区域危害（fg.TbHazard），第一次发现解锁。</summary>
+        Hazard = 15,
+        /// <summary>FG9-UX-01（FGR-UX-051“资料库按存档保存”）：资料库（剧情，fg.TbNarrativeEntry）。解锁状态只看当前存档，不进跨存档的图鉴文件。</summary>
+        Lore = 16,
     }
 
     /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。FG2-FW-05：固件 / 反应条目由各自的表生成，
@@ -61,10 +81,10 @@ namespace GameLogic.Progression
     /// - 持久化：机制条目跨存档共享（沿用 <see cref="CodexPersistence"/> 的方式：独立 JSON 文件、整份覆盖写、读失败回落空集合不抛异常）。
     /// - FG2-FW-05（FGU-38 固件 / 反应页签、FGR-UX-051 搜索与互链、FGR-UX-030 悬停跳转）：固件条目（44 条，“fw:”前缀）按 fg.TbFirmwareKind 生成，
     ///   第一次拿到芯片或内容解锁时解锁；反应条目（“reaction:”前缀）按 fg.TbReaction 生成，第一次打出时解锁；二者都跨存档（同一个图鉴文件）。
-    ///   敌人 / 阵营等其余页签是 FG9-UX-01 的交付。
+    ///   FG9-UX-01：组件 / 底盘 / 建筑 / 状态标签 / 敌人 / 阵营 / 区域 / 事件 / 资料库页签见 MechanicCodex.Content.cs（资料库按存档，不进图鉴文件）。
     /// 开销：只在钩子触发 / 解锁 / 打开面板时工作，O(条目数)；不按帧。
     /// </summary>
-    public static class MechanicCodex
+    public static partial class MechanicCodex
     {
         public const int FileVersion = 1;
         private const string FileName = "codex_mechanics.json";
@@ -78,8 +98,23 @@ namespace GameLogic.Progression
         /// <summary>FG8-EXP-04（FGR-EXP-040“图鉴有收集页”）：人类遗产页签——约 20 件遗产，未收集的显示剪影 + 类别与第几幕的提示，页签上写已收集 / 总数。</summary>
         public const string TabHeritage = "heritage";
 
-        /// <summary>页签顺序（界面按这个顺序画标签）。</summary>
-        public static readonly string[] Tabs = { TabSystem, TabFirmware, TabReaction, TabItem, TabRecipe, TabResearch, TabHeritage };
+        // FG9-UX-01（FGR-UX-050 正式版 14 个页签；配方 / 研究两页沿用 FG4-ECO-01 / FG5-RND-01，共 16 页，见 ADR-UX-009）
+        public const string TabComponent = "component";
+        public const string TabChassis = "chassis";
+        public const string TabBuilding = "building";
+        public const string TabStatus = "status";
+        public const string TabEnemy = "enemy";
+        public const string TabFaction = "faction";
+        public const string TabRegion = "region";
+        public const string TabEvent = "event";
+        public const string TabLore = "lore";
+
+        /// <summary>页签顺序（界面按这个顺序画标签）。FG9-UX-01：按 FGR-UX-050 的顺序排，系统说明放最前（打开图鉴的默认页）。</summary>
+        public static readonly string[] Tabs =
+        {
+            TabSystem, TabFirmware, TabComponent, TabChassis, TabBuilding, TabItem, TabRecipe, TabReaction, TabStatus,
+            TabEnemy, TabFaction, TabRegion, TabEvent, TabResearch, TabHeritage, TabLore,
+        };
 
         public const string FirmwarePrefix = "fw:";
         public const string ReactionPrefix = "reaction:";
@@ -157,7 +192,7 @@ namespace GameLogic.Progression
                 }
                 if (q != null)
                 {
-                    bool open = _unlocked.Contains(e.Id);
+                    bool open = IsUnlocked(e.Id);
                     string hay = open ? Title(e) + "\n" + Body(e, state) : Hint(e, state);
                     if ((hay ?? string.Empty).ToLowerInvariant().IndexOf(q, StringComparison.Ordinal) < 0)
                     {
@@ -189,7 +224,7 @@ namespace GameLogic.Progression
             int n = 0;
             foreach (MechanicCodexEntry e in _entries)
             {
-                if (e.Tab == tab && _unlocked.Contains(e.Id))
+                if (e.Tab == tab && IsUnlocked(e.Id))
                 {
                     n++;
                 }
@@ -215,7 +250,7 @@ namespace GameLogic.Progression
                 case MechanicCodexKind.Recipe:
                     return GameLogic.Localization.GameText.Get(e.TitleKey);
                 default:
-                    return GameLogic.Localization.GameText.Get(e.TitleKey);
+                    return e.Kind >= MechanicCodexKind.Component ? ContentTitle(e) : GameLogic.Localization.GameText.Get(e.TitleKey);
             }
         }
 
@@ -241,7 +276,7 @@ namespace GameLogic.Progression
                 case MechanicCodexKind.Heritage:
                     return Campaign.Env.HeritageService.CodexBody(e.ContentId);
                 default:
-                    return GameLogic.Localization.GameText.Get(e.BodyKey);
+                    return e.Kind >= MechanicCodexKind.Component ? ContentBody(e, state) : GameLogic.Localization.GameText.Get(e.BodyKey);
             }
         }
 
@@ -281,13 +316,14 @@ namespace GameLogic.Progression
                     // 没拿到的物品不剧透名字与用途，只写获取途径（表里的来源文字）。
                     return GameLogic.Localization.GameText.Format("codex.item.locked_hint", GameLogic.Localization.GameText.Get(e.HintKey));
                 default:
-                    return GameLogic.Localization.GameText.Format("codex.panel.locked_body", GameLogic.Localization.GameText.Get(e.HintKey));
+                    return e.Kind >= MechanicCodexKind.Component ? ContentHint(e, state)
+                        : GameLogic.Localization.GameText.Format("codex.panel.locked_body", GameLogic.Localization.GameText.Get(e.HintKey));
             }
         }
 
         /// <summary>固件条目的图标 ID（剪影 = 同一张图标着黑色，不另出资源）；其它条目为空。</summary>
         public static string IconOf(MechanicCodexEntry e) =>
-            e != null && e.Kind == MechanicCodexKind.Firmware && Campaign.Content.FirmwareCatalog.TryGet(e.ContentId, out Campaign.Content.MechanicalContentDef def) ? def.IconId : null;
+            e != null && e.Kind == MechanicCodexKind.Firmware && Campaign.Content.FirmwareCatalog.TryGet(e.ContentId, out Campaign.Content.MechanicalContentDef def) ? def.IconId : ContentIcon(e);
 
         private static string ReactionBody(string reactionId, Campaign.CampaignState state)
         {
@@ -333,6 +369,10 @@ namespace GameLogic.Progression
 
         public static bool IsUnlocked(string id)
         {
+            if (IsLoreId(id))
+            {
+                return LoreUnlocked(id); // FG9-UX-01：资料库只看当前存档（FGR-UX-051），不读跨存档的图鉴文件
+            }
             EnsureUnlocked();
             return id != null && _unlocked.Contains(id);
         }
@@ -346,7 +386,7 @@ namespace GameLogic.Progression
                 int n = 0;
                 foreach (MechanicCodexEntry e in _entries)
                 {
-                    if (_unlocked.Contains(e.Id))
+                    if (IsUnlocked(e.Id))
                     {
                         n++;
                     }
@@ -382,18 +422,35 @@ namespace GameLogic.Progression
         /// <summary>解锁一条（“?”按钮打开时）。返回 true = 这次才解锁。</summary>
         public static bool Unlock(string id)
         {
-            if (Find(id) == null)
-            {
-                return false;
-            }
-            EnsureUnlocked();
-            if (!_unlocked.Add(id))
+            if (!AddUnlocked(id))
             {
                 return false;
             }
             Revision++;
             Save();
             return true;
+        }
+
+        /// <summary>只把条目加进解锁集合（不递增版本、不写盘）：批量补解锁（<see cref="SyncContent"/>）最后统一写一次。返回 true = 这次才解锁。</summary>
+        private static bool AddUnlocked(string id)
+        {
+            // FG9-UX-01（负向：新存档里看不到其他存档的剧情文本）：资料库条目永远不写进跨存档的图鉴文件，收录只由 NarrativeService 写进存档。
+            if (Find(id) == null || IsLoreId(id))
+            {
+                return false;
+            }
+            EnsureUnlocked();
+            return _unlocked.Add(id);
+        }
+
+        /// <summary>批量补解锁之后：有新解锁时只递增一次版本、只写一次盘。</summary>
+        private static void CommitBatch(bool changed)
+        {
+            if (changed)
+            {
+                Revision++;
+                Save();
+            }
         }
 
         /// <summary>请求打开图鉴并定位到 <paramref name="id"/>（“?”按钮、暂停菜单“图鉴”）。<paramref name="unlock"/> = 从该机制的界面上打开，顺带解锁。</summary>
@@ -428,6 +485,7 @@ namespace GameLogic.Progression
             SaveCount = 0;
             OpenCount = 0;
             LastOpenedId = null;
+            ResetContentForTests();
         }
 
         private static bool _loggedError;
@@ -438,15 +496,17 @@ namespace GameLogic.Progression
         {
             // 读表失败（配置还没载入 / 表缺失）时不缓存失败结果：下一次访问再试，配置载入后自动恢复。
             // FG2-FW-05：固件 / 反应表重载（或测试注入）后重建派生条目。
-            int derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision,
-                Campaign.Economy.ResearchCatalog.Revision);
+            int derivedKey = DerivedKey();
             if (_entries != null && _loadError == null && derivedKey == _derivedKey)
             {
                 return;
             }
+            HashSet<string> previous = null;
             if (_entries != null && _loadError == null)
             {
-                _unlocked = null; // 条目集合变了：解锁集合按新条目重新过滤
+                // 条目集合变了：解锁集合按新条目重新过滤。FG9-UX-01：本局内已解锁、还没落盘的条目（编辑模式不写盘）带过去，不因表 / 语言重载丢失。
+                previous = _unlocked;
+                _unlocked = null;
                 Revision++;
             }
             _derivedKey = derivedKey;
@@ -481,11 +541,23 @@ namespace GameLogic.Progression
                     }
                     AddDerivedEntries();
                     _entries.Sort((a, b) => a.SortOrder != b.SortOrder ? a.SortOrder.CompareTo(b.SortOrder) : string.CompareOrdinal(a.Id, b.Id));
+                    _derivedKey = DerivedKey(); // 访问各目录会触发它们第一次载入（版本前进）：建完再取一次，键对得上
                 }
             }
             catch (Exception ex)
             {
                 _loadError = "配置表读取失败：" + ex.Message;
+            }
+            if (previous != null && _loadError == null)
+            {
+                EnsureUnlocked();
+                foreach (string id in previous)
+                {
+                    if (_byId.ContainsKey(id) && !IsLoreId(id))
+                    {
+                        _unlocked.Add(id);
+                    }
+                }
             }
             if (_loadError != null && !_loggedError)
             {
@@ -566,8 +638,7 @@ namespace GameLogic.Progression
         {
             // 读的是 ItemCatalog 自己的 Revision 之后的内容；访问 Items 会触发载入（第一次时 Revision 前进），这里再取一次让派生键对上。
             IReadOnlyList<Campaign.Economy.ItemDef> items = Campaign.Economy.ItemCatalog.Items;
-            _derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision,
-                Campaign.Economy.ResearchCatalog.Revision);
+            _derivedKey = DerivedKey();
             int order = 300000;
             foreach (Campaign.Economy.ItemDef item in items)
             {
@@ -640,6 +711,7 @@ namespace GameLogic.Progression
             }
             AddResearchEntries();
             AddHeritageEntries();
+            AddContentEntries(); // FG9-UX-01：组件 / 底盘 / 建筑 / 状态标签 / 敌人 / 阵营 / 区域 / 事件 / 资料库
         }
 
         /// <summary>FG8-EXP-04：按人类遗产表生成“人类遗产”页签的条目（遗产入库时由 <see cref="Campaign.Env.HeritageService"/> 解锁，跨存档）。</summary>
@@ -678,8 +750,7 @@ namespace GameLogic.Progression
         private static void AddResearchEntries()
         {
             IReadOnlyList<Campaign.Economy.ResearchNodeDef> nodes = Campaign.Economy.ResearchCatalog.Nodes;
-            _derivedKey = HashCode.Combine(Campaign.Content.FirmwareCatalog.Revision, Campaign.Content.NamedReactionCatalog.Revision, Campaign.Economy.ItemCatalog.Revision,
-                Campaign.Economy.ResearchCatalog.Revision);
+            _derivedKey = DerivedKey();
             int order = 500000;
             foreach (Campaign.Economy.ResearchNodeDef n in nodes)
             {
@@ -721,7 +792,7 @@ namespace GameLogic.Progression
             _unlocked = new HashSet<string>(StringComparer.Ordinal);
             foreach (string id in LoadFile())
             {
-                if (_byId.ContainsKey(id))
+                if (_byId.ContainsKey(id) && !IsLoreId(id))
                 {
                     _unlocked.Add(id);
                 }

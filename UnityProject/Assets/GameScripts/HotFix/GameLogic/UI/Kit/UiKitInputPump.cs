@@ -287,6 +287,13 @@ namespace GameLogic.UI.Kit
             {
                 OutpostOverviewPanelUIToolkit.Toggle();
             }
+            // FG9-UX-01（DEBT-FG9NAR01-04）：资料库键（默认 Alt+J，全部上下文，可重绑）：打开图鉴到资料库（剧情）页签；停在资料库页签时再按一次关闭。
+            // 更高层的面板盖在图鉴上面时不起作用（同其它面板键）。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenLore) && CampaignSession.Current != null
+                && !UiKitPanelHost.AnyModalAbove(MechanicCodexPanelUIToolkit.Order))
+            {
+                MechanicCodexPanelUIToolkit.ToggleLore();
+            }
             // FG8-QST-01（FGR-QST-003“一键让镜头飞过去”）：镜头依次飞到追踪栏里的任务（默认 Alt+Q，战略上下文，可重绑）。飞过去本身就是视觉反馈（确认音）；
             // 飞不了（追踪栏是空的 / 任务没有地点）时用“任务动态”字幕 + 通知说明原因与怎么追踪（B06）。
             if (InputRouter.ConsumeContextAction(GameActionId.FocusQuest) && CampaignSession.Current != null)

@@ -1251,7 +1251,8 @@ namespace GameLogic.UI.Kit
             return e == null
                 ? new TooltipContent { Title = InputActionCatalog.TryGet(HotbarAction(slot), out InputActionDef def) ? GameText.Get(def.NameKey) : key,
                     Body = GameText.Format("ui.hotbar.tip_empty", key), Shortcut = HotbarAction(slot) }
-                : new TooltipContent { Title = e.Name, Body = GameText.Format("ui.hotbar.tip_filled", e.Name, key), Shortcut = HotbarAction(slot) };
+                : new TooltipContent { Title = e.Name, Body = GameText.Format("ui.hotbar.tip_filled", e.Name, key), Shortcut = HotbarAction(slot),
+                    CodexEntryId = Progression.MechanicCodex.BuildingEntryId(e.Id) }; // FG9-UX-01：悬停快捷栏按图鉴键跳到建筑条目
         }
 
         private TooltipContent ItemTooltip(int index)

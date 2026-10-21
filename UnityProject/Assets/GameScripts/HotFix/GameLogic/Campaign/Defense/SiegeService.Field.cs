@@ -141,6 +141,8 @@ namespace GameLogic.Campaign.Defense
                         if (unit > 0)
                         {
                             site.SetSiegeUnitMode(unit, CombatSiegeMode.Skirmish);
+                            // FG9-UX-01（FGR-FAC-005）：被己方机器拦下就地展开 = 遭遇（攻城单位不是区域敌人记录，交火不走记录解锁）。O(1)。
+                            Progression.MechanicCodex.OnEnemyEncountered(def?.EnemyTypeId);
                             placed++; // 复审修复（P2）：只数真的生成了的（展开台数不虚高；全部生成失败时 placed = 0，下面不当成拦截）
                         }
                         else

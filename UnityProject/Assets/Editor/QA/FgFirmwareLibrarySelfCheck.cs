@@ -573,7 +573,9 @@ namespace GameLogic.EditorTools
             Line("  · E2. 图鉴面板：固件 / 反应页签与计数；未获得显示“？？？”+ 获取途径 + 剪影图标；搜索不剧透；相关条目跨页签跳转；空搜索提示");
             CampaignState s = NewState(9508, unlockAll: false);
             string owned = FirmwareKinds.Rows.Where(r => r != null && FirmwareCatalog.TryGet(r.Id, out _) && FirmwareKinds.KindOf(r.Id) == FirmwareKind.Regular
-                                                         && MechanicCodex.Find(MechanicCodex.FirmwareEntryId(r.Id)).Links.Length > 0).Select(r => r.Id).First();
+                                                         // FG9-UX-01：固件条目现在还链到状态标签（反应链接在前）；这里要的是“有参与反应”的固件（相关条目第一个是反应）。
+                                                         && MechanicCodex.Find(MechanicCodex.FirmwareEntryId(r.Id)).Links.FirstOrDefault()?.StartsWith(MechanicCodex.ReactionPrefix, StringComparison.Ordinal) == true)
+                .Select(r => r.Id).First();
             PrimitiveInventory.GrantCrafted(s, owned);
             string locked = FirmwareKinds.Rows.Where(r => r != null && FirmwareCatalog.TryGet(r.Id, out _) && !MechanicCodex.IsUnlocked(MechanicCodex.FirmwareEntryId(r.Id))
                                                           && !FirmwareLibrary.IsObtained(s, r.Id)).Select(r => r.Id).FirstOrDefault();

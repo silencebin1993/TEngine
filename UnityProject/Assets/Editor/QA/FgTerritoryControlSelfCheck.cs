@@ -282,8 +282,24 @@ namespace GameLogic.EditorTools
             int alerts = NotifyMembers(TerritoryControlService.NotifyAlert);
             int octants = s.Raids.Director.DestroyedByOctant.Sum();
             Vector2 at = new Vector2(o.CellX, o.CellY);
+            // FG9-UX-01 复审 P1：迎战展开 = 首次遭遇。图鉴用临时文件、从空白起步（图鉴跨存档，不能写玩家本机文件）。
+            string originalCodexPath = Progression.MechanicCodex.FilePathOverrideForTests;
+            Progression.MechanicCodex.FilePathOverrideForTests = Path.Combine(_dir, "codex-engage.json");
+            Progression.MechanicCodex.Reload();
+            Progression.MechanicCodex.ResetContentForTests();
+            List<string> garrisonTypes = GarrisonEnemyTypes("silent").Take(Math.Max(1, garrison)).ToList();
+            bool lockedBefore = garrisonTypes.Count > 0 && garrisonTypes.All(x => !Progression.MechanicCodex.IsUnlocked(Progression.MechanicCodex.EnemyEntryId(x)));
             int m = Spawn(s, Toward(s, at, 10f));
             bool engaged = RunUntil(() => o.Engaged, GameClock.StepHz * 8);
+            bool unlockedAfter = garrisonTypes.Count > 0 && garrisonTypes.All(x => Progression.MechanicCodex.IsUnlocked(Progression.MechanicCodex.EnemyEntryId(x)));
+            bool factionAfter = garrisonTypes.All(x => !EnemyDefs.TryGet(x, out GameConfig.fg.MechEnemy row) || string.IsNullOrEmpty(row.Faction)
+                                                        || Progression.MechanicCodex.IsUnlocked(Progression.MechanicCodex.FactionEntryId(row.Faction)));
+            Progression.MechanicCodex.FilePathOverrideForTests = originalCodexPath;
+            Progression.MechanicCodex.Reload();
+            Progression.MechanicCodex.ResetContentForTests();
+            Expect(lockedBefore && engaged && unlockedAfter && factionAfter,
+                $"C1b（FG9-UX-01 复审 P1，FGT-FAC-008）据点驻军迎战展开 = 首次遭遇：展开前 {string.Join("、", garrisonTypes)} 都是剪影（{lockedBefore}），" +
+                $"展开后敌人条目全部解锁（{unlockedAfter}）、所属阵营条目解锁（{factionAfter}）——不用把光标停在它们身上");
             CombatSite site = WorldSimulation.Home.Combat;
             int inKernel = engaged ? site.CountSiegeGroup(o.EngageKey) : 0;
             bool keyOk = o.EngageKey >= TerritoryControlService.KeyBase;

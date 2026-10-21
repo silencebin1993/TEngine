@@ -980,6 +980,7 @@ namespace GameLogic.Campaign.Regions
                 Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ExpeditionMarchTerritory, center,
                     GameText.Format("exp.cue.territory_detail", GameText.Get(inside.NameKey), tpl != null ? GameText.Get(tpl.IntroKey) : string.Empty));
                 GuidanceHooks.Raise(GuidanceHooks.WorldFirstTerritoryEntered);
+                Progression.MechanicCodex.OnTerritoryEntered(territory); // FG9-UX-01：第一次进入领地解锁区域 / 阵营条目
             }
             m.TerritoryId = territory;
 

@@ -1070,6 +1070,9 @@ namespace GameLogic.Campaign.WorldSim
                         {
                             site.SetSiegeUnitMode(unit, CombatSiegeMode.Skirmish);
                             placed++;
+                            // FG9-UX-01（FGR-FAC-005 / FGT-FAC-008）：据点驻军 / 巡逻在己方机器面前展开迎战 = 遭遇（与攻城展开、拦截展开同口径）。
+                            // 这些单位走具名目标耐久，战斗事件里查不到敌人记录，所以在展开这一刻解锁。本局去重 O(1)。
+                            Progression.MechanicCodex.OnEnemyEncountered(def?.EnemyTypeId);
                         }
                         else
                         {

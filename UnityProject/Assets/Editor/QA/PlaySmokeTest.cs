@@ -499,6 +499,7 @@ namespace GameLogic.EditorTools
                     case 245: StepMapReopenedByZoom(inStep); break;
                     case 180: StepFwLibOpened(inStep); break;
                     case 181: StepFwLibCodexJumped(inStep); break;
+                    case 184: StepCodexLoreTab(inStep); break;
                     case 182: StepFwLibCodexClosed(inStep); break;
                     case 183: StepFwLibClosed(inStep); break;
                     case 196: StepExposureOpened(inStep); break;
@@ -3193,8 +3194,41 @@ namespace GameLogic.EditorTools
                     r.SendEvent(leave);
                 }
             }
+            // FG9-UX-01：图鉴开着时按资料库键（默认 Alt+J）切到资料库（剧情）页签。
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.OpenLore));
+            Next(184, "鼠标移开，按资料库键（默认 Alt+J）切到图鉴的资料库页签");
+        }
+
+        /// <summary>FG9-UX-01（FGR-UX-050 / 051）：正式版图鉴 16 个页签逐个点开（文字无漏键），资料库页签有本存档的开场资料（按存档），再按 C 关闭。</summary>
+        private static void StepCodexLoreTab(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            UI.Kit.MechanicCodexPanelUIToolkit codex = UI.Kit.MechanicCodexPanelUIToolkit.Instance;
+            bool loreTab = UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && codex != null && codex.CurrentTab == Progression.MechanicCodex.TabLore;
+            int loreOpen = Progression.MechanicCodex.UnlockedCountIn(Progression.MechanicCodex.TabLore);
+            string loreBody = codex?.EntryBodyText ?? string.Empty;
+            Check(loreTab && loreOpen >= 1 && loreBody.Length > 0,
+                $"资料库键打开到资料库页签：本存档已收到 {loreOpen}/{Progression.MechanicCodex.CountIn(Progression.MechanicCodex.TabLore)} 条，选中“{codex?.EntryTitleText}”");
+            CheckNoTextMarkers("图鉴资料库页签");
+            var bad = new System.Collections.Generic.List<string>();
+            for (int i = 0; codex != null && i < Progression.MechanicCodex.Tabs.Length; i++)
+            {
+                string tab = Progression.MechanicCodex.Tabs[i];
+                InvokeClickable(codex.TabButton(i));
+                codex.Refresh();
+                if (codex.CurrentTab != tab || codex.ItemCount != Progression.MechanicCodex.CountIn(tab) || codex.ItemCount == 0 || codex.EntryTitleText.Length == 0)
+                {
+                    bad.Add($"{tab}（{codex.CurrentTab}，{codex.ItemCount} 条）");
+                }
+            }
+            Check(codex != null && Progression.MechanicCodex.Tabs.Length == 16 && bad.Count == 0,
+                $"图鉴 16 个页签逐个点开，每页都有条目并选中一条{(bad.Count == 0 ? string.Empty : "：" + string.Join("、", bad))}");
+            CheckNoTextMarkers("图鉴各页签");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.OpenCodex));
-            Next(182, "鼠标移开，再按 C 关闭图鉴");
+            Next(182, "再按 C 关闭图鉴");
         }
 
         private static void StepFwLibCodexClosed(double inStep)
@@ -5159,19 +5193,22 @@ namespace GameLogic.EditorTools
             Camera cam = WorldView.Camera != null ? WorldView.Camera : Camera.main;
             int unit = 0;
             string tagName = null;
+            string enemyType = null;
             if (site != null && !site.IsDisposed)
             {
                 foreach (RegionEnemyRecord e in CampaignSession.Current?.RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
                 {
-                    if (e == null || !e.IsAlive || !site.TryGetEnemyUnit(e.EnemyInstanceId, out int u))
+                    if (e == null || !e.IsAlive || !site.TryGetEnemyUnit(e.EnemyInstanceId, out int u)
+                        || site.UnitHasFlag(u, BinGames.Sim.Combat.CombatUnitFlags.Stealthed) || !site.UnitHasFlag(u, BinGames.Sim.Combat.CombatUnitFlags.Targetable))
                     {
-                        continue;
+                        continue; // FG9-UX-01：潜伏 / 不可选中的敌人看不见，悬停不弹（StatusTagHover.PickAt）
                     }
                     List<(string Glyph, string Name, float Seconds, int Stacks)> tags = Campaign.Combat.StatusTagHover.Describe(site.Kernel, u);
                     if (tags != null && tags.Count > 0)
                     {
                         unit = u;
                         tagName = tags[0].Name;
+                        enemyType = site.EnemyTypeOf(CampaignSession.Current, e.EnemyInstanceId);
                         break;
                     }
                 }
@@ -5181,15 +5218,21 @@ namespace GameLogic.EditorTools
                 Vector3 screen = cam.WorldToScreenPoint(new Vector3((float)view.Position.x, 0f, (float)view.Position.y));
                 InputRouter.DebugSetReader(new ScriptedReader { Mouse = screen });
             }
+            // FG9-UX-01（FGR-UX-030 / 051）：停在敌人身上弹的是敌人悬停读数——标题是敌人名字，正文含职能 / 弱点 + 身上每个标签一行（剩余时间与叠层），
+            // 按图鉴键跳到该敌人的图鉴条目；不是敌人（或表里没有名字）时仍是“状态标签”读数。
+            string expectTitle = (enemyType != null ? Campaign.Content.EnemyDefs.NameOf(enemyType) : null) ?? Localization.GameText.Get("tag.hover.title");
+            string expectCodex = enemyType != null ? Progression.MechanicCodex.EnemyEntryId(enemyType) : null;
             bool shown = UiTooltip.IsVisible && UiTooltip.HoveringWorld && UiTooltip.Content != null && tagName != null
-                         && UiTooltip.Content.Body.Contains(tagName) && UiTooltip.Content.Title == Localization.GameText.Get("tag.hover.title");
+                         && UiTooltip.Content.Body.Contains(tagName) && UiTooltip.Content.Title == expectTitle
+                         && expectCodex != null && UiTooltip.Content.CodexEntryId == expectCodex
+                         && Progression.MechanicCodex.IsUnlocked(expectCodex); // 光标停在敌人身上 = 看到它，首次遭遇即解锁
             if (!shown && inStep < 8)
             {
                 return;
             }
             int icons = site?.Renderer?.LastIconInstances ?? -1;
             bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
-            Write($"  - 状态标签：光标下单位 {unit}（{tagName}），头顶图标实例 {icons}，悬停读数“{UiTooltip.Content?.Body?.Replace('\n', '/')}”");
+            Write($"  - 状态标签：光标下单位 {unit}（{tagName}，敌人 {enemyType}），头顶图标实例 {icons}，悬停读数“{UiTooltip.Content?.Title}｜{UiTooltip.Content?.Body?.Replace('\n', '/')}”（图鉴 {UiTooltip.Content?.CodexEntryId}）");
             Check(site != null && site.Kernel.ReactionRuleCount == Campaign.Content.NamedReactionCatalog.TagRules.Count && site.Kernel.ReactionRuleCount == 16,
                 $"破碎都市的地点内核登记了 {site?.Kernel.ReactionRuleCount} 条具名标签反应规则（fg.TbReaction）");
             Check(GameSettings.HasSeenGuidanceHook(GuidanceHooks.StatusTagFirstSeen), "第一次看到头顶状态标签时发出引导钩子（内容在 FG15-UX-04）");
@@ -5226,7 +5269,7 @@ namespace GameLogic.EditorTools
             bool spClosed = ClickUitk("[StatsPanelHost]", "StatsPanelClose") && !UI.Kit.StatsPanelUIToolkit.IsOpen;
             Check(spAll && spExp && spClosed, $"真实 Play：统计面板“战斗 · 反应伤害归因”列出累计（“{spRow1}”）与这一场“{sessTitle}”的明细，“远征”筛选下仍在，点关闭收起");
             Check(unit != 0 && icons > 0 && shown,
-                $"真实 Play：带标签的敌人头顶画出图标（{icons} 个{(gpu ? "" : "，无 GPU 只备缓冲")}），光标停上去弹出悬停读数（{tagName}，含剩余时间与叠层）");
+                $"真实 Play：带标签的敌人头顶画出图标（{icons} 个{(gpu ? "" : "，无 GPU 只备缓冲")}），光标停上去弹出悬停读数（{expectTitle}：{tagName}，含剩余时间与叠层，图鉴键跳 {expectCodex}，该条已解锁）");
             InputRouter.DebugSetReader(new ScriptedReader { Mouse = OffScreen });
             PressKeyOffScreen(GameSettings.KeyBindings.GetKey(GameActionId.OpenSignalCore));
             Next(155, "FG1-SIG-01：远征途中按信号核键");

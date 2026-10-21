@@ -188,6 +188,11 @@ namespace GameLogic.Campaign.Content
                 Num(row.CycleSeconds), Num(row.EffectRange), Num(row.FrontalDamageReduction * 100f), Num(row.WeaponAim), Num(row.EffectAmount));
         }
 
+        /// <summary>FG9-UX-01：图鉴 / 内容目录用的描述（表 descKey；{0}=效果持续秒 effectSeconds（如断链束照射秒数） {1}=效果半径 {2}=周期秒 {3}=正面减伤% {4}=效果量）。</summary>
+        public static string DescText(MechEnemy row) =>
+            row == null ? string.Empty : GameText.Format(row.DescKey,
+                Num(row.EffectSeconds), Num(row.EffectRange), Num(row.CycleSeconds), Num(row.FrontalDamageReduction * 100f), Num(row.EffectAmount));
+
         private static string Num(float v) => v.ToString("0.##", CultureInfo.InvariantCulture);
 
         // ── 编成（fg.TbEnemyEncounter）──
@@ -492,7 +497,7 @@ namespace GameLogic.Campaign.Content
                 Id = row.Id,
                 Category = MechanicalContentCategory.Enemy,
                 DisplayName = GameText.Get(row.NameKey),
-                Description = GameText.Get(row.DescKey),
+                Description = DescText(row), // FG9-UX-01：描述里的占位符（例如断链束秒数）按表填上，不再漏出 {0}
                 Source = MechanicalContentSource.RegionEncounter,
                 SourceDetail = GameText.Get(row.WeaknessKey),
                 Slot = row.Role,

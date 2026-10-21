@@ -68,6 +68,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
         ChargeSpeed = _buf.ReadFloat();
         TurnRate = _buf.ReadFloat();
         MaxPlaced = _buf.ReadFloat();
+        CodexLinks = _buf.ReadString();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -271,6 +272,10 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 布雷:同时最多几颗雷(整数);0=不布雷
     /// </summary>
     public readonly float MaxPlaced;
+    /// <summary>
+    /// FG9-UX-01 图鉴互链:逗号分隔的图鉴条目ID(reaction:/comp:/fw:/enemy:/codex.*),敌人 ↔ 弱点相关的反应 / 组件 / 机制;none=只链阵营
+    /// </summary>
+    public readonly string CodexLinks;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -331,6 +336,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "chargeSpeed:" + ChargeSpeed + ","
         + "turnRate:" + TurnRate + ","
         + "maxPlaced:" + MaxPlaced + ","
+        + "codexLinks:" + CodexLinks + ","
         + "}";
     }
 }

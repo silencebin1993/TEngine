@@ -822,6 +822,7 @@ namespace GameLogic.Campaign.Signal
         public static int OnCampaignEntered(CampaignState s)
         {
             Install();
+            MechanicCodex.OnCampaignChanged(); // FG9-UX-01：本局遭遇去重按战役清空（跨存档的解锁仍在图鉴文件里）
             return SyncCodex(s);
         }
 
@@ -850,6 +851,7 @@ namespace GameLogic.Campaign.Signal
                     n++;
                 }
             }
+            n += MechanicCodex.SyncContent(s); // FG9-UX-01：组件 / 底盘 / 建筑 / 状态标签 / 危害 / 已击毁的敌人
             return n;
         }
 

@@ -383,6 +383,15 @@ namespace GameLogic.Campaign.Env
                     continue;
                 }
                 st.HazardsSeen = Append(st.HazardsSeen, h.Id);
+                // FG9-UX-01：第一次发现这种危害解锁事件条目；开局 / 旧档的静默补登只解锁、不发“图鉴新增”通知（与本处的危害通知同口径）。
+                if (notify)
+                {
+                    Progression.MechanicCodex.OnHazardSeen(h.Id);
+                }
+                else
+                {
+                    Progression.MechanicCodex.Unlock(Progression.MechanicCodex.HazardEntryId(h.Id));
+                }
                 Revision++;
                 if (!notify)
                 {

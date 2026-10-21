@@ -227,7 +227,7 @@ namespace GameLogic.UI.Kit
             }
             if (IsVisible && _content != null)
             {
-                return _content.CodexEntryId;
+                return CodexIdOf(_content);
             }
             if (_hoverTarget == null)
             {
@@ -235,9 +235,26 @@ namespace GameLogic.UI.Kit
             }
             if (_hoverTarget == _worldProxy)
             {
-                return _worldProvider?.Invoke()?.CodexEntryId;
+                return CodexIdOf(_worldProvider?.Invoke());
             }
-            return Bindings.TryGetValue(_hoverTarget, out Binding b) ? b.Provider?.Invoke()?.CodexEntryId : null;
+            return Bindings.TryGetValue(_hoverTarget, out Binding b) ? CodexIdOf(b.Provider?.Invoke()) : null;
+        }
+
+        /// <summary>
+        /// FG9-UX-01（FGR-UX-051“从任何悬停提示按一个键就能跳到对应条目”）：提示的图鉴条目——显式写了 <see cref="TooltipContent.CodexEntryId"/> 就用它；
+        /// 没写、也没有只给文字的 <see cref="TooltipContent.CodexEntry"/> 时，按标题找同名图鉴条目（建筑、物品、组件、敌人、状态标签……的提示标题就是名字）。找不到为 null。
+        /// </summary>
+        public static string CodexIdOf(TooltipContent c)
+        {
+            if (c == null)
+            {
+                return null;
+            }
+            if (!string.IsNullOrEmpty(c.CodexEntryId))
+            {
+                return c.CodexEntryId;
+            }
+            return string.IsNullOrEmpty(c.CodexEntry) ? Progression.MechanicCodex.ResolveTitle(c.Title) : null;
         }
 
         public static int WorldKey => _worldKey;
@@ -423,8 +440,9 @@ namespace GameLogic.UI.Kit
             SetText(_shortcut, _content.Shortcut.HasValue
                 ? GameText.Format("ui.common.shortcut", InputDisplay.ForAction(_content.Shortcut.Value))
                 : null);
-            SetText(_codex, !string.IsNullOrEmpty(_content.CodexEntryId)
-                ? GameText.Format("ui.common.codex_jump", InputDisplay.ForAction(GameActionId.OpenCodex), CodexHoverLink.EntryTitle(_content.CodexEntryId))
+            string codexId = CodexIdOf(_content);
+            SetText(_codex, !string.IsNullOrEmpty(codexId)
+                ? GameText.Format("ui.common.codex_jump", InputDisplay.ForAction(GameActionId.OpenCodex), CodexHoverLink.EntryTitle(codexId))
                 : string.IsNullOrEmpty(_content.CodexEntry) ? null : GameText.Format("ui.common.codex_link", _content.CodexEntry));
             string pinKey = InputDisplay.ForAction(GameActionId.PinTooltip);
             SetText(_pinHint, IsPinned ? GameText.Format("ui.tooltip.pinned", pinKey) : GameText.Format("ui.tooltip.pin_hint", pinKey));

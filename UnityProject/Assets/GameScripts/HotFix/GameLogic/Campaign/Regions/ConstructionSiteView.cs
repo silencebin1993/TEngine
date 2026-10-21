@@ -531,7 +531,10 @@ namespace GameLogic.Campaign.Regions
                 Title = HomeGridService.DisplayName(b.BuildingTypeId),
                 Body = body,
                 Shortcut = diag ? GameActionId.OpenDiagnosis : GameActionId.OpenPowerGrid,
-                CodexEntryId = diag ? "codex.logistics.diagnosis" : "codex.logistics.power",
+                // FG9-UX-01（复审 P2，FGR-UX-051）：标题是建筑名，图鉴键跳到该建筑的条目（条目的相关条目里有电网 / “为什么不工作”说明）；没有条目时回落到系统说明。
+                CodexEntryId = Progression.MechanicCodex.Find(Progression.MechanicCodex.BuildingEntryId(b.BuildingTypeId)) != null
+                    ? Progression.MechanicCodex.BuildingEntryId(b.BuildingTypeId)
+                    : diag ? "codex.logistics.diagnosis" : "codex.logistics.power",
             };
         }
         private bool _hoveringPipe;

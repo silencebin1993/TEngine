@@ -600,6 +600,7 @@ namespace GameLogic.Campaign.Env
             NotificationCenter.Post("weather", GameText.Format("env.weather.start_detail", GlyphOf(f.Kind) + " " + NameOf(f.Kind), GameClock.FormatDayTime(f.EndTick / hz),
                 EffectText(f.Kind)), CoreAt(state));
             GuidanceHooks.Raise(GuidanceHooks.EnvFirstWeather);
+            Progression.MechanicCodex.OnWeatherStarted(f.Kind); // FG9-UX-01：第一次经历这种天气解锁事件条目
             Revision++;
             GameEvent.Send(ChangedEvent, f.Kind);
         }

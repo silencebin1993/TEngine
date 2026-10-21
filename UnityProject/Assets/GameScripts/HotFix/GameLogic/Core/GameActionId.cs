@@ -162,5 +162,7 @@
         OpenOutposts = 127,
         /// <summary>FG8-QST-01（FGR-QST-003“追踪中的任务……可以一键让镜头飞过去”）：镜头依次飞到追踪栏里的任务（战略上下文，默认 Alt+Q）。与追踪栏 / 任务日志的“飞过去”按钮同一入口。</summary>
         FocusQuest = 128,
+        /// <summary>FG9-UX-01（DEBT-FG9NAR01-04“资料库快捷键”，FG00 B02）：打开 / 关闭图鉴的资料库（剧情）页签（全部上下文，默认 Alt+J）。</summary>
+        OpenLore = 129,
     }
 }

@@ -167,14 +167,18 @@ namespace GameLogic.UI.Kit
                     SetOpen(false); // 点遮罩 = 关闭（与暂停菜单一致）。
                 }
             });
+            // FG9-UX-01：页签按钮按 MechanicCodex.Tabs 的顺序取（UXML 里每页一个按钮，名字 = CodexTab + 页签 ID 首字母大写；缺按钮时记错误，不静默少一页）。
             _tabButtons.Clear();
-            _tabButtons.Add(root.Q<Button>("CodexTabSystem"));
-            _tabButtons.Add(root.Q<Button>("CodexTabFirmware"));
-            _tabButtons.Add(root.Q<Button>("CodexTabReaction"));
-            _tabButtons.Add(root.Q<Button>("CodexTabItem")); // FG4-ECO-01
-            _tabButtons.Add(root.Q<Button>("CodexTabRecipe"));
-            _tabButtons.Add(root.Q<Button>("CodexTabResearch")); // FG5-RND-01
-            _tabButtons.Add(root.Q<Button>("CodexTabHeritage")); // FG8-EXP-04：人类遗产（收集页）
+            foreach (string t in MechanicCodex.Tabs)
+            {
+                Button b = root.Q<Button>(TabButtonName(t));
+                if (b == null)
+                {
+                    TEngine.Log.Error($"[MechanicCodexPanel] UXML 缺页签按钮 {TabButtonName(t)}");
+                    b = new Button();
+                }
+                _tabButtons.Add(b);
+            }
             _tabs = new UiTabs(_tabButtons, i => SelectTab(MechanicCodex.Tabs[i]));
             _search = new UiSearchBox(root.Q<TextField>("CodexSearch"), root.Q<Label>("CodexSearchPlaceholder"), root.Q<Button>("CodexSearchClear"),
                 "codex.panel.search", SetSearch);
@@ -274,7 +278,9 @@ namespace GameLogic.UI.Kit
             {
                 return;
             }
-            int key = System.HashCode.Combine(MechanicCodex.Revision, _selectedId, _tab, _searchText, (int)GameText.Language, GameSettings.Revision);
+            // FG9-UX-01：资料库页签按存档——资料库版本与“当前是哪份存档”也在键里（换存档 / 收到新资料时重建）。
+            int key = System.HashCode.Combine(MechanicCodex.Revision, _selectedId, _tab, _searchText, (int)GameText.Language, GameSettings.Revision,
+                Narrative.NarrativeService.Revision, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(CampaignSession.Current));
             if (key == _key)
             {
                 return;
@@ -288,7 +294,7 @@ namespace GameLogic.UI.Kit
             for (int i = 0; i < _tabButtons.Count && i < MechanicCodex.Tabs.Length; i++)
             {
                 string t = MechanicCodex.Tabs[i];
-                _tabButtons[i].text = GameText.Get(TabTextKey(t)) + "  " + MechanicCodex.UnlockedCountIn(t) + "/" + MechanicCodex.CountIn(t);
+                _tabButtons[i].text = GameText.Get(MechanicCodex.TabTitleKey(t)) + "  " + MechanicCodex.UnlockedCountIn(t) + "/" + MechanicCodex.CountIn(t);
                 _tabButtons[i].EnableInClassList("uk-tab-selected", t == _tab);
             }
             string error = MechanicCodex.LoadError;
@@ -349,6 +355,10 @@ namespace GameLogic.UI.Kit
                 return;
             }
             bool open = MechanicCodex.IsUnlocked(sel.Id);
+            if (open && sel.Kind == MechanicCodexKind.Lore && state != null)
+            {
+                Narrative.NarrativeService.MarkRead(state, sel.ContentId); // 在图鉴里读过 = 资料库里也算读过（同一份存档记录）
+            }
             _entryIcon.EnableInClassList("cx-silhouette", !open);
             _entryTitle.text = open ? MechanicCodex.Title(sel) : GameText.Get("codex.panel.locked_title");
             _entryBody.text = InputDisplay.ExpandActionTokens(open ? MechanicCodex.Body(sel, state) : MechanicCodex.Hint(sel, state));
@@ -373,17 +383,36 @@ namespace GameLogic.UI.Kit
             }
         }
 
-        /// <summary>页签名的文本键（写全键名，文本键扫描能核对到）。</summary>
-        private static string TabTextKey(string tab) => tab switch
+        /// <summary>页签按钮在 UXML 里的名字（CodexTab + 页签 ID 首字母大写）。</summary>
+        public static string TabButtonName(string tab) =>
+            string.IsNullOrEmpty(tab) ? "CodexTab" : "CodexTab" + char.ToUpperInvariant(tab[0]) + tab.Substring(1);
+
+        /// <summary>FG9-UX-01（DEBT-FG9NAR01-04“资料库快捷键”）：资料库键（默认 Alt+J，可重绑）——图鉴开着且停在资料库页签时关闭，否则打开到资料库页签。</summary>
+        public static void ToggleLore()
         {
-            MechanicCodex.TabFirmware => "codex.tab.firmware",
-            MechanicCodex.TabReaction => "codex.tab.reaction",
-            MechanicCodex.TabItem => "codex.tab.item",
-            MechanicCodex.TabRecipe => "codex.tab.recipe",
-            MechanicCodex.TabResearch => "codex.tab.research", // FG5-RND-01
-            MechanicCodex.TabHeritage => "codex.tab.heritage", // FG8-EXP-04
-            _ => "codex.tab.system",
-        };
+            if (IsOpen && Instance != null && Instance._tab == MechanicCodex.TabLore)
+            {
+                Close();
+                return;
+            }
+            OpenTab(MechanicCodex.TabLore);
+        }
+
+        /// <summary>打开图鉴并切到某页签（选该页第一条已解锁的）。</summary>
+        public static void OpenTab(string tab)
+        {
+            if (Instance == null || Instance._root == null)
+            {
+                MechanicCodex.Open(null, unlock: false);
+                if (Instance != null)
+                {
+                    Instance._tab = tab;
+                }
+                return;
+            }
+            Instance.OpenAt(null);
+            Instance.SelectTab(tab);
+        }
 
         /// <summary>选中一条（可以跨页签：相关条目跳到另一页签时同时切换页签并清掉搜索）。</summary>
         public void Select(string id)

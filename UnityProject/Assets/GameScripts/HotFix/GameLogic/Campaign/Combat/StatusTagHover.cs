@@ -25,6 +25,8 @@ namespace GameLogic.Campaign.Combat
 
         private static CombatSite _hoveredSite;
         private static int _hoveredUnit;
+        /// <summary>FG9-UX-01：当前悬停的是敌人时它的类型 ID（悬停读数写名字 / 弱点，按图鉴键跳到敌人条目）；不是敌人为 null。</summary>
+        private static string _hoveredEnemyType;
 
         // 每帧不分配：提示内容的来源是一个缓存的委托（读当前悬停的地点 / 单位），拼文字复用同一组缓冲。
         private static readonly System.Func<TooltipContent> Provider = ProvideHovered;
@@ -44,22 +46,111 @@ namespace GameLogic.Campaign.Combat
             Vector3 screen = InputRouter.Reader.MousePosition;
             if (!InputRouter.IsUiPointerBlocked() && TryScreenToGround(camera, screen, out Vector2 ground))
             {
-                unit = site.Kernel.PickUnit(new double2(ground.x, ground.y), PickRadius, true);
+                unit = PickAt(site, new double2(ground.x, ground.y));
             }
+            HoverPicked(site, unit, new Vector2(screen.x, screen.y));
+        }
+
+        /// <summary>
+        /// 光标所在地面点下要弹悬停读数的单位：先找带标签的；没有就找没标签的敌人（FG9-UX-01，FGR-UX-030 / 051；FGR-FAC-005：名字 / 职能 / 弱点 + 图鉴链接；
+        /// 己方没标签的单位照旧不弹）。潜伏中 / 不可选中的敌人（静默潜伏、藏身的首领本体）看不见，不弹、不算遭遇。没有返回 0。
+        /// </summary>
+        public static int PickAt(CombatSite site, double2 at)
+        {
+            if (site == null || site.IsDisposed)
+            {
+                return 0;
+            }
+            int unit = site.Kernel.PickUnit(at, PickRadius, true, true);
+            if (unit != 0)
+            {
+                return unit;
+            }
+            int any = site.Kernel.PickUnit(at, PickRadius, false, true);
+            return any != 0 && site.TryGetEnemyOfUnit(any, out _) ? any : 0;
+        }
+
+        /// <summary>自检：光标停在地面点 <paramref name="at"/> 上（与 <see cref="Tick"/> 同一套拾取与开始悬停，跳过相机换算）。返回悬停到的单位（0 = 没有）。</summary>
+        public static int HoverGroundForTests(CombatSite site, double2 at)
+        {
+            int unit = PickAt(site, at);
+            HoverPicked(site, unit, Vector2.zero);
+            return unit;
+        }
+
+        private static void HoverPicked(CombatSite site, int unit, Vector2 screen)
+        {
             if (unit == 0)
             {
                 Leave(site);
                 return;
             }
+            if (unit != _hoveredUnit || site != _hoveredSite)
+            {
+                OnHoverStarted(site, unit);
+            }
             _hoveredSite = site;
             _hoveredUnit = unit;
-            UiTooltip.HoverWorld(unit, new Vector2(screen.x, screen.y), Provider);
+            UiTooltip.HoverWorld(unit, screen, Provider);
         }
+
+        /// <summary>自检：当前悬停读数（没有悬停返回 null）。</summary>
+        public static TooltipContent HoveredContentForTests() => ProvideHovered();
 
         private static TooltipContent ProvideHovered()
         {
             CombatSite site = _hoveredSite;
-            return site == null || site.IsDisposed || _hoveredUnit == 0 ? null : BuildContent(site.Kernel, _hoveredUnit);
+            if (site == null || site.IsDisposed || _hoveredUnit == 0)
+            {
+                return null;
+            }
+            TooltipContent tags = BuildContent(site.Kernel, _hoveredUnit);
+            return _hoveredEnemyType != null ? EnemyContent(_hoveredEnemyType, tags) : tags;
+        }
+
+        /// <summary>
+        /// FG9-UX-01：开始悬停一个单位（换目标时一次，不按帧）：光标停在敌人身上 = 在战场上看到它，解锁敌人图鉴条目（首次遭遇）；
+        /// 单位身上的状态标签解锁对应的状态标签条目。
+        /// </summary>
+        private static void OnHoverStarted(CombatSite site, int unit)
+        {
+            _hoveredEnemyType = null;
+            if (site.TryGetEnemyOfUnit(unit, out string instanceId))
+            {
+                _hoveredEnemyType = site.EnemyTypeOf(CampaignSession.Current, instanceId);
+                Progression.MechanicCodex.OnEnemyEncountered(_hoveredEnemyType);
+            }
+            if (site.Kernel.TryGetStatus(unit, out uint mask, out _, out _, out _, out _))
+            {
+                uint bits = mask & ~CombatConst.StatusBitZoneSlow;
+                for (int b = 0; b < 31; b++)
+                {
+                    if ((bits & (1u << b)) != 0u)
+                    {
+                        Progression.MechanicCodex.OnStatusSeen(NamedReactionCatalog.TagOfBit(b));
+                    }
+                }
+            }
+        }
+
+        /// <summary>敌人的悬停读数：名字为标题；职能、弱点（已解锁时；没解锁只写“按图鉴键查看”）+ 身上的标签；图鉴键跳到敌人条目。</summary>
+        public static TooltipContent EnemyContent(string enemyTypeId, TooltipContent tags)
+        {
+            string id = Progression.MechanicCodex.EnemyEntryId(enemyTypeId);
+            var sb = new StringBuilder();
+            if (EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy row))
+            {
+                sb.Append(GameText.Format("codex.label.role", GameText.Get("enemy.role." + row.Role), GameText.Get("enemy.tier." + row.Tier)));
+                if (Progression.MechanicCodex.IsUnlocked(id))
+                {
+                    sb.Append('\n').Append(GameText.Format("codex.label.weakness", GameText.Get(row.WeaknessKey)));
+                }
+            }
+            if (tags != null && !string.IsNullOrEmpty(tags.Body))
+            {
+                sb.Append('\n').Append(tags.Body);
+            }
+            return new TooltipContent { Title = EnemyDefs.NameOf(enemyTypeId) ?? GameText.Get("tag.hover.title"), Body = sb.ToString(), CodexEntryId = id };
         }
 
         /// <summary>离开（光标移开 / 地点不再被观察）。</summary>
@@ -69,6 +160,7 @@ namespace GameLogic.Campaign.Combat
             {
                 _hoveredUnit = 0;
                 _hoveredSite = null;
+                _hoveredEnemyType = null;
                 UiTooltip.LeaveWorld();
             }
         }
@@ -95,7 +187,26 @@ namespace GameLogic.Campaign.Combat
             {
                 sb.Append('\n').Append(GameText.Format("tag.hover.more", (lines.Count - CombatRenderer.MaxIconsPerUnit).ToString(CultureInfo.InvariantCulture)));
             }
-            return new TooltipContent { Title = GameText.Get("tag.hover.title"), Body = sb.ToString() };
+            // FG9-UX-01：按图鉴键跳到第一个标签的状态标签条目。
+            return new TooltipContent { Title = GameText.Get("tag.hover.title"), Body = sb.ToString(), CodexEntryId = FirstTagEntry(kernel, unitId) };
+        }
+
+        private static string FirstTagEntry(CombatKernel kernel, int unitId)
+        {
+            if (!kernel.TryGetStatus(unitId, out uint mask, out _, out _, out _, out _))
+            {
+                return null;
+            }
+            uint bits = mask & ~CombatConst.StatusBitZoneSlow;
+            for (int b = 0; b < 31; b++)
+            {
+                string tag = (bits & (1u << b)) != 0u ? NamedReactionCatalog.TagOfBit(b) : null;
+                if (tag != null && StatusTagCatalog.IsStatus(tag))
+                {
+                    return Progression.MechanicCodex.StatusEntryId(tag);
+                }
+            }
+            return null;
         }
 
         /// <summary>一个单位此刻身上的状态标签（按内核位序，与头顶图标同序）：形状、名称、剩余游戏秒、叠层。自检直接断言。</summary>

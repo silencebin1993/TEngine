@@ -358,6 +358,7 @@ namespace GameLogic.UI.Kit
                     TerritoryTemplate tpl = plan.TemplateFor(territory);
                     Show(GameText.Format("ui.territory.banner.enter", GameText.Get(t.NameKey)), tpl != null ? GameText.Get(tpl.IntroKey) : string.Empty);
                     GuidanceHooks.Raise(GuidanceHooks.WorldFirstTerritoryEntered);
+                    Progression.MechanicCodex.OnTerritoryEntered(territory); // FG9-UX-01：第一次进入领地解锁区域 / 阵营条目
                 }
                 else if (_lastTerritory != null)
                 {

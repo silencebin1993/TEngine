@@ -1328,7 +1328,8 @@ namespace GameLogic.UI.CircuitBoard
             {
                 body += "\n" + Localization.GameText.Get(turretKey);
             }
-            return new TooltipContent { Title = def.DisplayName, Body = body };
+            // FG9-UX-01（FGR-UX-051）：悬停主组件按图鉴键跳到组件条目。
+            return new TooltipContent { Title = def.DisplayName, Body = body, CodexEntryId = Progression.MechanicCodex.ComponentEntryId(def.Id) };
         }
 
         private void RefreshHistoryLabel()
