@@ -91,6 +91,10 @@ public partial class Tables
     /// </summary>
     public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
     /// <summary>
+    /// 第一幕节奏
+    /// </summary>
+    public fg.TbActPacing TbActPacing {get; }
+    /// <summary>
     /// 解析种类
     /// </summary>
     public fg.TbAnalysisKind TbAnalysisKind {get; }
@@ -379,6 +383,10 @@ public partial class Tables
     /// </summary>
     public fg.TbSiegeUnit TbSiegeUnit {get; }
     /// <summary>
+    /// 地点生成内容
+    /// </summary>
+    public fg.TbSiteGen TbSiteGen {get; }
+    /// <summary>
     /// 地点点位
     /// </summary>
     public fg.TbSitePoint TbSitePoint {get; }
@@ -521,6 +529,7 @@ public partial class Tables
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
+        TbActPacing = new fg.TbActPacing(loader("fg_tbactpacing"));
         TbAnalysisKind = new fg.TbAnalysisKind(loader("fg_tbanalysiskind"));
         TbAnalysisLore = new fg.TbAnalysisLore(loader("fg_tbanalysislore"));
         TbAnchorSite = new fg.TbAnchorSite(loader("fg_tbanchorsite"));
@@ -593,6 +602,7 @@ public partial class Tables
         TbSiegeRole = new fg.TbSiegeRole(loader("fg_tbsiegerole"));
         TbSiegeTarget = new fg.TbSiegeTarget(loader("fg_tbsiegetarget"));
         TbSiegeUnit = new fg.TbSiegeUnit(loader("fg_tbsiegeunit"));
+        TbSiteGen = new fg.TbSiteGen(loader("fg_tbsitegen"));
         TbSitePoint = new fg.TbSitePoint(loader("fg_tbsitepoint"));
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
@@ -648,6 +658,7 @@ public partial class Tables
         TbStatusEffect.ResolveRef(this);
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
+        TbActPacing.ResolveRef(this);
         TbAnalysisKind.ResolveRef(this);
         TbAnalysisLore.ResolveRef(this);
         TbAnchorSite.ResolveRef(this);
@@ -720,6 +731,7 @@ public partial class Tables
         TbSiegeRole.ResolveRef(this);
         TbSiegeTarget.ResolveRef(this);
         TbSiegeUnit.ResolveRef(this);
+        TbSiteGen.ResolveRef(this);
         TbSitePoint.ResolveRef(this);
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);

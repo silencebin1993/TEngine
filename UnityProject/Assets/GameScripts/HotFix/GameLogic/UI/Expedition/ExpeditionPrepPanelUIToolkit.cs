@@ -687,7 +687,9 @@ namespace GameLogic.UI.Expedition
                 _forecastLabel.text = ExpeditionForecast.Describe(ExpeditionForecast.Compute(state, selectedArray, snapshot.Target));
             }
             // FG7-ENV-02（FGR-ENV-013）：“跨过静默夜”现在只写在检查单提醒里（FG8-EXP-01 Opus 返工：不再在预测行重复）。
-            LastSilentCrossText = GameLogic.Campaign.Env.SilentNightService.ExpeditionCrossText(state) ?? string.Empty;
+            // FG9-ACT1-01（DEBT-FG7ENV02-03）：与检查单同一估时（按路线往返 + 地点停留）。
+            LastSilentCrossText = GameLogic.Campaign.Env.SilentNightService.ExpeditionCrossText(state, GameLogic.Campaign.Env.SilentNightService.ExpeditionEstimateSeconds(state,
+                snapshot.Target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId, selectedArray)) ?? string.Empty;
 
             // FG8-EXP-01：派遣检查单。硬约束与出发事务同一份结果（Blocked 即不能派，出发按钮置灰）；提醒可以无视，每条后面写着后果。
             ExpeditionChecklistService.Checklist checklist = ExpeditionChecklistService.Build(state, selectedArray, snapshot, validation, labor, laborDrops);

@@ -206,6 +206,13 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 解析台：数据复原（FG-GAP-050）────────────────────────────────────────────
 
+        /// <summary>FG9-ACT1-01 修复轮：解析面板没打开时写明解析台此刻的状态（施工状态、耐久、通用面板 / 选中），失败报告能看出原因。</summary>
+        internal static string DescribeBench()
+        {
+            BuildingRecord b = Building(HomeValleyLayout.BuildingTypeAnalysisBench);
+            return b == null ? "不存在" : $"{b.BuildingId} {b.ConstructionState} 耐久 {b.Health:F0} 格 ({b.GridX},{b.GridY}) 封锁 {b.BlockedReason}";
+        }
+
         internal static void OpenAnalysis(JourneyContext c) =>
             ClickNamed(c, "Building_" + HomeValleyLayout.BuildingTypeAnalysisBench, 0, () => !GameRoot.HomeValley.IsAnalysisPanelOpen);
 
@@ -218,7 +225,9 @@ namespace GameLogic.EditorTools.JourneyBots
             AnalysisPanelUIToolkit p = AnalysisPanelUIToolkit.Instance;
             if (!GameRoot.HomeValley.IsAnalysisPanelOpen || p == null)
             {
-                return StepOutcome.Retry("点解析台后解析面板没有打开" + (PanNote(c).Length > 0 ? "：" + PanNote(c) : string.Empty));
+                return StepOutcome.Retry("点解析台后解析面板没有打开" + (PanNote(c).Length > 0 ? "：" + PanNote(c) : string.Empty)
+                                         + "（" + FgjM1Journey.InputBlockers() + "；点击：" + FgjM1Journey.UiFail(c) + "；" + JourneyInput.LastUiFailure
+                                         + "；解析台 " + DescribeBench() + "）");
             }
             if (p.RestoreChoiceIds.Count == 0)
             {

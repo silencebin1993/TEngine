@@ -250,8 +250,9 @@ namespace GameLogic.Campaign.Regions
                 }
             }
 
-            // ── 提醒：预计会跨过静默夜（沿用 SilentNightService 的远征估时，固定估时见 DEBT-FG7ENV02-03）──
-            string silent = SilentNightService.ExpeditionCrossText(state);
+            // ── 提醒：预计会跨过静默夜（FG9-ACT1-01 承接 DEBT-FG7ENV02-03：按到目的地锚点的真实路线 × 这支队伍的行军速度估往返 + 地点停留）──
+            string silent = SilentNightService.ExpeditionCrossText(state, SilentNightService.ExpeditionEstimateSeconds(state,
+                snap.Target == ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId, selected));
             if (!string.IsNullOrEmpty(silent))
             {
                 reminders.Add(new Item("silent_night", silent));

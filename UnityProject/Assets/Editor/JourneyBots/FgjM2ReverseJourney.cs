@@ -164,7 +164,9 @@ namespace GameLogic.EditorTools.JourneyBots
                     c => FgjM2Common.TickFcSelection(c, c.GetInt("wetM"), c.GetInt("shockM")), retries: 4),
                 S("r6_attack", "右键点最近的敌人：安全模式的机器照常接令，蓝图里的固件不依赖信号，照样打出短路", 120, BeginFcAttack, TickFcConductWhileSafe, retries: 3),
                 S("r6_sel_out", "左键点电弧机", 20, c => FgjM2Common.ClickFc(c, c.GetInt("shockM"), false), c => FgjM2Common.TickFcSelection(c, c.GetInt("shockM")), retries: 4),
-                S("r6_out", "右键点撤离点附近的地面：驶出干扰场，2 游戏秒后自动退出安全模式", 90, c => JourneyInput.Click(EvacPoint + new Vector2(0f, 1f), button: 1), TickSafeModeRecovered),
+                // FG9-ACT1-01 修复轮：与 FGJ-M1 cmd_out 同一做法——撤离点附近的地面可能在画面外（地点窗口变大后战略镜头的范围跟着变大），像玩家一样先平移镜头再右键；
+                // 并核对右键之后真的接到了移动命令（原来直接点世界坐标，点不到时只会超时）。
+                S("r6_out", "右键点撤离点附近的地面：驶出干扰场，2 游戏秒后自动退出安全模式", 90, null, TickSafeModeRecovered),
             },
         };
 
@@ -525,9 +527,22 @@ namespace GameLogic.EditorTools.JourneyBots
             FgjM2Common.SampleFrame();
             JourneyCommon.ResumeIfAutoPaused(c);
             int b = c.GetInt("shockM");
-            if (c.StepElapsed < 0.8)
+            if (!FgjM3Common.Once(c, "rc", () => FgjM3Common.TryClick(EvacPoint + new Vector2(0f, 1f), 1)))
             {
                 return StepOutcome.Wait;
+            }
+            if (FgjM3Common.SinceMs(c, "rc") < 800)
+            {
+                return StepOutcome.Wait;
+            }
+            CombatSite site = GameRoot.FracturedCity.Combat;
+            if (c.GetInt(FgjM3Common.SK(c, "cmd")) == 0)
+            {
+                c.SetInt(FgjM3Common.SK(c, "cmd"), 1);
+                if (!site.TryGetMachineUnit(b, out int unit) || !site.TryGetCommand(unit, out BinGames.Sim.Combat.CombatCommand cmd) || cmd.Kind != BinGames.Sim.Combat.CombatCommandKind.Move)
+                {
+                    return StepOutcome.Fail($"右键地面后安全模式的 {Label(b)} 没有接到移动命令（{GameRoot.FracturedCity.SquadCommands.RecentEvents.LastOrDefault()}；{JourneyInput.LastUiFailure}）");
+                }
             }
             if (SignalLinkService.IsInSafeMode(St, b))
             {

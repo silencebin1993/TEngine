@@ -1179,6 +1179,9 @@ namespace GameLogic.EditorTools
             CampaignState s = CampaignState.CreateNew("fgtcontrol-" + seed, "Standard", seed);
             WorldGenService.ApplyNewGameWorld(s, seed, WorldSettings.Resolve(version, WorldGenContent.DefaultPresetId));
             CampaignSession.Set(Slot, s);
+            // FG9-ACT1-01：本段测 FG8-EXP-03 的领地据点规则（控制度、增援重建、平定到收复的精确数值），远征地点里的驻军据点（kind = site，同样计入控制度）
+            // 由 FgAct1SelfCheck C2～C8 覆盖；这里记成“已处理”不登记，保持本段的据点集合与数值口径不变。
+            s.World.SiteGarrisonsSeeded = true;
             HomeValleyFactory.EnsureBlueprintsSeeded(s);
             HomeValleyController home = WorldSimulation.LoadHome(resume: false);
             WorldView.Observe(home.SiteId);

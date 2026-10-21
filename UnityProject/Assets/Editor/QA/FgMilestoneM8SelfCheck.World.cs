@@ -1191,7 +1191,8 @@ namespace GameLogic.EditorTools
             bool pacifying = r.Status == TerritoryControlService.StatusPacifying && r.LeaderDefeated && NotifyMembers(TerritoryControlService.NotifyStatus) > status0
                              && LatestDetail(TerritoryControlService.NotifyStatus).Contains(GameText.Get("territory.leader." + tid));
             // ③ 收复：其余据点按正式摧毁入口摧毁到控制度 < 收复线（逐个真实交战已在 ① 证明，夹具省掉重复的战斗）。
-            foreach (OutpostRecord x in WorldOutpostSystem.Outposts(S).Where(x => x.Kind == WorldOutpostSystem.KindTerritory && x.TerritoryId == tid && !x.Destroyed)
+            // FG9-ACT1-01：远征地点里的驻军据点（kind = site）同样计入控制度——按控制度的口径逐个摧毁（CountsForControl）。
+            foreach (OutpostRecord x in WorldOutpostSystem.Outposts(S).Where(x => TerritoryControlService.CountsForControl(x) && x.TerritoryId == tid && !x.Destroyed)
                          .OrderBy(x => x.OutpostId, StringComparer.Ordinal).ToList())
             {
                 if (TerritoryControlService.ComputeControl(S, tid, out _, out _) < TerritoryControlService.ReclaimBelow)

@@ -225,6 +225,8 @@ namespace GameLogic.Campaign
                     return true;
                 case QuestCatalog.UnlockPrereq:
                     return FindQuest(state, q.Prereq)?.State == ObjectiveState.Completed;
+                case QuestCatalog.UnlockPace:
+                    return Act1PacingService.IsGateOpen(state, q.Prereq); // FG9-ACT1-01：传送带指引随传送带 T1 一起出现
                 case QuestCatalog.UnlockTerritoryVisible:
                     PlannedTerritory t = WorldGenService.PlanFor(state)?.Find(q.Territory);
                     if (t == null)

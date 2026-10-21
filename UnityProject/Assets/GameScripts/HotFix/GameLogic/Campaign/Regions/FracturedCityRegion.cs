@@ -177,6 +177,7 @@ namespace GameLogic.Campaign.Regions
             Economy.TestRangeService.NoteEnemyDefeated(state, enemy.EnemyTypeId); // FG5-RND-03（FGR-RND-030）：击败的敌人类型解锁对应的阵营靶子。
             MarkDestroyed(state, enemy.EnemyInstanceId);
             SpawnEnemyLoot(state, enemy);
+            SiteGarrisonService.OnEnemyKilled(state, enemy); // FG9-ACT1-01：领地驻军全灭 = 据点被摧毁（计入领地控制度）
             Log.Info($"[FracturedCityRegion] 敌人 {enemy.EnemyInstanceId} 已阵亡。");
             // ER8-CONTENT-01：存活→阵亡翻转点，击毁音与“字幕”模式下的击毁字幕。
             Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
@@ -732,7 +733,8 @@ namespace GameLogic.Campaign.Regions
         public static List<string> SelfCheckNoDuplicates(CampaignState state)
         {
             var violations = new List<string>();
-            int enemyCount = state?.RegionEnemies?.Count(e => e.RegionId == RegionId) ?? 0;
+            // FG9-ACT1-01：领地驻军（sg.*）是外圈的生成内容，不属于 Demo 手工实例的计数口径（重复 ID 检查仍覆盖全部记录）。
+            int enemyCount = state?.RegionEnemies?.Count(e => e.RegionId == RegionId && !SiteGarrisonService.IsGarrisonInstance(e.EnemyInstanceId)) ?? 0;
             if (enemyCount != 3)
             {
                 violations.Add($"破碎都市敌人实例数应为 3（2 侦察 + 1 干扰），实际 {enemyCount}。");

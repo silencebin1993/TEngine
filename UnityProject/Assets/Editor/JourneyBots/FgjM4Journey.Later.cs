@@ -57,12 +57,14 @@ namespace GameLogic.EditorTools.JourneyBots
             S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
                 FgjM1Journey.TickPrepOpen, retries: 2),
             S("prep_pick", "勾选出征名单（三台）", 20, null, FgjM3Common.TickRosterAny),
-            S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随），家园没人看着（记下离家时的各项累计）", 200, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1),
+            S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随），家园没人看着（记下离家时的各项累计）", 200, c => { RecordReportWindow(c, "rep0"); FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"); }, TickDeparted, retries: 1),
             S("away", "在破碎都市待 90 游戏秒以上，这期间家园一直没人观察", 160, null, TickAway),
             S("uplink", "机器列表点一台远征机器：接入", 25, c => FgjM1Journey.ClickMachineList(c, c.GetInt("other")), TickUplinked, retries: 3),
             S("evac_hold", "开到撤离点按住交互键（默认 E）打开撤离清单", 40, c => JourneyInput.HoldAction(GameActionId.Interact, 1.6), FgjM1Journey.TickEvacPanel, retries: 3),
             S("evac_confirm", "点“确认撤离”：远征队返回家园", 30, c => FgjM1Journey.ClickUi(c, "[FracturedCityExpeditionReturnHost]", "ConfirmButton"), FgjM1Journey.TickReturnedHome, retries: 1),
-            S("report", "离家报告回家时自动打开过这次的报告；按离家报告键（默认 Alt+H）再打开：离家期间各物品产量与提取钻 / 精炼炉的完成次数逐项对得上", 30, null, TickAwayReport),
+            // FG9-ACT1-01 修复轮：FG8-EXP-05 起撤离后要沿地形走回家园、到家才结算（离家报告到家那一刻生成、下一帧自动打开）——HEAD 上本旅程同样在 report 步失败。
+            S("walk_home", "远征队沿地形走回家园（点 3 倍速等它到家，正式到家结算；离家报告自动打开后点关闭）", 200, null, TickWalkHomeM4),
+            S("report","离家报告回家时自动打开过这次的报告；按离家报告键（默认 Alt+H）再打开：离家期间各物品产量与提取钻 / 精炼炉的完成次数逐项对得上", 30, null, TickAwayReport),
             S("report_click", "点报告里一条可定位的条目：面板收起、镜头飞过去（或打开对应面板）", 20, null, TickReportClick, retries: 1),
             S("report_close", "收起点开的面板", 15, null, TickCloseOpened, retries: 1),
             S("bg_check", "后台一致：离家期间金属提取钻出矿速率 = 观察时实测速率（家园 0 帧被观察）", 20, null, TickBackgroundConsistent),
@@ -276,6 +278,25 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 远征 ──────────────────────────────────────────────────────────────────────
 
+        /// <summary>FG9-ACT1-01 修复轮：离家报告窗口两端的完成次数（点出发 = rep0、走到家 = rep1）。</summary>
+        private static void RecordReportWindow(JourneyContext c, string key)
+        {
+            c.SetLong(key + ".drillM", P.Completed(P.Bld(c, "drillM")));
+            c.SetLong(key + ".furnace", P.Completed(P.Bld(c, "furnace")));
+            c.SetLong(key + ".tick", GameClock.Ticks);
+            c.SetInt(key + ".set", 1);
+        }
+
+        /// <summary>走回家园（共用 FgjM1Journey.TickWalkHome）；到家那一帧记下报告窗口的终点计数。</summary>
+        private static StepOutcome TickWalkHomeM4(JourneyContext c)
+        {
+            if (!ExpeditionMarchService.IsMarching(St) && c.GetInt("rep1.set") == 0)
+            {
+                RecordReportWindow(c, "rep1");
+            }
+            return FgjM1Journey.TickWalkHome(c);
+        }
+
         private static StepOutcome TickDeparted(JourneyContext c)
         {
             StepOutcome o = FgjM1Journey.TickDeparted(c);
@@ -379,13 +400,16 @@ namespace GameLogic.EditorTools.JourneyBots
             long t0 = c.GetLong("away.tick");
             double dt = (latest.EndTick - latest.StartTick) / (double)GameClock.StepHz;
             // 独立计数：各建筑在报告窗口里的完成次数之差（从离家那一刻记下的累计算起；报告从出发事务那一刻开到撤离事务结束）。
-            long dDrill = P.Completed(P.Bld(c, "drillM")) - c.GetLong("away.drillM");
-            long dFurn = P.Completed(P.Bld(c, "furnace")) - c.GetLong("away.furnace");
+            // FG9-ACT1-01 修复轮：FG8 起出发 = 沿地形行军、到家才结算，报告窗口是“点出发 → 走到家”（原来出发即到、撤离即到家，与“到了地点才记的累计”几乎重合）。
+            // 独立计数改按同一个窗口取：点出发那一刻（rep0）与走到家那一刻（rep1）的完成次数之差；两端各允许差一个周期。
+            bool window = c.GetInt("rep0.set") == 1 && c.GetInt("rep1.set") == 1;
+            long dDrill = window ? c.GetLong("rep1.drillM") - c.GetLong("rep0.drillM") : P.Completed(P.Bld(c, "drillM")) - c.GetLong("away.drillM");
+            long dFurn = window ? c.GetLong("rep1.furnace") - c.GetLong("rep0.furnace") : P.Completed(P.Bld(c, "furnace")) - c.GetLong("away.furnace");
             long ore = ProducedIn(latest, "metal_ore");
             long alloy = ProducedIn(latest, "alloy");
             // 报告窗口与“离家时记下的累计”起点可能差几步（出发事务与这一步记录之间），允许每项差一个周期。
-            bool oreOk = Math.Abs(ore - dDrill) <= 1;
-            bool alloyOk = Math.Abs(alloy - dFurn) <= 1;
+            bool oreOk = Math.Abs(ore - dDrill) <= (window ? 2 : 1);
+            bool alloyOk = Math.Abs(alloy - dFurn) <= (window ? 2 : 1);
             bool shown = panel.ShownSerial == latest.Serial && panel.VisibleRowCount > 0 && !Localization.GameText.ContainsMarker(panel.SummaryText);
             var rows = Enumerable.Range(0, Math.Min(panel.VisibleRowCount, 12)).Select(i => panel.RowText(i).Replace("\n", " ")).ToList();
             c.SetLong("rep.ore", ore);

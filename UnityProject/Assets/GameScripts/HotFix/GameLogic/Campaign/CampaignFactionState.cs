@@ -36,6 +36,13 @@ namespace GameLogic.Campaign
         public string FoundryCounterId = string.Empty;
         /// <summary>FG9-FAC-02：已经提示过“进入熔渣热区”的危害区（同一片只提示一次）。</summary>
         public string[] SlagZonesNoticed = Array.Empty<string>();
+
+        /// <summary>FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测到的静默信号点（据点 ID / 诱饵 ID，按序；唯一写入口 <c>WorldSim.SignalContactService</c>）。</summary>
+        public string[] ContactsDetected = Array.Empty<string>();
+        /// <summary>FG9-ACT1-01：监听站“反制预览”情报顺带甄别过的信号点（一直有效）。</summary>
+        public string[] ContactsIdentified = Array.Empty<string>();
+        /// <summary>FG9-ACT1-01：远征地点里已经提示过的熔渣热区（地点 ID#序号）。</summary>
+        public string[] SiteSlagNoticed = Array.Empty<string>();
     }
 
     /// <summary>

@@ -44,6 +44,8 @@ namespace GameLogic.EditorTools.JourneyBots
             S("evac_hold", "在撤离点按住交互键（默认 E）打开撤离清单", 40, c => JourneyInput.HoldAction(GameActionId.Interact, 1.6), FgjM1Journey.TickEvacPanel, retries: 3),
             S("evac_confirm", "点“确认撤离”：远征队返回家园（远征场次关闭）", 30, c => FgjM1Journey.ClickUi(c, "[FracturedCityExpeditionReturnHost]", "ConfirmButton"),
                 FgjM1Journey.TickReturnedHome, retries: 1),
+            // FG9-ACT1-01 修复轮：FG8-EXP-05 起撤离后要沿地形走回家园、到家才结算（线索、协议数据盒入库都在到家那一刻）。
+            S("walk_home", "远征队沿地形走回家园（点 3 倍速等它到家，正式到家结算；到家后点回 1 倍速、关掉自动打开的离家报告）", 200, null, FgjM1Journey.TickWalkHome),
             S("clue", "从远征回放拿到线索：仿真实验室分析这场的“短路”次数，给出指向熔合配方的线索（通知“新的熔合线索”）；带回的协议数据盒变成一枚未破解的标记跳转芯片", 60, null, TickClue),
         };
 
@@ -166,6 +168,8 @@ namespace GameLogic.EditorTools.JourneyBots
         private static StepOutcome TickClue(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
+            // FG9-ACT1-01 修复轮：撤离后的“走回家园”（FG8-EXP-05 到家才结算）在上一步 walk_home（FgjM1Journey.TickWalkHome，与 M4 / M9A 共用）里走完、
+            // 关掉了自动打开的离家报告；本步只核对线索与芯片（原来撤离当场就核对、又没等报告打开，报告随后盖住了下一步的信号核键）。
             CampaignState s = St;
             FusionState f = FusionService.StateOf(s);
             FusionClueRecord clue = f?.Clues?.LastOrDefault(x => x != null && x.SessionKind == ReactionAttribution.KindExpedition && x.ReactionId == FgjM2Common.Conduct);

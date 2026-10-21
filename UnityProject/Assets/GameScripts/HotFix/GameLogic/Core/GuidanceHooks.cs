@@ -603,6 +603,28 @@ namespace GameLogic.Core
         public const string QuestFirstEscort = "quest.first_escort";
         public const string QuestFirstTimeWarning = "quest.first_time_warning";
 
+        // ── FG9-ACT1-01：第一幕节奏台账（fg.TbActPacing.hookId；到达每个节奏点发一次，引导内容在 FG15-UX-04：每个新系统第一次出现时的提示）──
+        public const string Act1PaceWake = "act1.pace.wake";
+        public const string Act1PacePower = "act1.pace.power";
+        public const string Act1PaceFirstMachine = "act1.pace.first_machine";
+        public const string Act1PaceFirstExpedition = "act1.pace.first_expedition";
+        public const string Act1PaceFirstUplink = "act1.pace.first_uplink";
+        public const string Act1PaceBeltsOpen = "act1.pace.belts_open";
+        public const string Act1PaceFirstTurret = "act1.pace.first_turret";
+        public const string Act1PaceFirstRaid = "act1.pace.first_raid";
+        public const string Act1PaceFirstSilentNight = "act1.pace.first_silent_night";
+        public const string Act1PaceFoundryOuter = "act1.pace.foundry_outer";
+        public const string Act1PaceSilentMind = "act1.pace.silent_mind";
+        public const string Act1PaceOverrideT1 = "act1.pace.override_t1";
+        public const string Act1PaceFoundryCore = "act1.pace.foundry_core";
+        public const string Act1PaceAct1End = "act1.pace.act1_end";
+        /// <summary>FG9-ACT1-01：第一次在远征地点里把一处领地驻军打光（引导：地点内容就是领地据点，控制度下降）。</summary>
+        public const string SiteFirstGarrisonDestroyed = "site.first_garrison_destroyed";
+        /// <summary>FG9-ACT1-01：第一次在地图上侦测到静默信号点（引导：真假未知，诱饵中继；监听站的反制预览会顺带甄别）。</summary>
+        public const string SiteFirstContactSeen = "site.first_contact_seen";
+        /// <summary>FG9-ACT1-01：第一次甄别出信号点的真假。</summary>
+        public const string SiteFirstContactIdentified = "site.first_contact_identified";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -673,10 +695,16 @@ namespace GameLogic.Core
             QuestFirstNew, QuestFirstTrack, QuestFirstComplete, QuestFirstFailed, QuestFirstLogOpen, QuestFirstSideFound, QuestFirstEscort, QuestFirstTimeWarning,
             HeritageFirstFound, HeritageFirstLeftBehind, HeritageFirstDelivered, HeritageVaultFirstOpen,
             NarrativeFirstEntry, NarrativeLibraryFirstOpen, NarrativeFirstCutscene, NarrativeFirstSkip, NarrativeFirstReplay,
+            Act1PaceWake, Act1PacePower, Act1PaceFirstMachine, Act1PaceFirstExpedition, Act1PaceFirstUplink, Act1PaceBeltsOpen, Act1PaceFirstTurret,
+            Act1PaceFirstRaid, Act1PaceFirstSilentNight, Act1PaceFoundryOuter, Act1PaceSilentMind, Act1PaceOverrideT1, Act1PaceFoundryCore, Act1PaceAct1End,
+            SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>
         public static event Action<string> FirstRaised;
+
+        /// <summary>FG9-ACT1-01：每一次触发都回调（第一幕节奏台账按“这个机制在本局发生过”记节奏点；钩子“第一次”是跨战役的本机记录，不能当本局事实）。</summary>
+        public static event Action<string> Touched;
 
         public static string LastRaised { get; private set; }
         public static int RaisedCount { get; private set; }
@@ -694,6 +722,7 @@ namespace GameLogic.Core
             }
             TouchCount++;
             GameLogic.Progression.MechanicCodex.OnHook(hookId);
+            Touched?.Invoke(hookId);
             if (GameSettings.HasSeenGuidanceHook(hookId))
             {
                 return false;

@@ -864,6 +864,11 @@ namespace GameLogic.Campaign.Economy
             {
                 NotificationCenter.Post("intel_new", GameText.Format("intel.notify.new", k.Name, summary));
             }
+            if (r.Kind == IntelCatalog.KindCounter)
+            {
+                // FG9-ACT1-01（DEBT-FG9FAC01-02“监听站情报识别真假”）：反制预览顺带甄别当时已侦测到的全部静默信号点（不另设第六类情报，FGR-RND-050）。
+                WorldSim.SignalContactService.OnCounterPreviewProduced(s);
+            }
             return r;
         }
 

@@ -55,7 +55,7 @@ namespace GameLogic.EditorTools.JourneyBots
             OnFinish = Cleanup,
             // FG-TOOL-01：旅程断点。版本号在步骤语义 / 顺序变化时加 1；断点只登记界面中性（建造模式已关、没有面板开着、在家园）的步骤。
             // 迭代：bash tools/unity-journey.sh FGJ-M3 --from rate_t1；交付验收仍从主菜单完整跑。
-            Version = 1,
+            Version = 3, // FG9-ACT1-01 修复轮：m3_out 之后加 rate_pre（出征前观察窗口）；第 2 轮：观察 / 离家窗口改为正好一圈的计数（FG-GAP-145）
             CheckpointAfter = new[] { "fac_close", "rate_t1", "build_close2", "loaded" },
             // 布局库在旅程临时目录里（不是存档的一部分）：断点把它连同存档一起放回后，重新载入。
             OnCheckpointRestored = c => LayoutLibrary.Reload(),
@@ -187,15 +187,19 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("m3_wait", "第三台机器（ERC-003）出厂", 300, null, c => FgjM2Common.TickProduced(c, "verA", "m3")),
                 S("m3_sel", "左键点新机", 20, c => FgjM1Journey.ClickMachine(c, "m3"), c => FgjM1Journey.TickSelected(c, "m3"), retries: 4),
                 S("m3_out", "右键点旁边的空地：新机驶出装配站出口（右键地面 = 移动）", 30, null, TickDriveOut, retries: 3),
+                // FG9-ACT1-01 修复轮：“观察时实测速率”要和离家期间同一条件下测——第三台机器已出厂（装配站不再从库存取废料）、家园没有施工。
+                // 原来拿 rate_t2（升级后、装配站还在为 ERC-003 取废料时测的 83 件 / 分钟）当对照，物品线是“件数受限”的环形线，取料一停件数就多、速率就高，
+                // 与后台无关（HEAD 基线同样 97 对 90 失败，证据 _baseline-journey-FGJ-M3.txt）。
+                S("rate_pre", "出征前在家园看着物品线正好一圈（带长 ÷ 带速）：此刻（第三台已出厂、家园没有施工）核心输入口一圈收下的件数 = 环里流通的件数，作为离家核对的“观察时”一圈", 60, null, TickRatePre),
                 S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
                     FgjM1Journey.TickPrepOpen, retries: 2),
                 S("prep_pick", "勾选出征名单（三台）", 20, null, FgjM3Common.TickRosterAny),
-                S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随），家园没人看着", 200, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1),
+                S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随），家园没人看着", 200, c => { RecordMarchStart(c); FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"); }, TickDeparted, retries: 1),
                 S("away", "在破碎都市待一会儿（60 游戏秒以上），这期间家园一直没人观察", 120, null, TickAway),
                 S("uplink", "机器列表点一台远征机器：接入", 25, c => FgjM1Journey.ClickMachineList(c, c.GetInt("other")), TickUplinked, retries: 3),
                 S("evac_hold", "开到撤离点按住交互键（默认 E）打开撤离清单", 40, c => JourneyInput.HoldAction(GameActionId.Interact, 1.6), FgjM1Journey.TickEvacPanel, retries: 3),
                 S("evac_confirm", "点“确认撤离”：远征队返回家园", 30, c => FgjM1Journey.ClickUi(c, "[FracturedCityExpeditionReturnHost]", "ConfirmButton"), FgjM1Journey.TickReturnedHome, retries: 1),
-                S("bg_check", "回到家园核对：离家期间物品线收货 = 观察时实测速率 × 时间 = 设计速率 × 时间；两台泵的抽水量与储罐存量按 300 升 / 分钟对得上；悬停读数一致", 30, null, TickBackgroundConsistent),
+                S("bg_check", "回到家园核对：离家期间（家园没人观察）物品线正好一圈收下的件数 = 离家时环里流通的件数，与观察时一圈一样（每件都转一圈）、不超过设计速率；两台泵的抽水量与储罐存量按 300 升 / 分钟对得上；悬停读数一致", 30, null, TickBackgroundConsistent),
             },
         };
 
@@ -1492,13 +1496,106 @@ namespace GameLogic.EditorTools.JourneyBots
             return true;
         }
 
+        /// <summary>
+        /// 出征前的观察窗口：家园被观察（镜头在家园）、第三台机器已出厂、没有施工，从起点量正好一圈（<see cref="CycleWorldSteps"/>）核心输入口的收货件数，
+        /// 应 = 起点时环里流通的件数（每件恰好经过核心输入口一次）。FG-GAP-145（第 2 轮修复）：原来量 60 游戏秒的速率，环上件成团时随起点浮动 73～85 件 / 分钟，不能拿来对比。
+        /// </summary>
+        private static StepOutcome TickRatePre(JourneyContext c)
+        {
+            FgjM3Common.SampleFrame();
+            JourneyCommon.ResumeIfAutoPaused(c);
+            long got = FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeCore, c.Get("inKey"), out bool on);
+            // 诊断（BINGAMES_M3_PRE_1X=1）：观察窗口改在 1 倍速下测，与离家窗口（到了地点点回 1 倍速）同一倍速，分开“倍速”与“观察”两个因素。
+            if (Environment.GetEnvironmentVariable("BINGAMES_M3_PRE_1X") == "1" && !FgjM3Common.Done(c, "x1"))
+            {
+                FgjM3Common.Mark(c, "x1");
+                UnityEngine.UIElements.Button normal = JourneyInput.FindUitk<UnityEngine.UIElements.Button>("[WorldBarHost]", "WorldSpeed1");
+                if (normal != null && JourneyInput.IsClickable(normal))
+                {
+                    JourneyInput.ClickElement(normal);
+                }
+                return StepOutcome.Wait;
+            }
+            if (!FgjM3Common.Done(c, "t0"))
+            {
+                c.SetLong(FgjM3Common.SK(c, "tick0"), GameClock.Ticks);
+                c.SetLong(FgjM3Common.SK(c, "got0"), got);
+                c.SetInt(FgjM3Common.SK(c, "homeFrames"), 0);
+                c.SetInt(FgjM3Common.SK(c, "frames"), 0);
+                c.Set("pre.snap", LoopSnap(c));
+                c.SetInt("pre.n0", LoopItems());
+                c.SetLong("pre.cycle", CycleWorldSteps(c));
+                FgjM3Common.Mark(c, "t0");
+                return StepOutcome.Wait;
+            }
+            c.SetInt(FgjM3Common.SK(c, "frames"), c.GetInt(FgjM3Common.SK(c, "frames")) + 1);
+            TrackLoop(c, "pre");
+            if (WorldView.ObservedSiteId == HomeValleyLayout.RegionId)
+            {
+                c.SetInt(FgjM3Common.SK(c, "homeFrames"), c.GetInt(FgjM3Common.SK(c, "homeFrames")) + 1);
+            }
+            long cycle = c.GetLong("pre.cycle");
+            if (cycle <= 0)
+            {
+                return StepOutcome.Fail($"算不出物品线的一圈：路线 {Route(c).Count} 格、等级不一致或有格不存在（{FgjM3Common.MinTier(Route(c), out int maxT, out int miss)}～{maxT}，缺 {miss} 格）");
+            }
+            long elapsed = GameClock.Ticks - c.GetLong(FgjM3Common.SK(c, "tick0"));
+            if (elapsed < cycle)
+            {
+                return StepOutcome.Wait;
+            }
+            double dt = elapsed / (double)GameClock.StepHz;
+            long delivered = got - c.GetLong(FgjM3Common.SK(c, "got0"));
+            double perMin = delivered / dt * 60.0;
+            c.Set("ratePre", perMin.ToString("R", CultureInfo.InvariantCulture));
+            c.SetLong("pre.delivered", delivered);
+            c.SetLong("pre.over", elapsed - cycle);
+            int frames = c.GetInt(FgjM3Common.SK(c, "frames"));
+            int homeFrames = c.GetInt(FgjM3Common.SK(c, "homeFrames"));
+            bool queued = St.FactoryQueues != null && St.FactoryQueues.Any(q => q != null && q.State != FactoryQueueState.Completed
+                                                                                && q.State != FactoryQueueState.Cancelled && q.State != FactoryQueueState.Failed);
+            return on && perMin > 0 && homeFrames == frames && !queued
+                ? StepOutcome.Done($"一圈 {cycle} 个世界步（{cycle / (double)GameClock.StepHz:F1} 游戏秒，实际量到 {dt:F1} 秒；{GameClock.Speed:0.#}x，{frames} 帧都在看家园）核心输入口收下 {delivered} 件（起点流通 {c.GetInt("pre.n0")} 件），" +
+                                   $"折合 {perMin:F1} 件 / 分钟（升级后刚跑起来时 {c.Get("rateT2")}；此刻带上 {BeltPortService.StoreItemsOnBelts(St)} 件、家园库存 {St.Scrap}）；" +
+                                   LoopNote(c, c.Get("pre.snap"), (long)Math.Round(dt * GameClock.StepHz)) + "；" + SampleNote(c, "pre"))
+                : StepOutcome.Fail($"出征前观察窗口不成立：接上 {on}、一圈收下 {delivered} 件、看家园 {homeFrames}/{frames} 帧、装配站仍在生产 {queued}");
+        }
+
+        /// <summary>FG9-ACT1-01 修复轮：行军窗口的起点（点出发那一刻）——三台机器都离开家园、家园里没人干活，镜头跟着队伍（家园表面）。</summary>
+        private static void RecordMarchStart(JourneyContext c)
+        {
+            c.SetLong("march.tick", GameClock.Ticks);
+            c.SetLong("march.got", FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeCore, c.Get("inKey"), out _));
+            c.SetInt("march.frames", 0);
+            c.SetInt("march.homeFrames", 0);
+            c.SetInt("march.lastFrame", -1);
+            c.Set("march.snap", LoopSnap(c));
+        }
+
         private static StepOutcome TickDeparted(JourneyContext c)
         {
+            int f = Time.frameCount;
+            if (c.GetInt("march.lastFrame") != f)
+            {
+                c.SetInt("march.lastFrame", f);
+                c.SetInt("march.frames", c.GetInt("march.frames") + 1);
+                if (WorldView.ObservedSiteId == HomeValleyLayout.RegionId)
+                {
+                    c.SetInt("march.homeFrames", c.GetInt("march.homeFrames") + 1);
+                }
+                TrackLoop(c, "march");
+            }
             StepOutcome o = FgjM1Journey.TickDeparted(c);
             if (o.Status != JourneyStepStatus.Done)
             {
                 return o;
             }
+            // 行军窗口：从点出发到进入破碎都市，机器都不在家园；家园被观察的帧数一起记下（后台核对的“同条件观察”对照）。
+            double mdt = (GameClock.Ticks - c.GetLong("march.tick")) / (double)GameClock.StepHz;
+            long mgot = FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeCore, c.Get("inKey"), out _) - c.GetLong("march.got");
+            c.Set("rateMarch", (mdt > 0 ? mgot / mdt * 60.0 : 0).ToString("R", CultureInfo.InvariantCulture));
+            c.Set("marchNote", $"行军 {mdt:F0} 游戏秒（{c.GetInt("march.frames")} 帧里看家园 {c.GetInt("march.homeFrames")} 帧）核心输入口收货 {mgot} 件 = {(mdt > 0 ? mgot / mdt * 60.0 : 0):F1} 件 / 分钟，" +
+                                  LoopNote(c, c.Get("march.snap"), GameClock.Ticks - c.GetLong("march.tick")) + "，" + SampleNote(c, "march"));
             List<int> roster = FgjM1Journey.Roster(c);
             c.SetInt("other", roster[0]);
             RecordAwayStart(c);
@@ -1513,6 +1610,122 @@ namespace GameLogic.EditorTools.JourneyBots
             c.Set("away.tanks", string.Join(",", Tanks(c).Select(p => FgjM3Common.TankMl(p).ToString(CultureInfo.InvariantCulture))));
             c.SetInt("away.homeFrames", 0);
             c.SetInt("away.frames", 0);
+            c.Set("away.snap", LoopSnap(c));
+            c.SetInt("away.n0", LoopItems());
+            c.SetLong("away.cycle", CycleWorldSteps(c));
+            c.Set("away.cycDone", string.Empty);
+        }
+
+        /// <summary>
+        /// FG-GAP-145 诊断：环形物品线（仓库输出口 → 27 格 → 核心输入口 → 家园库存 → 仓库输出口）里流通的废料件数 = 家园库存 + 带上与输出口待推。
+        /// 这条线是“件数受限”的：T2 带速固定，收货速率 ≈ 流通件数 / 带长 × 带速，所以流通件数一变速率就变——窗口首尾和中途的跳变都记下来，用来分开“家园模拟快了”与“有东西往环里加了件”。
+        /// </summary>
+        private static int LoopItems() => St.Scrap + BeltPortService.StoreItemsOnBelts(St);
+
+        /// <summary>
+        /// FG-GAP-145（FG9-ACT1-01 第 2 轮修复）：物品线“一圈”的世界步数 = 带长（格）× 格长 ÷ 这一级每步位移（内核步），换算成世界步（输出口 → 核心输入口；端口周转 1～2 个内核步，远小于一件的间距）。
+        /// 环上的件分布不均（开跑时一批批推上去、成团前进），任意 60 秒窗口的收货随起点在 73～85 件之间浮动——FGJ-M3 断点存档在编辑模式下逐步重放实测（观察 / 不观察逐件相同）；
+        /// 正好一圈的窗口里每件流通的废料恰好经过核心输入口一次：收下件数 = 起点的流通件数，与件怎么分布无关（同一次重放里每个起点都是 72 / 72、73 / 73）。
+        /// 路线等级不一致、有格不存在或在减速（沙暴）时返回 -1。
+        /// </summary>
+        private static long CycleWorldSteps(JourneyContext c)
+        {
+            BeltKernel k = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
+            List<GridCell> route = Route(c);
+            int tier = FgjM3Common.MinTier(route, out int maxTier, out int missing);
+            if (k == null || route.Count == 0 || tier < 0 || tier != maxTier || missing > 0 || k.ExposedSlowPercent > 0)
+            {
+                return -1;
+            }
+            int v = k.UnitsPerStep(tier);
+            long kernelSteps = ((long)route.Count * BeltConst.CellLength + v - 1) / v;
+            return kernelSteps * GameClock.StepHz / Math.Max(1, k.Config.StepHz);
+        }
+
+        /// <summary>一圈窗口的容差：2 件 + 窗口结束那一帧多走的世界步里最多能到的件数（满载 = 每格 4 件、T2 每秒半格 → 每 30 个世界步 1 件）。</summary>
+        private static long CycleTolerance(long overSteps) => 2 + (overSteps + 29) / 30;
+
+        /// <summary>窗口起点快照：流通件数、内核步数、端口对账（真的重做绑定的）次数、端口绑定版本、转移次数、内核拓扑重建次数、内核载入次数。</summary>
+        private static string LoopSnap(JourneyContext c) => string.Join("|", new long[]
+        {
+            LoopItems(), BeltNetworkService.KernelStepsThisSession, BeltPortService.SyncCount, BeltPortService.Revision, BeltPortService.PumpCount,
+            BeltNetworkService.Kernel?.RebuildCount ?? 0, BeltNetworkService.LoadCount,
+            FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeWarehouse, c.Get("outKey"), out _), FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeCore, c.Get("inKey"), out _),
+        }.Select(x => x.ToString(CultureInfo.InvariantCulture)));
+
+        /// <summary>窗口首尾对照：流通件数、传送带内核步数（应 = 世界步 × 内核频率 / 世界频率）、端口对账重做 / 绑定版本 / 转移次数、拓扑重建、内核载入的增量。</summary>
+        private static string LoopNote(JourneyContext c, string snap, long worldSteps)
+        {
+            long[] a = (snap ?? string.Empty).Split('|').Select(x => long.TryParse(x, NumberStyles.Integer, CultureInfo.InvariantCulture, out long v) ? v : 0L).ToArray();
+            long[] b = LoopSnap(c).Split('|').Select(x => long.Parse(x, CultureInfo.InvariantCulture)).ToArray();
+            if (a.Length != b.Length)
+            {
+                return "（窗口起点快照缺失）";
+            }
+            double expect = worldSteps * (double)BeltNetworkService.Kernel.Config.StepHz / GameClock.StepHz;
+            return $"流通件数 {a[0]} → {b[0]}，传送带内核走了 {b[1] - a[1]} 步（按 {worldSteps} 个世界步应为 {expect:F0}），端口对账重做 {b[2] - a[2]} 次、绑定版本 +{b[3] - a[3]}、" +
+                   $"转移 {b[4] - a[4]} 次，拓扑重建 {b[5] - a[5]} 次，内核载入 {b[6] - a[6]} 次，仓库输出口推上 {b[7] - a[7]} 件 / 核心输入口收下 {b[8] - a[8]} 件";
+        }
+
+        /// <summary>逐帧采样（窗口内平均）：仓库输出口待推、核心输入口缓存、家园库存、堵塞格——分开“带上跑得慢”与“在端口 / 库存里等”。</summary>
+        private static void SamplePorts(JourneyContext c, string k)
+        {
+            BeltKernel kk = BeltNetworkService.IsRunning ? BeltNetworkService.Kernel : null;
+            if (kk == null)
+            {
+                return;
+            }
+            int srcPending = 0, sinkBuffered = 0;
+            BuildingRecord wh = FgjM3Common.Home(HomeValleyLayout.BuildingTypeWarehouse);
+            BuildingRecord core = FgjM3Common.Home(HomeValleyLayout.BuildingTypeCore);
+            BeltPortService.Binding src = wh != null ? BeltPortService.Find(wh.BuildingId, c.Get("outKey")) : null;
+            BeltPortService.Binding sink = core != null ? BeltPortService.Find(core.BuildingId, c.Get("inKey")) : null;
+            if (src != null && src.PortId >= 0)
+            {
+                kk.TryGetPortCounts(src.PortId, out srcPending, out _);
+            }
+            if (sink != null && sink.PortId >= 0)
+            {
+                kk.TryGetPortCounts(sink.PortId, out _, out sinkBuffered);
+            }
+            c.SetLong(k + ".sSrc", c.GetLong(k + ".sSrc") + srcPending);
+            c.SetLong(k + ".sSink", c.GetLong(k + ".sSink") + sinkBuffered);
+            c.SetLong(k + ".sInv", c.GetLong(k + ".sInv") + St.Scrap);
+            c.SetLong(k + ".sBlk", c.GetLong(k + ".sBlk") + kk.BlockedCells);
+            c.SetLong(k + ".sSlow", c.GetLong(k + ".sSlow") + kk.ExposedSlowPercent);
+            int netItems = 0;
+            if (sink != null && sink.PortId >= 0 && kk.TryGetPortInfo(sink.PortId, out BeltPortInfo si) && si.Network >= 0 && kk.TryGetNetworkStats(si.Network, out BeltNetworkStats ns))
+            {
+                netItems = ns.Items;
+            }
+            c.SetLong(k + ".sNet", c.GetLong(k + ".sNet") + netItems);
+            c.SetLong(k + ".sNetScrap", c.GetLong(k + ".sNetScrap") + BeltPortService.StoreItemsOnBelts(St));
+            c.SetLong(k + ".sN", c.GetLong(k + ".sN") + 1);
+        }
+
+        private static string SampleNote(JourneyContext c, string k)
+        {
+            double n = Math.Max(1, c.GetLong(k + ".sN"));
+            return $"逐帧平均（{c.GetLong(k + ".sN")} 帧）：仓库输出口待推 {c.GetLong(k + ".sSrc") / n:F2}、核心输入口缓存 {c.GetLong(k + ".sSink") / n:F2}、家园库存 {c.GetLong(k + ".sInv") / n:F2}、堵塞格 {c.GetLong(k + ".sBlk") / n:F2}、露天减速 {c.GetLong(k + ".sSlow") / n:F1}%、带上物品（全部种类）{c.GetLong(k + ".sNet") / n:F2}、其中废料 + 待推 {c.GetLong(k + ".sNetScrap") / n:F2}";
+        }
+
+        /// <summary>逐帧盯流通件数：一帧里变了 2 件以上就记一行（每段最多 8 行）。</summary>
+        private static void TrackLoop(JourneyContext c, string k)
+        {
+            SamplePorts(c, k);
+            int n = LoopItems();
+            string prev = c.Get(k + ".track");
+            if (!string.IsNullOrEmpty(prev))
+            {
+                int p = int.Parse(prev, CultureInfo.InvariantCulture);
+                if (Math.Abs(n - p) >= 2 && c.GetInt(k + ".jumps") < 8)
+                {
+                    c.SetInt(k + ".jumps", c.GetInt(k + ".jumps") + 1);
+                    c.Log($"    [FG-GAP-145 诊断] {k}：流通件数 {p} → {n}（第 {GameClock.Ticks} 步，家园库存 {St.Scrap}，带上 {BeltPortService.StoreItemsOnBelts(St)}，镜头在 {WorldView.ObservedSiteId}，" +
+                          $"内核载入 {BeltNetworkService.LoadCount} 次）");
+                }
+            }
+            c.Set(k + ".track", n.ToString(CultureInfo.InvariantCulture));
         }
 
         private static void CountObserved(JourneyContext c)
@@ -1535,8 +1748,10 @@ namespace GameLogic.EditorTools.JourneyBots
             FgjM3Common.SampleFrame();
             JourneyCommon.ResumeIfAutoPaused(c);
             CountObserved(c);
+            TrackLoop(c, "away");
+            RecordAwayCycle(c);
             double dt = (GameClock.Ticks - c.GetLong("away.tick")) / (double)GameClock.StepHz;
-            if (dt < 60.0)
+            if (dt < 60.0 || string.IsNullOrEmpty(c.Get("away.cycDone")))
             {
                 return StepOutcome.Wait;
             }
@@ -1545,9 +1760,29 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Fail($"远征期间有 {c.GetInt("away.homeFrames")} 帧在看家园（这一段要证明“不观察”）");
         }
 
+        /// <summary>离家窗口里正好一圈的那一刻（第一帧走过一圈）记下核心输入口累计收货与多走的步数（家园一直不被观察）。</summary>
+        private static void RecordAwayCycle(JourneyContext c)
+        {
+            long cycle = c.GetLong("away.cycle");
+            if (cycle <= 0 || !string.IsNullOrEmpty(c.Get("away.cycDone")))
+            {
+                return;
+            }
+            long elapsed = GameClock.Ticks - c.GetLong("away.tick");
+            if (elapsed < cycle)
+            {
+                return;
+            }
+            c.SetLong("away.cycDelivered", FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeCore, c.Get("inKey"), out _) - c.GetLong("away.got"));
+            c.SetLong("away.cycOver", elapsed - cycle);
+            c.SetInt("away.cycHomeFrames", c.GetInt("away.homeFrames"));
+            c.Set("away.cycDone", "1");
+        }
+
         private static StepOutcome TickUplinked(JourneyContext c)
         {
             CountObserved(c);
+            TrackLoop(c, "away");
             int b = c.GetInt("other");
             if (c.StepElapsed < 0.6)
             {
@@ -1574,10 +1809,25 @@ namespace GameLogic.EditorTools.JourneyBots
             long t1 = GameClock.Ticks;
             double dt = (t1 - t0) / (double)GameClock.StepHz;
             long got = FgjM3Common.PortTotal(HomeValleyLayout.BuildingTypeCore, c.Get("inKey"), out bool on) - c.GetLong("away.got");
-            double observed = double.Parse(c.Get("rateT2", "0"), CultureInfo.InvariantCulture);
+            double observed = double.Parse(c.Get("ratePre", "0"), CultureInfo.InvariantCulture);
+            double rateT2 = double.Parse(c.Get("rateT2", "0"), CultureInfo.InvariantCulture);
             double awayRate = got / dt * 60.0;
-            double expectGot = observed / 60.0 * dt;
-            bool beltOk = on && observed > 0 && Math.Abs(got - expectGot) <= Math.Max(3.0, expectGot * 0.03);
+            // FG-GAP-145（FG9-ACT1-01 第 2 轮修复）：件数受限的环形线，窗口不是整圈时收货随件在带上怎么成团而浮动（同一条线 60 秒窗口 73～85 件），
+            // 原来“离家 65 秒的速率 = 出征前 60 秒的速率”这条比较本身不成立（观察 / 不观察在编辑模式逐件重放完全相同，见 CycleWorldSteps）。
+            // 改为与分布无关的判据：观察时（出征前）与不观察时（离家）各量正好一圈，收下件数都 = 起点时环里流通的件数（每件恰好转一圈）；两段的一圈一样长（同一条线、同一等级、没有减速）；
+            // 整个离家窗口不超过设计 120 件 / 分钟。观察时慢了 / 不观察时快了，都会让某一段一圈收下的件数离开流通件数。
+            long preCycle = c.GetLong("pre.cycle");
+            long awayCycle = c.GetLong("away.cycle");
+            long preDelivered = c.GetLong("pre.delivered");
+            int preN0 = c.GetInt("pre.n0");
+            long preTol = CycleTolerance(c.GetLong("pre.over"));
+            bool awayCycDone = !string.IsNullOrEmpty(c.Get("away.cycDone"));
+            long awayCyc = c.GetLong("away.cycDelivered");
+            int awayN0 = c.GetInt("away.n0");
+            long awayTol = CycleTolerance(c.GetLong("away.cycOver"));
+            bool preOk = preCycle > 0 && Math.Abs(preDelivered - preN0) <= preTol;
+            bool awayOk = awayCycDone && awayCycle == preCycle && c.GetInt("away.cycHomeFrames") == 0 && Math.Abs(awayCyc - awayN0) <= awayTol;
+            bool beltOk = on && preOk && awayOk && awayRate <= 120 * 1.08;
             long[] p0 = c.Get("away.pumps").Split(',').Select(x => long.Parse(x, CultureInfo.InvariantCulture)).ToArray();
             long[] k0 = c.Get("away.tanks").Split(',').Select(x => long.Parse(x, CultureInfo.InvariantCulture)).ToArray();
             GridCell[] pumps = Pumps(c).ToArray();
@@ -1601,7 +1851,10 @@ namespace GameLogic.EditorTools.JourneyBots
             GridCell probe = Route(c)[Route(c).Count / 2];
             string beltHover = BeltNetworkService.DescribeCell(probe) ?? string.Empty;
             string tankHover = PipeNetworkService.TryDescribeHover(St, tanks[1], out string title, out string body) ? title + " " + body.Split('\n').FirstOrDefault() : string.Empty;
-            string report = $"离家 {dt:F1} 游戏秒（{c.GetInt("away.frames")} 帧里看家园 {c.GetInt("away.homeFrames")} 帧）：核心输入口收货 {got} 件 = {awayRate:F1} 件 / 分钟（观察时实测 {observed:F1}，按它应收 {expectGot:F0} 件）；" +
+            string report = $"物品线一圈 {preCycle} 个世界步（{preCycle / (double)GameClock.StepHz:F1} 游戏秒）：观察时（出征前，看着家园）一圈收下 {preDelivered} 件、起点流通 {preN0} 件（容差 {preTol}）{(preOk ? "✓" : "✗")}；" +
+                            $"不观察时（离家，{c.GetInt("away.cycHomeFrames")} 帧看家园）一圈收下 {awayCyc} 件、起点流通 {awayN0} 件（容差 {awayTol}）{(awayOk ? "✓" : "✗")}——每件都正好转一圈，两种情况下物品线行为一致；" +
+                            $"整个离家 {dt:F1} 游戏秒（{c.GetInt("away.frames")} 帧里看家园 {c.GetInt("away.homeFrames")} 帧）核心输入口收货 {got} 件 = {awayRate:F1} 件 / 分钟（不超过设计 120；窗口不是整圈，只作参考：出征前一圈折合 {observed:F1}、升级后刚跑起来时 {rateT2:F1}；{c.Get("marchNote")}）；" +
+                            $"离家窗口{LoopNote(c, c.Get("away.snap"), t1 - t0)}，{SampleNote(c, "away")}；" +
                             string.Join("；", lines) + $"；悬停读数“{beltHover.Replace("\n", " ")}”“{tankHover}”";
             return beltOk && fluidOk && unsaturated >= 1 && c.GetInt("away.homeFrames") == 0
                 ? StepOutcome.Done("产量与后台一致：" + report)

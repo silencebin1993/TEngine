@@ -370,7 +370,10 @@ namespace GameLogic.EditorTools
             var bad = new List<string>();
             foreach ((string entry, string node) in gates)
             {
-                if (!BuildCatalog.TryGet(entry, out BuildEntry e) || e.UnlockRule != "research:" + node || !GameText.Get(e.UnlockHintKey).Contains(N(node)?.Name ?? "?"))
+                // FG9-ACT1-01 修复轮：传送带一族的规则是复合规则“research:<节点>&pace:belts_open”（研究 + 第一幕节奏同时满足），研究节点那一段照样要对。
+                bool beltFamily = entry.StartsWith("belt_", StringComparison.Ordinal) || entry.StartsWith("underground_", StringComparison.Ordinal) || entry == "splitter" || entry == "merger";
+                string wantRule = "research:" + node + (beltFamily ? "&pace:belts_open" : string.Empty);
+                if (!BuildCatalog.TryGet(entry, out BuildEntry e) || e.UnlockRule != wantRule || ResearchGate.NodeOf(e.UnlockRule) != node || !GameText.Get(e.UnlockHintKey).Contains(N(node)?.Name ?? "?"))
                 {
                     bad.Add(entry);
                 }
@@ -387,8 +390,10 @@ namespace GameLogic.EditorTools
                     bad.Add(type + ".t" + tier);
                 }
             }
-            bool starters = new[] { "belt_t1", "pipe_t1", "pump", "tank", "valve", "power_pole", "recycler", "extraction_drill", "refinery_furnace", "parts_workshop", Lab }
-                .All(id => BuildCatalog.TryGet(id, out BuildEntry e) && e.UnlockRule == "always");
+            // FG9-ACT1-01（设计案 6.5）：传送带 T1 不再开局即可造，改由第一幕节奏台账在“第一次远征归来”时开放（pace:belts_open，FgAct1SelfCheck A3 / B4）；它仍不吃研究门槛。
+            bool starters = new[] { "pipe_t1", "pump", "tank", "valve", "power_pole", "recycler", "extraction_drill", "refinery_furnace", "parts_workshop", Lab }
+                .All(id => BuildCatalog.TryGet(id, out BuildEntry e) && e.UnlockRule == "always")
+                && BuildCatalog.TryGet("belt_t1", out BuildEntry beltT1) && beltT1.UnlockRule == "pace:belts_open";
             Expect(bad.Count == 0 && starters,
                 $"A3 研究门槛回写到 {gates.Length} 个建造菜单条目与 {tierGates.Length} 个建筑等级（承接 DEBT-FG3LOG03-07 / 04-01 / 05-01 / 06-01、DEBT-FG4ECO04-01 / 05-01 / 11-01），锁定说明写节点名；" +
                 $"开局必需（T1 传送带 / 管线、泵、储罐、阀门、电塔、回收站、提取钻、精炼炉、零件工坊、仿真实验室）仍开局可造（不符：{string.Join(",", bad)}）");

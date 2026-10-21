@@ -560,7 +560,89 @@ namespace GameLogic.EditorTools.JourneyBots
             SignalCoreHudUIToolkit hud = SignalCoreHudUIToolkit.Instance;
             return SignalCoreHudUIToolkit.IsOpen && hud != null && hud.PanelVisible
                 ? StepOutcome.Done($"信号核面板打开（HUD“{hud.EntryText}”）")
-                : StepOutcome.Retry("按信号核键后面板没有打开");
+                : StepOutcome.Retry("按信号核键后面板没有打开（" + InputBlockers() + "）");
+        }
+
+        /// <summary>
+        /// FG9-ACT1-01 修复轮：撤离之后的“走回家园”一步（FG8-EXP-05“到家才结算”起，撤离后远征队沿地形走回家园，到家才结算：离家报告、线索、货舱入库……）。
+        /// 像玩家一样点世界栏的 3 倍速等它到家，到家后点回 1 倍速（后面的步骤按 1 倍速写的）；到家结算后离家报告按设置“下一帧”自动打开（模态），
+        /// 记下打开过、再点“关闭”（真实按钮），不挡后面的按键步骤。M4 / M5 / M9A 共用（原来的旅程写于行军之前，撤离当场就核对，HEAD 上同样失败）。
+        /// </summary>
+        internal static StepOutcome TickWalkHome(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            CampaignState s = St;
+            if (ExpeditionMarchService.IsMarching(s))
+            {
+                if (c.GetInt("walk.fast") == 0)
+                {
+                    Button triple = JourneyInput.FindUitk<Button>("[WorldBarHost]", "WorldSpeed3");
+                    if (triple != null && JourneyInput.IsClickable(triple) && JourneyInput.ClickElement(triple))
+                    {
+                        c.SetInt("walk.fast", 1);
+                    }
+                }
+                c.SetLong("walk.home", 0);
+                return c.StepElapsed < 180 ? StepOutcome.Wait
+                    : StepOutcome.Fail($"撤离后远征队 180 秒内没走回家园（{ExpeditionMarchService.StatusOf(s)}，预计 {ExpeditionMarchService.EtaSeconds(s):0} 游戏秒）");
+            }
+            if (c.GetInt("walk.fast") == 1)
+            {
+                c.SetInt("walk.fast", 2);
+                Button normal = JourneyInput.FindUitk<Button>("[WorldBarHost]", "WorldSpeed1");
+                if (normal != null && JourneyInput.IsClickable(normal))
+                {
+                    JourneyInput.ClickElement(normal);
+                }
+            }
+            if (c.GetLong("walk.home") == 0)
+            {
+                c.SetLong("walk.home", Math.Max(1, FgjM3Common.NowMs()));
+                c.SetLong("walk.tick", GameClock.Ticks);
+            }
+            if (FgjM3Common.NowMs() - c.GetLong("walk.home") < 600)
+            {
+                return StepOutcome.Wait;
+            }
+            if (AwayReportPanelUIToolkit.IsOpen)
+            {
+                if (c.GetInt("walk.reportSeen") == 0)
+                {
+                    c.SetInt("walk.reportSeen", 1);
+                    c.Set("walk.report", $"离家报告自动打开（第 {AwayReportPanelUIToolkit.Instance?.ShownSerial} 份，“{AwayReportPanelUIToolkit.Instance?.SummaryText}”）后点关闭");
+                }
+                ClickUi(c, "[AwayReportHost]", "AwayReportClose");
+                return c.StepElapsed < 190 ? StepOutcome.Wait : StepOutcome.Retry("离家报告关不掉（" + UiFail(c) + "）");
+            }
+            // 跟随远征队走回来时镜头停在队伍到家的地方：像玩家一样按“跳回家园”（默认 H）把镜头带回归还核心（原来撤离当场镜头就回家园，后面的步骤按这个写的）。
+            if (c.GetInt("walk.jumped") == 0)
+            {
+                c.SetInt("walk.jumped", 1);
+                c.SetLong("walk.jumpAt", Math.Max(1, FgjM3Common.NowMs()));
+                JourneyInput.PressAction(GameActionId.JumpHome);
+                return StepOutcome.Wait;
+            }
+            if (FgjM3Common.NowMs() - c.GetLong("walk.jumpAt") < 1200)
+            {
+                return StepOutcome.Wait;
+            }
+            string report = c.Get("walk.report", "离家报告没有自动打开（设置关了或这次没有可报告的内容）");
+            c.SetInt("walk.jumped", 0);
+            c.SetInt("walk.fast", 0);
+            c.SetInt("walk.reportSeen", 0);
+            c.Set("walk.report", string.Empty);
+            return StepOutcome.Done($"远征队沿地形走回家园（{ExpeditionMarchService.StatusOf(s)}），第 {c.GetLong("walk.tick")} 步到家结算；{report}；按“跳回家园”镜头回到归还核心");
+        }
+
+        /// <summary>FG9-ACT1-01 修复轮：按键没生效时写明当时挡着输入的东西（模态占用者、Esc 栈顶、暂停 / 键盘让位、输入域、是否在世界里），
+        /// 失败报告直接能看出是哪个面板盖住了按键。只读，不改状态。</summary>
+        internal static string InputBlockers()
+        {
+            string owners = string.Join("、", InputRouter.ModalOwnerList.Select(o => o?.GetType().Name ?? "null"));
+            object page = UiEscapeStack.CurrentPage;
+            return $"模态占用 [{owners}]、Esc 栈顶 {(page == null ? "无" : page.GetType().Name)}、模态布尔 {InputRouter.ModalUiOpen}、" +
+                   $"键盘让位 {InputRouter.KeyboardSuppressed}、战略暂停 {InputRouter.StrategicPause}、输入域 {InputRouter.Scope}、上下文 {InputRouter.ActiveContext}、" +
+                   $"在世界里 {GameRoot.AnyRegionActive}、信号核实例 {(SignalCoreHudUIToolkit.Instance != null)}、IsOpen {SignalCoreHudUIToolkit.IsOpen}";
         }
 
         internal static void PrintOverload(JourneyContext c)

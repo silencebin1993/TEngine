@@ -345,6 +345,12 @@ namespace GameLogic.Campaign.Regions
                     ? Localization.GameText.Format("expedition.intel.enemy_plain", name, count, hp)
                     : Localization.GameText.Format("expedition.intel.enemy", name, count, hp, trait));
             }
+            // FG9-ACT1-01 修复轮：生成内容的世界里，地点外圈还有领地驻军（第一次去之前就写明，B06 不静默）。
+            string garrison = state != null ? SiteGarrisonService.IntelLine(state, regionId) : string.Empty;
+            if (!string.IsNullOrEmpty(garrison))
+            {
+                parts.Add(garrison);
+            }
             return string.Join(Localization.GameText.Get("expedition.intel.sep"), parts);
         }
 
@@ -816,6 +822,7 @@ namespace GameLogic.Campaign.Regions
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(restore.State); // FG2-FW-05：与读档一致，补解锁图鉴
             GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(restore.State); // FG8-EXP-04
             GameLogic.Narrative.NarrativeService.OnCampaignEntered(restore.State); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
+            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(restore.State); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
             GameRoot.ReenterHomeValley(); // FG8-EXP-02：回滚只发生在运行中的世界里，重进家园不做主菜单启动（与 ResumeHomeValley 同一段）
             Log.Info("[ExpeditionDepartureService] 已回滚到出发前档并重新进入归还谷地，未复制任何机器/货物/奖励。");
             return true;

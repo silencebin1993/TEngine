@@ -101,6 +101,9 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="Interact"/>/敌人 AI 视线判定共用（此前 SetupSquadCommands/SetupInteraction 各自
         /// 重建一份等价列表，这里合并为单一来源，行为不变）。</summary>
         private List<(Vector2 Position, float Radius)> _obstacles;
+        /// <summary>FG9-ACT1-01（DEBT-FG0ARCH01-01）：本地点的生成内容（星球真实地形的障碍、领地驻军、熔渣热区）；旧世界为 null（Demo 原样）。</summary>
+        private SiteGenContent _siteGen;
+        public SiteGenContent SiteGen => _siteGen;
 
         /// <summary>ER5-SILENT-01：静默侦察机扫描脉冲的可视化到期时间（Unity 真实时间，不受战略
         /// 暂停/慢放影响——纯反馈动画，不是游戏状态），键为敌人实例 ID。</summary>
@@ -134,6 +137,8 @@ namespace GameLogic.Campaign.Regions
             }
 
             FracturedCityRegion.EnsureEnemiesSeeded(state);
+            // FG9-ACT1-01（DEBT-FG0ARCH01-01）：领地驻军据点按当前驻军播种成本地点的敌人（读档续玩时已在存档里，不重复）。
+            SiteGarrisonService.SeedOnEnter(state, FracturedCityLayout.RegionId);
             if (region.State == RegionState.Available)
             {
                 region.State = RegionState.Active;
@@ -155,6 +160,15 @@ namespace GameLogic.Campaign.Regions
             foreach (FracturedCityLayout.Anchor anchor in FracturedCityLayout.AllAnchors())
             {
                 _obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+            // FG9-ACT1-01：地点外圈是星球上这片领地的真实地形——悬崖 / 水面成为障碍（挡路、挡视线，与 Demo 锚点的净空同一套避障）。
+            _siteGen = SiteGenLayout.For(state, FracturedCityLayout.RegionId);
+            if (_siteGen != null)
+            {
+                foreach (Vector3 o in _siteGen.Obstacles)
+                {
+                    _obstacles.Add((new Vector2(o.x, o.y), o.z));
+                }
             }
 
             // FG0-ARCH-03：机器与敌人进本地点的战斗内核（读档时从快照恢复；新派遣按记录建）。表现对象只在被观察时建（SetObserved）。
@@ -1027,7 +1041,8 @@ namespace GameLogic.Campaign.Regions
             {
                 DirectAnchor = TryGetPossessedAnchor,
                 EnsureDirectTarget = EnsureDirectTarget,
-                ArenaHalfExtent = FracturedCityLayout.CameraBoundsHalfExtentX,
+                // FG9-ACT1-01：有生成内容时方形平移范围放大到覆盖整个地点窗口（领地的这一块）；不用 DynamicBounds——跨地点飞跃（Tab）时会被它钳住。
+                ArenaHalfExtent = _siteGen != null ? Mathf.Max(_siteGen.HalfX, Mathf.Max(Mathf.Abs(_siteGen.Center.y - _siteGen.HalfY), Mathf.Abs(_siteGen.Center.y + _siteGen.HalfY))) : FracturedCityLayout.CameraBoundsHalfExtentX,
                 FollowOffset = new Vector3(0f, 40f, 0f),
                 InitialStrategyOrthographicSize = FracturedCityLayout.CameraBoundsHalfExtentZ,
                 InitialDirectOrthographicSize = 14f,
@@ -1059,6 +1074,8 @@ namespace GameLogic.Campaign.Regions
                 HostileUnit = id => _combat != null && _combat.TryGetEnemyUnit(id, out int u) ? u : 0,
                 AttackRange = AttackRange,
                 AttackCooldownSeconds = CombatSite.MachineAttackInterval, // fg.TbHomeTuning combat.machine.attack_interval（与即时命中武器的冷却同一个数）
+                // FG9-ACT1-01 修复轮：生成内容的世界里，移动目的地夹进地点窗口（领地的这一块）；旧世界保持 Demo 原样（不钳制）。
+                ClampDestination = p => _siteGen != null ? _siteGen.ClampToPlayable(p) : p,
             };
             SquadCommands.Bind(_squadCtx);
         }
@@ -1088,6 +1105,7 @@ namespace GameLogic.Campaign.Regions
         {
             _root = new GameObject("[FracturedCityRoot]");
             _enemyBadges.Clear();
+            SiteGenVisuals.Build(_root.transform, state, _siteGen); // FG9-ACT1-01：生成内容的占位表现（DEBT-FG9ACT101-01）
 
             BuildAnchorVisual(FracturedCityLayout.EntryEvac, PrimitiveType.Cylinder, new Color(0.2f, 0.7f, 0.9f, 0.5f), 0.05f, true);
             BuildAnchorVisual(FracturedCityLayout.RecoveryLocker, PrimitiveType.Cube, new Color(0.6f, 0.5f, 0.2f), 0.8f, false);
@@ -1326,6 +1344,7 @@ namespace GameLogic.Campaign.Regions
             }
             // FG8-LOOT-03（FG-GAP-104）：地上的数据包 / 黑匣子/ 地面物的地面外观（版本变了才对账）。
             _lootVisuals.Sync(state, FracturedCityLayout.RegionId, _root.transform, includeGround: true);
+            SiteGenVisuals.SyncGarrisonMarkers(_root.transform, state, _siteGen); // FG9-ACT1-01 修复轮：摧毁的驻军标记当场消失
             RegionRecord region = FracturedCityRegion.Find(state);
             bool nodeDestroyed = region?.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(FracturedCityLayout.ListeningNodeId);
 

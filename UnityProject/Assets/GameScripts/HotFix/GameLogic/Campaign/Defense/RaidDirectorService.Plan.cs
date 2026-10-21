@@ -269,7 +269,8 @@ namespace GameLogic.Campaign.Defense
             foreach (OutpostRecord o in WorldOutpostSystem.Outposts(s))
             {
                 // FG8-EXP-03：精英残部不作突袭出发地（它们只在已收复领地里等玩家来刷）。
-                if (o == null || o.Destroyed || o.Kind == WorldOutpostSystem.KindRemnant || FactionOfOutpost(s, o) != p.Faction)
+                // FG9-ACT1-01：远征地点里的驻军据点（kind = site）在地点内部，不作突袭出发地（突袭从星球上的据点沿地形出发）。
+                if (o == null || o.Destroyed || o.Kind == WorldOutpostSystem.KindRemnant || o.Kind == WorldOutpostSystem.KindSite || FactionOfOutpost(s, o) != p.Faction)
                 {
                     continue;
                 }

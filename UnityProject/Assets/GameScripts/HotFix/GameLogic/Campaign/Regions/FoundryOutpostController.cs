@@ -94,6 +94,9 @@ namespace GameLogic.Campaign.Regions
         private const float AttackRange = 7f;
 
         private List<(Vector2 Position, float Radius)> _obstacles;
+        /// <summary>FG9-ACT1-01（DEBT-FG0ARCH01-01）：本地点的生成内容（星球真实地形的障碍、领地驻军、熔渣热区）；旧世界为 null（Demo 原样）。</summary>
+        private SiteGenContent _siteGen;
+        public SiteGenContent SiteGen => _siteGen;
 
         public void Enter(IEnumerable<int> expeditionLogicIds, bool resume)
         {
@@ -119,6 +122,8 @@ namespace GameLogic.Campaign.Regions
             }
 
             FoundryOutpostRegion.EnsureEnemiesSeeded(state);
+            // FG9-ACT1-01（DEBT-FG0ARCH01-01）：领地驻军据点按当前驻军播种成本地点的敌人（读档续玩时已在存档里，不重复）。
+            SiteGarrisonService.SeedOnEnter(state, FoundryOutpostLayout.RegionId);
             if (region.State == RegionState.Available)
             {
                 region.State = RegionState.Active;
@@ -134,6 +139,15 @@ namespace GameLogic.Campaign.Regions
             foreach (FoundryOutpostLayout.Anchor anchor in FoundryOutpostLayout.AllAnchors())
             {
                 _obstacles.Add((anchor.Position, anchor.ClearanceRadius));
+            }
+            // FG9-ACT1-01：地点外圈是星球上这片领地的真实地形——悬崖 / 水面成为障碍（挡路、挡视线，与 Demo 锚点的净空同一套避障）。
+            _siteGen = SiteGenLayout.For(state, FoundryOutpostLayout.RegionId);
+            if (_siteGen != null)
+            {
+                foreach (Vector3 o in _siteGen.Obstacles)
+                {
+                    _obstacles.Add((new Vector2(o.x, o.y), o.z));
+                }
             }
 
             // FG0-ARCH-03：机器与敌人进本地点的战斗内核（读档时从快照恢复；新派遣按记录建）。表现对象只在被观察时建（SetObserved）。
@@ -298,6 +312,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             SquadCommands.TickSim(dt);
+            Env.SlagHeatService.SiteStep(state, _siteGen); // FG9-ACT1-01：信号所在的机器第一次进入某片地点熔渣热区时提示一次
             RecomputeCoreGateIfInputsChanged(state);
             TickCoreZoneEntry(state);
             FoundryOutpostCoreBoss.Tick(state, dt); // 首领阶段状态机（O(1)）；主核心开火在内核里。
@@ -666,6 +681,15 @@ namespace GameLogic.Campaign.Regions
             RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
             double maxY = region != null && !region.CoreGateUnlocked ? FoundryOutpostLayout.CoreGateBlockLineY : CombatConst.NoClamp;
             double minY = region != null && region.CoreLockoutActive ? FoundryOutpostLayout.CoreLockoutLineY : -CombatConst.NoClamp;
+            // FG9-ACT1-01 修复轮：直控的机器在外圈（Demo 核心区宽度之外、外圈上沿以下）时，y 上限 = 外圈上沿（核心区两侧的禁区开不进去）。
+            if (_siteGen != null && _possessed != null)
+            {
+                Vector3 at = _possessed.Position3;
+                if (Mathf.Abs(at.x) > _siteGen.Row.DemoHalfX && at.z <= _siteGen.OuterMaxY + 0.05f)
+                {
+                    maxY = Math.Min(maxY, _siteGen.OuterMaxY);
+                }
+            }
             _combat?.SetDirectClamp(minY, maxY);
         }
 
@@ -1050,7 +1074,8 @@ namespace GameLogic.Campaign.Regions
             {
                 DirectAnchor = TryGetPossessedAnchor,
                 EnsureDirectTarget = EnsureDirectTarget,
-                ArenaHalfExtent = FoundryOutpostLayout.CameraBoundsHalfExtentX,
+                // FG9-ACT1-01：有生成内容时方形平移范围放大到覆盖整个地点窗口（领地的这一块）；不用 DynamicBounds——跨地点飞跃（Tab）时会被它钳住。
+                ArenaHalfExtent = _siteGen != null ? Mathf.Max(_siteGen.HalfX, Mathf.Max(Mathf.Abs(_siteGen.Center.y - _siteGen.HalfY), Mathf.Abs(_siteGen.Center.y + _siteGen.HalfY))) : FoundryOutpostLayout.CameraBoundsHalfExtentX,
                 FollowOffset = new Vector3(0f, 40f, 0f),
                 InitialStrategyOrthographicSize = FoundryOutpostLayout.CameraBoundsHalfExtentZ,
                 InitialDirectOrthographicSize = 14f,
@@ -1100,6 +1125,12 @@ namespace GameLogic.Campaign.Regions
         {
             CampaignState state = CampaignSession.Current;
             RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
+            // FG9-ACT1-01 修复轮（第 1 轮审查 P1）：生成内容的世界里先把目的地夹进能去的范围——核心区两侧 / 上方是要塞外墙外的禁区（SiteGenContent.OuterMaxY），
+            // 这样“越过 Y 线”仍然只可能发生在核心区里，核心门 / 首领进场 / 场地边界的 Y 线判定不会被外圈机器误触发。
+            if (_siteGen != null)
+            {
+                target = _siteGen.ClampToPlayable(target);
+            }
             if (region == null)
             {
                 return target;
@@ -1110,7 +1141,9 @@ namespace GameLogic.Campaign.Regions
             }
             if (region.CoreLockoutActive && target.y < FoundryOutpostLayout.CoreLockoutLineY)
             {
-                return new Vector2(target.x, FoundryOutpostLayout.CoreLockoutLineY);
+                // 区域封锁：目的地留在核心区里（生成内容的世界里横向也夹进 Demo 核心区的宽度，不会被拉到禁区里）。
+                float x = _siteGen != null ? Mathf.Clamp(target.x, -_siteGen.Row.DemoHalfX, _siteGen.Row.DemoHalfX) : target.x;
+                return new Vector2(x, FoundryOutpostLayout.CoreLockoutLineY);
             }
             return target;
         }
@@ -1122,7 +1155,19 @@ namespace GameLogic.Campaign.Regions
             {
                 return null;
             }
-            return _combat.TryFindNearestEnemy(worldPoint, pickRadius, out string id) ? ResolveEnemyHostile(id) : null;
+            RegionHostileInfo? hit = _combat.TryFindNearestEnemy(worldPoint, pickRadius, out string id) ? ResolveEnemyHostile(id) : null;
+            // FG9-ACT1-01 修复轮（第 1 轮审查 P1）：核心门锁着时，门后（核心区里）的敌人不能用右键攻击点选——否则攻击追击会把机器带过封锁线
+            // （移动命令有 ClampAgainstCoreGate，攻击命令没有），破坏“门锁着任何绕路都进不去”。这时右键按移动处理，目的地被夹在门前。
+            if (hit != null && FoundryOutpostRegion.IsBeyondCoreGateLine(hit.Value.Position))
+            {
+                CampaignState state = CampaignSession.Current;
+                RegionRecord region = state != null ? FoundryOutpostRegion.Find(state) : null;
+                if (region != null && !region.CoreGateUnlocked)
+                {
+                    return null;
+                }
+            }
+            return hit;
         }
 
         private RegionHostileInfo? ResolveEnemyHostile(string hostileId)
@@ -1140,6 +1185,7 @@ namespace GameLogic.Campaign.Regions
         {
             _root = new GameObject("[FoundryOutpostRoot]");
             _enemyBadges.Clear();
+            SiteGenVisuals.Build(_root.transform, state, _siteGen); // FG9-ACT1-01：生成内容的占位表现（DEBT-FG9ACT101-01）
 
             BuildAnchorVisual(FoundryOutpostLayout.EntryEvac, PrimitiveType.Cylinder, new Color(0.2f, 0.7f, 0.9f, 0.5f), 0.05f, true);
             BuildAnchorVisual(FoundryOutpostLayout.RecoveryLocker, PrimitiveType.Cube, new Color(0.6f, 0.5f, 0.2f), 0.8f, false);
@@ -1297,6 +1343,8 @@ namespace GameLogic.Campaign.Regions
             _combat = CombatSites.Open(SiteId, state, resume, _combatRules, out bool restored);
             _combat.Squad = SquadCommands;
             _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
+            // FG9-ACT1-01（ADR-FAC-003 第 9 节第 13 条的承接）：前哨外圈的熔渣热区——区内武器散热变慢，敌我同一规则（派生量，进场 / 读档都重写一次）。
+            Env.SlagHeatService.ApplySiteZones(_combat, _siteGen);
             RegionRecord region = FoundryOutpostRegion.Find(state);
             if (!restored)
             {
@@ -1385,6 +1433,7 @@ namespace GameLogic.Campaign.Regions
             }
             // FG8-LOOT-03（FG-GAP-104）：地上的数据包 / 黑匣子/ 地面物的地面外观（版本变了才对账）。
             _lootVisuals.Sync(state, FoundryOutpostLayout.RegionId, _root.transform, includeGround: true);
+            SiteGenVisuals.SyncGarrisonMarkers(_root.transform, state, _siteGen); // FG9-ACT1-01 修复轮：摧毁的驻军标记当场消失
             RegionRecord region = FoundryOutpostRegion.Find(state);
 
             RefreshColor("Poi_" + FoundryOutpostLayout.Crate1Id, CrateColor(state, FoundryOutpostLayout.Crate1Id));

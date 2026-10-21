@@ -144,6 +144,84 @@ namespace GameLogic.Campaign.Env
             GuidanceHooks.Raise("foundry.first_slag");
         }
 
+        // ── FG9-ACT1-01：远征地点（铸造前哨）里的熔渣热区（地点局部坐标，SiteGenLayout 按种子放在 Demo 布局之外）──
+
+        private static readonly List<float3> SiteCircles = new List<float3>(4);
+
+        /// <summary>地点战斗内核打开 / 读档后写入地点里的熔渣热区（派生量）。没有生成内容 / 没有热区时写空（与之前完全一样）。返回写了几片。</summary>
+        public static int ApplySiteZones(CombatSite site, SiteGenContent c)
+        {
+            if (site == null || site.IsDisposed)
+            {
+                return 0;
+            }
+            SiteCircles.Clear();
+            if (c != null)
+            {
+                foreach (Vector3 z in c.SlagZones)
+                {
+                    SiteCircles.Add(new float3(z.x, z.y, z.z));
+                }
+            }
+            if (SiteCircles.Count == 0)
+            {
+                return 0;
+            }
+            site.SetSlagZones(SiteCircles, DissipationMult);
+            return SiteCircles.Count;
+        }
+
+        /// <summary>地点里某个局部位置在哪片熔渣热区（地点 ID#序号；不在返回 null）。O(区数)。</summary>
+        public static string SiteZoneAt(SiteGenContent c, Vector2 local)
+        {
+            if (c == null)
+            {
+                return null;
+            }
+            for (int i = 0; i < c.SlagZones.Count; i++)
+            {
+                Vector3 z = c.SlagZones[i];
+                float dx = local.x - z.x;
+                float dy = local.y - z.y;
+                if (dx * dx + dy * dy <= z.z * z.z)
+                {
+                    return c.SiteId + "#" + i.ToString();
+                }
+            }
+            return null;
+        }
+
+        /// <summary>信号所在的机器第一次进入地点里的某片熔渣热区时提示一次（每游戏秒一次，只看步序号；同一片只一次，进存档）。</summary>
+        public static void SiteStep(CampaignState s, SiteGenContent c)
+        {
+            if (s == null || c == null || c.SlagZones.Count == 0 || GameClock.Ticks % Math.Max(1, GameClock.StepHz) != 0)
+            {
+                return;
+            }
+            int id = Signal.SignalUplinkService.CurrentMachine(s);
+            if (id == 0 || !MachineRegistry.TryGetRecord(id, out MachineRecord m) || m == null || m.RegionId != c.SiteId)
+            {
+                return;
+            }
+            Vector2 pos = MachineRegistry.TryGetLivePosition(id, out Vector2 live) ? live : m.WorldPosition;
+            string zone = SiteZoneAt(c, pos);
+            if (zone == null)
+            {
+                return;
+            }
+            CampaignFgStateDomains.EnsureAll(s);
+            if (Array.IndexOf(s.Factions.SiteSlagNoticed, zone) >= 0)
+            {
+                return;
+            }
+            var list = new List<string>(s.Factions.SiteSlagNoticed) { zone };
+            list.Sort(StringComparer.Ordinal);
+            s.Factions.SiteSlagNoticed = list.ToArray();
+            Notices++;
+            NotificationCenter.Post("slag_heat", GameText.Format("site.slag.notify", Mathf.RoundToInt((1f - DissipationMult) * 100f)), null);
+            GuidanceHooks.Raise("foundry.first_slag");
+        }
+
         /// <summary>悬停说明里“效果”这一行（熔渣热区已生效）。</summary>
         public static string HoverLine() =>
             GameText.Format("hazard.slag_heat.active", Mathf.RoundToInt((1f - DissipationMult) * 100f).ToString());

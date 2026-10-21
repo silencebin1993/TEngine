@@ -39,6 +39,8 @@ namespace GameLogic.Campaign
         public const string UnlockTerritoryVisible = "territory_visible";
         public const string UnlockPrereq = "prereq";
         public const string UnlockSideFound = "side_found";
+        /// <summary>FG9-ACT1-01：第一幕节奏点到达后出现（前置列写节奏点 ID，fg.TbActPacing）。</summary>
+        public const string UnlockPace = "pace";
 
         public const string None = "none";
 

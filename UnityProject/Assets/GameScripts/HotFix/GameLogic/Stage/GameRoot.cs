@@ -445,6 +445,7 @@ namespace GameLogic.Stage
             Campaign.Signal.FirmwareLibrary.OnCampaignEntered(result.State);
             Campaign.Env.HeritageService.OnCampaignEntered(result.State); // FG8-EXP-04
             GameLogic.Narrative.NarrativeService.OnCampaignEntered(result.State); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
+            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(result.State); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
             Log.Info($"[GameRoot] 失败页读取自动存档：槽位 {slot}，campaignId={result.State.CampaignId}");
             ResumeCampaign();
             SaveContentReconciler.RaiseLoadNotices(result.Notices);

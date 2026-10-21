@@ -231,7 +231,8 @@ namespace GameLogic.Campaign.WorldSim
             total = 0;
             foreach (OutpostRecord o in WorldOutpostSystem.Outposts(s))
             {
-                if (o == null || o.Kind != WorldOutpostSystem.KindTerritory || o.TerritoryId != territoryId)
+                // FG9-ACT1-01（DEBT-FG8EXP03-06）：远征地点里的领地驻军据点（kind = site）同样计入控制度。
+                if (o == null || !CountsForControl(o) || o.TerritoryId != territoryId)
                 {
                     continue;
                 }
@@ -244,6 +245,10 @@ namespace GameLogic.Campaign.WorldSim
             }
             return total <= 0 ? 100 : (int)(alive * 100L / total);
         }
+
+        /// <summary>FG9-ACT1-01：计入领地控制度的据点种类——领地主力据点与远征地点里的领地驻军据点。</summary>
+        public static bool CountsForControl(OutpostRecord o) =>
+            o != null && (o.Kind == WorldOutpostSystem.KindTerritory || o.Kind == WorldOutpostSystem.KindSite);
 
         /// <summary>战略地图上的领地标签：“名字（控制度 N% · 敌控 / 平定中 / 已收复）”；旧世界（没有领地据点）写“待侦察”。</summary>
         public static string MapLabel(CampaignState s, PlannedTerritory t)
@@ -462,7 +467,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             foreach (OutpostRecord o in WorldOutpostSystem.Outposts(s))
             {
-                if (o != null && o.TerritoryId == r.TerritoryId && o.Kind == WorldOutpostSystem.KindTerritory)
+                if (o != null && o.TerritoryId == r.TerritoryId && CountsForControl(o)) // 修复轮：地点驻军（kind = site）一并停止增援
                 {
                     WorldOutpostSystem.StopReinforcement(s, o);
                 }
@@ -547,7 +552,9 @@ namespace GameLogic.Campaign.WorldSim
             OutpostScratch.Clear();
             foreach (OutpostRecord o in WorldOutpostSystem.Outposts(s))
             {
-                if (o != null && o.Destroyed && o.Kind == WorldOutpostSystem.KindTerritory && o.TerritoryId == r.TerritoryId)
+                // FG9-ACT1-01：远征地点里的驻军据点同样会被增援重建；地点正载入（玩家的机器就在里面）时不重建（不在玩家眼前凭空出现）。
+                if (o != null && o.Destroyed && CountsForControl(o) && o.TerritoryId == r.TerritoryId
+                    && !(o.Kind == WorldOutpostSystem.KindSite && Regions.SiteGarrisonService.SiteBusy(Regions.SiteGarrisonService.SiteOfOutpost(o.OutpostId))))
                 {
                     OutpostScratch.Add(o);
                 }
@@ -570,7 +577,7 @@ namespace GameLogic.Campaign.WorldSim
                     break;
                 }
                 uint h = WorldGenMath.Hash(seed, tIndex * 1000 + r.Reinforcements, StableHash(o.OutpostId), 0x5245494Eu); // "REIN"
-                if ((h & 0xFFFFFF) / (double)0x1000000 >= chance || NearOwn(o.CellX, o.CellY, block))
+                if ((h & 0xFFFFFF) / (double)0x1000000 >= chance || (o.Kind != WorldOutpostSystem.KindSite && NearOwn(o.CellX, o.CellY, block)))
                 {
                     continue;
                 }
@@ -827,7 +834,8 @@ namespace GameLogic.Campaign.WorldSim
             bool nests = ScoutNestsEngage;
             foreach (OutpostRecord o in OutpostScratch)
             {
-                if (o == null || o.Destroyed || (!nests && !o.Engaged && o.Kind == WorldOutpostSystem.KindScoutNest))
+                // FG9-ACT1-01：远征地点里的驻军据点在地点内部打（进场时按驻军播种），不在星球上迎战展开。
+                if (o == null || o.Destroyed || o.Kind == WorldOutpostSystem.KindSite || (!nests && !o.Engaged && o.Kind == WorldOutpostSystem.KindScoutNest))
                 {
                     continue;
                 }
@@ -1137,6 +1145,61 @@ namespace GameLogic.Campaign.WorldSim
             GuidanceHooks.Raise(GuidanceHooks.WorldFirstOutpostDestroyed);
         }
 
+        /// <summary>
+        /// FG9-ACT1-01（DEBT-FG8EXP03-06“地点内容就是领地据点，打掉计入控制度”）：远征地点里一处驻军据点的敌人全部阵亡 = 据点被摧毁。
+        /// 与星球上迎战全灭（<see cref="Routed"/>）同一结算：突袭导演记方向、控制度重算并通知、按等级的废料与据点掉落表——掉在**地点里**驻军所在处（远征队走近自动拾取）。
+        /// 返回 false = 已经是摧毁状态（重复调用不重复结算）。
+        /// </summary>
+        public static bool RouteSiteGarrison(CampaignState s, OutpostRecord o, string siteId, Vector2 localPos)
+        {
+            if (s == null || o == null || o.Kind != WorldOutpostSystem.KindSite)
+            {
+                return false;
+            }
+            EnsureState(s);
+            string territory = o.TerritoryId;
+            int before = ComputeControl(s, territory, out _, out _);
+            if (!WorldOutpostSystem.MarkDestroyed(s, o.OutpostId))
+            {
+                return false;
+            }
+            RoutedCount++;
+            TerritoryControlState st = StateOf(s);
+            int scrap = Math.Max(0, Math.Max(1, o.Tier) * Mathf.RoundToInt(T("site.garrison.scrap_per_tier", ScrapPerTier)));
+            if (scrap > 0)
+            {
+                HomeValleyCargo.SpawnGroundItem(s, siteId, localPos, CampaignEconomyLedger.ResourceScrap, scrap, LootPrefix + o.OutpostId + ":" + o.DestroyCount);
+            }
+            Economy.FieldLootService.OnOutpostDestroyed(s, FactionOf(s, o), localPos, siteId);
+            st.OutpostsDestroyed++;
+            RecomputeAll(s);
+            int after = Find(s, territory)?.Control ?? ComputeControl(s, territory, out _, out _);
+            // 修复轮（第 1 轮审查 P2）：通知的“定位”按发通知时镜头所在的地点解释——镜头就在这个远征地点里时给地点局部坐标（驻军所在处），
+            // 否则给星球格（战略地图上驻军据点的位置）。
+            Vector3 where = Stage.GameRoot.ActiveRegionId == siteId ? new Vector3(localPos.x, 0f, localPos.y) : new Vector3(o.CellX, 0f, o.CellY);
+            NotificationCenter.Post(NotifyAlert, GameText.Format("site.garrison.notify.destroyed", TerritoryName(s, territory), before, after, scrap), where);
+            GameEvent.Send(ChangedEvent, territory);
+            GuidanceHooks.Raise(GuidanceHooks.WorldFirstOutpostDestroyed);
+            GuidanceHooks.Raise(GuidanceHooks.SiteFirstGarrisonDestroyed);
+            Log.Info($"[TerritoryControlService] 远征地点 {siteId} 的驻军据点 {o.OutpostId} 被摧毁：{territory} 控制度 {before}% → {after}%");
+            return true;
+        }
+
+        /// <summary>FG9-ACT1-01：某阵营据点驻军的敌人类型序列（与星球上迎战展开同一编成：fg.TbTerritoryControl.garrisonUnits 按人数循环取）。</summary>
+        public static void GarrisonEnemyTypes(string territoryId, int count, List<string> into)
+        {
+            into.Clear();
+            BuildUnits(Row(territoryId)?.GarrisonUnits, count, territoryId, false);
+            foreach ((RaidUnitDef def, bool _) in UnitScratch)
+            {
+                if (def != null && !string.IsNullOrEmpty(def.EnemyTypeId))
+                {
+                    into.Add(def.EnemyTypeId);
+                }
+            }
+            UnitScratch.Clear();
+        }
+
         private static void PatrolRouted(CampaignState s, PatrolRecord p, OutpostRecord o)
         {
             string id = p.PatrolId;
@@ -1151,10 +1214,10 @@ namespace GameLogic.Campaign.WorldSim
 
         /// <summary>据点属于哪个阵营（领地据点 = 领地 ID；零散前哨 / 侦察巢按突袭导演的归属规则）。</summary>
         private static string FactionOf(CampaignState s, OutpostRecord o) =>
-            o.Kind == WorldOutpostSystem.KindTerritory || o.Kind == WorldOutpostSystem.KindRemnant ? o.TerritoryId : RaidDirectorService.FactionOfOutpost(s, o) ?? o.TerritoryId;
+            o.Kind == WorldOutpostSystem.KindTerritory || o.Kind == WorldOutpostSystem.KindRemnant || o.Kind == WorldOutpostSystem.KindSite ? o.TerritoryId : RaidDirectorService.FactionOfOutpost(s, o) ?? o.TerritoryId;
 
         private static string OwnerName(CampaignState s, OutpostRecord o) =>
-            o.Kind == WorldOutpostSystem.KindTerritory || o.Kind == WorldOutpostSystem.KindRemnant ? TerritoryName(s, o.TerritoryId) : OutpostName(o);
+            o.Kind == WorldOutpostSystem.KindTerritory || o.Kind == WorldOutpostSystem.KindRemnant || o.Kind == WorldOutpostSystem.KindSite ? TerritoryName(s, o.TerritoryId) : OutpostName(o);
 
         /// <summary>据点名（地图标签同一套文本）：“静默据点（3 级）”“铸造零散前哨（5 级）”“侦察巢（2 级）”“精英残部”。</summary>
         public static string OutpostName(OutpostRecord o)
@@ -1165,6 +1228,7 @@ namespace GameLogic.Campaign.WorldSim
                 : o.Kind == WorldOutpostSystem.KindTerritory ? GameText.Format("world.poi.outpost", faction, Math.Max(1, o.Tier))
                 : o.Kind == WorldOutpostSystem.KindScatter || o.Kind == WorldOutpostSystem.KindOuter ? GameText.Format("world.poi.scatter_outpost", faction, Math.Max(1, o.Tier))
                 : o.Kind == WorldOutpostSystem.KindRemnant ? GameText.Get("world.poi.remnant")
+                : o.Kind == WorldOutpostSystem.KindSite ? GameText.Format("site.garrison.name", faction, Math.Max(1, o.Tier))
                 : GameText.Get("outpost.name");
         }
 

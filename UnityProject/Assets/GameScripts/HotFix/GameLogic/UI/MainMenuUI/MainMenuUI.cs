@@ -1092,6 +1092,7 @@ namespace GameLogic
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(state);
             GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(state); // FG8-EXP-04：遗产挑遗迹点、图鉴补解锁
             GameLogic.Narrative.NarrativeService.OnCampaignEntered(state); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
+            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(state); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
             Log.Info($"[MainMenuUI] 新战役已创建：campaignId={campaignId} slot={slotIndex} phase={state.CampaignPhase}");
 
             // ER2-SCENE-01：新战役进入归还谷地正式场景。GameApp.MountGameplayUi() 幂等，
@@ -1137,6 +1138,7 @@ namespace GameLogic
             GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(result.State);
             GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(result.State); // FG8-EXP-04
             GameLogic.Narrative.NarrativeService.OnCampaignEntered(result.State); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
+            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(result.State); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
             Log.Info($"[MainMenuUI] 已读取战役：campaignId={result.State.CampaignId} slot={slotIndex} " +
                 $"phase={result.State.CampaignPhase}");
 

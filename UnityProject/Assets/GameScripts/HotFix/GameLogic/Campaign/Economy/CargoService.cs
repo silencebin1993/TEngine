@@ -751,6 +751,9 @@ namespace GameLogic.Campaign.Economy
             StepMaxMs = Math.Max(StepMaxMs, ms);
         }
 
+        /// <summary>FG9-ACT1-01：远征地点（Demo 两张地图换成的领地一角）。</summary>
+        public static bool IsExpeditionSite(string region) => region == FracturedCityLayout.RegionId || region == FoundryOutpostLayout.RegionId;
+
         private static bool InDepot(string region, Vector2 at)
         {
             if (region != HomeValleyLayout.RegionId)
@@ -1083,7 +1086,8 @@ namespace GameLogic.Campaign.Economy
             {
                 // 先做最便宜的判定（地点 + 离队员的距离，O(队员数)、不分配），绝大多数远处的地面物在这里就跳过；身份查询 / 开关只对走近的做。
                 // FG9-FAC-01：室内场地（地下中继大厅）里打掉的敌人掉的普通战利品也由进去的队员自动捡（与星球表面同一规则）。
-                if (g == null || g.Amount <= 0 || (g.RegionId != HomeValleyLayout.RegionId && !InteriorSiteService.IsInteriorSurface(g.RegionId))
+                // FG9-ACT1-01（DEBT-FG8EXP05-01）：远征地点（破碎都市 / 铸造前哨）里的普通战利品同样走近自动拾取；关键物（RegionQuestItems）仍是“装载”交互（目标链的确认动作）。
+                if (g == null || g.Amount <= 0 || (g.RegionId != HomeValleyLayout.RegionId && !InteriorSiteService.IsInteriorSurface(g.RegionId) && !IsExpeditionSite(g.RegionId))
                     || !NearAnyMember(g.RegionId, g.Position)
                     || InDepot(g.RegionId, g.Position) || IsDiscarded(st, g.SalvageInstanceId))
                 {

@@ -231,7 +231,26 @@ namespace GameLogic.Campaign.Env
         // ── 远征准备提示（FGR-ENV-013）──
 
         /// <summary>按 env.silent.expedition_estimate_hours 估计的远征会不会跨过下一次（或正在进行的）静默夜；会就返回提示文字，否则 null。</summary>
-        public static string ExpeditionCrossText(CampaignState s)
+        public static string ExpeditionCrossText(CampaignState s) => ExpeditionCrossText(s, ExpeditionEstimateHours * GameClock.HourSeconds);
+
+        /// <summary>
+        /// FG9-ACT1-01（承接 DEBT-FG7ENV02-03）：按真实路线估远征时长——去程 + 回程（锚点路线长度 ÷ 这支队伍的行军速度，FG8-EXP-02 同一路线与速度）
+        /// + 在地点里停留 env.silent.expedition_site_hours；锚点路线还没算出 / 队伍没有能走的机器时回到固定估计。单位：游戏秒。
+        /// </summary>
+        public static double ExpeditionEstimateSeconds(CampaignState s, string siteId, IReadOnlyList<int> roster)
+        {
+            double fallback = ExpeditionEstimateHours * GameClock.HourSeconds;
+            float route = s != null && !string.IsNullOrEmpty(siteId) ? Regions.ExpeditionSiteAnchors.RouteLength(s, siteId) : -1f;
+            float speed = Regions.ExpeditionMarchService.MarchSpeed(roster);
+            if (route < 0f || speed <= 0f)
+            {
+                return fallback;
+            }
+            return 2.0 * route / speed + Math.Max(0.0, Tuning("env.silent.expedition_site_hours", 2f)) * GameClock.HourSeconds;
+        }
+
+        /// <summary>同 <see cref="ExpeditionCrossText(CampaignState)"/>，估时由调用方给出（游戏秒；派遣检查单按路线估）。</summary>
+        public static string ExpeditionCrossText(CampaignState s, double estimateSeconds)
         {
             SilentNightState d = s?.Weather?.SilentNight;
             if (d == null || d.NextDay <= 0 || d.StartTick < 0)
@@ -239,7 +258,7 @@ namespace GameLogic.Campaign.Env
                 return null;
             }
             long now = GameClock.Ticks;
-            long until = now + GameClock.TicksFor(ExpeditionEstimateHours * GameClock.HourSeconds);
+            long until = now + GameClock.TicksFor(Math.Max(0.0, estimateSeconds));
             if (!(d.Active || (d.StartTick >= now && d.StartTick <= until)))
             {
                 return null;
@@ -250,7 +269,7 @@ namespace GameLogic.Campaign.Env
                 // 正在进行：不能再说“会跨过下一个静默夜（X 开始）”——X 已经过去；改说现在出发会怎样、到几点结束。
                 return GameText.Format("env.silent.expedition_during", GameClock.FormatDayTime(d.EndTick / hz));
             }
-            return GameText.Format("env.silent.expedition_cross", CalendarService.ShortDuration(ExpeditionEstimateHours * GameClock.HourSeconds),
+            return GameText.Format("env.silent.expedition_cross", CalendarService.ShortDuration(Math.Max(0.0, estimateSeconds)),
                 GameClock.FormatDayTime(d.StartTick / hz));
         }
 

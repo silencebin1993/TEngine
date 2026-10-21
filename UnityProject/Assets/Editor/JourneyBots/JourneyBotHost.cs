@@ -30,6 +30,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM6ReverseJourney.Id, FgjM6ReverseJourney.Build }, // FG6-E2E-01：M6 反向旅程（IC-REQ-022 六类）
             { FgjM7Journey.Id, FgjM7Journey.Build }, // FG7-E2E-01：M7 出口旅程
             { FgjM8Journey.Id, FgjM8Journey.Build }, // FG8-E2E-01：M8 出口旅程
+            { FgjM9FrontJourney.Id, FgjM9FrontJourney.Build }, // FG9-ACT1-01：M9 前半段（正式节奏：第一次远征归来 → 基础传送带开放）
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;
@@ -229,6 +230,29 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
+        /// <summary>写于第一幕节奏台账（FG9-ACT1-01）之前的旅程：FGJ-M0～M8（含反向）与 FGJ-GEN9。</summary>
+        public static bool PrePacingJourney(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return false;
+            }
+            if (id == "FGJ-GEN9")
+            {
+                return true;
+            }
+            if (!id.StartsWith("FGJ-M", StringComparison.Ordinal) || id.Length < 6)
+            {
+                return false;
+            }
+            int end = 5;
+            while (end < id.Length && char.IsDigit(id[end]))
+            {
+                end++;
+            }
+            return int.TryParse(id.Substring(5, end - 5), out int m) && m <= 8;
+        }
+
         private static void Tick()
         {
             if (_runner == null)
@@ -237,6 +261,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 return;
             }
             DrainLogs();
+            // FG9-ACT1-01：M0～M8 与 GEN9 旅程写于第一幕节奏台账之前（开局就造传送带）——按开放前的规则跑（与全量自检旧段的 LegacyGatesOpenForTests 同一口径）；
+            // 节奏门槛本身由 FgAct1SelfCheck 与冒烟覆盖，FGJ-M9（FG9-E2E-01）起按正式节奏走。每帧按当前旅程重设（进出 Play 的域重载会清掉静态量）。
+            GameLogic.Campaign.Act1PacingService.LegacyGatesOpenForJourneys = PrePacingJourney(_runner.Journey.Id);
             if (EditorApplication.isPlaying)
             {
                 JourneyInput.KeepScripted();
@@ -248,6 +275,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             bool pass = _runner.Result == JourneyRunner.ResultPass;
             Unhook();
+            GameLogic.Campaign.Act1PacingService.LegacyGatesOpenForJourneys = false;
             SessionState.SetString(Prefix + "Id", string.Empty);
             SessionState.SetString(Prefix + "From", string.Empty);
             Debug.Log($"[JourneyBot] {_runner.Journey.Id} {_runner.Result}：{(pass ? "完成" : _runner.FailStepId + " " + _runner.FailReason)}。报告 {_runner.ReportPath}");

@@ -142,8 +142,11 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rb_end", "这一波照常结束，只结算一次", 400, null, c => TickRaidOver(c, "rb")),
                 S("rb_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建（下一波之前把圈补上）", 600, null, TickWallRestored),
 
+                // FG9-ACT1-01 修复轮：第二波可能把屏障圈外的解析台打成废墟（rb_wall 只修圈上 / 圈里的）——HEAD 上本旅程同样在 fu_ana_open 失败（解析台 Damaged、耐久 0）。
+                // 像玩家一样：后面熔合段要用的解析台 / 装配站等圈外建筑被打坏了，就逐座左键点它、通用面板点“重建 / 修复”，等机器修好再用；没坏就跳过（与 rb_wall 同一个修复步骤，只是不限于圈上 / 圈里）。
+                S("fu_ana_fix", "这一波打坏的圈外建筑（解析台、装配站……熔合段要用）逐座修：左键点它，通用面板上点“重建 / 修复”，机器修好；没坏就跳过", 900, null, c => TickWallRestored(c, anywhere: true)),
                 // ── 承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 熔合回滚（父固件先复原 / 刻印；合成台按第一波预警条上的抵达点放在屏障圈外）──
-                S("fu_ana_open", "左键点解析台打开解析面板", 20, FgjM2Common.OpenAnalysis, FgjM2Common.TickAnalysisOpen, retries: 4),
+                S("fu_ana_open","左键点解析台打开解析面板", 20, FgjM2Common.OpenAnalysis, FgjM2Common.TickAnalysisOpen, retries: 4),
                 S("fu_ana_n2", "“数据复原”下拉选液氮，点“复原”：弹出确认框", 10, c => FgjM2Common.PickAndRestore(c, FwPartner), c => FgjM2Common.TickConfirmShown(c, FwPartner), retries: 1),
                 S("fu_ana_ok", "确认框点“复原”：液氮解锁", 10, c => FgjM2Common.ClickConfirm(c, true), c => TickRestored(c, FwPartner)),
                 S("fu_ana_close", "点“关闭”关闭解析面板", 10, FgjM2Common.CloseAnalysis, FgjM2Common.TickAnalysisClosed, retries: 1),
@@ -877,7 +880,10 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>这一波拆坏的建筑（优先屏障 / 闸门）：被摧毁 → 通用面板“重建”；只受损 → “修复”；一座都没坏就跳过。</summary>
-        private static StepOutcome TickWallRestored(JourneyContext c)
+        private static StepOutcome TickWallRestored(JourneyContext c) => TickWallRestored(c, anywhere: false);
+
+        /// <param name="anywhere">FG9-ACT1-01 修复轮：true = 家园里被打坏的建筑都修（不限于屏障圈上 / 圈里），熔合段之前用。</param>
+        private static StepOutcome TickWallRestored(JourneyContext c, bool anywhere)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
@@ -886,8 +892,8 @@ namespace GameLogic.EditorTools.JourneyBots
             if (string.IsNullOrEmpty(c.Get(tk)))
             {
                 // 这一波拆坏的屏障 / 闸门 / 圈里的建筑逐座修（屏障优先：圈上有洞，下一波直接走进来）。
-                BuildingRecord pick = n >= 10 ? null : s.BuildingRecords
-                    .Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore && !HomeValleyController.IsPlannedGhost(b) && OnOrInsideRing(c, b)
+                BuildingRecord pick = n >= (anywhere ? 20 : 10) ? null : s.BuildingRecords
+                    .Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore && !HomeValleyController.IsPlannedGhost(b) && (anywhere || OnOrInsideRing(c, b))
                                 && (b.ConstructionState != BuildingConstructionState.Operational && b.ConstructionState != BuildingConstructionState.Disabled || BuildingOps.Durability(b) <= 0.5f))
                     .OrderBy(b => DefenseCatalog.IsDraggable(b.BuildingTypeId) ? 0 : 1).ThenBy(b => BuildingOps.Durability(b)).FirstOrDefault();
                 // 只修被拆成废墟的（圈上的洞）；掉了耐久还立着的墙照样挡路，不在这一类里测。

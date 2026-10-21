@@ -88,11 +88,11 @@ public sealed partial class Quest : Luban.BeanBase
     /// </summary>
     public readonly string Anchor;
     /// <summary>
-    /// 出现时机:start=开局/territory_visible=领地在地图上可见(按幕或亲自探索到)/prereq=前置任务完成/side_found=发现支线地点
+    /// 出现时机:start=开局/territory_visible=领地在地图上可见(按幕或亲自探索到)/prereq=前置任务完成/side_found=发现支线地点/pace=第一幕节奏点到达(前置列写节奏点ID,fg.TbActPacing)
     /// </summary>
     public readonly string Unlock;
     /// <summary>
-    /// 前置任务ID(fg.TbQuest.id;none=没有)
+    /// 前置任务ID(fg.TbQuest.id;出现时机 pace 时写节奏点ID;none=没有)
     /// </summary>
     public readonly string Prereq;
     /// <summary>

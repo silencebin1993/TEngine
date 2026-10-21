@@ -319,6 +319,57 @@ namespace GameLogic.Campaign.WorldSim
         /// <summary>FG8-EXP-03：已收复领地里定期刷新的精英残部（不增援、不巡逻、不算控制度、不作突袭出发地）。</summary>
         public const string KindRemnant = "remnant";
 
+        /// <summary>
+        /// FG9-ACT1-01（DEBT-FG0ARCH01-01 / DEBT-FG8EXP03-06）：远征地点（破碎都市 / 铸造前哨）里的领地驻军据点——记录在星球上（锚点周围的真实位置），
+        /// 计入领地控制度、会被增援重建；但在地点内部打（进场时按驻军播种成地点敌人，见 <see cref="Regions.SiteGarrisonService"/>），星球上不迎战展开、
+        /// 不派巡逻、不作突袭出发地、不算行军遭遇。
+        /// </summary>
+        public const string KindSite = "site";
+
+        /// <summary>
+        /// FG9-ACT1-01：登记一个远征地点驻军据点（幂等：已登记的返回原记录）。与 <see cref="SpawnGenerated"/> 同一“从第 0 步起一直在休眠”的口径：
+        /// 驻军 = 等级 × 每级驻军、上限再 +2，增援点落在 0 + k × 间隔——何时登记（新战役 / 旧档第一次载入）不改变之后的驻军增长。
+        /// </summary>
+        public static OutpostRecord SpawnSiteGarrison(CampaignState state, string outpostId, string territoryId, int tier, int cellX, int cellY, int garrisonPerTier)
+        {
+            if (state == null || string.IsNullOrEmpty(outpostId))
+            {
+                return null;
+            }
+            OutpostRecord existing = Find(state, outpostId);
+            if (existing != null)
+            {
+                return existing;
+            }
+            CampaignFgStateDomains.EnsureAll(state);
+            long interval = Math.Max(1L, (long)Math.Round(Tuning("outpost.reinforce_interval_days", 3f) * GameClock.DaySeconds * GameClock.StepHz));
+            int t = Math.Max(1, tier);
+            int per = Math.Max(1, garrisonPerTier);
+            var o = new OutpostRecord
+            {
+                OutpostId = outpostId,
+                TerritoryId = territoryId ?? string.Empty,
+                Kind = KindSite,
+                Tier = t,
+                CellX = cellX,
+                CellY = cellY,
+                GarrisonCap = per * t + 2,
+                Garrison = per * t,
+                ReinforceIntervalTicks = interval,
+                NextReinforceTick = interval,
+                SimTick = 0,
+                Dormant = true,
+                DormantSinceTick = 0,
+                LastWakeReason = string.Empty,
+                PatrolRadius = 0,
+            };
+            var list = new List<OutpostRecord>(state.Raids.Outposts ?? Array.Empty<OutpostRecord>()) { o };
+            state.Raids.Outposts = list.ToArray();
+            _stateStamp++;
+            Revision++;
+            return o;
+        }
+
         /// <summary>FG8-EXP-03：据点集合的版本（摧毁 / 重建 / 新登记 / 移除巡逻时 +1；领地控制度据此重算，平时 O(1)）。</summary>
         public static int Revision { get; private set; } = 1;
 

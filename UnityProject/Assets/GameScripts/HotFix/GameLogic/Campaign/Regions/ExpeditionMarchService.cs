@@ -989,7 +989,8 @@ namespace GameLogic.Campaign.Regions
             for (int i = 0; outposts != null && i < outposts.Count; i++)
             {
                 OutpostRecord o = outposts[i];
-                if (o != null && !o.Destroyed && (new Vector2(o.CellX, o.CellY) - center).sqrMagnitude <= r2)
+                // FG9-ACT1-01：远征地点里的驻军据点在进入地点后才遭遇（地点内部），行军途中不算遭遇。
+                if (o != null && !o.Destroyed && o.Kind != WorldOutpostSystem.KindSite && (new Vector2(o.CellX, o.CellY) - center).sqrMagnitude <= r2)
                 {
                     TryRecordEncounter(m, o.OutpostId, new Vector2(o.CellX, o.CellY), "exp.cue.encounter.outpost");
                 }
@@ -1216,6 +1217,7 @@ namespace GameLogic.Campaign.Regions
             Signal.FirmwareLibrary.OnCampaignEntered(restore.State);
             Env.HeritageService.OnCampaignEntered(restore.State); // FG8-EXP-04
             GameLogic.Narrative.NarrativeService.OnCampaignEntered(restore.State); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
+            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(restore.State); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
             GameRoot.ReenterHomeValley();
             ExpeditionMarchState m = Current(restore.State);
             if (m != null && m.Phase == PhaseOutbound)

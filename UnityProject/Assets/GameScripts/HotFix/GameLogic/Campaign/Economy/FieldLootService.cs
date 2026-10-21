@@ -104,7 +104,8 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>敌方据点被摧毁（驻军全灭，TerritoryControlService 调用）：按 outpost 行掷材料、少量组件、可能的数据核心。</summary>
-        public static void OnOutpostDestroyed(CampaignState s, string faction, Vector2 at)
+        /// <param name="regionId">掉落落在哪个地点（FG9-ACT1-01：远征地点里的驻军据点掉在地点里；null = 星球表面）。</param>
+        public static void OnOutpostDestroyed(CampaignState s, string faction, Vector2 at, string regionId = null)
         {
             LootPacketState st = StateOf(s);
             if (st == null)
@@ -112,11 +113,13 @@ namespace GameLogic.Campaign.Economy
                 return;
             }
             long serial = ++st.OutpostLoots;
-            Roll(s, st, LootCatalog.SourceOutpost, faction ?? string.Empty, at, serial, SaltOutpost, 1f, OriginOutpost);
+            Roll(s, st, LootCatalog.SourceOutpost, faction ?? string.Empty, at, serial, SaltOutpost, 1f, OriginOutpost, regionId);
         }
 
-        private static void Roll(CampaignState s, LootPacketState st, string source, string faction, Vector2 at, long serial, uint saltBase, float clawMult, string origin)
+        private static void Roll(CampaignState s, LootPacketState st, string source, string faction, Vector2 at, long serial, uint saltBase, float clawMult, string origin,
+            string regionId = null)
         {
+            string region = string.IsNullOrEmpty(regionId) ? HomeValleyLayout.RegionId : regionId;
             uint seed = Seed(s);
             int key = unchecked((int)(serial & 0x7FFFFFFF));
             LootCatalog.RowsFor(source, faction, RowScratch);
@@ -139,13 +142,13 @@ namespace GameLogic.Campaign.Economy
                 string sid = SalvagePrefix + source + ":" + serialText + ":" + row.Index.ToString(CultureInfo.InvariantCulture);
                 if (row.Identity == LootCatalog.IdentityNone)
                 {
-                    SpawnMaterial(s, st, row.Item, n, at, sid, SalvagePrefix + source + ":");
+                    SpawnMaterial(s, st, row.Item, n, at, sid, SalvagePrefix + source + ":", region);
                     continue;
                 }
                 for (int i = 0; i < n; i++)
                 {
                     string target = PickIdentity(row, faction, seed, key, i, saltBase);
-                    SpawnEnemyItem(s, st, row.Item, target, faction, origin, at, sid + ":" + i.ToString(CultureInfo.InvariantCulture));
+                    SpawnEnemyItem(s, st, row.Item, target, faction, origin, at, sid + ":" + i.ToString(CultureInfo.InvariantCulture), region);
                 }
             }
             RowScratch.Clear();
@@ -177,7 +180,7 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>材料落地：就近合并进同一来源（<paramref name="mergePrefix"/>）、同种材料、没带身份的堆（不超过 loot.pile_max），否则另起一堆；开搬运单。</summary>
-        private static void SpawnMaterial(CampaignState s, LootPacketState st, ItemDef item, int amount, Vector2 at, string salvageId, string mergePrefix)
+        private static void SpawnMaterial(CampaignState s, LootPacketState st, ItemDef item, int amount, Vector2 at, string salvageId, string mergePrefix, string region)
         {
             if (amount <= 0 || item == null)
             {
@@ -189,7 +192,7 @@ namespace GameLogic.Campaign.Economy
             GroundItemRecord pile = null;
             foreach (GroundItemRecord g in s.GroundItems ?? Array.Empty<GroundItemRecord>())
             {
-                if (g == null || g.ResourceType != res || g.RegionId != HomeValleyLayout.RegionId || g.Amount + amount > pileMax
+                if (g == null || g.ResourceType != res || g.RegionId != region || g.Amount + amount > pileMax
                     || g.SalvageInstanceId == null || !g.SalvageInstanceId.StartsWith(mergePrefix, StringComparison.Ordinal) || FindTag(st, g.SalvageInstanceId) >= 0)
                 {
                     continue;
@@ -206,17 +209,21 @@ namespace GameLogic.Campaign.Economy
             }
             else
             {
-                pile = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at, res, amount, salvageId);
+                pile = HomeValleyCargo.SpawnGroundItem(s, region, at, res, amount, salvageId);
                 st.TotalDrops++;
             }
-            HomeValleyWorkOrders.TryCreateHaulPool(s, pile.GroundItemId); // 幂等：同一堆只有一张
+            if (region == HomeValleyLayout.RegionId)
+            {
+                HomeValleyWorkOrders.TryCreateHaulPool(s, pile.GroundItemId); // 幂等：同一堆只有一张（远征地点里没有搬运单：远征队走近自动拾取）
+            }
             GroundLootExpiry.Stamp(s, pile, item.Id); // FG8-EXP-05：普通战利品 1 个游戏日后被敌方回收（关键材料不会）
             GuidanceHooks.Raise(HookFirstFieldDrop);
         }
 
-        private static void SpawnEnemyItem(CampaignState s, LootPacketState st, ItemDef item, string target, string faction, string origin, Vector2 at, string salvageId)
+        private static void SpawnEnemyItem(CampaignState s, LootPacketState st, ItemDef item, string target, string faction, string origin, Vector2 at, string salvageId,
+            string region)
         {
-            GroundItemRecord g = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at, item.ResourceType, 1, salvageId);
+            GroundItemRecord g = HomeValleyCargo.SpawnGroundItem(s, region, at, item.ResourceType, 1, salvageId);
             if (g == null)
             {
                 return;
@@ -228,7 +235,10 @@ namespace GameLogic.Campaign.Economy
             });
             st.TotalDrops++;
             st.TotalEnemyItems++;
-            HomeValleyWorkOrders.TryCreateHaulPool(s, g.GroundItemId);
+            if (region == HomeValleyLayout.RegionId)
+            {
+                HomeValleyWorkOrders.TryCreateHaulPool(s, g.GroundItemId);
+            }
             GroundLootExpiry.Stamp(s, g, item.Id); // FG8-EXP-05
             GuidanceHooks.Raise(HookFirstFieldDrop);
             // 稀有掉落给一条带位置的反馈（材料不刷屏）：写明协议去向“需要解析”。

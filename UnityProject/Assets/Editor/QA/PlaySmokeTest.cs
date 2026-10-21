@@ -999,7 +999,31 @@ namespace GameLogic.EditorTools
                          && Narrative.NarrativeService.Has(s, Narrative.NarrativeService.WakeId) && s.Progress.PendingCutscene.Length == 0;
             Check(skip && asked && confirmed && filed,
                 $"点“跳过演出”：首次观看先弹确认 {asked}；点确认框“跳过”→ 演出结束、世界恢复运行、“苏醒”收进资料库（可重看）{filed}");
+            CheckAct1PacingAtStart(s);
             Next(4, "开场演出已跳过，回到归还谷地");
+        }
+
+        /// <summary>
+        /// FG9-ACT1-01（FG16 第 2 节；设计案 6.5）：新游戏开局的第一幕节奏台账——“苏醒”已记到、传送带 T1 在建造菜单里是锁定的（提示写明第一次远征归来后开放）、
+        /// 传送带指引任务还没出现。随后用与 <c>UnlockLikeDeparture</c> 同类的冒烟捷径把“第一次远征归来”记到（正式判定 site_back 由 FgAct1SelfCheck B 段跑真实远征往返），
+        /// 断言传送带 T1 开放、发出“新系统”通知、引导钩子与图鉴“基础传送带”随之解锁——冒烟后面的传送带步骤照旧走真实建造路径。
+        /// </summary>
+        private static void CheckAct1PacingAtStart(CampaignState s)
+        {
+            bool wake = s != null && Campaign.Act1PacingService.IsReached(s, "wake");
+            Campaign.Grid.BuildCatalog.TryGet("belt_t1", out Campaign.Grid.BuildEntry belt);
+            bool locked = belt != null && !Campaign.Grid.BuildCatalog.IsUnlocked(s, belt);
+            string hint = belt != null ? Localization.GameText.Get(belt.UnlockHintKey) : string.Empty;
+            bool noGuide = s != null && Campaign.CampaignObjectiveTracker.FindQuest(s, "guide.belt") == null;
+            Check(wake && locked && hint.Length > 0 && !Localization.GameText.ContainsMarker(hint) && noGuide,
+                $"第一幕节奏：开局“苏醒”已记到 {wake}，传送带 T1 锁定 {locked}（“{hint}”），传送带指引还没出现 {noGuide}");
+            int before = Notifications.NotificationCenter.History.Count(e => e?.Type?.Id == Campaign.Act1PacingService.NotifyOpen);
+            bool marked = Campaign.Act1PacingService.MarkReachedForTests(s, "belts_open");
+            bool open = belt != null && Campaign.Grid.BuildCatalog.IsUnlocked(s, belt);
+            int after = Notifications.NotificationCenter.History.Count(e => e?.Type?.Id == Campaign.Act1PacingService.NotifyOpen);
+            bool codex = Progression.MechanicCodex.IsUnlocked("codex.logistics.belt");
+            Check(marked && open && after == before + 1 && codex,
+                $"第一次远征归来（冒烟捷径）：传送带 T1 开放 {open}、“新系统”通知 {after - before} 条、图鉴“传送带”解锁 {codex}");
         }
 
         private static void StepHomeSoak(double inStep)
@@ -12419,8 +12443,12 @@ namespace GameLogic.EditorTools
             WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
             hud?.Refresh();
             string count = hud?.PacketCountText ?? string.Empty;
+            // FG9-ACT1-01（DEBT-FG8EXP05-01）：远征地点里的普通战利品会被队员自动装进货舱带回来——顶栏同时写货舱件数（loot.pick.hud.both）。
+            int heldNow = Campaign.Economy.LootPickService.HeldCount(state);
+            SessionState.SetInt(K + "LootHeldBefore", heldNow);
+            string wantCount = heldNow > 0 ? Localization.GameText.Format("loot.pick.hud.both", before + 1, heldNow) : Localization.GameText.Format("loot.pick.hud", before + 1);
             Check(p != null && p.Candidates.Length == 3 && Campaign.Economy.LootPickService.Count(state) == before + 1 && !LootPickPanelUIToolkit.IsOpen
-                  && count == Localization.GameText.Format("loot.pick.hud", before + 1),
+                  && count == wantCount,
                 $"得到数据包不弹面板（{!LootPickPanelUIToolkit.IsOpen}），顶栏显示“{count}”");
             Check(ClickUitk("[WorldBarHost]", "WorldPacketCount"), "点顶栏“待分拣 ×1”");
             Next(459, "待分拣面板：三张候选卡、在家园可以直接选，点“选这个”，Esc 关闭");
@@ -12463,9 +12491,13 @@ namespace GameLogic.EditorTools
             WorldBarHudUIToolkit hud = WorldBarHudUIToolkit.Instance;
             hud?.Refresh();
             string count = hud?.PacketCountText ?? string.Empty;
-            bool none = Campaign.Economy.LootPickService.Count(state) == 0 && Campaign.Economy.LootPickService.HeldCount(state) == 0;
-            Check(!LootPickPanelUIToolkit.IsOpen && none && count.Length == 0,
-                $"Esc 关闭待分拣面板（IsOpen={LootPickPanelUIToolkit.IsOpen}）；没有数据包、货舱里也没有分拣物品时顶栏计数隐藏（“{count}”）");
+            // FG9-ACT1-01：远征带回的货舱件数（自动拾取）在这一步之前就有，分拣本身不改它——没有数据包时顶栏只剩货舱件数；两者都没有时隐藏。
+            int heldBefore = SessionState.GetInt(K + "LootHeldBefore", 0);
+            int heldNow = Campaign.Economy.LootPickService.HeldCount(state);
+            bool none = Campaign.Economy.LootPickService.Count(state) == 0 && heldNow == heldBefore;
+            string wantCount = heldNow > 0 ? Localization.GameText.Format("loot.pick.hud.held", heldNow) : string.Empty;
+            Check(!LootPickPanelUIToolkit.IsOpen && none && count == wantCount,
+                $"Esc 关闭待分拣面板（IsOpen={LootPickPanelUIToolkit.IsOpen}）；没有数据包后顶栏只剩货舱件数（远征带回 {heldNow} 件，没有时隐藏）（“{count}”）");
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

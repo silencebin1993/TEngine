@@ -123,6 +123,8 @@ namespace GameLogic.UI.Kit
         Quest,
         /// <summary>FG8-QST-01：追踪中的任务（更醒目的样式，标签前加 ◆）。</summary>
         QuestTracked,
+        /// <summary>FG9-ACT1-01（DEBT-FG9FAC01-02）：静默信号点（据点图层；迷雾里的已侦测信号，真据点与诱饵中继同一样式，甄别后写真假）。</summary>
+        SignalContact,
     }
 
     /// <summary>地图上的一个图标。</summary>
@@ -397,6 +399,13 @@ namespace GameLogic.UI.Kit
                 }
                 _outposts.Clear();
                 _patrols.Clear();
+                // FG9-ACT1-01（DEBT-FG9FAC01-02）：静默信号点——迷雾里的已侦测信号（真据点 + 诱饵中继，未甄别时一模一样）；揭开迷雾的诱饵写“已识破”。O(已侦测的信号点)。
+                SignalContactService.CollectForMap(state, map, view.MinX - margin, view.MinY - margin, view.MaxX + margin, view.MaxY + margin, _contacts);
+                foreach ((string cid, Vector2 c, string label, bool decoy) in _contacts)
+                {
+                    Items.Add(new WorldMapItem { Kind = WorldMapItemKind.SignalContact, Layer = WorldMapLayer.Outposts, Id = "contact:" + cid, X = c.x, Y = c.y, Label = label, Done = decoy });
+                }
+                _contacts.Clear();
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Relics) && WorldGenService.ContextFor(state) != null)
             {
@@ -526,7 +535,9 @@ namespace GameLogic.UI.Kit
         {
             string name = TerritoryControlService.OutpostName(o); // FG8-EXP-03：与领地交战通知同一套名字（含精英残部）
             WorldOutpostSystem.Peek(state, o, out int garrison, out _);
-            return GameText.Format("outpost.marker", name, garrison);
+            string label = GameText.Format("outpost.marker", name, garrison);
+            // FG9-ACT1-01 修复轮（第 1 轮审查 P2）：远征地点里的领地驻军（kind = site）在星球上不迎战展开——标签写明“在远征地点内”，玩家知道要远征过去打。
+            return o != null && o.Kind == WorldOutpostSystem.KindSite ? label + GameText.Get("outpost.marker.in_site") : label;
         }
 
         private void Add(WorldMapItemKind kind, WorldMapLayer layer, string id, double x, double y, string label, Color tint = default)
@@ -535,6 +546,7 @@ namespace GameLogic.UI.Kit
         }
 
         private readonly List<Vector2> _expRoute = new List<Vector2>(64);
+        private readonly List<(string Id, Vector2 Cell, string Label, bool Decoy)> _contacts = new List<(string, Vector2, string, bool)>(8);
         private readonly List<(Vector2 Center, float Radius, string OutpostId)> _antiAir = new List<(Vector2, float, string)>(8);
         private readonly List<(int Serial, Vector2 Pos, Vector2 To, bool Returning, string Label)> _drops = new List<(int, Vector2, Vector2, bool, string)>(8);
 
@@ -1063,6 +1075,8 @@ namespace GameLogic.UI.Kit
                 e.EnableInClassList("wg-icon-own", item.Kind == WorldMapItemKind.OwnCluster);
                 e.EnableInClassList("wg-icon-outpost", item.Kind == WorldMapItemKind.Outpost);
                 e.EnableInClassList("wg-icon-patrol", item.Kind == WorldMapItemKind.Patrol);
+                e.EnableInClassList("wg-icon-contact", item.Kind == WorldMapItemKind.SignalContact);
+                e.EnableInClassList("wg-icon-contact-decoy", item.Kind == WorldMapItemKind.SignalContact && item.Done);
                 e.EnableInClassList("wg-icon-relic", item.Kind == WorldMapItemKind.Relic);
                 e.EnableInClassList("wg-icon-relic-done", (item.Kind == WorldMapItemKind.Relic || item.Kind == WorldMapItemKind.Cache || item.Kind == WorldMapItemKind.Terminal) && item.Done);
                 e.EnableInClassList("wg-icon-cache", item.Kind == WorldMapItemKind.Cache);

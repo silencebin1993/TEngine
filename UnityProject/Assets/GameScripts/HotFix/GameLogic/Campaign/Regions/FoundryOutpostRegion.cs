@@ -304,6 +304,7 @@ namespace GameLogic.Campaign.Regions
             Economy.TestRangeService.NoteEnemyDefeated(state, enemy.EnemyTypeId); // FG5-RND-03（FGR-RND-030）：击败的敌人类型解锁对应的阵营靶子。
             MarkDestroyed(state, enemy.EnemyInstanceId);
             SpawnEnemyLoot(state, enemy);
+            SiteGarrisonService.OnEnemyKilled(state, enemy); // FG9-ACT1-01：领地驻军全灭 = 据点被摧毁（计入领地控制度）
             Log.Info($"[FoundryOutpostRegion] 敌人 {enemy.EnemyInstanceId} 已阵亡。");
             // ER8-CONTENT-01：存活→阵亡翻转点，击毁音与“字幕”模式下的击毁字幕。
             Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
@@ -318,7 +319,8 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            if (!string.IsNullOrEmpty(row.KeyDrop) && row.KeyDrop != EnemyDefs.None)
+            // FG9-ACT1-01：关键掉落只属于 Demo 手工内容（编成表里的实例）；领地驻军里同型号的敌人不掉关键物。
+            if (!string.IsNullOrEmpty(row.KeyDrop) && row.KeyDrop != EnemyDefs.None && !SiteGarrisonService.IsGarrisonInstance(enemy.EnemyInstanceId))
             {
                 bool alreadyDropped = state.RegionQuestItems != null &&
                     state.RegionQuestItems.Any(q => q.ContentId == row.KeyDrop);
@@ -866,7 +868,8 @@ namespace GameLogic.Campaign.Regions
         {
             var violations = new List<string>();
             RegionRecord region = Find(state);
-            var allEnemies = state?.RegionEnemies?.Where(e => e.RegionId == RegionId).ToList() ?? new List<RegionEnemyRecord>();
+            // FG9-ACT1-01：领地驻军（sg.*）是外圈的生成内容，不属于 Demo 手工实例的去重口径。
+            var allEnemies = state?.RegionEnemies?.Where(e => e.RegionId == RegionId && !SiteGarrisonService.IsGarrisonInstance(e.EnemyInstanceId)).ToList() ?? new List<RegionEnemyRecord>();
 
             // ── 外围固定内容：基线4 + ER6-ADAPT-01 Flanker/JammerSupport 反制增援（互斥，最多+1）+
             // ER7-CORE-01 90暴露核心入口增援（与反制增援独立，可能同时存在）───────────────────

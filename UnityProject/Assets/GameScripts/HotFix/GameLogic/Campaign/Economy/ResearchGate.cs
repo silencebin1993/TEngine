@@ -27,10 +27,33 @@ namespace GameLogic.Campaign.Economy
         /// <summary>研发树是否已经开放（FG5-RND-01 起 = true）。</summary>
         public static bool TreeAvailable => TreeAvailableOverrideForTests?.Invoke() ?? !LegacyGatesOpenForTests;
 
-        public static bool IsResearchRule(string rule) =>
-            rule != null && rule.StartsWith(RulePrefix, StringComparison.Ordinal) && rule.Length > RulePrefix.Length;
+        /// <summary>FG9-ACT1-01 修复轮：复合规则的连接符（“research:&lt;节点&gt;&amp;pace:&lt;节奏点&gt;” = 两个门槛都满足）。</summary>
+        public const char RuleAnd = '&';
 
-        public static string NodeOf(string rule) => IsResearchRule(rule) ? rule.Substring(RulePrefix.Length) : null;
+        public static bool IsResearchRule(string rule) =>
+            rule != null && rule.StartsWith(RulePrefix, StringComparison.Ordinal) && rule.Length > RulePrefix.Length && rule.IndexOf(RuleAnd) < 0;
+
+        /// <summary>规则里的研究节点（复合规则取其中 research: 那一段）；没有研究门槛返回 null。</summary>
+        public static string NodeOf(string rule)
+        {
+            if (rule == null)
+            {
+                return null;
+            }
+            if (rule.IndexOf(RuleAnd) >= 0)
+            {
+                foreach (string part in rule.Split(RuleAnd))
+                {
+                    string p = part.Trim();
+                    if (IsResearchRule(p))
+                    {
+                        return p.Substring(RulePrefix.Length);
+                    }
+                }
+                return null;
+            }
+            return IsResearchRule(rule) ? rule.Substring(RulePrefix.Length) : null;
+        }
 
         /// <summary>这个研究节点算不算已完成（研发树开放前一律算）。</summary>
         public static bool IsCompleted(CampaignState state, string nodeId)
@@ -60,6 +83,24 @@ namespace GameLogic.Campaign.Economy
         /// <summary>“研究节点：信号 · 超控阵列 T1（……）”：规则不是研究规则时返回空串。</summary>
         public static string Describe(CampaignState state, string rule)
         {
+            // FG9-ACT1-01 修复轮：复合规则逐段说明（“研究节点：物流 · 传送带 T2（已完成）；基础传送带开放：还没到”），玩家看得到两个条件各差什么。
+            if (rule != null && rule.IndexOf(RuleAnd) >= 0)
+            {
+                var parts = new System.Collections.Generic.List<string>(2);
+                foreach (string part in rule.Split(RuleAnd))
+                {
+                    string d = Describe(state, part.Trim());
+                    if (!string.IsNullOrEmpty(d))
+                    {
+                        parts.Add(d);
+                    }
+                }
+                return string.Join(GameText.Get("pace.gate.join"), parts);
+            }
+            if (Act1PacingService.IsPaceRule(rule))
+            {
+                return Act1PacingService.Describe(state, rule); // FG9-ACT1-01：节奏台账门槛（建造菜单 / 图鉴同一句说明）
+            }
             string node = NodeOf(rule);
             if (node == null)
             {

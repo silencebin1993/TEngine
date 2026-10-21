@@ -278,6 +278,7 @@ namespace GameLogic.Campaign.WorldSim
             // InitializeNewGrid 提前返回——主菜单新建的 v2 战役一个侦察巢都没有，突袭只能从迷雾外来。v0 / v1 世界没有点位分布，什么也不做。
             WorldGen.WorldGenService.SeedHomeZoneOutposts(state);
             WorldGen.WorldGenService.SeedTerritoryOutposts(state); // FG8-GEN-02：阵营领地据点与零散前哨（v3 世界；幂等）
+            Regions.SiteGarrisonService.SeedAll(state); // FG9-ACT1-01：两个远征地点里的领地驻军据点（v3 世界；幂等，旧档第一次载入时补登记）
             NavService.AfterSitesLoaded(state);
             if (Home.IsLoaded)
             {
@@ -615,6 +616,10 @@ namespace GameLogic.Campaign.WorldSim
                 // FG9-FAC-02（FGR-FAC-004）：铸造反制每个游戏日锁定一次（日切那一步；平时 O(1)）；熔渣热区——信号所在的机器第一次进入某片时提示（每游戏秒一次）。
                 Regions.FoundryCounterService.WorldStep(state);
                 Env.SlagHeatService.WorldStep(state, GameClock.Ticks);
+                // FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测静默信号点（真据点 + 诱饵中继），每 site.contact.check_seconds 一次 O(队员 × 信号点)；
+                // 第一幕节奏台账（FG16 第 2 节）每 pace.check_seconds 一次 O(节奏点)。只看步序号，与观察无关。
+                SignalContactService.WorldStep(state, GameClock.Ticks);
+                Act1PacingService.WorldStep(state, GameClock.Ticks);
                 // FG0-ARCH-02：传送带内核（星球表面）按游戏时间累计推进到自己的 20 Hz（只看步序号，与镜头 / 帧率 / 倍速无关）。
                 BeltNetworkService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG3-LOG-05：管线内核与传送带同一节拍（FGR-LOG-090）。

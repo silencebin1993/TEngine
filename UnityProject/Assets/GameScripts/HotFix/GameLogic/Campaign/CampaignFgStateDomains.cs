@@ -36,6 +36,9 @@ namespace GameLogic.Campaign
         public int NextMapMarkerSerial = 1;
         /// <summary>FG8-GEN-02：外延区以内的阵营领地主力据点与领地之间的零散前哨已经登记成据点（新战役一次，幂等；外延区的按揭开范围按需登记）。</summary>
         public bool TerritoryOutpostsSeeded;
+        /// <summary>FG9-ACT1-01（DEBT-FG0ARCH01-01 / DEBT-FG8EXP03-06）：两个远征地点里的领地驻军据点已经登记成据点（kind = site；幂等；旧档第一次载入时补登记）。
+        /// 唯一写入口 <c>Regions.SiteGarrisonService</c>。</summary>
+        public bool SiteGarrisonsSeeded;
         /// <summary>FG8-GEN-02（FGR-GEN-090）：手工锚点从家园出发的可达性校验结果（开局用层级寻路校验一次，之后只读；规划层本身不存档）。
         /// 唯一写入口 <c>WorldGen.TerritoryAnchorChecks</c>。</summary>
         public AnchorCheckRecord[] AnchorChecks = Array.Empty<AnchorCheckRecord>();
@@ -101,6 +104,20 @@ namespace GameLogic.Campaign
         public string PendingCutscene = string.Empty;
         /// <summary>下一条资料库记录的序号（收到的先后，单调递增）。</summary>
         public int NarrativeSerial = 1;
+        /// <summary>FG9-ACT1-01（FG16 第 2 节）：第一幕节奏台账——已经到达的节奏点（第一次到达的那一步；只进不退）。唯一写入口 <c>Act1PacingService</c>。
+        /// 旧存档没有 = 第一次载入时按存档里的事实补记（补记的点 Migrated = true，时刻记为补记那一步）。</summary>
+        public ActPaceRecord[] Pacing = Array.Empty<ActPaceRecord>();
+    }
+
+    /// <summary>FG9-ACT1-01：第一幕节奏台账的一条记录（内容在 fg.TbActPacing）。</summary>
+    [Serializable]
+    public sealed class ActPaceRecord
+    {
+        public string Id;
+        /// <summary>到达的那一步（统一时钟 GameClock.Ticks）。</summary>
+        public long Tick;
+        /// <summary>旧档迁移补记的（不是本局实际到达的时刻，统计里不算偏差）。</summary>
+        public bool Migrated;
     }
 
     /// <summary>FG9-NAR-01：资料库里的一条记录（条目内容在 fg.TbNarrativeEntry，存档只记“收到了哪条、何时、在哪一幕、读过没有”）。</summary>
@@ -2700,6 +2717,7 @@ namespace GameLogic.Campaign
             s.Progress ??= new CampaignProgressState();
             s.Progress.Narrative ??= Array.Empty<NarrativeEntryRecord>(); // FG9-NAR-01：旧存档没有资料库 = 空资料库
             s.Progress.PendingCutscene ??= string.Empty;
+            s.Progress.Pacing ??= Array.Empty<ActPaceRecord>(); // FG9-ACT1-01：旧存档没有节奏台账 = 空（载入时按事实补记）
             if (s.Progress.NarrativeSerial < 1)
             {
                 s.Progress.NarrativeSerial = 1;
@@ -2715,6 +2733,9 @@ namespace GameLogic.Campaign
             s.Factions.SilentBoss.CounterId ??= string.Empty;
             s.Factions.FoundryCounterId ??= string.Empty; // FG9-FAC-02
             s.Factions.SlagZonesNoticed ??= Array.Empty<string>();
+            s.Factions.ContactsDetected ??= Array.Empty<string>(); // FG9-ACT1-01
+            s.Factions.ContactsIdentified ??= Array.Empty<string>();
+            s.Factions.SiteSlagNoticed ??= Array.Empty<string>();
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
             s.Grid.TerrainSourceId ??= string.Empty;

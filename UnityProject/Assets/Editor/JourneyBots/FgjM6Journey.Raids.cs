@@ -1248,14 +1248,31 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
             }
             lost = lost.GroupBy(x => x.Id).Select(g => g.Last()).ToList();
-            if (lost.Count == 0)
+            var targets = lost.Select(x => (Id: x.Id, Name: x.Name)).ToList();
+            if (targets.Count == 0)
             {
-                return StepOutcome.Fail($"两波里没有任何建筑被摧毁，没法证明自动重建（第二波：{D.ResultLine(RaidResultService.Find(s, c.GetInt("res2")))}；第三波：{D.ResultLine(RaidResultService.Find(s, c.GetInt("res3")))}）");
+                // FG9-ACT1-01 修复轮：两波都被防线挡在圈外、一座建筑都没打坏时（临界：HEAD 上第三波刚好打掉 1 座发电机，本卡上一次实跑 0 座、最终一次 1 座——FG-GAP-146
+                // 突袭强度 vs 第一套防线，承接 FG9-BAL-01），自动重建没有对象可验。这时才用登记过的重建验收夹具 ApplyRebuildDamageFixture
+                // （FgMilestoneM6SelfCheck.Fixtures 登记、只能出现在该方法里；DEBT-FG9ACT101-05：FG9-BAL-01 调完突袭强度后删掉）。
+                string fid = c.Get("rb.fix");
+                if (string.IsNullOrEmpty(fid))
+                {
+                    ApplyRebuildDamageFixture(c, s);
+                    fid = c.Get("rb.fix");
+                    if (string.IsNullOrEmpty(fid))
+                    {
+                        return StepOutcome.Fail($"两波里没有任何建筑被摧毁，重建验收夹具也没能把发电机打到 0（第二波：{D.ResultLine(RaidResultService.Find(s, c.GetInt("res2")))}；第三波：{D.ResultLine(RaidResultService.Find(s, c.GetInt("res3")))}）");
+                    }
+                    c.Log($"两波都没打坏建筑（第三波：{D.ResultLine(RaidResultService.Find(s, c.GetInt("res3")))}）：重建验收夹具（DEBT-FG9ACT101-05 / FG-GAP-146）把发电机 {fid} 打到 0，验自动重建");
+                    return StepOutcome.Wait;
+                }
+                BuildingRecord fixedOne = HomeGridService.FindBuilding(s, fid);
+                targets.Add((fid, fixedOne != null ? BuildingOps.NameOf(fixedOne) : fid));
             }
             var waiting = new List<string>();
             var done = new List<string>();
             IReadOnlyList<RuleLogRecord> log = StandingRuleService.LogEntries(s);
-            foreach (RaidLossRecord x in lost)
+            foreach ((string Id, string Name) x in targets)
             {
                 BuildingRecord b = HomeGridService.FindBuilding(s, x.Id);
                 bool up = b != null && !HomeValleyController.IsPlannedGhost(b) && b.ConstructionState == BuildingConstructionState.Operational;
@@ -1271,18 +1288,34 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (waiting.Count == 0)
             {
-                return StepOutcome.Done($"被摧毁的 {done.Count} 座已由自动重建 R{rule} 按原样重建：{string.Join("、", done)}；废料 {s.Scrap}");
+                string source = string.IsNullOrEmpty(c.Get("rb.fix")) ? "两波真实突袭打坏的" : "两波都没打坏建筑，重建验收夹具（DEBT-FG9ACT101-05 / FG-GAP-146）打到 0 的";
+                return StepOutcome.Done($"{source} {done.Count} 座已由自动重建 R{rule} 按原样重建：{string.Join("、", done)}；废料 {s.Scrap}");
             }
             int tick = (int)(c.StepElapsed / 30);
             if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
             {
                 c.SetInt(FgjM3Common.SK(c, "log"), tick);
-                string sites = string.Join("；", lost.Select(x => HomeGridService.FindBuilding(s, x.Id)).Where(b => b != null && b.ConstructionState != BuildingConstructionState.Operational)
+                string sites = string.Join("；", targets.Select(x => HomeGridService.FindBuilding(s, x.Id)).Where(b => b != null && b.ConstructionState != BuildingConstructionState.Operational)
                     .Select(b => HomeValleyConstruction.TryDescribeSite(s, new GridCell(b.GridX, b.GridY), out string st, out string sb) ? $"{st}：{sb?.Replace("\n", " / ")}" : $"{BuildingOps.NameOf(b)}：不在施工队列"));
                 c.Log($"等重建：[{string.Join("；", waiting)}]；施工点 [{sites}]；残骸去向 {RaidResultService.RouteText(RaidResultService.StateOf(s)?.WreckRouting ?? 0)}；{D.WorkDiag(s)}");
                 c.Log($"    重建诊断：{RebuildDiag(s, rule)}");
             }
             return StepOutcome.Wait;
+        }
+
+        /// <summary>
+        /// 重建验收夹具（FG9-ACT1-01 修复轮；DEBT-FG9ACT101-05，FG-GAP-146 → FG9-BAL-01 调完突袭强度后删掉）：只在两波真实突袭一座建筑都没打坏时由 <see cref="TickRebuilt"/> 调用。
+        /// 走建筑伤害的唯一入口（突袭、天气都经它）把一座运转中的发电机打到 0，成功时把它的 ID 记在 rb.fix；之后“自动重建规则派单、机器按原样重建、规则日志可追溯”照常验。
+        /// FgMilestoneM6SelfCheck.Fixtures 登记：这个调用只能出现在本方法里、且只有一处。
+        /// </summary>
+        private static void ApplyRebuildDamageFixture(JourneyContext c, CampaignState s)
+        {
+            BuildingRecord gen = s.BuildingRecords.FirstOrDefault(x => x != null && x.RegionId == HomeValleyLayout.RegionId && x.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator
+                && !HomeValleyController.IsPlannedGhost(x) && x.ConstructionState == BuildingConstructionState.Operational);
+            if (gen != null && BuildingOps.ApplyDamage(s, gen.BuildingId, 1e9f))
+            {
+                c.Set("rb.fix", gen.BuildingId);
+            }
         }
 
         /// <summary>等重建太久时的诊断：时钟有没有在走、家园内核步数、每台家园机器的内核状态（血量 / 行为 / 命令 / 标志）、在办工单的目标与机器、规则日志尾与待处理事件。</summary>

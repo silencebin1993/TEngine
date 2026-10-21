@@ -102,14 +102,32 @@ namespace GameLogic.Campaign.Grid
 
         // ── 解锁 ────────────────────────────────────────────────────────────────
 
-        /// <summary>解锁规则：always = 开局即可；beacon = 摧毁铸造前哨主核心并带回核心数据后（<see cref="HomeValleyBeacon.IsUnlocked"/>）。</summary>
+        /// <summary>解锁规则：always = 开局即可；beacon = 摧毁铸造前哨主核心并带回核心数据后（<see cref="HomeValleyBeacon.IsUnlocked"/>）；
+        /// research:&lt;节点&gt; = 研究完成；pace:&lt;节奏点&gt; = 第一幕节奏台账到达（FG9-ACT1-01）；用“&amp;”连起来的复合规则 = 每段都满足。</summary>
         public static bool IsUnlocked(CampaignState state, string rule)
         {
+            // FG9-ACT1-01 修复轮：复合规则“research:<节点>&pace:<节奏点>”——每一段都满足才开放（传送带一族：研究完成且第一幕节奏到了，研究再早也绕不过节奏台账）。
+            if (rule != null && rule.IndexOf(Economy.ResearchGate.RuleAnd) >= 0)
+            {
+                foreach (string part in rule.Split(Economy.ResearchGate.RuleAnd))
+                {
+                    if (!IsUnlocked(state, part.Trim()))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
             switch (rule)
             {
                 case "always": return true;
                 case "beacon": return state != null && HomeValleyBeacon.IsUnlocked(state);
                 default:
+                    // FG9-ACT1-01：pace:<节奏点> = 第一幕节奏台账到达这一点后开放（Act1PacingService；全量自检旧段 / M1～M8 旅程按开放前的规则视为已满足）。
+                    if (Act1PacingService.IsPaceRule(rule))
+                    {
+                        return Act1PacingService.IsGateOpen(state, Act1PacingService.PointOf(rule));
+                    }
                     // FG4-ECO-11：research:<节点> = 研究完成后解锁（研发树开放前视为已满足，见 ResearchGate）。
                     return Economy.ResearchGate.IsResearchRule(rule) && Economy.ResearchGate.IsCompleted(state, Economy.ResearchGate.NodeOf(rule));
             }
