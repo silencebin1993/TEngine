@@ -730,6 +730,25 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>FG10-BOSS-01（洗礼塔泄压）：改单位的免疫状态位（挂不上的标签）。状态随快照。</summary>
+        public bool SetImmuneMask(int id, uint mask)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                return false;
+            }
+            CombatClarityUnit c = _d.Clarity[i];
+            if (c.ImmuneMask == mask)
+            {
+                return true;
+            }
+            c.ImmuneMask = mask;
+            _d.Clarity[i] = c;
+            Touch();
+            return true;
+        }
+
         /// <summary>FG10-FAC-01（液氮）：给单位加受寒（测试夹具 / 将来玩家侧的液氮来源；与内核里的喷淋同一个入口）。</summary>
         public bool ChillUnit(int id, float amount)
         {

@@ -42,6 +42,8 @@ namespace GameLogic.Campaign.Content
         public const string BehaviorSpray = "spray";
         public const string BehaviorCrawlBurst = "crawl_burst";
         public const string BehaviorPivot = "pivot";
+        /// <summary>FG10-BOSS-01：固定环形喷淋架（洗礼塔：本体不动、没有武器，喷淋臂与枢轴喷灌同一套内核结算）。</summary>
+        public const string BehaviorRingSpray = "ring_spray";
         public const string BehaviorPollute = "pollute";
         public const string BehaviorSwarm = "swarm";
 

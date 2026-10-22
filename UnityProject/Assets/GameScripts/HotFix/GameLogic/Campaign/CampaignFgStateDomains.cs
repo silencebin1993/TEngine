@@ -2730,6 +2730,9 @@ namespace GameLogic.Campaign
             // FG9-FAC-01：旧档没有阵营扩充域 = 空域（首领未遭遇、发射器全在、反制未锁定）。
             s.Factions ??= new FactionState();
             s.Factions.SilentBoss ??= new SilentBossRecord();
+            s.Factions.ClarityBoss ??= new ClarityBossRecord(); // FG10-BOSS-01
+            s.Factions.ClarityBoss.WaveUnits ??= Array.Empty<int>();
+            s.Factions.ClarityBoss.Active ??= Array.Empty<ClarityBossFill>();
             s.Factions.NoiseEmittersDestroyed ??= Array.Empty<string>();
             s.Factions.NoiseZonesNoticed ??= Array.Empty<string>();
             s.Factions.SilentCounterId ??= string.Empty;

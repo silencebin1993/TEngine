@@ -321,6 +321,33 @@ namespace GameLogic.Campaign.Regions
             HomeValleyCombatTargets.OnKernelHit(state, key, damage, healthAfter, attackerLogicId, killed, direct);
         }
 
+        /// <summary>FG10-BOSS-01：洗礼塔反应塔（星球上的首领，external_health）的伤害请求交给首领状态机分阶段结算。</summary>
+        public override bool ApplyExternalEnemyDamage(CombatSite site, RegionEnemyRecord enemy, float damage)
+        {
+            if (enemy == null || enemy.EnemyInstanceId != BaptismTowerBoss.TowerInstanceId)
+            {
+                return false;
+            }
+            (bool ok, _) = BaptismTowerBoss.ApplyDamage(CampaignSession.Current, enemy, damage);
+            if (ok)
+            {
+                FeedbackCues.RaiseAt(FeedbackCueId.EnemyHit, enemy.Position);
+            }
+            return ok;
+        }
+
+        public override string InvulnerableDetail(RegionEnemyRecord enemy) =>
+            enemy != null && enemy.EnemyInstanceId == BaptismTowerBoss.TowerInstanceId ? BaptismTowerBoss.InvulnerableDetail(CampaignSession.Current) : string.Empty;
+
+        /// <summary>FG10-BOSS-01：洗礼塔泵站（内核耐久）被打空——它的流体停止灌入。</summary>
+        public override void OnEnemyKilled(CombatSite site, RegionEnemyRecord enemy)
+        {
+            if (enemy != null && BaptismTowerBoss.IsBossPart(enemy.EnemyInstanceId))
+            {
+                BaptismTowerBoss.OnPartKilled(CampaignSession.Current, enemy);
+            }
+        }
+
         /// <summary>FG0-ARCH-06：工作地点无法到达——工单转为等待（带原因，30 秒后重试），并发一条可定位的“无法到达”通知。</summary>
         public override void OnWorkBlocked(CombatSite site, int logicId, BinGames.Sim.Nav.NavFailReason reason, Vector2 at)
         {

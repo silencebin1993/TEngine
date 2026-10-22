@@ -415,6 +415,16 @@ namespace GameLogic.Campaign.Combat
             new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds", "effectRange", "effectAmount", "turnRate", "sprayCone" };
     }
 
+    /// <summary>FG10-BOSS-01 固定环形喷淋架：本体原地不动、不开火（内核 HoldFire），喷淋臂（臂长 effectRange、每秒伤害 effectAmount、转速 turnRate、半宽 sprayCone、
+    /// 蓄压 warnSeconds）绕本体扫——与枢轴喷灌同一套内核结算（洗礼塔）。</summary>
+    public sealed class RingSprayReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorRingSpray;
+        public override CombatBehavior Kernel => CombatBehavior.HoldFire;
+        public override bool NeedsProfile => true;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "warnSeconds", "effectRange", "effectAmount", "turnRate", "sprayCone" };
+    }
+
     /// <summary>投放（空中）：有投放目标时直飞过去，effectRange 内悬停预警 warnSeconds 后投放并自毁；没有目标时用武器扑向感知范围内的单位（灭活无人机）。</summary>
     public sealed class PolluteReading : ClarityChaseReading
     {
@@ -442,6 +452,7 @@ namespace GameLogic.Campaign.Combat
 
         public static bool Has(MechEnemy row) =>
             row != null && (row.Behavior == EnemyDefs.BehaviorSpray || row.Behavior == EnemyDefs.BehaviorCrawlBurst || row.Behavior == EnemyDefs.BehaviorPivot
+                            || row.Behavior == EnemyDefs.BehaviorRingSpray
                             || row.Behavior == EnemyDefs.BehaviorPollute || row.Behavior == EnemyDefs.BehaviorSwarm || row.SplitCount > 0f
                             || EnemyDefs.HasTag(row, EnemyDefs.TagAirborne) || EnemyDefs.HasTag(row, EnemyDefs.TagAcidProof)
                             || EnemyDefs.HasTag(row, EnemyDefs.TagAntiBuilding));
@@ -482,7 +493,7 @@ namespace GameLogic.Campaign.Combat
                 p.PoolDps = row.PoolDps * dm;
                 p.PoolChill = Math.Max(0f, row.Chill) * PoolChillFrac;
             }
-            else if (row.Behavior == EnemyDefs.BehaviorPivot)
+            else if (row.Behavior == EnemyDefs.BehaviorPivot || row.Behavior == EnemyDefs.BehaviorRingSpray)
             {
                 p.PivotRadius = row.EffectRange;
                 p.PivotWidth = row.SprayCone * 2f; // 表 sprayCone 是半宽，内核 PivotWidth 是全宽（审查修复）
@@ -549,7 +560,7 @@ namespace GameLogic.Campaign.Combat
             new StillReading(), new PatrolMarkReading(), new JamFieldReading(), new HoldFireReading(), new TelegraphReading(), new RepairReading(),
             new DeflectReading(), new StalkReading(), new SeverReading(),
             new SalvoReading(), new MinelayReading(), new ReloadReading(), new ChargeReading(),
-            new SprayReading(), new CrawlBurstReading(), new PivotReading(), new PolluteReading(), new SwarmReading());
+            new SprayReading(), new CrawlBurstReading(), new PivotReading(), new PolluteReading(), new SwarmReading(), new RingSprayReading());
 
         private static Dictionary<string, IEnemyBehaviorReading> Build(params IEnemyBehaviorReading[] readings)
         {

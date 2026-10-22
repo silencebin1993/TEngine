@@ -48,6 +48,9 @@ namespace GameLogic.Campaign.Combat
         /// <summary>改单位的酸蚀抗性（0～1；防腐涂层等）。</summary>
         public bool SetAcidResist(int unitId, float resist) => !IsDisposed && Kernel.SetAcidResist(unitId, Mathf.Clamp01(resist));
 
+        /// <summary>FG10-BOSS-01：改单位的免疫状态位（洗礼塔封闭时冻不住、泄压时能冻）。</summary>
+        public bool SetImmuneMask(int unitId, uint mask) => !IsDisposed && Kernel.SetImmuneMask(unitId, mask);
+
         /// <summary>给单位加受寒（与液氮命中同一个入口；自检夹具 / 将来玩家侧的液氮来源）。</summary>
         public bool ChillUnit(int unitId, float amount) => !IsDisposed && Kernel.ChillUnit(unitId, amount);
 
