@@ -85,6 +85,67 @@ namespace BinGames.Sim.Combat
             return c.Spray == 1 || c.Pivot != 0 || c.Fuse == 1;
         }
 
+        /// <summary>这个单位的攻击由澄净专属行为结算（喷淋布区 / 枢轴喷灌 / 自爆）：武器列只是参数来源，普通开火路径不出手。</summary>
+        internal static bool ClarityOwnsAttack(ref CombatData d, int i)
+        {
+            int bp = d.BProfile[i];
+            if (bp < 0 || bp >= d.Profiles.Length)
+            {
+                return false;
+            }
+            CombatBehaviorProfile p = d.Profiles[bp];
+            return p.SprayRange > 0f || p.PivotRadius > 0f || p.BurstRadius > 0f;
+        }
+
+        /// <summary>
+        /// 腐蚀蜂群“专门腐蚀建筑”（行为参数 StructPref）：射程内最近的己方建筑 / 炮塔（存活、可选中、没潜行、不是只受区域伤害的单位），并列取槽位大者；没有返回 -1。
+        /// O(局部格子 + 单位)，与 <see cref="FindTarget"/> 同一套格子查询。
+        /// </summary>
+        internal static int FindStructureTarget(ref CombatData d, ref CombatGrid grid, int i, float range)
+        {
+            if (range <= 0f)
+            {
+                return -1;
+            }
+            double2 pos = d.Pos[i];
+            int best = -1;
+            double bestDist = range;
+            double reach = range + GridSlack;
+            int cx0 = grid.CellOf(pos.x - reach);
+            int cx1 = grid.CellOf(pos.x + reach);
+            int cy0 = grid.CellOf(pos.y - reach);
+            int cy1 = grid.CellOf(pos.y + reach);
+            for (int cy = cy0; cy <= cy1; cy++)
+            {
+                for (int cx = cx0; cx <= cx1; cx++)
+                {
+                    if (!grid.TryGetCell(cx, cy, out int start, out int count))
+                    {
+                        continue;
+                    }
+                    for (int e = start; e < start + count; e++)
+                    {
+                        int k = grid.Slots[e];
+                        byte kind = d.Kind[k];
+                        if (k == i || d.Faction[k] != (byte)CombatFaction.Player || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable)
+                            || d.Has(k, CombatUnitFlags.Stealthed) || d.Has(k, CombatUnitFlags.AreaOnly)
+                            || (kind != (byte)CombatUnitKind.Turret && kind != (byte)CombatUnitKind.Structure))
+                        {
+                            continue;
+                        }
+                        double dist = math.distance(pos, d.Pos[k]);
+                        if (dist > bestDist || (dist == bestDist && k < best))
+                        {
+                            continue;
+                        }
+                        bestDist = dist;
+                        best = k;
+                    }
+                }
+            }
+            return best;
+        }
+
         /// <summary>酸液（酸沼 / 喷淋池 / 分裂液）对这个单位的伤害倍率 = (1 − 酸蚀抗性) ×（湿润时冲淡倍率）。</summary>
         internal static float AcidFactor(ref CombatData d, int k, double now)
         {

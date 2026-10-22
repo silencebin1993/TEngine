@@ -879,7 +879,12 @@ namespace BinGames.Sim.Combat
             float retarget = d.Secondary[i] - dt;
             if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || retarget <= 0f)
             {
-                t = FindTarget(ref d, ref grid, i, p.SenseRange, false, wp.TargetMode);
+                // FG10-FAC-01（腐蚀蜂群“专门腐蚀建筑”）：带建筑偏好的单位先找感知范围内的己方建筑 / 炮塔，没有再按武器的选目标模式。
+                t = p.StructPref > 0f ? FindStructureTarget(ref d, ref grid, i, p.SenseRange) : -1;
+                if (t < 0)
+                {
+                    t = FindTarget(ref d, ref grid, i, p.SenseRange, false, wp.TargetMode);
+                }
                 cmd.Target = t >= 0 ? d.Id[t] : 0;
                 retarget = 0.5f;
             }
@@ -942,6 +947,11 @@ namespace BinGames.Sim.Combat
             // 潜伏中要开火 → 这一次只现形（开始展桅预警），预警（RevealSeconds）没结束之前也不出手。伏击 / 驻守 / 瞄准线三条路径选定目标时已经先查过；
             // 突袭者（含行进拦截的就地交战）与攻城单位走到这里才第一次查（调用方已重置冷却：预警结束后的下一个冷却点再出手）。没有潜伏参数的单位 O(1) 直接放行。
             if (d.Faction[i] == (byte)CombatFaction.Hostile && SilentHold(ref d, i))
+            {
+                return;
+            }
+            // FG10-FAC-01：喷淋 / 枢轴喷灌 / 自爆单位的武器列描述的是专属攻击（澄净阶段结算，有预警），普通开火路径不出手（否则会在预警之外多打一发）。
+            if (d.Faction[i] == (byte)CombatFaction.Hostile && ClarityOwnsAttack(ref d, i))
             {
                 return;
             }

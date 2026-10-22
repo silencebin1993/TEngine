@@ -1037,6 +1037,8 @@ namespace GameLogic.Campaign.Env
                    + (h.Id == EmNoiseService.HazardId && !belt ? EmNoiseService.HoverLine(s, x, y)
                        // FG9-FAC-02：熔渣热区的效果已经接入（区内武器散热 -30%，战斗内核逐单位结算）。
                        : h.Id == SlagHeatService.HazardId && !belt ? SlagHeatService.HoverLine()
+                       // FG10-FAC-01：酸沼的效果已经接入（外圈酸沼带与领地里的酸沼同一规则，战斗内核每游戏秒结算）。
+                       : h.Id == AcidMarshService.HazardId ? AcidMarshService.HoverLine()
                        : GameText.Get("hazard.hover.pending"));
             return true;
         }

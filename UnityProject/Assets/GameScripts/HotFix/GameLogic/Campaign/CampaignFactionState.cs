@@ -37,6 +37,12 @@ namespace GameLogic.Campaign
         /// <summary>FG9-FAC-02：已经提示过“进入熔渣热区”的危害区（同一片只提示一次）。</summary>
         public string[] SlagZonesNoticed = Array.Empty<string>();
 
+        /// <summary>FG10-FAC-01：澄净反制（FGR-FAC-004：每个游戏日更新一次并锁定；唯一写入口 <c>Regions.ClarityCounterService</c>）。</summary>
+        public int ClarityCounterDay;
+        public string ClarityCounterId = string.Empty;
+        /// <summary>FG10-FAC-01：已经提示过“进入酸沼”的酸沼区域（外圈带 = 领地 ID#belt，领地里的酸沼 = 领地 ID#序号；同一片只提示一次）。</summary>
+        public string[] AcidZonesNoticed = Array.Empty<string>();
+
         /// <summary>FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测到的静默信号点（据点 ID / 诱饵 ID，按序；唯一写入口 <c>WorldSim.SignalContactService</c>）。</summary>
         public string[] ContactsDetected = Array.Empty<string>();
         /// <summary>FG9-ACT1-01：监听站“反制预览”情报顺带甄别过的信号点（一直有效）。</summary>

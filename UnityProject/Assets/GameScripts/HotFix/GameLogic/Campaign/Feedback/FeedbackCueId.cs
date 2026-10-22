@@ -119,6 +119,22 @@ namespace GameLogic.Campaign.Feedback
         FoundryBossBerserk,
         FoundryBossArenaReset,
 
+        // ── FG10-FAC-01 澄净专属语法（FGR-FAC-002 / 008 ①：每条专属行为都有 ≥ 0.8 秒的视觉 + 声音预警）──
+        ClaritySprayWarn,
+        ClaritySpray,
+        ClarityPivotWarn,
+        ClarityBurstWarn,
+        ClarityBurst,
+        ClarityDeflagrate,
+        ClaritySlickIgnite,
+        ClarityFreeze,
+        ClaritySplit,
+        ClarityDroneWarn,
+        ClarityPoolWashed,
+        ClarityAcid,
+        ClaritySprayWarnCryo,
+        ClaritySprayCryo,
+
         Max,
     }
 

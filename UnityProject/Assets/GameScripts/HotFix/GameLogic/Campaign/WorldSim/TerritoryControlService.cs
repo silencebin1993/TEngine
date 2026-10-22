@@ -762,7 +762,7 @@ namespace GameLogic.Campaign.WorldSim
                 LastProblem = "骚扰派兵失败：" + failure;
                 return;
             }
-            FillComposition(g2, row?.GarrisonUnits, g2.UnitCount, r.TerritoryId);
+            FillComposition(s, g2, row?.GarrisonUnits, g2.UnitCount, r.TerritoryId);
             r.HarassGroupId = g2.GroupId;
             HarassCount++;
             StateOf(s).HarassSent++;
@@ -771,9 +771,9 @@ namespace GameLogic.Campaign.WorldSim
             GuidanceHooks.Raise(GuidanceHooks.WorldFirstTerritoryHarassed);
         }
 
-        private static void FillComposition(TransitGroupRecord g, string units, int count, string faction)
+        private static void FillComposition(CampaignState s, TransitGroupRecord g, string units, int count, string faction)
         {
-            BuildUnits(units, count, faction, elite: false);
+            BuildUnits(units, count, faction, elite: false, s);
             var ids = new List<string>(4);
             var counts = new List<int>(4);
             foreach ((RaidUnitDef def, bool _) in UnitScratch)
@@ -871,7 +871,7 @@ namespace GameLogic.Campaign.WorldSim
                 }
                 GameConfig.fg.TerritoryControl row = Row(FactionOf(s, o));
                 bool elite = o.Kind == WorldOutpostSystem.KindRemnant;
-                BuildUnits(elite ? row?.EliteUnits : row?.GarrisonUnits, o.Garrison, FactionOf(s, o), elite);
+                BuildUnits(elite ? row?.EliteUnits : row?.GarrisonUnits, o.Garrison, FactionOf(s, o), elite, s);
                 int key = o.EngageKey = AcquireKey(s, o.EngageKey);
                 int placed = Unfold(s, site, key, new GridCell(o.CellX, o.CellY));
                 if (placed <= 0)
@@ -931,7 +931,7 @@ namespace GameLogic.Campaign.WorldSim
                     continue;
                 }
                 string faction = o != null ? FactionOf(s, o) : string.Empty;
-                BuildUnits(Row(faction)?.GarrisonUnits, p.UnitCount, faction, elite: false);
+                BuildUnits(Row(faction)?.GarrisonUnits, p.UnitCount, faction, elite: false, s);
                 int key = p.EngageKey = AcquireKey(s, p.EngageKey);
                 int placed = Unfold(s, site, key, NavService.CellOf(p.PosX, p.PosY));
                 if (placed <= 0)
@@ -1016,8 +1016,12 @@ namespace GameLogic.Campaign.WorldSim
             return false;
         }
 
-        /// <summary>按编成（逗号分隔的 fg.TbRaidUnit.id，循环取）凑 <paramref name="count"/> 台；编成为 none / 表里没有时取该阵营编成表第一种单位，再没有取第一行。</summary>
-        private static void BuildUnits(string units, int count, string faction, bool elite)
+        /// <summary>
+        /// 按编成（逗号分隔的 fg.TbRaidUnit.id，循环取）凑 <paramref name="count"/> 台；编成为 none / 表里没有时取该阵营编成表第一种单位，再没有取第一行。
+        /// FG10-FAC-01（FGR-FAC-004）：澄净的普通驻军按当天锁定的反制把编成末尾的几台换成对策单位（液氮压制 → 液氮泵车、蜂群饱和 → 腐蚀蜂群；
+        /// 台数 clarity.counter.extra_units，最多换一半；总台数不变，驻军账不变）。<paramref name="s"/> 为空时取当前会话。
+        /// </summary>
+        private static void BuildUnits(string units, int count, string faction, bool elite, CampaignState s = null)
         {
             UnitScratch.Clear();
             var defs = new List<RaidUnitDef>(4);
@@ -1050,7 +1054,23 @@ namespace GameLogic.Campaign.WorldSim
             {
                 UnitScratch.Add((defs.Count > 0 ? defs[i % defs.Count] : null, elite));
             }
+            if (!elite && faction == Content.EnemyDefs.FactionClarity && UnitScratch.Count >= 2)
+            {
+                RaidUnitDef extra = Regions.ClarityCounterService.ExtraUnit(Regions.ClarityCounterService.Locked(s ?? CampaignSession.Current));
+                if (extra != null)
+                {
+                    int k = Math.Min(Regions.ClarityCounterService.ExtraUnitCount, UnitScratch.Count / 2);
+                    for (int i = UnitScratch.Count - k; i < UnitScratch.Count; i++)
+                    {
+                        UnitScratch[i] = (extra, false);
+                    }
+                    ClarityCounterApplied++;
+                }
+            }
         }
+
+        /// <summary>FG10-FAC-01：澄净驻军按反制换上对策单位的次数（自检用）。</summary>
+        public static int ClarityCounterApplied { get; private set; }
 
         /// <summary>在 <paramref name="at"/> 附近按切比雪夫环把 <see cref="UnitScratch"/> 逐台生成（敌方可走格，固定顺序），设成“就地交战”。返回生成的台数。</summary>
         private static int Unfold(CampaignState s, CombatSite site, int key, GridCell at)

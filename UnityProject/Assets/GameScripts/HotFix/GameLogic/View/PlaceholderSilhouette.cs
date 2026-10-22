@@ -133,6 +133,12 @@ namespace GameLogic.View
                 return;
             }
 
+            // FG10-FAC-01 澄净（管线、罐体、喷洒；B15 形状区分，占位几何体，美术阶段替换 DEBT-FG10FAC01-01）。
+            if (silhouette != null && silhouette.StartsWith("clarity_", System.StringComparison.Ordinal))
+            {
+                ApplyClarity(parts, mat, silhouette);
+                return;
+            }
             if (silhouette == "foundry_node")
             {
                 Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.1f, 0f), new Vector3(1.1f, 0.9f, 1.1f));
@@ -222,6 +228,53 @@ namespace GameLogic.View
             {
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.4f, 0f), new Vector3(0.8f, 0.12f, 0.22f));
                 Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 0.4f, 0f), new Vector3(0.22f, 0.12f, 0.8f));
+            }
+        }
+
+        /// <summary>澄净剪影：横卧 / 竖立的罐体 + 管线 + 喷嘴（俯视圆罐，与铸造的方块、静默的细杆都不同）。</summary>
+        private static void ApplyClarity(Transform parts, Material mat, string silhouette)
+        {
+            switch (silhouette)
+            {
+                case "clarity_sprayer":
+                    // 喷洒车：低底盘 + 横卧罐体 + 前伸喷杆。
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.7f, 0f), new Vector3(1.3f, 0.35f, 1.8f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.15f, -0.15f), new Vector3(0.9f, 0.7f, 0.9f), new Vector3(90f, 0f, 0f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.2f, 1.05f), new Vector3(0.12f, 0.35f, 0.12f), new Vector3(70f, 0f, 0f));
+                    break;
+                case "clarity_pump":
+                    // 液氮泵车：底盘 + 两只竖罐 + 前伸喷嘴。
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, -0.7f, 0f), new Vector3(1.4f, 0.35f, 1.8f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(-0.35f, 0.05f, -0.3f), new Vector3(0.55f, 0.6f, 0.55f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0.35f, 0.05f, -0.3f), new Vector3(0.55f, 0.6f, 0.55f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.25f, 1.0f), new Vector3(0.16f, 0.35f, 0.16f), new Vector3(80f, 0f, 0f));
+                    break;
+                case "clarity_crawler":
+                    // 油污爬行者：贴地扁圆罐 + 尾部漏油管。
+                    Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, -0.72f, 0f), new Vector3(1.1f, 0.45f, 1.3f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.85f, -0.75f), new Vector3(0.12f, 0.25f, 0.12f), new Vector3(90f, 0f, 0f));
+                    break;
+                case "clarity_drone":
+                    // 灭活无人机：悬在高处的小罐体 + 两片旋翼盘（空中单位，比地面单位高一截）。
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0.9f, 0f), new Vector3(0.45f, 0.25f, 0.45f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(-0.55f, 1.05f, 0f), new Vector3(0.6f, 0.02f, 0.6f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0.55f, 1.05f, 0f), new Vector3(0.6f, 0.02f, 0.6f));
+                    break;
+                case "clarity_swarm":
+                    // 腐蚀蜂群：三只小球挤在一起（一群小东西）。
+                    Part(parts, mat, PrimitiveType.Sphere, new Vector3(-0.3f, -0.75f, 0f), Vector3.one * 0.4f);
+                    Part(parts, mat, PrimitiveType.Sphere, new Vector3(0.3f, -0.75f, 0.1f), Vector3.one * 0.35f);
+                    Part(parts, mat, PrimitiveType.Sphere, new Vector3(0f, -0.7f, -0.3f), Vector3.one * 0.38f);
+                    break;
+                case "clarity_tank":
+                    // 沉淀巨罐：粗大竖罐 + 顶部枢轴 + 一条长喷淋臂。
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 0f, 0f), new Vector3(2.6f, 1.0f, 2.6f));
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, 1.1f, 0f), new Vector3(0.5f, 0.15f, 0.5f));
+                    Part(parts, mat, PrimitiveType.Cube, new Vector3(0f, 1.15f, 1.8f), new Vector3(0.18f, 0.12f, 3.2f));
+                    break;
+                default:
+                    Part(parts, mat, PrimitiveType.Cylinder, new Vector3(0f, -0.3f, 0f), new Vector3(1.1f, 0.6f, 1.1f));
+                    break;
             }
         }
 

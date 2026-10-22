@@ -190,6 +190,8 @@ namespace GameLogic.Campaign.Combat
             }
             Kernel.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
             Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+            // FG10-FAC-01：澄净专属语法认的四个状态位（酸蚀免疫 / 湿润冲淡酸液 / 油迹 / 燃烧引爆与解冻），按 fg.TbStatusTag 的位写；表重载时随反应一起重登记。
+            Kernel.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"));
             ReactionRevision = NamedReactionCatalog.Revision;
             // FG2-FW-04：规则下标变了（纪元 +1）→ 当场重取反馈基线，下一步起的反应照常进日志 / 归因（不把第一步吞成基线）。
             ReactionFeedback.Prime(Kernel, FeedCursor);
@@ -274,6 +276,12 @@ namespace GameLogic.Campaign.Combat
             c.TurretAimToleranceDeg = Math.Max(0.5f, Tuning("turret.aim_tolerance_deg", 6f));
             // FG6-LOG-10（FGR-LOG-046）：管线泄漏的液洼整片反应（燃油遇火成燃烧区）后至少烧多少游戏秒。
             c.LeakReactSeconds = Math.Max(0f, Tuning("logistics.leak.react_seconds", 12f));
+            // FG10-FAC-01：受寒与冻结（液氮“先减速再冻结”）、喷淋池 + 油迹的共用上限（fg.TbHomeTuning clarity.*）。
+            c.ChillSlowMax = Tuning("clarity.chill.slow_max", 0.6f);
+            c.ChillDecay = Tuning("clarity.chill.decay_per_sec", 0.25f);
+            c.FreezeSeconds = Tuning("clarity.chill.freeze_seconds", 2.5f);
+            c.ThawGuardSeconds = Tuning("clarity.chill.thaw_guard_seconds", 1.5f);
+            c.PoolZoneCapacity = (int)Math.Round(Tuning("clarity.pool.cap", CombatConst.DefaultPoolZoneCapacity));
             return c;
         }
 
@@ -1564,6 +1572,14 @@ namespace GameLogic.Campaign.Combat
                     // FG9-FAC-02（FGR-FAC-008 ①）：齐射预警 / 对空拦截 / 空爆 / 雷区 / 冲锋蓄力 / 架炮驻锄——声音 + 字幕 + 画面。
                     FoundryCombatFeedback.OnCue(this, e, at);
                     return;
+                case CombatEventKind.ClarityCue:
+                    // FG10-FAC-01（FGR-FAC-008 ①）：喷嘴蓄压 / 枢轴喷灌蓄压 / 自爆引信 / 投放预警（≥ 0.8 秒）与喷出 / 爆燃 / 冻结 / 分裂 / 冲洗 / 酸沼腐蚀——声音 + 字幕 + 画面。
+                    ClarityCombatFeedback.OnCue(this, e, at);
+                    return;
+                case CombatEventKind.Repolluted:
+                    // FG10-FAC-01：灭活无人机投放完成（不丢的玩法事件）。目标点周围再污染由 FG10-RAID-01 订阅 ClarityCombatFeedback.RepollutedAt 落地。
+                    ClarityCombatFeedback.OnRepolluted(this, e, at);
+                    return;
                 case CombatEventKind.TagReaction:
                 {
                     // FG2-FW-03（FGR-FW-041 / 042）：开放命名的反应报出机械名；未开放的照样生效，只是不显示名字。
@@ -1698,6 +1714,10 @@ namespace GameLogic.Campaign.Combat
                     return GameText.Get("combat.fire.hidden"); // FG9-FAC-01：目标潜伏中，不能远程锁定
                 case CombatFireResult.AreaOnly:
                     return GameText.Get("combat.fire.area_only"); // FG9-FAC-02：子母雷只能用范围伤害 / 牵引引爆
+                case CombatFireResult.Frozen:
+                    return GameText.Get("combat.fire.frozen"); // FG10-FAC-01：被液氮冻住，解冻前不能开火
+                case CombatFireResult.CannotHitAir:
+                    return GameText.Get("combat.fire.cannot_hit_air"); // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区打不到空中目标
                 default:
                     return string.Empty;
             }

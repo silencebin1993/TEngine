@@ -449,6 +449,13 @@ namespace GameLogic.Campaign.Defense
                     }
                 }
                 EnemySilentParams.ApplyLurk(row, ref bp);
+                // FG10-FAC-01（攻城与据点展开中的澄净专属语法）：喷淋布区 / 枢轴喷灌 / 自爆与油迹 / 分裂 / 飞行与投放 / 抗性 / 建筑偏好的参数取敌人表（与区域同一份翻译），
+                // 伤害类参数乘难度与精英倍率；带 adapt_insulate 的单位在澄净反制锁定为“绝缘涂层”的那天挂不上电击类标签（当天的锁定，FGR-FAC-004）。
+                if (EnemyClarityParams.Has(row))
+                {
+                    EnemyClarityParams.Apply(row, ref bp, dmgScale,
+                        EnemyClarityParams.Insulates(row) && Regions.ClarityCounterService.InsulateToday(CampaignSession.Current));
+                }
             }
             int profile = site.ProfileIndex(bp);
             int unit = site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult,

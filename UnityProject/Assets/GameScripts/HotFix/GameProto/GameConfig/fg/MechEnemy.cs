@@ -68,6 +68,19 @@ public sealed partial class MechEnemy : Luban.BeanBase
         ChargeSpeed = _buf.ReadFloat();
         TurnRate = _buf.ReadFloat();
         MaxPlaced = _buf.ReadFloat();
+        SprayCone = _buf.ReadFloat();
+        PoolRadius = _buf.ReadFloat();
+        PoolSeconds = _buf.ReadFloat();
+        PoolDps = _buf.ReadFloat();
+        Chill = _buf.ReadFloat();
+        StatusTag = _buf.ReadString();
+        StatusSeconds = _buf.ReadFloat();
+        DeflagMult = _buf.ReadFloat();
+        SplitCount = _buf.ReadFloat();
+        SplitHp = _buf.ReadFloat();
+        SplitSpeed = _buf.ReadFloat();
+        SplitLife = _buf.ReadFloat();
+        SplitDps = _buf.ReadFloat();
         CodexLinks = _buf.ReadString();
     }
 
@@ -213,7 +226,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string IconId;
     /// <summary>
-    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy
+    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy/clarity_sprayer/clarity_crawler/clarity_pump/clarity_drone/clarity_swarm/clarity_tank
     /// </summary>
     public readonly string Silhouette;
     /// <summary>
@@ -272,6 +285,58 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 布雷:同时最多几颗雷(整数);0=不布雷
     /// </summary>
     public readonly float MaxPlaced;
+    /// <summary>
+    /// 喷淋锥形半角 / 枢轴喷淋臂半宽(度);0=没有
+    /// </summary>
+    public readonly float SprayCone;
+    /// <summary>
+    /// 喷淋池 / 油迹 / 分裂液接触的半径(米);0=不留池
+    /// </summary>
+    public readonly float PoolRadius;
+    /// <summary>
+    /// 喷淋池存留(秒);0=不留池
+    /// </summary>
+    public readonly float PoolSeconds;
+    /// <summary>
+    /// 喷淋池每秒伤害(难度倍率另乘)
+    /// </summary>
+    public readonly float PoolDps;
+    /// <summary>
+    /// 液氮:每次喷中给目标加的受寒(0~1,满 1 冻结;液氮池每节拍 &#215; clarity.pool.chill_tick_frac);0=没有
+    /// </summary>
+    public readonly float Chill;
+    /// <summary>
+    /// 喷淋 / 喷灌 / 油迹 / 分裂液挂的状态标签(fg.TbStatusTag.id:Acid/Frozen/Oil);none=不挂
+    /// </summary>
+    public readonly string StatusTag;
+    /// <summary>
+    /// 上面那个状态标签的持续秒数
+    /// </summary>
+    public readonly float StatusSeconds;
+    /// <summary>
+    /// 自爆单位被火击毁时的爆燃伤害倍率;0=不爆燃
+    /// </summary>
+    public readonly float DeflagMult;
+    /// <summary>
+    /// 被击毁后分裂成几滩会爬行的腐蚀液(整数,≤8);0=不分裂
+    /// </summary>
+    public readonly float SplitCount;
+    /// <summary>
+    /// 每滩分裂液的耐久
+    /// </summary>
+    public readonly float SplitHp;
+    /// <summary>
+    /// 分裂液爬行速度(米/秒)
+    /// </summary>
+    public readonly float SplitSpeed;
+    /// <summary>
+    /// 分裂液多久蒸发(秒)
+    /// </summary>
+    public readonly float SplitLife;
+    /// <summary>
+    /// 分裂液接触时每秒伤害(多滩同时接触不叠加;难度倍率另乘)
+    /// </summary>
+    public readonly float SplitDps;
     /// <summary>
     /// FG9-UX-01 图鉴互链:逗号分隔的图鉴条目ID(reaction:/comp:/fw:/enemy:/codex.*),敌人 ↔ 弱点相关的反应 / 组件 / 机制;none=只链阵营
     /// </summary>
@@ -336,6 +401,19 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "chargeSpeed:" + ChargeSpeed + ","
         + "turnRate:" + TurnRate + ","
         + "maxPlaced:" + MaxPlaced + ","
+        + "sprayCone:" + SprayCone + ","
+        + "poolRadius:" + PoolRadius + ","
+        + "poolSeconds:" + PoolSeconds + ","
+        + "poolDps:" + PoolDps + ","
+        + "chill:" + Chill + ","
+        + "statusTag:" + StatusTag + ","
+        + "statusSeconds:" + StatusSeconds + ","
+        + "deflagMult:" + DeflagMult + ","
+        + "splitCount:" + SplitCount + ","
+        + "splitHp:" + SplitHp + ","
+        + "splitSpeed:" + SplitSpeed + ","
+        + "splitLife:" + SplitLife + ","
+        + "splitDps:" + SplitDps + ","
         + "codexLinks:" + CodexLinks + ","
         + "}";
     }
