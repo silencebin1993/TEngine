@@ -604,6 +604,8 @@ namespace GameLogic.EditorTools
             Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
             // FG10-REG-01 沉淀湖领地：模板与湖心平台锚点、防腐涂层（DEBT-FG8QST01-03）、没有涂层进酸沼先拒绝并说明（软门槛）、样品车接车点在带外、第一次进入的阵营介绍。
             Seg("FgSettlingLakeSelfCheck", FgSettlingLakeSelfCheck.Run);
+            // FG10-REACT-01 化工反应开放：可得性探针、澄净不怕酸的负向、澄净领地出现时开放并通知、图鉴打法、首次触发慢放。
+            Seg("FgClarityReactionSelfCheck", FgClarityReactionSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);
             // FG9-UX-01 正式版图鉴（FG13 FGR-UX-050 / 051、FGR-UX-030；FG09 FGR-FAC-005；FGT-UX-006、FGT-FAC-008）：16 个页签由表生成且条数一致、中英文齐全、互链可达；
