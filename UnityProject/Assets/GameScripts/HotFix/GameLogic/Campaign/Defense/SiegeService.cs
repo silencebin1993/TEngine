@@ -660,7 +660,8 @@ namespace GameLogic.Campaign.Defense
                         break;
                     }
                 }
-                if (!owned && !TerritoryControlService.OwnsKey(state, key)) // FG8-EXP-03：正在迎战的据点 / 巡逻也是主人
+                // FG8-EXP-03：正在迎战的据点 / 巡逻也是主人；FG10-BOSS-01：洗礼塔战斗中召来的那一波也是。
+                if (!owned && !TerritoryControlService.OwnsKey(state, key) && !Regions.BaptismTowerBoss.OwnsKey(state, key))
                 {
                     site.DespawnSiegeGroup(key);
                     OrphansRemoved++;

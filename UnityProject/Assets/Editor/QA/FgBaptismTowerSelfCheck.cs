@@ -264,7 +264,10 @@ namespace GameLogic.EditorTools
             RegionEnemyRecord tower = BaptismTowerBoss.Tower(s);
             BaptismTowerBoss.ApplyDamage(s, tower, tower.MaxHealth * 5f);
             bool atGate = BaptismTowerBoss.PhaseOf(s) == BaptismPhase.React && Mathf.Approximately(tower.Health, tower.MaxHealth * BaptismTowerBoss.Phase2HpFraction);
-            bool wave = r.WaveSpawned && r.WaveUnits.Length > 0 && r.WaveUnits.All(u => home.Kernel.TryGetUnit(u, out _));
+            // 复核修复的回归：召来的单位要留得住（攻城服务每 0.5 秒清一次无主队伍，洗礼塔的那一波由 BaptismTowerBoss.OwnsKey 认领）。
+            StepSeconds(2);
+            bool wave = r.WaveSpawned && r.WaveUnits.Length > 0
+                        && r.WaveUnits.All(u => home.Kernel.TryGetUnit(u, out CombatUnitView wv) && (wv.Flags & CombatUnitFlags.Alive) != 0);
             Expect(atGate && wave,
                 $"C1 一发 5 倍耐久的伤害只打到阶段二门槛（耐久 {tower.Health:0} / {tower.MaxHealth:0}，进入{BaptismTowerBoss.PhaseName(BaptismTowerBoss.PhaseOf(s))}），召来 {r.WaveUnits.Length} 台澄净单位");
 
@@ -294,8 +297,7 @@ namespace GameLogic.EditorTools
                 }
             }
             StepSeconds(1);
-            bool baitHit = bait != 0 && home.Kernel.TryGetStatus(bait, out uint bm, out _, out _, out _, out _) && (bm & Bit(trigger)) != 0u
-                           || (home.Kernel.TryGetUnit(bait, out CombatUnitView bv) && bv.Health < 1e6f);
+            bool baitHit = bait != 0 && home.Kernel.TryGetStatus(bait, out uint bm, out _, out _, out _, out _) && (bm & Bit(trigger)) != 0u;
             Expect(target != null && reactWarn > 0 && reactAt - reactWarn >= GameClock.TicksFor(0.8) && pickedSerial == target.Serial && baitHit,
                 $"C2 主动反应：预警 {(reactAt - reactWarn) / (float)GameClock.StepHz:0.00} 秒（≥ 0.8），挑中机器站着的那片{target?.Tag}（{pickedSerial == target?.Serial}）并{(trigger == "Shock" ? "通电" : "点燃")}；" +
                 $"站在里面的敌方单位同样挨到（借力打力，{baitHit}）");
@@ -306,7 +308,7 @@ namespace GameLogic.EditorTools
             float sealedMult = BaptismTowerBoss.DamageMult(s);
             int shockIndex = RuleIndex("reaction_thermalshock");
             int shock0 = home.Kernel.ReactionCountOf(shockIndex);
-            FreezeThenBurn(home, towerUnit);
+            bool frozeSealed = FreezeThenBurn(home, towerUnit);
             int shockSealed = home.Kernel.ReactionCountOf(shockIndex) - shock0;
             int vents0 = BaptismTowerBoss.VentsOpened;
             for (int i = 0; i < GameClock.StepHz * 20 && BaptismTowerBoss.VentsOpened == vents0; i++)
@@ -316,11 +318,11 @@ namespace GameLogic.EditorTools
             float ventMult = BaptismTowerBoss.DamageMult(s);
             bool frozenOk = home.TryGetClarity(towerUnit, out CombatClarityUnit vc) && (vc.ImmuneMask & Bit("Frozen")) == 0u;
             int shock1 = home.Kernel.ReactionCountOf(shockIndex);
-            FreezeThenBurn(home, towerUnit);
+            bool frozeVent = FreezeThenBurn(home, towerUnit);
             int shockVent = home.Kernel.ReactionCountOf(shockIndex) - shock1;
-            Expect(vent && Mathf.Approximately(sealedMult, BaptismTowerBoss.SealedDamageMult) && shockSealed == 0 && Mathf.Approximately(ventMult, BaptismTowerBoss.VentDamageMult)
-                   && frozenOk && shockVent >= 1,
-                $"D1 泄压阶段：封闭时伤害 × {sealedMult}、先冻再烧打不出热震（{shockSealed} 次）；泄压时伤害 × {ventMult}、能冻住（{frozenOk}）、热震打得出来（{shockVent} 次）");
+            Expect(vent && Mathf.Approximately(sealedMult, BaptismTowerBoss.SealedDamageMult) && !frozeSealed && shockSealed == 0 && Mathf.Approximately(ventMult, BaptismTowerBoss.VentDamageMult)
+                   && frozenOk && frozeVent && shockVent >= 1,
+                $"D1 泄压阶段：封闭时伤害 × {sealedMult}、冻不住（挂上冰冻 {frozeSealed}）、火烧不出热震（{shockSealed} 次）；泄压时伤害 × {ventMult}、能冻住（{frozeVent}）、再烧打出热震（{shockVent} 次）");
 
             // E 击败：奖励一次、领地平定、HUD。
             bool hud = BaptismTowerHud.Compose(s, out string title, out float hpPct, out float mark, out string hpLine, out string lines)
@@ -362,23 +364,30 @@ namespace GameLogic.EditorTools
             bool reset = BaptismTowerBoss.Resets == resets0 + 1 && BaptismTowerBoss.PhaseOf(s) == BaptismPhase.Dormant && r.LastReachedPhase == (int)BaptismPhase.Fill
                          && !home.TryGetEnemyUnit(BaptismTowerBoss.TowerInstanceId, out _) && BaptismTowerBoss.Tower(s)?.Health == BaptismTowerBoss.Tower(s)?.MaxHealth;
             NotificationEntry note = NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == BaptismTowerBoss.NotifyType);
-            bool told = (note?.Latest?.DetailText ?? note?.Text ?? string.Empty).Contains("自动存档");
+            string expected = GameText.Format(r.RetrySaved ? "boss.clarity.notify.retry" : "boss.clarity.notify.retry_nosave", BaptismTowerBoss.PhaseName(BaptismPhase.Fill));
+            bool told = (note?.Latest?.DetailText ?? note?.Text ?? string.Empty).Contains(expected);
             MoveTo(m, center + new Vector2(5f, 0f));
             StepSeconds(2);
             bool again = BaptismTowerBoss.IsEngaged(s) && r.Attempt == 2;
             Expect(engaged && notYet && reset && told && again,
                 $"F1 负向“全员离开 / 全灭”：离开场地 {BaptismTowerBoss.ArenaLeaveSeconds} 秒内不复位（{notYet}），满了 → 复位到开战前（部件回满、撤出内核，记“上次止步：灌注”），" +
-                $"通知写明可从首领战前的自动存档重试（{told}）；再进场重新开战（第 {r.Attempt} 次挑战）");
+                $"通知如实写明有没有首领战前的自动存档可回（{told}）；再进场重新开战（第 {r.Attempt} 次挑战）");
         }
 
         // ─────────────────────────────── 工具 ───────────────────────────────
 
-        private static void FreezeThenBurn(CombatSite site, int unit)
+        /// <summary>先挂冰冻，再在它脚下铺一块会烧的区域（区域节拍带伤害，纯倍率反应才会结算——hit = 0 的直接挂标签不结算）。返回冰冻挂上了没有。</summary>
+        private static bool FreezeThenBurn(CombatSite site, int unit)
         {
             float fireDps = StatusTagCatalog.TryGet("Fire", out StatusTag ft) ? ft.Amount : 0f;
             site.Kernel.ApplyStatus(unit, Bit("Frozen"), 3f, 0f, 0f, 0f, 0);
-            site.Kernel.ApplyStatus(unit, Bit("Fire"), 3f, fireDps, 0f, 0f, 0);
-            WorldSimulation.StepMany(2);
+            bool frozen = site.Kernel.TryGetStatus(unit, out uint mask, out _, out _, out _, out _) && (mask & Bit("Frozen")) != 0u;
+            if (site.Kernel.TryGetUnit(unit, out CombatUnitView v))
+            {
+                site.Kernel.SpawnFieldZone(CombatFaction.Neutral, v.Position, 3f, 1.5f, 0f, Bit("Fire"), 3f, Mathf.Max(1f, fireDps), 0f, 0f);
+            }
+            StepSeconds(1f);
+            return frozen;
         }
 
         private static int RuleIndex(string id)

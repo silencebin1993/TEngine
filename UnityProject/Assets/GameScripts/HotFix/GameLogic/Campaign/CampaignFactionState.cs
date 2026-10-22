@@ -109,6 +109,8 @@ namespace GameLogic.Campaign
         public long EngagedTick;
         public long DefeatedTick;
         public bool RewardsGranted;
+        /// <summary>这一次开战前的自动存档写成了没有（复位通知按它写“可以从存档重试”还是“这次没有存档可回”）。</summary>
+        public bool RetrySaved;
         /// <summary>上一次复位时止步的阶段（重试前显示）；历史最高阶段。</summary>
         public int LastReachedPhase;
         public int BestPhase;

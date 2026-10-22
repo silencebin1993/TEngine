@@ -53,8 +53,9 @@ namespace GameLogic.Campaign.Regions
         public const string TowerInstanceId = "clarity.boss.tower";
         public const int PumpCount = 4;
         public const string NotifyType = "clarity_boss";
-        /// <summary>阶段二召来的单位在战斗内核里的编组键（不是突袭队伍；击毁按野外掉落结算）。</summary>
-        public const int WaveKey = 990900;
+        /// <summary>阶段二召来的单位在战斗内核里的编组键（不是突袭队伍；击毁按野外掉落结算）。落在迎战键区间 [200000, 215000) 之外，
+        /// 且小于击毁事件经 float 传外部键的精确上限（约 21.5 万，CombatSite.Siege.cs）——否则种类序号解码错位。攻城服务清理无主队伍时由 <see cref="OwnsKey"/> 认领。</summary>
+        public const int WaveKey = 215100;
 
         private static readonly Dictionary<BaptismPhase, BaptismPhase> LegalNext = new Dictionary<BaptismPhase, BaptismPhase>
         {
@@ -76,11 +77,14 @@ namespace GameLogic.Campaign.Regions
         public static int RewardGrants { get; private set; }
         /// <summary>开战前自动存档（自检可关：自检里存档目录是临时的，开关只为不改写自检的存档计数）。</summary>
         public static bool SaveOnEngage = true;
+        /// <summary>开战已排到本步末尾（整步提交之后才存档开战，防重复排队）。</summary>
+        private static bool _engagePending;
 
         public static void ResetForTests()
         {
             Engages = Resets = FillsPoured = ReactionsTriggered = VentsOpened = RejectedTransitions = RewardGrants = 0;
             SaveOnEngage = true;
+            _engagePending = false;
         }
 
         public static float ArenaRadius => Tuning("boss.clarity.arena_radius", 40f);
@@ -173,6 +177,13 @@ namespace GameLogic.Campaign.Regions
         }
 
         public static bool IsBossPart(string instanceId) => instanceId == TowerInstanceId || PumpIndexOf(instanceId) >= 0;
+
+        /// <summary>攻城服务清理“没有主人的队伍”时问：这个队伍键是不是洗礼塔召来、仍在战斗中的那一波。</summary>
+        public static bool OwnsKey(CampaignState s, int key)
+        {
+            ClarityBossRecord r = key == WaveKey ? Record(s) : null;
+            return r != null && r.WaveSpawned && IsEngaged(s);
+        }
 
         public static Vector2 PumpPosition(Vector2 center, int i)
         {
@@ -319,6 +330,21 @@ namespace GameLogic.Campaign.Regions
                     r.ReactFill = -1;
                     r.FillPump = -1;
                     site?.RemoveEnemy(TowerInstanceId);
+                    // 首领倒下：泵站停摆撤出、召来的单位撤走（之后不会再有“泵站被摧毁”的提示，也不留没人管的敌人）。
+                    if (site != null)
+                    {
+                        site.DespawnSiegeGroup(WaveKey);
+                        for (int i = 0; i < PumpCount; i++)
+                        {
+                            site.RemoveEnemy(PumpInstanceId(i));
+                            RegionEnemyRecord pump = Pump(s, i);
+                            if (pump != null)
+                            {
+                                pump.IsAlive = false;
+                            }
+                        }
+                    }
+                    r.WaveUnits = Array.Empty<int>();
                     FeedbackCues.RaiseLocated(FeedbackCueId.BossDestroyed, at, GameText.Get("boss.clarity.notify.defeated"));
                     GrantRewardsOnce(s, at);
                     break;
@@ -349,12 +375,14 @@ namespace GameLogic.Campaign.Regions
                 EnemyDefs.ReportEncounterProblem(SiteId, "baptism_tower");
                 return false;
             }
+            r.RetrySaved = false;
             if (SaveOnEngage)
             {
                 SaveResult save = CampaignAutoSaveService.SaveAuto(SaveReason.BossEngageEnter);
+                r.RetrySaved = save.Success;
                 if (!save.Success)
                 {
-                    // 星球上没有“门”可以拦：照常开战，并如实说明这一次没有首领战前的存档可回。
+                    // 星球上没有“门”可以拦：照常开战，复位时如实说明这一次没有首领战前的存档可回。
                     Log.Warning($"[BaptismTowerBoss] 首领战前自动存档未成功（{save.Outcome}），照常开战。");
                 }
             }
@@ -406,10 +434,7 @@ namespace GameLogic.Campaign.Regions
             r.LastReachedPhase = (int)p;
             if (site != null)
             {
-                foreach (int unit in r.WaveUnits ?? Array.Empty<int>())
-                {
-                    site.Kernel.Despawn(unit);
-                }
+                site.DespawnSiegeGroup(WaveKey);
                 site.RemoveEnemy(TowerInstanceId);
                 for (int i = 0; i < PumpCount; i++)
                 {
@@ -429,7 +454,7 @@ namespace GameLogic.Campaign.Regions
             r.WaveUnits = Array.Empty<int>();
             r.Active = Array.Empty<ClarityBossFill>();
             Resets++;
-            string text = GameText.Format("boss.clarity.notify.retry", PhaseName(p));
+            string text = GameText.Format(r.RetrySaved ? "boss.clarity.notify.retry" : "boss.clarity.notify.retry_nosave", PhaseName(p));
             if (TryArena(s, out Vector2 c))
             {
                 FeedbackCues.RaiseLocated(FeedbackCueId.FoundryBossArenaReset, c, text);
@@ -506,6 +531,15 @@ namespace GameLogic.Campaign.Regions
             }
             if (any)
             {
+                // 内核是重新建的（没有快照）：之前灌下的流体区域与召来的单位也不在了——记录跟着清空，主动反应不会点到空地。
+                ClarityBossRecord r = Record(s);
+                if (r != null)
+                {
+                    r.Active = Array.Empty<ClarityBossFill>();
+                    r.ReactFill = -1;
+                    r.FillPump = -1;
+                    r.WaveUnits = Array.Empty<int>();
+                }
                 SyncFlags(site, s);
             }
         }
@@ -607,9 +641,19 @@ namespace GameLogic.Campaign.Regions
             bool second = tick % Math.Max(1, GameClock.StepHz) == 0;
             if ((BaptismPhase)r.Phase == BaptismPhase.Dormant)
             {
-                if (second && ClarityCounterService.Visible(s) && TryArena(s, out Vector2 at) && MachinesInArena(s, at) > 0)
+                // 开战（含首领战前自动存档）排到整步提交之后（ERD-SAV-002：存档不得写在事务半提交中）；攻城剧场开着 / 靶场测试进行中时推迟到下一秒。
+                if (second && !_engagePending && ClarityCounterService.Visible(s) && TryArena(s, out Vector2 at) && MachinesInArena(s, at, forEngage: true) > 0
+                    && RaidResultService.AutosaveDeferReason(s) == null)
                 {
-                    Engage(s);
+                    _engagePending = true;
+                    WorldSim.WorldSimulation.RunAfterStep(() =>
+                    {
+                        _engagePending = false;
+                        if (CampaignSession.Current == s && PhaseOf(s) == BaptismPhase.Dormant && TryArena(s, out Vector2 c2) && MachinesInArena(s, c2, forEngage: true) > 0)
+                        {
+                            Engage(s);
+                        }
+                    });
                 }
                 return;
             }
@@ -819,9 +863,11 @@ namespace GameLogic.Campaign.Regions
             {
                 float a = (i * 360f / WaveCount + 22.5f) * Mathf.Deg2Rad;
                 Vector2 at = center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * (PumpRing * 0.6f);
-                int unit = SiegeService.SpawnOne(site, WaveKey, at, center, defs[i % defs.Count], false);
+                int unit = SiegeService.SpawnOne(site, WaveKey, at, center, defs[i % defs.Count], false,
+                    DifficultyService.EnemyHealthMul(s), DifficultyService.EnemyDamageMul(s));
                 if (unit > 0)
                 {
+                    site.SetSiegeUnitMode(unit, CombatSiegeMode.Skirmish); // 就地迎战（不走攻城流场去拆家园建筑）
                     ids.Add(unit);
                 }
             }
@@ -876,13 +922,20 @@ namespace GameLogic.Campaign.Regions
             return rec != null ? rec.Position : Vector2.zero;
         }
 
-        public static int MachinesInArena(CampaignState s, Vector2 center)
+        /// <summary>场地里的己方机器数。<paramref name="forEngage"/> = 判断要不要开战：行军中的远征队路过不算（玩家没让它们去打首领，FGR-BASE-020）；开战后谁在场都算。</summary>
+        public static int MachinesInArena(CampaignState s, Vector2 center, bool forEngage = false)
         {
             float r2 = ArenaRadius * ArenaRadius;
+            HashSet<int> marching = null;
+            if (forEngage && ExpeditionMarchService.IsMarching(s))
+            {
+                marching = new HashSet<int>(ExpeditionMarchService.AlivePlanetMembers(s));
+            }
             int n = 0;
             foreach (MachineRecord m in MachineRegistry.AllRecords)
             {
-                if (m != null && m.IsAlive && !m.IsInFactory && m.RegionId == SiteId && (LivePos(m) - center).sqrMagnitude <= r2)
+                if (m != null && m.IsAlive && !m.IsInFactory && m.RegionId == SiteId && (marching == null || !marching.Contains(m.LogicId))
+                    && (LivePos(m) - center).sqrMagnitude <= r2)
                 {
                     n++;
                 }
