@@ -183,6 +183,18 @@ namespace GameLogic.Campaign.Regions
             Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
         }
 
+        /// <summary>FG10-FAC-01：敌人自毁（自爆 / 投放后）——不掉落、不解锁靶子、不放击毁音（自爆有自己的反馈），场上清除与驻军全灭判定照做。</summary>
+        public static void OnEnemySelfDestructed(CampaignState state, RegionEnemyRecord enemy)
+        {
+            if (state == null || enemy == null)
+            {
+                return;
+            }
+            MarkDestroyed(state, enemy.EnemyInstanceId);
+            SiteGarrisonService.OnEnemyKilled(state, enemy);
+            Log.Info($"[FracturedCityRegion] 敌人 {enemy.EnemyInstanceId} 已自毁。");
+        }
+
         private static void SpawnEnemyLoot(CampaignState state, RegionEnemyRecord enemy)
         {
             // FG9-DATA-01：掉落废料按敌人表 scrapLoot（表里缺这一行就不掉，并已在生成时可见报错）。

@@ -25,6 +25,9 @@ namespace GameLogic.Campaign.Combat
     {
         public virtual void OnEnemyDamaged(CombatSite site, RegionEnemyRecord enemy, float damage) { }
         public virtual void OnEnemyKilled(CombatSite site, RegionEnemyRecord enemy) { }
+        /// <summary>FG10-FAC-01（复核修复）：具名敌人自毁（爬行者自爆 / 无人机投放后），不是被击毁——不掉落、不记击杀、不解锁靶子、不放击毁音，
+        /// 但“场上已清除”、驻军全灭 → 据点摧毁、视图刷新照做（否则最后一台驻军自爆时据点永远不倒）。默认只做驻军簿记。</summary>
+        public virtual void OnEnemySelfDestructed(CombatSite site, RegionEnemyRecord enemy) => SiteGarrisonService.OnEnemyKilled(CampaignSession.Current, enemy);
         /// <summary>血量在热更层的敌人（首领）受到伤害。返回 false = 结算被拒（阶段不可伤等）。</summary>
         public virtual bool ApplyExternalEnemyDamage(CombatSite site, RegionEnemyRecord enemy, float damage) => false;
         public virtual bool ApplyExternalEnemyHeal(CombatSite site, RegionEnemyRecord enemy, float amount) => false;
@@ -1319,9 +1322,10 @@ namespace GameLogic.Campaign.Combat
                     rec.Health = 0f;
                     rec.IsAlive = false;
                     rec.Position = new Vector2((float)e.Pos.x, (float)e.Pos.y);
-                    // FG10-FAC-01（审查修复）：自毁（自爆 / 投放后 / 蒸发）只把记录标为阵亡——不是被谁击毁，不记击杀、不走地点规则的击杀结算（掉落 / 目标进度）。
+                    // FG10-FAC-01（审查修复）：自毁（自爆 / 投放后 / 蒸发）不是被谁击毁——不记击杀、不走地点规则的击杀结算（掉落 / 靶子 / 击毁音），只做清除与驻军簿记。
                     if ((e.Code2 & CombatConst.KillSelfDestructBit) != 0)
                     {
+                        Rules?.OnEnemySelfDestructed(this, rec);
                         return;
                     }
                     // FG4-ECO-07（FGR-ECO-041 机器详情“击杀”）：内核的阵亡事件带着致命一击的来源单位（Other）；来源是己方机器时记一次击杀。O(1)。

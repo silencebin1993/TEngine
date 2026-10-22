@@ -310,6 +310,18 @@ namespace GameLogic.Campaign.Regions
             Feedback.FeedbackCues.RaiseAt(Feedback.FeedbackCueId.EnemyDestroyed, enemy.Position, Feedback.FeedbackCues.ContentName(enemy.EnemyTypeId));
         }
 
+        /// <summary>FG10-FAC-01：敌人自毁（自爆 / 投放后）——不掉落、不解锁靶子、不放击毁音（自爆有自己的反馈），场上清除与驻军全灭判定照做。</summary>
+        public static void OnEnemySelfDestructed(CampaignState state, RegionEnemyRecord enemy)
+        {
+            if (state == null || enemy == null)
+            {
+                return;
+            }
+            MarkDestroyed(state, enemy.EnemyInstanceId);
+            SiteGarrisonService.OnEnemyKilled(state, enemy);
+            Log.Info($"[FoundryOutpostRegion] 敌人 {enemy.EnemyInstanceId} 已自毁。");
+        }
+
         /// <summary>DEMO-CONTENT-LOCK.md §4.1第4条"步进炮首次击破必产生铸造重炮模块"——FG9-DATA-01 起按敌人表 keyDrop 列：
         /// 带关键掉落的敌人死亡且该关键物此前从未产出过时掉落（显式判重，与 <see cref="FracturedCityRegion.TryDestroyListeningNode"/> 同一纪律）。
         /// 普通废料按表 scrapLoot（Demo 的“其它敌人掉 10”兜底删除：干扰支援从此按表掉 20）。</summary>

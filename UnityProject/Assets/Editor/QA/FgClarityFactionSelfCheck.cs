@@ -701,9 +701,11 @@ namespace GameLogic.EditorTools
             double rev = 360.0 / row.TurnRate + 0.5 + 1e-3;
             bool allInFirstTurn = sweepStart > 0 && hitAt.All(h => h > 0 && h - sweepStart <= rev);
             bool warned = warnStart > 0 && hitAt.All(h => h - warnStart >= 0.8 - 1e-3);
-            Expect(allInFirstTurn && warned,
+            // 复核修复的回归：按臂前沿结算，一圈之内每台恰好被扫中一次（相邻节拍的弧不重叠，伤害不翻倍）。
+            long hits = site.Kernel.Counters.PivotHits;
+            Expect(allInFirstTurn && warned && hits == angles.Length,
                 $"B5b 扫臂整圈覆盖：0° / 15° / 25° / 200° 的静止机器在臂起转后 {rev:0.0} 秒（一圈 + 一个节拍）内都被扫中（{string.Join(" / ", hitAt.Select(h => (h - sweepStart).ToString("0.00")))} 秒），" +
-                $"且都在整圈蓄压开始 0.8 秒之后（{warned}）");
+                $"且都在整圈蓄压开始 0.8 秒之后（{warned}）；一圈内扫中 {hits} 次（每台恰好一次 = {angles.Length}）");
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 

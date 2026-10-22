@@ -57,6 +57,8 @@ namespace GameLogic.Campaign
         public int Killed;
         public int EliteKilled;
         public int Exited;
+        /// <summary>FG10-FAC-01：自毁减员（爬行者自爆 / 无人机投放后），不算击毁，但兜底结算判“全灭”时与击毁合计。旧档 = 0。</summary>
+        public int SelfDestructed;
         /// <summary>展开那一刻家园战斗内核的累计读数（敌对伤害 / 己方伤害），结束时的差 = 这次造成 / 承受的伤害。</summary>
         public long BaseDealt;
         public long BaseTaken;

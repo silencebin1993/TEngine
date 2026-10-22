@@ -548,6 +548,27 @@ namespace GameLogic.Campaign.Defense
         /// <summary>FG10-FAC-01：收到的自毁（不结算）次数（自检用）。</summary>
         public static int SelfDestructs { get; private set; }
 
+        /// <summary>FG10-FAC-01（复核修复）：攻城中的队伍记一次自毁减员（兜底结算判“全灭 / 撤走”用）；行进途中与驻军不进结算。</summary>
+        private static void NoteSelfDestruct(CampaignState s, CombatSite site, int group)
+        {
+            foreach (TransitGroupRecord x in WorldTransitSystem.Groups(s))
+            {
+                if (x == null || SiegeService.KeyOf(x) != group)
+                {
+                    continue;
+                }
+                if (SiegeService.IsSieging(x))
+                {
+                    RaidResultRecord r = OpenFor(s, x.GroupId) ?? Begin(s, x, site);
+                    if (r != null)
+                    {
+                        r.SelfDestructed++;
+                    }
+                }
+                return;
+            }
+        }
+
         public static void OnKilled(CombatSite site, CombatEvent e)
         {
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -565,6 +586,7 @@ namespace GameLogic.Campaign.Defense
             if ((e.Code2 & CombatConst.KillSelfDestructBit) != 0)
             {
                 SelfDestructs++;
+                NoteSelfDestruct(s, site, (int)Math.Round(e.Value));
                 Stat(t0);
                 return;
             }
@@ -1119,12 +1141,13 @@ namespace GameLogic.Campaign.Defense
             CombatSite site = HomeSite;
             foreach (RaidResultRecord r in stale)
             {
-                bool destroyed = r.Killed >= r.Unfolded && r.Unfolded > 0;
+                int gone = r.Killed + r.SelfDestructed; // FG10-FAC-01：自毁减员不算击毁，但也没有撤走
+                bool destroyed = gone >= r.Unfolded && r.Unfolded > 0;
                 AddTimeline(r, GameClock.Ticks, destroyed ? "end_destroyed" : "end_withdrawn",
-                    Math.Max(0, r.Unfolded - r.Killed).ToString(CultureInfo.InvariantCulture), false, 0f, 0f);
+                    Math.Max(0, r.Unfolded - gone).ToString(CultureInfo.InvariantCulture), false, 0f, 0f);
                 if (!destroyed)
                 {
-                    r.Exited = Math.Max(r.Exited, r.Unfolded - r.Killed);
+                    r.Exited = Math.Max(r.Exited, r.Unfolded - gone);
                 }
                 Close(s, r, destroyed ? OutcomeDestroyed : OutcomeWithdrawn, site, notify: true);
             }

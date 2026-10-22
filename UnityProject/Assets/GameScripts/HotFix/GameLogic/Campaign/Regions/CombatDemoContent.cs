@@ -144,6 +144,12 @@ namespace GameLogic.Campaign.Regions
             OnEnemyVisualChanged?.Invoke(enemy.EnemyInstanceId);
         }
 
+        public override void OnEnemySelfDestructed(CombatSite site, RegionEnemyRecord enemy)
+        {
+            FracturedCityRegion.OnEnemySelfDestructed(CampaignSession.Current, enemy);
+            OnEnemyVisualChanged?.Invoke(enemy.EnemyInstanceId);
+        }
+
         public override void OnMachineMarked(CombatSite site, int logicId, float seconds, RegionEnemyRecord scout)
         {
             CampaignState state = CampaignSession.Current;
@@ -195,6 +201,12 @@ namespace GameLogic.Campaign.Regions
         public override void OnEnemyKilled(CombatSite site, RegionEnemyRecord enemy)
         {
             FoundryOutpostRegion.OnEnemyKilled(CampaignSession.Current, enemy);
+            OnEnemyVisualChanged?.Invoke(enemy.EnemyInstanceId);
+        }
+
+        public override void OnEnemySelfDestructed(CombatSite site, RegionEnemyRecord enemy)
+        {
+            FoundryOutpostRegion.OnEnemySelfDestructed(CampaignSession.Current, enemy);
             OnEnemyVisualChanged?.Invoke(enemy.EnemyInstanceId);
         }
 

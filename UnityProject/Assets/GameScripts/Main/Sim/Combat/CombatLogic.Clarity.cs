@@ -553,7 +553,7 @@ namespace BinGames.Sim.Combat
                 {
                     c.Pivot = 2;
                     c.PivotT = 0f;
-                    c.PivotPrev = c.PivotAngle; // 起转：上一节拍臂角 = 起始臂角
+                    c.PivotPrev = Wrap360(c.PivotAngle - p.PivotWidth); // 起转：前沿从“臂的后缘”算起，第一拍把起始臂已经盖住的扇区也算上
                 }
                 d.Clarity[i] = c;
                 return;
@@ -574,15 +574,18 @@ namespace BinGames.Sim.Combat
                 return;
             }
             float half = math.max(1f, p.PivotWidth * 0.5f);
-            // 审查修复：结算“上一节拍到这一节拍臂实际扫过的整段弧”（含两端各半个臂宽），不是只看节拍那一刻的臂角——
-            // 臂每节拍转过的角度可能大于臂宽，只看一刻会在每圈漏掉一半角度（冻结时臂不转，弧就是 0 + 臂宽）。
-            float swept = Wrap360(c.PivotAngle - c.PivotPrev);
-            float arcStart = c.PivotPrev - half;
-            float arcLen = swept + 2f * half;
+            // 审查修复（复核第 2 轮）：按臂的**前沿**这一节拍扫过的弧 [上一拍前沿, 这一拍前沿) 结算——每个目标每扫过一次恰好命中一次，
+            // 不论每拍转角比臂宽大还是小都不漏、不重复；一次命中的伤害 = 每秒伤害 × 臂扫过它的时长（臂宽 ÷ 转速）。臂不转（冻结）时弧为 0、不伤人。
+            float arcStart = c.PivotPrev + half;
+            float arcLen = Wrap360(c.PivotAngle - c.PivotPrev);
             c.PivotPrev = c.PivotAngle;
             d.Clarity[i] = c;
+            if (arcLen <= 0f)
+            {
+                return;
+            }
             FxOf(ref d, p.SprayStatus, out float sdps, out float sslow, out float svuln);
-            float dmg = math.max(0f, p.PivotDps) * tick;
+            float dmg = math.max(0f, p.PivotDps) * math.max(1f, p.PivotWidth) / math.max(1f, p.PivotSpeed);
             bool hitBuilding = false;
             int n = d.Count;
             for (int k = 0; k < n; k++)
@@ -596,7 +599,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                if (arcLen < 360f && Wrap360(AngleDeg(to) - arcStart) > arcLen)
+                if (Wrap360(AngleDeg(to) - arcStart) >= arcLen)
                 {
                     continue;
                 }
