@@ -34,9 +34,9 @@ namespace BinGames.Sim.Combat
             int n = d.Count;
             for (int i = 0; i < n; i++)
             {
-                if (!d.IsAlive(i) || d.Faction[i] != (byte)CombatFaction.Hostile)
+                if (!d.IsAlive(i) || d.Faction[i] != (byte)CombatFaction.Hostile || IsFrozen(ref d, i))
                 {
-                    continue;
+                    continue; // FG10-FAC-01：冻住的单位不铺雷、不加速装填、不齐射
                 }
                 int bp = d.BProfile[i];
                 if (bp < 0 || bp >= d.Profiles.Length)
@@ -739,8 +739,8 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
-        /// <summary>被冻结（减速状态 ≥ 90%）。</summary>
-        private static bool Frozen(ref CombatData d, int i) => d.StatusSlow[i] >= 0.9f && d.StatusActive(i, d.Scalars[0].Time);
+        /// <summary>被冻结（减速状态 ≥ 90%，或 FG10-FAC-01 液氮受寒满）。</summary>
+        private static bool Frozen(ref CombatData d, int i) => (d.StatusSlow[i] >= 0.9f && d.StatusActive(i, d.Scalars[0].Time)) || IsFrozen(ref d, i);
 
         /// <summary>高抛曲射的近距盲区：目标比 MinRange 更近（中心距减去两者半径）就打不到。</summary>
         private static bool InBlindSpot(ref CombatData d, int i, int t)

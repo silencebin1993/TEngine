@@ -123,6 +123,10 @@ namespace BinGames.Sim.Combat
         /// 格斗 / 力场要贴近（触及 = 区域半径 + 双方半径），过热迟滞（过热后降到恢复线以下才再开火）。不通过时不算开火、不积热。</summary>
         internal static CombatFireResult PreFireGate(ref CombatData d, int a, int t, in CombatWeapon wp)
         {
+            if (IsFrozen(ref d, a))
+            {
+                return CombatFireResult.Frozen; // FG10-FAC-01：冻住时不能开火
+            }
             if (IsContactCarrier(wp.Reading)
                 && math.distance(d.Pos[a], d.Pos[t]) > wp.Reading.Area + d.Radius[a] + d.Radius[t])
             {
@@ -257,9 +261,9 @@ namespace BinGames.Sim.Combat
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {
-                if (k == t || k == a || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                if (k == t || k == a || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
                 {
-                    continue;
+                    continue; // FG10-FAC-01（FGR-AIR-010）：格斗扇形 / 力场一圈打不到空中单位
                 }
                 double2 to = d.Pos[k] - origin;
                 double dist = math.length(to);
@@ -672,7 +676,13 @@ namespace BinGames.Sim.Combat
         /// - 叠层：这一次带来的每个标签层数 +1（上限 <see cref="CombatConfig.StatusStackCap"/>）；持续伤害逐位按“该标签每秒伤害 × 该位层数”取大（与 <see cref="RecomputeStatusFx"/> 同一算法），减速 / 易伤不随层数增强。</summary>
         internal static void ApplyStatus(ref CombatData d, int k, uint mask, float seconds, float dps, float slow, float vuln, int source, float hit)
         {
-            if (mask == 0u || !d.IsAlive(k))
+            if (!d.IsAlive(k))
+            {
+                return;
+            }
+            // FG10-FAC-01：挂不上的状态位（澄净单位不挂酸蚀；带绝缘涂层的单位不挂电击）——这一次带来的那几位直接作废，不触发反应。
+            mask &= ~d.Clarity[k].ImmuneMask;
+            if (mask == 0u)
             {
                 return;
             }
@@ -953,6 +963,7 @@ namespace BinGames.Sim.Combat
         /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
         internal static float SlowedSpeed(ref CombatData d, int i, float speed)
         {
+            speed *= ChillFactor(ref d, i); // FG10-FAC-01：受寒（液氮）减速、冻结 = 0
             if (d.StatusSlow[i] <= 0f || !d.StatusActive(i, d.Scalars[0].Time))
             {
                 return speed;
@@ -1054,12 +1065,14 @@ namespace BinGames.Sim.Combat
             // FG6-DEF-02 复审修复：读法区域与陷阱场地各有自己的上限、分开计数（场地铺满不挤掉炮塔 / 机器的读法区域，反之亦然）。
             // 总数没到某一种的上限时那一种必然没满（O(1)）；只有接近上限时才数一遍（O(区域数)，区域数 ≤ 两个上限之和）。
             bool field = kind == CombatConst.ZoneKindField;
-            int cap = field ? d.FieldZoneCap : d.ZoneCap;
+            // FG10-FAC-01：喷淋池与油迹共用自己的上限（大量喷洒车不挤掉玩家的读法区域）。
+            bool pool = kind == CombatConst.ZoneKindPool || kind == CombatConst.ZoneKindSlick;
+            int cap = field ? d.FieldZoneCap : pool ? d.PoolZoneCap : d.ZoneCap;
             if (d.Zones.Length >= cap && CountZones(ref d, kind) >= cap)
             {
-                if (!field)
+                if (!field && !pool)
                 {
-                    RefuseReading(ref d); // 场地被拒由调用方（陷阱发射器）逐座计数并写进状态行
+                    RefuseReading(ref d); // 场地被拒由调用方（陷阱发射器）逐座计数并写进状态行；喷淋池 / 油迹满了直接不生成
                 }
                 return false;
             }
@@ -1093,10 +1106,12 @@ namespace BinGames.Sim.Combat
         /// <summary>某一种区域此刻有几块（只在总数接近上限时调用）。</summary>
         private static int CountZones(ref CombatData d, byte kind)
         {
+            bool pool = kind == CombatConst.ZoneKindPool || kind == CombatConst.ZoneKindSlick;
             int n = 0;
             for (int z = 0; z < d.Zones.Length; z++)
             {
-                if (d.Zones[z].Kind == kind)
+                byte k = d.Zones[z].Kind;
+                if (k == kind || (pool && (k == CombatConst.ZoneKindPool || k == CombatConst.ZoneKindSlick)))
                 {
                     n++;
                 }
@@ -1159,7 +1174,8 @@ namespace BinGames.Sim.Combat
                         zone.NextTick = now + zone.TickInterval;
                     }
                     // FG6-LOG-10：液洼先看自己有没有遇上能起反应的标签（整片反应成残留区域），再按节拍给站在里面的单位挂标签。
-                    if (zone.Kind == CombatConst.ZoneKindLeak && zone.Phase == CombatConst.LeakPhasePuddle)
+                    // FG10-FAC-01：油迹同一套（“可以用燃迹反过来利用”）。
+                    if ((zone.Kind == CombatConst.ZoneKindLeak || zone.Kind == CombatConst.ZoneKindSlick) && zone.Phase == CombatConst.LeakPhasePuddle)
                     {
                         TryReactLeak(ref d, ref zone, z, now);
                     }
@@ -1177,15 +1193,27 @@ namespace BinGames.Sim.Combat
                         {
                             continue;
                         }
-                        if (!d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                        if (!d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
                         {
-                            continue;
+                            continue; // FG10-FAC-01：地面区域不影响空中单位
                         }
                         if (math.distance(d.Pos[k], zone.Pos) > zone.Radius + d.Radius[k])
                         {
                             continue;
                         }
                         float tickDamage = zone.Dps > 0f ? zone.Dps * zone.TickInterval : 0f;
+                        if (zone.Kind == CombatConst.ZoneKindPool)
+                        {
+                            // FG10-FAC-01：喷淋池的酸液吃酸蚀抗性与冲淡（冷却液）；液氮池每节拍加受寒。
+                            if (d.AcidBit != 0u && (zone.StatusMask & d.AcidBit) != 0u)
+                            {
+                                tickDamage *= AcidFactor(ref d, k, now);
+                            }
+                            if (zone.Chill > 0f)
+                            {
+                                ApplyChill(ref d, k, zone.Chill);
+                            }
+                        }
                         if (tickDamage > 0f)
                         {
                             DamageUnit(ref d, k, tickDamage, owner);
@@ -1302,9 +1330,9 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 CombatZone o = d.Zones[z];
-                if (o.Until <= now || (o.Kind == CombatConst.ZoneKindLeak && o.Phase == CombatConst.LeakPhasePuddle))
+                if (o.Until <= now || ((o.Kind == CombatConst.ZoneKindLeak || o.Kind == CombatConst.ZoneKindSlick) && o.Phase == CombatConst.LeakPhasePuddle))
                 {
-                    continue;
+                    continue; // 两摊还没反应的液体（液洼 / 油迹）挨着不算
                 }
                 if (math.distance(o.Pos, leak.Pos) <= o.Radius + leak.Radius)
                 {
@@ -1349,7 +1377,8 @@ namespace BinGames.Sim.Combat
                     rb &= rb - 1u;
                     MergeFx(d.StatusFx[b], ref rd, ref rs, ref rv);
                 }
-                float seconds = math.max(rule.ResidueSeconds, math.max(0f, d.Config.LeakReactSeconds));
+                bool slick = leak.Kind == CombatConst.ZoneKindSlick;
+                float seconds = slick ? rule.ResidueSeconds : math.max(rule.ResidueSeconds, math.max(0f, d.Config.LeakReactSeconds));
                 leak.Phase = CombatConst.LeakPhaseReacted;
                 leak.StatusMask = rule.ResidueBit;
                 leak.StatusDps = rd;
@@ -1367,6 +1396,15 @@ namespace BinGames.Sim.Combat
                 counters.ReactionsFired++;
                 d.Counters[0] = counters;
                 Cue(ref d, CombatEventKind.TagReaction, -1, 0, 0f, leak.Pos, (byte)i);
+                if (slick)
+                {
+                    // FG10-FAC-01：油迹不是管线液洼，不交给热更层的液洼对账（内核按时长自己消失）；只记计数与提示。
+                    counters = d.Counters[0];
+                    counters.SlicksIgnited++;
+                    d.Counters[0] = counters;
+                    ClarityCue(ref d, -1, 0, leak.Radius, leak.Pos, 6, 0);
+                    return;
+                }
                 d.LeakReactions.Add(new int2(-leak.Owner, i));
                 return;
             }

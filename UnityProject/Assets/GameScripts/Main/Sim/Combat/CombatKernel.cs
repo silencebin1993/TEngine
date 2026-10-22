@@ -416,6 +416,22 @@ namespace BinGames.Sim.Combat
                 fu.LayT = _d.Profiles[bp].MineCycle * 0.5f;
                 _d.Foundry[slot] = fu;
             }
+            // FG10-FAC-01：飞行、酸蚀抗性与免疫的状态位写进单位自己的状态（读档后沿用单位的值，不随参数表变化）；第一次喷淋按初始周期，油迹从出生点起算。
+            if (bp >= 0 && bp < _d.Profiles.Length)
+            {
+                CombatBehaviorProfile cp = _d.Profiles[bp];
+                if (cp.Airborne > 0f || cp.AcidResist > 0f || cp.ImmuneMask != 0u || cp.SprayRange > 0f || cp.BurstRadius > 0f)
+                {
+                    CombatClarityUnit cu = _d.Clarity[slot];
+                    cu.Air = cp.Airborne > 0f ? (byte)1 : (byte)0;
+                    cu.AcidResist = math.saturate(cp.AcidResist);
+                    cu.ImmuneMask = cp.ImmuneMask;
+                    cu.SprayT = math.max(0f, spawn.Cycle);
+                    cu.TrailLast = spawn.Position;
+                    cu.TrailT = cp.TrailInterval;
+                    _d.Clarity[slot] = cu;
+                }
+            }
             return id;
         }
 
@@ -506,6 +522,7 @@ namespace BinGames.Sim.Combat
                 Facing = _d.Armor[i].zw,
                 Siege = _d.Siege[i],
                 Silent = _d.Silent[i],
+                Clarity = _d.Clarity[i],
             };
         }
 
@@ -631,6 +648,126 @@ namespace BinGames.Sim.Combat
             get => _d.MineCap > 0 ? _d.MineCap : CombatLogic.DefaultMineCap;
             set => _d.MineCap = math.max(0, value);
         }
+
+        // ─────────────────────────────── FG10-FAC-01 澄净专属语法 ───────────────────────────────
+
+        /// <summary>FG10-FAC-01：单位的澄净状态（不存在 = false）。</summary>
+        public bool TryGetClarity(int id, out CombatClarityUnit clarity)
+        {
+            int i = _d.SlotOf(id);
+            clarity = i >= 0 ? _d.Clarity[i] : default;
+            return i >= 0;
+        }
+
+        /// <summary>
+        /// FG10-FAC-01（酸沼，DEBT-FG7ENV05-01 / DEBT-FG8EXP02-03）：写入酸沼的圆环（x, y, 内半径, 外半径）、每游戏秒扣最大耐久的比例、湿润时的伤害倍率（冷却液冲淡）。
+        /// 派生量，不进快照；读档后沿用。热更层（AcidMarshService）在内核打开 / 读档时按规划层写一次。
+        /// </summary>
+        public void SetAcidMarsh(IReadOnlyList<float4> shapes, float pctPerSecond, float wetMult)
+        {
+            _d.AcidShapes.Clear();
+            if (shapes != null)
+            {
+                for (int k = 0; k < shapes.Count; k++)
+                {
+                    float4 sh = shapes[k];
+                    if (sh.w > 0f && sh.w >= sh.z && sh.z >= 0f)
+                    {
+                        _d.AcidShapes.Add(sh);
+                    }
+                }
+            }
+            _d.AcidPct = pctPerSecond > 0f ? math.min(1f, pctPerSecond) : 0f;
+            _d.AcidDilute = wetMult > 0f ? math.min(1f, wetMult) : 1f;
+        }
+
+        public int AcidShapeCount => _d.AcidShapes.Length;
+
+        /// <summary>FG10-FAC-01：某点在不在酸沼里（悬停 / 自检用，O(形状)）。</summary>
+        public bool InAcidMarsh(double2 point) => CombatLogic.InAcid(ref _d, point);
+
+        /// <summary>FG10-FAC-01：本地点酸蚀 / 湿润 / 油 / 燃烧的状态位（热更层按 fg.TbStatusTag 写；0 = 没有）。派生量，读档后沿用。</summary>
+        public void SetClarityBits(uint acid, uint wet, uint oil, uint fire)
+        {
+            _d.AcidBit = acid;
+            _d.WetBit = wet;
+            _d.OilBit = oil;
+            _d.FireBit = fire;
+        }
+
+        /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量，不进快照；热更层按净化塔定期写入。</summary>
+        public void SetPolluteTargets(IReadOnlyList<float3> targets)
+        {
+            _d.PolluteTargets.Clear();
+            if (targets == null)
+            {
+                return;
+            }
+            for (int k = 0; k < targets.Count; k++)
+            {
+                _d.PolluteTargets.Add(targets[k]);
+            }
+        }
+
+        public int PolluteTargetCount => _d.PolluteTargets.Length;
+
+        /// <summary>FG10-FAC-01（防腐涂层等）：改单位的酸蚀抗性（0～1）。</summary>
+        public bool SetAcidResist(int id, float resist)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || float.IsNaN(resist))
+            {
+                return false;
+            }
+            CombatClarityUnit c = _d.Clarity[i];
+            c.AcidResist = math.saturate(resist);
+            _d.Clarity[i] = c;
+            Touch();
+            return true;
+        }
+
+        /// <summary>FG10-FAC-01（液氮）：给单位加受寒（测试夹具 / 将来玩家侧的液氮来源；与内核里的喷淋同一个入口）。</summary>
+        public bool ChillUnit(int id, float amount)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                return false;
+            }
+            CombatLogic.ApplyChill(ref _d, i, amount);
+            Touch();
+            return true;
+        }
+
+        /// <summary>FG10-FAC-01：某一种区域此刻有几块（喷淋池 / 油迹 / ……；O(区域)，只给自检 / 表现用）。</summary>
+        public int CountZonesOfKind(byte kind)
+        {
+            int n = 0;
+            for (int z = 0; z < _d.Zones.Length; z++)
+            {
+                if (_d.Zones[z].Kind == kind)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>FG10-FAC-01：存活的分裂液数（O(单位)，自检 / 表现用）。</summary>
+        public int CountPuddles()
+        {
+            int c = 0;
+            for (int i = 0; i < _d.Count; i++)
+            {
+                if (_d.IsAlive(i) && _d.Behavior[i] == (byte)CombatBehavior.Puddle)
+                {
+                    c++;
+                }
+            }
+            return c;
+        }
+
+        public int PendingClarityCount => _d.ClarityPending.Length;
 
         /// <summary>FG9-FAC-02：本地点存活的子母雷数（O(单位)，只给自检 / 表现对账用）。</summary>
         public int CountMines()
@@ -1891,6 +2028,33 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, hfu.RamSeq);
                 Mix(ref h, hfu.MineOwner);
                 Mix(ref h, hfu.BoostStep);
+                CombatClarityUnit hcu = _d.Clarity[i]; // FG10-FAC-01（格式 15）
+                Mix(ref h, hcu.Spray);
+                Mix(ref h, hcu.Pivot);
+                Mix(ref h, hcu.Fuse);
+                Mix(ref h, hcu.Air);
+                Mix(ref h, hcu.Pollute);
+                Mix(ref h, hcu.SprayT);
+                Mix(ref h, hcu.SprayDir.x);
+                Mix(ref h, hcu.SprayDir.y);
+                Mix(ref h, hcu.Anchor.x);
+                Mix(ref h, hcu.Anchor.y);
+                Mix(ref h, hcu.PivotAngle);
+                Mix(ref h, hcu.PivotT);
+                Mix(ref h, hcu.FuseT);
+                Mix(ref h, hcu.TrailT);
+                Mix(ref h, hcu.TrailLast.x);
+                Mix(ref h, hcu.TrailLast.y);
+                Mix(ref h, hcu.PolluteT);
+                Mix(ref h, hcu.PolluteAt.x);
+                Mix(ref h, hcu.PolluteAt.y);
+                Mix(ref h, hcu.Chill);
+                Mix(ref h, hcu.FrozenT);
+                Mix(ref h, hcu.ThawGuardT);
+                Mix(ref h, hcu.AcidResist);
+                Mix(ref h, hcu.ImmuneMask);
+                Mix(ref h, hcu.Life);
+                Mix(ref h, hcu.PuddleTick);
                 CombatSiegeUnit hsu = _d.Siege[i]; // FG6-DEF-05（格式 11）
                 Mix(ref h, hsu.Role);
                 Mix(ref h, hsu.Mode);
@@ -1954,11 +2118,23 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, zn.Until);
                 Mix(ref h, zn.NextTick);
                 Mix(ref h, zn.Owner);
-                if (zn.Kind == CombatConst.ZoneKindLeak)
+                if (zn.Kind == CombatConst.ZoneKindLeak || zn.Kind == CombatConst.ZoneKindSlick || zn.Kind == CombatConst.ZoneKindPool)
                 {
-                    Mix(ref h, zn.StatusMask); // FG6-LOG-10：液洼的标签与阶段（反应前后标签不同）
+                    Mix(ref h, zn.StatusMask); // FG6-LOG-10：液洼的标签与阶段（反应前后标签不同）；FG10-FAC-01：油迹 / 喷淋池同理（另含种类与受寒）
                     Mix(ref h, (int)zn.Phase);
+                    Mix(ref h, (int)zn.Kind);
+                    Mix(ref h, zn.Chill);
                 }
+            }
+            for (int q = 0; q < _d.ClarityPending.Length; q++)
+            {
+                CombatClarityPending cp = _d.ClarityPending[q]; // FG10-FAC-01（格式 15）：待结算的死亡效果
+                Mix(ref h, cp.Kind);
+                Mix(ref h, cp.Profile);
+                Mix(ref h, cp.Source);
+                Mix(ref h, cp.Mult);
+                Mix(ref h, cp.Pos.x);
+                Mix(ref h, cp.Pos.y);
             }
             for (int e = 0; e < _d.Echoes.Length; e++)
             {
@@ -2216,6 +2392,11 @@ namespace BinGames.Sim.Combat
                 {
                     WriteFoundry(w, _d.Foundry[i]);
                 }
+                // FG10-FAC-01（格式 15）：澄净状态。
+                if (format >= 15)
+                {
+                    WriteClarity(w, _d.Clarity[i]);
+                }
             }
 
             w.Write(_d.Projectiles.Length);
@@ -2297,6 +2478,21 @@ namespace BinGames.Sim.Combat
                     w.Write(im.Damage);
                 }
             }
+            // FG10-FAC-01（格式 15）：待结算的死亡效果（同样放在读法表之前）。
+            if (format >= 15)
+            {
+                w.Write(_d.ClarityPending.Length);
+                for (int q = 0; q < _d.ClarityPending.Length; q++)
+                {
+                    CombatClarityPending cp = _d.ClarityPending[q];
+                    w.Write(cp.Kind);
+                    w.Write(cp.Profile);
+                    w.Write(cp.Source);
+                    w.Write(cp.Mult);
+                    w.Write(cp.Pos.x);
+                    w.Write(cp.Pos.y);
+                }
+            }
             // FG2-FW-02（格式 3）：区域、回波、无人机。
             if (format >= 3)
             {
@@ -2329,10 +2525,12 @@ namespace BinGames.Sim.Combat
         {
             // FG6-LOG-10（格式 12）：液洼区域只写进认识它的格式（写更老的格式时略过：旧格式没有这个区域种类，液洼由热更层按记录重新登记）。
             bool leaks = format >= 12;
+            // FG10-FAC-01（格式 15）：喷淋池与油迹只写进认识它们的格式（写更老的格式时略过）。
+            bool clarity = format >= 15;
             int zoneCount = 0;
             for (int z = 0; z < _d.Zones.Length; z++)
             {
-                if (leaks || _d.Zones[z].Kind != CombatConst.ZoneKindLeak)
+                if (ZoneWritable(_d.Zones[z].Kind, leaks, clarity))
                 {
                     zoneCount++;
                 }
@@ -2341,7 +2539,7 @@ namespace BinGames.Sim.Combat
             for (int z = 0; z < _d.Zones.Length; z++)
             {
                 CombatZone zn = _d.Zones[z];
-                if (!leaks && zn.Kind == CombatConst.ZoneKindLeak)
+                if (!ZoneWritable(zn.Kind, leaks, clarity))
                 {
                     continue;
                 }
@@ -2372,6 +2570,10 @@ namespace BinGames.Sim.Combat
                 if (leaks)
                 {
                     w.Write(zn.Phase); // FG6-LOG-10（格式 12）：液洼阶段（液洼 / 已反应）
+                }
+                if (clarity)
+                {
+                    w.Write(zn.Chill); // FG10-FAC-01（格式 15）：液氮池的受寒量
                 }
             }
             w.Write(_d.Echoes.Length);
@@ -2410,6 +2612,9 @@ namespace BinGames.Sim.Combat
                 }
             }
         }
+
+        private static bool ZoneWritable(byte kind, bool leaks, bool clarity) =>
+            kind == CombatConst.ZoneKindLeak ? leaks : (kind == CombatConst.ZoneKindPool || kind == CombatConst.ZoneKindSlick) ? clarity : true;
 
         /// <summary>读格式版本（不校验其余部分）：-1 = 不是内核快照。</summary>
         public static int PeekFormat(byte[] data)
@@ -2488,6 +2693,21 @@ namespace BinGames.Sim.Combat
             }
             staging.SlagMult = _d.SlagMult;
             staging.MineCap = _d.MineCap;
+            // FG10-FAC-01：酸沼、标签状态位、投放目标是派生量（热更层写），读档沿用当前的。
+            for (int i = 0; i < _d.AcidShapes.Length; i++)
+            {
+                staging.AcidShapes.Add(_d.AcidShapes[i]);
+            }
+            staging.AcidPct = _d.AcidPct;
+            staging.AcidDilute = _d.AcidDilute;
+            staging.AcidBit = _d.AcidBit;
+            staging.WetBit = _d.WetBit;
+            staging.OilBit = _d.OilBit;
+            staging.FireBit = _d.FireBit;
+            for (int i = 0; i < _d.PolluteTargets.Length; i++)
+            {
+                staging.PolluteTargets.Add(_d.PolluteTargets[i]);
+            }
             _d.Dispose();
             _d = staging;
             CombatLogic.RebuildDeflectActive(ref _d); // FG9-FAC-01：展开中的偏折场由每单位状态派生，读档后重算。
@@ -2741,6 +2961,16 @@ namespace BinGames.Sim.Combat
                         return CombatLoadResult.InvalidValue;
                     }
                 }
+                // FG10-FAC-01（格式 15）：澄净状态；更老的快照没有 = 全 0（没有澄净行为、没有受寒）。
+                CombatClarityUnit clarity = default;
+                if (format >= 15)
+                {
+                    clarity = ReadClarity(r);
+                    if (!ClarityValid(clarity))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                }
                 if (id <= 0 || id >= s.NextId || !IsFinite(sp.Position) || !IsFinite(sp.Home) || float.IsNaN(sp.Health)
                     || sp.Weapon >= wn || sp.BehaviorProfile >= pn || staging.SlotOf(id) >= 0)
                 {
@@ -2768,6 +2998,7 @@ namespace BinGames.Sim.Combat
                 staging.StatusZoneSlow[slot] = zoneSlow;
                 staging.Silent[slot] = silent;
                 staging.Foundry[slot] = foundry;
+                staging.Clarity[slot] = clarity;
                 uint sb = status;
                 int bi = 0;
                 while (sb != 0u)
@@ -2904,6 +3135,31 @@ namespace BinGames.Sim.Combat
                     staging.SiegeState.Impacts.Add(im);
                 }
             }
+            // FG10-FAC-01（格式 15）：待结算的死亡效果。
+            if (format >= 15)
+            {
+                int cpn = r.ReadInt32();
+                if (cpn < 0 || cpn > 1 << 16)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                for (int q = 0; q < cpn; q++)
+                {
+                    var cp = new CombatClarityPending
+                    {
+                        Kind = r.ReadByte(),
+                        Profile = r.ReadInt32(),
+                        Source = r.ReadInt32(),
+                        Mult = r.ReadSingle(),
+                        Pos = new double2(r.ReadDouble(), r.ReadDouble()),
+                    };
+                    if (cp.Kind < 1 || cp.Kind > 2 || cp.Profile < 0 || cp.Profile >= pn || cp.Source < 0 || !NonNeg(cp.Mult) || !IsFinite(cp.Pos))
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    staging.ClarityPending.Add(cp);
+                }
+            }
             if (format >= 3)
             {
                 CombatLoadResult rr = ParseReadings(r, ref staging, wn, format);
@@ -2985,8 +3241,12 @@ namespace BinGames.Sim.Combat
                 zone.Kind = format >= 10 ? r.ReadByte() : CombatConst.ZoneKindReading;
                 // FG6-LOG-10（格式 12）：液洼区域与它的阶段（更老的快照没有液洼，阶段 0）。液洼不归属任何单位：Owner = 液洼编号的相反数（< 0）。
                 zone.Phase = format >= 12 ? r.ReadByte() : (byte)0;
-                if (zone.Kind > (format >= 12 ? CombatConst.ZoneKindLeak : CombatConst.ZoneKindField) || zone.Phase > CombatConst.LeakPhaseReacted
-                    || (zone.Kind != CombatConst.ZoneKindLeak && zone.Phase != 0) || (zone.Kind == CombatConst.ZoneKindLeak && zone.Owner >= 0))
+                // FG10-FAC-01（格式 15）：喷淋池 / 油迹与液氮池的受寒量（更老的快照没有这两种区域，受寒 0）。
+                zone.Chill = format >= 15 ? r.ReadSingle() : 0f;
+                byte maxKind = format >= 15 ? CombatConst.ZoneKindSlick : format >= 12 ? CombatConst.ZoneKindLeak : CombatConst.ZoneKindField;
+                bool phased = zone.Kind == CombatConst.ZoneKindLeak || zone.Kind == CombatConst.ZoneKindSlick || zone.Kind == CombatConst.ZoneKindPool;
+                if (zone.Kind > maxKind || zone.Phase > CombatConst.LeakPhaseReacted
+                    || (!phased && zone.Phase != 0) || (zone.Kind == CombatConst.ZoneKindLeak && zone.Owner >= 0) || !NonNeg(zone.Chill))
                 {
                     return CombatLoadResult.InvalidValue;
                 }
@@ -3141,6 +3401,19 @@ namespace BinGames.Sim.Combat
                 w.Write(c.MinesDetonated);
                 w.Write(c.Charges);
             }
+            if (format >= 15)
+            {
+                w.Write(c.Sprays);
+                w.Write(c.Freezes);
+                w.Write(c.Bursts);
+                w.Write(c.Deflagrations);
+                w.Write(c.SlicksIgnited);
+                w.Write(c.Splits);
+                w.Write(c.Repollutions);
+                w.Write(c.AcidTicks);
+                w.Write(c.PoolsWashed);
+                w.Write(c.PivotHits);
+            }
         }
 
         private static CombatCounters ReadCounters(BinaryReader r, int format)
@@ -3168,6 +3441,19 @@ namespace BinGames.Sim.Combat
                 c.MinesLaid = r.ReadInt64();
                 c.MinesDetonated = r.ReadInt64();
                 c.Charges = r.ReadInt64();
+            }
+            if (format >= 15)
+            {
+                c.Sprays = r.ReadInt64();
+                c.Freezes = r.ReadInt64();
+                c.Bursts = r.ReadInt64();
+                c.Deflagrations = r.ReadInt64();
+                c.SlicksIgnited = r.ReadInt64();
+                c.Splits = r.ReadInt64();
+                c.Repollutions = r.ReadInt64();
+                c.AcidTicks = r.ReadInt64();
+                c.PoolsWashed = r.ReadInt64();
+                c.PivotHits = r.ReadInt64();
             }
             return c;
         }
@@ -3484,6 +3770,48 @@ namespace BinGames.Sim.Combat
                 w.Write(p.DeploySeconds);
                 w.Write(p.MinRange);
             }
+            if (format >= 15)
+            {
+                // FG10-FAC-01（格式 15）：澄净专属语法参数。
+                w.Write(p.SprayRange);
+                w.Write(p.SprayCone);
+                w.Write(p.SprayWarn);
+                w.Write(p.SprayCycle);
+                w.Write(p.SprayDamage);
+                w.Write(p.SprayChill);
+                w.Write(p.SprayStatus);
+                w.Write(p.SprayStatusSeconds);
+                w.Write(p.PoolRadius);
+                w.Write(p.PoolSeconds);
+                w.Write(p.PoolDps);
+                w.Write(p.PoolChill);
+                w.Write(p.PivotRadius);
+                w.Write(p.PivotWidth);
+                w.Write(p.PivotSpeed);
+                w.Write(p.PivotWarn);
+                w.Write(p.PivotDps);
+                w.Write(p.BurstRadius);
+                w.Write(p.BurstDamage);
+                w.Write(p.BurstFuse);
+                w.Write(p.BurstTrigger);
+                w.Write(p.DeflagMult);
+                w.Write(p.TrailInterval);
+                w.Write(p.TrailRadius);
+                w.Write(p.TrailSeconds);
+                w.Write(p.TrailStatus);
+                w.Write(p.SplitCount);
+                w.Write(p.SplitHp);
+                w.Write(p.SplitSpeed);
+                w.Write(p.SplitLife);
+                w.Write(p.SplitDps);
+                w.Write(p.SplitRadius);
+                w.Write(p.Airborne);
+                w.Write(p.PolluteRange);
+                w.Write(p.PolluteChannel);
+                w.Write(p.AcidResist);
+                w.Write(p.ImmuneMask);
+                w.Write(p.StructPref);
+            }
         }
 
         /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
@@ -3501,6 +3829,17 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             if (p.SalvoCount > 0f && (p.SalvoGap <= 0f || p.SalvoReload <= 0f))
+            {
+                return false;
+            }
+            // FG10-FAC-01：澄净参数同样不得为负 / 非数；酸蚀抗性 ≤ 1、分裂最多 8 滩。
+            if (!NonNeg(p.SprayRange) || !NonNeg(p.SprayCone) || !NonNeg(p.SprayWarn) || !NonNeg(p.SprayCycle) || !NonNeg(p.SprayDamage) || !NonNeg(p.SprayChill)
+                || !NonNeg(p.SprayStatusSeconds) || !NonNeg(p.PoolRadius) || !NonNeg(p.PoolSeconds) || !NonNeg(p.PoolDps) || !NonNeg(p.PoolChill)
+                || !NonNeg(p.PivotRadius) || !NonNeg(p.PivotWidth) || !NonNeg(p.PivotSpeed) || !NonNeg(p.PivotWarn) || !NonNeg(p.PivotDps)
+                || !NonNeg(p.BurstRadius) || !NonNeg(p.BurstDamage) || !NonNeg(p.BurstFuse) || !NonNeg(p.BurstTrigger) || !NonNeg(p.DeflagMult)
+                || !NonNeg(p.TrailInterval) || !NonNeg(p.TrailRadius) || !NonNeg(p.TrailSeconds) || !NonNeg(p.SplitCount) || p.SplitCount > 8f || !NonNeg(p.SplitHp)
+                || !NonNeg(p.SplitSpeed) || !NonNeg(p.SplitLife) || !NonNeg(p.SplitDps) || !NonNeg(p.SplitRadius) || !NonNeg(p.Airborne) || !NonNeg(p.PolluteRange)
+                || !NonNeg(p.PolluteChannel) || !NonNeg(p.AcidResist) || p.AcidResist > 1f || !NonNeg(p.StructPref))
             {
                 return false;
             }
@@ -3569,6 +3908,69 @@ namespace BinGames.Sim.Combat
             && Finite(f.MineLife) && Finite(f.LayT) && !double.IsNaN(f.AnchorPos.x) && !double.IsNaN(f.AnchorPos.y)
             && !double.IsInfinity(f.AnchorPos.x) && !double.IsInfinity(f.AnchorPos.y);
 
+        private static void WriteClarity(BinaryWriter w, in CombatClarityUnit c)
+        {
+            w.Write(c.Spray);
+            w.Write(c.Pivot);
+            w.Write(c.Fuse);
+            w.Write(c.Air);
+            w.Write(c.Pollute);
+            w.Write(c.SprayT);
+            w.Write(c.SprayDir.x);
+            w.Write(c.SprayDir.y);
+            w.Write(c.Anchor.x);
+            w.Write(c.Anchor.y);
+            w.Write(c.PivotAngle);
+            w.Write(c.PivotT);
+            w.Write(c.FuseT);
+            w.Write(c.TrailT);
+            w.Write(c.TrailLast.x);
+            w.Write(c.TrailLast.y);
+            w.Write(c.PolluteT);
+            w.Write(c.PolluteAt.x);
+            w.Write(c.PolluteAt.y);
+            w.Write(c.Chill);
+            w.Write(c.FrozenT);
+            w.Write(c.ThawGuardT);
+            w.Write(c.AcidResist);
+            w.Write(c.ImmuneMask);
+            w.Write(c.Life);
+            w.Write(c.PuddleTick);
+        }
+
+        private static CombatClarityUnit ReadClarity(BinaryReader r) => new CombatClarityUnit
+        {
+            Spray = r.ReadByte(),
+            Pivot = r.ReadByte(),
+            Fuse = r.ReadByte(),
+            Air = r.ReadByte(),
+            Pollute = r.ReadByte(),
+            SprayT = r.ReadSingle(),
+            SprayDir = new float2(r.ReadSingle(), r.ReadSingle()),
+            Anchor = new double2(r.ReadDouble(), r.ReadDouble()),
+            PivotAngle = r.ReadSingle(),
+            PivotT = r.ReadSingle(),
+            FuseT = r.ReadSingle(),
+            TrailT = r.ReadSingle(),
+            TrailLast = new double2(r.ReadDouble(), r.ReadDouble()),
+            PolluteT = r.ReadSingle(),
+            PolluteAt = new double2(r.ReadDouble(), r.ReadDouble()),
+            Chill = r.ReadSingle(),
+            FrozenT = r.ReadSingle(),
+            ThawGuardT = r.ReadSingle(),
+            AcidResist = r.ReadSingle(),
+            ImmuneMask = r.ReadUInt32(),
+            Life = r.ReadSingle(),
+            PuddleTick = r.ReadInt64(),
+        };
+
+        /// <summary>FG10-FAC-01：读回的澄净状态必须在取值范围内（阶段字节、受寒 0～1、抗性 0～1、计时有限）。</summary>
+        private static bool ClarityValid(in CombatClarityUnit c) =>
+            c.Spray <= 1 && c.Pivot <= 2 && c.Fuse <= 2 && c.Air <= 1 && c.Pollute <= 1
+            && Finite(c.SprayT) && Finite(c.SprayDir.x) && Finite(c.SprayDir.y) && IsFinite(c.Anchor) && Finite(c.PivotAngle) && Finite(c.PivotT)
+            && Finite(c.FuseT) && Finite(c.TrailT) && IsFinite(c.TrailLast) && Finite(c.PolluteT) && IsFinite(c.PolluteAt)
+            && c.Chill >= 0f && c.Chill <= 1f && NonNeg(c.FrozenT) && NonNeg(c.ThawGuardT) && c.AcidResist >= 0f && c.AcidResist <= 1f && Finite(c.Life);
+
         private static CombatBehaviorProfile ReadProfile(BinaryReader r, int format)
         {
             var p = new CombatBehaviorProfile
@@ -3622,6 +4024,47 @@ namespace BinGames.Sim.Combat
                 p.TurnRate = r.ReadSingle();
                 p.DeploySeconds = r.ReadSingle();
                 p.MinRange = r.ReadSingle();
+            }
+            if (format >= 15)
+            {
+                p.SprayRange = r.ReadSingle();
+                p.SprayCone = r.ReadSingle();
+                p.SprayWarn = r.ReadSingle();
+                p.SprayCycle = r.ReadSingle();
+                p.SprayDamage = r.ReadSingle();
+                p.SprayChill = r.ReadSingle();
+                p.SprayStatus = r.ReadUInt32();
+                p.SprayStatusSeconds = r.ReadSingle();
+                p.PoolRadius = r.ReadSingle();
+                p.PoolSeconds = r.ReadSingle();
+                p.PoolDps = r.ReadSingle();
+                p.PoolChill = r.ReadSingle();
+                p.PivotRadius = r.ReadSingle();
+                p.PivotWidth = r.ReadSingle();
+                p.PivotSpeed = r.ReadSingle();
+                p.PivotWarn = r.ReadSingle();
+                p.PivotDps = r.ReadSingle();
+                p.BurstRadius = r.ReadSingle();
+                p.BurstDamage = r.ReadSingle();
+                p.BurstFuse = r.ReadSingle();
+                p.BurstTrigger = r.ReadSingle();
+                p.DeflagMult = r.ReadSingle();
+                p.TrailInterval = r.ReadSingle();
+                p.TrailRadius = r.ReadSingle();
+                p.TrailSeconds = r.ReadSingle();
+                p.TrailStatus = r.ReadUInt32();
+                p.SplitCount = r.ReadSingle();
+                p.SplitHp = r.ReadSingle();
+                p.SplitSpeed = r.ReadSingle();
+                p.SplitLife = r.ReadSingle();
+                p.SplitDps = r.ReadSingle();
+                p.SplitRadius = r.ReadSingle();
+                p.Airborne = r.ReadSingle();
+                p.PolluteRange = r.ReadSingle();
+                p.PolluteChannel = r.ReadSingle();
+                p.AcidResist = r.ReadSingle();
+                p.ImmuneMask = r.ReadUInt32();
+                p.StructPref = r.ReadSingle();
             }
             return p;
         }
@@ -3737,6 +4180,63 @@ namespace BinGames.Sim.Combat
                     B = new float4(zn.Radius, left, color, CombatConst.EffectKindZone + (float)zn.Look),
                 });
             }
+            // FG10-FAC-01（FGR-FAC-008 ①“每条专属行为都有不少于 0.8 秒的视觉预警”）：澄净专属行为的预警画面——全部读内核状态（不靠可丢的提示事件），
+            // 用现有的“冲击环 / 斑点”外观画（占位，正式美术阶段替换）：喷嘴蓄压 = 落点圈；枢轴蓄压 = 整圈；扫臂 = 臂上一串斑点 + 臂前方预警扇区一串琥珀斑点；
+            // 自爆引信 = 爆炸半径圈；投放预警 = 落点圈。
+            for (int i = 0; i < D.Count; i++)
+            {
+                if (!D.IsAlive(i))
+                {
+                    continue;
+                }
+                CombatClarityUnit c = D.Clarity[i];
+                if (c.Spray == 0 && c.Pivot == 0 && c.Fuse != 1 && c.Pollute == 0)
+                {
+                    continue;
+                }
+                int bp = D.BProfile[i];
+                if (bp < 0 || bp >= D.Profiles.Length)
+                {
+                    continue;
+                }
+                CombatBehaviorProfile pf = D.Profiles[bp];
+                double2 at = D.Pos[i];
+                if (c.Spray == 1)
+                {
+                    double2 land = at + (double2)(c.SprayDir * (pf.SprayRange * 0.55f));
+                    float lr = pf.PoolRadius > 0f ? pf.PoolRadius : pf.SprayRange * 0.3f;
+                    AddWarn(land, lr, c.SprayT / math.max(0.8f, pf.SprayWarn), CombatZoneLook.Pulse);
+                }
+                if (c.Pivot == 1)
+                {
+                    AddWarn(at, pf.PivotRadius, c.PivotT / math.max(0.8f, pf.PivotWarn), CombatZoneLook.Pulse);
+                }
+                else if (c.Pivot == 2)
+                {
+                    float rad = math.radians(c.PivotAngle);
+                    for (int k = 1; k <= 4; k++)
+                    {
+                        double2 dot = at + new double2(math.cos(rad), math.sin(rad)) * (pf.PivotRadius * k / 4.0);
+                        AddDot(dot, 0.45f, CombatConst.EffectFoeColor);
+                    }
+                    float ahead = pf.PivotSpeed * math.max(0.8f, pf.PivotWarn);
+                    float startDeg = c.PivotAngle + pf.PivotWidth * 0.5f;
+                    for (int k = 0; k <= 4; k++)
+                    {
+                        float a = math.radians(startDeg + ahead * k / 4f);
+                        double2 dot = at + new double2(math.cos(a), math.sin(a)) * (pf.PivotRadius * 0.75);
+                        AddDot(dot, 0.4f, CombatConst.EffectWarnColor);
+                    }
+                }
+                if (c.Fuse == 1)
+                {
+                    AddWarn(at, pf.BurstRadius, c.FuseT / math.max(0.8f, pf.BurstFuse), CombatZoneLook.Pulse);
+                }
+                if (c.Pollute == 1)
+                {
+                    AddWarn(c.PolluteAt, 2.5f, c.PolluteT / math.max(0.8f, pf.PolluteChannel), CombatZoneLook.Pulse);
+                }
+            }
             for (int q = 0; q < D.Drones.Length; q++)
             {
                 CombatDrone dr = D.Drones[q];
@@ -3765,6 +4265,32 @@ namespace BinGames.Sim.Combat
                     B = new float4(0.45f, left, CombatConst.MuzzleFlashColor, CombatConst.MuzzleFlashKind),
                 });
             }
+        }
+
+        /// <summary>FG10-FAC-01：一个预警圈（琥珀色；left = 预警剩余比例）。</summary>
+        private void AddWarn(double2 world, float radius, float left, CombatZoneLook look)
+        {
+            if (!(radius > 0f))
+            {
+                return;
+            }
+            double2 p = world - Origin;
+            Effects.Add(new CombatInstance
+            {
+                A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                B = new float4(radius, math.saturate(left), CombatConst.EffectWarnColor, CombatConst.EffectKindZone + (float)look),
+            });
+        }
+
+        /// <summary>FG10-FAC-01：一个斑点（扫臂 / 预警扇区）。</summary>
+        private void AddDot(double2 world, float radius, int color)
+        {
+            double2 p = world - Origin;
+            Effects.Add(new CombatInstance
+            {
+                A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                B = new float4(radius, 1f, color, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
+            });
         }
     }
 

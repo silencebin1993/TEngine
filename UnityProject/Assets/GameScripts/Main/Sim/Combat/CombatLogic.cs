@@ -95,6 +95,8 @@ namespace BinGames.Sim.Combat
             StepSilent(ref d, ref grid, dt);
             // 4b. FG9-FAC-02：铸造专属语法里与行为无关的部分（装填光环、铺雷、对空形态的齐射）。
             StepFoundry(ref d, ref grid, dt);
+            // 4c. FG10-FAC-01：澄净专属语法（死亡效果、受寒、喷淋 / 枢轴 / 自爆、喷淋池冲洗、酸沼、分裂液接触）。
+            StepClarity(ref d, ref grid, dt);
             RebuildDeflectActive(ref d);
             grid.Dispose();
 
@@ -192,13 +194,17 @@ namespace BinGames.Sim.Combat
 
         private static void StepPlayerUnit(ref CombatData d, ref CombatGrid grid, int i, float dt)
         {
+            if (IsFrozen(ref d, i))
+            {
+                return; // FG10-FAC-01（液氮“冻结”）：冻住的机器 / 炮塔这一步什么都不做（命令保留、计时暂停，解冻后接着执行）
+            }
             if (d.Has(i, CombatUnitFlags.Possessed))
             {
                 // Demo：受控机排除在编队接管之外（命令保留，释放后恢复）；位移来自直控输入。
                 float2 dir = d.Direct[i];
                 if (math.lengthsq(dir) > 0.0001f)
                 {
-                    double2 step = (double2)(math.normalize(dir) * (d.Speed[i] * dt));
+                    double2 step = (double2)(math.normalize(dir) * (ChillSpeed(ref d, i, d.Speed[i]) * dt));
                     double2 p0 = d.Pos[i];
                     double2 p = p0 + step;
                     CombatScalars s = d.Scalars[0];
@@ -253,7 +259,7 @@ namespace BinGames.Sim.Combat
             CombatCommandKind ck = d.Cmd[i].Kind;
             if (ck == CombatCommandKind.Move || ck == CombatCommandKind.Retreat || ck == CombatCommandKind.Guard || ck == CombatCommandKind.Attack)
             {
-                Separate(ref d, ref grid, i, d.Speed[i], dt);
+                Separate(ref d, ref grid, i, ChillSpeed(ref d, i, d.Speed[i]), dt);
             }
 
             // FG6-DEF-05（DEBT-FG4ECO07-02）：空闲的驻防机器守点交战（有命令时听命令：工单赶路、玩家命令优先）。
@@ -294,7 +300,7 @@ namespace BinGames.Sim.Combat
                     reason = CombatEndReason.Arrived;
                     return true;
                 }
-                double2 stepW = math.normalize(to) * (d.Speed[i] * dt);
+                double2 stepW = math.normalize(to) * (ChillSpeed(ref d, i, d.Speed[i]) * dt);
                 if (math.lengthsq(stepW) > math.lengthsq(to))
                 {
                     stepW = to;
@@ -406,7 +412,7 @@ namespace BinGames.Sim.Combat
                 float side = math.dot(perp, toObstacle) >= 0f ? -1f : 1f;
                 moveDir = math.normalize(desired + perp * (side * d.Config.AvoidWeight));
             }
-            double2 step = (double2)(moveDir * (d.Speed[i] * dt));
+            double2 step = (double2)(moveDir * (ChillSpeed(ref d, i, d.Speed[i]) * dt)); // FG10-FAC-01：受寒减速
             if (math.lengthsq(step) > math.lengthsq(toTarget))
             {
                 step = toTarget;
@@ -497,6 +503,22 @@ namespace BinGames.Sim.Combat
 
         private static void StepHostileUnit(ref CombatData d, ref CombatGrid grid, int i, float dt)
         {
+            // FG10-FAC-01：冻住的敌人这一步什么都不做（架设到一半的步进炮回到未架设）；空中单位按空中规则行动；
+            // 喷嘴蓄压 / 枢轴喷灌 / 自爆引信把单位定在原地（这一步不移动、不用武器，专属行为在澄净阶段推进）。
+            if (IsFrozen(ref d, i))
+            {
+                InterruptFrozen(ref d, i);
+                return;
+            }
+            if (IsAir(ref d, i))
+            {
+                StepAirUnit(ref d, ref grid, i, dt);
+                return;
+            }
+            if (ClarityHolds(ref d, i))
+            {
+                return;
+            }
             switch ((CombatBehavior)d.Behavior[i])
             {
                 case CombatBehavior.HoldFire:
@@ -534,6 +556,10 @@ namespace BinGames.Sim.Combat
                     break;
                 case CombatBehavior.Charger:
                     StepCharger(ref d, ref grid, i, dt);
+                    break;
+                // FG10-FAC-01 澄净（CombatLogic.Clarity.cs）
+                case CombatBehavior.Puddle:
+                    StepPuddle(ref d, i, dt);
                     break;
             }
         }
@@ -1062,6 +1088,10 @@ namespace BinGames.Sim.Combat
             {
                 return CombatFireResult.NoWeapon;
             }
+            if (IsAir(ref d, t) && !CanHitAir(ref d, a))
+            {
+                return CombatFireResult.CannotHitAir; // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区打不到空中目标
+            }
             CombatWeapon wp = d.Weapons[w];
             if (wp.Mode == CombatWeaponMode.Cannon)
             {
@@ -1122,6 +1152,11 @@ namespace BinGames.Sim.Combat
         private static CombatFireResult FireCannon(ref CombatData d, int a, int t, in CombatWeapon wp)
         {
             double now = d.Scalars[0].Time;
+            if (IsFrozen(ref d, a))
+            {
+                d.AimReadyAt[a] = 0;
+                return CombatFireResult.Frozen; // FG10-FAC-01：冻住时不能瞄准 / 开火
+            }
             if (d.Has(a, CombatUnitFlags.Overheated))
             {
                 if (d.Heat[a] > wp.RecoverBelow)
@@ -1378,6 +1413,8 @@ namespace BinGames.Sim.Combat
                 s.Tombstones++;
                 d.Scalars[0] = s;
             }
+            // FG10-FAC-01：分裂 / 自爆单位的死亡效果（O(1) 记一条，下一个澄净阶段结算）。
+            ClarityOnKill(ref d, t, killerId);
         }
 
         public static void Heal(ref CombatData d, int t, float amount, int healer)
@@ -1412,12 +1449,14 @@ namespace BinGames.Sim.Combat
         /// 最近模式：距离最小，并列取槽位大者（与 Demo“按列表顺序扫描、距离 ≤ 当前最佳就替换”一致）；最低耐久模式：血量比例最小，并列取距离近者。
         /// FG6-DEF-01：最高威胁（<see cref="ThreatOf"/> 最大）、精英优先、优先攻击正在破坏建筑的敌人（带对应标志的先，同类里按最近），并列一律取距离近者、再取槽位大者。
         /// </summary>
-        public static int FindTarget(ref CombatData d, ref CombatGrid grid, int i, float range, bool needsLos, CombatTargetMode mode)
+        public static int FindTarget(ref CombatData d, ref CombatGrid grid, int i, float range, bool needsLos, CombatTargetMode mode, bool groundOnly = false)
         {
             if (range <= 0f)
             {
                 return -1;
             }
+            // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区（以及地面专属行为，groundOnly）不选空中目标。
+            bool hitsAir = !groundOnly && CanHitAir(ref d, i);
             byte want = d.Faction[i] == (byte)CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
             double2 pos = d.Pos[i];
             int best = -1;
@@ -1441,7 +1480,7 @@ namespace BinGames.Sim.Combat
                     {
                         int k = grid.Slots[e];
                         if (k == i || d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || d.Has(k, CombatUnitFlags.Stealthed)
-                            || d.Has(k, CombatUnitFlags.AreaOnly))
+                            || d.Has(k, CombatUnitFlags.AreaOnly) || (!hitsAir && IsAir(ref d, k)))
                         {
                             continue;
                         }
@@ -1800,9 +1839,9 @@ namespace BinGames.Sim.Combat
         /// </summary>
         public static double2 MoveCollide(ref CombatData d, int i, double2 from, double2 to)
         {
-            if (d.Config.NavEnabled == 0)
+            if (d.Config.NavEnabled == 0 || (i >= 0 && i < d.Count && d.Clarity[i].Air != 0))
             {
-                return to;
+                return to; // FG10-FAC-01：空中单位不受格网碰撞
             }
             int cls = ClassOf(ref d, i);
             int2 cf = CellOf(from);
@@ -1964,7 +2003,7 @@ namespace BinGames.Sim.Combat
                 if (d.RouteLen[i] > 0)
                 {
                     // 不以旧终点判定新命令完成，也不把寻路延迟计入停滞看门狗。
-                    FollowRoute(ref d, i, d.Speed[i], dt);
+                    FollowRoute(ref d, i, ChillSpeed(ref d, i, d.Speed[i]), dt);
                 }
                 return false;
             }
@@ -1989,7 +2028,7 @@ namespace BinGames.Sim.Combat
                 reason = CombatEndReason.Arrived;
                 return true;
             }
-            FollowRoute(ref d, i, d.Speed[i], dt);
+            FollowRoute(ref d, i, ChillSpeed(ref d, i, d.Speed[i]), dt);
             if (cmd.Kind == CombatCommandKind.WorkMove)
             {
                 return false; // 工作赶路的停滞看门狗在热更层（按剩余路线长度）。

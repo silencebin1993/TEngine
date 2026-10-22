@@ -1693,9 +1693,9 @@ namespace BinGames.Sim.Combat
                         {
                             int k = grid.Slots[e];
                             if (d.Faction[k] != (byte)CombatFaction.Hostile || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable)
-                                || math.distance(post, d.Pos[k]) > radius)
+                                || math.distance(post, d.Pos[k]) > radius || (CombatLogic.IsAir(ref d, k) && !CombatLogic.CanHitAir(ref d, i)))
                             {
-                                continue;
+                                continue; // FG10-FAC-01：格斗 / 力场 / 布区的驻防机器不追打不到的空中单位
                             }
                             double dist = EdgeDistance(ref d, i, k);
                             if (dist < bestDist || (dist == bestDist && k < best))
@@ -1762,6 +1762,112 @@ namespace BinGames.Sim.Combat
                 d.SiegeState.Stats[0] = gs;
             }
         }
+        /// <summary>
+        /// FG10-FAC-01（灭活无人机，FG18 FGR-AIR-010）：空中的攻城单位不走流场、不破墙。撤退：直线飞向最近的集结出口，离出口不到离场半径就离开（没有出口 = 当场离开）；
+        /// 进攻：按职能选射程内的目标（与地面同一份偏好表，没有流场门槛），没有就自卫，都没有就直线飞向最近的职能目标（带攻城类别的己方结构单位），再没有就飞向目标点。
+        /// 每单位 O(局部格子 + 单位)，确定性。
+        /// </summary>
+        public static void StepAirRaider(ref CombatData d, ref CombatGrid grid, int i, float speed, float dt)
+        {
+            int w = d.Weapon[i];
+            if (w < 0 || w >= d.Weapons.Length)
+            {
+                return;
+            }
+            ref CombatSiegeData s = ref d.SiegeState;
+            CombatSiegeConfig cfg = s.Cfg[0];
+            CombatWeapon wp = d.Weapons[w];
+            CombatSiegeUnit su = d.Siege[i];
+            double2 pos = d.Pos[i];
+            if (su.Mode == (byte)CombatSiegeMode.Retreat)
+            {
+                if (!NearestExit(ref d, pos, out double2 exit) || math.distance(pos, exit) <= math.max(1.0, cfg.ExitRadius))
+                {
+                    Exit(ref d, i);
+                    return;
+                }
+                CombatLogic.AirMoveToward(ref d, i, exit, speed * dt, 0.0);
+                return;
+            }
+            int role = FieldRole(su);
+            float range = CombatLogic.EngageRange(ref d, i, wp);
+            int t = RoleTarget(ref d, ref grid, i, role, range, -1, role * 2, role * 2 + 1);
+            if (t < 0)
+            {
+                t = SelfDefense(ref d, ref grid, i, range);
+            }
+            float cycle = d.Cycle[i] - dt;
+            d.Cycle[i] = cycle;
+            if (t >= 0)
+            {
+                if (cycle <= 0f)
+                {
+                    d.Cycle[i] = CombatLogic.EffectiveCooldown(wp);
+                    CombatLogic.UnitAttack(ref d, i, t, wp);
+                }
+                return;
+            }
+            int goal = NearestRoleStructure(ref d, i, role);
+            if (goal >= 0)
+            {
+                CombatLogic.AirMoveToward(ref d, i, d.Pos[goal], speed * dt, math.max(0.5, range * 0.8 + d.Radius[goal]));
+            }
+            else
+            {
+                CombatLogic.AirMoveToward(ref d, i, d.Home[i], speed * dt, 0.5);
+            }
+        }
+
+        /// <summary>最近的集结出口（格心）。没有登记出口返回 false。</summary>
+        private static bool NearestExit(ref CombatData d, double2 pos, out double2 exit)
+        {
+            ref CombatSiegeData s = ref d.SiegeState;
+            exit = pos;
+            double best = double.MaxValue;
+            bool found = false;
+            for (int e = 0; e < s.Exits.Length; e++)
+            {
+                int2 c = s.Exits[e];
+                double2 p = new double2(c.x, c.y);
+                double ds = math.distancesq(p, pos);
+                if (ds < best)
+                {
+                    best = ds;
+                    exit = p;
+                    found = true;
+                }
+            }
+            return found;
+        }
+
+        /// <summary>最近的职能目标：带本职能偏好类别的己方结构单位（存活、可选中）。O(单位)。</summary>
+        private static int NearestRoleStructure(ref CombatData d, int i, int role)
+        {
+            ref CombatSiegeData s = ref d.SiegeState;
+            int mask = role >= 0 && role < CombatSiegeConst.RoleRetreat ? s.RoleMask[role] : 0;
+            if (mask == 0)
+            {
+                return -1;
+            }
+            double2 pos = d.Pos[i];
+            int best = -1;
+            double bestD = double.MaxValue;
+            for (int k = 0; k < d.Count; k++)
+            {
+                if (d.Faction[k] != (byte)CombatFaction.Player || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (d.Siege[k].Cat & mask) == 0)
+                {
+                    continue;
+                }
+                double ds = math.distancesq(d.Pos[k], pos);
+                if (ds < bestD)
+                {
+                    bestD = ds;
+                    best = k;
+                }
+            }
+            return best;
+        }
+
         /// <summary>撤退的单位走到集结点：发不丢的事件（热更层把幸存者并回行进队伍），当场移除（不算阵亡、不计击杀）。</summary>
         private static void Exit(ref CombatData d, int i)
         {
