@@ -2742,6 +2742,7 @@ namespace GameLogic.Campaign
             s.Factions.SiteSlagNoticed ??= Array.Empty<string>();
             s.Factions.ClarityCounterId ??= string.Empty; // FG10-FAC-01
             s.Factions.AcidZonesNoticed ??= Array.Empty<string>();
+            s.Factions.TerritoriesIntroduced ??= Array.Empty<string>(); // FG10-REG-01
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
             s.Grid.TerrainSourceId ??= string.Empty;

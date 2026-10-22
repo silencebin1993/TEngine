@@ -146,10 +146,15 @@ namespace BinGames.Sim.Combat
             return best;
         }
 
-        /// <summary>酸液（酸沼 / 喷淋池 / 分裂液）对这个单位的伤害倍率 = (1 − 酸蚀抗性) ×（湿润时冲淡倍率）。</summary>
+        /// <summary>酸液（酸沼 / 喷淋池 / 分裂液）对这个单位的伤害倍率 = (1 − 酸蚀抗性) ×（湿润时冲淡倍率）；玩家机器的抗性取它与防腐涂层的较大值。</summary>
         internal static float AcidFactor(ref CombatData d, int k, double now)
         {
-            float f = 1f - math.saturate(d.Clarity[k].AcidResist);
+            float resist = d.Clarity[k].AcidResist;
+            if (d.PlayerAcidResist > 0f && d.Faction[k] == (byte)CombatFaction.Player && d.Kind[k] == (byte)CombatUnitKind.Machine)
+            {
+                resist = math.max(resist, d.PlayerAcidResist); // FG10-REG-01：防腐涂层（派生量，读档后由热更层重写）
+            }
+            float f = 1f - math.saturate(resist);
             if (f > 0f && d.AcidDilute > 0f && IsWet(ref d, k, now))
             {
                 f *= math.saturate(d.AcidDilute);

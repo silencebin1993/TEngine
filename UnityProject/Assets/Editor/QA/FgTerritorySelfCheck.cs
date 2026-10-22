@@ -1452,10 +1452,10 @@ namespace GameLogic.EditorTools
             ExpeditionChecklistService.HazardHit? hb = ExpeditionChecklistService.DefaultHazardProbe(s, through);
             ExpeditionChecklistService.HazardHit? hn = ExpeditionChecklistService.DefaultHazardProbe(s, clear);
             ExpeditionChecklistService.HazardHit? hz = ExpeditionChecklistService.DefaultHazardProbe(s, toZone);
-            Expect(hb.HasValue && hb.Value.Name.Contains(GameText.Get(lake.HazardKey)) && hb.Value.Consequence.Contains(GameText.Get("hazard.hover.pending"))
+            Expect(hb.HasValue && hb.Value.Name.Contains(GameText.Get(lake.HazardKey)) && hb.Value.Consequence.Contains(AcidMarshService.HoverLine())
                    && !hn.HasValue && hz.HasValue && hz.Value.Name.Contains(GameText.Get("hazard.emi_noise.name"))
                    && ExpeditionChecklistService.HazardProbe == (Func<CampaignState, IReadOnlyList<Vector2>, ExpeditionChecklistService.HazardHit?>)ExpeditionChecklistService.DefaultHazardProbe,
-                $"J1 DEBT-FG8EXP01-04 检查单接入真实危害数据：路线穿过沉淀湖外圈 →“{hb?.Name}”（后果写效果 + 当前只作标记），穿过静默危害区 →“{hz?.Name}”；不经过时不提醒；默认探测就是真实数据");
+                $"J1 DEBT-FG8EXP01-04 检查单接入真实危害数据：路线穿过沉淀湖外圈 →“{hb?.Name}”（后果写效果 + 酸沼“生效中”与涂层状态，FG10-REG-01 起与悬停同一口径），穿过静默危害区 →“{hz?.Name}”；不经过时不提醒；默认探测就是真实数据");
         }
 
         // ── K 远征地点内部的覆盖根（DEBT-FG8EXP02-02）─────────────────────────────────

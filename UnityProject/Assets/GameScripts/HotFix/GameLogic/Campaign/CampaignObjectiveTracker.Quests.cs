@@ -388,6 +388,21 @@ namespace GameLogic.Campaign
 
         // ── 地点与目标 ───────────────────────────────────────────────────
 
+        /// <summary>自检用：按任务表解析一条任务的地点（不改存档）。</summary>
+        public static bool ResolveAnchorForTests(CampaignState state, string questId, out int x, out int y)
+        {
+            x = y = 0;
+            Quest q = QuestCatalog.Get(questId);
+            var r = new ObjectiveRecord { ObjectiveId = questId };
+            if (q == null || !ResolveAnchor(state, q, r, null) || !r.HasAnchor)
+            {
+                return false;
+            }
+            x = r.AnchorX;
+            y = r.AnchorY;
+            return true;
+        }
+
         /// <summary>按 fg.TbQuest.anchor 解析任务地点（按种子生成的领地 / 支线地点 / 归还核心，不依赖固定坐标，B25）。解析不出返回 false。</summary>
         private static bool ResolveAnchor(CampaignState state, Quest q, ObjectiveRecord r, WorldFeature site)
         {
@@ -418,6 +433,34 @@ namespace GameLogic.Campaign
                         return false;
                     }
                     SetAnchor(r, t.CenterX, t.CenterY);
+                    r.SiteId = t.Id;
+                    return true;
+                }
+                case QuestCatalog.AnchorBeltOuter:
+                {
+                    // FG10-REG-01（FGR-GEN-022 / FGR-QST-020）：接车点在外圈危害带外缘再往核心方向 pickup_margin 格（最近一格机器能站的），不进危害带。
+                    PlannedTerritory t = WorldGenService.PlanFor(state)?.Find(q.Territory);
+                    if (t == null)
+                    {
+                        return false;
+                    }
+                    GridCell core = HomeGridService.CorePivot(state);
+                    Vector2 c = new Vector2(t.CenterX, t.CenterY);
+                    Vector2 dir = new Vector2(core.X, core.Y) - c;
+                    dir = dir.sqrMagnitude > 1e-4f ? dir.normalized : Vector2.up;
+                    float margin = Env.AcidMarshService.PickupMargin;
+                    GridCell cell = default;
+                    for (int step = 1; step <= 4; step++)
+                    {
+                        // 最近的可走格还落在危害带里（带外缘正好是水 / 悬崖）→ 再往外推一个 margin 重找，最多 4 次。
+                        Vector2 p = c + dir * (t.OuterRadius + margin * step);
+                        cell = Defense.SiegeService.NearestPassable(new GridCell(Mathf.RoundToInt(p.x), Mathf.RoundToInt(p.y)), Mathf.Max(8, Mathf.RoundToInt(margin)));
+                        if (Env.AcidMarshService.ZoneAt(state, new Vector2(cell.X, cell.Y)) == null)
+                        {
+                            break;
+                        }
+                    }
+                    SetAnchor(r, cell.X, cell.Y);
                     r.SiteId = t.Id;
                     return true;
                 }
@@ -924,6 +967,8 @@ namespace GameLogic.Campaign
             {
                 if (CampaignEventLedger.TryGrant(state, BlueprintEventId(q.RewardBlueprint), "QuestBlueprint", state.PlaySeconds, q.Id))
                 {
+                    Env.AcidMarshService.InvalidateCoating(); // FG10-REG-01：防腐涂层蓝图到手，下一个游戏秒写进星球战斗内核
+
                     KeyMaterial k = QuestCatalog.KeyMaterialOf(q.RewardBlueprint);
                     FeedbackCues.Raise(FeedbackCueId.QuestUpdate, GameText.Format("quest.notify.blueprint", k != null ? GameText.Get(k.NameKey) : q.RewardBlueprint));
                 }

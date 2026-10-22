@@ -619,6 +619,8 @@ namespace GameLogic.Campaign.WorldSim
                 // FG10-FAC-01（FGR-FAC-004）：澄净反制每个游戏日锁定一次（日切那一步；平时 O(1)）；酸沼——信号所在的机器第一次进入某片时提示（每游戏秒一次）。
                 Regions.ClarityCounterService.WorldStep(state);
                 Env.AcidMarshService.WorldStep(state, GameClock.Ticks);
+                // FG10-REG-01：第一次走进有阵营介绍的领地时发一条介绍（每游戏秒一次 O(1)，与观察无关）。
+                Regions.TerritoryIntroService.WorldStep(state, GameClock.Ticks);
                 // FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测静默信号点（真据点 + 诱饵中继），每 site.contact.check_seconds 一次 O(队员 × 信号点)；
                 // 第一幕节奏台账（FG16 第 2 节）每 pace.check_seconds 一次 O(节奏点)。只看步序号，与观察无关。
                 SignalContactService.WorldStep(state, GameClock.Ticks);

@@ -84,7 +84,7 @@ public sealed partial class Quest : Luban.BeanBase
     /// </summary>
     public readonly string Territory;
     /// <summary>
-    /// 地图位置:none/core=归还核心/territory_center=领地中心/side_site=发现的支线地点/side_nearest=领地里离核心最近的支线地点/side_center=领地里离中心最近的支线地点
+    /// 地图位置:none/core=归还核心/territory_center=领地中心/side_site=发现的支线地点/side_nearest=领地里离核心最近的支线地点/side_center=领地里离中心最近的支线地点/belt_outer=领地外圈危害带外缘朝核心一侧(往外 hazard.acid_marsh.pickup_margin 格;不进危害带)
     /// </summary>
     public readonly string Anchor;
     /// <summary>

@@ -11,14 +11,18 @@ namespace GameLogic.Campaign.Combat
     /// </summary>
     public sealed partial class CombatSite
     {
-        /// <summary>酸沼（x, y, 内半径, 外半径；内半径 0 = 实心圆）、每游戏秒扣最大耐久的比例、湿润时的倍率（冷却液冲淡）。派生量，不进快照。</summary>
-        public void SetAcidMarsh(IReadOnlyList<float4> shapes, float pctPerSecond, float wetMult)
+        /// <summary>酸沼（x, y, 内半径, 外半径；内半径 0 = 实心圆）、每游戏秒扣最大耐久的比例、湿润时的倍率（冷却液冲淡）、
+        /// 玩家机器的防腐涂层抗性（FG10-REG-01；0 = 没有涂层）。派生量，不进快照。</summary>
+        public void SetAcidMarsh(IReadOnlyList<float4> shapes, float pctPerSecond, float wetMult, float playerResist = 0f)
         {
             if (!IsDisposed)
             {
-                Kernel.SetAcidMarsh(shapes, pctPerSecond, wetMult);
+                Kernel.SetAcidMarsh(shapes, pctPerSecond, wetMult, playerResist);
             }
         }
+
+        /// <summary>FG10-REG-01：内核里当前生效的玩家机器防腐涂层抗性。</summary>
+        public float PlayerAcidResist => IsDisposed ? 0f : Kernel.PlayerAcidResist;
 
         public int AcidShapeCount => IsDisposed ? 0 : Kernel.AcidShapeCount;
 

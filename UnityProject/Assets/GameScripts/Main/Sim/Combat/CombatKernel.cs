@@ -663,7 +663,8 @@ namespace BinGames.Sim.Combat
         /// FG10-FAC-01（酸沼，DEBT-FG7ENV05-01 / DEBT-FG8EXP02-03）：写入酸沼的圆环（x, y, 内半径, 外半径）、每游戏秒扣最大耐久的比例、湿润时的伤害倍率（冷却液冲淡）。
         /// 派生量，不进快照；读档后沿用。热更层（AcidMarshService）在内核打开 / 读档时按规划层写一次。
         /// </summary>
-        public void SetAcidMarsh(IReadOnlyList<float4> shapes, float pctPerSecond, float wetMult)
+        /// <param name="playerResist">FG10-REG-01：玩家机器的酸蚀抗性下限（防腐涂层蓝图到手后由热更层写；0 = 没有涂层）。只作用于玩家阵营的机器，炮塔与建筑不涂。</param>
+        public void SetAcidMarsh(IReadOnlyList<float4> shapes, float pctPerSecond, float wetMult, float playerResist = 0f)
         {
             _d.AcidShapes.Clear();
             if (shapes != null)
@@ -679,7 +680,10 @@ namespace BinGames.Sim.Combat
             }
             _d.AcidPct = pctPerSecond > 0f ? math.min(1f, pctPerSecond) : 0f;
             _d.AcidDilute = wetMult > 0f ? math.min(1f, wetMult) : 1f;
+            _d.PlayerAcidResist = playerResist > 0f ? math.saturate(playerResist) : 0f;
         }
+
+        public float PlayerAcidResist => _d.PlayerAcidResist;
 
         public int AcidShapeCount => _d.AcidShapes.Length;
 
@@ -2703,6 +2707,7 @@ namespace BinGames.Sim.Combat
             }
             staging.AcidPct = _d.AcidPct;
             staging.AcidDilute = _d.AcidDilute;
+            staging.PlayerAcidResist = _d.PlayerAcidResist;
             staging.AcidBit = _d.AcidBit;
             staging.WetBit = _d.WetBit;
             staging.OilBit = _d.OilBit;

@@ -94,6 +94,8 @@ namespace BinGames.Sim.Combat
         public NativeList<float4> AcidShapes;
         public float AcidPct;
         public float AcidDilute;
+        /// <summary>FG10-REG-01：玩家机器的酸蚀抗性下限（防腐涂层，派生量；0 = 没有涂层）。</summary>
+        public float PlayerAcidResist;
         /// <summary>FG10-FAC-01：内核不认识标签名——酸蚀 / 湿润 / 油 / 燃烧在本地点的状态位（热更层按 fg.TbStatusTag 写；0 = 没有这个标签，相关规则不生效）。派生量。</summary>
         public uint AcidBit;
         public uint WetBit;

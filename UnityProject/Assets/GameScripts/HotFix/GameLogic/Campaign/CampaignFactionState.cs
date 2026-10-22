@@ -42,6 +42,8 @@ namespace GameLogic.Campaign
         public string ClarityCounterId = string.Empty;
         /// <summary>FG10-FAC-01：已经提示过“进入酸沼”的酸沼区域（外圈带 = 领地 ID#belt，领地里的酸沼 = 领地 ID#序号；同一片只提示一次）。</summary>
         public string[] AcidZonesNoticed = Array.Empty<string>();
+        /// <summary>FG10-REG-01：已经发过阵营介绍的领地（第一次进入时一条；唯一写入口 <c>Regions.TerritoryIntroService</c>）。</summary>
+        public string[] TerritoriesIntroduced = Array.Empty<string>();
 
         /// <summary>FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测到的静默信号点（据点 ID / 诱饵 ID，按序；唯一写入口 <c>WorldSim.SignalContactService</c>）。</summary>
         public string[] ContactsDetected = Array.Empty<string>();

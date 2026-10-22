@@ -602,6 +602,8 @@ namespace GameLogic.EditorTools
             // 冷却液冲洗 / 酸沼 / 空中单位与投放 / 蜂群打建筑（内核实测预警 ≥ 0.8 秒）、快照格式 15 与确定性；世界酸沼（DEBT-FG8EXP02-03）、澄净据点展开本阵营单位（DEBT-FG8EXP03-02）、
             // 攻城单位专属参数与绝缘涂层、反制每日锁定（FGT-FAC-005）与情报行；反馈与图鉴；性能。
             Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
+            // FG10-REG-01 沉淀湖领地：模板与湖心平台锚点、防腐涂层（DEBT-FG8QST01-03）、没有涂层进酸沼先拒绝并说明（软门槛）、样品车接车点在带外、第一次进入的阵营介绍。
+            Seg("FgSettlingLakeSelfCheck", FgSettlingLakeSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);
             // FG9-UX-01 正式版图鉴（FG13 FGR-UX-050 / 051、FGR-UX-030；FG09 FGR-FAC-005；FGT-UX-006、FGT-FAC-008）：16 个页签由表生成且条数一致、中英文齐全、互链可达；

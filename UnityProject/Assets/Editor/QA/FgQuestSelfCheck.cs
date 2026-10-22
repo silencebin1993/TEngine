@@ -338,10 +338,12 @@ namespace GameLogic.EditorTools
             TerritoryControlService.MarkLeaderDefeated(s, "foundry");
             StepSeconds(2);
             ObjectiveRecord anti = CampaignObjectiveTracker.FindQuest(s, "main.anticorrosion");
-            WorldFeature nearest = SideSites(s, "clarity").FirstOrDefault();
-            Expect(prereqBefore && foundry.State == ObjectiveState.Completed && HomeInventory.Stock(s, "furnace_heart") == 1 && anti?.State == ObjectiveState.Active
-                   && nearest != null && anti.AnchorX == nearest.X && anti.AnchorY == nearest.Y,
-                $"B3 熔炉心进保管库后，第二幕主线“防腐涂层样品”按前置出现，接车点 = 沉淀湖领地里离核心最近的支线地点（{anti?.AnchorX},{anti?.AnchorY}，按规则定位，B25）");
+            // FG10-REG-01：接车点改在沉淀湖外圈酸沼带外缘、朝家园一侧（belt_outer）——拿到防腐涂层之前不用先穿过酸沼（原为领地里离核心最近的支线地点）。
+            PlannedTerritory lake = WorldGenService.PlanFor(s)?.Find("clarity");
+            bool outsideBelt = anti != null && lake != null && AcidMarshService.ZoneAt(s, new Vector2(anti.AnchorX, anti.AnchorY)) == null
+                               && Vector2.Distance(new Vector2(anti.AnchorX, anti.AnchorY), new Vector2(lake.CenterX, lake.CenterY)) >= lake.OuterRadius;
+            Expect(prereqBefore && foundry.State == ObjectiveState.Completed && HomeInventory.Stock(s, "furnace_heart") == 1 && anti?.State == ObjectiveState.Active && outsideBelt,
+                $"B3 熔炉心进保管库后，第二幕主线“防腐涂层样品”按前置出现，接车点在沉淀湖外圈酸沼带外、朝家园一侧（{anti?.AnchorX},{anti?.AnchorY}，按规则定位，B25；FG10-REG-01）");
         }
 
         // ── C 主线护送：被毁 → 失败 → 重新开始 → 完成 ──────────────────────────────

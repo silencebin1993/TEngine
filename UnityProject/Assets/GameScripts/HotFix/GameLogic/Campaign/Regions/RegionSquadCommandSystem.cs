@@ -150,6 +150,11 @@ namespace GameLogic.Campaign.Regions
         public static int OutOfCoverageRejects { get; private set; }
         /// <summary>FG1-SIG-07：最近一次“目标 / 路线走出覆盖”的提醒次数（自检读取）。</summary>
         public static int RouteWarnings { get; private set; }
+        /// <summary>FG10-REG-01：没有防腐涂层时“路线进酸沼”被拒绝 / 确认后强行进入的次数（自检读取）。</summary>
+        public static int AcidGateRefusals { get; private set; }
+        public static int AcidGateForced { get; private set; }
+        /// <summary>FG10-REG-01：上一次因酸沼拒绝后，这个真实时间之前再下一次命令 = 强行进入（-1 = 没有待确认）。</summary>
+        private float _acidConfirmUntil = -1f;
         private readonly List<int> _outScratch = new List<int>(8);
         private readonly List<Vector2> _coverageRouteScratch = new List<Vector2>(2);
         public IReadOnlyList<string> RecentEvents => _recentEvents;
@@ -696,6 +701,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            // FG10-REG-01（FGR-GEN-022 软门槛）：没有防腐涂层时路线要进酸沼——先拒绝并说明蓝图去哪拿，确认窗口内再下一次 = 强行进入。撤退不拦。
+            if (kind != RegionCommandKind.Retreat && !PassAcidGate(targetPosition))
+            {
+                return;
+            }
             int started = StartCommandForTargets(kind, targetPosition, hostileId, _selection, paused);
             if (started > 0 && kind == RegionCommandKind.Move)
             {
@@ -827,23 +837,12 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            Vector2 sum = Vector2.zero;
-            int n = 0;
-            foreach (int id in _selection)
-            {
-                HomeValleyMachineMarker m = FindMarker(id);
-                if (m != null)
-                {
-                    sum += m.Position;
-                    n++;
-                }
-            }
-            if (n == 0)
+            if (!TrySelectionCentroid(out Vector2 from))
             {
                 return;
             }
             _coverageRouteScratch.Clear();
-            _coverageRouteScratch.Add(sum / n);
+            _coverageRouteScratch.Add(from);
             _coverageRouteScratch.Add(target);
             float outside = SignalCoverageService.RouteOutsideLength(_ctx.Site.SiteId, _coverageRouteScratch, out _);
             if (outside <= 0f)
@@ -856,6 +855,58 @@ namespace GameLogic.Campaign.Regions
                 : GameText.Get("signal.command.target_outside");
             PushEvent(text);
             FeedbackCues.Raise(FeedbackCueId.SignalLinkWarning, text);
+        }
+
+        /// <summary>选择集里有标记的机器的中心（O(选中数)，下令时一次）。</summary>
+        private bool TrySelectionCentroid(out Vector2 center)
+        {
+            Vector2 sum = Vector2.zero;
+            int n = 0;
+            foreach (int id in _selection)
+            {
+                HomeValleyMachineMarker m = FindMarker(id);
+                if (m != null)
+                {
+                    sum += m.Position;
+                    n++;
+                }
+            }
+            center = n > 0 ? sum / n : Vector2.zero;
+            return n > 0;
+        }
+
+        /// <summary>
+        /// FG10-REG-01（FGR-GEN-022“没有防腐涂层时能进去，但会持续受到重度腐蚀”；卡片负向“没有防腐涂层时尝试进入：拒绝并说明去哪里拿”）：
+        /// 星球表面上，编队中心到目标的直线会进酸沼、又没有防腐涂层 → 这次不下达，命令栏 + 拒绝音 + 字幕写明哪片酸沼、腐蚀多快、蓝图来自哪条主线；
+        /// hazard.acid_marsh.gate_confirm_seconds 真实秒内再下一次（任意进酸沼的命令）= 强行进入（软门槛，不是看不见的墙）。已经在酸沼里往外走不拦。
+        /// </summary>
+        private bool PassAcidGate(Vector2 target)
+        {
+            CampaignState s = CampaignSession.Current;
+            if (s == null || _ctx?.Site == null || _ctx.Site.SiteId != HomeValleyLayout.RegionId || !TrySelectionCentroid(out Vector2 from))
+            {
+                return true;
+            }
+            if (!Env.AcidMarshService.RouteEntersAcid(s, from, target, out string zone))
+            {
+                return true;
+            }
+            float now = RealTime();
+            if (_acidConfirmUntil >= 0f && now <= _acidConfirmUntil)
+            {
+                _acidConfirmUntil = -1f;
+                AcidGateForced++;
+                PushEvent(GameText.Get("hazard.acid_marsh.gate.forced"));
+                return true;
+            }
+            float window = Env.AcidMarshService.GateConfirmSeconds;
+            _acidConfirmUntil = now + window;
+            AcidGateRefusals++;
+            string text = GameText.Format("hazard.acid_marsh.gate.refuse", Env.AcidMarshService.ZoneName(s, zone), Env.AcidMarshService.Pct(Env.AcidMarshService.CorrodePct),
+                GameText.Get("quest.main.anticorrosion.title"), Mathf.RoundToInt(window).ToString());
+            PushEvent(text);
+            FeedbackCues.Raise(FeedbackCueId.Denied, text);
+            return false;
         }
 
         /// <summary>停止：清除选择集内所有机器的当前编队命令，交还 AI（Guard 的"取消"落点）。
