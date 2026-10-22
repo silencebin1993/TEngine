@@ -69,14 +69,19 @@ namespace GameLogic.Campaign.Regions
             f.ClarityCounterId = Decide(s);
             f.ClarityCounterDay = Today(s);
             LockCount++;
-            // 换对策时提示一次（第一次锁定、没有对策、对策没变都不提示；只在世界里有澄净领地时，避免第一幕前的噪音）。
-            if (!first && f.ClarityCounterId != before && f.ClarityCounterId != CounterNone && HasClarity(s))
+            // 换对策时提示一次（第一次锁定、没有对策、对策没变都不提示；只在澄净领地已经在地图上显示时，第一幕不剧透）。
+            if (!first && f.ClarityCounterId != before && f.ClarityCounterId != CounterNone && Visible(s))
             {
                 Notifications.NotificationCenter.Post("clarity_counter", GameText.Format("clarity.counter.notify", CounterName(f.ClarityCounterId)));
             }
         }
 
-        private static bool HasClarity(CampaignState s) => WorldGen.WorldGenService.PlanFor(s)?.Find(EnemyDefs.FactionClarity) != null;
+        /// <summary>澄净领地在地图上显示（第二幕起，或玩家已经揭开过它的危害；与地图 / 悬停同一判定）：情报行与换对策通知只在这之后出现。</summary>
+        public static bool Visible(CampaignState s)
+        {
+            WorldGen.PlannedTerritory t = WorldGen.WorldGenService.PlanFor(s)?.Find(EnemyDefs.FactionClarity);
+            return t != null && Env.HomeExplorationService.TerritoryVisible(s, t);
+        }
 
         /// <summary>当天锁定的对策（counter_cryo / counter_swarm / counter_insulate / 空串）。当天还没锁定时当场锁定一次（同一天之后不再变）。</summary>
         public static string Locked(CampaignState s)

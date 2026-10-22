@@ -816,8 +816,8 @@ namespace GameLogic.Campaign.Economy
                         r.FoundryCounter = FoundryCounterService.Locked(s);
                         r.FoundryCounterNext = FoundryCounterService.Preview(s);
                     }
-                    // FG10-FAC-01（FGR-FAC-004）：世界里有澄净领地时，附上澄净当天锁定的对策与下一次日切的预测。
-                    if (WorldGen.WorldGenService.PlanFor(s)?.Find(Content.EnemyDefs.FactionClarity) != null)
+                    // FG10-FAC-01（FGR-FAC-004）：澄净领地在地图上显示（第二幕起，或已经揭开过它的危害）时，附上澄净当天锁定的对策与下一次日切的预测。
+                    if (ClarityCounterService.Visible(s))
                     {
                         r.HasClarityCounter = true;
                         r.ClarityCounter = ClarityCounterService.Locked(s);

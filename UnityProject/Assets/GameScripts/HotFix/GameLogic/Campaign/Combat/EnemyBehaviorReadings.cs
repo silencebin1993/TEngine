@@ -538,7 +538,7 @@ namespace GameLogic.Campaign.Combat
         }
 
         /// <summary>液氮池每节拍受寒 = 喷中受寒 × clarity.pool.chill_tick_frac。</summary>
-        public static float PoolChillFrac => Grid.GridContent.TryGetTuning("clarity.pool.chill_tick_frac", out float v) && v > 0f ? v : 0.25f;
+        public static float PoolChillFrac => Grid.GridContent.TryGetTuning("clarity.pool.chill_tick_frac", out float v) && v > 0f ? v : 0.5f;
     }
 
     /// <summary>读法注册表（键 = fg.TbMechEnemy.behavior）。</summary>

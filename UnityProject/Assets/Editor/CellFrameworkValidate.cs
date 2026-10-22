@@ -598,6 +598,10 @@ namespace GameLogic.EditorTools
             // 熔渣热区、快照格式 14；主核心 Demo 阶段 + 阶段三对空形态 + 狂暴 + 奖励、首领战中存读档、阶段三窗口全灭复位、场地边界、倍速 / 暂停 / 观察一致；
             // 反制每日锁定（FGT-FAC-005）、攻城单位、对空阵地锚点与投送舱防空、性能。
             Seg("FgFoundryFactionSelfCheck", FgFoundryFactionSelfCheck.Run);
+            // FG10-FAC-01 澄净单位与精英：5 类单位 + 沉淀巨罐入表与图鉴、喷淋布区 / 液氮先减速再冻结 / 自爆与被火击毁的爆燃（反过来利用）/ 枢轴喷灌 / 分裂（负向：分裂液在酸沼里不叠加）/
+            // 冷却液冲洗 / 酸沼 / 空中单位与投放 / 蜂群打建筑（内核实测预警 ≥ 0.8 秒）、快照格式 15 与确定性；世界酸沼（DEBT-FG8EXP02-03）、澄净据点展开本阵营单位（DEBT-FG8EXP03-02）、
+            // 攻城单位专属参数与绝缘涂层、反制每日锁定（FGT-FAC-005）与情报行；反馈与图鉴；性能。
+            Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);
             // FG9-UX-01 正式版图鉴（FG13 FGR-UX-050 / 051、FGR-UX-030；FG09 FGR-FAC-005；FGT-UX-006、FGT-FAC-008）：16 个页签由表生成且条数一致、中英文齐全、互链可达；
