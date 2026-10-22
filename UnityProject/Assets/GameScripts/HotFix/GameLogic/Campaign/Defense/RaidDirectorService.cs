@@ -338,7 +338,7 @@ namespace GameLogic.Campaign.Defense
         /// <summary>第三幕巨构一个阶段完工（FG11 / FG13-END-01 调用）：触发一次突袭，不受最短间隔限制。</summary>
         public static bool OnMegastructureStageCompleted(CampaignState s) => EnqueueKind(s, RaidCatalog.TriggerMegastructure, null);
 
-        /// <summary>化工阵营针对净化塔（FG09；FG10-RAID-01 在净化塔建成 / 化工阵营登场时调用）：由化工阵营发动。</summary>
+        /// <summary>化工阵营针对净化塔（FG09）：由澄净发动。FG10-RAID-01 起由 <see cref="ClarityRaidService.WorldStep"/> 调用（澄净领地出现在地图上、家园有净化塔之后定期一次）。</summary>
         public static bool OnPurificationTowerTargeted(CampaignState s) => EnqueueKind(s, RaidCatalog.TriggerPurification, RaidCatalog.FactionChemical);
 
         private static bool EnqueueKind(CampaignState s, string kind, string faction)

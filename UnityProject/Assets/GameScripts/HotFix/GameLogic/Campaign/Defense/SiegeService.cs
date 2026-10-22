@@ -184,6 +184,11 @@ namespace GameLogic.Campaign.Defense
                 }
             }
             StepIntercepts(state, site, ticksBefore, worldHz);
+            if (StateOf(state).TheaterActive)
+            {
+                // FG10-RAID-01：净化塔建成 / 拆除（生产索引变了）当步就更新投放目标（没变 O(1)）。
+                ClarityRaidService.ApplyPolluteTargets(state, site, AnyClaritySieging(state), false);
+            }
             DrainCollateral(state, site);
             long every = Math.Max(1, (long)Math.Round(SiegeCatalog.SyncSeconds * worldHz));
             if (ticksBefore % every == 0)
@@ -221,6 +226,7 @@ namespace GameLogic.Campaign.Defense
             }
             if (st.TheaterActive)
             {
+                ApplyRoles(state, site, false); // FG10-RAID-01：澄净队伍到场 / 走光时换职能表（表没变内核不重建）
                 SyncStructures(state, site);
                 NotifyBreaches(state, site);
             }
@@ -430,12 +436,18 @@ namespace GameLogic.Campaign.Defense
             bool eliteTier = false;
             if (def != null && Content.EnemyDefs.TryGet(def.EnemyTypeId, out GameConfig.fg.MechEnemy row))
             {
-                // FG9-FAC-02（攻城中的铸造专属语法）：布雷车照样铺雷、装填机照样给攻城火炮加速装填（参数取敌人表，与区域同一份；冲锋 / 齐射只在区域与地点里）；
+                // FG9-FAC-02（攻城中的铸造专属语法）：布雷车照样铺雷、装填机照样给攻城火炮加速装填（参数取敌人表，与区域同一份；齐射只在区域与地点里）；
                 // 攻城重甲的背部弱点照常结算；敌人表层级是精英的单位本身就带精英标记（FG6-DEF-01“精英优先”有真目标）。
-                if (row.MaxPlaced > 0f || row.Behavior == Content.EnemyDefs.BehaviorReload)
+                // FG10-RAID-01（DEBT-FG9FAC02-03）：攻城重甲在攻城里也蓄力冲锋（参数同一份；内核 CombatSiegeLogic.StepSiegeCharge：冲向职能目标 / 挡路的墙，撞墙即停）。
+                if (row.MaxPlaced > 0f || row.Behavior == Content.EnemyDefs.BehaviorReload || row.Behavior == Content.EnemyDefs.BehaviorCharge)
                 {
                     var fp = new CombatBehaviorProfile();
                     EnemyFoundryParams.Apply(row, ref fp);
+                    bp.ChargeSpeed = fp.ChargeSpeed;
+                    bp.ChargeWarn = fp.ChargeWarn;
+                    bp.ChargeSeconds = fp.ChargeSeconds;
+                    bp.ChargeCooldown = fp.ChargeCooldown;
+                    bp.ChargeKnock = fp.ChargeKnock;
                     bp.MineMax = fp.MineMax;
                     bp.MineCycle = fp.MineCycle;
                     bp.MineRadius = fp.MineRadius;
@@ -597,9 +609,31 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
-            site.SetSiegeRoles(SiegeCatalog.RoleMasks, SiegeCatalog.RoleBias);
+            ApplyRoles(state, site);
             site.SetSiegeTheater(st.TheaterActive, new int2(st.MinX, st.MinY), new int2(st.MaxX, st.MaxY), SiegeCatalog.BreachBaseCost,
                 SiegeCatalog.BreachCostPerBand, SiegeCatalog.BreachHpBand, SiegeCatalog.RetargetSeconds, SiegeCatalog.ExitRadius);
+        }
+
+        /// <summary>FG10-RAID-01：有澄净队伍在攻城 → 净化塔提成主目标的那张职能表（<see cref="SiegeCatalog.RoleBiasFor"/>）；表没变内核不重建。展开 / 读档 / 每次对账调用，O(队伍 + 类别)。</summary>
+        private static void ApplyRoles(CampaignState state, CombatSite site, bool force = true)
+        {
+            bool clarity = AnyClaritySieging(state);
+            site.SetSiegeRoles(SiegeCatalog.RoleMasksFor(clarity), SiegeCatalog.RoleBiasFor(clarity));
+            ClarityRaidService.ApplyPolluteTargets(state, site, clarity, force); // 灭活无人机的投放目标（净化塔；只在澄净攻城时）
+        }
+
+        /// <summary>正在攻城的队伍里有没有澄净的（队伍的阵营；旧档没记时按所属计划）。</summary>
+        public static bool AnyClaritySieging(CampaignState state)
+        {
+            foreach (TransitGroupRecord g in SiegingGroups(state))
+            {
+                string f = !string.IsNullOrEmpty(g.Faction) ? g.Faction : RaidDirectorService.FindPlan(state, g.PlanId)?.Faction;
+                if (f == RaidCatalog.FactionChemical)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>集结点（撤退流场的终点）= 正在攻城的队伍的集结点（按队伍顺序）。</summary>

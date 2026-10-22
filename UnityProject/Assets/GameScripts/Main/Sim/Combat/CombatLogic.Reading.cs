@@ -652,7 +652,7 @@ namespace BinGames.Sim.Combat
             d.Pos[k] = MoveCollide(ref d, k, from, from + dir * step);
         }
 
-        private static bool CanDisplace(ref CombatData d, int k)
+        internal static bool CanDisplace(ref CombatData d, int k)
         {
             byte kind = d.Kind[k];
             if (kind == (byte)CombatUnitKind.Structure || kind == (byte)CombatUnitKind.Turret)

@@ -119,16 +119,12 @@ namespace GameLogic.Campaign.Combat
             Changed?.Invoke(site, e.Unit, e.Code);
         }
 
-        /// <summary>投放完成（不丢的玩法事件）：记一次并转给订阅者（FG10-RAID-01 的再污染）；没有订阅者时写日志（投放目标由 RAID-01 写入，本卡不写，不会发生）。</summary>
+        /// <summary>投放完成（不丢的玩法事件）：记一次，家园 / 星球内核上落地为真实再污染（FG10-RAID-01 <see cref="Defense.ClarityRaidService.OnRepolluted"/>），再转给订阅者。</summary>
         public static void OnRepolluted(CombatSite site, in CombatEvent e, Vector2 at)
         {
             RepollutedEvents++;
-            if (RepollutedAt == null)
-            {
-                Log.Warning($"[ClarityCombatFeedback] 灭活无人机在 ({at.x:F1},{at.y:F1}) 投放完成，但没有再污染订阅者（FG10-RAID-01 接入前不写投放目标）。");
-                return;
-            }
-            RepollutedAt.Invoke(site, at, e.Value);
+            Defense.ClarityRaidService.OnRepolluted(site, at, e.Value);
+            RepollutedAt?.Invoke(site, at, e.Value);
         }
     }
 }

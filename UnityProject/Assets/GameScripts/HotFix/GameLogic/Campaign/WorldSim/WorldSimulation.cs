@@ -623,6 +623,8 @@ namespace GameLogic.Campaign.WorldSim
                 Regions.TerritoryIntroService.WorldStep(state, GameClock.Ticks);
                 // FG10-REACT-01（FGR-FW-042）：澄净领地出现在地图上时开放化工反应命名（每游戏秒一次 O(批次)）。
                 Content.ReactionBatchService.WorldStep(state, GameClock.Ticks);
+                // FG10-RAID-01：澄净针对净化塔的突袭触发（澄净领地出现 + 家园有净化塔；每游戏秒一次 O(1)，与观察无关）。
+                Defense.ClarityRaidService.WorldStep(state, GameClock.Ticks);
                 // FG10-BOSS-01：洗礼塔（湖心平台，星球战斗内核里就地展开）：沉寂时每游戏秒看有没有机器进场；开战中推进灌注 / 反应 / 泄压（每步 O(1)）。
                 Regions.BaptismTowerBoss.WorldStep(state, GameClock.Ticks);
                 // FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测静默信号点（真据点 + 诱饵中继），每 site.contact.check_seconds 一次 O(队员 × 信号点)；

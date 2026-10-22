@@ -2954,7 +2954,7 @@ namespace BinGames.Sim.Combat
                         GuardPost = new double2(r.ReadDouble(), r.ReadDouble()),
                         GuardRadius = r.ReadSingle(),
                     };
-                    if (su.Role > (byte)CombatSiegeRole.Siege || su.Mode > (byte)CombatSiegeMode.Skirmish || su.Hold > 1 || (su.Cat & ~0x3F) != 0
+                    if (su.Role > (byte)CombatSiegeRole.Siege || su.Mode > (byte)CombatSiegeMode.Skirmish || su.Hold > 1 || (su.Cat & ~CombatSiegeConst.CatMask) != 0
                         || !(su.StructMult >= 0f) || float.IsInfinity(su.StructMult) || float.IsNaN(su.HealCd) || float.IsInfinity(su.HealCd) || su.Breach < 0
                         || !IsFinite(su.GuardPost) || !(su.GuardRadius >= 0f) || float.IsInfinity(su.GuardRadius))
                     {

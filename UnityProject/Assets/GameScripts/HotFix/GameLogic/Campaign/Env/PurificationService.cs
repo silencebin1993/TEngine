@@ -37,6 +37,8 @@ namespace GameLogic.Campaign.Env
         public int CellsRaised;
         public int LevelsRaised;
         public int BuildingsContaminated;
+        /// <summary>FG10-RAID-01：这一片怎么净化回来（<see cref="PurificationService.RepurifyPath"/>，写进通知 / 离家报告）。</summary>
+        public string RepurifyPath;
     }
 
     /// <summary>
@@ -1446,13 +1448,59 @@ namespace GameLogic.Campaign.Env
             Revision++;
             if (res.CellsRaised > 0)
             {
-                NotificationCenter.Post("pollution_raised", GameText.Format("purify.notify.repolluted", GameText.Get(sourceKey), res.CellsRaised, res.BuildingsContaminated),
-                    new Vector3(center.X, 0f, center.Y));
+                res.RepurifyPath = RepurifyPath(state, center);
+                NotificationCenter.Post("pollution_raised", GameText.Format("purify.notify.repolluted", GameText.Get(sourceKey), res.CellsRaised, res.BuildingsContaminated,
+                    res.RepurifyPath), new Vector3(center.X, 0f, center.Y));
                 GuidanceHooks.Raise(GuidanceHooks.EnvFirstRepollution);
                 CheckMilestones(state); // 归还面积可能减少（已达成的里程碑不收回）
                 GameEvent.Send(ChangedEvent, ReturnedArea(state));
             }
             return res;
+        }
+
+        /// <summary>
+        /// FG10-RAID-01（“重新净化的路径清楚”）：再污染之后这一片怎么净化回来。与格子悬停同一判定：覆盖这一格、正在净化的塔优先——它从最里面还有污染的一环起自动重新净化，
+        /// 写全塔还要多久（剩余步数 × purify.hours_per_level，只算有电有冷却液的时间）；只有暂停的塔覆盖 → 写它为什么停着（被毁 / 缺电 / 缺冷却液……，修好 / 接上后自动继续）；
+        /// 没有塔覆盖 → 在附近放一座。O(净化塔数)；只读。
+        /// </summary>
+        public static string RepurifyPath(CampaignState state, GridCell cell)
+        {
+            ProductionService.Producer best = null;
+            ProductionService.Producer paused = null;
+            foreach (ProductionService.Producer p in PurifiersOf(state))
+            {
+                if (p?.Building == null || HomeValleyController.IsPlannedGhost(p.Building))
+                {
+                    continue;
+                }
+                int r = RadiusOf(p.Building);
+                if (Dist2(cell, p.Building.GridX, p.Building.GridY) > (long)r * r)
+                {
+                    continue;
+                }
+                if (p.Rec != null && p.Rec.PurifySupplied && p.Building.ConstructionState == BuildingConstructionState.Operational)
+                {
+                    best ??= p;
+                }
+                else
+                {
+                    paused ??= p;
+                }
+            }
+            if (best != null)
+            {
+                TowerInfo info = InfoOf(state, best.Building);
+                double secs = Math.Max(0.0, info.StepsLeft * HoursPerLevel * GameClock.HourSeconds - (best.Rec?.PurifyTicks ?? 0L) / (double)Math.Max(1, GameClock.StepHz));
+                return GameText.Format("purify.repath.working", BuildingOps.NameOf(best.Building), CalendarService.ShortDuration(secs));
+            }
+            if (paused != null)
+            {
+                string why = paused.Building.ConstructionState == BuildingConstructionState.Operational
+                    ? ProductionService.ReasonText(state, paused).Replace("\n", " · ")
+                    : GameText.Get(BuildingOps.UiStatusNameKey(BuildingStatusService.Evaluate(state, paused.Building).Kind));
+                return GameText.Format("purify.repath.paused", BuildingOps.NameOf(paused.Building), why);
+            }
+            return GameText.Get("purify.repath.uncovered");
         }
 
         /// <summary>

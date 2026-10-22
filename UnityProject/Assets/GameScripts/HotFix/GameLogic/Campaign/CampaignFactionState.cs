@@ -48,6 +48,13 @@ namespace GameLogic.Campaign
         /// <summary>FG10-REG-01：已经发过阵营介绍的领地（第一次进入时一条；唯一写入口 <c>Regions.TerritoryIntroService</c>）。</summary>
         public string[] TerritoriesIntroduced = Array.Empty<string>();
 
+        /// <summary>FG10-RAID-01：澄净“针对净化塔”的突袭（唯一写入口 <c>Defense.ClarityRaidService</c>）：下一次触发的步（-1 = 还没排）、累计触发次数；
+        /// 灭活无人机投放落地（真实再污染）的次数与升级的格数。</summary>
+        public long ClarityRaidNextTick = -1;
+        public int ClarityRaidTriggers;
+        public int ClarityRaidDrops;
+        public long ClarityRaidCells;
+
         /// <summary>FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测到的静默信号点（据点 ID / 诱饵 ID，按序；唯一写入口 <c>WorldSim.SignalContactService</c>）。</summary>
         public string[] ContactsDetected = Array.Empty<string>();
         /// <summary>FG9-ACT1-01：监听站“反制预览”情报顺带甄别过的信号点（一直有效）。</summary>

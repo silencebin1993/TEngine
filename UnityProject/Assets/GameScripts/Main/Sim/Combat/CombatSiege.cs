@@ -19,14 +19,17 @@ namespace BinGames.Sim.Combat
         public const int RoleRetreat = 3;
         /// <summary>每种职能两张流场：开路（屏障 / 建筑挡路）与破墙（建筑格可穿过，按耐久加代价）。</summary>
         public const int FieldCount = RoleCount * 2;
-        /// <summary>目标类别位（<see cref="CombatSiegeUnit.Cat"/>）：核心 / 发电 / 信号 / 防御 / 监听站 / 其它建筑。</summary>
-        public const int CategoryCount = 6;
+        /// <summary>目标类别位（<see cref="CombatSiegeUnit.Cat"/>）：核心 / 发电 / 信号 / 防御 / 监听站 / 其它建筑 / 净化塔（FG10-RAID-01：澄净突袭的主目标）。</summary>
+        public const int CategoryCount = 7;
         public const byte CatCore = 1 << 0;
         public const byte CatPower = 1 << 1;
         public const byte CatSignal = 1 << 2;
         public const byte CatDefense = 1 << 3;
         public const byte CatListening = 1 << 4;
         public const byte CatOther = 1 << 5;
+        public const byte CatPurify = 1 << 6;
+        /// <summary>全部类别位。</summary>
+        public const int CatMask = (1 << CategoryCount) - 1;
         public const int Inf = int.MaxValue / 4;
         /// <summary>带 <see cref="CombatUnitFlags.HealthFloor"/> 的单位耐久的下限（与 BuildingOps.CoreFloorHealth 同一口径）。</summary>
         public const float HealthFloor = 0.001f;
@@ -73,7 +76,7 @@ namespace BinGames.Sim.Combat
         public int2 FootMax;
         /// <summary>打建筑（带类别位的单位）时的伤害倍率（0 = 1）。</summary>
         public float StructMult;
-        /// <summary>随队维修的计时（游戏秒；行为参数 EffectAmount &gt; 0 的单位用）。</summary>
+        /// <summary>随队维修的计时（游戏秒；行为参数 EffectAmount &gt; 0 的单位用）。FG10-RAID-01：带建筑偏好（StructPref &gt; 0）、不会维修的单位用它记“腐蚀行进”的计时。</summary>
         public float HealCd;
         /// <summary>正在破墙的结构单位 ID（0 = 没有）：叠加层画“正在拆哪段墙”、热更层发破墙通知。</summary>
         public int Breach;
@@ -128,6 +131,9 @@ namespace BinGames.Sim.Combat
         public int NeedMask;
         public long ImpactsDropped;
         public long Exits;
+        /// <summary>FG10-RAID-01：腐蚀行进记下的溅射命中次数；攻城冲锋撞上结构单位（撞墙）的次数。</summary>
+        public long GroundImpacts;
+        public long ChargeWallHits;
         /// <summary>驻防机器守点开火的次数（DEBT-FG4ECO07-02）；守点逻辑跑过的单位步数、其中有目标的步数、最近一次开火结果（诊断）。</summary>
         public long GuardShots;
         public long GuardTicks;
@@ -1563,6 +1569,17 @@ namespace BinGames.Sim.Combat
                     }
                 }
             }
+            // 1b. FG10-RAID-01（FG09 第 6 章“大量腐蚀单位攻击传送带和管线”）：带建筑偏好、不会维修的单位（腐蚀蜂群）边走边腐蚀——每个开火间隔在脚下那一格记一次溅射命中
+            //     （武器伤害 × 对建筑倍率 × 建筑偏好），热更层按同一套溅射结算到这一格附近的传送带 / 管线 / 施工虚影（附近没有就什么都不打）。O(1)。
+            else if (!retreat && p.StructPref > 0f)
+            {
+                su.HealCd -= dt;
+                if (su.HealCd <= 0f)
+                {
+                    RecordGroundImpact(ref d, CombatLogic.CellOf(pos), wp.Damage * (su.StructMult > 0f ? su.StructMult : 1f) * p.StructPref);
+                    su.HealCd = math.max(0.1f, CombatLogic.EffectiveCooldown(wp));
+                }
+            }
 
             // 2. 选目标
             bool useBreach = idx >= 0 && s.FieldValid[fo] != 0 && s.Dist[fo * n + idx] >= CombatSiegeConst.Inf && s.FieldValid[fb] != 0
@@ -1572,8 +1589,10 @@ namespace BinGames.Sim.Combat
             int t = d.SlotOf(cmd.Target);
             float retarget = d.Secondary[i] - dt;
             bool holds = su.Hold != 0;
+            bool fresh = false;
             if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || retarget <= 0f)
             {
+                fresh = true;
                 t = -1;
                 holds = false;
                 su.Breach = 0;
@@ -1606,6 +1625,12 @@ namespace BinGames.Sim.Combat
             d.Secondary[i] = retarget;
             d.Cmd[i] = cmd;
             d.Siege[i] = su;
+
+            // 2b. FG10-RAID-01（DEBT-FG9FAC02-03）：攻城重甲（行为参数 ChargeSpeed > 0）对冲锋距离内的职能目标 / 挡路的墙蓄力冲锋。
+            if (!retreat && p.ChargeSpeed > 0f && StepSiegeCharge(ref d, ref grid, i, in p, in wp, t, role, range, idx, fo, fb, fresh, dt))
+            {
+                return;
+            }
 
             // 3. 开火
             float cycle = d.Cycle[i] - dt;
@@ -2075,7 +2100,159 @@ namespace BinGames.Sim.Combat
             return best;
         }
 
+        // ─────────────────────────────── 冲锋（FG10-RAID-01） ───────────────────────────────
+
+        /// <summary>
+        /// DEBT-FG9FAC02-03：攻城里的重甲冲锋（与区域里同一套参数：预警 ChargeWarn ≥ 0.8 秒、冲锋 ChargeSeconds、速度 ChargeSpeed、冷却 ChargeCooldown、击退 ChargeKnock）。
+        /// 推进中、冷却好了、刚重选过目标、当前目标还不在射程里时：在冲锋距离（速度 × 时长）内按职能偏好找目标（与选目标同一份流场门槛，只去流场要带它去的地方），
+        /// 没有就找挡路的那段墙（破墙场前方第一段）；找到 → 蓄力（原地，发冲锋预警提示，内核 FoundryCue 代码 6）→ 沿直线冲过去。
+        /// 冲锋中撞到的结构单位（建筑 / 炮塔 / 屏障）吃一次撞击（武器伤害；对建筑倍率与溅射照常）后停下——撞墙即停；撞到的己方机器吃撞击（正面装甲照常）并被击退。
+        /// 冷却记在 <see cref="CombatFoundryUnit.ChargeT"/>（推进中它空着；区域里的冷却在 Secondary，攻城里 Secondary 是重选目标的计时）。
+        /// 返回 true = 这一步在蓄力 / 冲锋（不开火、不走流场）。每单位 O(冲锋距离内的格) 只在重选目标那一步，冲锋中 O(单位)（与区域一致）。
+        /// </summary>
+        private static bool StepSiegeCharge(ref CombatData d, ref CombatGrid grid, int i, in CombatBehaviorProfile p, in CombatWeapon wp, int t, int role, float range,
+            int idx, int fo, int fb, bool fresh, float dt)
+        {
+            CombatFoundryUnit f = d.Foundry[i];
+            double2 pos = d.Pos[i];
+            if (f.Charge == 1)
+            {
+                f.ChargeT -= dt;
+                if (f.ChargeT <= 0f)
+                {
+                    f.Charge = 2;
+                    f.ChargeT = math.max(0.1f, p.ChargeSeconds);
+                    f.ChargeSeq++;
+                    CombatCounters c = d.Counters[0];
+                    c.Charges++;
+                    d.Counters[0] = c;
+                }
+                d.Foundry[i] = f;
+                return true;
+            }
+            if (f.Charge == 2)
+            {
+                double2 moved = CombatLogic.MoveCollide(ref d, i, pos, pos + (double2)(f.ChargeDir * (p.ChargeSpeed * dt)));
+                bool blocked = math.distancesq(moved, pos) < 1e-6;
+                d.Pos[i] = moved;
+                bool wall = SiegeRam(ref d, i, in p, in wp, ref f);
+                f.ChargeT -= dt;
+                if (f.ChargeT <= 0f || blocked || wall)
+                {
+                    f.Charge = 0;
+                    f.ChargeT = math.max(0.1f, p.ChargeCooldown);
+                    CombatSiegeStats st = d.SiegeState.Stats[0];
+                    if (wall)
+                    {
+                        st.ChargeWallHits++;
+                    }
+                    d.SiegeState.Stats[0] = st;
+                }
+                d.Foundry[i] = f;
+                return true;
+            }
+            if (f.ChargeT > 0f)
+            {
+                f.ChargeT = math.max(0f, f.ChargeT - dt);
+                d.Foundry[i] = f;
+                return false;
+            }
+            if (!fresh || (t >= 0 && EdgeDistance(ref d, i, t) <= range))
+            {
+                return false;
+            }
+            float reach = p.ChargeSpeed * math.max(0.1f, p.ChargeSeconds);
+            int c2 = RoleTarget(ref d, ref grid, i, role, reach, idx, fo, fb);
+            if (c2 < 0 && idx >= 0 && d.SiegeState.FieldValid[fb] != 0)
+            {
+                int w = d.SlotOf(BreachAhead(ref d, fb, idx, (int)math.ceil(reach) + 2));
+                c2 = w >= 0 && d.IsAlive(w) && EdgeDistance(ref d, i, w) <= reach ? w : -1;
+            }
+            if (c2 < 0 || EdgeDistance(ref d, i, c2) <= range)
+            {
+                return false;
+            }
+            double2 to = d.Pos[c2] - pos;
+            double len = math.length(to);
+            if (len < 1e-6)
+            {
+                return false;
+            }
+            f.Charge = 1;
+            f.ChargeT = math.max(0.8f, p.ChargeWarn);
+            f.ChargeDir = (float2)(to / len);
+            f.AnchorPos = pos;
+            d.Foundry[i] = f;
+            float4 a = d.Armor[i];
+            d.Armor[i] = new float4(a.x, a.y, f.ChargeDir.x, f.ChargeDir.y); // 正面朝冲锋方向（正面装甲 / 背部弱点按朝向结算）
+            CombatLogic.Cue2(ref d, i, d.Id[c2], f.ChargeT, pos, 6, 0);
+            return true;
+        }
+
+        /// <summary>冲锋中：贴上的己方单位各吃一次撞击（一次冲锋只撞一次）。结构单位按外沿算接触、撞到就返回 true（撞墙即停）；机器按半径算接触，正面装甲照常、被沿冲锋方向击退。</summary>
+        private static bool SiegeRam(ref CombatData d, int i, in CombatBehaviorProfile p, in CombatWeapon wp, ref CombatFoundryUnit f)
+        {
+            int self = d.Id[i];
+            bool wall = false;
+            int n = d.Count;
+            double touch = d.Radius[i] + 0.3;
+            for (int k = 0; k < n; k++)
+            {
+                if (d.Faction[k] != (byte)CombatFaction.Player || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                {
+                    continue;
+                }
+                bool structure = d.Siege[k].Cat != 0;
+                double gap = structure ? EdgeDistance(ref d, i, k) : math.distance(d.Pos[k], d.Pos[i]) - d.Radius[k];
+                if (gap > touch)
+                {
+                    continue;
+                }
+                CombatFoundryUnit v = d.Foundry[k];
+                if (v.RamBy == self && v.RamSeq == f.ChargeSeq)
+                {
+                    continue;
+                }
+                v.RamBy = self;
+                v.RamSeq = f.ChargeSeq;
+                d.Foundry[k] = v;
+                float dmg = wp.Damage;
+                if (!structure && CombatLogic.IsFrontalArmored(ref d, k, d.Pos[i]))
+                {
+                    dmg *= math.max(0f, 1f - d.Armor[k].x);
+                }
+                CombatLogic.DamageUnit(ref d, k, dmg, i); // 结构单位：对建筑倍率与溅射在 DamageUnit 里照常
+                if (structure)
+                {
+                    wall = true;
+                }
+                else if (p.ChargeKnock > 0f && CombatLogic.CanDisplace(ref d, k))
+                {
+                    double2 from = d.Pos[k];
+                    d.Pos[k] = CombatLogic.MoveCollide(ref d, k, from, from + (double2)(f.ChargeDir * p.ChargeKnock));
+                }
+                CombatLogic.Cue2(ref d, i, d.Id[k], dmg, d.Pos[k], 9, 0);
+            }
+            return wall;
+        }
+
         // ─────────────────────────────── 溅射 ───────────────────────────────
+
+        /// <summary>
+        /// FG10-RAID-01：在一格上直接记一次溅射命中（腐蚀行进；不经过结构单位）。与 <see cref="RecordImpact"/> 同一张命中表、同一上限。O(1)。
+        /// </summary>
+        public static void RecordGroundImpact(ref CombatData d, int2 cell, float damage)
+        {
+            ref CombatSiegeData s = ref d.SiegeState;
+            if (!s.IsCreated || damage <= 0f)
+            {
+                return;
+            }
+            AddImpact(ref s, cell, damage);
+            CombatSiegeStats st = s.Stats[0];
+            st.GroundImpacts++;
+            s.Stats[0] = st;
+        }
 
         /// <summary>
         /// 敌方单位打中带攻城类别的结构单位：在目标占地上离攻击者最近的那一格记一次命中（同格累计）。热更层每步取至多 N 格结算到附近的传送带 / 管线 / 施工虚影。
@@ -2093,6 +2270,11 @@ namespace BinGames.Sim.Combat
             int2 lo = math.min(su.FootMin, su.FootMax);
             int2 hi = math.max(su.FootMin, su.FootMax);
             int2 cell = new int2((int)math.clamp(math.round(from.x), lo.x, hi.x), (int)math.clamp(math.round(from.y), lo.y, hi.y));
+            AddImpact(ref s, cell, damage);
+        }
+
+        private static void AddImpact(ref CombatSiegeData s, int2 cell, float damage)
+        {
             long key = ((long)cell.x << 32) ^ (uint)cell.y;
             if (s.ImpactIndex.TryGetValue(key, out int at))
             {

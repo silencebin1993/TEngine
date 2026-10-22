@@ -870,6 +870,30 @@ namespace GameLogic.Campaign.Defense
             Revision++;
         }
 
+        /// <summary>
+        /// FG10-RAID-01（“再污染在离家报告里说明”）：灭活无人机投放落地、家园的格子真的再污染之后（<see cref="ClarityRaidService.OnRepolluted"/> 调用）：
+        /// 记到最早展开的那一份结算（次数 / 格数 / 受污染建筑数，第一次的落点），并记一条可定位的过程。没有进行中的结算（攻城外的投放）时不记，返回 false。O(1)。
+        /// </summary>
+        public static bool NoteRepollution(CampaignState s, int cells, int buildings, GridCell at)
+        {
+            RaidResultRecord r = PrimaryOpen(s);
+            if (r == null || cells <= 0)
+            {
+                return false;
+            }
+            if (r.Repollutions == 0)
+            {
+                r.RepollutedX = at.X;
+                r.RepollutedY = at.Y;
+            }
+            r.Repollutions++;
+            r.RepollutedCells += cells;
+            r.RepollutedBuildings += buildings;
+            AddTimeline(r, GameClock.Ticks, "repolluted", cells.ToString(CultureInfo.InvariantCulture) + "|" + buildings.ToString(CultureInfo.InvariantCulture), true, at.X, at.Y);
+            Revision++;
+            return true;
+        }
+
         /// <summary>机器阵亡（<see cref="MachineRegistry.MarkDeadByLogicId"/> 唯一翻转点）：家园里的机器在攻城期间阵亡记一处损失。</summary>
         public static void OnMachineDied(CampaignState s, MachineRecord m, Vector2 at)
         {

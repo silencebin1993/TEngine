@@ -87,6 +87,12 @@ namespace GameLogic.Campaign
         public int LostDefenses;
         public int LostMachines;
         public int LostDrones;
+        /// <summary>FG10-RAID-01：灭活无人机投放落地（再污染）的次数、升级的格数、进入“受污染”的建筑数；第一次的落点（离家报告写那一片怎么重新净化）。</summary>
+        public int Repollutions;
+        public int RepollutedCells;
+        public int RepollutedBuildings;
+        public int RepollutedX;
+        public int RepollutedY;
         public RaidContribRecord[] Contrib = Array.Empty<RaidContribRecord>();
         /// <summary>击毁者不明（反应区域 / 场地 / 超出记录上限）的击毁数。</summary>
         public int OtherKills;
@@ -102,7 +108,7 @@ namespace GameLogic.Campaign
     public sealed class RaidTimelineRecord
     {
         public long Tick;
-        /// <summary>warn / arrive / unfold / first_loss / retreat_losses / retreat_time / end_destroyed / end_withdrawn / core_lost / choice_jump / choice_stay。</summary>
+        /// <summary>warn / arrive / unfold / first_loss / retreat_losses / retreat_time / end_destroyed / end_withdrawn / core_lost / choice_jump / choice_stay / repolluted（FG10-RAID-01，Arg = 格数|建筑数）。</summary>
         public string Kind = string.Empty;
         public string Arg = string.Empty;
         public bool HasPos;

@@ -41,6 +41,9 @@ namespace GameLogic.Campaign.Defense
         public const int KeySignal = 1;
         public const int KeyDefense = 2;
         public const int KeyListening = 3;
+        /// <summary>FG10-RAID-01：净化塔（澄净突袭的主目标）；家园有净化塔时关键建筑一行多一段。</summary>
+        public const int KeyPurify = 4;
+        public const int KeyCount = 5;
 
         public bool CoreFound;
         public bool CoreDestroyed;
@@ -48,10 +51,10 @@ namespace GameLogic.Campaign.Defense
         public bool CoreFloor;
         public float CoreHp;
         public float CoreMax;
-        /// <summary>电力 / 信号 / 防御 / 监听四类关键建筑（建成的；施工中的虚影不算）：总数、完好（没被摧毁且耐久满）、被摧毁。</summary>
-        public readonly int[] Total = new int[4];
-        public readonly int[] Intact = new int[4];
-        public readonly int[] Destroyed = new int[4];
+        /// <summary>电力 / 信号 / 防御 / 监听 / 净化塔五类关键建筑（建成的；施工中的虚影不算）：总数、完好（没被摧毁且耐久满）、被摧毁。</summary>
+        public readonly int[] Total = new int[KeyCount];
+        public readonly int[] Intact = new int[KeyCount];
+        public readonly int[] Destroyed = new int[KeyCount];
         /// <summary>没被摧毁的关键建筑里耐久比例最低的一座（没有受损的为空）。</summary>
         public string WorstName = string.Empty;
         public int WorstPct = -1;
@@ -575,6 +578,7 @@ namespace GameLogic.Campaign.Defense
                 case CombatSiegeConst.CatSignal: return HomeRaidStatus.KeySignal;
                 case CombatSiegeConst.CatDefense: return HomeRaidStatus.KeyDefense;
                 case CombatSiegeConst.CatListening: return HomeRaidStatus.KeyListening;
+                case CombatSiegeConst.CatPurify: return HomeRaidStatus.KeyPurify;
                 default: return -1;
             }
         }
@@ -647,7 +651,15 @@ namespace GameLogic.Campaign.Defense
         {
             string line = GameText.Format("raid.away.keys", Count(st, HomeRaidStatus.KeyPower), Count(st, HomeRaidStatus.KeySignal), Count(st, HomeRaidStatus.KeyDefense),
                 Count(st, HomeRaidStatus.KeyListening));
-            int destroyed = st.Destroyed[0] + st.Destroyed[1] + st.Destroyed[2] + st.Destroyed[3];
+            if (st.Total[HomeRaidStatus.KeyPurify] > 0)
+            {
+                line += GameText.Get("rules.sep_dot") + GameText.Format("raid.away.keys_purify", Count(st, HomeRaidStatus.KeyPurify)); // FG10-RAID-01：澄净突袭专打净化塔
+            }
+            int destroyed = 0;
+            for (int k = 0; k < HomeRaidStatus.KeyCount; k++)
+            {
+                destroyed += st.Destroyed[k];
+            }
             if (destroyed > 0)
             {
                 line += GameText.Get("intel.list_sep") + GameText.Format("raid.away.worst_destroyed", destroyed);

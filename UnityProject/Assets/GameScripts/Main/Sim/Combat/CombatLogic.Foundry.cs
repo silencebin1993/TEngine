@@ -754,7 +754,7 @@ namespace BinGames.Sim.Combat
             return min > 0f && math.distance(d.Pos[i], d.Pos[t]) - d.Radius[t] < min;
         }
 
-        private static void Cue2(ref CombatData d, int slot, int other, float v, double2 pos, byte code, byte code2)
+        internal static void Cue2(ref CombatData d, int slot, int other, float v, double2 pos, byte code, byte code2)
         {
             int before = d.Cues.Length;
             Cue(ref d, CombatEventKind.FoundryCue, slot, other, v, pos, code);

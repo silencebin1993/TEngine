@@ -40,7 +40,8 @@ namespace GameLogic.Campaign.Defense
         public const string RoleSiege = "siege";
         public const string RoleRetreat = "retreat";
 
-        private static readonly string[] CategoryNames = { "core", "power", "signal", "defense", "listening", "other" };
+        // 顺序 = 内核类别位序号（CombatSiegeConst.Cat*）；FG10-RAID-01 加 purify（净化塔）。
+        private static readonly string[] CategoryNames = { "core", "power", "signal", "defense", "listening", "other", "purify" };
         private static readonly string[] RoleNames = { RoleAssault, RoleSabotage, RoleSiege, RoleRetreat };
 
         private static bool _loaded;
@@ -49,6 +50,9 @@ namespace GameLogic.Campaign.Defense
         private static readonly Dictionary<string, SiegeUnitDef> UnitByEnemy = new Dictionary<string, SiegeUnitDef>(StringComparer.Ordinal);
         private static readonly int[] Masks = new int[CombatSiegeConst.RoleCount];
         private static readonly int[] Bias = new int[CombatSiegeConst.RoleCount * CombatSiegeConst.CategoryCount];
+        private static readonly int[] ClarityBias = new int[CombatSiegeConst.RoleCount * CombatSiegeConst.CategoryCount];
+        private static readonly int[] ClarityMasks = new int[CombatSiegeConst.RoleCount];
+        private static int _clarityBuiltRevision = -1;
         private static readonly List<string> ProblemList = new List<string>();
         private static readonly HashSet<string> WarnedTuning = new HashSet<string>(StringComparer.Ordinal);
 
@@ -101,6 +105,8 @@ namespace GameLogic.Campaign.Defense
         public static float InterceptMinTargetCells => Math.Max(0f, T("siege.intercept_min_target_cells", 60f));
         public static float InterceptMaxSeconds => Math.Max(5f, T("siege.intercept_max_seconds", 90f));
         public static float OverlayRefreshSeconds => Math.Max(0.05f, T("siege.overlay_refresh_seconds", 0.5f));
+        /// <summary>FG10-RAID-01：澄净突袭在场时其它类别整体后移（米；净化塔偏好 0 = 主目标）。</summary>
+        public static float ClarityOtherShiftMeters => Math.Max(0f, T("siege.clarity.other_shift_m", 80f));
         public static int PerfUnits => Math.Max(1, (int)Math.Round(T("siege.perf.units", 200f)));
         public static float PerfFieldUpdateMs => Math.Max(0.1f, T("siege.perf.field_update_ms", 4f));
         public static float PerfStepMs => Math.Max(0.1f, T("siege.perf.step_ms", 2f));
@@ -182,13 +188,61 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
-        /// <summary>内核职能表：偏好代价（4 × 6；10 = 1 米）。</summary>
+        /// <summary>内核职能表：偏好代价（4 × 类别数；10 = 1 米）。</summary>
         public static IReadOnlyList<int> RoleBias
         {
             get
             {
                 EnsureLoaded();
                 return Bias;
+            }
+        }
+
+        /// <summary>
+        /// FG10-RAID-01（FG09 第 6 章“化工突袭专门袭击净化塔和已净化区域”）：攻城剧场里有澄净队伍时的职能表——三种职能都把净化塔当主目标
+        /// （偏好 0），其它类别的偏好整体后移 siege.clarity.other_shift_m：净化塔比别的目标远不到这么多就先打净化塔，没有净化塔时照常按职能打
+        /// （流场起点整体加同一个数，路线不变）。剧场是一张共享流场：同时在场的别的阵营队伍同一时刻也按这张表走（ADR-RAID-001 决策 2）。没有澄净队伍 = <see cref="RoleBias"/>。
+        /// </summary>
+        public static IReadOnlyList<int> RoleBiasFor(bool clarity)
+        {
+            EnsureLoaded();
+            if (!clarity)
+            {
+                return Bias;
+            }
+            BuildClarity();
+            return ClarityBias;
+        }
+
+        public static IReadOnlyList<int> RoleMasksFor(bool clarity)
+        {
+            EnsureLoaded();
+            if (!clarity)
+            {
+                return Masks;
+            }
+            BuildClarity();
+            return ClarityMasks;
+        }
+
+        private static void BuildClarity()
+        {
+            if (_clarityBuiltRevision == Revision)
+            {
+                return;
+            }
+            _clarityBuiltRevision = Revision;
+            int purify = math.tzcnt((int)CombatSiegeConst.CatPurify);
+            int shift = (int)Math.Round(ClarityOtherShiftMeters * 10f);
+            for (int r = 0; r < CombatSiegeConst.RoleCount; r++)
+            {
+                ClarityMasks[r] = r < CombatSiegeConst.RoleRetreat ? Masks[r] | CombatSiegeConst.CatPurify : 0;
+                for (int c = 0; c < CombatSiegeConst.CategoryCount; c++)
+                {
+                    int i = r * CombatSiegeConst.CategoryCount + c;
+                    int b = Bias[i];
+                    ClarityBias[i] = r >= CombatSiegeConst.RoleRetreat ? b : c == purify ? 0 : b >= CombatSiegeConst.Inf ? b : Math.Min(CombatSiegeConst.Inf, b + shift);
+                }
             }
         }
 
