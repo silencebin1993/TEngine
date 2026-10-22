@@ -699,9 +699,11 @@ namespace BinGames.Sim.Combat
             _d.FireBit = fire;
         }
 
-        /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量，不进快照；热更层按净化塔定期写入。</summary>
-        public void SetPolluteTargets(IReadOnlyList<float3> targets)
+        /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量，不进快照；热更层按净化塔定期写入。
+        /// FG10-RAID-01：<paramref name="siegeOnly"/> = 只有攻城中的单位读它（家园内核）。</summary>
+        public void SetPolluteTargets(IReadOnlyList<float3> targets, bool siegeOnly = false)
         {
+            _d.PolluteSiegeOnly = (byte)(siegeOnly ? 1 : 0);
             _d.PolluteTargets.Clear();
             if (targets == null)
             {
@@ -2731,6 +2733,7 @@ namespace BinGames.Sim.Combat
             staging.WetBit = _d.WetBit;
             staging.OilBit = _d.OilBit;
             staging.FireBit = _d.FireBit;
+            staging.PolluteSiegeOnly = _d.PolluteSiegeOnly;
             for (int i = 0; i < _d.PolluteTargets.Length; i++)
             {
                 staging.PolluteTargets.Add(_d.PolluteTargets[i]);

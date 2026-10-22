@@ -1146,7 +1146,9 @@ namespace BinGames.Sim.Combat
             CombatBehaviorProfile p = d.Profiles[bp];
             float speed = SlowedSpeed(ref d, i, p.Speed > 0f ? p.Speed : d.Speed[i]);
             bool retreat = d.Siege[i].Role != 0 && d.Siege[i].Mode == (byte)CombatSiegeMode.Retreat;
-            if (!retreat && p.PolluteRange > 0f && StepPollute(ref d, i, in p, speed, dt))
+            // FG10-RAID-01：家园内核只让攻城中的单位投放（PolluteSiegeOnly）；正在投放的那一架照常投完（StepPollute 先处理 Pollute == 1）。
+            bool mayPollute = d.PolluteSiegeOnly == 0 || CombatSiegeLogic.UsesSiege(ref d, i) || d.Clarity[i].Pollute == 1;
+            if (!retreat && mayPollute && p.PolluteRange > 0f && StepPollute(ref d, i, in p, speed, dt))
             {
                 return;
             }
@@ -1210,7 +1212,7 @@ namespace BinGames.Sim.Combat
                         break;
                     }
                 }
-                Gameplay(ref d, CombatEventKind.Repolluted, i, 0, r, 0f, c.PolluteAt, 0, 0);
+                Gameplay(ref d, CombatEventKind.Repolluted, i, d.Siege[i].Group, r, 0f, c.PolluteAt, 0, 0); // Other = 投放者所属攻城队伍的键（FG10-RAID-01：再污染记到那一份结算；非攻城单位 0）
                 CombatCounters cc = d.Counters[0];
                 cc.Repollutions++;
                 d.Counters[0] = cc;

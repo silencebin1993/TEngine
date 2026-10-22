@@ -131,7 +131,7 @@ namespace BinGames.Sim.Combat
         public int NeedMask;
         public long ImpactsDropped;
         public long Exits;
-        /// <summary>FG10-RAID-01：腐蚀行进记下的溅射命中次数；攻城冲锋撞上结构单位（撞墙）的次数。</summary>
+        /// <summary>FG10-RAID-01：腐蚀行进记下的溅射命中次数（命中表满丢弃的不算，另计 ImpactsDropped）；攻城冲锋撞上结构单位（撞墙）的次数。</summary>
         public long GroundImpacts;
         public long ChargeWallHits;
         /// <summary>驻防机器守点开火的次数（DEBT-FG4ECO07-02）；守点逻辑跑过的单位步数、其中有目标的步数、最近一次开火结果（诊断）。</summary>
@@ -171,7 +171,7 @@ namespace BinGames.Sim.Combat
     public struct CombatSiegeData : IDisposable
     {
         public NativeArray<CombatSiegeConfig> Cfg;
-        /// <summary>职能 r 的目标类别位（4 项）与偏好代价（4 × 6；<see cref="CombatSiegeConst.Inf"/> = 不当目标）。</summary>
+        /// <summary>职能 r 的目标类别位（RoleCount 项）与偏好代价（RoleCount × CategoryCount；<see cref="CombatSiegeConst.Inf"/> = 不当目标）。</summary>
         public NativeArray<int> RoleMask;
         public NativeArray<int> Bias;
         /// <summary>撤退的集结点（格）。</summary>
@@ -1627,7 +1627,7 @@ namespace BinGames.Sim.Combat
             d.Siege[i] = su;
 
             // 2b. FG10-RAID-01（DEBT-FG9FAC02-03）：攻城重甲（行为参数 ChargeSpeed > 0）对冲锋距离内的职能目标 / 挡路的墙蓄力冲锋。
-            if (!retreat && p.ChargeSpeed > 0f && StepSiegeCharge(ref d, ref grid, i, in p, in wp, t, role, range, idx, fo, fb, fresh, dt))
+            if (!retreat && p.ChargeSpeed > 0f && StepSiegeCharge(ref d, ref grid, i, in p, in wp, t, role, range, idx, fo, fb, useBreach, fresh, dt))
             {
                 return;
             }
@@ -2105,13 +2105,13 @@ namespace BinGames.Sim.Combat
         /// <summary>
         /// DEBT-FG9FAC02-03：攻城里的重甲冲锋（与区域里同一套参数：预警 ChargeWarn ≥ 0.8 秒、冲锋 ChargeSeconds、速度 ChargeSpeed、冷却 ChargeCooldown、击退 ChargeKnock）。
         /// 推进中、冷却好了、刚重选过目标、当前目标还不在射程里时：在冲锋距离（速度 × 时长）内按职能偏好找目标（与选目标同一份流场门槛，只去流场要带它去的地方），
-        /// 没有就找挡路的那段墙（破墙场前方第一段）；找到 → 蓄力（原地，发冲锋预警提示，内核 FoundryCue 代码 6）→ 沿直线冲过去。
-        /// 冲锋中撞到的结构单位（建筑 / 炮塔 / 屏障）吃一次撞击（武器伤害；对建筑倍率与溅射照常）后停下——撞墙即停；撞到的己方机器吃撞击（正面装甲照常）并被击退。
+        /// 没有就（只在开路场到不了、要破墙时，与选目标同一口径 <paramref name="useBreach"/>）找挡路的那段墙（破墙场前方第一段）；找到 → 蓄力（原地，发冲锋预警提示，内核 FoundryCue 代码 6）→ 沿直线冲过去。
+        /// 冲锋中撞到的、在前进方向上的结构单位（建筑 / 炮塔 / 屏障）吃一次撞击（武器伤害；对建筑倍率与溅射照常）后停下——撞墙即停（身后 / 侧后贴着的不算）；撞到的己方机器吃撞击（正面装甲照常）并被击退。
         /// 冷却记在 <see cref="CombatFoundryUnit.ChargeT"/>（推进中它空着；区域里的冷却在 Secondary，攻城里 Secondary 是重选目标的计时）。
         /// 返回 true = 这一步在蓄力 / 冲锋（不开火、不走流场）。每单位 O(冲锋距离内的格) 只在重选目标那一步，冲锋中 O(单位)（与区域一致）。
         /// </summary>
         private static bool StepSiegeCharge(ref CombatData d, ref CombatGrid grid, int i, in CombatBehaviorProfile p, in CombatWeapon wp, int t, int role, float range,
-            int idx, int fo, int fb, bool fresh, float dt)
+            int idx, int fo, int fb, bool useBreach, bool fresh, float dt)
         {
             CombatFoundryUnit f = d.Foundry[i];
             double2 pos = d.Pos[i];
@@ -2163,7 +2163,7 @@ namespace BinGames.Sim.Combat
             }
             float reach = p.ChargeSpeed * math.max(0.1f, p.ChargeSeconds);
             int c2 = RoleTarget(ref d, ref grid, i, role, reach, idx, fo, fb);
-            if (c2 < 0 && idx >= 0 && d.SiegeState.FieldValid[fb] != 0)
+            if (c2 < 0 && useBreach)
             {
                 int w = d.SlotOf(BreachAhead(ref d, fb, idx, (int)math.ceil(reach) + 2));
                 c2 = w >= 0 && d.IsAlive(w) && EdgeDistance(ref d, i, w) <= reach ? w : -1;
@@ -2189,7 +2189,8 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
-        /// <summary>冲锋中：贴上的己方单位各吃一次撞击（一次冲锋只撞一次）。结构单位按外沿算接触、撞到就返回 true（撞墙即停）；机器按半径算接触，正面装甲照常、被沿冲锋方向击退。</summary>
+        /// <summary>冲锋中：贴上的己方单位各吃一次撞击（一次冲锋只撞一次）。结构单位按外沿算接触、而且要在前进方向上（身后 / 侧后贴着的不算），撞到就返回 true（撞墙即停）；
+        /// 机器按半径算接触，正面装甲照常、被沿冲锋方向击退。</summary>
         private static bool SiegeRam(ref CombatData d, int i, in CombatBehaviorProfile p, in CombatWeapon wp, ref CombatFoundryUnit f)
         {
             int self = d.Id[i];
@@ -2204,7 +2205,7 @@ namespace BinGames.Sim.Combat
                 }
                 bool structure = d.Siege[k].Cat != 0;
                 double gap = structure ? EdgeDistance(ref d, i, k) : math.distance(d.Pos[k], d.Pos[i]) - d.Radius[k];
-                if (gap > touch)
+                if (gap > touch || (structure && math.dot(d.Pos[k] - d.Pos[i], (double2)f.ChargeDir) <= 0.0))
                 {
                     continue;
                 }
@@ -2248,10 +2249,12 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            AddImpact(ref s, cell, damage);
-            CombatSiegeStats st = s.Stats[0];
-            st.GroundImpacts++;
-            s.Stats[0] = st;
+            if (AddImpact(ref s, cell, damage))
+            {
+                CombatSiegeStats st = s.Stats[0];
+                st.GroundImpacts++;
+                s.Stats[0] = st;
+            }
         }
 
         /// <summary>
@@ -2273,7 +2276,8 @@ namespace BinGames.Sim.Combat
             AddImpact(ref s, cell, damage);
         }
 
-        private static void AddImpact(ref CombatSiegeData s, int2 cell, float damage)
+        /// <summary>同格累计 / 新增一格；命中表满丢弃并计数，返回 false。</summary>
+        private static bool AddImpact(ref CombatSiegeData s, int2 cell, float damage)
         {
             long key = ((long)cell.x << 32) ^ (uint)cell.y;
             if (s.ImpactIndex.TryGetValue(key, out int at))
@@ -2281,17 +2285,18 @@ namespace BinGames.Sim.Combat
                 CombatSiegeImpact im = s.Impacts[at];
                 im.Damage += damage;
                 s.Impacts[at] = im;
-                return;
+                return true;
             }
             if (s.Impacts.Length >= CombatSiegeConst.ImpactCap)
             {
                 CombatSiegeStats st = s.Stats[0];
                 st.ImpactsDropped++;
                 s.Stats[0] = st;
-                return;
+                return false;
             }
             s.ImpactIndex.TryAdd(key, s.Impacts.Length);
             s.Impacts.Add(new CombatSiegeImpact { Cell = cell, Damage = damage });
+            return true;
         }
     }
 }
