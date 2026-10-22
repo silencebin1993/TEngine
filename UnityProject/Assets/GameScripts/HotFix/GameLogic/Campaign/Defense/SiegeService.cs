@@ -252,7 +252,7 @@ namespace GameLogic.Campaign.Defense
             ExtendTheater(state, site, new GridCell(gather.X, gather.Y), NavService.CellOf(g.TargetX, g.TargetY));
             BuildUnitList(g);
             // FG6-DEF-09（FG16 第 3 节“敌人耐久和伤害”）：按当前难度的突袭敌人倍率生成（建造者 ×0.8 / 标准 ×1 / 严酷 ×1.2；难度说明里公开写出）。
-            int n = SpawnUnits(site, key, gather, target, g.Faction, DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state));
+            int n = SpawnUnits(site, key, gather, target, g.Faction, DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state), InsulateOf(state, g));
             g.Engaged = true;
             g.UnfoldedCount = n;
             g.ExitedCount = 0;
@@ -325,7 +325,17 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
-        private static int SpawnUnits(CombatSite site, int key, GridCell gather, Vector2 target, string faction, float hpMul, float dmgMul)
+        /// <summary>
+        /// FG10-FAC-01（审查修复，FGR-FAC-004“突袭在出发时按当天的状态生成” / FGT-DEF-004 情报与实际一致）：突袭队伍的绝缘涂层取所属计划排定时选的反制
+        /// （计划的反制 = clarity.em 才挂），与预警 / 情报 / 编成同一个值，不在到达那一刻重读当天的锁定；没有计划的队伍（领地骚扰）返回 null = 按当天锁定。
+        /// </summary>
+        public static bool? InsulateOf(CampaignState state, TransitGroupRecord g)
+        {
+            RaidPlanRecord p = g != null && !string.IsNullOrEmpty(g.PlanId) ? RaidDirectorService.FindPlan(state, g.PlanId) : null;
+            return p != null ? p.Counter == "clarity.em" : (bool?)null;
+        }
+
+        private static int SpawnUnits(CombatSite site, int key, GridCell gather, Vector2 target, string faction, float hpMul, float dmgMul, bool? insulate)
         {
             int step = Math.Max(1, Mathf.RoundToInt(SiegeCatalog.SpawnSpacing));
             int placed = 0;
@@ -353,7 +363,7 @@ namespace GameLogic.Campaign.Defense
                         used.Add(k);
                         // 复审修复（P2）：编成下标与成功台数分开记——生成失败（内核满）丢的是这一台本身、下标照样前进，不再缩短编成、总丢掉表尾那台（精英 / 维修机）。
                         (RaidUnitDef def, bool elite) = UnitScratch[next++];
-                        if (SpawnOne(site, key, new Vector2(x, y), target, def, elite, hpMul, dmgMul) > 0)
+                        if (SpawnOne(site, key, new Vector2(x, y), target, def, elite, hpMul, dmgMul, insulate) > 0)
                         {
                             placed++;
                             // FG9-UX-01（FGR-FAC-005）：突袭攻城单位来到家园 = 遭遇（家园观察与否结果一致，FGR-BASE-021）。
@@ -371,8 +381,10 @@ namespace GameLogic.Campaign.Defense
         }
 
         /// <summary>生成一台攻城单位（按 fg.TbSiegeUnit；表里没有这种敌人时按原型参数，并记问题）。</summary>
-        /// <remarks><paramref name="hpMul"/> / <paramref name="dmgMul"/> = 难度的突袭敌人耐久 / 伤害倍率（FG6-DEF-09，<see cref="DifficultyService.EnemyHealthMul"/>）。</remarks>
-        public static int SpawnOne(CombatSite site, int key, Vector2 at, Vector2 target, RaidUnitDef def, bool elite, float hpMul = 1f, float dmgMul = 1f)
+        /// <remarks><paramref name="hpMul"/> / <paramref name="dmgMul"/> = 难度的突袭敌人耐久 / 伤害倍率（FG6-DEF-09，<see cref="DifficultyService.EnemyHealthMul"/>）。
+        /// <paramref name="insulate"/> = 澄净绝缘涂层（null = 按澄净当天的锁定；突袭队伍传所属计划的反制，见 <see cref="InsulateOf"/>）。</remarks>
+        public static int SpawnOne(CombatSite site, int key, Vector2 at, Vector2 target, RaidUnitDef def, bool elite, float hpMul = 1f, float dmgMul = 1f,
+            bool? insulate = null)
         {
             CombatSiegeRole role = SiegeCatalog.RoleOf(def?.Role);
             if (role == CombatSiegeRole.None)
@@ -453,8 +465,8 @@ namespace GameLogic.Campaign.Defense
                 // 伤害类参数乘难度与精英倍率；带 adapt_insulate 的单位在澄净反制锁定为“绝缘涂层”的那天挂不上电击类标签（当天的锁定，FGR-FAC-004）。
                 if (EnemyClarityParams.Has(row))
                 {
-                    EnemyClarityParams.Apply(row, ref bp, dmgScale,
-                        EnemyClarityParams.Insulates(row) && Regions.ClarityCounterService.InsulateToday(CampaignSession.Current));
+                    bool ins = EnemyClarityParams.Insulates(row) && (insulate ?? Regions.ClarityCounterService.InsulateToday(CampaignSession.Current));
+                    EnemyClarityParams.Apply(row, ref bp, dmgScale, ins, hpScale); // 分裂液耐久与本体同吃难度 / 精英耐久倍率
                 }
             }
             int profile = site.ProfileIndex(bp);

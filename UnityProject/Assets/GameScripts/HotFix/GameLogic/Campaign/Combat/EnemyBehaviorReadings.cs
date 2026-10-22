@@ -433,7 +433,7 @@ namespace GameLogic.Campaign.Combat
     /// <summary>
     /// FG10-FAC-01：把敌人表里的澄净专属语法参数翻译成内核行为参数（喷淋布区 / 枢轴喷灌 / 自爆与油迹 / 分裂 / 飞行与投放 / 抗性 / 建筑偏好）。
     /// 按读法与列是否 &gt; 0 决定，不认识任何敌人 ID（IC-REQ-012）；区域生成（<see cref="EnemySpawnBuilder"/>）与攻城单位生成（SiegeService.SpawnOne）共用，
-    /// 伤害类参数乘调用方给的伤害倍率（难度 / 精英）。<paramref name="insulate"/> = 澄净反制当天锁定为“绝缘涂层”（带 adapt_insulate 的单位挂不上电击类标签）。
+    /// 伤害类参数乘调用方给的伤害倍率（难度 / 精英），分裂液耐久乘耐久倍率（与本体同一口径）。<paramref name="insulate"/> = 这次生成挂绝缘涂层（带 adapt_insulate 的单位挂不上电击类标签）。
     /// </summary>
     public static class EnemyClarityParams
     {
@@ -459,7 +459,7 @@ namespace GameLogic.Campaign.Combat
             return m;
         }
 
-        public static void Apply(MechEnemy row, ref CombatBehaviorProfile p, float dmgMul, bool insulate)
+        public static void Apply(MechEnemy row, ref CombatBehaviorProfile p, float dmgMul, bool insulate, float hpMul = 1f)
         {
             if (row == null)
             {
@@ -485,7 +485,7 @@ namespace GameLogic.Campaign.Combat
             else if (row.Behavior == EnemyDefs.BehaviorPivot)
             {
                 p.PivotRadius = row.EffectRange;
-                p.PivotWidth = row.SprayCone;
+                p.PivotWidth = row.SprayCone * 2f; // 表 sprayCone 是半宽，内核 PivotWidth 是全宽（审查修复）
                 p.PivotSpeed = row.TurnRate;
                 p.PivotWarn = Math.Max(0.8f, row.WarnSeconds);
                 p.PivotDps = row.EffectAmount * dm;
@@ -503,6 +503,7 @@ namespace GameLogic.Campaign.Combat
                 p.TrailRadius = row.PoolRadius;
                 p.TrailSeconds = row.EffectSeconds;
                 p.TrailStatus = status;
+                p.TrailStatusSeconds = row.StatusSeconds; // 审查修复：表 statusSeconds 不再是死数据（油迹 / 溅油挂油的秒数）
             }
             else if (row.Behavior == EnemyDefs.BehaviorPollute)
             {
@@ -512,7 +513,7 @@ namespace GameLogic.Campaign.Combat
             if (row.SplitCount > 0f)
             {
                 p.SplitCount = row.SplitCount;
-                p.SplitHp = row.SplitHp;
+                p.SplitHp = row.SplitHp * Math.Max(0.05f, hpMul);
                 p.SplitSpeed = row.SplitSpeed;
                 p.SplitLife = row.SplitLife;
                 p.SplitDps = row.SplitDps * dm;

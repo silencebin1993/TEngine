@@ -2055,6 +2055,9 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, hcu.ImmuneMask);
                 Mix(ref h, hcu.Life);
                 Mix(ref h, hcu.PuddleTick);
+                Mix(ref h, hcu.SprayAt.x);
+                Mix(ref h, hcu.SprayAt.y);
+                Mix(ref h, hcu.PivotPrev);
                 CombatSiegeUnit hsu = _d.Siege[i]; // FG6-DEF-05（格式 11）
                 Mix(ref h, hsu.Role);
                 Mix(ref h, hsu.Mode);
@@ -3654,6 +3657,31 @@ namespace BinGames.Sim.Combat
             JumpMax = r.ReadInt32(),
         };
 
+        /// <summary>
+        /// FG10-FAC-01（审查修复）：行为参数的完整字节键（按当前快照格式写出全部字段）——参数表去重用，与 <see cref="WeaponKey"/> 同一做法：
+        /// 新增字段自动算进去，不会再因为漏写某个字段把两套不同的行为参数（例如同一种单位的绝缘 / 不绝缘、精英 / 普通）并成一行。
+        /// </summary>
+        public static string ProfileKey(in CombatBehaviorProfile p)
+        {
+            using var ms = new MemoryStream(512);
+            using var bw = new BinaryWriter(ms);
+            WriteProfile(bw, p, CombatConst.FormatVersion);
+            bw.Flush();
+            return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
+        }
+
+        /// <summary>按下标取一行行为参数（去重比对用）。</summary>
+        public bool TryGetProfile(int index, out CombatBehaviorProfile profile)
+        {
+            if (index < 0 || index >= _d.Profiles.Length)
+            {
+                profile = default;
+                return false;
+            }
+            profile = _d.Profiles[index];
+            return true;
+        }
+
         /// <summary>FG2-FW-02：武器参数的完整字节键（武器表去重用：新增字段自动算进去，不会因为漏写某个字段把两套不同的读法并成一行）。</summary>
         public static string WeaponKey(in CombatWeapon w)
         {
@@ -3799,6 +3827,7 @@ namespace BinGames.Sim.Combat
                 w.Write(p.TrailRadius);
                 w.Write(p.TrailSeconds);
                 w.Write(p.TrailStatus);
+                w.Write(p.TrailStatusSeconds);
                 w.Write(p.SplitCount);
                 w.Write(p.SplitHp);
                 w.Write(p.SplitSpeed);
@@ -3837,7 +3866,7 @@ namespace BinGames.Sim.Combat
                 || !NonNeg(p.SprayStatusSeconds) || !NonNeg(p.PoolRadius) || !NonNeg(p.PoolSeconds) || !NonNeg(p.PoolDps) || !NonNeg(p.PoolChill)
                 || !NonNeg(p.PivotRadius) || !NonNeg(p.PivotWidth) || !NonNeg(p.PivotSpeed) || !NonNeg(p.PivotWarn) || !NonNeg(p.PivotDps)
                 || !NonNeg(p.BurstRadius) || !NonNeg(p.BurstDamage) || !NonNeg(p.BurstFuse) || !NonNeg(p.BurstTrigger) || !NonNeg(p.DeflagMult)
-                || !NonNeg(p.TrailInterval) || !NonNeg(p.TrailRadius) || !NonNeg(p.TrailSeconds) || !NonNeg(p.SplitCount) || p.SplitCount > 8f || !NonNeg(p.SplitHp)
+                || !NonNeg(p.TrailInterval) || !NonNeg(p.TrailRadius) || !NonNeg(p.TrailSeconds) || !NonNeg(p.TrailStatusSeconds) || !NonNeg(p.SplitCount) || p.SplitCount > 8f || !NonNeg(p.SplitHp)
                 || !NonNeg(p.SplitSpeed) || !NonNeg(p.SplitLife) || !NonNeg(p.SplitDps) || !NonNeg(p.SplitRadius) || !NonNeg(p.Airborne) || !NonNeg(p.PolluteRange)
                 || !NonNeg(p.PolluteChannel) || !NonNeg(p.AcidResist) || p.AcidResist > 1f || !NonNeg(p.StructPref))
             {
@@ -3936,6 +3965,9 @@ namespace BinGames.Sim.Combat
             w.Write(c.ImmuneMask);
             w.Write(c.Life);
             w.Write(c.PuddleTick);
+            w.Write(c.SprayAt.x);
+            w.Write(c.SprayAt.y);
+            w.Write(c.PivotPrev);
         }
 
         private static CombatClarityUnit ReadClarity(BinaryReader r) => new CombatClarityUnit
@@ -3962,6 +3994,8 @@ namespace BinGames.Sim.Combat
             ImmuneMask = r.ReadUInt32(),
             Life = r.ReadSingle(),
             PuddleTick = r.ReadInt64(),
+            SprayAt = new double2(r.ReadDouble(), r.ReadDouble()),
+            PivotPrev = r.ReadSingle(),
         };
 
         /// <summary>FG10-FAC-01：读回的澄净状态必须在取值范围内（阶段字节、受寒 0～1、抗性 0～1、计时有限）。</summary>
@@ -3969,7 +4003,8 @@ namespace BinGames.Sim.Combat
             c.Spray <= 1 && c.Pivot <= 2 && c.Fuse <= 2 && c.Air <= 1 && c.Pollute <= 1
             && Finite(c.SprayT) && Finite(c.SprayDir.x) && Finite(c.SprayDir.y) && IsFinite(c.Anchor) && Finite(c.PivotAngle) && Finite(c.PivotT)
             && Finite(c.FuseT) && Finite(c.TrailT) && IsFinite(c.TrailLast) && Finite(c.PolluteT) && IsFinite(c.PolluteAt)
-            && c.Chill >= 0f && c.Chill <= 1f && NonNeg(c.FrozenT) && NonNeg(c.ThawGuardT) && c.AcidResist >= 0f && c.AcidResist <= 1f && Finite(c.Life);
+            && c.Chill >= 0f && c.Chill <= 1f && NonNeg(c.FrozenT) && NonNeg(c.ThawGuardT) && c.AcidResist >= 0f && c.AcidResist <= 1f && Finite(c.Life)
+            && IsFinite(c.SprayAt) && Finite(c.PivotPrev);
 
         private static CombatBehaviorProfile ReadProfile(BinaryReader r, int format)
         {
@@ -4053,6 +4088,7 @@ namespace BinGames.Sim.Combat
                 p.TrailRadius = r.ReadSingle();
                 p.TrailSeconds = r.ReadSingle();
                 p.TrailStatus = r.ReadUInt32();
+                p.TrailStatusSeconds = r.ReadSingle();
                 p.SplitCount = r.ReadSingle();
                 p.SplitHp = r.ReadSingle();
                 p.SplitSpeed = r.ReadSingle();
@@ -4203,7 +4239,7 @@ namespace BinGames.Sim.Combat
                 double2 at = D.Pos[i];
                 if (c.Spray == 1)
                 {
-                    double2 land = at + (double2)(c.SprayDir * (pf.SprayRange * 0.55f));
+                    double2 land = CombatLogic.PoolLanding(at, c, pf.SprayRange); // 与正式结算同一个落点（IC-REQ-010）
                     float lr = pf.PoolRadius > 0f ? pf.PoolRadius : pf.SprayRange * 0.3f;
                     AddWarn(land, lr, c.SprayT / math.max(0.8f, pf.SprayWarn), CombatZoneLook.Pulse);
                 }

@@ -325,7 +325,8 @@ namespace BinGames.Sim.Combat
                     d.Clarity[i] = c;
                     return;
                 }
-                int t = FindTarget(ref d, ref grid, i, p.SprayRange, d.Has(i, CombatUnitFlags.NeedsLos), CombatTargetMode.Nearest, true);
+                // 审查修复：按外沿距离选目标（与攻城的 EdgeDistance 停驻口径、锥形命中的“射程 + 目标半径”一致），否则攻城中停在建筑外沿射程处的喷淋单位永远不出手。
+                int t = FindSprayTarget(ref d, ref grid, i, p.SprayRange, d.Has(i, CombatUnitFlags.NeedsLos));
                 if (t < 0)
                 {
                     return;
@@ -334,10 +335,11 @@ namespace BinGames.Sim.Combat
                 c.Spray = 1;
                 c.SprayT = math.max(0.8f, p.SprayWarn);
                 c.SprayDir = math.lengthsq(to) > 1e-12 ? (float2)math.normalize(to) : new float2(0f, 1f);
+                c.SprayAt = d.Pos[t];
                 c.Anchor = d.Pos[i];
                 d.Clarity[i] = c;
                 TurnToward(ref d, i, d.Pos[t], 360f);
-                ClarityCue(ref d, i, d.Id[t], c.SprayT, d.Pos[i] + (double2)(c.SprayDir * (p.SprayRange * 0.55f)), 1, p.SprayChill > 0f ? (byte)2 : (byte)1);
+                ClarityCue(ref d, i, d.Id[t], c.SprayT, PoolLanding(d.Pos[i], c, p.SprayRange), 1, p.SprayChill > 0f ? (byte)2 : (byte)1);
                 return;
             }
             c.SprayT -= dt;
@@ -347,16 +349,88 @@ namespace BinGames.Sim.Combat
                 return;
             }
             float2 dir = c.SprayDir;
+            double2 landing = PoolLanding(d.Pos[i], c, p.SprayRange);
             c.Spray = 0;
             c.SprayT = math.max(0.5f, p.SprayCycle);
             d.Clarity[i] = c;
-            SprayCone(ref d, i, in p, dir);
+            SprayCone(ref d, i, in p, dir, landing);
         }
 
+        /// <summary>喷淋池落点：沿喷淋方向，取“到蓄压时锁定的目标的距离”与射程的较小者（池子盖住被瞄准的那片地，而不是固定落在射程中段够不着停驻距离上的目标）。</summary>
+        internal static double2 PoolLanding(double2 origin, in CombatClarityUnit c, float range)
+        {
+            double dist = math.min(math.distance(origin, c.SprayAt), (double)range);
+            return origin + (double2)c.SprayDir * dist;
+        }
+
+        /// <summary>
+        /// 喷淋目标：射程内（外沿距离 = 中心距离 − 目标半径 ≤ 射程）最近的己方地面单位（含建筑 / 炮塔；不含空中、潜行、只受区域伤害的单位），
+        /// 按外沿距离取最近、并列取槽位大者；<paramref name="needsLos"/> 时过滤视线被挡的。O(局部格子 + 单位)。
+        /// </summary>
+        private static int FindSprayTarget(ref CombatData d, ref CombatGrid grid, int i, float range, bool needsLos)
+        {
+            if (range <= 0f)
+            {
+                return -1;
+            }
+            double2 pos = d.Pos[i];
+            int best = -1;
+            double bestEdge = double.MaxValue;
+            double reach = range + GridSlack + grid.MaxRadius;
+            int cx0 = grid.CellOf(pos.x - reach);
+            int cx1 = grid.CellOf(pos.x + reach);
+            int cy0 = grid.CellOf(pos.y - reach);
+            int cy1 = grid.CellOf(pos.y + reach);
+            for (int cy = cy0; cy <= cy1; cy++)
+            {
+                for (int cx = cx0; cx <= cx1; cx++)
+                {
+                    if (!grid.TryGetCell(cx, cy, out int start, out int count))
+                    {
+                        continue;
+                    }
+                    for (int e = start; e < start + count; e++)
+                    {
+                        int k = grid.Slots[e];
+                        if (k == i || d.Faction[k] != (byte)CombatFaction.Player || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable)
+                            || d.Has(k, CombatUnitFlags.Stealthed) || d.Has(k, CombatUnitFlags.AreaOnly) || IsAir(ref d, k))
+                        {
+                            continue;
+                        }
+                        double edge = math.max(0.0, math.distance(pos, d.Pos[k]) - d.Radius[k]);
+                        if (edge > range || edge > bestEdge || (edge == bestEdge && k < best))
+                        {
+                            continue;
+                        }
+                        if (needsLos && !LineOfSight(ref d, pos, d.Pos[k]))
+                        {
+                            continue;
+                        }
+                        bestEdge = edge;
+                        best = k;
+                    }
+                }
+            }
+            return best;
+        }
+
+        /// <summary>FGR-DEF-003“优先攻击正在破坏建筑的敌人”：澄净专属攻击这一下打到己方建筑 / 炮塔就置“正在破坏建筑”，没打到就清掉（与普通开火同一口径）。</summary>
+        private static void MarkSiegeAttack(ref CombatData d, int i, bool hitBuilding)
+        {
+            if (d.Faction[i] == (byte)CombatFaction.Hostile)
+            {
+                d.Set(i, CombatUnitFlags.SiegeAttack, hitBuilding);
+            }
+        }
+
+        private static bool IsBuilding(ref CombatData d, int k) =>
+            d.Kind[k] == (byte)CombatUnitKind.Turret || d.Kind[k] == (byte)CombatUnitKind.Structure;
+
         /// <summary>锥形喷出：锥形内的己方地面单位吃伤害、挂状态、加受寒；锥形中段落下一块喷淋池。</summary>
-        private static void SprayCone(ref CombatData d, int i, in CombatBehaviorProfile p, float2 dir)
+        private static void SprayCone(ref CombatData d, int i, in CombatBehaviorProfile p, float2 dir, double2 landing)
         {
             double2 origin = d.Pos[i];
+            bool hitBuilding = false;
             float cosHalf = p.SprayCone >= 180f ? -2f : math.cos(math.radians(math.max(1f, p.SprayCone)));
             FxOf(ref d, p.SprayStatus, out float sdps, out float sslow, out float svuln);
             int hits = 0;
@@ -389,12 +463,13 @@ namespace BinGames.Sim.Combat
                 {
                     ApplyChill(ref d, k, p.SprayChill);
                 }
+                hitBuilding |= IsBuilding(ref d, k);
                 hits++;
             }
+            MarkSiegeAttack(ref d, i, hitBuilding);
             if (p.PoolRadius > 0f && p.PoolSeconds > 0f)
             {
-                double2 at = origin + (double2)(dir * (p.SprayRange * 0.55f));
-                SpawnPool(ref d, i, at, p.PoolRadius, p.PoolSeconds, p.PoolDps, p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, p.PoolChill);
+                SpawnPool(ref d, i, landing, p.PoolRadius, p.PoolSeconds, p.PoolDps, p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, p.PoolChill);
             }
             CombatCounters c = d.Counters[0];
             c.Sprays++;
@@ -434,13 +509,13 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>一摊中立油迹（与喷淋池共用上限）。</summary>
-        private static bool SpawnSlick(ref CombatData d, int owner, double2 pos, float radius, float seconds, uint mask)
+        private static bool SpawnSlick(ref CombatData d, int owner, double2 pos, float radius, float seconds, uint mask, float statusSeconds)
         {
             if (mask == 0u || !(radius > 0f) || !(seconds > 0f))
             {
                 return false;
             }
-            if (!SpawnZone(ref d, owner, CombatFaction.Neutral, pos, radius, seconds, 0f, 0f, 1f, mask, 0f, 0f, 0f, 0f, CombatConst.ZoneKindSlick))
+            if (!SpawnZone(ref d, owner, CombatFaction.Neutral, pos, radius, seconds, 0f, 0f, 1f, mask, math.max(0f, statusSeconds), 0f, 0f, 0f, CombatConst.ZoneKindSlick))
             {
                 return false;
             }
@@ -478,6 +553,7 @@ namespace BinGames.Sim.Combat
                 {
                     c.Pivot = 2;
                     c.PivotT = 0f;
+                    c.PivotPrev = c.PivotAngle; // 起转：上一节拍臂角 = 起始臂角
                 }
                 d.Clarity[i] = c;
                 return;
@@ -498,8 +574,16 @@ namespace BinGames.Sim.Combat
                 return;
             }
             float half = math.max(1f, p.PivotWidth * 0.5f);
+            // 审查修复：结算“上一节拍到这一节拍臂实际扫过的整段弧”（含两端各半个臂宽），不是只看节拍那一刻的臂角——
+            // 臂每节拍转过的角度可能大于臂宽，只看一刻会在每圈漏掉一半角度（冻结时臂不转，弧就是 0 + 臂宽）。
+            float swept = Wrap360(c.PivotAngle - c.PivotPrev);
+            float arcStart = c.PivotPrev - half;
+            float arcLen = swept + 2f * half;
+            c.PivotPrev = c.PivotAngle;
+            d.Clarity[i] = c;
             FxOf(ref d, p.SprayStatus, out float sdps, out float sslow, out float svuln);
             float dmg = math.max(0f, p.PivotDps) * tick;
+            bool hitBuilding = false;
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {
@@ -512,10 +596,11 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                if (math.abs(AngleDiff(AngleDeg(to), c.PivotAngle)) > half)
+                if (arcLen < 360f && Wrap360(AngleDeg(to) - arcStart) > arcLen)
                 {
                     continue;
                 }
+                hitBuilding |= IsBuilding(ref d, k);
                 if (dmg > 0f)
                 {
                     DamageUnit(ref d, k, dmg, i);
@@ -528,6 +613,7 @@ namespace BinGames.Sim.Combat
                 cc.PivotHits++;
                 d.Counters[0] = cc;
             }
+            MarkSiegeAttack(ref d, i, hitBuilding);
         }
 
         /// <summary>方向的角度（度，0 = +x，逆时针）。</summary>
@@ -578,7 +664,7 @@ namespace BinGames.Sim.Combat
             // 身上一直带着油：没在燃烧、油也掉了（被引燃消耗）时补上。燃烧中不补——被火击毁才算“被火击毁”。
             if (p.TrailStatus != 0u && !IsBurning(ref d, i, now) && ((d.Status[i] & p.TrailStatus) != p.TrailStatus || !d.StatusActive(i, now)))
             {
-                ApplyStatus(ref d, i, p.TrailStatus, math.max(5f, p.TrailSeconds), 0f, 0f, 0f, i, 0f);
+                ApplyStatus(ref d, i, p.TrailStatus, math.max(5f, TrailStatusSecondsOf(in p)), 0f, 0f, 0f, i, 0f);
                 if (!d.IsAlive(i))
                 {
                     return;
@@ -595,7 +681,7 @@ namespace BinGames.Sim.Combat
                     if (math.distancesq(pos, c.TrailLast) >= (double)p.TrailRadius * p.TrailRadius)
                     {
                         c.TrailLast = pos;
-                        SpawnSlick(ref d, i, pos, p.TrailRadius, p.TrailSeconds, p.TrailStatus);
+                        SpawnSlick(ref d, i, pos, p.TrailRadius, p.TrailSeconds, p.TrailStatus, p.TrailStatusSeconds);
                     }
                 }
             }
@@ -663,16 +749,20 @@ namespace BinGames.Sim.Combat
                 DamageUnit(ref d, k, p.BurstDamage, i);
                 if (p.TrailStatus != 0u && d.IsAlive(k))
                 {
-                    ApplyStatus(ref d, k, p.TrailStatus, math.max(3f, p.TrailSeconds), 0f, 0f, 0f, i, p.BurstDamage);
+                    ApplyStatus(ref d, k, p.TrailStatus, TrailStatusSecondsOf(in p), 0f, 0f, 0f, i, p.BurstDamage);
                 }
             }
-            SpawnSlick(ref d, i, pos, math.max(p.TrailRadius, radius * 0.6f), p.TrailSeconds, p.TrailStatus);
+            SpawnSlick(ref d, i, pos, math.max(p.TrailRadius, radius * 0.6f), p.TrailSeconds, p.TrailStatus, p.TrailStatusSeconds);
             CombatCounters c = d.Counters[0];
             c.Bursts++;
             d.Counters[0] = c;
             ClarityCue(ref d, i, 0, radius, pos, 5, 0);
-            Kill(ref d, i, 0);
+            SelfDestruct(ref d, i); // 审查修复：自爆不是被谁击毁（不计击杀、不掉落、不解锁靶子）
         }
+
+        /// <summary>油迹 / 溅油挂的状态秒数：表 statusSeconds；没填按油迹存留秒数（至少 3 秒）。</summary>
+        private static float TrailStatusSecondsOf(in CombatBehaviorProfile p) =>
+            p.TrailStatusSeconds > 0f ? p.TrailStatusSeconds : math.max(3f, p.TrailSeconds);
 
         // ─────────────────────────────── 死亡效果（分裂 / 爆燃） ───────────────────────────────
 
@@ -738,7 +828,7 @@ namespace BinGames.Sim.Combat
         {
             if (!(e.Mult > 0f))
             {
-                SpawnSlick(ref d, -1, e.Pos, math.max(0.5f, p.TrailRadius * 1.5f), p.TrailSeconds, p.TrailStatus);
+                SpawnSlick(ref d, -1, e.Pos, math.max(0.5f, p.TrailRadius * 1.5f), p.TrailSeconds, p.TrailStatus, p.TrailStatusSeconds);
                 return;
             }
             float radius = math.max(0.5f, p.BurstRadius * 1.2f);
@@ -846,7 +936,7 @@ namespace BinGames.Sim.Combat
             d.Clarity[i] = c;
             if (c.Life <= 0f)
             {
-                Kill(ref d, i, 0);
+                SelfDestruct(ref d, i); // 蒸发不是被谁击毁
                 return;
             }
             float speed = SlowedSpeed(ref d, i, d.Speed[i]);
@@ -1116,7 +1206,7 @@ namespace BinGames.Sim.Combat
                 CombatCounters cc = d.Counters[0];
                 cc.Repollutions++;
                 d.Counters[0] = cc;
-                Kill(ref d, i, 0);
+                SelfDestruct(ref d, i); // 审查修复：投放后自毁不是被谁击毁
                 return true;
             }
             if (d.PolluteTargets.Length == 0)

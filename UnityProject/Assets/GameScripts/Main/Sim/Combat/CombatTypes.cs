@@ -82,6 +82,8 @@ namespace BinGames.Sim.Combat
         public const byte ZoneKindSlick = 4;
         /// <summary>FG10-FAC-01：配置没填（0）时喷淋池 + 油迹的共用上限（超出的不生成并计数）。</summary>
         public const int DefaultPoolZoneCapacity = 192;
+        /// <summary>FG10-FAC-01（审查修复）：阵亡 / 攻城击毁事件的 Code2 里这一位 = 自毁（不是被谁击毁；SiegeKilled 的第 0 位仍是精英）。</summary>
+        public const byte KillSelfDestructBit = 2;
 
         /// <summary>FG2-E2E-01（FG-GAP-043）：同时留在画面上的引信弹迹上限（满了挤掉最老的一条；每条只活零点几游戏秒）。</summary>
         public const int TraceCapacity = 128;
@@ -580,6 +582,8 @@ namespace BinGames.Sim.Combat
     /// 受寒（任何单位都可能挂）：<see cref="Chill"/> 0～1，越高越慢；满 1 冻结 <see cref="FrozenT"/> 秒（不能移动、不能开火），解冻后 <see cref="ThawGuardT"/> 秒内不再受寒。
     /// 抗性：<see cref="AcidResist"/>（酸沼 / 酸液池伤害 × (1 − 本值)）、<see cref="ImmuneMask"/>（挂不上的状态位：澄净单位不挂酸蚀、带绝缘涂层的单位不挂电击）。
     /// 分裂液：<see cref="Life"/> 剩余存活秒数；<see cref="PuddleTick"/> = 这个单位最近一次被分裂液腐蚀的节拍序号（同一节拍多滩分裂液只算一次）。
+    /// 审查修复：<see cref="SprayAt"/> = 喷嘴蓄压那一刻锁定的落点（目标所在处；喷淋池落在“到它的距离”与射程取小处，不是固定的射程中段）；
+    /// <see cref="PivotPrev"/> = 上一个区域节拍时的臂角（节拍结算“这段时间扫过的整段弧”，不只是节拍那一刻的臂角）。
     /// </summary>
     [Serializable]
     [StructLayout(LayoutKind.Sequential)]
@@ -609,6 +613,8 @@ namespace BinGames.Sim.Combat
         public uint ImmuneMask;
         public float Life;
         public long PuddleTick;
+        public double2 SprayAt;
+        public float PivotPrev;
     }
 
     /// <summary>
@@ -1071,6 +1077,8 @@ namespace BinGames.Sim.Combat
         public float TrailRadius;
         public float TrailSeconds;
         public uint TrailStatus;
+        /// <summary>审查修复：油迹 / 自爆溅油挂的状态持续秒数（表 statusSeconds；0 = 区域默认）。</summary>
+        public float TrailStatusSeconds;
         /// <summary>分裂：阵亡时分成几滩（0 = 不分裂）、每滩耐久、爬行速度、存活秒数、接触每秒伤害、接触半径。</summary>
         public float SplitCount;
         public float SplitHp;

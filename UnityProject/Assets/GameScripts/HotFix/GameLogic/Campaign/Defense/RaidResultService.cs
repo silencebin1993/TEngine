@@ -545,6 +545,9 @@ namespace GameLogic.Campaign.Defense
         /// 内核事件 <see cref="CombatEventKind.SiegeKilled"/>（家园战斗内核，CombatSite 绑定）：记“击败过的敌人种类”（靶场解锁，FG-GAP-101，攻城与拦截都算）；
         /// 攻城中的队伍另记结算——击毁数、按种类、贡献、残骸、掉落。O(队伍数 + 贡献者 + 残骸堆)。
         /// </summary>
+        /// <summary>FG10-FAC-01：收到的自毁（不结算）次数（自检用）。</summary>
+        public static int SelfDestructs { get; private set; }
+
         public static void OnKilled(CombatSite site, CombatEvent e)
         {
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -556,6 +559,13 @@ namespace GameLogic.Campaign.Defense
             RaidResultState st = EnsureState(s);
             if (st == null || st.CoreLost)
             {
+                return;
+            }
+            // FG10-FAC-01（审查修复）：自毁（油污爬行者自爆、灭活无人机投放后）不是被谁击毁——不解锁靶子、不计击毁 / 贡献、不留残骸与掉落（单位本身照样从队伍里减员）。
+            if ((e.Code2 & CombatConst.KillSelfDestructBit) != 0)
+            {
+                SelfDestructs++;
+                Stat(t0);
                 return;
             }
             int group = (int)Math.Round(e.Value);
@@ -578,7 +588,7 @@ namespace GameLogic.Campaign.Defense
             if (g == null || !SiegeService.IsSieging(g))
             {
                 // 行进途中的拦截战与领地驻军 / 巡逻迎战：不进家园的突袭结算；FG8-LOOT-01（FG-GAP-109）起按野外掉落表留残骸与掉落（FieldLootService）。
-                FieldLootService.OnFieldKill(s, site, def, e.Code2 == 1, at, e.Other);
+                FieldLootService.OnFieldKill(s, site, def, (e.Code2 & 1) != 0, at, e.Other);
                 Stat(t0);
                 return;
             }
@@ -588,7 +598,7 @@ namespace GameLogic.Campaign.Defense
                 Stat(t0);
                 return;
             }
-            bool elite = e.Code2 == 1;
+            bool elite = (e.Code2 & 1) != 0;
             r.Killed++;
             if (elite)
             {

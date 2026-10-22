@@ -310,7 +310,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string StatusTag;
     /// <summary>
-    /// 上面那个状态标签的持续秒数
+    /// 上面那个状态标签的持续秒数(喷淋 / 喷灌命中与池子;自爆单位 = 油迹与溅油挂油的秒数)
     /// </summary>
     public readonly float StatusSeconds;
     /// <summary>
@@ -322,7 +322,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly float SplitCount;
     /// <summary>
-    /// 每滩分裂液的耐久
+    /// 每滩分裂液的耐久(难度 / 精英耐久倍率另乘,与本体同一口径)
     /// </summary>
     public readonly float SplitHp;
     /// <summary>

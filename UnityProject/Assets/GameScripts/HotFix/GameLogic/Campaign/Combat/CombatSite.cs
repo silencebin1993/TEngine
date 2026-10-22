@@ -793,18 +793,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>行为参数表去重。</summary>
         public int ProfileIndex(in CombatBehaviorProfile p)
         {
-            string key = string.Join("|", p.Speed, p.FleeTrigger, p.Leash, p.PatrolRadius, p.PatrolFreq, p.SenseRange, p.CycleSeconds,
-                p.EffectSeconds, p.EffectAmount, p.EffectRange,
-                // FG9-FAC-01：静默专属语法参数也进键（不同潜伏 / 偏折 / 断链参数不会并成一行）
-                p.LurkSeconds, p.RevealSeconds, p.RevealRange, p.DeflectRadius, p.DeflectWarn, p.DeflectUp, p.DeflectGap, p.DeflectReflect,
-                p.SeverRange, p.SeverSeconds, p.SeverCooldown,
-                // FG9-FAC-02 修复轮：铸造专属语法参数也进键——此前漏了，主核心（坚守开火 + 对空齐射）会和同读法、无齐射的行并成一行，对空形态从不开火
-                p.SalvoCount, p.SalvoGap, p.SalvoReload, p.SalvoWarn, p.SalvoRadius, p.SalvoMode,
-                p.MineMax, p.MineCycle, p.MineRadius, p.MineDamage, p.MineFuse, p.MineLife,
-                p.ReloadRange, p.ReloadRate,
-                p.ChargeSpeed, p.ChargeWarn, p.ChargeSeconds, p.ChargeCooldown, p.ChargeKnock, p.TurnRate,
-                p.DeploySeconds, p.MinRange);
-            if (_profileIndex.TryGetValue(key, out int idx) && idx < Kernel.ProfileCount)
+            // FG10-FAC-01（审查修复）：键取行为参数的完整字节（与武器表同一做法）——此前逐字段拼键，FG10 的澄净参数（喷淋 / 枢轴 / 自爆 / 分裂 / 飞行 / 抗性 / 免疫位）
+            // 全不在键里，同一种单位的绝缘 / 不绝缘、精英 / 普通、不同难度会并成一行。命中后再比一次整行，防内核表被重建后下标错位。
+            string key = CombatKernel.ProfileKey(p);
+            if (_profileIndex.TryGetValue(key, out int idx) && Kernel.TryGetProfile(idx, out CombatBehaviorProfile existing) && existing.Equals(p))
             {
                 return idx;
             }
@@ -1327,6 +1319,11 @@ namespace GameLogic.Campaign.Combat
                     rec.Health = 0f;
                     rec.IsAlive = false;
                     rec.Position = new Vector2((float)e.Pos.x, (float)e.Pos.y);
+                    // FG10-FAC-01（审查修复）：自毁（自爆 / 投放后 / 蒸发）只把记录标为阵亡——不是被谁击毁，不记击杀、不走地点规则的击杀结算（掉落 / 目标进度）。
+                    if ((e.Code2 & CombatConst.KillSelfDestructBit) != 0)
+                    {
+                        return;
+                    }
                     // FG4-ECO-07（FGR-ECO-041 机器详情“击杀”）：内核的阵亡事件带着致命一击的来源单位（Other）；来源是己方机器时记一次击杀。O(1)。
                     if (_unitMachine.TryGetValue(e.Other, out int killerLogicId))
                     {

@@ -238,7 +238,7 @@ namespace GameLogic.Campaign.Feedback
                 CaptionKey = "clarity.cue.deflagrate", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 被火击毁的爆燃（可以反过来利用）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySlickIgnite, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "澄净", Caption = "油迹被点燃：整片爆燃", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.slick_ignite", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 油迹（燃迹组合）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityFreeze, SfxId = "sfx_signal_lost", Tag = "澄净", Caption = "机器被冻结：解冻前不能移动、不能开火", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityFreeze, SfxId = "sfx_power_down", Tag = "澄净", Caption = "机器被冻结：解冻前不能移动、不能开火", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.freeze", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮“先减速再冻结”" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySplit, SfxId = "sfx_enemy_cannon", Shake = 0.25f, Tag = "澄净", Caption = "沉淀巨罐破裂：分裂出会爬行的腐蚀液", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.split", Tone = FeedbackTone.Warning, CaptionSeconds = 3f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 精英分裂" });

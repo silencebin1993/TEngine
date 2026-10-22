@@ -24,6 +24,7 @@ using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Narrative;
 using GameLogic.Notifications;
+using GameLogic.Progression;
 using GameLogic.Settings;
 using GameLogic.Stage;
 using GameLogic.View;
@@ -91,6 +92,7 @@ namespace GameLogic.EditorTools
             Func<bool> originalAutoPause = NotificationCenter.AutoPauseHandler;
             string savedPrefs = PlayerPrefs.GetString(SettingsPrefsKey, null);
             bool hadPrefs = PlayerPrefs.HasKey(SettingsPrefsKey);
+            string originalCodexPath = MechanicCodex.FilePathOverrideForTests;
             _dir = Path.Combine(Path.GetTempPath(), "bingames-fgclarity-selfcheck-" + Guid.NewGuid().ToString("N"));
             try
             {
@@ -115,6 +117,11 @@ namespace GameLogic.EditorTools
                 ClarityCombatFeedback.ResetForTests();
                 ClarityCounterService.ResetForTests();
                 AcidMarshService.ResetForTests();
+                // 图鉴解锁写到临时文件（不碰开发机的图鉴记录）；本次运行实际触发过的引导钩子单独记（“已看过”是跨战役的本机记录，不能当本次事实）。
+                MechanicCodex.FilePathOverrideForTests = Path.Combine(_dir, "codex.json");
+                MechanicCodex.ResetContentForTests();
+                TouchedHooks.Clear();
+                GuidanceHooks.Touched += OnHookTouched;
 
                 Step(CheckData);
                 Step(CheckRaidGarrisonAndRange);
@@ -123,21 +130,26 @@ namespace GameLogic.EditorTools
                 Step(CheckCrawler);
                 Step(CheckDeflagration);
                 Step(CheckPivot);
+                Step(CheckPivotCoverage);
                 Step(CheckSplitInAcid);
                 Step(CheckAcidMarshKernel);
                 Step(CheckPoolWash);
                 Step(CheckAir);
                 Step(CheckSwarm);
+                Step(CheckSprayEdgeAndSiegeFlag);
                 Step(CheckKernelSnapshot);
                 Step(CheckDeterminism);
                 Step(CheckAcidWorld);
                 Step(CheckGarrisonAndSiege);
+                Step(CheckSelfDestructSettlement);
                 Step(CheckCounter);
                 Step(CheckFeedbackAndCodex);
                 Step(CheckPerf);
             }
             finally
             {
+                GuidanceHooks.Touched -= OnHookTouched;
+                MechanicCodex.FilePathOverrideForTests = originalCodexPath;
                 SignalCoverageService.OverrideForTests = null;
                 SignalCoverageService.Invalidate();
                 SignalUplinkService.RealTimeForTests = null;
@@ -186,6 +198,16 @@ namespace GameLogic.EditorTools
             }
             Line(_fail == 0 ? $"  澄净单位与精英：全部 {_pass} 项通过" : $"  澄净单位与精英：{_fail} 项失败 / {_pass} 项通过");
             return _fail;
+        }
+
+        private static readonly HashSet<string> TouchedHooks = new HashSet<string>(StringComparer.Ordinal);
+
+        private static void OnHookTouched(string id)
+        {
+            if (!string.IsNullOrEmpty(id))
+            {
+                TouchedHooks.Add(id);
+            }
         }
 
         // ─────────────────────────────── A 数据 ───────────────────────────────
@@ -422,12 +444,15 @@ namespace GameLogic.EditorTools
                 $"B1 喷淋布区（FGR-FAC-008，FGT-FAC-009 实测）：喷嘴蓄压 {sprayAt - warnStart:0.00} 秒（≥ 0.8）且蓄压中原地不动（{held}）→ 锥形喷出：前方机器挨 {400f - fl:0.#}（表 {row.WeaponDamage}）并挂酸蚀（{acid}），" +
                 $"身后 7 米的机器不挨（{bl:0}）；地面留下酸液池 {pools} 块；武器列只是喷淋参数，普通开火路径不出手（开火计数不变 {noGun}）；蓄压有声音 + 字幕（{ClarityCombatFeedback.SprayWarnCues}）");
 
-            // 酸液池只伤你的单位：站进池子的机器按节拍掉耐久并挂酸蚀；澄净单位自己不怕酸（acid_proof：挂不上酸蚀）。
+            // 酸液池只伤你的单位：站进池子的机器按节拍掉耐久并挂酸蚀；澄净单位自己不怕酸（acid_proof：主动给它挂酸蚀也挂不上；对照：给身后那台机器挂得上）。
             RunFor(site, 3f);
             float poolHit = 400f - View(site, front).Health;
+            site.Kernel.ApplyStatus(sp, Bit("Acid"), 4f, 3f, 0f, 0f, front);
+            site.Kernel.ApplyStatus(behind, Bit("Acid"), 4f, 3f, 0f, 0f, sp);
             bool selfClean = !HasStatus(site, sp, Bit("Acid"));
-            Expect(poolHit > row.WeaponDamage + 0.5f && selfClean,
-                $"B1b 酸液池按节拍腐蚀站在里面的机器（累计 {poolHit:0.#} > 单次喷淋 {row.WeaponDamage}）；喷洒车自己挂不上酸蚀（{selfClean}）");
+            bool controlTagged = HasStatus(site, behind, Bit("Acid"));
+            Expect(poolHit > row.WeaponDamage + 0.5f && selfClean && controlTagged,
+                $"B1b 酸液池按节拍腐蚀站在里面的机器（累计 {poolHit:0.#} > 单次喷淋 {row.WeaponDamage}）；主动给喷洒车挂酸蚀也挂不上（{selfClean}），同样挂给机器挂得上（对照 {controlTagged}）");
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 
@@ -437,7 +462,8 @@ namespace GameLogic.EditorTools
             CombatSite site = OpenBench(s);
             _t = 0;
             BenchEnemy(site, s, "enemy_ln2_pump", "b_ln2", new Vector2(0f, 0f));
-            int target = Player(site, new Vector2(5f, 0f), Gun(0.01f), 4000f);
+            // 审查修复的回归：目标在射程外（12 米）原地不动，泵车自己逼近到射程边上停下喷——液氮池要落在目标脚下，静止的目标才会“先减速再冻结”。
+            int target = Player(site, new Vector2(12f, 0f), Gun(0.01f), 4000f);
             double firstSpray = -1, frozenAt = -1;
             float chillAfterFirst = 0f;
             for (int i = 0; i < 60 * 20 && frozenAt < 0; i++)
@@ -458,7 +484,7 @@ namespace GameLogic.EditorTools
             bool frozenTag = HasStatus(site, target, Bit("Frozen"));
             Expect(firstSpray > 0 && chillAfterFirst > 0.2f && chillAfterFirst < 1f && frozenAt > firstSpray && fr == CombatFireResult.Frozen && reason == GameText.Get("combat.fire.frozen")
                    && frozenTag && site.Kernel.Counters.Freezes >= 1 && ClarityCombatFeedback.FreezeCues > 0,
-                $"B2 液氮“先减速再冻结”：第一次喷中只受寒 {chillAfterFirst:0.00}（没冻住），之后冻结（{frozenAt - firstSpray:0.0} 秒后）；冻结中不能开火（{fr}，原因“{reason}”）；挂冰冻标签（{frozenTag}）；提示 {ClarityCombatFeedback.FreezeCues}");
+                $"B2 液氮“先减速再冻结”（泵车从 12 米外逼近、目标原地不动）：第一次喷中只受寒 {chillAfterFirst:0.00}（没冻住），站在液氮池里随后冻结（{frozenAt - firstSpray:0.0} 秒后）；冻结中不能开火（{fr}，原因“{reason}”）；挂冰冻标签（{frozenTag}）；提示 {ClarityCombatFeedback.FreezeCues}");
             CombatSites.Close(Bench, s, dropRecord: true);
 
             // 受寒减速、燃烧解冻更快、解冻后短暂免疫（不会被永久冻住）。
@@ -506,6 +532,7 @@ namespace GameLogic.EditorTools
             BenchEnemy(site, s, "enemy_oil_crawler", "b_crawl", new Vector2(0f, 0f));
             int cr = UnitOf(site, "b_crawl");
             int target = Player(site, new Vector2(12f, 0f), Gun(0.01f));
+            long kills0 = site.Kernel.Counters.KillsHostile;
             bool oiled = false;
             double fuseStart = -1, boom = -1;
             Vector2 heldAt = Vector2.zero;
@@ -533,10 +560,14 @@ namespace GameLogic.EditorTools
             int slicks = site.CountZonesOfKind(CombatConst.ZoneKindSlick);
             float lost = 400f - View(site, target).Health;
             bool targetOiled = HasStatus(site, target, Bit("Oil"));
+            double oilLeft = site.Kernel.StatusBitSecondsLeft(target, math.tzcnt(Bit("Oil")));
             bool dead = !View(site, cr).Alive;
-            Expect(oiled && fuseStart > 0 && boom - fuseStart >= 0.8 - 1e-3 && held && lost >= row.WeaponDamage - 0.01f && targetOiled && dead && slicks >= 2 && ClarityCombatFeedback.BurstWarnCues > 0,
-                $"B3 油污爬行者：身上一直带油（{oiled}），一路留下油迹（{slicks} 摊）；贴近后引信燃烧 {boom - fuseStart:0.00} 秒（≥ 0.8）且原地不动（{held}）→ 自爆：机器挨 {lost:0.#}（表 {row.WeaponDamage}）并溅上油（{targetOiled}），" +
-                $"本体阵亡（{dead}）；引信有声音 + 字幕（{ClarityCombatFeedback.BurstWarnCues}）");
+            RegionEnemyRecord crRec = s.RegionEnemies.FirstOrDefault(e => e.EnemyInstanceId == "b_crawl");
+            bool notKill = site.Kernel.Counters.KillsHostile == kills0 && crRec != null && !crRec.IsAlive;
+            Expect(oiled && fuseStart > 0 && boom - fuseStart >= 0.8 - 1e-3 && held && lost >= row.WeaponDamage - 0.01f && targetOiled && oilLeft >= row.StatusSeconds - 0.5
+                   && dead && notKill && slicks >= 2 && ClarityCombatFeedback.BurstWarnCues > 0,
+                $"B3 油污爬行者：身上一直带油（{oiled}），一路留下油迹（{slicks} 摊）；贴近后引信燃烧 {boom - fuseStart:0.00} 秒（≥ 0.8）且原地不动（{held}）→ 自爆：机器挨 {lost:0.#}（表 {row.WeaponDamage}）并溅上油（{targetOiled}，" +
+                $"还剩 {oilLeft:0.0} 秒 ≈ 表 statusSeconds {row.StatusSeconds}），本体阵亡且记录标为阵亡，但不算击杀（{notKill}）；引信有声音 + 字幕（{ClarityCombatFeedback.BurstWarnCues}）");
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 
@@ -627,6 +658,147 @@ namespace GameLogic.EditorTools
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 
+        private static void CheckPivotCoverage()
+        {
+            // 审查修复的回归：扫臂按“上一节拍到这一节拍扫过的整段弧”结算——臂每节拍转 35°、比臂宽大，只看节拍那一刻会每圈漏一半角度。
+            // 在 0° / 15° / 25° / 200° 各放一台静止机器：臂起转后转满一圈（+ 一个节拍）之内每台都被扫中；每台从整圈蓄压开始到被扫中都不少于 0.8 秒。
+            CampaignState s = NewWorldState(1);
+            CombatSite site = OpenBench(s);
+            _t = 0;
+            BenchEnemy(site, s, "enemy_settling_tank", "b_tank", new Vector2(0f, 0f));
+            int tank = UnitOf(site, "b_tank");
+            float[] angles = { 0f, 15f, 25f, 200f };
+            var units = new int[angles.Length];
+            var hitAt = new double[angles.Length];
+            for (int k = 0; k < angles.Length; k++)
+            {
+                float a = angles[k] * Mathf.Deg2Rad;
+                units[k] = Player(site, new Vector2(Mathf.Cos(a) * 4.5f, Mathf.Sin(a) * 4.5f), Gun(0.01f), 4000f);
+                hitAt[k] = -1;
+            }
+            double warnStart = -1, sweepStart = -1;
+            for (int i = 0; i < 60 * 14 && hitAt.Any(h => h < 0); i++)
+            {
+                RunFor(site, Dt);
+                CombatClarityUnit c = Cu(site, tank);
+                if (c.Pivot == 1 && warnStart < 0)
+                {
+                    warnStart = _t;
+                }
+                if (c.Pivot == 2 && sweepStart < 0)
+                {
+                    sweepStart = _t;
+                }
+                for (int k = 0; k < units.Length; k++)
+                {
+                    if (hitAt[k] < 0 && View(site, units[k]).Health < 4000f)
+                    {
+                        hitAt[k] = _t;
+                    }
+                }
+            }
+            MechEnemy row = Row("enemy_settling_tank");
+            double rev = 360.0 / row.TurnRate + 0.5 + 1e-3;
+            bool allInFirstTurn = sweepStart > 0 && hitAt.All(h => h > 0 && h - sweepStart <= rev);
+            bool warned = warnStart > 0 && hitAt.All(h => h - warnStart >= 0.8 - 1e-3);
+            Expect(allInFirstTurn && warned,
+                $"B5b 扫臂整圈覆盖：0° / 15° / 25° / 200° 的静止机器在臂起转后 {rev:0.0} 秒（一圈 + 一个节拍）内都被扫中（{string.Join(" / ", hitAt.Select(h => (h - sweepStart).ToString("0.00")))} 秒），" +
+                $"且都在整圈蓄压开始 0.8 秒之后（{warned}）");
+            CombatSites.Close(Bench, s, dropRecord: true);
+        }
+
+        private static void CheckSprayEdgeAndSiegeFlag()
+        {
+            // 审查修复的回归：喷淋按外沿距离出手——停在“外沿 ≤ 射程、中心 > 射程”的大建筑前也会蓄压、喷中它、在它脚下留池；喷到建筑时置“正在破坏建筑”（FGR-DEF-003）。
+            CampaignState s = NewWorldState(1);
+            CombatSite site = OpenBench(s);
+            _t = 0;
+            MechEnemy row = Row("enemy_sprayer");
+            BenchEnemy(site, s, "enemy_sprayer", "b_edge", new Vector2(0f, 0f));
+            int sp = UnitOf(site, "b_edge");
+            int w = site.WeaponIndex(Gun(0.01f));
+            float centre = row.WeaponRange + 1.5f; // 中心在射程外 1.5 米
+            int building = site.Kernel.Spawn(new CombatSpawn
+            {
+                Kind = CombatUnitKind.Structure, Faction = CombatFaction.Player, Behavior = CombatBehavior.None, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
+                Position = new double2(centre, 0f), Home = new double2(centre, 0f), Radius = 2f, Health = 4000f, MaxHealth = 4000f, Weapon = w, BehaviorProfile = -1,
+                ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, 1f),
+            });
+            double warnAt = -1;
+            float warnDist = 0f;
+            for (int i = 0; i < 60 * 3 && warnAt < 0; i++)
+            {
+                RunFor(site, Dt);
+                if (Cu(site, sp).Spray == 1)
+                {
+                    warnAt = _t;
+                    warnDist = Vector2.Distance(Pos(site, sp), Pos(site, building));
+                }
+            }
+            RunFor(site, 2.5f);
+            float lost = 4000f - View(site, building).Health;
+            bool flagged = (View(site, sp).Flags & CombatUnitFlags.SiegeAttack) != 0;
+            CombatZone pool = default;
+            for (int z = 0; z < site.Kernel.ZoneCount; z++)
+            {
+                if (site.Kernel.TryGetZone(z, out CombatZone zn) && zn.Kind == CombatConst.ZoneKindPool)
+                {
+                    pool = zn;
+                    break;
+                }
+            }
+            float poolToBuilding = pool.Radius > 0f ? (float)math.distance(pool.Pos, new double2(centre, 0f)) : 999f;
+            Expect(warnAt >= 0 && warnDist > row.WeaponRange && lost >= row.WeaponDamage - 0.01f && flagged && poolToBuilding <= pool.Radius + 2f,
+                $"C0 喷淋按外沿距离出手：建筑中心在 {warnDist:0.0} 米（> 射程 {row.WeaponRange}）、外沿在射程内时就蓄压喷出，建筑挨 {lost:0.#}；喷中建筑时置“正在破坏建筑”（{flagged}）；" +
+                $"酸液池落在建筑脚下（池心离建筑中心 {poolToBuilding:0.0} 米）");
+            CombatSites.Close(Bench, s, dropRecord: true);
+        }
+
+        private static void CheckSelfDestructSettlement()
+        {
+            // 审查修复的回归：攻城里的油污爬行者自爆 = 自毁，不是被谁击毁——突袭结算不计击毁 / 不留残骸 / 不掉落 / 不解锁靶子（内核照样减员）。
+            CampaignState s = NewWorld(1);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            RaidCatalog.TryGetUnit("clarity.oil_crawler", out RaidUnitDef crawler);
+            var at = new Vector2(30f, 30f);
+            int victim = home.Kernel.Spawn(new CombatSpawn
+            {
+                Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.Commanded, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
+                Position = new double2(at.x + 1.5f, at.y), Home = new double2(at.x + 1.5f, at.y), Radius = 0.6f, Health = 4000f, MaxHealth = 4000f, Weapon = -1,
+                BehaviorProfile = -1, ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, 1f),
+            });
+            int sd0 = RaidResultService.SelfDestructs;
+            long kills0 = home.Kernel.Counters.KillsHostile;
+            bool unlockedBefore = Defeated(s, "enemy_oil_crawler");
+            int unit = SiegeService.SpawnOne(home, 990301, at, at, crawler, false);
+            // 只步进家园战斗内核（与世界步同一入口 CombatSite.Step，事件照常分发给突袭结算）：不经过攻城服务的周期对账，测试用的无主队伍不会被当孤儿清掉。
+            double now = GameClock.GameSeconds;
+            for (int i = 0; i < 60 * 3; i++)
+            {
+                now += Dt;
+                home.Step(Dt, now);
+            }
+            bool gone = !home.Kernel.TryGetUnit(unit, out CombatUnitView v) || !v.Alive;
+            bool unlockedAfter = Defeated(s, "enemy_oil_crawler");
+            Expect(unit > 0 && gone && home.Kernel.Counters.Bursts > 0 && RaidResultService.SelfDestructs > sd0 && home.Kernel.Counters.KillsHostile == kills0
+                   && unlockedAfter == unlockedBefore,
+                $"C4 攻城中的油污爬行者自爆（{gone}）只算自毁：突袭结算收到 {RaidResultService.SelfDestructs - sd0} 次自毁、不计击杀（击杀计数不变）、不解锁靶子（{unlockedBefore} → {unlockedAfter}）");
+            home.Kernel.Despawn(victim);
+        }
+
+        /// <summary>这种敌人对应的靶子（unlockEnemies 里有它）有没有解锁（“击败过”的公开口径）。</summary>
+        private static bool Defeated(CampaignState s, string enemyTypeId)
+        {
+            foreach (RangeTargetDef d in TestRangeCatalog.Targets)
+            {
+                if (d != null && ConfigSystem.Instance.Tables.TbRangeTarget.DataList.Any(t => t.Id == d.Id && t.UnlockEnemies.Split(',').Any(e => e.Trim() == enemyTypeId)))
+                {
+                    return TestRangeService.IsUnlocked(s, d);
+                }
+            }
+            return false;
+        }
+
         private static void CheckSplitInAcid()
         {
             // 卡片负向“巨罐分裂后的液体在酸沼里的叠加”：三滩分裂液贴着同一台机器、机器站在酸沼里——分裂液之间不叠加（每节拍只算一次），与酸沼各算各的（相加），状态叠层封顶。
@@ -647,14 +819,16 @@ namespace GameLogic.EditorTools
             RunFor(site, 4f);
             float lost = h0 - View(site, victim).Health;
             MechEnemy row = Row("enemy_settling_tank");
-            float expect = 4f * (row.SplitDps + 1000f * 0.02f);
-            float stacked = 4f * (row.SplitDps * 3f + 1000f * 0.02f);
             int stacks = site.Kernel.StatusStacksOf(victim, math.tzcnt(Bit("Acid")));
             int cap = site.Kernel.Config.StatusStackCap > 0 ? site.Kernel.Config.StatusStackCap : 3;
-            // 分裂液还给目标挂酸蚀（持续伤害 3/秒 × 层数，层数封顶）：不叠加时 ≈ 112 + 12～36；三滩叠加时 ≥ 176。
-            Expect(puddles == 3 && splitCue && lost >= expect * 0.9f && lost < 170f && stacks <= cap,
-                $"B6 沉淀巨罐被击毁分裂成 {puddles} 滩会爬行的腐蚀液（提示 {splitCue}）；负向：3 滩贴着同一台站在酸沼里的机器，4 秒掉 {lost:0.#}（≈ 分裂液 {row.SplitDps}/秒 + 酸沼 2%/秒 = {expect:0}，" +
-                $"不是三滩叠加的 {stacked:0}）；酸蚀叠层 {stacks} ≤ 上限 {cap}");
+            site.Kernel.TryGetStatus(victim, out _, out _, out float dotDps, out _, out _);
+            // 期望 = 4 秒 ×（分裂液 SplitDps，多滩只算一次 + 酸沼 2% × 1000 + 酸蚀持续伤害 = 每层伤害 × 封顶层数）；三滩叠加会多出 2 × SplitDps × 4。
+            float expect = 4f * (row.SplitDps + 1000f * 0.02f + dotDps);
+            float stacked = expect + 4f * row.SplitDps * 2f;
+            float perStack = site.Kernel.StatusFxOf(math.tzcnt(Bit("Acid"))).Amount;
+            Expect(puddles == 3 && splitCue && Mathf.Abs(lost - expect) <= 25f && stacks == cap && Mathf.Abs(dotDps - perStack * cap) < 0.01f,
+                $"B6 沉淀巨罐被击毁分裂成 {puddles} 滩会爬行的腐蚀液（提示 {splitCue}）；负向：3 滩贴着同一台站在酸沼里的机器，4 秒掉 {lost:0.#}（≈ 分裂液 {row.SplitDps}/秒 + 酸沼 2%/秒 + 酸蚀 {dotDps:0.#}/秒 = {expect:0}，" +
+                $"不是三滩叠加的 {stacked:0}）；酸蚀叠到上限 {stacks}/{cap} 层，持续伤害按封顶层数（{perStack} × {cap}）");
 
             RunFor(site, row.SplitLife + 1f);
             Expect(site.CountPuddles() == 0, $"B6b 分裂液 {row.SplitLife} 秒后蒸发（剩 {site.CountPuddles()} 滩）");
@@ -732,9 +906,28 @@ namespace GameLogic.EditorTools
             bool airFlag = Cu(site, drone).Air == 1;
             Expect(airFlag && m == CombatFireResult.CannotHitAir && reason == GameText.Get("combat.fire.cannot_hit_air") && g == CombatFireResult.Ok && afterGun < d0,
                 $"B9 灭活无人机在空中（{airFlag}）：格斗打不到（{m}，原因“{reason}”），射弹打得到（{g}，{d0:0} → {afterGun:0}）");
+            CombatSites.Close(Bench, s, dropRecord: true);
+
+            // B9b：空中单位不受酸沼与地面区域影响——先把无人机的酸蚀抗性清零（只能靠“在空中”挡住），脚下再铺一块会伤人、挂燃烧的地面区域；对照：同一块区域里的地面敌人掉血、挂上燃烧。
+            s = NewWorldState(1);
+            site = OpenBench(s);
+            _t = 0;
+            site.SetAcidMarsh(new List<float4> { new float4(0f, 0f, 0f, 50f) }, 0.02f, 0.5f);
+            BenchEnemy(site, s, "enemy_deact_drone", "b_air", new Vector2(0f, 0f));
+            BenchEnemy(site, s, "enemy_settling_tank", "b_ground", new Vector2(1.5f, 0f));
+            int air = UnitOf(site, "b_air");
+            int ground = UnitOf(site, "b_ground");
+            site.SetAcidResist(air, 0f);
+            site.SetAcidResist(ground, 0f);
+            site.Kernel.SpawnFieldZone(CombatFaction.Player, new double2(0.7, 0.0), 3f, 5f, 20f, Bit("Fire"), 3f, 4f, 0f, 0f);
+            float a0 = View(site, air).Health;
+            float g0 = View(site, ground).Health;
             RunFor(site, 3f);
-            Expect(View(site, drone).Health >= afterGun - 0.01f || !View(site, drone).Alive,
-                $"B9b 空中单位不受酸沼影响（站在酸沼上空 3 秒，耐久 {View(site, drone).Health:0}）");
+            bool airClean = Mathf.Approximately(View(site, air).Health, a0) && !HasStatus(site, air, Bit("Fire"));
+            bool groundHit = View(site, ground).Health < g0 - 20f && HasStatus(site, ground, Bit("Fire"));
+            Expect(airClean && groundHit,
+                $"B9b 空中单位不受酸沼与地面区域影响（酸蚀抗性清零后站在酸沼 + 燃烧区上空 3 秒：耐久 {a0:0} → {View(site, air).Health:0}、没挂燃烧 {airClean}）；" +
+                $"对照：同一块区域里的地面敌人掉血并挂燃烧（{g0:0} → {View(site, ground).Health:0}，{groundHit}）");
             CombatSites.Close(Bench, s, dropRecord: true);
 
             // 投放：有投放目标（净化塔）时直飞过去、悬停预警 ≥ 0.8 秒后投放并自毁；预警期间被击落 = 投放不发生（应对“对空火力”）。
@@ -952,7 +1145,40 @@ namespace GameLogic.EditorTools
                    && cp.DeflagMult > 0f && airborne && notInsulated && insulated && sp.AcidResist >= 1f,
                 $"C3 攻城 / 据点展开中的澄净专属语法：喷洒车带喷淋参数（射程 {sp.SprayRange}、蓄压 {sp.SprayWarn}）、巨罐带枢轴与分裂（{tp.PivotRadius} 米、{tp.SplitCount} 滩）、爬行者带自爆与爆燃（{cp.BurstRadius} 米 × {cp.DeflagMult}）、" +
                 $"无人机在空中（{airborne}）；绝缘涂层只在当天锁定时挂（平时 {!notInsulated}，锁定后 {insulated}）；不怕酸（抗性 {sp.AcidResist}）");
-            foreach (int u in new[] { su, du, tu, cu, su2 })
+            // 审查修复的回归（参数表去重键）：同一地点、同一种单位，精英 / 普通的专属伤害不能并成一行；分裂液耐久吃精英耐久倍率。
+            RaidCatalog.TryGetUnit("clarity.ln2_pump", out RaidUnitDef pump);
+            int pn = SiegeService.SpawnOne(home, 990201, new Vector2(20f, 10f), Vector2.zero, pump, false);
+            int pe = SiegeService.SpawnOne(home, 990201, new Vector2(22f, 10f), Vector2.zero, pump, true);
+            int te = SiegeService.SpawnOne(home, 990201, new Vector2(24f, 10f), Vector2.zero, tank, true);
+            home.TryGetUnitSilent(pn, out _, out CombatBehaviorProfile pnp);
+            home.TryGetUnitSilent(pe, out _, out CombatBehaviorProfile pep);
+            home.TryGetUnitSilent(te, out _, out CombatBehaviorProfile tep);
+            bool eliteSeparate = pep.SprayDamage > pnp.SprayDamage + 1e-3f && Mathf.Approximately(pep.SprayDamage / pnp.SprayDamage, SiegeCatalog.EliteDamageScale);
+            bool splitScaled = Mathf.Approximately(tep.SplitHp, tp.SplitHp * SiegeCatalog.EliteHpScale) && tp.SplitHp > 0f;
+            Expect(eliteSeparate && splitScaled,
+                $"C3b 参数表按完整字节去重：同一种单位的精英与普通各占一行（喷淋伤害 {pnp.SprayDamage} → 精英 {pep.SprayDamage}）；分裂液耐久与本体同吃精英倍率（{tp.SplitHp} → {tep.SplitHp}）");
+            // 审查修复的回归（FGR-FAC-004 出发时定编成）：突袭队伍的绝缘涂层取所属计划排定时的反制，不重读当天锁定；没有计划的队伍才按当天锁定。
+            RaidDirectorState dir = RaidDirectorService.StateOf(s);
+            RaidPlanRecord[] savedPlans = dir.Plans;
+            dir.Plans = new[]
+            {
+                new RaidPlanRecord { PlanId = "fg10fac01-em", Faction = EnemyDefs.FactionClarity, Counter = "clarity.em" },
+                new RaidPlanRecord { PlanId = "fg10fac01-none", Faction = EnemyDefs.FactionClarity, Counter = string.Empty },
+            };
+            s.Factions.ClarityCounterId = string.Empty; // 今天已不锁绝缘：计划仍按排定时的反制
+            bool? planEm = SiegeService.InsulateOf(s, new TransitGroupRecord { PlanId = "fg10fac01-em" });
+            bool? planNone = SiegeService.InsulateOf(s, new TransitGroupRecord { PlanId = "fg10fac01-none" });
+            bool? harass = SiegeService.InsulateOf(s, new TransitGroupRecord());
+            int su3 = SiegeService.SpawnOne(home, 990201, new Vector2(26f, 10f), Vector2.zero, sprayer, false, 1f, 1f, planEm);
+            home.TryGetUnitSilent(su3, out _, out CombatBehaviorProfile sp3);
+            s.Factions.ClarityCounterId = EnemyDefs.ConditionCounterInsulate; // 今天锁绝缘：没选绝缘的计划仍不挂
+            int su4 = SiegeService.SpawnOne(home, 990201, new Vector2(28f, 10f), Vector2.zero, sprayer, false, 1f, 1f, planNone);
+            home.TryGetUnitSilent(su4, out _, out CombatBehaviorProfile sp4);
+            dir.Plans = savedPlans;
+            Expect(planEm == true && planNone == false && harass == null && (sp3.ImmuneMask & shock) == shock && (sp4.ImmuneMask & shock) == 0u,
+                $"C10 突袭队伍的绝缘取计划的反制（计划=绝缘 → {planEm}，计划=无 → {planNone}，无计划 → {(harass.HasValue ? harass.Value.ToString() : "按当天")}）；" +
+                $"当天未锁也挂（{(sp3.ImmuneMask & shock) == shock}），当天锁了但计划没选也不挂（{(sp4.ImmuneMask & shock) != 0u}）");
+            foreach (int u in new[] { su, du, tu, cu, su2, pn, pe, te, su3, su4 })
             {
                 home.Kernel.Despawn(u);
             }
@@ -1066,9 +1292,12 @@ namespace GameLogic.EditorTools
 
         private static void CheckFeedbackAndCodex()
         {
+            // 第一次遭遇空中敌人：走正式的遭遇入口（与攻城展开 / 交火同一个），按 airborne 标签发钩子。
+            MechanicCodex.ResetContentForTests();
+            Progression.MechanicCodex.OnEnemyEncountered("enemy_deact_drone");
             string[] hooks = { "clarity.first_spray", "clarity.first_freeze", "clarity.first_burst", "clarity.first_slick_ignite", "clarity.first_pivot",
-                "clarity.first_split", "clarity.first_acid", "clarity.first_pool_washed", "clarity.first_drone" };
-            var unseen = hooks.Where(h => !GameSettings.HasSeenGuidanceHook(h)).ToList();
+                "clarity.first_split", "clarity.first_acid", "clarity.first_pool_washed", "clarity.first_drone", "clarity.first_air" };
+            var unseen = hooks.Where(h => !TouchedHooks.Contains(h)).ToList(); // 本次运行真的触发过（不看跨战役的“已看过”记录）
             string[] entries = { "codex.clarity.spray", "codex.clarity.pivot", "codex.clarity.crawler", "codex.clarity.chill", "codex.clarity.air", "codex.clarity.acid" };
             var missing = new List<string>();
             foreach (string id in entries)
@@ -1103,7 +1332,7 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(unseen.Count == 0 && missing.Count == 0 && badLinks.Count == 0,
-                $"E1 B07 / B14：每条专属行为第一次出现都发了引导钩子（未发 {unseen.Count}：{string.Join(",", unseen)}）；6 条澄净机制图鉴条目中英齐全（缺 {missing.Count}）；敌人图鉴互链可达（坏链 {badLinks.Count}）");
+                $"E1 B07 / B14：每条专属行为与第一次遭遇空中敌人都在本次运行里发了引导钩子（未发 {unseen.Count}：{string.Join(",", unseen)}）；6 条澄净机制图鉴条目中英齐全（缺 {missing.Count}）；敌人图鉴互链可达（坏链 {badLinks.Count}）");
             string hover = AcidMarshService.HoverLine();
             string frozen = GameText.Get("combat.fire.frozen");
             string air = GameText.Get("combat.fire.cannot_hit_air");
@@ -1127,11 +1356,18 @@ namespace GameLogic.EditorTools
             {
                 BenchEnemy(site, s, types[i % types.Length], "p" + i, new Vector2((i % 20) * 7f, (i / 20) * 7f));
             }
+            // 40 台机器（含 8 座建筑）穿插进敌人网格：每个敌人 16 米内都有目标，喷淋 / 枢轴 / 自爆 / 油迹 / 喷淋池 / 分裂液都真的在跑（审查修复：此前机器离敌人 27 米以上，计时的是空转）。
             for (int i = 0; i < 40; i++)
             {
-                Player(site, new Vector2((i % 10) * 14f, 90f + (i / 10) * 4f), Gun(1f), 1e6f);
+                Player(site, new Vector2((i % 10) * 14f + 3.5f, (i / 10) * 16f + 7f), Gun(1f), 1e6f, i % 5 == 0 ? CombatUnitKind.Structure : CombatUnitKind.Machine);
             }
-            RunFor(site, 2f);
+            RunFor(site, 9f); // 喷淋池与油迹到稳态
+            long sprays = site.Kernel.Counters.Sprays;
+            long pivots = site.Kernel.Counters.PivotHits;
+            long bursts = site.Kernel.Counters.Bursts;
+            int warm = site.CountZonesOfKind(CombatConst.ZoneKindPool) + site.CountZonesOfKind(CombatConst.ZoneKindSlick);
+            Expect(sprays > 0 && pivots > 0 && bursts > 0 && warm >= 20,
+                $"F0 性能场景的负载是真的（计时前：喷淋 {sprays} 次、扫中 {pivots} 次、自爆 {bursts} 次、喷淋池 + 油迹 {warm} 块）");
             var sw = Stopwatch.StartNew();
             int steps = 120;
             RunFor(site, steps * Dt);

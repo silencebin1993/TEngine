@@ -1427,6 +1427,38 @@ namespace BinGames.Sim.Combat
             ClarityOnKill(ref d, t, killerId);
         }
 
+        /// <summary>
+        /// FG10-FAC-01（审查修复）：自毁（油污爬行者自爆、灭活无人机投放后）——单位移除，但不是被谁击毁：不计击杀数、不发炮塔击杀；
+        /// 逐次报告的单位与攻城单位照常发阵亡 / 攻城击毁事件（热更层要把记录标为阵亡、把攻城队伍减员），但 Code2 带 <see cref="CombatConst.KillSelfDestructBit"/>，
+        /// 热更层据此跳过击毁数、贡献、残骸、掉落与靶场解锁。没有死亡效果（自爆单位的爆炸已经结算过）。
+        /// </summary>
+        internal static void SelfDestruct(ref CombatData d, int t)
+        {
+            if (!d.IsAlive(t))
+            {
+                return;
+            }
+            d.Set(t, CombatUnitFlags.Alive, false);
+            d.Set(t, CombatUnitFlags.Targetable, false);
+            d.Hp[t] = 0f;
+            d.Cmd[t] = default;
+            if (d.Has(t, CombatUnitFlags.Report) || d.Has(t, CombatUnitFlags.ExternalHealth) || d.Has(t, CombatUnitFlags.ReportDeath))
+            {
+                Gameplay(ref d, CombatEventKind.Killed, t, 0, 0f, 0f, d.Pos[t], 0, CombatConst.KillSelfDestructBit);
+            }
+            if (d.Siege[t].Role != 0 && d.Faction[t] != (byte)CombatFaction.Player)
+            {
+                byte flags = (byte)((d.Has(t, CombatUnitFlags.Elite) ? 1 : 0) | CombatConst.KillSelfDestructBit);
+                Gameplay(ref d, CombatEventKind.SiegeKilled, t, 0, d.Siege[t].Group, -(float)d.ExtKey[t], d.Pos[t], d.Siege[t].Role, flags);
+            }
+            if (d.Has(t, CombatUnitFlags.RemoveOnDeath))
+            {
+                CombatScalars s = d.Scalars[0];
+                s.Tombstones++;
+                d.Scalars[0] = s;
+            }
+        }
+
         public static void Heal(ref CombatData d, int t, float amount, int healer)
         {
             if (!d.IsAlive(t))
@@ -2125,9 +2157,9 @@ namespace BinGames.Sim.Combat
                     for (int k = start; k < start + count; k++)
                     {
                         int j = grid.Slots[k];
-                        if (j == i || d.Faction[j] != faction || !d.IsAlive(j))
+                        if (j == i || d.Faction[j] != faction || !d.IsAlive(j) || IsAir(ref d, j) != IsAir(ref d, i))
                         {
-                            continue;
+                            continue; // FG10-FAC-01（审查修复）：只和同一层的单位分离（空中单位不挤地面单位）
                         }
                         byte bj = d.Behavior[j];
                         if (bj != (byte)CombatBehavior.Raider && bj != (byte)CombatBehavior.Commanded && bj != (byte)CombatBehavior.AutoEngage)
