@@ -197,7 +197,7 @@ namespace GameLogic.EditorTools
 
         /// <summary>
         /// 夹具：只能出现在这些方法体里（DEBT 编号见 ADR-QA-023 第 5 节）。FGJ-M6 没有任何突袭 / 研究 / 跳时夹具；
-        /// 唯一一处是 FG9-ACT1-01 修复轮加的重建验收兜底（两波真实突袭一座建筑都没打坏时才用，FG-GAP-146 → FG9-BAL-01 调完突袭强度后删掉，DEBT-FG9ACT101-05）。
+        /// FG9-ACT1-01 修复轮加的重建验收兜底已由 FG9-BAL-01 删除（DEBT-FG9ACT101-05）；FGJ-M6 只剩开局的静默夜日程夹具（只改日期，DEBT-FG9ACT101-06 ①）。
         /// 登记的夹具 token 只在它自己的方法里免于 <see cref="ForbiddenCalls"/> 扫描，方法外出现照样判违规。
         /// </summary>
         private static readonly (string Token, string Method, int Count, string Debt)[] Fixtures =
@@ -205,12 +205,12 @@ namespace GameLogic.EditorTools
             ("ResearchService.CompleteForTests(", "ApplyResearchFixture", 1, "FGJ-M6R 屏障 / 陷阱已研究 DEBT-FG6E2E01-02"),
             ("RaidDirectorService.RequestStoryRaid(", "ApplyRaidFixture", 1, "FGJ-M6R 剧情节点触发突袭 DEBT-FG6E2E01-03"),
             ("M.ApplySubstrateFixture(", "ApplySubstrateFixture", 1, "FGJ-M6R 芯片基板进仓库（与 FGJ-M5 同一个夹具）DEBT-FG5E2E01-02"),
-            ("BuildingOps.ApplyDamage(", "ApplyRebuildDamageFixture", 1, "FGJ-M6 两波都没打坏建筑时的重建验收兜底 DEBT-FG9ACT101-05（FG-GAP-146）"),
+            ("SilentNightService.PlanDayForTests(", "ApplySilentNightFixture", 1, "FGJ-M6 第一次静默夜改排到第 40 日（只改日期）DEBT-FG9ACT101-06 ①"),
         };
 
         private static void CheckJourneySourcesUseInput()
         {
-            Line("  · A2. M6 旅程源码只走输入通道，不直接调业务方法；FGJ-M6R 的三处进度夹具与 FGJ-M6 的重建验收兜底只在登记的方法里，FGJ-M6 没有突袭夹具");
+            Line("  · A2. M6 旅程源码只走输入通道，不直接调业务方法；FGJ-M6R 的三处进度夹具与 FGJ-M6 的静默夜日程夹具只在登记的方法里（重建验收兜底已删除，DEBT-FG9ACT101-05），FGJ-M6 没有突袭夹具");
             var hits = new List<string>();
             var raw = new StringBuilder();
             var codeAll = new StringBuilder();

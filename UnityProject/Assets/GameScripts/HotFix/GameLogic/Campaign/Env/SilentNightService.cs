@@ -98,6 +98,12 @@ namespace GameLogic.Campaign.Env
         /// <summary>间隔（游戏日，按当前难度）。</summary>
         public static int IntervalDays(CampaignState s) => Math.Max(1, DifficultyService.SilentNightDays(s));
 
+        /// <summary>FG9-BAL-01（FG16 第 2 节 2:30 第一次静默夜）：第一次静默夜比间隔再推迟几日（env.silent.first_extra_days）。</summary>
+        public static int FirstExtraDays => Math.Max(0, (int)Math.Round(Tuning("env.silent.first_extra_days", 2f)));
+
+        /// <summary>第一次静默夜最早在第几日（标准 5 + 2 = 第 7 日；之后照常每 <see cref="IntervalDays"/> 日）。</summary>
+        public static int FirstDay(CampaignState s) => IntervalDays(s) + FirstExtraDays;
+
         // ── 查询 ─────────────────────────────────────────────────────────────────
 
         public static SilentNightState StateOf(CampaignState s)
@@ -366,7 +372,9 @@ namespace GameLogic.Campaign.Env
         {
             int interval = IntervalDays(state);
             int today = GameClock.DayOf(ticks / (double)Math.Max(1, GameClock.StepHz));
-            int day = Math.Max(interval, (today + interval - 1) / interval * interval);
+            // 复审 P2：补排到“第一次日 + k × 间隔”里今天之后最近的一个（越晚的旧档排得越晚、单调）。
+            int first = FirstDay(state);
+            int day = today <= first ? first : first + (today - first + interval - 1) / interval * interval;
             PlanTicks(day, out long warn, out _, out _);
             if (warn <= ticks)
             {

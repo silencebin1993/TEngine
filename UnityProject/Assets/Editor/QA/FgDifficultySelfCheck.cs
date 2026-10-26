@@ -339,7 +339,8 @@ namespace GameLogic.EditorTools
 
         private static int ExpectedBudget(CampaignState s, RaidPlanRecord p, double scale) =>
             Math.Max(1, (int)Math.Round(RaidCatalog.LevelBudget(p.Level) * RaidCatalog.ActCoef(Math.Max(1, s.Progress?.Act ?? 1)) * scale
-                                        * RaidDirectorService.IntervalCoef(D(s), p.CreatedTick) * (p.FirstRaid ? RaidCatalog.FirstRaidScale : 1.0)));
+                                        * RaidDirectorService.IntervalCoef(D(s), p.CreatedTick)
+                                        * (p.FirstRaid || RaidDirectorService.IsFirstSilentNightBudget(D(s), p) ? RaidCatalog.FirstRaidScale : 1.0))); // FG9-BAL-01 BAL-REC-003
 
         private static int NotifyCount(string type) => NotificationCenter.History.Where(e => e.Type?.Id == type).Sum(e => Math.Max(1, e.Members.Count));
 
@@ -430,9 +431,9 @@ namespace GameLogic.EditorTools
             string core = GameText.Get("difficulty.line.core_loss");
             bool builder = b.Contains(GameText.Get("difficulty.line.story_only")) && !b.Contains(GameText.Format("difficulty.line.frequency", "1"))
                            && b.Contains(GameText.Format("difficulty.line.scale", "0.5")) && b.Contains(GameText.Format("difficulty.line.enemy", "0.8", "0.8"))
-                           && b.Contains(GameText.Format("difficulty.line.silent_night", 7)) && b.Contains(GameText.Get("difficulty.builder.desc"));
+                           && b.Contains(GameText.Format("difficulty.line.silent_night", 7, 7 + GameLogic.Campaign.Env.SilentNightService.FirstExtraDays)) && b.Contains(GameText.Get("difficulty.builder.desc"));
             bool harsh = h.Contains(GameText.Format("difficulty.line.frequency", "1.3")) && h.Contains(GameText.Format("difficulty.line.scale", "1.3"))
-                         && h.Contains("×0.8") && h.Contains(GameText.Format("difficulty.line.enemy", "1.2", "1.2")) && h.Contains(GameText.Format("difficulty.line.silent_night", 4));
+                         && h.Contains("×0.8") && h.Contains(GameText.Format("difficulty.line.enemy", "1.2", "1.2")) && h.Contains(GameText.Format("difficulty.line.silent_night", 4, 4 + GameLogic.Campaign.Env.SilentNightService.FirstExtraDays));
             bool custom = cu.Contains(GameText.Format("difficulty.line.frequency", "1.7")) && cu.Contains(GameText.Format("difficulty.line.scale", "0.5"))
                           && cu.Contains(GameText.Format("difficulty.line.enemy", "1", "1")) && cu.Contains(GameText.Get("difficulty.custom.desc"));
             bool common = new[] { b, st, h, cu }.All(x => x.Contains(first) && x.Contains(core) && x.Contains(GameText.Get("difficulty.line.record")) && !GameText.ContainsMarker(x));

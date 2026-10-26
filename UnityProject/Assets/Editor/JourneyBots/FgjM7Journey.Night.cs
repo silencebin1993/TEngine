@@ -427,7 +427,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>
         /// 测试捷径（只改日程，登记在 ADR-QA-024 夹具表）：
         /// ① <see cref="SilentNightService.PlanDayForTests"/>：第一次静默夜改到“预警还在 6 个游戏小时以后”的最近一个夜里——时刻、预警提前量、持续时间与正式相同，只改日期
-        ///    （正式第 5 日，3 倍速下也要等约 31 分钟真实时间，超过旅程 30 分钟上限；正式排定已在 cal_open 断言）；
+        ///    （正式标准第 7 日（间隔 + 首次推迟），3 倍速下也要等约 31 分钟真实时间，超过旅程 30 分钟上限；正式排定已在 cal_open 断言）；
         /// ② <see cref="WeatherService.ScheduleForTests"/>：酸雨 1 个游戏小时后开始，下到静默夜结束后 2 个游戏小时（持续时间在 0.5～1.5 日之内）——第一段恶劣天气最早第 3 日、种类按种子随机。
         /// 之后的预警、开始、效果、结束全部由世界模拟按正式流程推进。
         /// </summary>

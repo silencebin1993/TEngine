@@ -600,6 +600,9 @@ namespace GameLogic.EditorTools
             Seg("FgFoundryFactionSelfCheck", FgFoundryFactionSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);
+            // FG9-BAL-01 第一幕平衡：节奏机器人（加速模拟，真实世界逐步推进）在 3 个测试种子上走完第一幕、每个节奏点偏差 ≤ 25%（FGT-BAL-004 第一幕部分）；
+            // 严酷 / 建造者负向、旧静默夜规则会被拦、存读档、突袭 vs 第一套防线（FG-GAP-146 数据）、性能。
+            Seg("FgAct1BalanceSelfCheck", FgAct1BalanceSelfCheck.Run);
             // FG9-UX-01 正式版图鉴（FG13 FGR-UX-050 / 051、FGR-UX-030；FG09 FGR-FAC-005；FGT-UX-006、FGT-FAC-008）：16 个页签由表生成且条数一致、中英文齐全、互链可达；
             // 真内核交火首次遭遇解锁（远处不解锁、击毁同样算、不重复通知）、暂停 / 0.5x～3x；机制条目跨存档（图鉴文件、重启）/ 资料库按存档（新存档看不到别的存档剧情、搜索不泄漏、真文件存读档）；
             // 搜索与双向互链；任意悬停提示一键跳转（显式 / 按标题兜底）；剪影与获取提示、资料库键、布局探针；进入战役补解锁；性能。

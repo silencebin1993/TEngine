@@ -28,7 +28,7 @@ namespace GameLogic.EditorTools.JourneyBots
     /// 建净化塔，让归还面积达到第一个里程碑，拿到奖励。
     ///
     /// 轻量口径（用户 2026-10-12）：一条正向旅程走通核心循环、每个新核心系统至少被真实输入触发一次并断言；不为凑剧情改数值。只有两处“日程”测试捷径（只改日期，效果全走正式推进，见 <see cref="ApplyScheduleFixture"/>）：
-    /// 第一次静默夜从第 5 日夜挪到准备就绪后的那个夜里（正式间隔下 3 倍速也要等约 31 分钟，超过旅程 30 分钟上限）、酸雨排到静默夜前后（第一段恶劣天气最早第 3 日、种类随机）。
+    /// 第一次静默夜从正式日程（间隔 + 首次推迟，标准第 7 日）的夜里挪到准备就绪后的那个夜里（正式间隔下 3 倍速也要等约 31 分钟，超过旅程 30 分钟上限）、酸雨排到静默夜前后（第一段恶劣天气最早第 3 日、种类随机）。
     /// 归还面积第一个里程碑（5,000 格）在 T1 净化塔下要很多座塔和多个游戏日，旅程只证明“净化 → 归还面积真实增长”，并按实测速度写出可达性估算；里程碑奖励由 FgPurificationSelfCheck M1 断言，可达性交真人试玩（DEBT-FG7E2E01-02）。
     /// </summary>
     public static partial class FgjM7Journey
@@ -51,7 +51,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("seed", "种子进了存档；生成结果与该种子的基准一致；起始区四级保证满足", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
                 S("workers", "记下开局两台机器", 10, null, FgjM3Common.TickWorkers),
 
-                // ── 1. 看日历（正式排定：第一次静默夜在第 5 日夜里）──
+                // ── 1. 看日历（正式排定：第一次静默夜在“间隔 + 首次推迟”日夜里，标准第 7 日）──
                 S("cal_open", "按日历键（默认 Alt+L）打开日历面板", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenCalendar, () => CalendarPanelUIToolkit.IsOpen, true), c => TickCalendar(c, false), retries: 1),
                 S("cal_close", "再按日历键关闭日历面板", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenCalendar, () => CalendarPanelUIToolkit.IsOpen, false), TickCalendarClosed, retries: 1),
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
@@ -138,7 +138,7 @@ namespace GameLogic.EditorTools.JourneyBots
         // ── 日历 ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// 日历面板打开：今天起 N 个游戏日的时间轴 + 事件列表；<paramref name="afterFixture"/> = false 时核对正式排定（第一次静默夜在第 5 日夜里），
+        /// 日历面板打开：今天起 N 个游戏日的时间轴 + 事件列表；<paramref name="afterFixture"/> = false 时核对正式排定（第一次静默夜在“间隔 + 首次推迟”日夜里，标准第 7 日），
         /// = true 时核对挪过来的静默夜与酸雨都在事件列表里、带倒计时。
         /// </summary>
         private static StepOutcome TickCalendar(JourneyContext c, bool afterFixture)
@@ -161,11 +161,15 @@ namespace GameLogic.EditorTools.JourneyBots
             if (!afterFixture)
             {
                 int interval = SilentNightService.IntervalDays(s);
-                bool ok = cal.DayRowCount == CalendarService.Days && sn != null && sn.NextDay == interval && silent.Length > 0 && cal.NowText.Contains("第 ");
+                int firstDay = SilentNightService.FirstDay(s); // FG9-BAL-01：第一次 = 间隔 + 首次推迟
+                // 复审 P2：按日历窗口精确判（与 CalendarPanelUIToolkit 同一窗口：今天 0 点起 Days 个游戏日）——在窗口里就必须列出静默夜事件，不在就不能列。
+                double viewEnd = GameClock.SecondsAt(GameClock.DayOf(GameClock.GameSeconds), 0.0) + CalendarService.Days * GameClock.DaySeconds;
+                bool inView = sn != null && sn.StartTick / (double)GameClock.StepHz < viewEnd;
+                bool ok = cal.DayRowCount == CalendarService.Days && sn != null && sn.NextDay == firstDay && (silent.Length > 0) == inView && cal.NowText.Contains("第 ");
                 c.SetLong("sn.formalStart", sn?.StartTick ?? -1);
                 return ok
-                    ? StepOutcome.Done($"日历 {cal.DayRowCount} 个游戏日（{cal.NowText}）：第一次静默夜按正式排定在第 {sn.NextDay} 日（间隔 {interval} 日）{GameClock.FormatHhMm(sn.StartTick / (double)GameClock.StepHz)} 开始；事件“{evLine}”")
-                    : StepOutcome.Fail($"日历不对：{cal.DayRowCount} 天（应 {CalendarService.Days}）、下一次静默夜第 {sn?.NextDay} 日（应 {interval}）、静默夜事件“{silent}”；全部事件“{evLine}”");
+                    ? StepOutcome.Done($"日历 {cal.DayRowCount} 个游戏日（{cal.NowText}）：第一次静默夜按正式排定在第 {sn.NextDay} 日（间隔 {interval} 日 + 首次推迟 {SilentNightService.FirstExtraDays} 日）{GameClock.FormatHhMm(sn.StartTick / (double)GameClock.StepHz)} 开始；事件“{evLine}”")
+                    : StepOutcome.Fail($"日历不对：{cal.DayRowCount} 天（应 {CalendarService.Days}）、下一次静默夜第 {sn?.NextDay} 日（应 {firstDay}）、静默夜事件“{silent}”；全部事件“{evLine}”");
             }
             string rain = ev.FirstOrDefault(t => t.Contains("酸雨")) ?? string.Empty;
             bool ok2 = sn != null && sn.NextDay == c.GetInt("sn.day") && silent.Length > 0 && rain.Length > 0;

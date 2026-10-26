@@ -367,13 +367,20 @@ namespace GameLogic.Campaign.Defense
             {
                 int act = Math.Max(1, s.Progress?.Act ?? 1);
                 b = RaidCatalog.LevelBudget(p.Level) * RaidCatalog.ActCoef(act) * scale * IntervalCoef(d, p.CreatedTick);
-                if (p.FirstRaid)
+                // FG9-BAL-01（BAL-REC-003）：玩家遇到的第一波突袭都“规模很小”——还没有任何突袭抵达过时，静默夜突袭同样乘 raid.first_raid_scale
+                // （节奏机器人实测：第一次静默夜的 1 级突袭 8 台在 2:20 直接拆掉只有 1 座炮塔的核心）。
+                // 复审 P1：“抵达过”按真实到达计数（ArrivedWaveCount，突袭队伍到达时写入、进存档），不看计划抵达步——已排定但还没到的普通首袭不算。
+                if (p.FirstRaid || IsFirstSilentNightBudget(d, p))
                 {
                     b *= RaidCatalog.FirstRaidScale;
                 }
             }
             return Math.Max(1, (int)Math.Round(b));
         }
+
+        /// <summary>BAL-REC-003：还没有任何突袭真正到达过家园 / 前哨（<see cref="RaidDirectorState.ArrivedWaveCount"/> = 0）时的静默夜突袭也按第一次突袭缩小。</summary>
+        public static bool IsFirstSilentNightBudget(RaidDirectorState d, RaidPlanRecord p) =>
+            d != null && p != null && d.ArrivedWaveCount <= 0 && p.Trigger == RaidCatalog.TriggerSilentNight;
 
         private static double Hash01(CampaignState s, int serial, int k, uint salt) =>
             WorldGenMath.Hash(SeedOf(s), serial, k, salt) / 4294967296.0;

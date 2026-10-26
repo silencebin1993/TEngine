@@ -356,29 +356,31 @@ namespace GameLogic.EditorTools
             {
                 CampaignState s = NewWorld(7201, true, diff);
                 SilentNightState d = D(s);
-                SilentNightService.PlanTicks(days, out long w, out long st, out long en);
-                bool planned = d.NextDay == days && d.WarnTick == w && d.StartTick == st && d.EndTick == en && !d.Active && !d.Warned;
+                // FG9-BAL-01：第一次静默夜 = 间隔 + 首次推迟（env.silent.first_extra_days），之后照常每 N 日。
+                int firstDay = days + SilentNightService.FirstExtraDays;
+                SilentNightService.PlanTicks(firstDay, out long w, out long st, out long en);
+                bool planned = d.NextDay == firstDay && SilentNightService.FirstDay(s) == firstDay && d.WarnTick == w && d.StartTick == st && d.EndTick == en && !d.Active && !d.Warned;
                 bool hours = Math.Abs(HourOf(st) - 22.0) < 1e-3 && Math.Abs(HourOf(en) - 2.0) < 1e-3 && Math.Abs(HourOf(w) - 20.8) < 1e-3
                              && DayNightCycle.IsNight(st / (double)Hz) && DayNightCycle.IsNight((en - 1) / (double)Hz)
                              && en - st == GameClock.TicksFor(4 * GameClock.HourSeconds) && st - w == GameClock.TicksFor(1.2 * GameClock.HourSeconds);
                 ok &= planned && hours;
                 lines.Add($"{diff} 第 {d.NextDay} 日 {GameClock.FormatHhMm(st / (double)Hz)}～{GameClock.FormatHhMm(en / (double)Hz)}（预警 {GameClock.FormatHhMm(w / (double)Hz)}；1x 下持续 {(en - st) / (double)Hz:0} 秒、预警提前 {(st - w) / (double)Hz:0} 秒）");
             }
-            Expect(ok, "C1 周期：按难度每 N 个游戏日一次（标准 5 / 建造者 7 / 严酷 4，读 fg.TbRaidDifficulty.silentNightDays），发生在夜里，持续 4 游戏小时，开始前 1.2 游戏小时预警：" + string.Join("；", lines));
+            Expect(ok, "C1 周期：按难度每 N 个游戏日一次（标准 5 / 建造者 7 / 严酷 4，读 fg.TbRaidDifficulty.silentNightDays；第一次再推迟 " + SilentNightService.FirstExtraDays + " 日，FG9-BAL-01），发生在夜里，持续 4 游戏小时，开始前 1.2 游戏小时预警：" + string.Join("；", lines));
 
             // 日历来源与常驻规则时间窗（DEBT-FG7ENV01-01 / DEBT-FG4ECO06-02 的正式接入）。
             CampaignState c = NewWorld(7202);
             SilentNightState cd = D(c);
             double now = GameClock.GameSeconds;
-            bool next = CalendarService.TryNext(c, CalendarKind.SilentNight, now, 6 * GameClock.DaySeconds, out CalendarEntry e);
+            bool next = CalendarService.TryNext(c, CalendarKind.SilentNight, now, (SilentNightService.FirstDay(c) + 1) * GameClock.DaySeconds, out CalendarEntry e);
             bool calOk = next && Math.Abs(e.StartSeconds - cd.StartTick / (double)Hz) < 1e-6 && e.Title == GameText.Get("env.silent.title") && e.Detail.Contains("22:00")
                          && CalendarService.HasSource(CalendarKind.SilentNight) && CalendarService.PendingKindsSuffix() == "\n" + GameText.Get("env.cal.pending_weather");
             int marks = CalendarService.Collect(c, now, now + 14 * GameClock.DaySeconds).Count(x => x.Kind == CalendarKind.SilentNight);
             bool window = StandingRuleService.TrySilentWindow(c, out long ws, out long we) && ws == cd.StartTick && we == cd.EndTick;
-            Expect(calOk && marks == 2 && window,
-                $"C1 日历与时间窗：日历来源已注册（下一次 {e.Detail}），14 天视野里有第 5、10 日两次（{marks}），页脚只剩“天气预报后续加入”；常驻规则“静默夜预案”的正式时间窗 = 存档里的开始 / 结束步 {window}");
+            Expect(calOk && marks == 2 && window && cd.NextDay == SilentNightService.FirstDay(c),
+                $"C1 日历与时间窗：日历来源已注册（下一次 {e.Detail}），14 天视野里有第 {cd.NextDay}、{cd.NextDay + SilentNightService.IntervalDays(c)} 日两次（{marks}），页脚只剩“天气预报后续加入”；常驻规则“静默夜预案”的正式时间窗 = 存档里的开始 / 结束步 {window}");
 
-            // 旧档补排：没有静默夜计划的存档在第 7 日上午第一次推进 → 排到第 10 日；预警已过的第 5 日夜里 → 也排到第 10 日（不追溯）。
+            // 旧档补排：没有静默夜计划的存档在第 7 日上午第一次推进 → 排到第 10 日；第 5 日 21:00 → 第一次最早第 7 日（FG9-BAL-01，不追溯）。
             CampaignState o = NewWorld(7203);
             D(o).NextDay = 0;
             SkipTo(o, 7, 9.0);
@@ -389,8 +391,10 @@ namespace GameLogic.EditorTools
             D(o2).NextDay = 0;
             SkipTo(o2, 5, 21.0);
             WorldSimulation.StepMany(1);
-            Expect(fromDay7 == 10 && D(o2).NextDay == 10 && !D(o2).Active,
-                $"C1 旧档补排：没有计划的存档在第 7 日上午 → 第 {fromDay7} 日；第 5 日 21:00（预警已过）→ 第 {D(o2).NextDay} 日，不追溯、不立刻开始");
+            // FG9-BAL-01：第 5 日 21:00 没有计划的旧档 → 按“第一次最早第 7 日”排到第 7 日（还没到预警）。
+            // 复审 P2：补排单调——第 7 日上午（第一次日当天、预警未到）排到第 7 日，不再跳到第 10 日（第 5 日的旧档反而更早）。
+            Expect(fromDay7 == SilentNightService.FirstDay(o) && D(o2).NextDay == SilentNightService.FirstDay(o2) && fromDay7 >= D(o2).NextDay && !D(o2).Active,
+                $"C1 旧档补排：没有计划的存档在第 7 日上午 → 第 {fromDay7} 日（应为第一次日 {SilentNightService.FirstDay(o)}）；第 5 日 21:00（预警已过）→ 第 {D(o2).NextDay} 日，不追溯、不立刻开始");
         }
 
         // ── R1 FGT-ENV-002：第 3.2 节表格逐条 ─────────────────────────────────────
@@ -550,7 +554,7 @@ namespace GameLogic.EditorTools
             Expect(debrisOk && GameSettings.HasSeenGuidanceHook(GuidanceHooks.EnvFirstStormDebris) && (s.GroundItems?.Length ?? 0) == ground0 + debris.Count,
                 $"R1 风暴残骸（FGR-ENV-014）：结束时按种子在家园地面放了 {debris.Count} 处（{string.Join("、", debris.Select(g => g == null ? "缺" : $"{g.ResourceType}×{g.Amount}@({g.Position.x:0},{g.Position.y:0})"))}），都在可走的空地上、离核心不超过 {GridContent.Tuning("env.silent.debris_ring_max")} 格，各开了一张搬运单让机器搬回");
             bool released = b2 != null && b2.FailureReason != SilentNightService.HoldReason && b2.State != WorkOrderState.Waiting;
-            Expect(released && r2 != null && !r2.Active && d.NextDay == 10 && !SignalLinkService.IsSilentNight && SignalCoverageService.CanReceiveCommand(erc1)
+            Expect(released && r2 != null && !r2.Active && d.NextDay == SilentNightService.FirstDay(s) + SilentNightService.IntervalDays(s) && !SignalLinkService.IsSilentNight && SignalCoverageService.CanReceiveCommand(erc1)
                    && StandingRuleService.TrySetThreshold(s, rule.Serial, 31, out _),
                 $"R1 结束后恢复：静默夜里放的施工自动开工（{b2?.State}）、静默夜预案恢复原状、下一次排到第 {d.NextDay} 日、接入与远程命令、改规则恢复");
             int guard = 0;
@@ -823,18 +827,19 @@ namespace GameLogic.EditorTools
         private static void CheckExpeditionHint()
         {
             CampaignState s = NewWorld(7221);
-            SkipTo(s, 4, 9.0);
+            int first = SilentNightService.FirstDay(s); // FG9-BAL-01：第一次静默夜在第“间隔 + 推迟”日
+            SkipTo(s, first - 1, 9.0);
             WorldSimulation.StepMany(1);
             string far = SilentNightService.ExpeditionCrossText(s);
-            SkipTo(s, 5, 12.0);
+            SkipTo(s, first, 12.0);
             WorldSimulation.StepMany(1);
             string near = SilentNightService.ExpeditionCrossText(s);
             SkipToTick(s, D(s).StartTick + Hz);
             WorldSimulation.StepMany(2);
             string during = SilentNightService.ExpeditionCrossText(s);
-            Expect(far == null && near != null && near.Contains("第 5 日 22:00") && near.Contains("安全模式") && during != null && D(s).Active
+            Expect(far == null && near != null && near.Contains($"第 {first} 日 22:00") && near.Contains("安全模式") && during != null && D(s).Active
                    && during.Contains("正在进行") && during.Contains("02:00") && !during.Contains("22:00") && !during.Contains("下一个"),
-                $"X1 FGT-ENV-003 远征准备提示：第 4 日上午（离静默夜超过估计的 {SilentNightService.ExpeditionEstimateHours:0} 游戏小时）不提示；第 5 日中午提示“{near}”；" +
+                $"X1 FGT-ENV-003 远征准备提示：第 {first - 1} 日上午（离静默夜超过估计的 {SilentNightService.ExpeditionEstimateHours:0} 游戏小时）不提示；第 {first} 日中午提示“{near}”；" +
                 $"静默夜进行中改说正在进行、到几点结束（不再写已经过去的开始时刻）：“{during}”");
         }
 
@@ -1073,23 +1078,24 @@ namespace GameLogic.EditorTools
             int starts0 = SilentNightService.StartCount;
             SkipToTick(s, d.EndTick + 10);
             WorldSimulation.StepMany(1);
-            bool skip = SilentNightService.SkippedCount == skipped0 + 1 && SilentNightService.StartCount == starts0 && !d.Active && d.NextDay == 10;
+            bool skip = SilentNightService.SkippedCount == skipped0 + 1 && SilentNightService.StartCount == starts0 && !d.Active && d.NextDay == SilentNightService.FirstDay(s) + SilentNightService.IntervalDays(s);
             // 没接正式入口：世界模拟不推进静默夜（自检之间复位后也不会误触发）。
             CampaignState u = NewWorld(7262);
             SilentNightService.ResetForTests();
             SkipToTick(u, D(u).StartTick + 5);
             WorldSimulation.StepMany(2);
             bool idle = !D(u).Active && !SignalLinkService.IsSilentNight && !SilentNightService.IsActiveNow();
-            // 难度中途改：已排定的这一次不变，再下一次按新间隔（标准 → 严酷：第 5 日之后是第 9 日）。
+            // 难度中途改：已排定的这一次不变，再下一次按新间隔（标准 → 严酷：第 7 日之后是第 11 日）。
             CampaignState h = NewWorld(7263);
             SilentNightState hd = D(h);
+            int stdFirst = SilentNightService.FirstDay(h);
             h.DifficultyId = "Harsh";
             int planned = hd.NextDay;
             SkipToTick(h, hd.StartTick - 1);
             WorldSimulation.StepMany(3);
             SkipToTick(h, hd.EndTick - 1);
             WorldSimulation.StepMany(3);
-            Expect(skip && idle && planned == 5 && hd.NextDay == 9,
+            Expect(skip && idle && planned == stdFirst && hd.NextDay == planned + SilentNightService.IntervalDays(h),
                 $"N1 负向：时间整段跳过静默夜 → 不补发效果、告警并排下一次（第 {d.NextDay} 日）{skip}；没接正式入口时世界模拟不推进 {idle}；难度中途改为严酷 → 已排定的第 {planned} 日不变，再下一次第 {hd.NextDay} 日");
         }
 

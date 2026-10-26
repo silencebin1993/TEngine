@@ -442,9 +442,9 @@ namespace GameLogic.EditorTools
             BuildingRecord gen = home.First(b => b.BuildingTypeId == "generator");
             BuildingRecord core = home.First(b => b.BuildingTypeId == "core");
             Expect(gen.ConstructionState == BuildingConstructionState.Damaged && core.ConstructionState == BuildingConstructionState.Operational
-                   && Mathf.Approximately(core.Health, 500f) && s.Grid.LayoutVersion == HomeGridService.LayoutVersion
+                   && Mathf.Approximately(core.Health, GameLogic.Campaign.Economy.BuildingOps.MaxDurability("core")) && s.Grid.LayoutVersion == HomeGridService.LayoutVersion
                    && s.Grid.Explored.Length == 1 && s.Grid.Explored[0].Radius == 40 && s.Grid.TerrainSourceId == WorldTerrainSource.Id,
-                "开局状态来自表（发电机受损、核心运转 500 生命）；格网域写入布局版本、开局探索半径 40、地形来源（FG0-ARCH-05 起新战役 = 世界生成器）");
+                "开局状态来自表（发电机受损、核心运转、满耐久 1600——FG9-BAL-01 BAL-REC-004）；格网域写入布局版本、开局探索半径 40、地形来源（FG0-ARCH-05 起新战役 = 世界生成器）");
             Expect(HomeValleyLayout.Validate().Count == 0 && HomeValleyLayout.Core.Position == Vector2.zero && HomeValleyLayout.Generator2Site.Position == new Vector2(24, -8)
                    && HomeValleyLayout.BeaconSlot.Position == new Vector2(12, 22) && HomeValleyLayout.CameraFocusStart == new Vector2(-4, 2),
                 "非建筑锚点（建造位、出生点、残骸、镜头焦点）改由开局布局表提供，位置不变、净空不重叠");

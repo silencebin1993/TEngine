@@ -349,7 +349,7 @@ namespace GameLogic.Campaign.Defense
             double warnMinutes = Math.Round(RaidCatalog.MinWarningHours * (double)c.Warning * 60.0, 2);
             lines.Add(GameText.Format("difficulty.line.warning", Num(c.Warning), GameClock.FormatGameDuration(warnMinutes * GameClock.DaySeconds / 1440.0)));
             lines.Add(GameText.Format("difficulty.line.enemy", Num(r.EnemyHp), Num(r.EnemyDamage)));
-            lines.Add(GameText.Format("difficulty.line.silent_night", r.SilentNightDays));
+            lines.Add(GameText.Format("difficulty.line.silent_night", r.SilentNightDays, r.SilentNightDays + Env.SilentNightService.FirstExtraDays));
             lines.Add(GameText.Format("difficulty.line.events", Num(r.EventRate)));
             lines.Add(GameText.Get("difficulty.line.first_raid"));
             lines.Add(GameText.Get("difficulty.line.core_loss"));

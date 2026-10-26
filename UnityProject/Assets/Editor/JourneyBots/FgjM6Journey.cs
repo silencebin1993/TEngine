@@ -55,11 +55,11 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("new_game", "存档槽 → 新游戏设置（种子 = 固定测试种子 42，难度标准）→ 点“开始” → 进入归还谷地", 150, null, JourneyCommon.TickNewGame),
                 S("seed", "种子进了存档；生成结果与该种子的基准一致；起始区四级保证满足", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
                 S("difficulty", "新档难度是标准、导演开局宽限到第 5 个游戏日（第一次突袭固定 1 级、规模 × 0.6）", 10, null, TickDifficulty),
-                // FG9-ACT1-01 修复轮：本旅程写于静默夜（FG7-ENV-01）之前——标准难度第 5 日夜里的第一次静默夜正好落在第一次突袭预警之前，
+                // FG9-ACT1-01 修复轮：本旅程写于静默夜（FG7-ENV-01）之前——标准难度第一次静默夜（当时第 5 日夜里，FG9-BAL-01 起推迟到第 7 日）正好落在第一次突袭预警之前，
                 // 静默夜开始时“突袭必定发生”会提前触发 / 合并本旅程等的那一波，w1_warn 等不到正常预警（静默夜第 336000 步、第一波预警第 355500 步，两个时刻都由种子与难度决定，HEAD 上一样）。与 FGJ-M7 同一个日程捷径（只改日期，效果走正式推进），
                 // 把第一次静默夜改排到第 40 日；静默夜与突袭的交织由 FGJ-M7 与 FgSilentNightSelfCheck 覆盖。
                 S("silent_fixture", "进度夹具：第一次静默夜改排到第 40 日（本旅程测突袭，静默夜由 FGJ-M7 走正式流程）", 10,
-                    c => SilentNightService.PlanDayForTests(St, 40),
+                    ApplySilentNightFixture,
                     c => SilentNightService.StateOf(St)?.NextDay == 40 ? StepOutcome.Done("第一次静默夜改排到第 40 日（预警 / 开始 / 结束仍按正式规则）") : StepOutcome.Retry($"静默夜日程没改成（第 {SilentNightService.StateOf(St)?.NextDay} 日）"), retries: 1),
                 S("workers", "记下开局两台机器", 10, null, FgjM3Common.TickWorkers),
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
@@ -132,6 +132,12 @@ namespace GameLogic.EditorTools.JourneyBots
                 Steps = steps,
             };
         }
+
+        /// <summary>
+        /// 静默夜日程夹具（FG9-ACT1-01 修复轮加；DEBT-FG9ACT101-06 ① 由 FG9-BAL-01 挪进本登记方法）：只改第一次静默夜的日期（预警 / 开始 / 结束仍按正式规则），
+        /// 让 FGJ-M6 的三波突袭不与第一次静默夜交织（静默夜由 FGJ-M7 与 FgSilentNightSelfCheck 走正式流程）。FgMilestoneM6SelfCheck.Fixtures 登记：只能出现在本方法里、且只有一处。
+        /// </summary>
+        private static void ApplySilentNightFixture(JourneyContext c) => SilentNightService.PlanDayForTests(St, 40);
 
         private static JourneyStep S(string id, string title, double timeout, Action<JourneyContext> enter, Func<JourneyContext, StepOutcome> tick, int retries = 0) =>
             JourneyCommon.S(id, title, timeout, enter, tick, retries);

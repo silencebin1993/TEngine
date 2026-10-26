@@ -738,7 +738,7 @@ namespace GameLogic.EditorTools
             bool window = StandingRuleService.TrySilentWindow(s, out long ws, out long we) && ws == st && we == en;
             bool cal = CalendarService.TryNext(s, CalendarKind.SilentNight, GameClock.GameSeconds, 3 * GameClock.DaySeconds, out CalendarEntry ce)
                        && Math.Abs(ce.StartSeconds - st / (double)Hz) < 1e-6;
-            Expect(formalDay == 5 && badDay && same && window && cal,
+            Expect(formalDay == SilentNightService.FirstDay(s) && badDay && same && window && cal,
                 $"G2 日程捷径 PlanDayForTests（ADR-QA-024 夹具表 ①）：正式排定第 {formalDay} 日；改到第 2 日后预警 {GameClock.FormatHhMm(w / (double)Hz)} / 开始 {GameClock.FormatHhMm(st / (double)Hz)} / 结束 {GameClock.FormatHhMm(en / (double)Hz)}，" +
                 $"与正式同一套时刻、预警提前量（{(st - w) / (double)Hz:0} 秒）与持续时间（{(en - st) / (double)Hz:0} 秒），只改日期 {same}；常驻规则时间窗 {window}、日历 {cal} 跟着改；第 0 日被拒 {badDay}");
 
@@ -752,8 +752,8 @@ namespace GameLogic.EditorTools
             SkipToTick(s, en - 3);
             bool ended = StepEach(() => !d.Active, 10);
             bool pastRejected = !SilentNightService.PlanDayForTests(s, 2);
-            Expect(warned && started && startedAt >= st && startedAt <= st + 2 && duringRejected && ended && d.Count == 1 && d.NextDay == 2 + formalDay && pastRejected,
-                $"G2 改期后走正式流程：预警 {warned}、开始步 {startedAt}（应 {st}）、结束 {ended}；进行中再改期被拒 {duringRejected}；结束后照常按间隔排下一次（第 {d.NextDay} 日 = 2 + {formalDay}）；预警已过的日期被拒 {pastRejected}");
+            Expect(warned && started && startedAt >= st && startedAt <= st + 2 && duringRejected && ended && d.Count == 1 && d.NextDay == 2 + SilentNightService.IntervalDays(s) && pastRejected,
+                $"G2 改期后走正式流程：预警 {warned}、开始步 {startedAt}（应 {st}）、结束 {ended}；进行中再改期被拒 {duringRejected}；结束后照常按间隔排下一次（第 {d.NextDay} 日 = 2 + 间隔 {SilentNightService.IntervalDays(s)}；正式第一次排在第 {formalDay} 日 = 间隔 + 首次推迟 {SilentNightService.FirstExtraDays}）；预警已过的日期被拒 {pastRejected}");
         }
 
         // ── R1 资源不足：净化塔缺冷却液 ─────────────────────────────────────────────
