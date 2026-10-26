@@ -25,7 +25,7 @@
 |---|---|---|
 | 家园建造 | **固定锚点**：每种建筑一个预设坐标，玩家只能在预设空地上解锁建造；不能自由放置；`BuildingRecord.Rotation` 字段存在但没有任何代码写入 | `Regions/HomeValleyLayout.cs`、`Regions/HomeValleyWorkOrders.cs`（TryCreateBuild）、`Campaign/CampaignRecords.cs` |
 | 区域运行 | 家园、破碎都市、铸造前哨三个控制器都是纯 C# 类，直接操作共享的 `CampaignState`；`GameRoot.OnUpdate` 每帧无条件更新三者，互斥靠出发事务显式 `Exit()` 保证 | `Stage/GameRoot.cs`、`Campaign/Regions/ExpeditionDepartureService.cs`、`Regions/HomeValleyController.cs` |
-| 内核 | `SimWorld`（Burst、SoA）和门面 `SimBridge` 目前只服务旧细胞阶段；家园和远征区**据盘点没有走内核** | `Main/Sim/SimWorld.cs`、`Battle/SimBridge.cs` |
+| 内核 | `SimWorld`（Burst、SoA）和门面 `SimBridge` 目前只服务旧细胞阶段；家园和远征区**据盘点没有走内核**。（2026-10-23 更正：FG0-ARCH-03 已另建正式版战斗内核 `CombatKernel`，各地点战斗都走它，热更层门面是 `CombatSite`，见 ADR-ARC-003；`SimWorld` / `SimBridge` 仍只服务旧细胞阶段） | `Main/Sim/SimWorld.cs`、`Battle/SimBridge.cs`；正式版：`Main/Sim/Combat/CombatKernel.cs`、`Campaign/Combat/CombatSite.cs`（门面注释 :1706-1708） |
 | 全局单例 | `CampaignSession.Current`、`MachineRegistry` 是全局共享状态；每个控制器各自持有 `CameraDirector` 和 `InputRouter` | — |
 | 存档 | `CampaignState` 有 `SchemaVersion`、`ContentVersion`；17 个状态域；3 个存档槽；6 个自动存档时机 | `Campaign/CampaignState.cs`、`CampaignSaveService.cs`、`CampaignAutoSaveService.cs`、`CampaignEnums.cs`（SaveReason） |
 | 敌人数据 | 手写静态字典，不走 Luban | `Content/EnemyCatalog.cs` |
@@ -38,7 +38,7 @@
 | 本地化 | **没有**；文案全是硬编码中文 | — |
 | 图鉴 | 有注册表和跨局持久化，但内容只覆盖细胞阶段 | `Progression/CodexRegistry.cs` |
 | 目标追踪 | 后端有，**没有独立任务面板** | `Campaign/CampaignObjectiveTracker.cs` |
-| 反应 | 旧反应引擎是预编译 DLL，看不到配对表；能看到 16 个具名反应和 2 条环境反应；机械反应 2 条 | `Assets/Plugins/ComposeEngine/`、`ReactionFeedbackCatalog.cs`、`EnvironmentReactionCatalog.cs`、`Campaign/Content/MechanicalReactionCatalog.cs` |
+| 反应 | 旧反应引擎是预编译 DLL，看不到配对表；能看到 16 个具名反应和 2 条环境反应；机械反应 2 条。（2026-10-23 更正：正式版具名反应不走旧 DLL，由 `NamedReactionCatalog.BuildKernelRules` 生成规则、经 `CombatSite` 调 `Kernel.SetReactionRules` 登记，在 `CombatKernel` 内按固件状态标签配对结算，见 `production/design/build-variety-theme-fit/research/02-reactions-tags.md` §1） | `Assets/Plugins/ComposeEngine/`、`ReactionFeedbackCatalog.cs`、`EnvironmentReactionCatalog.cs`、`Campaign/Content/MechanicalReactionCatalog.cs` |
 
 ---
 
@@ -64,7 +64,7 @@
 
 ### FGR-ARC-003 战斗逐单位逻辑下沉内核
 - 正式版规模（见 FG15）下，逐单位、逐弹体的循环不允许留在热更层（项目架构第 4 条）。
-- **默认方向**：把远征和家园突袭的战斗接入 `SimWorld` 内核，复用它已有的弹道（`JobProjectile`）和基元读法。热更层只下发命令、读取汇总结果。
+- **已定方向（ADR-ARC-003，2026-09-26 采纳；2026-10-23 文档更正）**：正式版战斗内核已落在 `Main/Sim/Combat/` 的 `CombatKernel`（单线程 Burst `IJob`、固定步 60 Hz，一个地点一份内核），远征和家园突袭的战斗都走它；热更层只经 `CombatSite` 门面下发命令、读取汇总结果与排空事件。`SimWorld` / `JobProjectile` 只服务旧细胞阶段，正式版不复用。（原文“接入 `SimWorld`、复用 `JobProjectile`”已作废。）
 - 备选：保留纯 C# 控制器并设规模上限。这个方案只在技术验证证明内核接入代价过高时才考虑，并且必须把正式版的规模目标一起下调，由用户拍板。
 - 弹道唯一真相仍然在内核，炮塔也走同一条弹道路径。
 
