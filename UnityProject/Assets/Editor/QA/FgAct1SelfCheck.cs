@@ -493,8 +493,8 @@ namespace GameLogic.EditorTools
             bool legacy = BuildCatalog.IsUnlocked(fresh, belt);
             ResearchGate.LegacyGatesOpenForTests = false;
             Expect(lockedFresh && journey && legacy && JourneyBotHost.PrePacingJourney("FGJ-M8") && JourneyBotHost.PrePacingJourney("FGJ-M3R")
-                   && JourneyBotHost.PrePacingJourney("FGJ-GEN9") && !JourneyBotHost.PrePacingJourney("FGJ-M9"),
-                "B11 旧规则开关：M0～M8 / GEN9 旅程与全量自检的旧段按开放前的规则（传送带可建），FGJ-M9 起按正式节奏；真实游戏两个开关都关");
+                   && !JourneyBotHost.PrePacingJourney("FGJ-GEN9") && !JourneyBotHost.PrePacingJourney("FGJ-M9"),
+                "B11 旧规则开关：M0～M8 旅程与全量自检的旧段按开放前的规则（传送带可建），FGJ-M9 / GEN9（复用 FGJ-M9 步骤，DEBT-FG3GEN01-10）起按正式节奏；真实游戏两个开关都关");
 
             var lines = new List<(string Text, string Cls)>();
             Act1PacingService.BuildStatsLines(s, lines);

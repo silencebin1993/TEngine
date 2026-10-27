@@ -48,7 +48,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 steps.Add(Take(id));
             }
-            steps.Add(S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随、3 倍速）", 200, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1));
+            steps.Add(S("prep_depart", "点“出发”：远征队沿地形行军到破碎都市（跟随、3 倍速；途中被截断、队伍在覆盖外时由行军服务按最后的“前进”自动重试，FG-GAP-136）", 200, c => FgjM1Journey.ClickUi(c, "[HomeValleyExpeditionPrepHost]", "DepartButton"), TickDeparted, retries: 1));
             steps.Add(S("in_city", "到了破碎都市：节奏台账记下“第一次远征”；人还在地点里，传送带仍锁着（负向）", 20, null, TickInCity));
             steps.Add(S("uplink", "机器列表点一台远征机器：接入", 25, c => FgjM1Journey.ClickMachineList(c, c.GetInt("other")), TickUplinked, retries: 3));
             steps.Add(S("evac_hold", "开到撤离点按住交互键（默认 E）打开撤离清单", 40, c => JourneyInput.HoldAction(GameActionId.Interact, 1.6), FgjM1Journey.TickEvacPanel, retries: 3));
@@ -167,7 +167,8 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static StepOutcome TickDeparted(JourneyContext c)
         {
-            StepOutcome o = FgjM1Journey.TickDeparted(c);
+            // FG9-E2E-01：行军途中“路线被截断”（成员路径持续受阻、原地待命）时像玩家一样点行军条“前进”重新下令（与 FGJ-M8 同一写法，最多 3 次，报告逐次写明）；队伍在覆盖外发不了“前进”时由行军服务按最后的命令自动重试（FG-GAP-136 产品修复，截断夹具已删）。
+            StepOutcome o = FgjM8Journey.TickDepart(c, 190);
             if (o.Status != JourneyStepStatus.Done)
             {
                 return o;

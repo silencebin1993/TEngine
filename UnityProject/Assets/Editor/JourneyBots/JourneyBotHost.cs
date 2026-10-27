@@ -31,6 +31,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM7Journey.Id, FgjM7Journey.Build }, // FG7-E2E-01：M7 出口旅程
             { FgjM8Journey.Id, FgjM8Journey.Build }, // FG8-E2E-01：M8 出口旅程
             { FgjM9FrontJourney.Id, FgjM9FrontJourney.Build }, // FG9-ACT1-01：M9 前半段（正式节奏：第一次远征归来 → 基础传送带开放）
+            { FgjM9Journey.Id, FgjM9Journey.Build }, // FG9-E2E-01：M9 出口旅程（第一幕全流程，加速版：打到击败铸造主核心）
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;
@@ -230,16 +231,12 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        /// <summary>写于第一幕节奏台账（FG9-ACT1-01）之前的旅程：FGJ-M0～M8（含反向）与 FGJ-GEN9。</summary>
+        /// <summary>写于第一幕节奏台账（FG9-ACT1-01）之前的旅程：FGJ-M0～M8（含反向）。FGJ-GEN9 自 FG9-E2E-01 起复用 FGJ-M9 的步骤（DEBT-FG3GEN01-10），按正式节奏。</summary>
         public static bool PrePacingJourney(string id)
         {
             if (string.IsNullOrEmpty(id))
             {
                 return false;
-            }
-            if (id == "FGJ-GEN9")
-            {
-                return true;
             }
             if (!id.StartsWith("FGJ-M", StringComparison.Ordinal) || id.Length < 6)
             {

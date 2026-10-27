@@ -47,7 +47,7 @@ namespace GameLogic.EditorTools
     /// - M4 出发事务失败整体回滚；M5 真实行军到达（用时 ≈ 路线 / 速度、整队同行、到达通知不抢镜头、进入地点）；
     /// - M6 观察 / 不观察 / 0.5x～3x / 暂停结果一致（含途中交战，FGT-EXP-012）；M7 行军中存读档：存档后不读档接着走（内存里那份）与读档接着走，到达的步与到达后状态一致（FGT-EXP-011 行军部分）；
     /// - M8 覆盖：走出覆盖前提醒、覆盖外只执行最后命令、不能接入、铺中继回到覆盖后控制恢复、返回家园结算（FGT-EXP-002）；
-    /// - M9 途中静默夜；M10 途中家园遇袭（不自动召回，玩家可召回；镜头随队走远 = 玩家在远征，DEBT-FG6DEF07-06；最慢成员阵亡后提速）；M11 地形阻挡绕行与路线截断（停下、说明、打通后再前进能到）；
+    /// - M9 途中静默夜；M10 途中家园遇袭（不自动召回，玩家可召回；镜头随队走远 = 玩家在远征，DEBT-FG6DEF07-06；最慢成员阵亡后提速）；M11 地形阻挡绕行与路线截断；M11b 覆盖外截断按最后的“前进”自动重试（FG-GAP-136）（停下、说明、打通后再前进能到）；
     /// - M12 到达失败（真实行军走到集结点：地点不开放 / 载入中途出错整体回滚，队伍照最后的“前进”在集结点等候、到点自动重试进入；集结点在覆盖外时玩家命令被拒）；
     /// - M15 途中遇敌（据点 / 巡逻 / 突袭各一次、读档后不重复）与危害带提示（进入一次、离开复位、再进再提示）；M13 界面（世界栏行军条、战略地图、名册、跟随镜头、布局探针）；M14 旧档兼容。
     /// 测试捷径（登记在证据里）：区域解锁 / 重新锁定直接改区域状态、覆盖用中继塔记录夹具、截断用悬崖地形夹具、M12 用故障注入点、M15 的据点（SpawnOutpost）与临时危害带（规划层 HazardWidth）夹具。
@@ -144,6 +144,7 @@ namespace GameLogic.EditorTools
                 Step(CheckSilentNight);
                 Step(CheckHomeRaid);
                 Step(CheckObstacleAndTruncation);
+                Step(CheckTruncationOutOfCoverage);
                 Step(CheckArrivalFailure);
                 Step(CheckEncountersAndHazard);
                 Step(CheckSelfDefense);
@@ -866,6 +867,89 @@ namespace GameLogic.EditorTools
                 map.SetTerrain(w.Cell, w.Was);
             }
             Expect(adv && arrived, $"M11 打通后玩家再下“前进”（{(adv ? "生效" : why)}）：走进去并进入远征地点（{arrived}）——截断不会软锁");
+        }
+
+        /// <summary>
+        /// FG9-E2E-01 复审修复（FG-GAP-136 / IC-REQ-022 路径失败不软锁）：第一幕节奏下（没有中继、没有投送站）队伍在覆盖外被截断，玩家下不了命令——
+        /// 行军服务按最后的“前进”到点自动重试（FGR-EXP-011 覆盖外执行最后一条命令）；仍走不进去只记日志不重复提示；打通后下一次重试走进去、进入地点。
+        /// </summary>
+        private static void CheckTruncationOutOfCoverage()
+        {
+            CampaignState s = NewWorld(5113);
+            int a = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(4f, -6f));
+            WorldSimulation.StepMany(3);
+            ExpeditionSiteAnchors.EnsureResolved(s);
+            ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(new[] { a }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            if (!dep.Success)
+            {
+                Fail($"M11b 前提：出发失败（{dep.Outcome}）");
+                return;
+            }
+            CampaignState now = CampaignSession.Current;
+            ExpeditionSiteAnchors.TryGet(now, FracturedCityLayout.RegionId, out Vector2 anchor);
+            HomeGridMap map = HomeGridService.MapFor(now);
+            byte cliff = GridContent.TerrainCode("cliff");
+            int ringR = Mathf.CeilToInt(ExpeditionMarchService.ArriveRadius) + 4;
+            var ring = new List<(GridCell Cell, byte Was)>();
+            int retrySteps = Mathf.CeilToInt(ExpeditionMarchService.ArrivalRetrySeconds * GameClock.StepHz);
+            try
+            {
+                // 走出核心覆盖（没有中继）之后，锚点四周塌成悬崖（场景夹具，改的是真实格网）：路上才发现走不进去。
+                bool outside = StepUntil(() => !ExpeditionMarchService.CanCommand(CampaignSession.Current, out string r) && r == "out-of-coverage", 20000);
+                if (!outside)
+                {
+                    Fail("M11b 前提：行军 20000 步内没有走出核心覆盖");
+                    return;
+                }
+                for (int dx = -ringR - 3; dx <= ringR + 3; dx++)
+                {
+                    for (int dy = -ringR - 3; dy <= ringR + 3; dy++)
+                    {
+                        float d = Mathf.Sqrt(dx * dx + dy * dy);
+                        if (d < ringR || d > ringR + 2.5f)
+                        {
+                            continue;
+                        }
+                        var cell = new GridCell(Mathf.RoundToInt(anchor.x) + dx, Mathf.RoundToInt(anchor.y) + dy);
+                        ring.Add((cell, map.GetTerrain(cell)));
+                        map.SetTerrain(cell, cliff);
+                    }
+                }
+                WorldSimulation.StepMany(2);
+                int cues0 = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted);
+                int retry0 = ExpeditionMarchService.HaltRetryCount;
+                bool halted = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Halted == ExpeditionMarchService.HaltRouteTruncated, 20000);
+                ExpeditionMarchState m = ExpeditionMarchService.Current(now);
+                bool rejected = !ExpeditionMarchService.IssueCommand(now, ExpeditionMarchService.Command.Advance, out string why) && why == "out-of-coverage";
+                bool cued = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 + 1 && m.ArrivalRetryTick > GameClock.Ticks;
+                // 还围着：到点自动重试一次，仍走不进去 → 再停下、不重复提示，命令仍是“前进”。
+                long at = m.ArrivalRetryTick;
+                StepUntil(() => GameClock.Ticks > at + 3, retrySteps + 30, chunk: 1);
+                bool reHalted = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Halted == ExpeditionMarchService.HaltRouteTruncated, 4000);
+                bool quiet = ExpeditionMarchService.HaltRetryCount >= retry0 + 1 && reHalted && FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 + 1
+                             && m.Command == (int)ExpeditionMarchService.Command.Advance && m.Phase == ExpeditionMarchService.PhaseOutbound;
+                Expect(halted && rejected && cued && quiet,
+                    $"M11b 覆盖外被截断（没有中继 / 投送站）：停下并提示“{GameText.Get("exp.cue.halted")}”一次（{halted && cued}），玩家“前进”被拒（{why}：{rejected}）；" +
+                    $"{ExpeditionMarchService.ArrivalRetrySeconds:0} 游戏秒后按最后的“前进”自动重试（{ExpeditionMarchService.HaltRetryCount - retry0} 次），仍走不进去再停下、不重复提示、命令不变（{quiet}）");
+
+                // 打通（地形还原）：下一次自动重试走进去、进入远征地点——玩家不用任何操作，不软锁。
+                foreach ((GridCell cell, byte was) in ring)
+                {
+                    map.SetTerrain(cell, was);
+                }
+                ring.Clear();
+                WorldSimulation.StepMany(2);
+                bool arrived = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Phase == ExpeditionMarchService.PhaseAtSite, retrySteps + 8000);
+                Expect(arrived && ExpeditionMarchService.HaltRetryCount >= retry0 + 2,
+                    $"M11b 打通后下一次自动重试走进去并进入远征地点（{arrived}，自动重试共 {ExpeditionMarchService.HaltRetryCount - retry0} 次）——覆盖外截断不软锁");
+            }
+            finally
+            {
+                foreach ((GridCell cell, byte was) in ring)
+                {
+                    map.SetTerrain(cell, was);
+                }
+            }
         }
 
         // ── M12 到达失败 ─────────────────────────────────────────────────────────

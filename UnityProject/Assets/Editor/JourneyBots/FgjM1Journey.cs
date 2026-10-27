@@ -1012,9 +1012,14 @@ namespace GameLogic.EditorTools.JourneyBots
             return row?.Q<Toggle>("Select");
         }
 
-        internal static StepOutcome TickDeparted(JourneyContext c)
+        internal static StepOutcome TickDeparted(JourneyContext c) => TickDeparted(c, 190);
+
+        /// <summary><paramref name="marchLimit"/>：行军最多跟多少真实秒（FG9-E2E-01：铸造前哨比破碎都市远）。</summary>
+        internal static StepOutcome TickDeparted(JourneyContext c, double marchLimit)
         {
-            if (FcActive)
+            // FG9-E2E-01：目的地也可以是铸造前哨（FGJ-M9）；到达判定与破碎都市同一套。
+            bool fo = GameRoot.FoundryOutpost != null && GameRoot.FoundryOutpost.IsActive;
+            if (FcActive || fo)
             {
                 if (c.StepElapsed < 3)
                 {
@@ -1032,10 +1037,13 @@ namespace GameLogic.EditorTools.JourneyBots
                     return StepOutcome.Wait;
                 }
                 List<int> roster = Roster(c);
-                bool all = roster.All(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.RegionId == FracturedCityLayout.RegionId);
-                return all && GameRoot.FracturedCity.Combat != null && GameRoot.FracturedCity.Combat.MachineCount == roster.Count
-                    ? StepOutcome.Done($"出发：{roster.Count} 台机器进入破碎都市，镜头飞过去；家园继续运行（家园机器 {GameRoot.HomeValley.LiveMachineCount} 台）")
-                    : StepOutcome.Fail($"出发后名单里的机器没有都到破碎都市（内核里 {GameRoot.FracturedCity.Combat?.MachineCount} 台）");
+                string region = fo ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId;
+                string place = fo ? "铸造前哨" : "破碎都市";
+                CombatSite arrived = fo ? GameRoot.FoundryOutpost.Combat : GameRoot.FracturedCity.Combat;
+                bool all = roster.All(id => MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.RegionId == region);
+                return all && arrived != null && arrived.MachineCount == roster.Count
+                    ? StepOutcome.Done($"出发：{roster.Count} 台机器进入{place}，镜头飞过去；家园继续运行（家园机器 {GameRoot.HomeValley.LiveMachineCount} 台）")
+                    : StepOutcome.Fail($"出发后名单里的机器没有都到{place}（内核里 {arrived?.MachineCount} 台）");
             }
             if (c.StepElapsed < 1)
             {
@@ -1059,9 +1067,9 @@ namespace GameLogic.EditorTools.JourneyBots
                         c.Log("出发 = 沿地形行军：点“跟随远征队”、3 倍速，跟着走到目的地");
                     }
                 }
-                if (c.StepElapsed > 190)
+                if (c.StepElapsed > marchLimit)
                 {
-                    return StepOutcome.Fail($"远征队 190 秒内没走到目的地（{ExpeditionMarchService.StatusOf(CampaignSession.Current)}，预计 {ExpeditionMarchService.EtaSeconds(CampaignSession.Current):0} 游戏秒）");
+                    return StepOutcome.Fail($"远征队 {marchLimit:0} 秒内没走到目的地（{ExpeditionMarchService.StatusOf(CampaignSession.Current)}，预计 {ExpeditionMarchService.EtaSeconds(CampaignSession.Current):0} 游戏秒）");
                 }
                 return StepOutcome.Wait;
             }

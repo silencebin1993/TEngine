@@ -94,6 +94,8 @@ namespace GameLogic.Campaign.Regions
         public static int EdgeCueCount { get; private set; }
         public static int CoverageCueCount { get; private set; }
         public static int HaltCueCount { get; private set; }
+        /// <summary>FG9-E2E-01（FG-GAP-136）：路线被截断、玩家又下不了命令时按最后的命令自动重下的次数（自检读）。</summary>
+        public static int HaltRetryCount { get; private set; }
         /// <summary>FG8-E2E-01：AI 教义自卫交战下达的内核攻击命令次数（自检读）。</summary>
         public static int SelfDefenseCount { get; private set; }
         public static string LastRejectReason { get; private set; }
@@ -480,6 +482,7 @@ namespace GameLogic.Campaign.Regions
             m.Command = (int)cmd;
             m.Halted = HaltNone;
             m.ArrivalFailReason = string.Empty; // 玩家重新下了令：之后再没进去照常提示
+            m.HaltAutoRetried = false;
             m.OrdersPending = !IssueOrders(s, m);
             CommandCount++;
             return true;
@@ -584,6 +587,7 @@ namespace GameLogic.Campaign.Regions
             m.Halted = HaltNone;
             m.ArrivalFailReason = string.Empty;
             m.ArrivalRetryTick = 0;
+            m.HaltAutoRetried = false;
             m.HazardZoneId = string.Empty;
             m.EncounteredIds = Array.Empty<string>();
             m.VisitedSite = false; // FG8-EXP-05：这一趟还没进过地点
@@ -678,6 +682,7 @@ namespace GameLogic.Campaign.Regions
             {
                 m.Phase = phase;
                 m.PhaseTick = GameClock.Ticks;
+                m.HaltAutoRetried = false;
             }
             if (phase != PhaseOutbound && phase != PhaseReturning)
             {
@@ -700,6 +705,15 @@ namespace GameLogic.Campaign.Regions
             {
                 m.Halted = HaltNone;
                 m.OrdersPending = true;
+            }
+            // FG9-E2E-01（FG-GAP-136 / IC-REQ-022 不软锁）：路线被截断后玩家下不了命令（覆盖外 / 静默夜）时，队伍照最后的“前进 / 返回”执行（FGR-EXP-011），
+            // 到 ArrivalRetryTick 自动重下一次内核命令（寻路重算）；玩家能下令时仍原地等新命令。不替玩家改命令，只看步序号，与观察无关。
+            if ((advancing || returning) && m.Halted == HaltRouteTruncated && GameClock.Ticks >= m.ArrivalRetryTick && !CanCommand(s, out _))
+            {
+                m.Halted = HaltNone;
+                m.OrdersPending = true;
+                m.HaltAutoRetried = true;
+                HaltRetryCount++;
             }
             if (m.OrdersPending)
             {
@@ -776,11 +790,16 @@ namespace GameLogic.Campaign.Regions
             // 复审修复：成员正被自卫教义占用（交战中 / 打完走回驻防点）时命令为空是正常的，不算截断。
             if ((advancing || returning) && !m.OrdersPending && !doctrineBusy && idle == alive && near < alive && m.Halted == HaltNone)
             {
+                bool repeat = m.HaltAutoRetried; // 自动重试后仍被截断：只记日志、不重复提示
                 m.Halted = HaltRouteTruncated;
-                HaltCueCount++;
-                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ExpeditionMarchHalted, center,
-                    GameText.Format("exp.cue.halted_detail", alive - near));
-                Log.Warning($"[ExpeditionMarchService] 远征队路线被截断：{alive - near} 台没能走到目的地，原地待命（等新命令）。");
+                m.ArrivalRetryTick = GameClock.Ticks + Math.Max(1L, (long)Math.Round(ArrivalRetrySeconds * GameClock.StepHz));
+                if (!repeat)
+                {
+                    HaltCueCount++;
+                    Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ExpeditionMarchHalted, center,
+                        GameText.Format("exp.cue.halted_detail", alive - near));
+                }
+                Log.Warning($"[ExpeditionMarchService] 远征队路线被截断：{alive - near} 台没能走到目的地，原地待命（等新命令；玩家下不了命令时第 {m.ArrivalRetryTick} 步按最后的命令自动重试）{(repeat ? "（自动重试后仍被截断，不重复提示）" : string.Empty)}。");
             }
         }
 

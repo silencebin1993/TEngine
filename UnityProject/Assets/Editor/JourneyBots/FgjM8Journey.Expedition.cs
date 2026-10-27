@@ -230,7 +230,13 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 出发后跟着走到破碎都市（<see cref="FgjM1Journey.TickDeparted"/>：跟随远征队 + 3 倍速、到达后镜头跟进地点）。
         /// 途中“路线被截断”（有成员没能走到、原地待命，行军条写明原因）时像玩家一样在覆盖里点行军条“前进”重新下令（最多 3 次，报告逐次写明谁卡在哪）。
         /// </summary>
-        private static StepOutcome TickDepart(JourneyContext c)
+        internal static StepOutcome TickDepart(JourneyContext c) => TickDepart(c, 190);
+
+        /// <summary>
+        /// FG9-E2E-01：FGJ-M9A / FGJ-M9 共用（行军时限 <paramref name="marchLimit"/> 真实秒）。
+        /// 复审修复（FG-GAP-136）：截断夹具已删——“路线被截断”时队伍在覆盖外、玩家发不了“前进”，由产品按最后的命令自动重试（ExpeditionMarchService.HaltRetryCount），旅程只等、只记次数。
+        /// </summary>
+        internal static StepOutcome TickDepart(JourneyContext c, double marchLimit)
         {
             CampaignState s = St;
             ExpeditionMarchState m = ExpeditionMarchService.Current(s);
@@ -248,7 +254,17 @@ namespace GameLogic.EditorTools.JourneyBots
                     c.Log($"行军条“路线被截断”：点“前进”重新下令（第 {c.GetInt("adv.n")} 次；{who}）");
                 }
             }
-            return FgjM1Journey.TickDeparted(c);
+            if (c.Get("retry0") == null)
+            {
+                c.SetInt("retry0", ExpeditionMarchService.HaltRetryCount);
+            }
+            int retried = ExpeditionMarchService.HaltRetryCount - c.GetInt("retry0");
+            if (retried > c.GetInt("retry.seen"))
+            {
+                c.SetInt("retry.seen", retried);
+                c.Log($"行军“路线被截断”、队伍在覆盖外：行军服务按最后的“前进”自动重试（第 {retried} 次，FG-GAP-136 产品修复）");
+            }
+            return FgjM1Journey.TickDeparted(c, marchLimit);
         }
 
         // ── 行军途中：静默领地 ───────────────────────────────────────────────────────

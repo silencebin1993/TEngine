@@ -368,12 +368,15 @@ namespace GameLogic.Campaign
         public bool EdgeWarned;
         /// <summary>有成员身边有敌对单位（交战中）。每秒刷新。</summary>
         public bool Engaged;
-        /// <summary>停下的原因：0 没停；1 路线被截断（寻路只到最近可达点）；2 到达但没能进入远征地点（已回滚；队伍照最后的“前进”在集结点等候，到 <see cref="ArrivalRetryTick"/> 自动重试）。</summary>
+        /// <summary>停下的原因：0 没停；1 路线被截断（寻路只到最近可达点；玩家下不了命令时到 <see cref="ArrivalRetryTick"/> 按最后的命令自动重试）；2 到达但没能进入远征地点（已回滚；队伍照最后的“前进”在集结点等候，到 <see cref="ArrivalRetryTick"/> 自动重试）。</summary>
         public int Halted;
         /// <summary>上一次到达失败的原因码（<see cref="Regions.ExpeditionTextKeys.ReasonCodes"/>；同一原因重试再失败不重复提示；进入成功 / 玩家改命令时清空）。</summary>
         public string ArrivalFailReason = string.Empty;
         /// <summary>到达失败后按最后的“前进”自动重试进入的世界步（只看步序号，与观察无关；FG00 B11 不软锁）。</summary>
         public long ArrivalRetryTick;
+        /// <summary>FG9-E2E-01（FG-GAP-136）：路线被截断后玩家下不了命令时，按最后的命令自动重试过（同一趟、同一阶段里再被截断不重复提示；玩家下令 / 换阶段时复位）。
+        /// 截断时 <see cref="ArrivalRetryTick"/> 同样记下一次自动重试的世界步。</summary>
+        public bool HaltAutoRetried;
         /// <summary>当前所在危害带的领地 ID（没有 = 空串；进入时提醒一次，离开后复位）。</summary>
         public string HazardZoneId = string.Empty;
         /// <summary>FG8-GEN-02：队伍中心当前所在的阵营领地 ID（不在领地里 = 空串；进入时提醒一次“进入 ××”，离开后复位）。</summary>

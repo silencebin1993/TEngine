@@ -117,7 +117,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("pf_built", "机器取料建成闸门：敌方寻路被圈死（从圈里出不去），自己的机器照样从闸门进出（己方寻路走得出去）", 300, null, TickGateBuilt),
 
                 // ── 3. 暂停与倍速（第一波）──
-                S("ra_fix", "进度夹具：剧情节点触发一波 1 级突袭（正式的暴露触发由 FGJ-M6 覆盖）", 10, ApplyRaidFixture, c => TickRaidRequested(c, "ra")),
+                S("ra_fix", "进度夹具：剧情节点触发一波 1 级突袭（正式的暴露触发由 FGJ-M6 覆盖）", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "ra")),
                 S("ra_warn", "等预警：左上角预警条一行（倒计时、来袭方向）", 600, null, c => TickWarned(c, "ra")),
                 S("ra_siege", "部队到达、攻城进行中（核心被屏障 + 闸门完全围住，敌人先打圈外够得着的建筑）", 400, null, c => TickSieging(c, "ra")),
                 S("ra_pause", "按暂停键（攻城中）", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => GameClock.Paused, true), FgjM1ReverseJourney.TickPausedNow, retries: 1),
@@ -130,7 +130,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("ra_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建：左键点它，通用面板上点“重建 / 修复”（被摧毁的留着原样的虚影），机器修好；没有拆坏的就跳过", 600, null, TickWallRestored),
 
                 // ── 4. 存读档（第二波）──
-                S("rb_fix", "进度夹具：剧情节点再触发一波", 10, ApplyRaidFixture, c => TickRaidRequested(c, "rb")),
+                S("rb_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rb")),
                 S("rb_warn", "等预警", 600, null, c => TickWarned(c, "rb")),
                 S("rb_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rb")),
                 S("rb_esc", "按 Esc 打开暂停菜单（攻城中，世界暂停）", 10, c => FgjM1Journey.PressIf(GameActionId.Cancel, !PauseMenuUIToolkit.IsOpen), TickPauseForSave, retries: 1),
@@ -167,7 +167,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("fu_sub", "进度夹具：芯片基板放进仓库（DEBT-FG5E2E01-02）", 10, ApplySubstrateFixture, M.TickSubstrateFixture),
                 S("fu_close", "按 Esc 关闭合成台面板（通用面板也关）", 15, null, c => M.TickCloseAll(c, () => !FusionPanelUIToolkit.IsOpen, "合成台面板"), retries: 1),
                 S("fu_build_close2", "按建造键关闭建造模式（开着的话）", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("rs_fix", "进度夹具：剧情节点再触发一波", 10, ApplyRaidFixture, c => TickRaidRequested(c, "rs")),
+                S("rs_fix", "进度夹具：剧情节点再触发一波（2 级：FG-GAP-146，1 级部队在合成台旁的两座炮塔前损失过重撤退、拆不掉合成台）", 10, c => ApplyRaidFixture(c, 2), c => TickRaidRequested(c, "rs")),
                 S("rs_warn", "等预警（来袭方向与第一波相同：合成台就在抵达点旁边）", 600, null, c => TickWarned(c, "rs")),
                 S("rs_slow", "按 1 倍速键（部队快到了，留出在合成台上操作的时间）", 10, c => JourneyInput.PressAction(GameActionId.SpeedNormal), c => TickSpeedIs(c, 1f), retries: 1),
                 S("fu_open2", "左键点电路合成台，通用面板上点“熔合…”", 40, null, c => M.TickSubPanel(c, "synth", "PrFusion", FusionOpen, "合成台面板打开"), retries: 2),
@@ -187,7 +187,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rs_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建", 600, null, TickWallRestored),
 
                 // ── 6. 目标死亡（第三波：两台家园机器先开到抵达点；部队快到时接入第一台、一展开就冲进敌群）──
-                S("rc_fix", "进度夹具：剧情节点再触发一波", 10, ApplyRaidFixture, c => TickRaidRequested(c, "rc")),
+                S("rc_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rc")),
                 S("rc_warn", "等预警", 600, null, c => TickWarned(c, "rc")),
                 S("rc_list", "记下还活着的家园机器（前几波里可能已有机器阵亡、应急打印过），至多两台", 10, null, TickListVictims),
                 S("rc_sel_a0", "左键点第一台家园机器", 20, c => FgjM1Journey.ClickMachine(c, "victimA"), c => FgjM1Journey.TickSelected(c, "victimA"), retries: 4),
@@ -204,7 +204,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
                 // ── 5. 断链（再请一波：攻城中按 0.5 倍速，敌人进了圈里炮塔的射程、炮塔正在开火时断电 → 停火 → 逐台启用 → 恢复开火）──
                 // 修复轮续：断链放在目标死亡之后的单独一波——放在同一波的前半段时，断电那十几秒里敌人在圈外多活一阵，两台在圈外修建筑的家园机器先被打死，目标死亡就没有机器可接入（续跑实测）。
-                S("rp_fix", "进度夹具：剧情节点再触发一波", 10, ApplyRaidFixture, c => TickRaidRequested(c, "rp")),
+                S("rp_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rp")),
                 S("rp_warn", "等预警", 600, null, c => TickWarned(c, "rp")),
                 S("rp_gens", "记下现在还在发电的发电机（开局那台、圈里的发电机 2）", 10, null, TickListGens),
                 S("rp_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rp")),
@@ -265,11 +265,12 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 进度夹具（DEBT-FG6E2E01-03，ADR-QA-023 第 5 节）：剧情节点触发一波 1 级突袭（突袭导演的剧情入口，不受开局宽限与最短间隔限制）。
         /// 家园突袭的正式触发（暴露越过阈值 → 排定 → 预警）由 FGJ-M6 三波从正式入口覆盖；这里要在可控的时刻来三波。之后的筹备、预警、行进、到达、攻城、撤退、结算全是正式流程。
         /// </summary>
-        private static void ApplyRaidFixture(JourneyContext c)
+        /// <summary>FG9-E2E-01（FG-GAP-146 复跑仍失败，卡片“仍不过就调整旅程”）：熔合回滚那一波（rs）用 2 级，其余各波仍是 1 级。</summary>
+        private static void ApplyRaidFixture(JourneyContext c, int tier = 1)
         {
             CampaignState s = St;
             c.SetInt(FgjM3Common.SK(c, "n0"), RaidDirectorService.StateOf(s)?.NextPlanSerial ?? 0);
-            RaidDirectorService.RequestStoryRaid(s, RaidDirectorService.MostStimulatedFaction(s), 1);
+            RaidDirectorService.RequestStoryRaid(s, RaidDirectorService.MostStimulatedFaction(s), tier);
         }
 
         private static StepOutcome TickRaidRequested(JourneyContext c, string key)
