@@ -860,6 +860,11 @@ namespace GameLogic.Progression
             if (EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy row))
             {
                 UnlockAndNotify(FactionEntryId(row.Faction));
+                // FG10-FAC-01（审查修复）：第一次遭遇空中敌人（按 airborne 标签，不认敌人 ID）→ 引导钩子，解锁“空中单位”机制条目。
+                if (EnemyDefs.HasTag(row, EnemyDefs.TagAirborne))
+                {
+                    Core.GuidanceHooks.Raise("clarity.first_air");
+                }
             }
         }
 

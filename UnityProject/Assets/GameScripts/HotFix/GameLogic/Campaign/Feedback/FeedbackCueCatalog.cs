@@ -223,6 +223,36 @@ namespace GameLogic.Campaign.Feedback
                 TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.arena_reset", Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-02 场地边界（FGR-FAC-006）" });
 
+            // FG10-FAC-01（FGR-FAC-002 / 008 ①）：澄净专属行为的预警与结果（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG10FAC01-01）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayWarn, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "喷嘴蓄压：前方扇区即将被喷淋", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.spray_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 喷淋布区预警（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySpray, SfxId = "sfx_signal_jam", Tag = "澄净", Caption = "酸雾喷出：地面留下酸液池", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.spray", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 喷淋布区" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityPivotWarn, SfxId = "sfx_alarm_warning", Shake = 0.15f, Tag = "澄净", Caption = "喷淋臂蓄压：臂前方的扇区即将被扫过", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.pivot_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 枢轴喷灌预警（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityBurstWarn, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "油污爬行者引信燃烧：离开爆炸圈", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.burst_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 自爆引信预警（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityBurst, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "澄净", Caption = "油污爬行者自爆", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.burst", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 自爆" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityDeflagrate, SfxId = "sfx_enemy_cannon", Shake = 0.3f, Tag = "澄净", Caption = "油污爬行者被火击毁：爆燃波及双方", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.deflagrate", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 被火击毁的爆燃（可以反过来利用）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySlickIgnite, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "澄净", Caption = "油迹被点燃：整片爆燃", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.slick_ignite", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 油迹（燃迹组合）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityFreeze, SfxId = "sfx_power_down", Tag = "澄净", Caption = "机器被冻结：解冻前不能移动、不能开火", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.freeze", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮“先减速再冻结”" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySplit, SfxId = "sfx_enemy_cannon", Shake = 0.25f, Tag = "澄净", Caption = "沉淀巨罐破裂：分裂出会爬行的腐蚀液", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.split", Tone = FeedbackTone.Warning, CaptionSeconds = 3f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 精英分裂" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityDroneWarn, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "灭活无人机悬停投放：击落它就能阻止", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.drone_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 投放预警（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityPoolWashed, SfxId = "sfx_objective_new", Tag = "澄净", Caption = "喷淋池被冲洗：很快消失", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.pool_washed", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 冷却液冲洗 / 燃烧蒸干" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityAcid, SfxId = "sfx_hit_armor", Volume = 0.6f, Tag = "澄净", Caption = "酸沼腐蚀中：每秒损失耐久", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.acid", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 3f, RequirementNote = "FG10-FAC-01 酸沼（DEBT-FG8EXP02-03）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayWarnCryo, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "液氮喷嘴蓄压：前方扇区即将被冻住", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.spray_warn_cryo", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 液氮喷淋预警（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayCryo, SfxId = "sfx_signal_jam", Tag = "澄净", Caption = "液氮喷出：地面留下液氮池", TagKey = "clarity.cue.tag",
+                CaptionKey = "clarity.cue.spray_cryo", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮喷淋" });
+
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
             // FG0-SAVE-01：读档后的内容迁移通知（正文由 SaveContentReconciler.Render 走文本键生成），停留更久。

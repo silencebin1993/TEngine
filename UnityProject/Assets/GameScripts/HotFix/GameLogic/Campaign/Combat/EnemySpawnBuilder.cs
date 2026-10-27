@@ -106,13 +106,16 @@ namespace GameLogic.Campaign.Combat
             {
                 spawn.Weapon = site.WeaponIndex(WeaponOf(state, row));
             }
-            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row))
+            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row) || EnemyClarityParams.Has(row))
             {
                 var profile = new CombatBehaviorProfile();
                 reading.FillProfile(row, ref profile);
                 EnemySilentParams.ApplyLurk(row, ref profile); // FG9-FAC-01：静默潜伏可以叠加在任何读法上
                 EnemyFoundryParams.Apply(row, ref profile);     // FG9-FAC-02：架炮驻锄 / 盲区 / 齐射 / 布雷可以叠加在任何读法上
                 profile.MineDamage *= DifficultyService.EnemyDamageMul(state);
+                // FG10-FAC-01：喷淋 / 枢轴 / 自爆 / 分裂 / 飞行 / 抗性 / 建筑偏好（伤害类参数乘难度倍率；绝缘涂层按澄净当天的锁定）。
+                EnemyClarityParams.Apply(row, ref profile, DifficultyService.EnemyDamageMul(state),
+                    EnemyClarityParams.Insulates(row) && Regions.ClarityCounterService.InsulateToday(state), DifficultyService.EnemyHealthMul(state));
                 spawn.BehaviorProfile = site.ProfileIndex(profile);
             }
             Vector2 home = e.Position;

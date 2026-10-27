@@ -34,6 +34,8 @@ namespace GameLogic.Campaign
         public const string AnchorSideSite = "side_site";
         public const string AnchorSideNearest = "side_nearest";
         public const string AnchorSideCenter = "side_center";
+        /// <summary>FG10-REG-01：领地外圈危害带外缘、朝核心一侧（拿到防腐涂层之前不用先穿过酸沼）。</summary>
+        public const string AnchorBeltOuter = "belt_outer";
 
         public const string UnlockStart = "start";
         public const string UnlockTerritoryVisible = "territory_visible";

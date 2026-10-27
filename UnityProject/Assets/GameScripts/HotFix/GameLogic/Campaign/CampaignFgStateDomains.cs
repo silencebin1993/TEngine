@@ -1114,6 +1114,10 @@ namespace GameLogic.Campaign
         public bool HasFoundryCounter;
         public string FoundryCounter = string.Empty;
         public string FoundryCounterNext = string.Empty;
+        /// <summary>FG10-FAC-01（FGR-FAC-004）：同上，澄净反制（counter_cryo / counter_swarm / counter_insulate；空串 = 没有）。旧档没有 = false。</summary>
+        public bool HasClarityCounter;
+        public string ClarityCounter = string.Empty;
+        public string ClarityCounterNext = string.Empty;
     }
 
     /// <summary>FG5-RND-05：一类情报的破译进度（千分之一倍率 × 统一时钟步数；一座监听站一步 = 1000）与累计产出。</summary>
@@ -2729,6 +2733,9 @@ namespace GameLogic.Campaign
             // FG9-FAC-01：旧档没有阵营扩充域 = 空域（首领未遭遇、发射器全在、反制未锁定）。
             s.Factions ??= new FactionState();
             s.Factions.SilentBoss ??= new SilentBossRecord();
+            s.Factions.ClarityBoss ??= new ClarityBossRecord(); // FG10-BOSS-01
+            s.Factions.ClarityBoss.WaveUnits ??= Array.Empty<int>();
+            s.Factions.ClarityBoss.Active ??= Array.Empty<ClarityBossFill>();
             s.Factions.NoiseEmittersDestroyed ??= Array.Empty<string>();
             s.Factions.NoiseZonesNoticed ??= Array.Empty<string>();
             s.Factions.SilentCounterId ??= string.Empty;
@@ -2739,6 +2746,9 @@ namespace GameLogic.Campaign
             s.Factions.ContactsDetected ??= Array.Empty<string>(); // FG9-ACT1-01
             s.Factions.ContactsIdentified ??= Array.Empty<string>();
             s.Factions.SiteSlagNoticed ??= Array.Empty<string>();
+            s.Factions.ClarityCounterId ??= string.Empty; // FG10-FAC-01
+            s.Factions.AcidZonesNoticed ??= Array.Empty<string>();
+            s.Factions.TerritoriesIntroduced ??= Array.Empty<string>(); // FG10-REG-01
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
             s.Grid.TerrainSourceId ??= string.Empty;

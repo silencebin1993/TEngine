@@ -137,7 +137,7 @@ namespace GameLogic.Campaign.Defense
                         }
                         (RaidUnitDef def, bool elite) = UnitScratch[next++];
                         int unit = SpawnOne(site, key, new Vector2(at.X + dx * step, at.Y + dy * step), home, def, elite,
-                            DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state)); // FG6-DEF-09：难度的突袭敌人倍率
+                            DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state), InsulateOf(state, g)); // FG6-DEF-09：难度的突袭敌人倍率
                         if (unit > 0)
                         {
                             site.SetSiegeUnitMode(unit, CombatSiegeMode.Skirmish);

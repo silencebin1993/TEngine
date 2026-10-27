@@ -95,6 +95,8 @@ namespace GameLogic.Campaign.Economy
                     r.OutdatedReason ??= string.Empty;
                     r.Counter ??= string.Empty;
                     r.TargetKind ??= string.Empty;
+                    r.ClarityCounter ??= string.Empty; // FG10-FAC-01
+                    r.ClarityCounterNext ??= string.Empty;
                 }
             }
             foreach (IntelProgressRecord p in f.Progress)
@@ -814,6 +816,13 @@ namespace GameLogic.Campaign.Economy
                         r.FoundryCounter = FoundryCounterService.Locked(s);
                         r.FoundryCounterNext = FoundryCounterService.Preview(s);
                     }
+                    // FG10-FAC-01（FGR-FAC-004）：澄净领地在地图上显示（第二幕起，或已经揭开过它的危害）时，附上澄净当天锁定的对策与下一次日切的预测。
+                    if (ClarityCounterService.Visible(s))
+                    {
+                        r.HasClarityCounter = true;
+                        r.ClarityCounter = ClarityCounterService.Locked(s);
+                        r.ClarityCounterNext = ClarityCounterService.Preview(s);
+                    }
                     r.ExpiresTick = now + Math.Max(1, validity);
                     break;
                 case "boss":
@@ -1088,6 +1097,10 @@ namespace GameLogic.Campaign.Economy
                     {
                         parts.Add(FoundryCounterService.IntelLine(r.FoundryCounter, r.FoundryCounterNext)); // FG9-FAC-02（FGR-FAC-004）
                     }
+                    if (r.HasClarityCounter)
+                    {
+                        parts.Add(ClarityCounterService.IntelLine(r.ClarityCounter, r.ClarityCounterNext)); // FG10-FAC-01（FGR-FAC-004）
+                    }
                     return string.Join(GameText.Get("intel.list_sep"), parts);
                 }
                 case IntelCatalog.KindBoss:
@@ -1330,7 +1343,8 @@ namespace GameLogic.Campaign.Economy
                     .Append(r.DirY.ToString("F4", CultureInfo.InvariantCulture)).Append('|').Append(r.WindowFromTick).Append('-').Append(r.WindowToTick).Append('|')
                     .Append(string.Join(",", r.Regions)).Append('|').Append(string.Join(",", r.Adaptations)).Append('|').Append(r.Counter).Append('|').Append(r.TargetKind)
                     .Append('|').Append(r.Level).Append('|').Append(r.PlanRevision).Append('|').Append(r.HasSilentCounter).Append(':').Append(r.SilentCounter).Append(':')
-                    .Append(r.SilentCounterNext).Append(':').Append(r.HasFoundryCounter).Append(':').Append(r.FoundryCounter).Append(':').Append(r.FoundryCounterNext).Append(';');
+                    .Append(r.SilentCounterNext).Append(':').Append(r.HasFoundryCounter).Append(':').Append(r.FoundryCounter).Append(':').Append(r.FoundryCounterNext)
+                    .Append(':').Append(r.HasClarityCounter).Append(':').Append(r.ClarityCounter).Append(':').Append(r.ClarityCounterNext).Append(';');
             }
             return sb.ToString();
         }

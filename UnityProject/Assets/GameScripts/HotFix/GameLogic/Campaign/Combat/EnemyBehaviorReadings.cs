@@ -82,6 +82,19 @@ namespace GameLogic.Campaign.Combat
                 case "chargeSpeed": return row.ChargeSpeed;
                 case "turnRate": return row.TurnRate;
                 case "maxPlaced": return row.MaxPlaced;
+                // FG10-FAC-01
+                case "sprayCone": return row.SprayCone;
+                case "poolRadius": return row.PoolRadius;
+                case "poolSeconds": return row.PoolSeconds;
+                case "poolDps": return row.PoolDps;
+                case "chill": return row.Chill;
+                case "statusSeconds": return row.StatusSeconds;
+                case "deflagMult": return row.DeflagMult;
+                case "splitCount": return row.SplitCount;
+                case "splitHp": return row.SplitHp;
+                case "splitSpeed": return row.SplitSpeed;
+                case "splitLife": return row.SplitLife;
+                case "splitDps": return row.SplitDps;
                 default: throw new ArgumentException("EnemyBehaviorReading.Column：未知列 " + col);
             }
         }
@@ -362,13 +375,192 @@ namespace GameLogic.Campaign.Combat
         public static float MineLifeSeconds => Grid.GridContent.TryGetTuning("foundry.mine.life_seconds", out float v) && v > 0f ? v : 90f;
     }
 
+    /// <summary>
+    /// FG10-FAC-01（FGR-FAC-008 澄净专属语法）的五个读法共用：内核行为都是“突袭者”式追击（感知范围内找目标、逼近到武器射程），
+    /// 专属攻击（喷淋 / 自爆 / 枢轴喷灌 / 投放）由 <see cref="EnemyClarityParams"/> 翻译成内核行为参数，在内核澄净阶段结算——武器三列是那一下本身，普通开火路径不出手。
+    /// </summary>
+    public abstract class ClarityChaseReading : EnemyBehaviorReading
+    {
+        public override CombatBehavior Kernel => CombatBehavior.Raider;
+        public override bool NeedsProfile => true;
+
+        public override void FillProfile(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            p.Speed = row.Speed;
+            p.SenseRange = row.SenseRange;
+        }
+    }
+
+    /// <summary>喷淋布区：喷嘴蓄压 warnSeconds → 锥形（weaponRange × sprayCone）喷出，命中挂 statusTag / 受寒，落地留池（喷洒车 / 液氮泵车）。</summary>
+    public sealed class SprayReading : ClarityChaseReading
+    {
+        public override string Key => EnemyDefs.BehaviorSpray;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds", "sprayCone" };
+    }
+
+    /// <summary>自爆与油迹：进入触发距离 weaponRange → 引信 warnSeconds → 爆炸（半径 effectRange、伤害 weaponDamage）；一路留油迹；被火击毁爆燃（油污爬行者）。</summary>
+    public sealed class CrawlBurstReading : ClarityChaseReading
+    {
+        public override string Key => EnemyDefs.BehaviorCrawlBurst;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds", "effectRange" };
+    }
+
+    /// <summary>枢轴喷灌：逼近到 weaponRange，蓄压 warnSeconds 后喷淋臂（臂长 effectRange、每秒伤害 effectAmount、转速 turnRate、半宽 sprayCone）绕本体扫（沉淀巨罐）。</summary>
+    public sealed class PivotReading : ClarityChaseReading
+    {
+        public override string Key => EnemyDefs.BehaviorPivot;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds", "effectRange", "effectAmount", "turnRate", "sprayCone" };
+    }
+
+    /// <summary>FG10-BOSS-01 固定环形喷淋架：本体原地不动、不开火（内核 HoldFire），喷淋臂（臂长 effectRange、每秒伤害 effectAmount、转速 turnRate、半宽 sprayCone、
+    /// 蓄压 warnSeconds）绕本体扫——与枢轴喷灌同一套内核结算（洗礼塔）。</summary>
+    public sealed class RingSprayReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorRingSpray;
+        public override CombatBehavior Kernel => CombatBehavior.HoldFire;
+        public override bool NeedsProfile => true;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "warnSeconds", "effectRange", "effectAmount", "turnRate", "sprayCone" };
+    }
+
+    /// <summary>投放（空中）：有投放目标时直飞过去，effectRange 内悬停预警 warnSeconds 后投放并自毁；没有目标时用武器扑向感知范围内的单位（灭活无人机）。</summary>
+    public sealed class PolluteReading : ClarityChaseReading
+    {
+        public override string Key => EnemyDefs.BehaviorPollute;
+        public override IReadOnlyList<string> RequiredColumns { get; } =
+            new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds", "effectRange" };
+    }
+
+    /// <summary>集群：追击感知范围内的目标，贴近用武器腐蚀；anti_building 标签优先打建筑（腐蚀蜂群）。</summary>
+    public sealed class SwarmReading : ClarityChaseReading
+    {
+        public override string Key => EnemyDefs.BehaviorSwarm;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown" };
+    }
+
+    /// <summary>
+    /// FG10-FAC-01：把敌人表里的澄净专属语法参数翻译成内核行为参数（喷淋布区 / 枢轴喷灌 / 自爆与油迹 / 分裂 / 飞行与投放 / 抗性 / 建筑偏好）。
+    /// 按读法与列是否 &gt; 0 决定，不认识任何敌人 ID（IC-REQ-012）；区域生成（<see cref="EnemySpawnBuilder"/>）与攻城单位生成（SiegeService.SpawnOne）共用，
+    /// 伤害类参数乘调用方给的伤害倍率（难度 / 精英），分裂液耐久乘耐久倍率（与本体同一口径）。<paramref name="insulate"/> = 这次生成挂绝缘涂层（带 adapt_insulate 的单位挂不上电击类标签）。
+    /// </summary>
+    public static class EnemyClarityParams
+    {
+        /// <summary>“电击类标签”（绝缘涂层挡掉的状态标签）。</summary>
+        public static readonly string[] InsulateTags = { "Shock", "Charged" };
+
+        public static bool Has(MechEnemy row) =>
+            row != null && (row.Behavior == EnemyDefs.BehaviorSpray || row.Behavior == EnemyDefs.BehaviorCrawlBurst || row.Behavior == EnemyDefs.BehaviorPivot
+                            || row.Behavior == EnemyDefs.BehaviorRingSpray
+                            || row.Behavior == EnemyDefs.BehaviorPollute || row.Behavior == EnemyDefs.BehaviorSwarm || row.SplitCount > 0f
+                            || EnemyDefs.HasTag(row, EnemyDefs.TagAirborne) || EnemyDefs.HasTag(row, EnemyDefs.TagAcidProof)
+                            || EnemyDefs.HasTag(row, EnemyDefs.TagAntiBuilding));
+
+        /// <summary>这一行在“绝缘涂层”那天会不会挂绝缘（带 adapt_insulate 标签）。</summary>
+        public static bool Insulates(MechEnemy row) => EnemyDefs.HasTag(row, EnemyDefs.TagAdaptInsulate);
+
+        public static uint InsulateMask()
+        {
+            uint m = 0u;
+            foreach (string t in InsulateTags)
+            {
+                m |= NamedReactionCatalog.BitOf(t);
+            }
+            return m;
+        }
+
+        public static void Apply(MechEnemy row, ref CombatBehaviorProfile p, float dmgMul, bool insulate, float hpMul = 1f)
+        {
+            if (row == null)
+            {
+                return;
+            }
+            float dm = Math.Max(0.05f, dmgMul);
+            uint status = NamedReactionCatalog.BitOf(row.StatusTag);
+            if (row.Behavior == EnemyDefs.BehaviorSpray)
+            {
+                p.SprayRange = row.WeaponRange;
+                p.SprayCone = row.SprayCone;
+                p.SprayWarn = Math.Max(0.8f, row.WarnSeconds);
+                p.SprayCycle = row.WeaponCooldown;
+                p.SprayDamage = row.WeaponDamage * dm;
+                p.SprayChill = Math.Max(0f, row.Chill);
+                p.SprayStatus = status;
+                p.SprayStatusSeconds = row.StatusSeconds;
+                p.PoolRadius = row.PoolRadius;
+                p.PoolSeconds = row.PoolSeconds;
+                p.PoolDps = row.PoolDps * dm;
+                p.PoolChill = Math.Max(0f, row.Chill) * PoolChillFrac;
+            }
+            else if (row.Behavior == EnemyDefs.BehaviorPivot || row.Behavior == EnemyDefs.BehaviorRingSpray)
+            {
+                p.PivotRadius = row.EffectRange;
+                p.PivotWidth = row.SprayCone * 2f; // 表 sprayCone 是半宽，内核 PivotWidth 是全宽（审查修复）
+                p.PivotSpeed = row.TurnRate;
+                p.PivotWarn = Math.Max(0.8f, row.WarnSeconds);
+                p.PivotDps = row.EffectAmount * dm;
+                p.SprayStatus = status;
+                p.SprayStatusSeconds = row.StatusSeconds;
+            }
+            else if (row.Behavior == EnemyDefs.BehaviorCrawlBurst)
+            {
+                p.BurstRadius = row.EffectRange;
+                p.BurstDamage = row.WeaponDamage * dm;
+                p.BurstFuse = Math.Max(0.8f, row.WarnSeconds);
+                p.BurstTrigger = row.WeaponRange;
+                p.DeflagMult = Math.Max(0f, row.DeflagMult);
+                p.TrailInterval = row.CycleSeconds;
+                p.TrailRadius = row.PoolRadius;
+                p.TrailSeconds = row.EffectSeconds;
+                p.TrailStatus = status;
+                p.TrailStatusSeconds = row.StatusSeconds; // 审查修复：表 statusSeconds 不再是死数据（油迹 / 溅油挂油的秒数）
+            }
+            else if (row.Behavior == EnemyDefs.BehaviorPollute)
+            {
+                p.PolluteRange = row.EffectRange;
+                p.PolluteChannel = Math.Max(0.8f, row.WarnSeconds);
+            }
+            if (row.SplitCount > 0f)
+            {
+                p.SplitCount = row.SplitCount;
+                p.SplitHp = row.SplitHp * Math.Max(0.05f, hpMul);
+                p.SplitSpeed = row.SplitSpeed;
+                p.SplitLife = row.SplitLife;
+                p.SplitDps = row.SplitDps * dm;
+                p.SplitRadius = row.PoolRadius > 0f ? row.PoolRadius : 1f;
+            }
+            if (EnemyDefs.HasTag(row, EnemyDefs.TagAirborne))
+            {
+                p.Airborne = 1f;
+            }
+            if (EnemyDefs.HasTag(row, EnemyDefs.TagAcidProof))
+            {
+                p.AcidResist = 1f;
+                p.ImmuneMask |= NamedReactionCatalog.BitOf("Acid");
+            }
+            if (EnemyDefs.HasTag(row, EnemyDefs.TagAntiBuilding))
+            {
+                p.StructPref = 1f;
+            }
+            if (insulate && Insulates(row))
+            {
+                p.ImmuneMask |= InsulateMask();
+            }
+        }
+
+        /// <summary>液氮池每节拍受寒 = 喷中受寒 × clarity.pool.chill_tick_frac。</summary>
+        public static float PoolChillFrac => Grid.GridContent.TryGetTuning("clarity.pool.chill_tick_frac", out float v) && v > 0f ? v : 0.5f;
+    }
+
     /// <summary>读法注册表（键 = fg.TbMechEnemy.behavior）。</summary>
     public static class EnemyBehaviorReadings
     {
         private static readonly Dictionary<string, IEnemyBehaviorReading> Map = Build(
             new StillReading(), new PatrolMarkReading(), new JamFieldReading(), new HoldFireReading(), new TelegraphReading(), new RepairReading(),
             new DeflectReading(), new StalkReading(), new SeverReading(),
-            new SalvoReading(), new MinelayReading(), new ReloadReading(), new ChargeReading());
+            new SalvoReading(), new MinelayReading(), new ReloadReading(), new ChargeReading(),
+            new SprayReading(), new CrawlBurstReading(), new PivotReading(), new PolluteReading(), new SwarmReading(), new RingSprayReading());
 
         private static Dictionary<string, IEnemyBehaviorReading> Build(params IEnemyBehaviorReading[] readings)
         {

@@ -103,7 +103,8 @@ namespace GameLogic.Campaign.Regions
                     string name = belt
                         ? GameText.Format("hazard.hover.title_belt", GameText.Get(t.HazardKey), GameText.Get(t.NameKey))
                         : Env.HomeExplorationService.HazardTitleZone(h, t);
-                    string consequence = GameText.Get(h.EffectKey) + "；" + GameText.Get("hazard.hover.pending");
+                    // FG10-REG-01：与地图悬停同一口径（已接入机制的危害写“生效中”与应对，不再一律写“只作标记”）。
+                    string consequence = GameText.Get(h.EffectKey) + "；" + Env.HomeExplorationService.HazardStatusLine(state, h, belt, Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.y)).Replace("\n", "；");
                     return new HazardHit(name, consequence);
                 }
             }

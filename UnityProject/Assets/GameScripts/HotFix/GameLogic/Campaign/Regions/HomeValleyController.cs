@@ -2091,6 +2091,7 @@ namespace GameLogic.Campaign.Regions
             Defense.SiegeService.RestoreAfterLoad(state, _combat); // FG6-DEF-05：按存档重设攻城剧场 / 职能表 / 集结点（内核快照不存这些配置），第一步之前
             Env.EmNoiseService.RestoreAfterLoad(state, _combat); // FG9-FAC-01：静默领地的噪声发射器（没被摧毁的补上，已摧毁的移除）
             Env.SlagHeatService.RestoreAfterLoad(state, _combat); // FG9-FAC-02：铸造领地的熔渣热区（区内散热 -30%，派生量不进快照）与子母雷上限
+            Env.AcidMarshService.RestoreAfterLoad(state, _combat); // FG10-FAC-01：澄净的酸沼带与领地酸沼（每秒 2% 耐久，派生量不进快照）
         }
 
         /// <summary>FG0-ARCH-04：还没建成的格网建筑（规划中 / 已预留材料 / 施工中）。</summary>

@@ -573,6 +573,14 @@ namespace GameLogic.Campaign.Defense
 
         private static void ChooseCounter(CampaignState s, RaidPlanRecord p)
         {
+            // FG10-FAC-01（FGR-FAC-004“突袭在出发时按当天的状态生成”）：澄净的突袭反制取当天锁定的阵营反制（燃烧 / 引信 / 电磁），映射到 fg.TbRaidCounter 的 clarity.* 行。
+            if (p.Faction == Content.EnemyDefs.FactionClarity)
+            {
+                RaidCounter cc = Regions.ClarityCounterService.RaidCounterFor(Regions.ClarityCounterService.Locked(s));
+                p.CounterCategory = cc?.Category ?? string.Empty;
+                p.Counter = cc?.Id ?? string.Empty;
+                return;
+            }
             string cat = TopDefenseCategory(s);
             RaidCounter c = cat != null ? RaidCatalog.CounterFor(p.Faction, cat) : null;
             p.CounterCategory = cat ?? string.Empty;

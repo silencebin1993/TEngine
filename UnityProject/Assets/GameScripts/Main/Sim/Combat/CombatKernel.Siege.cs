@@ -70,13 +70,13 @@ namespace BinGames.Sim.Combat
         public CombatSiegeConfig SiegeConfig => _d.SiegeState.Cfg[0];
 
         /// <summary>职能表：<paramref name="masks"/>[r] = 职能 r 的目标类别位（r = 0 突击 / 1 破坏 / 2 攻城；第 3 项撤退忽略），
-        /// <paramref name="bias"/>[r × 6 + 类别位序号] = 偏好代价（10 = 1 米；<see cref="CombatSiegeConst.Inf"/> = 不当目标）。表变了下一步全部流场重建。</summary>
+        /// <paramref name="bias"/>[r × CategoryCount + 类别位序号] = 偏好代价（10 = 1 米；<see cref="CombatSiegeConst.Inf"/> = 不当目标）。表变了下一步全部流场重建。</summary>
         public void SetSiegeRoles(IReadOnlyList<int> masks, IReadOnlyList<int> bias)
         {
             bool changed = false;
             for (int r = 0; r < CombatSiegeConst.RoleCount; r++)
             {
-                int m = r < CombatSiegeConst.RoleRetreat && masks != null && r < masks.Count ? masks[r] & 0x3F : 0;
+                int m = r < CombatSiegeConst.RoleRetreat && masks != null && r < masks.Count ? masks[r] & CombatSiegeConst.CatMask : 0;
                 changed |= _d.SiegeState.RoleMask[r] != m;
                 _d.SiegeState.RoleMask[r] = m;
             }

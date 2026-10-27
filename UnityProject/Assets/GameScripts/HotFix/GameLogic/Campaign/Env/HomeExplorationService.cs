@@ -1033,12 +1033,24 @@ namespace GameLogic.Campaign.Env
                 : HazardTitleZone(h, t);
             body = GameText.Format("hazard.hover.effect", GameText.Get(h.EffectKey)) + "\n"
                    + GameText.Format("hazard.hover.counter", GameText.Get(h.CounterKey)) + "\n"
-                   // FG9-FAC-01：电磁噪声的效果已经接入（覆盖 -30%、发射器可摧毁）——写生效 / 已清除，不再写“只作标记”。其余危害仍归各阵营卡。
-                   + (h.Id == EmNoiseService.HazardId && !belt ? EmNoiseService.HoverLine(s, x, y)
-                       // FG9-FAC-02：熔渣热区的效果已经接入（区内武器散热 -30%，战斗内核逐单位结算）。
-                       : h.Id == SlagHeatService.HazardId && !belt ? SlagHeatService.HoverLine()
-                       : GameText.Get("hazard.hover.pending"));
+                   + HazardStatusLine(s, h, belt, x, y);
             return true;
+        }
+
+        /// <summary>危害的“现在怎样”一行（悬停与派遣检查单同一口径）：已接入机制的写生效中 / 已清除，其余写“只作标记”。</summary>
+        public static string HazardStatusLine(CampaignState s, Hazard h, bool belt, int x, int y)
+        {
+            if (h == null)
+            {
+                return string.Empty;
+            }
+            // FG9-FAC-01：电磁噪声的效果已经接入（覆盖 -30%、发射器可摧毁）——写生效 / 已清除，不再写“只作标记”。其余危害仍归各阵营卡。
+            return h.Id == EmNoiseService.HazardId && !belt ? EmNoiseService.HoverLine(s, x, y)
+                // FG9-FAC-02：熔渣热区的效果已经接入（区内武器散热 -30%，战斗内核逐单位结算）。
+                : h.Id == SlagHeatService.HazardId && !belt ? SlagHeatService.HoverLine()
+                // FG10-FAC-01：酸沼的效果已经接入（外圈酸沼带与领地里的酸沼同一规则，战斗内核每游戏秒结算）；FG10-REG-01：附防腐涂层状态。
+                : h.Id == AcidMarshService.HazardId ? AcidMarshService.HoverLine() + "\n" + AcidMarshService.CoatingLine(s)
+                : GameText.Get("hazard.hover.pending");
         }
 
         public static Color HazardColor(Hazard h)

@@ -793,8 +793,8 @@ namespace GameLogic.EditorTools
                 Hazard h1 = HomeExplorationService.HazardForTerritory(act1.Id);
                 bool text1 = desc1 && t1.Contains(GameText.Get(h1.NameKey)) && t1.Contains(GameText.Get(act1.NameKey)) && b1.Contains(GameText.Get(h1.EffectKey))
                              && b1.Contains(GameText.Get(h1.CounterKey))
-                             // FG9-FAC-01：电磁噪声的效果已接入（覆盖 -30%、发射器可摧毁）——悬停写“生效中 / 已清除”；其余危害仍写“当前只作标记”。
-                             && b1.Contains(h1.Id == EmNoiseService.HazardId ? EmNoiseService.HoverLine(s, p1.x, p1.y) : GameText.Get("hazard.hover.pending"));
+                             // FG9-FAC-01 起各阵营危害陆续接入机制（电磁噪声 / 熔渣热区 / 酸沼写“生效中”，其余仍写“当前只作标记”）：按统一口径 HazardStatusLine 断言（FG10-REG-01）。
+                             && b1.Contains(HomeExplorationService.HazardStatusLine(s, h1, false, p1.x, p1.y));
                 bool beltDesc = HomeExplorationService.TryDescribeHazard(s, act2.CenterX + act2.Radius + act2.HazardWidth / 2, act2.CenterY, out _, out _);
                 bool hiddenAct2 = !beltDesc && !HomeExplorationService.TerritoryVisible(s, act2);
                 // 第一次揭开（探索圆碰到第二幕领地的外圈）：通知一次，之后这块领地在地图上显示、悬停可说明。

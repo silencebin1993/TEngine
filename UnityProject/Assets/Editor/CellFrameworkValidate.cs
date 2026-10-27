@@ -598,6 +598,17 @@ namespace GameLogic.EditorTools
             // 熔渣热区、快照格式 14；主核心 Demo 阶段 + 阶段三对空形态 + 狂暴 + 奖励、首领战中存读档、阶段三窗口全灭复位、场地边界、倍速 / 暂停 / 观察一致；
             // 反制每日锁定（FGT-FAC-005）、攻城单位、对空阵地锚点与投送舱防空、性能。
             Seg("FgFoundryFactionSelfCheck", FgFoundryFactionSelfCheck.Run);
+            // FG10-FAC-01 澄净单位与精英：5 类单位 + 沉淀巨罐入表与图鉴、喷淋布区 / 液氮先减速再冻结 / 自爆与被火击毁的爆燃（反过来利用）/ 枢轴喷灌 / 分裂（负向：分裂液在酸沼里不叠加）/
+            // 冷却液冲洗 / 酸沼 / 空中单位与投放 / 蜂群打建筑（内核实测预警 ≥ 0.8 秒）、快照格式 15 与确定性；世界酸沼（DEBT-FG8EXP02-03）、澄净据点展开本阵营单位（DEBT-FG8EXP03-02）、
+            // 攻城单位专属参数与绝缘涂层、反制每日锁定（FGT-FAC-005）与情报行；反馈与图鉴；性能。
+            Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
+            // FG10-REG-01 沉淀湖领地：模板与湖心平台锚点、防腐涂层（DEBT-FG8QST01-03）、没有涂层进酸沼先拒绝并说明（软门槛）、样品车接车点在带外、第一次进入的阵营介绍。
+            Seg("FgSettlingLakeSelfCheck", FgSettlingLakeSelfCheck.Run);
+            // FG10-REACT-01 化工反应开放：可得性探针、澄净不怕酸的负向、澄净领地出现时开放并通知、图鉴打法、首次触发慢放。
+            Seg("FgClarityReactionSelfCheck", FgClarityReactionSelfCheck.Run);
+            // FG10-BOSS-01 洗礼塔：三阶段（灌注 / 反应 / 泄压）、泵站停流体、主动反应与借力打力、热震、奖励与平定、复位重试、HUD。
+            Seg("FgBaptismTowerSelfCheck", FgBaptismTowerSelfCheck.Run);
+            Seg("FgClarityRaidSelfCheck", FgClarityRaidSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);
             // FG9-BAL-01 第一幕平衡：节奏机器人（加速模拟，真实世界逐步推进）在 3 个测试种子上走完第一幕、每个节奏点偏差 ≤ 25%（FGT-BAL-004 第一幕部分）；

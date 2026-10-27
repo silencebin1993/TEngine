@@ -89,6 +89,23 @@ namespace BinGames.Sim.Combat
         public float SlagMult;
         /// <summary>FG9-FAC-02：本地点同时存在的子母雷上限（派生量，热更层按调参写；0 = 默认 12）。</summary>
         public int MineCap;
+        /// <summary>FG10-FAC-01（酸沼“每秒 2% 耐久”，DEBT-FG7ENV05-01 / DEBT-FG8EXP02-03）：酸沼的圆环（x, y, 内半径, 外半径；危害区内半径 = 0，外圈酸沼带内半径 = 领地半径）、
+        /// 每游戏秒扣最大耐久的比例、身上湿润（或站在带湿润标签的区域里）时的伤害倍率（冷却液冲淡）。派生量（热更层按规划层写入），不进快照、不进状态哈希；读档后沿用。</summary>
+        public NativeList<float4> AcidShapes;
+        public float AcidPct;
+        public float AcidDilute;
+        /// <summary>FG10-REG-01：玩家机器的酸蚀抗性下限（防腐涂层，派生量；0 = 没有涂层）。</summary>
+        public float PlayerAcidResist;
+        /// <summary>FG10-FAC-01：内核不认识标签名——酸蚀 / 湿润 / 油 / 燃烧在本地点的状态位（热更层按 fg.TbStatusTag 写；0 = 没有这个标签，相关规则不生效）。派生量。</summary>
+        public uint AcidBit;
+        public uint WetBit;
+        public uint OilBit;
+        public uint FireBit;
+        /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量（热更层按净化塔写入），不进快照。</summary>
+        public NativeList<float3> PolluteTargets;
+        /// <summary>FG10-RAID-01：1 = 只有攻城中的单位（<see cref="CombatSiegeLogic.UsesSiege"/>）读投放目标（家园 / 星球内核：别处的澄净无人机——据点驻军、首领波次、被拦截就地交战的——不被吸去投放）；
+        /// 0 = 全部空中投放单位都读（靶场 / 自检）。派生量，与投放目标一起由热更层写入，不进快照。</summary>
+        public byte PolluteSiegeOnly;
 
         // ── 单位（按槽位；槽位顺序 = 生成顺序，压实时保持相对顺序）──
         public NativeList<int> Id;
@@ -140,6 +157,10 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatSilentUnit> Silent;
         /// <summary>FG9-FAC-02：每单位的铸造专属语法状态（齐射 / 架炮驻锄 / 冲锋 / 地雷 / 装填；随快照进存档，格式 14）。</summary>
         public NativeList<CombatFoundryUnit> Foundry;
+        /// <summary>FG10-FAC-01：每单位的澄净专属语法状态与受寒 / 抗性（随快照进存档，格式 15）。</summary>
+        public NativeList<CombatClarityUnit> Clarity;
+        /// <summary>FG10-FAC-01：待结算的死亡效果（分裂 / 爆燃；随快照进存档，格式 15）。</summary>
+        public NativeList<CombatClarityPending> ClarityPending;
         public NativeList<CombatCommand> Cmd;
         public NativeList<float2> Direct;
 
@@ -263,7 +284,11 @@ namespace BinGames.Sim.Combat
                 Siege = new NativeList<CombatSiegeUnit>(capacity, Allocator.Persistent),
                 Silent = new NativeList<CombatSilentUnit>(capacity, Allocator.Persistent),
                 Foundry = new NativeList<CombatFoundryUnit>(capacity, Allocator.Persistent),
+                Clarity = new NativeList<CombatClarityUnit>(capacity, Allocator.Persistent),
+                ClarityPending = new NativeList<CombatClarityPending>(4, Allocator.Persistent),
                 SlagZones = new NativeList<float3>(4, Allocator.Persistent),
+                AcidShapes = new NativeList<float4>(4, Allocator.Persistent),
+                PolluteTargets = new NativeList<float3>(4, Allocator.Persistent),
                 SiegeState = CombatSiegeData.Create(),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
                 Direct = new NativeList<float2>(capacity, Allocator.Persistent),
@@ -361,7 +386,11 @@ namespace BinGames.Sim.Combat
             Siege.Dispose();
             Silent.Dispose();
             Foundry.Dispose();
+            Clarity.Dispose();
+            ClarityPending.Dispose();
             SlagZones.Dispose();
+            AcidShapes.Dispose();
+            PolluteTargets.Dispose();
             SiegeState.Dispose();
             Cmd.Dispose();
             Direct.Dispose();
@@ -413,6 +442,7 @@ namespace BinGames.Sim.Combat
         public int FieldZoneCap => Config.FieldZoneCapacity > 0 ? Config.FieldZoneCapacity : CombatConst.DefaultFieldZoneCapacity;
         public int EchoCap => Config.EchoCapacity > 0 ? Config.EchoCapacity : CombatConst.DefaultEchoCapacity;
         public int DroneCap => Config.DroneCapacity > 0 ? Config.DroneCapacity : CombatConst.DefaultDroneCapacity;
+        public int PoolZoneCap => Config.PoolZoneCapacity > 0 ? Config.PoolZoneCapacity : CombatConst.DefaultPoolZoneCapacity;
 
         /// <summary>FG2-FW-02：这个单位此刻身上的状态标签（已到期的算没有）。</summary>
         public bool StatusActive(int slot, double now) => Status[slot] != 0u && StatusUntil[slot] > now;
@@ -476,6 +506,7 @@ namespace BinGames.Sim.Combat
             Siege.Add(s.Siege);
             Silent.Add(default);
             Foundry.Add(default);
+            Clarity.Add(default);
             Cmd.Add(default);
             Direct.Add(float2.zero);
             NavSt.Add(0);
@@ -536,6 +567,7 @@ namespace BinGames.Sim.Combat
             Siege[to] = Siege[from];
             Silent[to] = Silent[from];
             Foundry[to] = Foundry[from];
+            Clarity[to] = Clarity[from];
             Cmd[to] = Cmd[from];
             Direct[to] = Direct[from];
             NavSt[to] = NavSt[from];
@@ -586,6 +618,7 @@ namespace BinGames.Sim.Combat
             Siege.ResizeUninitialized(length);
             Silent.ResizeUninitialized(length);
             Foundry.ResizeUninitialized(length);
+            Clarity.ResizeUninitialized(length);
             Cmd.ResizeUninitialized(length);
             Direct.ResizeUninitialized(length);
             NavSt.ResizeUninitialized(length);
@@ -611,6 +644,7 @@ namespace BinGames.Sim.Combat
             Drones.Clear();
             Shields.Clear();
             DeflectActive.Clear();
+            ClarityPending.Clear();
             SiegeState.ClearImpacts();
             Gameplay.Clear();
             Cues.Clear();

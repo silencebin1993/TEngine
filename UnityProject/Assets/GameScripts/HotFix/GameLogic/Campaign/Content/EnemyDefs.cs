@@ -38,6 +38,14 @@ namespace GameLogic.Campaign.Content
         public const string BehaviorMinelay = "minelay";
         public const string BehaviorReload = "reload";
         public const string BehaviorCharge = "charge";
+        /// <summary>FG10-FAC-01（FGR-FAC-008 澄净专属语法）：喷淋布区（喷洒车 / 液氮泵车）、爬行自爆（油污爬行者）、枢轴喷灌（沉淀巨罐）、投放（灭活无人机）、集群（腐蚀蜂群）。</summary>
+        public const string BehaviorSpray = "spray";
+        public const string BehaviorCrawlBurst = "crawl_burst";
+        public const string BehaviorPivot = "pivot";
+        /// <summary>FG10-BOSS-01：固定环形喷淋架（洗礼塔：本体不动、没有武器，喷淋臂与枢轴喷灌同一套内核结算）。</summary>
+        public const string BehaviorRingSpray = "ring_spray";
+        public const string BehaviorPollute = "pollute";
+        public const string BehaviorSwarm = "swarm";
 
         // ── 标签（fg.TbMechEnemy.tags）──
         public const string TagStructure = "structure";
@@ -51,7 +59,19 @@ namespace GameLogic.Campaign.Content
         public const string TagAntiAir = "anti_air";
         public const string TagAirburst = "airburst";
         public const string TagAssembled = "assembled";
-        public static readonly string[] KnownTags = { TagStructure, TagExternalHealth, TagSilentFire, TagAdaptHeat, TagDecoy, TagListenAmp, TagAntiAir, TagAirburst, TagAssembled };
+        /// <summary>
+        /// FG10-FAC-01：acid_proof = 不受酸蚀（酸沼 / 酸液池 / 分裂液不伤、挂不上酸蚀标签；玩家酸蚀固件的命中伤害照算）；adapt_insulate = 澄净反制锁定为“绝缘涂层”的那天挂不上电击类标签；
+        /// airborne = 空中单位（格斗 / 力场 / 布区打不到，不受地形与地面区域影响）；anti_building = 感知范围内有你的建筑 / 炮塔时优先打它们。
+        /// </summary>
+        public const string TagAcidProof = "acid_proof";
+        public const string TagAdaptInsulate = "adapt_insulate";
+        public const string TagAirborne = "airborne";
+        public const string TagAntiBuilding = "anti_building";
+        public static readonly string[] KnownTags =
+        {
+            TagStructure, TagExternalHealth, TagSilentFire, TagAdaptHeat, TagDecoy, TagListenAmp, TagAntiAir, TagAirburst, TagAssembled,
+            TagAcidProof, TagAdaptInsulate, TagAirborne, TagAntiBuilding,
+        };
 
         // ── 职能 / 层级 / 阵营 ──
         public const string RoleStructure = "structure";
@@ -61,6 +81,7 @@ namespace GameLogic.Campaign.Content
         public const string TierBoss = "boss";
         public const string FactionSilent = "silent";
         public const string FactionFoundry = "foundry";
+        public const string FactionClarity = "clarity";
 
         // ── 编成条件（fg.TbEnemyEncounter.condition）──
         public const string ConditionBase = "base";
@@ -78,6 +99,10 @@ namespace GameLogic.Campaign.Content
         public const string ConditionBattery = "battery";
         public const string ConditionCounterAntiAir = "counter_antiair";
         public const string ConditionCounterMinefield = "counter_minefield";
+        /// <summary>FG10-FAC-01：澄净反制锁定为“液氮压制 / 蜂群饱和 / 绝缘涂层”（FG09 第 6 章反制表；据点展开与突袭按当天的锁定生成）。</summary>
+        public const string ConditionCounterCryo = "counter_cryo";
+        public const string ConditionCounterSwarm = "counter_swarm";
+        public const string ConditionCounterInsulate = "counter_insulate";
 
         public const string None = "none";
         public const string NotifyContentError = "content_error";

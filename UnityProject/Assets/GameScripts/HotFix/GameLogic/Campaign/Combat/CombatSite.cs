@@ -25,6 +25,9 @@ namespace GameLogic.Campaign.Combat
     {
         public virtual void OnEnemyDamaged(CombatSite site, RegionEnemyRecord enemy, float damage) { }
         public virtual void OnEnemyKilled(CombatSite site, RegionEnemyRecord enemy) { }
+        /// <summary>FG10-FAC-01（复核修复）：具名敌人自毁（爬行者自爆 / 无人机投放后），不是被击毁——不掉落、不记击杀、不解锁靶子、不放击毁音，
+        /// 但“场上已清除”、驻军全灭 → 据点摧毁、视图刷新照做（否则最后一台驻军自爆时据点永远不倒）。默认只做驻军簿记。</summary>
+        public virtual void OnEnemySelfDestructed(CombatSite site, RegionEnemyRecord enemy) => SiteGarrisonService.OnEnemyKilled(CampaignSession.Current, enemy);
         /// <summary>血量在热更层的敌人（首领）受到伤害。返回 false = 结算被拒（阶段不可伤等）。</summary>
         public virtual bool ApplyExternalEnemyDamage(CombatSite site, RegionEnemyRecord enemy, float damage) => false;
         public virtual bool ApplyExternalEnemyHeal(CombatSite site, RegionEnemyRecord enemy, float amount) => false;
@@ -190,6 +193,8 @@ namespace GameLogic.Campaign.Combat
             }
             Kernel.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
             Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+            // FG10-FAC-01：澄净专属语法认的四个状态位（酸蚀免疫 / 湿润冲淡酸液 / 油迹 / 燃烧引爆与解冻），按 fg.TbStatusTag 的位写；表重载时随反应一起重登记。
+            Kernel.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"));
             ReactionRevision = NamedReactionCatalog.Revision;
             // FG2-FW-04：规则下标变了（纪元 +1）→ 当场重取反馈基线，下一步起的反应照常进日志 / 归因（不把第一步吞成基线）。
             ReactionFeedback.Prime(Kernel, FeedCursor);
@@ -274,6 +279,12 @@ namespace GameLogic.Campaign.Combat
             c.TurretAimToleranceDeg = Math.Max(0.5f, Tuning("turret.aim_tolerance_deg", 6f));
             // FG6-LOG-10（FGR-LOG-046）：管线泄漏的液洼整片反应（燃油遇火成燃烧区）后至少烧多少游戏秒。
             c.LeakReactSeconds = Math.Max(0f, Tuning("logistics.leak.react_seconds", 12f));
+            // FG10-FAC-01：受寒与冻结（液氮“先减速再冻结”）、喷淋池 + 油迹的共用上限（fg.TbHomeTuning clarity.*）。
+            c.ChillSlowMax = Tuning("clarity.chill.slow_max", 0.6f);
+            c.ChillDecay = Tuning("clarity.chill.decay_per_sec", 0.25f);
+            c.FreezeSeconds = Tuning("clarity.chill.freeze_seconds", 2.5f);
+            c.ThawGuardSeconds = Tuning("clarity.chill.thaw_guard_seconds", 1.5f);
+            c.PoolZoneCapacity = (int)Math.Round(Tuning("clarity.pool.cap", CombatConst.DefaultPoolZoneCapacity));
             return c;
         }
 
@@ -785,18 +796,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>行为参数表去重。</summary>
         public int ProfileIndex(in CombatBehaviorProfile p)
         {
-            string key = string.Join("|", p.Speed, p.FleeTrigger, p.Leash, p.PatrolRadius, p.PatrolFreq, p.SenseRange, p.CycleSeconds,
-                p.EffectSeconds, p.EffectAmount, p.EffectRange,
-                // FG9-FAC-01：静默专属语法参数也进键（不同潜伏 / 偏折 / 断链参数不会并成一行）
-                p.LurkSeconds, p.RevealSeconds, p.RevealRange, p.DeflectRadius, p.DeflectWarn, p.DeflectUp, p.DeflectGap, p.DeflectReflect,
-                p.SeverRange, p.SeverSeconds, p.SeverCooldown,
-                // FG9-FAC-02 修复轮：铸造专属语法参数也进键——此前漏了，主核心（坚守开火 + 对空齐射）会和同读法、无齐射的行并成一行，对空形态从不开火
-                p.SalvoCount, p.SalvoGap, p.SalvoReload, p.SalvoWarn, p.SalvoRadius, p.SalvoMode,
-                p.MineMax, p.MineCycle, p.MineRadius, p.MineDamage, p.MineFuse, p.MineLife,
-                p.ReloadRange, p.ReloadRate,
-                p.ChargeSpeed, p.ChargeWarn, p.ChargeSeconds, p.ChargeCooldown, p.ChargeKnock, p.TurnRate,
-                p.DeploySeconds, p.MinRange);
-            if (_profileIndex.TryGetValue(key, out int idx) && idx < Kernel.ProfileCount)
+            // FG10-FAC-01（审查修复）：键取行为参数的完整字节（与武器表同一做法）——此前逐字段拼键，FG10 的澄净参数（喷淋 / 枢轴 / 自爆 / 分裂 / 飞行 / 抗性 / 免疫位）
+            // 全不在键里，同一种单位的绝缘 / 不绝缘、精英 / 普通、不同难度会并成一行。命中后再比一次整行，防内核表被重建后下标错位。
+            string key = CombatKernel.ProfileKey(p);
+            if (_profileIndex.TryGetValue(key, out int idx) && Kernel.TryGetProfile(idx, out CombatBehaviorProfile existing) && existing.Equals(p))
             {
                 return idx;
             }
@@ -1319,6 +1322,12 @@ namespace GameLogic.Campaign.Combat
                     rec.Health = 0f;
                     rec.IsAlive = false;
                     rec.Position = new Vector2((float)e.Pos.x, (float)e.Pos.y);
+                    // FG10-FAC-01（审查修复）：自毁（自爆 / 投放后 / 蒸发）不是被谁击毁——不记击杀、不走地点规则的击杀结算（掉落 / 靶子 / 击毁音），只做清除与驻军簿记。
+                    if ((e.Code2 & CombatConst.KillSelfDestructBit) != 0)
+                    {
+                        Rules?.OnEnemySelfDestructed(this, rec);
+                        return;
+                    }
                     // FG4-ECO-07（FGR-ECO-041 机器详情“击杀”）：内核的阵亡事件带着致命一击的来源单位（Other）；来源是己方机器时记一次击杀。O(1)。
                     if (_unitMachine.TryGetValue(e.Other, out int killerLogicId))
                     {
@@ -1564,6 +1573,14 @@ namespace GameLogic.Campaign.Combat
                     // FG9-FAC-02（FGR-FAC-008 ①）：齐射预警 / 对空拦截 / 空爆 / 雷区 / 冲锋蓄力 / 架炮驻锄——声音 + 字幕 + 画面。
                     FoundryCombatFeedback.OnCue(this, e, at);
                     return;
+                case CombatEventKind.ClarityCue:
+                    // FG10-FAC-01（FGR-FAC-008 ①）：喷嘴蓄压 / 枢轴喷灌蓄压 / 自爆引信 / 投放预警（≥ 0.8 秒）与喷出 / 爆燃 / 冻结 / 分裂 / 冲洗 / 酸沼腐蚀——声音 + 字幕 + 画面。
+                    ClarityCombatFeedback.OnCue(this, e, at);
+                    return;
+                case CombatEventKind.Repolluted:
+                    // FG10-FAC-01：灭活无人机投放完成（不丢的玩法事件）。目标点周围再污染由 FG10-RAID-01 订阅 ClarityCombatFeedback.RepollutedAt 落地。
+                    ClarityCombatFeedback.OnRepolluted(this, e, at);
+                    return;
                 case CombatEventKind.TagReaction:
                 {
                     // FG2-FW-03（FGR-FW-041 / 042）：开放命名的反应报出机械名；未开放的照样生效，只是不显示名字。
@@ -1698,6 +1715,10 @@ namespace GameLogic.Campaign.Combat
                     return GameText.Get("combat.fire.hidden"); // FG9-FAC-01：目标潜伏中，不能远程锁定
                 case CombatFireResult.AreaOnly:
                     return GameText.Get("combat.fire.area_only"); // FG9-FAC-02：子母雷只能用范围伤害 / 牵引引爆
+                case CombatFireResult.Frozen:
+                    return GameText.Get("combat.fire.frozen"); // FG10-FAC-01：被液氮冻住，解冻前不能开火
+                case CombatFireResult.CannotHitAir:
+                    return GameText.Get("combat.fire.cannot_hit_air"); // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区打不到空中目标
                 default:
                     return string.Empty;
             }

@@ -31,8 +31,11 @@ namespace BinGames.Sim.Combat
         /// 13 = FG9-FAC-01（FG09 FGR-FAC-008 静默专属语法）：行为参数追加潜伏 / 偏折场 / 断链束参数；每个单位追加静默状态（<see cref="CombatSilentUnit"/>：潜伏、现形倒计时、
         /// 偏折场阶段与计时、断链束目标与累计）（读取仍认 1～12：参数为 0 = 没有这些行为，状态为空）。
         /// 14 = FG9-FAC-02（FG09 FGR-FAC-008 铸造专属语法）：行为参数追加齐射 / 布雷 / 装填 / 冲锋 / 架炮驻锄 / 盲区参数；每个单位追加铸造状态（<see cref="CombatFoundryUnit"/>）；
-        /// 计数追加齐射 / 对空拦截 / 布雷 / 引爆 / 冲锋次数（读取仍认 1～13：参数为 0 = 没有这些行为，状态与计数为 0）。</summary>
-        public const int FormatVersion = 14;
+        /// 计数追加齐射 / 对空拦截 / 布雷 / 引爆 / 冲锋次数（读取仍认 1～13：参数为 0 = 没有这些行为，状态与计数为 0）。
+        /// 15 = FG10-FAC-01（FG09 FGR-FAC-008 澄净专属语法）：行为参数追加喷淋布区 / 枢轴喷灌 / 自爆与油迹 / 分裂 / 飞行与投放 / 抗性参数；每个单位追加澄净状态（<see cref="CombatClarityUnit"/>）；
+        /// 区域种类追加“喷淋池”“油迹”（<see cref="ZoneKindPool"/> / <see cref="ZoneKindSlick"/>），区域追加受寒量；追加待结算的死亡效果（分裂 / 爆燃）；计数追加喷淋 / 冻结 / 自爆 / 爆燃 / 油迹点燃 / 分裂 / 再污染 / 酸沼腐蚀 / 冲洗次数
+        /// （读取仍认 1～14：参数为 0 = 没有这些行为，状态与计数为 0，没有新种类的区域）。</summary>
+        public const int FormatVersion = 15;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -70,6 +73,17 @@ namespace BinGames.Sim.Combat
         /// <summary>液洼区域的阶段（<see cref="CombatZone.Phase"/>）：0 = 液洼（挂流体标签）；1 = 已反应（整片变成反应的残留区域，到期消失）。</summary>
         public const byte LeakPhasePuddle = 0;
         public const byte LeakPhaseReacted = 1;
+        /// <summary>FG10-FAC-01（FGR-FAC-008“喷淋布区”）：澄净单位喷出的地面持续池（喷洒车的酸液池、液氮泵车的液氮池）。属于敌方阵营（只结算己方单位，炮塔 / 建筑也挨），
+        /// 和读法区域一样按节拍伤害 / 挂标签，另带受寒量（<see cref="CombatZone.Chill"/>）。被冲洗（重叠的带湿润标签的区域冲淡酸液、带燃烧标签的区域蒸干液氮）时阶段记 1 并很快消失。
+        /// 与油迹共用一个上限（<see cref="CombatData.PoolZoneCap"/>），不挤占读法区域。</summary>
+        public const byte ZoneKindPool = 3;
+        /// <summary>FG10-FAC-01（油污爬行者“留下油迹”）：中立的油迹（站进去的己方机器与敌人都挂上油）。与管线液洼同一套整片反应（遇到燃烧等能和油起反应、会留残留的标签就整片变成残留区域，
+        /// 双方都挨——“可以用燃迹反过来利用”），但由内核按时长自己消失，不进热更层的液洼对账。阶段同液洼（<see cref="LeakPhasePuddle"/> / <see cref="LeakPhaseReacted"/>）。</summary>
+        public const byte ZoneKindSlick = 4;
+        /// <summary>FG10-FAC-01：配置没填（0）时喷淋池 + 油迹的共用上限（超出的不生成并计数）。</summary>
+        public const int DefaultPoolZoneCapacity = 192;
+        /// <summary>FG10-FAC-01（审查修复）：阵亡 / 攻城击毁事件的 Code2 里这一位 = 自毁（不是被谁击毁；SiegeKilled 的第 0 位仍是精英）。</summary>
+        public const byte KillSelfDestructBit = 2;
 
         /// <summary>FG2-E2E-01（FG-GAP-043）：同时留在画面上的引信弹迹上限（满了挤掉最老的一条；每条只活零点几游戏秒）。</summary>
         public const int TraceCapacity = 128;
@@ -117,6 +131,8 @@ namespace BinGames.Sim.Combat
         public const int MuzzleFlashColor = 0xFFD27A;
         public const int EffectFoeColor = 0xFA7330;
         public const int EffectNeutralColor = 0xB0B0B0;
+        /// <summary>FG10-FAC-01：澄净专属行为的预警画面（喷嘴蓄压落点、枢轴扫臂前方扇区、自爆引信半径、投放落点）用的琥珀黄，与阵营色、状态色都区分开。</summary>
+        public const int EffectWarnColor = 0xFFD23C;
     }
 
     /// <summary>
@@ -352,8 +368,11 @@ namespace BinGames.Sim.Combat
         /// <summary>FG6-DEF-02 复审修复：0 = 读法区域（武器 / 反应留下的），1 = 场地（陷阱发射器铺的）。两种各有自己的上限，场地铺满不挤掉读法区域。随快照（格式 10）。
         /// FG6-LOG-10：2 = 管线泄漏液洼（<see cref="CombatConst.ZoneKindLeak"/>；<see cref="Owner"/> 存液洼编号的相反数，不归属任何单位）。</summary>
         public byte Kind;
-        /// <summary>FG6-LOG-10：液洼区域的阶段（<see cref="CombatConst.LeakPhasePuddle"/> / <see cref="CombatConst.LeakPhaseReacted"/>）；其余区域恒为 0。随快照（格式 12）。</summary>
+        /// <summary>FG6-LOG-10：液洼区域的阶段（<see cref="CombatConst.LeakPhasePuddle"/> / <see cref="CombatConst.LeakPhaseReacted"/>）；其余区域恒为 0。随快照（格式 12）。
+        /// FG10-FAC-01：油迹同液洼；喷淋池 1 = 已被冲洗（很快消失，只提示一次）。</summary>
         public byte Phase;
+        /// <summary>FG10-FAC-01（液氮池）：每个节拍给站在里面的单位加多少受寒（0 = 没有；受寒满 1 冻结，见 <see cref="CombatClarityUnit.Chill"/>）。随快照（格式 15）。</summary>
+        public float Chill;
     }
 
     /// <summary>FG2-FW-02：一次待结算的回波（残影 / 节拍 / 追射 / 回旋）：到点后对同一目标再结算一次伤害与状态。</summary>
@@ -471,6 +490,9 @@ namespace BinGames.Sim.Combat
         Charger = 13,
         /// <summary>FG9-FAC-02（装填机）：受威胁后撤、否则回到牵引中心；装填光环由行为参数 Reload* 决定（任何行为都可以带）。</summary>
         Loader = 14,
+        /// <summary>FG10-FAC-01（沉淀巨罐被击毁后的“会爬行的腐蚀液”）：内核在巨罐阵亡处生成的匿名小单位——慢速爬向感知范围内最近的己方地面单位，接触时按节拍腐蚀
+        /// （多滩之间不叠加，见 <see cref="CombatClarityUnit.PuddleTick"/>），存活 SplitLife 秒后蒸发。参数取母体的行为参数 Split*。</summary>
+        Puddle = 15,
     }
 
     /// <summary>单位状态位。</summary>
@@ -549,6 +571,67 @@ namespace BinGames.Sim.Combat
         JamEmitter = 1 << 29,
         /// <summary>FG9-FAC-02（子母雷）：不能被单体锁定（索敌 / 编队攻击 / 直控点击都选不中，开火结果 <see cref="CombatFireResult.AreaOnly"/>）；范围伤害与牵引照常作用（会提前引爆）。</summary>
         AreaOnly = 1u << 30,
+    }
+
+    /// <summary>
+    /// FG10-FAC-01（FG09 FGR-FAC-008 澄净专属语法；第 6 章五类单位与精英）：每个单位的澄净状态（随快照进存档，格式 15）。全 0 = 没有澄净行为、没有受寒。
+    /// 喷淋布区：<see cref="Spray"/> 0 = 冷却（<see cref="SprayT"/> 还剩几秒）、1 = 喷嘴蓄压预警（定在 <see cref="Anchor"/>，方向 <see cref="SprayDir"/>，到点喷出）。
+    /// 枢轴喷灌：<see cref="Pivot"/> 0 = 待机、1 = 蓄压预警（<see cref="PivotT"/>）、2 = 扫臂（臂角 <see cref="PivotAngle"/> 度，PivotT = 周围没有目标的累计秒数）。
+    /// 自爆：<see cref="Fuse"/> 0 = 爬行、1 = 引信燃烧（<see cref="FuseT"/>，定在 Anchor）、2 = 已自爆（阵亡时不再按“被火击毁”爆燃）；油迹 <see cref="TrailT"/> / <see cref="TrailLast"/>。
+    /// 飞行：<see cref="Air"/> = 1（灭活无人机）——不受地形与地面区域影响，格斗 / 力场 / 布区打不到（FG18 FGR-AIR-010）。投放：<see cref="Pollute"/> 1 = 投放预警（<see cref="PolluteT"/>，目标 <see cref="PolluteAt"/>）。
+    /// 受寒（任何单位都可能挂）：<see cref="Chill"/> 0～1，越高越慢；满 1 冻结 <see cref="FrozenT"/> 秒（不能移动、不能开火），解冻后 <see cref="ThawGuardT"/> 秒内不再受寒。
+    /// 抗性：<see cref="AcidResist"/>（酸沼 / 酸液池伤害 × (1 − 本值)）、<see cref="ImmuneMask"/>（挂不上的状态位：澄净单位不挂酸蚀、带绝缘涂层的单位不挂电击）。
+    /// 分裂液：<see cref="Life"/> 剩余存活秒数；<see cref="PuddleTick"/> = 这个单位最近一次被分裂液腐蚀的节拍序号（同一节拍多滩分裂液只算一次）。
+    /// 审查修复：<see cref="SprayAt"/> = 喷嘴蓄压那一刻锁定的落点（目标所在处；喷淋池落在“到它的距离”与射程取小处，不是固定的射程中段）；
+    /// <see cref="PivotPrev"/> = 上一个区域节拍时的臂角（节拍结算“这段时间扫过的整段弧”，不只是节拍那一刻的臂角）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatClarityUnit
+    {
+        public byte Spray;
+        public byte Pivot;
+        public byte Fuse;
+        public byte Air;
+        public byte Pollute;
+        public byte Pad0;
+        public short Pad1;
+        public float SprayT;
+        public float2 SprayDir;
+        public double2 Anchor;
+        public float PivotAngle;
+        public float PivotT;
+        public float FuseT;
+        public float TrailT;
+        public double2 TrailLast;
+        public float PolluteT;
+        public double2 PolluteAt;
+        public float Chill;
+        public float FrozenT;
+        public float ThawGuardT;
+        public float AcidResist;
+        public uint ImmuneMask;
+        public float Life;
+        public long PuddleTick;
+        public double2 SprayAt;
+        public float PivotPrev;
+    }
+
+    /// <summary>
+    /// FG10-FAC-01：一条待结算的死亡效果（单位阵亡那一刻记下，下一个澄净阶段统一生成——阵亡可能发生在弹体 / 区域的遍历中途，不在遍历里追加单位或区域）。
+    /// <see cref="Kind"/> 1 = 自爆单位阵亡（<see cref="Mult"/> &gt; 0：被火击毁 → 中立爆燃，伤害 × Mult；= 0：只留一摊油迹）；2 = 分裂（生成 Profile 的 SplitCount 滩分裂液）。随快照进存档（格式 15）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CombatClarityPending
+    {
+        public byte Kind;
+        public byte Pad0;
+        public short Pad1;
+        public int Profile;
+        public int Source;
+        public float Mult;
+        public double2 Pos;
     }
 
     /// <summary>
@@ -719,6 +802,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG9-FAC-01（寂听者“断链束”）：断链束持续照射被接入的机器满 <see cref="CombatBehaviorProfile.SeverSeconds"/> 秒——热更层强制断链（走玩法事件，不丢）。
         /// Unit=被照射的机器，Other=照射者。</summary>
         LinkSevered = 21,
+        /// <summary>FG10-FAC-01（灭活无人机）：投放完成——热更层让目标点（净化塔）周围再次污染（走玩法事件，不丢）。Unit=无人机（投放后自毁），Pos=目标点，Value=目标点半径。</summary>
+        Repolluted = 22,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -755,6 +840,10 @@ namespace BinGames.Sim.Combat
         /// <summary>FG9-FAC-02：铸造专属语法的提示（Unit=行为者，Other=目标 / 被撞者，Value=预警秒数或半径，Pos=位置）。
         /// Code：1 齐射装填完成灯（预警，Code2 = 1 对空 / 2 空爆）、2 对空拦截、3 空爆、4 子母雷引信触发、5 子母雷爆炸、6 冲锋蓄力、7 步进炮开始架设、8 铺下一颗雷、9 冲锋撞击。</summary>
         FoundryCue = 47,
+        /// <summary>FG10-FAC-01：澄净专属语法的提示（Unit=行为者 / 受影响者，Other=目标，Value=预警秒数或半径，Pos=位置）。
+        /// Code：1 喷嘴蓄压（预警，Code2 = 1 酸液 / 2 液氮）、2 喷出、3 枢轴喷灌蓄压（预警）、4 自爆引信（预警）、5 爆炸（Code2 = 1 被火击毁的爆燃）、6 油迹被点燃、
+        /// 7 冻结（Unit = 被冻结者）、8 分裂、9 投放预警（灭活无人机）、10 喷淋池被冲洗、11 酸沼腐蚀（Unit = 受伤者，只在它这一秒第一次挨时发）。</summary>
+        ClarityCue = 48,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -784,6 +873,10 @@ namespace BinGames.Sim.Combat
         Hidden = 14,
         /// <summary>FG9-FAC-02：目标只能被范围伤害 / 牵引作用（子母雷）。</summary>
         AreaOnly = 15,
+        /// <summary>FG10-FAC-01：开火者被冻结（液氮泵车），解冻前不能开火。</summary>
+        Frozen = 16,
+        /// <summary>FG10-FAC-01（FG18 FGR-AIR-010）：目标在空中（灭活无人机），格斗 / 力场 / 布区打不到——用射弹、无人机或对空武器。</summary>
+        CannotHitAir = 17,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -952,6 +1045,56 @@ namespace BinGames.Sim.Combat
         /// <summary>架炮驻锄：开火前架设秒数（0 = 不用架设）；高抛曲射近距盲区（米，0 = 没有）。</summary>
         public float DeploySeconds;
         public float MinRange;
+
+        // ── FG10-FAC-01 澄净专属语法（全 0 = 没有；格式 15 起进快照）──
+        /// <summary>喷淋布区：锥形射程（米，0 = 不喷）、锥形半角（度）、喷嘴蓄压预警（≥ 0.8 秒）、两次喷淋的间隔、命中伤害、每次给命中者加的受寒（液氮）、
+        /// 命中挂的状态位与时长；落地池的半径、秒数、每秒伤害、每节拍受寒。</summary>
+        public float SprayRange;
+        public float SprayCone;
+        public float SprayWarn;
+        public float SprayCycle;
+        public float SprayDamage;
+        public float SprayChill;
+        public uint SprayStatus;
+        public float SprayStatusSeconds;
+        public float PoolRadius;
+        public float PoolSeconds;
+        public float PoolDps;
+        public float PoolChill;
+        /// <summary>枢轴喷灌：喷淋臂长（米，0 = 没有）、臂宽（度）、转速（度 / 秒）、蓄压预警（≥ 0.8 秒；也决定臂前方预警扇区的宽度）、扫中时每秒伤害（挂 <see cref="SprayStatus"/>）。</summary>
+        public float PivotRadius;
+        public float PivotWidth;
+        public float PivotSpeed;
+        public float PivotWarn;
+        public float PivotDps;
+        /// <summary>自爆：爆炸半径（米，0 = 不自爆）、伤害、引信（≥ 0.8 秒）、触发距离、被火击毁时的爆燃倍率；油迹：间隔、半径、秒数、挂的状态位（油；也是它身上一直带着的“油污”）。</summary>
+        public float BurstRadius;
+        public float BurstDamage;
+        public float BurstFuse;
+        public float BurstTrigger;
+        public float DeflagMult;
+        public float TrailInterval;
+        public float TrailRadius;
+        public float TrailSeconds;
+        public uint TrailStatus;
+        /// <summary>审查修复：油迹 / 自爆溅油挂的状态持续秒数（表 statusSeconds；0 = 区域默认）。</summary>
+        public float TrailStatusSeconds;
+        /// <summary>分裂：阵亡时分成几滩（0 = 不分裂）、每滩耐久、爬行速度、存活秒数、接触每秒伤害、接触半径。</summary>
+        public float SplitCount;
+        public float SplitHp;
+        public float SplitSpeed;
+        public float SplitLife;
+        public float SplitDps;
+        public float SplitRadius;
+        /// <summary>飞行（1 = 空中单位）；投放：接近距离（米，0 = 不投放）、投放预警（≥ 0.8 秒）。</summary>
+        public float Airborne;
+        public float PolluteRange;
+        public float PolluteChannel;
+        /// <summary>抗性：酸蚀抗性（0～1）与挂不上的状态位（生成时写进每单位状态，读档后沿用单位自己的值）。</summary>
+        public float AcidResist;
+        public uint ImmuneMask;
+        /// <summary>腐蚀蜂群“专门腐蚀建筑”：1 = 感知范围内有己方建筑 / 炮塔时优先打它们。</summary>
+        public float StructPref;
     }
 
     /// <summary>生成一个单位的参数。</summary>
@@ -1038,6 +1181,8 @@ namespace BinGames.Sim.Combat
         public CombatSiegeUnit Siege;
         /// <summary>FG9-FAC-01：静默状态（潜伏 / 偏折场 / 断链束）。</summary>
         public CombatSilentUnit Silent;
+        /// <summary>FG10-FAC-01：澄净状态（喷淋 / 枢轴 / 自爆 / 飞行 / 受寒 / 抗性）。</summary>
+        public CombatClarityUnit Clarity;
         public bool Alive => (Flags & CombatUnitFlags.Alive) != 0;
     }
 
@@ -1090,6 +1235,13 @@ namespace BinGames.Sim.Combat
         public float TurretAimToleranceDeg;
         /// <summary>FG6-LOG-10（FGR-LOG-046）：液洼整片反应成残留区域后至少持续多少游戏秒（fg.TbHomeTuning logistics.leak.react_seconds；与反应自己的残留时长取大）。0 = 只用反应的残留时长。</summary>
         public float LeakReactSeconds;
+        /// <summary>FG10-FAC-01：喷淋池 + 油迹的共用上限（0 = <see cref="CombatConst.DefaultPoolZoneCapacity"/>）。</summary>
+        public int PoolZoneCapacity;
+        /// <summary>FG10-FAC-01（液氮“先减速再冻结”）：受寒满时的最大减速比例、每秒自然消退量、冻结秒数、解冻后的免疫秒数（fg.TbHomeTuning clarity.chill.*；0 = 内核默认 0.6 / 0.25 / 2.5 / 1.5）。</summary>
+        public float ChillSlowMax;
+        public float ChillDecay;
+        public float FreezeSeconds;
+        public float ThawGuardSeconds;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -1143,6 +1295,17 @@ namespace BinGames.Sim.Combat
         public long MinesLaid;
         public long MinesDetonated;
         public long Charges;
+        /// <summary>FG10-FAC-01（格式 15）：喷淋次数、冻结次数、自爆、被火击毁的爆燃、油迹被点燃、分裂、再污染投放、酸沼腐蚀（单位·秒）、喷淋池被冲洗、枢轴扫中（单位·节拍）。</summary>
+        public long Sprays;
+        public long Freezes;
+        public long Bursts;
+        public long Deflagrations;
+        public long SlicksIgnited;
+        public long Splits;
+        public long Repollutions;
+        public long AcidTicks;
+        public long PoolsWashed;
+        public long PivotHits;
     }
 
     /// <summary>渲染实例（32 字节，与 CombatInstanced.shader 一致）：A = (当前 x, 当前 z, 上一步 x, 上一步 z)，B = (半径, 血量比例, 阵营, 种类)。</summary>

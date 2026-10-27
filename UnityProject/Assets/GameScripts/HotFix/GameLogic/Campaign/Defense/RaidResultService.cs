@@ -545,6 +545,30 @@ namespace GameLogic.Campaign.Defense
         /// 内核事件 <see cref="CombatEventKind.SiegeKilled"/>（家园战斗内核，CombatSite 绑定）：记“击败过的敌人种类”（靶场解锁，FG-GAP-101，攻城与拦截都算）；
         /// 攻城中的队伍另记结算——击毁数、按种类、贡献、残骸、掉落。O(队伍数 + 贡献者 + 残骸堆)。
         /// </summary>
+        /// <summary>FG10-FAC-01：收到的自毁（不结算）次数（自检用）。</summary>
+        public static int SelfDestructs { get; private set; }
+
+        /// <summary>FG10-FAC-01（复核修复）：攻城中的队伍记一次自毁减员（兜底结算判“全灭 / 撤走”用）；行进途中与驻军不进结算。</summary>
+        private static void NoteSelfDestruct(CampaignState s, CombatSite site, int group)
+        {
+            foreach (TransitGroupRecord x in WorldTransitSystem.Groups(s))
+            {
+                if (x == null || SiegeService.KeyOf(x) != group)
+                {
+                    continue;
+                }
+                if (SiegeService.IsSieging(x))
+                {
+                    RaidResultRecord r = OpenFor(s, x.GroupId) ?? Begin(s, x, site);
+                    if (r != null)
+                    {
+                        r.SelfDestructed++;
+                    }
+                }
+                return;
+            }
+        }
+
         public static void OnKilled(CombatSite site, CombatEvent e)
         {
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -556,6 +580,14 @@ namespace GameLogic.Campaign.Defense
             RaidResultState st = EnsureState(s);
             if (st == null || st.CoreLost)
             {
+                return;
+            }
+            // FG10-FAC-01（审查修复）：自毁（油污爬行者自爆、灭活无人机投放后）不是被谁击毁——不解锁靶子、不计击毁 / 贡献、不留残骸与掉落（单位本身照样从队伍里减员）。
+            if ((e.Code2 & CombatConst.KillSelfDestructBit) != 0)
+            {
+                SelfDestructs++;
+                NoteSelfDestruct(s, site, (int)Math.Round(e.Value));
+                Stat(t0);
                 return;
             }
             int group = (int)Math.Round(e.Value);
@@ -578,7 +610,7 @@ namespace GameLogic.Campaign.Defense
             if (g == null || !SiegeService.IsSieging(g))
             {
                 // 行进途中的拦截战与领地驻军 / 巡逻迎战：不进家园的突袭结算；FG8-LOOT-01（FG-GAP-109）起按野外掉落表留残骸与掉落（FieldLootService）。
-                FieldLootService.OnFieldKill(s, site, def, e.Code2 == 1, at, e.Other);
+                FieldLootService.OnFieldKill(s, site, def, (e.Code2 & 1) != 0, at, e.Other);
                 Stat(t0);
                 return;
             }
@@ -588,7 +620,7 @@ namespace GameLogic.Campaign.Defense
                 Stat(t0);
                 return;
             }
-            bool elite = e.Code2 == 1;
+            bool elite = (e.Code2 & 1) != 0;
             r.Killed++;
             if (elite)
             {
@@ -836,6 +868,30 @@ namespace GameLogic.Campaign.Defense
                 r.Losses = list.ToArray();
             }
             Revision++;
+        }
+
+        /// <summary>
+        /// FG10-RAID-01（“再污染在离家报告里说明”）：灭活无人机投放落地、家园的格子真的再污染之后（<see cref="ClarityRaidService.OnRepolluted"/> 调用）：
+        /// 记到最早展开的那一份结算（次数 / 格数 / 受污染建筑数，第一次的落点），并记一条可定位的过程。没有进行中的结算（攻城外的投放）时不记，返回 false。O(1)。
+        /// </summary>
+        public static bool NoteRepollution(CampaignState s, int cells, int buildings, GridCell at)
+        {
+            RaidResultRecord r = PrimaryOpen(s);
+            if (r == null || cells <= 0)
+            {
+                return false;
+            }
+            if (r.Repollutions == 0)
+            {
+                r.RepollutedX = at.X;
+                r.RepollutedY = at.Y;
+            }
+            r.Repollutions++;
+            r.RepollutedCells += cells;
+            r.RepollutedBuildings += buildings;
+            AddTimeline(r, GameClock.Ticks, "repolluted", cells.ToString(CultureInfo.InvariantCulture) + "|" + buildings.ToString(CultureInfo.InvariantCulture), true, at.X, at.Y);
+            Revision++;
+            return true;
         }
 
         /// <summary>机器阵亡（<see cref="MachineRegistry.MarkDeadByLogicId"/> 唯一翻转点）：家园里的机器在攻城期间阵亡记一处损失。</summary>
@@ -1109,12 +1165,13 @@ namespace GameLogic.Campaign.Defense
             CombatSite site = HomeSite;
             foreach (RaidResultRecord r in stale)
             {
-                bool destroyed = r.Killed >= r.Unfolded && r.Unfolded > 0;
+                int gone = r.Killed + r.SelfDestructed; // FG10-FAC-01：自毁减员不算击毁，但也没有撤走
+                bool destroyed = gone >= r.Unfolded && r.Unfolded > 0;
                 AddTimeline(r, GameClock.Ticks, destroyed ? "end_destroyed" : "end_withdrawn",
-                    Math.Max(0, r.Unfolded - r.Killed).ToString(CultureInfo.InvariantCulture), false, 0f, 0f);
+                    Math.Max(0, r.Unfolded - gone).ToString(CultureInfo.InvariantCulture), false, 0f, 0f);
                 if (!destroyed)
                 {
-                    r.Exited = Math.Max(r.Exited, r.Unfolded - r.Killed);
+                    r.Exited = Math.Max(r.Exited, r.Unfolded - gone);
                 }
                 Close(s, r, destroyed ? OutcomeDestroyed : OutcomeWithdrawn, site, notify: true);
             }

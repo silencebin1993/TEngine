@@ -616,6 +616,17 @@ namespace GameLogic.Campaign.WorldSim
                 // FG9-FAC-02（FGR-FAC-004）：铸造反制每个游戏日锁定一次（日切那一步；平时 O(1)）；熔渣热区——信号所在的机器第一次进入某片时提示（每游戏秒一次）。
                 Regions.FoundryCounterService.WorldStep(state);
                 Env.SlagHeatService.WorldStep(state, GameClock.Ticks);
+                // FG10-FAC-01（FGR-FAC-004）：澄净反制每个游戏日锁定一次（日切那一步；平时 O(1)）；酸沼——信号所在的机器第一次进入某片时提示（每游戏秒一次）。
+                Regions.ClarityCounterService.WorldStep(state);
+                Env.AcidMarshService.WorldStep(state, GameClock.Ticks);
+                // FG10-REG-01：第一次走进有阵营介绍的领地时发一条介绍（每游戏秒一次 O(1)，与观察无关）。
+                Regions.TerritoryIntroService.WorldStep(state, GameClock.Ticks);
+                // FG10-REACT-01（FGR-FW-042）：澄净领地出现在地图上时开放化工反应命名（每游戏秒一次 O(批次)）。
+                Content.ReactionBatchService.WorldStep(state, GameClock.Ticks);
+                // FG10-RAID-01：澄净针对净化塔的突袭触发（澄净领地出现 + 家园有净化塔；每游戏秒一次 O(1)，与观察无关）。
+                Defense.ClarityRaidService.WorldStep(state, GameClock.Ticks);
+                // FG10-BOSS-01：洗礼塔（湖心平台，星球战斗内核里就地展开）：沉寂时每游戏秒看有没有机器进场；开战中推进灌注 / 反应 / 泄压（每步 O(1)）。
+                Regions.BaptismTowerBoss.WorldStep(state, GameClock.Ticks);
                 // FG9-ACT1-01（DEBT-FG9FAC01-02）：远征队侦测静默信号点（真据点 + 诱饵中继），每 site.contact.check_seconds 一次 O(队员 × 信号点)；
                 // 第一幕节奏台账（FG16 第 2 节）每 pace.check_seconds 一次 O(节奏点)。只看步序号，与观察无关。
                 SignalContactService.WorldStep(state, GameClock.Ticks);

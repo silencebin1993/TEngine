@@ -302,7 +302,8 @@ namespace GameLogic.Progression
                     }
                     if (state != null && !Campaign.Content.NamedReactionCatalog.IsBatchOpen(state, row.Batch))
                     {
-                        return GameLogic.Localization.GameText.Format("reaction.codex.closed", GameLogic.Localization.GameText.Get("reaction.batch." + row.Batch));
+                        // FG10-REACT-01：写这一批什么时候开放（化工 = 澄净领地出现在地图上）。
+                        return Campaign.Content.ReactionBatchService.ClosedHint(row.Batch);
                     }
                     return GameLogic.Localization.GameText.Get("reaction.codex.locked");
                 case MechanicCodexKind.Research:
@@ -342,6 +343,12 @@ namespace GameLogic.Progression
             {
                 sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.recipe",
                     Campaign.Content.StatusTagCatalog.NameOf(row.TagA) ?? row.TagA, Campaign.Content.StatusTagCatalog.NameOf(row.TagB) ?? row.TagB));
+            }
+            // FG10-REACT-01（卡片“图鉴条目写明触发方式”）：配料之外的具体打法（去哪拿配料、借敌人、哪些目标挂不上）。
+            string tip = Campaign.Content.ReactionBatchService.TipOf(row);
+            if (!string.IsNullOrEmpty(tip))
+            {
+                sb.AppendLine(tip);
             }
             var names = new List<string>();
             foreach (string fw in Campaign.Signal.FirmwareLibrary.FirmwareForReaction(reactionId))

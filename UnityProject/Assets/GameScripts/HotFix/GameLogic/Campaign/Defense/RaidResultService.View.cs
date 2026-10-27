@@ -225,6 +225,26 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
+        /// <summary>
+        /// FG10-RAID-01：这一波的再污染汇总一行（没有就不写）：次数 / 格数 / 受污染建筑数 + 第一次落点那一片现在怎么净化回来（按当前状态写：哪座塔在重新净化、
+        /// 还要多久；停着的塔为什么停；没有塔覆盖就放一座）。点击定位到落点。
+        /// </summary>
+        private static void AppendRepollution(RaidResultRecord r, List<AwayLine> into, string section)
+        {
+            if (r == null || r.Repollutions <= 0)
+            {
+                return;
+            }
+            var at = new GridCell(r.RepollutedX, r.RepollutedY);
+            into.Add(new AwayLine
+            {
+                Text = GameText.Format("raid.result.repolluted", r.Repollutions, r.RepollutedCells, r.RepollutedBuildings,
+                    Env.PurificationService.RepurifyPath(CampaignSession.Current, at)),
+                Section = section, Cls = "ar-row-warn",
+                Action = AwayLineAction.Locate, HasPos = true, RegionId = HomeValleyLayout.RegionId, Pos = new Vector3(at.X, 0f, at.Y),
+            });
+        }
+
         public static string TimelineText(RaidTimelineRecord t)
         {
             switch (t.Kind)
@@ -240,6 +260,11 @@ namespace GameLogic.Campaign.Defense
                 case "core_lost": return GameText.Get("raid.result.tl.core_lost");
                 case "choice_jump": return GameText.Get("raid.result.tl.choice_jump");
                 case "choice_stay": return GameText.Get("raid.result.tl.choice_stay");
+                case "repolluted":
+                {
+                    string[] a = (t.Arg ?? string.Empty).Split('|');
+                    return GameText.Format("raid.result.tl.repolluted", a.Length > 0 ? a[0] : "0", a.Length > 1 ? a[1] : "0");
+                }
                 default: return t.Kind ?? string.Empty;
             }
         }
@@ -295,6 +320,7 @@ namespace GameLogic.Campaign.Defense
         private static void AppendLosses(RaidResultRecord r, List<AwayLine> into, int maxRows)
         {
             Title(into, "raid.result.sec.losses", "losses");
+            AppendRepollution(r, into, "losses");
             if (LossTotal(r) == 0)
             {
                 Dim(into, "raid.result.loss.none", "losses");
@@ -451,6 +477,7 @@ namespace GameLogic.Campaign.Defense
                 rows.RemoveAt(0); // 标题行在上面已经写了“哪一次突袭”
                 into.AddRange(rows);
                 into.Add(new AwayLine { Text = GameText.Format("raid.result.kills", r.Killed, r.EliteKilled, r.Exited, r.Unfolded), Section = "raid" });
+                AppendRepollution(r, into, "raid"); // FG10-RAID-01：再污染在离家报告里说明（含重新净化的路径）
                 if (LossTotal(r) > 0)
                 {
                     into.Add(new AwayLine
