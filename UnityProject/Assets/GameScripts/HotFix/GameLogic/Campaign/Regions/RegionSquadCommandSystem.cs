@@ -155,6 +155,7 @@ namespace GameLogic.Campaign.Regions
         public static int AcidGateForced { get; private set; }
         /// <summary>FG10-REG-01：上一次因酸沼拒绝后，这个真实时间之前再下一次命令 = 强行进入（-1 = 没有待确认）。</summary>
         private float _acidConfirmUntil = -1f;
+        private string _acidConfirmKey; // 被拒的那条命令（种类 + 酸沼区）：确认窗口内只有“同样的命令”算强行进入。
         private readonly List<int> _outScratch = new List<int>(8);
         private readonly List<Vector2> _coverageRouteScratch = new List<Vector2>(2);
         public IReadOnlyList<string> RecentEvents => _recentEvents;
@@ -702,7 +703,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             // FG10-REG-01（FGR-GEN-022 软门槛）：没有防腐涂层时路线要进酸沼——先拒绝并说明蓝图去哪拿，确认窗口内再下一次 = 强行进入。撤退不拦。
-            if (kind != RegionCommandKind.Retreat && !PassAcidGate(targetPosition))
+            if (kind != RegionCommandKind.Retreat && !PassAcidGate(kind, targetPosition))
             {
                 return;
             }
@@ -878,9 +879,10 @@ namespace GameLogic.Campaign.Regions
         /// <summary>
         /// FG10-REG-01（FGR-GEN-022“没有防腐涂层时能进去，但会持续受到重度腐蚀”；卡片负向“没有防腐涂层时尝试进入：拒绝并说明去哪里拿”）：
         /// 星球表面上，编队中心到目标的直线会进酸沼、又没有防腐涂层 → 这次不下达，命令栏 + 拒绝音 + 字幕写明哪片酸沼、腐蚀多快、蓝图来自哪条主线；
-        /// hazard.acid_marsh.gate_confirm_seconds 真实秒内再下一次（任意进酸沼的命令）= 强行进入（软门槛，不是看不见的墙）。已经在酸沼里往外走不拦。
+        /// hazard.acid_marsh.gate_confirm_seconds 真实秒内再下一次同样的命令（同种类、进同一片酸沼）= 强行进入（软门槛，不是看不见的墙）；
+        /// 中间下了不进酸沼的命令就作废。已经在酸沼里或在领地圈内往外走不拦。
         /// </summary>
-        private bool PassAcidGate(Vector2 target)
+        private bool PassAcidGate(RegionCommandKind kind, Vector2 target)
         {
             CampaignState s = CampaignSession.Current;
             if (s == null || _ctx?.Site == null || _ctx.Site.SiteId != HomeValleyLayout.RegionId || !TrySelectionCentroid(out Vector2 from))
@@ -889,10 +891,12 @@ namespace GameLogic.Campaign.Regions
             }
             if (!Env.AcidMarshService.RouteEntersAcid(s, from, target, out string zone))
             {
+                _acidConfirmUntil = -1f;
                 return true;
             }
             float now = RealTime();
-            if (_acidConfirmUntil >= 0f && now <= _acidConfirmUntil)
+            string key = kind.ToString() + "|" + zone;
+            if (_acidConfirmUntil >= 0f && now <= _acidConfirmUntil && key == _acidConfirmKey)
             {
                 _acidConfirmUntil = -1f;
                 AcidGateForced++;
@@ -901,6 +905,7 @@ namespace GameLogic.Campaign.Regions
             }
             float window = Env.AcidMarshService.GateConfirmSeconds;
             _acidConfirmUntil = now + window;
+            _acidConfirmKey = key;
             AcidGateRefusals++;
             string text = GameText.Format("hazard.acid_marsh.gate.refuse", Env.AcidMarshService.ZoneName(s, zone), Env.AcidMarshService.Pct(Env.AcidMarshService.CorrodePct),
                 GameText.Get("quest.main.anticorrosion.title"), Mathf.RoundToInt(window).ToString());

@@ -378,6 +378,7 @@ namespace GameLogic.EditorTools
             WorldGenService.ApplyNewGameWorld(s, seed, WorldSettings.Resolve(3, WorldGenContent.DefaultPresetId));
             CampaignSession.Set(Slot, s);
             CampaignFgStateDomains.EnsureAll(s);
+            NotificationCenter.Bind(s); // 与正式流程一样换战役即绑定：否则 History 还是前一段自检那局的通知（如沉淀湖 E1 已开放化工批），计数基线会错
             return s;
         }
 

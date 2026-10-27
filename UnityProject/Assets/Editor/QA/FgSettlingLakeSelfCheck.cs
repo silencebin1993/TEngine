@@ -10,6 +10,7 @@ using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Defense;
 using GameLogic.Campaign.Env;
 using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Grid;
@@ -40,6 +41,7 @@ namespace GameLogic.EditorTools
     ///   没有涂层时机器在酸沼带每秒掉 2%；命令进酸沼先被拒绝并说明蓝图去哪拿（负向），确认窗口内再下一次 = 强行进入，过了窗口重新拒绝；
     ///   拿到蓝图 → 下一个游戏秒写进内核并通知一次 → 机器只掉一成；再下令不拦；悬停 / 检查单写涂层状态；读档后派生量重写。
     /// D 第一次进入澄净领地发一条阵营介绍（每个领地一次、进存档；没有介绍文本的领地不发）。
+    /// E 暂停 / 0.5x～3x 倍速矩阵（正式世界步进下的涂层写入、酸沼结算、阵营介绍）与真实存档 → 读档往返（涂层重写、介绍不重发）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgSettlingLakeSelfCheck）；单段：bash tools/unity-validate.sh --segment FgSettlingLakeSelfCheck。
     /// </summary>
     public static class FgSettlingLakeSelfCheck
@@ -117,6 +119,7 @@ namespace GameLogic.EditorTools
                 Step(CheckWorld);
                 Step(CheckJourney);
                 Step(CheckIntro);
+                Step(CheckTimingAndSave);
             }
             finally
             {
@@ -220,7 +223,7 @@ namespace GameLogic.EditorTools
                 long core2 = (long)(t.CenterX - plan.CoreX) * (t.CenterX - plan.CoreX) + (long)(t.CenterY - plan.CoreY) * (t.CenterY - plan.CoreY);
                 double coreDist = Math.Sqrt(core2);
                 Expect(t.Act == 2 && t.HazardWidth >= 80 && t.HazardWidth <= 120 && coreDist >= 1100 && coreDist <= 1700 && zones
-                       && Count(WorldFeatureKind.Outpost) > 0 && Count(WorldFeatureKind.Cache) > 0 && Count(WorldFeatureKind.Terminal) > 0 && Count(WorldFeatureKind.SideSite) > 0 && platformInside,
+                       && Count(WorldFeatureKind.Outpost) > 0 && Count(WorldFeatureKind.Cache) > 0 && Count(WorldFeatureKind.Terminal) > 0 && Count(WorldFeatureKind.SideSite) > 0 && Count(WorldFeatureKind.Relic) > 0 && platformInside,
                     $"B1 种子 {seed}：澄净·沉淀湖（第 {t.Act} 幕，中心离核心 {coreDist:0} 格，半径 {t.Radius}，外圈酸沼带宽 {t.HazardWidth}）——领地里酸沼区 {plan.HazardZones.Count(z => z.TerritoryId == t.Id)} 片、" +
                     $"据点 {Count(WorldFeatureKind.Outpost)}、缓存 {Count(WorldFeatureKind.Cache)}、终端 {Count(WorldFeatureKind.Terminal)}、支线地点 {Count(WorldFeatureKind.SideSite)}、遗迹 {Count(WorldFeatureKind.Relic)}；湖心平台锚点在领地里（{platformInside}）");
 
@@ -288,7 +291,20 @@ namespace GameLogic.EditorTools
             int r1 = RegionSquadCommandSystem.AcidGateRefusals;
             squad.IssueMoveTo(core + new Vector2(6f, 6f), paused: false);
             bool dryOrderOk = RegionSquadCommandSystem.AcidGateRefusals == r1;
+            // 修复轮 1（审查 P2）：中间下了不进酸沼的命令 → 待确认作废，窗口内再进酸沼仍要先被拒一次（“同样的命令”才算强行进入）。
+            squad.IssueMoveTo(center, paused: false);
+            bool dryClears = RegionSquadCommandSystem.AcidGateRefusals == r1 + 1 && RegionSquadCommandSystem.AcidGateForced == f0 + 1;
             squad.Stop();
+            // 修复轮 1（审查 P2）：领地圈内（湖区、不在酸里）往家园下令 = 往外撤，不拦。
+            Vector2 lakeDry = center;
+            for (int k = 0; k < 64 && AcidMarshService.ZoneAt(s, lakeDry) != null; k++)
+            {
+                float ang = k * 0.7f;
+                lakeDry = center + new Vector2(Mathf.Cos(ang), Mathf.Sin(ang)) * (t.Radius * (0.2f + 0.01f * k));
+            }
+            bool lakeOut = AcidMarshService.ZoneAt(s, lakeDry) == null && !AcidMarshService.RouteEntersAcid(s, lakeDry, core, out _);
+            Expect(dryClears && lakeOut,
+                $"C2b 负向：被拒后先下一条不进酸沼的命令，再进酸沼仍先拒绝（{dryClears}）；湖区不在酸里的机器往家园下令不拦（{lakeOut}）");
             Expect(routeIn && zone == t.Id + "#belt" && !fromInside && refused && forced && expired && dryOrderOk,
                 $"C2 负向（卡片“没有防腐涂层时尝试进入”）：从家园往湖心下令 → 拒绝并说明（“{refuse}”）；{AcidMarshService.GateConfirmSeconds} 秒内再下一次 = 强行进入（{forced}）；" +
                 $"过了窗口重新拒绝（{expired}）；不经过酸沼的命令不拦（{dryOrderOk}）；已经在酸沼里往外走不拦（{!fromInside}）");
@@ -353,6 +369,131 @@ namespace GameLogic.EditorTools
             bool saved = s.Factions.TerritoriesIntroduced.Contains(lake.Id);
             Expect(first && !again && !outside && noText && saved && after > before,
                 $"D1 第一次进入澄净领地发一条阵营介绍（{first}），再进不重复（{!again}），领地外不发（{!outside}），没有介绍文本的领地不发（{noText}）；记进存档（{saved}）");
+        }
+
+        // ─────────────────────── E 暂停 / 倍速与存读档（隐含要求）───────────────────────
+
+        /// <summary>
+        /// 隐含要求：涂层与阵营介绍都按游戏秒走正式世界步进（WorldSimulation.Frame → AcidMarshService / TerritoryIntroService.WorldStep）：
+        /// 暂停时涂层不写入、介绍不发、机器不掉血；0.5x / 1x / 2x / 3x 下 4 个游戏秒涂层后都只掉 8（每秒 2% × 0.1 × 1000），介绍只发一次。
+        /// 然后真实存档 → 读档：涂层由事件账本推出、内核派生量由正式读档路径（HomeValleyController → RestoreAfterLoad）重写，介绍记录随存档往返、读档后不重发。
+        /// </summary>
+        private static void CheckTimingAndSave()
+        {
+            var lost = new List<string>();
+            bool pausedOk = true, same = true, introOnce = true;
+            CampaignState s = null;
+            CombatSite home = null;
+            PlannedTerritory t = null;
+            int machine = 0;
+            Func<int, Vector2?> originalLive = MachineRegistry.LivePositionProvider;
+            Func<int, bool> originalCoverage = SignalUplinkService.CoverageProvider;
+            try
+            {
+                foreach (float speed in new[] { 0.5f, 1f, 2f, 3f })
+                {
+                    s = NewWorld(42);
+                    if (s.Progress != null)
+                    {
+                        s.Progress.Act = Math.Max(2, s.Progress.Act);
+                    }
+                    t = WorldGenService.PlanFor(s).Find(EnemyDefs.FactionClarity);
+                    home = CombatSites.Get(HomeValleyLayout.RegionId);
+                    MachineRecord m = MachineRegistry.AllRecords.Where(x => x != null && x.IsAlive && x.RegionId == HomeValleyLayout.RegionId).OrderBy(x => x.LogicId).FirstOrDefault();
+                    if (t == null || home == null || m == null || s.SignalCore == null)
+                    {
+                        Fail($"E1 准备：澄净领地 {t != null}、家园内核 {home != null}、开局机器 {m != null}、信号 {s.SignalCore != null}");
+                        return;
+                    }
+                    // 夹具：信号在这台机器里（接入完成写的同一个存档字段），机器“站”在湖心；覆盖恒有，免得出覆盖断开接入。
+                    machine = m.LogicId;
+                    var center = new Vector2(t.CenterX, t.CenterY);
+                    s.SignalCore.UplinkMachineLogicId = machine;
+                    MachineRegistry.LivePositionProvider = id => id == machine ? center : (Vector2?)null;
+                    SignalUplinkService.CoverageProvider = _ => true;
+                    SignalCoverageService.OverrideForTests = (site, pos) => new SignalCoverageSample(true, true, 50f, pos, 80f, SignalCoverageSourceKind.RelayTower);
+                    CampaignEventLedger.TryGrant(s, CampaignObjectiveTracker.BlueprintEventId(AcidMarshService.CoatingBlueprintId), "QuestBlueprint", s.PlaySeconds, Quest);
+                    AcidMarshService.InvalidateCoating();
+                    var beltPoint = new Vector2(t.CenterX + t.Radius + t.HazardWidth * 0.5f, t.CenterY);
+                    int unit = home.Kernel.Spawn(new CombatSpawn
+                    {
+                        Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.Commanded, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
+                        Position = new double2(beltPoint.x, beltPoint.y), Home = new double2(beltPoint.x, beltPoint.y), Radius = 0.6f, Health = 1000f, MaxHealth = 1000f, Weapon = -1,
+                        BehaviorProfile = -1, ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, 1f),
+                    });
+                    int coat0 = AcidMarshService.CoatingNotices;
+                    int intro0 = TerritoryIntroService.Posted;
+                    GameClock.SetPaused(true);
+                    for (int i = 0; i < 30; i++)
+                    {
+                        WorldSimulation.Frame(0.1f);
+                    }
+                    pausedOk &= home.Kernel.TryGetUnit(unit, out CombatUnitView pv) && pv.Health >= 1000f - 1e-3f
+                                && home.PlayerAcidResist == 0f && AcidMarshService.CoatingNotices == coat0 && TerritoryIntroService.Posted == intro0;
+                    GameClock.SetPaused(false);
+                    GameClock.SetSpeed(speed);
+                    // 第 1 个游戏秒写入涂层；之后量 4 个游戏秒。
+                    long first = GameClock.Ticks + GameClock.StepHz + 1;
+                    for (int i = 0; i < 4000 && GameClock.Ticks < first; i++)
+                    {
+                        WorldSimulation.Frame(1f / 60f);
+                    }
+                    float h0 = home.Kernel.TryGetUnit(unit, out CombatUnitView v0) ? v0.Health : -1f;
+                    long target = GameClock.Ticks + GameClock.StepHz * 4;
+                    for (int i = 0; i < 4000 && GameClock.Ticks < target; i++)
+                    {
+                        WorldSimulation.Frame(1f / 60f);
+                    }
+                    GameClock.SetSpeed(1f);
+                    float l = home.Kernel.TryGetUnit(unit, out CombatUnitView v) ? h0 - v.Health : -1f;
+                    same &= Mathf.Abs(l - 8f) < 0.5f && Mathf.Approximately(home.PlayerAcidResist, AcidMarshService.CoatingResist) && AcidMarshService.CoatingNotices == coat0 + 1;
+                    introOnce &= TerritoryIntroService.Posted == intro0 + 1 && s.Factions.TerritoriesIntroduced.Contains(t.Id);
+                    lost.Add($"{speed}x {l:0.##}");
+                    home.Kernel.Despawn(unit);
+                }
+                Expect(pausedOk && same && introOnce,
+                    $"E1 暂停时涂层不写入、介绍不发、酸沼不扣（{pausedOk}）；0.5x / 1x / 2x / 3x 下涂层后 4 个游戏秒都只掉 8（每秒 2% × 0.1 × 1000）：{string.Join("、", lost)}；" +
+                    $"信号机器在湖心时走正式世界步进发阵营介绍、每档只一次（{introOnce}）");
+
+                // E2 真实存档 → 读档（最后一档的世界：已有涂层、已发介绍）。
+                SaveResult sv = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+                WorldSimulation.UnloadAll();
+                GameClock.ResetSession();
+                MachineRegistry.ResetForNewCampaign();
+                MachineLoadoutRegistry.Clear();
+                HomeGridService.Invalidate();
+                WorldGenService.Invalidate();
+                AcidMarshService.ResetForTests();
+                RestoreResult rr = CampaignRestoreOrchestrator.Restore(Slot);
+                if (!sv.Success || !rr.Success)
+                {
+                    Fail($"E2 准备：存档 {sv.Success} / 读档 {rr.Success}（{rr.Message}）");
+                    return;
+                }
+                CampaignSession.Set(Slot, rr.State);
+                CampaignState back = rr.State;
+                HomeValleyController hv = WorldSimulation.LoadHome(resume: true);
+                WorldView.Observe(hv.SiteId);
+                home = CombatSites.Get(HomeValleyLayout.RegionId);
+                bool resist = home != null && Mathf.Approximately(home.PlayerAcidResist, AcidMarshService.CoatingResist) && AcidMarshService.HasCoating(back);
+                bool introKept = back.Factions?.TerritoriesIntroduced != null && back.Factions.TerritoriesIntroduced.Contains(t.Id);
+                int introBefore = TerritoryIntroService.Posted;
+                int coatBefore = AcidMarshService.CoatingNotices;
+                back.SignalCore.UplinkMachineLogicId = machine;
+                var lakeCenter = new Vector2(t.CenterX, t.CenterY);
+                MachineRegistry.LivePositionProvider = id => id == machine ? lakeCenter : (Vector2?)null; // LoadHome 会换掉夹具，重新放回湖心
+                SignalCoverageService.OverrideForTests = (site, pos) => new SignalCoverageSample(true, true, 50f, pos, 80f, SignalCoverageSourceKind.RelayTower);
+                WorldSimulation.StepMany(GameClock.StepHz * 2);
+                bool noRepeat = TerritoryIntroService.Posted == introBefore && AcidMarshService.CoatingNotices == coatBefore;
+                Expect(resist && introKept && noRepeat,
+                    $"E2 存读档：读档后正式路径重写涂层（内核抗性 {home?.PlayerAcidResist}、事件账本推出有涂层 {AcidMarshService.HasCoating(back)}）；" +
+                    $"已介绍的领地随存档往返（{introKept}）；读档后再走 2 个游戏秒不重发介绍、不重发“涂层已生效”（{noRepeat}）");
+            }
+            finally
+            {
+                MachineRegistry.LivePositionProvider = originalLive;
+                SignalUplinkService.CoverageProvider = originalCoverage;
+            }
         }
 
         // ─────────────────────────────── 工具 ───────────────────────────────

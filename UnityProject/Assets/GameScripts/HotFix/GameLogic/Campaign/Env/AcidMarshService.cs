@@ -106,7 +106,7 @@ namespace GameLogic.Campaign.Env
                 return false;
             }
             Ensure(s);
-            if (Shapes.Count == 0 || ZoneAt(s, from) != null)
+            if (Shapes.Count == 0 || ZoneAt(s, from) != null || LeavesBeltFromInside(from, to))
             {
                 return false;
             }
@@ -118,6 +118,25 @@ namespace GameLogic.Campaign.Env
                 if (z != null)
                 {
                     zoneId = z;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>起点在某条外圈酸沼带围住的领地圈内、目标在带外 = 从湖区往外撤（与“已在酸沼里往外走不拦”同一口径）。O(区数)。</summary>
+        private static bool LeavesBeltFromInside(Vector2 from, Vector2 to)
+        {
+            for (int i = 0; i < Shapes.Count; i++)
+            {
+                float4 c = Shapes[i];
+                if (c.z <= 0f)
+                {
+                    continue; // 只看圆环（外圈带）
+                }
+                var center = new Vector2(c.x, c.y);
+                if ((from - center).sqrMagnitude < c.z * c.z && (to - center).sqrMagnitude > c.w * c.w)
+                {
                     return true;
                 }
             }
