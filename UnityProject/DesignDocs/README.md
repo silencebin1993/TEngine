@@ -5,13 +5,13 @@
 ## 必读顺序（0.2 正式版）
 
 1. [ProjectA_GDD.md](ProjectA_GDD.md)：GDD 0.2，产品最高权威（已合并正式版设计案与里程碑默认决策 D-01～D-22）。
-2. [ProjectA_FullGame_Milestones.md](ProjectA_FullGame_Milestones.md)：FG-M0～M15 的顺序、出口与出口旅程。
+2. [ProjectA_FullGame_Milestones.md](ProjectA_FullGame_Milestones.md)：FG-M0～M15 与 FG-M10.5 涌现通道（Epic FG-EMG，插在 M11 前）的顺序、出口与出口旅程。
 3. [fullgame/FG00_Completeness_Addendum.md](fullgame/FG00_Completeness_Addendum.md)：FG 完整性附加契约（B01～B25 正常游戏基线）。
 4. [detailed/00_Implementation_Completeness_Contract.md](detailed/00_Implementation_Completeness_Contract.md)：所有 Story 的完整性强制门禁（Ready 十项与完成矩阵）。
 5. [production/design/full-game/README.md](../../../production/design/full-game/README.md)：FG 制作目录（领取流程、证据规则）。
-6. [FG-STORY-BOARD.md](../../../production/design/full-game/FG-STORY-BOARD.md)：139 条 Story 的顺序与状态。
+6. [FG-STORY-BOARD.md](../../../production/design/full-game/FG-STORY-BOARD.md)：187 条 Story 的顺序与状态（含 FG-EMG 48 条）。
 7. [FG-STORY-CARDS.md](../../../production/design/full-game/FG-STORY-CARDS.md)：逐条施工卡片；只读自己那一张。
-8. `fullgame/FG01～FG17`：卡片点名的章节与需求 ID（不要整本通读）。
+8. `fullgame/FG01～FG19`：卡片点名的章节与需求 ID（不要整本通读）；固件 / 反应 / 电路 / 敌方读法一律以 FG19 涌现通道为准（附录 FG19A / FG19B）。
 9. [FG-GAP-REGISTER.md](../../../production/design/full-game/FG-GAP-REGISTER.md)：规格漏写、但正常玩家需要的缺口登记。
 10. [ProjectA_FullGame_Design.md](ProjectA_FullGame_Design.md)：GDD 0.2 的展开背景与名表出处，需要时读对应章节。
 11. [TERM-MIGRATION.md](../../../production/design/earth-reclamation/TERM-MIGRATION.md)：术语迁移 0.2（§6 正式版名表与禁用词，题材审计词表与之逐词一致）。

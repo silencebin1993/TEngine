@@ -12,7 +12,7 @@
 - **与 Demo 的关系**：Demo 的静默、铸造两派系内容原样作为正式版第一幕的骨架；Demo 三张手工地图的关键部分转为**手工锚点**，嵌入按种子生成的世界（FG17）。本文件只给这些内容补上叙事解释，不改 Demo 规则。
 - **生效方式**：2026-09-25 已按第 16 章的变更清单逐项改写 GDD（FG0-DOC-01），勾销记录见 GDD 0.2 附录 B；Demo 的 ERD、Story 和验收矩阵冻结，0.2 的需求 ID、Story 与验收由 `fullgame/` 与 `production/design/full-game/` 承接。
 - **本版的由来**：Demo 设计里，"直控"和"基元电路"是两条互不相交的规则线，谁来操作机器，电路的行为都一样，导致直控只剩彩蛋价值。本版的核心修正是让直控**进入电路**。
-- **施工文档**：里程碑见 [ProjectA_FullGame_Milestones.md](ProjectA_FullGame_Milestones.md)（含默认决策登记）；详细设计见 [fullgame/](fullgame/FG00_Completeness_Addendum.md)（FG00～FG17）；Story 卡片与看板在 `production/design/full-game/`。本文件只讲方向，**具体行为以详细设计为准**。
+- **施工文档**：里程碑见 [ProjectA_FullGame_Milestones.md](ProjectA_FullGame_Milestones.md)（含默认决策登记）；详细设计见 [fullgame/](fullgame/FG00_Completeness_Addendum.md)（FG00～FG19，含附录 FG19A / FG19B）；Story 卡片与看板在 `production/design/full-game/`。本文件只讲方向，**具体行为以详细设计为准**。
 
 ---
 
@@ -204,7 +204,7 @@
 | gene_rhythm | 时钟脉冲 | 限制器与击发逻辑 | 常规 | 按固定节拍自动触发 |
 | gene_harmonic | 谐振 | 限制器与击发逻辑 | 常规 | 按节奏多打几次 |
 | gene_synapse | 追射 | 限制器与击发逻辑 | 常规 | 命中后立刻补一发 |
-| gene_blood | 回收修复 | 限制器与击发逻辑 | 常规 | 能量回收，伤害转成维修量 |
+| gene_blood | 回收修复 | 限制器与击发逻辑 | 常规 | 击毁目标后就地拆解残骸，废料转成本机维修量（FG-EMG 阶段 2 生效，原为按伤害回血） |
 | gene_tide | 冷却液 | 流体改道 | 常规 | 留下液洼，目标浸湿 |
 | gene_oilfilm | 漏油 | 流体改道 | 常规 | 留下油膜，遇火燃烧 |
 | gene_frostfilm | 液氮 | 流体改道 | 常规 | 命中处结霜 |
@@ -247,11 +247,11 @@
 | org_pseudopod | 格斗·扇形 | 推铲 | 适合搬运机 |
 | org_orbitcilia | 格斗·环绕 | 旋刃环 | |
 | org_phago | 格斗·反伤 | 拆解钳 | 沿用"吞噬 → 拆解回收"；主动夹住近身敌人持续拆解，击毁时多回收废料 |
-| org_spine | 格斗·反伤 | 尖刺外装 | 被动：被近战攻击时反伤（FG2-FW-01 定为与拆解钳拉开差异，组件本体随 FG2-FW-02） |
+| org_spine | 格斗·反伤 | 爆炸反应装甲 | 被动：反伤范围内的攻击者即时命中时起爆一块装甲向外反伤，炸掉的块定时补上（原名尖刺外装，2026-10-23 用户同意改名，2026-10-26 用户批准块数机制 FGR-EMG-233；内部 ID func_spikes 与 thorns 数值不变；FG2-FW-01 定为与拆解钳拉开差异） |
 | org_bud | 无人机 | 蜂群无人机舱 | |
 | org_mycelium | 无人机·定点 | 哨戒桩 | |
 | org_osmotic | 力场 | 电晕场 | |
-| org_enzyme | 布区·池 | 喷洒器 | |
+| org_enzyme | 布区·池 | 罐弹抛洒器 | 向目标抛出化学罐弹，落地破裂铺开一片（原名喷洒器，FG19 FGR-EMG-230 第 3 行） |
 | org_wave | 布区·脉冲 | 震荡脉冲器 | |
 
 现役 32 条结构类旧条目（旧名：结构器官）按功能归入重甲、散热鳍、货舱、信号中继四类，正式版可以再扩类。

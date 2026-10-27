@@ -3,6 +3,7 @@
 > 需求前缀：`FGR-EVT`；测试前缀：`FGT-EVT`。里程碑：FG-M12。
 > 上游：[ProjectA_FullGame_Design.md](../ProjectA_FullGame_Design.md) 第 11 章。契约：[FG00](FG00_Completeness_Addendum.md)。
 > 相关：[FG04](FG04_Home_Economy_Automation.md)（提取钻、减震基座）、[FG06](FG06_Home_Defense_Raids.md)（突袭间隔）、[FG07](FG07_Time_Weather_Purification.md)（静默夜、风暴残骸）、[FG11](FG11_Narrative_Endgame.md)（伏笔）。
+> 本文的“事件导演”与 FG19 的“战斗事件总线”（evt.*）是两层东西，术语不混用（FG19 FGR-EMG-068）。
 
 ---
 
@@ -91,6 +92,7 @@ Demo 没有事件系统。可以复用：确定性随机（FGR-ARC-010）、通�
 **FGR-EVT-022 应对**
 - **反向接入**：玩家可以对被夺控的机器发起接入，引导 3 秒后立即夺回控制。这是信号对信号的较量。
 - 或者把它击倒：被夺控的己方机器被击倒后进入**瘫痪**，**不会阵亡**，事件结束后恢复。
+- 夺控与反向接入走战斗事件 `evt.seize` / `evt.release`，与槽位封锁（余烬主机）、根权限压制共用一套状态机（FG19 FGR-EMG-165）；“夺控”专指敌方控制己方机器，“信号劫持”专指玩家控制敌机。
 - 或者等 45 秒，它自己恢复。
 
 **FGR-EVT-023 奖励**
