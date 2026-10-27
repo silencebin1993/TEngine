@@ -625,6 +625,19 @@ namespace GameLogic.Core
         /// <summary>FG9-ACT1-01：第一次甄别出信号点的真假。</summary>
         public const string SiteFirstContactIdentified = "site.first_contact_identified";
 
+        // ── FG10-FAC-01 / RAID-01 / BOSS-01：澄净阵营第一次遭遇（fgdata_clarity.py CLARITY_HOOKS；系统说明图鉴条目按它们解锁）──
+        public const string ClarityFirstSpray = "clarity.first_spray";
+        public const string ClarityFirstFreeze = "clarity.first_freeze";
+        public const string ClarityFirstBurst = "clarity.first_burst";
+        public const string ClarityFirstSlickIgnite = "clarity.first_slick_ignite";
+        public const string ClarityFirstPivot = "clarity.first_pivot";
+        public const string ClarityFirstSplit = "clarity.first_split";
+        public const string ClarityFirstAcid = "clarity.first_acid";
+        public const string ClarityFirstPoolWashed = "clarity.first_pool_washed";
+        public const string ClarityFirstDrone = "clarity.first_drone";
+        public const string ClarityFirstAir = "clarity.first_air";
+        public const string ClarityFirstBoss = "clarity.first_boss";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -698,6 +711,8 @@ namespace GameLogic.Core
             Act1PaceWake, Act1PacePower, Act1PaceFirstMachine, Act1PaceFirstExpedition, Act1PaceFirstUplink, Act1PaceBeltsOpen, Act1PaceFirstTurret,
             Act1PaceFirstRaid, Act1PaceFirstSilentNight, Act1PaceFoundryOuter, Act1PaceSilentMind, Act1PaceOverrideT1, Act1PaceFoundryCore, Act1PaceAct1End,
             SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
+            ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
+            ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -729,7 +729,7 @@ namespace GameLogic.Campaign.Regions
                 r.FillY = spot.y;
                 r.FillAtTick = tick + GameClock.TicksFor(FillWarnSeconds);
                 // 预警：落点先亮起（没有效果的脉冲圈）+ 声音 + 字幕。
-                site.Kernel.SpawnFieldZone(CombatFaction.Neutral, new double2(spot.x, spot.y), FillRadius, FillWarnSeconds, 0f, 0u, 0f, 0f, 0f, 0f, CombatZoneLook.Pulse);
+                site.SpawnNeutralField(spot, FillRadius, FillWarnSeconds, 0f, 0u, 0f, 0f, CombatZoneLook.Pulse);
                 FeedbackCues.RaiseLocated(FeedbackCueId.ClaritySprayWarn, spot, GameText.Format("boss.clarity.cue.fill_warn", FluidName(FluidOf(s, pump))));
                 return;
             }
@@ -747,8 +747,8 @@ namespace GameLogic.Campaign.Regions
                 var at = new Vector2(r.FillX, r.FillY);
                 StatusTagCatalog.TryGet(tag, out StatusTag st);
                 float tagSeconds = EnemyDefs.TryGet(Pump(s, pump).EnemyTypeId, out MechEnemy pumpRow) ? pumpRow.StatusSeconds : 4f;
-                site.Kernel.SpawnFieldZone(CombatFaction.Neutral, new double2(at.x, at.y), FillRadius, FillLifeSeconds, 0f, NamedReactionCatalog.BitOf(tag),
-                    Mathf.Max(1f, tagSeconds), st?.Amount ?? 0f, 0f, 0f, CombatZoneLook.Pool);
+                site.SpawnNeutralField(at, FillRadius, FillLifeSeconds, 0f, NamedReactionCatalog.BitOf(tag),
+                    Mathf.Max(1f, tagSeconds), st?.Amount ?? 0f, CombatZoneLook.Pool);
                 r.Fills++;
                 var list = new List<ClarityBossFill>(r.Active)
                 {
@@ -774,7 +774,7 @@ namespace GameLogic.Campaign.Regions
                 r.ReactFill = target.Serial;
                 r.ReactAtTick = tick + GameClock.TicksFor(ReactWarnSeconds);
                 var at = new Vector2(target.X, target.Y);
-                site.Kernel.SpawnFieldZone(CombatFaction.Neutral, new double2(at.x, at.y), target.R, ReactWarnSeconds, 0f, 0u, 0f, 0f, 0f, 0f, CombatZoneLook.Pulse);
+                site.SpawnNeutralField(at, target.R, ReactWarnSeconds, 0f, 0u, 0f, 0f, CombatZoneLook.Pulse);
                 FeedbackCues.RaiseLocated(FeedbackCueId.ClarityPivotWarn, at, GameText.Format("boss.clarity.cue.react_warn", FluidName(target.Tag)));
                 return;
             }
@@ -790,8 +790,8 @@ namespace GameLogic.Campaign.Regions
                 string trigger = TriggerOf(target.Tag);
                 StatusTagCatalog.TryGet(trigger, out StatusTag st);
                 var at = new Vector2(target.X, target.Y);
-                site.Kernel.SpawnFieldZone(CombatFaction.Neutral, new double2(at.x, at.y), target.R, ReactZoneSeconds, ReactDps, NamedReactionCatalog.BitOf(trigger),
-                    Mathf.Max(1f, ReactZoneSeconds), st?.Amount ?? 0f, 0f, 0f, CombatZoneLook.Pulse);
+                site.SpawnNeutralField(at, target.R, ReactZoneSeconds, ReactDps, NamedReactionCatalog.BitOf(trigger),
+                    Mathf.Max(1f, ReactZoneSeconds), st?.Amount ?? 0f, CombatZoneLook.Pulse);
                 r.Reactions++;
                 ReactionsTriggered++;
                 string verb = GameText.Get(trigger == "Shock" ? "boss.clarity.react.shock" : "boss.clarity.react.ignite");

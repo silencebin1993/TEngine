@@ -143,6 +143,10 @@ namespace GameLogic.EditorTools
                 Step(CheckGarrisonAndSiege);
                 Step(CheckSelfDestructSettlement);
                 Step(CheckCounter);
+                Step(CheckCounterDefense);
+                Step(CheckBurnTrailFirmware);
+                Step(CheckSpeedMatrix);
+                Step(CheckSaveLoad);
                 Step(CheckFeedbackAndCodex);
                 Step(CheckPerf);
             }
@@ -1094,10 +1098,13 @@ namespace GameLogic.EditorTools
                 Position = new double2(beltPoint.x, beltPoint.y), Home = new double2(beltPoint.x, beltPoint.y), Radius = 0.6f, Health = 1000f, MaxHealth = 1000f, Weapon = -1,
                 BehaviorProfile = -1, ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, 1f),
             });
+            long ticks0 = home.Kernel.Counters.AcidTicks;
+            long steps0 = home.Kernel.Steps;
+            double sec0 = GameClock.GameSeconds;
             WorldSimulation.StepMany(GameClock.StepHz * 3);
             float lost = home.Kernel.TryGetUnit(unit, out CombatUnitView v) ? 1000f - v.Health : -1f;
             Expect(lost >= 40f && lost <= 80f,
-                $"C1b 世界里站在酸沼带上的机器 3 个游戏秒掉 {lost:0.#} 耐久（每秒 2% × 1000，按游戏秒结算）");
+                $"C1b 世界里站在酸沼带上的机器 3 个游戏秒掉 {lost:0.#} 耐久（每秒 2% × 1000，按游戏秒结算；酸沼结算 {home.Kernel.Counters.AcidTicks - ticks0} 次、内核 {home.Kernel.Steps - steps0} 步、游戏秒 {GameClock.GameSeconds - sec0:0.##}）");
             home.Kernel.Despawn(unit);
         }
 
@@ -1288,6 +1295,171 @@ namespace GameLogic.EditorTools
                          && sum.Contains(ClarityCounterService.CounterName(EnemyDefs.ConditionCounterSwarm));
             Expect(rc != null && rc.Id == "clarity.fuse" && rc.Tag == "swarm" && intel && hiddenAct1,
                 $"D2 突袭按当天锁定选反制行（{rc?.Id} → 标签 {rc?.Tag}）；第一幕情报不写澄净（{hiddenAct1}），第二幕起“敌方反制预览”写出澄净今天的锁定与下一次预测：{sum}");
+        }
+
+        /// <summary>FGT-FAC-005 另两种构筑：没有机器，只有炮塔（蓝图版本的固件槽）或只有陷阱发射器（陷阱固件）装燃迹 → 澄净照样选“液氮压制”。
+        /// 只验 Shares 的两条计数分支读对字段（夹具直接写记录，不走放置流程）。</summary>
+        private static void CheckCounterDefense()
+        {
+            CampaignState s = NewWorld(1);
+            MakeBlueprints(s);
+            SetFleet(s, BpPlain, 0); // 清掉全部机器
+            TurretState ts = TurretService.StateOf(s);
+            DefenseState ds = DefenseService.StateOf(s);
+            TurretRecord[] savedT = ts.Turrets;
+            DefenseRecord[] savedD = ds.Records;
+            ts.Turrets = new[] { new TurretRecord { BuildingId = "fg10fac01_turret", Serial = 990001, BlueprintId = BpFire, BlueprintVersion = 1 } };
+            ds.Records = Array.Empty<DefenseRecord>();
+            ClarityCounterService.Shares(s, out float turretFire, out _, out _);
+            string turretDecide = ClarityCounterService.Decide(s);
+            ts.Turrets = Array.Empty<TurretRecord>();
+            ds.Records = new[] { new DefenseRecord { BuildingId = "fg10fac01_trap", Serial = 990002, TrapFirmware = "fw_burntrail" } };
+            ClarityCounterService.Shares(s, out float trapFire, out _, out _);
+            string trapDecide = ClarityCounterService.Decide(s);
+            ds.Records = Array.Empty<DefenseRecord>();
+            string none = ClarityCounterService.Decide(s);
+            ts.Turrets = savedT;
+            ds.Records = savedD;
+            Expect(turretFire >= 0.99f && turretDecide == EnemyDefs.ConditionCounterCryo && trapFire >= 0.99f && trapDecide == EnemyDefs.ConditionCounterCryo
+                   && none == ClarityCounterService.CounterNone,
+                $"D1c 只有炮塔装燃迹（燃烧占比 {turretFire:0.00}）→ {turretDecide}；只有陷阱装燃迹（{trapFire:0.00}）→ {trapDecide}；都撤掉 → {(none == string.Empty ? "无" : none)}");
+        }
+
+        // ─────────────────────────────── G 燃迹组合 / 倍速 / 存读档（FG10-FAC-01 本机验证补） ───────────────────────────────
+
+        /// <summary>卡片“与燃迹组合”走玩家真实的固件读法：连射器 + 燃迹（fw_burntrail）的命中挂火 → 着火的爬行者被击毁 → 爆燃波及同伴。</summary>
+        private static void CheckBurnTrailFirmware()
+        {
+            CampaignState s = NewWorldState(1);
+            CombatSite site = OpenBench(s);
+            _t = 0;
+            MechEnemy row = Row("enemy_oil_crawler");
+            BenchEnemy(site, s, "enemy_oil_crawler", "g_crawler", new Vector2(0f, 0f));
+            BenchEnemy(site, s, "enemy_sprayer", "g_buddy", new Vector2(2f, 0f));
+            int crawler = UnitOf(site, "g_crawler");
+            int buddy = UnitOf(site, "g_buddy");
+            CombatWeapon wp = Gun(row.MaxHp / 3f + 1f); // 三发打死：第一发就挂上火
+            wp.Reading = CarrierReadings.Build(ComponentCatalog.CompGunId, null, HomeValleyLayout.Erc003ChassisId, new[] { "fw_burntrail" }, damageFromCompile: false);
+            int shooter = Player(site, new Vector2(-30f, 0f), wp, 9999f);
+            float b0 = View(site, buddy).Health;
+            long d0 = site.Kernel.Counters.Deflagrations;
+            bool burnedBeforeDeath = false;
+            for (int i = 0; i < 40 && site.Kernel.TryGetUnit(crawler, out CombatUnitView cv) && cv.Health > 0f; i++)
+            {
+                site.Kernel.FireAt(shooter, crawler, _t);
+                burnedBeforeDeath |= HasStatus(site, crawler, Bit("Fire"));
+                RunFor(site, 0.1f);
+            }
+            RunFor(site, 0.1f);
+            float hit = b0 - View(site, buddy).Health;
+            Expect(burnedBeforeDeath && site.Kernel.Counters.Deflagrations == d0 + 1 && hit >= row.WeaponDamage * row.DeflagMult - 0.5f,
+                $"G1 燃迹组合走真实固件读法：燃迹命中给爬行者挂火（{burnedBeforeDeath}）→ 被击毁时爆燃 {site.Kernel.Counters.Deflagrations - d0} 次，身旁喷洒车挨 {hit:0.#}（≥ {row.WeaponDamage} × {row.DeflagMult}）");
+            CombatSites.Close(Bench, s, dropRecord: true);
+        }
+
+        private static int SpawnOnBelt(CampaignState s, CombatSite home)
+        {
+            PlannedTerritory t = WorldGenService.PlanFor(s)?.Find(EnemyDefs.FactionClarity);
+            if (t == null || home == null)
+            {
+                return 0;
+            }
+            var at = new double2(t.CenterX + t.Radius + t.HazardWidth * 0.5f, t.CenterY);
+            return home.Kernel.Spawn(new CombatSpawn
+            {
+                Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.Commanded, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
+                Position = at, Home = at, Radius = 0.6f, Health = 1000f, MaxHealth = 1000f, Weapon = -1,
+                BehaviorProfile = -1, ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, 1f),
+            });
+        }
+
+        /// <summary>隐含要求：计时覆盖暂停与 0.5x～3x——酸沼按游戏秒结算，暂停不扣，四档倍速下同样的游戏秒扣同样多。</summary>
+        private static void CheckSpeedMatrix()
+        {
+            var lost = new List<string>();
+            bool paused = true, same = true;
+            foreach (float speed in new[] { 0.5f, 1f, 2f, 3f })
+            {
+                CampaignState s = NewWorld(42);
+                CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+                int unit = SpawnOnBelt(s, home);
+                if (unit == 0)
+                {
+                    Fail("G2 准备：没有澄净领地或家园内核");
+                    return;
+                }
+                GameClock.SetPaused(true);
+                for (int i = 0; i < 30; i++)
+                {
+                    WorldSimulation.Frame(0.1f);
+                }
+                paused &= home.Kernel.TryGetUnit(unit, out CombatUnitView pv) && pv.Health >= 1000f - 1e-3f;
+                GameClock.SetPaused(false);
+                GameClock.SetSpeed(speed);
+                long target = GameClock.Ticks + GameClock.StepHz * 4;
+                for (int i = 0; i < 4000 && GameClock.Ticks < target; i++)
+                {
+                    WorldSimulation.Frame(1f / 60f);
+                }
+                GameClock.SetSpeed(1f);
+                float l = home.Kernel.TryGetUnit(unit, out CombatUnitView v) ? 1000f - v.Health : -1f;
+                same &= Mathf.Abs(l - 80f) < 0.5f;
+                lost.Add($"{speed}x {l:0.#}");
+                home.Kernel.Despawn(unit);
+            }
+            Expect(paused && same, $"G2 暂停时酸沼不扣耐久（{paused}）；0.5x / 1x / 2x / 3x 下 4 个游戏秒都扣 80（每秒 2% × 1000）：{string.Join("、", lost)}");
+        }
+
+        /// <summary>隐含要求：新状态进存档——反制锁定（对策 + 锁定日）与已提示过的酸沼片随存档往返；派生量（星球内核里的酸沼形状）读档后重写、照常结算。</summary>
+        private static void CheckSaveLoad()
+        {
+            CampaignState s = NewWorld(42);
+            MakeBlueprints(s);
+            SetFleet(s, BpFire, 3);
+            string locked = ClarityCounterService.Locked(s);
+            int day = s.Factions.ClarityCounterDay;
+            string zone = WorldGenService.PlanFor(s)?.Find(EnemyDefs.FactionClarity)?.Id + "#belt";
+            s.Factions.AcidZonesNoticed = new[] { zone }; // 夹具：“已提示过”这一事实（提示本身由 E 段覆盖）
+            SaveResult sv = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            MachineRegistry.ResetForNewCampaign();
+            MachineLoadoutRegistry.Clear();
+            HomeGridService.Invalidate();
+            WorldGenService.Invalidate();
+            HomeValleyPowerGrid.ResetForTests();
+            ProductionService.ResetForTests();
+            BuildingOps.ResetForTests();
+            ResearchService.ResetForTests();
+            IntelService.ResetSessionState();
+            SiegeService.ResetSessionState();
+            AcidMarshService.ResetForTests();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(Slot);
+            if (!sv.Success || !rr.Success)
+            {
+                Fail($"G3 准备：存档 {sv.Success} / 读档 {rr.Success}（{rr.Message}）");
+                return;
+            }
+            CampaignSession.Set(Slot, rr.State);
+            CampaignState back = rr.State;
+            HomeValleyController hv = WorldSimulation.LoadHome(resume: true);
+            WorldView.Observe(hv.SiteId);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            int locks = ClarityCounterService.LockCount;
+            string lockedBack = ClarityCounterService.Locked(back);
+            bool kept = back.Factions.ClarityCounterId == locked && back.Factions.ClarityCounterDay == day && lockedBack == locked && ClarityCounterService.LockCount == locks
+                        && back.Factions.AcidZonesNoticed.Contains(zone);
+            IReadOnlyList<float4> shapes = AcidMarshService.ActiveShapes(back);
+            int unit = SpawnOnBelt(back, home);
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            float l = unit != 0 && home.Kernel.TryGetUnit(unit, out CombatUnitView v) ? 1000f - v.Health : -1f;
+            Expect(locked == EnemyDefs.ConditionCounterCryo && kept && home != null && shapes.Count > 0 && home.AcidShapeCount == shapes.Count && Mathf.Abs(l - 60f) < 0.5f,
+                $"G3 存读档：今天锁定的对策“{ClarityCounterService.CounterName(locked)}”与锁定日（第 {day} 天）读档后不变、不重锁（{kept}）；已提示过的酸沼片保留；" +
+                $"星球内核读档后重写 {home?.AcidShapeCount} 片酸沼（规划层 {shapes.Count} 片），站在外圈带上 3 个游戏秒照常扣 {l:0.#}");
+            if (unit != 0)
+            {
+                home.Kernel.Despawn(unit);
+            }
         }
 
         // ─────────────────────────────── E 反馈与图鉴 ───────────────────────────────

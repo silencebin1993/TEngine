@@ -1079,7 +1079,8 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static void StepAcidMarsh(ref CombatData d, float dt, double now)
         {
-            if (d.AcidShapes.Length == 0 || !(d.AcidPct > 0f) || math.floor(now) == math.floor(now - dt))
+            // 每游戏秒一次：dt 是 float(1/StepHz)，略大于精确值；不加余量时整秒后一步的 now − dt 落回上一秒，会再结算一次（实测每秒 2 次，FG10-FAC-01 本机验证）。
+            if (d.AcidShapes.Length == 0 || !(d.AcidPct > 0f) || math.floor(now + 1e-6) == math.floor(now - dt + 1e-6))
             {
                 return;
             }

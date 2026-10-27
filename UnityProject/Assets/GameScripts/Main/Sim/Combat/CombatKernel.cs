@@ -1712,15 +1712,16 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
-        /// <summary>测试 / 读档修复用：直接给单位挂状态（与读法挂的是同一条规则）。</summary>
-        public bool ApplyStatus(int id, uint mask, float seconds, float dps, float slow, float vuln, int sourceId)
+        /// <summary>测试 / 读档修复用：直接给单位挂状态（与读法挂的是同一条规则）。<paramref name="hit"/> = 带这些标签的这一击伤害
+        /// （默认 0 = 纯挂状态：只靠倍率的反应不结算，见 CombatLogic.ApplyStatus；本身不扣血）。</summary>
+        public bool ApplyStatus(int id, uint mask, float seconds, float dps, float slow, float vuln, int sourceId, float hit = 0f)
         {
             int slot = _d.SlotOf(id);
             if (slot < 0)
             {
                 return false;
             }
-            CombatLogic.ApplyStatus(ref _d, slot, mask, seconds, dps, slow, vuln, _d.SlotOf(sourceId));
+            CombatLogic.ApplyStatus(ref _d, slot, mask, seconds, dps, slow, vuln, _d.SlotOf(sourceId), hit);
             return true;
         }
 

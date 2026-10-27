@@ -20,7 +20,7 @@ namespace GameLogic.Campaign.Regions
     /// | 引信与弹芯（引信类比例 ≥ clarity.counter.fuse_share） | 蜂群饱和：多派腐蚀蜂群 | 据点展开追加腐蚀蜂群；突袭反制行 clarity.fuse（标签 swarm） |
     /// | 电磁场控（电磁类比例 ≥ clarity.counter.em_share） | 绝缘涂层：带 adapt_insulate 的单位当天挂不上电击类标签 | 生成时写进免疫位；突袭反制行 clarity.em（标签 insulated） |
     ///
-    /// “在用固件” = 存活机器当前蓝图版本的电路槽 + 炮塔蓝图的电路槽 + 陷阱发射器的固件（与突袭导演 <see cref="RaidDirectorService.TopDefenseCategory"/> 同一套计数，外加机器）。
+    /// “在用固件” = 存活机器当前蓝图版本的固件槽 + 炮塔蓝图版本的固件槽 + 陷阱发射器的固件（固件在有序固件槽，不在 3×3 电路格）。
     /// 优先级：燃烧 &gt; 引信 &gt; 电磁（同时满足取前者，确定）。锁定在日切那一步（<see cref="WorldStep"/>，只看游戏日，与观察无关）或当天第一次查询时做；
     /// 据点展开（TerritoryControlService）、突袭排定（RaidDirectorService.ChooseCounter）与攻城单位生成（SiegeService.SpawnOne）都读 <see cref="Locked"/>，
     /// 情报只读 <see cref="PeekLocked"/> / <see cref="Preview"/>（FGR-FAC-004“突袭在出发时按当天的状态生成；情报面板可以看到当前的反制和下一次更新的预测”）。
@@ -138,11 +138,10 @@ namespace GameLogic.Campaign.Regions
             return CounterNone;
         }
 
-        private static readonly int[] CategoryScratch = new int[4];
-
         /// <summary>
         /// 在用固件里 燃烧标签 / 引信类 / 电磁类 各占多少（分母 = 在用固件总枚数；没有固件全为 0）。
-        /// 机器：存活机器当前蓝图版本的电路槽；防线：炮塔蓝图 + 陷阱（与突袭导演同一套计数）。O(机器 × 9 + 炮塔 × 9 + 防御建筑)，只在锁定与情报刷新时算。
+        /// 机器：存活机器当前蓝图版本的固件槽；防线：炮塔蓝图版本的固件槽 + 陷阱固件。O(机器 × 2 + 炮塔 × 2 + 防御建筑)，只在锁定与情报刷新时算。
+        /// 固件在蓝图的有序固件槽（OrderedFirmwareIds），不在 3×3 电路格（FG1-SIG-01：固件不是电路格内容）。
         /// </summary>
         public static void Shares(CampaignState s, out float fire, out float fuse, out float em)
         {
@@ -153,18 +152,29 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
-                foreach (string id in SlotsOf(s, m.BlueprintId, m.BlueprintVersion))
+                foreach (string id in FirmwareOf(s, m.BlueprintId, m.BlueprintVersion))
                 {
                     Count(id, ref total, ref nFire, ref nFuse, ref nEm);
                 }
             }
-            // 防线：突袭导演的类别计数（炮塔 + 陷阱）；燃烧标签另数一遍。
-            RaidDirectorService.TopDefenseCategory(s, CategoryScratch);
-            int defense = CategoryScratch[0] + CategoryScratch[1] + CategoryScratch[2] + CategoryScratch[3];
-            total += defense;
-            nFuse += CategoryScratch[0];
-            nEm += CategoryScratch[3];
-            nFire += DefenseFireCount(s);
+            foreach (TurretRecord r in TurretService.All(s))
+            {
+                if (r == null || string.IsNullOrEmpty(r.BlueprintId))
+                {
+                    continue;
+                }
+                foreach (string id in FirmwareOf(s, r.BlueprintId, r.BlueprintVersion))
+                {
+                    Count(id, ref total, ref nFire, ref nFuse, ref nEm);
+                }
+            }
+            foreach (DefenseRecord dr in DefenseService.All(s))
+            {
+                if (dr != null)
+                {
+                    Count(dr.TrapFirmware, ref total, ref nFire, ref nFuse, ref nEm);
+                }
+            }
             fire = total > 0 ? nFire / (float)total : 0f;
             fuse = total > 0 ? nFuse / (float)total : 0f;
             em = total > 0 ? nEm / (float)total : 0f;
@@ -198,41 +208,14 @@ namespace GameLogic.Campaign.Regions
             return tags != null && Array.IndexOf(tags, "Fire") >= 0;
         }
 
-        private static int DefenseFireCount(CampaignState s)
-        {
-            int n = 0;
-            foreach (TurretRecord r in TurretService.All(s))
-            {
-                if (r == null || string.IsNullOrEmpty(r.BlueprintId))
-                {
-                    continue;
-                }
-                foreach (string id in SlotsOf(s, r.BlueprintId, r.BlueprintVersion))
-                {
-                    if (!string.IsNullOrEmpty(id) && FirmwareKinds.IsFirmware(id) && HasFireTag(id))
-                    {
-                        n++;
-                    }
-                }
-            }
-            foreach (DefenseRecord dr in DefenseService.All(s))
-            {
-                if (dr != null && !string.IsNullOrEmpty(dr.TrapFirmware) && FirmwareKinds.IsFirmware(dr.TrapFirmware) && HasFireTag(dr.TrapFirmware))
-                {
-                    n++;
-                }
-            }
-            return n;
-        }
-
-        private static IEnumerable<string> SlotsOf(CampaignState s, string blueprintId, int version)
+        private static IEnumerable<string> FirmwareOf(CampaignState s, string blueprintId, int version)
         {
             BlueprintRecord rec = BlueprintEditorService.Find(s, blueprintId);
             foreach (BlueprintVersionRecord v in rec?.Versions ?? Array.Empty<BlueprintVersionRecord>())
             {
                 if (v != null && v.Version == version)
                 {
-                    return v.CircuitSlotContentIds ?? Array.Empty<string>();
+                    return v.OrderedFirmwareIds ?? Array.Empty<string>();
                 }
             }
             return Array.Empty<string>();

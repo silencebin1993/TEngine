@@ -183,7 +183,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckObtainable()
         {
-            string gapText = File.ReadAllText(Path.Combine(Application.dataPath, "..", "..", "..", "production", "design", "full-game", "FG-GAP-REGISTER.md"));
+            string gapText = File.ReadAllText(Path.Combine(GameLogic.EditorTools.JourneyBots.JourneyCheckpoints.RepoRoot() ?? string.Empty, "production", "design", "full-game", "FG-GAP-REGISTER.md"));
             var lines = new List<string>();
             var bad = new List<string>();
             // 澄净敌人自带的配料（不用玩家装固件）：表里 statusTag 列 + 读法（爬行者一路带油）。
@@ -244,12 +244,12 @@ namespace GameLogic.EditorTools
                     }
                     return -1;
                 }
-                int Probe(int profile, double y, uint first, uint second, float secondDps, string id)
+                int Probe(int profile, double y, uint first, uint second, float secondDps, string id, float hit = 0f)
                 {
                     int before = Count(id);
                     int e = k.Spawn(Hostile(new double2(3, y), profile));
                     k.ApplyStatus(e, first, 5f, 0f, 0f, 0f, 0);
-                    k.ApplyStatus(e, second, 3f, secondDps, 0f, 0f, 0);
+                    k.ApplyStatus(e, second, 3f, secondDps, 0f, 0f, 0, hit);
                     k.Step(1f / 60f, k.Time + 1f / 60f);
                     k.ClearCues();
                     k.DrainGameplay(4096, out _);
@@ -257,8 +257,9 @@ namespace GameLogic.EditorTools
                 }
                 int burnPlain = Probe(-1, 0, acid, fire, fireDps, "reaction_causticburn");
                 int burnProof = Probe(proof, 1, acid, fire, fireDps, "reaction_causticburn");
-                int etchPlain = Probe(-1, 2, acid, oil, 0f, "reaction_dissolve");
-                int etchProof = Probe(proof, 3, acid, oil, 0f, "reaction_dissolve");
+                // 溶蚀只有“这一击 × 倍率”（没有附加标签 / 残留区域）：纯挂状态不结算（内核规则），要用一记带油的命中（如爬行者自爆）。
+                int etchPlain = Probe(-1, 2, acid, oil, 0f, "reaction_dissolve", 10f);
+                int etchProof = Probe(proof, 3, acid, oil, 0f, "reaction_dissolve", 10f);
                 int deflProof = Probe(proof, 4, oil, fire, fireDps, "reaction_deflagrate");
                 Expect(burnPlain == 1 && burnProof == 0 && etchPlain == 1 && etchProof == 0 && deflProof == 1,
                     $"C1 澄净单位不怕酸（免疫酸蚀位）：腐蚀灼烧 普通敌人 {burnPlain} 次 / 澄净 {burnProof} 次；溶蚀 普通 {etchPlain} / 澄净 {etchProof}；爆燃在澄净身上照样 {deflProof} 次——图鉴打法提示写明“这两条要打在其它阵营身上”");

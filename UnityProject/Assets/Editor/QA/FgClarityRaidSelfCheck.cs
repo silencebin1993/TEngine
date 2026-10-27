@@ -332,7 +332,6 @@ namespace GameLogic.EditorTools
                 }
             }
             BuildingRecord pole = S.PlaceNear(s, "power_pole", pur.Position, at, 0.08f, 0.2f);
-            AwayReportService.Begin(s, null, Array.Empty<int>());
             int landed0 = ClarityRaidService.Landed;
             int notes0 = NotifyCount("pollution_raised");
             S.Arrive(s, at, RaidCatalog.FactionChemical, new[] { "clarity.deact_drone" }, new[] { 2 });
@@ -342,8 +341,6 @@ namespace GameLogic.EditorTools
             string note = LastNotify("pollution_raised");
             RaidResultRecord rr = RaidResultService.PrimaryOpen(s);
             RaidTimelineRecord tl = rr?.Timeline.FirstOrDefault(t => t != null && t.Kind == "repolluted");
-            AwayReportRecord away = AwayReportService.Current(s);
-            AwayEntryRecord entry = away?.Entries.LastOrDefault(e => e != null && e.TypeId == "pollution_raised");
             bool contaminated = pole == null || PurificationService.IsContaminated(s, pole.BuildingId);
             string pathHere = PurificationService.RepurifyPath(s, center);
             bool pathNamed = pathHere.Contains(BuildingOps.NameOf(pur));
@@ -351,9 +348,16 @@ namespace GameLogic.EditorTools
                 $"D1 FGT-FAC-007：澄净攻城时投放目标 = 净化塔（{targets}）；灭活无人机飞过去投放（{landed}），塔中心那一格 0 → {lvl} 级，" +
                 $"路边电塔受污染（{contaminated}）；通知写明怎么净化回来（“{Short(note)}”）");
             Expect(rr != null && rr.Repollutions >= 1 && rr.RepollutedCells > 0 && tl != null && RaidResultService.TimelineText(tl).Contains(rr.RepollutedCells > 0 ? "格" : string.Empty)
-                   && entry != null && entry.Section == "weather" && entry.Detail.Contains("重新净化") && pathNamed,
-                $"D2 再污染在离家报告里说明：突袭结算记 {rr?.Repollutions} 次 / {rr?.RepollutedCells} 格、过程一条可定位（“{(tl != null ? RaidResultService.TimelineText(tl) : "无")}”）；" +
-                $"离家报告“天气与环境”段有这条通知（带重新净化路径）（{entry != null}）；这一片的路径点名覆盖它的净化塔（“{Short(pathHere)}”）");
+                   && pathNamed,
+                $"D2 再污染在突袭结算里说明：结算记 {rr?.Repollutions} 次 / {rr?.RepollutedCells} 格、过程一条可定位（“{(tl != null ? RaidResultService.TimelineText(tl) : "无")}”）；" +
+                $"这一片的路径点名覆盖它的净化塔（“{Short(pathHere)}”）");
+            // D2b 离家报告：报告只在远征在外时开着，世界一推进就被 Reconcile 按“没有远征”关掉——所以开报告后直接走同一个再污染入口、读这份报告、再结算，中间不推进世界。
+            AwayReportRecord away = AwayReportService.Begin(s, null, Array.Empty<int>());
+            RepolluteResult again = PurificationService.Repollute(s, center, r, 1);
+            AwayEntryRecord entry = away?.Entries.LastOrDefault(e => e != null && e.TypeId == "pollution_raised");
+            AwayReportService.End(s, AwayReportService.OutcomeOther, notify: false);
+            Expect(again.CellsRaised > 0 && entry != null && entry.Section == "weather" && entry.Detail.Contains("重新净化") && entry.HasLocation,
+                $"D2b 再污染记进离家报告：再污染 {again.CellsRaised} 格；“天气与环境”段有这条通知（{entry?.Section ?? "无"}，可定位 {entry?.HasLocation}），带重新净化路径（“{Short(entry?.Detail ?? string.Empty)}”）");
             string far = PurificationService.RepurifyPath(s, new GridCell(center.X + 400, center.Y + 400));
             Expect(far == GameText.Get("purify.repath.uncovered"), $"D3 没有净化塔覆盖的地方：路径写“在附近放一座净化塔”（“{Short(far)}”）");
 

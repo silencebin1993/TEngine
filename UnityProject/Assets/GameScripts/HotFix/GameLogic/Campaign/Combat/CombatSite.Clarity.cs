@@ -24,6 +24,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>FG10-REG-01：内核里当前生效的玩家机器防腐涂层抗性。</summary>
         public float PlayerAcidResist => IsDisposed ? 0f : Kernel.PlayerAcidResist;
 
+        /// <summary>FG10-BOSS-01 洗礼塔：中立场地（预警脉冲圈 / 灌注液池 / 主动反应区，对双方生效）。容量满时返回 false。</summary>
+        public bool SpawnNeutralField(Vector2 at, float radius, float seconds, float dps, uint statusMask, float statusSeconds, float statusDps, CombatZoneLook look) =>
+            !IsDisposed && Kernel.SpawnFieldZone(CombatFaction.Neutral, new double2(at.x, at.y), radius, seconds, dps, statusMask, statusSeconds, statusDps, 0f, 0f, look);
+
         public int AcidShapeCount => IsDisposed ? 0 : Kernel.AcidShapeCount;
 
         public bool InAcidMarsh(Vector2 point) => !IsDisposed && Kernel.InAcidMarsh(new double2(point.x, point.y));
