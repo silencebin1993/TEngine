@@ -7,19 +7,24 @@ using BinGames.Sim.Combat;
 using GameConfig;
 using GameConfig.fg;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Env;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Primitive;
+using GameLogic.Campaign.Regions;
 using GameLogic.Campaign.Signal;
 using GameLogic.Campaign.WorldGen;
+using GameLogic.Campaign.WorldSim;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.Notifications;
 using GameLogic.Progression;
 using GameLogic.Settings;
+using GameLogic.Stage;
+using GameLogic.View;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
@@ -33,8 +38,9 @@ namespace GameLogic.EditorTools
     /// B 可得性探针（内容层）：每条反应的两个配料，到第二幕为止玩家都拿得到（基础 / 遗迹 / 第一幕阵营 / 澄净掉落的固件，或澄净敌人自带）——拿不到的条目必须已登记缺口。
     ///   正式战斗内核里“装上真实固件就能触发 / 不触发”的对照在 FgReactionProbeSelfCheck E（FGT-FW-003）。
     /// C 内核负向：澄净单位不怕酸（免疫酸蚀位）→ 腐蚀灼烧 / 溶蚀在它身上打不出来，换成普通敌人就能；爆燃（油 + 火）在它身上照样打得出来。
-    /// D 正式开放：第一幕不开放；澄净领地出现在地图上（第二幕）的下一个游戏秒开放并通知一次（列四个名字），之后不重复；开放前不报名字、开放后报名字；图鉴提示随之变化。
+    /// D 正式开放（D2 覆盖种子测试集 1 / 42 / 20261017）：第一幕不开放；澄净领地出现在地图上（第二幕）的下一个游戏秒开放并通知一次（列四个名字），之后不重复；开放前不报名字、开放后报名字；图鉴提示随之变化。
     /// E 首次触发：开放前打出爆燃不慢放、不算首次；开放后第一次打出 → 慢放一次 + 首次记录（图鉴解锁），第二次不再慢放。
+    /// F 计时与存档：正式世界步进（WorldSimulation.Frame）下暂停不开放，0.5x / 1x / 2x / 3x 都在澄净领地出现后的第一个整游戏秒开放一次；真实存档 → 读档后批次仍开放、不重发；旧档（没有开放字段）进第二幕后第一个整游戏秒补开放。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgClarityReactionSelfCheck）。
     /// </summary>
     public static class FgClarityReactionSelfCheck
@@ -50,6 +56,7 @@ namespace GameLogic.EditorTools
         };
 
         private static StringBuilder _report;
+        private static string _dir;
         private static int _fail;
         private static int _pass;
 
@@ -85,6 +92,9 @@ namespace GameLogic.EditorTools
             bool slowmo = GameSettings.ReactionSlowMotionEnabled;
             string savedPrefs = PlayerPrefs.GetString(SettingsPrefsKey, null);
             bool hadPrefs = PlayerPrefs.HasKey(SettingsPrefsKey);
+            Func<float> originalDelta = CameraDirector.RealDeltaTime;
+            string originalCodexPath = MechanicCodex.FilePathOverrideForTests;
+            _dir = Path.Combine(Path.GetTempPath(), "bingames-fgreact-selfcheck-" + Guid.NewGuid().ToString("N"));
             try
             {
                 ConfigSystem.Instance.Load();
@@ -103,9 +113,37 @@ namespace GameLogic.EditorTools
                 Step(CheckClarityAcidProof);
                 Step(CheckOpening);
                 Step(CheckFirstTrigger);
+
+                CampaignSaveService.SaveDirectoryOverrideForTests = _dir;
+                Directory.CreateDirectory(_dir);
+                CameraDirector.RealDeltaTime = () => 0.05f;
+                MechanicCodex.FilePathOverrideForTests = Path.Combine(_dir, "codex.json");
+                GameRoot.BindWorldProviders();
+                Step(CheckTimingAndSave);
             }
             finally
             {
+                try
+                {
+                    WorldSimulation.UnloadAll();
+                }
+                catch (Exception e)
+                {
+                    Fail("收尾卸载世界抛异常：" + e.Message);
+                }
+                CampaignSaveService.SaveDirectoryOverrideForTests = null;
+                MechanicCodex.FilePathOverrideForTests = originalCodexPath;
+                CameraDirector.RealDeltaTime = originalDelta;
+                try
+                {
+                    if (Directory.Exists(_dir))
+                    {
+                        Directory.Delete(_dir, true);
+                    }
+                }
+                catch (IOException)
+                {
+                }
                 FeedbackCues.ObservedSiteProvider = originalObserved;
                 NotificationCenter.AutoPauseHandler = originalAutoPause;
                 GameSettings.SetReactionSlowMotionEnabled(slowmo);
@@ -316,6 +354,26 @@ namespace GameLogic.EditorTools
             Expect(closedAct1 && waitsForSecond && open && listed && once && notes1 >= notes0 + 1 && hintOpen && tipInBody,
                 $"D1 第一幕不开放（图鉴写“{ReactionBatchService.ClosedHint(Batch)}”）；澄净领地出现在地图上后的整游戏秒开放化工批并通知一次（“{text}”），之后不重复（{once}）；" +
                 $"开放后四条都报名字，图鉴提示变成“{GameText.Get("reaction.codex.locked")}”，正文含打法提示（{tipInBody}）");
+
+            // D2 种子无关（B25）：种子测试集里每个世界都有澄净领地，第一幕不开放、第二幕的整游戏秒开放。
+            var seeds = new List<string>();
+            bool allSeeds = true;
+            foreach (int seed in new[] { 1, 42, 20261017 })
+            {
+                CampaignState w = NewWorldState(seed);
+                bool hasLake = WorldGenService.PlanFor(w)?.Find(EnemyDefs.FactionClarity) != null;
+                ReactionBatchService.WorldStep(w, tick);
+                bool shut = !NamedReactionCatalog.IsBatchOpen(w, Batch);
+                if (w.Progress != null)
+                {
+                    w.Progress.Act = Math.Max(2, w.Progress.Act);
+                }
+                ReactionBatchService.WorldStep(w, tick + GameClock.StepHz);
+                bool ok = hasLake && shut && NamedReactionCatalog.IsBatchOpen(w, Batch);
+                allSeeds &= ok;
+                seeds.Add($"{seed}:{ok}");
+            }
+            Expect(allSeeds, $"D2 种子测试集（{string.Join(" ", seeds)}）：都有澄净领地，第一幕不开放、第二幕开放");
         }
 
         // ─────────────────────────────── E 首次触发慢放 ───────────────────────────────
@@ -352,6 +410,106 @@ namespace GameLogic.EditorTools
                     $"E1 首次触发（FGR-FW-043）：开放前打出爆燃不慢放、不算首次（{closedQuiet}）；开放后第一次 → 慢放一次 + 首次记录（图鉴解锁）（{firstSlow}）；第二次不再慢放（{noSecond}）");
             }
             GameClock.CancelSlowMotion();
+        }
+
+        // ─────────────────────────────── F 计时与存档 ───────────────────────────────
+
+        private static void CheckTimingAndSave()
+        {
+            var lines = new List<string>();
+            bool ok = true;
+            foreach (float speed in new[] { 0.5f, 1f, 2f, 3f })
+            {
+                CampaignState w = NewHomeWorld(42);
+                if (w.Progress != null)
+                {
+                    w.Progress.Act = Math.Max(2, w.Progress.Act); // 澄净领地在地图上显示
+                }
+                int opened0 = ReactionBatchService.Opened;
+                GameClock.SetPaused(true);
+                for (int i = 0; i < 30; i++)
+                {
+                    WorldSimulation.Frame(0.1f);
+                }
+                bool pausedShut = !NamedReactionCatalog.IsBatchOpen(w, Batch) && ReactionBatchService.Opened == opened0;
+                GameClock.SetPaused(false);
+                GameClock.SetSpeed(speed);
+                long visibleAt = GameClock.Ticks;
+                long deadline = (visibleAt / GameClock.StepHz + 1) * GameClock.StepHz; // 下一个整游戏秒
+                long openedAt = -1;
+                for (int i = 0; i < 4000 && GameClock.Ticks < deadline + GameClock.StepHz * 2; i++)
+                {
+                    WorldSimulation.Frame(1f / 60f);
+                    if (openedAt < 0 && NamedReactionCatalog.IsBatchOpen(w, Batch))
+                    {
+                        openedAt = GameClock.Ticks;
+                    }
+                }
+                GameClock.SetSpeed(1f);
+                // 一帧可能推进多步：记下的是开放那一帧结束时的步号，应落在整秒那一步到整秒后一秒之间。
+                bool onTime = openedAt >= deadline && openedAt < deadline + GameClock.StepHz;
+                bool once = ReactionBatchService.Opened == opened0 + 1;
+                ok &= pausedShut && onTime && once;
+                lines.Add($"{speed}x 暂停不开放 {pausedShut} / 第 {openedAt - visibleAt} 步开放（整秒在第 {deadline - visibleAt} 步）/ 只开放一次 {once}");
+            }
+            Expect(ok, $"F1 正式世界步进：{string.Join("；", lines)}");
+
+            // F2 真实存档 → 读档（最后一档的世界：化工批已开放）。
+            CampaignState s = CampaignSession.Current;
+            SaveResult sv = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            MachineRegistry.ResetForNewCampaign();
+            MachineLoadoutRegistry.Clear();
+            HomeGridService.Invalidate();
+            WorldGenService.Invalidate();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(Slot);
+            if (!sv.Success || !rr.Success)
+            {
+                Fail($"F2 准备：存档 {sv.Success} / 读档 {rr.Success}（{rr.Message}）");
+                return;
+            }
+            CampaignSession.Set(Slot, rr.State);
+            CampaignState back = rr.State;
+            HomeValleyController hv = WorldSimulation.LoadHome(resume: true);
+            WorldView.Observe(hv.SiteId);
+            int openedBack = ReactionBatchService.Opened;
+            WorldSimulation.StepMany(GameClock.StepHz * 2);
+            bool kept = NamedReactionCatalog.IsBatchOpen(back, Batch) && ClarityRows().All(r => NamedReactionCatalog.IsNamed(back, r.Id)) && ReactionBatchService.Opened == openedBack;
+
+            // 旧档没有开放字段：读进来是未开放；进第二幕后第一个整游戏秒补开放。
+            CampaignState legacy = JsonUtility.FromJson<CampaignState>(SaveMigrationJson.RemoveField(JsonUtility.ToJson(back), "OpenReactionBatches"));
+            CampaignFgStateDomains.EnsureAll(legacy);
+            bool legacyShut = legacy != null && !NamedReactionCatalog.IsBatchOpen(legacy, Batch);
+            ReactionBatchService.WorldStep(legacy, GameClock.StepHz * 1000L);
+            bool legacyOpen = legacy != null && NamedReactionCatalog.IsBatchOpen(legacy, Batch);
+            Expect(s != null && kept && legacyShut && legacyOpen,
+                $"F2 存读档：读档后化工批仍开放、四条都报名字，再走 2 个游戏秒不重发（{kept}）；旧档无字段 → 未开放（{legacyShut}）→ 第二幕第一个整游戏秒补开放（{legacyOpen}）");
+        }
+
+        /// <summary>带家园的正式世界（与 FgSettlingLakeSelfCheck 同一夹具，去掉信号接入部分）。</summary>
+        private static CampaignState NewHomeWorld(int seed)
+        {
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            GameClock.SetSpeed(1f);
+            GameClock.SetPaused(false);
+            MachineRegistry.ResetForNewCampaign();
+            MachineLoadoutRegistry.Clear();
+            HomeGridService.Invalidate();
+            WorldGenService.Invalidate();
+            HomeValleyWorkOrders.ResetSessionState();
+            InputRouter.Reset();
+            CampaignState s = CampaignState.CreateNew("fgreact-" + seed, "Standard", seed);
+            WorldGenService.ApplyNewGameWorld(s, seed, WorldSettings.Resolve(3, WorldGenContent.DefaultPresetId));
+            CampaignSession.Set(Slot, s);
+            CampaignFgStateDomains.EnsureAll(s);
+            NotificationCenter.Bind(s);
+            HomeValleyFactory.EnsureBlueprintsSeeded(s);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: false);
+            WorldView.Observe(home.SiteId);
+            WorldSimulation.StepMany(2);
+            return s;
         }
 
         // ─────────────────────────────── 工具 ───────────────────────────────
