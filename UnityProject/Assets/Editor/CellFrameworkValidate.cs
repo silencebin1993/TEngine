@@ -54,7 +54,134 @@ namespace GameLogic.EditorTools
         /// 段的顺序、内容与原来逐行调用完全相同；某段抛异常时与原来一样中止后面的段并记一条失败。
         /// </summary>
         [MenuItem("BinGames/QA/自检/细胞阶段框架")]
-        public static void RunAll() => RunSelected(null);
+        public static void RunAll()
+        {
+            // FG-TOOL-02：BINGAMES_VALIDATE_SHARD="i/n" 时只跑第 i 片（tools/unity-verify-parallel.sh 用；两片日志合并、覆盖核对通过才算全量）。
+            string shard = Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_SHARD");
+            if (string.IsNullOrWhiteSpace(shard))
+            {
+                RunSelected(null);
+                return;
+            }
+            RunShard(shard.Trim());
+        }
+
+        /// <summary>FG-TOOL-02：一个分片的信息（日志末尾写机器可读的段名单，合并时核对覆盖）。</summary>
+        private sealed class ShardInfo
+        {
+            public string Label;
+            public IReadOnlyList<string> All;
+            public string Note;
+            public string Error;
+        }
+
+        private static void RunShard(string spec)
+        {
+            IReadOnlyList<string> all = SegmentNames;
+            var info = new ShardInfo { Label = spec, All = all };
+            string[] parts = spec.Split('/');
+            if (parts.Length != 2 || !int.TryParse(parts[0], out int index) || !int.TryParse(parts[1], out int count) || count < 1 || index < 1 || index > count)
+            {
+                info.Error = $"分片参数 BINGAMES_VALIDATE_SHARD=“{spec}”不合法（应为 i/n，1 ≤ i ≤ n）";
+                RunSelected(new HashSet<string>(StringComparer.Ordinal), info);
+                return;
+            }
+            info.Label = $"{index}/{count}";
+            Dictionary<string, double> plan = ReadShardPlan(Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_SHARD_PLAN"), out info.Note);
+            var preload = new List<double>();
+            foreach (string p in (Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_SHARD_PRELOAD") ?? string.Empty).Split(','))
+            {
+                preload.Add(double.TryParse(p.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double s) ? s : 0);
+            }
+            info.Note += $"；各分片预先占用（秒）：{string.Join(",", preload)}";
+            RunSelected(new HashSet<string>(AssignShards(all, count, plan, preload)[index - 1], StringComparer.Ordinal), info);
+        }
+
+        /// <summary>
+        /// FG-TOOL-02：把全部段按全量的原顺序切成 count 个连续区间（分片 1 = 全量的前缀，片内每段之前跑过的段与全量完全相同；只有后面各片的开头是冷启动）。
+        /// 切点按耗时定：每片的 preload（预先占用的秒数，如分片 2 跑完还要跑冒烟）+ 段耗时之和尽量相等。段耗时取 plan（上一次全量的分段耗时表）；
+        /// plan 里没有的段（新加的）按 plan 的中位数估，仍在它在全量里的位置；没有 plan 时按段数均分（不计 preload）。每段恰好落在一个分片。
+        /// 不用“按耗时从长到短塞进较短的分片”（LPT）：两次实跑里它把段打散，暴露了 3 处段与段之间的状态依赖（前面的段装好的数据 / 没退订的信号 / 预热的托管堆），
+        /// 每次切法还随耗时变，是不稳定的失败来源（见 production/qa/evidence/fg-tool-02-verify-speed.md）。
+        /// 同样的输入在每个进程里得到同样的结果（两个分片各算一遍，必须一致）。
+        /// </summary>
+        public static List<string>[] AssignShards(IReadOnlyList<string> all, int count, IReadOnlyDictionary<string, double> plan, IReadOnlyList<double> preload)
+        {
+            var shards = new List<string>[count];
+            for (int k = 0; k < count; k++)
+            {
+                shards[k] = new List<string>();
+            }
+            bool timed = plan != null && plan.Count > 0;
+            double median = timed ? plan.Values.OrderBy(v => v).ElementAt(plan.Count / 2) : 1.0;
+            var est = new double[all.Count];
+            double total = 0;
+            for (int i = 0; i < all.Count; i++)
+            {
+                est[i] = timed && plan.TryGetValue(all[i], out double s) ? s : median;
+                total += est[i];
+            }
+            double Pre(int k) => timed && preload != null && k < preload.Count ? preload[k] : 0;
+            for (int k = 0; k < count; k++)
+            {
+                total += Pre(k);
+            }
+            double target = total / count;
+            int shard = 0;
+            double load = Pre(0);
+            for (int i = 0; i < all.Count; i++)
+            {
+                // 这一段过半落在目标之外就换下一片（最后一片收下剩余的全部段）
+                if (shard < count - 1 && shards[shard].Count > 0 && load + est[i] / 2 > target)
+                {
+                    shard++;
+                    load = Pre(shard);
+                }
+                shards[shard].Add(all[i]);
+                load += est[i];
+            }
+            return shards;
+        }
+
+        /// <summary>读上一次全量的分段耗时表（列 order seconds pass fail warn segment，按表头取列）。读不了 = null（按段数把全量原顺序切成连续 n 段）。</summary>
+        private static Dictionary<string, double> ReadShardPlan(string path, out string note)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                note = "没有耗时表（BINGAMES_VALIDATE_SHARD_PLAN 未设），按段数把全量原顺序切成连续 n 段";
+                return null;
+            }
+            try
+            {
+                string[] lines = File.ReadAllLines(path);
+                string[] header = lines.Length > 0 ? lines[0].Split('\t') : new string[0];
+                int si = Array.IndexOf(header, "seconds");
+                int ni = Array.IndexOf(header, "segment");
+                if (si < 0 || ni < 0)
+                {
+                    note = $"耗时表 {path} 缺 seconds / segment 列，按段数把全量原顺序切成连续 n 段";
+                    return null;
+                }
+                var plan = new Dictionary<string, double>(StringComparer.Ordinal);
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    string[] cols = lines[i].Split('\t');
+                    if (cols.Length > Math.Max(si, ni)
+                        && double.TryParse(cols[si], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double s))
+                    {
+                        string name = cols[ni].Trim();
+                        plan[name] = plan.TryGetValue(name, out double old) ? Math.Max(old, s) : s;
+                    }
+                }
+                note = $"耗时表 {Path.GetFileName(path)}：{plan.Count} 段有耗时（按耗时切成连续区间），新段按中位数估";
+                return plan;
+            }
+            catch (Exception e)
+            {
+                note = $"耗时表 {path} 读不了（{e.Message}），按段数把全量原顺序切成连续 n 段";
+                return null;
+            }
+        }
 
         /// <summary>
         /// FG-TOOL-01：只跑点名的段（逗号分隔的段名，见日志末尾的耗时排行或 <see cref="SegmentNames"/>）。
@@ -105,7 +232,7 @@ namespace GameLogic.EditorTools
         /// <summary>最近一次运行的分段耗时（运行顺序）。</summary>
         public static IReadOnlyList<SegmentTiming> LastTimings => Timings;
 
-        private static void RunSelected(HashSet<string> only)
+        private static void RunSelected(HashSet<string> only, ShardInfo shard = null)
         {
             Report.Clear();
             _fail = 0;
@@ -126,7 +253,15 @@ namespace GameLogic.EditorTools
             var total = System.Diagnostics.Stopwatch.StartNew();
 
             Line("========== 细胞阶段框架自检 ==========");
-            if (only != null)
+            if (shard != null)
+            {
+                Line($"（分片 {shard.Label}：本片 {only.Count} 段 / 全量 {shard.All.Count} 段——并行验证用，两片日志合并、覆盖核对通过后才算全量自检；{shard.Note}）");
+                if (shard.Error != null)
+                {
+                    Fail(shard.Error);
+                }
+            }
+            else if (only != null)
             {
                 Line($"（只跑点名的段：{string.Join("、", only)}——迭代用；交付验收仍跑全量 RunAll）");
                 List<string> unknown = only.Where(n => !SegmentNames.Contains(n)).ToList();
@@ -153,10 +288,17 @@ namespace GameLogic.EditorTools
 
             Line("======================================");
             // 只跑点名的段时结论写明“不是全量”：工作流以全量日志里的“全部通过”判断交付验收（FG-TOOL-01 修复）。
-            Line(_fail == 0 ? (only != null ? "点名的段全部通过（只跑了点名的段，不是全量自检）" : "全部通过") : $"失败 {_fail} 项");
+            // FG-TOOL-02：分片结论里不出现“全部通过”这几个字（工作流有按子串找“全部通过”判断全量通过的地方；合并失败的日志里也会带着两片原文）。
+            Line(_fail == 0 ? (shard != null ? $"分片 {shard.Label} 无失败（未合并，不是全量自检）" : only != null ? "点名的段全部通过（只跑了点名的段，不是全量自检）" : "全部通过") : $"失败 {_fail} 项");
             total.Stop();
             PerfGate.AppendSummary(Report);
             AppendTimingRanking(Report, Timings, total.Elapsed.TotalSeconds);
+            if (shard != null)
+            {
+                // 机器可读的两行（tools/unity-verify-parallel.sh 合并时核对：各片实际跑过的段的并集 = 全部段、每段恰好一次）
+                Line($"分片 {shard.Label} 段：{string.Join(",", Timings.Select(t => t.Name))}");
+                Line($"全部段：{string.Join(",", shard.All)}");
+            }
 
             Debug.Log(Report.ToString());
             WriteTimingTsv(Environment.GetEnvironmentVariable("BINGAMES_VALIDATE_TIMING_OUT"), Timings);
