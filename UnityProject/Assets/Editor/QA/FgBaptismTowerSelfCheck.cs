@@ -216,6 +216,8 @@ namespace GameLogic.EditorTools
             int m = Spawn(s, center + new Vector2(BaptismTowerBoss.ArenaRadius + 30f, 0f));
             StepSeconds(2);
             bool quietOutside = BaptismTowerBoss.PhaseOf(s) == BaptismPhase.Dormant;
+            IntelService.EnsureState(s);
+            bool intelBefore = IntelService.NextBoss(s, GameClock.Ticks)?.Id == IntelCatalog.BossIdBaptismTower;
             RaidAudioDirector.ResetSession();
             RaidAudioDirector.Tick(s, true, 1f, force: true);
             string musicBefore = RaidAudioDirector.CurrentMusic;
@@ -230,6 +232,18 @@ namespace GameLogic.EditorTools
             bool sealedImmune = home.TryGetClarity(towerUnit, out CombatClarityUnit tc) && (tc.ImmuneMask & Bit("Frozen")) != 0u && (tc.ImmuneMask & Bit("Acid")) != 0u;
             Expect(quietOutside && engaged && parts && sealedImmune,
                 $"B1 场外机器不开战（{quietOutside}）；走进湖心平台 → 开战（灌注阶段，第 {r.Attempt} 次挑战），反应塔与 4 座泵站进星球战斗内核（{parts}），反应塔不怕酸、此刻冻不住（{sealedImmune}）");
+
+            // B1b DEBT-FG10BOSS01-03：遭遇过（开战过一次）之后监听站才排“首领弱点”破译，情报一行写洗礼塔的阶段门槛与弱点（数值取首领调参）。
+            bool needs = IntelCatalog.TryGet(IntelCatalog.KindBoss, out IntelKindDef bossKind) && IntelService.Needed(s, bossKind, GameClock.Ticks, out _);
+            bool nextIsTower = IntelService.NextBoss(s, GameClock.Ticks)?.Id == IntelCatalog.BossIdBaptismTower;
+            IntelRecord weak = InjectBossIntel(s);
+            string intelLine = IntelService.Summary(s, weak, GameClock.Ticks);
+            bool intelText = intelLine.Contains(GameText.Get("intel.boss.baptism_tower.name")) && intelLine.Contains(Mathf.RoundToInt(BaptismTowerBoss.Phase2HpFraction * 100f) + "%")
+                             && intelLine.Contains("×" + BaptismTowerBoss.VentDamageMult.ToString("0.#")) && intelLine.Contains(GameText.Get("intel.boss.baptism_tower.advice"));
+            bool notAgain = IntelService.NextBoss(s, GameClock.Ticks) == null;
+            Expect(!intelBefore && needs && nextIsTower && intelText && notAgain,
+                $"B1b 监听站首领弱点情报（DEBT-FG10BOSS01-03）：开战前不排洗礼塔（{!intelBefore}）；遭遇过后要破译、下一个首领是洗礼塔（{needs}/{nextIsTower}）；" +
+                $"情报一行写阶段门槛 / 泄压增伤 / 应对（{intelText}：“{intelLine.Replace("\n", " ")}”）；已有有效情报不再重复排（{notAgain}）");
 
             // B2 灌注：落点先预警 ≥ 0.8 秒再落，站进去的机器沾上标签。
             long warnAt = -1, pourAt = -1;
@@ -384,6 +398,9 @@ namespace GameLogic.EditorTools
             bool pacified = TerritoryControlService.Find(s, EnemyDefs.FactionClarity)?.LeaderDefeated == true;
             RaidAudioDirector.Tick(s, true, 1f, force: true);
             bool musicOff = RaidAudioDirector.CurrentMusic.Length == 0;
+            IntelService.Step(s, 1);
+            bool intelGone = !IntelService.HasValid(s, IntelCatalog.KindBoss, IntelCatalog.BossIdBaptismTower, GameClock.Ticks, out _) && IntelService.NextBoss(s, GameClock.Ticks) == null;
+            Expect(intelGone, $"E1b 击败后洗礼塔的弱点情报标已过时、不再排破译（{intelGone}）");
             Expect(hud && defeated && fw && pick && core && pacified && musicOff,
                 $"E1 HUD 显示名称与阶段、分阶段血条（“{title}”，{hpLine}）；击毁 → 奖励只发一次：核心固件反应增幅 + 此前没有的流体类固件 {(rewardFw.Length > 1 ? rewardFw[1] : "无")}（{fw}）、" +
                 $"一个来源为首领的三选一数据包（{pick}）、关键材料反应核进核心保管库（{core0} → {HomeInventory.Stock(s, "reactor_core")}）；反应塔撤出内核、澄净领地平定（{pacified}）、首领音乐停下（{musicOff}）");
@@ -918,6 +935,18 @@ namespace GameLogic.EditorTools
                 GameClock.SetSpeed(1f);
                 GameClock.SetPaused(false);
             }
+        }
+
+        private static IntelRecord InjectBossIntel(CampaignState s)
+        {
+            IntelState st = IntelService.StateOf(s);
+            var rec = new IntelRecord
+            {
+                Serial = 9100, Kind = IntelCatalog.KindBoss, Subject = IntelCatalog.BossIdBaptismTower, Source = "post", ProducedTick = GameClock.Ticks,
+                ExpiresTick = GameClock.Ticks + GameClock.TicksFor(3600.0),
+            };
+            st.Records = new List<IntelRecord>(st.Records ?? Array.Empty<IntelRecord>()) { rec }.ToArray();
+            return rec;
         }
 
         private static void Expect(bool ok, string message)

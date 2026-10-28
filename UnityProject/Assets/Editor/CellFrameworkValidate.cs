@@ -621,6 +621,9 @@ namespace GameLogic.EditorTools
             // FG9-E2E-01：M9 出口——FGJ-M9 登记覆盖里程碑原文（FGJ-M9A 为前段、FGJ-GEN9 复用其步骤）、旅程源码只走输入通道、开局 / 截断夹具只在登记处、FGJ-M3 诊断已清；
             // IC-REQ-022 六类反向映射到起真实系统的断言（所在段登记在全量自检）；缺口清零；FG-M9 试玩包；里程碑“必须完成”七项映射。
             Seg("FgMilestoneM9SelfCheck", FgMilestoneM9SelfCheck.Run);
+            // FG10-E2E-01：M10 出口——FGJ-M10 登记覆盖里程碑原文与 FG-GAP-163 区域片段、旅程源码只走输入通道、夹具只在登记处、反应名一处映射；
+            // IC-REQ-022 六类反向与承接项（FG-GAP-161、DEBT-FG8EXP02-03、DEBT-FG10BOSS01-03）映射到起真实系统的断言；缺口清零；FG-M10 试玩包；“必须完成”六项映射。
+            Seg("FgMilestoneM10SelfCheck", FgMilestoneM10SelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

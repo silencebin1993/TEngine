@@ -137,6 +137,9 @@ namespace GameLogic.Campaign.Regions
 
         public static bool IsDefeated(CampaignState s) => PhaseOf(s) == BaptismPhase.Defeated;
 
+        /// <summary>遭遇过（首领战开始过至少一次，或已击败）：监听站首领弱点情报的前提（FGR-FAC-006“需要先遭遇过一次”，DEBT-FG10BOSS01-03）。</summary>
+        public static bool WasEncountered(CampaignState s) => (Record(s)?.Attempt ?? 0) > 0 || IsDefeated(s);
+
         public static string PhaseName(BaptismPhase p) => GameText.Get(p switch
         {
             BaptismPhase.Fill => "boss.clarity.phase.fill",

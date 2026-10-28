@@ -7,6 +7,7 @@ using BinGames.Sim.Combat;
 using BinGames.Sim.Logistics;
 using BinGames.Sim.Nav;
 using GameLogic.Campaign;
+using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Defense;
@@ -44,6 +45,8 @@ namespace GameLogic.EditorTools
     ///   通知 / 离家报告（天气与环境段）/ 突袭结算（过程 + 汇总）都写明，汇总带重新净化的路径；读档后投放目标在第一步之前重写。
     /// E 腐蚀蜂群边走边腐蚀脚下的传送带（附近没有建筑，伤害只能来自腐蚀行进）。
     /// F 攻城重甲冲锋撞墙（DEBT-FG9FAC02-03）：蓄力预警（提示 ≥ 0.8 秒）→ 冲锋 → 撞上屏障即停、屏障掉耐久。
+    /// W 整个世界同时运行（FG10-E2E-01 承接）：W1 FG-GAP-161 ① 澄净领地据点战观察 / 不观察逐位一致；W2 DEBT-FG8EXP02-03 行军中的远征队站上酸沼带掉耐久、
+    ///   危害带提示一次；W3 FG-GAP-161 ② 远征在外时澄净无人机真实投放 → 离家报告条目。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgClarityRaidSelfCheck）。
     /// </summary>
     public static class FgClarityRaidSelfCheck
@@ -128,6 +131,8 @@ namespace GameLogic.EditorTools
                 Step(CheckSiegeCharge);
                 Step(CheckPurifierPlanTarget);
                 Step(CheckTimingAndObservation);
+                Step(CheckTerritoryObservation);
+                Step(CheckAwayMarchAcidAndRepollution);
             }
             finally
             {
@@ -675,6 +680,159 @@ namespace GameLogic.EditorTools
             }
             Expect(same && paused && landedAll,
                 $"H1 暂停 1.5 秒世界不动（{paused}）；观察 1x / 0.5x / 3x 与不观察家园 1x 跑同样 60 游戏秒：投放落地（{landedAll}）、再污染格子 / 受污染 / 结算记账 / 内核哈希逐位一致（{same}）" + diff);
+        }
+
+        // ─────────────────────── W 整个世界同时运行（FG10-E2E-01 承接）───────────────────────
+
+        /// <summary>
+        /// W1 FG-GAP-161 ①（FGT-FAC-009 / FGR-BASE-021）：同一片澄净领地的据点战，镜头飞过去观察与完全不观察，各推进同样 20 游戏秒，
+        /// 机器耐久、驻军、据点状态与星球内核哈希逐位一致。夹具只有“在据点旁放 3 台连射器”（真实生成入口）；据点展开、喷洒 / 自爆 / 投放都走真实系统。
+        /// </summary>
+        private static void CheckTerritoryObservation()
+        {
+            string watched = TerritoryFight(true, out bool foughtA, out string where);
+            string blind = TerritoryFight(false, out bool foughtB, out _);
+            Expect(foughtA && foughtB && watched == blind,
+                $"W1 FG-GAP-161 ①：澄净领地据点（{where}）旁 3 台连射器，观察（镜头飞到据点）与不观察各推进 20 游戏秒：都打起来了（{foughtA}/{foughtB}），" +
+                $"机器耐久 / 驻军 / 据点状态 / 内核哈希逐位一致（{watched == blind}）" + (watched == blind ? string.Empty : $"\n观察：{Short(watched)}\n不观察：{Short(blind)}"));
+        }
+
+        private static string TerritoryFight(bool observe, out bool fought, out string where)
+        {
+            fought = false;
+            where = "无";
+            CampaignState s = NewWorld(42, observe);
+            s.Progress.Act = Math.Max(2, s.Progress.Act);
+            HomeValleyFactory.EnsureBlueprintsSeeded(s);
+            OutpostRecord o = WorldOutpostSystem.Outposts(s)
+                .Where(x => x != null && !x.Destroyed && x.TerritoryId == EnemyDefs.FactionClarity && x.Kind == WorldOutpostSystem.KindTerritory)
+                .OrderBy(x => x.Tier).ThenBy(x => x.OutpostId, StringComparer.Ordinal).FirstOrDefault();
+            if (o == null)
+            {
+                return "没有澄净领地据点";
+            }
+            where = $"{o.OutpostId} ({o.CellX},{o.CellY}) {o.Tier} 级 驻军 {o.Garrison}";
+            GridCell g = SiegeService.NearestPassable(new GridCell(o.CellX + 14, o.CellY), 8);
+            int[] ids = Enumerable.Range(0, 3).Select(i => SpawnFighter(s, new Vector2(g.X, g.Y + 2f * i))).ToArray();
+            if (ids.Any(id => id == 0))
+            {
+                return "夹具：据点旁放不下机器";
+            }
+            if (observe)
+            {
+                WorldView.FlyTo(HomeValleyLayout.RegionId, new Vector2(o.CellX, o.CellY));
+            }
+            long target = GameClock.Ticks + GameClock.StepHz * 20;
+            for (int frames = 0; GameClock.Ticks < target && frames < 60 * 120; frames++)
+            {
+                WorldSimulation.Frame(1f / 60f, target);
+            }
+            string hp = string.Join(",", ids.Select(id => MachineRegistry.TryGetRecord(id, out MachineRecord m)
+                ? (m.IsAlive ? m.Health.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : "x") : "?"));
+            fought = o.Engaged || o.Destroyed || ids.Any(id => !MachineRegistry.TryGetRecord(id, out MachineRecord m) || !m.IsAlive || m.Health < m.MaxHealth);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            return $"{hp}|驻军 {o.Garrison}|交战 {o.Engaged}|摧毁 {o.Destroyed}|{home?.Kernel.StateHash():X16}";
+        }
+
+        private static int SpawnFighter(CampaignState s, Vector2 at)
+        {
+            MachineOpResult r = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, HomeValleyLayout.RegionId, at, 120f, 120f);
+            if (r.Success && MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec))
+            {
+                MachineLoadoutRegistry.Register(s, rec.LogicId, rec.BlueprintId, rec.BlueprintVersion);
+            }
+            return r.Success ? r.LogicId : 0;
+        }
+
+        /// <summary>
+        /// W2 DEBT-FG8EXP02-03（行军穿酸沼带）+ W3 FG-GAP-161 ②（远征在外时澄净突袭再污染 → 离家报告）：同一个世界里真实出发（派遣准备面板“出发”同一入口）、原地待命，
+        /// 夹具把待命的远征队挪到澄净外圈酸沼带上（行军走到那里要很久）；被测的掉耐久、危害带提示、离家报告都走真实系统。
+        /// 然后家园来一波灭活无人机：投放落地再污染，远征仍在外、离家报告还开着，报告里有这条再污染（带重新净化路径、可定位）。
+        /// </summary>
+        private static void CheckAwayMarchAcidAndRepollution()
+        {
+            CampaignState s = NewWorld(10709);
+            s.Progress.Act = Math.Max(2, s.Progress.Act);
+            HomeValleyFactory.EnsureBlueprintsSeeded(s);
+            RegionRecord ruins = FracturedCityRegion.Find(s);
+            if (ruins != null && ruins.State == RegionState.Locked)
+            {
+                ruins.State = RegionState.Available;
+            }
+            Vector2 core = S.CoreCenter(s);
+            int[] team = { SpawnFighter(s, core + new Vector2(6f, -6f)) }; // 一台连射器（派遣带宽 2 / 上限 3）
+            WorldSimulation.StepMany(3);
+            for (int i = 0; i < 30 && !ExpeditionSiteAnchors.IsResolved(s, FracturedCityLayout.RegionId); i++)
+            {
+                WorldSimulation.StepMany(GameClock.StepHz);
+            }
+            ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(team, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            s = CampaignSession.Current;
+            WorldSimulation.StepMany(3);
+            bool hold = ExpeditionMarchService.IssueCommand(s, ExpeditionMarchService.Command.Hold, out string why);
+            WorldSimulation.StepMany(GameClock.StepHz);
+            if (!dep.Success || !team.All(id => ExpeditionMarchService.IsTeamMember(s, id)) || !AwayReportService.IsOpen(s))
+            {
+                Fail($"W2 夹具：出发失败或离家报告没开（{dep.Outcome}：{string.Join("，", dep.Reasons ?? Array.Empty<string>())}；待命 {hold} {why}；报告 {AwayReportService.IsOpen(s)}）");
+                return;
+            }
+
+            // W2 行军中的远征队站上酸沼带：没有涂层时真实掉耐久，危害带提示只发一次。
+            PlannedTerritory t = WorldGenService.PlanFor(s)?.Find(EnemyDefs.FactionClarity);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            if (t == null || home == null || t.HazardWidth <= 0)
+            {
+                Fail("W2 夹具：种子 10709 没有带外圈危害带的澄净领地或星球战斗内核");
+                return;
+            }
+            var belt = new Vector2(t.CenterX + t.Radius + t.HazardWidth * 0.5f, t.CenterY);
+            for (int i = 0; i < team.Length; i++)
+            {
+                if (home.TryGetMachineUnit(team[i], out int unit))
+                {
+                    home.Kernel.SetPosition(unit, new Unity.Mathematics.double2(belt.x + 1.5f * i, belt.y)); // 测试捷径：远征队已经走到酸沼带
+                }
+            }
+            float hp0 = team.Sum(id => MachineRegistry.TryGetRecord(id, out MachineRecord m) ? m.Health : 0f);
+            int cue0 = ExpeditionMarchService.HazardCueCount;
+            long acid0 = home.Kernel.Counters.AcidTicks;
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            int cue1 = ExpeditionMarchService.HazardCueCount;
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            float hp1 = team.Sum(id => MachineRegistry.TryGetRecord(id, out MachineRecord m) ? m.Health : 0f);
+            bool marching = team.All(id => ExpeditionMarchService.IsMarchMember(s, id));
+            bool inBelt = AcidMarshService.ZoneAt(s, belt) != null && home.InAcidMarsh(belt);
+            Expect(marching && inBelt && hp1 < hp0 && home.Kernel.Counters.AcidTicks > acid0 && cue1 == cue0 + 1 && ExpeditionMarchService.HazardCueCount == cue1,
+                $"W2 DEBT-FG8EXP02-03：行军中的远征队（{marching}）站在澄净外圈酸沼带上（{inBelt}），没有涂层 6 游戏秒全队耐久 {hp0:0.#} → {hp1:0.#}（酸沼结算 {home.Kernel.Counters.AcidTicks - acid0} 次）；" +
+                $"危害带提示发 {cue1 - cue0} 次、在带里不重复（{ExpeditionMarchService.HazardCueCount - cue1}）");
+
+            // W3 远征在外时家园挨一波灭活无人机：再污染进离家报告。
+            Vector2 at = S.OutsidePoint(s, 40f);
+            BuildingRecord pur = S.PlaceNear(s, Purifier, at, core, 0.4f, 0.75f);
+            if (pur == null)
+            {
+                Fail("W3 夹具：放不下净化塔");
+                return;
+            }
+            var center = new GridCell(pur.GridX, pur.GridY);
+            HomeGridMap map = HomeGridService.MapFor(s);
+            int r = ClarityRaidService.RepolluteRadius;
+            for (int dy = -r; dy <= r; dy++)
+            {
+                for (int dx = -r; dx <= r; dx++)
+                {
+                    map.SetPollution(new GridCell(center.X + dx, center.Y + dy), 0); // 测试捷径：塔周围已净化
+                }
+            }
+            int landed0 = ClarityRaidService.Landed;
+            S.Arrive(s, at, RaidCatalog.FactionChemical, new[] { "clarity.deact_drone" }, new[] { 2 });
+            bool landed = F.StepUntil(() => ClarityRaidService.Landed > landed0, 120);
+            AwayReportRecord rep = AwayReportService.Current(s);
+            AwayEntryRecord entry = rep?.Entries.LastOrDefault(e => e != null && e.TypeId == "pollution_raised");
+            bool stillAway = ExpeditionMarchService.AwaySiteId(s) != null && AwayReportService.IsOpen(s);
+            Expect(landed && map.GetPollution(center) > 0 && stillAway && entry != null && entry.Detail.Contains("重新净化") && entry.HasLocation,
+                $"W3 FG-GAP-161 ②：远征在外（离家报告开着 {stillAway}）时澄净无人机真实投放落地（{landed}），塔心 0 → {map.GetPollution(center)} 级；" +
+                $"离家报告里有这条再污染（{entry?.Section ?? "无"}，可定位 {entry?.HasLocation}），带重新净化路径（“{Short(entry?.Detail ?? string.Empty)}”）");
         }
 
         // ─────────────────────────────── 工具 ───────────────────────────────

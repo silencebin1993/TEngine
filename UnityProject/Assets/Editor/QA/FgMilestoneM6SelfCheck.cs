@@ -206,6 +206,7 @@ namespace GameLogic.EditorTools
             ("RaidDirectorService.RequestStoryRaid(", "ApplyRaidFixture", 1, "FGJ-M6R 剧情节点触发突袭 DEBT-FG6E2E01-03"),
             ("M.ApplySubstrateFixture(", "ApplySubstrateFixture", 1, "FGJ-M6R 芯片基板进仓库（与 FGJ-M5 同一个夹具）DEBT-FG5E2E01-02"),
             ("SilentNightService.PlanDayForTests(", "ApplySilentNightFixture", 1, "FGJ-M6 第一次静默夜改排到第 40 日（只改日期）DEBT-FG9ACT101-06 ①"),
+            ("HomeInventory.Add(", "ApplyRepairKitFixture", 1, "FGJ-M6R 修核心的维修件补足（FG-GAP-149）DEBT-FG10E2E01-05"),
         };
 
         private static void CheckJourneySourcesUseInput()

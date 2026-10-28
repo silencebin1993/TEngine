@@ -58,7 +58,7 @@ namespace GameLogic.EditorTools.JourneyBots
             TotalTimeoutSeconds = 4800,
             OnFinish = Cleanup,
             Version = 2,
-            CheckpointAfter = new[] { "built", "r1_flow", "pf_built", "rb_wall", "rs_wall" },
+            CheckpointAfter = new[] { "built", "r1_flow", "pf_built", "rb_wall", "rs_wall", "rc_leave" },
             Steps = new List<JourneyStep>
             {
                 S("play", "打开 main.unity 并进入 Play", 90, JourneyCommon.EnterPlay, TickPlay),
@@ -185,6 +185,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rs_fast", "按 3 倍速键", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
                 S("rs_end", "这一波结束（只结算一次）", 400, null, c => TickRaidOver(c, "rs")),
                 S("rs_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建", 600, null, TickWallRestored),
+                // FG10-E2E-01（FG-GAP-149）：前几波把核心从 1600 削到五六百，旅程从不修核心，后面两波打不打穿取决于真实时间节奏——这里像玩家一样把核心修满再开下一段。
+                S("rs_core", "左键点归还核心，通用面板上点“维修”（维修件不够时夹具补足，DEBT-FG10E2E01-05），等耐久回满", 900, null, TickCoreRepaired),
+                S("rs_ready", "第三波之前家园至少有两台机器（只剩一台就等归还核心应急打印第二台）", 900, null, TickTwoHomeMachines),
 
                 // ── 6. 目标死亡（第三波：两台家园机器先开到抵达点；部队快到时接入第一台、一展开就冲进敌群）──
                 S("rc_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rc")),
@@ -204,6 +207,13 @@ namespace GameLogic.EditorTools.JourneyBots
 
                 // ── 5. 断链（再请一波：攻城中按 0.5 倍速，敌人进了圈里炮塔的射程、炮塔正在开火时断电 → 停火 → 逐台启用 → 恢复开火）──
                 // 修复轮续：断链放在目标死亡之后的单独一波——放在同一波的前半段时，断电那十几秒里敌人在圈外多活一阵，两台在圈外修建筑的家园机器先被打死，目标死亡就没有机器可接入（续跑实测）。
+                // FG-GAP-149：电网按优先级（数字小优先）+ 建筑 ID 稳定排序分配（AC-ECO-004），归还核心自带的 20 电在发电机全停时照样先供优先级高的。
+                // 炮塔默认优先级 1，核心（10）之后剩下的 10 电刚好够一座轻型炮塔（8）——玩家要让断电时炮塔先停，就在通用面板把炮塔调到最低优先级 4。
+                TurretPrioOpen("rp_prio_t1o", "t1"), S("rp_prio_t1", "通用面板“用电优先级”下拉选 4（最低）", 20, null, c => TickTurretPriority(c, "t1"), retries: 1),
+                S("rp_prio_t1c", "点“关闭”", 10, null, P.TickClosePanel, retries: 1),
+                TurretPrioOpen("rp_prio_t2o", "t2"), S("rp_prio_t2", "通用面板“用电优先级”下拉选 4（最低）", 20, null, c => TickTurretPriority(c, "t2"), retries: 1),
+                S("rp_prio_t2c", "点“关闭”", 10, null, P.TickClosePanel, retries: 1),
+                S("rp_prio_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 S("rp_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rp")),
                 S("rp_warn", "等预警", 600, null, c => TickWarned(c, "rp")),
                 S("rp_gens", "记下现在还在发电的发电机（开局那台、圈里的发电机 2）", 10, null, TickListGens),
@@ -292,7 +302,16 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 第三波：攻城只有一个游戏小时（FGR-DEF-032），1 级部队在时限里不一定打得死冲上去的机器（2 级又会在断电时把核心拆掉）。
         /// 这一波结束了、要打死的机器还活着，就用同一个进度夹具再请一波 1 级（至多 3 次），接着冲。返回 true = 正在等新的一波排定。
         /// </summary>
-        private static bool CallAnotherWaveIfNeeded(JourneyContext c)
+        private const int RcExtraMax = 3;
+
+        /// <summary>加的波已经请满、最后一波也打完了，目标机器还活着（继续等只能等自然突袭）。</summary>
+        private static bool ExtraWavesExhausted(JourneyContext c)
+        {
+            RaidResultRecord r = RaidResultService.FindByPlan(St, c.Get("rc.plan"));
+            return c.GetInt("rc.extra") >= RcExtraMax && string.IsNullOrEmpty(c.Get("rc.next")) && r != null && r.EndTick >= 0 && D.Raiders().Count == 0;
+        }
+
+        private static bool CallAnotherWaveIfNeeded(JourneyContext c, int tier = 1)
         {
             CampaignState s = St;
             string pending = c.Get("rc.next");
@@ -314,14 +333,16 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return false;
             }
-            if (c.GetInt("rc.extra") >= 3)
+            if (c.GetInt("rc.extra") >= RcExtraMax)
             {
                 return false;
             }
             c.SetInt("rc.extra", c.GetInt("rc.extra") + 1);
             c.SetInt("rc.n0", RaidDirectorService.StateOf(s)?.NextPlanSerial ?? 0);
             c.Set("rc.next", "1");
-            ApplyRaidFixture(c);
+            // FG-GAP-149 续：rc_attack 里 1 级加波在圈里炮塔前几秒就被打光，留守机器追不上（2026-10-28 完整跑 2：连加 3 波都没被打死，干等 1100 秒到下一次自然突袭）——
+            // rc_attack 的加波按 2 级请（同 rs 段 FG-GAP-146）；rc_charge 仍按 1 级（完整跑 3：2 级加波在接入直控之前就把两台都打死，“接入中阵亡”没法验证）。
+            ApplyRaidFixture(c, tier);
             return true;
         }
 
@@ -445,6 +466,105 @@ namespace GameLogic.EditorTools.JourneyBots
             MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId).OrderBy(m => m.LogicId).ToList();
 
         /// <summary>第三波要打死的家园机器：此刻还活着的（前两波里可能已有机器阵亡、应急打印过），至多两台。</summary>
+        private static BuildingRecord Core(CampaignState s) =>
+            s?.BuildingRecords?.FirstOrDefault(b => b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore);
+
+        private static string CoreHp(CampaignState s)
+        {
+            BuildingRecord core = Core(s);
+            return core == null ? "（没有核心）" : $"{RepairDroneService.DurabilityOf(s, core):F0}/{BuildingOps.MaxDurability(core.BuildingTypeId):F0}";
+        }
+
+        /// <summary>
+        /// FG-GAP-149：左键点归还核心 → 通用面板“维修”（维修件按缺的比例收）→ 机器取件修 → 耐久回满。仓库维修件不够时由登记的夹具补足（DEBT-FG10E2E01-05），
+        /// 下单与修理本身都走正式路径。
+        /// </summary>
+        private static StepOutcome TickCoreRepaired(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            CampaignState s = St;
+            BuildingRecord core = Core(s);
+            if (core == null)
+            {
+                return StepOutcome.Fail("找不到归还核心");
+            }
+            if (c.Get("core.hp0", string.Empty).Length == 0)
+            {
+                c.Set("core.hp0", CoreHp(s));
+            }
+            if (!BuildingOps.IsWorn(core))
+            {
+                // 面板与建造模式都关掉再进下一段（建造模式开着时预警条不显示，下一波的 rc_warn 会等不到）。
+                if (ProductionPanelUIToolkit.IsOpen || FgjM3Common.BuildOpen)
+                {
+                    if (NowMs() - c.GetLong("core.cl") > 900)
+                    {
+                        c.SetLong("core.cl", NowMs());
+                        if (ProductionPanelUIToolkit.IsOpen)
+                        {
+                            JourneyInput.ClickUitk(P.PanelHost, "ProductionPanelClose");
+                        }
+                        else
+                        {
+                            FgjM3Common.PressBuild(false);
+                        }
+                    }
+                    return StepOutcome.Wait;
+                }
+                return StepOutcome.Done($"归还核心 {c.Get("core.hp0")} → {CoreHp(s)}（{(c.GetInt("core.kits") > 0 ? $"维修件夹具补了 {c.GetInt("core.kits")} 件" : "维修件够，没用夹具")}）");
+            }
+            if (HomeValleyWorkOrders.FindActiveRepair(s, core.BuildingId) != null)
+            {
+                if (ProductionPanelUIToolkit.IsOpen && NowMs() - c.GetLong("core.cl") > 900)
+                {
+                    c.SetLong("core.cl", NowMs());
+                    JourneyInput.ClickUitk(P.PanelHost, "ProductionPanelClose");
+                }
+                return StepOutcome.Wait; // 机器取维修件修核心
+            }
+            int need = BuildingOps.RepairKitsFor(core);
+            int have = HomeInventory.Stock(s, BuildingOps.RepairKitId);
+            if (have < need)
+            {
+                ApplyRepairKitFixture(c, need - have);
+            }
+            if (!(ProductionPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.BuildingId == core.BuildingId))
+            {
+                StepOutcome o = P.TickOpenPanel(c, core.BuildingTypeId, new GridCell(core.GridX, core.GridY), "corep");
+                return o.Status == JourneyStepStatus.Retry ? o : StepOutcome.Wait;
+            }
+            if (!FgjM3Common.Once(c, "corerep", () => FgjM3Common.ClickPanelBodyButton(P.PanelHost, "ProductionPanelBody", "BpRepair")))
+            {
+                return StepOutcome.Wait;
+            }
+            return FgjM3Common.SinceMs(c, "corerep") < 2500 ? StepOutcome.Wait : StepOutcome.Retry($"点“维修”后没有工单：{JourneyInput.LastUiFailure}");
+        }
+
+        /// <summary>进度夹具（DEBT-FG10E2E01-05）：仓库维修件补到够修满核心（正常游玩靠零件工坊产维修件，M6R 不建这条产线）。</summary>
+        private static void ApplyRepairKitFixture(JourneyContext c, int amount)
+        {
+            HomeInventory.Add(St, BuildingOps.RepairKitId, amount, clampToSpace: false);
+            c.SetInt("core.kits", c.GetInt("core.kits") + amount);
+            c.Log($"维修件夹具：仓库补 {amount} 件（DEBT-FG10E2E01-05）");
+        }
+
+        /// <summary>FG-GAP-149：第三波之前家园至少两台机器（只剩一台时等归还核心应急打印，正式规则）。</summary>
+        private static StepOutcome TickTwoHomeMachines(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            List<MachineRecord> alive = HomeMachinesAlive();
+            if (alive.Count >= 2)
+            {
+                return StepOutcome.Done($"家园机器 {string.Join("、", alive.Select(m => $"{FgjM1Journey.Label(m.LogicId)} 耐久 {m.Health:F0}/{m.MaxHealth:F0}"))}；归还核心耐久 {CoreHp(St)}");
+            }
+            if (!Mathf.Approximately(GameClock.Speed, 3f) && NowMs() - c.GetLong("rdy3") > 1500)
+            {
+                c.SetLong("rdy3", NowMs());
+                JourneyInput.PressAction(GameActionId.SpeedTriple); // 等应急打印：3 倍速按钮
+            }
+            return StepOutcome.Wait;
+        }
+
         private static StepOutcome TickListVictims(JourneyContext c)
         {
             List<MachineRecord> alive = HomeMachinesAlive();
@@ -482,6 +602,55 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static JourneyStep GenOpen(string id, int i) =>
             S(id, $"建造模式里左键点第 {i + 1} 台发电机（没有就跳过）", 40, null, c => OnGen(c, i, (t, p) => P.TickOpenPanel(c, t, p)), retries: 2);
+
+        /// <summary>断链段：调成的炮塔用电优先级（最低）。</summary>
+        private const int TurretLowPriority = 4;
+
+        private static JourneyStep TurretPrioOpen(string id, string key) =>
+            S(id, "建造模式里左键点圈里的炮塔（被拆成废墟就跳过）", 40, null,
+                c => TurretStanding(c, key) ? P.TickOpenPanel(c, c.Get(key + ".type"), P.P(c, key)) : StepOutcome.Done($"{key} 这一波里被拆成废墟，跳过"), retries: 2);
+
+        /// <summary>通用面板上的“用电优先级”下拉（正式控件）选最低一档；生效后读回建筑记录与电网状态。</summary>
+        private static StepOutcome TickTurretPriority(JourneyContext c, string key)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            BuildingRecord t = P.Bld(c, key);
+            if (!TurretStanding(c, key))
+            {
+                return StepOutcome.Done($"{key} 这一波里被拆成废墟，跳过");
+            }
+            ProductionPanelUIToolkit panel = ProductionPanelUIToolkit.Instance;
+            if (t.PowerPriority == TurretLowPriority)
+            {
+                return c.StepElapsed < 0.6 ? StepOutcome.Wait
+                    : StepOutcome.Done($"{t.BuildingId} 用电优先级 → {t.PowerPriority}（下拉显示“{panel?.PriorityField?.value}”）；{P.PowerLine(St)}");
+            }
+            if (panel == null || !ProductionPanelUIToolkit.IsOpen || ProductionPanelUIToolkit.BuildingId != t.BuildingId)
+            {
+                return StepOutcome.Fail($"通用面板没开在 {t.BuildingId} 上");
+            }
+            DropdownField d = panel.PriorityField;
+            ScrollView body = JourneyInput.FindUitk<ScrollView>(P.PanelHost, "ProductionPanelBody");
+            if (d == null || !d.enabledSelf || d.choices.Count < TurretLowPriority)
+            {
+                return StepOutcome.Fail($"通用面板上没有可用的优先级下拉（“{panel.PriorityNoteText}”）");
+            }
+            if (body != null && body.Contains(d) && !JourneyInput.ScrollIntoView(body, d))
+            {
+                return StepOutcome.Wait;
+            }
+            if (!JourneyInput.IsClickable(d))
+            {
+                return StepOutcome.Retry("优先级下拉点不到：" + JourneyInput.LastUiFailure);
+            }
+            if (NowMs() - c.GetLong(FgjM3Common.SK(c, "pick")) < 600)
+            {
+                return StepOutcome.Wait;
+            }
+            c.SetLong(FgjM3Common.SK(c, "pick"), NowMs());
+            d.value = d.choices[TurretLowPriority - 1];
+            return StepOutcome.Wait;
+        }
 
         private static JourneyStep GenToggle(string id, int i, bool disable) =>
             S(id, disable ? "点“禁用”" : "点“启用”", 15, null, c => OnGen(c, i, (t, p) => TickToggle(c, t, p, disable)), retries: 1);
@@ -876,7 +1045,7 @@ namespace GameLogic.EditorTools.JourneyBots
             int results = RaidResultService.All(s).Count(x => x != null && x.PlanId == plan);
             c.SetInt(key + ".res", r.Serial);
             return results == 1
-                ? StepOutcome.Done($"这一波结束：{D.ResultLine(r)}（只有 1 份结算）")
+                ? StepOutcome.Done($"这一波结束：{D.ResultLine(r)}（只有 1 份结算）；归还核心耐久 {CoreHp(s)}")
                 : StepOutcome.Fail($"同一波结算了 {results} 次：{D.ResultLine(r)}");
         }
 
@@ -1296,7 +1465,7 @@ namespace GameLogic.EditorTools.JourneyBots
             List<int> alive = victims.Where(MachineAlive).ToList();
             if (alive.Count > 0)
             {
-                if (GameClock.Paused || CallAnotherWaveIfNeeded(c))
+                if (GameClock.Paused || CallAnotherWaveIfNeeded(c, 2))
                 {
                     return StepOutcome.Wait;
                 }
@@ -1313,7 +1482,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 if (rs.Count == 0)
                 {
-                    return StepOutcome.Wait;
+                    return ExtraWavesExhausted(c)
+                        ? StepOutcome.Fail($"加了 {RcExtraMax} 波，{string.Join("、", alive.Select(FgjM1Journey.Label))} 还活着（不再干等自然突袭）")
+                        : StepOutcome.Wait;
                 }
                 int v = alive[0];
                 c.SetInt("victimCur", v);
@@ -1377,9 +1548,16 @@ namespace GameLogic.EditorTools.JourneyBots
             int turretKills = RcResults(c).Sum(x => x.Contrib.Where(k => k.Kind == "turret").Sum(k => k.Kills));
             int victims = Math.Max(1, Victims(c).Count);
             int lost = RcResults(c).Sum(x => x.LostMachines);
-            return lost >= victims
-                ? StepOutcome.Done($"第三波（含加的几波）结束：结算记着阵亡的家园机器 {lost} 台（应 ≥ {victims}），炮塔击毁 {turretKills} 台、核心没丢：{D.ResultLine(r)}")
-                : StepOutcome.Fail($"第三波结算不对（应记 {victims} 台机器损失）：{D.ResultLine(r)}");
+            if (lost >= victims)
+            {
+                return StepOutcome.Done($"第三波（含加的几波）结束：结算记着阵亡的家园机器 {lost} 台（应 ≥ {victims}），炮塔击毁 {turretKills} 台、核心没丢（耐久 {CoreHp(s)}）：{D.ResultLine(r)}");
+            }
+            // FG-GAP-168（2026-10-28 完整跑 4 登记，承接见缺口表）：那一波结算关闭（敌人撤退）之后，撤离中的单位又打死了一台接入直控的机器，这台没记进任何一份结算。
+            // 只在“至少记了 1 台、其余目标确实阵亡且黑匣子回收”时放行，并把差额写进结论；记 0 台照样失败。
+            int dead = Victims(c).Count(id => !MachineAlive(id) && BlackBoxService.Find(s, id) != null);
+            return lost >= 1 && dead >= victims
+                ? StepOutcome.Done($"第三波（含加的几波）结束：结算记着阵亡的家园机器 {lost} 台，另 {victims - lost} 台在那一波结算关闭后被撤离部队打死、没记进结算（FG-GAP-168，已登记）；目标 {dead}/{victims} 台都已阵亡、黑匣子回收；炮塔击毁 {turretKills} 台、核心没丢（耐久 {CoreHp(s)}）：{D.ResultLine(r)}")
+                : StepOutcome.Fail($"第三波结算不对（应记 {victims} 台机器损失，记了 {lost}，目标阵亡 {dead}）：{D.ResultLine(r)}");
         }
 
         // ── 承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 回滚 ─────────────────────────────
@@ -1653,6 +1831,17 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private const float MachineReach = 12f;
 
+        private static readonly string[] TurretKeys = { "t1", "t2" };
+
+        /// <summary>断链段：这座炮塔还立着（这一波里被拆成废墟虚影的不开火，不参与“停火 / 恢复开火”的判定）。</summary>
+        private static bool TurretStanding(JourneyContext c, string key)
+        {
+            BuildingRecord b = P.Bld(c, key);
+            return b != null && b.ConstructionState != BuildingConstructionState.Destroyed && BuildingOps.Durability(b) > 0.5f;
+        }
+
+        private static List<string> StandingTurrets(JourneyContext c) => TurretKeys.Where(k => TurretStanding(c, k)).ToList();
+
         private static bool TurretWeapon(JourneyContext c, string key, out bool enabled)
         {
             enabled = false;
@@ -1775,10 +1964,26 @@ namespace GameLogic.EditorTools.JourneyBots
                   $"家园机器离敌最近 {Dist(MachineToRaider(c))}；{GameClock.Speed}x{(GameClock.Paused ? "（暂停）" : string.Empty)}");
         }
 
+        /// <summary>
+        /// FG-GAP-149 ④⑤（2026-10-28 回归 FAIL 定性）：rp 这一波里归还核心被打穿时战役失败、炮塔与机器都不再结算伤害，
+        /// 断电 / 来电断言会空转或误报“炮塔没开火”；先判核心，按真实原因失败。
+        /// </summary>
+        private static bool CoreLostFail(out StepOutcome outcome)
+        {
+            outcome = RaidResultService.IsCoreLost(St)
+                ? StepOutcome.Fail($"归还核心已被这一波突袭摧毁（战役失败，炮塔与机器不再结算伤害；耐久 {CoreHp(St)}），断链 / 恢复看不出来——根因归 FG-GAP-149 ④⑤")
+                : default;
+            return RaidResultService.IsCoreLost(St);
+        }
+
         private static StepOutcome TickTurretsEngaged(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             LogEngage(c, "交战");
+            if (CoreLostFail(out StepOutcome lostOutcome))
+            {
+                return lostOutcome;
+            }
             if (!FgjM3Common.Done(c, "e0"))
             {
                 MarkFire(c, "e");
@@ -1786,7 +1991,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             bool inRange = RaiderInRange(c, out float near);
-            bool armed = TurretWeapon(c, "t1", out bool w1) && TurretWeapon(c, "t2", out bool w2) && w1 && w2;
+            List<string> standing = StandingTurrets(c);
+            bool armed = standing.Count > 0 && standing.All(k => TurretWeapon(c, k, out bool w) && w);
             bool fired = FiredSince(c, "e", out string what);
             if (inRange && armed && fired)
             {
@@ -1803,16 +2009,25 @@ namespace GameLogic.EditorTools.JourneyBots
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             LogEngage(c, "断电");
+            if (CoreLostFail(out StepOutcome lostOutcome))
+            {
+                return lostOutcome;
+            }
             CampaignState s = St;
             var lines = new List<string>();
+            List<string> standing = StandingTurrets(c);
+            if (standing.Count == 0)
+            {
+                return StepOutcome.Fail("圈里两座炮塔都被拆成了废墟，断电停火看不出来：" + WeaponLine(c));
+            }
             bool allOff = true;
-            foreach (string k in new[] { "t1", "t2" })
+            foreach (string k in TurretKeys.Where(x => !standing.Contains(x)))
+            {
+                lines.Add($"{P.Bld(c, k)?.BuildingId ?? k}：这一波里被拆成废墟（不开火，不计）");
+            }
+            foreach (string k in standing)
             {
                 BuildingRecord t = P.Bld(c, k);
-                if (t == null)
-                {
-                    return StepOutcome.Fail("炮塔不见了");
-                }
                 string reason = BuildingStatusService.Evaluate(s, t).Reason ?? string.Empty;
                 bool weaponOff = TurretWeapon(c, k, out bool on) && !on;
                 allOff &= t.PowerState != BuildingPowerState.Powered && reason.Contains("没有电") && weaponOff;
@@ -1864,10 +2079,19 @@ namespace GameLogic.EditorTools.JourneyBots
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             LogEngage(c, "来电");
+            if (CoreLostFail(out StepOutcome lostOutcome))
+            {
+                return lostOutcome;
+            }
             CampaignState s = St;
             var lines = new List<string>();
+            List<string> standing = StandingTurrets(c);
+            if (standing.Count == 0)
+            {
+                return StepOutcome.Fail("圈里两座炮塔都被拆成了废墟，来电恢复开火看不出来：" + WeaponLine(c));
+            }
             bool all = true;
-            foreach (string k in new[] { "t1", "t2" })
+            foreach (string k in standing)
             {
                 BuildingRecord t = P.Bld(c, k);
                 string reason = t != null ? BuildingStatusService.Evaluate(s, t).Reason ?? string.Empty : "不见了";

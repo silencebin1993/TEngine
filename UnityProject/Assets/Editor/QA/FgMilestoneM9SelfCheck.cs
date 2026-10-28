@@ -344,9 +344,12 @@ namespace GameLogic.EditorTools
             // 修复轮 2：FGJ-M6R 四次运行 1 PASS 3 FAIL，FG-GAP-149 重开、交 FG10-E2E-01；M9 出口只要求它已登记、没有被写成关闭、门禁晚于 M9。
             status.TryGetValue("FG-GAP-149", out string s149);
             gates.TryGetValue("FG-GAP-149", out string g149);
-            bool m6rOpen = s149 != null && !s149.StartsWith("Closed", StringComparison.Ordinal) && g149 != null && FirstMilestoneOf(g149) > 9
+            // FG10-E2E-01：承接方修好并两次完整跑 PASS 后关闭（Closed 里写明 FG10-E2E-01）也算合格。
+            // FG10-E2E-01 兜底（总控 2026-10-28 认可）：改承接 EMG1-E2E-01，门禁 EMG-1（FirstMilestoneOf 解析为 -1，同样晚于 M9）。
+            bool emgGate = g149 != null && FirstMilestoneOf(g149) < 0 && g149.Contains("EMG-1") && s149 != null && s149.Contains("改承接 EMG1-E2E-01");
+            bool m6rOpen = s149 != null && (!s149.StartsWith("Closed", StringComparison.Ordinal) || s149.Contains("FG10-E2E-01")) && g149 != null && (FirstMilestoneOf(g149) > 9 || emgGate)
                            && text.Contains("FG10-E2E-01（FG-M10 出口回归前修 FGJ-M6R 编排");
-            Expect(m6rOpen, $"FGJ-M6R 未稳定通过：FG-GAP-149 已登记、状态不是 Closed（{s149?.Split('（')[0]}）、门禁 {g149} 晚于 M9、承接 FG10-E2E-01");
+            Expect(m6rOpen, $"FGJ-M6R 未稳定通过：FG-GAP-149 已登记、状态不是 Closed（{s149?.Split('（')[0]}）、门禁 {g149} 晚于 M9、承接 FG10-E2E-01（兜底后改承接 EMG1-E2E-01）");
         }
 
         // ── D. 试玩包 ──────────────────────────────────────────────────────────────
