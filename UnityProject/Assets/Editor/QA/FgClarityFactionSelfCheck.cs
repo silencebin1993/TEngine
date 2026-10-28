@@ -975,8 +975,26 @@ namespace GameLogic.EditorTools
             }
             RunFor(site, 2f);
             Expect(hover > 0 && dropped - hover >= 0.8 - 1e-3 && selfDestroyed && relayed && shotDown && site.Kernel.Counters.Repollutions == rp0,
-                $"B9c 投放：飞到净化塔附近悬停预警 {dropped - hover:0.00} 秒（≥ 0.8）→ 投放并自毁（{selfDestroyed}），再污染事件转给订阅者（{relayed}，再污染本身归 FG10-RAID-01）；" +
+                $"B9c 投放：飞到净化塔附近悬停预警 {dropped - hover:0.00} 秒（≥ 0.8）→ 投放并自毁（{selfDestroyed}），再污染事件转给订阅者（{relayed}；再污染本身由 ClarityCombatFeedback.OnRepolluted 直调 FG10-RAID-01 落地，这里的测试地点不是家园所以不落地）；" +
                 $"预警期间被击落 → 投放不发生（{shotDown}，投放计数不变）");
+            CombatSites.Close(Bench, s, dropRecord: true);
+
+            // FG10-RAID-01（复核 #13）：家园内核只让攻城中的单位投放（siegeOnly）——不在攻城队伍里的澄净无人机有投放目标也不飞去投放。
+            s = NewWorldState(1);
+            site = OpenBench(s);
+            _t = 0;
+            BenchEnemy(site, s, "enemy_deact_drone", "b_d3", new Vector2(0f, 0f));
+            int d3 = UnitOf(site, "b_d3");
+            site.SetPolluteTargets(new List<float3> { new float3(14f, 0f, 3f) }, siegeOnly: true);
+            long rp1 = site.Kernel.Counters.Repollutions;
+            bool everHover = false;
+            for (int i = 0; i < 60 * 12; i++)
+            {
+                RunFor(site, Dt);
+                everHover |= Cu(site, d3).Pollute != 0;
+            }
+            Expect(site.PolluteSiegeOnly && !everHover && site.Kernel.Counters.Repollutions == rp1 && View(site, d3).Alive,
+                $"B9d 只让攻城单位投放（siegeOnly）：不在攻城队伍里的灭活无人机 12 秒内不进入投放（{!everHover}）、投放计数不变、没有自毁（{View(site, d3).Alive}）");
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 

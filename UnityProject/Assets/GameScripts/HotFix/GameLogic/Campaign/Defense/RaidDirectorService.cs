@@ -549,7 +549,7 @@ namespace GameLogic.Campaign.Defense
                 RaidPlanRecord pending = PendingNormalPlan(d);
                 if (pending != null && (pending.State < StateWarned || level <= pending.Level))
                 {
-                    MergeTrigger(s, pending, def.Id, level);
+                    MergeTrigger(s, pending, def.Id, level, tick);
                     d.TriggersMerged++;
                     return;
                 }

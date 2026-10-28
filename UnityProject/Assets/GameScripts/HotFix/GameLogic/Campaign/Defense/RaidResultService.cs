@@ -399,7 +399,9 @@ namespace GameLogic.Campaign.Defense
             Hook(GuidanceHooks.RaidFirstResult);
             if (notify)
             {
-                NotificationCenter.Post("raid_result", GameText.Format("raid.result.notify", WaveLabel(r), OutcomeText(r), r.Killed, LossTotal(r)));
+                NotificationCenter.Post("raid_result", r.Repollutions > 0
+                    ? GameText.Format("raid.result.notify_repolluted", WaveLabel(r), OutcomeText(r), r.Killed, LossTotal(r), r.Repollutions)
+                    : GameText.Format("raid.result.notify", WaveLabel(r), OutcomeText(r), r.Killed, LossTotal(r)));
             }
             TEngine.Log.Info($"[RaidResultService] 突袭结算 #{r.Serial}（{r.GroupId}，第 {r.Wave} 波）：{r.Outcome}，击毁 {r.Killed}（精英 {r.EliteKilled}），撤走 {r.Exited}，损失 {LossTotal(r)}，第 {GameClock.Ticks} 步");
         }
@@ -872,11 +874,24 @@ namespace GameLogic.Campaign.Defense
 
         /// <summary>
         /// FG10-RAID-01（“再污染在离家报告里说明”）：灭活无人机投放落地、家园的格子真的再污染之后（<see cref="ClarityRaidService.OnRepolluted"/> 调用）：
-        /// 记到最早展开的那一份结算（次数 / 格数 / 受污染建筑数，第一次的落点），并记一条可定位的过程。没有进行中的结算（攻城外的投放）时不记，返回 false。O(1)。
+        /// 记到投放者所属队伍（<paramref name="groupKey"/> = 内核攻城队伍键）那一份进行中的结算，找不到再退回最早展开的那一份（次数 / 格数 / 受污染建筑数，第一次的落点），
+        /// 并记一条可定位的过程。没有进行中的结算（攻城外的投放）时不记，返回 false。O(队伍数)。
         /// </summary>
-        public static bool NoteRepollution(CampaignState s, int cells, int buildings, GridCell at)
+        public static bool NoteRepollution(CampaignState s, int cells, int buildings, GridCell at, int groupKey = 0)
         {
-            RaidResultRecord r = PrimaryOpen(s);
+            RaidResultRecord r = null;
+            if (groupKey > 0)
+            {
+                foreach (TransitGroupRecord g in WorldTransitSystem.Groups(s))
+                {
+                    if (g != null && SiegeService.KeyOf(g) == groupKey)
+                    {
+                        r = OpenFor(s, g.GroupId);
+                        break;
+                    }
+                }
+            }
+            r ??= PrimaryOpen(s);
             if (r == null || cells <= 0)
             {
                 return false;

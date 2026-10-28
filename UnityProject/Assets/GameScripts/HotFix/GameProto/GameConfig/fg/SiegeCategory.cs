@@ -33,7 +33,7 @@ public sealed partial class SiegeCategory : Luban.BeanBase
     /// </summary>
     public readonly string TypeId;
     /// <summary>
-    /// 攻城目标类别:core / power / signal / defense / listening(other 不用登记)
+    /// 攻城目标类别:core / power / signal / defense / listening / purify(净化塔,FG10-RAID-01;other 不用登记)
     /// </summary>
     public readonly string Category;
    

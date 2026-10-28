@@ -32,14 +32,17 @@ namespace GameLogic.Campaign.Combat
 
         public bool InAcidMarsh(Vector2 point) => !IsDisposed && Kernel.InAcidMarsh(new double2(point.x, point.y));
 
-        /// <summary>灭活无人机的投放目标（x, y, 半径；净化塔）。派生量，不进快照。</summary>
-        public void SetPolluteTargets(IReadOnlyList<float3> targets)
+        /// <summary>灭活无人机的投放目标（x, y, 半径；净化塔）。派生量，不进快照。<paramref name="siegeOnly"/> = 只有攻城中的单位投放（FG10-RAID-01 家园内核）。</summary>
+        public void SetPolluteTargets(IReadOnlyList<float3> targets, bool siegeOnly = false)
         {
             if (!IsDisposed)
             {
-                Kernel.SetPolluteTargets(targets);
+                Kernel.SetPolluteTargets(targets, siegeOnly);
             }
         }
+
+        /// <summary>内核此刻是否只让攻城中的单位投放（自检读点）。</summary>
+        public bool PolluteSiegeOnly => !IsDisposed && Kernel.PolluteSiegeOnly;
 
         public int PolluteTargetCount => IsDisposed ? 0 : Kernel.PolluteTargetCount;
 

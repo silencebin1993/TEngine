@@ -496,13 +496,13 @@ namespace GameLogic.EditorTools
             Expect(bad.Count == 0 && notify && hooks && cx != null,
                 $"A3 文本键中英齐全（{allKeys.Count} 个）、通知类型 raid_warning（警告）/ raid_withdrawn（信息）、5 个引导钩子已登记、图鉴条目“突袭导演与预警”存在"
                 + (bad.Count > 0 ? "；缺：" + string.Join(",", bad.Take(6)) : string.Empty));
-            // 触发来源还没做的三类：表里写明承接 Story（不静默）。
+            // 三类特殊触发：表里写明接入它的 Story（溯源；净化塔一类已由 FG10-RAID-01 接入，ClarityRaidService 触发）。
             bool opens = RaidCatalog.TryGetTrigger(RaidCatalog.TriggerSilentNight, out RaidTriggerDef sn) && sn.OpensIn == "FG7-ENV-02"
                          && RaidCatalog.TryGetTrigger(RaidCatalog.TriggerMegastructure, out RaidTriggerDef mg) && mg.OpensIn == "FG13-END-01"
                          && RaidCatalog.TryGetTrigger(RaidCatalog.TriggerPurification, out RaidTriggerDef pu) && pu.OpensIn == "FG10-RAID-01"
                          && RaidCatalog.TryGetTrigger(RaidCatalog.TriggerExposure, out RaidTriggerDef ex) && ex.OpensIn == null && !ex.Exempt
                          && RaidCatalog.TryGetTrigger(RaidCatalog.TriggerStory, out RaidTriggerDef st) && st.Exempt;
-            Expect(opens, "A4 静默夜 / 巨构阶段 / 净化塔三类触发的来源系统在后续 Story：表里写明承接（FG7-ENV-02 / FG13-END-01 / FG10-RAID-01）；剧情不受最短间隔、暴露受限");
+            Expect(opens, "A4 静默夜 / 巨构阶段 / 净化塔三类触发的来源 Story 写在表里（FG7-ENV-02 / FG13-END-01 / FG10-RAID-01，净化塔已接入）；剧情不受最短间隔、暴露受限");
         }
 
         // ── B FGT-DEF-003：暴露触发的完整旅程 ─────────────────────────────────────────

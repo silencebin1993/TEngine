@@ -1448,7 +1448,7 @@ namespace GameLogic.Campaign.Env
             Revision++;
             if (res.CellsRaised > 0)
             {
-                res.RepurifyPath = RepurifyPath(state, center);
+                res.RepurifyPath = RepurifyPath(state, center, radius);
                 NotificationCenter.Post("pollution_raised", GameText.Format("purify.notify.repolluted", GameText.Get(sourceKey), res.CellsRaised, res.BuildingsContaminated,
                     res.RepurifyPath), new Vector3(center.X, 0f, center.Y));
                 GuidanceHooks.Raise(GuidanceHooks.EnvFirstRepollution);
@@ -1461,10 +1461,15 @@ namespace GameLogic.Campaign.Env
         /// <summary>
         /// FG10-RAID-01（“重新净化的路径清楚”）：再污染之后这一片怎么净化回来。与格子悬停同一判定：覆盖这一格、正在净化的塔优先——它从最里面还有污染的一环起自动重新净化，
         /// 写全塔还要多久（剩余步数 × purify.hours_per_level，只算有电有冷却液的时间）；只有暂停的塔覆盖 → 写它为什么停着（被毁 / 缺电 / 缺冷却液……，修好 / 接上后自动继续）；
-        /// 没有塔覆盖 → 在附近放一座。O(净化塔数)；只读。
+        /// 没有塔覆盖 → 在附近放一座。“已经净化回来了”按整片判（落点半径 <paramref name="radius"/> 内全部 0 级）：净化从塔心往外走，塔心先清零时外圈还脏（FG10-RAID-01 修复轮 1，P1）。
+        /// O(净化塔数 + 半径²)；只读。
         /// </summary>
-        public static string RepurifyPath(CampaignState state, GridCell cell)
+        public static string RepurifyPath(CampaignState state, GridCell cell, int radius = 0)
         {
+            if (state != null && AreaMaxPollution(state, cell, radius) == 0)
+            {
+                return GameText.Get("purify.repath.done"); // 整片已经是 0 级（FG10-RAID-01 复核 #7）
+            }
             ProductionService.Producer best = null;
             ProductionService.Producer paused = null;
             foreach (ProductionService.Producer p in PurifiersOf(state))
@@ -1478,6 +1483,10 @@ namespace GameLogic.Campaign.Env
                 {
                     continue;
                 }
+                if (InfoOf(state, p.Building).StepsLeft == 0)
+                {
+                    continue; // 它范围里已全部净化完：剩下的污染在它够不到的地方，这座塔帮不上
+                }
                 if (p.Rec != null && p.Rec.PurifySupplied && p.Building.ConstructionState == BuildingConstructionState.Operational)
                 {
                     best ??= p;
@@ -1489,9 +1498,7 @@ namespace GameLogic.Campaign.Env
             }
             if (best != null)
             {
-                TowerInfo info = InfoOf(state, best.Building);
-                double secs = Math.Max(0.0, info.StepsLeft * HoursPerLevel * GameClock.HourSeconds - (best.Rec?.PurifyTicks ?? 0L) / (double)Math.Max(1, GameClock.StepHz));
-                return GameText.Format("purify.repath.working", BuildingOps.NameOf(best.Building), CalendarService.ShortDuration(secs));
+                return GameText.Format("purify.repath.working", BuildingOps.NameOf(best.Building), CalendarService.ShortDuration(SecondsToFinish(state, best.Building, best.Rec)));
             }
             if (paused != null)
             {
@@ -1501,6 +1508,26 @@ namespace GameLogic.Campaign.Env
                 return GameText.Format("purify.repath.paused", BuildingOps.NameOf(paused.Building), why);
             }
             return GameText.Get("purify.repath.uncovered");
+        }
+
+        /// <summary><paramref name="center"/> 半径 <paramref name="radius"/> 格内（与 <see cref="Repollute"/> 同一个圆）最高污染等级。O(半径²)。</summary>
+        private static int AreaMaxPollution(CampaignState state, GridCell center, int radius)
+        {
+            HomeGridMap map = HomeGridService.MapFor(state);
+            int limit = GridContent.TuningInt("world.coord_limit");
+            int max = 0;
+            foreach (int[] ring in Rings(Math.Max(0, radius)))
+            {
+                foreach (int off in ring)
+                {
+                    var c = new GridCell(center.X + Dx(off), center.Y + Dy(off));
+                    if (limit <= 0 || WorldCoord.WithinLimit(c, limit))
+                    {
+                        max = Math.Max(max, map.GetPollution(c));
+                    }
+                }
+            }
+            return max;
         }
 
         /// <summary>

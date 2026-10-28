@@ -297,7 +297,7 @@ namespace GameLogic.EditorTools
         private static GridCell Core(CampaignState s) => HomeGridService.CorePivot(s);
 
         /// <summary>离核心约 <paramref name="dist"/> 格、能放下至少 <paramref name="need"/> 座发电机 2 的一片（先揭开那一片；按种子地形找，B25）。第 <paramref name="skip"/> 个合格的方向。</summary>
-        private static Vector2? FindSpot(CampaignState s, float dist, int need = 6, int skip = 0, float angleOffset = 0f)
+        internal static Vector2? FindSpot(CampaignState s, float dist, int need = 6, int skip = 0, float angleOffset = 0f)
         {
             GridCell core = Core(s);
             int found = 0;
@@ -360,7 +360,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary><paramref name="center"/> 周围 [from, to] 格按格网规则找空地放一座（建成）。</summary>
-        private static BuildingRecord PlaceNear(CampaignState s, string type, Vector2 center, float from, float to)
+        internal static BuildingRecord PlaceNear(CampaignState s, string type, Vector2 center, float from, float to)
         {
             GridCell? c = FreeNear(s, type, center, from, to);
             return c.HasValue ? Register(s, type, c.Value) : null;
@@ -385,7 +385,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>真实玩家入口放一座虚影（施工单 + 机器取料施工），返回虚影。</summary>
-        private static BuildingRecord Ghost(CampaignState s, string type, Vector2 center, float from, float to)
+        internal static BuildingRecord Ghost(CampaignState s, string type, Vector2 center, float from, float to)
         {
             GridCell? c = FreeNear(s, type, center, from, to);
             if (!c.HasValue)

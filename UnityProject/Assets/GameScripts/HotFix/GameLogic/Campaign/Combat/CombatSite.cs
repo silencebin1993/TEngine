@@ -1578,7 +1578,7 @@ namespace GameLogic.Campaign.Combat
                     ClarityCombatFeedback.OnCue(this, e, at);
                     return;
                 case CombatEventKind.Repolluted:
-                    // FG10-FAC-01：灭活无人机投放完成（不丢的玩法事件）。目标点周围再污染由 FG10-RAID-01 订阅 ClarityCombatFeedback.RepollutedAt 落地。
+                    // FG10-FAC-01：灭活无人机投放完成（不丢的玩法事件）。目标点周围再污染由 ClarityCombatFeedback.OnRepolluted 直调 FG10-RAID-01（ClarityRaidService.OnRepolluted）落地。
                     ClarityCombatFeedback.OnRepolluted(this, e, at);
                     return;
                 case CombatEventKind.TagReaction:

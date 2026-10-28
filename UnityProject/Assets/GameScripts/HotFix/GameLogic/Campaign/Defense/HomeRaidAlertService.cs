@@ -75,9 +75,9 @@ namespace GameLogic.Campaign.Defense
         {
             CoreFound = CoreDestroyed = CoreFloor = false;
             CoreHp = CoreMax = 0f;
-            Array.Clear(Total, 0, 4);
-            Array.Clear(Intact, 0, 4);
-            Array.Clear(Destroyed, 0, 4);
+            Array.Clear(Total, 0, Total.Length);
+            Array.Clear(Intact, 0, Intact.Length);
+            Array.Clear(Destroyed, 0, Destroyed.Length);
             WorstName = string.Empty;
             WorstPct = -1;
             WorstPosition = Vector2.zero;

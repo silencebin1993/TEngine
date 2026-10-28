@@ -30,7 +30,7 @@ namespace GameLogic.Campaign.Combat
         /// <summary>某地点某个单位的澄净表现要刷新（参数：地点、内核单位 ID、提示代码）。</summary>
         public static event Action<CombatSite, int, byte> Changed;
 
-        /// <summary>灭活无人机投放完成（地点、目标点、目标点半径）。FG10-RAID-01 订阅：目标点（净化塔）周围再次污染、写离家报告。</summary>
+        /// <summary>灭活无人机投放完成（地点、目标点、目标点半径）之后的通知。再污染本身已由 <see cref="OnRepolluted"/> 直调 FG10-RAID-01 落地，订阅者只做表现。</summary>
         public static event Action<CombatSite, Vector2, float> RepollutedAt;
 
         public static int SprayWarnCues { get; private set; }
@@ -123,7 +123,7 @@ namespace GameLogic.Campaign.Combat
         public static void OnRepolluted(CombatSite site, in CombatEvent e, Vector2 at)
         {
             RepollutedEvents++;
-            Defense.ClarityRaidService.OnRepolluted(site, at, e.Value);
+            Defense.ClarityRaidService.OnRepolluted(site, at, e.Value, e.Other); // Other = 投放者所属攻城队伍的键（非攻城单位 0）
             RepollutedAt?.Invoke(site, at, e.Value);
         }
     }

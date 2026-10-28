@@ -70,6 +70,10 @@ namespace GameLogic.Campaign.Defense
                 p.PostgameIndex = d.PostgameCount++;
             }
             SelectTarget(s, p);
+            if (def.Id == RaidCatalog.TriggerPurification)
+            {
+                SelectPurifierTarget(s, p); // FG10-RAID-01 复核 #4：“针对净化塔”打净化塔最多的那一处
+            }
             SelectOrigin(s, d, p);
             ChooseCounter(s, p);
             p.Budget = ComputeBudget(s, d, p);
@@ -84,12 +88,30 @@ namespace GameLogic.Campaign.Defense
         }
 
         /// <summary>普通触发并进还没出发的普通计划：记下触发；还没预警时等级取高者并重新编成（第一次突袭保持 1 级）。</summary>
-        private static void MergeTrigger(CampaignState s, RaidPlanRecord p, string kind, int level)
+        private static void MergeTrigger(CampaignState s, RaidPlanRecord p, string kind, int level, long tick)
         {
             if (Array.IndexOf(p.Triggers, kind) < 0)
             {
                 var list = new List<string>(p.Triggers) { kind };
                 p.Triggers = list.ToArray();
+            }
+            // shortcut: 后台通道正替它算路线（RouteAwaiting）时不改目标——通道结果只能由 AdoptRoute 取走，中途改目标会占死通道；通道空出后的下一次“针对净化塔”触发再改。
+            if (kind == RaidCatalog.TriggerPurification && p.State < StateWarned && p.RouteState != RouteAwaiting)
+            {
+                // FG10-RAID-01 修复轮 1（P2）：“针对净化塔”并进来时同样改打净化塔最多的那一处；目标变了按出发地失效同一套重排（重选出发地、重要路线、预报作废）。
+                string kind0 = p.TargetKind, id0 = p.TargetId;
+                SelectPurifierTarget(s, p);
+                if (p.TargetKind != kind0 || p.TargetId != id0)
+                {
+                    SelectOrigin(s, StateOf(s), p);
+                    p.State = StatePlanning;
+                    p.RouteState = RouteNeed;
+                    p.RouteRequestTick = tick;
+                    p.WarnTick = -1;
+                    p.DepartTick = -1;
+                    p.ArrivalTick = -1;
+                    PlanChanged(s, p);
+                }
             }
             if (p.State < StateWarned && !p.FirstRaid && level > p.Level)
             {
@@ -258,6 +280,57 @@ namespace GameLogic.Campaign.Defense
                 }
                 r -= x.W;
             }
+        }
+
+        /// <summary>
+        /// FG10-RAID-01（复核 #4）：“针对净化塔”的计划目标 = 附近净化塔最多的家园 / 前哨站（每座立着的净化塔归给离它最近的候选：归还核心、还立着 ≥ N 座建筑的前哨站；
+        /// 同数取前者，家园优先）。一座都没有时保留 <see cref="SelectTarget"/> 的结果。确定、与观察无关；O(净化塔 × 前哨站)，只在建计划时调一次。
+        /// </summary>
+        private static void SelectPurifierTarget(CampaignState s, RaidPlanRecord p)
+        {
+            GridCell core = HomeGridService.CorePivot(s);
+            int minB = RaidCatalog.TargetOutpostMinBuildings;
+            var cands = new List<(string Kind, string Id, int X, int Y)>(4) { (TargetHome, TargetHome, core.X, core.Y) };
+            foreach (OwnOutpostRecord o in OwnOutpostService.All(s))
+            {
+                if (o != null && o.Intact >= minB)
+                {
+                    cands.Add((TargetOutpost, o.OutpostId, (int)Math.Round(o.X), (int)Math.Round(o.Y)));
+                }
+            }
+            var counts = new int[cands.Count];
+            foreach (BuildingRecord b in ClarityRaidService.StandingPurifierBuildings(s))
+            {
+                int near = 0;
+                long nearD = long.MaxValue;
+                for (int i = 0; i < cands.Count; i++)
+                {
+                    long dx = b.GridX - cands[i].X, dy = b.GridY - cands[i].Y;
+                    long dd = dx * dx + dy * dy;
+                    if (dd < nearD)
+                    {
+                        nearD = dd;
+                        near = i;
+                    }
+                }
+                counts[near]++;
+            }
+            int best = 0;
+            for (int i = 1; i < cands.Count; i++)
+            {
+                if (counts[i] > counts[best])
+                {
+                    best = i;
+                }
+            }
+            if (counts[best] == 0)
+            {
+                return;
+            }
+            p.TargetKind = cands[best].Kind;
+            p.TargetId = cands[best].Id;
+            p.TargetX = cands[best].X;
+            p.TargetY = cands[best].Y;
         }
 
         /// <summary>出发地（FGR-DEF-023 / FGR-GEN-034）：所选阵营离目标最近的活跃（没被摧毁的）据点；没有合适的 → 迷雾外。</summary>

@@ -186,7 +186,7 @@ namespace GameLogic.Campaign.Defense
             StepIntercepts(state, site, ticksBefore, worldHz);
             if (StateOf(state).TheaterActive)
             {
-                // FG10-RAID-01：净化塔建成 / 拆除（生产索引变了）当步就更新投放目标（没变 O(1)）。
+                // FG10-RAID-01：净化塔建成 / 拆除当步就更新投放目标；每步按当前建筑重算并与上次比较，O(净化塔数 + 攻城队伍数)，没变不写内核。
                 ClarityRaidService.ApplyPolluteTargets(state, site, AnyClaritySieging(state), false);
             }
             DrainCollateral(state, site);
@@ -260,6 +260,8 @@ namespace GameLogic.Campaign.Defense
             // FG6-DEF-09（FG16 第 3 节“敌人耐久和伤害”）：按当前难度的突袭敌人倍率生成（建造者 ×0.8 / 标准 ×1 / 严酷 ×1.2；难度说明里公开写出）。
             int n = SpawnUnits(site, key, gather, target, g.Faction, DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state), InsulateOf(state, g));
             g.Engaged = true;
+            // FG10-RAID-01 复核 #1：ExtendTheater 写职能表时这支队伍还没 Engaged；展开当步就按“澄净在场”重写（不等对账，读档与不读档一致）。
+            ApplyRoles(state, site, false);
             g.UnfoldedCount = n;
             g.ExitedCount = 0;
             g.SiegeRetreat = false;

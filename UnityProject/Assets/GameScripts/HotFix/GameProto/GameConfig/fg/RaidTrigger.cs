@@ -54,7 +54,7 @@ public sealed partial class RaidTrigger : Luban.BeanBase
     /// </summary>
     public readonly string LevelRule;
     /// <summary>
-    /// 触发来源系统还没做:承接 Story ID(此前只有接口与自检);已接入 = none
+    /// 接入这个触发来源的 Story ID(只作溯源,运行时不据此关闭触发;FG10-RAID-01 已接入 purification);一开始就有 = none
     /// </summary>
     public readonly string OpensIn;
     /// <summary>

@@ -53,8 +53,8 @@ namespace GameLogic.Campaign.Defense
         {
             Triggered = Landed = TargetWrites = 0;
             _targetSite = null;
-            _targetRevision = int.MinValue;
             _targetClarity = false;
+            Written.Clear();
         }
 
         // ─────────────────────────────── 触发 ───────────────────────────────
@@ -78,6 +78,18 @@ namespace GameLogic.Campaign.Defense
                 }
             }
             return n;
+        }
+
+        /// <summary>家园里立着的净化塔（同 <see cref="StandingPurifiers"/> 的口径；排“针对净化塔”的计划目标时用，非每步）。</summary>
+        public static IEnumerable<BuildingRecord> StandingPurifierBuildings(CampaignState s)
+        {
+            foreach (ProductionService.Producer p in PurificationService.PurifiersOf(s))
+            {
+                if (p?.Building != null && !HomeValleyController.IsPlannedGhost(p.Building) && p.Building.RegionId == HomeValleyLayout.RegionId)
+                {
+                    yield return p.Building;
+                }
+            }
         }
 
         /// <summary>每游戏秒一次（世界步，与观察无关）：排“针对净化塔”的触发。</summary>
@@ -118,13 +130,14 @@ namespace GameLogic.Campaign.Defense
         // ─────────────────────────────── 投放目标 ───────────────────────────────
 
         private static readonly List<float3> Targets = new List<float3>(8);
+        private static readonly List<float3> Written = new List<float3>(8);
         private static CombatSite _targetSite;
-        private static int _targetRevision = int.MinValue;
         private static bool _targetClarity;
 
         /// <summary>
-        /// 家园内核的灭活无人机投放目标：有澄净队伍攻城时 = 每座净化塔的中心（x, y, 再污染半径），否则清空。生产索引 / 澄净在场 / 内核实例没变时跳过（O(1)）；
-        /// <paramref name="force"/> = 读档 / 剧场重设时无条件重写（内核快照不存它）。
+        /// 家园内核的灭活无人机投放目标：有澄净队伍攻城时 = 当前攻城剧场矩形里每座净化塔的中心（x, y, 再污染半径），否则清空；内核只让攻城中的单位投放（siegeOnly：
+        /// 据点驻军、洗礼塔波次、被拦截就地交战的无人机不读它）。每次按当前建筑算出目标列表，与上次写进内核的比较，没变跳过（O(净化塔数)；
+        /// 施工完成是原地改建筑状态、生产索引的 Revision 不涨，所以不靠 Revision 缓存）；<paramref name="force"/> = 读档 / 剧场重设时无条件重写（内核快照不存它）。
         /// </summary>
         public static void ApplyPolluteTargets(CampaignState s, CombatSite site, bool clarity, bool force)
         {
@@ -132,38 +145,57 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
-            _ = ProductionService.ProducerCount; // 先让生产索引按当前建筑建好（建筑变了 → 索引重建、Revision 变）
-            int rev = ProductionService.Revision;
-            if (!force && ReferenceEquals(site, _targetSite) && rev == _targetRevision && clarity == _targetClarity)
-            {
-                return;
-            }
-            _targetSite = site;
-            _targetRevision = rev;
-            _targetClarity = clarity;
             Targets.Clear();
-            if (clarity)
+            SiegeState st = SiegeService.StateOf(s);
+            if (clarity && st != null && st.TheaterActive)
             {
                 float r = RepolluteRadius;
                 foreach (ProductionService.Producer p in PurificationService.PurifiersOf(s))
                 {
-                    if (p?.Building != null && !HomeValleyController.IsPlannedGhost(p.Building) && p.Building.RegionId == HomeValleyLayout.RegionId)
+                    BuildingRecord b = p?.Building;
+                    if (b != null && !HomeValleyController.IsPlannedGhost(b) && b.RegionId == HomeValleyLayout.RegionId
+                        && b.GridX >= st.MinX && b.GridX <= st.MaxX && b.GridY >= st.MinY && b.GridY <= st.MaxY)
                     {
-                        Targets.Add(new float3(p.Building.GridX, p.Building.GridY, r));
+                        Targets.Add(new float3(b.GridX, b.GridY, r));
                     }
                 }
             }
-            site.SetPolluteTargets(Targets);
+            if (!force && ReferenceEquals(site, _targetSite) && clarity == _targetClarity && SameAsWritten())
+            {
+                return;
+            }
+            _targetSite = site;
+            _targetClarity = clarity;
+            Written.Clear();
+            Written.AddRange(Targets);
+            site.SetPolluteTargets(Targets, siegeOnly: true);
             TargetWrites++;
+        }
+
+        private static bool SameAsWritten()
+        {
+            if (Written.Count != Targets.Count)
+            {
+                return false;
+            }
+            for (int i = 0; i < Targets.Count; i++)
+            {
+                if (!Written[i].Equals(Targets[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         // ─────────────────────────────── 再污染落地 ───────────────────────────────
 
         /// <summary>
         /// 内核“投放完成”事件（<see cref="ClarityCombatFeedback.OnRepolluted"/> 调用）：只在家园 / 星球内核上落地——落点半径（事件带的半径，没有用 raid.clarity.repollute_radius）内
-        /// 每格污染升 raid.clarity.repollute_levels 级。返回再污染结果（不是家园 / 没有战役 = 空结果）。
+        /// 每格污染升 raid.clarity.repollute_levels 级。<paramref name="groupKey"/> = 投放者所属攻城队伍的内核键（事件 Other；记到那支队伍的结算）。
+        /// 返回再污染结果（不是家园 / 没有战役 = 空结果）。
         /// </summary>
-        public static RepolluteResult OnRepolluted(CombatSite site, Vector2 at, float radius)
+        public static RepolluteResult OnRepolluted(CombatSite site, Vector2 at, float radius, int groupKey = 0)
         {
             CampaignState s = CampaignSession.Current;
             if (s?.Factions == null || site == null || site.SiteId != HomeValleyLayout.RegionId)
@@ -176,7 +208,7 @@ namespace GameLogic.Campaign.Defense
             s.Factions.ClarityRaidDrops++;
             s.Factions.ClarityRaidCells += res.CellsRaised;
             Landed++;
-            RaidResultService.NoteRepollution(s, res.CellsRaised, res.BuildingsContaminated, center);
+            RaidResultService.NoteRepollution(s, res.CellsRaised, res.BuildingsContaminated, center, groupKey);
             if (res.CellsRaised == 0)
             {
                 Log.Info($"[ClarityRaid] 灭活无人机在 ({center.X},{center.Y}) 投放：这一片已经是 3 级污染，没有再升级。");

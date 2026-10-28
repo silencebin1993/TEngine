@@ -717,6 +717,11 @@ namespace BinGames.Sim.Combat
 
         public int PolluteTargetCount => _d.PolluteTargets.Length;
 
+        public bool PolluteSiegeOnly => _d.PolluteSiegeOnly != 0;
+
+        /// <summary>第 <paramref name="k"/> 个投放目标（x, y, 半径；自检读点）。</summary>
+        public float3 PolluteTargetAt(int k) => _d.PolluteTargets[k];
+
         /// <summary>FG10-FAC-01（防腐涂层等）：改单位的酸蚀抗性（0～1）。</summary>
         public bool SetAcidResist(int id, float resist)
         {

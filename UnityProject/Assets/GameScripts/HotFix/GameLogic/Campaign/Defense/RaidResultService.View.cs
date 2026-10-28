@@ -157,7 +157,7 @@ namespace GameLogic.Campaign.Defense
                 ProductionStats.UiNumber((float)(live ? Math.Max(0, ds.TotalRepaired - r.BaseRepaired) : r.Repaired)),
                 live ? Math.Max(0, ds.TotalKitsUsed - r.BaseKits) : r.Kits), "damage");
             AppendReactions(s, r, into);
-            AppendLosses(r, into, int.MaxValue);
+            AppendLosses(s, r, into, int.MaxValue);
             AppendContrib(s, r, into, ContribTop, "contrib");
             AppendLoot(r, into);
             Title(into, "raid.result.sec.wreck", "wreck");
@@ -229,7 +229,7 @@ namespace GameLogic.Campaign.Defense
         /// FG10-RAID-01：这一波的再污染汇总一行（没有就不写）：次数 / 格数 / 受污染建筑数 + 第一次落点那一片现在怎么净化回来（按当前状态写：哪座塔在重新净化、
         /// 还要多久；停着的塔为什么停；没有塔覆盖就放一座）。点击定位到落点。
         /// </summary>
-        private static void AppendRepollution(RaidResultRecord r, List<AwayLine> into, string section)
+        private static void AppendRepollution(CampaignState s, RaidResultRecord r, List<AwayLine> into, string section)
         {
             if (r == null || r.Repollutions <= 0)
             {
@@ -239,7 +239,7 @@ namespace GameLogic.Campaign.Defense
             into.Add(new AwayLine
             {
                 Text = GameText.Format("raid.result.repolluted", r.Repollutions, r.RepollutedCells, r.RepollutedBuildings,
-                    Env.PurificationService.RepurifyPath(CampaignSession.Current, at)),
+                    Env.PurificationService.RepurifyPath(s, at, ClarityRaidService.RepolluteRadius)),
                 Section = section, Cls = "ar-row-warn",
                 Action = AwayLineAction.Locate, HasPos = true, RegionId = HomeValleyLayout.RegionId, Pos = new Vector3(at.X, 0f, at.Y),
             });
@@ -317,13 +317,16 @@ namespace GameLogic.Campaign.Defense
             Plain(into, GameText.Format("raid.result.reaction_total", all), "reaction");
         }
 
-        private static void AppendLosses(RaidResultRecord r, List<AwayLine> into, int maxRows)
+        private static void AppendLosses(CampaignState s, RaidResultRecord r, List<AwayLine> into, int maxRows)
         {
             Title(into, "raid.result.sec.losses", "losses");
-            AppendRepollution(r, into, "losses");
+            AppendRepollution(s, r, into, "losses");
             if (LossTotal(r) == 0)
             {
-                Dim(into, "raid.result.loss.none", "losses");
+                if (r.Repollutions <= 0)
+                {
+                    Dim(into, "raid.result.loss.none", "losses"); // 只有再污染时不写“没有损失”（FG10-RAID-01 复核 #6）
+                }
                 return;
             }
             into.Add(new AwayLine
@@ -470,14 +473,14 @@ namespace GameLogic.Campaign.Defense
                 {
                     Text = GameText.Format("raid.result.title_row", WaveLabel(r), FactionText(r.Faction), LevelText(r.Level), OutcomeText(r)),
                     Section = "raid", Action = AwayLineAction.RaidResult, Arg = r.Serial.ToString(CultureInfo.InvariantCulture),
-                    Cls = r.Outcome == OutcomeCoreLost || LossTotal(r) > 0 ? "ar-row-warn" : null,
+                    Cls = r.Outcome == OutcomeCoreLost || LossTotal(r) > 0 || r.Repollutions > 0 ? "ar-row-warn" : null,
                 });
                 var rows = new List<AwayLine>();
                 AppendTimeline(s, r, rows, "raid");
                 rows.RemoveAt(0); // 标题行在上面已经写了“哪一次突袭”
                 into.AddRange(rows);
                 into.Add(new AwayLine { Text = GameText.Format("raid.result.kills", r.Killed, r.EliteKilled, r.Exited, r.Unfolded), Section = "raid" });
-                AppendRepollution(r, into, "raid"); // FG10-RAID-01：再污染在离家报告里说明（含重新净化的路径）
+                AppendRepollution(s, r, into, "raid"); // FG10-RAID-01：再污染在离家报告里说明（含重新净化的路径）
                 if (LossTotal(r) > 0)
                 {
                     into.Add(new AwayLine

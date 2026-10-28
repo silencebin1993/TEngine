@@ -69,6 +69,9 @@ namespace BinGames.Sim.Combat
 
         public CombatSiegeConfig SiegeConfig => _d.SiegeState.Cfg[0];
 
+        /// <summary>当前职能表第 <paramref name="i"/> 项的偏好代价（下标同 <see cref="SetSiegeRoles"/> 的 bias；自检读点）。</summary>
+        public int SiegeRoleBias(int i) => _d.SiegeState.Bias[i];
+
         /// <summary>职能表：<paramref name="masks"/>[r] = 职能 r 的目标类别位（r = 0 突击 / 1 破坏 / 2 攻城；第 3 项撤退忽略），
         /// <paramref name="bias"/>[r × CategoryCount + 类别位序号] = 偏好代价（10 = 1 米；<see cref="CombatSiegeConst.Inf"/> = 不当目标）。表变了下一步全部流场重建。</summary>
         public void SetSiegeRoles(IReadOnlyList<int> masks, IReadOnlyList<int> bias)
