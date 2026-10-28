@@ -254,6 +254,7 @@ namespace GameLogic.Campaign.WorldSim
             LastStepMs = 0;
             _inStep = false;
             AfterStepActions.Clear();
+            Regions.BaptismTowerBoss.ResetSessionState(); // FG10-BOSS-01：排到步末的开战回调随队列清掉，排队标记跟着清
         }
 
         public static HomeValleyController LoadHome(bool resume)

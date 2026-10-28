@@ -139,6 +139,8 @@ namespace GameLogic.Campaign
         public int VentState;
         /// <summary>场地：己方机器全部离开场地的那一步（-1 = 有机器在场）。</summary>
         public long OutsideSinceTick = -1;
+        /// <summary>场地复位过、在等机器回来（FGR-FAC-006：耐久已回到本阶段开始时；灌注 / 主动反应暂停，首领音乐不放）。</summary>
+        public bool ArenaIdle;
         /// <summary>阶段二召来的单位（战斗内核单位编号，复位时撤走）。</summary>
         public bool WaveSpawned;
         public int[] WaveUnits = Array.Empty<int>();

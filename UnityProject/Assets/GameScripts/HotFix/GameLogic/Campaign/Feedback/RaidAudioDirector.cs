@@ -23,9 +23,12 @@ namespace GameLogic.Campaign.Feedback
         public const int PhaseCalm = 0;
         public const int PhaseWarning = 1;
         public const int PhaseRaid = 2;
+        /// <summary>FG10-BOSS-01：首领战进行中（FGR-FAC-006“首领战有专属音乐”）。优先级：突袭 &gt; 首领战 &gt; 预警。</summary>
+        public const int PhaseBoss = 3;
 
         public const string MusicWarning = "mus_raid_warning";
         public const string MusicRaid = "mus_raid_battle";
+        public const string MusicBoss = "mus_boss_clarity"; // 占位（DEBT-FG10BOSS01-01，FG-M15 替换同名文件）
         public const string StingWarning = "sfx_alarm_warning";
         public const string StingRaid = "sfx_boss_phase";
         public const string StingEnd = "sfx_objective_complete";
@@ -53,11 +56,16 @@ namespace GameLogic.Campaign.Feedback
             CurrentMusic = string.Empty;
             HistoryList.Clear();
             _timer = 0f;
+            _warningHeard = false;
         }
 
         /// <summary>这一刻家园的突袭阶段（只读）。</summary>
-        public static int Evaluate(CampaignState s)
+        public static int Evaluate(CampaignState s) => Evaluate(s, out _);
+
+        /// <summary><paramref name="warning"/> = 有正在来的突袭（首领战的音乐层盖住预警时，预警提示音仍要响）。</summary>
+        private static int Evaluate(CampaignState s, out bool warning)
         {
+            warning = false;
             if (s == null)
             {
                 return PhaseCalm;
@@ -70,10 +78,15 @@ namespace GameLogic.Campaign.Feedback
             {
                 if (!w.PlannedOnly && !w.Arrived && w.Lead != null && w.Lead.TargetKind != RaidDirectorService.TargetOutpost)
                 {
-                    return PhaseWarning;
+                    warning = true;
+                    break;
                 }
             }
-            return PhaseCalm;
+            if (Regions.BaptismTowerBoss.IsFighting(s))
+            {
+                return PhaseBoss;
+            }
+            return warning ? PhaseWarning : PhaseCalm;
         }
 
         /// <summary>每帧（GameRoot.OnUpdate；真实时间）。<paramref name="force"/> = 立即判定（自检）。</summary>
@@ -85,14 +98,29 @@ namespace GameLogic.Campaign.Feedback
                 return;
             }
             _timer = 0.5f;
-            int next = inWorld ? Evaluate(s) : PhaseCalm;
-            if (next != Phase)
-            {
-                Apply(Phase, next); // 音乐 / 音效的音量设置由音频模块的通道音量统一作用（FeedbackCues.ApplyAudioSettings），这里不重放
-            }
+            bool warning = false;
+            int next = inWorld ? Evaluate(s, out warning) : PhaseCalm;
+            ApplyEvaluated(next, warning);
         }
 
-        private static void Apply(int from, int to)
+        /// <summary>Tick 判定后的状态切换（自检直接喂阶段序列验证首领战与突袭交错时的音乐 / 提示音）。</summary>
+        public static void ApplyEvaluated(int next, bool warning)
+        {
+            int prev = Phase;
+            if (next != prev)
+            {
+                Apply(prev, next, _warningHeard); // 音乐 / 音效的音量设置由音频模块的通道音量统一作用（FeedbackCues.ApplyAudioSettings），这里不重放
+            }
+            if (next == PhaseBoss && warning && !_warningHeard && prev != PhaseWarning)
+            {
+                Sting(StingWarning); // 首领战中新来的突袭预警：音乐层仍是首领战（ADR-FAC-005 第 6 节第 6 条），提示音照响（FG6-DEF-06）
+            }
+            _warningHeard = warning && (next == PhaseBoss || next == PhaseWarning);
+        }
+
+        private static bool _warningHeard;
+
+        private static void Apply(int from, int to, bool warningHeard)
         {
             Phase = to;
             PhaseChanges++;
@@ -104,7 +132,7 @@ namespace GameLogic.Campaign.Feedback
             switch (to)
             {
                 case PhaseWarning:
-                    if (from == PhaseCalm)
+                    if (from == PhaseCalm || (from == PhaseBoss && !warningHeard))
                     {
                         Sting(StingWarning);
                     }
@@ -113,6 +141,13 @@ namespace GameLogic.Campaign.Feedback
                 case PhaseRaid:
                     Sting(StingRaid);
                     PlayMusic(MusicRaid);
+                    break;
+                case PhaseBoss:
+                    if (from == PhaseRaid)
+                    {
+                        Sting(StingEnd); // 首领战中家园突袭结束：结束提示音照响，音乐回到首领战
+                    }
+                    PlayMusic(MusicBoss); // 开战与阶段转换的提示音由 BaptismTowerBoss 的 BossPhase 反馈负责，这里不另响
                     break;
                 default:
                     if (from == PhaseRaid)

@@ -32,7 +32,7 @@ namespace GameLogic.Campaign.Regions
 
     /// <summary>
     /// FG10-BOSS-01（FG09 第 6 章“首领：洗礼塔”，FGR-FAC-006；FGT-FAC-003）：洗礼塔首领战的状态机——<see cref="TryTransition"/> 是阶段的唯一写入口，
-    /// 复位（全员离开 / 全灭）走 <see cref="ResetToPreFight"/>。场地是星球表面上的湖心平台（规划层锚点 baptism_platform，按种子放在澄净领地里），
+    /// 复位（全员离开 / 全灭）走 <see cref="ResetArena"/>。场地是星球表面上的湖心平台（规划层锚点 baptism_platform，按种子放在澄净领地里），
     /// 首领在星球战斗内核里就地展开（与领地据点同一个内核，FG17“湖心平台（地表）”），不切表面。
     ///
     /// - 部件：反应塔 1 座（敌人表 boss 行：耐久在这里分阶段结算，external_health；固定环形喷淋架 = 枢轴喷灌同一套内核结算）+ 泵站 4 座
@@ -43,7 +43,8 @@ namespace GameLogic.Campaign.Regions
     /// - 反应（耐久 ≤ phase2）：开局召来一波澄净单位；每 react_seconds 挑一片“站着最多己方机器”的流体，预警 react_warn_seconds 后盖上一块火（油 / 酸）或电（水）——
     ///   站在里面的单位（包括它自己的小兵）当场起反应：借力打力是有意设计（卡片负向）。
     /// - 泄压（耐久 ≤ phase3）：循环——封闭（伤害 × sealed_damage_mult，冻不住）→ 预警 → 泄压（伤害 × vent_damage_mult，能冻住：先冻再烧打出热震）。
-    /// - 复位：己方机器全部离开场地（含全灭）满 arena_leave_seconds → 部件回满、波次撤走、阶段 = 沉寂，记“上次止步”；通知写明可以从首领战前的自动存档重试。
+    /// - 场地边界（FGR-FAC-006）：己方机器全部离开场地（含全灭）满 arena_leave_seconds → 阶段不变、反应塔耐久回到本阶段开始时（灌注阶段泵站修回）、波次撤走，
+    ///   等机器回来接着打本阶段；记“上次止步”，通知写明可以从首领战前的自动存档（BossEngageEnter）从头重试。
     /// - 击败：固定奖励（敌人表 components 第一个 = 核心固件“反应增幅”，第二个 = 此前没拿到才给的流体类固件）、一个三选一数据包、澄净领地平定（MarkLeaderDefeated → 主线“反应核”）。
     /// 每步 O(1)；开战 / 场地检查每游戏秒一次 O(机器数)；挑反应目标每 react_seconds 一次 O(机器 × 流体)。与是否被观察无关（FGR-BASE-021）。
     /// </summary>
@@ -79,6 +80,9 @@ namespace GameLogic.Campaign.Regions
         public static bool SaveOnEngage = true;
         /// <summary>开战已排到本步末尾（整步提交之后才存档开战，防重复排队）。</summary>
         private static bool _engagePending;
+
+        /// <summary>会话复位（WorldSimulation.ResetSessionState：新建 / 读档时整步回调队列已清空，排队标记跟着清，否则首领再也开不了战）。</summary>
+        public static void ResetSessionState() => _engagePending = false;
 
         public static void ResetForTests()
         {
@@ -395,6 +399,7 @@ namespace GameLogic.Campaign.Regions
             r.PumpCursor = 0;
             r.Reactions = 0;
             r.OutsideSinceTick = -1;
+            r.ArenaIdle = false;
             r.WaveSpawned = false;
             r.WaveUnits = Array.Empty<int>();
             r.Active = Array.Empty<ClarityBossFill>();
@@ -419,10 +424,11 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>
-        /// 全员离开场地 / 全灭、首领还没被击败 → 回到开战前：部件回满、召来的单位撤走、阶段 = 沉寂，记下“上次止步于第几阶段”。
-        /// 不碰机队 / 仓储 / 已结算的战利品；完整重试由开战前的自动存档提供（通知写明）。场上已经灌下的流体照常到期干涸。
+        /// FGR-FAC-006 场地边界：全员离开场地（含全灭）满 <see cref="ArenaLeaveSeconds"/> 秒、首领还没被击败 → 首领留在当前阶段、耐久回到本阶段开始时，
+        /// 召来的单位撤走，暂停灌注 / 主动反应等机器回来（<see cref="ResumeArena"/>），记下“上次止步于第几阶段”。
+        /// 不碰机队 / 仓储 / 已结算的战利品；从头重打由开战前的 BossEngageEnter 自动存档提供（通知写明有没有）。场上已经灌下的流体照常到期干涸。
         /// </summary>
-        public static bool ResetToPreFight(CampaignState s)
+        public static bool ResetArena(CampaignState s)
         {
             ClarityBossRecord r = Record(s);
             BaptismPhase p = (BaptismPhase)(r?.Phase ?? 0);
@@ -432,27 +438,34 @@ namespace GameLogic.Campaign.Regions
             }
             CombatSite site = CombatSites.Get(SiteId);
             r.LastReachedPhase = (int)p;
-            if (site != null)
+            // 召来的单位撤走（不留在场外追着机器跑）；回来时按本阶段口径重新召（ResumeArena）。
+            site?.DespawnSiegeGroup(WaveKey);
+            r.WaveSpawned = false;
+            r.WaveUnits = Array.Empty<int>();
+            // 阶段不变，反应塔耐久回到本阶段开始时（灌注 = 满、反应 = 阶段二门槛、泄压 = 阶段三门槛；只回升不下压）。
+            RegionEnemyRecord tower = Tower(s);
+            if (tower != null && tower.IsAlive)
             {
-                site.DespawnSiegeGroup(WaveKey);
-                site.RemoveEnemy(TowerInstanceId);
+                float start = tower.MaxHealth * (p == BaptismPhase.Fill ? 1f : p == BaptismPhase.React ? Phase2HpFraction : Phase3HpFraction);
+                tower.Health = Mathf.Max(tower.Health, start);
+            }
+            // 泵站是灌注阶段的部件：只在灌注阶段复位时修回（同铸造主核心护盾阶段修回供能节点）；之后的阶段里打掉的泵站保持打掉。
+            if (p == BaptismPhase.Fill)
+            {
                 for (int i = 0; i < PumpCount; i++)
                 {
-                    site.RemoveEnemy(PumpInstanceId(i));
+                    RestorePart(s, PumpInstanceId(i));
+                    if (site != null && Pump(s, i) is RegionEnemyRecord pump)
+                    {
+                        site.RemoveEnemy(pump.EnemyInstanceId); // 泵站耐久在内核里：重建一份满血的
+                        Spawn(s, site, pump);
+                    }
                 }
             }
-            RestorePart(s, TowerInstanceId);
-            for (int i = 0; i < PumpCount; i++)
-            {
-                RestorePart(s, PumpInstanceId(i));
-            }
-            r.Phase = (int)BaptismPhase.Dormant;
             r.FillPump = -1;
             r.ReactFill = -1;
             r.OutsideSinceTick = -1;
-            r.WaveSpawned = false;
-            r.WaveUnits = Array.Empty<int>();
-            r.Active = Array.Empty<ClarityBossFill>();
+            r.ArenaIdle = true;
             Resets++;
             string text = GameText.Format(r.RetrySaved ? "boss.clarity.notify.retry" : "boss.clarity.notify.retry_nosave", PhaseName(p));
             if (TryArena(s, out Vector2 c))
@@ -569,6 +582,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return (false, "dormant");
             }
+            if (r.ArenaIdle)
+            {
+                // 场地复位后待命：场外狙击 / 残留的燃烧流体不再磨它（FGR-FAC-006“防止拉扯”），机器回到平台才接着打。
+                return (false, "idle");
+            }
             float after = target.Health - Mathf.Max(0f, damage) * DamageMult(s);
             switch (p)
             {
@@ -664,10 +682,14 @@ namespace GameLogic.Campaign.Regions
             if (second)
             {
                 EnsureSpawned(s, site);
-                if (TickArena(s, r, center, tick))
+                if (TickArena(s, r, site, center, tick))
                 {
-                    return; // 复位了
+                    return; // 这一秒复位了 / 复位后还没人回来
                 }
+            }
+            if (r.ArenaIdle)
+            {
+                return;
             }
             TickFill(s, r, site, center, tick);
             if ((BaptismPhase)r.Phase == BaptismPhase.React || (BaptismPhase)r.Phase == BaptismPhase.Vent)
@@ -680,13 +702,21 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>场地检查：有己方机器在场 → 计时清零；全部离开（含全灭）满 arena_leave_seconds → 复位。返回是否复位了。</summary>
-        private static bool TickArena(CampaignState s, ClarityBossRecord r, Vector2 center, long tick)
+        /// <summary>场地检查：有己方机器在场 → 计时清零；全部离开（含全灭）满 arena_leave_seconds → 复位。返回本秒是否不再推进（刚复位 / 复位后没人在场）。</summary>
+        private static bool TickArena(CampaignState s, ClarityBossRecord r, CombatSite site, Vector2 center, long tick)
         {
             if (MachinesInArena(s, center) > 0)
             {
                 r.OutsideSinceTick = -1;
+                if (r.ArenaIdle)
+                {
+                    ResumeArena(s, r, site, center, tick);
+                }
                 return false;
+            }
+            if (r.ArenaIdle)
+            {
+                return true; // 复位过、没人在场：首领原地待命，不重复计时 / 刷通知
             }
             if (r.OutsideSinceTick < 0)
             {
@@ -697,10 +727,32 @@ namespace GameLogic.Campaign.Regions
             }
             if (tick - r.OutsideSinceTick >= GameClock.TicksFor(ArenaLeaveSeconds))
             {
-                return ResetToPreFight(s);
+                return ResetArena(s);
             }
             return false;
         }
+
+        /// <summary>场地复位后有机器回到场地：本阶段从头接着打（灌注 / 主动反应重新计时，反应 / 泄压阶段重新召来那一波单位），提示当前阶段。</summary>
+        private static void ResumeArena(CampaignState s, ClarityBossRecord r, CombatSite site, Vector2 center, long tick)
+        {
+            r.ArenaIdle = false;
+            BaptismPhase p = (BaptismPhase)r.Phase;
+            r.NextFillTick = tick + GameClock.TicksFor(FillWarnSeconds);
+            if (p == BaptismPhase.React || p == BaptismPhase.Vent)
+            {
+                r.NextReactTick = tick + GameClock.TicksFor(ReactSeconds * 0.5f);
+                if (!r.WaveSpawned)
+                {
+                    SpawnWave(s, site, r, center);
+                }
+            }
+            string text = GameText.Format("boss.clarity.notify.phase", PhaseName(p));
+            FeedbackCues.RaiseLocated(FeedbackCueId.BossPhase, center, text);
+            NotificationCenter.Post(NotifyType, text, new Vector3(center.x, 0f, center.y));
+        }
+
+        /// <summary>首领战正在打（开战中、且不是场地复位后等机器回来）：首领音乐据此播放。</summary>
+        public static bool IsFighting(CampaignState s) => IsEngaged(s) && Record(s)?.ArenaIdle != true;
 
         public static float ArenaLeaveSecondsLeft(CampaignState s)
         {
