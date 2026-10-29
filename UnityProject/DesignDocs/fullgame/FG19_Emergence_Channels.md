@@ -141,7 +141,7 @@
 - 四列 `dirs` / `perceive` / `carrierImpl` / `stage` 不逐行手填，按下列推导规则生成（`tools/fgdata_emg.py` 生成时套用，表校验比对）；2.4～2.7 节命名总表里显式写出的值优先于推导：
   - `dirs`：2.4 节“方向”列写明的照写；其余端口一律“两者”（可读可写）。事件端口按第 4 节表：“可发出 = 是”的为两者，其余只读。
   - `perceive`：族不是语法、元程序时为 true；语法、元程序族恒为 false。
-  - `carrierImpl`：族属于语法、物质、能量、场、实体（`ent.*` 生成类与 `prop.*` 写端）时为 true；事件、协同、相态、底盘、地形、劫持、节拍族为 false（由规则或内核统一结算，不按载体各写一份）。
+  - `carrierImpl`：族属于语法、物质、能量、场、实体（`ent.*` 生成类与 `prop.*` 写端）时为 true；事件、协同、相态、底盘、地形、劫持、节拍族为 false（由规则或内核统一结算，不按载体各写一份）；元程序族上面两类都没点名，按编译期指令（作用于下游程序段、不直接结算载荷）取 false（EMG1-DATA-01 补，待用户复核）。
   - `stage`：默认取 2.3 节族阶段（地形族取 2）；例外：`ter.obstacle`、`ter.cover`、`fld.deflect`、`chs.moving` 为 1（内核已有障碍圆、残骸、敌方偏折场与单位移动状态，FG19A 申请 A1；`chs.moving` 读哪个内核字段在阶段 1 开工时核实，否则燃迹、拖尾整条切轨会被推到阶段 3）；`grm.anchor` 为 3（随熔合接线交付，FG19A N43）；物质、能量、相态写端在阶段 1 走过渡动词（FG19A 第 3.2 节），`stage` 仍记 2。
   - `numericOnly`：只有 2.4 节标“是”的三个 `grm.mod.*` 为 true，其余全部 false。`prop.mass`、`prop.integrity`、`prop.conductive`、`prop.flammable` 作写端时 `numericOnly = false`（它们被场、撞击、传导、点燃规则读取，属跨通道量；并入 FG19A 申请 A6）。
 
@@ -158,7 +158,7 @@
 | `role` | enum `EmgRole` | 读：`trigger`（端口发生时执行本 owner 的写端）、`condition`（端口为真时才生效）、`sense`（读量值决定幅度）、`scope`（扩大读取范围，如中继）。写：`emit`（排放 / 产生）、`modify`（写入载荷参数）、`spawn`（生成实体或子载荷）、`inject`（注入能量或累积量）、`apply`（施加状态 / 相态） |
 | `amount` | float | 主幅度，单位按端口 |
 | `param2` | float | 副参数（如触发器的份数、定时秒数、近炸半径） |
-| `carriers` | flags | 适用载体：射弹 / 格斗 / 无人机 / 力场 / 布区；空 = 全部 |
+| `carriers` | flags | 适用载体：射弹 / 格斗 / 无人机 / 力场 / 布区的分号组合；全部填 `all`（fg 表不许留空，按代码事实改，EMG1-DATA-01） |
 | `heat` | float | 本条声明附加的每发热量（可为 0），计入 FGR-EMG-016 |
 | `textKey` | string | `emg.decl.<owner>.<seq>`；读法说明由“端口 × 载体”短语生成（沿用 `tools/fgdata_firmware.py` 的 `reading_text` 生成做法），不手写 |
 | `stageGate` | int | 本条从哪一阶段起生效；未生效前该 owner 继续走旧 `readFields`（FGR-EMG-019） |
@@ -182,6 +182,7 @@
 - 编译器（`BlueprintCircuitCompiler`、新程序编译器）、`CarrierReadings`、战斗内核（`Sim/Combat/`）、所有规则表（`fg.TbChannelRule`、`fg.TbPhaseRule`、`fg.TbFieldCarrierRule`、`fg.TbChassisTrait`）都不得出现 `fw_`、`comp_`、`func_`、`struct_` 开头的 ID 判断。底盘特性按“状态端口 / 载体类别”生效，不按底盘 ID 写进别处的分支（FGR-EMG-141）。
 - 自检 `FgEmergenceRuleAuditSelfCheck`：扫上述表的非 owner 列与 `Sim/Combat/`、编译器源码里的字符串字面量，命中即失败。
 - 过渡豁免只有两条现存装配反应（FGR-EMG-021），不得新增。
+- 审计范围按代码事实加宽（EMG1-DATA-01）：除 `fw_` / `comp_` / `func_` / `struct_` / `chassis_` 字符串字面量外，还扫组件 / 固件 / 底盘 ID 常量引用（`ComponentCatalog.*Id`、`FirmwareCatalog.*Id`、`ChassisCatalog.*Id`）与 ID 配对检测函数，按“文件 | 符号 | 出现次数”比对；扫描范围另含编译器调用的 `BlueprintCircuitBoard.cs`（热量 / 带宽函数）与 `GL/Campaign/Emergence/`。扫描发现 7 条早于 FG19 的存量判断（编译器 3 处：静默标记器、铸造重炮开火方式、散热鳍；`BlueprintCircuitBoard` 热量函数里重炮 + 过载配对积热 4 处与中继带宽 1 处；`CarrierReadings` 固定底盘分支 1 处），它们不是装配反应、不进豁免，登记 FG-GAP-169 作只减不增的存量清单，按承接卡逐条清零（编译器与热量侧最迟阶段 2 出口，中继带宽与固定底盘分支最迟阶段 3 出口）。
 
 **FGR-EMG-014 新固件准入（现有固件改造同标准）**
 - 至少 1 条读端，且端口的 `perceive = true`（事件、物质、能量、属性、相态、场、协同、底盘状态、地形、劫持、节拍）。
@@ -225,7 +226,7 @@
 
 **FGR-EMG-019 双轨迁移**
 - `stageGate` 未到（高于运行时总开关 `emg.stage`，ADR-EMG-001 ⑮）的声明不生效，该 owner 继续走旧 `readFields` → `CarrierReadings` 路径（`CarrierReadings.cs:231-346`）。同一 owner 同一阶段只能走一条轨，不得两轨同时结算（自检比对）。
-- 整条切轨：一个 owner 的全部声明取同一个 `stageGate`，取值 = 它用到的端口里最晚可用的阶段（FG19A 第 0.3 节口径 2、申请 A2）；表校验发现同一 owner 的 `stageGate` 不一致即失败（FGT-EMG-001）。
+- 整条切轨：一个 owner 的全部声明取同一个 `stageGate`，取值 = 它用到的端口里最晚可用的阶段（FG19A 第 0.3 节口径 2、申请 A2；物质、能量、相态写端按阶段 1 过渡动词计 1，见 FGR-EMG-010 `stage` 推导末句与 FG19A 第 0.3 节口径 3，表校验按此判“stageGate 不得早于端口可用阶段”）；表校验发现同一 owner 的 `stageGate` 不一致即失败（FGT-EMG-001）。
 - 阶段 4 结束时旧 `readFields` 列只保留作存档对账，不再被战斗读取；`GeneCatalog` 旧基因编译（`BlueprintCircuitCompiler.cs:279-310`）只保留给 `TotalNormalizedDamage` 预览，ADR-EMG-001 决定是否一并退役。
 
 **FGR-EMG-020 附录 FG19A / FG19B 必须遵守的规则**
@@ -300,7 +301,7 @@
 | `mat.acid` | 405 | 酸液 | `mat.dust` | 414 | 导电粉尘 |
 | `mat.polymer` | 406 | 聚合胶 | `mat.ice` | 415 | 冰 |
 | `mat.cured` | 407 | 固化胶块 | `mat.glass` | 416 | 玻化层 |
-| `mat.molten` | 408 | 熔融金属 | `mat.sludge` | 417 | 化工污泥 |
+| `mat.molten` | 408 | 熔融金属 | `mat.sludge` | 417 | 污泥（玩家可见名；“化工”是 TERM-MIGRATION §6.7 禁用的阵营内部代号，2026-10-28 EMG1-DATA-01 改，FG19 / FG19A / FG19B 全文同步） |
 | `mat.slag` | 409 | 冷渣 | | | |
 | `en.heat` | 501 | 热 | `en.mag` | 503 | 磁化 |
 | `en.elec` | 502 | 电 | `en.kinetic` | 504 | 动能 |
@@ -646,7 +647,7 @@
 | 导电粉尘 `mat.dust` | 气 | 中（粉尘爆燃） | 中 | 无 | 无 | 无 | 低 | 无 | 低 | 否 | 否 | 曲射、牵引（现“扬尘”） |
 | 冰 `mat.ice` | 地 | 无 | 无 | 中 | 无 | 无 | 无 | 高 | 无 | 是（可站立桥面，受动能碎） | 低 | 水 / 冷却液遇液氮 |
 | 玻化层 `mat.glass` | 地 | 无 | 无 | 无 | 无 | 无 | 无 | 低 | 无 | 是（薄，可碎） | 高 | 粉尘遇火 |
-| 化工污泥 `mat.sludge` | 地 | 低 | 低 | 无 | 低（持续伤害） | 中 | 无 | 无 | 无 | 否 | 否 | 子母弹污染坑（现“污染”） |
+| 污泥 `mat.sludge` | 地 | 低 | 低 | 无 | 低（持续伤害） | 中 | 无 | 无 | 无 | 否 | 否 | 子母弹污染坑（现“污染”） |
 - 固件排放物质的题材口径（GDD §5.3“固件不凭空造出硬件”）：排放 = 机器自身储罐、散热管路、电池电解液、战斗部装药的外排；烟、蒸汽、碎屑、熔融金属、冰、玻化层、固化胶块只能由规则产生，不由固件凭空排放。
 
 **FGR-EMG-081 承载形式：物质斑块（推荐；细节交 ADR-EMG-001）**

@@ -167,6 +167,18 @@ public partial class Tables
     /// </summary>
     public fg.TbCarrierReading TbCarrierReading {get; }
     /// <summary>
+    /// 通道声明
+    /// </summary>
+    public fg.TbChannelDecl TbChannelDecl {get; }
+    /// <summary>
+    /// 通道端口
+    /// </summary>
+    public fg.TbChannelPort TbChannelPort {get; }
+    /// <summary>
+    /// 底盘特性
+    /// </summary>
+    public fg.TbChassisTrait TbChassisTrait {get; }
+    /// <summary>
     /// 机制图鉴条目
     /// </summary>
     public fg.TbCodexEntry TbCodexEntry {get; }
@@ -274,6 +286,10 @@ public partial class Tables
     /// 通知类型
     /// </summary>
     public fg.TbNotifyType TbNotifyType {get; }
+    /// <summary>
+    /// 端口载体实现
+    /// </summary>
+    public fg.TbPortCarrier TbPortCarrier {get; }
     /// <summary>
     /// 电力节点
     /// </summary>
@@ -402,6 +418,10 @@ public partial class Tables
     /// 风暴残骸
     /// </summary>
     public fg.TbStormDebris TbStormDebris {get; }
+    /// <summary>
+    /// 子形态
+    /// </summary>
+    public fg.TbSubPayload TbSubPayload {get; }
     /// <summary>
     /// 表面
     /// </summary>
@@ -548,6 +568,9 @@ public partial class Tables
         TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
         TbBuildUpgrade = new fg.TbBuildUpgrade(loader("fg_tbbuildupgrade"));
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
+        TbChannelDecl = new fg.TbChannelDecl(loader("fg_tbchanneldecl"));
+        TbChannelPort = new fg.TbChannelPort(loader("fg_tbchannelport"));
+        TbChassisTrait = new fg.TbChassisTrait(loader("fg_tbchassistrait"));
         TbCodexEntry = new fg.TbCodexEntry(loader("fg_tbcodexentry"));
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
         TbEcoItem = new fg.TbEcoItem(loader("fg_tbecoitem"));
@@ -575,6 +598,7 @@ public partial class Tables
         TbNarrativeLine = new fg.TbNarrativeLine(loader("fg_tbnarrativeline"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
+        TbPortCarrier = new fg.TbPortCarrier(loader("fg_tbportcarrier"));
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbPowerSource = new fg.TbPowerSource(loader("fg_tbpowersource"));
         TbProducer = new fg.TbProducer(loader("fg_tbproducer"));
@@ -607,6 +631,7 @@ public partial class Tables
         TbStartLayout = new fg.TbStartLayout(loader("fg_tbstartlayout"));
         TbStatusTag = new fg.TbStatusTag(loader("fg_tbstatustag"));
         TbStormDebris = new fg.TbStormDebris(loader("fg_tbstormdebris"));
+        TbSubPayload = new fg.TbSubPayload(loader("fg_tbsubpayload"));
         TbSurface = new fg.TbSurface(loader("fg_tbsurface"));
         TbTerritory = new fg.TbTerritory(loader("fg_tbterritory"));
         TbTerritoryControl = new fg.TbTerritoryControl(loader("fg_tbterritorycontrol"));
@@ -677,6 +702,9 @@ public partial class Tables
         TbBuildTool.ResolveRef(this);
         TbBuildUpgrade.ResolveRef(this);
         TbCarrierReading.ResolveRef(this);
+        TbChannelDecl.ResolveRef(this);
+        TbChannelPort.ResolveRef(this);
+        TbChassisTrait.ResolveRef(this);
         TbCodexEntry.ResolveRef(this);
         TbCombatComponent.ResolveRef(this);
         TbEcoItem.ResolveRef(this);
@@ -704,6 +732,7 @@ public partial class Tables
         TbNarrativeLine.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
+        TbPortCarrier.ResolveRef(this);
         TbPowerNode.ResolveRef(this);
         TbPowerSource.ResolveRef(this);
         TbProducer.ResolveRef(this);
@@ -736,6 +765,7 @@ public partial class Tables
         TbStartLayout.ResolveRef(this);
         TbStatusTag.ResolveRef(this);
         TbStormDebris.ResolveRef(this);
+        TbSubPayload.ResolveRef(this);
         TbSurface.ResolveRef(this);
         TbTerritory.ResolveRef(this);
         TbTerritoryControl.ResolveRef(this);

@@ -766,6 +766,11 @@ namespace GameLogic.EditorTools
             // FG10-E2E-01：M10 出口——FGJ-M10 登记覆盖里程碑原文与 FG-GAP-163 区域片段、旅程源码只走输入通道、夹具只在登记处、反应名一处映射；
             // IC-REQ-022 六类反向与承接项（FG-GAP-161、DEBT-FG8EXP02-03、DEBT-FG10BOSS01-03）映射到起真实系统的断言；缺口清零；FG-M10 试玩包；“必须完成”六项映射。
             Seg("FgMilestoneM10SelfCheck", FgMilestoneM10SelfCheck.Run);
+            // EMG1-DATA-01：涌现通道端口注册表 / 声明表 / 端口 × 载体 / 子形态 / 底盘特性——源 = 表、真实表编译成内核整数数组、FGR-EMG-010 推导逐行一致（FGT-EMG-003 端口表部分）、
+            // 负向矩阵（码跨段 / 复用、(owner, seq) 重复、未注册端口、非 owner 列内容 ID、整条切轨、表重载不残留、emg.stage 钳位，FGT-EMG-001）、源码内容 ID 审计与回归（FGT-EMG-004）。
+            Seg("FgEmergenceRuleAuditSelfCheck", FgEmergenceRuleAuditSelfCheck.Run);
+            // EMG1-DATA-01：新固件准入框架（FGR-EMG-014，FGT-EMG-002 阶段 1 框架部分）——已声明固件逐条准入、三条假固件被拒、混合固件按两父判、emg.stage = 0 双轨、编译耗时。
+            Seg("FgChannelAdmissionSelfCheck", FgChannelAdmissionSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>
