@@ -458,7 +458,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (p.SprayDamage > 0f)
                 {
-                    DamageUnit(ref d, k, p.SprayDamage, i);
+                    DamageFrom(ref d, k, p.SprayDamage, i, EmgCode.SrcZone);
                 }
                 if (p.SprayStatus != 0u && d.IsAlive(k))
                 {
@@ -611,7 +611,7 @@ namespace BinGames.Sim.Combat
                 hitBuilding |= IsBuilding(ref d, k);
                 if (dmg > 0f)
                 {
-                    DamageUnit(ref d, k, dmg, i);
+                    DamageFrom(ref d, k, dmg, i, EmgCode.SrcMelee);
                 }
                 if (p.SprayStatus != 0u && d.IsAlive(k))
                 {
@@ -754,7 +754,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                DamageUnit(ref d, k, p.BurstDamage, i);
+                DamageFrom(ref d, k, p.BurstDamage, i, EmgCode.SrcZone);
                 if (p.TrailStatus != 0u && d.IsAlive(k))
                 {
                     ApplyStatus(ref d, k, p.TrailStatus, TrailStatusSecondsOf(in p), 0f, 0f, 0f, i, p.BurstDamage);
@@ -856,7 +856,7 @@ namespace BinGames.Sim.Combat
                 }
                 // 伤害归属：打在敌方身上的记给引燃它的人（被玩家引燃时算玩家的击杀）；打在己方身上不归属任何单位。
                 int attacker = d.Faction[k] == (byte)CombatFaction.Hostile && src >= 0 && d.Faction[src] == (byte)CombatFaction.Player ? src : -1;
-                DamageUnit(ref d, k, dmg, attacker);
+                DamageFrom(ref d, k, dmg, attacker, EmgCode.SrcZone);
                 if (d.FireBit != 0u && d.IsAlive(k))
                 {
                     ApplyStatus(ref d, k, d.FireBit, 3f, fdps, fslow, fvuln, attacker, dmg);
@@ -1004,7 +1004,7 @@ namespace BinGames.Sim.Combat
                     float dmg = math.max(0f, p.SplitDps) * tick * AcidFactor(ref d, k, now);
                     if (dmg > 0f)
                     {
-                        DamageUnit(ref d, k, dmg, i);
+                        DamageFrom(ref d, k, dmg, i, EmgCode.SrcPatch);
                     }
                     if (p.SprayStatus != 0u && d.IsAlive(k))
                     {
@@ -1106,7 +1106,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                DamageUnit(ref d, k, dmg, -1);
+                DamageFrom(ref d, k, dmg, -1, EmgCode.SrcPatch); // 酸沼 = 常驻 mat.acid 虚拟世界源（FG19 物质表下注）
                 CombatCounters c = d.Counters[0];
                 c.AcidTicks++;
                 d.Counters[0] = c;

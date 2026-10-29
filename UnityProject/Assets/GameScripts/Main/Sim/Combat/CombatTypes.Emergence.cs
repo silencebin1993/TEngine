@@ -30,6 +30,23 @@ namespace BinGames.Sim.Combat
         public const int EventPortBase = 300;
         public const int EventKinds = 29;
 
+        // ── EMG1-BUS-01（FGR-EMG-063～065）：每步处理条数 / 扇出 / 每宿主上限 / 冷却完成比例的初值（运行时取 CombatConfig 里热更层按 fg.TbHomeTuning emg.* 写的值，≤ 0 用这里）──
+        public const int DefaultBusPerStep = 512;
+        public const int DefaultMaxFanout = 8;
+        /// <summary>每宿主同一事件码上限（弹体 TrigUsed 每条事件读端 2 比特，所以最多 3）。</summary>
+        public const int DefaultMaxPerHost = 3;
+        public const float DefaultCoolRatio = 0.5f;
+        /// <summary>积压保护（ADR ④）：未处理条数到 BusCapacity − MergeHeadroom 起，新事件先合并进同一步同类同源的事件（Value 累加、Code2 记合并数），找不到再合并进队尾 <see cref="MergeScan"/> 条里同类的一条。
+        /// 余量 32 &gt; 事件种类 29：只有“队尾 64 条里还没有这一类”时才追加，追加的又都在队尾，所以这段时间里追加的条数 ≤ 29，未处理条数 ≤ BusCapacity − 32 + 29，不会到容量。</summary>
+        public const int MergeHeadroom = 32;
+        /// <summary>两轮合并查找都从队尾往前最多看几条（逼近容量时每条事件 O(1)，不随队列长度变）。</summary>
+        public const int MergeScan = 64;
+        /// <summary>指令行角色（与热更层 EmgRole 同值）：1 = 触发读端；1～4 = 读端（触发 / 条件 / 感知 / 作用域），5 起是写端。</summary>
+        public const byte RoleTrigger = 1;
+        public const byte RoleLastRead = 4;
+        /// <summary>每宿主计数（弹体 TrigUsed / 出手上下文）能记几条事件读端（32 位 / 每条 2 比特）；一个节点的事件读端行超过这个数的程序登记 / 读档时拒绝。</summary>
+        public const int HostCounterSlots = 16;
+
         // ── 快照 Emg 段的段标记（格式 16 起；永不复用，新段取未用过的下一个号，不分阶段——阶段 1 后续卡要加的快照内容（CHAIN-01 规则计数槽位、TRIG-01 区域宿主字段）同样另开新段，不改 WriteReadings）──
         public const int SegScalars = 1;
         public const int SegPrograms = 2;
@@ -78,6 +95,111 @@ namespace BinGames.Sim.Combat
         Release = 27,
         Beat = 28,
         Ping = 29,
+    }
+
+    /// <summary>
+    /// EMG1-BUS-01：事件 Code 的取值（FGR-EMG-060 “带的数据”列；内核只认这些整数）。
+    /// 载荷宿主的事件（发射 / 命中 / 穿透 / 反弹 / 终结 / 近炸 / 定时 / 击杀 / 被标记 / 吸收）：EntKind / Ent = 宿主载荷（弹体 Id 或即时出手的单位 Id），Other = 被作用的单位；
+    /// 单位级事件（阵亡 / 被击 / 过热 / 冷却完成 / 接入 / 断开 / 拾取 / 夺控 / 归还）：Ent = 单位自己，Other = 对方（击杀者 / 攻击者）。
+    /// Code2 平时为 0；积压保护合并时记“又合并进来几条”（ADR ④）。
+    /// </summary>
+    public static class EmgCode
+    {
+        // evt.hit：命中种类
+        public const ushort HitDirect = 0, HitAfterPierce = 1, HitAfterBounce = 2, HitZoneTick = 3, HitPatch = 4, HitEcho = 5, HitChain = 6, HitHeal = 7;
+        // evt.expire：原因（含“命中”，FG19A 申请 A8）
+        public const ushort ExpireLife = 1, ExpireGround = 2, ExpireAbsorbed = 3, ExpireHit = 4, ExpireBounds = 5;
+        // evt.bounce：面
+        public const ushort FaceUnit = 1, FaceObstacle = 2, FaceWreck = 3, FaceMatter = 4, FaceField = 5;
+        // evt.hurt：来源
+        public const ushort SrcOther = 0, SrcMelee = 1, SrcProjectile = 2, SrcZone = 3, SrcPatch = 4, SrcField = 5, SrcImpact = 6;
+        // evt.unlink：原因（主动 / 切换 / 阵亡 / 断链 / 静默夜 / 区域卸载）
+        public const ushort UnlinkOther = 0, UnlinkLeave = 1, UnlinkSwitch = 2, UnlinkDeath = 3, UnlinkSevered = 4, UnlinkSilentNight = 5, UnlinkUnload = 6;
+        // evt.pickup：物品类
+        public const ushort PickupDrop = 1, PickupScrap = 2, PickupDebris = 3;
+    }
+
+    /// <summary>EMG1-BUS-01（FGR-EMG-066）：热更层注入一条单位事件的结果。</summary>
+    public enum EmgInjectResult : byte
+    {
+        Enqueued = 0,
+        /// <summary>按需：这台单位的程序不读这个事件码，不入队（不是错误）。</summary>
+        NoListener = 1,
+        NoUnit = 2,
+        /// <summary>只有接入 / 断开 / 拾取 / 夺控 / 归还可由热更层注入。</summary>
+        NotInjectable = 3,
+        /// <summary>队列已到容量且没有可合并的同类事件（不该发生，模糊测试器报告）。</summary>
+        Full = 4,
+    }
+
+    /// <summary>
+    /// EMG1-BUS-01：战斗事件总线的调试计数（调试层可见：<see cref="CombatKernel.EmgBusStats"/>）。不进快照、不进状态哈希，读档后从 0 计；
+    /// 进存档的可靠计数（按规则 StableKey / 端口 / 实体种类）归 EMG1-CHAIN-01。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgBusStats
+    {
+        public long Enqueued;
+        public long Processed;
+        /// <summary>积压保护合并掉的条数（计数在被合并事件的 Code2 里，不丢）。</summary>
+        public long Merged;
+        /// <summary>到容量仍无处合并而没入队的条数（正常为 0；不为 0 = 设计缺陷，FGR-EMG-221）。</summary>
+        public long Lost;
+        /// <summary>链深已到 3、不再生成后代的次数（FGR-EMG-064 EmgDepthCut）。</summary>
+        public long DepthCut;
+        /// <summary>一条事件唤起的监听超过 8 条被截掉的条数（FGR-EMG-065）。</summary>
+        public long FanoutCut;
+        /// <summary>同一载荷节点同一事件码到 3 次后不再入队的次数（FGR-EMG-065）。</summary>
+        public long PerHostCut;
+        /// <summary>唤起的触发读端（子载荷生成归 EMG1-TRIG-01）与条件 / 感知读端（效果执行归 EMG1-FW-01 / FW-02）。</summary>
+        public long TriggerWakes;
+        public long ListenWakes;
+        /// <summary>近炸求值次数（没有程序读 evt.prox 时应为 0）。</summary>
+        public long ProxEvals;
+        /// <summary>出队顺序不是 Seq 递增的次数（应为 0）。</summary>
+        public long OrderErrors;
+        /// <summary>处理完一步仍有剩余（顺延到下一步）的步数。</summary>
+        public long StepsDeferred;
+        public int LastSeq;
+        public int HasLast;
+        public int LastDepthCutChain;
+        public int LastFanoutCutChain;
+        public int MaxPending;
+        public int LastStepProcessed;
+    }
+
+    /// <summary>
+    /// EMG1-BUS-01：当前正在结算的出手 / 载荷（宿主五元组的运行时副本）。只在一次出手（<c>EmgShotBegin</c> → <c>EmgShotEnd</c>）或一发弹体的命中结算期间有效，
+    /// 让统一扣血入口 DamageUnit / Kill 知道这次伤害归哪个载荷（evt.hit / evt.kill 的宿主、evt.hurt 的来源与链）。瞬时量：不进快照、不进哈希。
+    /// </summary>
+    public struct EmgCtx
+    {
+        /// <summary>宿主程序（−1 = 不在载荷结算里）。</summary>
+        public int Prog;
+        public int Chain;
+        /// <summary>宿主实体的稳定 ID（弹体 Id / 出手单位 Id）。</summary>
+        public int Ent;
+        /// <summary>出手单位的槽位（−1 = 不明）：只有它造成的伤害算本载荷的命中 / 击杀（反伤、别人的伤害不算）。</summary>
+        public int Owner;
+        public byte Node;
+        public byte Depth;
+        public EmgEntKind EntKind;
+        public byte HurtSrc;
+        public ushort HitCode;
+        /// <summary>本次出手已命中几个单位（evt.hit 的 HitIdx 放在 Value2）。</summary>
+        public ushort Hits;
+        /// <summary>DamageUnit → Kill 的溢出伤害（evt.kill Value）。</summary>
+        public float Overflow;
+        /// <summary>本宿主每条事件读端已入队几次（2 比特一条，与弹体 TrigUsed 同口径；弹体宿主进出时与弹体互相拷贝）。</summary>
+        public uint TrigUsed;
+
+        public static EmgCtx None => new EmgCtx { Prog = -1, Owner = -1 };
+
+        /// <summary>
+        /// 只记伤害来源、不做宿主（Prog = −1）：区域节拍等由 <paramref name="owner"/> 的载体造成的伤害据此给 evt.hurt 填来源码。
+        /// EntKind 非 None 表示“这段结算里出手者 = owner 的伤害来自这个载体”，owner 可以是 −1（出手者已不在）。
+        /// </summary>
+        public static EmgCtx Source(int owner, EmgEntKind kind, byte src) => new EmgCtx { Prog = -1, Owner = owner, EntKind = kind, HurtSrc = src };
     }
 
     /// <summary>事件里实体的种类（ADR ④：实体用稳定 ID，不用下标）。</summary>
@@ -164,6 +286,8 @@ namespace BinGames.Sim.Combat
         Fragment = 2,
         /// <summary>抛射弹道。</summary>
         Lob = 4,
+        /// <summary>EMG1-BUS-01：在近炸读端半径内（进入时发一次 evt.prox，离开后清掉；重复进入受每宿主上限约束）。</summary>
+        ProxIn = 8,
     }
 
     /// <summary>程序表一行（ADR ②，16 字节）。<see cref="FirstNode"/> 是节点表里的绝对下标；表只追加、不改写、不压实。</summary>
@@ -239,6 +363,9 @@ namespace BinGames.Sim.Combat
         /// <summary>外部血量单位最后一次受击的攻击者单位 ID 与链 ID（击杀归属，ADR ⑦ 第 2 条）。</summary>
         public int LastHitBy;
         public int LastHitChain;
+        /// <summary>EMG1-BUS-01（FGR-EMG-060 第 13 行）：1 = 过热过、还没回落到阈值 × emg.heat.cool_ratio 以下（回落时发 evt.cooled 并清 0）。
+        /// 只在地点有程序读 evt.cooled 时才置位（没有程序的地点逐字不变）。格式 16 单位段尾部追加的第 5 个字段，短段读到取 0。</summary>
+        public byte HeatLatch;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -299,6 +426,8 @@ namespace BinGames.Sim.Combat
         public int EmgSeq;
         /// <summary>总线头指针（已处理到哪；运行时量——快照只写未处理的事件，读档后为 0）。</summary>
         public int BusHead;
+        /// <summary>EMG1-BUS-01：本步开始时的 EmgSeq（Seq ≥ 它的事件是本步入队的；积压保护只合并同一步的）。运行时量，不进快照。</summary>
+        public int StepFirstSeq;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1 };
     }

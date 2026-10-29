@@ -123,6 +123,85 @@ namespace GameLogic.Campaign.Combat
             _hooked = true;
             MachineRegistry.MachineDied += OnMachineDied;
             MachineLoadoutRegistry.Changed += OnLoadoutChanged;
+            EnsureEmgListening();
+        }
+
+        // ── EMG1-BUS-01（FGR-EMG-066）：热更层来源的战斗事件注入（接入 / 断开订阅信号广播；拾取在自动拾取处；夺控 / 归还的生产在 EMG4-HIJ-01 / 02 调同一入口）──
+
+        private static bool _emgListening;
+
+        /// <summary>订阅 <see cref="Signal.SignalUplinkService.UplinkChangedEvent"/>（进程内一次；读档 / 换场景不重复订阅——重复订阅会让同一次接入注入两条）。</summary>
+        public static void EnsureEmgListening()
+        {
+            if (_emgListening)
+            {
+                return;
+            }
+            _emgListening = true;
+            GameEvent.AddEventListener<Signal.SignalUplinkChange>(Signal.SignalUplinkService.UplinkChangedEvent, OnUplinkChanged);
+        }
+
+        public static bool EmgListening => _emgListening;
+
+        /// <summary>本进程经信号广播注入的接入 / 断开条数（自检核对“一次广播只注入一次”）。</summary>
+        public static int EmgUplinkInjected { get; private set; }
+
+        /// <summary>
+        /// 信号从 <c>PreviousLogicId</c> 到了 <c>CurrentLogicId</c>：离开的机器注入 evt.unlink（Code = 原因），接入的机器注入 evt.uplink。
+        /// 同一台机器的核心固件编辑（Previous == Current）不是接入 / 断开。广播在两台机器重算武器（重编译程序）之后发出，所以按新程序判断有没有监听。O(地点数)。
+        /// </summary>
+        public static void OnUplinkChanged(Signal.SignalUplinkChange c)
+        {
+            if (c.PreviousLogicId == c.CurrentLogicId)
+            {
+                return;
+            }
+            if (c.PreviousLogicId != 0 && InjectEmgForMachine(c.PreviousLogicId, EmgEventKind.Unlink, UnlinkCode(c.Reason, c.CurrentLogicId)) == EmgInjectResult.Enqueued)
+            {
+                EmgUplinkInjected++;
+            }
+            if (c.CurrentLogicId != 0 && InjectEmgForMachine(c.CurrentLogicId, EmgEventKind.Uplink, 0) == EmgInjectResult.Enqueued)
+            {
+                EmgUplinkInjected++;
+            }
+        }
+
+        /// <summary>断开原因 → evt.unlink 的 Code（FGR-EMG-060 第 18 行：主动 / 切换 / 阵亡 / 断链 / 静默夜；区域卸载另记）。</summary>
+        public static ushort UnlinkCode(RegionControlChangeReason reason, int currentLogicId)
+        {
+            switch (reason)
+            {
+                case RegionControlChangeReason.PlayerRequest:
+                    return currentLogicId != 0 ? EmgCode.UnlinkSwitch : EmgCode.UnlinkLeave;
+                case RegionControlChangeReason.DeathRebound:
+                    return EmgCode.UnlinkDeath;
+                case RegionControlChangeReason.SignalLost:
+                case RegionControlChangeReason.CoverageLost:
+                    return EmgCode.UnlinkSevered;
+                case RegionControlChangeReason.SilentNight:
+                    return EmgCode.UnlinkSilentNight;
+                case RegionControlChangeReason.RegionUnload:
+                    return EmgCode.UnlinkUnload;
+                default:
+                    return EmgCode.UnlinkOther;
+            }
+        }
+
+        /// <summary>机器自动拾取了一件地面物（CargoService 调；桥接层之外不点名内核类型，FG14 §5 硬约束 3）。</summary>
+        public static bool InjectEmgPickup(int logicId, bool scrap) =>
+            InjectEmgForMachine(logicId, EmgEventKind.Pickup, scrap ? EmgCode.PickupScrap : EmgCode.PickupDrop) == EmgInjectResult.Enqueued;
+
+        /// <summary>把一条热更层来源的事件注入机器所在的地点内核（机器只在一个地点；O(地点数)）。不在任何已载入地点返回 NoUnit。</summary>
+        public static EmgInjectResult InjectEmgForMachine(int logicId, EmgEventKind kind, ushort code, int otherUnit = 0)
+        {
+            foreach (CombatSite s in Sites.Values)
+            {
+                if (!s.IsDisposed && s.TryGetMachineUnit(logicId, out _))
+                {
+                    return s.InjectEmgMachineEvent(logicId, kind, code, otherUnit);
+                }
+            }
+            return EmgInjectResult.NoUnit;
         }
 
         private static void OnMachineDied(int logicId)

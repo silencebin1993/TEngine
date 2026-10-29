@@ -835,6 +835,15 @@ namespace GameLogic.EditorTools
 
             RestoreWorld();
             WorldSimulation.StepMany(120);
+            // EMG1-BUS-01 起总线每步排空：存档前补 2 条未处理事件，下面“未处理事件随真实存档进出”与续跑哈希才覆盖队列。
+            CombatSite midSite = CombatSites.Get(FracturedCityLayout.RegionId);
+            int midSprayer = CampaignSession.Current.MachineRecords.First(m => m.BlueprintId == BpSprayer).LogicId;
+            if (midSite == null || !midSite.TryGetMachineUnit(midSprayer, out int mu)
+                || !midSite.Kernel.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Uplink, EntKind = EmgEntKind.Unit, Ent = mu, Prog = -1, Pos = new double2(1, 2) })
+                || !midSite.Kernel.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Timer, Depth = 1, EntKind = EmgEntKind.Projectile, Ent = 1, Prog = 0, Node = 1, Value = 0.5f, Code = 308, Pos = new double2(-3, 5) }))
+            {
+                Fail("存档前给破碎都市地点内核补未处理事件失败");
+            }
             WorldSimulation.SyncAllForSave();
             SaveResult mid = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
             WorldSimulation.StepMany(120);
@@ -853,7 +862,8 @@ namespace GameLogic.EditorTools
             Expect(hasReading, "读档后机器的内核武器仍是布区载体 + 冷却液的驻留读法（装配结算重算，不靠旧参数）");
             bool emgKept = site != null && site.Kernel.ProgramCount == 1 && site.Kernel.EmgBusPending == 2 && site.Kernel.WreckCount == 1
                            && site.TryGetMachineUnit(sprayer, out int su) && site.Kernel.TryGetUnitEmg(su, out short sp, out EmgUnitState sst) && sp == 3 && sst.LastHitBy == 2;
-            Expect(emgKept, "涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 1 行、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）");
+            Expect(emgKept, "涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 1 行、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
+                            + (emgKept ? string.Empty : $"；实际：程序 {site?.Kernel.ProgramCount}、未处理 {site?.Kernel.EmgBusPending}、残骸 {site?.Kernel.WreckCount}、步数 {site?.Kernel.Steps}"));
         }
 
         private static void BuildWorldSave(int seed)

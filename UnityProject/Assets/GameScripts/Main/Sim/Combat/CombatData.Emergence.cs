@@ -16,6 +16,11 @@ namespace BinGames.Sim.Combat
             Wrecks = new NativeList<EmgWreck>(4, Allocator.Persistent);
             EProfile = new NativeList<short>(capacity, Allocator.Persistent);
             EmgUnit = new NativeList<EmgUnitState>(capacity, Allocator.Persistent);
+            EmgStats = new NativeArray<EmgBusStats>(1, Allocator.Persistent);
+            EmgKindEnq = new NativeArray<long>(EmgConst.EventKinds + 1, Allocator.Persistent);
+            EmgLastByKind = new NativeArray<EmgEvent>(EmgConst.EventKinds + 1, Allocator.Persistent);
+            EmgListen = 0u;
+            EmgCtx = EmgCtx.None;
         }
 
         private void EmgDispose()
@@ -28,6 +33,9 @@ namespace BinGames.Sim.Combat
             Wrecks.Dispose();
             EProfile.Dispose();
             EmgUnit.Dispose();
+            EmgStats.Dispose();
+            EmgKindEnq.Dispose();
+            EmgLastByKind.Dispose();
         }
 
         private void EmgAppend()
@@ -54,6 +62,19 @@ namespace BinGames.Sim.Combat
             EmgBus.Clear();
             Wrecks.Clear();
             EmgS[0] = EmgScalars.Initial;
+            EmgResetStats();
+            EmgCtx = EmgCtx.None;
+        }
+
+        /// <summary>EMG1-BUS-01：清调试计数（清战斗状态时；读档换一份新数据时天然为 0）。</summary>
+        internal void EmgResetStats()
+        {
+            EmgStats[0] = default;
+            for (int k = 0; k < EmgKindEnq.Length; k++)
+            {
+                EmgKindEnq[k] = 0;
+                EmgLastByKind[k] = default;
+            }
         }
 
         /// <summary>未处理的事件条数。</summary>

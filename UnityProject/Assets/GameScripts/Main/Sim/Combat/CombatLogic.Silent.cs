@@ -328,6 +328,10 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             float back = math.max(0f, damage) * reflect;
+            // EMG1-BUS-01：即时 / 重炮射弹打进偏折场也是一次反弹（宿主 = 本次出手；法线 = 场源指向开火者）。
+            double2 bn = d.Pos[a] - d.Pos[t];
+            float2 nrm = math.lengthsq(bn) > 1e-12 ? (float2)math.normalize(bn) : new float2(0f, 1f);
+            EmgShotEvent(ref d, EmgEventKind.Bounce, d.Id[source], nrm.x, nrm.y, EmgCode.FaceField, d.Pos[t]);
             if (back > 0f)
             {
                 DamageUnit(ref d, a, back, source);
@@ -346,6 +350,10 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
+            // EMG1-BUS-01：evt.bounce（面 = 场；Value / Value2 = 法线，取掉头后的飞行方向）。反弹回来的弹体归场源、不再带己方读法，也不再带己方程序。
+            float2 nrm = math.normalizesafe(-pr.Vel);
+            EmgProjEvent(ref d, ref pr, EmgEventKind.Bounce, d.Id[source], EmgEntKind.Unit, nrm.x, nrm.y, EmgCode.FaceField, pr.Pos);
+            pr.Prog = -1;
             pr.Vel = -pr.Vel;
             pr.Faction = CombatFaction.Hostile;
             pr.Owner = d.Id[source];

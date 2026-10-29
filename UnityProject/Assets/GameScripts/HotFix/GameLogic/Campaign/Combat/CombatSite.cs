@@ -295,6 +295,12 @@ namespace GameLogic.Campaign.Combat
             c.FreezeSeconds = Tuning("clarity.chill.freeze_seconds", 2.5f);
             c.ThawGuardSeconds = Tuning("clarity.chill.thaw_guard_seconds", 1.5f);
             c.PoolZoneCapacity = (int)Math.Round(Tuning("clarity.pool.cap", CombatConst.DefaultPoolZoneCapacity));
+            // EMG1-BUS-01（FG19 第 18 节 emg.*）：战斗事件总线每步处理条数、扇出上限、每宿主同一事件码上限（2 比特计数，钳到 1～3）、冷却完成比例。
+            // 容量 emg.bus.capacity 是内核常量 EmgConst.BusCapacity（快照读档按它防坏值），表里的值由 FgEmgBusSelfCheck 核对一致。
+            c.EmgBusPerStep = Math.Max(1, (int)Math.Round(Tuning("emg.bus.per_step", EmgConst.DefaultBusPerStep)));
+            c.EmgMaxFanout = Math.Max(1, (int)Math.Round(Tuning("emg.bus.max_fanout", EmgConst.DefaultMaxFanout)));
+            c.EmgMaxPerHost = Mathf.Clamp((int)Math.Round(Tuning("emg.trig.max_per_host", EmgConst.DefaultMaxPerHost)), 1, EmgConst.DefaultMaxPerHost);
+            c.EmgCoolRatio = Mathf.Clamp(Tuning("emg.heat.cool_ratio", EmgConst.DefaultCoolRatio), 0.01f, 1f);
             return c;
         }
 
@@ -417,6 +423,49 @@ namespace GameLogic.Campaign.Combat
         }
 
         public bool TryGetMachineUnit(int logicId, out int unitId) => _machineUnit.TryGetValue(logicId, out unitId);
+
+        /// <summary>
+        /// EMG1-BUS-01（FGR-EMG-066）：热更层来源的战斗事件（接入 / 断开 / 拾取 / 夺控 / 归还）在两步之间注入本地点内核（内核一步是同步执行完的，这里调用时不在步内）。
+        /// O(1)；按需：机器的程序不读这个事件码时不入队。机器不在本地点返回 NoUnit。
+        /// </summary>
+        public EmgInjectResult InjectEmgMachineEvent(int logicId, EmgEventKind kind, ushort code, int otherUnit = 0)
+        {
+            if (IsDisposed || !_machineUnit.TryGetValue(logicId, out int unitId))
+            {
+                return EmgInjectResult.NoUnit;
+            }
+            return Kernel.InjectEmgUnitEvent(kind, unitId, code, otherUnit);
+        }
+
+        /// <summary>EMG1-BUS-01：战斗事件总线的调试计数（调试层：链深截断 / 扇出截断 / 合并 / 顺延……）。</summary>
+        public EmgBusStats EmgBusStats => IsDisposed ? default : Kernel.EmgBusStats;
+
+        private long _emgDepthCutSeen, _emgFanoutCutSeen, _emgLostSeen;
+
+        /// <summary>调试层：链深截断、扇出截断第一次出现时各记一行（之后计数照常累加、可随时读 <see cref="EmgBusDebugLine"/>）；队列满仍无处合并（丢失）每次出现都报警。O(1) / 步。</summary>
+        private void WatchEmgBus()
+        {
+            EmgBusStats s = Kernel.EmgBusStats;
+            if (s.DepthCut > 0 && _emgDepthCutSeen == 0 || s.FanoutCut > 0 && _emgFanoutCutSeen == 0)
+            {
+                Log.Info(EmgBusDebugLine());
+            }
+            if (s.Lost > _emgLostSeen)
+            {
+                Log.Warning($"{EmgBusDebugLine()}（队列到容量仍无同类可合并：设计缺陷，FGR-EMG-221）");
+            }
+            _emgDepthCutSeen = s.DepthCut;
+            _emgFanoutCutSeen = s.FanoutCut;
+            _emgLostSeen = s.Lost;
+        }
+
+        /// <summary>调试层一行：本地点战斗事件总线的处理量与截断计数（不用文本键：只给开发调试看，不进玩家界面）。</summary>
+        public string EmgBusDebugLine()
+        {
+            EmgBusStats s = EmgBusStats;
+            return $"[EmgBus] {SiteId} 待处理 {(IsDisposed ? 0 : Kernel.EmgBusPending)} · 入队 {s.Enqueued} · 处理 {s.Processed} · 顺延步 {s.StepsDeferred} · 合并 {s.Merged} · "
+                   + $"链深截断 {s.DepthCut}（链 {s.LastDepthCutChain}）· 扇出截断 {s.FanoutCut}（链 {s.LastFanoutCutChain}）· 每宿主截断 {s.PerHostCut} · 近炸求值 {s.ProxEvals} · 丢失 {s.Lost}";
+        }
 
         /// <summary>FG1-SIG-05：这台机器此刻的武器热量与是否过热（内核实时状态）。过热是机体状态——谁在开都一样，
         /// 交还 AI 时照样要等散热到恢复线以下才能开火（原 Demo OverloadSuppressionMirror 的“按身体归属”规则在正式版的落点）。</summary>
@@ -1117,6 +1166,7 @@ namespace GameLogic.Campaign.Combat
                 ConfigureReactions();
             }
             Kernel.Step(dt, time);
+            WatchEmgBus();
             ProcessEvents();
             // FG2-FW-04：反应反馈与伤害归因（按内核累计计数的增量，O(反应条数)；与是否观察无关的部分照常结算）。
             ReactionFeedback.Process(this, CampaignSession.Current);

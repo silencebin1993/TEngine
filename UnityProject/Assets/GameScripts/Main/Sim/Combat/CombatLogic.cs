@@ -46,6 +46,9 @@ namespace BinGames.Sim.Combat
             s.Time = time;
             s.Revision++;
             d.Scalars[0] = s;
+            EmgScalars emgS = d.EmgS[0];
+            emgS.StepFirstSeq = emgS.EmgSeq; // EMG1-BUS-01：积压保护只合并本步入队的
+            d.EmgS[0] = emgS;
 
             MaybeCompact(ref d);
             MaybeCompactRoutes(ref d);
@@ -118,6 +121,12 @@ namespace BinGames.Sim.Combat
             // 5b. FG2-FW-02：读法生成的无人机、区域、回波与状态标签（统一时钟，暂停不走、倍速按游戏时间）。
             StepReadings(ref d, dt);
 
+            // 5d. EMG1-BUS-01：战斗事件总线（ADR-EMG-001 ④：StepReadings 之后、场地边界钳制之前；按 Seq 先进先出，每步 emg.bus.per_step 条，超出顺延不丢）。
+            if (d.EmgBus.Length > 0)
+            {
+                StepEmgBus(ref d);
+            }
+
             // 5c. FG5-RND-03：场地边界（靶场）。放在全部位移（移动、击退、牵引、无人机）之后，一处钳住所有来源。
             if (d.Scalars[0].ArenaOn != 0)
             {
@@ -168,6 +177,7 @@ namespace BinGames.Sim.Combat
                 CombatProjectile pr = d.Projectiles[p];
                 if (pr.Pos.x < lo.x || pr.Pos.x > hi.x || pr.Pos.y < lo.y || pr.Pos.y > hi.y)
                 {
+                    EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireBounds, pr.Pos); // EMG1-BUS-01
                     expired++;
                     continue;
                 }
@@ -486,6 +496,7 @@ namespace BinGames.Sim.Combat
             if (w < 0 || w >= d.Weapons.Length)
             {
                 d.Heat[i] = 0f;
+                EmgOnCool(ref d, i, 0f, 0f); // EMG1-BUS-01：没有武器 = 不再“过热过”，清记号
                 return;
             }
             CombatWeapon wp = d.Weapons[w];
@@ -497,6 +508,7 @@ namespace BinGames.Sim.Combat
             {
                 d.Set(i, CombatUnitFlags.Overheated, false);
             }
+            EmgOnCool(ref d, i, h, wp.OverheatAt); // EMG1-BUS-01：evt.cooled
         }
 
         // ─────────────────────────────── 敌方 ───────────────────────────────
@@ -746,6 +758,8 @@ namespace BinGames.Sim.Combat
                 CombatScalars s2 = d.Scalars[0];
                 d.MarkedUntil[nearest] = s2.Time + p.EffectSeconds;
                 Gameplay(ref d, CombatEventKind.MachineMarked, nearest, d.Id[i], p.EffectSeconds, 0f, d.Pos[nearest], 0, 0);
+                // EMG1-BUS-01：evt.marked 的宿主是标记器（侦察单位）自己的程序（阶段 1 敌人没有程序，读法 / 敌方程序在 FG19 第 7.5 节接上）。
+                EmgUnitEvent(ref d, EmgEventKind.Marked, i, d.Id[nearest], p.EffectSeconds, 0f, 0, d.Pos[nearest]);
             }
             else
             {
@@ -943,6 +957,12 @@ namespace BinGames.Sim.Combat
         /// <summary>单位主动攻击（驻守开火 / 瞄准线 / 突袭者 / 炮塔）：弹体武器生成弹体，其余即时命中。</summary>
         internal static void UnitAttack(ref CombatData d, int i, int t, in CombatWeapon wp)
         {
+            UnitAttackCore(ref d, i, t, wp);
+            EmgShotEnd(ref d); // EMG1-BUS-01：本次出手的宿主上下文到此为止
+        }
+
+        private static void UnitAttackCore(ref CombatData d, int i, int t, in CombatWeapon wp)
+        {
             // FG9-FAC-01（FGR-FAC-008“移动或开火时展开现形”、① 专属行为 ≥ 0.8 秒预警）：带潜伏参数的敌方单位不会从潜伏里直接出手——
             // 潜伏中要开火 → 这一次只现形（开始展桅预警），预警（RevealSeconds）没结束之前也不出手。伏击 / 驻守 / 瞄准线三条路径选定目标时已经先查过；
             // 突袭者（含行进拦截的就地交战）与攻城单位走到这里才第一次查（调用方已重置冷却：预警结束后的下一个冷却点再出手）。没有潜伏参数的单位 O(1) 直接放行。
@@ -960,6 +980,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgShotBegin(ref d, i, t, wp); // EMG1-BUS-01：一次出手（evt.fire；带程序的武器开一条因果链）
             if (d.Faction[i] == (byte)CombatFaction.Hostile)
             {
                 SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露
@@ -1023,7 +1044,8 @@ namespace BinGames.Sim.Combat
             EmgScalars es = d.EmgS[0];
             int prog = wp.Program;
             int id = es.NextProjId++;
-            int chain = prog >= 0 ? es.NextChain++ : 0;
+            // EMG1-BUS-01：这一发的链就是本次出手开的那条（EmgShotBegin 已发号，evt.fire 与弹体同链）；不在出手上下文里生成的才另开。
+            int chain = prog < 0 ? 0 : d.EmgCtx.Prog == prog && d.EmgCtx.Chain > 0 ? d.EmgCtx.Chain : es.NextChain++;
             d.EmgS[0] = es;
             d.Projectiles.Add(new CombatProjectile
             {
@@ -1073,6 +1095,13 @@ namespace BinGames.Sim.Combat
         /// 目标检查 → 重炮两段式（过热迟滞、冷却、1 秒瞄准线、积热、熔穿过载穿甲）或普通武器（正面装甲减伤、侧后加成、标记、标记跳转）。
         /// </summary>
         public static CombatFireResult FireAt(ref CombatData d, int a, int t)
+        {
+            CombatFireResult r = FireAtCore(ref d, a, t);
+            EmgShotEnd(ref d); // EMG1-BUS-01：本次出手的宿主上下文到此为止（含重炮）
+            return r;
+        }
+
+        private static CombatFireResult FireAtCore(ref CombatData d, int a, int t)
         {
             if (a < 0 || a >= d.Count)
             {
@@ -1131,6 +1160,7 @@ namespace BinGames.Sim.Combat
             c.ShotsFired++;
             d.Counters[0] = c;
             RawFired(ref d, a, t);
+            EmgShotBegin(ref d, a, t, wp); // EMG1-BUS-01：一次出手（evt.fire；过热事件随后继承这条链）
             AddShotHeat(ref d, a, wp);
             if (wp.Mode != CombatWeaponMode.Projectile && TryReflectInstant(ref d, a, t, wp.Damage, wp))
             {
@@ -1213,6 +1243,7 @@ namespace BinGames.Sim.Combat
             d.AimReadyAt[a] = 0;
             d.NextFireAt[a] = now + EffectiveCooldown(wp);
             ConsumeShotAmmo(ref d, a, wp); // FG6-DEF-01 审查修复：真的开火这一刻扣一发补给（与 AddShotHeat 同一口径）
+            EmgShotBegin(ref d, a, t, wp); // EMG1-BUS-01：重炮真的开火这一刻（瞄准阶段不算出手）
             // FG1-SIG-03：门控反应（信号带进来的核心固件）发动过一次后就被压住，直到热更层按冷却重新下发武器参数。
             bool overload = wp.Reaction == CombatReaction.MeltOverload && !d.Has(a, CombatUnitFlags.ReactionSpent);
             float heat = d.Heat[a] + wp.HeatPerShot + (overload ? wp.OverloadExtraHeat : 0f);
@@ -1232,6 +1263,7 @@ namespace BinGames.Sim.Combat
             {
                 d.Set(a, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
+                EmgOnOverheat(ref d, a, heat); // EMG1-BUS-01：evt.overheat
             }
             if (TryReflectInstant(ref d, a, t, wp.Damage, wp))
             {
@@ -1368,11 +1400,13 @@ namespace BinGames.Sim.Combat
             }
             d.Counters[0] = c;
             int attackerId = attacker >= 0 && attacker < d.Count ? d.Id[attacker] : 0;
+            EmgOnDamage(ref d, t, damage, attacker, attackerId); // EMG1-BUS-01：evt.hit（当前宿主：出手 / 弹体 / 无人机）、evt.hurt（受击者，来源按载体）
             if (d.Has(t, CombatUnitFlags.ExternalHealth))
             {
                 Gameplay(ref d, CombatEventKind.DamageRequest, t, attackerId, damage, d.Hp[t], d.Pos[t], 0, 0);
                 return true;
             }
+            d.EmgCtx.Overflow = math.max(0f, damage - d.Hp[t]); // EMG1-BUS-01：evt.kill 的溢出伤害（只在下面真的阵亡时被读走）
             float hp = math.max(0f, d.Hp[t] - damage);
             if (hp <= 0f && d.Has(t, CombatUnitFlags.HealthFloor))
             {
@@ -1434,6 +1468,7 @@ namespace BinGames.Sim.Combat
             }
             // FG10-FAC-01：分裂 / 自爆单位的死亡效果（O(1) 记一条，下一个澄净阶段结算）。
             ClarityOnKill(ref d, t, killerId);
+            EmgOnKill(ref d, t, killerId); // EMG1-BUS-01：evt.death（阵亡者）、evt.kill（击杀者 / 致死载荷）
         }
 
         /// <summary>
@@ -1460,6 +1495,7 @@ namespace BinGames.Sim.Combat
                 byte flags = (byte)((d.Has(t, CombatUnitFlags.Elite) ? 1 : 0) | CombatConst.KillSelfDestructBit);
                 Gameplay(ref d, CombatEventKind.SiegeKilled, t, 0, d.Siege[t].Group, -(float)d.ExtKey[t], d.Pos[t], d.Siege[t].Role, flags);
             }
+            EmgOnKill(ref d, t, 0); // EMG1-BUS-01：自毁也是阵亡（evt.death，没有击杀者 → 不发 evt.kill）
             if (d.Has(t, CombatUnitFlags.RemoveOnDeath))
             {
                 CombatScalars s = d.Scalars[0];
@@ -1737,6 +1773,9 @@ namespace BinGames.Sim.Combat
                         dmg *= math.max(0f, 1f - d.Armor[hit].x);
                     }
                     dmg *= BackMultiplier(ref d, hit, fromSide);
+                    // EMG1-BUS-01：这一发命中结算期间以它为宿主——evt.hit（含读法的次级命中，与即时出手同一口径）、evt.hurt 的来源与链、evt.kill 的宿主都在 DamageUnit / Kill 里发。
+                    EmgProjCtxBegin(ref d, pr);
+                    int hitId = d.Id[hit];
                     bool landed = DamageUnit(ref d, hit, dmg, owner);
                     Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
                     if (landed && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
@@ -1744,6 +1783,9 @@ namespace BinGames.Sim.Combat
                         // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
                         ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
                     }
+                    EmgProjCtxEnd(ref d, ref pr);
+                    // FG19A 申请 A8：命中即结束的载荷在命中同一步也发终结（Code = 命中）。
+                    EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, hitId, EmgEntKind.Unit, 0f, 0f, EmgCode.ExpireHit, hitPos);
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesHit++;
                     d.Counters[0] = c;
@@ -1751,12 +1793,17 @@ namespace BinGames.Sim.Combat
                 }
                 if (pr.Life <= 0f)
                 {
+                    EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireLife, next); // EMG1-BUS-01：寿命到
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesExpired++;
                     d.Counters[0] = c;
                     continue;
                 }
                 pr.Pos = next;
+                if (pr.Prog >= 0)
+                {
+                    EmgProjTick(ref d, ref grid, ref pr, dt); // EMG1-BUS-01：带程序的弹体累计飞行秒数、按需求值定时 / 近炸
+                }
                 d.Projectiles[write++] = pr;
             }
             d.Projectiles.ResizeUninitialized(write);
@@ -1804,7 +1851,11 @@ namespace BinGames.Sim.Combat
                 emptied = 1;
             }
             d.Shields[best] = hitShield;
-            Cue(ref d, CombatEventKind.ShieldAbsorb, -1, hitShield.ExtKey, dmg, pr.Prev + (next - pr.Prev) * bestT, emptied);
+            double2 at = pr.Prev + (next - pr.Prev) * bestT;
+            Cue(ref d, CombatEventKind.ShieldAbsorb, -1, hitShield.ExtKey, dmg, at, emptied);
+            // EMG1-BUS-01：evt.absorb（Other = 护盾外部键，不是单位）与终结（Code = 被吸收）；残骸 / 固态斑块吸收随 EMG1-ENT-01 / EMG2-MAT-01。
+            EmgProjEvent(ref d, ref pr, EmgEventKind.Absorb, hitShield.ExtKey, EmgEntKind.None, dmg, 0f, 0, at);
+            EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireAbsorbed, at);
             return true;
         }
 

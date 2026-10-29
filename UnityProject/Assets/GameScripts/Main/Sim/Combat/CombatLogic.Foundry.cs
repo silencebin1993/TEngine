@@ -296,7 +296,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (math.distance(d.Pos[k], center) <= radius + d.Radius[k])
                 {
-                    DamageUnit(ref d, k, wp.Damage, i);
+                    DamageFrom(ref d, k, wp.Damage, i, EmgCode.SrcProjectile);
                 }
             }
             double now = d.Scalars[0].Time;
@@ -490,7 +490,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (math.distance(d.Pos[k], pos) <= radius + d.Radius[k])
                 {
-                    DamageUnit(ref d, k, p.MineDamage, i);
+                    DamageFrom(ref d, k, p.MineDamage, i, EmgCode.SrcZone);
                 }
             }
             CombatCounters c = d.Counters[0];
@@ -669,7 +669,7 @@ namespace BinGames.Sim.Combat
                 {
                     dmg *= math.max(0f, 1f - d.Armor[k].x);
                 }
-                DamageUnit(ref d, k, dmg, i);
+                DamageFrom(ref d, k, dmg, i, EmgCode.SrcImpact);
                 if (p.ChargeKnock > 0f && CanDisplace(ref d, k))
                 {
                     double2 from = d.Pos[k];

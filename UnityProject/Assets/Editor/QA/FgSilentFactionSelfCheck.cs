@@ -522,6 +522,37 @@ namespace GameLogic.EditorTools
                 $"B5 偏折场（FGT-FAC-009 实测）：预警 {warn:0.00} 秒（≥ 0.8，表 {Row("enemy_prism").WarnSeconds}）后展开；展开时即时射弹打回开火者（棱柱 {prismHp:0}→{prismAfterGun:0} 不掉，开火者 {gunHp:0}→{gunAfter:0}），" +
                 $"弹体掉头打中发射者（{boltHp:0}→{boltAfter:0}），反弹 {reflected} 次；格斗不受偏折（{prismBeforeMelee:0}→{prismAfterMelee:0}）；预警有声音 + 字幕 {SilentCombatFeedback.DeflectWarnCues} 次");
 
+            // EMG1-BUS-01：偏折场真实反弹路径发 evt.bounce（面 = 场、Other = 场源），宿主 = 本次出手 / 弹体并带它的程序；反弹回来的弹体去掉程序。上面没有程序的开火一条不入队（对照）。
+            long bounceNoProg = site.Kernel.EmgEnqueuedOf(EmgEventKind.Bounce);
+            int bp = site.Kernel.AddProgram(new EmgProgram { ListenMask = 1u << (int)EmgEventKind.Bounce },
+                new[] { new EmgNode { Parent = -1, Gen = 0, FirstInstr = 0, InstrCount = 1 } },
+                new[] { new EmgInstr { Port = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Bounce), Role = EmgConst.RoleTrigger } });
+            CombatWeapon progGun = Gun(10f);
+            progGun.Program = bp;
+            CombatWeapon progBolt = Bolt(10f);
+            progBolt.Program = bp;
+            int gunP = Player(site, new Vector2(20f, 3f), progGun);
+            int boltP = Player(site, new Vector2(-20f, 3f), progBolt);
+            CombatFireResult rp = site.Kernel.FireAt(gunP, prism, _t);
+            // 只入队、不内联：开火这一刻事件还在队里（TryGetLastEmgEvent 是“最后处理的一条”，要等下一步）。
+            bool instBounce = site.Kernel.EmgEnqueuedOf(EmgEventKind.Bounce) == bounceNoProg + 1
+                              && Enumerable.Range(0, site.Kernel.EmgBusPending).Any(j => site.Kernel.TryGetEmgEvent(j, out EmgEvent ib) && ib.Kind == EmgEventKind.Bounce
+                                  && ib.EntKind == EmgEntKind.Unit && ib.Ent == gunP && ib.Code == EmgCode.FaceField && ib.Prog == bp && ib.Other == prism);
+            site.Kernel.FireAt(boltP, prism, _t);
+            bool projBounce = false, stripped = false;
+            for (int i = 0; i < 120; i++)
+            {
+                RunFor(site, Dt);
+                if (site.Kernel.EmgEnqueuedOf(EmgEventKind.Bounce) >= bounceNoProg + 2 && site.Kernel.TryGetLastEmgEvent(EmgEventKind.Bounce, out EmgEvent pbv))
+                {
+                    projBounce = pbv.EntKind == EmgEntKind.Projectile && pbv.Code == EmgCode.FaceField && pbv.Prog == bp && pbv.Other == prism;
+                    stripped = Enumerable.Range(0, site.Kernel.ProjectileCount).All(j => !site.Kernel.TryGetProjectile(j, out CombatProjectile cp) || cp.Prog < 0);
+                    break;
+                }
+            }
+            Expect(bounceNoProg == 0 && instBounce && projBounce && stripped,
+                $"EMG1-BUS-01 偏折场真实反弹发 evt.bounce：没有程序的开火不入队（{bounceNoProg}）；带读 evt.bounce 程序的即时射弹 {(instBounce ? "发" : "没发")}（开火结果 {rp}，入队 {site.Kernel.EmgEnqueuedOf(EmgEventKind.Bounce)}；面 = 场、Other = 棱柱）、弹体 {(projBounce ? "发" : "没发")}（宿主 = 弹体）；反弹回来的弹体{(stripped ? "已去掉" : "仍带")}己方程序");
+
             // 间隙里即时射弹照常命中。
             for (int i = 0; i < 60 * 8; i++)
             {

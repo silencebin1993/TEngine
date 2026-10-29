@@ -275,6 +275,16 @@ namespace BinGames.Sim.Combat
         /// <summary>每单位：实体档案下标（−1 = 单位种类默认）与涌现状态基本段（按槽位，随单位一起追加 / 搬移 / 截断）。</summary>
         public NativeList<short> EProfile;
         public NativeList<EmgUnitState> EmgUnit;
+        // ── EMG1-BUS-01（FGR-EMG-062～065）：总线的调试计数与派生量（都不进快照、不进状态哈希）──
+        /// <summary>调试计数（长度 1）、每种事件累计入队条数（下标 = 事件码，长度 30）、每种事件最后处理的一条（调试层 / 自检读）。读档后从 0 计。</summary>
+        public NativeArray<EmgBusStats> EmgStats;
+        public NativeArray<long> EmgKindEnq;
+        public NativeArray<EmgEvent> EmgLastByKind;
+        /// <summary>地点级监听掩码（FGR-EMG-062）：程序表里全部程序 ListenMask 的并集（表只追加，登记程序时并上、读档后重算，不按帧）。只作“整类事件有没有可能有人读”的快速判空；
+        /// 真正入队前再按宿主节点的读端行过滤。0 = 本地点没有程序，所有生产点一条比较就返回。</summary>
+        public uint EmgListen;
+        /// <summary>当前正在结算的出手 / 载荷（瞬时量，见 <see cref="EmgCtx"/>）。</summary>
+        public EmgCtx EmgCtx;
 
         public bool IsCreated => Id.IsCreated;
 

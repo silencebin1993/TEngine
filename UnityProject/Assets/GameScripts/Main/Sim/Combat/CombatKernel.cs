@@ -2755,6 +2755,7 @@ namespace BinGames.Sim.Combat
             _d.Dispose();
             _d = staging;
             _programIndex = null; // EMG1-KRN-01：程序去重索引是派生量，按读进来的程序表重建
+            RecomputeEmgListen(); // EMG1-BUS-01：地点级监听掩码同是派生量
             CombatLogic.RebuildDeflectActive(ref _d); // FG9-FAC-01：展开中的偏折场由每单位状态派生，读档后重算。
             FeedEpoch++;
             return CombatLoadResult.Ok;

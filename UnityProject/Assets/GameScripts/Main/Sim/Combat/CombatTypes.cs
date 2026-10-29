@@ -1261,6 +1261,12 @@ namespace BinGames.Sim.Combat
         public float ChillDecay;
         public float FreezeSeconds;
         public float ThawGuardSeconds;
+        /// <summary>EMG1-BUS-01（FGR-EMG-063 / 065，fg.TbHomeTuning emg.bus.per_step / emg.bus.max_fanout / emg.trig.max_per_host / emg.heat.cool_ratio）：
+        /// 战斗事件总线每步处理条数、一条事件最多唤起几条监听、每宿主同一事件码上限（≤ 3）、冷却完成的积热比例。≤ 0 取 <see cref="EmgConst"/> 初值。</summary>
+        public int EmgBusPerStep;
+        public int EmgMaxFanout;
+        public int EmgMaxPerHost;
+        public float EmgCoolRatio;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -1278,6 +1284,10 @@ namespace BinGames.Sim.Combat
             NavEnabled = 0,
             SeparationFactor = 0.5f,
             FuseTraceSeconds = 0.15f,
+            EmgBusPerStep = EmgConst.DefaultBusPerStep,
+            EmgMaxFanout = EmgConst.DefaultMaxFanout,
+            EmgMaxPerHost = EmgConst.DefaultMaxPerHost,
+            EmgCoolRatio = EmgConst.DefaultCoolRatio,
         };
     }
 

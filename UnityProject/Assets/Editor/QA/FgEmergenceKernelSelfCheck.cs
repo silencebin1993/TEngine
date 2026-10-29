@@ -287,6 +287,8 @@ namespace GameLogic.EditorTools
                    && b.EmgScalars.NextChain == k.EmgScalars.NextChain && again == p && b.ProgramCount == 2,
                 $"读档后续跑 2 秒与不存档连续跑一致（下一个弹体号 {b.EmgScalars.NextProjId}、链号 {b.EmgScalars.NextChain} 接着发）；读档后同一程序再登记仍返回 {again}（去重索引按表重建，在飞载荷的下标不变）");
 
+            // EMG1-BUS-01 起总线每步排空：再注入一条未处理事件，让下面“总线序号由最后一条事件 + 1 推出”的短段口径仍有事件可推。
+            k.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Uplink, EntKind = EmgEntKind.Unit, Ent = gun, Prog = -1, Pos = new double2(1, 2) });
             // 短段：本阶段较早提交写出的记录少几个字段。
             byte[] shortUnits = k.SerializeEmgShapeForTests(EmgConst.SegUnits, 1, 0);
             byte[] shortWrecks = k.SerializeEmgShapeForTests(EmgConst.SegWrecks, 12, 0);
@@ -511,6 +513,9 @@ namespace GameLogic.EditorTools
             gw.SpawnFlight = 1; // 边界值：写入口收下的，末尾的完好快照必须原样读回
             k.AddWeapon(gw);
             StepN(k, 30);
+            // EMG1-BUS-01 起总线每步排空：存档前补 2 条未处理事件（其中 1 条带程序），坏值用例才有事件记录可改。
+            k.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Uplink, EntKind = EmgEntKind.Unit, Ent = 1, Prog = -1, Pos = new double2(1, 2) });
+            k.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Timer, Depth = 1, EntKind = EmgEntKind.Projectile, Ent = 1, Prog = p, Node = 1, Value = 0.5f, Code = 308, Pos = new double2(-3, 5) });
             byte[] snap = k.Serialize();
             var cases = new List<(string Name, byte[] Data, CombatLoadResult Want)>();
             (int at, int stride) wseg = FindSegment(snap, EmgConst.SegWeapons, 2, k.WeaponCount);

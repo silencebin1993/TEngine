@@ -42,6 +42,7 @@ namespace BinGames.Sim.Combat
             {
                 return -1;
             }
+            _d.EmgListen |= program.ListenMask; // EMG1-BUS-01（FGR-EMG-062）：地点级监听掩码在程序表变化时并上，不按帧
             EmgProgram p = program;
             p.FirstNode = _d.EmgNodes.Length;
             p.NodeCount = (byte)nodes.Count;
@@ -131,12 +132,23 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            for (int j = 0; j < instrs.Count; j++)
+            // 节点恰好铺满指令列表（上面已核），按节点走一遍就是全部指令。
+            for (int j = 0; j < nodes.Count; j++)
             {
-                EmgInstr x = instrs[j];
-                if (!Finite(x.Amount) || !Finite(x.Param2) || !Finite(x.A) || !Finite(x.B) || !Finite(x.C))
+                int eventReads = 0;
+                for (int i = nodes[j].FirstInstr; i < nodes[j].FirstInstr + nodes[j].InstrCount; i++)
                 {
-                    return false;
+                    EmgInstr x = instrs[i];
+                    if (!Finite(x.Amount) || !Finite(x.Param2) || !Finite(x.A) || !Finite(x.B) || !Finite(x.C))
+                    {
+                        return false;
+                    }
+                    // EMG1-BUS-01（FGR-EMG-065）：每宿主计数每条事件读端 2 比特、共 16 条；超过的读端行会让“同一事件 ≤ 3 次”失效，所以不收。
+                    if (x.Role >= EmgConst.RoleTrigger && x.Role <= EmgConst.RoleLastRead && x.Port > EmgConst.EventPortBase && x.Port <= EmgConst.EventPortBase + EmgConst.EventKinds
+                        && ++eventReads > EmgConst.HostCounterSlots)
+                    {
+                        return false;
+                    }
                 }
             }
             return true;
@@ -203,10 +215,101 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        /// <summary>EMG1-BUS-01：地点级监听掩码按读进来的程序表重算（O(程序数)；读档后调用）。</summary>
+        private void RecomputeEmgListen()
+        {
+            uint m = 0u;
+            for (int i = 0; i < _d.EmgPrograms.Length; i++)
+            {
+                m |= _d.EmgPrograms[i].ListenMask;
+            }
+            _d.EmgListen = m;
+        }
+
+        /// <summary>地点级监听掩码（位 k = 事件码 k 可能有程序读；0 = 本地点没有程序）。</summary>
+        public uint EmgListenMask => _d.EmgListen;
+
+        /// <summary>战斗事件总线的调试计数（调试层：处理 / 合并 / 链深截断 / 扇出截断 / 每宿主截断 / 近炸求值……；不进快照）。</summary>
+        public EmgBusStats EmgBusStats => _d.EmgStats[0];
+
+        /// <summary>某种事件累计入队条数（调试层；不进快照）。</summary>
+        public long EmgEnqueuedOf(EmgEventKind kind) => (int)kind > 0 && (int)kind < _d.EmgKindEnq.Length ? _d.EmgKindEnq[(int)kind] : 0;
+
+        /// <summary>某种事件最后处理的一条（调试层 / 自检看字段；没处理过返回 false）。</summary>
+        public bool TryGetLastEmgEvent(EmgEventKind kind, out EmgEvent e)
+        {
+            bool ok = (int)kind > 0 && (int)kind < _d.EmgLastByKind.Length && _d.EmgLastByKind[(int)kind].Kind == kind;
+            e = ok ? _d.EmgLastByKind[(int)kind] : default;
+            return ok;
+        }
+
         /// <summary>
-        /// 热更层注入一条事件（ADR ④：evt.uplink / unlink / pickup / seize / release 在两步之间注入，O(1)）。内核发 Seq（总线自己的计数器）；
+        /// EMG1-BUS-01（FGR-EMG-066）：热更层在两步之间注入一条单位事件——接入 / 断开 / 拾取 / 夺控 / 归还（O(本单位程序根节点的指令行数)）。
+        /// 宿主 = 单位武器的程序根节点；按需：程序不读这个事件码时不入队（返回 <see cref="EmgInjectResult.NoListener"/>）。每次注入开一条新因果链（ADR ⑨）。
+        /// 与内核生产点走同一个入队口（同一套 Seq、积压保护），在下一步的 5d 段按 Seq 处理。
+        /// </summary>
+        public EmgInjectResult InjectEmgUnitEvent(EmgEventKind kind, int unitId, ushort code, int other = 0)
+        {
+            if (kind != EmgEventKind.Uplink && kind != EmgEventKind.Unlink && kind != EmgEventKind.Pickup && kind != EmgEventKind.Seize && kind != EmgEventKind.Release)
+            {
+                return EmgInjectResult.NotInjectable;
+            }
+            int slot = _d.SlotOf(unitId);
+            if (slot < 0)
+            {
+                return EmgInjectResult.NoUnit;
+            }
+            long before = _d.EmgStats[0].Enqueued + _d.EmgStats[0].Merged;
+            long lost = _d.EmgStats[0].Lost;
+            EmgCtx saved = _d.EmgCtx;
+            _d.EmgCtx = EmgCtx.None; // 注入不在任何出手里：新链、链深 0
+            CombatLogic.EmgUnitEvent(ref _d, kind, slot, other, 0f, 0f, code, _d.Pos[slot]);
+            _d.EmgCtx = saved;
+            if (_d.EmgStats[0].Lost > lost)
+            {
+                return EmgInjectResult.Full;
+            }
+            if (_d.EmgStats[0].Enqueued + _d.EmgStats[0].Merged == before)
+            {
+                return EmgInjectResult.NoListener;
+            }
+            Touch();
+            return EmgInjectResult.Enqueued;
+        }
+
+        /// <summary>测试 / 调试：以未处理队列里第 <paramref name="i"/> 条为父事件，按“事件触发的生成”入队一条子事件（链深 + 1、继承链；父事件链深已到 3 时不入队并计 DepthCut）。
+        /// 子载荷 / 规则产物的真实生成在 EMG1-TRIG-01 / EMG2-RULE-01 走同一个内核入口。</summary>
+        public bool EmgEmitChildForTests(int i, EmgEventKind kind)
+        {
+            if (!TryGetEmgEvent(i, out EmgEvent parent) || kind < EmgEventKind.Fire || (byte)kind > EmgConst.EventKinds)
+            {
+                return false;
+            }
+            bool ok = CombatLogic.EmgTryEmitChild(ref _d, parent, new EmgEvent { Kind = kind, EntKind = parent.EntKind, Ent = parent.Ent, Prog = parent.Prog, Node = parent.Node, Pos = parent.Pos });
+            Touch();
+            return ok;
+        }
+
+        /// <summary>测试 / 调试：对在飞的第 <paramref name="slot"/> 发弹体走一次弹体宿主事件的生产（与内核生产点同一段代码：按需过滤、每宿主上限、入队）。
+        /// 穿透 / 撞单位与障碍的反弹在 EMG1-GRM-01 的真实弹道里调同一个生产点；这里让自检在那之前就能验证它的入队口径。</summary>
+        public bool EmgProjectileEventForTests(int slot, EmgEventKind kind, int otherUnit, float value, float value2, ushort code)
+        {
+            if (slot < 0 || slot >= _d.Projectiles.Length || kind < EmgEventKind.Fire || (byte)kind > EmgConst.EventKinds)
+            {
+                return false;
+            }
+            CombatProjectile pr = _d.Projectiles[slot];
+            long before = _d.EmgStats[0].Enqueued + _d.EmgStats[0].Merged;
+            CombatLogic.EmgProjEvent(ref _d, ref pr, kind, otherUnit, otherUnit != 0 ? EmgEntKind.Unit : EmgEntKind.None, value, value2, code, pr.Pos);
+            _d.Projectiles[slot] = pr;
+            Touch();
+            return _d.EmgStats[0].Enqueued + _d.EmgStats[0].Merged > before;
+        }
+
+        /// <summary>
+        /// 原始注入一条事件（KRN-01 的底层入口，自检与读档对拍用；热更层的接入 / 断开 / 拾取 / 夺控 / 归还走 <see cref="InjectEmgUnitEvent"/>）。内核发 Seq（总线自己的计数器）；
         /// Chain = 0 时分配一条新的因果链（ADR ⑨“热更注入分配一个”）。事件码不在 1～29、链深 &gt; 3、程序下标越界、节点不在该程序里、链为负或没发过、数值不是有限数、
-        /// 队列已满（16384）时拒绝（返回 false，队列不变）。校验与读档共用 <see cref="EventValid"/>。队列的消费归 EMG1-BUS-01。
+        /// 队列已满（16384）时拒绝（返回 false，队列不变）。校验与读档共用 <see cref="EventValid"/>。不经积压合并；入队的事件由下一步 5d 段（CombatLogic.StepEmgBus）处理。
         /// </summary>
         public bool InjectEmgEvent(in EmgEvent e)
         {
@@ -224,6 +327,12 @@ namespace BinGames.Sim.Combat
             }
             _d.EmgS[0] = es;
             _d.EmgBus.Add(x);
+            // EMG1-BUS-01：调试计数与内核生产点同一口径（入队数 / 峰值 / 每种入队数）。
+            EmgBusStats st = _d.EmgStats[0];
+            st.Enqueued++;
+            st.MaxPending = Math.Max(st.MaxPending, _d.EmgBusPending);
+            _d.EmgStats[0] = st;
+            _d.EmgKindEnq[(int)x.Kind] = _d.EmgKindEnq[(int)x.Kind] + 1;
             Touch();
             return true;
         }
@@ -316,7 +425,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
-                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0)
+                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0)
                 {
                     return true;
                 }
@@ -379,7 +488,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, 4, _d.Count);
+            sw.Begin(EmgConst.SegUnits, 5, _d.Count);
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
@@ -387,6 +496,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(u.PrevMatterMask);
                 if (sw.F()) w.Write(u.LastHitBy);
                 if (sw.F()) w.Write(u.LastHitChain);
+                if (sw.F()) w.Write(u.HeatLatch); // EMG1-BUS-01：尾部追加（同一格式 16 内只追加，短段读到取 0）
                 sw.EndRecord();
             }
             sw.End();
@@ -713,6 +823,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.PrevMatterMask = r.ReadUInt32();
                         if (sr.F()) u.LastHitBy = r.ReadInt32();
                         if (sr.F()) u.LastHitChain = r.ReadInt32();
+                        if (sr.F()) u.HeatLatch = r.ReadByte();
                         if (!sr.RecordOk || !UnitEmgValid(prof, u))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -971,7 +1082,7 @@ namespace BinGames.Sim.Combat
 
         private static bool WeaponEmgValid(in CombatWeapon w, int programs) => w.ProgramRef >= 0 && w.ProgramRef <= programs && w.SpawnFlight <= 1;
 
-        private static bool UnitEmgValid(short profile, in EmgUnitState u) => profile >= -1 && u.LastHitBy >= 0 && u.LastHitChain >= 0;
+        private static bool UnitEmgValid(short profile, in EmgUnitState u) => profile >= -1 && u.LastHitBy >= 0 && u.LastHitChain >= 0 && u.HeatLatch <= 1;
 
         private static bool WreckValid(in EmgWreck k) =>
             k.Id > 0 && IsFinite(k.Pos) && !double.IsNaN(k.Born) && !double.IsNaN(k.Until) && !double.IsNaN(k.DwellSince)

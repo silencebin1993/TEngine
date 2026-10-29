@@ -2222,7 +2222,7 @@ namespace BinGames.Sim.Combat
                 {
                     dmg *= math.max(0f, 1f - d.Armor[k].x);
                 }
-                CombatLogic.DamageUnit(ref d, k, dmg, i); // 结构单位：对建筑倍率与溅射在 DamageUnit 里照常
+                CombatLogic.DamageFrom(ref d, k, dmg, i, EmgCode.SrcImpact); // 结构单位：对建筑倍率与溅射在 DamageUnit 里照常
                 if (structure)
                 {
                     wall = true;

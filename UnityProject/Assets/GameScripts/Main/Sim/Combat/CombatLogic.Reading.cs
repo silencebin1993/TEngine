@@ -82,6 +82,7 @@ namespace BinGames.Sim.Combat
             if (wp.MarkSeconds > 0f && d.IsAlive(t))
             {
                 d.MarkedUntil[t] = now + wp.MarkSeconds;
+                EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[t], wp.MarkSeconds, 0f, 0, d.Pos[t]); // EMG1-BUS-01：evt.marked（宿主 = 打上标记的这次出手）
             }
             if (namedReactions && wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(a, CombatUnitFlags.ReactionSpent))
             {
@@ -245,6 +246,7 @@ namespace BinGames.Sim.Combat
             {
                 d.Set(a, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
+                EmgOnOverheat(ref d, a, heat); // EMG1-BUS-01：evt.overheat
             }
         }
 
@@ -371,7 +373,10 @@ namespace BinGames.Sim.Combat
             // 穿透：攻击方向上、目标身后的几个。
             if (r.PierceHits > 0 && r.PierceRange > 0f)
             {
+                ushort hc = d.EmgCtx.HitCode;
+                d.EmgCtx.HitCode = EmgCode.HitAfterPierce; // EMG1-BUS-01：身后被穿到的这几下是“穿透后”命中
                 PierceBehind(ref d, a, t, from, hitPos, baseDamage * (r.PierceRatio > 0f ? r.PierceRatio : 1f), r, want, ref hit);
+                d.EmgCtx.HitCode = hc;
             }
             // 连锁：从命中点依次跳向最近的未命中目标。
             if (r.ChainHits > 0 && r.ChainRange > 0f)
@@ -388,7 +393,10 @@ namespace BinGames.Sim.Combat
                     }
                     hit.Add(k);
                     dmg *= r.ChainFalloff > 0f ? r.ChainFalloff : 1f;
+                    ushort hc = d.EmgCtx.HitCode;
+                    d.EmgCtx.HitCode = EmgCode.HitChain; // EMG1-BUS-01：连锁跳到的命中
                     DamageUnit(ref d, k, dmg, a);
+                    d.EmgCtx.HitCode = hc;
                     if (r.StatusMask != 0u)
                     {
                         ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a, dmg);
@@ -1216,7 +1224,9 @@ namespace BinGames.Sim.Combat
                         }
                         if (tickDamage > 0f)
                         {
+                            d.EmgCtx = EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone); // EMG1-BUS-01：evt.hurt 来源 = 区域（区域做宿主的 evt.hit 区域节拍归 EMG1-TRIG-01）
                             DamageUnit(ref d, k, tickDamage, owner);
+                            d.EmgCtx = EmgCtx.None;
                         }
                         uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
                         // 区域节拍的“这一击”：区域自己的节拍伤害；没有直接伤害的纯状态区域取它挂的持续伤害一个节拍的量（如爆燃残留的燃烧区）；
@@ -1585,6 +1595,7 @@ namespace BinGames.Sim.Combat
                 int owner = d.SlotOf(dr.Owner);
                 if (owner < 0 || !d.IsAlive(owner) || dr.Until <= now)
                 {
+                    EmgDroneExpire(ref d, dr); // EMG1-BUS-01：evt.expire（无人机 / 哨戒桩到期或母机没了）
                     continue;
                 }
                 dr.Prev = dr.Pos;
@@ -1649,6 +1660,7 @@ namespace BinGames.Sim.Combat
                         double tNow = now;
                         bool wasMarked = d.MarkedUntil[target] > tNow;
                         double2 hitPos = d.Pos[target];
+                        EmgDroneBegin(ref d, dr, owner, target, wp.Program); // EMG1-BUS-01：每架每次开火 = 一次出手（evt.fire；随后的 evt.hit / evt.kill 以无人机为宿主）
                         float dealt = StrikeDamage(ref d, owner, target, dr.Damage, r, dr.Pos, false, 0f);
                         if (DamageUnit(ref d, target, dealt, owner))
                         {
@@ -1660,6 +1672,7 @@ namespace BinGames.Sim.Combat
                             droneWp.Reading.EscortDrones = 0;
                             Anchored(ref d, owner, target, hitPos, dealt, dr.Damage, droneWp, wasMarked, dr.Pos, true);
                         }
+                        EmgShotEnd(ref d);
                     }
                 }
                 d.Drones[write++] = dr;
@@ -1716,11 +1729,14 @@ namespace BinGames.Sim.Combat
                 }
             }
             float jump = primaryDamage;
+            ushort hc = d.EmgCtx.HitCode;
+            d.EmgCtx.HitCode = EmgCode.HitChain; // EMG1-BUS-01：标记跳转 = 连锁命中
             for (int q = 0; q < picked.Length; q++)
             {
                 jump *= jumpFalloff;
                 DamageUnit(ref d, picked[q], jump, a);
             }
+            d.EmgCtx.HitCode = hc;
             return picked.Length;
         }
 

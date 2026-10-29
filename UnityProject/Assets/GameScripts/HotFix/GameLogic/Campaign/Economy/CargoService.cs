@@ -1137,6 +1137,8 @@ namespace GameLogic.Campaign.Economy
                 };
                 MergeOrAppend(st, h); // 材料并入同机同种已有的那条（FGR-LOOT-030“每 10 个占 1”按总件数算）
                 st.CargoAutoPicked++;
+                // EMG1-BUS-01（FGR-EMG-066）：机器拾取掉落 / 废料 → evt.pickup（Code = 物品类：散装材料 = 废料，其余 = 掉落；碎屑归物质层 EMG2-MAT-01）。按需：机器程序不读就不入队。
+                Combat.CombatSites.InjectEmgPickup(by, bulk);
                 if (take >= g.Amount)
                 {
                     (removed ??= new List<string>()).Add(g.GroundItemId);
