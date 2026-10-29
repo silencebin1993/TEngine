@@ -869,9 +869,9 @@ namespace GameLogic.EditorTools
                 float coveredHp = Hp(k, foe);
                 k.FireAt(me, foe, k.Time);
                 k.TryGetWreck(0, out EmgWreck w0);
-                Expect(added && r == CombatFireResult.Ok && Near(w1.Hp, 20f) && ab && ae.Other == wid && ae.OtherKind == EmgEntKind.Wreck && Near(ae.Value, 10f) && Near(coveredHp, 50f)
+                Expect(added && r == CombatFireResult.Covered && Near(w1.Hp, 20f) && ab && ae.Other == wid && ae.OtherKind == EmgEntKind.Wreck && Near(ae.Value, 10f) && Near(coveredHp, 50f)
                        && Near(w0.Hp, 0f) && Near(Hp(k, foe), 40f) && k.EmgBusStats.CoverAbsorbed == 3,
-                    $"残骸（0, 3，耐久 30）挡在即时命中线段上：目标获得掩护（3 发都被吸收，目标仍 {coveredHp:0} 血），残骸耐久 30 → {w1.Hp:0} → 0，evt.absorb（Other = 残骸 {wid}）；耐久归 0 后第 4 发照常命中（{Hp(k, foe):0}）");
+                    $"残骸（0, 3，耐久 30）挡在即时命中线段上：开火结果 = 被掩体挡下（{r}，EMG1-ENT-01 关闭 DEBT-EMG1TRIG01-02），目标获得掩护（3 发都被吸收，目标仍 {coveredHp:0} 血），残骸耐久 30 → {w1.Hp:0} → 0，evt.absorb（Other = 残骸 {wid}）；耐久归 0 后第 4 发照常命中（{Hp(k, foe):0}）");
             }
             using (var k = new CombatKernel(Cfg(), 16))
             {

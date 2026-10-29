@@ -1748,7 +1748,8 @@ namespace BinGames.Sim.Combat
                     {
                         CombatFireResult r = CombatLogic.FireAt(ref d, i, best);
                         gs.GuardLastResult = (int)r;
-                        if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming || r == CombatFireResult.Launched)
+                        // EMG1-ENT-01：Covered = 开过火、被残骸 / 掩体挡下，冷却照走（与热更层调用方同一口径）
+                        if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming || r == CombatFireResult.Launched || r == CombatFireResult.Covered)
                         {
                             su.HealCd = math.max(0.05f, CombatLogic.EffectiveCooldown(wp));
                             gs.GuardShots++;

@@ -530,7 +530,7 @@ namespace GameLogic.EditorTools
             {
                 cases.Add(("事件节点 200", Patch(snap, d => d[bseg.at + progEv * bseg.stride + 28] = 200), CombatLoadResult.InvalidValue)); // 记录内偏移：码/深/种/种 4 + Code×2 4 + Ent/Other/Prog/Chain/Seq 20 = 28
             }
-            (int at, int stride) kseg = FindSegment(snap, EmgConst.SegWrecks, 20, k.WreckCount);
+            (int at, int stride) kseg = FindSegment(snap, EmgConst.SegWrecks, 26, k.WreckCount); // EMG1-ENT-01：20 → 26 个字段（尾部 +6 滑行 / 推动）
             cases.Add(("残骸耐久非数", Patch(snap, d => WriteInt(d, kseg.at + 44, BitConverter.SingleToInt32Bits(float.NaN))), CombatLoadResult.InvalidValue));
             if (k.ProjectileCount >= 2)
             {

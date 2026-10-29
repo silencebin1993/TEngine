@@ -974,7 +974,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>线段 a→b 与某种圆（障碍 / 有耐久的残骸）的最早交点：返回圆在原表里的下标（没有 −1），<paramref name="tHit"/> ∈ [0, 1]。
         /// <paramref name="skipEnds"/>：线段起点或终点已在圆内的不算（站在残骸上的单位不算躲在它后面）。O(线段外接框覆盖的格 × 格内圆)。</summary>
-        private static int EmgHashSegment(ref CombatData d, double2 a, double2 b, byte kind, bool skipEnds, out double tHit)
+        private static int EmgHashSegment(ref CombatData d, double2 a, double2 b, byte kind, bool skipEnds, out double tHit, bool skipStart = false)
         {
             tHit = 2.0;
             EmgHashEnsure(ref d);
@@ -1007,9 +1007,9 @@ namespace BinGames.Sim.Combat
                         }
                         double2 center = new double2(c.x, c.y);
                         double r2 = (double)c.z * c.z;
-                        if (skipEnds && (math.lengthsq(a - center) <= r2 || math.lengthsq(b - center) <= r2))
+                        if ((skipEnds || skipStart) && (math.lengthsq(a - center) <= r2 || (skipEnds && math.lengthsq(b - center) <= r2)))
                         {
-                            continue;
+                            continue; // EMG1-ENT-01：skipStart = 只跳过起点已在圆内的（弹体从残骸里飞出去不算撞上）
                         }
                         double t = SegmentCircleT(a, b, center, c.z);
                         if (t >= 0 && (t < tHit || (t == tHit && idx < best)))
@@ -1028,7 +1028,7 @@ namespace BinGames.Sim.Combat
         /// 即时命中的掩体（ADR ③；FGR-EMG-113“残骸背后的单位获得掩护”）：结算前对出手者 → 目标的线段做一次残骸检测（固态斑块随 EMG2 并入同一哈希）；
         /// 地点没有残骸时 O(1) 跳过、与旧行为逐字一致。挡住时这一击被残骸吸收（扣残骸耐久、发 evt.absorb），目标不受伤。
         /// </summary>
-        internal static bool EmgInstantCovered(ref CombatData d, int a, int t, in CombatWeapon wp)
+        internal static bool EmgInstantCovered(ref CombatData d, int a, int t, in CombatWeapon wp, float kineticCoef)
         {
             // 只对射弹类即时命中（含敌人的 Instant 攻击）；格斗 / 力场 / 布区 / 放机不是一条射击线段。
             if (d.Wrecks.Length == 0 || a < 0 || t < 0 || wp.Reading.Carrier != CombatCarrier.Projectile)
@@ -1047,6 +1047,9 @@ namespace BinGames.Sim.Combat
             EmgStat(ref d, 5);
             double2 at = d.Pos[a] + (d.Pos[t] - d.Pos[a]) * tHit;
             EmgShotEvent(ref d, EmgEventKind.Absorb, k.Id, damage, 0f, 0, at, EmgEntKind.Wreck);
+            // EMG1-ENT-01（FGR-EMG-114）：单次动能（伤害 × 载体系数）够时残骸崩出破片，归出手者、链深 + 1。
+            EmgWreckStruck(ref d, w, math.max(0f, damage) * kineticCoef, EmgDir(d.Pos[t] - d.Pos[a]), d.Id[a], FactionOfSlot(ref d, a),
+                d.EmgCtx.Prog >= 0 ? d.EmgCtx.Depth : (byte)0, d.EmgCtx.Prog >= 0 ? d.EmgCtx.Chain : 0);
             return true;
         }
 

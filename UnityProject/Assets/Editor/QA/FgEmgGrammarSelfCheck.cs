@@ -884,6 +884,32 @@ namespace GameLogic.EditorTools
                 Expect(line.Take(3).All(f => Near(Hp(k, f), 190f)) && Near(Hp(k, line[3]), 200f) && k.EmgEnqueuedOf(EmgEventKind.Pierce) == 2 && lastHit.Code == EmgCode.HitAfterPierce,
                     $"穿透 2 次：同一直线上前 3 个各掉 10、第 4 个不掉（次数用尽在第 3 个处终结）；evt.pierce {k.EmgEnqueuedOf(EmgEventKind.Pierce)} 次，后面的命中 Code = 穿透后（{lastHit.Code}）");
             }
+            // EMG1-ENT-01（DEBT-EMG1GRM01-01）：穿透按质量——比弹体轻的目标不消耗次数，不轻于弹体的每穿一个消耗 1 次（FG19A 第 1.1 节）
+            foreach (bool light in new[] { true, false })
+            {
+                using (var k = new CombatKernel(Cfg(), 16))
+                {
+                    int p = Tree(k, Root().Verb(EmgVerb.PassThrough, 1f, 1f).Read(EmgEventKind.Pierce));
+                    int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 30f, 2f)));
+                    int[] line = { Foe(k, new double2(0, 4)), Foe(k, new double2(0, 6)), Foe(k, new double2(0, 8)) };
+                    foreach (int f in line)
+                    {
+                        k.SetUnitProfile(f, -1, light ? 0.5f : 5f);
+                    }
+                    k.FireAt(me, line[0], k.Time);
+                    StepN(k, 90);
+                    if (light)
+                    {
+                        Expect(line.All(f => Near(Hp(k, f), 190f)) && k.EmgEnqueuedOf(EmgEventKind.Pierce) == 3,
+                            $"穿透 1 次 × 轻目标（质量 0.5 < 弹体）：3 个都被穿过各掉 10（{string.Join("/", line.Select(f => Hp(k, f)))}），evt.pierce {k.EmgEnqueuedOf(EmgEventKind.Pierce)} 次（不消耗次数）");
+                    }
+                    else
+                    {
+                        Expect(Near(Hp(k, line[0]), 190f) && Near(Hp(k, line[1]), 190f) && Near(Hp(k, line[2]), 200f) && k.EmgEnqueuedOf(EmgEventKind.Pierce) == 1,
+                            $"对照：穿透 1 次 × 重目标（质量 5）：只穿过第 1 个、在第 2 个处终结、第 3 个不掉（{string.Join("/", line.Select(f => Hp(k, f)))}），evt.pierce {k.EmgEnqueuedOf(EmgEventKind.Pierce)} 次");
+                    }
+                }
+            }
             using (var k = new CombatKernel(Cfg(), 16))
             {
                 // [跳弹, 壁撞]：单位面 1 次、障碍面 2 次，分开计

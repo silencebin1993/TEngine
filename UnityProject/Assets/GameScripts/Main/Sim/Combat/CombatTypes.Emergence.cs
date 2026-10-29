@@ -87,6 +87,29 @@ namespace BinGames.Sim.Combat
 
         /// <summary>一份快照最多几个 Emg 段（读档防坏值）。</summary>
         public const int MaxSegments = 256;
+
+        // ── EMG1-ENT-01（FG19 FGR-EMG-110～114；FG19B 第 6 节；fg.TbHomeTuning emg.wreck.* / emg.impact.v_min / emg.push.*）：初值（运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）──
+        public const float DefaultWreckSeconds = 90f;
+        public const float DefaultWreckHpRatio = 0.5f;
+        public const float DefaultWreckSlow = 0.5f;
+        public const float DefaultImpactVMin = 4f;
+        public const float DefaultPushDMin = 0.5f;
+        public const float DefaultKnockSeconds = 0.2f;
+        public const float DefaultShoveRefMass = 10f;
+        /// <summary>残骸半径 = 原单位半径 × 本值（FGR-EMG-113）。</summary>
+        public const float WreckRadiusRatio = 0.9f;
+        /// <summary>实体档案种类默认的槽位（fg.TbEntityProfile 的 entity.* 行按此顺序写在档案表最前面；热更层 EmgEntityProfiles.SlotIds 同序）。</summary>
+        public const short SlotProjectile = 0, SlotHeavy = 1, SlotDrone = 2, SlotSentry = 3, SlotFragment = 4, SlotMachine = 5, SlotEnemy = 6,
+            SlotBoss = 7, SlotTurret = 8, SlotStructure = 9, SlotWreck = 10;
+        public const int ProfileSlots = 11;
+        /// <summary>材质码（evt.kill Code = 阵亡者材质；0 = 未知）。</summary>
+        public const byte MatSteel = 1, MatAlloy = 2, MatComposite = 3, MatCeramic = 4, MatGlass = 5;
+        /// <summary>阵亡标志：直接击毁（碎裂 / 湮灭 / 处决等不留残骸，ADR ⑦ 第 3 条）。</summary>
+        public const byte DeathNoWreck = 1;
+        /// <summary>evt.push 的原因端口码：击退 / 推铲（grm.mod.bounce 的击退读法）、牵引读法（fld.pull）。</summary>
+        public const ushort PushCauseKnock = 112, PushCausePull = 701;
+        /// <summary>残骸滑行速度低于本值视为停住（米 / 秒）。</summary>
+        public const float WreckRestSpeed = 0.05f;
     }
 
     /// <summary>FG19 FGR-EMG-060 事件清单（封闭 29 条；码 = 端口码 − 300）。与 <see cref="CombatEventKind"/> 完全分开，不占玩法段也不占提示段。</summary>
@@ -201,6 +224,13 @@ namespace BinGames.Sim.Combat
         public long OrderErrors;
         /// <summary>处理完一步仍有剩余（顺延到下一步）的步数。</summary>
         public long StepsDeferred;
+        /// <summary>EMG1-ENT-01：飞行弹体被残骸吸收 / 撞残骸反弹的次数、生成的破片、弹体池满没放出的破片（正常为 0，模糊测试器报告）、撞击与位移次数（不论有没有程序读）。</summary>
+        public long WreckAbsorbs;
+        public long WreckBounces;
+        public long FragSpawned;
+        public long FragLost;
+        public long Impacts;
+        public long Pushes;
         public int LastSeq;
         public int HasLast;
         public int LastDepthCutChain;
@@ -490,6 +520,10 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-BUS-01（FGR-EMG-060 第 13 行）：1 = 过热过、还没回落到阈值 × emg.heat.cool_ratio 以下（回落时发 evt.cooled 并清 0）。
         /// 只在地点有程序读 evt.cooled 时才置位（没有程序的地点逐字不变）。格式 16 单位段尾部追加的第 5 个字段，短段读到取 0。</summary>
         public byte HeatLatch;
+        /// <summary>EMG1-ENT-01：本单位质量（0 = 按档案 / 种类推算，见 CombatLogic.EmgUnitMass）。单位段第 6 个字段，短段读到取 0。</summary>
+        public float Mass;
+        /// <summary>EMG1-ENT-01：待处理的阵亡标志（外部血量单位收到“直接击毁”致死请求时置 <see cref="EmgConst.DeathNoWreck"/>，热更层判死回到阵亡入口时读走）。单位段第 7 个字段。</summary>
+        public byte DeathFlags;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -525,6 +559,15 @@ namespace BinGames.Sim.Combat
         public byte NoSalvage;
         public byte Pad0;
         public short Pad1;
+        // ── EMG1-ENT-01：被推动（推铲 / 击退）的滑行状态（残骸段尾部追加，短段读到取 0 = 静止）──
+        /// <summary>当前速度（米 / 秒）与匀减速度（米 / 秒²）；速度降到 <see cref="EmgConst.WreckRestSpeed"/> 以下停住。</summary>
+        public float2 Vel;
+        public float Decel;
+        /// <summary>本次推动已滑行的距离（停住时 ≥ emg.push.d_min 发 evt.push）。</summary>
+        public float PushDist;
+        /// <summary>推动它的单位 ID（撞击伤害的攻击者）与原因端口码。</summary>
+        public int PushBy;
+        public ushort PushCause;
 
         /// <summary>实体档案下标（继承原单位；−1 = 种类默认）。不钳位：−2 这类坏值照原样留着，由校验拒绝。</summary>
         public short Profile
@@ -532,6 +575,80 @@ namespace BinGames.Sim.Combat
             get => (short)(ProfileRef - 1);
             set => ProfileRef = (short)(value + 1);
         }
+    }
+
+    /// <summary>EMG1-ENT-01（ADR ⑦ 第 5 条“合并请求”）：一步内某个外部血量单位累计的持续类伤害（区域节拍 / 状态持续伤害 / 斑块接触），步末合成一条伤害请求。瞬时量，不进快照。</summary>
+    public struct EmgMergeReq
+    {
+        public int Slot;
+        public float Damage;
+        /// <summary>伤害最大的那一份的攻击者单位 ID 与它的伤害。</summary>
+        public int By;
+        public float ByDamage;
+    }
+
+    /// <summary>
+    /// EMG1-ENT-01（FG19 FGR-EMG-111；ADR ⑦“静态属性走档案表”）：一行实体档案（热更层按 fg.TbEntityProfile 编好：实体 / 底盘行的 −1 已换成材质值）。
+    /// 前 <see cref="EmgConst.ProfileSlots"/> 行是种类默认（槽位见 EmgConst.Slot*），其后是“种类 × 材质 / 底盘”的组合行，单位的 EProfile 指向它们。不进快照（表数据，读档沿用当前的）。
+    /// </summary>
+    public struct EmgProfile
+    {
+        /// <summary>质量（0 = 按规则推算：敌人 8 × 半径²，限 1～80）。</summary>
+        public float Mass;
+        public float Conductive;
+        public float Flammable;
+        public float Magnetic;
+        /// <summary>寒、热、电、腐蚀、磁、入侵六列抗性（相变累积速度读，阶段 2）。</summary>
+        public float ResistCold, ResistHeat, ResistElec, ResistCorrode, ResistMag, ResistHack;
+        public float Brittle;
+        /// <summary>材质码（EmgConst.Mat*）。</summary>
+        public byte Material;
+        /// <summary>1 = 可被击退 / 推铲 / 场推动。</summary>
+        public byte Displace;
+
+        /// <summary>FG19B 第 6 节钢材质初值（没有表的自检夹具用；热更层载入表后整份覆盖）。</summary>
+        public static EmgProfile Steel(float mass, float cond = 0.9f, float flam = 0.1f, float mag = 0.9f, byte displace = 1) => new EmgProfile
+        {
+            Mass = mass, Conductive = cond, Flammable = flam, Magnetic = mag, ResistHeat = 0.1f, Brittle = 1f, Material = EmgConst.MatSteel, Displace = displace,
+        };
+    }
+
+    /// <summary>EMG1-ENT-01（FG19B 第 6.3 节、第 2.9 节）：载体动能系数与“残骸重击”破片参数（fg.TbEntityProfile 的 kinetic.* / fragment.wreck_heavy 行）。表数据，不进快照。</summary>
+    public struct EmgEntityParams
+    {
+        public float KineticProjectile, KineticHeavy, KineticBeam, KineticMelee, KineticDrone, KineticAura, KineticField, KineticFragment;
+        /// <summary>撞击动能 = 质量 × 速度² × 本值。</summary>
+        public float KineticImpact;
+        public int FragCount;
+        public float FragDamage, FragSpeed, FragRange, FragThreshold;
+
+        public static EmgEntityParams Default => new EmgEntityParams
+        {
+            KineticProjectile = 1f, KineticHeavy = 2f, KineticBeam = 0f, KineticMelee = 2.2f, KineticDrone = 0.5f, KineticAura = 0.2f, KineticField = 0.3f,
+            KineticFragment = 2.5f, KineticImpact = 0.05f, FragCount = 2, FragDamage = 5f, FragSpeed = 16f, FragRange = 5f, FragThreshold = 40f,
+        };
+    }
+
+    /// <summary>
+    /// EMG1-ENT-01（FGR-EMG-110 / 111：“不合并数据结构，只统一公共属性语义”）：任一实体（弹体 / 无人机 / 哨戒桩 / 单位 / 残骸 / 破片）的公共属性块，
+    /// 由 <see cref="CombatKernel.TryGetEntityProps"/> 按实体种类从各自的结构 + 档案表拼出来。热量：单位取武器积热、残骸取自带；电荷阶段 2 起（现为残骸自带 / 0）。
+    /// </summary>
+    public struct EmgEntityProps
+    {
+        public EmgEntKind Kind;
+        /// <summary>0 = 本种类；1 = 哨戒桩（无人机结构里插地的那种）；2 = 破片（弹体池里的 Fragment）。</summary>
+        public byte Sub;
+        public float Mass;
+        public float Conductive;
+        public float Flammable;
+        public float Magnetic;
+        public float Heat;
+        public float Charge;
+        /// <summary>结构完整度 = 剩余耐久比例（单位、残骸；弹体 / 无人机 / 破片恒 1）。</summary>
+        public float Integrity;
+        public byte Material;
+        public byte Displace;
+        public float ResistCold, ResistHeat, ResistElec, ResistCorrode, ResistMag, ResistHack;
     }
 
     /// <summary>EMG1-FLASH-01：一架无人机 / 哨戒桩的刷写读数（悬停“刷写 3 / 4 条（带宽已满）”“离母机过远，暂停 1 条”与自检）。</summary>
@@ -583,6 +700,11 @@ namespace BinGames.Sim.Combat
         public int ArmCursor;
         /// <summary>EMG1-TRIG-01：EmgHash 要重建（障碍 / 残骸变了；读档、清战斗后为 1）。运行时量，不进快照。</summary>
         public byte HashDirty;
+        /// <summary>EMG1-ENT-01：本地点生成过的残骸、到期崩解、满容量时最早的崩解、被打掉的残骸（可靠计数，Emg 标量段尾部追加，短段读到取 0；崩解“计数可见、不静默”）。</summary>
+        public int WrecksBorn;
+        public int WrecksAged;
+        public int WrecksCapped;
+        public int WrecksDestroyed;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
     }

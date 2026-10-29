@@ -164,7 +164,8 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>单位级事件（阵亡 / 被击 / 过热 / 冷却完成……）与“单位做宿主”的事件：宿主 = 单位武器的程序根节点。在一次出手 / 载荷结算里发生的继承它的链与链深。</summary>
-        internal static void EmgUnitEvent(ref CombatData d, EmgEventKind k, int slot, int other, float value, float value2, ushort code, double2 pos)
+        internal static void EmgUnitEvent(ref CombatData d, EmgEventKind k, int slot, int other, float value, float value2, ushort code, double2 pos,
+            EmgEntKind otherKind = EmgEntKind.Unit)
         {
             if (!EmgSiteListens(ref d, k) || slot < 0 || slot >= d.Count)
             {
@@ -182,7 +183,7 @@ namespace BinGames.Sim.Combat
             EmgEmitHosted(ref d, new EmgEvent
             {
                 Kind = k, Depth = inCtx ? d.EmgCtx.Depth : (byte)0, EntKind = EmgEntKind.Unit, Ent = d.Id[slot],
-                OtherKind = other != 0 ? EmgEntKind.Unit : EmgEntKind.None, Other = other, Prog = prog, Node = 0,
+                OtherKind = other != 0 ? otherKind : EmgEntKind.None, Other = other, Prog = prog, Node = 0,
                 Chain = inCtx ? d.EmgCtx.Chain : 0, Code = code, Value = value, Value2 = value2, Pos = pos,
             }, EmgUnitHost(ref d, slot), dir);
         }
@@ -323,11 +324,17 @@ namespace BinGames.Sim.Combat
         {
             if (d.EmgListen == 0u)
             {
-                return DamageUnit(ref d, t, damage, attacker);
+                d.EmgMergeCont = (byte)(src == EmgCode.SrcZone || src == EmgCode.SrcPatch ? 1 : 0);
+                bool hit = DamageUnit(ref d, t, damage, attacker);
+                d.EmgMergeCont = 0;
+                return hit;
             }
             EmgCtx saved = d.EmgCtx;
             d.EmgCtx = EmgCtx.Source(attacker, EmgEntKind.Unit, (byte)src);
+            bool cont = src == EmgCode.SrcZone || src == EmgCode.SrcPatch; // EMG1-ENT-01：区域 / 斑块类持续伤害对外部血量单位按步合并
+            d.EmgMergeCont = (byte)(cont ? 1 : 0);
             bool landed = DamageUnit(ref d, t, damage, attacker);
+            d.EmgMergeCont = 0;
             d.EmgCtx = saved;
             return landed;
         }
@@ -546,13 +553,14 @@ namespace BinGames.Sim.Combat
                 return;
             }
             int ks = d.SlotOf(killerId);
+            ushort mat = EmgUnitMaterial(ref d, t); // EMG1-ENT-01：evt.kill Code = 阵亡者材质（实体档案）
             if (d.EmgCtx.Prog >= 0 && ks >= 0 && ks == d.EmgCtx.Owner)
             {
-                EmgShotEvent(ref d, EmgEventKind.Kill, d.Id[t], overflow, 0f, 0, d.Pos[t]);
+                EmgShotEvent(ref d, EmgEventKind.Kill, d.Id[t], overflow, 0f, mat, d.Pos[t]);
             }
             else if (ks >= 0 && ks != t)
             {
-                EmgUnitEvent(ref d, EmgEventKind.Kill, ks, d.Id[t], overflow, 0f, 0, d.Pos[t]);
+                EmgUnitEvent(ref d, EmgEventKind.Kill, ks, d.Id[t], overflow, 0f, mat, d.Pos[t]);
             }
         }
 

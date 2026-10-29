@@ -52,6 +52,19 @@ namespace BinGames.Sim.Combat
             bool wasMarked = d.MarkedUntil[t] > now;
             double2 primaryPos = d.Pos[t];
             float baseDamage = math.max(0f, wp.Damage);
+            // EMG1-GRM-01：根节点上的新动词（格斗侧偏；力场多个小脉冲 / 中心游移 / 越障 / 不被残骸挡；布区多块小落区 / 落点散开 / 越障 / 越过残骸）。没有程序时为空。
+            EmgMods em = default;
+            if (wp.Program >= 0)
+            {
+                EmgModsOf(ref d, wp.Program, 0, out em);
+            }
+            // EMG1-ENT-01（DEBT-EMG1GRM01-04）：掩体规则开时，力场的主目标在障碍 / 残骸后面同样打不到（与圈内其余目标同一条 EmgPulseBlocked），圈内其余照常结算；报“被掩体挡下”。
+            if (r.Carrier == CombatCarrier.Aura && EmgPulseBlocked(ref d, d.Pos[a], d.Pos[t], em))
+            {
+                Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
+                StrikeCarrierArea(ref d, a, t, baseDamage, r, em);
+                return CombatFireResult.Covered;
+            }
             float dealt = StrikeDamage(ref d, a, t, baseDamage, r, d.Pos[a], true, 0f);
             Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
             if (!DamageUnit(ref d, t, dealt, a))
@@ -59,14 +72,12 @@ namespace BinGames.Sim.Combat
                 return CombatFireResult.Invulnerable; // Demo：首领阶段不可伤时结算失败，不打标记、不跳转。
             }
             ReflectMelee(ref d, a, t, dealt);
-            PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
-
-            // EMG1-GRM-01：根节点上的新动词（格斗侧偏；力场多个小脉冲 / 中心游移 / 越障 / 不被残骸挡；布区多块小落区 / 落点散开 / 越障 / 越过残骸）。没有程序时为空。
-            EmgMods em = default;
-            if (wp.Program >= 0)
+            // EMG1-ENT-01（FGR-EMG-112）：击退读法（推铲 / 震荡）这一下把出手范围里的残骸推开（格斗按前方窄带、力场按一圈；每次出手一次，在主目标被击退之前按出手瞬间的位置算）。
+            if (r.Knockback > 0f && (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura))
             {
-                EmgModsOf(ref d, wp.Program, 0, out em);
+                EmgShoveWrecks(ref d, a, t, d.Pos[a], r.Knockback, r.Carrier == CombatCarrier.Melee);
             }
+            PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
             // 载体投送的其余目标（格斗扇形 / 力场一圈）：逐目标读法，不锚定。
             if (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura)
             {
@@ -374,7 +385,7 @@ namespace BinGames.Sim.Combat
             }
             if (r.Knockback > 0f && a >= 0 && d.IsAlive(t))
             {
-                Displace(ref d, t, origin, -r.Knockback, 0.0);
+                Displace(ref d, t, origin, -r.Knockback, 0.0, a, EmgConst.PushCauseKnock);
             }
         }
 
@@ -473,7 +484,7 @@ namespace BinGames.Sim.Combat
                     {
                         continue;
                     }
-                    Displace(ref d, k, center, math.min(r.PullStrength, (float)dist - 0.5f), 0.5);
+                    Displace(ref d, k, center, math.min(r.PullStrength, (float)dist - 0.5f), 0.5, a, EmgConst.PushCausePull);
                 }
             }
             // 跃击：攻击者扑近。
@@ -680,7 +691,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>把单位朝 <paramref name="center"/> 移动 <paramref name="meters"/> 米（负数 = 推开），不越过 <paramref name="keep"/> 米。
         /// 结构物、炮塔、主核心（优先级 0）不被推动；星球格网上走碰撞（不穿越悬崖 / 建筑）。</summary>
-        private static void Displace(ref CombatData d, int k, double2 center, float meters, double keep)
+        private static void Displace(ref CombatData d, int k, double2 center, float meters, double keep, int pusher, ushort cause)
         {
             if (math.abs(meters) < 1e-4f || !CanDisplace(ref d, k))
             {
@@ -699,7 +710,8 @@ namespace BinGames.Sim.Combat
                 return;
             }
             double2 from = d.Pos[k];
-            d.Pos[k] = MoveCollide(ref d, k, from, from + dir * step);
+            // EMG1-ENT-01（FGR-EMG-112）：实体层开时位移途中撞障碍 / 残骸 / 单位就停在撞点并按速度结算撞击，位移够远发 evt.push；关时逐字是原来的格网碰撞。
+            d.Pos[k] = EmgEntOn(ref d) ? EmgDisplaceUnit(ref d, k, from, from + dir * step, pusher, cause) : MoveCollide(ref d, k, from, from + dir * step);
         }
 
         internal static bool CanDisplace(ref CombatData d, int k)
@@ -1013,7 +1025,7 @@ namespace BinGames.Sim.Combat
         /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
         internal static float SlowedSpeed(ref CombatData d, int i, float speed)
         {
-            speed *= ChillFactor(ref d, i); // FG10-FAC-01：受寒（液氮）减速、冻结 = 0
+            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i); // FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
             if (d.StatusSlow[i] <= 0f || !d.StatusActive(i, d.Scalars[0].Time))
             {
                 return speed;
@@ -1097,7 +1109,9 @@ namespace BinGames.Sim.Combat
                 }
                 if (tick && d.StatusDps[k] > 0f)
                 {
+                    d.EmgMergeCont = 1; // EMG1-ENT-01：状态持续伤害对外部血量单位按步合并成一条请求
                     DamageUnit(ref d, k, d.StatusDps[k] * statusTick, d.SlotOf(d.StatusSource[k]));
+                    d.EmgMergeCont = 0;
                 }
             }
         }
@@ -1277,7 +1291,9 @@ namespace BinGames.Sim.Combat
                         if (tickDamage > 0f)
                         {
                             d.EmgCtx = zoneCtx;
+                            d.EmgMergeCont = 1; // EMG1-ENT-01：区域节拍伤害对外部血量单位按步合并成一条请求
                             DamageUnit(ref d, k, tickDamage, owner);
+                            d.EmgMergeCont = 0;
                             zoneCtx = d.EmgCtx;
                             d.EmgCtx = EmgCtx.None;
                         }

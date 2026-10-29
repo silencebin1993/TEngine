@@ -390,6 +390,13 @@ namespace GameLogic.Campaign.Regions
                 {
                     return pending.Result.Value;
                 }
+                if (fired && res == BinGames.Sim.Combat.CombatFireResult.Covered)
+                {
+                    // EMG1-ENT-01：开了火、被残骸挡下（目标没掉血）——记一条带原因的未命中，不说“弹体在飞”。
+                    var covered = HitResult.Fail(why, isAiSource, attackerLogicId);
+                    PushEvent(covered);
+                    return covered;
+                }
                 if (fired)
                 {
                     // 已经开火、但这一刻还没有伤害结算：弹体还在飞 / 重炮在瞄准。命中时内核的“受伤”事件照常记一条结果（OnKernelHit，按攻击者是不是正被直控记来源），

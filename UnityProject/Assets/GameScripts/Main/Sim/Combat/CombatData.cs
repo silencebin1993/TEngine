@@ -318,6 +318,12 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgSpawn> EmgPending;
         /// <summary>EMG1-TRIG-01：子形态参数（下标 = 子形态码 1～5；热更层按 fg.TbSubPayload 写，缺省 FG19A 初值）。表数据，不进快照。</summary>
         public NativeArray<EmgSubForm> EmgSubForms;
+        /// <summary>EMG1-ENT-01：实体档案表（前 EmgConst.ProfileSlots 行是种类默认；热更层按 fg.TbEntityProfile 写，缺省 FG19B 初值）与动能 / 破片参数（长度 1）。表数据，不进快照。</summary>
+        public NativeList<EmgProfile> EmgProfiles;
+        public NativeArray<EmgEntityParams> EmgEntParams;
+        /// <summary>EMG1-ENT-01（ADR ⑦ 第 5 条）：本步待合并的外部血量单位持续伤害（步末清空，不进快照）；EmgMergeCont = 1 时 DamageUnit 的外部血量分支往这里记而不是逐条发请求。</summary>
+        public NativeList<EmgMergeReq> EmgMerge;
+        public byte EmgMergeCont;
         /// <summary>EMG1-TRIG-01（ADR ③ / ⑤）：EmgHash——障碍圆与残骸圆的派生空间哈希（不进快照；障碍 / 残骸变化时置脏 <see cref="EmgScalars.HashDirty"/>，下次查询时重建）。</summary>
         public EmgHash EmgHash;
 

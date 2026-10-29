@@ -974,6 +974,12 @@ namespace GameLogic.Campaign.Regions
                 {
                     var r = (BinGames.Sim.Combat.CombatFireResult)e.Code;
                     bool destroyed = e.Code2 != 0;
+                    if (r == BinGames.Sim.Combat.CombatFireResult.Covered)
+                    {
+                        // EMG1-ENT-01（DEBT-EMG1TRIG01-02）：开了火、被残骸挡下。
+                        PushEvent(GameText.Format("squad.ev.covered", MachineNaming.Short(logicId), hostileId));
+                        return;
+                    }
                     if (r == BinGames.Sim.Combat.CombatFireResult.Launched)
                     {
                         // EMG1-TRIG-01（ADR-EMG-001 ③）：飞行弹体开火当下只报“已发射”；击毁在命中致死时由内核补发（Ok + 击毁，走下面的“击毁目标”文案）。

@@ -821,6 +821,7 @@
 - 容量：每地点 `emg.wreck.capacity`（256）；满了时最早的残骸崩解为碎屑斑块（转化，不消失）。
 - 与现有流程：远征战利品“残骸节点”、解析台“残骸”物品计数（`GL/Campaign/CampaignRecords.cs:877-880`）是另外的东西；己方机器阵亡后的现有回收流程与残骸实体的关系待核实，阶段 1 开工时对齐，不得出现“同一台机器的残骸被回收两次”。
 - 进内核快照（FGR-EMG-211）。
+- 阶段 1 落地（EMG1-ENT-01，按推荐默认执行（2026-10-28），待用户确认）：满 256 或到期时先发崩解计数（`WrecksCapped` / `WrecksAged`，可见、不静默）并消失，“崩解为金属碎屑斑块”由 EMG2-MAT-01 交付（DEBT-EMG1ENT01-01，最迟 EMG-2 出口，FGT-EMG-037）；阶段 1 所有地点残骸都按 90 秒到期，家园 / 前哨长期留存由 EMG2-PERSIST-01 交付（DEBT-EMG1ENT01-02）。T5 已核实：己方机器阵亡的现有流程（`MachineRegistry.MarkDeadByLogicId`）只做黑匣子 / 数据包 / 遗产掉落与突袭损失记录，没有回收残骸或返还废料；突袭 `enemy_wreck` 物品堆只来自敌方攻城单位，与内核残骸无关；己方残骸的 `NoSalvage` 保持到 EMG2-RECL-01。
 
 **FGR-EMG-114 破片实体（新增）**
 - 由碎裂、固态斑块破坏、残骸被重击、触发器的破片类子形态生成；本质是弹体池里的一种短寿命弹体，固定按 2 代处理（不再执行程序），命中仍发 `evt.hit`（链深 + 1），可被磁场吸动、可沾染。
@@ -1398,6 +1399,7 @@
 | `emg.smoke.lockloss_seconds` | 0.5 秒 | `emg.wreck.capacity` | 256 |
 | `emg.wreck.seconds` | 90 秒（野外） | `emg.wreck.hp_ratio` | 0.5 |
 | `emg.wreck.slow` | 0.5 | `emg.reclaim.max_ratio` | 0.15 |
+| `emg.push.knock_seconds` | 0.2 秒（击退等效用时：位移 ÷ 用时 = 撞击速度；EMG1-ENT-01 新增，按 FG19B §6.3 反推，待用户确认） | `emg.push.ref_mass` | 10（推铲推动残骸的参考质量：速度 × 10 ÷ 残骸质量；同上） |
 | `emg.relay.range` | 12 米 | `emg.relay.per_second` | 4 |
 | `emg.hijack.seconds` | 30 秒 | `emg.hijack.max` | 2 |
 | `emg.hijack.hp_ratio` | 0.3 | `emg.tempo.beat` | 0.5 秒 |

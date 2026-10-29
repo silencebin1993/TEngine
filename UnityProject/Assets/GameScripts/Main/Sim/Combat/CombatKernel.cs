@@ -950,6 +950,22 @@ namespace BinGames.Sim.Combat
                 _d.Set(i, CombatUnitFlags.Targetable, false);
                 _d.Cmd[i] = default;
             }
+            if (CombatLogic.EmgEntOn(ref _d))
+            {
+                if (wasAlive && !alive)
+                {
+                    // EMG1-ENT-01（ADR ⑦ 第 1 条）：热更层同步血量判死（SyncMachineHealth / SyncEnemyFromRecord）也走阵亡统一入口：残骸 + evt.death / evt.kill，
+                    // 击杀者 = 最后一次伤害请求的攻击者；随后的 Kill(unit, 0) 看到 Alive 已翻转直接返回，不重复生成。
+                    CombatLogic.EmgOnDeath(ref _d, i, CombatLogic.EmgResolveKiller(ref _d, i, 0), 0);
+                }
+                else if (alive && _d.EmgUnit[i].DeathFlags != 0)
+                {
+                    // 致死请求没把它打死（首领阶段免伤等）：撤掉“不留残骸”，下一次真正阵亡照常留残骸。
+                    EmgUnitState u = _d.EmgUnit[i];
+                    u.DeathFlags = 0;
+                    _d.EmgUnit[i] = u;
+                }
+            }
             Touch();
             return true;
         }
@@ -2758,6 +2774,13 @@ namespace BinGames.Sim.Combat
             {
                 staging.EmgSubForms[i] = _d.EmgSubForms[i];
             }
+            // EMG1-ENT-01：实体档案与动能 / 破片参数同是表数据（热更层按 fg.TbEntityProfile 写），读档沿用当前的。
+            staging.EmgProfiles.Clear();
+            for (int i = 0; i < _d.EmgProfiles.Length; i++)
+            {
+                staging.EmgProfiles.Add(_d.EmgProfiles[i]);
+            }
+            staging.EmgEntParams[0] = _d.EmgEntParams[0];
             _d.Dispose();
             _d = staging;
             _programIndex = null; // EMG1-KRN-01：程序去重索引是派生量，按读进来的程序表重建
@@ -4284,6 +4307,17 @@ namespace BinGames.Sim.Combat
                 {
                     A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
                     B = new float4(zn.Radius, left, color, CombatConst.EffectKindZone + (float)zn.Look),
+                });
+            }
+            // EMG1-ENT-01（FGR-EMG-113）：残骸——深灰斑点圆片，外圈 = 剩余耐久（占位外观，美术阶段替换；与区域同一次绘制调用，不另加 Draw Call）。
+            for (int w = 0; w < D.Wrecks.Length; w++)
+            {
+                EmgWreck k = D.Wrecks[w];
+                double2 p = k.Pos - Origin;
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                    B = new float4(k.Radius, k.MaxHp > 0f ? math.saturate(k.Hp / k.MaxHp) : 0f, CombatConst.EffectWreckColor, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
                 });
             }
             // FG10-FAC-01（FGR-FAC-008 ①“每条专属行为都有不少于 0.8 秒的视觉预警”）：澄净专属行为的预警画面——全部读内核状态（不靠可丢的提示事件），

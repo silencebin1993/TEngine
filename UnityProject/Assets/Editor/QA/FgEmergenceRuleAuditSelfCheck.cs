@@ -107,9 +107,9 @@ namespace GameLogic.EditorTools
         // ── A 源 = 表 ──
         private static void CheckSourceEqualsTables()
         {
-            Line("  · A. 源数据 fgdata_emg.py / fgdata_reading.py（--dump 的 EP / ED / EC / ES / ET）= 运行时五张表");
+            Line("  · A. 源数据 fgdata_emg.py / fgdata_reading.py（--dump 的 EP / ED / EC / ES / ET / EE）= 运行时六张表");
             (int code, string output) = FgProductionSelfCheck.RunPython(FgProductionSelfCheck.LocateRepo(), "tools/cell_tables/fgdata.py --dump");
-            string[] tags = { "EP\t", "ED\t", "EC\t", "ES\t", "ET\t" };
+            string[] tags = { "EP\t", "ED\t", "EC\t", "ES\t", "ET\t", "EE\t" };
             List<string> src = output.Replace("\r", string.Empty).Split('\n').Where(l => tags.Any(t => l.StartsWith(t, StringComparison.Ordinal))).ToList();
             Tables t = ConfigSystem.Instance.Tables;
             var rt = new List<string>();
@@ -118,10 +118,14 @@ namespace GameLogic.EditorTools
             rt.AddRange(t.TbPortCarrier.DataList.Select(r => J("EC", r.Id, r.Port, r.Carrier, r.Verb, Py(r.A), Py(r.B), Py(r.C), r.Mag, r.TextKey)));
             rt.AddRange(t.TbSubPayload.DataList.Select(r => J("ES", r.Id, r.Code, r.Carrier, Py(r.Speed), Py(r.Life), Py(r.LifeRatio), Py(r.Radius), Py(r.RadiusRatio), Py(r.Kinetic), r.KineticInherit, r.NameKey)));
             rt.AddRange(t.TbChassisTrait.DataList.Select(r => J("ET", r.Id, r.Chassis, r.Kind, r.AppliesTo, r.StatePorts, r.ParamKeys, r.Stage, r.Reserved, r.NameKey, r.DescKey)));
+            // EMG1-ENT-01 实体档案（EE）同样走 --dump 逐字段比对；FgDataPipelineSelfCheck 因此排除 EE。
+            rt.AddRange(t.TbEntityProfile.DataList.Select(r => J("EE", r.Id, r.Kind, r.Material, Py(r.Mass), Py(r.Conductive), Py(r.Flammable), Py(r.Magnetic),
+                Py(r.ResistCold), Py(r.ResistHeat), Py(r.ResistElec), Py(r.ResistCorrode), Py(r.ResistMag), Py(r.ResistHack), Py(r.Brittle), r.Displace, Py(r.Kinetic),
+                r.Count, Py(r.Damage), Py(r.Speed), Py(r.Range), Py(r.Threshold), r.NameKey)));
             List<string> onlySrc = src.Except(rt).ToList();
             List<string> onlyRt = rt.Except(src).ToList();
             Expect(code == 0 && src.Count > 0 && onlySrc.Count == 0 && onlyRt.Count == 0 && src.Count == rt.Count,
-                $"源数据 {src.Count} 行 = 运行时表 {rt.Count} 行，逐字段一致（端口 {t.TbChannelPort.DataList.Count}、声明 {t.TbChannelDecl.DataList.Count}、端口 × 载体 {t.TbPortCarrier.DataList.Count}、子形态 {t.TbSubPayload.DataList.Count}、底盘特性 {t.TbChassisTrait.DataList.Count}）"
+                $"源数据 {src.Count} 行 = 运行时表 {rt.Count} 行，逐字段一致（端口 {t.TbChannelPort.DataList.Count}、声明 {t.TbChannelDecl.DataList.Count}、端口 × 载体 {t.TbPortCarrier.DataList.Count}、子形态 {t.TbSubPayload.DataList.Count}、底盘特性 {t.TbChassisTrait.DataList.Count}、实体档案 {t.TbEntityProfile.DataList.Count}）"
                 + (onlySrc.Count + onlyRt.Count > 0 ? "；不一致：" + string.Join(" | ", onlySrc.Concat(onlyRt).Take(4)) : string.Empty) + (code != 0 ? "；python 退出码 " + code : string.Empty));
         }
 

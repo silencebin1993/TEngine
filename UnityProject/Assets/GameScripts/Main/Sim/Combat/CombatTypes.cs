@@ -136,6 +136,8 @@ namespace BinGames.Sim.Combat
         public const int MuzzleFlashColor = 0xFFD27A;
         public const int EffectFoeColor = 0xFA7330;
         public const int EffectNeutralColor = 0xB0B0B0;
+        /// <summary>EMG1-ENT-01：残骸的占位颜色（深灰，与中立区域的浅灰区分）。</summary>
+        public const int EffectWreckColor = 0x5C5752;
         /// <summary>FG10-FAC-01：澄净专属行为的预警画面（喷嘴蓄压落点、枢轴扫臂前方扇区、自爆引信半径、投放落点）用的琥珀黄，与阵营色、状态色都区分开。</summary>
         public const int EffectWarnColor = 0xFFD23C;
     }
@@ -913,6 +915,9 @@ namespace BinGames.Sim.Combat
         CannotHitAir = 17,
         /// <summary>EMG1-TRIG-01（ADR-EMG-001 ③）：SpawnFlight 武器开了火、弹体已发射（不在开火当下判击毁；击毁由命中致死时的 Killed / evt.kill 与“攻击结果 = 击毁”回报）。</summary>
         Launched = 18,
+        /// <summary>EMG1-ENT-01（DEBT-EMG1TRIG01-02；FGR-EMG-113“残骸背后的单位获得掩护”）：开了火，但这一击被出手者与目标之间的残骸挡下（残骸扣耐久，目标不受伤）；
+        /// 力场的主目标在障碍 / 残骸后面也算（DEBT-EMG1GRM01-04）。只在 emg.stage ≥ 1（有残骸 / 掩体规则）时出现。</summary>
+        Covered = 19,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -1311,6 +1316,17 @@ namespace BinGames.Sim.Combat
         public int EmgFlashBandwidth;
         public float EmgFlashRange;
         public float EmgFlashStep;
+        /// <summary>EMG1-ENT-01：1 = 实体层开（热更层在 emg.stage ≥ 1 时置位）——机器 / 敌人 / 炮塔阵亡生成残骸，残骸挡弹、减速、可被推动，破片、撞击与位移事件，
+        /// 外部血量单位记最后攻击者。0 = 旧行为逐字不变（emg.stage = 0 的正式流程不生成残骸）。</summary>
+        public byte EmgEntity;
+        /// <summary>EMG1-ENT-01（fg.TbHomeTuning emg.wreck.seconds / hp_ratio / slow、emg.impact.v_min、emg.push.d_min / knock_seconds / ref_mass）。≤ 0 取 <see cref="EmgConst"/> 初值。</summary>
+        public float EmgWreckSeconds;
+        public float EmgWreckHpRatio;
+        public float EmgWreckSlow;
+        public float EmgImpactVMin;
+        public float EmgPushDMin;
+        public float EmgKnockSeconds;
+        public float EmgShoveRefMass;
 
         public static CombatConfig Default => new CombatConfig
         {

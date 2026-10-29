@@ -553,6 +553,160 @@ namespace BinGames.Sim.Combat
 
         public int WreckCount => _d.Wrecks.Length;
 
+        // ─────────────────────────────── EMG1-ENT-01：实体档案、公共属性、阵亡与残骸计数 ───────────────────────────────
+
+        /// <summary>写实体档案表（前 <see cref="EmgConst.ProfileSlots"/> 行是种类默认，其后组合行）与动能 / 破片参数。行数不足、数值不在 0～1 / 为负时整份拒绝（保留原表）。</summary>
+        public bool SetEntityProfiles(System.Collections.Generic.IReadOnlyList<EmgProfile> rows, in EmgEntityParams p)
+        {
+            if (rows == null || rows.Count < EmgConst.ProfileSlots || rows.Count > short.MaxValue || p.FragCount < 0 || p.FragCount > 16
+                || !(Finite(p.FragDamage) && Finite(p.FragSpeed) && Finite(p.FragRange) && Finite(p.FragThreshold) && Finite(p.KineticImpact)))
+            {
+                return false;
+            }
+            foreach (EmgProfile r in rows)
+            {
+                if (!(Finite(r.Mass) && r.Mass >= 0f && In01(r.Conductive) && In01(r.Flammable) && In01(r.Magnetic) && In01(r.ResistCold) && In01(r.ResistHeat)
+                      && In01(r.ResistElec) && In01(r.ResistCorrode) && In01(r.ResistMag) && In01(r.ResistHack) && Finite(r.Brittle) && r.Displace <= 1))
+                {
+                    return false;
+                }
+            }
+            _d.EmgProfiles.Clear();
+            foreach (EmgProfile r in rows)
+            {
+                _d.EmgProfiles.Add(r);
+            }
+            _d.EmgEntParams[0] = p;
+            return true;
+        }
+
+        private static bool In01(float v) => v >= 0f && v <= 1f;
+
+        public int EntityProfileCount => _d.EmgProfiles.Length;
+
+        public EmgProfile EntityProfileAt(int index) => CombatLogic.EmgProfileAt(ref _d, index);
+
+        public EmgEntityParams EntityParams => _d.EmgEntParams[0];
+
+        /// <summary>写单位的实体档案下标（机器按底盘、敌人按材质）与质量（0 = 按档案推算）；不碰涌现状态的其余字段。</summary>
+        public bool SetUnitProfile(int unitId, short profile, float mass)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0 || profile < -1 || profile >= _d.EmgProfiles.Length || !Finite(mass) || mass < 0f)
+            {
+                return false;
+            }
+            _d.EProfile[i] = profile;
+            EmgUnitState u = _d.EmgUnit[i];
+            u.Mass = mass;
+            _d.EmgUnit[i] = u;
+            Touch();
+            return true;
+        }
+
+        /// <summary>
+        /// FGR-EMG-110 / 111：任一实体的公共属性块（质量 / 导电 / 可燃 / 磁性 / 热量 / 电荷 / 完整度 / 材质 / 抗性）。单位按单位 ID；弹体（含破片）、无人机（含哨戒桩）、残骸按稳定 ID。
+        /// O(该种实体数)，只给表现层悬停与自检用，不按帧。
+        /// </summary>
+        public bool TryGetEntityProps(EmgEntKind kind, int id, out EmgEntityProps props)
+        {
+            props = default;
+            switch (kind)
+            {
+                case EmgEntKind.Unit:
+                {
+                    int i = _d.SlotOf(id);
+                    if (i < 0)
+                    {
+                        return false;
+                    }
+                    props = CombatLogic.EmgUnitProps(ref _d, i);
+                    return true;
+                }
+                case EmgEntKind.Projectile:
+                    for (int i = 0; i < _d.Projectiles.Length; i++)
+                    {
+                        if (_d.Projectiles[i].Id == id)
+                        {
+                            props = CombatLogic.EmgProjProps(ref _d, _d.Projectiles[i]);
+                            return true;
+                        }
+                    }
+                    return false;
+                case EmgEntKind.Drone:
+                    for (int i = 0; i < _d.Drones.Length; i++)
+                    {
+                        if (_d.Drones[i].Id == id)
+                        {
+                            props = CombatLogic.EmgDroneProps(ref _d, _d.Drones[i]);
+                            return true;
+                        }
+                    }
+                    return false;
+                case EmgEntKind.Wreck:
+                    for (int i = 0; i < _d.Wrecks.Length; i++)
+                    {
+                        if (_d.Wrecks[i].Id == id)
+                        {
+                            props = CombatLogic.EmgWreckProps(ref _d, _d.Wrecks[i]);
+                            return true;
+                        }
+                    }
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// ADR ⑦ 第 3 条“直接击毁”（碎裂 / 湮灭 / 处决等不留残骸）：普通单位当场阵亡且不留残骸；外部血量单位发一条致死伤害请求（伤害 = 镜像血量）并记“不留残骸”，
+        /// 热更层判死后经 SetHealth / Kill 回到阵亡入口（下一次血量同步不会把它复活）。阶段 2 的碎裂 / 处决规则调同一个内核入口。
+        /// </summary>
+        public bool DestroyDirect(int id, int attackerId)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                return false;
+            }
+            bool ok = CombatLogic.EmgDestroyDirect(ref _d, i, _d.SlotOf(attackerId));
+            Touch();
+            return ok;
+        }
+
+        /// <summary>残骸可靠计数（进快照）：生成过的、到期崩解的、满容量时最早崩解的、被打掉的（“崩解计数可见，不静默”）。</summary>
+        public (int Born, int Aged, int Capped, int Destroyed) WreckCounts
+        {
+            get
+            {
+                EmgScalars es = _d.EmgS[0];
+                return (es.WrecksBorn, es.WrecksAged, es.WrecksCapped, es.WrecksDestroyed);
+            }
+        }
+
+        /// <summary>测试 / 调试：给一块残骸一个滑行速度（与推铲同一套滑行 / 撞击结算），模拟“被推了一下”。</summary>
+        public bool PushWreckForTests(int wreckId, Unity.Mathematics.float2 velocity, int pusherUnitId)
+        {
+            for (int i = 0; i < _d.Wrecks.Length; i++)
+            {
+                if (_d.Wrecks[i].Id != wreckId)
+                {
+                    continue;
+                }
+                EmgWreck k = _d.Wrecks[i];
+                k.Vel = velocity;
+                float tau = _d.Config.EmgKnockSeconds > 0f ? _d.Config.EmgKnockSeconds : EmgConst.DefaultKnockSeconds;
+                k.Decel = Unity.Mathematics.math.length(velocity) / (2f * tau);
+                k.PushDist = 0f;
+                k.PushBy = pusherUnitId;
+                k.PushCause = EmgConst.PushCauseKnock;
+                _d.Wrecks[i] = k;
+                Touch();
+                return true;
+            }
+            return false;
+        }
+
         public bool TryGetWreck(int index, out EmgWreck w)
         {
             bool ok = index >= 0 && index < _d.Wrecks.Length;
@@ -641,14 +795,15 @@ namespace BinGames.Sim.Combat
 
         private bool EmgActive()
         {
-            if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0)
+            EmgScalars ec = _d.EmgS[0];
+            if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0)
             {
                 return true;
             }
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
-                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0)
+                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0 || u.Mass != 0f || u.DeathFlags != 0)
                 {
                     return true;
                 }
@@ -670,7 +825,7 @@ namespace BinGames.Sim.Combat
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
             w.Write(14 + (extraBytes > 0 ? 1 : 0)); // EMG1-FLASH-01：+ 段 14（刷写变体表）
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, 8, 1);
+            sw.Begin(EmgConst.SegScalars, 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -679,6 +834,10 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(es.NextChain);
             if (sw.F()) w.Write(es.EmgSeq);
             if (sw.F()) w.Write(es.NextZoneId); // EMG1-TRIG-01：尾部追加，短段读到取 1
+            if (sw.F()) w.Write(es.WrecksBorn); // EMG1-ENT-01：尾部追加 4 个残骸可靠计数，短段读到取 0
+            if (sw.F()) w.Write(es.WrecksAged);
+            if (sw.F()) w.Write(es.WrecksCapped);
+            if (sw.F()) w.Write(es.WrecksDestroyed);
             sw.EndRecord();
             sw.End();
 
@@ -717,7 +876,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, 5, _d.Count);
+            sw.Begin(EmgConst.SegUnits, 7, _d.Count);
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
@@ -726,6 +885,8 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(u.LastHitBy);
                 if (sw.F()) w.Write(u.LastHitChain);
                 if (sw.F()) w.Write(u.HeatLatch); // EMG1-BUS-01：尾部追加（同一格式 16 内只追加，短段读到取 0）
+                if (sw.F()) w.Write(u.Mass); // EMG1-ENT-01：尾部追加 2 个（质量、待处理阵亡标志），短段读到取 0
+                if (sw.F()) w.Write(u.DeathFlags);
                 sw.EndRecord();
             }
             sw.End();
@@ -795,7 +956,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWrecks, 20, _d.Wrecks.Length);
+            sw.Begin(EmgConst.SegWrecks, 26, _d.Wrecks.Length);
             for (int i = 0; i < _d.Wrecks.Length; i++)
             {
                 EmgWreck k = _d.Wrecks[i];
@@ -819,6 +980,12 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(k.SrcKind);
                 if (sw.F()) w.Write(k.DwellMatter);
                 if (sw.F()) w.Write(k.NoSalvage);
+                if (sw.F()) w.Write(k.Vel.x); // EMG1-ENT-01：尾部追加 6 个（滑行速度 / 减速度 / 已滑行距离 / 推动者 / 原因），短段读到取 0 = 静止
+                if (sw.F()) w.Write(k.Vel.y);
+                if (sw.F()) w.Write(k.Decel);
+                if (sw.F()) w.Write(k.PushDist);
+                if (sw.F()) w.Write(k.PushBy);
+                if (sw.F()) w.Write(k.PushCause);
                 sw.EndRecord();
             }
             sw.End();
@@ -1026,8 +1193,12 @@ namespace BinGames.Sim.Combat
                     buf.HadSeq = sr.F();
                     if (buf.HadSeq) es.EmgSeq = r.ReadInt32();
                     if (sr.F()) es.NextZoneId = r.ReadInt32();
+                    if (sr.F()) es.WrecksBorn = r.ReadInt32();
+                    if (sr.F()) es.WrecksAged = r.ReadInt32();
+                    if (sr.F()) es.WrecksCapped = r.ReadInt32();
+                    if (sr.F()) es.WrecksDestroyed = r.ReadInt32();
                     if (!sr.RecordOk || es.NextProjId < 1 || es.NextDroneId < 1 || es.NextWreckId < 1 || es.NextPatchId < 1 || es.NextFieldId < 1 || es.NextChain < 1
-                        || es.NextZoneId < 1)
+                        || es.NextZoneId < 1 || es.WrecksBorn < 0 || es.WrecksAged < 0 || es.WrecksCapped < 0 || es.WrecksDestroyed < 0)
                     {
                         return CombatLoadResult.InvalidValue;
                     }
@@ -1151,6 +1322,8 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.LastHitBy = r.ReadInt32();
                         if (sr.F()) u.LastHitChain = r.ReadInt32();
                         if (sr.F()) u.HeatLatch = r.ReadByte();
+                        if (sr.F()) u.Mass = r.ReadSingle();
+                        if (sr.F()) u.DeathFlags = r.ReadByte();
                         if (!sr.RecordOk || !UnitEmgValid(prof, u))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1276,6 +1449,14 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) k.SrcKind = r.ReadByte();
                         if (sr.F()) k.DwellMatter = r.ReadByte();
                         if (sr.F()) k.NoSalvage = r.ReadByte();
+                        float vx = 0f, vy = 0f;
+                        if (sr.F()) vx = r.ReadSingle();
+                        if (sr.F()) vy = r.ReadSingle();
+                        k.Vel = new Unity.Mathematics.float2(vx, vy);
+                        if (sr.F()) k.Decel = r.ReadSingle();
+                        if (sr.F()) k.PushDist = r.ReadSingle();
+                        if (sr.F()) k.PushBy = r.ReadInt32();
+                        if (sr.F()) k.PushCause = r.ReadUInt16();
                         if (!sr.RecordOk)
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1613,12 +1794,14 @@ namespace BinGames.Sim.Combat
 
         private static bool WeaponEmgValid(in CombatWeapon w, int programs) => w.ProgramRef >= 0 && w.ProgramRef <= programs && w.SpawnFlight <= 1;
 
-        private static bool UnitEmgValid(short profile, in EmgUnitState u) => profile >= -1 && u.LastHitBy >= 0 && u.LastHitChain >= 0 && u.HeatLatch <= 1;
+        private static bool UnitEmgValid(short profile, in EmgUnitState u) => profile >= -1 && u.LastHitBy >= 0 && u.LastHitChain >= 0 && u.HeatLatch <= 1
+            && Finite(u.Mass) && u.Mass >= 0f && u.DeathFlags <= EmgConst.DeathNoWreck;
 
         private static bool WreckValid(in EmgWreck k) =>
             k.Id > 0 && IsFinite(k.Pos) && !double.IsNaN(k.Born) && !double.IsNaN(k.Until) && !double.IsNaN(k.DwellSince)
             && Finite(k.Radius) && k.Radius >= 0f && Finite(k.MaxHp) && k.MaxHp >= 0f && Finite(k.Hp) && k.Hp >= 0f && k.Hp <= k.MaxHp
-            && Finite(k.Mass) && k.Mass >= 0f && Finite(k.Temp) && Finite(k.Charge) && k.Chain >= 0 && k.Profile >= -1 && k.NoSalvage <= 1;
+            && Finite(k.Mass) && k.Mass >= 0f && Finite(k.Temp) && Finite(k.Charge) && k.Chain >= 0 && k.Profile >= -1 && k.NoSalvage <= 1
+            && Finite(k.Vel.x) && Finite(k.Vel.y) && Finite(k.Decel) && k.Decel >= 0f && Finite(k.PushDist) && k.PushDist >= 0f && k.PushBy >= 0;
 
     }
 

@@ -544,8 +544,8 @@ namespace GameLogic.EditorTools
                     || f[0] == "QST" || f[0] == "KEY"
                     // FG8-EXP-04 的人类遗产表（HER）由 FgHeritageSelfCheck A 段逐字段比对。
                     || f[0] == "HER"
-                    // EMG1-DATA-01 的通道端口（EP）、声明（ED）、端口 × 载体（EC）、子形态（ES）、底盘特性（ET）由 FgEmergenceRuleAuditSelfCheck A 段逐字段比对。
-                    || f[0] == "EP" || f[0] == "ED" || f[0] == "EC" || f[0] == "ES" || f[0] == "ET"
+                    // EMG1-DATA-01 的通道端口（EP）、声明（ED）、端口 × 载体（EC）、子形态（ES）、底盘特性（ET）及 EMG1-ENT-01 的实体档案（EE）由 FgEmergenceRuleAuditSelfCheck A 段逐字段比对。
+                    || f[0] == "EP" || f[0] == "ED" || f[0] == "EC" || f[0] == "ES" || f[0] == "ET" || f[0] == "EE"
                     || f[0].StartsWith("W", StringComparison.Ordinal))
                 {
                     continue;

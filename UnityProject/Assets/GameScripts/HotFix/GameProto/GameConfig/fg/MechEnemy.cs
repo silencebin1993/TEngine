@@ -82,6 +82,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
         SplitLife = _buf.ReadFloat();
         SplitDps = _buf.ReadFloat();
         CodexLinks = _buf.ReadString();
+        Material = _buf.ReadString();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -341,6 +342,10 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// FG9-UX-01 图鉴互链:逗号分隔的图鉴条目ID(reaction:/comp:/fw:/enemy:/codex.*),敌人 ↔ 弱点相关的反应 / 组件 / 机制;none=只链阵营
     /// </summary>
     public readonly string CodexLinks;
+    /// <summary>
+    /// 材质(fg.TbEntityProfile 的 material.* 行;缺省按阵营:静默复合/铸造钢/澄净陶瓷/超频合金/舰队钢)
+    /// </summary>
+    public readonly string Material;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -415,6 +420,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "splitLife:" + SplitLife + ","
         + "splitDps:" + SplitDps + ","
         + "codexLinks:" + CodexLinks + ","
+        + "material:" + Material + ","
         + "}";
     }
 }

@@ -483,8 +483,11 @@ namespace BinGames.Sim.Combat
             }
             if (pr.PierceLeft > 0)
             {
-                // shortcut: 单位没有质量属性（实体公共属性随 EMG1-ENT-01），“比弹体轻的目标不消耗穿透”在那时按 prop.mass 比较；现在每穿一个消耗 1 次。
-                pr.PierceLeft--;
+                // EMG1-ENT-01（DEBT-EMG1GRM01-01；FG19A 第 1.1 节）：比弹体轻的目标（prop.mass）不消耗穿透次数，不轻于弹体的每穿一个消耗 1 次。
+                if (EmgUnitMass(ref d, hit) >= EmgProjMass(ref d, pr))
+                {
+                    pr.PierceLeft--;
+                }
                 pr.Mods |= EmgProjMods.Pierced;
                 pr.IgnoreUnit = hitId;
                 pr.Pos = hitPos;

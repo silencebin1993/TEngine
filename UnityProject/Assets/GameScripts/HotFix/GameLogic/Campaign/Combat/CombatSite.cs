@@ -187,6 +187,8 @@ namespace GameLogic.Campaign.Combat
             SiteId = siteId;
             Kernel = new CombatKernel(config, 64);
             ApplyEmgSubForms(Kernel); // EMG1-TRIG-01：子形态参数按 fg.TbSubPayload 写进内核
+            ApplyEntityProfiles(Kernel); // EMG1-ENT-01：实体档案按 fg.TbEntityProfile 写进内核
+            _emgEntity = config.EmgEntity != 0;
             ConfigureReactions();
             Sync = new CombatTransformSync(16);
             MaxEventsPerStep = Math.Max(1, config.MaxGameplayEventsPerStep);
@@ -314,6 +316,15 @@ namespace GameLogic.Campaign.Combat
             c.EmgFlashBandwidth = Math.Max(1, (int)Math.Round(Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth)));
             c.EmgFlashRange = Mathf.Max(0.5f, Tuning("emg.flash.range", EmgConst.DefaultFlashRange));
             c.EmgFlashStep = Mathf.Max(0.1f, Tuning("emg.flash.step", EmgConst.DefaultFlashStep));
+            // EMG1-ENT-01（FG19 FGR-EMG-110～114）：实体层（残骸 / 破片 / 撞击 / 位移）随阶段 1 开；emg.stage = 0 时关，旧行为逐字不变。
+            c.EmgEntity = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
+            c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));
+            c.EmgWreckHpRatio = Mathf.Clamp(Tuning("emg.wreck.hp_ratio", EmgConst.DefaultWreckHpRatio), 0.01f, 1f);
+            c.EmgWreckSlow = Mathf.Clamp(Tuning("emg.wreck.slow", EmgConst.DefaultWreckSlow), 0.05f, 1f);
+            c.EmgImpactVMin = Mathf.Max(0.1f, Tuning("emg.impact.v_min", EmgConst.DefaultImpactVMin));
+            c.EmgPushDMin = Mathf.Max(0.01f, Tuning("emg.push.d_min", EmgConst.DefaultPushDMin));
+            c.EmgKnockSeconds = Mathf.Max(0.02f, Tuning("emg.push.knock_seconds", EmgConst.DefaultKnockSeconds));
+            c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
             return c;
         }
 
@@ -386,6 +397,7 @@ namespace GameLogic.Campaign.Combat
                 AimReadyAt = rec.CannonAimReadyAtPlaySeconds,
                 NextFireAt = rec.NextCannonActionAtPlaySeconds,
             });
+            AssignProfile(unit, Emergence.EmgEntityProfiles.ForChassis(rec.ChassisId)); // EMG1-ENT-01：机器质量按底盘
             return AttachMachine(rec, unit);
         }
 
@@ -470,6 +482,33 @@ namespace GameLogic.Campaign.Combat
             _emgDepthCutSeen = s.DepthCut;
             _emgFanoutCutSeen = s.FanoutCut;
             _emgLostSeen = s.Lost;
+        }
+
+        /// <summary>EMG1-ENT-01：调试层一行——本地点残骸数与可靠计数（生成 / 到期崩解 / 满容量崩解 / 被打掉）、破片与撞击（崩解“计数可见、不静默”；不用文本键：只给开发调试看）。</summary>
+        public string EmgWreckDebugLine()
+        {
+            if (IsDisposed)
+            {
+                return $"[EmgWreck] {SiteId} 已卸载";
+            }
+            var (born, aged, capped, destroyed) = Kernel.WreckCounts;
+            EmgBusStats s = Kernel.EmgBusStats;
+            return $"[EmgWreck] {SiteId} 残骸 {Kernel.WreckCount}/{EmgConst.DefaultWreckCapacity} · 生成 {born} · 到期崩解 {aged} · 满容量崩解 {capped} · 被打掉 {destroyed} · "
+                   + $"挡弹 {s.WreckAbsorbs + s.CoverAbsorbed} · 反弹 {s.WreckBounces} · 破片 {s.FragSpawned}（池满未放 {s.FragLost}）· 撞击 {s.Impacts} · 位移 {s.Pushes}";
+        }
+
+        private int _wreckCappedSeen, _wreckAgedSeen;
+
+        /// <summary>崩解第一次出现、以及满容量崩解每次增加时记一行（调试层；O(1) / 步）。</summary>
+        private void WatchWrecks()
+        {
+            var (_, aged, capped, _) = Kernel.WreckCounts;
+            if (capped > _wreckCappedSeen || (aged > 0 && _wreckAgedSeen == 0))
+            {
+                Log.Info(EmgWreckDebugLine());
+            }
+            _wreckCappedSeen = capped;
+            _wreckAgedSeen = aged;
         }
 
         /// <summary>调试层一行：本地点战斗事件总线的处理量与截断计数（不用文本键：只给开发调试看，不进玩家界面）。</summary>
@@ -1013,6 +1052,63 @@ namespace GameLogic.Campaign.Combat
             return speed > 0f && radius > 0f && lifeScale > 0f ? null : $"允许实体化但缺值（弹速 {speed}、半径 {radius}、寿命系数 {lifeScale}）";
         }
 
+        private readonly bool _emgEntity;
+
+        /// <summary>
+        /// EMG1-ENT-01（FGR-EMG-111）：把编好的实体档案（<see cref="Emergence.EmgEntityProfiles"/>）与动能 / 破片参数写进内核。表缺失或不合法时内核保留 FG19B 初值（已报错）。
+        /// </summary>
+        public static bool ApplyEntityProfiles(CombatKernel kernel)
+        {
+            Emergence.EmgEntityProfiles.Compiled c = Emergence.EmgEntityProfiles.Current;
+            if (kernel == null || !c.Ok)
+            {
+                foreach (string p in c.Problems)
+                {
+                    Log.Error("[EmgEntityProfiles] " + p);
+                }
+                return false;
+            }
+            var rows = new List<EmgProfile>(c.Rows.Count);
+            foreach (Emergence.EmgProfileRow r in c.Rows)
+            {
+                rows.Add(new EmgProfile
+                {
+                    Mass = r.Mass, Conductive = r.Conductive, Flammable = r.Flammable, Magnetic = r.Magnetic, ResistCold = r.ResistCold, ResistHeat = r.ResistHeat,
+                    ResistElec = r.ResistElec, ResistCorrode = r.ResistCorrode, ResistMag = r.ResistMag, ResistHack = r.ResistHack, Brittle = r.Brittle,
+                    Material = r.Material, Displace = r.Displace,
+                });
+            }
+            EmgEntityParams d = EmgEntityParams.Default;
+            var p0 = new EmgEntityParams
+            {
+                KineticProjectile = Emergence.EmgEntityProfiles.KineticOf("kinetic.projectile", d.KineticProjectile),
+                KineticHeavy = Emergence.EmgEntityProfiles.KineticOf("kinetic.heavy", d.KineticHeavy),
+                KineticBeam = Emergence.EmgEntityProfiles.KineticOf("kinetic.beam", d.KineticBeam),
+                KineticMelee = Emergence.EmgEntityProfiles.KineticOf("kinetic.melee", d.KineticMelee),
+                KineticDrone = Emergence.EmgEntityProfiles.KineticOf("kinetic.dronebullet", d.KineticDrone),
+                KineticAura = Emergence.EmgEntityProfiles.KineticOf("kinetic.aura", d.KineticAura),
+                KineticField = Emergence.EmgEntityProfiles.KineticOf("kinetic.field", d.KineticField),
+                KineticFragment = Emergence.EmgEntityProfiles.KineticOf("kinetic.fragment", d.KineticFragment),
+                KineticImpact = Emergence.EmgEntityProfiles.KineticOf("kinetic.impact", d.KineticImpact),
+                FragCount = c.FragCount, FragDamage = c.FragDamage, FragSpeed = c.FragSpeed, FragRange = c.FragRange, FragThreshold = c.FragThreshold,
+            };
+            bool ok = kernel.SetEntityProfiles(rows, p0);
+            if (!ok)
+            {
+                Log.Error("[EmgEntityProfiles] 内核拒绝了实体档案（行数不足或数值越界），保留 FG19B 初值");
+            }
+            return ok;
+        }
+
+        /// <summary>EMG1-ENT-01：实体层开时给单位挂档案行（机器按底盘、敌人按材质；首领另一组）。实体层关时不写（EProfile 保持 −1，快照与哈希逐字不变）。</summary>
+        private void AssignProfile(int unit, short profile)
+        {
+            if (_emgEntity && unit > 0 && profile >= 0)
+            {
+                Kernel.SetUnitProfile(unit, profile, 0f);
+            }
+        }
+
         /// <summary>EMG1-TRIG-01：把 fg.TbSubPayload 的 5 行写进内核（子形态码 = 下标）。没有表（自检夹具）时内核保留 FG19A 初值。</summary>
         public static void ApplyEmgSubForms(CombatKernel kernel)
         {
@@ -1218,6 +1314,11 @@ namespace GameLogic.Campaign.Combat
                 template.Flags &= ~(CombatUnitFlags.Alive | CombatUnitFlags.Targetable);
             }
             int unit = Kernel.Spawn(template);
+            if (_emgEntity && Content.EnemyDefs.TryGet(rec.EnemyTypeId, out GameConfig.fg.MechEnemy def))
+            {
+                // EMG1-ENT-01（FGR-EMG-111）：敌人按表里的 material 列取档案行；外部血量单位（首领）用首领组（质量 200、不位移）。
+                AssignProfile(unit, Emergence.EmgEntityProfiles.ForEnemy(def.Material, (template.Flags & CombatUnitFlags.ExternalHealth) != 0));
+            }
             _enemyUnit[rec.EnemyInstanceId] = unit;
             _unitEnemy[unit] = rec.EnemyInstanceId;
             return unit;
@@ -1455,6 +1556,10 @@ namespace GameLogic.Campaign.Combat
             }
             Kernel.Step(dt, time);
             WatchEmgBus();
+            if (_emgEntity)
+            {
+                WatchWrecks(); // EMG1-ENT-01
+            }
             ProcessEvents();
             // FG2-FW-04：反应反馈与伤害归因（按内核累计计数的增量，O(反应条数)；与是否观察无关的部分照常结算）。
             ReactionFeedback.Process(this, CampaignSession.Current);
@@ -2053,6 +2158,11 @@ namespace GameLogic.Campaign.Combat
             result = Kernel.FireAt(attacker, target, GameClock.GameSeconds);
             ProcessEvents();
             bool ok = result == CombatFireResult.Ok || result == CombatFireResult.StillAiming || result == CombatFireResult.Launched; // EMG1-TRIG-01：已发射也是开了火
+            if (result == CombatFireResult.Covered)
+            {
+                reason = FireReason(result, attackerLogicId, enemyInstanceId); // EMG1-ENT-01：开了火但被残骸挡下——不是失败（冷却照走），但要告诉玩家为什么没打中
+                return true;
+            }
             if (!ok)
             {
                 reason = FireReason(result, attackerLogicId, enemyInstanceId);
@@ -2112,6 +2222,8 @@ namespace GameLogic.Campaign.Combat
                     return GameText.Get("combat.fire.frozen"); // FG10-FAC-01：被液氮冻住，解冻前不能开火
                 case CombatFireResult.CannotHitAir:
                     return GameText.Get("combat.fire.cannot_hit_air"); // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区打不到空中目标
+                case CombatFireResult.Covered:
+                    return GameText.Get("combat.fire.covered"); // EMG1-ENT-01（DEBT-EMG1TRIG01-02）：目标在残骸后面
                 default:
                     return string.Empty;
             }

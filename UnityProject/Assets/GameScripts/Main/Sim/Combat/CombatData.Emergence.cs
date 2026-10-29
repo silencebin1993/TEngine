@@ -30,6 +30,22 @@ namespace BinGames.Sim.Combat
                 EmgSubForms[k] = EmgSubForm.Default(k);
             }
             EmgHash = EmgHash.Create();
+            EmgProfiles = new NativeList<EmgProfile>(EmgConst.ProfileSlots, Allocator.Persistent);
+            EmgProfiles.Add(EmgProfile.Steel(1f));                  // 弹体
+            EmgProfiles.Add(EmgProfile.Steel(4f));                  // 重型弹体
+            EmgProfiles.Add(EmgProfile.Steel(0.5f, 0.5f, 0.1f, 0.5f)); // 无人机
+            EmgProfiles.Add(EmgProfile.Steel(6f, 0.9f, 0.05f, 0.9f, 0)); // 哨戒桩（插地不位移）
+            EmgProfiles.Add(EmgProfile.Steel(0.2f, 0.9f, 0f, 0.9f)); // 破片
+            EmgProfiles.Add(EmgProfile.Steel(6f));                  // 机器（轮式）
+            EmgProfiles.Add(EmgProfile.Steel(0f));                  // 敌人（8 × 半径²）
+            EmgProfiles.Add(EmgProfile.Steel(200f, 0.9f, 0.1f, 0.9f, 0)); // 首领
+            EmgProfiles.Add(EmgProfile.Steel(20f, 0.9f, 0.1f, 0.9f, 0));  // 炮塔
+            EmgProfiles.Add(EmgProfile.Steel(20f, 0.9f, 0.1f, 0.9f, 0));  // 结构
+            EmgProfiles.Add(EmgProfile.Steel(0f));                  // 残骸（继承原单位）
+            EmgEntParams = new NativeArray<EmgEntityParams>(1, Allocator.Persistent);
+            EmgEntParams[0] = EmgEntityParams.Default;
+            EmgMerge = new NativeList<EmgMergeReq>(4, Allocator.Persistent);
+            EmgMergeCont = 0;
         }
 
         private void EmgDispose()
@@ -50,6 +66,9 @@ namespace BinGames.Sim.Combat
             EmgPending.Dispose();
             EmgSubForms.Dispose();
             EmgHash.Dispose();
+            EmgProfiles.Dispose();
+            EmgEntParams.Dispose();
+            EmgMerge.Dispose();
         }
 
         private void EmgAppend()

@@ -121,6 +121,12 @@ namespace BinGames.Sim.Combat
             // 5b. FG2-FW-02：读法生成的无人机、区域、回波与状态标签（统一时钟，暂停不走、倍速按游戏时间）。
             StepReadings(ref d, dt);
 
+            // 5f. EMG1-ENT-01：残骸滑行 / 撞击、被打掉、到期崩解（总线之前，本步的撞击 / 位移事件本步处理）。
+            if (d.Wrecks.Length > 0)
+            {
+                StepWrecks(ref d, dt);
+            }
+
             // 5d. EMG1-BUS-01：战斗事件总线（ADR-EMG-001 ④：StepReadings 之后、场地边界钳制之前；按 Seq 先进先出，每步 emg.bus.per_step 条，超出顺延不丢）。
             if (d.EmgBus.Length > 0)
             {
@@ -130,6 +136,12 @@ namespace BinGames.Sim.Combat
             if (d.EmgPending.Length > 0)
             {
                 StepEmgPending(ref d);
+            }
+
+            // 5g. EMG1-ENT-01（ADR ⑦ 第 5 条）：本步合并的外部血量单位持续伤害，每单位一条伤害请求。
+            if (d.EmgMerge.Length > 0)
+            {
+                EmgMergeFlush(ref d);
             }
 
             // 5c. FG5-RND-03：场地边界（靶场）。放在全部位移（移动、击退、牵引、无人机）之后，一处钳住所有来源。
@@ -1030,7 +1042,7 @@ namespace BinGames.Sim.Combat
                 }
                 return;
             }
-            if (EmgInstantCovered(ref d, i, t, wp))
+            if (EmgInstantCovered(ref d, i, t, wp, d.EmgEntParams[0].KineticProjectile))
             {
                 // EMG1-TRIG-01：残骸挡在线段上，这一击被吸收（地点没有残骸时 O(1) 跳过）；开火提示照常。
                 if (!d.Has(i, CombatUnitFlags.SilentFire))
@@ -1235,11 +1247,11 @@ namespace BinGames.Sim.Combat
                 }
                 return CombatFireResult.Launched;
             }
-            if (EmgInstantCovered(ref d, a, t, wp))
+            if (EmgInstantCovered(ref d, a, t, wp, d.EmgEntParams[0].KineticProjectile))
             {
-                // EMG1-TRIG-01：开了火（照常有开火提示），被残骸挡下。shortcut: 结果码仍报 Ok（热更层写“命中”），残骸进正式流程时由 EMG1-ENT-01 加“被掩体挡下”结果码（DEBT-EMG1TRIG01-02）。
+                // EMG1-TRIG-01：开了火（照常有开火提示），被残骸挡下；EMG1-ENT-01（DEBT-EMG1TRIG01-02）：结果码 = 被掩体挡下，热更层写“被掩体挡下”而不是“命中”。
                 Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
-                return CombatFireResult.Ok;
+                return CombatFireResult.Covered;
             }
             // FG2-FW-02：载体投送 + 读法（射弹 / 格斗 / 无人机 / 力场 / 布区）；没有读法的射弹载体与 Demo 逐字同一结算（正面装甲、侧后、标记、标记跳转）。
             return DeliverInstant(ref d, a, t, wp, true);
@@ -1326,9 +1338,9 @@ namespace BinGames.Sim.Combat
             {
                 return CombatFireResult.Ok; // FG9-FAC-01：重炮打进偏折场，被反弹回开火者
             }
-            if (EmgInstantCovered(ref d, a, t, wp))
+            if (EmgInstantCovered(ref d, a, t, wp, d.EmgEntParams[0].KineticHeavy))
             {
-                return CombatFireResult.Ok; // EMG1-TRIG-01：残骸挡下
+                return CombatFireResult.Covered; // EMG1-TRIG-01：残骸挡下（EMG1-ENT-01：重炮单次动能按重型系数，够了崩出破片）
             }
             // 基础伤害不受过载影响；过载只改积热与穿甲（Demo CannonCombat 类注释）。FG2-FW-02：固件读法（穿甲、伤害倍率、增幅……）同一处结算。
             float pierce = (!overload || d.Has(t, CombatUnitFlags.HeatResistant)) ? 0f : wp.PierceBonus;
@@ -1464,6 +1476,12 @@ namespace BinGames.Sim.Combat
             EmgOnDamage(ref d, t, damage, attacker, attackerId); // EMG1-BUS-01：evt.hit（当前宿主：出手 / 弹体 / 无人机）、evt.hurt（受击者，来源按载体）
             if (d.Has(t, CombatUnitFlags.ExternalHealth))
             {
+                EmgNoteExternalHit(ref d, t, attackerId); // EMG1-ENT-01（ADR ⑦ 第 2 条）：击杀归属 = 最后一次伤害请求的攻击者
+                if (d.EmgMergeCont != 0 && EmgEntOn(ref d))
+                {
+                    EmgMergeAdd(ref d, t, damage, attackerId); // EMG1-ENT-01（ADR ⑦ 第 5 条）：持续类伤害一步合成一条请求（步末发）
+                    return true;
+                }
                 Gameplay(ref d, CombatEventKind.DamageRequest, t, attackerId, damage, d.Hp[t], d.Pos[t], 0, 0);
                 return true;
             }
@@ -1491,6 +1509,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            killerId = EmgResolveKiller(ref d, t, killerId); // EMG1-ENT-01：热更层判死传 0 的外部血量单位，击杀者取最后一次伤害请求的攻击者
             d.Set(t, CombatUnitFlags.Alive, false);
             d.Set(t, CombatUnitFlags.Targetable, false);
             d.Hp[t] = 0f;
@@ -1533,7 +1552,7 @@ namespace BinGames.Sim.Combat
             }
             // FG10-FAC-01：分裂 / 自爆单位的死亡效果（O(1) 记一条，下一个澄净阶段结算）。
             ClarityOnKill(ref d, t, killerId);
-            EmgOnKill(ref d, t, killerId); // EMG1-BUS-01：evt.death（阵亡者）、evt.kill（击杀者 / 致死载荷）
+            EmgOnDeath(ref d, t, killerId, 0); // EMG1-ENT-01：阵亡统一入口——残骸，再 evt.death（阵亡者）、evt.kill（击杀者 / 致死载荷，EMG1-BUS-01）
         }
 
         /// <summary>
@@ -1860,6 +1879,21 @@ namespace BinGames.Sim.Combat
                     d.Counters[0] = co;
                     continue;
                 }
+                // EMG1-ENT-01（FGR-EMG-113 挡弹；FGT-EMG-016“反弹撞残骸”）：先于单位交点撞上残骸——有障碍面反弹次数就按残骸圆法线反弹，否则被吸收；
+                // 空中的抛射弹、绕发射者转圈的弹体、还有穿透次数的弹体（贯穿越过残骸）不查。地点没有残骸时一条比较跳过。
+                if (d.Wrecks.Length > 0 && EmgEntOn(ref d) && !airborne && pr.PierceLeft == 0 && ((pr.Mods & EmgProjMods.Orbit) == 0 || (pr.Flags & EmgProjFlags.Sub) != 0))
+                {
+                    int wr = EmgWreckHit(ref d, ref pr, next, hit >= 0 ? hitT : 1.0);
+                    if (wr == 1)
+                    {
+                        d.Projectiles[write++] = pr;
+                        continue;
+                    }
+                    if (wr == 2)
+                    {
+                        continue;
+                    }
+                }
                 if (hit >= 0)
                 {
                     int owner = d.SlotOf(pr.Owner);
@@ -1893,6 +1927,10 @@ namespace BinGames.Sim.Combat
                         dmg *= BackMultiplier(ref d, hit, fromSide);
                         bool landed = DamageUnit(ref d, hit, dmg, owner);
                         Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
+                        if (landed && (pr.Flags & EmgProjFlags.Fragment) != 0)
+                        {
+                            EmgFragmentHit(ref d, pr, hitId, dmg, hitPos); // EMG1-ENT-01（FGR-EMG-114）：破片命中发 evt.hit（链深 = 破片的链深）
+                        }
                         // EMG1-TRIG-01：子弹药不读根读法，只执行自己节点的指令（下面）。
                         if (landed && (pr.Flags & EmgProjFlags.Sub) == 0 && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
                         {
@@ -1943,6 +1981,11 @@ namespace BinGames.Sim.Combat
                     EmgProjTick(ref d, ref grid, ref pr, dt); // EMG1-BUS-01：带程序的弹体累计飞行秒数、按需求值定时 / 近炸
                 }
                 d.Projectiles[write++] = pr;
+            }
+            // 本步里直接加进池的弹体（撞残骸崩出的破片）排在 m 之后：搬到存活段末尾，下一步才开始飞（不在本步截掉）
+            for (int p = m, n = d.Projectiles.Length; p < n; p++)
+            {
+                d.Projectiles[write++] = d.Projectiles[p];
             }
             d.Projectiles.ResizeUninitialized(write);
             if (orbiting)

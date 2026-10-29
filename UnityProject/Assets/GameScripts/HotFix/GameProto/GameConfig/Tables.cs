@@ -195,6 +195,10 @@ public partial class Tables
     /// </summary>
     public fg.TbEnemyEncounter TbEnemyEncounter {get; }
     /// <summary>
+    /// 实体档案
+    /// </summary>
+    public fg.TbEntityProfile TbEntityProfile {get; }
+    /// <summary>
     /// 固件种类
     /// </summary>
     public fg.TbFirmwareKind TbFirmwareKind {get; }
@@ -575,6 +579,7 @@ public partial class Tables
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
         TbEcoItem = new fg.TbEcoItem(loader("fg_tbecoitem"));
         TbEnemyEncounter = new fg.TbEnemyEncounter(loader("fg_tbenemyencounter"));
+        TbEntityProfile = new fg.TbEntityProfile(loader("fg_tbentityprofile"));
         TbFirmwareKind = new fg.TbFirmwareKind(loader("fg_tbfirmwarekind"));
         TbFluid = new fg.TbFluid(loader("fg_tbfluid"));
         TbFluidLeak = new fg.TbFluidLeak(loader("fg_tbfluidleak"));
@@ -709,6 +714,7 @@ public partial class Tables
         TbCombatComponent.ResolveRef(this);
         TbEcoItem.ResolveRef(this);
         TbEnemyEncounter.ResolveRef(this);
+        TbEntityProfile.ResolveRef(this);
         TbFirmwareKind.ResolveRef(this);
         TbFluid.ResolveRef(this);
         TbFluidLeak.ResolveRef(this);

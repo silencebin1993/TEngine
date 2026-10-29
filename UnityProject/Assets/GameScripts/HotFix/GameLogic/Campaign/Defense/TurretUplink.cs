@@ -235,6 +235,14 @@ namespace GameLogic.Campaign.Defense
                 Revision++;
                 return TurretOpResult.Success(string.Empty);
             }
+            if (res == CombatFireResult.Covered)
+            {
+                // EMG1-ENT-01：开了火（冷却照走），被残骸挡下——说明原因，不算故障。
+                Revision++;
+                string covered = site.FireReason(res, 0, null);
+                Say(covered);
+                return TurretOpResult.Success(covered);
+            }
             string text = GameText.Format("turret.reason.fire_failed", FireFailureText(site, res, w));
             Say(text);
             return TurretOpResult.Fail(TurretFailure.FireFailed, text);

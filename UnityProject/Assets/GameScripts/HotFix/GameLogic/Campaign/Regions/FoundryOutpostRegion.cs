@@ -426,7 +426,9 @@ namespace GameLogic.Campaign.Regions
             {
                 return ActionResult.Fail("铸造前哨外围没有载入，不能结算攻击。");
             }
-            return site.TryFireAtEnemy(attackerLogicId, enemyInstanceId, out _, out string reason)
+            // EMG1-ENT-01：被残骸挡下（开了火、冷却照走）按失败返回，让直控 / 指令显示“被掩体挡下”的原因。
+            return site.TryFireAtEnemy(attackerLogicId, enemyInstanceId, out BinGames.Sim.Combat.CombatFireResult fireResult, out string reason)
+                   && fireResult != BinGames.Sim.Combat.CombatFireResult.Covered
                 ? ActionResult.Ok()
                 : ActionResult.Fail(reason);
         }
