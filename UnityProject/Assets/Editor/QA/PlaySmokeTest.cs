@@ -2879,6 +2879,14 @@ namespace GameLogic.EditorTools
                 bool changed = panel?.Board?.PrimaryId == Campaign.Content.ComponentCatalog.CompRamId && panel.Board.FirmwareSlots[0] == Campaign.Content.FirmwareCatalog.FwHomingId;
                 Check(changed && meleeLine.Contains(meleeReading) && !meleeLine.Contains(projReading),
                     $"正式下拉换成液压刺锤 + 寻的：读法行只写格斗上的读法（“{meleeLine}”）");
+                // EMG1-UX-01（FGU-48）：双态预览下方的程序树按这次编译显示——正式表 emg.stage = 0 时程序为空：写“基础攻击”，并列出仍按原读法结算的固件（不是空白）。
+                VisualElement treeRows = circuitRoot?.Q<VisualElement>("ProgramTreeAiRows");
+                string treeFirst = treeRows != null && treeRows.childCount > 0 ? (treeRows[0] as Label)?.text : null;
+                IReadOnlyList<Campaign.Emergence.EmgTreeRow> treeData = panel?.ProgramTree?.Rows(UI.CircuitBoard.ProgramTreeView.ColumnAi);
+                bool treeOk = treeFirst != null && treeData != null && treeData.Count > 0 && treeFirst == treeData[0].Text && !Localization.GameText.ContainsMarker(treeFirst)
+                              && (!Campaign.Emergence.EmgCatalog.EffectiveStage.Equals(0)
+                                  || (treeData[0].Kind == Campaign.Emergence.EmgTreeRowKind.Empty && treeData.Any(r => r.Kind == Campaign.Emergence.EmgTreeRowKind.Legacy && r.Text.Contains(homingName))));
+                Check(changed && treeOk, $"电路面板程序树（FGU-48）：“{string.Join(" / ", treeData?.Select(r => r.Text) ?? Array.Empty<string>())}”");
                 // FG2-FW-02 修复轮（B13）：预览摘要写的是内核实际每发伤害（液压刺锤 = 表里的伤害），不是旧器官编译的归一化总伤害。
                 string previewSummary = circuitRoot?.Q<Label>("PreviewSummaryLabel")?.text ?? string.Empty;
                 Campaign.Content.CarrierReadings.TryGetComponent(Campaign.Content.ComponentCatalog.CompRamId, out GameConfig.fg.CombatComponent ramRow);

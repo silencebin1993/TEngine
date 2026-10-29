@@ -213,6 +213,12 @@ namespace GameLogic.Campaign.Content
                 }
                 sb.Append(GameText.Format("reading.detail.line", CarrierName(c), Reading(firmwareId, c)));
             }
+            // EMG1-UX-01（FG19 第 13 节 B01）：详情页 / 悬停同时列出这条固件读 / 写的端口（只读声明表）。
+            string ports = Emergence.EmgProgramTreeText.PortsLine(firmwareId);
+            if (ports != null)
+            {
+                sb.Append('\n').Append(ports);
+            }
             return sb.ToString();
         }
 

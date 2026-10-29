@@ -638,6 +638,9 @@ namespace GameLogic.Core
         public const string ClarityFirstAir = "clarity.first_air";
         public const string ClarityFirstBoss = "clarity.first_boss";
 
+        /// <summary>EMG1-UX-01（FG19 第 13 节 B01 / B14）：第一次在电路编辑器里看到非空的程序树（引导内容在 FG15-UX-04：槽序即程序序、容量逐代减半、继承与溢出怎么读）。</summary>
+        public const string EmgFirstProgramTree = "emg_first_program_tree";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -713,6 +716,7 @@ namespace GameLogic.Core
             SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
             ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
             ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
+            EmgFirstProgramTree,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

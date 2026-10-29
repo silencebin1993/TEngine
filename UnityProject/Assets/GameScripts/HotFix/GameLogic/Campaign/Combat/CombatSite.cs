@@ -171,6 +171,12 @@ namespace GameLogic.Campaign.Combat
         private readonly Dictionary<int, HomeValleyMachineMarker> _markerByUnit = new Dictionary<int, HomeValleyMachineMarker>();
         private readonly Dictionary<string, int> _weaponIndex = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<int, MachineWeaponInfo> _machineWeapons = new Dictionary<int, MachineWeaponInfo>();
+        /// <summary>EMG1-UX-01（DEBT-EMG1PRG01-01）：登记进程序表时因表满被拒的程序签名——电路编辑器的程序树据此显示 emg.compile.table_full。
+        /// 阶段 1 程序表只追加不压实（DEBT-EMG1KRN01-01），被拒的签名此后不会再登记成功；地点重开（读档）时随武器重编重建。</summary>
+        private readonly HashSet<string> _rejectedPrograms = new HashSet<string>(System.StringComparer.Ordinal);
+
+        /// <summary>这个程序（编译签名）在本地点登记时被拒（程序表已满）。O(1)。</summary>
+        public bool IsProgramRejected(string signature) => !string.IsNullOrEmpty(signature) && _rejectedPrograms.Contains(signature);
         private readonly List<CombatEvent> _merge = new List<CombatEvent>(64);
         private static readonly Comparison<CombatEvent> BySeq = (a, b) => a.Seq.CompareTo(b.Seq);
         private readonly System.Diagnostics.Stopwatch _watch = new System.Diagnostics.Stopwatch();
@@ -669,6 +675,7 @@ namespace GameLogic.Campaign.Combat
             if (index < 0)
             {
                 noteKey = Emergence.EmgProgramCompiler.NoteTableFull;
+                _rejectedPrograms.Add(program.Signature);
                 Log.Warning($"[CombatSite] {SiteId} 程序表已满（{Kernel.ProgramCount} 行），本次装配退回只有基础攻击（DEBT-EMG1KRN01-01）。");
                 return w;
             }

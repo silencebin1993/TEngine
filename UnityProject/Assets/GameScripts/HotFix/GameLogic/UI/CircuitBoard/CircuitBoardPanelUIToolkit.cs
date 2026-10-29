@@ -132,6 +132,12 @@ namespace GameLogic.UI.CircuitBoard
         /// <summary>自检 / 冒烟读：界面上正在显示的双态预览与接入口标记。</summary>
         public CircuitUplinkView UplinkView => _uplinkView;
 
+        /// <summary>EMG1-UX-01（FGR-EMG-038；FGU-48）：双态预览的程序树视图（读编译器产出）。</summary>
+        private readonly ProgramTreeView _programTreeView = new ProgramTreeView();
+
+        /// <summary>自检 / 冒烟读：界面上正在显示的程序树。</summary>
+        public ProgramTreeView ProgramTree => _programTreeView;
+
         public BlueprintCircuitBoard Board => _board;
 
         private Func<bool> _undoFromShortcut;
@@ -273,6 +279,11 @@ namespace GameLogic.UI.CircuitBoard
             _closeButton = _root.Q<Button>("CloseButton");
             _saveResultLabel = _root.Q<Label>("SaveResultLabel");
 
+            List<string> missingTree = _programTreeView.Bind(_root);
+            if (missingTree.Count > 0)
+            {
+                Log.Error($"[CircuitBoardPanelUIToolkit] 程序树元素缺失：{string.Join(",", missingTree)}");
+            }
             List<string> missingUplink = _uplinkView.Bind(_root);
             if (missingUplink.Count > 0)
             {
@@ -897,6 +908,9 @@ namespace GameLogic.UI.CircuitBoard
             RefreshLastCombat();
             // FG1-SIG-02：双态编译预览按当前信号核重算（同一套纯计算，预览与实际一致）。
             _uplinkView.Render(_board, CampaignSession.Current);
+            // EMG1-UX-01：程序树按同一次双态编译的两份预览显示（AI 驾驶 / 你接入），并带出旧内容版本提示。
+            _programTreeView.Render(_board != null ? _uplinkView.Last : null,
+                BlueprintEditorService.FindActiveVersion(CampaignSession.Current, _selectedBlueprintId));
             if (_board != null && _board.HasUplink)
             {
                 GuidanceHooks.Raise(GuidanceHooks.CircuitUplinkFirstSeen);
@@ -1307,6 +1321,12 @@ namespace GameLogic.UI.CircuitBoard
                 : CarrierReadings.TryGetCarrier(_board.PrimaryId, out Campaign.Signal.FirmwareCarrier carrier)
                     ? Localization.GameText.Format("reading.detail.line", CarrierReadings.CarrierName(carrier), CarrierReadings.Reading(fw, carrier))
                     : Localization.GameText.Get("reading.circuit.none");
+            // EMG1-UX-01（FG19 第 13 节 B01）：固件悬停显示它读 / 写哪些端口（只读声明表）。
+            string ports = Campaign.Emergence.EmgProgramTreeText.PortsLine(fw);
+            if (ports != null)
+            {
+                body += "\n" + ports;
+            }
             // FG2-FW-05：悬停按图鉴键跳到这条固件的图鉴条目（FG02 第 4 章）。
             return new TooltipContent { Title = title, Body = body, CodexEntryId = Progression.MechanicCodex.FirmwareEntryId(fw) };
         }

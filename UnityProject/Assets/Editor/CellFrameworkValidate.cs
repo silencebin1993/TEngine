@@ -781,6 +781,9 @@ namespace GameLogic.EditorTools
             // 修饰读端随继承、热量分项、程序顺序（接入在前，FirmwareIds 反例）与 T3、签名、负向（空程序 / emg.stage = 0 / 表满 / 内容 ID）、旧内容版本提示（T9）、
             // 家园正式流程（装配登记、接入、接入中途换装配、断开、真实存读档写回程序下标、emg.stage = 0 逐字不变）与编译耗时。
             Seg("FgEmgProgramSelfCheck", FgEmgProgramSelfCheck.Run);
+            // EMG1-UX-01：程序树预览与编译原因（FGT-EMG-018；FGU-48）——固定程序的预览与编译器逐项一致、八个原因键与解决办法（按办法操作后消失）、
+            // 单位级提升标记、空程序 / 旧读法 / 接入口不在路径上、调序与撤销即时刷新、暂停与倍速、读写端口、引导钩子、中英、布局探针与耗时。
+            Seg("FgEmgProgramTreeSelfCheck", FgEmgProgramTreeSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

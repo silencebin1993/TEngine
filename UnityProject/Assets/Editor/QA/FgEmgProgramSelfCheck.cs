@@ -133,7 +133,7 @@ namespace GameLogic.EditorTools
 
         // ── 测试目录：真实五张表 + FG19A 已定、还没落表的 4 条固件声明；emg.stage = 1 ──
 
-        private static void UseStage1Catalog()
+        internal static void UseStage1Catalog()
         {
             EmgSource src = EmgCatalog.FromTables();
             Func<string, (bool ok, float value)> tuning = src.Tuning;
@@ -189,11 +189,11 @@ namespace GameLogic.EditorTools
         private static string Short(string id) => id != null && id.StartsWith("fw_", StringComparison.Ordinal) ? id.Substring(3) : id;
 
         /// <summary>树的规范文本：节点 “序号&lt;父 g代 占用/容量 事件×份数: 自有 ^继承”，节点之间用 “ | ”。</summary>
-        private static string Tree(EmgProgramResult r) => string.Join(" | ", r.Nodes.Select(n =>
+        internal static string Tree(EmgProgramResult r) => string.Join(" | ", r.Nodes.Select(n =>
             $"{n.Index}{(n.Parent >= 0 ? "<" + n.Parent : string.Empty)} g{n.Gen} {n.Used}/{n.Capacity}{(n.Parent >= 0 ? $" {n.TrigEvent.ToString().ToLowerInvariant()}×{n.TrigCount}" : string.Empty)}:" +
             string.Concat(n.Entries.Select(e => " " + (e.Inherited ? "^" : string.Empty) + Short(r.Steps[e.Ordinal].OwnerId)))));
 
-        private static string Notes(EmgProgramResult r) => string.Join(", ", r.Notes.Select(n =>
+        internal static string Notes(EmgProgramResult r) => string.Join(", ", r.Notes.Select(n =>
             $"{n.Key.Substring("emg.compile.".Length)}:{Short(r.Steps[n.Ordinal].OwnerId)}{(n.Node >= 0 ? "@" + n.Node : string.Empty)}"));
 
         // ── A. 固定程序（FGT-EMG-010）────────────────────────────────────────────────
@@ -201,7 +201,19 @@ namespace GameLogic.EditorTools
         private static void CheckFixedPrograms()
         {
             Line("  · A. 固定程序（FGT-EMG-010）：树形、容量占用、继承、溢出、代际已满逐项比对期望（第 3.2 节三例、单位级提升与提升溢出、混合展开、grm.inherit）");
-            var cases = new (string Name, EmgProgramResult R, string Tree, string Notes)[]
+            (string Name, EmgProgramResult R, string Tree, string Notes)[] cases = FixedCases();
+            foreach ((string name, EmgProgramResult r, string tree, string notes) in cases)
+            {
+                string t = Tree(r), n = Notes(r);
+                Expect(t == tree && n == notes, $"{name}：{t}{(n.Length > 0 ? "；原因 " + n : string.Empty)}" + (t == tree && n == notes ? string.Empty : $"（期望 {tree}；{notes}）"));
+            }
+            CheckFixedProgramsTail(cases);
+        }
+
+        /// <summary>FGT-EMG-010 的固定程序与期望树（EMG1-UX-01 的 FGT-EMG-018 用同一组程序比对预览）。调用前须 <see cref="UseStage1Catalog"/>。</summary>
+        internal static (string Name, EmgProgramResult R, string Tree, string Notes)[] FixedCases()
+        {
+            return new (string Name, EmgProgramResult R, string Tree, string Notes)[]
             {
                 ("例 1 [寻的, 分裂, 分裂]（接入 1 + 机器 2）", P(A(Homing), A(Split, Split)),
                     "0 g0 2/4: homing split | 1<0 g1 2/2 hit×3: split ^homing | 2<1 g2 1/1 hit×3: ^homing", ""),
@@ -233,11 +245,10 @@ namespace GameLogic.EditorTools
                 ("提升的指令不进子弹药 [过热泄放, 集群协议, 分裂]（扩大继承也不带）", P(A(Vent, Swarm), A(Split)),
                     "0 g0 3/4: ventarc swarm split | 1<0 g1 1/2 hit×3: ^swarm", ""),
             };
-            foreach ((string name, EmgProgramResult r, string tree, string notes) in cases)
-            {
-                string t = Tree(r), n = Notes(r);
-                Expect(t == tree && n == notes, $"{name}：{t}{(n.Length > 0 ? "；原因 " + n : string.Empty)}" + (t == tree && n == notes ? string.Empty : $"（期望 {tree}；{notes}）"));
-            }
+        }
+
+        private static void CheckFixedProgramsTail((string Name, EmgProgramResult R, string Tree, string Notes)[] cases)
+        {
             EmgProgramResult ex3 = cases[2].R;
             Expect(ex3.Nodes[1].TrigParam == 0.6f && cases[9].R.Nodes[1].TrigParam == 4f && cases[0].R.Nodes[1].TrigCount == 3 && cases[9].R.Nodes[1].TrigCount == 2,
                 $"触发参数取声明：延时引信定时 {ex3.Nodes[1].TrigParam} 秒、分叉近炸半径 {cases[9].R.Nodes[1].TrigParam} 米，份数 = grm.trig 幅度（分裂 3、分叉 2）");
@@ -461,7 +472,7 @@ namespace GameLogic.EditorTools
 
         // ── F. 程序顺序与接入（FGR-EMG-030、T3、事实 1.18）──────────────────────────────
 
-        private static BlueprintCircuitBoard GunBoard(bool uplink, params string[] firmware)
+        internal static BlueprintCircuitBoard GunBoard(bool uplink, params string[] firmware)
         {
             BlueprintCircuitBoard b = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, firmware);
             if (uplink && !b.TrySetUplink(2).Success)

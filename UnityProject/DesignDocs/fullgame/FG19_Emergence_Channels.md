@@ -481,6 +481,7 @@
 **FGR-EMG-038 编译预览与原因文本**
 - 电路编辑器的双态预览（FGR-SIG-022）增加“程序树”视图：每个节点显示代号、容量占用（如 `2/2`）、挂的事件、继承来的修饰（另一种底色）、溢出 / 截断 / 代际已满 / 重复无效的指令，以及热量分项。
 - 原因文本键（稳定、可本地化）：`emg.compile.overflow`、`emg.compile.gen_full`、`emg.compile.not_flashed`、`emg.compile.duplicate`、`emg.compile.flash_truncated`、`emg.compile.flash_range`。
+- 另有两条同样进预览的原因（EMG1-UX-01 核实补记，2026-10-29）：`emg.compile.table_full`（地点程序表满、本次装配退回基础攻击与旧读法，DEBT-EMG1PRG01-01）与 `emg.compile.stale_content`（蓝图在旧内容版本下编译，ADR-EMG-001 ⑩）。八个键各有解决办法文本 `<键>.fix`；`flash_truncated`、`flash_range` 的产出方是 EMG1-FLASH-01，预览已按同一路径渲染（夹具验证）。实现：`EmgProgramTreeText`（Campaign/Emergence）+ `ProgramTreeView`（电路编辑器）；固件悬停 / 详情显示读写端口（`EmgProgramTreeText.PortsLine`，只读声明表）。
 - 界面用 UI Toolkit；界面编号已在 FG13 界面编号表分配：程序树预览 = FGU-48，组合图鉴 = FGU-49（FGR-EMG-183），已回填卡片 EMG1-UX-01、EMG4-CODEX-01 的规格栏。
 
 **FGR-EMG-039 槽位、配额、路径的评估结论**
@@ -1310,7 +1311,7 @@
 | FGT-EMG-015 | 修饰读端：霰射（`evt.fire`）在出手时写入、跳弹（`evt.hit`）只在命中时生效，二者都不产生额外结算、不放子载荷；被继承到子载荷时读端一并带上 | 012、033 | 1 |
 | FGT-EMG-016 | 弹道修饰内核动词：9 个非纯数值修饰 × 5 载体各一例，与“去掉修饰”对照行为不同；含“反弹撞残骸”用例 | 015、018、033、035 | 1 |
 | FGT-EMG-017 | 热量与暴露：固定 6 组程序逐项核对热量分项（指令、声明、触发节点、子载荷份数、复制 / 循环倍数）与预览一致；子载荷与元程序重复执行不重复计暴露；对照组去掉触发器后热量下降 | 016、042 | 1 / 3 |
-| FGT-EMG-018 | 程序树预览：12 组固定程序的预览与 FGT-EMG-010 的树逐项一致；六个原因键（FGR-EMG-038）都出现，且按提示操作后可恢复（卡片草稿 EMG1-UX-01 原写的“建议新增 FGT-EMG-015”与本表已有的 015 撞号，以本号为准） | 038 | 1 |
+| FGT-EMG-018 | 程序树预览：12 组固定程序的预览与 FGT-EMG-010 的树逐项一致；八个原因键（FGR-EMG-038 六个 + `table_full` + `stale_content`）都出现，且按提示操作后可恢复（`flash_truncated` / `flash_range` 在 EMG1-FLASH-01 落地前以注入夹具验证，FLASH-01 补真实触发与恢复）（卡片草稿 EMG1-UX-01 原写的“建议新增 FGT-EMG-015”与本表已有的 015 撞号，以本号为准） | 038 | 1 |
 | FGT-EMG-020 | 事件总线：29 条事件各有触发用例与“不该发”对照；按需发事件（无监听不入队）；命中即结束的载荷在命中同一步也发 `evt.expire`（`Code` = 命中）；阶段 1 的 `evt.react` 生产者 = 连锁结算：`fw_marktag` 跳到已标记目标时发一次、`reaction_marktag` 计数 +1，没有已标记目标时不发不计（对照），旧 `DetectMarkJump` 不重复计数 | 060～062、084 | 1 |
 | FGT-EMG-021 | 预算与顺延：一步灌入 2000 条事件，全部在后续步处理完、无丢失、顺序按 `Seq`；存档读档后队列一致 | 063 | 1 |
 | FGT-EMG-022 | 链深与扇出：链深 3 截止并计数；扇出 8 截断 | 064、065 | 1 |
