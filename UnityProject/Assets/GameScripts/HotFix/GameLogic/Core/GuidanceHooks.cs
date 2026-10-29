@@ -641,6 +641,9 @@ namespace GameLogic.Core
         /// <summary>EMG1-UX-01（FG19 第 13 节 B01 / B14）：第一次在电路编辑器里看到非空的程序树（引导内容在 FG15-UX-04：槽序即程序序、容量逐代减半、继承与溢出怎么读）。</summary>
         public const string EmgFirstProgramTree = "emg_first_program_tree";
 
+        /// <summary>EMG1-TRIG-01（FG19 FGR-EMG-034）：第一次有触发器放出子载荷（引导内容在 FG15-UX-04：触发事件、子弹药只执行自己节点、代际与份数）。</summary>
+        public const string EmgFirstTrigger = "emg_first_trigger";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -716,7 +719,7 @@ namespace GameLogic.Core
             SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
             ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
             ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
-            EmgFirstProgramTree,
+            EmgFirstProgramTree, EmgFirstTrigger,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

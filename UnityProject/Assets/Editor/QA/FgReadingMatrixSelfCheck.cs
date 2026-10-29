@@ -203,6 +203,8 @@ namespace GameLogic.EditorTools
                     c.Load.ToString(CultureInfo.InvariantCulture), c.Source, c.Icon,
                     // FG2-VFX-02：布区落点 / 无人机方式 / 组件自带回波 / 反伤
                     c.FieldPlace, c.DroneMode, c.EchoCount.ToString(CultureInfo.InvariantCulture), F(c.EchoDelay), F(c.EchoRatio), F(c.Thorns), F(c.ThornsReach),
+                    // EMG1-TRIG-01：根载荷实体化参数（FG19A 第 2.1.1 节）
+                    c.Flight, F(c.FlightSpeed), F(c.FlightRadius), F(c.FlightLifeScale), c.FlightLob.ToString(CultureInfo.InvariantCulture), F(c.Kinetic),
                 };
                 Compare(f, mine, cdiff);
             }

@@ -63,6 +63,8 @@ namespace BinGames.Sim.Combat
         public byte BounceLeft;
         public byte Depth;
         public EmgProjFlags Flags;
+        /// <summary>EMG1-TRIG-01：子弹药不打的单位 Id（命中触发放出的子弹药指向“其他”单位，不再打母载荷刚命中的那个；0 = 没有）。Emg 弹体段第 16 个字段。</summary>
+        public int IgnoreUnit;
     }
 
     /// <summary>内核的标量状态（NativeArray 长度 1，作业与托管调用共用）。</summary>
@@ -285,6 +287,12 @@ namespace BinGames.Sim.Combat
         public uint EmgListen;
         /// <summary>当前正在结算的出手 / 载荷（瞬时量，见 <see cref="EmgCtx"/>）。</summary>
         public EmgCtx EmgCtx;
+        /// <summary>EMG1-TRIG-01：待生成的子载荷 / 定时 / 根弹体（进快照，见 <see cref="EmgSpawn"/>）。</summary>
+        public NativeList<EmgSpawn> EmgPending;
+        /// <summary>EMG1-TRIG-01：子形态参数（下标 = 子形态码 1～5；热更层按 fg.TbSubPayload 写，缺省 FG19A 初值）。表数据，不进快照。</summary>
+        public NativeArray<EmgSubForm> EmgSubForms;
+        /// <summary>EMG1-TRIG-01（ADR ③ / ⑤）：EmgHash——障碍圆与残骸圆的派生空间哈希（不进快照；障碍 / 残骸变化时置脏 <see cref="EmgScalars.HashDirty"/>，下次查询时重建）。</summary>
+        public EmgHash EmgHash;
 
         public bool IsCreated => Id.IsCreated;
 

@@ -534,7 +534,7 @@ namespace GameLogic.EditorTools
             cases.Add(("残骸耐久非数", Patch(snap, d => WriteInt(d, kseg.at + 44, BitConverter.SingleToInt32Bits(float.NaN))), CombatLoadResult.InvalidValue));
             if (k.ProjectileCount >= 2)
             {
-                (int at, int stride) pseg = FindSegment(snap, EmgConst.SegProjectiles, 15, k.ProjectileCount);
+                (int at, int stride) pseg = FindSegment(snap, EmgConst.SegProjectiles, 16, k.ProjectileCount);
                 cases.Add(("弹体 Id 重复", Patch(snap, d => WriteInt(d, pseg.at + pseg.stride, BitConverter.ToInt32(d, pseg.at))), CombatLoadResult.InvalidValue));
                 cases.Add(("弹体程序下标越界", Patch(snap, d => WriteInt(d, pseg.at + 4, 50)), CombatLoadResult.InvalidValue));
             }
@@ -605,7 +605,7 @@ namespace GameLogic.EditorTools
         // ── 工具 ─────────────────────────────────────────────────────────────
 
         /// <summary>按段头（段标记、字段数、记录数，且段尾紧跟下一个段标记）在快照里找 Emg 段，返回第一条记录的位置与记录长度。</summary>
-        private static (int at, int stride) FindSegment(byte[] d, int tag, int fields, int count)
+        internal static (int at, int stride) FindSegment(byte[] d, int tag, int fields, int count)
         {
             for (int i = 0; i + 14 <= d.Length - 4; i++)
             {
@@ -628,7 +628,7 @@ namespace GameLogic.EditorTools
             return (-1, 0);
         }
 
-        private static byte[] Patch(byte[] src, Action<byte[]> edit)
+        internal static byte[] Patch(byte[] src, Action<byte[]> edit)
         {
             byte[] d = (byte[])src.Clone();
             edit(d);
@@ -636,7 +636,7 @@ namespace GameLogic.EditorTools
             return d;
         }
 
-        private static void WriteInt(byte[] d, int at, int v)
+        internal static void WriteInt(byte[] d, int at, int v)
         {
             byte[] b = BitConverter.GetBytes(v);
             Buffer.BlockCopy(b, 0, d, at, 4);

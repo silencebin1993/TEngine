@@ -454,6 +454,7 @@
 - 上限：每次触发份数 ≤ `emg.trig.max_children`（4）；一次根出手衍生的载荷总数 ≤ `emg.tree.max_payloads`（16），按“同一因果链同时存活 ≤ 16”判定，超出的生成请求排队顺延（FGR-EMG-063），不丢（ADR-EMG-001 第 7 节第 6 条）。
 - 子载荷的基础伤害 = 母载荷伤害 × `emg.sub.dmg_ratio`（0.5，与现 split 读法同值）。
 - 母载荷仍按自己的程序结算；触发不消耗母载荷，除非事件本身就是母载荷结束（`evt.expire`、`evt.death`）。
+- **EMG1-TRIG-01 已落地（2026-10-29）**：生产点按“宿主节点挂在该事件上的子节点”记待生成请求，总线分派唤起后在 5e 段先进先出生成（`Main/Sim/Combat/CombatLogic.Trigger.cs` `EmgEmitHosted` / `EmgResolvePending` / `StepEmgPending`）；命中触发第 k 份指向 5 米内第 k 近的其他敌对单位（治疗子弹药找己方），没有则从母载荷方向起径向均分；“被击”朝攻击者；格斗 / 力场只按主目标；份数上限、同链同时存活上限、链深 3 截止都在内核；弹体池 / 区域满时请求顺延不丢、生成时才计寿命。阶段 1 的排放类指令（`mat.*` 写端）经 `fg.TbPortCarrier` 映射到读法驻留区（半径 1.5 米、6 秒、沾染位，FG19A 第 0.3 节口径 3，`stageGate` 与声明同为 1，阶段 2 由 EMG2-MAT-01 改斑块；参数为临时值，由 FG15-BAL-01 重定）。区域（布区落区、子区）与回波按 ADR ③ 宿主五元组做事件宿主（DEBT-EMG1BUS01-03 核销）。自动验收：`FgEmgTriggerSelfCheck`（FGT-EMG-011 / 022 / 040）、`FgEmgBusSelfCheck` C2。
 
 **FGR-EMG-035 子载荷的子形态与“结算”在 5 载体上的定义**
 
@@ -465,6 +466,7 @@
 | 力场（电晕场） | 每次脉冲 | 圈内每个单位各算一次命中，触发只按主目标一次 | 子区（小场脉冲） |
 | 布区（喷洒器、震荡脉冲器） | 每块落区 | 每个区域节拍、到期 | 子区（子区域） |
 - 无人机、哨戒桩本身是“发射者”，持有被刷写的程序（FGR-EMG-036）；它们的每次开火才是载荷。
+- **EMG1-TRIG-01 已落地（2026-10-29）**：编译器判“需要飞行”且主组件 `flight = yes` 时热更层置 `SpawnFlight`（`CombatSite.ApplySpawnFlight`），即时 / 重炮在原当场结算那一刻生成根弹体、开火结果报“已发射”（`CombatFireResult.Launched`），命中致死才回报击毁；无人机每次开火同样实体化；缺值不退回即时命中（表校验 R27 + `FgChannelAdmissionSelfCheck` E）。现行机器每 `combat.machine.attack_interval`（1.2 秒）出手一次，切割束一次出手 = 一段 = 一枚载荷，`emg.trig.beam_interval` 在出现持续光束时才需要切段。“装了需要飞行的固件后机器武器改为飞行弹体，只对相关程序生效”按推荐默认执行（2026-10-28，LANDING-PLAN 第 12 节 #8），待用户确认。
 
 **FGR-EMG-036 持续实体的刷写带宽**
 - 适用：无人机、伴飞无人机、哨戒桩、被劫持的敌机（FGR-EMG-163）、镜像体复制品（FGR-EMG-164）。

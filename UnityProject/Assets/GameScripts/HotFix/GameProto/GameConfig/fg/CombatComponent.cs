@@ -53,6 +53,12 @@ public sealed partial class CombatComponent : Luban.BeanBase
         EchoRatio = _buf.ReadFloat();
         Thorns = _buf.ReadFloat();
         ThornsReach = _buf.ReadFloat();
+        Flight = _buf.ReadString();
+        FlightSpeed = _buf.ReadFloat();
+        FlightRadius = _buf.ReadFloat();
+        FlightLifeScale = _buf.ReadFloat();
+        FlightLob = _buf.ReadInt();
+        Kinetic = _buf.ReadFloat();
     }
 
     public static CombatComponent DeserializeCombatComponent(ByteBuf _buf)
@@ -196,6 +202,30 @@ public sealed partial class CombatComponent : Luban.BeanBase
     /// 反伤触及(米,另加双方半径):攻击者在这个距离内才算近战
     /// </summary>
     public readonly float ThornsReach;
+    /// <summary>
+    /// 根载荷实体化:yes=允许(程序需要飞行时武器置 SpawnFlight、当场结算改为生成飞行弹体),no=不实体化(格斗/力场/布区/功能组件)
+    /// </summary>
+    public readonly string Flight;
+    /// <summary>
+    /// 实体化弹速(米/秒;yes 行必须 &gt;0,缺值表校验与 FgChannelAdmissionSelfCheck 失败,运行时不退回即时命中;no 行填 0)
+    /// </summary>
+    public readonly float FlightSpeed;
+    /// <summary>
+    /// 实体化弹体半径(米;yes 行必须 &gt;0)
+    /// </summary>
+    public readonly float FlightRadius;
+    /// <summary>
+    /// 实体化弹体寿命 = 射程(无人机为牵引绳) &#247; 弹速 &#215; 本值(yes 行必须 &gt;0)
+    /// </summary>
+    public readonly float FlightLifeScale;
+    /// <summary>
+    /// 1 = 可抛射(grm.mod.lob 生效);0 = 直线(光束:曲射只留落点扬尘)
+    /// </summary>
+    public readonly int FlightLob;
+    /// <summary>
+    /// 动能系数(FG19B &#167;6.3)
+    /// </summary>
+    public readonly float Kinetic;
    
     public const int __ID__ = -2113875684;
     public override int GetTypeId() => __ID__;
@@ -241,6 +271,12 @@ public sealed partial class CombatComponent : Luban.BeanBase
         + "echoRatio:" + EchoRatio + ","
         + "thorns:" + Thorns + ","
         + "thornsReach:" + ThornsReach + ","
+        + "flight:" + Flight + ","
+        + "flightSpeed:" + FlightSpeed + ","
+        + "flightRadius:" + FlightRadius + ","
+        + "flightLifeScale:" + FlightLifeScale + ","
+        + "flightLob:" + FlightLob + ","
+        + "kinetic:" + Kinetic + ","
         + "}";
     }
 }

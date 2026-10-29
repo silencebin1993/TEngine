@@ -59,6 +59,7 @@ namespace GameLogic.EditorTools
                 Step(CheckFakes);
                 Step(CheckMixed);
                 Step(CheckDualTrack);
+                Step(CheckFlightColumns);
                 Step(CheckPerformance);
             }
             finally
@@ -173,6 +174,42 @@ namespace GameLogic.EditorTools
             int onDecl = c.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
             Expect(c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
                 $"fg.TbHomeTuning emg.stage = {c.RawStage:0}，生效阶段 {c.EffectiveStage}；{c.OwnerIds.Length} 个已声明 owner 里走声明轨的 {onDecl} 个（新路径全部关闭，战斗行为逐字不变）");
+        }
+
+        /// <summary>EMG1-TRIG-01（FG19A 第 2.1.1 节；FG19 FGR-EMG-035）：作战组件表的根载荷实体化列——允许实体化的组件缺值即失败（运行时不退回即时命中）；0 弹速只对不实体化的行合法。</summary>
+        private static void CheckFlightColumns()
+        {
+            Line("  · E. 根载荷实体化列（EMG1-TRIG-01）：射弹 / 无人机主组件 flight = yes 且弹速 / 半径 / 寿命系数 > 0；其余 flight = no 且弹速 0；缺值判失败、不退回即时命中");
+            var bad = new List<string>();
+            int yes = 0, no = 0;
+            foreach (CombatComponent c in GameLogic.Campaign.Content.CarrierReadings.Components)
+            {
+                string problem = GameLogic.Campaign.Combat.CombatSite.FlightProblem(c.Flight, c.FlightSpeed, c.FlightRadius, c.FlightLifeScale);
+                bool wantYes = c.Slot == "main" && (c.Carrier == "projectile" || c.Carrier == "summon");
+                if (problem != null || (c.Flight == "yes") != wantYes)
+                {
+                    bad.Add($"{c.Id}（{c.Carrier}/{c.Slot} flight={c.Flight}：{problem ?? "射弹 / 无人机主组件才允许实体化"}）");
+                }
+                yes += c.Flight == "yes" ? 1 : 0;
+                no += c.Flight == "no" ? 1 : 0;
+            }
+            Expect(bad.Count == 0 && yes >= 5 && no >= 5, $"fg.TbCombatComponent：允许实体化 {yes} 行、不实体化 {no} 行，逐行成立{(bad.Count > 0 ? "；不成立：" + string.Join("、", bad) : string.Empty)}");
+            // 负向（同一判定函数，表校验 R27 有对应的 2 条负向自测）：允许实体化的行缺弹速 / 半径 / 寿命系数、不实体化的行写了弹速、flight 写错都判失败；0 弹速只对 no 合法。
+            var cases = new (string Name, string Flight, float Speed, float Radius, float Life, bool Ok)[]
+            {
+                ("yes 缺弹速", "yes", 0f, 0.15f, 1.2f, false), ("yes 缺半径", "yes", 30f, 0f, 1.2f, false), ("yes 缺寿命系数", "yes", 30f, 0.15f, 0f, false),
+                ("yes 弹速非数", "yes", float.NaN, 0.15f, 1.2f, false), ("no 写了弹速", "no", 30f, 0f, 0f, false), ("flight 拼错", "Yes", 30f, 0.15f, 1.2f, false),
+                ("yes 完整", "yes", 30f, 0.15f, 1.2f, true), ("no 弹速 0", "no", 0f, 0f, 0f, true),
+            };
+            string wrong = string.Join("、", cases.Where(x => (GameLogic.Campaign.Combat.CombatSite.FlightProblem(x.Flight, x.Speed, x.Radius, x.Life) == null) != x.Ok).Select(x => x.Name));
+            // 运行时：缺值照样置 SpawnFlight（弹体不动、寿命到即止）并给原因键，不退回即时命中。
+            var w = new BinGames.Sim.Combat.CombatWeapon { Mode = BinGames.Sim.Combat.CombatWeaponMode.Instant, Range = 30f, Damage = 10f };
+            string note = GameLogic.Campaign.Combat.CombatSite.ApplySpawnFlight(ref w, 0f, 0.15f, 1.2f);
+            var okW = new BinGames.Sim.Combat.CombatWeapon { Mode = BinGames.Sim.Combat.CombatWeaponMode.Instant, Range = 30f, Damage = 10f };
+            string okNote = GameLogic.Campaign.Combat.CombatSite.ApplySpawnFlight(ref okW, 30f, 0.15f, 1.2f);
+            Expect(wrong.Length == 0 && note == GameLogic.Campaign.Combat.CombatSite.NoteFlightMissing && w.SpawnFlight == 1 && w.Mode == BinGames.Sim.Combat.CombatWeaponMode.Instant
+                   && okNote == null && okW.SpawnFlight == 1 && Mathf.Approximately(okW.ProjectileLife, 1.2f) && Mathf.Approximately(okW.ProjectileSpeed, 30f),
+                $"负向 {cases.Length} 例判定正确{(wrong.Length > 0 ? "（判错：" + wrong + "）" : string.Empty)}；运行时缺弹速：仍置 SpawnFlight、Mode 不变、原因键 {note}（不退回即时命中）；完整参数：寿命 = 30 ÷ 30 × 1.2 = {okW.ProjectileLife:0.##} 秒、无原因键");
         }
 
         private static void CheckPerformance()

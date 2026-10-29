@@ -21,6 +21,13 @@ namespace BinGames.Sim.Combat
             EmgLastByKind = new NativeArray<EmgEvent>(EmgConst.EventKinds + 1, Allocator.Persistent);
             EmgListen = 0u;
             EmgCtx = EmgCtx.None;
+            EmgPending = new NativeList<EmgSpawn>(4, Allocator.Persistent);
+            EmgSubForms = new NativeArray<EmgSubForm>(6, Allocator.Persistent);
+            for (int k = 1; k <= 5; k++)
+            {
+                EmgSubForms[k] = EmgSubForm.Default(k);
+            }
+            EmgHash = EmgHash.Create();
         }
 
         private void EmgDispose()
@@ -36,6 +43,9 @@ namespace BinGames.Sim.Combat
             EmgStats.Dispose();
             EmgKindEnq.Dispose();
             EmgLastByKind.Dispose();
+            EmgPending.Dispose();
+            EmgSubForms.Dispose();
+            EmgHash.Dispose();
         }
 
         private void EmgAppend()
@@ -61,7 +71,8 @@ namespace BinGames.Sim.Combat
         {
             EmgBus.Clear();
             Wrecks.Clear();
-            EmgS[0] = EmgScalars.Initial;
+            EmgPending.Clear();
+            EmgS[0] = EmgScalars.Initial; // 游标归 0、EmgHash 置脏（EmgScalars.Initial）
             EmgResetStats();
             EmgCtx = EmgCtx.None;
         }

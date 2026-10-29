@@ -382,6 +382,8 @@ FGR-EMG-015 规则二要求每条声明在 5 载体上开 / 关都有行为差�
 
 动能系数与 FG19B §6.3 同值（格斗 2.2、布区 0.3 已按该节对齐）；FG19B 允许本表按子形态覆盖，目前没有覆盖。
 
+**EMG1-TRIG-01 已落地（2026-10-29）**：作战组件表新增 `flight` / `flightSpeed` / `flightRadius` / `flightLifeScale` / `flightLob` / `kinetic` 6 列（`tools/cell_tables/fgdata_reading.py` `_FLIGHT`），`fg.TbSubPayload` 5 行按上表写进内核（`CombatSite.ApplyEmgSubForms`）；“缺值”= 允许实体化的行弹速 / 半径 / 寿命系数为 0 或未填，0 弹速只对不实体化的行合法（check_luban R27、`CombatSite.FlightProblem`）。寿命由热更层显式写：射程（无人机为牵引绳）÷ 弹速 × 寿命系数。全部为临时值，由 FG15-BAL-01 重定。阶段 1 排放映射（第 0.3 节口径 3）：9 种物质 × 5 载体的 `fg.TbPortCarrier` 行动词 = emit、A = 驻留区半径 1.5 米、B = 6 秒、C = 沾染状态位号 + 1（液氮没有沾染位，只留区域），与声明 `stageGate` = 1 对齐。 审查补记（2026-10-29）：`comp_repairbeam` 表里保留“是 / 40”，但玩家维修束目前没有战场修复出手（装配没有攻击出口，内核开火报 NoCombatOutput），实体化与“命中 Code = heal”随友军修复出手一起由 EMG1-FW-01 交付（DEBT-EMG1TRIG01-03）；在此之前 `ApplySpawnFlight` 对没有攻击出口的武器与炮塔的弹体武器（本来就飞）不置位。切割束“每 0.5 秒一段”暂未生效（DEBT-EMG1TRIG01-04）。
+
 ### 2.2 4 个结构模块
 
 | owner | 玩家名 | 读端 | 写端 | 通道作用 | 阶段 |

@@ -176,16 +176,20 @@ namespace BinGames.Sim.Combat
                 return;
             }
             bool inCtx = d.EmgCtx.Prog >= 0;
-            EmgEmit(ref d, new EmgEvent
+            // EMG1-TRIG-01：单位级事件的触发子载荷在本单位处放出；被击朝向攻击者（FGR-EMG-034 表）。
+            int os = k == EmgEventKind.Hurt && other != 0 ? d.SlotOf(other) : -1;
+            float2 dir = os >= 0 ? EmgDir(d.Pos[os] - d.Pos[slot]) : float2.zero;
+            EmgEmitHosted(ref d, new EmgEvent
             {
                 Kind = k, Depth = inCtx ? d.EmgCtx.Depth : (byte)0, EntKind = EmgEntKind.Unit, Ent = d.Id[slot],
                 OtherKind = other != 0 ? EmgEntKind.Unit : EmgEntKind.None, Other = other, Prog = prog, Node = 0,
                 Chain = inCtx ? d.EmgCtx.Chain : 0, Code = code, Value = value, Value2 = value2, Pos = pos,
-            });
+            }, EmgUnitHost(ref d, slot), dir);
         }
 
         /// <summary>当前宿主（出手单位 / 弹体命中结算 / 无人机）做宿主的事件；与弹体宿主同一条“每宿主同一事件码 ≤ 3 次”（计数在上下文里，出手结束即丢，弹体宿主拷回弹体）。</summary>
-        internal static void EmgShotEvent(ref CombatData d, EmgEventKind k, int other, float value, float value2, ushort code, double2 pos)
+        internal static void EmgShotEvent(ref CombatData d, EmgEventKind k, int other, float value, float value2, ushort code, double2 pos,
+            EmgEntKind otherKind = EmgEntKind.Unit)
         {
             EmgCtx c = d.EmgCtx;
             if (c.Prog < 0 || !EmgSiteListens(ref d, k))
@@ -198,11 +202,13 @@ namespace BinGames.Sim.Combat
                 return;
             }
             d.EmgCtx.TrigUsed = c.TrigUsed;
-            EmgEmit(ref d, new EmgEvent
+            // EMG1-TRIG-01：触发子载荷的方向 = 出手者 → 结算点（命中触发另按“5 米内其他敌对单位”取向）。
+            float2 dir = c.Owner >= 0 && c.Owner < d.Count ? EmgDir(pos - d.Pos[c.Owner]) : float2.zero;
+            EmgEmitHosted(ref d, new EmgEvent
             {
-                Kind = k, Depth = c.Depth, EntKind = c.EntKind, Ent = c.Ent, OtherKind = other != 0 ? EmgEntKind.Unit : EmgEntKind.None, Other = other,
+                Kind = k, Depth = c.Depth, EntKind = c.EntKind, Ent = c.Ent, OtherKind = other != 0 ? otherKind : EmgEntKind.None, Other = other,
                 Prog = c.Prog, Node = c.Node, Chain = c.Chain, Code = code, Value = value, Value2 = value2, Pos = pos,
-            });
+            }, c, dir);
         }
 
         /// <summary>每宿主同一事件码 ≤ emg.trig.max_per_host 次（FGR-EMG-065）：<paramref name="used"/> 每条事件读端 2 比特；到上限计 PerHostCut、返回 false。
@@ -235,11 +241,11 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            EmgEmit(ref d, new EmgEvent
+            EmgEmitHosted(ref d, new EmgEvent
             {
                 Kind = k, Depth = pr.Depth, EntKind = EmgEntKind.Projectile, Ent = pr.Id, OtherKind = otherKind, Other = other,
                 Prog = pr.Prog, Node = pr.Node, Chain = pr.Chain, Code = code, Value = value, Value2 = value2, Pos = pos,
-            });
+            }, EmgProjHost(ref d, pr), EmgDir((double2)pr.Vel));
         }
 
         /// <summary>
@@ -289,10 +295,12 @@ namespace BinGames.Sim.Combat
                 : carrier == CombatCarrier.Aura ? (byte)EmgCode.SrcField : (byte)EmgCode.SrcOther;
             int prog = wp.Program;
             EmgHostBegin(ref d, prog, a, d.Id[a], EmgEntKind.Unit, src, d.Pos[a], t);
+            EmgFillShot(ref d, a, t, wp); // EMG1-TRIG-01：母载荷参数（触发子载荷用）
             if (prog < 0 || d.EmgListen == 0u)
             {
                 return;
             }
+            EmgQueueShotTimer(ref d, a, wp); // EMG1-TRIG-01：格斗 / 力场的定时从出手起算（DEBT-EMG1BUS01-03）
             if (wp.Mode != CombatWeaponMode.Projectile && EmgSiteListens(ref d, EmgEventKind.Prox) && EmgReadSlot(ref d, prog, 0, EmgEventKind.Prox) >= 0)
             {
                 EmgCountProx(ref d);
@@ -350,8 +358,18 @@ namespace BinGames.Sim.Combat
 
         /// <summary>一架无人机（含哨戒桩）对 <paramref name="t"/> 开火一次：宿主 = 无人机（稳定 Id），程序 = 它所属武器的程序根节点；每次开火发 evt.fire（FGR-EMG-060 第 1 行“每架每次开火”），
         /// 随后的伤害发 evt.hit / evt.kill、被击者 evt.hurt 的来源 = 弹体（无人机是射击）。与 <see cref="EmgShotEnd"/> 成对。</summary>
-        internal static void EmgDroneBegin(ref CombatData d, in CombatDrone dr, int owner, int t, int prog) =>
+        internal static void EmgDroneBegin(ref CombatData d, in CombatDrone dr, int owner, int t, int prog)
+        {
             EmgHostBegin(ref d, prog, owner, dr.Id, EmgEntKind.Drone, (byte)EmgCode.SrcProjectile, dr.Pos, t);
+            EmgCtx c = d.EmgCtx; // EMG1-TRIG-01：母载荷参数（无人机子弹）
+            c.Damage = dr.Damage;
+            c.Weapon = dr.Weapon;
+            c.OwnerId = dr.Owner;
+            c.Faction = (byte)dr.Faction;
+            c.Carrier = (byte)CombatCarrier.Summon;
+            c.MainTarget = d.Id[t];
+            d.EmgCtx = c;
+        }
 
         /// <summary>无人机 / 哨戒桩到期或母机没了、从列表移除：evt.expire（Code = 寿命；宿主 = 无人机）。</summary>
         internal static void EmgDroneExpire(ref CombatData d, in CombatDrone dr)
@@ -367,14 +385,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>一发弹体命中结算期间以它为宿主（DamageUnit / Kill 据此发 evt.hit、evt.hurt 的来源与链、evt.kill 的宿主）；没有程序也记来源。
         /// 每宿主计数从弹体拷进上下文，<see cref="EmgProjCtxEnd"/> 拷回。</summary>
-        private static void EmgProjCtxBegin(ref CombatData d, in CombatProjectile pr)
-        {
-            d.EmgCtx = new EmgCtx
-            {
-                Prog = pr.Prog < 0 ? -1 : pr.Prog, Chain = pr.Chain, Ent = pr.Id, Owner = d.SlotOf(pr.Owner), Node = pr.Node, Depth = pr.Depth,
-                EntKind = EmgEntKind.Projectile, HurtSrc = (byte)EmgCode.SrcProjectile, HitCode = EmgCode.HitDirect, TrigUsed = pr.TrigUsed,
-            };
-        }
+        private static void EmgProjCtxBegin(ref CombatData d, in CombatProjectile pr) => d.EmgCtx = EmgProjHost(ref d, pr); // EMG1-TRIG-01：连同母载荷参数
 
         private static void EmgProjCtxEnd(ref CombatData d, ref CombatProjectile pr)
         {
@@ -634,6 +645,7 @@ namespace BinGames.Sim.Combat
             ushort port = (ushort)(EmgConst.EventPortBase + kind);
             int maxFan = d.Config.EmgMaxFanout > 0 ? d.Config.EmgMaxFanout : EmgConst.DefaultMaxFanout;
             int woken = 0, cut = 0;
+            bool trigWoken = false;
             EmgBusStats st = d.EmgStats[0];
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
             for (int i = n.FirstInstr; i < end; i++)
@@ -659,6 +671,7 @@ namespace BinGames.Sim.Combat
                     }
                     st = d.EmgStats[0];
                     st.TriggerWakes++;
+                    trigWoken = true;
                 }
                 else
                 {
@@ -671,6 +684,12 @@ namespace BinGames.Sim.Combat
                 st.LastFanoutCutChain = e.Chain;
             }
             d.EmgStats[0] = st;
+            // EMG1-TRIG-01：由这条事件记下的待生成子载荷——触发读端被唤起（链深未到 3）则唤起并发 evt.split，否则作废。
+            // 子节点与触发指令按程序顺序一一对应；一个节点里读同一事件的指令 ≤ 容量 4，到不了扇出 8，所以“唤起了一条触发读端”即唤起这条事件的全部子节点。
+            if (d.EmgS[0].ArmCursor < d.EmgPending.Length)
+            {
+                EmgResolvePending(ref d, e, trigWoken);
+            }
         }
     }
 }

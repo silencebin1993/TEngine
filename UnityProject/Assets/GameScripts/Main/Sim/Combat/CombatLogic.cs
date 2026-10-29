@@ -126,6 +126,11 @@ namespace BinGames.Sim.Combat
             {
                 StepEmgBus(ref d);
             }
+            // 5e. EMG1-TRIG-01：待生成的子载荷 / 定时 / 根弹体（总线唤起之后、先进先出；池满 / 区域满 / 同链存活满顺延不丢）。
+            if (d.EmgPending.Length > 0)
+            {
+                StepEmgPending(ref d);
+            }
 
             // 5c. FG5-RND-03：场地边界（靶场）。放在全部位移（移动、击退、牵引、无人机）之后，一处钳住所有来源。
             if (d.Scalars[0].ArenaOn != 0)
@@ -867,7 +872,9 @@ namespace BinGames.Sim.Combat
                 return;
             }
             d.Cycle[i] = p.CycleSeconds;
+            EmgRepairBegin(ref d, i, lowest, p.EffectAmount); // EMG1-TRIG-01：带程序的维修单位每次修复 = 一次出手（修复命中 evt.hit Code = 修复）
             Heal(ref d, lowest, p.EffectAmount, i);
+            EmgShotEnd(ref d);
         }
 
         /// <summary>突袭者（FG06 原型）：扑向感知范围内的目标，进入射程开火；没有目标时朝目标点前进。每 0.5 游戏秒重选一次目标。</summary>
@@ -985,7 +992,7 @@ namespace BinGames.Sim.Combat
             {
                 SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露
             }
-            else if (wp.Mode != CombatWeaponMode.Projectile && TryReflectInstant(ref d, i, t, wp.Damage, wp))
+            else if (wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, i, t, wp.Damage, wp))
             {
                 CombatCounters rc = d.Counters[0];
                 rc.ShotsFired++;
@@ -1007,6 +1014,29 @@ namespace BinGames.Sim.Combat
             if (wp.Mode == CombatWeaponMode.Projectile)
             {
                 SpawnProjectile(ref d, i, t, d.Weapon[i], wp);
+                return;
+            }
+            if (EmgFlightOn(wp))
+            {
+                // EMG1-TRIG-01（ADR ③）：程序需要飞行——原来“当场结算”的这一下改为生成一发弹体（命中时按同一套结算），不改 Mode。
+                if (!d.Has(i, CombatUnitFlags.SilentFire))
+                {
+                    Cue(ref d, d.Faction[i] == (byte)CombatFaction.Hostile ? CombatEventKind.EnemyFired : CombatEventKind.Fired, i, d.Id[t], 0f, d.Pos[i], 0);
+                }
+                EmgFireFlight(ref d, i, t, d.Weapon[i], wp, EmgProjFlags.None);
+                if (wp.Reading.EscortDrones > 0)
+                {
+                    LaunchDrones(ref d, i, wp, wp.Reading.EscortDrones);
+                }
+                return;
+            }
+            if (EmgInstantCovered(ref d, i, t, wp))
+            {
+                // EMG1-TRIG-01：残骸挡在线段上，这一击被吸收（地点没有残骸时 O(1) 跳过）；开火提示照常。
+                if (!d.Has(i, CombatUnitFlags.SilentFire))
+                {
+                    Cue(ref d, d.Faction[i] == (byte)CombatFaction.Hostile ? CombatEventKind.EnemyFired : CombatEventKind.Fired, i, d.Id[t], 0f, d.Pos[i], 0);
+                }
                 return;
             }
             if (wp.Reading.Carrier != CombatCarrier.Projectile || wp.Reading.HasFirmwareReading)
@@ -1162,7 +1192,7 @@ namespace BinGames.Sim.Combat
             RawFired(ref d, a, t);
             EmgShotBegin(ref d, a, t, wp); // EMG1-BUS-01：一次出手（evt.fire；过热事件随后继承这条链）
             AddShotHeat(ref d, a, wp);
-            if (wp.Mode != CombatWeaponMode.Projectile && TryReflectInstant(ref d, a, t, wp.Damage, wp))
+            if (wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, a, t, wp.Damage, wp))
             {
                 if (IsCharged(wp))
                 {
@@ -1176,7 +1206,7 @@ namespace BinGames.Sim.Combat
                 TurnToward(ref d, a, d.Pos[t], 360f);
             }
             // FG2-E2E-01（FG-GAP-043）：引信类固件的弹迹与炮口装定闪光（弹体武器只闪光，弹体自己飞）。
-            PushTrace(ref d, a, t, wp, wp.Mode == CombatWeaponMode.Projectile);
+            PushTrace(ref d, a, t, wp, wp.Mode == CombatWeaponMode.Projectile || EmgFlightOn(wp));
             if (IsCharged(wp))
             {
                 // FG2-FW-02：蓄力读法（出手间隔倍率 > 1）记下这一发之后多久才蓄满；直控点击按它拦（FireDirect），编队攻击的冷却本身已乘同一倍率。
@@ -1194,6 +1224,23 @@ namespace BinGames.Sim.Combat
                 return CombatFireResult.Ok;
             }
 
+            if (EmgFlightOn(wp))
+            {
+                // EMG1-TRIG-01（ADR ③）：SpawnFlight——这一下生成飞行弹体，开火结果报“已发射”，击毁在命中致死时回报。
+                Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
+                EmgFireFlight(ref d, a, t, w, wp, EmgProjFlags.None);
+                if (wp.Reading.EscortDrones > 0)
+                {
+                    LaunchDrones(ref d, a, wp, wp.Reading.EscortDrones);
+                }
+                return CombatFireResult.Launched;
+            }
+            if (EmgInstantCovered(ref d, a, t, wp))
+            {
+                // EMG1-TRIG-01：开了火（照常有开火提示），被残骸挡下。shortcut: 结果码仍报 Ok（热更层写“命中”），残骸进正式流程时由 EMG1-ENT-01 加“被掩体挡下”结果码（DEBT-EMG1TRIG01-02）。
+                Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
+                return CombatFireResult.Ok;
+            }
             // FG2-FW-02：载体投送 + 读法（射弹 / 格斗 / 无人机 / 力场 / 布区）；没有读法的射弹载体与 Demo 逐字同一结算（正面装甲、侧后、标记、标记跳转）。
             return DeliverInstant(ref d, a, t, wp, true);
         }
@@ -1253,7 +1300,7 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             RawFired(ref d, a, t);
             Cue(ref d, CombatEventKind.CannonFire, a, d.Id[t], 0f, d.Pos[t], 0);
-            PushTrace(ref d, a, t, wp, false); // FG2-E2E-01（FG-GAP-043）
+            PushTrace(ref d, a, t, wp, EmgFlightOn(wp)); // FG2-E2E-01（FG-GAP-043）；EMG1-TRIG-01：SpawnFlight 重炮只闪光，弹体自己飞
             if (overload)
             {
                 Cue(ref d, CombatEventKind.MeltOverload, a, d.Id[t], 0f, d.Pos[t], 0);
@@ -1265,9 +1312,23 @@ namespace BinGames.Sim.Combat
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
                 EmgOnOverheat(ref d, a, heat); // EMG1-BUS-01：evt.overheat
             }
+            if (EmgFlightOn(wp))
+            {
+                // EMG1-TRIG-01（ADR ③）：重炮 + 需要飞行的程序：瞄准阶段与熔穿过载（积热 / 反应）照常，真开火这一下生成重型弹体，过载的穿甲在命中时加。
+                EmgFireFlight(ref d, a, t, d.Weapon[a], wp, overload ? EmgProjFlags.Overload : EmgProjFlags.None);
+                if (wp.Reading.EscortDrones > 0)
+                {
+                    LaunchDrones(ref d, a, wp, wp.Reading.EscortDrones);
+                }
+                return CombatFireResult.Launched;
+            }
             if (TryReflectInstant(ref d, a, t, wp.Damage, wp))
             {
                 return CombatFireResult.Ok; // FG9-FAC-01：重炮打进偏折场，被反弹回开火者
+            }
+            if (EmgInstantCovered(ref d, a, t, wp))
+            {
+                return CombatFireResult.Ok; // EMG1-TRIG-01：残骸挡下
             }
             // 基础伤害不受过载影响；过载只改积热与穿甲（Demo CannonCombat 类注释）。FG2-FW-02：固件读法（穿甲、伤害倍率、增幅……）同一处结算。
             float pierce = (!overload || d.Has(t, CombatUnitFlags.HeatResistant)) ? 0f : wp.PierceBonus;
@@ -1450,6 +1511,10 @@ namespace BinGames.Sim.Combat
             }
             // FG6-DEF-01（击杀数）：击杀者带 CountKills（炮塔）、阵亡者与它敌对——记一次击杀（玩法事件，不丢；O(1)）。
             int ks = d.SlotOf(killerId);
+            if (d.EmgCtx.Flight != 0 && ks >= 0 && ks != t && ks == d.EmgCtx.Owner)
+            {
+                EmgFlightKillReport(ref d, ks, t); // EMG1-TRIG-01（ADR ③）：SpawnFlight 弹体命中致死才回报击毁
+            }
             if (ks >= 0 && ks != t && d.Has(ks, CombatUnitFlags.CountKills) && d.Faction[ks] != d.Faction[t])
             {
                 Gameplay(ref d, CombatEventKind.TurretKill, ks, d.Id[t], 0f, 0f, d.Pos[t], d.Has(t, CombatUnitFlags.Elite) ? (byte)1 : (byte)0, 0);
@@ -1511,6 +1576,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             int healerId = healer >= 0 && healer < d.Count ? d.Id[healer] : 0;
+            EmgOnHeal(ref d, t, amount, healer); // EMG1-TRIG-01：载荷修复友军 = evt.hit（Code = 修复）
             if (d.Has(t, CombatUnitFlags.ExternalHealth))
             {
                 Gameplay(ref d, CombatEventKind.HealRequest, t, healerId, amount, d.Hp[t], d.Pos[t], 0, 0);
@@ -1718,7 +1784,9 @@ namespace BinGames.Sim.Combat
                     d.Projectiles[write++] = pr; // FG9-FAC-01：被偏折场反弹，下一步起按敌方弹体飞回去
                     continue;
                 }
-                byte want = pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
+                // EMG1-TRIG-01：治疗子弹药碰己方单位；子弹药不打母载荷刚命中的那个（IgnoreUnit）。旧弹体两项都是缺省，逐字不变。
+                bool heal = (pr.Flags & EmgProjFlags.Heal) != 0;
+                byte want = heal ? (byte)pr.Faction : pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
                 // 线段 prev→next 与单位圆（半径 = 单位半径 + 弹体半径）求最早交点。
                 double reach = pr.Radius + maxR;
                 int cx0 = grid.CellOf(math.min(pr.Prev.x, next.x) - reach);
@@ -1738,7 +1806,7 @@ namespace BinGames.Sim.Combat
                         for (int e = start; e < start + count; e++)
                         {
                             int k = grid.Slots[e];
-                            if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
+                            if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (pr.IgnoreUnit != 0 && d.Id[k] == pr.IgnoreUnit))
                             {
                                 continue;
                             }
@@ -1761,27 +1829,58 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
+                // EMG1-TRIG-01（ADR ③）：SpawnFlight 弹体与子弹药按本步线段查 EmgHash 里的障碍圆，先于单位交点撞上就在撞点结束（反弹归 EMG1-GRM-01）；炮塔 / 突袭者弹体不查。
+                if (EmgObstacleBefore(ref d, pr, next, hit >= 0 ? hitT : 1.0, out double2 obstacleAt))
+                {
+                    if ((pr.Flags & EmgProjFlags.Sub) != 0)
+                    {
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, obstacleAt, d.SlotOf(pr.Owner), pr.Faction);
+                    }
+                    EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireObstacle, obstacleAt);
+                    CombatCounters co = d.Counters[0];
+                    co.ProjectilesExpired++;
+                    d.Counters[0] = co;
+                    continue;
+                }
                 if (hit >= 0)
                 {
                     int owner = d.SlotOf(pr.Owner);
                     double2 hitPos = pr.Prev + (next - pr.Prev) * hitT;
                     // 命中方向：沿飞行方向反推“攻击者在哪一侧”（装甲 / 侧后判定用）。
                     double2 fromSide = d.Pos[hit] - (double2)(math.normalizesafe(pr.Vel) * 10f);
-                    float dmg = pr.Damage;
-                    if (IsFrontalArmored(ref d, hit, fromSide))
-                    {
-                        dmg *= math.max(0f, 1f - d.Armor[hit].x);
-                    }
-                    dmg *= BackMultiplier(ref d, hit, fromSide);
                     // EMG1-BUS-01：这一发命中结算期间以它为宿主——evt.hit（含读法的次级命中，与即时出手同一口径）、evt.hurt 的来源与链、evt.kill 的宿主都在 DamageUnit / Kill 里发。
                     EmgProjCtxBegin(ref d, pr);
                     int hitId = d.Id[hit];
-                    bool landed = DamageUnit(ref d, hit, dmg, owner);
-                    Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
-                    if (landed && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
+                    if (heal)
                     {
-                        // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
-                        ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
+                        d.EmgCtx.HitCode = EmgCode.HitHeal; // EMG1-TRIG-01：治疗子弹药命中 = 修复（evt.hit Code = 修复）
+                        Heal(ref d, hit, pr.Damage, owner);
+                    }
+                    else if ((pr.Flags & EmgProjFlags.Flight) != 0)
+                    {
+                        Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, pr.Damage, hitPos, 0);
+                        EmgFlightHit(ref d, pr, owner, hit, hitPos, fromSide); // EMG1-TRIG-01：根弹体按原“当场结算”那一下结算
+                    }
+                    else
+                    {
+                        float dmg = pr.Damage;
+                        if (IsFrontalArmored(ref d, hit, fromSide))
+                        {
+                            dmg *= math.max(0f, 1f - d.Armor[hit].x);
+                        }
+                        dmg *= BackMultiplier(ref d, hit, fromSide);
+                        bool landed = DamageUnit(ref d, hit, dmg, owner);
+                        Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
+                        // EMG1-TRIG-01：子弹药不读根读法，只执行自己节点的指令（下面）。
+                        if (landed && (pr.Flags & EmgProjFlags.Sub) == 0 && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
+                        {
+                            // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
+                            ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
+                        }
+                    }
+                    if ((pr.Flags & EmgProjFlags.Sub) != 0)
+                    {
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, hitPos, owner, pr.Faction);
                     }
                     EmgProjCtxEnd(ref d, ref pr);
                     // FG19A 申请 A8：命中即结束的载荷在命中同一步也发终结（Code = 命中）。
@@ -1793,6 +1892,10 @@ namespace BinGames.Sim.Combat
                 }
                 if (pr.Life <= 0f)
                 {
+                    if ((pr.Flags & EmgProjFlags.Sub) != 0)
+                    {
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次
+                    }
                     EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireLife, next); // EMG1-BUS-01：寿命到
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesExpired++;

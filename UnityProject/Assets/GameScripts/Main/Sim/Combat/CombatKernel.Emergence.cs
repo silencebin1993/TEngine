@@ -72,6 +72,30 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        /// <summary>EMG1-TRIG-01：写一行子形态参数（下标 = fg.TbSubPayload 的 code 1～5；数值必须有限且非负，否则拒绝）。</summary>
+        public bool SetEmgSubForm(int code, in EmgSubForm f)
+        {
+            bool ok = code >= 1 && code <= 5 && Finite(f.Speed) && Finite(f.Life) && Finite(f.LifeRatio) && Finite(f.Radius) && Finite(f.RadiusRatio)
+                      && f.Speed >= 0f && f.Life >= 0f && f.LifeRatio >= 0f && f.Radius >= 0f && f.RadiusRatio >= 0f;
+            if (ok)
+            {
+                _d.EmgSubForms[code] = f;
+            }
+            return ok;
+        }
+
+        public EmgSubForm EmgSubFormOf(int code) => code >= 1 && code <= 5 ? _d.EmgSubForms[code] : default;
+
+        /// <summary>EMG1-TRIG-01：待生成表（子载荷 / 定时 / 顺延的根弹体）。</summary>
+        public int EmgPendingCount => _d.EmgPending.Length;
+
+        public bool TryGetEmgPending(int index, out EmgSpawn s)
+        {
+            bool ok = index >= 0 && index < _d.EmgPending.Length;
+            s = ok ? _d.EmgPending[index] : default;
+            return ok;
+        }
+
         public bool TryGetEmgNode(int index, out EmgNode n)
         {
             bool ok = index >= 0 && index < _d.EmgNodes.Length;
@@ -346,10 +370,19 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        /// <summary>EMG1-TRIG-01：障碍 / 残骸变了——EmgHash 下次查询时重建（脏标记在 EmgS 里，内核一步的作业副本与主线程共用）。</summary>
+        private void EmgHashDirty()
+        {
+            EmgScalars es = _d.EmgS[0];
+            es.HashDirty = 1;
+            _d.EmgS[0] = es;
+        }
+
         /// <summary>登记一个残骸（发稳定 Id）。满了（<see cref="EmgConst.DefaultWreckCapacity"/>）、数值不合理（与读档同一份 <see cref="WreckValid"/>）或链没发过返回 false——
         /// 满了的“最早的崩解为碎屑”归 EMG1-ENT-01。</summary>
         public bool TryAddWreck(in EmgWreck wreck, out int id)
         {
+            EmgHashDirty(); // EMG1-TRIG-01：残骸圆收在 EmgHash 里（即时命中掩体检测）
             id = 0;
             EmgWreck w = wreck;
             w.Id = 1; // 只为过校验；真正的号下面发
@@ -445,9 +478,9 @@ namespace BinGames.Sim.Combat
         private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes)
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
-            w.Write(10 + (extraBytes > 0 ? 1 : 0));
+            w.Write(13 + (extraBytes > 0 ? 1 : 0));
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, 7, 1);
+            sw.Begin(EmgConst.SegScalars, 8, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -455,6 +488,7 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(es.NextFieldId);
             if (sw.F()) w.Write(es.NextChain);
             if (sw.F()) w.Write(es.EmgSeq);
+            if (sw.F()) w.Write(es.NextZoneId); // EMG1-TRIG-01：尾部追加，短段读到取 1
             sw.EndRecord();
             sw.End();
 
@@ -501,7 +535,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegProjectiles, 15, _d.Projectiles.Length);
+            sw.Begin(EmgConst.SegProjectiles, 16, _d.Projectiles.Length);
             for (int i = 0; i < _d.Projectiles.Length; i++)
             {
                 CombatProjectile p = _d.Projectiles[i];
@@ -520,6 +554,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(p.BounceLeft);
                 if (sw.F()) w.Write(p.Depth);
                 if (sw.F()) w.Write((byte)p.Flags);
+                if (sw.F()) w.Write(p.IgnoreUnit); // EMG1-TRIG-01：尾部追加
                 sw.EndRecord();
             }
             sw.End();
@@ -585,6 +620,8 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
+            WriteTriggerSegments(w, sw);
+
             if (extraBytes > 0)
             {
                 sw.Begin(UnknownSegmentTagForTests, 1, 1);
@@ -592,6 +629,70 @@ namespace BinGames.Sim.Combat
                 sw.EndRecord();
                 sw.End();
             }
+        }
+
+        /// <summary>EMG1-TRIG-01：待生成表（段 11）、区域宿主字段（段 12，按区域表逐条）、回波宿主字段（段 13，按回波表逐条）。</summary>
+        private void WriteTriggerSegments(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            sw.Begin(EmgConst.SegPending, 25, _d.EmgPending.Length);
+            for (int i = 0; i < _d.EmgPending.Length; i++)
+            {
+                EmgSpawn s = _d.EmgPending[i];
+                if (sw.F()) w.Write(s.At);
+                if (sw.F()) w.Write(s.Pos.x);
+                if (sw.F()) w.Write(s.Pos.y);
+                if (sw.F()) w.Write(s.Dir.x);
+                if (sw.F()) w.Write(s.Dir.y);
+                if (sw.F()) w.Write(s.Damage);
+                if (sw.F()) w.Write(s.ZoneRadius);
+                if (sw.F()) w.Write(s.ZoneLife);
+                if (sw.F()) w.Write(s.Prog);
+                if (sw.F()) w.Write(s.Chain);
+                if (sw.F()) w.Write(s.Owner);
+                if (sw.F()) w.Write(s.Weapon);
+                if (sw.F()) w.Write(s.Other);
+                if (sw.F()) w.Write(s.Ent);
+                if (sw.F()) w.Write(s.Seq);
+                if (sw.F()) w.Write(s.Node);
+                if (sw.F()) w.Write(s.Depth);
+                if (sw.F()) w.Write(s.Count);
+                if (sw.F()) w.Write(s.Kind);
+                if (sw.F()) w.Write(s.Faction);
+                if (sw.F()) w.Write((byte)s.Flags);
+                if (sw.F()) w.Write((byte)s.EntKind);
+                if (sw.F()) w.Write(s.Armed);
+                if (sw.F()) w.Write(s.SubForm);
+                if (sw.F()) w.Write((short)(s.Gen | (s.Done << 4)));
+                sw.EndRecord();
+            }
+            sw.End();
+            sw.Begin(EmgConst.SegZones, 9, _d.Zones.Length);
+            for (int i = 0; i < _d.Zones.Length; i++)
+            {
+                CombatZone z = _d.Zones[i];
+                if (sw.F()) w.Write(z.EmgProgRef);
+                if (sw.F()) w.Write(z.EmgId);
+                if (sw.F()) w.Write(z.EmgChain);
+                if (sw.F()) w.Write(z.EmgTrigUsed);
+                if (sw.F()) w.Write(z.EmgNode);
+                if (sw.F()) w.Write(z.EmgDepth);
+                if (sw.F()) w.Write(z.EmgGen);
+                if (sw.F()) w.Write(z.EmgSub);
+                if (sw.F()) w.Write(z.EmgWeapon);
+                sw.EndRecord();
+            }
+            sw.End();
+            sw.Begin(EmgConst.SegEchoes, 4, _d.Echoes.Length);
+            for (int i = 0; i < _d.Echoes.Length; i++)
+            {
+                CombatEcho e = _d.Echoes[i];
+                if (sw.F()) w.Write(e.EmgProgRef);
+                if (sw.F()) w.Write(e.EmgChain);
+                if (sw.F()) w.Write(e.EmgNode);
+                if (sw.F()) w.Write(e.EmgDepth);
+                sw.EndRecord();
+            }
+            sw.End();
         }
 
         private const int ProgramFields = 6;
@@ -651,6 +752,9 @@ namespace BinGames.Sim.Combat
         private sealed class EmgLoadBuffer
         {
             public int[] DroneIds;
+            /// <summary>EMG1-TRIG-01：区域 / 回波的宿主字段（读法表在 Emg 段之后读，FinishEmgLoad 再落）。</summary>
+            public CombatZone[] ZoneHosts;
+            public CombatEcho[] EchoHosts;
             public bool HadSeq;
         }
 
@@ -706,7 +810,9 @@ namespace BinGames.Sim.Combat
                     if (sr.F()) es.NextChain = r.ReadInt32();
                     buf.HadSeq = sr.F();
                     if (buf.HadSeq) es.EmgSeq = r.ReadInt32();
-                    if (!sr.RecordOk || es.NextProjId < 1 || es.NextDroneId < 1 || es.NextWreckId < 1 || es.NextPatchId < 1 || es.NextFieldId < 1 || es.NextChain < 1)
+                    if (sr.F()) es.NextZoneId = r.ReadInt32();
+                    if (!sr.RecordOk || es.NextProjId < 1 || es.NextDroneId < 1 || es.NextWreckId < 1 || es.NextPatchId < 1 || es.NextFieldId < 1 || es.NextChain < 1
+                        || es.NextZoneId < 1)
                     {
                         return CombatLoadResult.InvalidValue;
                     }
@@ -856,7 +962,8 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) p.BounceLeft = r.ReadByte();
                         if (sr.F()) p.Depth = r.ReadByte();
                         if (sr.F()) p.Flags = (EmgProjFlags)r.ReadByte();
-                        if (!sr.RecordOk)
+                        if (sr.F()) p.IgnoreUnit = r.ReadInt32();
+                        if (!sr.RecordOk || p.IgnoreUnit < 0)
                         {
                             return CombatLoadResult.InvalidValue;
                         }
@@ -947,9 +1054,106 @@ namespace BinGames.Sim.Combat
                         staging.Wrecks.Add(k);
                     }
                     return CombatLoadResult.Ok;
+                case EmgConst.SegPending:
+                    return ParsePending(r, sr, ref staging);
+                case EmgConst.SegZones:
+                    if (n > 1 << 20)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    buf.ZoneHosts = new CombatZone[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var z = new CombatZone();
+                        if (sr.F()) z.EmgProgRef = r.ReadInt32();
+                        if (sr.F()) z.EmgId = r.ReadInt32();
+                        if (sr.F()) z.EmgChain = r.ReadInt32();
+                        if (sr.F()) z.EmgTrigUsed = r.ReadUInt32();
+                        if (sr.F()) z.EmgNode = r.ReadByte();
+                        if (sr.F()) z.EmgDepth = r.ReadByte();
+                        if (sr.F()) z.EmgGen = r.ReadByte();
+                        if (sr.F()) z.EmgSub = r.ReadByte();
+                        if (sr.F()) z.EmgWeapon = r.ReadInt32();
+                        if (!sr.RecordOk)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        buf.ZoneHosts[i] = z;
+                    }
+                    return CombatLoadResult.Ok;
+                case EmgConst.SegEchoes:
+                    if (n > 1 << 20)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    buf.EchoHosts = new CombatEcho[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var e = new CombatEcho();
+                        if (sr.F()) e.EmgProgRef = r.ReadInt32();
+                        if (sr.F()) e.EmgChain = r.ReadInt32();
+                        if (sr.F()) e.EmgNode = r.ReadByte();
+                        if (sr.F()) e.EmgDepth = r.ReadByte();
+                        if (!sr.RecordOk)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        buf.EchoHosts[i] = e;
+                    }
+                    return CombatLoadResult.Ok;
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过
             }
+        }
+
+        private static CombatLoadResult ParsePending(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            if (n > EmgConst.PendingCapacity)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            for (int i = 0; i < n; i++)
+            {
+                sr.Record(i);
+                var s = new EmgSpawn { Prog = -1, Weapon = -1 };
+                short genDone = 0;
+                if (sr.F()) s.At = r.ReadDouble();
+                if (sr.F()) s.Pos.x = r.ReadDouble();
+                if (sr.F()) s.Pos.y = r.ReadDouble();
+                if (sr.F()) s.Dir.x = r.ReadSingle();
+                if (sr.F()) s.Dir.y = r.ReadSingle();
+                if (sr.F()) s.Damage = r.ReadSingle();
+                if (sr.F()) s.ZoneRadius = r.ReadSingle();
+                if (sr.F()) s.ZoneLife = r.ReadSingle();
+                if (sr.F()) s.Prog = r.ReadInt32();
+                if (sr.F()) s.Chain = r.ReadInt32();
+                if (sr.F()) s.Owner = r.ReadInt32();
+                if (sr.F()) s.Weapon = r.ReadInt32();
+                if (sr.F()) s.Other = r.ReadInt32();
+                if (sr.F()) s.Ent = r.ReadInt32();
+                if (sr.F()) s.Seq = r.ReadInt32();
+                if (sr.F()) s.Node = r.ReadByte();
+                if (sr.F()) s.Depth = r.ReadByte();
+                if (sr.F()) s.Count = r.ReadByte();
+                if (sr.F()) s.Kind = r.ReadByte();
+                if (sr.F()) s.Faction = r.ReadByte();
+                if (sr.F()) s.Flags = (EmgProjFlags)r.ReadByte();
+                if (sr.F()) s.EntKind = (EmgEntKind)r.ReadByte();
+                if (sr.F()) s.Armed = r.ReadByte();
+                if (sr.F()) s.SubForm = r.ReadByte();
+                if (sr.F()) genDone = r.ReadInt16();
+                s.Gen = (byte)(genDone & 0xF);
+                s.Done = (short)(genDone >> 4);
+                if (!sr.RecordOk)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.EmgPending.Add(s);
+            }
+            return CombatLoadResult.Ok;
         }
 
         /// <summary>
@@ -1065,11 +1269,86 @@ namespace BinGames.Sim.Combat
             {
                 maxChain = Math.Max(maxChain, staging.EmgUnit[i].LastHitChain);
             }
+            CombatLoadResult tr = FinishTriggerLoad(ref staging, buf, ref es, ref maxChain);
+            if (tr != CombatLoadResult.Ok)
+            {
+                return tr;
+            }
             es.NextChain = Math.Max(es.NextChain, maxChain + 1);
             es.BusHead = 0;
             staging.EmgS[0] = es;
             return CombatLoadResult.Ok;
         }
+
+        /// <summary>EMG1-TRIG-01 读档收尾：落区域 / 回波的宿主字段（条数必须与读法表一致），校验程序下标 / 节点 / 链深 / Id 唯一，待生成请求逐条校验；区域发号器接着发。</summary>
+        private static CombatLoadResult FinishTriggerLoad(ref CombatData staging, EmgLoadBuffer buf, ref EmgScalars es, ref int maxChain)
+        {
+            int programs = staging.EmgPrograms.Length;
+            if (buf?.ZoneHosts != null && buf.ZoneHosts.Length != staging.Zones.Length || buf?.EchoHosts != null && buf.EchoHosts.Length != staging.Echoes.Length)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            var ids = new HashSet<int>();
+            int maxZone = 0;
+            for (int i = 0; buf?.ZoneHosts != null && i < staging.Zones.Length; i++)
+            {
+                CombatZone h = buf.ZoneHosts[i];
+                CombatZone z = staging.Zones[i];
+                if (h.EmgProgRef < 0 || h.EmgProgRef > programs || h.EmgChain < 0 || h.EmgDepth > EmgConst.MaxDepth || h.EmgGen > EmgConst.MaxGen || h.EmgSub > 1
+                    || h.EmgProgRef > 0 && (h.EmgWeapon < -1 || h.EmgWeapon >= staging.Weapons.Length || h.EmgId < 1 || !ids.Add(h.EmgId) || h.EmgNode >= staging.EmgPrograms[h.EmgProgRef - 1].NodeCount))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                z.EmgProgRef = h.EmgProgRef;
+                z.EmgId = h.EmgId;
+                z.EmgChain = h.EmgChain;
+                z.EmgTrigUsed = h.EmgTrigUsed;
+                z.EmgNode = h.EmgNode;
+                z.EmgDepth = h.EmgDepth;
+                z.EmgGen = h.EmgGen;
+                z.EmgSub = h.EmgSub;
+                z.EmgWeapon = h.EmgWeapon;
+                staging.Zones[i] = z;
+                maxZone = Math.Max(maxZone, h.EmgId);
+                maxChain = Math.Max(maxChain, h.EmgChain);
+            }
+            es.NextZoneId = Math.Max(es.NextZoneId, maxZone + 1);
+            for (int i = 0; buf?.EchoHosts != null && i < staging.Echoes.Length; i++)
+            {
+                CombatEcho h = buf.EchoHosts[i];
+                CombatEcho e = staging.Echoes[i];
+                if (h.EmgProgRef < 0 || h.EmgProgRef > programs || h.EmgChain < 0 || h.EmgDepth > EmgConst.MaxDepth
+                    || h.EmgProgRef > 0 && h.EmgNode >= staging.EmgPrograms[h.EmgProgRef - 1].NodeCount)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                e.EmgProgRef = h.EmgProgRef;
+                e.EmgChain = h.EmgChain;
+                e.EmgNode = h.EmgNode;
+                e.EmgDepth = h.EmgDepth;
+                staging.Echoes[i] = e;
+                maxChain = Math.Max(maxChain, h.EmgChain);
+            }
+            for (int i = 0; i < staging.EmgPending.Length; i++)
+            {
+                EmgSpawn s = staging.EmgPending[i];
+                if (!SpawnValid(s, ref staging))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                maxChain = Math.Max(maxChain, s.Chain);
+            }
+            es.ArmCursor = 0;
+            es.HashDirty = 1;
+            return CombatLoadResult.Ok;
+        }
+
+        /// <summary>待生成请求：种类 0～2、程序下标在表内且节点在程序节点数内（根弹体为 −1 也可）、链深 ≤ 3、代 ≤ 2、子形态 0～5、武器在表内、数值有限。</summary>
+        private static bool SpawnValid(in EmgSpawn s, ref CombatData d) =>
+            s.Kind <= EmgConst.PendRoot && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
+            && (s.Prog >= 0 || s.Kind == EmgConst.PendRoot) && s.Depth <= EmgConst.MaxDepth && s.Gen <= EmgConst.MaxGen && s.SubForm <= 5 && s.Armed <= 1
+            && s.Weapon >= -1 && s.Weapon < d.Weapons.Length && s.Chain >= 0 && s.Done >= 0 && (byte)s.EntKind <= (byte)EmgEntKind.Field
+            && !double.IsNaN(s.At) && !double.IsInfinity(s.At) && IsFinite(s.Pos) && Finite(s.Dir.x) && Finite(s.Dir.y) && Finite(s.Damage) && Finite(s.ZoneRadius) && Finite(s.ZoneLife);
 
         // ── 写入口与读档共用的校验：写得进去的值存档后一定读得回来（审查 P1：三个写入口曾比读档宽）──
 

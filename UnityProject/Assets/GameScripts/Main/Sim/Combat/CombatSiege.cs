@@ -1560,7 +1560,9 @@ namespace BinGames.Sim.Combat
                     int ally = LowestAlly(ref d, ref grid, i, p.EffectRange);
                     if (ally >= 0)
                     {
+                        CombatLogic.EmgRepairBegin(ref d, i, ally, p.EffectAmount); // EMG1-TRIG-01：带程序的随队维修每次修复 = 一次出手（evt.hit Code = 修复）
                         CombatLogic.Heal(ref d, ally, p.EffectAmount, i);
+                        CombatLogic.EmgShotEnd(ref d);
                         su.HealCd = math.max(0.1f, p.CycleSeconds);
                     }
                     else
@@ -1746,7 +1748,7 @@ namespace BinGames.Sim.Combat
                     {
                         CombatFireResult r = CombatLogic.FireAt(ref d, i, best);
                         gs.GuardLastResult = (int)r;
-                        if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming)
+                        if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming || r == CombatFireResult.Launched)
                         {
                             su.HealCd = math.max(0.05f, CombatLogic.EffectiveCooldown(wp));
                             gs.GuardShots++;

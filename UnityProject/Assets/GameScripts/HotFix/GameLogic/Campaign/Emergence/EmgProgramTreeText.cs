@@ -21,6 +21,8 @@ namespace GameLogic.Campaign.Emergence
         Empty = 8,
         Legacy = 9,
         OffPath = 10,
+        /// <summary>EMG1-TRIG-01：“本程序以飞行弹体发射”（ADR U4）。</summary>
+        Flight = 11,
     }
 
     public struct EmgTreeRow
@@ -58,6 +60,10 @@ namespace GameLogic.Campaign.Emergence
         };
 
         public static string FixKey(string noteKey) => noteKey + ".fix";
+
+        /// <summary>EMG1-TRIG-01：编译器判“需要飞行”且载体是射弹（0）或无人机（2）——这两类组件在 FG19A 第 2.1.1 节都允许实体化。</summary>
+        public static bool SpawnsFlight(EmgProgramResult r) =>
+            r != null && !r.IsEmpty && (r.Program.Flags & EmgProgramFlags.NeedsFlight) != 0 && (r.Carrier == 0 || r.Carrier == 2);
 
         /// <summary>原因 + 解决办法的一行文本（{0} = 指令名）。</summary>
         public static string ReasonText(string noteKey, string instructionName) =>
@@ -118,6 +124,11 @@ namespace GameLogic.Campaign.Emergence
             }
             Add(into, EmgTreeRowKind.Heat, GameText.Format("emg.tree.heat", F1(r.HeatInstr), F1(r.HeatDecl), F1(r.HeatTrigger), r.ChildPayloads.ToString(CultureInfo.InvariantCulture),
                 F1(r.HeatChildren), F1(r.HeatTotal)), -1, -1, 0);
+            if (SpawnsFlight(r))
+            {
+                // EMG1-TRIG-01（ADR U4，待用户确认）：程序需要飞行、载体允许实体化（射弹 / 无人机）时写明“以飞行弹体发射”。
+                Add(into, EmgTreeRowKind.Flight, GameText.Get("emg.tree.spawn_flight"), -1, -1, 0);
+            }
             bool title = false;
             for (int i = 0; i < r.Notes.Count; i++)
             {

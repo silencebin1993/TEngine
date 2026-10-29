@@ -358,6 +358,9 @@ namespace BinGames.Sim.Combat
             pr.Faction = CombatFaction.Hostile;
             pr.Owner = d.Id[source];
             pr.Weapon = -1; // 反弹回来的弹体不再带己方读法
+            // EMG1-TRIG-01 审查修复：也不再是己方的 SpawnFlight 根弹体 / 治疗或子弹药 / 过载这一发——否则治疗弹会去修敌人、命中致死会给场源补发击毁回报。
+            pr.Flags &= ~(EmgProjFlags.Flight | EmgProjFlags.Heal | EmgProjFlags.Sub | EmgProjFlags.Overload | EmgProjFlags.ViaDrone);
+            pr.IgnoreUnit = 0;
             pr.Damage = math.max(0f, pr.Damage) * reflect;
             Cue(ref d, CombatEventKind.Reflected, source, 0, pr.Damage, pr.Pos, 1);
             CombatCounters c = d.Counters[0];

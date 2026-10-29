@@ -78,6 +78,7 @@ namespace GameLogic.EditorTools
                 Step(CheckProjectileProducers);
                 Step(CheckPierceBounceHost);
                 Step(CheckHostsAndSources);
+                Step(CheckTriggerHosts);
                 Step(CheckKernelInject);
                 Step(CheckBudget);
                 Step(CheckDepthFanout);
@@ -631,6 +632,135 @@ namespace GameLogic.EditorTools
         }
 
         // ── D. 热更层注入（内核入口）───────────────────────────────────────────────────
+
+        // ── C2. EMG1-TRIG-01 承接 DEBT-EMG1BUS01-03：区域 / 回波 / 维修 / 格斗与力场定时做宿主 ─────────────────────
+
+        private static List<(int step, EmgEvent e)> WatchAt(CombatKernel k, int steps, params EmgEventKind[] kinds)
+        {
+            var got = new List<(int, EmgEvent)>();
+            var last = kinds.ToDictionary(x => x, x => k.TryGetLastEmgEvent(x, out EmgEvent e) ? e.Seq : int.MinValue);
+            for (int s = 1; s <= steps; s++)
+            {
+                StepN(k, 1);
+                foreach (EmgEventKind x in kinds)
+                {
+                    if (k.TryGetLastEmgEvent(x, out EmgEvent e) && e.Seq != last[x])
+                    {
+                        last[x] = e.Seq;
+                        got.Add((s, e));
+                    }
+                }
+            }
+            return got;
+        }
+
+        /// <summary>mode 0 = 程序读这些码；1 = 程序只读 evt.uplink（不该发）；2 = 没有程序（不该发）。</summary>
+        private static int HostProg(CombatKernel k, int mode, params (EmgEventKind, byte, float)[] reads) =>
+            mode == 0 ? Prog(k, reads) : mode == 1 ? Prog(k, new[] { R(EmgEventKind.Uplink) }) : -1;
+
+        private static void CheckTriggerHosts()
+        {
+            Line("  · C2. EMG1-TRIG-01 承接 DEBT-EMG1BUS01-03（ADR ③ 宿主五元组）：布区落区做宿主——区域节拍 evt.hit（Code 3）、区域定时 evt.timer（从落区起算）、区域到期 evt.expire；回波 evt.hit（Code 5）；维修 evt.hit（Code 7）；格斗 / 力场 evt.timer（从出手起算）——每条“该发 / 不该发”对照");
+            EmgEventKind[] zk = { EmgEventKind.Hit, EmgEventKind.Timer, EmgEventKind.Expire };
+            for (int mode = 0; mode < 3; mode++)
+            {
+                using var k = new CombatKernel(CombatConfig.Default, 16);
+                int p = HostProg(k, mode, R(EmgEventKind.Hit, Cond), R(EmgEventKind.Timer, Trig, 0.4f), R(EmgEventKind.Expire, Cond));
+                CombatWeapon w = Instant(p);
+                w.Reading = new CombatReading { Carrier = CombatCarrier.Field, Area = 2f, FieldSeconds = 1.2f, FieldDpsRatio = 1f };
+                int me = Machine(k, new double2(0, 0), k.AddWeapon(w));
+                int foe = Foe(k, new double2(0, 4), -1, 500f);
+                k.FireAt(me, foe, k.Time);
+                k.TryGetZone(0, out CombatZone z0);
+                List<(int step, EmgEvent e)> got = WatchAt(k, 100, zk);
+                var zone = got.Where(x => x.e.EntKind == EmgEntKind.Zone).ToList();
+                if (mode == 0)
+                {
+                    var tick = zone.Where(x => x.e.Kind == EmgEventKind.Hit).ToList();
+                    var timer = zone.Where(x => x.e.Kind == EmgEventKind.Timer).ToList();
+                    var expire = zone.Where(x => x.e.Kind == EmgEventKind.Expire).ToList();
+                    bool host = zone.Count > 0 && zone.All(x => x.e.Ent == z0.EmgId && x.e.Prog == p && x.e.Node == 0 && x.e.Chain > 0 && x.e.Chain == zone[0].e.Chain) && z0.EmgId > 0 && z0.EmgProgRef == p + 1;
+                    Expect(host && tick.Count >= 1 && tick.All(x => x.e.Code == EmgCode.HitZoneTick && x.e.Other == foe) && timer.Count == 1 && Mathf.Approximately(timer[0].e.Value, 0.4f)
+                           && Math.Abs(timer[0].step * Dt - 0.4f) <= 2f * Dt && expire.Count == 1 && expire[0].e.Code == EmgCode.ExpireLife && Math.Abs(expire[0].step * Dt - 1.2f) <= 2f * Dt,
+                        $"该发（布区程序读 evt.hit / evt.timer / evt.expire）：落区成为宿主（EntKind = 区域、Ent = 稳定 ID {z0.EmgId}、程序 / 0 代根节点 / 出手的链）；区域节拍 evt.hit × {tick.Count}（Code {EmgCode.HitZoneTick}，Other = 圈内敌人）；"
+                        + $"evt.timer 在落区后第 {(timer.Count > 0 ? timer[0].step : -1)} 步（0.4 秒）；evt.expire 在第 {(expire.Count > 0 ? expire[0].step : -1)} 步（存续 1.2 秒，Code = 寿命）");
+                }
+                else
+                {
+                    Expect(zone.Count == 0 && z0.EmgProgRef == (mode == 1 ? p + 1 : 0) && zk.All(x => Enq(k, x) == 0),
+                        $"不该发（{(mode == 1 ? "程序只读接入：落区仍挂着出手的程序（区域程序引用 " + z0.EmgProgRef + "），但程序不读这些码" : "没有程序：落区不挂程序")}）：evt.hit / timer / expire 一条都不入队");
+                }
+            }
+            for (int mode = 0; mode < 3; mode++)
+            {
+                using var k = new CombatKernel(CombatConfig.Default, 16);
+                int p = HostProg(k, mode, R(EmgEventKind.Hit, Cond));
+                CombatWeapon w = Instant(p);
+                w.MarkSeconds = 0f;
+                w.Reading = new CombatReading { EchoCount = 1, EchoDelay = 0.3f, EchoRatio = 0.5f };
+                int me = Machine(k, new double2(0, 0), k.AddWeapon(w));
+                int foe = Foe(k, new double2(0, 4), -1, 500f);
+                k.FireAt(me, foe, k.Time);
+                List<(int step, EmgEvent e)> got = WatchAt(k, 40, EmgEventKind.Hit);
+                var direct = got.Where(x => x.e.Code == EmgCode.HitDirect).ToList();
+                var echo = got.Where(x => x.e.Code == EmgCode.HitEcho).ToList();
+                if (mode == 0)
+                {
+                    Expect(direct.Count == 1 && echo.Count == 1 && echo[0].e.EntKind == EmgEntKind.Unit && echo[0].e.Ent == me && echo[0].e.Other == foe && echo[0].e.Chain == direct[0].e.Chain
+                           && echo[0].e.Prog == p && Mathf.Approximately(echo[0].e.Value, 5f) && Math.Abs(echo[0].step * Dt - 0.3f) <= 2f * Dt,
+                        $"该发（回波读法 + 程序读 evt.hit）：直击 evt.hit Code 0，{(echo.Count > 0 ? echo[0].step : -1)} 步后回波结算发 evt.hit（Code {EmgCode.HitEcho} = 回波，宿主 = 出手单位、同一条链、伤害 5）");
+                }
+                else
+                {
+                    Expect(got.Count == 0 && Enq(k, EmgEventKind.Hit) == 0 && k.EchoCount == 0, $"不该发（{(mode == 1 ? "程序只读接入" : "没有程序")}）：直击与回波都照常结算，不发 evt.hit");
+                }
+            }
+            for (int mode = 0; mode < 3; mode++)
+            {
+                using var k = new CombatKernel(CombatConfig.Default, 16);
+                int p = HostProg(k, mode, R(EmgEventKind.Hit, Cond));
+                int prof = k.AddProfile(new CombatBehaviorProfile { EffectRange = 10f, EffectAmount = 5f, CycleSeconds = 0.2f });
+                int healer = k.Spawn(new CombatSpawn
+                {
+                    ExtKey = -1, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.Repair, Flags = Live, Position = new double2(10, 10), Home = new double2(10, 10),
+                    Radius = 0.5f, Health = 100f, MaxHealth = 100f, Weapon = k.AddWeapon(Instant(p)), BehaviorProfile = prof, Priority = 1,
+                });
+                int hurt = k.Spawn(new CombatSpawn
+                {
+                    ExtKey = -1, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.None, Flags = Live, Position = new double2(12, 10), Home = new double2(12, 10),
+                    Radius = 0.5f, Health = 20f, MaxHealth = 100f, Weapon = -1, BehaviorProfile = -1, Priority = 1,
+                });
+                List<(int step, EmgEvent e)> got = WatchAt(k, 30, EmgEventKind.Hit);
+                var heal = got.Where(x => x.e.Code == EmgCode.HitHeal && x.e.EntKind == EmgEntKind.Unit && x.e.Ent == healer && x.e.Other == hurt).ToList();
+                bool healed = k.TryGetUnit(hurt, out CombatUnitView hv) && hv.Health > 20f;
+                Expect(mode == 0 ? heal.Count >= 1 && healed && Mathf.Approximately(heal[0].e.Value, 5f) : got.Count == 0 && Enq(k, EmgEventKind.Hit) == 0 && healed,
+                    mode == 0
+                        ? $"该发（敌方维修单位带程序）：每次修复 = 一次出手，修复命中 evt.hit Code {EmgCode.HitHeal}（宿主 = 维修单位、Other = 伤员、数值 5）× {heal.Count}"
+                        : $"不该发（{(mode == 1 ? "程序只读接入" : "没有程序")}）：照常修复（伤员 {hv.Health:0} 血），不发 evt.hit");
+            }
+            foreach (CombatCarrier carrier in new[] { CombatCarrier.Melee, CombatCarrier.Aura, CombatCarrier.Projectile })
+            {
+                using var k = new CombatKernel(CombatConfig.Default, 16);
+                int p = Prog(k, new[] { R(EmgEventKind.Timer, Trig, 0.3f) });
+                CombatWeapon w = Instant(p);
+                w.Range = 3f;
+                w.Reading = new CombatReading { Carrier = carrier, Area = 3f, Cone = 60f };
+                int me = Machine(k, new double2(0, 0), k.AddWeapon(w));
+                int foe = Foe(k, new double2(0, 2), -1, 500f);
+                k.FireAt(me, foe, k.Time);
+                List<(int step, EmgEvent e)> got = WatchAt(k, 40, EmgEventKind.Timer);
+                if (carrier != CombatCarrier.Projectile)
+                {
+                    Expect(got.Count == 1 && got[0].e.EntKind == EmgEntKind.Unit && got[0].e.Ent == me && Mathf.Approximately(got[0].e.Value, 0.3f) && Math.Abs(got[0].step * Dt - 0.3f) <= 2f * Dt,
+                        $"该发（{(carrier == CombatCarrier.Melee ? "格斗" : "力场")}程序读 evt.timer 0.3 秒）：从出手起算，第 {(got.Count > 0 ? got[0].step : -1)} 步发 1 条（宿主 = 出手单位）");
+                }
+                else
+                {
+                    Expect(got.Count == 0 && Enq(k, EmgEventKind.Timer) == 0 && k.EmgPendingCount == 0,
+                        "不该发（射弹载体的即时命中：没有在飞的载荷，不记出手定时；弹体 / SpawnFlight 弹体的定时由弹体宿主发，见 C 段）");
+                }
+            }
+        }
 
         private static void CheckKernelInject()
         {

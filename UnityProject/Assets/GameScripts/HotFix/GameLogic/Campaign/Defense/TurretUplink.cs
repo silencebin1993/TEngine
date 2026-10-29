@@ -217,7 +217,7 @@ namespace GameLogic.Campaign.Defense
             }
             CombatFireResult res = site.TurretFireAt(r.Serial, target);
             LastFireResult = res;
-            if (res == CombatFireResult.Ok || res == CombatFireResult.StillAiming)
+            if (res == CombatFireResult.Ok || res == CombatFireResult.StillAiming || res == CombatFireResult.Launched)
             {
                 Revision++;
                 return TurretOpResult.Success(string.Empty);

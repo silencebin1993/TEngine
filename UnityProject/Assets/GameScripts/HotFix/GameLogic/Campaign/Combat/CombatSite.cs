@@ -174,6 +174,7 @@ namespace GameLogic.Campaign.Combat
         /// <summary>EMG1-UX-01（DEBT-EMG1PRG01-01）：登记进程序表时因表满被拒的程序签名——电路编辑器的程序树据此显示 emg.compile.table_full。
         /// 阶段 1 程序表只追加不压实（DEBT-EMG1KRN01-01），被拒的签名此后不会再登记成功；地点重开（读档）时随武器重编重建。</summary>
         private readonly HashSet<string> _rejectedPrograms = new HashSet<string>(System.StringComparer.Ordinal);
+        private bool _emgTriggerHookRaised;
 
         /// <summary>这个程序（编译签名）在本地点登记时被拒（程序表已满）。O(1)。</summary>
         public bool IsProgramRejected(string signature) => !string.IsNullOrEmpty(signature) && _rejectedPrograms.Contains(signature);
@@ -185,6 +186,7 @@ namespace GameLogic.Campaign.Combat
         {
             SiteId = siteId;
             Kernel = new CombatKernel(config, 64);
+            ApplyEmgSubForms(Kernel); // EMG1-TRIG-01：子形态参数按 fg.TbSubPayload 写进内核
             ConfigureReactions();
             Sync = new CombatTransformSync(16);
             MaxEventsPerStep = Math.Max(1, config.MaxGameplayEventsPerStep);
@@ -301,6 +303,11 @@ namespace GameLogic.Campaign.Combat
             c.EmgMaxFanout = Math.Max(1, (int)Math.Round(Tuning("emg.bus.max_fanout", EmgConst.DefaultMaxFanout)));
             c.EmgMaxPerHost = Mathf.Clamp((int)Math.Round(Tuning("emg.trig.max_per_host", EmgConst.DefaultMaxPerHost)), 1, EmgConst.DefaultMaxPerHost);
             c.EmgCoolRatio = Mathf.Clamp(Tuning("emg.heat.cool_ratio", EmgConst.DefaultCoolRatio), 0.01f, 1f);
+            // EMG1-TRIG-01（FG19 FGR-EMG-034）：子载荷伤害比例、每次触发份数上限、同链同时存活上限；排放动词码（阶段 1 映射到读法驻留区）。
+            c.EmgSubDmgRatio = Mathf.Max(0f, Tuning("emg.sub.dmg_ratio", EmgConst.DefaultSubDmgRatio));
+            c.EmgMaxChildren = Math.Max(1, (int)Math.Round(Tuning("emg.trig.max_children", EmgConst.DefaultMaxChildren)));
+            c.EmgMaxPayloads = Math.Max(1, (int)Math.Round(Tuning("emg.tree.max_payloads", EmgConst.DefaultMaxPayloads)));
+            c.EmgVerbEmit = Emergence.EmgCatalog.VerbCode("emit");
             return c;
         }
 
@@ -731,7 +738,74 @@ namespace GameLogic.Campaign.Combat
             w.Program = index;
             float raw = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, w.HeatPerShot + program.WeaponHeatDelta * raw);
+            noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
             return w;
+        }
+
+        /// <summary>EMG1-TRIG-01 缺值的原因键（预览 / 日志用）：允许实体化的组件在表里缺弹速等参数。正常由表校验 R27 与 FgChannelAdmissionSelfCheck 拦在发布前。</summary>
+        public const string NoteFlightMissing = "emg.compile.flight_missing";
+
+        /// <summary>
+        /// EMG1-TRIG-01（ADR-EMG-001 ③；FG19A 第 2.1.1 节）：编译器判“需要飞行”（根节点弹道修饰或飞行中触发）且主组件允许实体化时，武器置 SpawnFlight，
+        /// 弹速 / 弹体半径取作战组件表，寿命 = 射程（无人机为牵引绳）÷ 弹速 × 寿命系数（显式写，不依赖 0 值）。不改 Mode；不需要飞行的程序原样返回（逐字不变）。
+        /// 允许实体化却缺值：不退回即时命中——照样置位（弹体不会动，寿命到即止），报错并给原因键，由表校验与自检在发布前拦下。
+        /// </summary>
+        public static string ApplySpawnFlight(ref CombatWeapon w, Emergence.EmgProgramResult program, string primaryId)
+        {
+            // 审查修复：弹体武器（炮塔的射弹载体）本来就飞，现有弹体不变；没有攻击出口的非重炮武器（内核 FireAtCore 报 NoCombatOutput，如维修束，
+            // 战场友军修复出手见 DEBT-EMG1TRIG01-03）根本不出手，也不实体化——两种都原样返回，武器键不变。
+            if (w.Mode == CombatWeaponMode.Projectile || (w.HasOutput == 0 && w.Mode != CombatWeaponMode.Cannon))
+            {
+                return null;
+            }
+            if (program == null || (program.Program.Flags & EmgProgramFlags.NeedsFlight) == 0
+                || !CarrierReadings.TryGetComponent(primaryId, out GameConfig.fg.CombatComponent comp) || comp.Flight != "yes")
+            {
+                return null;
+            }
+            string note = ApplySpawnFlight(ref w, comp.FlightSpeed, comp.FlightRadius, comp.FlightLifeScale);
+            if (note != null)
+            {
+                Log.Error($"[CombatSite] 组件 {primaryId} 允许实体化但弹速 / 半径 / 寿命系数缺值（FG19A 第 2.1.1 节）；不退回即时命中。");
+            }
+            return note;
+        }
+
+        /// <summary>按给定参数置 SpawnFlight（表行已判“允许实体化”）；缺值照样置位、返回 <see cref="NoteFlightMissing"/>（自检直接用它验“不退回即时命中”）。</summary>
+        public static string ApplySpawnFlight(ref CombatWeapon w, float speed, float radius, float lifeScale)
+        {
+            w.SpawnFlight = 1;
+            w.ProjectileSpeed = Mathf.Max(0f, speed);
+            w.ProjectileRadius = Mathf.Max(0f, radius);
+            float range = w.Reading.Carrier == CombatCarrier.Summon && w.Reading.DroneLeash > 0f ? w.Reading.DroneLeash : w.Range;
+            w.ProjectileLife = speed > 0f ? range / speed * Mathf.Max(0f, lifeScale) : 0.05f;
+            return FlightProblem("yes", speed, radius, lifeScale) == null ? null : NoteFlightMissing;
+        }
+
+        /// <summary>
+        /// EMG1-TRIG-01（FG19A 第 2.1.1 节；与 check_luban R27 同一口径）：作战组件的实体化列是否成立——flight 只能 yes / no；yes 时弹速、弹体半径、寿命系数都要 &gt; 0
+        /// （缺值 = 0 / 未填）；no 时弹速必须为 0（0 只对不实体化的行合法）。成立返回 null，否则返回原因。ApplySpawnFlight 与 FgChannelAdmissionSelfCheck 共用。
+        /// </summary>
+        public static string FlightProblem(string flight, float speed, float radius, float lifeScale)
+        {
+            if (flight == "no")
+            {
+                return speed == 0f ? null : "不实体化的组件弹速必须为 0";
+            }
+            if (flight != "yes")
+            {
+                return $"flight = {flight ?? "空"}，只能是 yes / no";
+            }
+            return speed > 0f && radius > 0f && lifeScale > 0f ? null : $"允许实体化但缺值（弹速 {speed}、半径 {radius}、寿命系数 {lifeScale}）";
+        }
+
+        /// <summary>EMG1-TRIG-01：把 fg.TbSubPayload 的 5 行写进内核（子形态码 = 下标）。没有表（自检夹具）时内核保留 FG19A 初值。</summary>
+        public static void ApplyEmgSubForms(CombatKernel kernel)
+        {
+            foreach (Emergence.EmgSubFormRow s in Emergence.EmgCatalog.Current.SubForms)
+            {
+                kernel.SetEmgSubForm(s.Code, new EmgSubForm { Speed = s.Speed, Life = s.Life, LifeRatio = s.LifeRatio, Radius = s.Radius, RadiusRatio = s.RadiusRatio });
+            }
         }
 
         public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w) => WithProgram(p, w, out _, out _);
@@ -1198,6 +1272,12 @@ namespace GameLogic.Campaign.Combat
             if (IsDisposed)
             {
                 return;
+            }
+            // EMG1-TRIG-01：第一次有触发器放出子载荷（内核计数，O(1)；引导内容归 FG15-UX-04）。
+            if (!_emgTriggerHookRaised && Kernel.EmgBusStats.Splits > 0)
+            {
+                _emgTriggerHookRaised = true;
+                GuidanceHooks.Raise(GuidanceHooks.EmgFirstTrigger);
             }
             if (_processing)
             {
@@ -1758,7 +1838,7 @@ namespace GameLogic.Campaign.Combat
             }
             result = Kernel.FireAt(attacker, target, GameClock.GameSeconds);
             ProcessEvents();
-            bool ok = result == CombatFireResult.Ok || result == CombatFireResult.StillAiming;
+            bool ok = result == CombatFireResult.Ok || result == CombatFireResult.StillAiming || result == CombatFireResult.Launched; // EMG1-TRIG-01：已发射也是开了火
             if (!ok)
             {
                 reason = FireReason(result, attackerLogicId, enemyInstanceId);

@@ -378,6 +378,19 @@ namespace BinGames.Sim.Combat
         public byte Phase;
         /// <summary>FG10-FAC-01（液氮池）：每个节拍给站在里面的单位加多少受寒（0 = 没有；受寒满 1 冻结，见 <see cref="CombatClarityUnit.Chill"/>）。随快照（格式 15）。</summary>
         public float Chill;
+        // ── EMG1-TRIG-01（ADR-EMG-001 ③ 宿主五元组；DEBT-EMG1BUS01-03）：带程序的区域（布区落区、子区）做事件宿主。随 Emg 段 12 逐条进快照，没有程序的区域全为缺省。
+        /// <summary>程序表行号 + 1（0 = 没有程序；与 CombatWeapon.ProgramRef 同一做法）。</summary>
+        public int EmgProgRef;
+        public int EmgId;
+        public int EmgChain;
+        public uint EmgTrigUsed;
+        public byte EmgNode;
+        public byte EmgDepth;
+        public byte EmgGen;
+        /// <summary>1 = 子区（只执行自己节点的指令，到期时结算一次）。</summary>
+        public byte EmgSub;
+        /// <summary>母载荷武器下标（子区的读法状态取它；−1 = 没有），仅子区用。</summary>
+        public int EmgWeapon;
     }
 
     /// <summary>FG2-FW-02：一次待结算的回波（残影 / 节拍 / 追射 / 回旋）：到点后对同一目标再结算一次伤害与状态。</summary>
@@ -393,6 +406,11 @@ namespace BinGames.Sim.Combat
         public float StatusDps;
         public float StatusSlow;
         public float StatusVuln;
+        // ── EMG1-TRIG-01（DEBT-EMG1BUS01-03）：回波是排它的那次出手的延续，带出手宿主的程序 / 节点 / 链 / 链深，结算时以它为宿主发 evt.hit（Code = 回波）。Emg 段 13。
+        public int EmgProgRef;
+        public int EmgChain;
+        public byte EmgNode;
+        public byte EmgDepth;
     }
 
     /// <summary>FG2-FW-02：一架无人机（蜂群舱 / 集群协议伴飞）：在母机牵引绳范围内追最近的敌对单位，按间隔命中，命中带母机武器的读法（<see cref="Weapon"/>）。</summary>
@@ -884,6 +902,8 @@ namespace BinGames.Sim.Combat
         Frozen = 16,
         /// <summary>FG10-FAC-01（FG18 FGR-AIR-010）：目标在空中（灭活无人机），格斗 / 力场 / 布区打不到——用射弹、无人机或对空武器。</summary>
         CannotHitAir = 17,
+        /// <summary>EMG1-TRIG-01（ADR-EMG-001 ③）：SpawnFlight 武器开了火、弹体已发射（不在开火当下判击毁；击毁由命中致死时的 Killed / evt.kill 与“攻击结果 = 击毁”回报）。</summary>
+        Launched = 18,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -1267,6 +1287,12 @@ namespace BinGames.Sim.Combat
         public int EmgMaxFanout;
         public int EmgMaxPerHost;
         public float EmgCoolRatio;
+        /// <summary>EMG1-TRIG-01（fg.TbHomeTuning emg.sub.dmg_ratio / emg.trig.max_children / emg.tree.max_payloads）：子载荷伤害比例、每次触发份数上限、同一条链同时存活的载荷上限。≤ 0 取 <see cref="EmgConst"/> 初值。</summary>
+        public float EmgSubDmgRatio;
+        public int EmgMaxChildren;
+        public int EmgMaxPayloads;
+        /// <summary>EMG1-TRIG-01：“排放”动词（fg.TbPortCarrier verb = emit）在指令行里的码（EmgCatalog.Verbs 下标，热更层写；0 = 不执行）。阶段 1 映射到读法驻留区 + 状态位。</summary>
+        public int EmgVerbEmit;
 
         public static CombatConfig Default => new CombatConfig
         {
@@ -1288,6 +1314,9 @@ namespace BinGames.Sim.Combat
             EmgMaxFanout = EmgConst.DefaultMaxFanout,
             EmgMaxPerHost = EmgConst.DefaultMaxPerHost,
             EmgCoolRatio = EmgConst.DefaultCoolRatio,
+            EmgSubDmgRatio = EmgConst.DefaultSubDmgRatio,
+            EmgMaxChildren = EmgConst.DefaultMaxChildren,
+            EmgMaxPayloads = EmgConst.DefaultMaxPayloads,
         };
     }
 

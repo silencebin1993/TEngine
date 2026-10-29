@@ -58,6 +58,23 @@ namespace BinGames.Sim.Combat
         public const int SegDrones = 8;
         public const int SegBus = 9;
         public const int SegWrecks = 10;
+        /// <summary>EMG1-TRIG-01：待生成的子载荷 / 根弹体与即时宿主的定时（顺延不丢，ADR ③）；区域、回波的宿主五元组（随读法表的区域 / 回波逐条，读档中转同无人机 Id）。</summary>
+        public const int SegPending = 11;
+        public const int SegZones = 12;
+        public const int SegEchoes = 13;
+        // ── EMG1-TRIG-01（FGR-EMG-034 / 035；FG19A 第 2.1.1 节）：触发与子载荷的初值（运行时取 CombatConfig / 子形态表里热更层按 fg.TbHomeTuning、fg.TbSubPayload 写的值，≤ 0 用这里）──
+        public const float DefaultSubDmgRatio = 0.5f;
+        public const int DefaultMaxChildren = 4;
+        public const int DefaultMaxPayloads = 16;
+        /// <summary>命中触发的子弹药指向“5 米内其他敌对单位”（FGR-EMG-034 表第 1 行）。</summary>
+        public const float ChildSeekRadius = 5f;
+        /// <summary>待生成队列容量（满了拒绝并计数 SpawnLost，正常为 0；与总线同一口径，模糊测试器报告）。</summary>
+        public const int PendingCapacity = 4096;
+        /// <summary>子形态码 1～5（fg.TbSubPayload code 列）：子弹 / 短射程余波 / 无人机子弹（进弹体池），子区（小场脉冲）/ 子区（子区域）（进区域）。</summary>
+        public const byte SubBullet = 1, SubWave = 2, SubDroneBullet = 3, SubPulse = 4, SubZone = 5;
+        /// <summary>待生成种类：子载荷 / 即时宿主（格斗、力场）的定时 / 根载荷（SpawnFlight 弹体池满时顺延）。</summary>
+        public const byte PendSub = 0, PendTimer = 1, PendRoot = 2;
+
         /// <summary>一份快照最多几个 Emg 段（读档防坏值）。</summary>
         public const int MaxSegments = 256;
     }
@@ -109,6 +126,8 @@ namespace BinGames.Sim.Combat
         public const ushort HitDirect = 0, HitAfterPierce = 1, HitAfterBounce = 2, HitZoneTick = 3, HitPatch = 4, HitEcho = 5, HitChain = 6, HitHeal = 7;
         // evt.expire：原因（含“命中”，FG19A 申请 A8）
         public const ushort ExpireLife = 1, ExpireGround = 2, ExpireAbsorbed = 3, ExpireHit = 4, ExpireBounds = 5;
+        /// <summary>EMG1-TRIG-01：SpawnFlight 弹体 / 子弹药撞上障碍圆（经 EmgHash 线段检测；撞障碍反弹归 EMG1-GRM-01）。</summary>
+        public const ushort ExpireObstacle = 6;
         // evt.bounce：面
         public const ushort FaceUnit = 1, FaceObstacle = 2, FaceWreck = 3, FaceMatter = 4, FaceField = 5;
         // evt.hurt：来源
@@ -151,6 +170,16 @@ namespace BinGames.Sim.Combat
         public long FanoutCut;
         /// <summary>同一载荷节点同一事件码到 3 次后不再入队的次数（FGR-EMG-065）。</summary>
         public long PerHostCut;
+        /// <summary>EMG1-TRIG-01：触发器放出子载荷的次数（= evt.split 次数，不论有没有程序读 evt.split）、生成了几份子载荷、因弹体池 / 区域满或同链存活已满而顺延的步次、
+        /// 未被唤起（链深截断 / 事件被合并）而作废的待生成请求、队列满没入队的请求（应为 0）、即时命中被残骸挡下的次数、SpawnFlight 弹体 / 子弹药撞障碍的次数、根弹体实体化次数。</summary>
+        public long Splits;
+        public long SubSpawned;
+        public long SpawnDeferred;
+        public long SpawnDropped;
+        public long SpawnLost;
+        public long CoverAbsorbed;
+        public long ObstacleHits;
+        public long FlightShots;
         /// <summary>唤起的触发读端（子载荷生成归 EMG1-TRIG-01）与条件 / 感知读端（效果执行归 EMG1-FW-01 / FW-02）。</summary>
         public long TriggerWakes;
         public long ListenWakes;
@@ -192,6 +221,25 @@ namespace BinGames.Sim.Combat
         public float Overflow;
         /// <summary>本宿主每条事件读端已入队几次（2 比特一条，与弹体 TrigUsed 同口径；弹体宿主进出时与弹体互相拷贝）。</summary>
         public uint TrigUsed;
+        // ── EMG1-TRIG-01：本载荷的“母载荷参数”（触发器放子载荷时用，生产点随事件记进待生成队列；瞬时量）──
+        /// <summary>母载荷伤害（子载荷 = × emg.sub.dmg_ratio）。</summary>
+        public float Damage;
+        /// <summary>母载荷所属武器下标（子弹药的外观与归属；−1 = 没有）。</summary>
+        public int Weapon;
+        /// <summary>出手单位 Id（出手者已不在时 0）。</summary>
+        public int OwnerId;
+        public byte Faction;
+        /// <summary>载体（CombatCarrier）：格斗 / 力场的触发只按主目标一次。</summary>
+        public byte Carrier;
+        /// <summary>主目标单位 Id（格斗 / 力场按它只触发一次）。</summary>
+        public int MainTarget;
+        /// <summary>母落区半径 / 存续（布区子区按比例）。</summary>
+        public float ZoneRadius;
+        public float ZoneLife;
+        /// <summary>要带给子弹药的弹体标志（治疗 / 无人机出手）。</summary>
+        public EmgProjFlags PFlags;
+        /// <summary>1 = 本宿主是 SpawnFlight 根弹体（击毁改由命中致死回报）。</summary>
+        public byte Flight;
 
         public static EmgCtx None => new EmgCtx { Prog = -1, Owner = -1 };
 
@@ -288,6 +336,14 @@ namespace BinGames.Sim.Combat
         Lob = 4,
         /// <summary>EMG1-BUS-01：在近炸读端半径内（进入时发一次 evt.prox，离开后清掉；重复进入受每宿主上限约束）。</summary>
         ProxIn = 8,
+        /// <summary>EMG1-TRIG-01：根载荷实体化（武器 SpawnFlight）——命中时按原“当场结算”那一下结算（读法、标记、标记跳转、重炮读法），撞障碍即止。</summary>
+        Flight = 16,
+        /// <summary>EMG1-TRIG-01：治疗载荷（维修命中放出的子载荷）：碰己方单位，命中 = 修复（evt.hit Code = 修复）。</summary>
+        Heal = 32,
+        /// <summary>EMG1-TRIG-01：重炮熔穿过载的这一发（开火时已积热 / 发反应，命中时加穿甲）。</summary>
+        Overload = 64,
+        /// <summary>EMG1-TRIG-01：无人机开火实体化的弹体（命中按无人机读法：伤害基数是无人机伤害、以无人机为锚）。</summary>
+        ViaDrone = 128,
     }
 
     /// <summary>程序表一行（ADR ②，16 字节）。<see cref="FirstNode"/> 是节点表里的绝对下标；表只追加、不改写、不压实。</summary>
@@ -428,8 +484,86 @@ namespace BinGames.Sim.Combat
         public int BusHead;
         /// <summary>EMG1-BUS-01：本步开始时的 EmgSeq（Seq ≥ 它的事件是本步入队的；积压保护只合并同一步的）。运行时量，不进快照。</summary>
         public int StepFirstSeq;
+        /// <summary>EMG1-TRIG-01：下一个区域的稳定 ID（只有带程序的区域发号，做事件宿主；Emg 标量段第 8 个字段，短段读到取 1）。</summary>
+        public int NextZoneId;
+        /// <summary>EMG1-TRIG-01：待生成表里第一条“未决”请求的位置（运行时游标，不进快照；取 0 总是正确，只是多扫几条）。
+        /// 和 <see cref="HashDirty"/> 一样放在 EmgS 里：内核一步在 CombatStepJob 的 CombatData 副本上跑，值字段的修改带不回主线程。</summary>
+        public int ArmCursor;
+        /// <summary>EMG1-TRIG-01：EmgHash 要重建（障碍 / 残骸变了；读档、清战斗后为 1）。运行时量，不进快照。</summary>
+        public byte HashDirty;
 
-        public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1 };
+        public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
+    }
+
+    /// <summary>
+    /// EMG1-TRIG-01（FGR-EMG-034 / 063；ADR ③“弹体池满或区域满：生成请求留在总线里顺延，生成时才开始计寿命”）：一条待生成请求。
+    /// 生产点（命中 / 终结 / 定时……事件入队那一刻）按宿主节点的触发子节点记下“母载荷参数”（伤害、武器、阵营、位置、方向、母落区）；总线处理到那条事件（<see cref="Seq"/>）、
+    /// 触发读端被唤起且链深未到 3 时置 <see cref="Armed"/>（同时发 evt.split）；之后每步按先进先出生成，弹体池 / 区域满或同链同时存活已满就留到下一步。
+    /// 没被唤起的（链深截断 / 事件被积压保护合并）在那条事件处理过后作废（计 SpawnDropped）。同一结构也承载格斗 / 力场的定时（从出手起算，到点发 evt.timer）
+    /// 与弹体池满时顺延的 SpawnFlight 根弹体。进快照（Emg 段 11）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgSpawn
+    {
+        /// <summary>定时：到点时刻；其余 0。</summary>
+        public double At;
+        public double2 Pos;
+        public float2 Dir;
+        public float Damage;
+        public float ZoneRadius;
+        public float ZoneLife;
+        public int Prog;
+        public int Chain;
+        /// <summary>出手单位 Id（0 = 已不在）。</summary>
+        public int Owner;
+        public int Weapon;
+        /// <summary>命中触发：被命中的单位 Id（子弹药不打它、找“其他”敌对单位）；根弹体：目标单位 Id。</summary>
+        public int Other;
+        /// <summary>定时：宿主实体 Id。</summary>
+        public int Ent;
+        /// <summary>唤起它的那条事件的 Seq（定时 / 根弹体不用）。</summary>
+        public int Seq;
+        /// <summary>子载荷：子节点（程序内序号）；定时：宿主节点；根弹体：0。</summary>
+        public byte Node;
+        /// <summary>生成物的链深（子载荷 = 事件链深 + 1；定时 / 根弹体 = 宿主链深）。</summary>
+        public byte Depth;
+        /// <summary>还要生成几份。</summary>
+        public byte Count;
+        public byte Kind;
+        public byte Faction;
+        public EmgProjFlags Flags;
+        public EmgEntKind EntKind;
+        /// <summary>1 = 已被唤起（可以生成）。</summary>
+        public byte Armed;
+        /// <summary>子形态码（1～5）；根弹体 0。</summary>
+        public byte SubForm;
+        /// <summary>子载荷的代（= 子节点的 Gen）。</summary>
+        public byte Gen;
+        /// <summary>已生成几份（第 k 份指向第 k 近的目标 / 径向均分的第 k 个方向）。</summary>
+        public short Done;
+    }
+
+    /// <summary>EMG1-TRIG-01：fg.TbSubPayload 一行的内核副本（下标 = 子形态码；热更层按表写入，缺省为 FG19A 第 2.1.1 节初值）。</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgSubForm
+    {
+        public float Speed;
+        public float Life;
+        public float LifeRatio;
+        public float Radius;
+        public float RadiusRatio;
+
+        /// <summary>FG19A 第 2.1.1 节 5 行初值（临时值，由 FG15-BAL-01 重定）。</summary>
+        public static EmgSubForm Default(int code) => code switch
+        {
+            EmgConst.SubBullet => new EmgSubForm { Speed = 28f, Life = 0.5f, Radius = 0.1f },
+            EmgConst.SubWave => new EmgSubForm { Speed = 20f, Life = 0.15f, Radius = 0.3f },
+            EmgConst.SubDroneBullet => new EmgSubForm { Speed = 24f, Life = 0.2f, Radius = 0.1f },
+            EmgConst.SubPulse => new EmgSubForm { Speed = 0f, Life = 0.3f, Radius = 1.2f },
+            EmgConst.SubZone => new EmgSubForm { Speed = 0f, LifeRatio = 0.5f, RadiusRatio = 0.5f },
+            _ => default,
+        };
     }
 
     /// <summary>

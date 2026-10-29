@@ -321,6 +321,7 @@ namespace BinGames.Sim.Combat
 
         public void SetObstacles(IReadOnlyList<float3> obstacles)
         {
+            EmgHashDirty(); // EMG1-TRIG-01：障碍圆收在 EmgHash 里，下次查询时重建
             _d.Obstacles.Clear();
             if (obstacles == null)
             {
@@ -2751,6 +2752,11 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.PolluteTargets.Length; i++)
             {
                 staging.PolluteTargets.Add(_d.PolluteTargets[i]);
+            }
+            // EMG1-TRIG-01：子形态参数是表数据（热更层按 fg.TbSubPayload 写），读档沿用当前的。
+            for (int i = 0; i < _d.EmgSubForms.Length; i++)
+            {
+                staging.EmgSubForms[i] = _d.EmgSubForms[i];
             }
             _d.Dispose();
             _d = staging;

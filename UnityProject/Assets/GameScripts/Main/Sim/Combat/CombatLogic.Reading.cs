@@ -76,6 +76,7 @@ namespace BinGames.Sim.Combat
                 {
                     SetLastZoneLook(ref d, atSelf ? CombatZoneLook.Pulse : CombatZoneLook.Pool);
                     NoteReading(ref d, CombatConst.ReadingFeedZone, fieldPos, a);
+                    EmgAdoptZone(ref d, a); // EMG1-TRIG-01：布区每块落区 = 一个根载荷宿主（带程序时）
                 }
             }
 
@@ -1171,9 +1172,17 @@ namespace BinGames.Sim.Combat
                 CombatZone zone = d.Zones[z];
                 if (zone.Until <= now)
                 {
+                    if (zone.EmgProgRef > 0)
+                    {
+                        EmgZoneExpire(ref d, zone); // EMG1-TRIG-01：区域到期 evt.expire（子区在到期处结算一次）
+                    }
                     continue;
                 }
                 zone.Radius += zone.Growth * dt;
+                if (zone.EmgProgRef > 0)
+                {
+                    EmgZoneTimer(ref d, ref zone, now, dt); // EMG1-TRIG-01：区域的 evt.timer 从落区起算
+                }
                 if (now >= zone.NextTick)
                 {
                     zone.NextTick += zone.TickInterval;
@@ -1192,6 +1201,8 @@ namespace BinGames.Sim.Combat
                     // FG6-LOG-10：中立区域（液洼与它反应成的残留）对己方机器与敌人一视同仁；建筑 / 炮塔类结构单位不在这里结算
                     // （它们挨的火由热更层按建筑耐久结算一次，避免内核与建筑记录各扣一遍）。
                     bool neutral = zone.Faction == CombatFaction.Neutral;
+                    // EMG1-BUS-01 / TRIG-01：区域节拍的伤害来源 = 区域；带程序的区域同时是宿主（evt.hit Code = 区域节拍，每宿主计数随区域进快照）。
+                    EmgCtx zoneCtx = zone.EmgProgRef > 0 ? EmgZoneHost(ref d, zone) : EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone);
                     int n = d.Count;
                     for (int k = 0; k < n; k++)
                     {
@@ -1224,8 +1235,9 @@ namespace BinGames.Sim.Combat
                         }
                         if (tickDamage > 0f)
                         {
-                            d.EmgCtx = EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone); // EMG1-BUS-01：evt.hurt 来源 = 区域（区域做宿主的 evt.hit 区域节拍归 EMG1-TRIG-01）
+                            d.EmgCtx = zoneCtx;
                             DamageUnit(ref d, k, tickDamage, owner);
+                            zoneCtx = d.EmgCtx;
                             d.EmgCtx = EmgCtx.None;
                         }
                         uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
@@ -1234,6 +1246,7 @@ namespace BinGames.Sim.Combat
                         float reactionHit = tickDamage > 0f ? tickDamage : math.max(0f, zone.StatusDps) * zone.TickInterval;
                         ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner, reactionHit);
                     }
+                    zone.EmgTrigUsed = zoneCtx.TrigUsed;
                 }
                 d.Zones[write++] = zone;
             }
@@ -1445,6 +1458,7 @@ namespace BinGames.Sim.Combat
                 StatusSlow = r.StatusSlow,
                 StatusVuln = r.StatusVuln,
             });
+            EmgAdoptEcho(ref d, a); // EMG1-TRIG-01：回波带出手宿主的程序 / 节点 / 链 / 链深
             CombatCounters c = d.Counters[0];
             c.EchoesQueued++;
             d.Counters[0] = c;
@@ -1470,10 +1484,12 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 int owner = d.SlotOf(echo.Owner);
+                EmgEchoBegin(ref d, echo, owner); // EMG1-TRIG-01：带程序的回波以出手宿主发 evt.hit（Code = 回波）
                 if (DamageUnit(ref d, t, echo.Damage, owner))
                 {
                     ApplyStatus(ref d, t, echo.StatusMask, echo.StatusSeconds, echo.StatusDps, echo.StatusSlow, echo.StatusVuln, owner, echo.Damage);
                 }
+                d.EmgCtx = EmgCtx.None;
             }
             d.Echoes.ResizeUninitialized(write);
         }
@@ -1661,6 +1677,13 @@ namespace BinGames.Sim.Combat
                         bool wasMarked = d.MarkedUntil[target] > tNow;
                         double2 hitPos = d.Pos[target];
                         EmgDroneBegin(ref d, dr, owner, target, wp.Program); // EMG1-BUS-01：每架每次开火 = 一次出手（evt.fire；随后的 evt.hit / evt.kill 以无人机为宿主）
+                        if (wp.SpawnFlight != 0)
+                        {
+                            EmgDroneFlight(ref d, dr, target, wp); // EMG1-TRIG-01：需要飞行的程序——无人机开火实体化为弹体
+                            EmgShotEnd(ref d);
+                            d.Drones[write++] = dr;
+                            continue;
+                        }
                         float dealt = StrikeDamage(ref d, owner, target, dr.Damage, r, dr.Pos, false, 0f);
                         if (DamageUnit(ref d, target, dealt, owner))
                         {
