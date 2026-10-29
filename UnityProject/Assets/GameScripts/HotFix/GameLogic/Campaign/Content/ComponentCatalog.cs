@@ -42,8 +42,16 @@ namespace GameLogic.Campaign.Content
         public const string CompPulserId = "comp_pulser";
         /// <summary>拆解钳（格斗·拆解：夹住后持续拆解 = 组件自带回波；击毁多回收废料随 FG8-LOOT-01）。</summary>
         public const string CompClawId = "comp_claw";
-        /// <summary>尖刺外装（功能组件，格斗·反伤：被动，被近身攻击时反伤）。</summary>
+        /// <summary>爆炸反应装甲（原尖刺外装；功能组件，格斗·反伤：被动，反伤范围内的攻击者命中时起爆反伤）。内部 ID 不改（FG19 FGR-EMG-231）。</summary>
         public const string FuncSpikesId = "func_spikes";
+
+        /// <summary>EMG1-TXT-01 / DEBT-EMG1TXT01-01（B22）：外观仍是占位的组件，返回图鉴里的占位说明；外观已换正式的返回 null。
+        /// 数据驱动：表里有 <c>component.{id}.art_placeholder</c> 文本键 = 占位，正式外观到位时删掉这条文本即可。</summary>
+        public static string ArtPlaceholderNote(string id)
+        {
+            string key = "component." + id + ".art_placeholder";
+            return id != null && GameText.Has(key) ? GameText.Get(key) : null;
+        }
 
         private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
         {

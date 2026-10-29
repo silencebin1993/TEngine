@@ -479,6 +479,11 @@ namespace GameLogic.Progression
                 return;
             }
             sb.AppendLine(d.Description);
+            string artNote = ComponentCatalog.ArtPlaceholderNote(id);
+            if (artNote != null)
+            {
+                sb.AppendLine(artNote); // EMG1-TXT-01：占位外观角标（B22，DEBT-EMG1TXT01-01）
+            }
             sb.AppendLine(Line("codex.label.slot", GameText.Get(SlotKey(d.Category))));
             string subtype = CarrierReadings.SubtypeName(id);
             if (subtype != null)

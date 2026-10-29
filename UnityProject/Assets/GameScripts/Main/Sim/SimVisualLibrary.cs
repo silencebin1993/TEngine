@@ -28,6 +28,7 @@ namespace BinGames.Sim
             {
                 return SphereUnit();
             }
+            artId = Canonical(artId);
             if (_cache.TryGetValue(artId, out Mesh cached))
             {
                 return cached;
@@ -35,6 +36,29 @@ namespace BinGames.Sim
             Mesh m = Compose(artId);
             _cache[artId] = m;
             return m;
+        }
+
+        /// <summary>EMG1-TXT-01（FG19 FGR-EMG-230 第 1、4、5 行，FGR-EMG-231）：生物题材的旧视觉 ID 换机械命名，旧键留作别名。
+        /// 别名与新键解析到同一个 Mesh 实例（缓存按新键），旧存档 / 旧目录（OrganelleCatalog、StageSkinCatalog 的 <c>org/spine@mech</c> 等）不用改。
+        /// 造型本身随重出图再换（DEBT-EMG1TXT01-01），这里只换名字。</summary>
+        public static readonly IReadOnlyDictionary<string, string> LegacyAliases = new Dictionary<string, string>
+        {
+            ["org/spine"] = "mech/reactive_armor",   // 尖刺旧弹体（刺球）→ 爆炸反应装甲
+            ["org/lyso"] = "mech/warhead",           // 腐蚀弹头（刺球）→ 战斗部
+            ["summon/spore"] = "mech/swarm_drone",   // 蜂群无人机舱的无人机
+            ["summon/mycelium"] = "mech/sentry_stake", // 哨戒桩
+        };
+
+        /// <summary>旧键（含 <c>旧键::后缀</c> 的组合 marker）换成新键；其余原样返回。</summary>
+        public static string Canonical(string artId)
+        {
+            if (string.IsNullOrEmpty(artId))
+            {
+                return artId;
+            }
+            int sep = artId.IndexOf("::", System.StringComparison.Ordinal);
+            string head = sep < 0 ? artId : artId.Substring(0, sep);
+            return LegacyAliases.TryGetValue(head, out string canon) ? (sep < 0 ? canon : canon + artId.Substring(sep)) : artId;
         }
 
         private static Mesh Compose(string artId)
@@ -58,7 +82,7 @@ namespace BinGames.Sim
                     Sphere(0.32f), Ring(0.5f, 0.05f, Quaternion.identity));
                 case "org/flagella": return Combine("org_flagella",
                     Sphere(0.4f), EquatorFlagellum(0.4f));
-                case "org/lyso": return SpikedSphere("org_lyso", 0.34f, 9, 0.14f, 0.045f);
+                case "mech/warhead": return SpikedSphere("org_lyso", 0.34f, 9, 0.14f, 0.045f);
                 case "org/perox": return Combine("org_perox",
                     Sphere(0.34f), At(Cone(0.14f, 0.22f), new Vector3(0, 0.4f, 0), Vector3.one, FromTo(Vector3.up)));
                 case "org/aqua": return Combine("org_aqua",
@@ -75,7 +99,7 @@ namespace BinGames.Sim
                     At(Disc(0.22f, 0.1f), Vector3.zero, Vector3.one));
                 case "org/cilia": return Combine("org_cilia",
                     Sphere(0.3f), At(Capsule(0.06f, 0.36f), new Vector3(0, 0.5f, 0), Vector3.one));
-                case "org/spine": return SpikedSphere("org_spine", 0.3f, 11, 0.26f, 0.05f);
+                case "mech/reactive_armor": return SpikedSphere("org_spine", 0.3f, 11, 0.26f, 0.05f);
                 case "org/slime": return Combine("org_slime",
                     Sphere(0.3f), At(Sphere(0.42f), Vector3.zero, Vector3.one));
                 case "org/receptor": return Combine("org_receptor",
@@ -94,12 +118,12 @@ namespace BinGames.Sim
                 case "prim/heat": return Tetra(0.36f);
 
                 // ── 召唤物（任务三）──
-                case "summon/spore": return Combine("summon_spore",
+                case "mech/swarm_drone": return Combine("summon_spore",
                     Sphere(0.24f), At(Cone(0.06f, 0.1f), new Vector3(0, 0.26f, 0), Vector3.one, FromTo(Vector3.up)));
                 case "summon/phage": return Combine("summon_phage",
                     At(Sphere(0.22f), new Vector3(0.12f, 0, 0), Vector3.one),
                     At(Capsule(0.09f, 0.16f), new Vector3(-0.2f, 0, 0), new Vector3(1f, 0.6f, 0.6f), Quaternion.Euler(0, 0, 90)));
-                case "summon/mycelium": return MyceliumFan();
+                case "mech/sentry_stake": return MyceliumFan();
 
                 // ── Carrier 装配挂件（玩家本体随装配变化，任务二）──
                 case "carrier/base": return Capsule(0.32f, 0.45f);
@@ -190,6 +214,11 @@ namespace BinGames.Sim
                 {
                     ids.Add(baseId + "::" + suffix);
                 }
+            }
+            // EMG1-TXT-01：机械命名的新键追加在末尾（不挪动旧键的下标，CellStageFlow 按下标取 VisualId）；旧键仍在上面，作别名。
+            foreach (string canon in LegacyAliases.Values)
+            {
+                ids.Add(canon);
             }
             return ids.ToArray();
         }

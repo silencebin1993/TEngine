@@ -131,12 +131,12 @@
 | Catalyzed | 放大中 | Rhythmic | 节拍 |
 | FeedbackHit | 追击 | Woven | 连网 |
 | Orbiting | 绕行 | Rippling | 波动 |
-| Valved | 限流 | Thorns | 反伤 |
+| Valved | 限流 | Thorns | 反应装甲 |
 | Overheat | 过热 | Merged | 合流 |
 | Insulated | 隔离 | FuseTripped | 熔断 |
 | Filtered | 过滤 | | |
 
-`Thorns` 的显示名在 FG-EMG 阶段 1（EMG1-TXT-01）与文本键同一提交改为“反应装甲”，本表随之改（FG19 FGR-EMG-230 第 1 行）；改之前本表与 `fg.TbStatusTag` 保持一致。
+`Thorns` 的显示名已在 FG-EMG 阶段 1（EMG1-TXT-01，2026-10-28）与文本键、`fg.TbStatusTag` 同一提交改为“反应装甲”（FG19 FGR-EMG-230 第 1 行）；内部标签 ID `Thorns` 不改。
 `FeedbackHit`（追击）在游戏 C# 代码里没有定义与消费方，只在 `ComposeEngine/src/ComposeEngine/Builtin/Modules/FeedbackLoop.cs:23` 写入；追射的描述与实现不符登记为 FG-GAP-153，由 FG-EMG 阶段 1 处理（FG19 FGR-EMG-004 第 7 行）。
 
 **FGR-FW-031 标签可见**

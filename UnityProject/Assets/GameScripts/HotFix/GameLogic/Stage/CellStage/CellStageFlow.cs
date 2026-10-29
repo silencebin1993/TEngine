@@ -1228,13 +1228,13 @@ namespace GameLogic.Stage.CellStage
                         break;
                     // 召唤机制（任务三）：孢子仆从/噬菌体/菌丝体，行为原型 id 13/14/15 直接复用为 VisualId。
                     case 13:
-                        mesh = SimVisualLibrary.BuildForArtId("summon/spore");
+                        mesh = SimVisualLibrary.BuildForArtId("mech/swarm_drone");
                         break;
                     case 14:
                         mesh = SimVisualLibrary.BuildForArtId("summon/phage");
                         break;
                     case 15:
-                        mesh = SimVisualLibrary.BuildForArtId("summon/mycelium");
+                        mesh = SimVisualLibrary.BuildForArtId("mech/sentry_stake");
                         break;
                     case 20:
                         mesh = squashMesh;

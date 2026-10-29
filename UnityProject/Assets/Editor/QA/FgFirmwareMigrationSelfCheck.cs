@@ -48,7 +48,7 @@ namespace GameLogic.EditorTools
 
         /// <summary>英文玩家文本里的旧生物题材词（中文词表见 <see cref="ThemeLexicon"/>）。“cell”在英文里是地图格子，不算。</summary>
         internal static readonly Regex EnglishBioWords = new Regex(
-            @"\b(genes?|genetic|organs?|organelles?|metabolism|metabolic|phagocyt\w*|biomass|mitochondri\w*|chloroplasts?|spores?|mycel\w*|cilia|pseudopod\w*|flagell\w*|hemoly\w*)\b",
+            @"\b(genes?|genetic|organs?|organelles?|metabolism|metabolic|phagocyt\w*|biomass|mitochondri\w*|chloroplasts?|spores?|mycel\w*|cilia|pseudopod\w*|flagell\w*|hemoly\w*|apoptos\w*|infect(s|ed|ion|ious)?|parasit\w*|enzymes?|lifesteal|vampir\w*|proliferat\w*|lysosom\w*)\b",
             RegexOptions.IgnoreCase);
 
         /// <summary>内部 ID 形态：旧基因 / 旧器官 / 固件 / 组件内容 ID 漏进玩家文本。</summary>

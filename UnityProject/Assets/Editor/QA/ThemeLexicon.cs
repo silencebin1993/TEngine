@@ -26,6 +26,8 @@ namespace GameLogic.EditorTools
             "叶绿体", "线粒体", "纤毛", "伪足", "鞭毛",
             "生物质",
             "登陆场", "静默领地", "铸造领地", "超频领地", "静默首领", "铸造首领", "超频首领",
+            // EMG1-TXT-01（FG19 FGR-EMG-232）：生物残留第 1 层补的禁用词（其余 FGR-EMG-232 词已在 §2.3 或上面）。
+            "菌网", "凋亡", "吸血", "感染", "寄生", "增殖", "糖膜", "酶",
         };
 
         internal static IEnumerable<string> AllWords => LegacyBioWords.Concat(FgNameTableWords);
