@@ -68,6 +68,10 @@ namespace GameLogic.Campaign.Combat
         public Blueprint.MorphMask Morph;
         /// <summary>FG2-FW-04：这组参数的编译结果里生效的固件（反应日志“参与的固件”从这里按反应配料筛）。</summary>
         public string[] FirmwareIds;
+        /// <summary>EMG1-PRG-01：这组参数编出的程序（树、原因、热量分项；空程序 = 只有基础攻击）。程序树预览只读这里与编译器，不另算（IC-REQ-010）。</summary>
+        public Emergence.EmgProgramResult Program;
+        /// <summary>EMG1-PRG-01：程序没能登记进内核时的原因文本键（表满 <c>emg.compile.table_full</c>，武器退回只有基础攻击 + 旧读法），正常为 null。</summary>
+        public string ProgramNoteKey;
     }
 
     /// <summary>
@@ -641,11 +645,49 @@ namespace GameLogic.Campaign.Combat
                                  && SignalUplinkService.IsCoreGatedReaction(p.ReactionId, p.UplinkFirmwareIds);
             // FG1-SIG-06（FGR-SIG-061）：接入口里有信号裸跑的未破解常规固件、且信号上的计次间隔已过——下一发计一次暴露。
             info.RawGated = info.Uplinked && RawFirmwareService.ShouldArmCharge(state, p.RawFirmwareIds);
-            CombatWeapon w = MachineWeaponFrom(p, info.ReactionSuppressed);
+            CombatWeapon w = WithProgram(p, MachineWeaponFrom(p, info.ReactionSuppressed), out info.Program, out info.ProgramNoteKey);
             info.WeaponIndex = WeaponIndex(w);
             _machineWeapons[logicId] = info;
             return info;
         }
+
+        /// <summary>
+        /// EMG1-PRG-01（FGR-EMG-030～033、045；ADR ②）：把这套装配编成程序、登记进本地点内核的程序表（按完整字节去重，读档带回的同一程序返回原下标），
+        /// 写回武器的程序下标，并把新热量分项（声明热量、触发节点、子载荷份数，扣回溢出指令）加到每发积热上（裸跑 ×1.5 同乘）。
+        /// 只在装配结算时调用（装配变化 / 接入 / 离开 / 冷却起止 / 读档后，都经 MachineLoadoutRegistry.Changed → RefreshMachineWeapon），O(程序长度)。
+        /// 空程序（没有生效声明，含 emg.stage = 0）原样返回武器：行为与 StateHash 逐字不变。表满时退回无程序并给原因键。
+        /// </summary>
+        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w, out Emergence.EmgProgramResult program, out string noteKey)
+        {
+            noteKey = null;
+            program = Emergence.EmgProgramCompiler.Compile(p);
+            if (program.IsEmpty)
+            {
+                return w;
+            }
+            int index = RegisterProgram(Kernel, program);
+            if (index < 0)
+            {
+                noteKey = Emergence.EmgProgramCompiler.NoteTableFull;
+                Log.Warning($"[CombatSite] {SiteId} 程序表已满（{Kernel.ProgramCount} 行），本次装配退回只有基础攻击（DEBT-EMG1KRN01-01）。");
+                return w;
+            }
+            w.Program = index;
+            float raw = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
+            w.HeatPerShot = Mathf.Max(0f, w.HeatPerShot + program.WeaponHeatDelta * raw);
+            return w;
+        }
+
+        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w) => WithProgram(p, w, out _, out _);
+
+        /// <summary>登记进内核程序表（按完整字节去重，已有的返回原下标）。空程序返回 −1；表满 / 形状不合法也返回 −1（调用方给原因 <see cref="Emergence.EmgProgramCompiler.NoteTableFull"/>）。
+        /// 放在桥接层：FG14 §5 硬约束 3，热更层只有 Campaign/Combat/ 能点名内核。</summary>
+        public static int RegisterProgram(CombatKernel kernel, Emergence.EmgProgramResult r) =>
+            kernel == null || r == null || r.IsEmpty ? -1 : kernel.AddProgram(r.Program, r.KernelNodes, r.KernelInstrs);
+
+        /// <summary>程序的完整字节键（转发内核纯函数，与程序表去重同一把键；编译器拿它算程序签名）。</summary>
+        public static string ProgramKey(in EmgProgram program, IReadOnlyList<EmgNode> nodes, IReadOnlyList<EmgInstr> instrs) =>
+            CombatKernel.ProgramKey(program, nodes, instrs);
 
         private static bool HasHeatSink(CampaignState state, int logicId)
         {

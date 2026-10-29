@@ -12,9 +12,11 @@ namespace BinGames.Sim.Combat
     /// </summary>
     public static class EmgConst
     {
-        /// <summary>每个程序最多几个节点 / 几条指令（ADR ②：理论最大 4 槽 × 混合 2 条 = 8 条自有指令 + 继承副本、节点 ≤ 9，留余量）。</summary>
+        /// <summary>每个程序最多几个节点 / 几条指令行（ADR ②：理论最大 4 槽 × 混合 2 条 = 8 条自有指令 + 继承副本、节点 ≤ 13，留余量）。
+        /// EMG1-PRG-01：内核指令行是“一条声明一行”（读端、写端各一行，同一条程序指令的行共用 Ordinal），一条固件 2～4 行，
+        /// 满树 ≤ 20 个指令位 × 每位 ≤ 5 行，所以上限按行数取 128（InstrTotal / InstrCount 仍是 byte）；只放宽读档与登记的校验上界，不改任何字段。</summary>
         public const int MaxNodes = 16;
-        public const int MaxInstr = 32;
+        public const int MaxInstr = 128;
         /// <summary>每地点程序表上限（只追加、不压实；ADR ②：阶段 1 实测超过再做“程序 / 弹体 / 无人机 / 区域统一重映射”的压实）。满了拒绝登记。</summary>
         public const int MaxPrograms = 4096;
         /// <summary>子载荷代 ≤ 2（编译期保证，FGR-EMG-031）；链深 ≤ 3（出队处截断，FGR-EMG-064）。</summary>
@@ -142,6 +144,14 @@ namespace BinGames.Sim.Combat
         Overflow = 4,
         /// <summary>落点接线复制来的效果写端（ADR ②，阶段 3）。</summary>
         Anchored = 8,
+        // ── 目标偏好（FGR-EMG-017 / FG19A A5）：只在 grm.mod.homing / grm.mod.chain 写端行上，由编译器按“写同键的各条指令的读端”按位并好；
+        //    内核挑目标按固定顺序：homing 已标记 > 热信号 > 最近；chain 已标记 > 导电 > 最近（chain 只有“已标记”一种偏好时只跳已标记目标）。执行归 EMG1-GRM-01。
+        /// <summary>偏好已标记目标（读 evt.marked）。</summary>
+        PreferMarked = 16,
+        /// <summary>寻的偏好热信号（读 prop.heat）。</summary>
+        PreferHeat = 32,
+        /// <summary>连锁偏好导电目标（读 prop.conductive）。</summary>
+        PreferConductive = 64,
     }
 
     [Flags]

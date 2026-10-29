@@ -94,8 +94,11 @@ namespace GameLogic.Campaign.Blueprint
         public string UtilityId;
         public string StructureId;
 
+        /// <summary>机器固件槽数（FGR-EMG-039：阶段 1～2 不改）；程序根节点容量 C0 = 本值 + 接入口配额（FGR-EMG-032）。</summary>
+        public const int FirmwareSlotCount = 2;
+
         /// <summary>固定长度 2，index0/1 对应两个独立有序固件槽；null/空串＝空槽。</summary>
-        public string[] FirmwareSlots = { null, null };
+        public string[] FirmwareSlots = new string[FirmwareSlotCount];
 
         /// <summary>固定长度 9，index0/8 由 <see cref="SyncFixedSlots"/> 自动维护，玩家不可直接改。</summary>
         public string[] SlotContentIds = new string[BlueprintCircuitLayout.SlotCount];

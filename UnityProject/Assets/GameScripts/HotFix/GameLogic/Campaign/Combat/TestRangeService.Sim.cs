@@ -465,7 +465,8 @@ namespace GameLogic.Campaign.Economy
             {
                 return -1;
             }
-            return site.WeaponIndex(CombatSite.MachineWeaponFrom(active, suppressed));
+            // EMG1-PRG-01：试射与实战同一份程序（IC-REQ-010）。
+            return site.WeaponIndex(site.WithProgram(active, CombatSite.MachineWeaponFrom(active, suppressed)));
         }
 
         /// <summary>按当前生效的编译结果重下发武器参数与门控位（接入 / 离开 / 冷却起止，O(1)）。</summary>

@@ -107,7 +107,7 @@ namespace BinGames.Sim.Combat
             return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
         }
 
-        /// <summary>程序形状：1～16 个节点、≤ 32 条指令；根节点 Parent = −1、Gen = 0；其余节点的父节点在它之前且 Gen = 父 Gen + 1 ≤ 2；
+        /// <summary>程序形状：1～16 个节点、≤ EmgConst.MaxInstr（128）条指令；根节点 Parent = −1、Gen = 0；其余节点的父节点在它之前且 Gen = 父 Gen + 1 ≤ 2；
         /// 触发事件码 ≤ 29；节点按序拥有连续的指令段、恰好铺满指令列表（继承在编译期做完，每个节点自带完整指令，FGR-EMG-033）；数值有限。</summary>
         public static bool ProgramShapeValid(in EmgProgram program, IReadOnlyList<EmgNode> nodes, IReadOnlyList<EmgInstr> instrs)
         {

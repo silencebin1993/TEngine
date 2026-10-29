@@ -410,7 +410,7 @@ namespace GameLogic.EditorTools
             {
                 ("没有节点", Array.Empty<EmgNode>(), Array.Empty<EmgInstr>()),
                 ("17 个节点", Enumerable.Range(0, 17).Select(j => new EmgNode { Parent = (sbyte)(j == 0 ? -1 : 0), Gen = (byte)(j == 0 ? 0 : 1) }).ToArray(), Array.Empty<EmgInstr>()),
-                ("33 条指令", new[] { new EmgNode { Parent = -1, InstrCount = 33 } }, Enumerable.Repeat(new EmgInstr { Amount = 1f }, 33).ToArray()),
+                ($"{EmgConst.MaxInstr + 1} 条指令", new[] { new EmgNode { Parent = -1, InstrCount = EmgConst.MaxInstr + 1 } }, Enumerable.Repeat(new EmgInstr { Amount = 1f }, EmgConst.MaxInstr + 1).ToArray()),
                 ("根节点有父", Nodes(n => n[0].Parent = 0), SampleInstrs()),
                 ("父节点在后", Nodes(n => n[1].Parent = 1), SampleInstrs()),
                 ("代号跳级", Nodes(n => n[1].Gen = 2), SampleInstrs()),
@@ -425,7 +425,7 @@ namespace GameLogic.EditorTools
             int rows = k.ProgramCount;
             var leaked = bad.Where(b => k.AddProgram(SampleProgram(1f), b.Nodes, b.Instrs) != -1).Select(b => b.Name).ToList();
             Expect(leaked.Count == 0 && k.ProgramCount == rows && k.AddProgram(new EmgProgram { HeatPerShot = -1f }, SampleNodes(), SampleInstrs()) == -1,
-                $"{bad.Length + 1} 种坏程序形状（没有节点 / 超 16 节点 / 超 32 指令 / 根有父 / 父在后 / 代号跳级 / 第 3 代 / 事件码 30 / 指令段不铺满 / 非数 / 负热量）全部拒绝（−1），表不变{(leaked.Count > 0 ? "；漏放：" + string.Join("、", leaked) : string.Empty)}");
+                $"{bad.Length + 1} 种坏程序形状（没有节点 / 超 16 节点 / 超 {EmgConst.MaxInstr} 指令 / 根有父 / 父在后 / 代号跳级 / 第 3 代 / 事件码 30 / 指令段不铺满 / 非数 / 负热量）全部拒绝（−1），表不变{(leaked.Count > 0 ? "；漏放：" + string.Join("、", leaked) : string.Empty)}");
 
             using (var full = new CombatKernel(CombatConfig.Default, 8))
             {

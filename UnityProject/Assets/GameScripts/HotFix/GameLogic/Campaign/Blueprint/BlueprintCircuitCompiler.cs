@@ -89,6 +89,10 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>FG1-SIG-02：插进接入口并**生效**的固件（AI 驾驶时永远为空，FGR-SIG-021、FGR-SIG-090）。</summary>
         public string[] UplinkFirmwareIds = Array.Empty<string>();
 
+        /// <summary>EMG1-PRG-01（FGR-EMG-030）：机器固件槽里 AI 也能用的固件，按槽序（S1、S2，空槽与核心固件已剔掉）。
+        /// 程序编译器按“<see cref="UplinkFirmwareIds"/> 在前、本字段在后”组装程序；<see cref="FirmwareIds"/> 是机器在前，顺序相反，不得拿来编程序（ADR-EMG-001 事实 1.18）。</summary>
+        public string[] LocalFirmwareIds = Array.Empty<string>();
+
         /// <summary>FG1-SIG-05（FGR-SIG-090）：机器电路自己的固件槽里残留的核心固件（旧草稿 / 旧档）。AI 永远不用核心固件，
         /// 所以它们不进 <see cref="FirmwareIds"/>、不产生反应与热量；界面据此说明（保存校验也会拒绝）。</summary>
         public string[] InertCoreFirmwareIds = Array.Empty<string>();
@@ -160,6 +164,7 @@ namespace GameLogic.Campaign.Blueprint
             // FG1-SIG-05（FGR-SIG-090）：机器电路自己的固件里只有常规固件生效——核心固件（旧草稿 / 旧档残留）AI 永远不用；
             // 核心固件只能经信号插进接入口（uplinkEffective）。
             string[] localEffective = FirmwareKinds.AiUsable(board.FirmwareSlots);
+            preview.LocalFirmwareIds = localEffective;
             preview.InertCoreFirmwareIds = FirmwareKinds.InertCore(board.FirmwareSlots);
             preview.FirmwareIds = localEffective.Concat(uplinkEffective).ToArray();
             // FG1-SIG-06（FGR-SIG-061）：信号裸跑未破解的敌方固件——热量增长是同类已破解固件的 1.5 倍（确定性，不靠随机）。

@@ -777,6 +777,10 @@ namespace GameLogic.EditorTools
             // EMG1-KRN-01：内核涌现结构与快照格式 16（FGT-EMG-040 / 042）——布局与 4096 满池内存、程序表为空时对 M10 基线金标准逐字不变、程序 / 武器 / 弹体 / 总线 / 残骸 / 单位段往返、
             // 短段 / 长段 / 新段、格式 14 / 15 缺省、回滚时新快照整块不读、负向矩阵（坏程序 / 满表 / 满队列 / 满残骸 / 快照坏值）、中途存读档续跑一致与无状态哈希随机。
             Seg("FgEmergenceKernelSelfCheck", FgEmergenceKernelSelfCheck.Run);
+            // EMG1-PRG-01：程序编译器（FGT-EMG-010 / 014 / 015 / 017 阶段 1）——14 组固定程序的树形 / 容量 / 继承 / 溢出 / 代际已满、内核三张表的行与去重、同端口幂等、
+            // 修饰读端随继承、热量分项、程序顺序（接入在前，FirmwareIds 反例）与 T3、签名、负向（空程序 / emg.stage = 0 / 表满 / 内容 ID）、旧内容版本提示（T9）、
+            // 家园正式流程（装配登记、接入、接入中途换装配、断开、真实存读档写回程序下标、emg.stage = 0 逐字不变）与编译耗时。
+            Seg("FgEmgProgramSelfCheck", FgEmgProgramSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

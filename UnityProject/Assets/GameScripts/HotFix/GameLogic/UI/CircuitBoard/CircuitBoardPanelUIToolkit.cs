@@ -1382,6 +1382,12 @@ namespace GameLogic.UI.CircuitBoard
                     Campaign.Combat.CombatSite.MachineHitDamage(_lastPreview).ToString("F1", System.Globalization.CultureInfo.InvariantCulture))
                     + "\n" + _lastPreview.ReactionHint;
             }
+            // EMG1-PRG-01（ADR-EMG-001 ⑩、T9）：已保存的这一版是在旧内容版本下编译的——提示重新保存（保存即按当前内容重编）。
+            string stale = BlueprintEditorService.StaleContentNotice(BlueprintEditorService.FindActiveVersion(CampaignSession.Current, _selectedBlueprintId));
+            if (stale != null)
+            {
+                _previewSummaryLabel.text += "\n" + stale;
+            }
 
             for (int i = 0; i < MaxPathRows; i++)
             {

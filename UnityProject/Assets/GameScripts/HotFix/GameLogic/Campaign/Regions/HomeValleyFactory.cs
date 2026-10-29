@@ -108,6 +108,7 @@ namespace GameLogic.Campaign.Regions
                     HeatBudget = 0f,
                     FactionTags = Array.Empty<string>(),
                     CompileSignature = kv.Key + ":v1",
+                    ContentVersionAtCompile = CampaignSaveService.CurrentContentVersion, // EMG1-PRG-01：新建的默认版本不是“旧内容编译”
                     CreatedAtPlaySeconds = state.PlaySeconds,
                 };
                 var record = new BlueprintRecord

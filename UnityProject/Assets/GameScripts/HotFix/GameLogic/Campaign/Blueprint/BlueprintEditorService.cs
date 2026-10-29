@@ -57,6 +57,15 @@ namespace GameLogic.Campaign.Blueprint
             return record?.Versions?.FirstOrDefault(v => v.Version == record.ActiveVersion);
         }
 
+        /// <summary>EMG1-PRG-01（ADR-EMG-001 ⑩、T9）：这一版是在已经变化的内容定义下编译保存的（<see cref="BlueprintVersionRecord.ContentVersionAtCompile"/>
+        /// 低于 <see cref="CampaignSaveService.CurrentContentVersion"/>）——机器照常按当前内容结算（程序每次装配结算时现编），只提示玩家重新保存一次。</summary>
+        public static bool IsCompiledOnOldContent(BlueprintVersionRecord version) =>
+            version != null && version.ContentVersionAtCompile < CampaignSaveService.CurrentContentVersion;
+
+        /// <summary>旧内容版本编译的提示文本（不是旧版本返回 null）：“基于已变化内容编译，请重新编译”。</summary>
+        public static string StaleContentNotice(BlueprintVersionRecord version) =>
+            IsCompiledOnOldContent(version) ? Localization.GameText.Get(Emergence.EmgProgramCompiler.StaleContentKey) : null;
+
         public static string GenerateBlueprintId() => "bp_" + Guid.NewGuid().ToString("N").Substring(0, 12);
 
         /// <summary>"新建"：登记一条没有任何已保存版本的空白记录（<c>ActiveVersion=0</c>，

@@ -450,7 +450,8 @@ namespace GameLogic.Campaign.Defense
             {
                 GridContent.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.BuildingGrid g);
                 float radius = g != null ? Mathf.Min(g.FootprintW, g.FootprintH) * 0.45f : 0.9f;
-                CombatWeapon w0 = p != null ? WeaponOf(state, rt, p, b, r.TargetMode, needsSupply, uplinked) : default;
+                // EMG1-PRG-01：程序只在推给内核的那一刻编译登记（参数变了才推；程序下标只对本地点内核有效，不进参数缓存）。
+                CombatWeapon w0 = p != null ? site.WithProgram(p, WeaponOf(state, rt, p, b, r.TargetMode, needsSupply, uplinked)) : default;
                 float max = BuildingOps.MaxDurability(b.BuildingTypeId);
                 float hp = Mathf.Clamp(BuildingOps.Durability(b), 1f, max);
                 site.SpawnTurretUnit(r.Serial, center, radius, hp, max, w0, TurretCatalog.TierArmor(tier), false, Vector2.up, 0f);
@@ -506,6 +507,7 @@ namespace GameLogic.Campaign.Defense
                 CombatWeapon w = WeaponOf(state, rt, p, b, r.TargetMode, needsSupply, uplinked);
                 if (!rt.WeaponPushed)
                 {
+                    w = site.WithProgram(p, w);
                     if (!site.TryGetTurretWeapon(r.Serial, out CombatWeapon cur) || !cur.Equals(w))
                     {
                         site.SetTurretWeapon(r.Serial, w);

@@ -216,7 +216,8 @@ namespace GameLogic.Campaign
     {
         /// <summary>FG0-SAVE-01：正式版 0.2 = 存档格式 v2（Demo 0.1 = v1，不迁移）。</summary>
         public const int CurrentSchemaVersion = 2;
-        public const int CurrentContentVersion = 1;
+        /// <summary>内容版本：1 = 0.2 起始；2 = EMG1-PRG-01 程序编译器（固件按声明编成程序树，FGR-EMG-030）。低于它编译保存的蓝图版本在电路编辑器里提示重新保存（<see cref="Blueprint.BlueprintEditorService.IsCompiledOnOldContent"/>）；读档的内容对账不按版本号做事，只把它记进通知。</summary>
+        public const int CurrentContentVersion = 2;
         public const string ProductVersion = "0.2";
 
         /// <summary>Demo 骨架先给 3 个固定槽位；手动槽不限、自动存档轮换、快速存档属于 FG15-SYS-01（DEBT-FG0SAVE01-02）。</summary>
