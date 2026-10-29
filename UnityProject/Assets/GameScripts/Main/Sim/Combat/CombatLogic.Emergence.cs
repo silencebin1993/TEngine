@@ -356,6 +356,99 @@ namespace BinGames.Sim.Combat
             EmgShotEvent(ref d, EmgEventKind.Fire, d.Id[t], dir.x, dir.y, 0, from);
         }
 
+        // ── EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：持续实体的刷写带宽、距离衰减与信号离开时剥离核心指令 ──
+        // 变体表（CombatData.FlashHead / FlashMap）由热更层在武器结算时登记：无人机开火查“前 k 条”那一行的武器，程序与读法一起截，
+        // 子载荷、触发、evt.expire 都随那一行的程序走（在飞载荷持有发射时的程序，FGR-EMG-037）。全部 O(无人机数)，只在内核。
+
+        internal static int4 FlashHeadOf(ref CombatData d, int weapon) => weapon >= 0 && weapon < d.FlashHead.Length ? d.FlashHead[weapon] : new int4(-1, 0, 0, 0);
+
+        internal static int FlashBandwidthOf(ref CombatData d) => d.Config.EmgFlashBandwidth > 0 ? d.Config.EmgFlashBandwidth : EmgConst.DefaultFlashBandwidth;
+
+        /// <summary>这架持有几条（读档短段的 255 = 全长；武器没有变体表 = 0，不占带宽）。</summary>
+        internal static int FlashHeld(ref CombatData d, in CombatDrone dr)
+        {
+            int4 h = FlashHeadOf(ref d, dr.Weapon);
+            return h.x < 0 ? 0 : math.min(dr.Active, dr.Strip != 0 ? h.z : h.y);
+        }
+
+        /// <summary>母机 <paramref name="ownerId"/> 的刷写占用：存活（未到期）实体持有条数之和，跳过下标 <paramref name="skip"/>。</summary>
+        internal static int FlashUsedBy(ref CombatData d, int ownerId, int skip)
+        {
+            double now = d.Scalars[0].Time;
+            int used = 0;
+            for (int q = 0; q < d.Drones.Length; q++)
+            {
+                CombatDrone dr = d.Drones[q];
+                if (q != skip && dr.Owner == ownerId && dr.Until > now)
+                {
+                    used += FlashHeld(ref d, dr);
+                }
+            }
+            return used;
+        }
+
+        /// <summary>这架此刻开火用的武器：没有变体表 = 放出它的武器（旧行为逐字不变）；有 = 变体表里“前 (持有 − 暂停) 条”那一行。</summary>
+        internal static int FlashExecWeapon(ref CombatData d, in CombatDrone dr)
+        {
+            int4 h = FlashHeadOf(ref d, dr.Weapon);
+            if (h.x < 0)
+            {
+                return dr.Weapon;
+            }
+            int len = dr.Strip != 0 ? h.z : h.y;
+            int k = math.clamp(math.min(dr.Active, len) - dr.Pause, 0, len);
+            int at = h.x + (dr.Strip != 0 ? h.y + 1 : 0) + k;
+            return at < d.FlashMap.Length ? d.FlashMap[at] : dr.Weapon;
+        }
+
+        /// <summary>新放出的一架该刷几条：min(程序全长, 带宽 − 已占用)，可到 0（= 只有基础攻击）。已存在的实体不受影响（FGR-EMG-036）。</summary>
+        internal static byte FlashGrant(ref CombatData d, int weapon, int used)
+        {
+            int4 h = FlashHeadOf(ref d, weapon);
+            return h.x < 0 ? (byte)0 : (byte)math.clamp(FlashBandwidthOf(ref d) - used, 0, h.y);
+        }
+
+        /// <summary>本步是否跨过一个 0.25 游戏秒的刷写节拍（按模拟时间对齐：暂停 dt = 0 不跨，倍速按游戏秒同样每 0.25 秒一次；不存状态，读档后照样对齐）。</summary>
+        internal static bool FlashTick(double now, float dt) =>
+            dt > 0f && math.floor(now / EmgConst.FlashInterval) != math.floor((now - dt) / EmgConst.FlashInterval);
+
+        /// <summary>距离衰减：离母机超过 emg.flash.range 后，每再远 emg.flash.step（不足一档按一档）暂停末尾 1 条，最多暂停到 0 条；回到范围内为 0。</summary>
+        internal static byte FlashPauseOf(ref CombatData d, in CombatDrone dr, int ownerSlot)
+        {
+            int held = FlashHeld(ref d, dr);
+            if (held <= 0)
+            {
+                return 0;
+            }
+            float range = d.Config.EmgFlashRange > 0f ? d.Config.EmgFlashRange : EmgConst.DefaultFlashRange;
+            float step = d.Config.EmgFlashStep > 0f ? d.Config.EmgFlashStep : EmgConst.DefaultFlashStep;
+            double over = math.distance(dr.Pos, d.Pos[ownerSlot]) - range;
+            return over <= 0.0 ? (byte)0 : (byte)math.min(held, (int)math.ceil(over / step));
+        }
+
+        /// <summary>信号离开母机（evt.unlink 注入 / 炮塔离开）：它已放出、持有刷写程序的无人机 / 哨戒桩剥离核心指令（按剥离换算改持有条数），常规指令留到实体到期。
+        /// 程序里没有核心指令的持有条数不变（剥离换算是恒等），但同样标记、不再被母机开火续命——母机已回到本地程序，接入时那份不能永远续下去。返回处理了几架。O(无人机数)。</summary>
+        internal static int EmgFlashStrip(ref CombatData d, int ownerId)
+        {
+            int n = 0;
+            for (int q = 0; q < d.Drones.Length; q++)
+            {
+                CombatDrone dr = d.Drones[q];
+                int4 h = FlashHeadOf(ref d, dr.Weapon);
+                if (dr.Owner != ownerId || dr.Strip != 0 || h.x < 0)
+                {
+                    continue;
+                }
+                int held = math.min(dr.Active, h.y);
+                dr.Active = (byte)d.FlashMap[h.x + h.y + 1 + h.z + 1 + held];
+                dr.Strip = 1;
+                dr.Pause = (byte)math.min((int)dr.Pause, dr.Active);
+                d.Drones[q] = dr;
+                n++;
+            }
+            return n;
+        }
+
         /// <summary>一架无人机（含哨戒桩）对 <paramref name="t"/> 开火一次：宿主 = 无人机（稳定 Id），程序 = 它所属武器的程序根节点；每次开火发 evt.fire（FGR-EMG-060 第 1 行“每架每次开火”），
         /// 随后的伤害发 evt.hit / evt.kill、被击者 evt.hurt 的来源 = 弹体（无人机是射击）。与 <see cref="EmgShotEnd"/> 成对。</summary>
         internal static void EmgDroneBegin(ref CombatData d, in CombatDrone dr, int owner, int t, int prog)
@@ -371,14 +464,19 @@ namespace BinGames.Sim.Combat
             d.EmgCtx = c;
         }
 
-        /// <summary>无人机 / 哨戒桩到期或母机没了、从列表移除：evt.expire（Code = 寿命；宿主 = 无人机）。</summary>
+        /// <summary>无人机 / 哨戒桩到期或母机没了、从列表移除：evt.expire（Code = 寿命；宿主 = 无人机，程序 = 它此刻持有的那份，EMG1-FLASH-01）。</summary>
         internal static void EmgDroneExpire(ref CombatData d, in CombatDrone dr)
         {
-            if (d.EmgListen == 0u || dr.Weapon < 0 || dr.Weapon >= d.Weapons.Length || d.Weapons[dr.Weapon].Program < 0)
+            if (d.EmgListen == 0u || dr.Weapon < 0 || dr.Weapon >= d.Weapons.Length)
             {
                 return;
             }
-            d.EmgCtx = new EmgCtx { Prog = d.Weapons[dr.Weapon].Program, Ent = dr.Id, Owner = -1, EntKind = EmgEntKind.Drone };
+            int prog = d.Weapons[FlashExecWeapon(ref d, dr)].Program;
+            if (prog < 0)
+            {
+                return;
+            }
+            d.EmgCtx = new EmgCtx { Prog = prog, Ent = dr.Id, Owner = -1, EntKind = EmgEntKind.Drone };
             EmgShotEvent(ref d, EmgEventKind.Expire, 0, 0f, 0f, EmgCode.ExpireLife, dr.Pos);
             d.EmgCtx = EmgCtx.None;
         }

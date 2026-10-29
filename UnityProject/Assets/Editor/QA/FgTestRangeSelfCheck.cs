@@ -232,7 +232,7 @@ namespace GameLogic.EditorTools
         // ── 工具 ─────────────────────────────────────────────────────────────────
 
         /// <summary>一个有电的家园 + 一座运转中的靶场（按种子地形找空地，不写死坐标，B25）+ 四张测试蓝图。</summary>
-        private static CampaignState NewWorld(int seed, out BuildingRecord range, bool observe = true)
+        internal static CampaignState NewWorld(int seed, out BuildingRecord range, bool observe = true)
         {
             TestRangeService.ResetForTests();
             HomeValleyPowerGrid.ResetForTests();
@@ -293,14 +293,14 @@ namespace GameLogic.EditorTools
             return t.Contains(".") || t.Contains("E") ? t : t + ".0";
         }
 
-        private static void AddBlueprint(CampaignState s, string id, BlueprintCircuitBoard board)
+        internal static void AddBlueprint(CampaignState s, string id, BlueprintCircuitBoard board)
         {
             BlueprintVersionRecord version = board.ToVersion(1, 0f);
             s.BlueprintRecords = (s.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != id)
                 .Append(new BlueprintRecord { BlueprintId = id, DisplayName = id, ActiveVersion = 1, Versions = new[] { version } }).ToArray();
         }
 
-        private static void SetLayout(CampaignState s, string rangeId, params string[] slots)
+        internal static void SetLayout(CampaignState s, string rangeId, params string[] slots)
         {
             TestRangeService.ClearSlots(s, rangeId);
             for (int i = 0; i < slots.Length; i++)

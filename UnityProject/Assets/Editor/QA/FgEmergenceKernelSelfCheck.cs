@@ -518,7 +518,7 @@ namespace GameLogic.EditorTools
             k.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Timer, Depth = 1, EntKind = EmgEntKind.Projectile, Ent = 1, Prog = p, Node = 1, Value = 0.5f, Code = 308, Pos = new double2(-3, 5) });
             byte[] snap = k.Serialize();
             var cases = new List<(string Name, byte[] Data, CombatLoadResult Want)>();
-            (int at, int stride) wseg = FindSegment(snap, EmgConst.SegWeapons, 2, k.WeaponCount);
+            (int at, int stride) wseg = FindSegment(snap, EmgConst.SegWeapons, 5, k.WeaponCount); // EMG1-FLASH-01：2 → 5 个字段（尾部 +3 刷写表头）
             cases.Add(("武器程序下标越界", Patch(snap, d => WriteInt(d, wseg.at + (k.WeaponCount - 1) * wseg.stride, 99)), CombatLoadResult.InvalidValue));
             cases.Add(("武器程序下标 −5", Patch(snap, d => WriteInt(d, wseg.at + (k.WeaponCount - 1) * wseg.stride, -5)), CombatLoadResult.InvalidValue));
             (int at, int stride) bseg = FindSegment(snap, EmgConst.SegBus, 16, k.EmgBusPending);

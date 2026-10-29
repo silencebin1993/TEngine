@@ -62,6 +62,16 @@ namespace BinGames.Sim.Combat
         public const int SegPending = 11;
         public const int SegZones = 12;
         public const int SegEchoes = 13;
+        /// <summary>EMG1-FLASH-01（FGR-EMG-036；ADR ③）：刷写变体表（每把无人机武器 “截到 k 条 / 剥离核心后截到 k 条” 的执行武器下标 + 剥离换算），一条记录一个 int。</summary>
+        public const int SegFlash = 14;
+        // ── EMG1-FLASH-01（FGR-EMG-036；fg.TbHomeTuning emg.flash.*）：刷写带宽初值（运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）──
+        public const int DefaultFlashBandwidth = 8;
+        public const float DefaultFlashRange = 8f;
+        public const float DefaultFlashStep = 4f;
+        /// <summary>距离衰减的重算节拍（游戏秒；按模拟时间对齐，暂停不走、倍速同步，ADR ③“每 0.25 秒重算一次”）。</summary>
+        public const double FlashInterval = 0.25;
+        /// <summary>一个程序能参与刷写的指令条数上限（Active / Pause 是 byte；变体表每把武器 ≤ 3 × 256 条）。</summary>
+        public const int MaxFlashLen = 250;
         // ── EMG1-TRIG-01（FGR-EMG-034 / 035；FG19A 第 2.1.1 节）：触发与子载荷的初值（运行时取 CombatConfig / 子形态表里热更层按 fg.TbHomeTuning、fg.TbSubPayload 写的值，≤ 0 用这里）──
         public const float DefaultSubDmgRatio = 0.5f;
         public const int DefaultMaxChildren = 4;
@@ -522,6 +532,30 @@ namespace BinGames.Sim.Combat
             get => (short)(ProfileRef - 1);
             set => ProfileRef = (short)(value + 1);
         }
+    }
+
+    /// <summary>EMG1-FLASH-01：一架无人机 / 哨戒桩的刷写读数（悬停“刷写 3 / 4 条（带宽已满）”“离母机过远，暂停 1 条”与自检）。</summary>
+    public struct CombatDroneFlash
+    {
+        public int Id;
+        public int Owner;
+        /// <summary>放出它的武器（变体表挂在这把武器上）。</summary>
+        public int Weapon;
+        /// <summary>此刻开火用的武器（变体表里“前 Held − Pause 条”那一行）与它的程序（−1 = 只有基础攻击）。</summary>
+        public int ExecWeapon;
+        public int Program;
+        /// <summary>持有的条数（带宽截断后；剥离后按去核心列表）。</summary>
+        public int Held;
+        /// <summary>当前列表的全长（剥离后 = 去核心长度）；Length − Held = 被带宽截掉的条数。</summary>
+        public int Length;
+        /// <summary>程序全长（含核心）。</summary>
+        public int FullLength;
+        /// <summary>离母机过远暂停的末尾条数。</summary>
+        public int Pause;
+        public bool Stripped;
+        public bool Anchored;
+        public int Truncated => Length - Held;
+        public int Effective => Held - Pause;
     }
 
     /// <summary>涌现发号器与总线计数（独立的长度 1 数组，不并进 <see cref="CombatScalars"/>：那里有多处“读出—改—写回”的局部副本，混在一起会把中途发的号写丢）。</summary>

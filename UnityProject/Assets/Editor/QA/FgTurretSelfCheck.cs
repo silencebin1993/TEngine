@@ -247,10 +247,10 @@ namespace GameLogic.EditorTools
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
 
-        private static CombatSite Site => WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded ? WorldSimulation.Home.Combat : null;
+        internal static CombatSite Site => WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded ? WorldSimulation.Home.Combat : null;
 
         /// <summary>一个有电的家园（开局发电机修好 + 两座发电机 2；按种子地形找空地，不写死坐标，B25）。</summary>
-        private static CampaignState NewWorld(int seed, bool observe = true, int scrap = 900)
+        internal static CampaignState NewWorld(int seed, bool observe = true, int scrap = 900)
         {
             HomeValleyPowerGrid.ResetForTests();
             PowerEnvironment.ResetForTests();
@@ -309,7 +309,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>在核心附近按种子地形找空地登记一座炮塔（<paramref name="powered"/> = 接得上电网且吃到电；false = 故意放在电网外）。装 <paramref name="bp"/>（null = 默认）。</summary>
-        private static BuildingRecord PlaceTurret(CampaignState s, string type, string bp = null, bool powered = true, float from = 5f, float to = 26f)
+        internal static BuildingRecord PlaceTurret(CampaignState s, string type, string bp = null, bool powered = true, float from = 5f, float to = 26f)
         {
             GridCell core = HomeGridService.CorePivot(s);
             for (float d = from; d <= to; d += 1f)
@@ -349,17 +349,17 @@ namespace GameLogic.EditorTools
             return null;
         }
 
-        private static void AddBlueprint(CampaignState s, string id, BlueprintCircuitBoard board, string name = null)
+        internal static void AddBlueprint(CampaignState s, string id, BlueprintCircuitBoard board, string name = null)
         {
             BlueprintVersionRecord version = board.ToVersion(1, 0f);
             s.BlueprintRecords = (s.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != id)
                 .Append(new BlueprintRecord { BlueprintId = id, DisplayName = name ?? id, ActiveVersion = 1, Versions = new[] { version } }).ToArray();
         }
 
-        private static BlueprintCircuitBoard Fixed(string primary, params string[] firmware) =>
+        internal static BlueprintCircuitBoard Fixed(string primary, params string[] firmware) =>
             BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, primary, null, null, firmware ?? Array.Empty<string>());
 
-        private static TurretRecord Rec(CampaignState s, BuildingRecord b) => b != null ? TurretService.Find(s, b.BuildingId) : null;
+        internal static TurretRecord Rec(CampaignState s, BuildingRecord b) => b != null ? TurretService.Find(s, b.BuildingId) : null;
 
         private static int Unit(CampaignState s, BuildingRecord b)
         {

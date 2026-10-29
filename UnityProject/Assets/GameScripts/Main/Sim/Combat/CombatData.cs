@@ -293,6 +293,10 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgProgram> EmgPrograms;
         public NativeList<EmgNode> EmgNodes;
         public NativeList<EmgInstr> EmgInstrs;
+        /// <summary>EMG1-FLASH-01：刷写变体表的表头（下标 = 武器下标；x = 在 <see cref="FlashMap"/> 的起点（−1 = 没有），y = 全长 L0，z = 去核心后的长度 L1）。随快照（Emg 段 5 尾部）。</summary>
+        public NativeList<Unity.Mathematics.int4> FlashHead;
+        /// <summary>EMG1-FLASH-01：每把武器一段 [截到 0..L0 条的执行武器][去核心后截到 0..L1 条的执行武器][剥离换算：全长列表上持有 k 条 → 去核心列表上 k′ 条]。只追加。随快照（Emg 段 14）。</summary>
+        public NativeList<int> FlashMap;
         /// <summary>涌现事件队列（头指针在 EmgS.BusHead；进快照、不丢）。</summary>
         public NativeList<EmgEvent> EmgBus;
         /// <summary>残骸（容量 EmgConst.DefaultWreckCapacity；进快照）。</summary>

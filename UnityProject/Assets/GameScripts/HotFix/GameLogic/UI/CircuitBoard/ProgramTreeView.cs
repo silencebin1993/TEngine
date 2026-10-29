@@ -87,10 +87,10 @@ namespace GameLogic.UI.CircuitBoard
                 RenderColumn(ColumnUplinked, null, null, false, visible: false);
                 return;
             }
-            EmgProgramResult ai = EmgProgramCompiler.Compile(dual.Ai);
+            EmgProgramResult ai = CombatSite.WithFlashForecast(dual.Ai, EmgProgramCompiler.Compile(dual.Ai)); // EMG1-FLASH-01：刷写截断预判
             RenderColumn(ColumnAi, ai, null, IsRejected(ai), visible: true);
             bool hasUplink = dual.Plan != null && dual.Plan.HasUplink;
-            EmgProgramResult up = hasUplink ? EmgProgramCompiler.Compile(dual.Uplinked) : null;
+            EmgProgramResult up = hasUplink ? CombatSite.WithFlashForecast(dual.Uplinked, EmgProgramCompiler.Compile(dual.Uplinked)) : null;
             string offPath = hasUplink && dual.Uplinked != null && !dual.Uplinked.UplinkOnPath && dual.Plan.Inserted.Count > 0 ? Names(dual.Plan.InsertedIds) : null;
             RenderColumn(ColumnUplinked, up, offPath, IsRejected(up), visible: hasUplink);
             if (!_hookRaised && (!ai.IsEmpty || (up != null && !up.IsEmpty)))

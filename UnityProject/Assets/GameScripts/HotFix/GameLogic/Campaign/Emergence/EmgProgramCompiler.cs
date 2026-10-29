@@ -168,6 +168,139 @@ namespace GameLogic.Campaign.Emergence
             return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob);
         }
 
+        // ── EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：刷写变体——无人机 / 哨戒桩只持有程序的前 k 条（带宽截断、距离暂停）或剥离核心后的前 k 条 ──
+
+        /// <summary>参与刷写的指令（不溢出的程序位置，按程序序）；<paramref name="noCore"/> = 去掉核心指令后的列表。条数 = 持续实体占用的刷写带宽。</summary>
+        public static List<EmgProgramStep> FlashSteps(EmgProgramResult r, bool noCore)
+        {
+            var list = new List<EmgProgramStep>(r?.Steps.Count ?? 0);
+            if (r == null)
+            {
+                return list;
+            }
+            foreach (EmgProgramStep s in r.Steps)
+            {
+                if (!s.Overflow && !(noCore && s.Core))
+                {
+                    list.Add(s);
+                }
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// 只保留刷写列表前 <paramref name="k"/> 条的程序（节点结构、代号、触发参数都不变，指令行按 Ordinal 过滤：Ordinal ≤ 第 k 条的程序序；<paramref name="noCore"/> 时再去掉核心行）。
+        /// 继承副本与合并行沿用编译器的口径（合并行的序号取最早来源、“核心”只在各来源都是核心时保留），所以“截到所有来源都被截才丢这行”。
+        /// 监听掩码、需要飞行、含核心按剩下的行重算；热量分项沿用原程序（无人机开火不积热，热量留母机，FGR-SIG-033）。没有剩下的行返回 null（= 只有基础攻击）。
+        /// shortcut: 剥离核心时，同节点同键合并成一行、来源里既有核心又有常规的，按最早序号判截断——常规来源排在截断点之后而核心来源在前时这行会多留；要精确时把来源序号存进行（阶段 3 元程序前再议）。
+        /// </summary>
+        public static EmgProgramResult Truncate(EmgProgramResult r, int k, bool noCore)
+        {
+            List<EmgProgramStep> steps = FlashSteps(r, noCore);
+            if (r == null || r.IsEmpty || k <= 0 || steps.Count == 0)
+            {
+                return null;
+            }
+            int cut = steps[Math.Min(k, steps.Count) - 1].Ordinal;
+            EmgCompiled c = EmgCatalog.Current;
+            EnsureIndex(c);
+            var t = new EmgProgramResult
+            {
+                RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed,
+                HeatInstr = r.HeatInstr, HeatDecl = r.HeatDecl, HeatTrigger = r.HeatTrigger, HeatChildren = r.HeatChildren, HeatOverflowInstr = r.HeatOverflowInstr,
+                ChildPayloads = r.ChildPayloads,
+            };
+            t.Steps.AddRange(r.Steps);
+            t.LegacyOwners.AddRange(r.LegacyOwners);
+            uint listen = 0u;
+            bool flight = false, core = false;
+            for (int j = 0; j < r.KernelNodes.Count; j++)
+            {
+                EmgNode n = r.KernelNodes[j];
+                int first = t.KernelInstrs.Count;
+                for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+                {
+                    EmgInstr x = r.KernelInstrs[i];
+                    if (x.Ordinal > cut || (noCore && (x.Flags & EmgInstrFlags.Core) != 0))
+                    {
+                        continue;
+                    }
+                    t.KernelInstrs.Add(x);
+                    bool write = x.Role > EmgConst.RoleLastRead;
+                    if (!write && IsEventPort(x.Port))
+                    {
+                        listen |= 1u << (x.Port - EventPortBase);
+                    }
+                    flight |= j == 0 && write && (x.Flags & EmgInstrFlags.Overflow) == 0 && PortIds.TryGetValue(x.Port, out string pid) && Array.IndexOf(FlightMods, pid) >= 0;
+                    core |= (x.Flags & EmgInstrFlags.Core) != 0;
+                }
+                n.FirstInstr = first;
+                n.InstrCount = (byte)(t.KernelInstrs.Count - first);
+                t.KernelNodes.Add(n);
+            }
+            if (t.KernelInstrs.Count == 0)
+            {
+                return null;
+            }
+            // 根节点的触发读端还在、它放出的子节点读的是“飞行中”事件 → 仍需飞行（与编译器同一口径）
+            foreach (EmgNode n in t.KernelNodes)
+            {
+                flight |= n.Parent == 0 && NeedsFlightEvent(n.TrigEvent) && (listen & (1u << (int)n.TrigEvent)) != 0;
+            }
+            t.Program = new EmgProgram
+            {
+                Flags = (r.Program.Flags & ~(EmgProgramFlags.NeedsFlight | EmgProgramFlags.HasCore))
+                        | (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None),
+                ListenMask = listen, HeatPerShot = r.Program.HeatPerShot,
+            };
+            return t;
+        }
+
+        /// <summary>前 <paramref name="k"/> 条之外、整条固件的全部程序位置都被截掉的固件（变体武器的旧读法字段一并去掉：截到 0 条 = 只有基础攻击）。</summary>
+        public static HashSet<string> FlashDroppedFirmware(EmgProgramResult r, int k, bool noCore)
+        {
+            var kept = new HashSet<string>(StringComparer.Ordinal);
+            var all = new HashSet<string>(StringComparer.Ordinal);
+            List<EmgProgramStep> steps = FlashSteps(r, false);
+            List<EmgProgramStep> keep = FlashSteps(r, noCore);
+            for (int i = 0; i < keep.Count && i < k; i++)
+            {
+                kept.Add(keep[i].FirmwareId);
+                kept.Add(keep[i].OwnerId);
+            }
+            foreach (EmgProgramStep s in steps)
+            {
+                all.Add(s.FirmwareId);
+                all.Add(s.OwnerId);
+            }
+            all.ExceptWith(kept);
+            return all;
+        }
+
+        /// <summary>
+        /// 编译预览的刷写预判（FGR-EMG-038 原因 emg.compile.flash_truncated）：载体一次放 <paramref name="drones"/> 架、母机带宽 <paramref name="bandwidth"/> 条时，
+        /// 后放出的那几架会从末尾少装哪些指令——每条至少被一架截掉的指令记一条原因（Node = −1，Ordinal = 程序序）。运行时按真实在场数截断（内核），这里只是提醒。
+        /// </summary>
+        public static void AddFlashForecast(EmgProgramResult r, int drones, int bandwidth)
+        {
+            List<EmgProgramStep> steps = FlashSteps(r, false);
+            if (r == null || r.IsEmpty || drones <= 0 || steps.Count == 0)
+            {
+                return;
+            }
+            int used = 0, worst = steps.Count;
+            for (int i = 0; i < drones; i++)
+            {
+                int grant = Math.Max(0, Math.Min(steps.Count, bandwidth - used));
+                used += grant;
+                worst = Math.Min(worst, grant);
+            }
+            for (int i = worst; i < steps.Count; i++)
+            {
+                r.Notes.Add(new EmgCompileNote { Key = EmgProgramTreeText.NoteFlashTruncated, Ordinal = steps[i].Ordinal, Node = -1 });
+            }
+        }
+
         /// <summary>EMG1-GRM-01：程序里写了修饰端口（grm.mod.*）的固件（切到声明轨后，这些固件的旧读法修饰字段不再结算）。</summary>
         public static HashSet<string> ModifierFirmware(EmgProgramResult r)
         {

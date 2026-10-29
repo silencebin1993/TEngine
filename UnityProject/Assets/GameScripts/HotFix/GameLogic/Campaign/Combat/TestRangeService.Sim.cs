@@ -444,6 +444,10 @@ namespace GameLogic.Campaign.Economy
 
         private static void SetUplinked(Session session, Projection p, bool on)
         {
+            if (!on)
+            {
+                session.Site.Kernel.FlashStrip(p.Unit); // EMG1-FLASH-01（FGR-EMG-037 / IC-REQ-010）：信号离开投影与实战同一规则，已放出的无人机剥离核心、不再续命。
+            }
             p.Uplinked = on;
             p.CoreReadyAt = -1; // 冷却属于信号：信号离开 / 进来时按新的编译结果重新下发（投影里的模拟冷却不带走）。
             ApplyWeapon(session, p, suppressed: false);

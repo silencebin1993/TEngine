@@ -55,6 +55,9 @@ namespace GameLogic.Campaign.Combat
 
         public bool TryGetTurretOfUnit(int unitId, out int serial) => _unitTurret.TryGetValue(unitId, out serial);
 
+        /// <summary>EMG1-FLASH-01（FGR-EMG-037）：信号离开这座炮塔——它已放出的无人机 / 哨戒桩剥离核心指令、不再续命（与机器 evt.unlink 同一个内核入口）。返回处理了几架。</summary>
+        public int StripTurretFlash(int serial) => Kernel != null && _turretUnit.TryGetValue(serial, out int unitId) ? Kernel.FlashStrip(unitId) : 0;
+
         /// <summary>
         /// 把一座炮塔放进内核（建成 / 读档对账补齐）。已经在内核里时返回原单位。<paramref name="armorFraction"/> = 炮塔座等级的全方位减伤。
         /// <paramref name="ammo"/> = 补给存量（发）。返回单位 ID（失败 0）。

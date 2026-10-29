@@ -12,6 +12,8 @@ namespace BinGames.Sim.Combat
             EmgPrograms = new NativeList<EmgProgram>(4, Allocator.Persistent);
             EmgNodes = new NativeList<EmgNode>(8, Allocator.Persistent);
             EmgInstrs = new NativeList<EmgInstr>(16, Allocator.Persistent);
+            FlashHead = new NativeList<Unity.Mathematics.int4>(4, Allocator.Persistent);
+            FlashMap = new NativeList<int>(16, Allocator.Persistent);
             EmgBus = new NativeList<EmgEvent>(16, Allocator.Persistent);
             Wrecks = new NativeList<EmgWreck>(4, Allocator.Persistent);
             EProfile = new NativeList<short>(capacity, Allocator.Persistent);
@@ -36,6 +38,8 @@ namespace BinGames.Sim.Combat
             EmgPrograms.Dispose();
             EmgNodes.Dispose();
             EmgInstrs.Dispose();
+            FlashHead.Dispose();
+            FlashMap.Dispose();
             EmgBus.Dispose();
             Wrecks.Dispose();
             EProfile.Dispose();

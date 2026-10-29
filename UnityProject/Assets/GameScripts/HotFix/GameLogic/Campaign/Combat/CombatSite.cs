@@ -310,6 +310,10 @@ namespace GameLogic.Campaign.Combat
             c.EmgVerbEmit = Emergence.EmgCatalog.VerbCode("emit");
             // EMG1-GRM-01：阶段 1 起的掩体规则（力场脉冲 / 布区投放受障碍、残骸阻挡，曲射 / 贯穿越过）；emg.stage = 0 时关，旧行为逐字不变。
             c.EmgCover = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
+            // EMG1-FLASH-01（FG19 FGR-EMG-036）：每台母机的刷写带宽、刷写距离、超出后每再远多少米失效末尾 1 条。
+            c.EmgFlashBandwidth = Math.Max(1, (int)Math.Round(Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth)));
+            c.EmgFlashRange = Mathf.Max(0.5f, Tuning("emg.flash.range", EmgConst.DefaultFlashRange));
+            c.EmgFlashStep = Mathf.Max(0.1f, Tuning("emg.flash.step", EmgConst.DefaultFlashStep));
             return c;
         }
 
@@ -729,6 +733,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return w;
             }
+            CombatWeapon local = w; // EMG1-FLASH-01：变体武器从同一把本地武器出发
             int index = RegisterProgram(Kernel, program);
             if (index < 0)
             {
@@ -748,7 +753,109 @@ namespace GameLogic.Campaign.Combat
             }
             noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
             noteKey ??= program.Notes.Exists(n => n.Key == Emergence.EmgProgramCompiler.NoteLobStraight) ? Emergence.EmgProgramCompiler.NoteLobStraight : null;
+            RegisterFlashVariants(p, local, w, program);
             return w;
+        }
+
+        /// <summary>
+        /// EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：会放无人机 / 哨戒桩的武器，按“只刷前 k 条”（全长列表）与“剥离核心后只剩前 k 条”（去核心列表）各登记一把变体武器，
+        /// 挂成内核的刷写变体表：无人机开火时内核按它持有的条数（带宽截断 − 距离暂停，剥离后换列表）查表换武器——程序与读法一起截，截到 0 条 = 只有基础攻击。
+        /// 只在装配结算时调用（与 <see cref="WithProgram(BlueprintCircuitPreview, CombatWeapon, out Emergence.EmgProgramResult, out string)"/> 同一次），O(程序长度 × 读法重建)；
+        /// 同一把武器（完整字节去重）只登记一次。不认内容 ID：条数、核心标记都来自编译结果（FGR-EMG-013）。
+        /// </summary>
+        private void RegisterFlashVariants(BlueprintCircuitPreview p, CombatWeapon local, CombatWeapon final, Emergence.EmgProgramResult program)
+        {
+            if (Kernel == null || final.Reading.Drones + final.Reading.EscortDrones <= 0)
+            {
+                return;
+            }
+            List<Emergence.EmgProgramStep> full = Emergence.EmgProgramCompiler.FlashSteps(program, false);
+            List<Emergence.EmgProgramStep> soft = Emergence.EmgProgramCompiler.FlashSteps(program, true);
+            if (full.Count == 0 || full.Count > EmgConst.MaxFlashLen)
+            {
+                return;
+            }
+            int self = WeaponIndex(final);
+            if (Kernel.FlashHeadOf(self).x >= 0)
+            {
+                _flashPrograms[self] = program; // 读档带回的变体表：补上名字来源
+                return;
+            }
+            var fv = new int[full.Count + 1];
+            var sv = new int[soft.Count + 1];
+            var strip = new int[full.Count + 1];
+            for (int k = 0; k <= full.Count; k++)
+            {
+                fv[k] = k == full.Count ? self : FlashVariant(p, local, final, program, k, false);
+                strip[k] = k == 0 ? 0 : strip[k - 1] + (full[k - 1].Core ? 0 : 1);
+            }
+            for (int k = 0; k <= soft.Count; k++)
+            {
+                sv[k] = k == soft.Count && soft.Count == full.Count ? self : FlashVariant(p, local, final, program, k, true);
+            }
+            _flashPrograms[self] = program;
+            if (!Kernel.SetFlashVariants(self, fv, sv, strip))
+            {
+                Log.Error($"[CombatSite] {SiteId} 刷写变体表登记失败（武器 {self}，全长 {full.Count}、去核心 {soft.Count}）。");
+            }
+        }
+
+        /// <summary>一把变体武器：程序 = 截断后的程序（没有剩下的行 = −1，只有基础攻击）；读法 = 去掉整条被截固件的旧读法字段后重折；需要飞行按截断后的程序重判。</summary>
+        private int FlashVariant(BlueprintCircuitPreview p, CombatWeapon local, CombatWeapon final, Emergence.EmgProgramResult program, int k, bool noCore)
+        {
+            Emergence.EmgProgramResult t = Emergence.EmgProgramCompiler.Truncate(program, k, noCore);
+            HashSet<string> dropped = Emergence.EmgProgramCompiler.FlashDroppedFirmware(program, k, noCore);
+            CombatWeapon v = local;
+            v.HeatPerShot = final.HeatPerShot;
+            int index = t != null ? RegisterProgram(Kernel, t) : -1;
+            if (t != null && index < 0)
+            {
+                Log.Error($"[CombatSite] {SiteId} 刷写变体（前 {k} 条{(noCore ? "，去核心" : string.Empty)}）的程序登记失败（程序表已满），这一档退化为只有基础攻击。");
+            }
+            v.Program = index;
+            if (v.Mode != CombatWeaponMode.Projectile)
+            {
+                v.Reading = FlashReading(p, local.Reading, program, index >= 0 ? t : null, dropped);
+            }
+            if (index >= 0)
+            {
+                ApplySpawnFlight(ref v, t, p.PrimaryId);
+            }
+            return WeaponIndex(v);
+        }
+
+        /// <summary>
+        /// EMG1-FLASH-01（FGR-EMG-038）：程序树预览的刷写预判——这套装配一次放出的无人机 / 哨戒桩（读法的 Drones + EscortDrones）按母机带宽（fg.TbHomeTuning emg.flash.bandwidth）
+        /// 依次刷写时，后放出的会从末尾少装哪些指令，记成原因 emg.compile.flash_truncated（与悬停同一键、同一解决办法）。不放无人机的装配原样返回。只在面板刷新时运行。
+        /// </summary>
+        public static Emergence.EmgProgramResult WithFlashForecast(BlueprintCircuitPreview p, Emergence.EmgProgramResult r)
+        {
+            if (p == null || r == null || r.IsEmpty)
+            {
+                return r;
+            }
+            CombatReading reading = MachineWeaponFrom(p).Reading;
+            int bandwidth = Math.Max(1, (int)Math.Round(Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth)));
+            Emergence.EmgProgramCompiler.AddFlashForecast(r, reading.Drones + reading.EscortDrones, bandwidth);
+            return r;
+        }
+
+        /// <summary>武器下标 → 它的编译结果（悬停读数列出被截 / 暂停指令的名字用；本次会话结算过的武器才有，读档后随装配重算补上）。</summary>
+        private readonly Dictionary<int, Emergence.EmgProgramResult> _flashPrograms = new Dictionary<int, Emergence.EmgProgramResult>();
+
+        public Emergence.EmgProgramResult FlashProgramOf(int weapon) => _flashPrograms.TryGetValue(weapon, out Emergence.EmgProgramResult r) ? r : null;
+
+        /// <summary>变体读法：与 <see cref="ProgramReading"/> 同一做法（按原程序去掉切到声明轨的修饰字段），另外去掉整条被截固件的全部旧读法字段，再把截断后根节点的旧动词行折回。</summary>
+        private static CombatReading FlashReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program, Emergence.EmgProgramResult truncated,
+            HashSet<string> dropped)
+        {
+            bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
+            HashSet<string> modFirmware = Emergence.EmgProgramCompiler.ModifierFirmware(program);
+            CombatReading r = modFirmware.Count == 0 && dropped.Count == 0
+                ? reading
+                : CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
+                    (fw, field) => dropped.Contains(fw) || (modFirmware.Contains(fw) && Emergence.EmgProgramCompiler.ModifierFields.Contains(field)));
+            return FoldProgramReadings(r, truncated, damageFromCompile);
         }
 
         /// <summary>

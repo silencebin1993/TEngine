@@ -43,12 +43,119 @@ namespace GameLogic.Campaign.Combat
                 return;
             }
             int unit = 0;
+            int drone = 0;
             Vector3 screen = InputRouter.Reader.MousePosition;
             if (!InputRouter.IsUiPointerBlocked() && TryScreenToGround(camera, screen, out Vector2 ground))
             {
                 unit = PickAt(site, new double2(ground.x, ground.y));
+                drone = unit == 0 ? PickFlashDrone(site, new double2(ground.x, ground.y)) : 0;
+            }
+            if (drone != 0)
+            {
+                HoverDrone(site, drone, new Vector2(screen.x, screen.y));
+                return;
             }
             HoverPicked(site, unit, new Vector2(screen.x, screen.y));
+        }
+
+        // ── EMG1-FLASH-01（FG19 FGR-EMG-036）：光标停在持有刷写程序的无人机 / 哨戒桩上——“刷写 3 / 4 条（带宽已满）”“离母机过远，暂停 1 条”，
+        //    以及被截 / 暂停的是哪几条（原因 + 解决办法，与程序树预览同一套文本 EmgProgramTreeText.ReasonText）。拾取在内核（O(无人机数)），这里只拼一架的文字。──
+
+        /// <summary>悬停键：−(基数 + 无人机稳定 Id)，与单位 ID（&gt; 0）和施工 / 管线等悬停键（−731…）不重叠。</summary>
+        public const int DroneHoverKeyBase = 2000000;
+
+        private static int _hoveredDrone;
+        private static readonly System.Func<TooltipContent> DroneProvider = ProvideDrone;
+
+        public static int HoveredDrone => _hoveredDrone;
+
+        /// <summary>光标所在地面点下持有刷写程序的无人机 / 哨戒桩（稳定 Id；没有 0）。没有变体表的无人机（没有程序）不弹。</summary>
+        public static int PickFlashDrone(CombatSite site, double2 at)
+        {
+            if (site == null || site.IsDisposed)
+            {
+                return 0;
+            }
+            int q = site.Kernel.PickDrone(at, PickRadius);
+            return q >= 0 && site.Kernel.TryGetDroneFlash(q, out CombatDroneFlash f) ? f.Id : 0;
+        }
+
+        /// <summary>自检：光标停在地面点上（与 <see cref="Tick"/> 同一套无人机拾取）。返回悬停到的无人机稳定 Id（0 = 没有）。</summary>
+        public static int HoverDroneGroundForTests(CombatSite site, double2 at)
+        {
+            int unit = PickAt(site, at);
+            int drone = unit == 0 ? PickFlashDrone(site, at) : 0;
+            if (drone == 0)
+            {
+                HoverPicked(site, unit, Vector2.zero);
+                return 0;
+            }
+            HoverDrone(site, drone, Vector2.zero);
+            return drone;
+        }
+
+        private static void HoverDrone(CombatSite site, int droneId, Vector2 screen)
+        {
+            if (_hoveredUnit != 0)
+            {
+                _hoveredUnit = 0;
+                _hoveredEnemyType = null;
+            }
+            _hoveredSite = site;
+            _hoveredDrone = droneId;
+            UiTooltip.HoverWorld(-(DroneHoverKeyBase + droneId), screen, DroneProvider);
+        }
+
+        private static TooltipContent ProvideDrone()
+        {
+            CombatSite site = _hoveredSite;
+            return site == null || site.IsDisposed || _hoveredDrone == 0 ? null : DroneContent(site, _hoveredDrone);
+        }
+
+        /// <summary>一架无人机 / 哨戒桩的刷写读数（自检直接断言）。找不到这架或它没有刷写程序返回 null。</summary>
+        public static TooltipContent DroneContent(CombatSite site, int droneId)
+        {
+            CombatKernel k = site?.Kernel;
+            if (k == null || k.IsDisposed)
+            {
+                return null;
+            }
+            return k.TryGetDroneFlash(k.DroneIndexOf(droneId), out CombatDroneFlash f) // 按 Id 找在内核（O(无人机数) 不在热更层）
+                ? new TooltipContent { Title = GameText.Get("emg.flash.hover.title"), Body = FlashBody(site.FlashProgramOf(f.Weapon), f) }
+                : null;
+        }
+
+        /// <summary>读数正文：持有条数（带宽已满时注明）、距离暂停、信号离开后的剥离，再逐条列出被截 / 暂停的指令（知道程序时）。</summary>
+        public static string FlashBody(Emergence.EmgProgramResult program, in CombatDroneFlash f)
+        {
+            var sb = new StringBuilder();
+            sb.Append(GameText.Format("emg.flash.hover.held", f.Held.ToString(CultureInfo.InvariantCulture), f.Length.ToString(CultureInfo.InvariantCulture)));
+            if (f.Truncated > 0)
+            {
+                sb.Append(GameText.Get("emg.flash.hover.full"));
+            }
+            if (f.Pause > 0)
+            {
+                sb.Append('\n').Append(GameText.Format("emg.flash.hover.range", f.Pause.ToString(CultureInfo.InvariantCulture)));
+            }
+            if (f.Stripped)
+            {
+                sb.Append('\n').Append(GameText.Get("emg.flash.hover.stripped"));
+            }
+            List<Emergence.EmgProgramStep> steps = program != null ? Emergence.EmgProgramCompiler.FlashSteps(program, f.Stripped) : null;
+            if (steps == null || steps.Count != f.Length)
+            {
+                return sb.ToString(); // 程序不在本次会话的结算记录里（例如读档后母机已换装配）：只给条数
+            }
+            for (int i = f.Held; i < f.Length; i++)
+            {
+                sb.Append('\n').Append(Emergence.EmgProgramTreeText.ReasonText(Emergence.EmgProgramTreeText.NoteFlashTruncated, Emergence.EmgProgramTreeText.StepName(steps[i])));
+            }
+            for (int i = f.Effective; i < f.Held; i++)
+            {
+                sb.Append('\n').Append(Emergence.EmgProgramTreeText.ReasonText(Emergence.EmgProgramTreeText.NoteFlashRange, Emergence.EmgProgramTreeText.StepName(steps[i])));
+            }
+            return sb.ToString();
         }
 
         /// <summary>
@@ -85,6 +192,7 @@ namespace GameLogic.Campaign.Combat
                 Leave(site);
                 return;
             }
+            _hoveredDrone = 0;
             if (unit != _hoveredUnit || site != _hoveredSite)
             {
                 OnHoverStarted(site, unit);
@@ -156,9 +264,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>离开（光标移开 / 地点不再被观察）。</summary>
         public static void Leave(CombatSite site)
         {
-            if (_hoveredUnit != 0 && (site == null || site == _hoveredSite))
+            if ((_hoveredUnit != 0 || _hoveredDrone != 0) && (site == null || site == _hoveredSite))
             {
                 _hoveredUnit = 0;
+                _hoveredDrone = 0;
                 _hoveredSite = null;
                 _hoveredEnemyType = null;
                 UiTooltip.LeaveWorld();

@@ -433,6 +433,15 @@ namespace BinGames.Sim.Combat
         public double2 Anchor;
         /// <summary>EMG1-KRN-01（ADR ④，格式 16）：稳定 Id（每地点单调，EmgScalars.NextDroneId；无人机每步压实，跨步引用用它）。</summary>
         public int Id;
+        /// <summary>EMG1-FLASH-01（FGR-EMG-036 / 037；ADR ③ Prog / Active）：放出时刷进的指令条数（母机带宽不够时从末尾截断；<see cref="Strip"/> = 1 后是“去掉核心指令的列表”上的条数）。
+        /// 执行的程序 = 放出它的武器（<see cref="Weapon"/>）的刷写变体表里“前 Active − Pause 条”那一行的武器（<c>CombatLogic.FlashExecWeapon</c>），程序与读法一起截。
+        /// 255 = 读档读到不含刷写字段的短段（按全长）。武器没有变体表（没有程序）时不用。随快照（Emg 段 8，格式 16 内追加）。</summary>
+        public byte Active;
+        /// <summary>EMG1-FLASH-01（FGR-EMG-037）：1 = 信号离开母机时已剥离核心指令（不再被母机开火续命，常规指令打到到期）。</summary>
+        public byte Strip;
+        /// <summary>EMG1-FLASH-01（FGR-EMG-036）：离母机过远暂停的末尾条数（内核每 0.25 游戏秒按距离重算，回到范围内归 0）。</summary>
+        public byte Pause;
+        public byte FlashPad;
     }
 
     /// <summary>
@@ -1298,6 +1307,10 @@ namespace BinGames.Sim.Combat
         public byte EmgCover;
         /// <summary>EMG1-GRM-01：连锁“导电优先”认哪些沾染位（阶段 1 过渡：浸湿 2、导电粉尘 12；实体导电属性 prop.conductive 随 EMG1-ENT-01）。0 = 用内核默认。</summary>
         public uint EmgConductiveMask;
+        /// <summary>EMG1-FLASH-01（FGR-EMG-036，fg.TbHomeTuning emg.flash.bandwidth / range / step）：每台母机的刷写带宽（条）、刷写距离（米）、超出后每再远多少米失效末尾 1 条。≤ 0 取 <see cref="EmgConst"/> 初值。</summary>
+        public int EmgFlashBandwidth;
+        public float EmgFlashRange;
+        public float EmgFlashStep;
 
         public static CombatConfig Default => new CombatConfig
         {

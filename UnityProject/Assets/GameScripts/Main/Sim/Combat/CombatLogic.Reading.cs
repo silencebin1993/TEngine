@@ -1562,6 +1562,7 @@ namespace BinGames.Sim.Combat
                 face = (float2)math.normalize(d.Pos[tgt] - d.Pos[a]);
             }
             int have = 0;
+            int flashUsed = 0; // EMG1-FLASH-01：本母机已占用的刷写带宽（只数留下来的存活实体）
             var stale = new FixedList128Bytes<int>();
             for (int k = 0; k < d.Drones.Length; k++)
             {
@@ -1587,7 +1588,11 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 have++;
-                dr.Until = now + seconds;
+                flashUsed += FlashHeld(ref d, dr);
+                if (dr.Strip == 0)
+                {
+                    dr.Until = now + seconds; // EMG1-FLASH-01：剥离过核心的不再续命，常规指令打到到期（FGR-EMG-037）
+                }
                 d.Drones[k] = dr;
             }
             int reuse = 0;
@@ -1623,7 +1628,9 @@ namespace BinGames.Sim.Combat
                     Leash = leash,
                     Cooldown = r.DroneCooldown > 0f ? r.DroneCooldown : 0.8f,
                     Faction = (CombatFaction)d.Faction[a],
+                    Active = FlashGrant(ref d, d.Weapon[a], flashUsed), // EMG1-FLASH-01：超带宽从末尾截断
                 };
+                flashUsed += fresh.Active;
                 d.EmgS[0] = es;
                 if (recycled)
                 {
@@ -1646,6 +1653,7 @@ namespace BinGames.Sim.Combat
             double now = d.Scalars[0].Time;
             int m = d.Drones.Length;
             int write = 0;
+            bool flashTick = d.FlashHead.Length > 0 && FlashTick(now, dt); // EMG1-FLASH-01：距离衰减每 0.25 游戏秒重算一次
             for (int q = 0; q < m; q++)
             {
                 CombatDrone dr = d.Drones[q];
@@ -1656,6 +1664,10 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 dr.Prev = dr.Pos;
+                if (flashTick)
+                {
+                    dr.Pause = FlashPauseOf(ref d, dr, owner);
+                }
                 byte want = dr.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
                 bool post = dr.Anchored != 0;
                 double2 home = post ? dr.Anchor : d.Pos[owner];
@@ -1712,7 +1724,7 @@ namespace BinGames.Sim.Combat
                     dr.NextHit = now + dr.Cooldown;
                     if (dr.Weapon >= 0 && dr.Weapon < d.Weapons.Length)
                     {
-                        CombatWeapon wp = d.Weapons[dr.Weapon];
+                        CombatWeapon wp = d.Weapons[FlashExecWeapon(ref d, dr)]; // EMG1-FLASH-01：截断 / 暂停 / 剥离后的那份程序与读法
                         CombatReading r = wp.Reading;
                         double tNow = now;
                         bool wasMarked = d.MarkedUntil[target] > tNow;

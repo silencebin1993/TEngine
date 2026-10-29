@@ -72,6 +72,192 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        // ─────────────────────────────── EMG1-FLASH-01 刷写带宽（FGR-EMG-036 / 037；ADR ③）───────────────────────────────
+
+        /// <summary>
+        /// 给一把会放无人机 / 哨戒桩的武器挂刷写变体表（热更层桥接在武器结算时登记）：<paramref name="full"/>[k] = 只刷前 k 条（全长列表）时无人机开火用的武器下标，
+        /// <paramref name="soft"/>[k] = 剥离核心后只剩前 k 条（去核心列表）时的武器，<paramref name="strip"/>[k] = 全长列表上持有 k 条的无人机剥离核心后在去核心列表上持有几条。
+        /// full[L0] 应当是武器自己。变体武器的程序与读法都已按截断重算（热更层），内核只按条数查表，不认内容 ID（FGR-EMG-013）。
+        /// 同一把武器已登记过（武器按完整字节去重，同一武器 = 同一程序 = 同一变体表）时不改、返回 true。参数不合法返回 false、表不变。O(L)。
+        /// </summary>
+        public bool SetFlashVariants(int weapon, int[] full, int[] soft, int[] strip)
+        {
+            if (weapon < 0 || weapon >= _d.Weapons.Length || full == null || soft == null || strip == null
+                || full.Length < 1 || full.Length > EmgConst.MaxFlashLen + 1 || soft.Length < 1 || soft.Length > full.Length || strip.Length != full.Length)
+            {
+                return false;
+            }
+            if (weapon < _d.FlashHead.Length && _d.FlashHead[weapon].x >= 0)
+            {
+                return true;
+            }
+            int l0 = full.Length - 1, l1 = soft.Length - 1;
+            for (int k = 0; k <= l0; k++)
+            {
+                if (full[k] < 0 || full[k] >= _d.Weapons.Length || strip[k] < 0 || strip[k] > l1)
+                {
+                    return false;
+                }
+            }
+            for (int k = 0; k <= l1; k++)
+            {
+                if (soft[k] < 0 || soft[k] >= _d.Weapons.Length)
+                {
+                    return false;
+                }
+            }
+            while (_d.FlashHead.Length <= weapon)
+            {
+                _d.FlashHead.Add(new Unity.Mathematics.int4(-1, 0, 0, 0));
+            }
+            _d.FlashHead[weapon] = new Unity.Mathematics.int4(_d.FlashMap.Length, l0, l1, 0);
+            foreach (int x in full) _d.FlashMap.Add(x);
+            foreach (int x in soft) _d.FlashMap.Add(x);
+            foreach (int x in strip) _d.FlashMap.Add(x);
+            Touch();
+            return true;
+        }
+
+        /// <summary>这把武器的刷写变体表表头（x &lt; 0 = 没有；y = 全长 L0，z = 去核心长度 L1）。</summary>
+        public Unity.Mathematics.int4 FlashHeadOf(int weapon) => CombatLogic.FlashHeadOf(ref _d, weapon);
+
+        /// <summary>变体表的一格：<paramref name="k"/> 条（<paramref name="noCore"/> = 去核心列表）时的执行武器；没有表或越界返回 −1。</summary>
+        public int FlashVariantOf(int weapon, int k, bool noCore)
+        {
+            Unity.Mathematics.int4 h = CombatLogic.FlashHeadOf(ref _d, weapon);
+            int len = noCore ? h.z : h.y;
+            return h.x < 0 || k < 0 || k > len ? -1 : _d.FlashMap[h.x + (noCore ? h.y + 1 : 0) + k];
+        }
+
+        /// <summary>剥离换算：全长列表上持有 <paramref name="k"/> 条的实体剥离核心后持有几条；没有表或越界返回 −1。</summary>
+        public int FlashStripOf(int weapon, int k)
+        {
+            Unity.Mathematics.int4 h = CombatLogic.FlashHeadOf(ref _d, weapon);
+            return h.x < 0 || k < 0 || k > h.y ? -1 : _d.FlashMap[h.x + h.y + 1 + h.z + 1 + k];
+        }
+
+        /// <summary>每台母机的刷写带宽（条，配置值；≤ 0 取初值 8）。</summary>
+        public int FlashBandwidth => CombatLogic.FlashBandwidthOf(ref _d);
+
+        /// <summary>这台母机（单位 ID）此刻的刷写占用 = 它存活的无人机 / 哨戒桩各自持有的指令条数之和（每步由存活实体派生，不另存计数）。O(无人机数)。
+        /// FG11-FAC-01 的镜像复制品、EMG4 的被劫持敌机按同一口径汇总到各自母机。</summary>
+        public int FlashUsed(int ownerId) => CombatLogic.FlashUsedBy(ref _d, ownerId, -1);
+
+        /// <summary>信号离开母机 <paramref name="ownerId"/>（单位 ID）：它已放出的无人机 / 哨戒桩剥离核心指令、不再续命（FGR-EMG-037）。返回处理了几架。O(无人机数)。
+        /// 机器经 evt.unlink 注入调用；炮塔接入离开（TurretUplink）没有 evt.unlink，直接调这里。</summary>
+        public int FlashStrip(int ownerId)
+        {
+            int n = CombatLogic.EmgFlashStrip(ref _d, ownerId);
+            if (n > 0)
+            {
+                Touch();
+            }
+            return n;
+        }
+
+        /// <summary>稳定 Id → 无人机下标（没有 −1）。O(无人机数)，只在悬停刷新 / 自检时调用。</summary>
+        public int DroneIndexOf(int droneId)
+        {
+            for (int q = 0; q < _d.Drones.Length; q++)
+            {
+                if (_d.Drones[q].Id == droneId)
+                {
+                    return q;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>一架无人机此刻的刷写读数（悬停 / 自检）。没有这架或它的武器没有变体表时返回 false。</summary>
+        public bool TryGetDroneFlash(int index, out CombatDroneFlash f)
+        {
+            f = default;
+            if (index < 0 || index >= _d.Drones.Length)
+            {
+                return false;
+            }
+            CombatDrone dr = _d.Drones[index];
+            Unity.Mathematics.int4 h = CombatLogic.FlashHeadOf(ref _d, dr.Weapon);
+            if (h.x < 0)
+            {
+                return false;
+            }
+            int len = dr.Strip != 0 ? h.z : h.y;
+            int held = Math.Min(dr.Active, len);
+            int exec = CombatLogic.FlashExecWeapon(ref _d, dr);
+            f = new CombatDroneFlash
+            {
+                Id = dr.Id, Owner = dr.Owner, Weapon = dr.Weapon, ExecWeapon = exec, Program = _d.Weapons[exec].Program,
+                Held = held, Length = len, FullLength = h.y, Pause = Math.Min(dr.Pause, held), Stripped = dr.Strip != 0, Anchored = dr.Anchored != 0,
+            };
+            return true;
+        }
+
+        /// <summary>光标拾取：离 <paramref name="at"/> 最近、在 <paramref name="radius"/> 米内、持有刷写程序（武器有变体表）的无人机 / 哨戒桩下标（没有 −1）。
+        /// 没有程序的无人机不挡住旁边有程序的那架。O(无人机数)，悬停每帧一次。</summary>
+        public int PickDrone(Unity.Mathematics.double2 at, float radius)
+        {
+            int best = -1;
+            double bestD = radius;
+            for (int q = 0; q < _d.Drones.Length; q++)
+            {
+                if (CombatLogic.FlashHeadOf(ref _d, _d.Drones[q].Weapon).x < 0)
+                {
+                    continue;
+                }
+                double dist = Unity.Mathematics.math.distance(_d.Drones[q].Pos, at);
+                if (dist <= bestD)
+                {
+                    bestD = dist;
+                    best = q;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>读档：武器表头与变体表一起核对后落进 staging（表头指向的整段都在表内、变体武器在武器表内、剥离换算不超过去核心长度）。</summary>
+        private static bool LoadFlash(ref CombatData staging, EmgLoadBuffer buf)
+        {
+            int[] map = buf?.FlashMap ?? Array.Empty<int>();
+            Unity.Mathematics.int4[] heads = buf?.FlashHead;
+            int weapons = staging.Weapons.Length;
+            for (int i = 0; heads != null && i < heads.Length && i < weapons; i++)
+            {
+                Unity.Mathematics.int4 h = heads[i];
+                if (h.x < 0)
+                {
+                    staging.FlashHead.Add(new Unity.Mathematics.int4(-1, 0, 0, 0));
+                    continue;
+                }
+                int l0 = h.y, l1 = h.z;
+                if (l1 > l0 || l0 > EmgConst.MaxFlashLen || (long)h.x + (l0 + 1) * 2 + l1 + 1 > map.Length)
+                {
+                    return false;
+                }
+                for (int k = 0; k <= l0 + l1 + 1; k++)
+                {
+                    if (map[h.x + k] < 0 || map[h.x + k] >= weapons)
+                    {
+                        return false;
+                    }
+                }
+                for (int k = 0; k <= l0; k++)
+                {
+                    int sk = map[h.x + l0 + 1 + l1 + 1 + k];
+                    if (sk < 0 || sk > l1)
+                    {
+                        return false;
+                    }
+                }
+                staging.FlashHead.Add(h);
+            }
+            foreach (int x in map)
+            {
+                staging.FlashMap.Add(x);
+            }
+            return true;
+        }
+
         /// <summary>EMG1-TRIG-01：写一行子形态参数（下标 = fg.TbSubPayload 的 code 1～5；数值必须有限且非负，否则拒绝）。</summary>
         public bool SetEmgSubForm(int code, in EmgSubForm f)
         {
@@ -283,6 +469,10 @@ namespace BinGames.Sim.Combat
             {
                 return EmgInjectResult.NoUnit;
             }
+            if (kind == EmgEventKind.Unlink)
+            {
+                FlashStrip(unitId); // EMG1-FLASH-01（FGR-EMG-037）：信号离开即剥离，不看程序有没有监听 evt.unlink
+            }
             long before = _d.EmgStats[0].Enqueued + _d.EmgStats[0].Merged;
             long lost = _d.EmgStats[0].Lost;
             EmgCtx saved = _d.EmgCtx;
@@ -478,7 +668,7 @@ namespace BinGames.Sim.Combat
         private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes)
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
-            w.Write(13 + (extraBytes > 0 ? 1 : 0));
+            w.Write(14 + (extraBytes > 0 ? 1 : 0)); // EMG1-FLASH-01：+ 段 14（刷写变体表）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, 8, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -514,10 +704,15 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWeapons, WeaponFields, _d.Weapons.Length);
+            sw.Begin(EmgConst.SegWeapons, WeaponFields + 3, _d.Weapons.Length);
             for (int i = 0; i < _d.Weapons.Length; i++)
             {
                 WriteWeaponEmg(w, _d.Weapons[i], sw);
+                // EMG1-FLASH-01：刷写变体表表头（尾部追加；不进 WriteWeaponEmg——那份字段清单也是武器去重键，表头是登记后才挂上的派生关系）
+                Unity.Mathematics.int4 fh = i < _d.FlashHead.Length ? _d.FlashHead[i] : new Unity.Mathematics.int4(-1, 0, 0, 0);
+                if (sw.F()) w.Write(fh.x);
+                if (sw.F()) w.Write((byte)fh.y);
+                if (sw.F()) w.Write((byte)fh.z);
                 sw.EndRecord();
             }
             sw.End();
@@ -563,10 +758,14 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegDrones, 1, _d.Drones.Length);
+            sw.Begin(EmgConst.SegDrones, 4, _d.Drones.Length);
             for (int i = 0; i < _d.Drones.Length; i++)
             {
-                if (sw.F()) w.Write(_d.Drones[i].Id);
+                CombatDrone dr = _d.Drones[i];
+                if (sw.F()) w.Write(dr.Id);
+                if (sw.F()) w.Write(dr.Active); // EMG1-FLASH-01：尾部追加 3 个（短段读到 Active = 255 按全长、Strip / Pause = 0）
+                if (sw.F()) w.Write(dr.Strip);
+                if (sw.F()) w.Write(dr.Pause);
                 sw.EndRecord();
             }
             sw.End();
@@ -625,6 +824,14 @@ namespace BinGames.Sim.Combat
             sw.End();
 
             WriteTriggerSegments(w, sw);
+
+            sw.Begin(EmgConst.SegFlash, 1, _d.FlashMap.Length);
+            for (int i = 0; i < _d.FlashMap.Length; i++)
+            {
+                if (sw.F()) w.Write(_d.FlashMap[i]);
+                sw.EndRecord();
+            }
+            sw.End();
 
             if (extraBytes > 0)
             {
@@ -756,6 +963,10 @@ namespace BinGames.Sim.Combat
         private sealed class EmgLoadBuffer
         {
             public int[] DroneIds;
+            /// <summary>EMG1-FLASH-01：无人机刷写字段（Active / Strip / Pause）、武器表头、变体表。</summary>
+            public byte[] DroneFlash;
+            public Unity.Mathematics.int4[] FlashHead;
+            public int[] FlashMap;
             /// <summary>EMG1-TRIG-01：区域 / 回波的宿主字段（读法表在 Emg 段之后读，FinishEmgLoad 再落）。</summary>
             public CombatZone[] ZoneHosts;
             public CombatEcho[] EchoHosts;
@@ -911,6 +1122,12 @@ namespace BinGames.Sim.Combat
                         int prog = cw.Program;
                         if (sr.F()) prog = r.ReadInt32();
                         if (sr.F()) cw.SpawnFlight = r.ReadByte();
+                        var fh = new Unity.Mathematics.int4(-1, 0, 0, 0);
+                        if (sr.F()) fh.x = r.ReadInt32();
+                        if (sr.F()) fh.y = r.ReadByte();
+                        if (sr.F()) fh.z = r.ReadByte();
+                        buf.FlashHead ??= new Unity.Mathematics.int4[n];
+                        buf.FlashHead[i] = fh; // 范围在 FinishEmgLoad 按变体表核（段 14 可能在后面）
                         if (!sr.RecordOk || prog < -1) // 先判再赋：Program 的 setter 会把任何负数折成“没有程序”，坏值得在这里拒绝
                         {
                             return CombatLoadResult.InvalidValue;
@@ -984,10 +1201,14 @@ namespace BinGames.Sim.Combat
                         return CombatLoadResult.InvalidValue;
                     }
                     buf.DroneIds = new int[n];
+                    buf.DroneFlash = new byte[n * 3];
                     for (int i = 0; i < n; i++)
                     {
                         sr.Record(i);
                         if (sr.F()) buf.DroneIds[i] = r.ReadInt32();
+                        buf.DroneFlash[i * 3] = sr.F() ? r.ReadByte() : (byte)255;
+                        if (sr.F()) buf.DroneFlash[i * 3 + 1] = r.ReadByte();
+                        if (sr.F()) buf.DroneFlash[i * 3 + 2] = r.ReadByte();
                         if (!sr.RecordOk)
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1064,6 +1285,22 @@ namespace BinGames.Sim.Combat
                     return CombatLoadResult.Ok;
                 case EmgConst.SegPending:
                     return ParsePending(r, sr, ref staging);
+                case EmgConst.SegFlash:
+                    if (n > 1 << 20)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    buf.FlashMap = new int[n];
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        buf.FlashMap[i] = sr.F() ? r.ReadInt32() : -1;
+                        if (!sr.RecordOk)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                    }
+                    return CombatLoadResult.Ok;
                 case EmgConst.SegZones:
                     if (n > 1 << 20)
                     {
@@ -1191,6 +1428,10 @@ namespace BinGames.Sim.Combat
                     return CombatLoadResult.InvalidValue;
                 }
             }
+            if (!LoadFlash(ref staging, buf))
+            {
+                return CombatLoadResult.InvalidValue;
+            }
             EmgScalars es = staging.EmgS[0];
             int maxChain = 0;
             var ids = new HashSet<int>();
@@ -1228,7 +1469,10 @@ namespace BinGames.Sim.Combat
             {
                 CombatDrone dr = staging.Drones[i];
                 dr.Id = buf?.DroneIds != null ? buf.DroneIds[i] : 0;
-                if (dr.Id < 0 || (dr.Id > 0 && !ids.Add(dr.Id)))
+                dr.Active = buf?.DroneFlash != null ? buf.DroneFlash[i * 3] : (byte)255;
+                dr.Strip = buf?.DroneFlash != null ? buf.DroneFlash[i * 3 + 1] : (byte)0;
+                dr.Pause = buf?.DroneFlash != null ? buf.DroneFlash[i * 3 + 2] : (byte)0;
+                if (dr.Id < 0 || (dr.Id > 0 && !ids.Add(dr.Id)) || dr.Strip > 1)
                 {
                     return CombatLoadResult.InvalidValue;
                 }

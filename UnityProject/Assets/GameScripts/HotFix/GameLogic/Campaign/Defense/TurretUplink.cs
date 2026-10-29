@@ -127,6 +127,7 @@ namespace GameLogic.Campaign.Defense
             TurretService.StateOf(s).UplinkTurretId = buildingId;
             if (!string.IsNullOrEmpty(prev) && prev != buildingId)
             {
+                StripFlash(s, prev);
                 TurretService.Refresh(s, prev);
             }
             TurretService.Refresh(s, buildingId);
@@ -146,10 +147,22 @@ namespace GameLogic.Campaign.Defense
                 return TurretOpResult.Fail(TurretFailure.NotUplinked, GameText.Get("turret.reason.not_uplinked"));
             }
             TurretService.StateOf(s).UplinkTurretId = string.Empty;
+            StripFlash(s, id);
             TurretService.Refresh(s, id);
             string text = GameText.Get(feedbackKey);
             Say(text);
             return TurretOpResult.Success(text);
+        }
+
+        /// <summary>EMG1-FLASH-01（FGR-EMG-037）：信号离开炮塔（主动离开 / 静默夜 / 断电禁用 / 换到别处，全部经 <see cref="Leave"/> 或换接）→ 它已放出的无人机 / 哨戒桩剥离核心指令。</summary>
+        private static void StripFlash(CampaignState s, string buildingId)
+        {
+            TurretRecord r = TurretService.Find(s, buildingId);
+            CombatSite site = WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded ? WorldSimulation.Home.Combat : null;
+            if (r != null && site != null)
+            {
+                site.StripTurretFlash(r.Serial);
+            }
         }
 
         /// <summary>炮塔没了 / 失去作用（被摧毁、拆除）：信号在里面就回到归还核心并说明。</summary>
