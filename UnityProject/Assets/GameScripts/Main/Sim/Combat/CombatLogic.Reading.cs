@@ -61,22 +61,39 @@ namespace BinGames.Sim.Combat
             ReflectMelee(ref d, a, t, dealt);
             PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
 
+            // EMG1-GRM-01：根节点上的新动词（格斗侧偏；力场多个小脉冲 / 中心游移 / 越障 / 不被残骸挡；布区多块小落区 / 落点散开 / 越障 / 越过残骸）。没有程序时为空。
+            EmgMods em = default;
+            if (wp.Program >= 0)
+            {
+                EmgModsOf(ref d, wp.Program, 0, out em);
+            }
             // 载体投送的其余目标（格斗扇形 / 力场一圈）：逐目标读法，不锚定。
             if (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura)
             {
-                StrikeCarrierArea(ref d, a, t, baseDamage, r);
+                StrikeCarrierArea(ref d, a, t, baseDamage, r, em);
             }
             else if (r.Carrier == CombatCarrier.Field && r.FieldSeconds > 0f && r.Area > 0f)
             {
                 // FG2-VFX-02：震荡脉冲器（布区·脉冲）的区域落在自己脚下（画成冲击波）；其余布区落在目标脚下（液池）。
                 bool atSelf = r.FieldPlacement == CombatZonePlacement.Attacker;
-                double2 fieldPos = atSelf ? d.Pos[a] : primaryPos;
-                if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), fieldPos, r.Area, r.FieldSeconds, baseDamage * math.max(0f, r.FieldDpsRatio), r.ZoneGrowth, r.ZoneTickScale,
-                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
+                double2 fieldPos = atSelf ? d.Pos[a] : EmgDropPoint(ref d, d.Pos[a], primaryPos, em);
+                fieldPos += EmgCenterDrift(ref d, a, em);
+                int zones = em.Multi > 1 ? em.Multi : 1;
+                float zr = zones > 1 ? r.Area * (em.MultiRadius > 0f ? em.MultiRadius : 0.6f) : r.Area;
+                float zdps = baseDamage * math.max(0f, r.FieldDpsRatio) * (zones > 1 && em.MultiRatio > 0f ? em.MultiRatio : 1f);
+                double2 side = math.lengthsq(primaryPos - d.Pos[a]) > 1e-12 ? math.normalize(primaryPos - d.Pos[a]) : new double2(0, 1);
+                side = new double2(-side.y, side.x);
+                for (int q = 0; q < zones; q++)
                 {
-                    SetLastZoneLook(ref d, atSelf ? CombatZoneLook.Pulse : CombatZoneLook.Pool);
-                    NoteReading(ref d, CombatConst.ReadingFeedZone, fieldPos, a);
-                    EmgAdoptZone(ref d, a); // EMG1-TRIG-01：布区每块落区 = 一个根载荷宿主（带程序时）
+                    // 多块小落区沿出手方向的垂线摊开（间距 = 原半径 × 0.8），一份时就是原落点。
+                    double2 zp = fieldPos + side * (r.Area * 0.8 * (q - (zones - 1) * 0.5));
+                    if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), zp, zr, r.FieldSeconds, zdps, r.ZoneGrowth, r.ZoneTickScale,
+                        r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
+                    {
+                        SetLastZoneLook(ref d, atSelf ? CombatZoneLook.Pulse : CombatZoneLook.Pool);
+                        NoteReading(ref d, CombatConst.ReadingFeedZone, zp, a);
+                        EmgAdoptZone(ref d, a); // EMG1-TRIG-01：布区每块落区 = 一个根载荷宿主（带程序时）
+                    }
                 }
             }
 
@@ -252,7 +269,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>格斗扇形 / 力场一圈里除主目标以外的敌对单位：逐目标读法。</summary>
-        private static void StrikeCarrierArea(ref CombatData d, int a, int t, float baseDamage, in CombatReading r)
+        private static void StrikeCarrierArea(ref CombatData d, int a, int t, float baseDamage, in CombatReading r, in EmgMods em)
         {
             byte want = WantOf(ref d, a);
             double2 origin = d.Pos[a];
@@ -260,7 +277,26 @@ namespace BinGames.Sim.Combat
             double2 toT = d.Pos[t] - origin;
             float2 dir = math.lengthsq(toT) > 1e-12 ? (float2)math.normalize(toT) : new float2(0f, 1f);
             float reach = melee ? math.max(r.Area, (float)math.length(toT)) : r.Area;
-            float cosHalf = r.Cone >= 180f ? -2f : math.cos(math.radians(math.max(0f, r.Cone)));
+            float cone = r.Cone;
+            if (em.Any)
+            {
+                // EMG1-GRM-01：格斗侧偏（挥击方向随机 ±、扇形加宽）；力场中心游移 / 多个小脉冲。
+                if (melee)
+                {
+                    dir = Rotate(dir, EmgSwingDrift(ref d, a, em, out float coneAdd));
+                    cone += coneAdd;
+                }
+                else
+                {
+                    origin += EmgCenterDrift(ref d, a, em);
+                    if (em.Multi > 1)
+                    {
+                        EmgAuraPulses(ref d, a, t, origin, baseDamage, r, em);
+                        return;
+                    }
+                }
+            }
+            float cosHalf = cone >= 180f ? -2f : math.cos(math.radians(math.max(0f, cone)));
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {
@@ -277,6 +313,10 @@ namespace BinGames.Sim.Combat
                 if (melee && dist > 1e-6 && math.dot(dir, (float2)(to / dist)) < cosHalf)
                 {
                     continue;
+                }
+                if (!melee && EmgPulseBlocked(ref d, origin, d.Pos[k], em))
+                {
+                    continue; // EMG1-GRM-01：阶段 1 掩体规则（emg.stage ≥ 1）：障碍 / 残骸后的单位脉冲打不到，曲射 / 贯穿越过
                 }
                 float dealt = StrikeDamage(ref d, a, k, baseDamage, r, origin, false, 0f);
                 if (DamageUnit(ref d, k, dealt, a))
@@ -385,9 +425,10 @@ namespace BinGames.Sim.Combat
                 int max = math.min(r.ChainHits, CombatConst.MaxReadingTargets);
                 double2 at = hitPos;
                 float dmg = dealt;
+                EmgInstrFlags chainPref = EmgChainPrefOf(ref d, wp); // EMG1-GRM-01：程序里连锁的目标偏好（已标记 > 导电 > 最近）；没有偏好沿用最近
                 for (int q = 0; q < max; q++)
                 {
-                    int k = NearestExcept(ref d, at, r.ChainRange, want, ref hit);
+                    int k = chainPref == EmgInstrFlags.None ? NearestExcept(ref d, at, r.ChainRange, want, ref hit) : EmgChainPick(ref d, at, r.ChainRange, want, ref hit, chainPref);
                     if (k < 0)
                     {
                         break;

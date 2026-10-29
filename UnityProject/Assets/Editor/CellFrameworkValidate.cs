@@ -791,6 +791,9 @@ namespace GameLogic.EditorTools
             // EMG1-TRIG-01：触发器、子载荷与根载荷实体化（FGT-EMG-011 每种可触发事件 + 对照组 / 022 代际 × 链深 / 040 在飞子弹药存读档）——格斗 / 力场只按主目标、顺延不丢、
             // SpawnFlight（已发射 / 命中致死回报击毁 / 重炮瞄准与过载 / 无人机）、障碍与残骸掩体、[分裂, 漏油] 落油、维修与治疗子弹药、热更层置位与预览、耗时、真实家园地点倍速与暂停。
             Seg("FgEmgTriggerSelfCheck", FgEmgTriggerSelfCheck.Run);
+            // EMG1-GRM-01：弹道修饰的内核动词（FGT-EMG-016 9 个修饰 × 5 载体与“去掉修饰”对照 / 003 修饰端口 / 014 [跳弹, 壁撞]、[电弧, 标记跳转]）——寻的 30° 实测与重选、
+            // 穿透 / 反弹次数与面过滤、连锁偏好、折返 / 绕行 / 抛射 / 侧偏、炮塔兼容与单轨、在飞弹体存读档、倍速与暂停、耗时。
+            Seg("FgEmgGrammarSelfCheck", FgEmgGrammarSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

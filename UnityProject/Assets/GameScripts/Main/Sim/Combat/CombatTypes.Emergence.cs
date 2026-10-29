@@ -126,8 +126,10 @@ namespace BinGames.Sim.Combat
         public const ushort HitDirect = 0, HitAfterPierce = 1, HitAfterBounce = 2, HitZoneTick = 3, HitPatch = 4, HitEcho = 5, HitChain = 6, HitHeal = 7;
         // evt.expire：原因（含“命中”，FG19A 申请 A8）
         public const ushort ExpireLife = 1, ExpireGround = 2, ExpireAbsorbed = 3, ExpireHit = 4, ExpireBounds = 5;
-        /// <summary>EMG1-TRIG-01：SpawnFlight 弹体 / 子弹药撞上障碍圆（经 EmgHash 线段检测；撞障碍反弹归 EMG1-GRM-01）。</summary>
+        /// <summary>EMG1-TRIG-01：SpawnFlight 弹体 / 子弹药撞上障碍圆（经 EmgHash 线段检测；还有障碍面反弹次数时改为反弹，EMG1-GRM-01）。</summary>
         public const ushort ExpireObstacle = 6;
+        /// <summary>EMG1-GRM-01：折返的弹体回到发射者身边终结（FG19A 第 1.4 节第 41 行“在发射者身边终结”）。</summary>
+        public const ushort ExpireReturn = 7;
         // evt.bounce：面
         public const ushort FaceUnit = 1, FaceObstacle = 2, FaceWreck = 3, FaceMatter = 4, FaceField = 5;
         // evt.hurt：来源
@@ -344,6 +346,62 @@ namespace BinGames.Sim.Combat
         Overload = 64,
         /// <summary>EMG1-TRIG-01：无人机开火实体化的弹体（命中按无人机读法：伤害基数是无人机伤害、以无人机为锚）。</summary>
         ViaDrone = 128,
+    }
+
+    /// <summary>
+    /// EMG1-GRM-01（FG19A 第 3.1 节；ADR-EMG-001 ②）：内核动词码 = 指令行 <see cref="EmgInstr.Verb"/>（热更层 EmgCatalog.Verbs 下标 + 1，按武器载体解析好）。
+    /// 1～25 是旧读法动词（CarrierReadingVerb 同值，不改）：根节点上的由热更层折进武器读法，内核只认其中的 <see cref="Chain"/>（连锁按目标偏好挑目标）；
+    /// 26 起是新动词，内核按动词执行，不认端口名以外的任何内容 ID（FGR-EMG-013）。
+    /// </summary>
+    public enum EmgVerb : byte
+    {
+        None = 0,
+        /// <summary>旧读法“连锁”（= CarrierReadingVerb.Chain）。</summary>
+        Chain = 5,
+        Steer = 26,
+        PassThrough = 27,
+        Ricochet = 28,
+        Multi = 29,
+        Return = 30,
+        Orbit = 31,
+        Lob = 32,
+        Drift = 33,
+        SubPayload = 34,
+        Mark = 35,
+        Emit = 36,
+        Spread = 37,
+        Inject = 38,
+        Spawn = 39,
+        Fragment = 40,
+        Salvage = 41,
+        Mass = 42,
+        Link = 43,
+        Field = 44,
+        /// <summary>grm.inherit：编译期扩大继承（FGR-EMG-033），内核不执行。</summary>
+        Inherit = 45,
+    }
+
+    /// <summary>EMG1-GRM-01：在飞弹体的弹道修饰状态（进快照：Emg 弹体段尾部追加）。</summary>
+    [Flags]
+    public enum EmgProjMods : byte
+    {
+        None = 0,
+        /// <summary>寻的转向中（剩余修正角 <see cref="CombatProjectile.SteerLeft"/>）。</summary>
+        Steer = 1,
+        /// <summary>命中后会折返。</summary>
+        Return = 2,
+        /// <summary>正在折返（飞回发射者）。</summary>
+        Returning = 4,
+        /// <summary>正在绕发射者转圈（<see cref="CombatProjectile.ModT"/> = 已转弧度）。</summary>
+        Orbit = 8,
+        /// <summary>侧偏过（穿过偏折场时按概率不被反射）。</summary>
+        Drift = 16,
+        /// <summary>穿透过（之后的命中 evt.hit Code = 穿透后）。</summary>
+        Pierced = 32,
+        /// <summary>反弹过（之后的命中 evt.hit Code = 反弹后）。</summary>
+        Bounced = 64,
+        /// <summary>折返途中已命中过 1 次（之后只飞回发射者，不再碰单位）；或已回到发射者身边。</summary>
+        ReturnHit = 128,
     }
 
     /// <summary>程序表一行（ADR ②，16 字节）。<see cref="FirstNode"/> 是节点表里的绝对下标；表只追加、不改写、不压实。</summary>

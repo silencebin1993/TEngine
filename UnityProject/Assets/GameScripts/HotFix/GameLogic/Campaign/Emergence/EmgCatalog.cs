@@ -167,13 +167,14 @@ namespace GameLogic.Campaign.Emergence
         public static readonly string[] Carriers = { "projectile", "melee", "summon", "aura", "field" };
         public const byte AllCarriers = 0x1F;
 
-        /// <summary>动词清单：前 25 个 = CarrierReadingVerb（Dmg=1……Cone=25），其后是 FG19A 第 3.1 节新动词（与 fgdata_reading.ALL_PORT_VERBS 同序）。</summary>
+        /// <summary>动词清单：前 25 个 = CarrierReadingVerb（Dmg=1……Cone=25），其后是 FG19A 第 3.1 节新动词（与 fgdata_reading.ALL_PORT_VERBS 同序）。
+        /// 码 = 下标 + 1，内核枚举 <see cref="BinGames.Sim.Combat.EmgVerb"/> 与之同值（EMG1-GRM-01；FgEmgGrammarSelfCheck A 段逐个比对）。</summary>
         public static readonly string[] Verbs =
         {
             "dmg", "cooldown", "extra", "pierce", "chain", "blast", "sweep", "echo", "pull", "knock", "lunge", "armor", "execute", "leech", "amp",
             "zone", "zonegrow", "zonetick", "weave", "escort", "drones", "heatburst", "jump", "reach", "cone",
             "steer", "passthrough", "ricochet", "multi", "return", "orbit", "lob", "drift", "subpayload", "mark", "emit", "spread",
-            "inject", "spawn", "fragment", "salvage", "mass", "link", "field",
+            "inject", "spawn", "fragment", "salvage", "mass", "link", "field", "inherit",
         };
 
         /// <summary>内容 ID 前缀（与 fgdata_emg.CONTENT_ID_PREFIXES 同）：规则 / 声明的非 owner 列不得出现。</summary>

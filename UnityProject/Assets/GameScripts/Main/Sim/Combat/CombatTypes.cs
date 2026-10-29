@@ -1293,6 +1293,11 @@ namespace BinGames.Sim.Combat
         public int EmgMaxPayloads;
         /// <summary>EMG1-TRIG-01：“排放”动词（fg.TbPortCarrier verb = emit）在指令行里的码（EmgCatalog.Verbs 下标，热更层写；0 = 不执行）。阶段 1 映射到读法驻留区 + 状态位。</summary>
         public int EmgVerbEmit;
+        /// <summary>EMG1-GRM-01：1 = 阶段 1 起的掩体规则开（热更层在 emg.stage ≥ 1 时置位）——力场脉冲打不到障碍后 / 残骸后的单位、布区投放被障碍 / 残骸截停，
+        /// 曲射（lob）越过障碍、贯穿（passthrough）越过残骸（FG19A 第 3.2 节力场 / 布区列的前提）。0 = 旧行为逐字不变（emg.stage = 0 的正式流程）。</summary>
+        public byte EmgCover;
+        /// <summary>EMG1-GRM-01：连锁“导电优先”认哪些沾染位（阶段 1 过渡：浸湿 2、导电粉尘 12；实体导电属性 prop.conductive 随 EMG1-ENT-01）。0 = 用内核默认。</summary>
+        public uint EmgConductiveMask;
 
         public static CombatConfig Default => new CombatConfig
         {

@@ -535,7 +535,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegProjectiles, 16, _d.Projectiles.Length);
+            sw.Begin(EmgConst.SegProjectiles, 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段
             for (int i = 0; i < _d.Projectiles.Length; i++)
             {
                 CombatProjectile p = _d.Projectiles[i];
@@ -555,6 +555,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(p.Depth);
                 if (sw.F()) w.Write((byte)p.Flags);
                 if (sw.F()) w.Write(p.IgnoreUnit); // EMG1-TRIG-01：尾部追加
+                if (sw.F()) w.Write(p.ModQ); // EMG1-GRM-01：尾部追加 4 个（短段读到取缺省 = 没有修饰）
+                if (sw.F()) w.Write((byte)p.Mods);
+                if (sw.F()) w.Write(p.BounceObs);
+                if (sw.F()) w.Write(p.Intercepts);
                 sw.EndRecord();
             }
             sw.End();
@@ -963,7 +967,11 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) p.Depth = r.ReadByte();
                         if (sr.F()) p.Flags = (EmgProjFlags)r.ReadByte();
                         if (sr.F()) p.IgnoreUnit = r.ReadInt32();
-                        if (!sr.RecordOk || p.IgnoreUnit < 0)
+                        if (sr.F()) p.ModQ = r.ReadUInt16();
+                        if (sr.F()) p.Mods = (EmgProjMods)r.ReadByte();
+                        if (sr.F()) p.BounceObs = r.ReadByte();
+                        if (sr.F()) p.Intercepts = r.ReadByte();
+                        if (!sr.RecordOk || p.IgnoreUnit < 0 || ((p.Mods & EmgProjMods.Orbit) == 0 && p.SteerLeft > 360f))
                         {
                             return CombatLoadResult.InvalidValue;
                         }

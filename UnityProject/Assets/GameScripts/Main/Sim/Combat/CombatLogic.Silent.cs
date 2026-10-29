@@ -361,6 +361,15 @@ namespace BinGames.Sim.Combat
             // EMG1-TRIG-01 审查修复：也不再是己方的 SpawnFlight 根弹体 / 治疗或子弹药 / 过载这一发——否则治疗弹会去修敌人、命中致死会给场源补发击毁回报。
             pr.Flags &= ~(EmgProjFlags.Flight | EmgProjFlags.Heal | EmgProjFlags.Sub | EmgProjFlags.Overload | EmgProjFlags.ViaDrone);
             pr.IgnoreUnit = 0;
+            // EMG1-GRM-01 审查修复：己方程序给的弹道修饰（寻的 / 穿透 / 反弹 / 折返 / 绕行 / 抛射）一并清掉，反弹回来的弹体沿反射方向直飞。
+            pr.Mods = EmgProjMods.None;
+            pr.ModQ = 0;
+            pr.HomingTarget = 0;
+            pr.PierceLeft = 0;
+            pr.BounceLeft = 0;
+            pr.BounceObs = 0;
+            pr.Intercepts = 0;
+            pr.Flags &= ~EmgProjFlags.Lob;
             pr.Damage = math.max(0f, pr.Damage) * reflect;
             Cue(ref d, CombatEventKind.Reflected, source, 0, pr.Damage, pr.Pos, 1);
             CombatCounters c = d.Counters[0];

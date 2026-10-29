@@ -308,6 +308,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgMaxChildren = Math.Max(1, (int)Math.Round(Tuning("emg.trig.max_children", EmgConst.DefaultMaxChildren)));
             c.EmgMaxPayloads = Math.Max(1, (int)Math.Round(Tuning("emg.tree.max_payloads", EmgConst.DefaultMaxPayloads)));
             c.EmgVerbEmit = Emergence.EmgCatalog.VerbCode("emit");
+            // EMG1-GRM-01：阶段 1 起的掩体规则（力场脉冲 / 布区投放受障碍、残骸阻挡，曲射 / 贯穿越过）；emg.stage = 0 时关，旧行为逐字不变。
+            c.EmgCover = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
             return c;
         }
 
@@ -738,8 +740,113 @@ namespace GameLogic.Campaign.Combat
             w.Program = index;
             float raw = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, w.HeatPerShot + program.WeaponHeatDelta * raw);
+            if (w.Mode != CombatWeaponMode.Projectile)
+            {
+                // EMG1-GRM-01：机器武器的读法换成“声明轨”——写修饰端口的固件不再按旧修饰字段结算，根节点上的旧动词行按 fg.TbPortCarrier 折进读法。
+                // 炮塔的弹体武器（Mode = 弹体，固定底盘）沿用 FGR-FW-012 兼容表，读法不动。
+                w.Reading = ProgramReading(p, w.Reading, program);
+            }
             noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
+            noteKey ??= program.Notes.Exists(n => n.Key == Emergence.EmgProgramCompiler.NoteLobStraight) ? Emergence.EmgProgramCompiler.NoteLobStraight : null;
             return w;
+        }
+
+        /// <summary>
+        /// EMG1-GRM-01（FGR-EMG-018 / 019；FG19A 第 3.2 节）：程序轨的武器读法——先按旧读法重建、去掉“写修饰端口的固件”的修饰字段（不两轨同时结算），
+        /// 再把根节点上解析成旧动词的修饰行（格斗 / 力场 / 布区的大多数格子，以及连锁、体积、破甲、威力）按 fg.TbPortCarrier 参数 × 声明幅度折进读法。O(程序长度 × 端口行)，只在装配结算时。
+        /// </summary>
+        public static CombatReading ProgramReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program)
+        {
+            if (program == null || program.IsEmpty)
+            {
+                return reading;
+            }
+            bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
+            HashSet<string> modFirmware = Emergence.EmgProgramCompiler.ModifierFirmware(program);
+            CombatReading r = modFirmware.Count == 0
+                ? reading
+                : CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
+                    (fw, field) => modFirmware.Contains(fw) && Emergence.EmgProgramCompiler.ModifierFields.Contains(field));
+            return FoldProgramReadings(r, program, damageFromCompile);
+        }
+
+        /// <summary>EMG1-GRM-01：根节点（0 代）上动词是旧读法动词（1～25）的写端行，逐条按 fg.TbPortCarrier 该端口 × 本载体的全部旧动词行折进读法（幅度 = 声明 amount）。</summary>
+        public static CombatReading FoldProgramReadings(CombatReading r, Emergence.EmgProgramResult program, bool damageFromCompile)
+        {
+            if (program == null || program.IsEmpty || program.KernelNodes.Count == 0)
+            {
+                return r;
+            }
+            Emergence.EmgCompiled c = Emergence.EmgCatalog.Current;
+            var carrier = (FirmwareCarrier)program.Carrier;
+            EmgNode root = program.KernelNodes[0];
+            string[] mags = { "none", "a", "b", "c" };
+            for (int i = root.FirstInstr; i < root.FirstInstr + root.InstrCount && i < program.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = program.KernelInstrs[i];
+                if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0)
+                {
+                    continue;
+                }
+                if (FoldLegacyNumeric(ref r, c, program, x, carrier, damageFromCompile))
+                {
+                    continue;
+                }
+                foreach (Emergence.EmgPortCarrierRow row in c.PortCarriers)
+                {
+                    if (row.Port != x.Port || row.Carrier != program.Carrier || row.Verb < 1 || row.Verb > 25)
+                    {
+                        continue;
+                    }
+                    CarrierReadings.ApplyVerb(ref r, carrier, Emergence.EmgCatalog.Verbs[row.Verb - 1], row.A, row.B, row.C, mags[Math.Min(3, (int)row.Mag)], x.Amount, damageFromCompile);
+                }
+            }
+            r.Cone = Math.Min(180f, r.Cone);
+            return r;
+        }
+
+        /// <summary>numericOnly 端口 → 迁移对照里对应的旧读法字段（FG19A 第 1.5 节：flare scale、wide spread、armorpierce armor）。</summary>
+        private static readonly (string Port, string[] Fields)[] NumericLegacy =
+        {
+            ("grm.mod.size", new[] { "scale", "spread" }), ("grm.mod.armor", new[] { "armor" }),
+        };
+
+        /// <summary>
+        /// EMG1-GRM-01 审查修复（FG19A 第 3.2 节：numericOnly 端口“沿用现动词”）：写 numericOnly 端口的固件自己带对应旧读法字段时，按该字段的旧读法行 × 旧幅度折进读法
+        /// （广角 spread:60 → 格斗扇形 +30°、力场 +2 米、布区 +1.5 米，与 FG19A 第 1.1 节第 94 行逐格一致），不再拿声明幅度（广角写的是 30°）去乘体积行。
+        /// 没有对应旧字段的固件（新固件）走 fg.TbPortCarrier 行 × 声明幅度。返回 true = 已按旧字段折过。
+        /// </summary>
+        private static bool FoldLegacyNumeric(ref CombatReading r, Emergence.EmgCompiled c, Emergence.EmgProgramResult program, EmgInstr x, FirmwareCarrier carrier, bool damageFromCompile)
+        {
+            foreach ((string port, string[] fields) in NumericLegacy)
+            {
+                if (!c.PortIndexById.TryGetValue(port, out int pi) || c.Ports[pi].Code != x.Port)
+                {
+                    continue;
+                }
+                // 同键幂等后根节点只剩一行：按写了修饰端口的各条固件（同一条装两次只算一次）汇总旧字段幅度，再按旧读法行折一次（与 Build 同一累加）。
+                var sum = new Dictionary<string, float>(StringComparer.Ordinal);
+                foreach (string fw in Emergence.EmgProgramCompiler.ModifierFirmware(program))
+                {
+                    foreach ((string field, float mag) in CarrierReadings.FieldsOf(fw))
+                    {
+                        if (Array.IndexOf(fields, field) >= 0)
+                        {
+                            sum[field] = (sum.TryGetValue(field, out float v) ? v : 0f) + mag;
+                        }
+                    }
+                }
+                bool any = false;
+                foreach (string field in fields)
+                {
+                    if (sum.TryGetValue(field, out float mag))
+                    {
+                        any |= CarrierReadings.ApplyField(ref r, carrier, field, mag, damageFromCompile);
+                    }
+                }
+                return any;
+            }
+            return false;
         }
 
         /// <summary>EMG1-TRIG-01 缺值的原因键（预览 / 日志用）：允许实体化的组件在表里缺弹速等参数。正常由表校验 R27 与 FgChannelAdmissionSelfCheck 拦在发布前。</summary>

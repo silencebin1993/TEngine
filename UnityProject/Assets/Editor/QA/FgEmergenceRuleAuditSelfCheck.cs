@@ -158,8 +158,8 @@ namespace GameLogic.EditorTools
                     verbBad.Add(EmgCatalog.Verbs[i]);
                 }
             }
-            Expect(verbBad.Count == 0 && EmgCatalog.Verbs.Length == 44 && EmgCatalog.Verbs.Distinct().Count() == 44,
-                $"动词码：前 25 个与 CarrierReadingVerb 同值（Dmg = 1 … Cone = 25），FG19A 第 3.1 节新动词 19 个接在 26 起{(verbBad.Count > 0 ? "；不符：" + string.Join(",", verbBad) : string.Empty)}");
+            Expect(verbBad.Count == 0 && EmgCatalog.Verbs.Length == 45 && EmgCatalog.Verbs.Distinct().Count() == 45,
+                $"动词码：前 25 个与 CarrierReadingVerb 同值（Dmg = 1 … Cone = 25），FG19A 第 3.1 节新动词 19 个接在 26 起，EMG1-GRM-01 末尾追加 inherit（45）{(verbBad.Count > 0 ? "；不符：" + string.Join(",", verbBad) : string.Empty)}");
             // 端口 × 载体：被声明写到的 carrierImpl 端口 5 载体齐全（FGR-EMG-015 规则一）——编译器已查，这里独立按数组复核
             var written = new HashSet<ushort>(c.Decls.Where(d => d.Dir == EmgDirs.Write).Select(d => d.Port));
             int incomplete = written.Count(code => c.Ports.First(p => p.Code == code).Flags is var f && (f & EmgPortRow.FlagCarrierImpl) != 0

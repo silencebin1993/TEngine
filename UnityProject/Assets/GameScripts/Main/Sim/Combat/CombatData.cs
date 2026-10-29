@@ -39,8 +39,12 @@ namespace BinGames.Sim.Combat
         public float Radius;
         public float Life;
         public CombatFaction Faction;
-        public byte Pad0;
-        public short Pad1;
+        // EMG1-GRM-01：原 Pad0 / Pad1 的 3 个空字节改放弹道修饰的 3 个字节字段（结构仍 112 字节，ADR-EMG-001 ⑬ +48 ≤ +52）。
+        public EmgProjMods Mods;
+        /// <summary>剩余“障碍面”反弹次数（壁撞；单位面用 <see cref="BounceLeft"/>，FGR-EMG-017 面过滤分开计）。</summary>
+        public byte BounceObs;
+        /// <summary>本圈已拦下的敌方弹体数（绕轨每圈 ≤ 2 发）。</summary>
+        public byte Intercepts;
         // ── EMG1-KRN-01（ADR-EMG-001 ③ / ⑩，快照格式 16 的弹体段）：宿主五元组（程序、节点、代、链、链深）与弹道 / 物质字段。
         // 弹体下标每步压实会变，跨步引用一律用 Id（每地点单调，EmgScalars.NextProjId）。Prog = −1 = 没有程序（按旧逻辑飞完）。
         public int Id;
@@ -63,8 +67,27 @@ namespace BinGames.Sim.Combat
         public byte BounceLeft;
         public byte Depth;
         public EmgProjFlags Flags;
+        /// <summary>
+        /// EMG1-GRM-01：弹道修饰的定点状态（占 Flags 后的 2 字节对齐空位）。绕行中（<see cref="EmgProjMods.Orbit"/>）= 已转弧度 × 1024；
+        /// 否则 = 寻的剩余可修正角 × 100（度）。绕行时不转向，绕完圈数后由内核改写为寻的额度，两者不同时使用。用 <see cref="ModT"/> / <see cref="SteerLeft"/> 读写。
+        /// </summary>
+        public ushort ModQ;
         /// <summary>EMG1-TRIG-01：子弹药不打的单位 Id（命中触发放出的子弹药指向“其他”单位，不再打母载荷刚命中的那个；0 = 没有）。Emg 弹体段第 16 个字段。</summary>
         public int IgnoreUnit;
+
+        /// <summary>寻的剩余可修正角（度，精度 0.01°；初值 = 修正上限，FG19A 寻的 30°）。与 <see cref="ModT"/> 共用 <see cref="ModQ"/>。</summary>
+        public float SteerLeft
+        {
+            get => ModQ / 100f;
+            set => ModQ = (ushort)math.clamp((int)math.round(value * 100f), 0, 65535);
+        }
+
+        /// <summary>绕行已转过的弧度（精度 1/1024；绕完 圈数 × 2π 后飞向目标，上限约 10 圈）。与 <see cref="SteerLeft"/> 共用 <see cref="ModQ"/>。</summary>
+        public float ModT
+        {
+            get => ModQ / 1024f;
+            set => ModQ = (ushort)math.clamp((int)math.round(value * 1024f), 0, 65535);
+        }
     }
 
     /// <summary>内核的标量状态（NativeArray 长度 1，作业与托管调用共用）。</summary>

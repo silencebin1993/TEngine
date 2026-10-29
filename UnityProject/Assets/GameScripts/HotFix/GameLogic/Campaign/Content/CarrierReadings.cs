@@ -238,7 +238,12 @@ namespace GameLogic.Campaign.Content
             Build(primaryId, null, chassisId, firmwareIds, damageFromCompile);
 
         /// <summary>FG2-VFX-02：同上，另读功能组件的被动参数（尖刺外装的反伤）。武器载体与投送仍只由主组件决定。</summary>
-        public static CombatReading Build(string primaryId, string utilityId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile)
+        public static CombatReading Build(string primaryId, string utilityId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile) =>
+            Build(primaryId, utilityId, chassisId, firmwareIds, damageFromCompile, null);
+
+        /// <param name="skipField">EMG1-GRM-01：(固件, 字段) → true 时这一字段不按旧读法结算（已切到声明轨、由程序动词承接的修饰字段，FGR-EMG-019 同一 owner 不两轨同时结算）。</param>
+        public static CombatReading Build(string primaryId, string utilityId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile,
+            Func<string, string, bool> skipField)
         {
             var r = new CombatReading();
             FirmwareCarrier carrier = FirmwareCarrier.Projectile;
@@ -286,6 +291,10 @@ namespace GameLogic.Campaign.Content
                 {
                     foreach ((string field, float mag) in FieldsOf(fw))
                     {
+                        if (skipField != null && skipField(fw, field))
+                        {
+                            continue;
+                        }
                         if (!fields.ContainsKey(field))
                         {
                             order.Add(field);
@@ -350,16 +359,38 @@ namespace GameLogic.Campaign.Content
             return r;
         }
 
-        private static void Accumulate(ref CombatReading r, FirmwareCarrier carrier, CarrierReading row, float mag, bool damageFromCompile)
+        private static void Accumulate(ref CombatReading r, FirmwareCarrier carrier, CarrierReading row, float mag, bool damageFromCompile) =>
+            ApplyVerb(ref r, carrier, row.Verb, row.A, row.B, row.C, row.Mag, mag, damageFromCompile, row.Place, row.Id);
+
+        /// <summary>
+        /// 一条“动词 + 参数”按旧读法结算进武器读法（幅度 <paramref name="mag"/> 乘到 <paramref name="magTarget"/> 指的参数上）。旧 readFields 轨（<see cref="Build(string, string, string, IReadOnlyList{string}, bool)"/>）
+        /// 与 EMG1-GRM-01 的程序轨（根节点上 fg.TbPortCarrier 解析出的旧动词行，CombatSite.FoldProgramReadings）共用这一份结算，同一动词两轨结果一致。
+        /// </summary>
+        /// <summary>EMG1-GRM-01：把一个旧读法字段（幅度 <paramref name="mag"/>）按本载体的读法行折进读法（与 <see cref="Build"/> 同一累加）。没有行返回 false。</summary>
+        public static bool ApplyField(ref CombatReading r, FirmwareCarrier carrier, string field, float mag, bool damageFromCompile)
         {
-            float a = row.A, b = row.B, c = row.C;
-            switch (row.Mag)
+            EnsureLoaded();
+            if (!_byFieldCarrier.TryGetValue((field, carrier), out List<CarrierReading> rows))
+            {
+                return false;
+            }
+            foreach (CarrierReading row in rows)
+            {
+                Accumulate(ref r, carrier, row, mag, damageFromCompile);
+            }
+            return true;
+        }
+
+        public static void ApplyVerb(ref CombatReading r, FirmwareCarrier carrier, string verb, float a, float b, float c, string magTarget, float mag, bool damageFromCompile,
+            string place = "none", string rowId = null)
+        {
+            switch (magTarget)
             {
                 case "a": a *= mag; break;
                 case "b": b *= mag; break;
                 case "c": c *= mag; break;
             }
-            switch (VerbOf(row.Verb))
+            switch (VerbOf(verb))
             {
                 case CarrierReadingVerb.Dmg:
                     if (!damageFromCompile && a > 0f)
@@ -431,7 +462,7 @@ namespace GameLogic.Campaign.Content
                     r.ZoneRadius = Math.Max(r.ZoneRadius, a);
                     r.ZoneSeconds = Math.Max(r.ZoneSeconds, b);
                     r.ZoneDps += c;
-                    r.ZonePlacement = row.Place switch
+                    r.ZonePlacement = place switch
                     {
                         "mid" => CombatZonePlacement.Midpoint,
                         "self" => CombatZonePlacement.Attacker,
@@ -483,7 +514,7 @@ namespace GameLogic.Campaign.Content
                     r.Cone += a;
                     break;
                 default:
-                    Log.Error($"[CarrierReadings] fg.TbCarrierReading {row.Id} 的动作 {row.Verb} 不认识（check_luban R26 应已拦下）。");
+                    Log.Error($"[CarrierReadings] 读法行 {rowId ?? "(程序)"} 的动作 {verb} 不认识（check_luban R26 / R39 应已拦下）。");
                     break;
             }
         }

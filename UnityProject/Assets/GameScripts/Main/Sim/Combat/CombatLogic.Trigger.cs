@@ -426,12 +426,14 @@ namespace BinGames.Sim.Combat
                 EmgScalars es = d.EmgS[0];
                 int id = es.NextProjId++;
                 d.EmgS[0] = es;
-                d.Projectiles.Add(new CombatProjectile
+                var sub = new CombatProjectile
                 {
                     Id = id, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Gen = s.Gen, Depth = s.Depth, Flags = EmgProjFlags.Sub | (s.Flags & EmgProjFlags.Heal),
                     Pos = s.Pos, Prev = s.Pos, Vel = dir * form.Speed, Owner = s.Owner, Weapon = s.Weapon, Damage = damage, Radius = form.Radius, Life = form.Life,
                     Faction = faction, IgnoreUnit = s.Other,
-                });
+                };
+                EmgInitFlight(ref d, ref sub, s.Pos + (double2)(dir * form.Speed * form.Life), k >= 0 ? d.Id[k] : 0, false); // EMG1-GRM-01：子弹药按自己节点（含继承）的修饰
+                d.Projectiles.Add(sub);
                 CombatCounters c = d.Counters[0];
                 c.ProjectilesSpawned++;
                 d.Counters[0] = c;
@@ -507,7 +509,11 @@ namespace BinGames.Sim.Combat
             CombatWeapon wp = d.Weapons[s.Weapon];
             int t = d.SlotOf(s.Other);
             double2 to = t >= 0 && d.IsAlive(t) ? d.Pos[t] : s.Pos + (double2)s.Dir;
-            if (!EmgTrySpawnFlight(ref d, s.Pos, 0f, to, s.Owner, s.Weapon, wp, s.Damage, (CombatFaction)s.Faction, s.Flags, s.Chain))
+            if (t >= 0 && d.IsAlive(t) && math.lengthsq(s.Dir) > 1e-12f && EmgPellets(ref d, wp, out _, out _) > 1)
+            {
+                to = s.Pos + (double2)s.Dir * math.distance(d.Pos[t], s.Pos); // EMG1-GRM-01 审查修复：多份载荷排队的弹丸保留各自扇角（Dir = 出手时这一份的方向）
+            }
+            if (!EmgTrySpawnFlight(ref d, s.Pos, 0f, to, s.Owner, s.Weapon, wp, s.Damage, (CombatFaction)s.Faction, s.Flags, s.Chain, t >= 0 && d.IsAlive(t) ? s.Other : 0))
             {
                 return false;
             }
@@ -714,7 +720,25 @@ namespace BinGames.Sim.Combat
             EmgStat(ref d, 7);
             int chain = d.EmgCtx.Prog == wp.Program && d.EmgCtx.Chain > 0 ? d.EmgCtx.Chain : 0;
             EmgProjFlags flags = EmgProjFlags.Flight | extra;
-            if (EmgTrySpawnFlight(ref d, d.Pos[a], d.Radius[a], d.Pos[t], d.Id[a], w, wp, wp.Damage, (CombatFaction)d.Faction[a], flags, chain))
+            // EMG1-GRM-01：多份载荷（霰射：一次出手 N 发真实弹丸，扇面均分、各 a 倍伤害，各自命中、各自触发）。一份时逐字同旧。
+            int pellets = EmgPellets(ref d, wp, out float ratio, out float fan);
+            if (pellets > 1 && chain == 0 && wp.Program >= 0)
+            {
+                EmgScalars es0 = d.EmgS[0];
+                chain = es0.NextChain++;
+                d.EmgS[0] = es0;
+            }
+            double2 aim = d.Pos[t] - d.Pos[a];
+            for (int q = 0; q < pellets; q++)
+            {
+                double2 to = pellets > 1 ? d.Pos[a] + (double2)Rotate((float2)aim, math.radians(fan * ((float)q / (pellets - 1) - 0.5f))) : d.Pos[t];
+                EmgFireOne(ref d, a, t, w, wp, wp.Damage * ratio, to, flags, ref chain);
+            }
+        }
+
+        private static void EmgFireOne(ref CombatData d, int a, int t, int w, in CombatWeapon wp, float damage, double2 to, EmgProjFlags flags, ref int chain)
+        {
+            if (EmgTrySpawnFlight(ref d, d.Pos[a], d.Radius[a], to, d.Id[a], w, wp, damage, (CombatFaction)d.Faction[a], flags, chain, d.Id[t]))
             {
                 return;
             }
@@ -732,8 +756,8 @@ namespace BinGames.Sim.Combat
             EmgStat(ref d, 2);
             d.EmgPending.Add(new EmgSpawn
             {
-                Kind = EmgConst.PendRoot, Armed = 1, Count = 1, Pos = d.Pos[a], Dir = EmgDir(d.Pos[t] - d.Pos[a]), Other = d.Id[t], Owner = d.Id[a], Weapon = w,
-                Damage = wp.Damage, Faction = d.Faction[a], Flags = flags, Prog = wp.Program, Chain = chain,
+                Kind = EmgConst.PendRoot, Armed = 1, Count = 1, Pos = d.Pos[a], Dir = EmgDir(to - d.Pos[a]), Other = d.Id[t], Owner = d.Id[a], Weapon = w,
+                Damage = damage, Faction = d.Faction[a], Flags = flags, Prog = wp.Program, Chain = chain,
             });
         }
 
@@ -744,7 +768,7 @@ namespace BinGames.Sim.Combat
             int chain = d.EmgCtx.Prog == wp.Program && d.EmgCtx.Chain > 0 ? d.EmgCtx.Chain : 0;
             EmgProjFlags flags = EmgProjFlags.Flight | EmgProjFlags.ViaDrone;
             int owner = d.SlotOf(dr.Owner);
-            if (EmgTrySpawnFlight(ref d, dr.Pos, 0f, d.Pos[target], dr.Owner, dr.Weapon, wp, dr.Damage, dr.Faction, flags, chain) || d.EmgPending.Length >= EmgConst.PendingCapacity)
+            if (EmgTrySpawnFlight(ref d, dr.Pos, 0f, d.Pos[target], dr.Owner, dr.Weapon, wp, dr.Damage, dr.Faction, flags, chain, d.Id[target]) || d.EmgPending.Length >= EmgConst.PendingCapacity)
             {
                 return;
             }
@@ -757,7 +781,7 @@ namespace BinGames.Sim.Combat
         }
 
         private static bool EmgTrySpawnFlight(ref CombatData d, double2 from, float fromRadius, double2 to, int ownerId, int weapon, in CombatWeapon wp, float damage,
-            CombatFaction faction, EmgProjFlags flags, int chain)
+            CombatFaction faction, EmgProjFlags flags, int chain, int targetId)
         {
             if (d.Projectiles.Length >= d.Config.ProjectileCapacity)
             {
@@ -778,11 +802,13 @@ namespace BinGames.Sim.Combat
             d.EmgS[0] = es;
             // 寿命显式由热更层写（射程 ÷ 弹速 × 1.2，FG19A 第 2.1.1 节）；不依赖 0 值语义。弹速缺值时弹体不动、寿命到即止——不退回即时命中（缺值由表校验与 FgChannelAdmissionSelfCheck 拦下）。
             float life = wp.ProjectileLife > 0f ? wp.ProjectileLife : wp.Range * 1.2f / math.max(0.01f, wp.ProjectileSpeed);
-            d.Projectiles.Add(new CombatProjectile
+            var pr = new CombatProjectile
             {
                 Id = id, Prog = wp.Program, Chain = chain, Pos = start, Prev = start, Vel = dir * wp.ProjectileSpeed, Owner = ownerId, Weapon = weapon, Damage = damage,
                 Radius = wp.ProjectileRadius, Life = life, Faction = faction, Flags = flags,
-            });
+            };
+            EmgInitFlight(ref d, ref pr, to, targetId, true); // EMG1-GRM-01：根节点的弹道修饰写进弹体（没有修饰时不改任何字段）
+            d.Projectiles.Add(pr);
             CombatCounters c = d.Counters[0];
             c.ProjectilesSpawned++;
             d.Counters[0] = c;
@@ -1025,14 +1051,15 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>SpawnFlight 弹体 / 子弹药这一步的线段先于单位交点撞上障碍圆：在撞点结束（evt.expire Code = 撞障碍；子弹药在撞点执行自己节点的指令）。</summary>
-        private static bool EmgObstacleBefore(ref CombatData d, in CombatProjectile pr, double2 next, double unitT, out double2 at)
+        private static bool EmgObstacleBefore(ref CombatData d, in CombatProjectile pr, double2 next, double unitT, out double2 at, out int o)
         {
             at = next;
+            o = -1;
             if (d.Obstacles.Length == 0 || (pr.Flags & (EmgProjFlags.Sub | EmgProjFlags.Flight)) == 0)
             {
                 return false;
             }
-            int o = EmgHashSegment(ref d, pr.Prev, next, EmgHash.KindObstacle, false, out double t);
+            o = EmgHashSegment(ref d, pr.Prev, next, EmgHash.KindObstacle, false, out double t);
             if (o < 0 || t > unitT)
             {
                 return false;

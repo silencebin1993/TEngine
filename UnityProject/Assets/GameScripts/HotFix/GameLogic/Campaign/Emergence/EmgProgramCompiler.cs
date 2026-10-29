@@ -93,6 +93,8 @@ namespace GameLogic.Campaign.Emergence
         public int RootCapacity;
         public int ContentVersion;
         public byte Carrier;
+        /// <summary>EMG1-GRM-01：主组件可抛射（false = 光束：lob 动词不执行，给原因 emg.compile.lob_straight）。</summary>
+        public bool LobAllowed = true;
         /// <summary>热量分项（FGR-EMG-016）：指令表值、声明 heat、触发节点（trigger_gen × 代号）、子载荷份数 × per_child。</summary>
         public float HeatInstr, HeatDecl, HeatTrigger, HeatChildren;
         /// <summary>溢出指令的表值热量：旧积热（BlueprintCircuitBoard.ComputeFirmwareHeat）按装着的固件算过，溢出“不计热量”所以要扣回。</summary>
@@ -136,8 +138,16 @@ namespace GameLogic.Campaign.Emergence
         private static bool NeedsFlightEvent(EmgEventKind e) => e == EmgEventKind.Timer || e == EmgEventKind.Prox || e == EmgEventKind.Expire
                                                               || e == EmgEventKind.Bounce || e == EmgEventKind.Pierce;
 
+        /// <summary>根节点写这些端口 = 程序需要飞行（ADR ③）。EMG1-GRM-01：加上 grm.mod.multi——霰射“一次打出 3 份真实弹丸，每份各自命中、各自触发”只有飞行弹体做得到（待用户复核）。</summary>
         private static readonly string[] FlightMods =
-            { "grm.mod.homing", "grm.mod.pierce", "grm.mod.bounce", "grm.mod.return", "grm.mod.orbit", "grm.mod.lob", "grm.mod.drift" };
+            { "grm.mod.homing", "grm.mod.pierce", "grm.mod.bounce", "grm.mod.return", "grm.mod.orbit", "grm.mod.lob", "grm.mod.drift", "grm.mod.multi" };
+
+        /// <summary>EMG1-GRM-01：光束类主组件（作战组件表 flightLob = 0）上的曲射不越障，预览写原因（FG19A 第 2.1.1 节）。</summary>
+        public const string NoteLobStraight = "emg.compile.lob_straight";
+
+        /// <summary>EMG1-GRM-01：旧读法里与修饰端口对应的字段（FG19A 第 1.5 节迁移对照）。写修饰端口、已切到声明轨的固件不再按这些字段结算旧读法（同一 owner 不两轨同时结算，FGR-EMG-019）。</summary>
+        public static readonly HashSet<string> ModifierFields = new HashSet<string>(StringComparer.Ordinal)
+            { "homing", "count", "spread", "pierce", "bounce", "return", "scale", "orbit", "chain", "lob", "armor", "tick", "markjump" };
 
         // ── 目录派生的查找表（目录换了才重建；只在编译时用，不按帧）──
         private static EmgCompiled _for;
@@ -154,11 +164,66 @@ namespace GameLogic.Campaign.Emergence
                 return new EmgProgramResult();
             }
             CarrierReadings.TryGetCarrier(p.PrimaryId, out FirmwareCarrier carrier); // 查不到时是射弹（与读法同一默认）
-            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier);
+            bool lob = !CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) || comp.Flight != "yes" || comp.FlightLob != 0;
+            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob);
+        }
+
+        /// <summary>EMG1-GRM-01：程序里写了修饰端口（grm.mod.*）的固件（切到声明轨后，这些固件的旧读法修饰字段不再结算）。</summary>
+        public static HashSet<string> ModifierFirmware(EmgProgramResult r)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            if (r == null || r.IsEmpty)
+            {
+                return set;
+            }
+            EmgCompiled c = EmgCatalog.Current;
+            EnsureIndex(c);
+            foreach (EmgProgramStep s in r.Steps)
+            {
+                foreach (int di in s.Decls)
+                {
+                    if (c.Decls[di].Dir == EmgDirs.Write && PortIds.TryGetValue(c.Decls[di].Port, out string pid) && IsMod(pid))
+                    {
+                        set.Add(s.FirmwareId);
+                        break;
+                    }
+                }
+            }
+            // 审查修复（零死对）：修饰行只落在子区 / 脉冲子节点（力场 / 布区的触发子节点，内核不执行弹道修饰）的固件不切轨，保留旧读法修饰字段；
+            // shortcut: 子区 / 脉冲上的修饰暂按旧读法折在根读法上（与阶段 1 前一致），真正的子区修饰随 EMG1-FW-01（DEBT-EMG1GRM01-05）。
+            // 第 2 轮审查修复：只改数字的端口（numericOnly：体积 / 破甲 / 威力）只在根节点由 CombatSite.FoldProgramReadings 折进读法，子弹药不结算；
+            // 落在任何子节点（含飞行子弹药）上同样不切轨、保留旧读法字段（shortcut: 同上，子节点数值修饰随 EMG1-FW-01，DEBT-EMG1GRM01-05）。
+            var executed = new HashSet<string>(StringComparer.Ordinal);
+            var zoneOnly = new HashSet<string>(StringComparer.Ordinal);
+            foreach (EmgNode n in r.KernelNodes)
+            {
+                bool child = n.Parent >= 0;
+                bool zoneChild = child && !IsFlyingSubForm(n.SubForm);
+                for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+                {
+                    EmgInstr x = r.KernelInstrs[i];
+                    if (x.Role <= EmgConst.RoleLastRead || x.Ordinal >= r.Steps.Count || !PortIds.TryGetValue(x.Port, out string pid) || !IsMod(pid))
+                    {
+                        continue;
+                    }
+                    bool numeric = c.PortIndexById.TryGetValue(pid, out int pi) && (c.Ports[pi].Flags & EmgPortRow.FlagNumericOnly) != 0;
+                    (zoneChild || (child && numeric) ? zoneOnly : executed).Add(r.Steps[x.Ordinal].FirmwareId);
+                }
+            }
+            foreach (string fw in zoneOnly)
+            {
+                if (!executed.Contains(fw))
+                {
+                    set.Remove(fw);
+                }
+            }
+            return set;
         }
 
         /// <param name="rootCapacity">≤ 0 = 按公式 C0 = 机器固件槽数 + 接入口配额；自检可给别的值验证“配额变了公式不变”（FGR-EMG-039）。</param>
-        public static EmgProgramResult Compile(IReadOnlyList<string> uplinkFirmwareIds, IReadOnlyList<string> localFirmwareIds, FirmwareCarrier carrier, int rootCapacity = 0)
+        /// <param name="lobAllowed">主组件可抛射（作战组件表 flightLob）；false 时 lob 动词不执行并给原因 <see cref="NoteLobStraight"/>（光束：曲射只留落点扬尘）。</param>
+        public static EmgProgramResult Compile(IReadOnlyList<string> uplinkFirmwareIds, IReadOnlyList<string> localFirmwareIds, FirmwareCarrier carrier, int rootCapacity = 0,
+            bool lobAllowed = true)
         {
             EmgCompiled c = EmgCatalog.Current;
             EnsureIndex(c);
@@ -167,6 +232,7 @@ namespace GameLogic.Campaign.Emergence
                 RootCapacity = rootCapacity > 0 ? rootCapacity : BlueprintCircuitBoard.FirmwareSlotCount + UplinkCompiler.Quota,
                 ContentVersion = CampaignSaveService.CurrentContentVersion,
                 Carrier = (byte)carrier,
+                LobAllowed = lobAllowed,
             };
             AddSlots(r, c, uplinkFirmwareIds, true);
             AddSlots(r, c, localFirmwareIds, false);
@@ -506,13 +572,18 @@ namespace GameLogic.Campaign.Emergence
                             Flags = (e.Inherited ? EmgInstrFlags.Inherited : EmgInstrFlags.None) | (s.Core ? EmgInstrFlags.Core : EmgInstrFlags.None)
                                     | (write ? PreferenceOf(c, s, port) : EmgInstrFlags.None),
                         };
-                        if (write && PortCarrierAt.TryGetValue(d.Port << 3 | r.Carrier, out int pci))
+                        if (write && PortCarrierAt.TryGetValue(d.Port << 3 | ResolveCarrier(c, r.Carrier, n.Parent), out int pci))
                         {
                             EmgPortCarrierRow pc = c.PortCarriers[pci];
                             x.Verb = pc.Verb;
                             x.A = pc.A;
                             x.B = pc.B;
                             x.C = pc.C;
+                            if (!r.LobAllowed && pc.Verb == EmgCatalog.VerbCode("lob"))
+                            {
+                                x.Verb = 0; // EMG1-GRM-01：光束直线，曲射不越障（同条固件的落点扬尘照常）
+                                r.Notes.Add(new EmgCompileNote { Key = NoteLobStraight, Ordinal = s.Ordinal, Node = n.Index, Port = d.Port });
+                            }
                         }
                         if (!write && IsEventPort(d.Port))
                         {
@@ -549,6 +620,15 @@ namespace GameLogic.Campaign.Emergence
             };
             r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");
         }
+
+        /// <summary>
+        /// EMG1-GRM-01 审查修复：写端行按哪个载体查 fg.TbPortCarrier。根节点按主组件载体；子节点的子形态是飞行弹体（子弹 / 余波 / 无人机子弹）时按射弹列解析
+        /// （否则格斗 / 无人机子节点上的修饰解析成旧读法动词，而旧动词只在根节点折进读法，子弹药上装了等于没装）。子区 / 脉冲子节点仍按主载体（见 <see cref="ModifierFirmware"/>）。
+        /// </summary>
+        private static byte ResolveCarrier(EmgCompiled c, byte carrier, int parent) =>
+            parent >= 0 && IsFlyingSubForm(SubFormOf(c, carrier)) ? (byte)FirmwareCarrier.Projectile : carrier;
+
+        private static bool IsFlyingSubForm(byte code) => code == EmgConst.SubBullet || code == EmgConst.SubWave || code == EmgConst.SubDroneBullet;
 
         private static byte SubFormOf(EmgCompiled c, byte carrier)
         {

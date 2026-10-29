@@ -1773,13 +1773,20 @@ namespace BinGames.Sim.Combat
             int m = d.Projectiles.Length;
             int write = 0;
             float maxR = grid.MaxRadius;
+            bool orbiting = false;
             for (int p = 0; p < m; p++)
             {
                 CombatProjectile pr = d.Projectiles[p];
+                // EMG1-GRM-01：弹道修饰（寻的转向 / 折返 / 绕行）在移动前改速度或给出本步终点；没有修饰的弹体（Mods = 0）逐字走旧逻辑。
+                double2 orbitNext = default;
+                bool moved = pr.Mods != EmgProjMods.None && EmgMoveStep(ref d, ref pr, dt, out orbitNext);
                 pr.Prev = pr.Pos;
-                double2 next = pr.Pos + (double2)(pr.Vel * dt);
+                double2 next = moved ? orbitNext : pr.Pos + (double2)(pr.Vel * dt);
                 pr.Life -= dt;
-                if (pr.Faction == CombatFaction.Player && d.DeflectActive.Length > 0 && TryReflectProjectile(ref d, ref pr, next))
+                orbiting |= (pr.Mods & EmgProjMods.Orbit) != 0;
+                // EMG1-GRM-01：抛射弹体在空中不碰单位 / 障碍 / 护盾 / 偏折场，落地那一步才结算（落到目标脚下，FG19A 第 1.1 节第 11 行）。
+                bool airborne = (pr.Flags & EmgProjFlags.Lob) != 0 && pr.Life > 0f;
+                if (pr.Faction == CombatFaction.Player && d.DeflectActive.Length > 0 && !airborne && !EmgEvadesDeflect(ref d, pr) && TryReflectProjectile(ref d, ref pr, next))
                 {
                     d.Projectiles[write++] = pr; // FG9-FAC-01：被偏折场反弹，下一步起按敌方弹体飞回去
                     continue;
@@ -1795,6 +1802,10 @@ namespace BinGames.Sim.Combat
                 int cy1 = grid.CellOf(math.max(pr.Prev.y, next.y) + reach);
                 int hit = -1;
                 double hitT = 2.0;
+                if (airborne || EmgSkipUnits(pr))
+                {
+                    cy1 = cy0 - 1; // EMG1-GRM-01：空中的抛射弹 / 回程已命中过的折返弹不碰单位
+                }
                 for (int cy = cy0; cy <= cy1; cy++)
                 {
                     for (int cx = cx0; cx <= cx1; cx++)
@@ -1825,13 +1836,20 @@ namespace BinGames.Sim.Combat
                 }
                 // FG6-DEF-02（FGR-DEF-012）：从圈外飞进展开的护盾（不同阵营）就被吸收——比任何单位的交点更早时，弹体在入圈点作废、扣护盾值。
                 // 起点已在圈内的（圈内开火）不挡。O(护盾数)，护盾数有上限 CombatConst.MaxShields。
-                if (d.Shields.Length > 0 && TryAbsorbByShield(ref d, ref pr, next, hitT))
+                if (d.Shields.Length > 0 && !airborne && TryAbsorbByShield(ref d, ref pr, next, hitT))
                 {
                     continue;
                 }
-                // EMG1-TRIG-01（ADR ③）：SpawnFlight 弹体与子弹药按本步线段查 EmgHash 里的障碍圆，先于单位交点撞上就在撞点结束（反弹归 EMG1-GRM-01）；炮塔 / 突袭者弹体不查。
-                if (EmgObstacleBefore(ref d, pr, next, hit >= 0 ? hitT : 1.0, out double2 obstacleAt))
+                // EMG1-TRIG-01（ADR ③）：SpawnFlight 弹体与子弹药按本步线段查 EmgHash 里的障碍圆，先于单位交点撞上就在撞点结束；炮塔 / 突袭者弹体不查。
+                // EMG1-GRM-01：还有障碍面反弹次数（壁撞）时按撞点法线反弹继续飞；抛射弹（越障）与绕发射者转圈的弹体不查障碍（子弹药自绕照常查）。
+                if ((pr.Flags & EmgProjFlags.Lob) == 0 && ((pr.Mods & EmgProjMods.Orbit) == 0 || (pr.Flags & EmgProjFlags.Sub) != 0)
+                    && EmgObstacleBefore(ref d, pr, next, hit >= 0 ? hitT : 1.0, out double2 obstacleAt, out int obstacleIdx))
                 {
+                    if (obstacleIdx >= 0 && EmgBounceFace(ref d, ref pr, obstacleAt, new double2(d.Obstacles[obstacleIdx].x, d.Obstacles[obstacleIdx].y), EmgCode.FaceObstacle))
+                    {
+                        d.Projectiles[write++] = pr;
+                        continue;
+                    }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
                         EmgNodeEffects(ref d, pr.Prog, pr.Node, obstacleAt, d.SlotOf(pr.Owner), pr.Faction);
@@ -1850,6 +1868,10 @@ namespace BinGames.Sim.Combat
                     double2 fromSide = d.Pos[hit] - (double2)(math.normalizesafe(pr.Vel) * 10f);
                     // EMG1-BUS-01：这一发命中结算期间以它为宿主——evt.hit（含读法的次级命中，与即时出手同一口径）、evt.hurt 的来源与链、evt.kill 的宿主都在 DamageUnit / Kill 里发。
                     EmgProjCtxBegin(ref d, pr);
+                    if ((pr.Mods & (EmgProjMods.Pierced | EmgProjMods.Bounced)) != 0)
+                    {
+                        d.EmgCtx.HitCode = (pr.Mods & EmgProjMods.Pierced) != 0 ? EmgCode.HitAfterPierce : EmgCode.HitAfterBounce; // EMG1-GRM-01
+                    }
                     int hitId = d.Id[hit];
                     if (heal)
                     {
@@ -1881,8 +1903,18 @@ namespace BinGames.Sim.Combat
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
                         EmgNodeEffects(ref d, pr.Prog, pr.Node, hitPos, owner, pr.Faction);
+                        if (!heal)
+                        {
+                            EmgSubChain(ref d, pr, owner, hit, hitPos); // EMG1-GRM-01：子弹药节点上的连锁
+                        }
                     }
                     EmgProjCtxEnd(ref d, ref pr);
+                    // EMG1-GRM-01：绕行 / 折返 / 穿透 / 反弹的弹体命中后继续飞（不终结、不发终结事件）。
+                    if (!heal && pr.Prog >= 0 && EmgAfterUnitHit(ref d, ref pr, hit, hitId, hitPos))
+                    {
+                        d.Projectiles[write++] = pr;
+                        continue;
+                    }
                     // FG19A 申请 A8：命中即结束的载荷在命中同一步也发终结（Code = 命中）。
                     EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, hitId, EmgEntKind.Unit, 0f, 0f, EmgCode.ExpireHit, hitPos);
                     CombatCounters c = d.Counters[0];
@@ -1896,7 +1928,10 @@ namespace BinGames.Sim.Combat
                     {
                         EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次
                     }
-                    EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireLife, next); // EMG1-BUS-01：寿命到
+                    // EMG1-BUS-01：寿命到；EMG1-GRM-01：抛射弹落地（Code = 落地）、折返弹回到发射者身边（Code = 折返）。
+                    ushort why = (pr.Flags & EmgProjFlags.Lob) != 0 ? EmgCode.ExpireGround
+                        : EmgReturnedHome(ref d, pr) ? EmgCode.ExpireReturn : EmgCode.ExpireLife;
+                    EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, why, next);
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesExpired++;
                     d.Counters[0] = c;
@@ -1910,6 +1945,10 @@ namespace BinGames.Sim.Combat
                 d.Projectiles[write++] = pr;
             }
             d.Projectiles.ResizeUninitialized(write);
+            if (orbiting)
+            {
+                EmgOrbitIntercept(ref d); // EMG1-GRM-01：绕行中的弹体拦下撞上的敌方弹体
+            }
         }
 
         /// <summary>FG6-DEF-02：这一步弹体的线段 prev→next 先于单位交点（参数 <paramref name="unitT"/>）进入哪座展开的、不同阵营的护盾；进入了就吸收（返回 true，弹体作废）。</summary>

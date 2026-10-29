@@ -198,6 +198,7 @@
 - 规则二（行为可见）：固件（`ownerKind = firmware`，含混合固件展开后的两条）的每条声明在 5 种载体上都要产生可观察的行为差异；部件、结构模块、底盘特性、敌方单位行的声明只在其自身载体或宿主上验证开 / 关差异（FG19A §2“部件写端只在自身载体上有实现”）。判定沿用并扩展 `Assets/Editor/QA/FgReadingMatrixSelfCheck.cs` C 段（`:318-354`）的“读法开 / 关行为指纹必须不同”断言，扩到“声明开 / 关”与“在程序首位 / 末位”两种位置。
 - 规则三（有源）：每个读端口至少有一个正常游戏可获得的写者（固件、部件、敌人、世界常驻源）。“动能无人挂所以脆裂打不出来”（FG-GAP-052）这类无源端口不得存在。已在 `fg.TbChannelPort` 注册、但没有任何声明或规则引用的端口（例：相关新固件落表前的 `meta.*`、`hij.hack` 这类只写端口，以及 `evt.ping`——既没人写也没人读，规则三的“读端有写者”判不到它们），同样算无源缺口：列入模糊测试器与表校验的“已登记缺口”清单，不得静默通过；端口 `stage` 不高于当前阶段、到该阶段出口仍无人引用即失败（FGR-EMG-221，第 12 节新固件落表）。
 - 规则四（可达）：`fg.TbChannelRule` 每一行的两侧端口都有源，且模糊测试器在固定用例集里至少触发过一次（FGR-EMG-221）。
+- **EMG1-GRM-01 已落地（2026-10-29）**：`carrierImpl` 的语法 / 修饰端口（`grm.mod.*`、`grm.inherit`、`grm.trig`）在 `fg.TbPortCarrier` 里 5 载体齐全（补了连锁、折返、绕行、威力、继承的行）；9 个非纯数值修饰 × 5 载体的“有修饰 / 去掉修饰”行为指纹对照见 `Assets/Editor/QA/FgEmgGrammarSelfCheck.cs` B 段（FGT-EMG-016）。
 
 **FGR-EMG-016 代价规则**
 - 三种代价，全部在编译时确定、在预览里分项显示（FGR-EMG-038），超出时降级而不是拒绝编译：
@@ -216,6 +217,7 @@
     - `grm.mod.bounce`：面过滤（单位 / 非单位面）是键的一部分，各面分别取剩余反弹次数的大者。例：[跳弹, 壁撞] 两种反弹都生效——撞单位按跳弹改向下一目标，撞障碍 / 残骸 / 固态斑块按壁撞反弹（兑现 FG19A D-09“三者不再共用一个字段”）。
     - `grm.mod.homing`、`grm.mod.chain`：过滤是目标偏好，不进键；幅度（转向量 / 跳数）取大，偏好按固定顺序合并。homing 沿用 FG19A 0.3 #8：已标记 > 热信号 > 最近；chain：只跳已标记 > 导电优先 > 最近。例：[电弧, 标记跳转] 跳 2 次，先找已标记目标、再找导电目标，同时每跳仍注入电荷（`en.elec` 键与 chain 无关）。
       - 编译产物（EMG1-PRG-01）：合并后只留 1 行，偏好写在该行 `EmgInstr.Flags` 的 `PreferMarked` / `PreferHeat` / `PreferConductive` 位（由写同键各条指令的读端推出、按位并），内核按上述固定顺序挑目标；chain 只有“已标记”一种偏好时只跳已标记目标（FG19A 第 1 节第 20 行）。内核执行归 EMG1-GRM-01。
+      - **EMG1-GRM-01 已落地（2026-10-29）**：连锁挑目标 `CombatLogic.EmgChainPick`（`Main/Sim/Combat/CombatLogic.Grammar.cs`），格斗 / 力场 / 布区的锚定连锁与子弹药连锁都走它；寻的挑目标 `EmgPickHoming`（已标记 > 热信号 > 最近）；反弹单位面 / 障碍面分开计（弹体 `BounceLeft` / `BounceObs`），残骸面接口 `EmgBounceFace(…, EmgCode.FaceWreck)` 由 EMG1-ENT-01 接上。
   - 不同端口从不互相作废：[回波, 装甲击穿] 各自的 `en.kinetic` 若生效事件不同即各自结算；[电容蓄力, 电弧] 的 `en.elec` 同理。
 - 唯一能让同一键多次结算的结构是元程序“复制 / 循环”，它们付热量（FGR-EMG-042）。
 - 取代 `FG02:206` 的“同参数加法叠加受上限”。
@@ -224,6 +226,8 @@
 - 由现有 `fg.TbCarrierReading`（字段 × 载体 → 内核动词，140 行，`tools/fgdata_reading.py`）扩展：加 `port` 列，把“字段”换成“端口”。旧字段行保留到双轨期结束（FGR-EMG-019）。
 - 每行：`port`、`carrier`、`verb`（内核动词，现有 25 个 `CarrierReadingVerb` 加本文新增动词，见 ADR-EMG-001）、`a/b/c`、`mag`（幅度乘到哪个参数）、`textKey`。
 - 内核只认动词与参数，不认端口名以外的任何内容 ID。
+- **EMG1-GRM-01 已落地（2026-10-29）**：新动词登记为内核枚举 `EmgVerb`（`CombatTypes.Emergence.cs`，码 = `EmgCatalog.Verbs` 下标 + 1：Steer 26 … Field 44、Inherit 45；旧 25 个 `CarrierReadingVerb` 不变）。飞行载荷（SpawnFlight 根弹体、无人机实体化子弹、子弹药）由内核按新动词执行；格斗 / 力场 / 布区上解析成旧动词（1～25）的根节点行由热更层 `CombatSite.FoldProgramReadings` 折进读法，新动词在出手时由内核读根节点执行。写 `grm.mod.*` 的固件已切声明轨，不再按旧修饰字段结算（FGR-EMG-019 不两轨同时结算；其余字段切轨归 EMG1-FW-01，炮塔读法不动）。
+- 阶段 1 掩体规则（EMG1-GRM-01，按推荐默认执行（2026-10-29），待用户确认）：`emg.stage ≥ 1` 时力场脉冲打不到障碍 / 残骸背后的单位（主目标除外）、布区投放被截停在撞点前；`grm.mod.lob` 越障、`grm.mod.pierce` 越过残骸。`emg.stage = 0` 时逐字旧行为。
 
 **FGR-EMG-019 双轨迁移**
 - `stageGate` 未到（高于运行时总开关 `emg.stage`，ADR-EMG-001 ⑮）的声明不生效，该 owner 继续走旧 `readFields` → `CarrierReadings` 路径（`CarrierReadings.cs:231-346`）。同一 owner 同一阶段只能走一条轨，不得两轨同时结算（自检比对）。

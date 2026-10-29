@@ -368,6 +368,7 @@ FGR-EMG-015 规则二要求每条声明在 5 载体上开 / 关都有行为差�
 | `comp_corona`（力场）、`comp_sprayer`、`comp_pulser`（布区） | 不实体化 | — | — | — | 按各自读法 | 力场 0.2；布区 0.3 |
 
 - 寿命：基础 = 射程 ÷ 弹速 × 1.2；绕轨、回旋、曲射按额外路径长度 ÷ 弹速延长（绕轨一圈约 15.7 米）。炮塔现行 `ProjectileLife = 0`（`GL/Campaign/Defense/TurretService.Sim.cs:399`）在内核里的语义待核实，实体化时显式写寿命，不依赖 0 值。
+- EMG1-GRM-01（2026-10-29）：切割束 / 维修束（作战组件表 `flightLob = 0`）上的 `grm.mod.lob` 编译成不执行，落点扬尘保留，预览给原因键 `emg.compile.lob_straight`（修复建议 `emg.compile.lob_straight.fix`）。`grm.mod.multi` 也算“需要飞行”（3 份弹丸各自是真实飞行弹体、各自命中各自触发；按推荐默认执行，待用户确认）。
 - 需要飞行的 ADR ③ 条件不变；本表只给参数。根载荷不实体化的载体（格斗、力场、布区）上，弹道修饰按第 3.2 节对应载体列的读法生效。
 
 **`fg.TbSubPayload` 5 行参数**（FGR-EMG-035 的子形态；初值，FG15-BAL-01 调）：
@@ -443,9 +444,11 @@ FGR-EMG-014 末条要求敌方单位行同样过准入，FG19B §7 写明云端�
 | `Mass` / `Link` | 改本载荷质量 / 传导图加边 | `prop.mass`、`prop.conductive` |
 | `Field` | 生成场（类型由端口给） | `fld.*` |
 
+**EMG1-GRM-01 已落地（2026-10-29）**：上表新动词登记为内核枚举 `EmgVerb`（`Main/Sim/Combat/CombatTypes.Emergence.cs`），码 = `EmgCatalog.Verbs` 下标 + 1，与 `fg.TbPortCarrier.verb` 同值：Steer 26、PassThrough 27、Ricochet 28、Multi 29、Return 30、Orbit 31、Lob 32、Drift 33 …… Field 44；末尾新增 `Inherit` 45（`grm.inherit` 的 5 载体行用，编译期扩大继承，内核不执行）。旧 25 个 `CarrierReadingVerb` 值不变。`PassThrough` 的“按目标质量消耗”在阶段 1 单位没有质量属性，暂按每穿 1 个消耗 1 次（FG-GAP 登记，承接 EMG1-ENT-01）。新动词参数（a / b / c 含义）见 `tools/cell_tables/fgdata_reading.py` `_PC_PARAMS` 注释，初值按第 1.1 节，FG15-BAL-01 再调。回旋（`Return`）的终结点在发射者身边（`evt.expire` Code = 折返）、霰射在无人机上 = 多放 1 架（`Drones`）：按推荐默认执行（2026-10-28），待用户确认（LANDING-PLAN 第 12 节 #7）。
+
 ### 3.2 端口 × 5 载体（固件与部件用到的全部写端）
 
-每格写“动词：一句”；“阶段 1 过渡”列是第 0.3 节口径 3 的映射。`grm.mod.size` / `armor` / `power` 为 `numericOnly`，沿用现动词。
+每格写“动词：一句”；“阶段 1 过渡”列是第 0.3 节口径 3 的映射。`grm.mod.size` / `armor` / `power` 为 `numericOnly`，沿用现动词。（EMG1-GRM-01 审查修复 2026-10-29：写 numericOnly 端口的固件自带对应旧读法字段时，按该旧字段的读法行 × 旧幅度折进读法——广角 `spread:60` 即格斗扇形 +30°、力场 +2 米、布区 +1.5 米，与第 1.1 节第 94 行一致；声明幅度只在固件没有旧字段时乘端口 × 载体行。修饰放在触发固件之后编进子节点时，子形态是飞行弹体（子弹 / 余波 / 无人机子弹）的按射弹列解析成内核动词、由子弹药执行；子区 / 脉冲子节点暂不执行弹道修饰，该固件保留旧读法，见 DEBT-EMG1GRM01-05。子弹药继承的绕行绕自己的出生点，不绕开火的机器。）（第 2 轮审查补：数值端口只在根节点折进读法；写在触发固件之后、落在任何子节点上的，该固件保留旧读法字段、加在本机出手上，子弹药 / 子区自身的数值修饰随 EMG1-FW-01，DEBT-EMG1GRM01-05。）
 
 | 写端口 | 射弹 | 格斗 | 无人机 | 力场 | 布区 | 阶段 1 过渡 |
 |---|---|---|---|---|---|---|
