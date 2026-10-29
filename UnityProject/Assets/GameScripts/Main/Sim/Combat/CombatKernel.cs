@@ -288,6 +288,7 @@ namespace BinGames.Sim.Combat
 
         public int AddWeapon(in CombatWeapon w)
         {
+            RequireProgram(w);
             _d.Weapons.Add(w);
             return _d.Weapons.Length - 1;
         }
@@ -296,6 +297,7 @@ namespace BinGames.Sim.Combat
         {
             if (index >= 0 && index < _d.Weapons.Length)
             {
+                RequireProgram(w);
                 _d.Weapons[index] = w;
             }
         }
@@ -2227,6 +2229,7 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, nr.Goal.x);
                 Mix(ref h, nr.Goal.y);
             }
+            MixEmergence(ref h); // EMG1-KRN-01：只在有涌现状态时混入（程序表 / 总线 / 残骸 / 单位涌现段全空时与格式 15 的哈希逐字相同）
             return h;
         }
 
@@ -2253,7 +2256,7 @@ namespace BinGames.Sim.Combat
         /// <summary>测试用：按较老的格式写快照（2 = FG2-FW-02 之前：没有读法、状态、区域 / 回波 / 无人机），用来验证旧档能读。</summary>
         public byte[] SerializeFormatForTests(int format) => SerializeFormat(Math.Max(2, Math.Min(format, CombatConst.FormatVersion)));
 
-        private byte[] SerializeFormat(int format)
+        private byte[] SerializeFormat(int format, int emgShortTag = 0, int emgFieldCap = int.MaxValue, int emgExtraBytes = 0)
         {
             using var ms = new MemoryStream(256 + _d.Count * 220 + _d.Projectiles.Length * 64);
             using var w = new BinaryWriter(ms);
@@ -2527,6 +2530,11 @@ namespace BinGames.Sim.Combat
                     w.Write(cp.Pos.y);
                 }
             }
+            // EMG1-KRN-01（格式 16）：自描述的 Emg 段（同样放在读法表之前；CombatKernel.Emergence.cs）。
+            if (format >= 16)
+            {
+                WriteEmg(w, emgShortTag, emgFieldCap, emgExtraBytes);
+            }
             // FG2-FW-02（格式 3）：区域、回波、无人机。
             if (format >= 3)
             {
@@ -2746,6 +2754,7 @@ namespace BinGames.Sim.Combat
             }
             _d.Dispose();
             _d = staging;
+            _programIndex = null; // EMG1-KRN-01：程序去重索引是派生量，按读进来的程序表重建
             CombatLogic.RebuildDeflectActive(ref _d); // FG9-FAC-01：展开中的偏折场由每单位状态派生，读档后重算。
             FeedEpoch++;
             return CombatLoadResult.Ok;
@@ -3062,6 +3071,7 @@ namespace BinGames.Sim.Combat
                     Radius = r.ReadSingle(),
                     Life = r.ReadSingle(),
                     Faction = (CombatFaction)r.ReadByte(),
+                    Prog = -1, // EMG1-KRN-01：格式 16 的 Emg 段再覆盖；更老的快照 = 没有程序
                 };
                 pr.Prev = pr.Pos;
                 if (!IsFinite(pr.Pos))
@@ -3196,6 +3206,16 @@ namespace BinGames.Sim.Combat
                     staging.ClarityPending.Add(cp);
                 }
             }
+            // EMG1-KRN-01（格式 16）：Emg 段；无人机 Id 等读法表读完再落（FinishEmgLoad）。更老的快照全部取缺省。
+            EmgLoadBuffer emg = null;
+            if (format >= 16)
+            {
+                CombatLoadResult er = ParseEmg(r, ref staging, bodyLen, out emg);
+                if (er != CombatLoadResult.Ok)
+                {
+                    return er;
+                }
+            }
             if (format >= 3)
             {
                 CombatLoadResult rr = ParseReadings(r, ref staging, wn, format);
@@ -3203,6 +3223,11 @@ namespace BinGames.Sim.Combat
                 {
                     return rr;
                 }
+            }
+            CombatLoadResult fr = FinishEmgLoad(ref staging, emg);
+            if (fr != CombatLoadResult.Ok)
+            {
+                return fr;
             }
             if (format >= 4)
             {
@@ -3721,6 +3746,11 @@ namespace BinGames.Sim.Combat
             using var ms = new MemoryStream(256);
             using var bw = new BinaryWriter(ms);
             WriteWeapon(bw, w);
+            // EMG1-KRN-01：程序下标与 SpawnFlight 只在不是缺省时追加——没有程序的武器键与格式 15 逐字相同，带程序的武器各自成行。
+            if (w.ProgramRef != 0 || w.SpawnFlight != 0)
+            {
+                WriteWeaponEmg(bw, w, null);
+            }
             bw.Flush();
             return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
         }

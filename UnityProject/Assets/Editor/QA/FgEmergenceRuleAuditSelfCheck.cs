@@ -309,9 +309,10 @@ namespace GameLogic.EditorTools
             EmgCompiled hc = EmgCatalog.Current;
             bool track = EmgCatalog.IsOwnerOnDeclTrack("fw_split");
             EmgCatalog.OverrideForTests(null);
-            Expect(hc.RawStage == 3f && hc.EffectiveStage == EmgCatalog.ImplementedStage && !track
+            // EMG1-KRN-01 起已实现阶段 = 1：填 3 钳到 1，stageGate 1 的 fw_split 走声明轨（只在调参被改高时；正式表仍是 0，见下一条）。
+            Expect(hc.RawStage == 3f && hc.EffectiveStage == EmgCatalog.ImplementedStage && EmgCatalog.ImplementedStage == 1 && track
                    && EmgCatalog.ClampStage(4f, 2) == 2 && EmgCatalog.ClampStage(1f, 2) == 1 && EmgCatalog.ClampStage(-1f, 2) == 0,
-                $"emg.stage 填 3（高于已实现阶段 {EmgCatalog.ImplementedStage}）→ 生效阶段钳到 {hc.EffectiveStage}，stageGate 1 的 fw_split 仍走旧轨；钳位函数：4→2、1→1、−1→0（已实现 2 时）");
+                $"emg.stage 填 3（高于已实现阶段 {EmgCatalog.ImplementedStage}）→ 生效阶段钳到 {hc.EffectiveStage}，stageGate 1 的 fw_split 随之走声明轨；钳位函数：4→2、1→1、−1→0（已实现 2 时）");
             Expect(EmgCatalog.EffectiveStage == 0 && real.Decls.Select(d => d.Owner).Distinct().All(o => !EmgCatalog.IsOwnerOnDeclTrack(o)),
                 "正式表 emg.stage = 0：全部声明 owner 都走旧 readFields 路径（本卡不改任何战斗行为）");
         }

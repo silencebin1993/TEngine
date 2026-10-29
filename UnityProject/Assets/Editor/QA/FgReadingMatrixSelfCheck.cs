@@ -751,6 +751,36 @@ namespace GameLogic.EditorTools
                 bool corrupted = CorruptLastDroneCooldown(bad);
                 CombatLoadResult l3 = c3.Load(bad);
                 Expect(corrupted && l3 == CombatLoadResult.InvalidValue && c3.SlotCount == before, $"无人机出手间隔写成 0 的快照：整份拒绝（{l3}），内核保持原样");
+
+                // EMG1-KRN-01（格式 16，FGT-EMG-040 / 041）：格式 15 / 14 旧快照照读（涌现段取缺省、无人机按读入顺序补发 Id）；带涌现状态的快照往返逐位一致、续跑一致。
+                foreach (int fmt in new[] { 15, 14 })
+                {
+                    byte[] old = k.SerializeFormatForTests(fmt);
+                    using var co = new CombatKernel(k.Config, 64);
+                    CombatLoadResult lo = co.Load(old);
+                    bool ids = true;
+                    for (int i = 0; i < co.DroneCount; i++)
+                    {
+                        ids &= co.TryGetDrone(i, out CombatDrone dr) && dr.Id == i + 1;
+                    }
+                    Expect(lo == CombatLoadResult.Ok && co.SlotCount == k.SlotCount && co.ZoneCount == k.ZoneCount && co.DroneCount == k.DroneCount && co.EchoCount == k.EchoCount
+                           && ids && co.ProgramCount == 0 && co.EmgBusPending == 0 && co.WreckCount == 0 && (fmt != 15 || co.StateHash() == k.StateHash()),
+                        $"格式 {fmt} 旧快照（读法区域 {co.ZoneCount} 块、无人机 {co.DroneCount} 架）照读：涌现段取缺省、无人机 Id 1～{co.DroneCount}{(fmt == 15 ? "，状态哈希与原内核一致" : string.Empty)}");
+                }
+                int p = FgEmergenceKernelSelfCheck.Seed(k, a.Ids[ArenaP]);
+                byte[] snapE = k.Serialize();
+                using var e2 = new CombatKernel(k.Config, 64);
+                CombatLoadResult le = e2.Load(snapE);
+                bool eSame = le == CombatLoadResult.Ok && p == 0 && e2.StateHash() == k.StateHash() && e2.EmgStateHash() == k.EmgStateHash()
+                             && e2.ProgramCount == 1 && e2.EmgBusPending == 2 && e2.WreckCount == 1 && e2.TryGetUnitEmg(a.Ids[ArenaP], out short prof, out _) && prof == 3;
+                for (int i = 0; i < 90; i++)
+                {
+                    double t = k.Time + Dt;
+                    k.Step(Dt, t);
+                    e2.Step(Dt, t);
+                }
+                Expect(eSame && e2.StateHash() == k.StateHash() && e2.EmgStateHash() == k.EmgStateHash(),
+                    "带涌现状态（程序 1 行、事件 2 条、残骸 1 个、单位段）的读法战斗快照（格式 16）：读回状态哈希 / 涌现哈希逐位一致，再跑 1.5 秒仍一致");
             }
         }
 
@@ -821,6 +851,9 @@ namespace GameLogic.EditorTools
             bool hasReading = site != null && site.TryGetMachineUnit(sprayer, out int unit) && site.Kernel.TryGetUnit(unit, out CombatUnitView uv)
                               && site.Kernel.TryGetWeapon(uv.Weapon, out CombatWeapon kw) && kw.Reading.Carrier == CombatCarrier.Field && kw.Reading.ZoneSeconds > 0f;
             Expect(hasReading, "读档后机器的内核武器仍是布区载体 + 冷却液的驻留读法（装配结算重算，不靠旧参数）");
+            bool emgKept = site != null && site.Kernel.ProgramCount == 1 && site.Kernel.EmgBusPending == 2 && site.Kernel.WreckCount == 1
+                           && site.TryGetMachineUnit(sprayer, out int su) && site.Kernel.TryGetUnitEmg(su, out short sp, out EmgUnitState sst) && sp == 3 && sst.LastHitBy == 2;
+            Expect(emgKept, "涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 1 行、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）");
         }
 
         private static void BuildWorldSave(int seed)
@@ -849,6 +882,12 @@ namespace GameLogic.EditorTools
             city.SquadCommands.IssueAttack(FracturedCityLayout.Scout2SpawnId, paused: false);
             city.SquadCommands.ClearSelection();
             WorldSimulation.StepMany(60);
+            // EMG1-KRN-01：给城里的地点内核铺一份涌现状态（程序 1 行、热更注入事件 2 条、残骸 1 个、喷洒机的单位段），H 段的倍速 / 暂停 / 观察 / 存读档哈希因此覆盖新状态。
+            CombatSite citySite = CombatSites.Get(FracturedCityLayout.RegionId);
+            if (citySite == null || !citySite.TryGetMachineUnit(a, out int au) || FgEmergenceKernelSelfCheck.Seed(citySite.Kernel, au) != 0)
+            {
+                Fail("给破碎都市地点内核铺涌现状态失败");
+            }
             WorldSimulation.SyncAllForSave();
             SaveResult r = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
             if (!r.Success)

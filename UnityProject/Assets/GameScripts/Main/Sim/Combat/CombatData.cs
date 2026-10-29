@@ -41,6 +41,28 @@ namespace BinGames.Sim.Combat
         public CombatFaction Faction;
         public byte Pad0;
         public short Pad1;
+        // ── EMG1-KRN-01（ADR-EMG-001 ③ / ⑩，快照格式 16 的弹体段）：宿主五元组（程序、节点、代、链、链深）与弹道 / 物质字段。
+        // 弹体下标每步压实会变，跨步引用一律用 Id（每地点单调，EmgScalars.NextProjId）。Prog = −1 = 没有程序（按旧逻辑飞完）。
+        public int Id;
+        public int Prog;
+        public int Chain;
+        /// <summary>沾染位（独立于单位 Status 的物质沾染，FGR-EMG-020 第 5 条后备）。</summary>
+        public uint Coat;
+        /// <summary>上一步所在物质掩码（evt.enter / evt.leave 做差，ADR ④）。</summary>
+        public uint PrevMatterMask;
+        /// <summary>每条触发指令 2 比特的已触发计数（emg.trig.max_per_host）。</summary>
+        public uint TrigUsed;
+        /// <summary>寻的目标（单位 ID；0 = 没有）。</summary>
+        public int HomingTarget;
+        public float Mass;
+        /// <summary>已飞行秒数（定时触发用）。</summary>
+        public float Age;
+        public byte Node;
+        public byte Gen;
+        public byte PierceLeft;
+        public byte BounceLeft;
+        public byte Depth;
+        public EmgProjFlags Flags;
     }
 
     /// <summary>内核的标量状态（NativeArray 长度 1，作业与托管调用共用）。</summary>
@@ -78,7 +100,7 @@ namespace BinGames.Sim.Combat
     /// 战斗内核的全部数据（SoA）。一个结构体装下全部原生容器，Burst 作业（<see cref="CombatStepJob"/>）与托管的即时调用
     /// （<see cref="CombatKernel.FireAt"/> 等）共用同一份数据、同一套 <see cref="CombatLogic"/> 代码。
     /// </summary>
-    public struct CombatData
+    public partial struct CombatData
     {
         public CombatConfig Config;
         /// <summary>FG7-ENV-03（FGR-ENV-020“寒潮：散热 +30%”）：本地点所有武器散热额外加成（0 = 正常，0.3 = +30%）。
@@ -239,6 +261,21 @@ namespace BinGames.Sim.Combat
         public NativeArray<CombatScalars> Scalars;
         public NativeArray<CombatCounters> Counters;
 
+        // ── EMG1-KRN-01（ADR-EMG-001 ② / ④ / ⑦ / ⑨，快照格式 16；容器的建、放、增删见 CombatData.Emergence.cs）──
+        /// <summary>涌现发号器与总线计数（长度 1）。</summary>
+        public NativeArray<EmgScalars> EmgS;
+        /// <summary>程序 / 节点 / 指令三张表（只追加、不改写、不压实；快照写全表）。</summary>
+        public NativeList<EmgProgram> EmgPrograms;
+        public NativeList<EmgNode> EmgNodes;
+        public NativeList<EmgInstr> EmgInstrs;
+        /// <summary>涌现事件队列（头指针在 EmgS.BusHead；进快照、不丢）。</summary>
+        public NativeList<EmgEvent> EmgBus;
+        /// <summary>残骸（容量 EmgConst.DefaultWreckCapacity；进快照）。</summary>
+        public NativeList<EmgWreck> Wrecks;
+        /// <summary>每单位：实体档案下标（−1 = 单位种类默认）与涌现状态基本段（按槽位，随单位一起追加 / 搬移 / 截断）。</summary>
+        public NativeList<short> EProfile;
+        public NativeList<EmgUnitState> EmgUnit;
+
         public bool IsCreated => Id.IsCreated;
 
         public static CombatData Create(in CombatConfig config, int capacity)
@@ -333,6 +370,7 @@ namespace BinGames.Sim.Combat
                 Scalars = new NativeArray<CombatScalars>(1, Allocator.Persistent),
                 Counters = new NativeArray<CombatCounters>(1, Allocator.Persistent),
             };
+            d.EmgCreate(capacity);
             d.SlotOfId.Add(-1); // ID 0 = 没有
             d.Scalars[0] = new CombatScalars
             {
@@ -434,6 +472,7 @@ namespace BinGames.Sim.Combat
             Cues.Dispose();
             Scalars.Dispose();
             Counters.Dispose();
+            EmgDispose();
         }
 
         public int Count => Id.Length;
@@ -516,6 +555,7 @@ namespace BinGames.Sim.Combat
             RouteLen.Add(0);
             RouteIdx.Add(0);
             RouteEnd.Add(s.Position);
+            EmgAppend();
             while (SlotOfId.Length <= id)
             {
                 SlotOfId.Add(-1);
@@ -577,6 +617,7 @@ namespace BinGames.Sim.Combat
             RouteLen[to] = RouteLen[from];
             RouteIdx[to] = RouteIdx[from];
             RouteEnd[to] = RouteEnd[from];
+            EmgMoveSlot(from, to);
         }
 
         public void Truncate(int length)
@@ -628,6 +669,7 @@ namespace BinGames.Sim.Combat
             RouteLen.ResizeUninitialized(length);
             RouteIdx.ResizeUninitialized(length);
             RouteEnd.ResizeUninitialized(length);
+            EmgTruncate(length);
         }
 
         /// <summary>全部单位与标量清空（读档前）。武器 / 行为表、障碍、兴趣点另行覆盖。</summary>
@@ -650,6 +692,7 @@ namespace BinGames.Sim.Combat
             Cues.Clear();
             RoutePts.Clear();
             NavOut.Clear();
+            EmgClearState();
         }
     }
 }

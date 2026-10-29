@@ -1540,8 +1540,10 @@ namespace BinGames.Sim.Combat
                     float2 side = new float2(-face.y, face.x);
                     at = d.Pos[a] + (double2)(face * (d.Radius[a] + SentryPlantAhead) + side * SentrySpread(q));
                 }
+                EmgScalars es = d.EmgS[0]; // EMG1-KRN-01：无人机稳定 Id（回收旧槽位的也是一架新无人机，发新号）
                 var fresh = new CombatDrone
                 {
+                    Id = es.NextDroneId++,
                     Pos = at,
                     Prev = at,
                     Anchored = (byte)(anchored ? 1 : 0),
@@ -1555,6 +1557,7 @@ namespace BinGames.Sim.Combat
                     Cooldown = r.DroneCooldown > 0f ? r.DroneCooldown : 0.8f,
                     Faction = (CombatFaction)d.Faction[a],
                 };
+                d.EmgS[0] = es;
                 if (recycled)
                 {
                     d.Drones[stale[reuse++]] = fresh;

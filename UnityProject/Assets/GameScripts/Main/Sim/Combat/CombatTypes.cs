@@ -34,8 +34,13 @@ namespace BinGames.Sim.Combat
         /// 计数追加齐射 / 对空拦截 / 布雷 / 引爆 / 冲锋次数（读取仍认 1～13：参数为 0 = 没有这些行为，状态与计数为 0）。
         /// 15 = FG10-FAC-01（FG09 FGR-FAC-008 澄净专属语法）：行为参数追加喷淋布区 / 枢轴喷灌 / 自爆与油迹 / 分裂 / 飞行与投放 / 抗性参数；每个单位追加澄净状态（<see cref="CombatClarityUnit"/>）；
         /// 区域种类追加“喷淋池”“油迹”（<see cref="ZoneKindPool"/> / <see cref="ZoneKindSlick"/>），区域追加受寒量；追加待结算的死亡效果（分裂 / 爆燃）；计数追加喷淋 / 冻结 / 自爆 / 爆燃 / 油迹点燃 / 分裂 / 再污染 / 酸沼腐蚀 / 冲洗次数
-        /// （读取仍认 1～14：参数为 0 = 没有这些行为，状态与计数为 0，没有新种类的区域）。</summary>
-        public const int FormatVersion = 15;
+        /// （读取仍认 1～14：参数为 0 = 没有这些行为，状态与计数为 0，没有新种类的区域）。
+        /// 16 = EMG1-KRN-01（FG19 FGR-EMG-045 / 211，ADR-EMG-001 ⑩）：在待结算死亡效果之后、读法表之前追加一块自描述的 Emg 段（段标记 + 段长度 + 字段数 + 记录数，
+        /// 短段缺的字段取缺省、长段与不认识的段按长度跳过；读写器见 CombatKernel.Emergence.cs 的 EmgSegmentWriter / EmgSegmentReader）：发号器与总线序号、程序 / 节点 / 指令三张表（全表）、
+        /// 武器的程序下标与 SpawnFlight、每单位档案下标与涌现状态基本段、每发弹体的稳定 Id 与宿主五元组 / 弹道 / 物质字段、每架无人机的稳定 Id、未处理的涌现事件、残骸
+        /// （读取仍认 1～15：弹体 Prog = −1（按旧逻辑飞完）、0 代、按读入顺序补发弹体 / 无人机 Id、发号器取补发后的下一个、掩码与计时 0、档案取单位种类默认（−1）、
+        /// 总线空且序号 0、没有残骸、武器没有程序）。</summary>
+        public const int FormatVersion = 16;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -408,6 +413,8 @@ namespace BinGames.Sim.Combat
         public byte Anchored;
         public short Pad1;
         public double2 Anchor;
+        /// <summary>EMG1-KRN-01（ADR ④，格式 16）：稳定 Id（每地点单调，EmgScalars.NextDroneId；无人机每步压实，跨步引用用它）。</summary>
+        public int Id;
     }
 
     /// <summary>
@@ -960,6 +967,18 @@ namespace BinGames.Sim.Combat
         public float TurnRate;
         /// <summary>FG6-DEF-01（FGR-DEF-004）：每发要消耗的补给量（流体类固件的流体，按“发”计）。0 = 不需要补给。存量不够一发时开火结果为 <see cref="CombatFireResult.NoAmmo"/>。</summary>
         public float AmmoPerShot;
+        /// <summary>EMG1-KRN-01（ADR-EMG-001 ②，格式 16）：程序表行号 + 1（0 = 没有程序）。按 +1 存是为了让结构默认值就是“没有程序”——热更层与旧代码不写它也不会误指第 0 行；
+        /// 读写一律用 <see cref="Program"/>（−1 = 没有）。</summary>
+        public int ProgramRef;
+        /// <summary>EMG1-KRN-01（ADR ③）：1 = 程序需要飞行，即时命中 / 重炮在“当场结算”那一刻改为生成一发弹体（EMG1-TRIG-01 接上执行）；不改 <see cref="Mode"/>。</summary>
+        public byte SpawnFlight;
+
+        /// <summary>程序下标（−1 = 没有程序）。</summary>
+        public int Program
+        {
+            get => ProgramRef - 1;
+            set => ProgramRef = value < 0 ? 0 : value + 1;
+        }
     }
 
     /// <summary>FG2-E2E-01（FG-GAP-043）：一条引信弹迹（表现数据：不进快照、不进状态哈希；按游戏时间到期，暂停时不消失）。</summary>

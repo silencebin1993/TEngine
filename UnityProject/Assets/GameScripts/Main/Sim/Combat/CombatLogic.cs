@@ -1019,8 +1019,17 @@ namespace BinGames.Sim.Combat
             float2 dir = math.lengthsq(to) > 1e-12 ? (float2)math.normalize(to) : new float2(0f, 1f);
             // 起点放在开火者半径外，免得刚出膛就擦到自己一侧的单位。
             double2 start = from + (double2)(dir * (d.Radius[i] + wp.ProjectileRadius));
+            // EMG1-KRN-01（ADR ③ / ⑨）：稳定 Id；带程序的武器发出的是 0 代根载荷（根节点），并开一条新的因果链。程序表为空时只多发一个号（不进状态哈希）。
+            EmgScalars es = d.EmgS[0];
+            int prog = wp.Program;
+            int id = es.NextProjId++;
+            int chain = prog >= 0 ? es.NextChain++ : 0;
+            d.EmgS[0] = es;
             d.Projectiles.Add(new CombatProjectile
             {
+                Id = id,
+                Prog = prog,
+                Chain = chain,
                 Pos = start,
                 Prev = start,
                 Vel = dir * wp.ProjectileSpeed,

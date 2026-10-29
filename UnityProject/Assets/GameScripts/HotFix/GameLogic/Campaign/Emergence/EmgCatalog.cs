@@ -152,15 +152,16 @@ namespace GameLogic.Campaign.Emergence
     /// EMG1-DATA-01（FG19 FGR-EMG-010～013、018～021、035、140；ADR-EMG-001 ①、⑮ 第 4 步 1a）：把 fg.TbChannelPort / TbChannelDecl / TbPortCarrier /
     /// TbSubPayload / TbChassisTrait 编成内核只认整数码的数组，并跑运行时版本的表校验——是 tools/cell_tables/check_luban.py R37～R41 的子集，以 check_luban 为准
     ///   （运行时不查：端口 unit 列、R41 调参取值范围；枚举名大小写不敏感）。坏行一律不进数组。
-    /// - 本卡不接战斗：没有任何战斗代码读这些数组；<see cref="ImplementedStage"/> = 0，emg.stage 钳到 0，全部 owner 走旧 readFields 路径（行为逐字不变）。
-    ///   内核结构与登记在 EMG1-KRN-01 起接入，届时提高 <see cref="ImplementedStage"/>。
+    /// - 本卡不接战斗：没有任何战斗代码读这些数组；正式表 emg.stage = 0，全部 owner 走旧 readFields 路径（行为逐字不变）。
+    ///   EMG1-KRN-01 铺好阶段 1 内核结构（程序 / 节点 / 指令表、总线、残骸、快照 16）后，<see cref="ImplementedStage"/> 提到 1：emg.stage 允许填 1（对照测试 / 回滚开关），
+    ///   表里缺省仍是 0——新轨（编译器、总线消费、触发器、动词）在 EMG1-PRG-01 / BUS-01 / TRIG-01 / GRM-01 接通前不得把缺省提到 1（裁决见 EMG1-KRN-01 证据“待用户复核”）。
     /// - 规则只认端口 × 端口：这里不出现任何 fw_ / comp_ / func_ / struct_ 判断（FGR-EMG-013，FgEmergenceRuleAuditSelfCheck 扫本文件）。
     /// 只在载入 / 表重载时编译（O(表行数)），不按帧。
     /// </summary>
     public static class EmgCatalog
     {
-        /// <summary>已实现的最高 FG-EMG 阶段：emg.stage 填得更高时钳到这里（卡片负向“emg.stage 填高于已实现阶段”）。EMG1-KRN-01 起逐卡提高。</summary>
-        public const int ImplementedStage = 0;
+        /// <summary>已实现的最高 FG-EMG 阶段：emg.stage 填得更高时钳到这里（卡片负向“emg.stage 填高于已实现阶段”）。EMG1-KRN-01 铺好阶段 1 内核结构后为 1；阶段 2 内核（快照 17）落地时提到 2。</summary>
+        public const int ImplementedStage = 1;
         public const string StageKey = "emg.stage";
 
         public static readonly string[] Carriers = { "projectile", "melee", "summon", "aura", "field" };

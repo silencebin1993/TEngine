@@ -774,6 +774,9 @@ namespace GameLogic.EditorTools
             // EMG1-TXT-01：生物残留第 1 层（FGR-EMG-230～232，FGT-EMG-072 阶段 1、FGT-FW-008 扩展）——禁用词表与 FG19 一致、emg.* 文本零生物词、
             // 第 11 节文案已换（爆炸反应装甲 / 反应装甲 / 罐弹抛洒器 / 处决 / 信号劫持）、旧存档显示新名且数值不变、视觉 ID 旧键别名、图鉴占位标记。
             Seg("EmgTextResidueSelfCheck", EmgTextResidueSelfCheck.Run);
+            // EMG1-KRN-01：内核涌现结构与快照格式 16（FGT-EMG-040 / 042）——布局与 4096 满池内存、程序表为空时对 M10 基线金标准逐字不变、程序 / 武器 / 弹体 / 总线 / 残骸 / 单位段往返、
+            // 短段 / 长段 / 新段、格式 14 / 15 缺省、回滚时新快照整块不读、负向矩阵（坏程序 / 满表 / 满队列 / 满残骸 / 快照坏值）、中途存读档续跑一致与无状态哈希随机。
+            Seg("FgEmergenceKernelSelfCheck", FgEmergenceKernelSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>
