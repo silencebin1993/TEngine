@@ -136,11 +136,70 @@ namespace BinGames.Sim.Combat
         {
             int before = d.EmgBus.Length;
             EmgEmit(ref d, e);
-            if (e.Prog < 0 || e.Prog >= d.EmgPrograms.Length || d.EmgPrograms[e.Prog].NodeCount < 2 || d.EmgBus.Length != before + 1)
+            if (e.Prog < 0 || e.Prog >= d.EmgPrograms.Length || d.EmgBus.Length != before + 1)
+            {
+                return;
+            }
+            if (e.Node == 0)
+            {
+                EmgRootGated(ref d, d.EmgBus[before], host);
+            }
+            if (d.EmgPrograms[e.Prog].NodeCount < 2)
             {
                 return;
             }
             EmgQueueChildren(ref d, d.EmgBus[before], host, dir);
+        }
+
+        /// <summary>
+        /// EMG1-FW-02（FG19A 第 6 节 N12 / N13 / N16；第 0.3 节口径 3 阶段 1 过渡）：根节点上带 <see cref="EmgInstrFlags.RootKernel"/> 的效果写端，
+        /// 在它的生效事件（同一条指令的 trigger 读端）入队时，在事件位置落一块驻留区 + 状态位：排放 = 物质驻留区（冷却液 / 水……），注电 = 短电击区。
+        /// 单位级事件（过热 / 冷却完成……）的位置 = 本单位处。只认动词与参数，不认端口名以外的内容 ID（FGR-EMG-013）。O(根节点指令数²)，只在事件入队时。
+        /// </summary>
+        private static void EmgRootGated(ref CombatData d, in EmgEvent e, in EmgCtx host)
+        {
+            EmgProgram p = d.EmgPrograms[e.Prog];
+            if (p.NodeCount < 1 || p.FirstNode >= d.EmgNodes.Length)
+            {
+                return;
+            }
+            EmgNode n = d.EmgNodes[p.FirstNode];
+            int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            ushort evPort = (ushort)(EmgConst.EventPortBase + (int)e.Kind);
+            int emit = d.Config.EmgVerbEmit;
+            for (int i = n.FirstInstr; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if ((x.Flags & EmgInstrFlags.RootKernel) == 0 || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead
+                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject))
+                {
+                    continue;
+                }
+                bool gated = false;
+                for (int j = n.FirstInstr; j < end && !gated; j++)
+                {
+                    EmgInstr r = d.EmgInstrs[j];
+                    gated = r.Ordinal == x.Ordinal && r.Role == EmgConst.RoleTrigger && r.Port == evPort;
+                }
+                if (!gated)
+                {
+                    continue;
+                }
+                float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
+                float b = (x.Flags & EmgInstrFlags.MagB) != 0 ? x.B * x.Amount : x.B;
+                if (!(a > 0f) || !(b > 0f))
+                {
+                    continue;
+                }
+                int bit = (int)math.round(x.C) - 1;
+                uint mask = bit >= 0 && bit < 32 ? 1u << bit : 0u;
+                int owner = host.Owner >= 0 && host.Owner < d.Count ? host.Owner : -1;
+                if (SpawnZone(ref d, owner, (CombatFaction)host.Faction, e.Pos, a, b, 0f, 0f, 1f, mask, 0f, 0f, 0f, 0f))
+                {
+                    SetLastZoneLook(ref d, x.Verb == (byte)EmgVerb.Inject ? CombatZoneLook.Pulse : CombatZoneLook.Pool); // 注电 = 外扩冲击环，排放 = 液池
+                    NoteReading(ref d, CombatConst.ReadingFeedZone, e.Pos, owner);
+                }
+            }
         }
 
         private static void EmgQueueChildren(ref CombatData d, in EmgEvent e, in EmgCtx host, float2 dir)

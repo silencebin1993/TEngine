@@ -90,8 +90,10 @@ namespace GameLogic.EditorTools
             // EMG1-FW-01（FGR-EMG-014 全量判定，DEBT-EMG1DATA01-01 已关）：fg.TbFirmwareKind 每条正式固件都有声明且准入，没有声明即失败
             var undeclared = FirmwareKinds.Rows.Where(r => !r.Id.StartsWith("fw_mix_", StringComparison.Ordinal) && !fwOwners.Contains(r.Id)).Select(r => r.Id).ToList();
             int formal = FirmwareKinds.Rows.Count(r => !r.Id.StartsWith("fw_mix_", StringComparison.Ordinal));
-            Expect(formal == 44 && fwOwners.Count == 44 && undeclared.Count == 0 && rejected.Count == 0 && fwOwners.All(kinds.Contains),
-                $"fg.TbFirmwareKind 正式固件 {formal} 条：已声明 {fwOwners.Count} 条、全部准入且都在固件表{(undeclared.Count > 0 ? "；未声明：" + string.Join("、", undeclared) : string.Empty)}{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
+            // EMG1-FW-02（FGT-EMG-002 新增行准入）：名表 44 条 + FG19A 第 6 节新固件 8 条（N09～N16）
+            int addon = FirmwareKinds.AddonRows.Count;
+            Expect(formal == 44 + addon && addon == 8 && fwOwners.Count == formal && undeclared.Count == 0 && rejected.Count == 0 && fwOwners.All(kinds.Contains),
+                $"fg.TbFirmwareKind 正式固件 {formal} 条（名表 44 + 新固件 {addon}）：已声明 {fwOwners.Count} 条、全部准入且都在固件表{(undeclared.Count > 0 ? "；未声明：" + string.Join("、", undeclared) : string.Empty)}{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
             // func_spikes 是部件，不在准入范围，但按同标准自查（FGR-EMG-233 第 5 条）
             Expect(EmgCatalog.Admit(EmgCatalog.DeclsOf(src, "func_spikes"), ports, out string spikes),
                 $"爆炸反应装甲（func_spikes，部件）按同标准自查通过：读 evt.hurt（事件族）写 ent.fragment（实体族）→ {spikes}");

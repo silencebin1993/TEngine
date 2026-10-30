@@ -1083,7 +1083,8 @@ namespace GameLogic.UI.CircuitBoard
                 // 只数条数；已携回待解析的仍逐条列出（玩家下一步能做的事）。获取途径随 FG2-FW-05 固件库与图鉴显示。
                 if (def.Category == MechanicalContentCategory.Firmware && cls != ContentUnlockState.RetrievedPendingAnalysis)
                 {
-                    lockedFirmware++;
+                    // EMG1-FW-02（FGT-EMG-006）：当前阶段拿不到的新固件（stageGate 高于 emg.stage）不算“尚未获得”
+                    lockedFirmware += !Campaign.Signal.FirmwareKinds.IsFirmware(def.Id) || Campaign.Signal.FirmwareKinds.IsObtainable(def.Id) ? 1 : 0;
                     continue;
                 }
                 string tag = cls == ContentUnlockState.RetrievedPendingAnalysis ? "已携回待解析" : "未知";

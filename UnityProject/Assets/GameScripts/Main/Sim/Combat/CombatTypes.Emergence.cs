@@ -377,6 +377,10 @@ namespace BinGames.Sim.Combat
         MagA = 128,
         MagB = 256,
         MagC = 512,
+        /// <summary>EMG1-FW-02：只走声明的固件（没有旧读法轨）在根节点上的效果写端——阶段 1 由内核在这条指令的生效事件处直接执行
+        /// （<see cref="CombatLogic"/>.EmgRootGated：排放 / 注电 → 驻留区 + 状态位，A 半径、B 秒数、C 状态位 + 1，Mag 位指明哪个参数乘幅度）。
+        /// 有旧读法轨的固件根节点效果仍由热更层折进读法（不带本位，内核不执行，避免两轨同时结算）。</summary>
+        RootKernel = 1024,
     }
 
     [Flags]

@@ -49,6 +49,8 @@ namespace GameLogic.Campaign.Economy
         private static int _builtItemRevision = -1;
         private static readonly Dictionary<string, List<string>> FirmwareByFaction = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         private static int _firmwareRevision = -1;
+        private static int _firmwareEmgRevision = -1;
+        private static int _firmwareStage = -1;
 
         public static int Revision { get; private set; } = 1;
 
@@ -248,13 +250,15 @@ namespace GameLogic.Campaign.Economy
         /// </summary>
         public static IReadOnlyList<string> EnemyFirmwareOf(string faction)
         {
-            if (_firmwareRevision != FirmwareKinds.CatalogRevision)
+            // EMG1-FW-02：只走通道声明的新固件随 emg.stage 开放（FGT-EMG-006），阶段 / 声明表变了也重建
+            int stage = Emergence.EmgCatalog.EffectiveStage;
+            if (_firmwareRevision != FirmwareKinds.CatalogRevision || _firmwareEmgRevision != Emergence.EmgCatalog.Revision || _firmwareStage != stage)
             {
                 FirmwareByFaction.Clear();
                 var all = new List<string>();
                 foreach (GameConfig.fg.FirmwareKind r in FirmwareKinds.Rows)
                 {
-                    if (r == null || r.Protocol != "enemy" || r.Source != "salvage" || !FirmwareKinds.IsFirmware(r.Id))
+                    if (r == null || r.Protocol != "enemy" || r.Source != "salvage" || !FirmwareKinds.IsFirmware(r.Id) || !FirmwareKinds.IsObtainable(r.Id))
                     {
                         continue;
                     }
@@ -273,6 +277,8 @@ namespace GameLogic.Campaign.Economy
                 }
                 FirmwareByFaction[AnyFaction] = all;
                 _firmwareRevision = FirmwareKinds.CatalogRevision;
+                _firmwareEmgRevision = Emergence.EmgCatalog.Revision;
+                _firmwareStage = stage;
             }
             return FirmwareByFaction.TryGetValue(faction ?? string.Empty, out List<string> list) && list.Count > 0
                 ? list

@@ -38,7 +38,11 @@ namespace GameLogic.EditorTools
             {
                 EmgCatalog.OverrideForTests(src);
                 var gate = src.Decls.GroupBy(d => d.Owner).ToDictionary(g => g.Key, g => g.First().StageGate, StringComparer.Ordinal);
-                List<string> stage1 = FirmwareKinds.BaseRows.Select(r => r.Id).Where(id => gate.TryGetValue(id, out int g) && g <= 1).ToList();
+                // EMG1-FW-02：FG19A 第 6 节新固件也进本矩阵——读的事件在这组场景里自然发生的（命中）直接比；读阵亡 / 反弹 / 穿透 / 过热 / 冷却完成的
+                // 条件型（FG19A 第 1.8 节）在 FgEmgAddonFirmwareSelfCheck 的条件场景里逐载体 × 首位 / 末位比（先造出条件）
+                List<string> stage1 = FirmwareKinds.BaseRows.Select(r => r.Id)
+                    .Concat(FirmwareKinds.AddonRows.Select(r => r.Id).Where(id => !IsConditionalAddon(src, id)))
+                    .Where(id => gate.TryGetValue(id, out int g) && g <= 1).ToList();
                 var dead = new List<string>();
                 var dual = new List<string>();
                 int combos = 0;
@@ -225,6 +229,10 @@ namespace GameLogic.EditorTools
             Expect(reads.Count >= 10 && sourceless.Count == 0,
                 $"阶段 1 声明读到 {reads.Count} 个端口，无源 {sourceless.Count} 个{(sourceless.Count > 0 ? "：" + string.Join("、", sourceless) : string.Empty)}；没有声明写者、靠世界源的：{string.Join("；", viaWorld)}");
         }
+
+        /// <summary>EMG1-FW-02：新固件的触发事件在 C2 的常规场景里不会自然发生（阵亡 / 反弹 / 穿透 / 过热 / 冷却完成……），要在条件场景里比。</summary>
+        internal static bool IsConditionalAddon(EmgSource src, string fw) =>
+            src.Decls.Any(d => d.Owner == fw && d.Dir == "read" && d.Role == "trigger" && d.Port != "evt.hit" && d.Port != "evt.fire" && d.Port != "evt.expire");
 
         private static bool HasModWrite(string fw, FirmwareCarrier carrier)
         {

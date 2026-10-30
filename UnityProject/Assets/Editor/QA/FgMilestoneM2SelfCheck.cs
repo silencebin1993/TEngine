@@ -173,7 +173,9 @@ namespace GameLogic.EditorTools
             var list = new List<string>();
             foreach (GameConfig.fg.FirmwareKind row in FirmwareKinds.Rows)
             {
-                if (row != null && Array.IndexOf(RestorableSources, row.Source) >= 0)
+                // EMG1-FW-02（FGT-EMG-006）：只走通道声明的新固件在声明生效（stageGate ≤ emg.stage）前不开放来源，数据复原同口径
+                if (row != null && Array.IndexOf(RestorableSources, row.Source) >= 0
+                    && (!FirmwareKinds.IsDeclOnlyRow(row) || GameLogic.Campaign.Emergence.EmgCatalog.IsOwnerOnDeclTrack(row.Id)))
                 {
                     list.Add(row.Id);
                 }
@@ -193,8 +195,10 @@ namespace GameLogic.EditorTools
             bool keptOut = kept.All(k => !got.Contains(k) && !FirmwareRestoreService.IsRestorable(k));
             int baseCount = FirmwareCatalog.All.Keys.Count(id => FirmwareKinds.SourceOf(id) == "base");
             bool baseOut = FirmwareCatalog.All.Keys.Where(id => FirmwareKinds.SourceOf(id) == "base").All(id => !got.Contains(id));
-            Expect(total == 44 && expect.Count == 38 && got.SequenceEqual(expect) && keptOut && baseOut && baseCount == 4,
-                $"新档可复原 {got.Count} 条 = 按表独立重算的 {expect.Count} 条（44 条里去掉基础蓝图库 {baseCount} 条与终端数据盒 / 技术缓存各 1 条）");
+            int legacy = FirmwareKinds.Rows.Count(r => r != null && Array.IndexOf(RestorableSources, r.Source) >= 0 && !FirmwareKinds.IsDeclOnlyRow(r));
+            int addon = expect.Count - legacy;
+            Expect(total == 44 && legacy == 38 && got.SequenceEqual(expect) && keptOut && baseOut && baseCount == 4,
+                $"新档可复原 {got.Count} 条 = 按表独立重算的 {expect.Count} 条（44 条里去掉基础蓝图库 {baseCount} 条与终端数据盒 / 技术缓存各 1 条 = {legacy} 条，另加声明已生效的新固件 {addon} 条）");
             int cost = got.Sum(FirmwareRestoreService.CostOf);
             int common = got.Count(x => FirmwareKinds.RarityOf(x) == "common");
             int rare = got.Count(x => FirmwareKinds.RarityOf(x) == "rare");

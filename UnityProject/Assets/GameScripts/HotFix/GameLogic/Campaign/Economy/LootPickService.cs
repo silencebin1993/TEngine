@@ -1245,8 +1245,11 @@ namespace GameLogic.Campaign.Economy
                         }
                     }
                     bool cracked = c.Kind == LootPickCatalog.KindCracked || !FirmwareKinds.IsRaw(s, c.TargetId);
-                    return GameText.Format("loot.pick.cmp.fw", ChipCount(s, c.TargetId), GameText.Get("firmware.category." + catKey), kinds.Count,
+                    string cmp = GameText.Format("loot.pick.cmp.fw", ChipCount(s, c.TargetId), GameText.Get("firmware.category." + catKey), kinds.Count,
                         GameText.Get(cracked ? "loot.pick.cmp.fw.cracked" : "loot.pick.cmp.fw.raw"));
+                    // EMG1-FW-02：三选一卡面的读 / 写端口由声明生成（与固件详情页同一函数）
+                    string ports = Emergence.EmgProgramTreeText.PortsLine(c.TargetId);
+                    return ports == null ? cmp : cmp + "\n" + ports;
                 }
                 case LootPickCatalog.KindModule:
                     return GameText.Format("loot.pick.cmp.module", Feedback.FeedbackCues.ContentName(c.TargetId),

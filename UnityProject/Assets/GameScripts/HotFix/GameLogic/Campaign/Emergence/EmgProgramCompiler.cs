@@ -160,6 +160,9 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>EMG1-GRM-01：光束类主组件（作战组件表 flightLob = 0）上的曲射不越障，预览写原因（FG19A 第 2.1.1 节）。</summary>
         public const string NoteLobStraight = "emg.compile.lob_straight";
 
+        /// <summary>EMG1-FW-02（FG-GAP-177）：声明的适用载体（carriers）不含当前主组件 → 这条指令整条不编译，预览写原因（仍占程序位置）。</summary>
+        public const string NoteCarrierNa = "emg.compile.carrier_na";
+
         // ── 目录派生的查找表（目录换了才重建；只在编译时用，不按帧）──
         private static EmgCompiled _for;
         private static readonly Dictionary<int, List<int>> DeclsByOwner = new Dictionary<int, List<int>>();
@@ -612,6 +615,10 @@ namespace GameLogic.Campaign.Emergence
                     mod |= IsMod(port);
                 }
             }
+            if (s.Decls.Count == 0)
+            {
+                r.Notes.Add(new EmgCompileNote { Key = NoteCarrierNa, Ordinal = s.Ordinal, Node = -1 });
+            }
             s.Kind = trig ? EmgStepKind.Trigger : anchor ? EmgStepKind.Anchor : meta ? EmgStepKind.Meta : mod ? EmgStepKind.Modify : EmgStepKind.Effect;
             if (trig)
             {
@@ -889,6 +896,12 @@ namespace GameLogic.Campaign.Emergence
                                 x.Verb = 0; // EMG1-GRM-01：光束直线，曲射不越障（同条固件的落点扬尘照常）
                                 r.Notes.Add(new EmgCompileNote { Key = NoteLobStraight, Ordinal = s.Ordinal, Node = n.Index, Port = d.Port });
                             }
+                            // EMG1-FW-02：只走声明的固件（没有旧读法轨可过渡，FG19A 第 6 节新固件）在根节点上的效果写端，阶段 1 由内核在这条指令的生效事件处
+                            // 直接执行（CombatLogic.EmgRootGated：排放 → 驻留区、注电 → 电击区，FG19A 第 0.3 节口径 3）；按数据列判（FirmwareKinds.IsDeclOnlyRow），不按内容 ID。
+                            if (n.Parent < 0 && x.Verb != 0 && IsRootKernelOwner(s.OwnerId) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
+                            {
+                                x.Flags |= EmgInstrFlags.RootKernel | (pc.Mag switch { 1 => EmgInstrFlags.MagA, 2 => EmgInstrFlags.MagB, 3 => EmgInstrFlags.MagC, _ => EmgInstrFlags.None });
+                            }
                         }
                         if (!write && IsEventPort(d.Port))
                         {
@@ -988,6 +1001,9 @@ namespace GameLogic.Campaign.Emergence
                 x.Verb = 0; // 旧字段在子形态的载体列上没有子载荷能执行的读法（如只改出手间隔）：不执行
             }
         }
+
+        private static bool IsRootKernelOwner(string owner) =>
+            FirmwareKinds.TryGetRow(owner, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row);
 
         private static bool IsFlyingSubForm(byte code) => code == EmgConst.SubBullet || code == EmgConst.SubWave || code == EmgConst.SubDroneBullet;
 

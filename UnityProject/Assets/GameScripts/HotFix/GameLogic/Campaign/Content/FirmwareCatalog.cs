@@ -45,7 +45,7 @@ namespace GameLogic.Campaign.Content
                 var list = new List<string>(48);
                 foreach (string id in All.Keys)
                 {
-                    if (!FirmwareKinds.IsMixed(id))
+                    if (!FirmwareKinds.IsMixed(id) && !IsAddon(id))
                     {
                         list.Add(id);
                     }
@@ -54,7 +54,7 @@ namespace GameLogic.Campaign.Content
             }
         }
 
-        /// <summary>目录里正式固件（不是混合固件）的条数——与 <see cref="ExpectedCount"/> 比对用。</summary>
+        /// <summary>目录里名表正式固件（不是混合固件、不是 FG19A 第 6 节新固件）的条数——与 <see cref="ExpectedCount"/> 比对用。</summary>
         public static int BaseCount
         {
             get
@@ -62,7 +62,7 @@ namespace GameLogic.Campaign.Content
                 int n = 0;
                 foreach (string id in All.Keys)
                 {
-                    if (!FirmwareKinds.IsMixed(id))
+                    if (!FirmwareKinds.IsMixed(id) && !IsAddon(id))
                     {
                         n++;
                     }
@@ -70,6 +70,9 @@ namespace GameLogic.Campaign.Content
                 return n;
             }
         }
+
+        /// <summary>EMG1-FW-02：FG19A 第 6 节新固件（只走通道声明，不在设计案 5.4 名表的 44 条里）。</summary>
+        public static bool IsAddon(string id) => FirmwareKinds.TryGetRow(id, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row);
 
         /// <summary>Demo 6 条的调试层字段（真实代码入口、DEBT 号、剪影说明）：只给审计与调试看，不进玩家可见文本。
         /// 其余 38 条的这些字段按表统一生成。</summary>

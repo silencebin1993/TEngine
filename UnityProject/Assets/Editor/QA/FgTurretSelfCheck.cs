@@ -461,7 +461,7 @@ namespace GameLogic.EditorTools
             string[] rtf = t.TbTurretFluid.DataList.Select(r => string.Join("\t", "TF", r.FirmwareId, r.Fluid, Fl(r.LitersPerShot))).ToArray();
             string[] rtm = t.TbTurretTargetMode.DataList.Select(r => string.Join("\t", "TM", r.Id, r.Code.ToString(CultureInfo.InvariantCulture), r.NameKey, r.DescKey,
                 r.SortOrder.ToString(CultureInfo.InvariantCulture))).ToArray();
-            Expect(code == 0 && tp.Length == 13 && tp.SequenceEqual(rtp) && tf.Length == 9 && tf.SequenceEqual(rtf) && tm.Length == 5 && tm.SequenceEqual(rtm)
+            Expect(code == 0 && tp.Length == 13 && tp.SequenceEqual(rtp) && tf.Length == 11 && tf.SequenceEqual(rtf) /* EMG1-FW-02：+冷却回流、水箱外排 */ && tm.Length == 5 && tm.SequenceEqual(rtm)
                    && TurretCatalog.Problems.Count == 0,
                 $"A1 三张新表 fg.TbTurretProfile（{tp.Length} 行）/ fg.TbTurretFluid（{tf.Length} 行）/ fg.TbTurretTargetMode（{tm.Length} 行）与源数据 fgdata_defense 逐字段一致；目录无问题（{string.Join("；", TurretCatalog.Problems)}）"
                 + (code == 0 ? string.Empty : "：" + FgProductionSelfCheck.Tail(output)));

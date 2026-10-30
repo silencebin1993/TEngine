@@ -328,12 +328,17 @@ namespace GameLogic.Campaign.Economy
             };
         }
 
-        /// <summary>候选池 = 这个阵营的池 + 通用池（按表顺序；阵营不认识 / 空 = 只有通用池）。</summary>
+        /// <summary>候选池 = 这个阵营的池 + 通用池（按表顺序；阵营不认识 / 空 = 只有通用池）。
+        /// EMG1-FW-02（FGT-EMG-006）：固件候选只收此刻能拿到的（<see cref="Signal.FirmwareKinds.IsObtainable"/>：声明未生效的新固件不进候选池）。</summary>
         public static void PoolFor(string faction, List<LootPickDef> into)
         {
             into.Clear();
             foreach (LootPickDef r in Rows)
             {
+                if ((r.Kind == KindFirmware || r.Kind == KindCracked) && !Signal.FirmwareKinds.IsObtainable(r.Target))
+                {
+                    continue;
+                }
                 if (r.Pool == PoolAny || (!string.IsNullOrEmpty(faction) && r.Pool == faction))
                 {
                     into.Add(r);

@@ -67,9 +67,10 @@ namespace GameLogic.Campaign.Signal
 
         public static bool IsRestorableSource(string source) => source != null && Array.IndexOf(RestorableSources, source) >= 0;
 
-        /// <summary>这条固件能不能走数据复原（与战役无关：只看表的获取途径）。</summary>
+        /// <summary>这条固件能不能走数据复原（与战役无关：只看表的获取途径）。
+        /// EMG1-FW-02（FGT-EMG-006）：数据复原是用技术数据“买”刻录数据的渠道，同样只开放此刻能拿到的固件（声明未生效的新固件不进清单）。</summary>
         public static bool IsRestorable(string firmwareId) =>
-            FirmwareKinds.IsFirmware(firmwareId) && IsRestorableSource(FirmwareKinds.SourceOf(firmwareId));
+            FirmwareKinds.IsFirmware(firmwareId) && IsRestorableSource(FirmwareKinds.SourceOf(firmwareId)) && FirmwareKinds.IsObtainable(firmwareId);
 
         /// <summary>复原一条固件要多少技术数据（按稀有度，fg.TbHomeTuning firmware.restore.cost_*）。不是固件时 0。</summary>
         public static int CostOf(string firmwareId)

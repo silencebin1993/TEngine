@@ -170,8 +170,10 @@ namespace GameLogic.EditorTools
             var missing = fw.Where(id => MechanicCodex.Find(MechanicCodex.FirmwareEntryId(id)) == null).ToList();
             // FG5-RND-04：名表 44 条 + 30 条混合固件（熔合产物）都有图鉴条目（FG05 第 4 节“所有配方都有图鉴条目”）。
             int nFw = FirmwareCatalog.All.Count;
-            Expect(FirmwareCatalog.BaseCount == 44 && fw.Count == nFw && fwEntries.Count == nFw && missing.Count == 0 && MechanicCodex.CountIn(MechanicCodex.TabFirmware) == nFw,
-                $"固件目录 {fw.Count} 条，图鉴固件页签 {fwEntries.Count} 条，一一对应{(missing.Count > 0 ? "；缺：" + string.Join("、", missing) : "")}");
+            // EMG1-FW-02（FGT-EMG-006）：当前阶段拿不到的新固件（stageGate 高于 emg.stage）有条目但不列出、不计数
+            int closedFw = fwEntries.Count(e => !FirmwareKinds.IsObtainable(e.ContentId) && !MechanicCodex.IsUnlocked(e.Id));
+            Expect(FirmwareCatalog.BaseCount == 44 && fw.Count == nFw && fwEntries.Count == nFw && missing.Count == 0 && MechanicCodex.CountIn(MechanicCodex.TabFirmware) == nFw - closedFw,
+                $"固件目录 {fw.Count} 条，图鉴固件条目 {fwEntries.Count} 条，一一对应；固件页签计数 {MechanicCodex.CountIn(MechanicCodex.TabFirmware)} = {nFw} − 当前阶段拿不到的 {closedFw}{(missing.Count > 0 ? "；缺：" + string.Join("、", missing) : "")}");
             Expect(rxEntries.Count == reactions && reactions >= 18 && MechanicCodex.CountIn(MechanicCodex.TabReaction) == reactions,
                 $"具名反应 {reactions} 条，图鉴反应页签 {rxEntries.Count} 条");
             var bad = new List<string>();
@@ -185,7 +187,8 @@ namespace GameLogic.EditorTools
                 {
                     bad.Add(e.Id + " 标题");
                 }
-                if (string.IsNullOrEmpty(acquire) || !hint.Contains(acquire) || GameText.ContainsMarker(hint))
+                bool closed = !FirmwareKinds.IsObtainable(e.ContentId);
+                if (closed ? hint != GameText.Get("codex.firmware.not_open") : string.IsNullOrEmpty(acquire) || !hint.Contains(acquire) || GameText.ContainsMarker(hint))
                 {
                     bad.Add(e.Id + " 获取途径");
                 }
@@ -592,7 +595,7 @@ namespace GameLogic.EditorTools
                                    && !panel.EntryBodyText.Contains(lockedName) && panel.EntryIconSilhouette && !panel.EntryIconHidden
                                    && panel.EntryIconId == MechanicCodex.IconOf(MechanicCodex.Find(MechanicCodex.FirmwareEntryId(locked))) && panel.RelatedCount == 0;
                 int lockedItems = Enumerable.Range(0, panel.ItemCount).Count(i => panel.ItemText(i) == GameText.Get("codex.panel.locked_title"));
-                int nTab = FirmwareCatalog.All.Count; // FG5-RND-04：含 30 条混合固件
+                int nTab = MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware && (FirmwareKinds.IsObtainable(e.ContentId) || MechanicCodex.IsUnlocked(e.Id))); // FG5-RND-04：含 30 条混合固件；EMG1-FW-02：不含当前阶段拿不到的新固件
                 bool counts = panel.ItemCount == nTab && lockedItems == nTab - MechanicCodex.UnlockedCountIn(MechanicCodex.TabFirmware)
                               && panel.CountText == GameText.Format("codex.panel.list_title", MechanicCodex.UnlockedCountIn(MechanicCodex.TabFirmware), nTab)
                               && panel.TabText(1).Contains("/" + nTab);

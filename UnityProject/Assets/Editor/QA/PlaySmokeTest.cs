@@ -2827,12 +2827,16 @@ namespace GameLogic.EditorTools
                 GameObject circuitHost = GameObject.Find("[HomeValleyCircuitBoardHost]");
                 VisualElement circuitRoot = circuitHost != null ? circuitHost.GetComponent<UIDocument>()?.rootVisualElement : null;
                 string locked = circuitRoot?.Q<Label>("LockedContentHintLabel")?.text ?? string.Empty;
-                int lockedFw = Campaign.Content.FirmwareCatalog.All.Keys.Count(id => !Campaign.Content.MechanicalContentUnlock.IsUnlocked(CampaignSession.Current, id));
+                // EMG1-FW-02（FGT-EMG-006）：与面板 RefreshLockedContentHint 同一口径——已携回待解析的逐条列出、当前阶段拿不到的新固件（stageGate 高于 emg.stage）不计
+                int lockedFw = Campaign.Content.FirmwareCatalog.All.Keys.Count(id => !Campaign.Content.MechanicalContentUnlock.IsUnlocked(CampaignSession.Current, id)
+                    && Campaign.Content.MechanicalContentUnlock.Classify(CampaignSession.Current, id) != Campaign.Content.ContentUnlockState.RetrievedPendingAnalysis
+                    && (!Campaign.Signal.FirmwareKinds.IsFirmware(id) || Campaign.Signal.FirmwareKinds.IsObtainable(id)));
+                int gatedFw = Campaign.Content.FirmwareCatalog.All.Keys.Count(id => Campaign.Signal.FirmwareKinds.IsFirmware(id) && !Campaign.Signal.FirmwareKinds.IsObtainable(id));
                 string coolant = Localization.GameText.Get("firmware.fw_coolant.name");
                 Check(Campaign.Content.FirmwareCatalog.BaseCount == Campaign.Content.FirmwareCatalog.ExpectedCount && lockedFw > 0
                       && locked.Contains(Localization.GameText.Format("circuit.locked_firmware_count", lockedFw)) && !locked.Contains(coolant)
                       && !Localization.GameText.ContainsMarker(locked) && !FgFirmwareMigrationSelfCheck.InternalContentId.IsMatch(locked),
-                    $"电路面板“未解锁”行：{lockedFw} 条没拿到的固件只计数（“{locked}”），不列内部 ID");
+                    $"电路面板“未解锁”行：{lockedFw} 条没拿到的固件只计数（当前阶段拿不到的 {gatedFw} 条不计；“{locked}”），不列内部 ID");
                 // FG2-FW-01 修复轮：蓝图派系标签存阵营键，面板上显示 faction.<key> 文本（不漏出 reclaim / clarity 这类内部键）。
                 string summary = circuitRoot?.Q<Label>("CostSummaryLabel")?.text ?? string.Empty;
                 string factionLine = summary.Split('\n').FirstOrDefault(l => l.StartsWith("派系：")) ?? string.Empty;

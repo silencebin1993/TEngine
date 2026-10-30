@@ -225,7 +225,8 @@ namespace GameLogic.EditorTools
             }
             var fwFields = FirmwareKinds.Rows.SelectMany(r => CarrierReadings.ParseFields(r.ReadFields).Select(x => x.Field)).Distinct().ToList();
             var undeclared = fwFields.Where(f => !fields.Contains(f)).ToList();
-            var noFields = FirmwareKinds.Rows.Where(r => CarrierReadings.ParseFields(r.ReadFields).Count == 0).Select(r => r.Id).ToList();
+            // EMG1-FW-02：FG19A 第 6 节新固件只走通道声明（readFields = none），不在旧读法矩阵里（行为由 C2 / FgEmgAddonFirmwareSelfCheck 验）
+            var noFields = FirmwareKinds.Rows.Where(r => !FirmwareKinds.IsDeclOnlyRow(r) && CarrierReadings.ParseFields(r.ReadFields).Count == 0).Select(r => r.Id).ToList();
             Expect(fields.Count == 27 && missing.Count == 0 && undeclared.Count == 0 && noFields.Count == 0 && FirmwareKinds.BaseRows.Count == FirmwareCatalog.ExpectedCount,
                 $"{fields.Count} 个读法字段在 5 种载体上都有行；44 条固件都声明了读法字段、字段都在表里{Detail(missing.Concat(undeclared).Concat(noFields).ToList())}");
             var carriersWithMain = comps.Where(c => c.Slot == "main").Select(c => c.Carrier).Distinct().ToList();

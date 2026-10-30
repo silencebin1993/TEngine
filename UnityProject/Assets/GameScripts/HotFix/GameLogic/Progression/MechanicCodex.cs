@@ -186,7 +186,7 @@ namespace GameLogic.Progression
             string q = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToLowerInvariant();
             foreach (MechanicCodexEntry e in _entries)
             {
-                if (e.Tab != tab)
+                if (e.Tab != tab || !Counted(e))
                 {
                     continue;
                 }
@@ -203,13 +203,18 @@ namespace GameLogic.Progression
             }
         }
 
+        /// <summary>EMG1-FW-02（FGT-EMG-006）：当前阶段拿不到的固件（stageGate 高于 emg.stage）不列出、不计入页签总数 / 已收集数（已解锁的照列）。</summary>
+        private static bool Counted(MechanicCodexEntry e) =>
+            e.Kind != MechanicCodexKind.Firmware || Campaign.Signal.FirmwareKinds.IsObtainable(e.ContentId) || IsUnlocked(e.Id);
+
         public static int CountIn(string tab)
         {
             EnsureEntries();
+            EnsureUnlocked();
             int n = 0;
             foreach (MechanicCodexEntry e in _entries)
             {
-                if (e.Tab == tab)
+                if (e.Tab == tab && Counted(e))
                 {
                     n++;
                 }
@@ -224,7 +229,7 @@ namespace GameLogic.Progression
             int n = 0;
             foreach (MechanicCodexEntry e in _entries)
             {
-                if (e.Tab == tab && IsUnlocked(e.Id))
+                if (e.Tab == tab && IsUnlocked(e.Id) && Counted(e))
                 {
                     n++;
                 }
@@ -290,7 +295,9 @@ namespace GameLogic.Progression
             switch (e.Kind)
             {
                 case MechanicCodexKind.Firmware:
-                    return GameLogic.Localization.GameText.Format("codex.firmware.locked_body", Campaign.Signal.FirmwareKinds.AcquireText(e.ContentId));
+                    return Campaign.Signal.FirmwareKinds.IsObtainable(e.ContentId)
+                        ? GameLogic.Localization.GameText.Format("codex.firmware.locked_body", Campaign.Signal.FirmwareKinds.AcquireText(e.ContentId))
+                        : GameLogic.Localization.GameText.Get("codex.firmware.not_open");
                 case MechanicCodexKind.Reaction:
                     if (!Campaign.Content.NamedReactionCatalog.TryGet(e.ContentId, out GameConfig.fg.Reaction row))
                     {

@@ -620,6 +620,7 @@ namespace BinGames.Sim.Combat
             }
             double2 dir = axis / len;
             int max = math.min(r.PierceHits, CombatConst.MaxReadingTargets);
+            int through = t;
             for (int q = 0; q < max; q++)
             {
                 int best = -1;
@@ -654,6 +655,13 @@ namespace BinGames.Sim.Combat
                 }
                 hit.Add(best);
                 SecondaryStrike(ref d, a, best, damage, r, from);
+                if (r.Carrier == CombatCarrier.Melee)
+                {
+                    // EMG1-FW-02（FG-GAP-177；FGR-EMG-060 evt.pierce 发出者含“格”）：挥击穿过前一个单位打到身后这个 = 一次穿透（Other = 被穿过者，Value2 = 剩余穿透）。
+                    // 射弹 / 无人机的穿透由飞行弹体发（CombatLogic.Grammar），这里只补格斗，避免重复。
+                    EmgShotEvent(ref d, EmgEventKind.Pierce, d.Id[through], 0f, max - q - 1, 0, d.Pos[through]);
+                }
+                through = best;
             }
         }
 

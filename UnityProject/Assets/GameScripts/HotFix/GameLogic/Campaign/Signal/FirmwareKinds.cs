@@ -387,9 +387,27 @@ namespace GameLogic.Campaign.Signal
 
         /// <summary>这枚固件有没有机器电路可结算的实现：带旧基因等价实现（LegacyFacadeId），或者有读法字段（FG2-FW-02：装甲击穿的原生读法“破甲”，
         /// DEBT-FG1SIG06-07 关闭）。核心固件、不是固件时 false。</summary>
+        /// EMG1-FW-02：只走通道声明的新固件（FG19A 第 6 节）在声明生效（stageGate ≤ emg.stage）时由程序轨结算，同样算有实现。
         public static bool HasMachineImplementation(string contentId) =>
             !IsCore(contentId) && FirmwareCatalog.TryGet(contentId, out MechanicalContentDef def)
-            && (!string.IsNullOrEmpty(def.LegacyFacadeId) || CarrierReadings.HasReading(contentId));
+            && (!string.IsNullOrEmpty(def.LegacyFacadeId) || CarrierReadings.HasReading(contentId)
+                || TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) && IsDeclOnlyRow(row) && Emergence.EmgCatalog.IsOwnerOnDeclTrack(contentId));
+
+        /// <summary>
+        /// EMG1-FW-02（FG19 FGT-EMG-006）：这条固件此刻能不能从正常游戏来源拿到（掉落表 / 三选一候选池 / 商店都按它过滤）。
+        /// 只走通道声明的固件（没有旧读法轨）只在声明生效（stageGate ≤ emg.stage）时开放——玩家拿不到不起作用的固件；
+        /// 有旧读法轨的固件（名表 44 条、混合固件）在声明未生效时照旧按旧轨结算，一直开放（emg.stage = 0 回滚时也不从掉落里消失）。不是固件时 false。
+        /// </summary>
+        public static bool IsObtainable(string contentId) =>
+            TryGetFirmwareRow(contentId, out GameConfig.fg.FirmwareKind row) && (!IsDeclOnlyRow(row) || Emergence.EmgCatalog.IsOwnerOnDeclTrack(contentId));
+
+        /// <summary>
+        /// EMG1-FW-02：表里一行是不是“只走通道声明”的固件（FG19A 第 6 节新固件）：没有旧基因、没有旧读法字段（readFields = none）、不是混合固件。
+        /// 按数据列判，不按内容 ID（FGR-EMG-013）。
+        /// </summary>
+        public static bool IsDeclOnlyRow(GameConfig.fg.FirmwareKind row) =>
+            row != null && !IsMixedRow(row) && (string.IsNullOrEmpty(row.LegacyId) || row.LegacyId == "none")
+            && (string.IsNullOrEmpty(row.ReadFields) || row.ReadFields == "none");
 
         /// <summary>FG8-LOOT-01：<see cref="CanInstall"/> 的拒绝原因是不是“未破解的敌方固件”（玩家装配被拒时触发第一次被拒绝的引导钩子）。</summary>
         /// 逐个列出完整文本键（与 CanInstall 的三种未破解返回值 + 电路保存校验的 raw_in_circuit 一致），不用前缀匹配。
@@ -555,7 +573,7 @@ namespace GameLogic.Campaign.Signal
 
         // ── FG5-RND-04（FGR-FW-050）：混合固件（熔合产物）────────────────────────────────
 
-        /// <summary>设计案 5.4 名表的 44 条正式固件（表里去掉混合固件的行，按表顺序）。只在目录 / 自检 / 面板刷新时用，不按帧。</summary>
+        /// <summary>设计案 5.4 名表的 44 条正式固件（表里去掉混合固件与 FG19A 第 6 节新固件的行，按表顺序）。只在目录 / 自检 / 面板刷新时用，不按帧。</summary>
         public static List<GameConfig.fg.FirmwareKind> BaseRows
         {
             get
@@ -563,7 +581,24 @@ namespace GameLogic.Campaign.Signal
                 var list = new List<GameConfig.fg.FirmwareKind>(48);
                 foreach (GameConfig.fg.FirmwareKind row in Rows)
                 {
-                    if (row != null && !IsMixedRow(row))
+                    if (row != null && !IsMixedRow(row) && !IsDeclOnlyRow(row))
+                    {
+                        list.Add(row);
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>EMG1-FW-02：FG19A 第 6 节落表的新固件（只走通道声明，表尾追加，按表顺序）。只在目录 / 自检时用，不按帧。</summary>
+        public static List<GameConfig.fg.FirmwareKind> AddonRows
+        {
+            get
+            {
+                var list = new List<GameConfig.fg.FirmwareKind>(8);
+                foreach (GameConfig.fg.FirmwareKind row in Rows)
+                {
+                    if (IsDeclOnlyRow(row))
                     {
                         list.Add(row);
                     }
