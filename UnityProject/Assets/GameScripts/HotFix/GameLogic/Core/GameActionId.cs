@@ -164,5 +164,7 @@
         FocusQuest = 128,
         /// <summary>FG9-UX-01（DEBT-FG9NAR01-04“资料库快捷键”，FG00 B02）：打开 / 关闭图鉴的资料库（剧情）页签（全部上下文，默认 Alt+J）。</summary>
         OpenLore = 129,
+        /// <summary>EMG1-CHAIN-01（FG19 FGR-EMG-181）：开 / 关光标附近的因果链叠加（最近 N 条链的连线与文字；战略与接入上下文，战略暂停中可用；临时默认 Ctrl+T，正式键位 FG15-UX-01）。</summary>
+        CausalChain = 130,
     }
 }

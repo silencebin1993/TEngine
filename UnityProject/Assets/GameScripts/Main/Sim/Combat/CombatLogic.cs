@@ -1087,8 +1087,13 @@ namespace BinGames.Sim.Combat
             int prog = wp.Program;
             int id = es.NextProjId++;
             // EMG1-BUS-01：这一发的链就是本次出手开的那条（EmgShotBegin 已发号，evt.fire 与弹体同链）；不在出手上下文里生成的才另开。
-            int chain = prog < 0 ? 0 : d.EmgCtx.Prog == prog && d.EmgCtx.Chain > 0 ? d.EmgCtx.Chain : es.NextChain++;
+            bool opened = prog >= 0 && !(d.EmgCtx.Prog == prog && d.EmgCtx.Chain > 0);
+            int chain = prog < 0 ? 0 : opened ? es.NextChain++ : d.EmgCtx.Chain;
             d.EmgS[0] = es;
+            if (opened)
+            {
+                EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, d.Id[i], from); // EMG1-CHAIN-01
+            }
             d.Projectiles.Add(new CombatProjectile
             {
                 Id = id,

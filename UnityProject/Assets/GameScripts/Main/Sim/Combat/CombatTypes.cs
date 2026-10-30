@@ -1327,6 +1327,9 @@ namespace BinGames.Sim.Combat
         public float EmgPushDMin;
         public float EmgKnockSeconds;
         public float EmgShoveRefMass;
+        /// <summary>EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁按“已标记”偏好确实跳到已标记目标时计数用的图鉴条目稳定键（热更层按 fg.TbReaction 写；0 = 不计）。
+        /// 内核不认内容 ID，只认这个数（FGR-EMG-013）。</summary>
+        public int EmgMarkTagKey;
 
         public static CombatConfig Default => new CombatConfig
         {

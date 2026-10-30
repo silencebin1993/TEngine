@@ -260,10 +260,14 @@ namespace BinGames.Sim.Combat
                 Chain = d.EmgCtx.Prog >= 0 ? d.EmgCtx.Chain : 0, Id = es.NextWreckId++,
             };
             w.Profile = (short)EmgUnitProfileIndex(ref d, t);
+            // EMG1-CHAIN-01：残骸继承击毁它的那条链（Key = 残骸 Id，Aux = 来源单位种类，源 = 被击毁者，Other = 击毁者）；击毁者另持久存在残骸上
+            int killer = d.EmgCtx.Owner >= 0 && d.EmgCtx.Owner < d.Count ? d.Id[d.EmgCtx.Owner] : d.EmgUnit[t].LastHitBy;
+            w.Killer = killer;
             es.WrecksBorn++;
             es.HashDirty = 1;
             d.EmgS[0] = es;
             d.Wrecks.Add(w);
+            EmgChainLog(ref d, EmgChainNode.Wreck, w.Chain, d.EmgCtx.Depth, w.Id, d.Id[t], w.Pos, killer, d.Kind[t]);
         }
 
         /// <summary>单位穿过残骸减速（FGR-EMG-113 作用 2）：单位中心在一块有耐久的残骸圆内时速度 × emg.wreck.slow；空中单位不受影响。不改寻路网格。</summary>
@@ -342,9 +346,12 @@ namespace BinGames.Sim.Combat
                 st.DepthCut++;
                 st.LastDepthCutChain = chain;
                 d.EmgStats[0] = st;
+                EmgChainLog(ref d, EmgChainNode.DepthCut, chain, depth, d.Wrecks[w].Id, ownerId, d.Wrecks[w].Pos, 0, 0, d.Wrecks[w].Chain); // EMG1-CHAIN-01
                 return;
             }
             EmgWreck k = d.Wrecks[w];
+            // EMG1-CHAIN-01：破片走打击者的链，Parent = 残骸的链（跨机结果在因果链里同时显示各台机器）；Key = 残骸 Id，Aux = 片数
+            EmgChainLog(ref d, EmgChainNode.Fragment, chain > 0 ? chain : k.Chain, (byte)(depth + 1), k.Id, ownerId, k.Pos, 0, (byte)math.min(ep.FragCount, 255), chain > 0 ? k.Chain : 0);
             float2 fwd = math.lengthsq(dir) > 1e-12f ? math.normalize(dir) : new float2(0f, 1f);
             double2 from = k.Pos + (double2)(fwd * (k.Radius + 0.15f));
             for (int q = 0; q < ep.FragCount; q++)

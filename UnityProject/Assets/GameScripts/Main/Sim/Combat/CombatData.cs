@@ -326,6 +326,18 @@ namespace BinGames.Sim.Combat
         public byte EmgMergeCont;
         /// <summary>EMG1-TRIG-01（ADR ③ / ⑤）：EmgHash——障碍圆与残骸圆的派生空间哈希（不进快照；障碍 / 残骸变化时置脏 <see cref="EmgScalars.HashDirty"/>，下次查询时重建）。</summary>
         public EmgHash EmgHash;
+        // ── EMG1-CHAIN-01（FGR-EMG-067 / 180；ADR ⑨）──
+        /// <summary>因果链环形记录（<see cref="EmgConst.ChainRing"/> 条）与环头（[0] = 下一条写到哪、[1] = 已有几条）。不进快照、不进状态哈希；读档换一份新数据时天然为空。</summary>
+        public NativeArray<EmgChainRec> EmgRing;
+        public NativeArray<int> EmgRingHead;
+        /// <summary>可靠计数（进快照，Emg 段 15 / 16）：规则计数槽（按稳定键开放寻址，槽位本场不挪）与按事件码的入队计数（下标 = 事件码）。</summary>
+        public NativeArray<int> EmgRuleKey;
+        public NativeArray<int> EmgRuleCount;
+        public NativeArray<long> EmgPortCount;
+        /// <summary>规则计数槽的进给（不进快照）、本步有变化的槽（脏列表；热更层每步只读它）与去重标记。脏列表在下一步开始时去掉上一步已交出去的部分（两步之间的即时调用留到下一步一起交）。</summary>
+        public NativeArray<EmgRuleFeed> EmgRuleFeed;
+        public NativeList<short> EmgDirty;
+        public NativeArray<byte> EmgDirtyMark;
 
         public bool IsCreated => Id.IsCreated;
 

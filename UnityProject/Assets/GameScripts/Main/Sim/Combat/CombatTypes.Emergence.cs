@@ -64,6 +64,12 @@ namespace BinGames.Sim.Combat
         public const int SegEchoes = 13;
         /// <summary>EMG1-FLASH-01（FGR-EMG-036；ADR ③）：刷写变体表（每把无人机武器 “截到 k 条 / 剥离核心后截到 k 条” 的执行武器下标 + 剥离换算），一条记录一个 int。</summary>
         public const int SegFlash = 14;
+        /// <summary>EMG1-CHAIN-01（FGR-EMG-067 / 180；ADR ⑨）：可靠计数——按稳定键的规则计数槽（一条记录 = 键 + 次数）与按事件端口的入队计数（一条记录 = 次数，下标 = 事件码）。</summary>
+        public const int SegRuleCounts = 15;
+        public const int SegPortCounts = 16;
+        /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
+        public const int ChainRing = 256;
+        public const int RuleSlots = 256;
         // ── EMG1-FLASH-01（FGR-EMG-036；fg.TbHomeTuning emg.flash.*）：刷写带宽初值（运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）──
         public const int DefaultFlashBandwidth = 8;
         public const float DefaultFlashRange = 8f;
@@ -568,6 +574,8 @@ namespace BinGames.Sim.Combat
         /// <summary>推动它的单位 ID（撞击伤害的攻击者）与原因端口码。</summary>
         public int PushBy;
         public ushort PushCause;
+        /// <summary>EMG1-CHAIN-01（ADR ⑨ 产物归属，修复轮）：击毁者单位 ID（持久，进残骸段第 27 个字段；占 PushCause 后的对齐空位，结构仍 120 字节）。环被覆盖 / 读档后悬停“谁造成的”至少还有它。0 = 不明。</summary>
+        public int Killer;
 
         /// <summary>实体档案下标（继承原单位；−1 = 种类默认）。不钳位：−2 这类坏值照原样留着，由校验拒绝。</summary>
         public short Profile
@@ -575,6 +583,56 @@ namespace BinGames.Sim.Combat
             get => (short)(ProfileRef - 1);
             set => ProfileRef = (short)(value + 1);
         }
+    }
+
+    /// <summary>EMG1-CHAIN-01（FGR-EMG-180；ADR ⑨）：因果链节点种类。ADR 列的出手 / 触发 / 规则 / 相变 / 转发 / 合并 / 教义之外，阶段 1 还记热更注入、残骸、破片与链深截断（因果链末端“链深已达上限”）。</summary>
+    public enum EmgChainNode : byte
+    {
+        None = 0,
+        Shot = 1,
+        Trigger = 2,
+        Rule = 3,
+        Phase = 4,
+        Relay = 5,
+        Merge = 6,
+        Doctrine = 7,
+        Inject = 8,
+        Wreck = 9,
+        Fragment = 10,
+        DepthCut = 11,
+    }
+
+    /// <summary>
+    /// EMG1-CHAIN-01（FGR-EMG-180；ADR ⑨）：一条因果链记录，48 字节、只含值类型。每地点 <see cref="EmgConst.ChainRing"/> 条环形缓冲，满了覆盖最旧的；
+    /// <b>不进快照、不进 StateHash</b>（与“反应日志不存档”一致），读档后从空环开始。热更层只在打开因果链叠加 / 悬停时读（O(环长)）。
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgChainRec
+    {
+        public int Chain;
+        /// <summary>引起它的另一条链（跨链：破片的链是打击者的，Parent = 残骸的链；没有 0）。</summary>
+        public int Parent;
+        public EmgChainNode Kind;
+        public byte Depth;
+        /// <summary>1 字节附加码（触发：子代号；破片：片数；反应装甲块位，ADR ⑨ 2026-10-26）。</summary>
+        public byte Aux;
+        public byte Pad0;
+        /// <summary>端口码或规则稳定键（出手 0；触发 = 唤起的事件码；规则 = 稳定键；残骸 = 来源单位种类；注入 = 事件码）。</summary>
+        public int Key;
+        /// <summary>源单位 ID（出手者 / 打击者 / 被击毁者；0 = 不明）。</summary>
+        public int SrcUnit;
+        /// <summary>第二个单位 ID（规则：目标；残骸：击毁者；其余 0）。</summary>
+        public int Other;
+        public double2 Pos;
+        public double Time;
+    }
+
+    /// <summary>EMG1-CHAIN-01：规则计数槽的反馈进给（最后一次的位置 / 来源 / 目标；不进快照，热更层弹字与日志用）。</summary>
+    public struct EmgRuleFeed
+    {
+        public double2 Pos;
+        public int Src;
+        public int Target;
     }
 
     /// <summary>EMG1-ENT-01（ADR ⑦ 第 5 条“合并请求”）：一步内某个外部血量单位累计的持续类伤害（区域节拍 / 状态持续伤害 / 斑块接触），步末合成一条伤害请求。瞬时量，不进快照。</summary>

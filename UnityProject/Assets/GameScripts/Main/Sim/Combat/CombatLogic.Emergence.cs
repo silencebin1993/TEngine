@@ -101,6 +101,7 @@ namespace BinGames.Sim.Combat
             {
                 st.Merged++;
                 d.EmgStats[0] = st;
+                d.EmgPortCount[(int)e.Kind] = d.EmgPortCount[(int)e.Kind] + 1; // 合并的计数不丢（EMG1-CHAIN-01 端口计数同口径）
                 return;
             }
             if (pending >= EmgConst.BusCapacity)
@@ -109,7 +110,8 @@ namespace BinGames.Sim.Combat
                 d.EmgStats[0] = st;
                 return;
             }
-            if (e.Chain == 0)
+            bool opened = e.Chain == 0;
+            if (opened)
             {
                 e.Chain = es.NextChain++;
             }
@@ -121,6 +123,11 @@ namespace BinGames.Sim.Combat
             st.MaxPending = math.max(st.MaxPending, pending + 1);
             d.EmgStats[0] = st;
             d.EmgKindEnq[(int)e.Kind] = d.EmgKindEnq[(int)e.Kind] + 1;
+            d.EmgPortCount[(int)e.Kind] = d.EmgPortCount[(int)e.Kind] + 1; // EMG1-CHAIN-01：按端口的可靠计数（进快照）
+            if (opened)
+            {
+                EmgChainLog(ref d, EmgChainNode.Inject, e.Chain, e.Depth, (int)e.Kind, e.EntKind == EmgEntKind.Unit ? e.Ent : 0, e.Pos); // 不在任何出手里的事件开新链
+            }
         }
 
         /// <summary>积压保护（ADR ④）：先找同一步、同类同源（宿主程序 / 节点 / 实体 / Code 相同）的一条，找不到再找队尾 MergeScan 条里同类的一条；Value 累加、Code2 记合并数。
@@ -263,6 +270,7 @@ namespace BinGames.Sim.Combat
             st.DepthCut++;
             st.LastDepthCutChain = parent.Chain;
             d.EmgStats[0] = st;
+            EmgChainLog(ref d, EmgChainNode.DepthCut, parent.Chain, parent.Depth, (int)parent.Kind, parent.EntKind == EmgEntKind.Unit ? parent.Ent : 0, parent.Pos); // EMG1-CHAIN-01：链尾“链深已达上限”
             return false;
         }
 
@@ -353,6 +361,7 @@ namespace BinGames.Sim.Combat
             EmgScalars es = d.EmgS[0];
             int chain = es.NextChain++;
             d.EmgS[0] = es;
+            EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, EmgIdOf(ref d, owner), from); // EMG1-CHAIN-01：一次出手开一条链
             d.EmgCtx = new EmgCtx { Prog = prog, Chain = chain, Ent = ent, Owner = owner, Node = 0, Depth = 0, EntKind = kind, HurtSrc = src, HitCode = EmgCode.HitDirect };
             if (d.EmgListen == 0u)
             {

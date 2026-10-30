@@ -581,7 +581,7 @@
 | 19 | `evt.pickup` | 拾取 | 机器拾取掉落、废料或碎屑 | Unit，Code=物品类 | 热更注入；物质层（碎屑） | 是 | 否 | 无 |
 | 20 | `evt.impact` | 撞击 | 被推动的实体以 ≥ `emg.impact.v_min`（4 米 / 秒）撞上障碍、残骸或另一实体 | Entity，Other，Pos，Value=速度，Value2=质量 | 实体层 | 是 | 否 | 无（`WallImpact` 标签无消费方） |
 | 21 | `evt.push` | 位移 | 实体被击退 / 牵引 / 场推动超过 `emg.push.d_min`（0.5 米） | Entity，Pos，Value=距离，Code=原因端口码 | 格场布；场 | 是 | 否 | 无 |
-| 22 | `evt.react` | 反应 | 一条通道规则结算；或连锁跳转按“只跳已标记”过滤确实跳到已标记目标（`reaction_marktag`，无规则行，FGR-EMG-084） | Code=规则下标，StableKey，Pos，Unit / Patch | 物质层、相变层、场；连锁结算（`fw_marktag`，阶段 1） | 是 | 否 | `TagReaction`(42，提示) |
+| 22 | `evt.react` | 反应 | 一条通道规则结算；或连锁跳转按“只跳已标记”过滤确实跳到已标记目标（`reaction_marktag`，无规则行，FGR-EMG-084） | Code=规则计数槽下标（稳定键经 `EmgRuleKeyAt(Code)` 取），Value=累计次数，Pos，Unit / Patch | 物质层、相变层、场；连锁结算（`fw_marktag`，阶段 1） | 是 | 否 | `TagReaction`(42，提示) |
 | 23 | `evt.phase` | 相变 | 单位或斑块相态 / 物质改变 | Entity / Patch，Code=新相，Code2=旧相 | 相变层 | 是 | 否 | 无可靠事件（云端 `Frozen` 是开火结果码 `CombatFireResult`，冻结通知是可丢的提示事件 `ClarityCue` Code 7，ADR-EMG-001 第 7 节第 1 条） |
 | 24 | `evt.absorb` | 吸收 | 弹体被护盾、残骸、固态斑块吸收 | Absorber，Src，Pos，Value | 护盾、残骸、固态斑块 | 是 | 否 | `ShieldAbsorb`(43) |
 | 25 | `evt.hijack` | 劫持 | 敌机被重启为己方 | Unit，Hijacker | 劫持层 | 是 | 否 | 无 |
@@ -684,7 +684,7 @@
 
 **FGR-EMG-084 表驱动：规则只写在端口 × 端口之间**
 - 物质 × 物质、物质 × 能量、事件 × 物质、属性 × 场、相态 × 能量等全部写在 `fg.TbChannelRule`（字段见 FGR-EMG-020），按 `pairKind` 区分：`matter_matter`、`matter_energy`、`event_matter`、`phase_energy`、`prop_field`、`coat_matter`、`matter_entity`（物质 × 实体端口，如残骸在酸 / 污泥斑块里，FG19B W01、W02）。`coat_matter` 的 `b` 可以是物质端口、能量端口或另一个沾染位（单位层“沾染 × 能量”“沾染 × 沾染”，FG19B C01～C08、第 9 节第 2 条）。没有 `event_event` 取值：标记跳转不设规则行，由 FG19A `fw_marktag` 自己写的“只跳已标记”`grm.mod.chain` 承接，每次确实跳到已标记目标时发 `evt.react` 按稳定键 `reaction_marktag` 计入图鉴（FG19B §4.1 A1；FG19B 规则表共 61 行）。
-  - 阶段 1 计数路径（`fw_marktag` 的 `stageGate` = 1，早于规则引擎 EMG2-RULE-01）：连锁动词（`grm.mod.chain`，EMG1-GRM-01）按“只跳已标记”过滤确实跳到已标记目标时入队 `evt.react`（`Code` = `reaction_marktag` 的稳定键）；内核按稳定键累加可靠计数并写进脏列表（FGR-EMG-067），热更层只读脏列表、沿用现有按 `StableKey` 的反应计数与首次触发记录（`ReactionFirstTriggers`）。交付卡 **EMG1-CHAIN-01**（可靠计数与脏列表；EMG1-BUS-01 的生产者清单把这一条指向它），验收并入 FGT-EMG-020 与 FGT-EMG-023。`fw_marktag` 走声明轨后，旧装配反应 `DetectMarkJump` 对同一武器不再结算跳转与计数（同一 owner 单轨，FGR-EMG-019），同一次跳转不得计两次；`MechanicalReactionCatalog` 的 ID 配对代码按 FGR-EMG-021 在阶段 2 删除。
+  - 阶段 1 计数路径（`fw_marktag` 的 `stageGate` = 1，早于规则引擎 EMG2-RULE-01）：连锁动词（`grm.mod.chain`，EMG1-GRM-01）按“只跳已标记”过滤确实跳到已标记目标时入队 `evt.react`（`Code` = 计数槽下标，稳定键经 `CombatKernel.EmgRuleKeyAt(Code)` 取——ushort 放不下 32 位稳定键；2026-10-29 EMG1-CHAIN-01 修复轮统一口径）；内核按稳定键累加可靠计数并写进脏列表（FGR-EMG-067），热更层只读脏列表、沿用现有按 `StableKey` 的反应计数与首次触发记录（`ReactionFirstTriggers`）。交付卡 **EMG1-CHAIN-01**（可靠计数与脏列表；EMG1-BUS-01 的生产者清单把这一条指向它），验收并入 FGT-EMG-020 与 FGT-EMG-023。`fw_marktag` 走声明轨后，旧装配反应 `DetectMarkJump` 对同一武器不再结算跳转与计数（同一 owner 单轨，FGR-EMG-019），同一次跳转不得计两次；`MechanicalReactionCatalog` 的 ID 配对代码按 FGR-EMG-021 在阶段 2 删除。
 - 内核只认端口码、物质码、阈值、产物码，不认规则名（与现有 `CombatReactionRule` 只认状态位同一原则，`CombatTypes.cs:129-148`）。规则上限由现在的 32（`CombatConst.MaxReactions`）扩到 `emg.rule.capacity`（256），扩容方式由 ADR-EMG-001 定。
 - 一块斑块 / 一个单位同一时刻满足多条规则时，按 `priority` 只结算最小的一条，其余留给下一个节拍（沿用现规则，`FG02:142`）。
 
@@ -991,11 +991,12 @@
 - 每次出手、每次世界源排放分配一个因果链 ID；其后代事件、载荷、斑块、实体、规则结算都继承它（FGR-EMG-061）。合并的斑块记“合并自链 X、Y”。
 - 内核每地点保留最近 `emg.chain.ring`（256）条链记录（环形缓冲，只含值类型）：链 ID、父链、节点种类（出手 / 触发 / 规则 / 相变 / 转发）、端口或规则 `StableKey`、源单位、位置、时刻、链深。
 - 热更层只在玩家打开面板或悬停时读取（O(环长)），不按帧读。链记录不进存档（与“反应日志不存档”一致，`FG02:258`）；可靠计数照常进存档（FGR-EMG-067）。
+- 阶段 1 落地口径（EMG1-CHAIN-01，2026-10-29）：可靠计数在快照格式 16 的 Emg 段新开段 15（规则计数槽：槽下标 + 稳定键 + 次数，槽位本场不挪）与段 16（按事件码的入队计数），按 ADR ⑩ 自描述段约定不升 `FormatVersion`；实体种类计数取各实体稳定 ID 的发号器（已在快照里）。`evt.react` 的 `Code` = 计数槽下标（ushort 放不下 32 位稳定键，稳定键经槽下标取）、`Other` = 目标单位、`Value` = 累计次数。产物上的持久 `Owners` 字段随 EMG2-MAT-01 斑块落地；阶段 1 的归属（4 个规则）由环记录派生（DEBT-EMG1CHAIN01-02）。“只跳已标记”的计数口径：连锁指令带“已标记”偏好且这一跳确实落在已标记目标上即计（`[电弧, 标记跳转]` 合并后先跳已标记的那一跳同样计）。
 - 因果链里的每个自动动作都能显示来源：“由 A 车（漏油）留下 → 由 B 车（燃迹）点燃 → 规则：爆燃 → 燃烧区”；中继转发显示“由中继转发”；教义动作显示“由教义触发”。
 
 **FGR-EMG-181 战斗中查看**
 - 悬停斑块、残骸、单位相态图标：显示“这是什么、谁造成的、接下来会怎样”（例：“油 · 来自 A 车 · 遇明火会整片燃烧”）。
-- “因果链”键（可重绑；临时默认键 `T`，登记进战略与接入两个输入上下文，开工先与 `InputBindingSet` 做冲突检查，冲突时改取 FG13 第 5 节默认快捷键表未占用的键；正式默认键位由 FG15-UX-01 定，DEBT-EMG1CHAIN01-01）：在光标附近叠加显示最近 N 条链的连线与文字；战略暂停中可用（B09）。
+- “因果链”键（可重绑；临时默认键 `T`，登记进战略与接入两个输入上下文，开工先与 `InputBindingSet` 做冲突检查，冲突时改取 FG13 第 5 节默认快捷键表未占用的键；正式默认键位由 FG15-UX-01 定，DEBT-EMG1CHAIN01-01）：在光标附近叠加显示最近 N 条链的连线与文字；战略暂停中可用（B09）。EMG1-CHAIN-01 冲突检查结果（2026-10-29）：`T` 在战略上下文已是“命令：攻击”（FG0-UX-01 并入的旧动作），临时默认键改为未占用的 `Ctrl+T`；N = `emg.chain.overlay_chains`（4，叠加最多 8 行）。
 - 首次触发某条交互时沿用 FGR-FW-043 的慢放、镜头轻推与弹名字（慢放只在镜头正看着该地点时发生，三个开关在暂停菜单“战斗反馈”）。
 - 大量结算时聚合显示（“爆燃 ×12”），每秒弹字上限沿用 6 条。统一用字“爆燃”，GDD 与 FG02 里的“燃爆”在第 4 步改为“爆燃”。
 

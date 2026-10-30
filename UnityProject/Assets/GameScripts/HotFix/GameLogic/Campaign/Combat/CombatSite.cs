@@ -243,6 +243,7 @@ namespace GameLogic.Campaign.Combat
         public void Dispose()
         {
             StatusTagHover.Leave(this);
+            UI.Kit.CausalChainOverlay.CloseFor(this);
             Renderer?.Dispose();
             Renderer = null;
             Sync?.Dispose();
@@ -325,6 +326,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgPushDMin = Mathf.Max(0.01f, Tuning("emg.push.d_min", EmgConst.DefaultPushDMin));
             c.EmgKnockSeconds = Mathf.Max(0.02f, Tuning("emg.push.knock_seconds", EmgConst.DefaultKnockSeconds));
             c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
+            // EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁“只跳已标记”确实跳到已标记目标时记在哪个图鉴条目上（按稳定键；内核不认内容 ID）。
+            c.EmgMarkTagKey = NamedReactionCatalog.StableKey(MechanicalReactionCatalog.ReactionMarkJumpId);
             return c;
         }
 
@@ -1210,7 +1213,10 @@ namespace GameLogic.Campaign.Combat
             float rawHeatI = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, p.FirmwareHeatPerShot) * rawHeatI;
             w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
-            if (!suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
+            // EMG1-CHAIN-01（FGR-EMG-084 / 019 同一 owner 单轨）：触发这条装配反应的固件已走声明轨（它的 grm.mod.chain“只跳已标记”在程序里跳、在内核计数），
+            // 旧装配反应对同一武器不再结算跳转与计数——同一次跳转不计两次。没走声明轨（emg.stage = 0 的正式流程）逐字同旧。
+            if (!suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId
+                && !Emergence.EmgCatalog.IsOwnerOnDeclTrack(MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId)))
             {
                 w.Reaction = CombatReaction.MarkJump;
                 w.JumpRange = FracturedCityLayout.MarkJumpRange;
@@ -2501,12 +2507,15 @@ namespace GameLogic.Campaign.Combat
             }
             // FG2-FW-03（FGR-FW-031）：光标下带标签的单位 → 悬停读数（名称 / 剩余时间 / 叠层）。
             StatusTagHover.Tick(this, camera);
+            // EMG1-CHAIN-01（FGR-EMG-181）：“因果链”键开 / 关光标附近的因果链叠加（只在打开时读环）。
+            UI.Kit.CausalChainOverlay.Tick(this, camera);
         }
 
         /// <summary>离开观察：释放 GPU 资源（表现对象由地点自己销毁）。</summary>
         public void ReleaseRender()
         {
             StatusTagHover.Leave(this);
+            UI.Kit.CausalChainOverlay.CloseFor(this);
             Sync?.Clear();
             Renderer?.Dispose();
             Renderer = null;

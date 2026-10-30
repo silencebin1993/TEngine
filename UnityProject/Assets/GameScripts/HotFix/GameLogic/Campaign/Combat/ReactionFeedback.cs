@@ -21,6 +21,8 @@ namespace GameLogic.Campaign.Combat
         internal readonly double[] Hostile = new double[CombatConst.MaxReactions]; // 与内核同为 double：长时间累计不丢精度
         internal double Total;
         internal readonly long[] Reading = new long[CombatConst.ReadingFeedKinds];
+        /// <summary>EMG1-CHAIN-01：内核可靠计数槽（按稳定键）的基线。</summary>
+        internal readonly int[] Emg = new int[EmgConst.RuleSlots];
     }
 
     /// <summary>
@@ -121,7 +123,32 @@ namespace GameLogic.Campaign.Combat
                 }
                 OnReading(k, kind, d, observed, now);
             }
+
+            // EMG1-CHAIN-01（FGR-EMG-067）：涌现规则的可靠计数——只读脏列表（O(本步变化的槽)），沿用按稳定键的反应计数、首次触发记录与弹字聚合。
+            int dirty = k.EmgDirtyCount;
+            for (int j = 0; j < dirty; j++)
+            {
+                int slot = k.EmgDirtyAt(j);
+                int c = k.EmgRuleCountAt(slot);
+                int dc = c - cur.Emg[slot];
+                cur.Emg[slot] = c;
+                if (dc <= 0)
+                {
+                    continue;
+                }
+                EmgRuleSeen += dc;
+                string rid = NamedReactionCatalog.IdOfKey(k.EmgRuleKeyAt(slot));
+                if (rid == null)
+                {
+                    continue;
+                }
+                EmgRuleFeed f = k.EmgRuleFeedAt(slot);
+                OnCountedReaction(site, state, rid, dc, f.Src, f.Target, new Vector2((float)f.Pos.x, (float)f.Pos.y), observed, now);
+            }
         }
+
+        /// <summary>本进程经脏列表处理到的涌现规则次数（自检对照内核计数）。</summary>
+        public static long EmgRuleSeen { get; private set; }
 
         /// <summary>纪元变了（读档 / 重新登记规则）或第一次：把内核当前的累计值当基线，不产生反馈。</summary>
         public static void Prime(CombatKernel k, ReactionFeedCursor cur)
@@ -135,6 +162,10 @@ namespace GameLogic.Campaign.Combat
             for (int kind = 0; kind < CombatConst.ReadingFeedKinds; kind++)
             {
                 cur.Reading[kind] = k.ReadingFeedCountOf(kind);
+            }
+            for (int i = 0; i < EmgConst.RuleSlots; i++)
+            {
+                cur.Emg[i] = k.EmgRuleCountAt(i);
             }
             cur.Epoch = k.FeedEpoch;
             cur.Primed = true;
@@ -203,9 +234,18 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
-            ReactionsSeen++;
+            OnCountedReaction(site, state, reactionId, 1, sourceUnit, targetUnit, ground, IsObserved(site.SiteId), RealTime());
+        }
+
+        /// <summary>
+        /// 按次数结算一条没有标签规则行的反应（装配反应一次一条；EMG1-CHAIN-01 涌现规则按脏列表一次 <paramref name="count"/> 条）：日志与归因记 count 次（这类反应的额外伤害不单独计），
+        /// 本存档第一次报出名字时写首次触发、镜头看着这个地点时慢放 / 推镜头；弹字同键聚合“标记跳转 ×200”、每秒新开上限沿用 reaction.popup_per_second。
+        /// </summary>
+        private static void OnCountedReaction(CombatSite site, CampaignState state, string reactionId, int count, int sourceUnit, int targetUnit, Vector2 ground, bool observed, float now)
+        {
+            ReactionsSeen += count;
             bool named = NamedReactionCatalog.IsNamed(state, reactionId);
-            ReactionAttribution.AddReaction(state, site.SiteId, reactionId, 1, 0);
+            ReactionAttribution.AddReaction(state, site.SiteId, reactionId, count, 0);
             bool first = named && RecordFirst(state, reactionId, site.SiteId);
             ReactionLogParty source = Party(site, state, sourceUnit);
             ReactionLog.Add(state, new ReactionLogEntry
@@ -216,19 +256,18 @@ namespace GameLogic.Campaign.Combat
                 ReactionId = reactionId,
                 Named = named,
                 First = first,
-                Count = 1,
+                Count = count,
                 Source = source,
                 Target = Party(site, state, targetUnit),
                 FirmwareIds = FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>(),
                 Position = ground,
             });
             Revision++;
-            if (!named || !IsObserved(site.SiteId))
+            if (!named || !observed)
             {
                 return;
             }
-            float now = RealTime();
-            if (ReactionPopups.Push(PopupKey(reactionId), NamedReactionCatalog.NameOf(reactionId), 1, new Vector3(ground.x, PopupHeight, ground.y), first, false, now))
+            if (ReactionPopups.Push(PopupKey(reactionId), NamedReactionCatalog.NameOf(reactionId), count, new Vector3(ground.x, PopupHeight, ground.y), first, false, now))
             {
                 PopupPushes++;
             }
@@ -346,7 +385,7 @@ namespace GameLogic.Campaign.Combat
 
         // ─────────────────────────────── 日志辅助 ───────────────────────────────
 
-        private static ReactionLogParty Party(CombatSite site, CampaignState state, int unitId)
+        internal static ReactionLogParty Party(CombatSite site, CampaignState state, int unitId)
         {
             var p = new ReactionLogParty();
             if (unitId <= 0)

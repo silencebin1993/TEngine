@@ -470,6 +470,9 @@ namespace GameLogic.EditorTools
                 case 458: StepLootPickPrepare(inStep); break;
                 case 459: StepLootPickPanel(inStep); break;
                 case 460: StepLootPickClosed(inStep); break;
+                // EMG1-CHAIN-01（FGR-EMG-181）：家园战略上下文按因果链键（临时默认 Ctrl+T）开叠加 → 面板可见、读了环 → 再按一次关闭
+                case 473: StepCausalChainOpened(inStep); break;
+                case 474: StepCausalChainClosed(inStep); break;
                     case 346: StepOverridePicked(inStep); break;
                     case 347: StepOverridePlaced(inStep); break;
                     case 348: StepOverridePanel(inStep); break;
@@ -12506,6 +12509,45 @@ namespace GameLogic.EditorTools
             string wantCount = heldNow > 0 ? Localization.GameText.Format("loot.pick.hud.held", heldNow) : string.Empty;
             Check(!LootPickPanelUIToolkit.IsOpen && none && count == wantCount,
                 $"Esc 关闭待分拣面板（IsOpen={LootPickPanelUIToolkit.IsOpen}）；没有数据包后顶栏只剩货舱件数（远征带回 {heldNow} 件，没有时隐藏）（“{count}”）");
+            SessionState.SetInt(K + "ChainReads", UI.Kit.CausalChainOverlay.Reads);
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.CausalChain));
+            Next(473, $"EMG1-CHAIN-01：按因果链键 {InputDisplay.ForAction(GameActionId.CausalChain)} 打开光标附近的因果链叠加");
+        }
+
+        /// <summary>UiKitOverlay 上的因果链面板（CausalChainPanel）当前是否可见（不带 uk-hidden）。</summary>
+        private static VisualElement CausalChainPanelElement()
+        {
+            GameObject host = GameObject.Find("[UiKitOverlayHost]");
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            return doc?.rootVisualElement?.Q<VisualElement>("CausalChainPanel");
+        }
+
+        private static void StepCausalChainOpened(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            VisualElement panel = CausalChainPanelElement();
+            Label row0 = panel?.Q<Label>("CausalChainRow0");
+            int reads0 = SessionState.GetInt(K + "ChainReads", 0);
+            Check(UI.Kit.CausalChainOverlay.IsOpen && UI.Kit.CausalChainOverlay.Reads > reads0 && panel != null && !panel.ClassListContains("uk-hidden")
+                  && row0 != null && row0.text.Length > 0,
+                $"真实 Play 帧里按 {InputDisplay.ForAction(GameActionId.CausalChain)}（上下文 {InputRouter.ActiveContext}）：因果链叠加打开、读了环（{UI.Kit.CausalChainOverlay.LineCount} 条链），首行“{row0?.text}”");
+            CheckNoTextMarkers("因果链叠加");
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.CausalChain));
+            Next(474, "再按一次因果链键关闭叠加");
+        }
+
+        private static void StepCausalChainClosed(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            VisualElement panel = CausalChainPanelElement();
+            Check(!UI.Kit.CausalChainOverlay.IsOpen && UI.Kit.CausalChainOverlay.LineCount == 0 && panel != null && panel.ClassListContains("uk-hidden"),
+                $"再按因果链键关闭叠加（IsOpen={UI.Kit.CausalChainOverlay.IsOpen}，面板隐藏）");
             Next(406, "FG6-DEF-05：测试捷径——200 台突袭到达家园北面，攻城服务按编成展开");
         }
 

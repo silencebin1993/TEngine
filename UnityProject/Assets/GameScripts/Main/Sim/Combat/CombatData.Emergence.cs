@@ -46,6 +46,14 @@ namespace BinGames.Sim.Combat
             EmgEntParams[0] = EmgEntityParams.Default;
             EmgMerge = new NativeList<EmgMergeReq>(4, Allocator.Persistent);
             EmgMergeCont = 0;
+            EmgRing = new NativeArray<EmgChainRec>(EmgConst.ChainRing, Allocator.Persistent);
+            EmgRingHead = new NativeArray<int>(2, Allocator.Persistent);
+            EmgRuleKey = new NativeArray<int>(EmgConst.RuleSlots, Allocator.Persistent);
+            EmgRuleCount = new NativeArray<int>(EmgConst.RuleSlots, Allocator.Persistent);
+            EmgPortCount = new NativeArray<long>(EmgConst.EventKinds + 1, Allocator.Persistent);
+            EmgRuleFeed = new NativeArray<EmgRuleFeed>(EmgConst.RuleSlots, Allocator.Persistent);
+            EmgDirty = new NativeList<short>(8, Allocator.Persistent);
+            EmgDirtyMark = new NativeArray<byte>(EmgConst.RuleSlots, Allocator.Persistent);
         }
 
         private void EmgDispose()
@@ -69,6 +77,14 @@ namespace BinGames.Sim.Combat
             EmgProfiles.Dispose();
             EmgEntParams.Dispose();
             EmgMerge.Dispose();
+            EmgRing.Dispose();
+            EmgRingHead.Dispose();
+            EmgRuleKey.Dispose();
+            EmgRuleCount.Dispose();
+            EmgPortCount.Dispose();
+            EmgRuleFeed.Dispose();
+            EmgDirty.Dispose();
+            EmgDirtyMark.Dispose();
         }
 
         private void EmgAppend()
@@ -98,6 +114,26 @@ namespace BinGames.Sim.Combat
             EmgS[0] = EmgScalars.Initial; // 游标归 0、EmgHash 置脏（EmgScalars.Initial）
             EmgResetStats();
             EmgCtx = EmgCtx.None;
+            EmgClearChain();
+        }
+
+        /// <summary>EMG1-CHAIN-01：清因果链环、可靠计数、进给与脏列表（清战斗状态时；读档换一份新数据时天然为空 / 由快照填计数）。</summary>
+        internal void EmgClearChain()
+        {
+            EmgRingHead[0] = 0;
+            EmgRingHead[1] = 0;
+            for (int i = 0; i < EmgConst.RuleSlots; i++)
+            {
+                EmgRuleKey[i] = 0;
+                EmgRuleCount[i] = 0;
+                EmgRuleFeed[i] = default;
+                EmgDirtyMark[i] = 0;
+            }
+            for (int k = 0; k < EmgPortCount.Length; k++)
+            {
+                EmgPortCount[k] = 0;
+            }
+            EmgDirty.Clear();
         }
 
         /// <summary>EMG1-BUS-01：清调试计数（清战斗状态时；读档换一份新数据时天然为 0）。</summary>

@@ -535,12 +535,18 @@ namespace BinGames.Sim.Combat
             EmgEvent x = e;
             x.Seq = es.EmgSeq;
             es.EmgSeq = unchecked(es.EmgSeq + 1);
-            if (x.Chain == 0)
+            bool opened = x.Chain == 0;
+            if (opened)
             {
                 x.Chain = es.NextChain++;
             }
             _d.EmgS[0] = es;
             _d.EmgBus.Add(x);
+            if (opened)
+            {
+                CombatLogic.EmgChainLog(ref _d, EmgChainNode.Inject, x.Chain, x.Depth, (int)x.Kind, x.EntKind == EmgEntKind.Unit ? x.Ent : 0, x.Pos); // EMG1-CHAIN-01
+            }
+            _d.EmgPortCount[(int)x.Kind] = _d.EmgPortCount[(int)x.Kind] + 1;
             // EMG1-BUS-01：调试计数与内核生产点同一口径（入队数 / 峰值 / 每种入队数）。
             EmgBusStats st = _d.EmgStats[0];
             st.Enqueued++;
@@ -796,7 +802,7 @@ namespace BinGames.Sim.Combat
         private bool EmgActive()
         {
             EmgScalars ec = _d.EmgS[0];
-            if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0)
+            if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts())
             {
                 return true;
             }
@@ -823,7 +829,7 @@ namespace BinGames.Sim.Combat
         private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes)
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
-            w.Write(14 + (extraBytes > 0 ? 1 : 0)); // EMG1-FLASH-01：+ 段 14（刷写变体表）
+            w.Write(16 + (extraBytes > 0 ? 1 : 0)); // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -956,7 +962,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWrecks, 26, _d.Wrecks.Length);
+            sw.Begin(EmgConst.SegWrecks, 27, _d.Wrecks.Length);
             for (int i = 0; i < _d.Wrecks.Length; i++)
             {
                 EmgWreck k = _d.Wrecks[i];
@@ -986,6 +992,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(k.PushDist);
                 if (sw.F()) w.Write(k.PushBy);
                 if (sw.F()) w.Write(k.PushCause);
+                if (sw.F()) w.Write(k.Killer); // EMG1-CHAIN-01：尾部追加击毁者，短段读到取 0 = 不明
                 sw.EndRecord();
             }
             sw.End();
@@ -999,6 +1006,8 @@ namespace BinGames.Sim.Combat
                 sw.EndRecord();
             }
             sw.End();
+
+            WriteChainSegments(w, sw);
 
             if (extraBytes > 0)
             {
@@ -1457,6 +1466,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) k.PushDist = r.ReadSingle();
                         if (sr.F()) k.PushBy = r.ReadInt32();
                         if (sr.F()) k.PushCause = r.ReadUInt16();
+                        if (sr.F()) k.Killer = r.ReadInt32();
                         if (!sr.RecordOk)
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1466,6 +1476,10 @@ namespace BinGames.Sim.Combat
                     return CombatLoadResult.Ok;
                 case EmgConst.SegPending:
                     return ParsePending(r, sr, ref staging);
+                case EmgConst.SegRuleCounts:
+                    return ParseRuleCounts(r, sr, ref staging);
+                case EmgConst.SegPortCounts:
+                    return ParsePortCounts(r, sr, ref staging);
                 case EmgConst.SegFlash:
                     if (n > 1 << 20)
                     {

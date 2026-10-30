@@ -450,6 +450,7 @@ namespace BinGames.Sim.Combat
                     d.EmgCtx.HitCode = EmgCode.HitChain; // EMG1-BUS-01：连锁跳到的命中
                     DamageUnit(ref d, k, dmg, a);
                     d.EmgCtx.HitCode = hc;
+                    EmgMarkJumpReact(ref d, a, k, chainPref); // EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）
                     if (r.StatusMask != 0u)
                     {
                         ApplyStatus(ref d, k, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, a, dmg);

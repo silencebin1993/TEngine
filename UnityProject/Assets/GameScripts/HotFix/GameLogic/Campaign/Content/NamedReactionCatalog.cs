@@ -169,6 +169,23 @@ namespace GameLogic.Campaign.Content
             return h == 0u ? 1 : unchecked((int)h);
         }
 
+        /// <summary>EMG1-CHAIN-01：稳定键 → 反应 ID（内核可靠计数槽只存键；O(表行数)，只在某个槽本步有变化时调）。查不到返回 null。</summary>
+        public static string IdOfKey(int key)
+        {
+            if (key == 0)
+            {
+                return null;
+            }
+            foreach (Reaction row in Rows)
+            {
+                if (row != null && StableKey(row.Id) == key)
+                {
+                    return row.Id;
+                }
+            }
+            return null;
+        }
+
         /// <summary>每个状态位的效果（32 格；fg.TbStatusTag 主标签的 effect / amount）。</summary>
         public static CombatStatusFx[] BuildStatusFx()
         {

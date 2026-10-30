@@ -604,6 +604,7 @@ namespace BinGames.Sim.Combat
                 hitList.Add(k);
                 dmg *= m.ChainFalloff > 0f ? m.ChainFalloff : 1f;
                 DamageUnit(ref d, k, dmg, owner);
+                EmgMarkJumpReact(ref d, owner, k, m.ChainPref); // EMG1-CHAIN-01：按“已标记”偏好跳到已标记目标 → reaction_marktag 计数 + evt.react
                 at = d.Pos[k];
             }
             d.EmgCtx.HitCode = hc;

@@ -27,6 +27,7 @@ namespace GameLogic.UI.Kit
             UiTooltip.BindView(root);
             UiContextMenu.BindView(root);
             UiDragDrop.BindView(root);
+            CausalChainOverlay.BindView(root); // EMG1-CHAIN-01
         }
 
         private void Update()
@@ -46,6 +47,7 @@ namespace GameLogic.UI.Kit
             UiTooltip.UnbindView();
             UiContextMenu.UnbindView();
             UiDragDrop.UnbindView();
+            CausalChainOverlay.UnbindView();
             if (Instance == this)
             {
                 Instance = null;

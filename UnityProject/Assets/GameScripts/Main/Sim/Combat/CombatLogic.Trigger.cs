@@ -227,6 +227,8 @@ namespace BinGames.Sim.Combat
                 return;
             }
             EmgStat(ref d, 0);
+            // EMG1-CHAIN-01：触发放出子载荷（链深 + 1；Key = 唤起它的事件码，Aux = 子代号）
+            EmgChainLog(ref d, EmgChainNode.Trigger, e.Chain, (byte)(e.Depth + 1), (int)e.Kind, e.EntKind == EmgEntKind.Unit ? e.Ent : 0, e.Pos, 0, gen);
             // evt.split：宿主 = 母载荷（Node = 父节点），Value = 份数，Code = 子代号；链深 + 1。只在宿主节点读它时入队（FGR-EMG-062）。
             if (EmgSiteListens(ref d, EmgEventKind.Split) && EmgReadSlot(ref d, e.Prog, e.Node, EmgEventKind.Split) >= 0)
             {
@@ -727,6 +729,7 @@ namespace BinGames.Sim.Combat
                 EmgScalars es0 = d.EmgS[0];
                 chain = es0.NextChain++;
                 d.EmgS[0] = es0;
+                EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, d.Id[a], d.Pos[a]); // EMG1-CHAIN-01
             }
             double2 aim = d.Pos[t] - d.Pos[a];
             for (int q = 0; q < pellets; q++)
@@ -752,6 +755,7 @@ namespace BinGames.Sim.Combat
                 EmgScalars es = d.EmgS[0];
                 chain = es.NextChain++;
                 d.EmgS[0] = es;
+                EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, d.Id[a], d.Pos[a]); // EMG1-CHAIN-01
             }
             EmgStat(ref d, 2);
             d.EmgPending.Add(new EmgSpawn
@@ -795,11 +799,16 @@ namespace BinGames.Sim.Combat
             double2 start = from + (double2)(dir * (fromRadius + wp.ProjectileRadius));
             EmgScalars es = d.EmgS[0];
             int id = es.NextProjId++;
-            if (chain == 0 && wp.Program >= 0)
+            bool opened = chain == 0 && wp.Program >= 0;
+            if (opened)
             {
                 chain = es.NextChain++;
             }
             d.EmgS[0] = es;
+            if (opened)
+            {
+                EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, ownerId, from); // EMG1-CHAIN-01
+            }
             // 寿命显式由热更层写（射程 ÷ 弹速 × 1.2，FG19A 第 2.1.1 节）；不依赖 0 值语义。弹速缺值时弹体不动、寿命到即止——不退回即时命中（缺值由表校验与 FgChannelAdmissionSelfCheck 拦下）。
             float life = wp.ProjectileLife > 0f ? wp.ProjectileLife : wp.Range * 1.2f / math.max(0.01f, wp.ProjectileSpeed);
             var pr = new CombatProjectile

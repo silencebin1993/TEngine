@@ -800,6 +800,9 @@ namespace GameLogic.EditorTools
             // EMG1-ENT-01：实体公共属性、残骸、破片与撞击（FGT-EMG-037 阶段 1 / 016 / 020 / 040）——表值与下发、残骸生成 / 只生成一次、挡弹 / 反弹 / 破片、
             // 容量 256 与 90 秒崩解、穿过减速、击退撞击 / 推铲、合并请求、存读档与短段、暂停与倍速、种子无关、耗时。
             Seg("FgEmgEntitySelfCheck", FgEmgEntitySelfCheck.Run);
+            // EMG1-CHAIN-01：因果链记录、可靠计数与战斗中查看（FGT-EMG-020 阶段 1 evt.react 生产者 / 023 / 024 / 042）——单轨（旧 DetectMarkJump 不重复计）、
+            // 计数与脏列表、链继承 / 归属 / 链深截断、环满覆盖 / 不进哈希与快照、存读档与坏值、悬停三段、因果链键（暂停中、重绑）、首次慢放与 200 次聚合、倍速矩阵、耗时。
+            Seg("FgEmgChainSelfCheck", FgEmgChainSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>
