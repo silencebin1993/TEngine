@@ -122,7 +122,7 @@ namespace BinGames.Sim.Combat
             return new EmgCtx
             {
                 Prog = z.EmgProgRef - 1, Chain = z.EmgChain, Ent = z.EmgId, Owner = d.SlotOf(z.Owner), Node = z.EmgNode, Depth = z.EmgDepth, EntKind = EmgEntKind.Zone,
-                HurtSrc = (byte)EmgCode.SrcZone, HitCode = EmgCode.HitZoneTick, TrigUsed = z.EmgTrigUsed, Damage = math.max(0f, z.Dps), Weapon = z.EmgWeapon, OwnerId = z.Owner,
+                HurtSrc = (byte)EmgCode.SrcZone, HitCode = EmgCode.HitZoneTick, TrigUsed = z.EmgTrigUsed, Damage = math.max(0f, z.Dps), Strike = math.max(0f, z.Dps) * z.TickInterval, Weapon = z.EmgWeapon, OwnerId = z.Owner,
                 Faction = (byte)z.Faction, Carrier = (byte)CombatCarrier.Field, ZoneRadius = z.Radius, ZoneLife = (float)(z.Until - z.Born),
             };
         }
@@ -170,8 +170,9 @@ namespace BinGames.Sim.Combat
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile;
                 if ((x.Flags & EmgInstrFlags.RootKernel) == 0 || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead
-                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject))
+                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject && !follow))
                 {
                     continue;
                 }
@@ -183,6 +184,11 @@ namespace BinGames.Sim.Combat
                 }
                 if (!gated)
                 {
+                    continue;
+                }
+                if (follow)
+                {
+                    EmgQueueFollow(ref d, e, host, x);
                     continue;
                 }
                 float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
@@ -200,6 +206,99 @@ namespace BinGames.Sim.Combat
                     NoteReading(ref d, CombatConst.ReadingFeedZone, e.Pos, owner);
                 }
             }
+        }
+
+        /// <summary>
+        /// EMG1-FIX-01（FG19A 第 1.2 节第 26 行 / D-14，FG-GAP-153）：根节点写 ent.projectile（spawn）、同一条读的事件入队时——命中了一个单位，就记一条追射：
+        /// 到点（a = 延迟秒数，fg.TbPortCarrier）对同一目标补 1 发（幅度 = 份数），伤害 = 宿主这一击的伤害 × param2（0.5；布区落区 = 一个节拍的伤害，不是每秒伤害）。格斗 / 力场只按本次出手的主目标一次（与触发器同口径）。
+        /// 追射是这条事件的产物：链深已到 3 不再生成（EmgCanGenerate）。O(根节点指令数)。
+        /// </summary>
+        private static void EmgQueueFollow(ref CombatData d, in EmgEvent e, in EmgCtx host, in EmgInstr x)
+        {
+            if (e.OtherKind != EmgEntKind.Unit || e.Other == 0 || (host.PFlags & EmgProjFlags.Heal) != 0)
+            {
+                return;
+            }
+            if (host.EntKind == EmgEntKind.Unit && (host.Carrier == (byte)CombatCarrier.Melee || host.Carrier == (byte)CombatCarrier.Aura) && e.Other != host.MainTarget)
+            {
+                return;
+            }
+            if (!EmgCanGenerate(ref d, e))
+            {
+                return;
+            }
+            if (d.EmgPending.Length >= EmgConst.PendingCapacity)
+            {
+                EmgStat(ref d, 4);
+                return;
+            }
+            d.EmgPending.Add(new EmgSpawn
+            {
+                Kind = EmgConst.PendFollow, Armed = 1, Count = (byte)math.clamp(Round(x.Amount), 1, EmgConst.DefaultMaxChildren),
+                At = d.Scalars[0].Time + math.max(0f, x.A), Pos = e.Pos, Other = e.Other, Owner = host.OwnerId, Weapon = host.Weapon,
+                Damage = (host.Strike > 0f ? host.Strike : host.Damage) * (x.Param2 > 0f ? x.Param2 : EmgSubRatio(ref d)), Faction = host.Faction, Prog = e.Prog, Node = 0, Chain = e.Chain,
+                Depth = (byte)math.min(e.Depth + 1, EmgConst.MaxDepth), SubForm = host.Carrier,
+            });
+        }
+
+        /// <summary>
+        /// 追射到点：目标或发射者已不在 = 作废（不补射）。射弹 / 无人机载体：从发射者（机器）处朝目标补射弹体——弹速 / 半径 / 寿命取武器，只带本节点（根）的弹道修饰，
+        /// 不带伤害读法、不再触发程序（每条事件读端计数置满，FGR-EMG-065 同一机制），所以追射弹自己不会再追射；格斗 / 力场 / 布区：立刻对同一目标追加一记。
+        /// 返回 false = 弹体池满，留到下一步（不丢）。
+        /// </summary>
+        private static bool EmgFireFollow(ref CombatData d, ref EmgSpawn s)
+        {
+            int t = d.SlotOf(s.Other);
+            int o = d.SlotOf(s.Owner);
+            if (t < 0 || !d.IsAlive(t) || o < 0 || !d.IsAlive(o))
+            {
+                s.Count = 0;
+                return true;
+            }
+            bool shoots = s.SubForm == (byte)CombatCarrier.Projectile || s.SubForm == (byte)CombatCarrier.Summon;
+            if (!shoots)
+            {
+                EmgCtx saved = d.EmgCtx;
+                d.EmgCtx = new EmgCtx { Prog = -1, Owner = o, OwnerId = s.Owner, Faction = s.Faction, Weapon = -1 };
+                DamageUnit(ref d, t, s.Damage, o);
+                d.EmgCtx = saved;
+                s.Count--;
+                return true;
+            }
+            if (s.Weapon < 0 || s.Weapon >= d.Weapons.Length)
+            {
+                s.Count = 0;
+                return true;
+            }
+            if (d.Projectiles.Length >= d.Config.ProjectileCapacity)
+            {
+                return false;
+            }
+            CombatWeapon wp = d.Weapons[s.Weapon];
+            float speed = wp.ProjectileSpeed > 0f ? wp.ProjectileSpeed : d.EmgSubForms[EmgConst.SubBullet].Speed;
+            float radius = wp.ProjectileRadius > 0f ? wp.ProjectileRadius : d.EmgSubForms[EmgConst.SubBullet].Radius;
+            float2 dir = EmgDir(d.Pos[t] - d.Pos[o]);
+            if (math.lengthsq(dir) < 1e-12f)
+            {
+                dir = new float2(0f, 1f);
+            }
+            double2 start = d.Pos[o] + (double2)(dir * (d.Radius[o] + radius));
+            float life = wp.ProjectileLife > 0f ? wp.ProjectileLife : math.max(wp.Range, 1f) * 1.2f / math.max(0.01f, speed); // 与根弹体同一口径（EmgTrySpawnFlight）
+            EmgScalars es = d.EmgS[0];
+            int id = es.NextProjId++;
+            d.EmgS[0] = es;
+            var pr = new CombatProjectile
+            {
+                Id = id, Prog = s.Prog, Chain = s.Chain, Node = 0, Depth = s.Depth, Pos = start, Prev = start, Vel = dir * speed, Owner = s.Owner, Weapon = -1,
+                Damage = s.Damage, Radius = radius, Life = life, Faction = (CombatFaction)s.Faction, Flags = EmgProjFlags.Flight, TrigUsed = uint.MaxValue,
+            };
+            EmgInitFlight(ref d, ref pr, d.Pos[t], s.Other, true);
+            d.Projectiles.Add(pr);
+            CombatCounters c = d.Counters[0];
+            c.ProjectilesSpawned++;
+            d.Counters[0] = c;
+            s.Count--;
+            return true;
         }
 
         private static void EmgQueueChildren(ref CombatData d, in EmgEvent e, in EmgCtx host, float2 dir)
@@ -345,6 +444,24 @@ namespace BinGames.Sim.Combat
                     EmgFireTimer(ref d, s);
                     continue;
                 }
+                if (s.Kind == EmgConst.PendFollow)
+                {
+                    // EMG1-FIX-01：追射到点才补（暂停不步进 = 不到点；倍速只改每帧步数，按游戏时间到点）
+                    if (now + 1e-9 < s.At)
+                    {
+                        d.EmgPending[write++] = s;
+                        continue;
+                    }
+                    while (s.Count > 0 && EmgFireFollow(ref d, ref s))
+                    {
+                    }
+                    if (s.Count > 0)
+                    {
+                        EmgStat(ref d, 2);
+                        d.EmgPending[write++] = s;
+                    }
+                    continue;
+                }
                 if (s.Kind == EmgConst.PendFrag)
                 {
                     // EMG1-FW-01（FGR-EMG-063）：池满顺延的破片，有空位就放出（方向 / 速度 / 射程按排队时记下的）
@@ -462,6 +579,13 @@ namespace BinGames.Sim.Combat
                 }
                 int k = s.Ent == (int)EmgEventKind.Hit ? EmgSeekIndex(ref d, s) : -1;
                 float2 dir = k >= 0 ? EmgDir(d.Pos[k] - s.Pos) : EmgRadial(ref d, s);
+                if (k < 0 && s.Ent == (int)EmgEventKind.Timer && code != EmgConst.SubWave && math.lengthsq(s.Dir) > 1e-12f)
+                {
+                    // EMG1-FIX-01（FG19A 第 1.1 节第 6 行“出膛 0.6 秒空爆，向前扇形放出 3 枚”）：在飞母载荷的定时空爆沿飞行方向扇形摊开（第 k 份均分扇角），不再径向一圈；格斗余波（出手点放出）仍径向
+                    int total = math.max(1, s.Done + s.Count);
+                    float off = total > 1 ? EmgConst.TimerFanDeg * ((float)s.Done / (total - 1) - 0.5f) : 0f;
+                    dir = Rotate(math.normalize(s.Dir), math.radians(off));
+                }
                 float each = damage * (cm.DmgMul > 0f ? cm.DmgMul : 1f) * (pellets > 1 ? (cm.MultiRatio > 0f ? cm.MultiRatio : 0.4f) : 1f);
                 float reach = form.Speed * form.Life;
                 for (int q = 0; q < pellets; q++)

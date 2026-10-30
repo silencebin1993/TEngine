@@ -129,7 +129,7 @@
 |---|---|---|---|
 | ExplodeOnHit | 命中爆开 | Growing | 扩张 |
 | Catalyzed | 放大中 | Rhythmic | 节拍 |
-| FeedbackHit | 追击 | Woven | 连网 |
+| Woven | 连网 | | |
 | Orbiting | 绕行 | Rippling | 波动 |
 | Valved | 限流 | Thorns | 反应装甲 |
 | Overheat | 过热 | Merged | 合流 |
@@ -137,7 +137,7 @@
 | Filtered | 过滤 | | |
 
 `Thorns` 的显示名已在 FG-EMG 阶段 1（EMG1-TXT-01，2026-10-28）与文本键、`fg.TbStatusTag` 同一提交改为“反应装甲”（FG19 FGR-EMG-230 第 1 行）；内部标签 ID `Thorns` 不改。
-`FeedbackHit`（追击）在游戏 C# 代码里没有定义与消费方，只在 `ComposeEngine/src/ComposeEngine/Builtin/Modules/FeedbackLoop.cs:23` 写入；追射的描述与实现不符登记为 FG-GAP-153，由 FG-EMG 阶段 1 处理（FG19 FGR-EMG-004 第 7 行）。
+`FeedbackHit`（追击）在游戏 C# 代码里没有定义与消费方，只在 `ComposeEngine/src/ComposeEngine/Builtin/Modules/FeedbackLoop.cs:23` 写入；EMG1-FIX-01（2026-10-30，FG-GAP-153 已关）按 FG19A 第 1.6 节迁移表废弃：从 fg.TbStatusTag 与本表撤下，追射改为命中后 0.1 秒真补一发（`ent.projectile`）。旧组合引擎模块（Demo 冻结 DLL）仍会贴这个字符串，游戏内不显示、不参与反应。
 
 **FGR-FW-031 标签可见**
 - 敌人和己方单位头顶显示当前标签图标（形状加颜色），悬停能看到名称、剩余时间和叠层数。

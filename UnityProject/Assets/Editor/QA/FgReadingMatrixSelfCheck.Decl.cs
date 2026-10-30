@@ -307,7 +307,10 @@ namespace GameLogic.EditorTools
                     EmgFamily fam = EmgCatalog.FamilyOf(port);
                     if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta)
                     {
-                        keep.UnionWith(EmgProgramCompiler.TransitionFields(port));
+                        if (!EmgProgramCompiler.IsRootKernelPort(port)) // EMG1-FIX-01：根节点由内核直接执行的端口（追射）不留过渡字段
+                        {
+                            keep.UnionWith(EmgProgramCompiler.TransitionFields(port));
+                        }
                         tags = true;
                     }
                 }

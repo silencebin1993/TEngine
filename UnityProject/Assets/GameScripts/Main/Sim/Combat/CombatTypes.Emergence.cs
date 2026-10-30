@@ -30,6 +30,8 @@ namespace BinGames.Sim.Combat
         public const int EventPortBase = 300;
         /// <summary>EMG1-FW-01（DEBT-EMG1GRM01-03）：感知 / 条件读端改变行为的三个世界量端口码（fg.TbChannelPort.code）：弹体、偏折场、掩体。</summary>
         public const ushort PortProjectile = 601, PortDeflect = 705, PortCover = 1103;
+        /// <summary>EMG1-FIX-01（FG19A 第 1.1 节第 16 行 壁撞）：动能写端、障碍条件读端的端口码——“写 en.kinetic 且同一条读 ter.obstacle”= 撞障碍面时在撞击点放冲击（按端口，不按固件 ID）。</summary>
+        public const ushort PortKinetic = 504, PortObstacle = 1101;
         public const int EventKinds = 29;
 
         // ── EMG1-BUS-01（FGR-EMG-063～065）：每步处理条数 / 扇出 / 每宿主上限 / 冷却完成比例的初值（运行时取 CombatConfig 里热更层按 fg.TbHomeTuning emg.* 写的值，≤ 0 用这里）──
@@ -90,8 +92,11 @@ namespace BinGames.Sim.Combat
         public const int PendingCapacity = 4096;
         /// <summary>子形态码 1～5（fg.TbSubPayload code 列）：子弹 / 短射程余波 / 无人机子弹（进弹体池），子区（小场脉冲）/ 子区（子区域）（进区域）。</summary>
         public const byte SubBullet = 1, SubWave = 2, SubDroneBullet = 3, SubPulse = 4, SubZone = 5;
-        /// <summary>待生成种类：子载荷 / 即时宿主（格斗、力场）的定时 / 根载荷（SpawnFlight 弹体池满时顺延）。</summary>
-        public const byte PendSub = 0, PendTimer = 1, PendRoot = 2, PendFrag = 3;
+        /// <summary>待生成种类：子载荷 / 即时宿主（格斗、力场）的定时 / 根载荷（SpawnFlight 弹体池满时顺延）/ 破片顺延 /
+        /// EMG1-FIX-01 追射（根节点写 ent.projectile：命中后到点从发射者补射 1 发，FG19A 第 1.2 节第 26 行）。</summary>
+        public const byte PendSub = 0, PendTimer = 1, PendRoot = 2, PendFrag = 3, PendFollow = 4;
+        /// <summary>EMG1-FIX-01（FG19A 第 1.1 节第 6 行“向前扇形放出”）：飞行中定时空爆的子弹药扇角（度，与霰射缺省扇角同值）。shortcut: 临时值，FG15-BAL-01 调参时如需可调再进 fg.TbSubPayload。</summary>
+        public const float TimerFanDeg = 30f;
 
         /// <summary>一份快照最多几个 Emg 段（读档防坏值）。</summary>
         public const int MaxSegments = 256;
@@ -274,6 +279,8 @@ namespace BinGames.Sim.Combat
         // ── EMG1-TRIG-01：本载荷的“母载荷参数”（触发器放子载荷时用，生产点随事件记进待生成队列；瞬时量）──
         /// <summary>母载荷伤害（子载荷 = × emg.sub.dmg_ratio）。</summary>
         public float Damage;
+        /// <summary>EMG1-FIX-01 审查修复：这一击的伤害（区域 = 一个节拍 Dps × 节拍；0 = 同 <see cref="Damage"/>）。追射按它 × param2，不把每秒伤害当一击。</summary>
+        public float Strike;
         /// <summary>母载荷所属武器下标（子弹药的外观与归属；−1 = 没有）。</summary>
         public int Weapon;
         /// <summary>出手单位 Id（出手者已不在时 0）。</summary>

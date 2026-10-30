@@ -393,7 +393,7 @@ namespace GameLogic.Campaign.Emergence
 
         /// <summary>
         /// EMG1-FW-01（FG19A 第 0.3 节口径 3、第 1.5 节、第 3.2 节“阶段 1 过渡”列）：效果写端口在阶段 1 的过渡实现 = 该固件自己的旧读法字段。
-        /// 按端口（族）给，不按固件 ID（FGR-EMG-013）：物质排放 → 驻留区 / 拖尾；热 → 过热爆圈；动能 → 余震；无人机 → 伴飞；追射 → 回波；
+        /// 按端口（族）给，不按固件 ID（FGR-EMG-013）：物质排放 → 驻留区 / 拖尾；热 → 过热爆圈；动能 → 余震；无人机 → 伴飞；追射 → 回波（EMG1-FIX-01 起只用于子节点，根节点由内核真补射）；
         /// 处决 / 腐蚀 → 爆开；导电连通 → 减速网。其余端口没有过渡字段（新动词由内核执行，或承接阶段才有实现）。
         /// </summary>
         public static string[] TransitionFields(string port)
@@ -475,7 +475,9 @@ namespace GameLogic.Campaign.Emergence
                     // shortcut: 子载荷自己执行这些效果动词随阶段 2 斑块 / 传导去掉过渡字段时一起做（DEBT-EMG1FW01-03）。
                     if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && (n.Parent < 0 || fam != EmgFamily.Matter))
                     {
-                        foreach (string f in TransitionFields(pid))
+                        // EMG1-FIX-01：根节点上由内核直接执行的写端（RootKernel，如追射 ent.projectile）不再保留旧读法过渡字段（否则旧回波与真补射两轨同时结算，FGR-EMG-019）
+                        bool kernelRoot = n.Parent < 0 && (x.Flags & EmgInstrFlags.RootKernel) != 0;
+                        foreach (string f in kernelRoot ? Array.Empty<string>() : TransitionFields(pid))
                         {
                             Keep(fw, f);
                         }
@@ -898,7 +900,7 @@ namespace GameLogic.Campaign.Emergence
                             }
                             // EMG1-FW-02：只走声明的固件（没有旧读法轨可过渡，FG19A 第 6 节新固件）在根节点上的效果写端，阶段 1 由内核在这条指令的生效事件处
                             // 直接执行（CombatLogic.EmgRootGated：排放 → 驻留区、注电 → 电击区，FG19A 第 0.3 节口径 3）；按数据列判（FirmwareKinds.IsDeclOnlyRow），不按内容 ID。
-                            if (n.Parent < 0 && x.Verb != 0 && IsRootKernelOwner(s.OwnerId) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
+                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port)) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
                             {
                                 x.Flags |= EmgInstrFlags.RootKernel | (pc.Mag switch { 1 => EmgInstrFlags.MagA, 2 => EmgInstrFlags.MagB, 3 => EmgInstrFlags.MagC, _ => EmgInstrFlags.None });
                             }
@@ -1001,6 +1003,9 @@ namespace GameLogic.Campaign.Emergence
                 x.Verb = 0; // 旧字段在子形态的载体列上没有子载荷能执行的读法（如只改出手间隔）：不执行
             }
         }
+
+        /// <summary>EMG1-FIX-01（FG19A 第 1.2 节第 26 行 / D-14）：根节点上由内核直接执行、不再走旧读法过渡的写端口（任何 owner）：ent.projectile = 追射（CombatLogic.EmgQueueFollow）。按端口，不按内容 ID。</summary>
+        public static bool IsRootKernelPort(string port) => port == "ent.projectile";
 
         private static bool IsRootKernelOwner(string owner) =>
             FirmwareKinds.TryGetRow(owner, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row);

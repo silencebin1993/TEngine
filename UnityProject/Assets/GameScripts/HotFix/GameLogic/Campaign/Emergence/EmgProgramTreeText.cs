@@ -1,4 +1,5 @@
 using UnityEngine;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -24,6 +25,8 @@ namespace GameLogic.Campaign.Emergence
         OffPath = 10,
         /// <summary>EMG1-TRIG-01：“本程序以飞行弹体发射”（ADR U4）。</summary>
         Flight = 11,
+        /// <summary>EMG1-FIX-01：有旧读法的固件已按通道声明运行（旧存档蓝图重编译后的行为变化），附当前描述。</summary>
+        Migrated = 12,
     }
 
     public struct EmgTreeRow
@@ -144,9 +147,32 @@ namespace GameLogic.Campaign.Emergence
             {
                 AddReason(into, ref title, EmgProgramCompiler.NoteTableFull, string.Empty, -1, -1);
             }
+            AddMigrated(r, into);
             AddLegacy(r, into);
             AddOffPath(into, offPathFirmware);
         }
+
+        /// <summary>
+        /// EMG1-FIX-01（卡片负向：旧存档蓝图里的固件重编译后的行为变化在预览说明）：进了程序（声明已生效）、且表里登记了“机制变化说明”
+        /// （文本 firmware.&lt;id&gt;.migrated，只有阶段 1 真正改了机制的固件才有，tools/cell_tables/fgdata_firmware.py MIGRATED_TEXT）的固件——逐条写“已按新机制运行”并附变化说明。
+        /// 行为没变的旧固件（只改数值按旧字段折算、物质排放保留过渡字段、只改描述的）没有这条文本，不写。按文本数据判，不按内容 ID 分支（FGR-EMG-013）。O(程序长度)。
+        /// </summary>
+        private static void AddMigrated(EmgProgramResult r, List<EmgTreeRow> into)
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (EmgProgramStep s in r.Steps)
+            {
+                string key = MigratedKey(s.FirmwareId);
+                if (s.Overflow || !seen.Add(s.FirmwareId) || !GameText.Has(key))
+                {
+                    continue;
+                }
+                Add(into, EmgTreeRowKind.Migrated, GameText.Format("emg.tree.migrated", FirmwareName(s.FirmwareId), GameText.Get(key)), -1, s.Ordinal, 0);
+            }
+        }
+
+        /// <summary>固件“机制变化说明”文本键（没登记 = 行为与旧版本存档相同）。</summary>
+        public static string MigratedKey(string firmwareId) => "firmware." + firmwareId + ".migrated";
 
         private static bool IsDuplicateNote(EmgProgramResult r, int i)
         {
@@ -286,6 +312,8 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>
         /// 固件悬停 / 详情页的端口行（FG19 第 13 节 B01“固件详情显示读 / 写端口”）：“端口：读 命中、热信号；写 触发器”。
         /// 只读声明表（混合固件取两父的声明，父 A 在前），不看阶段门槛；没有声明时返回 null。
+        /// EMG1-FIX-01（FG-GAP-156）：声明的阶段门槛高于本版本已实现的阶段（如磁聚 stageGate 2）时，这些端口在本版本不会生效、固件按原读法结算——
+        /// 改用 emg.ports.line_pending 写明“尚未生效”，不让详情页 / 三选一卡面承诺不存在的行为。
         /// </summary>
         public static string PortsLine(string firmwareId)
         {
@@ -296,14 +324,15 @@ namespace GameLogic.Campaign.Emergence
             EmgCompiled c = EmgCatalog.Current;
             var reads = new List<string>(4);
             var writes = new List<string>(4);
+            bool pending = false;
             if (FirmwareKinds.TryGetParents(firmwareId, out string a, out string b))
             {
-                CollectPorts(c, a, reads, writes);
-                CollectPorts(c, b, reads, writes);
+                pending |= CollectPorts(c, a, reads, writes);
+                pending |= CollectPorts(c, b, reads, writes);
             }
             else
             {
-                CollectPorts(c, firmwareId, reads, writes);
+                pending |= CollectPorts(c, firmwareId, reads, writes);
             }
             if (reads.Count == 0 && writes.Count == 0)
             {
@@ -311,14 +340,19 @@ namespace GameLogic.Campaign.Emergence
             }
             string sep = GameText.Get("signal.core.summary_sep");
             string none = GameText.Get("emg.ports.none");
-            return GameText.Format("emg.ports.line", reads.Count > 0 ? string.Join(sep, reads) : none, writes.Count > 0 ? string.Join(sep, writes) : none);
+            // 只走声明、没有旧读法的固件（新固件）门槛未到时没有“原读法”可结算：写“当前不生效”
+            string key = !pending ? "emg.ports.line"
+                : FirmwareKinds.TryGetRow(firmwareId, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row) ? "emg.ports.line_inactive" : "emg.ports.line_pending";
+            return GameText.Format(key, reads.Count > 0 ? string.Join(sep, reads) : none, writes.Count > 0 ? string.Join(sep, writes) : none);
         }
 
-        private static void CollectPorts(EmgCompiled c, string owner, List<string> reads, List<string> writes)
+        /// <summary>收集 owner 的读 / 写端口名；返回 true = 它的声明门槛高于本版本已实现的阶段（端口尚未生效）。</summary>
+        private static bool CollectPorts(EmgCompiled c, string owner, List<string> reads, List<string> writes)
         {
+            bool pending = false;
             if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi))
             {
-                return;
+                return false;
             }
             foreach (EmgDeclRow d in c.Decls)
             {
@@ -326,6 +360,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     continue;
                 }
+                pending |= d.StageGate > EmgCatalog.ImplementedStage;
                 string name = GameText.Get("emg.port." + id + ".name");
                 List<string> list = d.Dir == EmgDirs.Read ? reads : writes;
                 if (!list.Contains(name))
@@ -333,6 +368,7 @@ namespace GameLogic.Campaign.Emergence
                     list.Add(name);
                 }
             }
+            return pending;
         }
     }
 }

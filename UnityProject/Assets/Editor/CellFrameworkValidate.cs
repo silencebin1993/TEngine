@@ -806,6 +806,9 @@ namespace GameLogic.EditorTools
             // EMG1-CHAIN-01：因果链记录、可靠计数与战斗中查看（FGT-EMG-020 阶段 1 evt.react 生产者 / 023 / 024 / 042）——单轨（旧 DetectMarkJump 不重复计）、
             // 计数与脏列表、链继承 / 归属 / 链深截断、环满覆盖 / 不进哈希与快照、存读档与坏值、悬停三段、因果链键（暂停中、重绑）、首次慢放与 200 次聚合、倍速矩阵、耗时。
             Seg("FgEmgChainSelfCheck", FgEmgChainSelfCheck.Run);
+            // EMG1-FIX-01：现存文案与实现一致（FGT-EMG-005 五条固件“描述—行为”触发 / 不触发对照、FGT-EMG-011 定时触发）——分裂三枚、延时引信飞行中空爆与提前命中不空爆、
+            // 壁撞只在撞障碍时冲击、追射真补一发、磁聚过渡文案；文本与声明同源、图鉴 / 详情 / 三选一同步、旧存档预览说明、暂停与倍速、存读档。
+            Seg("FgEmgTextBehaviorSelfCheck", FgEmgTextBehaviorSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

@@ -603,8 +603,9 @@ namespace GameLogic.EditorTools
                 string[] actual = FirmwareCatalog.ProbeModuleTags(r.Id);
                 string[] declared = FirmwareKinds.TagsOf(r.Id).OrderBy(x => x, StringComparer.Ordinal).ToArray();
                 // EMG1-FW-01（FG19A D-13、FG19 第 11 节第 7 行）：时钟脉冲误贴的 Blood 已从表里去掉；旧组合引擎模块（GeneCatalog，Demo 冻结）仍贴，只在这里登记为已知勘误，不再要求表与模块一致
-                string[] actualStatus = actual?.Where(t => StatusTagCatalog.IsStatus(t) && !(r.Id == "fw_clock" && t == "Blood")).ToArray();
-                string[] unregistered = actual?.Where(t => !StatusTagCatalog.TryGet(t, out _)).ToArray() ?? Array.Empty<string>();
+                // EMG1-FIX-01（FG19A 第 1.6 节迁移表）：壁撞不再贴撞壁（改由撞击点冲击承接），追击标记（FeedbackHit）已从表里撤下——旧模块仍贴，同样登记为已知勘误
+                string[] actualStatus = actual?.Where(t => StatusTagCatalog.IsStatus(t) && !(r.Id == "fw_clock" && t == "Blood") && !(r.Id == "fw_wallslam" && t == "WallImpact")).ToArray();
+                string[] unregistered = actual?.Where(t => !StatusTagCatalog.TryGet(t, out _) && !FgEmgTextBehaviorSelfCheck.RetiredEngineTags.Contains(t)).ToArray() ?? Array.Empty<string>();
                 if (actual == null || !actualStatus.SequenceEqual(declared) || unregistered.Length > 0)
                 {
                     probeBad.Add($"{r.Id}：表 [{string.Join(",", declared)}] 模块 [{string.Join(",", actual ?? Array.Empty<string>())}]");
@@ -625,7 +626,7 @@ namespace GameLogic.EditorTools
                 foreach (string tag in p.Paths.SelectMany(x => x.Tags))
                 {
                     seen++;
-                    if (!StatusTagCatalog.TryGet(tag, out _) && !ReactionProducts.Contains(tag))
+                    if (!StatusTagCatalog.TryGet(tag, out _) && !ReactionProducts.Contains(tag) && !FgEmgTextBehaviorSelfCheck.RetiredEngineTags.Contains(tag))
                     {
                         unknown.Add(tag);
                     }

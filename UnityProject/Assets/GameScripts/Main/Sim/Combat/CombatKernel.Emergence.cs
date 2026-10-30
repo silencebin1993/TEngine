@@ -1797,7 +1797,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>待生成请求：种类 0～3（3 = 池满顺延的破片）、程序下标在表内且节点在程序节点数内（根弹体为 −1 也可）、链深 ≤ 3、代 ≤ 2、子形态 0～5、武器在表内、数值有限。</summary>
         private static bool SpawnValid(in EmgSpawn s, ref CombatData d) =>
-            s.Kind <= EmgConst.PendFrag && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
+            s.Kind <= EmgConst.PendFollow && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
             && (s.Prog >= 0 || s.Kind >= EmgConst.PendRoot) && s.Depth <= EmgConst.MaxDepth && s.Gen <= EmgConst.MaxGen && s.SubForm <= 5 && s.Armed <= 1
             && s.Weapon >= -1 && s.Weapon < d.Weapons.Length && s.Chain >= 0 && s.Done >= 0 && (byte)s.EntKind <= (byte)EmgEntKind.Field
             && !double.IsNaN(s.At) && !double.IsInfinity(s.At) && IsFinite(s.Pos) && Finite(s.Dir.x) && Finite(s.Dir.y) && Finite(s.Damage) && Finite(s.ZoneRadius) && Finite(s.ZoneLife);

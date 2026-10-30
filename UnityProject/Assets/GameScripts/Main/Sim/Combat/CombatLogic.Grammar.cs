@@ -664,7 +664,57 @@ namespace BinGames.Sim.Combat
             pr.Mods |= EmgProjMods.Bounced;
             pr.IgnoreUnit = 0;
             EmgProjEvent(ref d, ref pr, EmgEventKind.Bounce, 0, face == EmgCode.FaceWreck ? EmgEntKind.Wreck : EmgEntKind.None, n.x, n.y, face, at);
+            EmgObstacleKinetic(ref d, ref pr, at, face);
             return true;
+        }
+
+        /// <summary>
+        /// EMG1-FIX-01（FG19A 第 1.1 节第 16 行 / D-03，FG-GAP-155；FGR-EMG-060 第 20 行）：弹体撞上非单位面（障碍 / 残骸）时，节点里“写 en.kinetic、且同一条指令读 ter.obstacle 条件”的行
+        /// 在撞击点结算一次冲击：声明 param2 米内的敌对单位各吃 弹体伤害 × 幅度，并发 evt.impact（另一方 = 残骸或无）。没撞到障碍 = 不结算（开阔地不触发）。
+        /// 按端口判断，不按固件 ID（FGR-EMG-013）。O(节点指令数² + 单位数)，只在撞障碍那一步。
+        /// </summary>
+        private static void EmgObstacleKinetic(ref CombatData d, ref CombatProjectile pr, double2 at, ushort face)
+        {
+            if (pr.Prog < 0 || pr.Prog >= d.EmgPrograms.Length)
+            {
+                return;
+            }
+            EmgProgram p = d.EmgPrograms[pr.Prog];
+            if (pr.Node >= p.NodeCount || p.FirstNode + pr.Node >= d.EmgNodes.Length)
+            {
+                return;
+            }
+            EmgNode n = d.EmgNodes[p.FirstNode + pr.Node];
+            int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            float ratio = 0f, radius = 0f;
+            for (int i = n.FirstInstr; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if (x.Port != EmgConst.PortKinetic || x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || !(x.Param2 > 0f))
+                {
+                    continue;
+                }
+                bool gated = false;
+                for (int j = n.FirstInstr; j < end && !gated; j++)
+                {
+                    EmgInstr r = d.EmgInstrs[j];
+                    gated = r.Ordinal == x.Ordinal && r.Port == EmgConst.PortObstacle && r.Role >= EmgConst.RoleTrigger && r.Role <= EmgConst.RoleLastRead
+                            && (r.Flags & EmgInstrFlags.Overflow) == 0;
+                }
+                if (gated)
+                {
+                    ratio = math.max(ratio, x.Amount);
+                    radius = math.max(radius, x.Param2);
+                }
+            }
+            if (!(ratio > 0f) || !(pr.Damage > 0f))
+            {
+                return;
+            }
+            float dmg = pr.Damage * ratio;
+            byte want = pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
+            EmgRingDamage(ref d, at, radius, want, dmg, d.SlotOf(pr.Owner), -1);
+            EmgProjEvent(ref d, ref pr, EmgEventKind.Impact, 0, face == EmgCode.FaceWreck ? EmgEntKind.Wreck : EmgEntKind.None, dmg, radius, face, at);
         }
 
         /// <summary>侧偏过的弹体穿过偏折场时按概率不被反射（FG19A 第 1.1 节第 14 行：一半概率；每发一个无状态哈希，同一发结果固定）。

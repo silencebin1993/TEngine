@@ -624,6 +624,10 @@ namespace GameLogic.EditorTools
                         bad.Add($"{r.Id}.{c} 文本缺失或漏内部 ID：{text}");
                         continue;
                     }
+                    if (FgEmgTextBehaviorSelfCheck.Fg19aReadings.Contains((r.Id, c)))
+                    {
+                        continue; // EMG1-FIX-01：机制已改的载体按 FG19A 新读法写（数字与声明同源，FgEmgTextBehaviorSelfCheck 逐条核对），不再由旧字段短语组成
+                    }
                     foreach ((string field, double mag) in ParseFieldsExact(r.ReadFields))
                     {
                         string phrase = Phrase(field, c, mag);
