@@ -602,7 +602,8 @@ namespace GameLogic.EditorTools
             {
                 string[] actual = FirmwareCatalog.ProbeModuleTags(r.Id);
                 string[] declared = FirmwareKinds.TagsOf(r.Id).OrderBy(x => x, StringComparer.Ordinal).ToArray();
-                string[] actualStatus = actual?.Where(StatusTagCatalog.IsStatus).ToArray();
+                // EMG1-FW-01（FG19A D-13、FG19 第 11 节第 7 行）：时钟脉冲误贴的 Blood 已从表里去掉；旧组合引擎模块（GeneCatalog，Demo 冻结）仍贴，只在这里登记为已知勘误，不再要求表与模块一致
+                string[] actualStatus = actual?.Where(t => StatusTagCatalog.IsStatus(t) && !(r.Id == "fw_clock" && t == "Blood")).ToArray();
                 string[] unregistered = actual?.Where(t => !StatusTagCatalog.TryGet(t, out _)).ToArray() ?? Array.Empty<string>();
                 if (actual == null || !actualStatus.SequenceEqual(declared) || unregistered.Length > 0)
                 {

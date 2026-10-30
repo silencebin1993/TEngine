@@ -145,6 +145,55 @@ namespace GameLogic.Campaign.Combat
                 EmgRuleFeed f = k.EmgRuleFeedAt(slot);
                 OnCountedReaction(site, state, rid, dc, f.Src, f.Target, new Vector2((float)f.Pos.x, (float)f.Pos.y), observed, now);
             }
+
+            // EMG1-FW-01（FGR-EMG-233 第 6 条）：反应装甲块数只在变化的步进脏列表（O(本步变化数)）——己方机器降到 0 块发一次信息级通知（同车聚合、可定位）。
+            int eraDirty = k.EmgEraDirtyCount;
+            for (int j = 0; j < eraDirty; j++)
+            {
+                OnEraChanged(site, state, k, k.EmgEraDirtyAt(j));
+            }
+
+            // EMG1-FW-01（FGR-EMG-184 / 233 第 3 条）：破片伤到己方——警告级友伤通知（同类聚合、可定位）；因果链“友伤”节点在内核记。O(本步友伤数)。
+            int ff = k.EmgFriendlyCount;
+            for (int j = 0; j < ff; j++)
+            {
+                OnFriendly(site, state, k, k.EmgFriendlyAt(j));
+            }
+        }
+
+        /// <summary>本进程发出的友伤通知条数（自检）。</summary>
+        public static long FriendlyPosted { get; private set; }
+
+        private static void OnFriendly(CombatSite site, CampaignState state, CombatKernel k, int2 hit)
+        {
+            // 只报己方受伤（敌人被敌人自己的破片打到不发通知）
+            if (!k.TryGetUnit(hit.x, out CombatUnitView v) || v.Faction != CombatFaction.Player)
+            {
+                return;
+            }
+            double2 p = v.Position;
+            string detail = GameText.Format("emg.friendly.fragment", EmgChainView.PartyName(site, state, hit.x), EmgChainView.PartyName(site, state, hit.y));
+            Notifications.NotificationCenter.Post("friendly_fire", detail, new Vector3((float)p.x, 0f, (float)p.y));
+            FriendlyPosted++;
+        }
+
+        /// <summary>本进程经脏列表处理到的反应装甲块数变化次数 / 发出的耗尽通知条数（自检）。</summary>
+        public static long EraChangesSeen { get; private set; }
+        public static long EraDepletedPosted { get; private set; }
+
+        private static void OnEraChanged(CombatSite site, CampaignState state, CombatKernel k, int unitId)
+        {
+            EraChangesSeen++;
+            // 只报己方（机器 / 炮塔）的耗尽；敌人身上的反应装甲耗尽不发通知（悬停与因果链照样可查）
+            if (!k.TryGetEra(unitId, out int intact, out _, out _, out float nextIn) || intact > 0 || !k.TryGetUnit(unitId, out CombatUnitView v)
+                || v.Faction != CombatFaction.Player)
+            {
+                return;
+            }
+            double2 p = v.Position;
+            string detail = GameText.Format("emg.era.depleted", EmgChainView.PartyName(site, state, unitId), nextIn.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+            Notifications.NotificationCenter.Post("era_depleted", detail, new Vector3((float)p.x, 0f, (float)p.y));
+            EraDepletedPosted++;
         }
 
         /// <summary>本进程经脏列表处理到的涌现规则次数（自检对照内核计数）。</summary>
@@ -312,7 +361,7 @@ namespace GameLogic.Campaign.Combat
         }
 
         private static readonly Dictionary<string, string> PopupKeys = new Dictionary<string, string>(StringComparer.Ordinal);
-        private static readonly string[] ReadingKeys = { "reading:0", "reading:1", "reading:2", "reading:3" };
+        private static readonly string[] ReadingKeys = { "reading:0", "reading:1", "reading:2", "reading:3", "reading:4" };
 
         /// <summary>弹字的聚合键（按反应 ID 缓存，不每步拼字符串）。</summary>
         public static string PopupKey(string reactionId)
@@ -330,6 +379,7 @@ namespace GameLogic.Campaign.Combat
             CombatConst.ReadingFeedZone => FeedbackCueId.ReadingZone,
             CombatConst.ReadingFeedEcho => FeedbackCueId.ReadingEcho,
             CombatConst.ReadingFeedThorns => FeedbackCueId.ReadingThorns,
+            CombatConst.ReadingFeedEra => FeedbackCueId.ReadingThorns, // EMG1-FW-01：起爆沿用反伤音效钩子（占位音，DEBT-EMG1FW01-01）
             _ => FeedbackCueId.ReadingDrone,
         };
 
@@ -338,6 +388,7 @@ namespace GameLogic.Campaign.Combat
             CombatConst.ReadingFeedZone => "reading.popup.zone",
             CombatConst.ReadingFeedEcho => "reading.popup.echo",
             CombatConst.ReadingFeedThorns => "reading.popup.thorns",
+            CombatConst.ReadingFeedEra => "reading.popup.era",
             _ => "reading.popup.drone",
         };
 

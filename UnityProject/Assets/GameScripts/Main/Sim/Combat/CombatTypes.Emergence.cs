@@ -28,6 +28,8 @@ namespace BinGames.Sim.Combat
         public const int DefaultWreckCapacity = 256;
         /// <summary>事件端口码 = 300 + 事件码（FGR-EMG-060）。</summary>
         public const int EventPortBase = 300;
+        /// <summary>EMG1-FW-01（DEBT-EMG1GRM01-03）：感知 / 条件读端改变行为的三个世界量端口码（fg.TbChannelPort.code）：弹体、偏折场、掩体。</summary>
+        public const ushort PortProjectile = 601, PortDeflect = 705, PortCover = 1103;
         public const int EventKinds = 29;
 
         // ── EMG1-BUS-01（FGR-EMG-063～065）：每步处理条数 / 扇出 / 每宿主上限 / 冷却完成比例的初值（运行时取 CombatConfig 里热更层按 fg.TbHomeTuning emg.* 写的值，≤ 0 用这里）──
@@ -89,7 +91,7 @@ namespace BinGames.Sim.Combat
         /// <summary>子形态码 1～5（fg.TbSubPayload code 列）：子弹 / 短射程余波 / 无人机子弹（进弹体池），子区（小场脉冲）/ 子区（子区域）（进区域）。</summary>
         public const byte SubBullet = 1, SubWave = 2, SubDroneBullet = 3, SubPulse = 4, SubZone = 5;
         /// <summary>待生成种类：子载荷 / 即时宿主（格斗、力场）的定时 / 根载荷（SpawnFlight 弹体池满时顺延）。</summary>
-        public const byte PendSub = 0, PendTimer = 1, PendRoot = 2;
+        public const byte PendSub = 0, PendTimer = 1, PendRoot = 2, PendFrag = 3;
 
         /// <summary>一份快照最多几个 Emg 段（读档防坏值）。</summary>
         public const int MaxSegments = 256;
@@ -370,6 +372,11 @@ namespace BinGames.Sim.Combat
         PreferHeat = 32,
         /// <summary>连锁偏好导电目标（读 prop.conductive）。</summary>
         PreferConductive = 64,
+        // ── EMG1-FW-01（DEBT-EMG1GRM01-05）：子节点上的旧读法动词行，fg.TbPortCarrier 的 mag 列（哪个参数乘声明幅度）由编译器写成这三位；
+        //    三位都没有 = 参数已是最终值（数值端口按固件旧字段解析好的行）。根节点上的旧动词行由热更层折进读法，内核不读这三位。
+        MagA = 128,
+        MagB = 256,
+        MagC = 512,
     }
 
     [Flags]
@@ -396,14 +403,33 @@ namespace BinGames.Sim.Combat
 
     /// <summary>
     /// EMG1-GRM-01（FG19A 第 3.1 节；ADR-EMG-001 ②）：内核动词码 = 指令行 <see cref="EmgInstr.Verb"/>（热更层 EmgCatalog.Verbs 下标 + 1，按武器载体解析好）。
-    /// 1～25 是旧读法动词（CarrierReadingVerb 同值，不改）：根节点上的由热更层折进武器读法，内核只认其中的 <see cref="Chain"/>（连锁按目标偏好挑目标）；
+    /// 1～25 是旧读法动词（CarrierReadingVerb 同值，不改）：根节点上的由热更层折进武器读法，内核在根节点只认其中的 <see cref="Chain"/>（连锁按目标偏好挑目标）；
+    /// 子节点（子弹药 / 子区 / 小脉冲）上的旧动词由子载荷自己执行（EMG1-FW-01，DEBT-EMG1GRM01-05：下面列出的几个，其余旧动词编译不到子节点）。
     /// 26 起是新动词，内核按动词执行，不认端口名以外的任何内容 ID（FGR-EMG-013）。
     /// </summary>
     public enum EmgVerb : byte
     {
         None = 0,
+        /// <summary>旧读法“伤害”：子节点上 a = 子载荷伤害倍率。</summary>
+        Dmg = 1,
+        /// <summary>旧读法“余击”：子弹药命中后再打 a 个 c 米内的其他目标，各 b 倍。</summary>
+        Extra = 3,
         /// <summary>旧读法“连锁”（= CarrierReadingVerb.Chain）。</summary>
         Chain = 5,
+        /// <summary>旧读法“爆圈”：子弹药命中处 a 米内的其他目标各吃 b 倍。</summary>
+        Blast = 6,
+        /// <summary>旧读法“环扫”：子区落下时 a 米内的目标各吃一次 b 倍。</summary>
+        Sweep = 7,
+        /// <summary>旧读法“回响”：子区收回（到期）时再结算一次，c 倍。</summary>
+        Echo = 8,
+        /// <summary>旧读法“牵引”：子区落下时把 b 米内的目标拉近 a 米。</summary>
+        Pull = 9,
+        /// <summary>旧读法“击退”：子区落下时把区内目标推开 a 米。</summary>
+        Knock = 10,
+        /// <summary>旧读法“破甲”：子载荷对正面装甲的减伤少 a（0～1）。</summary>
+        Armor = 12,
+        /// <summary>旧读法“触及”：子区半径 + a 米。</summary>
+        Reach = 24,
         Steer = 26,
         PassThrough = 27,
         Ricochet = 28,
@@ -530,6 +556,11 @@ namespace BinGames.Sim.Combat
         public float Mass;
         /// <summary>EMG1-ENT-01：待处理的阵亡标志（外部血量单位收到“直接击毁”致死请求时置 <see cref="EmgConst.DeathNoWreck"/>，热更层判死回到阵亡入口时读走）。单位段第 7 个字段。</summary>
         public byte DeathFlags;
+        /// <summary>EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲“缺块掩码”（位 b = 1 表示第 b 块已起爆、还没补回；低 N/2 位 = 左裙从前到后，其后 N/2 位 = 右裙从前到后）。
+        /// 存缺块而不存完整块：0 = 满块，短段读到取 0 自然满块（FGR-EMG-211 只追加）。单位段第 8 个字段。</summary>
+        public ushort EraMiss;
+        /// <summary>EMG1-FW-01：补块计时（秒，满块时归零；再次被击不重置）。单位段第 9 个字段，短段读到取 0。</summary>
+        public float EraRefillT;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -600,6 +631,10 @@ namespace BinGames.Sim.Combat
         Wreck = 9,
         Fragment = 10,
         DepthCut = 11,
+        /// <summary>EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲起爆——evt.hurt 链上的“触发”节点（SrcUnit = 宿主，Other = 攻击者，Key = 端口 ent.fragment 的事件码位 = Hurt，Aux = 块位 + 1）。</summary>
+        Era = 12,
+        /// <summary>EMG1-FW-01（FGR-EMG-184）：友伤——破片伤到同阵营单位（SrcUnit = 受伤单位，Other = 破片归属单位）。</summary>
+        Friendly = 13,
     }
 
     /// <summary>
@@ -679,11 +714,15 @@ namespace BinGames.Sim.Combat
         public float KineticImpact;
         public int FragCount;
         public float FragDamage, FragSpeed, FragRange, FragThreshold;
+        /// <summary>EMG1-FW-01（FG19B 第 2.9 节“爆炸反应装甲起爆”行，fg.TbEntityProfile fragment.era）：片数 / 每片伤害 / 速度 / 射程。</summary>
+        public int EraFragCount;
+        public float EraFragDamage, EraFragSpeed, EraFragRange;
 
         public static EmgEntityParams Default => new EmgEntityParams
         {
             KineticProjectile = 1f, KineticHeavy = 2f, KineticBeam = 0f, KineticMelee = 2.2f, KineticDrone = 0.5f, KineticAura = 0.2f, KineticField = 0.3f,
             KineticFragment = 2.5f, KineticImpact = 0.05f, FragCount = 2, FragDamage = 5f, FragSpeed = 16f, FragRange = 5f, FragThreshold = 40f,
+            EraFragCount = 3, EraFragDamage = 4f, EraFragSpeed = 16f, EraFragRange = 4f,
         };
     }
 

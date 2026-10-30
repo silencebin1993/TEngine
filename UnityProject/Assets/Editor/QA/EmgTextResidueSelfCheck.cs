@@ -184,14 +184,14 @@ namespace GameLogic.EditorTools
 
         private static void CheckSection11Texts()
         {
-            Line("  · B. 第 11 节文案：爆炸反应装甲 / 反应装甲 / 罐弹抛洒器 / 处决 / 信号劫持；不写远程不触发、不写块数；英文能容纳（B16）");
+            Line("  · B. 第 11 节文案：爆炸反应装甲 / 反应装甲 / 罐弹抛洒器 / 处决 / 信号劫持；不写远程不触发；爆炸反应装甲写块数与补块（EMG1-FW-01 起第 3 层）；英文能容纳（B16）");
             ComponentCatalog.TryGet(ComponentCatalog.FuncSpikesId, out MechanicalContentDef spikes);
             CarrierReadings.TryGetComponent(ComponentCatalog.FuncSpikesId, out GameConfig.fg.CombatComponent row);
             string flat = row == null ? "?" : row.Damage.ToString("0.#", CultureInfo.InvariantCulture);
             string d = spikes?.Description ?? string.Empty;
             Expect(spikes != null && row != null && spikes.DisplayName == SpikesZh && d.Contains("反伤范围内的攻击者") && d.Contains("起爆") && d.Contains(flat) && d.Contains("一半")
-                   && Mathf.Approximately(row.Thorns, 0.5f) && !d.Contains("远程") && !d.Contains("块数") && !d.Contains("补") && !d.Contains("尖刺"),
-                $"组件名“{spikes?.DisplayName}”；说明“{d}”：写反伤范围与起爆、数值 = 表（{flat} + 一半），不写“远程攻击不触发”、不写块数与补块");
+                   && Mathf.Approximately(row.Thorns, 0.5f) && !d.Contains("远程") && !d.Contains("尖刺") && d.Contains("补回 1 块") && d.Contains("块用完时不反伤"),
+                $"组件名“{spikes?.DisplayName}”；说明“{d}”：写反伤范围与起爆、数值 = 表（{flat} + 一半），不写“远程攻击不触发”；EMG1-FW-01 块数机制生效同一提交换成第 3 层（写块数与补块，FGR-EMG-233 第 6 条）");
 
             string thorns = StatusTagCatalog.NameOf("Thorns");
             GameSettings.SetLanguage(GameLanguage.En);

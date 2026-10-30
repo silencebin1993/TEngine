@@ -81,6 +81,17 @@ namespace BinGames.Sim.Combat
                     Dissipate(ref d, i, dt);
                 }
             }
+            // 3b. EMG1-FW-01（FGR-EMG-233 第 4 条）：爆炸反应装甲补块（块数机制开着时；只碰缺块的存活单位，宿主阵亡后不补）
+            if (d.Config.EmgEraBlocks > 0)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    if (d.EmgUnit[i].EraMiss != 0 && d.IsAlive(i))
+                    {
+                        EmgEraRefill(ref d, i, dt);
+                    }
+                }
+            }
 
             // 4. 敌方（优先级 0 先于 1）
             for (int pass = 0; pass < 2; pass++)
@@ -1148,6 +1159,43 @@ namespace BinGames.Sim.Combat
             return r;
         }
 
+        /// <summary>
+        /// EMG1-FW-01（DEBT-EMG1TRIG01-03；FG19A comp_repairbeam：prop.integrity modify 修复友军）：修复出口的一次出手——目标是己方单位（不是自己）、在射程内：
+        /// 出手宿主 PFlags = Heal、HitCode = 修复（与内核维修行为同一个 <see cref="EmgRepairBegin"/>），修复量 = 武器伤害字段（热更层按 emg.repair.hp_per_shot × 声明幅度写）；
+        /// 程序需要飞行（SpawnFlight）时发一发治疗根弹体（只碰己方），否则当场修复。修复命中发 evt.hit Code = 修复，触发器放出的子载荷是治疗子弹药。
+        /// 节奏由攻击命令的出手间隔给（与普通即时武器一样，直控点击一次一发）。
+        /// </summary>
+        private static CombatFireResult RepairFire(ref CombatData d, int a, int t, int w)
+        {
+            CombatWeapon wp = d.Weapons[w];
+            if (IsFrozen(ref d, a))
+            {
+                return CombatFireResult.Frozen; // 审查修复（第 1 轮）：与普通武器同一门槛，冻住时不能修复出手
+            }
+            if (t == a || d.Faction[t] != d.Faction[a] || d.MaxHp[t] <= 0f)
+            {
+                return CombatFireResult.NotFriendly;
+            }
+            if (math.distance(d.Pos[a], d.Pos[t]) > wp.Range + d.Radius[a] + d.Radius[t])
+            {
+                return CombatFireResult.OutOfRange;
+            }
+            float amount = math.max(0f, wp.Damage);
+            CombatCounters c = d.Counters[0];
+            c.ShotsFired++;
+            d.Counters[0] = c;
+            EmgRepairBegin(ref d, a, t, amount);
+            if (EmgFlightOn(wp))
+            {
+                EmgFireFlight(ref d, a, t, w, wp, EmgProjFlags.Heal);
+                EmgShotEnd(ref d);
+                return CombatFireResult.Launched;
+            }
+            Heal(ref d, t, amount, a);
+            EmgShotEnd(ref d);
+            return CombatFireResult.Ok;
+        }
+
         private static CombatFireResult FireAtCore(ref CombatData d, int a, int t)
         {
             if (a < 0 || a >= d.Count)
@@ -1165,6 +1213,11 @@ namespace BinGames.Sim.Combat
             if (!d.IsAlive(t))
             {
                 return CombatFireResult.TargetDead;
+            }
+            int wr = d.Weapon[a];
+            if (wr >= 0 && wr < d.Weapons.Length && d.Weapons[wr].HasOutput == CombatConst.OutputRepair && d.Weapons[wr].Mode != CombatWeaponMode.Cannon)
+            {
+                return RepairFire(ref d, a, t, wr); // EMG1-FW-01（DEBT-EMG1TRIG01-03）：修复出口对友军出手
             }
             if (!d.Has(t, CombatUnitFlags.Targetable) || d.Faction[t] == d.Faction[a])
             {
@@ -1818,6 +1871,8 @@ namespace BinGames.Sim.Combat
                 // EMG1-TRIG-01：治疗子弹药碰己方单位；子弹药不打母载荷刚命中的那个（IgnoreUnit）。旧弹体两项都是缺省，逐字不变。
                 bool heal = (pr.Flags & EmgProjFlags.Heal) != 0;
                 byte want = heal ? (byte)pr.Faction : pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
+                // EMG1-FW-01（FGR-EMG-184 / 233 第 3 条、第 14 节第 6 条“完全中立”）：破片不分阵营，同阵营的也打（放出它的单位除外，IgnoreUnit），伤到同阵营发友伤
+                bool neutral = (pr.Flags & EmgProjFlags.Fragment) != 0;
                 // 线段 prev→next 与单位圆（半径 = 单位半径 + 弹体半径）求最早交点。
                 double reach = pr.Radius + maxR;
                 int cx0 = grid.CellOf(math.min(pr.Prev.x, next.x) - reach);
@@ -1841,7 +1896,7 @@ namespace BinGames.Sim.Combat
                         for (int e = start; e < start + count; e++)
                         {
                             int k = grid.Slots[e];
-                            if (d.Faction[k] != want || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (pr.IgnoreUnit != 0 && d.Id[k] == pr.IgnoreUnit))
+                            if ((!neutral && d.Faction[k] != want) || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (pr.IgnoreUnit != 0 && d.Id[k] == pr.IgnoreUnit))
                             {
                                 continue;
                             }
@@ -1927,7 +1982,8 @@ namespace BinGames.Sim.Combat
                         float dmg = pr.Damage;
                         if (IsFrontalArmored(ref d, hit, fromSide))
                         {
-                            dmg *= math.max(0f, 1f - d.Armor[hit].x);
+                            // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的破甲由子弹药自己结算
+                            dmg *= (pr.Flags & EmgProjFlags.Sub) != 0 ? EmgSubArmorFactor(ref d, pr, hit) : math.max(0f, 1f - d.Armor[hit].x);
                         }
                         dmg *= BackMultiplier(ref d, hit, fromSide);
                         bool landed = DamageUnit(ref d, hit, dmg, owner);
@@ -1935,6 +1991,10 @@ namespace BinGames.Sim.Combat
                         if (landed && (pr.Flags & EmgProjFlags.Fragment) != 0)
                         {
                             EmgFragmentHit(ref d, pr, hitId, dmg, hitPos); // EMG1-ENT-01（FGR-EMG-114）：破片命中发 evt.hit（链深 = 破片的链深）
+                            if (d.Faction[hit] == (byte)pr.Faction)
+                            {
+                                EmgFriendlyHit(ref d, pr, hitId, hitPos); // EMG1-FW-01（FGR-EMG-184）：友伤
+                            }
                         }
                         // EMG1-TRIG-01：子弹药不读根读法，只执行自己节点的指令（下面）。
                         if (landed && (pr.Flags & EmgProjFlags.Sub) == 0 && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
@@ -1949,6 +2009,7 @@ namespace BinGames.Sim.Combat
                         if (!heal)
                         {
                             EmgSubChain(ref d, pr, owner, hit, hitPos); // EMG1-GRM-01：子弹药节点上的连锁
+                            EmgSubSplash(ref d, pr, owner, hit, hitPos, pr.Damage); // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的爆圈 / 余击
                         }
                     }
                     EmgProjCtxEnd(ref d, ref pr);

@@ -70,6 +70,10 @@ namespace GameLogic.Campaign.Combat
         public string[] FirmwareIds;
         /// <summary>EMG1-PRG-01：这组参数编出的程序（树、原因、热量分项；空程序 = 只有基础攻击）。程序树预览只读这里与编译器，不另算（IC-REQ-010）。</summary>
         public Emergence.EmgProgramResult Program;
+        /// <summary>EMG1-FW-01（FGR-EMG-193 第 3 条）：机器质量加成（功能组件 + 结构模块写 prop.mass 的 modify 相加，封顶 emg.part.prop_sum_cap），0 = 按底盘。</summary>
+        public float MassBonus;
+        /// <summary>EMG1-FW-01：底盘的实体档案下标 + 1（装配刷新时按它重写质量；0 = 解析失败 / 没有档案）。</summary>
+        public short ChassisProfileRef;
         /// <summary>EMG1-PRG-01：程序没能登记进内核时的原因文本键（表满 <c>emg.compile.table_full</c>，武器退回只有基础攻击 + 旧读法），正常为 null。</summary>
         public string ProgramNoteKey;
     }
@@ -328,6 +332,9 @@ namespace GameLogic.Campaign.Combat
             c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
             // EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁“只跳已标记”确实跳到已标记目标时记在哪个图鉴条目上（按稳定键；内核不认内容 ID）。
             c.EmgMarkTagKey = NamedReactionCatalog.StableKey(MechanicalReactionCatalog.ReactionMarkJumpId);
+            // EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲块数机制随阶段 1 开（emg.stage = 0 时块数 0 = 旧轨：反伤不限次数、不放破片）。
+            c.EmgEraBlocks = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? Mathf.Clamp((int)Math.Round(Tuning("emg.era.blocks", 12f)) & ~1, 2, 16) : 0);
+            c.EmgEraRefill = Mathf.Max(0.1f, Tuning("emg.era.refill_seconds", 3f));
             return c;
         }
 
@@ -400,7 +407,7 @@ namespace GameLogic.Campaign.Combat
                 AimReadyAt = rec.CannonAimReadyAtPlaySeconds,
                 NextFireAt = rec.NextCannonActionAtPlaySeconds,
             });
-            AssignProfile(unit, Emergence.EmgEntityProfiles.ForChassis(rec.ChassisId)); // EMG1-ENT-01：机器质量按底盘
+            AssignProfile(unit, Emergence.EmgEntityProfiles.ForChassis(rec.ChassisId), info.MassBonus); // EMG1-ENT-01：机器质量按底盘；EMG1-FW-01：× (1 + 部件加成)
             return AttachMachine(rec, unit);
         }
 
@@ -616,7 +623,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return false;
             }
-            return w.Mode == CombatWeaponMode.Cannon || w.HasOutput != 0;
+            return w.Mode == CombatWeaponMode.Cannon || (w.HasOutput != 0 && w.HasOutput != CombatConst.OutputRepair); // 修复出口（维修束）打不出伤害，不派去追敌
         }
 
         /// <summary>FG8-E2E-01 复审修复：这台机器此刻是否被接入（直控）——内核 Possessed 标志（受控机不执行编队命令，也不交给教义）。</summary>
@@ -703,6 +710,11 @@ namespace GameLogic.Campaign.Combat
             }
             MachineWeaponInfo info = ResolveMachineWeapon(state, logicId);
             Kernel.SetUnitWeapon(unit, info.WeaponIndex);
+            // EMG1-FW-01：装配变化后机器质量随部件加成重算（换下重甲即回到底盘质量）
+            if (info.ChassisProfileRef > 0)
+            {
+                AssignProfile(unit, (short)(info.ChassisProfileRef - 1), info.MassBonus);
+            }
             Kernel.SetFlag(unit, CombatUnitFlags.HeatSink, HasHeatSink(state, logicId));
             // FG9-FAC-01：装着信号中继模块的机器——回声猎手优先刺杀它，潜伏单位在它附近现形。
             Kernel.SetFlag(unit, CombatUnitFlags.SignalRelay, Signal.SignalCoverageService.IsRelayMachine(logicId));
@@ -746,6 +758,8 @@ namespace GameLogic.Campaign.Combat
             BlueprintCircuitPreview p = resolution.Preview;
             info.PrimaryId = p.PrimaryId;
             info.UtilityId = p.UtilityId;
+            info.MassBonus = Emergence.EmgCatalog.PartPropModify("prop.mass", new[] { p.UtilityId, p.StructureId }, out _);
+            info.ChassisProfileRef = (short)(Emergence.EmgEntityProfiles.ForChassis(p.ChassisId) + 1);
             info.Morph = MachineMorph.MaskOf(p); // FG1-VFX-01：机身状态 = 本次编译结果里生效固件的类别集合。
             info.FirmwareIds = p.FirmwareIds ?? Array.Empty<string>();
             info.Uplinked = SignalUplinkService.IsUplinked(state, logicId);
@@ -892,11 +906,10 @@ namespace GameLogic.Campaign.Combat
             HashSet<string> dropped)
         {
             bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
-            HashSet<string> modFirmware = Emergence.EmgProgramCompiler.ModifierFirmware(program);
-            CombatReading r = modFirmware.Count == 0 && dropped.Count == 0
-                ? reading
-                : CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
-                    (fw, field) => dropped.Contains(fw) || (modFirmware.Contains(fw) && Emergence.EmgProgramCompiler.ModifierFields.Contains(field)));
+            // EMG1-FW-01：变体读法的跳过规则按“截断后的程序”定（被截掉的指令不编译，它的固件旧字段与过渡字段都不结算）；截到 0 条 = 全部固件按截断前的单轨口径去掉
+            Func<string, string, bool> skip = Emergence.EmgProgramCompiler.LegacySkip(truncated ?? program);
+            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
+                (fw, field) => dropped.Contains(fw) || (skip != null && skip(fw, field)));
             return FoldProgramReadings(r, truncated, damageFromCompile);
         }
 
@@ -911,11 +924,9 @@ namespace GameLogic.Campaign.Combat
                 return reading;
             }
             bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
-            HashSet<string> modFirmware = Emergence.EmgProgramCompiler.ModifierFirmware(program);
-            CombatReading r = modFirmware.Count == 0
-                ? reading
-                : CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
-                    (fw, field) => modFirmware.Contains(fw) && Emergence.EmgProgramCompiler.ModifierFields.Contains(field));
+            // EMG1-FW-01（FGR-EMG-019 单轨）：程序里的固件旧字段 / 旧标签一律跳过，只留根节点效果写端的过渡字段（EmgProgramCompiler.LegacySkip）
+            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
+                Emergence.EmgProgramCompiler.LegacySkip(program));
             return FoldProgramReadings(r, program, damageFromCompile);
         }
 
@@ -957,7 +968,9 @@ namespace GameLogic.Campaign.Combat
         /// <summary>numericOnly 端口 → 迁移对照里对应的旧读法字段（FG19A 第 1.5 节：flare scale、wide spread、armorpierce armor）。</summary>
         private static readonly (string Port, string[] Fields)[] NumericLegacy =
         {
-            ("grm.mod.size", new[] { "scale", "spread" }), ("grm.mod.armor", new[] { "armor" }),
+            ("grm.mod.size", Emergence.EmgProgramCompiler.NumericLegacyFields("grm.mod.size")),
+            ("grm.mod.armor", Emergence.EmgProgramCompiler.NumericLegacyFields("grm.mod.armor")),
+            ("grm.mod.power", Emergence.EmgProgramCompiler.NumericLegacyFields("grm.mod.power")), // EMG1-FW-01：电容蓄力 capacitor（过载没有旧字段，走端口行 × 幅度 1 = 不改）
         };
 
         /// <summary>
@@ -975,7 +988,7 @@ namespace GameLogic.Campaign.Combat
                 }
                 // 同键幂等后根节点只剩一行：按写了修饰端口的各条固件（同一条装两次只算一次）汇总旧字段幅度，再按旧读法行折一次（与 Build 同一累加）。
                 var sum = new Dictionary<string, float>(StringComparer.Ordinal);
-                foreach (string fw in Emergence.EmgProgramCompiler.ModifierFirmware(program))
+                foreach (string fw in Emergence.EmgProgramCompiler.RootWriters(program, x.Port)) // EMG1-FW-01：只汇总根节点上写这个端口的固件
                 {
                     foreach ((string field, float mag) in CarrierReadings.FieldsOf(fw))
                     {
@@ -1094,6 +1107,7 @@ namespace GameLogic.Campaign.Combat
                 KineticFragment = Emergence.EmgEntityProfiles.KineticOf("kinetic.fragment", d.KineticFragment),
                 KineticImpact = Emergence.EmgEntityProfiles.KineticOf("kinetic.impact", d.KineticImpact),
                 FragCount = c.FragCount, FragDamage = c.FragDamage, FragSpeed = c.FragSpeed, FragRange = c.FragRange, FragThreshold = c.FragThreshold,
+                EraFragCount = c.EraFragCount, EraFragDamage = c.EraFragDamage, EraFragSpeed = c.EraFragSpeed, EraFragRange = c.EraFragRange,
             };
             bool ok = kernel.SetEntityProfiles(rows, p0);
             if (!ok)
@@ -1104,13 +1118,17 @@ namespace GameLogic.Campaign.Combat
         }
 
         /// <summary>EMG1-ENT-01：实体层开时给单位挂档案行（机器按底盘、敌人按材质；首领另一组）。实体层关时不写（EProfile 保持 −1，快照与哈希逐字不变）。</summary>
-        private void AssignProfile(int unit, short profile)
+        private void AssignProfile(int unit, short profile, float massBonus = 0f)
         {
             if (_emgEntity && unit > 0 && profile >= 0)
             {
-                Kernel.SetUnitProfile(unit, profile, 0f);
+                Kernel.SetUnitProfile(unit, profile, MachineMass(Kernel, profile, massBonus));
             }
         }
+
+        /// <summary>EMG1-FW-01（FGR-EMG-193 第 3 条）：机器质量 = 底盘档案质量 × (1 + 部件加成)；加成为 0 时返回 0（= 内核按档案推算，与 EMG1-ENT-01 逐字相同）。</summary>
+        public static float MachineMass(CombatKernel kernel, short profile, float massBonus) =>
+            massBonus > 0f && profile >= 0 ? kernel.EntityProfileAt(profile).Mass * (1f + massBonus) : 0f;
 
         /// <summary>EMG1-TRIG-01：把 fg.TbSubPayload 的 5 行写进内核（子形态码 = 下标）。没有表（自检夹具）时内核保留 FG19A 初值。</summary>
         public static void ApplyEmgSubForms(CombatKernel kernel)
@@ -1208,7 +1226,11 @@ namespace GameLogic.Campaign.Combat
             w.Range = FracturedCityLayout.DirectAttackRange;
             // FG2-FW-02：即时命中武器也有自己的冷却（与编队攻击间隔同一个数）——驻守开火的炮塔按它出手，蓄力读法（电容蓄力）按它 × 倍率蓄满。
             w.Cooldown = MachineAttackInterval;
-            w.MarkSeconds = p.HasMarkerFunction ? FracturedCityLayout.EnemyMarkDurationSeconds : 0f;
+            // EMG1-FW-01 审查修复（第 1 轮，FGR-EMG-019 单轨）：功能组件写 evt.marked emit 的声明已生效时按声明（秒数 = 幅度，FG19A func_marker 6 秒），不按组件 ID；
+            // 声明未生效（emg.stage = 0）走旧轨（装了静默标记器 = 10 秒）。
+            float markDecl = Emergence.EmgCatalog.PartWriteAmount("evt.marked", Emergence.EmgRole.Emit, new[] { p.UtilityId });
+            w.MarkSeconds = markDecl > 0f ? markDecl
+                : p.HasMarkerFunction && !Emergence.EmgCatalog.IsOwnerOnDeclTrack(p.UtilityId) ? FracturedCityLayout.EnemyMarkDurationSeconds : 0f;
             // DEBT-FG1SIG06-02：即时命中武器也按生效固件积热（与热量预算同一个数；裸跑 ×1.5），过热停火、降到恢复线以下再开火。
             float rawHeatI = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, p.FirmwareHeatPerShot) * rawHeatI;
@@ -1222,6 +1244,18 @@ namespace GameLogic.Campaign.Combat
                 w.JumpRange = FracturedCityLayout.MarkJumpRange;
                 w.JumpFalloff = FracturedCityLayout.MarkJumpDamageFalloff;
                 w.JumpMax = FracturedCityLayout.MarkJumpMaxTargets;
+            }
+            // EMG1-FW-01（DEBT-EMG1TRIG01-03）：没有攻击出口、主组件声明了 prop.integrity modify（修复友军，FG19A comp_repairbeam 行）→ 修复出口：只对己方出手、命中 = 修复。
+            // 按声明（端口 + 角色 + 幅度，声明已生效）判，不按组件 ID；emg.stage = 0 时声明不生效，逐字同旧（没有出口）。
+            if (!p.HasCombatOutput && !string.IsNullOrEmpty(p.PrimaryId))
+            {
+                Emergence.EmgCatalog.PartPropModify("prop.integrity", new[] { p.PrimaryId }, out float heal); // 取未封顶的声明幅度（prop.* 合计上限只管装配加成，不截修复量）
+                if (heal > 0f)
+                {
+                    w.HasOutput = CombatConst.OutputRepair;
+                    w.Damage = Mathf.Max(0f, Tuning("emg.repair.hp_per_shot", 10f)) * heal;
+                    w.Range = Mathf.Max(0.5f, Tuning("emg.repair.range", 8f));
+                }
             }
             w.FuseTrace = FuseTraceOf(p);
             return w;
@@ -2189,6 +2223,8 @@ namespace GameLogic.Campaign.Combat
                         ? info.FailureReason : GameText.Get("combat.fire.no_weapon");
                 case CombatFireResult.NoCombatOutput:
                     return GameText.Get("combat.fire.no_output");
+                case CombatFireResult.NotFriendly:
+                    return GameText.Get("combat.fire.not_friendly");
                 case CombatFireResult.Overheated:
                     return GameText.Format("combat.fire.overheated", FracturedCityLayout.WeaponHeatRecoverThreshold.ToString("0"));
                 case CombatFireResult.Cooldown:

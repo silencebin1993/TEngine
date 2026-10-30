@@ -1,3 +1,4 @@
+using UnityEngine;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
@@ -259,6 +260,24 @@ namespace GameLogic.Campaign.Emergence
             {
                 Add(into, EmgTreeRowKind.OffPath, GameText.Format("emg.tree.off_path", offPathFirmware), -1, -1, 0);
             }
+        }
+
+        /// <summary>
+        /// EMG1-FW-01（FGR-EMG-193 第 3 条）：装配预览的“部件属性合计”行——功能组件 + 结构模块写同一 prop.* 的 modify 相加，超出 emg.part.prop_sum_cap 的部分无效并写明。
+        /// 与运行时写单位质量同一个函数（EmgCatalog.PartPropModify）。没有部件写 prop.* 时返回 null。
+        /// </summary>
+        public static string PartPropLine(string port, string utilityId, string structureId)
+        {
+            float capped = EmgCatalog.PartPropModify(port, new[] { utilityId, structureId }, out float raw);
+            if (!(raw > 0f))
+            {
+                return null;
+            }
+            string name = EmgCatalog.Current.PortIndexById.ContainsKey(port) ? GameText.Get("emg.port." + port + ".name") : port;
+            string pct(float v) => Mathf.RoundToInt(v * 100f).ToString(CultureInfo.InvariantCulture);
+            return raw > capped + 1e-4f
+                ? GameText.Format("emg.part.prop_capped", name, pct(raw), pct(capped), pct(raw - capped))
+                : GameText.Format("emg.part.prop_sum", name, pct(raw));
         }
 
         private static void Add(List<EmgTreeRow> into, EmgTreeRowKind kind, string text, int node, int ordinal, int depth) =>

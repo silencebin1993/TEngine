@@ -55,6 +55,9 @@ namespace GameLogic.EditorTools
     /// </summary>
     public static class FgFusionSelfCheck
     {
+        /// <summary>FG-GAP-174：线索标签检查暂缓的配方（EMG3-FUSE-01 重做线索时删掉）。</summary>
+        private static readonly string[] ClueTagPending = { "fusion.rustclock", "fusion.rustbomb" };
+
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const string PanelUxml = "Assets/GameRes/Raw/UI/UiKit/FusionPanel.uxml";
         private const string QueueRowUxml = "Assets/GameRes/Raw/UI/UiKit/FusionQueueRow.uxml";
@@ -401,8 +404,10 @@ namespace GameLogic.EditorTools
                 bool name = GameText.TryGet(r.NameKey, GameLanguage.ZhCn, out string zh) && GameText.TryGet(r.NameKey, GameLanguage.En, out string en)
                             && !string.IsNullOrWhiteSpace(zh) && !string.IsNullOrWhiteSpace(en) && FirmwareKinds.DisplayName(r.MixId) == zh
                             && !zh.Contains(FirmwareKinds.DisplayName(r.ParentA) + FirmwareKinds.DisplayName(r.ParentB));
+                // EMG1-FW-01（FG-GAP-174）：fw_clock 去掉误贴的 Blood 后，这两条配方的线索标签检查暂缓（与 tools/cell_tables/fgdata_fusion.py CLUE_TAG_PENDING 同表），反应存在照查
                 bool reaction = NamedReactionCatalog.TryGet(r.Reaction, out GameConfig.fg.Reaction rx)
-                                && ((HasTag(r.ParentA, rx.TagA) && HasTag(r.ParentB, rx.TagB)) || (HasTag(r.ParentA, rx.TagB) && HasTag(r.ParentB, rx.TagA)));
+                                && (Array.IndexOf(ClueTagPending, r.Id) >= 0
+                                    || (HasTag(r.ParentA, rx.TagA) && HasTag(r.ParentB, rx.TagB)) || (HasTag(r.ParentA, rx.TagB) && HasTag(r.ParentB, rx.TagA)));
                 bool acquire = FirmwareKinds.SourceOf(r.MixId) == "fusion" && !FirmwareKinds.IsEnemyProtocol(r.MixId) && FirmwareRestoreService.IsRestorable(r.MixId) == false
                                && CarrierReadings.AllCarriers.All(c => !string.IsNullOrEmpty(FirmwareKinds.Reading(r.MixId, c)));
                 if (!(parents && core && load && fields && tagOk && catOk && name && reaction && acquire))

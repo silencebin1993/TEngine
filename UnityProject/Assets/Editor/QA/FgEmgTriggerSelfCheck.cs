@@ -351,12 +351,14 @@ namespace GameLogic.EditorTools
 
             int emit = EmgCatalog.VerbCode("emit");
             ushort oil = c.PortIndexById.TryGetValue("mat.oil", out int oi) ? c.Ports[oi].Code : (ushort)0;
-            EmgPortCarrierRow[] oilRows = c.PortCarriers.Where(r => r.Port == oil).ToArray();
+            // EMG1-FW-01：物质端口另有 5 行“扩散 / 随车”改写行（动词 spread，按声明角色 modify 选行），排放行只看 emit
+            EmgPortCarrierRow[] oilRows = c.PortCarriers.Where(r => r.Port == oil && r.Verb == emit).ToArray();
+            int oilSpread = c.PortCarriers.Count(r => r.Port == oil && r.Verb == EmgCatalog.VerbCode("spread"));
             uint oilBit = NamedReactionCatalog.BitOf("Oil");
             bool oilOk = oilRows.Length == 5 && oilRows.All(r => r.Verb == emit && Near(r.A, 1.5f) && Near(r.B, 6f) && (int)math.round(r.C) >= 1 && 1u << ((int)math.round(r.C) - 1) == oilBit);
             int matRows = c.PortCarriers.Count(r => r.Verb == emit);
-            Expect(emit > 0 && oil > 0 && oilOk && oilBit != 0u && matRows >= 9 * 5,
-                $"排放（阶段 1 口径 3，FG19A 第 0.3 节）：mat.oil × 5 载体 → 动词 emit（码 {emit}）、驻留区半径 1.5 米、6 秒、C = 沾染位号 + 1 → 状态位 Oil（{oilBit:X}）；带 emit 动词的端口 × 载体行 {matRows} 行（9 种物质 × 5 载体）；临时值待 FG15-BAL-01");
+            Expect(emit > 0 && oil > 0 && oilOk && oilSpread == 5 && oilBit != 0u && matRows >= 9 * 5,
+                $"排放（阶段 1 口径 3，FG19A 第 0.3 节）：mat.oil × 5 载体 → 动词 emit（码 {emit}）、驻留区半径 1.5 米、6 秒、C = 沾染位号 + 1 → 状态位 Oil（{oilBit:X}）；带 emit 动词的端口 × 载体行 {matRows} 行（9 种可排放物质 + 熔融金属（只给底盘拖带）× 5 载体）；油另有扩散行 {oilSpread} 行；临时值待 FG15-BAL-01");
 
             CombatConfig cfg = CombatSite.ConfigFromTuning();
             Expect(Near(cfg.EmgSubDmgRatio, 0.5f) && cfg.EmgMaxChildren == 4 && cfg.EmgMaxPayloads == 16 && cfg.EmgVerbEmit == emit && CombatConfig.Default.EmgVerbEmit == 0,
@@ -980,6 +982,69 @@ namespace GameLogic.EditorTools
                 $"敌方维修单位修复伤员：evt.hit Code {EmgCode.HitHeal}（修复，宿主 = 维修单位、Other = 伤员）；放出 {k.EmgBusStats.SubSpawned} 颗治疗子弹药（伤害 = 修复量 5 × 0.5），另一友军 +{g:0.#} 血（2.5 的整数倍），挡在路上的我方机器 {Hp(k, me):0} 血不受伤");
         }
 
+        /// <summary>
+        /// I2（DEBT-EMG1TRIG01-03）：玩家维修束的战场友军修复出手。真实蓝图预览（维修束主组件、没有攻击出口）→ MachineWeaponFrom 按声明编成修复出口；
+        /// 正向：维修束 + [分裂] 修复受伤友军 A（evt.hit Code = 修复 → 分裂放出治疗子弹药），子弹药治疗旁边的友军 B、不伤敌；
+        /// 对照：去掉触发器只修 A、不放子弹药；维修束 + [寻的]（需要飞行）发一发治疗根弹体，飞到 A 才修复。调用方已切到 emg.stage = 1。
+        /// </summary>
+        private static void CheckRepairBeam()
+        {
+            var preview = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompRepairBeamId, ChassisId = ChassisCatalog.ChassisHoverId, HasCombatOutput = false, FirmwareIds = new[] { "fw_split" } };
+            EmgProgramResult split = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_split" }, FirmwareCarrier.Projectile);
+            EmgProgramResult homing = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_homing" }, FirmwareCarrier.Projectile);
+            float per = 0f;
+            float aSplit = 0f, bSplit = 0f, eSplit = 0f, aBare = 0f, bBare = 0f;
+            long subsSplit = 0, subsBare = 0;
+            CombatFireResult rSplit = default, rBare = default, rFoe = default;
+            foreach (bool withTrigger in new[] { true, false })
+            {
+                CombatWeapon beam = CombatSite.MachineWeaponFrom(preview);
+                per = beam.Damage;
+                using var k = new CombatKernel(Cfg(), 16);
+                beam.Program = withTrigger ? CombatSite.RegisterProgram(k, split) : -1;
+                int me = Me(k, new double2(0, 0), k.AddWeapon(beam));
+                int a = Unit(k, CombatFaction.Player, new double2(0, 4), -1, 50f, 100f);
+                int b = Unit(k, CombatFaction.Player, new double2(1.5, 4.5), -1, 50f, 100f);
+                int foe = Foe(k, new double2(-1.5, 4.5), 50f);
+                CombatFireResult r = k.FireAt(me, a, k.Time);
+                StepN(k, 60);
+                if (withTrigger)
+                {
+                    rSplit = r;
+                    aSplit = Hp(k, a);
+                    bSplit = Hp(k, b);
+                    eSplit = Hp(k, foe);
+                    subsSplit = k.EmgBusStats.SubSpawned;
+                    rFoe = k.FireAt(me, foe, k.Time);
+                }
+                else
+                {
+                    rBare = r;
+                    aBare = Hp(k, a);
+                    bBare = Hp(k, b);
+                    subsBare = k.EmgBusStats.SubSpawned;
+                }
+            }
+            Expect(per > 0f && rSplit == CombatFireResult.Ok && Near(aSplit, 50f + per) && subsSplit >= 1 && bSplit > 50f && Near(eSplit, 50f) && rFoe == CombatFireResult.NotFriendly,
+                $"维修束 + [分裂]：修复友军 A +{aSplit - 50f:0.#}（= emg.repair.hp_per_shot × 声明幅度 {per:0.#}），修复命中触发分裂放出 {subsSplit} 颗治疗子弹药，旁边友军 B 回到 {bSplit:0.#}、敌人 {eSplit:0} 不受伤；对敌人出手 {rFoe}");
+            Expect(rBare == CombatFireResult.Ok && Near(aBare, 50f + per) && Near(bBare, 50f) && subsBare == 0,
+                $"对照（去掉触发器）：只修 A（{aBare:0.#}），B 仍 {bBare:0.#}、不放子弹药");
+            CombatWeapon fly = CombatSite.MachineWeaponFrom(preview);
+            CombatSite.ApplySpawnFlight(ref fly, homing, ComponentCatalog.CompRepairBeamId);
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                fly.Program = CombatSite.RegisterProgram(k, homing);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(fly));
+                int a = Unit(k, CombatFaction.Player, new double2(0, 6), -1, 50f, 100f);
+                CombatFireResult r = k.FireAt(me, a, k.Time);
+                float atOnce = Hp(k, a);
+                int inFlight = k.ProjectileCount;
+                StepN(k, 60);
+                Expect(fly.SpawnFlight == 1 && r == CombatFireResult.Launched && Near(atOnce, 50f) && inFlight == 1 && Near(Hp(k, a), 50f + per) && k.ProjectileCount == 0,
+                    $"维修束 + [寻的]（需要飞行）：发一发治疗根弹体（{r}，开火当下 A 仍 {atOnce:0}），飞到后 A 回到 {Hp(k, a):0.#}");
+            }
+        }
+
         // ── J. FGT-EMG-040：中途存读档 ─────────────────────────────────────────────
 
         private static void CheckSaveLoad()
@@ -1129,7 +1194,7 @@ namespace GameLogic.EditorTools
             CombatWeapon turretBolt = Bolt(0, 0f);
             string tkey = CombatKernel.WeaponKey(turretBolt);
             string n5 = CombatSite.ApplySpawnFlight(ref turretBolt, homing, ComponentCatalog.CompGunId);
-            // 维修束：装配编译没有攻击出口（HasOutput = 0），内核 FireAtCore 报 NoCombatOutput、根本不出手——不实体化、不放伤害子载荷（战场友军修复出手见 DEBT-EMG1TRIG01-03）。
+            // 维修束：装配编译没有攻击出口；EMG1-FW-01（DEBT-EMG1TRIG01-03 关闭）起按声明 prop.integrity modify 编成修复出口（HasOutput = 2），只对己方出手——对敌人报 NotFriendly、不出手、不实体化。
             var repairPreview = new BlueprintCircuitPreview
             {
                 PrimaryId = ComponentCatalog.CompRepairBeamId, ChassisId = ChassisCatalog.ChassisHoverId, HasCombatOutput = false, FirmwareIds = new[] { "fw_homing" },
@@ -1146,9 +1211,10 @@ namespace GameLogic.EditorTools
                 CombatFireResult rr = k.FireAt(me, foe, k.Time);
                 StepN(k, 30);
                 Expect(n5 == null && turretBolt.SpawnFlight == 0 && CombatKernel.WeaponKey(turretBolt) == tkey
-                       && repair.HasOutput == 0 && n6 == null && repair.SpawnFlight == 0 && repairSame && rr == CombatFireResult.NoCombatOutput
+                       && repair.HasOutput == CombatConst.OutputRepair && n6 == null && repair.SpawnFlight == 1 && !repairSame && rr == CombatFireResult.NotFriendly
                        && k.ProjectileCount == 0 && k.EmgPendingCount == 0 && Near(Hp(k, foe), 50f) && k.EmgBusStats.FlightShots == 0,
-                    $"不置 SpawnFlight：炮塔射弹武器（本来就飞，寿命与武器键不变）；维修束 + [寻的]（没有攻击出口，开火 {rr}，不生成弹体、不记待生成请求、敌人不掉血；友军修复出手见 DEBT-EMG1TRIG01-03）");
+                    $"不置 SpawnFlight：炮塔射弹武器（本来就飞，寿命与武器键不变）；维修束 + [寻的]：修复出口（HasOutput {repair.HasOutput}）按表实体化（SpawnFlight {repair.SpawnFlight}），对敌人开火 {rr}——不生成弹体、不记待生成请求、敌人不掉血");
+                CheckRepairBeam();
             }
 
             // 编译器判“需要飞行”的主入口：根节点读定时 / 近炸（[延时引信] / [分叉]）。真实编译 → ApplySpawnFlight 置位 → 根弹体还在飞时就按定时 / 近炸放出子载荷。

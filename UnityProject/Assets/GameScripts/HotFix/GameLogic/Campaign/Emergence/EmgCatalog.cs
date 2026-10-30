@@ -250,6 +250,48 @@ namespace GameLogic.Campaign.Emergence
             return false;
         }
 
+        /// <summary>
+        /// EMG1-FW-01（FGR-EMG-193 第 3 条）：同一台机器上不同部件写同一 prop.* 端口的 modify 按（端口, 角色）相加，合计上限 emg.part.prop_sum_cap（+100%），超出部分无效。
+        /// 只认声明（端口码、角色、幅度）与“声明已生效”，不认部件 ID（FGR-EMG-013）；同名部件只算一次（第 2 条限装 1 件）。<paramref name="raw"/> = 未封顶的合计（预览显示超出部分）。
+        /// 预览（蓝图编辑器）与运行时（CombatSite 写单位质量）调同一个函数。
+        /// </summary>
+        public static float PartPropModify(string port, IReadOnlyList<string> partIds, out float raw)
+        {
+            raw = PartWriteAmount(port, EmgRole.Modify, partIds);
+            float cap = GridContent.TryGetTuning(PartPropCapKey, out float v) ? v : 1f;
+            return Math.Min(raw, Math.Max(0f, cap));
+        }
+
+        /// <summary>部件声明里（端口, 角色）写端的幅度合计：声明已生效（stageGate ≤ 当前阶段）、同名部件只算一次、不封顶。只认声明，不认部件 ID。</summary>
+        public static float PartWriteAmount(string port, EmgRole role, IReadOnlyList<string> partIds)
+        {
+            float raw = 0f;
+            EmgCompiled c = Current;
+            if (port == null || partIds == null || !c.PortIndexById.TryGetValue(port, out int pi))
+            {
+                return 0f;
+            }
+            ushort code = c.Ports[pi].Code;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string part in partIds)
+            {
+                if (string.IsNullOrEmpty(part) || !seen.Add(part) || !c.OwnerIndex.TryGetValue(part, out int oi))
+                {
+                    continue;
+                }
+                foreach (EmgDeclRow d in c.Decls)
+                {
+                    if (d.Owner == oi && d.Dir == EmgDirs.Write && d.Role == role && d.Port == code && d.StageGate <= c.EffectiveStage)
+                    {
+                        raw += d.Amount;
+                    }
+                }
+            }
+            return raw;
+        }
+
+        public const string PartPropCapKey = "emg.part.prop_sum_cap";
+
         public static int ClampStage(float raw, int implemented) => Math.Max(0, Math.Min(implemented, (int)Math.Round(raw)));
 
         public static EmgFamily FamilyOf(string portId)

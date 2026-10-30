@@ -565,7 +565,8 @@ namespace BinGames.Sim.Combat
         public bool SetEntityProfiles(System.Collections.Generic.IReadOnlyList<EmgProfile> rows, in EmgEntityParams p)
         {
             if (rows == null || rows.Count < EmgConst.ProfileSlots || rows.Count > short.MaxValue || p.FragCount < 0 || p.FragCount > 16
-                || !(Finite(p.FragDamage) && Finite(p.FragSpeed) && Finite(p.FragRange) && Finite(p.FragThreshold) && Finite(p.KineticImpact)))
+                || !(Finite(p.FragDamage) && Finite(p.FragSpeed) && Finite(p.FragRange) && Finite(p.FragThreshold) && Finite(p.KineticImpact))
+                || p.EraFragCount < 0 || p.EraFragCount > 16 || !(Finite(p.EraFragDamage) && Finite(p.EraFragSpeed) && Finite(p.EraFragRange)))
             {
                 return false;
             }
@@ -809,7 +810,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
-                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0 || u.Mass != 0f || u.DeathFlags != 0)
+                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0 || u.Mass != 0f || u.DeathFlags != 0 || u.EraMiss != 0 || u.EraRefillT != 0f)
                 {
                     return true;
                 }
@@ -882,7 +883,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, 7, _d.Count);
+            sw.Begin(EmgConst.SegUnits, 9, _d.Count);
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
@@ -893,6 +894,8 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(u.HeatLatch); // EMG1-BUS-01：尾部追加（同一格式 16 内只追加，短段读到取 0）
                 if (sw.F()) w.Write(u.Mass); // EMG1-ENT-01：尾部追加 2 个（质量、待处理阵亡标志），短段读到取 0
                 if (sw.F()) w.Write(u.DeathFlags);
+                if (sw.F()) w.Write(u.EraMiss); // EMG1-FW-01（FGR-EMG-233）：尾部追加 2 个（缺块掩码、补块计时），短段读到取 0 = 满块
+                if (sw.F()) w.Write(u.EraRefillT);
                 sw.EndRecord();
             }
             sw.End();
@@ -1333,6 +1336,8 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.HeatLatch = r.ReadByte();
                         if (sr.F()) u.Mass = r.ReadSingle();
                         if (sr.F()) u.DeathFlags = r.ReadByte();
+                        if (sr.F()) u.EraMiss = r.ReadUInt16();
+                        if (sr.F()) u.EraRefillT = r.ReadSingle();
                         if (!sr.RecordOk || !UnitEmgValid(prof, u))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1790,10 +1795,10 @@ namespace BinGames.Sim.Combat
             return CombatLoadResult.Ok;
         }
 
-        /// <summary>待生成请求：种类 0～2、程序下标在表内且节点在程序节点数内（根弹体为 −1 也可）、链深 ≤ 3、代 ≤ 2、子形态 0～5、武器在表内、数值有限。</summary>
+        /// <summary>待生成请求：种类 0～3（3 = 池满顺延的破片）、程序下标在表内且节点在程序节点数内（根弹体为 −1 也可）、链深 ≤ 3、代 ≤ 2、子形态 0～5、武器在表内、数值有限。</summary>
         private static bool SpawnValid(in EmgSpawn s, ref CombatData d) =>
-            s.Kind <= EmgConst.PendRoot && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
-            && (s.Prog >= 0 || s.Kind == EmgConst.PendRoot) && s.Depth <= EmgConst.MaxDepth && s.Gen <= EmgConst.MaxGen && s.SubForm <= 5 && s.Armed <= 1
+            s.Kind <= EmgConst.PendFrag && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
+            && (s.Prog >= 0 || s.Kind >= EmgConst.PendRoot) && s.Depth <= EmgConst.MaxDepth && s.Gen <= EmgConst.MaxGen && s.SubForm <= 5 && s.Armed <= 1
             && s.Weapon >= -1 && s.Weapon < d.Weapons.Length && s.Chain >= 0 && s.Done >= 0 && (byte)s.EntKind <= (byte)EmgEntKind.Field
             && !double.IsNaN(s.At) && !double.IsInfinity(s.At) && IsFinite(s.Pos) && Finite(s.Dir.x) && Finite(s.Dir.y) && Finite(s.Damage) && Finite(s.ZoneRadius) && Finite(s.ZoneLife);
 
@@ -1809,7 +1814,8 @@ namespace BinGames.Sim.Combat
         private static bool WeaponEmgValid(in CombatWeapon w, int programs) => w.ProgramRef >= 0 && w.ProgramRef <= programs && w.SpawnFlight <= 1;
 
         private static bool UnitEmgValid(short profile, in EmgUnitState u) => profile >= -1 && u.LastHitBy >= 0 && u.LastHitChain >= 0 && u.HeatLatch <= 1
-            && Finite(u.Mass) && u.Mass >= 0f && u.DeathFlags <= EmgConst.DeathNoWreck;
+            && Finite(u.Mass) && u.Mass >= 0f && u.DeathFlags <= EmgConst.DeathNoWreck
+            && Finite(u.EraRefillT) && u.EraRefillT >= 0f;
 
         private static bool WreckValid(in EmgWreck k) =>
             k.Id > 0 && IsFinite(k.Pos) && !double.IsNaN(k.Born) && !double.IsNaN(k.Until) && !double.IsNaN(k.DwellSince)

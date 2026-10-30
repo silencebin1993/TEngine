@@ -75,6 +75,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPierceBounce);
                 Step(CheckChain);
                 Step(CheckReturnOrbitLobDrift);
+                Step(CheckReadEnds);
                 Step(CheckNegatives);
                 Step(CheckSaveLoad);
                 Step(CheckSpeeds);
@@ -105,6 +106,13 @@ namespace GameLogic.EditorTools
             public N Read(EmgEventKind k, byte role = Cond)
             {
                 Instrs.Add(new EmgInstr { Port = (ushort)(EmgConst.EventPortBase + (int)k), Role = role });
+                return this;
+            }
+
+            /// <summary>世界量读端（感知 3 / 条件 2）：EMG1-FW-01 起霰射 / 绕轨 / 乱流的读端改变行为。</summary>
+            public N Sense(ushort port, byte role = 3)
+            {
+                Instrs.Add(new EmgInstr { Port = port, Role = role });
                 return this;
             }
 
@@ -573,92 +581,113 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>
-        /// B2（审查修复，FGT-EMG-003 零死对的本卡部分）：修饰放在触发固件之后（[分裂, X]，编进子节点）。子形态是飞行弹体（射弹 / 格斗 / 无人机的子弹、余波、无人机子弹）时
-        /// 子节点的修饰按射弹列解析成内核动词、由子弹药执行；子区 / 脉冲（力场 / 布区）子节点不执行弹道修饰，该固件不切轨、保留旧读法（DEBT-EMG1GRM01-05）。
+        /// B2（FGT-EMG-003 零死对的本卡部分；EMG1-FW-01 关闭 DEBT-EMG1GRM01-05）：修饰放在触发固件之后（[分裂, X]，编进子节点）由子载荷自己结算——
+        /// 飞行子弹药（射弹 / 格斗 / 无人机的子弹、余波、无人机子弹）按射弹列执行内核弹道动词；子区 / 小脉冲（力场 / 布区）执行子区读法（触及、多块、游移、击退、牵引、
+        /// 环扫、回响、连锁、越障）；数值端口（照明弹 / 广角 / 破甲）落在任何子节点上都由子弹药 / 子区自己放大或破甲。写修饰端口的固件一律切轨，不再保留旧读法字段。
         /// </summary>
         private static void CheckChildMods()
         {
-            Line("  · B2. 修饰放末位（[分裂, X]，编进子节点）× 5 载体：飞行子弹药按射弹列执行内核动词；子区 / 脉冲保留旧读法（不出现装了等于没装）");
-            var kernelVerbs = new HashSet<byte>
+            Line("  · B2. 修饰放末位（[分裂, X]，编进子节点）× 5 载体：飞行子弹药执行内核弹道动词；子区 / 小脉冲按子区读法自己结算；数值端口由子载荷自己放大 / 破甲（固件切轨）");
+            var flyVerbs = new HashSet<byte>
             {
                 (byte)EmgVerb.Steer, (byte)EmgVerb.PassThrough, (byte)EmgVerb.Ricochet, (byte)EmgVerb.Return, (byte)EmgVerb.Orbit, (byte)EmgVerb.Lob,
                 (byte)EmgVerb.Drift, (byte)EmgVerb.Chain, (byte)EmgVerb.Multi,
             };
+            var zoneVerbs = new HashSet<byte>
+            {
+                (byte)EmgVerb.Reach, (byte)EmgVerb.PassThrough, (byte)EmgVerb.Knock, (byte)EmgVerb.Multi, (byte)EmgVerb.Lob, (byte)EmgVerb.Drift,
+                (byte)EmgVerb.Chain, (byte)EmgVerb.Pull, (byte)EmgVerb.Echo, (byte)EmgVerb.Sweep,
+            };
             var bad = new List<string>();
-            int flyingCells = 0, legacyCells = 0;
+            int flyingCells = 0, zoneCells = 0;
             foreach ((FirmwareCarrier car, string _, string carName) in Cars)
             {
                 foreach ((string mod, string fw) in Mods)
                 {
                     EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_split", fw }, car);
-                    int childNode = pr.KernelNodes.FindIndex(n => n.Parent >= 0);
-                    if (childNode < 0)
-                    {
-                        bad.Add($"{carName}+[分裂, {mod}] 没有子节点");
-                        continue;
-                    }
-                    EmgNode cn = pr.KernelNodes[childNode];
-                    var own = new List<EmgInstr>();
-                    for (int i = cn.FirstInstr; i < cn.FirstInstr + cn.InstrCount; i++)
-                    {
-                        EmgInstr x = pr.KernelInstrs[i];
-                        if (x.Role > EmgConst.RoleLastRead && x.Port >= 110 && x.Port <= 119 && (x.Flags & EmgInstrFlags.Inherited) == 0)
-                        {
-                            own.Add(x);
-                        }
-                    }
+                    List<EmgInstr> own = ChildLines(pr, 110, 119);
                     bool flying = car == FirmwareCarrier.Projectile || car == FirmwareCarrier.Melee || car == FirmwareCarrier.Summon;
-                    if (flying)
+                    HashSet<byte> want = flying ? flyVerbs : zoneVerbs;
+                    _ = flying ? flyingCells++ : zoneCells++;
+                    if (own.Count == 0 || own.Any(x => !want.Contains(x.Verb)))
                     {
-                        flyingCells++;
-                        if (own.Count == 0 || own.Any(x => !kernelVerbs.Contains(x.Verb)))
-                        {
-                            bad.Add($"{carName}+[分裂, {mod}] 子节点动词 {string.Join("/", own.Select(x => x.Verb))} 不是内核弹道动词");
-                        }
+                        bad.Add($"{carName}+[分裂, {mod}] 子节点动词 {string.Join("/", own.Select(x => x.Verb))} 不是子载荷能执行的动词");
                     }
-                    else
+                    if (!EmgProgramCompiler.ModifierFirmware(pr).Contains(fw))
                     {
-                        legacyCells++;
-                        if (EmgProgramCompiler.ModifierFirmware(pr).Contains(fw))
-                        {
-                            bad.Add($"{carName}+[分裂, {mod}] 只落在子区 / 脉冲子节点却切了轨（旧读法被去掉）");
-                        }
+                        bad.Add($"{carName}+[分裂, {mod}] 没切轨（旧读法还在本机出手上）");
                     }
                 }
             }
-            Expect(bad.Count == 0, $"[分裂, X]：飞行子弹药 {flyingCells} 格都解析成内核弹道动词，子区 / 脉冲 {legacyCells} 格保留旧读法{(bad.Count > 0 ? "；不对：" + string.Join("、", bad) : string.Empty)}");
-            // 第 2 轮审查修复：只改数字的修饰（照明弹 / 广角 / 破甲，端口 120～122）放在分裂之后编进任何子节点（含飞行子弹药）时，子弹药不结算数值行，
-            // 固件不切轨、保留旧读法字段（scale / spread / armor）——走正式装配路径（MachineWeaponFrom → ProgramReading），装与不装读法必须不同。
+            Expect(bad.Count == 0, $"[分裂, X]：飞行子弹药 {flyingCells} 格解析成内核弹道动词、子区 / 小脉冲 {zoneCells} 格解析成子区读法动词，固件全部切轨{(bad.Count > 0 ? "；不对：" + string.Join("、", bad) : string.Empty)}");
+
+            // 子区 / 小脉冲的行为：正式编译 + 真实内核，同一场景装 / 不装 X 对照（只差子节点那一行）
+            var zBad = new List<string>();
+            int zRun = 0;
+            foreach ((FirmwareCarrier car, string comp, string carName) in Cars.Where(c => c.Car == FirmwareCarrier.Aura || c.Car == FirmwareCarrier.Field))
+            {
+                ZCell off = ZoneChild(car, comp, null, null), offW = ZoneChild(car, comp, null, "wreck"), offO = ZoneChild(car, comp, null, "obstacle");
+                foreach ((string mod, string fw) in Mods)
+                {
+                    zRun++;
+                    string cover = mod == "穿透" ? "wreck" : mod == "抛射" ? "obstacle" : null;
+                    ZCell on = ZoneChild(car, comp, fw, cover), o = cover == "wreck" ? offW : cover == "obstacle" ? offO : off;
+                    (bool ok, string why) = mod switch
+                    {
+                        "寻的" => (on.R > o.R + 0.3f, $"子区半径 {on.R:0.##} / 对照 {o.R:0.##}"),
+                        "穿透" => (on.Lost("A") > o.Lost("A") + 0.01f, $"残骸后的 A 掉血 {on.Lost("A"):0.##} / 对照被挡 {o.Lost("A"):0.##}"),
+                        "反弹" => (on.Moved("A") > o.Moved("A") + 0.2, $"区内 A 被弹开 {on.Moved("A"):0.00} 米 / 对照 {o.Moved("A"):0.00}"),
+                        "连锁" => (on.LostAll > o.LostAll + 0.01f, $"子区落下时连锁跳向近处敌人：总掉血 {on.LostAll:0.##} / 对照 {o.LostAll:0.##}"),
+                        "多份载荷" => (on.Zones > o.Zones && on.R < o.R, $"一份子区变 {on.Zones} 块小子区（半径 {on.R:0.##}；对照 {o.Zones} 块 {o.R:0.##}）"),
+                        "折返" => car == FirmwareCarrier.Aura
+                            ? (on.Moved("B") > o.Moved("B") + 0.2, $"子脉冲收缩：把 B 拉近 {on.Moved("B"):0.00} 米 / 对照 {o.Moved("B"):0.00}")
+                            : (on.LostAll > o.LostAll + 0.01f, $"子区收回时回响再结算：总掉血 {on.LostAll:0.##} / 对照 {o.LostAll:0.##}"),
+                        "绕行" => car == FirmwareCarrier.Aura
+                            ? (on.Lost("C") > o.Lost("C") + 0.01f, $"子脉冲旋转外甩：6 米内的 C 掉血 {on.Lost("C"):0.##} / 对照 {o.Lost("C"):0.##}")
+                            : (on.R > o.R + 0.3f, $"子区旋转外扩：半径 {on.R:0.##} / 对照 {o.R:0.##}"),
+                        "抛射" => (on.Lost("A") > o.Lost("A") + 0.01f, $"障碍后的 A 掉血 {on.Lost("A"):0.##} / 对照被挡 {o.Lost("A"):0.##}"),
+                        "侧偏" => (math.distance(on.First, o.First) > 0.05 && math.distance(on.First, o.First) <= 1.5 * math.SQRT2 + 1e-3,
+                            $"子区落点随机游移 {math.distance(on.First, o.First):0.00} 米（≤ 1.5√2）"),
+                        _ => (false, "未定义"),
+                    };
+                    if (!ok)
+                    {
+                        zBad.Add($"{carName}+[分裂, {mod}]：{why}");
+                    }
+                }
+            }
+            Expect(zBad.Count == 0 && zRun == 18, $"子区 / 小脉冲 {zRun} 格（力场、布区 × 9 修饰）：装与不装的行为不同，由子区自己结算{(zBad.Count > 0 ? "；不对：" + string.Join("、", zBad) : string.Empty)}");
+
+            // 数值端口（照明弹 / 广角 / 破甲）落在子节点：固件切轨（旧字段不再加在本机出手上），子节点的数值行按旧字段解析成子载荷能执行的读法
             var numBad = new List<string>();
             int numCells = 0;
             foreach ((FirmwareCarrier car, string comp, string carName) in Cars)
             {
-                foreach ((string mod, string fw) in new[] { ("照明弹", "fw_flare"), ("广角", "fw_wide"), ("破甲", "fw_armorpierce") })
+                bool flying = car == FirmwareCarrier.Projectile || car == FirmwareCarrier.Melee || car == FirmwareCarrier.Summon;
+                foreach ((string mod, string fw, string field) in new[] { ("照明弹", "fw_flare", "scale"), ("广角", "fw_wide", "spread"), ("破甲", "fw_armorpierce", "armor") })
                 {
-                    CombatReading Read(string[] fws, out EmgProgramResult prog)
-                    {
-                        var p = new BlueprintCircuitPreview
-                        {
-                            PrimaryId = comp, ChassisId = ChassisCatalog.ChassisHoverId, HasCombatOutput = true, FirmwareIds = fws, LocalFirmwareIds = fws,
-                            UplinkFirmwareIds = Array.Empty<string>(),
-                        };
-                        prog = EmgProgramCompiler.Compile(p);
-                        return CombatSite.ProgramReading(p, CombatSite.MachineWeaponFrom(p).Reading, prog);
-                    }
-                    CombatReading nOn = Read(new[] { "fw_split", fw }, out EmgProgramResult pOn), nOff = Read(new[] { "fw_split" }, out _);
                     numCells++;
-                    int child = pOn.KernelNodes.FindIndex(n => n.Parent >= 0);
-                    bool numericInChild = child >= 0 && Enumerable.Range(pOn.KernelNodes[child].FirstInstr, pOn.KernelNodes[child].InstrCount)
-                        .Any(i => pOn.KernelInstrs[i].Role > EmgConst.RoleLastRead && pOn.KernelInstrs[i].Port >= 120 && pOn.KernelInstrs[i].Port <= 122);
-                    bool differs = !Near(nOn.BlastRadius, nOff.BlastRadius) || !Near(nOn.Area, nOff.Area) || !Near(nOn.Cone, nOff.Cone) || nOn.ExtraHits != nOff.ExtraHits
-                                   || !Near(nOn.ArmorPierce, nOff.ArmorPierce);
-                    if (!numericInChild || EmgProgramCompiler.ModifierFirmware(pOn).Contains(fw) || !differs)
+                    EmgProgramResult pOn = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_split", fw }, car);
+                    List<EmgInstr> num = ChildLines(pOn, 120, 122);
+                    byte expect = mod == "破甲" ? (byte)EmgVerb.Armor : flying ? (mod == "照明弹" ? (byte)EmgVerb.Blast : (byte)EmgVerb.Extra) : (byte)EmgVerb.Reach;
+                    bool resolved = num.Count == 1 && num[0].Verb == expect && num[0].A > 0f && (num[0].Flags & (EmgInstrFlags.MagA | EmgInstrFlags.MagB | EmgInstrFlags.MagC)) == 0;
+                    Func<string, string, bool> skip = EmgProgramCompiler.LegacySkip(pOn);
+                    bool switched = skip != null && skip(fw, field);
+                    if (!resolved || !switched)
                     {
-                        numBad.Add($"{carName}+[分裂, {mod}]（数值行在子节点 {numericInChild}，切轨 {EmgProgramCompiler.ModifierFirmware(pOn).Contains(fw)}，读法有差 {differs}）");
+                        numBad.Add($"{carName}+[分裂, {mod}]（子节点数值行 {string.Join("/", num.Select(x => $"{x.Verb}:{x.A:0.##}"))}，应为 {expect}；旧字段 {field} 已不加在本机 {switched}）");
                     }
                 }
             }
-            Expect(numBad.Count == 0, $"[分裂, 照明弹 / 广角 / 破甲] × 5 载体 {numCells} 格：数值行落在子节点时固件保留旧读法，装与不装读法不同（不出现装了等于没装）{(numBad.Count > 0 ? "；不对：" + string.Join("、", numBad) : string.Empty)}");
+            Expect(numBad.Count == 0, $"[分裂, 照明弹 / 广角 / 破甲] × 5 载体 {numCells} 格：数值行落在子节点时按固件旧字段解析成子载荷读法（射弹列爆圈 / 余击、力场 / 布区列加半径、破甲），固件切轨{(numBad.Count > 0 ? "；不对：" + string.Join("、", numBad) : string.Empty)}");
+            {
+                ZCell wOn = ZoneChild(FirmwareCarrier.Aura, ComponentCatalog.CompCoronaId, "fw_wide", null), wOff = ZoneChild(FirmwareCarrier.Aura, ComponentCatalog.CompCoronaId, null, null);
+                ZCell aOn = ZoneChild(FirmwareCarrier.Aura, ComponentCatalog.CompCoronaId, "fw_armorpierce", null, true), aOff = ZoneChild(FirmwareCarrier.Aura, ComponentCatalog.CompCoronaId, null, null, true);
+                ZCell fOn = SubBullets("fw_flare", false), fOff = SubBullets(null, false), pOn = SubBullets("fw_armorpierce", true), pOff = SubBullets(null, true);
+                Expect(wOn.R > wOff.R + 0.5f && aOn.Lost("A") > aOff.Lost("A") + 0.01f && fOn.Lost("N") > fOff.Lost("N") + 0.01f && pOn.Lost("T") > pOff.Lost("T") + 0.01f,
+                    $"子载荷自己放大 / 破甲：力场 [分裂, 广角] 子脉冲半径 {wOn.R:0.##}（对照 {wOff.R:0.##}）；[分裂, 破甲] 子脉冲打正面装甲的 A 掉 {aOn.Lost("A"):0.##}（对照 {aOff.Lost("A"):0.##}）；" +
+                    $"射弹 [分裂, 照明弹] 子弹命中处爆圈波及 N 掉 {fOn.Lost("N"):0.##}（对照 {fOff.Lost("N"):0.##}）；[分裂, 破甲] 子弹打正面装甲的 T2 掉 {pOn.Lost("T"):0.##}（对照 {pOff.Lost("T"):0.##}）");
+            }
             EmgProgramResult rootFirst = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_ricochet", "fw_split" }, FirmwareCarrier.Aura);
             Expect(EmgProgramCompiler.ModifierFirmware(rootFirst).Contains("fw_ricochet"),
                 "对照：力场 + [跳弹, 分裂]（修饰在根节点）照常切到声明轨（根节点按 fg.TbPortCarrier 折进读法）");
@@ -686,8 +715,262 @@ namespace GameLogic.EditorTools
                 }
                 return seen;
             }
-            bool on = Bounced(true), off = Bounced(false);
-            Expect(on && !off, $"格斗 + [分裂, 跳弹]：放出的余波命中后真的改向下一个目标（见到已反弹的子弹药 {on}；只装分裂 {off}）——以前解析成格斗的击退动词，子弹药上装了等于没装");
+            bool bOn = Bounced(true), bOff = Bounced(false);
+            Expect(bOn && !bOff, $"格斗 + [分裂, 跳弹]：放出的余波命中后真的改向下一个目标（见到已反弹的子弹药 {bOn}；只装分裂 {bOff}）——以前解析成格斗的击退动词，子弹药上装了等于没装");
+            CheckChildPellets();
+        }
+
+        /// <summary>子节点（第 1 个子节点）自己的写端行（端口 lo～hi，不含继承来的）。</summary>
+        private static List<EmgInstr> ChildLines(EmgProgramResult pr, int lo, int hi)
+        {
+            var own = new List<EmgInstr>();
+            int child = pr.KernelNodes.FindIndex(n => n.Parent >= 0);
+            if (child < 0)
+            {
+                return own;
+            }
+            EmgNode cn = pr.KernelNodes[child];
+            for (int i = cn.FirstInstr; i < cn.FirstInstr + cn.InstrCount; i++)
+            {
+                EmgInstr x = pr.KernelInstrs[i];
+                if (x.Role > EmgConst.RoleLastRead && x.Port >= lo && x.Port <= hi && (x.Flags & EmgInstrFlags.Inherited) == 0)
+                {
+                    own.Add(x);
+                }
+            }
+            return own;
+        }
+
+        private sealed class ZCell
+        {
+            public int Zones;
+            public float R;
+            public double2 First = new double2(double.NaN, double.NaN);
+            public readonly Dictionary<string, float> Hp = new Dictionary<string, float>();
+            public readonly Dictionary<string, double2> At = new Dictionary<string, double2>();
+            public readonly Dictionary<string, double2> Start = new Dictionary<string, double2>();
+            public float Lost(string key) => Hp.TryGetValue(key, out float v) ? 2000f - v : 0f;
+            public float LostAll => Hp.Values.Sum(v => 2000f - v);
+            public double Moved(string key) => At.TryGetValue(key, out double2 a) && Start.TryGetValue(key, out double2 b) ? math.distance(a, b) : 0;
+        }
+
+        private static int ArmoredFoe(CombatKernel k, double2 p, bool armored) => k.Spawn(new CombatSpawn
+        {
+            ExtKey = -1, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.None, Flags = Live | CombatUnitFlags.Report,
+            Position = p, Home = p, Radius = 0.5f, Health = 2000f, MaxHealth = 2000f, Weapon = -1, Priority = 1,
+            ArmorFraction = armored ? 0.6f : 0f, ArmorHalfAngleDeg = 180f, ArmorFacing = new float2(0f, -1f),
+        });
+
+        /// <summary>
+        /// 力场 / 布区 + [分裂, <paramref name="fw"/>]（null = 只装分裂）打 T：子区落在命中处。T(0,4)、A(0.8,4) 在子区里、B(2.6,4) 在子区外 6 米内、C(4.5,4) 更远；
+        /// <paramref name="cover"/> = "wreck" / "obstacle" 时 T 与 A 之间放一块小残骸 / 小障碍（根出手从本机打 A 不经过它）。走 5 秒，记子区块数 / 半径 / 第一块的落点、掉血与位移。
+        /// </summary>
+        private static ZCell ZoneChild(FirmwareCarrier car, string comp, string fw, string cover, bool armored = false)
+        {
+            var cell = new ZCell();
+            using var k = new CombatKernel(Cfg(), 64);
+            EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), fw == null ? new[] { "fw_split" } : new[] { "fw_split", fw }, car);
+            CombatWeapon w = BaseWeapon(comp, car == FirmwareCarrier.Field ? 12f : 20f);
+            w.Reading = CombatSite.FoldProgramReadings(w.Reading, pr, false);
+            w.Program = CombatSite.RegisterProgram(k, pr);
+            int me = Me(k, new double2(0, 0), k.AddWeapon(w));
+            var ids = new Dictionary<string, int>
+            {
+                ["T"] = ArmoredFoe(k, new double2(0, 4), false), ["A"] = ArmoredFoe(k, new double2(0.8, 4), armored),
+                ["B"] = ArmoredFoe(k, new double2(2.6, 4), false), ["C"] = ArmoredFoe(k, new double2(4.5, 4), false),
+            };
+            if (cover == "wreck")
+            {
+                k.TryAddWreck(new EmgWreck { Pos = new double2(0.4, 4), Radius = 0.15f, Hp = 1000f, MaxHp = 1000f, Until = 1e9 }, out _);
+            }
+            else if (cover == "obstacle")
+            {
+                k.SetObstacles(new List<float3> { new float3(0.4f, 4f, 0.15f) });
+            }
+            foreach (KeyValuePair<string, int> kv in ids)
+            {
+                cell.Start[kv.Key] = Pos(k, kv.Value);
+            }
+            k.FireAt(me, ids["T"], k.Time);
+            for (int i = 0; i < 300; i++)
+            {
+                StepN(k, 1);
+                int n = 0;
+                foreach (CombatZone z in Zones(k).Where(z => z.EmgSub != 0))
+                {
+                    n++;
+                    cell.R = Mathf.Max(cell.R, z.Radius);
+                    if (double.IsNaN(cell.First.x))
+                    {
+                        cell.First = z.Pos;
+                    }
+                }
+                cell.Zones = Math.Max(cell.Zones, n);
+            }
+            foreach (KeyValuePair<string, int> kv in ids)
+            {
+                cell.Hp[kv.Key] = Hp(k, kv.Value);
+                cell.At[kv.Key] = Pos(k, kv.Value);
+            }
+            return cell;
+        }
+
+        /// <summary>机枪 + [分裂, <paramref name="fw"/>]：主弹打 M(0,4) 放出子弹，子弹打 T(0,6)（<paramref name="armored"/> 时正面装甲 0.6），N(0.9,6) 在 T 身边。走 2 秒。</summary>
+        private static ZCell SubBullets(string fw, bool armored)
+        {
+            var cell = new ZCell();
+            using var k = new CombatKernel(Cfg(), 64);
+            EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), fw == null ? new[] { "fw_split" } : new[] { "fw_split", fw }, FirmwareCarrier.Projectile);
+            CombatWeapon w = Flight(-1, 30f, 2f);
+            w.Program = CombatSite.RegisterProgram(k, pr);
+            int me = Me(k, new double2(0, 0), k.AddWeapon(w));
+            int m = ArmoredFoe(k, new double2(0, 4), false);
+            var ids = new Dictionary<string, int> { ["T"] = ArmoredFoe(k, new double2(0, 6), armored), ["N"] = ArmoredFoe(k, new double2(0.9, 6.2), false) };
+            k.FireAt(me, m, k.Time);
+            StepN(k, 120);
+            foreach (KeyValuePair<string, int> kv in ids)
+            {
+                cell.Hp[kv.Key] = Hp(k, kv.Value);
+            }
+            return cell;
+        }
+
+        /// <summary>
+        /// 子弹药上的霰射分份（[分裂, 霰射] 的子弹分成 3 发真实弹丸，各 0.4 倍）与弹体池打满后排队的霰射弹丸保留各自扇角（卡片补测，ADR ③ 顺延不丢）。
+        /// </summary>
+        private static void CheckChildPellets()
+        {
+            int Subs(bool scatter, out float dmg)
+            {
+                using var k = new CombatKernel(Cfg(), 64);
+                EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), scatter ? new[] { "fw_split", "fw_scatter" } : new[] { "fw_split" }, FirmwareCarrier.Projectile);
+                CombatWeapon w = Flight(-1, 30f, 2f);
+                w.Program = CombatSite.RegisterProgram(k, pr);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(w));
+                int m = Foe(k, new double2(0, 4));
+                k.FireAt(me, m, k.Time);
+                int most = 0;
+                dmg = 0f;
+                for (int i = 0; i < 40; i++)
+                {
+                    StepN(k, 1);
+                    List<CombatProjectile> subs = Projs(k).Where(p => (p.Flags & EmgProjFlags.Sub) != 0).ToList();
+                    if (subs.Count > most)
+                    {
+                        most = subs.Count;
+                        dmg = subs.Max(p => p.Damage);
+                    }
+                }
+                return most;
+            }
+            int on = Subs(true, out float dOn), off = Subs(false, out float dOff);
+            Expect(on == off * 3 && Near(dOn, dOff * 0.4f, 0.01f), $"[分裂, 霰射]：子弹分成 3 发真实弹丸（同时在飞 {on} 发，对照 {off} 发），每发 {dOn:0.###}（对照 {dOff:0.###} × 0.4）");
+
+            // 弹体池打满：多份载荷的弹丸排进待生成表，生成时保留各自扇角（不全挤成朝目标的一条线；EMG1-GRM-01 审查修复的 Dir 记账，卡片要求补测）
+            CombatConfig cfg = Cfg();
+            cfg.ProjectileCapacity = 4;
+            using (var k = new CombatKernel(cfg, 64))
+            {
+                EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_scatter" }, FirmwareCarrier.Projectile);
+                CombatWeapon w = Flight(-1, 30f, 0.5f);
+                w.Program = CombatSite.RegisterProgram(k, pr);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(w));
+                int t = Foe(k, new double2(0, 3), 5000f);
+                var seen = new SortedDictionary<int, float>();
+                void Look()
+                {
+                    foreach (CombatProjectile p in Projs(k).Where(p => !seen.ContainsKey(p.Id)))
+                    {
+                        seen[p.Id] = math.degrees(math.atan2(p.Vel.x, p.Vel.y));
+                    }
+                }
+                k.FireAt(me, t, k.Time); // 3 发进池
+                Look();
+                k.FireAt(me, t, k.Time); // 池只剩 1 个位：1 发进池、2 发排队
+                Look();
+                int queued = k.EmgPendingCount;
+                for (int i = 0; i < 60; i++)
+                {
+                    StepN(k, 1);
+                    Look();
+                }
+                List<float> second = seen.Values.Skip(3).ToList();
+                bool fanned = second.Count == 3 && second.Any(a => Mathf.Abs(a - 15f) < 1.5f) && second.Any(a => Mathf.Abs(a + 15f) < 1.5f) && second.Any(a => Mathf.Abs(a) < 1.5f);
+                Expect(queued == 2 && k.EmgPendingCount == 0 && fanned,
+                    $"弹体池上限 4：第二次出手 {queued} 发排队，空出位置后生成，三发仍是 −15° / 0° / +15° 扇面（第二次出手的航向 {string.Join(" / ", second.Select(a => a.ToString("0.#")))}°）");
+            }
+        }
+
+        /// <summary>
+        /// F2（EMG1-FW-01 关闭 DEBT-EMG1GRM01-03；FG19A 第 1.1 节第 3 / 14 / 42 行与第 1.8 节退化表）：感知 / 条件读端改变行为——
+        /// 霰射读 ter.cover：扇面里被掩体挡的那份弹丸往外侧绕开；绕轨读 ent.projectile：绕行中才拦敌弹；乱流读 fld.deflect：穿过偏折场才有一半不被反射。读端开 / 关对照。
+        /// </summary>
+        private static void CheckReadEnds()
+        {
+            Line("  · F2. 读端改变行为（开 / 关对照）：霰射绕开掩体（ter.cover）、绕轨拦弹（ent.projectile）、乱流规避偏折场（fld.deflect）");
+            List<float> Fan(bool sense)
+            {
+                using var k = new CombatKernel(Cfg(), 16);
+                N root = Root().Verb(EmgVerb.Multi, 3f, 0.4f, 0f, 0f, 30f);
+                int p = Tree(k, sense ? root.Sense(EmgConst.PortCover) : root);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 30f, 1f)));
+                int t = Foe(k, new double2(0, 10), 5000f);
+                float2 blocked = new float2(-math.sin(math.radians(15f)), math.cos(math.radians(15f))) * 4.8f;
+                k.SetObstacles(new List<float3> { new float3(blocked.x, blocked.y, 0.5f) });
+                k.FireAt(me, t, k.Time);
+                return Projs(k).Select(q => math.degrees(math.atan2(-q.Vel.x, q.Vel.y))).OrderBy(a => a).ToList();
+            }
+            List<float> on = Fan(true), off = Fan(false);
+            Expect(off.Count == 3 && Near(off[2], 15f, 0.5f) && on.Count == 3 && on[2] > 20f && Near(on[0], -15f, 0.5f) && Near(on[1], 0f, 0.5f),
+                $"霰射读掩体：被障碍挡的那份往外侧绕开（航向 {string.Join(" / ", on.Select(a => a.ToString("0.#")))}°）；不读掩体时均分扇面 {string.Join(" / ", off.Select(a => a.ToString("0.#")))}°（打在障碍上）");
+            long Intercepted(bool sense)
+            {
+                using var k = new CombatKernel(Cfg(), 64);
+                N root = Root().Verb(EmgVerb.Orbit, 120f, 2.5f, 1f).Read(EmgEventKind.Absorb);
+                int p = Tree(k, sense ? root.Sense(EmgConst.PortProjectile) : root);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 20f, 3f)));
+                int target = Foe(k, new double2(0, 30));
+                int gunW = k.AddWeapon(new CombatWeapon
+                {
+                    Mode = CombatWeaponMode.Projectile, HasOutput = 1, TargetMode = CombatTargetMode.Nearest, Range = 60f, Damage = 1f, Cooldown = 0f,
+                    ProjectileSpeed = 0.05f, ProjectileRadius = 0.6f, ProjectileLife = 60f,
+                });
+                for (int g = 0; g < 4; g++)
+                {
+                    float ang = math.radians(30f + 90f * g);
+                    k.FireAt(Unit(k, CombatFaction.Hostile, new double2(math.cos(ang), math.sin(ang)) * 3.0, gunW, 1000f), me, k.Time);
+                }
+                StepN(k, 2);
+                long before = k.EmgEnqueuedOf(EmgEventKind.Absorb);
+                k.FireAt(me, target, k.Time);
+                StepN(k, 120);
+                return k.EmgEnqueuedOf(EmgEventKind.Absorb) - before;
+            }
+            long iOn = Intercepted(true), iOff = Intercepted(false);
+            Expect(iOn >= 1 && iOff == 0, $"绕轨读弹体：绕行中拦下 {iOn} 发敌弹；不读 ent.projectile 时只绕行、拦 {iOff} 发");
+            (int shots, long reflected) Deflected(bool cond)
+            {
+                using var k = new CombatKernel(Cfg(), 64);
+                N root = Root().Verb(EmgVerb.Drift, 15f, 1f, 0.2f, 0.5f);
+                int p = Tree(k, cond ? root.Sense(EmgConst.PortDeflect, Cond) : root);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 30f, 2f)));
+                int prism = Unit(k, CombatFaction.Hostile, new double2(0, 9), -1, 5000f, k.AddProfile(new CombatBehaviorProfile { DeflectRadius = 3f, DeflectReflect = 0.5f }));
+                k.SetFlag(prism, CombatUnitFlags.DeflectArmed, true);
+                k.SetDeflectPhase(prism, 2, 60f);
+                int shots = 0;
+                for (int s = 0; s < 30; s++)
+                {
+                    int before = k.ProjectileCount;
+                    k.FireAt(me, prism, k.Time);
+                    shots += k.ProjectileCount > before ? 1 : 0;
+                    StepN(k, 20);
+                }
+                return (shots, k.Counters.ShotsReflected);
+            }
+            (int sOn, long rOn) = Deflected(true);
+            (int sOff, long rOff) = Deflected(false);
+            Expect(sOn == 30 && sOff == 30 && rOn > 5 && rOn < 25 && rOff == sOff,
+                $"乱流读偏折场：穿过偏折场被反射 {rOn} / {sOn} 发（约一半规避）；不读 fld.deflect 时只剩侧偏，{rOff} / {sOff} 发全被反射");
         }
 
         private static float LostOf(Cell c, string key, float init) => c.Hp.TryGetValue(key, out float v) ? init - v : 0f;
@@ -1112,7 +1395,7 @@ namespace GameLogic.EditorTools
             using (var k = new CombatKernel(Cfg(), 64))
             {
                 // 审查修复：每圈拦截上限按圈清零。6 发慢速大弹体先停在绕行圈附近（6 个方向），绕 2 圈：第 1 圈拦 2 发、第 2 圈再拦 2 发，合计 4 > 旧实现（整个绕行 ≤ 2）。
-                int p = Tree(k, Root().Verb(EmgVerb.Orbit, 120f, 2.5f, 2f).Read(EmgEventKind.Absorb));
+                int p = Tree(k, Root().Verb(EmgVerb.Orbit, 120f, 2.5f, 2f).Sense(EmgConst.PortProjectile).Read(EmgEventKind.Absorb));
                 int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 20f, 3f)));
                 int target = Foe(k, new double2(0, 30));
                 int gunW = k.AddWeapon(new CombatWeapon
@@ -1175,7 +1458,7 @@ namespace GameLogic.EditorTools
             }
             using (var k = new CombatKernel(Cfg(), 64))
             {
-                int p = Tree(k, Root().Verb(EmgVerb.Drift, 15f, 1f, 0.2f, 0.5f));
+                int p = Tree(k, Root().Verb(EmgVerb.Drift, 15f, 1f, 0.2f, 0.5f).Sense(EmgConst.PortDeflect, Cond));
                 int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 30f, 2f)));
                 int prof = k.AddProfile(new CombatBehaviorProfile { DeflectRadius = 3f, DeflectReflect = 0.5f });
                 int prism = Unit(k, CombatFaction.Hostile, new double2(0, 9), -1, 5000f, prof);

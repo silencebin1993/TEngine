@@ -245,6 +245,11 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            if (d.Config.EmgEraBlocks > 0)
+            {
+                EmgEraDetonate(ref d, a, t, reflect); // EMG1-FW-01（FGR-EMG-233）：块数机制开着时按块起爆（块为 0 不反伤），反伤公式不变
+                return;
+            }
             if (DamageUnit(ref d, a, reflect, t))
             {
                 NoteReading(ref d, CombatConst.ReadingFeedThorns, d.Pos[t], t);
@@ -1259,6 +1264,13 @@ namespace BinGames.Sim.Combat
                     bool neutral = zone.Faction == CombatFaction.Neutral;
                     // EMG1-BUS-01 / TRIG-01：区域节拍的伤害来源 = 区域；带程序的区域同时是宿主（evt.hit Code = 区域节拍，每宿主计数随区域进快照）。
                     EmgCtx zoneCtx = zone.EmgProgRef > 0 ? EmgZoneHost(ref d, zone) : EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone);
+                    // EMG1-FW-01（DEBT-EMG1GRM01-05）：阶段 1 掩体规则开时，子区 / 小脉冲的节拍与根力场脉冲同一口径——被障碍 / 残骸挡（抛射 / 贯穿越过），吃正面装甲（破甲减免）
+                    bool subRule = zone.EmgSub != 0 && zone.EmgProgRef > 0 && d.Config.EmgCover != 0;
+                    EmgMods zm = default;
+                    if (subRule)
+                    {
+                        EmgModsOf(ref d, zone.EmgProgRef - 1, zone.EmgNode, out zm);
+                    }
                     int n = d.Count;
                     for (int k = 0; k < n; k++)
                     {
@@ -1277,6 +1289,15 @@ namespace BinGames.Sim.Combat
                             continue;
                         }
                         float tickDamage = zone.Dps > 0f ? zone.Dps * zone.TickInterval : 0f;
+                        if (subRule)
+                        {
+                            float f = EmgSubZoneTickFactor(ref d, zone, zm, k);
+                            if (!(f > 0f))
+                            {
+                                continue;
+                            }
+                            tickDamage *= f;
+                        }
                         if (zone.Kind == CombatConst.ZoneKindPool)
                         {
                             // FG10-FAC-01：喷淋池的酸液吃酸蚀抗性与冲淡（冷却液）；液氮池每节拍加受寒。

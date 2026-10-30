@@ -363,23 +363,51 @@ namespace BinGames.Sim.Combat
             }
         }
 
-        /// <summary>破片（FGR-EMG-114）：弹体池里的短寿命弹体，2 代、不执行程序（Prog −1）、命中发 evt.hit；池满不放并计 FragLost（应为 0，模糊测试器报告）。</summary>
+        /// <summary>
+        /// 破片（FGR-EMG-114）：弹体池里的短寿命弹体，2 代、不执行程序（Prog −1）、命中发 evt.hit、不分阵营（不打放出它的单位）。
+        /// 弹体池满按 FGR-EMG-063 顺延（EMG1-FW-01，关闭 DEBT-EMG1ENT01-03）：进待生成表（种类 PendFrag），之后每步有空位先放出、方向不变；待生成表也满才丢弃并计 FragLost。
+        /// 返回 true = 当步已放出。
+        /// </summary>
         internal static bool EmgSpawnFragment(ref CombatData d, double2 at, float2 dir, int ownerId, CombatFaction faction, byte depth, int chain, float damage, float speed, float range)
         {
-            EmgBusStats st = d.EmgStats[0];
-            if (d.Projectiles.Length >= d.Config.ProjectileCapacity || !(speed > 0f) || !(range > 0f))
+            if (speed > 0f && range > 0f)
             {
-                st.FragLost++; // shortcut: 池满丢弃只计数、不按 FGR-EMG-063 顺延，EMG1-FUZZ-01 定口径（DEBT-EMG1ENT01-03）
-                d.EmgStats[0] = st;
+                if (EmgFragmentTry(ref d, at, dir, ownerId, faction, depth, chain, damage, speed, range))
+                {
+                    return true;
+                }
+                if (d.EmgPending.Length < EmgConst.PendingCapacity)
+                {
+                    EmgStat(ref d, 2);
+                    d.EmgPending.Add(new EmgSpawn
+                    {
+                        Kind = EmgConst.PendFrag, Armed = 1, Count = 1, Pos = at, Dir = dir, Owner = ownerId, Weapon = -1, Prog = -1, Faction = (byte)faction,
+                        Depth = depth, Chain = chain, Damage = damage, ZoneRadius = speed, ZoneLife = range,
+                    });
+                    return false;
+                }
+            }
+            EmgBusStats lost = d.EmgStats[0];
+            lost.FragLost++;
+            d.EmgStats[0] = lost;
+            return false;
+        }
+
+        /// <summary>弹体池有空位就放一片破片（待生成表补放与当步放出共用）。</summary>
+        internal static bool EmgFragmentTry(ref CombatData d, double2 at, float2 dir, int ownerId, CombatFaction faction, byte depth, int chain, float damage, float speed, float range)
+        {
+            if (d.Projectiles.Length >= d.Config.ProjectileCapacity)
+            {
                 return false;
             }
+            EmgBusStats st = d.EmgStats[0];
             EmgScalars es = d.EmgS[0];
             int id = es.NextProjId++;
             d.EmgS[0] = es;
             d.Projectiles.Add(new CombatProjectile
             {
                 Id = id, Prog = -1, Chain = chain, Gen = EmgConst.MaxGen, Depth = depth, Flags = EmgProjFlags.Fragment,
-                Pos = at, Prev = at, Vel = dir * speed, Owner = ownerId, Weapon = -1, Damage = damage, Radius = 0.1f, Life = range / speed, Faction = faction,
+                Pos = at, Prev = at, Vel = dir * speed, Owner = ownerId, Weapon = -1, Damage = damage, Radius = 0.1f, Life = range / speed, Faction = faction, IgnoreUnit = ownerId,
                 Mass = EmgProfileAt(ref d, EmgConst.SlotFragment).Mass,
             });
             CombatCounters c = d.Counters[0];
@@ -388,6 +416,16 @@ namespace BinGames.Sim.Combat
             st.FragSpawned++;
             d.EmgStats[0] = st;
             return true;
+        }
+
+        /// <summary>
+        /// EMG1-FW-01（FGR-EMG-184 / 233 第 3 条）：破片伤到同阵营单位——因果链记“友伤”节点（SrcUnit = 受伤单位，Other = 破片归属单位），
+        /// 并进友伤列表（不进快照；热更层只读它，己方的发警告级聚合通知、可定位）。O(1)。
+        /// </summary>
+        internal static void EmgFriendlyHit(ref CombatData d, in CombatProjectile pr, int victimId, double2 at)
+        {
+            EmgChainLog(ref d, EmgChainNode.Friendly, pr.Chain, pr.Depth, 0, victimId, at, pr.Owner);
+            d.EmgFriendly.Add(new int2(victimId, pr.Owner));
         }
 
         /// <summary>破片命中一个单位：evt.hit（宿主 = 破片，Prog −1，链深 = 破片的链深）。按需：地点没有程序读 evt.hit 时不入队。</summary>

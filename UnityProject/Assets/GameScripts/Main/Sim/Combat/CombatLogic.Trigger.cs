@@ -286,6 +286,16 @@ namespace BinGames.Sim.Combat
                     EmgFireTimer(ref d, s);
                     continue;
                 }
+                if (s.Kind == EmgConst.PendFrag)
+                {
+                    // EMG1-FW-01（FGR-EMG-063）：池满顺延的破片，有空位就放出（方向 / 速度 / 射程按排队时记下的）
+                    if (!EmgFragmentTry(ref d, s.Pos, s.Dir, s.Owner, (CombatFaction)s.Faction, s.Depth, s.Chain, s.Damage, s.ZoneRadius, s.ZoneLife))
+                    {
+                        EmgStat(ref d, 2);
+                        d.EmgPending[write++] = s;
+                    }
+                    continue;
+                }
                 if (!liveBuilt)
                 {
                     EmgBuildLive(ref d, ref live);
@@ -372,77 +382,51 @@ namespace BinGames.Sim.Combat
             CombatFaction faction = (CombatFaction)s.Faction;
             if (code == EmgConst.SubPulse || code == EmgConst.SubZone)
             {
-                if (d.Zones.Length >= d.ZoneCap && CountZones(ref d, CombatConst.ZoneKindReading) >= d.ZoneCap)
+                // EMG1-FW-01（DEBT-EMG1GRM01-05）：子区 / 小脉冲按自己节点的修饰与数值行结算（CombatLogic.ChildMods）
+                if (!EmgSpawnSubZone(ref d, ref s, code, form, damage, ownerSlot, faction))
                 {
                     return false;
                 }
-                CombatReading r = s.Weapon >= 0 && s.Weapon < d.Weapons.Length ? d.Weapons[s.Weapon].Reading : default;
-                float radius = form.RadiusRatio > 0f ? s.ZoneRadius * form.RadiusRatio : form.Radius;
-                float seconds = form.LifeRatio > 0f ? s.ZoneLife * form.LifeRatio : form.Life;
-                if (!(radius > 0f) || !(seconds > 0f))
+                if (s.Chain > 0)
                 {
-                    s.Count = 0; // 母落区参数缺失：生成不了，整条请求作废（不会因为等待而好转）
-                    EmgStat(ref d, 3);
-                    return false;
+                    EmgLiveAdd(ref live, s.Chain);
                 }
-                float dps, tickScale;
-                if (code == EmgConst.SubPulse)
-                {
-                    // 小场脉冲：存续内恰好结算一次，一次的伤害 = 母载荷伤害 × 比例。
-                    float interval = seconds * 0.6f;
-                    tickScale = ZoneTickOf(ref d) / interval;
-                    dps = damage / interval;
-                }
-                else
-                {
-                    tickScale = 1f;
-                    dps = damage; // 母落区的每秒伤害 × 比例
-                }
-                if (!SpawnZone(ref d, ownerSlot, faction, s.Pos, radius, seconds, dps, 0f, tickScale, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
-                {
-                    return false;
-                }
-                SetLastZoneLook(ref d, code == EmgConst.SubPulse ? CombatZoneLook.Pulse : CombatZoneLook.Pool);
-                int last = d.Zones.Length - 1;
-                CombatZone z = d.Zones[last];
-                EmgScalars es = d.EmgS[0];
-                z.EmgProgRef = s.Prog + 1;
-                z.EmgId = es.NextZoneId++;
-                d.EmgS[0] = es;
-                z.EmgChain = s.Chain;
-                z.EmgNode = s.Node;
-                z.EmgDepth = s.Depth;
-                z.EmgGen = s.Gen;
-                z.EmgSub = 1;
-                z.EmgWeapon = s.Weapon;
-                d.Zones[last] = z;
             }
             else
             {
-                if (d.Projectiles.Length >= d.Config.ProjectileCapacity)
+                // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的多份载荷分成真实弹丸（一份的弹丸一起放，弹体池放不下整份留到下一步，扇角不丢）、伤害倍率
+                EmgModsOf(ref d, s.Prog, s.Node, out EmgMods cm);
+                int pellets = cm.Multi > 1 ? cm.Multi : 1;
+                if (d.Projectiles.Length + pellets > d.Config.ProjectileCapacity)
                 {
                     return false;
                 }
                 int k = s.Ent == (int)EmgEventKind.Hit ? EmgSeekIndex(ref d, s) : -1;
                 float2 dir = k >= 0 ? EmgDir(d.Pos[k] - s.Pos) : EmgRadial(ref d, s);
-                EmgScalars es = d.EmgS[0];
-                int id = es.NextProjId++;
-                d.EmgS[0] = es;
-                var sub = new CombatProjectile
+                float each = damage * (cm.DmgMul > 0f ? cm.DmgMul : 1f) * (pellets > 1 ? (cm.MultiRatio > 0f ? cm.MultiRatio : 0.4f) : 1f);
+                float reach = form.Speed * form.Life;
+                for (int q = 0; q < pellets; q++)
                 {
-                    Id = id, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Gen = s.Gen, Depth = s.Depth, Flags = EmgProjFlags.Sub | (s.Flags & EmgProjFlags.Heal),
-                    Pos = s.Pos, Prev = s.Pos, Vel = dir * form.Speed, Owner = s.Owner, Weapon = s.Weapon, Damage = damage, Radius = form.Radius, Life = form.Life,
-                    Faction = faction, IgnoreUnit = s.Other,
-                };
-                EmgInitFlight(ref d, ref sub, s.Pos + (double2)(dir * form.Speed * form.Life), k >= 0 ? d.Id[k] : 0, false); // EMG1-GRM-01：子弹药按自己节点（含继承）的修饰
-                d.Projectiles.Add(sub);
-                CombatCounters c = d.Counters[0];
-                c.ProjectilesSpawned++;
-                d.Counters[0] = c;
-            }
-            if (s.Chain > 0)
-            {
-                EmgLiveAdd(ref live, s.Chain);
+                    float2 pd = pellets > 1 ? EmgPelletDir(ref d, s.Prog, s.Node, s.Pos, dir, reach, q, pellets, cm.MultiFan > 0f ? cm.MultiFan : 30f) : dir;
+                    EmgScalars es = d.EmgS[0];
+                    int id = es.NextProjId++;
+                    d.EmgS[0] = es;
+                    var sub = new CombatProjectile
+                    {
+                        Id = id, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Gen = s.Gen, Depth = s.Depth, Flags = EmgProjFlags.Sub | (s.Flags & EmgProjFlags.Heal),
+                        Pos = s.Pos, Prev = s.Pos, Vel = pd * form.Speed, Owner = s.Owner, Weapon = s.Weapon, Damage = each, Radius = form.Radius, Life = form.Life,
+                        Faction = faction, IgnoreUnit = s.Other,
+                    };
+                    EmgInitFlight(ref d, ref sub, s.Pos + (double2)(pd * reach), k >= 0 ? d.Id[k] : 0, false); // EMG1-GRM-01：子弹药按自己节点（含继承）的修饰
+                    d.Projectiles.Add(sub);
+                    CombatCounters c = d.Counters[0];
+                    c.ProjectilesSpawned++;
+                    d.Counters[0] = c;
+                    if (s.Chain > 0)
+                    {
+                        EmgLiveAdd(ref live, s.Chain);
+                    }
+                }
             }
             s.Done++;
             EmgStat(ref d, 1);
@@ -599,6 +583,7 @@ namespace BinGames.Sim.Combat
             if (z.EmgSub != 0)
             {
                 EmgNodeEffects(ref d, z.EmgProgRef - 1, z.EmgNode, z.Pos, d.SlotOf(z.Owner), z.Faction);
+                EmgSubZoneEcho(ref d, z); // EMG1-FW-01（DEBT-EMG1GRM01-05）：子区收回时的回响
             }
             if (d.EmgListen == 0u)
             {
@@ -732,9 +717,12 @@ namespace BinGames.Sim.Combat
                 EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, d.Id[a], d.Pos[a]); // EMG1-CHAIN-01
             }
             double2 aim = d.Pos[t] - d.Pos[a];
+            double aimLen = math.length(aim);
+            float2 aimDir = aimLen > 1e-9 ? (float2)(aim / aimLen) : new float2(0f, 1f);
             for (int q = 0; q < pellets; q++)
             {
-                double2 to = pellets > 1 ? d.Pos[a] + (double2)Rotate((float2)aim, math.radians(fan * ((float)q / (pellets - 1) - 0.5f))) : d.Pos[t];
+                // EMG1-FW-01（DEBT-EMG1GRM01-03）：霰射读 ter.cover 时，扇面里被掩体挡住的那份弹丸往外侧绕开（EmgPelletDir）
+                double2 to = pellets > 1 ? d.Pos[a] + (double2)EmgPelletDir(ref d, wp.Program, 0, d.Pos[a], aimDir, aimLen, q, pellets, fan) * aimLen : d.Pos[t];
                 EmgFireOne(ref d, a, t, w, wp, wp.Damage * ratio, to, flags, ref chain);
             }
         }
@@ -815,6 +803,7 @@ namespace BinGames.Sim.Combat
             {
                 Id = id, Prog = wp.Program, Chain = chain, Pos = start, Prev = start, Vel = dir * wp.ProjectileSpeed, Owner = ownerId, Weapon = weapon, Damage = damage,
                 Radius = wp.ProjectileRadius, Life = life, Faction = faction, Flags = flags,
+                IgnoreUnit = (flags & EmgProjFlags.Heal) != 0 ? ownerId : 0, // EMG1-FW-01：治疗根弹体（维修束）不碰出手者自己（出膛点贴着它的半径）
             };
             EmgInitFlight(ref d, ref pr, to, targetId, true); // EMG1-GRM-01：根节点的弹道修饰写进弹体（没有修饰时不改任何字段）
             d.Projectiles.Add(pr);

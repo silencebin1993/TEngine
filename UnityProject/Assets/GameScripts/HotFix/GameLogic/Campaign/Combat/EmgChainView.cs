@@ -130,6 +130,12 @@ namespace GameLogic.Campaign.Combat
                 case EmgChainNode.DepthCut:
                     text = GameText.Get("emg.chain.node.depthcut");
                     break;
+                case EmgChainNode.Era:
+                    text = EraNodeText(site, state, r);
+                    break;
+                case EmgChainNode.Friendly:
+                    text = GameText.Format("emg.chain.node.friendly", PartyName(site, state, r.SrcUnit), PartyName(site, state, r.Other));
+                    break;
                 case EmgChainNode.Relay:
                     text = GameText.Get("emg.chain.node.relay");
                     break;
@@ -144,6 +150,72 @@ namespace GameLogic.Campaign.Combat
                     break;
             }
             return count > 1 ? GameText.Format("emg.chain.counted", text, count.ToString(CultureInfo.InvariantCulture)) : text;
+        }
+
+        /// <summary>EMG1-FW-01（FGR-EMG-233 第 6 条）：“A 车爆炸反应装甲 · 左裙第 2 块起爆”（Aux = 块位 + 1；低一半 = 左裙从前到后）。</summary>
+        public static string EraNodeText(CombatSite site, CampaignState state, in EmgChainRec r)
+        {
+            int n = site != null && !site.IsDisposed ? System.Math.Max(2, (int)site.Kernel.Config.EmgEraBlocks) : 12;
+            int half = n / 2;
+            int b = System.Math.Max(0, r.Aux - 1);
+            bool left = b < half;
+            return GameText.Format("emg.chain.node.era", PartyName(site, state, r.SrcUnit), GameText.Get(left ? "emg.era.side.left" : "emg.era.side.right"),
+                ((left ? b : b - half) + 1).ToString(CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>
+        /// EMG1-FW-01（FGR-EMG-233 第 6 条，B05 / B07 / B22）：反应装甲悬停两行——“爆炸反应装甲 7 / 12 · 每 3 秒补 1 块 · 下一块 1.2 秒”与占位刻度条
+        /// （■ 完整 / □ 缺块 / ▣ 补充中，以形状区分；三态外观美术到位前的占位，DEBT-EMG1FW01-01）。块数机制关或单位没有反伤读法返回 null。
+        /// </summary>
+        public static string EraHoverLine(CombatSite site, int unitId)
+        {
+            if (site == null || site.IsDisposed || !site.Kernel.TryGetEra(unitId, out int intact, out int total, out ushort miss, out float nextIn))
+            {
+                return null;
+            }
+            string period = F0(site.Kernel.Config.EmgEraRefill > 0f ? site.Kernel.Config.EmgEraRefill : 3f);
+            string head = miss == 0
+                ? GameText.Format("emg.era.hover_full", intact.ToString(CultureInfo.InvariantCulture), total.ToString(CultureInfo.InvariantCulture), period)
+                : GameText.Format("emg.era.hover", intact.ToString(CultureInfo.InvariantCulture), total.ToString(CultureInfo.InvariantCulture), period, nextIn.ToString("0.0", CultureInfo.InvariantCulture));
+            return head + "\n" + EraGauge(total, miss);
+        }
+
+        /// <summary>刻度条：每侧从前到后，完整 ■、缺块 □、下一块要补的位 ▣（补位顺序与内核 EmgEraRefill 相同：完整块少的一侧优先、相同取左，该侧从前往后第一个缺位）。</summary>
+        public static string EraGauge(int total, int miss)
+        {
+            int half = total / 2;
+            int sideMask = (1 << half) - 1;
+            int li = half - math.countbits(miss & sideMask), ri = half - math.countbits((miss >> half) & sideMask);
+            int next = -1;
+            if (miss != 0)
+            {
+                int s0 = li <= ri ? 0 : half;
+                next = FirstMissing(miss, s0, half);
+                if (next < 0)
+                {
+                    next = FirstMissing(miss, s0 == 0 ? half : 0, half);
+                }
+            }
+            var l = new System.Text.StringBuilder(half);
+            var r = new System.Text.StringBuilder(half);
+            for (int k = 0; k < half; k++)
+            {
+                l.Append(k == next ? '▣' : ((miss >> k) & 1) != 0 ? '□' : '■');
+                r.Append(k + half == next ? '▣' : ((miss >> (k + half)) & 1) != 0 ? '□' : '■');
+            }
+            return GameText.Format("emg.era.gauge", l.ToString(), r.ToString());
+        }
+
+        private static int FirstMissing(int miss, int start, int half)
+        {
+            for (int k = 0; k < half; k++)
+            {
+                if (((miss >> (start + k)) & 1) != 0)
+                {
+                    return start + k;
+                }
+            }
+            return -1;
         }
 
         /// <summary>单位名（机器 = “A 车”这类编号名；敌人 = 内容名；查不到 = “不明来源”）。</summary>

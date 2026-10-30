@@ -302,6 +302,11 @@ namespace GameLogic.Campaign.Content
                         }
                         fields[field] += mag;
                     }
+                    // EMG1-FW-01：已切声明轨的固件旧标签也只走一轨（skipField(fw, "#tags")，见 EmgProgramCompiler.LegacySkip）
+                    if (skipField != null && skipField(fw, Emergence.EmgProgramCompiler.TagsField))
+                    {
+                        continue;
+                    }
                     foreach (string tag in FirmwareKinds.TagsOf(fw))
                     {
                         tags.Add(tag);

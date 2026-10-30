@@ -338,6 +338,13 @@ namespace BinGames.Sim.Combat
         public NativeArray<EmgRuleFeed> EmgRuleFeed;
         public NativeList<short> EmgDirty;
         public NativeArray<byte> EmgDirtyMark;
+        /// <summary>EMG1-FW-01（FGR-EMG-233 第 6 条）：本步爆炸反应装甲块数有变化（起爆 / 补块 / 拆装清零）的单位 ID（同一步同一单位只进一次；热更层只在变化时更新）。不进快照。</summary>
+        public NativeList<int> EmgEraDirty;
+        /// <summary>脏列表前多少条已在上一步交出（下一步开始时去掉）；去重只看其后未交出的部分（两步之间又变化的单位要能再进下一步）。</summary>
+        public int EmgEraDirtyPublished;
+        /// <summary>EMG1-FW-01（FGR-EMG-184 / 233 第 3 条）：本步破片误伤同阵营单位的命中（x = 受伤单位 ID，y = 破片归属单位 ID）；热更层只读它发友伤通知。不进快照。</summary>
+        public NativeList<int2> EmgFriendly;
+        public int EmgFriendlyPublished;
 
         public bool IsCreated => Id.IsCreated;
 

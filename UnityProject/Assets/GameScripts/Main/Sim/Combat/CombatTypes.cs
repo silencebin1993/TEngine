@@ -122,7 +122,11 @@ namespace BinGames.Sim.Combat
         public const int ReadingFeedDrone = 2;
         /// <summary>FG2-VFX-02：尖刺外装反伤（被近身攻击时把伤害反弹给攻击者）。</summary>
         public const int ReadingFeedThorns = 3;
-        public const int ReadingFeedKinds = 4;
+        /// <summary>EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲起爆（扣块 + 反伤 + 破片；只在块数机制开着时记，旧轨仍记 <see cref="ReadingFeedThorns"/>）。</summary>
+        public const int ReadingFeedEra = 4;
+        /// <summary>EMG1-FW-01（DEBT-EMG1TRIG01-03）：<see cref="CombatWeapon.HasOutput"/> = 修复出口。</summary>
+        public const byte OutputRepair = 2;
+        public const int ReadingFeedKinds = 5;
 
         /// <summary>FG2-VFX-02（DEBT-FG2FW02-02）：区域 / 无人机渲染实例的种类（<see cref="CombatInstance"/> B.w）：区域 = 本值 + <see cref="CombatZoneLook"/>。</summary>
         public const float EffectKindZone = 20f;
@@ -918,6 +922,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-ENT-01（DEBT-EMG1TRIG01-02；FGR-EMG-113“残骸背后的单位获得掩护”）：开了火，但这一击被出手者与目标之间的残骸挡下（残骸扣耐久，目标不受伤）；
         /// 力场的主目标在障碍 / 残骸后面也算（DEBT-EMG1GRM01-04）。只在 emg.stage ≥ 1（有残骸 / 掩体规则）时出现。</summary>
         Covered = 19,
+        /// <summary>EMG1-FW-01（DEBT-EMG1TRIG01-03）：修复出口（维修束）只能对己方单位出手（目标是敌对单位或自己）。</summary>
+        NotFriendly = 20,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -963,7 +969,8 @@ namespace BinGames.Sim.Combat
     {
         public CombatWeaponMode Mode;
         public CombatReaction Reaction;
-        /// <summary>1 = 装配有可攻击的主武器出口（Demo HasCombatOutput）；重炮不看它。</summary>
+        /// <summary>1 = 装配有可攻击的主武器出口（Demo HasCombatOutput）；重炮不看它。
+        /// 2 = 修复出口（<see cref="CombatConst.OutputRepair"/>，EMG1-FW-01：主组件声明 prop.integrity modify 且没有攻击出口——维修束）：只对己方出手，命中 = 修复。</summary>
         public byte HasOutput;
         public CombatTargetMode TargetMode;
         /// <summary>射程（驻守开火 / 炮塔 / 突袭者用；编队攻击命令用命令自带的接战距离）。</summary>
@@ -1330,6 +1337,10 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁按“已标记”偏好确实跳到已标记目标时计数用的图鉴条目稳定键（热更层按 fg.TbReaction 写；0 = 不计）。
         /// 内核不认内容 ID，只认这个数（FGR-EMG-013）。</summary>
         public int EmgMarkTagKey;
+        /// <summary>EMG1-FW-01（FGR-EMG-233，fg.TbHomeTuning emg.era.blocks / refill_seconds）：爆炸反应装甲每台总块数（2～16 的偶数，左右侧裙各一半）与每补回 1 块的秒数。
+        /// 块数 0 = 块数机制关（emg.stage = 0）：反伤不限次数、不放破片，旧行为逐字不变。</summary>
+        public byte EmgEraBlocks;
+        public float EmgEraRefill;
 
         public static CombatConfig Default => new CombatConfig
         {

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using GameConfig.fg;
+using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Signal;
@@ -17,11 +18,11 @@ namespace GameLogic.EditorTools
     /// <summary>
     /// EMG1-DATA-01 新固件准入框架的自动验收（FG19 FGR-EMG-014；FGT-EMG-002 阶段 1 的“框架与假固件拒绝”部分）。
     /// 起真实系统：真实 fg.TbChannelPort / TbChannelDecl → 真实 <see cref="EmgCatalog.Admit"/> 与 <see cref="EmgCatalog.Compile"/>（正式编译路径同一函数）。
-    /// A 已声明的固件逐条准入（本卡落 FG19A 第 1.1 节 17 条）；全部 74 条（含 30 条混合）的全量判定在 EMG1-FW-01 开启（DEBT-EMG1DATA01-01，最迟 EMG-1 出口）；
+    /// A 准入全量（EMG1-FW-01 开启）：fg.TbFirmwareKind 44 条正式固件逐条有声明且准入，部件 / 结构 / 底盘声明全部进内核数组；
     /// B 三条假固件必须被拒：只有 numericOnly 写端的、读写都在实体族的（读 prop.mass 写 prop.mass）、只以恒真事件 evt.fire 作 trigger 的；对照：同形状但带世界量读端的准入；
     ///   假固件走正式编译路径同样被拒，且它的声明不进内核数组；
     /// C 混合固件按展开后的两条父声明各判一次；
-    /// D 双轨（FGR-EMG-019）：emg.stage = 0 时没有任何 owner 走声明轨；
+    /// D 双轨（FGR-EMG-019）：emg.stage = 0 时没有任何 owner 走声明轨；emg.stage = 1 时 stageGate ≤ 1 的切轨、≥ 2 的仍走旧轨，stageGate 高于 emg.stage 的不生效；
     /// P 性能：真实五张表编译一次的耗时（只在载入 / 表重载时发生）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgChannelAdmissionSelfCheck）；单段：bash tools/unity-validate.sh GameLogic.EditorTools.FgChannelAdmissionSelfCheck.RunFromMenu。
     /// </summary>
@@ -86,14 +87,22 @@ namespace GameLogic.EditorTools
                 }
             }
             HashSet<string> kinds = new HashSet<string>(FirmwareKinds.Rows.Select(r => r.Id), StringComparer.Ordinal);
-            Expect(fwOwners.Count >= 17 && rejected.Count == 0 && fwOwners.All(kinds.Contains),
-                $"已声明的 {fwOwners.Count} 条固件（FG19A 第 1.1 节引信与弹芯 17 条）全部准入且都在 fg.TbFirmwareKind{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
+            // EMG1-FW-01（FGR-EMG-014 全量判定，DEBT-EMG1DATA01-01 已关）：fg.TbFirmwareKind 每条正式固件都有声明且准入，没有声明即失败
+            var undeclared = FirmwareKinds.Rows.Where(r => !r.Id.StartsWith("fw_mix_", StringComparison.Ordinal) && !fwOwners.Contains(r.Id)).Select(r => r.Id).ToList();
+            int formal = FirmwareKinds.Rows.Count(r => !r.Id.StartsWith("fw_mix_", StringComparison.Ordinal));
+            Expect(formal == 44 && fwOwners.Count == 44 && undeclared.Count == 0 && rejected.Count == 0 && fwOwners.All(kinds.Contains),
+                $"fg.TbFirmwareKind 正式固件 {formal} 条：已声明 {fwOwners.Count} 条、全部准入且都在固件表{(undeclared.Count > 0 ? "；未声明：" + string.Join("、", undeclared) : string.Empty)}{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
             // func_spikes 是部件，不在准入范围，但按同标准自查（FGR-EMG-233 第 5 条）
             Expect(EmgCatalog.Admit(EmgCatalog.DeclsOf(src, "func_spikes"), ports, out string spikes),
                 $"爆炸反应装甲（func_spikes，部件）按同标准自查通过：读 evt.hurt（事件族）写 ent.fragment（实体族）→ {spikes}");
-            int total = FirmwareKinds.Rows.Count;
-            int undeclared = FirmwareKinds.Rows.Count(r => !fwOwners.Contains(r.Id));
-            Line($"    · 全量判定范围：fg.TbFirmwareKind {total} 条，已声明 {fwOwners.Count} 条，未声明 {undeclared} 条（含 30 条混合）由 EMG1-FW-01 写齐并开启全量判定（DEBT-EMG1DATA01-01，最迟 EMG-1 出口，自动测试 FGT-EMG-002）");
+            // 部件 / 结构 / 底盘声明：全部进内核数组（外键、角色、阶段都合法），16 组件里只有罐弹抛洒器不声明（FG19A 第 2.1 节）
+            EmgCompiled c = EmgCatalog.Compile(src);
+            string[] parts = { "comp_gun", "comp_beam", "comp_cannon", "comp_repairbeam", "func_dash", "func_marker", "comp_ram", "comp_shovel", "comp_dronebay", "comp_corona",
+                "comp_orbit", "comp_sentry", "comp_pulser", "comp_claw", "func_spikes", "struct_cargo", "struct_relay", "struct_armor", "struct_fin",
+                "chassis_track", "chassis_wheel", "chassis_hover", "chassis_fixed", "chassis_legged", "chassis_air", "chassis_hull" };
+            var missing = parts.Where(o => !c.OwnerIndex.ContainsKey(o)).ToList();
+            Expect(missing.Count == 0 && c.Problems.Count == 0 && !c.OwnerIndex.ContainsKey("comp_sprayer"),
+                $"FG19A 第 2 节：15 个作战 / 功能组件 + 4 个结构模块 + 7 条底盘特性的声明全部进内核数组（罐弹抛洒器不声明）；编译问题 {c.Problems.Count} 条{(missing.Count > 0 ? "；缺：" + string.Join("、", missing) : string.Empty)}{(c.Problems.Count > 0 ? "：" + string.Join("；", c.Problems.Take(3)) : string.Empty)}");
         }
 
         private static void CheckFakes()
@@ -163,17 +172,60 @@ namespace GameLogic.EditorTools
                     rejected.Add(row.Id + "：" + why);
                 }
             }
-            Expect(mixes == 30 && rejected.Count == 0,
-                $"30 条混合固件里两父都已声明的 {judged} 条逐条准入；其余 {mixes - judged} 条随 EMG1-FW-01 声明写齐后判（DEBT-EMG1DATA01-01）{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
+            Expect(mixes == 30 && judged == 30 && rejected.Count == 0,
+                $"30 条混合固件按展开后的两条父声明逐条判：判 {judged} 条，全部准入{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
         }
 
         private static void CheckDualTrack()
         {
-            Line("  · D. 双轨（FGR-EMG-019）：emg.stage = 0 时全部 owner 走旧 readFields");
+            Line("  · D. 双轨（FGR-EMG-019）：emg.stage = 0 时全部 owner 走旧 readFields；emg.stage = 1 时 stageGate ≤ 1 的 owner 切到声明轨，stageGate ≥ 2 的仍走旧轨");
             EmgCompiled c = EmgCatalog.Current;
             int onDecl = c.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
             Expect(c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
                 $"fg.TbHomeTuning emg.stage = {c.RawStage:0}，生效阶段 {c.EffectiveStage}；{c.OwnerIds.Length} 个已声明 owner 里走声明轨的 {onDecl} 个（新路径全部关闭，战斗行为逐字不变）");
+            EmgSource src = EmgCatalog.FromTables();
+            Func<string, (bool ok, float value)> tuning = src.Tuning;
+            src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
+            var gateOf = src.Decls.GroupBy(d => d.Owner).ToDictionary(g => g.Key, g => g.First().StageGate, StringComparer.Ordinal);
+            try
+            {
+                EmgCatalog.OverrideForTests(src);
+                var wrong = gateOf.Where(kv => EmgCatalog.IsOwnerOnDeclTrack(kv.Key) != (kv.Value <= 1)).Select(kv => $"{kv.Key}(stageGate {kv.Value})").ToList();
+                var later = gateOf.Where(kv => kv.Value >= 2 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}").OrderBy(x => x, StringComparer.Ordinal).ToList();
+                Expect(wrong.Count == 0 && later.Contains("fw_amplify=2"),
+                    $"emg.stage = 1：stageGate ≤ 1 的 {gateOf.Count(kv => kv.Value <= 1)} 个 owner 走声明轨，stageGate ≥ 2 的 {gateOf.Count(kv => kv.Value >= 2)} 个仍走旧轨（不计入阶段 1 指纹与零死对）；阶段 1 仍走旧轨的固件：{string.Join("、", later)}{(wrong.Count > 0 ? "；不对：" + string.Join("、", wrong) : string.Empty)}");
+                // 卡片“切轨的 owner 不再改 TotalNormalizedDamage”：阶段 1 下声明轨固件不进旧组合引擎的伤害预览（与不装时相同）；阶段 0 对照照旧改伤害
+                float Tnd(string fw)
+                {
+                    var b = GameLogic.Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(GameLogic.Campaign.Regions.HomeValleyLayout.Erc003ChassisId, "comp_gun", null, null,
+                        fw == null ? Array.Empty<string>() : new[] { fw });
+                    return GameLogic.Campaign.Blueprint.BlueprintCircuitCompiler.CompilePreview(b).TotalNormalizedDamage;
+                }
+                float none1 = Tnd(null);
+                var changed1 = gateOf.Where(kv => kv.Value <= 1 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => kv.Key)
+                    .Where(fw => Math.Abs(Tnd(fw) - none1) > 1e-4f).ToList();
+                EmgCatalog.ResetForTests();
+                float none0 = Tnd(null);
+                var changed0 = gateOf.Where(kv => kv.Value <= 1 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => kv.Key)
+                    .Where(fw => Math.Abs(Tnd(fw) - none0) > 1e-4f).ToList();
+                EmgCatalog.OverrideForTests(src);
+                Expect(changed1.Count == 0 && changed0.Count > 0,
+                    $"TotalNormalizedDamage：emg.stage = 1 时声明轨固件装上与不装相同（改动 {changed1.Count} 条{(changed1.Count > 0 ? "：" + string.Join("、", changed1) : string.Empty)}）；" +
+                    $"对照 emg.stage = 0 时旧组合引擎里有 {changed0.Count} 条会改它（如 {string.Join("、", changed0.Take(3))}）");
+                // 负向：stageGate 高于 emg.stage 的声明不生效——把寻的改成 stageGate 2，阶段 1 下它回到旧轨，程序里不再有它
+                foreach (EmgSource.Decl d in src.Decls.Where(d => d.Owner == "fw_homing"))
+                {
+                    d.StageGate = 2;
+                }
+                EmgCatalog.OverrideForTests(src);
+                EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_homing" }, FirmwareCarrier.Projectile);
+                Expect(!EmgCatalog.IsOwnerOnDeclTrack("fw_homing") && pr.IsEmpty && pr.LegacyOwners.Contains("fw_homing"),
+                    "负向：寻的 stageGate 改为 2、emg.stage = 1 → 声明不生效，程序为空、寻的列入“仍按原读法结算”（单轨回到旧 readFields）");
+            }
+            finally
+            {
+                EmgCatalog.ResetForTests();
+            }
         }
 
         /// <summary>EMG1-TRIG-01（FG19A 第 2.1.1 节；FG19 FGR-EMG-035）：作战组件表的根载荷实体化列——允许实体化的组件缺值即失败（运行时不退回即时命中）；0 弹速只对不实体化的行合法。</summary>

@@ -66,6 +66,8 @@ namespace GameLogic.Campaign.Blueprint
 
         /// <summary>FG1-VFX-01：功能组件内容 ID（func_dash / func_marker，没有为 null）。机身形变按“装了哪些作战组件”挑形变部件（FGR-FW-020：每个作战组件三套状态）。</summary>
         public string UtilityId;
+        /// <summary>EMG1-FW-01：结构模块（没有为 null）。机器级 prop.* 由功能组件 + 结构模块的声明相加封顶（FGR-EMG-193 第 3 条，EmgCatalog.PartPropModify）。</summary>
+        public string StructureId;
 
         /// <summary>ER6-REACT-02：结构槽是否装了散热鳍（<see cref="Content.ComponentCatalog.StructFinId"/>）——
         /// 额外 +5/秒散热（DEMO-CONTENT-LOCK.md §2.4）。</summary>
@@ -191,6 +193,7 @@ namespace GameLogic.Campaign.Blueprint
             preview.ChassisId = board.ChassisId;
             preview.UtilityId = string.IsNullOrEmpty(board.UtilityId) ? null : board.UtilityId; // 存读档后空槽可能是 ""：统一成 null，编译结果逐字段稳定
             preview.HasHeatSinkStructure = board.StructureId == ComponentCatalog.StructFinId;
+            preview.StructureId = string.IsNullOrEmpty(board.StructureId) ? null : board.StructureId;
 
             if (string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))
             {
@@ -289,7 +292,8 @@ namespace GameLogic.Campaign.Blueprint
             // FG5-RND-04（FGR-FW-050）：混合固件展开成两条父固件的旧引擎等价模块（同时具有两者的读法）。
             foreach (string firmwareId in FirmwareKinds.ExpandMixed(firmwareIds))
             {
-                if (string.IsNullOrEmpty(firmwareId))
+                // EMG1-FW-01（卡片“切轨的 owner 不再改 TotalNormalizedDamage”，FGR-EMG-019 单轨）：声明已生效的固件不再进旧组合引擎的伤害预览
+                if (string.IsNullOrEmpty(firmwareId) || Emergence.EmgCatalog.IsOwnerOnDeclTrack(firmwareId))
                 {
                     continue;
                 }

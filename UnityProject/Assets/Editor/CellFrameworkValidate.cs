@@ -771,6 +771,8 @@ namespace GameLogic.EditorTools
             Seg("FgEmergenceRuleAuditSelfCheck", FgEmergenceRuleAuditSelfCheck.Run);
             // EMG1-DATA-01：新固件准入框架（FGR-EMG-014，FGT-EMG-002 阶段 1 框架部分）——已声明固件逐条准入、三条假固件被拒、混合固件按两父判、emg.stage = 0 双轨、编译耗时。
             Seg("FgChannelAdmissionSelfCheck", FgChannelAdmissionSelfCheck.Run);
+            Seg("FgEmgPartSelfCheck", FgEmgPartSelfCheck.Run); // EMG1-FW-01：FGR-EMG-193 同名部件限装 1 件、prop.* 相加封顶（FGT-EMG-062 阶段 1）
+            Seg("FgEmgEraSelfCheck", FgEmgEraSelfCheck.Run); // EMG1-FW-01：FGR-EMG-233 爆炸反应装甲块数机制（FGT-EMG-073 阶段 1）
             // EMG1-TXT-01：生物残留第 1 层（FGR-EMG-230～232，FGT-EMG-072 阶段 1、FGT-FW-008 扩展）——禁用词表与 FG19 一致、emg.* 文本零生物词、
             // 第 11 节文案已换（爆炸反应装甲 / 反应装甲 / 罐弹抛洒器 / 处决 / 信号劫持）、旧存档显示新名且数值不变、视觉 ID 旧键别名、图鉴占位标记。
             Seg("EmgTextResidueSelfCheck", EmgTextResidueSelfCheck.Run);

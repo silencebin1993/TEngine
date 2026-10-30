@@ -87,6 +87,8 @@ namespace GameLogic.UI.CircuitBoard
                 RenderColumn(ColumnUplinked, null, null, false, visible: false);
                 return;
             }
+            // EMG1-FW-01（FGR-EMG-193 第 3 条）：部件写同一 prop.* 相加封顶，超出部分在装配预览写明（AI 栏末行）
+            _partLine = dual.Ai == null ? null : EmgProgramTreeText.PartPropLine("prop.mass", dual.Ai.UtilityId, dual.Ai.StructureId);
             EmgProgramResult ai = CombatSite.WithFlashForecast(dual.Ai, EmgProgramCompiler.Compile(dual.Ai)); // EMG1-FLASH-01：刷写截断预判
             RenderColumn(ColumnAi, ai, null, IsRejected(ai), visible: true);
             bool hasUplink = dual.Plan != null && dual.Plan.HasUplink;
@@ -101,6 +103,11 @@ namespace GameLogic.UI.CircuitBoard
         }
 
         /// <summary>渲染一栏（面板与自检共用；自检可直接给编译结果，例如注入刷写原因的夹具）。</summary>
+        private string _partLine;
+
+        /// <summary>自检用：上一次刷新算出的部件属性合计行（没有为 null）。</summary>
+        public string PartLine => _partLine;
+
         public void RenderColumn(int col, EmgProgramResult r, string offPathFirmware, bool tableFull, bool visible = true)
         {
             _results[col] = visible ? r : null;
@@ -108,6 +115,10 @@ namespace GameLogic.UI.CircuitBoard
             if (visible)
             {
                 EmgProgramTreeText.BuildRows(r, rows, offPathFirmware, tableFull);
+                if (col == ColumnAi && _partLine != null)
+                {
+                    rows.Add(new EmgTreeRow { Kind = EmgTreeRowKind.Heat, Text = _partLine, Node = -1, Ordinal = -1 });
+                }
             }
             else
             {

@@ -33,7 +33,71 @@ namespace BinGames.Sim.Combat
             public byte Chain;
             public float ChainRange, ChainFalloff;
             public EmgInstrFlags ChainPref;
+            // EMG1-FW-01（DEBT-EMG1GRM01-05）：子节点上的旧读法动词（只在 node > 0 时汇总；根节点的由热更层折进读法）
+            public float DmgMul, ArmorPierce, BlastR, BlastRatio, ExtraRatio, ExtraR, Reach, Knock, PullA, PullR, SweepR, SweepRatio, EchoRatio;
+            public byte ExtraHits;
             public bool Any;
+        }
+
+        /// <summary>子节点旧动词行的参数：编译器按 fg.TbPortCarrier 的 mag 列置了 MagA / B / C 位的那一个乘声明幅度，其余原值。</summary>
+        private static float MagOf(in EmgInstr x, float v, EmgInstrFlags bit) => (x.Flags & bit) != 0 ? v * x.Amount : v;
+
+        /// <summary>EMG1-FW-01（DEBT-EMG1GRM01-03）：节点有没有读 <paramref name="port"/> 的读端行（触发 / 条件 / 感知 / 作用域；溢出行不算）。读端随修饰继承到子节点。O(节点指令数)。</summary>
+        internal static bool EmgNodeReads(ref CombatData d, int prog, int node, ushort port)
+        {
+            if (prog < 0 || prog >= d.EmgPrograms.Length)
+            {
+                return false;
+            }
+            EmgProgram p = d.EmgPrograms[prog];
+            if (node < 0 || node >= p.NodeCount || p.FirstNode + node >= d.EmgNodes.Length)
+            {
+                return false;
+            }
+            EmgNode n = d.EmgNodes[p.FirstNode + node];
+            int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            for (int i = n.FirstInstr; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if (x.Port == port && x.Role >= EmgConst.RoleTrigger && x.Role <= EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>线段上有掩体（ter.cover：障碍或残骸）。</summary>
+        private static bool EmgCoverBetween(ref CombatData d, double2 from, double2 to) =>
+            (d.Obstacles.Length > 0 && !LineOfSight(ref d, from, to)) || (d.Wrecks.Length > 0 && EmgHashSegment(ref d, from, to, EmgHash.KindWreck, true, out _) >= 0);
+
+        /// <summary>
+        /// 多份载荷第 <paramref name="q"/> 份（共 <paramref name="n"/> 份，扇角 <paramref name="fan"/> 度）的方向。节点读 ter.cover（霰射的感知读端，FG19A 第 1.1 节第 3 行）时，
+        /// 这一份在 <paramref name="dist"/> 米内被掩体挡住就按半个扇距一步步往外侧转（中间那份先左后右），最多 4 步，找到不被挡的方向为止；都被挡保持原方向。没读掩体 = 均分扇面。
+        /// </summary>
+        internal static float2 EmgPelletDir(ref CombatData d, int prog, int node, double2 from, float2 aim, double dist, int q, int n, float fan)
+        {
+            float off = n > 1 ? fan * ((float)q / (n - 1) - 0.5f) : 0f;
+            float2 dir = Rotate(aim, math.radians(off));
+            if (n <= 1 || !(dist > 0.5) || !EmgNodeReads(ref d, prog, node, EmgConst.PortCover) || !EmgCoverBetween(ref d, from, from + (double2)dir * dist))
+            {
+                return dir;
+            }
+            float step = math.max(5f, fan / (n - 1) * 0.5f);
+            float side = math.abs(off) > 1e-3f ? math.sign(off) : 1f;
+            for (int s = 1; s <= 4; s++)
+            {
+                for (int t = 0; t < (math.abs(off) > 1e-3f ? 1 : 2); t++)
+                {
+                    float sgn = t == 0 ? side : -side;
+                    float2 alt = Rotate(aim, math.radians(off + sgn * step * s));
+                    if (!EmgCoverBetween(ref d, from, from + (double2)alt * dist))
+                    {
+                        return alt;
+                    }
+                }
+            }
+            return dir;
         }
 
         private const uint SaltDrift = 0xD21Fu, SaltEvade = 0xE7A3u, SaltSwing = 0x3E1Au, SaltPulse = 0x9C55u;
@@ -121,6 +185,39 @@ namespace BinGames.Sim.Combat
                         m.ChainRange = math.max(m.ChainRange, x.B);
                         m.ChainFalloff = math.max(m.ChainFalloff, x.C);
                         m.ChainPref |= x.Flags & (EmgInstrFlags.PreferMarked | EmgInstrFlags.PreferConductive);
+                        break;
+                    // EMG1-FW-01（DEBT-EMG1GRM01-05）：子节点上的旧读法动词由子载荷自己结算（根节点的已折进读法，这里不再算一遍）
+                    case EmgVerb.Dmg when node > 0:
+                        m.DmgMul = (m.DmgMul > 0f ? m.DmgMul : 1f) * math.max(0f, MagOf(x, x.A, EmgInstrFlags.MagA));
+                        break;
+                    case EmgVerb.Armor when node > 0:
+                        m.ArmorPierce = math.min(1f, m.ArmorPierce + math.max(0f, MagOf(x, x.A, EmgInstrFlags.MagA)));
+                        break;
+                    case EmgVerb.Blast when node > 0:
+                        m.BlastR = math.max(m.BlastR, MagOf(x, x.A, EmgInstrFlags.MagA));
+                        m.BlastRatio = math.max(m.BlastRatio, MagOf(x, x.B, EmgInstrFlags.MagB));
+                        break;
+                    case EmgVerb.Extra when node > 0:
+                        m.ExtraHits = (byte)math.max((int)m.ExtraHits, math.min(CombatConst.MaxReadingTargets, Round(MagOf(x, x.A, EmgInstrFlags.MagA))));
+                        m.ExtraRatio = math.max(m.ExtraRatio, MagOf(x, x.B, EmgInstrFlags.MagB));
+                        m.ExtraR = math.max(m.ExtraR, MagOf(x, x.C, EmgInstrFlags.MagC));
+                        break;
+                    case EmgVerb.Reach when node > 0:
+                        m.Reach += math.max(0f, MagOf(x, x.A, EmgInstrFlags.MagA));
+                        break;
+                    case EmgVerb.Knock when node > 0:
+                        m.Knock = math.max(m.Knock, MagOf(x, x.A, EmgInstrFlags.MagA));
+                        break;
+                    case EmgVerb.Pull when node > 0:
+                        m.PullA = math.max(m.PullA, MagOf(x, x.A, EmgInstrFlags.MagA));
+                        m.PullR = math.max(m.PullR, MagOf(x, x.B, EmgInstrFlags.MagB));
+                        break;
+                    case EmgVerb.Sweep when node > 0:
+                        m.SweepR = math.max(m.SweepR, MagOf(x, x.A, EmgInstrFlags.MagA));
+                        m.SweepRatio = math.max(m.SweepRatio, MagOf(x, x.B, EmgInstrFlags.MagB));
+                        break;
+                    case EmgVerb.Echo when node > 0:
+                        m.EchoRatio = math.max(m.EchoRatio, MagOf(x, x.C, EmgInstrFlags.MagC));
                         break;
                     default:
                         continue;
@@ -570,10 +667,12 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
-        /// <summary>侧偏过的弹体穿过偏折场时按概率不被反射（FG19A 第 1.1 节第 14 行：一半概率；每发一个无状态哈希，同一发结果固定）。</summary>
+        /// <summary>侧偏过的弹体穿过偏折场时按概率不被反射（FG19A 第 1.1 节第 14 行：一半概率；每发一个无状态哈希，同一发结果固定）。
+        /// EMG1-FW-01（DEBT-EMG1GRM01-03）：只有节点读 fld.deflect（乱流的条件读端）时才规避，没读 = 只剩侧偏（FG19A 第 1.8 节退化表）。</summary>
         internal static bool EmgEvadesDeflect(ref CombatData d, in CombatProjectile pr)
         {
-            if ((pr.Mods & EmgProjMods.Drift) == 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m) || !(m.DriftEvade > 0f))
+            if ((pr.Mods & EmgProjMods.Drift) == 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m) || !(m.DriftEvade > 0f)
+                || !EmgNodeReads(ref d, pr.Prog, pr.Node, EmgConst.PortDeflect))
             {
                 return false;
             }
@@ -623,6 +722,10 @@ namespace BinGames.Sim.Combat
                 if ((o.Mods & EmgProjMods.Orbit) == 0 || o.Intercepts >= MaxInterceptsPerLap || !(o.Life > 0f))
                 {
                     continue;
+                }
+                if (!EmgNodeReads(ref d, o.Prog, o.Node, EmgConst.PortProjectile))
+                {
+                    continue; // EMG1-FW-01（DEBT-EMG1GRM01-03）：拦弹靠绕轨的 ent.projectile 感知读端；没读 = 只绕行（FG19A 第 1.8 节退化表）
                 }
                 for (int j = 0; j < n && o.Intercepts < MaxInterceptsPerLap; j++)
                 {

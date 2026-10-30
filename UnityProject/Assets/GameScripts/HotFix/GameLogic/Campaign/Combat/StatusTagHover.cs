@@ -258,7 +258,8 @@ namespace GameLogic.Campaign.Combat
             }
             int any = site.Kernel.PickUnit(at, PickRadius, false, true);
             // EMG1-CHAIN-01（FG-GAP-171）：带程序的己方机器没标签时也弹（附程序行）；没程序的己方单位照旧不弹。
-            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any)) ? any : 0;
+            // EMG1-FW-01：装着爆炸反应装甲（块数机制开着）的己方单位没标签时也弹（附块数与补块倒计时）。
+            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _)) ? any : 0;
         }
 
         private static bool HasProgram(CombatSite site, int unit) =>
@@ -267,6 +268,8 @@ namespace GameLogic.Campaign.Combat
         private static void AppendProgramLine(CombatSite site, int unit, ref TooltipContent content)
         {
             string line = EmgChainView.MachineProgramLine(site, unit);
+            string era = EmgChainView.EraHoverLine(site, unit); // EMG1-FW-01（FGR-EMG-233 第 6 条）
+            line = era == null ? line : line == null ? era : era + "\n" + line;
             if (line == null)
             {
                 return;

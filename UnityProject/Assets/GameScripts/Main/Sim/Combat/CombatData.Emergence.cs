@@ -1,4 +1,5 @@
 using Unity.Collections;
+using Unity.Mathematics;
 
 namespace BinGames.Sim.Combat
 {
@@ -54,6 +55,8 @@ namespace BinGames.Sim.Combat
             EmgRuleFeed = new NativeArray<EmgRuleFeed>(EmgConst.RuleSlots, Allocator.Persistent);
             EmgDirty = new NativeList<short>(8, Allocator.Persistent);
             EmgDirtyMark = new NativeArray<byte>(EmgConst.RuleSlots, Allocator.Persistent);
+            EmgEraDirty = new NativeList<int>(8, Allocator.Persistent);
+            EmgFriendly = new NativeList<int2>(8, Allocator.Persistent);
         }
 
         private void EmgDispose()
@@ -85,6 +88,8 @@ namespace BinGames.Sim.Combat
             EmgRuleFeed.Dispose();
             EmgDirty.Dispose();
             EmgDirtyMark.Dispose();
+            EmgEraDirty.Dispose();
+            EmgFriendly.Dispose();
         }
 
         private void EmgAppend()
@@ -134,6 +139,10 @@ namespace BinGames.Sim.Combat
                 EmgPortCount[k] = 0;
             }
             EmgDirty.Clear();
+            EmgEraDirty.Clear();
+            EmgEraDirtyPublished = 0;
+            EmgFriendly.Clear();
+            EmgFriendlyPublished = 0;
         }
 
         /// <summary>EMG1-BUS-01：清调试计数（清战斗状态时；读档换一份新数据时天然为 0）。</summary>

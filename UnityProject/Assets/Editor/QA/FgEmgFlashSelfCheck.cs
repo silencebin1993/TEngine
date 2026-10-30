@@ -79,6 +79,7 @@ namespace GameLogic.EditorTools
                 Step(CheckUnlink);
                 Step(CheckSaveLoad);
                 Step(CheckHotfix);
+                Step(CheckMergedCoreStrip);
                 Step(CheckPerformance);
                 Step(CheckWorld);
                 Step(CheckTurret);
@@ -499,6 +500,37 @@ namespace GameLogic.EditorTools
                 Fail("夹具：无人机舱蓝图 2 号格标接入口失败");
             }
             return uplink ? UplinkCompiler.CompileUplinked(board, new[] { MarkTag }) : BlueprintCircuitCompiler.CompilePreview(board);
+        }
+
+        /// <summary>
+        /// FG-GAP-173（EMG1-FW-01 核对）：核心与常规固件写同一端口、落在同一节点合并成一行（阶段 1 实际存在：标记跳转（核心）+ 电弧连锁都写 grm.mod.chain，
+        /// 电容蓄力（核心）+ 电弧连锁都写 en.elec）。信号离开剥离核心后，这一行按剩下的常规来源重算：幅度 = 常规那份、不留“只跳已标记”偏好、不标核心（FGT-EMG-013 对照）。
+        /// </summary>
+        private static void CheckMergedCoreStrip()
+        {
+            Line("  · F2. FG-GAP-173：核心 + 常规同端口同节点的合并行，剥离核心后按常规来源拆回（FGT-EMG-013 对照）");
+            FgEmgProgramSelfCheck.UseStage1Catalog();
+            try
+            {
+                EmgProgramResult res = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_marktag", "fw_arcchain" }, FirmwareCarrier.Projectile);
+                KeyValuePair<int, List<EmgMergeSource>> merged = res.MergeSources.FirstOrDefault(m => m.Value.Any(x => x.Core) && m.Value.Any(x => !x.Core));
+                bool found = merged.Value != null;
+                EmgInstr full = found ? res.KernelInstrs[merged.Key] : default;
+                EmgMergeSource regular = found ? merged.Value.First(x => !x.Core) : default;
+                int n = EmgProgramCompiler.FlashSteps(res, true).Count;
+                EmgProgramResult stripped = EmgProgramCompiler.Truncate(res, n, true);
+                EmgInstr after = stripped != null ? stripped.KernelInstrs.FirstOrDefault(x => x.Port == full.Port && x.Role == full.Role) : default;
+                EmgProgramResult kept = EmgProgramCompiler.Truncate(res, EmgProgramCompiler.FlashSteps(res, false).Count, false);
+                EmgInstr keptRow = kept != null ? kept.KernelInstrs.FirstOrDefault(x => x.Port == full.Port && x.Role == full.Role) : default;
+                Expect(found && (full.Flags & EmgInstrFlags.PreferMarked) != 0 && stripped != null && after.Port == full.Port
+                       && Mathf.Approximately(after.Amount, regular.Amount) && (after.Flags & (EmgInstrFlags.PreferMarked | EmgInstrFlags.Core)) == 0
+                       && (keptRow.Flags & EmgInstrFlags.PreferMarked) != 0,
+                    $"[标记跳转（核心）, 电弧连锁] 合并行（端口码 {full.Port}，{merged.Value?.Count ?? 0} 个来源）：剥离核心后幅度 {after.Amount} = 常规那份 {regular.Amount}、不留“只跳已标记”、不标核心；不剥离时仍带“只跳已标记”（对照）");
+            }
+            finally
+            {
+                EmgCatalog.ResetForTests();
+            }
         }
 
         private static void CheckHotfix()

@@ -45,7 +45,7 @@ namespace GameLogic.EditorTools
     /// H 正式流程：破碎都市里带读法的机器（喷洒器 + 冷却液、连射器 + 拖尾 + 霰射）经编队攻击命令真打，0.5x～3x 与暂停、观察 / 不观察、真实存档读档后续跑结果一致；
     /// I 负向（容量满、母机阵亡、目标消失、不可伤、未知组件）；J 性能。已并入 <c>CellFrameworkValidate.RunAll</c>。
     /// </summary>
-    public static class FgReadingMatrixSelfCheck
+    public static partial class FgReadingMatrixSelfCheck
     {
         private const int Slot = 0;
         private const int RunSlot = 1;
@@ -112,6 +112,7 @@ namespace GameLogic.EditorTools
                 Step(CheckLegacyMatrix);
                 Step(CheckDeclaredFields);
                 Step(CheckKernelMatrix);
+                Step(CheckDeclMatrix);
                 Step(CheckNamedReadings);
                 Step(CheckFixedChassis);
                 Step(CheckReadingTexts);
@@ -1143,6 +1144,8 @@ namespace GameLogic.EditorTools
             public int MaxZonesAlive;
             public int DamagedCount;
             public int SlowedCount;
+            /// <summary>结束时仍被标记的单位数（不进指纹，避免改动既有“指纹相同”的对照）。</summary>
+            public int MarkedCount;
         }
 
         private static float Dmg(Obs o, int idx) => o.StartUnitHp[idx] - o.Hp[idx];
@@ -1175,12 +1178,22 @@ namespace GameLogic.EditorTools
             public readonly int[] Ids = new int[ArenaCount];
             public int MaxDrones;
             public int MaxZones;
+            /// <summary>EMG1-FW-01：声明轨武器的载荷轨迹指纹（每步全部弹体位置 0.1 米取整 + 修饰位），寻的 / 侧偏 / 折返 / 绕行这类只改弹道的行为由它看出。</summary>
+            public bool Trace;
+            public ulong TraceHash = 1469598103934665603UL;
 
-            public static Arena Build(CombatWeapon w, bool prepared, CombatConfig? config = null)
+            public static Arena Build(CombatWeapon w, bool prepared, CombatConfig? config = null, GameLogic.Campaign.Emergence.EmgProgramResult program = null, string comp = null,
+                bool conditions = false, bool cover = false, bool wreckCover = false)
             {
                 CombatConfig cfg = config ?? CombatSite.ConfigFromTuning();
                 cfg.NavEnabled = 0;
                 var a = new Arena { K = new CombatKernel(cfg, 32) };
+                if (program != null && !program.IsEmpty)
+                {
+                    // EMG1-FW-01：声明轨武器——程序登记进本场内核，需要飞行的按作战组件表实体化（与 CombatSite.WithProgram 同一做法）
+                    w.Program = CombatSite.RegisterProgram(a.K, program);
+                    CombatSite.ApplySpawnFlight(ref w, program, comp);
+                }
                 int wi = a.K.AddWeapon(w);
                 a.Ids[ArenaAttacker] = a.K.Spawn(Machine(double2.zero, wi, 300f, 500f));
                 // 主目标：正面装甲朝着攻击者（减伤 50%）
@@ -1214,6 +1227,29 @@ namespace GameLogic.EditorTools
                         a.K.ApplyStatus(a.Ids[idx], wet, 1e7f, 0f, 0f, 0f, 0);
                     }
                 }
+                if (conditions)
+                {
+                    // EMG1-FW-01（FG19A 第 1.8 节“条件型声明的固定用例先造出条件”）：主目标旁的障碍（撞墙 / 越障）、主目标身后的残骸（穿透 / 掩体）、
+                    // 旁边一个热信号最高的敌人（寻的 / 广角 / 装甲击穿的热读端）——它带一件不出手的武器，积热不被清零。
+                    a.K.SetObstacles(new List<float3> { new float3(3.0f, -1.3f, 0.35f), new float3(1.6f, 1.5f, 0.3f) });
+                    a.K.TryAddWreck(new EmgWreck { Pos = new double2(4.6, 0.45), Radius = 0.45f, Hp = 1000f, MaxHp = 1000f, Until = 1e9 }, out _);
+                    int dummy = a.K.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 0 }); // 不出手、积热不被清零
+                    CombatSpawn hot = Hostile(new double2(2.4, -0.9), 5000f, 5000f);
+                    hot.Weapon = dummy;
+                    a.K.SetWeaponState(a.K.Spawn(hot), 50f, false, 0, 0);
+                }
+                if (cover)
+                {
+                    // EMG1-FW-01：掩体场景——障碍挡在本机与主目标之间，障碍正后方另有一个敌人（力场“不被掩体吸收”、布区“越过掩体 / 无视线投放”要有它才看得见）
+                    a.K.SetObstacles(new List<float3> { new float3(1.5f, 0.15f, 0.3f) });
+                    a.K.Spawn(Hostile(new double2(2.4, 0.24), 5000f, 5000f));
+                }
+                if (wreckCover)
+                {
+                    // 同上，挡在中间的换成残骸（穿透“越过残骸 / 不被残骸吸收”只认残骸与固态斑块，不认障碍）
+                    a.K.TryAddWreck(new EmgWreck { Pos = new double2(1.5, 0.15), Radius = 0.3f, Hp = 1000f, MaxHp = 1000f, Until = 1e9 }, out _);
+                    a.K.Spawn(Hostile(new double2(2.4, 0.24), 5000f, 5000f));
+                }
                 a.K.IssueCommand(a.Ids[ArenaAttacker], CombatCommandKind.Attack, new double2(3.0, 0.3), a.Ids[ArenaP], 0.5f, 6f, 0.5f, false);
                 return a;
             }
@@ -1226,6 +1262,15 @@ namespace GameLogic.EditorTools
                     K.Step(Dt, K.Time + Dt);
                     MaxDrones = Math.Max(MaxDrones, K.DronesOf(Ids[ArenaAttacker]));
                     MaxZones = Math.Max(MaxZones, K.ZoneCount);
+                    for (int p = 0; Trace && p < K.ProjectileCount; p++)
+                    {
+                        if (K.TryGetProjectile(p, out CombatProjectile pr))
+                        {
+                            TraceHash = (TraceHash ^ (ulong)(long)math.round(pr.Pos.x * 10)) * 1099511628211UL;
+                            TraceHash = (TraceHash ^ (ulong)(long)math.round(pr.Pos.y * 10)) * 1099511628211UL;
+                            TraceHash = (TraceHash ^ (ulong)pr.Mods) * 1099511628211UL;
+                        }
+                    }
                 }
             }
 
@@ -1267,9 +1312,11 @@ namespace GameLogic.EditorTools
             Priority = 1,
         };
 
-        private static Obs RunArena(CombatWeapon w, float seconds, bool prepared)
+        private static Obs RunArena(CombatWeapon w, float seconds, bool prepared, GameLogic.Campaign.Emergence.EmgProgramResult program = null, string comp = null,
+            bool conditions = false, bool cover = false, bool wreckCover = false)
         {
-            using Arena a = Arena.Build(w, prepared);
+            using Arena a = Arena.Build(w, prepared, null, program, comp, conditions, cover, wreckCover);
+            a.Trace = program != null;
             var o = new Obs { StartUnitHp = new float[ArenaCount] };
             for (int i = 0; i < ArenaCount; i++)
             {
@@ -1303,6 +1350,10 @@ namespace GameLogic.EditorTools
                         o.SlowedCount++;
                     }
                 }
+                if (ok && v.MarkedUntil > a.K.Time)
+                {
+                    o.MarkedCount++;
+                }
                 sb.Append(o.Hp[i].ToString("F1", CultureInfo.InvariantCulture)).Append(',')
                   .Append(o.Pos[i].x.ToString("F2", CultureInfo.InvariantCulture)).Append(',')
                   .Append(o.Pos[i].y.ToString("F2", CultureInfo.InvariantCulture)).Append(o.Alive[i] ? 'A' : 'D').Append('|');
@@ -1317,6 +1368,15 @@ namespace GameLogic.EditorTools
             o.MaxZonesAlive = a.MaxZones;
             sb.Append("S").Append(c.ShotsFired).Append("Z").Append(c.ZonesSpawned).Append("E").Append(c.EchoesQueued).Append("D").Append(c.DronesLaunched)
               .Append("M").Append(a.MaxDrones);
+            if (a.Trace)
+            {
+                sb.Append("T").Append(a.TraceHash.ToString("X16"));
+            }
+            if (program != null && a.K.TryGetLastEmgEvent(EmgEventKind.Expire, out EmgEvent ex))
+            {
+                // 声明轨：载荷终结的位置与代号也算行为（回旋在发射者身边终结、子母弹在终结处抛子弹药）
+                sb.Append("X").Append(ex.Code).Append('@').Append(ex.Pos.x.ToString("F1", CultureInfo.InvariantCulture)).Append(',').Append(ex.Pos.y.ToString("F1", CultureInfo.InvariantCulture));
+            }
             o.Digest = sb.ToString();
             return o;
         }

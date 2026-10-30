@@ -50,6 +50,8 @@ namespace GameLogic.Campaign.Blueprint
         FirmwareNoMachineImpl,
         /// <summary>FG2-FW-02（FGR-FW-012）：固定底盘（炮塔）上装了不兼容的作战组件（冲刺器：依赖机体位移）。</summary>
         ComponentNotOnFixedChassis,
+        /// <summary>EMG1-FW-01（FGR-EMG-193 第 2 条）：同一台机器装了两件同名部件（旧存档 / 外部改动）——库存不动，蓝图标红、拒绝再保存（文本 emg.compile.part_duplicate）。</summary>
+        PartDuplicate,
     }
 
     public sealed class CircuitIssue
@@ -93,6 +95,39 @@ namespace GameLogic.Campaign.Blueprint
         public string PrimaryId;
         public string UtilityId;
         public string StructureId;
+
+        /// <summary>EMG1-FW-01（FGR-EMG-193 第 2 条）：同名部件每台机器限装 1 件（原因码 / 文本键）。判定只比部件 ID 是否相同，不认具体部件。</summary>
+        public const string PartDuplicateCode = "part_duplicate";
+        public const string PartDuplicateKey = "emg.compile.part_duplicate";
+
+        /// <summary>候选部件是否与本机其它部件位上已装的同名（<paramref name="ownSlot"/>：0 主组件 / 1 功能组件 / 2 结构，自身位不算）。</summary>
+        public bool IsPartDuplicate(string candidate, int ownSlot)
+        {
+            string[] parts = { PrimaryId, UtilityId, StructureId };
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (i != ownSlot && !string.IsNullOrEmpty(candidate) && parts[i] == candidate)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>本机部件位里重复的同名部件数（0 = 没有重复）。读档后蓝图校验用。</summary>
+        public int DuplicatePartCount()
+        {
+            string[] parts = { PrimaryId, UtilityId, StructureId };
+            int n = 0;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                for (int j = i + 1; j < parts.Length; j++)
+                {
+                    n += !string.IsNullOrEmpty(parts[i]) && parts[i] == parts[j] ? 1 : 0;
+                }
+            }
+            return n;
+        }
 
         /// <summary>机器固件槽数（FGR-EMG-039：阶段 1～2 不改）；程序根节点容量 C0 = 本值 + 接入口配额（FGR-EMG-032）。</summary>
         public const int FirmwareSlotCount = 2;
@@ -334,6 +369,10 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return CircuitOpResult.Fail("primary_required", "主组件不能为空。");
             }
+            if (IsPartDuplicate(primaryId, 0))
+            {
+                return CircuitOpResult.Fail(PartDuplicateCode, GameText.Get(PartDuplicateKey)); // FGR-EMG-193：同名部件每台限 1 件
+            }
             if (!ComponentCatalog.TryGet(primaryId, out MechanicalContentDef def)
                 || def.Category != MechanicalContentCategory.MainComponent)
             {
@@ -364,6 +403,10 @@ namespace GameLogic.Campaign.Blueprint
                 CommitUndo();
                 return CircuitOpResult.Ok();
             }
+            if (IsPartDuplicate(utilityId, 1))
+            {
+                return CircuitOpResult.Fail(PartDuplicateCode, GameText.Get(PartDuplicateKey)); // FGR-EMG-193：同名部件每台限 1 件
+            }
             if (!ComponentCatalog.TryGet(utilityId, out MechanicalContentDef def)
                 || def.Category != MechanicalContentCategory.FunctionComponent)
             {
@@ -392,6 +435,10 @@ namespace GameLogic.Campaign.Blueprint
                 StructureId = null;
                 CommitUndo();
                 return CircuitOpResult.Ok();
+            }
+            if (IsPartDuplicate(structureId, 2))
+            {
+                return CircuitOpResult.Fail(PartDuplicateCode, GameText.Get(PartDuplicateKey)); // FGR-EMG-193：同名部件每台限 1 件
             }
             if (!ComponentCatalog.TryGet(structureId, out MechanicalContentDef def)
                 || def.Category != MechanicalContentCategory.Structure)
@@ -829,6 +876,10 @@ namespace GameLogic.Campaign.Blueprint
                 }
             }
 
+            if (DuplicatePartCount() > 0)
+            {
+                result.Add(CircuitIssueCode.PartDuplicate, GameText.Get(PartDuplicateKey));
+            }
             if (!string.IsNullOrEmpty(FirmwareSlots[0]) && !FirmwareCatalog.TryGet(FirmwareSlots[0], out _))
             {
                 result.Add(CircuitIssueCode.FirmwareUnknown, $"固件槽0 内容 '{FirmwareSlots[0]}' 未知。");

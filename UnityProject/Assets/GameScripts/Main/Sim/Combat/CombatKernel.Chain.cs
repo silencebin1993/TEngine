@@ -21,6 +21,18 @@ namespace BinGames.Sim.Combat
                 _d.EmgDirty.RemoveRange(0, cut); // 去重标记已在交出时清掉：两步之间又命中的槽重新追加在未交出部分
             }
             _dirtyPublished = 0;
+            int cutEra = System.Math.Min(_d.EmgEraDirtyPublished, _d.EmgEraDirty.Length);
+            if (cutEra > 0)
+            {
+                _d.EmgEraDirty.RemoveRange(0, cutEra); // EMG1-FW-01：反应装甲块数脏列表同一口径
+            }
+            _d.EmgEraDirtyPublished = 0;
+            int cutFf = System.Math.Min(_d.EmgFriendlyPublished, _d.EmgFriendly.Length);
+            if (cutFf > 0)
+            {
+                _d.EmgFriendly.RemoveRange(0, cutFf); // 友伤命中列表同一口径
+            }
+            _d.EmgFriendlyPublished = 0;
         }
 
         /// <summary>交出本步脏列表并清掉这些槽的去重标记（修复：上一步刚交出的槽在两步之间又被即时出手命中时，要能再进下一步的列表）。热更层按累计差值读，同槽重复出现无害。</summary>
@@ -32,6 +44,60 @@ namespace BinGames.Sim.Combat
                 _d.EmgDirtyMark[_d.EmgDirty[i]] = 0;
             }
             _dirtyPublished = n;
+            _d.EmgEraDirtyPublished = _d.EmgEraDirty.Length;
+            _d.EmgFriendlyPublished = _d.EmgFriendly.Length;
+        }
+
+        /// <summary>EMG1-FW-01（FGR-EMG-233 第 6 条）：本步爆炸反应装甲块数有变化的单位（热更层只读这个列表更新块数刻度 / 耗尽通知，O(本步变化数)）。</summary>
+        public int EmgEraDirtyCount => _d.EmgEraDirty.Length;
+
+        /// <summary>
+        /// 自检：在“攻击者 <paramref name="attackerId"/> 的程序出手、链深 <paramref name="depth"/>”的上下文里让宿主吃一次即时命中后的起爆判定（走与 ReflectMelee 同一个起爆入口）。
+        /// 只用来覆盖“链深已到 3：扣块与反伤照常、不放破片”这一分支（正式流程里即时命中都在出手根上，链深 0）。
+        /// </summary>
+        public void EraDetonateForTests(int attackerId, int hostId, float reflect, byte depth)
+        {
+            int a = _d.SlotOf(attackerId), t = _d.SlotOf(hostId);
+            if (a < 0 || t < 0 || !CombatLogic.EmgEraArmed(ref _d, t))
+            {
+                return;
+            }
+            EmgCtx saved = _d.EmgCtx;
+            EmgScalars es = _d.EmgS[0];
+            int chain = es.NextChain++;
+            _d.EmgS[0] = es;
+            _d.EmgCtx = new EmgCtx { Prog = 0, Chain = chain, Owner = a, Depth = depth };
+            CombatLogic.EmgEraDetonate(ref _d, a, t, reflect);
+            _d.EmgCtx = saved;
+            Touch();
+        }
+
+        /// <summary>EMG1-FW-01（FGR-EMG-184）：本步破片误伤同阵营单位的命中（x = 受伤单位 ID，y = 破片归属单位 ID）。O(本步友伤数)。</summary>
+        public int EmgFriendlyCount => _d.EmgFriendly.Length;
+
+        public int2 EmgFriendlyAt(int i) => i >= 0 && i < _d.EmgFriendly.Length ? _d.EmgFriendly[i] : default;
+
+        public int EmgEraDirtyAt(int i) => i >= 0 && i < _d.EmgEraDirty.Length ? _d.EmgEraDirty[i] : 0;
+
+        /// <summary>
+        /// EMG1-FW-01：单位的爆炸反应装甲读数——完整块数 / 总块数 / 缺块掩码 / 下一块还要几秒（满块 0）。块数机制关（emg.stage = 0）或单位没有反伤读法时返回 false。O(1)。
+        /// </summary>
+        public bool TryGetEra(int unitId, out int intact, out int total, out ushort missMask, out float nextIn)
+        {
+            intact = total = 0;
+            missMask = 0;
+            nextIn = 0f;
+            int i = _d.SlotOf(unitId);
+            if (i < 0 || !CombatLogic.EmgEraArmed(ref _d, i))
+            {
+                return false;
+            }
+            total = CombatLogic.EmgEraN(ref _d);
+            missMask = (ushort)(_d.EmgUnit[i].EraMiss & ((1 << total) - 1));
+            intact = total - math.countbits((int)missMask);
+            float period = CombatLogic.EmgEraPeriod(ref _d);
+            nextIn = missMask == 0 ? 0f : math.max(0f, period - _d.EmgUnit[i].EraRefillT);
+            return true;
         }
 
         // ─────────────────────────────── 环 ───────────────────────────────
