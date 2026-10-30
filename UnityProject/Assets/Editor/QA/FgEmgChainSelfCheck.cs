@@ -327,6 +327,7 @@ namespace GameLogic.EditorTools
                 PrimaryId = ComponentCatalog.CompGunId, HasCombatOutput = true, TotalNormalizedDamage = 10f, ReactionId = MechanicalReactionCatalog.ReactionMarkJumpId,
                 FirmwareIds = new[] { MarkTag }, UplinkFirmwareIds = new[] { MarkTag }, UplinkOnPath = true,
             };
+            FgEmgProgramSelfCheck.UseStage0Catalog(); // EMG1-E2E-01：正式表已是 1，旧轨对照显式注入 0（回滚开关）
             CombatWeapon legacy = CombatSite.MachineWeaponFrom(p, false);
             UseStage1(false);
             CombatWeapon decl = CombatSite.MachineWeaponFrom(p, false);
@@ -388,6 +389,31 @@ namespace GameLogic.EditorTools
                 StepN(k, 1);
                 Expect(k.EmgRuleCountOfKey(MarkKey) == 0 && k.EmgDirtyCount == 0 && k.EmgEnqueuedOf(EmgEventKind.React) == 0 && Math.Abs(Hp(k, marked) - 1e6f) < 1e-3f && Math.Abs(Hp(k, near) - 1e6f) < 1e-3f,
                     $"对照：没有已标记目标——不跳（只有“已标记”偏好）、不计（{k.EmgRuleCountOfKey(MarkKey)}）、不发 evt.react（{k.EmgEnqueuedOf(EmgEventKind.React)}）");
+            }
+            // DEBT-EMG1CHAIN01-05：子弹药上的“只跳已标记”也走同一份可靠计数——[分裂, 标记跳转] 的跳转只在子弹药节点（根节点只有分裂），
+            // 子弹药撞上周围一圈未标记敌人后跳到外圈已标记的那个，每跳计一次、evt.react 条数 = 计数。
+            using (var k = new CombatKernel(Cfg(), 64))
+            {
+                int w = k.AddWeapon(Melee(k, Compile(Split, MarkTag)));
+                int me = k.Spawn(MachineSpawn(new double2(0, -1.5), w));
+                int t = k.Spawn(HostileSpawn(double2.zero));
+                for (int i = 0; i < 16; i++)
+                {
+                    double ang = i * math.PI * 2 / 16;
+                    var ring = HostileSpawn(new double2(math.cos(ang), math.sin(ang)) * 2.6);
+                    ring.Radius = 0.6f;
+                    k.Spawn(ring);
+                }
+                int far = k.Spawn(HostileSpawn(new double2(0, 6.5)));
+                k.SetMarkedUntil(far, 1e9);
+                long enq0 = k.EmgEnqueuedOf(EmgEventKind.React);
+                k.FireAt(me, t, k.Time);
+                int atFire = k.EmgRuleCountOfKey(MarkKey);
+                StepN(k, 90);
+                int count = k.EmgRuleCountOfKey(MarkKey);
+                long enq = k.EmgEnqueuedOf(EmgEventKind.React) - enq0;
+                Expect(atFire == 0 && count >= 1 && count <= 3 && enq == count && Hp(k, far) < 1e6f,
+                    $"子弹药标记跳转：根节点出手时计数 {atFire}（根只有分裂）；子弹药命中后跳到已标记目标，计数 {count}（≤ 3 份子弹药）、evt.react {enq} 条 = 计数，已标记目标掉血 {1e6f - Hp(k, far):F1}");
             }
             UseStage1(false);
             using (var k = new CombatKernel(Cfg(), 16))
@@ -658,6 +684,29 @@ namespace GameLogic.EditorTools
                    && sb.Contains(GameText.Format("emg.hover.sub.who", EmgChainView.PartyName(site, s, b))) && sb.Split('\n').Length == 3,
                 $"悬停子弹药：标题“{sc?.Title}”，正文“{sb.Replace("\n", " / ")}”");
             StatusTagHover.Leave(site);
+
+            // DEBT-EMG1CHAIN01-05：破片悬停（EmgChainView.ProjectileContent 的破片分支）——残骸受重击崩出的破片，三段“是什么 / 谁造成的 / 接下来”。
+            CombatConfig fc = Cfg();
+            fc.EmgEntity = 1;
+            fc.EmgCover = 1;
+            using var fsite = new CombatSite(SiteId + "_frag", fc);
+            CombatKernel fk = fsite.Kernel;
+            int fw = fk.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, TargetMode = CombatTargetMode.Nearest, Range = 30f, Damage = 50f, Cooldown = 0f, Reading = new CombatReading { Carrier = CombatCarrier.Projectile } });
+            int fa = fk.Spawn(MachineSpawn(double2.zero, fw));
+            fsite.SetUnitLabel(fa, "reaction.log.machine_n", "C");
+            int ffoe = fk.Spawn(HostileSpawn(new double2(0, 10)));
+            fk.TryAddWreck(new EmgWreck { Pos = new double2(0, 5), Radius = 0.6f, Hp = 200f, MaxHp = 200f, Mass = 6f, Born = fk.Time, Until = fk.Time + 90.0, Profile = -1 }, out _);
+            fk.FireAt(fa, ffoe, fk.Time);
+            int fi = -1;
+            for (int i = 0; i < fk.ProjectileCount && fi < 0; i++)
+            {
+                fi = fk.TryGetProjectile(i, out CombatProjectile fp) && (fp.Flags & EmgProjFlags.Fragment) != 0 ? i : -1;
+            }
+            TooltipContent fcnt = fi >= 0 ? EmgChainView.ProjectileContent(fsite, s, fi) : null;
+            string fb = fcnt?.Body ?? string.Empty;
+            Expect(fi >= 0 && fcnt != null && fcnt.Title == GameText.Get("emg.hover.frag.title") && fb.Split('\n').Length == 3
+                   && fb.Contains(GameText.Format("emg.hover.frag.who", EmgChainView.PartyName(fsite, s, fa))),
+                $"悬停破片：标题“{fcnt?.Title}”，正文“{fb.Replace("\n", " / ")}”");
         }
 
         // ── D2. 因果链键 ───────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+using GameLogic.Campaign.Emergence;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -375,8 +376,11 @@ namespace GameLogic.EditorTools
             WorldView.Observe(city.SiteId);
             CombatSite site = city.Combat;
             CommitVia(m);
-            Expect(WeaponOf(site, m).Reaction == CombatReaction.MarkJump && SignalUplinkService.IsUplinked(s, m),
-                "接入后：接入口插入标记跳转，内核武器带“标记跳转”反应");
+            // EMG1-E2E-01：emg.stage = 1 起 fw_marktag 走声明轨——跳转由武器程序执行（武器不再挂装配反应），两轨都算“带上了标记跳转”。
+            bool declMark = EmgCatalog.IsOwnerOnDeclTrack(FirmwareCatalog.FwMarkTagId);
+            Expect((declMark ? WeaponOf(site, m).Program >= 0 && WeaponOf(site, m).Reaction == CombatReaction.None : WeaponOf(site, m).Reaction == CombatReaction.MarkJump)
+                   && SignalUplinkService.IsUplinked(s, m),
+                $"接入后：接入口插入标记跳转，内核武器带“标记跳转”（{(declMark ? "声明轨：武器程序" : "旧轨：装配反应")}）");
 
             string s1 = FracturedCityLayout.Scout1SpawnId;
             string s2 = FracturedCityLayout.Scout2SpawnId;
@@ -388,10 +392,46 @@ namespace GameLogic.EditorTools
             FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             float s2Before = Enemy(s, s2).Health;
             FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
+            WorldSimulation.StepMany(2); // 声明轨的跳转计数在步进的反馈结算里报上来（DEBT-EMG1CHAIN01-06：冷却 / 暴露 / 提示）
             float jumped = s2Before - Enemy(s, s2).Health;
             Expect(jumped > 0.01f && FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump) > jump0 && SignalUplinkService.CoreFiredCount == fired0 + 1
                    && SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwMarkTagId) > 0,
                 $"你接入时：第三发命中已标记目标 → 跳到已标记的邻近敌人（{jumped:F1}），标记跳转进入冷却");
+
+            // EMG1-E2E-01 修复轮（FGR-SIG-033 行为）：冷却中仍接入这台，再打已标记目标——不跳、不再计发动；冷却结束后恢复跳转并重新进入冷却。
+            Func<float> resetAndMark = () =>
+            {
+                foreach (string sid in new[] { s1, s2 })
+                {
+                    RegionEnemyRecord rec = Enemy(s, sid);
+                    rec.Health = rec.MaxHealth;
+                    site.SyncEnemyFromRecord(rec);
+                }
+                PlaceEnemy(site, s1, new Vector2(-10f, -8f));
+                PlaceEnemy(site, s2, new Vector2(-6f, -8f));
+                FracturedCityRegion.TryAttackEnemy(s, m, s2, s.RandomSeed, isAiSource: false);
+                FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
+                return Enemy(s, s2).Health;
+            };
+            WorldSimulation.StepMany(2);
+            float s2c = resetAndMark();
+            int jumpC = FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump);
+            int firedC = SignalUplinkService.CoreFiredCount;
+            FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
+            WorldSimulation.StepMany(2);
+            float jumpedCooling = s2c - Enemy(s, s2).Health;
+            Expect(SignalUplinkService.IsUplinked(s, m) && SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwMarkTagId) > 0 && jumpedCooling < 0.01f
+                   && FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump) == jumpC && SignalUplinkService.CoreFiredCount == firedC,
+                $"冷却中（仍接入）：再打已标记目标不跳（邻近敌人掉血 {jumpedCooling:F1}）、不出提示、核心发动次数不变（{firedC} → {SignalUplinkService.CoreFiredCount}）");
+            WorldSimulation.StepMany((int)Math.Ceiling(SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwMarkTagId) * GameClock.StepHz) + 2);
+            float s2r = resetAndMark();
+            int firedR = SignalUplinkService.CoreFiredCount;
+            FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
+            WorldSimulation.StepMany(2);
+            float jumpedAgain = s2r - Enemy(s, s2).Health;
+            Expect(jumpedAgain > 0.01f && SignalUplinkService.CoreFiredCount == firedR + 1 && SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwMarkTagId) > 0,
+                $"冷却结束（仍接入）：再打已标记目标恢复跳转（{jumpedAgain:F1}），标记跳转重新进入冷却");
+            WorldSimulation.StepMany((int)Math.Ceiling(SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwMarkTagId) * GameClock.StepHz) + 2);
 
             // 对照：信号跳到另一台，这台交还 AI；等冷却结束后再打已标记目标——AI 驾驶不跳（两个侦察机先回满血，排除“打死了所以没跳”）。
             CommitVia(other);

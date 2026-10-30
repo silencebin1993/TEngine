@@ -181,10 +181,18 @@ namespace GameLogic.EditorTools
         private static void CheckDualTrack()
         {
             Line("  · D. 双轨（FGR-EMG-019）：emg.stage = 0 时全部 owner 走旧 readFields；emg.stage = 1 时 stageGate ≤ 1 的 owner 切到声明轨，stageGate ≥ 2 的仍走旧轨");
+            // EMG1-E2E-01（DEBT-EMG1KRN01-02）：阶段 1 出口起正式表缺省 emg.stage = 1；阶段 0（回滚对照）显式注入调参。
+            EmgCompiled real = EmgCatalog.Current;
+            int realOnDecl = real.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
+            EmgSource src0 = EmgCatalog.FromTables();
+            Func<string, (bool ok, float value)> tuning0 = src0.Tuning;
+            src0.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : tuning0(id);
+            EmgCatalog.OverrideForTests(src0);
             EmgCompiled c = EmgCatalog.Current;
             int onDecl = c.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
-            Expect(c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
-                $"fg.TbHomeTuning emg.stage = {c.RawStage:0}，生效阶段 {c.EffectiveStage}；{c.OwnerIds.Length} 个已声明 owner 里走声明轨的 {onDecl} 个（新路径全部关闭，战斗行为逐字不变）");
+            EmgCatalog.ResetForTests();
+            Expect(real.RawStage == 1f && real.EffectiveStage == 1 && realOnDecl > 0 && c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
+                $"正式表 fg.TbHomeTuning emg.stage = {real.RawStage:0}（生效 {real.EffectiveStage}，走声明轨 {realOnDecl} 个 owner）；对照 emg.stage = 0：生效阶段 {c.EffectiveStage}，{c.OwnerIds.Length} 个已声明 owner 里走声明轨的 {onDecl} 个（新路径全部关闭）");
             EmgSource src = EmgCatalog.FromTables();
             Func<string, (bool ok, float value)> tuning = src.Tuning;
             src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
@@ -206,7 +214,7 @@ namespace GameLogic.EditorTools
                 float none1 = Tnd(null);
                 var changed1 = gateOf.Where(kv => kv.Value <= 1 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => kv.Key)
                     .Where(fw => Math.Abs(Tnd(fw) - none1) > 1e-4f).ToList();
-                EmgCatalog.ResetForTests();
+                EmgCatalog.OverrideForTests(src0);
                 float none0 = Tnd(null);
                 var changed0 = gateOf.Where(kv => kv.Value <= 1 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => kv.Key)
                     .Where(fw => Math.Abs(Tnd(fw) - none0) > 1e-4f).ToList();

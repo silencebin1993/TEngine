@@ -346,10 +346,12 @@ namespace GameLogic.EditorTools
             gates.TryGetValue("FG-GAP-149", out string g149);
             // FG10-E2E-01：承接方修好并两次完整跑 PASS 后关闭（Closed 里写明 FG10-E2E-01）也算合格。
             // FG10-E2E-01 兜底（总控 2026-10-28 认可）：改承接 EMG1-E2E-01，门禁 EMG-1（FirstMilestoneOf 解析为 -1，同样晚于 M9）。
-            bool emgGate = g149 != null && FirstMilestoneOf(g149) < 0 && g149.Contains("EMG-1") && s149 != null && s149.Contains("改承接 EMG1-E2E-01");
-            bool m6rOpen = s149 != null && (!s149.StartsWith("Closed", StringComparison.Ordinal) || s149.Contains("FG10-E2E-01")) && g149 != null && (FirstMilestoneOf(g149) > 9 || emgGate)
+            // EMG1-E2E-01（2026-10-30）修好并两次完整跑 PASS 后关闭：Closed 里写明 EMG1-E2E-01 与两次 PASS 也算合格。
+            bool closedByEmg = s149 != null && s149.StartsWith("Closed", StringComparison.Ordinal) && s149.Contains("EMG1-E2E-01") && s149.Contains("两次");
+            bool emgGate = g149 != null && FirstMilestoneOf(g149) < 0 && g149.Contains("EMG-1") && s149 != null && (s149.Contains("改承接 EMG1-E2E-01") || closedByEmg);
+            bool m6rOpen = s149 != null && (!s149.StartsWith("Closed", StringComparison.Ordinal) || s149.Contains("FG10-E2E-01") || closedByEmg) && g149 != null && (FirstMilestoneOf(g149) > 9 || emgGate)
                            && text.Contains("FG10-E2E-01（FG-M10 出口回归前修 FGJ-M6R 编排");
-            Expect(m6rOpen, $"FGJ-M6R 未稳定通过：FG-GAP-149 已登记、状态不是 Closed（{s149?.Split('（')[0]}）、门禁 {g149} 晚于 M9、承接 FG10-E2E-01（兜底后改承接 EMG1-E2E-01）");
+            Expect(m6rOpen, $"FGJ-M6R：FG-GAP-149 已登记（{s149?.Split('（')[0]}）、门禁 {g149} 晚于 M9、承接 FG10-E2E-01（兜底后改承接 EMG1-E2E-01）；未关闭，或已由承接方写明两次完整跑 PASS 后关闭（{closedByEmg}）");
         }
 
         // ── D. 试玩包 ──────────────────────────────────────────────────────────────

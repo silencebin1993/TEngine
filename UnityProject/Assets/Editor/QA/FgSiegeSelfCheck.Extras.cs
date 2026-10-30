@@ -489,6 +489,8 @@ namespace GameLogic.EditorTools
                 long shots0 = SiegeService.GuardShots;
                 TransitGroupRecord rg = Arrive(s, at, "foundry", new[] { "foundry.armorbot" }, new[] { 3 });
                 StepUntil(() => SiegeService.GuardShots > shots0 + 2, 40);
+                // EMG1-E2E-01：emg.stage = 1 起默认装配（带寻的）发飞行弹体，开火当下还没命中——再走 1 秒让在飞的弹体落地，再数掉血的突袭者。
+                WorldSimulation.StepMany(GameClock.StepHz);
                 if (garrison && MachineRegistry.TryGetRecord(g, out MachineRecord mr) && Site.TryGetMachinePosition(g, out Vector2 mpos))
                 {
                     int nh = Site.FindNearestHostile(mpos, 60f);

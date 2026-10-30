@@ -143,7 +143,9 @@ namespace GameLogic.Campaign.Combat
                     continue;
                 }
                 EmgRuleFeed f = k.EmgRuleFeedAt(slot);
-                OnCountedReaction(site, state, rid, dc, f.Src, f.Target, new Vector2((float)f.Pos.x, (float)f.Pos.y), observed, now);
+                var at = new Vector2((float)f.Pos.x, (float)f.Pos.y);
+                OnCountedReaction(site, state, rid, dc, f.Src, f.Target, at, observed, now);
+                site.OnDeclCoreReaction(state, f.Src, rid, dc, at); // DEBT-EMG1CHAIN01-06：核心固件冷却 / 暴露 / 提示与旧轨一致
             }
 
             // EMG1-FW-01（FGR-EMG-233 第 6 条）：反应装甲块数只在变化的步进脏列表（O(本步变化数)）——己方机器降到 0 块发一次信息级通知（同车聚合、可定位）。

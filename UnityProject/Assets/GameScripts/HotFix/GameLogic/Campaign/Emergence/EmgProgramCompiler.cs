@@ -172,7 +172,10 @@ namespace GameLogic.Campaign.Emergence
         private static readonly HashSet<string> WarnedTuning = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>按预览编：接入固件取 <see cref="BlueprintCircuitPreview.UplinkFirmwareIds"/>，机器固件取 <see cref="BlueprintCircuitPreview.LocalFirmwareIds"/>（不读 FirmwareIds），载体取主组件。</summary>
-        public static EmgProgramResult Compile(BlueprintCircuitPreview p)
+        public static EmgProgramResult Compile(BlueprintCircuitPreview p) => Compile(p, null);
+
+        /// <param name="skipUplink">EMG1-E2E-01 修复轮（FGR-SIG-033 声明轨）：接入口里正在冷却的核心固件——不编进程序（冷却中这条反应不发动，固件照样插着）；null = 不跳过。</param>
+        public static EmgProgramResult Compile(BlueprintCircuitPreview p, ICollection<string> skipUplink)
         {
             if (p == null)
             {
@@ -180,7 +183,7 @@ namespace GameLogic.Campaign.Emergence
             }
             CarrierReadings.TryGetCarrier(p.PrimaryId, out FirmwareCarrier carrier); // 查不到时是射弹（与读法同一默认）
             bool lob = !CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) || comp.Flight != "yes" || comp.FlightLob != 0;
-            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob);
+            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink);
         }
 
         // ── EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：刷写变体——无人机 / 哨戒桩只持有程序的前 k 条（带宽截断、距离暂停）或剥离核心后的前 k 条 ──
@@ -514,7 +517,7 @@ namespace GameLogic.Campaign.Emergence
         /// <param name="rootCapacity">≤ 0 = 按公式 C0 = 机器固件槽数 + 接入口配额；自检可给别的值验证“配额变了公式不变”（FGR-EMG-039）。</param>
         /// <param name="lobAllowed">主组件可抛射（作战组件表 flightLob）；false 时 lob 动词不执行并给原因 <see cref="NoteLobStraight"/>（光束：曲射只留落点扬尘）。</param>
         public static EmgProgramResult Compile(IReadOnlyList<string> uplinkFirmwareIds, IReadOnlyList<string> localFirmwareIds, FirmwareCarrier carrier, int rootCapacity = 0,
-            bool lobAllowed = true)
+            bool lobAllowed = true, ICollection<string> skipUplink = null)
         {
             EmgCompiled c = EmgCatalog.Current;
             EnsureIndex(c);
@@ -525,8 +528,8 @@ namespace GameLogic.Campaign.Emergence
                 Carrier = (byte)carrier,
                 LobAllowed = lobAllowed,
             };
-            AddSlots(r, c, uplinkFirmwareIds, true);
-            AddSlots(r, c, localFirmwareIds, false);
+            AddSlots(r, c, uplinkFirmwareIds, true, skipUplink);
+            AddSlots(r, c, localFirmwareIds, false, null);
             if (r.IsEmpty)
             {
                 return r; // 全空程序：武器照常基础攻击，不登记程序（Program = −1）
@@ -546,12 +549,12 @@ namespace GameLogic.Campaign.Emergence
 
         // ── 1. 指令序列 ──
 
-        private static void AddSlots(EmgProgramResult r, EmgCompiled c, IReadOnlyList<string> ids, bool fromUplink)
+        private static void AddSlots(EmgProgramResult r, EmgCompiled c, IReadOnlyList<string> ids, bool fromUplink, ICollection<string> skip)
         {
             for (int i = 0; ids != null && i < ids.Count; i++)
             {
                 string id = ids[i];
-                if (string.IsNullOrEmpty(id))
+                if (string.IsNullOrEmpty(id) || (skip != null && skip.Contains(id)))
                 {
                     continue;
                 }

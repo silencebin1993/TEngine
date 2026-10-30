@@ -680,6 +680,18 @@ namespace GameLogic.Campaign.Regions
             CombatTargetRecord target = HomeValleyCombatTargets.TryFindTargetInAim(state, origin, aimDir);
             if (target == null)
             {
+                // EMG1-E2E-01：点在敌方内核单位上（家园世界里的据点驻军 / 突袭者，没有训练靶记录）时按该单位开火——与远征地点直控同一内核规则
+                // （CombatKernel.FireAt：射程、冷却、过热、接入程序）；此前家园直控只认训练靶，接入后打不了身边的敌人。
+                int unit = _combat != null ? _combat.FindNearestHostile(new Vector2(worldPoint.x, worldPoint.z), DirectPickRadius) : 0;
+                if (unit > 0)
+                {
+                    bool fired = _combat.TryFireAtUnit(_possessed.LogicId, unit, out CombatFireResult res, out string why);
+                    if (!fired)
+                    {
+                        Log.Info($"[HomeValleyController] 直控攻击敌方单位 {unit} 没开火：{why}");
+                    }
+                    return;
+                }
                 Log.Info("[HomeValleyController] 直控攻击：瞄准方向/射程内没有可命中的低威胁残骸靶。");
                 return;
             }
@@ -691,6 +703,9 @@ namespace GameLogic.Campaign.Regions
         /// FG0-ARCH-03：逐机器的射程 / 间隔判定在家园战斗内核（AutoEngage 行为，每步 O(机器数) 在 AOT）；命中结算仍走
         /// <see cref="HomeValleyCombatTargets.TryAttack"/>（<c>isAiSource: true</c>，经 HomeValleyCombatRules.OnEngageRequest），与玩家直控同一出口。</summary>
         public const float AiEngageIntervalSeconds = 5f;
+
+        /// <summary>EMG1-E2E-01：直控左键点地面时，离点击点多近的敌方单位算“点中了”（格）。</summary>
+        public const float DirectPickRadius = 2.5f;
 
         public int? SelectedMachineLogicId => _selected != null ? _selected.LogicId : (int?)null;
 

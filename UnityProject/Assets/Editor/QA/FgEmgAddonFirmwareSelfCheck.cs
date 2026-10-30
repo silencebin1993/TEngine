@@ -275,6 +275,13 @@ namespace GameLogic.EditorTools
                 bool wet = water.Zones.Any(z => (z.Mask & (1u << 2)) != 0 && math.distance(z.Pos, new double2(3.0, 0.3)) < 1.0);
                 Expect(wet && !dry.Zones.Any(z => (z.Mask & (1u << 2)) != 0),
                     $"水箱外排：命中主目标处落浸湿位驻留区（{water.Zones.Count} 块）；不装时没有（{dry.Zones.Count} 块）");
+                // FGT-EMG-014 阶段 1（EMG1-E2E-01 行为复核）：[腐蚀弹头, 酸液] 编译成两行（命中排酸 / 终结排酸，FgEmgProgramSelfCheck C）；运行时腐蚀弹头在阶段 1 走过渡读法
+                // （FG19A 第 9 行“1（过渡）→ 2”：命中再爆一圈 + 腐蚀，不排酸），命中排酸随阶段 2 斑块层落地（DEBT-EMG1E2E01-02）。阶段 1 断言：终结排酸照常、不被同装的腐蚀弹头吞掉。
+                AddonObs both = RunAddonCondition("comp_gun", new[] { "fw_corrode", "fw_acid" }, AddonCond.Pierce, 3f);
+                AddonObs corrode = RunAddonCondition("comp_gun", new[] { "fw_corrode" }, AddonCond.Pierce, 3f);
+                AddonObs acid = RunAddonCondition("comp_gun", new[] { "fw_acid" }, AddonCond.Pierce, 3f);
+                Expect(acid.Zones.Count > dry.Zones.Count && both.Zones.Count >= acid.Zones.Count && corrode.Zones.Count == dry.Zones.Count,
+                    $"[腐蚀弹头, 酸液]（阶段 1）：终结排酸照常生效、同装不被吞（只装酸液 {acid.Zones.Count} 块、同装 {both.Zones.Count} 块）；腐蚀弹头走过渡读法不排酸（只装 {corrode.Zones.Count} 块 = 不装 {dry.Zones.Count} 块，命中排酸随阶段 2）");
                 // emg.stage = 0：声明不生效、程序为空、没有旧读法 → 与不装逐字相同（也拿不到，见 C 段）
                 UseStage(0);
                 AddonObs off = RunAddonCondition("comp_gun", new[] { "fw_coolback" }, AddonCond.Heat, 14f);

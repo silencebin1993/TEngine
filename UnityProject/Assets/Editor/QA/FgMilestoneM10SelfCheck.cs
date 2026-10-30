@@ -331,9 +331,12 @@ namespace GameLogic.EditorTools
                     : $"FG-M10 出口前还开着：[{string.Join("、", openRows)}]");
             // FG-GAP-149（FGJ-M6R 编排）：总控 2026-10-28 预先认可的兜底——同一根因（FG-GAP-168 突袭结算少记撤离阶段阵亡的机器）两轮不过，改承接 EMG1-E2E-01（门禁 EMG-1，晚于 M10），待用户复核。
             bool g149 = status.TryGetValue("FG-GAP-149", out string s149) && gates.TryGetValue("FG-GAP-149", out string gate149)
-                        && FirstMilestoneOf(gate149) < 0 && gate149.Contains("EMG-1") && s149.Contains("改承接 EMG1-E2E-01") && s149.Contains("总控已认可") && s149.Contains("待用户复核")
+                        && FirstMilestoneOf(gate149) < 0 && gate149.Contains("EMG-1")
+                        && ((s149.Contains("改承接 EMG1-E2E-01") && s149.Contains("总控已认可") && s149.Contains("待用户复核"))
+                            // EMG1-E2E-01（2026-10-30）修好后关闭：Closed 里写明承接方与两次完整跑 PASS 也算合格。
+                            || (s149.StartsWith("Closed", StringComparison.Ordinal) && s149.Contains("EMG1-E2E-01") && s149.Contains("两次")))
                         && status.ContainsKey("FG-GAP-168") && gates.TryGetValue("FG-GAP-168", out string gate168) && gate168.Contains("EMG-1");
-            Expect(g149, "FG-GAP-149 已登记、门禁晚于 M10：改承接 EMG1-E2E-01（门禁 EMG-1，总控已认可、待用户复核），根因 FG-GAP-168 同门禁登记");
+            Expect(g149, "FG-GAP-149 已登记、门禁晚于 M10：改承接 EMG1-E2E-01（门禁 EMG-1，总控已认可、待用户复核），或已由 EMG1-E2E-01 两次完整跑 PASS 后关闭；根因 FG-GAP-168 同门禁登记");
             List<string> notClosed = ClosedHere.Where(id => !status.TryGetValue(id, out string v) || !v.StartsWith("Closed", StringComparison.Ordinal)).ToList();
             List<string> unregistered = MineRegistered.Where(id => !status.ContainsKey(id)).ToList();
             bool pending = status.TryGetValue("DEBT-FG10E2E01-06", out string p) && p.Contains("待用户");

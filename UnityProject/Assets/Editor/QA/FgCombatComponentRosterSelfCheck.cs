@@ -414,6 +414,14 @@ namespace GameLogic.EditorTools
 
         private static void CheckSpikes()
         {
+            // EMG1-E2E-01：本段是旧轨“尖刺外装”被动反伤（不限次数、反伤弹字进给）的回归；正式表 emg.stage = 1 起同一部件按爆炸反应装甲结算
+            // （块数、破片、evt.hit，FGR-EMG-233，FgReadingMatrixSelfCheck 的 EMG1-FW-01 段验），这里显式注入 0 跑旧轨（回滚开关），段尾还原。
+            FgEmgProgramSelfCheck.UseStage0Catalog();
+            try { CheckSpikesLegacy(); } finally { GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests(); }
+        }
+
+        private static void CheckSpikesLegacy()
+        {
             Line("  · F. 尖刺外装（被动反伤）：近身即时攻击 → 攻击者吃 4 + 这一击 × 0.5（直接开火与敌人驻守开火两条路径）；远程不反伤；没装不反伤；反伤不连锁；弹字进给");
             CarrierReadings.TryGetComponent(ComponentCatalog.FuncSpikesId, out CombatComponent sp);
             float expect = sp.Damage + 10f * sp.Thorns;
@@ -671,7 +679,7 @@ namespace GameLogic.EditorTools
                     k.FireAt(me, t, k.Time);
                 }
                 Run(k, 0.5f);
-                long f0 = k.ReadingFeedCountOf(CombatConst.ReadingFeedThorns);
+                long f0 = k.ReadingFeedCountOf(CombatConst.ReadingFeedThorns) + k.ReadingFeedCountOf(CombatConst.ReadingFeedEra); // EMG1-E2E-01：stage 1 起按爆炸反应装甲起爆计（ReadingFeedEra）
                 var sw = Stopwatch.StartNew();
                 const int n = 240;
                 for (int i = 0; i < n; i++)
@@ -679,7 +687,7 @@ namespace GameLogic.EditorTools
                     k.Step(Dt, k.Time + Dt);
                 }
                 sw.Stop();
-                reflected = k.ReadingFeedCountOf(CombatConst.ReadingFeedThorns) - f0;
+                reflected = k.ReadingFeedCountOf(CombatConst.ReadingFeedThorns) + k.ReadingFeedCountOf(CombatConst.ReadingFeedEra) - f0;
                 return sw.Elapsed.TotalMilliseconds / n;
             }
             double with = Measure(true, out long refl);

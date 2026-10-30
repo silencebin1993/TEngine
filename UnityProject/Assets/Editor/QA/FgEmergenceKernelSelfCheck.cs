@@ -68,6 +68,7 @@ namespace GameLogic.EditorTools
                 GridContent.Reload();
                 EmgCatalog.ResetForTests();
                 Step(CheckLayout);
+                Step(CheckFullPoolStep);
                 Step(CheckGolden);
                 Step(CheckRoundTrip);
                 Step(CheckOldFormats);
@@ -185,6 +186,49 @@ namespace GameLogic.EditorTools
             int kinds = Enum.GetValues(typeof(EmgEventKind)).Length - 1;
             Expect(bad.Count == 0 && evtPorts == EmgConst.EventKinds && kinds == EmgConst.EventKinds,
                 $"内核事件枚举 {kinds} 条 = 端口表 evt.* {evtPorts} 条，码 = 端口码 − 300 逐条对上（FGR-EMG-060）{(bad.Count > 0 ? "；不符：" + string.Join("、", bad) : string.Empty)}");
+        }
+
+        // ── A2. 满池步进耗时（DEBT-EMG1KRN01-03，阶段 1 出口按 FGR-EMG-200 复核）──────────────────
+        // 性能只测一次：超预算不到 2 倍记性能警告，超 2 倍判失败（用户 2026-09-30 口径）。
+
+        private static void CheckFullPoolStep()
+        {
+            Line("  · A2. 满池步进（DEBT-EMG1KRN01-03）：256 座弹体炮塔把弹体池打满 4096 发，测满池时每步耗时（FGR-EMG-200：3x 倍速每世界步 ≤ 1.5 ms）");
+            using var k = new CombatKernel(CombatConfig.Default, 512);
+            int tw = k.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Projectile, HasOutput = 1, TargetMode = CombatTargetMode.Nearest, Range = 120f, Damage = 0.01f, Cooldown = 0.05f, ProjectileSpeed = 4f, ProjectileRadius = 0.2f });
+            for (int i = 0; i < 256; i++)
+            {
+                SpawnTurret(k, new double2(-64 + (i % 32) * 4, -(i / 32) * 4), tw);
+            }
+            for (int i = 0; i < 8; i++)
+            {
+                var p = new double2(-28 + 8 * i, 60);
+                k.Spawn(new CombatSpawn { ExtKey = -1, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.HoldFire, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable, Position = p, Home = p, Radius = 0.6f, Health = 1e9f, MaxHealth = 1e9f, Weapon = -1, BehaviorProfile = -1, Priority = 1 });
+            }
+            int cap = CombatConfig.Default.ProjectileCapacity;
+            for (int s = 0; s < 600 && k.ProjectileCount < cap; s++)
+            {
+                StepN(k, 1);
+            }
+            int full = k.ProjectileCount;
+            var sw = new System.Diagnostics.Stopwatch();
+            var ms = new List<double>(120);
+            for (int s = 0; s < 120; s++)
+            {
+                sw.Restart();
+                StepN(k, 1);
+                sw.Stop();
+                ms.Add(sw.Elapsed.TotalMilliseconds);
+            }
+            ms.Sort();
+            double avg = ms.Average(), p99 = ms[(int)(ms.Count * 0.99)];
+            const double budget = 1.5;
+            if (avg > budget)
+            {
+                Line($"    · 性能警告：满池每步平均 {avg:F3} ms 超 FGR-EMG-200 预算 {budget} ms（{avg / budget:F2} 倍，不到 2 倍不判失败）");
+            }
+            Expect(full >= cap - 64 && k.ProjectileCount >= cap - 256 && avg <= budget * 2,
+                $"弹体池填到 {full} / {cap} 发（测量期间 {k.ProjectileCount}）；满池每步平均 {avg:F3} ms、p99 {p99:F3} ms（预算 {budget} ms，超 2 倍才判失败）");
         }
 
         // ── B. 程序表为空时逐字不变 ─────────────────────────────────────────────

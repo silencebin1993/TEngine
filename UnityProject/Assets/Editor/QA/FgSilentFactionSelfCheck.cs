@@ -833,11 +833,18 @@ namespace GameLogic.EditorTools
             float coreHp = coreRec.Health;
             site.Combat.TryGetMachineUnit(m[0], out int su);
             int coreUnit = core;
+            long refl0 = site.Combat.Kernel.Counters.ShotsReflected;
             CombatFireResult fr = site.Combat.Kernel.FireAt(su, coreUnit, site.Combat.Kernel.Time);
             site.Combat.ProcessEvents();
-            bool reflected = fr == CombatFireResult.Ok && Math.Abs(coreRec.Health - coreHp) < 1e-3f && Rec(m[0]).Health < shooterHp;
+            // EMG1-E2E-01：emg.stage = 1 起装了需要飞行的固件（寻的等）的机器武器发飞行弹体（LANDING #8），弹体飞进偏折场才掉头——等它飞回来（至多 3 秒、场仍展开）。
+            bool fired = fr == CombatFireResult.Ok || fr == CombatFireResult.Launched; // 飞行弹体开火报“已发射”
+            for (int i = 0; i < GameClock.StepHz * 3 && fired && Rec(m[0]).Health >= shooterHp; i++)
+            {
+                WorldSimulation.StepMany(1);
+            }
+            bool reflected = fired && site.Combat.Kernel.Counters.ShotsReflected > refl0 && Math.Abs(coreRec.Health - coreHp) < 1e-3f && Rec(m[0]).Health < shooterHp;
             Expect(warnAt > 0 && warn >= 1.5 - 1e-6 && reflected,
-                $"C5 阶段二·磁暴（FGT-FAC-009 实测）：全场偏折场预警 {warn:0.00} 秒（规格 1.5；{warnDiag}）后展开；展开时机器的射弹被反弹（主脑 {coreHp:0}→{coreRec.Health:0} 不掉，开火的机器 {shooterHp:0}→{Rec(m[0]).Health:0}）");
+                $"C5 阶段二·磁暴（FGT-FAC-009 实测）：全场偏折场预警 {warn:0.00} 秒（规格 1.5；{warnDiag}）后展开；展开时机器的射弹被反弹（主脑 {coreHp:0}→{coreRec.Health:0} 不掉，开火的机器 {shooterHp:0}→{Rec(m[0]).Health:0}）" + (reflected ? string.Empty : $"（诊断：开火 {fr}、反弹 {site.Combat.Kernel.Counters.ShotsReflected - refl0}、弹体发射 {site.Combat.Kernel.Counters.ProjectilesSpawned}、命中 {site.Combat.Kernel.Counters.ProjectilesHit}、到期 {site.Combat.Kernel.Counters.ProjectilesExpired}、偏折场 {site.Combat.Kernel.ActiveDeflectCount}）"));
 
             // 打到阈值 → 全频静默预警（情报提前警告：字幕 + 通知 + HUD 倒计时）→ 静默 20 秒。
             int warnNotes0 = NotifyCount("silent_boss");

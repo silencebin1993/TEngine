@@ -125,6 +125,7 @@ namespace GameLogic.EditorTools
                 Step(CheckData);
                 Step(CheckBuildingAndDefaults);
                 Step(CheckFreeAndKernel);
+                Step(CheckProgramIndex);
                 Step(CheckLateStart);
                 Step(CheckStaysInRange);
                 Step(CheckDisplacersStayInRange);
@@ -483,6 +484,43 @@ namespace GameLogic.EditorTools
             Expect(inKernel && isolated && fought && sameWeapon,
                 $"C2 投影只在靶场自己的战斗内核里（{k?.CountAlive(CombatFaction.Player)} 个己方投影、{(k != null ? AliveOf(k, CombatFaction.Hostile) : 0)} 个投影靶；不登记进战斗地点表 {CombatSites.Count == sitesBefore}、不进机器名册；"
                 + $"家园内核开火 / 伤害不变 {home.Kernel.Counters.ShotsFired == homeShots0}）；内核真打：伤害 {live?.Damage:F1}、发数 {live?.Shots}；重炮投影的武器参数与家园里同一张蓝图的真机器逐字节相同（{weaponNote}，{sameWeapon}）——开火、命中、反应都走 Main/Sim 同一个战斗内核，不另起模拟");
+        }
+
+        /// <summary>
+        /// EMG1-PRG-01 审查补记（EMG1-E2E-01 验收）：试射与实战同一份程序（IC-REQ-010）——投影武器的程序下标指向靶场内核里与家园真机器同一份程序（完整字节相同：
+        /// 把真机器的编译结果再登记进靶场内核得到同一个下标、程序表不增行）；下标各自只对本内核有效。
+        /// </summary>
+        private static void CheckProgramIndex()
+        {
+            CampaignState s = NewWorld(9330, out BuildingRecord range);
+            if (range == null)
+            {
+                return;
+            }
+            RangeOpResult p = TestRangeService.ProjectBlueprint(s, range.BuildingId, BpWet);
+            Seconds(1f);
+            CombatSite site = TestRangeService.SiteOf(range.BuildingId);
+            CombatKernel k = site?.Kernel;
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            MachineOpResult real = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, BpWet, HomeValleyLayout.RegionId, HomeValleyLayout.Core.Position + new Vector2(3f, 3f), 200f, 200f, "Player", 1);
+            MachineLoadoutRegistry.Register(s, real.LogicId, BpWet, 1);
+            WorldSimulation.StepMany(3);
+            bool ok = false;
+            string note = "没找到";
+            if (p.Success && k != null && real.Success && home.TryGetMachineWeapon(real.LogicId, out MachineWeaponInfo info) && home.Kernel.TryGetWeapon(info.WeaponIndex, out CombatWeapon rw)
+                && info.Program != null && !info.Program.IsEmpty)
+            {
+                RangeProjectionView view = TestRangeService.ProjectionsOf(range.BuildingId).First(v => v.Label == BpWet);
+                k.TryGetUnit(view.UnitId, out CombatUnitView pv);
+                if (k.TryGetWeapon(pv.Weapon, out CombatWeapon pw))
+                {
+                    int rows = k.ProgramCount;
+                    int same = CombatSite.RegisterProgram(k, info.Program);
+                    ok = pw.Program >= 0 && same == pw.Program && k.ProgramCount == rows && rw.Program == CombatSite.RegisterProgram(home.Kernel, info.Program);
+                    note = $"投影程序 {pw.Program}、真机器的程序登记进靶场内核得 {same}（程序表 {rows} → {k.ProgramCount} 行）；家园内核里真机器程序 {rw.Program}";
+                }
+            }
+            Expect(ok, $"C2b 试射与实战同一份程序：{note}");
         }
 
         /// <summary>冒烟抓到的回归：游戏已经过了很久（远超最长测试时长）时开始测试，时长从开始算，不会一开始就“到时”结束。</summary>
@@ -1058,6 +1096,14 @@ namespace GameLogic.EditorTools
         /// <summary>I4 FG-GAP-061：反应打出致命一击的那一步，日志目标仍写“投影靶·…”（名字不在阵亡事件里清掉）。
         /// 靶子血压到很低，让反应频繁收尾；旁听同一地点的阵亡事件，按（单位 ID, 刻）对上日志条目。</summary>
         private static void CheckReactionKillLabel()
+        {
+            // EMG1-E2E-01：本段验“反应收尾击杀”的日志目标写“投影靶·…”（标签走 ReactionFeedback.Party，两轨同一函数）。正式表 emg.stage = 1 下
+            // 电弧走声明轨、打靶改飞行弹体后，击毁那一步与反应记账的对齐口径变了（全量诊断：82 次击毁、0 条同步），登记 FG-GAP-181 复核；这里显式注入 0 跑旧轨。
+            FgEmgProgramSelfCheck.UseStage0Catalog();
+            try { CheckReactionKillLabelCore(); } finally { GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests(); }
+        }
+
+        private static void CheckReactionKillLabelCore()
         {
             CampaignState s = NewWorld(9319, out BuildingRecord range);
             if (range == null)

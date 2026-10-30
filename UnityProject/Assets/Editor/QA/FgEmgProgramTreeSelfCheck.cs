@@ -364,7 +364,7 @@ namespace GameLogic.EditorTools
                    && view.Rows(ProgramTreeView.ColumnUplinked).Count == 0,
                 $"没有固件的连射器：“{empty[0].Text}”；没有接入口时不显示接入栏");
 
-            EmgCatalog.ResetForTests(); // 正式表 emg.stage = 0：全部固件走旧读法
+            FgEmgProgramSelfCheck.UseStage0Catalog(); // EMG1-E2E-01：正式表已是 1，旧读法对照显式注入 emg.stage = 0（回滚开关）
             List<EmgTreeRow> legacy = Rows(EmgProgramCompiler.Compile(BlueprintCircuitCompiler.CompilePreview(FgEmgProgramSelfCheck.GunBoard(false, Split))));
             FgEmgProgramSelfCheck.UseStage1Catalog();
             Expect(legacy.Count == 2 && legacy[0].Kind == EmgTreeRowKind.Empty && legacy[1].Kind == EmgTreeRowKind.Legacy && legacy[1].Text.Contains(FirmwareKinds.DisplayName(Split)),

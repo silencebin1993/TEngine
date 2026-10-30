@@ -393,6 +393,24 @@ namespace GameLogic.Campaign.Signal
         }
 
         /// <summary>
+        /// EMG1-E2E-01 修复轮（FGR-SIG-033 声明轨）：这份接入口固件里正在冷却的核心固件（冷却属于信号）。声明轨上核心固件的反应由武器程序执行，
+        /// 编程序时把它们去掉 = 冷却中这条反应不发动（固件照样插着、形变不闪）。没有时返回 null。O(接入口槽数)。
+        /// </summary>
+        public static HashSet<string> CoolingUplinkCores(CampaignState s, IReadOnlyList<string> uplinkFirmwareIds)
+        {
+            HashSet<string> set = null;
+            for (int i = 0; s != null && uplinkFirmwareIds != null && i < uplinkFirmwareIds.Count; i++)
+            {
+                string fw = uplinkFirmwareIds[i];
+                if (!string.IsNullOrEmpty(fw) && FirmwareKinds.IsCore(fw) && CooldownRemaining(s, fw) > 0)
+                {
+                    (set ??= new HashSet<string>(StringComparer.Ordinal)).Add(fw);
+                }
+            }
+            return set;
+        }
+
+        /// <summary>
         /// 战斗内核翻译武器参数时问：这条反应是不是“信号带进来的、有冷却的核心固件”发动的（<paramref name="uplinkFirmwareIds"/> = 接入口里生效的固件）。
         /// 是 → 内核单位带 <c>CombatUnitFlags.ReactionGated</c>：反应一发动就当场压住，直到这里按信号上的冷却重新下发参数。
         /// 与 <see cref="OnReactionFired(CampaignState,int,string,bool)"/> 的结算条件一致（核心、插在接入口里、冷却 &gt; 0）。

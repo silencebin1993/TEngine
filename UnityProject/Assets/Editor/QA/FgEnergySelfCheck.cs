@@ -1452,6 +1452,8 @@ namespace GameLogic.EditorTools
             float cap = HomeValleyLayout.BatteryCapacity.TryGetValue(HomeValleyLayout.Erc003ChassisId, out float c) ? c : 100f;
             rec.Battery = cap * 0.5f;
             int before = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == spawn.LogicId);
+            CombatCounters cc0 = WorldSimulation.Home?.Combat?.Kernel?.Counters ?? default;
+            int tries0 = HomeValleyCombatTargets.AttemptCount(spawn.LogicId);
             float last = rec.Battery;
             bool neverDown = true;
             for (int i = 0; i < 40; i++)
@@ -1461,6 +1463,9 @@ namespace GameLogic.EditorTools
                 last = rec.Battery;
             }
             int attacks = HomeValleyCombatTargets.RecentEvents.Count(e => e.IsAiSource && e.AttackerLogicId == spawn.LogicId) - before;
+            CombatCounters cc1 = WorldSimulation.Home?.Combat?.Kernel?.Counters ?? default;
+            string diag = $"（诊断：尝试 {HomeValleyCombatTargets.AttemptCount(spawn.LogicId) - tries0}、开火 {cc1.ShotsFired - cc0.ShotsFired}、弹体发射 {cc1.ProjectilesSpawned - cc0.ProjectilesSpawned}、" +
+                          $"命中 {cc1.ProjectilesHit - cc0.ProjectilesHit}、到期 {cc1.ProjectilesExpired - cc0.ProjectilesExpired}；最近一条 {HomeValleyCombatTargets.RecentEvents.LastOrDefault().Summarize()}）";
             MachineCombatResolution res = MachineLoadoutRegistry.ResolveForAi(s, spawn.LogicId, s.RandomSeed);
             float homingHeat = FirmwareKinds.HeatOf("fw_homing");
             float shot = -1f;
@@ -1490,7 +1495,7 @@ namespace GameLogic.EditorTools
             Expect(board.FirmwareSlots.Contains("fw_homing") && attacks >= 2 && neverDown && homingHeat > 0f && FirmwareKinds.PowerOf("fw_homing") > 0
                    && Mathf.Approximately(perShot, homingHeat) && Mathf.Approximately(shot, homingHeat),
                 $"F11 开火不扣电池（DEBT-FG2FW01-02 范围变更）：装寻的（能耗 {FirmwareKinds.PowerOf("fw_homing")} 只在数据层、每发积热 {homingHeat}）的连射器在家园对训练靶自动出手 {attacks} 次，" +
-                $"20 游戏秒里电池从不减少（{cap * 0.5f:0.#} → {rec.Battery:0.#}）；同一装配翻译成的内核武器每发积热 {perShot}，真实内核开一发积热 {shot}（逐发代价只有热量）");
+                $"20 游戏秒里电池从不减少（{cap * 0.5f:0.#} → {rec.Battery:0.#}）；同一装配翻译成的内核武器每发积热 {perShot}，真实内核开一发积热 {shot}（逐发代价只有热量）" + (attacks >= 2 ? string.Empty : diag));
         }
 
         // ── F12 建造菜单真实放置 ─────────────────────────────────────────────────────

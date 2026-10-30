@@ -1,3 +1,4 @@
+using GameLogic.Campaign.Emergence;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -517,7 +518,11 @@ namespace GameLogic.EditorTools
 
         private static void CheckKernelMassDeath()
         {
-            using CombatKernel k = NewKernel();
+            // EMG1-E2E-01：本段验事件队列上限与墓碑压实。emg.stage = 1 起实体层打开，前排阵亡留下的残骸会挡住同一步后排炮塔的即时射击
+            // （残骸掩体，FgEmgEntitySelfCheck 另验），不是本段要测的；这里关实体层，让 200 座炮塔照旧同一步打死 200 个。
+            CombatConfig noWreck = CombatSite.ConfigFromTuning();
+            noWreck.EmgEntity = 0;
+            using CombatKernel k = new CombatKernel(noWreck, 64);
             int w = k.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, Range = 80f, Damage = 1000f, Cooldown = 5f });
             var enemies = new List<int>();
             for (int i = 0; i < 200; i++)
@@ -545,7 +550,7 @@ namespace GameLogic.EditorTools
             Tally(first, n1, kills, ref damaged);
             steps++;
             byte[] snap = k.Serialize();
-            using var reloaded = NewKernel();
+            using var reloaded = new CombatKernel(noWreck, 64);
             CombatLoadResult lr = reloaded.Load(snap);
             int pendingAfterLoad = reloaded.GameplayPending;
             while (reloaded.GameplayPending > 0 && steps < 100)
@@ -564,7 +569,7 @@ namespace GameLogic.EditorTools
                 $"阵亡事件恰好 {kills.Count} 个不重不漏");
 
             // 匿名单位（突袭规模）阵亡即移除：墓碑达到一半时步首压实，存活单位 ID 不变、相对顺序不变，渲染缓冲同步。
-            using CombatKernel k2 = NewKernel();
+            using CombatKernel k2 = new CombatKernel(noWreck, 64);
             int w2 = k2.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, Range = 80f, Damage = 1000f, Cooldown = 5f });
             var raiders = new List<int>();
             for (int i = 0; i < 200; i++)
@@ -1131,6 +1136,14 @@ namespace GameLogic.EditorTools
         }
 
         private static void CheckDemoMarkJump()
+        {
+            // EMG1-E2E-01：本段是 Demo 旧装配反应（伤害 × MarkJumpDamageFalloff）的回归——正式表 emg.stage = 1 起 fw_marktag 走声明轨（跳转伤害按声明幅度，
+            // FgEmgChainSelfCheck / FgCoreFirmwareBoundarySelfCheck C2 验），这里显式注入 0 跑旧轨（回滚开关），段尾还原。
+            FgEmgProgramSelfCheck.UseStage0Catalog();
+            try { CheckDemoMarkJumpCore(); } finally { EmgCatalog.ResetForTests(); }
+        }
+
+        private static void CheckDemoMarkJumpCore()
         {
             CampaignState s = NewCampaign(7104);
             MakeBlueprints(s);

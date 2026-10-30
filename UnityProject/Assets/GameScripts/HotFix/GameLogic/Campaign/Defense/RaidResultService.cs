@@ -62,6 +62,7 @@ namespace GameLogic.Campaign.Defense
         public static float DropEliteMult => Math.Max(1f, Tuning("raid.result.drop_elite_mult", 2f));
         public static int TimelineMax => Math.Max(4, (int)Math.Round(Tuning("raid.result.timeline_max", 24f)));
         public static int LossesMax => Math.Max(1, (int)Math.Round(Tuning("raid.result.losses_max", 32f)));
+        public static float AftermathSeconds => Math.Max(0f, Tuning("raid.result.aftermath_seconds", 60f));
         public static int ContribMax => Math.Max(1, (int)Math.Round(Tuning("raid.result.contrib_max", 24f)));
         public static int ContribTop => Math.Max(1, (int)Math.Round(Tuning("raid.result.contrib_top", 3f)));
         public static float RouteSeconds => Math.Max(0.5f, Tuning("raid.result.route_seconds", 10f));
@@ -239,18 +240,19 @@ namespace GameLogic.Campaign.Defense
             return null;
         }
 
-        /// <summary>最新一份已结算的（通知点开 / 面板默认）。</summary>
+        /// <summary>最新一份已结算的（通知点开 / 面板默认；余波归属）：按结算时刻 EndTick 取最晚的——两波并发、后展开的先结束时不能取成展开顺序最后的那份（同刻取后展开的）。</summary>
         public static RaidResultRecord LatestEnded(CampaignState s)
         {
             IReadOnlyList<RaidResultRecord> all = All(s);
-            for (int i = all.Count - 1; i >= 0; i--)
+            RaidResultRecord best = null;
+            for (int i = 0; i < all.Count; i++)
             {
-                if (all[i] != null && all[i].EndTick >= 0)
+                if (all[i] != null && all[i].EndTick >= 0 && (best == null || all[i].EndTick >= best.EndTick))
                 {
-                    return all[i];
+                    best = all[i];
                 }
             }
-            return null;
+            return best;
         }
 
         /// <summary>与时间段 [<paramref name="from"/>, <paramref name="to"/>]（to &lt; 0 = 到现在）有重叠的结算（离家报告读），按展开先后。</summary>
@@ -840,9 +842,16 @@ namespace GameLogic.Campaign.Defense
                 return;
             }
             RaidResultRecord r = PrimaryOpen(s);
+            bool aftermath = false;
             if (r == null)
             {
-                return;
+                // FG-GAP-168：一波刚结算（敌人全灭 / 撤走）后，残留的弹体、场地物还会打死东西——这段余波里的损失仍记进刚结束的那一波，不让结算少记。
+                r = LatestEnded(s);
+                if (r == null || r.Outcome == OutcomeCoreLost || GameClock.Ticks - r.EndTick > GameClock.TicksFor(AftermathSeconds))
+                {
+                    return;
+                }
+                aftermath = true;
             }
             switch (kind)
             {
@@ -868,6 +877,10 @@ namespace GameLogic.Campaign.Defense
                     new RaidLossRecord { Tick = GameClock.Ticks, Kind = kind ?? string.Empty, Id = id ?? string.Empty, Name = name, X = at.x, Y = at.y },
                 };
                 r.Losses = list.ToArray();
+            }
+            if (aftermath)
+            {
+                TEngine.Log.Info($"[RaidResultService] 突袭结算 #{r.Serial} 余波损失：{KindText(kind)} {name}（结算后 {GameClock.Ticks - r.EndTick} 步），合计 {LossTotal(r)}");
             }
             Revision++;
         }

@@ -33,6 +33,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM9FrontJourney.Id, FgjM9FrontJourney.Build }, // FG9-ACT1-01：M9 前半段（正式节奏：第一次远征归来 → 基础传送带开放）
             { FgjM9Journey.Id, FgjM9Journey.Build }, // FG9-E2E-01：M9 出口旅程（第一幕全流程，加速版：打到击败铸造主核心）
             { FgjM10Journey.Id, FgjM10Journey.Build }, // FG10-E2E-01：M10 出口旅程（防腐涂层 → 沉淀湖 → 爆燃 → 洗礼塔 → 化工突袭与重新净化）
+            { FgjEmg1Journey.Id, FgjEmg1Journey.Build }, // EMG1-E2E-01：FG-EMG 阶段 1 出口旅程（[分裂, 漏油] → 延时引信接入 → 空爆 → 因果链 → 离开 → 存读档）
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;

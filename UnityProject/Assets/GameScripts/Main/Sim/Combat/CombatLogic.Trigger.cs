@@ -1044,6 +1044,7 @@ namespace BinGames.Sim.Combat
                 Radius = wp.ProjectileRadius, Life = life, Faction = faction, Flags = flags,
                 IgnoreUnit = (flags & EmgProjFlags.Heal) != 0 ? ownerId : 0, // EMG1-FW-01：治疗根弹体（维修束）不碰出手者自己（出膛点贴着它的半径）
             };
+            pr.HomingTarget = targetId; // EMG1-E2E-01：记下开火目标（没有寻的修饰时只用于“目标所在的障碍圆不挡”，不转向）
             EmgInitFlight(ref d, ref pr, to, targetId, true); // EMG1-GRM-01：根节点的弹道修饰写进弹体（没有修饰时不改任何字段）
             d.Projectiles.Add(pr);
             CombatCounters c = d.Counters[0];
@@ -1211,7 +1212,8 @@ namespace BinGames.Sim.Combat
 
         /// <summary>线段 a→b 与某种圆（障碍 / 有耐久的残骸）的最早交点：返回圆在原表里的下标（没有 −1），<paramref name="tHit"/> ∈ [0, 1]。
         /// <paramref name="skipEnds"/>：线段起点或终点已在圆内的不算（站在残骸上的单位不算躲在它后面）。O(线段外接框覆盖的格 × 格内圆)。</summary>
-        private static int EmgHashSegment(ref CombatData d, double2 a, double2 b, byte kind, bool skipEnds, out double tHit, bool skipStart = false)
+        private static int EmgHashSegment(ref CombatData d, double2 a, double2 b, byte kind, bool skipEnds, out double tHit, bool skipStart = false,
+            bool skipAround = false, double2 around = default)
         {
             tHit = 2.0;
             EmgHashEnsure(ref d);
@@ -1247,6 +1249,10 @@ namespace BinGames.Sim.Combat
                         if ((skipEnds || skipStart) && (math.lengthsq(a - center) <= r2 || (skipEnds && math.lengthsq(b - center) <= r2)))
                         {
                             continue; // EMG1-ENT-01：skipStart = 只跳过起点已在圆内的（弹体从残骸里飞出去不算撞上）
+                        }
+                        if (skipAround && math.distance(around, center) <= c.z + 0.1)
+                        {
+                            continue; // EMG1-E2E-01：开火目标所在的障碍圆不挡（同即时命中的视线 LineOfSight：终点自己所在的障碍不算）
                         }
                         double t = SegmentCircleT(a, b, center, c.z);
                         if (t >= 0 && (t < tHit || (t == tHit && idx < best)))
@@ -1299,7 +1305,11 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            o = EmgHashSegment(ref d, pr.Prev, next, EmgHash.KindObstacle, false, out double t);
+            // EMG1-E2E-01（阶段 1 出口：emg.stage = 1 后默认装配 [寻的, 拖尾] 的机器都发飞行弹体）：与即时命中的视线（LineOfSight）同一口径——
+            // 起点已在圆内的障碍（站在锚点净空圈 / 屏障边开火）与开火目标所在的障碍（训练靶在自己锚点的净空圈中心）不挡；原先这两种弹体一出膛 / 到靶前就撞圈作废。
+            int ts = pr.HomingTarget != 0 ? d.SlotOf(pr.HomingTarget) : -1;
+            bool aroundTarget = ts >= 0 && d.IsAlive(ts);
+            o = EmgHashSegment(ref d, pr.Prev, next, EmgHash.KindObstacle, false, out double t, (pr.Flags & EmgProjFlags.Sub) == 0, aroundTarget, aroundTarget ? d.Pos[ts] : default);
             if (o < 0 || t > unitT)
             {
                 return false;

@@ -795,6 +795,32 @@ namespace GameLogic.EditorTools
             Expect(ordered && done && r.Outcome == RaidResultService.OutcomeWithdrawn && r.Exited == 1 && r.Killed == 4 && r.Timeline.Last().Kind == "end_withdrawn"
                    && RaidResultService.OutcomeText(r).Contains(GameText.Get("raid.result.reason.losses")),
                 $"B4 结束条件“撤退”：损失超过 70% → 撤退令记进过程（{ordered}）→ 残部撤离家园后结算“{RaidResultService.OutcomeText(r)}”（击毁 {r?.Killed}、撤走 {r?.Exited}）");
+
+            // FG-GAP-168：结算关闭后的余波里阵亡的家园机器仍记进这一波；过了余波窗口的不记（负向）。
+            MachineOpResult early = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, CoreCenter(s) + new Vector2(3f, 3f), 50f, 50f);
+            MachineOpResult late = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, CoreCenter(s) + new Vector2(-3f, 3f), 50f, 50f);
+            int before = r?.LostMachines ?? -1;
+            Seconds(2f);
+            MachineRegistry.ApplyDamage(early.LogicId, 9999f);
+            bool inAftermath = r != null && RaidResultService.PrimaryOpen(s) == null && r.LostMachines == before + 1
+                               && r.Losses.Any(l => l.Kind == RaidResultService.KindMachine && l.Id == early.LogicId.ToString(CultureInfo.InvariantCulture));
+            Seconds(RaidResultService.AftermathSeconds + 1f);
+            MachineRegistry.ApplyDamage(late.LogicId, 9999f);
+            bool afterWindow = r != null && r.LostMachines == before + 1 && RaidResultService.All(s).All(x => x == null || x.Losses.All(l => l.Id != late.LogicId.ToString(CultureInfo.InvariantCulture)));
+            Expect(early.Success && late.Success && inAftermath && afterWindow,
+                $"B4b 余波（FG-GAP-168）：结算关闭 2 秒后阵亡的家园机器记进刚结束的这一波（{before} → {r?.LostMachines}）；过了余波 {RaidResultService.AftermathSeconds:0} 秒再阵亡的不记进任何结算（{afterWindow}）");
+
+            // EMG1-E2E-01 修复轮（P2）：两波并发、后展开的那波先结束——“最新结算”按结算时刻取，不按展开顺序（余波归属不记到早已结束的那份）。
+            RaidResultState rs = RaidResultService.StateOf(s);
+            RaidResultRecord[] saved = rs?.Results;
+            if (rs != null && r != null)
+            {
+                var earlier = new RaidResultRecord { Serial = 99001, EndTick = r.EndTick - 10 * GameClock.StepHz };
+                rs.Results = rs.Results.Append(earlier).ToArray(); // 展开顺序在最后、结算时刻更早
+                RaidResultRecord latest = RaidResultService.LatestEnded(s);
+                rs.Results = saved;
+                Expect(ReferenceEquals(latest, r), $"B4c 并发两波：展开顺序在后但先结束的那份不算“最新结算”（取到 {(ReferenceEquals(latest, earlier) ? "先结束的那份" : "结算时刻最晚的那份")}）");
+            }
         }
 
         private static void CheckLosses()

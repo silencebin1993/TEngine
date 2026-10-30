@@ -265,18 +265,20 @@ namespace GameLogic.Campaign.Defense
         /// <summary>接入的炮塔打出了具名反应（内核玩法事件）：核心固件按信号上的冷却结算，炮塔随即重编译（冷却中这条反应不发动）。</summary>
         public static void OnReactionFired(CampaignState s, TurretRecord r, in CombatEvent e)
         {
-            if (s == null || r == null)
-            {
-                return;
-            }
-            bool gated = e.Code2 == 1;
-            if (!gated && !IsUplinkedTo(s, r.BuildingId))
-            {
-                return;
-            }
             string reactionId = (CombatReaction)e.Code == CombatReaction.MeltOverload ? MechanicalReactionCatalog.ReactionMeltOverloadId
                 : (CombatReaction)e.Code == CombatReaction.MarkJump ? MechanicalReactionCatalog.ReactionMarkJumpId : null;
-            if (reactionId == null)
+            OnCoreReaction(s, r, reactionId, e.Code2 == 1);
+        }
+
+        /// <summary>同上，按反应 ID（旧轨装配反应事件与声明轨涌现计数共用；EMG1-E2E-01 修复轮：声明轨标记跳转在接入炮塔上也按信号冷却结算）。
+        /// <paramref name="gated"/> = 开火那一刻是门控反应（信号已离开也照样记冷却）。</summary>
+        public static void OnCoreReaction(CampaignState s, TurretRecord r, string reactionId, bool gated)
+        {
+            if (s == null || r == null || reactionId == null)
+            {
+                return;
+            }
+            if (!gated && !IsUplinkedTo(s, r.BuildingId))
             {
                 return;
             }

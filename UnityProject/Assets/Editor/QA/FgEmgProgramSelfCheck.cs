@@ -133,6 +133,15 @@ namespace GameLogic.EditorTools
 
         // ── 测试目录：真实五张表 + FG19A 已定、还没落表的 4 条固件声明；emg.stage = 1 ──
 
+        /// <summary>EMG1-E2E-01（DEBT-EMG1KRN01-02）：正式表缺省改 1 之后，阶段 0（回滚对照）显式注入。</summary>
+        internal static void UseStage0Catalog()
+        {
+            EmgSource src = EmgCatalog.FromTables();
+            Func<string, (bool ok, float value)> tuning = src.Tuning;
+            src.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : tuning(id);
+            EmgCatalog.OverrideForTests(src);
+        }
+
         internal static void UseStage1Catalog()
         {
             EmgSource src = EmgCatalog.FromTables();
@@ -545,10 +554,10 @@ namespace GameLogic.EditorTools
                        && k.ProgramCount == 0,
                     "全空程序（没装固件，或只装了还没声明的冷却液）：不登记程序（−1，表 0 行），没声明的固件记“仍走旧读法”，武器照常基础攻击");
             }
-            EmgCatalog.ResetForTests();
+            UseStage0Catalog();
             EmgProgramResult stage0 = P(A(Homing), A(Split, Split));
             Expect(EmgCatalog.EffectiveStage == 0 && stage0.IsEmpty && stage0.LegacyOwners.Count == 3,
-                $"真实表 emg.stage = 0：全部 owner 走旧轨，程序为空（旧路径照旧，FGR-EMG-019）");
+                $"emg.stage = 0（回滚对照；正式表阶段 1 出口起缺省 1）：全部 owner 走旧轨，程序为空（旧路径照旧，FGR-EMG-019）");
             UseStage1Catalog();
 
             BlueprintCircuitPreview pv = UplinkCompiler.CompileUplinked(GunBoard(true, Pierce, Oil), new[] { Split });
@@ -718,14 +727,14 @@ namespace GameLogic.EditorTools
             }
             Expect(loadOk, $"真实存档（CampaignAutoSaveService）→ 读档（CampaignRestoreOrchestrator）→ 家园载入：机器武器的程序下标写回（不回到“没有程序”），读档带回的程序表里已有的程序返回原下标（{loadInfo}）");
 
-            EmgCatalog.ResetForTests();
+            UseStage0Catalog();
             CampaignState cs = CampaignSession.Current;
             int lid = cs.MachineRecords.First(r => r.BlueprintId == Bp).LogicId;
             Home.RefreshMachineWeapon(cs, lid);
             BlueprintCircuitPreview p0 = MachineLoadoutRegistry.ResolveForPilot(cs, lid, cs.RandomSeed).Preview;
             bool same = KernelWeapon(Home, lid, out CombatWeapon w0) && w0.Program == -1 && CombatKernel.WeaponKey(w0) == CombatKernel.WeaponKey(CombatSite.MachineWeaponFrom(p0));
             UseStage1Catalog();
-            Expect(same, "emg.stage = 0（真实表）：同一台机器重新结算后武器没有程序，参数与只走旧路径时逐字相同（旧旅程不变）");
+            Expect(same, "emg.stage = 0（回滚对照）：同一台机器重新结算后武器没有程序，参数与只走旧路径时逐字相同（旧旅程不变）");
         }
 
         private static void SignalCoreTestEquip(CampaignState s, string firmwareId, int slot)

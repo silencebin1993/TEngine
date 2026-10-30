@@ -136,6 +136,7 @@ namespace GameLogic.EditorTools
                 Step(CheckData);
                 Step(CheckPlacementAndBuild);
                 Step(CheckWeaponAndKernel);
+                Step(CheckProgramIndex);
                 Step(CheckTargetModes);
                 Step(CheckBatchAndCopy);
                 Step(CheckSupply);
@@ -710,6 +711,39 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(offenders.Count == 0, $"C4 炮塔热更层（Campaign/Defense）不直接碰战斗内核、不另起弹道 / 伤害（命中 {offenders.Count} 处{(offenders.Count > 0 ? "：" + string.Join("，", offenders.Take(8)) : string.Empty)}）");
+        }
+
+        /// <summary>
+        /// EMG1-PRG-01 审查补记（EMG1-E2E-01 验收）：炮塔的程序只在推武器参数那一刻编译登记；程序下标只对本地点内核有效、不进炮塔参数缓存；
+        /// 参数没变时再同步不重复登记；换成不同程序的蓝图后重新编、下标指向新的程序行。
+        /// </summary>
+        private static void CheckProgramIndex()
+        {
+            CampaignState s = NewWorld(6109);
+            CombatSite site = Site;
+            const string bpSplit = "bp_tu_emg_split", bpCool = "bp_tu_emg_cool";
+            AddBlueprint(s, bpSplit, Fixed(ComponentCatalog.CompGunId, "fw_split"), "分裂炮塔");
+            AddBlueprint(s, bpCool, Fixed(ComponentCatalog.CompGunId, "fw_coolant"), "冷却炮塔");
+            BuildingRecord t = PlaceTurret(s, L, bpSplit);
+            if (t == null)
+            {
+                return;
+            }
+            TurretRecord r = Rec(s, t);
+            CombatWeapon pushed = Weapon(s, t);
+            bool cached = TurretService.TryGetCachedWeaponForTests(r.Serial, out CombatWeapon cache);
+            int programs = site.Kernel.ProgramCount;
+            Seconds(1f);
+            CombatWeapon again = Weapon(s, t);
+            bool stable = site.Kernel.ProgramCount == programs && again.Program == pushed.Program;
+            TurretOpResult swap = TurretService.TryAssignBlueprint(s, t.BuildingId, bpCool);
+            Seconds(0.5f);
+            CombatWeapon swapped = Weapon(s, t);
+            bool cached2 = TurretService.TryGetCachedWeaponForTests(Rec(s, t).Serial, out CombatWeapon cache2);
+            Expect(pushed.Program >= 0 && pushed.Program < programs && cached && cache.Program < 0 && stable
+                   && swap.Ok && swapped.Program >= 0 && swapped.Program != pushed.Program && swapped.Program < site.Kernel.ProgramCount && cached2 && cache2.Program < 0,
+                $"C5 炮塔程序下标：推给内核的武器带程序 {pushed.Program}（程序表 {programs} 行），参数缓存里不带（{cache.Program}）；参数没变时再同步不重复登记（{stable}）；" +
+                $"换冷却炮塔蓝图后重新编译登记、下标 {swapped.Program}（程序表 {site.Kernel.ProgramCount} 行，换蓝图 {swap.Ok}{swap.Message}，记录蓝图 {Rec(s, t)?.BlueprintId}，读数“{Readout(s, t).Status.Reason}”），缓存仍不带（{cache2.Program}）");
         }
 
         // ── D 五种目标模式 ─────────────────────────────────────────────────────────
@@ -1455,6 +1489,15 @@ namespace GameLogic.EditorTools
                 string meltBy = melts.Count > 0 ? ReactionLog.PartyLabel(melts[0].Source) : string.Empty;
                 Expect(melts.Count > meltLogged0 && meltBy.Contains("炮塔") && SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId) > 0f,
                     $"I3b 接入炮塔的熔穿过载进反应日志（{meltLogged0} → {melts.Count} 条，触发者“{meltBy}”），核心固件按信号规则开始冷却（剩 {SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId):F1} 秒）");
+
+                // EMG1-E2E-01 修复轮（DEBT-EMG1CHAIN01-06 / FGR-DEF-005）：声明轨上报的核心固件反应（涌现计数，不经装配反应事件）发生在接入的炮塔上——
+                // 同样按信号上的冷却结算并让炮塔重编译（修复前只认机器，炮塔接入的核心固件完全不冷却）。
+                WorldSimulation.StepMany((int)Math.Ceiling(SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId) * GameClock.StepHz) + 2);
+                int firedT = SignalUplinkService.CoreFiredCount;
+                bool readyT = SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId) <= 0;
+                site.OnDeclCoreReaction(s, Unit(s, th), MechanicalReactionCatalog.ReactionMeltOverloadId, 1, c);
+                Expect(readyT && SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId) > 0f && SignalUplinkService.CoreFiredCount == firedT + 1,
+                    $"I3c 声明轨核心固件反应在接入炮塔上：按信号冷却结算（冷却前已就绪 {readyT}，现剩 {SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId):F1} 秒，发动 {firedT} → {SignalUplinkService.CoreFiredCount}）");
 
                 TurretOpResult leave = TurretUplink.Leave(s);
                 long shots1 = Shots(site);

@@ -388,8 +388,14 @@ namespace GameLogic.EditorTools
             Expect(Dmg(on, ArenaNear) > 0f && Dmg(off, ArenaNear) == 0f, $"腐蚀弹头 · 射弹 = 命中爆开：主目标旁边的敌人吃到溅射 {Dmg(on, ArenaNear):0}（读法关 0）");
             (on, off) = Pair(gun, "fw_coolant");
             Expect(on.Zones > 0 && off.Zones == 0 && on.HostileHp < off.HostileHp, $"冷却液 · 射弹 = 命中处留区域：生成 {on.Zones} 块（读法关 0），敌方总耐久更低");
+            // EMG1-E2E-01：正式表 emg.stage = 1 下牵引的拉动量比旧读法小（全量诊断实测：读法关 1.4 米、开 1.0 米；幅度口径登记 FG-GAP-180 待复核）：
+            // 阶段 1 只断言“确实拉近”；旧读法的 0.5 米幅度显式注入 0 跑（回滚开关）。
             (on, off) = Pair(gun, "fw_tractor");
-            Expect(Dist(on, ArenaNear, ArenaP) < Dist(off, ArenaNear, ArenaP) - 0.5f, $"牵引 · 射弹：附近敌人被拉向命中点（距离 {Dist(on, ArenaNear, ArenaP):0.0} < 读法关 {Dist(off, ArenaNear, ArenaP):0.0}）");
+            Expect(Dist(on, ArenaNear, ArenaP) < Dist(off, ArenaNear, ArenaP) - 0.1f, $"牵引 · 射弹（emg.stage = 1）：附近敌人被拉向命中点（距离 {Dist(on, ArenaNear, ArenaP):0.0} < 读法关 {Dist(off, ArenaNear, ArenaP):0.0}）");
+            FgEmgProgramSelfCheck.UseStage0Catalog();
+            (on, off) = Pair(gun, "fw_tractor");
+            GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests();
+            Expect(Dist(on, ArenaNear, ArenaP) < Dist(off, ArenaNear, ArenaP) - 0.5f, $"牵引 · 射弹（旧读法，emg.stage = 0）：附近敌人被拉向命中点（距离 {Dist(on, ArenaNear, ArenaP):0.0} < 读法关 {Dist(off, ArenaNear, ArenaP):0.0}）");
             (on, off) = Pair(ram, "fw_ricochet");
             Expect(math.length(on.Pos[ArenaP]) > math.length(off.Pos[ArenaP]) + 0.5, $"跳弹 · 格斗 = 击退：主目标被推到离原点 {math.length(on.Pos[ArenaP]):0.0} 米（读法关 {math.length(off.Pos[ArenaP]):0.0}）");
             (on, off) = Pair(ram, "fw_arc");
@@ -848,7 +854,7 @@ namespace GameLogic.EditorTools
             int midSprayer = CampaignSession.Current.MachineRecords.First(m => m.BlueprintId == BpSprayer).LogicId;
             if (midSite == null || !midSite.TryGetMachineUnit(midSprayer, out int mu)
                 || !midSite.Kernel.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Uplink, EntKind = EmgEntKind.Unit, Ent = mu, Prog = -1, Pos = new double2(1, 2) })
-                || !midSite.Kernel.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Timer, Depth = 1, EntKind = EmgEntKind.Projectile, Ent = 1, Prog = 0, Node = 1, Value = 0.5f, Code = 308, Pos = new double2(-3, 5) }))
+                || !midSite.Kernel.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Timer, Depth = 1, EntKind = EmgEntKind.Projectile, Ent = 1, Prog = _seedProg, Node = 1, Value = 0.5f, Code = 308, Pos = new double2(-3, 5) }))
             {
                 Fail("存档前给破碎都市地点内核补未处理事件失败");
             }
@@ -868,11 +874,13 @@ namespace GameLogic.EditorTools
             bool hasReading = site != null && site.TryGetMachineUnit(sprayer, out int unit) && site.Kernel.TryGetUnit(unit, out CombatUnitView uv)
                               && site.Kernel.TryGetWeapon(uv.Weapon, out CombatWeapon kw) && kw.Reading.Carrier == CombatCarrier.Field && kw.Reading.ZoneSeconds > 0f;
             Expect(hasReading, "读档后机器的内核武器仍是布区载体 + 冷却液的驻留读法（装配结算重算，不靠旧参数）");
-            bool emgKept = site != null && site.Kernel.ProgramCount == 1 && site.Kernel.EmgBusPending == 2 && site.Kernel.WreckCount == 1
+            bool emgKept = site != null && site.Kernel.ProgramCount == _seedProgCount + 1 && site.Kernel.EmgBusPending == 2 && site.Kernel.WreckCount == 1
                            && site.TryGetMachineUnit(sprayer, out int su) && site.Kernel.TryGetUnitEmg(su, out short sp, out EmgUnitState sst) && sp == 3 && sst.LastHitBy == 2;
-            Expect(emgKept, "涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 1 行、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
+            Expect(emgKept, $"涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 {_seedProgCount + 1} 行（含样例 1 行）、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
                             + (emgKept ? string.Empty : $"；实际：程序 {site?.Kernel.ProgramCount}、未处理 {site?.Kernel.EmgBusPending}、残骸 {site?.Kernel.WreckCount}、步数 {site?.Kernel.Steps}"));
         }
+
+        private static int _seedProg, _seedProgCount;
 
         private static void BuildWorldSave(int seed)
         {
@@ -902,7 +910,9 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(60);
             // EMG1-KRN-01：给城里的地点内核铺一份涌现状态（程序 1 行、热更注入事件 2 条、残骸 1 个、喷洒机的单位段），H 段的倍速 / 暂停 / 观察 / 存读档哈希因此覆盖新状态。
             CombatSite citySite = CombatSites.Get(FracturedCityLayout.RegionId);
-            if (citySite == null || !citySite.TryGetMachineUnit(a, out int au) || FgEmergenceKernelSelfCheck.Seed(citySite.Kernel, au) != 0)
+            // EMG1-E2E-01：正式表 emg.stage = 1 起城里两台机器的武器本身就登记了程序（霰射 / 冷却液走声明轨），铺的样例程序排在它们后面——记下下标与行数，不再假定是第 0 行。
+            _seedProgCount = citySite != null ? citySite.Kernel.ProgramCount : -1;
+            if (citySite == null || !citySite.TryGetMachineUnit(a, out int au) || (_seedProg = FgEmergenceKernelSelfCheck.Seed(citySite.Kernel, au)) != _seedProgCount)
             {
                 Fail("给破碎都市地点内核铺涌现状态失败");
             }

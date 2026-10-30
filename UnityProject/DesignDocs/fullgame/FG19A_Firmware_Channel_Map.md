@@ -62,7 +62,7 @@
 | 3 | `fw_scatter` | 霰射 | 一次出手打出 3 份真实弹丸（30° 扇面，各 0.4 倍），每份各自命中、各自触发；扇面里有掩体时弹丸绕开掩体向两侧散开，不浪费在掩体上 | `evt.fire` trigger；`ter.cover` sense（扇面内掩体） | `grm.mod.multi` modify 3（`param2` 扇角 30°） | 修饰 / 多份载荷 | 热 1（声明 +1）｜容 1｜带 1 | 改机制：原“额外目标溅射”（extra 动词）改为多份载荷 | ✓（原数值型；靠 multi） | 1 |
 | 4 | `fw_fork` | 分叉 | 飞行中离最近敌人 ≤4 米时一分为二，两枚子弹药各追一个目标 | `evt.prox` trigger（`param2` 4 米） | `grm.trig` spawn 2 | 触发 / 近炸引信 | 热 1+触发项｜容 1 | 改机制：原“命中后 2 枚”，与分裂只差数量（D-06）；改为飞行中近炸分叉，兑现“飞到半路分叉” | ✓ | 1 |
 | 5 | `fw_split` | 分裂 | 首次合法命中后裂出 3 枚次级弹（各 0.5 倍），次级弹带着下游程序 | `evt.hit` trigger | `grm.trig` spawn 3 | 触发 / 触发引信 | 热 1+触发项｜容 1 | 改机制：原 extra 瞬时结算改为真子载荷；描述“两枚”改“三枚”，与表值和读法文本一致（D-01、FG-GAP-154） | ✓ | 1 |
-| 6 | `fw_delayfuse` | 延时引信 | 出膛 0.6 秒空爆，向前扇形放出 3 枚子弹药；提前命中则不空爆 | `evt.timer` trigger（`param2` 0.6 秒） | `grm.trig` spawn 3 | 触发 / 定时空爆引信 | 热 1+触发项｜容 1 | 改机制：原“命中点 0.6 秒回波 + 命中分裂”（`GeneCatalog.cs:173-176`），改为飞行中定时空爆（D-02、FG-GAP-152） | ✓ | 1 |
+| 6 | `fw_delayfuse` | 延时引信 | 出膛 0.6 秒空爆，向前扇形放出 3 枚子弹药；提前命中则不空爆 | `evt.timer` trigger（`param2` 0.6 秒） | `grm.trig` spawn 3 | 触发 / 定时空爆引信 | 热 1+触发项｜容 1 | 改机制：原“命中点 0.6 秒回波 + 命中分裂”（`GeneCatalog.cs:173-176`），改为飞行中定时空爆（D-02、FG-GAP-152）；无人机舱上无人机贴近开火，子弹 0.6 秒内先命中则不空爆，读法写明这一条件（FG-GAP-179，EMG1-E2E-01 定口径，按推荐默认执行（2026-10-30），待用户确认） | ✓ | 1 |
 | 7 | `fw_cluster` | 子母弹 | 母弹终结处（命中、落地或到期）抛出 4 枚子弹药，并留下一摊污泥 | `evt.expire` trigger | `grm.trig` spawn 4；`mat.sludge` emit 1 份 | 触发 + 物质源 | 热 1+触发项｜容 1 | 改机制：原“爆开溅射 + 污染区”改为子弹药 + 污泥斑块；污染标签由污泥沾染承接 | ✓ | 1（污泥过渡）→ 2 |
 | 8 | `fw_pierce` | 贯穿 | 穿过目标继续飞；比弹体轻的目标不消耗穿透，重目标与残骸各消耗 1 次 | `prop.mass` sense | `grm.mod.pierce` modify 1 | 修饰 | 热 1｜容 1｜带 1 | 改机制：现内核 `PierceHits` 是“身后 N 米瞬时次级打击”（`Sim/Combat/CombatTypes.cs:248-251`），改为弹体真穿透；力场 / 布区原读作破甲 25%，改为“不被掩体吸收” | ✓ | 1 |
 | 9 | `fw_corrode` | 腐蚀弹头 | 命中时把战斗部的酸注入目标（腐蚀度，满了破甲），并溅出一小摊酸液 | `evt.hit` trigger | `phs.corrode` inject 0.35；`mat.acid` emit 0.5 份 | 效果 / 相态源 + 物质源 | 热 1｜容 1｜带 1 | 改机制：原“爆圈 + 腐蚀每秒 3”改为腐蚀累积 → 破甲 + 酸斑块；视觉“刺球”换战斗部（FG19 第 11 节第 5 行） | ✓ | 1（过渡）→ 2 |
@@ -702,7 +702,7 @@ FG19 FGR-EMG-044 推荐“混合固件 = 一槽两指令（占 1 槽，计 2 条
 | N10 | 反弹引信 | `fw_bouncefuse` | 每次反弹放出 1 份子载荷 | `evt.bounce` trigger | `grm.trig` 1 | 撞击引信 | `evt.bounce` 无读者 | 1 |
 | N11 | 穿透引信 | `fw_piercefuse` | 每次穿透在目标身后放出 1 份子载荷 | `evt.pierce` trigger | `grm.trig` 1 | 串联战斗部 | `evt.pierce` 无读者 | 1 |
 | N12 | 过热泄放 | `fw_ventarc` | 武器过热时向本机 4 米内放电 | `evt.overheat` trigger | `en.elec` inject | 过热泄放 | `evt.overheat` 无读者 | 1 |
-| N13 | 冷却回流 | `fw_coolback` | 冷却完成时在脚下排一摊冷却液 | `evt.cooled` trigger | `mat.coolant` emit | 回流排液 | `evt.cooled` 无读者 | 1 |
+| N13 | 冷却回流 | `fw_coolback` | 冷却完成时在脚下排一摊冷却液（需要积热来源：武器不积热、程序里也没有积热指令时不触发；FG-GAP-179，按推荐默认执行（2026-10-30），待用户确认） | `evt.cooled` trigger | `mat.coolant` emit | 回流排液 | `evt.cooled` 无读者 | 1 |
 | N14 | 入场引信 | `fw_enterfuse` | 载荷进入斑块或场时放出 1 份子载荷 | `evt.enter` trigger | `grm.trig` 1 | 介质引信 | `evt.enter` 无读者 | 2 |
 | N15 | 接入冲击 | `fw_uplinkpulse` | 信号接入瞬间以本机为心放推斥环 | `evt.uplink` trigger | `fld.push` spawn | 接入冲击 | `evt.uplink` 无读者 | 2 |
 | N16 | 水箱外排 | `fw_water` | 命中处排一摊水 | `evt.hit` trigger | `mat.water` emit | 水箱外排 | 水没有固件源 | 1 → 2 |

@@ -769,7 +769,7 @@ namespace GameLogic.Campaign.Combat
                                  && SignalUplinkService.IsCoreGatedReaction(p.ReactionId, p.UplinkFirmwareIds);
             // FG1-SIG-06（FGR-SIG-061）：接入口里有信号裸跑的未破解常规固件、且信号上的计次间隔已过——下一发计一次暴露。
             info.RawGated = info.Uplinked && RawFirmwareService.ShouldArmCharge(state, p.RawFirmwareIds);
-            CombatWeapon w = WithProgram(p, MachineWeaponFrom(p, info.ReactionSuppressed), out info.Program, out info.ProgramNoteKey);
+            CombatWeapon w = WithProgram(p, MachineWeaponFrom(p, info.ReactionSuppressed), state, out info.Program, out info.ProgramNoteKey);
             info.WeaponIndex = WeaponIndex(w);
             _machineWeapons[logicId] = info;
             return info;
@@ -781,10 +781,11 @@ namespace GameLogic.Campaign.Combat
         /// 只在装配结算时调用（装配变化 / 接入 / 离开 / 冷却起止 / 读档后，都经 MachineLoadoutRegistry.Changed → RefreshMachineWeapon），O(程序长度)。
         /// 空程序（没有生效声明，含 emg.stage = 0）原样返回武器：行为与 StateHash 逐字不变。表满时退回无程序并给原因键。
         /// </summary>
-        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w, out Emergence.EmgProgramResult program, out string noteKey)
+        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w, CampaignState state, out Emergence.EmgProgramResult program, out string noteKey)
         {
             noteKey = null;
-            program = Emergence.EmgProgramCompiler.Compile(p);
+            // EMG1-E2E-01 修复轮：冷却中的核心固件（标记跳转等）不进程序——冷却起止都经 MachineLoadoutRegistry.Changed / 炮塔重推重编，冷却中再命中不跳。
+            program = Emergence.EmgProgramCompiler.Compile(p, p != null ? SignalUplinkService.CoolingUplinkCores(state, p.UplinkFirmwareIds) : null);
             if (program.IsEmpty)
             {
                 return w;
@@ -1139,7 +1140,13 @@ namespace GameLogic.Campaign.Combat
             }
         }
 
-        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w) => WithProgram(p, w, out _, out _);
+        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w) => WithProgram(p, w, null, out _, out _);
+
+        /// <summary>同上；<paramref name="state"/> 给出时，接入口里正在冷却的核心固件不编进程序（FGR-SIG-033 声明轨：冷却中这条反应不发动）。</summary>
+        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w, CampaignState state) => WithProgram(p, w, state, out _, out _);
+
+        public CombatWeapon WithProgram(BlueprintCircuitPreview p, CombatWeapon w, out Emergence.EmgProgramResult program, out string noteKey) =>
+            WithProgram(p, w, null, out program, out noteKey);
 
         /// <summary>登记进内核程序表（按完整字节去重，已有的返回原下标）。空程序返回 −1；表满 / 形状不合法也返回 −1（调用方给原因 <see cref="Emergence.EmgProgramCompiler.NoteTableFull"/>）。
         /// 放在桥接层：FG14 §5 硬约束 3，热更层只有 Campaign/Combat/ 能点名内核。</summary>
@@ -2168,6 +2175,37 @@ namespace GameLogic.Campaign.Combat
             }
         }
 
+        /// <summary>
+        /// EMG1-E2E-01（DEBT-EMG1CHAIN01-06）：声明轨上的核心固件反应（emg.stage ≥ 1 时 fw_marktag 的标记跳转由程序执行，不再发装配反应事件）按涌现可靠计数报上来——
+        /// 与旧轨 <see cref="CombatEventKind.ReactionFired"/> 同一结算：信号带进来的核心固件开始冷却并按裸跑 / 核心计暴露，标记跳转照旧出“跳转 N 个目标”的声音与字幕。
+        /// 不是核心固件触发的反应（TriggerFirmwareOf = null）什么都不做。O(1)。
+        /// </summary>
+        public void OnDeclCoreReaction(CampaignState state, int unit, string reactionId, int count, Vector2 at)
+        {
+            if (MechanicalReactionCatalog.TriggerFirmwareOf(reactionId) == null)
+            {
+                return;
+            }
+            // 声明轨上核心固件的指令只可能来自信号带进来的接入口（核心固件放不进机器 / 炮塔电路，FGR-SIG-012），程序又是开火那一刻编进弹体的——
+            // 所以这次发动按“开火时门控”结算：在飞弹体等信号离开后才命中也照样记冷却（不给“打完立刻切走”留空子，与旧轨 gatedAtFire 同口径）。
+            if (_unitTurret.TryGetValue(unit, out int serial))
+            {
+                TurretRecord tr = Defense.TurretService.FindBySerial(state, serial);
+                if (tr != null)
+                {
+                    Defense.TurretUplink.OnCoreReaction(state, tr, reactionId, true);
+                }
+            }
+            else
+            {
+                NotifyReactionFired(state, unit, reactionId, true);
+            }
+            if (reactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
+            {
+                FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, $"跳转 {count} 个目标", FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
+            }
+        }
+
         /// <summary>内核反应码 → 反应内容 ID（与 <see cref="MachineWeaponFrom(BlueprintCircuitPreview, bool)"/> 的翻译互逆）。</summary>
         public static string ReactionIdOf(CombatReaction r) => r switch
         {
@@ -2206,6 +2244,28 @@ namespace GameLogic.Campaign.Combat
             if (!ok)
             {
                 reason = FireReason(result, attackerLogicId, enemyInstanceId);
+            }
+            return ok;
+        }
+
+        /// <summary>
+        /// EMG1-E2E-01：己方机器对一个敌方内核单位开一次火（家园直控点中据点驻军 / 突袭者——它们没有具名敌人记录）。规则与 <see cref="TryFireAtEnemy"/> 相同。
+        /// </summary>
+        public bool TryFireAtUnit(int attackerLogicId, int targetUnit, out CombatFireResult result, out string reason)
+        {
+            reason = null;
+            if (IsDisposed || !_machineUnit.TryGetValue(attackerLogicId, out int attacker))
+            {
+                result = CombatFireResult.NoAttacker;
+                reason = FireReason(result, attackerLogicId, null);
+                return false;
+            }
+            result = Kernel.FireAt(attacker, targetUnit, GameClock.GameSeconds);
+            ProcessEvents();
+            bool ok = result == CombatFireResult.Ok || result == CombatFireResult.StillAiming || result == CombatFireResult.Launched || result == CombatFireResult.Covered;
+            if (!ok || result == CombatFireResult.Covered)
+            {
+                reason = FireReason(result, attackerLogicId, null);
             }
             return ok;
         }

@@ -1,3 +1,4 @@
+using GameLogic.Campaign.Emergence;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -464,7 +465,9 @@ namespace GameLogic.EditorTools
             WorldView.Observe(city.SiteId);
             CombatSite site = city.Combat;
             CommitVia(m);
-            Expect(WeaponOf(site, m).Reaction == CombatReaction.MarkJump && MachineLoadoutRegistry.ResolveForPilot(s, m, s.RandomSeed).Preview.RawFirmwareIds
+            bool declMark = EmgCatalog.IsOwnerOnDeclTrack(FirmwareCatalog.FwMarkTagId); // EMG1-E2E-01：stage 1 起标记跳转由武器程序执行
+            Expect((declMark ? WeaponOf(site, m).Program >= 0 && WeaponOf(site, m).Reaction == CombatReaction.None : WeaponOf(site, m).Reaction == CombatReaction.MarkJump)
+                   && MachineLoadoutRegistry.ResolveForPilot(s, m, s.RandomSeed).Preview.RawFirmwareIds
                        .SequenceEqual(new[] { FirmwareCatalog.FwMarkTagId }) && (Unit(site, m).Flags & CombatUnitFlags.RawGated) == 0,
                 "接入后：接入口插入未破解的标记跳转，内核武器带标记跳转反应（核心固件走反应门控，不带常规裸跑门控）");
 

@@ -343,6 +343,11 @@ namespace GameLogic.Campaign.Emergence
             {
                 "ter.obstacle" or "ter.cover" or "fld.deflect" or "chs.moving" => 1,
                 "grm.anchor" => 3,
+                // EMG1-E2E-01 修复轮（FG-GAP-183）：阶段 1 无人引用、也没有阶段 1 生产者的端口记到第一个读者 / 写者落表的阶段（与 fgdata_emg.STAGE_OVERRIDES 同一张表）
+                "evt.enter" or "evt.leave" or "evt.phase"
+                    or "ent.unit" or "ent.wreck" or "prop.flammable" or "prop.magnetic" => 2,
+                "evt.beat" or "evt.ping" => 3,
+                "evt.hijack" or "evt.seize" or "evt.release" => 4,
                 _ => FamilyStage(f),
             };
             bool numeric = id == "grm.mod.size" || id == "grm.mod.armor" || id == "grm.mod.power";

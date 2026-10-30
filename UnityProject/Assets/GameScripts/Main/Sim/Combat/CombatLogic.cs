@@ -1873,6 +1873,10 @@ namespace BinGames.Sim.Combat
                 byte want = heal ? (byte)pr.Faction : pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
                 // EMG1-FW-01（FGR-EMG-184 / 233 第 3 条、第 14 节第 6 条“完全中立”）：破片不分阵营，同阵营的也打（放出它的单位除外，IgnoreUnit），伤到同阵营发友伤
                 bool neutral = (pr.Flags & EmgProjFlags.Fragment) != 0;
+                // EMG1-E2E-01（阶段 1 出口：emg.stage = 1 后带寻的等飞行修饰的机器开火改为飞行弹体）：己方弹体也打中立单位（家园训练靶是唯一的中立单位）——
+                // 即时命中一直能打训练靶，飞行弹体原先只认敌方阵营，装寻的的机器对训练靶出手全部穿过去（FgEnergySelfCheck F11）。
+                // 只认涌现载荷（根载荷实体化 / 子弹药，emg.stage ≥ 1 才会出现）：旧弹体（炮塔射弹等）逐字不变，stage 0 一键回滚仍是旧行为（ADR-EMG-002 第 1、2 条）。
+                bool hitsNeutral = !heal && pr.Faction == CombatFaction.Player && (pr.Flags & (EmgProjFlags.Flight | EmgProjFlags.Sub)) != 0;
                 // 线段 prev→next 与单位圆（半径 = 单位半径 + 弹体半径）求最早交点。
                 double reach = pr.Radius + maxR;
                 int cx0 = grid.CellOf(math.min(pr.Prev.x, next.x) - reach);
@@ -1896,7 +1900,7 @@ namespace BinGames.Sim.Combat
                         for (int e = start; e < start + count; e++)
                         {
                             int k = grid.Slots[e];
-                            if ((!neutral && d.Faction[k] != want) || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (pr.IgnoreUnit != 0 && d.Id[k] == pr.IgnoreUnit))
+                            if ((!neutral && d.Faction[k] != want && !(hitsNeutral && d.Faction[k] == (byte)CombatFaction.Neutral)) || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (pr.IgnoreUnit != 0 && d.Id[k] == pr.IgnoreUnit))
                             {
                                 continue;
                             }

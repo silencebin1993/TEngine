@@ -317,8 +317,9 @@ namespace GameLogic.EditorTools
             Expect(hc.RawStage == 3f && hc.EffectiveStage == EmgCatalog.ImplementedStage && EmgCatalog.ImplementedStage == 1 && track
                    && EmgCatalog.ClampStage(4f, 2) == 2 && EmgCatalog.ClampStage(1f, 2) == 1 && EmgCatalog.ClampStage(-1f, 2) == 0,
                 $"emg.stage 填 3（高于已实现阶段 {EmgCatalog.ImplementedStage}）→ 生效阶段钳到 {hc.EffectiveStage}，stageGate 1 的 fw_split 随之走声明轨；钳位函数：4→2、1→1、−1→0（已实现 2 时）");
-            Expect(EmgCatalog.EffectiveStage == 0 && real.Decls.Select(d => d.Owner).Distinct().All(o => !EmgCatalog.IsOwnerOnDeclTrack(o)),
-                "正式表 emg.stage = 0：全部声明 owner 都走旧 readFields 路径（本卡不改任何战斗行为）");
+            // EMG1-E2E-01（DEBT-EMG1KRN01-02）：阶段 1 出口起正式表缺省 1——stageGate ≤ 1 的 owner 走声明轨，≥ 2 的仍走旧轨。
+            Expect(EmgCatalog.EffectiveStage == 1 && real.Decls.GroupBy(d => d.Owner).All(g => EmgCatalog.IsOwnerOnDeclTrack(g.Key) == (g.First().StageGate <= 1)),
+                "正式表 emg.stage = 1（阶段 1 出口起缺省）：stageGate ≤ 1 的声明 owner 走声明轨，stageGate ≥ 2 的仍走旧 readFields");
         }
 
         private static void Neg(string title, Action<EmgSource> mutate, Func<EmgCompiled, bool> notLeaked, string reasonPart)

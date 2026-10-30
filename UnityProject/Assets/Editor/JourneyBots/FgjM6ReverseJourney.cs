@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rs_end", "这一波结束（只结算一次）", 400, null, c => TickRaidOver(c, "rs")),
                 S("rs_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建", 600, null, TickWallRestored),
                 // FG10-E2E-01（FG-GAP-149）：前几波把核心从 1600 削到五六百，旅程从不修核心，后面两波打不打穿取决于真实时间节奏——这里像玩家一样把核心修满再开下一段。
-                S("rs_core", "左键点归还核心，通用面板上点“维修”（维修件不够时夹具补足，DEBT-FG10E2E01-05），等耐久回满", 900, null, TickCoreRepaired),
+                S("rs_core", "左键点归还核心，通用面板上点“维修”（维修件不够时夹具补足，DEBT-FG10E2E01-05），等耐久回满", 900, null, c => TickCoreRepaired(c, "core")),
                 S("rs_ready", "第三波之前家园至少有两台机器（只剩一台就等归还核心应急打印第二台）", 900, null, TickTwoHomeMachines),
 
                 // ── 6. 目标死亡（第三波：两台家园机器先开到抵达点；部队快到时接入第一台、一展开就冲进敌群）──
@@ -204,6 +204,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rc_back", "第三波（含加的几波）结束：结算记着阵亡的家园机器，炮塔照常守住", 400, null, TickThirdWaveBack),
                 S("rc_leave", "信号还在机器上（阵亡后弹到了别的机器、处于直控）就按接入键离开：信号回到归还核心、镜头回战略视角（建造与通用面板要在战略视角里）", 15,
                     c => { if (!SignalPresence.AtCore) { JourneyInput.ReleaseKeys(); JourneyInput.PressAction(GameActionId.ToggleCameraView); } }, TickBackToStrategy, retries: 2),
+                // FG-GAP-149 ④⑤：rc 段（含加的几波）又把核心削下去，rp 这一波打不打穿取决于真实时间节奏——开 rp 之前像玩家一样再修满一次。
+                S("rc_core", "左键点归还核心，通用面板上点“维修”（维修件不够时夹具补足，DEBT-FG10E2E01-05），等耐久回满", 900, null, c => TickCoreRepaired(c, "core2")),
 
                 // ── 5. 断链（再请一波：攻城中按 0.5 倍速，敌人进了圈里炮塔的射程、炮塔正在开火时断电 → 停火 → 逐台启用 → 恢复开火）──
                 // 修复轮续：断链放在目标死亡之后的单独一波——放在同一波的前半段时，断电那十几秒里敌人在圈外多活一阵，两台在圈外修建筑的家园机器先被打死，目标死亡就没有机器可接入（续跑实测）。
@@ -479,7 +481,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// FG-GAP-149：左键点归还核心 → 通用面板“维修”（维修件按缺的比例收）→ 机器取件修 → 耐久回满。仓库维修件不够时由登记的夹具补足（DEBT-FG10E2E01-05），
         /// 下单与修理本身都走正式路径。
         /// </summary>
-        private static StepOutcome TickCoreRepaired(JourneyContext c)
+        private static StepOutcome TickCoreRepaired(JourneyContext c, string k)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
@@ -488,18 +490,18 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail("找不到归还核心");
             }
-            if (c.Get("core.hp0", string.Empty).Length == 0)
+            if (c.Get(k + ".hp0", string.Empty).Length == 0)
             {
-                c.Set("core.hp0", CoreHp(s));
+                c.Set(k + ".hp0", CoreHp(s));
             }
             if (!BuildingOps.IsWorn(core))
             {
                 // 面板与建造模式都关掉再进下一段（建造模式开着时预警条不显示，下一波的 rc_warn 会等不到）。
                 if (ProductionPanelUIToolkit.IsOpen || FgjM3Common.BuildOpen)
                 {
-                    if (NowMs() - c.GetLong("core.cl") > 900)
+                    if (NowMs() - c.GetLong(k + ".cl") > 900)
                     {
-                        c.SetLong("core.cl", NowMs());
+                        c.SetLong(k + ".cl", NowMs());
                         if (ProductionPanelUIToolkit.IsOpen)
                         {
                             JourneyInput.ClickUitk(P.PanelHost, "ProductionPanelClose");
@@ -511,13 +513,13 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                     return StepOutcome.Wait;
                 }
-                return StepOutcome.Done($"归还核心 {c.Get("core.hp0")} → {CoreHp(s)}（{(c.GetInt("core.kits") > 0 ? $"维修件夹具补了 {c.GetInt("core.kits")} 件" : "维修件够，没用夹具")}）");
+                return StepOutcome.Done($"归还核心 {c.Get(k + ".hp0")} → {CoreHp(s)}（{(c.GetInt("core.kits") > 0 ? $"维修件夹具补了 {c.GetInt("core.kits")} 件" : "维修件够，没用夹具")}）");
             }
             if (HomeValleyWorkOrders.FindActiveRepair(s, core.BuildingId) != null)
             {
-                if (ProductionPanelUIToolkit.IsOpen && NowMs() - c.GetLong("core.cl") > 900)
+                if (ProductionPanelUIToolkit.IsOpen && NowMs() - c.GetLong(k + ".cl") > 900)
                 {
-                    c.SetLong("core.cl", NowMs());
+                    c.SetLong(k + ".cl", NowMs());
                     JourneyInput.ClickUitk(P.PanelHost, "ProductionPanelClose");
                 }
                 return StepOutcome.Wait; // 机器取维修件修核心
@@ -530,14 +532,14 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (!(ProductionPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.BuildingId == core.BuildingId))
             {
-                StepOutcome o = P.TickOpenPanel(c, core.BuildingTypeId, new GridCell(core.GridX, core.GridY), "corep");
+                StepOutcome o = P.TickOpenPanel(c, core.BuildingTypeId, new GridCell(core.GridX, core.GridY), k + "p");
                 return o.Status == JourneyStepStatus.Retry ? o : StepOutcome.Wait;
             }
-            if (!FgjM3Common.Once(c, "corerep", () => FgjM3Common.ClickPanelBodyButton(P.PanelHost, "ProductionPanelBody", "BpRepair")))
+            if (!FgjM3Common.Once(c, k + "rep", () => FgjM3Common.ClickPanelBodyButton(P.PanelHost, "ProductionPanelBody", "BpRepair")))
             {
                 return StepOutcome.Wait;
             }
-            return FgjM3Common.SinceMs(c, "corerep") < 2500 ? StepOutcome.Wait : StepOutcome.Retry($"点“维修”后没有工单：{JourneyInput.LastUiFailure}");
+            return FgjM3Common.SinceMs(c, k + "rep") < 2500 ? StepOutcome.Wait : StepOutcome.Retry($"点“维修”后没有工单：{JourneyInput.LastUiFailure}");
         }
 
         /// <summary>进度夹具（DEBT-FG10E2E01-05）：仓库维修件补到够修满核心（正常游玩靠零件工坊产维修件，M6R 不建这条产线）。</summary>
@@ -1546,18 +1548,22 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             int turretKills = RcResults(c).Sum(x => x.Contrib.Where(k => k.Kind == "turret").Sum(k => k.Kills));
-            int victims = Math.Max(1, Victims(c).Count);
+            List<int> ids = Victims(c);
             int lost = RcResults(c).Sum(x => x.LostMachines);
-            if (lost >= victims)
+            // EMG1-E2E-01 修复轮 1（审查 P2）：按目标机器的 LogicId 逐台在损失明细里找（不比总数——余波里阵亡的应急搬运机不能凑数），
+            // 没记全时在余波窗口内继续等（目标在结算关闭后几帧才阵亡也会记进来），窗口过了还没记全才判失败。
+            var recorded = new HashSet<string>(RcResults(c).SelectMany(x => x.Losses).Where(l => l.Kind == RaidResultService.KindMachine).Select(l => l.Id), StringComparer.Ordinal);
+            int missing = ids.Count(id => !recorded.Contains(id.ToString(CultureInfo.InvariantCulture)));
+            if (ids.Count > 0 && missing == 0)
             {
-                return StepOutcome.Done($"第三波（含加的几波）结束：结算记着阵亡的家园机器 {lost} 台（应 ≥ {victims}），炮塔击毁 {turretKills} 台、核心没丢（耐久 {CoreHp(s)}）：{D.ResultLine(r)}");
+                return StepOutcome.Done($"第三波（含加的几波）结束：结算逐台记着阵亡的目标机器 {ids.Count} 台（损失合计 {lost} 台），炮塔击毁 {turretKills} 台、核心没丢（耐久 {CoreHp(s)}）：{D.ResultLine(r)}");
             }
-            // FG-GAP-168（2026-10-28 完整跑 4 登记，承接见缺口表）：那一波结算关闭（敌人撤退）之后，撤离中的单位又打死了一台接入直控的机器，这台没记进任何一份结算。
-            // 只在“至少记了 1 台、其余目标确实阵亡且黑匣子回收”时放行，并把差额写进结论；记 0 台照样失败。
-            int dead = Victims(c).Count(id => !MachineAlive(id) && BlackBoxService.Find(s, id) != null);
-            return lost >= 1 && dead >= victims
-                ? StepOutcome.Done($"第三波（含加的几波）结束：结算记着阵亡的家园机器 {lost} 台，另 {victims - lost} 台在那一波结算关闭后被撤离部队打死、没记进结算（FG-GAP-168，已登记）；目标 {dead}/{victims} 台都已阵亡、黑匣子回收；炮塔击毁 {turretKills} 台、核心没丢（耐久 {CoreHp(s)}）：{D.ResultLine(r)}")
-                : StepOutcome.Fail($"第三波结算不对（应记 {victims} 台机器损失，记了 {lost}，目标阵亡 {dead}）：{D.ResultLine(r)}");
+            if (GameClock.Ticks - r.EndTick <= GameClock.TicksFor(RaidResultService.AftermathSeconds))
+            {
+                return StepOutcome.Wait;
+            }
+            int dead = ids.Count(id => !MachineAlive(id) && BlackBoxService.Find(s, id) != null);
+            return StepOutcome.Fail($"第三波结算不对（目标机器 {ids.Count} 台，余波窗口过后仍有 {missing} 台没记进损失明细；损失合计 {lost}，目标阵亡 {dead}）：{D.ResultLine(r)}");
         }
 
         // ── 承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 回滚 ─────────────────────────────

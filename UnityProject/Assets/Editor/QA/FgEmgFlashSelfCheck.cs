@@ -614,7 +614,8 @@ namespace GameLogic.EditorTools
                 StatusTagHover.Leave(null);
                 EmgCatalog.ResetForTests();
             }
-            // emg.stage = 0（正式流程缺省）：没有程序就没有变体表，无人机舱武器逐字同旧
+            // emg.stage = 0（回滚开关；EMG1-E2E-01 起正式表为 1，这里显式注入 0）：没有程序就没有变体表，无人机舱武器逐字同旧
+            FgEmgProgramSelfCheck.UseStage0Catalog();
             BlueprintCircuitPreview pv0 = BayPreview(false);
             using (var site = new CombatSite("emgflash-stage0", CombatSite.ConfigFromTuning()))
             {
@@ -622,6 +623,7 @@ namespace GameLogic.EditorTools
                 Expect(r0.IsEmpty && site.Kernel.FlashHeadOf(site.WeaponIndex(w0)).x < 0 && CombatKernel.WeaponKey(w0) == CombatKernel.WeaponKey(CombatSite.MachineWeaponFrom(pv0)),
                     "负向：emg.stage = 0 时程序为空、不挂变体表，武器键与旧路径逐字相同");
             }
+            EmgCatalog.ResetForTests();
         }
 
         private static CombatConfig With(CombatConfig c, int bandwidth)

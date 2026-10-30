@@ -462,7 +462,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry($"选了“{c.Get("cannonChoice")}”，主组件仍是 {b?.PrimaryId}（{JourneyInput.FindUitk<Label>("[HomeValleyCircuitBoardHost]", "SaveResultLabel")?.text}）");
         }
 
-        private static void ClickPathSlot(JourneyContext c)
+        internal static void ClickPathSlot(JourneyContext c)
         {
             BlueprintCircuitBoard board = Panel()?.Board;
             int target = -1;
@@ -481,7 +481,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        private static StepOutcome TickSlotPicked(JourneyContext c)
+        internal static StepOutcome TickSlotPicked(JourneyContext c)
         {
             int slot = c.GetInt("uplinkSlot", -1);
             if (slot <= 0)
@@ -498,7 +498,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry($"点选 {slot} 号格后检查器没有“标为接入口”（{UiFail(c)}）");
         }
 
-        private static StepOutcome TickMarkedEmptyCore(JourneyContext c)
+        internal static StepOutcome TickMarkedEmptyCore(JourneyContext c)
         {
             if (c.StepElapsed < 0.5)
             {

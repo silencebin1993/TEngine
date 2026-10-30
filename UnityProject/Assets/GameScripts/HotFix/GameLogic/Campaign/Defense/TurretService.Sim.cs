@@ -68,6 +68,14 @@ namespace GameLogic.Campaign.Defense
         }
 
         private static readonly Dictionary<int, Runtime> Rt = new Dictionary<int, Runtime>();
+
+        /// <summary>自检用（EMG1-PRG-01 审查补记）：炮塔的武器参数缓存（不含程序下标：程序只在推给内核那一刻编译登记）。</summary>
+        public static bool TryGetCachedWeaponForTests(int serial, out CombatWeapon w)
+        {
+            bool ok = Rt.TryGetValue(serial, out Runtime rt) && rt.WeaponFor != null;
+            w = ok ? rt.Weapon : default;
+            return ok;
+        }
         private static readonly List<GridCell> CellScratch = new List<GridCell>(16);
         private static readonly List<GridCell> RingScratch = new List<GridCell>(24);
         private static readonly HashSet<GridCell> FootScratch = new HashSet<GridCell>();
@@ -451,7 +459,7 @@ namespace GameLogic.Campaign.Defense
                 GridContent.TryGetBuilding(b.BuildingTypeId, out GameConfig.fg.BuildingGrid g);
                 float radius = g != null ? Mathf.Min(g.FootprintW, g.FootprintH) * 0.45f : 0.9f;
                 // EMG1-PRG-01：程序只在推给内核的那一刻编译登记（参数变了才推；程序下标只对本地点内核有效，不进参数缓存）。
-                CombatWeapon w0 = p != null ? site.WithProgram(p, WeaponOf(state, rt, p, b, r.TargetMode, needsSupply, uplinked)) : default;
+                CombatWeapon w0 = p != null ? site.WithProgram(p, WeaponOf(state, rt, p, b, r.TargetMode, needsSupply, uplinked), state) : default;
                 float max = BuildingOps.MaxDurability(b.BuildingTypeId);
                 float hp = Mathf.Clamp(BuildingOps.Durability(b), 1f, max);
                 site.SpawnTurretUnit(r.Serial, center, radius, hp, max, w0, TurretCatalog.TierArmor(tier), false, Vector2.up, 0f);
@@ -507,7 +515,7 @@ namespace GameLogic.Campaign.Defense
                 CombatWeapon w = WeaponOf(state, rt, p, b, r.TargetMode, needsSupply, uplinked);
                 if (!rt.WeaponPushed)
                 {
-                    w = site.WithProgram(p, w);
+                    w = site.WithProgram(p, w, state);
                     if (!site.TryGetTurretWeapon(r.Serial, out CombatWeapon cur) || !cur.Equals(w))
                     {
                         site.SetTurretWeapon(r.Serial, w);
