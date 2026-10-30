@@ -352,9 +352,11 @@ namespace BinGames.Sim.Combat
             }
             // EMG1-BUS-01：evt.bounce（面 = 场；Value / Value2 = 法线，取掉头后的飞行方向）。反弹回来的弹体归场源、不再带己方读法，也不再带己方程序。
             float2 nrm = math.normalizesafe(-pr.Vel);
+            // EMG1-FUZZ-01（模糊测试器发现的死指令）：先掉头再发事件——反弹触发的子载荷沿“反弹后的飞行方向”放出（与撞单位 / 撞障碍反弹同一口径），
+            // 原先沿掉头前的方向放，子载荷一出生就飞进同一个偏折场被再弹掉，[反弹引信, X] 的 X 永远打不到东西。
+            pr.Vel = -pr.Vel;
             EmgProjEvent(ref d, ref pr, EmgEventKind.Bounce, d.Id[source], EmgEntKind.Unit, nrm.x, nrm.y, EmgCode.FaceField, pr.Pos);
             pr.Prog = -1;
-            pr.Vel = -pr.Vel;
             pr.Faction = CombatFaction.Hostile;
             pr.Owner = d.Id[source];
             pr.Weapon = -1; // 反弹回来的弹体不再带己方读法

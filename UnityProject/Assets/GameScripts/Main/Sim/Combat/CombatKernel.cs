@@ -1370,6 +1370,10 @@ namespace BinGames.Sim.Combat
             // FG6-DEF-05：攻城剧场维护（格子缓存与流场按本步之前的变化增量更新、补算需要的流场）在内核一步之前，单独计时（流场更新 ≤ 4 ms 的证据）。
             MaintainSiege();
             EmgDirtyRetire(); // EMG1-CHAIN-01：脏列表只含本步（及上一步之后的即时调用）的变化
+            if (_actOn)
+            {
+                SyncInstrActivation(); // EMG1-FUZZ-01：只在模糊测试器打开计数时
+            }
             var job = new CombatStepJob { D = _d, Dt = dt, Time = time };
             job.Run();
             EmgDirtyPublish();
@@ -2785,6 +2789,7 @@ namespace BinGames.Sim.Combat
             staging.EmgEntParams[0] = _d.EmgEntParams[0];
             _d.Dispose();
             _d = staging;
+            SyncInstrActivation(); // EMG1-FUZZ-01：激活计数不进快照，读档后从 0 计
             _dirtyPublished = 0; // EMG1-CHAIN-01：新数据的环与脏列表都是空的
             _programIndex = null; // EMG1-KRN-01：程序去重索引是派生量，按读进来的程序表重建
             RecomputeEmgListen(); // EMG1-BUS-01：地点级监听掩码同是派生量

@@ -22,6 +22,7 @@ namespace BinGames.Sim.Combat
             EmgStats = new NativeArray<EmgBusStats>(1, Allocator.Persistent);
             EmgKindEnq = new NativeArray<long>(EmgConst.EventKinds + 1, Allocator.Persistent);
             EmgLastByKind = new NativeArray<EmgEvent>(EmgConst.EventKinds + 1, Allocator.Persistent);
+            EmgAct = new NativeList<int>(0, Allocator.Persistent);
             EmgListen = 0u;
             EmgCtx = EmgCtx.None;
             EmgPending = new NativeList<EmgSpawn>(4, Allocator.Persistent);
@@ -74,6 +75,7 @@ namespace BinGames.Sim.Combat
             EmgStats.Dispose();
             EmgKindEnq.Dispose();
             EmgLastByKind.Dispose();
+            EmgAct.Dispose();
             EmgPending.Dispose();
             EmgSubForms.Dispose();
             EmgHash.Dispose();

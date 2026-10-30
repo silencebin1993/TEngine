@@ -297,6 +297,9 @@ namespace BinGames.Sim.Combat
         public EmgProjFlags PFlags;
         /// <summary>1 = 本宿主是 SpawnFlight 根弹体（击毁改由命中致死回报）。</summary>
         public byte Flight;
+        /// <summary>EMG1-FUZZ-01（FGR-EMG-060 第 6 行、FG19A 申请 A8）：1 = 本次出手是当场结算的载荷（即时射弹 / 重炮 / 格斗 / 力场 / 即时修复），出手结束 = 载荷终结，发 evt.expire。
+        /// 飞行弹体、布区、无人机各自在弹体 / 区域 / 无人机结束时发，不置位。</summary>
+        public byte Instant;
 
         public static EmgCtx None => new EmgCtx { Prog = -1, Owner = -1 };
 

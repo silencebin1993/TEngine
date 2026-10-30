@@ -2014,7 +2014,9 @@ namespace BinGames.Sim.Combat
                     }
                     EmgProjCtxEnd(ref d, ref pr);
                     // EMG1-GRM-01：绕行 / 折返 / 穿透 / 反弹的弹体命中后继续飞（不终结、不发终结事件）。
-                    if (!heal && pr.Prog >= 0 && EmgAfterUnitHit(ref d, ref pr, hit, hitId, hitPos))
+                    // EMG1-FUZZ-01（模糊测试器发现的死指令：维修束 + 穿透类固件）：修复弹体还有穿透次数时同样穿过友军继续飞、发 evt.pierce（修完一个接着修身后那个）；
+                    // 反弹 / 绕行 / 折返对修复弹体仍不生效（反弹按敌对阵营挑目标）：修复弹体只走穿透分支（pierceOnly）。
+                    if ((!heal || pr.PierceLeft > 0) && pr.Prog >= 0 && EmgAfterUnitHit(ref d, ref pr, hit, hitId, hitPos, heal))
                     {
                         d.Projectiles[write++] = pr;
                         continue;

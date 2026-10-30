@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Unity.Collections;
 
 namespace BinGames.Sim.Combat
 {
@@ -62,6 +63,7 @@ namespace BinGames.Sim.Combat
             _d.EmgPrograms.Add(p);
             _programIndex[key] = index;
             Touch();
+            SyncInstrActivation(); // EMG1-FUZZ-01：计数开着时新程序的指令行从 0 计
             return index;
         }
 
@@ -441,6 +443,34 @@ namespace BinGames.Sim.Combat
 
         /// <summary>战斗事件总线的调试计数（调试层：处理 / 合并 / 链深截断 / 扇出截断 / 每宿主截断 / 近炸求值……；不进快照）。</summary>
         public EmgBusStats EmgBusStats => _d.EmgStats[0];
+
+        private bool _actOn;
+
+        /// <summary>
+        /// EMG1-FUZZ-01（ADR-EMG-001 ⑫“死指令”）：按指令行的激活计数开关——只给模糊测试器用，正式流程不开。
+        /// 开着时每步前把计数数组补到指令表行数（新登记的程序从 0 计）；关掉时数组清空、计数点只剩一条长度比较。计数不进快照、不进状态哈希，读档后从 0 计。
+        /// </summary>
+        public bool InstrActivationCounting
+        {
+            get => _actOn;
+            set
+            {
+                _actOn = value;
+                SyncInstrActivation();
+            }
+        }
+
+        /// <summary>第 <paramref name="instr"/> 行指令（指令表绝对下标）累计被执行 / 唤起的次数（计数关着时恒 0）。</summary>
+        public int InstrActivations(int instr) => instr >= 0 && instr < _d.EmgAct.Length ? _d.EmgAct[instr] : 0;
+
+        private void SyncInstrActivation()
+        {
+            int n = _actOn ? _d.EmgInstrs.Length : 0;
+            if (_d.EmgAct.Length != n)
+            {
+                _d.EmgAct.Resize(n, NativeArrayOptions.ClearMemory);
+            }
+        }
 
         /// <summary>某种事件累计入队条数（调试层；不进快照）。</summary>
         public long EmgEnqueuedOf(EmgEventKind kind) => (int)kind > 0 && (int)kind < _d.EmgKindEnq.Length ? _d.EmgKindEnq[(int)kind] : 0;

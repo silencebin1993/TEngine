@@ -309,6 +309,9 @@ namespace BinGames.Sim.Combat
         public NativeArray<EmgBusStats> EmgStats;
         public NativeArray<long> EmgKindEnq;
         public NativeArray<EmgEvent> EmgLastByKind;
+        /// <summary>EMG1-FUZZ-01（ADR-EMG-001 ⑫）：按指令行下标的激活计数。只在模糊测试器打开计数（<see cref="CombatKernel.InstrActivationCounting"/>）时长度 = 指令表行数，
+        /// 否则长度 0（计数点只多一条长度比较）。不进快照、不进状态哈希，读档后从 0 计。</summary>
+        public NativeList<int> EmgAct;
         /// <summary>地点级监听掩码（FGR-EMG-062）：程序表里全部程序 ListenMask 的并集（表只追加，登记程序时并上、读档后重算，不按帧）。只作“整类事件有没有可能有人读”的快速判空；
         /// 真正入队前再按宿主节点的读端行过滤。0 = 本地点没有程序，所有生产点一条比较就返回。</summary>
         public uint EmgListen;

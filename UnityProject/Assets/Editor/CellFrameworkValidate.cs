@@ -809,6 +809,9 @@ namespace GameLogic.EditorTools
             // EMG1-FIX-01：现存文案与实现一致（FGT-EMG-005 五条固件“描述—行为”触发 / 不触发对照、FGT-EMG-011 定时触发）——分裂三枚、延时引信飞行中空爆与提前命中不空爆、
             // 壁撞只在撞障碍时冲击、追射真补一发、磁聚过渡文案；文本与声明同源、图鉴 / 详情 / 三选一同步、旧存档预览说明、暂停与倍速、存读档。
             Seg("FgEmgTextBehaviorSelfCheck", FgEmgTextBehaviorSelfCheck.Run);
+            // EMG1-FUZZ-01：组合模糊测试器雏形与涌现满载场景（FGT-EMG-070 / 071 阶段 1、FGT-EMG-042）——固定种子 64 例（真实编译器 + CombatSite + 内核，无画面）：
+            // 零崩溃 / 零卡死 / 零死指令（内核按指令行激活计数，只在本段打开）/ 确定性 / 中途存读档 / 积压 / 数值溢出；有源审计与缺口清单；负向；多地点涌现满载性能（阶段 1 只判绝对预算）。
+            Seg("FgEmergenceFuzzSelfCheck", FgEmergenceFuzzSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

@@ -60,6 +60,30 @@ namespace BinGames.Sim.Combat
         /// <summary>子形态码缺省 = 载体 + 1（射弹 1 / 格斗 2 / 无人机 3 / 力场 4 / 布区 5，与 fg.TbSubPayload 行序一致）。</summary>
         private static byte EmgSubFormOf(byte carrier) => (byte)(math.min((int)carrier, 4) + 1);
 
+        /// <summary>
+        /// EMG1-FUZZ-01（DEBT-EMG1ENT01-08，FG19B 第 6 节“子弹药质量 = 母弹 ÷ 份数”）：沿程序树从本节点往根逐代除以该代的份数（编译期 TrigCount，钳到每次触发份数上限），
+        /// 根 = 母武器的弹体档案（重炮按重型弹体）。只读程序表，不加快照字段；O(代数 ≤ 2)。
+        /// </summary>
+        private static float EmgSubMass(ref CombatData d, in EmgSpawn s)
+        {
+            bool heavy = s.Weapon >= 0 && s.Weapon < d.Weapons.Length && d.Weapons[s.Weapon].Mode == CombatWeaponMode.Cannon;
+            float m = EmgProfileAt(ref d, heavy ? EmgConst.SlotHeavy : EmgConst.SlotProjectile).Mass;
+            if (s.Prog < 0 || s.Prog >= d.EmgPrograms.Length)
+            {
+                return m;
+            }
+            EmgProgram p = d.EmgPrograms[s.Prog];
+            int node = s.Node;
+            int cap = EmgMaxChildren(ref d);
+            for (int g = 0; g <= EmgConst.MaxGen && node > 0 && node < p.NodeCount && p.FirstNode + node < d.EmgNodes.Length; g++)
+            {
+                EmgNode n = d.EmgNodes[p.FirstNode + node];
+                m /= math.clamp((int)n.TrigCount, 1, cap);
+                node = n.Parent;
+            }
+            return m;
+        }
+
         private static void EmgStat(ref CombatData d, int which)
         {
             EmgBusStats st = d.EmgStats[0];
@@ -544,6 +568,32 @@ namespace BinGames.Sim.Combat
 
         private static int EmgLiveOf(ref NativeParallelHashMap<int, int> live, int chain) => live.TryGetValue(chain, out int v) ? v : 0;
 
+        /// <summary>
+        /// EMG1-FUZZ-01（模糊测试器发现的死指令）：载荷节点下挂着“定时”触发的子节点时，载荷至少飞到定时到点（+ <see cref="TimerLifeMargin"/>）——
+        /// 否则连射器根弹体（射程 12 ÷ 弹速 30 × 1.2 = 0.48 秒）与子弹（0.5 秒）装 [延时引信]（0.6 秒）永远先到寿命、定时永不到点。按端口（定时触发参数）判断，O(节点数 ≤ 8)。
+        /// </summary>
+        internal static float EmgTimerLife(ref CombatData d, int prog, int node, float life)
+        {
+            if (prog < 0 || prog >= d.EmgPrograms.Length)
+            {
+                return life;
+            }
+            EmgProgram p = d.EmgPrograms[prog];
+            float timer = 0f;
+            for (int k = 0; k < p.NodeCount && p.FirstNode + k < d.EmgNodes.Length; k++)
+            {
+                EmgNode n = d.EmgNodes[p.FirstNode + k];
+                if (n.Parent == node && n.TrigEvent == EmgEventKind.Timer)
+                {
+                    timer = math.max(timer, n.TrigParam);
+                }
+            }
+            return timer > 0f ? math.max(life, timer + TimerLifeMargin) : life;
+        }
+
+        /// <summary>挂定时子节点的载荷寿命比定时多留的游戏秒（6 步）。</summary>
+        internal const float TimerLifeMargin = 0.1f;
+
         /// <summary>生成一份子载荷；弹体池 / 区域满或同链同时存活已满返回 false（留到下一步）。</summary>
         private static bool EmgSpawnSub(ref CombatData d, ref EmgSpawn s, ref NativeParallelHashMap<int, int> live)
         {
@@ -588,6 +638,7 @@ namespace BinGames.Sim.Combat
                 }
                 float each = damage * (cm.DmgMul > 0f ? cm.DmgMul : 1f) * (pellets > 1 ? (cm.MultiRatio > 0f ? cm.MultiRatio : 0.4f) : 1f);
                 float reach = form.Speed * form.Life;
+                float subMass = EmgSubMass(ref d, s); // EMG1-FUZZ-01（DEBT-EMG1ENT01-08）：子弹药质量 = 母载荷 ÷ 份数
                 for (int q = 0; q < pellets; q++)
                 {
                     float2 pd = pellets > 1 ? EmgPelletDir(ref d, s.Prog, s.Node, s.Pos, dir, reach, q, pellets, cm.MultiFan > 0f ? cm.MultiFan : 30f) : dir;
@@ -597,8 +648,8 @@ namespace BinGames.Sim.Combat
                     var sub = new CombatProjectile
                     {
                         Id = id, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Gen = s.Gen, Depth = s.Depth, Flags = EmgProjFlags.Sub | (s.Flags & EmgProjFlags.Heal),
-                        Pos = s.Pos, Prev = s.Pos, Vel = pd * form.Speed, Owner = s.Owner, Weapon = s.Weapon, Damage = each, Radius = form.Radius, Life = form.Life,
-                        Faction = faction, IgnoreUnit = s.Other,
+                        Pos = s.Pos, Prev = s.Pos, Vel = pd * form.Speed, Owner = s.Owner, Weapon = s.Weapon, Damage = each, Radius = form.Radius, Life = EmgTimerLife(ref d, s.Prog, s.Node, form.Life),
+                        Faction = faction, IgnoreUnit = s.Other, Mass = subMass,
                     };
                     EmgInitFlight(ref d, ref sub, s.Pos + (double2)(pd * reach), k >= 0 ? d.Id[k] : 0, false); // EMG1-GRM-01：子弹药按自己节点（含继承）的修饰
                     d.Projectiles.Add(sub);
@@ -612,6 +663,7 @@ namespace BinGames.Sim.Combat
                 }
             }
             s.Done++;
+            EmgActNode(ref d, s.Prog, s.Node); // EMG1-FUZZ-01：子节点执行一次（只在模糊测试器开启计数时）
             EmgStat(ref d, 1);
             return true;
         }
@@ -861,6 +913,7 @@ namespace BinGames.Sim.Combat
             int prog = EmgUnitProg(ref d, i);
             if (prog < 0 || d.EmgListen == 0u)
             {
+                EmgActNode(ref d, prog, 0); // EMG1-FUZZ-01：没有事件监听也是一次修复出手（无条件修饰 / 效果照样执行；只在模糊测试器开启计数时，不改状态）
                 return;
             }
             EmgHostBegin(ref d, prog, i, d.Id[i], EmgEntKind.Unit, (byte)EmgCode.SrcOther, d.Pos[i], target);
@@ -872,6 +925,8 @@ namespace BinGames.Sim.Combat
             c.MainTarget = d.Id[target];
             c.PFlags = EmgProjFlags.Heal;
             c.HitCode = EmgCode.HitHeal;
+            int w = d.Weapon[i];
+            c.Instant = (byte)(w >= 0 && w < d.Weapons.Length && !EmgFlightOn(d.Weapons[w]) ? 1 : 0); // EMG1-FUZZ-01：当场修复 = 载荷当场终结（EmgShotEnd 发 evt.expire）
             d.EmgCtx = c;
         }
 
@@ -982,6 +1037,7 @@ namespace BinGames.Sim.Combat
             }
             // 寿命显式由热更层写（射程 ÷ 弹速 × 1.2，FG19A 第 2.1.1 节）；不依赖 0 值语义。弹速缺值时弹体不动、寿命到即止——不退回即时命中（缺值由表校验与 FgChannelAdmissionSelfCheck 拦下）。
             float life = wp.ProjectileLife > 0f ? wp.ProjectileLife : wp.Range * 1.2f / math.max(0.01f, wp.ProjectileSpeed);
+            life = EmgTimerLife(ref d, wp.Program, 0, life);
             var pr = new CombatProjectile
             {
                 Id = id, Prog = wp.Program, Chain = chain, Pos = start, Prev = start, Vel = dir * wp.ProjectileSpeed, Owner = ownerId, Weapon = weapon, Damage = damage,

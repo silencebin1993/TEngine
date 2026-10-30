@@ -558,20 +558,25 @@ namespace BinGames.Sim.Combat
         /// 命中一个单位（已结算）之后：绕行中 / 折返中 / 还有穿透 / 还有单位面反弹时弹体继续（返回 true，弹体留在命中点、忽略刚命中的单位），否则 false（照旧终结）。
         /// 顺序：绕行（每个撞上的单位各算一次命中）→ 折返途中（回程命中 1 次）→ 穿透（比弹体轻的不消耗；阶段 1 单位没有质量属性，一律消耗 1 次）→ 反弹（改向 B 米内下一个目标）→ 开始折返。
         /// </summary>
-        internal static bool EmgAfterUnitHit(ref CombatData d, ref CombatProjectile pr, int hit, int hitId, double2 hitPos)
+        /// <param name="pierceOnly">修复弹体：只走穿透（穿过友军接着修身后那个），绕行 / 折返 / 反弹一律不生效（EMG1-FUZZ-01 修复轮）。</param>
+        internal static bool EmgAfterUnitHit(ref CombatData d, ref CombatProjectile pr, int hit, int hitId, double2 hitPos, bool pierceOnly = false)
         {
             if (pr.Mods == EmgProjMods.None && pr.PierceLeft == 0 && pr.BounceLeft == 0)
             {
                 return false;
             }
             float speed = math.length(pr.Vel);
-            if ((pr.Mods & EmgProjMods.Orbit) != 0)
+            if (pierceOnly && pr.PierceLeft == 0)
+            {
+                return false;
+            }
+            if (!pierceOnly && (pr.Mods & EmgProjMods.Orbit) != 0)
             {
                 pr.IgnoreUnit = hitId;
                 pr.Pos = hitPos; // 停在命中点（本步已转过的相位已记进 ModT，下一步从这里接着绕）
                 return true;
             }
-            if ((pr.Mods & EmgProjMods.Returning) != 0)
+            if (!pierceOnly && (pr.Mods & EmgProjMods.Returning) != 0)
             {
                 pr.Mods |= EmgProjMods.ReturnHit;
                 pr.IgnoreUnit = hitId;

@@ -309,6 +309,13 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            // EMG1-FUZZ-01（FGR-EMG-060 第 6 行“射格无场布”、FG19A 申请 A8）：当场结算的载荷在出手结束时终结（EmgShotEnd 发 evt.expire）；
+            // 飞行弹体 / 布区 / 召唤各自在弹体、区域、无人机结束时发，不在这里重复。
+            if (wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp)
+                && (carrier == CombatCarrier.Projectile || carrier == CombatCarrier.Melee || carrier == CombatCarrier.Aura))
+            {
+                d.EmgCtx.Instant = 1;
+            }
             EmgQueueShotTimer(ref d, a, wp); // EMG1-TRIG-01：格斗 / 力场的定时从出手起算（DEBT-EMG1BUS01-03）
             if (wp.Mode != CombatWeaponMode.Projectile && EmgSiteListens(ref d, EmgEventKind.Prox) && EmgReadSlot(ref d, prog, 0, EmgEventKind.Prox) >= 0)
             {
@@ -322,7 +329,73 @@ namespace BinGames.Sim.Combat
             }
         }
 
-        internal static void EmgShotEnd(ref CombatData d) => d.EmgCtx = EmgCtx.None;
+        internal static void EmgShotEnd(ref CombatData d)
+        {
+            EmgCtx c = d.EmgCtx;
+            if (c.Instant != 0 && c.Prog >= 0)
+            {
+                // 当场结算的载荷到此终结：命中过 = Code 命中、位置 = 主目标；没命中（被反弹 / 被残骸吸收）= Code 寿命、位置 = 出手者。
+                int ts = c.Hits > 0 && c.MainTarget > 0 ? d.SlotOf(c.MainTarget) : -1;
+                double2 at = ts >= 0 ? d.Pos[ts] : c.Owner >= 0 && c.Owner < d.Count ? d.Pos[c.Owner] : double2.zero;
+                EmgShotEvent(ref d, EmgEventKind.Expire, ts >= 0 ? c.MainTarget : 0, 0f, 0f, ts >= 0 ? EmgCode.ExpireHit : EmgCode.ExpireLife, at);
+            }
+            d.EmgCtx = EmgCtx.None;
+        }
+
+        // ─────────────────────────────── EMG1-FUZZ-01：按指令行的激活计数（ADR-EMG-001 ⑫）───────────────────────────────
+        // 只在模糊测试器打开计数时 EmgAct 的长度 = 指令表行数，否则长度 0：每个计数点只多一条长度比较。不进快照、不进状态哈希。
+
+        /// <summary>第 <paramref name="i"/> 行指令被事件唤起一次。</summary>
+        private static void EmgActRow(ref CombatData d, int i)
+        {
+            if (i < d.EmgAct.Length)
+            {
+                d.EmgAct[i] = d.EmgAct[i] + 1;
+            }
+        }
+
+        /// <summary>
+        /// 节点执行一次（根出手 / 维修出手 / 无人机出手 / 子载荷生成）：节点里“没有事件触发读端”的指令（无条件修饰、效果、条件 / 感知读端）各 +1；
+        /// 有事件触发读端的那条指令（同一程序序号的行）只在被唤起时计（<see cref="EmgDispatch"/>）。容量溢出行不执行、不计。
+        /// </summary>
+        internal static void EmgActNode(ref CombatData d, int prog, int node)
+        {
+            if (d.EmgAct.Length == 0 || prog < 0 || prog >= d.EmgPrograms.Length)
+            {
+                return;
+            }
+            EmgProgram p = d.EmgPrograms[prog];
+            if (node < 0 || node >= p.NodeCount || p.FirstNode + node >= d.EmgNodes.Length)
+            {
+                return;
+            }
+            EmgNode n = d.EmgNodes[p.FirstNode + node];
+            int end = math.min(n.FirstInstr + n.InstrCount, math.min(d.EmgInstrs.Length, d.EmgAct.Length));
+            for (int i = n.FirstInstr; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if ((x.Flags & EmgInstrFlags.Overflow) != 0 || EmgOrdinalTriggered(ref d, n, x.Ordinal))
+                {
+                    continue;
+                }
+                d.EmgAct[i] = d.EmgAct[i] + 1;
+            }
+        }
+
+        /// <summary>节点里同一程序序号有没有事件触发读端行（有 = 这条指令由事件门控）。</summary>
+        private static bool EmgOrdinalTriggered(ref CombatData d, in EmgNode n, byte ordinal)
+        {
+            int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            for (int j = n.FirstInstr; j < end; j++)
+            {
+                EmgInstr y = d.EmgInstrs[j];
+                if (y.Ordinal == ordinal && y.Role == EmgConst.RoleTrigger && y.Port > EmgConst.EventPortBase && y.Port <= EmgConst.EventPortBase + EmgConst.EventKinds)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         /// <summary>
         /// 不经过 UnitAttack / FireAt 的派系专属攻击（齐射空爆、地雷、冲撞 / 攻城冲撞、喷淋、横扫、自爆、爆燃、分裂液、酸沼）走这里扣血：
@@ -362,6 +435,7 @@ namespace BinGames.Sim.Combat
             int chain = es.NextChain++;
             d.EmgS[0] = es;
             EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, EmgIdOf(ref d, owner), from); // EMG1-CHAIN-01：一次出手开一条链
+            EmgActNode(ref d, prog, 0); // EMG1-FUZZ-01：根节点执行一次（只在模糊测试器开启计数时）
             d.EmgCtx = new EmgCtx { Prog = prog, Chain = chain, Ent = ent, Owner = owner, Node = 0, Depth = 0, EntKind = kind, HurtSrc = src, HitCode = EmgCode.HitDirect };
             if (d.EmgListen == 0u)
             {
@@ -792,6 +866,7 @@ namespace BinGames.Sim.Combat
                 {
                     st.ListenWakes++;
                 }
+                EmgActRow(ref d, i);
             }
             if (cut > 0)
             {
