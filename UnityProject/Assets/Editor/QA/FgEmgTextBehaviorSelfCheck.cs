@@ -45,6 +45,7 @@ namespace GameLogic.EditorTools
             (FwDelay, FirmwareCarrier.Projectile), (FwDelay, FirmwareCarrier.Melee), (FwDelay, FirmwareCarrier.Summon), (FwDelay, FirmwareCarrier.Aura), (FwDelay, FirmwareCarrier.Field),
             (FwFollow, FirmwareCarrier.Projectile), (FwFollow, FirmwareCarrier.Melee), (FwFollow, FirmwareCarrier.Summon), (FwFollow, FirmwareCarrier.Aura), (FwFollow, FirmwareCarrier.Field),
             (FwWall, FirmwareCarrier.Projectile), (FwWall, FirmwareCarrier.Summon),
+            (FwWall, FirmwareCarrier.Melee), (FwWall, FirmwareCarrier.Aura), (FwWall, FirmwareCarrier.Field), // EMG2-RULE-01：格斗 / 力场 / 布区改“被推动实体撞障碍冲击”
         };
 
         private const string FwSplit = "fw_split", FwDelay = "fw_delayfuse", FwWall = "fw_wallslam", FwFollow = "fw_followup", FwMagnet = "fw_magnet";
@@ -91,6 +92,7 @@ namespace GameLogic.EditorTools
                 Step(CheckSplit);
                 Step(CheckDelayFuse);
                 Step(CheckWallSlam);
+                Step(CheckWallSlamCarriers);
                 Step(CheckFollowUp);
                 Step(CheckMagnet);
                 Step(CheckDisplaySync);
@@ -284,8 +286,20 @@ namespace GameLogic.EditorTools
                     leak.Add($"{fw}.{c}：{t}");
                 }
             }
-            Expect(leak.Count == 0 && Read(FwWall, FirmwareCarrier.Melee).Contains("弹开"),
-                $"{Fg19aReadings.Count} 句按 FG19A 新读法写的读法说明都没有旧机制说法；壁撞的格斗 / 力场 / 布区仍是击退读法（{Read(FwWall, FirmwareCarrier.Melee)}）{(leak.Count > 0 ? "；不符：" + string.Join("、", leak) : string.Empty)}");
+            // EMG2-RULE-01：壁撞的格斗 / 力场 / 布区读法 = 推动距离（与内核同源：编译出的 en.kinetic 写端 a）+ 撞上障碍受撞击伤害
+            var slam = new List<string>();
+            foreach (FirmwareCarrier c in new[] { FirmwareCarrier.Melee, FirmwareCarrier.Aura, FirmwareCarrier.Field })
+            {
+                EmgInstr kc = RootInstrs(Compile(FwWall, c)).FirstOrDefault(x => x.Port == EmgConst.PortKinetic && x.Role > EmgConst.RoleLastRead);
+                string t = Read(FwWall, c);
+                if (!(kc.A > 0f) || !t.Contains($"{F(kc.A)} 米") || !t.Contains("撞击"))
+                {
+                    slam.Add($"{c}：a = {F(kc.A)}，读法“{t}”");
+                }
+            }
+            Expect(leak.Count == 0 && slam.Count == 0,
+                $"{Fg19aReadings.Count} 句按 FG19A 新读法写的读法说明都没有旧机制说法；壁撞的格斗 / 力场 / 布区读法写的推动距离就是内核 en.kinetic 的 a（{Read(FwWall, FirmwareCarrier.Melee)}）"
+                + $"{(leak.Count > 0 ? "；不符：" + string.Join("、", leak) : string.Empty)}{(slam.Count > 0 ? "；壁撞不符：" + string.Join("、", slam) : string.Empty)}");
         }
 
         // ── B. 分裂 ─────────────────────────────────────────────────────────────
@@ -487,14 +501,62 @@ namespace GameLogic.EditorTools
                 }
                 if (obstacle)
                 {
-                    Expect(impact && ie.Code == EmgCode.FaceObstacle && Near(ie.Value, 5f) && Near(Hp(k, by), 95f) && Near(Hp(k, foe), 100f) && k.EmgBusStats.ObstacleHits >= 1,
-                        $"触发：弹体撞上障碍（0, 4，半径 1）反弹，撞击点 ({ie.Pos.x:0.##}, {ie.Pos.y:0.##}) 1.5 米内的敌人 {Hp(k, by):0} 血（吃 {F(ie.Value)} = 50%），evt.impact 已发；障碍后的目标未被打到");
+                    Expect(impact && ie.Code == EmgCode.FaceObstacle && ie.Value > 1f && ie.Value2 > 0f && Near(Hp(k, by), 95f) && Near(Hp(k, foe), 100f) && k.EmgBusStats.ObstacleHits >= 1,
+                        $"触发：弹体撞上障碍（0, 4，半径 1）反弹，撞击点 ({ie.Pos.x:0.##}, {ie.Pos.y:0.##}) 1.5 米内的敌人 {Hp(k, by):0} 血（吃 {F(ie.Value)} = 50%），evt.impact 已发（载荷 速度 {F(ie.Value)} 米/秒、质量 {F(ie.Value2)}）；障碍后的目标未被打到");
                 }
                 else
                 {
                     Expect(!impact && Near(Hp(k, by), 100f) && Near(Hp(k, foe), 90f) && k.ProjectileCount == bounces0,
                         $"不触发：开阔地直接命中目标（{Hp(k, foe):0} 血），没有冲击（旁边敌人 {Hp(k, by):0} 血、无 evt.impact），撞到敌人不反弹（弹体已结束，剩 {k.ProjectileCount} 发）");
                 }
+            }
+        }
+
+        /// <summary>
+        /// EMG2-RULE-01（FG19A 第 1.1 节第 16 行；卡片负向“壁撞三格”）：格斗 / 力场 / 布区命中把目标朝远离出手者推开 a 米；推动途中撞上障碍 = 实体层撞击
+        /// （撞击计数 + 撞击伤害，DamageFrom 来源 = 撞击），开阔地只推开、不冲击。同一夹具两跑对照，只差一个障碍。
+        /// </summary>
+        private static void CheckWallSlamCarriers()
+        {
+            Line("  · D2. 壁撞 · 格斗 / 力场 / 布区：命中推开目标，撞上障碍受撞击伤害；对照：开阔地只推开、不冲击");
+            foreach ((FirmwareCarrier fc, CombatReading rd, double dist, string say) in CarrierCases())
+            {
+                if (fc == FirmwareCarrier.Summon)
+                {
+                    continue; // 无人机子弹走射弹壁撞（D 段）
+                }
+                float a = RootInstrs(Compile(FwWall, fc)).FirstOrDefault(x => x.Port == EmgConst.PortKinetic && x.Role > EmgConst.RoleLastRead).A;
+                var runs = new (float hp, double moved, long impacts, bool hit)[2];
+                for (int run = 0; run < 2; run++)
+                {
+                    bool obstacle = run == 0;
+                    CombatConfig cfg = Cfg();
+                    cfg.EmgEntity = 1;
+                    using var k = new CombatKernel(cfg, 32);
+                    CombatSite.ApplyEmgSubForms(k);
+                    CombatSite.ApplyEntityProfiles(k);
+                    int me = Me(k, new double2(0, 0), k.AddWeapon(CarrierGun(k, FwWall, fc, rd, true)));
+                    int foe = Foe(k, new double2(0, dist), 1000f);
+                    if (obstacle)
+                    {
+                        k.SetObstacles(new List<float3> { new float3(0f, (float)dist + 1.2f, 0.5f) }); // 推动路线上 0.2 米处贴上障碍（半径 0.5 + 单位 0.5）
+                    }
+                    long impacts0 = k.EmgBusStats.Impacts;
+                    k.FireAt(me, foe, k.Time);
+                    bool hit = false;
+                    for (int i = 0; i < 180 && !hit; i++)
+                    {
+                        StepN(k, 1);
+                        hit = Hp(k, foe) < 1000f; // 第一次命中那一步就停（布区每拍都会再推）
+                    }
+                    runs[run] = (Hp(k, foe), Pos(k, foe).y - dist, k.EmgBusStats.Impacts - impacts0, hit);
+                }
+                var (hpO, movedO, impO, hitO) = runs[0];
+                var (hpF, movedF, impF, hitF) = runs[1];
+                Expect(a > 0f && hitO && impO >= 1 && hpO < hpF - 0.5f && movedO > 0.05 && movedO < 0.4,
+                    $"{say} 触发：命中后朝远离出手者推开，0.2 米处撞上障碍停住（推开 {movedO:0.##} 米），实体层撞击 {impO} 次、目标 {hpO:0.#} 血（开阔地同一击 {hpF:0.#} 血）");
+                Expect(hitF && impF == 0 && Math.Abs(movedF - a) < 0.05,
+                    $"{say} 不触发：开阔地只推开 {movedF:0.##} 米（= 表值 a {F(a)}），没有撞击（{impF} 次）");
             }
         }
 

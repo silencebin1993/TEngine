@@ -37,6 +37,121 @@ namespace BinGames.Sim.Combat
 
         public EmgMatter MatterRow(int code) => code >= 1 && code <= EmgMatterConst.Count ? _d.EmgMatters[code] : default;
 
+        /// <summary>
+        /// EMG2-RULE-01（FG19 FGR-EMG-084；ADR ⑥）：写通道规则表并按物质码建两张索引（a 侧物质：matter_matter / matter_energy；b 侧物质：event_matter），索引内按优先级升序。
+        /// 超过 <see cref="EmgRuleConst.Capacity"/> 条、码越界、结算方式不认识时整表拒绝（返回 false，保留原表）。O(规则数²)，只在地点载入 / 表重载时。
+        /// </summary>
+        public bool SetEmgRules(IReadOnlyList<EmgRule> rules)
+        {
+            if (rules == null || rules.Count > EmgRuleConst.Capacity)
+            {
+                return false;
+            }
+            for (int i = 0; i < rules.Count; i++)
+            {
+                EmgRule r = rules[i];
+                if (r.Pair < EmgRuleConst.PairMatterMatter || r.Pair > EmgRuleConst.PairMatterEntity || r.Op > EmgRuleConst.OpVent || r.Product > EmgMatterConst.Count
+                    || r.By > EmgMatterConst.Count || r.Main < EmgRuleConst.MainS || r.Main > EmgRuleConst.MainP || r.Key == 0)
+                {
+                    return false;
+                }
+            }
+            _d.EmgRules.Clear();
+            _d.EmgRuleOrder.Clear();
+            for (int i = 0; i < rules.Count; i++)
+            {
+                _d.EmgRules.Add(rules[i]);
+            }
+            for (int slot = 0; slot < EmgRuleConst.IndexSlots; slot++)
+            {
+                int start = _d.EmgRuleOrder.Length;
+                var picked = new List<int>();
+                for (int i = 0; i < rules.Count; i++)
+                {
+                    if (CombatLogic.EmgRuleIndexSlot(rules[i]) == slot)
+                    {
+                        picked.Add(i);
+                    }
+                }
+                picked.Sort((x, y) => rules[x].Priority != rules[y].Priority ? rules[x].Priority.CompareTo(rules[y].Priority) : x.CompareTo(y));
+                foreach (int i in picked)
+                {
+                    _d.EmgRuleOrder.Add((short)i);
+                }
+                _d.EmgRuleIdx[slot] = new int2(start, picked.Count);
+            }
+            Touch();
+            return true;
+        }
+
+        public int EmgRuleCount => _d.EmgRules.Length;
+
+        public EmgRule EmgRuleAt(int i) => i >= 0 && i < _d.EmgRules.Length ? _d.EmgRules[i] : default;
+
+        /// <summary>自检 / 热更注入：在 <paramref name="pos"/> 处 <paramref name="radius"/> 米内的斑块注入能量（FG19B 第 1.4 节第 4 条；port = 501 热 / 502 电）。返回注入到的斑块数。</summary>
+        public int InjectPatchEnergy(double2 pos, float radius, ushort port, float amount, int chain = 0)
+        {
+            int n = CombatLogic.EmgInjectPatches(ref _d, pos, radius, port, amount, chain, 0);
+            Touch();
+            return n;
+        }
+
+        /// <summary>自检：铺一块某阵营的读法驻留区（与正式读法同一条 SpawnZone 迁入路径；能映射物质时成迁入斑块，按区域载荷只伤对面阵营）。</summary>
+        public bool SpawnReadingZoneForTests(CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint statusMask)
+        {
+            bool ok = CombatLogic.SpawnReadingZoneForTests(ref _d, faction, pos, radius, seconds, dps, statusMask);
+            Touch();
+            return ok;
+        }
+
+        /// <summary>斑块的温度 / 电荷 / 累计动能（按斑块 Id；找不到返回 false）。</summary>
+        public bool TryGetPatchEnergy(int patchId, out float temp, out float charge, out float kinetic)
+        {
+            temp = charge = kinetic = 0f;
+            for (int i = 0; i < _d.Patches.Length; i++)
+            {
+                CombatZone z = _d.Patches[i];
+                if (z.Matter != 0 && z.EmgId == patchId)
+                {
+                    temp = z.Temp;
+                    charge = z.Charge;
+                    kinetic = z.Kinetic;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// EMG2-RULE-01（FGR-EMG-088）：本机的“避开危险物质”教义开关（缺省开；接入 / 直控的机器本来就不走教义）。标志随单位进快照。
+        /// </summary>
+        public bool SetHazardAvoid(int unitId, bool on)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0)
+            {
+                return false;
+            }
+            _d.Set(i, CombatUnitFlags.NoHazardAvoid, !on);
+            Touch();
+            return true;
+        }
+
+        /// <summary>单位的 7 个累积量（AccA = 寒量、结构积热、电荷、腐蚀度；AccB = 磁化度、着火度、入侵度）与温度；不存在返回 false。</summary>
+        public bool TryGetUnitEnergy(int unitId, out float4 accA, out float3 accB)
+        {
+            int i = _d.SlotOf(unitId);
+            accA = default;
+            accB = default;
+            if (i < 0)
+            {
+                return false;
+            }
+            accA = _d.EmgUnit[i].AccA;
+            accB = _d.EmgUnit[i].AccB;
+            return true;
+        }
+
         /// <summary>DEBT-EMG1ENT01-07：实体档案表每行的稳定键（与 <see cref="SetEntityProfiles"/> 同序同长；不同长拒绝）。读档时按它把旧档里的档案下标挪到当前表。</summary>
         public bool SetEntityProfileKeys(IReadOnlyList<int> keys)
         {

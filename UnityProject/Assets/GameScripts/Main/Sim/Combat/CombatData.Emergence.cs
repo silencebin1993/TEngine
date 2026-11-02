@@ -12,6 +12,10 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgField> Fields;
         /// <summary>EMG2-MAT-01：物质数值表（下标 = 物质码 1～17；热更层按 fg.TbMatter 写，是表数据，读档沿用当前的）。</summary>
         public NativeArray<EmgMatter> EmgMatters;
+        /// <summary>EMG2-RULE-01：编好的通道规则（fg.TbChannelRule，≤ 256；表数据，读档沿用当前的）与按物质码的索引（int2 = EmgRuleOrder 里的起点、条数；按优先级升序）。</summary>
+        public NativeList<EmgRule> EmgRules;
+        public NativeArray<Unity.Mathematics.int2> EmgRuleIdx;
+        public NativeList<short> EmgRuleOrder;
         /// <summary>EMG2-MAT-01（DEBT-EMG1ENT01-07）：实体档案表每行的稳定键（热更层按 fg.TbEntityProfile 行 ID 写；读档时按键把单位 / 残骸的档案下标挪到当前表）。</summary>
         public NativeList<int> EmgProfileKeys;
         /// <summary>EMG2-MAT-02（ADR ⑤）：设施受击聚合——待发布（按键合并、不限条数但键数 ≤ 斑块 + 液洼）与已发布（每步 ≤ 64 条、热更层取走）。派生量，不进快照。</summary>
@@ -27,6 +31,9 @@ namespace BinGames.Sim.Combat
             Patches = new NativeList<CombatZone>(8, Allocator.Persistent);
             Fields = new NativeList<EmgField>(4, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
+            EmgRules = new NativeList<EmgRule>(8, Allocator.Persistent);
+            EmgRuleIdx = new NativeArray<Unity.Mathematics.int2>(EmgRuleConst.IndexSlots, Allocator.Persistent);
+            EmgRuleOrder = new NativeList<short>(8, Allocator.Persistent);
             EmgProfileKeys = new NativeList<int>(EmgConst.ProfileSlots, Allocator.Persistent);
             EmgStructPending = new NativeList<EmgStructHit>(8, Allocator.Persistent);
             EmgStructOut = new NativeList<EmgStructHit>(8, Allocator.Persistent);
@@ -88,6 +95,9 @@ namespace BinGames.Sim.Combat
             Patches.Dispose();
             Fields.Dispose();
             EmgMatters.Dispose();
+            EmgRules.Dispose();
+            EmgRuleIdx.Dispose();
+            EmgRuleOrder.Dispose();
             EmgProfileKeys.Dispose();
             EmgStructPending.Dispose();
             EmgStructOut.Dispose();

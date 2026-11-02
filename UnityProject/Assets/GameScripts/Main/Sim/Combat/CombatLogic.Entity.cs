@@ -448,7 +448,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>没有宿主程序的实体事件（残骸的撞击 / 位移 / 吸收）：按需（地点有程序读这一类）才入队。</summary>
-        private static void EmgEntityEvent(ref CombatData d, EmgEventKind k, EmgEntKind ent, int entId, EmgEntKind other, int otherId, float value, float value2, ushort code, double2 pos)
+        internal static void EmgEntityEvent(ref CombatData d, EmgEventKind k, EmgEntKind ent, int entId, EmgEntKind other, int otherId, float value, float value2, ushort code, double2 pos)
         {
             if (!EmgSiteListens(ref d, k))
             {
@@ -592,6 +592,7 @@ namespace BinGames.Sim.Combat
                 EmgEntKind otherKind = hitUnit >= 0 ? EmgEntKind.Unit : hitWreck >= 0 ? EmgEntKind.Wreck : EmgEntKind.None;
                 EmgCountImpact(ref d);
                 EmgUnitEvent(ref d, EmgEventKind.Impact, k, otherId, speed, mass, 0, end, otherKind);
+                EmgKineticAt(ref d, end, kinetic); // EMG2-RULE-01：撞击动能落到撞点的固态斑块（FG19B 1.4 #7）
                 int capped = d.EmgS[0].WrecksCapped;
                 EmgImpactDamage(ref d, k, kinetic, pusher);
                 hitWreck -= d.EmgS[0].WrecksCapped - capped; // 被推者撞死、满 256 生成残骸会整表前移一位：撞上的那块下标跟着前移（< 0 = 它已被移出）

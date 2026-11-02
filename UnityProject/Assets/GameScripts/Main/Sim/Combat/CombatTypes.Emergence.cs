@@ -32,6 +32,8 @@ namespace BinGames.Sim.Combat
         public const ushort PortProjectile = 601, PortDeflect = 705, PortCover = 1103;
         /// <summary>EMG1-FIX-01（FG19A 第 1.1 节第 16 行 壁撞）：动能写端、障碍条件读端的端口码——“写 en.kinetic 且同一条读 ter.obstacle”= 撞障碍面时在撞击点放冲击（按端口，不按固件 ID）。</summary>
         public const ushort PortKinetic = 504, PortObstacle = 1101;
+        /// <summary>EMG2-RULE-01：能量端口码（FG19 第 2.5 节）。</summary>
+        public const ushort PortHeat = 501, PortElec = 502, PortMag = 503;
         public const int EventKinds = 29;
 
         // ── EMG1-BUS-01（FGR-EMG-063～065）：每步处理条数 / 扇出 / 每宿主上限 / 冷却完成比例的初值（运行时取 CombatConfig 里热更层按 fg.TbHomeTuning emg.* 写的值，≤ 0 用这里）──
@@ -873,6 +875,25 @@ namespace BinGames.Sim.Combat
         public int StructHitsDeferred;
         /// <summary>待发布表满（没有消费者的地点）丢掉的最旧条目数。</summary>
         public int StructHitsDropped;
+        // ── EMG2-RULE-01（不进快照，调试 / 自检计数）──
+        /// <summary>规则结算次数 / 本节拍还有别的规则成立、按优先级留到下一节拍的次数（FGR-EMG-084 同一宿主一个节拍只结算一条）。</summary>
+        public int RulesSettled;
+        public int RulesDeferred;
+        /// <summary>传导节拍数 / 累计节点访问 / 因访问上限把剩余能量顺延到下一节拍的次数 / 最近一个传导节拍的访问数。</summary>
+        public int ConductTicks;
+        public int ConductVisits;
+        public int ConductCarried;
+        public int ConductLastVisits;
+        /// <summary>AI 避险施加排斥的单位步数（FGR-EMG-088）；玩家显式命令穿过危险斑块的警告次数。</summary>
+        public int AvoidPushes;
+        public int AvoidWarnings;
+        /// <summary>落到固态斑块上的动能次数（FGR-EMG-093）。</summary>
+        public int KineticDeposits;
+        /// <summary>同一次出手（链 + 节点 + 步）对斑块只注一次能量（不进快照，只在同一步内有效）：最近一次注能的链 / 节点 / 步、本步已注的指令位。</summary>
+        public int InjChain;
+        public int InjNode;
+        public long InjStep;
+        public ulong InjMask;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
     }

@@ -1224,6 +1224,10 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>自检（EMG2-RULE-01）：按读法驻留区同一条路径铺一块某阵营的区域（斑块层开着、标签能映射物质时迁入 Patches 成迁入斑块）。</summary>
+        internal static bool SpawnReadingZoneForTests(ref CombatData d, CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint mask) =>
+            SpawnZone(ref d, -1, faction, pos, radius, seconds, dps, 0f, 1f, mask, 3f, 0f, 0f, 0f, CombatConst.ZoneKindReading, migrate: true);
+
         /// <summary>FG2-VFX-02：刚生成的那块区域画成什么样（只影响画面）。</summary>
         private static void SetLastZoneLook(ref CombatData d, CombatZoneLook look)
         {

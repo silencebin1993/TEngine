@@ -193,6 +193,7 @@ namespace GameLogic.Campaign.Combat
             ApplyEmgSubForms(Kernel); // EMG1-TRIG-01：子形态参数按 fg.TbSubPayload 写进内核
             ApplyEntityProfiles(Kernel); // EMG1-ENT-01：实体档案按 fg.TbEntityProfile 写进内核
             ApplyMatters(Kernel); // EMG2-MAT-01：17 种物质按 fg.TbMatter 写进内核（斑块层开不开看 emg.stage）
+            ApplyRules(Kernel); // EMG2-RULE-01：通道规则 fg.TbChannelRule 编成内核规则（≤ 256）
             _emgEntity = config.EmgEntity != 0;
             ConfigureReactions();
             Sync = new CombatTransformSync(16);
@@ -342,6 +343,23 @@ namespace GameLogic.Campaign.Combat
             c.EmgPatchSoftMerge = Mathf.Max(0f, Tuning("emg.patch.soft_merge_radius", EmgMatterConst.DefaultSoftMergeRadius));
             c.EmgGasMinConc = Mathf.Clamp(Tuning("emg.gas.min_conc", EmgMatterConst.DefaultMinConc), 0.01f, 1f);
             c.EmgFriendlyScale = Mathf.Clamp(Tuning("emg.matter.friendly_scale", 1f), 0f, 1f);
+            // EMG2-RULE-01（FG19 FGR-EMG-091 / 092、FG19B 第 1.4 / 10 节）：传导与热交换参数
+            c.EmgConductTick = Mathf.Max(0.05f, Tuning("emg.conduct.tick", EmgMatterConst.DefaultTick));
+            c.EmgConductFalloff = Mathf.Clamp(Tuning("emg.conduct.falloff", EmgRuleConst.DefaultFalloff), 0.05f, 0.99f);
+            c.EmgConductHops = Mathf.Clamp((int)Math.Round(Tuning("emg.conduct.max_hops", EmgRuleConst.DefaultMaxHops)), 1, 16);
+            c.EmgConductQMin = Mathf.Max(0.001f, Tuning("emg.conduct.q_min", EmgRuleConst.DefaultQMin));
+            c.EmgConductVisits = Mathf.Clamp((int)Math.Round(Tuning("emg.conduct.max_visits", EmgRuleConst.DefaultMaxVisits)), 1, 4096);
+            c.EmgConductShare = Mathf.Clamp(Tuning("emg.conduct.unit_share", EmgRuleConst.DefaultUnitShare), 0f, 1f);
+            c.EmgConductDecay = Mathf.Clamp(Tuning("emg.conduct.patch_decay", EmgRuleConst.DefaultPatchDecay), 0.01f, 1f);
+            c.EmgConductBigR = Mathf.Max(1f, Tuning("emg.conduct.big_patch_radius", EmgRuleConst.DefaultBigRadius));
+            c.EmgHeatAmbient = Tuning("emg.heat.ambient", EmgRuleConst.DefaultAmbient);
+            c.EmgHeatExchange = Mathf.Clamp(Tuning("emg.heat.exchange", EmgRuleConst.DefaultExchange), 0.01f, 1f);
+            c.EmgHeatGain = Mathf.Max(0.01f, Tuning("emg.heat.patch_gain", EmgRuleConst.DefaultPatchGain));
+            c.EmgHeatCool = Mathf.Max(0f, Tuning("emg.heat.cool_rate", EmgRuleConst.DefaultCoolRate));
+            c.EmgHeatUnitScale = Mathf.Max(1f, Tuning("emg.heat.unit_overheat_scale", EmgRuleConst.DefaultUnitOverheatScale));
+            c.EmgHeatUnitGain = Mathf.Max(0f, Tuning("emg.heat.unit_gain", EmgRuleConst.DefaultUnitGain));
+            c.EmgAvoidMargin = Mathf.Max(0.1f, Tuning("emg.avoid.margin", EmgRuleConst.DefaultAvoidMargin));
+            c.EmgAvoidWeight = Mathf.Max(0f, Tuning("emg.avoid.weight", EmgRuleConst.DefaultAvoidWeight));
             c.EmgKnockSeconds = Mathf.Max(0.02f, Tuning("emg.push.knock_seconds", EmgConst.DefaultKnockSeconds));
             c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
             // EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁“只跳已标记”确实跳到已标记目标时记在哪个图鉴条目上（按稳定键；内核不认内容 ID）。
@@ -551,6 +569,9 @@ namespace GameLogic.Campaign.Combat
         }
 
         private int _patchDegradeSeen;
+
+        /// <summary>EMG2-RULE-01：本进程发出的“路线穿过危险物质”警告条数（自检）。</summary>
+        public static long HazardWarningsPosted { get; private set; }
 
         /// <summary>斑块降级（软 / 总上限、丢弃）每次增加时记一行（调试层；O(1) / 步）。</summary>
         private void WatchPatches()
@@ -1128,6 +1149,29 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>EMG2-MAT-01：把编好的物质表（<see cref="Emergence.EmgMatterCatalog"/>，fg.TbMatter）写进内核（地点创建 / 表重载）。
         /// 表不合法时报错并保持内核原表（斑块层因此不生效，不静默：Log.Error）。放在 Campaign/Combat 下：只有这里碰内核（FG14 §5 硬约束 3）。</summary>
+        public static bool ApplyRules(CombatKernel kernel)
+        {
+            Emergence.EmgRuleCatalog.Compiled c = Emergence.EmgRuleCatalog.Current;
+            if (kernel == null || !c.Ok)
+            {
+                foreach (string p in c.Problems)
+                {
+                    Log.Error("[EmgRuleCatalog] " + p);
+                }
+                return false;
+            }
+            if (!kernel.SetEmgRules(c.Rules))
+            {
+                Log.Error("[EmgRuleCatalog] 内核拒绝了规则表（码越界或超容量）");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>EMG2-RULE-01（FGR-EMG-088）：机器的“避开危险物质”教义开关（缺省开）。机器不在本地点返回 false。</summary>
+        public bool SetMachineHazardAvoid(int logicId, bool on) =>
+            !IsDisposed && _machineUnit.TryGetValue(logicId, out int unit) && Kernel.SetHazardAvoid(unit, on);
+
         public static bool ApplyMatters(CombatKernel kernel)
         {
             Emergence.EmgMatterCatalog.Compiled c = Emergence.EmgMatterCatalog.Current;
@@ -2062,6 +2106,15 @@ namespace GameLogic.Campaign.Combat
                     {
                         marker.OnWorkArrived();
                     }
+                    return;
+                }
+                case CombatEventKind.HazardPath:
+                {
+                    // EMG2-RULE-01（FGR-EMG-088 / B08）：玩家显式路线穿过危险物质——警告级通知、可定位；路线不改写（内核下令时判一次）
+                    string who = EmgChainView.PartyName(this, state, e.Unit);
+                    string what = Emergence.EmgMatterCatalog.NameOf(e.Code) ?? GameText.Get("emg.tree.unknown");
+                    Notifications.NotificationCenter.Post("hazard_path", GameText.Format("emg.avoid.warn.body", who, what), new Vector3((float)e.Pos.x, 0f, (float)e.Pos.y));
+                    HazardWarningsPosted++;
                     return;
                 }
                 case CombatEventKind.WorkBlocked:

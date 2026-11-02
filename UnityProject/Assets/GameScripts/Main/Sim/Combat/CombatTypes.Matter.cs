@@ -125,4 +125,51 @@ namespace BinGames.Sim.Combat
         public byte Faction;
         public byte Depth;
     }
+
+    /// <summary>
+    /// EMG2-RULE-01（FG19 FGR-EMG-084 / 085 / 091～093；ADR-EMG-001 ⑥）：通道规则引擎常量。规则表 fg.TbChannelRule 由热更层编成 <see cref="EmgRule"/>（≤ <see cref="Capacity"/> 条），
+    /// 内核只认 pairKind / 条件种类 / 结算方式这几个码与端口码、物质码、阈值，不认规则名与任何内容 ID（FGR-EMG-013）。
+    /// </summary>
+    public static class EmgRuleConst
+    {
+        public const int Capacity = 256;
+        /// <summary>沾染位在规则两侧码里的表示：<see cref="CoatBase"/> + 位号（端口码都 &lt; 1200，不冲突）。</summary>
+        public const ushort CoatBase = 2000;
+        public const byte PairMatterMatter = 1, PairMatterEnergy = 2, PairEventMatter = 3, PairCoatMatter = 4, PairPhaseEnergy = 5, PairPropField = 6, PairMatterEntity = 7;
+        public const byte CondNone = 0, CondOverlap = 1, CondOverlapDry = 2, CondTempGe = 3, CondTempLt = 4, CondTempGeConcLt = 5, CondTempGeConcGe = 6, CondTempLeFor = 7,
+            CondTempGtFor = 8, CondChargeGe = 9, CondChargeGeConcGe = 10, CondKineticGe = 11, CondExpire = 12, CondExpireTempLt = 13, CondOverheatIn = 14;
+        /// <summary>结算方式：0 = 承接卡接上（本卡落表、占容量、不结算）。</summary>
+        public const byte OpDeferred = 0, OpConvert = 1, OpMoveOver = 2, OpDilute = 3, OpDouse = 4, OpErode = 5, OpSplit = 6, OpSpawn = 7, OpBurst = 8, OpArc = 9, OpFragment = 10, OpVent = 11;
+        public const byte MainS = 1, MainT = 2, MainB = 3, MainP = 4;
+        public const byte SideNone = 0, SideDamage = 1, SideMult = 2;
+        /// <summary>“不改温度”的哨兵（表里写 −999）。</summary>
+        public const float KeepTemp = -998f;
+        /// <summary>按物质码建的两张索引：[0, 18) = a 侧物质（matter_matter / matter_energy），[18, 36) = b 侧物质（event_matter）。</summary>
+        public const int IndexSlots = (EmgMatterConst.Count + 1) * 2;
+        // 传导 / 热（FG19B 第 1.4 节、第 10 节初值；运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）
+        public const int DefaultMaxHops = 6, DefaultMaxVisits = 256;
+        public const float DefaultFalloff = 0.7f, DefaultQMin = 0.05f, DefaultUnitShare = 0.6f, DefaultPatchDecay = 0.5f, DefaultBigRadius = 8f, DefaultConductMinStrength = 0.3f;
+        public const float DefaultAmbient = 20f, DefaultExchange = 0.4f, DefaultPatchGain = 10f, DefaultCoolRate = 40f, DefaultUnitOverheatScale = 300f, DefaultUnitGain = 0.02f;
+        public const float DefaultAvoidMargin = 1f, DefaultAvoidWeight = 1.5f;
+    }
+
+    /// <summary>一条编好的通道规则（fg.TbChannelRule 一行）。全部值类型，Burst 可读；表数据，不进快照（读档沿用当前表）。</summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgRule
+    {
+        /// <summary>计数键：named 的稳定键（none 时用本行 id 的稳定键）。可靠计数、evt.react 的槽位、因果链“规则”节点都按它。</summary>
+        public int Key;
+        /// <summary>本行 id 的稳定键（调试 / 悬停文本反查）。</summary>
+        public int IdKey;
+        public float C1, C2, P1, P2, P3, P4, Life, LifeMul, ByAmount, ByTemp, ByLife, ConsA, ConsB, SideValue;
+        public ushort A, B;
+        public short Priority;
+        public byte Pair, Cond, Main, Op;
+        /// <summary>产物物质码（S / T 类结算出的物质；P 类为 0）。</summary>
+        public byte Product;
+        /// <summary>伴生物质码（0 = 没有）。</summary>
+        public byte By;
+        public byte Side, Stage;
+    }
 }

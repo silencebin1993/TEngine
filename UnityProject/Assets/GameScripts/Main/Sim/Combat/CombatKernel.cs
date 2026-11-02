@@ -1218,6 +1218,26 @@ namespace BinGames.Sim.Combat
             };
             _d.Set(i, CombatUnitFlags.PendingCommand, pending);
             ResetNav(i, keepRoute);
+            // EMG2-RULE-01（FGR-EMG-088 / B08）：玩家显式的移动 / 攻击移动路线穿过对这台机器有害的斑块——路线不改写，下令时发一次警告级事件（不做智能延续）
+            if ((kind == CombatCommandKind.Move || kind == CombatCommandKind.Attack) && _d.Faction[i] == (byte)CombatFaction.Player)
+            {
+                double2 to = kind == CombatCommandKind.Attack && _d.SlotOf(targetId) >= 0 ? _d.Pos[_d.SlotOf(targetId)] : pos;
+                double len = math.distance(_d.Pos[i], to);
+                if (kind == CombatCommandKind.Attack && attackRange > 0f && len > 1e-6)
+                {
+                    // 攻击移动走到射程就停：只判断“本机 → 离目标还差一个射程”那一段，目标站在火后面但已在射程内时不误报
+                    to = _d.Pos[i] + (to - _d.Pos[i]) * (math.max(0.0, len - attackRange) / len);
+                }
+                int hz = math.distance(_d.Pos[i], to) > 1e-6 ? CombatLogic.EmgPathHazard(ref _d, i, _d.Pos[i], to) : -1;
+                if (hz >= 0)
+                {
+                    CombatZone z = _d.Patches[hz];
+                    EmgScalars es = _d.EmgS[0];
+                    es.AvoidWarnings++;
+                    _d.EmgS[0] = es;
+                    CombatLogic.Gameplay(ref _d, CombatEventKind.HazardPath, i, 0, z.Radius, 0f, z.Pos, z.Matter, 0);
+                }
+            }
             return true;
         }
 
@@ -2865,6 +2885,10 @@ namespace BinGames.Sim.Combat
             staging.EmgEntParams[0] = _d.EmgEntParams[0];
             // EMG2-MAT-01：物质数值表是表数据（热更层按 fg.TbMatter 写），读档沿用当前的；实体档案稳定键：快照里存的是写档时的表（段 19），按键把下标挪到当前表（DEBT-EMG1ENT01-07）。
             staging.EmgMatters.CopyFrom(_d.EmgMatters);
+            // EMG2-RULE-01：通道规则同是表数据（热更层按 fg.TbChannelRule 写），读档沿用当前的。
+            staging.EmgRules.CopyFrom(_d.EmgRules);
+            staging.EmgRuleIdx.CopyFrom(_d.EmgRuleIdx);
+            staging.EmgRuleOrder.CopyFrom(_d.EmgRuleOrder);
             RemapProfiles(ref staging, _d.EmgProfileKeys);
             _d.Dispose();
             _d = staging;

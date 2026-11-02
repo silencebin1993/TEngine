@@ -594,6 +594,11 @@ namespace BinGames.Sim.Combat
         /// 所以同一次伤害的 evt.hit 一定排在 Kill 里的 evt.kill 之前。</summary>
         internal static void EmgOnDamage(ref CombatData d, int t, float damage, int attacker, int attackerId)
         {
+            EmgCtx c0 = d.EmgCtx;
+            if (c0.Prog >= 0 && c0.EntKind != EmgEntKind.None && attacker == c0.Owner)
+            {
+                EmgHitInject(ref d, t, c0); // EMG2-RULE-01：命中注能（en.heat / en.elec / en.mag 写端）与壁撞推动；不依赖总线监听
+            }
             if (d.EmgListen == 0u)
             {
                 return;
@@ -650,6 +655,7 @@ namespace BinGames.Sim.Combat
         /// <summary>积热首次越过过热阈值：evt.overheat（Value = 积热）；地点有程序读 evt.cooled 时记下“过热过”，回落时 <see cref="EmgOnCool"/> 发 evt.cooled。</summary>
         internal static void EmgOnOverheat(ref CombatData d, int a, float heat)
         {
+            EmgOverheatRules(ref d, a); // EMG2-RULE-01：event_matter（evt.overheat × 冷却液 / 水：V04 / V05）在生产点内联求值，不依赖总线监听（DEBT-EMG1BUS01-02）
             if (d.EmgListen == 0u)
             {
                 return;

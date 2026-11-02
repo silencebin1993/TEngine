@@ -236,7 +236,20 @@ namespace BinGames.Sim.Combat
         private static bool Conductive(ref CombatData d, int k, double now)
         {
             uint mask = d.Config.EmgConductiveMask != 0u ? d.Config.EmgConductiveMask : DefaultConductiveMask;
-            return (d.Status[k] & mask) != 0u && d.StatusUntil[k] > now;
+            if ((d.Status[k] & mask) != 0u && d.StatusUntil[k] > now)
+            {
+                return true;
+            }
+            // EMG2-RULE-01（FGR-EMG-091 末条）：站在导电斑块（导电 ≥ 0.3）里的单位同样算“导电”，连锁优先跳它（兑现电弧“沿湿面优先”）
+            uint inside = d.EmgUnit[k].PrevMatterMask;
+            for (int m = 1; inside != 0u && m <= EmgMatterConst.Count; m++)
+            {
+                if ((inside & (1u << m)) != 0u && MatterOf(ref d, m).Conductive >= EmgRuleConst.DefaultConductMinStrength)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ─────────────────────────────── 挑目标（寻的 / 连锁 / 跳弹）───────────────────────────────
@@ -718,8 +731,12 @@ namespace BinGames.Sim.Combat
             }
             float dmg = pr.Damage * ratio;
             byte want = pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
-            EmgRingDamage(ref d, at, radius, want, dmg, d.SlotOf(pr.Owner), -1);
-            EmgProjEvent(ref d, ref pr, EmgEventKind.Impact, 0, face == EmgCode.FaceWreck ? EmgEntKind.Wreck : EmgEntKind.None, dmg, radius, face, at);
+            // EMG2-RULE-01（卡片负向 / FG19 事件表第 20 行）：冲击伤害走 DamageFrom（evt.hurt Code = 撞击 6），evt.impact 载荷 Value = 速度、Value2 = 质量（原为伤害 / 半径）
+            EmgRingDamage(ref d, at, radius, want, dmg, d.SlotOf(pr.Owner), -1, EmgCode.SrcImpact);
+            float speed = math.length(pr.Vel);
+            float mass = EmgProjMass(ref d, pr);
+            EmgKineticAt(ref d, at, mass * speed * speed * d.EmgEntParams[0].KineticImpact);
+            EmgProjEvent(ref d, ref pr, EmgEventKind.Impact, 0, face == EmgCode.FaceWreck ? EmgEntKind.Wreck : EmgEntKind.None, speed, mass, face, at);
         }
 
         /// <summary>侧偏过的弹体穿过偏折场时按概率不被反射（FG19A 第 1.1 节第 14 行：一半概率；每发一个无状态哈希，同一发结果固定）。

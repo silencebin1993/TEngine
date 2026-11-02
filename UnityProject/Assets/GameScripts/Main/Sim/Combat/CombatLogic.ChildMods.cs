@@ -51,7 +51,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary><paramref name="center"/> 周围 <paramref name="radius"/> 米内的敌对地面单位各吃 <paramref name="damage"/>（<paramref name="exclude"/> 除外）。</summary>
-        private static void EmgRingDamage(ref CombatData d, double2 center, float radius, byte want, float damage, int owner, int exclude)
+        private static void EmgRingDamage(ref CombatData d, double2 center, float radius, byte want, float damage, int owner, int exclude, ushort src = 0)
         {
             for (int k = 0; k < d.Count; k++)
             {
@@ -61,7 +61,14 @@ namespace BinGames.Sim.Combat
                 }
                 if (math.distance(d.Pos[k], center) <= radius + d.Radius[k])
                 {
-                    DamageUnit(ref d, k, damage, owner);
+                    if (src != 0)
+                    {
+                        DamageFrom(ref d, k, damage, owner, src);
+                    }
+                    else
+                    {
+                        DamageUnit(ref d, k, damage, owner);
+                    }
                 }
             }
         }

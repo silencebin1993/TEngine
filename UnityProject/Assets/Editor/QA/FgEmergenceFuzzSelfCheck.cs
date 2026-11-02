@@ -1424,7 +1424,7 @@ namespace GameLogic.EditorTools
                 "tempo" => "EMG3-TMP-01",
                 "meta" => "EMG3-FW-02",
                 "hijack" => "EMG4-FW-01",
-                _ => "EMG2-RULE-01（规则表读端）",
+                _ => "EMG2-PHS-01（属性 / 累积量读端，DEBT-EMG2RULE01-11）",
             };
         }
 

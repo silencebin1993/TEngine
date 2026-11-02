@@ -116,7 +116,8 @@ namespace GameLogic.Campaign.Combat
                 case EmgChainNode.Rule:
                 {
                     string rid = NamedReactionCatalog.IdOfKey(r.Key);
-                    string name = (rid != null ? NamedReactionCatalog.NameOf(rid) : null) ?? GameText.Get("emg.tree.unknown");
+                    // EMG2-RULE-01：图鉴里没有的规则（named = none / 新条目）用规则说明文本，不写“未知”
+                    string name = (rid != null ? NamedReactionCatalog.NameOf(rid) : null) ?? Emergence.EmgRuleCatalog.TextOfKey(r.Key) ?? GameText.Get("emg.tree.unknown");
                     return count > 1
                         ? GameText.Format("emg.chain.node.rule_count", name, count.ToString(CultureInfo.InvariantCulture))
                         : GameText.Format("emg.chain.node.rule", name, PartyName(site, state, r.Other));
@@ -140,7 +141,8 @@ namespace GameLogic.Campaign.Combat
                     text = GameText.Get("emg.chain.node.relay");
                     break;
                 case EmgChainNode.Doctrine:
-                    text = GameText.Get("emg.chain.node.doctrine");
+                    // EMG2-RULE-01（FGR-EMG-088）：Aux = 1 是 AI 避险的排斥动作——“由教义触发：避开危险物质”
+                    text = GameText.Get(r.Aux == 1 ? "emg.avoid.chain" : "emg.chain.node.doctrine");
                     break;
                 case EmgChainNode.Merge:
                     text = GameText.Format("emg.chain.node.merge", r.Chain.ToString(CultureInfo.InvariantCulture), r.Parent.ToString(CultureInfo.InvariantCulture));

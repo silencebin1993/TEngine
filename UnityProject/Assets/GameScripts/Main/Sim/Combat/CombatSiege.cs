@@ -1767,6 +1767,7 @@ namespace BinGames.Sim.Combat
                     if (len > 1e-6)
                     {
                         double2 next = pos + to / len * math.min(speed * dt, len);
+                        next = CombatLogic.EmgAvoidAdjust(ref d, i, pos, next); // EMG2-RULE-01（FGR-EMG-088 / ADR ⑯）：教义自选站位叠加有害斑块排斥力
                         if (math.distance(next, post) <= radius)
                         {
                             d.Pos[i] = CombatLogic.MoveCollide(ref d, i, pos, next);
@@ -1780,7 +1781,8 @@ namespace BinGames.Sim.Combat
                 double len = math.length(to);
                 if (len > 1.0)
                 {
-                    d.Pos[i] = CombatLogic.MoveCollide(ref d, i, pos, pos + to / len * math.min(speed * dt, len));
+                    double2 back = CombatLogic.EmgAvoidAdjust(ref d, i, pos, pos + to / len * math.min(speed * dt, len)); // EMG2-RULE-01：回守点同样避开有害斑块
+                    d.Pos[i] = CombatLogic.MoveCollide(ref d, i, pos, back);
                 }
             }
             su.HealCd = math.max(su.HealCd, -1f);

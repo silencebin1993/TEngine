@@ -175,6 +175,10 @@ public partial class Tables
     /// </summary>
     public fg.TbChannelPort TbChannelPort {get; }
     /// <summary>
+    /// 通道规则
+    /// </summary>
+    public fg.TbChannelRule TbChannelRule {get; }
+    /// <summary>
     /// 底盘特性
     /// </summary>
     public fg.TbChassisTrait TbChassisTrait {get; }
@@ -578,6 +582,7 @@ public partial class Tables
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
         TbChannelDecl = new fg.TbChannelDecl(loader("fg_tbchanneldecl"));
         TbChannelPort = new fg.TbChannelPort(loader("fg_tbchannelport"));
+        TbChannelRule = new fg.TbChannelRule(loader("fg_tbchannelrule"));
         TbChassisTrait = new fg.TbChassisTrait(loader("fg_tbchassistrait"));
         TbCodexEntry = new fg.TbCodexEntry(loader("fg_tbcodexentry"));
         TbCombatComponent = new fg.TbCombatComponent(loader("fg_tbcombatcomponent"));
@@ -714,6 +719,7 @@ public partial class Tables
         TbCarrierReading.ResolveRef(this);
         TbChannelDecl.ResolveRef(this);
         TbChannelPort.ResolveRef(this);
+        TbChannelRule.ResolveRef(this);
         TbChassisTrait.ResolveRef(this);
         TbCodexEntry.ResolveRef(this);
         TbCombatComponent.ResolveRef(this);

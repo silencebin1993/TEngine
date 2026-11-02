@@ -639,6 +639,8 @@ namespace BinGames.Sim.Combat
         JamEmitter = 1 << 29,
         /// <summary>FG9-FAC-02（子母雷）：不能被单体锁定（索敌 / 编队攻击 / 直控点击都选不中，开火结果 <see cref="CombatFireResult.AreaOnly"/>）；范围伤害与牵引照常作用（会提前引爆）。</summary>
         AreaOnly = 1u << 30,
+        /// <summary>EMG2-RULE-01（FGR-EMG-088 / ADR ⑯）：本机关闭了“避开危险物质”教义（缺省 0 = 开：AI 驾驶的己方机器在教义自选站位时绕开对自己有害的斑块）。随单位标志进快照。</summary>
+        NoHazardAvoid = 1u << 31,
     }
 
     /// <summary>
@@ -912,6 +914,9 @@ namespace BinGames.Sim.Combat
         /// Code：1 喷嘴蓄压（预警，Code2 = 1 酸液 / 2 液氮）、2 喷出、3 枢轴喷灌蓄压（预警）、4 自爆引信（预警）、5 爆炸（Code2 = 1 被火击毁的爆燃）、6 油迹被点燃、
         /// 7 冻结（Unit = 被冻结者）、8 分裂、9 投放预警（灭活无人机）、10 喷淋池被冲洗、11 酸沼腐蚀（Unit = 受伤者，只在它这一秒第一次挨时发）。</summary>
         ClarityCue = 48,
+        /// <summary>EMG2-RULE-01（FGR-EMG-088 / B08）：玩家显式下达的移动 / 攻击移动路线会穿过对这台机器有害的斑块（Unit = 机器，Code = 物质码，Pos = 第一块危险斑块中心）。
+        /// 路线不改写、只发这一次（下令时判一次，不做智能延续）。</summary>
+        HazardPath = 49,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -1384,6 +1389,12 @@ namespace BinGames.Sim.Combat
         public float EmgGasMinConc;
         /// <summary>己方物质伤到己方的系数（初值 1.0 = 完全中立，FG19 第 14 节 #6；0 视为 1）。</summary>
         public float EmgFriendlyScale;
+        /// <summary>EMG2-RULE-01（FG19 FGR-EMG-091 / 092、FG19B 第 1.4 / 10 节；≤ 0 用 <see cref="EmgRuleConst"/> 初值）：传导与热交换参数。</summary>
+        public float EmgConductTick, EmgConductFalloff, EmgConductQMin, EmgConductShare, EmgConductDecay, EmgConductBigR;
+        public int EmgConductHops, EmgConductVisits;
+        public float EmgHeatAmbient, EmgHeatExchange, EmgHeatGain, EmgHeatCool, EmgHeatUnitScale, EmgHeatUnitGain;
+        /// <summary>EMG2-RULE-01（FGR-EMG-088）：AI 避险排斥的起始距离（有害斑块边缘外，米）与权重。</summary>
+        public float EmgAvoidMargin, EmgAvoidWeight;
 
         public static CombatConfig Default => new CombatConfig
         {

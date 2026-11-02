@@ -171,10 +171,10 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>
         /// EMG2-MAT-01（按推荐默认执行（2026-11-01），待用户确认）：阶段 2 已开、但内核还没有执行者的端口（按端口，不按内容 ID，FGR-EMG-013）。
         /// stageGate ≥ 2 的 owner 只要有一条声明用到这些端口，就继续走旧 readFields 路径（FGR-EMG-019 双轨，整条切轨），避免“阶段提到 2 → 旧读法没了、新动词还没人执行”的整条失效。
-        /// 每张承接卡接通后从这里删掉对应项：fld.* → EMG2-FLD-01；ent.wreck → EMG2-RECL-01；evt.react 读端 / en.* / prop.heat → EMG2-RULE-01；物质端口的 modify（蔓延 / 随车）→ EMG2-RECL-01。
+        /// 每张承接卡接通后从这里删掉对应项：fld.* → EMG2-FLD-01；ent.wreck → EMG2-RECL-01；en.* → EMG2-RULE-01（已接通）；evt.react 读端 → EMG2-REACT-02（DEBT-EMG2RULE01-08）；prop.heat → EMG2-PHS-01（DEBT-EMG2RULE01-11）；物质端口的 modify（蔓延 / 随车）→ EMG2-RECL-01。
         /// 前缀以“.”结尾按族匹配，否则整串匹配。
         /// </summary>
-        public static readonly string[] PendingPorts = { "fld.", "ent.wreck", "evt.react", "en.", "prop.heat" };
+        public static readonly string[] PendingPorts = { "fld.", "ent.wreck", "evt.react", "prop.heat" }; // EMG2-RULE-01：en.* 已由内核注入 / 传导执行，移出
 
         /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>；物质端口的 modify 角色同样未接通）。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)

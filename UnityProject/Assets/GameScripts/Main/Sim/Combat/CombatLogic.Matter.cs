@@ -409,6 +409,7 @@ namespace BinGames.Sim.Combat
         {
             // EMG2-MAT-02：酸沼是虚拟世界源（不占斑块槽），有酸沼时同样要走接触（evt.enter / leave 与 PrevMatterMask）
             bool marsh = d.AcidShapes.Length > 0 && EmgPatchesOn(ref d);
+            StepConduct(ref d, dt); // EMG2-RULE-01：传导节拍（每 15 步一次，按步序号对齐；没有斑块也要衰减 / 传单位身上的电荷与磁化）
             if (d.EmgS[0].PatchLive <= 0 && !marsh)
             {
                 return;
@@ -541,6 +542,10 @@ namespace BinGames.Sim.Combat
             if (expire || z.Radius <= 0.05f || z.Amount <= 0.01f)
             {
                 d.Patches[i] = z;
+                if (!(m.Solid != 0 && z.Hp <= 0f))
+                {
+                    EmgExpireRules(ref d, i); // EMG2-RULE-01：event_matter（evt.expire × 本物质：V01 凝结、V02 冰化）在生产点内联求值
+                }
                 KillPatch(ref d, i);
                 EmgScalars es = d.EmgS[0];
                 es.PatchesExpired++;
@@ -559,6 +564,10 @@ namespace BinGames.Sim.Combat
             {
                 // EMG2-MAT-02（ADR ⑤ / DEBT-EMG2MAT01-02）：建筑 / 传送带 / 管线吃斑块——按斑块聚合进设施受击脏列表（热更层按格结算，不遍历斑块）；明火另标燃烧（烧产线）
                 AddStructHit(ref d, z.EmgId, z.Pos, z.Radius, m.StructDps * elapsed, z.Matter, z.Matter == EmgMatterConst.Fire ? EmgMatterConst.HitFire : (byte)0);
+            }
+            if (EmgPatchRules(ref d, i, now))
+            {
+                return; // EMG2-RULE-01：本块被规则转化 / 消失（同一宿主一个节拍只结算一条），本拍不再合并
             }
             EmgTickNeighbors(ref d, i, m);
         }

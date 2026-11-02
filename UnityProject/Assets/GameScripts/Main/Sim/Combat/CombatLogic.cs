@@ -1545,6 +1545,10 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             int attackerId = attacker >= 0 && attacker < d.Count ? d.Id[attacker] : 0;
             EmgOnDamage(ref d, t, damage, attacker, attackerId); // EMG1-BUS-01：evt.hit（当前宿主：出手 / 弹体 / 无人机）、evt.hurt（受击者，来源按载体）
+            if (!d.IsAlive(t))
+            {
+                return true; // EMG2-RULE-01：壁撞推动途中撞击已把目标撞死（EmgHitInject → 实体层撞击），这次伤害不再重复扣血 / 报伤
+            }
             if (d.Has(t, CombatUnitFlags.ExternalHealth))
             {
                 EmgNoteExternalHit(ref d, t, attackerId); // EMG1-ENT-01（ADR ⑦ 第 2 条）：击杀归属 = 最后一次伤害请求的攻击者
@@ -2062,6 +2066,10 @@ namespace BinGames.Sim.Combat
                     // EMG1-BUS-01：寿命到；EMG1-GRM-01：抛射弹落地（Code = 落地）、折返弹回到发射者身边（Code = 折返）。
                     ushort why = (pr.Flags & EmgProjFlags.Lob) != 0 ? EmgCode.ExpireGround
                         : EmgReturnedHome(ref d, pr) ? EmgCode.ExpireReturn : EmgCode.ExpireLife;
+                    if (d.EmgS[0].PatchLive > 0 && pr.Damage > 0f && why != EmgCode.ExpireReturn)
+                    {
+                        EmgKineticAt(ref d, next, pr.Damage * EmgProjKinetic(ref d, pr)); // EMG2-RULE-01（FG19B 1.4 #7）：抛射弹落地 / 破片落点的动能落到固态斑块
+                    }
                     EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, why, next);
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesExpired++;
