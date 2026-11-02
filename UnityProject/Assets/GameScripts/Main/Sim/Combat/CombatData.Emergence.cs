@@ -25,6 +25,10 @@ namespace BinGames.Sim.Combat
         public int LastZoneAt;
         /// <summary>EMG2-MAT-02（FG19B §1.5“液氮 → mat.cryo”）：冻结标签在本地点的状态位（热更层按 fg.TbStatusTag 写；液氮驻留区 / 液氮池迁入斑块时据此映射物质码）。派生量。</summary>
         public uint FrozenBit;
+        /// <summary>EMG2-PHS-01：相态规则（fg.TbPhaseRule 7 行，下标 = 累积量下标；表数据，读档沿用当前的）。</summary>
+        public NativeArray<EmgPhaseRule> EmgPhases;
+        /// <summary>EMG2-PHS-01（ADR ⑭ #9）：电击标签在本地点的状态位（热更层按 fg.TbStatusTag 写；读 15 / 16 版快照把 ImmuneMask 的电击位映射成电抗覆盖）。派生量。</summary>
+        public uint ShockBit;
 
         private void EmgCreate(int capacity)
         {
@@ -34,6 +38,11 @@ namespace BinGames.Sim.Combat
             EmgRules = new NativeList<EmgRule>(8, Allocator.Persistent);
             EmgRuleIdx = new NativeArray<Unity.Mathematics.int2>(EmgRuleConst.IndexSlots, Allocator.Persistent);
             EmgRuleOrder = new NativeList<short>(8, Allocator.Persistent);
+            EmgPhases = new NativeArray<EmgPhaseRule>(EmgPhaseConst.Count, Allocator.Persistent);
+            for (int k = 0; k < EmgPhaseConst.Count; k++)
+            {
+                EmgPhases[k] = EmgPhaseConst.Default(k);
+            }
             EmgProfileKeys = new NativeList<int>(EmgConst.ProfileSlots, Allocator.Persistent);
             EmgStructPending = new NativeList<EmgStructHit>(8, Allocator.Persistent);
             EmgStructOut = new NativeList<EmgStructHit>(8, Allocator.Persistent);
@@ -98,6 +107,7 @@ namespace BinGames.Sim.Combat
             EmgRules.Dispose();
             EmgRuleIdx.Dispose();
             EmgRuleOrder.Dispose();
+            EmgPhases.Dispose();
             EmgProfileKeys.Dispose();
             EmgStructPending.Dispose();
             EmgStructOut.Dispose();

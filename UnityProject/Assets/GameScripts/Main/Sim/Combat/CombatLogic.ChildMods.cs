@@ -18,7 +18,7 @@ namespace BinGames.Sim.Combat
         internal static float EmgSubArmorFactor(ref CombatData d, in CombatProjectile pr, int hit)
         {
             float pierce = pr.Prog >= 0 && EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m) ? m.ArmorPierce : 0f;
-            return math.max(0f, 1f - d.Armor[hit].x * (1f - math.saturate(pierce)));
+            return math.max(0f, 1f - ArmorOf(ref d, hit) * (1f - math.saturate(pierce)));
         }
 
         /// <summary>子弹药命中后：爆圈（命中处 r 米内其他敌对单位各吃 b 倍）与余击（c 米内最近的 a 个其他目标各吃 b 倍）。O(单位数 × 余击数)。</summary>
@@ -235,7 +235,7 @@ namespace BinGames.Sim.Combat
             {
                 return 0f;
             }
-            return IsFrontalArmored(ref d, k, z.Pos) ? math.max(0f, 1f - d.Armor[k].x * (1f - math.saturate(m.ArmorPierce))) : 1f;
+            return IsFrontalArmored(ref d, k, z.Pos) ? math.max(0f, 1f - ArmorOf(ref d, k) * (1f - math.saturate(m.ArmorPierce))) : 1f;
         }
     }
 }

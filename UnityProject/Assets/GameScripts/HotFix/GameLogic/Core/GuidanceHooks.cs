@@ -647,6 +647,9 @@ namespace GameLogic.Core
         /// <summary>EMG2-MAT-01（FG19 FGR-EMG-080～083）：第一次出现物质斑块（引导内容在 FG15-UX-04：物质不分敌我、沾染、形状纹样怎么认、悬停看来源与后果）。</summary>
         public const string EmgFirstMatter = "emg_first_matter";
 
+        /// <summary>EMG2-PHS-01（FG19 FGR-EMG-100～101）：第一次有单位进入相态（冻结 / 熔穿 / 麻痹 / 破甲 / 磁化 / 燃烧；引导内容在 FG15-UX-04：累积量与阈值、免疫窗、抗性、头顶图标怎么读）。</summary>
+        public const string EmgFirstPhase = "emg_first_phase";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -656,7 +659,7 @@ namespace GameLogic.Core
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
             LogisticsFirstBelt, LogisticsFirstBlocked,
-            SignalCoreFirstOpen, CircuitUplinkFirstSeen, EmgFirstMatter,
+            SignalCoreFirstOpen, CircuitUplinkFirstSeen, EmgFirstMatter, EmgFirstPhase,
             SignalFirstUplink,
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,

@@ -25,10 +25,6 @@ namespace BinGames.Sim.Combat
     /// </summary>
     public static partial class CombatLogic
     {
-        private const float DefaultChillSlowMax = 0.6f;
-        private const float DefaultChillDecay = 0.25f;
-        private const float DefaultFreezeSeconds = 2.5f;
-        private const float DefaultThawGuard = 1.5f;
         /// <summary>枢轴喷灌：周围没有目标累计这么多秒就收臂。</summary>
         private const float PivotIdleSeconds = 3f;
         /// <summary>分裂液找目标的距离（米）。</summary>
@@ -36,32 +32,25 @@ namespace BinGames.Sim.Combat
         /// <summary>一次结算死亡效果的上限（连锁爆燃的保险丝）。</summary>
         private const int MaxPendingPerStep = 512;
 
-        private static float ChillSlowMaxOf(ref CombatData d) => d.Config.ChillSlowMax > 0f ? math.min(0.95f, d.Config.ChillSlowMax) : DefaultChillSlowMax;
-        private static float ChillDecayOf(ref CombatData d) => d.Config.ChillDecay > 0f ? d.Config.ChillDecay : DefaultChillDecay;
-        private static float FreezeSecondsOf(ref CombatData d) => d.Config.FreezeSeconds > 0f ? d.Config.FreezeSeconds : DefaultFreezeSeconds;
-        private static float ThawGuardOf(ref CombatData d) => d.Config.ThawGuardSeconds > 0f ? d.Config.ThawGuardSeconds : DefaultThawGuard;
 
         // ─────────────────────────────── 查询（各处共用，O(1)） ───────────────────────────────
-
-        /// <summary>被冻结（液氮受寒满）：不能移动、不能开火。</summary>
-        internal static bool IsFrozen(ref CombatData d, int i) => d.Clarity[i].FrozenT > 0f;
 
         /// <summary>空中单位（灭活无人机）。</summary>
         internal static bool IsAir(ref CombatData d, int i) => d.Clarity[i].Air != 0;
 
-        /// <summary>受寒后的移动速度倍率（冻结 = 0；没有受寒 = 1）。</summary>
+        /// <summary>受寒后的移动速度倍率（冻结 / 麻痹 = 0；没有受寒 = 1）。EMG2-PHS-01：受寒 = 寒量累积量（phase_chill，减速上限 p1 = 0.6，与云端同数）。</summary>
         internal static float ChillFactor(ref CombatData d, int i)
         {
-            CombatClarityUnit c = d.Clarity[i];
-            if (c.FrozenT > 0f)
+            if (IsImmobile(ref d, i))
             {
                 return 0f;
             }
-            if (c.Chill <= 0f)
+            float chill = d.EmgUnit[i].AccA.x;
+            if (chill <= 0f)
             {
                 return 1f;
             }
-            return 1f - ChillSlowMaxOf(ref d) * math.saturate(c.Chill);
+            return 1f - math.min(0.95f, d.EmgPhases[EmgPhaseConst.Chill].P1) * math.saturate(chill / math.max(0.01f, d.EmgPhases[EmgPhaseConst.Chill].Enter));
         }
 
         /// <summary>己方机器的移动速度（只吃受寒；状态标签的减速对己方机器的口径不在本卡改）。</summary>
@@ -215,8 +204,8 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                StepChill(ref d, i, dt, now);
-                if (d.Faction[i] != (byte)CombatFaction.Hostile || IsFrozen(ref d, i) || d.Behavior[i] == (byte)CombatBehavior.Puddle)
+                StepPhase(ref d, i, dt, now); // EMG2-PHS-01：7 个累积量与相态（取代云端 StepChill）
+                if (d.Faction[i] != (byte)CombatFaction.Hostile || IsImmobile(ref d, i) || d.Behavior[i] == (byte)CombatBehavior.Puddle)
                 {
                     continue;
                 }
@@ -244,74 +233,14 @@ namespace BinGames.Sim.Combat
             StepPuddleContact(ref d, dt, now);
         }
 
-        /// <summary>受寒消退与冻结倒计时（任何单位）。燃烧 +2 倍、积热过半 +1 倍解冻速度（“燃烧、高热构筑”是应对）。</summary>
-        private static void StepChill(ref CombatData d, int i, float dt, double now)
-        {
-            CombatClarityUnit c = d.Clarity[i];
-            if (c.Chill <= 0f && c.FrozenT <= 0f && c.ThawGuardT <= 0f)
-            {
-                return;
-            }
-            float thaw = 1f;
-            if (IsBurning(ref d, i, now))
-            {
-                thaw += 2f;
-            }
-            int w = d.Weapon[i];
-            if (w >= 0 && w < d.Weapons.Length)
-            {
-                float oh = d.Weapons[w].OverheatAt;
-                if (oh > 0f && d.Heat[i] >= oh * 0.5f)
-                {
-                    thaw += 1f;
-                }
-            }
-            if (c.FrozenT > 0f)
-            {
-                c.FrozenT -= dt * thaw;
-                if (c.FrozenT <= 0f)
-                {
-                    c.FrozenT = 0f;
-                    c.Chill = 0f;
-                    c.ThawGuardT = ThawGuardOf(ref d);
-                }
-            }
-            else
-            {
-                c.Chill = math.max(0f, c.Chill - ChillDecayOf(ref d) * dt * thaw);
-                c.ThawGuardT = math.max(0f, c.ThawGuardT - dt);
-            }
-            d.Clarity[i] = c;
-        }
-
-        /// <summary>给单位加受寒（液氮命中 / 液氮池节拍）。冻结中、解冻免疫期内、空中单位不加。满 1 冻结并发提示（ClarityCue/7）。</summary>
+        /// <summary>给单位加受寒（液氮命中 / 液氮池节拍）。EMG2-PHS-01：并入寒量累积量（EmgAddAcc：冻结中 / 免疫窗内不加、按寒抗折减、满了进入冻结）；空中单位不加。</summary>
         internal static void ApplyChill(ref CombatData d, int k, float amount)
         {
             if (!(amount > 0f) || k < 0 || k >= d.Count || !d.IsAlive(k) || d.Clarity[k].Air != 0)
             {
                 return;
             }
-            CombatClarityUnit c = d.Clarity[k];
-            if (c.FrozenT > 0f || c.ThawGuardT > 0f)
-            {
-                return;
-            }
-            c.Chill = math.min(1f, c.Chill + amount);
-            if (c.Chill >= 1f)
-            {
-                c.FrozenT = FreezeSecondsOf(ref d);
-                d.Clarity[k] = c;
-                CombatCounters cc = d.Counters[0];
-                cc.Freezes++;
-                d.Counters[0] = cc;
-                if (d.Kind[k] == (byte)CombatUnitKind.Turret)
-                {
-                    d.AimReadyAt[k] = 0; // 重炮瞄准到一半被冻住：这次瞄准作废
-                }
-                Cue(ref d, CombatEventKind.ClarityCue, k, 0, c.FrozenT, d.Pos[k], 7);
-                return;
-            }
-            d.Clarity[k] = c;
+            EmgAddAcc(ref d, k, EmgPhaseConst.Chill, amount);
         }
 
         /// <summary>冻结的敌方单位：架炮驻锄回到未架设（FG09 第 10 节负向“架设到一半被冻结”）。</summary>
@@ -470,9 +399,9 @@ namespace BinGames.Sim.Combat
                 {
                     DamageFrom(ref d, k, p.SprayDamage, i, EmgCode.SrcZone);
                 }
-                if (p.SprayStatus != 0u && d.IsAlive(k))
+                if ((p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus) != 0u && d.IsAlive(k))
                 {
-                    ApplyStatus(ref d, k, p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, i, p.SprayDamage);
+                    ApplyStatus(ref d, k, p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, i, p.SprayDamage); // EMG2-PHS-01：液氮喷淋的受寒由 SprayChill 给，冻结标签不另换寒量
                 }
                 if (p.SprayChill > 0f)
                 {
@@ -625,9 +554,9 @@ namespace BinGames.Sim.Combat
                 {
                     DamageFrom(ref d, k, dmg, i, EmgCode.SrcMelee);
                 }
-                if (p.SprayStatus != 0u && d.IsAlive(k))
+                if ((p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus) != 0u && d.IsAlive(k))
                 {
-                    ApplyStatus(ref d, k, p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, i, dmg);
+                    ApplyStatus(ref d, k, p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, i, dmg); // 与判断同一掩码（审查修复 P2）
                 }
                 CombatCounters cc = d.Counters[0];
                 cc.PivotHits++;
@@ -1016,9 +945,9 @@ namespace BinGames.Sim.Combat
                     {
                         DamageFrom(ref d, k, dmg, i, EmgCode.SrcPatch);
                     }
-                    if (p.SprayStatus != 0u && d.IsAlive(k))
+                    if ((p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus) != 0u && d.IsAlive(k))
                     {
-                        ApplyStatus(ref d, k, p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, i, dmg);
+                        ApplyStatus(ref d, k, p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus, p.SprayStatusSeconds, sdps, sslow, svuln, i, dmg); // 与判断同一掩码（审查修复 P2）
                     }
                 }
             }

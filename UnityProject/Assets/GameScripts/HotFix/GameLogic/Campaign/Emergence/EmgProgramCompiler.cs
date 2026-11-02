@@ -421,7 +421,9 @@ namespace GameLogic.Campaign.Emergence
             }
             return port switch
             {
-                "en.heat" => new[] { "heatburst" },
+                // EMG2-PHS-01：阶段 ≥ 2 注热由内核落点结算进结构积热累积量（命中注能要物质层，EMG2-RULE-01 接通），过渡字段 heatburst 退役（DEBT-EMG1FW01-03）；
+                // emg.stage = 1 的回滚对照里内核不注能，仍保留 heatburst（不让过载在阶段 1 变成死指令）
+                "en.heat" => KernelInjectLive ? Array.Empty<string>() : new[] { "heatburst" },
                 "en.kinetic" => new[] { "echo" },
                 "ent.drone" => new[] { "inherit" },
                 "ent.projectile" => new[] { "feedback" },
@@ -432,6 +434,56 @@ namespace GameLogic.Campaign.Emergence
         }
 
         private static readonly string[] MatterTransition = { "linger", "trail" };
+
+        /// <summary>
+        /// EMG2-PHS-01（承接 DEBT-EMG1FW01-03 注入类，FGR-EMG-019 单轨）：能量注入写端由内核在落点写累积量（结构积热 → 熔穿、电荷 → 麻痹、磁化度 → 磁化）后，
+        /// 同一写端原先在本机出手上挂的旧标签退役。按端口给，不按固件 ID（FGR-EMG-013）。
+        /// 电击 Shock 不在此列：它不写电荷累积量，是短路 / 电解 / 绝缘旧标签反应的配料，随 FG19B §12 #3“电击改麻痹”由 EMG2-REACT-02 撤（DEBT-EMG2PHS01-04）。
+        /// </summary>
+        public static string[] RetiredTags(string port) => !KernelInjectLive ? Array.Empty<string>() : port switch
+        {
+            "en.heat" => new[] { "Fire" },
+            "en.elec" => new[] { "Charged" },
+            "en.mag" => new[] { "Charged", "Magnet" },
+            _ => Array.Empty<string>(),
+        };
+
+        /// <summary>内核命中注能（EmgHitInject）此刻有执行者：生效阶段 ≥ 2（物质层开着，CombatSite.ConfigFromTuning 同一判断）。阶段 1 回滚对照里注入类仍走过渡字段与旧标签。</summary>
+        public static bool KernelInjectLive => EmgCatalog.EffectiveStage >= 2;
+
+        /// <summary><see cref="LegacySkip"/> 的逐标签伪字段：(固件, TagField(tag)) → true 时这个旧标签不进读法（CarrierReadings.Build 同名约定）。</summary>
+        public static string TagField(string tag) => TagsField + ":" + tag;
+
+        /// <summary>
+        /// 固件此刻退役的旧标签（与 <see cref="LegacySkip"/> 同口径的 owner 级视图）：走声明轨（<see cref="EmgCatalog.IsOwnerOnDeclTrack"/>）且声明里有能量注入写端时，
+        /// 该端口的 <see cref="RetiredTags"/>。固件库 / 修复 / 反应提示 / 反制统计按它显示，不再说“挂燃烧”而实际不挂。
+        /// </summary>
+        public static HashSet<string> RetiredTagsOf(string firmwareId)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            EmgCompiled c = EmgCatalog.Current;
+            if (firmwareId == null || !c.OwnerIndex.TryGetValue(firmwareId, out int oi) || !c.OwnerActive(oi))
+            {
+                return set;
+            }
+            EnsureIndex(c);
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.Owner == oi && d.Dir == EmgDirs.Write && PortIds.TryGetValue(d.Port, out string pid))
+                {
+                    set.UnionWith(RetiredTags(pid));
+                }
+            }
+            return set;
+        }
+
+        /// <summary>此刻真正会挂上的旧标签 = 表里的标签去掉 <see cref="RetiredTagsOf"/>（玩家可见的标签列表用）。</summary>
+        public static string[] LiveTagsOf(string firmwareId)
+        {
+            string[] tags = Signal.FirmwareKinds.TagsOf(firmwareId);
+            HashSet<string> gone = tags.Length == 0 ? null : RetiredTagsOf(firmwareId);
+            return gone == null || gone.Count == 0 ? tags : Array.FindAll(tags, t => !gone.Contains(t));
+        }
 
         /// <summary>只改数字的端口 → 旧读法字段（FG19A 第 1.5 节：扩口 scale、广角 spread、装甲击穿 armor、电容蓄力 capacitor）。根节点上由 CombatSite.FoldProgramReadings 按旧字段折一次。</summary>
         public static string[] NumericLegacyFields(string port) => port switch
@@ -463,6 +515,7 @@ namespace GameLogic.Campaign.Emergence
                 onDecl.Add(s.FirmwareId);
             }
             var keep = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            var retired = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
             void Keep(string fw, string field)
             {
                 if (!keep.TryGetValue(fw, out HashSet<string> set))
@@ -485,7 +538,18 @@ namespace GameLogic.Campaign.Emergence
                     EmgFamily fam = EmgCatalog.FamilyOf(pid);
                     // 审查修复（第 1 轮）：子节点上的效果写端，除物质排放（内核子载荷 emit 执行）外，阶段 1 内核在子载荷上还不执行——
                     // 与根节点同一过渡口径保留该固件的过渡字段与旧标签（作用在本机出手上），否则 [触发, 效果] 的第二条成了死指令（FGR-EMG-015 规则二）。
-                    // shortcut: 子载荷自己执行这些效果动词随阶段 2 斑块 / 传导去掉过渡字段时一起做（DEBT-EMG1FW01-03）。
+                    // shortcut: 生成 / 标记 / 连通 / 破片类子载荷动词随 EMG2-REACT-02 去倍率改写一起撤过渡字段（DEBT-EMG1FW01-03 余下部分；注入类已由 EMG2-PHS-01 撤）。
+                    // EMG2-PHS-01（承接 DEBT-EMG1FW01-03 注入类）：en.heat / en.elec / en.mag 的注入由内核在落点结算（EmgHitInject：根节点按本机命中、子节点按子弹药 / 子区落点），
+                    // 写进结构积热 / 电荷 / 磁化度累积量并由相态表现（熔穿 / 麻痹 / 磁化）——过渡字段 heatburst 退役（TransitionFields("en.heat") 为空），
+                    // 该写端的旧标签（Fire / Charged / Magnet，RetiredTags）也不再挂在本机出手上：同一写端只走内核一轨（FGR-EMG-019）。
+                    foreach (string t in RetiredTags(pid))
+                    {
+                        if (!retired.TryGetValue(fw, out HashSet<string> rs))
+                        {
+                            retired[fw] = rs = new HashSet<string>(StringComparer.Ordinal);
+                        }
+                        rs.Add(t);
+                    }
                     if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && (n.Parent < 0 || fam != EmgFamily.Matter))
                     {
                         // EMG1-FIX-01：根节点上由内核直接执行的写端（RootKernel，如追射 ent.projectile）不再保留旧读法过渡字段（否则旧回波与真补射两轨同时结算，FGR-EMG-019）
@@ -498,7 +562,34 @@ namespace GameLogic.Campaign.Emergence
                     }
                 }
             }
-            return (fw, field) => fw != null && onDecl.Contains(fw) && !(keep.TryGetValue(fw, out HashSet<string> k) && k.Contains(field));
+            string tagPrefix = TagsField + ":";
+            return (fw, field) =>
+            {
+                if (fw == null || !onDecl.Contains(fw))
+                {
+                    return false;
+                }
+                if (field.StartsWith(tagPrefix, StringComparison.Ordinal))
+                {
+                    return retired.TryGetValue(fw, out HashSet<string> rs) && rs.Contains(field.Substring(tagPrefix.Length));
+                }
+                return !(keep.TryGetValue(fw, out HashSet<string> k) && k.Contains(field));
+            };
+        }
+
+        /// <summary>
+        /// EMG2-PHS-01 审查修复（第 2 轮，FGR-EMG-019 单轨）：只跳过能量注入写端退役的那部分旧读法——<see cref="RetiredTags"/> 的逐标签伪字段与过渡字段 heatburst，
+        /// 其余字段不动。给沿用 FGR-FW-012 兼容读法的炮塔弹体武器用（弹体带程序下标，命中同样经 EmgHitInject 注能）。阶段 1 / 空程序 → null（不跳）。
+        /// </summary>
+        public static Func<string, string, bool> InjectSkip(EmgProgramResult r)
+        {
+            Func<string, string, bool> legacy = KernelInjectLive ? LegacySkip(r) : null;
+            if (legacy == null)
+            {
+                return null;
+            }
+            string tagPrefix = TagsField + ":";
+            return (fw, field) => (field.StartsWith(tagPrefix, StringComparison.Ordinal) || field == "heatburst") && legacy(fw, field);
         }
 
         /// <summary>根节点上写某个只改数字端口（<paramref name="port"/>）且已编译的固件（同一条装两次只算一次）：数值折叠只汇总这些固件的旧字段。</summary>

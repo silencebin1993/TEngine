@@ -485,10 +485,10 @@ namespace GameLogic.EditorTools
             }
             CombatFireResult fr = site.Kernel.FireAt(target, UnitOf(site, "b_ln2"), _t);
             string reason = site.FireReason(fr, 0, null);
-            bool frozenTag = HasStatus(site, target, Bit("Frozen"));
+            bool frozenTag = site.IsFrozen(target) && !HasStatus(site, target, Bit("Frozen")); // EMG2-PHS-01：冻结是相态（头顶图标读相态块），不再挂冰冻标签 / 易伤
             Expect(firstSpray > 0 && chillAfterFirst > 0.2f && chillAfterFirst < 1f && frozenAt > firstSpray && fr == CombatFireResult.Frozen && reason == GameText.Get("combat.fire.frozen")
                    && frozenTag && site.Kernel.Counters.Freezes >= 1 && ClarityCombatFeedback.FreezeCues > 0,
-                $"B2 液氮“先减速再冻结”（泵车从 12 米外逼近、目标原地不动）：第一次喷中只受寒 {chillAfterFirst:0.00}（没冻住），站在液氮池里随后冻结（{frozenAt - firstSpray:0.0} 秒后）；冻结中不能开火（{fr}，原因“{reason}”）；挂冰冻标签（{frozenTag}）；提示 {ClarityCombatFeedback.FreezeCues}");
+                $"B2 液氮“先减速再冻结”（泵车从 12 米外逼近、目标原地不动）：第一次喷中只受寒 {chillAfterFirst:0.00}（没冻住），站在液氮池里随后冻结（{frozenAt - firstSpray:0.0} 秒后）；冻结中不能开火（{fr}，原因“{reason}”）；冻结是相态、不挂冰冻标签（{frozenTag}）；提示 {ClarityCombatFeedback.FreezeCues}");
             CombatSites.Close(Bench, s, dropRecord: true);
 
             // 受寒减速、燃烧解冻更快、解冻后短暂免疫（不会被永久冻住）。

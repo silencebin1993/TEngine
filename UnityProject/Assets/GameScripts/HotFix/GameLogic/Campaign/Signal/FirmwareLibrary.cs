@@ -501,7 +501,7 @@ namespace GameLogic.Campaign.Signal
                 return list;
             }
             var tags = new HashSet<string>(StringComparer.Ordinal);
-            foreach (string t in FirmwareKinds.TagsOf(firmwareId))
+            foreach (string t in Emergence.EmgProgramCompiler.LiveTagsOf(firmwareId))
             {
                 tags.Add(StatusTagCatalog.Canonical(t));
             }
@@ -577,7 +577,7 @@ namespace GameLogic.Campaign.Signal
                 sb.AppendLine(GameText.Get("fwlib.readings_title"));
                 sb.AppendLine(readings);
             }
-            List<string> tagNames = StatusTagCatalog.DisplayNames(FirmwareKinds.TagsOf(firmwareId));
+            List<string> tagNames = StatusTagCatalog.DisplayNames(Emergence.EmgProgramCompiler.LiveTagsOf(firmwareId));
             sb.AppendLine(tagNames.Count == 0 ? GameText.Get("fwlib.detail.tags_none") : GameText.Format("fwlib.detail.tags", string.Join(Sep, tagNames)));
             List<string> reactions = ReactionsOf(firmwareId);
             if (reactions.Count == 0)
@@ -640,7 +640,7 @@ namespace GameLogic.Campaign.Signal
                 rows.Add((CarrierReadings.CarrierName(c), FirmwareKinds.Reading(a, c) ?? string.Empty, FirmwareKinds.Reading(b, c) ?? string.Empty));
             }
             rows.Add((GameText.Get("fwlib.compare.tags"),
-                string.Join(Sep, StatusTagCatalog.DisplayNames(FirmwareKinds.TagsOf(a))), string.Join(Sep, StatusTagCatalog.DisplayNames(FirmwareKinds.TagsOf(b)))));
+                string.Join(Sep, StatusTagCatalog.DisplayNames(Emergence.EmgProgramCompiler.LiveTagsOf(a))), string.Join(Sep, StatusTagCatalog.DisplayNames(Emergence.EmgProgramCompiler.LiveTagsOf(b)))));
             return rows;
         }
 

@@ -153,9 +153,9 @@ namespace BinGames.Sim.Combat
         /// 格斗 / 力场要贴近（触及 = 区域半径 + 双方半径），过热迟滞（过热后降到恢复线以下才再开火）。不通过时不算开火、不积热。</summary>
         internal static CombatFireResult PreFireGate(ref CombatData d, int a, int t, in CombatWeapon wp)
         {
-            if (IsFrozen(ref d, a))
+            if (IsImmobile(ref d, a))
             {
-                return CombatFireResult.Frozen; // FG10-FAC-01：冻住时不能开火
+                return ImmobileFire(ref d, a); // FG10-FAC-01：冻住时不能开火；EMG2-PHS-01：麻痹同样不能开火（结果码 Stunned）
             }
             if (IsContactCarrier(wp.Reading)
                 && math.distance(d.Pos[a], d.Pos[t]) > wp.Reading.Area + d.Radius[a] + d.Radius[t])
@@ -362,7 +362,7 @@ namespace BinGames.Sim.Combat
             }
             if (IsFrontalArmored(ref d, t, from))
             {
-                float frac = math.max(0f, d.Armor[t].x - math.max(0f, r.ArmorPierce) - math.max(0f, extraPierce));
+                float frac = math.max(0f, ArmorOf(ref d, t) - math.max(0f, r.ArmorPierce) - math.max(0f, extraPierce));
                 dmg *= math.max(0f, 1f - frac);
                 if (cueArmor)
                 {
@@ -758,6 +758,11 @@ namespace BinGames.Sim.Combat
             }
             // FG10-FAC-01：挂不上的状态位（澄净单位不挂酸蚀；带绝缘涂层的单位不挂电击）——这一次带来的那几位直接作废，不触发反应。
             mask &= ~d.Clarity[k].ImmuneMask;
+            if (mask == 0u)
+            {
+                return;
+            }
+            mask = PhaseTagGain(ref d, k, mask, source);
             if (mask == 0u)
             {
                 return;
@@ -1363,6 +1368,10 @@ namespace BinGames.Sim.Combat
                         d.EmgCtx = EmgCtx.None;
                     }
                     uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
+                    if (zone.Chill > 0f)
+                    {
+                        mask &= ~d.FrozenBit; // EMG2-PHS-01：液氮池的受寒由上面的 ApplyChill 给（与云端同数），冻结标签不再另换寒量
+                    }
                     // 区域节拍的“这一击”：区域自己的节拍伤害；没有直接伤害的纯状态区域取它挂的持续伤害一个节拍的量（如爆燃残留的燃烧区）；
                     // 两者都没有（减速网之类）= 0，只靠倍率的反应不结算（见 ApplyStatus）。
                     float reactionHit = tickDamage > 0f ? tickDamage : math.max(0f, zone.StatusDps) * zone.TickInterval;

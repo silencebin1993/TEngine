@@ -489,7 +489,7 @@ namespace GameLogic.Campaign.Combat
             List<string> hits = null;
             foreach (string fw in firmware)
             {
-                string[] tags = FirmwareKinds.TagsOf(fw);
+                string[] tags = Emergence.EmgProgramCompiler.LiveTagsOf(fw);
                 if (tags == null)
                 {
                     continue;

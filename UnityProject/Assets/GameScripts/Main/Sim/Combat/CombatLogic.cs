@@ -116,6 +116,7 @@ namespace BinGames.Sim.Combat
             StepFoundry(ref d, ref grid, dt);
             // 4c. FG10-FAC-01：澄净专属语法（死亡效果、受寒、喷淋 / 枢轴 / 自爆、喷淋池冲洗、酸沼、分裂液接触）。
             StepClarity(ref d, ref grid, dt);
+            StepMagnetized(ref d, dt); // EMG2-PHS-01：磁化单位是弱磁源，弹体转向
             RebuildDeflectActive(ref d);
             grid.Dispose();
 
@@ -245,7 +246,7 @@ namespace BinGames.Sim.Combat
 
         private static void StepPlayerUnit(ref CombatData d, ref CombatGrid grid, int i, float dt)
         {
-            if (IsFrozen(ref d, i))
+            if (IsImmobile(ref d, i))
             {
                 return; // FG10-FAC-01（液氮“冻结”）：冻住的机器 / 炮塔这一步什么都不做（命令保留、计时暂停，解冻后接着执行）
             }
@@ -558,7 +559,7 @@ namespace BinGames.Sim.Combat
         {
             // FG10-FAC-01：冻住的敌人这一步什么都不做（架设到一半的步进炮回到未架设）；空中单位按空中规则行动；
             // 喷嘴蓄压 / 枢轴喷灌 / 自爆引信把单位定在原地（这一步不移动、不用武器，专属行为在澄净阶段推进）。
-            if (IsFrozen(ref d, i))
+            if (IsImmobile(ref d, i))
             {
                 InterruptFrozen(ref d, i);
                 return;
@@ -1181,9 +1182,9 @@ namespace BinGames.Sim.Combat
         private static CombatFireResult RepairFire(ref CombatData d, int a, int t, int w)
         {
             CombatWeapon wp = d.Weapons[w];
-            if (IsFrozen(ref d, a))
+            if (IsImmobile(ref d, a))
             {
-                return CombatFireResult.Frozen; // 审查修复（第 1 轮）：与普通武器同一门槛，冻住时不能修复出手
+                return ImmobileFire(ref d, a); // 审查修复（第 1 轮）：与普通武器同一门槛，冻住时不能修复出手
             }
             if (t == a || d.Faction[t] != d.Faction[a] || d.MaxHp[t] <= 0f)
             {
@@ -1331,10 +1332,10 @@ namespace BinGames.Sim.Combat
         private static CombatFireResult FireCannon(ref CombatData d, int a, int t, in CombatWeapon wp)
         {
             double now = d.Scalars[0].Time;
-            if (IsFrozen(ref d, a))
+            if (IsImmobile(ref d, a))
             {
                 d.AimReadyAt[a] = 0;
-                return CombatFireResult.Frozen; // FG10-FAC-01：冻住时不能瞄准 / 开火
+                return ImmobileFire(ref d, a); // FG10-FAC-01：冻住时不能瞄准 / 开火
             }
             if (d.Has(a, CombatUnitFlags.Overheated))
             {
@@ -1434,7 +1435,7 @@ namespace BinGames.Sim.Combat
         public static bool IsFrontalArmored(ref CombatData d, int t, double2 attackerPos)
         {
             float4 ar = d.Armor[t];
-            if (ar.x <= 0f)
+            if (ar.x <= 0f || ArmorOf(ref d, t) <= 0f) // EMG2-PHS-01：破甲 / 熔穿期间装甲失效
             {
                 return false;
             }
@@ -2012,7 +2013,7 @@ namespace BinGames.Sim.Combat
                         if (IsFrontalArmored(ref d, hit, fromSide))
                         {
                             // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的破甲由子弹药自己结算
-                            dmg *= (pr.Flags & EmgProjFlags.Sub) != 0 ? EmgSubArmorFactor(ref d, pr, hit) : math.max(0f, 1f - d.Armor[hit].x);
+                            dmg *= (pr.Flags & EmgProjFlags.Sub) != 0 ? EmgSubArmorFactor(ref d, pr, hit) : math.max(0f, 1f - ArmorOf(ref d, hit));
                         }
                         dmg *= BackMultiplier(ref d, hit, fromSide);
                         bool landed = DamageUnit(ref d, hit, dmg, owner);

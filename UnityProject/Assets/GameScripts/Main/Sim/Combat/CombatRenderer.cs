@@ -82,7 +82,7 @@ namespace BinGames.Sim.Combat
             _projectiles = new NativeList<CombatInstance>(256, Allocator.Persistent);
             _effects = new NativeList<CombatInstance>(32, Allocator.Persistent);
             _icons = new NativeList<CombatInstance>(32, Allocator.Persistent);
-            _statusVisuals = new NativeArray<float2>(32, Allocator.Persistent);
+            _statusVisuals = new NativeArray<float2>(PhaseVisualBase + EmgPhaseConst.Count, Allocator.Persistent); // 32 个状态位 + EMG2-PHS-01 的 7 个相态
             for (int b = 0; b < 32; b++)
             {
                 _statusVisuals[b] = new float2(-1f, 0f);
@@ -115,6 +115,25 @@ namespace BinGames.Sim.Combat
             _fxProps = new MaterialPropertyBlock();
             _iconProps = new MaterialPropertyBlock();
             GpuAvailable = true;
+        }
+
+        /// <summary>EMG2-PHS-01：相态图标在视觉表里的起点（状态位 0～31 之后）。</summary>
+        public const int PhaseVisualBase = 32;
+
+        /// <summary>EMG2-PHS-01（FGR-EMG-101、B05 / B15）：7 个累积量 / 相态的头顶图标（x = 形状序号，&lt;0 = 不画；y = 打包颜色）。热更层按 fg.TbPhaseRule 写入一次。</summary>
+        public void SetPhaseVisuals(float2[] visuals)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            for (int k = 0; k < EmgPhaseConst.Count; k++)
+            {
+                float2 v = visuals != null && k < visuals.Length ? visuals[k] : new float2(-1f, 0f);
+                _statusVisuals[PhaseVisualBase + k] = v;
+                _hasStatusVisuals |= v.x >= 0f;
+            }
+            _preparedRevision = int.MinValue;
         }
 
         /// <summary>FG2-FW-03（FGR-FW-031）：每个状态位的图标（x = 形状序号，&lt;0 = 不画；y = 打包颜色 0xRRGGBB）。热更层按 fg.TbStatusTag 的形状 / 颜色写入一次。</summary>

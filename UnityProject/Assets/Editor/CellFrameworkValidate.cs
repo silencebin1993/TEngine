@@ -816,6 +816,7 @@ namespace GameLogic.EditorTools
             // 中立与离地、接触伤害 Code 4、弹体沾染 / 抛射、入场引信、残骸崩解成碎屑、快照 17 往返 / 16 版 / 短长段 / 档案稳定键、确定性与倍速、悬停与调试行、耗时。
             Seg("FgEmgMatterSelfCheck", FgEmgMatterSelfCheck.Run);
             Seg("FgEmgRuleSelfCheck", FgEmgRuleSelfCheck.Run); // EMG2-RULE-01：通道规则引擎与能量传导（FgEmgMatterSelfCheck 的规则段，单独成段）
+            Seg("FgEmgPhaseSelfCheck", FgEmgPhaseSelfCheck.Run); // EMG2-PHS-01：相变累积量与单位相态（FGT-EMG-034 / 020 evt.phase）
             Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02
         }
 

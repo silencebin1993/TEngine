@@ -29,6 +29,10 @@ namespace BinGames.Sim.Combat
         private static float ExchangeOf(ref CombatData d) => d.Config.EmgHeatExchange > 0f ? d.Config.EmgHeatExchange : EmgRuleConst.DefaultExchange;
         private static float HeatGainOf(ref CombatData d) => d.Config.EmgHeatGain > 0f ? d.Config.EmgHeatGain : EmgRuleConst.DefaultPatchGain;
         private static float CoolRateOf(ref CombatData d) => d.Config.EmgHeatCool > 0f ? d.Config.EmgHeatCool : EmgRuleConst.DefaultCoolRate;
+        private const double HeatFixScale = 65536.0;
+
+        private static long FixHeat(float v) => (long)math.round(v * HeatFixScale);
+
         private static float UnitScaleOf(ref CombatData d) => d.Config.EmgHeatUnitScale > 0f ? d.Config.EmgHeatUnitScale : EmgRuleConst.DefaultUnitOverheatScale;
         private static float UnitGainOf(ref CombatData d) => d.Config.EmgHeatUnitGain > 0f ? d.Config.EmgHeatUnitGain : EmgRuleConst.DefaultUnitGain;
 
@@ -587,9 +591,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (arc && charge > 0f)
                 {
-                    EmgUnitState st = d.EmgUnit[u];
-                    st.AccA.z = math.min(2f, st.AccA.z + charge * (1f - EmgResist(ref d, u, 2)));
-                    d.EmgUnit[u] = st;
+                    EmgAddAcc(ref d, u, EmgPhaseConst.Charge, charge, src >= 0 && src < d.Count ? d.Id[src] : 0); // EMG2-PHS-01：电荷累积量统一入口（电抗、免疫窗、上限、满了麻痹）
                 }
                 if (damage > 0f)
                 {
@@ -632,7 +634,9 @@ namespace BinGames.Sim.Combat
             EmgUnitState st = d.EmgUnit[u];
             float prof = k switch { 0 => p.ResistCold, 1 => p.ResistHeat, 2 => p.ResistElec, 3 => p.ResistCorrode, 4 => p.ResistMag, _ => p.ResistHack };
             byte ov = k switch { 0 => st.Res0, 1 => st.Res1, 2 => st.Res2, 3 => st.Res3, 4 => st.Res4, _ => st.Res5 };
-            return math.saturate(math.max(prof, ov / 255f));
+            float floor = k == EmgPhaseConst.ResCorrode && d.PlayerAcidResist > 0f && d.Faction[u] == (byte)CombatFaction.Player && d.Kind[u] == (byte)CombatUnitKind.Machine
+                ? d.PlayerAcidResist : 0f; // ADR ⑦：防腐涂层作己方机器腐蚀抗性下限
+            return math.saturate(math.max(math.max(prof, ov / 255f), floor));
         }
 
         // ─────────────────────────────── 事件 × 物质（内联求值，不经总线）───────────────────────────────
@@ -806,9 +810,8 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            EmgUnitState st = d.EmgUnit[u];
-            st.AccA.y = math.min(1f, st.AccA.y + q / UnitScaleOf(ref d));
-            d.EmgUnit[u] = st;
+            EmgAddAcc(ref d, u, EmgPhaseConst.Overheat, q / UnitScaleOf(ref d), 0, raw: true); // EMG2-PHS-01：结构积热累积量（已按热抗折减；满了熔穿）
+            PhaseHeat(ref d, u, q); // EMG2-PHS-01（P02）：冻结中单次注热 ≥ 阈值 → 热震立即解冻
             int w = d.Weapon[u];
             if (w >= 0 && w < d.Weapons.Length && d.Weapons[w].OverheatAt > 0f)
             {
@@ -874,15 +877,11 @@ namespace BinGames.Sim.Combat
                 }
                 else if (x.Port == EmgConst.PortElec)
                 {
-                    EmgUnitState st = d.EmgUnit[t];
-                    st.AccA.z = math.min(2f, st.AccA.z + x.Amount * (1f - EmgResist(ref d, t, 2)));
-                    d.EmgUnit[t] = st;
+                    EmgAddAcc(ref d, t, EmgPhaseConst.Charge, x.Amount, EmgIdOf(ref d, c.Owner));
                 }
                 else
                 {
-                    EmgUnitState st = d.EmgUnit[t];
-                    st.AccB.x = math.min(2f, st.AccB.x + x.Amount * (1f - EmgResist(ref d, t, 4)));
-                    d.EmgUnit[t] = st;
+                    EmgAddAcc(ref d, t, EmgPhaseConst.Magnetize, x.Amount, EmgIdOf(ref d, c.Owner));
                 }
                 if (x.Port != EmgConst.PortMag && EmgFirstPatchInject(ref d, c, i - n.FirstInstr))
                 {
@@ -1068,7 +1067,8 @@ namespace BinGames.Sim.Combat
                 return 0;
             }
             src.Sort(new Int2XComparer());
-            var dT = new NativeArray<float>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            // 定点累加（1/65536 度）：整数加法与邻居遍历顺序无关——空间哈希的桶内顺序随槽位插入顺序变，读档会重排槽位，浮点累加顺序不同会让续跑分叉（EMG2-PHS-01 模糊存读档 #61）
+            var dT = new NativeArray<long>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
             var isSrc = new NativeArray<byte>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
             int n = math.min(src.Length, budget);
             int start = 0;
@@ -1123,11 +1123,11 @@ namespace BinGames.Sim.Combat
                             bool fixJ = MatterOf(ref d, o.Matter).FixedTemp != 0 || PatchWorld(o);
                             float k = ex * (float)ratio * lf;
                             float wj = fixJ ? 1f : fixI ? 0f : o.Amount / math.max(1e-3f, z.Amount + o.Amount);
-                            dT[i] += k * (o.Temp - z.Temp) * wj;
+                            dT[i] += FixHeat(k * (o.Temp - z.Temp) * wj);
                             if (isSrc[j] == 0)
                             {
                                 float wi = fixI ? 1f : fixJ ? 0f : z.Amount / math.max(1e-3f, z.Amount + o.Amount);
-                                dT[j] += k * (z.Temp - o.Temp) * wi;
+                                dT[j] += FixHeat(k * (z.Temp - o.Temp) * wi);
                             }
                         }
                         while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
@@ -1141,7 +1141,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                float t = z.Temp + dT[i];
+                float t = z.Temp + (float)(dT[i] * (1.0 / HeatFixScale));
                 if (isSrc[i] != 0 && t > amb)
                 {
                     t = math.max(amb, t - cool);
@@ -1306,10 +1306,8 @@ namespace BinGames.Sim.Combat
                     {
                         EmgUnitState st = d.EmgUnit[pu];
                         float recv = math.min(2f, q * share * (1f - EmgResist(ref d, pu, 2)));
-                        if (recv >= qmin && recv > st.AccA.z + 1e-4f)
+                        if (recv >= qmin && recv > st.AccA.z + 1e-4f && EmgAddAcc(ref d, pu, EmgPhaseConst.Charge, recv - st.AccA.z, 0, raw: true, enterNow: false) > 0f)
                         {
-                            st.AccA.z = recv;
-                            d.EmgUnit[pu] = st;
                             queue.Add(new int4(2, pu, nd.z + 1, d.Id[pu]));
                             qv.Add(recv);
                         }
@@ -1500,11 +1498,11 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// 单位侧（O(单位数)，每传导节拍一次）：站在热斑块里（温度高于常温 30 度以上的最热一块）吃热 = unit_gain × (T − 常温)（FGR-EMG-092 持续加热让武器过热停火，敌我都算）；
-        /// 电荷 / 磁化累积量 × 衰减（相态阈值与正式衰减由 EMG2-PHS-01 接 fg.TbPhaseRule）；磁化沿磁性接触在单位之间有界传播。返回访问数。
+        /// 电荷 / 磁化累积量的衰减与相态在 StepPhase（fg.TbPhaseRule，EMG2-PHS-01）；磁化沿磁性接触在单位之间有界传播。返回访问数。
         /// </summary>
         private static int EmgUnitEnergyTick(ref CombatData d, int budget, int phase)
         {
-            float amb = AmbientOf(ref d), gain = UnitGainOf(ref d), k = DecayOf(ref d), qmin = QMinOf(ref d), fall = FalloffOf(ref d);
+            float amb = AmbientOf(ref d), gain = UnitGainOf(ref d), qmin = QMinOf(ref d), fall = FalloffOf(ref d);
             bool patches = d.EmgS[0].PatchLive > 0;
             var hits = new NativeList<int2>(EmgMatterConst.ContactPerUnit + 1, Allocator.Temp);
             var magQ = new NativeList<int2>(4, Allocator.Temp); // (单位 Id, 槽位)
@@ -1534,12 +1532,7 @@ namespace BinGames.Sim.Combat
                 {
                     magQ.Add(new int2(d.Id[u], u));
                 }
-                if (st.AccA.z > 0f || st.AccB.x > 0f)
-                {
-                    st.AccA.z = st.AccA.z * k < qmin ? 0f : st.AccA.z * k;
-                    st.AccB.x = st.AccB.x * k < qmin ? 0f : st.AccB.x * k;
-                    d.EmgUnit[u] = st;
-                }
+                // EMG2-PHS-01（关 DEBT-EMG2RULE01-02）：电荷 / 磁化度的衰减、阈值与相态改由 fg.TbPhaseRule 在 StepPhase 每步结算，这里不再借斑块衰减系数
             }
             hits.Dispose();
             int visits = 0;
@@ -1582,10 +1575,8 @@ namespace BinGames.Sim.Combat
                         }
                         EmgUnitState sv = d.EmgUnit[v];
                         float recv = q * fall * mag * (1f - EmgResist(ref d, v, 4));
-                        if (recv >= qmin && recv > sv.AccB.x + 1e-4f)
+                        if (recv >= qmin && recv > sv.AccB.x + 1e-4f && EmgAddAcc(ref d, v, EmgPhaseConst.Magnetize, recv - sv.AccB.x, 0, raw: true, enterNow: false) > 0f)
                         {
-                            sv.AccB.x = recv;
-                            d.EmgUnit[v] = sv;
                             magQ.Add(new int2(d.Id[v], v));
                             hop.Add(hop[h] + 1);
                             mq.Add(recv);

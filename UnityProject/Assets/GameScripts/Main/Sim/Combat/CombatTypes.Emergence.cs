@@ -596,7 +596,7 @@ namespace BinGames.Sim.Combat
         public float3 AccB;
         /// <summary>相态位（位 k = 第 k 个累积量的相态已进入）。</summary>
         public ushort PhaseMask;
-        /// <summary>每量一个计时（同 AccA / AccB 的顺序）：在相态中 = 进入时刻（最短停留）；不在相态中 = 免疫窗到期时刻（ADR ⑥ guard）。0 = 未记。</summary>
+        /// <summary>每量一个计时（同 AccA / AccB 的顺序；EMG2-PHS-01 定为剩余秒倒计时，按游戏秒推进）：在相态中 = 剩余最短停留 / 定时相态剩余时长；不在相态中 = 免疫窗剩余秒（ADR ⑥ guard）。0 = 没有。</summary>
         public float4 PhsTA;
         public float3 PhsTB;
         /// <summary>6 个运行时抗性覆盖（ADR ⑦，0～255 映射 0～1；有效抗性 = max(档案值, 覆盖值)），按 EmgProfile 抗性列顺序：寒、热、电、腐蚀、磁、入侵（劫持）。</summary>
@@ -879,6 +879,8 @@ namespace BinGames.Sim.Combat
         /// <summary>规则结算次数 / 本节拍还有别的规则成立、按优先级留到下一节拍的次数（FGR-EMG-084 同一宿主一个节拍只结算一条）。</summary>
         public int RulesSettled;
         public int RulesDeferred;
+        /// <summary>EMG2-PHS-01（不进快照，调试 / 自检计数）：进入相态次数。</summary>
+        public int PhaseEnters;
         /// <summary>传导节拍数 / 累计节点访问 / 因访问上限把剩余能量顺延到下一节拍的次数 / 最近一个传导节拍的访问数。</summary>
         public int ConductTicks;
         public int ConductVisits;

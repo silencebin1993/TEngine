@@ -45,6 +45,8 @@ namespace GameLogic.EditorTools
                     .Where(id => gate.TryGetValue(id, out int g) && g <= 1).ToList();
                 var dead = new List<string>();
                 var dual = new List<string>();
+                var landing = new List<string>();
+                int injectPairs = 0;
                 int combos = 0;
                 int trigPairs = 0;
                 var sw = Stopwatch.StartNew();
@@ -92,8 +94,32 @@ namespace GameLogic.EditorTools
                     }
                 }
                 sw.Stop();
+                // EMG2-PHS-01（DEBT-EMG1FW01-03 注入类，卡片“C2 触发器后对照改断言落点”）：命中注能在阶段 ≥ 2 才有内核执行者（物质层），本段临时把生效阶段提到 2——
+                // 注入写端排在触发器后只在子弹药 / 子区落点结算：有目标累积到注入量，且本机主目标的累积量低于同一条固件放根节点（本机命中注入）时；不再靠本机出手上的过渡字段 / 旧标签“有差异”。
+                src.Tuning = id => id == EmgCatalog.StageKey ? (true, 2f) : tuning(id);
+                EmgCatalog.OverrideForTests(src);
+                foreach ((FirmwareCarrier carrier, string comp) in CarrierComponents)
+                {
+                    foreach (string fw in stage1)
+                    {
+                        if (fw == TriggerFiller || !HasInjectWrite(fw, carrier))
+                        {
+                            continue;
+                        }
+                        injectPairs++;
+                        Obs root = DeclObs(comp, new[] { fw }), child = DeclObs(comp, new[] { TriggerFiller, fw });
+                        if (!(root.InjectRoot > 0 && child.InjectChild > 0 && child.InjectRoot == 0))
+                        {
+                            landing.Add($"{carrier}/{fw}（单条：根节点注能 {root.InjectRoot} 次；排在分裂后：根节点 {child.InjectRoot} 次、子载荷落点 {child.InjectChild} 次）");
+                        }
+                    }
+                }
+                src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
+                EmgCatalog.OverrideForTests(src);
                 Expect(stage1.Count >= 30 && dead.Count == 0 && trigPairs >= 40,
                     $"阶段 1 走声明轨的 {stage1.Count} 条固件 × 5 载体 × 首位 / 末位 + 效果固件在触发器后（{trigPairs} 对）共 {combos} 对全部有行为指纹差异，死对 {dead.Count} 对（{sw.ElapsedMilliseconds} 毫秒）{(dead.Count > 0 ? "：" + string.Join("、", dead) : string.Empty)}");
+                Expect(injectPairs >= 5 && landing.Count == 0,
+                    $"注入类（en.heat / en.elec / en.mag）排在触发器后：{injectPairs} 对全部只在子弹药 / 子区落点注能（因果链注入记录全在链深 ≥ 1，本机出手 0 次；单条放根节点时本机命中注能）{Detail(landing)}");
                 Expect(dual.Count == 0, $"单轨比对：{stage1.Count - 1} 条 × 5 载体的程序轨读法与独立推导的单轨读法逐字段一致（同一 owner 不两轨同时结算）{Detail(dual)}");
                 // 负向：把旧轨字段也算进去（不跳旧字段 = 两轨同时结算），比对必须报失败
                 string caught = SingleTrackProblem("comp_gun", FirmwareCarrier.Projectile, "fw_split", true);
@@ -242,6 +268,30 @@ namespace GameLogic.EditorTools
                    && cat.Decls.Any(d => d.Owner == oi && d.Dir == EmgDirs.Write && (d.Carriers & bit) != 0 && cat.PortIdByCode[d.Port].StartsWith("grm.mod.", StringComparison.Ordinal));
         }
 
+        /// <summary>EMG2-PHS-01：被测固件在该载体上有能量注入写端（en.heat / en.elec / en.mag，<see cref="EmgProgramCompiler.RetiredTags"/> 非空的端口）。</summary>
+        private static bool HasInjectWrite(string fw, FirmwareCarrier carrier)
+        {
+            EmgCompiled cat = EmgCatalog.Current;
+            byte bit = (byte)(1 << (int)carrier);
+            return cat.OwnerIndex.TryGetValue(fw, out int oi)
+                   && cat.Decls.Any(d => d.Owner == oi && d.Dir == EmgDirs.Write && (d.Carriers & bit) != 0 && EmgProgramCompiler.RetiredTags(cat.PortIdByCode[d.Port]).Length > 0);
+        }
+
+        /// <summary>EMG2-PHS-01：按正式路径编出武器跑预置场景 4 游戏秒（因果链注入记录按链深分根节点 / 子载荷）。</summary>
+        private static Obs DeclObs(string comp, string[] fws)
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, comp, null, null, Array.Empty<string>());
+            board.TrySetUplink(UplinkSlot);
+            BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, fws);
+            CombatWeapon w = CombatSite.MachineWeaponFrom(p);
+            EmgProgramResult program = EmgProgramCompiler.Compile(p);
+            if (!program.IsEmpty && w.Mode != CombatWeaponMode.Projectile)
+            {
+                w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
+            }
+            return RunArena(w, 4f, prepared: true, program, comp);
+        }
+
         /// <summary>被测固件在该载体上有效果写端（非语法、非元程序）。</summary>
         private static bool HasEffectWrite(string fw, FirmwareCarrier carrier)
         {
@@ -297,6 +347,7 @@ namespace GameLogic.EditorTools
             // 独立推导：从声明表读被测固件的写端口（单条程序全部在根节点）
             EmgCompiled cat = EmgCatalog.Current;
             var keep = new HashSet<string>(StringComparer.Ordinal);
+            var retired = new HashSet<string>(StringComparer.Ordinal);
             bool tags = false;
             if (cat.OwnerIndex.TryGetValue(fw, out int oi))
             {
@@ -305,6 +356,7 @@ namespace GameLogic.EditorTools
                 {
                     string port = cat.PortIdByCode[d.Port];
                     EmgFamily fam = EmgCatalog.FamilyOf(port);
+                    retired.UnionWith(EmgProgramCompiler.RetiredTags(port)); // EMG2-PHS-01：能量注入写端的旧标签退役（FGR-EMG-019）
                     if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta)
                     {
                         if (!EmgProgramCompiler.IsRootKernelPort(port)) // EMG1-FIX-01：根节点由内核直接执行的端口（追射）不留过渡字段
@@ -317,7 +369,9 @@ namespace GameLogic.EditorTools
             }
             CombatReading expected = CombatSite.FoldProgramReadings(
                 CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, CombatSite.ReadingFirmware(p), damageFromCompile,
-                    (f, field) => f == fw && (field == EmgProgramCompiler.TagsField ? !tags : !keep.Contains(field))),
+                    (f, field) => f == fw && (field == EmgProgramCompiler.TagsField ? !tags
+                        : field.StartsWith(EmgProgramCompiler.TagsField + ":", StringComparison.Ordinal) ? retired.Contains(field.Substring(EmgProgramCompiler.TagsField.Length + 1))
+                        : !keep.Contains(field))),
                 pr, damageFromCompile);
             string a = ReadingFields(actual), e = ReadingFields(expected);
             if (a == e)

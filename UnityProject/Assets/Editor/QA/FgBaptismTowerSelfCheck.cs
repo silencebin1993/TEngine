@@ -9,6 +9,7 @@ using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Env;
@@ -358,10 +359,10 @@ namespace GameLogic.EditorTools
             BaptismTowerBoss.ApplyDamage(s, tower, tower.MaxHealth);
             bool vent = BaptismTowerBoss.PhaseOf(s) == BaptismPhase.Vent && Mathf.Approximately(tower.Health, tower.MaxHealth * BaptismTowerBoss.Phase3HpFraction);
             float sealedMult = BaptismTowerBoss.DamageMult(s);
-            int shockIndex = RuleIndex("reaction_thermalshock");
-            int shock0 = home.Kernel.ReactionCountOf(shockIndex);
+            int shockKey = ShockKey();
+            int shock0 = home.Kernel.EmgRuleCountOfKey(shockKey);
             bool frozeSealed = FreezeThenBurn(home, towerUnit);
-            int shockSealed = home.Kernel.ReactionCountOf(shockIndex) - shock0;
+            int shockSealed = home.Kernel.EmgRuleCountOfKey(shockKey) - shock0;
             int vents0 = BaptismTowerBoss.VentsOpened;
             for (int i = 0; i < GameClock.StepHz * 20 && BaptismTowerBoss.VentsOpened == vents0; i++)
             {
@@ -369,9 +370,9 @@ namespace GameLogic.EditorTools
             }
             float ventMult = BaptismTowerBoss.DamageMult(s);
             bool frozenOk = home.TryGetClarity(towerUnit, out CombatClarityUnit vc) && (vc.ImmuneMask & Bit("Frozen")) == 0u;
-            int shock1 = home.Kernel.ReactionCountOf(shockIndex);
+            int shock1 = home.Kernel.EmgRuleCountOfKey(shockKey);
             bool frozeVent = FreezeThenBurn(home, towerUnit);
-            int shockVent = home.Kernel.ReactionCountOf(shockIndex) - shock1;
+            int shockVent = home.Kernel.EmgRuleCountOfKey(shockKey) - shock1;
             Expect(vent && Mathf.Approximately(sealedMult, BaptismTowerBoss.SealedDamageMult) && !frozeSealed && shockSealed == 0 && Mathf.Approximately(ventMult, BaptismTowerBoss.VentDamageMult)
                    && frozenOk && frozeVent && shockVent >= 1,
                 $"D1 泄压阶段：封闭时伤害 × {sealedMult}、冻不住（挂上冰冻 {frozeSealed}）、火烧不出热震（{shockSealed} 次）；泄压时伤害 × {ventMult}、能冻住（{frozeVent}）、再烧打出热震（{shockVent} 次）");
@@ -828,15 +829,25 @@ namespace GameLogic.EditorTools
         /// <summary>先挂冰冻，再在它脚下铺一块会烧的区域（区域节拍带伤害，纯倍率反应才会结算——hit = 0 的直接挂标签不结算）。返回冰冻挂上了没有。</summary>
         private static bool FreezeThenBurn(CombatSite site, int unit)
         {
-            float fireDps = StatusTagCatalog.TryGet("Fire", out StatusTag ft) ? ft.Amount : 0f;
-            site.Kernel.ApplyStatus(unit, Bit("Frozen"), 3f, 0f, 0f, 0f, 0);
-            bool frozen = site.Kernel.TryGetStatus(unit, out uint mask, out _, out _, out _, out _) && (mask & Bit("Frozen")) != 0u;
+            // EMG2-PHS-01（FG19 第 14 节 #7 按推荐默认执行）：冻结 = 寒量满进入的相态（不再是标签）；热震 = P02（冻结中单次注热 ≥ 30，或被推进 / 站进明火、熔融斑块）。
+            // 与旧口径（冰冻 + 会烧的区域）等价的玩家路径：先喷满寒量看冻不冻得住，再在它脚下铺一块明火斑块（首领带热抗，玩家单发注热到不了 30，靠站进明火触发）。
+            site.ChillUnit(unit, 1f);
+            site.ChillUnit(unit, 1f);
+            bool frozen = site.IsFrozen(unit);
             if (site.Kernel.TryGetUnit(unit, out CombatUnitView v))
             {
-                site.Kernel.SpawnFieldZone(CombatFaction.Neutral, v.Position, 3f, 1.5f, 0f, Bit("Fire"), 3f, Mathf.Max(1f, fireDps), 0f, 0f);
+                site.Kernel.SpawnPatch(EmgMatterConst.Fire, v.Position, 2f, 1f, 3f);
             }
             StepSeconds(1f);
             return frozen;
+        }
+
+        /// <summary>EMG2-PHS-01：热震（P02 冻结 × 热）在通道规则里的计数键。</summary>
+        private static int ShockKey()
+        {
+            EmgRuleCatalog.Compiled c = EmgRuleCatalog.Current;
+            int i = c.Ids.IndexOf("reaction_thermalshock"); // P02 行的 id
+            return i >= 0 ? c.Rules[i].Key : 0;
         }
 
         private static int RuleIndex(string id)

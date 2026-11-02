@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using BinGames.Sim.Combat;
 using Unity.Mathematics;
+using GameLogic.Campaign.Content;
 using UnityEngine;
 
 namespace GameLogic.Campaign.Combat
@@ -55,8 +56,45 @@ namespace GameLogic.Campaign.Combat
         /// <summary>改单位的酸蚀抗性（0～1；防腐涂层等）。</summary>
         public bool SetAcidResist(int unitId, float resist) => !IsDisposed && Kernel.SetAcidResist(unitId, Mathf.Clamp01(resist));
 
-        /// <summary>FG10-BOSS-01：改单位的免疫状态位（洗礼塔封闭时冻不住、泄压时能冻）。</summary>
+        /// <summary>FG10-BOSS-01：改单位的免疫状态位（仍走状态位的旧路径）。EMG2-PHS-01 起游戏代码改调 <see cref="SetResist"/>（ADR ⑦ / ⑭ #9）。</summary>
         public bool SetImmuneMask(int unitId, uint mask) => !IsDisposed && Kernel.SetImmuneMask(unitId, mask);
+
+        /// <summary>抗性列（内核 Res0～5 的顺序）。</summary>
+        public const int ResistCold = 0, ResistHeat = 1, ResistElec = 2, ResistCorrode = 3, ResistMag = 4, ResistHack = 5;
+
+        /// <summary>
+        /// EMG2-PHS-01（ADR ⑦ 运行时抗性覆盖，FGR-EMG-103）：改单位某一列抗性的覆盖值（0～1；0 = 回到档案值）。累积量、传导、沾染都读“档案值与覆盖值取大”。
+        /// 寒 / 腐蚀 / 电三列满值（1）时同时挂冻结 / 酸蚀 / 电击免疫位（内核状态位旧路径保留，ADR ⑭ #9），小于 1 时摘掉对应位。O(1)。
+        /// </summary>
+        public bool SetResist(int unitId, int kind, float value)
+        {
+            value = Mathf.Clamp01(value);
+            if (IsDisposed || !Kernel.SetResist(unitId, kind, value))
+            {
+                return false;
+            }
+            string tag = kind == ResistCold ? "Frozen" : kind == ResistCorrode ? "Acid" : kind == ResistElec ? "Shock" : null;
+            uint bit = tag != null ? NamedReactionCatalog.BitOf(tag) : 0u;
+            if (bit != 0u && Kernel.TryGetClarity(unitId, out CombatClarityUnit c))
+            {
+                uint mask = value >= 1f ? c.ImmuneMask | bit : c.ImmuneMask & ~bit;
+                if (mask != c.ImmuneMask)
+                {
+                    Kernel.SetImmuneMask(unitId, mask);
+                    Kernel.SetResist(unitId, kind, value); // 免疫位同步会改覆盖；再写一次以调用方的值为准
+                }
+            }
+            return true;
+        }
+
+        /// <summary>EMG2-PHS-01：单位某一列的有效抗性（悬停“不能冻结”的原因用）。</summary>
+        public float EffectiveResist(int unitId, int kind) => IsDisposed ? 0f : Kernel.EffectiveResist(unitId, kind);
+
+        /// <summary>EMG2-PHS-01：单位是否在第 k 个相态里（0 冻结、1 熔穿、2 麻痹、3 破甲、4 磁化、5 燃烧）。</summary>
+        public bool InPhase(int unitId, int k) => !IsDisposed && Kernel.InPhase(unitId, k);
+
+        /// <summary>EMG2-PHS-01：第 k 个累积量（0 寒量 … 6 入侵度）。</summary>
+        public float AccumOf(int unitId, int k) => IsDisposed ? 0f : Kernel.AccumOf(unitId, k);
 
         /// <summary>给单位加受寒（与液氮命中同一个入口；自检夹具 / 将来玩家侧的液氮来源）。</summary>
         public bool ChillUnit(int unitId, float amount) => !IsDisposed && Kernel.ChillUnit(unitId, amount);
@@ -67,10 +105,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>存活的分裂液数。</summary>
         public int CountPuddles() => IsDisposed ? 0 : Kernel.CountPuddles();
 
-        /// <summary>单位冻结中（液氮受寒满）：不能移动、不能开火。</summary>
-        public bool IsFrozen(int unitId) => TryGetClarity(unitId, out CombatClarityUnit c) && c.FrozenT > 0f;
+        /// <summary>单位冻结中（寒量满，EMG2-PHS-01 起是相态）：不能移动、不能开火。</summary>
+        public bool IsFrozen(int unitId) => InPhase(unitId, EmgPhaseConst.Chill);
 
-        /// <summary>单位当前的受寒（0～1）。</summary>
-        public float ChillOf(int unitId) => TryGetClarity(unitId, out CombatClarityUnit c) ? c.Chill : 0f;
+        /// <summary>单位当前的受寒（寒量累积量，0～1）。</summary>
+        public float ChillOf(int unitId) => AccumOf(unitId, EmgPhaseConst.Chill);
     }
 }

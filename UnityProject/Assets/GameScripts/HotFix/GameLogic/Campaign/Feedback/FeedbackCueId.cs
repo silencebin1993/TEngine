@@ -134,6 +134,10 @@ namespace GameLogic.Campaign.Feedback
         ClarityAcid,
         ClaritySprayWarnCryo,
         ClaritySprayCryo,
+        /// <summary>EMG2-PHS-01：单位进入相态（冻结 / 熔穿 / 麻痹 / 破甲 / 磁化 / 燃烧）。</summary>
+        EmgPhaseEnter,
+        /// <summary>EMG2-PHS-01：相态被打断（冻结被击碎 / 受热解冻、燃烧被水扑灭）。</summary>
+        EmgPhaseBroken,
 
         Max,
     }

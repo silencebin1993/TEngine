@@ -53,12 +53,9 @@ namespace BinGames.Sim.Combat
         internal static float EmgUnitMass(ref CombatData d, int i)
         {
             float own = d.EmgUnit[i].Mass;
-            if (own > 0f)
-            {
-                return own;
-            }
             float pm = EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, i)).Mass;
-            return pm > 0f ? pm : math.clamp(8f * d.Radius[i] * d.Radius[i], 1f, 80f);
+            float m = own > 0f ? own : pm > 0f ? pm : math.clamp(8f * d.Radius[i] * d.Radius[i], 1f, 80f);
+            return m * PhaseMassMul(ref d, i); // EMG2-PHS-01：破甲期间质量 × 0.6（更容易被推走）
         }
 
         /// <summary>弹体质量：弹体自带（prop.mass 写端改过）> 破片 / 重炮根弹体（重型射弹档案，FG19B 6.2）/ 普通弹体档案。</summary>

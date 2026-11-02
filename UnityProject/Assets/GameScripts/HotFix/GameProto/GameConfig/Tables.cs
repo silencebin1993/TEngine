@@ -299,6 +299,10 @@ public partial class Tables
     /// </summary>
     public fg.TbNotifyType TbNotifyType {get; }
     /// <summary>
+    /// 相态规则
+    /// </summary>
+    public fg.TbPhaseRule TbPhaseRule {get; }
+    /// <summary>
     /// 端口载体实现
     /// </summary>
     public fg.TbPortCarrier TbPortCarrier {get; }
@@ -613,6 +617,7 @@ public partial class Tables
         TbNarrativeLine = new fg.TbNarrativeLine(loader("fg_tbnarrativeline"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
         TbNotifyType = new fg.TbNotifyType(loader("fg_tbnotifytype"));
+        TbPhaseRule = new fg.TbPhaseRule(loader("fg_tbphaserule"));
         TbPortCarrier = new fg.TbPortCarrier(loader("fg_tbportcarrier"));
         TbPowerNode = new fg.TbPowerNode(loader("fg_tbpowernode"));
         TbPowerSource = new fg.TbPowerSource(loader("fg_tbpowersource"));
@@ -750,6 +755,7 @@ public partial class Tables
         TbNarrativeLine.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);
         TbNotifyType.ResolveRef(this);
+        TbPhaseRule.ResolveRef(this);
         TbPortCarrier.ResolveRef(this);
         TbPowerNode.ResolveRef(this);
         TbPowerSource.ResolveRef(this);

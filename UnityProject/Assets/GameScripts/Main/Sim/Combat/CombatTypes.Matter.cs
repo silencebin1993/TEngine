@@ -172,4 +172,43 @@ namespace BinGames.Sim.Combat
         public byte By;
         public byte Side, Stage;
     }
+
+    /// <summary>
+    /// EMG2-PHS-01（FG19 FGR-EMG-100～103；ADR-EMG-001 ⑥）：相态规则下标与缺省值。下标 = 累积量下标（<see cref="EmgUnitState.AccA"/>.xyzw / <see cref="EmgUnitState.AccB"/>.xyz），
+    /// 内核按下标读，不认规则 ID（FGR-EMG-013）。缺省值 = FG19B §3.3 初值（热更层按 fg.TbPhaseRule 覆盖；自检直接建的内核用缺省）。
+    /// </summary>
+    public static class EmgPhaseConst
+    {
+        public const int Count = 7;
+        public const int Chill = 0, Overheat = 1, Charge = 2, Corrode = 3, Magnetize = 4, Ignite = 5, Hack = 6;
+        /// <summary>抗性列（EmgProfile / EmgUnitState.Res0～5 的顺序）。</summary>
+        public const byte ResCold = 0, ResHeat = 1, ResElec = 2, ResCorrode = 3, ResMag = 4, ResHack = 5;
+        public const byte ExitTimed = 0, ExitThreshold = 1, ExitDeath = 2;
+        /// <summary>evt.phase 的 Code：低 4 位 = 累积量下标；位 4 = 退出（0 = 进入）；位 5 = 被提前打断（碎裂 / 热震 / 进水）。</summary>
+        public const ushort CodeExit = 16, CodeBroken = 32;
+
+        public static EmgPhaseRule Default(int k) => k switch
+        {
+            Chill => new EmgPhaseRule { Enter = 1f, Decay = 0.25f, Cap = 1f, MinDwell = 2.5f, Guard = 1.5f, Resist = ResCold, ExitMode = ExitTimed, TagGain = 0.3f, ContactGain = 0.6f, P1 = 0.6f, P2 = 3f, P3 = 2f, P4 = 30f },
+            Overheat => new EmgPhaseRule { Enter = 1f, Exit = 0.4f, Decay = 0.05f, Cap = 1.5f, MinDwell = 4f, Guard = 8f, Resist = ResHeat, ExitMode = ExitThreshold, P1 = 6f, P2 = 2f, P3 = 2f, P4 = 4f },
+            Charge => new EmgPhaseRule { Enter = 1f, Decay = 0.4f, Cap = 1.2f, MinDwell = 1f, Guard = 2f, Resist = ResElec, ExitMode = ExitTimed, P1 = 0.5f, P2 = 4f, P3 = 3f },
+            Corrode => new EmgPhaseRule { Enter = 1f, Exit = 0.3f, Decay = 0.08f, Cap = 1.5f, MinDwell = 4f, Guard = 3f, Resist = ResCorrode, ExitMode = ExitThreshold, TagGain = 0.15f, ContactGain = 0.25f, P1 = 2f, P2 = 0.6f, P3 = 0.5f, P4 = 0.05f },
+            Magnetize => new EmgPhaseRule { Enter = 1f, Exit = 0.4f, Decay = 0.15f, Cap = 1.5f, MinDwell = 3f, Guard = 2f, Resist = ResMag, ExitMode = ExitThreshold, P1 = 4f, P2 = 45f },
+            Ignite => new EmgPhaseRule { Enter = 1f, Exit = 0.2f, Decay = 0.3f, Cap = 1.5f, MinDwell = 2f, Guard = 1f, Resist = ResHeat, ExitMode = ExitThreshold, TagGain = 0.3f, ContactGain = 0.8f, P1 = 0.25f, P2 = 10f, P3 = 30f, P4 = 0.3f },
+            _ => new EmgPhaseRule { Enter = 1f, Decay = 0.05f, Cap = 1f, Resist = ResHack, ExitMode = ExitDeath },
+        };
+    }
+
+    /// <summary>一条编好的相态规则（fg.TbPhaseRule 一行，FG19 FGR-EMG-100 的字段）。表数据，不进快照（读档沿用当前表）。</summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgPhaseRule
+    {
+        public float Enter, Exit, Decay, Cap, MinDwell, Guard;
+        /// <summary>挂上对应标签一次的增益（带寒 / 带酸 / 带火载荷）、站在对应物质里每秒的增益（液氮 / 酸 / 明火）。</summary>
+        public float TagGain, ContactGain;
+        /// <summary>各行自己的参数（fg.TbPhaseRule.note）。</summary>
+        public float P1, P2, P3, P4;
+        public byte Resist, ExitMode;
+    }
 }

@@ -237,7 +237,7 @@ namespace GameLogic.EditorTools
             {
                 foreach (string id in fw)
                 {
-                    var tags = new HashSet<string>(FirmwareKinds.TagsOf(id).Select(StatusTagCatalog.Canonical));
+                    var tags = new HashSet<string>(GameLogic.Campaign.Emergence.EmgProgramCompiler.LiveTagsOf(id).Select(StatusTagCatalog.Canonical));
                     bool expect = r.Kind == NamedReactionCatalog.KindAssembly
                         ? MechanicalReactionCatalog.TriggerFirmwareOf(r.Id) == id
                         : tags.Contains(StatusTagCatalog.Canonical(r.TagA)) || tags.Contains(StatusTagCatalog.Canonical(r.TagB));

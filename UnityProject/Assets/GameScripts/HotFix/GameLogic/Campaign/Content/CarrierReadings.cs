@@ -309,6 +309,11 @@ namespace GameLogic.Campaign.Content
                     }
                     foreach (string tag in FirmwareKinds.TagsOf(fw))
                     {
+                        // EMG2-PHS-01：能量注入写端退役的旧标签（EmgProgramCompiler.RetiredTags，FGR-EMG-019 单轨）
+                        if (skipField != null && skipField(fw, Emergence.EmgProgramCompiler.TagField(tag)))
+                        {
+                            continue;
+                        }
                         tags.Add(tag);
                     }
                 }

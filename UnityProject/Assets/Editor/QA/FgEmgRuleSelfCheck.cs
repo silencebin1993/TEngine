@@ -368,8 +368,8 @@ namespace GameLogic.EditorTools
                         }
                     }
                 }
-                Expect(beyond == 0f && Mathf.Approximately(Hp(k, far), 200f) && AccA(k, far).z == 0f && Hp(k, near) < 200f,
-                    $"之后 10 个节拍源头每拍都注电 4.0：第 8～10 块每步读数最大 {beyond:0.###}（起点按节拍开始时的余电出发、不重读本节拍刚抬高的值；越界的那一跳 ≈ 0.079 低于放电阈值 0.2、节拍末衰减后归零），第 8 块里的单位 {Hp(k, far):0.#} 血、电荷 {AccA(k, far).z:0.###}；对照第 6 块里的单位被电到 {Hp(k, near):0.#} 血");
+                Expect(beyond <= 0.5f * 0.7f + 1e-3f && Mathf.Approximately(Hp(k, far), 200f) /* EMG2-PHS-01：第 7 块里的单位麻痹放电 0.5 给第 8 块里的单位，它再把电带进第 8 块（FG19B §3.4“放电进导电水洼”），网格本身不越过 6 跳 */ && AccA(k, far).z <= 0.5f + 1e-3f && Hp(k, near) < 200f, // EMG2-PHS-01：第 7 块里的单位电荷满麻痹时向 4 米内导体放电 0.5（第 8 块的单位只可能从这里得电，不挨电）
+                    $"之后 10 个节拍源头每拍都注电 4.0：第 8～10 块每步读数最大 {beyond:0.###}（≤ 0.35：只来自第 7 块单位的麻痹放电；起点按节拍开始时的余电出发、不重读本节拍刚抬高的值；越界的那一跳 ≈ 0.079 低于放电阈值 0.2、节拍末衰减后归零），第 8 块里的单位 {Hp(k, far):0.#} 血、电荷 {AccA(k, far).z:0.###}（≤ 邻居麻痹放电 0.5）；对照第 6 块里的单位被电到 {Hp(k, near):0.#} 血");
             }
             using (CombatKernel k = NewKernel(visits: 4))
             {
@@ -430,8 +430,8 @@ namespace GameLogic.EditorTools
                 k.InjectPatchEnergy(new double2(0, 0), 0.5f, EmgConst.PortElec, 1f, 3);
                 ToNextConduct(k);
                 float a = AccA(k, inU).z, b = AccA(k, outU).z;
-                Expect(a > 0.28f && a < 0.32f && b == 0f,
-                    $"金属碎屑（导电 0.5）带电 1.0：站在里面的单位分得 0.6 × 1.0、节拍末衰减后 {a:0.###}（≈ 0.3）；碎屑外的单位 {b:0.###}");
+                Expect(a > 0.5f && a < 0.61f && b == 0f, // EMG2-PHS-01：电荷衰减改由 fg.TbPhaseRule（0.4 / 秒，每步）结算，不再在节拍末 × 0.5
+                    $"金属碎屑（导电 0.5）带电 1.0：站在里面的单位分得 0.6 × 1.0、按 phase_charge 每秒 0.4 衰减后 {a:0.###}（≈ 0.6）；碎屑外的单位 {b:0.###}");
             }
             foreach (bool carrier in new[] { true, false })
             {
@@ -440,7 +440,7 @@ namespace GameLogic.EditorTools
                 k.SpawnPatch(EmgMatterConst.Water, new double2(6, 0), 1.5f, 5f, 0f, 0, false, 3); // 与碎屑不相交
                 int u = carrier ? Unit(k, CombatFaction.Player, new double2(0, 0), -1, 500f) : 0;
                 StepN(k, 20);
-                k.InjectPatchEnergy(new double2(0, 0), 0.5f, EmgConst.PortElec, 4f, 3);
+                k.InjectPatchEnergy(new double2(0, 0), 0.5f, EmgConst.PortElec, 1.5f, 3); // EMG2-PHS-01：单位分得 0.9 < 麻痹阈值 1（满了会放电清零）
                 ToNextConduct(k);
                 float q = carrier ? AccA(k, u).z : 0f;
                 if (carrier)
@@ -500,14 +500,14 @@ namespace GameLogic.EditorTools
             }
             var chain = Run(0, 1.1);
             bool ratio = Enumerable.Range(0, 5).All(i => chain.m[i] > 0f && Mathf.Abs(chain.m[i + 1] / chain.m[i] - 0.63f) < 0.02f);
-            Expect(chain.prog >= 0 && chain.hit > 1.9f && ratio && chain.m[6] > 0f && chain.m[7] == 0f && chain.m[8] == 0f,
-                $"命中注入磁化 {chain.hit:0.###}；节拍末（源头已 × 0.5）沿 9 台相距 1.1 米的钢制敌人：{string.Join(" / ", chain.m.Select(x => x.ToString("0.###")))}——逐跳 × 0.63，第 8 台起低于 q_min 停止");
+            Expect(chain.prog >= 0 && chain.hit > 1.45f /* EMG2-PHS-01：磁化度上限 fg.TbPhaseRule cap 1.5 */ && ratio && chain.m[6] > 0f && chain.m[7] == 0f && chain.m[8] == 0f,
+                $"命中注入磁化 {chain.hit:0.###}（上限 1.5）；节拍末沿 9 台相距 1.1 米的钢制敌人：{string.Join(" / ", chain.m.Select(x => x.ToString("0.###")))}——逐跳 × 0.63，第 8 台起低于 q_min 停止");
             var cut = Run(3, 1.1);
             Expect(cut.m.Take(4).All(x => x > 0f) && cut.m.Skip(4).All(x => x == 0f),
                 $"跳数上限调到 3：{string.Join(" / ", cut.m.Select(x => x.ToString("0.###")))}——第 5 台按 q_min 本可得 0.157，被跳数上限截住");
             var held = Run(3, 1.1, 10);
-            Expect(held.peak.Take(4).All(x => x > 0f) && held.peak[4] < 0.08f && held.peak.Skip(5).All(x => x == 0f),
-                $"跳数上限 3、之后 10 个节拍每拍都命中第 1 台：各台每步读数最大 {string.Join(" / ", held.peak.Select(x => x.ToString("0.###")))}——起点按入队时的余量出发；第 5 台只有跨节拍越界一跳（≤ 1 × 0.63³ × 0.5 × 0.63 ≈ 0.079），第 6 台起始终为 0");
+            Expect(held.peak.Take(4).All(x => x > 0f) && held.peak[4] < 0.24f && Enumerable.Range(4, 3).All(i => held.peak[i] <= held.peak[i - 1] * 0.64f) && held.peak[7] == 0f && held.peak[8] == 0f, // EMG2-PHS-01：磁化度按 0.15 / 秒衰减（不再节拍末 × 0.5），带磁的单位跨节拍再作起点，链每节拍最多外延一跳、逐跳 × 0.63、低于 q_min 停
+                $"跳数上限 3、之后 10 个节拍每拍都命中第 1 台：各台每步读数最大 {string.Join(" / ", held.peak.Select(x => x.ToString("0.###")))}——起点按入队时的余量出发；第 5 台只有跨节拍越界一跳（≤ 1.5 × 0.63⁴ ≈ 0.236；EMG2-PHS-01 起不在节拍末 × 0.5），第 6、7 台只靠跨节拍逐跳外延（仍 × 0.63），第 8 台起低于 q_min 始终为 0");
             var apart = Run(0, 1.5);
             Expect(apart.m[0] > 0f && apart.m.Skip(1).All(x => x == 0f), $"对照：相距 1.5 米（超过半径和 + 0.2）不接触，只有被命中的那台有磁化 {apart.m[0]:0.###}");
         }

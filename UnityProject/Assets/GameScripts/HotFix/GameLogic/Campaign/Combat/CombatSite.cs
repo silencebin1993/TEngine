@@ -194,6 +194,7 @@ namespace GameLogic.Campaign.Combat
             ApplyEntityProfiles(Kernel); // EMG1-ENT-01：实体档案按 fg.TbEntityProfile 写进内核
             ApplyMatters(Kernel); // EMG2-MAT-01：17 种物质按 fg.TbMatter 写进内核（斑块层开不开看 emg.stage）
             ApplyRules(Kernel); // EMG2-RULE-01：通道规则 fg.TbChannelRule 编成内核规则（≤ 256）
+            ApplyPhaseRules(Kernel); // EMG2-PHS-01：相态规则 fg.TbPhaseRule（7 个累积量的阈值 / 衰减 / 免疫窗 / 抗性列）
             _emgEntity = config.EmgEntity != 0;
             ConfigureReactions();
             Sync = new CombatTransformSync(16);
@@ -215,7 +216,8 @@ namespace GameLogic.Campaign.Combat
             Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
             // FG10-FAC-01：澄净专属语法认的四个状态位（酸蚀免疫 / 湿润冲淡酸液 / 油迹 / 燃烧引爆与解冻），按 fg.TbStatusTag 的位写；表重载时随反应一起重登记。
             Kernel.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"),
-                NamedReactionCatalog.BitOf("Frozen")); // EMG2-MAT-02：冻结位 → 液氮迁入斑块映射 mat.cryo
+                NamedReactionCatalog.BitOf("Frozen"), // EMG2-MAT-02：冻结位 → 液氮迁入斑块映射 mat.cryo
+                NamedReactionCatalog.BitOf("Shock")); // EMG2-PHS-01：电击位 → 读旧档时免疫位映射电抗覆盖
             ReactionRevision = NamedReactionCatalog.Revision;
             // FG2-FW-04：规则下标变了（纪元 +1）→ 当场重取反馈基线，下一步起的反应照常进日志 / 归因（不把第一步吞成基线）。
             ReactionFeedback.Prime(Kernel, FeedCursor);
@@ -302,10 +304,6 @@ namespace GameLogic.Campaign.Combat
             // FG6-LOG-10（FGR-LOG-046）：管线泄漏的液洼整片反应（燃油遇火成燃烧区）后至少烧多少游戏秒。
             c.LeakReactSeconds = Math.Max(0f, Tuning("logistics.leak.react_seconds", 12f));
             // FG10-FAC-01：受寒与冻结（液氮“先减速再冻结”）、喷淋池 + 油迹的共用上限（fg.TbHomeTuning clarity.*）。
-            c.ChillSlowMax = Tuning("clarity.chill.slow_max", 0.6f);
-            c.ChillDecay = Tuning("clarity.chill.decay_per_sec", 0.25f);
-            c.FreezeSeconds = Tuning("clarity.chill.freeze_seconds", 2.5f);
-            c.ThawGuardSeconds = Tuning("clarity.chill.thaw_guard_seconds", 1.5f);
             c.PoolZoneCapacity = (int)Math.Round(Tuning("clarity.pool.cap", CombatConst.DefaultPoolZoneCapacity));
             // EMG1-BUS-01（FG19 第 18 节 emg.*）：战斗事件总线每步处理条数、扇出上限、每宿主同一事件码上限（2 比特计数，钳到 1～3）、冷却完成比例。
             // 容量 emg.bus.capacity 是内核常量 EmgConst.BusCapacity（快照读档按它防坏值），表里的值由 FgEmgBusSelfCheck 核对一致。
@@ -884,6 +882,10 @@ namespace GameLogic.Campaign.Combat
                 // 炮塔的弹体武器（Mode = 弹体，固定底盘）沿用 FGR-FW-012 兼容表，读法不动。
                 w.Reading = ProgramReading(p, w.Reading, program);
             }
+            else
+            {
+                w.Reading = InjectTrimmedReading(p, w.Reading, program);
+            }
             noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
             noteKey ??= program.Notes.Exists(n => n.Key == Emergence.EmgProgramCompiler.NoteLobStraight) ? Emergence.EmgProgramCompiler.NoteLobStraight : null;
             RegisterFlashVariants(p, local, w, program);
@@ -994,6 +996,23 @@ namespace GameLogic.Campaign.Combat
         /// EMG1-GRM-01（FGR-EMG-018 / 019；FG19A 第 3.2 节）：程序轨的武器读法——先按旧读法重建、去掉“写修饰端口的固件”的修饰字段（不两轨同时结算），
         /// 再把根节点上解析成旧动词的修饰行（格斗 / 力场 / 布区的大多数格子，以及连锁、体积、破甲、威力）按 fg.TbPortCarrier 参数 × 声明幅度折进读法。O(程序长度 × 端口行)，只在装配结算时。
         /// </summary>
+        /// <summary>
+        /// EMG2-PHS-01 审查修复（第 2 轮）：炮塔弹体武器的兼容读法里，去掉能量注入写端退役的旧标签与 heatburst（内核落点注能已承接，FGR-EMG-019 单轨），其余读法逐字不动。
+        /// 伤害倍率沿用传入读法的值（TurretService.BuildWeapon 已把它折进 Damage 并置 1）。
+        /// </summary>
+        public static CombatReading InjectTrimmedReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program)
+        {
+            Func<string, string, bool> skip = Emergence.EmgProgramCompiler.InjectSkip(program);
+            if (skip == null)
+            {
+                return reading;
+            }
+            bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
+            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile, skip);
+            r.DamageScale = reading.DamageScale;
+            return r;
+        }
+
         public static CombatReading ProgramReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program)
         {
             if (program == null || program.IsEmpty)
@@ -1163,6 +1182,26 @@ namespace GameLogic.Campaign.Combat
             if (!kernel.SetEmgRules(c.Rules))
             {
                 Log.Error("[EmgRuleCatalog] 内核拒绝了规则表（码越界或超容量）");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>EMG2-PHS-01：把编好的相态规则（fg.TbPhaseRule）写进内核。表不合法时报错并保持内核缺省表（数值同 FG19B §3.3，不静默：Log.Error）。</summary>
+        public static bool ApplyPhaseRules(CombatKernel kernel)
+        {
+            Emergence.EmgPhaseCatalog.Compiled c = Emergence.EmgPhaseCatalog.Current;
+            if (kernel == null || !c.Ok)
+            {
+                foreach (string p in c.Problems)
+                {
+                    Log.Error("[EmgPhaseCatalog] " + p);
+                }
+                return false;
+            }
+            if (!kernel.SetPhaseRules(c.Rules))
+            {
+                Log.Error("[EmgPhaseCatalog] 内核拒绝了相态规则表（阈值 / 上限 / 退出不合法）");
                 return false;
             }
             return true;
@@ -2264,6 +2303,10 @@ namespace GameLogic.Campaign.Combat
                     // FG9-FAC-02（FGR-FAC-008 ①）：齐射预警 / 对空拦截 / 空爆 / 雷区 / 冲锋蓄力 / 架炮驻锄——声音 + 字幕 + 画面。
                     FoundryCombatFeedback.OnCue(this, e, at);
                     return;
+                case CombatEventKind.PhaseCue:
+                    // EMG2-PHS-01（FGR-EMG-101，B07）：相态进入 / 被打断——声音 + 字幕；画面是头顶相态图标（内核图标作业）。
+                    EmgPhaseFeedback.OnCue(this, e, at);
+                    return;
                 case CombatEventKind.ClarityCue:
                     // FG10-FAC-01（FGR-FAC-008 ①）：喷嘴蓄压 / 枢轴喷灌蓄压 / 自爆引信 / 投放预警（≥ 0.8 秒）与喷出 / 爆燃 / 冻结 / 分裂 / 冲洗 / 酸沼腐蚀——声音 + 字幕 + 画面。
                     ClarityCombatFeedback.OnCue(this, e, at);
@@ -2468,6 +2511,8 @@ namespace GameLogic.Campaign.Combat
                     return GameText.Get("combat.fire.area_only"); // FG9-FAC-02：子母雷只能用范围伤害 / 牵引引爆
                 case CombatFireResult.Frozen:
                     return GameText.Get("combat.fire.frozen"); // FG10-FAC-01：被液氮冻住，解冻前不能开火
+                case CombatFireResult.Stunned:
+                    return GameText.Get("combat.fire.stunned"); // EMG2-PHS-01：电荷满被麻痹，1 秒内不能开火
                 case CombatFireResult.CannotHitAir:
                     return GameText.Get("combat.fire.cannot_hit_air"); // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区打不到空中目标
                 case CombatFireResult.Covered:
@@ -2738,6 +2783,8 @@ namespace GameLogic.Campaign.Combat
                 Renderer.Hologram = HologramRender;
                 // FG2-FW-03（FGR-FW-031）：头顶状态标签图标的形状 / 颜色来自 fg.TbStatusTag。
                 Renderer.SetStatusVisuals(NamedReactionCatalog.BuildStatusVisuals());
+                // EMG2-PHS-01（FGR-EMG-101 / B15）：头顶相态 / 累积量图标的形状 / 颜色来自 fg.TbPhaseRule。
+                Renderer.SetPhaseVisuals(EmgPhaseFeedback.BuildVisuals());
                 // FG6-DEF-05（FGR-DEF-030）：头顶职能图标的形状 / 颜色来自 fg.TbSiegeRole（攻城服务写入）。
                 Renderer.SetSiegeVisuals(SiegeRoleVisuals);
             }

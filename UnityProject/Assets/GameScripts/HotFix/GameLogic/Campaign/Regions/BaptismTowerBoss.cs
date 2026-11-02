@@ -879,7 +879,7 @@ namespace GameLogic.Campaign.Regions
             SyncFlags(site, s);
         }
 
-        /// <summary>反应塔的免疫位：一直不怕酸（澄净）；阶段三泄压以外冻不住（核心封闭），泄压时能冻住（先冻再烧打出热震）。</summary>
+        /// <summary>反应塔的抗性覆盖：一直不怕酸（澄净）；阶段三泄压以外冻不住（核心封闭），泄压时能冻住（先冻再加热打出热震）。</summary>
         public static void SyncFlags(CombatSite site, CampaignState s)
         {
             if (site == null || s == null || !site.TryGetEnemyUnit(TowerInstanceId, out int unit))
@@ -887,13 +887,10 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             ClarityBossRecord r = Record(s);
-            uint mask = NamedReactionCatalog.BitOf("Acid");
             bool venting = r != null && (BaptismPhase)r.Phase == BaptismPhase.Vent && VentStateAt(r, GameClock.Ticks) == 2;
-            if (!venting)
-            {
-                mask |= NamedReactionCatalog.BitOf("Frozen");
-            }
-            site.SetImmuneMask(unit, mask);
+            // EMG2-PHS-01（ADR ⑦ / ⑭ #9）：免疫位改为运行时抗性覆盖——腐蚀抗性一直 1（澄净）；寒抗封闭时 1（冻不住）、泄压时回到档案值（能冻）。
+            site.SetResist(unit, CombatSite.ResistCorrode, 1f);
+            site.SetResist(unit, CombatSite.ResistCold, venting ? 0f : 1f);
         }
 
         // ─────────────────────────────── 召来的单位 ───────────────────────────────

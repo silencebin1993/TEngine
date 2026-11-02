@@ -454,6 +454,7 @@ namespace BinGames.Sim.Combat
                     cu.TrailLast = spawn.Position;
                     cu.TrailT = cp.TrailInterval;
                     _d.Clarity[slot] = cu;
+                    CombatLogic.SyncImmuneResist(ref _d, slot); // EMG2-PHS-01（ADR ⑭ #9）：免疫位同时表达为抗性覆盖
                 }
             }
             return id;
@@ -715,8 +716,9 @@ namespace BinGames.Sim.Combat
         public bool InAcidMarsh(double2 point) => CombatLogic.InAcid(ref _d, point);
 
         /// <summary>FG10-FAC-01：本地点酸蚀 / 湿润 / 油 / 燃烧的状态位（热更层按 fg.TbStatusTag 写；0 = 没有）。派生量，读档后沿用。</summary>
-        public void SetClarityBits(uint acid, uint wet, uint oil, uint fire, uint frozen = 0u)
+        public void SetClarityBits(uint acid, uint wet, uint oil, uint fire, uint frozen = 0u, uint shock = 0u)
         {
+            _d.ShockBit = shock; // EMG2-PHS-01：读旧档时 ImmuneMask 电击位 → 电抗覆盖
             _d.AcidBit = acid;
             _d.WetBit = wet;
             _d.OilBit = oil;
@@ -793,11 +795,121 @@ namespace BinGames.Sim.Combat
             {
                 return true;
             }
+            uint before = c.ImmuneMask;
             c.ImmuneMask = mask;
             _d.Clarity[i] = c;
+            CombatLogic.SyncImmuneResist(ref _d, i, before); // EMG2-PHS-01：免疫位 → 抗性覆盖（累积量、传导读有效抗性）
             Touch();
             return true;
         }
+
+        /// <summary>
+        /// EMG2-PHS-01（ADR ⑦ 运行时抗性覆盖，FGR-EMG-103）：改单位某一列抗性的运行时覆盖（0 寒、1 热、2 电、3 腐蚀、4 磁、5 入侵；0～1）。有效抗性 = max(档案值, 覆盖值)，
+        /// 累积量、传导分电、沾染换算都读它；覆盖清回 0 = 回到档案值。状态随快照（单位段 Res0～5）。O(1)。
+        /// </summary>
+        public bool SetResist(int id, int kind, float value)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || kind < 0 || kind > 5)
+            {
+                return false;
+            }
+            CombatLogic.SetResistOverride(ref _d, i, kind, value);
+            Touch();
+            return true;
+        }
+
+        /// <summary>EMG2-PHS-01：单位某一列的有效抗性（档案值、覆盖值、防腐涂层下限取大）。找不到单位返回 0。</summary>
+        public float EffectiveResist(int id, int kind)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 || kind < 0 || kind > 5 ? 0f : CombatLogic.EmgResist(ref _d, i, kind);
+        }
+
+        /// <summary>
+        /// EMG2-PHS-01（FG19 FGR-EMG-100）：写相态规则（fg.TbPhaseRule 7 行，下标 = 累积量下标）。行数不对、进入阈值 ≤ 0、上限 &lt; 进入、阈值退出的退出 ≥ 进入时整表拒绝（返回 false，保留原表）。
+        /// </summary>
+        public bool SetPhaseRules(IReadOnlyList<EmgPhaseRule> rules)
+        {
+            if (rules == null || rules.Count != EmgPhaseConst.Count)
+            {
+                return false;
+            }
+            for (int k = 0; k < rules.Count; k++)
+            {
+                EmgPhaseRule r = rules[k];
+                if (!(r.Enter > 0f) || r.Cap < r.Enter || r.Decay < 0f || r.MinDwell < 0f || r.Guard < 0f || r.Resist > 5 || r.ExitMode > EmgPhaseConst.ExitDeath
+                    || (r.ExitMode == EmgPhaseConst.ExitThreshold && !(r.Exit < r.Enter)))
+                {
+                    return false;
+                }
+            }
+            for (int k = 0; k < rules.Count; k++)
+            {
+                _d.EmgPhases[k] = rules[k];
+            }
+            Touch();
+            return true;
+        }
+
+        public EmgPhaseRule PhaseRuleAt(int k) => k >= 0 && k < EmgPhaseConst.Count ? _d.EmgPhases[k] : default;
+
+        /// <summary>EMG2-PHS-01：单位是否在第 k 个相态里（0 冻结、1 熔穿、2 麻痹、3 破甲、4 磁化、5 燃烧）。</summary>
+        public bool InPhase(int id, int k)
+        {
+            int i = _d.SlotOf(id);
+            return i >= 0 && k >= 0 && k < EmgPhaseConst.Count && CombatLogic.InPhase(ref _d, i, k);
+        }
+
+        /// <summary>EMG2-PHS-01：第 k 个累积量（找不到 = 0）。</summary>
+        public float AccumOf(int id, int k)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 || k < 0 || k >= EmgPhaseConst.Count ? 0f : CombatLogic.AccOf(_d.EmgUnit[i], k);
+        }
+
+        /// <summary>EMG2-PHS-01：给单位第 k 个累积量加 amount（按抗性 / 免疫窗 / 上限；自检与热更注入用，与内核来源同一个入口）。返回实际增加量。</summary>
+        public float AddAccum(int id, int k, float amount)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                return 0f;
+            }
+            float got = CombatLogic.EmgAddAcc(ref _d, i, k, amount);
+            Touch();
+            return got;
+        }
+
+        /// <summary>EMG2-PHS-01：给单位注热（与命中注热 / 站在热斑块里同一个入口：武器积热 + 结构积热累积量 + 冻结热震判定；按热抗折减）。自检 / 热更注入用。</summary>
+        public bool InjectUnitHeat(int id, float q)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0)
+            {
+                return false;
+            }
+            CombatLogic.EmgAddUnitHeat(ref _d, i, q);
+            Touch();
+            return true;
+        }
+
+        /// <summary>EMG2-PHS-01：单位此刻生效的装甲减伤比例（破甲 / 熔穿期间 = 0）。</summary>
+        public float EffectiveArmorOf(int id)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 0f : CombatLogic.ArmorOf(ref _d, i);
+        }
+
+        /// <summary>EMG2-PHS-01：单位此刻的质量（破甲期间 × 0.6）。</summary>
+        public float UnitMassOf(int id)
+        {
+            int i = _d.SlotOf(id);
+            return i < 0 ? 0f : CombatLogic.EmgUnitMass(ref _d, i);
+        }
+
+        /// <summary>EMG2-PHS-01：本地点进入相态的累计次数（不进快照；自检用）。</summary>
+        public int PhaseEnters => _d.EmgS[0].PhaseEnters;
 
         /// <summary>FG10-FAC-01（液氮）：给单位加受寒（测试夹具 / 将来玩家侧的液氮来源；与内核里的喷淋同一个入口）。</summary>
         public bool ChillUnit(int id, float amount)
@@ -2550,7 +2662,8 @@ namespace BinGames.Sim.Combat
                 // FG10-FAC-01（格式 15）：澄净状态。
                 if (format >= 15)
                 {
-                    WriteClarity(w, _d.Clarity[i]);
+                    // EMG2-PHS-01：写 15 / 16 版（只给自检造旧档）时把寒量 / 冻结 / 免疫窗折回云端字段；17 版里它们在单位涌现段，云端字段恒 0
+                    WriteClarity(w, format < 17 ? CombatLogic.ClarityForOldFormat(ref _d, i) : _d.Clarity[i]);
                 }
             }
 
@@ -2889,6 +3002,9 @@ namespace BinGames.Sim.Combat
             staging.EmgRules.CopyFrom(_d.EmgRules);
             staging.EmgRuleIdx.CopyFrom(_d.EmgRuleIdx);
             staging.EmgRuleOrder.CopyFrom(_d.EmgRuleOrder);
+            staging.EmgPhases.CopyFrom(_d.EmgPhases); // EMG2-PHS-01：相态规则同是表数据
+            staging.ShockBit = _d.ShockBit;
+            CombatLogic.MigrateClarityPhase(ref staging); // EMG2-PHS-01（ADR ⑭ #5 #9、⑩ 15 → 17）：云端受寒 / 冻结 / 免疫窗 → 寒量与冻结相态；免疫位 → 抗性覆盖
             RemapProfiles(ref staging, _d.EmgProfileKeys);
             _d.Dispose();
             _d = staging;
@@ -4586,20 +4702,70 @@ namespace BinGames.Sim.Combat
         {
             Icons.Clear();
             double now = D.Scalars[0].Time;
+            bool phaseVis = Visuals.Length >= CombatRenderer.PhaseVisualBase + EmgPhaseConst.Count;
             for (int i = 0; i < D.Count; i++)
             {
-                if (!D.IsAlive(i) || !D.StatusActive(i, now))
+                if (!D.IsAlive(i))
                 {
                     continue;
                 }
-                uint bits = D.Status[i] & ~CombatConst.StatusBitZoneSlow;
+                // EMG2-PHS-01（FGR-EMG-101 / B05）：先画相态（满层 = 3 点），再画累积中的量（进度 1～2 点，≥ 1/3 进入阈值才画），最后是状态标签；合计 ≤ MaxPerUnit。
+                EmgUnitState es = D.EmgUnit[i];
+                int phaseRow = 0;
+                int accRow = 0;
+                if (phaseVis)
+                {
+                    for (int k = 0; k < EmgPhaseConst.Hack; k++)
+                    {
+                        if ((es.PhaseMask & (1 << k)) != 0)
+                        {
+                            phaseRow++;
+                        }
+                        else if (CombatLogic.AccOf(es, k) >= D.EmgPhases[k].Enter / 3f)
+                        {
+                            accRow++;
+                        }
+                    }
+                }
+                bool tags = D.StatusActive(i, now);
+                uint bits = tags ? D.Status[i] & ~CombatConst.StatusBitZoneSlow : 0u;
+                int total = phaseRow + accRow + math.countbits(bits);
+                if (total == 0)
+                {
+                    continue;
+                }
                 int shown = 0;
-                int total = math.countbits(bits);
                 int row = math.min(total, MaxPerUnit);
                 double2 p = D.Pos[i] - Origin;
                 double2 q = D.Prev[i] - Origin;
                 float lift = D.Radius[i] + Size * 0.9f;
                 float left = -(row - 1) * Size * 0.55f;
+                for (int pass = 0; pass < 2 && phaseVis; pass++)
+                {
+                    for (int k = 0; k < EmgPhaseConst.Hack && shown < MaxPerUnit; k++)
+                    {
+                        bool inPhase = (es.PhaseMask & (1 << k)) != 0;
+                        float acc = CombatLogic.AccOf(es, k);
+                        float enter = math.max(0.01f, D.EmgPhases[k].Enter);
+                        if (pass == 0 ? !inPhase : inPhase || acc < enter / 3f)
+                        {
+                            continue;
+                        }
+                        float2 v = Visuals[CombatRenderer.PhaseVisualBase + k];
+                        if (v.x < 0f)
+                        {
+                            continue;
+                        }
+                        int pips = inPhase ? 3 : acc >= enter * 2f / 3f ? 2 : 1;
+                        float dx = left + shown * Size * 1.1f;
+                        Icons.Add(new CombatInstance
+                        {
+                            A = new float4((float)p.x + dx, (float)p.y + lift, (float)q.x + dx, (float)q.y + lift),
+                            B = new float4(Size, v.x, v.y, 30f + pips),
+                        });
+                        shown++;
+                    }
+                }
                 while (bits != 0u && shown < MaxPerUnit)
                 {
                     int b = math.tzcnt(bits);

@@ -599,6 +599,10 @@ namespace BinGames.Sim.Combat
             {
                 EmgHitInject(ref d, t, c0); // EMG2-RULE-01：命中注能（en.heat / en.elec / en.mag 写端）与壁撞推动；不依赖总线监听
             }
+            if (damage > 0f && attacker >= 0 && attacker < d.Count && c0.EntKind != EmgEntKind.Zone && c0.EntKind != EmgEntKind.Patch && IsFrozen(ref d, t))
+            {
+                PhaseKinetic(ref d, t, damage * HitKineticOf(ref d, attacker), attacker); // EMG2-PHS-01（P01）：冻结中受单次动能 → 碎裂（区域 / 斑块节拍不算一次冲击）
+            }
             if (d.EmgListen == 0u)
             {
                 return;

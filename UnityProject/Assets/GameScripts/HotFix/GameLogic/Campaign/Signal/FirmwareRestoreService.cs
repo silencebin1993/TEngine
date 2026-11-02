@@ -240,7 +240,7 @@ namespace GameLogic.Campaign.Signal
                 return string.Empty;
             }
             var tags = new List<string>();
-            foreach (string t in FirmwareKinds.TagsOf(firmwareId))
+            foreach (string t in Emergence.EmgProgramCompiler.LiveTagsOf(firmwareId))
             {
                 tags.Add(StatusTagCatalog.NameOf(t) ?? t);
             }

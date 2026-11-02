@@ -34,7 +34,7 @@ namespace BinGames.Sim.Combat
             int n = d.Count;
             for (int i = 0; i < n; i++)
             {
-                if (!d.IsAlive(i) || d.Faction[i] != (byte)CombatFaction.Hostile || IsFrozen(ref d, i))
+                if (!d.IsAlive(i) || d.Faction[i] != (byte)CombatFaction.Hostile || IsImmobile(ref d, i))
                 {
                     continue; // FG10-FAC-01：冻住的单位不铺雷、不加速装填、不齐射
                 }
@@ -667,7 +667,7 @@ namespace BinGames.Sim.Combat
                 float dmg = wp.Damage;
                 if (IsFrontalArmored(ref d, k, d.Pos[i]))
                 {
-                    dmg *= math.max(0f, 1f - d.Armor[k].x);
+                    dmg *= math.max(0f, 1f - ArmorOf(ref d, k));
                 }
                 DamageFrom(ref d, k, dmg, i, EmgCode.SrcImpact);
                 if (p.ChargeKnock > 0f && CanDisplace(ref d, k))

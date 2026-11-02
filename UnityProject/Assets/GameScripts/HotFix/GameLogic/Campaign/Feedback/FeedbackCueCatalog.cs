@@ -238,6 +238,11 @@ namespace GameLogic.Campaign.Feedback
                 CaptionKey = "clarity.cue.deflagrate", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 被火击毁的爆燃（可以反过来利用）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySlickIgnite, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "澄净", Caption = "油迹被点燃：整片爆燃", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.slick_ignite", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 油迹（燃迹组合）" });
+            // EMG2-PHS-01（FGR-EMG-101，B07 三通道：头顶相态图标 + 声音 + 字幕；字幕细节 = “单位：相态名”）
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmgPhaseEnter, SfxId = "sfx_power_down", Tag = "相态", Caption = "进入相态", TagKey = "emg.phase.cue.tag",
+                CaptionKey = "emg.phase.cue.caption", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.4f, RequirementNote = "EMG2-PHS-01 相变累积量与单位相态" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmgPhaseBroken, SfxId = "sfx_enemy_cannon", Tag = "相态", Caption = "相态被打断", TagKey = "emg.phase.cue.tag",
+                CaptionKey = "emg.phase.cue.broken", Tone = FeedbackTone.Info, CaptionSeconds = 2f, MinIntervalSeconds = 0.4f, RequirementNote = "EMG2-PHS-01 碎裂 / 热震 / 熄灭" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityFreeze, SfxId = "sfx_power_down", Tag = "澄净", Caption = "机器被冻结：解冻前不能移动、不能开火", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.freeze", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮“先减速再冻结”" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySplit, SfxId = "sfx_enemy_cannon", Shake = 0.25f, Tag = "澄净", Caption = "沉淀巨罐破裂：分裂出会爬行的腐蚀液", TagKey = "clarity.cue.tag",

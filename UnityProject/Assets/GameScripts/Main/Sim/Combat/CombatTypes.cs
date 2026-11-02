@@ -917,6 +917,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-RULE-01（FGR-EMG-088 / B08）：玩家显式下达的移动 / 攻击移动路线会穿过对这台机器有害的斑块（Unit = 机器，Code = 物质码，Pos = 第一块危险斑块中心）。
         /// 路线不改写、只发这一次（下令时判一次，不做智能延续）。</summary>
         HazardPath = 49,
+        /// <summary>EMG2-PHS-01（FGR-EMG-101，B07）：相态进入 / 退出的表现提示（可丢；可靠计数与 evt.phase 另走）。Unit = 单位，Other = 来源单位 ID（放电者 / 0），Value = 累积量，
+        /// Code 低 4 位 = 累积量下标（0 寒量→冻结、1 结构积热→熔穿、2 电荷→麻痹、3 腐蚀度→破甲、4 磁化度→磁化、5 着火度→燃烧）；位 4 = 退出；位 5 = 被打断；Code = 64 = 麻痹放电电弧（Unit = 被电到的导体）。</summary>
+        PhaseCue = 50,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -957,6 +960,8 @@ namespace BinGames.Sim.Combat
         Covered = 19,
         /// <summary>EMG1-FW-01（DEBT-EMG1TRIG01-03）：修复出口（维修束）只能对己方单位出手（目标是敌对单位或自己）。</summary>
         NotFriendly = 20,
+        /// <summary>EMG2-PHS-01（FGR-EMG-101）：开火者被麻痹（电荷满），1 秒内不能行动。</summary>
+        Stunned = 21,
     }
 
     /// <summary>武器开火方式。</summary>
@@ -1330,11 +1335,7 @@ namespace BinGames.Sim.Combat
         public float LeakReactSeconds;
         /// <summary>FG10-FAC-01：喷淋池 + 油迹的共用上限（0 = <see cref="CombatConst.DefaultPoolZoneCapacity"/>）。</summary>
         public int PoolZoneCapacity;
-        /// <summary>FG10-FAC-01（液氮“先减速再冻结”）：受寒满时的最大减速比例、每秒自然消退量、冻结秒数、解冻后的免疫秒数（fg.TbHomeTuning clarity.chill.*；0 = 内核默认 0.6 / 0.25 / 2.5 / 1.5）。</summary>
-        public float ChillSlowMax;
-        public float ChillDecay;
-        public float FreezeSeconds;
-        public float ThawGuardSeconds;
+        // EMG2-PHS-01：云端受寒的 4 个配置（ChillSlowMax / ChillDecay / FreezeSeconds / ThawGuardSeconds，调参 clarity.chill.*）已并入 fg.TbPhaseRule 的 phase_chill 行，删除（一处来源）。
         /// <summary>EMG1-BUS-01（FGR-EMG-063 / 065，fg.TbHomeTuning emg.bus.per_step / emg.bus.max_fanout / emg.trig.max_per_host / emg.heat.cool_ratio）：
         /// 战斗事件总线每步处理条数、一条事件最多唤起几条监听、每宿主同一事件码上限（≤ 3）、冷却完成的积热比例。≤ 0 取 <see cref="EmgConst"/> 初值。</summary>
         public int EmgBusPerStep;

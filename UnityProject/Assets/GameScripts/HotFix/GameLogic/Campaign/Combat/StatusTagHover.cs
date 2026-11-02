@@ -399,12 +399,19 @@ namespace GameLogic.Campaign.Combat
         public static TooltipContent BuildContent(CombatKernel kernel, int unitId)
         {
             List<(string Glyph, string Name, float Seconds, int Stacks)> lines = LineBuffer;
-            if (!Describe(kernel, unitId, lines) || lines.Count == 0)
-            {
-                return null;
-            }
+            bool tags = Describe(kernel, unitId, lines) && lines.Count > 0;
             StringBuilder sb = TextBuffer;
             sb.Clear();
+            // EMG2-PHS-01（FGR-EMG-101 / 103）：相态（剩余秒）、累积量（百分比）、抗性满不能进入的原因排在标签前
+            bool phases = EmgPhaseFeedback.AppendLines(kernel, unitId, sb);
+            if (!tags)
+            {
+                lines.Clear();
+                if (!phases)
+                {
+                    return null;
+                }
+            }
             foreach ((string glyph, string name, float seconds, int stacks) in lines)
             {
                 if (sb.Length > 0)

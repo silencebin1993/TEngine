@@ -637,6 +637,15 @@ namespace GameLogic.EditorTools
                     foreach ((string field, double mag) in ParseFieldsExact(r.ReadFields))
                     {
                         string phrase = Phrase(field, c, mag);
+                        if (field == "heatburst" && GameLogic.Campaign.Emergence.EmgProgramCompiler.RetiredTagsOf(r.Id).Contains("Fire"))
+                        {
+                            // EMG2-PHS-01（DEBT-EMG1FW01-03 注入类）：注热写端退役的过渡字段不再写进读法（改写“注热”，fgdata_firmware.inject_text_parts）——反过来断言旧短语不在
+                            if (phrase != null && text.Contains(phrase))
+                            {
+                                bad.Add($"{r.Id}.{c} 仍写着已退役的过渡字段 {field}：“{phrase}”");
+                            }
+                            continue;
+                        }
                         if (phrase == null || !text.Contains(phrase))
                         {
                             bad.Add($"{r.Id}.{c} 缺字段 {field} 的短语“{phrase}”（实际“{text}”）");
@@ -1144,6 +1153,8 @@ namespace GameLogic.EditorTools
         private sealed class Obs
         {
             public string Digest;
+            public float[] Acc; // EMG2-PHS-01：每个单位的注入累积量（结构积热 + 电荷 + 磁化度），只在程序轨场景填
+            public int InjectRoot, InjectChild; // EMG2-PHS-01：因果链环里命中注能记录（en.heat / en.elec / en.mag）在根节点（链深 0）/ 子载荷（链深 ≥ 1）各几条
             public float HostileHp;
             public float StartHp;
             public float[] Hp;
@@ -1205,6 +1216,10 @@ namespace GameLogic.EditorTools
                 var a = new Arena { K = new CombatKernel(cfg, 32) };
                 if (program != null && !program.IsEmpty)
                 {
+                    // EMG2-PHS-01：声明轨场景与正式地点同样写入物质 / 通道规则 / 相态表（命中注能要物质层开着，CombatSite 构造同一做法），注入类固件的行为才落得下来
+                    CombatSite.ApplyMatters(a.K);
+                    CombatSite.ApplyRules(a.K);
+                    CombatSite.ApplyPhaseRules(a.K);
                     // EMG1-FW-01：声明轨武器——程序登记进本场内核，需要飞行的按作战组件表实体化（与 CombatSite.WithProgram 同一做法）
                     w.Program = CombatSite.RegisterProgram(a.K, program);
                     CombatSite.ApplySpawnFlight(ref w, program, comp);
@@ -1372,6 +1387,33 @@ namespace GameLogic.EditorTools
                 sb.Append(o.Hp[i].ToString("F1", CultureInfo.InvariantCulture)).Append(',')
                   .Append(o.Pos[i].x.ToString("F2", CultureInfo.InvariantCulture)).Append(',')
                   .Append(o.Pos[i].y.ToString("F2", CultureInfo.InvariantCulture)).Append(o.Alive[i] ? 'A' : 'D').Append('|');
+            }
+            if (program != null)
+            {
+                // EMG2-PHS-01（DEBT-EMG1FW01-03）：注入类固件（en.heat / en.elec / en.mag）撤了过渡字段后，行为落在目标的累积量（结构积热 / 电荷 / 磁化度 → 相态），也算行为
+                o.Acc = new float[a.Ids.Length];
+                for (int r = 0; a.K.TryGetEmgChainRecent(r, out EmgChainRec rec); r++)
+                {
+                    if (rec.Kind == EmgChainNode.Inject && (rec.Key == EmgConst.PortHeat || rec.Key == EmgConst.PortElec || rec.Key == EmgConst.PortMag))
+                    {
+                        if (rec.Depth == 0)
+                        {
+                            o.InjectRoot++;
+                        }
+                        else
+                        {
+                            o.InjectChild++;
+                        }
+                    }
+                }
+                for (int i = 0; i < a.Ids.Length; i++)
+                {
+                    if (a.K.TryGetUnitEmg(a.Ids[i], out _, out EmgUnitState es))
+                    {
+                        o.Acc[i] = es.AccA.y + es.AccA.z + es.AccB.x;
+                        sb.Append('e').Append((es.AccA.y + es.AccA.z + es.AccB.x).ToString("F2", CultureInfo.InvariantCulture)).Append('p').Append(es.PhaseMask);
+                    }
+                }
             }
             CombatCounters c = a.K.Counters;
             o.AttackerPos = o.Pos[ArenaAttacker];
