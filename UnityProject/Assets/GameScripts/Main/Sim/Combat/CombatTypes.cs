@@ -39,8 +39,11 @@ namespace BinGames.Sim.Combat
         /// 短段缺的字段取缺省、长段与不认识的段按长度跳过；读写器见 CombatKernel.Emergence.cs 的 EmgSegmentWriter / EmgSegmentReader）：发号器与总线序号、程序 / 节点 / 指令三张表（全表）、
         /// 武器的程序下标与 SpawnFlight、每单位档案下标与涌现状态基本段、每发弹体的稳定 Id 与宿主五元组 / 弹道 / 物质字段、每架无人机的稳定 Id、未处理的涌现事件、残骸
         /// （读取仍认 1～15：弹体 Prog = −1（按旧逻辑飞完）、0 代、按读入顺序补发弹体 / 无人机 Id、发号器取补发后的下一个、掩码与计时 0、档案取单位种类默认（−1）、
-        /// 总线空且序号 0、没有残骸、武器没有程序）。</summary>
-        public const int FormatVersion = 16;
+        /// 总线空且序号 0、没有残骸、武器没有程序）。
+        /// 17 = EMG2-MAT-01（FG19 FGR-EMG-081 / 082 / 211，ADR-EMG-001 ⑤ ⑩）：Emg 段追加阶段 2 的全部内核状态段——物质斑块（段 17，扩展字段的 CombatZone、独立列表）、
+        /// 活跃场（段 18）、实体档案稳定键（段 19，DEBT-EMG1ENT01-07）；单位段尾部追加温度、7 个累积量、相态位与每量计时、6 个抗性覆盖；标量段尾部追加斑块可靠计数；
+        /// 规则计数 256 槽沿用段 15（格式 16 起已是 256）。读取仍认 1～16：没有斑块 / 场（旧区域照旧是区域直到到期；“像物质的区域”转斑块归 EMG2-MAT-02）、累积量 / 相态 / 覆盖全 0、档案下标原样。</summary>
+        public const int FormatVersion = 17;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -397,6 +400,31 @@ namespace BinGames.Sim.Combat
         public byte EmgSub;
         /// <summary>母载荷武器下标（子区的读法状态取它；−1 = 没有），仅子区用。</summary>
         public int EmgWeapon;
+        // ── EMG2-MAT-01（FGR-EMG-081；ADR-EMG-001 ⑤ B′）：物质斑块字段，只在 CombatData.Patches 里用（Zones 里恒为缺省）。
+        //    斑块的稳定 Id / 因果链 / 链深沿用上面的 EmgId / EmgChain / EmgDepth；Owner = 排放者单位 ID（世界源 / 残骸崩解为 0 或液洼号的相反数）；Faction 恒为 Neutral。
+        public float Amount;
+        public float Temp;
+        public float Charge;
+        /// <summary>固态斑块耐久（非固态 0）与累计动能（≥ 耐久时碎，规则 E18～E20 归 EMG2-RULE-01）。</summary>
+        public float Hp;
+        public float Kinetic;
+        /// <summary>气体浓度（1 = 刚生成；扩散时 = (初始半径 ÷ 当前半径)²，低于 emg.gas.min_conc 消失）。</summary>
+        public float Conc;
+        /// <summary>生成时的半径（蒸干 / 燃尽在存续最后 25% 从它线性缩到 0；气体浓度按它算）。</summary>
+        public float R0;
+        /// <summary>燃烧累计秒（明火每 emitEvery 秒向气体层排一份烟）。</summary>
+        public float BurnSeconds;
+        /// <summary>熔融累计（熔穿相态在身下漏熔融金属的累加器，EMG2-PHS-01 用；ADR ⑩ 版本 17 字段）。</summary>
+        public float MoltenAccum;
+        /// <summary>规则条件开始满足的时刻（W01 / W02 停留秒数，EMG2-RULE-01 用）。</summary>
+        public double CondSince;
+        /// <summary>归属：链上最多 4 台机器的单位 ID（ADR ⑨；合并时取份量大者）。</summary>
+        public int4 Owners;
+        public byte Matter;
+        public byte Layer;
+        /// <summary><see cref="EmgMatterConst.FlagWorld"/> / <see cref="EmgMatterConst.FlagOilCovered"/> / <see cref="EmgMatterConst.FlagPersist"/>。</summary>
+        public byte PFlags;
+        public byte PatchPad;
     }
 
     /// <summary>FG2-FW-02：一次待结算的回波（残影 / 节拍 / 追射 / 回旋）：到点后对同一目标再结算一次伤害与状态。</summary>
@@ -1341,6 +1369,21 @@ namespace BinGames.Sim.Combat
         /// 块数 0 = 块数机制关（emg.stage = 0）：反伤不限次数、不放破片，旧行为逐字不变。</summary>
         public byte EmgEraBlocks;
         public float EmgEraRefill;
+        /// <summary>EMG2-MAT-01（FGR-EMG-081～083）：1 = 物质斑块层开（热更层在 emg.stage ≥ 2 时置位）——排放写端生成斑块（不再落读法驻留区）、残骸崩解为碎屑斑块、
+        /// 斑块节拍 / 单位接触 / 弹体沾染 / evt.enter · evt.leave。0 = 阶段 1 行为逐字不变。</summary>
+        public byte EmgPatchOn;
+        /// <summary>fg.TbHomeTuning emg.patch.*（容量 / 世界源保留额 / 每步结算与生成上限 / 邻居数 / 节拍 / 单块半径上限 / 软上限就近合并半径）、emg.gas.min_conc、emg.matter.friendly_scale。≤ 0 取 <see cref="EmgMatterConst"/> 初值。</summary>
+        public int EmgPatchCapacity;
+        public int EmgPatchReserve;
+        public int EmgPatchPerStep;
+        public int EmgPatchSpawnPerStep;
+        public int EmgPatchNeighbors;
+        public float EmgPatchTick;
+        public float EmgPatchMaxRadius;
+        public float EmgPatchSoftMerge;
+        public float EmgGasMinConc;
+        /// <summary>己方物质伤到己方的系数（初值 1.0 = 完全中立，FG19 第 14 节 #6；0 视为 1）。</summary>
+        public float EmgFriendlyScale;
 
         public static CombatConfig Default => new CombatConfig
         {

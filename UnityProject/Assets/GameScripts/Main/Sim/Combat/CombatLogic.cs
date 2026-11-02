@@ -48,7 +48,12 @@ namespace BinGames.Sim.Combat
             d.Scalars[0] = s;
             EmgScalars emgS = d.EmgS[0];
             emgS.StepFirstSeq = emgS.EmgSeq; // EMG1-BUS-01：积压保护只合并本步入队的
+            emgS.PatchSpawnedStep = 0; // EMG2-MAT-01：每步生成额度（emg.patch.spawn_per_step）
             d.EmgS[0] = emgS;
+            if (d.EmgPending.Length > 0 && EmgPatchesOn(ref d))
+            {
+                StepPendingPatches(ref d); // EMG2-MAT-01：顺延斑块先于本步新请求占生成额度（先进先出）
+            }
 
             MaybeCompact(ref d);
             MaybeCompactRoutes(ref d);
@@ -137,6 +142,8 @@ namespace BinGames.Sim.Combat
             {
                 StepWrecks(ref d, dt);
             }
+            // 5c. EMG2-MAT-01（FGR-EMG-081～083）：物质斑块节拍（错相、每步 ≤ emg.patch.per_step 块）与单位接触（沾染 / 接触伤害 / evt.enter · evt.leave，本步总线处理）。没有斑块时 O(1)。
+            StepMatter(ref d, dt);
 
             // 5d. EMG1-BUS-01：战斗事件总线（ADR-EMG-001 ④：StepReadings 之后、场地边界钳制之前；按 Seq 先进先出，每步 emg.bus.per_step 条，超出顺延不丢）。
             if (d.EmgBus.Length > 0)
@@ -1046,7 +1053,7 @@ namespace BinGames.Sim.Combat
                 {
                     Cue(ref d, d.Faction[i] == (byte)CombatFaction.Hostile ? CombatEventKind.EnemyFired : CombatEventKind.Fired, i, d.Id[t], 0f, d.Pos[i], 0);
                 }
-                EmgFireFlight(ref d, i, t, d.Weapon[i], wp, EmgProjFlags.None);
+                EmgFireFlight(ref d, i, t, d.Weapon[i], wp, EmgProjFlags.NoNamed); // DEBT-EMG1TRIG01-05：驻守 / 炮塔入口，命中不发具名反应（同下面 DeliverInstant(…, false)）
                 if (wp.Reading.EscortDrones > 0)
                 {
                     LaunchDrones(ref d, i, wp, wp.Reading.EscortDrones);
@@ -1863,6 +1870,10 @@ namespace BinGames.Sim.Combat
                 orbiting |= (pr.Mods & EmgProjMods.Orbit) != 0;
                 // EMG1-GRM-01：抛射弹体在空中不碰单位 / 障碍 / 护盾 / 偏折场，落地那一步才结算（落到目标脚下，FG19A 第 1.1 节第 11 行）。
                 bool airborne = (pr.Flags & EmgProjFlags.Lob) != 0 && pr.Life > 0f;
+                if (d.EmgS[0].PatchLive > 0 || pr.PrevMatterMask != 0u)
+                {
+                    EmgProjMatter(ref d, ref pr, next, airborne); // EMG2-MAT-01（FGR-EMG-083）：穿过斑块沾染、进 / 离发 evt.enter / evt.leave；地点没有斑块且弹体不在斑块里时不查（最后一块消失后补发 leave、清掩码）
+                }
                 if (pr.Faction == CombatFaction.Player && d.DeflectActive.Length > 0 && !airborne && !EmgEvadesDeflect(ref d, pr) && TryReflectProjectile(ref d, ref pr, next))
                 {
                     d.Projectiles[write++] = pr; // FG9-FAC-01：被偏折场反弹，下一步起按敌方弹体飞回去
@@ -1935,7 +1946,7 @@ namespace BinGames.Sim.Combat
                     }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
-                        EmgNodeEffects(ref d, pr.Prog, pr.Node, obstacleAt, d.SlotOf(pr.Owner), pr.Faction);
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, obstacleAt, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth);
                     }
                     EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireObstacle, obstacleAt);
                     CombatCounters co = d.Counters[0];
@@ -1971,6 +1982,10 @@ namespace BinGames.Sim.Combat
                         d.EmgCtx.HitCode = (pr.Mods & EmgProjMods.Pierced) != 0 ? EmgCode.HitAfterPierce : EmgCode.HitAfterBounce; // EMG1-GRM-01
                     }
                     int hitId = d.Id[hit];
+                    if (pr.Coat != 0u && !heal)
+                    {
+                        EmgCoatOnHit(ref d, hit, pr); // EMG2-MAT-01：命中时把沾上的物质带给目标
+                    }
                     if (heal)
                     {
                         d.EmgCtx.HitCode = EmgCode.HitHeal; // EMG1-TRIG-01：治疗子弹药命中 = 修复（evt.hit Code = 修复）
@@ -2009,7 +2024,7 @@ namespace BinGames.Sim.Combat
                     }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
-                        EmgNodeEffects(ref d, pr.Prog, pr.Node, hitPos, owner, pr.Faction);
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, hitPos, owner, pr.Faction, pr.Chain, pr.Depth);
                         if (!heal)
                         {
                             EmgSubChain(ref d, pr, owner, hit, hitPos); // EMG1-GRM-01：子弹药节点上的连锁
@@ -2036,7 +2051,7 @@ namespace BinGames.Sim.Combat
                 {
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
-                        EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次
                     }
                     // EMG1-BUS-01：寿命到；EMG1-GRM-01：抛射弹落地（Code = 落地）、折返弹回到发射者身边（Code = 折返）。
                     ushort why = (pr.Flags & EmgProjFlags.Lob) != 0 ? EmgCode.ExpireGround

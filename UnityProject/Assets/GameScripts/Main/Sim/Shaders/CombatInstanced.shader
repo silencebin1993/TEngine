@@ -6,6 +6,7 @@
 // _Kind = 2：FG2-FW-03 头顶状态标签图标（FGR-FW-031）。B = (边长, 形状序号, 打包颜色 0xRRGGBB, 30 + 叠层)。形状为主、颜色为辅（B15 色盲安全）：
 //            深色底板 + 按形状序号画的符号（▲●◆◇★▼■☆◎○※△□▽ 依次 0～13），底部小点 = 叠层数。
 //            FG6-DEF-05：同一路画头顶职能图标（14 上箭头 = 突击、15 闪电 = 破坏、16 城垛 = 攻城、17 下箭头 = 撤退中；叠层 0 = 不画小点）。
+// EMG2-MAT-01：物质斑块（_Kind = 0 那一路里 B.w = 40～56，17 种纹样，见 patchFrag）。
 // FG2-VFX-02（DEBT-FG2FW02-02）：区域与无人机（_Kind = 0 那一路里 B.w ≥ 20 的实例）。B = (半径, 剩余时间比例, 打包颜色 0xRRGGBB, 种类)。
 //            种类 20 液池（外移的波纹）/ 21 冲击波（随时间外扩的冲击环）/ 22 减速网（网格）/ 23 反应残留（斑点）；外圈一道 = 剩余时间。
 //            24 伴飞无人机（X 形机臂 + 四个旋翼环）/ 25 定点哨戒桩（三脚架 + 闪烁信标 + 六边形底座）。颜色 = 区域挂的状态标签色（火 / 酸 / 电……）或阵营色。
@@ -306,8 +307,52 @@ Shader "BinGames/CombatInstanced"
                 return 0;
             }
 
+            // EMG2-MAT-01（FG19B §1.3，B15 形状纹样为主、颜色为辅）：物质斑块（_Kind = 0 那一路里 B.w = 40 + 纹样码 0～16）。B = (半径, 剩余存续比例, 打包颜色, 种类)。
+            // 17 种纹样一一对应 17 种物质，色盲时靠纹样也分得开；外圈一道 = 剩余存续。占位外观（B22），美术阶段替换。
+            fixed4 patchFrag(float2 uv, float4 d)
+            {
+                float2 q = (uv - 0.5) * 2.0;
+                float r = length(q);
+                if (r > 1.0) discard;
+                float3 col = unpackRgb(d.z);
+                float t = _GameTime;
+                int pat = (int)round(d.w) - 40;
+                float left = saturate(d.y);
+                if (r > 0.93)
+                {
+                    float ang = atan2(q.x, q.y) / 6.2831853 + 0.5;
+                    return fixed4(ang <= left ? col : col * 0.3, 1);
+                }
+                float2 g = q * 4.0;
+                bool on = false;
+                float3 c = col;
+                if (pat == 0) { float b = frac((q.x + q.y) * 3.0 + t * 0.2); on = b < 0.35; c = col + 0.25 * float3(sin(b * 6.28), sin(b * 6.28 + 2.1), sin(b * 6.28 + 4.2)); }      // 油：斜向虹彩条纹
+                else if (pat == 1) { on = frac(r * 5.0 - t * 0.5) < 0.18; }                                                                                                        // 水：同心波纹
+                else if (pat == 2) { float2 f = abs(frac(g) - 0.5); on = (f.x < 0.07 && f.y < 0.3) || (f.y < 0.07 && f.x < 0.3); }                                                // 冷却液：十字格
+                else if (pat == 3) { float2 h = frac(float2(q.x * 3.0 + q.y * 1.732, q.y * 3.464)) - 0.5; on = abs(abs(h.x) + abs(h.y) * 0.577 - 0.35) < 0.06 || r > 0.8; c = lerp(col, 1, 0.3); } // 液氮：六角霜花 + 白雾边
+                else if (pat == 4) { float2 f = abs(frac(float2(q.x + q.y, q.x - q.y) * 2.5) - 0.5); on = min(f.x, f.y) < 0.08; }                                                   // 酸液：菱形格
+                else if (pat == 5) { float2 f = frac(float2(q.x * 3.5, q.y * 3.5 + floor(q.x * 3.5) * 0.5)) - 0.5; on = abs(length(f) - 0.3) < 0.07; }                            // 聚合胶：蜂窝气泡
+                else if (pat == 6) { on = true; c = col * (abs(frac(q.x * 2.0 + q.y * 3.0) - 0.5) < 0.04 ? 0.4 : 1.0); }                                                           // 固化胶块：实心块 + 裂纹
+                else if (pat == 7) { float n = sin(q.x * 9.0 + sin(q.y * 7.0 + t)) * sin(q.y * 8.0 - t * 0.7); on = abs(n) < 0.25; c = lerp(col, float3(1, 0.9, 0.4), 0.4); }    // 熔融金属：发光流动裂纹
+                else if (pat == 8) { float2 cell = floor(q * 6.0); on = hash21(cell) > 0.35 && length(frac(q * 6.0) - 0.5) < 0.42; }                                               // 冷渣：粗颗粒堆
+                else if (pat == 9) { float saw = frac(q.x * 3.0) ; on = q.y + 0.6 < (1.0 - abs(saw - 0.5) * 2.0) * (0.9 + 0.3 * sin(t * 6.0 + q.x * 5.0)); }                   // 明火：三角火舌
+                else if (pat == 10) { float n = sin(q.x * 3.0 + t * 0.4) + sin(q.y * 3.7 - t * 0.3) + sin((q.x + q.y) * 2.3); on = n > 0.2 && hash21(floor(uv * 64.0)) > 0.35; } // 烟：体积烟团（抖动半透明）
+                else if (pat == 11) { float a = atan2(q.y, q.x) + r * 6.0 - t; on = frac(a / 1.5708) < 0.2 && hash21(floor(uv * 64.0)) > 0.3; }                                   // 蒸汽：卷云
+                else if (pat == 12) { float2 cell = floor(q * 9.0); float2 f = abs(frac(q * 9.0) - 0.5); on = hash21(cell) > 0.72 && max(f.x, f.y) < 0.22; }                     // 金属碎屑：散点碎片
+                else if (pat == 13) { float2 cell = floor(q * 12.0); on = hash21(cell) > 0.88 && frac(t * 1.5 + hash21(cell + 7.0)) < 0.6 && length(frac(q * 12.0) - 0.5) < 0.2; } // 导电粉尘：闪点微粒
+                else if (pat == 14) { on = abs(frac(q.x * 1.7 + q.y * 0.4) - 0.5) < 0.03 || abs(frac(q.y * 1.9 - q.x * 0.6) - 0.5) < 0.03 || abs(frac((q.x - q.y) * 1.3) - 0.5) < 0.03; } // 冰：冰裂纹
+                else if (pat == 15) { on = frac((q.x - q.y) * 2.0 + t * 0.3) < 0.12; c = lerp(col, 1, 0.5); }                                                                      // 玻化层：斜向高光条
+                else { float2 cell = floor(q * 7.0); on = (hash21(cell) > 0.8 && length(frac(q * 7.0) - 0.5) < 0.25) || r > 0.82; c = r > 0.82 ? col * 0.6 : col; }             // 污泥：气泡点 + 浑浊边
+                if (!on) discard;
+                return fixed4(saturate(c), 1);
+            }
+
             fixed4 frag(v2f i) : SV_Target
             {
+                if (_Kind < 0.5 && i.data.w > 39.5 && i.data.w < 57.5)
+                {
+                    return patchFrag(i.uv, i.data);
+                }
                 if (_Kind < 0.5 && i.data.w > 19.5 && i.data.w < 29.5)
                 {
                     return effectFrag(i.uv, i.data);

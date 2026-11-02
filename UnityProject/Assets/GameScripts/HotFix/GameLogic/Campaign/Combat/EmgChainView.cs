@@ -296,6 +296,29 @@ namespace GameLogic.Campaign.Combat
             return new TooltipContent { Title = GameText.Get("emg.hover.wreck.title"), Body = Three(what, who, next) };
         }
 
+        /// <summary>
+        /// EMG2-MAT-01（FGR-EMG-181 句式“油 · 来自 A 车 · 遇明火会整片燃烧”）：物质斑块悬停（斑块下标 <paramref name="index"/>）。
+        /// 标题 = 那一句；正文 = 层 / 份量 / 剩余秒数，与“不分敌我都会沾上什么、保留几秒”（固态写“挡路，不沾染”）。只拼一块的文字，O(1)。
+        /// </summary>
+        public static TooltipContent PatchContent(CombatSite site, CampaignState state, int index)
+        {
+            if (site == null || site.IsDisposed || !site.Kernel.TryGetPatch(index, out CombatZone z))
+            {
+                return null;
+            }
+            string name = Emergence.EmgMatterCatalog.NameOf(z.Matter);
+            string from = (z.PFlags & EmgMatterConst.FlagWorld) != 0 ? GameText.Get("emg.patch.hover.world")
+                : z.Phase == EmgMatterConst.PhaseFromWreck ? GameText.Get("emg.patch.hover.wreck")
+                : z.Owner > 0 ? PartyName(site, state, z.Owner) : GameText.Get("emg.patch.hover.unknown");
+            string line = GameText.Format("emg.patch.hover.line", name, from, Emergence.EmgMatterCatalog.NextOf(z.Matter));
+            double left = (z.PFlags & EmgMatterConst.FlagWorld) != 0 ? 0 : System.Math.Max(0, z.Until - site.Kernel.Time);
+            string layer = GameText.Get(z.Layer == EmgMatterConst.LayerGas ? "emg.patch.layer.gas" : "emg.patch.layer.ground");
+            string detail = GameText.Format("emg.patch.hover.detail", layer, F0(z.Amount), F0((float)left));
+            EmgMatter m = site.Kernel.MatterRow(z.Matter);
+            string coat = m.CoatBit < 0 ? GameText.Get("emg.patch.hover.nocoat") : GameText.Format("emg.patch.hover.coat", name, F0(m.CoatSeconds));
+            return new TooltipContent { Title = line, Body = detail + "\n" + coat };
+        }
+
         /// <summary>子弹药 / 破片悬停（弹体下标 <paramref name="index"/>）。不是子弹药 / 破片返回 null。</summary>
         public static TooltipContent ProjectileContent(CombatSite site, CampaignState state, int index)
         {

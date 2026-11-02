@@ -360,7 +360,8 @@ namespace GameLogic.Campaign.Emergence
                 {
                     continue;
                 }
-                pending |= d.StageGate > EmgCatalog.ImplementedStage;
+                // 本版本还没有执行者：门槛高于已实现阶段，或阶段 2 的声明用到未接通端口（EMG2-MAT-01 未接通端口闸，按端口判）
+                pending |= d.StageGate > EmgCatalog.ImplementedStage || (d.StageGate >= 2 && EmgCatalog.IsPendingPort(id, d.Role));
                 string name = GameText.Get("emg.port." + id + ".name");
                 List<string> list = d.Dir == EmgDirs.Read ? reads : writes;
                 if (!list.Contains(name))

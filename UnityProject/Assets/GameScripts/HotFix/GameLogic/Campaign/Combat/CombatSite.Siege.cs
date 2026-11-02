@@ -218,7 +218,7 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>生成一台攻城单位（敌方、突袭者行为、实例化画出来、阵亡即移除）。返回单位 ID。</summary>
         public int SpawnSiegeRaider(int groupKey, Vector2 at, Vector2 home, float radius, float speed, float health, float armorFraction,
-            int weapon, int profile, CombatSiegeRole role, bool elite, float structMult, int kind = 0)
+            int weapon, int profile, CombatSiegeRole role, bool elite, float structMult, int kind = 0, string enemyTypeId = null)
         {
             if (IsDisposed || groupKey <= 0)
             {
@@ -233,7 +233,7 @@ namespace GameLogic.Campaign.Combat
             {
                 flags |= CombatUnitFlags.Elite;
             }
-            return Kernel.Spawn(new CombatSpawn
+            int unit = Kernel.Spawn(new CombatSpawn
             {
                 ExtKey = -(SiegeRaiderKeyBase + groupKey * SiegeKindStride + kindCode),
                 Kind = CombatUnitKind.Enemy,
@@ -254,6 +254,12 @@ namespace GameLogic.Campaign.Combat
                 ArmorFacing = new float2((float)(home.x - at.x), (float)(home.y - at.y)),
                 Siege = new CombatSiegeUnit { Role = (byte)role, Group = groupKey, StructMult = Mathf.Max(0f, structMult) },
             });
+            // EMG2-MAT-01（DEBT-EMG1ENT01-04，FGR-EMG-111）：突袭者按敌人表 material 列挂档案行（与 SpawnEnemy 同一入口），残骸材质随之正确；不知道种类时保持敌人默认（钢）
+            if (_emgEntity && unit > 0 && !string.IsNullOrEmpty(enemyTypeId) && Content.EnemyDefs.TryGet(enemyTypeId, out GameConfig.fg.MechEnemy def))
+            {
+                AssignProfile(unit, Emergence.EmgEntityProfiles.ForEnemy(def.Material, false));
+            }
+            return unit;
         }
 
         /// <summary>拦截交战用：把刚生成的攻城单位改成“就地交战”（不走攻城流场）。</summary>

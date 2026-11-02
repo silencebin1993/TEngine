@@ -485,7 +485,7 @@ namespace GameLogic.Campaign.Defense
             }
             int profile = site.ProfileIndex(bp);
             int unit = site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult,
-                RaidCatalog.KindOf(def));
+                RaidCatalog.KindOf(def), def?.EnemyTypeId);
             if (deflect && unit > 0)
             {
                 site.SetUnitFlag(unit, CombatUnitFlags.DeflectArmed, true);

@@ -2556,7 +2556,7 @@ namespace BinGames.Sim.Combat
             // EMG1-KRN-01（格式 16）：自描述的 Emg 段（同样放在读法表之前；CombatKernel.Emergence.cs）。
             if (format >= 16)
             {
-                WriteEmg(w, emgShortTag, emgFieldCap, emgExtraBytes);
+                WriteEmg(w, emgShortTag, emgFieldCap, emgExtraBytes, format);
             }
             // FG2-FW-02（格式 3）：区域、回波、无人机。
             if (format >= 3)
@@ -2787,6 +2787,9 @@ namespace BinGames.Sim.Combat
                 staging.EmgProfiles.Add(_d.EmgProfiles[i]);
             }
             staging.EmgEntParams[0] = _d.EmgEntParams[0];
+            // EMG2-MAT-01：物质数值表是表数据（热更层按 fg.TbMatter 写），读档沿用当前的；实体档案稳定键：快照里存的是写档时的表（段 19），按键把下标挪到当前表（DEBT-EMG1ENT01-07）。
+            staging.EmgMatters.CopyFrom(_d.EmgMatters);
+            RemapProfiles(ref staging, _d.EmgProfileKeys);
             _d.Dispose();
             _d = staging;
             SyncInstrActivation(); // EMG1-FUZZ-01：激活计数不进快照，读档后从 0 计
@@ -4326,6 +4329,23 @@ namespace BinGames.Sim.Combat
                 {
                     A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
                     B = new float4(k.Radius, k.MaxHp > 0f ? math.saturate(k.Hp / k.MaxHp) : 0f, CombatConst.EffectWreckColor, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
+                });
+            }
+            // EMG2-MAT-01（B15：形状纹样为主、颜色为辅）：物质斑块——种类 40 + 纹样码（CombatInstanced.shader 17 种纹样），颜色取 fg.TbMatter；外圈 = 剩余存续（世界源恒满）。占位外观，美术阶段替换。
+            for (int q = 0; q < D.Patches.Length; q++)
+            {
+                CombatZone pz = D.Patches[q];
+                if (pz.Matter == 0 || pz.Matter > EmgMatterConst.Count)
+                {
+                    continue;
+                }
+                EmgMatter mt = D.EmgMatters[pz.Matter];
+                double2 p = pz.Pos - Origin;
+                float leftP = (pz.PFlags & EmgMatterConst.FlagWorld) != 0 ? 1f : (float)math.saturate((pz.Until - now) / math.max(0.001, pz.Until - pz.Born));
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                    B = new float4(pz.Radius, leftP, mt.Color, EmgMatterConst.EffectKindPatch + mt.Pattern),
                 });
             }
             // FG10-FAC-01（FGR-FAC-008 ①“每条专属行为都有不少于 0.8 秒的视觉预警”）：澄净专属行为的预警画面——全部读内核状态（不靠可丢的提示事件），

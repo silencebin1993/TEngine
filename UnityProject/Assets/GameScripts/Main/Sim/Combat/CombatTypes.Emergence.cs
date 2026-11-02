@@ -71,6 +71,10 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-CHAIN-01（FGR-EMG-067 / 180；ADR ⑨）：可靠计数——按稳定键的规则计数槽（一条记录 = 键 + 次数）与按事件端口的入队计数（一条记录 = 次数，下标 = 事件码）。</summary>
         public const int SegRuleCounts = 15;
         public const int SegPortCounts = 16;
+        /// <summary>EMG2-MAT-01（快照格式 17，ADR ⑩）：物质斑块（扩展字段的 CombatZone 全记录）、活跃场、实体档案稳定键（读档按键把单位 / 残骸的档案下标挪到当前表，DEBT-EMG1ENT01-07）。</summary>
+        public const int SegPatches = 17;
+        public const int SegFields = 18;
+        public const int SegProfileKeys = 19;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
@@ -95,6 +99,9 @@ namespace BinGames.Sim.Combat
         /// <summary>待生成种类：子载荷 / 即时宿主（格斗、力场）的定时 / 根载荷（SpawnFlight 弹体池满时顺延）/ 破片顺延 /
         /// EMG1-FIX-01 追射（根节点写 ent.projectile：命中后到点从发射者补射 1 发，FG19A 第 1.2 节第 26 行）。</summary>
         public const byte PendSub = 0, PendTimer = 1, PendRoot = 2, PendFrag = 3, PendFollow = 4;
+        /// <summary>EMG2-MAT-01（FG19B §8.3 产物生成每步 ≤ 32 块）：本步生成额度用完的斑块顺延（SubForm = 物质码、Damage = 份量、ZoneRadius / ZoneLife = 半径 / 秒数、
+        /// Owner = 排放者 ID、Count = 1、Gen = 斑块标志；生成时才计寿命）。</summary>
+        public const byte PendPatch = 5;
         /// <summary>EMG1-FIX-01（FG19A 第 1.1 节第 6 行“向前扇形放出”）：飞行中定时空爆的子弹药扇角（度，与霰射缺省扇角同值）。shortcut: 临时值，FG15-BAL-01 调参时如需可调再进 fg.TbSubPayload。</summary>
         public const float TimerFanDeg = 30f;
 
@@ -394,7 +401,8 @@ namespace BinGames.Sim.Combat
     }
 
     [Flags]
-    public enum EmgProjFlags : byte
+    /// <remarks>EMG2-MAT-01（格式 17，DEBT-EMG1TRIG01-05）：8 位用满后扩到 16 位；快照里低 8 位留在原字段，高 8 位作为段尾追加字段（短段读到取 0）。</remarks>
+    public enum EmgProjFlags : ushort
     {
         None = 0,
         /// <summary>子弹药：跳过根读法，只执行自己节点的指令（ADR ③）。</summary>
@@ -413,6 +421,9 @@ namespace BinGames.Sim.Combat
         Overload = 64,
         /// <summary>EMG1-TRIG-01：无人机开火实体化的弹体（命中按无人机读法：伤害基数是无人机伤害、以无人机为锚）。</summary>
         ViaDrone = 128,
+        /// <summary>EMG2-MAT-01（DEBT-EMG1TRIG01-05）：入口 = 驻守开火 / 炮塔自动开火（原即时命中 DeliverInstant(…, namedReactions: false)）实体化的弹体——
+        /// 命中照原入口不发具名反应（标记跳转），与不需要飞行时逐字一致；编队攻击 / 直控（FireAtCore）的弹体不带此位。</summary>
+        NoNamed = 256,
     }
 
     /// <summary>
@@ -575,6 +586,23 @@ namespace BinGames.Sim.Combat
         public ushort EraMiss;
         /// <summary>EMG1-FW-01：补块计时（秒，满块时归零；再次被击不重置）。单位段第 9 个字段，短段读到取 0。</summary>
         public float EraRefillT;
+        // ── EMG2-MAT-01（ADR ⑥ ⑦ ⑩ 版本 17：阶段 2 状态段一次铺好，单位段第 10～31 个字段，短段 / 读 ≤ 16 版取 0）。累积与相态的结算归 EMG2-PHS-01，传导归 EMG2-RULE-01。
+        /// <summary>单位温度（度，0 = 常温未记）。</summary>
+        public float Temp;
+        /// <summary>7 个累积量（FGR-EMG-100）：AccA = 寒量、结构积热、电荷、腐蚀度；AccB = 磁化度、着火度、入侵度。</summary>
+        public float4 AccA;
+        public float3 AccB;
+        /// <summary>相态位（位 k = 第 k 个累积量的相态已进入）。</summary>
+        public ushort PhaseMask;
+        /// <summary>每量一个计时（同 AccA / AccB 的顺序）：在相态中 = 进入时刻（最短停留）；不在相态中 = 免疫窗到期时刻（ADR ⑥ guard）。0 = 未记。</summary>
+        public float4 PhsTA;
+        public float3 PhsTB;
+        /// <summary>6 个运行时抗性覆盖（ADR ⑦，0～255 映射 0～1；有效抗性 = max(档案值, 覆盖值)），按 EmgProfile 抗性列顺序：寒、热、电、腐蚀、磁、入侵（劫持）。</summary>
+        public byte Res0, Res1, Res2, Res3, Res4, Res5;
+
+        /// <summary>阶段 2 状态段是否全为缺省（EmgActive 与 StateHash 金标准用：没有物质 / 相态时哈希逐字不变）。</summary>
+        public bool Stage2Default => Temp == 0f && math.all(AccA == 0f) && math.all(AccB == 0f) && PhaseMask == 0 && math.all(PhsTA == 0f) && math.all(PhsTB == 0f)
+                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -816,6 +844,28 @@ namespace BinGames.Sim.Combat
         public int WrecksAged;
         public int WrecksCapped;
         public int WrecksDestroyed;
+        // ── EMG2-MAT-01（FGR-EMG-082“降级都计数、在调试层可见，不静默”；标量段尾部追加，短段读到取 0）──
+        public int PatchesBorn;
+        /// <summary>节拍里同物质同层重叠合并的次数。</summary>
+        public int PatchesMerged;
+        /// <summary>到期 / 燃尽 / 稀释消失的块数。</summary>
+        public int PatchesExpired;
+        /// <summary>软上限（同种到上限）：就近并入 / 同种最早提前到期。</summary>
+        public int PatchSoftMerged;
+        public int PatchSoftExpired;
+        /// <summary>总上限（战斗斑块 = 容量 − 世界源保留额）：并入最近同物质 / 同层最早提前到期。</summary>
+        public int PatchCapMerged;
+        public int PatchCapExpired;
+        /// <summary>同层没有可让位的斑块、或世界源保留额已满：新斑块不生成（计数，不静默）。</summary>
+        public int PatchDropped;
+        /// <summary>本步生成额度用完顺延到下一步的次数。</summary>
+        public int PatchDeferred;
+        /// <summary>残骸崩解成碎屑斑块的次数（DEBT-EMG1ENT01-01）。</summary>
+        public int WrecksToDebris;
+        /// <summary>本步已生成的斑块数（不进快照：每步开头清 0）。</summary>
+        public int PatchSpawnedStep;
+        /// <summary>活着的斑块数（不进快照：快照只写活斑块，读档后 = 斑块表长度；没有斑块时斑块步 O(1) 跳过）。</summary>
+        public int PatchLive;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
     }

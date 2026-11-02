@@ -833,14 +833,16 @@ namespace BinGames.Sim.Combat
         private bool EmgActive()
         {
             EmgScalars ec = _d.EmgS[0];
-            if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts())
+            if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
+                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
-                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0 || u.Mass != 0f || u.DeathFlags != 0 || u.EraMiss != 0 || u.EraRefillT != 0f)
+                if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0 || u.Mass != 0f || u.DeathFlags != 0 || u.EraMiss != 0 || u.EraRefillT != 0f
+                    || !u.Stage2Default)
                 {
                     return true;
                 }
@@ -857,12 +859,14 @@ namespace BinGames.Sim.Combat
 
         private const int UnknownSegmentTagForTests = 9999;
 
-        private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes)
+        private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes, int format = CombatConst.FormatVersion)
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
-            w.Write(16 + (extraBytes > 0 ? 1 : 0)); // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）
+            bool v17 = format >= 17;
+            // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
+            w.Write(16 + (v17 ? 3 : 0) + (extraBytes > 0 ? 1 : 0));
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, 12, 1);
+            sw.Begin(EmgConst.SegScalars, v17 ? 22 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -875,6 +879,20 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(es.WrecksAged);
             if (sw.F()) w.Write(es.WrecksCapped);
             if (sw.F()) w.Write(es.WrecksDestroyed);
+            if (v17)
+            {
+                // EMG2-MAT-01：尾部追加 10 个斑块可靠计数（降级计数可见、不静默），短段读到取 0
+                if (sw.F()) w.Write(es.PatchesBorn);
+                if (sw.F()) w.Write(es.PatchesMerged);
+                if (sw.F()) w.Write(es.PatchesExpired);
+                if (sw.F()) w.Write(es.PatchSoftMerged);
+                if (sw.F()) w.Write(es.PatchSoftExpired);
+                if (sw.F()) w.Write(es.PatchCapMerged);
+                if (sw.F()) w.Write(es.PatchCapExpired);
+                if (sw.F()) w.Write(es.PatchDropped);
+                if (sw.F()) w.Write(es.PatchDeferred);
+                if (sw.F()) w.Write(es.WrecksToDebris);
+            }
             sw.EndRecord();
             sw.End();
 
@@ -913,7 +931,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, 9, _d.Count);
+            sw.Begin(EmgConst.SegUnits, v17 ? 31 : 9, _d.Count);
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
@@ -926,11 +944,15 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(u.DeathFlags);
                 if (sw.F()) w.Write(u.EraMiss); // EMG1-FW-01（FGR-EMG-233）：尾部追加 2 个（缺块掩码、补块计时），短段读到取 0 = 满块
                 if (sw.F()) w.Write(u.EraRefillT);
+                if (v17)
+                {
+                    WriteUnitStage2(w, u, sw); // EMG2-MAT-01：尾部追加 22 个（温度、7 个累积量、相态位、7 个计时、6 个抗性覆盖）
+                }
                 sw.EndRecord();
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegProjectiles, 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段
+            sw.Begin(EmgConst.SegProjectiles, v17 ? 21 : 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
             for (int i = 0; i < _d.Projectiles.Length; i++)
             {
                 CombatProjectile p = _d.Projectiles[i];
@@ -954,6 +976,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write((byte)p.Mods);
                 if (sw.F()) w.Write(p.BounceObs);
                 if (sw.F()) w.Write(p.Intercepts);
+                if (v17)
+                {
+                    if (sw.F()) w.Write((byte)((ushort)p.Flags >> 8)); // EMG2-MAT-01：弹体记号高 8 位（NoNamed 等），短段读到取 0
+                }
                 sw.EndRecord();
             }
             sw.End();
@@ -1030,7 +1056,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            WriteTriggerSegments(w, sw);
+            WriteTriggerSegments(w, sw, v17);
 
             sw.Begin(EmgConst.SegFlash, 1, _d.FlashMap.Length);
             for (int i = 0; i < _d.FlashMap.Length; i++)
@@ -1041,6 +1067,10 @@ namespace BinGames.Sim.Combat
             sw.End();
 
             WriteChainSegments(w, sw);
+            if (v17)
+            {
+                WriteMatterSegments(w, sw);
+            }
 
             if (extraBytes > 0)
             {
@@ -1052,9 +1082,9 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>EMG1-TRIG-01：待生成表（段 11）、区域宿主字段（段 12，按区域表逐条）、回波宿主字段（段 13，按回波表逐条）。</summary>
-        private void WriteTriggerSegments(BinaryWriter w, EmgSegmentWriter sw)
+        private void WriteTriggerSegments(BinaryWriter w, EmgSegmentWriter sw, bool v17)
         {
-            sw.Begin(EmgConst.SegPending, 25, _d.EmgPending.Length);
+            sw.Begin(EmgConst.SegPending, v17 ? 26 : 25, _d.EmgPending.Length); // EMG2-MAT-01（格式 17）：+ 记号高 8 位
             for (int i = 0; i < _d.EmgPending.Length; i++)
             {
                 EmgSpawn s = _d.EmgPending[i];
@@ -1083,6 +1113,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(s.Armed);
                 if (sw.F()) w.Write(s.SubForm);
                 if (sw.F()) w.Write((short)(s.Gen | (s.Done << 4)));
+                if (v17)
+                {
+                    if (sw.F()) w.Write((byte)((ushort)s.Flags >> 8));
+                }
                 sw.EndRecord();
             }
             sw.End();
@@ -1239,6 +1273,7 @@ namespace BinGames.Sim.Combat
                     if (sr.F()) es.WrecksAged = r.ReadInt32();
                     if (sr.F()) es.WrecksCapped = r.ReadInt32();
                     if (sr.F()) es.WrecksDestroyed = r.ReadInt32();
+                    ReadPatchCounts(r, sr, ref es); // EMG2-MAT-01：格式 17 标量段尾部的斑块计数（短段 / 格式 16 取 0）
                     if (!sr.RecordOk || es.NextProjId < 1 || es.NextDroneId < 1 || es.NextWreckId < 1 || es.NextPatchId < 1 || es.NextFieldId < 1 || es.NextChain < 1
                         || es.NextZoneId < 1 || es.WrecksBorn < 0 || es.WrecksAged < 0 || es.WrecksCapped < 0 || es.WrecksDestroyed < 0)
                     {
@@ -1368,6 +1403,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.DeathFlags = r.ReadByte();
                         if (sr.F()) u.EraMiss = r.ReadUInt16();
                         if (sr.F()) u.EraRefillT = r.ReadSingle();
+                        ReadUnitStage2(r, sr, ref u); // EMG2-MAT-01：格式 17 单位段尾部（短段 / 格式 16 取 0）
                         if (!sr.RecordOk || !UnitEmgValid(prof, u))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1405,6 +1441,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) p.Mods = (EmgProjMods)r.ReadByte();
                         if (sr.F()) p.BounceObs = r.ReadByte();
                         if (sr.F()) p.Intercepts = r.ReadByte();
+                        if (sr.F()) p.Flags |= (EmgProjFlags)(r.ReadByte() << 8); // EMG2-MAT-01：记号高 8 位（≤16 版快照没有，取 0）
                         if (!sr.RecordOk || p.IgnoreUnit < 0 || ((p.Mods & EmgProjMods.Orbit) == 0 && p.SteerLeft > 360f))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1578,6 +1615,10 @@ namespace BinGames.Sim.Combat
                         buf.EchoHosts[i] = e;
                     }
                     return CombatLoadResult.Ok;
+                case EmgConst.SegPatches:
+                case EmgConst.SegFields:
+                case EmgConst.SegProfileKeys:
+                    return ParseMatterSegment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过
             }
@@ -1620,6 +1661,7 @@ namespace BinGames.Sim.Combat
                 if (sr.F()) s.Armed = r.ReadByte();
                 if (sr.F()) s.SubForm = r.ReadByte();
                 if (sr.F()) genDone = r.ReadInt16();
+                if (sr.F()) s.Flags |= (EmgProjFlags)(r.ReadByte() << 8); // EMG2-MAT-01：记号高 8 位
                 s.Gen = (byte)(genDone & 0xF);
                 s.Done = (short)(genDone >> 4);
                 if (!sr.RecordOk)
@@ -1825,12 +1867,20 @@ namespace BinGames.Sim.Combat
             return CombatLoadResult.Ok;
         }
 
-        /// <summary>待生成请求：种类 0～3（3 = 池满顺延的破片）、程序下标在表内且节点在程序节点数内（根弹体为 −1 也可）、链深 ≤ 3、代 ≤ 2、子形态 0～5、武器在表内、数值有限。</summary>
-        private static bool SpawnValid(in EmgSpawn s, ref CombatData d) =>
-            s.Kind <= EmgConst.PendFollow && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
+        /// <summary>待生成请求：种类 0～4（3 = 池满顺延的破片）、程序下标在表内且节点在程序节点数内（根弹体为 −1 也可）、链深 ≤ 3、代 ≤ 2、子形态 0～5、武器在表内、数值有限。
+        /// 种类 5（顺延斑块）另走 <see cref="PendPatchValid"/>：SubForm 存物质码、Gen 存斑块标志，不套子形态与代的上限（复审 P0：物质码 &gt; 5 的顺延斑块存档后读不回）。</summary>
+        private static bool SpawnValid(in EmgSpawn s, ref CombatData d) => s.Kind == EmgConst.PendPatch ? PendPatchValid(s) :
+            s.Kind < EmgConst.PendPatch && s.Prog >= -1 && s.Prog < d.EmgPrograms.Length && (s.Prog < 0 || s.Node < d.EmgPrograms[s.Prog].NodeCount)
             && (s.Prog >= 0 || s.Kind >= EmgConst.PendRoot) && s.Depth <= EmgConst.MaxDepth && s.Gen <= EmgConst.MaxGen && s.SubForm <= 5 && s.Armed <= 1
             && s.Weapon >= -1 && s.Weapon < d.Weapons.Length && s.Chain >= 0 && s.Done >= 0 && (byte)s.EntKind <= (byte)EmgEntKind.Field
             && !double.IsNaN(s.At) && !double.IsInfinity(s.At) && IsFinite(s.Pos) && Finite(s.Dir.x) && Finite(s.Dir.y) && Finite(s.Damage) && Finite(s.ZoneRadius) && Finite(s.ZoneLife);
+
+        /// <summary>顺延斑块（与 <see cref="CombatLogic.EmgRequestPatch"/> 写入口同口径）：物质码 1～17、标志只含已定义位且不含世界源（世界源不进顺延）、来源键 0～1、
+        /// 无程序无武器、链深 ≤ 3、链非负、Count ≤ 1（0 = 步首已生成、待 5e 压缩）、半径 &gt; 0 且有限、份量与秒数有限、位置有限。</summary>
+        private static bool PendPatchValid(in EmgSpawn s) =>
+            s.SubForm >= 1 && s.SubForm <= EmgMatterConst.Count && (s.Gen & ~(EmgMatterConst.FlagOilCovered | EmgMatterConst.FlagPersist)) == 0
+            && s.Faction <= EmgMatterConst.PhaseFromWreck && s.Prog == -1 && s.Weapon == -1 && s.Depth <= EmgConst.MaxDepth && s.Chain >= 0 && s.Count <= 1
+            && s.Armed <= 1 && Finite(s.ZoneRadius) && s.ZoneRadius > 0f && Finite(s.Damage) && Finite(s.ZoneLife) && IsFinite(s.Pos) && !double.IsNaN(s.At) && !double.IsInfinity(s.At);
 
         // ── 写入口与读档共用的校验：写得进去的值存档后一定读得回来（审查 P1：三个写入口曾比读档宽）──
 

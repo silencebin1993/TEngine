@@ -110,6 +110,8 @@ namespace GameLogic.Campaign.Emergence
         public byte Carrier;
         /// <summary>EMG1-GRM-01：主组件可抛射（false = 光束：lob 动词不执行，给原因 emg.compile.lob_straight）。</summary>
         public bool LobAllowed = true;
+        /// <summary>EMG2-MAT-01：主组件是修复出口（没有攻击出口、声明 prop.integrity modify，与 CombatSite.MachineWeaponFrom 同一判定）——修复弹体不反弹（FG-GAP-178 ④），读 evt.bounce 的固件整条“本载体不适用”。</summary>
+        public bool HealOnly;
         /// <summary>热量分项（FGR-EMG-016）：指令表值、声明 heat、触发节点（trigger_gen × 代号）、子载荷份数 × per_child。</summary>
         public float HeatInstr, HeatDecl, HeatTrigger, HeatChildren;
         /// <summary>溢出指令的表值热量：旧积热（BlueprintCircuitBoard.ComputeFirmwareHeat）按装着的固件算过，溢出“不计热量”所以要扣回。</summary>
@@ -149,9 +151,11 @@ namespace GameLogic.Campaign.Emergence
                                                          || e == EmgEventKind.Cooled || e == EmgEventKind.Uplink || e == EmgEventKind.Unlink
                                                          || e == EmgEventKind.Pickup || e == EmgEventKind.Seize || e == EmgEventKind.Release;
 
-        /// <summary>根节点触发读这些事件 = 程序需要飞行（ADR ③）。</summary>
+        /// <summary>根节点触发读这些事件 = 程序需要飞行（ADR ③）。EMG2-MAT-01：加上 evt.enter / evt.leave——载荷“进入 / 离开斑块”只有飞行弹体会发生，
+        /// 即时命中没有飞行路径（入场引信装在连射器上永远不触发，FGR-EMG-221 零反应；按推荐默认执行，2026-11-02，待用户确认）。</summary>
         private static bool NeedsFlightEvent(EmgEventKind e) => e == EmgEventKind.Timer || e == EmgEventKind.Prox || e == EmgEventKind.Expire
-                                                              || e == EmgEventKind.Bounce || e == EmgEventKind.Pierce;
+                                                              || e == EmgEventKind.Bounce || e == EmgEventKind.Pierce
+                                                              || e == EmgEventKind.Enter || e == EmgEventKind.Leave;
 
         /// <summary>根节点写这些端口 = 程序需要飞行（ADR ③）。EMG1-GRM-01：加上 grm.mod.multi——霰射“一次打出 3 份真实弹丸，每份各自命中、各自触发”只有飞行弹体做得到（待用户复核）。</summary>
         private static readonly string[] FlightMods =
@@ -183,7 +187,13 @@ namespace GameLogic.Campaign.Emergence
             }
             CarrierReadings.TryGetCarrier(p.PrimaryId, out FirmwareCarrier carrier); // 查不到时是射弹（与读法同一默认）
             bool lob = !CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) || comp.Flight != "yes" || comp.FlightLob != 0;
-            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink);
+            bool healOnly = false;
+            if (!p.HasCombatOutput && !string.IsNullOrEmpty(p.PrimaryId))
+            {
+                EmgCatalog.PartPropModify("prop.integrity", new[] { p.PrimaryId }, out float heal);
+                healOnly = heal > 0f;
+            }
+            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly);
         }
 
         // ── EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：刷写变体——无人机 / 哨戒桩只持有程序的前 k 条（带宽截断、距离暂停）或剥离核心后的前 k 条 ──
@@ -262,7 +272,7 @@ namespace GameLogic.Campaign.Emergence
             EnsureIndex(c);
             var t = new EmgProgramResult
             {
-                RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed,
+                RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
                 HeatInstr = r.HeatInstr, HeatDecl = r.HeatDecl, HeatTrigger = r.HeatTrigger, HeatChildren = r.HeatChildren, HeatOverflowInstr = r.HeatOverflowInstr,
                 ChildPayloads = r.ChildPayloads,
             };
@@ -517,7 +527,7 @@ namespace GameLogic.Campaign.Emergence
         /// <param name="rootCapacity">≤ 0 = 按公式 C0 = 机器固件槽数 + 接入口配额；自检可给别的值验证“配额变了公式不变”（FGR-EMG-039）。</param>
         /// <param name="lobAllowed">主组件可抛射（作战组件表 flightLob）；false 时 lob 动词不执行并给原因 <see cref="NoteLobStraight"/>（光束：曲射只留落点扬尘）。</param>
         public static EmgProgramResult Compile(IReadOnlyList<string> uplinkFirmwareIds, IReadOnlyList<string> localFirmwareIds, FirmwareCarrier carrier, int rootCapacity = 0,
-            bool lobAllowed = true, ICollection<string> skipUplink = null)
+            bool lobAllowed = true, ICollection<string> skipUplink = null, bool healOnly = false)
         {
             EmgCompiled c = EmgCatalog.Current;
             EnsureIndex(c);
@@ -527,6 +537,7 @@ namespace GameLogic.Campaign.Emergence
                 ContentVersion = CampaignSaveService.CurrentContentVersion,
                 Carrier = (byte)carrier,
                 LobAllowed = lobAllowed,
+                HealOnly = healOnly,
             };
             AddSlots(r, c, uplinkFirmwareIds, true, skipUplink);
             AddSlots(r, c, localFirmwareIds, false, null);
@@ -574,7 +585,7 @@ namespace GameLogic.Campaign.Emergence
         private static void AddOwner(EmgProgramResult r, EmgCompiled c, string firmwareId, string owner, bool fromUplink, bool core)
         {
             if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !DeclsByOwner.TryGetValue(oi, out List<int> all)
-                || all.Count == 0 || c.Decls[all[0]].StageGate > c.EffectiveStage)
+                || all.Count == 0 || !c.OwnerActive(oi))
             {
                 r.LegacyOwners.Add(owner ?? firmwareId);
                 return;
@@ -587,10 +598,12 @@ namespace GameLogic.Campaign.Emergence
             byte bit = (byte)(1 << r.Carrier);
             bool trig = false, anchor = false, meta = false, mod = false, eventSet = false;
             EmgDeclRow trigWrite = default;
+            // EMG2-MAT-01（FGR-EMG-221 零反应）：修复出口上读“反弹”的固件永远不触发（修复弹体不反弹），按端口整条判本载体不适用，预览写原因而不是静默死指令
+            bool bounceNa = r.HealOnly && all.Exists(x => c.Decls[x].Dir == EmgDirs.Read && c.Decls[x].Port == EventPortBase + (int)EmgEventKind.Bounce);
             foreach (int di in all)
             {
                 EmgDeclRow d = c.Decls[di];
-                if ((d.Carriers & bit) == 0)
+                if ((d.Carriers & bit) == 0 || bounceNa)
                 {
                     continue;
                 }

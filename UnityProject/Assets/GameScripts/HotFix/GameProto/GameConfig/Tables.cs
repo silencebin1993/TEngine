@@ -271,6 +271,10 @@ public partial class Tables
     /// </summary>
     public fg.TbLootPick TbLootPick {get; }
     /// <summary>
+    /// 物质
+    /// </summary>
+    public fg.TbMatter TbMatter {get; }
+    /// <summary>
     /// 机械敌人
     /// </summary>
     public fg.TbMechEnemy TbMechEnemy {get; }
@@ -598,6 +602,7 @@ public partial class Tables
         TbLocText = new fg.TbLocText(loader("fg_tbloctext"));
         TbLootDrop = new fg.TbLootDrop(loader("fg_tblootdrop"));
         TbLootPick = new fg.TbLootPick(loader("fg_tblootpick"));
+        TbMatter = new fg.TbMatter(loader("fg_tbmatter"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
         TbNarrativeEntry = new fg.TbNarrativeEntry(loader("fg_tbnarrativeentry"));
         TbNarrativeLine = new fg.TbNarrativeLine(loader("fg_tbnarrativeline"));
@@ -733,6 +738,7 @@ public partial class Tables
         TbLocText.ResolveRef(this);
         TbLootDrop.ResolveRef(this);
         TbLootPick.ResolveRef(this);
+        TbMatter.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
         TbNarrativeEntry.ResolveRef(this);
         TbNarrativeLine.ResolveRef(this);

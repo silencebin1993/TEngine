@@ -644,6 +644,9 @@ namespace GameLogic.Core
         /// <summary>EMG1-TRIG-01（FG19 FGR-EMG-034）：第一次有触发器放出子载荷（引导内容在 FG15-UX-04：触发事件、子弹药只执行自己节点、代际与份数）。</summary>
         public const string EmgFirstTrigger = "emg_first_trigger";
 
+        /// <summary>EMG2-MAT-01（FG19 FGR-EMG-080～083）：第一次出现物质斑块（引导内容在 FG15-UX-04：物质不分敌我、沾染、形状纹样怎么认、悬停看来源与后果）。</summary>
+        public const string EmgFirstMatter = "emg_first_matter";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -653,7 +656,7 @@ namespace GameLogic.Core
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
             LogisticsFirstBelt, LogisticsFirstBlocked,
-            SignalCoreFirstOpen, CircuitUplinkFirstSeen,
+            SignalCoreFirstOpen, CircuitUplinkFirstSeen, EmgFirstMatter,
             SignalFirstUplink,
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,

@@ -612,6 +612,11 @@ namespace GameLogic.EditorTools
                 // 读“反弹”的程序：被偏折场弹回的方向（本机身后）放一个敌人，反弹放出的子载荷才有东西可打（FGR-EMG-220 先造条件）
                 a.Hostiles.Add(k.Spawn(Hostile(new double2(-2.6, -0.4), 5000f, 1.2f, -1))); // 半径大一些：无人机子弹（4.8 米射程）从场边往回飞也够得着
             }
+            if (c.Carrier == FirmwareCarrier.Field && a.Program.Steps.Any(st => st.Kind == EmgStepKind.Trigger) && ProgramReads(a.Program, EmgEventKind.Hit))
+            {
+                // EMG2-MAT-01：力场的子载荷是小脉冲（触及 1.2 米，在脉冲结束处放出）——子节点读“命中”的程序在本机贴身处放一个敌人，子脉冲才有东西可打（FGR-EMG-220 先造条件）
+                a.Hostiles.Add(k.Spawn(Hostile(new double2(0.8, -0.6), 5000f, 0.5f, -1)));
+            }
             // 条件按端口：读过热 / 冷却完成 → 开局积热贴着过热阈值；读阵亡 → 6.5 秒判死（FG19A 第 1.8 节）
             a.Preheat = ProgramReads(a.Program, EmgEventKind.Overheat) || ProgramReads(a.Program, EmgEventKind.Cooled);
             if (a.Preheat && w.OverheatAt > 0f)
@@ -674,6 +679,9 @@ namespace GameLogic.EditorTools
             a.Obstacles = ObstaclesOf(site);
             k.SetObstacles(a.Obstacles);
             k.TryAddWreck(new EmgWreck { Pos = new double2(4.6, 0.45), Radius = 0.45f, Hp = 1000f, MaxHp = 1000f, Until = 1e9 }, out _);
+            // EMG2-MAT-01：阶段 2 斑块层开时，本机脚下一块常驻碎屑（世界源，残骸崩解的产物；碎屑沾染位 28 没有状态效果、不参与反应）——
+            // 本机与刚出膛的载荷都在斑块里，读“进场 / 离场”的程序有条件可触发（FGR-EMG-220 先造条件）；斑块层关时注入被拒、场景与原来一致。
+            k.SpawnPatch(EmgMatterConst.Debris, double2.zero, 1.5f, 1f, 0f, 0, true);
             if (site == "foundry_outpost")
             {
                 k.TryAddWreck(new EmgWreck { Pos = new double2(2.0, -2.2), Radius = 0.5f, Hp = 800f, MaxHp = 800f, Until = 1e9 }, out _);
@@ -1039,6 +1047,7 @@ namespace GameLogic.EditorTools
 
         /// <summary>存读档（FGR-EMG-221）：同一用例跑到一半取正式地点快照（CombatSite.Snapshot），在新地点的内核层读回（CombatKernel.Load，内核层快照往返），两边续跑到底比终局状态哈希。
         /// 地点还原路径（CombatSite.TryRestore 的机器登记表对账）不在这里测，由 FgReadingMatrixSelfCheck.AddonSaveLoad 与存档自检承接。</summary>
+
         private static string SaveLoadRun(FuzzCase c, Pools pools, int steps, ulong expected)
         {
             int half = steps / 2;
@@ -1122,9 +1131,9 @@ namespace GameLogic.EditorTools
         {
             Line("  · A. 用例生成：可获得固件池、13 个主作战组件、4 种底盘、地点模板、阵营；N09～N16 的状态");
             int addonInPool = AddonStage1.Count(pools.Firmware.Contains);
-            Expect(pools.Comps.Count == 13 && pools.Factions.Count >= 2 && addonInPool == AddonStage1.Length && !AddonStage2.Any(pools.Firmware.Contains)
+            Expect(pools.Comps.Count == 13 && pools.Factions.Count >= 2 && addonInPool == AddonStage1.Length && pools.Firmware.Contains("fw_enterfuse") && !pools.Firmware.Contains("fw_uplinkpulse")
                    && pools.Firmware.Count >= 44 && pools.PierceProvider != null,
-                $"抽取池：固件 {pools.Firmware.Count} 条（可获得且有机器实现，含混合固件 {pools.Firmware.Count(FirmwareKinds.IsMixed)} 条；阶段 1 生效的 N09～N13、N16 共 {addonInPool} 条在池里，N14 / N15 不在），" +
+                $"抽取池：固件 {pools.Firmware.Count} 条（可获得且有机器实现，含混合固件 {pools.Firmware.Count(FirmwareKinds.IsMixed)} 条；阶段 1 生效的 N09～N13、N16 共 {addonInPool} 条在池里；阶段 2 端口已接通的 N14 在、用到未接通 fld.push 的 N15 不在），" +
                 $"主作战组件 {pools.Comps.Count} 个，阵营 {pools.Factions.Count} 个（{string.Join("、", pools.Factions)}），穿透条件提供者按端口查到 {pools.PierceProvider}");
             // FG-GAP-177：反弹 / 穿透引信在声明 carriers 不含的载体上——不编译 + 预览写“本载体不适用” + 读法如实写明
             var na = new List<string>();
@@ -1247,6 +1256,8 @@ namespace GameLogic.EditorTools
         internal static readonly Dictionary<string, string> EventProducers = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["evt.split"] = "内核触发器放出子载荷（CombatLogic.Trigger；FgEmgTriggerSelfCheck / FgEmgBusSelfCheck）",
+            ["evt.enter"] = "单位 / 载荷进入物质斑块（CombatLogic.Matter EmgMatterEdges / EmgProjMatter；FgEmgMatterSelfCheck G / I）",
+            ["evt.leave"] = "单位 / 载荷离开物质斑块（CombatLogic.Matter；FgEmgMatterSelfCheck G）",
             ["evt.kill"] = "内核伤害归属阵亡（FgEmgBusSelfCheck）",
             ["evt.impact"] = "内核撞击 / 壁撞（CombatLogic.Entity；FgEmgEntitySelfCheck）",
             ["evt.push"] = "内核击退 / 牵引位移（FgEmgEntitySelfCheck）",
@@ -1297,7 +1308,13 @@ namespace GameLogic.EditorTools
         {
             var a = new SourceAudit();
             bool Obtainable(EmgSource.Decl d) => d.OwnerKind != "firmware" || FirmwareKinds.IsObtainable(d.Owner);
-            var live = src.Decls.Where(d => d != null && d.StageGate <= stage && Obtainable(d)).ToList();
+            // EMG2-MAT-01 未接通端口闸（EmgCatalog.PendingPorts，按端口判）：stageGate ≥ 2 的 owner 只要有一条声明用到还没有执行者的端口，整条仍走旧轨、不算生效
+            var gatedBy = new Dictionary<string, EmgSource.Decl>(StringComparer.Ordinal);
+            foreach (EmgSource.Decl d in src.Decls.Where(d => d != null && d.StageGate >= 2 && d.StageGate <= stage && PendingDecl(d)))
+            {
+                gatedBy.TryAdd(d.Owner, d);
+            }
+            var live = src.Decls.Where(d => d != null && d.StageGate <= stage && Obtainable(d) && !gatedBy.ContainsKey(d.Owner)).ToList();
             var portCarrier = new HashSet<string>(src.PortCarriers.Where(pc => pc != null).Select(pc => pc.Port), StringComparer.Ordinal);
             foreach (EmgSource.Port p in src.Ports.Where(p => p != null).OrderBy(p => p.Code))
             {
@@ -1325,6 +1342,12 @@ namespace GameLogic.EditorTools
                 int gate = src.Decls.Where(d => d != null && d.Port == p.Id).Select(d => d.StageGate).DefaultIfEmpty(0).Min();
                 string card = gate > stage ? $"emg.stage = {gate}（阶段 {gate} 开启，出口核对 EMG{gate}-E2E-01）" : CardOf(p.Id, p.Family);
                 string why = gate > stage ? $"只有 stageGate = {gate} 的声明引用" : (p.Stage > stage ? $"端口 stage = {p.Stage}" : "没有正常游戏可获得的写者或读者");
+                EmgSource.Decl gatedRef = src.Decls.Where(d => d != null && d.Port == p.Id && gatedBy.ContainsKey(d.Owner)).Select(d => gatedBy[d.Owner]).FirstOrDefault();
+                if (gate <= stage && gatedRef != null)
+                {
+                    card = PendingCard(gatedRef.Port, gatedRef.Role);
+                    why = $"只有用到未接通端口（{gatedRef.Port}）的 stageGate {gatedRef.StageGate} 声明引用";
+                }
                 // FG19 第 12 节规则三出口口径（EMG1-E2E-01 修复轮，FG-GAP-183）：内核本阶段真实发出的事件端口（固定集实测）有写者，读者落表前记缺口；
                 // 既没有声明引用、内核也不发出的端口到阶段出口即失败（端口 stage 应记到第一个读者 / 写者落表的阶段）。
                 bool kernelWrites = (observedEvents?.Contains(p.Id) ?? false) || WorldSources.ContainsKey(p.Id) || EventProducers.ContainsKey(p.Id);
@@ -1340,6 +1363,22 @@ namespace GameLogic.EditorTools
                 a.Gaps.Add((p.Id, card, why));
             }
             return a;
+        }
+
+        private static bool PendingDecl(EmgSource.Decl d) => Enum.TryParse(d.Role, true, out EmgRole role) && EmgCatalog.IsPendingPort(d.Port, role);
+
+        /// <summary>未接通端口的承接卡（与 EmgCatalog.PendingPorts 注释同一张映射）。</summary>
+        private static string PendingCard(string port, string role)
+        {
+            if (port.StartsWith("fld.", StringComparison.Ordinal))
+            {
+                return "EMG2-FLD-01";
+            }
+            if (port == "ent.wreck" || port.StartsWith("mat.", StringComparison.Ordinal))
+            {
+                return "EMG2-RECL-01";
+            }
+            return "EMG2-RULE-01";
         }
 
         /// <summary>未被任何声明引用的端口的承接卡（FG19 第 12 节新固件落表；看板 EMG2～EMG4）。</summary>
@@ -1396,21 +1435,24 @@ namespace GameLogic.EditorTools
             SourceAudit a = AuditSources(EmgCatalog.FromTables(), stage, observed);
             Expect(a.Failures.Count == 0 && a.Effective > 0,
                 $"本阶段（emg.stage = {stage}）生效端口 {a.Effective} 个全部有源（生效声明写者 / 世界常驻源 {WorldSources.Count} 类 / 派生源 / 固定集实测发出的事件 {observed.Count} 种），本阶段生效端口的缺口清单为空{Detail(a.Failures)}");
-            SourceAudit exit = AuditSources(EmgCatalog.FromTables(), stage, observed, exitMode: true);
+            // EMG2-MAT-01：阶段 2 已开但端口按承接卡逐张接通（EmgCatalog.PendingPorts 非空）——出口模式核对上一个已出口的阶段；阶段 2 出口由 EMG2-E2E-01 在全部接通后核对。
+            int exitStage = EmgCatalog.PendingPorts.Length > 0 ? stage - 1 : stage;
+            SourceAudit exit = AuditSources(EmgCatalog.FromTables(), exitStage, observed, exitMode: true);
             // EMG1-E2E-01（卡片：出口模式跑一次并清零；FG-GAP-183）：stage ≤ 当前阶段、既无声明引用内核也不发出的端口必须为 0。
             var exitOnly = exit.Failures.Except(a.Failures).ToList();
             var kernelOnly = exit.Gaps.Where(g => g.Why.StartsWith("本阶段已有生产者", StringComparison.Ordinal)).Select(g => g.Port).ToList();
             Expect(exitOnly.Count == 0,
-                $"出口模式（AuditSources exitMode，阶段 {stage} 出口，FG19 第 12 节规则三）：stage ≤ {stage} 却无人引用的端口 {exitOnly.Count} 个{Detail(exitOnly)}；" +
+                $"出口模式（AuditSources exitMode，阶段 {exitStage} 出口，FG19 第 12 节规则三；生效阶段 {stage}、未接通端口 {EmgCatalog.PendingPorts.Length} 族）：stage ≤ {exitStage} 却无人引用的端口 {exitOnly.Count} 个{Detail(exitOnly)}；" +
                 $"已有阶段 1 生产者、读者未落表 {kernelOnly.Count} 个（记缺口）：{string.Join("、", kernelOnly)}");
             foreach (IGrouping<string, (string Port, string Card, string Why)> g in a.Gaps.GroupBy(x => x.Card).OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 Line($"    · 缺口（承接 {g.Key}）{g.Count()} 个：{string.Join("、", g.Select(x => x.Port))}");
             }
-            var n1415 = a.Gaps.Where(x => x.Port == "evt.enter" || x.Port == "evt.uplink").ToList();
+            // EMG2-MAT-01：N14 入场引信端口全部接通 → evt.enter 生效（不是缺口）；N15 接入冲击用到 fld.push（未接通）→ evt.uplink 记缺口、承接 EMG2-FLD-01
+            var uplink = a.Gaps.Where(x => x.Port == "evt.uplink").ToList();
             Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && a.Gaps.Any(x => x.Port == "evt.ping") && a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal))
-                   && a.Gaps.Any(x => x.Port.StartsWith("meta.", StringComparison.Ordinal)) && n1415.Count == 2 && n1415.All(x => x.Card.StartsWith("emg.stage = 2", StringComparison.Ordinal)),
-                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 meta.*、evt.ping、hij.*；N14 / N15 的读端 evt.enter / evt.uplink 按阶段 2 报缺口");
+                   && a.Gaps.Any(x => x.Port.StartsWith("meta.", StringComparison.Ordinal)) && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 1 && uplink[0].Card == "EMG2-FLD-01",
+                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 meta.*、evt.ping、hij.*；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 因 fld.push 未接通记缺口（承接 {uplink.FirstOrDefault().Card}）");
         }
 
         // ═════════════════════════════════ D 负向 ═════════════════════════════════

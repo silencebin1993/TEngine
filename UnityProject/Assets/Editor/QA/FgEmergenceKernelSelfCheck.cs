@@ -165,12 +165,16 @@ namespace GameLogic.EditorTools
             int inc = proj - 64; // 格式 15 的 CombatProjectile = 64 字节
             int cap = CombatConfig.Default.ProjectileCapacity;
             long pool = (long)inc * cap;
-            Expect(inc > 0 && inc <= 52 && cap == 4096 && pool <= 52L * 4096,
-                $"弹体结构 {proj} 字节（+{inc}，含 Id / 程序 / 节点 / 代 / 剩余穿透 / 剩余反弹 / 链深 / 沾染 / 质量 / 链 / 触发计数 / 寻的目标 / 物质掩码）；弹体池按容量 {cap} 预分配，满池增量 {pool / 1024.0:F0} KB ≤ ADR ⑬ 估算（约 +52 字节 / 发 ≈ 208 KB）");
+            // EMG2-MAT-01（DEBT-EMG1TRIG01-05）：弹体记号 8 → 16 位，小字段多 1 字节、按对齐 +4 B（120 B / 发，+56）；满池 224 KB，比 ADR ⑬ 的“约 208 KB”多 16 KB，
+            // 仍在每地点合计 < 1.5 MB 之内（证据记偏差）。上限按 +56 卡住，再长要先改 ADR ⑬。
+            Expect(inc > 0 && inc <= 56 && cap == 4096 && pool <= 56L * 4096,
+                $"弹体结构 {proj} 字节（+{inc}，含 Id / 程序 / 节点 / 代 / 剩余穿透 / 剩余反弹 / 链深 / 沾染 / 质量 / 链 / 触发计数 / 寻的目标 / 物质掩码 / 16 位记号）；弹体池按容量 {cap} 预分配，满池增量 {pool / 1024.0:F0} KB ≤ 224 KB（ADR ⑬ 约 208 KB，记号扩宽 +16 KB）");
             int unit = UnsafeUtility.SizeOf<EmgUnitState>() + sizeof(short);
             int wreck = UnsafeUtility.SizeOf<EmgWreck>();
-            Expect(unit <= 92 && wreck * EmgConst.DefaultWreckCapacity <= 30 * 1024,
-                $"每单位涌现段 {unit} 字节（基本段 + 档案下标；ADR ⑬ 全量约 92 字节 / 单位，阶段 2 起追加）；残骸 {wreck} 字节 × {EmgConst.DefaultWreckCapacity} = {wreck * EmgConst.DefaultWreckCapacity / 1024.0:F1} KB ≤ 30 KB");
+            // EMG2-MAT-01：阶段 2 状态段一次铺齐（温度 / 7 个累积量 / 相态掩码与计时 / 6 项抗性覆盖）后 102 字节，比 ADR ⑬ 的“约 92 B”多 10 B；
+            // 按每地点 4096 单位算 ≈ 0.4 MB，仍在 ADR ⑬ 每地点合计 < 1.5 MB 之内（证据记偏差）。
+            Expect(unit <= 92 + 16 && (long)unit * 4096 <= 512 * 1024 && wreck * EmgConst.DefaultWreckCapacity <= 30 * 1024,
+                $"每单位涌现段 {unit} 字节（阶段 2 全量；ADR ⑬ 约 92 字节 / 单位，容差 16；4096 单位 {unit * 4096 / 1024.0:F0} KB ≤ 512 KB）；残骸 {wreck} 字节 × {EmgConst.DefaultWreckCapacity} = {wreck * EmgConst.DefaultWreckCapacity / 1024.0:F1} KB ≤ 30 KB");
 
             EmgCompiled c = EmgCatalog.Current;
             var bad = new List<string>();
@@ -315,7 +319,7 @@ namespace GameLogic.EditorTools
             byte[] snap = k.Serialize();
             using var b = new CombatKernel(k.Config, 64);
             CombatLoadResult lr = b.Load(snap);
-            bool same = lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 16
+            bool same = lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 17
                         && b.StateHash() == k.StateHash() && b.EmgStateHash() == k.EmgStateHash() && b.ProgramCount == k.ProgramCount
                         && b.EmgBusPending == 2 && b.WreckCount == 1 && b.TryGetUnitEmg(gun, out short prof, out EmgUnitState us) && prof == 3 && us.LastHitBy == 2
                         && b.TryGetEmgEvent(1, out EmgEvent e1) && k.TryGetEmgEvent(1, out EmgEvent e0) && e1.Seq == e0.Seq && e1.Chain == e0.Chain && e1.Kind == EmgEventKind.Timer
@@ -578,7 +582,7 @@ namespace GameLogic.EditorTools
             cases.Add(("残骸耐久非数", Patch(snap, d => WriteInt(d, kseg.at + 44, BitConverter.SingleToInt32Bits(float.NaN))), CombatLoadResult.InvalidValue));
             if (k.ProjectileCount >= 2)
             {
-                (int at, int stride) pseg = FindSegment(snap, EmgConst.SegProjectiles, 20, k.ProjectileCount); // EMG1-GRM-01：16 → 20 个字段
+                (int at, int stride) pseg = FindSegment(snap, EmgConst.SegProjectiles, 21, k.ProjectileCount); // EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
                 cases.Add(("弹体 Id 重复", Patch(snap, d => WriteInt(d, pseg.at + pseg.stride, BitConverter.ToInt32(d, pseg.at))), CombatLoadResult.InvalidValue));
                 cases.Add(("弹体程序下标越界", Patch(snap, d => WriteInt(d, pseg.at + 4, 50)), CombatLoadResult.InvalidValue));
             }

@@ -885,6 +885,7 @@
 | `emg.obscure.partial` | 0.4 | `emg.obscure.partial_range` | 6 米 |
 | `emg.obscure.inside_range` | 3 米 | `emg.react.annihilate_integrity` | 0.15 |
 | `emg.matter.pickup_scrap` | 0.5 废料 / 份（阶段 4 预留） | `emg.patch.per_step` | 69 块 / 步（ADR-EMG-001 ⑤） |
+| `emg.patch.soft_merge_radius` | 6 米（§8.1 软上限就近并入半径；EMG2-MAT-01 落表） | — | — |
 
 - 规则阈值（温度、电荷、动能、重叠比）写在 `fg.TbChannelRule.condition`，相态阈值写在 `fg.TbPhaseRule`，破片与系数写在 `fg.TbEntityProfile`，都不另设调参键，避免一个数两处维护。
 - 世界级总上限 `emg.patch.world_capacity`、`emg.bus.world_per_step` 由 FG19 第 18 节登记（ADR-EMG-001 ⑬），本附录不重复。

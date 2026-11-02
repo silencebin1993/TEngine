@@ -329,6 +329,10 @@ namespace GameLogic.EditorTools
             Line("  · C. FGT-EMG-006：来源只在 stageGate ≤ emg.stage 时开放（杂兵残骸掉落 / 精英三选一候选池 / 数据复原），名表固件不受影响");
             CampaignState s = CampaignState.CreateNew("emg1fw02-c", "Standard", 1);
             var pool = new List<LootPickDef>();
+            // 图鉴解锁状态隔离：已解锁的条目按设计照列、照计数（MechanicCodex.Counted），同一进程里前面的段（或本机图鉴文件）解锁过的新固件会混进页签总数；这里只测阶段闸
+            string codexPath = MechanicCodex.FilePathOverrideForTests;
+            MechanicCodex.FilePathOverrideForTests = Path.Combine(Path.GetTempPath(), "bingames-emgaddon-codex-" + Guid.NewGuid().ToString("N") + ".json");
+            MechanicCodex.Reload();
             try
             {
                 foreach (int stage in new[] { 0, 1 })
@@ -366,7 +370,8 @@ namespace GameLogic.EditorTools
                     string notOpen = GameText.Get("codex.firmware.not_open");
                     Expect(closed != null && scuttle != null && MechanicCodex.Hint(closed, s) == notOpen && (MechanicCodex.Hint(scuttle, s) == notOpen) == (stage < 1)
                            && fwTotal == fwWant && fwTotal == MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware) - Spec.Count(x => x.Gate > stage),
-                        $"emg.stage = {stage}：图鉴里入场引信提示“{MechanicCodex.Hint(closed, s)}”、自毁装药提示“{MechanicCodex.Hint(scuttle, s)}”；固件页签总数 {fwTotal}（拿不到的 {Spec.Count(x => x.Gate > stage)} 条不计）");
+                        $"emg.stage = {stage}：图鉴里入场引信提示“{MechanicCodex.Hint(closed, s)}”、自毁装药提示“{MechanicCodex.Hint(scuttle, s)}”；固件页签总数 {fwTotal}（拿不到的 {Spec.Count(x => x.Gate > stage)} 条不计；"
+                        + $"新固件计入 {string.Join("、", Spec.Where(x => MechanicCodex.Entries.Any(e => e.Kind == MechanicCodexKind.Firmware && e.ContentId == x.Id && MechanicCodex.IsUnlocked(e.Id))).Select(x => x.Id + "（已解锁）"))}）");
                 }
                 // 三选一候选行在表里排在全部既有行之后（既有行 ID / 顺序不动）
                 var rows = LootPickCatalog.Rows.ToList();
@@ -377,6 +382,8 @@ namespace GameLogic.EditorTools
             finally
             {
                 EmgCatalog.ResetForTests();
+                MechanicCodex.FilePathOverrideForTests = codexPath;
+                MechanicCodex.Reload();
             }
         }
 

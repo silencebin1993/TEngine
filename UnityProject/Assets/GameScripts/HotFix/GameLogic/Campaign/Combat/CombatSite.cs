@@ -192,6 +192,7 @@ namespace GameLogic.Campaign.Combat
             Kernel = new CombatKernel(config, 64);
             ApplyEmgSubForms(Kernel); // EMG1-TRIG-01：子形态参数按 fg.TbSubPayload 写进内核
             ApplyEntityProfiles(Kernel); // EMG1-ENT-01：实体档案按 fg.TbEntityProfile 写进内核
+            ApplyMatters(Kernel); // EMG2-MAT-01：17 种物质按 fg.TbMatter 写进内核（斑块层开不开看 emg.stage）
             _emgEntity = config.EmgEntity != 0;
             ConfigureReactions();
             Sync = new CombatTransformSync(16);
@@ -328,6 +329,18 @@ namespace GameLogic.Campaign.Combat
             c.EmgWreckSlow = Mathf.Clamp(Tuning("emg.wreck.slow", EmgConst.DefaultWreckSlow), 0.05f, 1f);
             c.EmgImpactVMin = Mathf.Max(0.1f, Tuning("emg.impact.v_min", EmgConst.DefaultImpactVMin));
             c.EmgPushDMin = Mathf.Max(0.01f, Tuning("emg.push.d_min", EmgConst.DefaultPushDMin));
+            // EMG2-MAT-01（FG19 FGR-EMG-081～083；FG19B 第 8、10 节）：物质斑块层随阶段 2 开；emg.stage ≤ 1 时关，阶段 1 行为逐字不变。
+            c.EmgPatchOn = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 2 ? 1 : 0);
+            c.EmgPatchCapacity = Mathf.Clamp((int)Math.Round(Tuning("emg.patch.capacity", EmgMatterConst.DefaultCapacity)), 1, EmgMatterConst.DefaultCapacity);
+            c.EmgPatchReserve = Mathf.Clamp((int)Math.Round(Tuning("emg.patch.reserve_world", EmgMatterConst.DefaultReserveWorld)), 0, c.EmgPatchCapacity);
+            c.EmgPatchPerStep = Math.Max(1, (int)Math.Round(Tuning("emg.patch.per_step", EmgMatterConst.DefaultPerStep)));
+            c.EmgPatchSpawnPerStep = Math.Max(1, (int)Math.Round(Tuning("emg.patch.spawn_per_step", EmgMatterConst.DefaultSpawnPerStep)));
+            c.EmgPatchNeighbors = Math.Max(1, (int)Math.Round(Tuning("emg.patch.max_neighbors", EmgMatterConst.DefaultMaxNeighbors)));
+            c.EmgPatchTick = Mathf.Max(0.05f, Tuning("emg.patch.tick", EmgMatterConst.DefaultTick));
+            c.EmgPatchMaxRadius = Mathf.Max(0.5f, Tuning("emg.patch.max_radius", EmgMatterConst.DefaultMaxRadius));
+            c.EmgPatchSoftMerge = Mathf.Max(0f, Tuning("emg.patch.soft_merge_radius", EmgMatterConst.DefaultSoftMergeRadius));
+            c.EmgGasMinConc = Mathf.Clamp(Tuning("emg.gas.min_conc", EmgMatterConst.DefaultMinConc), 0.01f, 1f);
+            c.EmgFriendlyScale = Mathf.Clamp(Tuning("emg.matter.friendly_scale", 1f), 0f, 1f);
             c.EmgKnockSeconds = Mathf.Max(0.02f, Tuning("emg.push.knock_seconds", EmgConst.DefaultKnockSeconds));
             c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
             // EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁“只跳已标记”确实跳到已标记目标时记在哪个图鉴条目上（按稳定键；内核不认内容 ID）。
@@ -476,6 +489,7 @@ namespace GameLogic.Campaign.Combat
         public EmgBusStats EmgBusStats => IsDisposed ? default : Kernel.EmgBusStats;
 
         private long _emgDepthCutSeen, _emgFanoutCutSeen, _emgLostSeen;
+        private bool _emgMatterHookRaised;
 
         /// <summary>调试层：链深截断、扇出截断第一次出现时各记一行（之后计数照常累加、可随时读 <see cref="EmgBusDebugLine"/>）；队列满仍无处合并（丢失）每次出现都报警。O(1) / 步。</summary>
         private void WatchEmgBus()
@@ -508,6 +522,46 @@ namespace GameLogic.Campaign.Combat
         }
 
         private int _wreckCappedSeen, _wreckAgedSeen;
+
+        /// <summary>FNV-1a 32 位（存档稳定，不用随进程变化的 string.GetHashCode）。</summary>
+        internal static int StableKey(string id)
+        {
+            unchecked
+            {
+                uint h = 2166136261;
+                foreach (char ch in id ?? string.Empty)
+                {
+                    h = (h ^ ch) * 16777619;
+                }
+                return (int)(h == 0 ? 1 : h);
+            }
+        }
+
+        /// <summary>EMG2-MAT-01（FGR-EMG-082“降级都计数、在调试层可见，不静默”）：调试层一行——本地点斑块数与可靠计数（不用文本键：只给开发调试看）。</summary>
+        public string EmgPatchDebugLine()
+        {
+            if (IsDisposed)
+            {
+                return $"[EmgPatch] {SiteId} 已卸载";
+            }
+            EmgScalars s = Kernel.PatchStats;
+            return $"[EmgPatch] {SiteId} 斑块 {Kernel.PatchCount}/{Kernel.Config.EmgPatchCapacity}（世界源保留 {Kernel.Config.EmgPatchReserve}）· 生成 {s.PatchesBorn} · 合并 {s.PatchesMerged} · 到期 {s.PatchesExpired} · "
+                   + $"软上限并入 {s.PatchSoftMerged} / 提前到期 {s.PatchSoftExpired} · 总上限并入 {s.PatchCapMerged} / 提前到期 {s.PatchCapExpired} · 丢弃 {s.PatchDropped} · 顺延 {s.PatchDeferred} · 残骸成碎屑 {s.WrecksToDebris}";
+        }
+
+        private int _patchDegradeSeen;
+
+        /// <summary>斑块降级（软 / 总上限、丢弃）每次增加时记一行（调试层；O(1) / 步）。</summary>
+        private void WatchPatches()
+        {
+            EmgScalars s = Kernel.PatchStats;
+            int degrade = s.PatchSoftMerged + s.PatchSoftExpired + s.PatchCapMerged + s.PatchCapExpired + s.PatchDropped;
+            if (degrade > _patchDegradeSeen)
+            {
+                Log.Info(EmgPatchDebugLine());
+            }
+            _patchDegradeSeen = degrade;
+        }
 
         /// <summary>崩解第一次出现、以及满容量崩解每次增加时记一行（调试层；O(1) / 步）。</summary>
         private void WatchWrecks()
@@ -1071,6 +1125,27 @@ namespace GameLogic.Campaign.Combat
 
         private readonly bool _emgEntity;
 
+        /// <summary>EMG2-MAT-01：把编好的物质表（<see cref="Emergence.EmgMatterCatalog"/>，fg.TbMatter）写进内核（地点创建 / 表重载）。
+        /// 表不合法时报错并保持内核原表（斑块层因此不生效，不静默：Log.Error）。放在 Campaign/Combat 下：只有这里碰内核（FG14 §5 硬约束 3）。</summary>
+        public static bool ApplyMatters(CombatKernel kernel)
+        {
+            Emergence.EmgMatterCatalog.Compiled c = Emergence.EmgMatterCatalog.Current;
+            if (kernel == null || !c.Ok)
+            {
+                foreach (string p in c.Problems)
+                {
+                    Log.Error("[EmgMatterCatalog] " + p);
+                }
+                return false;
+            }
+            if (!kernel.SetMatters(c.Rows))
+            {
+                Log.Error("[EmgMatterCatalog] 内核拒绝了物质表（数值越界）");
+                return false;
+            }
+            return true;
+        }
+
         /// <summary>
         /// EMG1-ENT-01（FGR-EMG-111）：把编好的实体档案（<see cref="Emergence.EmgEntityProfiles"/>）与动能 / 破片参数写进内核。表缺失或不合法时内核保留 FG19B 初值（已报错）。
         /// </summary>
@@ -1111,6 +1186,16 @@ namespace GameLogic.Campaign.Combat
                 EraFragCount = c.EraFragCount, EraFragDamage = c.EraFragDamage, EraFragSpeed = c.EraFragSpeed, EraFragRange = c.EraFragRange,
             };
             bool ok = kernel.SetEntityProfiles(rows, p0);
+            if (ok)
+            {
+                // EMG2-MAT-01（DEBT-EMG1ENT01-07）：档案行稳定键（行 ID 的 FNV 哈希），快照 17 段 19 按它把旧档的档案下标挪到当前表
+                var keys = new List<int>(c.Rows.Count);
+                foreach (Emergence.EmgProfileRow r in c.Rows)
+                {
+                    keys.Add(StableKey(r.Id));
+                }
+                kernel.SetEntityProfileKeys(keys);
+            }
             if (!ok)
             {
                 Log.Error("[EmgEntityProfiles] 内核拒绝了实体档案（行数不足或数值越界），保留 FG19B 初值");
@@ -1606,6 +1691,7 @@ namespace GameLogic.Campaign.Combat
             if (_emgEntity)
             {
                 WatchWrecks(); // EMG1-ENT-01
+                WatchPatches(); // EMG2-MAT-01
             }
             ProcessEvents();
             // FG2-FW-04：反应反馈与伤害归因（按内核累计计数的增量，O(反应条数)；与是否观察无关的部分照常结算）。
@@ -1644,6 +1730,12 @@ namespace GameLogic.Campaign.Combat
             {
                 _emgTriggerHookRaised = true;
                 GuidanceHooks.Raise(GuidanceHooks.EmgFirstTrigger);
+            }
+            // EMG2-MAT-01：第一次出现物质斑块（内核计数，O(1)；引导内容归 FG15-UX-04）。
+            if (!_emgMatterHookRaised && Kernel.PatchStats.PatchesBorn > 0)
+            {
+                _emgMatterHookRaised = true;
+                GuidanceHooks.Raise(GuidanceHooks.EmgFirstMatter);
             }
             if (_processing)
             {

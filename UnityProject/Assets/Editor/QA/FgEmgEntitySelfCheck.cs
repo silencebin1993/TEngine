@@ -271,6 +271,17 @@ namespace GameLogic.EditorTools
                    && c.Rows.Count == EmgEntityProfiles.SlotIds.Length + 7 + 10 && c.Rows[EmgConst.SlotFragment].Id == "entity.fragment" && c.Rows[EmgConst.SlotBoss].Id == "entity.boss",
                 $"表 {table.Count} 行编成内核档案 {c.Rows.Count} 行（11 种类默认按 EmgConst.Slot* 同序 + 7 底盘 + 敌人 / 首领 × 5 材质），问题 {c.Problems.Count}");
             var enemies = ConfigSystem.Instance.Tables.TbMechEnemy.DataList;
+            // DEBT-EMG1ENT01-04（EMG2-MAT-01 关闭）：攻城突袭者走正式生成入口 CombatSite.SpawnSiegeRaider，按敌人表 material 列挂档案；对照：不知道种类 → 敌人默认（−1，钢）
+            GameConfig.fg.MechEnemy nonSteel = enemies.FirstOrDefault(e => e.Material != "material.steel" && EmgEntityProfiles.ForEnemy(e.Material, false) >= 0);
+            using (var site = new CombatSite("emg_raider_profile", CombatSite.ConfigFromTuning()))
+            {
+                int known = site.SpawnSiegeRaider(1, new Vector2(0f, 0f), new Vector2(5f, 0f), 0.5f, 2f, 100f, 0f, -1, -1, CombatSiegeRole.Assault, false, 1f, 0, nonSteel?.Id);
+                int unknown = site.SpawnSiegeRaider(1, new Vector2(1f, 0f), new Vector2(5f, 0f), 0.5f, 2f, 100f, 0f, -1, -1, CombatSiegeRole.Assault, false, 1f);
+                site.Kernel.TryGetUnitEmg(known, out short pk, out _);
+                site.Kernel.TryGetUnitEmg(unknown, out short pu, out _);
+                Expect(nonSteel != null && known > 0 && pk == EmgEntityProfiles.ForEnemy(nonSteel.Material, false) && pk >= 0 && pu == -1,
+                    $"攻城突袭者（{nonSteel?.Id} · {nonSteel?.Material}）档案行 {pk} = 敌人 @ 该材质；不知道种类的突袭者 {pu}（敌人默认，钢）");
+            }
             var faction = new Dictionary<string, string>
             {
                 ["silent"] = "material.composite", ["foundry"] = "material.steel", ["clarity"] = "material.ceramic", ["overclock"] = "material.alloy", ["fleet"] = "material.steel",

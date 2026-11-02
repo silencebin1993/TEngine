@@ -13,6 +13,8 @@ namespace BinGames.Sim.Combat
         public const float Cell = 4f;
         public const byte KindObstacle = 0;
         public const byte KindWreck = 1;
+        /// <summary>EMG2-MAT-01：物质斑块（Refs = Patches 下标；按覆盖格登记，单块半径 ≤ emg.patch.max_radius 8 米）。</summary>
+        public const byte KindPatch = 2;
         /// <summary>每个圆：x, y, 半径, 种类。</summary>
         public NativeList<float4> Entries;
         /// <summary>圆在障碍表 / 残骸表里的下标。</summary>
@@ -218,6 +220,11 @@ namespace BinGames.Sim.Combat
                 float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
                 float b = (x.Flags & EmgInstrFlags.MagB) != 0 ? x.B * x.Amount : x.B;
                 if (!(a > 0f) || !(b > 0f))
+                {
+                    continue;
+                }
+                // EMG2-MAT-01：斑块层开着时排放写端生成物质斑块（FG19A 第 0.3 节口径 3 的阶段 2 形态），不再落读法驻留区
+                if (x.Verb == emit && EmgEmitPatch(ref d, x, e.Pos, a, b, host.Owner, e.Chain, e.Depth))
                 {
                     continue;
                 }
@@ -446,6 +453,14 @@ namespace BinGames.Sim.Combat
                 EmgSpawn s = d.EmgPending[i];
                 if (s.Count == 0)
                 {
+                    continue;
+                }
+                if (s.Kind == EmgConst.PendPatch)
+                {
+                    if (!EmgPendPatch(ref d, s))
+                    {
+                        d.EmgPending[write++] = s; // EMG2-MAT-01：本步生成额度已用完，留到下一步（生成时才计寿命）
+                    }
                     continue;
                 }
                 if (s.Kind == EmgConst.PendSub && s.Armed == 0)
@@ -817,7 +832,7 @@ namespace BinGames.Sim.Combat
         {
             if (z.EmgSub != 0)
             {
-                EmgNodeEffects(ref d, z.EmgProgRef - 1, z.EmgNode, z.Pos, d.SlotOf(z.Owner), z.Faction);
+                EmgNodeEffects(ref d, z.EmgProgRef - 1, z.EmgNode, z.Pos, d.SlotOf(z.Owner), z.Faction, z.EmgChain, z.EmgDepth);
                 EmgSubZoneEcho(ref d, z); // EMG1-FW-01（DEBT-EMG1GRM01-05）：子区收回时的回响
             }
             if (d.EmgListen == 0u)
@@ -1102,7 +1117,7 @@ namespace BinGames.Sim.Combat
                 d.MarkedUntil[hit] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[hit], wp.MarkSeconds, 0f, 0, d.Pos[hit]);
             }
-            if (wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(owner, CombatUnitFlags.ReactionSpent))
+            if (wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(owner, CombatUnitFlags.ReactionSpent) && (pr.Flags & EmgProjFlags.NoNamed) == 0)
             {
                 MarkJump(ref d, owner, hit, hitPos, dealt, wp);
             }
@@ -1132,9 +1147,10 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// 子载荷（1 / 2 代）一次结算（命中 / 寿命到 / 撞障碍 / 子区到期）时执行自己节点的效果写端。阶段 1：排放（mat.* 写端，动词 = 热更层给的 emit 码）
-        /// 经 fg.TbPortCarrier 映射到读法驻留区——A = 半径、B = 秒数、C = 状态位号 + 1（编译器按物质写好；FG19A 第 0.3 节口径 3）。阶段 2 改为斑块（EMG2-MAT-01）。
+        /// 经 fg.TbPortCarrier 映射到读法驻留区——A = 半径、B = 秒数、C = 状态位号 + 1（编译器按物质写好；FG19A 第 0.3 节口径 3）。
+        /// EMG2-MAT-01：斑块层开着（emg.stage ≥ 2）时改为生成物质斑块（物质码 = 端口码 − 400，份量 = 声明幅度，链 / 链深取这发子弹药的）。
         /// </summary>
-        private static void EmgNodeEffects(ref CombatData d, int prog, int node, double2 pos, int ownerSlot, CombatFaction faction)
+        private static void EmgNodeEffects(ref CombatData d, int prog, int node, double2 pos, int ownerSlot, CombatFaction faction, int chain = 0, byte depth = 0)
         {
             int verb = d.Config.EmgVerbEmit;
             if (verb <= 0 || prog < 0 || prog >= d.EmgPrograms.Length)
@@ -1152,6 +1168,15 @@ namespace BinGames.Sim.Combat
             {
                 EmgInstr x = d.EmgInstrs[i];
                 if (x.Role <= EmgConst.RoleLastRead || x.Verb != verb || !(x.A > 0f) || !(x.B > 0f))
+                {
+                    continue;
+                }
+                if (i < d.EmgAct.Length)
+                {
+                    // EMG2-MAT-01：落点 / 到期结算的排放行真的执行了——按行计激活（模糊测试器零反应判定；带事件触发的序号 EmgActNode 不计，漏记会误判死指令）
+                    d.EmgAct[i] = d.EmgAct[i] + 1;
+                }
+                if (EmgEmitPatch(ref d, x, pos, x.A, x.B, ownerSlot, chain, depth))
                 {
                     continue;
                 }
@@ -1185,6 +1210,15 @@ namespace BinGames.Sim.Combat
             {
                 EmgWreck w = d.Wrecks[k];
                 EmgHashAdd(ref d, w.Pos, w.Radius, EmgHash.KindWreck, k);
+            }
+            // EMG2-MAT-01（FGR-EMG-081）：斑块 × 单位 / 斑块 × 斑块 / 弹体 × 斑块都查这一张哈希（不做全表两两扫描，顺带偿还 DEBT-FG2FW02-06 的斑块那一半）。
+            for (int k = 0; k < d.Patches.Length; k++)
+            {
+                CombatZone z = d.Patches[k];
+                if (z.Matter != 0)
+                {
+                    EmgHashAdd(ref d, z.Pos, z.Radius, EmgHash.KindPatch, k);
+                }
             }
             EmgScalars es = d.EmgS[0];
             es.HashDirty = 0;

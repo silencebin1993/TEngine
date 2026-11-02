@@ -812,6 +812,9 @@ namespace GameLogic.EditorTools
             // EMG1-FUZZ-01：组合模糊测试器雏形与涌现满载场景（FGT-EMG-070 / 071 阶段 1、FGT-EMG-042）——固定种子 64 例（真实编译器 + CombatSite + 内核，无画面）：
             // 零崩溃 / 零卡死 / 零死指令（内核按指令行激活计数，只在本段打开）/ 确定性 / 中途存读档 / 积压 / 数值溢出；有源审计与缺口清单；负向；多地点涌现满载性能（阶段 1 只判绝对预算）。
             Seg("FgEmergenceFuzzSelfCheck", FgEmergenceFuzzSelfCheck.Run);
+            // EMG2-MAT-01：物质斑块层与空间哈希（FGT-EMG-031 / 040 / 042 / 020 进离场 / 011 进场触发）——17 种物质各一例、合并与容量降级（世界源保留、每步顺延、节拍错相）、
+            // 中立与离地、接触伤害 Code 4、弹体沾染 / 抛射、入场引信、残骸崩解成碎屑、快照 17 往返 / 16 版 / 短长段 / 档案稳定键、确定性与倍速、悬停与调试行、耗时。
+            Seg("FgEmgMatterSelfCheck", FgEmgMatterSelfCheck.Run);
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

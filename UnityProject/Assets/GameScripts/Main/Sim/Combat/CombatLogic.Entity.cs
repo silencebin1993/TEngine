@@ -243,13 +243,18 @@ namespace BinGames.Sim.Combat
             EmgScalars es = d.EmgS[0];
             if (d.Wrecks.Length >= EmgConst.DefaultWreckCapacity)
             {
-                // 满了：最早的崩解（阶段 1 = 计数 + 消失，DEBT-EMG1ENT01-01 转化为碎屑斑块归 EMG2-MAT-01）。列表按生成先后排，下标 0 最早。
+                // 满了：最早的崩解为金属碎屑斑块（EMG2-MAT-01）。列表按生成先后排，下标 0 最早。
+                EmgWreck oldest = d.Wrecks[0];
                 for (int j = 1; j < d.Wrecks.Length; j++)
                 {
                     d.Wrecks[j - 1] = d.Wrecks[j];
                 }
+                EmgWreck gone = oldest;
                 d.Wrecks.ResizeUninitialized(d.Wrecks.Length - 1);
-                es.WrecksCapped++; // shortcut: 满容量最早的崩解 = 计数 + 消失（不转碎屑斑块），EMG2-MAT-01 改生成 mat.debris（DEBT-EMG1ENT01-01）
+                es.WrecksCapped++;
+                d.EmgS[0] = es;
+                EmgWreckToDebris(ref d, gone); // EMG2-MAT-01（DEBT-EMG1ENT01-01）：满容量最早的崩解为金属碎屑斑块（斑块层没开时只计数）
+                es = d.EmgS[0];
             }
             double now = d.Scalars[0].Time;
             var w = new EmgWreck
@@ -319,7 +324,7 @@ namespace BinGames.Sim.Combat
             d.EmgStats[0] = st;
             if ((pr.Flags & EmgProjFlags.Sub) != 0)
             {
-                EmgNodeEffects(ref d, pr.Prog, pr.Node, at, d.SlotOf(pr.Owner), pr.Faction); // 子弹药在撞点执行自己节点的指令（与撞障碍同一口径）
+                EmgNodeEffects(ref d, pr.Prog, pr.Node, at, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth); // 子弹药在撞点执行自己节点的指令（与撞障碍同一口径）
             }
             EmgProjEvent(ref d, ref pr, EmgEventKind.Absorb, k.Id, EmgEntKind.Wreck, dmg, 0f, 0, at);
             EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, k.Id, EmgEntKind.Wreck, 0f, 0f, EmgCode.ExpireAbsorbed, at);
@@ -668,7 +673,10 @@ namespace BinGames.Sim.Combat
                 }
                 if (now >= k.Until)
                 {
-                    es.WrecksAged++; // shortcut: 阶段 1 崩解 = 计数 + 消失；转化为 mat.debris 碎屑斑块随 EMG2-MAT-01（DEBT-EMG1ENT01-01）
+                    es.WrecksAged++;
+                    d.EmgS[0] = es;
+                    EmgWreckToDebris(ref d, k); // EMG2-MAT-01（DEBT-EMG1ENT01-01）：野外到期崩解为金属碎屑斑块（斑块层没开时只计数）
+                    es = d.EmgS[0];
                     dirty = true;
                     continue;
                 }

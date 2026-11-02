@@ -474,9 +474,9 @@ namespace GameLogic.EditorTools
                 b.Step(Dt, t);
             }
             bool cont = k.StateHash() == b.StateHash() && Sig(k) == Sig(b);
-            Expect(lr == CombatLoadResult.Ok && before == after && same && cont && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 16
+            Expect(lr == CombatLoadResult.Ok && before == after && same && cont && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 17
                    && b.FlashHeadOf(bay.Self).Equals(k.FlashHeadOf(bay.Self)),
-                $"读档 {lr}：{before} → {after}（每架 Id:持有/全长-暂停，s = 已剥离 | 两台母机占用）；状态哈希一致 {same}，续跑 4 秒逐位相同 {cont}；格式仍 {CombatConst.FormatVersion}（阶段 1 内追加）");
+                $"读档 {lr}：{before} → {after}（每架 Id:持有/全长-暂停，s = 已剥离 | 两台母机占用）；状态哈希一致 {same}，续跑 4 秒逐位相同 {cont}；格式 {CombatConst.FormatVersion}（阶段 1 追加的字段在格式 17 里照旧）");
 
             // 短段：模拟本卡之前的提交写出的无人机段（只有 Id）→ 按全长；武器段只有 2 个字段 → 没有变体表，按旧行为
             byte[] shortDrones = k.SerializeEmgShapeForTests(EmgConst.SegDrones, 1, 0);

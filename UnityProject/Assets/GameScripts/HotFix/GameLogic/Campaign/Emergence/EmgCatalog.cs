@@ -146,6 +146,10 @@ namespace GameLogic.Campaign.Emergence
         public readonly List<string> Problems = new List<string>();
         public float RawStage;
         public int EffectiveStage;
+        /// <summary>EMG2-MAT-01：此刻走声明轨的 owner 下标（stageGate ≤ 生效阶段，且 stageGate ≥ 2 的 owner 没有用到未接通端口，见 <see cref="EmgCatalog.PendingPorts"/>）。</summary>
+        public readonly HashSet<int> ActiveOwners = new HashSet<int>();
+
+        public bool OwnerActive(int owner) => ActiveOwners.Contains(owner);
     }
 
     /// <summary>
@@ -160,8 +164,38 @@ namespace GameLogic.Campaign.Emergence
     /// </summary>
     public static class EmgCatalog
     {
-        /// <summary>已实现的最高 FG-EMG 阶段：emg.stage 填得更高时钳到这里（卡片负向“emg.stage 填高于已实现阶段”）。EMG1-KRN-01 铺好阶段 1 内核结构后为 1；阶段 2 内核（快照 17）落地时提到 2。</summary>
-        public const int ImplementedStage = 1;
+        /// <summary>已实现的最高 FG-EMG 阶段：emg.stage 填得更高时钳到这里（卡片负向“emg.stage 填高于已实现阶段”）。EMG1-KRN-01 铺好阶段 1 内核结构后为 1；
+        /// EMG2-MAT-01 铺好阶段 2 内核状态段（快照 17：斑块、累积量与相态、活跃场、规则计数）后提到 2。阶段 2 的端口按承接卡逐张接通，见 <see cref="PendingPorts"/>。</summary>
+        public const int ImplementedStage = 2;
+
+        /// <summary>
+        /// EMG2-MAT-01（按推荐默认执行（2026-11-01），待用户确认）：阶段 2 已开、但内核还没有执行者的端口（按端口，不按内容 ID，FGR-EMG-013）。
+        /// stageGate ≥ 2 的 owner 只要有一条声明用到这些端口，就继续走旧 readFields 路径（FGR-EMG-019 双轨，整条切轨），避免“阶段提到 2 → 旧读法没了、新动词还没人执行”的整条失效。
+        /// 每张承接卡接通后从这里删掉对应项：fld.* → EMG2-FLD-01；ent.wreck → EMG2-RECL-01；evt.react 读端 / en.* / prop.heat → EMG2-RULE-01；物质端口的 modify（蔓延 / 随车）→ EMG2-RECL-01。
+        /// 前缀以“.”结尾按族匹配，否则整串匹配。
+        /// </summary>
+        public static readonly string[] PendingPorts = { "fld.", "ent.wreck", "evt.react", "en.", "prop.heat" };
+
+        /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>；物质端口的 modify 角色同样未接通）。</summary>
+        public static bool IsPendingPort(string portId, EmgRole role)
+        {
+            if (string.IsNullOrEmpty(portId))
+            {
+                return false;
+            }
+            if (role == EmgRole.Modify && portId.StartsWith("mat.", StringComparison.Ordinal))
+            {
+                return true;
+            }
+            foreach (string p in PendingPorts)
+            {
+                if (p.EndsWith(".", StringComparison.Ordinal) ? portId.StartsWith(p, StringComparison.Ordinal) : portId == p)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
         public const string StageKey = "emg.stage";
 
         public static readonly string[] Carriers = { "projectile", "melee", "summon", "aura", "field" };
@@ -240,14 +274,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 return false;
             }
-            foreach (EmgDeclRow d in c.Decls)
-            {
-                if (d.Owner == oi)
-                {
-                    return d.StageGate <= c.EffectiveStage;
-                }
-            }
-            return false;
+            return c.OwnerActive(oi);
         }
 
         /// <summary>
@@ -281,7 +308,7 @@ namespace GameLogic.Campaign.Emergence
                 }
                 foreach (EmgDeclRow d in c.Decls)
                 {
-                    if (d.Owner == oi && d.Dir == EmgDirs.Write && d.Role == role && d.Port == code && d.StageGate <= c.EffectiveStage)
+                    if (d.Owner == oi && d.Dir == EmgDirs.Write && d.Role == role && d.Port == code && c.OwnerActive(oi))
                     {
                         raw += d.Amount;
                     }
@@ -893,6 +920,21 @@ namespace GameLogic.Campaign.Emergence
             }
             c.RawStage = raw;
             c.EffectiveStage = ClampStage(raw, ImplementedStage);
+            var pending = new HashSet<int>();
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.StageGate >= 2 && c.PortIdByCode.TryGetValue(d.Port, out string pid) && IsPendingPort(pid, d.Role))
+                {
+                    pending.Add(d.Owner);
+                }
+            }
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.StageGate <= c.EffectiveStage && !pending.Contains(d.Owner))
+                {
+                    c.ActiveOwners.Add(d.Owner);
+                }
+            }
             return c;
         }
 

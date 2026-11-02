@@ -71,6 +71,8 @@ namespace GameLogic.Campaign.Combat
         /// <summary>悬停键：子弹药 / 破片 = −(基数 + 弹体 Id)，残骸 = −(基数 + 残骸 Id)；与单位（&gt; 0）、无人机（−2000000…）和施工 / 管线（−731…）不重叠。</summary>
         public const int WreckHoverKeyBase = 3000000;
         public const int ProjHoverKeyBase = 100000000;
+        /// <summary>EMG2-MAT-01：物质斑块悬停键 = −(基数 + 斑块 Id)，在残骸（3000000…）与子弹药（100000000…）之间。</summary>
+        public const int PatchHoverKeyBase = 50000000;
 
         private static int _hoveredEmg;
         private static readonly System.Func<TooltipContent> EmgProvider = ProvideEmg;
@@ -91,7 +93,13 @@ namespace GameLogic.Campaign.Combat
                 return -(ProjHoverKeyBase + pr.Id);
             }
             int w = k.PickWreck(at, 0.2f);
-            return w >= 0 && k.TryGetWreck(w, out EmgWreck wr) ? -(WreckHoverKeyBase + wr.Id) : 0;
+            if (w >= 0 && k.TryGetWreck(w, out EmgWreck wr))
+            {
+                return -(WreckHoverKeyBase + wr.Id);
+            }
+            // EMG2-MAT-01（FGR-EMG-181）：物质斑块（最低优先：子弹药 / 残骸压在斑块上时先给它们）
+            int pz = k.PickPatch(at);
+            return pz >= 0 && k.TryGetPatch(pz, out CombatZone patch) ? -(PatchHoverKeyBase + patch.EmgId) : 0;
         }
 
         /// <summary>自检：光标停在地面点上（与 <see cref="Tick"/> 同一套单位 → 无人机 → 子弹药 / 残骸的拾取顺序）。返回涌现悬停键（0 = 没有）。</summary>
@@ -135,6 +143,11 @@ namespace GameLogic.Campaign.Combat
             {
                 int i = site.Kernel.ProjectileIndexOf(id - ProjHoverKeyBase);
                 return i >= 0 ? EmgChainView.ProjectileContent(site, state, i) : null;
+            }
+            if (id >= PatchHoverKeyBase)
+            {
+                int pz = site.Kernel.PatchIndexOf(id - PatchHoverKeyBase);
+                return pz >= 0 ? EmgChainView.PatchContent(site, state, pz) : null;
             }
             int w = site.Kernel.WreckIndexOf(id - WreckHoverKeyBase);
             return w >= 0 ? EmgChainView.WreckContent(site, state, w) : null;

@@ -672,8 +672,10 @@ namespace GameLogic.EditorTools
                    && !EmgProgramTreeText.PortsLine(FwSplit).Contains(GameText.Get("emg.ports.line_pending").Split('：')[0]),
                 $"端口行：磁聚的磁场端口本版本不生效，详情 / 三选一写“{EmgProgramTreeText.PortsLine(FwMagnet)}”；分裂照常“{EmgProgramTreeText.PortsLine(FwSplit)}”");
             string inactive = GameText.Get("emg.ports.line_inactive").Split('：')[0];
-            Expect(EmgProgramTreeText.PortsLine("fw_enterfuse")?.StartsWith(inactive, StringComparison.Ordinal) == true && !EmgProgramTreeText.PortsLine(FwMagnet).StartsWith(inactive, StringComparison.Ordinal),
-                $"端口行：没有旧读法、门槛未到的新固件写“当前不生效”（{EmgProgramTreeText.PortsLine("fw_enterfuse")}），不写“按原读法结算”");
+            // EMG2-MAT-01：阶段 2 起入场引信端口全部接通 → 照常端口行；接入冲击（fld.push 未接通，没有旧读法）→ “当前不生效”
+            Expect(EmgProgramTreeText.PortsLine("fw_uplinkpulse")?.StartsWith(inactive, StringComparison.Ordinal) == true && !EmgProgramTreeText.PortsLine(FwMagnet).StartsWith(inactive, StringComparison.Ordinal)
+                   && EmgProgramTreeText.PortsLine("fw_enterfuse")?.StartsWith(inactive, StringComparison.Ordinal) == false,
+                $"端口行：没有旧读法、端口未接通的新固件写“当前不生效”（{EmgProgramTreeText.PortsLine("fw_uplinkpulse")}），不写“按原读法结算”；端口已接通的入场引信照常（{EmgProgramTreeText.PortsLine("fw_enterfuse")}）");
         }
 
         private static CampaignState NewState(int seed)

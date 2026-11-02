@@ -6,8 +6,21 @@ namespace BinGames.Sim.Combat
     /// <summary>EMG1-KRN-01：涌现容器的建 / 放与每单位段随单位的追加、搬移、截断（字段声明在 CombatData.cs，同一结构体的 partial）。</summary>
     public partial struct CombatData
     {
+        /// <summary>EMG2-MAT-01（ADR-EMG-001 ⑤ B′）：物质斑块——扩展字段的 <see cref="CombatZone"/>，独立于读法区域 <see cref="Zones"/>，容量分开计；不压实，Matter = 0 是墓碑（生成时复用）。</summary>
+        public NativeList<CombatZone> Patches;
+        /// <summary>EMG2-MAT-01：活跃场（EMG2-FLD-01 生成；本卡铺好结构与快照段）。</summary>
+        public NativeList<EmgField> Fields;
+        /// <summary>EMG2-MAT-01：物质数值表（下标 = 物质码 1～17；热更层按 fg.TbMatter 写，是表数据，读档沿用当前的）。</summary>
+        public NativeArray<EmgMatter> EmgMatters;
+        /// <summary>EMG2-MAT-01（DEBT-EMG1ENT01-07）：实体档案表每行的稳定键（热更层按 fg.TbEntityProfile 行 ID 写；读档时按键把单位 / 残骸的档案下标挪到当前表）。</summary>
+        public NativeList<int> EmgProfileKeys;
+
         private void EmgCreate(int capacity)
         {
+            Patches = new NativeList<CombatZone>(8, Allocator.Persistent);
+            Fields = new NativeList<EmgField>(4, Allocator.Persistent);
+            EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
+            EmgProfileKeys = new NativeList<int>(EmgConst.ProfileSlots, Allocator.Persistent);
             EmgS = new NativeArray<EmgScalars>(1, Allocator.Persistent);
             EmgS[0] = EmgScalars.Initial;
             EmgPrograms = new NativeList<EmgProgram>(4, Allocator.Persistent);
@@ -62,6 +75,10 @@ namespace BinGames.Sim.Combat
 
         private void EmgDispose()
         {
+            Patches.Dispose();
+            Fields.Dispose();
+            EmgMatters.Dispose();
+            EmgProfileKeys.Dispose();
             EmgS.Dispose();
             EmgPrograms.Dispose();
             EmgNodes.Dispose();
@@ -117,6 +134,8 @@ namespace BinGames.Sim.Combat
         {
             EmgBus.Clear();
             Wrecks.Clear();
+            Patches.Clear();
+            Fields.Clear();
             EmgPending.Clear();
             EmgS[0] = EmgScalars.Initial; // 游标归 0、EmgHash 置脏（EmgScalars.Initial）
             EmgResetStats();
