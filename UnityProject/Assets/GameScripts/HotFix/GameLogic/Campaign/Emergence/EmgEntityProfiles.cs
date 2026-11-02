@@ -31,7 +31,7 @@ namespace GameLogic.Campaign.Emergence
             "entity.enemy", "entity.boss", "entity.turret", "entity.structure", "entity.wreck",
         };
 
-        public static readonly string[] MaterialIds = { "material.steel", "material.alloy", "material.composite", "material.ceramic", "material.glass" };
+        public static readonly string[] MaterialIds = { "material.steel", "material.alloy", "material.composite", "material.ceramic", "material.glass", "material.clarity" }; // EMG2-MAT-02：澄净（腐蚀抗 1 / 寒抗 0.5）追加在尾，已有码不变
 
         public sealed class Compiled
         {

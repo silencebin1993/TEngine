@@ -96,7 +96,8 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.Patches.Length; i++)
             {
                 CombatZone z = _d.Patches[i];
-                if (z.Matter == 0)
+                // EMG2-MAT-02：迁入斑块（液洼 / 喷淋池 / 读法驻留）沿用原区域的悬停（液洼 = ConstructionSiteView 的液洼读数），不在这里抢走世界悬停。
+                if (z.Matter == 0 || (z.PFlags & EmgMatterConst.FlagLegacy) != 0)
                 {
                     continue;
                 }
@@ -128,7 +129,7 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 快照格式 17：物质段 ───────────────────────────────
 
-        private const int PatchFields = 29;
+        private const int PatchFields = 40; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段（同版本 17 只追加，短段取缺省）
         private const int FieldFields = 12;
         private const int UnitStage2Fields = 22;
 
@@ -246,6 +247,18 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(z.EmgId);
                 if (sw.F()) w.Write(z.EmgChain);
                 if (sw.F()) w.Write(z.EmgDepth);
+                // EMG2-MAT-02：迁入斑块的区域载荷（非迁入斑块写缺省值）
+                if (sw.F()) w.Write(z.Kind);
+                if (sw.F()) w.Write((byte)z.Faction);
+                if (sw.F()) w.Write((byte)z.Look);
+                if (sw.F()) w.Write(z.Dps);
+                if (sw.F()) w.Write(z.StatusMask);
+                if (sw.F()) w.Write(z.StatusSeconds);
+                if (sw.F()) w.Write(z.StatusDps);
+                if (sw.F()) w.Write(z.StatusSlow);
+                if (sw.F()) w.Write(z.StatusVuln);
+                if (sw.F()) w.Write(z.Chill);
+                if (sw.F()) w.Write(z.Growth);
                 sw.EndRecord();
             }
             sw.End();
@@ -323,6 +336,26 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) z.EmgId = r.ReadInt32();
                         if (sr.F()) z.EmgChain = r.ReadInt32();
                         if (sr.F()) z.EmgDepth = r.ReadByte();
+                        if (sr.F()) z.Kind = r.ReadByte();
+                        if (sr.F()) z.Faction = (CombatFaction)r.ReadByte();
+                        if (sr.F()) z.Look = (CombatZoneLook)r.ReadByte();
+                        if (sr.F()) z.Dps = r.ReadSingle();
+                        if (sr.F()) z.StatusMask = r.ReadUInt32();
+                        if (sr.F()) z.StatusSeconds = r.ReadSingle();
+                        if (sr.F()) z.StatusDps = r.ReadSingle();
+                        if (sr.F()) z.StatusSlow = r.ReadSingle();
+                        if (sr.F()) z.StatusVuln = r.ReadSingle();
+                        if (sr.F()) z.Chill = r.ReadSingle();
+                        if (sr.F()) z.Growth = r.ReadSingle();
+                        // EMG2-MAT-02：迁入斑块的载荷校验（种类只能是读法 / 液洼 / 喷淋池 / 油迹；液洼的 Owner 必须是液洼号的相反数）；非迁入斑块恒为斑块种类、中立
+                        bool legacy = (z.PFlags & EmgMatterConst.FlagLegacy) != 0;
+                        if (legacy ? z.Kind > CombatConst.ZoneKindSlick || z.Kind == CombatConst.ZoneKindField || (z.Kind == CombatConst.ZoneKindLeak && z.Owner >= 0)
+                                     || (byte)z.Faction > (byte)CombatFaction.Neutral || (byte)z.Look > (byte)CombatZoneLook.Residue || z.Phase > CombatConst.LeakPhaseReacted
+                                     || float.IsNaN(z.Dps) || float.IsNaN(z.StatusDps) || !(z.Chill >= 0f) || float.IsNaN(z.Growth)
+                                   : z.Kind != EmgMatterConst.ZoneKindPatch || z.Faction != CombatFaction.Neutral)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
                         if (z.R0 <= 0f)
                         {
                             z.R0 = z.Radius;

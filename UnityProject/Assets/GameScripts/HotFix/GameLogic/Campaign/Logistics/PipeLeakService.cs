@@ -44,6 +44,12 @@ namespace GameLogic.Campaign.Logistics
         private static readonly Dictionary<GridCell, PipeLeakRecord> ByCell = new Dictionary<GridCell, PipeLeakRecord>();
         private static readonly List<int2> ReactScratch = new List<int2>(8);
         private static readonly HashSet<string> BurnedBuildings = new HashSet<string>(StringComparer.Ordinal);
+        // EMG2-MAT-02（ADR ⑤ / FGR-EMG-087）：内核上报的设施受击聚合条目——燃烧中的液洼（键 = 液洼号）最后一次上报的世界刻、其余斑块（明火 / 酸 / 熔融）按键累计的伤害。
+        // 热更层只处理取走的条目（O(本步变化条目)），不遍历区域 / 斑块。
+        private static readonly List<EmgStructHit> HitScratch = new List<EmgStructHit>(64);
+        private static readonly Dictionary<int, long> BurningSeen = new Dictionary<int, long>();
+        private static readonly Dictionary<int, EmgStructHit> AreaHits = new Dictionary<int, EmgStructHit>();
+        private static readonly List<int> AreaKeys = new List<int>(16);
         private static readonly List<string> ProblemList = new List<string>();
         private static bool _loaded;
         private static CampaignState _indexed;
@@ -61,6 +67,11 @@ namespace GameLogic.Campaign.Logistics
         public static double LastSyncMs { get; private set; }
         public static double MaxSyncMs { get; private set; }
         public static int OrphansRemoved { get; private set; }
+        /// <summary>EMG2-MAT-02：按内核聚合条目结算的“斑块烧 / 蚀设施”次数（不含液洼燃烧区）与取走的条目总数。</summary>
+        public static int AreaBurns { get; private set; }
+        public static int StructHitsTaken { get; private set; }
+        /// <summary>物质斑块条目落在炮塔上、留给内核接触结算（不重复扣）的次数（自检用）。</summary>
+        public static int TurretsLeftToKernel { get; private set; }
 
         public static IReadOnlyList<string> Problems
         {
@@ -143,6 +154,13 @@ namespace GameLogic.Campaign.Logistics
 
         public static uint MaskOf(int fluid) => NamedReactionCatalog.BitOf(TagOf(fluid));
 
+        /// <summary>EMG2-MAT-02（FG19B §1.5）：这种流体的液洼迁入斑块后的物质码（fg.TbFluidLeak.matter；没有 = 0，内核按标签映射）。</summary>
+        public static byte MatterOf(int fluid)
+        {
+            EnsureLoaded();
+            return FluidRows.TryGetValue(fluid, out FluidLeak row) ? Emergence.EmgMatterCatalog.CodeOf(row.Matter) : (byte)0;
+        }
+
         private static float ScaleOf(int fluid)
         {
             EnsureLoaded();
@@ -212,7 +230,12 @@ namespace GameLogic.Campaign.Logistics
             LastSyncMs = 0;
             MaxSyncMs = 0;
             OrphansRemoved = 0;
+            AreaBurns = 0;
+            StructHitsTaken = 0;
+            TurretsLeftToKernel = 0;
             BurnedBuildings.Clear();
+            BurningSeen.Clear();
+            AreaHits.Clear();
         }
 
         public static PipeLeakRecord[] Records(CampaignState state) => state?.Pipes?.Leaks ?? Array.Empty<PipeLeakRecord>();
@@ -421,7 +444,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return;
             }
-            if (!site.UpsertLeak(r.Id, new Vector2(r.X, r.Y), radius, MaskOf(r.Fluid)) && site.TryGetLeak(r.Id, out CombatZone z) && z.Phase == CombatConst.LeakPhaseReacted)
+            if (!site.UpsertLeak(r.Id, new Vector2(r.X, r.Y), radius, MaskOf(r.Fluid), MatterOf(r.Fluid)) && site.TryGetLeak(r.Id, out CombatZone z) && z.Phase == CombatConst.LeakPhaseReacted)
             {
                 // 内核里这一摊已经整片反应了、但本步的反应记录还没取走（例如读档后的第一步）：按内核补记反应。
                 MarkReacted(r, RuleOfZone(r.Fluid, z), z, now, notify: false);
@@ -473,15 +496,66 @@ namespace GameLogic.Campaign.Logistics
                     }
                 }
             }
+            if (site != null && !site.IsDisposed && site.DrainStructHits(HitScratch) > 0)
+            {
+                TakeStructHits(ticksBefore);
+            }
+            long every = Math.Max(1, (long)Math.Round(SyncSeconds * worldHz));
+            if (ticksBefore % every == 0 && AreaHits.Count > 0)
+            {
+                ApplyAreaHits(state);
+            }
             if (Count(state) == 0)
             {
                 return;
             }
-            long every = Math.Max(1, (long)Math.Round(SyncSeconds * worldHz));
             if (ticksBefore % every == 0)
             {
                 Sync(state, ticksBefore);
             }
+        }
+
+        /// <summary>EMG2-MAT-02：记下取走的设施受击条目（液洼燃烧 = 最后上报刻；其余按键累计伤害，下次对账一起结算）。O(条目)。</summary>
+        private static void TakeStructHits(long now)
+        {
+            foreach (EmgStructHit hit in HitScratch)
+            {
+                EmgStructHit h = hit;
+                StructHitsTaken++;
+                if ((h.Flags & EmgMatterConst.HitLeak) != 0)
+                {
+                    BurningSeen[-h.Key] = now;
+                }
+                else if (h.Damage > 0f)
+                {
+                    if (AreaHits.TryGetValue(h.Key, out EmgStructHit old))
+                    {
+                        h.Damage += old.Damage;
+                    }
+                    AreaHits[h.Key] = h;
+                }
+            }
+            HitScratch.Clear();
+        }
+
+        /// <summary>这摊液洼的燃烧残留最近 2 游戏秒内有没有被内核上报为燃烧格（Burn 只读这份聚合上报，ADR ⑤）。</summary>
+        private static bool BurningReported(int leakId, long now) =>
+            BurningSeen.TryGetValue(leakId, out long t) && now - t <= Math.Max(1, GameClock.TicksFor(2.0));
+
+        /// <summary>EMG2-MAT-02（DEBT-EMG2MAT01-02）：明火 / 酸 / 熔融斑块烧蚀范围里的管线、传送带与建筑（伤害 = 内核按 structDps × 节拍秒累计），按键升序结算后清空。</summary>
+        private static void ApplyAreaHits(CampaignState state)
+        {
+            BurnedBuildings.Clear();
+            AreaKeys.Clear();
+            AreaKeys.AddRange(AreaHits.Keys);
+            AreaKeys.Sort();
+            foreach (int key in AreaKeys)
+            {
+                EmgStructHit h = AreaHits[key];
+                BurnArea(state, new GridCell(Mathf.RoundToInt((float)h.Pos.x), Mathf.RoundToInt((float)h.Pos.y)), h.Radius, h.Damage, skipTurrets: true);
+                AreaBurns++;
+            }
+            AreaHits.Clear();
         }
 
         /// <summary>读档 / 新会话后第一次有家园战斗地点时：内核里没有记录的液洼区域移除；记录里有、内核里没有的（旧快照写的是不认识液洼的格式）重新登记；
@@ -514,6 +588,10 @@ namespace GameLogic.Campaign.Logistics
                 if (has && z.Phase == CombatConst.LeakPhaseReacted && r.State != StateReacted)
                 {
                     MarkReacted(r, RuleOfZone(r.Fluid, z), z, now, notify: false);
+                }
+                if (has && z.Phase == CombatConst.LeakPhaseReacted && z.StatusDps > 0f)
+                {
+                    BurningSeen[r.Id] = now; // EMG2-MAT-02：读档 / 新会话第一次对账时，内核里正在燃烧的残留算作刚上报过（燃烧格上报不进存档，避免读档后漏烧一拍）
                 }
                 else if (!has && r.State != StateReacted)
                 {
@@ -630,7 +708,7 @@ namespace GameLogic.Campaign.Logistics
                                 Remove(state, r);
                             }
                         }
-                        else if (r.Damaging && (syncIndex + r.Id) % burnEvery == 0)
+                        else if (r.Damaging && (syncIndex + r.Id) % burnEvery == 0 && BurningReported(r.Id, now))
                         {
                             Burn(state, r, now, burnEvery * SyncSeconds);
                         }
@@ -643,15 +721,18 @@ namespace GameLogic.Campaign.Logistics
 
         /// <summary>带持续伤害的残留区域（燃烧区）烧坏范围里的管线、传送带与建筑：每 logistics.leak.fire_tick_seconds 扣 logistics.leak.fire_dps × 这段时长。被烧穿的管线经
         /// <see cref="PipeNetworkService.TryDamage"/> 回到 <see cref="OnPipeHit"/>：再泄漏、再被点燃（连锁）。建筑经 <see cref="BuildingOps.ApplyDamage"/>（内核里的结构单位也从这里扣，内核区域不重复结算）。</summary>
-        private static void Burn(CampaignState state, PipeLeakRecord r, long now, float seconds)
+        private static void Burn(CampaignState state, PipeLeakRecord r, long now, float seconds) =>
+            BurnArea(state, new GridCell(r.X, r.Y), RadiusOf(r, now), FireDps * seconds);
+
+        /// <summary>一圈里的管线、传送带、建筑各扣 <paramref name="dmg"/>（建筑本次对账只扣一次）。O(半径内格数)。
+        /// <paramref name="skipTurrets"/> = 物质斑块条目：炮塔血量在内核、已由内核斑块接触结算（ADR ⑤），这里不再扣（液洼残留是中立区域，内核跳过炮塔，仍由这里扣）。</summary>
+        private static void BurnArea(CampaignState state, GridCell center, float radius, float dmg, bool skipTurrets = false)
         {
-            float dmg = FireDps * seconds;
-            if (dmg <= 0f)
+            if (dmg <= 0f || !(radius > 0f))
             {
                 return;
             }
             int amount = Math.Max(1, Mathf.RoundToInt(dmg));
-            float radius = RadiusOf(r, now);
             int reach = Mathf.CeilToInt(radius);
             float r2 = radius * radius;
             HomeGridMap map = HomeGridService.BoundMap(state);
@@ -663,7 +744,7 @@ namespace GameLogic.Campaign.Logistics
                     {
                         continue;
                     }
-                    var cell = new GridCell(r.X + dx, r.Y + dy);
+                    var cell = new GridCell(center.X + dx, center.Y + dy);
                     if (PipeNetworkService.HpOf(cell) >= 0)
                     {
                         PipeNetworkService.TryDamage(state, cell, amount, out _);
@@ -678,7 +759,11 @@ namespace GameLogic.Campaign.Logistics
                     if (!string.IsNullOrEmpty(occ) && BurnedBuildings.Add(occ))
                     {
                         BuildingRecord b = HomeGridService.FindBuilding(state, occ);
-                        if (b != null && !HomeValleyController.IsPlannedGhost(b))
+                        if (b != null && skipTurrets && Defense.TurretService.IsTurret(b))
+                        {
+                            TurretsLeftToKernel++;
+                        }
+                        else if (b != null && !HomeValleyController.IsPlannedGhost(b))
                         {
                             BuildingOps.ApplyDamage(state, occ, dmg);
                             FireHits++;

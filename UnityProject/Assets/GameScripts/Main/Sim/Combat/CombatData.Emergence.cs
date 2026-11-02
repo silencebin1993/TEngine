@@ -14,6 +14,13 @@ namespace BinGames.Sim.Combat
         public NativeArray<EmgMatter> EmgMatters;
         /// <summary>EMG2-MAT-01（DEBT-EMG1ENT01-07）：实体档案表每行的稳定键（热更层按 fg.TbEntityProfile 行 ID 写；读档时按键把单位 / 残骸的档案下标挪到当前表）。</summary>
         public NativeList<int> EmgProfileKeys;
+        /// <summary>EMG2-MAT-02（ADR ⑤）：设施受击聚合——待发布（按键合并、不限条数但键数 ≤ 斑块 + 液洼）与已发布（每步 ≤ 64 条、热更层取走）。派生量，不进快照。</summary>
+        public NativeList<EmgStructHit> EmgStructPending;
+        public NativeList<EmgStructHit> EmgStructOut;
+        /// <summary>EMG2-MAT-02：最近一次 SpawnZone 落在哪（≥ 0 = Zones 下标；&lt; 0 = 迁入斑块，Patches 下标 = −1 − 值；int.MinValue = 没生成）。调用方改“刚生成的那块”的外观 / 阶段 / 受寒用。</summary>
+        public int LastZoneAt;
+        /// <summary>EMG2-MAT-02（FG19B §1.5“液氮 → mat.cryo”）：冻结标签在本地点的状态位（热更层按 fg.TbStatusTag 写；液氮驻留区 / 液氮池迁入斑块时据此映射物质码）。派生量。</summary>
+        public uint FrozenBit;
 
         private void EmgCreate(int capacity)
         {
@@ -21,6 +28,9 @@ namespace BinGames.Sim.Combat
             Fields = new NativeList<EmgField>(4, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
             EmgProfileKeys = new NativeList<int>(EmgConst.ProfileSlots, Allocator.Persistent);
+            EmgStructPending = new NativeList<EmgStructHit>(8, Allocator.Persistent);
+            EmgStructOut = new NativeList<EmgStructHit>(8, Allocator.Persistent);
+            LastZoneAt = int.MinValue;
             EmgS = new NativeArray<EmgScalars>(1, Allocator.Persistent);
             EmgS[0] = EmgScalars.Initial;
             EmgPrograms = new NativeList<EmgProgram>(4, Allocator.Persistent);
@@ -79,6 +89,8 @@ namespace BinGames.Sim.Combat
             Fields.Dispose();
             EmgMatters.Dispose();
             EmgProfileKeys.Dispose();
+            EmgStructPending.Dispose();
+            EmgStructOut.Dispose();
             EmgS.Dispose();
             EmgPrograms.Dispose();
             EmgNodes.Dispose();
@@ -136,6 +148,8 @@ namespace BinGames.Sim.Combat
             Wrecks.Clear();
             Patches.Clear();
             Fields.Clear();
+            EmgStructPending.Clear();
+            EmgStructOut.Clear();
             EmgPending.Clear();
             EmgS[0] = EmgScalars.Initial; // 游标归 0、EmgHash 置脏（EmgScalars.Initial）
             EmgResetStats();

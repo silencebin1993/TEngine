@@ -140,6 +140,7 @@ namespace GameLogic.EditorTools
                 Step(CheckSaveLoad);
                 Step(CheckTimingMatrix);
                 Step(CheckObservedEqualsUnobserved);
+                Step(CheckPatchStructures);
                 Step(CheckSeedSet);
                 Step(CheckPerformance);
                 foreach (string p in PerfLines)
@@ -414,7 +415,7 @@ namespace GameLogic.EditorTools
             var runtime = new List<string>();
             foreach (GameConfig.fg.FluidLeak r in ConfigSystem.Instance.Tables.TbFluidLeak.DataList)
             {
-                runtime.Add(string.Join("\t", "FLK", r.Fluid.ToString(CultureInfo.InvariantCulture), r.Tag, Norm(r.RadiusScale), r.SortOrder.ToString(CultureInfo.InvariantCulture)));
+                runtime.Add(string.Join("\t", "FLK", r.Fluid.ToString(CultureInfo.InvariantCulture), r.Tag, Norm(r.RadiusScale), r.SortOrder.ToString(CultureInfo.InvariantCulture), r.Matter));
             }
             GameConfig.fg.CodexEntry cx = ConfigSystem.Instance.Tables.TbCodexEntry.DataList.FirstOrDefault(e => e.Id == "codex.logistics.leak");
             if (cx != null)
@@ -1153,6 +1154,44 @@ namespace GameLogic.EditorTools
                 same &= snap == reference;
             }
             Expect(paused && same, "H B09 暂停中（90 帧）液洼不扩大、燃烧区不走、管线不挨烧；0.5x / 1x / 2x / 3x 跑同样的 30 游戏秒泄漏（扩散、遇火反应、连锁烧毁、重新积起）逐位一致" + diff);
+        }
+
+        /// <summary>
+        /// EMG2-MAT-02（ADR ⑤；DEBT-EMG2MAT01-02）：物质斑块经内核聚合的设施受击走正式路径（WorldStep → DrainStructHits → 对账 BurnArea）——
+        /// 建筑按 structDps 掉耐久；炮塔血量在内核、已由内核斑块接触结算，热更层不再扣第二遍。
+        /// </summary>
+        private static void CheckPatchStructures()
+        {
+            CampaignState s = NewWorld(7431);
+            GridCell? area = F.FindArea(s, 8, 3);
+            GridOpResult tp = area.HasValue ? HomeGridService.TryPlace(s, TurretCatalog.LightTypeId, F.At(area.Value, 0, 0), 0) : default;
+            GridOpResult pp = area.HasValue ? HomeGridService.TryPlace(s, "power_pole", F.At(area.Value, 6, 1), 0) : default;
+            BuildingRecord turret = tp.Success ? HomeGridService.FindBuilding(s, tp.BuildingId) : null;
+            BuildingRecord pole = pp.Success ? HomeGridService.FindBuilding(s, pp.BuildingId) : null;
+            if (turret == null || pole == null)
+            {
+                Fail($"K 测试准备：放不下炮塔 / 电塔（炮塔 {tp.Success}、电塔 {pp.Success}）");
+                return;
+            }
+            foreach (BuildingRecord b in new[] { turret, pole })
+            {
+                b.ConstructionState = BuildingConstructionState.Operational; // 测试捷径：直接建成
+                b.Health = BuildingOps.MaxDurability(b.BuildingTypeId);
+            }
+            HomeValleyPowerGrid.Recompute(s);
+            TurretService.Sync(s);
+            WorldSimulation.StepMany(2);
+            int serial = TurretService.Find(s, turret.BuildingId)?.Serial ?? 0;
+            bool inKernel = Site.TryGetTurretState(serial, out TurretUnitState us0) && us0.Alive;
+            float t0 = TurretService.DurabilityOf(s, turret), p0 = BuildingOps.Durability(pole);
+            int left0 = PipeLeakService.TurretsLeftToKernel, burns0 = PipeLeakService.AreaBurns;
+            Site.Kernel.SpawnPatch(EmgMatterConst.Acid, new double2(turret.Position.x, turret.Position.y), 1.5f, 1f, 30f);
+            Site.Kernel.SpawnPatch(EmgMatterConst.Acid, new double2(pole.Position.x, pole.Position.y), 1.5f, 1f, 30f);
+            F.Seconds(4f);
+            float tLost = t0 - TurretService.DurabilityOf(s, turret), pLost = p0 - BuildingOps.Durability(pole);
+            Expect(inKernel && pLost > 0f && tLost > 0f && PipeLeakService.AreaBurns > burns0 && PipeLeakService.TurretsLeftToKernel > left0,
+                $"K1 酸斑块盖住电塔与炮塔 4 秒（正式路径：内核聚合 → 家园对账）：电塔按 structDps 掉耐久 {pLost:0.#}；炮塔在内核（{inKernel}）只吃内核接触 {tLost:0.#}，" +
+                $"对账跳过炮塔 {PipeLeakService.TurretsLeftToKernel - left0} 次（不双算，ADR ⑤）");
         }
 
         private static void CheckObservedEqualsUnobserved()

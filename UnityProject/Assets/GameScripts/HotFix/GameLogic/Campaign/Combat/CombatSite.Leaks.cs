@@ -14,8 +14,11 @@ namespace GameLogic.Campaign.Combat
     public sealed partial class CombatSite
     {
         /// <summary>登记或更新一块液洼（还没反应的那块）；已反应的同编号区域不动，返回 false。</summary>
-        public bool UpsertLeak(int leakId, Vector2 position, float radius, uint statusMask) =>
-            !IsDisposed && Kernel.UpsertLeakZone(leakId, new double2(position.x, position.y), radius, statusMask);
+        public bool UpsertLeak(int leakId, Vector2 position, float radius, uint statusMask, byte matter = 0) =>
+            !IsDisposed && Kernel.UpsertLeakZone(leakId, new double2(position.x, position.y), radius, statusMask, matter);
+
+        /// <summary>EMG2-MAT-02（ADR ⑤）：取走内核本步发布的设施受击聚合条目（燃烧的液洼残留 / 伤设施的斑块）。热更层只处理这些条目，不遍历斑块。</summary>
+        public int DrainStructHits(List<EmgStructHit> into) => IsDisposed ? 0 : Kernel.DrainStructHits(into);
 
         /// <summary>移除一块液洼（含已反应的残留区域）。</summary>
         public int RemoveLeak(int leakId) => IsDisposed ? 0 : Kernel.RemoveLeakZone(leakId);

@@ -21,6 +21,20 @@ namespace BinGames.Sim.Combat
         public const byte DecayEvaporate = 0, DecayKeep = 1, DecayDilute = 2, DecayBurn = 3, DecayAbsorb = 4, DecayCool = 5;
         /// <summary>斑块标志（<see cref="CombatZone.PFlags"/>）：常驻世界源（不衰减、不合并、不被挤掉，占世界源保留额）/ 被油覆盖（FG19B §1.4 第 12 条，规则引擎读）/ 长期留存（家园 / 前哨，EMG2-PERSIST-01）。</summary>
         public const byte FlagWorld = 1, FlagOilCovered = 2, FlagPersist = 4;
+        /// <summary>
+        /// EMG2-MAT-02（FGR-EMG-087 等价迁移）：从现有区域迁入的斑块——带着迁入时的区域载荷（<see cref="CombatZone.Dps"/> / StatusMask / 状态秒数 / 持续伤害 / 减速 / 易伤 /
+        /// 受寒 / 阵营 / 来源种类 Kind / 阶段 Phase）按区域节拍结算（与迁移前逐字同一段代码），不走 fg.TbMatter 的通用接触 / 衰减 / 合并、不给弹体沾染；
+        /// 物质码只用于识别（悬停 / 渲染 / evt.enter·leave / 冲洗与整片反应的“遇到的物质”）。按新规则改写（去掉本标志）归 EMG2-RULE-01 / REACT-02。
+        /// </summary>
+        public const byte FlagLegacy = 8;
+        /// <summary>EMG2-MAT-02（ADR ⑤ 建筑受击聚合）：每步最多发布给热更层的设施受击条目数；超出的留在待发布表（按键合并），下一步优先，不丢。</summary>
+        public const int StructHitsPerStep = 64;
+        /// <summary>已发布、热更层还没取走的条目上限（没有消费者的地点不会无限增长：满了就留在待发布表里按键合并）。</summary>
+        public const int StructHitsOutCap = 256;
+        /// <summary>待发布表上限：满了再来新键就丢最旧的一条（计数 <see cref="EmgScalars.StructHitsDropped"/>）；有消费者（家园每步取走）时到不了。</summary>
+        public const int StructHitsPendingCap = 256;
+        /// <summary>设施受击条目标志：来源是明火（mat.fire / 燃烧残留）/ 来源是管线液洼（键 = 液洼号的相反数）。</summary>
+        public const byte HitFire = 1, HitLeak = 2;
         /// <summary>容量初值（运行时取 CombatConfig 里热更层按 fg.TbHomeTuning emg.patch.* 写的值，≤ 0 用这里）。</summary>
         public const int DefaultCapacity = 1024;
         public const int DefaultReserveWorld = 96;
@@ -52,6 +66,8 @@ namespace BinGames.Sim.Combat
     {
         public float Flammable, Conductive, Cooling, Corrosive, Viscous, Obscure, Slippery, Magnetic, Reflective;
         public float Life, LifePerAmount, LifeMax, Spread, CoatSeconds, TempInit, Hp, MergeOverlap, ContactDps, ContactSlow, EmitEvery;
+        /// <summary>EMG2-MAT-02（fg.TbMatter structDps）：每秒对斑块范围里建筑 / 传送带 / 管线的伤害（内核按斑块聚合进设施受击脏列表，热更层按格结算）。</summary>
+        public float StructDps;
         public int Color;
         public short Quota;
         /// <summary>沾染状态位（−1 = 不沾染）。</summary>
@@ -67,6 +83,25 @@ namespace BinGames.Sim.Combat
             float l = Life + LifePerAmount * math.max(0f, amount);
             return LifeMax > 0f ? math.min(l, LifeMax) : l;
         }
+    }
+
+    /// <summary>
+    /// EMG2-MAT-02（ADR-EMG-001 ⑤“建筑、传送带、管线（血量在热更层）”）：一条设施受击聚合条目。内核按键合并（同一斑块 / 同一液洼同一步合并为一条），
+    /// 每步最多发布 <see cref="EmgMatterConst.StructHitsPerStep"/> 条、超出顺延不丢；热更层只处理取走的条目（O(本步变化条目)，不遍历斑块）。
+    /// 键：斑块 Id（&gt; 0）；管线液洼 = 液洼号的相反数（&lt; 0，<see cref="EmgMatterConst.HitLeak"/>）。不进快照（每步派生，读档最多少结算一个斑块节拍）。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgStructHit
+    {
+        public double2 Pos;
+        public float Radius;
+        /// <summary>累计伤害（耐久点；燃烧残留的液洼条目为 0，热更层按 logistics.leak.fire_dps 自己结算，与迁移前同一节奏）。</summary>
+        public float Damage;
+        public int Key;
+        public byte Matter;
+        public byte Flags;
+        public short Pad;
     }
 
     /// <summary>

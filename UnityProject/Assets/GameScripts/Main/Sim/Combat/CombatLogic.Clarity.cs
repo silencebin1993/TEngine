@@ -1,3 +1,4 @@
+using Unity.Collections;
 using Unity.Mathematics;
 
 namespace BinGames.Sim.Combat
@@ -180,6 +181,15 @@ namespace BinGames.Sim.Combat
             {
                 CombatZone zn = d.Zones[z];
                 if ((zn.StatusMask & wet) != 0u && zn.Until > now && math.distance(zn.Pos, pos) <= zn.Radius + r)
+                {
+                    return true;
+                }
+            }
+            // EMG2-MAT-02：站在湿润的斑块里（迁入斑块按区域标签、物质斑块按沾染位 = 湿润：水 / 冷却液）
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                CombatZone pz = d.Patches[i];
+                if (pz.Matter != 0 && pz.Until > now && (PatchTagMask(ref d, pz) & wet) != 0u && math.distance(pz.Pos, pos) <= pz.Radius + r)
                 {
                     return true;
                 }
@@ -501,15 +511,17 @@ namespace BinGames.Sim.Combat
         private static bool SpawnPool(ref CombatData d, int owner, double2 pos, float radius, float seconds, float dps, uint mask, float statusSeconds,
             float sdps, float sslow, float svuln, float chill)
         {
-            if (!SpawnZone(ref d, owner, CombatFaction.Hostile, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, sdps, sslow, svuln, CombatConst.ZoneKindPool))
+            // EMG2-MAT-02：迁入斑块（mat.acid / mat.cryo）；FG19B 定值前池保持敌方阵营作过渡（ADR ⑭ #1 / U5），炮塔与建筑照旧挨（非中立分支）
+            if (!SpawnZone(ref d, owner, CombatFaction.Hostile, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, sdps, sslow, svuln, CombatConst.ZoneKindPool, migrate: true))
             {
                 return false;
             }
-            int last = d.Zones.Length - 1;
-            CombatZone z = d.Zones[last];
-            z.Look = CombatZoneLook.Pool;
-            z.Chill = math.max(0f, chill);
-            d.Zones[last] = z;
+            if (TryGetLastZone(ref d, out CombatZone z))
+            {
+                z.Look = CombatZoneLook.Pool;
+                z.Chill = math.max(0f, chill);
+                SetLastZone(ref d, z);
+            }
             return true;
         }
 
@@ -520,7 +532,7 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            if (!SpawnZone(ref d, owner, CombatFaction.Neutral, pos, radius, seconds, 0f, 0f, 1f, mask, math.max(0f, statusSeconds), 0f, 0f, 0f, CombatConst.ZoneKindSlick))
+            if (!SpawnZone(ref d, owner, CombatFaction.Neutral, pos, radius, seconds, 0f, 0f, 1f, mask, math.max(0f, statusSeconds), 0f, 0f, 0f, CombatConst.ZoneKindSlick, migrate: true))
             {
                 return false;
             }
@@ -875,13 +887,11 @@ namespace BinGames.Sim.Combat
                     }
                     FxOf(ref d, rule.ResidueBit, out float rd, out float rs, out float rv);
                     if (SpawnZone(ref d, -1, CombatFaction.Neutral, e.Pos, math.max(rule.ResidueRadius, radius * 0.7f), rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv,
-                            CombatConst.ZoneKindSlick))
+                            CombatConst.ZoneKindSlick, migrate: true) && TryGetLastZone(ref d, out CombatZone z))
                     {
-                        int last = d.Zones.Length - 1;
-                        CombatZone z = d.Zones[last];
                         z.Phase = CombatConst.LeakPhaseReacted;
                         z.Look = CombatZoneLook.Residue;
-                        d.Zones[last] = z;
+                        SetLastZone(ref d, z);
                     }
                     break;
                 }
@@ -1022,53 +1032,106 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static void StepPoolWash(ref CombatData d, double now)
         {
-            int m = d.Zones.Length;
-            for (int z = 0; z < m; z++)
+            // EMG2-MAT-02：喷淋池可能在 Zones（斑块层没开 / 满了）或 Patches（迁入斑块）；冲洗者同样两边都算（物质斑块按沾染位：水 / 冷却液 = 湿润、明火 = 燃烧）。
+            // 收进 fg.TbChannelRule（M06 / M07 / M18）并删专属分支归 EMG2-RULE-01（DEBT-EMG2MAT02-01）。
+            for (int z = 0; z < d.Zones.Length; z++)
             {
                 CombatZone pool = d.Zones[z];
-                if (pool.Kind != CombatConst.ZoneKindPool || pool.Phase != 0 || pool.Until <= now)
+                if (PoolWashed(ref d, ref pool, z, -1, now))
                 {
-                    continue;
+                    d.Zones[z] = pool;
                 }
-                uint washer = 0u;
-                if (d.AcidBit != 0u && (pool.StatusMask & d.AcidBit) != 0u)
-                {
-                    washer |= d.WetBit;
-                }
-                if (pool.Chill > 0f)
-                {
-                    washer |= d.FireBit;
-                }
-                if (washer == 0u)
-                {
-                    continue;
-                }
-                bool washed = false;
-                for (int o = 0; o < m && !washed; o++)
-                {
-                    if (o == z)
-                    {
-                        continue;
-                    }
-                    CombatZone other = d.Zones[o];
-                    if (other.Kind == CombatConst.ZoneKindPool || other.Until <= now || (other.StatusMask & washer) == 0u)
-                    {
-                        continue;
-                    }
-                    washed = math.distance(other.Pos, pool.Pos) <= other.Radius + pool.Radius;
-                }
-                if (!washed)
-                {
-                    continue;
-                }
-                pool.Phase = 1;
-                pool.Until = math.min(pool.Until, now + 0.5);
-                d.Zones[z] = pool;
-                CombatCounters c = d.Counters[0];
-                c.PoolsWashed++;
-                d.Counters[0] = c;
-                ClarityCue(ref d, -1, 0, pool.Radius, pool.Pos, 10, 0);
             }
+            // 只收还没被冲洗的迁入喷淋池，按斑块 Id 升序（与槽位布局无关，读档续跑一致）；没有就 O(斑块) 一遍、不分配
+            NativeList<long> order = default;
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                CombatZone z = d.Patches[i];
+                if (IsLegacy(z) && z.Kind == CombatConst.ZoneKindPool && z.Phase == 0)
+                {
+                    if (!order.IsCreated)
+                    {
+                        order = new NativeList<long>(8, Allocator.Temp);
+                    }
+                    order.Add(((long)z.EmgId << 32) | (uint)i);
+                }
+            }
+            if (!order.IsCreated)
+            {
+                return;
+            }
+            order.Sort();
+            for (int o = 0; o < order.Length; o++)
+            {
+                int i = (int)(order[o] & 0xFFFFFFFFL);
+                CombatZone pool = d.Patches[i];
+                if (PoolWashed(ref d, ref pool, -1, i, now))
+                {
+                    d.Patches[i] = pool;
+                }
+            }
+            order.Dispose();
+        }
+
+        /// <summary>一块喷淋池此刻是否被冲洗（是 → 阶段记 1、半秒内消失、计数并提示一次）。O(区域 + 斑块)。</summary>
+        private static bool PoolWashed(ref CombatData d, ref CombatZone pool, int selfZone, int selfPatch, double now)
+        {
+            if (pool.Kind != CombatConst.ZoneKindPool || pool.Phase != 0 || pool.Until <= now)
+            {
+                return false;
+            }
+            uint washer = 0u;
+            if (d.AcidBit != 0u && (pool.StatusMask & d.AcidBit) != 0u)
+            {
+                washer |= d.WetBit;
+            }
+            if (pool.Chill > 0f)
+            {
+                washer |= d.FireBit;
+            }
+            if (washer == 0u)
+            {
+                return false;
+            }
+            bool washed = false;
+            for (int o = 0; o < d.Zones.Length && !washed; o++)
+            {
+                if (o == selfZone)
+                {
+                    continue;
+                }
+                CombatZone other = d.Zones[o];
+                if (other.Kind == CombatConst.ZoneKindPool || other.Until <= now || (other.StatusMask & washer) == 0u)
+                {
+                    continue;
+                }
+                washed = math.distance(other.Pos, pool.Pos) <= other.Radius + pool.Radius;
+            }
+            for (int o = 0; o < d.Patches.Length && !washed; o++)
+            {
+                if (o == selfPatch)
+                {
+                    continue;
+                }
+                CombatZone other = d.Patches[o];
+                if (other.Matter == 0 || other.Until <= now || ((other.PFlags & EmgMatterConst.FlagLegacy) != 0 && other.Kind == CombatConst.ZoneKindPool)
+                    || (PatchTagMask(ref d, other) & washer) == 0u)
+                {
+                    continue;
+                }
+                washed = math.distance(other.Pos, pool.Pos) <= other.Radius + pool.Radius;
+            }
+            if (!washed)
+            {
+                return false;
+            }
+            pool.Phase = 1;
+            pool.Until = math.min(pool.Until, now + 0.5);
+            CombatCounters c = d.Counters[0];
+            c.PoolsWashed++;
+            d.Counters[0] = c;
+            ClarityCue(ref d, -1, 0, pool.Radius, pool.Pos, 10, 0);
+            return true;
         }
 
         // ─────────────────────────────── 酸沼 ───────────────────────────────

@@ -866,6 +866,13 @@ namespace BinGames.Sim.Combat
         public int PatchSpawnedStep;
         /// <summary>活着的斑块数（不进快照：快照只写活斑块，读档后 = 斑块表长度；没有斑块时斑块步 O(1) 跳过）。</summary>
         public int PatchLive;
+        /// <summary>EMG2-MAT-02（不进快照，调试计数）：迁入斑块生成数 / 斑块层满照旧落区域数 / 读 ≤ 16 版快照转成斑块数 / 设施受击条目顺延的步数。</summary>
+        public int LegacyBorn;
+        public int LegacyKeptZone;
+        public int LegacyMigrated;
+        public int StructHitsDeferred;
+        /// <summary>待发布表满（没有消费者的地点）丢掉的最旧条目数。</summary>
+        public int StructHitsDropped;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
     }

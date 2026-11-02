@@ -213,7 +213,8 @@ namespace GameLogic.Campaign.Combat
             Kernel.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
             Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
             // FG10-FAC-01：澄净专属语法认的四个状态位（酸蚀免疫 / 湿润冲淡酸液 / 油迹 / 燃烧引爆与解冻），按 fg.TbStatusTag 的位写；表重载时随反应一起重登记。
-            Kernel.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"));
+            Kernel.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"),
+                NamedReactionCatalog.BitOf("Frozen")); // EMG2-MAT-02：冻结位 → 液氮迁入斑块映射 mat.cryo
             ReactionRevision = NamedReactionCatalog.Revision;
             // FG2-FW-04：规则下标变了（纪元 +1）→ 当场重取反馈基线，下一步起的反应照常进日志 / 归因（不把第一步吞成基线）。
             ReactionFeedback.Prime(Kernel, FeedCursor);

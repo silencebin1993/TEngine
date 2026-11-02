@@ -171,6 +171,12 @@ namespace BinGames.Sim.Combat
             // 6. 兴趣点
             StepPois(ref d);
 
+            // 6b. EMG2-MAT-02（ADR ⑤）：本步聚合的设施受击条目，每步最多发布 64 条（超出留到下一步，不丢）
+            if (d.EmgStructPending.Length > 0)
+            {
+                FlushStructHits(ref d);
+            }
+
             s = d.Scalars[0];
             s.Steps++;
             d.Scalars[0] = s;

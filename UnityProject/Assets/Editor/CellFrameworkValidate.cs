@@ -815,6 +815,7 @@ namespace GameLogic.EditorTools
             // EMG2-MAT-01：物质斑块层与空间哈希（FGT-EMG-031 / 040 / 042 / 020 进离场 / 011 进场触发）——17 种物质各一例、合并与容量降级（世界源保留、每步顺延、节拍错相）、
             // 中立与离地、接触伤害 Code 4、弹体沾染 / 抛射、入场引信、残骸崩解成碎屑、快照 17 往返 / 16 版 / 短长段 / 档案稳定键、确定性与倍速、悬停与调试行、耗时。
             Seg("FgEmgMatterSelfCheck", FgEmgMatterSelfCheck.Run);
+            Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

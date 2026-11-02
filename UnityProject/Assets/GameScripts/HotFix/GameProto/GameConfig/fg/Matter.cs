@@ -53,6 +53,7 @@ public sealed partial class Matter : Luban.BeanBase
         Color = _buf.ReadString();
         NameKey = _buf.ReadString();
         NextKey = _buf.ReadString();
+        StructDps = _buf.ReadFloat();
     }
 
     public static Matter DeserializeMatter(ByteBuf _buf)
@@ -196,6 +197,10 @@ public sealed partial class Matter : Luban.BeanBase
     /// 悬停“接下来会怎样”文本键 emg.matter.&lt;名&gt;.next
     /// </summary>
     public readonly string NextKey;
+    /// <summary>
+    /// 每秒对斑块范围里建筑 / 传送带 / 管线的伤害(EMG2-MAT-02;内核按斑块聚合进设施受击脏列表,热更层按格结算;0 = 不伤设施)
+    /// </summary>
+    public readonly float StructDps;
    
     public const int __ID__ = -382830418;
     public override int GetTypeId() => __ID__;
@@ -241,6 +246,7 @@ public sealed partial class Matter : Luban.BeanBase
         + "color:" + Color + ","
         + "nameKey:" + NameKey + ","
         + "nextKey:" + NextKey + ","
+        + "structDps:" + StructDps + ","
         + "}";
     }
 }

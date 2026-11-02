@@ -511,7 +511,7 @@ namespace BinGames.Sim.Combat
                     : r.ZonePlacement == CombatZonePlacement.Midpoint && hasSelf ? (self + hitPos) * 0.5
                     : hitPos;
                 if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), at, r.ZoneRadius, r.ZoneSeconds, r.ZoneDps, r.ZoneGrowth, r.ZoneTickScale,
-                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
+                    r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, CombatConst.ZoneKindReading, migrate: true))
                 {
                     NoteReading(ref d, CombatConst.ReadingFeedZone, at, a);
                 }
@@ -943,7 +943,8 @@ namespace BinGames.Sim.Combat
                 }
                 // 阵营显式按目标定：残留区域打的是目标这一边（出手者已死、区域节拍里的槽位为 -1 时也不会落到己方头上）。
                 CombatFaction residueFaction = d.Faction[k] == (byte)CombatFaction.Player ? CombatFaction.Hostile : CombatFaction.Player;
-                if (SpawnZone(ref d, source, residueFaction, d.Pos[k], rule.ResidueRadius, rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv))
+                if (SpawnZone(ref d, source, residueFaction, d.Pos[k], rule.ResidueRadius, rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv,
+                        CombatConst.ZoneKindReading, migrate: true))
                 {
                     SetLastZoneLook(ref d, CombatZoneLook.Residue);
                 }
@@ -1134,8 +1135,9 @@ namespace BinGames.Sim.Combat
 
         /// <summary>生成一块区域。<paramref name="faction"/> = 区域属于哪一边（打另一边），由调用方显式给出，不从槽位推断。</summary>
         private static bool SpawnZone(ref CombatData d, int owner, CombatFaction faction, double2 pos, float radius, float seconds, float dps, float growth, float tickScale,
-            uint mask, float statusSeconds, float statusDps, float slow, float vuln, byte kind = CombatConst.ZoneKindReading)
+            uint mask, float statusSeconds, float statusDps, float slow, float vuln, byte kind = CombatConst.ZoneKindReading, bool migrate = false)
         {
+            d.LastZoneAt = int.MinValue;
             if (radius <= 0f || seconds <= 0f)
             {
                 return false;
@@ -1146,7 +1148,7 @@ namespace BinGames.Sim.Combat
             // FG10-FAC-01：喷淋池与油迹共用自己的上限（大量喷洒车不挤掉玩家的读法区域）。
             bool pool = kind == CombatConst.ZoneKindPool || kind == CombatConst.ZoneKindSlick;
             int cap = field ? d.FieldZoneCap : pool ? d.PoolZoneCap : d.ZoneCap;
-            if (d.Zones.Length >= cap && CountZones(ref d, kind) >= cap)
+            if (d.Zones.Length + d.EmgS[0].PatchLive >= cap && CountZones(ref d, kind) >= cap)
             {
                 if (!field && !pool)
                 {
@@ -1156,7 +1158,7 @@ namespace BinGames.Sim.Combat
             }
             double now = d.Scalars[0].Time;
             float interval = ZoneTickOf(ref d) / (tickScale > 0f ? tickScale : 1f);
-            d.Zones.Add(new CombatZone
+            var made = new CombatZone
             {
                 Pos = pos,
                 Radius = radius,
@@ -1174,7 +1176,19 @@ namespace BinGames.Sim.Combat
                 Owner = owner >= 0 && owner < d.Count ? d.Id[owner] : 0,
                 Faction = faction,
                 Kind = kind,
-            });
+            };
+            // EMG2-MAT-02（FGR-EMG-087）：像物质的区域（驻留 / 拖尾 / 反应残留 / 喷淋池 / 油迹）在斑块层开着时迁入 Patches（带区域载荷，同一段节拍代码结算）；
+            // 映射不出物质（减速 / 电击……）或斑块层满了就照旧落成区域（不丢）。
+            int at = migrate ? EmgPlaceLegacy(ref d, made) : -1;
+            if (at >= 0)
+            {
+                d.LastZoneAt = -1 - at;
+            }
+            else
+            {
+                d.LastZoneAt = d.Zones.Length;
+                d.Zones.Add(made);
+            }
             CombatCounters c = d.Counters[0];
             c.ZonesSpawned++;
             d.Counters[0] = c;
@@ -1194,7 +1208,7 @@ namespace BinGames.Sim.Combat
                     n++;
                 }
             }
-            return n;
+            return n + LegacyOfKind(ref d, kind, pool); // EMG2-MAT-02：迁入斑块照旧占本种区域的上限（等价）
         }
 
         /// <summary>FG6-DEF-02（FGR-DEF-013 陷阱发射器）：不属于任何单位的场地（陷阱发射器铺的油膜带 / 冷却液带 / 电磁场……），与读法区域同一套结算（节拍伤害、挂标签、触发反应）。
@@ -1213,12 +1227,10 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-VFX-02：刚生成的那块区域画成什么样（只影响画面）。</summary>
         private static void SetLastZoneLook(ref CombatData d, CombatZoneLook look)
         {
-            int last = d.Zones.Length - 1;
-            if (last >= 0)
+            if (TryGetLastZone(ref d, out CombatZone z))
             {
-                CombatZone z = d.Zones[last];
                 z.Look = look;
-                d.Zones[last] = z;
+                SetLastZone(ref d, z);
             }
         }
 
@@ -1252,89 +1264,7 @@ namespace BinGames.Sim.Combat
                 {
                     EmgZoneTimer(ref d, ref zone, now, dt); // EMG1-TRIG-01：区域的 evt.timer 从落区起算
                 }
-                if (now >= zone.NextTick)
-                {
-                    zone.NextTick += zone.TickInterval;
-                    if (zone.NextTick <= now)
-                    {
-                        zone.NextTick = now + zone.TickInterval;
-                    }
-                    // FG6-LOG-10：液洼先看自己有没有遇上能起反应的标签（整片反应成残留区域），再按节拍给站在里面的单位挂标签。
-                    // FG10-FAC-01：油迹同一套（“可以用燃迹反过来利用”）。
-                    if ((zone.Kind == CombatConst.ZoneKindLeak || zone.Kind == CombatConst.ZoneKindSlick) && zone.Phase == CombatConst.LeakPhasePuddle)
-                    {
-                        TryReactLeak(ref d, ref zone, z, now);
-                    }
-                    int owner = d.SlotOf(zone.Owner);
-                    byte want = zone.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
-                    // FG6-LOG-10：中立区域（液洼与它反应成的残留）对己方机器与敌人一视同仁；建筑 / 炮塔类结构单位不在这里结算
-                    // （它们挨的火由热更层按建筑耐久结算一次，避免内核与建筑记录各扣一遍）。
-                    bool neutral = zone.Faction == CombatFaction.Neutral;
-                    // EMG1-BUS-01 / TRIG-01：区域节拍的伤害来源 = 区域；带程序的区域同时是宿主（evt.hit Code = 区域节拍，每宿主计数随区域进快照）。
-                    EmgCtx zoneCtx = zone.EmgProgRef > 0 ? EmgZoneHost(ref d, zone) : EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone);
-                    // EMG1-FW-01（DEBT-EMG1GRM01-05）：阶段 1 掩体规则开时，子区 / 小脉冲的节拍与根力场脉冲同一口径——被障碍 / 残骸挡（抛射 / 贯穿越过），吃正面装甲（破甲减免）
-                    bool subRule = zone.EmgSub != 0 && zone.EmgProgRef > 0 && d.Config.EmgCover != 0;
-                    EmgMods zm = default;
-                    if (subRule)
-                    {
-                        EmgModsOf(ref d, zone.EmgProgRef - 1, zone.EmgNode, out zm);
-                    }
-                    int n = d.Count;
-                    for (int k = 0; k < n; k++)
-                    {
-                        if (neutral
-                                ? d.Faction[k] == (byte)CombatFaction.Neutral || d.Kind[k] == (byte)CombatUnitKind.Turret || d.Kind[k] == (byte)CombatUnitKind.Structure
-                                : d.Faction[k] != want)
-                        {
-                            continue;
-                        }
-                        if (!d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
-                        {
-                            continue; // FG10-FAC-01：地面区域不影响空中单位
-                        }
-                        if (math.distance(d.Pos[k], zone.Pos) > zone.Radius + d.Radius[k])
-                        {
-                            continue;
-                        }
-                        float tickDamage = zone.Dps > 0f ? zone.Dps * zone.TickInterval : 0f;
-                        if (subRule)
-                        {
-                            float f = EmgSubZoneTickFactor(ref d, zone, zm, k);
-                            if (!(f > 0f))
-                            {
-                                continue;
-                            }
-                            tickDamage *= f;
-                        }
-                        if (zone.Kind == CombatConst.ZoneKindPool)
-                        {
-                            // FG10-FAC-01：喷淋池的酸液吃酸蚀抗性与冲淡（冷却液）；液氮池每节拍加受寒。
-                            if (d.AcidBit != 0u && (zone.StatusMask & d.AcidBit) != 0u)
-                            {
-                                tickDamage *= AcidFactor(ref d, k, now);
-                            }
-                            if (zone.Chill > 0f)
-                            {
-                                ApplyChill(ref d, k, zone.Chill);
-                            }
-                        }
-                        if (tickDamage > 0f)
-                        {
-                            d.EmgCtx = zoneCtx;
-                            d.EmgMergeCont = 1; // EMG1-ENT-01：区域节拍伤害对外部血量单位按步合并成一条请求
-                            DamageUnit(ref d, k, tickDamage, owner);
-                            d.EmgMergeCont = 0;
-                            zoneCtx = d.EmgCtx;
-                            d.EmgCtx = EmgCtx.None;
-                        }
-                        uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
-                        // 区域节拍的“这一击”：区域自己的节拍伤害；没有直接伤害的纯状态区域取它挂的持续伤害一个节拍的量（如爆燃残留的燃烧区）；
-                        // 两者都没有（减速网之类）= 0，只靠倍率的反应不结算（见 ApplyStatus）。
-                        float reactionHit = tickDamage > 0f ? tickDamage : math.max(0f, zone.StatusDps) * zone.TickInterval;
-                        ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner, reactionHit);
-                    }
-                    zone.EmgTrigUsed = zoneCtx.TrigUsed;
-                }
+                ZoneTick(ref d, ref zone, z, -1, now);
                 d.Zones[write++] = zone;
             }
             // 节拍里结算的反应（爆燃 → 燃烧区）会在循环中往列表尾部追加新区域（下标 ≥ m）：搬到压缩后的尾部保留下来，不能被截掉。
@@ -1344,6 +1274,103 @@ namespace BinGames.Sim.Combat
                 d.Zones[write++] = d.Zones[z];
             }
             d.Zones.ResizeUninitialized(write);
+            StepLegacyPatches(ref d, dt, now); // EMG2-MAT-02：迁入斑块按同一段区域节拍结算
+        }
+
+        /// <summary>
+        /// 区域节拍（StepZones 原循环体，EMG2-MAT-02 抽出与迁入斑块共用，逐字不变）：到节拍时按区域载荷对区域内的目标阵营单位造成伤害并挂状态。
+        /// <paramref name="selfZone"/> / <paramref name="selfPatch"/> = 这块在 Zones / Patches 里的下标（另一个 −1；液洼整片反应排除自己用）。
+        /// </summary>
+        private static void ZoneTick(ref CombatData d, ref CombatZone zone, int selfZone, int selfPatch, double now)
+        {
+            if (now >= zone.NextTick)
+            {
+                zone.NextTick += zone.TickInterval;
+                if (zone.NextTick <= now)
+                {
+                    zone.NextTick = now + zone.TickInterval;
+                }
+                // FG6-LOG-10：液洼先看自己有没有遇上能起反应的标签（整片反应成残留区域），再按节拍给站在里面的单位挂标签。
+                // FG10-FAC-01：油迹同一套（“可以用燃迹反过来利用”）。
+                if ((zone.Kind == CombatConst.ZoneKindLeak || zone.Kind == CombatConst.ZoneKindSlick) && zone.Phase == CombatConst.LeakPhasePuddle)
+                {
+                    TryReactLeak(ref d, ref zone, selfZone, selfPatch, now);
+                }
+                int owner = d.SlotOf(zone.Owner);
+                byte want = zone.Faction == CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile;
+                // FG6-LOG-10：中立区域（液洼与它反应成的残留）对己方机器与敌人一视同仁；建筑 / 炮塔类结构单位不在这里结算
+                // （它们挨的火由热更层按建筑耐久结算一次，避免内核与建筑记录各扣一遍）。
+                bool neutral = zone.Faction == CombatFaction.Neutral;
+                // EMG1-BUS-01 / TRIG-01：区域节拍的伤害来源 = 区域；带程序的区域同时是宿主（evt.hit Code = 区域节拍，每宿主计数随区域进快照）。
+                EmgCtx zoneCtx = zone.EmgProgRef > 0 ? EmgZoneHost(ref d, zone) : EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone);
+                // EMG1-FW-01（DEBT-EMG1GRM01-05）：阶段 1 掩体规则开时，子区 / 小脉冲的节拍与根力场脉冲同一口径——被障碍 / 残骸挡（抛射 / 贯穿越过），吃正面装甲（破甲减免）
+                bool subRule = zone.EmgSub != 0 && zone.EmgProgRef > 0 && d.Config.EmgCover != 0;
+                EmgMods zm = default;
+                if (subRule)
+                {
+                    EmgModsOf(ref d, zone.EmgProgRef - 1, zone.EmgNode, out zm);
+                }
+                int n = d.Count;
+                for (int k = 0; k < n; k++)
+                {
+                    if (neutral
+                            ? d.Faction[k] == (byte)CombatFaction.Neutral || d.Kind[k] == (byte)CombatUnitKind.Turret || d.Kind[k] == (byte)CombatUnitKind.Structure
+                            : d.Faction[k] != want)
+                    {
+                        continue;
+                    }
+                    if (!d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
+                    {
+                        continue; // FG10-FAC-01：地面区域不影响空中单位
+                    }
+                    if (math.distance(d.Pos[k], zone.Pos) > zone.Radius + d.Radius[k])
+                    {
+                        continue;
+                    }
+                    float tickDamage = zone.Dps > 0f ? zone.Dps * zone.TickInterval : 0f;
+                    if (subRule)
+                    {
+                        float f = EmgSubZoneTickFactor(ref d, zone, zm, k);
+                        if (!(f > 0f))
+                        {
+                            continue;
+                        }
+                        tickDamage *= f;
+                    }
+                    if (zone.Kind == CombatConst.ZoneKindPool)
+                    {
+                        // FG10-FAC-01：喷淋池的酸液吃酸蚀抗性与冲淡（冷却液）；液氮池每节拍加受寒。
+                        if (d.AcidBit != 0u && (zone.StatusMask & d.AcidBit) != 0u)
+                        {
+                            tickDamage *= AcidFactor(ref d, k, now);
+                        }
+                        if (zone.Chill > 0f)
+                        {
+                            ApplyChill(ref d, k, zone.Chill);
+                        }
+                    }
+                    if (tickDamage > 0f)
+                    {
+                        d.EmgCtx = zoneCtx;
+                        d.EmgMergeCont = 1; // EMG1-ENT-01：区域节拍伤害对外部血量单位按步合并成一条请求
+                        DamageUnit(ref d, k, tickDamage, owner);
+                        d.EmgMergeCont = 0;
+                        zoneCtx = d.EmgCtx;
+                        d.EmgCtx = EmgCtx.None;
+                    }
+                    uint mask = zone.StatusMask != 0u ? zone.StatusMask : (zone.StatusSlow > 0f ? CombatConst.StatusBitZoneSlow : 0u);
+                    // 区域节拍的“这一击”：区域自己的节拍伤害；没有直接伤害的纯状态区域取它挂的持续伤害一个节拍的量（如爆燃残留的燃烧区）；
+                    // 两者都没有（减速网之类）= 0，只靠倍率的反应不结算（见 ApplyStatus）。
+                    float reactionHit = tickDamage > 0f ? tickDamage : math.max(0f, zone.StatusDps) * zone.TickInterval;
+                    ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner, reactionHit);
+                }
+                zone.EmgTrigUsed = zoneCtx.TrigUsed;
+                // EMG2-MAT-02（ADR ⑤ / FGR-EMG-087）：燃烧的液洼残留按液洼号报一条“燃烧格”给热更层（PipeLeakService.Burn 只读这份聚合列表，不遍历区域 / 斑块）
+                if (zone.Kind == CombatConst.ZoneKindLeak && zone.Phase == CombatConst.LeakPhaseReacted && zone.StatusDps > 0f)
+                {
+                    AddStructHit(ref d, zone.Owner, zone.Pos, zone.Radius, 0f, zone.Matter, (byte)(EmgMatterConst.HitFire | EmgMatterConst.HitLeak));
+                }
+            }
         }
 
         // ─────────────────────────────── 液洼（FG6-LOG-10，FGR-LOG-046）───────────────────────────────
@@ -1353,13 +1380,42 @@ namespace BinGames.Sim.Combat
 
         /// <summary>登记或更新编号为 <paramref name="leakId"/> 的液洼（还没反应的那块）：位置 / 半径 / 标签就地改写，节拍相位不变；不存在时新建（中立、长期存在，由热更层移除）。
         /// 同编号的区域已经反应成残留时不动，返回 false。O(区域数)。</summary>
-        internal static bool UpsertLeakZone(ref CombatData d, int leakId, double2 pos, float radius, uint mask)
+        internal static bool UpsertLeakZone(ref CombatData d, int leakId, double2 pos, float radius, uint mask, byte matter = 0)
         {
             if (leakId <= 0 || !(radius > 0f) || mask == 0u)
             {
                 return false;
             }
             int owner = -leakId;
+            // EMG2-MAT-02：液洼已迁入斑块（世界源）时就地改那一块（同一液洼只有一块：先找斑块再找旧区域，都没有才新建）
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                CombatZone pz = d.Patches[i];
+                if (pz.Matter == 0 || (pz.PFlags & EmgMatterConst.FlagLegacy) == 0 || pz.Kind != CombatConst.ZoneKindLeak || pz.Owner != owner)
+                {
+                    continue;
+                }
+                if (pz.Phase != CombatConst.LeakPhasePuddle)
+                {
+                    return false;
+                }
+                bool grew = radius > pz.Radius;
+                pz.Pos = pos;
+                pz.Radius = radius;
+                pz.R0 = radius;
+                pz.StatusMask = mask;
+                byte mm = matter != 0 ? matter : MatterOfMask(ref d, mask);
+                if (mm != 0)
+                {
+                    pz.Matter = mm;
+                    pz.Layer = MatterOf(ref d, mm).Layer;
+                }
+                d.Patches[i] = pz;
+                EmgScalars es = d.EmgS[0];
+                es.HashDirty = 1; // 位置 / 半径可能变（每次对账 O(1) 次重建标记）
+                d.EmgS[0] = es;
+                return true;
+            }
             for (int z = 0; z < d.Zones.Length; z++)
             {
                 CombatZone zn = d.Zones[z];
@@ -1379,7 +1435,7 @@ namespace BinGames.Sim.Combat
             }
             double now = d.Scalars[0].Time;
             float interval = ZoneTickOf(ref d);
-            d.Zones.Add(new CombatZone
+            var leak = new CombatZone
             {
                 Pos = pos,
                 Radius = radius,
@@ -1394,7 +1450,12 @@ namespace BinGames.Sim.Combat
                 Look = CombatZoneLook.Pool,
                 Kind = CombatConst.ZoneKindLeak,
                 Phase = CombatConst.LeakPhasePuddle,
-            });
+            };
+            // EMG2-MAT-02（FG19B §1.5 / §1.4 第 11 条）：液洼 = 世界源斑块（水 / 油 / 冷却液 / 酸按流体给出的物质码，没给按标签映射），占世界源保留额；层没开 / 满了照旧落区域
+            if (EmgPlaceLegacy(ref d, leak, matter, world: true) < 0)
+            {
+                d.Zones.Add(leak);
+            }
             return true;
         }
 
@@ -1404,6 +1465,15 @@ namespace BinGames.Sim.Combat
             int owner = -leakId;
             int write = 0;
             int removed = 0;
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                CombatZone pz = d.Patches[i];
+                if (pz.Matter != 0 && (pz.PFlags & EmgMatterConst.FlagLegacy) != 0 && pz.Kind == CombatConst.ZoneKindLeak && pz.Owner == owner)
+                {
+                    KillPatch(ref d, i); // EMG2-MAT-02：迁入斑块的液洼（含已反应的残留）
+                    removed++;
+                }
+            }
             for (int z = 0; z < d.Zones.Length; z++)
             {
                 CombatZone zn = d.Zones[z];
@@ -1425,14 +1495,14 @@ namespace BinGames.Sim.Combat
         /// 记反应计数、发反应提示事件（与单位身上的反应同一套命名 / 反馈），并给热更层记一条液洼反应（告警、烧坏范围内的管线 / 传送带 / 建筑）。
         /// 只靠倍率起作用的反应（短路、电解……）液洼本身不结算：站进液洼、挂上标签的单位挨打时照常触发。O(区域数 + 单位数)。
         /// </summary>
-        private static void TryReactLeak(ref CombatData d, ref CombatZone leak, int self, double now)
+        private static void TryReactLeak(ref CombatData d, ref CombatZone leak, int self, int selfPatch, double now)
         {
             if (d.Reactions.Length == 0)
             {
                 return;
             }
             uint have = leak.StatusMask & ~CombatConst.StatusBitZoneSlow;
-            uint met = 0u;
+            uint met = MetFromPatches(ref d, leak, selfPatch, now); // EMG2-MAT-02：迁入斑块按区域载荷、物质斑块按沾染位算“遇到的标签”
             for (int z = 0; z < d.Zones.Length; z++)
             {
                 if (z == self)
@@ -1498,6 +1568,10 @@ namespace BinGames.Sim.Combat
                 leak.Born = now;
                 leak.Until = now + seconds;
                 leak.Look = CombatZoneLook.Residue;
+                if ((leak.PFlags & EmgMatterConst.FlagLegacy) != 0)
+                {
+                    LegacyReacted(ref d, ref leak); // EMG2-MAT-02：迁入斑块整片反应后换成残留的物质（燃烧残留 = mat.fire，FG19B §1.5“已反应阶段 = E01 产物明火”）
+                }
                 d.ReactionCount[i] = d.ReactionCount[i] + 1;
                 d.ReactionLastPos[i] = leak.Pos;
                 d.ReactionLastSource[i] = 0;
@@ -1902,9 +1976,9 @@ namespace BinGames.Sim.Combat
             {
                 StepDrones(ref d, dt);
             }
-            if (d.Zones.Length > 0)
+            if (d.Zones.Length > 0 || d.EmgS[0].PatchLive > 0)
             {
-                StepZones(ref d, dt);
+                StepZones(ref d, dt); // EMG2-MAT-02：迁入斑块（Patches）也在这里按区域节拍结算
             }
             if (d.Echoes.Length > 0)
             {

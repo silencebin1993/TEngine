@@ -23,6 +23,7 @@ public sealed partial class FluidLeak : Luban.BeanBase
         Tag = _buf.ReadString();
         RadiusScale = _buf.ReadFloat();
         SortOrder = _buf.ReadInt();
+        Matter = _buf.ReadString();
     }
 
     public static FluidLeak DeserializeFluidLeak(ByteBuf _buf)
@@ -46,6 +47,10 @@ public sealed partial class FluidLeak : Luban.BeanBase
     /// 排序
     /// </summary>
     public readonly int SortOrder;
+    /// <summary>
+    /// 液洼迁入斑块后的物质端口(EMG2-MAT-02;FG19B &#167;1.5:水 mat.water / 原油、燃油 mat.oil / 冷却液 mat.coolant / 酸液 mat.acid)
+    /// </summary>
+    public readonly string Matter;
    
     public const int __ID__ = 566139712;
     public override int GetTypeId() => __ID__;
@@ -61,6 +66,7 @@ public sealed partial class FluidLeak : Luban.BeanBase
         + "tag:" + Tag + ","
         + "radiusScale:" + RadiusScale + ","
         + "sortOrder:" + SortOrder + ","
+        + "matter:" + Matter + ","
         + "}";
     }
 }

@@ -153,6 +153,10 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 combat++;
+                if (IsLegacy(z))
+                {
+                    continue; // EMG2-MAT-02：迁入斑块只占总数，不当合并对象、不被软 / 总上限挤掉（等价迁移期按区域时长到期）
+                }
                 if (z.Layer == m.Layer && (oldestLayer < 0 || Older(z, d.Patches[oldestLayer])))
                 {
                     oldestLayer = i;
@@ -294,7 +298,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !PatchWorld(z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
+                if (PatchAlive(z) && !PatchWorld(z) && !IsLegacy(z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
                 {
                     best = i;
                 }
@@ -403,12 +407,17 @@ namespace BinGames.Sim.Combat
         /// <summary>5c. 斑块节拍 + 单位接触（StepReadings / StepWrecks 之后、总线之前：本步的 evt.enter / evt.leave 本步处理）。没有斑块时 O(1)。</summary>
         internal static void StepMatter(ref CombatData d, float dt)
         {
-            if (d.EmgS[0].PatchLive <= 0)
+            // EMG2-MAT-02：酸沼是虚拟世界源（不占斑块槽），有酸沼时同样要走接触（evt.enter / leave 与 PrevMatterMask）
+            bool marsh = d.AcidShapes.Length > 0 && EmgPatchesOn(ref d);
+            if (d.EmgS[0].PatchLive <= 0 && !marsh)
             {
                 return;
             }
-            StepPatchTicks(ref d);
             if (d.EmgS[0].PatchLive > 0)
+            {
+                StepPatchTicks(ref d);
+            }
+            if (d.EmgS[0].PatchLive > 0 || marsh)
             {
                 StepPatchContact(ref d, dt);
             }
@@ -447,7 +456,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && z.NextTick <= now + 1e-9)
+                if (PatchAlive(z) && !IsLegacy(z) && z.NextTick <= now + 1e-9)
                 {
                     due.Add(new PatchDue { T = z.NextTick, Id = z.EmgId, Index = i });
                 }
@@ -546,6 +555,11 @@ namespace BinGames.Sim.Combat
                 d.EmgS[0] = es;
             }
             d.Patches[i] = z;
+            if (m.StructDps > 0f)
+            {
+                // EMG2-MAT-02（ADR ⑤ / DEBT-EMG2MAT01-02）：建筑 / 传送带 / 管线吃斑块——按斑块聚合进设施受击脏列表（热更层按格结算，不遍历斑块）；明火另标燃烧（烧产线）
+                AddStructHit(ref d, z.EmgId, z.Pos, z.Radius, m.StructDps * elapsed, z.Matter, z.Matter == EmgMatterConst.Fire ? EmgMatterConst.HitFire : (byte)0);
+            }
             EmgTickNeighbors(ref d, i, m);
         }
 
@@ -583,9 +597,9 @@ namespace BinGames.Sim.Combat
                             continue;
                         }
                         CombatZone o = d.Patches[j];
-                        if (!PatchAlive(o) || o.Layer != z.Layer)
+                        if (!PatchAlive(o) || o.Layer != z.Layer || IsLegacy(o))
                         {
-                            continue;
+                            continue; // EMG2-MAT-02：迁入斑块不合并、不被吸收（按区域载荷与时长结算）
                         }
                         double dist = math.distance(o.Pos, z.Pos);
                         if (dist >= o.Radius + z.Radius)
@@ -684,7 +698,7 @@ namespace BinGames.Sim.Combat
                 }
                 hits.Clear();
                 bool air = IsAir(ref d, u);
-                uint mask = PatchesAt(ref d, d.Pos[u], air, ref hits, EmgMatterConst.ContactPerUnit);
+                uint mask = PatchesAt(ref d, d.Pos[u], air, ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);
                 EmgUnitState st = d.EmgUnit[u];
                 uint prev = st.PrevMatterMask;
                 if (mask != prev)
@@ -695,7 +709,10 @@ namespace BinGames.Sim.Combat
                 }
                 for (int k = 0; k < hits.Length && d.IsAlive(u); k++)
                 {
-                    EmgPatchTouch(ref d, u, hits[k].x, elapsed);
+                    if (hits[k].x >= 0 && !IsLegacy(d.Patches[hits[k].x]))
+                    {
+                        EmgPatchTouch(ref d, u, hits[k].x, elapsed); // 迁入斑块的接触由区域节拍结算（不双算）
+                    }
                 }
             }
             hits.Dispose();
@@ -710,6 +727,10 @@ namespace BinGames.Sim.Combat
                 int b = math.tzcnt(entered);
                 entered &= entered - 1u;
                 int p = HitOfMatter(ref d, hits, b);
+                if (p < 0)
+                {
+                    p = FirstPatchOfMatterAt(ref d, d.Pos[u], b); // 只有迁入斑块带来的物质（不在接触名额里）：按点再查一次（只在进入的那一步）
+                }
                 EmgUnitEvent(ref d, EmgEventKind.Enter, u, p >= 0 ? d.Patches[p].EmgId : 0, 0f, 0f, (ushort)b, p >= 0 ? d.Patches[p].Pos : d.Pos[u], EmgEntKind.Patch);
             }
             while (left != 0u)
@@ -736,12 +757,14 @@ namespace BinGames.Sim.Combat
         /// 点 <paramref name="p"/> 所在的活斑块（最多 <paramref name="cap"/> 块最近的，按 (距离, 下标) 升序写进 <paramref name="hits"/>）；返回物质掩码（位 = 物质码）。
         /// <paramref name="airborne"/> = 离地实体：地面层斑块不算（FG19B §1.4 第 1 条）。O(本格登记数)。
         /// </summary>
-        internal static uint PatchesAt(ref CombatData d, double2 p, bool airborne, ref NativeList<int2> hits, int cap)
+        internal static uint PatchesAt(ref CombatData d, double2 p, bool airborne, ref NativeList<int2> hits, int cap, bool legacyInHits = true)
         {
-            uint mask = 0u;
+            // EMG2-MAT-02（ADR ⑤ / ⑭ #13；FG19B §1.4 第 11 条）：酸沼 = 常驻 mat.acid 虚拟世界源——不实体化为斑块、不进 EmgHash、不占槽，按点是否在危害区查询；
+            // 只并进物质掩码（evt.enter / leave、PrevMatterMask、规则引擎读），接触伤害仍是 StepAcidMarsh（不另挂沾染，不双算）；离地实体不吃（地面层）。
+            uint mask = !airborne && d.AcidShapes.Length > 0 && InAcid(ref d, p) ? 1u << EmgMatterConst.Acid : 0u;
             if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(EmgHash.CellOf(p.x), EmgHash.CellOf(p.y)), out int e, out NativeParallelMultiHashMapIterator<long> it))
             {
-                return 0u;
+                return mask;
             }
             do
             {
@@ -765,6 +788,10 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 mask |= 1u << z.Matter;
+                if (!legacyInHits && (z.PFlags & EmgMatterConst.FlagLegacy) != 0)
+                {
+                    continue; // 迁入斑块只并进掩码、不占接触名额（它们的接触由区域节拍结算，占名额会挤掉真物质斑块的沾染）
+                }
                 InsertNearest(ref d, ref hits, new int2(j, (int)math.min(dist * 1000.0, int.MaxValue)), cap);
             }
             while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
@@ -844,9 +871,9 @@ namespace BinGames.Sim.Combat
                             continue;
                         }
                         EmgMatter m = MatterOf(ref d, z.Matter);
-                        if (m.CoatBit >= 0 && m.CoatBit < 31)
+                        if (m.CoatBit >= 0 && m.CoatBit < 31 && !IsLegacy(z))
                         {
-                            pr.Coat |= 1u << m.CoatBit;
+                            pr.Coat |= 1u << m.CoatBit; // EMG2-MAT-02：迁入斑块不给弹体沾染（等价迁移期，迁移前区域不沾弹体）
                         }
                         if (math.distancesq(next, z.Pos) <= r2)
                         {

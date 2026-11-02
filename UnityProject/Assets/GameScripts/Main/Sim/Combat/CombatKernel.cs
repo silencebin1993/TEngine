@@ -93,7 +93,28 @@ namespace BinGames.Sim.Combat
         public int SlotCount => _d.Count;
         public int ProjectileCount => _d.Projectiles.Length;
         /// <summary>FG2-FW-02：读法生成的区域 / 待结算回波 / 无人机的当前数量。</summary>
-        public int ZoneCount => _d.Zones.Length;
+        /// <summary>区域数（EMG2-MAT-02：含迁入斑块——下标 ≥ Zones 长度的是第 k 块活着的迁入斑块，见 <see cref="TryGetZone"/>；只给热更层查询 / 自检用，O(斑块)）。</summary>
+        /// <summary>EMG2-MAT-02：上一次读档（≤ 16 版快照）转成迁入斑块的旧区域数（自检 / 调试）。</summary>
+        public int LastLegacyMigrated { get; private set; }
+
+        public int ZoneCount => _d.Zones.Length + LegacyPatchCount;
+
+        /// <summary>EMG2-MAT-02：活着的迁入斑块数（从现有区域等价迁入、带区域载荷的斑块）。O(斑块)。</summary>
+        public int LegacyPatchCount
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < _d.Patches.Length; i++)
+                {
+                    if (CombatLogic.IsLegacy(_d.Patches[i]))
+                    {
+                        n++;
+                    }
+                }
+                return n;
+            }
+        }
         public int EchoCount => _d.Echoes.Length;
 
         /// <summary>FG2-E2E-01（FG-GAP-043）：当前留在画面上的引信弹迹条数与第 <paramref name="index"/> 条（自检核对）。</summary>
@@ -694,13 +715,32 @@ namespace BinGames.Sim.Combat
         public bool InAcidMarsh(double2 point) => CombatLogic.InAcid(ref _d, point);
 
         /// <summary>FG10-FAC-01：本地点酸蚀 / 湿润 / 油 / 燃烧的状态位（热更层按 fg.TbStatusTag 写；0 = 没有）。派生量，读档后沿用。</summary>
-        public void SetClarityBits(uint acid, uint wet, uint oil, uint fire)
+        public void SetClarityBits(uint acid, uint wet, uint oil, uint fire, uint frozen = 0u)
         {
             _d.AcidBit = acid;
             _d.WetBit = wet;
             _d.OilBit = oil;
             _d.FireBit = fire;
+            _d.FrozenBit = frozen; // EMG2-MAT-02：液氮驻留区 / 液氮池迁入斑块时映射 mat.cryo
         }
+
+        /// <summary>
+        /// EMG2-MAT-02（ADR ⑤）：取走已发布的设施受击条目（每步 ≤ 64 条进表；热更层每世界步调用一次，只处理这些条目，不遍历斑块）。
+        /// 键 &gt; 0 = 斑块 Id（伤害 = structDps × 节拍秒）；键 &lt; 0 = 燃烧中的液洼残留（液洼号的相反数，伤害由热更层按 logistics.leak.fire_dps 结算）。
+        /// </summary>
+        public int DrainStructHits(List<EmgStructHit> into)
+        {
+            int n = _d.EmgStructOut.Length;
+            for (int i = 0; i < n; i++)
+            {
+                into?.Add(_d.EmgStructOut[i]);
+            }
+            _d.EmgStructOut.Clear();
+            return n;
+        }
+
+        /// <summary>待发布（还没进已发布表）的设施受击条目数（自检：没有消费者时不丢、按键合并）。</summary>
+        public int StructHitsPending => _d.EmgStructPending.Length;
 
         /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量，不进快照；热更层按净化塔定期写入。
         /// FG10-RAID-01：<paramref name="siegeOnly"/> = 只有攻城中的单位读它（家园内核）。</summary>
@@ -783,7 +823,29 @@ namespace BinGames.Sim.Combat
                     n++;
                 }
             }
+            for (int i = 0; i < _d.Patches.Length; i++)
+            {
+                if (CombatLogic.IsLegacy(_d.Patches[i]) && _d.Patches[i].Kind == kind)
+                {
+                    n++; // EMG2-MAT-02：迁入斑块照旧按来源种类计
+                }
+            }
             return n;
+        }
+
+        /// <summary>EMG2-MAT-02 自检：按澄净单位同一条路径落一块喷淋池 / 一摊油迹（斑块层开着时是迁入斑块，否则是区域）。</summary>
+        public bool SpawnPoolForTests(int ownerId, double2 pos, float radius, float seconds, float dps, uint mask, float statusSeconds, float chill)
+        {
+            bool ok = CombatLogic.SpawnPoolForTests(ref _d, ownerId, pos, radius, seconds, dps, mask, statusSeconds, chill);
+            Touch();
+            return ok;
+        }
+
+        public bool SpawnSlickForTests(int ownerId, double2 pos, float radius, float seconds, uint mask, float statusSeconds)
+        {
+            bool ok = CombatLogic.SpawnSlickForTests(ref _d, ownerId, pos, radius, seconds, mask, statusSeconds);
+            Touch();
+            return ok;
         }
 
         /// <summary>FG10-FAC-01：存活的分裂液数（O(单位)，自检 / 表现用）。</summary>
@@ -1516,13 +1578,23 @@ namespace BinGames.Sim.Combat
 
         public bool TryGetZone(int index, out CombatZone zone)
         {
-            if (index < 0 || index >= _d.Zones.Length)
+            if (index >= 0 && index < _d.Zones.Length)
             {
-                zone = default;
-                return false;
+                zone = _d.Zones[index];
+                return true;
             }
-            zone = _d.Zones[index];
-            return true;
+            // EMG2-MAT-02：下标落在区域之后 = 第 (index − 区域数) 块活着的迁入斑块（按槽位顺序；带着区域载荷，读法与区域相同）
+            int k = index - _d.Zones.Length;
+            for (int i = 0; k >= 0 && i < _d.Patches.Length; i++)
+            {
+                if (CombatLogic.IsLegacy(_d.Patches[i]) && k-- == 0)
+                {
+                    zone = _d.Patches[i];
+                    return true;
+                }
+            }
+            zone = default;
+            return false;
         }
 
         public bool TryGetDrone(int index, out CombatDrone drone)
@@ -1637,13 +1709,14 @@ namespace BinGames.Sim.Combat
 
         /// <summary>FG6-LOG-10（FGR-LOG-046）：登记或更新一块液洼（热更层的液洼记录 → 内核区域；还没反应的那块就地改位置 / 半径 / 标签，节拍相位不变）。
         /// 同编号已经反应成残留区域时不动并返回 false。</summary>
-        public bool UpsertLeakZone(int leakId, double2 pos, float radius, uint statusMask)
+        public bool UpsertLeakZone(int leakId, double2 pos, float radius, uint statusMask, byte matter = 0)
         {
             if (!IsFinite(pos) || float.IsNaN(radius) || float.IsInfinity(radius))
             {
                 return false;
             }
-            bool ok = CombatLogic.UpsertLeakZone(ref _d, leakId, pos, radius, statusMask);
+            // EMG2-MAT-02：matter = 流体对应的物质码（水 / 油 / 冷却液 / 酸，FG19B §1.5；0 = 按标签映射）；斑块层开着时液洼是世界源斑块
+            bool ok = CombatLogic.UpsertLeakZone(ref _d, leakId, pos, radius, statusMask, matter);
             if (ok)
             {
                 Touch();
@@ -1666,6 +1739,15 @@ namespace BinGames.Sim.Combat
         public bool TryGetLeakZone(int leakId, out CombatZone zone)
         {
             int owner = -leakId;
+            for (int i = 0; leakId > 0 && i < _d.Patches.Length; i++)
+            {
+                CombatZone pz = _d.Patches[i];
+                if (CombatLogic.IsLegacy(pz) && pz.Kind == CombatConst.ZoneKindLeak && pz.Owner == owner)
+                {
+                    zone = pz; // EMG2-MAT-02：迁入斑块的液洼
+                    return true;
+                }
+            }
             for (int z = 0; leakId > 0 && z < _d.Zones.Length; z++)
             {
                 CombatZone zn = _d.Zones[z];
@@ -1684,14 +1766,7 @@ namespace BinGames.Sim.Combat
         {
             get
             {
-                int n = 0;
-                for (int z = 0; z < _d.Zones.Length; z++)
-                {
-                    if (_d.Zones[z].Kind == CombatConst.ZoneKindLeak)
-                    {
-                        n++;
-                    }
-                }
+                int n = CountZonesOfKind(CombatConst.ZoneKindLeak); // EMG2-MAT-02：含迁入斑块
                 return n;
             }
         }
@@ -2770,6 +2845,7 @@ namespace BinGames.Sim.Combat
             staging.WetBit = _d.WetBit;
             staging.OilBit = _d.OilBit;
             staging.FireBit = _d.FireBit;
+            staging.FrozenBit = _d.FrozenBit;
             staging.PolluteSiegeOnly = _d.PolluteSiegeOnly;
             for (int i = 0; i < _d.PolluteTargets.Length; i++)
             {
@@ -2797,6 +2873,15 @@ namespace BinGames.Sim.Combat
             _programIndex = null; // EMG1-KRN-01：程序去重索引是派生量，按读进来的程序表重建
             RecomputeEmgListen(); // EMG1-BUS-01：地点级监听掩码同是派生量
             CombatLogic.RebuildDeflectActive(ref _d); // FG9-FAC-01：展开中的偏折场由每单位状态派生，读档后重算。
+            if (format < 17)
+            {
+                // EMG2-MAT-02（FGR-EMG-211 / ADR ⑩）：读 ≤ 16 版快照——像物质的旧区域转成迁入斑块，映射不了的保留为旧区域直到到期
+                LastLegacyMigrated = CombatLogic.MigrateLegacyZones(ref _d);
+            }
+            else
+            {
+                LastLegacyMigrated = 0;
+            }
             FeedEpoch++;
             return CombatLoadResult.Ok;
         }

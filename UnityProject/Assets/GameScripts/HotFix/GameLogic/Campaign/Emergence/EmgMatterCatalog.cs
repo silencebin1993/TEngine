@@ -80,7 +80,7 @@ namespace GameLogic.Campaign.Emergence
                     Spread = r.Spread, CoatSeconds = r.CoatSeconds, TempInit = r.TempInit, Hp = r.Hp, MergeOverlap = r.MergeOverlap, ContactDps = r.ContactDps,
                     ContactSlow = r.ContactSlow, EmitEvery = r.EmitEvery, Color = ParseColor(r.Color), Quota = (short)Math.Max(0, r.Quota), CoatBit = (sbyte)r.CoatBit,
                     Layer = (byte)r.Layer, Solid = (byte)(r.Solid != 0 ? 1 : 0), FixedTemp = (byte)(r.FixedTemp != 0 ? 1 : 0), Decay = (byte)Math.Max(0, decay), Emit = emit,
-                    Pattern = (byte)Math.Max(0, r.Pattern),
+                    Pattern = (byte)Math.Max(0, r.Pattern), StructDps = Math.Max(0f, r.StructDps),
                 };
                 c.NameKeys[r.Code] = r.NameKey;
                 c.NextKeys[r.Code] = r.NextKey;
@@ -94,6 +94,9 @@ namespace GameLogic.Campaign.Emergence
             }
             return c;
         }
+
+        /// <summary>EMG2-MAT-02：物质端口 ID（mat.*）→ 物质码（不是物质端口 / 没登记 = 0）。</summary>
+        public static byte CodeOf(string portId) => string.IsNullOrEmpty(portId) || portId == "none" ? (byte)0 : EmgMatterConst.MatterOfPort(PortCodeOf(portId));
 
         /// <summary>物质端口码（fg.TbChannelPort）；按“码 = 400 + 物质码”的约定与端口表互证（不一致记问题）。</summary>
         private static int PortCodeOf(string portId)

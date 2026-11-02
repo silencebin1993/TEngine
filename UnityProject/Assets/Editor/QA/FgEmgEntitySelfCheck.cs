@@ -264,12 +264,12 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Line("  · A. 数据：fg.TbEntityProfile 5 材质 + 11 种类默认 + 7 底盘 + 9 动能系数 + 破片行；敌人 material 列；内核拿到的公共属性 = 表值（6 种实体）；调参与开关");
+            Line("  · A. 数据：fg.TbEntityProfile 6 材质（EMG2-MAT-02 追加澄净） + 11 种类默认 + 7 底盘 + 9 动能系数 + 破片行；敌人 material 列；内核拿到的公共属性 = 表值（6 种实体）；调参与开关");
             var table = ConfigSystem.Instance.Tables.TbEntityProfile.DataList;
             EmgEntityProfiles.Compiled c = EmgEntityProfiles.Current;
-            Expect(c.Ok && table.Count(r => r.Kind == "material") == 5 && table.Count(r => r.Kind == "chassis") == 7 && table.Count(r => r.Kind == "kinetic") == 9
-                   && c.Rows.Count == EmgEntityProfiles.SlotIds.Length + 7 + 10 && c.Rows[EmgConst.SlotFragment].Id == "entity.fragment" && c.Rows[EmgConst.SlotBoss].Id == "entity.boss",
-                $"表 {table.Count} 行编成内核档案 {c.Rows.Count} 行（11 种类默认按 EmgConst.Slot* 同序 + 7 底盘 + 敌人 / 首领 × 5 材质），问题 {c.Problems.Count}");
+            Expect(c.Ok && table.Count(r => r.Kind == "material") == EmgEntityProfiles.MaterialIds.Length && table.Count(r => r.Kind == "chassis") == 7 && table.Count(r => r.Kind == "kinetic") == 9
+                   && c.Rows.Count == EmgEntityProfiles.SlotIds.Length + 7 + 2 * EmgEntityProfiles.MaterialIds.Length && c.Rows[EmgConst.SlotFragment].Id == "entity.fragment" && c.Rows[EmgConst.SlotBoss].Id == "entity.boss",
+                $"表 {table.Count} 行编成内核档案 {c.Rows.Count} 行（11 种类默认按 EmgConst.Slot* 同序 + 7 底盘 + 敌人 / 首领 × {EmgEntityProfiles.MaterialIds.Length} 材质，EMG2-MAT-02 追加澄净），问题 {c.Problems.Count}");
             var enemies = ConfigSystem.Instance.Tables.TbMechEnemy.DataList;
             // DEBT-EMG1ENT01-04（EMG2-MAT-01 关闭）：攻城突袭者走正式生成入口 CombatSite.SpawnSiegeRaider，按敌人表 material 列挂档案；对照：不知道种类 → 敌人默认（−1，钢）
             GameConfig.fg.MechEnemy nonSteel = enemies.FirstOrDefault(e => e.Material != "material.steel" && EmgEntityProfiles.ForEnemy(e.Material, false) >= 0);
@@ -284,10 +284,10 @@ namespace GameLogic.EditorTools
             }
             var faction = new Dictionary<string, string>
             {
-                ["silent"] = "material.composite", ["foundry"] = "material.steel", ["clarity"] = "material.ceramic", ["overclock"] = "material.alloy", ["fleet"] = "material.steel",
+                ["silent"] = "material.composite", ["foundry"] = "material.steel", ["clarity"] = "material.clarity", ["overclock"] = "material.alloy", ["fleet"] = "material.steel",
             };
             Expect(enemies.Count > 0 && enemies.All(e => EmgEntityProfiles.MaterialIds.Contains(e.Material) && faction.TryGetValue(e.Faction, out string m) && m == e.Material),
-                $"fg.TbMechEnemy {enemies.Count} 行都有 material 列，取值按阵营默认（静默复合 / 铸造钢 / 澄净陶瓷 / 超频合金 / 舰队钢，FG19B 第 6.2 节）");
+                $"fg.TbMechEnemy {enemies.Count} 行都有 material 列，取值按阵营默认（静默复合 / 铸造钢 / 澄净（陶瓷属性 + 腐蚀抗 1 / 寒抗 0.5，EMG2-MAT-02） / 超频合金 / 舰队钢，FG19B 第 6.2 节）");
 
             using CombatKernel k = NewKernel();
             EntityProfile row(string id) => table.First(r => r.Id == id);

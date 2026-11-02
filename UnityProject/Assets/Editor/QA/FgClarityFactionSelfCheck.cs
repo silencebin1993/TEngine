@@ -1048,12 +1048,16 @@ namespace GameLogic.EditorTools
             byte[] snap = k.Serialize();
             ulong h0 = k.StateHash();
             using var b = new CombatKernel(k.Config, 64);
+            // EMG2-MAT-02：与 CombatSite 建地点同一套表数据（子形态 / 实体档案 / 物质表）——物质表决定斑块层开不开，喷淋池 / 油迹迁入斑块后读档两边必须一致
+            CombatSite.ApplyEmgSubForms(b);
+            CombatSite.ApplyEntityProfiles(b);
+            CombatSite.ApplyMatters(b);
             CombatLoadResult lr = b.Load(snap);
             // 反应规则、状态位效果、酸沼与澄净状态位是派生量（不进快照）：读档后由热更层按表 / 规划层重写——这里照同一份写回。
             b.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
             b.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
             b.SetAcidMarsh(new List<float4> { new float4(0f, 0f, 0f, 12f) }, 0.02f, 0.5f);
-            b.SetClarityBits(Bit("Acid"), Bit("Wet"), Bit("Oil"), Bit("Fire"));
+            b.SetClarityBits(Bit("Acid"), Bit("Wet"), Bit("Oil"), Bit("Fire"), Bit("Frozen"));
             ulong h1 = b.StateHash();
             double t0 = _t;
             for (int i = 0; i < 240; i++)
