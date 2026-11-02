@@ -238,7 +238,8 @@ namespace GameLogic.EditorTools
                 foreach (string id in fw)
                 {
                     var tags = new HashSet<string>(GameLogic.Campaign.Emergence.EmgProgramCompiler.LiveTagsOf(id).Select(StatusTagCatalog.Canonical));
-                    bool expect = r.Kind == NamedReactionCatalog.KindAssembly
+                    // EMG2-REACT-01：两条装配反应改为 kind = rule、无配料（按端口判定）——与 FirmwareLibrary 同口径：没有配料的行按触发固件链接
+                    bool expect = r.Kind == NamedReactionCatalog.KindAssembly || (r.Kind == NamedReactionCatalog.KindRule && (string.IsNullOrEmpty(r.TagA) || r.TagA == "none"))
                         ? MechanicalReactionCatalog.TriggerFirmwareOf(r.Id) == id
                         : tags.Contains(StatusTagCatalog.Canonical(r.TagA)) || tags.Contains(StatusTagCatalog.Canonical(r.TagB));
                     bool has = MechanicCodex.Find(MechanicCodex.FirmwareEntryId(id)).Links.Contains(MechanicCodex.ReactionEntryId(r.Id));

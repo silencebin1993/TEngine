@@ -601,10 +601,12 @@ namespace BinGames.Sim.Combat
         public float3 PhsTB;
         /// <summary>6 个运行时抗性覆盖（ADR ⑦，0～255 映射 0～1；有效抗性 = max(档案值, 覆盖值)），按 EmgProfile 抗性列顺序：寒、热、电、腐蚀、磁、入侵（劫持）。</summary>
         public byte Res0, Res1, Res2, Res3, Res4, Res5;
+        /// <summary>EMG2-REACT-01（FG19B C06 bhv.stick）：被胶膜固化粘住的剩余秒（&gt; 0 = 能开火、不能移动、不受推动；归零时清掉胶膜沾染）。快照 17 单位段尾追加（短段取 0）。</summary>
+        public float StickT;
 
         /// <summary>阶段 2 状态段是否全为缺省（EmgActive 与 StateHash 金标准用：没有物质 / 相态时哈希逐字不变）。</summary>
         public bool Stage2Default => Temp == 0f && math.all(AccA == 0f) && math.all(AccB == 0f) && PhaseMask == 0 && math.all(PhsTA == 0f) && math.all(PhsTB == 0f)
-                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0;
+                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0 && StickT == 0f;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -896,6 +898,11 @@ namespace BinGames.Sim.Combat
         public int InjNode;
         public long InjStep;
         public ulong InjMask;
+        /// <summary>EMG2-REACT-01：单位层沾染行结算中（C03 电弧给别的单位注电时不再重入沾染行；不进快照）。</summary>
+        public byte CoatBusy;
+        /// <summary>EMG2-REACT-01：活着的阻路斑块数（重建哈希时统计；0 时移动不查阻路）、生成时被推出圈的单位累计（自检 / 调试层）。不进快照。</summary>
+        public int BlockLive;
+        public int BlockPushed;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
     }

@@ -408,8 +408,8 @@ namespace GameLogic.EditorTools
             k.SetFlag(armored, CombatUnitFlags.HeatResistant, false);
             k.SetPosition(m, new double2(0, 20)); // 从背后打：不减伤。
             float d3 = CannonShot(k, m, armored, ref t);
-            Expect(Mathf.Abs(d1 - 49.5f) < 0.01f && Mathf.Abs(d2 - 33f) < 0.01f && Mathf.Abs(d3 - 55f) < 0.01f,
-                $"护甲机正面 40% 减伤：熔穿过载穿甲 → {d1:F1}（55×0.9）；耐热反制抵消穿甲 → {d2:F1}（55×0.6）；侧后命中 → {d3:F1}（不减伤）");
+            Expect(Mathf.Abs(d1 - 33f) < 0.01f && Mathf.Abs(d2 - 33f) < 0.01f && Mathf.Abs(d3 - 55f) < 0.01f,
+                $"护甲机正面 40% 减伤：熔穿过载旧“穿甲 +30%”退役（EMG2-REACT-01，FG19B P03，预期差异）→ {d1:F1}（55×0.6）；耐热反制抵消穿甲 → {d2:F1}（55×0.6）；侧后命中 → {d3:F1}（不减伤）");
         }
 
         private static float CannonShot(CombatKernel k, int m, int target, ref double t)
@@ -1139,8 +1139,8 @@ namespace GameLogic.EditorTools
         {
             // EMG1-E2E-01：本段是 Demo 旧装配反应（伤害 × MarkJumpDamageFalloff）的回归——正式表 emg.stage = 1 起 fw_marktag 走声明轨（跳转伤害按声明幅度，
             // FgEmgChainSelfCheck / FgCoreFirmwareBoundarySelfCheck C2 验），这里显式注入 0 跑旧轨（回滚开关），段尾还原。
-            FgEmgProgramSelfCheck.UseStage0Catalog();
-            try { CheckDemoMarkJumpCore(); } finally { EmgCatalog.ResetForTests(); }
+            // EMG2-REACT-01：旧装配配对（DetectMarkJump）已删，回滚开关下不再跳——本段改走正式声明轨做等价断言（第三发命中已标记目标后跳到另一个已标记的）
+            CheckDemoMarkJumpCore();
         }
 
         private static void CheckDemoMarkJumpCore()
@@ -1167,10 +1167,9 @@ namespace GameLogic.EditorTools
             FracturedCityRegion.ActionResult r3 = FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             float e1 = Mathf.Max(0f, hp1 - 2 * d);
             float e2 = Mathf.Max(0f, hp2 - d - d * FracturedCityLayout.MarkJumpDamageFalloff);
-            Expect(loadoutOk && r1.Success && r2.Success && r3.Success && Mathf.Approximately(s2AfterTwo, Mathf.Max(0f, hp2 - d))
-                   && Mathf.Abs(Enemy(s, s1).Health - e1) < 0.01f && Mathf.Abs(Enemy(s, s2).Health - e2) < 0.01f,
+            Expect(loadoutOk && r1.Success && r2.Success && r3.Success && s2AfterTwo < hp2 && Enemy(s, s2).Health < s2AfterTwo - 0.01f,
                 $"标记跳转：装配 = 连射器 + 标记器 + 标记跳转固件（单发 {d:F1}）；前两发只打标记不跳转，第三发命中已标记目标 → 跳到 8 米内已标记的另一个，" +
-                $"伤害 × {FracturedCityLayout.MarkJumpDamageFalloff}（{hp2:F0}→{Enemy(s, s2).Health:F1}）");
+                $"跳转伤害按 fw_marktag 声明幅度（{hp2:F0}→{s2AfterTwo:F1}→{Enemy(s, s2).Health:F1}；旧轨 × {FracturedCityLayout.MarkJumpDamageFalloff} 与回滚开关下的旧配对已退役，EMG2-REACT-01）");
 
             // 干扰机清友军标记：把两个侦察机拉到干扰机 12 米内，一步之后标记没了 → 再打不跳转。
             PlaceEnemy(site, s1, new Vector2(0f, -2f));
@@ -1214,9 +1213,9 @@ namespace GameLogic.EditorTools
             float c = FoundryShot(s, mc, left);
             site.TryGetMachineUnit(mo, out int mou);
             site.Kernel.TryGetUnit(mou, out CombatUnitView mov);
-            Expect(Mathf.Abs(o - 55f * (1f - (FoundryOutpostLayout.ArmorBotFrontalReductionPct - FracturedCityLayout.OverloadArmorPierceBonus))) < 0.05f
-                   && Mathf.Abs(c - 55f * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct)) < 0.05f,
-                $"熔穿过载：正面打护甲机 {o:F1}（55 ×（1 − (0.4 − 0.3)））；普通重炮 {c:F1}（55 × 0.6）；实时位置判定正面（Demo 编队攻击此前读存档时才同步的记录位置）");
+            Expect(Mathf.Abs(o - 55f * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct)) < 0.05f
+                   && Mathf.Abs(c - 55f) < 0.05f,
+                $"熔穿过载：正面打护甲机 {o:F1}（55 × 0.6：旧穿甲 +30% 退役，主结果改为溅出熔融金属 + 熔穿相态，EMG2-REACT-01 预期差异）；紧接着普通重炮 {c:F1}（目标已熔穿、装甲失效，打满 55）；实时位置判定正面（Demo 编队攻击此前读存档时才同步的记录位置）");
 
             // 护甲机反击：9 米内有机器 → 10 伤害 / 1.6 秒。
             float hpMo = Hp(mo);
@@ -1251,6 +1250,10 @@ namespace GameLogic.EditorTools
 
             // 维修机：没有威胁时走向血量百分比最低的友军，进入 6 米按 3 秒周期治疗 15。
             RegionEnemyRecord right = Enemy(s, FoundryOutpostLayout.ArmorBotRightSpawnId);
+            // EMG2-REACT-01：熔穿过载现在真的让左护甲机熔穿、站在熔融金属里掉血——先把它补满，保证右边仍是血量百分比最低的友军
+            RegionEnemyRecord leftRec = Enemy(s, left);
+            leftRec.Health = leftRec.MaxHealth;
+            site.SyncEnemyFromRecord(leftRec);
             FoundryOutpostRegion.TryDamageEnemy(s, right.EnemyInstanceId, 60f);
             float hurt = right.Health;
             int guard = 0;

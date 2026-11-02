@@ -715,6 +715,16 @@ namespace BinGames.Sim.Combat
         /// <summary>FG10-FAC-01：某点在不在酸沼里（悬停 / 自检用，O(形状)）。</summary>
         public bool InAcidMarsh(double2 point) => CombatLogic.InAcid(ref _d, point);
 
+        /// <summary>EMG2-REACT-01：区域整片反应残留（旧标签反应表撤下爆燃后，液洼 / 油迹 / 爬行者爆燃的残留参数与计数键）。key = 0 = 不参与。</summary>
+        public void SetLegacyResidue(uint pair, uint bit, float seconds, float radius, int key)
+        {
+            _d.ResiduePair = pair;
+            _d.ResidueBit = bit;
+            _d.ResidueSeconds = seconds;
+            _d.ResidueRadius = radius;
+            _d.ResidueKey = key;
+        }
+
         /// <summary>FG10-FAC-01：本地点酸蚀 / 湿润 / 油 / 燃烧的状态位（热更层按 fg.TbStatusTag 写；0 = 没有）。派生量，读档后沿用。</summary>
         public void SetClarityBits(uint acid, uint wet, uint oil, uint fire, uint frozen = 0u, uint shock = 0u)
         {
@@ -1988,6 +1998,7 @@ namespace BinGames.Sim.Combat
                 }
             }
             RemapReactionCounters(ref _d, keys, counts, dmgs, n);
+            MergeOrphanCounts(ref _d);
             // FG2-FW-04：规则下标变了，按下标记的进给（最后位置 / 出手者 / 目标 / 敌方身上的反应伤害）清零，热更层按新的纪元重取基线。
             for (int i = 0; i < n; i++)
             {
@@ -2047,6 +2058,7 @@ namespace BinGames.Sim.Combat
         /// 没有登记规则时原样放（规则稍后登记时再按键挪）。当前规则里没有的反应，计数丢弃。</summary>
         private static void RemapReactionCounters(ref CombatData d, int[] keys, int[] counts, float[] dmgs, int n)
         {
+            OrphanCounts.Clear(); // 上一次读档中途失败留下的暂存不带进这一次
             int max = CombatConst.MaxReactions;
             for (int i = 0; i < max; i++)
             {
@@ -2091,6 +2103,40 @@ namespace BinGames.Sim.Combat
                     d.ReactionDamage[i] = dmgs[src];
                 }
             }
+            // EMG2-REACT-01（ADR ⑥“计数数组 32 → 256 按 Key 挪位”）：已从旧标签反应表撤下、改走通道规则的反应（同一 StableKey），旧计数记下来并进涌现可靠计数（按键，见 MergeOrphanCounts）。
+            for (int j = 0; j < n; j++)
+            {
+                if (keys[j] == 0 || counts[j] <= 0)
+                {
+                    continue;
+                }
+                bool kept = false;
+                for (int i = 0; i < rules && i < max && !kept; i++)
+                {
+                    kept = d.Reactions[i].Key == keys[j];
+                }
+                if (!kept)
+                {
+                    OrphanCounts.Add(new int2(keys[j], counts[j]));
+                }
+            }
+        }
+
+        /// <summary>EMG2-REACT-01：旧表里有、新旧表都没有登记的键的计数（读档 / 换表时暂存，提交时并进 <see cref="CombatData.EmgRuleCount"/>）。只在主线程读档 / 登记规则时用。</summary>
+        private static readonly System.Collections.Generic.List<int2> OrphanCounts = new System.Collections.Generic.List<int2>();
+
+        /// <summary>把暂存的旧计数按稳定键加进涌现可靠计数槽（256 槽，按键开放寻址；与规则结算同一个槽位函数），然后清空。</summary>
+        private static void MergeOrphanCounts(ref CombatData d)
+        {
+            foreach (int2 o in OrphanCounts)
+            {
+                int slot = CombatLogic.EmgRuleSlot(ref d, o.x);
+                if (slot >= 0)
+                {
+                    d.EmgRuleCount[slot] = d.EmgRuleCount[slot] + o.y;
+                }
+            }
+            OrphanCounts.Clear();
         }
 
         /// <summary>登记每个状态位的效果（32 格，fg.TbStatusTag 的 effect / amount）。</summary>
@@ -2977,6 +3023,11 @@ namespace BinGames.Sim.Combat
             staging.AcidBit = _d.AcidBit;
             staging.WetBit = _d.WetBit;
             staging.OilBit = _d.OilBit;
+            staging.ResiduePair = _d.ResiduePair;
+            staging.ResidueBit = _d.ResidueBit;
+            staging.ResidueSeconds = _d.ResidueSeconds;
+            staging.ResidueRadius = _d.ResidueRadius;
+            staging.ResidueKey = _d.ResidueKey;
             staging.FireBit = _d.FireBit;
             staging.FrozenBit = _d.FrozenBit;
             staging.PolluteSiegeOnly = _d.PolluteSiegeOnly;
@@ -3006,6 +3057,7 @@ namespace BinGames.Sim.Combat
             staging.ShockBit = _d.ShockBit;
             CombatLogic.MigrateClarityPhase(ref staging); // EMG2-PHS-01（ADR ⑭ #5 #9、⑩ 15 → 17）：云端受寒 / 冻结 / 免疫窗 → 寒量与冻结相态；免疫位 → 抗性覆盖
             RemapProfiles(ref staging, _d.EmgProfileKeys);
+            MergeOrphanCounts(ref staging); // EMG2-REACT-01：旧档里撤下反应的计数按键并进涌现可靠计数（在规则计数段读完之后，不占它的槽）
             _d.Dispose();
             _d = staging;
             SyncInstrActivation(); // EMG1-FUZZ-01：激活计数不进快照，读档后从 0 计

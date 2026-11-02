@@ -895,7 +895,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return false;
             }
-            foreach (Reaction row in NamedReactionCatalog.TagRules)
+            foreach (Reaction row in NamedReactionCatalog.Rows) // EMG2-REACT-01：爆燃撤出旧标签表后，整片反应残留在 rule 类那一行（LegacyResidueRow）
             {
                 if (row == null || string.IsNullOrEmpty(row.Residue) || row.Residue == "none" || row.ResidueSeconds <= 0f || row.ResidueRadius <= 0f)
                 {

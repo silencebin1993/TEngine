@@ -918,6 +918,7 @@ namespace GameLogic.EditorTools
             public string FwTrapId;
             public string FwTurretId;
             public int Deflag0;
+            public long BuildTick; // 火墙实建的时刻：之后结束的各波结算都算“火墙建成后”的突袭
             public int Deflag;
             public int DeflagInResults;
             public int OiledMax;
@@ -1028,9 +1029,14 @@ namespace GameLogic.EditorTools
             if (run.FwTurretId != null)
             {
                 run.Deflag = DeflagCount() - run.Deflag0;
-                foreach (RaidResultRecord r in run.Results.OrderBy(x => x.EndTick).Skip(1))
+                // EMG2-REACT-01：火墙按第一次突袭的抵达点建出来时第一波可能还没打完（种子 1 实测：爆燃 22 次就记在第一波）——“火墙建成后的突袭结算记到爆燃”
+                // 按结算结束时刻 ≥ 火墙实建时刻认（旧口径 Skip(1) 默认第一波已结束）；击毁归功仍只算第二波起（见下）。
+                foreach (RaidResultRecord r in run.Results.Where(x => x.EndTick >= run.BuildTick))
                 {
                     run.DeflagInResults += r.Reactions?.Where(x => x != null && x.ReactionId != null && x.ReactionId.Contains("deflagr")).Sum(x => x.Count) ?? 0;
+                }
+                foreach (RaidResultRecord r in run.Results.OrderBy(x => x.EndTick).Skip(1))
+                {
                     run.FwKills += r.Contrib.Where(x => x.Kind == "turret" && x.Id == run.FwTurretId).Sum(x => x.Kills);
                 }
                 run.TrapLays = DefenseService.Find(s, run.FwTrapId)?.TrapLays ?? 0;
@@ -1067,6 +1073,7 @@ namespace GameLogic.EditorTools
             run.FwTrapId = trap.BuildingId;
             run.FwTurretId = tur?.BuildingId;
             run.Deflag0 = DeflagCount();
+            run.BuildTick = GameClock.Ticks;
         }
 
         private static int DeflagCount()
@@ -1076,14 +1083,7 @@ namespace GameLogic.EditorTools
             {
                 return 0;
             }
-            for (int i = 0; i < NamedReactionCatalog.TagRules.Count; i++)
-            {
-                if (NamedReactionCatalog.TagRules[i].Id == "reaction_deflagrate")
-                {
-                    return site.Kernel.ReactionCountOf(i);
-                }
-            }
-            return 0;
+            return CombatSite.ReactionCountOf(site.Kernel, "reaction_deflagrate"); // EMG2-REACT-01：爆燃已端口化，按稳定键读涌现计数
         }
 
         /// <summary>家园内核里身上带“油”标签的突袭单位数。</summary>
@@ -1152,7 +1152,9 @@ namespace GameLogic.EditorTools
                 bool three = results.Count >= 3 && results.Take(3).All(r => r.Outcome != "core_lost") && results.Take(2).Max(r => r.Level) <= 1 && results[2].Level <= 2;
                 bool fwOk = run.Firewall != null && !run.Firewall.StartsWith("✗", StringComparison.Ordinal);
                 string fwRun = run.FwTurretId == null ? "火墙没建" :
-                    $"火墙实建后：内核爆燃 {run.Deflag} 次、第二 / 三波结算记爆燃 {run.DeflagInResults} 次、带“油”标签的突袭单位最多 {run.OiledMax} 台、改装炮塔击毁 {run.FwKills}、陷阱铺 {run.TrapLays} 轮";
+                    $"火墙实建后：内核爆燃 {run.Deflag} 次、火墙建成后结束的各波结算记爆燃 {run.DeflagInResults} 次、带“油”标签的突袭单位最多 {run.OiledMax} 台、改装炮塔击毁 {run.FwKills}、陷阱铺 {run.TrapLays} 轮"
+                    + $"（诊断：归因场次爆燃 {string.Join("/", ReactionAttribution.Sessions(CampaignSession.Current).Where(x => x != null).Select(x => x.Kind + (x.EndTick < 0 ? "*" : "") + ":" + (x.Reactions?.Where(y => y?.ReactionId == "reaction_deflagrate").Sum(y => y.Count) ?? 0)))}、" +
+                      $"日志爆燃 {ReactionLog.All.Where(e => e.ReactionId == "reaction_deflagrate").Sum(e => e.Count)}、结算场次 {string.Join("/", run.Results.Select(r => r.PlanId + "→" + r.ReactionSessionId))}）";
                 // 修复轮续（复审 P1“火墙始终没接敌”的回归守护）：火墙按第一次突袭的真实抵达点建出来（陷阱漏油一条线 + 改装炮塔换燃迹），之后的突袭里必须打出爆燃——内核计数与第二 / 三波结算都 > 0。
                 // 上一版这里要求“种子 42 第二 / 三波有建筑损失（给自动重建留活）”：火墙真起作用后模拟里两波都没有损失，这条预测与“火墙有效”互相冲突，改为只记录；旅程里的自动重建由 FGJ-M6 rebuilt 自己核对。
                 bool fwDeflag = run.FwTurretId != null && run.Deflag > 0 && run.DeflagInResults > 0;

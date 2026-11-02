@@ -164,8 +164,8 @@
 | 燃烧 + 浸湿 | Steam | 蒸汽 | S `mat.steam`，烟幕失锁由 FG19B §5 遮蔽产生 | M12、M13、C02 | 无 | FG-EMG 阶段 2 起生效 |
 | 燃烧 + 油污 | Deflagrate | 爆燃 | S `mat.fire`（整片） | E01、C01 | `side.damage 8` | FG-EMG 阶段 2 起生效 |
 | 浸湿 + 电击 | Conduct | 短路 | P `topo.arc`（麻痹由 `phase_charge` 产生） | E14、E15、C03 | 每节拍 `side.damage 2` | FG-EMG 阶段 2 起生效 |
-| 冻结 + 动能 | Shatter | 脆裂 | P `topo.fragment` | P01 | `side.damage 20` | FG-EMG 阶段 2 起生效 |
-| 腐蚀 + 胶膜 | Sticky | 粘滞 | T `ter.block`（固化胶块） | M16、C06（B `bhv.stick`） | 无 | FG-EMG 阶段 2 起生效 |
+| 冻结 + 动能 | Shatter | 碎裂（原“脆裂”，EMG2-REACT-01 按推荐默认执行（2026-10-30），待用户确认） | P `topo.fragment` | P01 | `side.damage 20` | FG-EMG 阶段 2 起生效 |
+| 腐蚀 + 胶膜 | Sticky | 固化（原“粘滞”，EMG2-REACT-01 按推荐默认执行（2026-10-30），待用户确认） | T `ter.block`（固化胶块） | M16、C06（B `bhv.stick`） | 无 | FG-EMG 阶段 2 起生效 |
 | 电击 + 腐蚀 | Electrolysis | 电解 | S `mat.debris` | E16、C08 | 无 | FG-EMG 阶段 2 起生效 |
 | 电击 + 油污 | Insulate | 绝缘 | P `topo.arc`（闪络改跳） | C04 | 无 | FG-EMG 阶段 2 起生效 |
 | 燃烧 + 冻结 | ThermalShock | 热震 | P `topo.fragment`（冻裂的外装甲崩成破片；破甲为相态附带） | P02 | 无 | FG-EMG 阶段 2 起生效 |
@@ -178,15 +178,15 @@
 | 扬尘 + 浸湿 | Mudify | 淤塞 | S `mat.sludge`（断开导电），单位层是 B `bhv.slow` | M14、M15、C07 | 无 | FG-EMG 阶段 2 起生效 |
 | 污染 + 回收 | Sepsis | 连锁锈蚀 | P `topo.fragment`（残骸锈蚀崩塌；连锁只靠破片动能，不做接触传播） | W02 | 无 | FG-EMG 阶段 2 起生效 |
 
-**FGR-FW-041 旧反应的机械化命名（名字走 fg.TbReaction 的文本键；本表作命名对照保留，主结果见 FG19B §4.1；脆裂由 FG-EMG 阶段 2 的动能通道变为可触发）**
+**FGR-FW-041 旧反应的机械化命名（名字走 fg.TbReaction 的文本键；本表作命名对照保留，主结果见 FG19B §4.1；碎裂（原“脆裂”）由 FG-EMG 阶段 2 的动能通道变为可触发；EMG2-REACT-01 按 FG19B §4.5 推荐默认改名：脆裂 → 碎裂、粘滞 → 固化（2026-10-30，待用户确认），本表与 TERM-MIGRATION §6.5 逐字同步）**
 
 | 旧名 | 机械名（提案） | 旧名 | 机械名（提案） |
 |---|---|---|---|
 | 蒸汽 Steam | 蒸汽 | 苛性灼烧 CausticBurn | 腐蚀灼烧 |
 | 爆燃 Deflagrate | 爆燃 | 溶血 Hemolysis | 回路溶断 |
 | 导电 Conduct | 短路 | 糖浆 Syrup | 胶结 |
-| 碎裂 Shatter | 脆裂 | 溶解 Dissolve | 溶蚀 |
-| 黏滞 Sticky | 粘滞 | 湮灭 Annihilate | 湮灭 |
+| 碎裂 Shatter | 碎裂 | 溶解 Dissolve | 溶蚀 |
+| 黏滞 Sticky | 固化 | 湮灭 Annihilate | 湮灭 |
 | 电解 Electrolysis | 电解 | 玻化 Vitrify | 玻化 |
 | 绝缘 Insulate | 绝缘 | 泥泞 Mudify | 淤塞 |
 | 热震 ThermalShock | 热震 | 败血 Sepsis | 连锁锈蚀 |

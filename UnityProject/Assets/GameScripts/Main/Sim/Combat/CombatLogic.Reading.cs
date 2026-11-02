@@ -774,7 +774,15 @@ namespace BinGames.Sim.Combat
             }
             // 区域减速位带来的减速值单独记（在反应附加标签把别的减速并进 slow 之前取）。
             float zoneSlowIn = (mask & CombatConst.StatusBitZoneSlow) != 0u ? math.saturate(slow) : 0f;
-            if (d.Reactions.Length > 0)
+            // EMG2-REACT-01（FG19B C01 / C02 / C03 / C06）：单位层沾染行先结算（这 5 条已从旧标签反应表撤下，同一 StableKey 不并存）；结算了一条就不再走旧表（同一宿主一次一条）。
+            int settled0 = d.EmgS.IsCreated ? d.EmgS[0].RulesSettled : 0;
+            mask = EmgCoatReact(ref d, k, mask, 0f, 0f, source);
+            bool coatFired = d.EmgS.IsCreated && d.EmgS[0].RulesSettled != settled0;
+            if (mask == 0u || !d.IsAlive(k))
+            {
+                return;
+            }
+            if (!coatFired && d.Reactions.Length > 0)
             {
                 uint have = d.Status[k] & ~CombatConst.StatusBitZoneSlow;
                 uint incoming = mask & ~CombatConst.StatusBitZoneSlow;
@@ -1501,6 +1509,12 @@ namespace BinGames.Sim.Combat
             return removed;
         }
 
+        /// <summary>EMG2-REACT-01：热更层写入的“区域整片反应残留”（配对位 / 残留位 / 秒 / 半径；没写时 Pair = 0 = 不参与）。</summary>
+        internal static CombatReactionRule LegacyResidueRule(ref CombatData d) => new CombatReactionRule
+        {
+            Pair = d.ResidueKey != 0 ? d.ResiduePair : 0u, ResidueBit = d.ResidueBit, ResidueSeconds = d.ResidueSeconds, ResidueRadius = d.ResidueRadius, DamageMult = 1f,
+        };
+
         /// <summary>
         /// 液洼遇上反应（只在液洼的区域节拍上检查）：此刻和它重叠的其余区域（读法区域、陷阱场地、已反应的液洼；不含别的还没反应的液洼——两摊液体挨着不算）挂的标签，
         /// 加上站在它里面的单位身上正在生效的标签，合起来是“遇到的标签”。按反应登记顺序找第一条：配料一半在液洼上、另一半在遇到的标签里、且这条反应会留下残留区域——
@@ -1549,9 +1563,11 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            for (int i = 0; i < d.Reactions.Length; i++)
+            // EMG2-REACT-01：爆燃已从旧标签反应表撤下改走通道规则（E01 / C01）；液洼 / 油迹的“整片反应”仍是迁入区域的旧载荷（改写归 EMG2-REACT-02，DEBT-EMG2MAT02-03），
+            // 残留参数改读热更层写入的“区域整片反应残留”（i = −1，同一 fg.TbReaction 行），计数按稳定键记进涌现可靠计数，不再占旧表下标。
+            for (int i = -1; i < d.Reactions.Length; i++)
             {
-                CombatReactionRule rule = d.Reactions[i];
+                CombatReactionRule rule = i < 0 ? LegacyResidueRule(ref d) : d.Reactions[i];
                 if (rule.Pair == 0u || rule.ResidueBit == 0u || rule.ResidueSeconds <= 0f || rule.ResidueRadius <= 0f)
                 {
                     continue;
@@ -1585,14 +1601,21 @@ namespace BinGames.Sim.Combat
                 {
                     LegacyReacted(ref d, ref leak); // EMG2-MAT-02：迁入斑块整片反应后换成残留的物质（燃烧残留 = mat.fire，FG19B §1.5“已反应阶段 = E01 产物明火”）
                 }
-                d.ReactionCount[i] = d.ReactionCount[i] + 1;
-                d.ReactionLastPos[i] = leak.Pos;
-                d.ReactionLastSource[i] = 0;
-                d.ReactionLastTarget[i] = 0;
+                if (i < 0)
+                {
+                    EmgRuleHit(ref d, d.ResidueKey, 0, 0, leak.Pos);
+                }
+                else
+                {
+                    d.ReactionCount[i] = d.ReactionCount[i] + 1;
+                    d.ReactionLastPos[i] = leak.Pos;
+                    d.ReactionLastSource[i] = 0;
+                    d.ReactionLastTarget[i] = 0;
+                    Cue(ref d, CombatEventKind.TagReaction, -1, 0, 0f, leak.Pos, (byte)i);
+                }
                 CombatCounters counters = d.Counters[0];
                 counters.ReactionsFired++;
                 d.Counters[0] = counters;
-                Cue(ref d, CombatEventKind.TagReaction, -1, 0, 0f, leak.Pos, (byte)i);
                 if (slick)
                 {
                     // FG10-FAC-01：油迹不是管线液洼，不交给热更层的液洼对账（内核按时长自己消失）；只记计数与提示。
@@ -1602,7 +1625,7 @@ namespace BinGames.Sim.Combat
                     ClarityCue(ref d, -1, 0, leak.Radius, leak.Pos, 6, 0);
                     return;
                 }
-                d.LeakReactions.Add(new int2(-leak.Owner, i));
+                d.LeakReactions.Add(new int2(-leak.Owner, i < 0 ? CombatConst.ResidueRuleIndex : i));
                 return;
             }
         }

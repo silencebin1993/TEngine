@@ -1089,7 +1089,7 @@ namespace BinGames.Sim.Combat
             CombatReading r = wp.Reading;
             double now = d.Scalars[0].Time;
             bool wasMarked = d.MarkedUntil[hit] > now;
-            float pierce = (pr.Flags & EmgProjFlags.Overload) != 0 && !d.Has(hit, CombatUnitFlags.HeatResistant) ? wp.PierceBonus : 0f;
+            float pierce = 0f; // EMG2-REACT-01：熔穿过载旧穿甲退役（FG19B P03）
             float dealt = StrikeDamage(ref d, owner, hit, pr.Damage, r, fromSide, !viaDrone, pierce);
             if (!DamageUnit(ref d, hit, dealt, owner))
             {
@@ -1212,15 +1212,18 @@ namespace BinGames.Sim.Combat
                 EmgHashAdd(ref d, w.Pos, w.Radius, EmgHash.KindWreck, k);
             }
             // EMG2-MAT-01（FGR-EMG-081）：斑块 × 单位 / 斑块 × 斑块 / 弹体 × 斑块都查这一张哈希（不做全表两两扫描，顺带偿还 DEBT-FG2FW02-06 的斑块那一半）。
+            int blocks = 0;
             for (int k = 0; k < d.Patches.Length; k++)
             {
                 CombatZone z = d.Patches[k];
                 if (z.Matter != 0)
                 {
                     EmgHashAdd(ref d, z.Pos, z.Radius, EmgHash.KindPatch, k);
+                    blocks += PatchBlocks(ref d, z) ? 1 : 0; // EMG2-REACT-01：阻路斑块数（移动查阻路的开关）
                 }
             }
             EmgScalars es = d.EmgS[0];
+            es.BlockLive = blocks;
             es.HashDirty = 0;
             d.EmgS[0] = es;
         }

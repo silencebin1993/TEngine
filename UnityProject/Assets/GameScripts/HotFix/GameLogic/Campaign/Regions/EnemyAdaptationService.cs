@@ -54,7 +54,7 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>现场解析全部存活机器的装配反应，与 <see cref="FoundryOutpostRegion.ComputeCoreGateLights"/>
         /// "现役机实装"同一读取手法（<see cref="BlueprintEditorService.Find"/> → 对应版本 →
-        /// <see cref="BlueprintCircuitBoard.FromVersion"/> → <see cref="BlueprintCircuitCompiler.DetectReactionId"/>），
+        /// <see cref="BlueprintCircuitBoard.FromVersion"/> → <see cref="Emergence.EmgRuleCatalog.AssemblyReactionId"/>），
         /// 不新造第二套蓝图解析路径。</summary>
         private static BuildSummary SummarizeBuilds(CampaignState state)
         {

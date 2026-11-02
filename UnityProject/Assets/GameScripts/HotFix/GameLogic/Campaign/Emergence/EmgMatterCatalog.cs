@@ -79,7 +79,7 @@ namespace GameLogic.Campaign.Emergence
                     Slippery = r.Slippery, Magnetic = r.Magnetic, Reflective = r.Reflective, Life = r.Lifetime, LifePerAmount = r.LifePerAmount, LifeMax = r.LifeMax,
                     Spread = r.Spread, CoatSeconds = r.CoatSeconds, TempInit = r.TempInit, Hp = r.Hp, MergeOverlap = r.MergeOverlap, ContactDps = r.ContactDps,
                     ContactSlow = r.ContactSlow, EmitEvery = r.EmitEvery, Color = ParseColor(r.Color), Quota = (short)Math.Max(0, r.Quota), CoatBit = (sbyte)r.CoatBit,
-                    Layer = (byte)r.Layer, Solid = (byte)(r.Solid != 0 ? 1 : 0), FixedTemp = (byte)(r.FixedTemp != 0 ? 1 : 0), Decay = (byte)Math.Max(0, decay), Emit = emit,
+                    Layer = (byte)r.Layer, Solid = (byte)Math.Max(0, Math.Min(EmgMatterConst.SolidBlock, r.Solid)), FixedTemp = (byte)(r.FixedTemp != 0 ? 1 : 0), Decay = (byte)Math.Max(0, decay), Emit = emit,
                     Pattern = (byte)Math.Max(0, r.Pattern), StructDps = Math.Max(0f, r.StructDps),
                 };
                 c.NameKeys[r.Code] = r.NameKey;

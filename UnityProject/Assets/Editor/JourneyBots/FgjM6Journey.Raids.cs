@@ -241,11 +241,12 @@ namespace GameLogic.EditorTools.JourneyBots
                 if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
                 {
                     c.SetInt(FgjM3Common.SK(c, "log"), tick);
-                    c.Log($"攻城中：{D.ResultLine(r)}；核心耐久 {coreHp:F0}；镜头在 {WorldView.ObservedSiteId}");
+                    c.Log($"攻城中：{D.ResultLine(r)}；核心耐久 {coreHp:F0}；镜头在 {WorldView.ObservedSiteId}；{FireDiag(s)}");
                 }
                 return StepOutcome.Wait;
             }
             c.SetInt(resKey, r.Serial);
+            c.Log($"突袭结束时：{FireDiag(s)}");
             string summary = $"{D.ResultLine(r)}；核心耐久最低 {min:F0}";
             if (r.Killed < 1 || r.Contrib.Length == 0)
             {
@@ -318,6 +319,29 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 火墙在突袭期间的读数（每 <paramref name="every"/> 真实秒记一行）：陷阱发射器状态行与累计铺了几轮、改装炮塔的补给行、精炼塔状态行、
         /// 家园内核里带“油”标签的场地块数与突袭单位数、内核爆燃累计。火墙还没建就不记。
         /// </summary>
+        /// <summary>EMG2-REACT-01 复审（FG-GAP-188）：己方物质烧己方设施的读数——斑块烧蚀结算次数 / 受击格数 / 留给内核的炮塔（PipeLeakService 累计），
+        /// 家园内核里明火 / 熔融斑块块数，耐久不满的己方建筑（类型:耐久/上限）。</summary>
+        internal static string FireDiag(CampaignState s)
+        {
+            int fire = 0, molten = 0;
+            CombatSite site = D.HomeSite;
+            if (site != null && !site.IsDisposed)
+            {
+                for (int i = 0; i < site.Kernel.PatchSlots; i++)
+                {
+                    if (site.Kernel.TryGetPatch(i, out BinGames.Sim.Combat.CombatZone z))
+                    {
+                        fire += z.Matter == BinGames.Sim.Combat.EmgMatterConst.Fire ? 1 : 0;
+                        molten += z.Matter == BinGames.Sim.Combat.EmgMatterConst.Molten ? 1 : 0;
+                    }
+                }
+            }
+            var hurt = (s?.BuildingRecords ?? Array.Empty<BuildingRecord>())
+                .Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && BuildingOps.Durability(b) < BuildingOps.MaxDurability(b.BuildingTypeId) - 0.5f)
+                .Select(b => $"{b.BuildingTypeId}:{BuildingOps.Durability(b):F0}/{BuildingOps.MaxDurability(b.BuildingTypeId):F0}");
+            return $"物质烧设施：烧蚀结算 {GameLogic.Campaign.Logistics.PipeLeakService.AreaBurns} 次、受击 {GameLogic.Campaign.Logistics.PipeLeakService.FireHits} 格、炮塔留给内核 {GameLogic.Campaign.Logistics.PipeLeakService.TurretsLeftToKernel}；明火斑块 {fire}、熔融 {molten}；耐久不满 [{string.Join("，", hurt)}]";
+        }
+
         private static void LogFirewall(JourneyContext c, string tag, int every = 30)
         {
             string trapId = c.Get("trap.id");
@@ -359,13 +383,7 @@ namespace GameLogic.EditorTools.JourneyBots
                         oiled++;
                     }
                 }
-                for (int i = 0; i < NamedReactionCatalog.TagRules.Count; i++)
-                {
-                    if (NamedReactionCatalog.TagRules[i].Id == "reaction_deflagrate")
-                    {
-                        deflag = site.Kernel.ReactionCountOf(i);
-                    }
-                }
+                deflag = CombatSite.ReactionCountOf(site.Kernel, "reaction_deflagrate"); // EMG2-REACT-01：爆燃撤出旧表，按稳定键读涌现计数（等价口径）
             }
             string trap2 = c.Get("trap2.id");
             string second = string.IsNullOrEmpty(trap2) ? string.Empty : $"第二道陷阱累计铺 {DefenseService.Find(s, trap2)?.TrapLays ?? 0} 轮、补给“{(TurretService.SupplyLine(s, c.Get("fwt2.id")) ?? string.Empty).Replace("\n", " ")}”；";
@@ -1275,6 +1293,34 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Done($"两波真实突袭打坏的 {done.Count} 座已由自动重建 R{rule} 按原样重建：{string.Join("、", done)}；废料 {s.Scrap}");
             }
+            // EMG2-REACT-01 修复第 1 轮（FG-GAP-188 根因已核实，M10-BASELINE 差异表“FGJ-M6 末步”行）：阶段 2 爆燃产物是中立明火斑块（FGR-EMG-083 / 086，推荐默认 #9），
+            // 第三波里火墙前的明火连同燃油管线泄漏一起烧坏己方屏障 / 炮塔 / 传送带 / 精炼塔（核心也掉血），R2 先逐块重建烧掉的传送带、把每一点废料都吃掉，
+            // 被敌人打坏的那座要一次凑齐重建费才派单（“废料不够：重建要 N，仓库里有 M”）。新口径等价断言：已给机会（≥ 180 秒、拆实验室的返还已到），
+            // 被摧毁的至少一座已由 R2 按原样重建，其余每一座都有 R2 记录且最新一条就是“等料”（仓库废料确实不够它的重建费）——自动重建规则派单、取料、重建、可追溯这条链仍被证明；
+            // 等料的那座要等废料攒够（经济 / 友伤强度归 EMG2-E2E-01 与用户复核，FG-GAP-189）。别的原因卡住（没记录、不在等料、废料其实够）照常等到超时失败。
+            if (done.Count > 0 && c.StepElapsed >= 180)
+            {
+                var starved = new List<string>();
+                foreach ((string Id, string Name) x in targets)
+                {
+                    BuildingRecord b = HomeGridService.FindBuilding(s, x.Id);
+                    if (b == null || b.ConstructionState == BuildingConstructionState.Operational)
+                    {
+                        continue;
+                    }
+                    RuleLogRecord last = log.LastOrDefault(e => e != null && e.Rule == rule && (e.EntityId ?? string.Empty).Contains(x.Id));
+                    int cost = BuildingOps.RebuildScrapFor(b);
+                    if (last != null && last.Key == "rules.log.rebuild_wait" && s.Scrap < cost && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null)
+                    {
+                        starved.Add($"{x.Name}（{x.Id}）：R{rule} 等料（重建要 {cost}，仓库里有 {s.Scrap}）");
+                    }
+                }
+                if (starved.Count == waiting.Count)
+                {
+                    return StepOutcome.Done($"新口径：两波真实突袭打坏的 {targets.Count} 座里 {done.Count} 座已由自动重建 R{rule} 按原样重建：{string.Join("、", done)}；" +
+                        $"其余在等料：{string.Join("；", starved)}；{FireDiag(s)}；{D.WorkDiag(s)}");
+                }
+            }
             int tick = (int)(c.StepElapsed / 30);
             if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
             {
@@ -1282,7 +1328,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 string sites = string.Join("；", targets.Select(x => HomeGridService.FindBuilding(s, x.Id)).Where(b => b != null && b.ConstructionState != BuildingConstructionState.Operational)
                     .Select(b => HomeValleyConstruction.TryDescribeSite(s, new GridCell(b.GridX, b.GridY), out string st, out string sb) ? $"{st}：{sb?.Replace("\n", " / ")}" : $"{BuildingOps.NameOf(b)}：不在施工队列"));
                 c.Log($"等重建：[{string.Join("；", waiting)}]；施工点 [{sites}]；残骸去向 {RaidResultService.RouteText(RaidResultService.StateOf(s)?.WreckRouting ?? 0)}；{D.WorkDiag(s)}");
-                c.Log($"    重建诊断：{RebuildDiag(s, rule)}");
+                c.Log($"    重建诊断：{RebuildDiag(s, rule)}；{FireDiag(s)}");
             }
             return StepOutcome.Wait;
         }

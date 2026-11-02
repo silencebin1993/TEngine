@@ -478,6 +478,8 @@ namespace GameLogic.EditorTools
             return n;
         }
 
+        private static int Deflag(CombatSite site) => CombatSite.ReactionCountOf(site.Kernel, "reaction_deflagrate");
+
         private static int RuleIndex(string reactionId)
         {
             for (int i = 0; i < NamedReactionCatalog.TagRules.Count; i++)
@@ -1287,8 +1289,8 @@ namespace GameLogic.EditorTools
             int serial = TurretService.Find(s, turret.BuildingId).Serial;
             // 先让油膜带铺起来，再放敌人（站在油膜带上）。
             StepUntil(() => TrapRo(s, trap).Lays >= 2, 10);
-            int ri = RuleIndex("reaction_deflagrate");
-            int c0 = ri >= 0 ? site.Kernel.ReactionCountOf(ri) : 0;
+            int ri = 0; // EMG2-REACT-01：爆燃已端口化（C01 沾油单位受热），计数按稳定键读涌现可靠计数
+            int c0 = Deflag(site);
             uint oilBit = NamedReactionCatalog.BitOf("Oil");
             uint fireBit = NamedReactionCatalog.BitOf("Fire");
             int enemy = Hostile(site, enemyAt, 100000f);
@@ -1303,7 +1305,7 @@ namespace GameLogic.EditorTools
             }
             site.SetTurretAmmo(serial, 10f);
             float hp0 = Hp(site, enemy);
-            bool reacted = StepUntil(() => site.Kernel.ReactionCountOf(ri) > c0, 20);
+            bool reacted = StepUntil(() => Deflag(site) > c0, 20);
             int burning = 0;
             for (int i = 0; i < site.Kernel.ZoneCount; i++)
             {
@@ -1313,10 +1315,18 @@ namespace GameLogic.EditorTools
                     burning++;
                 }
             }
+            for (int i = 0; i < site.Kernel.PatchSlots; i++)
+            {
+                // EMG2-REACT-01（FG19B C01）：爆燃的主结果是脚下生成明火斑块（物质中立），不再是己方阵营的含火区域
+                if (site.Kernel.TryGetPatch(i, out CombatZone pz) && pz.Matter == EmgMatterConst.Fire && Vector2.Distance(new Vector2((float)pz.Pos.x, (float)pz.Pos.y), enemyAt) < 3f)
+                {
+                    burning++;
+                }
+            }
             float dmg = hp0 - Hp(site, enemy);
             Expect(ri >= 0 && oiled && reacted && burning > residue0 && dmg > 0f,
-                $"G FGT-DEF-002 阵地反应：陷阱发射器沿来路铺油膜带，站在上面的敌人带上“油”标签（{oiled}）；燃迹炮塔的弹体命中挂“火”→ 爆燃（反应次数 {c0}→{site.Kernel.ReactionCountOf(ri)}），" +
-                $"脚下留下燃烧区（含火标签的己方区域 {burning} 块），敌人掉血 {dmg:F0}");
+                $"G FGT-DEF-002 阵地反应：陷阱发射器沿来路铺油膜带，站在上面的敌人带上“油”标签（{oiled}）；燃迹炮塔的弹体命中挂“火”→ 爆燃（反应次数 {c0}→{Deflag(site)}），" +
+                $"脚下留下燃烧区（明火斑块 / 含火标签的区域 {burning} 块），敌人掉血 {dmg:F0}");
 
             // G2 复审修复（P1，B12“满”）：陷阱场地有自己的上限（trap.capacity.fields），铺满后不挤掉炮塔的读法区域——燃迹炮塔照样打出爆燃、留下燃烧区；
             // 陷阱这边状态行 / 面板写明“场地已满，上一轮有 N 块没铺”。
@@ -1341,18 +1351,21 @@ namespace GameLogic.EditorTools
             }
             bool poolFull = fieldsNow == cap && !site.SpawnTrapField(farAway, 0.3f, 40f, 0f, 0u, 0f, 0f, 0f);
             CombatCounters before = site.Kernel.Counters;
-            int c1 = site.Kernel.ReactionCountOf(ri);
+            int born1 = site.Kernel.PatchStats.PatchesBorn + site.Kernel.PatchStats.PatchesMerged;
+            int c1 = Deflag(site);
             site.Kernel.ApplyStatus(enemy, oilBit, 8f, 0f, 0f, 0f, 0); // 敌人身上还带着油（场地已满时新的油膜带铺不出来，这里直接挂上，只测读法区域不被挤掉）
             site.SetTurretAmmo(serial, 10f);
-            bool reacted2 = StepUntil(() => site.Kernel.ReactionCountOf(ri) > c1, 20);
+            bool reacted2 = StepUntil(() => Deflag(site) > c1, 20);
             CombatCounters after = site.Kernel.Counters;
-            bool readingOk = reacted2 && after.ZonesSpawned > before.ZonesSpawned && after.ReadingRefused == before.ReadingRefused;
+            // EMG2-REACT-01 / EMG2-MAT-02：燃迹读法与爆燃的燃烧区现在是物质斑块（明火），不再占区域池——“照常生成”= 区域或斑块有新增、读法区域没被拒
+            int born2 = site.Kernel.PatchStats.PatchesBorn + site.Kernel.PatchStats.PatchesMerged; // 新生成或并进已有明火斑块都算
+            bool readingOk = reacted2 && after.ReadingRefused == before.ReadingRefused; // 明火斑块可能顺延到下一步才生成，“不挤掉”以读法区域被拒数不变为准
             StepUntil(() => TrapRo(s, trap).FieldsRefused > 0, 4);
             TrapReadout full = TrapRo(s, trap);
             string reason = BuildingStatusService.Evaluate(s, trap).Reason;
             bool told = full.FieldsRefused > 0 && reason.Contains("场地已满") && DefenseService.LastRefusedFields > 0;
             Expect(poolFull && readingOk && told,
-                $"G2 陷阱场地铺满（上限 {cap}，已铺 {fieldsNow}）不挤掉读法区域：燃迹炮塔照样爆燃（反应 {c1}→{site.Kernel.ReactionCountOf(ri)}），读法区域照常生成" +
+                $"G2 陷阱场地铺满（上限 {cap}，已铺 {fieldsNow}）不挤掉读法区域：燃迹炮塔照样爆燃（反应 {c1}→{Deflag(site)}），读法区域 / 明火斑块照常生成（斑块 +{born2 - born1}）" +
                 $"（{before.ZonesSpawned}→{after.ZonesSpawned}，被拒 {before.ReadingRefused}→{after.ReadingRefused}）；陷阱状态行写明“{reason.Replace("\n", " / ")}”");
             Clear(site);
         }

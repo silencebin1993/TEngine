@@ -24,11 +24,11 @@ namespace GameLogic.Campaign.Blueprint
     /// </summary>
     public static class UplinkReactionReadiness
     {
-        /// <summary>与 <see cref="BlueprintCircuitCompiler.DetectReactionId(string, string, IEnumerable{string})"/> 的优先级一致（标记跳转先于熔穿过载）。</summary>
+        /// <summary>与 <see cref="Emergence.EmgRuleCatalog.AssemblyReactionId"/> 的优先级一致（EMG2-REACT-01：熔穿过载先于标记跳转——熔穿过载要靠武器的“开火时成立”标志结算，标记跳转由固件程序自己跳）。</summary>
         private static readonly string[] ReactionOrder =
         {
-            MechanicalReactionCatalog.ReactionMarkJumpId,
             MechanicalReactionCatalog.ReactionMeltOverloadId,
+            MechanicalReactionCatalog.ReactionMarkJumpId,
         };
 
         private const int CacheLimit = 256;
@@ -94,7 +94,7 @@ namespace GameLogic.Campaign.Blueprint
             }
             CompileCount++;
             var ready = new List<string>(1);
-            string aiReaction = BlueprintCircuitCompiler.DetectReactionId(board);
+            string aiReaction = BlueprintCircuitCompiler.AssemblyReactionId(board);
             if (aiReaction != null)
             {
                 ready.Add(aiReaction);

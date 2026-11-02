@@ -346,7 +346,9 @@ namespace GameLogic.EditorTools
                     }
                     string a = RunArena(with, 4f, prepared: true).Digest;
                     string b = RunArena(off, 4f, prepared: true).Digest;
-                    if (a == b)
+                    // EMG2-REACT-01：标记跳转撤掉装配挂接后只剩声明轨程序（条件连锁 grm.mod.chain + evt.marked，FG19A:106）——读法字段本身看不出差异时，
+                    // 按正式路径（蓝图编译 → 程序编译 → 内核程序）再比一次，程序轨有可观察差异也不算死对。
+                    if (a == b && DeclObs(comp, new[] { r.Id }).Digest == DeclObs(comp, Array.Empty<string>()).Digest)
                     {
                         dead.Add($"{carrier}/{r.Id}");
                     }
@@ -415,8 +417,10 @@ namespace GameLogic.EditorTools
             Expect(field.Zones >= 1 && field.MaxZonesAlive >= 1, $"布区载体：喷洒器在目标脚下铺区域（共 {field.Zones} 块，同时最多 {field.MaxZonesAlive} 块）");
             (on, off) = Pair(gun, "fw_echo");
             Expect(on.Echoes > 0 && Dmg(on, ArenaP) > Dmg(off, ArenaP), $"回波 · 射弹：排了 {on.Echoes} 次回波，主目标伤害 {Dmg(on, ArenaP):0} > {Dmg(off, ArenaP):0}");
-            (on, off) = Pair(ram, FirmwareCatalog.FwMarkTagId);
-            (Obs onU, Obs offU) = Pair(ram, FirmwareCatalog.FwMarkTagId, prepared: false);
+            // EMG2-REACT-01：标记跳转只剩声明轨（装配挂接已撤），按正式路径带程序跑（DeclObs：蓝图编译 → 程序编译 → 内核程序），读法关 = 同一部件不装固件。
+            on = DeclObs(ram, new[] { FirmwareCatalog.FwMarkTagId });
+            off = DeclObs(ram, Array.Empty<string>());
+            Obs onU = DeclObs(ram, new[] { FirmwareCatalog.FwMarkTagId }, prepared: false), offU = DeclObs(ram, Array.Empty<string>(), prepared: false);
             float MarkedDmg(Obs o) => Dmg(o, ArenaNear) + Dmg(o, ArenaMarked) + Dmg(o, ArenaFlank);
             Expect(MarkedDmg(on) > MarkedDmg(off) && onU.Digest == offU.Digest,
                 $"标记跳转 · 格斗：命中已标记的主目标时跳到附近已标记的敌人（它们共吃 {MarkedDmg(on):0} > 读法关 {MarkedDmg(off):0}）；场上没有标记时读法开 / 关完全相同（条件读法，不凭空跳）");

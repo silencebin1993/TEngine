@@ -205,6 +205,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 StepPhase(ref d, i, dt, now); // EMG2-PHS-01：7 个累积量与相态（取代云端 StepChill）
+                StepStick(ref d, i, dt); // EMG2-REACT-01（C06）：胶膜固化粘住计时
                 if (d.Faction[i] != (byte)CombatFaction.Hostile || IsImmobile(ref d, i) || d.Behavior[i] == (byte)CombatBehavior.Puddle)
                 {
                     continue;
@@ -807,9 +808,9 @@ namespace BinGames.Sim.Combat
             if (d.OilBit != 0u && d.FireBit != 0u)
             {
                 uint pair = d.OilBit | d.FireBit;
-                for (int r = 0; r < d.Reactions.Length; r++)
+                for (int r = -1; r < d.Reactions.Length; r++)
                 {
-                    CombatReactionRule rule = d.Reactions[r];
+                    CombatReactionRule rule = r < 0 ? LegacyResidueRule(ref d) : d.Reactions[r]; // EMG2-REACT-01：爆燃撤出旧表后残留参数读“区域整片反应残留”
                     if (rule.Pair != pair || rule.ResidueBit == 0u || rule.ResidueSeconds <= 0f || rule.ResidueRadius <= 0f)
                     {
                         continue;

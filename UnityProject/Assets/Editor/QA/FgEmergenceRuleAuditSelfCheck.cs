@@ -38,18 +38,14 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        /// <summary>FGR-EMG-021：过渡豁免只有两条现存装配反应，写死不得新增（阶段 2 端口化后清零，EMG2 卡把它改成空数组）。</summary>
-        public static readonly string[] Exemptions =
-        {
-            "BlueprintCircuitCompiler.cs|MechanicalReactionCatalog.DetectMarkJump|1",
-            "BlueprintCircuitCompiler.cs|MechanicalReactionCatalog.DetectMeltOverload|1",
-        };
+        /// <summary>FGR-EMG-021：过渡豁免只有两条现存装配反应，写死不得新增。EMG2-REACT-01 端口化后清零（熔穿过载 = P03 规则行，标记跳转 = fw_marktag 只跳已标记连锁），豁免数 = 0。</summary>
+        public static readonly string[] Exemptions = Array.Empty<string>();
 
         /// <summary>
         /// 存量违例（不是豁免）：审计发现的、早于 FG19 的按内容 ID 判断，登记 FG-GAP-169，只减不增。格式“文件|符号|出现次数”，按次数比对——
         /// 同一符号多写一处、出现清单外的新违例、或清单里的某条修掉了（次数变少）却没同步改清单，都判失败。承接：
         /// 编译器：静默标记器 → EMG1-FW-01（func_marker 声明切轨），铸造重炮开火方式 → EMG1-TRIG-01（根载荷实体化改按组件行数据），散热鳍 → EMG2-RULE-01（struct_fin 声明阶段 2）；
-        /// 编译器调用的 BlueprintCircuitBoard 热量 / 带宽函数：重炮 + 过载配对积热（熔穿过载的热量侧）→ EMG2-REACT-01（装配反应端口化），
+        /// 编译器调用的 BlueprintCircuitBoard 热量 / 带宽函数：重炮 + 过载配对积热（熔穿过载的热量侧）已由 EMG2-REACT-01 清零（重型射弹载体 + en.heat 写端 → P03 开火者代价），
         /// 中继带宽 → EMG1-FW-01 写 struct_relay 声明、EMG3-SQD-01 中继转发切轨；CarrierReadings 固定底盘分支 → EMG3-CHS-01（锚定特性按 chs.* 状态端口生效）。
         /// </summary>
         public static readonly string[] LegacyBaseline =
@@ -58,8 +54,6 @@ namespace GameLogic.EditorTools
             "BlueprintCircuitCompiler.cs|ComponentCatalog.CompCannonId|1",
             "BlueprintCircuitCompiler.cs|ComponentCatalog.StructFinId|1",
             "BlueprintCircuitBoard.cs|ComponentCatalog.StructRelayId|1",
-            "BlueprintCircuitBoard.cs|ComponentCatalog.CompCannonId|2",
-            "BlueprintCircuitBoard.cs|FirmwareCatalog.FwOverloadId|2",
             "CarrierReadings.cs|\"chassis_fixed\"|1",
         };
 
@@ -485,8 +479,8 @@ namespace GameLogic.EditorTools
                    && ScanSource("if (c == \"chassis_track\" || c == ChassisCatalog.ChassisHoverId) { }").Count == 2
                    && ScanSource("return Fail(\"chassis_locked\");").Count == 0,
                 "扫描器对照：字面量 \"fw_split\" 命中、注释里的不命中、只有前缀 \"fw_\" 不命中、组件常量命中、ID 配对检测函数命中、同一常量写两处计 2 次、底盘字面量与常量命中、已核实的错误码不计");
-            Expect(Exemptions.Length == 2 && Exemptions.All(e => e.Contains("DetectMarkJump") || e.Contains("DetectMeltOverload")),
-                "豁免清单写死为两条装配反应（标记跳转、熔穿过载，FGR-EMG-021），不得新增");
+            Expect(Exemptions.Length == 0,
+                "FGT-EMG-004：豁免数 = 0（两条装配反应已端口化，FGR-EMG-021 豁免撤销；MechanicalReactionCatalog.Detect* ID 配对已删）");
             var raw = new List<string>();
             int files = 0;
             foreach (string f in AuditFiles())
@@ -502,7 +496,7 @@ namespace GameLogic.EditorTools
             List<string> unexpected = findings.Except(Exemptions).Except(LegacyBaseline).ToList();
             List<string> fixedButListed = LegacyBaseline.Concat(Exemptions).Except(findings).ToList();
             Expect(files >= 16 && unexpected.Count == 0,
-                $"扫描 {files} 个源文件（Sim/Combat 全部、BlueprintCircuitCompiler、BlueprintCircuitBoard、CarrierReadings、Emergence）：除 2 条豁免与 {LegacyBaseline.Length} 条已登记存量（FG-GAP-169，按出现次数）外没有内容 ID 判断"
+                $"扫描 {files} 个源文件（Sim/Combat 全部、BlueprintCircuitCompiler、BlueprintCircuitBoard、CarrierReadings、Emergence）：除 {Exemptions.Length} 条豁免与 {LegacyBaseline.Length} 条已登记存量（FG-GAP-169，按出现次数）外没有内容 ID 判断"
                 + (unexpected.Count > 0 ? "；新违例或次数变多：" + string.Join("、", unexpected) : string.Empty));
             Expect(fixedButListed.Count == 0,
                 "存量与豁免只减不增：清单里每一条都仍在源码里、次数一致（修掉一处就必须同步改清单，清单不会悄悄变成新的豁免）"
@@ -540,14 +534,14 @@ namespace GameLogic.EditorTools
         // ── F 回归 ──
         private static void CheckRegression()
         {
-            Line("  · F. FGT-EMG-004（回归，阶段 1 口径；与 FGJ-M1 同）：熔穿过载与过载积热不变");
+            Line("  · F. FGT-EMG-004（回归，阶段 2 端口口径；与 FGJ-M1 同）：熔穿过载与过载积热不变（判定改按载体类别 + 端口）");
             FirmwareKinds.ResetForTests();
             string cannon = ComponentCatalog.CompCannonId, beam = ComponentCatalog.CompBeamId, overload = FirmwareCatalog.FwOverloadId;
             float cannonHeat = BlueprintCircuitBoard.ComputeHeatBudget(cannon, new[] { overload });
             float beamBase = BlueprintCircuitBoard.ComputeHeatBudget(beam, Array.Empty<string>());
             float beamOver = BlueprintCircuitBoard.ComputeHeatBudget(beam, new[] { overload });
-            string cannonRx = BlueprintCircuitCompiler.DetectReactionId(cannon, null, new[] { overload });
-            string beamRx = BlueprintCircuitCompiler.DetectReactionId(beam, null, new[] { overload });
+            string cannonRx = EmgRuleCatalog.AssemblyReactionId(cannon, new[] { overload });
+            string beamRx = EmgRuleCatalog.AssemblyReactionId(beam, new[] { overload });
             Expect(Mathf.Approximately(cannonHeat, 65f) && cannonRx == MechanicalReactionCatalog.ReactionMeltOverloadId,
                 $"铸造重炮 + 过载：熔穿过载（{cannonRx}），每发积热 {cannonHeat:0.#}（= 65；内核首发积热 65 另由 FgCombatKernelSelfCheck / FgCoreFirmwareBoundarySelfCheck 真开火断言）");
             Expect(Mathf.Approximately(beamOver - beamBase, 15f) && beamRx == null,

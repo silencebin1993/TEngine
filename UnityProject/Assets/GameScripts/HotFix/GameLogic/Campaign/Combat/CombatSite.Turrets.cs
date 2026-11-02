@@ -187,6 +187,7 @@ namespace GameLogic.Campaign.Combat
             }
             CombatFireResult r = Kernel.FireAt(unit, targetUnit, Kernel.Time);
             ProcessEvents();
+            ReactionFeedback.Process(this, CampaignSession.Current, countsOnly: true); // EMG2-REACT-01：熔穿过载等改在命中结算——即时命中的反应计数 / 核心固件冷却在这次开火里落账（与旧轨开火时发动同一时点）
             return r;
         }
 

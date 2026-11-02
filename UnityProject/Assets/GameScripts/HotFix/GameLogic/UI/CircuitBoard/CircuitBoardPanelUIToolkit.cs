@@ -1302,7 +1302,7 @@ namespace GameLogic.UI.CircuitBoard
             {
                 return null;
             }
-            string reaction = BlueprintCircuitCompiler.DetectReactionId(board.PrimaryId, board.UtilityId, board.FirmwareSlots);
+            string reaction = GameLogic.Campaign.Emergence.EmgRuleCatalog.AssemblyReactionId(board.PrimaryId, board.FirmwareSlots);
             return firmwareId == MechanicalReactionCatalog.TriggerFirmwareOf(reaction) && MechanicalReactionCatalog.TryGet(reaction, out MechanicalContentDef rdef)
                 ? rdef.DisplayName : null;
         }

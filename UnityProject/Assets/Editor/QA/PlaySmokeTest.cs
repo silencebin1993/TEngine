@@ -5272,8 +5272,8 @@ namespace GameLogic.EditorTools
             int icons = site?.Renderer?.LastIconInstances ?? -1;
             bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
             Write($"  - 状态标签：光标下单位 {unit}（{tagName}，敌人 {enemyType}），头顶图标实例 {icons}，悬停读数“{UiTooltip.Content?.Title}｜{UiTooltip.Content?.Body?.Replace('\n', '/')}”（图鉴 {UiTooltip.Content?.CodexEntryId}）");
-            Check(site != null && site.Kernel.ReactionRuleCount == Campaign.Content.NamedReactionCatalog.TagRules.Count && site.Kernel.ReactionRuleCount == 16,
-                $"破碎都市的地点内核登记了 {site?.Kernel.ReactionRuleCount} 条具名标签反应规则（fg.TbReaction）");
+            Check(site != null && site.Kernel.ReactionRuleCount == Campaign.Content.NamedReactionCatalog.TagRules.Count && site.Kernel.ReactionRuleCount == 11,
+                $"破碎都市的地点内核登记了 {site?.Kernel.ReactionRuleCount} 条具名标签反应规则（fg.TbReaction kind = tag；五条定稿反应已端口化进通道规则表 {site?.Kernel.EmgRuleCount} 行，EMG2-REACT-01）");
             Check(GameSettings.HasSeenGuidanceHook(GuidanceHooks.StatusTagFirstSeen), "第一次看到头顶状态标签时发出引导钩子（内容在 FG15-UX-04）");
             // FG2-FW-04：真实 Play 里读法生成区域时出声、镜头正看着的地点弹出读法弹字（承接 DEBT-FG2FW02-02）；远征的伤害归因场次在记敌方受到的伤害。
             CampaignState rs = CampaignSession.Current;

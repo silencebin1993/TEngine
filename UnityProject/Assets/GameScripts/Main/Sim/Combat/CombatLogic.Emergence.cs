@@ -597,7 +597,12 @@ namespace BinGames.Sim.Combat
             EmgCtx c0 = d.EmgCtx;
             if (c0.Prog >= 0 && c0.EntKind != EmgEntKind.None && attacker == c0.Owner)
             {
-                EmgHitInject(ref d, t, c0); // EMG2-RULE-01：命中注能（en.heat / en.elec / en.mag 写端）与壁撞推动；不依赖总线监听
+                float2 inj = EmgHitInject(ref d, t, c0); // EMG2-RULE-01：命中注能（en.heat / en.elec / en.mag 写端）与壁撞推动；不依赖总线监听
+                if (math.any(inj > 0f))
+                {
+                    EmgMeltOverloadHit(ref d, t, attacker, inj.x, damage); // EMG2-REACT-01（P03）：同一次命中注热 ≥ 45 且动能 ≥ 40 → 熔穿过载
+                    EmgCoatReact(ref d, t, 0u, inj.x, inj.y, attacker); // EMG2-REACT-01（C01～C03）：沾油 / 浸湿的单位这一次命中受热 / 通电
+                }
             }
             if (damage > 0f && attacker >= 0 && attacker < d.Count && c0.EntKind != EmgEntKind.Zone && c0.EntKind != EmgEntKind.Patch && IsFrozen(ref d, t))
             {

@@ -111,9 +111,7 @@ namespace GameLogic.EditorTools
             CombatSite.ApplyEmgSubForms(k);
             CombatSite.ApplyEntityProfiles(k);
             CombatSite.ApplyMatters(k);
-            k.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
-            k.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
-            k.SetClarityBits(Bit("Acid"), Bit("Wet"), Bit("Oil"), Bit("Fire"), Bit("Frozen"));
+            CombatSite.ApplyReactionTables(k); // EMG2-REACT-01：含整片反应残留参数（爆燃撤出旧表后从规则行取）
             return k;
         }
 

@@ -66,8 +66,10 @@ namespace GameLogic.Campaign.Combat
             return !string.IsNullOrEmpty(siteId) && observed == siteId;
         }
 
-        /// <summary>一个模拟步之后调用（<see cref="CombatSite.Step"/> 末尾）。</summary>
-        public static void Process(CombatSite site, CampaignState state)
+        /// <summary>一个模拟步之后调用（<see cref="CombatSite.Step"/> 末尾）。
+        /// <paramref name="countsOnly"/> = true：两步之间的手动开火后调用，只结算按游标取差值的部分（旧表 / 涌现计数、读法、伤害），
+        /// 不碰反应装甲与友伤列表——它们没有游标，上一步已交出的条目要到下一步开始才去掉，开火时新加的条目随下一步一起交（否则重复通知）。</summary>
+        public static void Process(CombatSite site, CampaignState state, bool countsOnly = false)
         {
             if (site == null || site.IsDisposed)
             {
@@ -146,6 +148,10 @@ namespace GameLogic.Campaign.Combat
                 var at = new Vector2((float)f.Pos.x, (float)f.Pos.y);
                 OnCountedReaction(site, state, rid, dc, f.Src, f.Target, at, observed, now);
                 site.OnDeclCoreReaction(state, f.Src, rid, dc, at); // DEBT-EMG1CHAIN01-06：核心固件冷却 / 暴露 / 提示与旧轨一致
+            }
+            if (countsOnly)
+            {
+                return;
             }
 
             // EMG1-FW-01（FGR-EMG-233 第 6 条）：反应装甲块数只在变化的步进脏列表（O(本步变化数)）——己方机器降到 0 块发一次信息级通知（同车聚合、可定位）。
@@ -299,6 +305,8 @@ namespace GameLogic.Campaign.Combat
             ReactionAttribution.AddReaction(state, site.SiteId, reactionId, count, 0);
             bool first = named && RecordFirst(state, reactionId, site.SiteId);
             ReactionLogParty source = Party(site, state, sourceUnit);
+            // EMG2-REACT-01：已端口化的具名交互（表里还有沾染配对）参与固件按配对认、并补旧标签轨的声音 + 字幕；装配反应（无配对）沿用核心固件与它们自己的提示时刻。
+            uint pair = NamedReactionCatalog.TryGet(reactionId, out GameConfig.fg.Reaction row) ? NamedReactionCatalog.BitOf(row.TagA) | NamedReactionCatalog.BitOf(row.TagB) : 0u;
             ReactionLog.Add(state, new ReactionLogEntry
             {
                 Tick = GameClock.Ticks,
@@ -310,10 +318,19 @@ namespace GameLogic.Campaign.Combat
                 Count = count,
                 Source = source,
                 Target = Party(site, state, targetUnit),
-                FirmwareIds = FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>(),
+                FirmwareIds = pair != 0u ? ParticipatingFirmware(site, source, pair)
+                    : FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>(),
                 Position = ground,
             });
             Revision++;
+            if (named)
+            {
+                GuidanceHooks.Raise(GuidanceHooks.ReactionFirstNamed);
+                if (pair != 0u)
+                {
+                    FeedbackCues.RaiseAt(FeedbackCueId.TagReaction, ground, GameText.Format("reaction.cue", NamedReactionCatalog.NameOf(reactionId)));
+                }
+            }
             if (!named || !observed)
             {
                 return;

@@ -1047,18 +1047,18 @@ namespace GameLogic.Campaign.Blueprint
         /// 既有数字（0 / 15 / 40 / 65）不变。</summary>
         public static float ComputeHeatBudget(string primaryId, IEnumerable<string> firmwareIds)
         {
-            bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
-            // FG5-RND-04：混合固件按两条父固件计（熔穿过载时由反应取代的是父固件“过载”那一项）。
+            // FG5-RND-04：混合固件按两条父固件计。
             List<string> ids = FirmwareKinds.ExpandMixed(firmwareIds?.Where(id => !string.IsNullOrEmpty(id)));
-            bool melt = hasCannon && ids.Contains(FirmwareCatalog.FwOverloadId);
             float heat = ComputeFirmwareHeat(primaryId, ids);
-            if (hasCannon)
+            // EMG2-REACT-01（FG19B §4.1 A2，FG-GAP-169 清零热量侧）：重型射弹载体有基础积热；带开火者代价的规则行（P03）在开火时成立时，
+            // 写 en.heat 的固件表值热量由代价 cost.heat 取代（不叠加）。按载体类别与端口判定，不认组件 / 固件 ID。
+            if (Emergence.EmgRuleCatalog.IsHeavyProjectile(primaryId))
             {
                 heat += Regions.FracturedCityLayout.CannonBaseHeatPerShot;
             }
-            if (melt)
+            if (Emergence.EmgRuleCatalog.CostRuleApplies(primaryId, ids, out float replaced, out float cost))
             {
-                heat += Regions.FracturedCityLayout.OverloadExtraHeatPerShot;
+                heat += cost - replaced;
             }
             return heat;
         }
@@ -1071,11 +1071,10 @@ namespace GameLogic.Campaign.Blueprint
             {
                 return 0f;
             }
-            bool hasCannon = primaryId == ComponentCatalog.CompCannonId;
             float heat = 0f;
             foreach (string id in FirmwareKinds.ExpandMixed(firmwareIds)) // FG5-RND-04：混合固件 = 两条父固件的积热之和（与表 heat 列同数）
             {
-                if (string.IsNullOrEmpty(id) || (hasCannon && id == FirmwareCatalog.FwOverloadId))
+                if (string.IsNullOrEmpty(id))
                 {
                     continue;
                 }

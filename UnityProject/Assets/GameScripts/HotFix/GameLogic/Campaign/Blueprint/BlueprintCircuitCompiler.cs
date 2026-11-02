@@ -42,7 +42,7 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>命中的具名反应展示名，或找不到时的中性说明（永不为 null/空，永不显示"缺反应"错误）。</summary>
         public string ReactionHint = "无具名反应（通用预览已生成）。";
 
-        /// <summary>ER6-REACT-01：<see cref="BlueprintCircuitCompiler.DetectReactionId"/> 的原始结果
+        /// <summary>ER6-REACT-01：<see cref="Emergence.EmgRuleCatalog.AssemblyReactionId"/> 的原始结果
         /// （<see cref="Content.MechanicalReactionCatalog.ReactionMarkJumpId"/> 等），供战斗结算代码
         /// （<see cref="Regions.FracturedCityRegion.TryAttackEnemy"/>）直接判定用，不必重新解析
         /// <see cref="ReactionHint"/> 展示文本或重新拿 <see cref="BlueprintCircuitBoard"/> 现算一次——
@@ -186,7 +186,7 @@ namespace GameLogic.Campaign.Blueprint
             // ER6-REACT-02 的整条战斗链会在第一步就被误判"没有武器"拒绝（execute_code 实测复现过
             // 这个问题）。铸造重炮的伤害本来就是 CannonCombat 里的固定设计常量、不读
             // TotalNormalizedDamage，不依赖这里的 ComposeEngine 编译结果，所以提前计算完全安全。
-            preview.ReactionId = DetectReactionId(board.PrimaryId, board.UtilityId, preview.FirmwareIds);
+            preview.ReactionId = Emergence.EmgRuleCatalog.AssemblyReactionId(board.PrimaryId, preview.FirmwareIds); // EMG2-REACT-01：按端口判定（ADR ⑪ 删 ID 配对）
             preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
             preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
             preview.PrimaryId = board.PrimaryId;
@@ -320,34 +320,10 @@ namespace GameLogic.Campaign.Blueprint
             return (contracts, moduleGeneFactories);
         }
 
-        /// <summary>DEMO-CONTENT-LOCK.md §3 两条具名反应的纯函数判定（<see cref="MechanicalReactionCatalog"/>，
-        /// ER4-CONTENT-01 已实现）——单一判定入口，供预览（<see cref="ResolveReactionHint"/>）与保存期扣费
-        /// （<c>BlueprintEditorService.TrySave</c>）共用同一结果（STORY-EXECUTION-CARDS.md ER4-BLP-01
-        /// 第2条"预览与实际编译共用同一结果"）。返回 null 表示当前组合未触发任何具名反应（合法状态，不是
-        /// 错误——合法组合仍按通用正交组合结算）。
-        /// FG1-SIG-05：这是“AI 驾驶时”的反应——机器电路里的核心固件不算（AI 永远不用核心固件，FGR-SIG-090）；
-        /// “你接入时能打出”的反应见 <see cref="UplinkReactionReadiness"/>。</summary>
-        public static string DetectReactionId(BlueprintCircuitBoard board) =>
-            DetectReactionId(board.PrimaryId, board.UtilityId, FirmwareKinds.AiUsable(board.FirmwareSlots));
-
-        /// <summary>FG1-SIG-02：同一判定的纯函数版本——“你接入时”把接入口里生效的固件并进 <paramref name="firmwareIdsIn"/>。</summary>
-        public static string DetectReactionId(string primaryId, string utilityId, IEnumerable<string> firmwareIdsIn)
-        {
-            var mainComponentIds = new[] { primaryId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
-            var functionComponentIds = new[] { utilityId }.Where(id => !string.IsNullOrEmpty(id)).ToList();
-            // FG5-RND-04（FGR-FW-050）：混合固件同时具有两条父固件的读法——装配反应按父固件识别（熔穿过载 / 标记跳转）。
-            var firmwareIds = FirmwareKinds.ExpandMixed((firmwareIdsIn ?? Array.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)));
-
-            if (MechanicalReactionCatalog.DetectMarkJump(mainComponentIds, functionComponentIds, firmwareIds))
-            {
-                return MechanicalReactionCatalog.ReactionMarkJumpId;
-            }
-            if (MechanicalReactionCatalog.DetectMeltOverload(mainComponentIds, firmwareIds))
-            {
-                return MechanicalReactionCatalog.ReactionMeltOverloadId;
-            }
-            return null;
-        }
+        /// <summary>EMG2-REACT-01（ADR ⑪，撤销 FGR-EMG-021 豁免）：AI 驾驶时这块电路按端口能判定成立的具名反应（机器电路里的核心固件不算，FGR-SIG-090）；
+        /// 判定本身在 <see cref="Emergence.EmgRuleCatalog.AssemblyReactionId"/>（载体类别 + 端口，不认组件 / 固件 ID）。</summary>
+        public static string AssemblyReactionId(BlueprintCircuitBoard board) =>
+            Emergence.EmgRuleCatalog.AssemblyReactionId(board.PrimaryId, FirmwareKinds.AiUsable(board.FirmwareSlots));
 
         /// <summary>不存在具名反应时返回中性说明，不是错误——满足 STORY-EXECUTION-CARDS.md ER4-PRIM-02
         /// 第2条"不存在具名反应的合法组合必须有通用预览，不提示缺反应"。</summary>

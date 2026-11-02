@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using BinGames.Sim.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Localization;
@@ -20,6 +21,9 @@ namespace GameLogic.Campaign.Emergence
             public readonly List<string> Ids = new List<string>();
             public readonly Dictionary<int, string> TextByKey = new Dictionary<int, string>();
             public readonly List<string> Problems = new List<string>();
+            /// <summary>EMG2-REACT-01：带开火者代价的那一行（FG19B §0.4：全表只有 P03 填 cost.heat）——代价、条件阈值（注热 ÷ 300、动能）、计入的图鉴条目。没有 = CostHeat 0。</summary>
+            public float CostHeat, CostC1, CostC2;
+            public string CostNamed;
             public bool Ok => Problems.Count == 0;
         }
 
@@ -44,8 +48,10 @@ namespace GameLogic.Campaign.Emergence
 
         private static readonly string[] Pairs = { "", "matter_matter", "matter_energy", "event_matter", "coat_matter", "phase_energy", "prop_field", "matter_entity" };
         private static readonly string[] Conds = { "", "overlap", "overlap_dry", "temp_ge", "temp_lt", "temp_ge_conc_lt", "temp_ge_conc_ge", "temp_le_for", "temp_gt_for", "charge_ge",
-            "charge_ge_conc_ge", "kinetic_ge", "expire", "expire_temp_lt", "overheat_in" };
-        private static readonly string[] Ops = { "deferred", "convert", "moveover", "dilute", "douse", "erode", "split", "spawn", "burst", "arc", "fragment", "vent" };
+            "charge_ge_conc_ge", "kinetic_ge", "expire", "expire_temp_lt", "overheat_in",
+            "inject_ge", "coats", "same_hit" }; // EMG2-REACT-01：单位层沾染行与 P03（与内核 EmgRuleConst.Cond* 同序，只追加）
+        private static readonly string[] Ops = { "deferred", "convert", "moveover", "dilute", "douse", "erode", "split", "spawn", "burst", "arc", "fragment", "vent",
+            "coatspawn", "coatarc", "stick" }; // EMG2-REACT-01：单位层沾染行（与内核 EmgRuleConst.Op* 同序，只追加）
 
         /// <summary>
         /// 编译。<paramref name="capacity"/> = emg.rule.capacity（夹到 ≤ 256）；行数超过它整表拒绝（卡片负向“规则超 256 行被表校验拒绝”）。
@@ -108,6 +114,13 @@ namespace GameLogic.Campaign.Emergence
                     Priority = (short)r.Priority, Stage = (byte)r.Stage,
                 });
                 c.Ids.Add(r.Id);
+                if (r.CostHeat > 0f && c.CostHeat <= 0f)
+                {
+                    c.CostHeat = r.CostHeat;
+                    c.CostC1 = r.C1;
+                    c.CostC2 = r.C2;
+                    c.CostNamed = r.Named != "none" ? r.Named : r.Id;
+                }
                 c.TextByKey[NamedReactionCatalog.StableKey(r.Id)] = r.TextKey;
                 if (!c.TextByKey.ContainsKey(key))
                 {
@@ -115,6 +128,72 @@ namespace GameLogic.Campaign.Emergence
                 }
             }
             return c;
+        }
+
+        /// <summary>
+        /// EMG2-REACT-01（FG19B §4.1 A2，FGR-EMG-016 / 021）：带开火者代价的规则行（P03 熔穿过载）“在开火时可判定成立”——主组件是重型射弹载体（作战组件表 carrier = projectile、
+        /// 细分 = 重型），且生效固件里有写 en.heat 注入的声明。成立时这些固件的表值热量被代价取代：<paramref name="replaced"/> = 被取代的表值热量之和，<paramref name="cost"/> = 代价。
+        /// 只按载体类别与端口判定，不认组件 / 固件 ID（取代旧“铸造重炮 + 过载”配对）。
+        /// </summary>
+        public static bool CostRuleApplies(string primaryId, IEnumerable<string> firmwareIds, out float replaced, out float cost)
+        {
+            replaced = 0f;
+            cost = Current.CostHeat;
+            if (!(cost > 0f) || firmwareIds == null || !IsHeavyProjectile(primaryId))
+            {
+                return false;
+            }
+            float injected = 0f;
+            var one = new string[1];
+            foreach (string id in Signal.FirmwareKinds.ExpandMixed(firmwareIds))
+            {
+                one[0] = id;
+                float amt = string.IsNullOrEmpty(id) ? 0f : EmgCatalog.PartWriteAmount("en.heat", EmgRole.Inject, one);
+                if (amt > 0f)
+                {
+                    replaced += Signal.FirmwareKinds.HeatOf(id);
+                    injected += amt;
+                }
+            }
+            // P03 c1：同一次命中注热 ≥ c1 × 结构积热换算（0.15 × 300 = 45，与内核 EmgMeltOverloadHit 同一阈值与容差）；注热不够这行开火时就不成立、不收代价。
+            // shortcut: 动能 c2（≥ 40）要看命中伤害，开火时不判，命中时由内核判；重型射弹单发动能远高于 40，以后有轻量重型射弹时再按组件伤害补判。
+            float scale = Math.Max(1f, Combat.CombatSite.Tuning("emg.heat.unit_overheat_scale", EmgRuleConst.DefaultUnitOverheatScale));
+            if (injected <= 0f || injected + 1e-3f < Current.CostC1 * scale)
+            {
+                replaced = 0f;
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>主组件是重型射弹载体（作战组件表 carrier = projectile、细分 = 重型）。</summary>
+        public static bool IsHeavyProjectile(string primaryId) =>
+            CarrierReadings.TryGetComponent(primaryId, out GameConfig.fg.CombatComponent comp) && comp.Carrier == "projectile" && comp.SubtypeKey == HeavyProjectileSubtype;
+
+        /// <summary>重型射弹载体的细分（作战组件表 subtypeKey；FG19B §6.3“重型射弹（重炮）”）。</summary>
+        public const string HeavyProjectileSubtype = "component.subtype.heavy";
+
+        /// <summary>
+        /// EMG2-REACT-01（取代 BlueprintCircuitCompiler.DetectReactionId 与 MechanicalReactionCatalog 的 ID 配对，ADR ⑪）：这套装配按端口能判定成立的具名反应——
+        /// ① 带开火者代价的规则行在开火时成立（<see cref="CostRuleApplies"/>）→ 该行计入的图鉴条目（熔穿过载）；
+        /// ② 有固件“以 evt.marked 为条件、写 grm.mod.chain”（只跳已标记的连锁，FG19A fw_marktag 的端口形状）→ 标记跳转（没有规则行，FGR-EMG-084）。都没有返回 null。
+        /// </summary>
+        public static string AssemblyReactionId(string primaryId, IEnumerable<string> firmwareIdsIn)
+        {
+            List<string> ids = Signal.FirmwareKinds.ExpandMixed((firmwareIdsIn ?? Array.Empty<string>()).Where(id => !string.IsNullOrEmpty(id)));
+            if (CostRuleApplies(primaryId, ids, out _, out _))
+            {
+                return Current.CostNamed;
+            }
+            foreach (string id in ids)
+            {
+                var one = new[] { id };
+                if (EmgCatalog.PartReads("evt.marked", EmgRole.Condition, one) && EmgCatalog.PartWriteAmount("grm.mod.chain", EmgRole.Modify, one) > 0f)
+                {
+                    return Content.MechanicalReactionCatalog.ReactionMarkJumpId;
+                }
+            }
+            return null;
         }
 
         /// <summary>规则计数键（named 或 id 的稳定键）→ 说明文本（因果链“规则”节点、悬停用）；查不到返回 null。</summary>

@@ -319,6 +319,32 @@ namespace GameLogic.Campaign.Emergence
 
         public const string PartPropCapKey = "emg.part.prop_sum_cap";
 
+        /// <summary>EMG2-REACT-01：这些部件里有没有已生效的“读 <paramref name="port"/>、角色 <paramref name="role"/>”声明（按端口 + 角色，不认部件 ID，FGR-EMG-013）。</summary>
+        public static bool PartReads(string port, EmgRole role, IReadOnlyList<string> partIds)
+        {
+            EmgCompiled c = Current;
+            if (port == null || partIds == null || !c.PortIndexById.TryGetValue(port, out int pi))
+            {
+                return false;
+            }
+            ushort code = c.Ports[pi].Code;
+            foreach (string part in partIds)
+            {
+                if (string.IsNullOrEmpty(part) || !c.OwnerIndex.TryGetValue(part, out int oi) || !c.OwnerActive(oi))
+                {
+                    continue;
+                }
+                foreach (EmgDeclRow d in c.Decls)
+                {
+                    if (d.Owner == oi && d.Dir == EmgDirs.Read && d.Role == role && d.Port == code)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         public static int ClampStage(float raw, int implemented) => Math.Max(0, Math.Min(implemented, (int)Math.Round(raw)));
 
         public static EmgFamily FamilyOf(string portId)

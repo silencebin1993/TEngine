@@ -25,6 +25,8 @@ namespace GameLogic.Campaign.Content
         public const string BatchAct1 = "act1";
         public const string KindTag = "tag";
         public const string KindAssembly = "assembly";
+        /// <summary>EMG2-REACT-01：由通道规则表 fg.TbChannelRule（named 列）驱动的具名反应——不再进旧标签反应表（同一 StableKey 不并存）；tagA / tagB 只作配料提示。</summary>
+        public const string KindRule = "rule";
         public const string Reachable = "reachable";
 
         private static TbReaction _table;
@@ -83,6 +85,10 @@ namespace GameLogic.Campaign.Content
         /// <summary>内核规则下标 → 反应 ID；越界返回 null。</summary>
         public static string IdOfRule(int ruleIndex)
         {
+            if (ruleIndex == CombatConst.ResidueRuleIndex)
+            {
+                return LegacyResidueRow()?.Id; // EMG2-REACT-01：液洼 / 油迹整片反应的残留（不在旧表里）
+            }
             EnsureLoaded();
             return ruleIndex >= 0 && ruleIndex < _tagRules.Count ? _tagRules[ruleIndex].Id : null;
         }
@@ -151,6 +157,16 @@ namespace GameLogic.Campaign.Content
                 };
             }
             return rules;
+        }
+
+        /// <summary>
+        /// EMG2-REACT-01：区域整片反应残留（液洼 / 油迹遇火、爬行者爆燃留下的燃烧区）——改走通道规则、但还留着残留列的那一行（爆燃）。
+        /// 这些迁入区域的旧载荷改写归 EMG2-REACT-02（DEBT-EMG2MAT02-03）；在那之前残留参数与计数键从这一行取，不再占旧标签反应表。
+        /// </summary>
+        public static Reaction LegacyResidueRow()
+        {
+            EnsureLoaded();
+            return _table?.DataList.FirstOrDefault(r => r != null && r.Kind == KindRule && !string.IsNullOrEmpty(r.Residue) && r.Residue != "none");
         }
 
         /// <summary>反应 ID 的稳定键（FNV-1a 32 位，非零）：内核按它把触发次数 / 伤害存进快照，表里 priority 顺序改了也不会记到别的反应上。</summary>

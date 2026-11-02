@@ -106,7 +106,7 @@ public sealed partial class Matter : Luban.BeanBase
     /// </summary>
     public readonly float Magnetic;
     /// <summary>
-    /// 固态:1 = 阻路 / 挡弹 / 可站立(不合并,有耐久)
+    /// 固态:1 = 挡弹 / 可站立(不合并,有耐久);2 = 固态且阻路(不可进入,生成时推出圈内单位;EMG2-REACT-01 / ADR ⑯)
     /// </summary>
     public readonly int Solid;
     /// <summary>

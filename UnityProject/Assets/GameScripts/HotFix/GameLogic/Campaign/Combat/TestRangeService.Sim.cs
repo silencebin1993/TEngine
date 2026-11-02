@@ -113,6 +113,10 @@ namespace GameLogic.Campaign.Economy
             public long BaseShots;
             public long BaseKills;
             public readonly int[] BaseReaction = new int[CombatConst.MaxReactions];
+            /// <summary>EMG2-REACT-01：已端口化反应（通道规则 / 装配）的涌现可靠计数基线，按计数槽（槽位按稳定键分配，开测后不挪）。</summary>
+            public readonly int[] BaseEmg = new int[EmgConst.RuleSlots];
+            /// <summary>EMG2-REACT-01：核心固件冷却已按到的涌现计数（按槽）——计数增量 = 新发动。</summary>
+            public readonly int[] SeenEmg = new int[EmgConst.RuleSlots];
             public readonly Dictionary<string, int> AssemblyReactions = new Dictionary<string, int>(StringComparer.Ordinal);
             public readonly List<string> ProjectionLabels = new List<string>(6);
             public double NextSample;
@@ -547,6 +551,10 @@ namespace GameLogic.Campaign.Economy
             {
                 session.BaseReaction[i] = k.ReactionCountOf(i);
             }
+            for (int i = 0; i < session.BaseEmg.Length; i++)
+            {
+                session.BaseEmg[i] = session.SeenEmg[i] = k.EmgRuleCountAt(i);
+            }
             session.NextSample = session.StartTime + TestRangeCatalog.SampleSeconds;
             Sessions.Add(session);
             Sessions.Sort((a, c) => string.CompareOrdinal(a.BuildingId, c.BuildingId)); // 多座靶场按建筑 ID 推进：与创建先后无关。
@@ -756,6 +764,27 @@ namespace GameLogic.Campaign.Economy
                 TargetUnit t = session.Respawns[0];
                 session.Respawns.RemoveAt(0);
                 SpawnTarget(session, t);
+            }
+            // EMG2-REACT-01：熔穿过载（P03 命中结算）与声明轨标记跳转不再发 ReactionFired，按涌现可靠计数的增量给投影上的核心固件起冷却（与 Observe 同一规则，FGR-SIG-033）。
+            // 只读本步的脏槽（O(本步变化的槽)）。
+            int dirty = k.EmgDirtyCount;
+            for (int j = 0; j < dirty; j++)
+            {
+                int slot = k.EmgDirtyAt(j);
+                int c = k.EmgRuleCountAt(slot);
+                if (slot < 0 || slot >= session.SeenEmg.Length || c <= session.SeenEmg[slot])
+                {
+                    continue;
+                }
+                session.SeenEmg[slot] = c;
+                string rid = NamedReactionCatalog.IdOfKey(k.EmgRuleKeyAt(slot));
+                string fw = rid != null ? MechanicalReactionCatalog.TriggerFirmwareOf(rid) : null;
+                float cd = fw != null ? FirmwareKinds.CoreCooldownSeconds(fw) : 0f;
+                if (cd > 0f && session.ByUnit.TryGetValue(k.EmgRuleFeedAt(slot).Src, out Projection fired) && fired.CoreGated && fired.CoreReadyAt < 0)
+                {
+                    fired.CoreReadyAt = now + cd;
+                    ApplyWeapon(session, fired, suppressed: true);
+                }
             }
             foreach (Projection p in session.Projections)
             {
@@ -997,6 +1026,17 @@ namespace GameLogic.Campaign.Economy
                 int d = k.ReactionCountOf(i) - session.BaseReaction[i];
                 string rid = NamedReactionCatalog.IdOfRule(i);
                 if (d > 0 && rid != null)
+                {
+                    reactions.TryGetValue(rid, out int c);
+                    reactions[rid] = c + d;
+                }
+            }
+            // EMG2-REACT-01：五条定稿反应与两条装配反应已端口化，次数在涌现可靠计数里（按稳定键认反应；装配反应由 AssemblyReactions 记的不重复计）
+            for (int slot = 0; slot < session.BaseEmg.Length; slot++)
+            {
+                int d = k.EmgRuleCountAt(slot) - session.BaseEmg[slot];
+                string rid = d > 0 ? NamedReactionCatalog.IdOfKey(k.EmgRuleKeyAt(slot)) : null;
+                if (rid != null && !session.AssemblyReactions.ContainsKey(rid))
                 {
                     reactions.TryGetValue(rid, out int c);
                     reactions[rid] = c + d;

@@ -379,7 +379,7 @@ namespace GameLogic.EditorTools
                     return i;
                 }
             }
-            return -1;
+            return BinGames.Sim.Combat.CombatConst.ResidueRuleIndex; // EMG2-REACT-01：爆燃撤出旧表，整片反应残留按残留下标 255 上报
         }
 
         private static string Short(string s) => s == null ? string.Empty : s.Length > 200 ? s.Substring(0, 200) + "…" : s;
@@ -489,8 +489,7 @@ namespace GameLogic.EditorTools
         private static CombatKernel NewKernel()
         {
             var k = new CombatKernel(CombatSite.ConfigFromTuning(), 64);
-            k.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
-            k.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+            CombatSite.ApplyReactionTables(k); // EMG2-REACT-01：爆燃撤出旧表——整片反应残留参数改从规则行取（本段只测旧液洼区域，不开斑块层）
             return k;
         }
 
@@ -542,7 +541,7 @@ namespace GameLogic.EditorTools
                 $"K1 液洼 = 中立内核区域：站进去的敌人与己方机器都按节拍挂上油污、结构单位（建筑 / 炮塔）不在这里结算、圈外的不挂（{tagged}）；没有火时一直是液洼（{stillPuddle}）");
 
             // 燃烧的敌人走进油污液洼 → 整片反应成燃烧区。
-            int count0 = k.ReactionCountOf(defl);
+            int count0 = CombatSite.ReactionCountOf(k, "reaction_deflagrate");
             int burner = KDummy(k, new double2(0, -0.6));
             k.ApplyStatus(burner, fire, 20f, 4f, 0f, 0f, 0);
             KRun(k, 0.6f, ref time);
@@ -550,7 +549,7 @@ namespace GameLogic.EditorTools
             k.DrainLeakReactions(drained);
             bool reacted = k.TryGetLeakZone(7, out CombatZone z1) && z1.Phase == CombatConst.LeakPhaseReacted && z1.StatusMask == fire && z1.Radius >= 1.5f - 1e-4f
                            && z1.Look == CombatZoneLook.Residue && z1.StatusDps > 0f && drained.Count == 1 && drained[0].x == 7 && drained[0].y == defl
-                           && k.ReactionCountOf(defl) >= count0 + 1;
+                           && CombatSite.ReactionCountOf(k, "reaction_deflagrate") >= count0 + 1;
             KRun(k, 0.6f, ref time);
             bool burns = (KStatus(k, foe) & fire) != 0u && (KStatus(k, ally) & fire) != 0u;
             // 结构单位：液洼与它反应成的燃烧区都不在内核里结算（建筑 / 炮塔挨的火由热更层按建筑耐久结算一次）。单独一块：只有着火的敌人和一座结构单位。
@@ -565,7 +564,7 @@ namespace GameLogic.EditorTools
             burns &= structSkipped;
             float seconds = (float)(z1.Until - z1.Born);
             string kdiag = $"阶段 {z1.Phase}、标签 {z1.StatusMask:X}/{fire:X}、外观 {z1.Look}、持续伤害 {z1.StatusDps:F2}、反应记录 {drained.Count}（{string.Join(",", drained.Select(d => d.x + ":" + d.y))}，爆燃 {defl}）、" +
-                           $"爆燃计数 {count0} → {k.ReactionCountOf(defl)}；敌人 {KStatus(k, foe):X}、机器 {KStatus(k, ally):X}、结构 {KStatus(k, wall):X}";
+                           $"爆燃计数 {count0} → {CombatSite.ReactionCountOf(k, "reaction_deflagrate")}；敌人 {KStatus(k, foe):X}、机器 {KStatus(k, ally):X}、结构 {KStatus(k, wall):X}";
             Expect(reacted && burns && seconds >= CombatSite.Tuning("logistics.leak.react_seconds", 12f) - 0.01f,
                 $"K2 验收探针（内核层）：着火的敌人站进燃油液洼 → 整片液洼反应成燃烧区（挂燃烧、半径 {z1.Radius:F2} 米 ≥ 液洼、持续 {seconds:F1} 秒 = max(反应残留, 液洼反应时长)），" +
                 $"爆燃计数增加、给热更层记一条液洼反应（{reacted}）；燃烧区点燃里面的敌人与己方机器、不重复结算结构单位（{burns}）" + (reacted && burns ? string.Empty : "；" + kdiag));

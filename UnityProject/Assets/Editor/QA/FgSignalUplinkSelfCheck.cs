@@ -55,6 +55,10 @@ namespace GameLogic.EditorTools
         private const string BpGunPlain = "bp_selfcheck_sig03_gun";
         private const float FrameDt = 0.05f;
 
+        /// <summary>EMG2-REACT-01（FG19B §4.1 A2）：熔穿过载被压住（核心固件冷却中）时，过载指令回到表值热量——铸造重炮每发 40 + 过载表值 15 = 55（旧实现只算 40）。</summary>
+        private static float SuppressedHeat => FracturedCityLayout.CannonBaseHeatPerShot
+            + BlueprintCircuitBoard.ComputeHeatBudget(ComponentCatalog.CompBeamId, new[] { FirmwareCatalog.FwOverloadId }) - BlueprintCircuitBoard.ComputeHeatBudget(ComponentCatalog.CompBeamId, Array.Empty<string>());
+
         private static StringBuilder _report;
         private static int _fail;
         private static int _pass;
@@ -749,9 +753,9 @@ namespace GameLogic.EditorTools
                 bool firedB = FireCannon(site, mb, target, out bool meltB);
                 float hb1 = Heat(site, mb);
                 Expect(firedB && !meltB && SignalUplinkService.CoreFiredCount == fired0 + 1 && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) == melt0
-                       && Mathf.Abs(hb1 - hb0 - FracturedCityLayout.CannonBaseHeatPerShot) < 0.01f
+                       && Mathf.Abs(hb1 - hb0 - SuppressedHeat) < 0.01f
                        && SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId) > 0,
-                    $"冷却中 #{mb} 开火：普通重炮（没有熔穿过载、只积热 40：{hb0:F1}→{hb1:F1}），冷却不因开火重置");
+                    $"冷却中 #{mb} 开火：普通重炮（没有熔穿过载；积热回到指令表值 {SuppressedHeat:F0} = 40 + 过载 15，FG19B §4.1 A2，旧实现 40：{hb0:F1}→{hb1:F1}），冷却不因开火重置");
 
                 int guard = 0;
                 while (s.SignalCore.CoreCooldowns.Length > 0 && guard++ < 60 * 20)
@@ -845,8 +849,8 @@ namespace GameLogic.EditorTools
                 CombatUnitFlags f1 = Unit(site, ma).Flags;
                 double rem = SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId);
                 Expect(gatedBefore && cuesQueued >= cap && res == CombatFireResult.Ok && dropped1 > dropped0
-                       && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) == meltCue0 && Mathf.Abs(h1 - h0 - overloadHeat) < 0.01f,
-                    $"本步已有 {cuesQueued} 条提示事件（上限 {cap}）：这发重炮的熔穿过载在内核里照常生效（积热 {h0:F1}→{h1:F1}），它的提示事件被丢（丢弃计数 {dropped0}→{dropped1}，没有反应音效）");
+                       && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) > meltCue0 && Mathf.Abs(h1 - h0 - overloadHeat) < 0.01f,
+                    $"本步已有 {cuesQueued} 条提示事件（上限 {cap}）：这发重炮的熔穿过载在命中时照常结算（积热 {h0:F1}→{h1:F1}），别的提示事件被丢（丢弃计数 {dropped0}→{dropped1}），熔穿过载的声音 / 字幕改由可靠计数发出、不再跟着丢（EMG2-REACT-01 预期差异）");
                 Expect(SignalUplinkService.CoreFiredCount == fired0 + 1 && Math.Abs(rem - cd) < 0.02 && info.ReactionSuppressed
                        && WeaponOf(site, ma).Reaction == CombatReaction.None && (f1 & (CombatUnitFlags.ReactionGated | CombatUnitFlags.ReactionSpent)) == 0,
                     $"提示事件被丢也不影响冷却：核心固件发动计数 +1、冷却 {rem:F2} 秒记在信号上、武器暂不带反应（门控标记随新参数清掉）");
@@ -868,9 +872,10 @@ namespace GameLogic.EditorTools
                 float hb = Heat(site, ma);
                 int fired1 = SignalUplinkService.CoreFiredCount;
                 site.ProcessEvents();
+                ReactionFeedback.Process(site, CampaignSession.Current); // EMG2-REACT-01：熔穿过载按命中计数（可靠计数）报给热更层，与地点每步的处理同一入口
                 double rem2 = SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId);
                 Expect(regated && r1 == CombatFireResult.Ok && r2 == CombatFireResult.Ok && Mathf.Abs(ha - overloadHeat) < 0.01f && spent
-                       && Mathf.Abs(hb - FracturedCityLayout.CannonBaseHeatPerShot) < 0.01f,
+                       && Mathf.Abs(hb - SuppressedHeat) < 0.01f,
                     $"事件还没被处理时：第一发熔穿过载（积热 {ha:F1}）并被内核当场压住，第二发只是普通重炮（积热 {hb:F1}）");
                 Expect(SignalUplinkService.CoreFiredCount == fired1 + 1 && Math.Abs(rem2 - cd) < 0.02 && (Unit(site, ma).Flags & CombatUnitFlags.ReactionSpent) == 0
                        && WeaponOf(site, ma).Reaction == CombatReaction.None,

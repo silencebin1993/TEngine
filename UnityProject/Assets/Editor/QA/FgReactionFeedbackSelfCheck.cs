@@ -344,10 +344,11 @@ namespace GameLogic.EditorTools
 
         private static void CheckKernelFeed()
         {
-            Line("  · A3. 反馈进给：每条反应最后一次的位置 / 出手者 / 目标；敌方身上的反应额外伤害 = 反应伤害；敌方受到的全部伤害精确累计；读档 / 重新登记规则时纪元变化");
-            NewState(9402);
-            CombatWeapon wet = WeaponFor("fw_coolant");
-            CombatWeapon shock = WeaponFor("fw_arcchain");
+            Line("  · A3. 反馈进给：每条反应最后一次的位置 / 出手者 / 目标；敌方身上的反应额外伤害 = 反应伤害；敌方受到的全部伤害精确累计；读档 / 重新登记规则时纪元变化" +
+                 "（EMG2-REACT-01：短路已端口化、主结果不是倍率，这里用仍在标签表里的电解对账；短路的计数 / 日志 / 声音见 D2 / E1）");
+            NewState(9402, unlockAll: true);
+            CombatWeapon wet = WeaponFor("fw_corrode");
+            CombatWeapon shock = WeaponFor("fw_followup");
             using (var a = new Arena(true))
             {
                 int mw = a.Machine(wet);
@@ -361,7 +362,7 @@ namespace GameLogic.EditorTools
                 CombatFireResult f1 = a.Fire(mw, e);
                 CombatFireResult f2 = a.Fire(ms, e);
                 a.K.TryGetUnit(e, out CombatUnitView v1);
-                int ci = RuleIndex("reaction_conduct");
+                int ci = RuleIndex("reaction_electrolysis");
                 double2 pos = a.K.ReactionLastPosOf(ci);
                 bool who = a.K.ReactionLastSourceOf(ci) == ms && a.K.ReactionLastTargetOf(ci) == e && math.distance(pos, new double2(3.0, 0.5)) < 1e-6;
                 // 敌方身上的反应伤害按实际落地算（易伤照样乘），所以 ≥ 反应的原始额外伤害。
@@ -376,7 +377,7 @@ namespace GameLogic.EditorTools
                 a.K.Load(a.K.Serialize());
                 int epoch2 = a.K.FeedEpoch;
                 Expect(who && dmg && total && epoch1 == epoch0 + 1 && epoch2 == epoch1 + 1,
-                    $"短路：最后一次触发者 = 电弧链机器、目标 = 敌人、位置 = 敌人位置；敌方反应伤害 {hostile:0.00}（原始额外伤害 {raw:0.00}，易伤照乘）；敌方受到全部伤害 {dealt:0.00} = 实际掉血 {v0.Health - v1.Health:0.00}；纪元 {epoch0}→{epoch1}→{epoch2}（开火 {f1} / {f2}）");
+                    $"电解：最后一次触发者 = 带电击的机器、目标 = 敌人、位置 = 敌人位置；敌方反应伤害 {hostile:0.00}（原始额外伤害 {raw:0.00}，易伤照乘）；敌方受到全部伤害 {dealt:0.00} = 实际掉血 {v0.Health - v1.Health:0.00}；纪元 {epoch0}→{epoch1}→{epoch2}（开火 {f1} / {f2}）");
             }
         }
 
@@ -682,18 +683,17 @@ namespace GameLogic.EditorTools
                     k.FireAt(shooters[i], enemies[i], k.Time);
                 }
                 long seen0 = ReactionFeedback.ReactionsSeen;
-                int ci = RuleIndex("reaction_conduct");
-                int kernelFired = k.ReactionCountOf(ci);
+                int kernelFired = CombatSite.ReactionCountOf(k, "reaction_conduct"); // EMG2-REACT-01：短路走涌现可靠计数（按稳定键）
                 site.Step(1f / 60f, k.Time + 1f / 60f);
                 ReactionLogEntry entry = ReactionLog.Filtered(ReactionLogFilter.All, s).FirstOrDefault(x => x.ReactionId == "reaction_conduct");
                 ReactionSessionRecord sess = ReactionAttribution.Current(s, SiteId, create: false);
                 ReactionShareRecord row = sess?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_conduct");
-                int n = k.ReactionCountOf(ci);
+                int n = CombatSite.ReactionCountOf(k, "reaction_conduct");
                 bool popup = ReactionPopups.Active.Count == 1 && ReactionPopups.Active[0].Count == n && ReactionPopups.Active[0].Text == "短路 ×" + n;
                 Expect(kernelFired >= 200 && n == kernelFired && ReactionFeedback.ReactionsSeen - seen0 == n && popup && entry != null && entry.Count == n
-                       && row != null && row.Count == n && Math.Abs(row.Damage - k.ReactionHostileDamageOf(ci)) < 1e-2 && FeedbackCues.CountOf(FeedbackCueId.TagReaction) - raise0 == 1,
-                    $"同一帧 200 次短路（这一帧提示事件丢弃 {k.Counters.CuesDropped - drop0} 条）：内核计数 {k.ReactionCountOf(ci)}、弹字“{ReactionPopups.Active.FirstOrDefault()?.Text}”、日志一条 ×{entry?.Count}、" +
-                    $"归因 {row?.Count} 次 / 伤害 {row?.Damage:0.0}（= 内核）、反应声音 / 字幕这一步只发 {FeedbackCues.CountOf(FeedbackCueId.TagReaction) - raise0} 次（逐次发会是 {n} 次）");
+                       && row != null && row.Count == n && row.Damage == 0 && FeedbackCues.CountOf(FeedbackCueId.TagReaction) - raise0 == 1,
+                    $"同一帧 200 次短路（这一帧提示事件丢弃 {k.Counters.CuesDropped - drop0} 条）：内核计数 {n}、弹字“{ReactionPopups.Active.FirstOrDefault()?.Text}”、日志一条 ×{entry?.Count}、" +
+                    $"归因 {row?.Count} 次 / 伤害 {row?.Damage:0.0}（交互伤害归因归 EMG2-DISC-01，DEBT-EMG2REACT01-08）、反应声音 / 字幕这一步只发 {FeedbackCues.CountOf(FeedbackCueId.TagReaction) - raise0} 次（逐次发会是 {n} 次）");
             }
         }
 
@@ -706,27 +706,26 @@ namespace GameLogic.EditorTools
             RestoreWorld(observeCity: false);
             CampaignState s = CampaignSession.Current;
             CombatSite city = CombatSites.Get(FracturedCityLayout.RegionId);
-            int ci = RuleIndex("reaction_conduct");
-            double hostile0 = city.Kernel.ReactionHostileDamageOf(ci);
             double total0 = city.Kernel.DamageDealtToHostile;
             ReactionSessionRecord before = ReactionAttribution.Current(s, FracturedCityLayout.RegionId, create: false);
             double sessTotal0 = before?.TotalDamage ?? 0;
             double sessConduct0 = before?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_conduct")?.Damage ?? 0;
-            int c0 = city.Kernel.ReactionCountOf(ci);
+            int c0 = CombatSite.ReactionCountOf(city.Kernel, "reaction_conduct"); // EMG2-REACT-01：短路走涌现可靠计数
             WorldSimulation.StepMany(360);
-            int dCount = city.Kernel.ReactionCountOf(ci) - c0;
+            int dCount = CombatSite.ReactionCountOf(city.Kernel, "reaction_conduct") - c0;
             ReactionSessionRecord sess = ReactionAttribution.Current(s, FracturedCityLayout.RegionId, create: false);
             ReactionShareRecord row = sess?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_conduct");
             double dConduct = (row?.Damage ?? 0) - sessConduct0;
             double dTotal = (sess?.TotalDamage ?? 0) - sessTotal0;
-            bool reconcile = Math.Abs(dConduct - (city.Kernel.ReactionHostileDamageOf(ci) - hostile0)) < 0.05 && Math.Abs(dTotal - (city.Kernel.DamageDealtToHostile - total0)) < 0.05;
+            // EMG2-REACT-01：短路主结果是电弧 / 导电水洼，附带伤害记进敌方全部伤害；按反应单列的“交互伤害归因”归 EMG2-DISC-01（DEBT-EMG2REACT01-08），本卡短路占比 = 0。
+            bool reconcile = Math.Abs(dConduct) < 1e-9 && dTotal > 0 && Math.Abs(dTotal - (city.Kernel.DamageDealtToHostile - total0)) < 0.05;
             List<ReactionAttribution.Share> shares = ReactionAttribution.SharesOf(sess);
             ReactionAttribution.Share share = shares.FirstOrDefault(x => x.ReactionId == "reaction_conduct");
             string text = ExpeditionReturnPanelUIToolkit.ReactionShareText(s, FracturedCityLayout.RegionId);
-            Expect(sess != null && sess.Kind == ReactionAttribution.KindExpedition && sess.Ordinal == 1 && sess.EndTick < 0 && row != null && dCount >= 1 && row.Count >= dCount && row.Damage > 0 && dConduct > 0
-                   && reconcile && share.Fraction > 0 && share.Fraction < 1 && Math.Abs(share.Fraction - row.Damage / sess.TotalDamage) < 1e-9 && text.Contains("短路") && text.Contains("%"),
-                $"远征场次“{ReactionAttribution.Title(sess)}”：短路 {row?.Count} 次、伤害 {row?.Damage:0.0} / 敌方全部 {sess?.TotalDamage:0.0}（占比 {ReactionAttribution.Percent(share.Fraction)}%，" +
-                $"本段增量与内核对账一致）；撤离报告：“{text}”");
+            Expect(sess != null && sess.Kind == ReactionAttribution.KindExpedition && sess.Ordinal == 1 && sess.EndTick < 0 && row != null && dCount >= 1 && row.Count >= dCount
+                   && reconcile && share.Fraction == 0 && text.Contains("短路") && text.Contains("%"),
+                $"远征场次“{ReactionAttribution.Title(sess)}”：短路 {row?.Count} 次、伤害 {row?.Damage:0.0} / 敌方全部 {sess?.TotalDamage:0.0}（占比 {ReactionAttribution.Percent(share.Fraction)}%：短路已端口化，交互伤害归因归 EMG2-DISC-01；" +
+                $"敌方全部伤害本段增量与内核对账一致）；撤离报告：“{text}”");
 
             // 日志：触发者是真实机器（#编号）、参与的固件、目标是侦察机。
             ReactionLogEntry entry = ReactionLog.Filtered(ReactionLogFilter.Expedition, s).FirstOrDefault(x => x.ReactionId == "reaction_conduct");
@@ -923,7 +922,7 @@ namespace GameLogic.EditorTools
                 Click(panel.TabButton(ReactionLogPanelUIToolkit.Tab.Codex));
                 string codex = string.Join("\n", Enumerable.Range(0, panel.VisibleRowCount).Select(panel.RowText));
                 bool codexOk = !panel.FilterBarVisible && codex.Contains("短路") && codex.Contains("首次触发") && codex.Contains("？？？") && !codex.Contains("热震\n")
-                               && codex.Contains("尚未开放命名") && codex.Contains("无法触发") && panel.FooterText.Contains("1 / 18");
+                               && codex.Contains("尚未开放命名") && !codex.Contains("无法触发") && panel.FooterText.Contains("1 / 18"); // EMG2-REACT-01：碎裂改走端口后 18 条全部可达
                 ReactionLog.Clear();
                 panel.SelectTab(ReactionLogPanelUIToolkit.Tab.Log);
                 panel.SelectFilter(ReactionLogFilter.All);
@@ -932,7 +931,7 @@ namespace GameLogic.EditorTools
                 bool closed = !panel.PanelVisible && !ReactionLogPanelUIToolkit.IsOpen;
                 Expect(opened && closed && raidOnly && expOnly, $"反应日志页：最新在前两条（“{panel.RowText(0)}”），“突袭”只剩热震、“远征”只剩短路");
                 Expect(attr && attr2, $"伤害归因页：远征“{attrAll.Replace("\n", " / ")}”；突袭筛选“{attrRaid.Replace("\n", " / ")}”");
-                Expect(codexOk && empty, $"反应图鉴页：打出过的短路显示名字、说明与首次触发；其余“？？？”并写明原因（未打出 / 未开放命名 / 无法触发），脚注“{panel.FooterText}”；日志空时有空状态说明");
+                Expect(codexOk && empty, $"反应图鉴页：打出过的短路显示名字、说明与首次触发；其余“？？？”并写明原因（未打出 / 未开放命名；碎裂已可达，不再有“无法触发”），脚注“{panel.FooterText}”；日志空时有空状态说明");
             }
             finally
             {
@@ -1225,8 +1224,7 @@ namespace GameLogic.EditorTools
                 K = new CombatKernel(cfg, 32);
                 if (configured)
                 {
-                    K.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
-                    K.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+                    CombatSite.ApplyContent(K); // EMG2-REACT-01：五条已端口化——与地点同一套登记（沾染行 / 斑块规则 / 残留）
                 }
             }
 
@@ -1355,7 +1353,9 @@ namespace GameLogic.EditorTools
                     continue;
                 }
                 uint b = NamedReactionCatalog.BitOf(row.Id);
-                if (b == 0u || b == a || rules.Any(r => r.Pair == (a | b)))
+                // EMG2-REACT-01：已端口化的五条（kind = rule，如燃烧 + 油污 = 爆燃 C01）不在旧标签表里，但沾染配对照样结算——按反应表全部配对排除
+                if (b == 0u || b == a || rules.Any(r => r.Pair == (a | b))
+                    || NamedReactionCatalog.Rows.Any(r => (NamedReactionCatalog.BitOf(r.TagA) | NamedReactionCatalog.BitOf(r.TagB)) == (a | b)))
                 {
                     continue;
                 }

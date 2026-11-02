@@ -50,7 +50,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < rules.Count; i++)
             {
                 EmgRule r = rules[i];
-                if (r.Pair < EmgRuleConst.PairMatterMatter || r.Pair > EmgRuleConst.PairMatterEntity || r.Op > EmgRuleConst.OpVent || r.Product > EmgMatterConst.Count
+                if (r.Pair < EmgRuleConst.PairMatterMatter || r.Pair > EmgRuleConst.PairMatterEntity || r.Op > EmgRuleConst.OpLast || r.Product > EmgMatterConst.Count
                     || r.By > EmgMatterConst.Count || r.Main < EmgRuleConst.MainS || r.Main > EmgRuleConst.MainP || r.Key == 0)
                 {
                     return false;
@@ -246,7 +246,7 @@ namespace BinGames.Sim.Combat
 
         private const int PatchFields = 40; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段（同版本 17 只追加，短段取缺省）
         private const int FieldFields = 12;
-        private const int UnitStage2Fields = 22;
+        private const int UnitStage2Fields = 23; // EMG2-REACT-01：段尾追加 StickT（同版本 17 只追加，短段取 0）
 
         private static void WriteUnitStage2(BinaryWriter w, in EmgUnitState u, EmgSegmentWriter sw)
         {
@@ -272,6 +272,7 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(u.Res3);
             if (sw.F()) w.Write(u.Res4);
             if (sw.F()) w.Write(u.Res5);
+            if (sw.F()) w.Write(u.StickT);
         }
 
         private static void ReadUnitStage2(BinaryReader r, EmgSegmentReader sr, ref EmgUnitState u)
@@ -298,6 +299,7 @@ namespace BinGames.Sim.Combat
             if (sr.F()) u.Res3 = r.ReadByte();
             if (sr.F()) u.Res4 = r.ReadByte();
             if (sr.F()) u.Res5 = r.ReadByte();
+            if (sr.F()) u.StickT = r.ReadSingle();
         }
 
         private static void ReadPatchCounts(BinaryReader r, EmgSegmentReader sr, ref EmgScalars es)

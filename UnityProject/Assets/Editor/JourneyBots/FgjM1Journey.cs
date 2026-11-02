@@ -1157,6 +1157,21 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>
         /// 开着重炮机靠近一架侦察机（离它 9 格左右、在干扰场外），鼠标点它开火（重炮先瞄准 1 秒再开火）。直到内核报出熔穿过载（核心固件发动、冷却开始）。
         /// </summary>
+        private const string MeltKey = "reaction_meltoverload";
+
+        private static int MoltenPatches(BinGames.Sim.Combat.CombatKernel k)
+        {
+            int n = 0;
+            for (int i = 0; k != null && i < k.PatchSlots; i++)
+            {
+                if (k.TryGetPatch(i, out BinGames.Sim.Combat.CombatZone z) && z.Matter == BinGames.Sim.Combat.EmgMatterConst.Molten)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
         private static StepOutcome TickFireMeltdown(JourneyContext c)
         {
             SampleFrame();
@@ -1166,6 +1181,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.SetInt("fire0Set", 1);
                 c.SetInt("core0", SignalUplinkService.CoreFiredCount);
                 c.SetInt("cue0", FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload));
+                c.SetInt("melt0", CombatSite.ReactionCountOf(GameRoot.FracturedCity.Combat?.Kernel, MeltKey));
             }
             if (SignalUplinkService.CoreFiredCount > c.GetInt("core0") && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) > c.GetInt("cue0"))
             {
@@ -1176,9 +1192,16 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     return StepOutcome.Fail($"熔穿过载打出后冷却没有开始（剩 {cd:F1} 秒）或信号不在重炮机里");
                 }
+                // EMG2-REACT-01 等价断言（FG19B P03）：熔穿过载 = 命中点溅出熔融金属 + 目标熔穿相态，按稳定键计数；旧“本发穿甲 +30%”退役（M10-BASELINE 差异表“预期差异”）
+                int melt = CombatSite.ReactionCountOf(GameRoot.FracturedCity.Combat?.Kernel, MeltKey) - c.GetInt("melt0");
+                int molten = MoltenPatches(GameRoot.FracturedCity.Combat?.Kernel);
+                if (melt <= 0 || molten <= 0)
+                {
+                    return StepOutcome.Fail($"熔穿过载打出了，但命中点没有溅出熔融金属或计数没涨（熔穿过载计数 +{melt}、熔融金属斑块 {molten}）");
+                }
                 c.Set("heatA0", heat.ToString("R", CultureInfo.InvariantCulture));
                 string cap = FeedbackCues.ActiveCaptions.Where(x => x.Cue == FeedbackCueId.ReactionMeltOverload).Select(x => x.Text).FirstOrDefault() ?? string.Empty;
-                return StepOutcome.Done($"{Label(a)} 打出熔穿过载（字幕“{cap}”）：核心固件发动，信号上的冷却 {cd:F1} 秒；重炮机热量 {heat:F0}{(overheated ? "（过热）" : string.Empty)}；开火 {c.GetInt("clicks")} 次点击");
+                return StepOutcome.Done($"{Label(a)} 打出熔穿过载（字幕“{cap}”）：命中点溅出熔融金属 {molten} 块、计数 +{melt}；核心固件发动，信号上的冷却 {cd:F1} 秒；重炮机热量 {heat:F0}{(overheated ? "（过热）" : string.Empty)}；开火 {c.GetInt("clicks")} 次点击");
             }
             if (!FcPos(a, out Vector2 me))
             {

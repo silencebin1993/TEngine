@@ -341,7 +341,16 @@ namespace GameLogic.Progression
             }
             var sb = new System.Text.StringBuilder();
             sb.AppendLine(GameLogic.Localization.GameText.Get(row.DescKey));
-            if (row.Kind == Campaign.Content.NamedReactionCatalog.KindAssembly)
+            if (row.Kind == Campaign.Content.NamedReactionCatalog.KindRule)
+            {
+                // EMG2-REACT-01：端口规则驱动的反应——配方写它的规则说明（FG19B 规则行文本，端口 × 端口）；没有规则行的（标记跳转）写说明里的打法
+                string rule = Campaign.Emergence.EmgRuleCatalog.TextOfKey(Campaign.Content.NamedReactionCatalog.StableKey(reactionId));
+                if (!string.IsNullOrEmpty(rule))
+                {
+                    sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.recipe_rule", rule));
+                }
+            }
+            else if (row.Kind == Campaign.Content.NamedReactionCatalog.KindAssembly)
             {
                 string fw = Campaign.Content.MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
                 sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.recipe_assembly", Campaign.Signal.FirmwareKinds.DisplayName(fw) ?? fw));

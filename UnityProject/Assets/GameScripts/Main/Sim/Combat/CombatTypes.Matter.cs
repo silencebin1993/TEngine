@@ -17,6 +17,8 @@ namespace BinGames.Sim.Combat
         public const byte Oil = 1, Water = 2, Coolant = 3, Cryo = 4, Acid = 5, Polymer = 6, Cured = 7, Molten = 8, Slag = 9, Fire = 10, Smoke = 11, Steam = 12,
             Debris = 13, Dust = 14, Ice = 15, Glass = 16, Sludge = 17;
         public const byte LayerGround = 0, LayerGas = 1;
+        /// <summary>EMG2-REACT-01（ADR ⑯）：fg.TbMatter solid 列 1 = 固态（挡弹 / 可站立 / 有耐久），2 = 固态且阻路（不可进入，固化胶块）。</summary>
+        public const byte SolidBlock = 2;
         /// <summary>衰减方式（fg.TbMatter decayMode）：蒸干（存续最后 25% 半径线性缩到 0）/ 保持 / 扩散稀释（气体）/ 燃尽 / 吸热蒸发（液氮）/ 冷却（熔融金属；转冷渣是规则 E11，归 EMG2-RULE-01）。</summary>
         public const byte DecayEvaporate = 0, DecayKeep = 1, DecayDilute = 2, DecayBurn = 3, DecayAbsorb = 4, DecayCool = 5;
         /// <summary>斑块标志（<see cref="CombatZone.PFlags"/>）：常驻世界源（不衰减、不合并、不被挤掉，占世界源保留额）/ 被油覆盖（FG19B §1.4 第 12 条，规则引擎读）/ 长期留存（家园 / 前哨，EMG2-PERSIST-01）。</summary>
@@ -137,9 +139,13 @@ namespace BinGames.Sim.Combat
         public const ushort CoatBase = 2000;
         public const byte PairMatterMatter = 1, PairMatterEnergy = 2, PairEventMatter = 3, PairCoatMatter = 4, PairPhaseEnergy = 5, PairPropField = 6, PairMatterEntity = 7;
         public const byte CondNone = 0, CondOverlap = 1, CondOverlapDry = 2, CondTempGe = 3, CondTempLt = 4, CondTempGeConcLt = 5, CondTempGeConcGe = 6, CondTempLeFor = 7,
-            CondTempGtFor = 8, CondChargeGe = 9, CondChargeGeConcGe = 10, CondKineticGe = 11, CondExpire = 12, CondExpireTempLt = 13, CondOverheatIn = 14;
+            CondTempGtFor = 8, CondChargeGe = 9, CondChargeGeConcGe = 10, CondKineticGe = 11, CondExpire = 12, CondExpireTempLt = 13, CondOverheatIn = 14,
+            // EMG2-REACT-01：单位层沾染行（C）与相态 × 能量行（P03）的条件
+            CondInjectGe = 15, CondCoats = 16, CondSameHit = 17;
         /// <summary>结算方式：0 = 承接卡接上（本卡落表、占容量、不结算）。</summary>
-        public const byte OpDeferred = 0, OpConvert = 1, OpMoveOver = 2, OpDilute = 3, OpDouse = 4, OpErode = 5, OpSplit = 6, OpSpawn = 7, OpBurst = 8, OpArc = 9, OpFragment = 10, OpVent = 11;
+        public const byte OpDeferred = 0, OpConvert = 1, OpMoveOver = 2, OpDilute = 3, OpDouse = 4, OpErode = 5, OpSplit = 6, OpSpawn = 7, OpBurst = 8, OpArc = 9, OpFragment = 10, OpVent = 11,
+            // EMG2-REACT-01：单位层沾染行（C01 / C02 脚下生成、C03 电弧、C06 粘住）
+            OpCoatSpawn = 12, OpCoatArc = 13, OpStick = 14, OpLast = 14;
         public const byte MainS = 1, MainT = 2, MainB = 3, MainP = 4;
         public const byte SideNone = 0, SideDamage = 1, SideMult = 2;
         /// <summary>“不改温度”的哨兵（表里写 −999）。</summary>

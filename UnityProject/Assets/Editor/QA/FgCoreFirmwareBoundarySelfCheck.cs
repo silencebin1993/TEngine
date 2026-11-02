@@ -349,19 +349,19 @@ namespace GameLogic.EditorTools
             float d1 = hp0 - armor.Health;
             float heat1 = Heat(site, a) - h0;
             double cd = SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwOverloadId);
-            float pierceHit = FracturedCityLayout.CannonBaseDamage * (1f - (FoundryOutpostLayout.ArmorBotFrontalReductionPct - FracturedCityLayout.OverloadArmorPierceBonus));
+            float pierceHit = FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct); // EMG2-REACT-01：旧“穿甲 +30%”退役（FG19B P03 主结果 = 熔融金属 + 熔穿相态）
             Expect(shot1 && melt1 && Mathf.Abs(d1 - pierceHit) < 0.05f && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) > melt0
                    && SignalUplinkService.CoreFiredCount == fired0 + 1 && Mathf.Abs(heat1 - 65f) < 0.5f
                    && cd > FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId) - 1.5 && cd <= FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId),
-                $"接入后开火：熔穿过载命中 {d1:F1}（55 ×（1 −（0.4 − 0.3）））、积热 {heat1:F0}；过载进入冷却（剩 {cd:F2} 游戏秒，正式表 {FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId)} 秒）");
+                $"接入后开火：熔穿过载命中 {d1:F1}（55 × 0.6，旧穿甲 +30% 退役）、积热 {heat1:F0}；过载进入冷却（剩 {cd:F2} 游戏秒，正式表 {FirmwareKinds.CoreCooldownSeconds(FirmwareCatalog.FwOverloadId)} 秒）");
 
             float hp1 = armor.Health;
             SetHeat(site, a, 0f);
             bool shot2 = FireCannon(site, a, left, out bool melt2);
             float d2 = hp1 - armor.Health;
-            Expect(shot2 && !melt2 && Mathf.Abs(d2 - FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct)) < 0.05f
+            Expect(shot2 && !melt2 && d2 >= FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct) - 0.05f
                    && SignalUplinkService.CoreFiredCount == fired0 + 1,
-                $"冷却中下一发（{FracturedCityLayout.CannonCooldownSeconds} 秒后）：固件照样插着，但不发动熔穿过载（{d2:F1}），核心发动次数不变——正式表里“每一发都熔穿”的问题不再存在");
+                $"冷却中下一发（{FracturedCityLayout.CannonCooldownSeconds} 秒后）：固件照样插着，但不发动熔穿过载（{d2:F1}：第一发让护甲机熔穿、装甲失效并站在熔融金属里，伤害只会更高，EMG2-REACT-01 预期差异），核心发动次数不变——正式表里“每一发都熔穿”的问题不再存在");
         }
 
         private static void CheckMarkJumpUplink()
@@ -389,8 +389,9 @@ namespace GameLogic.EditorTools
             int jump0 = FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump);
             int fired0 = SignalUplinkService.CoreFiredCount;
             FracturedCityRegion.TryAttackEnemy(s, m, s2, s.RandomSeed, isAiSource: false);
-            FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
+            // EMG2-REACT-01：手动开火后当场结算反应计数（与旧轨开火时发动同一时点），声明轨的跳转可能在第二发就发生——从第一发之后开始量
             float s2Before = Enemy(s, s2).Health;
+            FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             WorldSimulation.StepMany(2); // 声明轨的跳转计数在步进的反馈结算里报上来（DEBT-EMG1CHAIN01-06：冷却 / 暴露 / 提示）
             float jumped = s2Before - Enemy(s, s2).Health;
@@ -410,13 +411,14 @@ namespace GameLogic.EditorTools
                 PlaceEnemy(site, s1, new Vector2(-10f, -8f));
                 PlaceEnemy(site, s2, new Vector2(-6f, -8f));
                 FracturedCityRegion.TryAttackEnemy(s, m, s2, s.RandomSeed, isAiSource: false);
+                float afterMark = Enemy(s, s2).Health; // EMG2-REACT-01：跳转可能在第二发就发生（当场结算），从第一发之后开始量
                 FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
-                return Enemy(s, s2).Health;
+                return afterMark;
             };
             WorldSimulation.StepMany(2);
-            float s2c = resetAndMark();
             int jumpC = FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump);
             int firedC = SignalUplinkService.CoreFiredCount;
+            float s2c = resetAndMark();
             FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             WorldSimulation.StepMany(2);
             float jumpedCooling = s2c - Enemy(s, s2).Health;
@@ -424,8 +426,8 @@ namespace GameLogic.EditorTools
                    && FeedbackCues.CountOf(FeedbackCueId.ReactionMarkJump) == jumpC && SignalUplinkService.CoreFiredCount == firedC,
                 $"冷却中（仍接入）：再打已标记目标不跳（邻近敌人掉血 {jumpedCooling:F1}）、不出提示、核心发动次数不变（{firedC} → {SignalUplinkService.CoreFiredCount}）");
             WorldSimulation.StepMany((int)Math.Ceiling(SignalUplinkService.CooldownRemaining(s, FirmwareCatalog.FwMarkTagId) * GameClock.StepHz) + 2);
-            float s2r = resetAndMark();
             int firedR = SignalUplinkService.CoreFiredCount;
+            float s2r = resetAndMark();
             FracturedCityRegion.TryAttackEnemy(s, m, s1, s.RandomSeed, isAiSource: false);
             WorldSimulation.StepMany(2);
             float jumpedAgain = s2r - Enemy(s, s2).Health;
@@ -511,7 +513,7 @@ namespace GameLogic.EditorTools
             double expectWait = (heatHandoff - FracturedCityLayout.WeaponHeatRecoverThreshold) / FracturedCityLayout.WeaponHeatDissipationPerSecond;
             float aiHit = hpStart - armor.Health;
             Expect(!firedWhileHot && NextFire(site, a) != next0 && waited >= expectWait - 0.5
-                   && Mathf.Abs(aiHit - FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct)) < 0.05f
+                   && aiHit >= FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct) - 0.05f /* EMG2-REACT-01：先前的熔穿让护甲机装甲失效、站在熔融金属里，伤害只会更高；“没发动”看提示与发动次数 */
                    && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) == melt0,
                 $"交还后的 AI：过热期间一发不开，等了 {waited:F1} 游戏秒（热量 {heatHandoff:F0} → 60 约需 {expectWait:F1} 秒）才开火；这一发 {aiHit:F1}（普通重炮，没有熔穿过载）");
 
@@ -537,7 +539,7 @@ namespace GameLogic.EditorTools
             }
             float aimHit = hpAim - armor.Health;
             Expect(reup.Uplinked && reup.ReactionGated && aiming && NextFire(site, a) != nextAim && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) == melt1
-                   && SignalUplinkService.CoreFiredCount == fired1 && Mathf.Abs(aimHit - FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct)) < 0.05f,
+                   && SignalUplinkService.CoreFiredCount == fired1 && aimHit >= FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct) - 0.05f /* EMG2-REACT-01：先前的熔穿让护甲机装甲失效、站在熔融金属里，伤害只会更高；“没发动”看提示与发动次数 */,
                 $"接入中开始瞄准、瞄准没完就交还：AI 打完的这一发是普通重炮（{aimHit:F1}），不发动熔穿过载、不记核心冷却");
         }
 

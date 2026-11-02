@@ -1099,8 +1099,9 @@ namespace GameLogic.EditorTools
         {
             // EMG1-E2E-01：本段验“反应收尾击杀”的日志目标写“投影靶·…”（标签走 ReactionFeedback.Party，两轨同一函数）。正式表 emg.stage = 1 下
             // 电弧走声明轨、打靶改飞行弹体后，击毁那一步与反应记账的对齐口径变了（全量诊断：82 次击毁、0 条同步），登记 FG-GAP-181 复核；这里显式注入 0 跑旧轨。
-            FgEmgProgramSelfCheck.UseStage0Catalog();
-            try { CheckReactionKillLabelCore(); } finally { GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests(); }
+            // EMG2-REACT-01：短路改单位层沾染行 C03（单轨，旧轨 emg.stage = 0 不再结算），本段改在正式表（阶段 2）跑：短路的附带伤害打在电弧跳到的别的单位上，
+            // “这一击 × 倍率收尾”不再存在，改验“日志里后来阵亡的目标仍写投影靶·…”（标签走 ReactionFeedback.Party，阵亡后名字留到测试结束）。
+            CheckReactionKillLabelCore();
         }
 
         private static void CheckReactionKillLabelCore()
@@ -1132,7 +1133,7 @@ namespace GameLogic.EditorTools
                     killedUnits.Add(e.Unit);
                 }
             };
-            int log0 = ReactionLog.All.Count;
+            long tick0 = GameClock.Ticks; // 日志只留最近 50 条：按时刻取本段的（前面各段已把日志写满时 Skip(条数) 永远为空）
             for (int t = 0; t < 240 && !site.IsDisposed; t++)
             {
                 CombatKernel k = site.Kernel;
@@ -1146,17 +1147,18 @@ namespace GameLogic.EditorTools
                 }
                 Seconds(0.25f);
             }
-            var mine = ReactionLog.All.Skip(log0).Where(e => TestRangeService.IsRangeSite(e.SiteId)).ToList();
-            var finishing = mine.Where(e => e.Target.UnitId > 0 && kills.Contains((e.Target.UnitId, e.Tick))).ToList();
+            var mine = ReactionLog.All.Where(e => e.Tick >= tick0 && TestRangeService.IsRangeSite(e.SiteId)).ToList();
+            int sameTick = mine.Count(e => e.Target.UnitId > 0 && kills.Contains((e.Target.UnitId, e.Tick)));
+            var finishing = mine.Where(e => e.Target.UnitId > 0 && killedUnits.Contains(e.Target.UnitId)).ToList();
             string generic = GameText.Get("reaction.log.enemy");
             string unknown = GameText.Get("reaction.log.unknown");
             var bad = finishing.Select(e => ReactionLog.Describe(s, e)).Where(d => d.Contains(generic) || d.Contains(unknown) || !d.Contains("投影靶·")).ToList();
             bool labelKept = killedUnits.Count > 0 && killedUnits.All(u => site.TryGetUnitLabel(u, out string key, out _, out _) && key == "reaction.log.range_target");
             Expect(finishing.Count > 0 && bad.Count == 0 && labelKept,
-                $"I4 反应收尾击杀：60 游戏秒里 {killedUnits.Count} 次击毁，其中 {finishing.Count} 条反应日志就是打死目标的那一步，目标全部写“投影靶·…”"
+                $"I4 反应目标阵亡后的日志：60 游戏秒里 {killedUnits.Count} 次击毁，{finishing.Count} 条反应日志的目标后来阵亡（其中 {sameTick} 条就在击毁那一步），目标全部写“投影靶·…”"
                 + (bad.Count > 0 ? $"（{bad.Count} 条不是，例“{bad[0]}”）" : string.Empty)
                 + (finishing.Count > 0 ? $"，例“{ReactionLog.Describe(s, finishing[0])}”" : string.Empty)
-                + $"；阵亡靶子的名字留到测试结束（{labelKept}）");
+                + $"；阵亡靶子的名字留到测试结束（{labelKept}）（本段反应日志 {mine.Count} 条：{string.Join("/", mine.Select(e => e.ReactionId).Distinct())}）");
             TestRangeService.EndTest(s, range.BuildingId);
         }
 

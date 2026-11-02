@@ -535,6 +535,10 @@ namespace BinGames.Sim.Combat
                     z = d.Patches[i];
                 }
             }
+            if (m.Solid == EmgMatterConst.SolidBlock && z.Kinetic >= z.Hp)
+            {
+                z.Hp = 0f; // EMG2-REACT-01（FG19B §1.4 第 7 条、§2.5“动能（E 通用）”）：阻路固态没有专属 E 行，累计动能到耐久即碎，无产物
+            }
             if (m.Solid != 0 && z.Hp <= 0f)
             {
                 expire = true;

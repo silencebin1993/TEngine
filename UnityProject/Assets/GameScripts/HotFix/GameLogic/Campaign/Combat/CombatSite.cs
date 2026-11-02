@@ -212,15 +212,69 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
-            Kernel.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
-            Kernel.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
-            // FG10-FAC-01：澄净专属语法认的四个状态位（酸蚀免疫 / 湿润冲淡酸液 / 油迹 / 燃烧引爆与解冻），按 fg.TbStatusTag 的位写；表重载时随反应一起重登记。
-            Kernel.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"),
-                NamedReactionCatalog.BitOf("Frozen"), // EMG2-MAT-02：冻结位 → 液氮迁入斑块映射 mat.cryo
-                NamedReactionCatalog.BitOf("Shock")); // EMG2-PHS-01：电击位 → 读旧档时免疫位映射电抗覆盖
+            ApplyReactionTables(Kernel);
             ReactionRevision = NamedReactionCatalog.Revision;
             // FG2-FW-04：规则下标变了（纪元 +1）→ 当场重取反馈基线，下一步起的反应照常进日志 / 归因（不把第一步吞成基线）。
             ReactionFeedback.Prime(Kernel, FeedCursor);
+        }
+
+        /// <summary>
+        /// 具名标签反应表、整片反应残留与状态位（<see cref="ConfigureReactions"/> 的内核部分；自检的独立内核同一入口）。
+        /// FG10-FAC-01：澄净专属语法认的状态位（酸蚀免疫 / 湿润冲淡酸液 / 油迹 / 燃烧引爆与解冻）；EMG2-MAT-02 冻结位 → 液氮迁入斑块 mat.cryo；
+        /// EMG2-PHS-01 电击位 → 读旧档时免疫位映射电抗覆盖；EMG2-REACT-01 燃烧 / 电击位也是单位层沾染行（C01～C03）的“标签式”受热 / 通电。
+        /// </summary>
+        public static void ApplyReactionTables(CombatKernel k)
+        {
+            k.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
+            ApplyLegacyResidue(k); // EMG2-REACT-01：爆燃撤出旧表后，液洼 / 油迹 / 爬行者整片反应的残留参数
+            k.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+            k.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"),
+                NamedReactionCatalog.BitOf("Frozen"), NamedReactionCatalog.BitOf("Shock"));
+        }
+
+        /// <summary>自检 / 独立内核：与地点构造同一套内容登记（子形态、实体档案、物质、通道规则、相态规则，再加 <see cref="ApplyReactionTables"/>）。</summary>
+        public static void ApplyContent(CombatKernel k)
+        {
+            ApplyEmgSubForms(k);
+            ApplyEntityProfiles(k);
+            ApplyMatters(k);
+            ApplyRules(k);
+            ApplyPhaseRules(k);
+            ApplyReactionTables(k);
+        }
+
+        /// <summary>EMG2-REACT-01：把 <see cref="NamedReactionCatalog.LegacyResidueRow"/>（液洼 / 油迹 / 爬行者整片反应的残留参数，爆燃撤出旧表后从这一行取）写进内核；
+        /// 没有这一行时写 0（不参与）。热更层只经 Campaign/Combat 碰内核（FG14 §5 硬约束 3）。</summary>
+        public static void ApplyLegacyResidue(CombatKernel k)
+        {
+            var row = NamedReactionCatalog.LegacyResidueRow();
+            uint a = row == null ? 0u : NamedReactionCatalog.BitOf(row.TagA), b = row == null ? 0u : NamedReactionCatalog.BitOf(row.TagB);
+            k.SetLegacyResidue(a != 0u && b != 0u ? a | b : 0u, row == null ? 0u : NamedReactionCatalog.BitOf(row.Residue), row == null ? 0f : Math.Max(0f, row.ResidueSeconds),
+                row == null ? 0f : Math.Max(0f, row.ResidueRadius), row == null ? 0 : NamedReactionCatalog.StableKey(row.Id));
+        }
+
+        /// <summary>
+        /// EMG2-REACT-01：一条具名反应在内核里的累计次数 = 旧标签反应表（kind = tag）按表下标的次数 + 按稳定键的涌现可靠计数。
+        /// 已端口化的（rule）只有后者；还在旧表的也可能已有相态 / 通道行按同一稳定键结算（如热震：EMG2-PHS-01 的 P02 冻结 × 注热先解冻结算，旧行留给 EMG2-REACT-02 撤），
+        /// 同一次冻结只会走其中一轨，两项相加不重计。O(表行数)。
+        /// </summary>
+        public static int ReactionCountOf(CombatKernel k, string reactionId)
+        {
+            if (k == null || string.IsNullOrEmpty(reactionId))
+            {
+                return 0;
+            }
+            int legacy = 0;
+            var tags = NamedReactionCatalog.TagRules;
+            for (int i = 0; i < tags.Count; i++)
+            {
+                if (tags[i].Id == reactionId)
+                {
+                    legacy = k.ReactionCountOf(i);
+                    break;
+                }
+            }
+            return legacy + k.EmgRuleCountOfKey(NamedReactionCatalog.StableKey(reactionId));
         }
 
         /// <summary>最近一次登记时反应表的版本号（与 <see cref="NamedReactionCatalog.Revision"/> 不同 = 表重载过，下一步重新登记）。</summary>
@@ -1385,10 +1439,13 @@ namespace GameLogic.Campaign.Combat
                 w.AimSeconds = FracturedCityLayout.CannonAimSeconds;
                 // FG1-SIG-06（FGR-SIG-061）：信号裸跑未破解固件时积热 ×1.5（编译结果里的倍率，与双态预览的热量预算同一个数）。
                 float rawHeat = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
-                // FG2-FW-01（FGR-FW-001“热量”）：生效固件自己的每发积热（表 heat 列）叠在基础积热上，与热量预算同一规则（熔穿过载时过载一项由 OverloadExtraHeat 取代）。
+                // FG2-FW-01（FGR-FW-001“热量”）：生效固件自己的每发积热（表 heat 列）叠在基础积热上，与热量预算同一规则。
                 w.HeatPerShot = (FracturedCityLayout.CannonBaseHeatPerShot + Mathf.Max(0f, p.FirmwareHeatPerShot)) * rawHeat;
-                w.OverloadExtraHeat = FracturedCityLayout.OverloadExtraHeatPerShot * rawHeat;
-                w.PierceBonus = FracturedCityLayout.OverloadArmorPierceBonus;
+                // EMG2-REACT-01（FG19B §4.1 A2）：P03 开火时成立 → 开火者代价 cost.heat 取代写 en.heat 固件的表值热量（OverloadExtraHeat = 代价 − 被取代的表值，内核只在反应未被压住时加）；
+                // 被压住（冷却中 / 已发动）时回到表值。旧“额外穿甲 +30%”退役（PierceBonus = 0）。
+                w.OverloadExtraHeat = Emergence.EmgRuleCatalog.CostRuleApplies(p.PrimaryId, p.FirmwareIds, out float replacedHeat, out float costHeat)
+                    ? (costHeat - replacedHeat) * rawHeat : 0f;
+                w.PierceBonus = 0f;
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 // FG2-FW-02：重炮是射弹载体；伤害是固定值（不经电路编译），“伤害倍率”读法（电容蓄力）按表乘上。
                 w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
@@ -1413,14 +1470,8 @@ namespace GameLogic.Campaign.Combat
             w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
             // EMG1-CHAIN-01（FGR-EMG-084 / 019 同一 owner 单轨）：触发这条装配反应的固件已走声明轨（它的 grm.mod.chain“只跳已标记”在程序里跳、在内核计数），
             // 旧装配反应对同一武器不再结算跳转与计数——同一次跳转不计两次。没走声明轨（emg.stage = 0 的正式流程）逐字同旧。
-            if (!suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMarkJumpId
-                && !Emergence.EmgCatalog.IsOwnerOnDeclTrack(MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId)))
-            {
-                w.Reaction = CombatReaction.MarkJump;
-                w.JumpRange = FracturedCityLayout.MarkJumpRange;
-                w.JumpFalloff = FracturedCityLayout.MarkJumpDamageFalloff;
-                w.JumpMax = FracturedCityLayout.MarkJumpMaxTargets;
-            }
+            // EMG2-REACT-01（FGR-EMG-021 豁免撤销）：标记跳转只由固件“以 evt.marked 为条件写 grm.mod.chain”的只跳已标记连锁产生（内核 EmgMarkJumpReact 计数），
+            // 武器上不再挂旧装配反应 MarkJump（旧 DetectMarkJump 配对已删）。
             // EMG1-FW-01（DEBT-EMG1TRIG01-03）：没有攻击出口、主组件声明了 prop.integrity modify（修复友军，FG19A comp_repairbeam 行）→ 修复出口：只对己方出手、命中 = 修复。
             // 按声明（端口 + 角色 + 幅度，声明已生效）判，不按组件 ID；emg.stage = 0 时声明不生效，逐字同旧（没有出口）。
             if (!p.HasCombatOutput && !string.IsNullOrEmpty(p.PrimaryId))
@@ -2272,7 +2323,7 @@ namespace GameLogic.Campaign.Combat
                     return;
                 }
                 case CombatEventKind.MeltOverload:
-                    FeedbackCues.RaiseAt(FeedbackCueId.ReactionMeltOverload, at, "穿甲强化，热量额外上升",
+                    FeedbackCues.RaiseAt(FeedbackCueId.ReactionMeltOverload, at, GameText.Get("reaction.meltoverload.cue"),
                         FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMeltOverloadId));
                     return;
                 case CombatEventKind.Overheat:
@@ -2393,6 +2444,11 @@ namespace GameLogic.Campaign.Combat
             {
                 FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, $"跳转 {count} 个目标", FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
             }
+            else if (reactionId == MechanicalReactionCatalog.ReactionMeltOverloadId)
+            {
+                // EMG2-REACT-01：熔穿过载改在命中时结算（P03），声音与字幕跟着挪到这里
+                FeedbackCues.RaiseAt(FeedbackCueId.ReactionMeltOverload, at, GameText.Get("reaction.meltoverload.cue"), FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMeltOverloadId));
+            }
         }
 
         /// <summary>内核反应码 → 反应内容 ID（与 <see cref="MachineWeaponFrom(BlueprintCircuitPreview, bool)"/> 的翻译互逆）。</summary>
@@ -2424,6 +2480,7 @@ namespace GameLogic.Campaign.Combat
             }
             result = Kernel.FireAt(attacker, target, GameClock.GameSeconds);
             ProcessEvents();
+            ReactionFeedback.Process(this, CampaignSession.Current, countsOnly: true); // EMG2-REACT-01：熔穿过载等改在命中结算——即时命中的反应计数 / 核心固件冷却在这次开火里落账（与旧轨开火时发动同一时点）
             bool ok = result == CombatFireResult.Ok || result == CombatFireResult.StillAiming || result == CombatFireResult.Launched; // EMG1-TRIG-01：已发射也是开了火
             if (result == CombatFireResult.Covered)
             {
@@ -2451,6 +2508,7 @@ namespace GameLogic.Campaign.Combat
             }
             result = Kernel.FireAt(attacker, targetUnit, GameClock.GameSeconds);
             ProcessEvents();
+            ReactionFeedback.Process(this, CampaignSession.Current, countsOnly: true); // EMG2-REACT-01：熔穿过载等改在命中结算——即时命中的反应计数 / 核心固件冷却在这次开火里落账（与旧轨开火时发动同一时点）
             bool ok = result == CombatFireResult.Ok || result == CombatFireResult.StillAiming || result == CombatFireResult.Launched || result == CombatFireResult.Covered;
             if (!ok || result == CombatFireResult.Covered)
             {

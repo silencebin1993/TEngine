@@ -112,6 +112,8 @@ namespace BinGames.Sim.Combat
 
         /// <summary>FG2-FW-03：一个地点最多登记几条具名标签反应（fg.TbReaction 标签反应行；快照里反应计数按此定长）。</summary>
         public const int MaxReactions = 32;
+        /// <summary>EMG2-REACT-01：液洼整片反应上报里“区域整片反应残留”（不在旧标签反应表里）的下标占位。</summary>
+        public const int ResidueRuleIndex = 255;
 
         /// <summary>FG2-FW-03：状态标签叠层的存储上限（每位 2 比特）。</summary>
         public const int MaxStatusStacks = 3;

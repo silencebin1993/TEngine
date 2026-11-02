@@ -8,7 +8,7 @@ namespace GameLogic.Campaign.Content
     /// （引擎内建反应注册表，两者是不同层级的概念，不能合并）。
     ///
     /// 本类交付两件事：①反应内容目录条目本身（DisplayName/说明/组合条件文案）；②组合条件的纯函数判定
-    /// （<see cref="DetectMarkJump"/>/<see cref="DetectMeltOverload"/>），可被 execute_code 直接断言、
+    /// （EMG2-REACT-01 起改为端口判定，见 Emergence.EmgRuleCatalog.AssemblyReactionId），可被 execute_code 直接断言、
     /// 也是未来蓝图编译器（ER6-REACT-01/02）可以直接复用的判定逻辑，不需要重新设计规则。真正"保存蓝图
     /// 时由编译器识别并解锁反应效果"这条完整流程——包括把判定结果接到 <c>ComposeEngine</c> 的反应触发、
     /// 熔穿过载的精确数值耦合——分别移交 ER6-REACT-01/ER6-REACT-02（已在 STORY-BOARD.md 排期）。</summary>
@@ -24,9 +24,9 @@ namespace GameLogic.Campaign.Content
                 Id = ReactionMarkJumpId,
                 Category = MechanicalContentCategory.Reaction,
                 DisplayName = "标记跳转",
-                Description = "标记器与连射器/切割束同装、你接入时信号核带上标记跳转（核心固件，插进接入口）：主武器命中会额外跳向已标记的邻近敌人。AI 驾驶时不会触发。",
+                Description = "信号核带上标记跳转（核心固件，插进接入口）：命中后连锁只跳向已被标记的邻近敌人（任何标记来源都算），最多 2 跳。AI 驾驶时不会触发。",
                 Source = MechanicalContentSource.Composite,
-                SourceDetail = "非独立拾取；满足静默标记器+连射器/切割束同装，保存蓝图时由编译器识别（DEMO-CONTENT-LOCK.md §3/§2.4）。",
+                SourceDetail = "非独立拾取；由标记跳转固件的“只跳已标记”连锁产生（FG19 FGR-EMG-084，EMG2-REACT-01 端口化），没有规则行。",
                 Slot = "反应",
                 ScrapCost = 0,
                 Load = 0,
@@ -34,7 +34,7 @@ namespace GameLogic.Campaign.Content
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_reaction_marktag",
                 ModelId = "n/a",
-                ActionId = "MechanicalReactionCatalog.DetectMarkJump(...) — 纯函数组合检测，已用 execute_code 验证正/负两组输入",
+                ActionId = "EmgRuleCatalog.AssemblyReactionId(...) — 按端口判定（EMG2-REACT-01）",
                 VfxId = "vfx_none_placeholder",
                 SfxId = "sfx_reaction_markjump",
                 PreviewId = "preview_reaction_marktag",
@@ -49,17 +49,17 @@ namespace GameLogic.Campaign.Content
                 Id = ReactionMeltOverloadId,
                 Category = MechanicalContentCategory.Reaction,
                 DisplayName = "熔穿过载",
-                Description = "你接入铸造重炮机、信号核带上过载（核心固件，插进接入口）时触发：额外穿甲并大幅提升热量代价。AI 驾驶时不会触发。",
+                Description = "重型射弹带着足够的注热命中时触发（如接入铸造重炮机、信号核带上过载）：命中点溅出熔融金属，目标进入熔穿；开火热量代价提高。",
                 Source = MechanicalContentSource.Composite,
-                SourceDetail = "非独立拾取；满足铸造重炮+过载固件同装，保存蓝图时由编译器识别（DEMO-CONTENT-LOCK.md §3）。",
+                SourceDetail = "非独立拾取；通道规则 P03：同一次命中注热 ≥ 45 且动能 ≥ 40（FG19B §4.1 A2，EMG2-REACT-01 端口化）。",
                 Slot = "反应",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "重炮+过载是熔穿过载唯一配方；额外穿甲+30%，基础热量40上再加25即每发65，不再叠加一般+15%热量（DEMO-CONTENT-LOCK.md §2.4/§5）。",
+                ValuesSummary = "熔融金属 4 份（1000 度）+ 目标熔穿；开火者代价 25 取代过载表值 15，重炮每发 65；旧“额外穿甲 +30%”退役（FG19B P03）。",
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_reaction_meltoverload",
                 ModelId = "n/a",
-                ActionId = "MechanicalReactionCatalog.DetectMeltOverload(...) — 纯函数组合检测，已用 execute_code 验证正/负两组输入",
+                ActionId = "CombatLogic.EmgMeltOverloadHit — 通道规则 P03（EMG2-REACT-01）",
                 VfxId = "vfx_meltoverload_placeholder",
                 SfxId = "sfx_reaction_melt",
                 PreviewId = "preview_reaction_meltoverload",
@@ -75,33 +75,9 @@ namespace GameLogic.Campaign.Content
 
         public static bool TryGet(string id, out MechanicalContentDef def) => _defs.TryGetValue(id, out def);
 
-        /// <summary>DEMO-CONTENT-LOCK.md §2.4："标记跳转固件必须与标记器和连射器/切割束同装"。
-        /// 纯函数，不依赖任何游戏状态，供蓝图编译（ER6-REACT-01）与本 Story 自动化测试共用。</summary>
-        public static bool DetectMarkJump(IReadOnlyCollection<string> mainComponentIds,
-            IReadOnlyCollection<string> functionComponentIds, IReadOnlyCollection<string> firmwareIds)
-        {
-            if (mainComponentIds == null || functionComponentIds == null || firmwareIds == null)
-            {
-                return false;
-            }
-            bool hasMarker = functionComponentIds.Contains(ComponentCatalog.FuncMarkerId);
-            bool hasMarkJumpFirmware = firmwareIds.Contains(FirmwareCatalog.FwMarkTagId);
-            bool hasCompatibleMain = mainComponentIds.Contains(ComponentCatalog.CompGunId)
-                || mainComponentIds.Contains(ComponentCatalog.CompBeamId);
-            return hasMarker && hasMarkJumpFirmware && hasCompatibleMain;
-        }
-
-        /// <summary>DEMO-CONTENT-LOCK.md §2.4："重炮+过载是熔穿过载唯一配方"。</summary>
-        public static bool DetectMeltOverload(IReadOnlyCollection<string> mainComponentIds,
-            IReadOnlyCollection<string> firmwareIds)
-        {
-            if (mainComponentIds == null || firmwareIds == null)
-            {
-                return false;
-            }
-            return mainComponentIds.Contains(ComponentCatalog.CompCannonId)
-                && firmwareIds.Contains(FirmwareCatalog.FwOverloadId);
-        }
+        // EMG2-REACT-01（FG19 FGR-EMG-021，ADR ⑪）：DetectMarkJump / DetectMeltOverload 两个“组件 + 固件”ID 配对判定已删除、豁免撤销——
+        // 熔穿过载 = 通道规则 P03（重型射弹的单次动能 × 同一次命中注入的热），标记跳转 = 固件“以 evt.marked 为条件写 grm.mod.chain”的只跳已标记连锁；
+        // 装配判定见 Emergence.EmgRuleCatalog.AssemblyReactionId（只认载体类别与端口）。
 
         /// <summary>FG1-SIG-03（FGR-SIG-033）：这条反应由哪条固件“发动”——与上面两个判定函数同一份配方（熔穿过载 ← 过载，标记跳转 ← 标记跳转固件）。
         /// 核心固件的冷却按这条固件记在信号上；不是具名反应时返回 null。FG2-FW-03 反应全量命名时在这里接入新配方。</summary>

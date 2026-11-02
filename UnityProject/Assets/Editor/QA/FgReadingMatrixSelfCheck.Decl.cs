@@ -278,7 +278,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>EMG2-PHS-01：按正式路径编出武器跑预置场景 4 游戏秒（因果链注入记录按链深分根节点 / 子载荷）。</summary>
-        private static Obs DeclObs(string comp, string[] fws)
+        private static Obs DeclObs(string comp, string[] fws, bool prepared = true)
         {
             BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, comp, null, null, Array.Empty<string>());
             board.TrySetUplink(UplinkSlot);
@@ -289,7 +289,7 @@ namespace GameLogic.EditorTools
             {
                 w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
             }
-            return RunArena(w, 4f, prepared: true, program, comp);
+            return RunArena(w, 4f, prepared, program, comp);
         }
 
         /// <summary>被测固件在该载体上有效果写端（非语法、非元程序）。</summary>

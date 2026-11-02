@@ -442,6 +442,10 @@ namespace BinGames.Sim.Combat
             z.NextTick = now + z.TickInterval;
             d.Patches[i] = z;
             MarkHashDirty(ref d);
+            if (m.Solid == EmgMatterConst.SolidBlock)
+            {
+                EmgBlockPushOut(ref d, i); // EMG2-REACT-01（ADR ⑯，FG19B M16）：固化胶块生成时圈内单位按 Id 升序推到边缘
+            }
         }
 
         /// <summary>扣另一方份量（consB ≥ 0：× a 份量；&lt; 0：b 自身的比例）。世界源不扣（视为无穷大），返回值仍是名义消耗量。</summary>
@@ -832,17 +836,18 @@ namespace BinGames.Sim.Combat
         /// 命中注能（FG19 FGR-EMG-090：固件写端 role = inject）：本次伤害出自带程序的载荷时，节点里写 en.heat / en.elec / en.mag 的注入行（触发事件是命中或没有触发读端；
         /// 内核根节点事件门控行 RootKernel 由 EmgRootGated 执行，这里跳过）对目标单位与命中点 param2 米内的斑块注入。O(节点指令数)，只在带程序载荷的命中时。
         /// </summary>
-        internal static void EmgHitInject(ref CombatData d, int t, in EmgCtx c)
+        internal static float2 EmgHitInject(ref CombatData d, int t, in EmgCtx c)
         {
+            float2 inj = 0f; // EMG2-REACT-01：本次命中注入的 (热, 电)，给单位层沾染行（C01～C03）与 P03 读
             if (c.Prog < 0 || c.Prog >= d.EmgPrograms.Length)
             {
-                return;
+                return inj;
             }
             bool patchesOn = EmgPatchesOn(ref d); // 壁撞推动只看实体层，不依赖物质层
             EmgProgram p = d.EmgPrograms[c.Prog];
             if (c.Node >= p.NodeCount || p.FirstNode + c.Node >= d.EmgNodes.Length)
             {
-                return;
+                return inj;
             }
             EmgNode n = d.EmgNodes[p.FirstNode + c.Node];
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
@@ -874,10 +879,12 @@ namespace BinGames.Sim.Combat
                 if (x.Port == EmgConst.PortHeat)
                 {
                     EmgAddUnitHeat(ref d, t, x.Amount);
+                    inj.x += x.Amount;
                 }
                 else if (x.Port == EmgConst.PortElec)
                 {
                     EmgAddAcc(ref d, t, EmgPhaseConst.Charge, x.Amount, EmgIdOf(ref d, c.Owner));
+                    inj.y += x.Amount;
                 }
                 else
                 {
@@ -889,6 +896,7 @@ namespace BinGames.Sim.Combat
                 }
                 EmgChainLog(ref d, EmgChainNode.Inject, c.Chain, c.Depth, x.Port, EmgIdOf(ref d, c.Owner), at, d.Id[t]);
             }
+            return inj;
         }
 
         /// <summary>

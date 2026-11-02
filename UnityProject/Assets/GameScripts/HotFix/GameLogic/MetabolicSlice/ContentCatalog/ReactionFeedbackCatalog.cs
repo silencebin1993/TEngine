@@ -28,7 +28,8 @@ namespace GameLogic.MetabolicSlice.ContentCatalog
 
         /// <summary>全部已知反应的旧 id（图鉴“已发现反应”页遍历全量目录用；与 <see cref="GetLabel"/> / <see cref="GetDescription"/> 同一 key 空间）。</summary>
         public static IEnumerable<string> AllReactionIds =>
-            NamedReactionCatalog.Rows.Where(r => r != null && r.Kind == NamedReactionCatalog.KindTag && !string.IsNullOrEmpty(r.LegacyName) && r.LegacyName != "none")
+            // EMG2-REACT-01：已端口化的五条（kind = rule）旧引擎照样报这些旧名，按旧名列全（装配反应没有旧名，自然排除）
+            NamedReactionCatalog.Rows.Where(r => r != null && !string.IsNullOrEmpty(r.LegacyName) && r.LegacyName != "none")
                 .Select(r => r.LegacyName);
 
         /// <summary>图鉴用的完整说明（触发条件与效果）。</summary>

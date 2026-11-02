@@ -762,7 +762,7 @@ namespace GameLogic.EditorTools
             FirmwareCatalog.TryGet(coreMix.MixId, out MechanicalContentDef cdef);
             bool coreRules = !FirmwareKinds.CanInstall(s, coreMix.MixId, FirmwareHost.MachineCircuit, out _) && FirmwareKinds.CanInstall(s, coreMix.MixId, FirmwareHost.SignalCore, out _)
                              && cdef != null && cdef.AiPermission == MechanicalContentAiPermission.PlayerOnly;
-            string melt = BlueprintCircuitCompiler.DetectReactionId(ComponentCatalog.CompCannonId, null, new[] { coreMix.MixId });
+            string melt = GameLogic.Campaign.Emergence.EmgRuleCatalog.AssemblyReactionId(ComponentCatalog.CompCannonId, new[] { coreMix.MixId });
             bool gated = SignalUplinkService.IsCoreGatedReaction(melt, new[] { coreMix.MixId });
             float heatMelt = BlueprintCircuitBoard.ComputeHeatBudget(ComponentCatalog.CompCannonId, new[] { coreMix.MixId });
             float heatParents = BlueprintCircuitBoard.ComputeHeatBudget(ComponentCatalog.CompCannonId, new[] { coreMix.ParentA, coreMix.ParentB });
@@ -875,12 +875,12 @@ namespace GameLogic.EditorTools
             city.SquadCommands.ClearSelection();
             int ri = RuleIndex("reaction_deflagrate");
             CombatSite site = CombatSites.Get(FracturedCityLayout.RegionId);
-            int c0 = site?.Kernel.ReactionCountOf(ri) ?? 0;
-            for (int i = 0; i < 90 && (site?.Kernel.ReactionCountOf(ri) ?? 0) - c0 < FusionCatalog.ClueFullMin; i++)
+            int c0 = CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate");
+            for (int i = 0; i < 90 && (CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate")) - c0 < FusionCatalog.ClueFullMin; i++)
             {
                 WorldSimulation.StepMany(GameClock.StepHz / 2);
             }
-            int kernelCount = (site?.Kernel.ReactionCountOf(ri) ?? 0) - c0;
+            int kernelCount = (CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate")) - c0;
             ReactionSessionRecord sess = ReactionAttribution.Current(s, FracturedCityLayout.RegionId, create: false);
             int sessCount = sess?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_deflagrate")?.Count ?? 0;
             ReactionAttribution.CloseExpedition(s, FracturedCityLayout.RegionId); // 撤离（ExpeditionReturnService 同一入口）

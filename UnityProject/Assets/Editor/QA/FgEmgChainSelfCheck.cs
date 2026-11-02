@@ -83,6 +83,8 @@ namespace GameLogic.EditorTools
                 Step(CheckData);
                 Step(CheckSingleTrack);
                 UseStage1(false);
+                Step(CheckMarkJumpHops);
+                UseStage1(false);
                 Step(CheckMarkTag);
                 Step(CheckChainRecords);
                 Step(CheckDirtyAndRing);
@@ -321,7 +323,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckSingleTrack()
         {
-            Line("  · B1. FGR-EMG-084 / 019 单轨：fw_marktag 没走声明轨（emg.stage = 0 正式流程）时旧装配反应照旧；走声明轨后旧 DetectMarkJump 对同一武器不再结算，同一次跳转只计一次");
+            Line("  · B1. FGR-EMG-084 / 019 / 021 单轨（EMG2-REACT-01 豁免撤销后）：武器不再挂旧装配反应“标记跳转”（两种开关都一样）；标记跳转只由 fw_marktag 的只跳已标记连锁产生，同一次跳转只计一次；回滚开关（stage 0）下不跳（预期差异，DEBT-EMG2REACT01-05）");
             var p = new BlueprintCircuitPreview
             {
                 PrimaryId = ComponentCatalog.CompGunId, HasCombatOutput = true, TotalNormalizedDamage = 10f, ReactionId = MechanicalReactionCatalog.ReactionMarkJumpId,
@@ -352,10 +354,73 @@ namespace GameLogic.EditorTools
             EmgProgramResult prog = EmgProgramCompiler.Compile(new[] { MarkTag }, Array.Empty<string>(), FirmwareCarrier.Projectile);
             int dmgDecl = Run(decl, prog, out int gjDecl, out int ecDecl);
             EmgCatalog.ResetForTests();
-            Expect(legacy.Reaction == CombatReaction.MarkJump && decl.Reaction == CombatReaction.None,
-                $"旧轨武器带装配反应“标记跳转”（{legacy.Reaction}）；fw_marktag 走声明轨后同一装配的武器不带（{decl.Reaction}）");
-            Expect(dmgLegacy > 0 && gjLegacy == 1 && ecLegacy == 0 && dmgDecl > 0 && gjDecl == 0 && ecDecl == 1,
-                $"同一次跳转只计一次：旧轨 = 装配反应事件 {gjLegacy} 次、涌现计数 {ecLegacy}（已标记邻居掉 {dmgLegacy}）；声明轨 = 装配反应事件 {gjDecl} 次、涌现计数 {ecDecl}（掉 {dmgDecl}）");
+            Expect(legacy.Reaction == CombatReaction.None && decl.Reaction == CombatReaction.None,
+                $"旧 DetectMarkJump 配对已删：回滚开关下（{legacy.Reaction}）与声明轨（{decl.Reaction}）的武器都不挂装配反应");
+            Expect(gjLegacy == 0 && ecLegacy == 0 && dmgDecl > 0 && gjDecl == 0 && ecDecl == 1,
+                $"同一次跳转只计一次：回滚开关 = 装配反应事件 {gjLegacy} 次、涌现计数 {ecLegacy}（不跳，预期差异）；声明轨 = 装配反应事件 {gjDecl} 次、涌现计数 {ecDecl}（已标记邻居掉 {dmgDecl}）");
+        }
+
+        /// <summary>EMG2-REACT-01 复审（卡片负向“跳数等于声明值（2），不额外加跳”）：主目标周围 4 个已标记邻居，一发 fw_marktag 恰好跳 2 个、计数与跳数一致、不发旧装配反应事件。</summary>
+        private static void CheckMarkJumpHops()
+        {
+            Line("  · B3. 标记跳转跳数 = 声明值 2：主目标旁 4 个已标记邻居，一发只跳到 2 个（不额外加跳，没被跳到的邻居不掉血）；涌现计数 = 跳数；没有旧装配反应事件");
+            var p = new BlueprintCircuitPreview
+            {
+                PrimaryId = ComponentCatalog.CompGunId, HasCombatOutput = true, TotalNormalizedDamage = 10f, FirmwareIds = new[] { MarkTag },
+            };
+            CombatWeapon w = CombatSite.MachineWeaponFrom(p, false);
+            w.Cooldown = 1000f; // 只开这一发（不让自动索敌补第二发混进跳数）
+            EmgProgramResult pr = EmgProgramCompiler.Compile(new[] { MarkTag }, Array.Empty<string>(), FirmwareCarrier.Projectile);
+            using var k = new CombatKernel(Cfg(), 16);
+            // 复审 P2 查清：只 FoldProgramReadings 会留下 fw_marktag 的旧读法字段 markjump（JumpMax 2、每跳 60%），内核通用标记跳转在程序连锁之外再跳 2 次
+            // （实测 3 号邻居 13 = 旧跳 6 + 连锁 7、4 号 3.6 = 旧跳第 2 跳）。正式机器走 ProgramReading（LegacySkip 单轨跳过旧字段），这里照正式入口建读法。
+            w.Reading = CombatSite.ProgramReading(p, w.Reading, pr);
+            w.Program = CombatSite.RegisterProgram(k, pr);
+            int me = k.Spawn(MachineSpawn(new double2(0, -1.5), k.AddWeapon(w)));
+            int t = k.Spawn(HostileSpawn(double2.zero));
+            k.SetMarkedUntil(t, 1e9);
+            int[] marked = new[] { new double2(0, 3.0), new double2(3.0, 0.5), new double2(-3.0, 0.5), new double2(2.0, 2.5) }
+                .Select(at => { int id = k.Spawn(HostileSpawn(at)); k.SetMarkedUntil(id, 1e9); return id; }).ToArray();
+            int c0 = k.EmgRuleCountOfKey(MarkKey);
+            k.FireAt(me, t, k.Time);
+            // 复审 P2：跳转在开火当场结算；之后 30 步里邻居还在掉血 = 有持续伤害 / 斑块混进来（记步数，应全为 0）
+            var dropSteps = new int[marked.Length];
+            var lastHp = marked.Select(id => Hp(k, id)).ToArray();
+            for (int s = 1; s <= 30; s++)
+            {
+                StepN(k, 1);
+                for (int i = 0; i < marked.Length; i++)
+                {
+                    float hp = Hp(k, marked[i]);
+                    if (hp < lastHp[i])
+                    {
+                        dropSteps[i]++;
+                    }
+                    lastHp[i] = hp;
+                }
+            }
+            CombatEvent[] ev = k.DrainGameplay(4096, out int n);
+            int legacyEv = ev.Take(n).Count(e => e.Kind == CombatEventKind.ReactionFired && e.Code == (byte)CombatReaction.MarkJump);
+            int count = k.EmgRuleCountOfKey(MarkKey) - c0;
+            var ring = new List<string>();
+            var hopTo = new List<int>();
+            for (int i = 0; i < k.EmgChainRecordCount; i++)
+            {
+                if (k.TryGetEmgChainRecent(i, out EmgChainRec r))
+                {
+                    ring.Add($"{r.Kind}:{r.Other}@{r.Pos.x:0.#},{r.Pos.y:0.#}t{r.Time / Dt:0}");
+                    if (r.Kind == EmgChainNode.Rule && r.Key == MarkKey)
+                    {
+                        hopTo.Add(r.Other);
+                    }
+                }
+            }
+            EmgCatalog.ResetForTests();
+            // 跳数按因果链“规则”节点数（每跳一条）认，且没被跳到的已标记邻居一点血不掉（没有链外的第三跳 / 旧读法跳转）
+            int[] notHop = marked.Where(id => !hopTo.Contains(id)).ToArray();
+            bool quiet = notHop.Length == marked.Length - hopTo.Count && notHop.All(id => Hp(k, id) >= 1e6f) && w.Reading.JumpMax == 0;
+            Expect(hopTo.Count == 2 && hopTo.Distinct().Count() == 2 && hopTo.All(marked.Contains) && count == hopTo.Count && legacyEv == 0 && quiet,
+                $"4 个已标记邻居一发只跳 {hopTo.Count} 跳（声明 2，落在 {string.Join(",", hopTo)}；邻居掉血 {string.Join(" / ", marked.Select(id => (1e6f - Hp(k, id)).ToString("0.#")))}，全在开火当场；之后 30 步再掉血的步数 {string.Join(" / ", dropSteps)}）、没被跳到的邻居不掉血 {quiet}（正式入口建读法，旧字段 markjump JumpMax = {w.Reading.JumpMax}）、涌现计数 +{count}（= 跳数）、旧装配反应事件 {legacyEv} 次；邻居 Id {string.Join(",", marked.Select(id => k.TryGetUnit(id, out CombatUnitView uv) ? uv.Id : -1))}；链记录 [{string.Join(" ", ring)}]");
         }
 
         // ── B2. evt.react 生产者 ─────────────────────────────────────────────────

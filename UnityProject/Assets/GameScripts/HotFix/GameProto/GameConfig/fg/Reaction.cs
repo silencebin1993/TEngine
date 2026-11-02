@@ -59,7 +59,7 @@ public sealed partial class Reaction : Luban.BeanBase
     /// </summary>
     public readonly string LegacyRules;
     /// <summary>
-    /// tag=标签反应(战斗内核按状态标签触发);assembly=装配反应(标记跳转/熔穿过载,由装配识别)
+    /// tag=标签反应(战斗内核按状态标签触发);rule=通道规则(fg.TbChannelRule 的 named 列驱动,EMG2-REACT-01;tagA/tagB 只作配料提示);assembly=装配反应(已全部端口化,保留取值)
     /// </summary>
     public readonly string Kind;
     /// <summary>

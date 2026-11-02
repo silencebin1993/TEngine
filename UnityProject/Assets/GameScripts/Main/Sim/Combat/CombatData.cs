@@ -148,6 +148,10 @@ namespace BinGames.Sim.Combat
         public uint WetBit;
         public uint OilBit;
         public uint FireBit;
+        /// <summary>EMG2-REACT-01：区域整片反应残留（液洼 / 油迹遇火、爬行者爆燃留的燃烧区；热更层按 fg.TbReaction 规则行写入，派生量、读档后沿用）。</summary>
+        public uint ResiduePair, ResidueBit;
+        public float ResidueSeconds, ResidueRadius;
+        public int ResidueKey;
         /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量（热更层按净化塔写入），不进快照。</summary>
         public NativeList<float3> PolluteTargets;
         /// <summary>FG10-RAID-01：1 = 只有攻城中的单位（<see cref="CombatSiegeLogic.UsesSiege"/>）读投放目标（家园 / 星球内核：别处的澄净无人机——据点驻军、首领波次、被拦截就地交战的——不被吸去投放）；

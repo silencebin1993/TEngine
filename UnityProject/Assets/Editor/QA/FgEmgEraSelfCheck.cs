@@ -479,6 +479,7 @@ namespace GameLogic.EditorTools
             float allyHp0 = Hp(k, ally);
             k.FireAt(h, me, k.Time);
             int listed = 0;
+            long dupCounts = -1, dupFull = -1;
             for (int i = 0; i < 30; i++)
             {
                 site.Step(Dt, k.Time + Dt);
@@ -486,7 +487,20 @@ namespace GameLogic.EditorTools
                 {
                     listed += k.EmgFriendlyAt(j).x == ally && k.EmgFriendlyAt(j).y == me ? 1 : 0;
                 }
+                if (dupCounts < 0 && k.EmgFriendlyCount > 0)
+                {
+                    // EMG2-REACT-01 复审：这一步刚交出友伤条目（Step 末尾已发通知）——两步之间手动开火后的入口（CombatSite.TryFireAt* / 炮塔手动开火用 countsOnly）不再重复发；
+                    // 对照：不带 countsOnly 的整段处理会把同一批条目再发一遍（修复前的行为）
+                    long before = ReactionFeedback.FriendlyPosted;
+                    ReactionFeedback.Process(site, s, countsOnly: true);
+                    dupCounts = ReactionFeedback.FriendlyPosted - before;
+                    long mid = ReactionFeedback.FriendlyPosted;
+                    ReactionFeedback.Process(site, s);
+                    dupFull = ReactionFeedback.FriendlyPosted - mid;
+                }
             }
+            Expect(dupCounts == 0 && dupFull >= 1,
+                $"手动开火后的反馈结算不重复发友伤：只结算计数的入口多发 {dupCounts} 条（= 0）；对照整段再处理一遍多发 {dupFull} 条（修复前手动开火就是这样）");
             bool chained = false;
             for (int i = 0; i < k.EmgChainRecordCount; i++)
             {

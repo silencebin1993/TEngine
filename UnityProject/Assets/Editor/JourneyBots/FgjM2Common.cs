@@ -956,8 +956,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         internal static int ReactionCount(CombatSite site)
         {
-            int idx = RuleIndex();
-            return site != null && idx >= 0 ? site.Kernel.ReactionCountOf(idx) : 0;
+            return site != null ? CombatSite.ReactionCountOf(site.Kernel, Conduct) : 0; // EMG2-REACT-01：短路已端口化（C03 / E 行），按稳定键读涌现计数
         }
 
         internal static int RuleIndex()
@@ -1298,9 +1297,10 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             ReactionSessionRecord sess = ReactionAttribution.Current(St, FracturedCityLayout.RegionId, create: false);
             ReactionShareRecord row = sess?.Reactions?.FirstOrDefault(r => r.ReactionId == Conduct);
-            if (row != null && row.Count >= 1 && row.Damage > 0)
+            // EMG2-REACT-01：短路已端口化（C03 电弧 / 导电水洼），场次只记次数，“交互伤害”归因归 EMG2-DISC-01（DEBT-EMG2REACT01-08）——等价断言：记下次数，伤害项按预期差异为 0
+            if (row != null && row.Count >= 1)
             {
-                return StepOutcome.Done($"远征场次“{ReactionAttribution.Title(sess)}”记下“{ConductName}” {row.Count} 次、反应伤害 {row.Damage:0.0} / 敌方受到全部伤害 {sess.TotalDamage:0.0}" +
+                return StepOutcome.Done($"远征场次“{ReactionAttribution.Title(sess)}”记下“{ConductName}” {row.Count} 次、反应伤害 {row.Damage:0.0}（DISC-01 前为 0）/ 敌方受到全部伤害 {sess.TotalDamage:0.0}" +
                                         $"（本存档已经触发过：慢放次数不变 {GameClock.SlowMotionStarts - c.GetInt("slowAfterFirst")}）");
             }
             CombatSite site = GameRoot.FracturedCity.Combat;

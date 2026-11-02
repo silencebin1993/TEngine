@@ -239,10 +239,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 return "具名反应计数：没有家园内核";
             }
             var parts = new List<string>();
-            for (int i = 0; i < NamedReactionCatalog.TagRules.Count; i++)
+            foreach (var row in NamedReactionCatalog.Rows) // EMG2-REACT-01：标签反应 + 已端口化的规则反应一起数
             {
-                string id = NamedReactionCatalog.IdOfRule(i);
-                int n = site.Kernel.ReactionCountOf(i);
+                string id = row.Id;
+                int n = CombatSite.ReactionCountOf(site.Kernel, id);
                 if (n > 0)
                 {
                     string name = ReactionNames.FirstOrDefault(r => r.Id == id).Name ?? NamedReactionCatalog.NameOf(id);
@@ -1081,14 +1081,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private static int RuleCount(string reactionId)
         {
             CombatSite site = Home;
-            for (int i = 0; site?.Kernel != null && i < NamedReactionCatalog.TagRules.Count; i++)
-            {
-                if (NamedReactionCatalog.IdOfRule(i) == reactionId)
-                {
-                    return site.Kernel.ReactionCountOf(i);
-                }
-            }
-            return 0;
+            return CombatSite.ReactionCountOf(site?.Kernel, reactionId); // EMG2-REACT-01：标签 / 规则两种口径统一
         }
 
         private static StepOutcome TickOutpostCleared(JourneyContext c)
@@ -1618,7 +1611,7 @@ namespace GameLogic.EditorTools.JourneyBots
             if ((int)(c.StepElapsed / 20) > c.GetInt(FgjM3Common.SK(c, "log")))
             {
                 c.SetInt(FgjM3Common.SK(c, "log"), (int)(c.StepElapsed / 20));
-                c.Log($"[{F(c.StepElapsed, "0")}s] 计划 {PurifyPlan(s)?.State}；剧场 {SiegeService.StateOf(s)?.TheaterActive}；投放目标 {Home?.PolluteTargetCount}；投放 {ClarityRaidService.Landed - c.GetInt("landedStep0")} 次；塔心污染 {map.GetPollution(center)}；{TeamHp(c)}");
+                c.Log($"[{F(c.StepElapsed, "0")}s] 计划 {PurifyPlan(s)?.State}（抵达第 {PurifyPlan(s)?.ArrivalTick} 步，现在第 {GameClock.Ticks} 步，倍速 {GameClock.Speed}，暂停 {GameClock.Paused}）；剧场 {SiegeService.StateOf(s)?.TheaterActive}；投放目标 {Home?.PolluteTargetCount}；投放 {ClarityRaidService.Landed - c.GetInt("landedStep0")} 次；塔心污染 {map.GetPollution(center)}；{TeamHp(c)}");
             }
             if (ClarityRaidService.Landed <= c.GetInt("landedStep0"))
             {

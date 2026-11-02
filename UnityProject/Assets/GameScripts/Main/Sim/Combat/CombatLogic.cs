@@ -456,6 +456,10 @@ namespace BinGames.Sim.Combat
             }
             float2 desired = (float2)math.normalize(toTarget);
             bool blocked = FindBlockingObstacle(ref d, pos, desired, out double2 obstacle);
+            if (!blocked && !IsAir(ref d, i))
+            {
+                blocked = EmgBlockAhead(ref d, pos, desired, d.Config.Lookahead, d.Config.AvoidRadius, out obstacle); // EMG2-REACT-01：阻路斑块与障碍圆同一套绕行
+            }
             float2 moveDir = desired;
             if (blocked)
             {
@@ -1385,11 +1389,8 @@ namespace BinGames.Sim.Combat
             RawFired(ref d, a, t);
             Cue(ref d, CombatEventKind.CannonFire, a, d.Id[t], 0f, d.Pos[t], 0);
             PushTrace(ref d, a, t, wp, EmgFlightOn(wp)); // FG2-E2E-01（FG-GAP-043）；EMG1-TRIG-01：SpawnFlight 重炮只闪光，弹体自己飞
-            if (overload)
-            {
-                Cue(ref d, CombatEventKind.MeltOverload, a, d.Id[t], 0f, d.Pos[t], 0);
-                ReactionFired(ref d, a, t, CombatReaction.MeltOverload);
-            }
+            // EMG2-REACT-01（FG19B §4.1 A2）：开火这一刻只计开火者代价 cost.heat（OverloadExtraHeat = cost − 被取代的指令表值热量）；
+            // 熔穿过载本身是 P03 命中规则（溅出熔融金属 + 目标熔穿），在命中时结算、计数与发动（EmgMeltOverloadHit），开火时不再发反应事件。
             if (heat >= wp.OverheatAt)
             {
                 d.Set(a, CombatUnitFlags.Overheated, true);
@@ -1415,7 +1416,7 @@ namespace BinGames.Sim.Combat
                 return CombatFireResult.Covered; // EMG1-TRIG-01：残骸挡下（EMG1-ENT-01：重炮单次动能按重型系数，够了崩出破片）
             }
             // 基础伤害不受过载影响；过载只改积热与穿甲（Demo CannonCombat 类注释）。FG2-FW-02：固件读法（穿甲、伤害倍率、增幅……）同一处结算。
-            float pierce = (!overload || d.Has(t, CombatUnitFlags.HeatResistant)) ? 0f : wp.PierceBonus;
+            float pierce = 0f; // EMG2-REACT-01：熔穿过载旧“本发额外穿甲 +30%”退役（FG19B P03，预期差异）；PierceBonus 字段保留只为快照不变
             bool wasMarked = d.MarkedUntil[t] > now;
             double2 hitPos = d.Pos[t];
             float damage = StrikeDamage(ref d, a, t, wp.Damage, wp.Reading, d.Pos[a], true, pierce);
@@ -2228,6 +2229,11 @@ namespace BinGames.Sim.Combat
         /// </summary>
         public static double2 MoveCollide(ref CombatData d, int i, double2 from, double2 to)
         {
+            if (IsStuck(ref d, i))
+            {
+                return from; // EMG2-REACT-01（C06 bhv.stick）：粘住期间不能移动、不受推动
+            }
+            to = EmgBlockClamp(ref d, i, from, to); // EMG2-REACT-01（ADR ⑯）：阻路斑块不可进入（离地单位不受阻）
             if (d.Config.NavEnabled == 0 || (i >= 0 && i < d.Count && d.Clarity[i].Air != 0))
             {
                 return to; // FG10-FAC-01：空中单位不受格网碰撞

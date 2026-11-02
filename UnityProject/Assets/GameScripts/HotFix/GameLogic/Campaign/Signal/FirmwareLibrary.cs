@@ -511,7 +511,7 @@ namespace GameLogic.Campaign.Signal
                 {
                     continue;
                 }
-                bool hit = r.Kind == NamedReactionCatalog.KindAssembly
+                bool hit = r.Kind == NamedReactionCatalog.KindAssembly || (r.Kind == NamedReactionCatalog.KindRule && (string.IsNullOrEmpty(r.TagA) || r.TagA == "none"))
                     ? MechanicalReactionCatalog.TriggerFirmwareOf(r.Id) == firmwareId
                     : tags.Contains(StatusTagCatalog.Canonical(r.TagA)) || tags.Contains(StatusTagCatalog.Canonical(r.TagB));
                 if (hit)

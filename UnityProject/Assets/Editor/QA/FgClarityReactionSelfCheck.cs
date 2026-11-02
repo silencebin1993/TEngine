@@ -263,25 +263,13 @@ namespace GameLogic.EditorTools
             cfg.NavEnabled = 0;
             using (var k = new CombatKernel(cfg, 32))
             {
-                k.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
-                k.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+                CombatSite.ApplyContent(k); // EMG2-REACT-01：爆燃改走沾染行 C01，与地点同一套登记
                 uint acid = NamedReactionCatalog.BitOf("Acid");
                 uint oil = NamedReactionCatalog.BitOf("Oil");
                 uint fire = NamedReactionCatalog.BitOf("Fire");
                 int proof = k.AddProfile(new CombatBehaviorProfile { ImmuneMask = acid, AcidResist = 1f });
                 float fireDps = StatusTagCatalog.TryGet("Fire", out StatusTag ft) ? ft.Amount : 0f;
-                int Count(string id)
-                {
-                    IReadOnlyList<Reaction> rules = NamedReactionCatalog.TagRules;
-                    for (int i = 0; i < rules.Count; i++)
-                    {
-                        if (rules[i].Id == id)
-                        {
-                            return k.ReactionCountOf(i);
-                        }
-                    }
-                    return -1;
-                }
+                int Count(string id) => CombatSite.ReactionCountOf(k, id); // EMG2-REACT-01：爆燃已端口化，按稳定键读涌现计数
                 int Probe(int profile, double y, uint first, uint second, float secondDps, string id, float hit = 0f)
                 {
                     int before = Count(id);

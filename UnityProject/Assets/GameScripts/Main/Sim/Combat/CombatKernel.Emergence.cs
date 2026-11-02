@@ -931,7 +931,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, v17 ? 31 : 9, _d.Count);
+            sw.Begin(EmgConst.SegUnits, v17 ? 9 + UnitStage2Fields : 9, _d.Count);
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];

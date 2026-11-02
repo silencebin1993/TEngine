@@ -817,6 +817,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgMatterSelfCheck", FgEmgMatterSelfCheck.Run);
             Seg("FgEmgRuleSelfCheck", FgEmgRuleSelfCheck.Run); // EMG2-RULE-01：通道规则引擎与能量传导（FgEmgMatterSelfCheck 的规则段，单独成段）
             Seg("FgEmgPhaseSelfCheck", FgEmgPhaseSelfCheck.Run); // EMG2-PHS-01：相变累积量与单位相态（FGT-EMG-034 / 020 evt.phase）
+            Seg("FgEmgReactSelfCheck", FgEmgReactSelfCheck.Run); // EMG2-REACT-01：五条定稿反应与装配反应端口化（FGT-EMG-030 / 032 / 004）
             Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02
         }
 
