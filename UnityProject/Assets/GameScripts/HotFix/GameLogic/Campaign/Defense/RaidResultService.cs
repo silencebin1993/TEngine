@@ -298,8 +298,12 @@ namespace GameLogic.Campaign.Defense
             RaidPlanRecord p = RaidDirectorService.FindPlan(s, g.PlanId);
             long now = GameClock.Ticks;
             CombatCounters c = site != null && !site.IsDisposed ? site.KernelCounters : default;
+            (int persistWrecks, int persistSolids, int persistCapped) = Emergence.SitePersistService.Snapshot(site);
             var r = new RaidResultRecord
             {
+                BasePersistWrecks = persistWrecks,
+                BasePersistSolids = persistSolids,
+                BasePersistCapped = persistCapped,
                 Serial = st.NextSerial++,
                 PlanId = g.PlanId ?? string.Empty,
                 GroupId = g.GroupId ?? string.Empty,
@@ -384,6 +388,10 @@ namespace GameLogic.Campaign.Defense
                 CombatCounters c = site.KernelCounters;
                 r.Dealt = Math.Max(0, c.DamageToHostile - r.BaseDealt);
                 r.Taken = Math.Max(0, c.DamageToPlayer - r.BaseTaken);
+                (int leftW, int leftS, int capped) = Emergence.SitePersistService.Snapshot(site); // EMG2-PERSIST-01（B19）：这次突袭留下了什么；所有结算路径共用
+                r.LeftWrecks = Math.Max(0, leftW - r.BasePersistWrecks);
+                r.LeftSolids = Math.Max(0, leftS - r.BasePersistSolids);
+                r.PersistCapped = Math.Max(0, capped - r.BasePersistCapped);
             }
             DefenseState ds = s.Raids?.Defense;
             if (ds != null)

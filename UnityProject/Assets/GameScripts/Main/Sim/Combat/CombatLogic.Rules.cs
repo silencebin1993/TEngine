@@ -506,6 +506,10 @@ namespace BinGames.Sim.Combat
             {
                 EmgBlockPushOut(ref d, i); // EMG2-REACT-01（ADR ⑯，FG19B M16）：固化胶块生成时圈内单位按 Id 升序推到边缘
             }
+            if (m.Solid != 0 && d.Config.EmgPersist != 0)
+            {
+                EmgPersistCap(ref d, i); // EMG2-PERSIST-01：长期留存固态上限（原地转化也是新生成）
+            }
         }
 
         /// <summary>扣另一方份量（consB ≥ 0：× a 份量；&lt; 0：b 自身的比例）。世界源不扣（视为无穷大），返回值仍是名义消耗量。</summary>
@@ -1258,6 +1262,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgWreckBurnTick(ref d); // EMG2-PERSIST-01：放在“没斑块就返回”前面——脚下的火灭了，点着的残骸还要接着烧
             bool any = d.EmgS[0].PatchLive > 0 || d.Wires.Length > 0; // EMG2-RECL-01：导线两端（单位 / 残骸）没有斑块也要传
             if (!any && !EmgAnyUnitEnergy(ref d))
             {
@@ -1612,7 +1617,7 @@ namespace BinGames.Sim.Combat
                             else if (kind == EmgHash.KindWreck && j < d.Wrecks.Length && !(nd.x == 1 && j == nd.y))
                             {
                                 EmgWreck wk = d.Wrecks[j];
-                                float cond = EmgProfileAt(ref d, wk.ProfileRef).Conductive;
+                                float cond = EmgWreckProps(ref d, wk).Conductive;
                                 if (!(wk.Hp > 0f) || cond < EmgRuleConst.DefaultConductMinStrength || math.distance(wk.Pos, pos) >= wk.Radius + rad)
                                 {
                                     continue;

@@ -646,7 +646,7 @@ namespace GameLogic.Campaign.Env
         private static long[] _hitBeltsRef;
 
         /// <summary>这一段酸雨里受损过的建筑 / 传送带格的去重集合以存档为准（读档后接着数，与一直跑的计数一致）。</summary>
-        private static void EnsureHitSets(WeatherFrontState d)
+        private static void EnsureHitSets(CampaignState state, WeatherFrontState d)
         {
             if (ReferenceEquals(_hitFor, d) && ReferenceEquals(_hitIdsRef, d.HitBuildings) && ReferenceEquals(_hitBeltsRef, d.HitBelts))
             {
@@ -654,6 +654,12 @@ namespace GameLogic.Campaign.Env
             }
             DamagedIds.Clear();
             DamagedBeltKeys.Clear();
+            // 一段酸雨只预留一次：否则受损表逐格长大时，几张大表会在同一分钟一起扩容重建（12,000 格时越过 4,049 / 8,419 就是几到十几毫秒的尖峰）。
+            if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
+            {
+                DamagedBeltKeys.EnsureCapacity(BeltNetworkService.Kernel.CellCount);
+                BeltNetworkService.ReserveDamageIndex(BeltNetworkService.Kernel.CellCount);
+            }
             foreach (string id in d.HitBuildings ?? Array.Empty<string>())
             {
                 DamagedIds.Add(id);
@@ -715,7 +721,7 @@ namespace GameLogic.Campaign.Env
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             int gc0 = System.GC.CollectionCount(0);
             BatchCount++;
-            EnsureHitSets(d);
+            EnsureHitSets(state, d);
             NewHitIds.Clear();
             NewHitBelts.Clear();
             int buildings = 0;

@@ -455,13 +455,8 @@ namespace GameLogic.EditorTools
             using CombatKernel k2 = NewKernel();
             k2.SpawnPatch(EmgMatterConst.Cured, new double2(0, 0), 2f, 4f, 60f);
             CombatFireResult light = LandShot(k2, new double2(0, 0), 4f);
-            bool stay = FindPatch(k2, EmgMatterConst.Cured, out CombatZone cz);
-            float kin = 0f;
-            if (stay)
-            {
-                k2.TryGetPatchEnergy(cz.EmgId, out _, out _, out kin);
-            }
-            Expect(light == CombatFireResult.Launched && stay && kin > 0f && kin < 120f, $"对照：轻弹（4）落在胶块上累计动能 {kin:0.#} < 耐久 120，胶块还在（开火 {light}）");
+            bool stay = FindPatch(k2, EmgMatterConst.Cured, out CombatZone cz); // EMG2-PERSIST-01：胶块挡弹（fieldrule_solid_absorb），弹体在圆边被吸收、扣耐久 = 伤害
+            Expect(light == CombatFireResult.Launched && stay && Mathf.Approximately(cz.Hp, 116f), $"对照：轻弹（4）被胶块吸收，耐久 120 → {cz.Hp:0.#}，胶块还在（开火 {light}）");
             CombatFireResult heavy = LandShot(k2, new double2(0, 0), 300f);
             Expect(heavy == CombatFireResult.Launched && !FindPatch(k2, EmgMatterConst.Cured, out _) && k2.PatchCount == 0,
                 $"胶块受够动能（重弹 300 ≥ 耐久 120）碎掉、无产物（剩斑块 {k2.PatchCount}），通路重开（开火 {heavy}；堵路警告归 EMG2-PERSIST-01）");

@@ -42,6 +42,8 @@ namespace GameLogic.Campaign.Combat
                 cfg.NavEnabled = 1;
                 cfg.SeparationFactor = Nav.NavService.Tuning("nav.separation_factor", 0.5f);
             }
+            // EMG2-PERSIST-01（FGR-EMG-150，ADR T1 已核实）：家园内核在一局内常驻、随快照进存档；己方前哨是家园内核里的建筑群（FG8-OUT-01）。远征 / 室内每次派遣重建 → 野外寿命。
+            cfg.EmgPersist = (byte)(siteId == HomeValleyLayout.RegionId && Emergence.EmgCatalog.Current.EffectiveStage >= 2 ? 1 : 0);
             var site = new CombatSite(siteId, cfg) { Rules = rules };
             Sites[siteId] = site;
             if (cfg.NavEnabled != 0)

@@ -1250,17 +1250,26 @@ namespace BinGames.Sim.Combat
             }
             // EMG2-MAT-01（FGR-EMG-081）：斑块 × 单位 / 斑块 × 斑块 / 弹体 × 斑块都查这一张哈希（不做全表两两扫描，顺带偿还 DEBT-FG2FW02-06 的斑块那一半）。
             int blocks = 0;
+            uint blockSig = 0u;
+            int absorbers = 0;
             for (int k = 0; k < d.Patches.Length; k++)
             {
                 CombatZone z = d.Patches[k];
                 if (z.Matter != 0)
                 {
                     EmgHashAdd(ref d, z.Pos, z.Radius, EmgHash.KindPatch, k);
-                    blocks += PatchBlocks(ref d, z) ? 1 : 0; // EMG2-REACT-01：阻路斑块数（移动查阻路的开关）
+                    absorbers += IsAbsorber(z) ? 1 : 0;
+                    if (PatchBlocks(ref d, z))
+                    {
+                        blocks++; // EMG2-REACT-01：阻路斑块数（移动查阻路的开关）
+                        blockSig = (blockSig ^ (uint)z.EmgId) * 16777619u + 1u; // EMG2-PERSIST-01：集合变了才重推寻路镜像
+                    }
                 }
             }
             EmgScalars es = d.EmgS[0];
             es.BlockLive = blocks;
+            es.BlockSig = blockSig;
+            es.AbsorbLive = absorbers;
             es.HashDirty = 0;
             d.EmgS[0] = es;
         }
@@ -1348,12 +1357,21 @@ namespace BinGames.Sim.Combat
         internal static bool EmgInstantCovered(ref CombatData d, int a, int t, in CombatWeapon wp, float kineticCoef)
         {
             // 只对射弹类即时命中（含敌人的 Instant 攻击）；格斗 / 力场 / 布区 / 放机不是一条射击线段。
-            if (d.Wrecks.Length == 0 || a < 0 || t < 0 || wp.Reading.Carrier != CombatCarrier.Projectile)
+            if ((d.Wrecks.Length == 0 && d.EmgS[0].PatchLive <= 0) || a < 0 || t < 0 || wp.Reading.Carrier != CombatCarrier.Projectile)
             {
                 return false;
             }
             float damage = wp.Damage;
-            int w = EmgHashSegment(ref d, d.Pos[a], d.Pos[t], EmgHash.KindWreck, true, out double tHit);
+            double tHit = 2.0, solidT = 2.0;
+            int w = d.Wrecks.Length > 0 ? EmgHashSegment(ref d, d.Pos[a], d.Pos[t], EmgHash.KindWreck, true, out tHit) : -1;
+            // EMG2-PERSIST-01（fieldrule_solid_absorb）：固态斑块与残骸同一口径，取线段上先碰到的那个
+            int solid = d.EmgS[0].PatchLive > 0 ? EmgSolidOnShot(ref d, d.Pos[a], d.Pos[t], out solidT) : -1;
+            if (solid >= 0 && (w < 0 || solidT < tHit))
+            {
+                EmgSolidAbsorb(ref d, solid, damage);
+                EmgShotEvent(ref d, EmgEventKind.Absorb, d.Patches[solid].EmgId, damage, 0f, 0, d.Pos[a] + (d.Pos[t] - d.Pos[a]) * solidT, EmgEntKind.Patch);
+                return true;
+            }
             if (w < 0)
             {
                 return false;

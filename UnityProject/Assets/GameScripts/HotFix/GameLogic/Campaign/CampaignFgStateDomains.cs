@@ -1211,6 +1211,24 @@ namespace GameLogic.Campaign
         public LoopWatchRecord[] Loops = Array.Empty<LoopWatchRecord>();
         /// <summary>正在被盯着的施工 / 维修目标（机器到不了的那一段；按建筑 ID 排序）。</summary>
         public ReachWatchRecord[] Sites = Array.Empty<ReachWatchRecord>();
+        /// <summary>EMG2-PERSIST-01：长期留存物堵住的通路（核心到仓库 / 家园外框；按目标排序，只加字段，旧档 = 空）。</summary>
+        public PersistBlockRecord[] PersistBlocks = Array.Empty<PersistBlockRecord>();
+        /// <summary>EMG2-PERSIST-01：已经通知过的长期留存崩解累计数（残骸 + 固态斑块）。</summary>
+        public int PersistCappedSeen = -1; // -1 = 还没同步过（新局第一次检查 / 读阶段 2 之前的旧档）：只记基线，不补发历史崩解通知
+    }
+
+    /// <summary>EMG2-PERSIST-01（FGR-EMG-154）：一条堵路警告：被堵的目标（仓库建筑 ID，或 "exit" = 家园外框）与堵在中间的那件长期留存物。</summary>
+    [Serializable]
+    public sealed class PersistBlockRecord
+    {
+        public string Key = string.Empty;
+        public byte Kind;
+        public int ItemId;
+        /// <summary>true = 阻路斑块（真走不了）；false = 残骸（单位仍可减速穿过，只警告）。</summary>
+        public bool Blocks;
+        public float X;
+        public float Y;
+        public bool Alerted;
     }
 
     /// <summary>FG4-ECO-10：一条传送带闭环的卡死计时。</summary>

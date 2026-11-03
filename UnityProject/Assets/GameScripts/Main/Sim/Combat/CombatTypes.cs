@@ -1376,6 +1376,14 @@ namespace BinGames.Sim.Combat
         public float EmgWreckSeconds;
         public float EmgWreckHpRatio;
         public float EmgWreckSlow;
+        /// <summary>EMG2-PERSIST-01（FGR-EMG-150）：1 = 本地点的残骸与固态斑块长期留存（家园内核；己方前哨是家园内核里的建筑群，同一内核）。远征 / 室内 = 0，按野外寿命。不进快照（每次开地点按地点写）。</summary>
+        public byte EmgPersist;
+        /// <summary>EMG2-PERSIST-01（fg.TbHomeTuning emg.persist.patch_max）：每地点长期留存固态斑块上限，满了最早的崩解为碎屑。</summary>
+        public int EmgPersistPatchMax;
+        /// <summary>EMG2-PERSIST-01（fg.TbHomeTuning emg.wreck.ignite_temp / flammable_min / burn_rate）：残骸点燃。</summary>
+        public float EmgWreckIgniteTemp;
+        public float EmgWreckFlammableMin;
+        public float EmgWreckBurnRate;
         /// <summary>EMG2-RECL-01（fg.TbHomeTuning emg.reclaim.max_ratio / hp_per_mass / interval）：回收修复每次上限（本机最大耐久比例）、每单位残骸质量换算的维修量、两次拆解的最短间隔（秒）。≤ 0 取 <see cref="EmgReclaimConst"/> 初值。</summary>
         public float EmgReclaimMaxRatio;
         public float EmgReclaimHpPerMass;

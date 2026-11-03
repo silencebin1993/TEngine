@@ -30,6 +30,8 @@ namespace GameLogic.Campaign.Economy
     {
         // ── 自检读点 ──
         public static int Revision { get; private set; } = 1;
+        /// <summary>EMG2-PERSIST-01：堵路记录变了（<see cref="Emergence.SitePersistService"/>）。</summary>
+        public static void TouchRevision() => Revision++;
         public static int PrintChecks { get; private set; }
         public static int LoopChecks { get; private set; }
         public static int LoopRepresentativeScans { get; private set; }
@@ -72,6 +74,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>FG0-ARCH-01：会话开始时清空运行时缓存（存档里的计时不动）。</summary>
         public static void ResetSessionState()
         {
+            Emergence.SitePersistService.ResetSessionState();
             _spawnWarned = false;
             _loopRebuild = -1;
             _loopState = null;
@@ -122,6 +125,7 @@ namespace GameLogic.Campaign.Economy
             if (now % ReachTicks == 0)
             {
                 CheckReach(state);
+                Emergence.SitePersistService.Check(state); // EMG2-PERSIST-01：清除单目标核对、崩解通知、堵路警告（没变化不泛洪）
             }
         }
 

@@ -36,6 +36,13 @@ namespace GameLogic.Campaign
     [Serializable]
     public sealed class RaidResultRecord
     {
+        /// <summary>EMG2-PERSIST-01（B19）：突袭开始时家园的残骸 / 固态斑块 / 累计崩解基线；结束时留下的增量（只加字段，旧档 = 0）。</summary>
+        public int BasePersistWrecks;
+        public int BasePersistSolids;
+        public int BasePersistCapped;
+        public int LeftWrecks;
+        public int LeftSolids;
+        public int PersistCapped;
         public int Serial;
         public string PlanId = string.Empty;
         public string GroupId = string.Empty;

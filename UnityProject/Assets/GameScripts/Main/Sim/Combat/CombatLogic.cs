@@ -1998,9 +1998,16 @@ namespace BinGames.Sim.Combat
                 }
                 // EMG1-ENT-01（FGR-EMG-113 挡弹；FGT-EMG-016“反弹撞残骸”）：先于单位交点撞上残骸——有障碍面反弹次数就按残骸圆法线反弹，否则被吸收；
                 // 空中的抛射弹、绕发射者转圈的弹体、还有穿透次数的弹体（贯穿越过残骸）不查。地点没有残骸时一条比较跳过。
+                // EMG2-PERSIST-01（fieldrule_solid_absorb）：固化胶块 / 冷渣挡弹与残骸同一口径；两者都在线段上时先碰到的挡。
+                int solidHit = -1;
+                double solidT = 2.0;
+                if (d.EmgS[0].PatchLive > 0 && !airborne && pr.PierceLeft == 0 && ((pr.Mods & EmgProjMods.Orbit) == 0 || (pr.Flags & EmgProjFlags.Sub) != 0))
+                {
+                    solidHit = EmgSolidOnProjectile(ref d, pr, next, hit >= 0 ? hitT : 1.0, out solidT);
+                }
                 if (d.Wrecks.Length > 0 && EmgEntOn(ref d) && !airborne && pr.PierceLeft == 0 && ((pr.Mods & EmgProjMods.Orbit) == 0 || (pr.Flags & EmgProjFlags.Sub) != 0))
                 {
-                    int wr = EmgWreckHit(ref d, ref pr, next, hit >= 0 ? hitT : 1.0);
+                    int wr = EmgWreckHit(ref d, ref pr, next, solidHit >= 0 ? solidT : hit >= 0 ? hitT : 1.0);
                     if (wr == 1)
                     {
                         d.Projectiles[write++] = pr;
@@ -2010,6 +2017,14 @@ namespace BinGames.Sim.Combat
                     {
                         continue;
                     }
+                }
+                if (solidHit >= 0)
+                {
+                    if (EmgSolidHit(ref d, ref pr, solidHit, next, solidT))
+                    {
+                        d.Projectiles[write++] = pr; // 壁撞反弹：继续飞
+                    }
+                    continue;
                 }
                 if (hit >= 0)
                 {
@@ -2102,6 +2117,12 @@ namespace BinGames.Sim.Combat
                 }
                 if (pr.Life <= 0f)
                 {
+                    if ((pr.Flags & EmgProjFlags.Lob) != 0 && d.EmgS[0].PatchLive > 0 && EmgLobRebound(ref d, ref pr, next, dt))
+                    {
+                        pr.Pos = next;
+                        d.Projectiles[write++] = pr; // EMG2-PERSIST-01（FG19B 第 5 节）：落在玻化层 / 冰面再弹一段，落点结算留到最后一段
+                        continue;
+                    }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
                         EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次

@@ -59,6 +59,7 @@ namespace GameLogic.UI.Kit
         private Button _queue;
         private Button _power;
         private Button _clearBelt;
+        private Button _clearSite;
         // FG3-LOG-07：规划工具按钮
         private Button _copy;
         private Button _paste;
@@ -168,6 +169,7 @@ namespace GameLogic.UI.Kit
             _queue = root.Q<Button>("BuildQueue");
             _power = root.Q<Button>("BuildPowerGrid");
             _clearBelt = root.Q<Button>("BuildClearBelt");
+            _clearSite = root.Q<Button>("BuildClearSite"); // EMG2-PERSIST-01
             _copy = root.Q<Button>("BuildCopy");
             _paste = root.Q<Button>("BuildPaste");
             _layouts = root.Q<Button>("BuildLayouts");
@@ -238,10 +240,15 @@ namespace GameLogic.UI.Kit
             };
             _queue.clicked += ConstructionQueuePanelUIToolkit.Toggle;
             _power.clicked += PowerPanelUIToolkit.Toggle; // FG3-LOG-06：电网面板（按钮与 Alt+G 同一路径）。
+            _clearSite.clicked += () =>
+            {
+                HomeValleyBuildMode m = HomeValleyBuildMode.Current;
+                m?.SetClearSiteMode(!m.ClearSiteActive);
+            };
             _clearBelt.clicked += () =>
             {
                 HomeValleyBuildMode m = HomeValleyBuildMode.Current;
-                m?.SetClearMode(!m.ClearMode);
+                m?.SetClearMode(!m.ClearBeltActive);
             };
             // FG3-LOG-07：规划工具（按钮与快捷键同一路径）。
             _copy.clicked += () =>
@@ -331,6 +338,7 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_relocate, () => new TooltipContent { Title = GameText.Get("input.action.relocate_mode.name"), Body = GameText.Format("ui.build.hint_relocate", InputDisplay.ForAction(GameActionId.Rotate)), Shortcut = GameActionId.RelocateMode });
             UiTooltip.Attach(_gridToggle, () => new TooltipContent { Title = GameText.Get("input.action.toggle_grid_lines.name"), Shortcut = GameActionId.ToggleGridLines });
             UiTooltip.Attach(_prioritize, () => new TooltipContent { Title = GameText.Get("input.action.prioritize_area.name"), Body = GameText.Get("ui.build.prioritize_mode"), Shortcut = GameActionId.PrioritizeArea });
+            UiTooltip.Attach(_clearSite, () => new TooltipContent { Title = GameText.Get("emg.persist.tool_title"), Body = GameText.Get("emg.persist.tool_desc") });
             UiTooltip.Attach(_clearBelt, () => new TooltipContent { Title = GameText.Get("input.action.clear_belt_mode.name"), Body = GameText.Get("ui.build.clear_mode"),
                 Shortcut = GameActionId.ClearBeltMode, CodexEntryId = "codex.logistics.belt" });
             UiTooltip.Attach(_power, () => new TooltipContent { Title = GameText.Get("input.action.open_power_grid.name"), Body = GameText.Get("power.overlay.legend"),
@@ -560,6 +568,7 @@ namespace GameLogic.UI.Kit
                 : mode.SettingsMode ? GameText.Get("plan.mode.settings")
                 : mode.RelocateMode ? GameText.Get("ui.build.relocate_mode")
                 : mode.PrioritizeMode ? GameText.Get("ui.build.prioritize_mode")
+                : mode.ClearSiteActive ? GameText.Get("emg.persist.tool_btn")
                 : mode.ClearMode ? GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode))
                 : mode.ZoneMode ? GameText.Format("ui.build.zone_mode", GameText.Format("rules.label", mode.ZoneRuleSerial)) // FG6-DEF-03
                 : string.Empty;
@@ -577,7 +586,9 @@ namespace GameLogic.UI.Kit
             _queue.text = GameText.Format("ui.build.btn_queue", InputDisplay.ForAction(GameActionId.ConstructionQueue));
             _power.text = GameText.Format("power.panel.hud_button", InputDisplay.ForAction(GameActionId.OpenPowerGrid));
             _clearBelt.text = GameText.Format("ui.build.btn_clear", InputDisplay.ForAction(GameActionId.ClearBeltMode));
-            _clearBelt.EnableInClassList("bm-tool-active", mode.ClearMode);
+            _clearBelt.EnableInClassList("bm-tool-active", mode.ClearMode && !mode.ClearSite);
+            _clearSite.text = GameText.Get("emg.persist.tool_btn");
+            _clearSite.EnableInClassList("bm-tool-active", mode.ClearSiteActive);
             _placeholder.text = GameText.Get("ui.build.placeholder_note");
             RefreshPlanTools(mode, state);
 
@@ -634,7 +645,7 @@ namespace GameLogic.UI.Kit
                 nextRedo != PlanStepKind.None ? PlanHistory.StepName(nextRedo) : GameText.Get("plan.undo.nothing"), PlanHistory.Depth);
         }
 
-        private static string HintFor(HomeValleyBuildMode mode)
+        public static string HintFor(HomeValleyBuildMode mode)
         {
             string rotate = InputDisplay.ForAction(GameActionId.Rotate);
             if (mode.PasteMode)
@@ -668,6 +679,10 @@ namespace GameLogic.UI.Kit
             if (mode.ZoneMode)
             {
                 return GameText.Format("ui.build.zone_mode", GameText.Format("rules.label", mode.ZoneRuleSerial)); // FG6-DEF-03
+            }
+            if (mode.ClearSiteActive)
+            {
+                return GameText.Get("emg.persist.tool_mode");
             }
             if (mode.ClearMode)
             {
@@ -966,7 +981,9 @@ namespace GameLogic.UI.Kit
             {
                 SetVisible(_dragInfo, true);
                 BeltClearPlan cp = mode.ClearPlan;
-                _dragInfo.text = GameText.Format("ui.build.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.SurfaceCells, cp.Items);
+                _dragInfo.text = mode.ClearSite
+                    ? GameText.Format("emg.persist.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.Cells.Count)
+                    : GameText.Format("ui.build.clear_box", cp.Max.X - cp.Min.X + 1, cp.Max.Y - cp.Min.Y + 1, cp.SurfaceCells, cp.Items);
             }
             else if (mode.Drag == HomeValleyBuildMode.DragKind.ZoneBox)
             {

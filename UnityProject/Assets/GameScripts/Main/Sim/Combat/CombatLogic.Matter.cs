@@ -157,9 +157,9 @@ namespace BinGames.Sim.Combat
                 {
                     continue; // EMG2-MAT-02：迁入斑块只占总数，不当合并对象、不被软 / 总上限挤掉（等价迁移期按区域时长到期）
                 }
-                if (z.Layer == m.Layer && (oldestLayer < 0 || Older(z, d.Patches[oldestLayer])))
+                if (z.Layer == m.Layer && !PatchKept(ref d, z) && (oldestLayer < 0 || Older(z, d.Patches[oldestLayer])))
                 {
-                    oldestLayer = i;
+                    oldestLayer = i; // EMG2-PERSIST-01：总上限不挤长期留存固态（它们只按 emg.persist.patch_max 崩解为碎屑）
                 }
                 if (z.Matter != matter)
                 {
@@ -197,6 +197,7 @@ namespace BinGames.Sim.Combat
                 Owners = new int4(ownerId > 0 ? ownerId : 0, 0, 0, 0), EmgChain = chain, EmgDepth = depth, Born = now, Until = world ? double.MaxValue : now + life,
                 Temp = m.TempInit, Conc = 1f, Hp = m.Solid != 0 ? m.Hp : 0f, Faction = CombatFaction.Neutral, Kind = EmgMatterConst.ZoneKindPatch,
             };
+            bool keepNew = m.Solid != 0 && d.Config.EmgPersist != 0; // EMG2-PERSIST-01：长期留存固态不合并（FG19B §8.2），超软上限 / 总额由 EmgPersistCap 崩解为碎屑
             if (!world)
             {
                 // 1. 与重叠的同种合并（份量相加、面积守恒）
@@ -205,7 +206,7 @@ namespace BinGames.Sim.Combat
                     return bestOverlap;
                 }
                 // 2. 软上限（FG19B §8.1）：就近并入 6 米内同种（不受重叠阈值限制）→ 同种最早提前到期
-                if (m.Quota > 0 && sameCount >= m.Quota)
+                if (m.Quota > 0 && sameCount >= m.Quota && !keepNew)
                 {
                     if (nearSoft >= 0 && EmgMergeInto(ref d, nearSoft, incoming, true))
                     {
@@ -232,7 +233,7 @@ namespace BinGames.Sim.Combat
                 // 3. 总上限（FGR-EMG-082）：并入最近同物质 → 同层最早提前到期（世界源不参与）
                 if (combat >= PatchCapOf(ref d) - PatchReserveOf(ref d))
                 {
-                    if (nearest >= 0 && PatchAlive(d.Patches[nearest]) && EmgMergeInto(ref d, nearest, incoming, true))
+                    if (!keepNew && nearest >= 0 && PatchAlive(d.Patches[nearest]) && EmgMergeInto(ref d, nearest, incoming, true))
                     {
                         es = d.EmgS[0];
                         es.PatchCapMerged++;
@@ -279,6 +280,14 @@ namespace BinGames.Sim.Combat
                 at = d.Patches.Length;
                 d.Patches.Add(incoming);
             }
+            if (m.Solid == EmgMatterConst.SolidBlock)
+            {
+                EmgBlockPushOut(ref d, at); // EMG2-PERSIST-01：直接生成的阻路斑块同样把圈内单位推到边缘（ADR ⑯）
+            }
+            if (keepNew)
+            {
+                EmgPersistCap(ref d, at);
+            }
             return at;
         }
 
@@ -298,7 +307,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !PatchWorld(z) && !IsLegacy(z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
+                if (PatchAlive(z) && !PatchWorld(z) && !IsLegacy(z) && !PatchKept(ref d, z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
                 {
                     best = i;
                 }
@@ -409,6 +418,10 @@ namespace BinGames.Sim.Combat
         {
             // EMG2-MAT-02：酸沼是虚拟世界源（不占斑块槽），有酸沼时同样要走接触（evt.enter / leave 与 PrevMatterMask）
             bool marsh = d.AcidShapes.Length > 0 && EmgPatchesOn(ref d);
+            if (d.Config.EmgPersist != 0 && d.EmgS[0].HashDirty != 0)
+            {
+                EmgHashEnsure(ref d); // EMG2-PERSIST-01：长期留存地点每步把 BlockSig 算准（最后一块阻路斑块消失那一步也算），热更层据此同步寻路镜像
+            }
             StepConduct(ref d, dt); // EMG2-RULE-01：传导节拍（每 15 步一次，按步序号对齐；没有斑块也要衰减 / 传单位身上的电荷与磁化）
             if (d.EmgS[0].PatchLive <= 0 && !marsh)
             {
@@ -503,7 +516,7 @@ namespace BinGames.Sim.Combat
             }
             double life = math.max(1e-3, z.Until - z.Born);
             double left = z.Until - now;
-            bool expire = left <= 0;
+            bool expire = left <= 0 && !PatchKept(ref d, z); // EMG2-PERSIST-01：长期留存固态不按寿命到期（融化 / 打碎 / 清除照常）
             float oldR = z.Radius;
             if (z.Growth > 0f && !IsLegacy(z))
             {

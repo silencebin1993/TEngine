@@ -113,7 +113,7 @@ namespace GameLogic.Campaign.Regions
             return n;
         }
 
-        private static WorkOrderRecord FindActiveByTarget(CampaignState state, WorkOrderKind kind, string targetId)
+        public static WorkOrderRecord FindActiveByTarget(CampaignState state, WorkOrderKind kind, string targetId)
         {
             return state.WorkOrders?.LastOrDefault(o => o.Kind == kind && o.TargetId == targetId && !IsTerminal(o.State));
         }
@@ -1107,6 +1107,35 @@ namespace GameLogic.Campaign.Regions
             return WorkOrderOpResult.Ok(workOrderId);
         }
 
+        // ── 清除长期留存物（EMG2-PERSIST-01，FGR-EMG-154）────────────────────────
+        // 与遗迹回收同理复用 Salvage（“到现场干 N 秒”），TargetId = sitepersist:w / p:Id：工作面板、看门狗、分配引擎、取消、接入打断全部原样复用。
+        // 校验在 Emergence.SitePersistService；这里只建单与预留。
+
+        /// <summary>
+        /// 建一张清除单（进待分配池）：开单时从家园库存预留废料（完工才消耗；取消 / 目标没了全额返还，B03）。
+        /// 库存不够时有多少预留多少、照样开单——堵路时绝不能因为没料清不掉（B11 保底）。
+        /// </summary>
+        public static WorkOrderOpResult TryCreateSiteClear(CampaignState state, string targetId, float duration, int scrap)
+        {
+            WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Salvage, targetId);
+            if (existing != null)
+            {
+                return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
+            }
+            string workOrderId = FreshOrderId(state, targetId + ":clear"); // 暂停中可以反复下单 / 取消，时钟不走，ID 不能按时钟拼（重复 ID 读档会整档拒绝）
+            var order = NewOrder(state, workOrderId, WorkOrderKind.Salvage, targetId, 0, resourceTransactionId: null, duration: Math.Max(0.1f, duration));
+            order.State = WorkOrderState.Ready;
+            if (scrap > 0 && Economy.ItemCatalog.TryGet(Economy.ItemCatalog.ScrapId, out Economy.ItemDef item))
+            {
+                order.ReservedItemId = item.Id;
+                order.ReservedItemAmount = Economy.HomeInventory.RemoveUpTo(state, item, scrap);
+            }
+            Append(state, order);
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            return WorkOrderOpResult.Ok(workOrderId);
+        }
+
         // ── Haul（地面物两阶段搬运，复用 HomeValleyCargo 的票据 API）──────────────────
 
         public static WorkOrderOpResult TryCreateHaul(CampaignState state, string groundItemId, int machineLogicId)
@@ -1977,6 +2006,10 @@ namespace GameLogic.Campaign.Regions
         /// <summary>工单目标的显示名（建筑名；其它按目标 ID）。</summary>
         public static string DescribeTarget(CampaignState state, WorkOrderRecord order)
         {
+            if (Emergence.SitePersistService.IsClearTarget(order.TargetId))
+            {
+                return Emergence.SitePersistService.DescribeTarget(order.TargetId); // EMG2-PERSIST-01：不露内部 ID
+            }
             if (HomeValleyConstruction.IsBeltPlan(order.TargetId))
             {
                 PlannedBeltRecord plan = HomeValleyConstruction.FindPlan(state, order.TargetId);
@@ -2749,6 +2782,10 @@ namespace GameLogic.Campaign.Regions
                     // FG4-ECO-11 审查修复：关键材料（核心保管库物品）的取料点是归还核心，不是最近的仓库。
                     return order.Leg == 1 ? HomeValleyConstruction.FetchPosition(state, order, site) : site;
                 case WorkOrderKind.Salvage:
+                    if (Emergence.SitePersistService.IsClearTarget(order.TargetId))
+                    {
+                        return Emergence.SitePersistService.WorkPosition(order.TargetId); // EMG2-PERSIST-01：站到残骸 / 固态斑块旁边
+                    }
                     if (Env.HomeExplorationService.IsPoiId(order.TargetId))
                     {
                         return Env.HomeExplorationService.PositionOf(state, order.TargetId); // FG7-ENV-05：遗迹回收走到遗迹点（FG8-GEN-02：缓存 / 终端同理）。
@@ -3217,6 +3254,11 @@ namespace GameLogic.Campaign.Regions
         /// <see cref="WorkOrderRecord"/> 上加一个额外字段区分"这是哪种 Salvage"。</summary>
         private static void CompleteSalvage(CampaignState state, WorkOrderRecord order)
         {
+            if (Emergence.SitePersistService.IsClearTarget(order.TargetId))
+            {
+                CompleteSiteClear(state, order);
+                return;
+            }
             if (Env.HomeExplorationService.IsPoiId(order.TargetId))
             {
                 // FG7-ENV-05：遗迹回收完工（FG8-GEN-02：资源缓存 / 旧终端同一分支，按点位种类发奖励）——记为已回收、技术数据入账、背景资料通知（重复完工不重复发放）。
@@ -3232,6 +3274,26 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             CompleteDemolish(state, order);
+        }
+
+        /// <summary>EMG2-PERSIST-01：清除完工——目标还在就移除并消耗预留废料；目标先没了全额返还（不白扣）。</summary>
+        private static void CompleteSiteClear(CampaignState state, WorkOrderRecord order)
+        {
+            if (Emergence.SitePersistService.TryClearTarget(order.TargetId))
+            {
+                if (!string.IsNullOrEmpty(order.ReservedItemId) && order.ReservedItemAmount > 0)
+                {
+                    Economy.ProductionStats.RecordUnits(state, Economy.ItemCatalog.Find(order.ReservedItemId), order.ReservedItemAmount, produced: false);
+                    order.ReservedItemAmount = 0;
+                }
+            }
+            else
+            {
+                RefundReservedItems(state, order, HomeValleyLayout.Core.Position);
+            }
+            order.State = WorkOrderState.Completed;
+            MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId);
+            MarkAssignmentDirty();
         }
 
         private static void CompleteWreckageSalvage(CampaignState state, WorkOrderRecord order)
@@ -3468,6 +3530,10 @@ namespace GameLogic.Campaign.Regions
             if (refund && !string.IsNullOrEmpty(order.ResourceTransactionId))
             {
                 CampaignEconomyLedger.Cancel(state, order.ResourceTransactionId);
+            }
+            if (refund && order.Kind == WorkOrderKind.Salvage && Emergence.SitePersistService.IsClearTarget(order.TargetId))
+            {
+                RefundReservedItems(state, order, dropPosition); // EMG2-PERSIST-01：清除单取消全额返还（B03）
             }
             if (refund && (order.Kind == WorkOrderKind.Repair || order.Kind == WorkOrderKind.Deliver))
             {

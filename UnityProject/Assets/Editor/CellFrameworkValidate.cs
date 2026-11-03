@@ -822,6 +822,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgReact2SelfCheck", FgEmgReact2SelfCheck.Run); // EMG2-REACT-02：其余 11 条具名反应（FGT-EMG-030 全量、FGT-EMG-032 扩到 11 条）
             Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02
             Seg("FgEmgReclaimSelfCheck", FgEmgReclaimSelfCheck.Run); // EMG2-RECL-01：回收修复拆残骸、桥接导线、蔓延真扩散（FGT-EMG-037 / 033 / 031 对应部分）
+            Seg("FgEmgPersistSelfCheck", FgEmgPersistSelfCheck.Run); // EMG2-PERSIST-01：场地物长期留存、固态挡弹、抛射再弹、清除工作单、堵路警告（FGT-EMG-060 阶段 2、FGT-EMG-040、FGT-EMG-036 第 2 条）
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

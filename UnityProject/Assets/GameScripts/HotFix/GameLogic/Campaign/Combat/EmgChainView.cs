@@ -292,9 +292,12 @@ namespace GameLogic.Campaign.Combat
             string who = GameText.Format("emg.hover.wreck.who", Owners(site, state, k.EmgWreckOwners(w.Id)));
             float threshold = k.EntityParams.FragThreshold;
             double left = w.Until - k.Time;
-            string next = double.IsInfinity(w.Until) || left > 1e6
+            string next = double.IsInfinity(w.Until) || left > 1e6 || k.PersistSite
                 ? GameText.Format("emg.hover.wreck.next_persist", F0(threshold))
                 : GameText.Format("emg.hover.wreck.next", F0(threshold), F0((float)System.Math.Max(0, left)));
+            string hint = Emergence.SitePersistService.HoverHint(state, site, EmgPersistItem.KindWreck, w.Id); // EMG2-PERSIST-01
+            next = string.IsNullOrEmpty(hint) ? next : next + "\n" + hint;
+            next = k.WreckBurning(w) ? next + "\n" + GameText.Get("emg.hover.wreck.burning") : next;
             return new TooltipContent { Title = GameText.Get("emg.hover.wreck.title"), Body = Three(what, who, next) };
         }
 
@@ -317,6 +320,11 @@ namespace GameLogic.Campaign.Combat
             string layer = GameText.Get(z.Layer == EmgMatterConst.LayerGas ? "emg.patch.layer.gas" : "emg.patch.layer.ground");
             string detail = GameText.Format("emg.patch.hover.detail", layer, F0(z.Amount), F0((float)left));
             EmgMatter m = site.Kernel.MatterRow(z.Matter);
+            if (site.Kernel.PersistSite && m.Solid != 0)
+            {
+                // EMG2-PERSIST-01：长期留存的不写“剩余秒数”，写耐久与怎么清除
+                detail = GameText.Format("emg.persist.hover_detail", layer, F0(z.Hp)) + "\n" + Emergence.SitePersistService.HoverHint(state, site, EmgPersistItem.KindPatch, z.EmgId);
+            }
             string coat = m.CoatBit < 0 ? GameText.Get("emg.patch.hover.nocoat") : GameText.Format("emg.patch.hover.coat", name, F0(m.CoatSeconds));
             return new TooltipContent { Title = line, Body = detail + "\n" + coat };
         }

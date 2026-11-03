@@ -348,8 +348,12 @@ namespace GameLogic.EditorTools.JourneyBots
             return true;
         }
 
-        private static IEnumerable<RaidResultRecord> RcResults(JourneyContext c) =>
-            (c.Get("rc.plans") ?? string.Empty).Split(',').Where(x => !string.IsNullOrEmpty(x)).Select(x => RaidResultService.FindByPlan(St, x)).Where(x => x != null);
+        // 加的几波打完目标还活着时，它可能死在自然排定的下一波（不在 rc.plans 里）：第一份 rc 结算及之后的都算，记账照样按 LogicId 逐台核。
+        private static IEnumerable<RaidResultRecord> RcResults(JourneyContext c)
+        {
+            RaidResultRecord first = (c.Get("rc.plans") ?? string.Empty).Split(',').Where(x => !string.IsNullOrEmpty(x)).Select(x => RaidResultService.FindByPlan(St, x)).FirstOrDefault(x => x != null);
+            return first == null ? Enumerable.Empty<RaidResultRecord>() : RaidResultService.All(St).Where(x => x != null && x.Serial >= first.Serial);
+        }
 
         private static StepOutcome TickPlan(JourneyContext c)
         {

@@ -264,7 +264,7 @@ namespace BinGames.Sim.Combat
             double now = d.Scalars[0].Time;
             var w = new EmgWreck
             {
-                Pos = d.Pos[t], Born = now, Until = now + WreckSecondsOf(ref d), Radius = d.Radius[t] * EmgConst.WreckRadiusRatio, MaxHp = maxHp, Hp = maxHp,
+                Pos = d.Pos[t], Born = now, Until = d.Config.EmgPersist != 0 ? double.MaxValue : now + WreckSecondsOf(ref d), Radius = d.Radius[t] * EmgConst.WreckRadiusRatio, MaxHp = maxHp, Hp = maxHp,
                 Mass = EmgUnitMass(ref d, t), Temp = d.Heat[t], SrcKind = d.Kind[t], SrcExtKey = d.ExtKey[t],
                 NoSalvage = (byte)(d.Faction[t] == (byte)CombatFaction.Player ? 1 : 0), // T5：己方机器的残骸在回收修复（EMG2-RECL-01）定稿前不可拆解回收
                 Chain = d.EmgCtx.Prog >= 0 ? d.EmgCtx.Chain : 0, Id = es.NextWreckId++,
@@ -797,7 +797,7 @@ namespace BinGames.Sim.Combat
                     dirty = true;
                     continue;
                 }
-                if (now >= k.Until)
+                if (now >= k.Until && d.Config.EmgPersist == 0) // EMG2-PERSIST-01（FGR-EMG-150）：长期留存地点不按寿命崩解（旧档里带有限寿命的残骸同样留存）
                 {
                     es.WrecksAged++;
                     d.EmgS[0] = es;

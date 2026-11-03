@@ -95,6 +95,10 @@ namespace GameLogic.Campaign.Regions
         public GridCell PrioritizeBoxMax { get; private set; }
         /// <summary>FG3-LOG-03（FGR-LOG-026）：清带模式——点一格传送带（整条带）或拖框，把上面的物品送到最近的仓库。</summary>
         public bool ClearMode { get; private set; }
+        /// <summary>EMG2-PERSIST-01（FGR-EMG-154，B02）：清除模式的目标是残骸 / 固态斑块（下清除工作单），不是传送带。与清带共用模式开关、拖框与预览。</summary>
+        public bool ClearSite { get; private set; }
+        public bool ClearSiteActive => ClearMode && ClearSite;
+        public bool ClearBeltActive => ClearMode && !ClearSite;
         /// <summary>清带拉框时的规划（格数、物品数）；没在拉框时为 null。</summary>
         public BeltClearPlan ClearPlan { get; private set; }
         /// <summary>清带确认框（仓库放不下，问是否丢弃）是否正在询问（自检用）。</summary>
@@ -397,6 +401,13 @@ namespace GameLogic.Campaign.Regions
             Revision++;
         }
 
+        /// <summary>EMG2-PERSIST-01：“清除场地物”模式开关（按钮）。点一件 / 拖框下工作单；点已有单子的那一件 = 取消，全额返还。</summary>
+        public void SetClearSiteMode(bool on)
+        {
+            SetClearMode(on);
+            ClearSite = on;
+        }
+
         /// <summary>FG3-LOG-03（FGR-LOG-026）：清带模式开关（按钮与快捷键同一路径）。进入时退出放置 / 拆除 / 搬迁 / 优先建造。</summary>
         public void SetClearMode(bool on)
         {
@@ -404,6 +415,7 @@ namespace GameLogic.Campaign.Regions
             {
                 Open();
             }
+            ClearSite = false;
             ClearMode = on;
             if (on)
             {
@@ -905,6 +917,13 @@ namespace GameLogic.Campaign.Regions
                 case DragKind.ZoneBox:
                     CommitZone(state, start, cell); // FG6-DEF-03
                     break;
+                case DragKind.ClearBox when ClearSite:
+                    SetStatus(Emergence.SitePersistService.ApplyBox(state, start, cell, out bool siteDenied), siteDenied); // EMG2-PERSIST-01
+                    if (siteDenied)
+                    {
+                        Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, StatusText);
+                    }
+                    break;
                 case DragKind.ClearBox:
                     // 点一格 = 这一格所在的整条带；拖框 = 框里的传送带格。
                     CommitClear(state, start == cell ? BeltClearService.PlanNetwork(state, cell) : BeltClearService.PlanBox(state, start, cell));
@@ -1111,6 +1130,9 @@ namespace GameLogic.Campaign.Regions
                 case DragKind.DemolishBox:
                     BoxPlan = HomeGridService.PlanDemolishBox(state, DragStart, end, _boxBuffer);
                     BoxRoofBlocks = Env.RoofService.CountDemolishBox(state, DragStart, end); // FG7-ENV-03 审查修复：预览写会拆几块顶棚
+                    break;
+                case DragKind.ClearBox when ClearSite:
+                    ClearPlan = Emergence.SitePersistService.PlanBox(state, DragStart, end, _clearBuffer); // EMG2-PERSIST-01
                     break;
                 case DragKind.ClearBox:
                     ClearPlan = end == DragStart ? BeltClearService.PlanNetwork(state, end, _clearBuffer) : BeltClearService.PlanBox(state, DragStart, end, _clearBuffer);
@@ -1410,7 +1432,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (InputRouter.ConsumeAction(GameActionId.ClearBeltMode, InputScope.Strategy))
             {
-                SetClearMode(!ClearMode);
+                SetClearMode(!ClearBeltActive);
             }
             if (InputRouter.ConsumeAction(GameActionId.ConstructionQueue, InputScope.Strategy))
             {

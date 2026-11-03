@@ -1840,6 +1840,26 @@ namespace GameLogic.EditorTools
             int energyTab = Campaign.Grid.GridContent.Categories.ToList().FindIndex(c => c.Id == "energy");
             Check(hud != null && hud.CategoryCount == 12 && hud.SelectedCategoryId == "logistics" && hud.HotbarVisible,
                 $"建造菜单有 {hud?.CategoryCount} 个分类页签，默认“{hud?.SelectedCategoryId}”；底部快捷栏可见");
+            // EMG2-PERSIST-01：建造模式新增“清除场地物”工具（开 / 关一次，走真实按钮）。
+            Check(ClickUitk("[BuildModeHudHost]", "BuildClearSite") && mode != null && mode.ClearSiteActive, "点“清除场地物”按钮进入模式");
+            // 真实循环里放一件残骸，走建造模式点选下单再取消（点完清掉，不影响后面的步骤）
+            CampaignState clearState = CampaignSession.Current;
+            Campaign.Combat.CombatSite clearHome = Campaign.Combat.CombatSites.Get(Campaign.Regions.HomeValleyLayout.RegionId);
+            if (clearState != null && clearHome != null && mode != null)
+            {
+                Vector2 clearAt = Campaign.Regions.HomeValleyLayout.Core.Position + new Vector2(9f, 9f);
+                clearHome.Kernel.TryAddWreck(new BinGames.Sim.Combat.EmgWreck { Pos = new Unity.Mathematics.double2(clearAt.x, clearAt.y), Radius = 0.7f, Hp = 40f, MaxHp = 40f, Mass = 6f, Born = clearHome.Kernel.Time, Until = double.MaxValue, Profile = -1 }, out int clearId);
+                string clearTarget = Campaign.Emergence.SitePersistService.TargetOf(BinGames.Sim.Combat.EmgPersistItem.KindWreck, clearId);
+                Campaign.Grid.GridCell clearCell = Campaign.Nav.NavService.CellOf(clearAt.x, clearAt.y);
+                mode.PointerDown(clearState, clearCell);
+                mode.PointerUp(clearState, clearCell);
+                bool clearOrdered = Campaign.Emergence.SitePersistService.ActiveOrder(clearState, clearTarget) != null;
+                mode.PointerDown(clearState, clearCell);
+                mode.PointerUp(clearState, clearCell);
+                Check(clearOrdered && Campaign.Emergence.SitePersistService.ActiveOrder(clearState, clearTarget) == null, "“清除场地物”点残骸下工作单，再点取消");
+                Campaign.Emergence.SitePersistService.TryClearTarget(clearTarget);
+            }
+            Check(ClickUitk("[BuildModeHudHost]", "BuildClearSite") && mode != null && !mode.ClearSiteActive, "再点一次退出“清除场地物”模式");
             Check(ClickUitk("[BuildModeHudHost]", "BuildCat" + energyTab) && hud.SelectedCategoryId == "energy", "点“能源”分类页签");
             Check(ClickUitk("[BuildModeHudHost]", "BuildItem0") && mode != null && mode.SelectedTypeId == Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator2,
                 $"点建造栏第一项选中发电机（{mode?.SelectedTypeId}）");

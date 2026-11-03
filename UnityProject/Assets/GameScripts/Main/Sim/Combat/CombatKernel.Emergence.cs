@@ -866,7 +866,7 @@ namespace BinGames.Sim.Combat
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
             w.Write(16 + (v17 ? 5 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, v17 ? 23 : 12, 1);
+            sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -893,6 +893,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(es.PatchDeferred);
                 if (sw.F()) w.Write(es.WrecksToDebris);
                 if (sw.F()) w.Write(es.NextWireId); // EMG2-RECL-01：尾部追加，短段读到取导线表最大 Id + 1
+                if (sw.F()) w.Write(es.PersistCapped); // EMG2-PERSIST-01：尾部追加，短段读到取 0
+                if (sw.F()) w.Write(es.PersistCleared);
+                if (sw.F()) w.Write(es.SolidAbsorbs);
+                if (sw.F()) w.Write(es.WreckFires);
             }
             sw.EndRecord();
             sw.End();

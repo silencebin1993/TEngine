@@ -265,6 +265,19 @@ namespace BinGames.Sim.Nav
                 Out = _tmpCells,
             }.Run();
             long key = NavGridOps.Key(cx, cy);
+            if (_dynBlock.TryGetValue(key, out List<int> dyn))
+            {
+                if (!_dynUnder.TryGetValue(key, out List<byte> under))
+                {
+                    _dynUnder[key] = under = new List<byte>(dyn.Count);
+                }
+                under.Clear();
+                for (int k = 0; k < dyn.Count; k++)
+                {
+                    under.Add(_tmpCells[dyn[k]]);
+                    _tmpCells[dyn[k]] = (byte)(_tmpCells[dyn[k]] | NavConst.BlockAll); // EMG2-PERSIST-01：阻路斑块覆盖格（ADR ⑯）
+                }
+            }
             bool changed = NavGridOps.SetChunk(ref _mirror, key, _tmpCells, 0);
             if (changed)
             {
@@ -279,6 +292,54 @@ namespace BinGames.Sim.Nav
                 }
             }
             return changed;
+        }
+
+        // 区块键 → 区块内格下标。不进存档：覆盖格完全由战斗内核快照里的阻路斑块推出，读档后第一步重放。
+        private readonly Dictionary<long, List<int>> _dynBlock = new Dictionary<long, List<int>>();
+        // 同序的“盖上去之前的格值”：堵路归因要问“阻路斑块不在时走不走得通”，盖在地形 / 建筑上的格不能算通。
+        private readonly Dictionary<long, List<byte>> _dynUnder = new Dictionary<long, List<byte>>();
+
+        /// <summary>
+        /// EMG2-PERSIST-01（FG19 第 5.3 节，ADR ⑯）：换一整套阻路圆（x, y, 半径）。格中心离圆心 &lt; 半径 − 0.2 的格算挡路（生成时被推到圆外的单位不会落在挡路格上）。
+        /// <paramref name="touched"/> = 覆盖格有变化可能的区块（旧的 ∪ 新的，升序），调用方把它们重推进镜像。O(圆数 × 半径²)，只在阻路斑块生成 / 消失时。
+        /// </summary>
+        public void SetDynamicBlocks(IReadOnlyList<float3> circles, List<long> touched)
+        {
+            var keys = new HashSet<long>(_dynBlock.Keys);
+            _dynBlock.Clear();
+            _dynUnder.Clear();
+            int size = Config.ChunkSize;
+            for (int c = 0; c < circles.Count; c++)
+            {
+                float3 o = circles[c];
+                float r = o.z - 0.2f;
+                if (!(r > 0f))
+                {
+                    continue;
+                }
+                int x0 = (int)math.ceil(o.x - r), x1 = (int)math.floor(o.x + r), y0 = (int)math.ceil(o.y - r), y1 = (int)math.floor(o.y + r);
+                for (int y = y0; y <= y1; y++)
+                {
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        if ((x - o.x) * (x - o.x) + (y - o.y) * (y - o.y) >= r * r)
+                        {
+                            continue;
+                        }
+                        int cx = NavGridOps.FloorDiv(x, size), cy = NavGridOps.FloorDiv(y, size);
+                        long key = NavGridOps.Key(cx, cy);
+                        if (!_dynBlock.TryGetValue(key, out List<int> list))
+                        {
+                            _dynBlock[key] = list = new List<int>(16);
+                        }
+                        list.Add((x - cx * size) + (y - cy * size) * size);
+                        keys.Add(key);
+                    }
+                }
+            }
+            touched.Clear();
+            touched.AddRange(keys);
+            touched.Sort();
         }
 
         /// <summary>记一个“上次同步后变化的区块”（读档时恢复存档那一刻还没同步的变化）。</summary>
@@ -332,10 +393,13 @@ namespace BinGames.Sim.Nav
         /// <summary>
         /// 放置预览的可达性（镜像，Burst 泛洪）：在矩形区域里从 <paramref name="sources"/> 出发，把 <paramref name="extraBlocked"/> 当作障碍，
         /// 每个 owner 的探测格只要有一个被泛洪到就是可达。<paramref name="reached"/> 长度 = owner 数。
+        /// <paramref name="ignoreDynamic"/> = 假设阻路斑块都不在（只掀开底下本来能走的格）。
         /// </summary>
         public void Reachability(int cls, int2 min, int2 max, IReadOnlyList<int2> sources, IReadOnlyList<int2> extraBlocked,
-            IReadOnlyList<int2> probes, IReadOnlyList<int> probeOwner, bool[] reached)
+            IReadOnlyList<int2> probes, IReadOnlyList<int> probeOwner, bool[] reached, bool ignoreDynamic = false)
         {
+            List<int2> open = ignoreDynamic ? OpenUnderDynamic(cls) : null;
+            var through = ToNative(open);
             int ownerCount = reached.Length;
             var src = ToNative(sources);
             var extra = ToNative(extraBlocked);
@@ -362,6 +426,8 @@ namespace BinGames.Sim.Nav
                     ProbeOwner = po,
                     ProbeCount = probes?.Count ?? 0,
                     OwnerReached = outR,
+                    Through = through,
+                    ThroughCount = open?.Count ?? 0,
                 }.Run();
                 for (int i = 0; i < ownerCount; i++)
                 {
@@ -375,7 +441,27 @@ namespace BinGames.Sim.Nav
                 pr.Dispose();
                 po.Dispose();
                 outR.Dispose();
+                through.Dispose();
             }
+        }
+
+        private List<int2> OpenUnderDynamic(int cls)
+        {
+            var open = new List<int2>(64);
+            int size = Config.ChunkSize;
+            foreach (KeyValuePair<long, List<byte>> kv in _dynUnder)
+            {
+                NavGridOps.Unkey(kv.Key, out int cx, out int cy);
+                List<int> dyn = _dynBlock[kv.Key];
+                for (int k = 0; k < kv.Value.Count; k++)
+                {
+                    if (!NavGridOps.IsBlockedClass(kv.Value[k], cls))
+                    {
+                        open.Add(new int2(cx * size + dyn[k] % size, cy * size + dyn[k] / size));
+                    }
+                }
+            }
+            return open;
         }
 
         /// <summary>

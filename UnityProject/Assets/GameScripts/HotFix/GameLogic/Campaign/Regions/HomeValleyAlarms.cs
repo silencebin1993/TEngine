@@ -293,6 +293,7 @@ namespace GameLogic.Campaign.Regions
             CollectStorage(state, result);
             CollectFactory(state, result);
             CollectMachines(state, result);
+            CollectPersistBlocks(state, result); // EMG2-PERSIST-01
             CollectWork(state, result);
             CollectSoftlock(state, result);
             result.Sort((a, b) => a.Severity != b.Severity
@@ -586,6 +587,20 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>EMG2-PERSIST-01（FGR-EMG-154，B06 / B08 / B11）：长期留存物堵住核心与仓库 / 外框之间的通路：告警栏可定位。</summary>
+        private static void CollectPersistBlocks(CampaignState state, List<AlertRecord> into)
+        {
+            SoftlockState st = Economy.SoftlockService.StateOf(state);
+            foreach (PersistBlockRecord r in st?.PersistBlocks ?? Array.Empty<PersistBlockRecord>())
+            {
+                if (r != null)
+                {
+                    into.Add(new AlertRecord("persist:" + r.Key, Severity.WorkBlocked,
+                        GameText.Format("emg.persist.alarm", Emergence.SitePersistService.TargetName(state, r.Key)), 0, null, new Vector3(r.X, 0f, r.Y)));
+                }
+            }
+        }
+
         private static void CollectWork(CampaignState state, List<AlertRecord> into)
         {
             if (state.WorkOrders == null || state.WorkOrders.Length == 0)
@@ -645,6 +660,10 @@ namespace GameLogic.Campaign.Regions
             if (order == null)
             {
                 return GameText.Get("alarm.kind.other");
+            }
+            if (order.Kind == WorkOrderKind.Salvage && Emergence.SitePersistService.IsClearTarget(order.TargetId))
+            {
+                return GameText.Get("emg.persist.work_kind"); // EMG2-PERSIST-01
             }
             if (order.Kind == WorkOrderKind.Salvage && Env.HomeExplorationService.IsPoiId(order.TargetId))
             {

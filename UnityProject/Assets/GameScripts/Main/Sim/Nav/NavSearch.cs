@@ -1547,7 +1547,8 @@ namespace BinGames.Sim.Nav
         /// 每个探测格属于一个 owner（建筑序号）；owner 只要有一个探测格被泛洪到就算“可达”。
         /// </summary>
         public static void FloodReach(ref NavGrid g, int cls, int2 min, int2 max, NativeArray<int2> sources, int sourceCount,
-            NativeArray<int2> extraBlocked, int extraCount, NativeArray<int2> probes, NativeArray<int> probeOwner, int probeCount, NativeArray<byte> ownerReached)
+            NativeArray<int2> extraBlocked, int extraCount, NativeArray<int2> probes, NativeArray<int> probeOwner, int probeCount, NativeArray<byte> ownerReached,
+            NativeArray<int2> through, int throughCount)
         {
             int w = max.x - min.x + 1;
             int h = max.y - min.y + 1;
@@ -1565,6 +1566,14 @@ namespace BinGames.Sim.Nav
                     blocked[c.y * w + c.x] = 1;
                 }
             }
+            for (int i = 0; i < throughCount; i++)
+            {
+                int2 c = through[i] - min;
+                if (c.x >= 0 && c.y >= 0 && c.x < w && c.y < h)
+                {
+                    blocked[c.y * w + c.x] = 2; // EMG2-PERSIST-01：假设这一格能走（镜像里被阻路斑块盖着）
+                }
+            }
             var queue = new NativeList<int>(1024, Allocator.Temp);
             for (int i = 0; i < sourceCount; i++)
             {
@@ -1574,7 +1583,7 @@ namespace BinGames.Sim.Nav
                     continue;
                 }
                 int idx = c.y * w + c.x;
-                if (visited[idx] != 0 || blocked[idx] != 0 || !NavGridOps.Passable(ref g, sources[i], cls))
+                if (visited[idx] != 0 || !Open(ref g, cls, min, blocked, w, c.x, c.y))
                 {
                     continue;
                 }
@@ -1627,7 +1636,7 @@ namespace BinGames.Sim.Nav
         }
 
         private static bool Open(ref NavGrid g, int cls, int2 min, NativeArray<byte> blocked, int w, int lx, int ly) =>
-            blocked[ly * w + lx] == 0 && NavGridOps.Passable(ref g, min.x + lx, min.y + ly, cls);
+            blocked[ly * w + lx] == 2 || (blocked[ly * w + lx] == 0 && NavGridOps.Passable(ref g, min.x + lx, min.y + ly, cls));
 
         /// <summary>FG6-DEF-05：破墙预览——墙格（<paramref name="pen"/> &gt; 0）当作可走、进入付破墙代价；其余同 <see cref="Open(ref NavGrid,int,int2,NativeArray{byte},int,int,int)"/>。</summary>
         private static bool Open(ref NavGrid g, int cls, int2 min, NativeArray<byte> blocked, NativeArray<int> pen, int w, int lx, int ly) =>
@@ -1851,10 +1860,12 @@ namespace BinGames.Sim.Nav
         [ReadOnly] public NativeArray<int> ProbeOwner;
         public int ProbeCount;
         public NativeArray<byte> OwnerReached;
+        [ReadOnly] public NativeArray<int2> Through;
+        public int ThroughCount;
 
         public void Execute()
         {
-            NavSearch.FloodReach(ref G, Class, Min, Max, Sources, SourceCount, Extra, ExtraCount, Probes, ProbeOwner, ProbeCount, OwnerReached);
+            NavSearch.FloodReach(ref G, Class, Min, Max, Sources, SourceCount, Extra, ExtraCount, Probes, ProbeOwner, ProbeCount, OwnerReached, Through, ThroughCount);
         }
     }
 

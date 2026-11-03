@@ -280,11 +280,14 @@ namespace GameLogic.UI.WorkOrder
                 // FG7-ENV-05：遗迹回收单（拆解单、目标 = 遗迹点）写“回收遗迹 / 距离环名（x, y）”，不写“拆解 / 残骸”。
                 // FG8-GEN-02：资源缓存 / 旧终端同一条流程，写“打开缓存 / 读取终端”。
                 bool relicOrder = Campaign.Env.HomeExplorationService.IsPoiId(order.TargetId);
-                row.Q<Label>("Kind").text = relicOrder ? Campaign.Env.HomeExplorationService.WorkLabel(order.TargetId) : KindText(order.Kind);
+                bool clearOrder = Campaign.Emergence.SitePersistService.IsClearTarget(order.TargetId); // EMG2-PERSIST-01：写“清除场地物 / 固化胶块（x, y）”，不写“拆解 / 残骸”
+                row.Q<Label>("Kind").text = clearOrder ? GameLogic.Localization.GameText.Get("emg.persist.work_kind")
+                    : relicOrder ? Campaign.Env.HomeExplorationService.WorkLabel(order.TargetId) : KindText(order.Kind);
                 // ER4-CONTENT-01：建筑类目标改显机械内容目录 DisplayName（如"发电机"），
                 // 不再直接暴露内部拼接 id（如 "home_valley:generator"）；非建筑目标按工单类型给通用称呼。
                 string targetLabel = MechanicalContentFacade.ResolveWorkOrderTargetLabel(order.TargetId);
-                string targetText = relicOrder ? RelicTargetText(order.TargetId)
+                string targetText = clearOrder ? Campaign.Emergence.SitePersistService.DescribeTarget(order.TargetId)
+                    : relicOrder ? RelicTargetText(order.TargetId)
                     : targetLabel == order.TargetId ? FallbackTargetText(order.Kind) : targetLabel;
                 // FG4-ECO-06（FGR-ECO-031 可追溯）：规则派的补给 / 送修 / 驻防写清做什么，规则派出或改动过的单子附“由规则 R3 触发”。
                 CampaignState ruleState = CampaignSession.Current;

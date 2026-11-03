@@ -52,6 +52,7 @@ namespace BinGames.Sim.Combat
             PolymerPayload => new EmgFieldRule { Amount = 0.6f, Param = 1f, Once = 1, Impl = ImplKernel },
             ObscureUnit => new EmgFieldRule { Amount = 3f, Param = 6f, Impl = ImplKernel },
             AcidPayload => new EmgFieldRule { Once = 1, Impl = ImplCoat },
+            SolidAbsorb => new EmgFieldRule { Param = 1.5f, Once = 1, Impl = ImplKernel }, // Param = 冷渣掩护距离（其后 1.5 米内的单位，EMG2-PERSIST-01）
             _ => new EmgFieldRule { Once = 1, Impl = ImplDeferred },
         };
     }

@@ -303,7 +303,7 @@ namespace GameLogic.EditorTools.JourneyBots
             int id = c.GetInt(key);
             return GameRoot.HomeValley.SelectedMachineLogicId == id
                 ? StepOutcome.Done($"左键选中 {Label(id)}")
-                : StepOutcome.Retry($"左键后选中的是 {GameRoot.HomeValley.SelectedMachineLogicId}");
+                : StepOutcome.Retry($"左键后选中的是 {GameRoot.HomeValley.SelectedMachineLogicId}（选点：{JourneyInput.LastVisiblePointNote}；点击那两帧：{JourneyInput.LastWorldClickTrace}）");
         }
 
         internal static void RightClickBuilding(string typeId) => ClickBuildingVisible(typeId, 1);

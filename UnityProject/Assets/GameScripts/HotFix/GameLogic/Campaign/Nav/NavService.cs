@@ -306,6 +306,23 @@ namespace GameLogic.Campaign.Nav
             Dirty.Clear();
         }
 
+        private static readonly List<long> DynTouched = new List<long>(8);
+
+        /// <summary>EMG2-PERSIST-01（ADR ⑯）：把一整套阻路圆写进镜像（只推有变化的区块，按“变化”走：路线失效、重新寻路都走现有流水线）。只在阻路斑块生成 / 消失时。</summary>
+        public static void SyncDynamicBlocks(IReadOnlyList<float3> circles)
+        {
+            if (!IsBound || _map == null)
+            {
+                return;
+            }
+            Kernel.SetDynamicBlocks(circles, DynTouched);
+            foreach (long key in DynTouched)
+            {
+                BinGames.Sim.Nav.NavGridOps.Unkey(key, out int cx, out int cy);
+                Push(HomeGridMap.Key(cx, cy), asChange: true);
+            }
+        }
+
         // ─────────────────────────────── 每步 ───────────────────────────────
 
         /// <summary>一个模拟步开头的寻路流水线（见类注释）。</summary>

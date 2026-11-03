@@ -383,6 +383,10 @@ namespace GameLogic.Campaign.Combat
             c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));
             c.EmgWreckHpRatio = Mathf.Clamp(Tuning("emg.wreck.hp_ratio", EmgConst.DefaultWreckHpRatio), 0.01f, 1f);
             c.EmgWreckSlow = Mathf.Clamp(Tuning("emg.wreck.slow", EmgConst.DefaultWreckSlow), 0.05f, 1f);
+            c.EmgWreckIgniteTemp = Mathf.Max(1f, Tuning("emg.wreck.ignite_temp", EmgConst.DefaultWreckIgniteTemp)); // EMG2-PERSIST-01（FGR-EMG-113 作用 3）
+            c.EmgWreckFlammableMin = Mathf.Clamp(Tuning("emg.wreck.flammable_min", EmgConst.DefaultWreckFlammableMin), 0.01f, 1f);
+            c.EmgWreckBurnRate = Mathf.Max(0.001f, Tuning("emg.wreck.burn_rate", EmgConst.DefaultWreckBurnRate));
+            c.EmgPersistPatchMax = Mathf.Max(1, (int)Math.Round(Tuning("emg.persist.patch_max", 128f))); // EMG2-PERSIST-01（EmgPersist 由 CombatSites.Open 按地点写）
             c.EmgReclaimMaxRatio = Mathf.Clamp(Tuning("emg.reclaim.max_ratio", EmgReclaimConst.DefaultMaxRatio), 0f, 1f); // EMG2-RECL-01（FGR-EMG-115）
             c.EmgReclaimHpPerMass = Mathf.Max(0f, Tuning("emg.reclaim.hp_per_mass", EmgReclaimConst.DefaultHpPerMass));
             c.EmgReclaimInterval = Mathf.Max(0.1f, Tuning("emg.reclaim.interval", EmgReclaimConst.DefaultInterval));
@@ -1853,7 +1857,26 @@ namespace GameLogic.Campaign.Combat
             if (!IsDisposed && nav != null && !nav.IsDisposed)
             {
                 Kernel.BindNav(nav.Mirror);
+                _navBlockSig = 0u; // 新镜像没有覆盖格：有阻路斑块时下一步重放（读档后同一路径）
             }
+        }
+
+        private uint _navBlockSig;
+        private readonly System.Collections.Generic.List<Unity.Mathematics.float3> _navBlockCircles = new System.Collections.Generic.List<Unity.Mathematics.float3>(8);
+
+        /// <summary>
+        /// EMG2-PERSIST-01（FG19 第 5.3 节，ADR ⑯，DEBT-EMG2MAT01-06 / DEBT-EMG2REACT01-07）：阻路斑块集合变了才把覆盖格推进寻路镜像（每步一次 O(1) 比较，只在长期留存且有镜像的地点）。
+        /// 覆盖格不进存档：快照里的阻路斑块读回来后，这里第一步就重放。
+        /// </summary>
+        private void SyncNavBlocks()
+        {
+            if (!Kernel.PersistSite || !Nav.NavService.IsBound || Kernel.BlockSig == _navBlockSig)
+            {
+                return;
+            }
+            _navBlockSig = Kernel.BlockSig;
+            Kernel.CollectBlockCircles(_navBlockCircles);
+            Nav.NavService.SyncDynamicBlocks(_navBlockCircles);
         }
 
         public void UnbindNav()
@@ -1916,6 +1939,7 @@ namespace GameLogic.Campaign.Combat
             {
                 WatchWrecks(); // EMG1-ENT-01
                 WatchPatches(); // EMG2-MAT-01
+                SyncNavBlocks(); // EMG2-PERSIST-01
             }
             WatchFields(); // EMG2-FLD-01
             ProcessEvents();

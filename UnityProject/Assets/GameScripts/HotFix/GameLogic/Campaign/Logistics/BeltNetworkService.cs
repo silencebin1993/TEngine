@@ -894,6 +894,14 @@ namespace GameLogic.Campaign.Logistics
             _damageRecsRef = arr;
         }
 
+        /// <summary>酸雨开始时按传送带格数预留耐久索引，批量扣耐久途中不再扩容重建（见 WeatherService.EnsureHitSets）。</summary>
+        public static void ReserveDamageIndex(int cells)
+        {
+            DamageLost.EnsureCapacity(cells);
+            LastHit.EnsureCapacity(cells);
+            DamageRecs.EnsureCapacity(cells);
+        }
+
         private static void ResetDamageIndex()
         {
             DamageRecs.Clear();

@@ -118,6 +118,8 @@ namespace BinGames.Sim.Combat
         public const float DefaultWreckSeconds = 90f;
         public const float DefaultWreckHpRatio = 0.5f;
         public const float DefaultWreckSlow = 0.5f;
+        /// <summary>残骸点燃（FGR-EMG-113 作用 3，fg.TbHomeTuning emg.wreck.*）：燃点（度）、算“可燃材质”的可燃下限、每秒掉耐久比例（再 × 可燃）。</summary>
+        public const float DefaultWreckIgniteTemp = 180f, DefaultWreckFlammableMin = 0.3f, DefaultWreckBurnRate = 0.2f;
         public const float DefaultImpactVMin = 4f;
         public const float DefaultPushDMin = 0.5f;
         public const float DefaultKnockSeconds = 0.2f;
@@ -931,6 +933,13 @@ namespace BinGames.Sim.Combat
 
         /// <summary>EMG2-RECL-01：下一条导线的稳定 ID（从 1 起；进快照：标量段尾部追加，短段读到取导线表最大 Id + 1）。</summary>
         public int NextWireId;
+
+        /// <summary>EMG2-PERSIST-01（进快照：标量段尾部追加，短段取 0）：长期留存固态斑块满额 / 超软上限崩解为碎屑的次数；玩家工作单清除残骸与固态斑块的次数；固态斑块吸收弹体 / 即时命中的次数。</summary>
+        public int PersistCapped, PersistCleared, SolidAbsorbs, WreckFires;
+        /// <summary>EMG2-PERSIST-01（不进快照）：活着的阻路斑块集合的签名（重建哈希时算，没有阻路斑块 = 0）；热更层发现变了才把覆盖格推进寻路镜像。</summary>
+        public uint BlockSig;
+        /// <summary>EMG2-PERSIST-01（不进快照）：活着的挡弹固态斑块数（重建哈希时算）；0 时弹体 / 即时命中一条比较跳过，不查哈希。</summary>
+        public int AbsorbLive;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, NextWireId = 1, HashDirty = 1 };
     }

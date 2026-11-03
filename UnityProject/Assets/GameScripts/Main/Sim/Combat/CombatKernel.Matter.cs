@@ -366,6 +366,10 @@ namespace BinGames.Sim.Combat
             if (sr.F()) es.PatchDeferred = r.ReadInt32();
             if (sr.F()) es.WrecksToDebris = r.ReadInt32();
             if (sr.F()) es.NextWireId = r.ReadInt32(); // EMG2-RECL-01（短段取 0 → 读档后按导线表补）
+            if (sr.F()) es.PersistCapped = r.ReadInt32(); // EMG2-PERSIST-01（短段取 0）
+            if (sr.F()) es.PersistCleared = r.ReadInt32();
+            if (sr.F()) es.SolidAbsorbs = r.ReadInt32();
+            if (sr.F()) es.WreckFires = r.ReadInt32();
         }
 
         /// <summary>段 17 斑块（只写活斑块，按表内顺序）、段 18 活跃场、段 19 实体档案稳定键。</summary>

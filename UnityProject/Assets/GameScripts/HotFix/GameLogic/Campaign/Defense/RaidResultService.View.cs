@@ -162,6 +162,10 @@ namespace GameLogic.Campaign.Defense
             AppendLoot(r, into);
             Title(into, "raid.result.sec.wreck", "wreck");
             Plain(into, WreckStatusText(s), "wreck");
+            if (r.EndTick >= 0 && r.LeftWrecks + r.LeftSolids + r.PersistCapped > 0)
+            {
+                Plain(into, GameText.Format("emg.persist.raid_left", r.LeftWrecks, r.LeftSolids, r.PersistCapped), "wreck"); // EMG2-PERSIST-01（B19）
+            }
         }
 
         private static long LiveDealt(RaidResultRecord r)
@@ -481,6 +485,10 @@ namespace GameLogic.Campaign.Defense
                 into.AddRange(rows);
                 into.Add(new AwayLine { Text = GameText.Format("raid.result.kills", r.Killed, r.EliteKilled, r.Exited, r.Unfolded), Section = "raid" });
                 AppendRepollution(s, r, into, "raid"); // FG10-RAID-01：再污染在离家报告里说明（含重新净化的路径）
+                if (r.LeftWrecks + r.LeftSolids + r.PersistCapped > 0)
+                {
+                    into.Add(new AwayLine { Text = GameText.Format("emg.persist.raid_left", r.LeftWrecks, r.LeftSolids, r.PersistCapped), Section = "raid" }); // EMG2-PERSIST-01（B19）
+                }
                 if (LossTotal(r) > 0)
                 {
                     into.Add(new AwayLine
