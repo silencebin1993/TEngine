@@ -22,7 +22,7 @@ namespace BinGames.Sim.Combat
         /// <summary>场端口码（fg.TbChannelPort fld.*，FG19 第 2.6 节）。</summary>
         public const ushort PortPull = 701, PortPush = 702, PortVortex = 703, PortMagnet = 704, PortDeflect = 705, PortCorona = 706;
         /// <summary>弹体 FieldOnce 位（“每发弹体每种沾染只记一次”，FGR-EMG-120）：带电 / 被场反射 / 烟失锁 / 蒸汽失锁 / 玻化层反弹 / 冰面反弹 / 已挂拖尾。</summary>
-        public const byte OnceCharged = 1, OnceDeflect = 2, OnceSmoke = 4, OnceSteam = 8, OnceGlass = 16, OnceIce = 32, OnceTrail = 64;
+        public const byte OnceCharged = 1, OnceDeflect = 2, OnceSmoke = 4, OnceSteam = 8, OnceGlass = 16, OnceIce = 32, OnceTrail = 64, OnceIgnite = 128;
         /// <summary>牵引 / 磁场离场心这么近就不再拉（防止在场心来回抖）。</summary>
         public const float PullKeep = 0.5f;
         /// <summary>无人机载体的“小场”半径上限（FG19A 第 1.4 节电磁场控表“无人机命中处小牵引 / 磁 / 涡旋场（3 米）”）。shortcut: 内核常量未入表（同 PullKeep），FG15-BAL-01 调参时再进 fg.TbFieldCarrierRule。</summary>
@@ -47,7 +47,11 @@ namespace BinGames.Sim.Combat
             SteamPayload => new EmgFieldRule { Amount = 0.3f, Once = 1, Impl = ImplKernel },
             GlassPayload => new EmgFieldRule { Amount = 0.4f, Once = 1, Impl = ImplKernel },
             IcePayload => new EmgFieldRule { Amount = 0.25f, Once = 1, Impl = ImplKernel },
-            OilPayload or AcidPayload => new EmgFieldRule { Once = 1, Impl = ImplCoat },
+            OilPayload => new EmgFieldRule { Amount = 200f, Once = 1, Impl = ImplKernel },
+            DustPayload => new EmgFieldRule { Amount = 300f, Once = 1, Impl = ImplKernel },
+            PolymerPayload => new EmgFieldRule { Amount = 0.6f, Param = 1f, Once = 1, Impl = ImplKernel },
+            ObscureUnit => new EmgFieldRule { Amount = 3f, Param = 6f, Impl = ImplKernel },
+            AcidPayload => new EmgFieldRule { Once = 1, Impl = ImplCoat },
             _ => new EmgFieldRule { Once = 1, Impl = ImplDeferred },
         };
     }
@@ -356,6 +360,7 @@ namespace BinGames.Sim.Combat
             EmgFieldRule fu = FieldRule(ref d, EmgFieldConst.ForceUnit), mu = FieldRule(ref d, EmgFieldConst.MagnetUnit), cu = FieldRule(ref d, EmgFieldConst.CoronaUnit);
             bool ent = EmgEntOn(ref d);
             int pushes = 0;
+            int annihilate = EmgAnnihilateRule(ref d);
             for (int u = 0; u < d.Count; u++)
             {
                 if (!d.IsAlive(u))
@@ -373,11 +378,20 @@ namespace BinGames.Sim.Combat
                 {
                     EmgField f = d.Fields[j];
                     double r = FieldRadiusNow(f, now) + d.Radius[u];
-                    if (math.distancesq(pos, f.Pos) > r * r || f.Port == EmgFieldConst.PortDeflect)
+                    if (math.distancesq(pos, f.Pos) > r * r)
                     {
                         continue;
                     }
                     CombatFaction ff = (CombatFaction)f.Faction;
+                    if (f.Port == EmgFieldConst.PortDeflect)
+                    {
+                        // EMG2-REACT-02（F01 湮灭）：低完整度单位在敌对偏折场里被压溃起爆；敌我同一条（FGR-EMG-160）
+                        if (annihilate >= 0 && FieldRelation(EmgFieldConst.FacHostile, ff, uf) && EmgAnnihilate(ref d, u, d.EmgRules[annihilate], f))
+                        {
+                            break;
+                        }
+                        continue;
+                    }
                     if (f.Port == EmgFieldConst.PortCorona)
                     {
                         if (FieldLive(cu) && FieldRelation(cu.Faction, ff, uf))
@@ -841,6 +855,30 @@ namespace BinGames.Sim.Combat
                     }
                     break;
                 }
+                case EmgMatterConst.Oil:
+                case EmgMatterConst.Dust:
+                {
+                    // EMG2-REACT-02（DEBT-EMG2FLD01-01）：已带火的弹体穿过油 / 粉尘 → 向这块注热（油 +200 立即 E01；粉尘 +300 走 E04 / E05）
+                    EmgFieldRule rule = FieldRule(ref d, z.Matter == EmgMatterConst.Oil ? EmgFieldConst.OilPayload : EmgFieldConst.DustPayload);
+                    sbyte fire = MatterOf(ref d, EmgMatterConst.Fire).CoatBit;
+                    if (FieldLive(rule) && rule.Amount > 0f && (pr.FieldOnce & EmgFieldConst.OnceIgnite) == 0 && fire >= 0 && fire < 31 && (pr.Coat & (1u << fire)) != 0u)
+                    {
+                        pr.FieldOnce |= EmgFieldConst.OnceIgnite;
+                        EmgInjectPatches(ref d, next, 0.5f, EmgConst.PortHeat, rule.Amount, pr.Chain, pr.Depth);
+                    }
+                    break;
+                }
+                case EmgMatterConst.Polymer:
+                {
+                    // EMG2-REACT-02（DEBT-EMG2FLD01-01）：穿过聚合胶速度 × 0.6，持续 1 秒（到时恢复，CombatLogic.cs 弹体步）；破片不走这行（表：弹体、无人机子弹）
+                    EmgFieldRule rule = FieldRule(ref d, EmgFieldConst.PolymerPayload);
+                    if (FieldLive(rule) && pr.SlowQ == 0 && (pr.Flags & EmgProjFlags.Fragment) == 0 && rule.Amount > 0f && rule.Amount < 1f)
+                    {
+                        pr.SlowQ = (ushort)math.clamp((int)math.round(rule.Param * 1000f), 1, 65535);
+                        pr.Vel *= rule.Amount;
+                    }
+                    break;
+                }
                 case EmgMatterConst.Fire:
                 case EmgMatterConst.Molten:
                 {
@@ -880,6 +918,25 @@ namespace BinGames.Sim.Combat
                     break;
                 }
             }
+        }
+
+        /// <summary>
+        /// fieldrule_obscure_unit（FG19B 第 5 节，DEBT-EMG2FLD01-02）：目标身处烟里（遮蔽 ≥ emg.obscure.full）只有 Amount（3）米内看得到；身处蒸汽里（部分遮蔽）锁定距离上限 Param（6）米。
+        /// 所有索敌都经 <see cref="FindTarget"/>（编队、驻守、敌人 AI、炮塔）；玩家显式下的攻击命令不重新索敌，不受这条影响（RTS 右键敌人 = 攻击）。O(1)，读每步更新的物质掩码。
+        /// </summary>
+        internal static bool EmgObscured(ref CombatData d, int k, double dist)
+        {
+            uint mask = d.EmgUnit[k].PrevMatterMask;
+            if ((mask & ((1u << EmgMatterConst.Smoke) | (1u << EmgMatterConst.Steam))) == 0u)
+            {
+                return false;
+            }
+            EmgFieldRule rule = FieldRule(ref d, EmgFieldConst.ObscureUnit);
+            if (!FieldLive(rule))
+            {
+                return false;
+            }
+            return (mask & (1u << EmgMatterConst.Smoke)) != 0u ? dist > rule.Amount : dist > rule.Param;
         }
 
         /// <summary>带火又带油的弹体沿途拖出明火：本步线段每跨过一个“间距”刻度落一块小明火斑块（物质中立），直到块数用完（FG19B fieldrule_fire_payload）。</summary>

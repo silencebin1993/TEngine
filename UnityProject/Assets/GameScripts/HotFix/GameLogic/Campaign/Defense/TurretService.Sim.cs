@@ -569,7 +569,7 @@ namespace GameLogic.Campaign.Defense
             {
                 return false;
             }
-            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId);
+            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId, p.FirmwareIds);
             return fw != null && FirmwareKinds.IsCore(fw) && SignalUplinkService.CooldownRemaining(state, fw) > 0;
         }
 

@@ -835,6 +835,10 @@ namespace BinGames.Sim.Combat
             {
                 ApplyStatus(ref d, u, 1u << m.CoatBit, m.CoatSeconds, 0f, 0f, 0f, src);
             }
+            if (z.Matter == EmgMatterConst.Molten && d.IsAlive(u))
+            {
+                EmgCoatReact(ref d, u, 0u, MoltenContactHeat, 0f, src); // EMG2-REACT-02（FG19B C01 / C05“进入明火 / 熔融斑块”，DEBT-EMG2REACT01-04）：沾油 / 带酸的单位踩熔融金属
+            }
             if (m.ContactSlow > 0f && d.IsAlive(u))
             {
                 ApplyStatus(ref d, u, CombatConst.StatusBitZoneSlow, elapsed + 0.05f, 0f, m.ContactSlow, 0f, src);
@@ -898,14 +902,11 @@ namespace BinGames.Sim.Combat
                             continue;
                         }
                         EmgMatter m = MatterOf(ref d, z.Matter);
-                        if (m.CoatBit >= 0 && m.CoatBit < 31 && !IsLegacy(z))
+                        if (m.CoatBit >= 0 && m.CoatBit < 31)
                         {
-                            pr.Coat |= 1u << m.CoatBit; // EMG2-MAT-02：迁入斑块不给弹体沾染（等价迁移期，迁移前区域不沾弹体）
+                            pr.Coat |= 1u << m.CoatBit; // EMG2-REACT-02（DEBT-EMG2MAT02-03）：迁入斑块同样给弹体沾染（预期差异，M10-BASELINE）
                         }
-                        if (!IsLegacy(z))
-                        {
-                            EmgProjPatchRules(ref d, ref pr, z, next); // EMG2-FLD-01：失锁 / 去火 / 拖尾 / 玻化层与冰面反射
-                        }
+                        EmgProjPatchRules(ref d, ref pr, z, next); // EMG2-FLD-01：失锁 / 去火 / 拖尾 / 玻化层与冰面反射
                         if (math.distancesq(next, z.Pos) <= r2)
                         {
                             uint bit = 1u << z.Matter;

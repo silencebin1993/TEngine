@@ -583,7 +583,7 @@ namespace GameLogic.EditorTools
             cases.Add(("残骸耐久非数", Patch(snap, d => WriteInt(d, kseg.at + 44, BitConverter.SingleToInt32Bits(float.NaN))), CombatLoadResult.InvalidValue));
             if (k.ProjectileCount >= 2)
             {
-                (int at, int stride) pseg = FindSegment(snap, EmgConst.SegProjectiles, 24, k.ProjectileCount); // EMG2-FLD-01：+ LockQ/FieldOnce/TrailLeft；EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
+                (int at, int stride) pseg = FindSegment(snap, EmgConst.SegProjectiles, 25, k.ProjectileCount); // EMG2-FLD-01：+ LockQ/FieldOnce/TrailLeft；EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
                 cases.Add(("弹体 Id 重复", Patch(snap, d => WriteInt(d, pseg.at + pseg.stride, BitConverter.ToInt32(d, pseg.at))), CombatLoadResult.InvalidValue));
                 cases.Add(("弹体程序下标越界", Patch(snap, d => WriteInt(d, pseg.at + 4, 50)), CombatLoadResult.InvalidValue));
             }

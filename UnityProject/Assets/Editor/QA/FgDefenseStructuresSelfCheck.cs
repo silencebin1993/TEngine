@@ -1577,10 +1577,10 @@ namespace GameLogic.EditorTools
             CombatLoadResult r9 = k9.Load(snap9);
             using var kCur = new CombatKernel(cfg, 256);
             CombatLoadResult rCur = kCur.Load(snapCur);
-            Expect(CombatKernel.PeekFormat(snap10) == 10 && r10 == CombatLoadResult.Ok && k10.StateHash() == hash && k10.ShieldCount == shields && shields == 1
+            Expect(CombatKernel.PeekFormat(snap10) == 10 && r10 == CombatLoadResult.Ok && k10.ShieldCount == shields && shields == 1 // EMG2-REACT-02：陷阱场地进斑块后，格式 10（没有斑块段）的哈希不再可比，只比护盾
                    && CombatKernel.PeekFormat(snap9) == 9 && r9 == CombatLoadResult.Ok && k9.ShieldCount == 0
                    && CombatKernel.PeekFormat(snapCur) == CombatConst.FormatVersion && rCur == CombatLoadResult.Ok && kCur.StateHash() == hash && kCur.ShieldCount == shields,
-                $"I3 战斗内核快照：当前格式 {CombatConst.FormatVersion} 往返（{rCur}）与格式 10 往返（{r10}）状态哈希一致、护盾 {k10.ShieldCount} 座；格式 9 的旧快照照常读（{r9}，没有护盾表 → 热更层按记录重新登记）");
+                $"I3 战斗内核快照：当前格式 {CombatConst.FormatVersion} 往返（{rCur}）状态哈希一致、格式 10 往返（{r10}）护盾 {k10.ShieldCount} 座；格式 9 的旧快照照常读（{r9}，没有护盾表 → 热更层按记录重新登记）");
 
             // 旧快照没有护盾表：状态机按记录重新登记（读档后的第一步）。
             ls.RemoveShield(DefenseService.Find(l, gen.BuildingId).Serial);

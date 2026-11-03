@@ -51,12 +51,19 @@ namespace GameLogic.Campaign.Emergence
             "charge_ge_conc_ge", "kinetic_ge", "expire", "expire_temp_lt", "overheat_in",
             "inject_ge", "coats", "same_hit" }; // EMG2-REACT-01：单位层沾染行与 P03（与内核 EmgRuleConst.Cond* 同序，只追加）
         private static readonly string[] Ops = { "deferred", "convert", "moveover", "dilute", "douse", "erode", "split", "spawn", "burst", "arc", "fragment", "vent",
-            "coatspawn", "coatarc", "stick" }; // EMG2-REACT-01：单位层沾染行（与内核 EmgRuleConst.Op* 同序，只追加）
+            "coatspawn", "coatarc", "stick", "coatflash", "coattrail", "coatslow" }; // EMG2-REACT-01 / 02：单位层沾染行（与内核 EmgRuleConst.Op* 同序，只追加）
 
         /// <summary>
         /// 编译。<paramref name="capacity"/> = emg.rule.capacity（夹到 ≤ 256）；行数超过它整表拒绝（卡片负向“规则超 256 行被表校验拒绝”）。
         /// deferred 行（承接卡接上结算）照样编进来、占容量、过校验，内核不结算。
         /// </summary>
+        /// <summary>FG19B §2.9 封闭清单里非物质的产物（没有 bhv.breach：破甲只能是相态附带，FGT-EMG-030）。</summary>
+        private static readonly string[] ClosedNonMatterProducts =
+        {
+            "ter.block", "ter.bridge", "ter.cover", "ter.slick", "ter.mark", "bhv.lockloss", "bhv.overheat_stop", "bhv.stun", "bhv.freeze", "bhv.stick", "bhv.slow", "bhv.push",
+            "bhv.hijack", "topo.arc", "topo.fragment", "topo.reflect", "topo.redirect", "topo.burst", "topo.trail",
+        };
+
         public static Compiled Compile(IReadOnlyList<GameConfig.fg.ChannelRule> rows, int capacity)
         {
             var c = new Compiled();
@@ -81,10 +88,15 @@ namespace GameLogic.Campaign.Emergence
                 int pair = Array.IndexOf(Pairs, r.PairKind);
                 int op = Array.IndexOf(Ops, r.Op);
                 int cond = Array.IndexOf(Conds, r.Cond);
-                int main = "STBP".IndexOf(r.MainKind ?? "?", StringComparison.Ordinal) + 1;
+                int main = string.IsNullOrEmpty(r.MainKind) ? 0 : "STBP".IndexOf(r.MainKind, StringComparison.Ordinal) + 1; // 空串的 IndexOf 恒为 0，不能当 S
                 if (pair <= 0 || op < 0 || main <= 0 || (op != EmgRuleConst.OpDeferred && cond <= 0))
                 {
                     c.Problems.Add($"{r.Id}：pairKind / op / cond / mainKind 不认识（{r.PairKind} / {r.Op} / {r.Cond} / {r.MainKind}）");
+                    continue;
+                }
+                if (Array.IndexOf(ClosedNonMatterProducts, r.Product) < 0 && (r.Product == null || !r.Product.StartsWith("mat.", StringComparison.Ordinal)))
+                {
+                    c.Problems.Add($"{r.Id}：产物 {r.Product} 不在封闭清单（FG19B §2.9）");
                     continue;
                 }
                 if (!TryCode(ports, r.A, out ushort a) || !TryCode(ports, r.B, out ushort b))
@@ -169,6 +181,10 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>主组件是重型射弹载体（作战组件表 carrier = projectile、细分 = 重型）。</summary>
         public static bool IsHeavyProjectile(string primaryId) =>
             CarrierReadings.TryGetComponent(primaryId, out GameConfig.fg.CombatComponent comp) && comp.Carrier == "projectile" && comp.SubtypeKey == HeavyProjectileSubtype;
+
+        /// <summary>主组件是光束（细分 = 光束；动能系数 0，FG19B §6.3）。</summary>
+        public static bool IsBeam(string primaryId) =>
+            CarrierReadings.TryGetComponent(primaryId, out GameConfig.fg.CombatComponent comp) && comp.SubtypeKey == "component.subtype.beam";
 
         /// <summary>重型射弹载体的细分（作战组件表 subtypeKey；FG19B §6.3“重型射弹（重炮）”）。</summary>
         public const string HeavyProjectileSubtype = "component.subtype.heavy";

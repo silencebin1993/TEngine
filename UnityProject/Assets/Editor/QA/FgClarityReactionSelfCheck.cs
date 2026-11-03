@@ -52,7 +52,7 @@ namespace GameLogic.EditorTools
 
         private static readonly Dictionary<string, string> SpecNames = new Dictionary<string, string>
         {
-            ["reaction_deflagrate"] = "爆燃", ["reaction_causticburn"] = "腐蚀灼烧", ["reaction_syrup"] = "胶结", ["reaction_dissolve"] = "溶蚀",
+            ["reaction_deflagrate"] = "爆燃", ["reaction_causticburn"] = "腐蚀灼烧", ["reaction_syrup"] = "胶结", ["reaction_dissolve"] = "乳化",
         };
 
         private static StringBuilder _report;
@@ -283,12 +283,20 @@ namespace GameLogic.EditorTools
                 }
                 int burnPlain = Probe(-1, 0, acid, fire, fireDps, "reaction_causticburn");
                 int burnProof = Probe(proof, 1, acid, fire, fireDps, "reaction_causticburn");
-                // 溶蚀只有“这一击 × 倍率”（没有附加标签 / 残留区域）：纯挂状态不结算（内核规则），要用一记带油的命中（如爬行者自爆）。
+                // EMG2-REACT-02（FG19B M03）：乳化是斑块层的“油 × 酸 → 污泥”，单位身上的两种沾染不结算；澄净单位不沾酸也就打不到（ADR-REACT-001 第 5 节待复核项的新口径）
                 int etchPlain = Probe(-1, 2, acid, oil, 0f, "reaction_dissolve", 10f);
                 int etchProof = Probe(proof, 3, acid, oil, 0f, "reaction_dissolve", 10f);
+                int etch0 = Count("reaction_dissolve");
+                k.SpawnPatch(EmgMatterConst.Oil, new double2(40, 0), 2f, 3f, 30f);
+                k.SpawnPatch(EmgMatterConst.Acid, new double2(41, 0), 2f, 3f, 30f);
+                for (int s = 0; s < 60; s++)
+                {
+                    k.Step(1f / 60f, k.Time + 1f / 60f);
+                }
+                int etchPatch = Count("reaction_dissolve") - etch0;
                 int deflProof = Probe(proof, 4, oil, fire, fireDps, "reaction_deflagrate");
-                Expect(burnPlain == 1 && burnProof == 0 && etchPlain == 1 && etchProof == 0 && deflProof == 1,
-                    $"C1 澄净单位不怕酸（免疫酸蚀位）：腐蚀灼烧 普通敌人 {burnPlain} 次 / 澄净 {burnProof} 次；溶蚀 普通 {etchPlain} / 澄净 {etchProof}；爆燃在澄净身上照样 {deflProof} 次——图鉴打法提示写明“这两条要打在其它阵营身上”");
+                Expect(burnPlain == 1 && burnProof == 0 && etchPlain == 0 && etchProof == 0 && etchPatch >= 1 && deflProof == 1,
+                    $"C1 澄净单位不怕酸（免疫酸蚀位）：腐蚀灼烧 普通敌人 {burnPlain} 次 / 澄净 {burnProof} 次；乳化在单位层不结算（普通 {etchPlain} / 澄净 {etchProof}），油斑块 × 酸斑块结算 {etchPatch} 次；爆燃在澄净身上照样 {deflProof} 次——图鉴打法提示写明“这两条要打在其它阵营身上”");
             }
         }
 

@@ -149,7 +149,7 @@ namespace BinGames.Sim.Combat
             {
                 Prog = z.EmgProgRef - 1, Chain = z.EmgChain, Ent = z.EmgId, Owner = d.SlotOf(z.Owner), Node = z.EmgNode, Depth = z.EmgDepth, EntKind = EmgEntKind.Zone,
                 HurtSrc = (byte)EmgCode.SrcZone, HitCode = EmgCode.HitZoneTick, TrigUsed = z.EmgTrigUsed, Damage = math.max(0f, z.Dps), Strike = math.max(0f, z.Dps) * z.TickInterval, Weapon = z.EmgWeapon, OwnerId = z.Owner,
-                Faction = (byte)z.Faction, Carrier = (byte)CombatCarrier.Field, ZoneRadius = z.Radius, ZoneLife = (float)(z.Until - z.Born),
+                Faction = (byte)z.Faction, Carrier = (byte)CombatCarrier.Field, ZoneRadius = z.Radius, ZoneLife = (float)(z.Until - z.Born), ZoneBorn = z.Born, ZoneTick = z.TickInterval,
             };
         }
 
@@ -1148,10 +1148,6 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[hit] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[hit], wp.MarkSeconds, 0f, 0, d.Pos[hit]);
-            }
-            if (wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(owner, CombatUnitFlags.ReactionSpent) && (pr.Flags & EmgProjFlags.NoNamed) == 0)
-            {
-                MarkJump(ref d, owner, hit, hitPos, dealt, wp);
             }
             Anchored(ref d, owner, hit, hitPos, dealt, wp.Damage, wp, wasMarked, d.Pos[owner], false);
         }

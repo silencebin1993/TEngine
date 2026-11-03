@@ -439,12 +439,12 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>
         /// EMG2-PHS-01（承接 DEBT-EMG1FW01-03 注入类，FGR-EMG-019 单轨）：能量注入写端由内核在落点写累积量（结构积热 → 熔穿、电荷 → 麻痹、磁化度 → 磁化）后，
         /// 同一写端原先在本机出手上挂的旧标签退役。按端口给，不按固件 ID（FGR-EMG-013）。
-        /// 电击 Shock 不在此列：它不写电荷累积量，是短路 / 电解 / 绝缘旧标签反应的配料，随 FG19B §12 #3“电击改麻痹”由 EMG2-REACT-02 撤（DEBT-EMG2PHS01-04）。
+        /// 电击 Shock 随 EMG2-REACT-02 退役（短路 / 电解 / 绝缘都读注入量，不读标签）。
         /// </summary>
         public static string[] RetiredTags(string port) => !KernelInjectLive ? Array.Empty<string>() : port switch
         {
             "en.heat" => new[] { "Fire" },
-            "en.elec" => new[] { "Charged" },
+            "en.elec" => new[] { "Charged", "Shock" }, // EMG2-REACT-02：电击 = 一次 en.elec 注入（FG19B §3.1 位 4、§12 #3）
             "en.mag" => new[] { "Charged", "Magnet" },
             _ => Array.Empty<string>(),
         };
@@ -539,7 +539,6 @@ namespace GameLogic.Campaign.Emergence
                     EmgFamily fam = EmgCatalog.FamilyOf(pid);
                     // 审查修复（第 1 轮）：子节点上的效果写端，除物质排放（内核子载荷 emit 执行）外，阶段 1 内核在子载荷上还不执行——
                     // 与根节点同一过渡口径保留该固件的过渡字段与旧标签（作用在本机出手上），否则 [触发, 效果] 的第二条成了死指令（FGR-EMG-015 规则二）。
-                    // shortcut: 生成 / 标记 / 连通 / 破片类子载荷动词随 EMG2-REACT-02 去倍率改写一起撤过渡字段（DEBT-EMG1FW01-03 余下部分；注入类已由 EMG2-PHS-01 撤）。
                     // EMG2-PHS-01（承接 DEBT-EMG1FW01-03 注入类）：en.heat / en.elec / en.mag 的注入由内核在落点结算（EmgHitInject：根节点按本机命中、子节点按子弹药 / 子区落点），
                     // 写进结构积热 / 电荷 / 磁化度累积量并由相态表现（熔穿 / 麻痹 / 磁化）——过渡字段 heatburst 退役（TransitionFields("en.heat") 为空），
                     // 该写端的旧标签（Fire / Charged / Magnet，RetiredTags）也不再挂在本机出手上：同一写端只走内核一轨（FGR-EMG-019）。
@@ -551,7 +550,9 @@ namespace GameLogic.Campaign.Emergence
                         }
                         rs.Add(t);
                     }
-                    if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && (n.Parent < 0 || fam != EmgFamily.Matter))
+                    // EMG2-REACT-02（DEBT-EMG1FW01-03 余部）：子节点上的效果写端全部由内核在落点结算（CombatLogic.EmgChildHitWrite / EmgChildWrites / 排放），本机出手上不再留过渡字段与旧标签（FGR-EMG-019 单轨）；
+                    // emg.stage = 1 的回滚对照里内核不注能，仍按旧过渡口径
+                    if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && (n.Parent < 0 || (!KernelInjectLive && fam != EmgFamily.Matter)))
                     {
                         // EMG1-FIX-01：根节点上由内核直接执行的写端（RootKernel，如追射 ent.projectile）不再保留旧读法过渡字段（否则旧回波与真补射两轨同时结算，FGR-EMG-019）
                         bool kernelRoot = n.Parent < 0 && (x.Flags & EmgInstrFlags.RootKernel) != 0;

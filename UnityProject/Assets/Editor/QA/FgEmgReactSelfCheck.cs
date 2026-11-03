@@ -237,14 +237,14 @@ namespace GameLogic.EditorTools
                 "FGT-EMG-030：16 条 reaction_* ID 都在、StableKey = FNV-1a(ID) 未变；两条装配反应 ID 也在" + (missing.Count > 0 ? "；缺：" + string.Join(",", missing) : string.Empty));
             CombatReactionRule[] old = NamedReactionCatalog.BuildKernelRules();
             var oldKeys = new HashSet<int>(old.Select(r => r.Key));
-            var namedLive = new HashSet<int>(ok.Rules.Where(r => r.Op != EmgRuleConst.OpDeferred || r.Pair == EmgRuleConst.PairPhaseEnergy).Select(r => r.Key));
-            bool single = Five.All(id => !oldKeys.Contains(Key(id)) && namedLive.Contains(Key(id)) && NamedReactionCatalog.TryGet(id, out GameConfig.fg.Reaction row) && row.Kind == NamedReactionCatalog.KindRule);
-            Expect(single && old.Length == 11 && oldKeys.Count == 11,
-                $"单轨：五条（蒸汽 / 爆燃 / 短路 / 碎裂 / 固化）kind = rule、已从旧标签反应表撤下（旧表剩 {old.Length} 条），并在通道规则表有生效行；两表没有同一 StableKey");
+            var namedLive = new HashSet<int>(ok.Rules.Where(r => r.Op != EmgRuleConst.OpDeferred || r.Pair == EmgRuleConst.PairPhaseEnergy || r.Pair == EmgRuleConst.PairPropField || r.Pair == EmgRuleConst.PairMatterEntity).Select(r => r.Key));
+            bool single = Named16.All(id => !oldKeys.Contains(Key(id)) && namedLive.Contains(Key(id)) && NamedReactionCatalog.TryGet(id, out GameConfig.fg.Reaction row) && row.Kind == NamedReactionCatalog.KindRule);
+            Expect(single && old.Length == 0,
+                $"单轨（EMG2-REACT-02）：16 条全部 kind = rule、旧标签反应表撤空（剩 {old.Length} 条），每条在通道规则表有生效行");
             int coatLive = ok.Rules.Count(r => r.Pair == EmgRuleConst.PairCoatMatter && r.Op != EmgRuleConst.OpDeferred);
-            Expect(coatLive == 4, $"单位层沾染行接上 4 条（C01 爆燃、C02 蒸汽、C03 短路、C06 固化）；其余 C 行留给 EMG2-REACT-02（生效 {coatLive}）");
-            Expect(GameText.Get("reaction.shatter.name") == "碎裂" && GameText.Get("reaction.sticky.name") == "固化" && GameText.Get("reaction.dissolve.name") == "溶蚀",
-                $"玩家名按推荐默认（2026-10-30）：脆裂 → {GameText.Get("reaction.shatter.name")}、粘滞 → {GameText.Get("reaction.sticky.name")}；溶蚀 → 乳化不在本卡（仍 {GameText.Get("reaction.dissolve.name")}）");
+            Expect(coatLive == 8, $"单位层沾染行 C01～C08 全部接上（生效 {coatLive}）");
+            Expect(GameText.Get("reaction.shatter.name") == "碎裂" && GameText.Get("reaction.sticky.name") == "固化" && GameText.Get("reaction.dissolve.name") == "乳化",
+                $"玩家名按推荐默认（2026-10-30）：脆裂 → {GameText.Get("reaction.shatter.name")}、粘滞 → {GameText.Get("reaction.sticky.name")}；溶蚀 → {GameText.Get("reaction.dissolve.name")}（EMG2-REACT-02）");
             string adhesive = GameText.Get(t.TbFirmwareKind.GetOrDefault("fw_adhesive")?.DescKey ?? "none");
             Expect(adhesive.Contains("排出聚合胶，遇酸固化成阻路的胶块"), $"粘合剂文案（FGR-EMG-230 第 10 行）：{adhesive}");
         }
@@ -634,22 +634,25 @@ namespace GameLogic.EditorTools
             StepN(k2, 60);
             Expect(lr == CombatLoadResult.Ok && before > 0f && Mathf.Approximately(before, after) && k.StateHash() == k2.StateHash(),
                 $"粘住 {before:0.##} 秒时存档，读档 {lr} 后 {after:0.##} 秒，各续跑 1 秒状态哈希一致");
-            // 旧档：五条之一的计数还在旧标签反应表里（按键）——换成新表时按键并进涌现可靠计数
+            // 旧档：计数还在旧标签反应表里（按键）——读进来、换成撤空的表时按键并进涌现可靠计数。旧结算路径已删，这里直接写快照的计数块造旧档
             using CombatKernel k3 = NewKernel();
             int key = Key("reaction_conduct");
-            var legacy = NamedReactionCatalog.BuildKernelRules().ToList();
-            legacy.Insert(0, new CombatReactionRule { Pair = Bit("Wet") | Bit("Shock"), Consume = Bit("Wet"), DamageMult = 1.3f, Key = key });
-            k3.SetReactionRules(legacy.ToArray());
-            int v = Unit(k3, CombatFaction.Hostile, new double2(0, 0));
-            k3.ApplyStatus(v, Bit("Wet"), 10f, 0f, 0f, 0f, 0);
-            k3.SetEmgRules(new List<EmgRule>()); // 只走旧表：模拟撤旧之前
-            k3.ApplyStatus(v, Bit("Shock"), 3f, 0f, 0f, 0f, 0, 10f);
-            int oldCount = k3.ReactionCountOf(0);
-            CombatSite.ApplyRules(k3);
-            int emg0 = k3.EmgRuleCountOfKey(key);
-            k3.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
-            Expect(oldCount == 1 && k3.EmgRuleCountOfKey(key) == emg0 + 1,
-                $"旧表里短路计数 {oldCount} → 换成撤旧后的表：按稳定键并进涌现可靠计数（{emg0} → {k3.EmgRuleCountOfKey(key)}），内核规则下标不进存档");
+            var oldTable = new[] { new CombatReactionRule { Pair = Bit("Wet") | Bit("Shock"), Consume = Bit("Wet"), DamageMult = 1.3f, Key = key } };
+            k3.SetReactionRules(oldTable);
+            byte[] oldSnap = k3.Serialize();
+            int oldBody = oldSnap.Length - 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(1), 0, oldSnap, oldBody - CombatConst.MaxReactions * CombatKernel.ReactionCounterEntryBytes + 4, 4);
+            uint fnv = 2166136261u;
+            for (int i = 0; i < oldBody; i++)
+            {
+                fnv = (fnv ^ oldSnap[i]) * 16777619u;
+            }
+            Buffer.BlockCopy(BitConverter.GetBytes(fnv), 0, oldSnap, oldBody, 4);
+            using CombatKernel k4 = NewKernel();
+            CombatLoadResult lr4 = k4.Load(oldSnap); // 正式路径：表已撤空的地点读旧档
+            k4.SetReactionRules(NamedReactionCatalog.BuildKernelRules()); // 再次登记不重复并入
+            Expect(lr4 == CombatLoadResult.Ok && k4.EmgRuleCountOfKey(key) == 1,
+                $"旧档里旧标签表的短路计数 1 → 读档（{lr4}）并换成撤空后的表：按稳定键并进涌现可靠计数（{k4.EmgRuleCountOfKey(key)}），内核规则下标不进存档");
         }
 
         // ── J 暂停与倍速 ─────────────────────────────────────────────────────

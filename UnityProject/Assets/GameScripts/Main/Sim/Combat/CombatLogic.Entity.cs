@@ -187,7 +187,14 @@ namespace BinGames.Sim.Combat
             d.EmgUnit[t] = u;
             if (d.Has(t, CombatUnitFlags.ExternalHealth))
             {
-                return DamageUnit(ref d, t, math.max(d.Hp[t], 0.001f), attacker);
+                // 致死请求不是这发弹体的又一次命中：摘掉宿主程序，否则 EmgOnDamage → EmgHitInject → 处决写端又回到这里（镜像血量没变，无限递归）
+                EmgCtx saved = d.EmgCtx;
+                EmgCtx side0 = saved;
+                side0.Prog = -1;
+                d.EmgCtx = side0;
+                bool sent = DamageUnit(ref d, t, math.max(d.Hp[t], 0.001f), attacker);
+                d.EmgCtx = saved;
+                return sent;
             }
             Kill(ref d, t, attacker >= 0 && attacker < d.Count ? d.Id[attacker] : 0);
             return true;
@@ -338,6 +345,16 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static void EmgWreckStruck(ref CombatData d, int w, float kinetic, float2 dir, int ownerId, CombatFaction faction, byte depth, int chain)
         {
+            // EMG2-REACT-02（W02 第二条件）：在污泥里 ≥ 1 秒的残骸锈透了，单次动能 ≥ c2（15）就崩塌（锈蚀破片 6 × 2.5 = 15 正好够，连锁只靠这条；链深截止在 EmgWreckCollapse）。
+            if (w >= 0 && w < d.Wrecks.Length && d.Wrecks[w].DwellMatter == EmgMatterConst.Sludge && d.Wrecks[w].Hp > 0f && d.Scalars[0].Time - d.Wrecks[w].DwellSince >= 1.0 - 1e-6)
+            {
+                int rs = EmgEntityRule(ref d, EmgMatterConst.Sludge);
+                if (rs >= 0 && kinetic + 1e-3f >= d.EmgRules[rs].C2)
+                {
+                    EmgWreckCollapse(ref d, w, d.EmgRules[rs], ownerId, faction, depth, chain);
+                    return;
+                }
+            }
             EmgEntityParams ep = d.EmgEntParams[0];
             if (ep.FragCount <= 0 || !(kinetic >= ep.FragThreshold) || w < 0 || w >= d.Wrecks.Length)
             {
@@ -708,6 +725,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            PhaseKinetic(ref d, u, kinetic, pusher); // EMG2-REACT-02（DEBT-EMG2PHS01-01）：撞击动能也能碎冻结目标（先判，碎了就解冻，后面的伤害不再按出手者武器重判）
             DamageFrom(ref d, u, kinetic, pusher, EmgCode.SrcImpact);
         }
 
@@ -744,6 +762,30 @@ namespace BinGames.Sim.Combat
                 }
             }
             double now = d.Scalars[0].Time;
+            // EMG2-REACT-02（W01 / W02）：残骸在酸 / 污泥里驻留。没有斑块时不查（≤ 256 残骸 × 本格登记数）。
+            if (d.Wrecks.Length > 0 && d.EmgS[0].PatchLive > 0 && EmgRulesOn(ref d))
+            {
+                EmgHashEnsure(ref d);
+                int acidRule = EmgEntityRule(ref d, EmgMatterConst.Acid), sludgeRule = EmgEntityRule(ref d, EmgMatterConst.Sludge);
+                for (int i = 0; i < d.Wrecks.Length; i++)
+                {
+                    StepWreckDwell(ref d, i, dt, now, acidRule, sludgeRule);
+                }
+            }
+            else
+            {
+                // 场上最后一块斑块没了：驻留也作废，否则残骸还会按“锈透”被 15 动能崩塌（FG19B W02“污泥外同样破片不崩”）
+                for (int i = 0; i < d.Wrecks.Length; i++)
+                {
+                    EmgWreck k = d.Wrecks[i];
+                    if (k.DwellMatter != 0)
+                    {
+                        k.DwellMatter = 0;
+                        k.DwellSince = now;
+                        d.Wrecks[i] = k;
+                    }
+                }
+            }
             EmgScalars es = d.EmgS[0];
             int write = 0;
             for (int i = 0; i < d.Wrecks.Length; i++)

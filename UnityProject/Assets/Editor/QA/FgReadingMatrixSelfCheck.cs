@@ -1428,7 +1428,7 @@ namespace GameLogic.EditorTools
             o.MaxDrones = a.MaxDrones;
             o.MaxZonesAlive = a.MaxZones;
             sb.Append("S").Append(c.ShotsFired).Append("Z").Append(c.ZonesSpawned).Append("E").Append(c.EchoesQueued).Append("D").Append(c.DronesLaunched)
-              .Append("M").Append(a.MaxDrones);
+              .Append("M").Append(a.MaxDrones).Append("P").Append(a.K.PatchCount).Append("W").Append(a.K.WireCount);
             if (a.Trace)
             {
                 sb.Append("T").Append(a.TraceHash.ToString("X16"));

@@ -5272,8 +5272,9 @@ namespace GameLogic.EditorTools
             int icons = site?.Renderer?.LastIconInstances ?? -1;
             bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
             Write($"  - 状态标签：光标下单位 {unit}（{tagName}，敌人 {enemyType}），头顶图标实例 {icons}，悬停读数“{UiTooltip.Content?.Title}｜{UiTooltip.Content?.Body?.Replace('\n', '/')}”（图鉴 {UiTooltip.Content?.CodexEntryId}）");
-            Check(site != null && site.Kernel.ReactionRuleCount == Campaign.Content.NamedReactionCatalog.TagRules.Count && site.Kernel.ReactionRuleCount == 11,
-                $"破碎都市的地点内核登记了 {site?.Kernel.ReactionRuleCount} 条具名标签反应规则（fg.TbReaction kind = tag；五条定稿反应已端口化进通道规则表 {site?.Kernel.EmgRuleCount} 行，EMG2-REACT-01）");
+            int emgRuleRows = Campaign.Emergence.EmgRuleCatalog.Current.Rules.Count;
+            Check(site != null && site.Kernel.ReactionRuleCount == 0 && Campaign.Content.NamedReactionCatalog.TagRules.Count == 0 && emgRuleRows > 0 && site.Kernel.EmgRuleCount == emgRuleRows,
+                $"破碎都市的地点内核登记了通道规则表 {site?.Kernel.EmgRuleCount} 行（表 {emgRuleRows} 行）、旧具名标签反应规则 {site?.Kernel.ReactionRuleCount} 条（EMG2-REACT-02：16 条具名反应全部端口化）");
             Check(GameSettings.HasSeenGuidanceHook(GuidanceHooks.StatusTagFirstSeen), "第一次看到头顶状态标签时发出引导钩子（内容在 FG15-UX-04）");
             // FG2-FW-04：真实 Play 里读法生成区域时出声、镜头正看着的地点弹出读法弹字（承接 DEBT-FG2FW02-02）；远征的伤害归因场次在记敌方受到的伤害。
             CampaignState rs = CampaignSession.Current;
@@ -7534,7 +7535,8 @@ namespace GameLogic.EditorTools
 
         private static void StepVaultFocusCore(double inStep)
         {
-            if (inStep < 1.2)
+            // 0.5 秒的飞行按单帧步长 ≤ 0.05 秒走，帧率低于约 8（全量分片并行时）会超过 1.2 秒；过渡中冻结玩法输入，这时点击被丢，下一步的 Esc 又关掉建造模式，连锁 19 条假失败（2026-11-03）。
+            if (inStep < 1.2 || (WorldView.Director.InTransition && inStep < 30))
             {
                 return;
             }
@@ -7551,7 +7553,7 @@ namespace GameLogic.EditorTools
 
         private static void StepVaultBuildingPanel(double inStep)
         {
-            if (inStep < 0.8)
+            if (inStep < 0.8 || (!ProductionPanelUIToolkit.IsOpen && inStep < 8)) // 点击要走 3 帧，低帧率时 0.8 秒不够；不重点，一次点击必须打开
             {
                 return;
             }

@@ -876,9 +876,15 @@ namespace GameLogic.EditorTools
             int ri = RuleIndex("reaction_deflagrate");
             CombatSite site = CombatSites.Get(FracturedCityLayout.RegionId);
             int c0 = CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate");
+            // EMG2-REACT-02：爆燃带附带 8 + 明火接触，70 血的侦察机撑不到“部分线索”的 3 次；这里断言的是战斗次数 → 线索，目标血量不是被测对象
+            if (site != null && site.TryGetEnemyUnit(FracturedCityLayout.Scout2SpawnId, out int scoutUnit))
+            {
+                site.Kernel.SetHealth(scoutUnit, 3000f, 3000f, true);
+            }
             for (int i = 0; i < 90 && (CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate")) - c0 < FusionCatalog.ClueFullMin; i++)
             {
                 WorldSimulation.StepMany(GameClock.StepHz / 2);
+
             }
             int kernelCount = (CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate")) - c0;
             ReactionSessionRecord sess = ReactionAttribution.Current(s, FracturedCityLayout.RegionId, create: false);

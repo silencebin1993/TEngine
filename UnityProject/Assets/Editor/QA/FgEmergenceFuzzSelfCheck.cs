@@ -764,6 +764,7 @@ namespace GameLogic.EditorTools
         internal sealed class CaseResult
         {
             public FuzzCase Case;
+            public readonly Dictionary<int, int> RuleHits = new Dictionary<int, int>();
             public string Crash;
             public string Stall;
             public string Determinism;
@@ -927,6 +928,14 @@ namespace GameLogic.EditorTools
             bool interaction = st.SubSpawned > 0 || k.ZoneCount > 0 || st.WreckAbsorbs + st.WreckBounces + st.FragSpawned + st.Impacts + st.Pushes > 0
                                || r.Events.Where((v, e) => e != (int)EmgEventKind.Fire && e != (int)EmgEventKind.Hit && v > 0).Any() || cc.ZonesSpawned > 0;
             r.Plain = !interaction;
+            foreach (int key in EmgRuleCatalog.Current.Rules.Select(x => x.Key).Distinct())
+            {
+                int fired = a.K.EmgRuleCountOfKey(key); // EMG2-REACT-02：规则可达分布（FGR-EMG-015 规则四、FGR-EMG-221）
+                if (fired > 0)
+                {
+                    r.RuleHits[key] = fired;
+                }
+            }
         }
 
         /// <summary>每步扫描：NaN / 无穷（单位、弹体、无人机、区域）→ 崩溃；数值溢出（耐久越界、积热、单发伤害、同链子载荷数）→ 失败。</summary>
@@ -1365,7 +1374,14 @@ namespace GameLogic.EditorTools
             var capHits = results.Where(r => r.Capacity.Count > 0).ToList();
             Line($"    · 平庸（只报告）：{plain} 例除基础伤害外没有任何交互；容量（只报告）：{capHits.Count} 例命中上限或截断——" +
                  string.Join("；", capHits.Take(6).Select(r => $"#{r.Case.Index} {string.Join("、", r.Capacity)}")));
-            Line("    · 规则可达（规则四）：fg.TbChannelRule 在阶段 1 不存在（规则表随 EMG2-RULE-01 落地），本项 0 行；阶段 2 起固定集必须触发每一行（报告分布）");
+            // EMG2-REACT-02（FGT-EMG-070、FGR-EMG-015 规则四）：16 条具名反应在固定用例集里每条至少触发一次；随机例打不到的由定向场景补（配料要两侧凑齐，随机装配不保证）
+            var randomKeys = new HashSet<int>(results.SelectMany(x => x.RuleHits.Keys));
+            Dictionary<string, int> directed16 = FgEmgReact2SelfCheck.FireEachNamedOnce();
+            var missing16 = directed16.Where(kv => kv.Value < 1 && !randomKeys.Contains(NamedReactionCatalog.StableKey(kv.Key))).Select(kv => kv.Key).ToList();
+            int random16 = directed16.Keys.Count(id => randomKeys.Contains(NamedReactionCatalog.StableKey(id)));
+            Expect(directed16.Count == 16 && missing16.Count == 0,
+                $"规则可达（规则四）：16 条具名反应每条至少触发过一次（随机例打到 {random16} 条、定向场景补全；定向 {string.Join(" ", directed16.Select(kv => kv.Key.Replace("reaction_", string.Empty) + ":" + kv.Value))}）；" +
+                $"规则分布：随机例共触发 {randomKeys.Count} / {EmgRuleCatalog.Current.Rules.Select(x => x.Key).Distinct().Count()} 个稳定键{Detail(missing16)}");
             Line($"    · 本段 {results.Count} 例共 {results.Sum(r => r.Steps)} 步 × 3 遍（主跑 / 确定性 / 存读档）+ {variants} 例变体，墙钟 {sw.Elapsed.TotalSeconds:F1} 秒；子载荷生成 {results.Sum(r => r.SubSpawned)} 份，" +
                  $"链深截断 {results.Sum(r => r.DepthCut)} 次；单例内核步 p99 最大 {results.Max(r => r.P99Ms):F3} ms");
             string path = WriteReport("_emg-fuzz-fixed.md", $"固定集 seed={FixedSeed} count={FixedCount}", results);
@@ -2143,7 +2159,7 @@ namespace GameLogic.EditorTools
                     sb.AppendLine($"- {(EmgEventKind)e}：{sum}（{results.Count(r => r.Events[e] > 0)} 例）");
                 }
             }
-            sb.AppendLine("- 规则触发分布：阶段 1 没有 fg.TbChannelRule（EMG2-RULE-01 落地后按规则 StableKey 统计）");
+            sb.AppendLine("- 规则触发分布（稳定键:次数）：" + string.Join(" ", results.SelectMany(r => r.RuleHits).GroupBy(kv => kv.Key).OrderBy(g => g.Key).Select(g => $"{g.Key}:{g.Sum(kv => kv.Value)}")));
             string dir = EvidenceDir();
             if (dir == null)
             {

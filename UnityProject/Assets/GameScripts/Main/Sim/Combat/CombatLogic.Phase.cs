@@ -209,7 +209,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 float dist = (float)math.distance(d.Pos[u], d.Pos[v]);
-                if (dist > r.P2 || EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, v)).Conductive < EmgRuleConst.DefaultConductMinStrength)
+                if (dist > r.P2 || !EmgUnitConducts(ref d, v)) // EMG2-REACT-02：C07 泥浆单位不进传导图，放电也跳不到
                 {
                     continue;
                 }
@@ -246,9 +246,25 @@ namespace BinGames.Sim.Combat
         /// 挂标签 = 带寒 / 带酸 / 带火载荷（FG19B §3.1 / §3.3）：冻结位不再是持续标签（易伤 +25% 取消，FG19 第 14 节 #7），换成寒量 tagGain 并从这次的位里去掉
         /// （位 3 只作冻结相态的显示，头顶图标读相态块）；酸蚀位 → 腐蚀度 tagGain、燃烧位 → 着火度 tagGain（标签照常挂）。返回去掉冻结位后的掩码。
         /// </summary>
-        internal static uint PhaseTagGain(ref CombatData d, int k, uint mask, int source)
+        internal static uint PhaseTagGain(ref CombatData d, int k, uint mask, int source, out float elec)
         {
+            elec = 0f;
             int src = source >= 0 && source < d.Count ? d.Id[source] : 0;
+            // EMG2-REACT-02（FG19B §3.1 位 4，DEBT-EMG2PHS01-04）：电击不再是持续标签 = 一次 en.elec 注入（phase_charge.tagGain）；本位只留 0.5 秒“受过电”闪烁（不易伤、不叠层）。
+            if (d.ShockBit != 0u && (mask & d.ShockBit) != 0u)
+            {
+                mask &= ~d.ShockBit;
+                elec = d.EmgPhases[EmgPhaseConst.Charge].TagGain;
+                double flash = d.Scalars[0].Time + 0.5;
+                int idx = k * CombatConst.StatusBitStride + math.tzcnt(d.ShockBit);
+                d.Status[k] |= d.ShockBit;
+                d.StatusBitUntil[idx] = math.max(d.StatusBitUntil[idx], flash);
+                d.StatusUntil[k] = math.max(d.StatusUntil[k], flash);
+                if (!EmgElecShed(ref d, k, elec))
+                {
+                    EmgAddAcc(ref d, k, EmgPhaseConst.Charge, elec, src); // C04 成立时本单位不得电荷（沾染行把电跳走）
+                }
+            }
             if (d.FrozenBit != 0u && (mask & d.FrozenBit) != 0u)
             {
                 mask &= ~d.FrozenBit;
@@ -470,9 +486,55 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>磁化（弱磁源）：4 米内弹体不分阵营按 p2 度 / 秒 × 弹体磁性转向本单位（FG19B §2.9 topo.redirect）。只在本步有磁化单位时 O(磁化单位 × 弹体)。</summary>
+        /// <summary>
+        /// 磁化单位（弱磁源，FG19B §3.3）把 p1 米内非固态、磁性 ≥ 0.6 的斑块（金属碎屑）以 p3 米 / 秒 × 磁性拉向自己；贴到单位身边（0.5 米内）就停。
+        /// O(磁化单位 × 斑块)，没有磁化单位时一遍单位扫描就返回（Main/Sim）。
+        /// </summary>
+        private static void EmgMagnetizedDebris(ref CombatData d, in EmgPhaseRule r, float dt)
+        {
+            bool moved = false;
+            for (int u = 0; u < d.Count; u++)
+            {
+                if (!d.IsAlive(u) || (d.EmgUnit[u].PhaseMask & (1 << EmgPhaseConst.Magnetize)) == 0)
+                {
+                    continue;
+                }
+                for (int j = 0; j < d.Patches.Length; j++)
+                {
+                    CombatZone z = d.Patches[j];
+                    if (!PatchAlive(z) || PatchWorld(z))
+                    {
+                        continue;
+                    }
+                    EmgMatter m = MatterOf(ref d, z.Matter);
+                    if (m.Solid != 0 || m.Magnetic < 0.6f)
+                    {
+                        continue;
+                    }
+                    double2 to = d.Pos[u] - z.Pos;
+                    double dist = math.length(to);
+                    if (dist > r.P1 || dist < 0.5)
+                    {
+                        continue;
+                    }
+                    z.Pos += to / dist * math.min(dist - 0.5, r.P3 * m.Magnetic * dt);
+                    d.Patches[j] = z;
+                    moved = true;
+                }
+            }
+            if (moved)
+            {
+                MarkHashDirty(ref d);
+            }
+        }
+
         internal static void StepMagnetized(ref CombatData d, float dt)
         {
             EmgPhaseRule r = d.EmgPhases[EmgPhaseConst.Magnetize];
+            if (r.P1 > 0f && r.P3 > 0f && d.EmgS[0].PatchLive > 0)
+            {
+                EmgMagnetizedDebris(ref d, r, dt);
+            }
             if (!(r.P1 > 0f) || !(r.P2 > 0f) || d.Projectiles.Length == 0)
             {
                 return;
@@ -535,21 +597,22 @@ namespace BinGames.Sim.Combat
             ExitPhase(ref d, t, EmgPhaseConst.Chill, true);
             EmgEntityParams ep = d.EmgEntParams[0];
             int n = d.Radius[t] > 1.5f ? 8 : 6;
-            for (int j = 0; j < n; j++)
+            EmgRule fr = ri >= 0 ? d.EmgRules[ri] : default;
+            for (int j = 0; j < n && d.EmgCtx.Depth < EmgConst.MaxDepth; j++) // “一锤碎一片”由链深封顶（FG19B §2.9）
             {
                 float a = 2f * math.PI * j / n;
                 EmgSpawnFragment(ref d, d.Pos[t], new float2(math.cos(a), math.sin(a)), d.Id[t], CombatFaction.Neutral, (byte)(d.EmgCtx.Depth + 1), d.EmgCtx.Chain,
-                    ep.FragDamage, ep.FragSpeed, ep.FragRange);
+                    fr.P2 > 0f ? fr.P2 : ep.FragDamage, fr.P3 > 0f ? fr.P3 : ep.FragSpeed, fr.P4 > 0f ? fr.P4 : ep.FragRange); // FG19B §2.9 碎裂 P01：每片 10 / 18 米每秒 / 7 米
             }
             if (ri >= 0)
             {
                 EmgRuleSettle(ref d, d.EmgRules[ri], d.EmgCtx.Chain, d.EmgCtx.Depth, attackerId, d.Pos[t], 0);
             }
-            // 审查修复（第 1 轮 P2）：附带伤害 / 外部血量单位的致死请求要再走 DamageUnit，但不是这发弹体的又一次命中——临时摘掉宿主程序（Prog = −1），
-            // EmgOnDamage 不再重入命中注能（同一发不注两次）；普通单位的直接击毁走 Kill，不经 EmgOnDamage，击杀归属照旧。
+            // 审查修复（第 1 轮 P2）：附带伤害要再走 DamageUnit，但不是这发弹体的又一次命中——临时摘掉宿主程序（Prog = −1），
+            // EmgOnDamage 不再重入命中注能（同一发不注两次）；直接击毁的外部血量致死请求由 EmgDestroyDirect 同样摘掉，普通单位走 Kill，击杀归属照旧。
             bool kill = d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= 0.25f;
             EmgCtx saved = d.EmgCtx;
-            if (!kill || d.Has(t, CombatUnitFlags.ExternalHealth))
+            if (!kill)
             {
                 EmgCtx side0 = saved;
                 side0.Prog = -1;
@@ -587,11 +650,12 @@ namespace BinGames.Sim.Combat
         {
             ExitPhase(ref d, t, EmgPhaseConst.Chill, true);
             EmgEntityParams ep = d.EmgEntParams[0];
+            EmgRule fr = ri >= 0 ? d.EmgRules[ri] : default;
             for (int j = 0; j < 4; j++)
             {
                 float a = 2f * math.PI * j / 4f + 0.39f;
                 EmgSpawnFragment(ref d, d.Pos[t], new float2(math.cos(a), math.sin(a)), d.Id[t], CombatFaction.Neutral, (byte)(d.EmgCtx.Depth + 1), d.EmgCtx.Chain,
-                    ep.FragDamage, ep.FragSpeed, ep.FragRange);
+                    fr.P2 > 0f ? fr.P2 : ep.FragDamage, fr.P3 > 0f ? fr.P3 : ep.FragSpeed, fr.P4 > 0f ? fr.P4 : ep.FragRange); // FG19B §2.9 热震装甲破片：每片 6 / 14 米每秒 / 4 米
             }
             if (ri >= 0)
             {
@@ -613,6 +677,10 @@ namespace BinGames.Sim.Combat
             if (wp.Mode == CombatWeaponMode.Cannon)
             {
                 return ep.KineticHeavy;
+            }
+            if (wp.BeamHit != 0)
+            {
+                return ep.KineticBeam; // EMG2-REACT-02（DEBT-EMG2PHS01-01，FG19B §6.3）：光束动能系数 0，碎不了冻结目标
             }
             return wp.Reading.Carrier switch
             {

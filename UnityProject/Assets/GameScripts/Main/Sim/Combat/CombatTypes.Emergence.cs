@@ -79,6 +79,8 @@ namespace BinGames.Sim.Combat
         public const int SegProfileKeys = 19;
         /// <summary>EMG2-RECL-01（格式 17 内新增段，ADR ⑩“只追加”）：桥接导线（传导图的临时边）。</summary>
         public const int SegWires = 20;
+        /// <summary>EMG2-REACT-02：段 21 单位身上正在走的 C05 / C07 计时（同版本 17 追加，短档 / 旧档没有这段 = 空表）。</summary>
+        public const int SegCoatFx = 21;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
@@ -283,6 +285,9 @@ namespace BinGames.Sim.Combat
         public ushort HitCode;
         /// <summary>本次出手已命中几个单位（evt.hit 的 HitIdx 放在 Value2）。</summary>
         public ushort Hits;
+        /// <summary>EMG2-REACT-02：宿主是区域时，区域的落下时刻与节拍长度（布区“只在落点弹一次”）。</summary>
+        public double ZoneBorn;
+        public float ZoneTick;
         /// <summary>DamageUnit → Kill 的溢出伤害（evt.kill Value）。</summary>
         public float Overflow;
         /// <summary>本宿主每条事件读端已入队几次（2 比特一条，与弹体 TrigUsed 同口径；弹体宿主进出时与弹体互相拷贝）。</summary>

@@ -12,6 +12,7 @@ using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
@@ -59,7 +60,7 @@ namespace GameLogic.EditorTools
         {
             ["reaction_steam"] = "蒸汽", ["reaction_deflagrate"] = "爆燃", ["reaction_conduct"] = "短路", ["reaction_shatter"] = "碎裂",
             ["reaction_sticky"] = "固化", ["reaction_electrolysis"] = "电解", ["reaction_insulate"] = "绝缘", ["reaction_thermalshock"] = "热震",
-            ["reaction_causticburn"] = "腐蚀灼烧", ["reaction_hemolysis"] = "回路溶断", ["reaction_syrup"] = "胶结", ["reaction_dissolve"] = "溶蚀",
+            ["reaction_causticburn"] = "腐蚀灼烧", ["reaction_hemolysis"] = "回路溶断", ["reaction_syrup"] = "胶结", ["reaction_dissolve"] = "乳化",
             ["reaction_annihilate"] = "湮灭", ["reaction_vitrify"] = "玻化", ["reaction_mudify"] = "淤塞", ["reaction_sepsis"] = "连锁锈蚀",
             ["reaction_marktag"] = "标记跳转", ["reaction_meltoverload"] = "熔穿过载",
         };
@@ -174,7 +175,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckSource()
         {
-            Line("  · A. 源数据 fgdata_reaction.py 与运行时 fg.TbReaction 逐字段一致；11 条标签反应 + 7 条通道规则驱动（EMG2-REACT-01：五条定稿 + 两条装配端口化，装配类 0 条）");
+            Line("  · A. 源数据 fgdata_reaction.py 与运行时 fg.TbReaction 逐字段一致；标签反应 0 条 + 18 条通道规则驱动（EMG2-REACT-02：16 条具名 + 两条装配全部端口化）");
             (int code, string output) = RunPython(LocateRepo(), "tools/cell_tables/fgdata.py --dump");
             var rx = output.Replace("\r", string.Empty).Split('\n').Select(l => l.Split('\t')).Where(f => f[0] == "RX").ToList();
             var diffs = new List<string>();
@@ -191,7 +192,7 @@ namespace GameLogic.EditorTools
             int tags = NamedReactionCatalog.Rows.Count(r => r.Kind == NamedReactionCatalog.KindTag);
             int asm = NamedReactionCatalog.Rows.Count(r => r.Kind == NamedReactionCatalog.KindAssembly);
             int ruled = NamedReactionCatalog.Rows.Count(r => r.Kind == NamedReactionCatalog.KindRule);
-            Expect(code == 0 && rx.Count > 0 && rx.Count == NamedReactionCatalog.Rows.Count && diffs.Count == 0 && NamedReactionCatalog.LoadError == null && tags == 11 && ruled == 7 && asm == 0,
+            Expect(code == 0 && rx.Count > 0 && rx.Count == NamedReactionCatalog.Rows.Count && diffs.Count == 0 && NamedReactionCatalog.LoadError == null && tags == 0 && ruled == 18 && asm == 0,
                 $"fg.TbReaction {NamedReactionCatalog.Rows.Count} 行与源 {rx.Count} 行逐字段一致（标签反应 {tags}、通道规则驱动 {ruled}、装配反应 {asm}）{Detail(diffs)}");
             Expect(NamedReactionCatalog.TagRules.Select((r, i) => (r, i)).All(x => x.i == 0 || NamedReactionCatalog.TagRules[x.i - 1].Priority < x.r.Priority)
                    && NamedReactionCatalog.BuildKernelRules().Length == tags,
@@ -379,32 +380,28 @@ namespace GameLogic.EditorTools
                 }
             }
             uint physical = NamedReactionCatalog.BitOf("Physical");
-            Expect(bad.Count == 0 && unreachable.Count == 0 && ported.Count == 7 && physical != 0u && (reach & physical) == 0u,
-                $"44 条固件能挂上的状态位 {CountBits(reach)} 个；11 条标签反应全部可达；7 条通道规则驱动的按端口可达（碎裂不再靠没有固件会挂的“动能”标签）{Detail(bad)}");
+            Expect(bad.Count == 0 && unreachable.Count == 0 && ported.Count == 18 && physical != 0u && (reach & physical) == 0u,
+                $"44 条固件能挂上的状态位 {CountBits(reach)} 个；18 条通道规则驱动的按端口可达（碎裂不再靠没有固件会挂的“动能”标签）{Detail(bad)}");
         }
 
         // ── E. 正式版战斗内核：每条反应触发 / 不触发 ──────────────────────────────
 
         private static void CheckKernelProbes()
         {
-            Line("  · E. FGT-FW-003 正式版战斗内核：每条可达的标签反应用真实固件的武器（连射器 + 信号核接入口）实打：触发组（A 后 B、B 后 A、同一把武器装两条）与" +
+            Line("  · E. FGT-FW-003 正式版战斗内核：单位层沾染行（C01～C08）用真实固件的武器（连射器 + 信号核接入口）实打：触发组（A 后 B 或 B 后 A；电击不留标签，只有先沾染后通电才反应）与" +
                  "不触发组（只 A 打两次、只 B 打两次）；反应额外伤害 = 这一击 × (倍率 − 1)，掉血与“没登记反应规则”的同一套开火相比真的多 / 少；消耗、附加、残留真实发生");
             NewState(9302, unlockAll: true);
             var bad = new List<string>();
             var lines = new List<string>();
-            // EMG2-REACT-01：通道规则驱动的（单位层沾染行 C01～C03 / C06）同样用配料固件实打，只比触发 / 不触发（主结果不是倍率，FGR-EMG-085）；
-            // 碎裂的配料“动能”不是标签（冻结相态 × 单次动能），由 FgEmgReactSelfCheck 实打，这里跳过。
-            var rules = NamedReactionCatalog.Rows.Where(r => r.Kind != NamedReactionCatalog.KindAssembly && r.TagA != "none" && r.TagB != "none").OrderBy(r => r.Priority).ToList();
+            // EMG2-REACT-02：16 条都走通道规则。只有单位层沾染行（coat_matter）能用“两种配料的武器”实打，只比触发 / 不触发（主结果不是倍率，FGR-EMG-085）；
+            // 斑块 / 相态 / 场 / 残骸行由 FgEmgReactSelfCheck、FgEmgReact2SelfCheck 实打。
+            var coatKeys = new HashSet<int>(EmgRuleCatalog.Current.Rules.Where(r => r.Pair == EmgRuleConst.PairCoatMatter).Select(r => r.Key));
+            var rules = NamedReactionCatalog.Rows.Where(r => coatKeys.Contains(NamedReactionCatalog.StableKey(r.Id))).OrderBy(r => r.Priority).ToList();
             for (int ri = 0; ri < rules.Count; ri++)
             {
                 Reaction row = rules[ri];
-                bool ruled = row.Kind == NamedReactionCatalog.KindRule;
-                // 冻结配料已由 EMG2-PHS-01 改为寒量累积（冻结标签不留在身上），热震改由 P02（冻结相态 × 注热 ≥ 30）结算，FgEmgPhaseSelfCheck C 段实打；旧标签行由 EMG2-REACT-02 撤（DEBT-EMG2REACT01-09）
-                if (row.TagA == "Frozen" || row.TagB == "Frozen")
-                {
-                    continue;
-                }
-                if (row.Reach != NamedReactionCatalog.Reachable || (ruled && (row.TagA == "Physical" || row.TagB == "Physical")))
+                const bool ruled = true;
+                if (row.Reach != NamedReactionCatalog.Reachable)
                 {
                     continue;
                 }
@@ -430,10 +427,9 @@ namespace GameLogic.EditorTools
                 Hits(new[] { wa }, new[] { 0, 0 }, true, out int countAA, out _, out _);
                 Hits(new[] { wb }, new[] { 0, 0 }, true, out int countBB, out _, out _);
 
-                // 热震还在旧标签表，但 EMG2-PHS-01 的 P02（冻结 × 注热）先解冻结算、按同一稳定键计（REACT-02 撤旧行）：这类按端口结算的也只比触发 / 不触发。
-                ruled |= after.Emg != null && after.Emg.TryGetValue(row.Id, out int emgSettled) && emgSettled > 0;
+                // 电击标签 = 一次 en.elec 注入（不留在身上），所以两种顺序至少一种成立；同一把武器装两条按注入顺序，不断言
                 float expectBonus = baseB * (row.DamageMult - 1f);
-                bool triggers = countAB == 1 && countBA == 1 && countSame == 1;
+                bool triggers = countAB == 1 || countBA == 1;
                 bool quiet = countAA == 0 && countBB == 0;
                 bool bonusOk = Math.Abs(bonusAB - expectBonus) <= Math.Max(0.02f, Math.Abs(expectBonus) * 0.01f);
                 float diff = withRx - noRx;
@@ -446,14 +442,14 @@ namespace GameLogic.EditorTools
                 bool granted = (after.Mask & grant) == grant;
                 int residueZones = after.Zones - afterNo.Zones;
                 bool residue = row.Residue == "none" ? residueZones == 0 : residueZones == 1;
-                if (ruled ? !(triggers && quiet) : !(triggers && quiet && bonusOk && realized && consumed && granted && residue))
+                if (!(triggers && quiet))
                 {
                     bad.Add($"{row.LegacyName}（{fa}+{fb}）触发 {countAB}/{countBA}/{countSame} 不触发 {countAA}/{countBB} 额外伤害 {bonusAB:0.##}（应 {expectBonus:0.##}）" +
                             $" 掉血差 {diff:0.##} 消耗{(consumed ? "✓" : "✗")} 附加{(granted ? "✓" : "✗")} 残留{(residue ? "✓" : "✗")}");
                 }
                 lines.Add(ruled ? $"{row.LegacyName}:{fa}+{fb} 规则" : $"{row.LegacyName}:{fa}+{fb} Δ{diff:0.#}");
             }
-            Expect(bad.Count == 0 && lines.Count == 14, $"14 条可达反应（标签 10 + 通道规则 4；碎裂见 FgEmgReactSelfCheck、热震见 FgEmgPhaseSelfCheck P02；“规则”= 按端口结算只比触发 / 不触发）在正式内核里触发 / 不触发两组对照全部成立（{string.Join("；", lines)}）{Detail(bad)}");
+            Expect(bad.Count == 0 && lines.Count == 8, $"单位层沾染行 8 条在正式内核里触发 / 不触发两组对照全部成立（{string.Join("；", lines)}）{Detail(bad)}");
         }
 
         // ── F. 负向：两条同时满足、叠层上限 ───────────────────────────────────────
@@ -609,26 +605,18 @@ namespace GameLogic.EditorTools
         private static void CheckZeroHitAndFaction()
         {
             CombatWeapon wet = WeaponFor(ComponentCatalog.CompGunId, "fw_coolant");
-            // EMG2-REACT-01：短路已端口化（单位层沾染行 C03，主结果是电弧），“只靠倍率的反应”改用仍在标签表里、没有附加 / 残留的电解当例子
-            CombatWeapon acid = WeaponFor(ComponentCatalog.CompGunId, PickProducer("Acid", "Shock"));
-            CombatWeapon shock = WeaponFor(ComponentCatalog.CompGunId, PickProducer("Shock", "Acid"));
-            int elec = RuleIndex("reaction_electrolysis");
             const string defl = "reaction_deflagrate";
+            const string elecId = "reaction_electrolysis";
             using (var arena = new ProbeArena(true))
             {
-                int mA = arena.Machine(acid);
-                int mS = arena.Machine(shock);
-                int quiet = arena.Enemy(new double2(3.0, 40.0)); // 远离挨打的那个：电弧跳不过来
-                int shot = arena.Enemy(new double2(3.0, 4.0));
+                // EMG2-REACT-02 新口径：电解是沾染行 C08（析出碎屑），不靠倍率，挂状态（hit = 0）的电击 = 一次注电，同样结算。
+                int quiet = arena.Enemy(new double2(3.0, 40.0));
                 arena.K.ApplyStatus(quiet, NamedReactionCatalog.BitOf("Acid"), 3f, 0f, 0f, 0f, 0);
                 arena.K.ApplyStatus(quiet, NamedReactionCatalog.BitOf("Shock"), 3f, 0f, 0f, 0f, 0);
-                int zeroHit = arena.K.ReactionCountOf(elec);
-                bool bothKept = arena.HasTag(quiet, "Acid") && arena.HasTag(quiet, "Shock");
-                arena.Fire(mA, shot);
-                arena.Fire(mS, shot);
-                int realHit = arena.K.ReactionCountOf(elec) - zeroHit;
-                Expect(elec >= 0 && zeroHit == 0 && bothKept && realHit == 1,
-                    $"没有伤害的挂状态（腐蚀 + 电击，hit = 0）：只靠倍率的标签反应电解不结算、不消耗、不报名（{zeroHit} 次，两个标签都在 {bothKept}）；对照：真实命中打出电解 {realHit} 次");
+                int zeroHit = N(arena.K, elecId);
+                bool acidGone = !arena.HasTag(quiet, "Acid");
+                Expect(zeroHit == 1 && acidGone,
+                    $"没有伤害的挂状态（腐蚀 + 电击，hit = 0）：电解已不靠倍率，主结果是析出碎屑，照样结算（{zeroHit} 次，腐蚀被消耗 {acidGone}）");
             }
             using (var arena = new ProbeArena(true))
             {
@@ -662,10 +650,10 @@ namespace GameLogic.EditorTools
             }
         }
 
-        /// <summary>修复轮 P2：持续伤害叠层在挂状态与消耗后重算两处同一算法（逐位 该标签每秒伤害 × 该位层数，取大）。</summary>
+        /// <summary>修复轮 P2：持续伤害叠层在挂状态与消耗后重算两处同一算法（逐位 该标签每秒伤害 × 该位层数，取大）。EMG2-REACT-02：只登记状态位表，不走沾染行（燃烧 + 腐蚀现在会结算 C05）。</summary>
         private static void CheckDotStackingConsistency()
         {
-            using (var arena = new ProbeArena(true))
+            using (var arena = new ProbeArena(true, tagsOnly: true))
             {
                 // 找两个不互相反应、每秒伤害不同的持续伤害标签。
                 int hi = -1, lo = -1;
@@ -848,17 +836,17 @@ namespace GameLogic.EditorTools
                 "新战役：第一幕的短路 / 热震 / 标记跳转报名字，化工的爆燃不报；开放化工后爆燃报名字（重复开放 / 不存在的批次返回 false）；跨阵营开放后碎裂报名字（EMG2-REACT-01 改走冻结相态 × 动能后可达）");
 
             // 地点真的按开放状态报名字：同一个 CombatSite 事件流，未开放的反应照样触发、只是不报名字。
-            // EMG2-REACT-01：短路 / 爆燃已端口化（报名字走涌现计数 → ReactionFeedback，见 FgReactionFeedbackSelfCheck D2 / E1），标签事件流改用仍在标签表里的电解（超频）与腐蚀灼烧（化工）
+            // EMG2-REACT-02：16 条都走涌现计数（报名字经 ReactionFeedback，见 FgReactionFeedbackSelfCheck D2 / E1），这里断言同一地点按开放状态报 / 不报名字
             CampaignState fresh = NewState(9306, unlockAll: true);
             NamedReactionCatalog.OpenBatch(fresh, "overclock");
-            (string idC, bool namedC, int cuesC) = SiteCue(fresh, PickProducer("Acid", "Shock"), PickProducer("Shock", "Acid"));
-            (string idD, bool namedD, int cuesD) = SiteCue(fresh, PickProducer("Acid", "Fire"), PickProducer("Fire", "Acid"));
+            (int cuesC, bool namedC) = SiteCue(fresh, PickProducer("Acid", "Shock"), PickProducer("Shock", "Acid"), "reaction_electrolysis");
+            (int cuesD, bool namedD) = SiteCue(fresh, PickProducer("Acid", "Fire"), PickProducer("Fire", "Acid"), "reaction_causticburn");
             NamedReactionCatalog.OpenBatch(fresh, "clarity");
-            (string idD2, bool namedD2, _) = SiteCue(fresh, PickProducer("Acid", "Fire"), PickProducer("Fire", "Acid"));
-            Expect(idC == "reaction_electrolysis" && namedC && cuesC >= 1 && idD == "reaction_causticburn" && !namedD && cuesD >= 1 && idD2 == "reaction_causticburn" && namedD2
+            (int cuesD2, bool namedD2) = SiteCue(fresh, PickProducer("Acid", "Fire"), PickProducer("Fire", "Acid"), "reaction_causticburn");
+            Expect(namedC && cuesC >= 1 && !namedD && cuesD >= 1 && namedD2 && cuesD2 >= 1
                    && GuidanceHooks.Known.Contains(GuidanceHooks.ReactionFirstNamed) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.ReactionFirstNamed)
                    && GuidanceHooks.Known.Contains(GuidanceHooks.StatusTagFirstSeen),
-                $"地点事件流（CombatSite.ProcessEvents）：电解（超频已开放）触发并报名字（{idC}）；腐蚀灼烧（化工未开放）照样触发但不报名字（{idD}）；开放化工后同一反应报名字；" +
+                $"地点按开放状态报名字：电解（超频已开放）触发 {cuesC} 次并报名字；腐蚀灼烧（化工未开放）照样触发 {cuesD} 次但不报名字；开放化工后同一反应报名字；" +
                 "“首次打出具名反应”“首次看到状态标签”两个引导钩子已登记（内容在 FG15-UX-04）");
 
             // 题材审计：反应名 / 说明（中英）与旧引擎播报入口都没有生物词（FG-GAP-010）。
@@ -896,7 +884,7 @@ namespace GameLogic.EditorTools
                 $"反应名 / 说明（中英）零禁用词；旧引擎播报入口 ReactionFeedbackCatalog 改走机械名（导电 → 短路！，旧表的溶血 / 糖浆 / 泥泞 / 败血不再出现），查不到的显示“未知反应”不漏内部名；审计器对照能抓到旧名{Detail(hits)}");
         }
 
-        private static (string Id, bool Named, int Cues) SiteCue(CampaignState state, string fa, string fb)
+        private static (int Count, bool Named) SiteCue(CampaignState state, string fa, string fb, string reactionId)
         {
             CombatWeapon wa = WeaponFor(ComponentCatalog.CompGunId, fa);
             CombatWeapon wb = WeaponFor(ComponentCatalog.CompGunId, fb);
@@ -913,7 +901,8 @@ namespace GameLogic.EditorTools
                 site.ProcessEvents();
                 k.FireAt(mb, e, k.Time);
                 site.ProcessEvents();
-                return (site.LastTagReactionId, site.LastTagReactionNamed, site.TagReactionCuesHandled);
+                site.Step(1f / 60f, k.Time);
+                return (CombatSite.ReactionCountOf(k, reactionId), NamedReactionCatalog.IsNamed(state, reactionId));
             }
             finally
             {
@@ -961,7 +950,7 @@ namespace GameLogic.EditorTools
                 a.Fire(mW, e1);
                 a.Fire(mS, e1); // 短路（EMG2-REACT-01：单位层沾染行，涌现可靠计数按稳定键进快照）
                 a.Fire(mA, e3);
-                a.Fire(mS2, e3); // 电解（仍是标签反应，按表下标计数）
+                a.Fire(mS2, e3); // 电解（C08，涌现可靠计数）
                 a.Fire(mF, e2);
                 a.Fire(mF, e2);
                 a.Fire(mF, e2); // 燃烧 3 层
@@ -970,19 +959,18 @@ namespace GameLogic.EditorTools
                 byte[] snap = a.K.Serialize();
                 b.K.SetReactionRules(null);
                 CombatLoadResult r = b.K.Load(snap);
-                bool rulesKept = b.K.ReactionRuleCount == NamedReactionCatalog.TagRules.Count;
+
                 // 读档沿用内容：b 的规则被清空后读档，读档不会把规则带回来——正式流程里地点重建时由 CombatSite 登记；这里再登记一次与正式流程一致。
                 ProbeArena.Configure(b.K);
                 ulong ha = a.K.StateHash();
                 ulong hb = b.K.StateHash();
-                int conduct = RuleIndex("reaction_electrolysis"); // 下面“按稳定键 / 截断计数块”用标签反应电解（旧变量名沿用）
-                int snapConduct = a.K.ReactionCountOf(conduct);
-                bool countsKept = N(b.K, "reaction_conduct") == N(a.K, "reaction_conduct") && N(a.K, "reaction_conduct") >= 1 && snapConduct >= 1 && b.K.ReactionCountOf(conduct) == snapConduct
+                int snapElec = N(a.K, "reaction_electrolysis");
+                bool countsKept = N(b.K, "reaction_conduct") == N(a.K, "reaction_conduct") && N(a.K, "reaction_conduct") >= 1 && snapElec >= 1 && N(b.K, "reaction_electrolysis") == snapElec
                                   && b.K.Counters.ReactionsFired == a.K.Counters.ReactionsFired && b.K.StatusStacksOf(e2, Bit("Fire")) == a.K.StatusStacksOf(e2, Bit("Fire"));
                 a.Run(2f);
                 b.Run(2f);
-                Expect(r == CombatLoadResult.Ok && ha == hb && countsKept && a.K.StateHash() == b.K.StateHash() && !rulesKept,
-                    $"格式 {CombatConst.FormatVersion} 快照往返：哈希一致（{ha:X16}）、短路计数 {N(a.K, "reaction_conduct")}（涌现计数）/ 电解 {snapConduct}（标签反应）、燃烧 {a.K.StatusStacksOf(e2, Bit("Fire"))} 层都在，续跑 2 游戏秒仍一致；反应规则不在快照里（读档后由地点登记）");
+                Expect(r == CombatLoadResult.Ok && ha == hb && countsKept && a.K.StateHash() == b.K.StateHash(),
+                    $"格式 {CombatConst.FormatVersion} 快照往返：哈希一致（{ha:X16}）、短路计数 {N(a.K, "reaction_conduct")} / 电解 {snapElec}（都是涌现可靠计数）、燃烧 {a.K.StatusStacksOf(e2, Bit("Fire"))} 层都在，续跑 2 游戏秒仍一致");
 
                 byte[] v3 = a.K.SerializeFormatForTests(3);
                 using (var c = new ProbeArena(true))
@@ -991,36 +979,58 @@ namespace GameLogic.EditorTools
                     arenaCheck(c, r3, e2);
                 }
 
-                byte[] corrupt = CorruptFirstReactionCount(snap);
+                byte[] corrupt = WriteReactionCount(snap, 0, -1);
                 ulong before = b.K.StateHash();
                 CombatLoadResult rc = b.K.Load(corrupt);
                 Expect(rc == CombatLoadResult.InvalidValue && b.K.StateHash() == before, $"反应计数为负的快照被拒绝（{rc}），内核保持原样");
 
-                // 修复轮 P2：计数按反应的稳定键存，不按规则下标——表里 priority 顺序改了（这里整表倒过来登记）读档后、以及重新登记时，短路的次数仍记在短路上；
-                // 条数与当前 MaxReactions 不同的快照照样读（多出的丢弃，缺的为 0）。
-                CombatReactionRule[] reversed = NamedReactionCatalog.BuildKernelRules().Reverse().ToArray();
-                int revConduct = reversed.Length - 1 - conduct;
-                int keyedLoad, keyedReregister, shrunk;
-                CombatLoadResult rRev, rShrunk;
+                // 修复轮 P2：计数按反应的稳定键存，不按规则下标——倒序登记后读档、已读档的内核倒序重新登记，次数仍记在原反应上；条数少于 MaxReactions 的旧快照照样读。
+                // EMG2-REACT-02：旧结算路径已删，直接写快照的计数块造旧档；表已撤空的地点（正式路径）读同一份截断旧档时按键并进涌现计数（完整块见 FgEmgReactSelfCheck I 段）。
+                const int oldCount = 5;
+                string oldId = "reaction_electrolysis";
+                CombatReactionRule[] oldTable =
+                {
+                    new CombatReactionRule { Key = NamedReactionCatalog.StableKey("reaction_conduct") },
+                    new CombatReactionRule { Key = NamedReactionCatalog.StableKey(oldId) },
+                };
+                CombatReactionRule[] reversed = oldTable.Reverse().ToArray();
+                byte[] oldSnap;
+                using (var c1 = new ProbeArena(true))
+                {
+                    c1.K.SetReactionRules(oldTable);
+                    oldSnap = WriteReactionCount(c1.K.Serialize(), 1, oldCount);
+                }
+                int keyedLoad, keyedReregister, shrunk, merged;
+                CombatLoadResult rRev, rShrunk, rMerged;
                 using (var c2 = new ProbeArena(false))
                 {
                     c2.K.SetReactionRules(reversed);
-                    rRev = c2.K.Load(snap);
-                    keyedLoad = c2.K.ReactionCountOf(revConduct);
+                    rRev = c2.K.Load(oldSnap);
+                    keyedLoad = c2.K.ReactionCountOf(0);
                 }
-                ProbeArena.Configure(b.K);
-                b.K.Load(snap);
-                b.K.SetReactionRules(reversed);
-                keyedReregister = b.K.ReactionCountOf(revConduct);
-                using (var c3 = new ProbeArena(true))
+                using (var c3 = new ProbeArena(false))
                 {
-                    rShrunk = c3.K.Load(ShrinkReactionBlock(snap, conduct + 1));
-                    shrunk = c3.K.ReactionCountOf(conduct);
+                    c3.K.SetReactionRules(oldTable);
+                    c3.K.Load(oldSnap);
+                    c3.K.SetReactionRules(reversed);
+                    keyedReregister = c3.K.ReactionCountOf(0);
                 }
-                Expect(revConduct != conduct && rRev == CombatLoadResult.Ok && keyedLoad == snapConduct && keyedReregister == snapConduct
-                       && rShrunk == CombatLoadResult.Ok && shrunk == snapConduct,
-                    $"反应计数按稳定键：规则倒序登记后读档，电解 {keyedLoad} 次（快照里 {snapConduct}）；已读档的内核倒序重新登记，仍是 {keyedReregister} 次；" +
-                    $"只存 {conduct + 1} 条计数的快照照样读（{rShrunk}），电解 {shrunk} 次");
+                byte[] shortSnap = ShrinkReactionBlock(oldSnap, oldTable.Length);
+                using (var c4 = new ProbeArena(false))
+                {
+                    c4.K.SetReactionRules(oldTable);
+                    rShrunk = c4.K.Load(shortSnap);
+                    shrunk = c4.K.ReactionCountOf(1);
+                }
+                using (var c5 = new ProbeArena(true))
+                {
+                    rMerged = c5.K.Load(shortSnap);
+                    merged = N(c5.K, oldId);
+                }
+                Expect(rRev == CombatLoadResult.Ok && keyedLoad == oldCount && keyedReregister == oldCount && rShrunk == CombatLoadResult.Ok && shrunk == oldCount
+                       && rMerged == CombatLoadResult.Ok && merged == oldCount,
+                    $"旧档反应计数按稳定键：倒序登记后读档，电解 {keyedLoad} 次（快照里 {oldCount}）；已读档的内核倒序重新登记，仍是 {keyedReregister} 次；" +
+                    $"只存 {oldTable.Length} 条计数的快照照样读（{rShrunk}），电解 {shrunk} 次；表已撤空的地点读同一份（{rMerged}），并进涌现计数 {merged} 次（不重复并入）");
             }
 
             // 战役开放批次：真实存档文件往返；旧档（没有这个字段）只开放第一幕。
@@ -1085,14 +1095,13 @@ namespace GameLogic.EditorTools
             return data;
         }
 
-        private static byte[] CorruptFirstReactionCount(byte[] snap)
+        private static byte[] WriteReactionCount(byte[] snap, int index, int count)
         {
             var data = (byte[])snap.Clone();
             int body = data.Length - 4;
-            // 反应计数块：条数 + 每条（稳定键 int、次数 int、伤害 float），紧挨在校验和前；改坏第一条的次数。
+            // 反应计数块：条数 + 每条（稳定键 int、次数 int、伤害 float），紧挨在校验和前；改第 index 条的次数并重算校验和。
             int first = body - CombatConst.MaxReactions * CombatKernel.ReactionCounterEntryBytes;
-            byte[] neg = BitConverter.GetBytes(-1);
-            Buffer.BlockCopy(neg, 0, data, first + 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(count), 0, data, first + index * CombatKernel.ReactionCounterEntryBytes + 4, 4);
             uint h = 2166136261u;
             for (int i = 0; i < body; i++)
             {

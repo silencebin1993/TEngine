@@ -591,7 +591,7 @@ namespace GameLogic.EditorTools
             float b0 = View(site, buddy).Health;
             site.Kernel.ApplyStatus(burning, Bit("Fire"), 10f, 0f, 0f, 0f, shooter);
             site.Kernel.Damage(burning, 99999f, shooter);
-            RunFor(site, 0.1f);
+            RunFor(site, 1f); // EMG2-REACT-02（FG19B §12 #5）：原地排 15 份 300 度油，下一节拍 E01 整片爆燃（附带 8 + 明火接触），不再当场 ×1.5
             float hit = b0 - View(site, buddy).Health;
             long deflag = site.Kernel.Counters.Deflagrations;
             MechEnemy row = Row("enemy_oil_crawler");
@@ -599,8 +599,8 @@ namespace GameLogic.EditorTools
             site.Kernel.Damage(cold, 99999f, shooter);
             RunFor(site, 0.1f);
             int slicks1 = site.CountZonesOfKind(CombatConst.ZoneKindSlick);
-            Expect(deflag == 1 && hit >= row.WeaponDamage * row.DeflagMult - 0.5f && site.Kernel.Counters.Deflagrations == 1 && slicks1 > slicks0 && ClarityCombatFeedback.DeflagrateCues > 0,
-                $"B4 反过来利用：着火的油污爬行者被击毁 → 爆燃（{deflag} 次），身旁的喷洒车挨 {hit:0.#}（≥ 表 {row.WeaponDamage} × {row.DeflagMult}）；没着火的被击毁不爆燃、只留一摊油迹（{slicks0} → {slicks1}）");
+            Expect(deflag == 1 && hit >= 8f - 0.5f && hit < row.WeaponDamage * row.DeflagMult && site.Kernel.Counters.Deflagrations == 1 && slicks1 > slicks0 && ClarityCombatFeedback.DeflagrateCues > 0,
+                $"B4 反过来利用：着火的油污爬行者被击毁 → 爆燃（{deflag} 次），身旁的喷洒车挨 {hit:0.#}（附带 8 + 明火接触，不再是表 {row.WeaponDamage} × {row.DeflagMult}）；没着火的被击毁不爆燃、只留一摊油迹（{slicks0} → {slicks1}）");
 
             // 油迹遇到燃烧整片爆燃（与管线液洼同一套反应），可以用燃迹提前点掉。
             long ig0 = site.Kernel.Counters.SlicksIgnited;
@@ -1372,10 +1372,10 @@ namespace GameLogic.EditorTools
                 burnedBeforeDeath |= HasStatus(site, crawler, Bit("Fire"));
                 RunFor(site, 0.1f);
             }
-            RunFor(site, 0.1f);
+            RunFor(site, 1f); // EMG2-REACT-02：爆燃在下一节拍结算
             float hit = b0 - View(site, buddy).Health;
-            Expect(burnedBeforeDeath && site.Kernel.Counters.Deflagrations == d0 + 1 && hit >= row.WeaponDamage * row.DeflagMult - 0.5f,
-                $"G1 燃迹组合走真实固件读法：燃迹命中给爬行者挂火（{burnedBeforeDeath}）→ 被击毁时爆燃 {site.Kernel.Counters.Deflagrations - d0} 次，身旁喷洒车挨 {hit:0.#}（≥ {row.WeaponDamage} × {row.DeflagMult}）");
+            Expect(burnedBeforeDeath && site.Kernel.Counters.Deflagrations == d0 + 1 && hit >= 8f - 0.5f,
+                $"G1 燃迹组合走真实固件读法：燃迹命中给爬行者挂火（{burnedBeforeDeath}）→ 被击毁时爆燃 {site.Kernel.Counters.Deflagrations - d0} 次，身旁喷洒车挨 {hit:0.#}（≥ 附带 8）");
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 

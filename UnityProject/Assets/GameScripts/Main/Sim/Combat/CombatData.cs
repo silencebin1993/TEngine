@@ -72,6 +72,8 @@ namespace BinGames.Sim.Combat
         /// 否则 = 寻的剩余可修正角 × 100（度）。绕行时不转向，绕完圈数后由内核改写为寻的额度，两者不同时使用。用 <see cref="ModT"/> / <see cref="SteerLeft"/> 读写。
         /// </summary>
         public ushort ModQ;
+        /// <summary>EMG2-REACT-02（fieldrule_polymer_payload）：穿过聚合胶减速剩余毫秒；归零时速度恢复。放在 ModQ 后的对齐空位，不增大弹体记录（ADR ⑬ 上限 120 字节）。</summary>
+        public ushort SlowQ;
         /// <summary>EMG1-TRIG-01：子弹药不打的单位 Id（命中触发放出的子弹药指向“其他”单位，不再打母载荷刚命中的那个；0 = 没有）。Emg 弹体段第 16 个字段。</summary>
         public int IgnoreUnit;
 
@@ -266,6 +268,8 @@ namespace BinGames.Sim.Combat
 
         /// <summary>FG2-FW-03：具名标签反应规则（热更层按 fg.TbReaction 在建地点时写入，按 priority 排好序；不进存档——规则是内容，不是状态）。</summary>
         public NativeList<CombatReactionRule> Reactions;
+        /// <summary>EMG2-REACT-02：当前这次 DamageUnit 来自破片（瞬时量，不进快照）。</summary>
+        public byte EmgFragmentHit;
         /// <summary>FG2-FW-03：每个状态位的效果（反应附加 / 残留区域挂标签时用；按 fg.TbStatusTag 的 effect / amount 写入，32 格）。</summary>
         public NativeArray<CombatStatusFx> StatusFx;
         /// <summary>FG2-FW-03：每条反应（规则下标）累计触发次数与反应额外伤害（随快照进存档；伤害归因与统计面板由 FG2-FW-04 读）。</summary>

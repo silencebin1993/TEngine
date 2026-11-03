@@ -726,32 +726,21 @@ namespace GameLogic.EditorTools
             CampaignState s = RaidScenario(8115, true, 1.5f);
             RaidResultRecord r = RaidResultService.All(s).FirstOrDefault(x => x.EndTick < 0);
             CombatKernel k = Site.Kernel;
-            int ri = -1;
-            for (int i = 0; i < k.ReactionRuleCount; i++)
-            {
-                CombatReactionRule rule = k.ReactionRule(i);
-                if (rule.Pair != 0u && (rule.Grant != 0u || rule.ResidueBit != 0u) && NamedReactionCatalog.IdOfRule(i) != null)
-                {
-                    ri = i;
-                    break;
-                }
-            }
-            string rid = ri >= 0 ? NamedReactionCatalog.IdOfRule(ri) : null;
+            // EMG2-REACT-02：旧标签反应表已撤空，固定用沾染行 C08（沾腐蚀 + 电击 = 电解），按稳定键读次数
+            const string rid = "reaction_electrolysis";
             var ids = new List<int>();
             Site.SiegeRaiderIds(0, ids);
             TurretRecord tr = TurretService.All(s).FirstOrDefault();
             BuildingRecord tb = tr != null ? HomeGridService.FindBuilding(s, tr.BuildingId) : null;
             int tUnit = TurretUnit(s, tb);
-            int fired0 = ri >= 0 ? k.ReactionCountOf(ri) : 0;
-            if (ri >= 0 && ids.Count > 0)
+            int fired0 = CombatSite.ReactionCountOf(k, rid);
+            if (ids.Count > 0)
             {
-                uint pair = k.ReactionRule(ri).Pair;
-                uint a = pair & (~pair + 1u);
-                k.ApplyStatus(ids[0], a, 6f, 0f, 0f, 0f, tUnit);
-                k.ApplyStatus(ids[0], pair & ~a, 6f, 0f, 0f, 0f, tUnit);
+                k.ApplyStatus(ids[0], NamedReactionCatalog.BitOf("Acid"), 6f, 0f, 0f, 0f, tUnit);
+                k.ApplyStatus(ids[0], NamedReactionCatalog.BitOf("Shock"), 6f, 0f, 0f, 0f, tUnit);
             }
-            int fired = ri >= 0 ? k.ReactionCountOf(ri) - fired0 : 0;
-            WorldSimulation.StepMany(1); // 反馈进给：内核计数 → 反应归因（突袭场次）
+            WorldSimulation.StepMany(1); // 内核结算沾染行 + 反馈进给：内核计数 → 反应归因（突袭场次）
+            int fired = CombatSite.ReactionCountOf(k, rid) - fired0;
             ReactionSessionRecord live = ReactionAttribution.Sessions(s).LastOrDefault(x => x != null && x.Kind == ReactionAttribution.KindRaid && x.EndTick < 0);
             bool ended = r != null && StepUntil(() => r.EndTick >= 0, 300);
             CombatCounters c = Site.KernelCounters;
@@ -770,14 +759,14 @@ namespace GameLogic.EditorTools
                 RaidResultService.BuildDetail(s, new RaidHistoryEntry(r, null, r.UnfoldTick), lines);
             }
             List<AwayLine> rl = lines.Where(l => l.Section == "reaction").ToList();
-            string name = rid != null ? ReactionAttribution.DisplayName(s, rid) : "?";
+            string name = ReactionAttribution.DisplayName(s, rid);
             double rDamage = r?.Reactions?.Where(x => x != null && (x.Count > 0 || x.Damage > 0)).Sum(x => Math.Max(0, x.Damage)) ?? 0;
             double rTotal = r?.ReactionTotal ?? 0;
             int allPct = rTotal > 0 ? Mathf.RoundToInt((float)(100.0 * Math.Min(1.0, rDamage / rTotal))) : 0;
             bool row = rl.Count == 3 && rl[0].Text == GameText.Get("raid.result.sec.reaction") && rl[1].Text.Contains(name)
                        && rl[2].Text == GameText.Format("raid.result.reaction_total", allPct) && !GameText.ContainsMarker(string.Join("\n", rl.Select(l => l.Text)));
-            Expect(ri >= 0 && fired >= 1 && live != null && mine != null && mine.Count >= fired && sameAsSession && row,
-                $"B7 FGR-DEF-050 各反应的伤害贡献：攻城中凑齐“{name}”的两个配料（内核触发 {fired} 次，出手者炮塔单位 {tUnit}）→ 突袭场次记下；结束时结算复制这一场" +
+            Expect(fired >= 1 && live != null && mine != null && mine.Count >= fired && sameAsSession && row,
+                $"B7 FGR-DEF-050 各反应的伤害贡献：攻城中凑齐“{name}”的两个配料（内核触发 {fired} 次，出手者炮塔单位 {tUnit}）→ 突袭场次记下；结束时结算复制这一场（去倍率后只记次数，伤害占比 0% 见 DEBT-EMG2REACT01-08）" +
                 $"（{rid} ×{mine?.Count}、伤害 {mine?.Damage:0.0} / 敌方全部 {r?.ReactionTotal:0.0}，与场次逐项一致 {sameAsSession}）；详情“反应贡献”段 {rl.Count} 行（{string.Join(" / ", rl.Select(l => l.Text))}）");
         }
 

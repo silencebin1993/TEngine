@@ -1485,17 +1485,6 @@ namespace BinGames.Sim.Combat
             return cos < ar.y ? 1f + bonus : 1f;
         }
 
-        /// <summary>标记跳转（Demo ApplyMarkJump）：主目标附近已标记、视线可达的存活敌人，按距离升序至多跳 JumpMax 个，每跳伤害 × 衰减。</summary>
-        private static void MarkJump(ref CombatData d, int a, int primary, double2 primaryPos, float primaryDamage, in CombatWeapon wp)
-        {
-            int jumped = MarkJumpCore(ref d, a, primary, primaryPos, primaryDamage, wp.JumpRange, wp.JumpFalloff, wp.JumpMax);
-            if (jumped > 0)
-            {
-                Cue(ref d, CombatEventKind.MarkJump, a, d.Id[primary], jumped, primaryPos, 0);
-                ReactionFired(ref d, a, primary, CombatReaction.MarkJump);
-            }
-        }
-
         /// <summary>
         /// FG1-SIG-03（FGR-SIG-033）：具名反应真正发动了一次。发不丢的玩法事件（核心固件冷却、暴露按它结算，不受提示事件每步上限影响）；
         /// 这台单位的反应若来自信号带进来的核心固件（<see cref="CombatUnitFlags.ReactionGated"/>），当场压住（<see cref="CombatUnitFlags.ReactionSpent"/>），
@@ -1731,6 +1720,7 @@ namespace BinGames.Sim.Combat
             float bestPct = float.MaxValue;
             // 网格在步首按当时的位置建好；同一步里单位还会移动（每步至多零点几米），查询范围多放 GridSlack 米，结果仍按真实距离过滤。
             double reach = range + GridSlack;
+            bool obscureOn = d.EmgS.IsCreated && d.EmgS[0].PatchLive > 0; // EMG2-REACT-02（fieldrule_obscure_unit）：没有斑块时一条比较
             int cx0 = grid.CellOf(pos.x - reach);
             int cx1 = grid.CellOf(pos.x + reach);
             int cy0 = grid.CellOf(pos.y - reach);
@@ -1752,7 +1742,7 @@ namespace BinGames.Sim.Combat
                             continue;
                         }
                         double dist = math.distance(pos, d.Pos[k]);
-                        if (dist > range)
+                        if (dist > range || (obscureOn && EmgObscured(ref d, k, dist)))
                         {
                             continue;
                         }
@@ -1904,6 +1894,15 @@ namespace BinGames.Sim.Combat
                 {
                     EmgProjMatter(ref d, ref pr, next, airborne); // EMG2-MAT-01（FGR-EMG-083）：穿过斑块沾染、进 / 离发 evt.enter / evt.leave；地点没有斑块且弹体不在斑块里时不查（最后一块消失后补发 leave、清掩码）
                 }
+                if (pr.SlowQ > 0)
+                {
+                    pr.SlowQ = (ushort)math.max(0, pr.SlowQ - (int)math.round(dt * 1000f));
+                    if (pr.SlowQ == 0)
+                    {
+                        float keep = FieldRule(ref d, EmgFieldConst.PolymerPayload).Amount;
+                        pr.Vel /= keep > 0f && keep < 1f ? keep : 1f; // EMG2-REACT-02：聚合胶减速到时恢复
+                    }
+                }
                 if (pr.LockQ > 0)
                 {
                     pr.LockQ = (ushort)math.max(0, pr.LockQ - (int)math.round(dt * 1000f)); // EMG2-FLD-01：寻的失效倒计时（本步的转向已按失效前判过）
@@ -2048,7 +2047,18 @@ namespace BinGames.Sim.Combat
                             dmg *= (pr.Flags & EmgProjFlags.Sub) != 0 ? EmgSubArmorFactor(ref d, pr, hit) : math.max(0f, 1f - ArmorOf(ref d, hit));
                         }
                         dmg *= BackMultiplier(ref d, hit, fromSide);
+                        if ((pr.Flags & EmgProjFlags.Fragment) != 0 && IsFrozen(ref d, hit))
+                        {
+                            // EMG2-REACT-02（DEBT-EMG2PHS01-01，FG19B §2.9）：破片按自己的动能（每片伤害 × 2.5）判碎裂，链深 = 破片的链深；锈蚀破片 15 碎不动，碎裂破片 25 能接着碎
+                            EmgCtx saved0 = d.EmgCtx;
+                            d.EmgCtx.Chain = pr.Chain;
+                            d.EmgCtx.Depth = pr.Depth;
+                            PhaseKinetic(ref d, hit, dmg * EmgProjKinetic(ref d, pr), owner);
+                            d.EmgCtx = saved0;
+                        }
+                        d.EmgFragmentHit = (byte)((pr.Flags & EmgProjFlags.Fragment) != 0 ? 1 : 0); // 破片的“出手者”只是放出它的单位，不按那台单位的武器算动能（EmgOnDamage）
                         bool landed = DamageUnit(ref d, hit, dmg, owner);
+                        d.EmgFragmentHit = 0;
                         Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
                         if (landed && (pr.Flags & EmgProjFlags.Fragment) != 0)
                         {

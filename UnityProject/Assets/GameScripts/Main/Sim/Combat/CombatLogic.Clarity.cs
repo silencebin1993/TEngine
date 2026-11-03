@@ -229,7 +229,7 @@ namespace BinGames.Sim.Combat
                     StepCrawler(ref d, i, in p, dt, now);
                 }
             }
-            StepPoolWash(ref d, now);
+            StepCoatFx(ref d, dt); // EMG2-REACT-02（C05 / C07）：酸液滴火、泥浆计时
             StepAcidMarsh(ref d, dt, now);
             StepPuddleContact(ref d, dt, now);
         }
@@ -781,51 +781,9 @@ namespace BinGames.Sim.Combat
                 SpawnSlick(ref d, -1, e.Pos, math.max(0.5f, p.TrailRadius * 1.5f), p.TrailSeconds, p.TrailStatus, p.TrailStatusSeconds);
                 return;
             }
+            // EMG2-REACT-02（FG19B §7 #5 / §12 #5，按推荐默认执行（2026-10-30），待用户确认）：被火击毁不再 ×1.5 爆伤——原地排 15 份高温油，下一节拍由 E01 整片爆燃（附带 8 + 燃烧区）
             float radius = math.max(0.5f, p.BurstRadius * 1.2f);
-            float dmg = math.max(0f, p.BurstDamage) * e.Mult;
-            int src = d.SlotOf(e.Source);
-            FxOf(ref d, d.FireBit, out float fdps, out float fslow, out float fvuln);
-            int n = d.Count;
-            for (int k = 0; k < n; k++)
-            {
-                if (d.Faction[k] == (byte)CombatFaction.Neutral || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
-                {
-                    continue;
-                }
-                if (math.distance(d.Pos[k], e.Pos) > radius + d.Radius[k])
-                {
-                    continue;
-                }
-                // 伤害归属：打在敌方身上的记给引燃它的人（被玩家引燃时算玩家的击杀）；打在己方身上不归属任何单位。
-                int attacker = d.Faction[k] == (byte)CombatFaction.Hostile && src >= 0 && d.Faction[src] == (byte)CombatFaction.Player ? src : -1;
-                DamageFrom(ref d, k, dmg, attacker, EmgCode.SrcZone);
-                if (d.FireBit != 0u && d.IsAlive(k))
-                {
-                    ApplyStatus(ref d, k, d.FireBit, 3f, fdps, fslow, fvuln, attacker, dmg);
-                }
-            }
-            // 残留：按反应表里“油 + 燃烧、会留残留”的那条（爆燃）留一块中立残留区域；表里没有就不留（反应是数据，不写死）。
-            if (d.OilBit != 0u && d.FireBit != 0u)
-            {
-                uint pair = d.OilBit | d.FireBit;
-                for (int r = -1; r < d.Reactions.Length; r++)
-                {
-                    CombatReactionRule rule = r < 0 ? LegacyResidueRule(ref d) : d.Reactions[r]; // EMG2-REACT-01：爆燃撤出旧表后残留参数读“区域整片反应残留”
-                    if (rule.Pair != pair || rule.ResidueBit == 0u || rule.ResidueSeconds <= 0f || rule.ResidueRadius <= 0f)
-                    {
-                        continue;
-                    }
-                    FxOf(ref d, rule.ResidueBit, out float rd, out float rs, out float rv);
-                    if (SpawnZone(ref d, -1, CombatFaction.Neutral, e.Pos, math.max(rule.ResidueRadius, radius * 0.7f), rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv,
-                            CombatConst.ZoneKindSlick, migrate: true) && TryGetLastZone(ref d, out CombatZone z))
-                    {
-                        z.Phase = CombatConst.LeakPhaseReacted;
-                        z.Look = CombatZoneLook.Residue;
-                        SetLastZone(ref d, z);
-                    }
-                    break;
-                }
-            }
+            EmgRuleSpawn(ref d, EmgMatterConst.Oil, e.Pos, radius, 15f, 300f, 0f, e.Source, 0, 0);
             CombatCounters c = d.Counters[0];
             c.Deflagrations++;
             d.Counters[0] = c;
@@ -952,116 +910,6 @@ namespace BinGames.Sim.Combat
                     }
                 }
             }
-        }
-
-        // ─────────────────────────────── 喷淋池冲洗 ───────────────────────────────
-
-        /// <summary>
-        /// 喷淋池被冲洗：酸液池遇到带湿润标签的区域（冷却液 / 水：玩家的冷却液固件、冷却液陷阱、液洼）、液氮池遇到带燃烧标签的区域（燃迹、爆燃残留）→
-        /// 阶段记 1、半秒内消失、提示一次。O(喷淋池 × 区域)。
-        /// </summary>
-        private static void StepPoolWash(ref CombatData d, double now)
-        {
-            // EMG2-MAT-02：喷淋池可能在 Zones（斑块层没开 / 满了）或 Patches（迁入斑块）；冲洗者同样两边都算（物质斑块按沾染位：水 / 冷却液 = 湿润、明火 = 燃烧）。
-            // 收进 fg.TbChannelRule（M06 / M07 / M18）并删专属分支归 EMG2-RULE-01（DEBT-EMG2MAT02-01）。
-            for (int z = 0; z < d.Zones.Length; z++)
-            {
-                CombatZone pool = d.Zones[z];
-                if (PoolWashed(ref d, ref pool, z, -1, now))
-                {
-                    d.Zones[z] = pool;
-                }
-            }
-            // 只收还没被冲洗的迁入喷淋池，按斑块 Id 升序（与槽位布局无关，读档续跑一致）；没有就 O(斑块) 一遍、不分配
-            NativeList<long> order = default;
-            for (int i = 0; i < d.Patches.Length; i++)
-            {
-                CombatZone z = d.Patches[i];
-                if (IsLegacy(z) && z.Kind == CombatConst.ZoneKindPool && z.Phase == 0)
-                {
-                    if (!order.IsCreated)
-                    {
-                        order = new NativeList<long>(8, Allocator.Temp);
-                    }
-                    order.Add(((long)z.EmgId << 32) | (uint)i);
-                }
-            }
-            if (!order.IsCreated)
-            {
-                return;
-            }
-            order.Sort();
-            for (int o = 0; o < order.Length; o++)
-            {
-                int i = (int)(order[o] & 0xFFFFFFFFL);
-                CombatZone pool = d.Patches[i];
-                if (PoolWashed(ref d, ref pool, -1, i, now))
-                {
-                    d.Patches[i] = pool;
-                }
-            }
-            order.Dispose();
-        }
-
-        /// <summary>一块喷淋池此刻是否被冲洗（是 → 阶段记 1、半秒内消失、计数并提示一次）。O(区域 + 斑块)。</summary>
-        private static bool PoolWashed(ref CombatData d, ref CombatZone pool, int selfZone, int selfPatch, double now)
-        {
-            if (pool.Kind != CombatConst.ZoneKindPool || pool.Phase != 0 || pool.Until <= now)
-            {
-                return false;
-            }
-            uint washer = 0u;
-            if (d.AcidBit != 0u && (pool.StatusMask & d.AcidBit) != 0u)
-            {
-                washer |= d.WetBit;
-            }
-            if (pool.Chill > 0f)
-            {
-                washer |= d.FireBit;
-            }
-            if (washer == 0u)
-            {
-                return false;
-            }
-            bool washed = false;
-            for (int o = 0; o < d.Zones.Length && !washed; o++)
-            {
-                if (o == selfZone)
-                {
-                    continue;
-                }
-                CombatZone other = d.Zones[o];
-                if (other.Kind == CombatConst.ZoneKindPool || other.Until <= now || (other.StatusMask & washer) == 0u)
-                {
-                    continue;
-                }
-                washed = math.distance(other.Pos, pool.Pos) <= other.Radius + pool.Radius;
-            }
-            for (int o = 0; o < d.Patches.Length && !washed; o++)
-            {
-                if (o == selfPatch)
-                {
-                    continue;
-                }
-                CombatZone other = d.Patches[o];
-                if (other.Matter == 0 || other.Until <= now || ((other.PFlags & EmgMatterConst.FlagLegacy) != 0 && other.Kind == CombatConst.ZoneKindPool)
-                    || (PatchTagMask(ref d, other) & washer) == 0u)
-                {
-                    continue;
-                }
-                washed = math.distance(other.Pos, pool.Pos) <= other.Radius + pool.Radius;
-            }
-            if (!washed)
-            {
-                return false;
-            }
-            pool.Phase = 1;
-            pool.Until = math.min(pool.Until, now + 0.5);
-            CombatCounters c = d.Counters[0];
-            c.PoolsWashed++;
-            d.Counters[0] = c;
-            ClarityCue(ref d, -1, 0, pool.Radius, pool.Pos, 10, 0);
-            return true;
         }
 
         // ─────────────────────────────── 酸沼 ───────────────────────────────

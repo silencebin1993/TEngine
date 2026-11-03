@@ -418,6 +418,7 @@ namespace GameLogic.Campaign.Combat
             c.EmgHeatUnitScale = Mathf.Max(1f, Tuning("emg.heat.unit_overheat_scale", EmgRuleConst.DefaultUnitOverheatScale));
             c.EmgHeatUnitGain = Mathf.Max(0f, Tuning("emg.heat.unit_gain", EmgRuleConst.DefaultUnitGain));
             c.EmgAvoidMargin = Mathf.Max(0.1f, Tuning("emg.avoid.margin", EmgRuleConst.DefaultAvoidMargin));
+            c.EmgWallSlamSeek = Mathf.Max(0.1f, Tuning("emg.field.wallslam_seek", EmgRuleConst.DefaultWallSlamSeek)); // EMG2-REACT-02（DEBT-EMG2RULE01-10）
             c.EmgAvoidWeight = Mathf.Max(0f, Tuning("emg.avoid.weight", EmgRuleConst.DefaultAvoidWeight));
             c.EmgKnockSeconds = Mathf.Max(0.02f, Tuning("emg.push.knock_seconds", EmgConst.DefaultKnockSeconds));
             c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
@@ -1534,6 +1535,7 @@ namespace GameLogic.Campaign.Combat
                 w.PierceBonus = 0f;
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 // FG2-FW-02：重炮是射弹载体；伤害是固定值（不经电路编译），“伤害倍率”读法（电容蓄力）按表乘上。
+                w.BeamHit = (byte)(Emergence.EmgRuleCatalog.IsBeam(p.PrimaryId) ? 1 : 0);
                 w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
                 w.FuseTrace = FuseTraceOf(p);
                 return w;
@@ -1553,6 +1555,7 @@ namespace GameLogic.Campaign.Combat
             // DEBT-FG1SIG06-02：即时命中武器也按生效固件积热（与热量预算同一个数；裸跑 ×1.5），过热停火、降到恢复线以下再开火。
             float rawHeatI = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, p.FirmwareHeatPerShot) * rawHeatI;
+            w.BeamHit = (byte)(Emergence.EmgRuleCatalog.IsBeam(p.PrimaryId) ? 1 : 0);
             w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
             // EMG1-CHAIN-01（FGR-EMG-084 / 019 同一 owner 单轨）：触发这条装配反应的固件已走声明轨（它的 grm.mod.chain“只跳已标记”在程序里跳、在内核计数），
             // 旧装配反应对同一武器不再结算跳转与计数——同一次跳转不计两次。没走声明轨（emg.stage = 0 的正式流程）逐字同旧。
@@ -1596,7 +1599,7 @@ namespace GameLogic.Campaign.Combat
         /// （反应冷却中也不回退成普通读法，与“冷却中不发动”一致）。</summary>
         public static IReadOnlyList<string> ReadingFirmware(BlueprintCircuitPreview p)
         {
-            string trigger = MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId);
+            string trigger = MechanicalReactionCatalog.TriggerFirmwareOf(p.ReactionId, p.FirmwareIds);
             if (trigger == null || p.FirmwareIds == null)
             {
                 return p.FirmwareIds;

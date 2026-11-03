@@ -116,9 +116,15 @@ namespace BinGames.Sim.Combat
             for (int i = first; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if ((x.Verb != (byte)EmgVerb.Salvage && x.Verb != (byte)EmgVerb.Link && x.Verb != (byte)EmgVerb.Spread)
+                bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile; // EMG2-REACT-02（DEBT-EMG1FW01-03）：[子母弹, 追射] 子弹药命中后补射
+                if ((x.Verb != (byte)EmgVerb.Salvage && x.Verb != (byte)EmgVerb.Link && x.Verb != (byte)EmgVerb.Spread && !follow)
                     || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead || !EmgGatedBy(ref d, first, end, x.Ordinal, evPort))
                 {
+                    continue;
+                }
+                if (follow)
+                {
+                    EmgQueueFollow(ref d, e, host, x);
                     continue;
                 }
                 if (x.Verb == (byte)EmgVerb.Link)
@@ -290,7 +296,7 @@ namespace BinGames.Sim.Combat
                 for (int j = 0; j < d.Patches.Length; j++)
                 {
                     CombatZone z = d.Patches[j];
-                    if (PatchAlive(z) && !IsLegacy(z) && z.Layer == 0 && MatterOf(ref d, z.Matter).Conductive >= EmgRuleConst.DefaultConductMinStrength
+                    if (PatchAlive(z) && z.Layer == 0 && MatterOf(ref d, z.Matter).Conductive >= EmgRuleConst.DefaultConductMinStrength
                         && math.distance(z.Pos, pa) <= z.Radius && (kindA != EmgWireConst.EndPatch || z.EmgId < aid))
                     {
                         (kindA, aid, aidx, ca, ra) = (EmgWireConst.EndPatch, z.EmgId, j, z.Pos, z.Radius);
@@ -334,7 +340,7 @@ namespace BinGames.Sim.Combat
             for (int j = 0; j < d.Patches.Length; j++)
             {
                 CombatZone z = d.Patches[j];
-                if (!PatchAlive(z) || IsLegacy(z) || (kindA == EmgWireConst.EndPatch && j == aidx) || MatterOf(ref d, z.Matter).Conductive < EmgRuleConst.DefaultConductMinStrength)
+                if (!PatchAlive(z) || (kindA == EmgWireConst.EndPatch && j == aidx) || MatterOf(ref d, z.Matter).Conductive < EmgRuleConst.DefaultConductMinStrength)
                 {
                     continue;
                 }
@@ -532,7 +538,7 @@ namespace BinGames.Sim.Combat
                         qv.Add(recv);
                     }
                 }
-                else
+                else if (!EmgMudded(ref d, j)) // C07：泥浆附着不进传导图，导线也送不到它身上
                 {
                     EmgUnitState st = d.EmgUnit[j];
                     float recv = math.min(2f, q * share * (1f - EmgResist(ref d, j, 2)));
@@ -559,7 +565,7 @@ namespace BinGames.Sim.Combat
                         continue;
                     }
                     int u = WireEndIndex(ref d, kind, side == 0 ? w.A : w.B, -1);
-                    if (u < 0 || d.EmgUnit[u].AccA.z < qmin)
+                    if (u < 0 || d.EmgUnit[u].AccA.z < qmin || EmgMudded(ref d, u))
                     {
                         continue;
                     }

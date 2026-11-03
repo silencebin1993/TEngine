@@ -99,7 +99,7 @@ namespace BinGames.Sim.Combat
                     // 多块小落区沿出手方向的垂线摊开（间距 = 原半径 × 0.8），一份时就是原落点。
                     double2 zp = fieldPos + side * (r.Area * 0.8 * (q - (zones - 1) * 0.5));
                     if (SpawnZone(ref d, a, FactionOfSlot(ref d, a), zp, zr, r.FieldSeconds, zdps, r.ZoneGrowth, r.ZoneTickScale,
-                        r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
+                        r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln, migrate: wp.Program < 0)) // EMG2-REACT-02：无程序的布区落区进斑块；带程序的落区是语法宿主（EmgAdoptZone），物质由程序排放
                     {
                         SetLastZoneLook(ref d, atSelf ? CombatZoneLook.Pulse : CombatZoneLook.Pool);
                         NoteReading(ref d, CombatConst.ReadingFeedZone, zp, a);
@@ -112,10 +112,6 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[t] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[t], wp.MarkSeconds, 0f, 0, d.Pos[t]); // EMG1-BUS-01：evt.marked（宿主 = 打上标记的这次出手）
-            }
-            if (namedReactions && wp.Reaction == CombatReaction.MarkJump && wasMarked && !d.Has(a, CombatUnitFlags.ReactionSpent))
-            {
-                MarkJump(ref d, a, t, primaryPos, dealt, wp);
             }
             Anchored(ref d, a, t, primaryPos, dealt, baseDamage, wp, wasMarked, d.Pos[a], false);
             if (r.EscortDrones > 0)
@@ -540,8 +536,8 @@ namespace BinGames.Sim.Combat
                     QueueEcho(ref d, a, t, now + delay * (q + 1), dealt * r.EchoRatio, r);
                 }
             }
-            // 通用标记跳转（只在目标已被标记时跳；具名反应“标记跳转”另走 MarkJump）。
-            if (r.JumpMax > 0 && wasMarked && wp.Reaction != CombatReaction.MarkJump)
+            // 通用标记跳转（只在目标已被标记时跳；具名反应“标记跳转”由 fw_marktag 的只跳已标记连锁产生，EmgMarkJumpReact）。
+            if (r.JumpMax > 0 && wasMarked)
             {
                 int jumped = MarkJumpCore(ref d, a, t, hitPos, dealt, r.JumpRange, r.JumpFalloff, r.JumpMax);
                 if (jumped > 0)
@@ -741,10 +737,7 @@ namespace BinGames.Sim.Combat
             ApplyStatus(ref d, k, mask, seconds, dps, slow, vuln, source, 0f);
 
         /// <summary>挂状态：标签位并入、到期取晚、效果同类取大（已到期的整组先清空）。<paramref name="source"/> = 挂上它的单位槽位（持续伤害归属）。
-        /// FG2-FW-03：
-        /// - 反应读标签：单位身上已有的标签 ∪ 这一次的标签含某条具名反应的两个配料、且这一次至少带来其中一个时，按规则顺序只结算一条
-        ///   （这一击伤害 <paramref name="hit"/> × (倍率 − 1) 的额外伤害或克制返还、消耗配料、附加标签、残留区域），剩下的标签留给下一击；
-        ///   这一次没有伤害（<paramref name="hit"/> ≤ 0）时，只有带附加标签或残留区域的规则会结算；
+        /// FG2-FW-03 / EMG2-REACT-02：
         /// - 叠层：这一次带来的每个标签层数 +1（上限 <see cref="CombatConfig.StatusStackCap"/>）；持续伤害逐位按“该标签每秒伤害 × 该位层数”取大（与 <see cref="RecomputeStatusFx"/> 同一算法），减速 / 易伤不随层数增强。</summary>
         internal static void ApplyStatus(ref CombatData d, int k, uint mask, float seconds, float dps, float slow, float vuln, int source, float hit)
         {
@@ -758,8 +751,8 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            mask = PhaseTagGain(ref d, k, mask, source);
-            if (mask == 0u)
+            mask = PhaseTagGain(ref d, k, mask, source, out float tagElec);
+            if (mask == 0u && !(tagElec > 0f))
             {
                 return;
             }
@@ -770,39 +763,11 @@ namespace BinGames.Sim.Combat
             }
             // 区域减速位带来的减速值单独记（在反应附加标签把别的减速并进 slow 之前取）。
             float zoneSlowIn = (mask & CombatConst.StatusBitZoneSlow) != 0u ? math.saturate(slow) : 0f;
-            // EMG2-REACT-01（FG19B C01 / C02 / C03 / C06）：单位层沾染行先结算（这 5 条已从旧标签反应表撤下，同一 StableKey 不并存）；结算了一条就不再走旧表（同一宿主一次一条）。
-            int settled0 = d.EmgS.IsCreated ? d.EmgS[0].RulesSettled : 0;
-            mask = EmgCoatReact(ref d, k, mask, 0f, 0f, source);
-            bool coatFired = d.EmgS.IsCreated && d.EmgS[0].RulesSettled != settled0;
+            // EMG2-REACT-01 / 02（FGR-EMG-085 / 086）：16 条具名反应全部走通道规则表，单位层只有沾染行（C01～C08），旧标签反应路径已删。
+            mask = EmgCoatReact(ref d, k, mask, 0f, tagElec, source);
             if (mask == 0u || !d.IsAlive(k))
             {
                 return;
-            }
-            if (!coatFired && d.Reactions.Length > 0)
-            {
-                uint have = d.Status[k] & ~CombatConst.StatusBitZoneSlow;
-                uint incoming = mask & ~CombatConst.StatusBitZoneSlow;
-                uint combined = have | incoming;
-                for (int i = 0; i < d.Reactions.Length; i++)
-                {
-                    CombatReactionRule rule = d.Reactions[i];
-                    if (rule.Pair == 0u || (combined & rule.Pair) != rule.Pair || (incoming & rule.Pair) == 0u)
-                    {
-                        continue;
-                    }
-                    // 这一次没有伤害（纯状态区域的节拍、外部挂状态）时，只靠“这一击 × 倍率”起作用的反应什么也做不了：
-                    // 不结算、不消耗配料、不报名字，让给下一条有附加标签 / 残留区域的规则（都没有就原样挂上标签）。
-                    if (hit <= 0f && !HasNonDamageEffect(rule))
-                    {
-                        continue;
-                    }
-                    mask = FireReaction(ref d, k, i, rule, mask, hit, source, ref dps, ref slow, ref vuln);
-                    break;
-                }
-                if (mask == 0u || !d.IsAlive(k))
-                {
-                    return;
-                }
             }
             uint before = d.Status[k];
             d.Status[k] |= mask;
@@ -884,81 +849,6 @@ namespace BinGames.Sim.Combat
                 }
             }
             return m;
-        }
-
-        /// <summary>FG2-FW-03：结算一条具名标签反应（<see cref="ApplyStatus(ref CombatData,int,uint,float,float,float,float,int,float)"/> 内调用）。返回这一次还要挂上的标签位。</summary>
-        private static uint FireReaction(ref CombatData d, int k, int ri, in CombatReactionRule rule, uint mask, float hit, int source,
-            ref float dps, ref float slow, ref float vuln)
-        {
-            // 消耗：目标身上的与这一次带来的配料都去掉（含叠层）。
-            if (rule.Consume != 0u)
-            {
-                d.Status[k] &= ~rule.Consume;
-                ulong stacks = d.StatusStacks[k];
-                uint c = rule.Consume;
-                while (c != 0u)
-                {
-                    int b = math.tzcnt(c);
-                    c &= c - 1u;
-                    stacks &= ~(3UL << (b * 2));
-                }
-                d.StatusStacks[k] = stacks;
-                mask &= ~rule.Consume;
-                RecomputeStatusFx(ref d, k);
-                RecomputeStatusUntil(ref d, k);
-            }
-            float bonus = hit * (rule.DamageMult - 1f);
-            d.ReactionCount[ri] = d.ReactionCount[ri] + 1;
-            d.ReactionDamage[ri] = d.ReactionDamage[ri] + bonus;
-            // FG2-FW-04：反馈与伤害归因的进给（不进快照）：最后一次的位置 / 出手者 / 目标；打在敌对阵营身上的额外伤害（易伤照样乘，与实际掉血一致）。
-            d.ReactionLastPos[ri] = d.Pos[k];
-            d.ReactionLastSource[ri] = source >= 0 && source < d.Count ? d.Id[source] : 0;
-            d.ReactionLastTarget[ri] = d.Id[k];
-            if (bonus > 0f && d.Faction[k] != (byte)CombatFaction.Player && d.IsAlive(k) && !d.Has(k, CombatUnitFlags.Invulnerable))
-            {
-                d.ReactionHostileDamage[ri] = d.ReactionHostileDamage[ri] + bonus * VulnMultiplier(ref d, k);
-            }
-            CombatCounters counters = d.Counters[0];
-            counters.ReactionsFired++;
-            d.Counters[0] = counters;
-            Cue(ref d, CombatEventKind.TagReaction, source, d.Id[k], bonus, d.Pos[k], (byte)ri);
-            if (bonus > 0f)
-            {
-                DamageUnit(ref d, k, bonus, source);
-            }
-            else if (bonus < 0f)
-            {
-                Heal(ref d, k, -bonus, -1);
-            }
-            // 附加标签：效果按状态位表。
-            uint g = rule.Grant;
-            while (g != 0u)
-            {
-                int b = math.tzcnt(g);
-                g &= g - 1u;
-                mask |= 1u << b;
-                MergeFx(d.StatusFx[b], ref dps, ref slow, ref vuln);
-            }
-            // 残留区域：目标脚下一块挂残留标签的区域（与布区同一套区域结算，暂停不走、倍速按游戏时间、进存档）。
-            if (rule.ResidueBit != 0u && rule.ResidueSeconds > 0f && rule.ResidueRadius > 0f)
-            {
-                float rd = 0f, rs = 0f, rv = 0f;
-                uint rb = rule.ResidueBit;
-                while (rb != 0u)
-                {
-                    int b = math.tzcnt(rb);
-                    rb &= rb - 1u;
-                    MergeFx(d.StatusFx[b], ref rd, ref rs, ref rv);
-                }
-                // 阵营显式按目标定：残留区域打的是目标这一边（出手者已死、区域节拍里的槽位为 -1 时也不会落到己方头上）。
-                CombatFaction residueFaction = d.Faction[k] == (byte)CombatFaction.Player ? CombatFaction.Hostile : CombatFaction.Player;
-                if (SpawnZone(ref d, source, residueFaction, d.Pos[k], rule.ResidueRadius, rule.ResidueSeconds, 0f, 0f, 1f, rule.ResidueBit, 0f, rd, rs, rv,
-                        CombatConst.ZoneKindReading, migrate: true))
-                {
-                    SetLastZoneLook(ref d, CombatZoneLook.Residue);
-                }
-            }
-            return mask;
         }
 
         /// <summary>规则除了“这一击 × 倍率”以外还有没有别的效果（附加标签 / 残留区域）。</summary>
@@ -1225,7 +1115,8 @@ namespace BinGames.Sim.Combat
         internal static bool SpawnFieldZone(ref CombatData d, CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint mask, float statusSeconds,
             float statusDps, float slow, float vuln, CombatZoneLook look)
         {
-            if (!SpawnZone(ref d, -1, faction, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, statusDps, slow, vuln, CombatConst.ZoneKindField))
+            // EMG2-REACT-02（DEBT-EMG2MAT02-08）：陷阱场地进斑块；中立场地（洗礼塔灌注 / 引发）由 EMG2-BOSS-01 改成斑块 + 注能，这之前保持区域（否则塔被自己的整片连锁烧穿阶段）
+            if (!SpawnZone(ref d, -1, faction, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, statusDps, slow, vuln, CombatConst.ZoneKindField, migrate: faction != CombatFaction.Neutral))
             {
                 return false;
             }
@@ -1305,7 +1196,8 @@ namespace BinGames.Sim.Combat
                 }
                 // FG6-LOG-10：液洼先看自己有没有遇上能起反应的标签（整片反应成残留区域），再按节拍给站在里面的单位挂标签。
                 // FG10-FAC-01：油迹同一套（“可以用燃迹反过来利用”）。
-                if ((zone.Kind == CombatConst.ZoneKindLeak || zone.Kind == CombatConst.ZoneKindSlick) && zone.Phase == CombatConst.LeakPhasePuddle)
+                // EMG2-REACT-02：迁入油迹走 E01（规则引擎），这里只剩世界源液洼与斑块层满时落在 Zones 里的油迹
+                if ((zone.Kind == CombatConst.ZoneKindLeak || (zone.Kind == CombatConst.ZoneKindSlick && selfPatch < 0)) && zone.Phase == CombatConst.LeakPhasePuddle)
                 {
                     TryReactLeak(ref d, ref zone, selfZone, selfPatch, now);
                 }
@@ -1505,12 +1397,6 @@ namespace BinGames.Sim.Combat
             return removed;
         }
 
-        /// <summary>EMG2-REACT-01：热更层写入的“区域整片反应残留”（配对位 / 残留位 / 秒 / 半径；没写时 Pair = 0 = 不参与）。</summary>
-        internal static CombatReactionRule LegacyResidueRule(ref CombatData d) => new CombatReactionRule
-        {
-            Pair = d.ResidueKey != 0 ? d.ResiduePair : 0u, ResidueBit = d.ResidueBit, ResidueSeconds = d.ResidueSeconds, ResidueRadius = d.ResidueRadius, DamageMult = 1f,
-        };
-
         /// <summary>
         /// 液洼遇上反应（只在液洼的区域节拍上检查）：此刻和它重叠的其余区域（读法区域、陷阱场地、已反应的液洼；不含别的还没反应的液洼——两摊液体挨着不算）挂的标签，
         /// 加上站在它里面的单位身上正在生效的标签，合起来是“遇到的标签”。按反应登记顺序找第一条：配料一半在液洼上、另一半在遇到的标签里、且这条反应会留下残留区域——
@@ -1520,10 +1406,6 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static void TryReactLeak(ref CombatData d, ref CombatZone leak, int self, int selfPatch, double now)
         {
-            if (d.Reactions.Length == 0)
-            {
-                return;
-            }
             uint have = leak.StatusMask & ~CombatConst.StatusBitZoneSlow;
             uint met = MetFromPatches(ref d, leak, selfPatch, now); // EMG2-MAT-02：迁入斑块按区域载荷、物质斑块按沾染位算“遇到的标签”
             for (int z = 0; z < d.Zones.Length; z++)
@@ -1559,71 +1441,43 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            // EMG2-REACT-01：爆燃已从旧标签反应表撤下改走通道规则（E01 / C01）；液洼 / 油迹的“整片反应”仍是迁入区域的旧载荷（改写归 EMG2-REACT-02，DEBT-EMG2MAT02-03），
-            // 残留参数改读热更层写入的“区域整片反应残留”（i = −1，同一 fg.TbReaction 行），计数按稳定键记进涌现可靠计数，不再占旧表下标。
-            for (int i = -1; i < d.Reactions.Length; i++)
+            // EMG2-REACT-02：液洼是世界源（不被规则转化，FG19B §1.4 第 11 条），“已反应阶段 = E01 产物明火”（§1.5）由这里按热更层写入的残留参数转换，计数按 E01 同一稳定键。
+            uint pair = d.ResidueKey != 0 ? d.ResiduePair : 0u;
+            uint onPuddle = have & pair;
+            uint other = pair & ~onPuddle;
+            if (pair == 0u || d.ResidueBit == 0u || d.ResidueSeconds <= 0f || d.ResidueRadius <= 0f || onPuddle == 0u || other == 0u || (met & other) != other)
             {
-                CombatReactionRule rule = i < 0 ? LegacyResidueRule(ref d) : d.Reactions[i];
-                if (rule.Pair == 0u || rule.ResidueBit == 0u || rule.ResidueSeconds <= 0f || rule.ResidueRadius <= 0f)
-                {
-                    continue;
-                }
-                uint onPuddle = have & rule.Pair;
-                uint other = rule.Pair & ~onPuddle;
-                if (onPuddle == 0u || other == 0u || (met & other) != other)
-                {
-                    continue;
-                }
-                float rd = 0f, rs = 0f, rv = 0f;
-                uint rb = rule.ResidueBit;
-                while (rb != 0u)
-                {
-                    int b = math.tzcnt(rb);
-                    rb &= rb - 1u;
-                    MergeFx(d.StatusFx[b], ref rd, ref rs, ref rv);
-                }
-                bool slick = leak.Kind == CombatConst.ZoneKindSlick;
-                float seconds = slick ? rule.ResidueSeconds : math.max(rule.ResidueSeconds, math.max(0f, d.Config.LeakReactSeconds));
-                leak.Phase = CombatConst.LeakPhaseReacted;
-                leak.StatusMask = rule.ResidueBit;
-                leak.StatusDps = rd;
-                leak.StatusSlow = rs;
-                leak.StatusVuln = rv;
-                leak.Radius = math.max(leak.Radius, rule.ResidueRadius);
-                leak.Born = now;
-                leak.Until = now + seconds;
-                leak.Look = CombatZoneLook.Residue;
-                if ((leak.PFlags & EmgMatterConst.FlagLegacy) != 0)
-                {
-                    LegacyReacted(ref d, ref leak); // EMG2-MAT-02：迁入斑块整片反应后换成残留的物质（燃烧残留 = mat.fire，FG19B §1.5“已反应阶段 = E01 产物明火”）
-                }
-                if (i < 0)
-                {
-                    EmgRuleHit(ref d, d.ResidueKey, 0, 0, leak.Pos);
-                }
-                else
-                {
-                    d.ReactionCount[i] = d.ReactionCount[i] + 1;
-                    d.ReactionLastPos[i] = leak.Pos;
-                    d.ReactionLastSource[i] = 0;
-                    d.ReactionLastTarget[i] = 0;
-                    Cue(ref d, CombatEventKind.TagReaction, -1, 0, 0f, leak.Pos, (byte)i);
-                }
-                CombatCounters counters = d.Counters[0];
-                counters.ReactionsFired++;
-                d.Counters[0] = counters;
-                if (slick)
-                {
-                    // FG10-FAC-01：油迹不是管线液洼，不交给热更层的液洼对账（内核按时长自己消失）；只记计数与提示。
-                    counters = d.Counters[0];
-                    counters.SlicksIgnited++;
-                    d.Counters[0] = counters;
-                    ClarityCue(ref d, -1, 0, leak.Radius, leak.Pos, 6, 0);
-                    return;
-                }
-                d.LeakReactions.Add(new int2(-leak.Owner, i < 0 ? CombatConst.ResidueRuleIndex : i));
                 return;
             }
+            FxOf(ref d, d.ResidueBit, out float rd, out float rs, out float rv);
+            bool slick = leak.Kind == CombatConst.ZoneKindSlick;
+            float seconds = slick ? d.ResidueSeconds : math.max(d.ResidueSeconds, math.max(0f, d.Config.LeakReactSeconds));
+            leak.Phase = CombatConst.LeakPhaseReacted;
+            leak.StatusMask = d.ResidueBit;
+            leak.StatusDps = rd;
+            leak.StatusSlow = rs;
+            leak.StatusVuln = rv;
+            leak.Radius = math.max(leak.Radius, d.ResidueRadius);
+            leak.Born = now;
+            leak.Until = now + seconds;
+            leak.Look = CombatZoneLook.Residue;
+            if ((leak.PFlags & EmgMatterConst.FlagLegacy) != 0)
+            {
+                LegacyReacted(ref d, ref leak); // EMG2-MAT-02：迁入斑块整片反应后换成残留的物质（燃烧残留 = mat.fire，FG19B §1.5“已反应阶段 = E01 产物明火”）
+            }
+            EmgRuleHit(ref d, d.ResidueKey, 0, 0, leak.Pos);
+            CombatCounters counters = d.Counters[0];
+            counters.ReactionsFired++;
+            if (slick)
+            {
+                // FG10-FAC-01：油迹不是管线液洼，不交给热更层的液洼对账（内核按时长自己消失）；只记计数与提示。
+                counters.SlicksIgnited++;
+                d.Counters[0] = counters;
+                ClarityCue(ref d, -1, 0, leak.Radius, leak.Pos, 6, 0);
+                return;
+            }
+            d.Counters[0] = counters;
+            d.LeakReactions.Add(new int2(-leak.Owner, CombatConst.ResidueRuleIndex));
         }
 
         // ─────────────────────────────── 回波 ───────────────────────────────

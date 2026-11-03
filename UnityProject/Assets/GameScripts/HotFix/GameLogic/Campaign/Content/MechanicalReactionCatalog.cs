@@ -81,11 +81,29 @@ namespace GameLogic.Campaign.Content
 
         /// <summary>FG1-SIG-03（FGR-SIG-033）：这条反应由哪条固件“发动”——与上面两个判定函数同一份配方（熔穿过载 ← 过载，标记跳转 ← 标记跳转固件）。
         /// 核心固件的冷却按这条固件记在信号上；不是具名反应时返回 null。FG2-FW-03 反应全量命名时在这里接入新配方。</summary>
-        public static string TriggerFirmwareOf(string reactionId)
+        public static string TriggerFirmwareOf(string reactionId) => TriggerFirmwareOf(reactionId, null);
+
+        /// <summary>
+        /// EMG2-REACT-02（DEBT-EMG2REACT01-10）：这条反应的核心固件冷却记在哪条固件上——熔穿过载 = 这套装配里写 en.heat 注入的那条（按端口，不认 ID）；
+        /// 没给装配（<paramref name="assembly"/> = null，信号上行 / 靶场 / 图鉴）时记在过载上。
+        /// </summary>
+        public static string TriggerFirmwareOf(string reactionId, System.Collections.Generic.IEnumerable<string> assembly)
         {
             if (reactionId == ReactionMeltOverloadId)
             {
-                return FirmwareCatalog.FwOverloadId;
+                if (assembly != null)
+                {
+                    var one = new string[1];
+                    foreach (string id in assembly)
+                    {
+                        one[0] = id;
+                        if (!string.IsNullOrEmpty(id) && Emergence.EmgCatalog.PartWriteAmount("en.heat", Emergence.EmgRole.Inject, one) > 0f)
+                        {
+                            return id;
+                        }
+                    }
+                }
+                return FirmwareCatalog.FwOverloadId; // shortcut: 没给装配的调用方（信号上行 / 靶场 / 图鉴）仍算在过载上，别的写热固件的冷却归属见 DEBT-EMG2REACT02-01
             }
             if (reactionId == ReactionMarkJumpId)
             {

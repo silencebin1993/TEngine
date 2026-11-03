@@ -819,6 +819,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgPhaseSelfCheck", FgEmgPhaseSelfCheck.Run); // EMG2-PHS-01：相变累积量与单位相态（FGT-EMG-034 / 020 evt.phase）
             Seg("FgEmgFieldSelfCheck", FgEmgFieldSelfCheck.Run); // EMG2-FLD-01：场与载体互作（FGT-EMG-036 / 037 场推动 / 073 阶段 2）
             Seg("FgEmgReactSelfCheck", FgEmgReactSelfCheck.Run); // EMG2-REACT-01：五条定稿反应与装配反应端口化（FGT-EMG-030 / 032 / 004）
+            Seg("FgEmgReact2SelfCheck", FgEmgReact2SelfCheck.Run); // EMG2-REACT-02：其余 11 条具名反应（FGT-EMG-030 全量、FGT-EMG-032 扩到 11 条）
             Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02
             Seg("FgEmgReclaimSelfCheck", FgEmgReclaimSelfCheck.Run); // EMG2-RECL-01：回收修复拆残骸、桥接导线、蔓延真扩散（FGT-EMG-037 / 033 / 031 对应部分）
         }

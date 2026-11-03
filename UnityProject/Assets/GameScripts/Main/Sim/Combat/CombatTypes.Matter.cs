@@ -133,6 +133,22 @@ namespace BinGames.Sim.Combat
     }
 
     /// <summary>
+    /// EMG2-REACT-02（FG19B C05 / C07）：单位身上正在走的沾染行计时。放独立小表（ADR ⑬ 单位记录已到 108 字节上限），只有中招的单位才占一行，按 Unit（单位 Id）一人一行。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgCoatFx
+    {
+        public double2 TrailLast;
+        public int Unit;
+        public int Chain;
+        /// <summary>泥浆附着剩余秒（&gt; 0 = prop.conductive 视为 0，不进传导图，电弧跳不到）。</summary>
+        public float MudT;
+        /// <summary>燃烧的酸液滴落剩余秒、距上一块走过的米数、距上一块过去的秒数。</summary>
+        public float TrailT, TrailMoved, TrailIdle;
+    }
+
+    /// <summary>
     /// EMG2-RECL-01（FG19A 第 1.3 节第 36 行 fw_bridge；FG19 FGR-EMG-230 第 6 行）：桥接导线——结算点与 5 米内最近的另一个导体之间的临时传导边。
     /// 两端按稳定 ID 指向单位 / 残骸 / 斑块（<see cref="EmgWireConst"/>.End*）；电、热沿它传，同类液体沿它均分，兼作拦索（穿过的单位减速）。
     /// 任一端消失立即断开，到期移除（传导图恢复）。进快照段 20（格式 17 内追加）。
@@ -207,18 +223,20 @@ namespace BinGames.Sim.Combat
         /// <summary>结算方式：0 = 承接卡接上（本卡落表、占容量、不结算）。</summary>
         public const byte OpDeferred = 0, OpConvert = 1, OpMoveOver = 2, OpDilute = 3, OpDouse = 4, OpErode = 5, OpSplit = 6, OpSpawn = 7, OpBurst = 8, OpArc = 9, OpFragment = 10, OpVent = 11,
             // EMG2-REACT-01：单位层沾染行（C01 / C02 脚下生成、C03 电弧、C06 粘住）
-            OpCoatSpawn = 12, OpCoatArc = 13, OpStick = 14, OpLast = 14;
+            OpCoatSpawn = 12, OpCoatArc = 13, OpStick = 14, OpCoatFlash = 15, OpCoatTrail = 16, OpCoatSlow = 17, OpLast = 17;
         public const byte MainS = 1, MainT = 2, MainB = 3, MainP = 4;
         public const byte SideNone = 0, SideDamage = 1, SideMult = 2;
         /// <summary>“不改温度”的哨兵（表里写 −999）。</summary>
         public const float KeepTemp = -998f;
+        /// <summary>EMG2-REACT-02：子节点效果写端按端口码结算（fg.TbChannelPort，与 fgdata_emg 同值）。</summary>
+        public const ushort PortCorrode = 907, PortMarked = 316, PortIntegrity = 626, PortFragment = 606, PortDrone = 602;
         /// <summary>按物质码建的两张索引：[0, 18) = a 侧物质（matter_matter / matter_energy），[18, 36) = b 侧物质（event_matter）。</summary>
         public const int IndexSlots = (EmgMatterConst.Count + 1) * 2;
         // 传导 / 热（FG19B 第 1.4 节、第 10 节初值；运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）
         public const int DefaultMaxHops = 6, DefaultMaxVisits = 256;
         public const float DefaultFalloff = 0.7f, DefaultQMin = 0.05f, DefaultUnitShare = 0.6f, DefaultPatchDecay = 0.5f, DefaultBigRadius = 8f, DefaultConductMinStrength = 0.3f;
         public const float DefaultAmbient = 20f, DefaultExchange = 0.4f, DefaultPatchGain = 10f, DefaultCoolRate = 40f, DefaultUnitOverheatScale = 300f, DefaultUnitGain = 0.02f;
-        public const float DefaultAvoidMargin = 1f, DefaultAvoidWeight = 1.5f;
+        public const float DefaultAvoidMargin = 1f, DefaultAvoidWeight = 1.5f, DefaultWallSlamSeek = 8f;
     }
 
     /// <summary>一条编好的通道规则（fg.TbChannelRule 一行）。全部值类型，Burst 可读；表数据，不进快照（读档沿用当前表）。</summary>
@@ -259,9 +277,9 @@ namespace BinGames.Sim.Combat
         {
             Chill => new EmgPhaseRule { Enter = 1f, Decay = 0.25f, Cap = 1f, MinDwell = 2.5f, Guard = 1.5f, Resist = ResCold, ExitMode = ExitTimed, TagGain = 0.3f, ContactGain = 0.6f, P1 = 0.6f, P2 = 3f, P3 = 2f, P4 = 30f },
             Overheat => new EmgPhaseRule { Enter = 1f, Exit = 0.4f, Decay = 0.05f, Cap = 1.5f, MinDwell = 4f, Guard = 8f, Resist = ResHeat, ExitMode = ExitThreshold, P1 = 6f, P2 = 2f, P3 = 2f, P4 = 4f },
-            Charge => new EmgPhaseRule { Enter = 1f, Decay = 0.4f, Cap = 1.2f, MinDwell = 1f, Guard = 2f, Resist = ResElec, ExitMode = ExitTimed, P1 = 0.5f, P2 = 4f, P3 = 3f },
+            Charge => new EmgPhaseRule { Enter = 1f, Decay = 0.4f, Cap = 1.2f, MinDwell = 1f, Guard = 2f, Resist = ResElec, ExitMode = ExitTimed, TagGain = 0.5f, P1 = 0.5f, P2 = 4f, P3 = 3f },
             Corrode => new EmgPhaseRule { Enter = 1f, Exit = 0.3f, Decay = 0.08f, Cap = 1.5f, MinDwell = 4f, Guard = 3f, Resist = ResCorrode, ExitMode = ExitThreshold, TagGain = 0.15f, ContactGain = 0.25f, P1 = 2f, P2 = 0.6f, P3 = 0.5f, P4 = 0.05f },
-            Magnetize => new EmgPhaseRule { Enter = 1f, Exit = 0.4f, Decay = 0.15f, Cap = 1.5f, MinDwell = 3f, Guard = 2f, Resist = ResMag, ExitMode = ExitThreshold, P1 = 4f, P2 = 45f },
+            Magnetize => new EmgPhaseRule { Enter = 1f, Exit = 0.4f, Decay = 0.15f, Cap = 1.5f, MinDwell = 3f, Guard = 2f, Resist = ResMag, ExitMode = ExitThreshold, P1 = 4f, P2 = 45f, P3 = 1f },
             Ignite => new EmgPhaseRule { Enter = 1f, Exit = 0.2f, Decay = 0.3f, Cap = 1.5f, MinDwell = 2f, Guard = 1f, Resist = ResHeat, ExitMode = ExitThreshold, TagGain = 0.3f, ContactGain = 0.8f, P1 = 0.25f, P2 = 10f, P3 = 30f, P4 = 0.3f },
             _ => new EmgPhaseRule { Enter = 1f, Decay = 0.05f, Cap = 1f, Resist = ResHack, ExitMode = ExitDeath },
         };

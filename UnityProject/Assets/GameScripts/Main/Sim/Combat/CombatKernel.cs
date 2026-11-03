@@ -2134,6 +2134,10 @@ namespace BinGames.Sim.Combat
                     d.ReactionKey[j] = keys[j];
                     d.ReactionCount[j] = counts[j];
                     d.ReactionDamage[j] = dmgs[j];
+                    if (keys[j] != 0 && counts[j] > 0)
+                    {
+                        OrphanCounts.Add(new int2(keys[j], counts[j])); // EMG2-REACT-02：16 条撤完后表恒为空，旧档计数同样按键并进涌现计数（MergeOrphanCounts 并入后清槽）
+                    }
                 }
                 return;
             }
@@ -2194,6 +2198,15 @@ namespace BinGames.Sim.Combat
                 if (slot >= 0)
                 {
                     d.EmgRuleCount[slot] = d.EmgRuleCount[slot] + o.y;
+                    for (int i = 0; i < CombatConst.MaxReactions; i++)
+                    {
+                        if (d.ReactionKey[i] == o.x)
+                        {
+                            d.ReactionKey[i] = 0; // 空表时计数暂留在这一格：并入后清掉，再次换表不重复并入
+                            d.ReactionCount[i] = 0;
+                            d.ReactionDamage[i] = 0f;
+                        }
+                    }
                 }
             }
             OrphanCounts.Clear();
@@ -3918,7 +3931,7 @@ namespace BinGames.Sim.Combat
         private static void WriteWeapon(BinaryWriter w, in CombatWeapon x, int format = CombatConst.FormatVersion)
         {
             w.Write((byte)x.Mode);
-            w.Write((byte)x.Reaction);
+            w.Write((byte)((byte)x.Reaction | (x.BeamHit != 0 ? 0x80 : 0)));
             w.Write(x.HasOutput);
             w.Write((byte)x.TargetMode);
             w.Write(x.Range);
@@ -4146,6 +4159,8 @@ namespace BinGames.Sim.Combat
         private static CombatWeapon ReadWeapon(BinaryReader r, int format)
         {
             CombatWeapon w = ReadWeaponV1(r);
+            w.BeamHit = (byte)((byte)w.Reaction >> 7); // EMG2-REACT-02：光束标记放在 Reaction 字节最高位
+            w.Reaction = (CombatReaction)((byte)w.Reaction & 0x7F);
             if (format >= 3)
             {
                 w.Reading = ReadReading(r);

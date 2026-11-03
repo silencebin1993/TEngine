@@ -449,6 +449,42 @@ namespace GameLogic.EditorTools
                 $"导线 {on.wires} 条：两片水洼份量 {on.amtA:0.##} / {on.amtB:0.##}（均分，原 1 / 3）；对照没导线 {off.amtA:0.##} / {off.amtB:0.##}");
             Expect(on.chargeB > 0f && off.chargeB <= 0f && on.unitCharge > off.unitCharge + 0.3f, // 对照里单位那一点电荷来自目标进麻痹时的放电电弧（EMG2-PHS-01，与导线无关）
                 $"传电：第一片注电，第二片水洼电荷峰值 {on.chargeB:0.##}、站在里面的单位电荷峰值增量 {on.unitCharge:0.##}；对照没导线 {off.chargeB:0.##} / {off.unitCharge:0.##}（FGT-EMG-033 导线部分）");
+            // EMG2-REACT-02（DEBT-EMG2RECL01-03）：迁入斑块（冷却液液洼）也是导线端点，同类液体沿导线均分
+            (int wires, float amtA, float amtB, float chargeB) Legacy(bool bridge)
+            {
+                using CombatKernel k = NewKernel();
+                int pi = bridge ? Prog(k, "fw_bridge") : -1;
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(1f, pi)));
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 6));
+                k.SpawnReadingZoneForTests(CombatFaction.Player, new double2(0, 6), 1f, 60f, 0f, NamedReactionCatalog.BitOf("Wet")); // 迁入：冷却液，1 份
+                k.SpawnPatch(EmgMatterConst.Coolant, new double2(0, 9.6), 1.5f, 3f, 60f);
+                k.Step(Dt, k.Time + Dt);
+                k.FireAt(me, foe, k.Time);
+                StepN(k, 2);
+                int w = k.WireCount;
+                StepN(k, 16);
+                CombatZone a = default, b = PatchAt(k, new double2(0, 9.6));
+                for (int s = 0; s < k.PatchSlots; s++)
+                {
+                    if (k.TryGetPatch(s, out CombatZone z) && (z.PFlags & EmgMatterConst.FlagLegacy) != 0)
+                    {
+                        a = z; // PickPatch 只挑普通物质斑块（悬停读数），这里直接按迁入标记找
+                    }
+                }
+                k.InjectPatchEnergy(new double2(0, 6), 0.5f, EmgConst.PortElec, 4f, 1);
+                float cb = 0f;
+                for (int s = 0; s < 16; s++)
+                {
+                    StepN(k, 1);
+                    k.TryGetPatchEnergy(PatchAt(k, new double2(0, 9.6)).EmgId, out _, out float c, out _);
+                    cb = Mathf.Max(cb, c);
+                }
+                return (w, a.Amount, b.Amount, cb);
+            }
+            var lOn = Legacy(true);
+            var lOff = Legacy(false);
+            Expect(lOn.wires == 1 && Mathf.Abs(lOn.amtA - lOn.amtB) < 0.01f && lOn.chargeB > 0f && lOff.wires == 0 && Mathf.Abs(lOff.amtA - lOff.amtB) > 1f && lOff.chargeB <= 0f,
+                $"[冷却液, 桥接]：迁入的冷却液液洼当导线端点（导线 {lOn.wires} 条），同类液体均分 {lOn.amtA:0.##} / {lOn.amtB:0.##}，电沿导线传到另一片（{lOn.chargeB:0.##}）；对照没导线 {lOff.amtA:0.##} / {lOff.amtB:0.##}、电荷 {lOff.chargeB:0.##}");
             // 传热：目标不站在斑块里（A = 单位），B = 明火斑块 → 单位结构积热上升
             float Heat(bool bridge)
             {

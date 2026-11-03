@@ -604,7 +604,7 @@ namespace BinGames.Sim.Combat
                     EmgCoatReact(ref d, t, 0u, inj.x, inj.y, attacker); // EMG2-REACT-01（C01～C03）：沾油 / 浸湿的单位这一次命中受热 / 通电
                 }
             }
-            if (damage > 0f && attacker >= 0 && attacker < d.Count && c0.EntKind != EmgEntKind.Zone && c0.EntKind != EmgEntKind.Patch && IsFrozen(ref d, t))
+            if (damage > 0f && attacker >= 0 && attacker < d.Count && c0.EntKind != EmgEntKind.Zone && c0.EntKind != EmgEntKind.Patch && d.EmgFragmentHit == 0 && IsFrozen(ref d, t))
             {
                 PhaseKinetic(ref d, t, damage * HitKineticOf(ref d, attacker), attacker); // EMG2-PHS-01（P01）：冻结中受单次动能 → 碎裂（区域 / 斑块节拍不算一次冲击）
             }

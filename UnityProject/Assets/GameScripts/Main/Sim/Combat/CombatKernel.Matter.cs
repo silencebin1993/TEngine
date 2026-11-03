@@ -97,6 +97,13 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>自检：铺一块某阵营的读法驻留区（与正式读法同一条 SpawnZone 迁入路径；能映射物质时成迁入斑块，按区域载荷只伤对面阵营）。</summary>
+        /// <summary>自检：命中注能写 en.elec 时对酸沼的那一份（注入点在沼里才生效）。</summary>
+        public void InjectMarshElecForTests(double2 at, float amount)
+        {
+            CombatLogic.EmgMarshElec(ref _d, at, amount, 0, 0, 0);
+            Touch();
+        }
+
         public bool SpawnReadingZoneForTests(CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint statusMask)
         {
             bool ok = CombatLogic.SpawnReadingZoneForTests(ref _d, faction, pos, radius, seconds, dps, statusMask);
@@ -471,6 +478,22 @@ namespace BinGames.Sim.Combat
                 sw.EndRecord();
             }
             sw.End();
+            // EMG2-REACT-02：段 21 沾染行计时
+            sw.Begin(EmgConst.SegCoatFx, 8, _d.CoatFx.Length);
+            for (int i = 0; i < _d.CoatFx.Length; i++)
+            {
+                EmgCoatFx x = _d.CoatFx[i];
+                if (sw.F()) w.Write(x.TrailLast.x);
+                if (sw.F()) w.Write(x.TrailLast.y);
+                if (sw.F()) w.Write(x.Unit);
+                if (sw.F()) w.Write(x.Chain);
+                if (sw.F()) w.Write(x.MudT);
+                if (sw.F()) w.Write(x.TrailT);
+                if (sw.F()) w.Write(x.TrailMoved);
+                if (sw.F()) w.Write(x.TrailIdle);
+                sw.EndRecord();
+            }
+            sw.End();
         }
 
         private static CombatLoadResult ParseMatterSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
@@ -530,9 +553,9 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) z.StatusVuln = r.ReadSingle();
                         if (sr.F()) z.Chill = r.ReadSingle();
                         if (sr.F()) z.Growth = r.ReadSingle();
-                        // EMG2-MAT-02：迁入斑块的载荷校验（种类只能是读法 / 液洼 / 喷淋池 / 油迹；液洼的 Owner 必须是液洼号的相反数）；非迁入斑块恒为斑块种类、中立
+                        // EMG2-MAT-02：迁入斑块的载荷校验（种类只能是读法 / 陷阱场地 / 液洼 / 喷淋池 / 油迹；液洼的 Owner 必须是液洼号的相反数）；非迁入斑块恒为斑块种类、中立
                         bool legacy = (z.PFlags & EmgMatterConst.FlagLegacy) != 0;
-                        if (legacy ? z.Kind > CombatConst.ZoneKindSlick || z.Kind == CombatConst.ZoneKindField || (z.Kind == CombatConst.ZoneKindLeak && z.Owner >= 0)
+                        if (legacy ? z.Kind > CombatConst.ZoneKindSlick || (z.Kind == CombatConst.ZoneKindLeak && z.Owner >= 0)
                                      || (byte)z.Faction > (byte)CombatFaction.Neutral || (byte)z.Look > (byte)CombatZoneLook.Residue || z.Phase > CombatConst.LeakPhaseReacted
                                      || float.IsNaN(z.Dps) || float.IsNaN(z.StatusDps) || !(z.Chill >= 0f) || float.IsNaN(z.Growth)
                                    : z.Kind != EmgMatterConst.ZoneKindPatch || z.Faction != CombatFaction.Neutral)
@@ -611,6 +634,32 @@ namespace BinGames.Sim.Combat
                             return CombatLoadResult.InvalidValue;
                         }
                         staging.Wires.Add(x);
+                    }
+                    return CombatLoadResult.Ok;
+                }
+                case EmgConst.SegCoatFx:
+                {
+                    if (n > 4096)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var x = new EmgCoatFx();
+                        if (sr.F()) x.TrailLast.x = r.ReadDouble();
+                        if (sr.F()) x.TrailLast.y = r.ReadDouble();
+                        if (sr.F()) x.Unit = r.ReadInt32();
+                        if (sr.F()) x.Chain = r.ReadInt32();
+                        if (sr.F()) x.MudT = r.ReadSingle();
+                        if (sr.F()) x.TrailT = r.ReadSingle();
+                        if (sr.F()) x.TrailMoved = r.ReadSingle();
+                        if (sr.F()) x.TrailIdle = r.ReadSingle();
+                        if (!sr.RecordOk || !(x.MudT >= 0f) || !(x.TrailT >= 0f) || double.IsNaN(x.TrailLast.x) || double.IsNaN(x.TrailLast.y))
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.CoatFx.Add(x);
                     }
                     return CombatLoadResult.Ok;
                 }

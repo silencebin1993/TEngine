@@ -362,14 +362,14 @@ namespace GameLogic.EditorTools
                 CombatFireResult f1 = a.Fire(mw, e);
                 CombatFireResult f2 = a.Fire(ms, e);
                 a.K.TryGetUnit(e, out CombatUnitView v1);
-                int ci = RuleIndex("reaction_electrolysis");
-                double2 pos = a.K.ReactionLastPosOf(ci);
-                bool who = a.K.ReactionLastSourceOf(ci) == ms && a.K.ReactionLastTargetOf(ci) == e && math.distance(pos, new double2(3.0, 0.5)) < 1e-6;
-                // 敌方身上的反应伤害按实际落地算（易伤照样乘），所以 ≥ 反应的原始额外伤害。
-                double hostile = a.K.ReactionHostileDamageOf(ci);
-                float raw = a.K.ReactionDamageOf(ci);
+                // EMG2-REACT-02：电解是沾染行 C08（主结果析出碎屑），没有倍率，也不再有按表下标的进给；触发者 / 目标的归因走涌现计数与日志（D2 / E1）
+                bool who = false;
+                for (int pi = 0; pi < a.K.PatchSlots && !who; pi++)
+                {
+                    who = a.K.TryGetPatch(pi, out CombatZone debris) && debris.Matter == EmgMatterConst.Debris && math.distance(debris.Pos, new double2(3.0, 0.5)) < 1.5;
+                }
                 double dealt = a.K.DamageDealtToHostile;
-                bool dmg = a.K.ReactionCountOf(ci) == 1 && hostile > 0f && hostile >= raw - 1e-3f;
+                bool dmg = CombatSite.ReactionCountOf(a.K, "reaction_electrolysis") == 1;
                 bool total = Math.Abs(dealt - (v0.Health - v1.Health)) < 1e-2;
                 int epoch0 = a.K.FeedEpoch;
                 a.K.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
@@ -377,7 +377,7 @@ namespace GameLogic.EditorTools
                 a.K.Load(a.K.Serialize());
                 int epoch2 = a.K.FeedEpoch;
                 Expect(who && dmg && total && epoch1 == epoch0 + 1 && epoch2 == epoch1 + 1,
-                    $"电解：最后一次触发者 = 带电击的机器、目标 = 敌人、位置 = 敌人位置；敌方反应伤害 {hostile:0.00}（原始额外伤害 {raw:0.00}，易伤照乘）；敌方受到全部伤害 {dealt:0.00} = 实际掉血 {v0.Health - v1.Health:0.00}；纪元 {epoch0}→{epoch1}→{epoch2}（开火 {f1} / {f2}）");
+                    $"电解（C08）：计数 1（{dmg}），敌人脚下析出碎屑（{who}）；敌方受到全部伤害 {dealt:0.00} = 实际掉血 {v0.Health - v1.Health:0.00}；纪元 {epoch0}→{epoch1}→{epoch2}（开火 {f1} / {f2}）");
             }
         }
 
@@ -728,7 +728,7 @@ namespace GameLogic.EditorTools
                 $"敌方全部伤害本段增量与内核对账一致）；撤离报告：“{text}”");
 
             // 日志：触发者是真实机器（#编号）、参与的固件、目标是侦察机。
-            ReactionLogEntry entry = ReactionLog.Filtered(ReactionLogFilter.Expedition, s).FirstOrDefault(x => x.ReactionId == "reaction_conduct");
+            ReactionLogEntry entry = ReactionLog.Filtered(ReactionLogFilter.Expedition, s).FirstOrDefault(x => x.ReactionId == "reaction_conduct" && x.Target.Kind == CombatUnitKind.Enemy);
             string line = entry != null ? ReactionLog.Describe(s, entry) : string.Empty;
             string fwName = FirmwareKinds.TryGetRow("fw_arcchain", out GameConfig.fg.FirmwareKind fk) ? GameText.Get(fk.NameKey) : "?";
             string fwName2 = FirmwareKinds.TryGetRow("fw_coolant", out GameConfig.fg.FirmwareKind fk2) ? GameText.Get(fk2.NameKey) : "?";
@@ -810,17 +810,17 @@ namespace GameLogic.EditorTools
                 StepSite(home, 1);
                 home.Kernel.ApplyStatus(e3, NamedReactionCatalog.BitOf("Oil"), 5f, 0f, 0f, 0f, 0);
                 bool oilBefore = home.Kernel.TryGetStatus(e3, out uint m0, out _, out _, out _, out _) && (m0 & NamedReactionCatalog.BitOf("Oil")) != 0u;
-                int insK0 = home.Kernel.ReactionCountOf(RuleIndex("reaction_insulate"));
+                int insK0 = CombatSite.ReactionCountOf(home.Kernel, "reaction_insulate");
                 home.Kernel.TryGetUnit(e3, out CombatUnitView hp0);
                 CombatFireResult fr = home.Kernel.FireAt(ms3, e3, home.Kernel.Time);
                 home.Kernel.TryGetUnit(e3, out CombatUnitView hp1);
                 home.Kernel.TryGetStatus(e3, out uint m1, out _, out _, out _, out _);
-                int insK1 = home.Kernel.ReactionCountOf(RuleIndex("reaction_insulate"));
+                int insK1 = CombatSite.ReactionCountOf(home.Kernel, "reaction_insulate");
                 home.ProcessEvents();
                 StepSite(home, 1);
                 ReactionSessionRecord r2 = ReactionAttribution.Current(s, HomeValleyLayout.RegionId, create: false);
                 ReactionShareRecord ins = r2?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_insulate");
-                Expect(home.Kernel.ReactionCountOf(RuleIndex("reaction_insulate")) >= 1 && ins != null && ins.Count >= 1 && ins.Damage == 0,
+                Expect(CombatSite.ReactionCountOf(home.Kernel, "reaction_insulate") >= 1 && ins != null && ins.Count >= 1 && ins.Damage == 0,
                     $"克制类绝缘触发 {ins?.Count} 次（开火 {fr}，开火前有油污 {oilBefore}，掉血 {hp0.Health - hp1.Health:0.0}，标签 {m0:X}→{m1:X}，内核计数 {insK0}→{insK1}）：归因记次数、伤害 {ins?.Damage}（少掉的伤害不算反应伤害），占比 0");
             }
 
@@ -1347,7 +1347,7 @@ namespace GameLogic.EditorTools
             foreach (StatusTag row in StatusTagCatalog.Rows)
             {
                 // 不是持续伤害类（否则“燃烧到期后不再掉血”的断言会被它自己的持续伤害干扰）。
-                if (row == null || row.Kind != "status" || row.Bit < 0 || row.Bit > 30 || (row.AliasOf != null && row.AliasOf != "none") || row.Id == tag
+                if (row == null || row.Kind != "status" || row.Bit < 0 || row.Bit > 30 || (row.AliasOf != null && row.AliasOf != "none") || row.Id == tag || row.Id == "Shock" // EMG2-REACT-02：电击 = 一次注电，不留在身上
                     || NamedReactionCatalog.EffectCode(row.Effect) == CombatStatusFx.Dot)
                 {
                     continue;

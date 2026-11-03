@@ -12,6 +12,8 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgField> Fields;
         /// <summary>EMG2-RECL-01：桥接导线（传导图的临时边，≤ <see cref="EmgWireConst.Capacity"/>；进快照段 20）。</summary>
         public NativeList<EmgWire> Wires;
+        /// <summary>EMG2-REACT-02：单位身上正在走的 C05 / C07 计时（只有中招的单位才有一行）。</summary>
+        public NativeList<EmgCoatFx> CoatFx;
         /// <summary>EMG2-MAT-01：物质数值表（下标 = 物质码 1～17；热更层按 fg.TbMatter 写，是表数据，读档沿用当前的）。</summary>
         public NativeArray<EmgMatter> EmgMatters;
         /// <summary>EMG2-RULE-01：编好的通道规则（fg.TbChannelRule，≤ 256；表数据，读档沿用当前的）与按物质码的索引（int2 = EmgRuleOrder 里的起点、条数；按优先级升序）。</summary>
@@ -39,6 +41,7 @@ namespace BinGames.Sim.Combat
             Patches = new NativeList<CombatZone>(8, Allocator.Persistent);
             Fields = new NativeList<EmgField>(4, Allocator.Persistent);
             Wires = new NativeList<EmgWire>(4, Allocator.Persistent);
+            CoatFx = new NativeList<EmgCoatFx>(4, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
             EmgRules = new NativeList<EmgRule>(8, Allocator.Persistent);
             EmgRuleIdx = new NativeArray<Unity.Mathematics.int2>(EmgRuleConst.IndexSlots, Allocator.Persistent);
@@ -114,6 +117,7 @@ namespace BinGames.Sim.Combat
             Patches.Dispose();
             Fields.Dispose();
             Wires.Dispose();
+            CoatFx.Dispose();
             EmgMatters.Dispose();
             EmgRules.Dispose();
             EmgRuleIdx.Dispose();
@@ -181,6 +185,7 @@ namespace BinGames.Sim.Combat
             Patches.Clear();
             Fields.Clear();
             Wires.Clear();
+            CoatFx.Clear();
             EmgStructPending.Clear();
             EmgStructOut.Clear();
             EmgPending.Clear();

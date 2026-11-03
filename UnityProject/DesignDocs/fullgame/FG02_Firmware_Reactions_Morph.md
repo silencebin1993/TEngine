@@ -173,7 +173,7 @@
 | 燃烧 + 腐蚀 | CausticBurn | 腐蚀灼烧 | P `topo.trail`（明火拖尾） | C05 | 无 | FG-EMG 阶段 2 起生效 |
 | 回收 + 腐蚀 | Hemolysis | 回路溶断 | S `mat.debris`（残骸溶成碎屑） | W01 | 无 | FG-EMG 阶段 2 起生效 |
 | 浸湿 + 胶膜 | Syrup | 胶结 | S `mat.polymer`（胀大） | M08、M09 | 无 | FG-EMG 阶段 2 起生效 |
-| 腐蚀 + 油污 | Dissolve | 溶蚀 | S `mat.sludge` | M03 | 无 | FG-EMG 阶段 2 起生效 |
+| 腐蚀 + 油污 | Dissolve | 乳化（原“溶蚀”，EMG2-REACT-02 按推荐默认执行（2026-10-30），待用户确认） | S `mat.sludge` | M03 | 无 | FG-EMG 阶段 2 起生效 |
 | 偏折 + 处决 | Annihilate | 湮灭 | P `topo.burst` | F01 | `side.damage 40` | FG-EMG 阶段 2 起生效 |
 | 扬尘 + 燃烧 | Vitrify | 玻化 | S `mat.glass` | E04 | 无 | FG-EMG 阶段 2 起生效 |
 | 扬尘 + 浸湿 | Mudify | 淤塞 | S `mat.sludge`（断开导电），单位层是 B `bhv.slow` | M14、M15、C07 | 无 | FG-EMG 阶段 2 起生效 |
@@ -186,7 +186,7 @@
 | 蒸汽 Steam | 蒸汽 | 苛性灼烧 CausticBurn | 腐蚀灼烧 |
 | 爆燃 Deflagrate | 爆燃 | 溶血 Hemolysis | 回路溶断 |
 | 导电 Conduct | 短路 | 糖浆 Syrup | 胶结 |
-| 碎裂 Shatter | 碎裂 | 溶解 Dissolve | 溶蚀 |
+| 碎裂 Shatter | 碎裂 | 溶解 Dissolve | 乳化 |
 | 黏滞 Sticky | 固化 | 湮灭 Annihilate | 湮灭 |
 | 电解 Electrolysis | 电解 | 玻化 Vitrify | 玻化 |
 | 绝缘 Insulate | 绝缘 | 泥泞 Mudify | 淤塞 |
@@ -198,7 +198,7 @@
 **FGR-FW-042 按阵营开放（已由 FG19 取代）**
 - 已由 FG19 FGR-EMG-190（首次发现即开放）与 FGR-EMG-192（部件也是通道源）取代：任何具名交互第一次结算即报名字、进组合图鉴、播首次反馈；每个阵营带来新的端口源（新物质、新事件读法、新部件），不再按阵营批次开放命名，也不再要求“每个阵营至少 2 条新反应”。
 - 过渡：`NamedReactionCatalog.OpenBatch` 与云端 FG10-REACT-01 的 `ReactionBatchService` 在 FG-EMG 阶段 2 改为“首次发现记录”，通知 `reaction_batch` 改为“新发现”通知；跨阵营批次无承接（FG-GAP-054）随之关闭。M10 收尾仍按批次口径验证（回归基线）。
-- 历史说明（原暂定分配）：第一幕（静默、铸造）：标记跳转、熔穿过载、短路、热震；化工：爆燃、腐蚀灼烧、胶结、溶蚀；超频：电解、玻化、回路溶断、连锁锈蚀；其余：蒸汽、脆裂、粘滞、绝缘、湮灭、淤塞。
+- 历史说明（原暂定分配）：第一幕（静默、铸造）：标记跳转、熔穿过载、短路、热震；化工：爆燃、腐蚀灼烧、胶结、乳化；超频：电解、玻化、回路溶断、连锁锈蚀；其余：蒸汽、脆裂、粘滞、绝缘、湮灭、淤塞。
 
 **FGR-FW-043 反应反馈**
 - 触发时弹出反应名。

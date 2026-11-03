@@ -834,7 +834,7 @@ namespace BinGames.Sim.Combat
         {
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
-                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -864,7 +864,7 @@ namespace BinGames.Sim.Combat
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
             bool v17 = format >= 17;
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 4 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）
+            w.Write(16 + (v17 ? 5 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 23 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -959,7 +959,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegProjectiles, v17 ? 24 : 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
+            sw.Begin(EmgConst.SegProjectiles, v17 ? 25 : 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
             for (int i = 0; i < _d.Projectiles.Length; i++)
             {
                 CombatProjectile p = _d.Projectiles[i];
@@ -989,6 +989,7 @@ namespace BinGames.Sim.Combat
                     if (sw.F()) w.Write(p.LockQ); // EMG2-FLD-01：尾部追加 3 个（短段读到取 0 = 没有失锁 / 没有记过 / 不拖尾）
                     if (sw.F()) w.Write(p.FieldOnce);
                     if (sw.F()) w.Write(p.TrailLeft);
+                    if (sw.F()) w.Write(p.SlowQ); // EMG2-REACT-02：同版本 17 尾部追加（短段取 0）
                 }
                 sw.EndRecord();
             }
@@ -1462,6 +1463,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) p.LockQ = r.ReadUInt16(); // EMG2-FLD-01
                         if (sr.F()) p.FieldOnce = r.ReadByte();
                         if (sr.F()) p.TrailLeft = r.ReadByte();
+                        if (sr.F()) p.SlowQ = r.ReadUInt16();
                         if (!sr.RecordOk || p.IgnoreUnit < 0 || ((p.Mods & EmgProjMods.Orbit) == 0 && p.SteerLeft > 360f))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1639,6 +1641,7 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegFields:
                 case EmgConst.SegProfileKeys:
                 case EmgConst.SegWires:
+                case EmgConst.SegCoatFx:
                     return ParseMatterSegment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过

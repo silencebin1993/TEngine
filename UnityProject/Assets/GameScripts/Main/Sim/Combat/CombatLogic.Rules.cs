@@ -72,11 +72,34 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             CombatZone z = d.Patches[i];
-            if (!PatchAlive(z) || PatchWorld(z) || IsLegacy(z))
+            if (!PatchAlive(z) || PatchWorld(z))
             {
                 return false;
             }
             int2 ix = d.EmgRuleIdx[z.Matter];
+            if (z.Matter == EmgMatterConst.Water && d.AcidShapes.Length > 0 && InAcid(ref d, z.Pos))
+            {
+                // FG19B §7 #12：水不把整片沼泽冲淡，水斑块被沼泽吸收（速率沿用 M06 的稀释系数，每节拍按节拍长折算）
+                float rate = 0f;
+                int2 ax = d.EmgRuleIdx[EmgMatterConst.Acid];
+                for (int k = ax.x; k < ax.x + ax.y; k++)
+                {
+                    EmgRule ar = d.EmgRules[d.EmgRuleOrder[k]];
+                    if (ar.Op == EmgRuleConst.OpDilute && EmgMatterConst.MatterOfPort(ar.B) == EmgMatterConst.Water)
+                    {
+                        rate = ar.P1 * z.TickInterval;
+                    }
+                }
+                if (rate > 0f)
+                {
+                    EmgResizePatch(ref d, i, z.Amount * (1f - rate));
+                    if (!PatchAlive(d.Patches[i]))
+                    {
+                        return true;
+                    }
+                    z = d.Patches[i];
+                }
+            }
             int chosen = -1, partner = -1, satisfied = 0;
             bool condTimed = false;
             for (int k = ix.x; k < ix.x + ix.y; k++)
@@ -92,7 +115,8 @@ namespace BinGames.Sim.Combat
                 if (r.Pair == EmgRuleConst.PairMatterMatter)
                 {
                     other = EmgRulePartner(ref d, i, EmgMatterConst.MatterOfPort(r.B), r.C1, r.Cond == EmgRuleConst.CondOverlapDry, r.Op == EmgRuleConst.OpMoveOver);
-                    ok = other >= 0;
+                    // EMG2-REACT-02（DEBT-EMG2MAT02-05，FG19B §7 #12）：酸沼是不进哈希的虚拟世界源：斑块圆心在沼里算与酸重叠（“在沼泽里铺掩体”“能和油乳化”），另一方不被消耗（j = −1）
+                    ok = other >= 0 || (EmgMatterConst.MatterOfPort(r.B) == EmgMatterConst.Acid && d.AcidShapes.Length > 0 && InAcid(ref d, z.Pos));
                 }
                 else
                 {
@@ -200,7 +224,7 @@ namespace BinGames.Sim.Combat
                             continue;
                         }
                         CombatZone o = d.Patches[j];
-                        if (o.Matter != matter || IsLegacy(o) || (dry && (o.PFlags & EmgMatterConst.FlagOilCovered) != 0))
+                        if (o.Matter != matter || (dry && (o.PFlags & EmgMatterConst.FlagOilCovered) != 0))
                         {
                             continue;
                         }
@@ -255,6 +279,8 @@ namespace BinGames.Sim.Combat
             int owner = z.Owner;
             bool hostGone = false;
             float consumedB = 0f;
+            byte kind0 = IsLegacy(z) ? z.Kind : (byte)0;
+            float radius0 = z.Radius;
             switch (r.Op)
             {
                 case EmgRuleConst.OpConvert:
@@ -400,6 +426,22 @@ namespace BinGames.Sim.Combat
                 EmgUnitsInCircle(ref d, pos, math.max(0.5f, z.Radius), r.SideValue, owner, false, 0f);
             }
             EmgRuleSettle(ref d, r, chain, depth, owner, pos, z.EmgId);
+            if (hostGone && kind0 == CombatConst.ZoneKindPool)
+            {
+                // EMG2-REACT-02（FGR-EMG-087）：喷淋池被 M06 / M07 冲淡、被 M18 蒸干——专属分支 StepPoolWash 已删，云端的计数与提示挂在通用规则结算之后
+                CombatCounters cc = d.Counters[0];
+                cc.PoolsWashed++;
+                d.Counters[0] = cc;
+                ClarityCue(ref d, -1, 0, radius0, pos, 10, 0);
+            }
+            else if (hostGone && kind0 == CombatConst.ZoneKindSlick && r.Product == EmgMatterConst.Fire)
+            {
+                // FG19B §7 #4：油迹点燃走 E01，SlicksIgnited 按结算计
+                CombatCounters cc = d.Counters[0];
+                cc.SlicksIgnited++;
+                d.Counters[0] = cc;
+                ClarityCue(ref d, -1, 0, radius0, pos, 6, 0);
+            }
             return hostGone;
         }
 
@@ -436,6 +478,24 @@ namespace BinGames.Sim.Combat
                 z.Charge = 0f;
             }
             z.PFlags = (byte)(z.PFlags & ~EmgMatterConst.FlagOilCovered);
+            if (IsLegacy(z))
+            {
+                // EMG2-REACT-02（DEBT-EMG2MAT02-03）：迁入斑块被规则转化后，来源的区域载荷作废，产物就是普通物质斑块（物质接触、衰减、合并）
+                z.PFlags = (byte)(z.PFlags & ~EmgMatterConst.FlagLegacy);
+                z.Kind = EmgMatterConst.ZoneKindPatch; // 非迁入斑块的快照校验要求这个种类码，写错则整个地点读不回
+                z.Phase = 0;
+                z.Dps = 0f;
+                z.Chill = 0f;
+                z.Growth = 0f;
+                z.StatusMask = 0u;
+                z.StatusDps = 0f;
+                z.StatusSlow = 0f;
+                z.StatusVuln = 0f;
+                z.StatusSeconds = 0f;
+                z.Faction = CombatFaction.Neutral;
+                z.TickInterval = ConductTickOf(ref d);
+                z.Look = CombatZoneLook.Pool;
+            }
             float life = r.Life > 0f ? r.Life : m.LifeFor(amount) * (r.LifeMul > 0f ? r.LifeMul : 1f);
             z.Born = now;
             z.Until = now + life;
@@ -593,6 +653,10 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
+                if (arc && EmgMudded(ref d, u))
+                {
+                    continue; // C07：泥浆附着期间不进传导图（不得电、也不挨这一跳的附带伤害）
+                }
                 if (arc && charge > 0f)
                 {
                     EmgAddAcc(ref d, u, EmgPhaseConst.Charge, charge, src >= 0 && src < d.Count ? d.Id[src] : 0); // EMG2-PHS-01：电荷累积量统一入口（电抗、免疫窗、上限、满了麻痹）
@@ -614,7 +678,7 @@ namespace BinGames.Sim.Combat
             for (int j = 0; j < d.Patches.Length; j++)
             {
                 CombatZone o = d.Patches[j];
-                if (!PatchAlive(o) || IsLegacy(o) || PatchWorld(o) || math.distance(o.Pos, pos) > radius + o.Radius)
+                if (!PatchAlive(o) || PatchWorld(o) || math.distance(o.Pos, pos) > radius + o.Radius)
                 {
                     continue;
                 }
@@ -759,7 +823,7 @@ namespace BinGames.Sim.Combat
                         }
                         seen.Add(j);
                         CombatZone o = d.Patches[j];
-                        if (!PatchAlive(o) || IsLegacy(o) || math.distance(o.Pos, pos) > o.Radius + radius)
+                        if (!PatchAlive(o) || math.distance(o.Pos, pos) > o.Radius + radius)
                         {
                             continue;
                         }
@@ -869,6 +933,10 @@ namespace BinGames.Sim.Combat
                     EmgWallSlamPush(ref d, t, c, x, n, end);
                     continue;
                 }
+                if (n.Parent >= 0 && EmgChildHitWrite(ref d, t, c, x, n, end, hitPort))
+                {
+                    continue;
+                }
                 if (!patchesOn || x.Verb != (byte)EmgVerb.Inject || x.Role <= EmgConst.RoleLastRead || (x.Flags & (EmgInstrFlags.Overflow | EmgInstrFlags.RootKernel)) != 0
                     || (x.Port != EmgConst.PortHeat && x.Port != EmgConst.PortElec && x.Port != EmgConst.PortMag) || !(x.Amount > 0f))
                 {
@@ -892,7 +960,10 @@ namespace BinGames.Sim.Combat
                 }
                 else if (x.Port == EmgConst.PortElec)
                 {
-                    EmgAddAcc(ref d, t, EmgPhaseConst.Charge, x.Amount, EmgIdOf(ref d, c.Owner));
+                    if (!EmgElecShed(ref d, t, x.Amount))
+                    {
+                        EmgAddAcc(ref d, t, EmgPhaseConst.Charge, x.Amount, EmgIdOf(ref d, c.Owner)); // EMG2-REACT-02（C04）：沾油的单位不得电荷，EmgCoatReact 把这股电跳走
+                    }
                     inj.y += x.Amount;
                 }
                 else
@@ -902,6 +973,10 @@ namespace BinGames.Sim.Combat
                 if (x.Port != EmgConst.PortMag && EmgFirstPatchInject(ref d, c, i - n.FirstInstr))
                 {
                     EmgInjectPatches(ref d, at, math.max(0.5f, x.Param2), x.Port, x.Amount, c.Chain, c.Depth);
+                    if (x.Port == EmgConst.PortElec)
+                    {
+                        EmgMarshElec(ref d, at, x.Amount, EmgIdOf(ref d, c.Owner), c.Chain, c.Depth);
+                    }
                 }
                 EmgChainLog(ref d, EmgChainNode.Inject, c.Chain, c.Depth, x.Port, EmgIdOf(ref d, c.Owner), at, d.Id[t]);
             }
@@ -939,6 +1014,161 @@ namespace BinGames.Sim.Combat
         /// a 米（fg.TbPortCarrier：格斗 2.4 / 力场 2 / 布区 1.6）；推动途中撞上障碍 / 残骸 / 单位时由实体层按“被推动实体撞障碍”结算——evt.impact（速度 / 质量）+ 撞击动能伤害
         /// （DamageFrom，Code = 撞击）。没撞上 = 只是推开（开阔地不冲击）。按端口判断，不按固件 ID（FGR-EMG-013）。
         /// </summary>
+        /// <summary>
+        /// EMG2-REACT-02（DEBT-EMG1FW01-03 余部，FGR-EMG-015 规则二 / FGR-EMG-019 单轨）：排在触发器之后的非排放类效果写端在子弹药 / 子区落点结算，过渡字段与旧标签已从本机出手撤下——
+        /// 腐蚀度注入、余震（en.kinetic 带延迟 = 回波）、数据链标记、处决（完整度 ≤ 15% 直接击毁并炸破片）、无人机。按端口判，不认固件 ID。
+        /// 返回 true = 这一条已结算（调用方跳过）。子区按节拍每次命中都结算，所以一次性动作（标记、处决）对活着的目标才生效。
+        /// </summary>
+        private static bool EmgChildHitWrite(ref CombatData d, int t, in EmgCtx c, in EmgInstr x, in EmgNode n, int end, ushort hitPort)
+        {
+            if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || !d.IsAlive(t))
+            {
+                return false;
+            }
+            for (int j = n.FirstInstr; j < end; j++)
+            {
+                EmgInstr r = d.EmgInstrs[j];
+                // 子载荷自己不开火，evt.fire 门控的伴飞写端在它落地生效这一下放出（FG19A 第 21 行“放出伴飞”的子节点读法）
+                bool droneOnFire = x.Port == EmgRuleConst.PortDrone && r.Port == EmgConst.EventPortBase + (int)EmgEventKind.Fire;
+                if (r.Ordinal == x.Ordinal && r.Role == EmgConst.RoleTrigger && r.Port != hitPort && !droneOnFire)
+                {
+                    return false; // 门控在别的事件上：不是“命中时”的写端
+                }
+            }
+            int owner = c.Owner;
+            float strike = c.Strike > 0f ? c.Strike : c.Damage;
+            switch (x.Port)
+            {
+                case EmgRuleConst.PortCorrode:
+                    if (x.Amount > 0f && EmgPatchesOn(ref d))
+                    {
+                        EmgAddAcc(ref d, t, EmgPhaseConst.Corrode, x.Amount, EmgIdOf(ref d, owner));
+                        return true;
+                    }
+                    return false;
+                case EmgRuleConst.PortMarked:
+                    if (x.Amount > 0f)
+                    {
+                        d.MarkedUntil[t] = math.max(d.MarkedUntil[t], d.Scalars[0].Time + x.Amount);
+                        EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[t], x.Amount, 0f, 0, d.Pos[t]);
+                        return true;
+                    }
+                    return false;
+                case EmgConst.PortKinetic:
+                    if (x.Amount > 0f && x.Param2 > 0f && x.Param2 < 1f && strike > 0f && owner >= 0 && owner < d.Count)
+                    {
+                        // 回波：命中点 param2 秒后余震一次（amount 倍，带动能）。没有延迟的 en.kinetic 是修饰（穿甲 / 壁撞），由别的分支处理
+                        QueueEcho(ref d, owner, t, d.Scalars[0].Time + x.Param2, strike * x.Amount, default);
+                        return true;
+                    }
+                    return false;
+                case EmgRuleConst.PortIntegrity:
+                {
+                    float below = x.A > 0f ? x.A : 0.15f;
+                    if (d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= below && !d.Has(t, CombatUnitFlags.Invulnerable))
+                    {
+                        int frags = 0;
+                        for (int j = n.FirstInstr; j < end; j++)
+                        {
+                            EmgInstr f = d.EmgInstrs[j];
+                            if (f.Ordinal == x.Ordinal && f.Port == EmgRuleConst.PortFragment && f.Role > EmgConst.RoleLastRead)
+                            {
+                                frags = (int)math.round(f.Amount);
+                            }
+                        }
+                        double2 at = d.Pos[t];
+                        EmgDestroyDirect(ref d, t, owner);
+                        EmgEntityParams ep = d.EmgEntParams[0];
+                        for (int q = 0; q < frags && c.Depth < EmgConst.MaxDepth; q++)
+                        {
+                            float a = 2f * math.PI * q / math.max(1, frags);
+                            EmgSpawnFragment(ref d, at, new float2(math.cos(a), math.sin(a)), EmgIdOf(ref d, owner), (CombatFaction)c.Faction, (byte)(c.Depth + 1), c.Chain, ep.FragDamage, ep.FragSpeed, ep.FragRange);
+                        }
+                    }
+                    return true;
+                }
+                case EmgRuleConst.PortFragment:
+                    return true; // 随处决结算
+                case EmgRuleConst.PortDrone:
+                    if (x.Amount > 0f && owner >= 0 && owner < d.Count && d.IsAlive(owner) && c.Weapon >= 0 && c.Weapon < d.Weapons.Length)
+                    {
+                        CombatReading dr = d.Weapons[c.Weapon].Reading;
+                        LaunchDrones(ref d, owner, d.Weapons[c.Weapon], dr.Drones + dr.EscortDrones + (int)math.round(x.Amount), t); // 在本机原有架数上多放（无人机舱载体同 FG19A“多放”），重复命中不再累加
+                        return true;
+                    }
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// 酸沼通电（FG19B §1.4 第 5 条、§7 #12）：注入点在沼里 → 沼里、注入点 emg.conduct.big_r（8 米）内的地面单位得到电荷（注入 × 单位分成），并按 E16 在注入点析出碎屑。
+        /// 不做 BFS 中继（DEBT-EMG2RULE01-05 口径：只在注入点 8 米内传导），世界源不被消耗。O(单位)，只在往沼里注电时。
+        /// </summary>
+        internal static void EmgMarshElec(ref CombatData d, double2 at, float amount, int ownerId, int chain, byte depth)
+        {
+            if (d.AcidShapes.Length == 0 || !(amount > 0f) || !InAcid(ref d, at))
+            {
+                return;
+            }
+            float q = amount * ShareOf(ref d);
+            double big = BigROf(ref d);
+            for (int u = 0; u < d.Count; u++)
+            {
+                if (d.IsAlive(u) && !IsAir(ref d, u) && d.Kind[u] != (byte)CombatUnitKind.Structure && math.distance(d.Pos[u], at) <= big && InAcid(ref d, d.Pos[u]) && !EmgMudded(ref d, u) && !EmgElecShed(ref d, u, q))
+                {
+                    EmgAddAcc(ref d, u, EmgPhaseConst.Charge, q, ownerId);
+                }
+            }
+            int2 ix = d.EmgRuleIdx[EmgMatterConst.Acid];
+            for (int k = ix.x; k < ix.x + ix.y; k++)
+            {
+                EmgRule r = d.EmgRules[d.EmgRuleOrder[k]];
+                if (r.Op == EmgRuleConst.OpSpawn && ChargeCond(r.Cond) && amount >= r.C1)
+                {
+                    EmgRuleSpawn(ref d, r.Product, at, r.P2 > 0f ? r.P2 : 1f, r.P1 * MarshNominalAcid, r.P3, r.Life, ownerId, chain, depth);
+                    EmgRuleSettle(ref d, r, chain, depth, ownerId, at, 0);
+                    break;
+                }
+            }
+        }
+
+        /// <summary>酸沼是虚拟世界源、没有份量：E16“份量 = 0.2 × 酸”按一块标准酸斑块的份量折算。</summary>
+        private const float MarshNominalAcid = 5f;
+
+        /// <summary>离 <paramref name="p"/> 最近的障碍 / 残骸（边缘距离 ≤ <paramref name="reach"/>）；只在壁撞力场命中时查。O(障碍 + 残骸)。</summary>
+        private static bool EmgNearestObstacle(ref CombatData d, double2 p, float reach, out double2 at)
+        {
+            at = default;
+            double best = reach;
+            bool found = false;
+            for (int i = 0; i < d.Obstacles.Length; i++)
+            {
+                float3 o = d.Obstacles[i];
+                double2 c = new double2(o.x, o.y);
+                double e = math.max(0.0, math.distance(p, c) - o.z);
+                if (e < best)
+                {
+                    best = e;
+                    at = c;
+                    found = true;
+                }
+            }
+            for (int i = 0; i < d.Wrecks.Length; i++)
+            {
+                EmgWreck k = d.Wrecks[i];
+                double e = math.max(0.0, math.distance(p, k.Pos) - k.Radius);
+                if (k.Hp > 0f && e < best)
+                {
+                    best = e;
+                    at = k.Pos;
+                    found = true;
+                }
+            }
+            return found;
+        }
+
         private static void EmgWallSlamPush(ref CombatData d, int t, in EmgCtx c, in EmgInstr x, in EmgNode n, int end)
         {
             if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || !(x.A > 0f) || !EmgEntOn(ref d) || c.Owner < 0 || c.Owner >= d.Count || t == c.Owner)
@@ -956,10 +1186,23 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            // EMG2-REACT-02（DEBT-EMG2RULE01-10，FG19A 第 1.1 节第 16 行）：布区只在落点结算那一拍弹开（站在落区里不再每拍被推）
+            if (c.EntKind == EmgEntKind.Zone && d.Scalars[0].Time - c.ZoneBorn > 1e-3)
+            {
+                return;
+            }
             // 撞击伤害经 DamageUnit 回到 EmgOnDamage：推动期间清掉程序上下文，撞击不再触发注能 / 推动（否则被撞的单位又被推、无限递归）
             EmgCtx saved = d.EmgCtx;
             d.EmgCtx.Prog = -1;
-            Displace(ref d, t, d.Pos[c.Owner], -x.A, 0.0, c.Owner, EmgConst.PortKinetic);
+            // 力场“把敌人推向最近障碍”：有障碍 / 残骸在 emg.field.wallslam_seek 米内就朝它推（撞上结算冲击），没有才径向推开；其余载体径向推开
+            if (c.Carrier == (byte)CombatCarrier.Aura && EmgNearestObstacle(ref d, d.Pos[t], d.Config.EmgWallSlamSeek > 0f ? d.Config.EmgWallSlamSeek : EmgRuleConst.DefaultWallSlamSeek, out double2 wall))
+            {
+                Displace(ref d, t, wall, x.A, 0.0, c.Owner, EmgConst.PortKinetic);
+            }
+            else
+            {
+                Displace(ref d, t, d.Pos[c.Owner], -x.A, 0.0, c.Owner, EmgConst.PortKinetic);
+            }
             d.EmgCtx = saved;
         }
 
@@ -990,7 +1233,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 CombatZone o = d.Patches[j];
-                if (!PatchAlive(o) || IsLegacy(o) || MatterOf(ref d, o.Matter).Solid == 0 || math.distance(o.Pos, pos) > o.Radius)
+                if (!PatchAlive(o) || MatterOf(ref d, o.Matter).Solid == 0 || math.distance(o.Pos, pos) > o.Radius)
                 {
                     continue;
                 }
@@ -1077,7 +1320,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !IsLegacy(z) && math.abs(z.Temp - amb) > 0.5f)
+                if (PatchAlive(z) && math.abs(z.Temp - amb) > 0.5f)
                 {
                     src.Add(new int2(z.EmgId, i));
                 }
@@ -1130,7 +1373,7 @@ namespace BinGames.Sim.Combat
                             }
                             CombatZone o = d.Patches[j];
                             // 一个邻居可能登记在多个格里：只在它与本块外接格的第一个公共格处理一次
-                            if (!PatchAlive(o) || IsLegacy(o) || EmgHash.CellOf(math.max(o.Pos.x - o.Radius, z.Pos.x - z.Radius)) != cx
+                            if (!PatchAlive(o) || EmgHash.CellOf(math.max(o.Pos.x - o.Radius, z.Pos.x - z.Radius)) != cx
                                 || EmgHash.CellOf(math.max(o.Pos.y - o.Radius, z.Pos.y - z.Radius)) != cy)
                             {
                                 continue;
@@ -1158,7 +1401,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (!PatchAlive(z) || IsLegacy(z) || MatterOf(ref d, z.Matter).FixedTemp != 0 || PatchWorld(z))
+                if (!PatchAlive(z) || MatterOf(ref d, z.Matter).FixedTemp != 0 || PatchWorld(z))
                 {
                     continue;
                 }
@@ -1219,7 +1462,7 @@ namespace BinGames.Sim.Combat
             var hits = new NativeList<int2>(EmgMatterConst.ContactPerUnit + 1, Allocator.Temp);
             for (int u = 0; u < d.Count; u++)
             {
-                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure || (d.EmgUnit[u].PrevMatterMask & condMask) == 0u || IsAir(ref d, u))
+                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure || (d.EmgUnit[u].PrevMatterMask & condMask) == 0u || IsAir(ref d, u) || EmgMudded(ref d, u)) // C07：泥浆附着不进传导图
                 {
                     continue;
                 }
@@ -1245,7 +1488,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !IsLegacy(z) && z.Charge >= qmin && z.Radius <= bigR && !PatchWorld(z))
+                if (PatchAlive(z) && z.Charge >= qmin && z.Radius <= bigR && !PatchWorld(z))
                 {
                     queue.Add(new int4(0, i, 0, z.EmgId));
                 }
@@ -1399,7 +1642,7 @@ namespace BinGames.Sim.Combat
         private static void EmgElecToPatch(ref CombatData d, ref NativeList<int4> queue, ref NativeList<float> qv, int j, float recv, int hop, float qmin, float bigR)
         {
             CombatZone o = d.Patches[j];
-            if (!PatchAlive(o) || IsLegacy(o) || MatterOf(ref d, o.Matter).Conductive < EmgRuleConst.DefaultConductMinStrength || recv < qmin || recv <= o.Charge + 1e-4f)
+            if (!PatchAlive(o) || MatterOf(ref d, o.Matter).Conductive < EmgRuleConst.DefaultConductMinStrength || recv < qmin || recv <= o.Charge + 1e-4f)
             {
                 return;
             }
@@ -1450,7 +1693,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !IsLegacy(z) && !PatchWorld(z) && z.Charge >= qmin)
+                if (PatchAlive(z) && !PatchWorld(z) && z.Charge >= qmin)
                 {
                     hosts.Add(new int2(z.EmgId, i));
                 }

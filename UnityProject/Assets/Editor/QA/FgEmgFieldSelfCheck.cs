@@ -168,7 +168,7 @@ namespace GameLogic.EditorTools
                 same = a.Amount == b.Amount && a.Param == b.Param && a.Faction == b.Faction && a.FactionAlt == b.FactionAlt && a.Impl == b.Impl;
             }
             int kernelRows = c.Rules.Count(r => r.Impl == EmgFieldConst.ImplKernel), coatRows = c.Rules.Count(r => r.Impl == EmgFieldConst.ImplCoat);
-            Expect(same && kernelRows == 14 && coatRows == 2, $"表 {c.Rules.Count} 行、行序 = 内核行号；内核结算 {kernelRows} 行、沾染通用路径 {coatRows} 行、承接卡 {c.Rules.Count - kernelRows - coatRows} 行（DEBT-EMG2FLD01-01 / 02）");
+            Expect(same && kernelRows == 18 && coatRows == 1, $"表 {c.Rules.Count} 行、行序 = 内核行号；内核结算 {kernelRows} 行、沾染通用路径 {coatRows} 行、承接卡 {c.Rules.Count - kernelRows - coatRows} 行（DEBT-EMG2FLD01-01 / 02）");
             var bad = new List<EmgFieldRule>(c.Rules);
             bad[3] = new EmgFieldRule { Amount = -1f, Faction = 2, Impl = 1 };
             bool shortRej = !k.SetFieldRules(c.Rules.Take(19).ToList());

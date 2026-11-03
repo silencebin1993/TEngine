@@ -1012,6 +1012,8 @@ namespace BinGames.Sim.Combat
     {
         public CombatWeaponMode Mode;
         public CombatReaction Reaction;
+        /// <summary>EMG2-REACT-02（FG19B §6.3，DEBT-EMG2PHS01-01）：光束武器（动能系数 0）。快照放在 Reaction 字节的最高位（不升格式，旧档 = 0）。</summary>
+        public byte BeamHit;
         /// <summary>1 = 装配有可攻击的主武器出口（Demo HasCombatOutput）；重炮不看它。
         /// 2 = 修复出口（<see cref="CombatConst.OutputRepair"/>，EMG1-FW-01：主组件声明 prop.integrity modify 且没有攻击出口——维修束）：只对己方出手，命中 = 修复。</summary>
         public byte HasOutput;
@@ -1412,7 +1414,7 @@ namespace BinGames.Sim.Combat
         public int EmgConductHops, EmgConductVisits;
         public float EmgHeatAmbient, EmgHeatExchange, EmgHeatGain, EmgHeatCool, EmgHeatUnitScale, EmgHeatUnitGain;
         /// <summary>EMG2-RULE-01（FGR-EMG-088）：AI 避险排斥的起始距离（有害斑块边缘外，米）与权重。</summary>
-        public float EmgAvoidMargin, EmgAvoidWeight;
+        public float EmgAvoidMargin, EmgAvoidWeight, EmgWallSlamSeek;
 
         public static CombatConfig Default => new CombatConfig
         {

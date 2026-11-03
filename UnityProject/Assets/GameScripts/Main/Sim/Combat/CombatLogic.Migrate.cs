@@ -194,6 +194,7 @@ namespace BinGames.Sim.Combat
         {
             // 按斑块 Id 升序结算（不按槽位）：墓碑复用让连续跑与读档后的槽位布局不同，按槽位会让读档续跑的结算顺序变（FGT-EMG-040 / B10）
             var order = LegacyOrder(ref d);
+            bool rulesDue = d.Scalars[0].Steps % ConductSteps(ref d, dt) == 0;
             for (int o = 0; o < order.Length; o++)
             {
                 int i = (int)(order[o] & 0xFFFFFFFFL);
@@ -229,6 +230,11 @@ namespace BinGames.Sim.Combat
                 if (d.Patches[i].Matter != 0)
                 {
                     d.Patches[i] = z;
+                }
+                // EMG2-REACT-02（DEBT-EMG2MAT02-03 / FGR-EMG-087）：迁入斑块也是规则宿主（世界源除外：EmgPatchRules 内判），按传导节拍对齐求值
+                if (rulesDue && d.Patches[i].Matter != 0 && d.Patches[i].EmgId == z.EmgId)
+                {
+                    EmgPatchRules(ref d, i, now);
                 }
             }
             order.Dispose();

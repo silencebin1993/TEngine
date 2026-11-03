@@ -1053,7 +1053,8 @@ namespace GameLogic.EditorTools
                 + $"标签覆盖 {string.Join("，", live.Coverage.Select(c => TestRangeService.TagName(c.Id) + " " + c.Value / 10f + "%"))}、热量曲线 {live.HeatCurve.Length} 点、能耗 {live.Energy:F1}（= 每发耗电 × 发数 {expectEnergy:F1}）");
 
             var mine = ReactionLog.All.Skip(log0).Where(e => TestRangeService.IsRangeSite(e.SiteId)).ToList();
-            string line = mine.Count > 0 ? ReactionLog.Describe(s, mine[0]) : string.Empty;
+            ReactionLogEntry withTarget = mine.FirstOrDefault(e => e.Target.LabelKey != "reaction.log.ground"); // EMG2-REACT-02：液洼放电没有目标单位，写“地面”
+            string line = withTarget != null ? ReactionLog.Describe(s, withTarget) : string.Empty;
             CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
             bool dummyLabel = home.TryGetEnemyUnit(HomeValleyCombatTargets.LowThreatTargetId, out int dummy) && home.TryGetUnitLabel(dummy, out string dk, out _, out _)
                               && dk == HomeValleyCombatTargets.TrainingTargetLabelKey

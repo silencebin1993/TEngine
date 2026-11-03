@@ -317,7 +317,7 @@ namespace GameLogic.Campaign.Combat
                 First = first,
                 Count = count,
                 Source = source,
-                Target = Party(site, state, targetUnit),
+                Target = targetUnit > 0 ? Party(site, state, targetUnit) : new ReactionLogParty { Known = true, LabelKey = "reaction.log.ground" }, // EMG2-REACT-02：斑块层结算没有目标单位
                 FirmwareIds = pair != 0u ? ParticipatingFirmware(site, source, pair)
                     : FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>(),
                 Position = ground,
@@ -504,8 +504,18 @@ namespace GameLogic.Campaign.Combat
                 return Array.Empty<string>();
             }
             List<string> hits = null;
+            uint shock = NamedReactionCatalog.BitOf("Shock"), fire = NamedReactionCatalog.BitOf("Fire");
+            var one = new string[1];
             foreach (string fw in firmware)
             {
+                // EMG2-REACT-02：电击 / 燃烧不再是这条固件的旧标签时，看它是否写同一端口的注入（连锁电弧写 en.elec、过载写 en.heat）
+                one[0] = fw;
+                if (((pair & shock) != 0u && Emergence.EmgCatalog.PartWriteAmount("en.elec", Emergence.EmgRole.Inject, one) > 0f)
+                    || ((pair & fire) != 0u && Emergence.EmgCatalog.PartWriteAmount("en.heat", Emergence.EmgRole.Inject, one) > 0f))
+                {
+                    (hits ??= new List<string>()).Add(fw);
+                    continue;
+                }
                 string[] tags = Emergence.EmgProgramCompiler.LiveTagsOf(fw);
                 if (tags == null)
                 {

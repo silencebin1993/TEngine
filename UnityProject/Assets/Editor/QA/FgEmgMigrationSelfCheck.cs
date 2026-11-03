@@ -312,10 +312,12 @@ namespace GameLogic.EditorTools
             using (CombatKernel a = NewKernel(false))
             using (CombatKernel b = NewKernel(true))
             {
-                string sa = PoolScenario(a, false, "Wet", out int pa, out _);
+                // EMG2-REACT-02（FGR-EMG-087）：冲洗走规则 M06 / M07，专属分支已删；层关（emg.stage < 2 的区域路径）不再被冲洗（预期差异，证据第七节）
+                CombatSite.ApplyRules(b);
+                PoolScenario(a, false, "Wet", out int pa, out _);
                 string sb = PoolScenario(b, false, "Wet", out int pb, out _);
-                Expect(sa == sb && pa == 0 && pb == 0 && b.Counters.PoolsWashed == 1,
-                    $"D2 冷却液（湿润）盖到酸池上 → 冲淡、很快消失，迁移前后一致：[{sa}] = [{sb}]（StepPoolWash 两表都看）");
+                Expect(pa == 1 && pb == 0 && b.Counters.PoolsWashed == 1,
+                    $"D2 冷却液（湿润）盖到酸池上 → 按规则 M07 冲淡、很快消失（池 {pb}，冲洗计数 {b.Counters.PoolsWashed}：[{sb}]）；对照：层关的区域路径不再有专属冲洗（池 {pa}）");
             }
             using (CombatKernel a = NewKernel(false))
             using (CombatKernel b = NewKernel(true))
@@ -327,13 +329,16 @@ namespace GameLogic.EditorTools
             using (CombatKernel a = NewKernel(false))
             using (CombatKernel b = NewKernel(true))
             {
-                string sa = PoolScenario(a, true, "Fire", out int pa, out _);
+                CombatSite.ApplyRules(b);
+                PoolScenario(a, true, "Fire", out int pa, out _);
                 string sb = PoolScenario(b, true, "Fire", out int pb, out _);
-                Expect(sa == sb && pa == 0 && pb == 0, $"D4 明火（燃烧）盖到液氮池上 → 蒸干，迁移前后一致：[{sa}] = [{sb}]");
+                Expect(pa == 1 && pb == 0 && b.Counters.PoolsWashed == 1,
+                    $"D4 明火（燃烧）盖到液氮池上 → 按规则 M18 蒸干成冷雾（池 {pb}，计数 {b.Counters.PoolsWashed}：[{sb}]）；对照：层关不再有专属蒸干（池 {pa}）");
             }
             // 冲洗者是物质斑块（阶段 2 排放）：水斑块冲淡迁入的酸池（沾染位 = 湿润）
             using (CombatKernel b = NewKernel(true))
             {
+                CombatSite.ApplyRules(b);
                 int s = Dummy(b, new double2(10, 10));
                 b.SpawnPoolForTests(s, new double2(0, 0), 2.5f, 8f, 6f, Bit("Acid"), 4f, 0f);
                 b.SpawnPatch(EmgMatterConst.Water, new double2(1.5, 0), 2f, 1f, 6f);
@@ -344,7 +349,7 @@ namespace GameLogic.EditorTools
 
         // ── E 油迹 ───────────────────────────────────────────────────────────
 
-        private static string SlickScenario(CombatKernel k)
+        private static string SlickScenario(CombatKernel k, out bool bothHit)
         {
             int crawler = Dummy(k, new double2(10, 10));
             int foe = Dummy(k, new double2(0.4, 0));
@@ -354,6 +359,7 @@ namespace GameLogic.EditorTools
             int burner = Dummy(k, new double2(0, 0.5));
             k.ApplyStatus(burner, Bit("Fire"), 20f, 4f, 0f, 0f, 0);
             Run(k, 4f);
+            bothHit = Hp(k, foe) < 1000f && Hp(k, ally) < 1000f;
             return Sig(k, foe, ally, burner);
         }
 
@@ -362,9 +368,11 @@ namespace GameLogic.EditorTools
             Line("  · E. 云端油迹");
             using CombatKernel a = NewKernel(false);
             using CombatKernel b = NewKernel(true);
-            string sa = SlickScenario(a);
-            string sb = SlickScenario(b);
-            Expect(sa == sb && a.Counters.SlicksIgnited == 1 && b.Counters.SlicksIgnited == 1, $"E1 油迹遇燃烧的单位整片点燃（双方都挨），迁移前后一致：[{sa}] = [{sb}]");
+            // EMG2-REACT-02（FG19B §7 #4）：油迹点燃走 E01 / C01（计数改按结算），层开时伤害来自明火接触，数值不再逐位等于旧区域（预期差异，M10-BASELINE 差异表）
+            CombatSite.ApplyRules(b);
+            string sa = SlickScenario(a, out bool hitA);
+            string sb = SlickScenario(b, out bool hitB);
+            Expect(hitA && hitB && a.Counters.SlicksIgnited == 1 && b.Counters.SlicksIgnited == 1, $"E1 油迹遇燃烧的单位整片点燃（双方都挨）：层关 [{sa}]；层开走规则 [{sb}]");
         }
 
         // ── F 液洼负向 ───────────────────────────────────────────────────────

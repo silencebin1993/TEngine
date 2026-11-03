@@ -10,8 +10,8 @@ namespace BinGames.Sim.Combat
     /// </summary>
     public static partial class CombatLogic
     {
-        /// <summary>电击沾染新挂上（没有注入量的“标签式”通电）按这么多电荷算（电击标签 → 电荷换算的正式数值归 EMG2-REACT-02，DEBT-EMG2PHS01-04）。</summary>
-        private const float CoatTagElec = 0.5f;
+        /// <summary>站进熔融金属对沾染行算一次足够的注热（只用来过 inject_ge 阈值，不改单位积热）。</summary>
+        private const float MoltenContactHeat = 1000f;
 
         // ─────────────────────────────── 单位层沾染行（C） ───────────────────────────────
 
@@ -58,8 +58,8 @@ namespace BinGames.Sim.Combat
                 }
                 else if (r.B == EmgConst.PortElec)
                 {
-                    e = elecIn > 0f ? elecIn : CoatTagElec;
-                    ok = elecIn >= r.C1 || (d.ShockBit != 0u && (all & d.ShockBit) != 0u && (incoming & (d.ShockBit | aBit)) != 0u);
+                    e = elecIn;
+                    ok = elecIn >= r.C1; // EMG2-REACT-02（FG19B §3.1 位 4）：电击不再是持续标签，电击标签 = 一次 en.elec 注入（PhaseTagGain 按 phase_charge.tagGain 换算），这里只看注入量
                 }
                 else if (r.B >= EmgRuleConst.CoatBase)
                 {
@@ -125,6 +125,32 @@ namespace BinGames.Sim.Combat
                     consumed = 0u; // 胶膜在粘住结束时清除（FG19B C06“结束后胶膜清除”）
                     break;
                 }
+                case EmgRuleConst.OpCoatFlash:
+                    EmgCoatFlash(ref d, u, rule, energy, chain, depth);
+                    consumed = 0u; // C04 不消耗油污
+                    break;
+                case EmgRuleConst.OpCoatTrail:
+                {
+                    int fx = EmgCoatFxOf(ref d, d.Id[u], true);
+                    EmgCoatFx x = d.CoatFx[fx];
+                    x.TrailT = math.max(x.TrailT, rule.P1 > 0f ? rule.P1 : 4f);
+                    x.TrailMoved = 0f;
+                    x.TrailIdle = 0f;
+                    x.TrailLast = pos;
+                    x.Chain = chain;
+                    d.CoatFx[fx] = x;
+                    break;
+                }
+                case EmgRuleConst.OpCoatSlow:
+                {
+                    int fx = EmgCoatFxOf(ref d, d.Id[u], true);
+                    EmgCoatFx x = d.CoatFx[fx];
+                    x.MudT = math.max(x.MudT, rule.P2 > 0f ? rule.P2 : 4f);
+                    d.CoatFx[fx] = x;
+                    ApplyStatus(ref d, u, CombatConst.StatusBitZoneSlow, x.MudT, 0f, rule.P1, 0f, source); // 减速走区域减速位（敌我同一条移动口径，到期自清）
+                    consumed |= 1u << (rule.B - EmgRuleConst.CoatBase); // C07 同时消耗扬尘、浸湿
+                    break;
+                }
             }
             EmgUnitRuleSettle(ref d, rule, chain, depth, srcId, u);
             if (rule.Side == EmgRuleConst.SideDamage && rule.SideValue > 0f && d.IsAlive(u) && rule.Op != EmgRuleConst.OpCoatArc)
@@ -141,6 +167,112 @@ namespace BinGames.Sim.Combat
             }
             return incoming & ~consumed;
         }
+
+        /// <summary>
+        /// C04 这一次注电是否被闪络顶掉（沾油污且注入量 ≥ 阈值）：调用方不给本单位加电荷（FG19B C04“本单位不得电荷”），改由沾染行把电跳走。O(规则数)，只在注电时。
+        /// 优先级高于 C03（29 &lt; 32），所以只要这一行成立就不会再走短路。
+        /// </summary>
+        internal static bool EmgElecShed(ref CombatData d, int u, float elec)
+        {
+            if (!d.EmgRules.IsCreated || !(elec > 0f) || !d.IsAlive(u))
+            {
+                return false;
+            }
+            uint have = d.Status[u];
+            for (int i = 0; i < d.EmgRules.Length; i++)
+            {
+                EmgRule r = d.EmgRules[i];
+                if (r.Op == EmgRuleConst.OpCoatFlash && r.A >= EmgRuleConst.CoatBase && (have & (1u << (r.A - EmgRuleConst.CoatBase))) != 0u && elec >= r.C1)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// C04 闪络：这股电改跳 p3 米内最近的另一个导体（单位 / 导电斑块 / 残骸，含己方），量 × p1；附近没有导体就消散。
+        /// 哨戒桩不存电荷（无人机没有电荷状态），不算跳点（待用户复核的决策，证据 emg2-react-02）。O(单位 + 斑块 + 残骸)，只在闪络那一刻。
+        /// </summary>
+        private static void EmgCoatFlash(ref CombatData d, int u, in EmgRule r, float energy, int chain, byte depth)
+        {
+            float q = math.max(0f, energy) * (r.P1 > 0f ? r.P1 : 0.8f);
+            double reach = r.P3 > 0f ? r.P3 : 4f;
+            if (!(q > 0f))
+            {
+                return;
+            }
+            double2 pos = d.Pos[u];
+            double best = reach + 1e-6;
+            int bestUnit = -1, bestPatch = -1, bestWreck = -1;
+            for (int v = 0; v < d.Count; v++)
+            {
+                if (v == u || !d.IsAlive(v) || d.Kind[v] == (byte)CombatUnitKind.Structure || IsAir(ref d, v) || !EmgUnitConducts(ref d, v))
+                {
+                    continue;
+                }
+                double dist = math.distance(pos, d.Pos[v]);
+                if (dist < best || (dist == best && bestUnit >= 0 && d.Id[v] < d.Id[bestUnit]))
+                {
+                    best = dist;
+                    bestUnit = v;
+                }
+            }
+            for (int j = 0; j < d.Patches.Length; j++)
+            {
+                CombatZone z = d.Patches[j];
+                if (!PatchAlive(z) || MatterOf(ref d, z.Matter).Conductive < EmgRuleConst.DefaultConductMinStrength)
+                {
+                    continue;
+                }
+                double dist = math.max(0.0, math.distance(pos, z.Pos) - z.Radius);
+                if (dist < best || (dist == best && bestPatch >= 0 && z.EmgId < d.Patches[bestPatch].EmgId)) // 同距按 EmgId：墓碑复用让读档后的槽位布局与连续跑不同（同 EmgGroundPatchAt）
+                {
+                    best = dist;
+                    bestUnit = -1;
+                    bestPatch = j;
+                }
+            }
+            for (int w = 0; w < d.Wrecks.Length; w++)
+            {
+                EmgWreck k = d.Wrecks[w];
+                if (!(k.Hp > 0f) || EmgWreckProps(ref d, k).Conductive < EmgRuleConst.DefaultConductMinStrength)
+                {
+                    continue;
+                }
+                double dist = math.max(0.0, math.distance(pos, k.Pos) - k.Radius);
+                if (dist < best)
+                {
+                    best = dist;
+                    bestUnit = -1;
+                    bestPatch = -1;
+                    bestWreck = w;
+                }
+            }
+            if (bestUnit >= 0)
+            {
+                EmgAddAcc(ref d, bestUnit, EmgPhaseConst.Charge, q, d.Id[u], enterNow: false);
+                Cue(ref d, CombatEventKind.PhaseCue, bestUnit, d.Id[u], q, d.Pos[bestUnit], 64); // 64 = 电弧连线
+            }
+            else if (bestPatch >= 0)
+            {
+                CombatZone z = d.Patches[bestPatch];
+                z.Charge += q;
+                z.EmgChain = z.EmgChain != 0 ? z.EmgChain : chain;
+                z.EmgDepth = (byte)math.max((int)z.EmgDepth, (int)depth);
+                d.Patches[bestPatch] = z;
+            }
+            else if (bestWreck >= 0)
+            {
+                EmgWreck k = d.Wrecks[bestWreck];
+                k.Charge += q;
+                d.Wrecks[bestWreck] = k;
+            }
+        }
+
+        /// <summary>单位算不算导体（prop.conductive ≥ 0.3；C07 泥浆附着期间视为 0，不进传导图）。</summary>
+        internal static bool EmgUnitConducts(ref CombatData d, int v) =>
+            !EmgMudded(ref d, v) && EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, v)).Conductive >= EmgRuleConst.DefaultConductMinStrength;
 
         /// <summary>C03：本单位电荷注入 × p1；电弧跳向 p3 米内最多 p2 个导电（prop.conductive ≥ 0.3）或带同一沾染（浸湿）的单位（含己方、中立），第 k 跳 × p4^k；每跳附带伤害。
         /// <paramref name="injected"/>：这份电荷已由命中注能（EmgHitInject）加过 1 倍，这里只补 (p1 − 1) 倍，合计 = 注入 × p1。</summary>
@@ -164,7 +296,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 float dist = (float)math.distance(d.Pos[u], d.Pos[v]);
-                if (dist > range || ((d.Status[v] & coatBit) == 0u && EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, v)).Conductive < EmgRuleConst.DefaultConductMinStrength))
+                if (dist > range || EmgMudded(ref d, v) || ((d.Status[v] & coatBit) == 0u && !EmgUnitConducts(ref d, v))) // EMG2-REACT-02（C07）：泥浆附着的单位电弧跳不到
                 {
                     continue;
                 }
@@ -260,6 +392,250 @@ namespace BinGames.Sim.Combat
                     }
                 }
             }
+        }
+
+        /// <summary>单位 Id 在沾染行计时表里的下标；没有且 <paramref name="add"/> = 新增一行。</summary>
+        private static int EmgCoatFxOf(ref CombatData d, int unitId, bool add)
+        {
+            for (int i = 0; i < d.CoatFx.Length; i++)
+            {
+                if (d.CoatFx[i].Unit == unitId)
+                {
+                    return i;
+                }
+            }
+            if (!add)
+            {
+                return -1;
+            }
+            d.CoatFx.Add(new EmgCoatFx { Unit = unitId });
+            return d.CoatFx.Length - 1;
+        }
+
+        /// <summary>C07 泥浆附着中（prop.conductive 视为 0）。O(计时表)，表空时一条比较。</summary>
+        private static bool EmgMudded(ref CombatData d, int v)
+        {
+            if (d.CoatFx.Length == 0)
+            {
+                return false;
+            }
+            int i = EmgCoatFxOf(ref d, d.Id[v], false);
+            return i >= 0 && d.CoatFx[i].MudT > 0f;
+        }
+
+        /// <summary>
+        /// C05 燃烧的酸液滴落 / C07 泥浆计时（每步，随游戏时间走，暂停不走、倍速按游戏时间）。每走 p2 米在身后留一块明火，静止时每秒一块（FG19B C05）。单位没了或计时走完就删行。O(计时表)。
+        /// </summary>
+        internal static void StepCoatFx(ref CombatData d, float dt)
+        {
+            for (int i = d.CoatFx.Length - 1; i >= 0; i--)
+            {
+                EmgCoatFx x = d.CoatFx[i];
+                int u = d.SlotOf(x.Unit);
+                if (u < 0 || !d.IsAlive(u))
+                {
+                    d.CoatFx.RemoveAt(i);
+                    continue;
+                }
+                x.MudT = math.max(0f, x.MudT - dt);
+                if (x.TrailT > 0f)
+                {
+                    x.TrailT = math.max(0f, x.TrailT - dt);
+                    double2 pos = d.Pos[u];
+                    x.TrailMoved += (float)math.distance(pos, x.TrailLast);
+                    x.TrailIdle += dt;
+                    double2 behind = x.TrailLast;
+                    x.TrailLast = pos;
+                    int ri = -1;
+                    for (int r = 0; r < d.EmgRules.Length && ri < 0; r++)
+                    {
+                        if (d.EmgRules[r].Op == EmgRuleConst.OpCoatTrail)
+                        {
+                            ri = r;
+                        }
+                    }
+                    if (ri >= 0)
+                    {
+                        EmgRule rule = d.EmgRules[ri];
+                        if (x.TrailMoved >= (rule.P2 > 0f ? rule.P2 : 1.5f) || x.TrailIdle >= 1f)
+                        {
+                            x.TrailMoved = 0f;
+                            x.TrailIdle = 0f;
+                            EmgRuleSpawn(ref d, rule.Product != 0 ? rule.Product : EmgMatterConst.Fire, behind, rule.P3 > 0f ? rule.P3 : 1f, rule.P4 > 0f ? rule.P4 : 3f, EmgRuleConst.KeepTemp - 1f, rule.Life, x.Unit, x.Chain, 0);
+                        }
+                    }
+                }
+                if (x.MudT <= 0f && x.TrailT <= 0f)
+                {
+                    d.CoatFx.RemoveAt(i);
+                }
+                else
+                {
+                    d.CoatFx[i] = x;
+                }
+            }
+        }
+
+        // ─────────────────────────────── 残骸 × 物质（W01 / W02） ───────────────────────────────
+
+        /// <summary>matter_entity 行：按 a 侧物质端口找，不认规则 ID。没有 = −1。O(规则数)。</summary>
+        private static int EmgEntityRule(ref CombatData d, byte matter)
+        {
+            for (int i = 0; d.EmgRules.IsCreated && i < d.EmgRules.Length; i++)
+            {
+                EmgRule r = d.EmgRules[i];
+                if (r.Pair == EmgRuleConst.PairMatterEntity && EmgMatterConst.MatterOfPort(r.A) == matter)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>点 <paramref name="p"/> 所在的地面层 <paramref name="matter"/> 斑块（圆心在斑块内才算，−1 = 没有）。Id 最小的优先（确定性）。O(本格登记数)。</summary>
+        private static int EmgGroundPatchAt(ref CombatData d, double2 p, byte matter)
+        {
+            int found = -1;
+            if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(EmgHash.CellOf(p.x), EmgHash.CellOf(p.y)), out int e, out NativeParallelMultiHashMapIterator<long> it))
+            {
+                return -1;
+            }
+            do
+            {
+                if ((byte)d.EmgHash.Entries[e].w != EmgHash.KindPatch)
+                {
+                    continue;
+                }
+                int j = d.EmgHash.Refs[e];
+                if (j < 0 || j >= d.Patches.Length)
+                {
+                    continue;
+                }
+                CombatZone z = d.Patches[j];
+                if (PatchAlive(z) && z.Matter == matter && math.distancesq(p, z.Pos) <= (double)z.Radius * z.Radius && (found < 0 || z.EmgId < d.Patches[found].EmgId))
+                {
+                    found = j;
+                }
+            }
+            while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
+            return found;
+        }
+
+        /// <summary>
+        /// 每步逐残骸（StepWrecks，只在有斑块、有 W 行时）：W01 圆心在酸斑块里 ≥ c1 秒 → 完整度每秒 −p1，归零变金属碎屑（份量 p2 × 质量，≤ life），每秒耗酸 p4；
+        /// W02 圆心在污泥斑块里 ≥ c1 秒 → 锈蚀崩塌（破片 + 伴生碎屑）。优先级：同时在酸与污泥里按 W01（85 &lt; 86）。驻留记在 DwellMatter / DwellSince（进快照）。
+        /// </summary>
+        internal static void StepWreckDwell(ref CombatData d, int w, float dt, double now, int acidRule, int sludgeRule)
+        {
+            EmgWreck k = d.Wrecks[w];
+            if (!(k.Hp > 0f))
+            {
+                return;
+            }
+            int acid = acidRule >= 0 ? EmgGroundPatchAt(ref d, k.Pos, EmgMatterConst.Acid) : -1;
+            int sludge = acid < 0 && sludgeRule >= 0 ? EmgGroundPatchAt(ref d, k.Pos, EmgMatterConst.Sludge) : -1;
+            byte matter = acid >= 0 ? EmgMatterConst.Acid : sludge >= 0 ? EmgMatterConst.Sludge : (byte)0;
+            if (k.DwellMatter != matter)
+            {
+                k.DwellMatter = matter;
+                k.DwellSince = now;
+                d.Wrecks[w] = k;
+            }
+            if (matter == 0)
+            {
+                return;
+            }
+            double held = now - k.DwellSince;
+            if (acid >= 0)
+            {
+                EmgRule r = d.EmgRules[acidRule];
+                if (held + 1e-6 < r.C1)
+                {
+                    return;
+                }
+                k.Hp -= k.MaxHp * r.P1 * dt;
+                d.Wrecks[w] = k;
+                CombatZone z = d.Patches[acid];
+                if (!PatchWorld(z) && r.P4 > 0f)
+                {
+                    EmgResizePatch(ref d, acid, z.Amount * (1f - r.P4 * dt));
+                }
+                if (!(k.Hp > 0f))
+                {
+                    float amount = math.min(r.Life > 0f ? r.Life : 20f, r.P2 * k.Mass);
+                    EmgRuleSpawn(ref d, r.Product, k.Pos, math.max(k.Radius, 0.5f), math.max(0.1f, amount), EmgRuleConst.KeepTemp - 1f, 0f, 0, k.Chain, 0);
+                    EmgRuleSettle(ref d, r, k.Chain, 0, 0, k.Pos, k.Id);
+                }
+                return;
+            }
+            EmgRule rs = d.EmgRules[sludgeRule];
+            if (held + 1e-6 >= rs.C1)
+            {
+                EmgWreckCollapse(ref d, w, rs, 0, CombatFaction.Neutral, 0, k.Chain);
+            }
+        }
+
+        /// <summary>W02 锈蚀崩塌：残骸崩解为 p1 片锈蚀破片（放射），伴生碎屑（by 比例 × 质量，≤ life）。破片的连锁只靠动能（链深截止），没有接触传播（FG19B W02）。</summary>
+        private static void EmgWreckCollapse(ref CombatData d, int w, in EmgRule r, int ownerId, CombatFaction faction, byte depth, int chain)
+        {
+            EmgWreck k = d.Wrecks[w];
+            k.Hp = 0f;
+            d.Wrecks[w] = k;
+            int n = math.max(1, (int)math.round(r.P1));
+            if (depth < EmgConst.MaxDepth)
+            {
+                float off = (uint)math.hash(new int2(k.Id, n)) % 360u * (math.PI / 180f);
+                for (int f = 0; f < n; f++)
+                {
+                    float a = off + f * (2f * math.PI / n);
+                    float2 v = new float2(math.cos(a), math.sin(a));
+                    EmgSpawnFragment(ref d, k.Pos + (double2)(v * (k.Radius + 0.15f)), v, ownerId, faction, (byte)(depth + 1), chain, r.P2, r.P3, r.P4);
+                }
+            }
+            if (r.By > 0)
+            {
+                EmgRuleSpawn(ref d, r.By, k.Pos, math.max(k.Radius, 0.5f), math.max(0.1f, math.min(r.Life > 0f ? r.Life : 12f, r.ByAmount * k.Mass)), EmgRuleConst.KeepTemp - 1f, 0f, ownerId, chain, depth);
+            }
+            EmgRuleSettle(ref d, r, chain, depth, ownerId, k.Pos, k.Id);
+            MarkHashDirty(ref d);
+        }
+
+        // ─────────────────────────────── 湮灭（F01 属性 × 场） ───────────────────────────────
+
+        /// <summary>prop_field 行里 b = 偏折场的那一行（F01）；没有 = −1。</summary>
+        internal static int EmgAnnihilateRule(ref CombatData d)
+        {
+            for (int i = 0; d.EmgRules.IsCreated && i < d.EmgRules.Length; i++)
+            {
+                EmgRule r = d.EmgRules[i];
+                if (r.Pair == EmgRuleConst.PairPropField && r.B == EmgFieldConst.PortDeflect)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// F01：单位处于与它敌对的偏折场内且完整度 ≤ c1 → 压溃起爆：被击毁、不留残骸，原地起爆（半径 p1、动能 p3，附带每单位 side）。已被处决 / 别的伤害击毁的单位不再结算（调用方先查存活）。
+        /// 不可推动的固定目标（建筑、炮塔、敌方主核心，<see cref="CanDisplace"/>）不被压溃（待用户复核的决策）。返回 true = 结算了。
+        /// </summary>
+        internal static bool EmgAnnihilate(ref CombatData d, int u, in EmgRule r, in EmgField f)
+        {
+            if (!CanDisplace(ref d, u) || d.Has(u, CombatUnitFlags.Invulnerable) || !(d.MaxHp[u] > 0f) || d.Hp[u] / d.MaxHp[u] > r.C1)
+            {
+                return false;
+            }
+            double2 pos = d.Pos[u];
+            int unitId = d.Id[u];
+            EmgChainLog(ref d, EmgChainNode.Rule, f.Chain, f.Depth, r.Key, f.Owner, pos, unitId, 0);
+            EmgRuleSettle(ref d, r, f.Chain, f.Depth, f.Owner, pos, unitId);
+            int killer = d.SlotOf(f.Owner);
+            EmgDestroyDirect(ref d, u, killer);
+            float rad = r.P1 > 0f ? r.P1 : 3f;
+            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f);
+            EmgBurstPatches(ref d, pos, rad, r.P4, r.P3);
+            return true;
         }
 
         /// <summary>被胶膜固化粘住（能开火、不能移动、不受推动）。</summary>

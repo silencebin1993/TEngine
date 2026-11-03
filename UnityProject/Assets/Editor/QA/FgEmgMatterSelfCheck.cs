@@ -766,7 +766,7 @@ namespace GameLogic.EditorTools
             }
             var g = Run(true);
             var f = Run(false);
-            Expect(g.flag && g.kept && g.round && g.side == 0f && f.flag && !f.kept && f.round && f.side > 0f,
+            Expect(g.flag && g.kept && g.round && g.side == 0f && f.flag && !f.kept && f.round, // EMG2-REACT-02：旧 MarkJump 退役，跳转只由固件自己声明的连锁产生（FgEmgReactSelfCheck）
                 $"驻守自动出手：弹体带 NoNamed {g.kept}（读档后记号逐位一致 {g.round}）、命中已标记目标后旁边已标记的敌人掉血 {g.side}（不跳）；直控 FireAt：NoNamed {f.kept}、旁边掉血 {f.side}（跳）");
         }
 

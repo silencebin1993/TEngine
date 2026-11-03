@@ -582,6 +582,39 @@ namespace GameLogic.EditorTools
                     $"{say} 触发：命中后朝远离出手者推开，0.2 米处撞上障碍停住（推开 {movedO:0.##} 米），实体层撞击 {impO} 次、目标 {hpO:0.#} 血（开阔地同一击 {hpF:0.#} 血）");
                 Expect(hitF && impF == 0 && Math.Abs(movedF - a) < 0.05,
                     $"{say} 不触发：开阔地只推开 {movedF:0.##} 米（= 表值 a {F(a)}），没有撞击（{impF} 次）");
+                // EMG2-REACT-02（DEBT-EMG2RULE01-10，FG19A 第 1.1 节第 16 行）：力场把敌人推向 8 米内最近的障碍；布区只在落点结算那一拍弹开
+                if (fc == FirmwareCarrier.Aura || fc == FirmwareCarrier.Field)
+                {
+                    CombatConfig cfg2 = Cfg();
+                    cfg2.EmgEntity = 1;
+                    using var k2 = new CombatKernel(cfg2, 32);
+                    CombatSite.ApplyEmgSubForms(k2);
+                    CombatSite.ApplyEntityProfiles(k2);
+                    int me2 = Me(k2, new double2(0, 0), k2.AddWeapon(CarrierGun(k2, FwWall, fc, rd, true)));
+                    int foe2 = Foe(k2, new double2(0, dist), 1000f);
+                    if (fc == FirmwareCarrier.Aura)
+                    {
+                        k2.SetObstacles(new List<float3> { new float3(5f, (float)dist, 0.5f) }); // 目标正右侧 5 米
+                    }
+                    k2.FireAt(me2, foe2, k2.Time);
+                    bool hit2 = false;
+                    for (int i = 0; i < 180 && !hit2; i++)
+                    {
+                        StepN(k2, 1);
+                        hit2 = Hp(k2, foe2) < 1000f;
+                    }
+                    double2 after1 = Pos(k2, foe2);
+                    if (fc == FirmwareCarrier.Aura)
+                    {
+                        Expect(hit2 && after1.x > 0.05 && Math.Abs(after1.y - dist) < 0.05, $"力场：朝最近的障碍推（右移 {after1.x:0.##} 米，没有径向推开）");
+                    }
+                    else
+                    {
+                        StepN(k2, 90);
+                        double2 after2 = Pos(k2, foe2);
+                        Expect(hit2 && Math.Abs(after2.y - after1.y) < 0.02, $"布区：只在落点结算那一拍弹开（第一拍后 {after1.y:0.##}，再过 1.5 秒 {after2.y:0.##}），站在区里不再每拍被推");
+                    }
+                }
             }
         }
 

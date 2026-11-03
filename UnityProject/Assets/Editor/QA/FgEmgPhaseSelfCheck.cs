@@ -772,17 +772,17 @@ namespace GameLogic.EditorTools
                 compiled &= skip != null && !skip(fw, EmgProgramCompiler.TagsField);
                 single.StatusMask |= CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, new[] { fw }, false, skip).StatusMask;
                 dual.StatusMask |= CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, new[] { fw }, false).StatusMask;
-                compiled &= fw == "fw_arcchain" ? !skip(fw, EmgProgramCompiler.TagField("Shock")) : skip(fw, EmgProgramCompiler.TagField(fw == "fw_overload" ? "Fire" : "Charged"));
+                compiled &= skip(fw, EmgProgramCompiler.TagField(fw == "fw_arcchain" ? "Shock" : fw == "fw_overload" ? "Fire" : "Charged"));
             }
             CombatReading singleFull = CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, new[] { "fw_overload" }, false,
                 EmgProgramCompiler.LegacySkip(EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_overload" }, FirmwareCarrier.Projectile)));
             CombatReading dualFull = CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, new[] { "fw_overload" }, false);
             uint fire = NamedReactionCatalog.BitOf("Fire"), charged = NamedReactionCatalog.BitOf("Charged"), shock = NamedReactionCatalog.BitOf("Shock");
-            bool reading = (single.StatusMask & (fire | charged)) == 0u && (single.StatusMask & shock) != 0u && (dual.StatusMask & fire) != 0u && (dual.StatusMask & charged) != 0u;
+            bool reading = (single.StatusMask & (fire | charged | shock)) == 0u && (dual.StatusMask & fire) != 0u && (dual.StatusMask & charged) != 0u;
             string[] live = EmgProgramCompiler.LiveTagsOf("fw_overload");
-            Expect(compiled && reading && Array.IndexOf(live, "Fire") < 0 && Array.IndexOf(EmgProgramCompiler.LiveTagsOf("fw_arcchain"), "Shock") >= 0,
+            Expect(compiled && reading && Array.IndexOf(live, "Fire") < 0 && Array.IndexOf(EmgProgramCompiler.LiveTagsOf("fw_arcchain"), "Shock") < 0,
                 $"编译器单轨：程序里过载 / 电容蓄力的旧标签 Fire / Charged 不进读法（状态位 {single.StatusMask:X} vs 两轨 {dual.StatusMask:X}），过渡字段 heatburst 退役；" +
-                "连锁电弧的电击照挂；固件库 / 修复 / 反应提示显示的标签同口径（LiveTagsOf）");
+                "连锁电弧的旧标签电击也撤了（EMG2-REACT-02，FG19B §12 #3）；固件库 / 修复 / 反应提示显示的标签同口径（LiveTagsOf）");
             // 1b) EMG2-FLD-01：磁聚 fld.magnet 接通 → 整条切声明轨，en.mag 的旧标签 Charged / Magnet 按端口退役（单轨读法不再挂，两轨旧读法仍挂），注入由内核写磁化度
             EmgProgramResult magProg = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_magnet" }, FirmwareCarrier.Projectile);
             Func<string, string, bool> magSkip = EmgProgramCompiler.LegacySkip(magProg);

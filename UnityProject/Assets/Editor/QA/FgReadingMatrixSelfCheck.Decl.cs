@@ -74,7 +74,7 @@ namespace GameLogic.EditorTools
                         {
                             dead.Add($"{carrier}/{fw}（末位）");
                         }
-                        // 效果固件排在触发器之后（指令落进子节点）：[分裂, 被测] 对 [分裂]（物质排放由子载荷 emit 执行，其余效果按过渡口径作用在本机出手）
+                        // 效果固件排在触发器之后（指令落进子节点）：[分裂, 被测] 对 [分裂]。这里是 emg.stage = 1 的回滚对照（过渡口径作用在本机出手）；现行口径（阶段 ≥ 2 落点结算）见下面的 stage2Dead
                         // 同时写弹道修饰的（装甲击穿、撞墙……）在子节点上的修饰行为由 FgEmgGrammarSelfCheck B2 逐格对照，这里只比纯效果固件
                         if (fw != TriggerFiller && HasEffectWrite(fw, carrier) && !HasModWrite(fw, carrier))
                         {
@@ -98,8 +98,33 @@ namespace GameLogic.EditorTools
                 // 注入写端排在触发器后只在子弹药 / 子区落点结算：有目标累积到注入量，且本机主目标的累积量低于同一条固件放根节点（本机命中注入）时；不再靠本机出手上的过渡字段 / 旧标签“有差异”。
                 src.Tuning = id => id == EmgCatalog.StageKey ? (true, 2f) : tuning(id);
                 EmgCatalog.OverrideForTests(src);
+                var stage2Dead = new List<string>();
+                var stage2Fields = new List<string>();
+                int stage2Pairs = 0;
                 foreach ((FirmwareCarrier carrier, string comp) in CarrierComponents)
                 {
+                    // EMG2-REACT-02（DEBT-EMG1FW01-03 余部）：全部效果固件排在触发器后，阶段 2 的现行执行者在落点——行为必须与 [分裂] 有差异（零死对，FGR-EMG-015 规则二），本机出手的读法不留过渡字段
+                    DeclDigest(comp, new[] { TriggerFiller }, out _, out CombatReading trigReading);
+                    string stage2Base = DeclDigest(comp, new[] { TriggerFiller }, out _, out _);
+                    foreach (string fw in stage1)
+                    {
+                        if (fw == TriggerFiller || fw == DeclFiller || !HasEffectWrite(fw, carrier) || HasModWrite(fw, carrier))
+                        {
+                            continue;
+                        }
+                        stage2Pairs++;
+                        string d2 = DeclDigest(comp, new[] { TriggerFiller, fw }, out _, out CombatReading r2);
+                        // 无人机只打最近目标，预置场景里的残血目标不在子弹药落点附近；处决另造全部残血的场景比
+                        bool landed = d2 != stage2Base || (fw == FirmwareCatalog.FwExecuteId && SummonExecuted(comp, new[] { TriggerFiller, fw }) > SummonExecuted(comp, new[] { TriggerFiller }));
+                        if (!landed)
+                        {
+                            stage2Dead.Add($"{carrier}/{fw}");
+                        }
+                        if (!r2.Equals(trigReading))
+                        {
+                            stage2Fields.Add($"{carrier}/{fw}");
+                        }
+                    }
                     foreach (string fw in stage1)
                     {
                         if (fw == TriggerFiller || !HasInjectWrite(fw, carrier))
@@ -118,6 +143,8 @@ namespace GameLogic.EditorTools
                 EmgCatalog.OverrideForTests(src);
                 Expect(stage1.Count >= 30 && dead.Count == 0 && trigPairs >= 40,
                     $"阶段 1 走声明轨的 {stage1.Count} 条固件 × 5 载体 × 首位 / 末位 + 效果固件在触发器后（{trigPairs} 对）共 {combos} 对全部有行为指纹差异，死对 {dead.Count} 对（{sw.ElapsedMilliseconds} 毫秒）{(dead.Count > 0 ? "：" + string.Join("、", dead) : string.Empty)}");
+                Expect(stage2Pairs >= 40 && stage2Dead.Count == 0, $"阶段 2 效果固件排在触发器后（{stage2Pairs} 对）在子弹药 / 子区落点都有行为差异，死对 {stage2Dead.Count}：{string.Join("、", stage2Dead)}");
+                Expect(stage2Fields.Count == 0, $"阶段 2 效果固件排在触发器后：本机出手的读法与只有触发器时逐字段一致（过渡字段已撤）{Detail(stage2Fields)}");
                 Expect(injectPairs >= 5 && landing.Count == 0,
                     $"注入类（en.heat / en.elec / en.mag）排在触发器后：{injectPairs} 对全部只在子弹药 / 子区落点注能（因果链注入记录全在链深 ≥ 1，本机出手 0 次；单条放根节点时本机命中注能）{Detail(landing)}");
                 Expect(dual.Count == 0, $"单轨比对：{stage1.Count - 1} 条 × 5 载体的程序轨读法与独立推导的单轨读法逐字段一致（同一 owner 不两轨同时结算）{Detail(dual)}");
@@ -290,6 +317,32 @@ namespace GameLogic.EditorTools
                 w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
             }
             return RunArena(w, 4f, prepared, program, comp);
+        }
+
+        /// <summary>把敌人压到 10% 血（总量大到 4 秒打不死）后跑预置场景，返回阵亡数：只有直接击毁（处决）才会让它们阵亡。</summary>
+        private static int SummonExecuted(string comp, string[] fws)
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, comp, null, null, Array.Empty<string>());
+            board.TrySetUplink(UplinkSlot);
+            BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, fws);
+            CombatWeapon w = CombatSite.MachineWeaponFrom(p);
+            EmgProgramResult program = EmgProgramCompiler.Compile(p);
+            if (!program.IsEmpty && w.Mode != CombatWeaponMode.Projectile)
+            {
+                w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
+            }
+            using Arena a = Arena.Build(w, true, null, program, comp);
+            for (int i = 1; i < ArenaCount; i++)
+            {
+                a.K.SetHealth(a.Ids[i], 10000f, 100000f, true);
+            }
+            a.Run(4f);
+            int dead = 0;
+            for (int i = 1; i < ArenaCount; i++)
+            {
+                dead += a.K.TryGetUnit(a.Ids[i], out CombatUnitView v) && (v.Flags & CombatUnitFlags.Alive) != 0 ? 0 : 1;
+            }
+            return dead;
         }
 
         /// <summary>被测固件在该载体上有效果写端（非语法、非元程序）。</summary>
