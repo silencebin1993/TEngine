@@ -89,9 +89,9 @@ namespace BinGames.Sim.Combat
         public EmgRule EmgRuleAt(int i) => i >= 0 && i < _d.EmgRules.Length ? _d.EmgRules[i] : default;
 
         /// <summary>自检 / 热更注入：在 <paramref name="pos"/> 处 <paramref name="radius"/> 米内的斑块注入能量（FG19B 第 1.4 节第 4 条；port = 501 热 / 502 电）。返回注入到的斑块数。</summary>
-        public int InjectPatchEnergy(double2 pos, float radius, ushort port, float amount, int chain = 0)
+        public int InjectPatchEnergy(double2 pos, float radius, ushort port, float amount, int chain = 0, int ownerUnit = 0)
         {
-            int n = CombatLogic.EmgInjectPatches(ref _d, pos, radius, port, amount, chain, 0);
+            int n = CombatLogic.EmgInjectPatches(ref _d, pos, radius, port, amount, chain, 0, ownerUnit);
             Touch();
             return n;
         }
@@ -288,7 +288,7 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 快照格式 17：物质段 ───────────────────────────────
 
-        private const int PatchFields = 40; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段（同版本 17 只追加，短段取缺省）
+        private const int PatchFields = 41; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段；EMG2-DISC-01：再追加 RuleKey（同版本 17 只追加，短段取缺省）
         private const int FieldFields = 13; // EMG2-FLD-01 修复轮：段尾追加 Swept（同版本 17 只追加，短段取 0）
         private const int UnitStage2Fields = 26; // EMG2-RECL-01：再追加 ReclaimCdQ、ReclaimNote
         private const int WireFields = 12; // 下标缓存 IdxA / IdxB 不写（读档后斑块槽位会重排，写了会让同一状态写出不同字节） // EMG2-REACT-01：段尾追加 StickT；EMG2-FLD-01：再追加 FieldCdQ（同版本 17 只追加，短段取 0）
@@ -432,6 +432,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(z.StatusVuln);
                 if (sw.F()) w.Write(z.Chill);
                 if (sw.F()) w.Write(z.Growth);
+                if (sw.F()) w.Write(z.RuleKey);
                 sw.EndRecord();
             }
             sw.End();
@@ -557,6 +558,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) z.StatusVuln = r.ReadSingle();
                         if (sr.F()) z.Chill = r.ReadSingle();
                         if (sr.F()) z.Growth = r.ReadSingle();
+                        if (sr.F()) z.RuleKey = r.ReadInt32();
                         // EMG2-MAT-02：迁入斑块的载荷校验（种类只能是读法 / 陷阱场地 / 液洼 / 喷淋池 / 油迹；液洼的 Owner 必须是液洼号的相反数）；非迁入斑块恒为斑块种类、中立
                         bool legacy = (z.PFlags & EmgMatterConst.FlagLegacy) != 0;
                         if (legacy ? z.Kind > CombatConst.ZoneKindSlick || (z.Kind == CombatConst.ZoneKindLeak && z.Owner >= 0)

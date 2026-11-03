@@ -2608,6 +2608,34 @@ namespace GameLogic.Campaign
         /// <summary>这一场里敌对阵营受到的全部伤害（占比的分母）。</summary>
         public double TotalDamage;
         public ReactionShareRecord[] Reactions = Array.Empty<ReactionShareRecord>();
+        // EMG2-DISC-01（FG19 FGR-EMG-182，B19）：新增字段缺省为空 / 0，不升 schema（FGR-EMG-212）；旧场次显示 0。
+        /// <summary>这一场所有规则的结算次数（含没有图鉴名字的通道规则）。</summary>
+        public int InteractionCount;
+        /// <summary>这一场由规则产物造成的、打在敌对阵营身上的伤害（含没有规则键的：排放的物质、相态持续伤害）。</summary>
+        public double InteractionDamage;
+        /// <summary>这一场因果链记录到的最大链深。</summary>
+        public int MaxChainDepth;
+        /// <summary>这一场的新发现条数（具名交互 + 语法条目）。</summary>
+        public int NewDiscoveries;
+        /// <summary>交互伤害按因果链平分到各台机器（按 LogicId 排序）。</summary>
+        public InteractionCreditRecord[] Credits = Array.Empty<InteractionCreditRecord>();
+    }
+
+    /// <summary>EMG2-DISC-01（FGR-EMG-182）：一台机器在一场里分到的交互伤害。</summary>
+    [Serializable]
+    public sealed class InteractionCreditRecord
+    {
+        public int LogicId;
+        public double Damage;
+    }
+
+    /// <summary>EMG2-DISC-01（FGR-EMG-190 / 183）：一条语法发现（EntryId：gen.1、gen.2、evt.&lt;事件码&gt;）。</summary>
+    [Serializable]
+    public sealed class GrammarDiscoveryRecord
+    {
+        public string EntryId = string.Empty;
+        public long Tick;
+        public string SiteId = string.Empty;
     }
 
     /// <summary>FG2-FW-04：一场里某条反应的触发次数与额外伤害（打在敌对阵营身上的）。未开放命名的反应记在自己的 ID 下，显示时不报名字。</summary>

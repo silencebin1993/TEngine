@@ -334,7 +334,7 @@ namespace GameLogic.EditorTools
             foreach (string id in Eleven)
             {
                 NamedReactionCatalog.TryGet(id, out GameConfig.fg.Reaction row);
-                string tip = ReactionBatchService.TipOf(row);
+                string tip = ReactionDiscoveryService.TipOf(row);
                 string text = GameText.Get(row.DescKey) + " " + tip;
                 if (rx.IsMatch(text))
                 {

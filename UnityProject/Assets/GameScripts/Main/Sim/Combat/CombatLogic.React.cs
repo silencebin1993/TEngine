@@ -94,6 +94,14 @@ namespace BinGames.Sim.Combat
             double2 pos = d.Pos[u];
             int chain = saved.Chain > 0 ? saved.Chain : d.EmgUnit[u].LastHitChain;
             byte depth = saved.Chain > 0 ? saved.Depth : (byte)0;
+            // EMG2-DISC-01：单位身上的反应没有“斑块归属”。本步伤害行（不进快照）归这条链上的单位 + 这次的来源（ADR ⑨）；
+            // 产物斑块和顺延记录进快照与 StateHash，环读档后是空的，所以它们只继承键、归属由 EmgOwnersOfNew 取来源（否则存读档后分叉）。
+            int key0 = d.EmgRuleKeyNow;
+            int4 owners0 = d.EmgRuleOwnersNow;
+            int4 coatOwners = EmgChainAttr(ref d, chain, out _);
+            EmgOwnersAdd(ref coatOwners, srcId);
+            d.EmgRuleKeyNow = rule.Key;
+            d.EmgRuleOwnersNow = int4.zero;
             switch (rule.Op)
             {
                 case EmgRuleConst.OpCoatSpawn:
@@ -115,7 +123,7 @@ namespace BinGames.Sim.Combat
                     }
                     break;
                 case EmgRuleConst.OpCoatArc:
-                    EmgCoatArc(ref d, u, rule, energy, consumed, elecIn > 0f);
+                    EmgCoatArc(ref d, u, rule, energy, consumed, elecIn > 0f, coatOwners);
                     break;
                 case EmgRuleConst.OpStick:
                 {
@@ -155,8 +163,12 @@ namespace BinGames.Sim.Combat
             EmgUnitRuleSettle(ref d, rule, chain, depth, srcId, u);
             if (rule.Side == EmgRuleConst.SideDamage && rule.SideValue > 0f && d.IsAlive(u) && rule.Op != EmgRuleConst.OpCoatArc)
             {
+                EmgAttrBegin(ref d, rule.Key, coatOwners, EmgFriendlyCode.Reaction, chain);
                 DamageFrom(ref d, u, rule.SideValue, source >= 0 && source < d.Count ? source : -1, EmgCode.SrcZone);
+                d.EmgAttr.On = 0;
             }
+            d.EmgRuleKeyNow = key0;
+            d.EmgRuleOwnersNow = owners0;
             d.EmgCtx = saved;
             es = d.EmgS[0];
             es.CoatBusy = 0;
@@ -276,7 +288,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>C03：本单位电荷注入 × p1；电弧跳向 p3 米内最多 p2 个导电（prop.conductive ≥ 0.3）或带同一沾染（浸湿）的单位（含己方、中立），第 k 跳 × p4^k；每跳附带伤害。
         /// <paramref name="injected"/>：这份电荷已由命中注能（EmgHitInject）加过 1 倍，这里只补 (p1 − 1) 倍，合计 = 注入 × p1。</summary>
-        private static void EmgCoatArc(ref CombatData d, int u, in EmgRule r, float energy, uint coatBit, bool injected)
+        private static void EmgCoatArc(ref CombatData d, int u, in EmgRule r, float energy, uint coatBit, bool injected, in int4 owners)
         {
             float base0 = math.max(0f, energy);
             float mul = r.P1 > 0f ? r.P1 : 2f;
@@ -329,7 +341,9 @@ namespace BinGames.Sim.Combat
                 Cue(ref d, CombatEventKind.PhaseCue, v, d.Id[u], q, d.Pos[v], 64); // 64 = 电弧连线（表现：从放电者到导体）
                 if (r.Side == EmgRuleConst.SideDamage && r.SideValue > 0f)
                 {
-                    DamageFrom(ref d, v, r.SideValue, -1, EmgCode.SrcZone); // 物质中立：电弧伤到谁都不归属出手者的击杀（友伤通知归 EMG2-DISC-01）
+                    EmgAttrBegin(ref d, r.Key, owners, EmgFriendlyCode.Energy, d.EmgCtx.Chain); // EMG2-DISC-01（FGR-EMG-182 / 184）
+                    DamageFrom(ref d, v, r.SideValue, -1, EmgCode.SrcZone); // 物质中立：电弧伤到谁都不归属出手者的击杀
+                    d.EmgAttr.On = 0;
                 }
             }
             picks.Dispose();
@@ -633,7 +647,7 @@ namespace BinGames.Sim.Combat
             int killer = d.SlotOf(f.Owner);
             EmgDestroyDirect(ref d, u, killer);
             float rad = r.P1 > 0f ? r.P1 : 3f;
-            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f);
+            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f, r.Key, new int4(f.Owner, 0, 0, 0), f.Chain);
             EmgBurstPatches(ref d, pos, rad, r.P4, r.P3);
             return true;
         }

@@ -2072,7 +2072,12 @@ namespace BinGames.Sim.Combat
                             d.EmgCtx = saved0;
                         }
                         d.EmgFragmentHit = (byte)((pr.Flags & EmgProjFlags.Fragment) != 0 ? 1 : 0); // 破片的“出手者”只是放出它的单位，不按那台单位的武器算动能（EmgOnDamage）
+                        if (d.EmgFragmentHit != 0)
+                        {
+                            EmgAttrFragment(ref d, pr); // EMG2-DISC-01（FGR-EMG-182 / 184）
+                        }
                         bool landed = DamageUnit(ref d, hit, dmg, owner);
+                        d.EmgAttr.On = 0;
                         d.EmgFragmentHit = 0;
                         Cue(ref d, CombatEventKind.ProjectileHit, hit, pr.Owner, dmg, hitPos, 0);
                         if (landed && (pr.Flags & EmgProjFlags.Fragment) != 0)

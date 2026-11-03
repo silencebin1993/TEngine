@@ -1099,7 +1099,7 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-TRIG-01：待生成表（段 11）、区域宿主字段（段 12，按区域表逐条）、回波宿主字段（段 13，按回波表逐条）。</summary>
         private void WriteTriggerSegments(BinaryWriter w, EmgSegmentWriter sw, bool v17)
         {
-            sw.Begin(EmgConst.SegPending, v17 ? 26 : 25, _d.EmgPending.Length); // EMG2-MAT-01（格式 17）：+ 记号高 8 位
+            sw.Begin(EmgConst.SegPending, v17 ? 31 : 25, _d.EmgPending.Length); // EMG2-MAT-01（格式 17）：+ 记号高 8 位；EMG2-DISC-01：+ 顺延斑块的规则键与归属（只追加）
             for (int i = 0; i < _d.EmgPending.Length; i++)
             {
                 EmgSpawn s = _d.EmgPending[i];
@@ -1131,6 +1131,11 @@ namespace BinGames.Sim.Combat
                 if (v17)
                 {
                     if (sw.F()) w.Write((byte)((ushort)s.Flags >> 8));
+                    if (sw.F()) w.Write(s.RuleKey);
+                    if (sw.F()) w.Write(s.Owners.x);
+                    if (sw.F()) w.Write(s.Owners.y);
+                    if (sw.F()) w.Write(s.Owners.z);
+                    if (sw.F()) w.Write(s.Owners.w);
                 }
                 sw.EndRecord();
             }
@@ -1690,6 +1695,11 @@ namespace BinGames.Sim.Combat
                 if (sr.F()) s.SubForm = r.ReadByte();
                 if (sr.F()) genDone = r.ReadInt16();
                 if (sr.F()) s.Flags |= (EmgProjFlags)(r.ReadByte() << 8); // EMG2-MAT-01：记号高 8 位
+                if (sr.F()) s.RuleKey = r.ReadInt32();
+                if (sr.F()) s.Owners.x = r.ReadInt32();
+                if (sr.F()) s.Owners.y = r.ReadInt32();
+                if (sr.F()) s.Owners.z = r.ReadInt32();
+                if (sr.F()) s.Owners.w = r.ReadInt32();
                 s.Gen = (byte)(genDone & 0xF);
                 s.Done = (short)(genDone >> 4);
                 if (!sr.RecordOk)

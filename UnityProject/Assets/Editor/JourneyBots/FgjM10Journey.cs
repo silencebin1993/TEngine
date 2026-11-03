@@ -1135,7 +1135,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             bool named = NamedReactionCatalog.IsNamed(St, Deflagrate);
             return StepOutcome.Done($"右键攻击 {c.GetInt("op.rc")} 次，据点 {op.OutpostId} 驻军清空（摧毁 {op.Destroyed}）：燃迹点着的油污爬行者被击毁 → 爆燃 {defl} 次、油迹点燃 {slick} 次；" +
-                                    $"具名反应“爆燃”已开放 {named}、本段内核计数 +{RuleCount(Deflagrate) - c.GetInt("defRule0")}；{TeamHp(c)}");
+                                    $"具名反应“爆燃”报名字 {named}、本段内核计数 +{RuleCount(Deflagrate) - c.GetInt("defRule0")}；{TeamHp(c)}");
         }
 
         // ── 4. 洗礼塔 ───────────────────────────────────────────────────────────────

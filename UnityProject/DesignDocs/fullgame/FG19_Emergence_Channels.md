@@ -1029,6 +1029,7 @@
 **FGR-EMG-182 伤害归因改为交互链口径**
 - 取代 `FG02:197` 的“反应额外伤害”：交互伤害 = 由规则产物（斑块、破片、子载荷以外的规则生成物、相变效果）造成的伤害；按因果链归给链上各台机器（平分），按规则 `StableKey` 统计。
 - 统计面板与离家报告显示：各交互次数、交互伤害占比、最长链深、本场新发现数（B19）。
+- 阶段 2 落地口径（EMG2-DISC-01，2026-11-04）：规则产物的伤害在内核统一扣血入口记账——斑块接触（含沾染持续伤害那一节拍）、规则附带伤害、破片、相态持续伤害；打敌方进 `EmgAttrRows`（按“规则键 + 归属”合并，不进快照），热更层每步读一次写进场次（`CampaignFgStateDomains.cs` `ReactionSessionRecord` 新增字段，缺省 0）。斑块追加 `RuleKey`（段尾只追加，格式仍 17）；排放的物质与相态持续伤害没有规则键，只进交互伤害总量。归属 = 产物的 `Owners`，平分给其中登记为机器的单位（敌方、炮塔不分）。环不进快照，所以进快照的 `Owners` 只用持久数据：单位层规则的产物斑块只取来源，链上单位只进本步伤害行。没有图鉴名字的通道规则按 `rule:<稳定键>` 记行（含次数），显示规则说明。突袭结算面板与离家报告的突袭段按场次号读同一组交互数字。已知近似见 DEBT-EMG2DISC01-01、-02、-05。
 
 **FGR-EMG-183 组合图鉴条目**
 - 每条具名交互规则一个条目：两侧端口、主结果、首次发现时的因果链快照（哪台机器、哪些固件 / 部件、在哪个地点）、已触发次数。未发现显示剪影与“由哪两类通道产生”的提示（不给配方）。
@@ -1039,6 +1040,7 @@
 
 **FGR-EMG-184 友伤与自伤提示**
 - 己方单位被己方留下的物质、能量、破片伤害时，按警告级通知聚合（“B 车被 A 车的带电水洼电击 ×3”），可定位到位置（B08）；因果链里标“友伤”。
+- 阶段 2 落地口径（EMG2-DISC-01，2026-11-04）：内核按“受伤者 + 留下者 + 来源”一步合并一条；同一组合每 `emg.friendly.notify_seconds`（1 游戏秒）最多发一条（持续接触不刷屏），聚合数字是通知中心的“友伤（N 次）”；归属里只有敌方或没有归属（世界源）时不算友伤。通知文本写来源（物质名 / 电弧 / 反应 / 破片）。
 
 ---
 
@@ -1048,6 +1050,7 @@
 - 取代“按阵营批次开放命名”（`FG02:180-188`）：任何具名交互第一次结算即报名字、进图鉴、播首次反馈。现有 `NamedReactionCatalog.OpenBatch`（`:114`）与云端 `ReactionBatchService`（origin，FG10-REACT-01）在阶段 2 改为“首次发现记录”，开放通知文本键 `reaction_batch` 改为“新发现”通知。
 - 首次记录沿用存档字段 `CampaignState.ReactionFirstTriggers`（按 `StableKey`），并在旁边新增语法发现记录字段（新增字段缺省为空，不升 schema，FGR-EMG-212）。
 - “新发现”通知为信息级，同类聚合（B08）；同时发引导钩子事件 `emg_first_discovery`（内容归 FG15-UX-04）。
+- 阶段 2 落地口径（EMG2-DISC-01，2026-11-04）：`OpenBatch` 与 `ReactionBatchService` 已删除，改为 `ReactionDiscoveryService` + `ReactionFeedback.RecordFirst`；通知类型 ID 仍是 `reaction_batch`（不改内容 ID，FGR-EMG-210），文本改“新发现”。语法发现记在 `CampaignState.GrammarDiscoveries`（`gen.<代>`、`evt.<事件码>`；元程序条目随阶段 3，DEBT-EMG2DISC01-03）。旧档：`OpenReactionBatches` 保留只读，不伪造 `ReactionFirstTriggers`；其中的批次当时已通知过名字，这些反应第一次结算照常写记录与首次反馈，只不再弹“新发现”。`fg.TbReaction` 的 `batch` 列保留，只给这个判断用。
 
 **FGR-EMG-191 三选一显示“与现有固件可产生 N 种新交互”**
 - 待分拣数据包（`ProjectA_GDD.md:367`）里的每个候选（固件或部件）显示：“与你现有的固件 / 部件可产生 N 种新交互（已发现 M 种）”，悬停展开列出交互名（未发现的显示两侧端口类别，不显示名称）。
@@ -1444,6 +1447,7 @@
 | `emg.fuse.anchor_max` | 4（接线每次结算最多接的落点数，独立接线与熔合内置接线共用，FG19A 申请 B3） | `emg.fuse.anchor_heat` | 1（接线每个落点的热量） |
 | `emg.part.prop_sum_cap` | 1.0（不同部件同写一个 `prop.*` 的合计上限 +100%） | `emg.stage` | 0（运行时总开关：已生效的 FG-EMG 阶段 0～4；与声明 `stageGate` 共同决定走新轨还是旧 `readFields`，回滚时调低，ADR-EMG-001 ⑮） |
 | `emg.patch.world_capacity` | 2048（全世界斑块总上限；热更层在地点载入 / 卸载时按已载入地点数重分各地点 `emg.patch.capacity`，FGR-EMG-202、ADR-EMG-001 ⑬） | `emg.bus.world_per_step` | 768（每世界步全部地点总线处理条数之和；同法重分各地点 `emg.bus.per_step`，FGR-EMG-202、ADR-EMG-001 ⑬） |
+| `emg.friendly.notify_seconds` | 1（同一受伤者 + 留下者 + 来源的友伤通知最短间隔，游戏秒，EMG2-DISC-01） | | |
 | `emg.era.blocks` | 12（爆炸反应装甲每台总块数，左右侧裙各 6；2～16 的偶数，FGR-EMG-233，2026-10-26 用户批准） | `emg.era.refill_seconds` | 3 秒（每补回 1 块的间隔，FGR-EMG-233） |
 | `emg.persist.clear_seconds` | 6 秒（清除工作单到现场后的工时，EMG2-PERSIST-01） | `emg.persist.clear_scrap` | 2（开单预留废料，完工才消耗） |
 

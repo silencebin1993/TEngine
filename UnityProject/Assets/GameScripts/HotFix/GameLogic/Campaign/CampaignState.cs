@@ -56,12 +56,14 @@ namespace GameLogic.Campaign
 
         public string[] CompletedObjectiveIds = Array.Empty<string>();
         public string[] UnlockedContentIds = Array.Empty<string>();
-        /// <summary>FG2-FW-03（FG02 FGR-FW-042）：已开放命名的具名反应批次（第一幕 act1 开局即开放，不记在这里；其余由阵营推进时
-        /// <see cref="Content.NamedReactionCatalog.OpenBatch"/> 写入）。旧存档没有这个字段时为空 = 只开放第一幕。</summary>
+        /// <summary>FG2-FW-03（FG02 FGR-FW-042）：旧存档里已开放命名的具名反应批次。EMG2-DISC-01（FGR-EMG-190 / 212）起不再写入，字段保留：
+        /// 只读来判断“这批的名字已经通知过”（<see cref="Content.NamedReactionCatalog.WasAnnouncedByOldBatch"/>），首次结算不再弹“新发现”。</summary>
         public string[] OpenReactionBatches = Array.Empty<string>();
         /// <summary>FG2-FW-04（FG02 FGR-FW-043 / 第 6 节“每个存档里各反应的首次触发记录，以及图鉴解锁状态”）：本存档里每条具名反应第一次报出名字的触发
         /// （唯一写入口 <see cref="Combat.ReactionFeedback"/>）。有记录 = 反应图鉴条目已解锁；慢放与镜头推动只在记录新写入的那一次发生。</summary>
         public ReactionFirstTriggerRecord[] ReactionFirstTriggers = Array.Empty<ReactionFirstTriggerRecord>();
+        /// <summary>EMG2-DISC-01（FG19 FGR-EMG-190 / 183 / 212）：语法发现记录（第一次组成某代子弹药、第一次触发某种事件；阶段 3 起另有元程序）。新增字段缺省为空，不升 schema；图鉴界面归 EMG4-CODEX-01。</summary>
+        public GrammarDiscoveryRecord[] GrammarDiscoveries = Array.Empty<GrammarDiscoveryRecord>();
 
         public BuildingRecord[] BuildingRecords = Array.Empty<BuildingRecord>();
         public MachineRecord[] MachineRecords = Array.Empty<MachineRecord>();
@@ -310,6 +312,10 @@ namespace GameLogic.Campaign
                 .Where(r => r != null && !string.IsNullOrEmpty(r.ReactionId))
                 .GroupBy(r => r.ReactionId, StringComparer.Ordinal).Select(g => g.OrderBy(r => r.Tick).First())
                 .OrderBy(r => r.ReactionId, StringComparer.Ordinal).ToArray();
+            GrammarDiscoveries = (GrammarDiscoveries ?? Array.Empty<GrammarDiscoveryRecord>())
+                .Where(r => r != null && !string.IsNullOrEmpty(r.EntryId))
+                .GroupBy(r => r.EntryId, StringComparer.Ordinal).Select(g => g.OrderBy(r => r.Tick).First())
+                .OrderBy(r => r.EntryId, StringComparer.Ordinal).ToArray();
             BuildingRecords = (BuildingRecords ?? Array.Empty<BuildingRecord>())
                 .OrderBy(r => r.BuildingId, StringComparer.Ordinal).ToArray();
             MachineRecords = (MachineRecords ?? Array.Empty<MachineRecord>())

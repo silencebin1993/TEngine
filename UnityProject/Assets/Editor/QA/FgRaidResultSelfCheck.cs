@@ -760,11 +760,18 @@ namespace GameLogic.EditorTools
             }
             List<AwayLine> rl = lines.Where(l => l.Section == "reaction").ToList();
             string name = ReactionAttribution.DisplayName(s, rid);
-            double rDamage = r?.Reactions?.Where(x => x != null && (x.Count > 0 || x.Damage > 0)).Sum(x => Math.Max(0, x.Damage)) ?? 0;
+            double rDamage = ReactionAttribution.InteractionDamageOf(sess); // EMG2-DISC-01：占比按交互伤害（含没有规则键的）
             double rTotal = r?.ReactionTotal ?? 0;
             int allPct = rTotal > 0 ? Mathf.RoundToInt((float)(100.0 * Math.Min(1.0, rDamage / rTotal))) : 0;
-            bool row = rl.Count == 3 && rl[0].Text == GameText.Get("raid.result.sec.reaction") && rl[1].Text.Contains(name)
-                       && rl[2].Text == GameText.Format("raid.result.reaction_total", allPct) && !GameText.ContainsMarker(string.Join("\n", rl.Select(l => l.Text)));
+            string interaction = ReactionAttribution.InteractionLine(sess);
+            var awayLines = new List<AwayLine>();
+            if (r != null)
+            {
+                RaidResultService.AppendAway(s, r.UnfoldTick, r.EndTick, awayLines);
+            }
+            bool row = rl.Count == 4 && rl[0].Text == GameText.Get("raid.result.sec.reaction") && rl[1].Text.Contains(name)
+                       && rl[2].Text == GameText.Format("raid.result.reaction_total", allPct) && rl[3].Text == interaction
+                       && awayLines.Any(l => l.Section == "raid" && l.Text.Contains(interaction)) && !GameText.ContainsMarker(string.Join("\n", rl.Select(l => l.Text)));
             Expect(fired >= 1 && live != null && mine != null && mine.Count >= fired && sameAsSession && row,
                 $"B7 FGR-DEF-050 各反应的伤害贡献：攻城中凑齐“{name}”的两个配料（内核触发 {fired} 次，出手者炮塔单位 {tUnit}）→ 突袭场次记下；结束时结算复制这一场（去倍率后只记次数，伤害占比 0% 见 DEBT-EMG2REACT01-08）" +
                 $"（{rid} ×{mine?.Count}、伤害 {mine?.Damage:0.0} / 敌方全部 {r?.ReactionTotal:0.0}，与场次逐项一致 {sameAsSession}）；详情“反应贡献”段 {rl.Count} 行（{string.Join(" / ", rl.Select(l => l.Text))}）");

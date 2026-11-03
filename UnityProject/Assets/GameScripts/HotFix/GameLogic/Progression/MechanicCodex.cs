@@ -307,11 +307,6 @@ namespace GameLogic.Progression
                     {
                         return GameLogic.Localization.GameText.Get("reaction.codex.unreachable");
                     }
-                    if (state != null && !Campaign.Content.NamedReactionCatalog.IsBatchOpen(state, row.Batch))
-                    {
-                        // FG10-REACT-01：写这一批什么时候开放（化工 = 澄净领地出现在地图上）。
-                        return Campaign.Content.ReactionBatchService.ClosedHint(row.Batch);
-                    }
                     return GameLogic.Localization.GameText.Get("reaction.codex.locked");
                 case MechanicCodexKind.Research:
                     Campaign.Economy.ResearchNodeDef rn = Campaign.Economy.ResearchCatalog.Find(e.ContentId);
@@ -361,7 +356,7 @@ namespace GameLogic.Progression
                     Campaign.Content.StatusTagCatalog.NameOf(row.TagA) ?? row.TagA, Campaign.Content.StatusTagCatalog.NameOf(row.TagB) ?? row.TagB));
             }
             // FG10-REACT-01（卡片“图鉴条目写明触发方式”）：配料之外的具体打法（去哪拿配料、借敌人、哪些目标挂不上）。
-            string tip = Campaign.Content.ReactionBatchService.TipOf(row);
+            string tip = Campaign.Content.ReactionDiscoveryService.TipOf(row);
             if (!string.IsNullOrEmpty(tip))
             {
                 sb.AppendLine(tip);

@@ -445,7 +445,7 @@ namespace BinGames.Sim.Combat
         internal static void EmgFriendlyHit(ref CombatData d, in CombatProjectile pr, int victimId, double2 at)
         {
             EmgChainLog(ref d, EmgChainNode.Friendly, pr.Chain, pr.Depth, 0, victimId, at, pr.Owner);
-            d.EmgFriendly.Add(new int2(victimId, pr.Owner));
+            d.EmgFriendly.Add(new int3(victimId, pr.Owner, EmgFriendlyCode.Fragment));
         }
 
         /// <summary>破片命中一个单位：evt.hit（宿主 = 破片，Prog −1，链深 = 破片的链深）。按需：地点没有程序读 evt.hit 时不入队。</summary>

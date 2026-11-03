@@ -1108,11 +1108,11 @@ namespace GameLogic.EditorTools
                 "同一份快照再读一次：回到存档那一刻（读档幂等，子弹药 / 顺延请求不复制）；暂停 = 不步进，倍速只改每帧步数（内核步长固定），真实时钟的 0.5x / 1x / 3x 与暂停见 W 段");
 
             // 审查补充：段 11（待生成）/ 12（区域宿主）/ 13（回波宿主）的坏值——整份拒绝、内核原样。记录内偏移按 CombatKernel.WriteTriggerSegments 的字段顺序
-            // （待生成：At 8 + Pos 16 + Dir 8 + Damage/ZoneRadius/ZoneLife 12 → Prog @44 … Node @72、Depth @73，共 84 字节（EMG2-MAT-01 格式 17 尾部 + 记号高 8 位）；区域：ProgRef @0、Id @4、Chain @8、TrigUsed @12、Node @16、Depth @17 … 共 24；回波：ProgRef @0、Chain @4、Node @8、Depth @9，共 10）。
-            (int at, int stride) ps = FgEmergenceKernelSelfCheck.FindSegment(snap, EmgConst.SegPending, 26, pending);
+            // （待生成：At 8 + Pos 16 + Dir 8 + Damage/ZoneRadius/ZoneLife 12 → Prog @44 … Node @72、Depth @73，共 104 字节（EMG2-MAT-01 格式 17 尾部 + 记号高 8 位；EMG2-DISC-01 尾部 + 规则键 4 + 归属 16）；区域：ProgRef @0、Id @4、Chain @8、TrigUsed @12、Node @16、Depth @17 … 共 24；回波：ProgRef @0、Chain @4、Node @8、Depth @9，共 10）。
+            (int at, int stride) ps = FgEmergenceKernelSelfCheck.FindSegment(snap, EmgConst.SegPending, 31, pending);
             (int at, int stride) zs = FgEmergenceKernelSelfCheck.FindSegment(snap, EmgConst.SegZones, 9, zonesAtSave);
             (int at, int stride) es = FgEmergenceKernelSelfCheck.FindSegment(snap, EmgConst.SegEchoes, 4, echoes);
-            bool layout = ps.at > 0 && ps.stride == 84 && zs.at > 0 && zs.stride == 24 && es.at > 0 && es.stride == 10 && hostIdx.Length >= 2 && BitConverter.ToInt32(snap, es.at) > 0;
+            bool layout = ps.at > 0 && ps.stride == 104 && zs.at > 0 && zs.stride == 24 && es.at > 0 && es.stride == 10 && hostIdx.Length >= 2 && BitConverter.ToInt32(snap, es.at) > 0;
             var bad = new List<(string Name, byte[] Data)>();
             if (layout)
             {

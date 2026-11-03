@@ -422,6 +422,8 @@ namespace BinGames.Sim.Combat
         public double CondSince;
         /// <summary>归属：链上最多 4 台机器的单位 ID（ADR ⑨；合并时取份量大者）。</summary>
         public int4 Owners;
+        /// <summary>EMG2-DISC-01（FGR-EMG-182）：生成 / 转化出这块斑块的规则稳定键（0 = 不是规则产物，如排放写端）；这块斑块造成的伤害按它统计。</summary>
+        public int RuleKey;
         public byte Matter;
         public byte Layer;
         /// <summary><see cref="EmgMatterConst.FlagWorld"/> / <see cref="EmgMatterConst.FlagOilCovered"/> / <see cref="EmgMatterConst.FlagPersist"/>。</summary>

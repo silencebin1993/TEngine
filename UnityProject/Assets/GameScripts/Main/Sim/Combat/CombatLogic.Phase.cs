@@ -120,6 +120,10 @@ namespace BinGames.Sim.Combat
             EmgPhaseRule r = d.EmgPhases[k];
             EmgUnitState s = d.EmgUnit[u];
             s.PhaseMask = (ushort)(s.PhaseMask | (1 << k));
+            if (sourceId > 0 && !d.Has(u, CombatUnitFlags.ExternalHealth))
+            {
+                s.LastHitBy = sourceId; // EMG2-DISC-01：相态持续伤害的归属（外部血量单位这个字段已是“最后一次伤害请求者”）；不加每单位字段（K1）
+            }
             PhsTPut(ref s, k, math.max(0f, r.MinDwell));
             if (k == EmgPhaseConst.Charge)
             {
@@ -481,7 +485,10 @@ namespace BinGames.Sim.Combat
             float dps = perStack * math.max(0, level - tagStacks);
             if (dps > 0f)
             {
+                // EMG2-DISC-01：相变效果 = 交互伤害（FGR-EMG-182）；归属取最后一个把它推进相态的单位，没有规则键（燃烧不是一次规则结算）
+                EmgAttrBegin(ref d, 0, new int4(d.EmgUnit[i].LastHitBy, 0, 0, 0), EmgFriendlyCode.Reaction, 0);
                 DamageFrom(ref d, i, dps * dt, -1, EmgCode.SrcZone);
+                d.EmgAttr.On = 0;
             }
         }
 
@@ -618,6 +625,9 @@ namespace BinGames.Sim.Combat
                 side0.Prog = -1;
                 d.EmgCtx = side0;
             }
+            int4 shatterOwners = EmgChainAttr(ref d, saved.Chain, out _);
+            EmgOwnersAdd(ref shatterOwners, attackerId);
+            EmgAttrBegin(ref d, ri >= 0 ? d.EmgRules[ri].Key : 0, shatterOwners, EmgFriendlyCode.Reaction, saved.Chain); // EMG2-DISC-01：碎裂的附带伤害
             if (kill)
             {
                 EmgDestroyDirect(ref d, t, attacker);
@@ -626,6 +636,7 @@ namespace BinGames.Sim.Combat
             {
                 DamageFrom(ref d, t, side, attacker, EmgCode.SrcZone);
             }
+            d.EmgAttr.On = 0;
             d.EmgCtx = saved;
         }
 

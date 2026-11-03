@@ -106,7 +106,7 @@ namespace GameLogic.EditorTools
                 HomeExplorationService.ResetForTests();
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 NotificationCenter.AutoPauseHandler = null;
-                ReactionBatchService.ResetForTests();
+                ReactionDiscoveryService.ResetForTests();
 
                 Step(CheckData);
                 Step(CheckObtainable);
@@ -182,12 +182,10 @@ namespace GameLogic.EditorTools
             Reaction[] rows = ClarityRows().ToArray();
             bool names = rows.Length == SpecNames.Count && rows.All(r => SpecNames.TryGetValue(r.Id, out string n) && GameText.Get(r.NameKey) == n);
             bool reach = rows.All(r => r.Reach == NamedReactionCatalog.Reachable);
-            string[] noTip = rows.Where(r => string.IsNullOrEmpty(ReactionBatchService.TipOf(r))).Select(r => r.Id).ToArray();
-            bool closedHint = ReactionBatchService.ClosedHint(Batch) == GameText.Get("reaction.codex.closed_clarity");
-            bool notify = NotificationCatalog.TryGetType(ReactionBatchService.NotifyType, out _) && GameText.Has("reaction.batch.opened");
-            Expect(names && reach && noTip.Length == 0 && closedHint && notify,
-                $"A1 化工批 = {string.Join(" / ", rows.Select(r => GameText.Get(r.NameKey)))}（设计名一致 {names}），全部标可触发（{reach}）；每条有打法提示（缺 {string.Join(",", noTip)}）；" +
-                $"未开放时图鉴写“{ReactionBatchService.ClosedHint(Batch)}”；开放通知类型与文本（{notify}）");
+            string[] noTip = rows.Where(r => string.IsNullOrEmpty(ReactionDiscoveryService.TipOf(r))).Select(r => r.Id).ToArray();
+            bool notify = NotificationCatalog.TryGetType(ReactionDiscoveryService.NotifyType, out NotifyTypeDef notifyDef) && notifyDef.Tier == NotifyLevel.Info && GameText.Has("reaction.discovery.named");
+            Expect(names && reach && noTip.Length == 0 && notify,
+                $"A1 化工批 = {string.Join(" / ", rows.Select(r => GameText.Get(r.NameKey)))}（设计名一致 {names}），全部标可触发（{reach}）；每条有打法提示（缺 {string.Join(",", noTip)}）；“新发现”通知信息级、文本在（{notify}）");
         }
 
         // ─────────────────────────────── B 可得性探针 ───────────────────────────────
@@ -321,55 +319,32 @@ namespace GameLogic.EditorTools
 
         private static void CheckOpening()
         {
+            // EMG2-DISC-01（回改 FG10-REACT-01，FGR-EMG-190）：批次开放退役——第一幕也报名字；领地出现在地图上不开放、不通知、不写批次字段。
             CampaignState s = NewWorldState(42);
             PlannedTerritory lake = WorldGenService.PlanFor(s)?.Find(EnemyDefs.FactionClarity);
             Reaction burn = ClarityRows().First(r => r.Id == "reaction_causticburn");
             MechanicCodexEntry entry = MechanicCodex.Find(MechanicCodex.ReactionEntryId(burn.Id));
-            long tick = GameClock.StepHz * 10L;
-            int opened0 = ReactionBatchService.Opened;
-            ReactionBatchService.WorldStep(s, tick);
-            bool closedAct1 = !NamedReactionCatalog.IsBatchOpen(s, Batch) && !NamedReactionCatalog.IsNamed(s, burn.Id) && lake != null && !HomeExplorationService.TerritoryVisible(s, lake)
-                              && MechanicCodex.Hint(entry, s) == ReactionBatchService.ClosedHint(Batch);
-            if (s.Progress != null)
-            {
-                s.Progress.Act = Math.Max(2, s.Progress.Act); // 第二幕：澄净领地在地图上显示
-            }
-            int notes0 = NotificationCenter.History.Count(n => n.Type != null && n.Type.Id == ReactionBatchService.NotifyType);
-            ReactionBatchService.WorldStep(s, tick + 1); // 不是整游戏秒：这一步不查
-            bool waitsForSecond = !NamedReactionCatalog.IsBatchOpen(s, Batch);
-            ReactionBatchService.WorldStep(s, tick + GameClock.StepHz);
-            bool open = NamedReactionCatalog.IsBatchOpen(s, Batch) && ReactionBatchService.Opened == opened0 + 1 && ClarityRows().All(r => NamedReactionCatalog.IsNamed(s, r.Id));
-            NotificationEntry note = NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == ReactionBatchService.NotifyType);
-            string text = note?.Latest?.DetailText ?? note?.Text ?? string.Empty;
-            bool listed = SpecNames.Values.All(text.Contains);
-            ReactionBatchService.WorldStep(s, tick + GameClock.StepHz * 2);
-            int notes1 = NotificationCenter.History.Count(n => n.Type != null && n.Type.Id == ReactionBatchService.NotifyType);
-            bool once = ReactionBatchService.Opened == opened0 + 1;
-            bool hintOpen = MechanicCodex.Hint(entry, s) == GameText.Get("reaction.codex.locked");
-            bool tipInBody = MechanicCodex.Body(entry, s).Contains(ReactionBatchService.TipOf(burn));
-            Expect(closedAct1 && waitsForSecond && open && listed && once && notes1 >= notes0 + 1 && hintOpen && tipInBody,
-                $"D1 第一幕不开放（图鉴写“{ReactionBatchService.ClosedHint(Batch)}”）；澄净领地出现在地图上后的整游戏秒开放化工批并通知一次（“{text}”），之后不重复（{once}）；" +
-                $"开放后四条都报名字，图鉴提示变成“{GameText.Get("reaction.codex.locked")}”，正文含打法提示（{tipInBody}）");
+            bool namedAct1 = lake != null && !HomeExplorationService.TerritoryVisible(s, lake) && ClarityRows().All(r => NamedReactionCatalog.IsNamed(s, r.Id));
+            string hint = MechanicCodex.Hint(entry, s);
+            bool tipInBody = MechanicCodex.Body(entry, s).Contains(ReactionDiscoveryService.TipOf(burn));
+            Expect(namedAct1 && hint == GameText.Get("reaction.codex.locked") && tipInBody && (s.OpenReactionBatches?.Length ?? 0) == 0,
+                $"D1 第一幕（领地不在地图上）四条都报名字（{namedAct1}），图鉴提示“{hint}”，正文含打法提示（{tipInBody}），批次字段空");
 
-            // D2 种子无关（B25）：种子测试集里每个世界都有澄净领地，第一幕不开放、第二幕的整游戏秒开放。
+            // D2 种子无关（B25）：种子测试集里每个世界都有澄净领地，第一幕第一次结算就算首次发现。
             var seeds = new List<string>();
             bool allSeeds = true;
             foreach (int seed in new[] { 1, 42, 20261017 })
             {
                 CampaignState w = NewWorldState(seed);
                 bool hasLake = WorldGenService.PlanFor(w)?.Find(EnemyDefs.FactionClarity) != null;
-                ReactionBatchService.WorldStep(w, tick);
-                bool shut = !NamedReactionCatalog.IsBatchOpen(w, Batch);
-                if (w.Progress != null)
-                {
-                    w.Progress.Act = Math.Max(2, w.Progress.Act);
-                }
-                ReactionBatchService.WorldStep(w, tick + GameClock.StepHz);
-                bool ok = hasLake && shut && NamedReactionCatalog.IsBatchOpen(w, Batch);
+                int posted0 = ReactionDiscoveryService.Posted;
+                bool first = ReactionFeedback.RecordFirst(w, burn.Id, SiteId);
+                bool second = ReactionFeedback.RecordFirst(w, burn.Id, SiteId);
+                bool ok = hasLake && first && !second && ReactionDiscoveryService.Posted == posted0 + 1;
                 allSeeds &= ok;
                 seeds.Add($"{seed}:{ok}");
             }
-            Expect(allSeeds, $"D2 种子测试集（{string.Join(" ", seeds)}）：都有澄净领地，第一幕不开放、第二幕开放");
+            Expect(allSeeds, $"D2 种子测试集（{string.Join(" ", seeds)}）：都有澄净领地；不等领地显示，第一次结算记录一次、提示一次");
         }
 
         // ─────────────────────────────── E 首次触发慢放 ───────────────────────────────
@@ -394,16 +369,19 @@ namespace GameLogic.EditorTools
                     site.Step(1f / 60f, site.Kernel.Time + 1f / 60f);
                 }
                 int slow0 = GameClock.SlowMotionStarts;
+                int posted0 = ReactionDiscoveryService.Posted;
                 Deflagrate(0);
-                bool closedQuiet = GameClock.SlowMotionStarts == slow0 && !ReactionFeedback.IsFirstTriggered(s, "reaction_deflagrate");
-                ReactionBatchService.Open(s, Batch);
-                Deflagrate(2);
                 bool firstSlow = GameClock.SlowMotionStarts == slow0 + 1 && ReactionFeedback.IsFirstTriggered(s, "reaction_deflagrate");
+                NotificationEntry note = NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == ReactionDiscoveryService.NotifyType);
+                string text = note?.Latest?.DetailText ?? string.Empty;
+                bool told = ReactionDiscoveryService.Posted == posted0 + 1 && text.Contains(GameText.Get("reaction.deflagrate.name"));
                 GameClock.CancelSlowMotion();
+                int notes1 = ReactionDiscoveryService.Posted;
+                Deflagrate(2);
                 Deflagrate(4);
-                bool noSecond = GameClock.SlowMotionStarts == slow0 + 1 && s.ReactionFirstTriggers.Count(r => r.ReactionId == "reaction_deflagrate") == 1;
-                Expect(closedQuiet && firstSlow && noSecond,
-                    $"E1 首次触发（FGR-FW-043）：开放前打出爆燃不慢放、不算首次（{closedQuiet}）；开放后第一次 → 慢放一次 + 首次记录（图鉴解锁）（{firstSlow}）；第二次不再慢放（{noSecond}）");
+                bool noSecond = GameClock.SlowMotionStarts == slow0 + 1 && s.ReactionFirstTriggers.Count(r => r.ReactionId == "reaction_deflagrate") == 1 && ReactionDiscoveryService.Posted == notes1;
+                Expect(firstSlow && told && noSecond,
+                    $"E1 首次发现（FGR-EMG-190，取代“开放后第一次”）：第一次打出爆燃 → 慢放一次 + 首次记录（{firstSlow}）+ “新发现”通知（“{text}”，{told}）；第二、三次只计数：不慢放、不再提示（{noSecond}）");
             }
             GameClock.CancelSlowMotion();
         }
@@ -421,37 +399,33 @@ namespace GameLogic.EditorTools
                 {
                     w.Progress.Act = Math.Max(2, w.Progress.Act); // 澄净领地在地图上显示
                 }
-                int opened0 = ReactionBatchService.Opened;
+                int posted0 = ReactionDiscoveryService.Posted;
                 GameClock.SetPaused(true);
                 for (int i = 0; i < 30; i++)
                 {
                     WorldSimulation.Frame(0.1f);
                 }
-                bool pausedShut = !NamedReactionCatalog.IsBatchOpen(w, Batch) && ReactionBatchService.Opened == opened0;
+                bool pausedQuiet = (w.OpenReactionBatches?.Length ?? 0) == 0 && ReactionDiscoveryService.Posted == posted0;
                 GameClock.SetPaused(false);
                 GameClock.SetSpeed(speed);
-                long visibleAt = GameClock.Ticks;
-                long deadline = (visibleAt / GameClock.StepHz + 1) * GameClock.StepHz; // 下一个整游戏秒
-                long openedAt = -1;
-                for (int i = 0; i < 4000 && GameClock.Ticks < deadline + GameClock.StepHz * 2; i++)
+                long t0 = GameClock.Ticks;
+                for (int i = 0; i < 4000 && GameClock.Ticks < t0 + GameClock.StepHz * 3; i++)
                 {
                     WorldSimulation.Frame(1f / 60f);
-                    if (openedAt < 0 && NamedReactionCatalog.IsBatchOpen(w, Batch))
-                    {
-                        openedAt = GameClock.Ticks;
-                    }
                 }
                 GameClock.SetSpeed(1f);
-                // 一帧可能推进多步：记下的是开放那一帧结束时的步号，应落在整秒那一步到整秒后一秒之间。
-                bool onTime = openedAt >= deadline && openedAt < deadline + GameClock.StepHz;
-                bool once = ReactionBatchService.Opened == opened0 + 1;
-                ok &= pausedShut && onTime && once;
-                lines.Add($"{speed}x 暂停不开放 {pausedShut} / 第 {openedAt - visibleAt} 步开放（整秒在第 {deadline - visibleAt} 步）/ 只开放一次 {once}");
+                // EMG2-DISC-01：领地在地图上显示也不再有“整秒开放”；世界步进不写批次字段（OpenBatch 已没有生产调用）。
+                bool quiet = (w.OpenReactionBatches?.Length ?? 0) == 0 && GameClock.Ticks >= t0 + GameClock.StepHz * 3;
+                (bool discovery, bool attribution, int friendly) = DiscoverySpeedScene(w, speed);
+                bool friendlyOk = friendly >= 3 && friendly <= 5;
+                ok &= pausedQuiet && quiet && discovery && attribution && friendlyOk;
+                lines.Add($"{speed}x 暂停无变化 {pausedQuiet} / 走 3 游戏秒不写批次字段 {quiet} / 首次发现一次 {discovery} / 暂停不记交互伤害 {attribution} / 4 游戏秒持续友伤发 {friendly} 条");
             }
             Expect(ok, $"F1 正式世界步进：{string.Join("；", lines)}");
 
-            // F2 真实存档 → 读档（最后一档的世界：化工批已开放）。
+            // F2 真实存档 → 读档（旧档写过的批次字段照样保留，只读）。
             CampaignState s = CampaignSession.Current;
+            s.OpenReactionBatches = new[] { Batch };
             SaveResult sv = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
             WorldSimulation.UnloadAll();
             GameClock.ResetSession();
@@ -469,18 +443,88 @@ namespace GameLogic.EditorTools
             CampaignState back = rr.State;
             HomeValleyController hv = WorldSimulation.LoadHome(resume: true);
             WorldView.Observe(hv.SiteId);
-            int openedBack = ReactionBatchService.Opened;
+            int postedBack = ReactionDiscoveryService.Posted;
             WorldSimulation.StepMany(GameClock.StepHz * 2);
-            bool kept = NamedReactionCatalog.IsBatchOpen(back, Batch) && ClarityRows().All(r => NamedReactionCatalog.IsNamed(back, r.Id)) && ReactionBatchService.Opened == openedBack;
+            bool kept = back.OpenReactionBatches != null && back.OpenReactionBatches.Contains(Batch) && ClarityRows().All(r => NamedReactionCatalog.IsNamed(back, r.Id)
+                && NamedReactionCatalog.WasAnnouncedByOldBatch(back, r.Id)) && ReactionDiscoveryService.Posted == postedBack;
 
-            // 旧档没有开放字段：读进来是未开放；进第二幕后第一个整游戏秒补开放。
+            // 旧档没有批次字段：读进来为空，名字照样报，只是没有“已告知过”。
             CampaignState legacy = JsonUtility.FromJson<CampaignState>(SaveMigrationJson.RemoveField(JsonUtility.ToJson(back), "OpenReactionBatches"));
             CampaignFgStateDomains.EnsureAll(legacy);
-            bool legacyShut = legacy != null && !NamedReactionCatalog.IsBatchOpen(legacy, Batch);
-            ReactionBatchService.WorldStep(legacy, GameClock.StepHz * 1000L);
-            bool legacyOpen = legacy != null && NamedReactionCatalog.IsBatchOpen(legacy, Batch);
-            Expect(s != null && kept && legacyShut && legacyOpen,
-                $"F2 存读档：读档后化工批仍开放、四条都报名字，再走 2 个游戏秒不重发（{kept}）；旧档无字段 → 未开放（{legacyShut}）→ 第二幕第一个整游戏秒补开放（{legacyOpen}）");
+            bool legacyOk = legacy != null && (legacy.OpenReactionBatches?.Length ?? 0) == 0 && ClarityRows().All(r => NamedReactionCatalog.IsNamed(legacy, r.Id) && !NamedReactionCatalog.WasAnnouncedByOldBatch(legacy, r.Id));
+            Expect(s != null && kept && legacyOk,
+                $"F2 存读档：读档后批次字段原样、四条都报名字、算已告知，再走 2 个游戏秒不弹提示（{kept}）；旧档无字段 → 为空、照样报名字（{legacyOk}）");
+
+            // F3 旧档走完整读档流程（CampaignRestoreOrchestrator，FG10-REACT-01 遗留 P2）：新字段取缺省，首次记录原样，读档不补弹。
+            string firstJson = JsonUtility.ToJson(back).Contains("ReactionFirstTriggers") ? string.Join(",", back.ReactionFirstTriggers.Select(r => r.ReactionId)) : string.Empty;
+            SaveResult sv3 = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            string strip = FgEmgDiscoverySelfCheck.RewriteAsOldSave(Slot, out int schema3);
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            MachineRegistry.ResetForNewCampaign();
+            MachineLoadoutRegistry.Clear();
+            HomeGridService.Invalidate();
+            WorldGenService.Invalidate();
+            int posted3 = ReactionDiscoveryService.Posted;
+            RestoreResult rr3 = CampaignRestoreOrchestrator.Restore(Slot);
+            bool old3 = sv3.Success && strip == null && rr3.Success && schema3 == CampaignSaveService.CurrentSchemaVersion && (rr3.State.GrammarDiscoveries?.Length ?? 0) == 0
+                        && string.Join(",", rr3.State.ReactionFirstTriggers.Select(r => r.ReactionId)) == firstJson && ReactionDiscoveryService.Posted == posted3;
+            if (rr3.Success)
+            {
+                CampaignSession.Set(Slot, rr3.State);
+                HomeValleyController hv3 = WorldSimulation.LoadHome(resume: true);
+                WorldView.Observe(hv3.SiteId);
+                WorldSimulation.StepMany(GameClock.StepHz);
+                old3 &= ReactionDiscoveryService.Posted == posted3;
+            }
+            Expect(old3, $"F3 旧档（本 Story 之前的字段）走完整读档：schema {schema3}、语法发现为空、首次记录原样、读档与之后 1 个游戏秒都不补弹（{strip ?? rr3.Message}）");
+        }
+
+        /// <summary>
+        /// EMG2-DISC-01 倍速矩阵（B09）：家园一场突袭里 A 的明火点着 B 的油、己方 V 站在 A 的明火里，走真实世界步进。
+        /// 返回：爆燃只算一次首次发现；暂停时交互伤害不变、走起来才涨；友伤通知条数（同一组合每游戏秒最多一条）。
+        /// </summary>
+        private static (bool Discovery, bool Attribution, int Friendly) DiscoverySpeedScene(CampaignState w, float speed)
+        {
+            CombatSite home = CombatSites.Get(GameLogic.Campaign.Regions.HomeValleyLayout.RegionId);
+            CombatKernel k = home.Kernel;
+            int Own(double2 at) => k.Spawn(new CombatSpawn
+            {
+                ExtKey = -1, Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.None,
+                Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable, Position = at, Home = at, Radius = 0.5f, Health = 100000f, MaxHealth = 100000f, Weapon = -1, BehaviorProfile = -1, Priority = 1,
+            });
+            var c = new double2(120, 120);
+            int a = Own(c + new double2(0, 30));
+            int b = Own(c + new double2(0, 34));
+            int v = Own(c);
+            k.Spawn(Hostile(c + new double2(3, 0), -1));
+            ReactionAttribution.BeginRaid(w, "disc-" + speed);
+            WorldSimulation.StepMany(1);
+            k.SpawnPatch(EmgMatterConst.Fire, c, 2f, 1f, 8f, a, false, 7);
+            k.SpawnPatch(EmgMatterConst.Oil, c + new double2(3, 0), 2f, 5f, 0f, b, false, 0);
+            long friendly0 = ReactionFeedback.FriendlyPosted;
+            int posted0 = ReactionDiscoveryService.Posted;
+            GameClock.SetSpeed(speed);
+            long t0 = GameClock.Ticks;
+            for (int i = 0; i < 4000 && GameClock.Ticks < t0 + GameClock.StepHz * 4; i++)
+            {
+                WorldSimulation.Frame(1f / 60f);
+            }
+            GameClock.SetSpeed(1f);
+            GameClock.CancelSlowMotion();
+            int friendly = (int)(ReactionFeedback.FriendlyPosted - friendly0);
+            ReactionSessionRecord sess = ReactionAttribution.Current(w, home.SiteId, create: false);
+            double dmg = sess?.InteractionDamage ?? 0;
+            GameClock.SetPaused(true);
+            for (int i = 0; i < 30; i++)
+            {
+                WorldSimulation.Frame(0.1f);
+            }
+            bool pausedSame = Math.Abs((sess?.InteractionDamage ?? 0) - dmg) < 1e-9;
+            GameClock.SetPaused(false);
+            ReactionAttribution.EndRaid(w);
+            bool discovery = w.ReactionFirstTriggers.Count(r => r.ReactionId == "reaction_deflagrate") == 1 && ReactionDiscoveryService.Posted > posted0;
+            return (discovery, pausedSame && dmg > 0, friendly);
         }
 
         /// <summary>带家园的正式世界（与 FgSettlingLakeSelfCheck 同一夹具，去掉信号接入部分）。</summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BinGames.Sim.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Regions;
@@ -156,6 +157,117 @@ namespace GameLogic.Campaign.Combat
             Revision++;
         }
 
+        // ─────────────────────────────── EMG2-DISC-01：交互链口径（FG19 FGR-EMG-182，B19）───────────────────────────────
+
+        /// <summary>规则结算次数（可靠计数的增量）。</summary>
+        public static void AddInteractions(CampaignState state, string siteId, int count)
+        {
+            ReactionSessionRecord s = count > 0 ? Current(state, siteId, create: true) : null;
+            if (s != null)
+            {
+                s.InteractionCount += count;
+                Revision++;
+            }
+        }
+
+        /// <summary>一场新发现 + 1（具名交互 / 语法条目第一次写记录时）。没有场次的地点（家园平时）不记。</summary>
+        public static void AddDiscovery(CampaignState state, string siteId)
+        {
+            ReactionSessionRecord s = Current(state, siteId, create: true);
+            if (s != null)
+            {
+                s.NewDiscoveries++;
+                Revision++;
+            }
+        }
+
+        public static void NoteChainDepth(CampaignState state, string siteId, int depth)
+        {
+            ReactionSessionRecord s = Current(state, siteId, create: true);
+            if (s != null && depth > s.MaxChainDepth)
+            {
+                s.MaxChainDepth = depth;
+                Revision++;
+            }
+        }
+
+        /// <summary>
+        /// 内核合并好的一条交互伤害：进这一场的交互伤害；有规则键的按键记到对应行（具名 = 反应 ID，通道规则 = 稳定键文本）；按归属里的机器平分（最多 4 台，敌方与炮塔不分）。
+        /// shortcut: 机器的单位已注销时分不到（通常是撤离后的残留斑块），要算全时需内核存 LogicId，统计面板要求逐机完全守恒时再改。
+        /// </summary>
+        public static void AddInteractionDamage(CampaignState state, CombatSite site, in EmgAttrRow row)
+        {
+            ReactionSessionRecord s = row.Damage > 0 ? Current(state, site.SiteId, create: true) : null;
+            if (s == null)
+            {
+                return;
+            }
+            s.InteractionDamage += row.Damage;
+            if (row.Key != 0)
+            {
+                AddReaction(state, site.SiteId, NamedReactionCatalog.IdOfKey(row.Key) ?? RuleRowId(row.Key), 0, row.Damage);
+            }
+            int machines = 0;
+            for (int q = 0; q < 4; q++)
+            {
+                machines += row.Owners[q] != 0 && site.TryGetMachineOfUnit(row.Owners[q], out _) ? 1 : 0;
+            }
+            for (int q = 0; q < 4 && machines > 0; q++)
+            {
+                if (row.Owners[q] != 0 && site.TryGetMachineOfUnit(row.Owners[q], out int logicId))
+                {
+                    AddCredit(s, logicId, row.Damage / machines);
+                }
+            }
+            Revision++;
+        }
+
+        /// <summary>没有图鉴名字的通道规则在场次记录里的行键（显示时取规则说明文本）。</summary>
+        public static string RuleRowId(int key) => RulePrefix + key.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        private const string RulePrefix = "rule:";
+
+        private static void AddCredit(ReactionSessionRecord s, int logicId, double damage)
+        {
+            s.Credits ??= Array.Empty<InteractionCreditRecord>();
+            foreach (InteractionCreditRecord c in s.Credits)
+            {
+                if (c.LogicId == logicId)
+                {
+                    c.Damage += damage;
+                    return;
+                }
+            }
+            var grown = new InteractionCreditRecord[s.Credits.Length + 1];
+            Array.Copy(s.Credits, grown, s.Credits.Length);
+            grown[s.Credits.Length] = new InteractionCreditRecord { LogicId = logicId, Damage = damage };
+            Array.Sort(grown, (a, b) => a.LogicId.CompareTo(b.LogicId));
+            s.Credits = grown;
+        }
+
+        /// <summary>这一场的交互伤害：旧场次没有 InteractionDamage 字段，取按反应记的额外伤害。</summary>
+        public static double InteractionDamageOf(ReactionSessionRecord s)
+        {
+            double rows = 0;
+            foreach (ReactionShareRecord r in s?.Reactions ?? Array.Empty<ReactionShareRecord>())
+            {
+                rows += r != null ? Math.Max(0, r.Damage) : 0;
+            }
+            return Math.Max(rows, s?.InteractionDamage ?? 0);
+        }
+
+        /// <summary>一场的交互行：“交互 12 次 · 交互伤害占 30% · 最长链深 2 · 新发现 1 条”。这一场什么交互都没有时返回 null。</summary>
+        public static string InteractionLine(ReactionSessionRecord s)
+        {
+            double damage = InteractionDamageOf(s);
+            if (s == null || (s.InteractionCount == 0 && damage <= 0 && s.MaxChainDepth == 0 && s.NewDiscoveries == 0))
+            {
+                return null;
+            }
+            double fraction = s.TotalDamage > 0 ? Math.Min(1.0, damage / s.TotalDamage) : 0;
+            return GameText.Format("reaction.attr.interaction", s.InteractionCount, Percent(fraction), s.MaxChainDepth, s.NewDiscoveries);
+        }
+
         /// <summary>突袭开始（FG6-DEF-05 突袭队到达家园、展开成单位时调用）：家园此后的伤害记到这一场。已有进行中的突袭时返回它（不重复开）。</summary>
         public static ReactionSessionRecord BeginRaid(CampaignState state, string raidKey, string siteId = HomeValleyLayout.RegionId)
         {
@@ -262,6 +374,7 @@ namespace GameLogic.Campaign.Combat
                 }
                 sessions++;
                 totalDamage += Math.Max(0, s.TotalDamage);
+                reactionDamage += InteractionDamageOf(s); // EMG2-DISC-01：含没有规则键的交互伤害
                 if (s.Reactions == null)
                 {
                     continue;
@@ -274,7 +387,6 @@ namespace GameLogic.Campaign.Combat
                     }
                     sums.TryGetValue(r.ReactionId, out (int Count, double Damage) cur);
                     sums[r.ReactionId] = (cur.Count + Math.Max(0, r.Count), cur.Damage + Math.Max(0, r.Damage));
-                    reactionDamage += Math.Max(0, r.Damage);
                 }
             }
             var list = new List<Share>(sums.Count);
@@ -286,9 +398,18 @@ namespace GameLogic.Campaign.Combat
             return list;
         }
 
-        /// <summary>反应在归因 / 日志里的显示名：开放命名的显示机械名，没开放的显示“未知反应”（与战斗里不报名字一致）。</summary>
-        public static string DisplayName(CampaignState state, string reactionId) =>
-            NamedReactionCatalog.IsNamed(state, reactionId) ? NamedReactionCatalog.NameOf(reactionId) : GameText.Get("reaction.unnamed");
+        /// <summary>反应在归因 / 日志里的显示名：具名的显示机械名；没有图鉴名字的通道规则显示规则说明；其余（表里不可触发的行）显示“未知反应”。</summary>
+        public static string DisplayName(CampaignState state, string reactionId)
+        {
+            if (NamedReactionCatalog.IsNamed(state, reactionId))
+            {
+                return NamedReactionCatalog.NameOf(reactionId);
+            }
+            string text = reactionId != null && reactionId.StartsWith(RulePrefix, StringComparison.Ordinal)
+                && int.TryParse(reactionId.Substring(RulePrefix.Length), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int key)
+                ? Emergence.EmgRuleCatalog.TextOfKey(key) : null;
+            return text ?? GameText.Get("reaction.unnamed");
+        }
 
         /// <summary>一场的一行摘要（统计 / 撤离报告）：“反应伤害占比：短路 12%、热震 5%”；没有反应时写“本场没有打出反应”。</summary>
         public static string Summary(CampaignState state, ReactionSessionRecord s, int maxItems = 3)
@@ -297,17 +418,19 @@ namespace GameLogic.Campaign.Combat
             {
                 return GameText.Get("reaction.attr.none");
             }
+            string interaction = InteractionLine(s); // EMG2-DISC-01（B19）：离家报告 / 撤离报告都走这里
             List<Share> shares = SharesOf(s);
             if (shares.Count == 0)
             {
-                return GameText.Get("reaction.attr.none");
+                return interaction ?? GameText.Get("reaction.attr.none");
             }
             var parts = new List<string>();
             for (int i = 0; i < shares.Count && i < maxItems; i++)
             {
                 parts.Add(GameText.Format("reaction.attr.item", DisplayName(state, shares[i].ReactionId), Percent(shares[i].Fraction), shares[i].Count));
             }
-            return GameText.Format("reaction.attr.summary", string.Join(GameText.Get("reaction.attr.sep"), parts));
+            string summary = GameText.Format("reaction.attr.summary", string.Join(GameText.Get("reaction.attr.sep"), parts));
+            return interaction != null ? summary + GameText.Get("rules.sep_dot") + interaction : summary;
         }
 
         public static string Percent(double fraction) =>

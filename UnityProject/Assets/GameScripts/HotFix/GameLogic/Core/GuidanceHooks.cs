@@ -650,6 +650,9 @@ namespace GameLogic.Core
         /// <summary>EMG2-PHS-01（FG19 FGR-EMG-100～101）：第一次有单位进入相态（冻结 / 熔穿 / 麻痹 / 破甲 / 磁化 / 燃烧；引导内容在 FG15-UX-04：累积量与阈值、免疫窗、抗性、头顶图标怎么读）。</summary>
         public const string EmgFirstPhase = "emg_first_phase";
 
+        /// <summary>EMG2-DISC-01（FG19 FGR-EMG-190）：第一次有新发现（具名交互 / 语法条目；引导内容在 FG15-UX-04：首次发现即进图鉴、因果链怎么看）。</summary>
+        public const string EmgFirstDiscovery = "emg_first_discovery";
+
         /// <summary>本 Story 埋下的全部钩子（FG15-UX-04 的“钩子 ↔ 引导内容”对照表从这里取）。</summary>
         public static readonly IReadOnlyList<string> Known = new[]
         {
@@ -659,7 +662,7 @@ namespace GameLogic.Core
             WorldFirstGenerating,
             WorldFirstFocusSwitch, WorldFirstDispatch, WorldFirstRaidInTransit,
             LogisticsFirstBelt, LogisticsFirstBlocked,
-            SignalCoreFirstOpen, CircuitUplinkFirstSeen, EmgFirstMatter, EmgFirstPhase,
+            SignalCoreFirstOpen, CircuitUplinkFirstSeen, EmgFirstMatter, EmgFirstPhase, EmgFirstDiscovery,
             SignalFirstUplink,
             SignalFirstEncryptedFirmware, ExposurePanelFirstOpen,
             SignalCoverageFirstOverlay, SignalCoverageFirstLeft, SignalRelayFirstCut, SignalFirstFarJump,

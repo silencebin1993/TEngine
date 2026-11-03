@@ -109,7 +109,8 @@ namespace BinGames.Sim.Combat
             EmgDirty = new NativeList<short>(8, Allocator.Persistent);
             EmgDirtyMark = new NativeArray<byte>(EmgConst.RuleSlots, Allocator.Persistent);
             EmgEraDirty = new NativeList<int>(8, Allocator.Persistent);
-            EmgFriendly = new NativeList<int2>(8, Allocator.Persistent);
+            EmgFriendly = new NativeList<int3>(8, Allocator.Persistent);
+            EmgAttrRows = new NativeList<EmgAttrRow>(8, Allocator.Persistent);
         }
 
         private void EmgDispose()
@@ -157,6 +158,7 @@ namespace BinGames.Sim.Combat
             EmgDirtyMark.Dispose();
             EmgEraDirty.Dispose();
             EmgFriendly.Dispose();
+            EmgAttrRows.Dispose();
         }
 
         private void EmgAppend()
@@ -216,6 +218,12 @@ namespace BinGames.Sim.Combat
             EmgEraDirtyPublished = 0;
             EmgFriendly.Clear();
             EmgFriendlyPublished = 0;
+            EmgAttrRows.Clear();
+            EmgAttrPublished = 0;
+            EmgAttr = default;
+            EmgRuleKeyNow = 0;
+            EmgRuleOwnersNow = int4.zero;
+            EmgDepthPublished = 0;
         }
 
         /// <summary>EMG1-BUS-01：清调试计数（清战斗状态时；读档换一份新数据时天然为 0）。</summary>

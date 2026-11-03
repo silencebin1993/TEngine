@@ -468,17 +468,18 @@ namespace GameLogic.EditorTools
                 site.Kernel.ApplyStatus(e, NamedReactionCatalog.BitOf("Oil"), 5f, 0f, 0f, 0f, 0);
                 site.Kernel.ApplyStatus(e, NamedReactionCatalog.BitOf("Fire"), 3f, fireDps, 0f, 0f, 0);
                 StepSite(site, 1);
-                bool notFirst = !ReactionFeedback.IsFirstTriggered(s, "reaction_deflagrate") && ReactionPopups.Active.Count == 0;
+                // EMG2-DISC-01（FGR-EMG-190）：不再有“未开放时不报名字”——第一次结算即报名字、写首次记录；第二次只计数。
+                bool first = ReactionFeedback.IsFirstTriggered(s, "reaction_deflagrate");
+                int recorded = ReactionFeedback.FirstTriggersRecorded;
                 ReactionLogEntry entry = ReactionLog.Filtered(ReactionLogFilter.All, s).FirstOrDefault(x => x.ReactionId == "reaction_deflagrate");
-                bool logged = entry != null && !entry.Named && ReactionLog.Describe(s, entry).Contains(GameText.Get("reaction.unnamed")) && !ReactionLog.Describe(s, entry).Contains("爆燃");
-                NamedReactionCatalog.OpenBatch(s, "clarity");
+                bool logged = entry != null && entry.Named && entry.First && ReactionLog.Describe(s, entry).Contains("爆燃") && !ReactionLog.Describe(s, entry).Contains(GameText.Get("reaction.unnamed"));
                 int e2 = site.Kernel.Spawn(Arena.HostileSpawn(new double2(3, 3)));
                 StepSite(site, 1);
                 site.Kernel.ApplyStatus(e2, NamedReactionCatalog.BitOf("Oil"), 5f, 0f, 0f, 0f, 0);
                 site.Kernel.ApplyStatus(e2, NamedReactionCatalog.BitOf("Fire"), 3f, fireDps, 0f, 0f, 0);
                 StepSite(site, 1);
-                Expect(notFirst && logged && ReactionFeedback.IsFirstTriggered(s, "reaction_deflagrate"),
-                    "化工未开放时的爆燃：照样触发并进日志（显示“未知反应”，不漏名字），不算首次、不弹字；开放化工后再触发 → 首次记录写入");
+                Expect(first && logged && ReactionFeedback.FirstTriggersRecorded == recorded,
+                    $"爆燃第一次结算：报名字、进日志、写首次记录（{first} / {logged}）；第二次不再写记录（{ReactionFeedback.FirstTriggersRecorded == recorded}）");
             }
 
             // 装配反应（标记跳转）：内核发动事件经地点交给反馈——同样写首次记录、进日志。
@@ -718,12 +719,13 @@ namespace GameLogic.EditorTools
             double dConduct = (row?.Damage ?? 0) - sessConduct0;
             double dTotal = (sess?.TotalDamage ?? 0) - sessTotal0;
             // EMG2-REACT-01：短路主结果是电弧 / 导电水洼，附带伤害记进敌方全部伤害；按反应单列的“交互伤害归因”归 EMG2-DISC-01（DEBT-EMG2REACT01-08），本卡短路占比 = 0。
-            bool reconcile = Math.Abs(dConduct) < 1e-9 && dTotal > 0 && Math.Abs(dTotal - (city.Kernel.DamageDealtToHostile - total0)) < 0.05;
+            // EMG2-DISC-01（L5：口径变了，非削弱）：交互伤害归因已落地，短路的附带伤害按规则键单列；对账改为“这一行 ≤ 敌方全部且占比 = 行 / 全部”
+            bool reconcile = dConduct >= 0 && (row?.Damage ?? 0) <= (sess?.TotalDamage ?? 0) + 1e-6 && dTotal > 0 && Math.Abs(dTotal - (city.Kernel.DamageDealtToHostile - total0)) < 0.05;
             List<ReactionAttribution.Share> shares = ReactionAttribution.SharesOf(sess);
             ReactionAttribution.Share share = shares.FirstOrDefault(x => x.ReactionId == "reaction_conduct");
             string text = ExpeditionReturnPanelUIToolkit.ReactionShareText(s, FracturedCityLayout.RegionId);
             Expect(sess != null && sess.Kind == ReactionAttribution.KindExpedition && sess.Ordinal == 1 && sess.EndTick < 0 && row != null && dCount >= 1 && row.Count >= dCount
-                   && reconcile && share.Fraction == 0 && text.Contains("短路") && text.Contains("%"),
+                   && reconcile && Math.Abs(share.Fraction - (row?.Damage ?? 0) / Math.Max(1e-9, sess?.TotalDamage ?? 0)) < 1e-9 && text.Contains("短路") && text.Contains("%"),
                 $"远征场次“{ReactionAttribution.Title(sess)}”：短路 {row?.Count} 次、伤害 {row?.Damage:0.0} / 敌方全部 {sess?.TotalDamage:0.0}（占比 {ReactionAttribution.Percent(share.Fraction)}%：短路已端口化，交互伤害归因归 EMG2-DISC-01；" +
                 $"敌方全部伤害本段增量与内核对账一致）；撤离报告：“{text}”");
 
@@ -922,7 +924,7 @@ namespace GameLogic.EditorTools
                 Click(panel.TabButton(ReactionLogPanelUIToolkit.Tab.Codex));
                 string codex = string.Join("\n", Enumerable.Range(0, panel.VisibleRowCount).Select(panel.RowText));
                 bool codexOk = !panel.FilterBarVisible && codex.Contains("短路") && codex.Contains("首次触发") && codex.Contains("？？？") && !codex.Contains("热震\n")
-                               && codex.Contains("尚未开放命名") && !codex.Contains("无法触发") && panel.FooterText.Contains("1 / 18"); // EMG2-REACT-01：碎裂改走端口后 18 条全部可达
+                               && codex.Contains(GameText.Get("reaction.codex.locked")) && !codex.Contains("尚未开放命名") && !codex.Contains("无法触发") && panel.FooterText.Contains("1 / 18"); // EMG2-REACT-01：碎裂改走端口后 18 条全部可达
                 ReactionLog.Clear();
                 panel.SelectTab(ReactionLogPanelUIToolkit.Tab.Log);
                 panel.SelectFilter(ReactionLogFilter.All);
@@ -931,7 +933,7 @@ namespace GameLogic.EditorTools
                 bool closed = !panel.PanelVisible && !ReactionLogPanelUIToolkit.IsOpen;
                 Expect(opened && closed && raidOnly && expOnly, $"反应日志页：最新在前两条（“{panel.RowText(0)}”），“突袭”只剩热震、“远征”只剩短路");
                 Expect(attr && attr2, $"伤害归因页：远征“{attrAll.Replace("\n", " / ")}”；突袭筛选“{attrRaid.Replace("\n", " / ")}”");
-                Expect(codexOk && empty, $"反应图鉴页：打出过的短路显示名字、说明与首次触发；其余“？？？”并写明原因（未打出 / 未开放命名；碎裂已可达，不再有“无法触发”），脚注“{panel.FooterText}”；日志空时有空状态说明");
+                Expect(codexOk && empty, $"反应图鉴页：打出过的短路显示名字、说明与首次触发；其余“？？？”并写明原因（未打出，EMG2-DISC-01 起不再有“未开放命名”；碎裂已可达，不再有“无法触发”），脚注“{panel.FooterText}”；日志空时有空状态说明");
             }
             finally
             {

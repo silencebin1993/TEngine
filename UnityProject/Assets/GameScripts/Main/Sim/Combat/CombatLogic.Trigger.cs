@@ -560,6 +560,9 @@ namespace BinGames.Sim.Combat
                 while (s.Count > 0 && EmgSpawnSub(ref d, ref s, ref live))
                 {
                     s.Count--;
+                    EmgBusStats gs = d.EmgStats[0];
+                    gs.GenSeen |= 1 << s.Gen; // EMG2-DISC-01：语法发现“第一次组成第 n 代子弹药”（FGR-EMG-183）
+                    d.EmgStats[0] = gs;
                 }
                 if (s.Count > 0)
                 {

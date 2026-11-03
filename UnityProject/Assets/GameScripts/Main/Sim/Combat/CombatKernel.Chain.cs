@@ -33,6 +33,12 @@ namespace BinGames.Sim.Combat
                 _d.EmgFriendly.RemoveRange(0, cutFf); // 友伤命中列表同一口径
             }
             _d.EmgFriendlyPublished = 0;
+            int cutAttr = System.Math.Min(_d.EmgAttrPublished, _d.EmgAttrRows.Length);
+            if (cutAttr > 0)
+            {
+                _d.EmgAttrRows.RemoveRange(0, cutAttr); // EMG2-DISC-01：交互伤害同一口径
+            }
+            _d.EmgAttrPublished = 0;
         }
 
         /// <summary>交出本步脏列表并清掉这些槽的去重标记（修复：上一步刚交出的槽在两步之间又被即时出手命中时，要能再进下一步的列表）。热更层按累计差值读，同槽重复出现无害。</summary>
@@ -46,6 +52,11 @@ namespace BinGames.Sim.Combat
             _dirtyPublished = n;
             _d.EmgEraDirtyPublished = _d.EmgEraDirty.Length;
             _d.EmgFriendlyPublished = _d.EmgFriendly.Length;
+            _d.EmgAttrPublished = _d.EmgAttrRows.Length;
+            EmgBusStats st = _d.EmgStats[0];
+            _d.EmgDepthPublished = st.DepthWork;
+            st.DepthWork = 0;
+            _d.EmgStats[0] = st;
         }
 
         /// <summary>EMG1-FW-01（FGR-EMG-233 第 6 条）：本步爆炸反应装甲块数有变化的单位（热更层只读这个列表更新块数刻度 / 耗尽通知，O(本步变化数)）。</summary>
@@ -72,10 +83,21 @@ namespace BinGames.Sim.Combat
             Touch();
         }
 
-        /// <summary>EMG1-FW-01（FGR-EMG-184）：本步破片误伤同阵营单位的命中（x = 受伤单位 ID，y = 破片归属单位 ID）。O(本步友伤数)。</summary>
+        /// <summary>EMG1-FW-01 / EMG2-DISC-01（FGR-EMG-184）：本步己方挨的友伤（x = 受伤单位 ID，y = 留下它的单位 ID，z = <see cref="EmgFriendlyCode"/> 或物质码；同一组合一步一条）。O(本步友伤数)。</summary>
         public int EmgFriendlyCount => _d.EmgFriendly.Length;
 
-        public int2 EmgFriendlyAt(int i) => i >= 0 && i < _d.EmgFriendly.Length ? _d.EmgFriendly[i] : default;
+        public int3 EmgFriendlyAt(int i) => i >= 0 && i < _d.EmgFriendly.Length ? _d.EmgFriendly[i] : default;
+
+        /// <summary>EMG2-DISC-01（FGR-EMG-182）：本步敌方挨的交互伤害（已按“规则键 + 归属”合并；O(本步不同组合数)）。</summary>
+        public int EmgAttrCount => _d.EmgAttrRows.Length;
+
+        public EmgAttrRow EmgAttrAt(int i) => i >= 0 && i < _d.EmgAttrRows.Length ? _d.EmgAttrRows[i] : default;
+
+        /// <summary>EMG2-DISC-01：本步因果链记录到的最大链深（统计“最长链深”）。</summary>
+        public int EmgStepMaxDepth => _d.EmgDepthPublished;
+
+        /// <summary>EMG2-DISC-01（FGR-EMG-183 语法条目）：本内核生成过的子载荷代（位 n = 第 n 代）。</summary>
+        public int EmgGenSeenMask => _d.EmgStats[0].GenSeen;
 
         public int EmgEraDirtyAt(int i) => i >= 0 && i < _d.EmgEraDirty.Length ? _d.EmgEraDirty[i] : 0;
 
@@ -122,29 +144,7 @@ namespace BinGames.Sim.Combat
         /// 一条链上参与的单位（ADR ⑨ 归属，最多 4 个：按出现先后，超过时保留最早 3 个 + 最近 1 个）：从旧到新扫环（O(环长)，只在悬停 / 打开叠加时调），
         /// 本链及以它为父链的记录里的源单位 / 第二单位都算（破片的打击者、残骸的击毁者）。
         /// </summary>
-        public int4 EmgChainOwners(int chain)
-        {
-            int4 o = int4.zero;
-            int n = _d.EmgRingHead[1];
-            for (int i = n - 1; i >= 0 && chain > 0; i--)
-            {
-                EmgChainRec r = _d.EmgRing[(_d.EmgRingHead[0] - 1 - i) & (EmgConst.ChainRing - 1)];
-                if (r.Chain != chain && r.Parent != chain)
-                {
-                    continue;
-                }
-                bool destroyed = r.Kind == EmgChainNode.Wreck; // 残骸的源单位是被击毁者，不是归属
-                if (!destroyed)
-                {
-                    CombatLogic.EmgOwnersAdd(ref o, r.SrcUnit);
-                }
-                if (r.Kind == EmgChainNode.Wreck)
-                {
-                    CombatLogic.EmgOwnersAdd(ref o, r.Other);
-                }
-            }
-            return o;
-        }
+        public int4 EmgChainOwners(int chain) => CombatLogic.EmgChainAttr(ref _d, chain, out _);
 
         /// <summary>一块残骸的归属（ADR ⑨ 4 个规则）：持久的击毁者（<see cref="EmgWreck.Killer"/>，环被覆盖 / 读档后仍在）+ 之后打碎它的单位（环里 Key = 残骸 Id 的破片记录，从旧到新）。O(残骸数 + 环长)，只在悬停时调。</summary>
         public int4 EmgWreckOwners(int wreckId)
@@ -173,6 +173,15 @@ namespace BinGames.Sim.Combat
                 }
             }
             return o;
+        }
+
+        /// <summary>测试：发一个新链号（SetUnitEmg 只收已发过的）。</summary>
+        public int EmgIssueChainForTests()
+        {
+            EmgScalars es = _d.EmgS[0];
+            int chain = es.NextChain++;
+            _d.EmgS[0] = es;
+            return chain;
         }
 
         /// <summary>测试 / 调试：直接写一条环记录（与内核写入同一函数）。</summary>

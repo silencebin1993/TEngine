@@ -10,7 +10,7 @@ namespace GameLogic.UI.Kit
     /// FG2-FW-04：伤害归因的显示行（统计面板 <see cref="StatsPanelUIToolkit"/> 与反应记录面板“伤害归因”页签共用，同一份数据同一种写法）。
     /// 每行 = 文字 + 可选 USS 类（rl-row-title 标题行 / rl-row-dim 淡色说明），行由面板按数量建 Label。只在面板刷新时调用，O(场次 × 每场反应条数)。
     /// </summary>
-    internal static class ReactionAttributionView
+    public static class ReactionAttributionView
     {
         /// <summary>每场明细（最新在前）：“远征 · 破碎都市 第 2 次　白天 3 08:00 ～ …　敌方共受伤害 1,200”，下面逐条“短路 25%（3 次）”。</summary>
         public static int AppendSessions(CampaignState state, ReactionLogFilter filter, List<(string Text, string Cls)> lines)
@@ -29,6 +29,12 @@ namespace GameLogic.UI.Kit
                     ? GameText.Format("reaction.attr.ongoing", TickText(s.StartTick))
                     : GameText.Format("reaction.attr.ended", TickText(s.StartTick), TickText(s.EndTick));
                 lines.Add((ReactionAttribution.Title(s) + "　" + when + "　" + GameText.Format("reaction.attr.total", UiFormat.Number(System.Math.Round(s.TotalDamage))), "rl-row-title"));
+                string interaction = ReactionAttribution.InteractionLine(s);
+                if (interaction != null)
+                {
+                    lines.Add(("　" + interaction, null));
+                    AppendCredits(state, s, lines);
+                }
                 List<ReactionAttribution.Share> shares = ReactionAttribution.SharesOf(s);
                 if (shares.Count == 0)
                 {
@@ -41,6 +47,21 @@ namespace GameLogic.UI.Kit
                 }
             }
             return shown;
+        }
+
+        /// <summary>EMG2-DISC-01（FGR-EMG-182）：这一场交互伤害平分到各台机器的结果（一行，按分到的伤害从大到小）。</summary>
+        private static void AppendCredits(CampaignState state, ReactionSessionRecord s, List<(string Text, string Cls)> lines)
+        {
+            if (s.Credits == null || s.Credits.Length == 0)
+            {
+                return;
+            }
+            var parts = new List<string>(s.Credits.Length);
+            foreach (InteractionCreditRecord c in System.Linq.Enumerable.OrderByDescending(s.Credits, c => c.Damage))
+            {
+                parts.Add(GameText.Format("reaction.attr.credit_item", ReactionLog.PartyLabel(new ReactionLogParty { Known = true, Kind = BinGames.Sim.Combat.CombatUnitKind.Machine, LogicId = c.LogicId }), UiFormat.Number(System.Math.Round(c.Damage))));
+            }
+            lines.Add(("　" + GameText.Format("reaction.attr.credit", string.Join(GameText.Get("reaction.attr.sep"), parts)), "rl-row-dim"));
         }
 
         /// <summary>累计段（统计面板）：“累计（N 场）”“敌方共受伤害 X，其中反应额外伤害占 Y%”，下面逐条反应的合计占比与次数。没有符合筛选的场次时不写，返回 0。</summary>

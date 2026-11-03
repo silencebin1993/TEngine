@@ -79,6 +79,7 @@ namespace BinGames.Sim.Combat
                 {
                     Kind = EmgConst.PendPatch, Armed = 1, Count = 1, SubForm = matter, Pos = pos, ZoneRadius = radius, Damage = amount, ZoneLife = seconds,
                     Owner = ownerId, Chain = chain, Depth = depth, Gen = flags, Faction = phase, Prog = -1, Weapon = -1,
+                    RuleKey = d.EmgRuleKeyNow, Owners = d.EmgRuleOwnersNow,
                 });
                 return true;
             }
@@ -96,7 +97,13 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
+            int key0 = d.EmgRuleKeyNow;
+            int4 owners0 = d.EmgRuleOwnersNow;
+            d.EmgRuleKeyNow = s.RuleKey;
+            d.EmgRuleOwnersNow = s.Owners;
             EmgPlacePatch(ref d, s.SubForm, s.Pos, s.ZoneRadius, s.Damage, s.ZoneLife, s.Owner, s.Chain, s.Depth, s.Gen, s.Faction);
+            d.EmgRuleKeyNow = key0;
+            d.EmgRuleOwnersNow = owners0;
             return true;
         }
 
@@ -194,7 +201,7 @@ namespace BinGames.Sim.Combat
             var incoming = new CombatZone
             {
                 Pos = pos, Radius = radius, R0 = radius, Amount = amount, Matter = matter, Layer = m.Layer, PFlags = flags, Phase = phase, Owner = ownerId,
-                Owners = new int4(ownerId > 0 ? ownerId : 0, 0, 0, 0), EmgChain = chain, EmgDepth = depth, Born = now, Until = world ? double.MaxValue : now + life,
+                Owners = EmgOwnersOfNew(ref d, ownerId), RuleKey = d.EmgRuleKeyNow, EmgChain = chain, EmgDepth = depth, Born = now, Until = world ? double.MaxValue : now + life,
                 Temp = m.TempInit, Conc = 1f, Hp = m.Solid != 0 ? m.Hp : 0f, Faction = CombatFaction.Neutral, Kind = EmgMatterConst.ZoneKindPatch,
             };
             bool keepNew = m.Solid != 0 && d.Config.EmgPersist != 0; // EMG2-PERSIST-01：长期留存固态不合并（FG19B §8.2），超软上限 / 总额由 EmgPersistCap 崩解为碎屑
@@ -370,6 +377,7 @@ namespace BinGames.Sim.Combat
             {
                 a.Owner = b.Owner;
                 a.Owners = b.Owners;
+                a.RuleKey = b.RuleKey;
                 a.EmgChain = b.EmgChain;
                 a.Phase = b.Phase;
             }
@@ -847,6 +855,7 @@ namespace BinGames.Sim.Combat
             if (m.CoatBit >= 0 && m.CoatBit < 31)
             {
                 ApplyStatus(ref d, u, 1u << m.CoatBit, m.CoatSeconds, 0f, 0f, 0f, src);
+                EmgCoatDotNote(ref d, u, z, m.CoatBit, elapsed); // EMG2-DISC-01（FGR-EMG-182 / 184）
             }
             if (z.Matter == EmgMatterConst.Molten && d.IsAlive(u))
             {
@@ -865,7 +874,9 @@ namespace BinGames.Sim.Combat
                 }
                 if (dmg > 0f)
                 {
+                    EmgAttrBegin(ref d, z.RuleKey, z.Owners, z.Matter, z.EmgChain); // EMG2-DISC-01：物质接触伤害 = 交互伤害（FGR-EMG-182）；己方被己方的物质伤到 → 友伤（FGR-EMG-184）
                     DamageFrom(ref d, u, dmg, src, EmgCode.SrcPatch);
+                    d.EmgAttr.On = 0;
                 }
             }
         }

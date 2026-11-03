@@ -18,6 +18,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgDepthNote(ref d, depth);
             int head = d.EmgRingHead[0];
             d.EmgRing[head] = new EmgChainRec
             {
@@ -97,6 +98,17 @@ namespace BinGames.Sim.Combat
             }
             EmgChainLog(ref d, EmgChainNode.Rule, d.EmgCtx.Chain, d.EmgCtx.Depth, key, src, pos, d.Id[target]);
             EmgShotEvent(ref d, EmgEventKind.React, d.Id[target], d.EmgRuleCount[slot], 0f, (ushort)slot, pos);
+        }
+
+        /// <summary>EMG2-DISC-01：统计“最长链深”（FGR-EMG-182）。</summary>
+        internal static void EmgDepthNote(ref CombatData d, byte depth)
+        {
+            if (depth > d.EmgStats[0].DepthWork)
+            {
+                EmgBusStats st = d.EmgStats[0];
+                st.DepthWork = depth;
+                d.EmgStats[0] = st;
+            }
         }
 
         /// <summary>

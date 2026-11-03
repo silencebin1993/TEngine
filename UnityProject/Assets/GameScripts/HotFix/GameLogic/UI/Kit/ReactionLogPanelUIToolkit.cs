@@ -311,16 +311,11 @@ namespace GameLogic.UI.Kit
                 lines.Add((GameText.Get("reaction.codex.locked_name"), "rl-row-dim"));
                 string why = row.Reach != NamedReactionCatalog.Reachable
                     ? GameText.Get("reaction.codex.unreachable")
-                    : !NamedReactionCatalog.IsBatchOpen(state, row.Batch)
-                        ? GameText.Format("reaction.codex.closed", GameText.Get(BatchNameKey(row.Batch)))
-                        : GameText.Get("reaction.codex.locked");
+                    : GameText.Get("reaction.codex.locked");
                 lines.Add(("　" + why, "rl-row-dim"));
             }
             return unlocked;
         }
-
-        /// <summary>开放批次的名字键（reaction.batch.act1 / clarity / overclock / cross，fgdata_reaction.py）。</summary>
-        private static string BatchNameKey(string batch) => "reaction.batch." + batch;
 
         private static string TickText(long tick) => ReactionAttributionView.TickText(tick);
 

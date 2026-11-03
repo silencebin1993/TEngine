@@ -1031,7 +1031,6 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            NamedReactionCatalog.OpenBatch(s, "act1");
             SetLayout(s, range.BuildingId, "range.basic", "range.basic", "range.basic", "range.basic");
             TestRangeService.ProjectBlueprint(s, range.BuildingId, BpWet);
             TestRangeService.ProjectBlueprint(s, range.BuildingId, BpShock);
@@ -1112,7 +1111,6 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            NamedReactionCatalog.OpenBatch(s, "act1");
             SetLayout(s, range.BuildingId, "range.basic", "range.basic", "range.basic", "range.basic");
             TestRangeService.ProjectBlueprint(s, range.BuildingId, BpWet);
             TestRangeService.ProjectBlueprint(s, range.BuildingId, BpShock);

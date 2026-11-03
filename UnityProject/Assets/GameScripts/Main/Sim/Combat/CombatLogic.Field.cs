@@ -865,7 +865,7 @@ namespace BinGames.Sim.Combat
                     if (FieldLive(rule) && rule.Amount > 0f && (pr.FieldOnce & EmgFieldConst.OnceIgnite) == 0 && fire >= 0 && fire < 31 && (pr.Coat & (1u << fire)) != 0u)
                     {
                         pr.FieldOnce |= EmgFieldConst.OnceIgnite;
-                        EmgInjectPatches(ref d, next, 0.5f, EmgConst.PortHeat, rule.Amount, pr.Chain, pr.Depth);
+                        EmgInjectPatches(ref d, next, 0.5f, EmgConst.PortHeat, rule.Amount, pr.Chain, pr.Depth, pr.Owner);
                     }
                     break;
                 }

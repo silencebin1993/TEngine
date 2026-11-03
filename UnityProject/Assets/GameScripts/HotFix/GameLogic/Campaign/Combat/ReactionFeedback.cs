@@ -23,6 +23,11 @@ namespace GameLogic.Campaign.Combat
         internal readonly long[] Reading = new long[CombatConst.ReadingFeedKinds];
         /// <summary>EMG1-CHAIN-01：内核可靠计数槽（按稳定键）的基线。</summary>
         internal readonly int[] Emg = new int[EmgConst.RuleSlots];
+        /// <summary>EMG2-DISC-01：Prime 那一刻已有的事件端口计数 / 子载荷代（基线：旧快照里早就发生过的不算“新发现”）。</summary>
+        internal readonly bool[] PortSeen = new bool[EmgConst.EventKinds + 1];
+        internal int GenSeen;
+        /// <summary>EMG2-DISC-01（FGR-EMG-184）：同一“受伤者 + 留下者 + 来源”上次发友伤通知的统一时钟步（持续接触不刷屏）。</summary>
+        internal readonly Dictionary<(int, int, int), long> FriendlyAt = new Dictionary<(int, int, int), long>();
     }
 
     /// <summary>
@@ -139,9 +144,11 @@ namespace GameLogic.Campaign.Combat
                     continue;
                 }
                 EmgRuleSeen += dc;
+                ReactionAttribution.AddInteractions(state, site.SiteId, dc); // EMG2-DISC-01（B19）：交互次数含没有图鉴名字的通道规则
                 string rid = NamedReactionCatalog.IdOfKey(k.EmgRuleKeyAt(slot));
                 if (rid == null)
                 {
+                    ReactionAttribution.AddReaction(state, site.SiteId, ReactionAttribution.RuleRowId(k.EmgRuleKeyAt(slot)), dc, 0); // B19“各交互次数”：无名规则也有行
                     continue;
                 }
                 EmgRuleFeed f = k.EmgRuleFeedAt(slot);
@@ -161,26 +168,89 @@ namespace GameLogic.Campaign.Combat
                 OnEraChanged(site, state, k, k.EmgEraDirtyAt(j));
             }
 
-            // EMG1-FW-01（FGR-EMG-184 / 233 第 3 条）：破片伤到己方——警告级友伤通知（同类聚合、可定位）；因果链“友伤”节点在内核记。O(本步友伤数)。
+            // EMG1-FW-01 / EMG2-DISC-01（FGR-EMG-184）：己方被己方留下的物质 / 能量 / 破片伤到——警告级友伤通知（同类聚合、可定位）；因果链“友伤”节点在内核记。O(本步友伤数)。
             int ff = k.EmgFriendlyCount;
             for (int j = 0; j < ff; j++)
             {
-                OnFriendly(site, state, k, k.EmgFriendlyAt(j));
+                OnFriendly(site, state, k, cur, k.EmgFriendlyAt(j));
+            }
+
+            // EMG2-DISC-01（FGR-EMG-182）：交互伤害按因果链平分到机器、按规则键统计（内核已按键 + 归属合并，O(本步不同组合数)）；最长链深。与是否观察无关。
+            int rows = k.EmgAttrCount;
+            for (int j = 0; j < rows; j++)
+            {
+                ReactionAttribution.AddInteractionDamage(state, site, k.EmgAttrAt(j));
+            }
+            if (k.EmgStepMaxDepth > 0)
+            {
+                ReactionAttribution.NoteChainDepth(state, site.SiteId, k.EmgStepMaxDepth);
+            }
+            CheckGrammar(site, state, k, cur); // EMG2-DISC-01（FGR-EMG-183 语法条目）：O(事件种类数)
+        }
+
+        /// <summary>语法发现：第一次组成某代子弹药、第一次触发某种事件。比“新出现的位 / 计数从 0 变正”，Prime 时已有的不算（读旧档不补弹）。</summary>
+        private static void CheckGrammar(CombatSite site, CampaignState state, CombatKernel k, ReactionFeedCursor cur)
+        {
+            int gen = k.EmgGenSeenMask;
+            int newGen = gen & ~cur.GenSeen;
+            if (newGen != 0)
+            {
+                cur.GenSeen = gen;
+                for (int g = 1; g <= EmgConst.MaxGen; g++)
+                {
+                    if ((newGen & (1 << g)) != 0)
+                    {
+                        ReactionDiscoveryService.RecordGrammar(state, ReactionDiscoveryService.GenEntry(g), site.SiteId);
+                    }
+                }
+            }
+            for (int e = 1; e <= EmgConst.EventKinds; e++)
+            {
+                if (!cur.PortSeen[e] && k.EmgPortCountOf((EmgEventKind)e) > 0)
+                {
+                    cur.PortSeen[e] = true;
+                    ReactionDiscoveryService.RecordGrammar(state, ReactionDiscoveryService.EventEntry(e), site.SiteId);
+                }
             }
         }
 
         /// <summary>本进程发出的友伤通知条数（自检）。</summary>
         public static long FriendlyPosted { get; private set; }
 
-        private static void OnFriendly(CombatSite site, CampaignState state, CombatKernel k, int2 hit)
+        private static void OnFriendly(CombatSite site, CampaignState state, CombatKernel k, ReactionFeedCursor cur, int3 hit)
         {
             // 只报己方受伤（敌人被敌人自己的破片打到不发通知）
             if (!k.TryGetUnit(hit.x, out CombatUnitView v) || v.Faction != CombatFaction.Player)
             {
                 return;
             }
+            // 留下它的单位已不在场：还登记着的机器算己方，其余（阵亡的敌人）不算友伤
+            bool ownSide = k.TryGetUnit(hit.y, out CombatUnitView o) ? o.Faction == CombatFaction.Player : site.TryGetMachineOfUnit(hit.y, out _);
+            if (!ownSide)
+            {
+                return;
+            }
+            // 物质按节拍持续扣血：同一组合每 emg.friendly.notify_seconds 游戏秒最多一条（破片一次一条，不节流）
+            if (hit.z != EmgFriendlyCode.Fragment)
+            {
+                long gap = (long)(ReactionPopups.Tuning("emg.friendly.notify_seconds", 1f) * GameClock.StepHz);
+                (int, int, int) key = (hit.x, hit.y, hit.z);
+                if (cur.FriendlyAt.TryGetValue(key, out long at) && GameClock.Ticks >= at && GameClock.Ticks - at < gap)
+                {
+                    return;
+                }
+                if (cur.FriendlyAt.Count >= 256)
+                {
+                    cur.FriendlyAt.Clear(); // 单位 ID 只增不复用：只留近期的组合（清掉最多多发一条）
+                }
+                cur.FriendlyAt[key] = GameClock.Ticks;
+            }
             double2 p = v.Position;
-            string detail = GameText.Format("emg.friendly.fragment", EmgChainView.PartyName(site, state, hit.x), EmgChainView.PartyName(site, state, hit.y));
+            string victim = EmgChainView.PartyName(site, state, hit.x), owner = EmgChainView.PartyName(site, state, hit.y);
+            string detail = hit.z == EmgFriendlyCode.Fragment ? GameText.Format("emg.friendly.fragment", victim, owner)
+                : hit.z == EmgFriendlyCode.Energy ? GameText.Format("emg.friendly.energy", victim, owner)
+                : hit.z == EmgFriendlyCode.Reaction ? GameText.Format("emg.friendly.reaction", victim, owner)
+                : GameText.Format("emg.friendly.matter", victim, owner, Emergence.EmgMatterCatalog.NameOf(hit.z));
             Notifications.NotificationCenter.Post("friendly_fire", detail, new Vector3((float)p.x, 0f, (float)p.y));
             FriendlyPosted++;
         }
@@ -224,6 +294,11 @@ namespace GameLogic.Campaign.Combat
             {
                 cur.Emg[i] = k.EmgRuleCountAt(i);
             }
+            for (int e = 1; e <= EmgConst.EventKinds; e++)
+            {
+                cur.PortSeen[e] = k.EmgPortCountOf((EmgEventKind)e) > 0;
+            }
+            cur.GenSeen = k.EmgGenSeenMask;
             cur.Epoch = k.FeedEpoch;
             cur.Primed = true;
         }
@@ -237,7 +312,7 @@ namespace GameLogic.Campaign.Combat
             var ground = new Vector2((float)p.x, (float)p.y);
 
             ReactionAttribution.AddReaction(state, site.SiteId, rid, count, hostileDamage);
-            bool first = named && RecordFirst(state, rid, site.SiteId);
+            bool first = named && RecordFirst(state, rid, site.SiteId, new Vector3(ground.x, 0f, ground.y));
 
             int sourceId = k.ReactionLastSourceOf(ruleIndex);
             ReactionLogParty source = Party(site, state, sourceId);
@@ -303,7 +378,7 @@ namespace GameLogic.Campaign.Combat
             ReactionsSeen += count;
             bool named = NamedReactionCatalog.IsNamed(state, reactionId);
             ReactionAttribution.AddReaction(state, site.SiteId, reactionId, count, 0);
-            bool first = named && RecordFirst(state, reactionId, site.SiteId);
+            bool first = named && RecordFirst(state, reactionId, site.SiteId, new Vector3(ground.x, 0f, ground.y));
             ReactionLogParty source = Party(site, state, sourceUnit);
             // EMG2-REACT-01：已端口化的具名交互（表里还有沾染配对）参与固件按配对认、并补旧标签轨的声音 + 字幕；装配反应（无配对）沿用核心固件与它们自己的提示时刻。
             uint pair = NamedReactionCatalog.TryGet(reactionId, out GameConfig.fg.Reaction row) ? NamedReactionCatalog.BitOf(row.TagA) | NamedReactionCatalog.BitOf(row.TagB) : 0u;
@@ -433,8 +508,8 @@ namespace GameLogic.Campaign.Combat
             return null;
         }
 
-        /// <summary>写首次触发记录；已有返回 false（慢放 / 镜头推动只在返回 true 的那一次）。</summary>
-        public static bool RecordFirst(CampaignState state, string reactionId, string siteId)
+        /// <summary>写首次触发记录 = 首次发现（FGR-EMG-190，唯一写入口）；已有返回 false（慢放 / 镜头推动 / “新发现”通知只在返回 true 的那一次）。</summary>
+        public static bool RecordFirst(CampaignState state, string reactionId, string siteId, Vector3? at = null)
         {
             if (state == null || string.IsNullOrEmpty(reactionId) || IsFirstTriggered(state, reactionId))
             {
@@ -450,6 +525,7 @@ namespace GameLogic.Campaign.Combat
             Revision++;
             // FG2-FW-05（FGR-UX-051）：统一图鉴的反应条目在第一次打出时解锁（机制条目跨存档；本存档的首次触发时刻仍记在上面）。
             Progression.MechanicCodex.Unlock(Progression.MechanicCodex.ReactionEntryId(reactionId));
+            ReactionDiscoveryService.OnReactionDiscovered(state, reactionId, siteId, at);
             return true;
         }
 

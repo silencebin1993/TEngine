@@ -823,31 +823,22 @@ namespace GameLogic.EditorTools
             }
             Expect(badBatch.Count == 0, $"开放批次 = FGR-FW-042：第一幕 4 条（标记跳转、熔穿过载、短路、热震）、化工 4 条、超频 4 条、跨阵营 6 条{Detail(badBatch)}");
 
+            // EMG2-DISC-01（FGR-EMG-190）：批次开放退役——任何可触发的具名反应都报名字；不可触发的行不报。
             CampaignState s = NewState(9305, unlockAll: true);
-            bool act1 = NamedReactionCatalog.IsNamed(s, "reaction_conduct") && NamedReactionCatalog.IsNamed(s, "reaction_thermalshock") && NamedReactionCatalog.IsNamed(s, "reaction_marktag");
-            bool lockedClarity = !NamedReactionCatalog.IsNamed(s, "reaction_deflagrate");
-            bool opened = NamedReactionCatalog.OpenBatch(s, "clarity");
-            bool twice = NamedReactionCatalog.OpenBatch(s, "clarity");
-            bool bogus = NamedReactionCatalog.OpenBatch(s, "nope");
-            bool nowNamed = NamedReactionCatalog.IsNamed(s, "reaction_deflagrate");
-            NamedReactionCatalog.OpenBatch(s, "cross");
-            bool shatterNamed = NamedReactionCatalog.IsNamed(s, "reaction_shatter");
-            Expect(act1 && lockedClarity && opened && !twice && !bogus && nowNamed && shatterNamed,
-                "新战役：第一幕的短路 / 热震 / 标记跳转报名字，化工的爆燃不报；开放化工后爆燃报名字（重复开放 / 不存在的批次返回 false）；跨阵营开放后碎裂报名字（EMG2-REACT-01 改走冻结相态 × 动能后可达）");
+            bool allNamed = NamedReactionCatalog.Rows.Where(r => r.Reach == NamedReactionCatalog.Reachable).All(r => NamedReactionCatalog.IsNamed(s, r.Id));
+            bool unreachable = NamedReactionCatalog.Rows.Where(r => r.Reach != NamedReactionCatalog.Reachable).All(r => !NamedReactionCatalog.IsNamed(s, r.Id));
+            Expect(allNamed && unreachable && (s.OpenReactionBatches?.Length ?? 0) == 0,
+                $"新战役：可触发的具名反应全部报名字（{allNamed}），不可触发的行不报（{unreachable}），批次字段空");
 
-            // 地点真的按开放状态报名字：同一个 CombatSite 事件流，未开放的反应照样触发、只是不报名字。
-            // EMG2-REACT-02：16 条都走涌现计数（报名字经 ReactionFeedback，见 FgReactionFeedbackSelfCheck D2 / E1），这里断言同一地点按开放状态报 / 不报名字
+            // 地点真的报名字：同一个 CombatSite 事件流，第一幕新战役里任何批次的反应都照样触发、报名字（报名字经 ReactionFeedback，见 FgReactionFeedbackSelfCheck D2 / E1）。
             CampaignState fresh = NewState(9306, unlockAll: true);
-            NamedReactionCatalog.OpenBatch(fresh, "overclock");
             (int cuesC, bool namedC) = SiteCue(fresh, PickProducer("Acid", "Shock"), PickProducer("Shock", "Acid"), "reaction_electrolysis");
             (int cuesD, bool namedD) = SiteCue(fresh, PickProducer("Acid", "Fire"), PickProducer("Fire", "Acid"), "reaction_causticburn");
-            NamedReactionCatalog.OpenBatch(fresh, "clarity");
-            (int cuesD2, bool namedD2) = SiteCue(fresh, PickProducer("Acid", "Fire"), PickProducer("Fire", "Acid"), "reaction_causticburn");
-            Expect(namedC && cuesC >= 1 && !namedD && cuesD >= 1 && namedD2 && cuesD2 >= 1
+            Expect(namedC && cuesC >= 1 && namedD && cuesD >= 1
                    && GuidanceHooks.Known.Contains(GuidanceHooks.ReactionFirstNamed) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.ReactionFirstNamed)
-                   && GuidanceHooks.Known.Contains(GuidanceHooks.StatusTagFirstSeen),
-                $"地点按开放状态报名字：电解（超频已开放）触发 {cuesC} 次并报名字；腐蚀灼烧（化工未开放）照样触发 {cuesD} 次但不报名字；开放化工后同一反应报名字；" +
-                "“首次打出具名反应”“首次看到状态标签”两个引导钩子已登记（内容在 FG15-UX-04）");
+                   && GuidanceHooks.Known.Contains(GuidanceHooks.StatusTagFirstSeen) && GuidanceHooks.Known.Contains(GuidanceHooks.EmgFirstDiscovery),
+                $"地点报名字：电解（原超频批）触发 {cuesC} 次并报名字；腐蚀灼烧（原化工批）触发 {cuesD} 次并报名字；" +
+                "“首次打出具名反应”“首次看到状态标签”“首次发现”引导钩子已登记（内容在 FG15-UX-04）");
 
             // 题材审计：反应名 / 说明（中英）与旧引擎播报入口都没有生物词（FG-GAP-010）。
             var hits = new List<string>();
@@ -1033,17 +1024,18 @@ namespace GameLogic.EditorTools
                     $"只存 {oldTable.Length} 条计数的快照照样读（{rShrunk}），电解 {shrunk} 次；表已撤空的地点读同一份（{rMerged}），并进涌现计数 {merged} 次（不重复并入）");
             }
 
-            // 战役开放批次：真实存档文件往返；旧档（没有这个字段）只开放第一幕。
+            // 旧档批次字段（EMG2-DISC-01：只读）：真实存档文件往返；旧档没有这个字段时为空。名字都照报。
             CampaignState s = NewState(9308, unlockAll: true);
-            NamedReactionCatalog.OpenBatch(s, "overclock");
+            s.OpenReactionBatches = new[] { "overclock" };
             SaveResult saved = CampaignSaveService.Save(Slot, s, SaveReason.Manual);
             LoadResult loaded = CampaignSaveService.Load(Slot);
             string json = JsonUtility.ToJson(s);
             CampaignState legacy = JsonUtility.FromJson<CampaignState>(SaveMigrationJson.RemoveField(json, "OpenReactionBatches"));
-            Expect(saved.Success && loaded.Success && NamedReactionCatalog.IsNamed(loaded.State, "reaction_electrolysis") && !NamedReactionCatalog.IsNamed(loaded.State, "reaction_deflagrate")
+            Expect(saved.Success && loaded.Success && NamedReactionCatalog.WasAnnouncedByOldBatch(loaded.State, "reaction_electrolysis") && !NamedReactionCatalog.WasAnnouncedByOldBatch(loaded.State, "reaction_deflagrate")
+                   && NamedReactionCatalog.IsNamed(loaded.State, "reaction_deflagrate")
                    && legacy != null && legacy.OpenReactionBatches != null && legacy.OpenReactionBatches.Length == 0
-                   && NamedReactionCatalog.IsNamed(legacy, "reaction_conduct") && !NamedReactionCatalog.IsNamed(legacy, "reaction_electrolysis"),
-                "开放“超频”后真实存档 → 读档：电解仍报名字、爆燃仍不报；旧档没有开放记录：只开放第一幕（短路报名字，电解不报）");
+                   && NamedReactionCatalog.IsNamed(legacy, "reaction_electrolysis") && !NamedReactionCatalog.WasAnnouncedByOldBatch(legacy, "reaction_electrolysis"),
+                "旧档批次字段真实存读档后原样：电解算已告知、爆燃不算，两条都报名字；没有这个字段的旧档：为空、照样报名字");
 
             // 修复轮 P2：反应表重载（版本号变了）后，地点下一步自动重新登记规则，已有的触发次数按稳定键保留。
             CombatConfig cfg = CombatSite.ConfigFromTuning();

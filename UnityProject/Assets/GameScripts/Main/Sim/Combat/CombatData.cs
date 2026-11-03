@@ -360,8 +360,19 @@ namespace BinGames.Sim.Combat
         /// <summary>脏列表前多少条已在上一步交出（下一步开始时去掉）；去重只看其后未交出的部分（两步之间又变化的单位要能再进下一步）。</summary>
         public int EmgEraDirtyPublished;
         /// <summary>EMG1-FW-01（FGR-EMG-184 / 233 第 3 条）：本步破片误伤同阵营单位的命中（x = 受伤单位 ID，y = 破片归属单位 ID）；热更层只读它发友伤通知。不进快照。</summary>
-        public NativeList<int2> EmgFriendly;
+        public NativeList<int3> EmgFriendly;
         public int EmgFriendlyPublished;
+        // ── EMG2-DISC-01（FGR-EMG-182 / 184）：交互伤害记账（全部不进快照、不进状态哈希；热更层每步读一次已合并的结果，读档后从空开始）──
+        /// <summary>本步的交互伤害（按“规则键 + 归属”合并；脏列表同一交出口径）。</summary>
+        public NativeList<EmgAttrRow> EmgAttrRows;
+        public int EmgAttrPublished;
+        /// <summary>下一次 DamageUnit 属于哪条交互（瞬时量）。</summary>
+        public EmgAttrScope EmgAttr;
+        /// <summary>正在结算的规则（瞬时量）：这段时间生成 / 转化的斑块继承它的键与归属。</summary>
+        public int EmgRuleKeyNow;
+        public int4 EmgRuleOwnersNow;
+        /// <summary>上一步交出的最大链深（工作值在 EmgBusStats.DepthWork：步进跑在作业里，CombatData 是值拷贝，跨步状态要放原生数组）。</summary>
+        public int EmgDepthPublished;
 
         public bool IsCreated => Id.IsCreated;
 

@@ -254,6 +254,26 @@ namespace BinGames.Sim.Combat
         /// <summary>结算一条规则（宿主斑块 <paramref name="i"/>，另一方 <paramref name="j"/>，−1 = 没有）。返回 true = 宿主被转化 / 消失。</summary>
         private static bool EmgApplyRule(ref CombatData d, in EmgRule r, int i, int j, double now)
         {
+            // EMG2-DISC-01（ADR ⑨ 归属）：参与方的归属并进宿主（先出现的在前，满 4 个时保留最早 3 个 + 最近 1 个）；这条规则结算期间生成 / 转化的斑块继承键与归属
+            CombatZone host = d.Patches[i];
+            if (j >= 0)
+            {
+                CombatZone other = d.Patches[j];
+                host.Owners = other.Born <= host.Born ? EmgOwnersMerge(other.Owners, host.Owners) : EmgOwnersMerge(host.Owners, other.Owners);
+                d.Patches[i] = host;
+            }
+            int key0 = d.EmgRuleKeyNow;
+            int4 owners0 = d.EmgRuleOwnersNow;
+            d.EmgRuleKeyNow = r.Key;
+            d.EmgRuleOwnersNow = host.Owners;
+            bool settled = EmgApplyRuleBody(ref d, r, i, j, now);
+            d.EmgRuleKeyNow = key0;
+            d.EmgRuleOwnersNow = owners0;
+            return settled;
+        }
+
+        private static bool EmgApplyRuleBody(ref CombatData d, in EmgRule r, int i, int j, double now)
+        {
             CombatZone z = d.Patches[i];
             bool partnerWorld = j >= 0 && PatchWorld(d.Patches[j]);
             float a = z.Amount, b = j >= 0 ? d.Patches[j].Amount : 0f;
@@ -261,6 +281,12 @@ namespace BinGames.Sim.Combat
             if (r.Pair == EmgRuleConst.PairMatterEnergy && (r.Cond == EmgRuleConst.CondTempGe || r.Cond == EmgRuleConst.CondTempGeConcGe || r.Cond == EmgRuleConst.CondTempGeConcLt))
             {
                 int src = EmgHottestNeighbor(ref d, i);
+                if (src >= 0)
+                {
+                    z.Owners = EmgOwnersMerge(d.Patches[src].Owners, z.Owners); // EMG2-DISC-01：热源在链上先出现
+                    d.EmgRuleOwnersNow = z.Owners;
+                    d.Patches[i] = z;
+                }
                 if (src >= 0 && d.Patches[src].EmgChain > 0)
                 {
                     CombatZone s = d.Patches[src];
@@ -389,12 +415,12 @@ namespace BinGames.Sim.Combat
                     float rad = math.min(z.Radius + r.P1, r.P2 > 0f ? r.P2 : z.Radius + r.P1);
                     KillPatch(ref d, i);
                     hostGone = true;
-                    EmgUnitsInCircle(ref d, pos, rad, r.SideValue, owner, false, 0f);
+                    EmgUnitsInCircle(ref d, pos, rad, r.SideValue, owner, false, 0f, r.Key, d.EmgRuleOwnersNow, chain);
                     EmgBurstPatches(ref d, pos, rad, r.P4, r.P3);
                     break;
                 }
                 case EmgRuleConst.OpArc:
-                    EmgUnitsInCircle(ref d, pos, z.Radius, r.SideValue, owner, true, r.P1 * z.Charge);
+                    EmgUnitsInCircle(ref d, pos, z.Radius, r.SideValue, owner, true, r.P1 * z.Charge, r.Key, d.EmgRuleOwnersNow, chain);
                     break;
                 case EmgRuleConst.OpFragment:
                 {
@@ -423,7 +449,7 @@ namespace BinGames.Sim.Combat
             }
             if (r.Side == EmgRuleConst.SideDamage && r.SideValue > 0f && r.Op != EmgRuleConst.OpBurst && r.Op != EmgRuleConst.OpArc)
             {
-                EmgUnitsInCircle(ref d, pos, math.max(0.5f, z.Radius), r.SideValue, owner, false, 0f);
+                EmgUnitsInCircle(ref d, pos, math.max(0.5f, z.Radius), r.SideValue, owner, false, 0f, r.Key, d.EmgRuleOwnersNow, chain);
             }
             EmgRuleSettle(ref d, r, chain, depth, owner, pos, z.EmgId);
             if (hostGone && kind0 == CombatConst.ZoneKindPool)
@@ -459,6 +485,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             z.Matter = r.Product;
+            z.RuleKey = r.Key; // EMG2-DISC-01：转化产物的伤害按这条规则统计
             z.Layer = m.Layer;
             z.Amount = amount;
             z.Temp = m.FixedTemp != 0 || r.P3 <= EmgRuleConst.KeepTemp ? (m.FixedTemp != 0 ? m.TempInit : z.Temp) : r.P3;
@@ -571,6 +598,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             byte nd = (byte)(depth + 1);
+            EmgDepthNote(ref d, nd); // 规则产物不写链节点，但它是链上更深的一层
             if (d.EmgS[0].PatchSpawnedStep < PatchSpawnPerStepOf(ref d))
             {
                 int at = EmgPlacePatch(ref d, matter, pos, math.max(0.3f, radius), amount, life, owner, chain, nd, 0, 0);
@@ -647,7 +675,7 @@ namespace BinGames.Sim.Combat
         /// 圈内地面单位（不分阵营：物质中立，FGR-EMG-083）：附带伤害 <paramref name="damage"/>（同阵营 × emg.matter.friendly_scale，走 DamageFrom，evt.hurt Code = 斑块）；
         /// <paramref name="arc"/> 时另给电荷累积量 <paramref name="charge"/>（FG19B E14：单位 phs.charge + 0.6 × 斑块电荷）。O(单位数)，只在规则结算时。
         /// </summary>
-        private static void EmgUnitsInCircle(ref CombatData d, double2 pos, float radius, float damage, int ownerId, bool arc, float charge)
+        private static void EmgUnitsInCircle(ref CombatData d, double2 pos, float radius, float damage, int ownerId, bool arc, float charge, int key, int4 owners, int chain)
         {
             int src = ownerId > 0 ? d.SlotOf(ownerId) : -1;
             float fs = d.Config.EmgFriendlyScale > 0f ? d.Config.EmgFriendlyScale : 1f;
@@ -670,7 +698,9 @@ namespace BinGames.Sim.Combat
                     float dmg = src >= 0 && d.Faction[src] == d.Faction[u] ? damage * fs : damage;
                     if (dmg > 0f)
                     {
+                        EmgAttrBegin(ref d, key, owners, arc ? EmgFriendlyCode.Energy : EmgFriendlyCode.Reaction, chain); // EMG2-DISC-01（FGR-EMG-182 / 184）
                         DamageFrom(ref d, u, dmg, src, EmgCode.SrcPatch);
+                        d.EmgAttr.On = 0;
                     }
                 }
             }
@@ -794,7 +824,7 @@ namespace BinGames.Sim.Combat
         /// 在 <paramref name="pos"/> 处 <paramref name="radius"/> 米内的斑块注入能量（FG19B 第 1.4 节第 4 条）：热 → 升温 Q × patch_gain ÷ 份量（定温源不变）；电 → 导电 ≥ 0.3 的斑块加电荷。
         /// 迁入斑块不参与。返回注入到的斑块数。O(覆盖格登记数)。
         /// </summary>
-        internal static int EmgInjectPatches(ref CombatData d, double2 pos, float radius, ushort port, float amount, int chain, byte depth)
+        internal static int EmgInjectPatches(ref CombatData d, double2 pos, float radius, ushort port, float amount, int chain, byte depth, int ownerId = 0)
         {
             if (!EmgPatchesOn(ref d) || d.EmgS[0].PatchLive <= 0 || !(amount > 0f))
             {
@@ -857,6 +887,7 @@ namespace BinGames.Sim.Combat
                             o.EmgChain = chain;
                             o.EmgDepth = depth;
                         }
+                        EmgOwnersAdd(ref o.Owners, ownerId); // EMG2-DISC-01：注能者进这块斑块的归属（A 的油被 B 点着，结果算两台，ADR ⑨）
                         d.Patches[j] = o;
                         n++;
                     }
@@ -976,7 +1007,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (x.Port != EmgConst.PortMag && EmgFirstPatchInject(ref d, c, i - n.FirstInstr))
                 {
-                    EmgInjectPatches(ref d, at, math.max(0.5f, x.Param2), x.Port, x.Amount, c.Chain, c.Depth);
+                    EmgInjectPatches(ref d, at, math.max(0.5f, x.Param2), x.Port, x.Amount, c.Chain, c.Depth, EmgIdOf(ref d, c.Owner));
                     if (x.Port == EmgConst.PortElec)
                     {
                         EmgMarshElec(ref d, at, x.Amount, EmgIdOf(ref d, c.Owner), c.Chain, c.Depth);

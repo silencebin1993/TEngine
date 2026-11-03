@@ -594,6 +594,7 @@ namespace BinGames.Sim.Combat
         /// 所以同一次伤害的 evt.hit 一定排在 Kill 里的 evt.kill 之前。</summary>
         internal static void EmgOnDamage(ref CombatData d, int t, float damage, int attacker, int attackerId)
         {
+            EmgAttrTake(ref d, t, damage); // EMG2-DISC-01（FGR-EMG-182 / 184）：这次伤害若来自规则产物，记交互伤害 / 友伤（先取走，下面的连带伤害各算各的）
             EmgCtx c0 = d.EmgCtx;
             if (c0.Prog >= 0 && c0.EntKind != EmgEntKind.None && attacker == c0.Owner)
             {

@@ -16,7 +16,7 @@ namespace GameLogic.Campaign.Content
     /// - 表里的触发配对与效果全部来自旧反应引擎的行为探针（<see cref="MetabolicSlice.DebugTools.LegacyReactionProbe"/>），自检逐条比对“表 = 探针”。
     /// - 标签反应（kind = tag）翻译成战斗内核的 <see cref="CombatReactionRule"/>（<see cref="BuildKernelRules"/>，按 priority 排序，规则下标 = 内核事件的 Code），
     ///   内核只认状态位与数，不认识反应名；装配反应（标记跳转、熔穿过载）照旧由装配识别，这里只统一名字与开放批次。
-    /// - 命名按阵营分批开放（FGR-FW-042）：第一幕（act1）开局就开放，其余批次由阵营推进时 <see cref="OpenBatch"/>（记在存档 <see cref="CampaignState.OpenReactionBatches"/>）。
+    /// - 命名（EMG2-DISC-01 起按 FGR-EMG-190 首次发现即开放；batch 列只留给旧档判断“已告知过”）。原口径（FGR-FW-042）：第一幕（act1）开局就开放，其余批次由阵营推进时开放（记在存档 <see cref="CampaignState.OpenReactionBatches"/>）。
     ///   没开放的反应照样按规则触发，只是不显示名字；机械内容下永远不会触发的（reach = unreachable）不开放命名。
     /// - 表加载失败时记 Error 并视为空表：没有标签反应（IC-REQ-013 可见失败，不崩）。
     /// </summary>
@@ -99,34 +99,15 @@ namespace GameLogic.Campaign.Content
         /// <summary>说明（触发条件与效果，当前语言）。</summary>
         public static string DescriptionOf(string reactionId) => TryGet(reactionId, out Reaction row) ? GameText.Get(row.DescKey) : null;
 
-        // ─────────────────────────────── 开放批次（FGR-FW-042）───────────────────────────────
+        // ─────────────────────────────── 命名（FG19 FGR-EMG-190：首次发现即开放，取代 FGR-FW-042 的分批开放）───────────────────────────────
 
-        /// <summary>这一批的命名开放了没有：第一幕开局即开放；其余看存档里的开放记录。</summary>
-        public static bool IsBatchOpen(CampaignState state, string batch)
-        {
-            if (batch == BatchAct1)
-            {
-                return true;
-            }
-            return state?.OpenReactionBatches != null && Array.IndexOf(state.OpenReactionBatches, batch) >= 0;
-        }
-
-        /// <summary>这条反应此刻对玩家显示名字吗：机械内容下可触发 + 所在批次已开放。</summary>
+        /// <summary>这条反应结算时报名字吗：机械内容下可触发的都报（第一次结算即进图鉴，<see cref="Combat.ReactionFeedback.RecordFirst"/>）。</summary>
         public static bool IsNamed(CampaignState state, string reactionId) =>
-            TryGet(reactionId, out Reaction row) && row.Reach == Reachable && IsBatchOpen(state, row.Batch);
+            TryGet(reactionId, out Reaction row) && row.Reach == Reachable;
 
-        /// <summary>开放一批反应的命名（阵营推进时调用：化工 = FG10-REACT-01，超频 = FG11-REACT-01，跨阵营 = 第二幕后期）。
-        /// 已开放 / 批次不存在返回 false。进存档。</summary>
-        public static bool OpenBatch(CampaignState state, string batch)
-        {
-            if (state == null || string.IsNullOrEmpty(batch) || batch == BatchAct1 || IsBatchOpen(state, batch) || !Rows.Any(r => r.Batch == batch))
-            {
-                return false;
-            }
-            state.OpenReactionBatches = (state.OpenReactionBatches ?? Array.Empty<string>()).Concat(new[] { batch })
-                .OrderBy(b => b, StringComparer.Ordinal).ToArray();
-            return true;
-        }
+        /// <summary>EMG2-DISC-01：旧档读口——这条反应所在的批次在旧存档里已开放（当时已发过列出名字的通知）。新流程不再写这个字段；只用来不重复弹“新发现”。</summary>
+        public static bool WasAnnouncedByOldBatch(CampaignState state, string reactionId) =>
+            state?.OpenReactionBatches != null && TryGet(reactionId, out Reaction row) && Array.IndexOf(state.OpenReactionBatches, row.Batch) >= 0;
 
         // ─────────────────────────────── 翻译给内核 ───────────────────────────────
 

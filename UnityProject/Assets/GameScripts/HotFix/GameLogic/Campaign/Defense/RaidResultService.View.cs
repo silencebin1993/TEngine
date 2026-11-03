@@ -278,17 +278,12 @@ namespace GameLogic.Campaign.Defense
             Title(into, "raid.result.sec.reaction", "reaction");
             ReactionShareRecord[] shares = r.Reactions;
             double total = r.ReactionTotal;
-            if (r.EndTick < 0)
+            ReactionSessionRecord session = ReactionSessionOf(s, r);
+            if (r.EndTick < 0 && session != null)
             {
                 // 进行中：读还开着的突袭场次（不写记录）。
-                foreach (ReactionSessionRecord x in Combat.ReactionAttribution.Sessions(s))
-                {
-                    if (x != null && x.Kind == Combat.ReactionAttribution.KindRaid && x.EndTick < 0)
-                    {
-                        shares = x.Reactions ?? Array.Empty<ReactionShareRecord>();
-                        total = x.TotalDamage;
-                    }
-                }
+                shares = session.Reactions ?? Array.Empty<ReactionShareRecord>();
+                total = session.TotalDamage;
             }
             var sorted = new List<ReactionShareRecord>();
             double reactionDamage = 0;
@@ -300,7 +295,10 @@ namespace GameLogic.Campaign.Defense
                     reactionDamage += Math.Max(0, x.Damage);
                 }
             }
-            if (sorted.Count == 0)
+            // EMG2-DISC-01（FGR-EMG-182）：占比按交互伤害（含没有规则键的）；场次被挤出最近 N 场时只剩复制的反应行，走旧显示
+            reactionDamage = session != null ? Combat.ReactionAttribution.InteractionDamageOf(session) : reactionDamage;
+            string interaction = Combat.ReactionAttribution.InteractionLine(session);
+            if (sorted.Count == 0 && interaction == null)
             {
                 Dim(into, "raid.result.reaction_none", "reaction");
                 return;
@@ -316,9 +314,31 @@ namespace GameLogic.Campaign.Defense
                 int pct = total > 0 ? Mathf.RoundToInt((float)(100.0 * Math.Min(1.0, x.Damage / total))) : 0;
                 sb.Append(GameText.Format("raid.result.reaction_item", Combat.ReactionAttribution.DisplayName(s, x.ReactionId), pct, x.Count));
             }
-            Plain(into, sb.ToString(), "reaction");
+            if (sb.Length > 0)
+            {
+                Plain(into, sb.ToString(), "reaction");
+            }
             int all = total > 0 ? Mathf.RoundToInt((float)(100.0 * Math.Min(1.0, reactionDamage / total))) : 0;
             Plain(into, GameText.Format("raid.result.reaction_total", all), "reaction");
+            if (interaction != null)
+            {
+                Plain(into, interaction, "reaction");
+            }
+        }
+
+        /// <summary>这一次突袭的场次：进行中 = 还开着的突袭场次；已结束按记录里的场次号找，被挤出最近 N 场或旧记录返回 null。</summary>
+        private static ReactionSessionRecord ReactionSessionOf(CampaignState s, RaidResultRecord r)
+        {
+            ReactionSessionRecord found = null;
+            foreach (ReactionSessionRecord x in Combat.ReactionAttribution.Sessions(s))
+            {
+                if (x != null && x.Kind == Combat.ReactionAttribution.KindRaid
+                    && (r.EndTick < 0 ? x.EndTick < 0 : !string.IsNullOrEmpty(r.ReactionSessionId) && x.SessionId == r.ReactionSessionId))
+                {
+                    found = x;
+                }
+            }
+            return found;
         }
 
         private static void AppendLosses(CampaignState s, RaidResultRecord r, List<AwayLine> into, int maxRows)
@@ -484,6 +504,11 @@ namespace GameLogic.Campaign.Defense
                 rows.RemoveAt(0); // 标题行在上面已经写了“哪一次突袭”
                 into.AddRange(rows);
                 into.Add(new AwayLine { Text = GameText.Format("raid.result.kills", r.Killed, r.EliteKilled, r.Exited, r.Unfolded), Section = "raid" });
+                ReactionSessionRecord session = ReactionSessionOf(s, r);
+                if (Combat.ReactionAttribution.InteractionLine(session) != null || session?.Reactions?.Length > 0)
+                {
+                    into.Add(new AwayLine { Text = Combat.ReactionAttribution.Summary(s, session), Section = "raid" }); // EMG2-DISC-01（B19）：离家报告的突袭段也有交互四项
+                }
                 AppendRepollution(s, r, into, "raid"); // FG10-RAID-01：再污染在离家报告里说明（含重新净化的路径）
                 if (r.LeftWrecks + r.LeftSolids + r.PersistCapped > 0)
                 {

@@ -221,6 +221,10 @@ namespace BinGames.Sim.Combat
     [StructLayout(LayoutKind.Sequential)]
     public struct EmgBusStats
     {
+        /// <summary>EMG2-DISC-01：本步（及上一步之后的即时调用）因果链记录的最大链深，交出后归零。</summary>
+        public int DepthWork;
+        /// <summary>EMG2-DISC-01：本内核生成过的子载荷代（位 n = 第 n 代）；语法发现只比“新出现的位”，读档清空后重新置位也不会重复记录。</summary>
+        public int GenSeen;
         public long Enqueued;
         public long Processed;
         /// <summary>积压保护合并掉的条数（计数在被合并事件的 Code2 里，不丢）。</summary>
@@ -991,6 +995,9 @@ namespace BinGames.Sim.Combat
         public byte Gen;
         /// <summary>已生成几份（第 k 份指向第 k 近的目标 / 径向均分的第 k 个方向）。</summary>
         public short Done;
+        /// <summary>EMG2-DISC-01：顺延斑块的规则键与归属（规则产物被本步额度顺延时不丢归因）；其余种类 0。</summary>
+        public int RuleKey;
+        public int4 Owners;
     }
 
     /// <summary>EMG1-TRIG-01：fg.TbSubPayload 一行的内核副本（下标 = 子形态码；热更层按表写入，缺省为 FG19A 第 2.1.1 节初值）。</summary>
