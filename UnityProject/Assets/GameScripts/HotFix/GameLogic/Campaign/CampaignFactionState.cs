@@ -104,6 +104,8 @@ namespace GameLogic.Campaign
         public float R;
         public string Tag = string.Empty;
         public long UntilTick;
+        /// <summary>EMG2-BOSS-01：这片流体在内核里的斑块 Id；0 = 落在中立区域（旧档，或斑块层关着的回滚档）。</summary>
+        public int PatchId;
     }
 
     /// <summary>FG10-BOSS-01：洗礼塔首领战（阶段存档稳定码见 <c>Regions.BaptismPhase</c>）。全部计时是统一时钟的步。</summary>

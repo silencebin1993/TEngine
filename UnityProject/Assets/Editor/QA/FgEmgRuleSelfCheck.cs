@@ -722,6 +722,21 @@ namespace GameLogic.EditorTools
             Expect(on.minEdge > 0 && on.pushes > 0 && on.doctrineChain, $"教义开：追击路线离明火边缘最近 {on.minEdge:0.##} 米（没踩进去），排斥 {on.pushes} 步，因果链有“由教义触发：避开危险物质”");
             Expect(off.minEdge < 0 && off.pushes == 0, $"对照（教义关）：直线追击踩进明火（最近 {off.minEdge:0.##} 米），没有排斥");
             Expect(GameText.Get("emg.avoid.chain") == "由教义触发：避开危险物质", "界面文本 emg.avoid.chain = “由教义触发：避开危险物质”");
+            // EMG2-BOSS-01 卡片负向：AI 机器按教义避开首领的灌注斑块（酸片），和普通斑块同一条路
+            var boss = RunGuard(true, kk => kk.SpawnReservedPatch(EmgMatterConst.Acid, new double2(0, 6), 1.5f, 5f, 60f));
+            Expect(boss.minEdge > 0 && boss.pushes > 0, $"教义开：追击路线绕开首领灌注的酸片（离边缘最近 {boss.minEdge:0.##} 米，排斥 {boss.pushes} 步）");
+            // EMG2-BOSS-01 卡片负向：防腐涂层是己方机器的腐蚀抗性下限，站进酸片按抗性结算（不是免疫，也不是不变）
+            float Corrosion(float resist)
+            {
+                using CombatKernel k = NewKernel();
+                k.SetAcidMarsh(Array.Empty<float4>(), 0f, 1f, resist);
+                int u = Unit(k, CombatFaction.Player, new double2(0, 0), -1, 5000f);
+                k.SpawnReservedPatch(EmgMatterConst.Acid, new double2(0, 0), 3f, 5f, 10f);
+                StepN(k, 120);
+                return k.TryGetUnitEnergy(u, out float4 a, out _) ? a.w : 0f;
+            }
+            float bare = Corrosion(0f), coated = Corrosion(0.25f);
+            Expect(bare > 0f && coated > 0f && coated < bare, $"己方机器站进灌注酸片：没涂层腐蚀度 {bare:0.###}，防腐涂层（抗性 0.25）{coated:0.###}");
             foreach (bool cross in new[] { true, false })
             {
                 using CombatKernel k = NewKernel();

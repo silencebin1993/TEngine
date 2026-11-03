@@ -5,6 +5,7 @@ using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Defense;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Signal;
 using GameLogic.Localization;
@@ -16,10 +17,11 @@ namespace GameLogic.Campaign.Regions
     ///
     /// | 玩家常用 | 澄净的对策 | 落地 |
     /// |---|---|---|
-    /// | 燃烧类（在用固件里带燃烧标签的比例 ≥ clarity.counter.fire_share） | 液氮压制：多派液氮泵车 | 据点展开追加液氮泵车；突袭反制行 clarity.fluid（标签 cryo） |
-    /// | 引信与弹芯（引信类比例 ≥ clarity.counter.fuse_share） | 蜂群饱和：多派腐蚀蜂群 | 据点展开追加腐蚀蜂群；突袭反制行 clarity.fuse（标签 swarm） |
-    /// | 电磁场控（电磁类比例 ≥ clarity.counter.em_share） | 绝缘涂层：带 adapt_insulate 的单位当天挂不上电击类标签 | 生成时写进免疫位；突袭反制行 clarity.em（标签 insulated） |
+    /// | 燃烧类（在用程序写 en.heat / mat.fire 的比例 ≥ clarity.counter.fire_share） | 液氮压制：多派液氮泵车 | 据点展开追加液氮泵车；突袭反制行 clarity.fluid（标签 cryo） |
+    /// | 引信与弹芯（写语法族 grm.* 的比例 ≥ clarity.counter.fuse_share） | 蜂群饱和：多派腐蚀蜂群 | 据点展开追加腐蚀蜂群；突袭反制行 clarity.fuse（标签 swarm） |
+    /// | 电磁场控（写 en.elec / en.mag / 场族 fld.* 的比例 ≥ clarity.counter.em_share） | 绝缘涂层：带 adapt_insulate 的单位当天电抗 1 | 生成时写进免疫位（登记时同步成电抗覆盖，ADR ⑦）；突袭反制行 clarity.em（标签 insulated） |
     ///
+    /// EMG2-BOSS-01（ADR ⑭ #12、FGR-EMG-160）：只看声明的写端口，不看固件 ID、标签与类别。一枚固件只归一族，按 燃烧 → 电磁 → 语法 取第一个命中（电弧链同时写 en.elec 与 grm.mod.chain，算电磁）。
     /// “在用固件” = 存活机器当前蓝图版本的固件槽 + 炮塔蓝图版本的固件槽 + 陷阱发射器的固件（固件在有序固件槽，不在 3×3 电路格）。
     /// 优先级：燃烧 &gt; 引信 &gt; 电磁（同时满足取前者，确定）。锁定在日切那一步（<see cref="WorldStep"/>，只看游戏日，与观察无关）或当天第一次查询时做；
     /// 据点展开（TerritoryControlService）、突袭排定（RaidDirectorService.ChooseCounter）与攻城单位生成（SiegeService.SpawnOne）都读 <see cref="Locked"/>，
@@ -69,6 +71,11 @@ namespace GameLogic.Campaign.Regions
             f.ClarityCounterId = Decide(s);
             f.ClarityCounterDay = Today(s);
             LockCount++;
+            if (before == EnemyDefs.ConditionCounterInsulate && f.ClarityCounterId != before)
+            {
+                // ADR ⑭ #12：绝缘涂层只管锁定那一天，次日在场单位的电抗恢复
+                CombatSite.ClearImmuneBitsEverywhere(EnemyClarityParams.InsulateMask());
+            }
             // 换对策时提示一次（第一次锁定、没有对策、对策没变都不提示；只在澄净领地已经在地图上显示时，第一幕不剧透）。
             if (!first && f.ClarityCounterId != before && f.ClarityCounterId != CounterNone && Visible(s))
             {
@@ -139,7 +146,7 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>
-        /// 在用固件里 燃烧标签 / 引信类 / 电磁类 各占多少（分母 = 在用固件总枚数；没有固件全为 0）。
+        /// 在用固件里 燃烧 / 引信 / 电磁 三个端口族各占多少（分母 = 在用固件总枚数；没有固件全为 0）。
         /// 机器：存活机器当前蓝图版本的固件槽；防线：炮塔蓝图版本的固件槽 + 陷阱固件。O(机器 × 2 + 炮塔 × 2 + 防御建筑)，只在锁定与情报刷新时算。
         /// 固件在蓝图的有序固件槽（OrderedFirmwareIds），不在 3×3 电路格（FG1-SIG-01：固件不是电路格内容）。
         /// </summary>
@@ -187,25 +194,64 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             total++;
-            if (HasFireTag(id))
+            switch (PortGroupOf(id))
             {
-                fire++;
-            }
-            switch (FirmwareKinds.CategoryOf(id))
-            {
-                case FirmwareCategory.Fuse:
+                case PortGroup.Fire:
+                    fire++;
+                    break;
+                case PortGroup.Fuse:
                     fuse++;
                     break;
-                case FirmwareCategory.Electromagnetic:
+                case PortGroup.Em:
                     em++;
                     break;
             }
         }
 
-        private static bool HasFireTag(string id)
+        private enum PortGroup : byte
         {
-            string[] tags = FirmwareKinds.TagsOf(id);
-            return tags != null && Array.IndexOf(tags, "Fire") >= 0;
+            None, Fire, Fuse, Em,
+        }
+
+        private static readonly Dictionary<string, PortGroup> GroupCache = new Dictionary<string, PortGroup>(StringComparer.Ordinal);
+        private static int _groupRevision = -1;
+
+        /// <summary>这枚固件（混合固件取两父的声明）归哪个端口族。按 EmgCatalog.Revision 缓存。不看阶段闸门：反制读的是“玩家在用什么通道”，回滚 emg.stage 不改对策口径。</summary>
+        private static PortGroup PortGroupOf(string id)
+        {
+            if (_groupRevision != EmgCatalog.Revision)
+            {
+                GroupCache.Clear();
+                _groupRevision = EmgCatalog.Revision;
+            }
+            if (GroupCache.TryGetValue(id, out PortGroup cached))
+            {
+                return cached;
+            }
+            EmgCompiled c = EmgCatalog.Current;
+            var owners = new HashSet<int>();
+            foreach (string o in FirmwareKinds.ExpandMixed(new[] { id }))
+            {
+                if (c.OwnerIndex.TryGetValue(o, out int oi))
+                {
+                    owners.Add(oi);
+                }
+            }
+            bool fire = false, em = false, grammar = false;
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.Dir != EmgDirs.Write || !owners.Contains(d.Owner) || !c.PortIdByCode.TryGetValue(d.Port, out string port))
+                {
+                    continue;
+                }
+                EmgFamily family = EmgCatalog.FamilyOf(port);
+                fire |= port == "en.heat" || port == "mat.fire";
+                em |= port == "en.elec" || port == "en.mag" || family == EmgFamily.Field;
+                grammar |= family == EmgFamily.Grammar;
+            }
+            PortGroup group = fire ? PortGroup.Fire : em ? PortGroup.Em : grammar ? PortGroup.Fuse : PortGroup.None;
+            GroupCache[id] = group;
+            return group;
         }
 
         private static IEnumerable<string> FirmwareOf(CampaignState s, string blueprintId, int version)

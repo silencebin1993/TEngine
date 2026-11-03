@@ -139,12 +139,8 @@ namespace BinGames.Sim.Combat
         /// <summary>酸液（酸沼 / 喷淋池 / 分裂液）对这个单位的伤害倍率 = (1 − 酸蚀抗性) ×（湿润时冲淡倍率）；玩家机器的抗性取它与防腐涂层的较大值。</summary>
         internal static float AcidFactor(ref CombatData d, int k, double now)
         {
-            float resist = d.Clarity[k].AcidResist;
-            if (d.PlayerAcidResist > 0f && d.Faction[k] == (byte)CombatFaction.Player && d.Kind[k] == (byte)CombatUnitKind.Machine)
-            {
-                resist = math.max(resist, d.PlayerAcidResist); // FG10-REG-01：防腐涂层（派生量，读档后由热更层重写）
-            }
-            float f = 1f - math.saturate(resist);
+            // EmgResist：档案腐蚀抗性（澄净材质 1）、运行时覆盖与防腐涂层下限（FG10-REG-01，派生量，读档后由热更层重写）取大
+            float f = 1f - math.saturate(math.max(d.Clarity[k].AcidResist, EmgResist(ref d, k, EmgPhaseConst.ResCorrode)));
             if (f > 0f && d.AcidDilute > 0f && IsWet(ref d, k, now))
             {
                 f *= math.saturate(d.AcidDilute);
@@ -437,12 +433,12 @@ namespace BinGames.Sim.Combat
             }
         }
 
-        /// <summary>一块喷淋池（敌方阵营；与油迹共用上限）。</summary>
+        /// <summary>一块喷淋池（中立，EMG2-BOSS-01；与油迹共用上限）。</summary>
         private static bool SpawnPool(ref CombatData d, int owner, double2 pos, float radius, float seconds, float dps, uint mask, float statusSeconds,
             float sdps, float sslow, float svuln, float chill)
         {
-            // EMG2-MAT-02：迁入斑块（mat.acid / mat.cryo）；FG19B 定值前池保持敌方阵营作过渡（ADR ⑭ #1 / U5），炮塔与建筑照旧挨（非中立分支）
-            if (!SpawnZone(ref d, owner, CombatFaction.Hostile, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, sdps, sslow, svuln, CombatConst.ZoneKindPool, migrate: true))
+            // EMG2-MAT-02：迁入斑块（mat.acid / mat.cryo）。EMG2-BOSS-01（FG19B §7 #1 #2）：池中立，别的阵营踩进去同样挨，澄净靠抗性列（腐蚀 1、寒 0.5）；炮塔与建筑照旧挨（StepZones 的池分支）
+            if (!SpawnZone(ref d, owner, CombatFaction.Neutral, pos, radius, seconds, dps, 0f, 1f, mask, statusSeconds, sdps, sslow, svuln, CombatConst.ZoneKindPool, migrate: true))
             {
                 return false;
             }

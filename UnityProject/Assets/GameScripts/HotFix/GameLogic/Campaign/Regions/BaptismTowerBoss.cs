@@ -38,6 +38,8 @@ namespace GameLogic.Campaign.Regions
     /// - 部件：反应塔 1 座（敌人表 boss 行：耐久在这里分阶段结算，external_health；固定环形喷淋架 = 枢轴喷灌同一套内核结算）+ 泵站 4 座
     ///   （敌人表澄净结构行，按表里的顺序轮流取；内核耐久，被打掉就停掉它的流体）。都是 <see cref="RegionEnemyRecord"/>（区域 = 家园 / 星球），随快照与键表进存档。
     /// - 开战：澄净领地已在地图上显示、有己方机器进入场地半径 → 先自动存档（BossEngageEnter，FGR-FAC-006“全灭后从首领战前的自动存档重试”）→ 播种部件 → 灌注。
+    /// - EMG2-BOSS-01（FG19B §7 #9～#11）：灌注 = 中立物质斑块（油 / 酸 / 水），引发 = 向斑块注入 en.heat / en.elec（酸片盖一块 2 秒明火），后果由规则表结算；预警圈仍是无状态位的区域。
+    ///   塔不被自己烧穿：落点外缘离塔至少 fill_tower_clear（斑块不合并、不靠近塔，打不到塔）；阶段倍率不动。斑块层关着（emg.stage &lt; 2）时退回下面的旧区域写法。
     /// - 灌注（全程）：每 fill_seconds 轮到一座存活泵站，落点先预警 fill_warn_seconds（≥ 0.8），再落下一片中立流体（战斗内核布区：敌我站进去都沾油 / 酸 / 湿润，
     ///   流体与双方的标签按反应规则起反应）。落点按（种子, 第几次挑战, 第几片）派生。
     /// - 反应（耐久 ≤ phase2）：开局召来一波澄净单位；每 react_seconds 挑一片“站着最多己方机器”的流体，预警 react_warn_seconds 后盖上一块火（油 / 酸）或电（水）——
@@ -103,6 +105,14 @@ namespace GameLogic.Campaign.Regions
         public static float ReactWarnSeconds => Mathf.Max(0.8f, Tuning("boss.clarity.react_warn_seconds", 1.5f));
         public static float ReactZoneSeconds => Tuning("boss.clarity.react_zone_seconds", 2f);
         public static float ReactDps => Tuning("boss.clarity.react_dps", 8f);
+        /// <summary>EMG2-BOSS-01：一片流体的份量（注热升温按份量折算）。</summary>
+        public static float FillAmount => Mathf.Max(0.5f, Tuning("boss.clarity.fill_amount", 5f));
+        /// <summary>EMG2-BOSS-01：斑块外缘离塔心的最小距离（塔不被自己的灌注 / 引发烧穿阶段）。</summary>
+        public static float FillTowerClear => Tuning("boss.clarity.fill_tower_clear", 4f);
+        /// <summary>EMG2-BOSS-01：引发油片的升温（度，FG19B §7 #10：+300 度 → E01）。</summary>
+        public static float ReactHeatDegrees => Tuning("boss.clarity.react_heat_degrees", 300f);
+        /// <summary>EMG2-BOSS-01：引发水片的电荷注入（FG19B §7 #10：1.0 → E14）。</summary>
+        public static float ReactElec => Tuning("boss.clarity.react_elec", 1f);
         public static float Phase2HpFraction => Mathf.Clamp(Tuning("boss.clarity.phase2_hp_fraction", 0.7f), 0.1f, 0.95f);
         public static float Phase3HpFraction => Mathf.Clamp(Tuning("boss.clarity.phase3_hp_fraction", 0.35f), 0.05f, Phase2HpFraction - 0.01f);
         public static float VentCycleSeconds => Tuning("boss.clarity.vent_cycle_seconds", 16f);
@@ -453,6 +463,9 @@ namespace GameLogic.Campaign.Regions
                 tower.Health = Mathf.Max(tower.Health, start);
             }
             // 泵站是灌注阶段的部件：只在灌注阶段复位时修回（同铸造主核心护盾阶段修回供能节点）；之后的阶段里打掉的泵站保持打掉。
+            // 全灭 / 离场复位：灌下的斑块（含已被规则转化的）一并清空，机器回来是一片干净的场地（卡片负向）。旧档落在区域里的流体到期自己干涸。
+            site?.ClearReservedPatches();
+            r.Active = Array.Empty<ClarityBossFill>();
             if (p == BaptismPhase.Fill)
             {
                 for (int i = 0; i < PumpCount; i++)
@@ -771,7 +784,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (r.FillPump < 0 && tick >= r.NextFillTick)
             {
-                Prune(r, tick);
+                Prune(r, site, tick);
                 int pump = NextLivePump(s, r);
                 if (pump < 0 || r.Active.Length >= FillCap)
                 {
@@ -800,14 +813,19 @@ namespace GameLogic.Campaign.Regions
                     return;
                 }
                 var at = new Vector2(r.FillX, r.FillY);
-                StatusTagCatalog.TryGet(tag, out StatusTag st);
-                float tagSeconds = EnemyDefs.TryGet(Pump(s, pump).EnemyTypeId, out MechEnemy pumpRow) ? pumpRow.StatusSeconds : 4f;
-                site.SpawnNeutralField(at, FillRadius, FillLifeSeconds, 0f, NamedReactionCatalog.BitOf(tag),
-                    Mathf.Max(1f, tagSeconds), st?.Amount ?? 0f, CombatZoneLook.Pool);
+                int patchId = site.SpawnReservedPatch(MatterOfFluid(tag), at, FillRadius, FillAmount, FillLifeSeconds);
+                if (patchId == 0)
+                {
+                    // 斑块层关着（emg.stage < 2 回滚）：退回中立区域
+                    StatusTagCatalog.TryGet(tag, out StatusTag st);
+                    float tagSeconds = EnemyDefs.TryGet(Pump(s, pump).EnemyTypeId, out MechEnemy pumpRow) ? pumpRow.StatusSeconds : 4f;
+                    site.SpawnNeutralField(at, FillRadius, FillLifeSeconds, 0f, NamedReactionCatalog.BitOf(tag),
+                        Mathf.Max(1f, tagSeconds), st?.Amount ?? 0f, CombatZoneLook.Pool);
+                }
                 r.Fills++;
                 var list = new List<ClarityBossFill>(r.Active)
                 {
-                    new ClarityBossFill { Serial = r.Fills, X = at.x, Y = at.y, R = FillRadius, Tag = tag, UntilTick = tick + GameClock.TicksFor(FillLifeSeconds) },
+                    new ClarityBossFill { Serial = r.Fills, X = at.x, Y = at.y, R = FillRadius, Tag = tag, UntilTick = tick + GameClock.TicksFor(FillLifeSeconds), PatchId = patchId },
                 };
                 r.Active = list.ToArray();
                 FillsPoured++;
@@ -819,7 +837,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (r.ReactFill < 0 && tick >= r.NextReactTick)
             {
-                Prune(r, tick);
+                Prune(r, site, tick);
                 ClarityBossFill target = PickReactTarget(s, r);
                 if (target == null)
                 {
@@ -835,6 +853,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (r.ReactFill >= 0 && tick >= r.ReactAtTick)
             {
+                Prune(r, site, tick); // 预警这段时间里玩家可能已经点着 / 冲掉了这片
                 ClarityBossFill target = FindFill(r, r.ReactFill);
                 r.ReactFill = -1;
                 r.NextReactTick = tick + GameClock.TicksFor(ReactSeconds);
@@ -843,16 +862,51 @@ namespace GameLogic.Campaign.Regions
                     return;
                 }
                 string trigger = TriggerOf(target.Tag);
-                StatusTagCatalog.TryGet(trigger, out StatusTag st);
                 var at = new Vector2(target.X, target.Y);
-                site.SpawnNeutralField(at, target.R, ReactZoneSeconds, ReactDps, NamedReactionCatalog.BitOf(trigger),
-                    Mathf.Max(1f, ReactZoneSeconds), st?.Amount ?? 0f, CombatZoneLook.Pulse);
+                if (target.PatchId != 0)
+                {
+                    Ignite(site, target, at);
+                    // react_dps 按 FG19B §12 #12 阶段 2 先保留（出口再定）：只带伤害、不带任何触发位的区域，状态与反应都来自规则
+                    site.SpawnNeutralField(at, target.R, ReactZoneSeconds, ReactDps, 0u, 0f, 0f, CombatZoneLook.Pulse);
+                }
+                else
+                {
+                    StatusTagCatalog.TryGet(trigger, out StatusTag st);
+                    site.SpawnNeutralField(at, target.R, ReactZoneSeconds, ReactDps, NamedReactionCatalog.BitOf(trigger),
+                        Mathf.Max(1f, ReactZoneSeconds), st?.Amount ?? 0f, CombatZoneLook.Pulse);
+                }
                 r.Reactions++;
                 ReactionsTriggered++;
                 string verb = GameText.Get(trigger == "Shock" ? "boss.clarity.react.shock" : "boss.clarity.react.ignite");
                 FeedbackCues.RaiseLocated(FeedbackCueId.ClarityDeflagrate, at, GameText.Format("boss.clarity.cue.react", verb + FluidName(target.Tag)));
             }
         }
+
+        /// <summary>FG19B §7 #10：油片注 en.heat（升温 react_heat_degrees → E01 整片爆燃）；水片注 en.elec（→ E14 导电水洼）；酸片盖一块 react_zone_seconds 的明火（沾酸的单位 C05 拖火）。</summary>
+        private static void Ignite(CombatSite site, ClarityBossFill fill, Vector2 at)
+        {
+            switch (MatterOfFluid(fill.Tag))
+            {
+                case EmgMatterConst.Oil:
+                    float gain = Mathf.Max(0.01f, Tuning("emg.heat.patch_gain", 10f));
+                    site.InjectPatchEnergy(at, 0.5f, EmgConst.PortHeat, ReactHeatDegrees * FillAmount / gain);
+                    break;
+                case EmgMatterConst.Water:
+                    site.InjectPatchEnergy(at, 0.5f, EmgConst.PortElec, ReactElec);
+                    break;
+                default:
+                    site.SpawnReservedPatch(EmgMatterConst.Fire, at, fill.R, 1f, ReactZoneSeconds);
+                    break;
+            }
+        }
+
+        /// <summary>泵站流体标签 → 物质码（FG19B §1.5）。</summary>
+        public static byte MatterOfFluid(string tag) => tag switch
+        {
+            "Oil" => EmgMatterConst.Oil,
+            "Wet" => EmgMatterConst.Water,
+            _ => EmgMatterConst.Acid,
+        };
 
         private static void TickVent(CampaignState s, ClarityBossRecord r, CombatSite site, long tick)
         {
@@ -1016,7 +1070,7 @@ namespace GameLogic.Campaign.Regions
             uint seed = (uint)(s.World?.WorldSeed ?? s.RandomSeed);
             uint h = Hash(seed, (uint)r.Attempt, (uint)(r.Fills + 1));
             float a = (h % 3600u) * 0.1f * Mathf.Deg2Rad;
-            float min = Mathf.Max(FillRadius, PumpRing * 0.3f);
+            float min = Mathf.Max(FillRadius + FillTowerClear, PumpRing * 0.3f); // EMG2-BOSS-01：斑块外缘离开塔，塔不被自己烧穿阶段
             float max = Mathf.Max(min + 1f, ArenaRadius * 0.6f);
             float d = min + ((h >> 12) % 1000u) / 1000f * (max - min);
             return center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * d;
@@ -1063,27 +1117,27 @@ namespace GameLogic.Campaign.Regions
             return null;
         }
 
-        private static void Prune(ClarityBossRecord r, long tick)
+        /// <summary>去掉到期、或已被规则转化 / 冲掉的流体（只在挑落点、挑目标的瞬间调）；还在的同步斑块当前位置与半径（浮油会挪到水片上）。</summary>
+        private static void Prune(ClarityBossRecord r, CombatSite site, long tick)
         {
-            int alive = 0;
+            var list = new List<ClarityBossFill>(r.Active.Length);
             foreach (ClarityBossFill f in r.Active)
             {
-                if (f != null && f.UntilTick > tick)
+                if (f == null || f.UntilTick <= tick)
                 {
-                    alive++;
+                    continue;
                 }
-            }
-            if (alive == r.Active.Length)
-            {
-                return;
-            }
-            var list = new List<ClarityBossFill>(alive);
-            foreach (ClarityBossFill f in r.Active)
-            {
-                if (f != null && f.UntilTick > tick)
+                if (f.PatchId != 0)
                 {
-                    list.Add(f);
+                    if (!site.TryGetPatchById(f.PatchId, out CombatZone z) || z.Matter != MatterOfFluid(f.Tag))
+                    {
+                        continue;
+                    }
+                    f.X = (float)z.Pos.x;
+                    f.Y = (float)z.Pos.y;
+                    f.R = z.Radius;
                 }
+                list.Add(f);
             }
             r.Active = list.ToArray();
         }

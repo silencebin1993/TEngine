@@ -31,6 +31,8 @@ namespace BinGames.Sim.Combat
         public const byte FlagLegacy = 8;
         /// <summary>EMG2-RECL-01（蔓延）：这块斑块已经扩过（R0 = 目标半径、Growth = 扩散速率）。同一块只扩一次，持续开火不会超过文本写的 2 倍。</summary>
         public const byte FlagSpread = 16;
+        /// <summary>EMG2-BOSS-01（FG19B §7 #9 #10）：首领灌注这类“占世界源保留额、不合并、不被挤掉，但照常进规则、按自带时长到期”的斑块（常驻世界源 FlagWorld 不进规则，放不下“给油片打火提前引爆”）。</summary>
+        public const byte FlagReserved = 32;
         /// <summary>EMG2-MAT-02（ADR ⑤ 建筑受击聚合）：每步最多发布给热更层的设施受击条目数；超出的留在待发布表（按键合并），下一步优先，不丢。</summary>
         public const int StructHitsPerStep = 64;
         /// <summary>已发布、热更层还没取走的条目上限（没有消费者的地点不会无限增长：满了就留在待发布表里按键合并）。</summary>

@@ -49,6 +49,9 @@ namespace BinGames.Sim.Combat
 
         private static bool PatchWorld(in CombatZone z) => (z.PFlags & EmgMatterConst.FlagWorld) != 0;
 
+        /// <summary>占世界源保留额的斑块：常驻世界源，或首领灌注（FlagReserved）。</summary>
+        private static bool PatchInReserve(in CombatZone z) => (z.PFlags & (EmgMatterConst.FlagWorld | EmgMatterConst.FlagReserved)) != 0;
+
         // ─────────────────────────────── 生成 ───────────────────────────────
 
         /// <summary>
@@ -65,7 +68,7 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             EmgScalars es = d.EmgS[0];
-            if ((flags & EmgMatterConst.FlagWorld) == 0 && es.PatchSpawnedStep >= PatchSpawnPerStepOf(ref d))
+            if ((flags & (EmgMatterConst.FlagWorld | EmgMatterConst.FlagReserved)) == 0 && es.PatchSpawnedStep >= PatchSpawnPerStepOf(ref d))
             {
                 if (d.EmgPending.Length >= EmgConst.PendingCapacity)
                 {
@@ -131,8 +134,9 @@ namespace BinGames.Sim.Combat
         {
             EmgMatter m = MatterOf(ref d, matter);
             bool world = (flags & EmgMatterConst.FlagWorld) != 0;
+            bool inReserve = world || (flags & EmgMatterConst.FlagReserved) != 0;
             float maxR = PatchMaxRadiusOf(ref d);
-            radius = world ? radius : math.min(radius, maxR);
+            radius = inReserve ? radius : math.min(radius, maxR);
             amount = amount > 0f ? amount : 1f;
             double now = d.Scalars[0].Time;
             float life = seconds > 0f ? seconds : m.LifeFor(amount);
@@ -154,7 +158,7 @@ namespace BinGames.Sim.Combat
                     }
                     continue;
                 }
-                if (PatchWorld(z))
+                if (PatchInReserve(z))
                 {
                     worldN++;
                     continue;
@@ -188,7 +192,7 @@ namespace BinGames.Sim.Combat
                     nearSoftD = dist;
                     nearSoft = i;
                 }
-                if (m.MergeOverlap > 0f && !world)
+                if (m.MergeOverlap > 0f && !inReserve)
                 {
                     double ratio = OverlapRatio(z.Pos, z.Radius, pos, radius);
                     if (ratio >= m.MergeOverlap && (ratio > bestRatio || (ratio == bestRatio && z.EmgId < d.Patches[bestOverlap].EmgId)))
@@ -205,7 +209,7 @@ namespace BinGames.Sim.Combat
                 Temp = m.TempInit, Conc = 1f, Hp = m.Solid != 0 ? m.Hp : 0f, Faction = CombatFaction.Neutral, Kind = EmgMatterConst.ZoneKindPatch,
             };
             bool keepNew = m.Solid != 0 && d.Config.EmgPersist != 0; // EMG2-PERSIST-01：长期留存固态不合并（FG19B §8.2），超软上限 / 总额由 EmgPersistCap 崩解为碎屑
-            if (!world)
+            if (!inReserve)
             {
                 // 1. 与重叠的同种合并（份量相加、面积守恒）
                 if (bestOverlap >= 0 && EmgMergeInto(ref d, bestOverlap, incoming, false))
@@ -314,7 +318,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !PatchWorld(z) && !IsLegacy(z) && !PatchKept(ref d, z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
+                if (PatchAlive(z) && !PatchInReserve(z) && !IsLegacy(z) && !PatchKept(ref d, z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
                 {
                     best = i;
                 }
@@ -673,7 +677,7 @@ namespace BinGames.Sim.Combat
                     z.Amount *= 0.95f;
                     d.Patches[i] = z;
                 }
-                if (o.Matter == z.Matter && !PatchWorld(o) && m.MergeOverlap > 0f && OverlapRatio(z.Pos, z.Radius, o.Pos, o.Radius) >= m.MergeOverlap
+                if (o.Matter == z.Matter && !PatchInReserve(o) && !PatchInReserve(z) && m.MergeOverlap > 0f && OverlapRatio(z.Pos, z.Radius, o.Pos, o.Radius) >= m.MergeOverlap
                     && EmgMergeInto(ref d, i, o, false))
                 {
                     KillPatch(ref d, j);

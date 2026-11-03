@@ -29,6 +29,24 @@ namespace GameLogic.Campaign.Combat
         public bool SpawnNeutralField(Vector2 at, float radius, float seconds, float dps, uint statusMask, float statusSeconds, float statusDps, CombatZoneLook look) =>
             !IsDisposed && Kernel.SpawnFieldZone(CombatFaction.Neutral, new double2(at.x, at.y), radius, seconds, dps, statusMask, statusSeconds, statusDps, 0f, 0f, look);
 
+        /// <summary>EMG2-BOSS-01：首领灌注斑块（占世界源保留额、照常进规则，FG19B §7 #9）。返回斑块 Id；斑块层没开 / 保留额满返回 0。</summary>
+        public int SpawnReservedPatch(byte matter, Vector2 at, float radius, float amount, float seconds) =>
+            IsDisposed ? 0 : Kernel.SpawnReservedPatch(matter, new double2(at.x, at.y), radius, amount, seconds);
+
+        /// <summary>EMG2-BOSS-01：撤掉全部首领灌注斑块（首领战复位）。</summary>
+        public int ClearReservedPatches() => IsDisposed ? 0 : Kernel.ClearReservedPatches();
+
+        /// <summary>EMG2-BOSS-01：向 <paramref name="at"/> 处的斑块注入能量（port = EmgConst.PortHeat / PortElec），规则表结算后果。返回注入到几块。</summary>
+        public int InjectPatchEnergy(Vector2 at, float radius, ushort port, float amount) =>
+            IsDisposed ? 0 : Kernel.InjectPatchEnergy(new double2(at.x, at.y), radius, port, amount);
+
+        /// <summary>按斑块 Id 取活斑块（O(斑块数)，只在施放瞬间调）。</summary>
+        public bool TryGetPatchById(int id, out CombatZone patch)
+        {
+            patch = default;
+            return !IsDisposed && id != 0 && Kernel.TryGetPatch(Kernel.PatchIndexOf(id), out patch);
+        }
+
         public int AcidShapeCount => IsDisposed ? 0 : Kernel.AcidShapeCount;
 
         public bool InAcidMarsh(Vector2 point) => !IsDisposed && Kernel.InAcidMarsh(new double2(point.x, point.y));
@@ -58,6 +76,15 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>FG10-BOSS-01：改单位的免疫状态位（仍走状态位的旧路径）。EMG2-PHS-01 起游戏代码改调 <see cref="SetResist"/>（ADR ⑦ / ⑭ #9）。</summary>
         public bool SetImmuneMask(int unitId, uint mask) => !IsDisposed && Kernel.SetImmuneMask(unitId, mask);
+
+        /// <summary>EMG2-BOSS-01（ADR ⑭ #12）：摘掉所有打开地点里在场单位的这些免疫位（绝缘涂层次日恢复）。O(地点)；逐单位在内核。</summary>
+        public static void ClearImmuneBitsEverywhere(uint bits)
+        {
+            foreach (CombatSite site in CombatSites.All)
+            {
+                site.Kernel.ClearImmuneBits(bits);
+            }
+        }
 
         /// <summary>抗性列（内核 Res0～5 的顺序）。</summary>
         public const int ResistCold = 0, ResistHeat = 1, ResistElec = 2, ResistCorrode = 3, ResistMag = 4, ResistHack = 5;

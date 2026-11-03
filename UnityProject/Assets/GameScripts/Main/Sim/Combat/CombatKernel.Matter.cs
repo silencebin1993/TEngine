@@ -185,6 +185,22 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        /// <summary>EMG2-BOSS-01：立刻生成一块首领灌注斑块（FlagReserved，占世界源保留额）。返回斑块 Id；层没开 / 保留额满返回 0。</summary>
+        public int SpawnReservedPatch(byte matter, double2 pos, float radius, float amount, float seconds)
+        {
+            int at = CombatLogic.EmgPatchesOn(ref _d) ? CombatLogic.EmgPlacePatch(ref _d, matter, pos, radius, amount, seconds, 0, 0, 0, EmgMatterConst.FlagReserved, 0) : -1;
+            Touch();
+            return at >= 0 ? _d.Patches[at].EmgId : 0;
+        }
+
+        /// <summary>EMG2-BOSS-01：撤掉全部首领灌注斑块（含已被规则转化的；首领战复位用）。O(斑块数)。返回撤掉几块。</summary>
+        public int ClearReservedPatches()
+        {
+            int n = CombatLogic.EmgClearReserved(ref _d);
+            Touch();
+            return n;
+        }
+
         /// <summary>活着的斑块数。</summary>
         public int PatchCount => _d.EmgS[0].PatchLive;
 

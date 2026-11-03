@@ -312,7 +312,7 @@ namespace GameLogic.Campaign.Combat
                 return null;
             }
             string name = Emergence.EmgMatterCatalog.NameOf(z.Matter);
-            string from = (z.PFlags & EmgMatterConst.FlagWorld) != 0 ? GameText.Get("emg.patch.hover.world")
+            string from = (z.PFlags & (EmgMatterConst.FlagWorld | EmgMatterConst.FlagReserved)) != 0 ? GameText.Get("emg.patch.hover.world")
                 : z.Phase == EmgMatterConst.PhaseFromWreck ? GameText.Get("emg.patch.hover.wreck")
                 : z.Owner > 0 ? PartyName(site, state, z.Owner) : GameText.Get("emg.patch.hover.unknown");
             string line = GameText.Format("emg.patch.hover.line", name, from, Emergence.EmgMatterCatalog.NextOf(z.Matter));

@@ -598,7 +598,8 @@ namespace GameLogic.Campaign.Defense
                         ver = v;
                     }
                 }
-                foreach (string id in ver?.CircuitSlotContentIds ?? Array.Empty<string>())
+                // FG-GAP-159（EMG2-BOSS-01）：固件在有序固件槽，不在 3×3 电路格（FG1-SIG-01）
+                foreach (string id in ver?.OrderedFirmwareIds ?? Array.Empty<string>())
                 {
                     Count(counts, id);
                 }

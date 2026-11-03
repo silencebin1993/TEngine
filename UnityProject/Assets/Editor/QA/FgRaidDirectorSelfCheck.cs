@@ -809,6 +809,16 @@ namespace GameLogic.EditorTools
             string t2 = LayTrap(s, fw, "trap2");
             var counts = new int[4];
             string top = RaidDirectorService.TopDefenseCategory(s, counts);
+            // FG-GAP-159：炮塔的固件在有序固件槽，从前读 3×3 电路格一枚都数不到。
+            TurretState gapTurrets = TurretService.StateOf(s);
+            TurretRecord[] gapSaved = gapTurrets.Turrets;
+            BlueprintCircuitBoard gapBoard = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, new[] { "fw_homing", "fw_split" });
+            s.BlueprintRecords = s.BlueprintRecords.Append(new BlueprintRecord { BlueprintId = "bp_gap159", DisplayName = "bp_gap159", ActiveVersion = 1, Versions = new[] { gapBoard.ToVersion(1, 0f) } }).ToArray();
+            gapTurrets.Turrets = new[] { new TurretRecord { BuildingId = "gap159_turret", Serial = 990159, BlueprintId = "bp_gap159", BlueprintVersion = 1 } };
+            var gapCounts = new int[4];
+            string gapTop = RaidDirectorService.TopDefenseCategory(s, gapCounts);
+            gapTurrets.Turrets = gapSaved;
+            Expect(gapTop == "fuse" && gapCounts[0] == 2, $"FG-GAP-159 炮塔蓝图固件槽里的 2 枚引信类固件计入防线类别（{gapTop}，{gapCounts[0]} 枚）");
             RaidDirectorService.RequestStoryRaid(s, "foundry", 3);
             WorldSimulation.StepMany(2);
             RaidPlanRecord p = LatestPlan(s);

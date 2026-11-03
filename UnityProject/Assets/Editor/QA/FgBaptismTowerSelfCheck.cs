@@ -9,6 +9,7 @@ using GameConfig.fg;
 using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
+using GameLogic.Campaign.Defense;
 using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Economy;
@@ -43,6 +44,7 @@ namespace GameLogic.EditorTools
     /// C 反应阶段：耐久打到门槛停在门槛上进阶段二（一发巨额伤害不跳阶段），召来一波单位；主动反应先预警 ≥ 0.8 秒，再在机器最多的那片流体上点燃 / 通电——
     ///   站在里面的敌方单位同样起反应（借力打力）。
     /// D 泄压：封闭时伤害 × 0.5 且冻不住（先冻再烧打不出热震），泄压时伤害 × 2 且能冻住（热震打得出来）。
+    /// H～K（EMG2-BOSS-01）：灌注 / 引发走规则表（E01、E14、C05）、玩家先动手、旧档；塔不被自己烧穿（含正向对照）；emg.stage 回滚退回区域。
     /// E 击败：奖励（反应增幅 / 流体类固件 / 三选一）只发一次，澄净领地平定（主线“反应核”），反应塔从内核撤走；HUD 显示名称、阶段与分阶段血条。
     /// F 场地边界（FGR-FAC-006）：机器全部离开场地（含全灭）满 20 秒 → 阶段不变、耐久回到本阶段开始时（灌注阶段泵站修回）、波次撤走、待命不挨打；
     ///   机器回来接着打本阶段（反应阶段重新召波次）。F3 全灭后读首领战前自动存档（BossEngageEnter）→ 首领沉寂、再进场重新开战。
@@ -126,6 +128,9 @@ namespace GameLogic.EditorTools
                 Step(CheckRetryFromAutosave);
                 Step(CheckSaveLoad);
                 Step(CheckPauseSpeed);
+                Step(CheckFluidRules);
+                Step(CheckTowerNotBurned);
+                Step(CheckRollback);
                 Step(CheckPerf);
             }
             finally
@@ -272,6 +277,14 @@ namespace GameLogic.EditorTools
             }
             Expect(warned && first != null && tagged,
                 $"B2 灌注：落点先亮起 {(pourAt - warnAt) / (float)GameClock.StepHz:0.00} 秒（≥ 0.8）再落下一片{first?.Tag}；机器站进去沾上这个标签（{tagged}）");
+            // B2b FGT-EMG-035（洗礼塔灌注等价部分）：同样的半径 / 时长 / 片数，但这一片是中立物质斑块，不是带标签位的区域。
+            CombatZone firstPatch = default;
+            bool isPatch = first != null && home.TryGetPatchById(first.PatchId, out firstPatch) && firstPatch.Matter == BaptismTowerBoss.MatterOfFluid(first.Tag)
+                           && firstPatch.Faction == CombatFaction.Neutral && (firstPatch.PFlags & EmgMatterConst.FlagReserved) != 0 && (firstPatch.PFlags & EmgMatterConst.FlagWorld) == 0
+                           && Mathf.Approximately(firstPatch.Radius, BaptismTowerBoss.FillRadius)
+                           && Mathf.Abs((float)(firstPatch.Until - firstPatch.Born) - BaptismTowerBoss.FillLifeSeconds) < 0.01f;
+            Expect(isPatch && ReservedPatches(home) == r.Active.Length && r.Active.Length <= BaptismTowerBoss.FillCap,
+                $"B2b FGT-EMG-035：灌注片是中立物质斑块（物质 {firstPatch.Matter}、半径 {firstPatch.Radius}、时长 {firstPatch.Until - firstPatch.Born:0.#} 秒、占世界源保留额），场上 {ReservedPatches(home)} 块 = 记录 {r.Active.Length} 片（上限 {BaptismTowerBoss.FillCap}）");
 
             // B3 打掉一座泵站：它的流体不再灌入。
             home.TryGetEnemyUnit(BaptismTowerBoss.PumpInstanceId(0), out int pump0);
@@ -325,12 +338,16 @@ namespace GameLogic.EditorTools
                 $"C1 一发 5 倍耐久的伤害只打到阶段二门槛（耐久 {tower.Health:0} / {tower.MaxHealth:0}，进入{BaptismTowerBoss.PhaseName(BaptismTowerBoss.PhaseOf(s))}），召来 {r.WaveUnits.Length} 台澄净单位");
 
             // C2 主动反应：预警 ≥ 0.8 秒；落在机器最多的那片流体上；站在里面的敌方单位同样起反应（借力打力）。
-            ClarityBossFill target = r.Active.LastOrDefault(f => f.Tag == "Oil") ?? r.Active.LastOrDefault();
+            // 召来的液氮泵车的池子能把油片冻到点不着（规则涌现，不是缺陷）：这里只验塔引发那一下，先撤掉那一波，等一片新鲜的油
+            home.DespawnSiegeGroup(BaptismTowerBoss.WaveKey);
+            ClarityBossFill target = WaitFill(home, r, "Oil") ?? r.Active.LastOrDefault();
             int bait = 0;
             if (target != null)
             {
-                MoveTo(m, new Vector2(target.X, target.Y));
-                bait = home.Kernel.Spawn(Hostile(new double2(target.X + 0.5f, target.Y)));
+                // 浮油规则（M01）可能已把这片油挪到水片上：摆到斑块此刻的位置
+                Vector2 tp = home.TryGetPatchById(target.PatchId, out CombatZone tz) ? new Vector2((float)tz.Pos.x, (float)tz.Pos.y) : new Vector2(target.X, target.Y);
+                MoveTo(m, tp);
+                bait = home.Kernel.Spawn(Hostile(new double2(tp.x + 0.5f, tp.y)));
             }
             long reactWarn = -1, reactAt = -1;
             int reactions0 = BaptismTowerBoss.ReactionsTriggered;
@@ -349,8 +366,13 @@ namespace GameLogic.EditorTools
                     reactAt = GameClock.Ticks;
                 }
             }
+            // 引发之前这片可能又被浮油规则挪走过：诱饵摆到结算后的斑块上（中立：敌方单位站进去同样挨）
+            if (target != null && home.TryGetPatchById(target.PatchId, out CombatZone tz2))
+            {
+                bait = home.Kernel.Spawn(Hostile(tz2.Pos));
+            }
             StepSeconds(1);
-            bool baitHit = bait != 0 && home.Kernel.TryGetStatus(bait, out uint bm, out _, out _, out _, out _) && (bm & Bit(trigger)) != 0u;
+            bool baitHit = bait != 0 && (target.Tag == "Wet" ? Lost(home, bait) > 0f : home.Kernel.TryGetStatus(bait, out uint bm, out _, out _, out _, out _) && (bm & Bit("Fire")) != 0u);
             Expect(target != null && reactWarn > 0 && reactAt - reactWarn >= GameClock.TicksFor(0.8) && pickedSerial == target.Serial && baitHit,
                 $"C2 主动反应：预警 {(reactAt - reactWarn) / (float)GameClock.StepHz:0.00} 秒（≥ 0.8），挑中机器站着的那片{target?.Tag}（{pickedSerial == target?.Serial}）并{(trigger == "Shock" ? "通电" : "点燃")}；" +
                 $"站在里面的敌方单位同样挨到（借力打力，{baitHit}）");
@@ -482,13 +504,17 @@ namespace GameLogic.EditorTools
                 $"机器回来 → 重新召来 {r.WaveUnits.Length} 台（{waveAgain}）");
 
             // F2 卡片负向“全灭”：场上的机器真被打光（不是走开）→ 同样满 20 秒复位到本阶段开始时；新机器进场接着打。从头重试见 F3（首领战前自动存档）。
+            StepSeconds(BaptismTowerBoss.FillWarnSeconds + BaptismTowerBoss.FillSeconds + 1f); // 复位时场上要真有斑块，下面“清空”才不是假阴性
             int resets2 = BaptismTowerBoss.Resets;
+            int patchesBeforeWipe = ReservedPatches(CombatSites.Get(HomeValleyLayout.RegionId));
             bool killed = MachineRegistry.MarkDeadByLogicId(m).Success; // 机器阵亡的唯一翻转点（内核里的死亡只是它的回声，CombatSite.cs）
             BaptismTowerBoss.ApplyDamage(s, tower, tower.MaxHealth * 0.1f);
             StepSeconds(BaptismTowerBoss.ArenaLeaveSeconds + 2f);
             bool wipeReset = BaptismTowerBoss.Resets == resets2 + 1 && BaptismTowerBoss.PhaseOf(s) == BaptismPhase.React && r.ArenaIdle
                              && Mathf.Approximately(tower.Health, tower.MaxHealth * BaptismTowerBoss.Phase2HpFraction);
             string diag3 = $"复位 {BaptismTowerBoss.Resets - resets2} 次、阶段 {BaptismTowerBoss.PhaseOf(s)}、待命 {r.ArenaIdle}、耐久 {tower.Health:0}、场内 {BaptismTowerBoss.MachinesInArena(s, center)}";
+            Expect(patchesBeforeWipe > 0 && ReservedPatches(CombatSites.Get(HomeValleyLayout.RegionId)) == 0 && r.Active.Length == 0,
+                $"F2b 负向“全灭重试时斑块清空”：复位前场上 {patchesBeforeWipe} 块灌注斑块 → 复位后 {ReservedPatches(CombatSites.Get(HomeValleyLayout.RegionId))} 块、记录 {r.Active.Length} 片");
             int m2 = Spawn(s, center + new Vector2(5f, 0f));
             StepSeconds(2);
             bool retry = m2 != 0 && BaptismTowerBoss.IsFighting(s) && BaptismTowerBoss.PhaseOf(s) == BaptismPhase.React && r.Attempt == 1;
@@ -589,6 +615,7 @@ namespace GameLogic.EditorTools
             int engages = BaptismTowerBoss.Engages;
             long ticks = GameClock.Ticks;
             string before = Sig(s);
+            int patchesBefore = ReservedPatches(home);
             SaveNow();
             CampaignState l = LoadLikeMenu();
             if (l == null)
@@ -596,6 +623,11 @@ namespace GameLogic.EditorTools
                 return;
             }
             string after = Sig(l);
+            int patchesAfter = ReservedPatches(CombatSites.Get(HomeValleyLayout.RegionId));
+            ClarityBossFill savedFill = BaptismTowerBoss.Record(l).Active.LastOrDefault();
+            bool patchBack = patchesBefore > 0 && patchesAfter == patchesBefore && savedFill != null && savedFill.PatchId != 0
+                             && CombatSites.Get(HomeValleyLayout.RegionId).TryGetPatchById(savedFill.PatchId, out _);
+            Expect(patchBack, $"G1b 存读档：灌注斑块随内核快照回来（{patchesBefore} → {patchesAfter} 块），记录里的斑块 Id 对得上（{savedFill?.PatchId}）；首领灌注不新增内核状态，快照格式仍是 {CombatConst.FormatVersion}");
             StepSeconds(2);
             CombatSite lh = CombatSites.Get(HomeValleyLayout.RegionId);
             string inKernel = PartsAlive(lh);
@@ -825,6 +857,247 @@ namespace GameLogic.EditorTools
                                                                                      && n.Members.Any(mb => (mb.DetailText ?? string.Empty).Contains(text)));
 
         // ─────────────────────────────── 工具 ───────────────────────────────
+
+        private static int ReservedPatches(CombatSite site)
+        {
+            int n = 0;
+            for (int i = 0; i < site.Kernel.PatchSlots; i++)
+            {
+                if (site.Kernel.TryGetPatch(i, out CombatZone z) && (z.PFlags & EmgMatterConst.FlagReserved) != 0)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>诱饵（满血 1e6）掉了多少血。</summary>
+        private static float Lost(CombatSite site, int unit) => site.Kernel.TryGetUnit(unit, out CombatUnitView v) ? v.MaxHealth - v.Health : 0f;
+
+        private static int RuleCount(CombatSite site, string id)
+        {
+            EmgRuleCatalog.Compiled c = EmgRuleCatalog.Current;
+            int i = c.Ids.IndexOf(id);
+            return i >= 0 ? site.Kernel.EmgRuleCountOfKey(c.Rules[i].Key) : 0;
+        }
+
+        /// <summary>等场上出现一片还新鲜（剩 ≥ 25 秒）、还是原物质的 <paramref name="tag"/> 流体。</summary>
+        private static ClarityBossFill WaitFill(CombatSite site, ClarityBossRecord r, string tag)
+        {
+            for (int i = 0; i < GameClock.StepHz * 60; i++)
+            {
+                foreach (ClarityBossFill f in r.Active)
+                {
+                    if (f.Tag == tag && f.UntilTick - GameClock.Ticks >= GameClock.TicksFor(25f) && site.TryGetPatchById(f.PatchId, out CombatZone z) && z.Matter == BaptismTowerBoss.MatterOfFluid(tag))
+                    {
+                        return f;
+                    }
+                }
+                WorldSimulation.StepMany(1);
+            }
+            return null;
+        }
+
+        /// <summary>把机器与诱饵摆上这片（机器最多的那片才被挑中），等塔真的引发到这一片；每半秒把机器按回去。</summary>
+        private static bool WaitReactOn(CampaignState s, ClarityBossRecord r, ClarityBossFill f, int machine)
+        {
+            int picked = -1;
+            r.Active = new[] { f }; // 别的流体可能被浮油规则挪到同一处，“机器最多”并列时会抢走目标；只留这一片（别的斑块还在内核里照常结算）
+            for (int i = 0; i < GameClock.StepHz * 40; i++)
+            {
+                if (i % (GameClock.StepHz / 2) == 0)
+                {
+                    MoveTo(machine, new Vector2(f.X, f.Y));
+                }
+                int before = BaptismTowerBoss.ReactionsTriggered;
+                WorldSimulation.StepMany(1);
+                if (r.ReactFill >= 0)
+                {
+                    picked = r.ReactFill;
+                }
+                if (BaptismTowerBoss.ReactionsTriggered > before && picked == f.Serial)
+                {
+                    return true;
+                }
+                if (r.Active.Length == 0)
+                {
+                    return false; // 这片已被别的规则结算（如明火蒸干），调用方换一片
+                }
+            }
+            return false;
+        }
+
+        // ─────────────────────────────── H EMG2-BOSS-01：灌注 / 引发走规则表（FG19B §7 #9 #10）───────────────────────────────
+
+        private static void CheckFluidRules()
+        {
+            CampaignState s = NewWorld(43);
+            if (s.Progress != null)
+            {
+                s.Progress.Act = Math.Max(2, s.Progress.Act);
+            }
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            BaptismTowerBoss.TryArena(s, out Vector2 center);
+            int m = Spawn(s, center + new Vector2(BaptismTowerBoss.PumpRing * 0.5f, 0f));
+            StepSeconds(2);
+            ClarityBossRecord r = BaptismTowerBoss.Record(s);
+            RegionEnemyRecord tower = BaptismTowerBoss.Tower(s);
+            BaptismTowerBoss.ApplyDamage(s, tower, tower.MaxHealth * 5f); // 进反应阶段
+
+            // H1 油片：注热 → E01 整片变明火；站在里面的敌我都着火（中立、借力打力）。
+            ClarityBossFill oil = WaitFill(home, r, "Oil");
+            int deflag0 = RuleCount(home, "reaction_deflagrate");
+            int baitOil = oil != null ? home.Kernel.Spawn(Hostile(new double2(oil.X + 0.5f, oil.Y))) : 0;
+            bool oilPicked = oil != null && WaitReactOn(s, r, oil, m);
+            StepSeconds(1f);
+            bool oilFire = oil != null && home.TryGetPatchById(oil.PatchId, out CombatZone oz) && oz.Matter == EmgMatterConst.Fire;
+            bool baitBurn = home.Kernel.TryGetStatus(baitOil, out uint bm1, out _, out _, out _, out _) && (bm1 & Bit("Fire")) != 0u;
+            bool machineBurn = home.TryGetMachineUnit(m, out int mu) && home.Kernel.TryGetStatus(mu, out uint mm1, out _, out _, out _, out _) && (mm1 & Bit("Fire")) != 0u;
+            Expect(oilPicked && oilFire && RuleCount(home, "reaction_deflagrate") > deflag0 && baitBurn && machineBurn,
+                $"H1 油片：塔引发 → 规则 E01 结算（计数 {deflag0} → {RuleCount(home, "reaction_deflagrate")}），这一片变明火（{oilFire}）；站在里面的小兵（{baitBurn}）和己方机器（{machineBurn}）都着火");
+
+            // H2 水片：注电 → E14 导电水洼；站在里面的单位积电荷。
+            // 机器身上的火先灭掉：着火的单位踩水会按规则把水烧成蒸汽（FG19B C 类），水片撑不到引发
+            MoveTo(m, center + new Vector2(BaptismTowerBoss.ArenaRadius - 2f, 0f));
+            StepSeconds(6f);
+            ClarityBossFill water = null;
+            int conduct0 = RuleCount(home, "reaction_conduct");
+            int baitWet = 0;
+            bool waterPicked = false;
+            for (int attempt = 0; attempt < 4 && !waterPicked; attempt++)
+            {
+                water = WaitFill(home, r, "Wet");
+                baitWet = water != null ? home.Kernel.Spawn(Hostile(new double2(water.X + 0.5f, water.Y))) : 0;
+                waterPicked = water != null && WaitReactOn(s, r, water, m);
+            }
+            StepSeconds(1f);
+            float baitCharge = Lost(home, baitWet);
+            Expect(waterPicked && RuleCount(home, "reaction_conduct") > conduct0 && baitCharge > 0f,
+                $"H2 水片：塔引发（{waterPicked}，{water?.Tag}#{water?.Serial}）→ 规则 E14 放弧（计数 {conduct0} → {RuleCount(home, "reaction_conduct")}），站在里面的小兵被电掉 {baitCharge:0.##}");
+
+            // H3 酸片：盖 2 秒明火 → 沾酸的单位 C05 拖火；澄净单位腐蚀抗性 1 不沾酸（FG19B §7 #10 ③）。
+            ClarityBossFill acid = WaitFill(home, r, "Acid");
+            int caustic0 = RuleCount(home, "reaction_causticburn");
+            int baitAcid = acid != null ? home.Kernel.Spawn(Hostile(new double2(acid.X + 0.5f, acid.Y))) : 0;
+            RaidCatalog.TryGetUnit("clarity.sprayer", out RaidUnitDef sprayer);
+            int proof = acid != null ? SiegeService.SpawnOne(home, BaptismTowerBoss.WaveKey, new Vector2(acid.X - 0.5f, acid.Y), new Vector2(acid.X - 0.5f, acid.Y), sprayer, false) : 0;
+            StepSeconds(1f);
+            bool baitAcidCoat = home.Kernel.TryGetStatus(baitAcid, out uint am, out _, out _, out _, out _) && (am & Bit("Acid")) != 0u;
+            bool proofClean = home.Kernel.TryGetStatus(proof, out uint pm, out _, out _, out _, out _) && (pm & Bit("Acid")) == 0u;
+            bool acidPicked = acid != null && WaitReactOn(s, r, acid, m);
+            StepSeconds(1f);
+            Expect(acidPicked && baitAcidCoat && proofClean && RuleCount(home, "reaction_causticburn") > caustic0,
+                $"H3 酸片：普通单位沾酸（{baitAcidCoat}），澄净单位不沾（{proofClean}）；塔盖明火 → 规则 C05 拖火（计数 {caustic0} → {RuleCount(home, "reaction_causticburn")}）");
+
+            // H4 玩家先动手（FG19B §7 #9）：给油片打火提前引爆、水片遇液氮结冰；塔之后不再把它们当流体。
+            ClarityBossFill water2 = WaitFill(home, r, "Wet");
+            int freeze0 = RuleCount(home, "reaction_freeze");
+            if (water2 != null)
+            {
+                home.Kernel.SpawnPatch(EmgMatterConst.Cryo, new double2(water2.X, water2.Y), 3f, 3f, 5f);
+            }
+            StepSeconds(1f);
+            bool frozen = RuleCount(home, "reaction_freeze") > freeze0;
+            ClarityBossFill oil2 = WaitFill(home, r, "Oil");
+            if (oil2 != null && home.TryGetPatchById(oil2.PatchId, out CombatZone o2a))
+            {
+                home.InjectPatchEnergy(new Vector2((float)o2a.Pos.x, (float)o2a.Pos.y), 0.5f, EmgConst.PortHeat, 300f);
+            }
+            StepSeconds(1f);
+            bool oil2Lit = oil2 != null && home.TryGetPatchById(oil2.PatchId, out CombatZone o2) && o2.Matter == EmgMatterConst.Fire;
+            StepSeconds(BaptismTowerBoss.ReactSeconds + BaptismTowerBoss.ReactWarnSeconds + 1f);
+            bool dropped = oil2 != null && r.Active.All(f => f.Serial != oil2.Serial);
+            Expect(oil2Lit && frozen && dropped,
+                $"H4 玩家交互：给油片打火提前引爆（{oil2Lit}）、水片遇液氮结冰（{frozen}）；塔的流体记录里不再有烧掉的那片（{dropped}）");
+
+            // H5 旧档 / 回滚：流体记录没有斑块 Id（落在区域里）→ 引发退回带触发位的区域，不报错。
+            var legacyFill = new ClarityBossFill { Serial = 90001, X = center.x + 12f, Y = center.y, R = BaptismTowerBoss.FillRadius, Tag = "Oil", UntilTick = GameClock.Ticks + GameClock.TicksFor(60f) };
+            r.Active = r.Active.Append(legacyFill).ToArray();
+            int baitLegacy = home.Kernel.Spawn(Hostile(new double2(legacyFill.X + 0.5f, legacyFill.Y)));
+            bool legacyPicked = WaitReactOn(s, r, legacyFill, m);
+            StepSeconds(1f);
+            Expect(legacyPicked && home.Kernel.TryGetStatus(baitLegacy, out uint lm, out _, out _, out _, out _) && (lm & Bit("Fire")) != 0u,
+                $"H5 旧档：没有斑块 Id 的流体（落在区域里）照样能被引发（{legacyPicked}），站在里面的单位着火");
+        }
+
+        /// <summary>I DEBT-EMG2REACT02-06：塔不被自己的灌注 / 引发烧穿阶段（REACT-02 试过直接进斑块：20 秒烧掉约 25%）。正向对照：同样的油片压到塔身上就会掉血，证明这条测得出来。</summary>
+        private static void CheckTowerNotBurned()
+        {
+            CampaignState s = NewWorld(44);
+            if (s.Progress != null)
+            {
+                s.Progress.Act = Math.Max(2, s.Progress.Act);
+            }
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            BaptismTowerBoss.TryArena(s, out Vector2 center);
+            // 场地边上的机器够不到塔，塔掉的血只可能来自灌注 / 引发
+            int m = Spawn(s, center + new Vector2(BaptismTowerBoss.ArenaRadius - 2f, 0f));
+            StepSeconds(2);
+            ClarityBossRecord r = BaptismTowerBoss.Record(s);
+            RegionEnemyRecord tower = BaptismTowerBoss.Tower(s);
+            BaptismTowerBoss.ApplyDamage(s, tower, tower.MaxHealth * 5f);
+            float hp0 = tower.Health;
+            int reactions0 = BaptismTowerBoss.ReactionsTriggered;
+            float nearest = float.MaxValue;
+            for (int i = 0; i < 60; i++)
+            {
+                MoveTo(m, center + new Vector2(BaptismTowerBoss.ArenaRadius - 2f, 0f));
+                StepSeconds(1f);
+                foreach (ClarityBossFill f in r.Active)
+                {
+                    nearest = Mathf.Min(nearest, Vector2.Distance(new Vector2(f.X, f.Y), center) - f.R);
+                }
+            }
+            float lost = hp0 - tower.Health;
+            int reactions = BaptismTowerBoss.ReactionsTriggered - reactions0;
+            Expect(reactions >= 3 && Mathf.Approximately(lost, 0f) && BaptismTowerBoss.PhaseOf(s) == BaptismPhase.React && nearest >= BaptismTowerBoss.FillTowerClear - 0.01f,
+                $"I1 反应阶段 60 秒、塔亲手引发 {reactions} 次：塔掉血 {lost:0.##}（不烧穿阶段，仍是{BaptismTowerBoss.PhaseName(BaptismTowerBoss.PhaseOf(s))}），流体外缘离塔心最近 {nearest:0.#} 米（≥ {BaptismTowerBoss.FillTowerClear}）");
+            // 正向对照：同一份油压到塔身上再点着，塔真的掉血。
+            home.TryGetEnemyUnit(BaptismTowerBoss.TowerInstanceId, out int towerUnit);
+            home.Kernel.TryGetUnit(towerUnit, out CombatUnitView tv);
+            var at = new Vector2((float)tv.Position.x, (float)tv.Position.y);
+            home.SpawnReservedPatch(EmgMatterConst.Oil, at, BaptismTowerBoss.FillRadius, BaptismTowerBoss.FillAmount, 10f);
+            home.InjectPatchEnergy(at, 0.5f, EmgConst.PortHeat, BaptismTowerBoss.ReactHeatDegrees * BaptismTowerBoss.FillAmount / 10f);
+            float hp1 = tower.Health;
+            StepSeconds(5f);
+            Expect(tower.Health < hp1, $"I2 正向对照：油片压到塔身上再点着 → 塔掉血（{hp1:0} → {tower.Health:0}），I1 的“不掉血”不是测不到");
+        }
+
+        /// <summary>K 回滚开关：斑块层关（emg.stage = 1）→ 灌注退回中立区域，首领照样能打（ADR ⑮）。</summary>
+        private static void CheckRollback()
+        {
+            EmgSource src = EmgCatalog.FromTables();
+            Func<string, (bool ok, float value)> tuning = src.Tuning;
+            src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
+            EmgCatalog.OverrideForTests(src);
+            try
+            {
+                CampaignState s = NewWorld(46);
+                if (s.Progress != null)
+                {
+                    s.Progress.Act = Math.Max(2, s.Progress.Act);
+                }
+                CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+                BaptismTowerBoss.TryArena(s, out Vector2 center);
+                int m = Spawn(s, center + new Vector2(BaptismTowerBoss.PumpRing * 0.5f, 0f));
+                StepSeconds(2);
+                ClarityBossRecord r = BaptismTowerBoss.Record(s);
+                StepSeconds(BaptismTowerBoss.FillWarnSeconds + 1f);
+                ClarityBossFill f = r.Active.LastOrDefault();
+                if (f != null)
+                {
+                    MoveTo(m, new Vector2(f.X, f.Y));
+                    StepSeconds(1.5f);
+                }
+                bool tagged = f != null && home.TryGetMachineUnit(m, out int mu) && home.Kernel.TryGetStatus(mu, out uint mask, out _, out _, out _, out _) && (mask & Bit(f.Tag)) != 0u;
+                Expect(f != null && f.PatchId == 0 && ReservedPatches(home) == 0 && tagged,
+                    $"K1 回滚（emg.stage = 1，斑块层关）：灌注退回中立区域（斑块 Id {f?.PatchId}），机器站进去照样沾上{f?.Tag}（{tagged}）");
+            }
+            finally
+            {
+                EmgCatalog.ResetForTests();
+            }
+        }
 
         /// <summary>先挂冰冻，再在它脚下铺一块会烧的区域（区域节拍带伤害，纯倍率反应才会结算——hit = 0 的直接挂标签不结算）。返回冰冻挂上了没有。</summary>
         private static bool FreezeThenBurn(CombatSite site, int unit)

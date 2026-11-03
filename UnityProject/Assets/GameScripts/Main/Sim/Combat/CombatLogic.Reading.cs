@@ -1206,6 +1206,7 @@ namespace BinGames.Sim.Combat
                 // FG6-LOG-10：中立区域（液洼与它反应成的残留）对己方机器与敌人一视同仁；建筑 / 炮塔类结构单位不在这里结算
                 // （它们挨的火由热更层按建筑耐久结算一次，避免内核与建筑记录各扣一遍）。
                 bool neutral = zone.Faction == CombatFaction.Neutral;
+                bool pool = zone.Kind == CombatConst.ZoneKindPool; // EMG2-BOSS-01（FGR-EMG-083、FG19B §7 #1）：喷淋池中立，但炮塔与建筑照样挨；旧档里敌方阵营的池同口径
                 // EMG1-BUS-01 / TRIG-01：区域节拍的伤害来源 = 区域；带程序的区域同时是宿主（evt.hit Code = 区域节拍，每宿主计数随区域进快照）。
                 EmgCtx zoneCtx = zone.EmgProgRef > 0 ? EmgZoneHost(ref d, zone) : EmgCtx.Source(owner, EmgEntKind.Zone, (byte)EmgCode.SrcZone);
                 // EMG1-FW-01（DEBT-EMG1GRM01-05）：阶段 1 掩体规则开时，子区 / 小脉冲的节拍与根力场脉冲同一口径——被障碍 / 残骸挡（抛射 / 贯穿越过），吃正面装甲（破甲减免）
@@ -1218,7 +1219,8 @@ namespace BinGames.Sim.Combat
                 int n = d.Count;
                 for (int k = 0; k < n; k++)
                 {
-                    if (neutral
+                    if (pool ? d.Faction[k] == (byte)CombatFaction.Neutral
+                        : neutral
                             ? d.Faction[k] == (byte)CombatFaction.Neutral || d.Kind[k] == (byte)CombatUnitKind.Turret || d.Kind[k] == (byte)CombatUnitKind.Structure
                             : d.Faction[k] != want)
                     {

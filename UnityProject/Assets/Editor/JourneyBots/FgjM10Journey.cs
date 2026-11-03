@@ -126,7 +126,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("ml_close2", "再按任务日志键关闭", 10, c => JourneyInput.PressToggleTo(GameActionId.ToggleMissionLog, () => MissionLogUIToolkit.IsOpen, false),
                     c => MissionLogUIToolkit.IsOpen ? StepOutcome.Wait : StepOutcome.Done("任务日志已关闭"), retries: 1),
                 S("boss_go", "右键湖心平台上的地面：远征队开进湖心、进场，洗礼塔开战（灌注阶段，HUD 显示名称与分阶段血条）", 240, null, TickBossEngaged, retries: 1),
-                S("boss_fight", "右键反应塔（攻击），被打断就再右键：灌注 → 反应 → 泄压 → 击毁", 900, null, TickBossFight),
+                S("boss_fight", "右键反应塔（攻击），被打断就再右键：灌注 → 反应 → 泄压 → 击毁", 900, ApplyBossFixture, TickBossFight),
                 S("boss_won", "洗礼塔击毁：奖励只发一次（反应增幅 + 流体固件、首领三选一数据包、反应核入库），澄净领地平定", 30, null, TickBossWon),
 
                 // ── 5. 回家应对化工突袭、重新净化 ──
@@ -1360,6 +1360,22 @@ namespace GameLogic.EditorTools.JourneyBots
             return result;
         }
 
+        /// <summary>
+        /// 夹具（EMG2-BOSS-01）：远征队每台耐久提到 500。从前 8 台裸 ERC-003 打得赢，推断靠塔被自己的灌注 / 引发烧掉约一半耐久（DEBT-EMG2REACT02-06，已修）；
+        /// 塔现在只挨玩家的伤害，8 台 100 耐久的车打不完 2400。这条旅程验流程不验数值，强度归 FG15-BAL-01（FG-GAP-166）。
+        /// </summary>
+        private static void ApplyBossFixture(JourneyContext c)
+        {
+            foreach (int id in AliveTeam(c))
+            {
+                if (MachineRegistry.TryGetRecord(id, out MachineRecord m))
+                {
+                    m.MaxHealth = 500f;
+                    m.Health = 500f;
+                }
+            }
+        }
+
         private static StepOutcome TickBossFight(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
@@ -1397,6 +1413,23 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.SetInt(FgjM3Common.SK(c, "log"), (int)(c.StepElapsed / 15));
                 RegionEnemyRecord tw = BaptismTowerBoss.Tower(s);
                 c.Log($"[{F(c.StepElapsed, "0")}s] {BaptismTowerBoss.PhaseName(phase)}：反应塔 {F(tw?.Health ?? 0, "0")}/{F(tw?.MaxHealth ?? 0, "0")}、泵站存活 {BaptismTowerBoss.PumpsAlive(s)}、伤害倍率 {F(BaptismTowerBoss.DamageMult(s), "0.##")}；{TeamHp(c)}；攻击中 {AliveTeam(c).Count(id => Cmd(id) == (int)CombatCommandKind.Attack)} 台");
+            }
+            // FG-GAP-140 的临时做法（玩家也这么操作）：攻击命令直线逼近、被地形角落卡在射程外不动 → 先右键塔旁地面（移动走寻路）走近，下面再右键塔。
+            // EMG2-BOSS-01：撤掉场地区域后幸存的两台卡在拐角里不再被挤开，这一步才稳定复现。寻路局部避让归 FG15-SYS-02。
+            Vector2 centroid = Centroid(c);
+            if (NowMs() - c.GetLong(FgjM3Common.SK(c, "stuckAt")) > 5000)
+            {
+                Vector2 towerAt = BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.TowerInstanceId);
+                bool stuck = Vector2.Distance(centroid, towerAt) > 16f && Vector2.Distance(centroid, new Vector2(c.GetLong(FgjM3Common.SK(c, "stuckX")) / 100f, c.GetLong(FgjM3Common.SK(c, "stuckY")) / 100f)) < 0.5f;
+                c.SetLong(FgjM3Common.SK(c, "stuckAt"), NowMs());
+                c.SetLong(FgjM3Common.SK(c, "stuckX"), Mathf.RoundToInt(centroid.x * 100f));
+                c.SetLong(FgjM3Common.SK(c, "stuckY"), Mathf.RoundToInt(centroid.y * 100f));
+                if (stuck && !JourneyInput.Holding && FgjM3Common.TryClick(towerAt + (centroid - towerAt).normalized * 9f, 1))
+                {
+                    c.Log($"[{F(c.StepElapsed, "0")}s] 攻击命令卡在射程外（FG-GAP-140），先右键塔旁地面走近");
+                    c.SetLong(FgjM3Common.SK(c, "rcAt"), NowMs());
+                    return StepOutcome.Wait;
+                }
             }
             // 有人没在打反应塔（被灌注 / 召来的小兵打断、刚开战）：右键反应塔（攻击）。
             int attacking = AliveTeam(c).Count(id => Cmd(id) == (int)CombatCommandKind.Attack);

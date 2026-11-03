@@ -61,6 +61,21 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        /// <summary>EMG2-BOSS-01：撤掉全部首领灌注斑块（FlagReserved）。</summary>
+        internal static int EmgClearReserved(ref CombatData d)
+        {
+            int n = 0;
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                if (PatchAlive(d.Patches[i]) && (d.Patches[i].PFlags & EmgMatterConst.FlagReserved) != 0)
+                {
+                    KillPatch(ref d, i);
+                    n++;
+                }
+            }
+            return n;
+        }
+
         /// <summary>长期留存固态崩解为金属碎屑斑块（转化，不消失；FGR-EMG-150）。斑块层放不下时碎屑顺延 / 计丢弃，不静默。</summary>
         private static void EmgPersistCollapse(ref CombatData d, int i)
         {

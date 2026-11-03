@@ -307,7 +307,36 @@ namespace GameLogic.EditorTools
                 string sa = PoolScenario(a, false, null, out int pa, out _);
                 string sb = PoolScenario(b, false, null, out int pb, out int lb);
                 Expect(sa == sb && lb == 1 && pa == pb,
-                    $"D1 酸池（敌方阵营过渡，ADR ⑭ #1）打己方机器、炮塔与建筑，迁移前后一致（中立分支不跳过炮塔 / 建筑）：层关 [{sa}] = 开 [{sb}]；层开时是迁入斑块（{lb}）");
+                    $"D1 酸池（中立，FG19B §7 #1）打己方机器、炮塔与建筑，迁移前后一致（中立分支不跳过炮塔 / 建筑）：层关 [{sa}] = 开 [{sb}]；层开时是迁入斑块（{lb}）");
+            }
+            using (CombatKernel k = NewKernel(true))
+            {
+                // EMG2-BOSS-01：池中立——别的阵营单位踩进去同样挨；澄净靠腐蚀抗性 1 不受伤（FG19B §7 #1），液氮池只吃一半寒（寒抗 0.5，§7 #2）。
+                int owner = Dummy(k, new double2(10, 10));
+                int foe = Dummy(k, new double2(0, -0.6));
+                int proof = Dummy(k, new double2(0, 0.6));
+                k.SetImmuneMask(proof, Bit("Acid")); // 澄净单位（acid_proof）：免疫位同步成腐蚀抗性 1
+                k.SpawnPoolForTests(owner, new double2(0, 0), 2.5f, 8f, 6f, Bit("Acid"), 4f, 0f);
+                k.TryGetUnit(foe, out CombatUnitView f0);
+                k.TryGetUnit(proof, out CombatUnitView p0);
+                Run(k, 2f);
+                k.TryGetUnit(foe, out CombatUnitView f1);
+                k.TryGetUnit(proof, out CombatUnitView p1);
+                Expect(f1.Health < f0.Health && Mathf.Approximately(p1.Health, p0.Health),
+                    $"D1b 酸池中立：别的敌方单位踩进去掉血（{f0.Health:0} → {f1.Health:0}），腐蚀抗性 1 的单位不掉（{p0.Health:0} → {p1.Health:0}）");
+            }
+            using (CombatKernel k = NewKernel(true))
+            {
+                int owner = Dummy(k, new double2(10, 10));
+                int bare = Dummy(k, new double2(0, -0.6));
+                int half = Dummy(k, new double2(0, 0.6));
+                k.SetResist(half, CombatSite.ResistCold, 0.5f);
+                k.SpawnPoolForTests(owner, new double2(0, 0), 2.5f, 8f, 0f, Bit("Frozen"), 4f, 0.2f);
+                Run(k, 0.6f);
+                k.TryGetUnitEnergy(bare, out float4 ab, out _);
+                k.TryGetUnitEnergy(half, out float4 ah, out _);
+                Expect(ab.x > 0f && Mathf.Abs(ah.x - ab.x * 0.5f) < ab.x * 0.1f,
+                    $"D1c 液氮池中立：敌方单位踩进去也受寒（{ab.x:0.###}），寒抗 0.5 只吃一半（{ah.x:0.###}）");
             }
             using (CombatKernel a = NewKernel(false))
             using (CombatKernel b = NewKernel(true))

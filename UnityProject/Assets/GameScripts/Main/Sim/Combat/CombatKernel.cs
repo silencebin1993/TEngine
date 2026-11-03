@@ -813,6 +813,23 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>EMG2-BOSS-01：全部单位摘掉这些免疫位（绝缘涂层次日恢复；电抗覆盖随之清回档案值）。O(单位数)，只在日切换对策时。</summary>
+        public void ClearImmuneBits(uint bits)
+        {
+            for (int i = 0; i < _d.Count; i++)
+            {
+                CombatClarityUnit c = _d.Clarity[i];
+                if ((c.ImmuneMask & bits) != 0u)
+                {
+                    uint before = c.ImmuneMask;
+                    c.ImmuneMask &= ~bits;
+                    _d.Clarity[i] = c;
+                    CombatLogic.SyncImmuneResist(ref _d, i, before);
+                }
+            }
+            Touch();
+        }
+
         /// <summary>
         /// EMG2-PHS-01（ADR ⑦ 运行时抗性覆盖，FGR-EMG-103）：改单位某一列抗性的运行时覆盖（0 寒、1 热、2 电、3 腐蚀、4 磁、5 入侵；0～1）。有效抗性 = max(档案值, 覆盖值)，
         /// 累积量、传导分电、沾染换算都读它；覆盖清回 0 = 回到档案值。状态随快照（单位段 Res0～5）。O(1)。

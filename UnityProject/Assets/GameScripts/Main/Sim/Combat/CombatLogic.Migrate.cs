@@ -98,7 +98,7 @@ namespace BinGames.Sim.Combat
                         free = i;
                     }
                 }
-                else if (PatchWorld(p))
+                else if (PatchInReserve(p))
                 {
                     worldN++;
                 }

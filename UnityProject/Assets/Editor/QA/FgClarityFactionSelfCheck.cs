@@ -12,6 +12,7 @@ using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Defense;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Env;
 using GameLogic.Campaign.Grid;
@@ -448,7 +449,8 @@ namespace GameLogic.EditorTools
                 $"B1 喷淋布区（FGR-FAC-008，FGT-FAC-009 实测）：喷嘴蓄压 {sprayAt - warnStart:0.00} 秒（≥ 0.8）且蓄压中原地不动（{held}）→ 锥形喷出：前方机器挨 {400f - fl:0.#}（表 {row.WeaponDamage}）并挂酸蚀（{acid}），" +
                 $"身后 7 米的机器不挨（{bl:0}）；地面留下酸液池 {pools} 块；武器列只是喷淋参数，普通开火路径不出手（开火计数不变 {noGun}）；蓄压有声音 + 字幕（{ClarityCombatFeedback.SprayWarnCues}）");
 
-            // 酸液池只伤你的单位：站进池子的机器按节拍掉耐久并挂酸蚀；澄净单位自己不怕酸（acid_proof：主动给它挂酸蚀也挂不上；对照：给身后那台机器挂得上）。
+            // EMG2-BOSS-01（FG19B §7 #1）：池中立，别的阵营单位踩进去同样挨——澄净单位不怕酸靠腐蚀抗性 1（见下面 B1b 与 B1c）。
+            // 站进池子的机器按节拍掉耐久并挂酸蚀；澄净单位自己不怕酸（acid_proof：主动给它挂酸蚀也挂不上；对照：给身后那台机器挂得上）。
             RunFor(site, 3f);
             float poolHit = 400f - View(site, front).Health;
             site.Kernel.ApplyStatus(sp, Bit("Acid"), 4f, 3f, 0f, 0f, front);
@@ -1176,6 +1178,15 @@ namespace GameLogic.EditorTools
                    && cp.DeflagMult > 0f && airborne && notInsulated && insulated && sp.AcidResist >= 1f,
                 $"C3 攻城 / 据点展开中的澄净专属语法：喷洒车带喷淋参数（射程 {sp.SprayRange}、蓄压 {sp.SprayWarn}）、巨罐带枢轴与分裂（{tp.PivotRadius} 米、{tp.SplitCount} 滩）、爬行者带自爆与爆燃（{cp.BurstRadius} 米 × {cp.DeflagMult}）、" +
                 $"无人机在空中（{airborne}）；绝缘涂层只在当天锁定时挂（平时 {!notInsulated}，锁定后 {insulated}）；不怕酸（抗性 {sp.AcidResist}）");
+            // EMG2-BOSS-01（卡片负向 / ADR ⑭ #12）：反制锁定日绝缘涂层电抗 1，当日电不到、次日恢复。
+            float elecOn = home.EffectiveResist(su2, CombatSite.ResistElec), elecPlain = home.EffectiveResist(su, CombatSite.ResistElec);
+            s.Factions.ClarityCounterDay = s.Clock.Day;
+            s.Clock.Day += 1;
+            ClarityCounterService.WorldStep(s); // 日切那一步：这个夹具没有电磁固件，对策换掉
+            float elecNext = home.EffectiveResist(su2, CombatSite.ResistElec);
+            s.Clock.Day -= 1;
+            Expect(Mathf.Approximately(elecOn, 1f) && elecPlain < 1f && elecNext < 1f,
+                $"C3b 绝缘涂层：锁定日电抗 {elecOn}（平时 {elecPlain}），次日换对策后恢复 {elecNext}");
             // 审查修复的回归（参数表去重键）：同一地点、同一种单位，精英 / 普通的专属伤害不能并成一行；分裂液耐久吃精英耐久倍率。
             RaidCatalog.TryGetUnit("clarity.ln2_pump", out RaidUnitDef pump);
             int pn = SiegeService.SpawnOne(home, 990201, new Vector2(20f, 10f), Vector2.zero, pump, false);
@@ -1222,6 +1233,9 @@ namespace GameLogic.EditorTools
         private const string BpFuse = "bp_fg10fac01_fuse";
         private const string BpEm = "bp_fg10fac01_em";
         private const string BpPlain = "bp_fg10fac01_plain";
+        private const string BpCorrode = "bp_fg10fac01_corrode";
+        private const string BpCapacitor = "bp_fg10fac01_capacitor";
+        private const string BpBoomerang = "bp_fg10fac01_boomerang";
 
         private static void MakeBlueprints(CampaignState s)
         {
@@ -1241,6 +1255,9 @@ namespace GameLogic.EditorTools
             Add(BpFuse, "fw_homing", "fw_split");
             Add(BpEm, "fw_arcchain", "fw_vortex");
             Add(BpPlain);
+            Add(BpCorrode, "fw_corrode");
+            Add(BpCapacitor, "fw_capacitor");
+            Add(BpBoomerang, "fw_boomerang");
         }
 
         private static int SpawnIn(CampaignState s, string bp, Vector2 at)
@@ -1301,6 +1318,28 @@ namespace GameLogic.EditorTools
                 $"D1 FGT-FAC-005：燃烧构筑（燃烧占比 {fire:0.00}）→ 澄净选“液氮压制”（{fireDecide}），当天锁定；改成引信构筑当天不变（{stillLocked}），预测“蜂群饱和”（{preview}），日切后锁定为蜂群（{nextDay}）；" +
                 $"电磁构筑 → 绝缘涂层（{emDecide}）；没有固件 → 没有对策（{(plain == string.Empty ? "无" : plain)}）；同一燃烧构筑铸造在自己的技术树里选（{(foundryFire == string.Empty ? "无" : foundryFire)}），静默同理（{(silentPlain == string.Empty ? "无" : silentPlain)}）");
             Expect(fireDecide == EnemyDefs.ConditionCounterCryo && fuse0 == 0f && em0 == 0f, "D1b 燃烧构筑里没有引信 / 电磁固件（夹具自证）");
+
+            // EMG2-BOSS-01（ADR ⑭ #12）：按写端口判，不按固件 ID / 标签 / 类别。同一条固件（ID、标签都不变）只把声明的写端口换掉，对策就跟着变。
+            SetFleet(s, BpFire, 3);
+            EmgSource swapped = EmgCatalog.FromTables();
+            foreach (EmgSource.Decl dc in swapped.Decls.Where(dc => dc.Owner == "fw_burntrail" && dc.Dir == "write"))
+            {
+                dc.Port = "en.elec";
+            }
+            EmgCatalog.OverrideForTests(swapped);
+            string portSwapped = ClarityCounterService.Decide(s);
+            EmgCatalog.ResetForTests();
+            string portBack = ClarityCounterService.Decide(s);
+            SetFleet(s, BpCorrode, 3); // 旧类别 = 引信，但写的是 phs.corrode / mat.acid：不算引信
+            string corrodeDecide = ClarityCounterService.Decide(s);
+            SetFleet(s, BpCapacitor, 3); // 旧类别 = 限制器，但写 en.elec：算电磁
+            string capacitorDecide = ClarityCounterService.Decide(s);
+            SetFleet(s, BpBoomerang, 3); // 旧类别 = 电磁，但只写 grm.mod.return：算语法族
+            string boomerangDecide = ClarityCounterService.Decide(s);
+            SetFleet(s, BpPlain, 3); // 还原夹具：下面 D2 的情报预测按“没有固件”
+            Expect(portSwapped == EnemyDefs.ConditionCounterInsulate && portBack == EnemyDefs.ConditionCounterCryo && corrodeDecide == ClarityCounterService.CounterNone
+                   && capacitorDecide == EnemyDefs.ConditionCounterInsulate && boomerangDecide == EnemyDefs.ConditionCounterSwarm,
+                $"D1d 反制按端口族：燃迹声明改写 en.elec → {portSwapped}，还原 → {portBack}；写 phs.corrode / mat.acid → {(corrodeDecide == string.Empty ? "无" : corrodeDecide)}；写 en.elec 的限制器 → {capacitorDecide}；只写 grm.* 的旧电磁 → {boomerangDecide}");
 
             // 突袭反制映射与情报行（FGR-FAC-004：突袭在出发时按当天的状态生成；情报面板可以看到当前的反制和下一次更新的预测）。
             // 第一幕澄净领地还没显示：情报不写澄净这一行（不剧透）；第二幕起写。
