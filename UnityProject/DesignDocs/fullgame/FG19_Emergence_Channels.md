@@ -850,6 +850,7 @@
 - `fw_reclaim` 的新机制（第 11 节第 7 行；声明由 FG19A 定）：读 `evt.kill`（本机击毁目标），写 `ent.wreck`（就地拆解该残骸）→ 残骸消失，按残骸质量换算的维修量修复本机，上限 `emg.reclaim.max_ratio`（本机最大耐久的 15%），每秒最多一次。修复己方机器（外部血量单位）时发修复请求（新玩法事件，与伤害请求对称），由热更层改记录血量，下一次血量同步不冲掉修复量（ADR-EMG-001 ⑦、第 7 节第 18 条）。
 - 与拆解钳（`comp_claw`，“击毁多回收废料”文案，落地与否未核实）合并为同一条“拆解残骸”规则：拆解钳击毁时额外得到废料物品。
 - 取舍：残骸留着是掩体，拆了是维修量。取代现“按伤害 20% 回血”（`Blood` 标签 leech，`CarrierReadings.cs:323、418-419`）。
+- 阶段 2 落地（EMG2-RECL-01，按推荐默认执行（2026-11-03），待用户确认）：内核 `CombatLogic.Reclaim.cs`（读 evt.kill、写 ent.wreck，按残骸质量 × `emg.reclaim.hp_per_mass`（5）换算，≤ 15%、`emg.reclaim.interval` 1 秒、满耐久不拆）；己方机器发 HealRequest、热更层 `MachineRegistry.ApplyRepair` 改记录后同步；Blood 标签 effect 改 none，旧 leech 路径全部撤除。声明 `param2 > 0` = 修复（回收修复），`param2 = 0` = 只拆（拆解钳；额外废料沿用 FG8-LOOT-01 掉落加成）。拆解钳不修复；己方机器残骸维持 `NoSalvage`；部件声明暂不进程序（DEBT-EMG2RECL01-01）。
 
 ---
 

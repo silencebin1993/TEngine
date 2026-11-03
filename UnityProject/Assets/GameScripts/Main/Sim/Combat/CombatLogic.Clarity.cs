@@ -54,7 +54,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>己方机器的移动速度（只吃受寒；状态标签的减速对己方机器的口径不在本卡改）。</summary>
-        internal static float ChillSpeed(ref CombatData d, int i, float speed) => speed * ChillFactor(ref d, i) * EmgWreckSlow(ref d, i); // EMG1-ENT-01：穿过残骸减速
+        internal static float ChillSpeed(ref CombatData d, int i, float speed) => speed * ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i); // EMG1-ENT-01：穿过残骸减速；EMG2-RECL-01：导线拦索
 
         /// <summary>这个单位的武器能不能打空中目标：格斗 / 力场 / 布区只打同层（FG18 FGR-AIR-010）；射弹、无人机能打；没有武器（只用来感知 / 后撤）算能看见。</summary>
         internal static bool CanHitAir(ref CombatData d, int i)

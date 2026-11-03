@@ -29,6 +29,8 @@ namespace BinGames.Sim.Combat
         /// 物质码只用于识别（悬停 / 渲染 / evt.enter·leave / 冲洗与整片反应的“遇到的物质”）。按新规则改写（去掉本标志）归 EMG2-RULE-01 / REACT-02。
         /// </summary>
         public const byte FlagLegacy = 8;
+        /// <summary>EMG2-RECL-01（蔓延）：这块斑块已经扩过（R0 = 目标半径、Growth = 扩散速率）。同一块只扩一次，持续开火不会超过文本写的 2 倍。</summary>
+        public const byte FlagSpread = 16;
         /// <summary>EMG2-MAT-02（ADR ⑤ 建筑受击聚合）：每步最多发布给热更层的设施受击条目数；超出的留在待发布表（按键合并），下一步优先，不丢。</summary>
         public const int StructHitsPerStep = 64;
         /// <summary>已发布、热更层还没取走的条目上限（没有消费者的地点不会无限增长：满了就留在待发布表里按键合并）。</summary>
@@ -128,6 +130,64 @@ namespace BinGames.Sim.Combat
         public byte Depth;
         /// <summary>EMG2-FLD-01 修复轮：磁场的 F02 磁扫已做过（1 = 做过；每个磁场只扫一次，与在步内哪个阶段展开无关）。</summary>
         public byte Swept;
+    }
+
+    /// <summary>
+    /// EMG2-RECL-01（FG19A 第 1.3 节第 36 行 fw_bridge；FG19 FGR-EMG-230 第 6 行）：桥接导线——结算点与 5 米内最近的另一个导体之间的临时传导边。
+    /// 两端按稳定 ID 指向单位 / 残骸 / 斑块（<see cref="EmgWireConst"/>.End*）；电、热沿它传，同类液体沿它均分，兼作拦索（穿过的单位减速）。
+    /// 任一端消失立即断开，到期移除（传导图恢复）。进快照段 20（格式 17 内追加）。
+    /// </summary>
+    public struct EmgWire
+    {
+        public double Born;
+        public double Until;
+        public int Id;
+        public int Owner;
+        public int Chain;
+        /// <summary>两端的稳定 ID（单位 Id / 残骸 Id / 斑块 EmgId）。</summary>
+        public int A, B;
+        /// <summary>穿过的单位速度 × (1 − Slow)。</summary>
+        public float Slow;
+        public byte KindA, KindB;
+        public byte Faction;
+        public byte Depth;
+        /// <summary>两端的下标缓存（残骸 / 斑块；Id 对不上时重查）。只是查找加速，读档后照样按 Id 校正。</summary>
+        public int IdxA, IdxB;
+    }
+
+    /// <summary>EMG2-RECL-01：导线常量。</summary>
+    public static class EmgWireConst
+    {
+        public const byte EndUnit = 1;
+        public const byte EndWreck = 2;
+        public const byte EndPatch = 3;
+        /// <summary>每地点同时存在的导线上限（满了新导线不生效并计数 WiresCapped，可见、不静默）。</summary>
+        public const int Capacity = 32;
+        /// <summary>拦索判定的半宽（米）：单位中心到导线线段的距离 ≤ 单位半径 + 本值算“穿过”。</summary>
+        public const float RopeHalfWidth = 0.3f;
+        public const float HeatDelta = 30f;
+        public const float DefaultSlow = 0.35f;
+        public const float DefaultSeconds = 3f;
+        public const float DefaultReach = 5f;
+    }
+
+    /// <summary>EMG2-RECL-01（FG19 FGR-EMG-115）：回收修复的结果码（单位段 ReclaimNote，悬停写原因）与缺省参数。</summary>
+    public static class EmgReclaimConst
+    {
+        public const byte NoteNone = 0;
+        /// <summary>拆解了残骸、修复了本机。</summary>
+        public const byte NoteRepaired = 1;
+        /// <summary>击毁的目标没有残骸（建筑 / 直接击毁 / 残骸池满被最早崩解 / 被别的机器先拆了）。</summary>
+        public const byte NoteNoWreck = 2;
+        /// <summary>本机满耐久：不拆，残骸留作掩体。</summary>
+        public const byte NoteFull = 3;
+        /// <summary>距上次拆解不到 1 秒（每秒最多一次）：不拆，残骸保留。</summary>
+        public const byte NoteCooldown = 4;
+        /// <summary>残骸不可拆解回收（己方机器的残骸，ADR ⑦ T5）。</summary>
+        public const byte NoteNoSalvage = 5;
+        public const float DefaultMaxRatio = 0.15f;
+        public const float DefaultHpPerMass = 5f;
+        public const float DefaultInterval = 1f;
     }
 
     /// <summary>

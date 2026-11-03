@@ -134,7 +134,31 @@ namespace GameLogic.Campaign.Combat
                     sb.Append(line);
                 }
             }
+            // EMG2-RECL-01（FGR-EMG-115 负向）：回收修复最近一次的结果（没拆的写原因：没有残骸 / 满耐久 / 冷却 / 不可回收）
+            string note = ReclaimNoteKey(s.ReclaimNote);
+            if (note != null)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append('\n');
+                }
+                sb.Append(GameText.Get(note));
+            }
             return sb.Length > before;
+        }
+
+        /// <summary>EMG2-RECL-01：回收修复结果码 → 悬停文本键（0 = 没有记录）。</summary>
+        public static string ReclaimNoteKey(byte note)
+        {
+            switch (note)
+            {
+                case EmgReclaimConst.NoteRepaired: return "emg.reclaim.note.repaired";
+                case EmgReclaimConst.NoteNoWreck: return "emg.reclaim.note.no_wreck";
+                case EmgReclaimConst.NoteFull: return "emg.reclaim.note.full";
+                case EmgReclaimConst.NoteCooldown: return "emg.reclaim.note.cooldown";
+                case EmgReclaimConst.NoteNoSalvage: return "emg.reclaim.note.no_salvage";
+                default: return null;
+            }
         }
     }
 }

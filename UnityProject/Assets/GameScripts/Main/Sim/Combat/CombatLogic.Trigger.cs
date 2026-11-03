@@ -170,6 +170,10 @@ namespace BinGames.Sim.Combat
             {
                 EmgRootGated(ref d, d.EmgBus[before], host);
             }
+            else
+            {
+                EmgChildWrites(ref d, d.EmgBus[before], host); // EMG2-RECL-01：子节点上的回收修复 / 桥接 / 蔓延（子弹药击毁也拆残骸修母机，FG19A 第 3 节 fw_mix_rustharvest）
+            }
             if (d.EmgPrograms[e.Prog].NodeCount < 2)
             {
                 return;
@@ -193,12 +197,14 @@ namespace BinGames.Sim.Combat
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
             ushort evPort = (ushort)(EmgConst.EventPortBase + (int)e.Kind);
             int emit = d.Config.EmgVerbEmit;
+            bool salvaged = false;
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
                 bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile;
+                bool recl = x.Verb == (byte)EmgVerb.Salvage || x.Verb == (byte)EmgVerb.Link || x.Verb == (byte)EmgVerb.Spread; // EMG2-RECL-01
                 if ((x.Flags & EmgInstrFlags.RootKernel) == 0 || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead
-                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject && x.Verb != (byte)EmgVerb.Field && !follow))
+                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject && x.Verb != (byte)EmgVerb.Field && !follow && !recl))
                 {
                     continue;
                 }
@@ -215,6 +221,26 @@ namespace BinGames.Sim.Combat
                 if (follow)
                 {
                     EmgQueueFollow(ref d, e, host, x);
+                    continue;
+                }
+                // EMG2-RECL-01：回收修复 / 拆解钳（同一事件只拆一次，多条 salvage 写端合并）、桥接导线、蔓延
+                if (x.Verb == (byte)EmgVerb.Salvage)
+                {
+                    if (!salvaged)
+                    {
+                        salvaged = true;
+                        EmgSalvage(ref d, e, host, n.FirstInstr, end, evPort);
+                    }
+                    continue;
+                }
+                if (x.Verb == (byte)EmgVerb.Link)
+                {
+                    EmgLink(ref d, e, host, x);
+                    continue;
+                }
+                if (x.Verb == (byte)EmgVerb.Spread)
+                {
+                    EmgSpread(ref d, e, host, x);
                     continue;
                 }
                 if (x.Verb == (byte)EmgVerb.Field)

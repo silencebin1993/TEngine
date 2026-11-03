@@ -1015,7 +1015,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            bool any = d.EmgS[0].PatchLive > 0;
+            bool any = d.EmgS[0].PatchLive > 0 || d.Wires.Length > 0; // EMG2-RECL-01：导线两端（单位 / 残骸）没有斑块也要传
             if (!any && !EmgAnyUnitEnergy(ref d))
             {
                 return;
@@ -1031,6 +1031,10 @@ namespace BinGames.Sim.Combat
             {
                 EmgHashEnsure(ref d);
                 visits += EmgHeatExchange(ref d, budget, phase);
+                if (d.Wires.Length > 0)
+                {
+                    visits += EmgWireTick(ref d); // EMG2-RECL-01：导线上的热与同类液体均分
+                }
                 visits += EmgElecBfs(ref d, budget, phase);
                 EmgChargeRules(ref d);
                 EmgDecayCharge(ref d);
@@ -1254,6 +1258,10 @@ namespace BinGames.Sim.Combat
                     queue.Add(new int4(1, w, 0, wk.Id));
                 }
             }
+            if (d.Wires.Length > 0)
+            {
+                EmgWireSeeds(ref d, ref queue, qmin); // EMG2-RECL-01：导线一端的带电单位也是起点
+            }
             if (queue.Length == 0)
             {
                 queue.Dispose();
@@ -1302,6 +1310,10 @@ namespace BinGames.Sim.Combat
                 if (nd.z >= hops || q * fall < qmin)
                 {
                     continue;
+                }
+                if (d.Wires.Length > 0)
+                {
+                    EmgWireElec(ref d, ref queue, ref qv, nd, q, qmin, bigR, share); // EMG2-RECL-01：导线 = 传导图的一条边
                 }
                 if (nd.x == 2)
                 {

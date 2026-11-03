@@ -219,6 +219,11 @@ namespace BinGames.Sim.Combat
                         es.HashDirty = 1;
                         d.EmgS[0] = es;
                     }
+                    if ((z.PFlags & EmgMatterConst.FlagSpread) != 0 && z.Radius >= z.R0 - 1e-4f)
+                    {
+                        z.Radius = z.R0; // EMG2-RECL-01（蔓延）：扩到目标半径就停（读法 ZoneGrowth 的增长不停）
+                        z.Growth = 0f;
+                    }
                 }
                 ZoneTick(ref d, ref z, -1, i, now);
                 if (d.Patches[i].Matter != 0)

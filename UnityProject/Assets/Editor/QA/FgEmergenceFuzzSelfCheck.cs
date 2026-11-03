@@ -482,6 +482,10 @@ namespace GameLogic.EditorTools
             public int Prism = -1;
             public double2 MainAt;
             public int CeaseStep = -1;
+            /// <summary>读“击杀”的用例：第 BaitStep 步改令打碎靶，2 游戏秒后改回主目标（−1 = 不改令）。</summary>
+            public int BaitStep = -1;
+            public int Bait = -1;
+            public double2 BaitAt;
             public float Engage;
             public double T;
             public readonly List<int> Hostiles = new List<int>();
@@ -489,11 +493,50 @@ namespace GameLogic.EditorTools
 
             public void Dispose() => Site?.Dispose();
 
+            /// <summary>
+            /// 子节点读“击杀”要子载荷打出致死一击，而母载荷（溅射 / 力场）通常先把附近的碎靶打掉，所以碎靶跟着子载荷放（FGR-EMG-220 先造条件）：
+            /// 飞行子弹药放在前方、抛射子弹药放在落点；子区域与母区域同点、节拍同相、按表序结算，放在区域中心的碎靶耐久按阶梯铺开，总有一档的致死一击落在子区域的节拍上。
+            /// 只看内核状态（子载荷进快照）与步号，不留计数，存读档 / 分批推进都走同样的序列。
+            /// </summary>
+            private void BaitChildPayload(int step)
+            {
+                for (int p = 0; p < K.ProjectileCount; p++)
+                {
+                    if (K.TryGetProjectile(p, out CombatProjectile pr) && pr.Prog >= 0 && pr.Node > 0 && pr.Owner == Me)
+                    {
+                        float ahead = (pr.Flags & EmgProjFlags.Lob) != 0 ? pr.Life : Dt * 2f;
+                        K.Spawn(Hostile(pr.Pos + (double2)(pr.Vel * ahead), 0.1f, 0.4f, -1));
+                        return;
+                    }
+                }
+                for (int z = 0; z < K.ZoneCount; z++)
+                {
+                    if (K.TryGetZone(z, out CombatZone child) && child.EmgProgRef > 0 && child.EmgNode > 0 && child.Owner == Me)
+                    {
+                        K.Spawn(Hostile(child.Pos, 0.5f * (1 + step / ChildBaitSteps % 60), 0.4f, -1));
+                        return;
+                    }
+                }
+            }
+
             public void StepOnce(int i)
             {
                 if (i == CeaseStep)
                 {
                     K.ClearCommand(Me);
+                }
+                if (i == BaitStep)
+                {
+                    Bait = Bait >= 0 ? Bait : K.Spawn(Hostile(BaitAt, W.Damage + 0.05f, 0.4f, -1));
+                    K.IssueCommand(Me, CombatCommandKind.Attack, BaitAt, Bait, 0.5f, Engage, 0.5f, false);
+                }
+                else if (BaitStep >= 0 && i == BaitStep + 2 * SwitchSteps)
+                {
+                    K.IssueCommand(Me, CombatCommandKind.Attack, MainAt, Target, 0.5f, Engage, 0.5f, false);
+                }
+                if (BaitStep >= 0 && i % ChildBaitSteps == 0)
+                {
+                    BaitChildPayload(i);
                 }
                 if (i == KillStep)
                 {
@@ -519,6 +562,8 @@ namespace GameLogic.EditorTools
 
         /// <summary>召唤载体读“终结”的用例：开打这么多秒后停火；用例时长 = 停火 + 最长召唤存续（哨戒桩 14 秒）+ 1 秒。</summary>
         private const float CeaseAtSeconds = 4f;
+        private const float BaitAtSeconds = 4f;
+        private const int ChildBaitSteps = 6;
         private const float SummonExpireSeconds = CeaseAtSeconds + 15f;
 
         private static CombatConfig Config()
@@ -616,6 +661,15 @@ namespace GameLogic.EditorTools
             {
                 // EMG2-MAT-01：力场的子载荷是小脉冲（触及 1.2 米，在脉冲结束处放出）——子节点读“命中”的程序在本机贴身处放一个敌人，子脉冲才有东西可打（FGR-EMG-220 先造条件）
                 a.Hostiles.Add(k.Spawn(Hostile(new double2(0.8, -0.6), 5000f, 0.5f, -1)));
+            }
+            if (ProgramReads(a.Program, EmgEventKind.Kill))
+            {
+                // EMG2-RECL-01：读“击杀”的程序（回收修复及其混合固件）——主目标 5000 耐久、8 秒打不死（FGR-EMG-220 先造条件）：放一个碎靶，开打 4 秒后玩家改令打它 2 秒；子节点读者另见 Arena.BaitChildPayload。
+                // 格斗 / 力场当场结算、一圈全打，子载荷生成在被令攻击的目标身上、同一步撞上它：碎靶到改令那一步才生成在本机一侧（固定底盘也够得着），耐久 = 母载荷一击 + 余量，母打不死、子收尾
+                bool instantHost = w.Reading.Carrier == CombatCarrier.Melee || w.Reading.Carrier == CombatCarrier.Aura;
+                a.BaitAt = instantHost ? new double2(-1.5, -0.5) : a.MainAt + new double2(-1.0, 0.0);
+                a.Bait = instantHost ? -1 : k.Spawn(Hostile(a.BaitAt, 0.1f, 0.4f, -1));
+                a.BaitStep = Mathf.RoundToInt(BaitAtSeconds / Dt);
             }
             // 条件按端口：读过热 / 冷却完成 → 开局积热贴着过热阈值；读阵亡 → 6.5 秒判死（FG19A 第 1.8 节）
             a.Preheat = ProgramReads(a.Program, EmgEventKind.Overheat) || ProgramReads(a.Program, EmgEventKind.Cooled);
@@ -1147,7 +1201,7 @@ namespace GameLogic.EditorTools
                 a.StepOnce(i);
             }
             CombatSiteRecord rec = a.Site.Snapshot();
-            var b = new Arena { Site = new CombatSite("fuzz_" + c.Site, Config()), Me = a.Me, Target = a.Target, Prism = a.Prism, KillStep = a.KillStep, CeaseStep = a.CeaseStep, T = a.T };
+            var b = new Arena { Site = new CombatSite("fuzz_" + c.Site, Config()), Me = a.Me, Target = a.Target, Prism = a.Prism, KillStep = a.KillStep, CeaseStep = a.CeaseStep, T = a.T, BaitStep = a.BaitStep, Bait = a.Bait, BaitAt = a.BaitAt, MainAt = a.MainAt, Engage = a.Engage, W = a.W };
             try
             {
                 // 内核层读回地点快照（与 FgReadingMatrixSelfCheck.AddonSaveLoad 同一做法）：CombatSite.TryRestore 会按机器登记表对账，

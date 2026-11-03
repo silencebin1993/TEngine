@@ -405,7 +405,7 @@ namespace GameLogic.EditorTools
             (on, off) = Pair(corona, FirmwareCatalog.FwExecuteId);
             Expect(!on.Alive[ArenaLow] && off.Alive[ArenaLow], "处决 · 力场：剩余耐久 6% 的敌人被一击击毁（读法关仍存活）");
             (on, off) = Pair(gun, "fw_reclaim");
-            Expect(on.AttackerHp > off.AttackerHp + 1f, $"回收修复 · 射弹：本机耐久 {on.AttackerHp:0.0} > 读法关 {off.AttackerHp:0.0}（伤害转成维修量）");
+            Expect(Math.Abs(on.AttackerHp - off.AttackerHp) < 1e-3f, $"回收修复 · 射弹：不再按伤害回血（EMG2-RECL-01：本机耐久 {on.AttackerHp:0.0} = 读法关 {off.AttackerHp:0.0}；拆残骸修复见 FgEmgReclaimSelfCheck B）");
             Obs drone = RunArena(WeaponFor(bay, ch), 4f, true);
             Obs swarm = RunArena(WeaponFor(bay, ch, FirmwareCatalog.FwSwarmId), 4f, true);
             Obs escort = RunArena(WeaponFor(gun, ch, FirmwareCatalog.FwSwarmId), 4f, true);
@@ -493,7 +493,7 @@ namespace GameLogic.EditorTools
                    && Mathf.Approximately(bridge.Reading.WeaveSeconds, weaveRow.B) && Mathf.Approximately(bridge.Reading.WeaveSlow, weaveRow.C)
                    && Mathf.Approximately(bridge.Reading.WeaveDpsRatio, CombatSite.Tuning("reading.weave.dps_ratio", -1f))
                    && bridgeText.Contains(Num(weaveRow.B)) && bridgeText.Contains(Num(weaveRow.C * 100.0)),
-                $"桥接 · 射弹 = 连网：在主目标与旁边敌人之间拉出 {on.Zones} 块减速网（挂减速 {on.SlowedCount} 个）；持续 {bridge.Reading.WeaveSeconds} 秒 / 减速 {bridge.Reading.WeaveSlow * 100:0}% / 伤害比例 {bridge.Reading.WeaveDpsRatio:0.##} 都来自表（fg.TbCarrierReading weave 行、reading.weave.dps_ratio），说明“{bridgeText}”写的是同一个数");
+                $"桥接 · 射弹旧读法表（没进程序时的兼容读法 / 阶段 1 回滚对照；阶段 ≥ 2 正式路径走导线、WeaveRadius = 0，见 FgEmgReclaimSelfCheck H / H2）= 连网：在主目标与旁边敌人之间拉出 {on.Zones} 块减速网（挂减速 {on.SlowedCount} 个）；持续 {bridge.Reading.WeaveSeconds} 秒 / 减速 {bridge.Reading.WeaveSlow * 100:0}% / 伤害比例 {bridge.Reading.WeaveDpsRatio:0.##} 都来自表（fg.TbCarrierReading weave 行、reading.weave.dps_ratio），说明“{bridgeText}”写的是同一个数");
             (on, off) = Pair(gun, FirmwareCatalog.FwArmorPierceId);
             Expect(Dmg(on, ArenaP) > Dmg(off, ArenaP) * 1.5f, $"装甲击穿 · 射弹：带正面装甲的主目标吃伤害 {Dmg(on, ArenaP):0} > {Dmg(off, ArenaP):0}（DEBT-FG1SIG06-03 关闭）");
 

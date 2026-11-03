@@ -232,6 +232,43 @@ namespace BinGames.Sim.Combat
         /// <summary>活跃场数（EMG2-FLD-01 生成；本卡恒为 0）。</summary>
         public int FieldCount => _d.Fields.Length;
 
+        /// <summary>EMG2-RECL-01：此刻的桥接导线条数 / 第 i 条（只读；自检与悬停用）。</summary>
+        public int WireCount => _d.Wires.Length;
+        public EmgWire WireAt(int i) => i >= 0 && i < _d.Wires.Length ? _d.Wires[i] : default;
+
+        /// <summary>EMG2-RECL-01（自检用）：改写第 <paramref name="index"/> 块残骸（模拟被烧热等外部状态；不改 Id）。</summary>
+        public bool SetWreckForTests(int index, in EmgWreck w)
+        {
+            if (index < 0 || index >= _d.Wrecks.Length || w.Id != _d.Wrecks[index].Id)
+            {
+                return false;
+            }
+            _d.Wrecks[index] = w;
+            Touch();
+            return true;
+        }
+
+        /// <summary>EMG2-RECL-01（自检用）：让 <paramref name="ownerId"/> 按回收修复 / 拆解钳规则拆残骸 <paramref name="wreckId"/>（0 = 没有残骸）。返回实际修复量，−1 = 没拆。与正式路径同一个核心函数。</summary>
+        public float SalvageForTests(int ownerId, int wreckId, bool repair, bool claw)
+        {
+            int o = _d.SlotOf(ownerId);
+            if (o < 0 || !_d.IsAlive(o))
+            {
+                return -1f;
+            }
+            int w = -1;
+            for (int j = 0; wreckId > 0 && j < _d.Wrecks.Length; j++)
+            {
+                if (_d.Wrecks[j].Id == wreckId)
+                {
+                    w = j;
+                }
+            }
+            float r = CombatLogic.EmgSalvageCore(ref _d, o, w, repair, claw, 0);
+            Touch();
+            return r;
+        }
+
         /// <summary>自检：点上所在的物质掩码（位 = 物质码；<paramref name="airborne"/> = 离地实体不算地面层）。</summary>
         public uint MatterMaskAt(double2 p, bool airborne = false)
         {
@@ -246,7 +283,8 @@ namespace BinGames.Sim.Combat
 
         private const int PatchFields = 40; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段（同版本 17 只追加，短段取缺省）
         private const int FieldFields = 13; // EMG2-FLD-01 修复轮：段尾追加 Swept（同版本 17 只追加，短段取 0）
-        private const int UnitStage2Fields = 24; // EMG2-REACT-01：段尾追加 StickT；EMG2-FLD-01：再追加 FieldCdQ（同版本 17 只追加，短段取 0）
+        private const int UnitStage2Fields = 26; // EMG2-RECL-01：再追加 ReclaimCdQ、ReclaimNote
+        private const int WireFields = 12; // 下标缓存 IdxA / IdxB 不写（读档后斑块槽位会重排，写了会让同一状态写出不同字节） // EMG2-REACT-01：段尾追加 StickT；EMG2-FLD-01：再追加 FieldCdQ（同版本 17 只追加，短段取 0）
 
         private static void WriteUnitStage2(BinaryWriter w, in EmgUnitState u, EmgSegmentWriter sw)
         {
@@ -274,6 +312,8 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(u.Res5);
             if (sw.F()) w.Write(u.StickT);
             if (sw.F()) w.Write(u.FieldCdQ);
+            if (sw.F()) w.Write(u.ReclaimCdQ);
+            if (sw.F()) w.Write(u.ReclaimNote);
         }
 
         private static void ReadUnitStage2(BinaryReader r, EmgSegmentReader sr, ref EmgUnitState u)
@@ -302,6 +342,8 @@ namespace BinGames.Sim.Combat
             if (sr.F()) u.Res5 = r.ReadByte();
             if (sr.F()) u.StickT = r.ReadSingle();
             if (sr.F()) u.FieldCdQ = r.ReadUInt16();
+            if (sr.F()) u.ReclaimCdQ = r.ReadUInt16();
+            if (sr.F()) u.ReclaimNote = r.ReadByte();
         }
 
         private static void ReadPatchCounts(BinaryReader r, EmgSegmentReader sr, ref EmgScalars es)
@@ -316,6 +358,7 @@ namespace BinGames.Sim.Combat
             if (sr.F()) es.PatchDropped = r.ReadInt32();
             if (sr.F()) es.PatchDeferred = r.ReadInt32();
             if (sr.F()) es.WrecksToDebris = r.ReadInt32();
+            if (sr.F()) es.NextWireId = r.ReadInt32(); // EMG2-RECL-01（短段取 0 → 读档后按导线表补）
         }
 
         /// <summary>段 17 斑块（只写活斑块，按表内顺序）、段 18 活跃场、段 19 实体档案稳定键。</summary>
@@ -405,6 +448,26 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.EmgProfileKeys.Length; i++)
             {
                 if (sw.F()) w.Write(_d.EmgProfileKeys[i]);
+                sw.EndRecord();
+            }
+            sw.End();
+            // EMG2-RECL-01：段 20 桥接导线（按表内顺序 = 生成先后）
+            sw.Begin(EmgConst.SegWires, WireFields, _d.Wires.Length);
+            for (int i = 0; i < _d.Wires.Length; i++)
+            {
+                EmgWire x = _d.Wires[i];
+                if (sw.F()) w.Write(x.Born);
+                if (sw.F()) w.Write(x.Until);
+                if (sw.F()) w.Write(x.Id);
+                if (sw.F()) w.Write(x.Owner);
+                if (sw.F()) w.Write(x.Chain);
+                if (sw.F()) w.Write(x.A);
+                if (sw.F()) w.Write(x.B);
+                if (sw.F()) w.Write(x.Slow);
+                if (sw.F()) w.Write(x.KindA);
+                if (sw.F()) w.Write(x.KindB);
+                if (sw.F()) w.Write(x.Faction);
+                if (sw.F()) w.Write(x.Depth);
                 sw.EndRecord();
             }
             sw.End();
@@ -518,6 +581,39 @@ namespace BinGames.Sim.Combat
                         staging.Fields.Add(f);
                     }
                     return CombatLoadResult.Ok;
+                case EmgConst.SegWires:
+                {
+                    if (n > EmgWireConst.Capacity)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    var wids = new HashSet<int>();
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var x = new EmgWire { Slow = EmgWireConst.DefaultSlow, IdxA = -1, IdxB = -1 };
+                        if (sr.F()) x.Born = r.ReadDouble();
+                        if (sr.F()) x.Until = r.ReadDouble();
+                        if (sr.F()) x.Id = r.ReadInt32();
+                        if (sr.F()) x.Owner = r.ReadInt32();
+                        if (sr.F()) x.Chain = r.ReadInt32();
+                        if (sr.F()) x.A = r.ReadInt32();
+                        if (sr.F()) x.B = r.ReadInt32();
+                        if (sr.F()) x.Slow = r.ReadSingle();
+                        if (sr.F()) x.KindA = r.ReadByte();
+                        if (sr.F()) x.KindB = r.ReadByte();
+                        if (sr.F()) x.Faction = r.ReadByte();
+                        if (sr.F()) x.Depth = r.ReadByte();
+                        if (!sr.RecordOk || x.Id < 1 || !wids.Add(x.Id) || x.KindA < EmgWireConst.EndUnit || x.KindA > EmgWireConst.EndPatch || x.KindB < EmgWireConst.EndUnit
+                            || x.KindB > EmgWireConst.EndPatch || x.A < 1 || x.B < 1 || !(x.Slow >= 0f && x.Slow <= 1f) || x.Chain < 0 || x.Depth > EmgConst.MaxDepth
+                            || double.IsNaN(x.Born) || double.IsNaN(x.Until))
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.Wires.Add(x);
+                    }
+                    return CombatLoadResult.Ok;
+                }
                 case EmgConst.SegProfileKeys:
                     if (n > 4096)
                     {
@@ -565,6 +661,11 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < staging.Fields.Length; i++)
             {
                 es.NextFieldId = math.max(es.NextFieldId, staging.Fields[i].Id + 1);
+            }
+            es.NextWireId = math.max(1, es.NextWireId);
+            for (int i = 0; i < staging.Wires.Length; i++)
+            {
+                es.NextWireId = math.max(es.NextWireId, staging.Wires[i].Id + 1); // EMG2-RECL-01：短标量段（没写发号器）按导线表补
             }
             es.HashDirty = 1;
             staging.EmgS[0] = es;

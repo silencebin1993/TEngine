@@ -77,6 +77,8 @@ namespace BinGames.Sim.Combat
         public const int SegPatches = 17;
         public const int SegFields = 18;
         public const int SegProfileKeys = 19;
+        /// <summary>EMG2-RECL-01（格式 17 内新增段，ADR ⑩“只追加”）：桥接导线（传导图的临时边）。</summary>
+        public const int SegWires = 20;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
@@ -579,6 +581,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-BUS-01（FGR-EMG-060 第 13 行）：1 = 过热过、还没回落到阈值 × emg.heat.cool_ratio 以下（回落时发 evt.cooled 并清 0）。
         /// 只在地点有程序读 evt.cooled 时才置位（没有程序的地点逐字不变）。格式 16 单位段尾部追加的第 5 个字段，短段读到取 0。</summary>
         public byte HeatLatch;
+        /// <summary>EMG2-RECL-01：最近一次回收修复的结果（<see cref="EmgReclaimConst"/>.Note*；悬停写原因）。放在 HeatLatch 后的对齐空位里，不增大单位记录。快照 17 单位段尾追加（短段取 0 = 没有记录）。</summary>
+        public byte ReclaimNote;
         /// <summary>EMG1-ENT-01：本单位质量（0 = 按档案 / 种类推算，见 CombatLogic.EmgUnitMass）。单位段第 6 个字段，短段读到取 0。</summary>
         public float Mass;
         /// <summary>EMG1-ENT-01：待处理的阵亡标志（外部血量单位收到“直接击毁”致死请求时置 <see cref="EmgConst.DeathNoWreck"/>，热更层判死回到阵亡入口时读走）。单位段第 7 个字段。</summary>
@@ -596,6 +600,12 @@ namespace BinGames.Sim.Combat
         public float3 AccB;
         /// <summary>相态位（位 k = 第 k 个累积量的相态已进入）。</summary>
         public ushort PhaseMask;
+        /// <summary>
+        /// EMG2-RECL-01（FGR-EMG-115“每秒最多一次”）：最近一次回收修复拆解残骸的时刻，与 <see cref="FieldCdQ"/> 同一刻度（0.1 秒取模 65535 再 +1，0 = 从没拆过）；按模拟时钟，暂停不走、倍速同比。
+        /// 放在 PhaseMask 后的对齐空位里，不增大单位记录（ADR ⑬ 每单位 ≤ 108 字节；结构字段顺序与快照顺序无关，快照按字段逐个写）。
+        /// shortcut: 刻度每 1.8 小时回绕一次，回绕点前后 1 秒内可能误判冷却中、少修一次；要精确就改成 double 并先改 ADR ⑬ 预算。快照 17 单位段尾追加（短段取 0）。
+        /// </summary>
+        public ushort ReclaimCdQ;
         /// <summary>每量一个计时（同 AccA / AccB 的顺序；EMG2-PHS-01 定为剩余秒倒计时，按游戏秒推进）：在相态中 = 剩余最短停留 / 定时相态剩余时长；不在相态中 = 免疫窗剩余秒（ADR ⑥ guard）。0 = 没有。</summary>
         public float4 PhsTA;
         public float3 PhsTB;
@@ -611,7 +621,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>阶段 2 状态段是否全为缺省（EmgActive 与 StateHash 金标准用：没有物质 / 相态时哈希逐字不变）。</summary>
         public bool Stage2Default => Temp == 0f && math.all(AccA == 0f) && math.all(AccB == 0f) && PhaseMask == 0 && math.all(PhsTA == 0f) && math.all(PhsTB == 0f)
-                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0 && StickT == 0f && FieldCdQ == 0;
+                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0 && StickT == 0f && FieldCdQ == 0 && ReclaimCdQ == 0 && ReclaimNote == 0;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -911,8 +921,13 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-FLD-01（不进快照，调试 / 自检计数）：场生成 / 满 64 没生效 / 到期、场推动实体次数；弹体带电 / 被磁场转向 / 被场推 / 被场反射 / 失锁 / 撞斑块反弹、拖尾明火块。</summary>
         public int FieldsBorn, FieldsCapped, FieldsExpired, FieldPushes, GasPushed;
         public int ProjCharged, ProjRedirected, ProjPushed, ProjReflected, ProjLockLoss, ProjPatchBounce, TrailPatches, MagSweeps;
+        /// <summary>EMG2-RECL-01（不进快照，调试 / 自检计数）：回收修复拆解残骸次数、导线生成 / 一端消失断开 / 到期 / 满额没生效、蔓延启动的斑块数。</summary>
+        public int Salvages, WiresBorn, WiresCut, WiresExpired, WiresCapped, SpreadStarts;
 
-        public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
+        /// <summary>EMG2-RECL-01：下一条导线的稳定 ID（从 1 起；进快照：标量段尾部追加，短段读到取导线表最大 Id + 1）。</summary>
+        public int NextWireId;
+
+        public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, NextWireId = 1, HashDirty = 1 };
     }
 
     /// <summary>

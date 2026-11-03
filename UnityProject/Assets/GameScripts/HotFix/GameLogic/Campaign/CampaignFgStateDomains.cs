@@ -2250,6 +2250,9 @@ namespace GameLogic.Campaign
         public ReactionSessionRecord[] ReactionSessions = Array.Empty<ReactionSessionRecord>();
         /// <summary>下一场归因的序号（场次 ID = "rs-" + 序号，确定性、读档后接着编）。</summary>
         public int NextReactionSessionSerial = 1;
+        /// <summary>EMG2-RECL-01（B19）：回收修复 / 拆解钳拆残骸的累计次数与累计维修量（己方机器；唯一写入口 CombatSite 的 Salvaged 事件）。旧存档没有 = 0。</summary>
+        public int ReclaimSalvages;
+        public double ReclaimRepaired;
         /// <summary>FG4-ECO-08（FGR-ECO-050 / 051；FG04 第 6 节“统计（按时间窗口聚合保存）”）：生产统计（四个时间窗口的产量 / 消耗桶、持续赤字）与资源顶栏的固定物品。
         /// 唯一写入口 <see cref="Economy.ProductionStats"/> / <see cref="Economy.ResourcePins"/>。旧存档没有 = 空（读档时补空域，从读档那一刻开始统计）。</summary>
         public ProductionStatsState Production = new ProductionStatsState();

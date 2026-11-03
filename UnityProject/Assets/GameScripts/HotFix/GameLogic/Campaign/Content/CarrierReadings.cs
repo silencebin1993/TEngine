@@ -345,7 +345,6 @@ namespace GameLogic.Campaign.Content
                     case "dot": r.StatusDps = Math.Max(r.StatusDps, amount); break;
                     case "slow": r.StatusSlow = Math.Max(r.StatusSlow, amount); break;
                     case "vuln": r.StatusVuln = Math.Max(r.StatusVuln, amount); break;
-                    case "leech": r.Lifesteal = Math.Max(r.Lifesteal, amount); break;
                     case "execute": r.ExecuteBelow = Math.Max(r.ExecuteBelow, amount); break;
                 }
             }
@@ -463,8 +462,7 @@ namespace GameLogic.Campaign.Content
                     r.ExecuteBelow = Math.Max(r.ExecuteBelow, a);
                     break;
                 case CarrierReadingVerb.Leech:
-                    r.Lifesteal = Math.Max(r.Lifesteal, a);
-                    break;
+                    break; // EMG2-RECL-01：旧“伤害转修复”退役（回收修复改为拆残骸，内核 CombatLogic.Reclaim）；动词码保留只为对齐 EmgCatalog.Verbs
                 case CarrierReadingVerb.Amp:
                     r.StatusAmp += a;
                     break;

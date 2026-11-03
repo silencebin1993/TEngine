@@ -148,6 +148,11 @@ namespace BinGames.Sim.Combat
             {
                 StepWrecks(ref d, dt);
             }
+            // 5h. EMG2-RECL-01：桥接导线到期 / 一端消失即断开（传导之前）。没有导线时 O(1)。
+            if (d.Wires.Length > 0)
+            {
+                StepWires(ref d);
+            }
             // 5c. EMG2-MAT-01（FGR-EMG-081～083）：物质斑块节拍（错相、每步 ≤ emg.patch.per_step 块）与单位接触（沾染 / 接触伤害 / evt.enter · evt.leave，本步总线处理）。没有斑块时 O(1)。
             StepMatter(ref d, dt);
 

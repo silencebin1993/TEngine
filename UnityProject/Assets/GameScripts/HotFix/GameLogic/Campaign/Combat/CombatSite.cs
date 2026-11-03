@@ -383,6 +383,11 @@ namespace GameLogic.Campaign.Combat
             c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));
             c.EmgWreckHpRatio = Mathf.Clamp(Tuning("emg.wreck.hp_ratio", EmgConst.DefaultWreckHpRatio), 0.01f, 1f);
             c.EmgWreckSlow = Mathf.Clamp(Tuning("emg.wreck.slow", EmgConst.DefaultWreckSlow), 0.05f, 1f);
+            c.EmgReclaimMaxRatio = Mathf.Clamp(Tuning("emg.reclaim.max_ratio", EmgReclaimConst.DefaultMaxRatio), 0f, 1f); // EMG2-RECL-01（FGR-EMG-115）
+            c.EmgReclaimHpPerMass = Mathf.Max(0f, Tuning("emg.reclaim.hp_per_mass", EmgReclaimConst.DefaultHpPerMass));
+            c.EmgReclaimInterval = Mathf.Max(0.1f, Tuning("emg.reclaim.interval", EmgReclaimConst.DefaultInterval));
+            c.EmgWireRopeHalfWidth = Mathf.Max(0.01f, Tuning("emg.wire.rope_half_width", EmgWireConst.RopeHalfWidth));
+            c.EmgWireHeatDelta = Mathf.Max(0.01f, Tuning("emg.wire.heat_delta", EmgWireConst.HeatDelta));
             c.EmgImpactVMin = Mathf.Max(0.1f, Tuning("emg.impact.v_min", EmgConst.DefaultImpactVMin));
             c.EmgPushDMin = Mathf.Max(0.01f, Tuning("emg.push.d_min", EmgConst.DefaultPushDMin));
             // EMG2-MAT-01（FG19 FGR-EMG-081～083；FG19B 第 8、10 节）：物质斑块层随阶段 2 开；emg.stage ≤ 1 时关，阶段 1 行为逐字不变。
@@ -1299,6 +1304,8 @@ namespace GameLogic.Campaign.Combat
             {
                 return w;
             }
+            // EMG2-RECL-01（FG19A comp_claw 行）：部件声明写 ent.wreck（拆解钳）：击毁后拆走残骸（只拆不修，内核 EmgPartSalvage），与回收修复共用同一条拆解规则
+            w.ClawSalvage = (byte)(Emergence.EmgCatalog.PartWriteAmount("ent.wreck", Emergence.EmgRole.Modify, new[] { partId }) > 0f ? 1 : 0);
             Emergence.EmgCompiled c = Emergence.EmgCatalog.Current;
             foreach (string port in FieldPorts)
             {
@@ -2249,6 +2256,15 @@ namespace GameLogic.Campaign.Combat
                 }
                 case CombatEventKind.HealRequest:
                 {
+                    // EMG2-RECL-01（ADR-EMG-001 ⑦ 第 4 条）：己方机器（外部血量单位）的修复请求——改记录血量，再同步回内核镜像（下一次 SyncMachineHealth 不会冲掉修复量）
+                    if (_unitMachine.TryGetValue(e.Unit, out int healLogic))
+                    {
+                        if (MachineRegistry.TryGetRecord(healLogic, out MachineRecord hrec) && hrec.IsAlive && hrec.RegionId == SiteId && MachineRegistry.ApplyRepair(healLogic, e.Value) > 0f)
+                        {
+                            SyncMachineHealth(hrec);
+                        }
+                        return;
+                    }
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);
                     if (rec != null && Rules != null)
                     {
@@ -2257,6 +2273,14 @@ namespace GameLogic.Campaign.Combat
                     }
                     return;
                 }
+                case CombatEventKind.Salvaged:
+                    // EMG2-RECL-01（B19）：回收修复的维修量进统计面板（只记己方拆解者：机器与炮塔；拆解钳只拆不修复，Value = 0 时不计维修）
+                    if ((_unitMachine.ContainsKey(e.Unit) || _unitTurret.ContainsKey(e.Unit)) && state?.Stats != null)
+                    {
+                        state.Stats.ReclaimSalvages++;
+                        state.Stats.ReclaimRepaired += Math.Max(0f, e.Value);
+                    }
+                    return;
                 case CombatEventKind.CommandEnded:
                 case CombatEventKind.CommandStuckStrike:
                 case CombatEventKind.AttackOutcome:

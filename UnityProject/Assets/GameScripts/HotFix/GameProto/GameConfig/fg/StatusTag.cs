@@ -64,7 +64,7 @@ public sealed partial class StatusTag : Luban.BeanBase
     /// </summary>
     public readonly int Bit;
     /// <summary>
-    /// 内核效果:none/dot/slow/vuln/leech/execute(dot=每秒伤害,slow=减速比例,vuln=易伤比例,leech=回收修复比例,execute=处决阈值,none=只是反应用的标签)
+    /// 内核效果:none/dot/slow/vuln/execute(dot=每秒伤害,slow=减速比例,vuln=易伤比例,execute=处决阈值,none=只是反应用的标签)
     /// </summary>
     public readonly string Effect;
     /// <summary>

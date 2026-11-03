@@ -650,6 +650,11 @@ namespace GameLogic.UI.Kit
                 _filters[f].EnableInClassList("rl-selected", f == (int)CurrentFilter);
             }
             var lines = new List<(string Text, string Cls)>();
+            if (state?.Stats != null && state.Stats.ReclaimSalvages > 0)
+            {
+                // EMG2-RECL-01（B19）：回收修复累计维修量
+                lines.Add((GameText.Format("stats.reclaim.line", state.Stats.ReclaimSalvages, ProductionStats.UiNumber((float)state.Stats.ReclaimRepaired)), "rl-row"));
+            }
             int sessions = ReactionAttributionView.AppendTotals(state, CurrentFilter, lines);
             if (sessions > 0)
             {

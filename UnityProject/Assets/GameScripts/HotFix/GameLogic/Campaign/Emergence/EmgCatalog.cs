@@ -174,18 +174,14 @@ namespace GameLogic.Campaign.Emergence
         /// 每张承接卡接通后从这里删掉对应项：fld.* → EMG2-FLD-01；ent.wreck → EMG2-RECL-01；en.* → EMG2-RULE-01（已接通）；evt.react 读端 → EMG2-REACT-02（DEBT-EMG2RULE01-08）；prop.heat → EMG2-PHS-01（DEBT-EMG2RULE01-11）；物质端口的 modify（蔓延 / 随车）→ EMG2-RECL-01。
         /// 前缀以“.”结尾按族匹配，否则整串匹配。
         /// </summary>
-        public static readonly string[] PendingPorts = { "ent.wreck", "evt.react", "prop.heat" }; // EMG2-RULE-01：en.* 已由内核注入 / 传导执行，移出；EMG2-FLD-01：fld.* 已由内核场执行，移出
+        public static readonly string[] PendingPorts = { "evt.react", "prop.heat" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
 
-        /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>；物质端口的 modify 角色同样未接通）。</summary>
+        /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>）。EMG2-RECL-01：物质端口的 modify（蔓延）已由内核执行（CombatLogic.EmgSpread），不再算未接通。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)
         {
             if (string.IsNullOrEmpty(portId))
             {
                 return false;
-            }
-            if (role == EmgRole.Modify && portId.StartsWith("mat.", StringComparison.Ordinal))
-            {
-                return true;
             }
             foreach (string p in PendingPorts)
             {

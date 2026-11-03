@@ -505,6 +505,15 @@ namespace BinGames.Sim.Combat
             double left = z.Until - now;
             bool expire = left <= 0;
             float oldR = z.Radius;
+            if (z.Growth > 0f && !IsLegacy(z))
+            {
+                // EMG2-RECL-01（蔓延）：液体斑块按节拍向四周扩到目标半径 R0（份量不变），到了就停
+                z.Radius = math.min(z.R0, z.Radius + z.Growth * elapsed);
+                if (z.Radius >= z.R0 - 1e-4f)
+                {
+                    z.Growth = 0f;
+                }
+            }
             switch (m.Decay)
             {
                 case EmgMatterConst.DecayDilute:
@@ -519,6 +528,11 @@ namespace BinGames.Sim.Combat
                     float f = (float)(left / (0.25 * life));
                     if (f < 1f)
                     {
+                        if (z.Growth > 0f)
+                        {
+                            z.R0 = z.Radius; // 蔓延扩到一半就开始干缩：停扩，从当前半径开始缩（R0 还是目标半径的话这一拍半径会跳大）
+                            z.Growth = 0f;
+                        }
                         z.Radius = z.R0 * math.max(0f, f);
                     }
                     break;

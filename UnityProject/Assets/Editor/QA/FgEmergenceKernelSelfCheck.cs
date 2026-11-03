@@ -566,9 +566,10 @@ namespace GameLogic.EditorTools
             k.InjectEmgEvent(new EmgEvent { Kind = EmgEventKind.Timer, Depth = 1, EntKind = EmgEntKind.Projectile, Ent = 1, Prog = p, Node = 1, Value = 0.5f, Code = 308, Pos = new double2(-3, 5) });
             byte[] snap = k.Serialize();
             var cases = new List<(string Name, byte[] Data, CombatLoadResult Want)>();
-            (int at, int stride) wseg = FindSegment(snap, EmgConst.SegWeapons, 7, k.WeaponCount); // EMG1-FLASH-01：2 → 5 个字段（尾部 +3 刷写表头）；EMG2-FLD-01：+2 部件场（格式 17 段内追加）
+            (int at, int stride) wseg = FindSegment(snap, EmgConst.SegWeapons, 8, k.WeaponCount); // EMG1-FLASH-01：2 → 5 个字段（尾部 +3 刷写表头）；EMG2-FLD-01：+2 部件场；EMG2-RECL-01：+1 拆解钳（格式 17 段内追加）
             cases.Add(("武器程序下标越界", Patch(snap, d => WriteInt(d, wseg.at + (k.WeaponCount - 1) * wseg.stride, 99)), CombatLoadResult.InvalidValue));
             cases.Add(("武器程序下标 −5", Patch(snap, d => WriteInt(d, wseg.at + (k.WeaponCount - 1) * wseg.stride, -5)), CombatLoadResult.InvalidValue));
+            cases.Add(("拆解钳标记 2", Patch(snap, d => d[wseg.at + 17] = 2), CombatLoadResult.InvalidValue)); // 记录内偏移：程序 4 + 飞行 1 + 刷写表头 4 + 1 + 1 + 场端口 2 + 场半径 4 = 17
             (int at, int stride) bseg = FindSegment(snap, EmgConst.SegBus, 16, k.EmgBusPending);
             cases.Add(("事件码 31", Patch(snap, d => d[bseg.at] = 31), CombatLoadResult.InvalidValue));
             cases.Add(("事件链深 4", Patch(snap, d => d[bseg.at + 1] = 4), CombatLoadResult.InvalidValue));

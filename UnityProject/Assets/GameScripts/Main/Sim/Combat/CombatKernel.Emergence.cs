@@ -834,7 +834,7 @@ namespace BinGames.Sim.Combat
         {
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
-                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -864,9 +864,9 @@ namespace BinGames.Sim.Combat
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
             bool v17 = format >= 17;
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 3 : 0) + (extraBytes > 0 ? 1 : 0));
+            w.Write(16 + (v17 ? 4 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, v17 ? 22 : 12, 1);
+            sw.Begin(EmgConst.SegScalars, v17 ? 23 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -892,6 +892,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(es.PatchDropped);
                 if (sw.F()) w.Write(es.PatchDeferred);
                 if (sw.F()) w.Write(es.WrecksToDebris);
+                if (sw.F()) w.Write(es.NextWireId); // EMG2-RECL-01：尾部追加，短段读到取导线表最大 Id + 1
             }
             sw.EndRecord();
             sw.End();
@@ -918,7 +919,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWeapons, v17 ? WeaponFields + 5 : WeaponFields + 3, _d.Weapons.Length);
+            sw.Begin(EmgConst.SegWeapons, v17 ? WeaponFields + 6 : WeaponFields + 3, _d.Weapons.Length);
             for (int i = 0; i < _d.Weapons.Length; i++)
             {
                 WriteWeaponEmg(w, _d.Weapons[i], sw);
@@ -931,6 +932,7 @@ namespace BinGames.Sim.Combat
                 {
                     if (sw.F()) w.Write(_d.Weapons[i].FieldPort); // EMG2-FLD-01：部件场（尾部追加，短段读到取 0 = 没有）
                     if (sw.F()) w.Write(_d.Weapons[i].FieldRadius);
+                    if (sw.F()) w.Write(_d.Weapons[i].ClawSalvage); // EMG2-RECL-01：拆解钳（尾部追加，短段读到取 0 = 没有）
                 }
                 sw.EndRecord();
             }
@@ -1384,7 +1386,8 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) fh.z = r.ReadByte();
                         if (sr.F()) cw.FieldPort = r.ReadUInt16(); // EMG2-FLD-01
                         if (sr.F()) cw.FieldRadius = r.ReadSingle();
-                        if (!(cw.FieldRadius >= 0f) || (cw.FieldPort != 0 && !EmgFieldConst.IsFieldPort(cw.FieldPort)))
+                        if (sr.F()) cw.ClawSalvage = r.ReadByte(); // EMG2-RECL-01
+                        if (!(cw.FieldRadius >= 0f) || (cw.FieldPort != 0 && !EmgFieldConst.IsFieldPort(cw.FieldPort)) || cw.ClawSalvage > 1)
                         {
                             return CombatLoadResult.InvalidValue;
                         }
@@ -1635,6 +1638,7 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegPatches:
                 case EmgConst.SegFields:
                 case EmgConst.SegProfileKeys:
+                case EmgConst.SegWires:
                     return ParseMatterSegment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过

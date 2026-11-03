@@ -637,6 +637,19 @@ namespace GameLogic.Campaign
             return MachineOpResult.Ok(logicId, $"机器 {logicId} 受到 {damage:F1} 点伤害，剩余 {record.Health:F1}/{record.MaxHealth:F0}。");
         }
 
+        /// <summary>EMG2-RECL-01（ADR-EMG-001 ⑦ 第 4 条）：机器受到修复（内核 HealRequest，如回收修复拆残骸）的唯一写入口——血量加到最大耐久为止，返回实际修复量。
+        /// 目标不存在 / 已阵亡返回 0（不复活）。</summary>
+        public static float ApplyRepair(int logicId, float amount)
+        {
+            if (!_records.TryGetValue(logicId, out MachineRecord record) || !record.IsAlive || !(amount > 0f))
+            {
+                return 0f;
+            }
+            float before = record.Health;
+            record.Health = Mathf.Min(record.MaxHealth, record.Health + amount);
+            return record.Health - before;
+        }
+
         // ── 活体状态同步（存档前拉一次实况）───────────────────
 
         /// <summary>存档前把活体机器的位置/血量/装配签名等易变字段从当前会话同步回记录。

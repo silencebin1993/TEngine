@@ -37,7 +37,7 @@ namespace GameLogic.EditorTools
     public static class FgEmgTextBehaviorSelfCheck
     {
         /// <summary>旧组合引擎模块（Demo 冻结 DLL）仍会贴、但已从 fg.TbStatusTag 撤下的标记（FG19A 第 1.6 节迁移表“FeedbackHit 废弃”，FG-GAP-153）。</summary>
-        public static readonly HashSet<string> RetiredEngineTags = new HashSet<string>(StringComparer.Ordinal) { "FeedbackHit" };
+        public static readonly HashSet<string> RetiredEngineTags = new HashSet<string>(StringComparer.Ordinal) { "FeedbackHit", "Woven" }; // EMG2-RECL-01：桥接改真导线，连网记号撤下
 
         /// <summary>读法说明按 FG19A 新读法写的（固件, 载体）——与 tools/cell_tables/fgdata_firmware.py READ_TEXT_FG19A 同一份名单（A 段核对两边一致）。</summary>
         public static readonly HashSet<(string, FirmwareCarrier)> Fg19aReadings = new HashSet<(string, FirmwareCarrier)>
@@ -51,7 +51,7 @@ namespace GameLogic.EditorTools
         static FgEmgTextBehaviorSelfCheck()
         {
             // EMG2-FLD-01：场固件的读法改按 FG19A 第 1.4 节写真场（5 载体）
-            foreach (string fw in new[] { "fw_tractor", FwMagnet, "fw_vortex", "fw_shockwave", "fw_deflect" })
+            foreach (string fw in new[] { "fw_tractor", FwMagnet, "fw_vortex", "fw_shockwave", "fw_deflect", "fw_reclaim", "fw_bridge", "fw_spread" }) // EMG2-RECL-01：回收修复 / 桥接 / 蔓延按 FG19A 新机制写
             {
                 foreach (FirmwareCarrier c in new[] { FirmwareCarrier.Projectile, FirmwareCarrier.Melee, FirmwareCarrier.Summon, FirmwareCarrier.Aura, FirmwareCarrier.Field })
                 {

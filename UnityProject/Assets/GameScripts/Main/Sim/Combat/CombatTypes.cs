@@ -309,7 +309,7 @@ namespace BinGames.Sim.Combat
         public float ArmorPierce;
         /// <summary>处决：目标剩余血量比例 ≤ 本值时一击击毁。</summary>
         public float ExecuteBelow;
-        /// <summary>回收修复：造成伤害 × 本值 修复攻击者。</summary>
+        /// <summary>EMG2-RECL-01：退役（旧“伤害一部分转修复”的吸血；回收修复改为拆残骸）。字段留着保持快照 / 武器去重键布局，热更层不再写、内核不再读，恒 0。</summary>
         public float Lifesteal;
         /// <summary>增幅：对带任何状态标签的目标伤害 × (1 + 本值)。</summary>
         public float StatusAmp;
@@ -922,6 +922,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-PHS-01（FGR-EMG-101，B07）：相态进入 / 退出的表现提示（可丢；可靠计数与 evt.phase 另走）。Unit = 单位，Other = 来源单位 ID（放电者 / 0），Value = 累积量，
         /// Code 低 4 位 = 累积量下标（0 寒量→冻结、1 结构积热→熔穿、2 电荷→麻痹、3 腐蚀度→破甲、4 磁化度→磁化、5 着火度→燃烧）；位 4 = 退出；位 5 = 被打断；Code = 64 = 麻痹放电电弧（Unit = 被电到的导体）。</summary>
         PhaseCue = 50,
+        /// <summary>EMG2-RECL-01（FGR-EMG-115，玩法事件、不丢）：回收修复 / 拆解钳就地拆解了一块残骸（Unit = 拆解者，Other = 被击毁单位 ID，Value = 本次实际修复量（拆解钳不修复 = 0），
+        /// Value2 = 残骸质量，Pos = 残骸位置，Code = 1 修复了本机 / 0 只拆解）。统计面板的维修量从这里累加。</summary>
+        Salvaged = 51,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -1056,6 +1059,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-FLD-01（FGR-EMG-112）：部件声明的场（fld.* spawn 的端口码，0 = 没有）与半径；每次出手续期一个持续场（CombatLogic.EmgWeaponField）。Emg 武器段尾部追加。</summary>
         public ushort FieldPort;
         public float FieldRadius;
+        /// <summary>EMG2-RECL-01（FG19A comp_claw 行）：部件声明写 ent.wreck（拆解钳）：击毁目标后拆走它的残骸，不修复（CombatLogic.EmgPartSalvage）。Emg 武器段尾部追加。</summary>
+        public byte ClawSalvage;
 
         /// <summary>程序下标（−1 = 没有程序）。</summary>
         public int Program
@@ -1369,6 +1374,13 @@ namespace BinGames.Sim.Combat
         public float EmgWreckSeconds;
         public float EmgWreckHpRatio;
         public float EmgWreckSlow;
+        /// <summary>EMG2-RECL-01（fg.TbHomeTuning emg.reclaim.max_ratio / hp_per_mass / interval）：回收修复每次上限（本机最大耐久比例）、每单位残骸质量换算的维修量、两次拆解的最短间隔（秒）。≤ 0 取 <see cref="EmgReclaimConst"/> 初值。</summary>
+        public float EmgReclaimMaxRatio;
+        public float EmgReclaimHpPerMass;
+        public float EmgReclaimInterval;
+        /// <summary>EMG2-RECL-01（fg.TbHomeTuning emg.wire.rope_half_width / heat_delta）：拦索判定半宽（米）；导线一端比常温高这么多度时另一端的单位才吃热。≤ 0 = 用 <see cref="EmgWireConst"/> 缺省。</summary>
+        public float EmgWireRopeHalfWidth;
+        public float EmgWireHeatDelta;
         public float EmgImpactVMin;
         public float EmgPushDMin;
         public float EmgKnockSeconds;

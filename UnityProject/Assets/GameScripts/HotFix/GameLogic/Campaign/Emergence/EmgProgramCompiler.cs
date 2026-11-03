@@ -428,7 +428,8 @@ namespace GameLogic.Campaign.Emergence
                 "ent.drone" => new[] { "inherit" },
                 "ent.projectile" => new[] { "feedback" },
                 "prop.integrity" or "phs.corrode" => new[] { "explode" },
-                "prop.conductive" => new[] { "weave" },
+                // EMG2-RECL-01：阶段 ≥ 2 桥接由内核拉真导线（CombatLogic.EmgLink），旧减速网过渡字段退役；emg.stage = 1 的回滚对照仍用减速网
+                "prop.conductive" => KernelInjectLive ? Array.Empty<string>() : new[] { "weave" },
                 _ => Array.Empty<string>(),
             };
         }
@@ -580,6 +581,7 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>
         /// EMG2-PHS-01 审查修复（第 2 轮，FGR-EMG-019 单轨）：只跳过能量注入写端退役的那部分旧读法——<see cref="RetiredTags"/> 的逐标签伪字段与过渡字段 heatburst，
         /// 其余字段不动。给沿用 FGR-FW-012 兼容读法的炮塔弹体武器用（弹体带程序下标，命中同样经 EmgHitInject 注能）。阶段 1 / 空程序 → null（不跳）。
+        /// EMG2-RECL-01：由内核执行回收修复 / 桥接 / 蔓延的固件（根节点经 EmgRootGated、子节点经 EmgChildWrites，弹体同样如此），旧字段全部跳过（return / weave / linger / scale），同样只走一轨。
         /// </summary>
         public static Func<string, string, bool> InjectSkip(EmgProgramResult r)
         {
@@ -588,8 +590,22 @@ namespace GameLogic.Campaign.Emergence
             {
                 return null;
             }
+            var kernelOwners = new HashSet<string>(StringComparer.Ordinal);
+            foreach (EmgNode n in r.KernelNodes)
+            {
+                for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+                {
+                    EmgInstr x = r.KernelInstrs[i];
+                    // 与内核执行条件同口径：根节点看 RootKernel（EmgRootGated），子节点不打这个标记、只看写端未溢出（EmgChildWrites）
+                    bool runs = n.Parent < 0 ? (x.Flags & EmgInstrFlags.RootKernel) != 0 : (x.Flags & EmgInstrFlags.Overflow) == 0 && x.Role > EmgConst.RoleLastRead;
+                    if (runs && x.Ordinal < r.Steps.Count && (x.Verb == (byte)EmgVerb.Salvage || x.Verb == (byte)EmgVerb.Link || x.Verb == (byte)EmgVerb.Spread))
+                    {
+                        kernelOwners.Add(r.Steps[x.Ordinal].FirmwareId);
+                    }
+                }
+            }
             string tagPrefix = TagsField + ":";
-            return (fw, field) => (field.StartsWith(tagPrefix, StringComparison.Ordinal) || field == "heatburst") && legacy(fw, field);
+            return (fw, field) => ((fw != null && kernelOwners.Contains(fw)) || field.StartsWith(tagPrefix, StringComparison.Ordinal) || field == "heatburst") && legacy(fw, field);
         }
 
         /// <summary>根节点上写某个只改数字端口（<paramref name="port"/>）且已编译的固件（同一条装两次只算一次）：数值折叠只汇总这些固件的旧字段。</summary>
@@ -941,7 +957,7 @@ namespace GameLogic.Campaign.Emergence
                         }
                         if (write && !IsStructural(port))
                         {
-                            var key = (d.Port, d.Role, s.EventPort, port == "grm.mod.bounce" ? d.Param2 : 0f);
+                            var key = (d.Port, d.Role, s.EventPort, port == "grm.mod.bounce" || port == "ent.wreck" ? d.Param2 : 0f); // EMG2-RECL-01：回收修复（param2 > 0 修复）与拆解钳（param2 = 0 只拆）是两种拆解，不互相判重复
                             if (keys.TryGetValue(key, out int at))
                             {
                                 // 同节点同键：只生效一次，取幅度大者；后来的这条显示“重复无效”，不计它的声明热量。
@@ -1007,7 +1023,14 @@ namespace GameLogic.Campaign.Emergence
                             }
                             // EMG1-FW-02：只走声明的固件（没有旧读法轨可过渡，FG19A 第 6 节新固件）在根节点上的效果写端，阶段 1 由内核在这条指令的生效事件处
                             // 直接执行（CombatLogic.EmgRootGated：排放 → 驻留区、注电 → 电击区，FG19A 第 0.3 节口径 3）；按数据列判（FirmwareKinds.IsDeclOnlyRow），不按内容 ID。
-                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port)) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
+                            bool medium = n.Parent < 0 && IsMediumEmit(c, s, port, d.Role);
+                            if (medium)
+                            {
+                                // 声明 param2 = 这摊介质的半径；格斗 / 力场读法只让已有斑块扩散、不留水（FG19A 第 1.3 节蔓延读法），写端仍标内核，旧驻留区同样退役
+                                var mediumCarrier = (FirmwareCarrier)ResolveCarrier(c, r.Carrier, n.Parent);
+                                x.A = mediumCarrier == FirmwareCarrier.Melee || mediumCarrier == FirmwareCarrier.Aura ? 0f : d.Param2 > 0f ? d.Param2 : x.A;
+                            }
+                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port) || IsRootKernelWrite(port, d.Role) || medium) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
                             {
                                 x.Flags |= EmgInstrFlags.RootKernel | (pc.Mag switch { 1 => EmgInstrFlags.MagA, 2 => EmgInstrFlags.MagB, 3 => EmgInstrFlags.MagC, _ => EmgInstrFlags.None });
                             }
@@ -1113,6 +1136,34 @@ namespace GameLogic.Campaign.Emergence
 
         /// <summary>EMG1-FIX-01（FG19A 第 1.2 节第 26 行 / D-14）：根节点上由内核直接执行、不再走旧读法过渡的写端口（任何 owner）：ent.projectile = 追射（CombatLogic.EmgQueueFollow）。按端口，不按内容 ID。</summary>
         public static bool IsRootKernelPort(string port) => port == "ent.projectile" || (port != null && port.StartsWith("fld.", StringComparison.Ordinal)); // EMG2-FLD-01：场写端由内核在结算点 / 生效事件处展开
+
+        /// <summary>
+        /// EMG2-RECL-01：阶段 ≥ 2（物质层开着）时根节点上由内核在生效事件处直接执行的写端——ent.wreck（回收修复 / 拆解钳拆残骸）、prop.conductive（桥接导线）、
+        /// 地面物质的 modify（蔓延）。按端口 × 角色，不按内容 ID。阶段 1 回滚对照不标（桥接走减速网过渡）。
+        /// </summary>
+        public static bool IsRootKernelWrite(string port, EmgRole role) =>
+            KernelInjectLive && port != null && (port == "ent.wreck" || port == "prop.conductive" || (role == EmgRole.Modify && port.StartsWith("mat.", StringComparison.Ordinal)));
+
+        /// <summary>
+        /// EMG2-RECL-01（FG19A 第 1.3 节第 35 行）：同一条声明里还改写地面物质（modify）的 owner，它的物质排放是给改写当介质的：阶段 ≥ 2 由内核排真斑块
+        /// （走旧驻留区过渡的话物质按状态位映射成冷却液、又是按区域载荷结算的迁入斑块，排的就不是声明写的那种液体）。按声明判，不按内容 ID。
+        /// </summary>
+        private static bool IsMediumEmit(EmgCompiled c, EmgProgramStep s, string port, EmgRole role)
+        {
+            if (!KernelInjectLive || role != EmgRole.Emit || port == null || !port.StartsWith("mat.", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            foreach (int di in s.Decls)
+            {
+                EmgDeclRow o = c.Decls[di];
+                if (o.Dir == EmgDirs.Write && o.Role == EmgRole.Modify && PortIds.TryGetValue(o.Port, out string pid) && pid.StartsWith("mat.", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         private static bool IsRootKernelOwner(string owner) =>
             FirmwareKinds.TryGetRow(owner, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row);

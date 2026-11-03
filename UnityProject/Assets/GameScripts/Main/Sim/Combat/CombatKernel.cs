@@ -4135,6 +4135,10 @@ namespace BinGames.Sim.Combat
                 bw.Write(w.FieldPort); // EMG2-FLD-01：带部件场的武器各自成行
                 bw.Write(w.FieldRadius);
             }
+            if (w.ClawSalvage != 0)
+            {
+                bw.Write(w.ClawSalvage); // EMG2-RECL-01：带拆解钳的武器各自成行
+            }
             bw.Flush();
             return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
         }
@@ -4673,6 +4677,27 @@ namespace BinGames.Sim.Combat
                     A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
                     B = new float4(k.Radius, k.MaxHp > 0f ? math.saturate(k.Hp / k.MaxHp) : 0f, CombatConst.EffectWreckColor, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
                 });
+            }
+            // EMG2-RECL-01：桥接导线——两端之间一串 6 个小斑点（占位外观，美术阶段替换；与区域同一次绘制调用），外圈 = 剩余存续。
+            for (int k = 0; k < D.Wires.Length; k++)
+            {
+                EmgWire wr = D.Wires[k];
+                int ia = CombatLogic.WireEndIndex(ref D, wr.KindA, wr.A, wr.IdxA), ib = CombatLogic.WireEndIndex(ref D, wr.KindB, wr.B, wr.IdxB);
+                if (ia < 0 || ib < 0)
+                {
+                    continue;
+                }
+                double2 wa = CombatLogic.WireEndPos(ref D, wr.KindA, ia) - Origin, wb = CombatLogic.WireEndPos(ref D, wr.KindB, ib) - Origin;
+                float wleft = (float)math.saturate((wr.Until - D.Scalars[0].Time) / math.max(0.1, wr.Until - wr.Born));
+                for (int s = 0; s < 6; s++)
+                {
+                    double2 q = math.lerp(wa, wb, (s + 0.5) / 6.0);
+                    Effects.Add(new CombatInstance
+                    {
+                        A = new float4((float)q.x, (float)q.y, (float)q.x, (float)q.y),
+                        B = new float4(0.18f, wleft, 0x7FD4FF, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
+                    });
+                }
             }
             // EMG2-FLD-01（FGR-EMG-112）：活跃场——“冲击环”外观（外扩环 = 场在起作用），颜色按场端口区分（形状同为环、颜色为辅；推斥环随时间扩到全半径），外圈 = 剩余存续。占位外观，美术阶段替换。
             for (int f = 0; f < D.Fields.Length; f++)

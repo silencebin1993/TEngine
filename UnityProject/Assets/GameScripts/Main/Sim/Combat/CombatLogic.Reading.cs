@@ -373,7 +373,7 @@ namespace BinGames.Sim.Combat
             return dmg;
         }
 
-        /// <summary>逐目标读法（伤害已落地之后）：状态 → 处决 → 回收修复 → 击退。击退从 <paramref name="origin"/>（出手的那个身体：机器本身，或无人机）推开。</summary>
+        /// <summary>逐目标读法（伤害已落地之后）：状态 → 处决 → 击退（EMG2-RECL-01：按伤害回血的旧回收修复已撤，回收修复改为拆残骸，见 CombatLogic.Reclaim）。击退从 <paramref name="origin"/>（出手的那个身体：机器本身，或无人机）推开。</summary>
         private static void PerTarget(ref CombatData d, int a, int t, float dealt, in CombatReading r, double2 origin)
         {
             if (r.StatusMask != 0u)
@@ -383,10 +383,6 @@ namespace BinGames.Sim.Combat
             if (r.ExecuteBelow > 0f && d.IsAlive(t) && d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= r.ExecuteBelow && !d.Has(t, CombatUnitFlags.Invulnerable))
             {
                 DamageUnit(ref d, t, d.Hp[t] + 1f, a);
-            }
-            if (r.Lifesteal > 0f && a >= 0 && d.IsAlive(a) && dealt > 0f)
-            {
-                Heal(ref d, a, dealt * r.Lifesteal, a);
             }
             if (r.Knockback > 0f && a >= 0 && d.IsAlive(t))
             {
@@ -1053,7 +1049,7 @@ namespace BinGames.Sim.Combat
         /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
         internal static float SlowedSpeed(ref CombatData d, int i, float speed)
         {
-            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i); // FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
+            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i); // FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
             if (d.StatusSlow[i] <= 0f || !d.StatusActive(i, d.Scalars[0].Time))
             {
                 return speed;

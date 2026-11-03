@@ -169,6 +169,7 @@ namespace BinGames.Sim.Combat
                 }
             }
             EmgOnKill(ref d, t, killerId);
+            EmgPartSalvage(ref d, t, killerId); // EMG2-RECL-01：拆解钳拆残骸（排在 evt.kill 之后：同装回收修复时只拆一次）
         }
 
         /// <summary>
