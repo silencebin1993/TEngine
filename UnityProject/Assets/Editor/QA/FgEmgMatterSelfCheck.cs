@@ -280,10 +280,10 @@ namespace GameLogic.EditorTools
             bool tractor = EmgCatalog.IsOwnerOnDeclTrack("fw_tractor");
             bool spread = EmgCatalog.IsOwnerOnDeclTrack("fw_spread");
             bool split = EmgCatalog.IsOwnerOnDeclTrack("fw_split");
-            bool pending = EmgCatalog.IsPendingPort("fld.pull", EmgRole.Emit) && EmgCatalog.IsPendingPort("mat.oil", EmgRole.Modify) && !EmgCatalog.IsPendingPort("mat.oil", EmgRole.Emit)
+            bool pending = !EmgCatalog.IsPendingPort("fld.pull", EmgRole.Spawn) && EmgCatalog.IsPendingPort("ent.wreck", EmgRole.Modify) && EmgCatalog.IsPendingPort("mat.oil", EmgRole.Modify) && !EmgCatalog.IsPendingPort("mat.oil", EmgRole.Emit)
                            && !EmgCatalog.IsPendingPort("evt.enter", EmgRole.Trigger);
-            Expect(stage == 2 && EmgCatalog.ImplementedStage == 2 && Cfg().EmgPatchOn == 1 && fuse && !tractor && !spread && split && pending,
-                $"真实表 emg.stage 缺省 2（生效 {stage}）、斑块层开；入场引信（端口全部接通）走声明轨 {fuse}；牵引（fld.*）/ 扩散（物质 modify）用到未接通端口 → 仍走旧轨（{tractor} / {spread}）；阶段 1 的分裂照旧 {split}（按端口判，不按内容 ID）");
+            Expect(stage == 2 && EmgCatalog.ImplementedStage == 2 && Cfg().EmgPatchOn == 1 && fuse && tractor && !spread && split && pending,
+                $"真实表 emg.stage 缺省 2（生效 {stage}）、斑块层开；入场引信（端口全部接通）走声明轨 {fuse}；牵引（fld.*，EMG2-FLD-01 已接通）走声明轨 {tractor}；扩散（物质 modify）用到未接通端口 → 仍走旧轨（{spread}）；阶段 1 的分裂照旧 {split}（按端口判，不按内容 ID）");
             try
             {
                 UseStage(1);

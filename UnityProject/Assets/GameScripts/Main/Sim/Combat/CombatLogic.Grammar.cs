@@ -476,9 +476,9 @@ namespace BinGames.Sim.Combat
                 pr.Vel = (float2)(to / dist) * speed;
                 return false;
             }
-            if ((pr.Mods & EmgProjMods.Steer) == 0 || !(pr.SteerLeft > 0f))
+            if ((pr.Mods & EmgProjMods.Steer) == 0 || !(pr.SteerLeft > 0f) || pr.LockQ > 0)
             {
-                return false;
+                return false; // EMG2-FLD-01：穿过烟 / 蒸汽后寻的失效期间不转向
             }
             EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m);
             int t = d.SlotOf(pr.HomingTarget);

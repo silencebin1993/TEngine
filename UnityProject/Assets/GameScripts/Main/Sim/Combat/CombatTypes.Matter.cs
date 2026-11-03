@@ -126,6 +126,8 @@ namespace BinGames.Sim.Combat
         public ushort Port;
         public byte Faction;
         public byte Depth;
+        /// <summary>EMG2-FLD-01 修复轮：磁场的 F02 磁扫已做过（1 = 做过；每个磁场只扫一次，与在步内哪个阶段展开无关）。</summary>
+        public byte Swept;
     }
 
     /// <summary>

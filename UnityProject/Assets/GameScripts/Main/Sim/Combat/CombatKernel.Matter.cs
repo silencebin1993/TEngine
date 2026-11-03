@@ -245,8 +245,8 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 快照格式 17：物质段 ───────────────────────────────
 
         private const int PatchFields = 40; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段（同版本 17 只追加，短段取缺省）
-        private const int FieldFields = 12;
-        private const int UnitStage2Fields = 23; // EMG2-REACT-01：段尾追加 StickT（同版本 17 只追加，短段取 0）
+        private const int FieldFields = 13; // EMG2-FLD-01 修复轮：段尾追加 Swept（同版本 17 只追加，短段取 0）
+        private const int UnitStage2Fields = 24; // EMG2-REACT-01：段尾追加 StickT；EMG2-FLD-01：再追加 FieldCdQ（同版本 17 只追加，短段取 0）
 
         private static void WriteUnitStage2(BinaryWriter w, in EmgUnitState u, EmgSegmentWriter sw)
         {
@@ -273,6 +273,7 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(u.Res4);
             if (sw.F()) w.Write(u.Res5);
             if (sw.F()) w.Write(u.StickT);
+            if (sw.F()) w.Write(u.FieldCdQ);
         }
 
         private static void ReadUnitStage2(BinaryReader r, EmgSegmentReader sr, ref EmgUnitState u)
@@ -300,6 +301,7 @@ namespace BinGames.Sim.Combat
             if (sr.F()) u.Res4 = r.ReadByte();
             if (sr.F()) u.Res5 = r.ReadByte();
             if (sr.F()) u.StickT = r.ReadSingle();
+            if (sr.F()) u.FieldCdQ = r.ReadUInt16();
         }
 
         private static void ReadPatchCounts(BinaryReader r, EmgSegmentReader sr, ref EmgScalars es)
@@ -395,6 +397,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(f.Port);
                 if (sw.F()) w.Write(f.Faction);
                 if (sw.F()) w.Write(f.Depth);
+                if (sw.F()) w.Write(f.Swept);
                 sw.EndRecord();
             }
             sw.End();
@@ -507,7 +510,8 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) f.Port = r.ReadUInt16();
                         if (sr.F()) f.Faction = r.ReadByte();
                         if (sr.F()) f.Depth = r.ReadByte();
-                        if (!sr.RecordOk || f.Id < 1 || !(f.Radius >= 0f) || f.Chain < 0)
+                        if (sr.F()) f.Swept = r.ReadByte();
+                        if (!sr.RecordOk || f.Id < 1 || !(f.Radius >= 0f) || f.Chain < 0 || f.Swept > 1)
                         {
                             return CombatLoadResult.InvalidValue;
                         }

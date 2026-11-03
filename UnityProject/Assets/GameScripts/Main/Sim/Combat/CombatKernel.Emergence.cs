@@ -918,7 +918,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWeapons, WeaponFields + 3, _d.Weapons.Length);
+            sw.Begin(EmgConst.SegWeapons, v17 ? WeaponFields + 5 : WeaponFields + 3, _d.Weapons.Length);
             for (int i = 0; i < _d.Weapons.Length; i++)
             {
                 WriteWeaponEmg(w, _d.Weapons[i], sw);
@@ -927,6 +927,11 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(fh.x);
                 if (sw.F()) w.Write((byte)fh.y);
                 if (sw.F()) w.Write((byte)fh.z);
+                if (v17)
+                {
+                    if (sw.F()) w.Write(_d.Weapons[i].FieldPort); // EMG2-FLD-01：部件场（尾部追加，短段读到取 0 = 没有）
+                    if (sw.F()) w.Write(_d.Weapons[i].FieldRadius);
+                }
                 sw.EndRecord();
             }
             sw.End();
@@ -952,7 +957,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegProjectiles, v17 ? 21 : 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
+            sw.Begin(EmgConst.SegProjectiles, v17 ? 24 : 20, _d.Projectiles.Length); // EMG1-GRM-01：16 → 20 个字段；EMG2-MAT-01（格式 17）：+ 记号高 8 位
             for (int i = 0; i < _d.Projectiles.Length; i++)
             {
                 CombatProjectile p = _d.Projectiles[i];
@@ -979,6 +984,9 @@ namespace BinGames.Sim.Combat
                 if (v17)
                 {
                     if (sw.F()) w.Write((byte)((ushort)p.Flags >> 8)); // EMG2-MAT-01：弹体记号高 8 位（NoNamed 等），短段读到取 0
+                    if (sw.F()) w.Write(p.LockQ); // EMG2-FLD-01：尾部追加 3 个（短段读到取 0 = 没有失锁 / 没有记过 / 不拖尾）
+                    if (sw.F()) w.Write(p.FieldOnce);
+                    if (sw.F()) w.Write(p.TrailLeft);
                 }
                 sw.EndRecord();
             }
@@ -1374,6 +1382,12 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) fh.x = r.ReadInt32();
                         if (sr.F()) fh.y = r.ReadByte();
                         if (sr.F()) fh.z = r.ReadByte();
+                        if (sr.F()) cw.FieldPort = r.ReadUInt16(); // EMG2-FLD-01
+                        if (sr.F()) cw.FieldRadius = r.ReadSingle();
+                        if (!(cw.FieldRadius >= 0f) || (cw.FieldPort != 0 && !EmgFieldConst.IsFieldPort(cw.FieldPort)))
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
                         buf.FlashHead ??= new Unity.Mathematics.int4[n];
                         buf.FlashHead[i] = fh; // 范围在 FinishEmgLoad 按变体表核（段 14 可能在后面）
                         if (!sr.RecordOk || prog < -1) // 先判再赋：Program 的 setter 会把任何负数折成“没有程序”，坏值得在这里拒绝
@@ -1442,6 +1456,9 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) p.BounceObs = r.ReadByte();
                         if (sr.F()) p.Intercepts = r.ReadByte();
                         if (sr.F()) p.Flags |= (EmgProjFlags)(r.ReadByte() << 8); // EMG2-MAT-01：记号高 8 位（≤16 版快照没有，取 0）
+                        if (sr.F()) p.LockQ = r.ReadUInt16(); // EMG2-FLD-01
+                        if (sr.F()) p.FieldOnce = r.ReadByte();
+                        if (sr.F()) p.TrailLeft = r.ReadByte();
                         if (!sr.RecordOk || p.IgnoreUnit < 0 || ((p.Mods & EmgProjMods.Orbit) == 0 && p.SteerLeft > 360f))
                         {
                             return CombatLoadResult.InvalidValue;

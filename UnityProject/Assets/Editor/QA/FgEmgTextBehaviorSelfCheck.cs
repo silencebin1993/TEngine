@@ -48,6 +48,18 @@ namespace GameLogic.EditorTools
             (FwWall, FirmwareCarrier.Melee), (FwWall, FirmwareCarrier.Aura), (FwWall, FirmwareCarrier.Field), // EMG2-RULE-01：格斗 / 力场 / 布区改“被推动实体撞障碍冲击”
         };
 
+        static FgEmgTextBehaviorSelfCheck()
+        {
+            // EMG2-FLD-01：场固件的读法改按 FG19A 第 1.4 节写真场（5 载体）
+            foreach (string fw in new[] { "fw_tractor", FwMagnet, "fw_vortex", "fw_shockwave", "fw_deflect" })
+            {
+                foreach (FirmwareCarrier c in new[] { FirmwareCarrier.Projectile, FirmwareCarrier.Melee, FirmwareCarrier.Summon, FirmwareCarrier.Aura, FirmwareCarrier.Field })
+                {
+                    Fg19aReadings.Add((fw, c));
+                }
+            }
+        }
+
         private const string FwSplit = "fw_split", FwDelay = "fw_delayfuse", FwWall = "fw_wallslam", FwFollow = "fw_followup", FwMagnet = "fw_magnet";
         private const float Dt = 1f / 60f;
         private const int SessionSlot = 0;
@@ -94,8 +106,11 @@ namespace GameLogic.EditorTools
                 Step(CheckWallSlam);
                 Step(CheckWallSlamCarriers);
                 Step(CheckFollowUp);
+                // EMG2-FLD-01：磁聚 / 牵引 / 涡流 / 偏折 / 冲击波是 stageGate 2，只在 emg.stage ≥ 2 进程序
+                UseStage(2);
                 Step(CheckMagnet);
                 Step(CheckDisplaySync);
+                UseStage(1);
                 Step(CheckStageZero);
             }
             catch (Exception e)
@@ -269,12 +284,22 @@ namespace GameLogic.EditorTools
                 $"追射（D-14，FG-GAP-153）：根节点 ent.projectile 由内核执行（RootKernel，射弹延迟 {F(spawn.A)} 秒 / 格斗 {F(spawnMelee.A)} 秒，{F(spawn.Amount)} 发 × {F(spawn.Param2)} 倍），"
                 + "旧回波字段 feedback 不再结算（单轨），追击标记已从 fg.TbStatusTag 撤下；描述“" + fd + "”");
 
+            UseStage(2); // 磁聚 stageGate 2
+            try
+            {
             string md = Desc(FwMagnet);
             FirmwareKinds.TryGetRow(FwMagnet, out GameConfig.fg.FirmwareKind mr);
-            Expect(!EmgCatalog.IsOwnerOnDeclTrack(FwMagnet) && mr != null && mr.ReadFields.Contains("pull:")
-                   && FirmwareKinds.TagsOf(FwMagnet).Contains("Charged") && FirmwareKinds.TagsOf(FwMagnet).Contains("Magnet")
-                   && md.Contains("吸近") && md.Contains("充能") && md.Contains("磁化") && !md.Contains("弹道被拉向一点") && Read(FwMagnet, FirmwareCarrier.Projectile).Contains("拉近"),
-                $"磁聚（D-04，FG-GAP-156 描述部分）：阶段 1 仍走旧读法（{mr?.ReadFields} + 充能 / 磁化），过渡描述“{md}”与之一致；磁场机制随 EMG2-FLD-01");
+            // EMG2-FLD-01（FG-GAP-156 机制部分）：fld.magnet 接通，磁聚整条切声明轨；描述改回 FG19A 第 1.4 节第 38 行，读法写真磁场、不再附带「充能」「磁化」（旧标签按端口退役）
+            string[] live = EmgProgramCompiler.LiveTagsOf(FwMagnet);
+            Expect(EmgCatalog.IsOwnerOnDeclTrack(FwMagnet) && mr != null && !live.Contains("Charged") && !live.Contains("Magnet")
+                   && md.Contains("拉向一点汇聚") && md.Contains("磁化度") && !md.Contains("吸近一小段") && Read(FwMagnet, FirmwareCarrier.Projectile).Contains("磁场")
+                   && !Read(FwMagnet, FirmwareCarrier.Projectile).Contains("充能"),
+                $"磁聚（D-04，FG-GAP-156）：走声明轨（fld.magnet + en.mag），描述“{md}”= FG19A 第 1.4 节第 38 行；旧标签 Charged / Magnet 退役（现挂 {string.Join(";", live)}）");
+            }
+            finally
+            {
+                UseStage(1);
+            }
 
             // 读法名单两边一致：Python READ_TEXT_FG19A 写过的（固件, 载体）都不含旧字段短语；没写的仍由字段短语生成（FgReadingMatrixSelfCheck F 段）。
             var leak = new List<string>();
@@ -711,33 +736,43 @@ namespace GameLogic.EditorTools
 
         private static void CheckMagnet()
         {
-            Line("  · F. 磁聚（阶段 1 过渡）：真实装配编译的连射器 + 磁聚——命中点附近的敌人被吸近一小段、目标挂充能与磁化；对照：远处的敌人不动");
+            Line("  · F. 磁聚（EMG2-FLD-01 磁场）：真实装配编译的连射器 + 磁聚——命中点展开 5 米磁场，场内敌人被吸向场心、目标累积磁化度；对照：场外的敌人不动");
             CampaignState s = NewState(9301);
             BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
             board.TrySetUplink(UplinkSlot);
             BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, new[] { FwMagnet });
             CombatWeapon w = CombatSite.MachineWeaponFrom(p);
-            using var k = new CombatKernel(Cfg(), 32);
+            EmgProgramResult program = EmgProgramCompiler.Compile(p);
+            CombatConfig cfg = CombatSite.ConfigFromTuning(); // 磁化度的累积 / 衰减参数取正式调参表（与正式地点同一入口）
+            cfg.NavEnabled = 0;
+            using var k = new CombatKernel(cfg, 32);
+            CombatSite.ApplyEmgSubForms(k);
+            CombatSite.ApplyEntityProfiles(k);
+            CombatSite.ApplyMatters(k);
+            CombatSite.ApplyRules(k);
+            CombatSite.ApplyPhaseRules(k);
+            CombatSite.ApplyFieldRules(k);
+            w.Program = program.IsEmpty ? -1 : CombatSite.RegisterProgram(k, program);
             int me = Me(k, new double2(0, 0), k.AddWeapon(w));
             int foe = Foe(k, new double2(0, 6), 300f);
+            k.SetUnitProfile(foe, EmgEntityProfiles.ForEnemy("material.steel", false), 0f); // 磁化度只在磁性目标上累积（磁聚读 prop.magnetic；与 FgEmgFieldSelfCheck I 段同一夹具）
             int nearFoe = Foe(k, new double2(3, 6), 300f);
             int farFoe = Foe(k, new double2(0, 13), 300f);
             CombatFireResult fr = k.FireAt(me, foe, k.Time);
-            StepN(k, 2);
+            StepN(k, 12);
             double moved = 3.0 - math.distance(Pos(k, nearFoe), new double2(0, 6));
             double farMoved = math.distance(Pos(k, farFoe), new double2(0, 13));
-            k.TryGetStatus(foe, out uint mask, out _, out _, out _, out _);
-            uint want = NamedReactionCatalog.BitOf("Charged") | NamedReactionCatalog.BitOf("Magnet");
-            Expect(s != null && moved > 0.3 && moved < 1.5 && farMoved < 1e-6 && want != 0u && (mask & want) == want,
-                $"开火 {fr}：命中点 3 米处的敌人被吸近 {moved:0.##} 米，7 米外的敌人不动（{farMoved:0.###}）；目标挂上充能 + 磁化（状态位 {mask & want:X}）——与过渡描述一致");
-            Expect(EmgProgramTreeText.PortsLine(FwMagnet).Contains(GameText.Get("emg.ports.line_pending").Split('：')[0])
-                   && !EmgProgramTreeText.PortsLine(FwSplit).Contains(GameText.Get("emg.ports.line_pending").Split('：')[0]),
-                $"端口行：磁聚的磁场端口本版本不生效，详情 / 三选一写“{EmgProgramTreeText.PortsLine(FwMagnet)}”；分裂照常“{EmgProgramTreeText.PortsLine(FwSplit)}”");
+            float magAcc = k.AccumOf(foe, EmgPhaseConst.Magnetize);
+            Expect(s != null && !program.IsEmpty && k.EmgScalars.FieldsBorn == 1 && moved > 0.2 && farMoved < 1e-6 && magAcc > 0.25f,
+                $"开火 {fr}：命中点展开磁场 {k.EmgScalars.FieldsBorn} 个，3 米处的敌人被吸向场心 {moved:0.##} 米，7 米外的敌人不动（{farMoved:0.###}）；目标磁化度 {magAcc:0.00}（en.mag 0.3 + 场内累积）——与描述一致");
+            string pendingHead = GameText.Get("emg.ports.line_pending").Split('：')[0];
+            Expect(!EmgProgramTreeText.PortsLine(FwMagnet).Contains(pendingHead) && !EmgProgramTreeText.PortsLine(FwSplit).Contains(pendingHead),
+                $"端口行：fld.magnet 接通后磁聚自动退回普通端口行“{EmgProgramTreeText.PortsLine(FwMagnet)}”（emg.ports.line_pending → emg.ports.line）；分裂照常“{EmgProgramTreeText.PortsLine(FwSplit)}”");
             string inactive = GameText.Get("emg.ports.line_inactive").Split('：')[0];
-            // EMG2-MAT-01：阶段 2 起入场引信端口全部接通 → 照常端口行；接入冲击（fld.push 未接通，没有旧读法）→ “当前不生效”
-            Expect(EmgProgramTreeText.PortsLine("fw_uplinkpulse")?.StartsWith(inactive, StringComparison.Ordinal) == true && !EmgProgramTreeText.PortsLine(FwMagnet).StartsWith(inactive, StringComparison.Ordinal)
+            // EMG2-FLD-01：fld.push 接通 → 接入冲击也照常端口行（不再“当前不生效”）；入场引信照常
+            Expect(EmgProgramTreeText.PortsLine("fw_uplinkpulse")?.StartsWith(inactive, StringComparison.Ordinal) == false && !EmgProgramTreeText.PortsLine(FwMagnet).StartsWith(inactive, StringComparison.Ordinal)
                    && EmgProgramTreeText.PortsLine("fw_enterfuse")?.StartsWith(inactive, StringComparison.Ordinal) == false,
-                $"端口行：没有旧读法、端口未接通的新固件写“当前不生效”（{EmgProgramTreeText.PortsLine("fw_uplinkpulse")}），不写“按原读法结算”；端口已接通的入场引信照常（{EmgProgramTreeText.PortsLine("fw_enterfuse")}）");
+                $"端口行：接入冲击的端口全部接通，照常端口行（{EmgProgramTreeText.PortsLine("fw_uplinkpulse")}）；入场引信照常（{EmgProgramTreeText.PortsLine("fw_enterfuse")}）");
         }
 
         private static CampaignState NewState(int seed)
@@ -780,7 +815,7 @@ namespace GameLogic.EditorTools
 
             var rows = new List<EmgTreeRow>();
             var migrated = new List<string>();
-            foreach (string fw in new[] { FwDelay, FwWall, FwFollow })
+            foreach (string fw in new[] { FwDelay, FwWall, FwFollow, "fw_tractor", FwMagnet, "fw_vortex", "fw_deflect", "fw_shockwave" })
             {
                 EmgProgramTreeText.BuildRows(Compile(fw), rows);
                 string change = GameText.Get(EmgProgramTreeText.MigratedKey(fw));
@@ -791,7 +826,7 @@ namespace GameLogic.EditorTools
             }
             // 审查修复（第 1 轮）：行为没变的不写——分裂只改描述、广角只改数值（旧字段折算）、冷却液保留过渡字段、磁聚未进程序、新固件没有旧读法
             var wrongly = new List<string>();
-            foreach (string fw in new[] { FwSplit, "fw_wide", "fw_coolant", FwMagnet, "fw_scuttle" })
+            foreach (string fw in new[] { FwSplit, "fw_wide", "fw_coolant", "fw_scuttle" })
             {
                 EmgProgramTreeText.BuildRows(Compile(fw), rows);
                 if (rows.Any(x => x.Kind == EmgTreeRowKind.Migrated))
@@ -802,9 +837,9 @@ namespace GameLogic.EditorTools
             bool oldOnDecl = !Compile(FwSplit).IsEmpty && !Compile("fw_wide").IsEmpty && !Compile("fw_coolant").IsEmpty;
             string cd = GameText.Get(EmgProgramTreeText.MigratedKey(FwDelay)), cf = GameText.Get(EmgProgramTreeText.MigratedKey(FwFollow)), cw = GameText.Get(EmgProgramTreeText.MigratedKey(FwWall));
             bool numbers = cd.Contains("0.6 秒") && cd.Contains("3 枚") && cf.Contains("0.1 秒") && cf.Contains("50%") && cw.Contains("1.5 米") && cw.Contains("50%");
-            Expect(migrated.Count == 3 && wrongly.Count == 0 && oldOnDecl && numbers,
-                $"程序树预览：真正改了机制的 3 条（延时引信 / 壁撞 / 追射）重编译后各一行“已按新机制运行”并写明新旧差别（数字与声明同源）；"
-                + $"已进程序但行为没变的分裂 / 广角 / 冷却液、未进程序的磁聚、没有旧读法的新固件都不写{(wrongly.Count > 0 ? "；误写：" + string.Join("、", wrongly) : string.Empty)}");
+            Expect(migrated.Count == 8 && wrongly.Count == 0 && oldOnDecl && numbers,
+                $"程序树预览：真正改了机制的 8 条（延时引信 / 壁撞 / 追射；EMG2-FLD-01 起牵引 / 磁聚 / 涡流 / 偏折 / 冲击波）重编译后各一行“已按新机制运行”并写明新旧差别（数字与声明同源）；"
+                + $"已进程序但行为没变的分裂 / 广角 / 冷却液、没有旧读法的新固件都不写{(wrongly.Count > 0 ? "；误写：" + string.Join("、", wrongly) : string.Empty)}");
         }
 
         // ── H. emg.stage = 0 不受影响 ──────────────────────────────────────────

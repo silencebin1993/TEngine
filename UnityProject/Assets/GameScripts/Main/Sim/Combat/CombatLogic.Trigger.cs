@@ -198,7 +198,7 @@ namespace BinGames.Sim.Combat
                 EmgInstr x = d.EmgInstrs[i];
                 bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile;
                 if ((x.Flags & EmgInstrFlags.RootKernel) == 0 || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead
-                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject && !follow))
+                    || (x.Verb != emit && x.Verb != (byte)EmgVerb.Inject && x.Verb != (byte)EmgVerb.Field && !follow))
                 {
                     continue;
                 }
@@ -215,6 +215,12 @@ namespace BinGames.Sim.Combat
                 if (follow)
                 {
                     EmgQueueFollow(ref d, e, host, x);
+                    continue;
+                }
+                if (x.Verb == (byte)EmgVerb.Field)
+                {
+                    // EMG2-FLD-01：事件门控的场写端在事件位置展开（单位级事件 = 本单位处；接入冲击 = 接入时以本机为心；被击 = 按宿主载体展开，见 EmgGatedField）
+                    EmgGatedField(ref d, x, e, host);
                     continue;
                 }
                 float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
@@ -1153,7 +1159,7 @@ namespace BinGames.Sim.Combat
         private static void EmgNodeEffects(ref CombatData d, int prog, int node, double2 pos, int ownerSlot, CombatFaction faction, int chain = 0, byte depth = 0)
         {
             int verb = d.Config.EmgVerbEmit;
-            if (verb <= 0 || prog < 0 || prog >= d.EmgPrograms.Length)
+            if (prog < 0 || prog >= d.EmgPrograms.Length)
             {
                 return;
             }
@@ -1167,7 +1173,16 @@ namespace BinGames.Sim.Combat
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if (x.Role <= EmgConst.RoleLastRead || x.Verb != verb || !(x.A > 0f) || !(x.B > 0f))
+                if (x.Verb == (byte)EmgVerb.Field && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                {
+                    // EMG2-FLD-01：子载荷落点 / 到期 / 撞障碍结算处展开场（与命中注能同一步同一处只生成一个）
+                    if (EmgFieldFromInstr(ref d, x, pos, EmgIdOf(ref d, ownerSlot), faction, chain, depth) && i < d.EmgAct.Length)
+                    {
+                        d.EmgAct[i] = d.EmgAct[i] + 1;
+                    }
+                    continue;
+                }
+                if (verb <= 0 || x.Role <= EmgConst.RoleLastRead || x.Verb != verb || !(x.A > 0f) || !(x.B > 0f))
                 {
                     continue;
                 }

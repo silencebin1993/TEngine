@@ -27,6 +27,8 @@ namespace BinGames.Sim.Combat
         public uint FrozenBit;
         /// <summary>EMG2-PHS-01：相态规则（fg.TbPhaseRule 7 行，下标 = 累积量下标；表数据，读档沿用当前的）。</summary>
         public NativeArray<EmgPhaseRule> EmgPhases;
+        /// <summary>EMG2-FLD-01：场 × 载体规则（fg.TbFieldCarrierRule 20 行，下标 = EmgFieldConst 行号；表数据，读档沿用当前的）。</summary>
+        public NativeArray<EmgFieldRule> EmgFieldRules;
         /// <summary>EMG2-PHS-01（ADR ⑭ #9）：电击标签在本地点的状态位（热更层按 fg.TbStatusTag 写；读 15 / 16 版快照把 ImmuneMask 的电击位映射成电抗覆盖）。派生量。</summary>
         public uint ShockBit;
 
@@ -42,6 +44,11 @@ namespace BinGames.Sim.Combat
             for (int k = 0; k < EmgPhaseConst.Count; k++)
             {
                 EmgPhases[k] = EmgPhaseConst.Default(k);
+            }
+            EmgFieldRules = new NativeArray<EmgFieldRule>(EmgFieldConst.RuleCount, Allocator.Persistent);
+            for (int k = 0; k < EmgFieldConst.RuleCount; k++)
+            {
+                EmgFieldRules[k] = EmgFieldConst.Default(k);
             }
             EmgProfileKeys = new NativeList<int>(EmgConst.ProfileSlots, Allocator.Persistent);
             EmgStructPending = new NativeList<EmgStructHit>(8, Allocator.Persistent);
@@ -108,6 +115,7 @@ namespace BinGames.Sim.Combat
             EmgRuleIdx.Dispose();
             EmgRuleOrder.Dispose();
             EmgPhases.Dispose();
+            EmgFieldRules.Dispose();
             EmgProfileKeys.Dispose();
             EmgStructPending.Dispose();
             EmgStructOut.Dispose();

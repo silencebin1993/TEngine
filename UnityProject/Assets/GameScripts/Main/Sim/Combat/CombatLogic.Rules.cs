@@ -855,6 +855,15 @@ namespace BinGames.Sim.Combat
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                if (x.Verb == (byte)EmgVerb.Field)
+                {
+                    // EMG2-FLD-01（FGR-EMG-112）：结算点展开场——没有 trigger 读端的场写端在命中处生成（有 trigger 的由 EmgRootGated / 子节点触发执行）；同一次出手打中多个目标只生成一个
+                    if (x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 && !EmgOrdinalTriggered(ref d, n.FirstInstr, end, x.Ordinal))
+                    {
+                        EmgHitField(ref d, x, t, c); // 修复轮：按宿主载体展开（FG19A 第 1.4 节电磁场控 5 载体）
+                    }
+                    continue;
+                }
                 if (x.Port == EmgConst.PortKinetic && (c.EntKind == EmgEntKind.Unit || c.EntKind == EmgEntKind.Zone))
                 {
                     EmgWallSlamPush(ref d, t, c, x, n, end);

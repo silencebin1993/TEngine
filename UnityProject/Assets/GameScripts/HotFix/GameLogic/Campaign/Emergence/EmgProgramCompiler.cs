@@ -1112,7 +1112,7 @@ namespace GameLogic.Campaign.Emergence
         }
 
         /// <summary>EMG1-FIX-01（FG19A 第 1.2 节第 26 行 / D-14）：根节点上由内核直接执行、不再走旧读法过渡的写端口（任何 owner）：ent.projectile = 追射（CombatLogic.EmgQueueFollow）。按端口，不按内容 ID。</summary>
-        public static bool IsRootKernelPort(string port) => port == "ent.projectile";
+        public static bool IsRootKernelPort(string port) => port == "ent.projectile" || (port != null && port.StartsWith("fld.", StringComparison.Ordinal)); // EMG2-FLD-01：场写端由内核在结算点 / 生效事件处展开
 
         private static bool IsRootKernelOwner(string owner) =>
             FirmwareKinds.TryGetRow(owner, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row);

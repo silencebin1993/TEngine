@@ -418,20 +418,11 @@ namespace GameLogic.EditorTools
 
                 // AI 驾驶：接入冲击阶段 2 才生效（推斥场随 EMG2-FLD-01）。测试夹具把它的写端代入阶段 1 已有内核实现的“排水”、stageGate 提前到 1，
                 // 只验触发条件：没有信号接入（AI 驾驶）时内核不发 evt.uplink、不结算；热更层接入注入后才发并在本机处结算一次
-                UseStage(1, src =>
-                {
-                    foreach (EmgSource.Decl d in src.Decls.Where(d => d.Owner == "fw_uplinkpulse"))
-                    {
-                        d.StageGate = 1;
-                        if (d.Dir == "write")
-                        {
-                            (d.Port, d.Role, d.Amount, d.Param2) = ("mat.water", "emit", 1f, 0f);
-                        }
-                    }
-                });
+                // EMG2-FLD-01（DEBT-EMG1FW02-02 关闭）：真实声明行 [evt.uplink trigger → fld.push spawn 3 米 0.8 秒]（不再用写端替身），阶段 2 正式表
+                UseStage(2);
                 (long ai, int aiZones, EmgInjectResult inj, long linked, int linkedZones) = UplinkProbe();
                 Expect(ai == 0 && aiZones == 0 && inj == EmgInjectResult.Enqueued && linked == 1 && linkedZones == 1,
-                    $"装了接入冲击的机器在 AI 驾驶下 4 秒 evt.uplink {ai} 次、结算 {aiZones} 次；信号接入注入后 {inj}、evt.uplink {linked} 次、本机处结算 {linkedZones} 次（推斥场本身随 EMG2-FLD-01，DEBT-EMG1FW02-02）");
+                    $"装了接入冲击的机器在 AI 驾驶下 4 秒 evt.uplink {ai} 次、推斥环 {aiZones} 个；信号接入注入后 {inj}、evt.uplink {linked} 次、在本机处放推斥环 {linkedZones} 个（真实声明行 fld.push）");
 
                 UseStage(1);
                 string sl = AddonSaveLoad("comp_gun", new[] { "fw_coolback", AddonFiller }, AddonCond.Heat, 1.0f, 13f, out long zones);
@@ -514,10 +505,11 @@ namespace GameLogic.EditorTools
                 k.Step(1f / 60f, k.Time + 1f / 60f);
             }
             long ai = k.EmgEnqueuedOf(EmgEventKind.Uplink);
-            int aiZones = (int)k.Counters.ZonesSpawned;
+            int aiZones = k.EmgScalars.FieldsBorn; // EMG2-FLD-01：数推斥场（fld.push），不再数替身驻留区
             EmgInjectResult r = k.InjectEmgUnitEvent(EmgEventKind.Uplink, me, 0);
             k.Step(1f / 60f, k.Time + 1f / 60f);
-            return (ai, aiZones, r, k.EmgEnqueuedOf(EmgEventKind.Uplink), (int)k.Counters.ZonesSpawned - aiZones);
+            bool atSelf = k.FieldCount == 1 && k.FieldAt(0).Port == EmgFieldConst.PortPush && k.TryGetPosition(me, out double2 mp) && math.distance(k.FieldAt(0).Pos, mp) < 1e-6;
+            return (ai, aiZones, r, k.EmgEnqueuedOf(EmgEventKind.Uplink), atSelf ? k.EmgScalars.FieldsBorn - aiZones : -1);
         }
 
         // ── 工具 ─────────────────────────────────────────────────────────────

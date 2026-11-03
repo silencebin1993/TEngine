@@ -138,6 +138,11 @@ namespace BinGames.Sim.Combat
             // 5b. FG2-FW-02：读法生成的无人机、区域、回波与状态标签（统一时钟，暂停不走、倍速按游戏时间）。
             StepReadings(ref d, dt);
 
+            // 5e. EMG2-FLD-01（FGR-EMG-112 / 121）：活跃场到期与对单位 / 残骸 / 无人机的作用（残骸滑行之前，本步被场带动的残骸本步滑）。没有场时 O(1)。
+            if (d.Fields.Length > 0)
+            {
+                StepFields(ref d, dt);
+            }
             // 5f. EMG1-ENT-01：残骸滑行 / 撞击、被打掉、到期崩解（总线之前，本步的撞击 / 位移事件本步处理）。
             if (d.Wrecks.Length > 0)
             {
@@ -1052,6 +1057,10 @@ namespace BinGames.Sim.Combat
             c.ShotsFired++;
             d.Counters[0] = c;
             AddShotHeat(ref d, i, wp);
+            if (wp.FieldPort != 0)
+            {
+                EmgWeaponField(ref d, i, t, wp); // EMG2-FLD-01 修复轮：部件场与机器同一入口（任何投送方式都续期，电晕炮塔同样展开）
+            }
             if (wp.Mode == CombatWeaponMode.Projectile)
             {
                 SpawnProjectile(ref d, i, t, d.Weapon[i], wp);
@@ -1301,6 +1310,10 @@ namespace BinGames.Sim.Combat
                 d.NextFireAt[a] = d.Scalars[0].Time + EffectiveCooldown(wp);
             }
 
+            if (wp.FieldPort != 0)
+            {
+                EmgWeaponField(ref d, a, t, wp); // EMG2-FLD-01：部件声明的场（电晕场 fld.corona）随每次出手续期——放在投送分支之前，弹体 / 飞行武器同样生效
+            }
             if (wp.Mode == CombatWeaponMode.Projectile)
             {
                 // 弹体武器：护甲 / 侧后在命中那一刻按飞行方向结算（弹道唯一真相在内核）；读法在命中时结算。
@@ -1886,6 +1899,19 @@ namespace BinGames.Sim.Combat
                 {
                     EmgProjMatter(ref d, ref pr, next, airborne); // EMG2-MAT-01（FGR-EMG-083）：穿过斑块沾染、进 / 离发 evt.enter / evt.leave；地点没有斑块且弹体不在斑块里时不查（最后一块消失后补发 leave、清掩码）
                 }
+                if (pr.LockQ > 0)
+                {
+                    pr.LockQ = (ushort)math.max(0, pr.LockQ - (int)math.round(dt * 1000f)); // EMG2-FLD-01：寻的失效倒计时（本步的转向已按失效前判过）
+                }
+                if (pr.TrailLeft > 0)
+                {
+                    EmgProjTrail(ref d, ref pr, next); // EMG2-FLD-01：带油带火的弹体沿途拖出明火
+                }
+                if (d.Fields.Length > 0 && EmgProjFields(ref d, ref pr, next, airborne, dt))
+                {
+                    d.Projectiles[write++] = pr; // EMG2-FLD-01：被偏折场反射，下一步起按场方阵营飞回去
+                    continue;
+                }
                 if (pr.Faction == CombatFaction.Player && d.DeflectActive.Length > 0 && !airborne && !EmgEvadesDeflect(ref d, pr) && TryReflectProjectile(ref d, ref pr, next))
                 {
                     d.Projectiles[write++] = pr; // FG9-FAC-01：被偏折场反弹，下一步起按敌方弹体飞回去
@@ -1994,7 +2020,7 @@ namespace BinGames.Sim.Combat
                         d.EmgCtx.HitCode = (pr.Mods & EmgProjMods.Pierced) != 0 ? EmgCode.HitAfterPierce : EmgCode.HitAfterBounce; // EMG1-GRM-01
                     }
                     int hitId = d.Id[hit];
-                    if (pr.Coat != 0u && !heal)
+                    if ((pr.Coat != 0u || (pr.FieldOnce & EmgFieldConst.OnceCharged) != 0) && !heal)
                     {
                         EmgCoatOnHit(ref d, hit, pr); // EMG2-MAT-01：命中时把沾上的物质带给目标
                     }

@@ -195,6 +195,7 @@ namespace GameLogic.Campaign.Combat
             ApplyMatters(Kernel); // EMG2-MAT-01：17 种物质按 fg.TbMatter 写进内核（斑块层开不开看 emg.stage）
             ApplyRules(Kernel); // EMG2-RULE-01：通道规则 fg.TbChannelRule 编成内核规则（≤ 256）
             ApplyPhaseRules(Kernel); // EMG2-PHS-01：相态规则 fg.TbPhaseRule（7 个累积量的阈值 / 衰减 / 免疫窗 / 抗性列）
+            ApplyFieldRules(Kernel); // EMG2-FLD-01：场 × 载体规则 fg.TbFieldCarrierRule（20 行）
             _emgEntity = config.EmgEntity != 0;
             ConfigureReactions();
             Sync = new CombatTransformSync(16);
@@ -240,6 +241,7 @@ namespace GameLogic.Campaign.Combat
             ApplyMatters(k);
             ApplyRules(k);
             ApplyPhaseRules(k);
+            ApplyFieldRules(k);
             ApplyReactionTables(k);
         }
 
@@ -637,6 +639,30 @@ namespace GameLogic.Campaign.Combat
             _patchDegradeSeen = degrade;
         }
 
+        /// <summary>EMG2-FLD-01（FG19 第 18 节降级表“活跃场 emg.field.capacity 64：新场不生效，预览与调试层可见”）：调试层一行——活跃场数 / 容量与满额未生效计数（只给开发调试看，不用文本键）。</summary>
+        public string EmgFieldDebugLine()
+        {
+            if (IsDisposed)
+            {
+                return $"[EmgField] {SiteId} 已卸载";
+            }
+            EmgScalars s = Kernel.EmgScalars;
+            return $"[EmgField] {SiteId} 活跃场 {Kernel.FieldCount}/{EmgMatterConst.FieldCapacity} · 生成 {s.FieldsBorn} · 到期 {s.FieldsExpired} · 满额未生效 {s.FieldsCapped} · 推动 {s.FieldPushes}";
+        }
+
+        private int _fieldCappedSeen;
+
+        /// <summary>场满额（新场不生效）每次增加时记一行（调试层；O(1) / 步，同 WatchWrecks）。</summary>
+        private void WatchFields()
+        {
+            int capped = Kernel.EmgScalars.FieldsCapped;
+            if (capped > _fieldCappedSeen)
+            {
+                Log.Info(EmgFieldDebugLine());
+            }
+            _fieldCappedSeen = capped;
+        }
+
         /// <summary>崩解第一次出现、以及满容量崩解每次增加时记一行（调试层；O(1) / 步）。</summary>
         private void WatchWrecks()
         {
@@ -916,7 +942,7 @@ namespace GameLogic.Campaign.Combat
             program = Emergence.EmgProgramCompiler.Compile(p, p != null ? SignalUplinkService.CoolingUplinkCores(state, p.UplinkFirmwareIds) : null);
             if (program.IsEmpty)
             {
-                return w;
+                return WithPartField(p?.PrimaryId, w);
             }
             CombatWeapon local = w; // EMG1-FLASH-01：变体武器从同一把本地武器出发
             int index = RegisterProgram(Kernel, program);
@@ -925,7 +951,7 @@ namespace GameLogic.Campaign.Combat
                 noteKey = Emergence.EmgProgramCompiler.NoteTableFull;
                 _rejectedPrograms.Add(program.Signature);
                 Log.Warning($"[CombatSite] {SiteId} 程序表已满（{Kernel.ProgramCount} 行），本次装配退回只有基础攻击（DEBT-EMG1KRN01-01）。");
-                return w;
+                return WithPartField(p.PrimaryId, w);
             }
             w.Program = index;
             float raw = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
@@ -943,7 +969,8 @@ namespace GameLogic.Campaign.Combat
             noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
             noteKey ??= program.Notes.Exists(n => n.Key == Emergence.EmgProgramCompiler.NoteLobStraight) ? Emergence.EmgProgramCompiler.NoteLobStraight : null;
             RegisterFlashVariants(p, local, w, program);
-            return w;
+            // EMG2-FLD-01 修复轮：部件场在程序出口统一写上——机器、炮塔（TurretService）、试验场（TestRangeService）同一条路径（FGR-EMG-013 规则只看端口）
+            return WithPartField(p.PrimaryId, w);
         }
 
         /// <summary>
@@ -1240,6 +1267,58 @@ namespace GameLogic.Campaign.Combat
             }
             return true;
         }
+
+        /// <summary>EMG2-FLD-01：把编好的场 × 载体规则（fg.TbFieldCarrierRule）写进内核。表不合法时报错并保持内核缺省表（数值同 FG19B 第 5 节，不静默）。</summary>
+        public static bool ApplyFieldRules(CombatKernel kernel)
+        {
+            Emergence.EmgFieldCatalog.Compiled c = Emergence.EmgFieldCatalog.Current;
+            if (kernel == null || !c.Ok)
+            {
+                foreach (string p in c.Problems)
+                {
+                    Log.Error("[EmgFieldCatalog] " + p);
+                }
+                return false;
+            }
+            if (!kernel.SetFieldRules(c.Rules))
+            {
+                Log.Error("[EmgFieldCatalog] 内核拒绝了场 × 载体规则表（幅度 / 阵营 / 执行者不合法）");
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// EMG2-FLD-01（FG19A 第 2.1 节部件声明；FGR-EMG-112）：主部件声明里已生效的 fld.* spawn 写端 → 武器的部件场（端口码 + 半径 = 声明幅度），每次出手由内核续期一个持续场。
+        /// 按声明与端口判，不按部件 ID（FGR-EMG-013）。推斥 / 牵引与武器已有的击退 / 牵引读法是同一个效果（FG19A 第 3.2 节“现动词”列：fld.push = Knock、fld.pull = Pull），
+        /// 读法已经在做的不再另开一个场（否则同一下推两次；推铲 / 震荡脉冲器的推残骸由击退读法 EmgShoveWrecks 执行）。
+        /// </summary>
+        public static CombatWeapon WithPartField(string partId, CombatWeapon w)
+        {
+            if (string.IsNullOrEmpty(partId))
+            {
+                return w;
+            }
+            Emergence.EmgCompiled c = Emergence.EmgCatalog.Current;
+            foreach (string port in FieldPorts)
+            {
+                float a = Emergence.EmgCatalog.PartWriteAmount(port, Emergence.EmgRole.Spawn, new[] { partId });
+                if (!(a > 0f) || !c.PortIndexById.TryGetValue(port, out int pi))
+                {
+                    continue;
+                }
+                if ((port == "fld.push" && w.Reading.Knockback > 0f) || (port == "fld.pull" && w.Reading.PullStrength > 0f))
+                {
+                    continue;
+                }
+                w.FieldPort = (ushort)c.Ports[pi].Code;
+                w.FieldRadius = a;
+                return w;
+            }
+            return w;
+        }
+
+        private static readonly string[] FieldPorts = { "fld.corona", "fld.magnet", "fld.vortex", "fld.deflect", "fld.pull", "fld.push" };
 
         /// <summary>EMG2-PHS-01：把编好的相态规则（fg.TbPhaseRule）写进内核。表不合法时报错并保持内核缺省表（数值同 FG19B §3.3，不静默：Log.Error）。</summary>
         public static bool ApplyPhaseRules(CombatKernel kernel)
@@ -1828,6 +1907,7 @@ namespace GameLogic.Campaign.Combat
                 WatchWrecks(); // EMG1-ENT-01
                 WatchPatches(); // EMG2-MAT-01
             }
+            WatchFields(); // EMG2-FLD-01
             ProcessEvents();
             // FG2-FW-04：反应反馈与伤害归因（按内核累计计数的增量，O(反应条数)；与是否观察无关的部分照常结算）。
             ReactionFeedback.Process(this, CampaignSession.Current);

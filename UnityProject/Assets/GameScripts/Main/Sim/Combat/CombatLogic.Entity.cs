@@ -519,7 +519,7 @@ namespace BinGames.Sim.Combat
         /// 速度 ≥ emg.impact.v_min 时发 evt.impact、按撞击动能（质量 × 速度² × 系数）扣双方的血（DamageFrom 来源 = 撞击；不伤推动者的己方）；位移 ≥ emg.push.d_min 发 evt.push。
         /// 档案不可位移（哨戒桩 / 固定底盘 / 首领）的不动。返回新位置。
         /// </summary>
-        internal static double2 EmgDisplaceUnit(ref CombatData d, int k, double2 from, double2 want, int pusher, ushort cause)
+        internal static double2 EmgDisplaceUnit(ref CombatData d, int k, double2 from, double2 want, int pusher, ushort cause, float speedOverride = -1f)
         {
             if (EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, k)).Displace == 0)
             {
@@ -527,13 +527,19 @@ namespace BinGames.Sim.Combat
             }
             double2 actual = MoveCollide(ref d, k, from, want);
             bool navBlocked = math.distancesq(actual, want) > 1e-6;
+            // EMG2-FLD-01：场的持续推动按场速度（力 ÷ 质量）结算撞击，不按瞬时击退的等效用时
+            float speed = speedOverride >= 0f ? speedOverride : (float)(math.distance(from, want) / KnockSecondsOf(ref d));
+            float r = d.Radius[k];
+            if (speedOverride >= 0f)
+            {
+                // 修复轮：场每步都推——只有“由不贴着变成撞上”的那一步结算撞击；已贴着（接触带内）的障碍 / 残骸 / 单位只挡住朝它的分量、不再算撞（接触锁存）
+                actual = EmgFieldContact(ref d, k, from, actual, r, ref navBlocked, want);
+            }
             double segLen = math.distance(from, actual);
-            float speed = (float)(math.distance(from, want) / KnockSecondsOf(ref d));
             double best = navBlocked ? 1.0 : 2.0;
             int hitUnit = -1, hitWreck = -1;
             if (segLen > 1e-6)
             {
-                float r = d.Radius[k];
                 for (int o = 0; o < d.Obstacles.Length; o++)
                 {
                     float3 ob = d.Obstacles[o];
@@ -613,6 +619,85 @@ namespace BinGames.Sim.Combat
                 EmgUnitEvent(ref d, EmgEventKind.Push, k, pusher >= 0 && pusher < d.Count ? d.Id[pusher] : 0, moved, 0f, cause, end);
             }
             return end;
+        }
+
+        /// <summary>场推动的接触带（米）：离障碍 / 残骸 / 单位表面这么近、又被朝它推，视为“已贴着”（撞击后停在撞点前 0.02 米，下一步落在这里）。</summary>
+        private const double FieldContactSlop = 0.05;
+
+        /// <summary>
+        /// EMG2-FLD-01 修复轮（场持续推动的撞击锁存，不加新状态）：① 格网——沿推力方向再走 0.05 米就进不去 = 已贴墙，沿墙滑、不算新撞击；第一次撞上时先把位置推到墙边（二分 8 次），
+        /// 下一步就落在接触带里；② 圆形障碍 / 残骸 / 地面单位——表面 0.05 米内且位移朝它的，去掉朝它的分量（贴着不穿、不算撞）。O(障碍 + 残骸 + 单位)，只在被场推动的单位上。
+        /// </summary>
+        private static double2 EmgFieldContact(ref CombatData d, int k, double2 from, double2 actual, float r, ref bool navBlocked, double2 want)
+        {
+            double2 seg = want - from;
+            double len = math.length(seg);
+            if (navBlocked && len > 1e-9)
+            {
+                double2 probe = from + seg / len * FieldContactSlop;
+                if (math.distancesq(MoveCollide(ref d, k, from, probe), probe) > 1e-12)
+                {
+                    navBlocked = false; // 已贴墙：MoveCollide 的结果（沿墙滑 / 不动）照用，不发撞击
+                }
+                else
+                {
+                    double lo = 0.0, hi = 1.0;
+                    for (int it = 0; it < 8; it++)
+                    {
+                        double mid = (lo + hi) * 0.5;
+                        double2 p = from + seg * mid;
+                        if (math.distancesq(MoveCollide(ref d, k, from, p), p) <= 1e-12)
+                        {
+                            lo = mid;
+                        }
+                        else
+                        {
+                            hi = mid;
+                        }
+                    }
+                    actual = from + seg * lo; // 第一次撞上：停在墙边（撞点），本步结算一次撞击
+                }
+            }
+            double2 move = actual - from;
+            if (math.lengthsq(move) < 1e-12)
+            {
+                return actual;
+            }
+            for (int o = 0; o < d.Obstacles.Length; o++)
+            {
+                float3 ob = d.Obstacles[o];
+                move = EmgContactSlide(from, move, new double2(ob.x, ob.y), ob.z + r);
+            }
+            for (int w = 0; w < d.Wrecks.Length; w++)
+            {
+                EmgWreck wk = d.Wrecks[w];
+                if (wk.Hp > 0f)
+                {
+                    move = EmgContactSlide(from, move, wk.Pos, wk.Radius + r);
+                }
+            }
+            for (int u = 0; u < d.Count; u++)
+            {
+                if (u != k && d.IsAlive(u) && !IsAir(ref d, u))
+                {
+                    move = EmgContactSlide(from, move, d.Pos[u], d.Radius[u] + r);
+                }
+            }
+            return from + move;
+        }
+
+        /// <summary>在接触带里（表面外 0..0.05 米）且朝圆心走的位移去掉法向分量；重叠（已经压进去）的照旧放行（同原“站在残骸上被推开的不算撞”）。</summary>
+        private static double2 EmgContactSlide(double2 from, double2 move, double2 c, double rr)
+        {
+            double2 rel = c - from;
+            double dist = math.length(rel);
+            if (dist <= rr || dist > rr + FieldContactSlop)
+            {
+                return move;
+            }
+            double2 n = rel / dist;
+            double dn = math.dot(move, n);
+            return dn > 0 ? move - n * dn : move;
         }
 
         /// <summary>撞击扣血：走 DamageFrom（evt.hurt Code = 撞击 6）；推动者的己方不受伤（友伤通知归 FGR-EMG-184，阶段 3）。</summary>

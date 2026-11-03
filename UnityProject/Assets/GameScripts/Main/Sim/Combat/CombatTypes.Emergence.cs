@@ -601,12 +601,17 @@ namespace BinGames.Sim.Combat
         public float3 PhsTB;
         /// <summary>6 个运行时抗性覆盖（ADR ⑦，0～255 映射 0～1；有效抗性 = max(档案值, 覆盖值)），按 EmgProfile 抗性列顺序：寒、热、电、腐蚀、磁、入侵（劫持）。</summary>
         public byte Res0, Res1, Res2, Res3, Res4, Res5;
+        /// <summary>
+        /// EMG2-FLD-01 修复轮（FG19A 第 1.4 节第 43 行“偏折内置冷却 3 秒”）：被击门控的偏折场最近一次展开的时刻，按 0.1 秒刻度取模 65535 再 +1（0 = 从没展开过）。
+        /// 放在 Res5 后的对齐空位里，不增大单位记录（ADR ⑬ 每单位 ≤ 108 字节）。shortcut: 刻度每 1.8 小时回绕一次，回绕点前后 3 秒内挨打可能误判冷却中、少展开一次；要精确就改成 double 并先改 ADR ⑬ 预算。快照 17 单位段尾追加（短段取 0）。
+        /// </summary>
+        public ushort FieldCdQ;
         /// <summary>EMG2-REACT-01（FG19B C06 bhv.stick）：被胶膜固化粘住的剩余秒（&gt; 0 = 能开火、不能移动、不受推动；归零时清掉胶膜沾染）。快照 17 单位段尾追加（短段取 0）。</summary>
         public float StickT;
 
         /// <summary>阶段 2 状态段是否全为缺省（EmgActive 与 StateHash 金标准用：没有物质 / 相态时哈希逐字不变）。</summary>
         public bool Stage2Default => Temp == 0f && math.all(AccA == 0f) && math.all(AccB == 0f) && PhaseMask == 0 && math.all(PhsTA == 0f) && math.all(PhsTB == 0f)
-                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0 && StickT == 0f;
+                                     && (Res0 | Res1 | Res2 | Res3 | Res4 | Res5) == 0 && StickT == 0f && FieldCdQ == 0;
     }
 
     /// <summary>残骸（ADR ⑦；独立小结构，不是单位，不被索敌 / 编队 / 攻城当目标）。生成与挡弹归 EMG1-ENT-01。</summary>
@@ -903,6 +908,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-REACT-01：活着的阻路斑块数（重建哈希时统计；0 时移动不查阻路）、生成时被推出圈的单位累计（自检 / 调试层）。不进快照。</summary>
         public int BlockLive;
         public int BlockPushed;
+        /// <summary>EMG2-FLD-01（不进快照，调试 / 自检计数）：场生成 / 满 64 没生效 / 到期、场推动实体次数；弹体带电 / 被磁场转向 / 被场推 / 被场反射 / 失锁 / 撞斑块反弹、拖尾明火块。</summary>
+        public int FieldsBorn, FieldsCapped, FieldsExpired, FieldPushes, GasPushed;
+        public int ProjCharged, ProjRedirected, ProjPushed, ProjReflected, ProjLockLoss, ProjPatchBounce, TrailPatches, MagSweeps;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, HashDirty = 1 };
     }

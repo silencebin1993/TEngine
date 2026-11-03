@@ -783,6 +783,15 @@ namespace GameLogic.EditorTools
             Expect(compiled && reading && Array.IndexOf(live, "Fire") < 0 && Array.IndexOf(EmgProgramCompiler.LiveTagsOf("fw_arcchain"), "Shock") >= 0,
                 $"编译器单轨：程序里过载 / 电容蓄力的旧标签 Fire / Charged 不进读法（状态位 {single.StatusMask:X} vs 两轨 {dual.StatusMask:X}），过渡字段 heatburst 退役；" +
                 "连锁电弧的电击照挂；固件库 / 修复 / 反应提示显示的标签同口径（LiveTagsOf）");
+            // 1b) EMG2-FLD-01：磁聚 fld.magnet 接通 → 整条切声明轨，en.mag 的旧标签 Charged / Magnet 按端口退役（单轨读法不再挂，两轨旧读法仍挂），注入由内核写磁化度
+            EmgProgramResult magProg = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_magnet" }, FirmwareCarrier.Projectile);
+            Func<string, string, bool> magSkip = EmgProgramCompiler.LegacySkip(magProg);
+            uint magnetBit = NamedReactionCatalog.BitOf("Magnet");
+            uint magSingle = CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, new[] { "fw_magnet" }, false, magSkip).StatusMask;
+            uint magDual = CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, new[] { "fw_magnet" }, false).StatusMask;
+            Expect(!magProg.IsEmpty && magSkip != null && magSkip("fw_magnet", EmgProgramCompiler.TagField("Magnet")) && magSkip("fw_magnet", EmgProgramCompiler.TagField("Charged"))
+                   && (magSingle & (magnetBit | NamedReactionCatalog.BitOf("Charged"))) == 0u && (magDual & magnetBit) != 0u,
+                $"磁聚（stageGate 2，fld.magnet 随 EMG2-FLD-01 接通）：程序里旧标签 Charged / Magnet 不进读法（单轨 {magSingle:X} vs 两轨 {magDual:X}）——磁化由 en.mag 注入磁化度与磁场表现");
             // 2) 同一次命中只走一轨：程序注热 + 单轨读法 → 结构积热涨、着火度不涨（没挂 Fire）；负向：两轨读法（旧 Fire 标签还在）会同时写着火度，比对必须比出来
             float IgniteAfterHit(CombatReading r, out float heat)
             {

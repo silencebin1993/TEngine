@@ -88,6 +88,12 @@ namespace BinGames.Sim.Combat
             get => ModQ / 1024f;
             set => ModQ = (ushort)math.clamp((int)math.round(value * 1024f), 0, 65535);
         }
+        /// <summary>EMG2-FLD-01（FGR-EMG-120）：寻的失效剩余毫秒（穿过烟 0.5 秒 / 蒸汽 0.3 秒）；&gt; 0 时不转向。Emg 弹体段尾部追加。</summary>
+        public ushort LockQ;
+        /// <summary>EMG2-FLD-01：每发弹体每种场 / 斑块改写只记一次的位（EmgFieldConst.Once*：带电 / 被场反射 / 烟 / 蒸汽 / 玻化层 / 冰面 / 拖尾）。</summary>
+        public byte FieldOnce;
+        /// <summary>EMG2-FLD-01：带油的弹体穿过明火后还要拖出的明火块数（每 2 米一块）。</summary>
+        public byte TrailLeft;
     }
 
     /// <summary>内核的标量状态（NativeArray 长度 1，作业与托管调用共用）。</summary>

@@ -888,6 +888,10 @@ namespace BinGames.Sim.Combat
                         {
                             pr.Coat |= 1u << m.CoatBit; // EMG2-MAT-02：迁入斑块不给弹体沾染（等价迁移期，迁移前区域不沾弹体）
                         }
+                        if (!IsLegacy(z))
+                        {
+                            EmgProjPatchRules(ref d, ref pr, z, next); // EMG2-FLD-01：失锁 / 去火 / 拖尾 / 玻化层与冰面反射
+                        }
                         if (math.distancesq(next, z.Pos) <= r2)
                         {
                             uint bit = 1u << z.Matter;
@@ -941,6 +945,23 @@ namespace BinGames.Sim.Combat
         {
             uint left = pr.Coat;
             int src = d.SlotOf(pr.Owner);
+            if ((pr.FieldOnce & EmgFieldConst.OnceCharged) != 0)
+            {
+                EmgFieldRule cr = FieldRule(ref d, EmgFieldConst.CoronaPayload);
+                if (FieldLive(cr) && cr.Amount > 0f)
+                {
+                    EmgAddAcc(ref d, t, EmgPhaseConst.Charge, cr.Amount, pr.Owner); // EMG2-FLD-01（FGR-EMG-120）：穿过己方电晕场带的电，命中注入 en.elec
+                }
+            }
+            sbyte cryoBit = MatterOf(ref d, EmgMatterConst.Cryo).CoatBit;
+            if (cryoBit >= 0 && cryoBit < 32 && (pr.Coat & (1u << cryoBit)) != 0u)
+            {
+                EmgFieldRule kr = FieldRule(ref d, EmgFieldConst.CryoPayload);
+                if (FieldLive(kr) && kr.Amount > 0f)
+                {
+                    EmgAddAcc(ref d, t, EmgPhaseConst.Chill, kr.Amount, pr.Owner); // EMG2-FLD-01 修复轮（FG19B fieldrule_cryo_payload“命中 phs.chill +0.3”）：穿过液氮雾带的寒，命中注入寒量（沾染位本身不进相态累积）
+                }
+            }
             while (left != 0u)
             {
                 int b = math.tzcnt(left);

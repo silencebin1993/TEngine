@@ -1053,6 +1053,9 @@ namespace BinGames.Sim.Combat
         public int ProgramRef;
         /// <summary>EMG1-KRN-01（ADR ③）：1 = 程序需要飞行，即时命中 / 重炮在“当场结算”那一刻改为生成一发弹体（EMG1-TRIG-01 接上执行）；不改 <see cref="Mode"/>。</summary>
         public byte SpawnFlight;
+        /// <summary>EMG2-FLD-01（FGR-EMG-112）：部件声明的场（fld.* spawn 的端口码，0 = 没有）与半径；每次出手续期一个持续场（CombatLogic.EmgWeaponField）。Emg 武器段尾部追加。</summary>
+        public ushort FieldPort;
+        public float FieldRadius;
 
         /// <summary>程序下标（−1 = 没有程序）。</summary>
         public int Program

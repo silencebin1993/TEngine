@@ -864,6 +864,66 @@ namespace BinGames.Sim.Combat
 
         public EmgPhaseRule PhaseRuleAt(int k) => k >= 0 && k < EmgPhaseConst.Count ? _d.EmgPhases[k] : default;
 
+        /// <summary>EMG2-FLD-01（FGR-EMG-122）：写场 × 载体规则（fg.TbFieldCarrierRule 20 行，下标 = EmgFieldConst 行号）。行数不对、幅度非数 / 负、阵营 / 执行者码越界时整表拒绝（保留原表）。</summary>
+        public bool SetFieldRules(IReadOnlyList<EmgFieldRule> rules)
+        {
+            if (rules == null || rules.Count != EmgFieldConst.RuleCount)
+            {
+                return false;
+            }
+            foreach (EmgFieldRule r in rules)
+            {
+                if (!(r.Amount >= 0f) || !(r.Param >= 0f) || float.IsInfinity(r.Amount) || float.IsInfinity(r.Param) || r.Faction > EmgFieldConst.FacHostile
+                    || r.FactionAlt > EmgFieldConst.FacHostile || r.Impl > EmgFieldConst.ImplCoat || r.Once > 1)
+                {
+                    return false;
+                }
+            }
+            for (int k = 0; k < rules.Count; k++)
+            {
+                _d.EmgFieldRules[k] = rules[k];
+            }
+            Touch();
+            return true;
+        }
+
+        public EmgFieldRule FieldRuleAt(int k) => k >= 0 && k < EmgFieldConst.RuleCount ? _d.EmgFieldRules[k] : default;
+
+        /// <summary>EMG2-FLD-01：在 (x, y) 展开一个场（自检 / 调试入口；正式路径由声明轨 fld.* 写端与部件场生成）。返回是否生效（满 64 不生效、计数可见）。</summary>
+        public bool SpawnField(ushort port, double x, double y, float radius, float seconds, int ownerId, CombatFaction faction)
+        {
+            bool ok = CombatLogic.EmgSpawnField(ref _d, port, new double2(x, y), radius, seconds, ownerId, faction, 0, 0, false);
+            Touch();
+            return ok;
+        }
+
+        public EmgField FieldAt(int i) => i >= 0 && i < _d.Fields.Length ? _d.Fields[i] : default;
+
+        /// <summary>EMG2-FLD-01 自检入口：放一片普通破片（FGR-EMG-114，2 代、不执行程序），走与碎裂 / 爆炸反应装甲同一个 EmgSpawnFragment。</summary>
+        public bool SpawnFragmentForTests(double2 at, float2 dir, int ownerId, CombatFaction faction, float damage, float speed, float range)
+        {
+            bool ok = CombatLogic.EmgSpawnFragment(ref _d, at, dir, ownerId, faction, 1, 0, damage, speed, range);
+            Touch();
+            return ok;
+        }
+
+        /// <summary>EMG2-FLD-01 自检入口：在 pos 放一架无人机（anchored = 插地的哨戒桩），归属 ownerId（须是活着的单位）；不打人（NextHit 远在以后）。返回下标。</summary>
+        public int AddDroneForTests(double2 pos, int ownerId, CombatFaction faction, bool anchored, float leash = 30f)
+        {
+            EmgScalars es = _d.EmgS[0];
+            int id = math.max(1, es.NextDroneId);
+            es.NextDroneId = id + 1;
+            _d.EmgS[0] = es;
+            double now = _d.Scalars[0].Time;
+            _d.Drones.Add(new CombatDrone
+            {
+                Pos = pos, Prev = pos, Until = now + 600.0, NextHit = now + 600.0, Owner = ownerId, Weapon = -1, Leash = leash, Cooldown = 1f, Faction = faction,
+                Anchored = (byte)(anchored ? 1 : 0), Anchor = pos, Id = id, Active = 255,
+            });
+            Touch();
+            return _d.Drones.Length - 1;
+        }
+
         /// <summary>EMG2-PHS-01：单位是否在第 k 个相态里（0 冻结、1 熔穿、2 麻痹、3 破甲、4 磁化、5 燃烧）。</summary>
         public bool InPhase(int id, int k)
         {
@@ -3054,6 +3114,7 @@ namespace BinGames.Sim.Combat
             staging.EmgRuleIdx.CopyFrom(_d.EmgRuleIdx);
             staging.EmgRuleOrder.CopyFrom(_d.EmgRuleOrder);
             staging.EmgPhases.CopyFrom(_d.EmgPhases); // EMG2-PHS-01：相态规则同是表数据
+            staging.EmgFieldRules.CopyFrom(_d.EmgFieldRules); // EMG2-FLD-01：场 × 载体规则同是表数据
             staging.ShockBit = _d.ShockBit;
             CombatLogic.MigrateClarityPhase(ref staging); // EMG2-PHS-01（ADR ⑭ #5 #9、⑩ 15 → 17）：云端受寒 / 冻结 / 免疫窗 → 寒量与冻结相态；免疫位 → 抗性覆盖
             RemapProfiles(ref staging, _d.EmgProfileKeys);
@@ -4069,6 +4130,11 @@ namespace BinGames.Sim.Combat
             {
                 WriteWeaponEmg(bw, w, null);
             }
+            if (w.FieldPort != 0)
+            {
+                bw.Write(w.FieldPort); // EMG2-FLD-01：带部件场的武器各自成行
+                bw.Write(w.FieldRadius);
+            }
             bw.Flush();
             return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);
         }
@@ -4606,6 +4672,24 @@ namespace BinGames.Sim.Combat
                 {
                     A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
                     B = new float4(k.Radius, k.MaxHp > 0f ? math.saturate(k.Hp / k.MaxHp) : 0f, CombatConst.EffectWreckColor, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
+                });
+            }
+            // EMG2-FLD-01（FGR-EMG-112）：活跃场——“冲击环”外观（外扩环 = 场在起作用），颜色按场端口区分（形状同为环、颜色为辅；推斥环随时间扩到全半径），外圈 = 剩余存续。占位外观，美术阶段替换。
+            for (int f = 0; f < D.Fields.Length; f++)
+            {
+                EmgField fd = D.Fields[f];
+                double2 p = fd.Pos - Origin;
+                double flife = math.max(0.001, fd.Until - fd.Born);
+                float r = fd.Port == EmgFieldConst.PortPush ? fd.Radius * (float)math.clamp((now - fd.Born) / flife, 0.25, 1.0) : fd.Radius;
+                int color = fd.Port switch
+                {
+                    EmgFieldConst.PortPull => 0x6090F0, EmgFieldConst.PortPush => 0xF0A060, EmgFieldConst.PortVortex => 0x60D0C0,
+                    EmgFieldConst.PortMagnet => 0x8A8AFF, EmgFieldConst.PortDeflect => 0xE0E0FF, _ => 0xC78BFF,
+                };
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)p.x, (float)p.y, (float)p.x, (float)p.y),
+                    B = new float4(r, (float)math.saturate((fd.Until - now) / flife), color, CombatConst.EffectKindZone + (float)CombatZoneLook.Pulse),
                 });
             }
             // EMG2-MAT-01（B15：形状纹样为主、颜色为辅）：物质斑块——种类 40 + 纹样码（CombatInstanced.shader 17 种纹样），颜色取 fg.TbMatter；外圈 = 剩余存续（世界源恒满）。占位外观，美术阶段替换。

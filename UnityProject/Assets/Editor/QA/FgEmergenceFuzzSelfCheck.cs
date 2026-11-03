@@ -623,6 +623,11 @@ namespace GameLogic.EditorTools
             {
                 k.SetWeaponState(a.Me, w.OverheatAt - 0.01f, false, 0, 0);
             }
+            if (c.Uplinked && ProgramReads(a.Program, EmgEventKind.Uplink))
+            {
+                // EMG2-FLD-01：读“接入”的程序（N15 接入冲击）——正式路径在信号接入时由热更层注入 evt.uplink（CombatSites.OnUplinkChanged），用例开局按同一入口注入一次（FGR-EMG-220 先造条件）
+                k.InjectEmgUnitEvent(EmgEventKind.Uplink, a.Me, 0);
+            }
             if (ProgramReads(a.Program, EmgEventKind.Death))
             {
                 a.KillStep = Mathf.RoundToInt(Mathf.Min(DeathAtSeconds, c.Seconds - 1f) / Dt);
@@ -712,6 +717,8 @@ namespace GameLogic.EditorTools
             public string Variant;
             public string Backlog;
             public readonly List<string> Dead = new List<string>();
+            /// <summary>条件型零反应（FG-GAP-179 口径）：定时在本载体射程内必先命中、读法写明条件的节点及其子节点，单列、不算死指令。</summary>
+            public readonly List<string> CondZero = new List<string>();
             public readonly List<string> Overflow = new List<string>();
             public readonly List<string> Capacity = new List<string>();
             public readonly HashSet<string> Keys = new HashSet<string>(StringComparer.Ordinal);
@@ -998,6 +1005,7 @@ namespace GameLogic.EditorTools
                     act[x.Ordinal] = act.TryGetValue(x.Ordinal, out long v) ? v + n : n;
                 }
             }
+            HashSet<int> condNodes = TimerCondNodes(a, r.Case);
             foreach (EmgProgramStep s in prog.Steps)
             {
                 r.Instructions++;
@@ -1016,6 +1024,11 @@ namespace GameLogic.EditorTools
                     continue;
                 }
                 bool on = act.TryGetValue(s.Ordinal, out long c) && c > 0;
+                if (!on && OnlyOnNodes(prog, s.Ordinal, condNodes))
+                {
+                    r.CondZero.Add($"{s.FirmwareId}（第 {s.Ordinal + 1} 位，{r.Case.Carrier}；{RowsOf(prog, s.Ordinal)}）");
+                    continue;
+                }
                 r.Ordinals.Add((s.FirmwareId, r.Case.Carrier, s.Ordinal, on));
                 if (!on)
                 {
@@ -1023,6 +1036,83 @@ namespace GameLogic.EditorTools
                 }
             }
             r.LegacySteps = prog.LegacyOwners.Count;
+        }
+
+        /// <summary>
+        /// FG-GAP-179 口径（EMG1-E2E-01 定，待用户复核）在固定集上的判定：读“定时”的节点，若载体最远打击距离 ÷ 实体化弹速 &lt; 定时秒数（哨戒桩 / 无人机按牵引绳，维修束按射程），
+        /// 子弹在射程内必先命中、定时只在打空时才到点；该固件本载体读法写明“先命中则不空爆”时，这个节点及其子节点返回，其上全程不激活的指令记条件型零反应。
+        /// 射程够的远射载体不走这里（<see cref="Build"/> 把目标放远造条件）；读法没写明条件的照旧算死指令。按端口 + 载体参数判，不按内容 ID。
+        /// </summary>
+        private static HashSet<int> TimerCondNodes(Arena a, FuzzCase c)
+        {
+            var set = new HashSet<int>();
+            CombatWeapon w = a.W;
+            bool summon = c.Carrier == FirmwareCarrier.Summon;
+            if ((!summon && w.HasOutput != CombatConst.OutputRepair) || !(w.ProjectileSpeed > 0f) || a.Program.KernelNodes.Count == 0)
+            {
+                return set;
+            }
+            float reach = summon ? (w.Reading.DroneLeash > 0f ? w.Reading.DroneLeash : 10f) + 1f : w.Range + 1.2f;
+            float flight = reach / w.ProjectileSpeed;
+            ushort port = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Timer);
+            string carrier = c.Carrier.ToString().ToLowerInvariant();
+            List<EmgNode> nodes = a.Program.KernelNodes;
+            for (int n = 0; n < nodes.Count; n++)
+            {
+                for (int j = nodes[n].FirstInstr; j < nodes[n].FirstInstr + nodes[n].InstrCount && j < a.Program.KernelInstrs.Count; j++)
+                {
+                    EmgInstr x = a.Program.KernelInstrs[j];
+                    if (x.Port != port || x.Role < EmgConst.RoleTrigger || x.Role > EmgConst.RoleLastRead || !(x.Param2 > flight))
+                    {
+                        continue;
+                    }
+                    string fw = a.Program.Steps.FirstOrDefault(st => st.Ordinal == x.Ordinal)?.FirmwareId;
+                    if (fw != null && GameText.Get($"firmware.{fw}.read.{carrier}").Contains("先命中则不空爆"))
+                    {
+                        set.Add(n);
+                    }
+                }
+            }
+            for (bool grew = set.Count > 0; grew;)
+            {
+                grew = false;
+                for (int n = 0; n < nodes.Count; n++)
+                {
+                    if (!set.Contains(n) && nodes[n].Parent >= 0 && set.Contains(nodes[n].Parent))
+                    {
+                        set.Add(n);
+                        grew = true;
+                    }
+                }
+            }
+            return set;
+        }
+
+        /// <summary>这个指令位置的所有行都落在给定节点上（至少 1 行）。</summary>
+        private static bool OnlyOnNodes(EmgProgramResult prog, int ordinal, HashSet<int> nodes)
+        {
+            if (nodes.Count == 0)
+            {
+                return false;
+            }
+            int rows = 0;
+            for (int n = 0; n < prog.KernelNodes.Count; n++)
+            {
+                EmgNode node = prog.KernelNodes[n];
+                for (int j = node.FirstInstr; j < node.FirstInstr + node.InstrCount && j < prog.KernelInstrs.Count; j++)
+                {
+                    if (prog.KernelInstrs[j].Ordinal != ordinal)
+                    {
+                        continue;
+                    }
+                    if (!nodes.Contains(n))
+                    {
+                        return false;
+                    }
+                    rows++;
+                }
+            }
+            return rows > 0;
         }
 
         /// <summary>死指令的行（报告给策划定位用）：节点 / 端口 / 角色，例如“n1 evt.timer 触发”。</summary>
@@ -1131,9 +1221,9 @@ namespace GameLogic.EditorTools
         {
             Line("  · A. 用例生成：可获得固件池、13 个主作战组件、4 种底盘、地点模板、阵营；N09～N16 的状态");
             int addonInPool = AddonStage1.Count(pools.Firmware.Contains);
-            Expect(pools.Comps.Count == 13 && pools.Factions.Count >= 2 && addonInPool == AddonStage1.Length && pools.Firmware.Contains("fw_enterfuse") && !pools.Firmware.Contains("fw_uplinkpulse")
+            Expect(pools.Comps.Count == 13 && pools.Factions.Count >= 2 && addonInPool == AddonStage1.Length && pools.Firmware.Contains("fw_enterfuse") && pools.Firmware.Contains("fw_uplinkpulse")
                    && pools.Firmware.Count >= 44 && pools.PierceProvider != null,
-                $"抽取池：固件 {pools.Firmware.Count} 条（可获得且有机器实现，含混合固件 {pools.Firmware.Count(FirmwareKinds.IsMixed)} 条；阶段 1 生效的 N09～N13、N16 共 {addonInPool} 条在池里；阶段 2 端口已接通的 N14 在、用到未接通 fld.push 的 N15 不在），" +
+                $"抽取池：固件 {pools.Firmware.Count} 条（可获得且有机器实现，含混合固件 {pools.Firmware.Count(FirmwareKinds.IsMixed)} 条；阶段 1 生效的 N09～N13、N16 共 {addonInPool} 条在池里；阶段 2 端口已接通的 N14 在、fld.push 随 EMG2-FLD-01 接通后 N15 也在），" +
                 $"主作战组件 {pools.Comps.Count} 个，阵营 {pools.Factions.Count} 个（{string.Join("、", pools.Factions)}），穿透条件提供者按端口查到 {pools.PierceProvider}");
             // FG-GAP-177：反弹 / 穿透引信在声明 carriers 不含的载体上——不编译 + 预览写“本载体不适用” + 读法如实写明
             var na = new List<string>();
@@ -1205,7 +1295,9 @@ namespace GameLogic.EditorTools
             int ords = results.Sum(r => r.Ordinals.Count);
             Expect(dead.Count == 0 && ords > 0,
                 $"零死指令：{ords} 个指令位置全程激活次数 > 0（内核按指令行计数，合并行记给每个来源）；容量溢出 {results.Sum(r => r.OverflowSteps)}、幂等合并 {results.Sum(r => r.MergedSteps)}、" +
-                $"旧轨（stageGate &gt; 1）{results.Sum(r => r.LegacySteps)} 条不计{Detail(dead.Select(r => r.Case.Text + "：" + string.Join("，", r.Dead)))}");
+                $"旧轨（stageGate &gt; 1）{results.Sum(r => r.LegacySteps)} 条不计；条件型零反应（FG-GAP-179 口径：定时在本载体射程内必先命中、读法写明“先命中则不空爆”）{results.Sum(r => r.CondZero.Count)} 条单列"
+                + $"{(results.Any(r => r.CondZero.Count > 0) ? "（" + string.Join("；", results.Where(r => r.CondZero.Count > 0).Select(r => $"#{r.Case.Index} {string.Join("，", r.CondZero)}")) + "）" : string.Empty)}"
+                + $"{Detail(dead.Select(r => r.Case.Text + "：" + string.Join("，", r.Dead)))}");
             Expect(det.Count == 0, $"确定性：{results.Count} 例同种子重跑（计数关、不观察）终局状态哈希都与主跑（计数开、逐步观察）相同——激活计数不改状态{Detail(det.Select(r => r.Case.Text + "：" + r.Determinism))}");
             Expect(sl.Count == 0, $"存读档：{results.Count} 例在第 {Mathf.RoundToInt(CaseSeconds / Dt) / 2} 步取地点快照、内核层读回（快照往返），续跑终局哈希与连续跑相同{Detail(sl.Select(r => r.Case.Text + "：" + r.SaveLoad))}");
             int variants = results.Count(r => r.Case.Index % 8 == 3);
@@ -1274,6 +1366,7 @@ namespace GameLogic.EditorTools
             ["evt.hurt"] = "敌方对己方单位的伤害（DamageUnit 统一入口）；阶段 1 只有 func_spikes 读它，由爆炸反应装甲原生结算（EMG1-FW-01，FgEmgEraSelfCheck）",
             ["prop.heat"] = "武器积热 / 热信号（每台带武器的单位）",
             ["prop.mass"] = "实体档案质量（fg.TbEntityProfile）",
+            ["prop.magnetic"] = "实体档案磁性（fg.TbEntityProfile；EMG2-FLD-01 磁场按它加权）",
             ["prop.conductive"] = "实体档案导电 + 浸湿 / 导电粉尘状态位",
             ["prop.integrity"] = "单位剩余耐久比例",
             ["fld.deflect"] = "敌方偏折单位（静默阵营偏折场）",
@@ -1323,7 +1416,7 @@ namespace GameLogic.EditorTools
                 if (p.Stage <= stage && (readers.Count > 0 || writers.Count > 0))
                 {
                     a.Effective++;
-                    bool sourced = writers.Count > 0 || WorldSources.ContainsKey(p.Id) || (observedEvents?.Contains(p.Id) ?? false)
+                    bool sourced = writers.Count > 0 || WorldSources.ContainsKey(p.Id) || (observedEvents?.Contains(p.Id) ?? false) || EventProducers.ContainsKey(p.Id)
                                    || (DerivedSources.TryGetValue(p.Id, out string via) && live.Any(d => d.Dir == "write" && d.Port == via));
                     if (readers.Count > 0 && !sourced)
                     {
@@ -1451,8 +1544,8 @@ namespace GameLogic.EditorTools
             // EMG2-MAT-01：N14 入场引信端口全部接通 → evt.enter 生效（不是缺口）；N15 接入冲击用到 fld.push（未接通）→ evt.uplink 记缺口、承接 EMG2-FLD-01
             var uplink = a.Gaps.Where(x => x.Port == "evt.uplink").ToList();
             Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && a.Gaps.Any(x => x.Port == "evt.ping") && a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal))
-                   && a.Gaps.Any(x => x.Port.StartsWith("meta.", StringComparison.Ordinal)) && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 1 && uplink[0].Card == "EMG2-FLD-01",
-                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 meta.*、evt.ping、hij.*；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 因 fld.push 未接通记缺口（承接 {uplink.FirstOrDefault().Card}）");
+                   && a.Gaps.Any(x => x.Port.StartsWith("meta.", StringComparison.Ordinal)) && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 0,
+                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 meta.*、evt.ping、hij.*；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 随 fld.push 接通（EMG2-FLD-01）也已生效，不再是缺口（{uplink.Count}）");
         }
 
         // ═════════════════════════════════ D 负向 ═════════════════════════════════
@@ -1485,7 +1578,7 @@ namespace GameLogic.EditorTools
             };
             EnsureConditions(dz, pools);
             CaseResult dr = Evaluate(dz, full: false, pools);
-            bool droneDead = dr.Dead.Any(d => d.StartsWith("fw_delayfuse", StringComparison.Ordinal));
+            bool droneDead = dr.Dead.Concat(dr.CondZero).Any(d => d.StartsWith("fw_delayfuse", StringComparison.Ordinal)); // 固定集同一口径：读法写明条件的单列为条件型零反应
             string droneRead = GameText.Get("firmware.fw_delayfuse.read.summon");
             string coolDesc = GameText.Get("firmware.fw_coolback.desc");
             Expect(dr.Crash == null && dr.Stall == null && (!droneDead || droneRead.Contains("先命中则不空爆")) && coolDesc.Contains("需要积热来源"),
