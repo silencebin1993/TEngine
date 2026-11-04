@@ -193,14 +193,14 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rc_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rc")),
                 S("rc_warn", "等预警", 600, null, c => TickWarned(c, "rc")),
                 S("rc_list", "记下还活着的家园机器（前几波里可能已有机器阵亡、应急打印过），至多两台", 10, null, TickListVictims),
-                S("rc_sel_a0", "左键点第一台家园机器", 20, c => FgjM1Journey.ClickMachine(c, "victimA"), c => FgjM1Journey.TickSelected(c, "victimA"), retries: 4),
+                S("rc_sel_a0", "左键点第一台家园机器", 20, c => FgjM1Journey.ClickMachine(c, "victimA"), c => FgjM1Journey.TickSelected(c, "victimA"), retries: 8),
                 S("rc_send_a", "右键点预警条写的抵达点（右键地面 = 移动）：它从闸门出圈去迎敌", 30, c => RightClickArrival(c, "victimA"), c => TickSentToArrival(c, "victimA"), retries: 2),
                 S("rc_sel_b0", "左键点第二台家园机器（只剩一台就跳过）", 20, c => { if (c.GetInt("victimB") > 0) { FgjM1Journey.ClickMachine(c, "victimB"); } },
                     c => c.GetInt("victimB") > 0 ? FgjM1Journey.TickSelected(c, "victimB") : StepOutcome.Done("只剩一台机器，跳过"), retries: 4),
                 S("rc_send_b", "右键点抵达点：第二台也去", 30, c => RightClickArrival(c, "victimB"), c => TickSentToArrival(c, "victimB"), retries: 2),
                 S("rc_charge", "部队离抵达不到 30 游戏秒时左键点第一台、按接入键（直控）等着，部队一展开就冲进敌群（直控中攻城展开不自动暂停，FG-GAP-114）——机器被打死，信号回到归还核心或弹到最近能接入的机器（原因写明），黑匣子回收；这一波打完它还活着就再请一波", 1500, null, TickUplinkedDies),
                 S("rc_sel_b", "看还有哪些家园机器活着（第一台阵亡后信号回核心或弹到另一台）", 10, null, c => StepOutcome.Done($"还活着的家园机器：{string.Join("、", Victims(c).Where(MachineAlive).Select(FgjM1Journey.Label))}（信号在 {(SignalPresence.AtCore ? "归还核心" : FgjM1Journey.Label(SignalPresence.CurrentMachineLogicId))}）")),
-                S("rc_attack", "剩下的家园机器：信号在谁身上就直控它开进敌群，否则左键选中、右键点进攻的敌人（右键敌人 = 攻击）——都被打死、家园机器全灭 → 应急打印一台机器救回家园；这一波打完还有活着的就再来一波", 1500, null, TickWipedAndPrinted, retries: 1),
+                S("rc_attack", "剩下的家园机器：信号在谁身上就直控它开进敌群，否则左键选中、右键点这一波的抵达点（右键地面 = 移动）、到了按守备键原地守着，部队一展开就打它——都被打死、家园机器全灭 → 应急打印一台机器救回家园；这一波打完还有活着的就再来一波", 1500, null, TickWipedAndPrinted, retries: 1),
                 S("rc_back", "第三波（含加的几波）结束：结算记着阵亡的家园机器，炮塔照常守住", 400, null, TickThirdWaveBack),
                 S("rc_leave", "信号还在机器上（阵亡后弹到了别的机器、处于直控）就按接入键离开：信号回到归还核心、镜头回战略视角（建造与通用面板要在战略视角里）", 15,
                     c => { if (!SignalPresence.AtCore) { JourneyInput.ReleaseKeys(); JourneyInput.PressAction(GameActionId.ToggleCameraView); } }, TickBackToStrategy, retries: 2),
@@ -235,7 +235,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rp_end", "这一波被炮塔打退（只结算一次）", 400, null, c => TickRaidOver(c, "rp")),
 
                 // ── 承接 DEBT-FG5RND06-03：真实突袭打死家园机器 → 黑匣子 → 陈列馆分析 → 技术数据 → 研究 ──
-                S("bb_plan", "看地形：在核心配电范围里规划黑匣子陈列馆与仿真实验室（电不够就加发电机 2）", 30, null, TickBlackBoxPlan),
+                // 规划按“现有建筑都修好”算电（FgjM4Common.PlanGenerators）：rp 这一波拆掉的发电机先重建，否则陈列馆 / 实验室建成了也没电（2026-11-04 完整跑 bb_built Brownout）。
+                S("rp_gen_fix", "这一波拆成废墟的发电机逐座重建，电够陈列馆与实验室就停（每座重建都花废料）：左键点它，通用面板上点“重建 / 修复”，机器取料修好；电够就跳过", 900, null,
+                    c => TickWallRestored(c, anywhere: true, NeedGenerator)),
+                S("bb_plan","看地形：在核心配电范围里规划黑匣子陈列馆与仿真实验室（电不够就加发电机 2）", 30, null, TickBlackBoxPlan),
                 S("bb_build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("bb_place", "放陈列馆、仿真实验室（电不够时连同发电机 2）", 200, null, c => P.TickActions(c, "bbp", 40), retries: 2),
                 S("bb_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
@@ -1059,7 +1062,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private static StepOutcome TickWallRestored(JourneyContext c) => TickWallRestored(c, anywhere: false);
 
         /// <param name="anywhere">FG9-ACT1-01 修复轮：true = 家园里被打坏的建筑都修（不限于屏障圈上 / 圈里），熔合段之前用。</param>
-        private static StepOutcome TickWallRestored(JourneyContext c, bool anywhere)
+        private static StepOutcome TickWallRestored(JourneyContext c, bool anywhere, Func<BuildingRecord, bool> only = null)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
@@ -1069,7 +1072,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 // 这一波拆坏的屏障 / 闸门 / 圈里的建筑逐座修（屏障优先：圈上有洞，下一波直接走进来）。
                 BuildingRecord pick = n >= (anywhere ? 20 : 10) ? null : s.BuildingRecords
-                    .Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore && !HomeValleyController.IsPlannedGhost(b) && (anywhere || OnOrInsideRing(c, b))
+                    .Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore && !HomeValleyController.IsPlannedGhost(b) && (anywhere || OnOrInsideRing(c, b)) && (only == null || only(b))
                                 && (b.ConstructionState != BuildingConstructionState.Operational && b.ConstructionState != BuildingConstructionState.Disabled || BuildingOps.Durability(b) <= 0.5f))
                     .OrderBy(b => DefenseCatalog.IsDraggable(b.BuildingTypeId) ? 0 : 1).ThenBy(b => BuildingOps.Durability(b)).FirstOrDefault();
                 // 只修被拆成废墟的（圈上的洞）；掉了耐久还立着的墙照样挡路，不在这一类里测。
@@ -1130,6 +1133,26 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             return FgjM3Common.SinceMs(c, "rep" + k) < 2500 ? StepOutcome.Wait : StepOutcome.Retry($"点“重建 / 修复”后没有工单：{JourneyInput.LastUiFailure}");
+        }
+
+        /// <summary>
+        /// rp_gen_fix：被拆的发电机只重建到“此刻电网的需要 + 陈列馆 + 实验室”够用为止——多修一座就多花一份废料，
+        /// 2026-11-04 续跑三座全修完废料只剩 68，实验室缺料 900 秒没建成。
+        /// </summary>
+        private static bool NeedGenerator(BuildingRecord b)
+        {
+            if (P.BuildingSupply(b.BuildingTypeId) <= 0 || HomeValleyPowerGrid.IsFuelGeneratorType(b.BuildingTypeId))
+            {
+                return false;
+            }
+            CampaignState s = St;
+            BuildingRecord core = FgjM3Common.Home(HomeValleyLayout.BuildingTypeCore);
+            if (core == null || !HomeValleyPowerGrid.TryGetBuildingPower(s, core.BuildingId, out BuildingPowerInfo bi)
+                             || !HomeValleyPowerGrid.TryGetSubnetInfo(s, bi.Subnet, out BinGames.Sim.Logistics.PowerSubnetInfo info))
+            {
+                return true;
+            }
+            return info.Supply < (info.Demand + P.BuildingDemand(M.Gallery) + P.BuildingDemand(M.Lab)) * 1.05;
         }
 
         /// <summary>建筑在屏障圈上或圈里（机器从闸门进出就够得着；圈外被拆的留给玩家以后处理，不在这一类里测）。</summary>
@@ -1249,6 +1272,28 @@ namespace GameLogic.EditorTools.JourneyBots
             if (!alive)
             {
                 JourneyInput.ReleaseKeys();
+                // FG-GAP-114：接入中阵亡、被干扰切断后阵亡两条通过分支都要过这一关（部队展开时它已接入直控 → 世界不该被自动暂停、通知照常进历史）。
+                int notes114 = SiegeNotes() - c.GetInt("rc.siegeNotes0");
+                bool wasUplinked = c.GetInt(FgjM3Common.SK(c, "up")) == 1 || c.GetInt(FgjM3Common.SK(c, "jamCut")) == 1;
+                string fail114 = wasUplinked ? Gap114Failure(c.GetInt("rc.preUp") == 1, c.GetInt("rc.pausedUp") == 1, notes114) : null;
+                if (fail114 != null)
+                {
+                    return StepOutcome.Fail(fail114);
+                }
+                string gap114 = wasUplinked && c.GetInt("rc.preUp") == 1 ? $"；部队展开时它正接入直控：世界没有被自动暂停、“攻城开始”通知照常进历史（+{notes114}，FG-GAP-114）" : string.Empty;
+                if (c.GetInt(FgjM3Common.SK(c, "up")) == 0 && c.GetInt(FgjM3Common.SK(c, "jamCut")) == 1)
+                {
+                    // EMG2-E2E-01 修复轮 3（FG-GAP-192，FGJ-M6R rc_charge 新失败形态）：接入冲锋时被静默部队的干扰切断（宽限耗尽 Jammed，信号按设计回归还核心），
+                    // 之后才阵亡——“接入的机器阵亡”这一下已不可能发生，改核对玩家此刻看得到的结果：机器阵亡、信号在归还核心、断链原因写明、黑匣子回收。
+                    if (!SignalPresence.AtCore)
+                    {
+                        return StepOutcome.Wait;
+                    }
+                    return BlackBoxService.Find(s, a) != null
+                        ? StepOutcome.Done($"{FgjM1Journey.Label(a)} 接入冲锋时被静默部队的干扰切断（断链记录 Jammed，“{c.Get(FgjM3Common.SK(c, "cutWhy"))}”），信号已回到归还核心；随后被打死，黑匣子回收进陈列馆队列" +
+                                           (c.GetInt("aEarly") > 0 ? $"（{FgjM1Journey.Label(c.GetInt("aEarly"))} 在接入之前已被打死）" : string.Empty) + gap114)
+                        : StepOutcome.Fail($"{FgjM1Journey.Label(a)} 阵亡了但黑匣子没回收");
+                }
                 if (c.GetInt(FgjM3Common.SK(c, "up")) == 0)
                 {
                     // 接入之前就被打死了（部队一展开就集火）：换第二台当接入的那台，接着来。
@@ -1272,17 +1317,6 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 c.SetInt("bOnline", bounced && now == c.GetInt("victimB") ? 1 : 0);
                 bool box = BlackBoxService.Find(s, a) != null;
-                // FG-GAP-114：部队展开时它已经接入直控（下一波临近时先接入）——世界不该被“攻城开始”自动暂停，通知照常进历史。
-                string gap114 = string.Empty;
-                if (c.GetInt("rc.preUp") == 1)
-                {
-                    int notes = SiegeNotes() - c.GetInt("rc.siegeNotes0");
-                    if (c.GetInt("rc.pausedUp") == 1 || notes <= 0)
-                    {
-                        return StepOutcome.Fail($"直控中攻城展开：世界被自动暂停 {c.GetInt("rc.pausedUp") == 1}、“攻城开始”通知新增 {notes} 条（FG-GAP-114 应为不暂停、通知照常进历史）");
-                    }
-                    gap114 = $"；部队展开时它正接入直控：世界没有被自动暂停、“攻城开始”通知照常进历史（+{notes}，FG-GAP-114）";
-                }
                 return box
                     ? StepOutcome.Done($"{FgjM1Journey.Label(a)} 被突袭部队打死：信号{(bounced ? "弹到最近能接入的 " + FgjM1Journey.Label(now) : "回到归还核心")}（“{fb}”）；黑匣子回收进陈列馆队列" +
                                        (c.GetInt("aEarly") > 0 ? $"（{FgjM1Journey.Label(c.GetInt("aEarly"))} 在接入之前已被打死）" : string.Empty) + $"；第三波共 {(c.Get("rc.plans") ?? string.Empty).Split(',').Length} 波" + gap114)
@@ -1291,6 +1325,27 @@ namespace GameLogic.EditorTools.JourneyBots
             List<(int Id, Vector2 Pos)> raiders = D.Raiders();
             bool hasMarker = FgjM1Journey.HomeMarker(a, out HomeValleyMachineMarker mk);
             bool up = SignalPresence.CurrentMachineLogicId == a;
+            bool fresh = SignalLinkService.BreakCount > c.GetInt(FgjM3Common.SK(c, "brk0"));
+            bool planned = NowMs() - c.GetLong(FgjM3Common.SK(c, "leaveAt")) < 5000;
+            UplinkDrop drop = ClassifyDrop(c.GetInt(FgjM3Common.SK(c, "up")) == 1, up, true, fresh, planned, SignalLinkService.LastBreakReason, SignalLinkService.LastBreakLogicId, a);
+            switch (drop)
+            {
+                case UplinkDrop.Death:
+                    up = true; // 阵亡优先：信号先回核心、IsAlive 晚一帧变 false 时，下一帧仍按“接入中阵亡”核对（不当成断链，也不当成接入之前阵亡）
+                    break;
+                case UplinkDrop.Jammed:
+                    c.SetInt(FgjM3Common.SK(c, "jamCut"), 1); // 冲锋中被干扰切断：记下断链记录，阵亡时按上面的分支核对
+                    c.Set(FgjM3Common.SK(c, "cutWhy"), SignalUplinkService.LastFeedbackText ?? string.Empty);
+                    break;
+                case UplinkDrop.Unknown:
+                    return StepOutcome.Fail($"{FgjM1Journey.Label(a)} 接入中掉线，但不是干扰也不是阵亡（断链记录 {SignalLinkService.LastBreakReason} / 机器 {SignalLinkService.LastBreakLogicId}，" +
+                                            $"新断链 {fresh}，旅程刚按离开 {planned}，反馈“{SignalUplinkService.LastFeedbackText}”）");
+            }
+            if (up)
+            {
+                c.SetInt(FgjM3Common.SK(c, "jamCut"), 0); // 重新接入：回到“接入的机器阵亡”这条正常判定
+                c.SetInt(FgjM3Common.SK(c, "brk0"), SignalLinkService.BreakCount);
+            }
             c.SetInt(FgjM3Common.SK(c, "up"), up ? 1 : 0);
             int tick = (int)(c.StepElapsed / 20);
             if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
@@ -1329,7 +1384,10 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 if (!up)
                 {
-                    UplinkVictim(c, a);
+                    if (next.State != TransitGroupState.Marching || HoldAtArrival(c, "victimA"))
+                    {
+                        UplinkVictim(c, a); // 先在抵达点守着再接入（断链后它可能被 AI 教义带到圈里别处）
+                    }
                 }
                 else if (c.GetInt("rc.preUp") == 0)
                 {
@@ -1350,9 +1408,47 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 return StepOutcome.Wait;
             }
-            CallAnotherWaveIfNeeded(c);
+            if (!CallAnotherWaveIfNeeded(c))
+            {
+                HoldAtArrival(c, "victimA");
+            }
             return StepOutcome.Wait;
         }
+
+        internal enum UplinkDrop
+        {
+            None,
+            Jammed,
+            Death,
+            Unknown,
+        }
+
+        /// <summary>
+        /// rc_charge：接入的机器这一帧掉线了，按断链记录归类（纯函数，FgMilestoneM6SelfCheck A2b 用正反例核对）。
+        /// 阵亡优先：机器已阵亡、或新断链记录是“机器阵亡”→ Death；新断链记录是这台机器的“干扰”→ Jammed；旅程自己刚按了离开、且没有新断链 → None；其余一律 Unknown（判失败）。
+        /// </summary>
+        internal static UplinkDrop ClassifyDrop(bool wasUp, bool upNow, bool aliveNow, bool freshBreak, bool plannedLeave, SignalLinkBreakReason reason, int breakLogicId, int a)
+        {
+            if (!wasUp || upNow)
+            {
+                return UplinkDrop.None;
+            }
+            if (!aliveNow || (freshBreak && reason == SignalLinkBreakReason.MachineDestroyed && breakLogicId == a))
+            {
+                return UplinkDrop.Death;
+            }
+            if (freshBreak && reason == SignalLinkBreakReason.Jammed && breakLogicId == a)
+            {
+                return UplinkDrop.Jammed;
+            }
+            return !freshBreak && plannedLeave ? UplinkDrop.None : UplinkDrop.Unknown;
+        }
+
+        /// <summary>FG-GAP-114（rc_charge 两条通过分支共用）：部队展开前已接入直控时，世界不该被“攻城开始”自动暂停、通知照常进历史。返回 null = 通过（或不适用）。</summary>
+        internal static string Gap114Failure(bool preUp, bool pausedUp, int notes) =>
+            preUp && (pausedUp || notes <= 0)
+                ? $"直控中攻城展开：世界被自动暂停 {pausedUp}、“攻城开始”通知新增 {notes} 条（FG-GAP-114 应为不暂停、通知照常进历史）"
+                : null;
 
         /// <summary>选中接入的那台（左键点它）、按接入键（玩家的做法；按键间隔 2 秒，等上一下生效）。</summary>
         private static void UplinkVictim(JourneyContext c, int a)
@@ -1460,7 +1556,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private static bool MachineAlive(int id) => MachineRegistry.TryGetRecord(id, out MachineRecord m) && m.IsAlive;
 
         /// <summary>
-        /// 第三波开始时还活着的家园机器一台台打死：信号弹到哪台就直控它开进敌群，否则选中第一台还活着的、右键敌人进攻；这一波打完还有活着的就再请一波。
+        /// 第三波开始时还活着的家园机器一台台打死：信号弹到哪台就直控它开进敌群，否则选中第一台还活着的、开到这一波的抵达点守着；这一波打完还有活着的就再请一波。
         /// 全部阵亡 → 家园机器全灭 → 应急打印出一台新的（编号比它们都大），通知照常。
         /// </summary>
         private static StepOutcome TickWipedAndPrinted(JourneyContext c)
@@ -1469,6 +1565,11 @@ namespace GameLogic.EditorTools.JourneyBots
             CampaignState s = St;
             List<int> victims = Victims(c);
             List<int> alive = victims.Where(MachineAlive).ToList();
+            if (RaidResultService.IsCoreLost(s))
+            {
+                return StepOutcome.Fail($"归还核心被摧毁（{string.Join("、", alive.Select(FgjM1Journey.Label))} 还活着）");
+            }
+            LogRcDiag(c, alive);
             if (alive.Count > 0)
             {
                 if (GameClock.Paused || CallAnotherWaveIfNeeded(c, 2))
@@ -1486,28 +1587,12 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                     return StepOutcome.Wait;
                 }
-                if (rs.Count == 0)
+                if (rs.Count == 0 && ExtraWavesExhausted(c))
                 {
-                    return ExtraWavesExhausted(c)
-                        ? StepOutcome.Fail($"加了 {RcExtraMax} 波，{string.Join("、", alive.Select(FgjM1Journey.Label))} 还活着（不再干等自然突袭）")
-                        : StepOutcome.Wait;
+                    return StepOutcome.Fail($"加了 {RcExtraMax} 波，{string.Join("、", alive.Select(FgjM1Journey.Label))} 还活着（不再干等自然突袭）");
                 }
-                int v = alive[0];
-                c.SetInt("victimCur", v);
-                if (GameRoot.HomeValley.SelectedMachineLogicId != v)
-                {
-                    if (NowMs() - c.GetLong(FgjM3Common.SK(c, "selAt")) > 1500)
-                    {
-                        c.SetLong(FgjM3Common.SK(c, "selAt"), NowMs());
-                        FgjM1Journey.ClickMachine(c, "victimCur");
-                    }
-                    return StepOutcome.Wait;
-                }
-                if (!FgjM2Common.IsAttacking(D.HomeSite, v) && NowMs() - c.GetLong(FgjM3Common.SK(c, "rcAt")) > 4000)
-                {
-                    c.SetLong(FgjM3Common.SK(c, "rcAt"), NowMs());
-                    RightClickRaiderFor(v);
-                }
+                c.SetInt("victimCur", alive[0]);
+                HoldAtArrival(c, "victimCur");
                 return StepOutcome.Wait;
             }
             int max = victims.Count > 0 ? victims.Max() : 0;
@@ -1521,21 +1606,77 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done($"{string.Join("、", victims.Select(FgjM1Journey.Label))} 都被突袭部队打死、家园机器全灭 → 应急打印出 {FgjM1Journey.Label(printed.LogicId)}（{printed.ChassisId}，应急打印通知）；黑匣子回收 {boxes}/{victims.Count}；第三波共 {(c.Get("rc.plans") ?? string.Empty).Split(',').Length} 波");
         }
 
-        private static void RightClickRaiderFor(int id)
+        /// <summary>
+        /// FG-GAP-192 根因修复：要打死的机器每一波都先开到这一波的抵达点（右键地面 = 移动），到了按守备键原地守着（返回 true = 已在抵达点守着）。
+        /// 原来 rc_attack 右键敌人进攻：攻击命令让机器站在自己的射程上打，目标一丢就交还 AI、回圈里接工单；rc_charge 断链后机器按 AI 教义走到圈里别处，
+        /// 下一波就在那里接入、离敌人二十多米。突袭单位射程内有职能建筑时只打建筑，没有建筑可打才自卫打机器（CombatSiege.RoleTarget / SelfDefense），
+        /// 机器站在哪儿由逐帧时序决定，同一断点两次续跑一次当波打死、一次三波不死。抵达点离建筑远、部队就在那里展开，展开那一刻它就在全队射程里。
+        /// </summary>
+        private static bool HoldAtArrival(JourneyContext c, string key)
         {
-            List<(int Id, Vector2 Pos)> raiders = D.Raiders();
-            if (raiders.Count == 0 || !FgjM1Journey.HomeMarker(id, out HomeValleyMachineMarker mk))
+            int v = c.GetInt(key);
+            RaidPlanRecord rp = RaidDirectorService.FindPlan(St, c.Get("rc.plan"));
+            if (v <= 0 || rp == null || rp.WarnTick < 0)
+            {
+                return false; // 下一波还没排定抵达点
+            }
+            if (GameRoot.HomeValley.SelectedMachineLogicId != v)
+            {
+                if (NowMs() - c.GetLong(FgjM3Common.SK(c, "selAt")) > 1500)
+                {
+                    c.SetLong(FgjM3Common.SK(c, "selAt"), NowMs());
+                    FgjM1Journey.ClickMachine(c, key);
+                }
+                return false;
+            }
+            CombatSite site = D.HomeSite;
+            BinGames.Sim.Combat.CombatCommandKind kind = site != null && site.TryGetMachineUnit(v, out int unit) && site.TryGetCommand(unit, out BinGames.Sim.Combat.CombatCommand cmd)
+                ? cmd.Kind : BinGames.Sim.Combat.CombatCommandKind.None;
+            bool there = FgjM1Journey.HomeMarker(v, out HomeValleyMachineMarker vm) && Vector2.Distance(vm.Position, new Vector2(rp.ArriveX, rp.ArriveY)) <= 2.5f;
+            if (!there)
+            {
+                if (kind != BinGames.Sim.Combat.CombatCommandKind.Move && kind != BinGames.Sim.Combat.CombatCommandKind.Attack && NowMs() - c.GetLong(FgjM3Common.SK(c, "mvAt")) > 4000)
+                {
+                    c.SetLong(FgjM3Common.SK(c, "mvAt"), NowMs());
+                    RightClickArrival(c, key);
+                }
+                return false;
+            }
+            if (kind != BinGames.Sim.Combat.CombatCommandKind.Guard)
+            {
+                if (NowMs() - c.GetLong(FgjM3Common.SK(c, "gdAt")) > 2000)
+                {
+                    c.SetLong(FgjM3Common.SK(c, "gdAt"), NowMs());
+                    JourneyInput.PressAction(GameActionId.CommandGuard);
+                }
+                return false;
+            }
+            return true;
+        }
+
+        private static void LogRcDiag(JourneyContext c, List<int> alive)
+        {
+            int tick = (int)(c.StepElapsed / 30);
+            if (alive.Count == 0 || tick <= c.GetInt(FgjM3Common.SK(c, "diag")))
             {
                 return;
             }
-            Vector2 at = raiders.OrderBy(x => Vector2.Distance(x.Pos, mk.Position)).First().Pos;
-            if (!JourneyInput.OnScreen(at, 0.05f))
+            c.SetInt(FgjM3Common.SK(c, "diag"), tick);
+            CampaignState s = St;
+            CombatSite site = D.HomeSite;
+            List<(int Id, Vector2 Pos)> rs = D.Raiders();
+            var parts = new List<string>();
+            foreach (int id in alive)
             {
-                FgjM3Common.PanTo(at);
-                JourneyInput.DeferWorldClick(() => RightClickRaiderFor(id));
-                return;
+                Vector2 me = FgjM1Journey.HomeMarker(id, out HomeValleyMachineMarker mk) ? mk.Position : Vector2.zero;
+                MachineRegistry.TryGetRecord(id, out MachineRecord m);
+                WorkOrderRecord o = HomeValleyWorkOrders.FindActiveOrderForMachine(s, id);
+                string cmd = site != null && site.TryGetMachineUnit(id, out int u) && site.TryGetCommand(u, out BinGames.Sim.Combat.CombatCommand cc) ? cc.Kind.ToString() : "-";
+                string near = rs.Count == 0 ? "无" : $"{rs.Min(x => Vector2.Distance(x.Pos, me)):F1}";
+                parts.Add($"{FgjM1Journey.Label(id)} 在 {me} 耐久 {m?.Health:F0} 命令 {cmd} 工单 {o?.Kind}/{o?.State} 最近敌 {near}");
             }
-            JourneyInput.Click(at, 1);
+            RaidResultRecord r = RaidResultService.FindByPlan(s, c.Get("rc.plan"));
+            c.Log($"诊断：{string.Join("；", parts)}；敌 {rs.Count}；信号 {(SignalPresence.AtCore ? "核心" : SignalPresence.CurrentMachineLogicId.ToString(CultureInfo.InvariantCulture))}；核心 {CoreHp(s)}；{c.Get("rc.plan")} {(r == null ? "未开始" : r.EndTick >= 0 ? "已结束" : "进行中")}；{GameClock.Speed}x");
         }
 
         private static StepOutcome TickThirdWaveBack(JourneyContext c)

@@ -497,6 +497,23 @@ namespace GameLogic.EditorTools
 
         private static void CheckCover()
         {
+            // FG-GAP-186：残骸格走布隆位图预筛，不得漏掉真残骸（负坐标、跨格、打掉后不再挡）
+            foreach (double2 o in new[] { new double2(-37.3, -12.8), new double2(-1.9, 3.9), new double2(203.4, -411.1) })
+            {
+                using (CombatKernel k = NewKernel())
+                {
+                    int p = Tree(k, true, new[] { EmgEventKind.Absorb, EmgEventKind.Expire }, null);
+                    int me = Me(k, o, k.AddWeapon(Flight(p, 10f)));
+                    int foe = Foe(k, o + new double2(0, 10));
+                    AddWreck(k, o + new double2(0, 5), 5f, 0.6f);
+                    k.FireAt(me, foe, k.Time);
+                    StepN(k, 40);
+                    bool blocked = k.EmgBusStats.WreckAbsorbs == 1 && Near(Hp(k, foe), 200f) && k.WreckCount == 0;
+                    k.FireAt(me, foe, k.Time);
+                    StepN(k, 40);
+                    Expect(blocked && k.EmgBusStats.WreckAbsorbs == 1 && Hp(k, foe) < 200f, $"残骸预筛不漏（{o.x:0.#},{o.y:0.#}）：第一发被挡并打掉残骸（{blocked}），第二发打中目标（{Hp(k, foe):0.#}）");
+                }
+            }
             Line("  · D. 残骸挡弹（FGR-EMG-113 作用 1）：飞行弹体 / 普通弹体（炮塔 / 突袭者那种）/ 即时命中 / 力场主目标都被挡（evt.absorb、扣耐久、结果 = 被掩体挡下）；贯穿越过；没残骸对照");
             using (CombatKernel k = NewKernel())
             {

@@ -294,6 +294,17 @@ namespace BinGames.Sim.Combat
         /// 飞行弹体本步线段先于单位交点撞上残骸（FGR-EMG-113 作用 1）：扣残骸耐久（单次动能够时崩出破片）；还有障碍面反弹次数就按残骸圆法线反弹（返回 1，弹体继续飞），
         /// 否则被吸收（evt.absorb + evt.expire Code = 被吸收，返回 2，弹体作废）。没撞上返回 0。起点已在残骸圆内（站在残骸上开火）的不算。
         /// </summary>
+        /// <summary>
+        /// FG-GAP-186：线段外接框覆盖的 1 米细格里有没有残骸登记（先把哈希刷新到当前）。没有 = 线段必不碰任何残骸圆，<see cref="EmgWreckHit"/> 必返回 0、且无副作用，
+        /// 调用方可直接跳过——上千发弹体每步都要过这一关，先用位图排除，不进函数、不算交点。
+        /// </summary>
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        internal static bool EmgWreckNear(ref CombatData d, double2 a, double2 b)
+        {
+            EmgHashEnsure(ref d);
+            return d.EmgHash.WreckFineOnSegment(a, b);
+        }
+
         internal static int EmgWreckHit(ref CombatData d, ref CombatProjectile pr, double2 next, double unitT)
         {
             int w = EmgHashSegment(ref d, pr.Prev, next, EmgHash.KindWreck, false, out double t, true);
@@ -767,6 +778,17 @@ namespace BinGames.Sim.Combat
             {
                 EmgHashEnsure(ref d);
                 int acidRule = EmgEntityRule(ref d, EmgMatterConst.Acid), sludgeRule = EmgEntityRule(ref d, EmgMatterConst.Sludge);
+                // EMG2-E2E-01 修复轮 3（FGR-EMG-200）：场上没有活着的酸 / 污泥斑块时不逐残骸查格（满载 512 块残骸每步上千次哈希查找）；查格本来也只会返回 −1，结果不变
+                // 依赖通道规则表：酸溶残骸产物和污泥崩塌伴生物都是 mat.debris，改表要核对本早退出条件
+                bool anyAcid = false, anySludge = false;
+                for (int j = 0; j < d.Patches.Length && (acidRule >= 0 || sludgeRule >= 0); j++)
+                {
+                    byte pm = d.Patches.ElementAt(j).Matter;
+                    anyAcid |= pm == EmgMatterConst.Acid;
+                    anySludge |= pm == EmgMatterConst.Sludge;
+                }
+                acidRule = anyAcid ? acidRule : -1;
+                sludgeRule = anySludge ? sludgeRule : -1;
                 for (int i = 0; i < d.Wrecks.Length; i++)
                 {
                     StepWreckDwell(ref d, i, dt, now, acidRule, sludgeRule);
@@ -938,12 +960,44 @@ namespace BinGames.Sim.Combat
         private static int EmgHashPoint(ref CombatData d, double2 p, byte kind)
         {
             EmgHashEnsure(ref d);
-            if (d.EmgHash.Entries.Length == 0
-                || !d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(EmgHash.CellOf(p.x), EmgHash.CellOf(p.y)), out int e, out Unity.Collections.NativeParallelMultiHashMapIterator<long> it))
+            if (d.EmgHash.Entries.Length == 0)
             {
                 return -1;
             }
             int best = -1;
+            int pcx = EmgHash.CellOf(p.x), pcy = EmgHash.CellOf(p.y);
+            if (kind == EmgHash.KindWreck)
+            {
+                if (!d.EmgHash.WreckFineOnSegment(p, p))
+                {
+                    return -1; // FG-GAP-186：所在 1 米细格没有残骸登记 = 不在任何残骸圆内
+                }
+                // FG-GAP-186：残骸走专用格链（取包含该点的最小下标，与遍历顺序无关，同通用哈希逐字一致）
+                for (int node = d.EmgHash.WreckHead[EmgHash.WreckSlot(pcx, pcy)] - 1; node >= 0;)
+                {
+                    int4 cell = d.EmgHash.WreckNodes[node];
+                    node = cell.w;
+                    if (cell.x != pcx || cell.y != pcy)
+                    {
+                        continue;
+                    }
+                    float4 wc = d.EmgHash.Entries[cell.z];
+                    if (math.lengthsq(p - new double2(wc.x, wc.y)) > (double)wc.z * wc.z)
+                    {
+                        continue; // 先判几何（只读登记的圆），点在圆内才读残骸表
+                    }
+                    int widx = d.EmgHash.Refs[cell.z];
+                    if (widx < d.Wrecks.Length && d.Wrecks.ElementAt(widx).Hp > 0f && (best < 0 || widx < best))
+                    {
+                        best = widx;
+                    }
+                }
+                return best;
+            }
+            if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(pcx, pcy), out int e, out Unity.Collections.NativeParallelMultiHashMapIterator<long> it))
+            {
+                return -1;
+            }
             do
             {
                 float4 c = d.EmgHash.Entries[e];

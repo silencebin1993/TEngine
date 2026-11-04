@@ -1268,7 +1268,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 return;
             }
             c.Set("enemy", e.EnemyInstanceId);
-            if (JourneyInput.Holding || !JourneyCommon.PanToward(p, 0.3f))
+            // EMG2-E2E-01 修复轮 3（FGJ-M2R r6_attack 两次复现）：目标的屏幕点被界面面板盖住时，产品按设计让 UI 吃掉这次右键（世界层收不到、编队没有任何事件）。
+            // 玩家会先把镜头挪到目标露出来再点：被盖住就把它平移到画面中部再点，不隔着界面点。
+            bool covered = JourneyInput.UiCoverAt(JourneyInput.ScreenOf(p)) != null;
+            if (JourneyInput.Holding || !JourneyCommon.PanToward(p, 0.3f) || (covered && !JourneyCommon.PanToward(p, 0.42f)))
             {
                 c.Set("flyFirst", "1");
                 return;

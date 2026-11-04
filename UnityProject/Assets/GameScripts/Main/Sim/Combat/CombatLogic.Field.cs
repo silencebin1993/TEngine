@@ -106,6 +106,7 @@ namespace BinGames.Sim.Combat
                     f.Radius = radius;
                     f.Until = math.max(f.Until, now + seconds);
                     d.Fields[i] = f;
+                    d.EmgHash.MarkFieldCircle(i, pos, radius);
                     return true;
                 }
                 if (f.Born >= now && math.distancesq(f.Pos, pos) < 1.0)
@@ -129,6 +130,7 @@ namespace BinGames.Sim.Combat
                 Pos = pos, Born = now, Until = now + seconds, Radius = radius, Strength = 1f, Id = id, Owner = ownerId, Chain = chain, Port = (ushort)port,
                 Faction = (byte)faction, Depth = depth,
             });
+            d.EmgHash.MarkFieldCircle(d.Fields.Length - 1, pos, radius);
             return true;
         }
 
@@ -295,6 +297,16 @@ namespace BinGames.Sim.Combat
             EmgSpawnField(ref d, wp.FieldPort, at, wp.FieldRadius, sec, d.Id[a], (CombatFaction)d.Faction[a], 0, 0, true);
         }
 
+        /// <summary>FG-GAP-186：场的格掩码（半径取 f.Radius，推斥环的当前半径只会更小，不漏）。</summary>
+        private static void EmgRebuildFieldMasks(ref CombatData d)
+        {
+            d.EmgHash.ClearFieldCells();
+            for (int f = 0; f < d.Fields.Length; f++)
+            {
+                d.EmgHash.MarkFieldCircle(f, d.Fields[f].Pos, d.Fields[f].Radius);
+            }
+        }
+
         private static float FieldRadiusNow(in EmgField f, double now)
         {
             if (f.Port != EmgFieldConst.PortPush)
@@ -328,8 +340,8 @@ namespace BinGames.Sim.Combat
         {
             double now = d.Scalars[0].Time;
             EmgScalars es = d.EmgS[0];
-            int n = 0;
-            for (int i = 0; i < d.Fields.Length; i++)
+            int n = 0, before = d.Fields.Length;
+            for (int i = 0; i < before; i++)
             {
                 EmgField f = d.Fields[i];
                 if (now >= f.Until)
@@ -341,6 +353,12 @@ namespace BinGames.Sim.Combat
             }
             d.Fields.ResizeUninitialized(n);
             d.EmgS[0] = es;
+            if (before > 0)
+            {
+                // 压缩后下标变了；全部到期（n = 0）也要清——否则下一步弹体段里新生成的场会让陈旧位指向表外（EMG2-E2E-01 修复轮 2）。
+                // 修复轮 3 复核：不能改成“只在 n != before 时重建”——格掩码不进快照，读档后没有弹体的那一步弹体段不重建，掩码为空、场不作用（模糊存读档 #51 漩涡场分叉）；重建本身每步只有几微秒（满载 64 场时整个场步三地点合计 0.02 ms）
+                EmgRebuildFieldMasks(ref d);
+            }
             if (n == 0 || !(dt > 0f))
             {
                 return;
@@ -375,8 +393,15 @@ namespace BinGames.Sim.Combat
                 int pusher = 0;
                 ushort cause = 0;
                 int movable = -1;
-                for (int j = 0; j < n; j++)
+                ulong candidates = d.EmgHash.FieldMaskOnSegment(pos, pos, d.Radius[u]);
+                while (candidates != 0ul)
                 {
+                    int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
+                    candidates &= candidates - 1ul;
+                    if (j >= n)
+                    {
+                        break; // 本循环期间新生成的场（下标 ≥ n）不参与本步
+                    }
                     EmgField f = d.Fields[j];
                     double r = FieldRadiusNow(f, now) + d.Radius[u];
                     if (math.distancesq(pos, f.Pos) > r * r)
@@ -458,8 +483,15 @@ namespace BinGames.Sim.Combat
                 int by = 0;
                 ushort cause = 0;
                 float kmag = -1f;
-                for (int j = 0; j < n; j++)
+                ulong candidates = d.EmgHash.FieldMaskOnSegment(k.Pos, k.Pos, k.Radius);
+                while (candidates != 0ul)
                 {
+                    int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
+                    candidates &= candidates - 1ul;
+                    if (j >= n)
+                    {
+                        break; // 本循环期间新生成的场（下标 ≥ n）不参与本步
+                    }
                     EmgField f = d.Fields[j];
                     double r = FieldRadiusNow(f, now) + k.Radius;
                     if (f.Port == EmgFieldConst.PortCorona || f.Port == EmgFieldConst.PortDeflect || math.distancesq(k.Pos, f.Pos) > r * r)
@@ -510,8 +542,15 @@ namespace BinGames.Sim.Combat
                 double2 v = double2.zero;
                 EmgEntityProps dp = default;
                 bool props = false;
-                for (int j = 0; j < n; j++)
+                ulong candidates = d.EmgHash.FieldMaskOnSegment(dr.Pos, dr.Pos, 0.0);
+                while (candidates != 0ul)
                 {
+                    int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
+                    candidates &= candidates - 1ul;
+                    if (j >= n)
+                    {
+                        break; // 本循环期间新生成的场（下标 ≥ n）不参与本步
+                    }
                     EmgField f = d.Fields[j];
                     double r = FieldRadiusNow(f, now);
                     if (f.Port == EmgFieldConst.PortCorona || f.Port == EmgFieldConst.PortDeflect || math.distancesq(dr.Pos, f.Pos) > r * r)
@@ -574,8 +613,15 @@ namespace BinGames.Sim.Combat
                 double2 v = double2.zero;
                 double curl = 0.0;
                 float mass = math.max(1f, z.Amount);
-                for (int j = 0; j < n; j++)
+                ulong candidates = d.EmgHash.FieldMaskOnSegment(z.Pos, z.Pos, z.Radius);
+                while (candidates != 0ul)
                 {
+                    int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
+                    candidates &= candidates - 1ul;
+                    if (j >= n)
+                    {
+                        break; // 本循环期间新生成的场（下标 ≥ n）不参与本步
+                    }
                     EmgField f = d.Fields[j];
                     if (f.Port != EmgFieldConst.PortPull && f.Port != EmgFieldConst.PortPush && f.Port != EmgFieldConst.PortVortex)
                     {
@@ -693,7 +739,8 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static bool EmgProjFields(ref CombatData d, ref CombatProjectile pr, double2 next, bool airborne, float dt)
         {
-            if (d.Fields.Length == 0 || airborne)
+            ulong candidates = d.Fields.Length == 0 || airborne ? 0ul : d.EmgHash.FieldMaskOnSegment(pr.Prev, next, pr.Radius);
+            if (candidates == 0ul)
             {
                 return false;
             }
@@ -701,10 +748,16 @@ namespace BinGames.Sim.Combat
             bool frag = (pr.Flags & EmgProjFlags.Fragment) != 0;
             EmgEntityProps props = default;
             bool haveProps = false;
-            EmgScalars es = d.EmgS[0];
+            int charged = 0, redirected = 0, pushed = 0;
             bool reflected = false;
-            for (int j = 0; j < d.Fields.Length && !reflected; j++)
+            while (candidates != 0ul && !reflected)
             {
+                int j = math.tzcnt(candidates); // 与全表顺序扫描同序（下标升序），结果逐字相同
+                candidates &= candidates - 1ul;
+                if (j >= d.Fields.Length)
+                {
+                    break; // 掩码只会多不会少；下标升序，后面的位都在表外
+                }
                 EmgField f = d.Fields[j];
                 double r = FieldRadiusNow(f, now) + pr.Radius;
                 if (math.distancesq(next, f.Pos) > r * r && SegmentCircleT(pr.Prev, next, f.Pos, (float)r) < 0)
@@ -720,7 +773,7 @@ namespace BinGames.Sim.Combat
                         if (FieldLive(rule) && (pr.FieldOnce & EmgFieldConst.OnceCharged) == 0 && FieldRelation(rule.Faction, ff, pr.Faction))
                         {
                             pr.FieldOnce |= EmgFieldConst.OnceCharged;
-                            es.ProjCharged++;
+                            charged++;
                         }
                         break;
                     }
@@ -731,8 +784,6 @@ namespace BinGames.Sim.Combat
                         {
                             EmgReflectCore(ref d, ref pr, f.Owner, ff, rule.Amount);
                             pr.FieldOnce |= EmgFieldConst.OnceDeflect;
-                            es = d.EmgS[0];
-                            es.ProjReflected++;
                             reflected = true;
                         }
                         break;
@@ -761,7 +812,7 @@ namespace BinGames.Sim.Combat
                         da = math.atan2(math.sin(da), math.cos(da));
                         a0 += math.clamp(da, -turn, turn);
                         pr.Vel = new float2(math.cos(a0), math.sin(a0)) * sp;
-                        es.ProjRedirected++;
+                        redirected++;
                         break;
                     }
                     default:
@@ -782,12 +833,20 @@ namespace BinGames.Sim.Combat
                             haveProps = true;
                         }
                         pr.Vel += (float2)(dir * (rule.Amount * f.Strength / math.max(0.05f, props.Mass) * dt));
-                        es.ProjPushed++;
+                        pushed++;
                         break;
                     }
                 }
             }
-            d.EmgS[0] = es;
+            if (charged + redirected + pushed > 0 || reflected)
+            {
+                EmgScalars es = d.EmgS[0];
+                es.ProjCharged += charged;
+                es.ProjRedirected += redirected;
+                es.ProjPushed += pushed;
+                es.ProjReflected += reflected ? 1 : 0;
+                d.EmgS[0] = es;
+            }
             return reflected;
         }
 

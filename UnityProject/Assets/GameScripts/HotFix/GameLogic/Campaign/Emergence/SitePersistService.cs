@@ -50,6 +50,7 @@ namespace GameLogic.Campaign.Emergence
         public static int Floods { get; private set; }
         public static double LastFloodMs { get; private set; }
 
+
         public static float ClearSeconds => Mathf.Max(0.1f, GridContent.Tuning("emg.persist.clear_seconds"));
         public static int ClearScrap => Mathf.Max(0, GridContent.TuningInt("emg.persist.clear_scrap"));
 
@@ -330,6 +331,13 @@ namespace GameLogic.Campaign.Emergence
             minY -= margin;
             maxX += margin;
             maxY += margin;
+            // 泛洪只在这个框里走：框外的留存物（远处野地里的残骸）堵不到框内的路，不用泛洪。
+            Items.RemoveAll(it => it.Pos.x + it.Radius + 1.5 < minX || it.Pos.x - it.Radius - 1.5 > maxX || it.Pos.y + it.Radius + 1.5 < minY || it.Pos.y - it.Radius - 1.5 > maxY);
+            if (Items.Count == 0)
+            {
+                SetBlocks(st, Array.Empty<PersistBlockRecord>());
+                return;
+            }
             // 覆盖格（残骸能减速穿过，算“堵”只用于警告；阻路斑块本来就走不了，外扩半格让相切的圆也连成墙）
             Extra.Clear();
             ExtraSet.Clear();

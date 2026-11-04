@@ -1,4 +1,7 @@
 using System.IO;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 
 namespace BinGames.Sim.Combat
@@ -211,22 +214,11 @@ namespace BinGames.Sim.Combat
         /// <summary>离 <paramref name="at"/> 最近的子弹药 / 破片（在飞、Flags 带 Sub 或 Fragment）的弹体下标（没有 −1）。O(弹体数)。</summary>
         public int PickEmgProjectile(double2 at, float radius)
         {
-            int best = -1;
-            double bd = double.MaxValue;
-            for (int i = 0; i < _d.Projectiles.Length; i++)
-            {
-                CombatProjectile p = _d.Projectiles[i];
-                if ((p.Flags & (EmgProjFlags.Sub | EmgProjFlags.Fragment)) == 0 || !(p.Life > 0f))
-                {
-                    continue;
-                }
-                double dist = math.distance(p.Pos, at);
-                if (dist <= p.Radius + radius && dist < bd)
-                {
-                    bd = dist;
-                    best = i;
-                }
-            }
+            // FG-GAP-186：光标每帧都查，上千发弹体时托管循环是家园画面每帧最大的开销，放进 Burst
+            var pick = new NativeArray<int>(1, Allocator.TempJob);
+            new EmgPickProjectileJob { Projectiles = _d.Projectiles, At = at, Radius = radius, Out = pick }.Run();
+            int best = pick[0];
+            pick.Dispose();
             return best;
         }
 
@@ -400,6 +392,37 @@ namespace BinGames.Sim.Combat
                 }
             }
             return CombatLoadResult.Ok;
+        }
+    }
+
+    /// <summary>光标下离得最近的子弹药 / 破片（Burst，Run；没有写 -1）。</summary>
+    [BurstCompile(CompileSynchronously = true)]
+    internal struct EmgPickProjectileJob : IJob
+    {
+        [ReadOnly] public NativeList<CombatProjectile> Projectiles;
+        public double2 At;
+        public float Radius;
+        public NativeArray<int> Out;
+
+        public void Execute()
+        {
+            int best = -1;
+            double bd = double.MaxValue;
+            for (int i = 0; i < Projectiles.Length; i++)
+            {
+                CombatProjectile p = Projectiles[i];
+                if ((p.Flags & (EmgProjFlags.Sub | EmgProjFlags.Fragment)) == 0 || !(p.Life > 0f))
+                {
+                    continue;
+                }
+                double dist = math.distance(p.Pos, At);
+                if (dist <= p.Radius + Radius && dist < bd)
+                {
+                    bd = dist;
+                    best = i;
+                }
+            }
+            Out[0] = best;
         }
     }
 }

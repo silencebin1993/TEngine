@@ -790,6 +790,18 @@ namespace GameLogic.Campaign.Combat
             return w.Mode == CombatWeaponMode.Cannon || (w.HasOutput != 0 && w.HasOutput != CombatConst.OutputRepair); // 修复出口（维修束）打不出伤害，不派去追敌
         }
 
+        /// <summary>FG-GAP-175：这台机器的主武器是不是修复出口（维修束）。右键受伤友军时只派这种机器。</summary>
+        public bool CanMachineRepair(int logicId) =>
+            !IsDisposed && _machineUnit.TryGetValue(logicId, out int unit) && Kernel.TryGetUnit(unit, out CombatUnitView v)
+            && Kernel.TryGetWeapon(v.Weapon, out CombatWeapon w) && w.HasOutput == CombatConst.OutputRepair;
+
+        /// <summary>FG-GAP-175：世界坐标附近点中的受伤己方单位（内核单位号；没有返回 0）。右键修复经此桥接碰内核（FG14 §5 硬约束 3）。</summary>
+        public int PickInjuredPlayerUnit(Vector2 world, float radius)
+        {
+            int unit = IsDisposed ? 0 : Kernel.PickUnit(new double2(world.x, world.y), radius, false, true);
+            return unit != 0 && Kernel.TryGetUnit(unit, out CombatUnitView v) && v.Faction == CombatFaction.Player && v.Health < v.MaxHealth ? unit : 0;
+        }
+
         /// <summary>FG8-E2E-01 复审修复：这台机器此刻是否被接入（直控）——内核 Possessed 标志（受控机不执行编队命令，也不交给教义）。</summary>
         public bool IsMachinePossessed(int logicId) =>
             !IsDisposed && _machineUnit.TryGetValue(logicId, out int unit) && Kernel.TryGetUnit(unit, out CombatUnitView v) && (v.Flags & CombatUnitFlags.Possessed) != 0;

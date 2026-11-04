@@ -49,13 +49,13 @@ namespace GameLogic.Campaign.Blueprint
         /// "AI 与直控读同一 reactionId"（验收卡原文）字面上就是读这个字段。null＝无具名反应。</summary>
         public string ReactionId;
 
-        /// <summary>ER6-REACT-01：功能槽是否装了静默标记器（<see cref="Content.ComponentCatalog.FuncMarkerId"/>）——
+        /// <summary>ER6-REACT-01：功能槽是否装了静默标记器（声明写 evt.marked）——
         /// 内容目录原文"标记主目标及附近至多两个敌人"：只要装了标记器，命中就会打标记，即使没有配齐
         /// 标记跳转固件+兼容主组件（那样只是标记本身不产生跳转，"无标记跳转固件仍可以标记"是内容
         /// 目录独立于反应组合的单独行为，不是本 Story 臆造）。</summary>
         public bool HasMarkerFunction;
 
-        /// <summary>ER6-REACT-02：主组件是否为铸造重炮（<see cref="Content.ComponentCatalog.CompCannonId"/>）——
+        /// <summary>ER6-REACT-02：主组件是否为铸造重炮（组件行细分 = 重型射弹）——
         /// 战斗结算据此判断是否走 <see cref="Regions.CannonCombat"/> 的瞄准线/冷却/热量状态机，而不是
         /// 普通连射器/切割束那种即时命中路径。</summary>
         public bool HasCannonPrimary;
@@ -69,7 +69,7 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>EMG1-FW-01：结构模块（没有为 null）。机器级 prop.* 由功能组件 + 结构模块的声明相加封顶（FGR-EMG-193 第 3 条，EmgCatalog.PartPropModify）。</summary>
         public string StructureId;
 
-        /// <summary>ER6-REACT-02：结构槽是否装了散热鳍（<see cref="Content.ComponentCatalog.StructFinId"/>）——
+        /// <summary>ER6-REACT-02：结构槽是否装了散热鳍（声明写 prop.heat）——
         /// 额外 +5/秒散热（DEMO-CONTENT-LOCK.md §2.4）。</summary>
         public bool HasHeatSinkStructure;
 
@@ -187,12 +187,12 @@ namespace GameLogic.Campaign.Blueprint
             // 这个问题）。铸造重炮的伤害本来就是 CannonCombat 里的固定设计常量、不读
             // TotalNormalizedDamage，不依赖这里的 ComposeEngine 编译结果，所以提前计算完全安全。
             preview.ReactionId = Emergence.EmgRuleCatalog.AssemblyReactionId(board.PrimaryId, preview.FirmwareIds); // EMG2-REACT-01：按端口判定（ADR ⑪ 删 ID 配对）
-            preview.HasMarkerFunction = board.UtilityId == ComponentCatalog.FuncMarkerId;
-            preview.HasCannonPrimary = board.PrimaryId == ComponentCatalog.CompCannonId;
+            preview.HasMarkerFunction = Emergence.EmgCatalog.OwnerDeclaresWrite(board.UtilityId, "evt.marked"); // FG-GAP-169：按声明，不按内容 ID（FGR-EMG-013）
+            preview.HasCannonPrimary = Emergence.EmgRuleCatalog.IsHeavyProjectile(board.PrimaryId); // FG-GAP-169：按组件行的载体细分
             preview.PrimaryId = board.PrimaryId;
             preview.ChassisId = board.ChassisId;
             preview.UtilityId = string.IsNullOrEmpty(board.UtilityId) ? null : board.UtilityId; // 存读档后空槽可能是 ""：统一成 null，编译结果逐字段稳定
-            preview.HasHeatSinkStructure = board.StructureId == ComponentCatalog.StructFinId;
+            preview.HasHeatSinkStructure = Emergence.EmgCatalog.OwnerDeclaresWrite(board.StructureId, "prop.heat"); // FG-GAP-169：按声明
             preview.StructureId = string.IsNullOrEmpty(board.StructureId) ? null : board.StructureId;
 
             if (string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))

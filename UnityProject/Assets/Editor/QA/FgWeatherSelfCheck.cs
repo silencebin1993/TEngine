@@ -1322,6 +1322,9 @@ namespace GameLogic.EditorTools
             StepUntil(() => WeatherService.IsActive(s, WeatherService.AcidRain), 10 * Hz);
             StepUntil(() => D(s).AcidMinutes >= 61, (int)HourTicks + 200);
             double maxBatch = WeatherService.MaxBatchMs;
+            string slowSplit = WeatherService.SlowBatchSplit;
+            // EMG2-E2E-01 修复轮 2：受损表在酸雨开始那一步预留（一段一次），单列耗时，不混进每分钟结算。
+            string reserve = $"{WeatherService.LastReserveMs:F2} ms{(WeatherService.LastReserveGc ? "（其间赶上回收）" : string.Empty)}";
             // FG8-GEN-02 修复轮（DEBT-FG8EXP02-08）：中途赶上垃圾回收的那一分钟单列（回收停顿取决于整个托管堆，全量自检跑到这里时堆很大，与酸雨结算本身无关）。
             int gcBatches = WeatherService.GcBatchCount;
             double gcBatchMs = WeatherService.MaxGcBatchMs;
@@ -1382,12 +1385,12 @@ namespace GameLogic.EditorTools
                 $"剩下 {preset.Count:N0} 格扣到只剩 1 点后 70 分钟酸雨摧毁 {destroyed:N0} 格，最多的一分钟 {maxDestroyed} 格（按格错开相位，归零分摊到不同分钟）；" +
                 $"每格一份虚影（+{ghosts}）、物品落地 +{ground} 份并开返还搬运单 +{haul} 张、受损表只剩活着的格且与运行时一致 {recordsLive}；" +
                 $"{batches} 分钟只发了 {notices} 条摧毁通知（每分钟至多一条，多格合并：“{BeltNetworkService.LastBatchNotifyText}”）{merged}；受损去重表 {D(s).HitBelts.Length} = {D(s).DamagedBelts}");
-            PerfLines.Add($"天气每步检查 {idleUs:F3} μs / 步，步首派生量对齐 {preUs:F3} μs / 步；酸雨按游戏分钟结算（{poles} 座建筑 + {liveBelts:N0} 格传送带）最慢一次 {maxBatch:F2} ms（61 分钟扫 {sweeps} 次，内核每分钟交回最多 {maxCand} 格、平均 {cand / Math.Max(1, sweeps)} 格）；" +
+            PerfLines.Add($"天气每步检查 {idleUs:F3} μs / 步，步首派生量对齐 {preUs:F3} μs / 步；酸雨按游戏分钟结算（{poles} 座建筑 + {liveBelts:N0} 格传送带）最慢一次 {maxBatch:F2} ms（61 分钟扫 {sweeps} 次，内核每分钟交回最多 {maxCand} 格、平均 {cand / Math.Max(1, sweeps)} 格；最慢一分钟分项 {slowSplit}；酸雨开始时一次性预留受损表 {reserve}）；" +
                           $"大批临近归零的 70 分钟里最慢一分钟 {maxZeroBatch:F2} ms（最多一分钟摧毁 {maxDestroyed} 格）；一次扣 {preset.Count:N0} 格耐久 {presetMs:F1} ms；" +
                           $"同一刻批量摧毁 500 格 {burst500:F1} ms / 2,000 格 {burst2000:F1} ms（每格 {perCell500 * 1000:F0} / {perCell2000 * 1000:F0} μs，比值 {linear:F2}）；" +
                           $"中途赶上垃圾回收、单列不计入最慢一分钟的：正常酸雨 {gcBatches} 分钟（其中最慢 {gcBatchMs:F2} ms）、大批归零 {gcZeroBatches} 分钟（其中最慢 {gcZeroBatchMs:F2} ms）");
             PerfGate.Expect(poles >= 800 && belts >= 15000, $"P1 天气每步检查 {idleUs:F3} μs / 步（阈值 1 μs；O(1)）、步首派生量对齐 {preUs:F3} μs / 步（阈值 1 μs）、" +
-                                  $"酸雨结算最慢一分钟 {maxBatch:F2} ms（阈值 4 ms；{poles} 座建筑 + {liveBelts:N0} 格传送带）、大批归零时最慢一分钟 {maxZeroBatch:F2} ms（阈值 8 ms = 120 帧一帧）、" +
+                                  $"酸雨结算最慢一分钟 {maxBatch:F2} ms（阈值 4 ms；{poles} 座建筑 + {liveBelts:N0} 格传送带；分项 {slowSplit}；开始时一次性预留 {reserve}，不计入每分钟）、大批归零时最慢一分钟 {maxZeroBatch:F2} ms（阈值 8 ms = 120 帧一帧）、" +
                                   $"批量摧毁每格耗时 2,000 格 / 500 格 = {linear:F2}（阈值 2：线性约 1，平方级约 4）；最慢一分钟不含中途赶上垃圾回收的分钟（单列：正常酸雨 {gcBatches} 分钟、最慢 {gcBatchMs:F2} ms，" +
                                   $"大批归零 {gcZeroBatches} 分钟、最慢 {gcZeroBatchMs:F2} ms；赶上回收的分钟占比 {gcShare:P0}，阈值 25%：批次自己大量分配时几乎每分钟都会赶上回收）",
                 new[] { PerfGate.Le(idleUs, 1.0, "天气每步 μs"), PerfGate.Le(preUs, 1.0, "步首对齐 μs"), PerfGate.Le(maxBatch, 4.0, "酸雨结算 ms"), PerfGate.Le(maxZeroBatch, 8.0, "大批归零 ms"),

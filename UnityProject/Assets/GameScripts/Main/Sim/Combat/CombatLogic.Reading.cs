@@ -1596,6 +1596,14 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 have++;
+                // FG-GAP-172：母机被接入后武器下标变了（或离开后又变回）：还没剥离的无人机被这次开火续命时按当前带宽重刷，接入的效果当场体现。
+                if (dr.Strip == 0 && dr.Weapon != d.Weapon[a])
+                {
+                    dr.Weapon = d.Weapon[a];
+                    dr.Damage = math.max(0f, wp.Damage) * (r.DroneRatio > 0f ? r.DroneRatio : 0.4f);
+                    dr.Cooldown = r.DroneCooldown > 0f ? r.DroneCooldown : 0.8f;
+                    dr.Active = FlashGrant(ref d, dr.Weapon, flashUsed);
+                }
                 flashUsed += FlashHeld(ref d, dr);
                 if (dr.Strip == 0)
                 {

@@ -544,6 +544,18 @@ namespace GameLogic.EditorTools
             StepN(e, 60);
             Expect(e.FieldCount == 0 && e.EmgScalars.FieldsExpired == 1 && math.length(Wreck(e, w).Vel) < 0.05f && math.distance(Pos(e, u), uEnd) < 1e-9 && vEnd > 0f,
                 $"场到期（0.25 秒）时残骸正以 {vEnd:0.00} 米 / 秒被拉动 → 1 秒后停住；单位离场即停、不再位移");
+            // EMG2-E2E-01 修复轮 2（审查 P1）：场全部到期后格掩码清空；之后再展开的场只占下标 0，旧场所在格不留指向表外的位（弹体段按位读场表不越界、不读到已到期的场）
+            using CombatKernel mk = NewKernel();
+            int mo = Unit(mk, CombatFaction.Player, new double2(-30, -30));
+            mk.SpawnField(Pull, 0, 0, 3f, 0.25f, mo, CombatFaction.Player);
+            mk.SpawnField(Corona, 20, 0, 3f, 0.25f, mo, CombatFaction.Player);
+            int bornBoth = mk.FieldCount;
+            StepN(mk, 30);
+            ulong stale = mk.FieldMaskAtForTests(0, 0) | mk.FieldMaskAtForTests(20, 0);
+            mk.SpawnField(Push, -20, 0, 3f, 1f, mo, CombatFaction.Player);
+            ulong outside = (mk.FieldMaskAtForTests(0, 0) | mk.FieldMaskAtForTests(20, 0)) & ~((1ul << mk.FieldCount) - 1ul);
+            Expect(bornBoth == 2 && mk.FieldCount == 1 && stale == 0ul && outside == 0ul && (mk.FieldMaskAtForTests(-20, 0) & 1ul) != 0ul,
+                $"两个场同时到期后格掩码清空（旧场所在格残留位 0x{stale:X}）；再展开 1 个场只占下标 0（旧场所在格指向表外的位 0x{outside:X}，新场所在格有位 0）");
             // 暂停：dt = 0 不推动、场不到期
             using CombatKernel p = NewKernel();
             int po = Unit(p, CombatFaction.Player, new double2(-30, -30));

@@ -90,6 +90,7 @@ namespace GameLogic.EditorTools
             Line("\n[M6 出口] FG6-E2E-01：旅程登记与正式输入、规划不依赖固定坐标、防线守得住、缺口清零、试玩包、需求覆盖、FGT-DEF-010 性能场景、突袭打坏熔合 / 打死机器的承接链路");
             Step(CheckJourneyCatalog);
             Step(CheckJourneySourcesUseInput);
+            Step(CheckUplinkDropVerdicts);
             Step(CheckGapGate);
             Step(CheckPlaytestPack);
             Step(CheckRequirementCoverage);
@@ -275,6 +276,33 @@ namespace GameLogic.EditorTools
             Expect(miss.Count == 0 && rts,
                 "旅程用到的正式输入：建造 / 研发树 / 常驻规则 / 离家报告 / 暂停 / 倍速 / Esc / 接入键 / 跳回上一台 / 交互键，UI Toolkit 点击；远征小窗“跳回家园”“留在远征队”、炮塔面板“接入”、" +
                 $"通用面板“炮塔… / 陷阱… / 启用禁用 / 重建”、远征准备面板广播开关与出发、存档 / 读取；RTS：右键敌人攻击、接入炮塔左键亲自开火（{rts}）{(miss.Count == 0 ? string.Empty : "；缺：" + string.Join("、", miss))}");
+        }
+
+        /// <summary>A2b（EMG2-E2E-01 评审 P1）：FGJ-M6R rc_charge 的掉线归类与 FG-GAP-114 判定——不明原因掉线、114 回退都必须判失败，不能走“被干扰切断后阵亡”放行。</summary>
+        private static void CheckUplinkDropVerdicts()
+        {
+            const int a = 7;
+            var J = GameLogic.Campaign.Signal.SignalLinkBreakReason.Jammed;
+            var D = GameLogic.Campaign.Signal.SignalLinkBreakReason.MachineDestroyed;
+            var O = GameLogic.Campaign.Signal.SignalLinkBreakReason.OutOfCoverage;
+            var N = GameLogic.Campaign.Signal.SignalLinkBreakReason.None;
+            var cases = new (string What, FgjM6ReverseJourney.UplinkDrop Got, FgjM6ReverseJourney.UplinkDrop Want)[]
+            {
+                ("这台机器的新断链记录是干扰", FgjM6ReverseJourney.ClassifyDrop(true, false, true, true, false, J, a, a), FgjM6ReverseJourney.UplinkDrop.Jammed),
+                ("掉线但没有新断链记录（旧的干扰记录不算）", FgjM6ReverseJourney.ClassifyDrop(true, false, true, false, false, J, a, a), FgjM6ReverseJourney.UplinkDrop.Unknown),
+                ("新断链是走出覆盖（不是干扰）", FgjM6ReverseJourney.ClassifyDrop(true, false, true, true, false, O, a, a), FgjM6ReverseJourney.UplinkDrop.Unknown),
+                ("新干扰记录是别的机器的", FgjM6ReverseJourney.ClassifyDrop(true, false, true, true, false, J, a + 1, a), FgjM6ReverseJourney.UplinkDrop.Unknown),
+                ("信号先回核心、IsAlive 晚一帧（新断链记录是阵亡）→ 阵亡优先", FgjM6ReverseJourney.ClassifyDrop(true, false, true, true, false, D, a, a), FgjM6ReverseJourney.UplinkDrop.Death),
+                ("已经阵亡 → 阵亡优先", FgjM6ReverseJourney.ClassifyDrop(true, false, false, true, false, J, a, a), FgjM6ReverseJourney.UplinkDrop.Death),
+                ("旅程刚按离开、没有新断链", FgjM6ReverseJourney.ClassifyDrop(true, false, true, false, true, N, 0, a), FgjM6ReverseJourney.UplinkDrop.None),
+                ("旅程刚按离开、但同时有新的走出覆盖断链", FgjM6ReverseJourney.ClassifyDrop(true, false, true, true, true, O, a, a), FgjM6ReverseJourney.UplinkDrop.Unknown),
+                ("一直接入着", FgjM6ReverseJourney.ClassifyDrop(true, true, true, true, false, J, a, a), FgjM6ReverseJourney.UplinkDrop.None),
+            };
+            var bad = cases.Where(x => x.Got != x.Want).Select(x => $"{x.What}：得 {x.Got}、应 {x.Want}").ToList();
+            bool g114 = FgjM6ReverseJourney.Gap114Failure(true, true, 3) != null && FgjM6ReverseJourney.Gap114Failure(true, false, 0) != null
+                        && FgjM6ReverseJourney.Gap114Failure(true, false, 2) == null && FgjM6ReverseJourney.Gap114Failure(false, true, 0) == null;
+            Expect(bad.Count == 0 && g114,
+                $"A2b. FGJ-M6R rc_charge 掉线归类 {cases.Length} 例（不明原因掉线 → Unknown 判失败、阵亡优先）与 FG-GAP-114 判定（自动暂停或没有攻城通知 → 失败）：114 {g114}{(bad.Count == 0 ? string.Empty : "；" + string.Join("；", bad))}");
         }
 
         private static int Count(string text, string token)

@@ -1030,16 +1030,19 @@ namespace GameLogic.EditorTools
         private static void MeasureConstructionBurst(BaselineFile cur, CampaignState s, int ghostsAtStart)
         {
             var times = new List<double>(BurstMaxSteps);
+            var gcSteps = new List<int>(BurstMaxSteps);
             var sw = new Stopwatch();
             int occ0 = HomeGridService.OccupancyRebuildCount;
             GC.Collect();
             while (times.Count < BurstMaxSteps
                    && (s.BuildingRecords.Any(HomeValleyController.IsPlannedGhost) || HomeValleyWorkOrders.CountActiveConstruction(s) > 0))
             {
+                int gc0 = GC.CollectionCount(0);
                 sw.Restart();
                 WorldSimulation.StepMany(1);
                 sw.Stop();
                 times.Add(sw.Elapsed.TotalMilliseconds);
+                gcSteps.Add(GC.CollectionCount(0) - gc0);
             }
             int left = s.BuildingRecords.Count(HomeValleyController.IsPlannedGhost);
             int built = ghostsAtStart - left;
@@ -1054,6 +1057,8 @@ namespace GameLogic.EditorTools
             double p95 = sorted[(int)(sorted.Count * 0.95)];
             double worst = sorted[sorted.Count - 1];
             int over4 = times.Count(t => t > 4.0);
+            int worstAt = times.IndexOf(worst);
+            Line($"  · 施工高峰最慢一步：第 {worstAt + 1} 步，这一步 GC {gcSteps[worstAt]} 次；全程 GC {gcSteps.Sum()} 次；堵路泛洪累计 {GameLogic.Campaign.Emergence.SitePersistService.Floods} 次、最近一次 {GameLogic.Campaign.Emergence.SitePersistService.LastFloodMs:F2} ms（只报告）");
             int occ = HomeGridService.OccupancyRebuildCount - occ0;
             Line($"  · 施工高峰：读档时队列里 {ghostsAtStart} 座虚影，{times.Count} 步（{times.Count / 60.0:F1} 游戏秒）里完工 {built} 座、剩 {left} 座；" +
                  $"每步平均 {avg:F3} / p95 {p95:F3} / 最慢 {worst:F2} ms，超过 4 ms 的步 {over4} 个；格网占用整体重建 {occ} 次（Editor；只报告，基线对比跟踪）");

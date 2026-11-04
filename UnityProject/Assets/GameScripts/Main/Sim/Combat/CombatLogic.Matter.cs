@@ -149,7 +149,7 @@ namespace BinGames.Sim.Combat
             float soft = PatchSoftMergeOf(ref d);
             for (int i = 0; i < d.Patches.Length; i++)
             {
-                CombatZone z = d.Patches[i];
+                ref CombatZone z = ref d.Patches.ElementAt(i); // 修复轮 3（FGR-EMG-200）：生成时的全表扫只读引用（满载补斑块那一步每步 32 次）
                 if (!PatchAlive(z))
                 {
                     if (free < 0)
@@ -481,7 +481,7 @@ namespace BinGames.Sim.Combat
             var due = new NativeList<PatchDue>(64, Allocator.Temp);
             for (int i = 0; i < d.Patches.Length; i++)
             {
-                CombatZone z = d.Patches[i];
+                ref CombatZone z = ref d.Patches.ElementAt(i); // EMG2-E2E-01 修复轮 3（FGR-EMG-200）：每步全表扫只读引用，不整块拷斑块结构
                 if (PatchAlive(z) && !IsLegacy(z) && z.NextTick <= now + 1e-9)
                 {
                     due.Add(new PatchDue { T = z.NextTick, Id = z.EmgId, Index = i });
@@ -518,6 +518,22 @@ namespace BinGames.Sim.Combat
             due.Dispose();
         }
 
+        /// <summary>这种物质“温度低于阈值就转化”的那条规则（E11）。</summary>
+        private static bool EmgCoolRule(ref CombatData d, byte matter, out EmgRule rule)
+        {
+            int2 ix = d.EmgRuleIdx[matter];
+            for (int k = ix.x; k < ix.x + ix.y; k++)
+            {
+                rule = d.EmgRules[d.EmgRuleOrder[k]];
+                if (rule.Cond == EmgRuleConst.CondTempLt && rule.Op == EmgRuleConst.OpConvert)
+                {
+                    return true;
+                }
+            }
+            rule = default;
+            return false;
+        }
+
         private static void TickPatch(ref CombatData d, int i, float elapsed, double now)
         {
             CombatZone z = d.Patches[i];
@@ -529,6 +545,17 @@ namespace BinGames.Sim.Combat
             double life = math.max(1e-3, z.Until - z.Born);
             double left = z.Until - now;
             bool expire = left <= 0 && !PatchKept(ref d, z); // EMG2-PERSIST-01：长期留存固态不按寿命到期（融化 / 打碎 / 清除照常）
+            // EMG2-E2E-01：冷却型物质寿命到 = 凉透（FG19B §1.2“熔融金属 10 秒，冷却成冷渣”）：被反复加热、到期时还高于凝固线也按 E11 凝成冷渣，不凭空消失
+            if (left <= 0 && m.Decay == EmgMatterConst.DecayCool && EmgRulesOn(ref d) && EmgCoolRule(ref d, z.Matter, out EmgRule cool))
+            {
+                z.Temp = math.min(z.Temp, cool.C1);
+                d.Patches[i] = z;
+                EmgScalars ces = d.EmgS[0];
+                ces.PatchesExpired++;
+                d.EmgS[0] = ces;
+                EmgApplyRule(ref d, cool, i, -1, now);
+                return;
+            }
             float oldR = z.Radius;
             if (z.Growth > 0f && !IsLegacy(z))
             {
@@ -547,6 +574,7 @@ namespace BinGames.Sim.Combat
                     expire |= z.Conc < GasMinConcOf(ref d);
                     break;
                 case EmgMatterConst.DecayKeep:
+                case EmgMatterConst.DecayCool:
                     break;
                 default:
                     // 蒸干 / 燃尽 / 吸热 / 冷却：存续最后 25% 半径线性缩到 0（“快干了”可读，FG19B §8.2）
@@ -899,36 +927,36 @@ namespace BinGames.Sim.Combat
             int y0 = EmgHash.CellOf(math.min(a.y, next.y)), y1 = EmgHash.CellOf(math.max(a.y, next.y));
             uint mask = 0u;
             int enterPatch = -1;
+            double seg = -1.0; // 修复轮 3（FGR-EMG-200）：格里真有斑块才算线段长（多数弹体所在格没有斑块）
             for (int cy = y0; cy <= y1; cy++)
             {
                 for (int cx = x0; cx <= x1; cx++)
                 {
-                    if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(cx, cy), out int e, out NativeParallelMultiHashMapIterator<long> it))
+                    for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(cx, cy)] - 1; node >= 0;)
                     {
-                        continue;
-                    }
-                    do
-                    {
-                        if ((byte)d.EmgHash.Entries[e].w != EmgHash.KindPatch)
+                        int4 cell = d.EmgHash.PatchNodes[node];
+                        node = cell.w;
+                        int j = cell.z;
+                        if (cell.x != cx || cell.y != cy || j >= d.Patches.Length)
                         {
                             continue;
                         }
-                        int j = d.EmgHash.Refs[e];
-                        if (j >= d.Patches.Length)
+                        // FG-GAP-186：先用引用判断，真穿过才拷整个结构（格子里的斑块多，上千发弹体时拷贝是主要开销）
+                        ref CombatZone zr = ref d.Patches.ElementAt(j);
+                        if (!PatchAlive(zr) || (airborne && zr.Layer == EmgMatterConst.LayerGround))
                         {
                             continue;
                         }
-                        CombatZone z = d.Patches[j];
-                        if (!PatchAlive(z) || (airborne && z.Layer == EmgMatterConst.LayerGround))
-                        {
-                            continue;
-                        }
-                        double r2 = (double)z.Radius * z.Radius;
-                        bool crossed = math.distancesq(a, z.Pos) <= r2 || math.distancesq(next, z.Pos) <= r2 || SegmentCircleT(a, next, z.Pos, z.Radius) >= 0;
+                        seg = seg < 0.0 ? math.distance(a, next) + 1e-3 : seg;
+                        double r2 = (double)zr.Radius * zr.Radius;
+                        double reach = zr.Radius + seg;
+                        bool crossed = math.distancesq(next, zr.Pos) <= reach * reach
+                            && (math.distancesq(a, zr.Pos) <= r2 || math.distancesq(next, zr.Pos) <= r2 || SegmentCircleT(a, next, zr.Pos, zr.Radius) >= 0);
                         if (!crossed)
                         {
                             continue;
                         }
+                        CombatZone z = zr;
                         EmgMatter m = MatterOf(ref d, z.Matter);
                         if (m.CoatBit >= 0 && m.CoatBit < 31)
                         {
@@ -945,7 +973,6 @@ namespace BinGames.Sim.Combat
                             mask |= bit;
                         }
                     }
-                    while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
                 }
             }
             uint prev = pr.PrevMatterMask;

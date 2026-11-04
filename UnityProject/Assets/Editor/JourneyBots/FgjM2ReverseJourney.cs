@@ -489,6 +489,25 @@ namespace GameLogic.EditorTools.JourneyBots
             c.SetInt("safeReact", 0);
             c.SetInt("conductFc0", FgjM2Common.ReactionCount(GameRoot.FracturedCity?.Combat));
             FgjM2Common.RightClickFcEnemy(c);
+            // EMG2-E2E-01 修复轮 3：右键那一刻的输入现场（作用域、UI 是否挡住指针、目标在不在点选半径内），失败时能分清是点击没到还是命令路径
+            CombatSite fc = GameRoot.FracturedCity?.Combat;
+            string id = c.Get("enemy");
+            Vector2 ep = default;
+            string near = null;
+            bool pos = fc != null && !string.IsNullOrEmpty(id) && fc.TryGetEnemyPosition(id, out ep);
+            bool pick = pos && fc.TryFindNearestEnemy(ep, 1.6f, out near);
+            Vector3 mp = InputRouter.Reader.MousePosition;
+            var hits = new List<string>();
+            foreach (UnityEngine.UIElements.UIDocument doc in UnityEngine.Object.FindObjectsByType<UnityEngine.UIElements.UIDocument>(FindObjectsSortMode.None))
+            {
+                UnityEngine.UIElements.IPanel panel = doc.rootVisualElement?.panel;
+                UnityEngine.UIElements.VisualElement ve = panel?.Pick(UnityEngine.UIElements.RuntimePanelUtils.ScreenToPanel(panel, new Vector2(mp.x, Screen.height - mp.y)));
+                for (int k = 0; ve != null && k < 4; k++, ve = ve.parent)
+                {
+                    hits.Add($"{doc.name}:{ve.name}({ve.GetType().Name})");
+                }
+            }
+            c.Log($"右键现场：作用域 {InputRouter.Scope}、UI 挡指针 {InputRouter.IsUiPointerBlocked()}、指针 {mp}、目标 {id} {(pos ? "在内核 " + ep : "不在内核")}、地点内核点选（1.6 米）{(pick ? near : "无")}、主镜头 {Camera.main?.name}；指针下的 UI [{string.Join(" ← ", hits)}]");
         }
 
         /// <summary>安全模式的电弧机与冷却液机一起打：只要打出短路就算（伤害归因记进这次出击）；另记“短路发生时电弧机是否还在安全模式”。</summary>
@@ -507,7 +526,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 // 安全模式的机器照常接令：编队记下“攻击 已下达（2 台）”（两台都接令，不因断链少一台）。
                 if (!FgjM2Common.AttackIssued(c, GameRoot.FracturedCity.SquadCommands, 2))
                 {
-                    return StepOutcome.Fail($"右键敌人后没有两台都接到攻击命令（{string.Join(" / ", FgjM2Common.NewEvents(c, GameRoot.FracturedCity.SquadCommands))}）");
+                    // EMG2-E2E-01 修复轮 3：失败时如实报现场（选中、目标、暂停、待命、最近事件），分清是点击没到、还是命令路径吞了
+                    RegionSquadCommandSystem sq = GameRoot.FracturedCity.SquadCommands;
+                    return StepOutcome.Fail($"右键敌人后没有两台都接到攻击命令（{string.Join(" / ", FgjM2Common.NewEvents(c, sq))}）；现场：目标 {c.Get("enemy")}、选中 [{string.Join("、", sq.Selection.Select(Label))}]、"
+                        + $"暂停 {GameClock.Paused}、待命 {sq.ArmedKind?.ToString() ?? "无"}、最近事件 [{string.Join(" / ", sq.RecentEvents.Skip(Math.Max(0, sq.RecentEvents.Count - 3)))}]");
                 }
                 c.Log($"右键敌人：安全模式的 {Label(b)} 照常接到攻击命令（安全模式 {SignalLinkService.IsInSafeMode(St, b)}）");
             }

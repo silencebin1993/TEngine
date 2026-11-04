@@ -78,10 +78,16 @@ namespace GameLogic.Campaign.Env
         public static long BeltCandidates { get; private set; }
         public static int MaxBeltCandidates { get; private set; }
         public static int MaxBeltsDestroyed { get; private set; }
+        /// <summary>EMG2-E2E-01 修复轮：最慢一批（不含赶上回收的）的分项——第几批、建筑段 / 内核交回 / 扣耐久 / 其余各几毫秒、托管堆大小。全量自检尖峰定位用。</summary>
+        public static string SlowBatchSplit { get; private set; } = string.Empty;
+        /// <summary>EMG2-E2E-01 修复轮 2：最近一段酸雨开始时预留受损表的耗时、其间是否赶上回收（一段一次，不算每分钟结算）。</summary>
+        public static double LastReserveMs { get; private set; }
+        public static bool LastReserveGc { get; private set; }
 
         /// <summary>自检：清零“最慢一次 / 最多一次”的统计（分段量性能）。</summary>
         public static void ResetBatchStats()
         {
+            SlowBatchSplit = string.Empty;
             LastBatchMs = MaxBatchMs = MaxGcBatchMs = 0;
             MaxBeltCandidates = MaxBeltsDestroyed = GcBatchCount = 0;
         }
@@ -596,6 +602,14 @@ namespace GameLogic.Campaign.Env
             {
                 PipeNetworkService.SetColdSnap(state, true);
             }
+            else if (f.Kind == AcidRain)
+            {
+                long r0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                int gc0 = System.GC.CollectionCount(0);
+                ReserveAcidTables(state);
+                LastReserveMs = (System.Diagnostics.Stopwatch.GetTimestamp() - r0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                LastReserveGc = System.GC.CollectionCount(0) != gc0;
+            }
             double hz = Math.Max(1, GameClock.StepHz);
             NotificationCenter.Post("weather", GameText.Format("env.weather.start_detail", GlyphOf(f.Kind) + " " + NameOf(f.Kind), GameClock.FormatDayTime(f.EndTick / hz),
                 EffectText(f.Kind)), CoreAt(state));
@@ -654,12 +668,7 @@ namespace GameLogic.Campaign.Env
             }
             DamagedIds.Clear();
             DamagedBeltKeys.Clear();
-            // 一段酸雨只预留一次：否则受损表逐格长大时，几张大表会在同一分钟一起扩容重建（12,000 格时越过 4,049 / 8,419 就是几到十几毫秒的尖峰）。
-            if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
-            {
-                DamagedBeltKeys.EnsureCapacity(BeltNetworkService.Kernel.CellCount);
-                BeltNetworkService.ReserveDamageIndex(BeltNetworkService.Kernel.CellCount);
-            }
+            ReserveAcidTables(state); // 正常已在 Start 预留过（空操作）；只有雨中读档 / 雨中传送带变多时才在这里补
             foreach (string id in d.HitBuildings ?? Array.Empty<string>())
             {
                 DamagedIds.Add(id);
@@ -671,6 +680,18 @@ namespace GameLogic.Campaign.Env
             _hitFor = d;
             _hitIdsRef = d.HitBuildings;
             _hitBeltsRef = d.HitBelts;
+        }
+
+        /// <summary>按传送带格数预留受损表（几张表只清不缩，同一进程的下一段酸雨通常不再分配）。
+        /// 一段酸雨只预留一次：否则受损表逐格长大时，几张大表会在同一分钟一起扩容重建（12,000 格时越过 4,049 / 8,419 就是几到十几毫秒的尖峰）。
+        /// EMG2-E2E-01 修复轮 2：放在酸雨开始那一步（<see cref="Start"/>），不进每分钟结算——约 1.4 MB 的大块分配在托管堆很大时偶尔要付十毫秒级的回收账（全量自检第 1 批 11.53 ms）。</summary>
+        private static void ReserveAcidTables(CampaignState state)
+        {
+            if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
+            {
+                DamagedBeltKeys.EnsureCapacity(BeltNetworkService.Kernel.CellCount);
+                BeltNetworkService.ReserveDamageIndex(BeltNetworkService.Kernel.CellCount);
+            }
         }
 
         private static T[] Append<T>(T[] old, List<T> more)
@@ -722,6 +743,7 @@ namespace GameLogic.Campaign.Env
             int gc0 = System.GC.CollectionCount(0);
             BatchCount++;
             EnsureHitSets(state, d);
+            long te = System.Diagnostics.Stopwatch.GetTimestamp();
             NewHitIds.Clear();
             NewHitBelts.Clear();
             int buildings = 0;
@@ -771,6 +793,7 @@ namespace GameLogic.Campaign.Env
                     minPct = Mathf.Min(minPct, b.Health / Mathf.Max(1f, BuildingOps.MaxDurability(b.BuildingTypeId)));
                 }
             }
+            long t1 = System.Diagnostics.Stopwatch.GetTimestamp(), t2 = t1, t3 = t1;
             // 传送带（FG7-ENV-03 审查修复，P1）：逐格判定在 AOT 内核（Burst：露天、地面、这一分钟按格错开相位后真有整点伤害的格才交回来）；
             // 热更层只对交回的格查污染倍率与净化区（每分钟约 格数 × 每分钟伤害率），扣耐久、归零摧毁都走批量（受损表 / 虚影 / 通知各一次）。
             if (BeltNetworkService.IsRunning && ReferenceEquals(BeltNetworkService.BoundState, state))
@@ -778,6 +801,7 @@ namespace GameLogic.Campaign.Env
                 BeltSweepCount++;
                 BeltNetworkService.Kernel.CollectAcidHits(k, PerMinute(BeltNetworkService.MaxHp(0), factor), PerMinute(BeltNetworkService.MaxHp(1), factor),
                     PerMinute(BeltNetworkService.MaxHp(2), factor), BeltCells);
+                t2 = System.Diagnostics.Stopwatch.GetTimestamp();
                 BeltCandidates += BeltCells.Count;
                 MaxBeltCandidates = Math.Max(MaxBeltCandidates, BeltCells.Count);
                 BatchCells.Clear();
@@ -810,6 +834,7 @@ namespace GameLogic.Campaign.Env
                     d.Destroyed += BatchDestroyed.Count;
                     MaxBeltsDestroyed = Math.Max(MaxBeltsDestroyed, BatchDestroyed.Count);
                 }
+                t3 = System.Diagnostics.Stopwatch.GetTimestamp();
             }
             // 去重集合按“第一次受损”的顺序追加（确定性；不再每分钟整表排序重建，O(新受损数)）。
             if (NewHitIds.Count > 0)
@@ -834,9 +859,13 @@ namespace GameLogic.Campaign.Env
                 GcBatchCount++;
                 MaxGcBatchMs = Math.Max(MaxGcBatchMs, ms);
             }
-            else
+            else if (ms > MaxBatchMs)
             {
-                MaxBatchMs = Math.Max(MaxBatchMs, ms);
+                MaxBatchMs = ms;
+                double f = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                long t4 = System.Diagnostics.Stopwatch.GetTimestamp();
+                SlowBatchSplit = $"第 {BatchCount} 批：对齐去重表 {(te - t0) * f:F2} / 建筑 {(t1 - te) * f:F2} / 内核交回 {(t2 - t1) * f:F2} / 扣耐久 {(t3 - t2) * f:F2} / 其余 {(t4 - t3) * f:F2} ms，" +
+                                 $"受损表 {d.HitBelts?.Length ?? 0} 格，托管堆 {System.GC.GetTotalMemory(false) >> 20} MB";
             }
         }
 

@@ -20,12 +20,33 @@ namespace BinGames.Sim.Combat
         /// <summary>圆在障碍表 / 残骸表里的下标。</summary>
         public NativeList<int> Refs;
         public NativeParallelMultiHashMap<long, int> Cells;
+        /// <summary>FG-GAP-186：残骸专用的格链表（同 <see cref="PatchHead"/>：x, y = 格，z = Entries 下标，w = 下一节点；头表存“节点号 + 1”，0 = 空）。
+        /// 每发弹体每步、每个移动单位每步都查残骸，上千发时通用哈希（同格还挂着障碍）是战斗内核最大的新增开销；随哈希重建，不进快照。</summary>
+        public NativeArray<int> WreckHead;
+        public NativeList<int4> WreckNodes;
+        /// <summary>FG-GAP-186：残骸圆（按登记的单精度圆心，外扩 1 毫米）覆盖的 1 米细格位图（散列，只会误报“可能有”、不会漏）。弹体先查它，绝大多数不进残骸检测。</summary>
+        public NativeArray<ulong> WreckFine;
+        /// <summary>FG-GAP-186：活跃场覆盖格 → 场下标掩码（容量恒 ≤ 64，一格一个 ulong；哈希撞格只会多查、不会漏）。每步弹体结算前重建，弹体结算期间新生成 / 续期的场当场补记。</summary>
+        public NativeArray<ulong> FieldMasks;
+        /// <summary>FG-GAP-186：弹体 × 斑块专用的格链表（头插，同格遍历顺序与 Cells 相同）：x, y = 格，z = Patches 下标，w = 下一节点。上千发弹体每步都查，不走 Cells 的通用哈希、也不用跳过同格的障碍与残骸。头表存“节点号 + 1”，0 = 空。</summary>
+        public NativeArray<int> PatchHead;
+        public NativeList<int4> PatchNodes;
+        internal const int PatchHeadSlots = 2048;
+        private const int WreckHeadSlots = 1024;
+        private const int WreckFineWords = 256;
+        private const int FieldMaskSlots = 1024;
 
         public static EmgHash Create() => new EmgHash
         {
             Entries = new NativeList<float4>(8, Allocator.Persistent),
             Refs = new NativeList<int>(8, Allocator.Persistent),
             Cells = new NativeParallelMultiHashMap<long, int>(16, Allocator.Persistent),
+            WreckHead = new NativeArray<int>(WreckHeadSlots, Allocator.Persistent),
+            WreckNodes = new NativeList<int4>(16, Allocator.Persistent),
+            WreckFine = new NativeArray<ulong>(WreckFineWords, Allocator.Persistent),
+            FieldMasks = new NativeArray<ulong>(FieldMaskSlots, Allocator.Persistent),
+            PatchHead = new NativeArray<int>(PatchHeadSlots, Allocator.Persistent),
+            PatchNodes = new NativeList<int4>(64, Allocator.Persistent),
         };
 
         public void Dispose()
@@ -33,11 +54,135 @@ namespace BinGames.Sim.Combat
             Entries.Dispose();
             Refs.Dispose();
             Cells.Dispose();
+            WreckHead.Dispose();
+            WreckNodes.Dispose();
+            WreckFine.Dispose();
+            FieldMasks.Dispose();
+            PatchHead.Dispose();
+            PatchNodes.Dispose();
         }
 
         internal static int CellOf(double v) => (int)math.floor(v / Cell);
 
         internal static long Key(int cx, int cy) => ((long)cx << 32) ^ (uint)cy;
+
+        internal static int WreckSlot(int cx, int cy) => (int)(((uint)cx * 73856093u ^ (uint)cy * 19349663u) & (WreckHeadSlots - 1u));
+
+        internal void AddWreckCell(int cx, int cy, int entry)
+        {
+            int slot = WreckSlot(cx, cy);
+            WreckNodes.Add(new int4(cx, cy, entry, WreckHead[slot] - 1));
+            WreckHead[slot] = WreckNodes.Length;
+        }
+
+        internal void ClearWreckCells()
+        {
+            WreckNodes.Clear();
+            for (int i = 0; i < WreckHeadSlots; i++)
+            {
+                WreckHead[i] = 0;
+            }
+            for (int i = 0; i < WreckFineWords; i++)
+            {
+                WreckFine[i] = 0ul;
+            }
+        }
+
+        private static uint FineBit(int fx, int fy) => ((uint)fx * 73856093u ^ (uint)fy * 19349663u) & (WreckFineWords * 64u - 1u);
+
+        /// <summary>登记一个残骸圆（与 Entries 同一份单精度圆心 / 半径；外扩 1 毫米覆盖 SegmentCircleT 的舍入）。</summary>
+        internal void MarkWreckFine(float4 c)
+        {
+            double r = (double)c.z + 1e-3;
+            int x0 = (int)math.floor(c.x - r), x1 = (int)math.floor(c.x + r), y0 = (int)math.floor(c.y - r), y1 = (int)math.floor(c.y + r);
+            for (int fy = y0; fy <= y1; fy++)
+            {
+                for (int fx = x0; fx <= x1; fx++)
+                {
+                    uint b = FineBit(fx, fy);
+                    WreckFine[(int)(b >> 6)] |= 1ul << (int)(b & 63u);
+                }
+            }
+        }
+
+        /// <summary>线段 a→b 的外接框覆盖的 1 米细格里有没有残骸登记（false = 线段必不碰任何残骸圆）。</summary>
+        internal bool WreckFineOnSegment(double2 a, double2 b)
+        {
+            int x0 = (int)math.floor(math.min(a.x, b.x)), x1 = (int)math.floor(math.max(a.x, b.x));
+            int y0 = (int)math.floor(math.min(a.y, b.y)), y1 = (int)math.floor(math.max(a.y, b.y));
+            if ((long)(x1 - x0 + 1) * (y1 - y0 + 1) > 64)
+            {
+                return true; // 很长的线段不逐格查，交给完整检测
+            }
+            for (int fy = y0; fy <= y1; fy++)
+            {
+                for (int fx = x0; fx <= x1; fx++)
+                {
+                    uint b2 = FineBit(fx, fy);
+                    if ((WreckFine[(int)(b2 >> 6)] & (1ul << (int)(b2 & 63u))) != 0ul)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        internal static int PatchSlot(int cx, int cy) => (int)(((uint)cx * 73856093u ^ (uint)cy * 19349663u) & (PatchHeadSlots - 1u));
+
+        internal void ClearPatchCells()
+        {
+            PatchNodes.Clear();
+            for (int i = 0; i < PatchHeadSlots; i++)
+            {
+                PatchHead[i] = 0;
+            }
+        }
+
+        internal void AddPatchCell(int cx, int cy, int patch)
+        {
+            int slot = PatchSlot(cx, cy);
+            PatchNodes.Add(new int4(cx, cy, patch, PatchHead[slot] - 1));
+            PatchHead[slot] = PatchNodes.Length;
+        }
+
+        internal void ClearFieldCells()
+        {
+            for (int i = 0; i < FieldMaskSlots; i++)
+            {
+                FieldMasks[i] = 0ul;
+            }
+        }
+
+        private static int FieldSlot(int cx, int cy) => (int)(((uint)cx * 73856093u ^ (uint)cy * 19349663u) & (FieldMaskSlots - 1u));
+
+        internal void MarkFieldCircle(int field, double2 p, float r)
+        {
+            int x0 = CellOf(p.x - r), x1 = CellOf(p.x + r), y0 = CellOf(p.y - r), y1 = CellOf(p.y + r);
+            for (int cy = y0; cy <= y1; cy++)
+            {
+                for (int cx = x0; cx <= x1; cx++)
+                {
+                    int slot = FieldSlot(cx, cy);
+                    FieldMasks[slot] |= 1ul << field;
+                }
+            }
+        }
+
+        /// <summary>线段外接框（外扩 <paramref name="pad"/>）覆盖的格里可能碰到的场（下标掩码）。</summary>
+        internal ulong FieldMaskOnSegment(double2 a, double2 b, double pad)
+        {
+            int x0 = CellOf(math.min(a.x, b.x) - pad), x1 = CellOf(math.max(a.x, b.x) + pad), y0 = CellOf(math.min(a.y, b.y) - pad), y1 = CellOf(math.max(a.y, b.y) + pad);
+            ulong mask = 0ul;
+            for (int cy = y0; cy <= y1; cy++)
+            {
+                for (int cx = x0; cx <= x1; cx++)
+                {
+                    mask |= FieldMasks[FieldSlot(cx, cy)];
+                }
+            }
+            return mask;
+        }
     }
 
     /// <summary>
@@ -1241,6 +1386,8 @@ namespace BinGames.Sim.Combat
             d.EmgHash.Entries.Clear();
             d.EmgHash.Refs.Clear();
             d.EmgHash.Cells.Clear();
+            d.EmgHash.ClearWreckCells();
+            d.EmgHash.ClearPatchCells();
             for (int k = 0; k < d.Obstacles.Length; k++)
             {
                 float3 o = d.Obstacles[k];
@@ -1286,12 +1433,24 @@ namespace BinGames.Sim.Combat
             int e = d.EmgHash.Entries.Length;
             d.EmgHash.Entries.Add(new float4((float)p.x, (float)p.y, r, kind));
             d.EmgHash.Refs.Add(index);
+            if (kind == EmgHash.KindWreck)
+            {
+                d.EmgHash.MarkWreckFine(d.EmgHash.Entries[e]);
+            }
             int x0 = EmgHash.CellOf(p.x - r), x1 = EmgHash.CellOf(p.x + r), y0 = EmgHash.CellOf(p.y - r), y1 = EmgHash.CellOf(p.y + r);
             for (int cy = y0; cy <= y1; cy++)
             {
                 for (int cx = x0; cx <= x1; cx++)
                 {
                     d.EmgHash.Cells.Add(EmgHash.Key(cx, cy), e);
+                    if (kind == EmgHash.KindWreck)
+                    {
+                        d.EmgHash.AddWreckCell(cx, cy, e);
+                    }
+                    else if (kind == EmgHash.KindPatch)
+                    {
+                        d.EmgHash.AddPatchCell(cx, cy, index);
+                    }
                 }
             }
         }
@@ -1310,47 +1469,72 @@ namespace BinGames.Sim.Combat
             int x0 = EmgHash.CellOf(math.min(a.x, b.x)), x1 = EmgHash.CellOf(math.max(a.x, b.x));
             int y0 = EmgHash.CellOf(math.min(a.y, b.y)), y1 = EmgHash.CellOf(math.max(a.y, b.y));
             int best = -1;
+            // FG-GAP-186：线段外接框（外扩 1 毫米，远大于 SegmentCircleT 的舍入误差）——圆的外接框与它不相交时必然不相交，先排除再读残骸表
+            double2 lo = math.min(a, b) - 1e-3, hi = math.max(a, b) + 1e-3;
             for (int cy = y0; cy <= y1; cy++)
             {
                 for (int cx = x0; cx <= x1; cx++)
                 {
+                    if (kind == EmgHash.KindWreck)
+                    {
+                        // FG-GAP-186：残骸走专用格链（结果只取最早 t、同 t 取小下标，与遍历顺序无关，同通用哈希逐字一致）
+                        for (int node = d.EmgHash.WreckHead[EmgHash.WreckSlot(cx, cy)] - 1; node >= 0;)
+                        {
+                            int4 cell = d.EmgHash.WreckNodes[node];
+                            node = cell.w;
+                            if (cell.x == cx && cell.y == cy)
+                            {
+                                EmgHashSegmentTest(ref d, cell.z, a, b, lo, hi, kind, skipEnds, skipStart, skipAround, around, ref tHit, ref best);
+                            }
+                        }
+                        continue;
+                    }
                     if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(cx, cy), out int e, out NativeParallelMultiHashMapIterator<long> it))
                     {
                         continue;
                     }
                     do
                     {
-                        float4 c = d.EmgHash.Entries[e];
-                        if ((byte)c.w != kind)
+                        if ((byte)d.EmgHash.Entries[e].w == kind)
                         {
-                            continue;
-                        }
-                        int idx = d.EmgHash.Refs[e];
-                        if (kind == EmgHash.KindWreck && (idx >= d.Wrecks.Length || !(d.Wrecks[idx].Hp > 0f)))
-                        {
-                            continue;
-                        }
-                        double2 center = new double2(c.x, c.y);
-                        double r2 = (double)c.z * c.z;
-                        if ((skipEnds || skipStart) && (math.lengthsq(a - center) <= r2 || (skipEnds && math.lengthsq(b - center) <= r2)))
-                        {
-                            continue; // EMG1-ENT-01：skipStart = 只跳过起点已在圆内的（弹体从残骸里飞出去不算撞上）
-                        }
-                        if (skipAround && math.distance(around, center) <= c.z + 0.1)
-                        {
-                            continue; // EMG1-E2E-01：开火目标所在的障碍圆不挡（同即时命中的视线 LineOfSight：终点自己所在的障碍不算）
-                        }
-                        double t = SegmentCircleT(a, b, center, c.z);
-                        if (t >= 0 && (t < tHit || (t == tHit && idx < best)))
-                        {
-                            tHit = t;
-                            best = idx;
+                            EmgHashSegmentTest(ref d, e, a, b, lo, hi, kind, skipEnds, skipStart, skipAround, around, ref tHit, ref best);
                         }
                     }
                     while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
                 }
             }
             return best;
+        }
+
+        private static void EmgHashSegmentTest(ref CombatData d, int e, double2 a, double2 b, double2 lo, double2 hi, byte kind, bool skipEnds, bool skipStart,
+            bool skipAround, double2 around, ref double tHit, ref int best)
+        {
+            float4 c = d.EmgHash.Entries[e];
+            if ((double)c.x + c.z < lo.x || (double)c.x - c.z > hi.x || (double)c.y + c.z < lo.y || (double)c.y - c.z > hi.y)
+            {
+                return; // 外接框不相交：SegmentCircleT 必为 −1、起点也不在圆内（下面各条跳过只会让命中更少），结果不变
+            }
+            int idx = d.EmgHash.Refs[e];
+            if (kind == EmgHash.KindWreck && (idx >= d.Wrecks.Length || !(d.Wrecks.ElementAt(idx).Hp > 0f)))
+            {
+                return;
+            }
+            double2 center = new double2(c.x, c.y);
+            double r2 = (double)c.z * c.z;
+            if ((skipEnds || skipStart) && (math.lengthsq(a - center) <= r2 || (skipEnds && math.lengthsq(b - center) <= r2)))
+            {
+                return; // EMG1-ENT-01：skipStart = 只跳过起点已在圆内的（弹体从残骸里飞出去不算撞上）
+            }
+            if (skipAround && math.distance(around, center) <= c.z + 0.1)
+            {
+                return; // EMG1-E2E-01：开火目标所在的障碍圆不挡（同即时命中的视线 LineOfSight：终点自己所在的障碍不算）
+            }
+            double t = SegmentCircleT(a, b, center, c.z);
+            if (t >= 0 && (t < tHit || (t == tHit && idx < best)))
+            {
+                tHit = t;
+                best = idx;
+            }
         }
 
         /// <summary>
@@ -1396,7 +1580,7 @@ namespace BinGames.Sim.Combat
         {
             at = next;
             o = -1;
-            if (d.Obstacles.Length == 0 || (pr.Flags & (EmgProjFlags.Sub | EmgProjFlags.Flight)) == 0)
+            if ((pr.Flags & (EmgProjFlags.Sub | EmgProjFlags.Flight)) == 0 || d.Obstacles.Length == 0) // FG-GAP-186：先判本地标志（旧弹体都在这里退出），少一次容器访问
             {
                 return false;
             }

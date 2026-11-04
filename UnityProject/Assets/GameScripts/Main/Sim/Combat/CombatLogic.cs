@@ -11,6 +11,8 @@ namespace BinGames.Sim.Combat
     [BurstCompile(CompileSynchronously = true)]
     public struct CombatStepJob : IJob
     {
+        // FG-GAP-186：只用 Run() 在主线程同步执行、内核数据不与别的作业共用——编辑器里调度时逐个登记 ~140 个容器的安全句柄每步约 4.5 µs，没有可防的并发；关掉安全句柄后只剩越界检查，用已释放容器的检测没有了。
+        [Unity.Collections.LowLevel.Unsafe.NativeDisableContainerSafetyRestriction]
         public CombatData D;
         public float Dt;
         public double Time;
@@ -1874,6 +1876,10 @@ namespace BinGames.Sim.Combat
 
         private static void StepProjectiles(ref CombatData d, ref CombatGrid grid, float dt)
         {
+            if (d.Fields.Length > 0)
+            {
+                EmgRebuildFieldMasks(ref d);
+            }
             int m = d.Projectiles.Length;
             int write = 0;
             float maxR = grid.MaxRadius;
@@ -1938,6 +1944,12 @@ namespace BinGames.Sim.Combat
                 int cy1 = grid.CellOf(math.max(pr.Prev.y, next.y) + reach);
                 int hit = -1;
                 double hitT = 2.0;
+                int ignoreUnit = pr.IgnoreUnit;
+                bool plainScan = !neutral && !hitsNeutral && ignoreUnit == 0;
+                // 线段外接框外扩 1 毫米（远大于 SegmentCircleT 的舍入误差）；逐候选用到的弹体字段先取到本地
+                double2 a0 = pr.Prev;
+                float prR = pr.Radius;
+                double2 segLo = math.min(a0, next) - 1e-3, segHi = math.max(a0, next) + 1e-3;
                 if (airborne || EmgSkipUnits(pr))
                 {
                     cy1 = cy0 - 1; // EMG1-GRM-01：空中的抛射弹 / 回程已命中过的折返弹不碰单位
@@ -1953,11 +1965,22 @@ namespace BinGames.Sim.Combat
                         for (int e = start; e < start + count; e++)
                         {
                             int k = grid.Slots[e];
-                            if ((!neutral && d.Faction[k] != want && !(hitsNeutral && d.Faction[k] == (byte)CombatFaction.Neutral)) || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || (pr.IgnoreUnit != 0 && d.Id[k] == pr.IgnoreUnit))
+                            if (plainScan && d.Faction[k] != want)
+                            {
+                                continue; // FG-GAP-186：旧弹体（不中立、不打中立、无忽略单位）下式第一项化简为阵营不符
+                            }
+                            double2 uc = d.Pos[k];
+                            float ur = d.Radius[k] + prR;
+                            if (uc.x + ur < segLo.x || uc.x - ur > segHi.x || uc.y + ur < segLo.y || uc.y - ur > segHi.y)
+                            {
+                                continue; // FG-GAP-186：圆的外接框不碰线段外接框 → SegmentCircleT 必为 −1（先排除，少算二次方程与两次状态读）
+                            }
+                            if ((!plainScan && ((!neutral && d.Faction[k] != want && !(hitsNeutral && d.Faction[k] == (byte)CombatFaction.Neutral)) || (ignoreUnit != 0 && d.Id[k] == ignoreUnit)))
+                                || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable))
                             {
                                 continue;
                             }
-                            double tHit = SegmentCircleT(pr.Prev, next, d.Pos[k], d.Radius[k] + pr.Radius);
+                            double tHit = SegmentCircleT(a0, next, uc, ur);
                             if (tHit < 0)
                             {
                                 continue;
@@ -2005,7 +2028,8 @@ namespace BinGames.Sim.Combat
                 {
                     solidHit = EmgSolidOnProjectile(ref d, pr, next, hit >= 0 ? hitT : 1.0, out solidT);
                 }
-                if (d.Wrecks.Length > 0 && EmgEntOn(ref d) && !airborne && pr.PierceLeft == 0 && ((pr.Mods & EmgProjMods.Orbit) == 0 || (pr.Flags & EmgProjFlags.Sub) != 0))
+                if (d.Wrecks.Length > 0 && EmgEntOn(ref d) && !airborne && pr.PierceLeft == 0 && ((pr.Mods & EmgProjMods.Orbit) == 0 || (pr.Flags & EmgProjFlags.Sub) != 0)
+                    && EmgWreckNear(ref d, pr.Prev, next)) // FG-GAP-186：线段外接框的 1 米细格里没有残骸时不进 EmgWreckHit（结果同为 0）
                 {
                     int wr = EmgWreckHit(ref d, ref pr, next, solidHit >= 0 ? solidT : hit >= 0 ? hitT : 1.0);
                     if (wr == 1)
@@ -2796,20 +2820,12 @@ namespace BinGames.Sim.Combat
     /// </summary>
     public struct CombatGrid : IDisposable
     {
-        private struct Entry : IComparable<Entry>
-        {
-            public long Key;
-            public int Slot;
-
-            public int CompareTo(Entry o)
-            {
-                int c = Key.CompareTo(o.Key);
-                return c != 0 ? c : Slot.CompareTo(o.Slot);
-            }
-        }
-
         public NativeArray<int> Slots;
-        private NativeParallelHashMap<long, int2> _cells;
+        // FG-GAP-186：格 → (起点, 个数) 用开放寻址表（2 的幂、线性探测、个数 0 = 空位），代替 NativeParallelHashMap——
+        // 上千发弹体每步要查几千次格，通用哈希表的 long 散列（cx ^ cy）在对角线上大量撞桶。表里存的 (起点, 个数) 与原来逐字相同。
+        private NativeArray<long> _keys;
+        private NativeArray<int2> _vals;
+        private int _mask;
         private readonly float _cell;
         private readonly double _inv;
         public float MaxRadius;
@@ -2820,7 +2836,9 @@ namespace BinGames.Sim.Combat
             _cell = math.max(CombatConst.MinGridCell, cell);
             _inv = 1.0 / _cell;
             Slots = default;
-            _cells = default;
+            _keys = default;
+            _vals = default;
+            _mask = 0;
             MaxRadius = 0f;
             _built = false;
         }
@@ -2829,46 +2847,84 @@ namespace BinGames.Sim.Combat
 
         private static long Key(int cx, int cy) => ((long)cx << 32) ^ (uint)cy;
 
+        private int Probe(long key) => (int)(((ulong)key * 11400714819323198485ul) >> 40) & _mask;
+
         public void Build(ref CombatData d)
         {
+            // FG-GAP-186：计数分桶代替排序（O(n)）：按槽位升序逐个放进所属格，每格里的槽位顺序与原来“按 (格键, 槽位) 排序”逐字相同；
+            // 各格在 Slots 里的先后不同，但所有调用方都只按 (起点, 个数) 读一格。
             int n = d.Count;
-            var entries = new NativeList<Entry>(math.max(1, n), Allocator.Temp);
+            var cellOf = new NativeArray<int>(math.max(1, n), Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            int size = math.ceilpow2(math.max(4, n * 2)); // 格数 ≤ 单位数，装载率 ≤ 1/2
+            _mask = size - 1;
+            _keys = new NativeArray<long>(size, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            _vals = new NativeArray<int2>(size, Allocator.Temp); // 清零：个数 0 = 空位
+            int m = 0;
             for (int i = 0; i < n; i++)
             {
                 if (!d.IsAlive(i) || !d.Has(i, CombatUnitFlags.Targetable))
                 {
+                    cellOf[i] = -1;
                     continue;
                 }
                 double2 p = d.Pos[i];
-                entries.Add(new Entry { Key = Key(CellOf(p.x), CellOf(p.y)), Slot = i });
+                long key = Key(CellOf(p.x), CellOf(p.y));
+                int h = Probe(key);
+                while (_vals[h].y != 0 && _keys[h] != key)
+                {
+                    h = (h + 1) & _mask;
+                }
+                _keys[h] = key;
+                _vals[h] = new int2(0, _vals[h].y + 1);
+                cellOf[i] = h;
+                m++;
                 MaxRadius = math.max(MaxRadius, d.Radius[i]);
             }
-            entries.Sort();
-            Slots = new NativeArray<int>(math.max(1, entries.Length), Allocator.Temp);
-            _cells = new NativeParallelHashMap<long, int2>(math.max(1, entries.Length), Allocator.Temp);
-            int k = 0;
-            while (k < entries.Length)
+            var fill = new NativeArray<int>(size, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            int run = 0;
+            for (int h = 0; h < size; h++)
             {
-                long key = entries[k].Key;
-                int start = k;
-                while (k < entries.Length && entries[k].Key == key)
+                int c = _vals[h].y;
+                if (c != 0)
                 {
-                    Slots[k] = entries[k].Slot;
-                    k++;
+                    _vals[h] = new int2(run, c);
+                    fill[h] = run;
+                    run += c;
                 }
-                _cells.TryAdd(key, new int2(start, k - start));
             }
-            entries.Dispose();
+            Slots = new NativeArray<int>(math.max(1, m), Allocator.Temp);
+            for (int i = 0; i < n; i++)
+            {
+                int h = cellOf[i];
+                if (h >= 0)
+                {
+                    Slots[fill[h]++] = i;
+                }
+            }
+            cellOf.Dispose();
+            fill.Dispose();
             _built = true;
         }
 
         public bool TryGetCell(int cx, int cy, out int start, out int count)
         {
-            if (_built && _cells.TryGetValue(Key(cx, cy), out int2 v))
+            if (_built)
             {
-                start = v.x;
-                count = v.y;
-                return true;
+                long key = Key(cx, cy);
+                for (int h = Probe(key); ; h = (h + 1) & _mask)
+                {
+                    int2 v = _vals[h];
+                    if (v.y == 0)
+                    {
+                        break;
+                    }
+                    if (_keys[h] == key)
+                    {
+                        start = v.x;
+                        count = v.y;
+                        return true;
+                    }
+                }
             }
             start = 0;
             count = 0;
@@ -2882,7 +2938,8 @@ namespace BinGames.Sim.Combat
                 return;
             }
             Slots.Dispose();
-            _cells.Dispose();
+            _keys.Dispose();
+            _vals.Dispose();
             _built = false;
         }
     }

@@ -449,8 +449,41 @@ namespace GameLogic.EditorTools
 
         // ── D 摧毁 / 融化 / 清除 ───────────────────────────────────────────
 
+        private static bool MatterAlive(CombatKernel k, byte matter)
+        {
+            for (int i = 0; i < k.PatchSlots; i++)
+            {
+                if (k.TryGetPatch(i, out CombatZone z) && z.Matter == matter)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static void CheckEndings()
         {
+            // EMG2-E2E-01：熔融金属被反复加热，寿命（10 秒）到时还高于凝固线：同样凝成冷渣，不能凭空消失（突袭里连续熔穿实测发现）
+            using (CombatKernel melt = NewKernel(true))
+            {
+                melt.SpawnPatch(EmgMatterConst.Molten, new double2(0, 0), 1f, 4f, 10f);
+                for (int i = 0; i < 60 * 9; i++)
+                {
+                    if (i % 15 == 0)
+                    {
+                        melt.InjectPatchEnergy(new double2(0, 0), 1f, EmgConst.PortHeat, 30f);
+                    }
+                    melt.Step(Dt, melt.Time + Dt);
+                }
+                bool hot = MatterAlive(melt, EmgMatterConst.Molten);
+                for (int i = 0; i < 60 * 2; i++)
+                {
+                    melt.Step(Dt, melt.Time + Dt);
+                }
+                Expect(hot && !MatterAlive(melt, EmgMatterConst.Molten) && MatterAlive(melt, EmgMatterConst.Slag),
+                    $"熔融金属一直被加热（9 秒时还是熔融 {hot}）：10 秒寿命到凝成冷渣（{MatterAlive(melt, EmgMatterConst.Slag)}），没有凭空消失");
+            }
+
             using CombatKernel k = NewKernel(true);
             k.SpawnPatch(EmgMatterConst.Ice, new double2(0, 0), 2f);
             k.SpawnPatch(EmgMatterConst.Cured, new double2(30, 0), 2f);
@@ -937,6 +970,11 @@ namespace GameLogic.EditorTools
             SoftlockState st = SoftlockService.StateOf(s);
             int floods0 = SitePersistService.Floods;
             Expect(st.PersistBlocks.Length == 0 && NotifyCount(SitePersistService.NotifyBlocked) == 0, "L1 负向：什么都没堵时不警告");
+            // EMG2-E2E-01：框外（远处野地）的残骸堵不到框内的路，不用泛洪（后期基地施工高峰曾被这一次泛洪拖慢）
+            AddWreck(k, new double2(c.X + 400, c.Y + 400));
+            WorldSimulation.StepMany(2);
+            SitePersistService.Check(s);
+            Expect(SitePersistService.Floods == floods0 && st.PersistBlocks.Length == 0, $"L1b 框外的残骸不泛洪（{SitePersistService.Floods - floods0} 次）、不警告");
             // 一圈固化胶块围住仓库（核心到仓库唯一通路被堵死）
             Ring(k, c, 5, wrecks: false);
             WorldSimulation.StepMany(240); // 每步生成额度 32，顺延铺完

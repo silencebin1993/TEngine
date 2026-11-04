@@ -75,6 +75,7 @@ namespace GameLogic.EditorTools
                 EmgCatalog.ResetForTests();
                 Step(CheckData);
                 Step(CheckBandwidth);
+                Step(CheckRelinkRefresh);
                 Step(CheckRange);
                 Step(CheckUnlink);
                 Step(CheckSaveLoad);
@@ -154,18 +155,18 @@ namespace GameLogic.EditorTools
             public int[] S = new int[4];
         }
 
-        private static Bay MakeBay(CombatKernel k, int drones, bool anchored = false, bool flight = false)
+        private static Bay MakeBay(CombatKernel k, int drones, bool anchored = false, bool flight = false, int fullBase = 100, int softBase = 200)
         {
             var b = new Bay();
             b.P[0] = -1;
             b.S[0] = -1;
             for (int i = 1; i <= 4; i++)
             {
-                b.P[i] = Prog(k, i, 100);
+                b.P[i] = Prog(k, i, fullBase);
             }
             for (int i = 1; i <= 3; i++)
             {
-                b.S[i] = Prog(k, i, 200);
+                b.S[i] = Prog(k, i, softBase);
             }
             int[] full = b.P.Select(p => k.AddWeapon(DroneW(p, drones, anchored, flight))).ToArray();
             int[] soft = b.S.Select(p => k.AddWeapon(DroneW(p, drones, anchored, flight))).ToArray();
@@ -262,6 +263,44 @@ namespace GameLogic.EditorTools
         }
 
         // ── B. FGT-EMG-012 带宽 ─────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// FG-GAP-172（FGT-EMG-012 对照）：先放出无人机再接入——武器下标换了，已在场的无人机被下一次开火续命时按当前带宽重刷成接入程序；
+        /// 对照：武器没换时再开火，持有与程序都不变；离开时已剥离的不再被重刷、不再续命。
+        /// </summary>
+        private static void CheckRelinkRefresh()
+        {
+            Line("  · B2. FG-GAP-172：无人机舱先放出无人机、再被接入 → 下一次开火重刷成接入程序（对照：武器没换不重刷；已剥离的不重刷）");
+            using var k = new CombatKernel(Cfg(8), 32);
+            Bay ai = MakeBay(k, 3);
+            Bay up = MakeBay(k, 3, fullBase: 300, softBase: 400);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), ai.Self, 500f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 4), 1e6f);
+            k.FireAt(me, foe, k.Time);
+            List<CombatDroneFlash> f0 = Flash(k);
+            StepN(k, 2);
+            k.FireAt(me, foe, k.Time);
+            List<CombatDroneFlash> same = Flash(k);
+            Expect(f0.Count == 3 && Ints(f0.Select(x => x.Held)) == "4,4,0" && same.All(x => x.Weapon == ai.Self) && Ints(same.Select(x => x.Held)) == "4,4,0" && same[0].Program == ai.P[4],
+                $"对照：武器没换时再开火，持有 {Ints(same.Select(x => x.Held))}、程序 {same[0].Program} 不变（AI 程序 {ai.P[4]}）");
+            k.SetUnitWeapon(me, up.Self);
+            StepN(k, 2);
+            List<CombatDroneFlash> linked = Flash(k);
+            Expect(linked.All(x => x.Weapon == ai.Self), "接入那一刻不动已在场的（FGR-EMG-036）：下一次开火才换");
+            k.FireAt(me, foe, k.Time);
+            List<CombatDroneFlash> f1 = Flash(k);
+            Expect(f1.Count == 3 && f1.All(x => x.Weapon == up.Self) && Ints(f1.Select(x => x.Held)) == "4,4,0" && f1[0].Program == up.P[4] && f1[2].Program == -1 && k.FlashUsed(me) == 8,
+                $"接入后第一次开火：3 架都换成接入武器，按当前带宽重刷，持有 {Ints(f1.Select(x => x.Held))}、程序 {f1[0].Program}（接入程序 {up.P[4]}）、占用 {k.FlashUsed(me)} / {k.FlashBandwidth}");
+            k.FlashStrip(me);
+            k.SetUnitWeapon(me, ai.Self);
+            Dictionary<int, double> until0 = DroneUntil(k, me);
+            StepN(k, 2);
+            k.FireAt(me, foe, k.Time);
+            List<CombatDroneFlash> f2 = Flash(k);
+            Dictionary<int, double> until1 = DroneUntil(k, me);
+            Expect(f2.Where(x => x.Stripped).All(x => x.Weapon == up.Self) && f2.Count(x => x.Stripped) == 3 && until0.All(kv => until1.TryGetValue(kv.Key, out double u) && u == kv.Value),
+                "负向：离开后回 AI 武器再开火，已剥离的 3 架不重刷（仍是接入武器的剥离表）、也不续命（FGR-EMG-037）");
+        }
 
         private static void CheckBandwidth()
         {

@@ -916,6 +916,9 @@ namespace BinGames.Sim.Combat
 
         public EmgField FieldAt(int i) => i >= 0 && i < _d.Fields.Length ? _d.Fields[i] : default;
 
+        /// <summary>EMG2-E2E-01 自检入口：(x, y) 所在格的场下标掩码（弹体穿场预筛用；场全部到期后应为 0，任何位都不得指向表外）。</summary>
+        public ulong FieldMaskAtForTests(double x, double y) => _d.EmgHash.FieldMaskOnSegment(new double2(x, y), new double2(x, y), 0.0);
+
         /// <summary>EMG2-FLD-01 自检入口：放一片普通破片（FGR-EMG-114，2 代、不执行程序），走与碎裂 / 爆炸反应装甲同一个 EmgSpawnFragment。</summary>
         public bool SpawnFragmentForTests(double2 at, float2 dir, int ownerId, CombatFaction faction, float damage, float speed, float range)
         {

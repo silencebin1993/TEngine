@@ -1791,6 +1791,7 @@ namespace GameLogic.EditorTools
             public readonly List<double> SumMs = new List<double>();
             public readonly double[] SiteMs = new double[3];
             public int MaxProjectiles, MinProjectiles = int.MaxValue, MaxDrones, Wrecks, Machines, MinHostiles = int.MaxValue, MinTurrets = int.MaxValue;
+            public int MinPatches = int.MaxValue, MinFields = int.MaxValue, MaxHomePatches;
             public long Enqueued, Processed, SubSpawned, Injected;
             public int MaxProcessedPerStep, MaxPending, Rise, MaxRise;
             public long Alloc;
@@ -1814,17 +1815,19 @@ namespace GameLogic.EditorTools
             double enqPerStep = on.Enqueued / (double)measure, procPerStep = on.Processed / (double)measure, injPerStep = on.Injected / (double)measure, natPerStep = (on.Enqueued - on.Injected) / (double)measure;
             Line($"    · 环境：{SystemInfo.processorType}（{SystemInfo.processorCount} 线程），Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，Burst {(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}；" +
                  "内核是 Editor 下的 Burst 作业（真机 IL2CPP + Burst AOT 相同或更快），热更层另测（FG15-SYS-02）；推荐配置按开发机 ÷ 0.6 换算（ADR-ARC-003）");
+            Line($"    · 规模（阶段 2 新增满载项，预期差异，LANDING 6.3）：远征斑块每秒补回后最少 {on.MinPatches}、活跃场最少 {on.MinFields}、家园斑块峰值 {on.MaxHomePatches}");
+            Expect(on.MinPatches >= 488 && on.MinFields >= 64 && on.MaxHomePatches >= 100,
+                $"阶段 2 满载项装上（FGR-EMG-203 活跃场 64、家园 128；斑块只放不挡弹不伤人的 8 种，软上限之和 488，到顶就是这个量，1024 块由 FgEmgMatterSelfCheck 斑块段单测）：斑块 {on.MinPatches}、场 {on.MinFields}、家园 {on.MaxHomePatches}");
             Line($"    · 规模（阶段 1 满载项）：远征 200 突袭者 + 80 炮塔 + {on.Machines} 台带程序机器（测量期敌人最少 {on.MinHostiles}、炮塔最少 {on.MinTurrets}），弹体 {on.MinProjectiles}～{on.MaxProjectiles}，无人机峰值 {on.MaxDrones}，残骸 {on.Wrecks}（远征 256 + 家园 256），" +
                  $"子载荷生成 {on.SubSpawned}；事件负载：远征每步平均入队 {enqPerStep:F1}（自然产生 {natPerStep:F1} + 宿主模板注入 {injPerStep:F1}，常态 {LoadEventsPerStep}、每秒一次峰值 {LoadEventsPeak}；家园每步注入 {HomeEventsPerStep}）/ 三地点处理 {procPerStep:F1}、" +
-                 $"单步处理峰值 {on.MaxProcessedPerStep}、队列峰值 {on.MaxPending}、最长连续只增 {on.MaxRise} 步；无人机峰值未到规格 512（DEBT-EMG1FUZZ01-01）、" +
-                 $"斑块 / 场 / 相变（阶段 2 项）本阶段不装");
+                 $"单步处理峰值 {on.MaxProcessedPerStep}、队列峰值 {on.MaxPending}、最长连续只增 {on.MaxRise} 步；无人机峰值未到规格 512（承接 FG15-SYS-02）");
             Line($"    · 三地点内核之和每世界步：阶段 1 平均 {avgOn:F3} / p99 {p99On:F3} ms（远征 {on.SiteMs[0] / measure:F3}、家园 {on.SiteMs[1] / measure:F3}、前哨 {on.SiteMs[2] / measure:F3}）；" +
                  $"同场景 emg.stage = 0（程序为空、没有事件负载）平均 {avgOff:F3} / p99 {p99Off:F3} ms；涌现新增 = 两次独立运行的平均之差 {addAvg:F3} ms（p99 之差 {addP99:F3} ms 只作参考：两次运行逐步不配对，差值没有分位意义）；" +
                  $"测量 {measure} 步托管分配 {on.Alloc / 1024.0:F1} KB");
             bool scale = on.MinProjectiles >= 1500 && on.Wrecks >= 400 && on.Machines >= 120 && on.SubSpawned > 0 && on.MaxDrones > 0;
             Expect(scale, $"满载规模达标：测量窗口弹体始终 ≥ 1500（{on.MinProjectiles}）、带程序机器 {on.Machines} ≥ 120、残骸 {on.Wrecks} ≥ 400、有子载荷（{on.SubSpawned}）与无人机（{on.MaxDrones}）");
             PerfGate.Expect(true,
-                $"FGR-EMG-200（阶段 1 只判绝对预算）：三地点战斗内核每世界步 p99 {p99On:F3} ms → 推荐配置 {p99On / rec:F3} ms ≤ 1.5 ms（3x 每世界步，按推荐默认执行，2026-10-28），即 1x ≤ 3.0 ms / 帧；" +
+                $"FGR-EMG-200（绝对预算）：三地点战斗内核每世界步 p99 {p99On:F3} ms → 推荐配置 {p99On / rec:F3} ms ≤ 1.5 ms（3x 每世界步，按推荐默认执行，2026-10-28），即 1x ≤ 3.0 ms / 帧；" +
                 $"涌现新增（平均之差）{addAvg:F3} ms → {addAvg / rec:F3} ms ≤ 1.0 ms",
                 new[] { PerfGate.Le(p99On / rec, 1.5, "三地点内核每世界步 p99（推荐配置 ms）"), PerfGate.Le(addAvg / rec, 1.0, "涌现新增每世界步（平均之差，推荐配置 ms）") }, Expect, Line);
             Expect(procPerStep >= LoadEventsPerStep && on.MaxProcessedPerStep >= LoadEventsPeak && on.Injected > 0,
@@ -1878,6 +1881,11 @@ namespace GameLogic.EditorTools
                 int cursor = 0;
                 st.Machines = machines[0].Count + machines[1].Count;
                 st.Wrecks = AddWrecks(sites[0], 256, 26f) + AddWrecks(sites[1], 256, 20f);
+                int patchSeq = 0;
+                if (stage >= 2)
+                {
+                    TopUpStage2Load(sites, ref patchSeq); // DEBT-EMG1FUZZ01-01：阶段 2 满载项（远征斑块 + 活跃场 64、家园长期留存斑块 128）
+                }
                 double t = 0;
                 for (int i = 0; i < warm; i++)
                 {
@@ -1887,6 +1895,10 @@ namespace GameLogic.EditorTools
                         {
                             OrderAttacks(sites[s], machines[s], i);
                         }
+                    }
+                    if (stage >= 2 && i % 60 == 0)
+                    {
+                        TopUpStage2Load(sites, ref patchSeq); // 预热期同样每秒补，测量第一秒就是满载
                     }
                     InjectLoad(sites, hosts, i, ref cursor);
                     foreach (CombatSite s in sites)
@@ -1907,6 +1919,17 @@ namespace GameLogic.EditorTools
                         {
                             OrderAttacks(sites[s], machines[s], warm + i);
                         }
+                        if (stage >= 2)
+                        {
+                            TopUpStage2Load(sites, ref patchSeq); // 补的是两步之间的注入，不在内核计时里
+                        }
+                    }
+                    if (stage >= 2 && i % 60 == 30)
+                    {
+                        // 两次补之间读：请求按每步额度生成，3 秒的场在补的那一刻正好全部到期
+                        st.MinPatches = Math.Min(st.MinPatches, sites[0].Kernel.PatchCount);
+                        st.MinFields = Math.Min(st.MinFields, sites[0].Kernel.FieldCount);
+                        st.MaxHomePatches = Math.Max(st.MaxHomePatches, sites[1].Kernel.PatchCount);
                     }
                     st.Injected += InjectLoad(sites, hosts, warm + i, ref cursor); // 两步之间（热更层注入的时机），分派在下一步的 5d 段、计入内核计时
                     long pb = Processed(sites);
@@ -1952,6 +1975,34 @@ namespace GameLogic.EditorTools
                 }
             }
             return st;
+        }
+
+        /// <summary>
+        /// FGR-EMG-203 阶段 2 满载项：远征地点铺满斑块、活跃场 64，家园 128 块。按覆盖式格子轮着补（不重叠，软上限内并入 / 到期算真实降级路径），生成走内核同一条路径。
+        /// 8 种常见物质混着放，规则节拍、接触、传导都真实发生。shortcut: 无人机没到规格 512（只有机器自然放出的几十架），要补得给满载场景配 512 架的来源，承接 FG15-SYS-02。
+        /// </summary>
+        private static void TopUpStage2Load(CombatSite[] sites, ref int seq)
+        {
+            // 不挡弹、不伤人的物质：要量的是斑块层本身的开销，不能让斑块把战斗打散（FGR-EMG-203 同屏弹体 1500 同时成立）
+            byte[] mats = { EmgMatterConst.Oil, EmgMatterConst.Water, EmgMatterConst.Coolant, EmgMatterConst.Polymer, EmgMatterConst.Debris, EmgMatterConst.Dust, EmgMatterConst.Smoke, EmgMatterConst.Steam };
+            const int side = 34;
+            CombatKernel k = sites[0].Kernel;
+            for (int n = 1024 - k.PatchCount; n > 0; n--) // 只补缺口：SpawnPatch 是排队的（每步额度），多要只会堆“软上限并入”的空转，那不是满载而是刷生成
+            {
+                int cell = seq++ % (side * side);
+                var at = new double2((cell % side - side / 2) * 2.6, (cell / side - side / 2) * 2.6);
+                k.SpawnPatch(mats[seq % mats.Length], at, 1f, 1f, 8f);
+            }
+            for (int f = k.FieldCount; f < 64; f++)
+            {
+                k.SpawnField(EmgFieldConst.PortCorona, (f % 8 - 4) * 9.0, (f / 8 - 4) * 9.0, 3f, 3f, 0, CombatFaction.Player);
+            }
+            CombatKernel h = sites[1].Kernel;
+            for (int n = 128 - h.PatchCount; n > 0; n--)
+            {
+                int cell = seq++ % 144;
+                h.SpawnPatch(mats[seq % mats.Length], new double2((cell % 12 - 6) * 3.0, (cell / 12 - 6) * 3.0), 1f, 1f, 8f);
+            }
         }
 
         /// <summary>满载场景机器的接战距离：守在炮塔圈内原地开火（接战距离 6 米时 120 台机器会冲出炮塔圈去贴突袭者，双方弹道都缩成几米，弹幕规模掉一半）。</summary>

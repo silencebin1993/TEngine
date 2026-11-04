@@ -1355,7 +1355,7 @@ namespace BinGames.Sim.Combat
             var src = new NativeList<int2>(16, Allocator.Temp); // (Id, 下标)
             for (int i = 0; i < d.Patches.Length; i++)
             {
-                CombatZone z = d.Patches[i];
+                ref CombatZone z = ref d.Patches.ElementAt(i); // EMG2-E2E-01 修复轮 3（FGR-EMG-200）：只读引用，不整块拷斑块结构
                 if (PatchAlive(z) && math.abs(z.Temp - amb) > 0.5f)
                 {
                     src.Add(new int2(z.EmgId, i));
@@ -1384,7 +1384,7 @@ namespace BinGames.Sim.Combat
             for (int s = 0; s < n; s++)
             {
                 int i = src[(start + s) % src.Length].y;
-                CombatZone z = d.Patches[i];
+                ref CombatZone z = ref d.Patches.ElementAt(i);
                 bool fixI = MatterOf(ref d, z.Matter).FixedTemp != 0 || PatchWorld(z);
                 int x0 = EmgHash.CellOf(z.Pos.x - z.Radius), x1 = EmgHash.CellOf(z.Pos.x + z.Radius);
                 int y0 = EmgHash.CellOf(z.Pos.y - z.Radius), y1 = EmgHash.CellOf(z.Pos.y + z.Radius);
@@ -1392,22 +1392,17 @@ namespace BinGames.Sim.Combat
                 {
                     for (int cx = x0; cx <= x1; cx++)
                     {
-                        if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(cx, cy), out int e, out NativeParallelMultiHashMapIterator<long> it))
+                        // 修复轮 3（FGR-EMG-200 满载传导节拍）：走斑块专用格链（与 Cells 同一组登记，不经通用哈希、不跳残骸 / 障碍）；dT 是定点整数累加，与遍历顺序无关
+                        for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(cx, cy)] - 1; node >= 0;)
                         {
-                            continue;
-                        }
-                        do
-                        {
-                            if ((byte)d.EmgHash.Entries[e].w != EmgHash.KindPatch)
+                            int4 cell = d.EmgHash.PatchNodes[node];
+                            node = cell.w;
+                            int j = cell.z;
+                            if (cell.x != cx || cell.y != cy || j == i || j >= d.Patches.Length)
                             {
                                 continue;
                             }
-                            int j = d.EmgHash.Refs[e];
-                            if (j == i || j >= d.Patches.Length)
-                            {
-                                continue;
-                            }
-                            CombatZone o = d.Patches[j];
+                            ref CombatZone o = ref d.Patches.ElementAt(j);
                             // 一个邻居可能登记在多个格里：只在它与本块外接格的第一个公共格处理一次
                             if (!PatchAlive(o) || EmgHash.CellOf(math.max(o.Pos.x - o.Radius, z.Pos.x - z.Radius)) != cx
                                 || EmgHash.CellOf(math.max(o.Pos.y - o.Radius, z.Pos.y - z.Radius)) != cy)
@@ -1430,13 +1425,12 @@ namespace BinGames.Sim.Combat
                                 dT[j] += FixHeat(k * (z.Temp - o.Temp) * wi);
                             }
                         }
-                        while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
                     }
                 }
             }
             for (int i = 0; i < d.Patches.Length; i++)
             {
-                CombatZone z = d.Patches[i];
+                ref CombatZone z = ref d.Patches.ElementAt(i);
                 if (!PatchAlive(z) || MatterOf(ref d, z.Matter).FixedTemp != 0 || PatchWorld(z))
                 {
                     continue;
@@ -1446,11 +1440,7 @@ namespace BinGames.Sim.Combat
                 {
                     t = math.max(amb, t - cool);
                 }
-                if (t != z.Temp)
-                {
-                    z.Temp = t;
-                    d.Patches[i] = z;
-                }
+                z.Temp = t;
             }
             dT.Dispose();
             isSrc.Dispose();

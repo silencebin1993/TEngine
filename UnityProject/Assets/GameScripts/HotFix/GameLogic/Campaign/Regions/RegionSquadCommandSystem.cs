@@ -581,7 +581,7 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        /// <summary>右键情境命令（也是自检入口）：敌人 → 攻击；宿主认领的工作目标 → 派工；否则 → 移动到该点。</summary>
+        /// <summary>右键情境命令（也是自检入口）：敌人 → 攻击；受伤友军且选中里有维修机 → 修复；宿主认领的工作目标 → 派工；否则 → 移动到该点。</summary>
         public void IssueContextCommand(Vector3 screen, Vector2 world, bool paused)
         {
             if (_ctx == null || _selection.Count == 0)
@@ -594,12 +594,42 @@ namespace GameLogic.Campaign.Regions
                 IssueAttack(hostile.Value.HostileId, paused);
                 return;
             }
+            if (TryIssueRepair(world, paused))
+            {
+                return;
+            }
             if (_ctx.ContextCommand != null && _ctx.ContextCommand(screen))
             {
                 _armedKind = null;
                 return;
             }
             IssueMoveTo(world, paused);
+        }
+
+        /// <summary>FG-GAP-175：点中受伤的己方单位、选中里有维修机时，只派维修机去修（内核攻击命令对友军目标 = 修复出手）；其余选中的机器不接这条令。否则返回 false，右键照常往下判定。</summary>
+        private bool TryIssueRepair(Vector2 world, bool paused)
+        {
+            GameLogic.Campaign.Combat.CombatSite site = _ctx.Site;
+            int unit = site != null ? site.PickInjuredPlayerUnit(world, ClickPickRadius) : 0;
+            if (unit == 0)
+            {
+                return false;
+            }
+            var repairers = new List<int>();
+            for (int i = 0; i < _selection.Count; i++)
+            {
+                if (site.CanMachineRepair(_selection[i]) && !(site.TryGetMachineUnit(_selection[i], out int own) && own == unit))
+                {
+                    repairers.Add(_selection[i]);
+                }
+            }
+            if (repairers.Count == 0)
+            {
+                return false;
+            }
+            _armedKind = null;
+            StartCommandForTargets(RegionCommandKind.Attack, world, null, repairers, paused, unit, GameText.Get("alarm.kind.repair"));
+            return true;
         }
 
         /// <summary>UI 按钮/热键共用入口：进入"武装"状态，下一次左键点击世界即确认目标。
@@ -748,11 +778,11 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
-        private int StartCommandForTargets(RegionCommandKind kind, Vector2 targetPosition, string hostileId, IReadOnlyList<int> targets, bool pending)
+        private int StartCommandForTargets(RegionCommandKind kind, Vector2 targetPosition, string hostileId, IReadOnlyList<int> targets, bool pending, int friendlyTarget = 0, string label = null)
         {
             int firstStarted = 0;
             int started = 0;
-            int targetUnit = kind == RegionCommandKind.Attack && _ctx.HostileUnit != null ? _ctx.HostileUnit(hostileId) : 0;
+            int targetUnit = friendlyTarget != 0 ? friendlyTarget : kind == RegionCommandKind.Attack && _ctx.HostileUnit != null ? _ctx.HostileUnit(hostileId) : 0;
             _outScratch.Clear();
             for (int i = 0; i < targets.Count; i++)
             {
@@ -792,7 +822,7 @@ namespace GameLogic.Campaign.Regions
             // 它排在拒绝原因后面，命令栏最新一行只剩“已下达（0 台）”，玩家看不到为什么没动（B06）。
             if (!pending && (started > 0 || _outScratch.Count == 0))
             {
-                PushEvent($"{KindLabel(kind)} 已下达（{started} 台）。");
+                PushEvent($"{label ?? KindLabel(kind)} 已下达（{started} 台）。");
                 if (firstStarted != 0)
                 {
                     // 命令确认音按第一台接令机器的底盘区分（ChassisCatalog.SfxId 的消费点）；选择框与路径线是它的等价视觉反馈，不出字幕。

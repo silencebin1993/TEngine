@@ -313,6 +313,25 @@ namespace GameLogic.Campaign.Emergence
             return raw;
         }
 
+        /// <summary>FG-GAP-169：这个部件有没有声明“写 <paramref name="port"/>”。不看声明是否生效：回滚（emg.stage = 0）时旧轨同样要知道它是哪类部件。</summary>
+        public static bool OwnerDeclaresWrite(string owner, string port)
+        {
+            EmgCompiled c = Current;
+            if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !c.PortIndexById.TryGetValue(port, out int pi))
+            {
+                return false;
+            }
+            ushort code = c.Ports[pi].Code;
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.Owner == oi && d.Dir == EmgDirs.Write && d.Port == code)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public const string PartPropCapKey = "emg.part.prop_sum_cap";
 
         /// <summary>EMG2-REACT-01：这些部件里有没有已生效的“读 <paramref name="port"/>、角色 <paramref name="role"/>”声明（按端口 + 角色，不认部件 ID，FGR-EMG-013）。</summary>

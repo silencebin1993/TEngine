@@ -136,7 +136,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static long NowMs() => FgjM2Common.NowMs();
 
-        private static string Name(string fw) =>
+        internal static string Name(string fw) =>
             fw == ComponentCatalog.CompCannonId ? ComponentCatalog.All[fw].DisplayName : GameText.Get("firmware." + fw + ".name");
 
         private static StepOutcome TickPlay(JourneyContext c) =>
@@ -179,38 +179,9 @@ namespace GameLogic.EditorTools.JourneyBots
             var missing = new List<string>();
             foreach (string fw in new[] { Split, Oil, Fuse, ComponentCatalog.CompCannonId })
             {
-                var where = new List<string>();
-                if (MechanicalContentUnlock.IsUnlocked(s, fw))
-                {
-                    where.Add("开局已有");
-                }
-                if (LootPickCatalog.Rows.Any(r => r?.Item?.Id == fw))
-                {
-                    where.Add("三选一候选池");
-                }
-                if (LootCatalog.Rows.Any(r => r?.Item?.Id == fw))
-                {
-                    where.Add("掉落表");
-                }
-                foreach (string f in new[] { EnemyDefs.FactionFoundry, EnemyDefs.FactionClarity, EnemyDefs.FactionSilent, FirmwareKinds.FactionReclaim })
-                {
-                    if (LootCatalog.EnemyFirmwareOf(f).Contains(fw))
-                    {
-                        where.Add(f + " 杂兵残骸");
-                        break;
-                    }
-                }
-                if (FirmwareRestoreService.IsRestorable(fw))
-                {
-                    where.Add($"数据复原（表来源 {FirmwareKinds.SourceOf(fw)}）");
-                }
-                if (fw == ComponentCatalog.CompCannonId && MechanicalContentFacade.TryGet(fw, out MechanicalContentDef cdef))
-                {
-                    where.Add($"远征带回解析（来源 {cdef.Source}，FGJ-M1 覆盖）");
-                }
-                bool obtainable = fw == ComponentCatalog.CompCannonId || FirmwareKinds.IsObtainable(fw);
-                src.Add($"{Name(fw)}（{fw}）：{(where.Count == 0 ? "无" : string.Join("、", where))}；可获得 {obtainable}");
-                if (where.Count == 0 || !obtainable)
+                string where = SourcesOf(s, fw, out bool obtainable);
+                src.Add($"{Name(fw)}（{fw}）：{where}；可获得 {obtainable}");
+                if (where == "无" || !obtainable)
                 {
                     missing.Add(fw);
                 }
@@ -229,6 +200,43 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
+        /// <summary>这条固件 / 组件在正常游戏里的来源（开局即有 / 三选一候选池 / 掉落表 / 杂兵残骸固件 / 数据复原）；一条都没有返回“无”。</summary>
+        internal static string SourcesOf(CampaignState s, string fw, out bool obtainable)
+        {
+            var where = new List<string>();
+            if (MechanicalContentUnlock.IsUnlocked(s, fw))
+            {
+                where.Add("开局已有");
+            }
+            if (LootPickCatalog.Rows.Any(r => r?.Item?.Id == fw))
+            {
+                where.Add("三选一候选池");
+            }
+            if (LootCatalog.Rows.Any(r => r?.Item?.Id == fw))
+            {
+                where.Add("掉落表");
+            }
+            foreach (string f in new[] { EnemyDefs.FactionFoundry, EnemyDefs.FactionClarity, EnemyDefs.FactionSilent, FirmwareKinds.FactionReclaim })
+            {
+                if (LootCatalog.EnemyFirmwareOf(f).Contains(fw))
+                {
+                    where.Add(f + " 杂兵残骸");
+                    break;
+                }
+            }
+            if (FirmwareRestoreService.IsRestorable(fw))
+            {
+                where.Add($"数据复原（表来源 {FirmwareKinds.SourceOf(fw)}）");
+            }
+            bool component = ComponentCatalog.All.ContainsKey(fw);
+            if (component && MechanicalContentFacade.TryGet(fw, out MechanicalContentDef cdef))
+            {
+                where.Add($"远征带回解析（来源 {cdef.Source}，FGJ-M1 覆盖）");
+            }
+            obtainable = component || FirmwareKinds.IsObtainable(fw);
+            return where.Count == 0 ? "无" : string.Join("、", where);
+        }
+
         private static StepOutcome TickFixture(JourneyContext c)
         {
             if (c.StepElapsed < 1)
@@ -240,9 +248,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail($"有固件在正常游戏里没有来源：{c.Get("fix.missing")}（{c.Get("fix.src")}）");
             }
             EmgCompiled cat = EmgCatalog.Current;
-            if (cat.RawStage != 1f || cat.EffectiveStage != 1)
+            if (cat.EffectiveStage < 1)
             {
-                return StepOutcome.Fail($"正式表 emg.stage = {cat.RawStage}（生效 {cat.EffectiveStage}），阶段 1 出口应为 1（DEBT-EMG1KRN01-02）");
+                return StepOutcome.Fail($"正式表 emg.stage = {cat.RawStage}（生效 {cat.EffectiveStage}），阶段 1 及以后应 ≥ 1（DEBT-EMG1KRN01-02）");
             }
             bool decl = EmgCatalog.IsOwnerOnDeclTrack(Split) && EmgCatalog.IsOwnerOnDeclTrack(Oil) && EmgCatalog.IsOwnerOnDeclTrack(Fuse);
             return decl
@@ -250,7 +258,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Fail("阶段 1 下分裂 / 漏油 / 延时引信没有全部走声明轨");
         }
 
-        private static StepOutcome TickGeneratorDone(JourneyContext c)
+        internal static StepOutcome TickGeneratorDone(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             BuildingRecord g = FgjM1Journey.Building(HomeValleyLayout.BuildingTypeGenerator);
@@ -349,7 +357,7 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>两点之间的直线每 1 格都能走（己方通行类别）。</summary>
-        private static bool Corridor(Vector2 a, Vector2 b, out string block)
+        internal static bool Corridor(Vector2 a, Vector2 b, out string block)
         {
             block = null;
             Vector2 dir = (b - a).normalized;
@@ -399,7 +407,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done($"出厂 {Label(id)}（{c.Get("m.at")}，ERC-003 v{FgjM1Journey.Erc003Record()?.ActiveVersion}）：武器程序下标 {prog}；据点 {c.Get("op.id")}（{c.Get("op.at")}，1 级、驻军 1、不增援）");
         }
 
-        private static bool Program(CombatSite site, int logicId, out CombatWeapon w, out int prog)
+        internal static bool Program(CombatSite site, int logicId, out CombatWeapon w, out int prog)
         {
             w = default;
             prog = -1;
@@ -714,7 +722,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 3. 信号核 ────────────────────────────────────────────────────────────────
 
-        private static void PrintFirmware(JourneyContext c, string fw)
+        internal static void PrintFirmware(JourneyContext c, string fw)
         {
             DropdownField print = JourneyInput.FindUitk<DropdownField>("[SignalCoreHost]", "SignalPrintChoice");
             string choice = print?.choices?.FirstOrDefault(x => x.Contains(Name(fw)));
@@ -728,7 +736,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
         }
 
-        private static StepOutcome TickPrinted(JourneyContext c, string fw)
+        internal static StepOutcome TickPrinted(JourneyContext c, string fw)
         {
             if (c.Get("printChoice").Length == 0)
             {
@@ -746,7 +754,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry($"刻印没成功（{hud?.FeedbackText}；{FgjM1Journey.UiFail(c)}）");
         }
 
-        private static StepOutcome TickEquipped(JourneyContext c, string fw)
+        internal static StepOutcome TickEquipped(JourneyContext c, string fw)
         {
             if (c.StepElapsed < 0.5)
             {

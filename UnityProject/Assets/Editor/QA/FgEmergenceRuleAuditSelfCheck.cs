@@ -50,9 +50,6 @@ namespace GameLogic.EditorTools
         /// </summary>
         public static readonly string[] LegacyBaseline =
         {
-            "BlueprintCircuitCompiler.cs|ComponentCatalog.FuncMarkerId|1",
-            "BlueprintCircuitCompiler.cs|ComponentCatalog.CompCannonId|1",
-            "BlueprintCircuitCompiler.cs|ComponentCatalog.StructFinId|1",
             "BlueprintCircuitBoard.cs|ComponentCatalog.StructRelayId|1",
             "CarrierReadings.cs|\"chassis_fixed\"|1",
         };
