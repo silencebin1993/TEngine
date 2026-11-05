@@ -193,7 +193,9 @@ namespace GameLogic.Campaign.Emergence
         private static bool In01(float v) => v >= 0f && v <= 1f;
 
         /// <summary>机器的档案行（按底盘；不认识的底盘用种类默认 −1）。</summary>
-        public static short ForChassis(string chassisId) => chassisId != null && Current.ByChassis.TryGetValue(chassisId, out short i) ? i : (short)-1;
+        /// <summary>底盘的实体档案下标（−1 = 没有）。机器记录的 ChassisId 是具体机型（erc_001 / 002 / 003），先译成底盘内容 ID 再查（FG-GAP-197，与 EmgCatalog.TryGetTrait 同口径）。</summary>
+        public static short ForChassis(string chassisId) =>
+            chassisId != null && Current.ByChassis.TryGetValue(Content.ChassisCatalog.ResolveArchetype(chassisId) ?? chassisId, out short i) ? i : (short)-1;
 
         /// <summary>敌人的档案行（按 fg.TbMechEnemy 的 material 列；首领另一组，质量 200、不位移）。</summary>
         public static short ForEnemy(string materialId, bool boss)

@@ -983,6 +983,7 @@ namespace GameLogic.Campaign.Combat
             w.Program = index;
             float raw = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, w.HeatPerShot + program.WeaponHeatDelta * raw);
+            w.DrawHeat = Mathf.Min(w.HeatPerShot, Mathf.Max(0f, program.HeatDraw * raw)); // EMG3-CHS-02 取水：内核只在水面上的取水单位出手时扣掉这份
             if (w.Mode != CombatWeaponMode.Projectile)
             {
                 // EMG1-GRM-01：机器武器的读法换成“声明轨”——写修饰端口的固件不再按旧修饰字段结算，根节点上的旧动词行按 fg.TbPortCarrier 折进读法。
@@ -2893,10 +2894,13 @@ namespace GameLogic.Campaign.Combat
             // 下标 0（机制 None）借来放冲刺器参数（emg.dash.speed / seconds / cooldown，FG-GAP-176）
             k.SetTraitParams(EmgTraitConst.None, new Unity.Mathematics.float4(Tuning("emg.dash.speed", EmgTraitConst.DefaultDashSpeed),
                 Tuning("emg.dash.seconds", EmgTraitConst.DefaultDashSeconds), Tuning("emg.dash.cooldown", EmgTraitConst.DefaultDashCooldown), 0f));
+            uint allowed = 1u;
             foreach (Emergence.EmgTraitRow t in Emergence.EmgCatalog.Current.Traits)
             {
                 k.SetTraitParams((byte)t.Kind, new Unity.Mathematics.float4(t.P0, t.P1, t.P2, t.P3));
+                allowed |= t.Reserved ? 0u : 1u << (int)t.Kind; // 不看阶段：emg.stage 回滚对照时阶段 3 的旧档照常能读
             }
+            k.SetAllowedTraits(allowed); // EMG3-CHS-02（FGR-EMG-142 负向）：只存在于自检数据的测试底盘行混进存档 → 读档拒绝并报错
         }
 
         /// <summary>
@@ -3104,8 +3108,13 @@ namespace GameLogic.Campaign.Combat
                     CombatLoadResult.UnknownFormat => "combat.load.reason.unknown_format",
                     CombatLoadResult.BadChecksum => "combat.load.reason.bad_checksum",
                     CombatLoadResult.Truncated => "combat.load.reason.truncated",
+                    CombatLoadResult.ReservedTrait => "combat.load.reason.reserved_trait",
                     _ => "combat.load.reason.invalid_value",
                 };
+                if (r == CombatLoadResult.ReservedTrait)
+                {
+                    Log.Error($"[CombatSite] {SiteId} 战斗快照里有单位带着未登记为正式内容的底盘特性（自检测试底盘行混进了存档），拒绝读入，按记录重建。");
+                }
                 return false;
             }
             _keys.Clear();

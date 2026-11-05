@@ -40,8 +40,14 @@ namespace BinGames.Sim.Combat
         /// <summary>运行态行标志：装着冲刺器（FG-GAP-176）。</summary>
         public const byte FlagDash = 1;
 
+        /// <summary>EMG3-CHS-02 预留特性参数缺省（运行时取 fg.TbChassisTrait paramKeys 的 emg.trait.* 值）：震地间隔 / 溅出份量比例 / 扬尘份量；空投半径系数；取水排放系数。</summary>
+        public const float DefaultStompStep = 0.8f, DefaultStompSplash = 0.15f, DefaultStompDust = 0.5f, DefaultAirRadius = 0.6f, DefaultHullAmount = 1.5f;
+        /// <summary>震地扬起的粉尘 / 溅出小斑块的半径（米）。shortcut: 临时定值，多足底盘落地（FG17-CHS-01）调参时如需可调再进 emg.trait.*。</summary>
+        public const float StompDustRadius = 1f, StompSplashMinRadius = 0.3f;
+
         public static bool IsAirborneKind(byte k) => k == HoverFloat || k == AirDrop;
-        public static bool HasRun(byte k) => k == TrackDrag || k == WheelTow;
+        /// <summary>有运行态行的机制：拖带 / 拖挂（站位相关）与震地（Odo 借作“移动中累计秒数”，快照段 22 已有这一列，不升格式）。</summary>
+        public static bool HasRun(byte k) => k == TrackDrag || k == WheelTow || k == LeggedStomp;
     }
 
     /// <summary>
@@ -105,7 +111,8 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static bool ChsAirborne(ref CombatData d, int i) => IsAir(ref d, i) || EmgTraitConst.IsAirborneKind(EmgTraitOf(ref d, i));
 
-        /// <summary>chs.* 状态位（内核派生，O(1)，按需读、不存）：着地 = 非离地；移动 = 本步位移 &gt; <see cref="EmgTraitConst.MoveEps"/>；水面 = 0（水面地形落地前恒 0，卡片“chs.water 在水面地形落地前恒为 0”）。</summary>
+        /// <summary>chs.* 状态位（内核派生，O(1)，按需读、不存）：着地 = 非离地；移动 = 本步位移 &gt; <see cref="EmgTraitConst.MoveEps"/>；
+        /// 水面 = 站在水面上（正式水面地形 FG18-SEA-01 落地前只有自检的测试水域 <see cref="CombatData.WaterTest"/>，正式路径恒 0）。</summary>
         internal static byte ChsMask(ref CombatData d, int i)
         {
             if (i < 0 || i >= d.Count)
@@ -117,7 +124,47 @@ namespace BinGames.Sim.Combat
             {
                 m |= EmgTraitConst.ChsMoving;
             }
+            if (d.WaterTest.z > 0f && (m & EmgTraitConst.ChsGround) != 0 && math.distance(d.Pos[i], new double2(d.WaterTest.x, d.WaterTest.y)) <= d.WaterTest.z)
+            {
+                m |= EmgTraitConst.ChsWater; // shortcut: 测试水域只有一圈、不进快照，水面地形（FG18-SEA-01）落地时换成“站在 ter.water 上”
+            }
             return m;
+        }
+
+        /// <summary>EMG3-CHS-02 取水（FGR-EMG-140 trait.hull.draw）：带取水特性、此刻在水面上（chs.water）。离水立即为假（按需派生，不存状态）。</summary>
+        internal static bool HullDrawing(ref CombatData d, int i) =>
+            i >= 0 && i < d.Count && EmgTraitOf(ref d, i) == EmgTraitConst.HullDraw && (ChsMask(ref d, i) & EmgTraitConst.ChsWater) != 0;
+
+        /// <summary>EMG3-CHS-02 空投（trait.air.drop）：出手者带空投特性。</summary>
+        internal static bool AirDropping(ref CombatData d, int i) => i >= 0 && i < d.Count && EmgTraitOf(ref d, i) == EmgTraitConst.AirDrop;
+
+        /// <summary>空投落区 / 排放的半径系数（emg.trait.air.radius；不是空投 = 1）。</summary>
+        internal static float AirDropRadius(ref CombatData d, int i) =>
+            AirDropping(ref d, i) ? TraitParam(ref d, EmgTraitConst.AirDrop, 0, EmgTraitConst.DefaultAirRadius) : 1f;
+
+        /// <summary>
+        /// 一发的积热（FGR-EMG-016 + 取水）：在水面上的取水单位，写 mat.water / mat.coolant 的指令那份热量（<see cref="CombatWeapon.DrawHeat"/>，编译期算好）不计。
+        /// 其余单位逐字同旧（<see cref="CombatWeapon.HeatPerShot"/>）。O(1)。
+        /// </summary>
+        internal static float ShotHeat(ref CombatData d, int a, in CombatWeapon wp) =>
+            wp.DrawHeat > 0f && HullDrawing(ref d, a) ? math.max(0f, wp.HeatPerShot - wp.DrawHeat) : wp.HeatPerShot;
+
+        /// <summary>排放份量 / 半径按出手者特性改（空投半径 × emg.trait.air.radius；在水面上的取水单位排水 / 冷却液份量 × emg.trait.hull.amount）。</summary>
+        internal static void EmgTraitEmit(ref CombatData d, int ownerSlot, byte matter, ref float radius, ref float amount)
+        {
+            if (ownerSlot < 0 || ownerSlot >= d.Count)
+            {
+                return;
+            }
+            byte kind = EmgTraitOf(ref d, ownerSlot);
+            if (kind == EmgTraitConst.AirDrop)
+            {
+                radius *= TraitParam(ref d, EmgTraitConst.AirDrop, 0, EmgTraitConst.DefaultAirRadius);
+            }
+            else if (kind == EmgTraitConst.HullDraw && (matter == EmgMatterConst.Water || matter == EmgMatterConst.Coolant) && HullDrawing(ref d, ownerSlot))
+            {
+                amount *= TraitParam(ref d, EmgTraitConst.HullDraw, 0, EmgTraitConst.DefaultHullAmount);
+            }
         }
 
         private static byte ChsBitOfPort(ushort port) => port switch
@@ -361,6 +408,12 @@ namespace BinGames.Sim.Combat
                 }
                 double2 pos = d.Pos[u];
                 x.Last = pos;
+                if (x.Kind == EmgTraitConst.LeggedStomp)
+                {
+                    StepLeggedStomp(ref d, u, ref x, dt, patches);
+                    d.TraitRun[r] = x;
+                    continue;
+                }
                 if (!patches || ChsAirborne(ref d, u))
                 {
                     d.TraitRun[r] = x;
@@ -376,6 +429,57 @@ namespace BinGames.Sim.Combat
                 }
                 d.TraitRun[r] = x;
             }
+        }
+
+        /// <summary>
+        /// EMG3-CHS-02 震地（FGR-EMG-140 trait.legged.stomp）：移动中每 emg.trait.legged.step 秒（模拟时间，暂停不走、倍速只改每帧步数）对脚下发一次 evt.impact
+        /// （宿主 = 自己，Value = 速度，Value2 = 质量）；脚下的冰 / 玻化层注入足以碎裂的动能（= 两者耐久的较大值，E18 / E19 在它的节拍结算）；
+        /// 站在地面层液体斑块里 → 从该斑块分出 emg.trait.legged.splash 份量，溅成一块同物质小斑块落在斑块外缘（朝脚的方向）；不在液体里 → 扬起 emg.trait.legged.dust 份量的粉尘。
+        /// 停住时计时清零（“移动中”）；离地不震。计时借 <see cref="EmgTraitRun.Odo"/>（快照段 22 已有，存读档后节拍连续）。
+        /// </summary>
+        private static void StepLeggedStomp(ref CombatData d, int u, ref EmgTraitRun x, float dt, bool patches)
+        {
+            double moved = math.distance(d.Pos[u], d.Prev[u]);
+            if (moved <= EmgTraitConst.MoveEps || ChsAirborne(ref d, u))
+            {
+                x.Odo = 0f;
+                return;
+            }
+            float step = TraitParam(ref d, EmgTraitConst.LeggedStomp, 0, EmgTraitConst.DefaultStompStep);
+            x.Odo += dt;
+            if (x.Odo < step - 1e-4f)
+            {
+                return;
+            }
+            x.Odo = math.max(0f, x.Odo - step);
+            double2 p = d.Pos[u];
+            float speed = (float)(moved / math.max(dt, 1e-4f));
+            EmgCountImpact(ref d);
+            EmgUnitEvent(ref d, EmgEventKind.Impact, u, 0, speed, EmgUnitMass(ref d, u), 0, p, EmgEntKind.None);
+            if (!patches || !d.IsAlive(u))
+            {
+                return;
+            }
+            if (ShatterUnder(ref d, p))
+            {
+                EmgKineticAt(ref d, p, math.max(MatterOf(ref d, EmgMatterConst.Ice).Hp, MatterOf(ref d, EmgMatterConst.Glass).Hp));
+            }
+            int liquid = GroundFluidAt(ref d, p, EmgTraitConst.GroundFluidMask & ~(1u << EmgMatterConst.Fire));
+            if (liquid < 0)
+            {
+                EmgRequestPatch(ref d, EmgMatterConst.Dust, p, EmgTraitConst.StompDustRadius, TraitParam(ref d, EmgTraitConst.LeggedStomp, 2, EmgTraitConst.DefaultStompDust), 0f, d.Id[u], 0, 0);
+                return;
+            }
+            CombatZone z = d.Patches[liquid];
+            float take = TakeFromPatch(ref d, liquid, TraitParam(ref d, EmgTraitConst.LeggedStomp, 1, EmgTraitConst.DefaultStompSplash));
+            if (take < EmgTraitConst.TrackMinSplit)
+            {
+                return;
+            }
+            double2 dir = p - z.Pos;
+            dir = math.lengthsq(dir) > 1e-8 ? math.normalize(dir) : math.normalize(d.Pos[u] - d.Prev[u]);
+            float sr = math.max(EmgTraitConst.StompSplashMinRadius, z.Radius * math.sqrt(take / math.max(z.Amount, 1e-4f)));
+            EmgRequestPatch(ref d, z.Matter, z.Pos + dir * (z.Radius + sr + 0.05), sr, take, 0f, d.Id[u], z.EmgChain, z.EmgDepth);
         }
 
         /// <summary>

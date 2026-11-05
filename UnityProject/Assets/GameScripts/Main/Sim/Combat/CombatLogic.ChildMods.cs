@@ -95,6 +95,11 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             radius += m.Reach;
+            bool airDrop = AirDropping(ref d, ownerSlot);
+            if (airDrop && !(form.RadiusRatio > 0f))
+            {
+                radius *= AirDropRadius(ref d, ownerSlot); // EMG3-CHS-02 空投：按母落区比例的子区已随母落区缩过，只缩定值半径
+            }
             damage *= m.DmgMul > 0f ? m.DmgMul : 1f;
             float baseRadius = radius;
             if (parts > 1)
@@ -132,7 +137,7 @@ namespace BinGames.Sim.Combat
                     float ang = start + 2f * math.PI * q / parts;
                     zp += new double2(math.cos(ang), math.sin(ang)) * (baseRadius * 0.8f);
                 }
-                zp = EmgDropPoint(ref d, s.Pos, zp, m); // 掩体规则：游移 / 多块偏出去的落点途中撞障碍（抛射越过）或残骸（贯穿越过）就落在撞点前
+                zp = airDrop ? zp : EmgDropPoint(ref d, s.Pos, zp, m); // EMG3-CHS-02 空投不被截停；掩体规则：游移 / 多块偏出去的落点途中撞障碍（抛射越过）或残骸（贯穿越过）就落在撞点前
                 if (!SpawnZone(ref d, ownerSlot, faction, zp, radius, seconds, dps, 0f, tickScale, r.StatusMask, r.StatusSeconds, r.StatusDps, r.StatusSlow, r.StatusVuln))
                 {
                     continue;

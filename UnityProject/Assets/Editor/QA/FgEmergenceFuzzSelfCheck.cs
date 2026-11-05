@@ -52,7 +52,11 @@ namespace GameLogic.EditorTools
         private static int _fail;
 
         private static readonly string[] SiteTemplates = { "home", "fractured_city", "foundry_outpost" };
-        private static readonly string[] ChassisIds = { ChassisCatalog.ChassisWheelId, ChassisCatalog.ChassisTrackId, ChassisCatalog.ChassisHoverId, ChassisCatalog.ChassisFixedId };
+        private static readonly string[] BaseChassisIds = { ChassisCatalog.ChassisWheelId, ChassisCatalog.ChassisTrackId, ChassisCatalog.ChassisHoverId, ChassisCatalog.ChassisFixedId };
+
+        /// <summary>EMG3-CHS-02（FGR-EMG-142 / 220）：现行 4 种（顺序不变，用例与旧版逐字相同）+ 任何新落地、特性行已生效且在底盘目录里的底盘（将来多足 / 飞行 / 船体加一行表就自动纳入）。</summary>
+        internal static string[] ChassisIds => BaseChassisIds.Concat(EmgCatalog.Current.TraitByChassis.Keys
+            .Where(id => !BaseChassisIds.Contains(id) && EmgCatalog.TryGetActiveTrait(id, out _) && ChassisCatalog.TryGet(id, out _)).OrderBy(id => id, StringComparer.Ordinal)).ToArray();
         private static readonly string[] FunctionIds = { ComponentCatalog.FuncDashId, ComponentCatalog.FuncMarkerId, ComponentCatalog.FuncSpikesId };
 
         /// <summary>FG19A N09～N16 中阶段 1 生效的 6 条（EMG1-FW-02 转来，DEBT-EMG1FW02-01）与 N14 / N15（阶段 2，报缺口）。</summary>

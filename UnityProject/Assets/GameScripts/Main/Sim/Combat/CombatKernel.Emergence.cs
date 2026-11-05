@@ -834,6 +834,19 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        private uint _allowedTraits = uint.MaxValue;
+
+        /// <summary>
+        /// EMG3-CHS-02（FGR-EMG-142 负向）：读档时允许出现的底盘特性机制（位 k = 机制 k；位 0“没有特性”恒允许）。热更层建地点时按 fg.TbChassisTrait 的正式行（非预留）写；
+        /// 快照里有单位带着别的机制（只存在于自检数据的测试底盘行）→ <see cref="Load"/> 返回 <see cref="CombatLoadResult.ReservedTrait"/>。没写过 = 全部允许（纯内核自检）。表数据，不进快照。
+        /// </summary>
+        public void SetAllowedTraits(uint mask) => _allowedTraits = mask | 1u;
+
+        /// <summary>EMG3-CHS-02 自检桩：测试水域（圆心、半径；半径 ≤ 0 = 清掉）。正式水面地形（FG18-SEA-01）落地前只有它让 chs.water 为真；不进快照，正式代码不调用。</summary>
+        public void SetWaterForTests(Unity.Mathematics.double2 center, float radius) =>
+            _d.WaterTest = radius > 0f && Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(center)) && float.IsFinite(radius)
+                ? new Unity.Mathematics.float4((float)center.x, (float)center.y, radius, 0f) : default;
+
         /// <summary>单位此刻的 chs.* 状态位（<see cref="EmgTraitConst"/>.Chs*；内核派生，热更层悬停 / 自检读）。不存在的单位 = 0。</summary>
         public byte ChsOf(int unitId) => CombatLogic.ChsMask(ref _d, _d.SlotOf(unitId));
 
@@ -997,7 +1010,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWeapons, v17 ? WeaponFields + 6 : WeaponFields + 3, _d.Weapons.Length);
+            sw.Begin(EmgConst.SegWeapons, (v17 ? WeaponFields + 6 : WeaponFields + 3) + (v18 ? 1 : 0), _d.Weapons.Length);
             for (int i = 0; i < _d.Weapons.Length; i++)
             {
                 WriteWeaponEmg(w, _d.Weapons[i], sw);
@@ -1011,6 +1024,10 @@ namespace BinGames.Sim.Combat
                     if (sw.F()) w.Write(_d.Weapons[i].FieldPort); // EMG2-FLD-01：部件场（尾部追加，短段读到取 0 = 没有）
                     if (sw.F()) w.Write(_d.Weapons[i].FieldRadius);
                     if (sw.F()) w.Write(_d.Weapons[i].ClawSalvage); // EMG2-RECL-01：拆解钳（尾部追加，短段读到取 0 = 没有）
+                }
+                if (v18)
+                {
+                    if (sw.F()) w.Write(_d.Weapons[i].DrawHeat); // EMG3-CHS-02：取水不计的那份积热（尾部追加，短段读到取 0 = 没有）
                 }
                 sw.EndRecord();
             }
@@ -1485,7 +1502,9 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) cw.FieldPort = r.ReadUInt16(); // EMG2-FLD-01
                         if (sr.F()) cw.FieldRadius = r.ReadSingle();
                         if (sr.F()) cw.ClawSalvage = r.ReadByte(); // EMG2-RECL-01
-                        if (!(cw.FieldRadius >= 0f) || (cw.FieldPort != 0 && !EmgFieldConst.IsFieldPort(cw.FieldPort)) || cw.ClawSalvage > 1)
+                        if (sr.F()) cw.DrawHeat = r.ReadSingle(); // EMG3-CHS-02
+                        if (!(cw.FieldRadius >= 0f) || (cw.FieldPort != 0 && !EmgFieldConst.IsFieldPort(cw.FieldPort)) || cw.ClawSalvage > 1
+                            || !(cw.DrawHeat >= 0f) || float.IsInfinity(cw.DrawHeat))
                         {
                             return CombatLoadResult.InvalidValue;
                         }

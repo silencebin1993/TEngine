@@ -87,10 +87,12 @@ namespace BinGames.Sim.Combat
             {
                 // FG2-VFX-02：震荡脉冲器（布区·脉冲）的区域落在自己脚下（画成冲击波）；其余布区落在目标脚下（液池）。
                 bool atSelf = r.FieldPlacement == CombatZonePlacement.Attacker;
-                double2 fieldPos = atSelf ? d.Pos[a] : EmgDropPoint(ref d, d.Pos[a], primaryPos, em);
+                // EMG3-CHS-02 空投（FGR-EMG-140 trait.air.drop）：从空中投放，落点不被途中障碍 / 残骸截停（不受视线与地面通行限制），半径 × emg.trait.air.radius
+                bool airDrop = AirDropping(ref d, a);
+                double2 fieldPos = atSelf ? d.Pos[a] : airDrop ? primaryPos : EmgDropPoint(ref d, d.Pos[a], primaryPos, em);
                 fieldPos += EmgCenterDrift(ref d, a, em);
                 int zones = em.Multi > 1 ? em.Multi : 1;
-                float zr = zones > 1 ? r.Area * (em.MultiRadius > 0f ? em.MultiRadius : 0.6f) : r.Area;
+                float zr = (zones > 1 ? r.Area * (em.MultiRadius > 0f ? em.MultiRadius : 0.6f) : r.Area) * AirDropRadius(ref d, a);
                 float zdps = baseDamage * math.max(0f, r.FieldDpsRatio) * (zones > 1 && em.MultiRatio > 0f ? em.MultiRatio : 1f);
                 double2 side = math.lengthsq(primaryPos - d.Pos[a]) > 1e-12 ? math.normalize(primaryPos - d.Pos[a]) : new double2(0, 1);
                 side = new double2(-side.y, side.x);
@@ -266,11 +268,12 @@ namespace BinGames.Sim.Combat
         {
             // FG6-DEF-01（FGR-DEF-004）：一发扣一发的补给（与积热同一处：只在门槛通过、真的开火之后）。
             ConsumeShotAmmo(ref d, a, wp);
-            if (wp.HeatPerShot <= 0f)
+            float shot = ShotHeat(ref d, a, wp); // EMG3-CHS-02：在水面上的取水单位，写水 / 冷却液的指令不计热量
+            if (shot <= 0f)
             {
                 return;
             }
-            float heat = d.Heat[a] + wp.HeatPerShot;
+            float heat = d.Heat[a] + shot;
             d.Heat[a] = heat;
             if (wp.OverheatAt > 0f && heat >= wp.OverheatAt && !d.Has(a, CombatUnitFlags.Overheated))
             {

@@ -116,6 +116,8 @@ namespace GameLogic.Campaign.Emergence
         public float HeatInstr, HeatDecl, HeatTrigger, HeatChildren;
         /// <summary>溢出指令的表值热量：旧积热（BlueprintCircuitBoard.ComputeFirmwareHeat）按装着的固件算过，溢出“不计热量”所以要扣回。</summary>
         public float HeatOverflowInstr;
+        /// <summary>EMG3-CHS-02（FGR-EMG-140 取水）：写 mat.water / mat.coolant 的指令（未溢出、非继承）的表值热量 + 声明热量；在水面上的取水单位出手时不计（CombatWeapon.DrawHeat）。</summary>
+        public float HeatDraw;
         /// <summary>一次根出手全树的子载荷份数（逐代份数相乘后求和）。</summary>
         public int ChildPayloads;
         /// <summary>程序完整字节键的 64 位哈希 + 内容版本（同一程序同一内容版本同签名，IC-REQ-010）。空程序为空串。</summary>
@@ -274,7 +276,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
                 HeatInstr = r.HeatInstr, HeatDecl = r.HeatDecl, HeatTrigger = r.HeatTrigger, HeatChildren = r.HeatChildren, HeatOverflowInstr = r.HeatOverflowInstr,
-                ChildPayloads = r.ChildPayloads,
+                HeatDraw = r.HeatDraw, ChildPayloads = r.ChildPayloads,
             };
             t.Steps.AddRange(r.Steps);
             t.LegacyOwners.AddRange(r.LegacyOwners);
@@ -940,6 +942,7 @@ namespace GameLogic.Campaign.Emergence
                 foreach (EmgTreeEntry e in n.Entries)
                 {
                     EmgProgramStep s = r.Steps[e.Ordinal];
+                    bool draw = !e.Inherited && (HasWrite(c, s, "mat.water") || HasWrite(c, s, "mat.coolant")); // EMG3-CHS-02 取水：按写端端口判，不按固件 ID
                     if (e.Inherited)
                     {
                         inheritMask |= (byte)(1 << r.Nodes[e.FromNode].Gen);
@@ -947,6 +950,7 @@ namespace GameLogic.Campaign.Emergence
                     else
                     {
                         r.HeatInstr += s.TableHeat;
+                        r.HeatDraw += draw ? s.TableHeat : 0f;
                     }
                     foreach (int di in s.Decls)
                     {
@@ -999,6 +1003,7 @@ namespace GameLogic.Campaign.Emergence
                         if (!e.Inherited)
                         {
                             r.HeatDecl += Math.Max(0f, d.Heat);
+                            r.HeatDraw += draw ? Math.Max(0f, d.Heat) : 0f;
                         }
                         var x = new EmgInstr
                         {

@@ -887,10 +887,16 @@ namespace GameLogic.EditorTools
             bool hasReading = site != null && site.TryGetMachineUnit(sprayer, out int unit) && site.Kernel.TryGetUnit(unit, out CombatUnitView uv)
                               && site.Kernel.TryGetWeapon(uv.Weapon, out CombatWeapon kw) && kw.Reading.Carrier == CombatCarrier.Field && kw.Reading.ZoneSeconds > 0f;
             Expect(hasReading, "读档后机器的内核武器仍是布区载体 + 冷却液的驻留读法（装配结算重算，不靠旧参数）");
+            // FG-GAP-197（EMG3-CHS-02 修复）起机型 erc_003 能查到底盘档案：读档后的装配结算重算（同上“不靠旧参数”）把样例铺的档案 3 改回底盘档案，
+            // 单位段随存档进出改由样例的状态字段（LastHitBy / LastHitChain；PrevMatterMask 每步按脚下物质重算，不作证据）证明；档案下标本身的往返由内核快照 G 段与 FgEmergenceKernelSelfCheck C 段覆盖。
+            short chassisProf = GameLogic.Campaign.Emergence.EmgEntityProfiles.ForChassis(HomeValleyLayout.Erc003ChassisId);
+            short sp = -2;
+            EmgUnitState sst = default;
+            bool unitSeg = site != null && site.TryGetMachineUnit(sprayer, out int su) && site.Kernel.TryGetUnitEmg(su, out sp, out sst);
             bool emgKept = site != null && site.Kernel.ProgramCount == _seedProgCount + 1 && site.Kernel.EmgBusPending == 2 && site.Kernel.WreckCount == 1
-                           && site.TryGetMachineUnit(sprayer, out int su) && site.Kernel.TryGetUnitEmg(su, out short sp, out EmgUnitState sst) && sp == 3 && sst.LastHitBy == 2;
-            Expect(emgKept, $"涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 {_seedProgCount + 1} 行（含样例 1 行）、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
-                            + (emgKept ? string.Empty : $"；实际：程序 {site?.Kernel.ProgramCount}、未处理 {site?.Kernel.EmgBusPending}、残骸 {site?.Kernel.WreckCount}、步数 {site?.Kernel.Steps}"));
+                           && unitSeg && chassisProf >= 0 && sp == chassisProf && sst.LastHitBy == 2 && sst.LastHitChain == 1;
+            Expect(emgKept, $"涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 {_seedProgCount + 1} 行（含样例 1 行）、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（样例状态字段原样读回，档案 = 底盘档案 {chassisProf}；以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
+                            + (emgKept ? string.Empty : $"；实际：程序 {site?.Kernel.ProgramCount}、未处理 {site?.Kernel.EmgBusPending}、残骸 {site?.Kernel.WreckCount}、步数 {site?.Kernel.Steps}、单位段 {unitSeg} 档案 {sp} 上次命中 {sst.LastHitBy} 链 {sst.LastHitChain}"));
         }
 
         private static int _seedProg, _seedProgCount;

@@ -1407,7 +1407,7 @@ namespace BinGames.Sim.Combat
             EmgShotBegin(ref d, a, t, wp); // EMG1-BUS-01：重炮真的开火这一刻（瞄准阶段不算出手）
             // FG1-SIG-03：门控反应（信号带进来的核心固件）发动过一次后就被压住，直到热更层按冷却重新下发武器参数。
             bool overload = wp.Reaction == CombatReaction.MeltOverload && !d.Has(a, CombatUnitFlags.ReactionSpent);
-            float heat = d.Heat[a] + wp.HeatPerShot + (overload ? wp.OverloadExtraHeat : 0f);
+            float heat = d.Heat[a] + ShotHeat(ref d, a, wp) + (overload ? wp.OverloadExtraHeat : 0f); // EMG3-CHS-02：取水不计写水 / 冷却液的那份
             d.Heat[a] = heat;
             CombatCounters c = d.Counters[0];
             c.ShotsFired++;

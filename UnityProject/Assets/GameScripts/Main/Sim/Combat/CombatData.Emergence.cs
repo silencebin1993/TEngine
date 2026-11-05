@@ -20,6 +20,8 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgMetaRun> MetaRun;
         /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
         public NativeArray<float4> EmgTraitParams;
+        /// <summary>EMG3-CHS-02：自检用测试水域（x, y = 圆心，z = 半径；z ≤ 0 = 没有）。正式水面地形（FG18-SEA-01）落地前 chs.water 只由它置位，正式路径恒 0；不进快照，读档沿用当前的。</summary>
+        public float4 WaterTest;
         /// <summary>EMG2-MAT-01：物质数值表（下标 = 物质码 1～17；热更层按 fg.TbMatter 写，是表数据，读档沿用当前的）。</summary>
         public NativeArray<EmgMatter> EmgMatters;
         /// <summary>EMG2-RULE-01：编好的通道规则（fg.TbChannelRule，≤ 256；表数据，读档沿用当前的）与按物质码的索引（int2 = EmgRuleOrder 里的起点、条数；按优先级升序）。</summary>

@@ -1068,6 +1068,8 @@ namespace BinGames.Sim.Combat
         public float FieldRadius;
         /// <summary>EMG2-RECL-01（FG19A comp_claw 行）：部件声明写 ent.wreck（拆解钳）：击毁目标后拆走它的残骸，不修复（CombatLogic.EmgPartSalvage）。Emg 武器段尾部追加。</summary>
         public byte ClawSalvage;
+        /// <summary>EMG3-CHS-02（FGR-EMG-140 取水）：<see cref="HeatPerShot"/> 里写 mat.water / mat.coolant 的指令那一份（编译期算好，≤ HeatPerShot）；在水面上的取水单位出手时不计。Emg 武器段尾部追加（格式 18 内，短段取 0 = 没有）。</summary>
+        public float DrawHeat;
 
         /// <summary>程序下标（−1 = 没有程序）。</summary>
         public int Program

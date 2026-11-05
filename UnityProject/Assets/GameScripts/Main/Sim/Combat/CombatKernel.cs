@@ -21,6 +21,8 @@ namespace BinGames.Sim.Combat
         BadChecksum = 4,
         Truncated = 5,
         InvalidValue = 6,
+        /// <summary>EMG3-CHS-02（FGR-EMG-142 负向）：快照里有单位带着未登记为正式内容的底盘特性（只存在于自检数据的测试底盘行）。拒绝读入，热更层报错并按记录重建。</summary>
+        ReservedTrait = 7,
     }
 
     /// <summary>
@@ -3149,6 +3151,7 @@ namespace BinGames.Sim.Combat
             staging.EmgPhases.CopyFrom(_d.EmgPhases); // EMG2-PHS-01：相态规则同是表数据
             staging.EmgFieldRules.CopyFrom(_d.EmgFieldRules); // EMG2-FLD-01：场 × 载体规则同是表数据
             staging.EmgTraitParams.CopyFrom(_d.EmgTraitParams); // EMG3-CHS-01：底盘特性 / 冲刺参数同是表数据（emg.trait.* / emg.dash.*）
+            staging.WaterTest = _d.WaterTest; // EMG3-CHS-02：测试水域不进快照（自检桩）
             staging.ShockBit = _d.ShockBit;
             CombatLogic.MigrateClarityPhase(ref staging); // EMG2-PHS-01（ADR ⑭ #5 #9、⑩ 15 → 17）：云端受寒 / 冻结 / 免疫窗 → 寒量与冻结相态；免疫位 → 抗性覆盖
             RemapProfiles(ref staging, _d.EmgProfileKeys);
@@ -3641,6 +3644,16 @@ namespace BinGames.Sim.Combat
             if (fr != CombatLoadResult.Ok)
             {
                 return fr;
+            }
+            if (_allowedTraits != uint.MaxValue)
+            {
+                for (int i = 0; i < staging.Count; i++)
+                {
+                    if ((_allowedTraits & (1u << staging.EmgUnit[i].Trait)) == 0u)
+                    {
+                        return CombatLoadResult.ReservedTrait; // EMG3-CHS-02：测试底盘行混进正式存档
+                    }
+                }
             }
             if (format >= 4)
             {
@@ -4172,6 +4185,10 @@ namespace BinGames.Sim.Combat
             if (w.ClawSalvage != 0)
             {
                 bw.Write(w.ClawSalvage); // EMG2-RECL-01：带拆解钳的武器各自成行
+            }
+            if (w.DrawHeat != 0f)
+            {
+                bw.Write(w.DrawHeat); // EMG3-CHS-02：取水不计的那份积热不同的武器各自成行（没有时键逐字同旧）
             }
             bw.Flush();
             return Convert.ToBase64String(ms.GetBuffer(), 0, (int)ms.Length);

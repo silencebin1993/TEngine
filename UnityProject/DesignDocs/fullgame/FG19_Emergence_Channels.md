@@ -922,6 +922,7 @@
 
 **FGR-EMG-142 预留底盘的接口**
 - 越野多足、飞行、船体落地时只需新增 `fg.TbChassisTrait` 一行与 `fg.TbEntityProfile` 默认值，不改规则表、不改固件声明；零死对与模糊测试器自动把新底盘纳入用例（FGR-EMG-220）。
+- EMG3-CHS-02 落地口径（2026-11-05）：三条机制已在内核实现、只用自检里的测试底盘行验证（`FgEmgReservedChassisSelfCheck`；正式表三行仍 `reserved = 1`，不进底盘列表、研发树、三选一）。震地：移动中按模拟时间每 0.8 秒发一次 `evt.impact`（宿主 = 自己），脚下冰 / 玻化层注入等于其耐久的动能（碎裂由 E18 / E19 结算），站在地面层液体里溅出 `emg.trait.legged.splash` 份量的同物质小斑块（落在斑块外缘），否则扬起 `emg.trait.legged.dust` 份量的粉尘；停住计时清零，计时借运行态行的里程列（快照段 22，不升格式）。空投：布区落点不被途中障碍 / 残骸截停（不调掩体落点 `EmgDropPoint`），落区与物质排放半径 × 0.6；落在不可通行区照常生成；“谁能被打到”同悬浮（FG-GAP-196 口径不变）。取水：水面判定在水面地形（FG18-SEA-01）落地前只有自检测试水域（不进快照，正式路径 `chs.water` 恒 0）；编译期把写 `mat.water` / `mat.coolant` 的指令热量记进武器 `DrawHeat`（Emg 武器段格式 18 尾部追加，短段取 0），在水面上出手时不计、排水 / 冷却液份量 × 1.5，离水按需派生立即失效。读档时快照里有单位带着非正式（预留 / 测试）特性 → 拒绝（`CombatLoadResult.ReservedTrait`，原因文本 `combat.load.reason.reserved_trait`）并按记录重建。模糊测试器底盘列表改为“现行 4 种 + 特性已生效的新底盘”。
 
 ### 7.4 地形与永久改变（通道 11）
 
@@ -1456,6 +1457,7 @@
 | `emg.friendly.notify_seconds` | 1（同一受伤者 + 留下者 + 来源的友伤通知最短间隔，游戏秒，EMG2-DISC-01） | | |
 | `emg.era.blocks` | 12（爆炸反应装甲每台总块数，左右侧裙各 6；2～16 的偶数，FGR-EMG-233，2026-10-26 用户批准） | `emg.era.refill_seconds` | 3 秒（每补回 1 块的间隔，FGR-EMG-233） |
 | `emg.persist.clear_seconds` | 6 秒（清除工作单到现场后的工时，EMG2-PERSIST-01） | `emg.persist.clear_scrap` | 2（开单预留废料，完工才消耗） |
+| `emg.trait.legged.splash` | 0.15（震地从脚下液体斑块溅出的份量比例，EMG3-CHS-02） | `emg.trait.legged.dust` | 0.5（震地不在液体里时扬起的粉尘份量，EMG3-CHS-02） |
 
 - 上面两个世界级键由 ADR-EMG-001 ⑬ 提出、在本节正式登记（ADR 第 0 节“只新增 `emg.stage`”一句随之修正）；地形上限一律用本表的 `emg.terrain.pit_max` / `emg.terrain.bridge_max`，不另起 `emg.ter.*` 键名。FG19B 第 10 节另有本附录专属调参键（`emg.patch.per_step`、`emg.patch.reserve_world`、`emg.conduct.max_visits` 等），不与本表重复。
 - `emg.era.*` 两个键（2026-10-26 用户批准第 3 层后新增）用调参键、不在 `fg.TbCombatComponent` 加列：只有一个组件用，加列要给全部组件行填值并改 `check_luban`；内核按“带反伤读法”生效，与组件 ID 无关（FGR-EMG-013）。破片片数在声明 `amount`，每片参数按 FG19B 第 10 节的做法（破片与系数不另设调参键）放 `fg.TbEntityProfile`（FG19B 第 2.9 节），不另设键。

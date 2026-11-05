@@ -1078,7 +1078,9 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             int owner = ownerSlot >= 0 && ownerSlot < d.Count ? d.Id[ownerSlot] : 0;
-            EmgRequestPatch(ref d, matter, pos, radius, x.Amount > 0f ? x.Amount : 1f, seconds, owner, chain, depth);
+            float amount = x.Amount > 0f ? x.Amount : 1f;
+            EmgTraitEmit(ref d, ownerSlot, matter, ref radius, ref amount); // EMG3-CHS-02：空投半径 × 0.6；在水面上的取水单位排水 / 冷却液 × 1.5
+            EmgRequestPatch(ref d, matter, pos, radius, amount, seconds, owner, chain, depth);
             return true;
         }
     }
