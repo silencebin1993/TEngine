@@ -289,7 +289,7 @@
 | D-09 | 跳弹 | 跳弹认单位、壁撞认非单位面、偏折改为场源，三者不再共用一个字段 | 需代码（阶段 1～2） |
 | D-10 | 过载 | 伤害随积热比例（纯数值写端）+ 注热 | 需代码（阶段 1 过渡，阶段 2 完整） |
 | D-11 | 集群协议 | `grm.inherit` + 伴飞持有完整程序 | 需代码（阶段 1） |
-| D-12 | 反应增幅 | 改为交互触发器（`evt.react` 的生产者随 EMG2-RULE-01 交付，故切轨阶段为 2） | 需代码（阶段 2） |
+| D-12 | 反应增幅 | 改为交互触发器（`evt.react` 的生产者随 EMG2-RULE-01 交付，故切轨阶段为 2）。**EMG3-FW-01 已落地（2026-11-05）**：载荷结算中成立的规则另按载荷宿主发 `evt.react`，触发器在交互点放出子载荷（`CombatLogic.EmgReactHosted`） | 需代码（阶段 2） |
 | D-13 | 时钟脉冲 | 阶段 1 先在旧轨删掉误贴的 `Blood`（`tools/fgdata_firmware.py` 该行 tags 列）；阶段 3 改节拍读法 | 阶段 1 只改表；阶段 3 需代码 |
 | D-14 | 追射 | 真补一发（FG-GAP-153） | 需代码（阶段 1） |
 | D-15 | 回收修复 | 去掉 `return`，改拆残骸 | 需代码（阶段 2） |
@@ -400,7 +400,7 @@ FGR-EMG-015 规则二要求每条声明在 5 载体上开 / 关都有行为差�
 | `struct_cargo` | 货舱 | — | `prop.mass` modify（本机质量 +20%） | 满载更重：更难被推、被拉，冲刺撞击更重；货位 +2 不变 | 1 |
 | `struct_relay` | 信号中继 | `sqd.relay` scope（12 米） | — | 装本模块的机器，其程序里所有 `role = trigger` 且端口属于白名单（`evt.hit`、`evt.kill`、`evt.marked`、`evt.hurt`、`evt.bounce`、`evt.pierce`）的读端，自动获得 `sqd.relay` 作用域；固件不需要、也不能自行声明 `sqd.relay`；预览在这些指令上标“可被中继转发”（与 FGR-EMG-132 同一句）。只转发事件，不转发程序；信号覆盖延伸不变 | 3 |
 | `struct_armor` | 重甲 | — | `prop.mass` modify（本机质量 +50%） | 不易被推、被拉、被涡旋卷走；撞击动能大；HP 与速度数值不动 | 1 |
-| `struct_fin` | 散热鳍 | `en.heat` sense；`mat.coolant`、`mat.water` condition（身下有该斑块） | `prop.heat` modify（散热 5 / 秒；泡在冷却液或水里 ×2） | 冷却液池成为散热站；“热量 Stat 管线未建立”的现状是否已在 0.2 接线未核实（底稿 07 §1.3） | 2 |
+| `struct_fin` | 散热鳍 | `en.heat` sense；`mat.coolant`、`mat.water` condition（身下有该斑块） | `prop.heat` modify（散热 5 / 秒；泡在冷却液或水里 ×2） | 冷却液池成为散热站；“热量 Stat 管线未建立”的现状是否已在 0.2 接线未核实（底稿 07 §1.3）。**EMG3-FW-01 已落地（2026-11-05）**：内核武器散热（`Dissipate`）里散热件那份 = 声明幅度，单位站在冷却液 / 水斑块里 × `param2`（`CombatConfig.EmgFinWetMul`，按声明写） | 2 |
 
 ### 2.3 7 条底盘特性（`fg.TbChassisTrait` 的声明部分；规则与参数见 FG19 FGR-EMG-140）
 

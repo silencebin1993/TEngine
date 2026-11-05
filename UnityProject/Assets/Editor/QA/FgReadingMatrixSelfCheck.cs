@@ -11,6 +11,7 @@ using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
@@ -113,6 +114,7 @@ namespace GameLogic.EditorTools
                 Step(CheckDeclaredFields);
                 Step(CheckKernelMatrix);
                 Step(CheckDeclMatrix);
+                Step(CheckStage3SingleTrack); // EMG3-FW-01：阶段 3 全量单轨（FGT-EMG-055 / 003）
                 Step(CheckNamedReadings);
                 Step(CheckFixedChassis);
                 Step(CheckReadingTexts);
@@ -624,6 +626,7 @@ namespace GameLogic.EditorTools
             Line("  · F. 读法说明（FGR-FW-011）：220 句 = 表里 字段 × 载体 的短语按幅度填数（与内核参数同源）；信号核悬停逐条列 5 种载体；电路编辑器只显示当前主组件载体那一条");
             NewState(9106, unlockAll: true);
             var bad = new List<string>();
+            int declTexts = 0;
             foreach (FwRow r in FirmwareKinds.Rows)
             {
                 foreach (FirmwareCarrier c in CarrierReadings.AllCarriers)
@@ -638,35 +641,31 @@ namespace GameLogic.EditorTools
                     {
                         continue; // EMG1-FIX-01：机制已改的载体按 FG19A 新读法写（数字与声明同源，FgEmgTextBehaviorSelfCheck 逐条核对），不再由旧字段短语组成
                     }
-                    foreach ((string field, double mag) in ParseFieldsExact(r.ReadFields))
+                    if (FirmwareKinds.TryGetRow(r.Id, out GameConfig.fg.FirmwareKind kr) && FirmwareKinds.IsDeclOnlyRow(kr))
                     {
-                        string phrase = Phrase(field, c, mag);
-                        if (field == "heatburst" && GameLogic.Campaign.Emergence.EmgProgramCompiler.RetiredTagsOf(r.Id).Contains("Fire"))
-                        {
-                            // EMG2-PHS-01（DEBT-EMG1FW01-03 注入类）：注热写端退役的过渡字段不再写进读法（改写“注热”，fgdata_firmware.inject_text_parts）——反过来断言旧短语不在
-                            if (phrase != null && text.Contains(phrase))
-                            {
-                                bad.Add($"{r.Id}.{c} 仍写着已退役的过渡字段 {field}：“{phrase}”");
-                            }
-                            continue;
-                        }
-                        if (phrase == null || !text.Contains(phrase))
-                        {
-                            bad.Add($"{r.Id}.{c} 缺字段 {field} 的短语“{phrase}”（实际“{text}”）");
-                        }
+                        continue; // 只走声明的新固件（N09～N16）由 FgEmgAddonFirmwareSelfCheck 核对“事件 + 端口 × 载体短语”
                     }
+                    declTexts++;
+                    DeclTextProblems(r, c, text, bad);
                 }
             }
-            Expect(bad.Count == 0, $"44 × 5 = 220 句读法说明逐句由 字段 × 载体 的短语与真实幅度组成{Detail(bad)}");
+            Expect(bad.Count == 0 && declTexts >= 300,
+                $"EMG3-FW-01：{declTexts} 句读法说明（名表 44 条 + 混合 30 条 × 5 载体，FG19A 手写句除外）逐句由声明生成——每条写端：本机出手上仍由过渡 / 折叠字段执行的写该字段短语（真实幅度），" +
+                $"其余写端口 × 载体短语；没接到任何声明写端的旧字段短语不出现（它们已不结算）{Detail(bad)}");
 
             // 数值与内核同源：抽几条直接比数。
-            CombatWeapon homing = WeaponFor(ComponentCatalog.CompGunId, HomeValleyLayout.Erc003ChassisId, FirmwareCatalog.FwHomingId);
+            // EMG3-FW-01：说明与内核同源改按声明——寻的写的是“飞行中转向”（程序里有 steer 指令，旧“破甲”字段已不结算）；电弧写“连锁 ×N”，N = 程序里连锁指令的跳数
             string homingText = FirmwareKinds.Reading(FirmwareCatalog.FwHomingId, FirmwareCarrier.Projectile);
-            CombatWeapon chain = WeaponFor(ComponentCatalog.CompRamId, HomeValleyLayout.Erc003ChassisId, "fw_arcchain");
             string chainText = FirmwareKinds.Reading("fw_arcchain", FirmwareCarrier.Melee);
-            Expect(homingText.Contains(Num(homing.Reading.ArmorPierce * 100.0)) && chain.Reading.ChainHits == 2 && chainText.Contains(Num(chain.Reading.ChainRange))
-                   && chainText.Contains(Num(chain.Reading.ChainFalloff * 100.0)),
-                $"说明里的数就是内核用的数：寻的 · 射弹 破甲 {homing.Reading.ArmorPierce * 100:0.#}%；电弧 · 格斗 跳 {chain.Reading.ChainHits} 个 / {chain.Reading.ChainRange} 米 / 每跳 {chain.Reading.ChainFalloff * 100:0}%");
+            EmgProgramResult homingProg = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { FirmwareCatalog.FwHomingId }, FirmwareCarrier.Projectile);
+            EmgProgramResult chainProg = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_arcchain" }, FirmwareCarrier.Melee);
+            ushort chainPort = EmgCatalog.Current.Ports[EmgCatalog.Current.PortIndexById["grm.mod.chain"]].Code;
+            float hops = chainProg.KernelInstrs.Where(x => x.Port == chainPort).Select(x => x.Amount).DefaultIfEmpty(0f).Max();
+            bool steers = homingProg.KernelInstrs.Any(x => x.Verb == EmgCatalog.VerbCode("steer"));
+            string armorPh = Phrase("homing", FirmwareCarrier.Projectile, 0.85);
+            Expect(steers && homingText.Contains(GameText.Get("emg.pc.grm.mod.homing.projectile")) && (armorPh == null || !homingText.Contains(armorPh))
+                   && hops >= 1f && chainText.Contains("×" + Num(hops)),
+                $"说明与内核同源（按声明）：寻的 · 射弹“{homingText}”= 程序真转向（steer 指令 {steers}），不再写旧破甲；电弧 · 格斗“{chainText}”跳数 ×{hops} = 程序里连锁指令的跳数");
 
             string tip = SignalCoreHudUIToolkit.ReadingTip(FirmwareCatalog.FwHomingId);
             int lines = CarrierReadings.AllCarriers.Count(c => tip.Contains(GameText.Format("reading.detail.line", CarrierReadings.CarrierName(c), FirmwareKinds.Reading(FirmwareCatalog.FwHomingId, c))));
@@ -706,6 +705,66 @@ namespace GameLogic.EditorTools
                 }
             }
             return list;
+        }
+
+        /// <summary>
+        /// EMG3-FW-01：读法说明由声明生成的独立核对（与 fgdata_firmware.decl_text 同口径，按 C# 侧 EmgProgramCompiler.TransitionFields / NumericLegacyFields 推）：
+        /// 写端在本机出手上由旧字段执行 → 字段短语在句中；否则 → 端口 × 载体短语在句中；没接到任何写端的旧字段短语不在句中。
+        /// </summary>
+        private static void DeclTextProblems(FwRow r, FirmwareCarrier c, string text, List<string> bad)
+        {
+            EmgCompiled cat = EmgCatalog.Current;
+            string[] owners = FirmwareKinds.TryGetParents(r.Id, out string pa, out string pb) ? new[] { pa, pb } : new[] { r.Id };
+            var fields = ParseFieldsExact(r.ReadFields);
+            var executed = new HashSet<string>(StringComparer.Ordinal);
+            string car = CarrierReadings.CarrierKey(c);
+            foreach (string o in owners)
+            {
+                if (!cat.OwnerIndex.TryGetValue(o, out int oi))
+                {
+                    bad.Add($"{r.Id}.{c}：owner {o} 没有声明（读法无法由声明生成）");
+                    return;
+                }
+                var mine = cat.Decls.Where(d => d.Owner == oi).ToList();
+                bool medium = mine.Any(d => d.Dir == EmgDirs.Write && d.Role == EmgRole.Modify && cat.PortIdByCode[d.Port].StartsWith("mat.", StringComparison.Ordinal));
+                bool beat = mine.Any(d => d.Dir == EmgDirs.Read && cat.PortIdByCode[d.Port] == "evt.beat");
+                foreach (EmgDeclRow d in mine.Where(d => d.Dir == EmgDirs.Write))
+                {
+                    string port = cat.PortIdByCode[d.Port];
+                    string[] exec = EmgProgramCompiler.IsRootKernelPort(port) ? Array.Empty<string>() : port.StartsWith("mat.", StringComparison.Ordinal) ? (medium || d.Role != EmgRole.Emit ? Array.Empty<string>() : EmgProgramCompiler.TransitionFields(port))
+                        : port == "en.kinetic" && beat ? Array.Empty<string>()
+                        : EmgProgramCompiler.TransitionFields(port).Concat(EmgProgramCompiler.NumericLegacyFields(port)).ToArray();
+                    // 物质排放的过渡字段只认 owner 自己的旧字段（与 EmgProgramCompiler.IsTriggeredEmitWithoutTransition 按 OwnerId 同口径；混合行 readFields 是两父相加）
+                    bool matter = port.StartsWith("mat.", StringComparison.Ordinal);
+                    var used = fields.Where(f => exec.Contains(f.Item1) && (!matter || CarrierReadings.FieldsOf(o).Any(of => of.Item1 == f.Item1))).ToList();
+                    if (used.Count == 0)
+                    {
+                        string pc = GameText.Get("emg.pc." + port + "." + car);
+                        if (!text.Contains(pc))
+                        {
+                            bad.Add($"{r.Id}.{c} 缺写端 {port} 的端口 × 载体短语“{pc}”（实际“{text}”）");
+                        }
+                        continue;
+                    }
+                    foreach ((string f, double m) in used)
+                    {
+                        executed.Add(f);
+                        string ph = Phrase(f, c, m);
+                        if (ph == null || !text.Contains(ph))
+                        {
+                            bad.Add($"{r.Id}.{c} 缺写端 {port} 的执行字段 {f} 短语“{ph}”（实际“{text}”）");
+                        }
+                    }
+                }
+            }
+            foreach ((string f, double m) in fields.Where(f => !executed.Contains(f.Item1)))
+            {
+                string ph = Phrase(f, c, m);
+                if (ph != null && ph.Length > 6 && text.Contains(ph))
+                {
+                    bad.Add($"{r.Id}.{c} 仍写着不再结算的旧字段 {f}：“{ph}”");
+                }
+            }
         }
 
         private static string Phrase(string field, FirmwareCarrier c, double mag)

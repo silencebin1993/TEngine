@@ -1363,7 +1363,8 @@ namespace BinGames.Sim.Combat
         /// 经 fg.TbPortCarrier 映射到读法驻留区——A = 半径、B = 秒数、C = 状态位号 + 1（编译器按物质写好；FG19A 第 0.3 节口径 3）。
         /// EMG2-MAT-01：斑块层开着（emg.stage ≥ 2）时改为生成物质斑块（物质码 = 端口码 − 400，份量 = 声明幅度，链 / 链深取这发子弹药的）。
         /// </summary>
-        private static void EmgNodeEffects(ref CombatData d, int prog, int node, double2 pos, int ownerSlot, CombatFaction faction, int chain = 0, byte depth = 0, ulong allow = ulong.MaxValue)
+        private static void EmgNodeEffects(ref CombatData d, int prog, int node, double2 pos, int ownerSlot, CombatFaction faction, int chain = 0, byte depth = 0, ulong allow = ulong.MaxValue,
+            bool emitOnly = false)
         {
             int verb = d.Config.EmgVerbEmit;
             if (prog < 0 || prog >= d.EmgPrograms.Length)
@@ -1384,7 +1385,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue; // EMG3-META-01：元程序关掉 / 推迟的下游指令
                 }
-                if (x.Verb == (byte)EmgVerb.Field && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                if (!emitOnly && x.Verb == (byte)EmgVerb.Field && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
                 {
                     // EMG2-FLD-01：子载荷落点 / 到期 / 撞障碍结算处展开场（与命中注能同一步同一处只生成一个）
                     if (EmgFieldFromInstr(ref d, x, pos, EmgIdOf(ref d, ownerSlot), faction, chain, depth) && i < d.EmgAct.Length)
@@ -1393,7 +1394,7 @@ namespace BinGames.Sim.Combat
                     }
                     continue;
                 }
-                if (verb <= 0 || x.Role <= EmgConst.RoleLastRead || x.Verb != verb || !(x.A > 0f) || !(x.B > 0f))
+                if (verb <= 0 || x.Role <= EmgConst.RoleLastRead || x.Verb != verb || !(x.A > 0f) || !(x.B > 0f) || (emitOnly && (x.Flags & EmgInstrFlags.Overflow) != 0))
                 {
                     continue;
                 }

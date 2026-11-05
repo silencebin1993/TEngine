@@ -160,7 +160,7 @@ namespace BinGames.Sim.Combat
                     break;
                 }
             }
-            EmgUnitRuleSettle(ref d, rule, chain, depth, srcId, u);
+            int settled = EmgUnitRuleSettle(ref d, rule, chain, depth, srcId, u); // 这里 d.EmgCtx 是 side0（Prog = −1），载荷宿主的 evt.react 在恢复上下文后补发
             if (rule.Side == EmgRuleConst.SideDamage && rule.SideValue > 0f && d.IsAlive(u) && rule.Op != EmgRuleConst.OpCoatArc)
             {
                 EmgAttrBegin(ref d, rule.Key, coatOwners, EmgFriendlyCode.Reaction, chain);
@@ -173,6 +173,7 @@ namespace BinGames.Sim.Combat
             es = d.EmgS[0];
             es.CoatBusy = 0;
             d.EmgS[0] = es;
+            EmgReactHosted(ref d, settled, pos, d.Id[u]);
             if (consumed != 0u)
             {
                 EmgClearCoat(ref d, u, consumed);
@@ -374,7 +375,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>单位宿主的规则结算记账：可靠计数 + 因果链“规则”节点 + evt.react（宿主 = 单位，Code = 计数槽）。</summary>
-        private static void EmgUnitRuleSettle(ref CombatData d, in EmgRule r, int chain, byte depth, int ownerId, int u)
+        private static int EmgUnitRuleSettle(ref CombatData d, in EmgRule r, int chain, byte depth, int ownerId, int u)
         {
             double2 pos = d.Pos[u];
             int slot = EmgRuleHit(ref d, r.Key, ownerId, d.Id[u], pos);
@@ -385,7 +386,23 @@ namespace BinGames.Sim.Combat
             if (slot >= 0)
             {
                 EmgEntityEvent(ref d, EmgEventKind.React, EmgEntKind.Unit, d.Id[u], EmgEntKind.None, 0, d.EmgRuleCount[slot], 0f, (ushort)slot, pos);
+                EmgReactHosted(ref d, slot, pos, d.Id[u]);
             }
+            return slot;
+        }
+
+        /// <summary>
+        /// EMG3-FW-01（FG19A 第 1 节第 22 行反应增幅 / D-12：“本载荷引发的每次通道交互，在交互点再放出 1 份子载荷”）：规则在某个载荷的结算里成立时
+        /// （宿主 = 正在结算的弹体 / 出手，d.EmgCtx.Prog ≥ 0），另按这个载荷宿主发一次 evt.react，读 evt.react 的触发器在交互点放出子载荷。
+        /// 按需：没有程序读 evt.react 时 EmgShotEvent 首行即返回；不转发（中继只转发 Relayable 事件）。斑块 / 单位宿主的 evt.react 照旧另发（图鉴计数口径不变）。
+        /// </summary>
+        private static void EmgReactHosted(ref CombatData d, int slot, double2 pos, int unitId)
+        {
+            if (slot < 0 || d.EmgCtx.Prog < 0 || d.EmgCtx.EntKind == EmgEntKind.None)
+            {
+                return;
+            }
+            EmgShotEvent(ref d, EmgEventKind.React, unitId, d.EmgRuleCount[slot], 0f, (ushort)slot, pos, unitId != 0 ? EmgEntKind.Unit : EmgEntKind.None);
         }
 
         /// <summary>去掉单位身上的沾染位（含叠层），重算状态效果与到期（与旧标签反应的“消耗”同一做法）。</summary>
@@ -528,6 +545,30 @@ namespace BinGames.Sim.Combat
                 }
             }
             return -1;
+        }
+
+        /// <summary>
+        /// EMG3-FW-01（散热鳍声明 prop.heat modify，FG19A 第 2.2 节）：装散热件的单位站在 condition 所列物质的斑块里时散热件那份散热的倍率，否则 1。
+        /// 没配置或没有斑块时直接返回（空场景零开销）；O(掩码位数 × 本格登记数)，只对挂散热件的单位。
+        /// </summary>
+        internal static float EmgFinWetFactor(ref CombatData d, int i)
+        {
+            uint mask = d.Config.EmgFinWetMatters;
+            if (mask == 0u || !(d.Config.EmgFinWetMul > 0f) || d.Patches.Length == 0)
+            {
+                return 1f;
+            }
+            double2 p = d.Pos[i];
+            while (mask != 0u)
+            {
+                int m = math.tzcnt(mask);
+                mask &= mask - 1u;
+                if (EmgGroundPatchAt(ref d, p, (byte)m) >= 0)
+                {
+                    return d.Config.EmgFinWetMul;
+                }
+            }
+            return 1f;
         }
 
         /// <summary>点 <paramref name="p"/> 所在的地面层 <paramref name="matter"/> 斑块（圆心在斑块内才算，−1 = 没有）。Id 最小的优先（确定性）。O(本格登记数)。</summary>

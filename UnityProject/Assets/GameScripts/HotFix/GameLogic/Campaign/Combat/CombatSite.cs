@@ -371,6 +371,7 @@ namespace GameLogic.Campaign.Combat
             c.EmgMaxFanout = Math.Max(1, (int)Math.Round(Tuning("emg.bus.max_fanout", EmgConst.DefaultMaxFanout)));
             c.EmgMaxPerHost = Mathf.Clamp((int)Math.Round(Tuning("emg.trig.max_per_host", EmgConst.DefaultMaxPerHost)), 1, EmgConst.DefaultMaxPerHost);
             c.EmgCoolRatio = Mathf.Clamp(Tuning("emg.heat.cool_ratio", EmgConst.DefaultCoolRatio), 0.01f, 1f);
+            (c.EmgFinWetMul, c.EmgFinWetMatters) = Emergence.EmgCatalog.HeatSinkWet(); // EMG3-FW-01：散热件泡在冷却液 / 水里的倍率（按声明）
             // EMG1-TRIG-01（FG19 FGR-EMG-034）：子载荷伤害比例、每次触发份数上限、同链同时存活上限；排放动词码（阶段 1 映射到读法驻留区）。
             c.EmgSubDmgRatio = Mathf.Max(0f, Tuning("emg.sub.dmg_ratio", EmgConst.DefaultSubDmgRatio));
             c.EmgMaxChildren = Math.Max(1, (int)Math.Round(Tuning("emg.trig.max_children", EmgConst.DefaultMaxChildren)));
@@ -1553,7 +1554,7 @@ namespace GameLogic.Campaign.Combat
             var w = new CombatWeapon
             {
                 Dissipation = FracturedCityLayout.WeaponHeatDissipationPerSecond,
-                HeatSinkBonus = FracturedCityLayout.HeatSinkBonusDissipationPerSecond,
+                HeatSinkBonus = Emergence.EmgCatalog.HeatSinkBonus(p.StructureId, FracturedCityLayout.HeatSinkBonusDissipationPerSecond),
                 OverheatAt = FracturedCityLayout.WeaponHeatOverheatThreshold,
                 RecoverBelow = FracturedCityLayout.WeaponHeatRecoverThreshold,
                 HasOutput = (byte)(p.HasCombatOutput ? 1 : 0),

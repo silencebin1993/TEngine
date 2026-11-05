@@ -181,7 +181,10 @@ namespace GameLogic.Campaign.Emergence
         // EMG3-META-01：meta.* 由元程序执行者接通（CombatLogic.Meta）；元程序 owner 的条件读端（prop.heat 等）由元程序条件求值执行，不算未接通（见 Compile 的 metaOwners）
         // EMG3-TMP-01：evt.beat / tmp.*（tmp.beat、tmp.sync）由内核节拍执行者接通（CombatLogic.Tempo）；fw_clock / fw_resonance 整条切到声明轨
         // EMG3-SQD-01：sqd.relay（struct_relay 的 scope）与 evt.ping 由内核跨机协同执行者接通（CombatLogic.Squad）；evt.ping 在 N30～N32 落表（EMG3-FW-02）前没有表内写者 / 读者，模糊测试器报“缺口（承接 EMG3-FW-02）”
-        public static readonly string[] PendingPorts = { "evt.react", "prop.heat", "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
+        // EMG3-FW-01（FGT-EMG-055 全量单轨）：evt.react 读端由载荷宿主的 evt.react 接通（CombatLogic.EmgReactHosted，反应增幅 D-12，DEBT-EMG2RULE01-08）；
+        // prop.heat modify 由内核散热执行（散热鳍：声明幅度 → CombatWeapon.HeatSinkBonus，condition 物质 × param2 → CombatConfig.EmgFinWetMul，DEBT-EMG2RULE01-11）。
+        // 只剩 grm.anchor（N43 接线随 EMG3-FUSE-01 落表；表里现无声明用到它）。
+        public static readonly string[] PendingPorts = { "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
 
         /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>）。EMG2-RECL-01：物质端口的 modify（蔓延）已由内核执行（CombatLogic.EmgSpread），不再算未接通。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)
@@ -375,6 +378,54 @@ namespace GameLogic.Campaign.Emergence
                 }
             }
             return raw;
+        }
+
+        /// <summary>
+        /// EMG3-FW-01（FG19A 第 2.2 节散热鳍，FGR-EMG-019 单轨）：结构模块的 prop.heat modify 声明生效时，散热件那份散热 = 声明幅度（每秒）；
+        /// 声明未生效（旧轨）时 = <paramref name="legacy"/>（FracturedCityLayout 常量）。按声明，不认部件 ID。
+        /// </summary>
+        public static float HeatSinkBonus(string structureId, float legacy)
+        {
+            float v = string.IsNullOrEmpty(structureId) ? 0f : PartWriteAmount("prop.heat", EmgRole.Modify, new[] { structureId });
+            return v > 0f ? v : legacy;
+        }
+
+        /// <summary>
+        /// EMG3-FW-01：生效的 prop.heat modify 声明的“泡在物质里”倍率（param2）与它的 condition 读端物质（码位掩码）。全表取倍率最大的那个 owner
+        /// （shortcut: 内核按全局配置执行，现表只有散热鳍一个 owner 写 prop.heat；出现第二个倍率不同的散热件时改成按武器存）。没有生效声明返回 (0, 0)。
+        /// </summary>
+        public static (float mul, uint matters) HeatSinkWet()
+        {
+            EmgCompiled c = Current;
+            if (!c.PortIndexById.TryGetValue("prop.heat", out int pi))
+            {
+                return (0f, 0u);
+            }
+            ushort heat = c.Ports[pi].Code;
+            float best = 0f;
+            uint mask = 0u;
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.Dir != EmgDirs.Write || d.Role != EmgRole.Modify || d.Port != heat || !c.OwnerActive(d.Owner) || !(d.Param2 > best))
+                {
+                    continue;
+                }
+                uint m = 0u;
+                foreach (EmgDeclRow r in c.Decls)
+                {
+                    if (r.Owner == d.Owner && r.Dir == EmgDirs.Read && r.Role == EmgRole.Condition && c.PortIdByCode.TryGetValue(r.Port, out string pid)
+                        && pid.StartsWith("mat.", StringComparison.Ordinal) && EmgMatterCatalog.CodeOf(pid) is byte code && code > 0 && code < 32)
+                    {
+                        m |= 1u << code;
+                    }
+                }
+                if (m != 0u)
+                {
+                    best = d.Param2;
+                    mask = m;
+                }
+            }
+            return (best, mask);
         }
 
         /// <summary>FG-GAP-169：这个部件有没有声明“写 <paramref name="port"/>”。不看声明是否生效：回滚（emg.stage = 0）时旧轨同样要知道它是哪类部件。</summary>

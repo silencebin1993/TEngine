@@ -167,6 +167,12 @@ namespace BinGames.Sim.Combat
                     d.Zones[last] = z;
                 }
             }
+            if (any && code == EmgConst.SubPulse && s.Done == 0)
+            {
+                // EMG3-FW-01 审查修复（第 1 轮，FG-GAP-201）：小场脉冲节点读 evt.beat 时在脉冲点留节拍锚点（与子弹药同一做法，一次放出只留一个）——否则 [子母弹, 时钟脉冲] 装在力场上，
+                // 嵌在 0.3 秒脉冲里的节拍指令永远撑不到相位（零死指令，FGR-EMG-221）
+                EmgBeatAnchorSub(ref d, s, s.Dir, damage, (byte)CombatCarrier.Aura);
+            }
             return any;
         }
 

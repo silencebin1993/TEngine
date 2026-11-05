@@ -247,7 +247,7 @@ namespace GameLogic.EditorTools
             EmgProgramResult split = Compile(FwSplit);
             int splitN = split.KernelNodes.Count > 1 ? split.KernelNodes[1].TrigCount : 0;
             Expect(splitN == 3 && FirmwareKinds.TryGetRow(FwSplit, out GameConfig.fg.FirmwareKind sr) && sr.ReadFields.Contains("split:3")
-                   && Desc(FwSplit).Contains(ZhDigits[splitN] + "枚") && !Desc(FwSplit).Contains("两枚") && Read(FwSplit, FirmwareCarrier.Projectile).Contains($"{splitN} 枚")
+                   && Desc(FwSplit).Contains(ZhDigits[splitN] + "枚") && !Desc(FwSplit).Contains("两枚") && Read(FwSplit, FirmwareCarrier.Projectile).Contains($"×{splitN}") /* EMG3-FW-01：读法由声明生成（grm.trig spawn 份数 ×N、各 emg.sub.dmg_ratio） */
                    && Desc(FwSplit).Contains("一半") && Read(FwSplit, FirmwareCarrier.Projectile).Contains("50%"),
                 $"分裂（D-01，FG-GAP-154）：声明触发 {splitN} 份 = 表值 split:3 = 描述“{ZhDigits[Math.Min(splitN, 5)]}枚、一半” = 读法“{Read(FwSplit, FirmwareCarrier.Projectile)}”");
 

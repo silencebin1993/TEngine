@@ -1361,6 +1361,11 @@ namespace BinGames.Sim.Combat
         public int EmgMaxFanout;
         public int EmgMaxPerHost;
         public float EmgCoolRatio;
+        /// <summary>EMG3-FW-01（FG19A 第 2.2 节散热鳍：prop.heat modify，身下有 condition 读端所列物质的斑块时 × param2）：装了散热件（<see cref="CombatUnitFlags.HeatSink"/>）的单位
+        /// 站在 <see cref="EmgFinWetMatters"/>（物质码位掩码）任一种斑块里时，散热件那份散热 × <see cref="EmgFinWetMul"/>。0 = 不生效（旧轨 / 阶段 &lt; 2）。
+        /// 由热更层按声明写（不认部件 ID）；配置不进快照，读档后按同一张表重建。</summary>
+        public float EmgFinWetMul;
+        public uint EmgFinWetMatters;
         /// <summary>EMG1-TRIG-01（fg.TbHomeTuning emg.sub.dmg_ratio / emg.trig.max_children / emg.tree.max_payloads）：子载荷伤害比例、每次触发份数上限、同一条链同时存活的载荷上限。≤ 0 取 <see cref="EmgConst"/> 初值。</summary>
         public float EmgSubDmgRatio;
         public int EmgMaxChildren;

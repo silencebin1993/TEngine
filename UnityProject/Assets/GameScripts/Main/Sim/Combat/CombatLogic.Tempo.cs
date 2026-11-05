@@ -321,7 +321,8 @@ namespace BinGames.Sim.Combat
         /// 子弹药（子弹 / 余波 / 无人机子弹，寿命 ≤ 0.5 秒）所在节点读 evt.beat：在放出点留 2 秒节拍锚点代它按拍执行（与格斗“挥击点留 2 秒程序锚点”同一读法，FG19A fw_clock 行），
         /// 否则嵌套在子弹药里的节拍指令几乎撑不到自己的相位（零死指令，FGR-EMG-221）。按端口判，不按内容 ID。
         /// </summary>
-        internal static void EmgBeatAnchorSub(ref CombatData d, in EmgSpawn s, float2 dir, float damage)
+        /// <remarks>EMG3-FW-01 审查修复（第 1 轮，FG-GAP-201）：小场脉冲（存续 0.3 秒，跨不到拍界）同样留锚点，载体记力场（<paramref name="carrier"/>）；子区域活得过一个周期，自己做宿主，不留。</remarks>
+        internal static void EmgBeatAnchorSub(ref CombatData d, in EmgSpawn s, float2 dir, float damage, byte carrier = (byte)CombatCarrier.Projectile)
         {
             if (s.Prog < 0 || (d.EmgListen & EmgBit(EmgEventKind.Beat)) == 0u || EmgReadSlot(ref d, s.Prog, s.Node, EmgEventKind.Beat) < 0)
             {
@@ -331,7 +332,7 @@ namespace BinGames.Sim.Combat
             {
                 Unit = s.Owner, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Host = s.Owner, HostKind = (byte)EmgEntKind.Unit, Mode = EmgMetaConst.RunBeat,
                 Depth = s.Depth, Mask = ulong.MaxValue, Pos = s.Pos, Dir = dir, Other = s.Other, Weapon = s.Weapon, Damage = math.max(0f, damage), Faction = s.Faction,
-                Carrier = (byte)CombatCarrier.Projectile, PFlags = (ushort)(s.Flags & EmgProjFlags.Heal), ZoneRadius = math.max(0f, s.ZoneRadius), ZoneLife = math.max(0f, s.ZoneLife),
+                Carrier = carrier, PFlags = (ushort)(s.Flags & EmgProjFlags.Heal), ZoneRadius = math.max(0f, s.ZoneRadius), ZoneLife = math.max(0f, s.ZoneLife),
             });
         }
 

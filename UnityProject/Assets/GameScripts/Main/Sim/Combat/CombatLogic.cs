@@ -571,7 +571,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             CombatWeapon wp = d.Weapons[w];
-            float rate = (wp.Dissipation + (d.Has(i, CombatUnitFlags.HeatSink) ? wp.HeatSinkBonus : 0f)) * (1f + math.max(0f, d.DissipationBonus)); // FG7-ENV-03 寒潮散热加成
+            float rate = (wp.Dissipation + (d.Has(i, CombatUnitFlags.HeatSink) ? wp.HeatSinkBonus * (d.Heat[i] > 0f ? EmgFinWetFactor(ref d, i) : 1f) : 0f)) * (1f + math.max(0f, d.DissipationBonus)); // FG7-ENV-03 寒潮散热加成
             rate *= SlagFactor(ref d, i); // FG9-FAC-02：熔渣热区内散热 -30%
             float h = math.max(0f, d.Heat[i] - rate * dt);
             d.Heat[i] = h;

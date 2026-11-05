@@ -296,7 +296,8 @@ namespace GameLogic.Campaign.Content
                 Slot = "结构",
                 ScrapCost = 15,
                 Load = 1,
-                ValuesSummary = "散热+5/秒（DEMO-CONTENT-LOCK.md §2.4）。",
+                // shortcut: 与同表其他数值摘要一样写死中文（倍率 / 物质与 fg.TbChannelDecl 散热鳍声明同数），整表摘要改文本键随图鉴文本统一做（证据文件遗留项）
+                ValuesSummary = "散热+5/秒；身下有冷却液或水的斑块时这份散热 ×2。",
                 AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                 IconId = "icon_struct_fin",
                 ModelId = "primitive:capsule",

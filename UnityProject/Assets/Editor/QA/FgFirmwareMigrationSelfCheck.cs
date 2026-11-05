@@ -739,7 +739,9 @@ namespace GameLogic.EditorTools
                 string all = string.Join("|", new[] { d.DisplayName, d.Description, d.SourceDetail, d.LockedHintText, d.ValuesSummary }.Concat(zhReads));
                 // EMG1-FW-02：只走声明的新固件，读法由“事件 + 端口 × 载体短语”生成（单位级事件在本机处、与载体无关；射弹 / 无人机的子形态都是子弹），
                 // 允许载体间同句，不要求 5 句互不相同；缺失 / 标记 / 禁用词 / 内部 ID 照查
-                bool declOnly = FirmwareKinds.TryGetRow(d.Id, out GameConfig.fg.FirmwareKind fr) && FirmwareKinds.IsDeclOnlyRow(fr);
+                // EMG3-FW-01：声明轨固件的读法全部由“写端口 × 载体短语”生成，端口在几种载体上的执行相同（如连锁、标记）就如实同句，同样不要求 5 句互不相同
+                bool declOnly = (FirmwareKinds.TryGetRow(d.Id, out GameConfig.fg.FirmwareKind fr) && FirmwareKinds.IsDeclOnlyRow(fr)) || GameLogic.Campaign.Emergence.EmgCatalog.IsOwnerOnDeclTrack(d.Id)
+                                || (FirmwareKinds.TryGetParents(d.Id, out string pa, out string pb) && GameLogic.Campaign.Emergence.EmgCatalog.IsOwnerOnDeclTrack(pa) && GameLogic.Campaign.Emergence.EmgCatalog.IsOwnerOnDeclTrack(pb));
                 if ((!declOnly && (zhReads.Distinct().Count() != 5 || enReads.Distinct().Count() != 5)) || zhReads.Any(string.IsNullOrWhiteSpace) || enReads.Any(string.IsNullOrWhiteSpace)
                     || GameText.ContainsMarker(all + string.Join("|", enReads)) || AuditHit(all, string.Join("|", enReads)) != null)
                 {

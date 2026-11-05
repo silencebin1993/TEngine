@@ -1432,7 +1432,55 @@ namespace GameLogic.EditorTools
             ["evt.uplink"] = "信号接入时热更层注入（CombatSites.OnUplinkChanged；FgEmgAddonFirmwareSelfCheck 接入冲击）",
             ["evt.unlink"] = "信号离开时热更层注入（CombatSites.OnUplinkChanged；FgEmgFlashSelfCheck）",
             ["evt.pickup"] = "机器拾取时热更层注入（CargoService → CombatSites.InjectEmgPickup；FgEmgBusSelfCheck）",
+            ["evt.phase"] = "单位进 / 出相态时内核发（CombatLogic.Phase EnterPhase / ExitPhase；EMG2-PHS-01，FgEmgPhaseSelfCheck）", // EMG3-FW-01：阶段 2 出口核对暴露（原被 evt.react 未接通挡在阶段 1 出口）
         };
+
+        /// <summary>
+        /// EMG3-FW-01（FG19 规则三“世界常驻源”之一：内核规则产物）：已生效（stage ≤ 当前阶段）的 fg.TbChannelRule 行的主产物 / 伴生产物物质端口——
+        /// 规则结算时内核直接生成这些斑块（蒸汽、烟、熔渣、冰、玻璃、碎屑；ter.block = 固化胶块 mat.cured，EmgRuleCatalog.ProductMatter），不需要声明去写。
+        /// </summary>
+        /// <summary>EMG3-FW-01：相态端口（phs.*）——阶段 ≥ 2 由内核相变层按 fg.TbPhaseRule 的累积量 / 相态行维护（EMG2-PHS-01），属于世界常驻源。</summary>
+        private static bool KernelPhase(string port, int stage)
+        {
+            if (stage < 2 || !port.StartsWith("phs.", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            try
+            {
+                foreach (GameConfig.fg.PhaseRule r in ConfigSystem.Instance.Tables.TbPhaseRule.DataList)
+                {
+                    if (r != null && (r.Acc == port || r.Phase == port))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 表不可用：不算
+            }
+            return false;
+        }
+
+        private static bool RuleProduct(string port, int stage)
+        {
+            try
+            {
+                foreach (GameConfig.fg.ChannelRule r in ConfigSystem.Instance.Tables.TbChannelRule.DataList)
+                {
+                    if (r != null && r.Stage <= stage && (r.Product == port || r.ByProduct == port || (port == "mat.cured" && r.Product == "ter.block")))
+                    {
+                        return true;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 表不可用：不算规则产物（审计照常按其余来源判）
+            }
+            return false;
+        }
 
         /// <summary>非事件读端口的世界常驻源（FG19 规则三“固件、部件、敌人、世界常驻源”）：内核本来就有的量，不需要任何声明去写。</summary>
         internal static readonly Dictionary<string, string> WorldSources = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -1448,8 +1496,12 @@ namespace GameLogic.EditorTools
             ["sqd.relay"] = "信号中继结构模块（struct_relay 的 scope 声明）的中继范围：装中继的机器周围 emg.relay.range 米（EMG3-SQD-01，内核 CombatLogic.Squad；FgEmgSquadSelfCheck）",
             ["ter.obstacle"] = "地形障碍",
             ["ter.cover"] = "障碍 / 残骸",
+            ["ter.ground"] = "地面（PCG 地形本身，任何落点都在地面上；EMG3-FW-01 阶段 2 出口核对登记）",
+            ["ter.water"] = "水面（PCG 地形水域，chs.water 的来源；EMG3-FW-01 阶段 2 出口核对登记）",
             ["ent.projectile"] = "所有射弹武器的弹体",
             ["tmp.beat"] = "内核全局节拍（CombatLogic.Tempo，每 emg.tempo.beat 一拍；EMG3-TMP-01，FgEmgTempoSelfCheck B / C）",
+            ["ent.unit"] = "场上所有单位（实体族“单位”端口；EMG3-FW-01 阶段 2 出口核对登记）",
+            ["prop.flammable"] = "实体档案可燃性（fg.TbEntityProfile；EMG2-PERSIST-01 残骸 / 单位着火按它）",
             ["tmp.sync"] = "内核相位对齐（同机 ≥ 2 条节拍指令同拍执行；EMG3-TMP-01，FgEmgTempoSelfCheck D）",
         };
 
@@ -1493,7 +1545,7 @@ namespace GameLogic.EditorTools
                 if (p.Stage <= stage && (readers.Count > 0 || writers.Count > 0))
                 {
                     a.Effective++;
-                    bool sourced = writers.Count > 0 || WorldSources.ContainsKey(p.Id) || (observedEvents?.Contains(p.Id) ?? false) || EventProducers.ContainsKey(p.Id)
+                    bool sourced = writers.Count > 0 || WorldSources.ContainsKey(p.Id) || (observedEvents?.Contains(p.Id) ?? false) || EventProducers.ContainsKey(p.Id) || RuleProduct(p.Id, stage) || KernelPhase(p.Id, stage)
                                    || (DerivedSources.TryGetValue(p.Id, out string via) && live.Any(d => d.Dir == "write" && d.Port == via));
                     if (readers.Count > 0 && !sourced)
                     {
@@ -1520,7 +1572,7 @@ namespace GameLogic.EditorTools
                 }
                 // FG19 第 12 节规则三出口口径（EMG1-E2E-01 修复轮，FG-GAP-183）：内核本阶段真实发出的事件端口（固定集实测）有写者，读者落表前记缺口；
                 // 既没有声明引用、内核也不发出的端口到阶段出口即失败（端口 stage 应记到第一个读者 / 写者落表的阶段）。
-                bool kernelWrites = (observedEvents?.Contains(p.Id) ?? false) || WorldSources.ContainsKey(p.Id) || EventProducers.ContainsKey(p.Id);
+                bool kernelWrites = (observedEvents?.Contains(p.Id) ?? false) || WorldSources.ContainsKey(p.Id) || EventProducers.ContainsKey(p.Id) || RuleProduct(p.Id, stage) || KernelPhase(p.Id, stage);
                 if (exitMode && p.Stage <= stage && !kernelWrites)
                 {
                     a.Failures.Add($"阶段出口仍无人引用的端口 {p.Id}（端口 stage = {p.Stage}，{why}，承接 {card}）");
@@ -1623,7 +1675,8 @@ namespace GameLogic.EditorTools
             Expect(a.Failures.Count == 0 && a.Effective > 0,
                 $"本阶段（emg.stage = {stage}）生效端口 {a.Effective} 个全部有源（生效声明写者 / 世界常驻源 {WorldSources.Count} 类 / 派生源 / 固定集实测发出的事件 {observed.Count} 种），本阶段生效端口的缺口清单为空{Detail(a.Failures)}");
             // EMG2-MAT-01：阶段 2 已开但端口按承接卡逐张接通（EmgCatalog.PendingPorts 非空）——出口模式核对上一个已出口的阶段；阶段 2 出口由 EMG2-E2E-01 在全部接通后核对。
-            // EMG3-CHS-01：阶段 3 开后，出口阶段 = 还有未接通端口的最低阶段 − 1（阶段 2 的 evt.react / prop.heat 仍未接通 → 仍核对阶段 1 出口；与原“阶段 2 已开、有未接通端口 → 阶段 1”同一口径）
+            // EMG3-CHS-01：阶段 3 开后，出口阶段 = 还有未接通端口的最低阶段 − 1（与原“阶段 2 已开、有未接通端口 → 阶段 1”同一口径）。
+            // EMG3-FW-01：evt.react / prop.heat 接通后只剩 grm.anchor（stage 3）→ 核对阶段 2 出口；暴露的 8 个端口都是内核产物（evt.phase 生产者、规则产物斑块），登记为生产者 / 规则产物源
             int exitStage = stage;
             foreach (EmgSource.Port pp in EmgCatalog.FromTables().Ports)
             {
@@ -1685,28 +1738,33 @@ namespace GameLogic.EditorTools
             string coolDesc = GameText.Get("firmware.fw_coolback.desc");
             Expect(dr.Crash == null && dr.Stall == null && (!droneDead || droneRead.Contains("先命中则不空爆")) && coolDesc.Contains("需要积热来源"),
                 $"FG-GAP-179：[延时引信]×无人机舱 {(droneDead ? "零反应（子弹先命中）" : "激活")}，读法写明条件“{droneRead}”；[冷却回流] 说明写明“需要积热来源”（{coolDesc}）");
-            // 2. 无源端口：一个生效部件声明读 prop.flammable（端口 stage 2，阶段 2 仍没有任何写者、不是世界常驻源）
-            EmgSource src = EmgCatalog.FromTables();
+            // 2. 无源端口：构造一个阶段 2 的实体族端口（不在世界源 / 生产者 / 规则产物里，EMG3-FW-01 起真实表里 stage ≤ 2 的端口都已有来源，改用构造端口，判定本身仍要能失败）
+            const string NegPort = "prop.fuzzneg";
+            EmgSource WithNegPort()
+            {
+                EmgSource s0 = EmgCatalog.FromTables();
+                s0.Ports.Add(new EmgSource.Port { Id = NegPort, Family = "entity", Dirs = "both", Unit = "ratio", NameKey = "emg.port.prop.mass.name", DescKey = "emg.port.prop.mass.desc", Code = 699, Perceive = 1, Stage = 2 });
+                return s0;
+            }
+            EmgSource src = WithNegPort();
             src.Decls.Add(new EmgSource.Decl
             {
-                Id = "comp_fuzzneg.1", Owner = "comp_fuzzneg", OwnerKind = "component", Seq = 1, Dir = "read", Port = "prop.flammable", Role = "sense", Carriers = "all",
+                Id = "comp_fuzzneg.1", Owner = "comp_fuzzneg", OwnerKind = "component", Seq = 1, Dir = "read", Port = NegPort, Role = "sense", Carriers = "all",
                 TextKey = "emg.decl.comp_fuzzneg.1", StageGate = 2, Amount = 1f,
             });
             SourceAudit au = AuditSources(src, 2, new List<string>());
-            SourceAudit au0 = AuditSources(EmgCatalog.FromTables(), 1, new List<string>());
-            // 出口模式会失败的对照：阶段 1 出口已清零，改按阶段 2 的表跑（stage ≤ 2、无人引用、也没有生产者的端口，如 mat.*）——断言判定本身能失败，不是空转。
-            SourceAudit au2 = AuditSources(EmgCatalog.FromTables(), 2, new List<string>());
-            SourceAudit auExit = AuditSources(EmgCatalog.FromTables(), 2, new List<string>(), exitMode: true);
-            string exitPort = au2.Gaps.Where(g => !EventProducers.ContainsKey(g.Port) && !WorldSources.ContainsKey(g.Port)
-                                                  && EmgCatalog.FromTables().Ports.Any(pp => pp != null && pp.Id == g.Port && pp.Stage <= 2)).Select(g => g.Port).FirstOrDefault();
-            string producerPort = au0.Gaps.Select(g => g.Port).FirstOrDefault(EventProducers.ContainsKey);
+            SourceAudit au0 = AuditSources(WithNegPort(), 2, new List<string>());
+            SourceAudit auExit = AuditSources(WithNegPort(), 2, new List<string>(), exitMode: true);
+            string exitPort = NegPort;
+            SourceAudit au1 = AuditSources(EmgCatalog.FromTables(), 1, new List<string>());
+            string producerPort = au1.Gaps.Select(g => g.Port).FirstOrDefault(EventProducers.ContainsKey);
             SourceAudit auExit1 = AuditSources(EmgCatalog.FromTables(), 1, new List<string>(), exitMode: true);
-            Expect(exitPort != null && auExit.Failures.Any(f => f.Contains("端口 " + exitPort + "（")) && !auExit.Gaps.Any(g => g.Port == exitPort)
+            Expect(auExit.Failures.Any(f => f.Contains("端口 " + exitPort + "（")) && !auExit.Gaps.Any(g => g.Port == exitPort) && au0.Gaps.Any(g => g.Port == exitPort)
                    && producerPort != null && !auExit1.Failures.Any(f => f.Contains("端口 " + producerPort + "（")) && auExit1.Gaps.Any(g => g.Port == producerPort),
-                $"出口模式：stage ≤ 当前阶段、无人引用也没有生产者的端口（阶段 2 例 {exitPort ?? "无"}）平时只是缺口，出口模式下判失败（{auExit.Failures.FirstOrDefault(f => exitPort != null && f.Contains(exitPort))}）；" +
+                $"出口模式：stage ≤ 当前阶段、无人引用也没有生产者的端口（构造的阶段 2 端口 {exitPort}）平时只是缺口，出口模式下判失败（{auExit.Failures.FirstOrDefault(f => f.Contains(exitPort))}）；" +
                 $"有阶段 1 生产者的端口（例 {producerPort ?? "无"}）出口模式下仍记缺口");
-            Expect(au.Failures.Any(f => f.Contains("prop.flammable")) && !au0.Failures.Any(f => f.Contains("prop.flammable")) && au0.Gaps.Any(g => g.Port == "prop.flammable"),
-                $"构造的无源端口被报出：{au.Failures.FirstOrDefault(f => f.Contains("prop.flammable"))}；不加这行时 prop.flammable 只是缺口（承接 {au0.Gaps.FirstOrDefault(g => g.Port == "prop.flammable").Card}）");
+            Expect(au.Failures.Any(f => f.Contains(NegPort)) && !au0.Failures.Any(f => f.Contains(NegPort)) && au0.Gaps.Any(g => g.Port == NegPort),
+                $"构造的无源端口被报出：{au.Failures.FirstOrDefault(f => f.Contains(NegPort))}；不加读它的声明时只是缺口（承接 {au0.Gaps.FirstOrDefault(g => g.Port == NegPort).Card}）");
             // 3. NaN 位置判崩溃：真实场地里把一个敌人的位置写成 NaN
             using (Arena a = Build(new FuzzCase { Index = 902, Comp = ComponentCatalog.CompGunId, Carrier = FirmwareCarrier.Projectile, Chassis = ChassisCatalog.ChassisWheelId, Site = "home", Faction = pools.Factions[0], Enemies = 3, EnemySeed = 3 }, true, pools))
             {

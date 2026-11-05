@@ -208,22 +208,17 @@ namespace BinGames.Sim.Combat
             {
                 for (int cx = x0; cx <= x1; cx++)
                 {
-                    if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(cx, cy), out int e, out NativeParallelMultiHashMapIterator<long> it))
+                    // EMG3-FW-01 满载回收：走斑块专用格链（与 Cells 里的斑块登记同一组，同 PatchesAt），只读引用；按 (重叠比, EmgId) 取最大，与遍历顺序无关
+                    for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(cx, cy)] - 1; node >= 0;)
                     {
-                        continue;
-                    }
-                    do
-                    {
-                        if ((byte)d.EmgHash.Entries[e].w != EmgHash.KindPatch)
+                        int4 cell = d.EmgHash.PatchNodes[node];
+                        node = cell.w;
+                        int j = cell.z;
+                        if (cell.x != cx || cell.y != cy || j == i || j >= d.Patches.Length)
                         {
                             continue;
                         }
-                        int j = d.EmgHash.Refs[e];
-                        if (j == i || j >= d.Patches.Length)
-                        {
-                            continue;
-                        }
-                        CombatZone o = d.Patches[j];
+                        ref CombatZone o = ref d.Patches.ElementAt(j);
                         if (o.Matter != matter || (dry && (o.PFlags & EmgMatterConst.FlagOilCovered) != 0))
                         {
                             continue;
@@ -243,7 +238,6 @@ namespace BinGames.Sim.Combat
                             best = j;
                         }
                     }
-                    while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
                 }
             }
             return best;
@@ -627,6 +621,7 @@ namespace BinGames.Sim.Combat
             if (slot >= 0)
             {
                 EmgEntityEvent(ref d, EmgEventKind.React, EmgEntKind.Patch, patchId, EmgEntKind.None, 0, d.EmgRuleCount[slot], 0f, (ushort)slot, pos);
+                EmgReactHosted(ref d, slot, pos, 0); // EMG3-FW-01：载荷结算里成立的规则另按载荷宿主发 evt.react（反应增幅）
             }
         }
 

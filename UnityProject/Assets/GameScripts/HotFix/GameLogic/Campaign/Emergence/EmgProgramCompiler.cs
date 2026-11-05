@@ -1460,7 +1460,7 @@ namespace GameLogic.Campaign.Emergence
                                 var mediumCarrier = (FirmwareCarrier)ResolveCarrier(c, r.Carrier, n.Parent);
                                 x.A = mediumCarrier == FirmwareCarrier.Melee || mediumCarrier == FirmwareCarrier.Aura ? 0f : d.Param2 > 0f ? d.Param2 : x.A;
                             }
-                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port) || IsRootKernelWrite(port, d.Role) || medium) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
+                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port) || IsRootKernelWrite(port, d.Role) || medium || IsTriggeredEmitWithoutTransition(c, s, port, d.Role)) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
                             {
                                 x.Flags |= EmgInstrFlags.RootKernel | (pc.Mag switch { 1 => EmgInstrFlags.MagA, 2 => EmgInstrFlags.MagB, 3 => EmgInstrFlags.MagC, _ => EmgInstrFlags.None });
                             }
@@ -1593,6 +1593,36 @@ namespace GameLogic.Campaign.Emergence
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// EMG3-FW-01（DEBT-EMG1E2E01-02，FGR-EMG-019 单轨）：阶段 ≥ 2 根节点上的物质排放，由事件触发（同一 owner 有 trigger 读端）、而这条固件没有物质过渡字段（linger / trail）可执行时，
+        /// 由内核在生效事件处直接排真斑块（EmgRootGated → EmgEmitPatch）——否则这条声明写端没有任何执行者（腐蚀弹头“命中排酸”0 块）。按声明与数据列判，不按内容 ID。
+        /// </summary>
+        private static bool IsTriggeredEmitWithoutTransition(EmgCompiled c, EmgProgramStep s, string port, EmgRole role)
+        {
+            if (!KernelInjectLive || role != EmgRole.Emit || port == null || !port.StartsWith("mat.", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            bool trig = false;
+            foreach (int di in s.Decls)
+            {
+                trig |= c.Decls[di].Dir == EmgDirs.Read && c.Decls[di].Role == EmgRole.Trigger;
+            }
+            if (!trig)
+            {
+                return false;
+            }
+            // 审查修复（第 1 轮）：按这条声明的 owner（混合固件 = 父固件）自己的旧字段判——混合行的 readFields 是两父相加，另一父的驻留区 / 拖尾只排它自己那种物质
+            foreach ((string f, float _) in CarrierReadings.FieldsOf(s.OwnerId))
+            {
+                if (Array.IndexOf(MatterTransition, f) >= 0)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static bool IsRootKernelOwner(string owner) =>

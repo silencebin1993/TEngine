@@ -232,6 +232,7 @@
 **FGR-EMG-019 双轨迁移**
 - `stageGate` 未到（高于运行时总开关 `emg.stage`，ADR-EMG-001 ⑮）的声明不生效，该 owner 继续走旧 `readFields` → `CarrierReadings` 路径（`CarrierReadings.cs:231-346`）。同一 owner 同一阶段只能走一条轨，不得两轨同时结算（自检比对）。
 - 整条切轨：一个 owner 的全部声明取同一个 `stageGate`，取值 = 它用到的端口里最晚可用的阶段（FG19A 第 0.3 节口径 2、申请 A2；物质、能量、相态写端按阶段 1 过渡动词计 1，见 FGR-EMG-010 `stage` 推导末句与 FG19A 第 0.3 节口径 3，表校验按此判“stageGate 不得早于端口可用阶段”）；表校验发现同一 owner 的 `stageGate` 不一致即失败（FGT-EMG-001）。
+- **EMG3-FW-01 已落地（2026-11-05）**：阶段 3 起 `stageGate ≤ 3` 的 owner 全部单轨——`EmgCatalog.PendingPorts` 只剩 `grm.anchor`（N43 接线随 EMG3-FUSE-01）；`evt.react` 读端由“载荷结算中成立的规则另按载荷宿主发 `evt.react`”接通（`CombatLogic.EmgReactHosted`，反应增幅 D-12），`prop.heat` modify 由内核散热执行（散热鳍：声明幅度 = 散热件那份散热，`condition` 物质斑块里 × `param2`）。声明轨 owner 的旧字段只保留“本机出手上仍由过渡 / 折叠字段执行”的那几个（FG19A 第 0.3 节口径 3：排放 linger / trail、动能 echo、伴飞 inherit、处决 / 腐蚀 explode；数值端口折叠 scale / spread / armor / capacitor），其余旧字段不结算、读法说明也不再写；过渡字段换内核新动词在阶段 4 结束前完成（本条第 3 点，DEBT-EMG3META01-01）。读法说明全部按声明生成（`fgdata_firmware.decl_text`）。stageGate = 4：表内 0 个（`comp_claw` 拆解拾取碎屑一条为预留、未落表）。自检 `FgReadingMatrixSelfCheck` C5（FGT-EMG-055 / 003 阶段 3）。
 - 阶段 4 结束时旧 `readFields` 列只保留作存档对账，不再被战斗读取；`GeneCatalog` 旧基因编译（`BlueprintCircuitCompiler.cs:279-310`）只保留给 `TotalNormalizedDamage` 预览，ADR-EMG-001 决定是否一并退役。
 
 **FGR-EMG-020 附录 FG19A / FG19B 必须遵守的规则**
@@ -969,6 +970,7 @@
 
 **FGR-EMG-160 敌人用同一套程序**
 - 敌方单位的武器、行为读法与玩家同一套编译器、同一套规则表（现状已共用 `CarrierReadings`，`EnemySpawnBuilder.cs:146`；云端澄净敌人行装配 `fw_acid`、`fw_oilleak`、`fw_nitrogen`）。
+  - **EMG3-FW-01 现状更正（2026-11-05）**：上句“同一套编译器”尚未成立——敌方组装武器只共用旧读法表（`EnemySpawnBuilder.WeaponOf` → `CarrierReadings.Build`，不编程序、不走 `LegacySkip`），同一固件在玩家侧走声明轨、在敌方侧仍按旧 `readFields` 结算；敌方接同一套编译器归 EMG4-HIJ-01（DEBT-EMG3FW01-01），完成前 EMG4-CLEAN-01 不得删旧 `readFields`。
 - 敌方单位行在 `fg.TbChannelDecl`（`ownerKind = enemy`）声明专属行为的读写端口；不得按单位 ID 写反应特例（FG10-FAC-01 卡片第 4 步补这一句）。
 - 反制原则（`ProjectA_GDD.md:385`）改为“针对你当前正在使用的通道交互”，反制必须预警、可读、可降低（沿用）。
 - **EMG2-BOSS-01 已落地（2026-11-04）**：澄净反制按在用程序的写端口判（`ClarityCounterService.PortGroupOf`）：写 `en.heat` / `mat.fire` 算燃烧，写 `en.elec` / `en.mag` / `fld.*` 算电磁，写 `grm.*` 算引信；一枚固件只归一族（燃烧 → 电磁 → 语法取第一个），分母是在用固件枚数（不按指令数：`fw_spread` 一枚有 9 行 modify，会压过别的程序），阈值键不变。反制锁定日电抗 1，次日在场单位恢复。铸造、寂听的反制仍按固件类别，等各自的回改卡。

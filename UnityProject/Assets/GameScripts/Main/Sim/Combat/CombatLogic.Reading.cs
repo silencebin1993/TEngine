@@ -1190,7 +1190,17 @@ namespace BinGames.Sim.Combat
                 {
                     EmgZoneTimer(ref d, ref zone, now, dt); // EMG1-TRIG-01：区域的 evt.timer 从落区起算
                 }
+                double tick0 = zone.NextTick;
                 ZoneTick(ref d, ref zone, z, -1, now);
+                if (zone.EmgSub != 0 && zone.EmgProgRef > 0 && zone.TickInterval > 0f && zone.NextTick != tick0 && EmgPatchesOn(ref d))
+                {
+                    // EMG3-FW-01（DEBT-EMG1TRIG01-01，FGR-EMG-035 布区行“每个区域节拍、到期”）：斑块层开着时子区每个区域节拍执行自己节点的排放写端（到期另执行一次全部效果）
+                    // 审查修复（第 1 轮，FGR-EMG-040～043）：节拍排放与到期同一口径过元程序（条件 / 随机 / 延后），不另开一条不受门控的路径；没有元程序时 EmgMetaAllowNow 首行返回全 1
+                    int zt = -1;
+                    uint zm = EmgHasMeta(ref d, zone.EmgProgRef - 1) ? EmgZoneSubjOf(ref d, zone, ref zt) : EmgNotZone;
+                    EmgNodeEffects(ref d, zone.EmgProgRef - 1, zone.EmgNode, zone.Pos, d.SlotOf(zone.Owner), zone.Faction, zone.EmgChain, zone.EmgDepth,
+                        EmgMetaAllowNow(ref d, zone.EmgProgRef - 1, zone.EmgNode, EmgEventKind.Expire, d.SlotOf(zone.Owner), zt, zone.EmgChain, zone.EmgId, zm), emitOnly: true);
+                }
                 d.Zones[write++] = zone;
             }
             // 节拍里结算的反应（爆燃 → 燃烧区）会在循环中往列表尾部追加新区域（下标 ≥ m）：搬到压缩后的尾部保留下来，不能被截掉。
