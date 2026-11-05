@@ -44,6 +44,20 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>本载体上生效的声明（<see cref="EmgCompiled.Decls"/> 下标，按 seq）。</summary>
         public readonly List<int> Decls = new List<int>(4);
         public bool Overflow;
+        /// <summary>EMG3-META-01（FGR-EMG-040 反转）：逆序树里位于反转之后的指令——写端 fld.pull ↔ fld.push 互换、grm.mod.return（回拉）→ grm.mod.pierce（前冲）。</summary>
+        public bool Flip;
+    }
+
+    /// <summary>EMG3-META-01（FGR-EMG-038 / 042）：一条元程序在预览里的说明——作用的节点、序号、种类（EmgMetaConst）、下游段（程序序号）、每次结算执行次数、是否生效、累计延后秒数。</summary>
+    public struct EmgMetaInfo
+    {
+        public int Node;
+        public int Ordinal;
+        public int Kind;
+        public List<int> Down;
+        public int Exec;
+        public bool Valid;
+        public float Delay;
     }
 
     public struct EmgTreeEntry
@@ -123,9 +137,15 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>程序完整字节键的 64 位哈希 + 内容版本（同一程序同一内容版本同签名，IC-REQ-010）。空程序为空串。</summary>
         public string Signature = string.Empty;
         public bool IsEmpty => Steps.Count == 0;
-        public float HeatTotal => HeatInstr + HeatDecl + HeatTrigger + HeatChildren;
+        public float HeatTotal => HeatInstr + HeatDecl + HeatTrigger + HeatChildren + HeatMeta;
         /// <summary>武器每发积热要在旧算法之上加的量（旧算法已含指令表值，这里只加新分项并扣回溢出指令）。</summary>
-        public float WeaponHeatDelta => HeatDecl + HeatTrigger + HeatChildren - HeatOverflowInstr;
+        public float WeaponHeatDelta => HeatDecl + HeatTrigger + HeatChildren + HeatMeta - HeatOverflowInstr;
+        /// <summary>EMG3-META-01（FGR-EMG-042）：元程序加成——复制段 ×（执行次数 − 1）、循环段 × (emg.heat.loop_factor − 1)、随机段按平均值（少于原和时为负）；条件 / 反转 / 延后不加段热量。</summary>
+        public float HeatMeta;
+        /// <summary>EMG3-META-01：元程序说明（预览“下游段与执行次数”；与内核同一份编译结果）。</summary>
+        public readonly List<EmgMetaInfo> Metas = new List<EmgMetaInfo>(2);
+        /// <summary>EMG3-META-01（FGR-EMG-040 反转）：程序里有反转时的逆序树（同一套步骤按反转后的顺序编译，序号 = 逆序后的位置）；没有 = null。</summary>
+        public EmgProgramResult Reverse;
     }
 
     /// <summary>
@@ -145,6 +165,8 @@ namespace GameLogic.Campaign.Emergence
         public const string NoteDuplicate = "emg.compile.duplicate";
         public const string NoteTableFull = "emg.compile.table_full";
         public const string StaleContentKey = "emg.compile.stale_content";
+        /// <summary>EMG3-META-01（FGR-EMG-042）：嵌套复制相乘超过 emg.meta.max_exec / 一条链累计延后超过 emg.meta.defer_total_max（超出部分不执行）/ 元程序没有下游段。</summary>
+        public const string NoteMetaExecCap = "emg.compile.meta_exec_cap", NoteMetaDeferCap = "emg.compile.meta_defer_cap", NoteMetaEmpty = "emg.compile.meta_empty";
 
         private const ushort EventPortBase = EmgConst.EventPortBase;
 
@@ -161,7 +183,7 @@ namespace GameLogic.Campaign.Emergence
 
         /// <summary>根节点写这些端口 = 程序需要飞行（ADR ③）。EMG1-GRM-01：加上 grm.mod.multi——霰射“一次打出 3 份真实弹丸，每份各自命中、各自触发”只有飞行弹体做得到（待用户复核）。</summary>
         private static readonly string[] FlightMods =
-            { "grm.mod.homing", "grm.mod.pierce", "grm.mod.bounce", "grm.mod.return", "grm.mod.orbit", "grm.mod.lob", "grm.mod.drift", "grm.mod.multi" };
+            { "grm.mod.homing", "grm.mod.pierce", "grm.mod.bounce", "grm.mod.return", "grm.mod.orbit", "grm.mod.lob", "grm.mod.drift", "grm.mod.multi", "meta.loop" }; // EMG3-META-01：根节点循环 = 飞行中周期执行（FGR-EMG-043）
 
         /// <summary>EMG1-GRM-01：光束类主组件（作战组件表 flightLob = 0）上的曲射不越障，预览写原因（FG19A 第 2.1.1 节）。</summary>
         public const string NoteLobStraight = "emg.compile.lob_straight";
@@ -276,7 +298,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
                 HeatInstr = r.HeatInstr, HeatDecl = r.HeatDecl, HeatTrigger = r.HeatTrigger, HeatChildren = r.HeatChildren, HeatOverflowInstr = r.HeatOverflowInstr,
-                HeatDraw = r.HeatDraw, ChildPayloads = r.ChildPayloads,
+                HeatDraw = r.HeatDraw, ChildPayloads = r.ChildPayloads, HeatMeta = r.HeatMeta,
             };
             t.Steps.AddRange(r.Steps);
             t.LegacyOwners.AddRange(r.LegacyOwners);
@@ -658,15 +680,288 @@ namespace GameLogic.Campaign.Emergence
             BuildTree(r);
             Inherit(r, c);
             Emit(r, c);
+            MetaPass(r, c);
+            r.Reverse = BuildReverse(r, c);
+            if (r.Reverse != null)
+            {
+                // 两棵树都计入编译签名（FGR-EMG-040；FG19A 申请 A7）
+                r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs) + "|"
+                                                             + Combat.CombatSite.ProgramKey(r.Reverse.Program, r.Reverse.KernelNodes, r.Reverse.KernelInstrs)).ToString("X16");
+            }
             return r;
+        }
+
+        // ── 5. 元程序（EMG3-META-01；FG19 FGR-EMG-040～043）──
+
+        private static int MetaKindOf(EmgCompiled c, EmgProgramStep s)
+        {
+            foreach (int di in s.Decls)
+            {
+                EmgDeclRow d = c.Decls[di];
+                int k = d.Dir == EmgDirs.Write ? EmgMetaConst.KindOf(d.Port) : -1;
+                if (k >= 0)
+                {
+                    return k;
+                }
+            }
+            return -1;
+        }
+
+        private static float StepHeat(EmgCompiled c, EmgProgramStep s)
+        {
+            float h = s.TableHeat;
+            foreach (int di in s.Decls)
+            {
+                h += Math.Max(0f, c.Decls[di].Heat);
+            }
+            return h;
+        }
+
+        /// <summary>
+        /// 元程序的编译期部分（预览与内核共用这一份结果，FGR-EMG-038 / IC-REQ-010）：每条元程序的下游段（同节点、序号更大的非元程序指令）、每次结算执行次数（复制各层 ×2 相乘，
+        /// 超过 emg.meta.max_exec 的那一层不生效、写原因）、一条链累计延后（祖先节点里罩住放出本节点的触发器的延后 + 本节点内层层延后，超过 emg.meta.defer_total_max 的不执行、写原因）；
+        /// 结果写进内核行：元程序写端行 A = 1 生效 / 0 超上限，子节点 MetaMask = 放出它的触发器序号 + 1，程序带 HasMeta。热量按 FGR-EMG-042 加 HeatMeta。O(节点数 × 指令数)。
+        /// </summary>
+        private static void MetaPass(EmgProgramResult r, EmgCompiled c)
+        {
+            bool any = false;
+            foreach (EmgProgramStep s in r.Steps)
+            {
+                any |= !s.Overflow && s.Kind == EmgStepKind.Meta;
+            }
+            if (!any)
+            {
+                return;
+            }
+            int maxExec = Math.Max(1, TuningInt("emg.meta.max_exec", EmgMetaConst.DefaultMaxExec));
+            int loopMax = Math.Max(1, TuningInt("emg.meta.loop_max", EmgMetaConst.DefaultLoopMax));
+            float deferSec = Tuning("emg.meta.defer_seconds", EmgMetaConst.DefaultDefer), deferMax = Tuning("emg.meta.defer_total_max", EmgMetaConst.DefaultDeferMax);
+            float loopFactor = Tuning("emg.heat.loop_factor", 2f), trigGen = Tuning("emg.heat.trigger_gen", 2f), perChild = Tuning("emg.heat.per_child", 1f);
+            int count = r.Nodes.Count;
+            var mult = new int[count];
+            var subHeat = new float[count];
+            var deferPath = new int[count];
+            foreach (EmgTreeNode n in r.Nodes)
+            {
+                mult[n.Index] = n.Parent < 0 ? 1 : n.TrigCount * (n.Parent > 0 ? mult[n.Parent] : 1);
+            }
+            for (int i = count - 1; i >= 0; i--)
+            {
+                // 子树热量（父节点总在子节点之前建，倒序即自底向上）：自有指令热量 + 子节点的触发节点 / 子载荷份数热量（与 Emit 同一口径）
+                EmgTreeNode n = r.Nodes[i];
+                float h = n.Parent >= 0 ? trigGen * n.Gen + perChild * mult[i] : 0f;
+                foreach (EmgTreeEntry e in n.Entries)
+                {
+                    h += e.Inherited ? 0f : StepHeat(c, r.Steps[e.Ordinal]);
+                }
+                foreach (EmgTreeNode ch in r.Nodes)
+                {
+                    h += ch.Parent == i ? subHeat[ch.Index] : 0f;
+                }
+                subHeat[i] = h;
+            }
+            var metas = new List<int>(4);
+            var units = new List<int>(4);
+            float extra = 0f;
+            foreach (EmgTreeNode n in r.Nodes)
+            {
+                metas.Clear();
+                units.Clear();
+                foreach (EmgTreeEntry e in n.Entries)
+                {
+                    if (!e.Inherited)
+                    {
+                        (r.Steps[e.Ordinal].Kind == EmgStepKind.Meta ? metas : units).Add(e.Ordinal);
+                    }
+                }
+                metas.Sort();
+                units.Sort();
+                int repeatValid = 0, deferIn = 0;
+                var validMeta = new Dictionary<int, bool>(metas.Count);
+                foreach (int m in metas)
+                {
+                    int kind = MetaKindOf(c, r.Steps[m]);
+                    var info = new EmgMetaInfo { Node = n.Index, Ordinal = m, Kind = kind, Down = units.FindAll(u => u > m), Exec = 1, Valid = true };
+                    if (info.Down.Count == 0)
+                    {
+                        r.Notes.Add(new EmgCompileNote { Key = NoteMetaEmpty, Ordinal = m, Node = n.Index });
+                    }
+                    if (kind == EmgMetaConst.Repeat)
+                    {
+                        info.Valid = (1 << repeatValid) < maxExec; // 这一层还能多执行至少一次才生效；超出部分不执行（FGR-EMG-042）
+                        repeatValid += info.Valid ? 1 : 0;
+                        info.Exec = Math.Min(1 << repeatValid, maxExec);
+                        if (!info.Valid)
+                        {
+                            r.Notes.Add(new EmgCompileNote { Key = NoteMetaExecCap, Ordinal = m, Node = n.Index });
+                        }
+                    }
+                    else if (kind == EmgMetaConst.Defer)
+                    {
+                        deferIn++;
+                        info.Delay = (deferPath[n.Index] + deferIn) * deferSec;
+                        info.Valid = info.Delay <= deferMax + 1e-4f;
+                        if (!info.Valid)
+                        {
+                            r.Notes.Add(new EmgCompileNote { Key = NoteMetaDeferCap, Ordinal = m, Node = n.Index });
+                        }
+                    }
+                    else if (kind == EmgMetaConst.Loop)
+                    {
+                        info.Exec = loopMax;
+                        info.Delay = Tuning("emg.meta.loop_period", EmgMetaConst.DefaultLoopPeriod); // 循环：Delay 记周期秒数（预览用）
+                    }
+                    validMeta[m] = info.Valid;
+                    r.Metas.Add(info);
+                    SetMetaRow(r, n.Index, m, info.Valid);
+                }
+                foreach (EmgTreeNode ch in r.Nodes)
+                {
+                    if (ch.Parent != n.Index)
+                    {
+                        continue;
+                    }
+                    int path = deferPath[n.Index];
+                    foreach (int m in metas)
+                    {
+                        path += m < ch.TriggerOrdinal && MetaKindOf(c, r.Steps[m]) == EmgMetaConst.Defer ? 1 : 0;
+                    }
+                    deferPath[ch.Index] = path;
+                }
+                // 热量（FGR-EMG-042）：每个下游单位按“执行次数 × 循环系数 ÷ 随机段条数”加权，多出的部分计入每发
+                foreach (int u in units)
+                {
+                    float f = 1f;
+                    int kr = 0;
+                    foreach (int m in metas)
+                    {
+                        if (m >= u)
+                        {
+                            continue;
+                        }
+                        int kind = MetaKindOf(c, r.Steps[m]);
+                        kr += kind == EmgMetaConst.Repeat && validMeta[m] ? 1 : 0;
+                        f *= kind == EmgMetaConst.Loop ? loopFactor : 1f;
+                        if (kind == EmgMetaConst.Random)
+                        {
+                            f /= Math.Max(1, units.FindAll(x => x > m).Count);
+                        }
+                    }
+                    f *= Math.Min(1 << Math.Min(kr, 6), maxExec);
+                    float h = StepHeat(c, r.Steps[u]);
+                    foreach (EmgTreeNode ch in r.Nodes)
+                    {
+                        h += ch.Parent == n.Index && ch.TriggerOrdinal == u ? subHeat[ch.Index] : 0f;
+                    }
+                    extra += h * (f - 1f);
+                }
+            }
+            r.HeatMeta = extra;
+            for (int j = 1; j < r.KernelNodes.Count && j < r.Nodes.Count; j++)
+            {
+                EmgNode kn = r.KernelNodes[j];
+                int t = r.Nodes[j].TriggerOrdinal;
+                kn.MetaMask = (byte)(t >= 0 && t < 255 ? t + 1 : 0);
+                r.KernelNodes[j] = kn;
+            }
+            EmgProgram p = r.Program;
+            p.Flags |= EmgProgramFlags.HasMeta;
+            p.HeatPerShot = Math.Max(0f, r.HeatTotal);
+            r.Program = p;
+            r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");
+        }
+
+        /// <summary>元程序写端行（内核按它判这一层是否生效）：A = 1 生效 / 0 超上限。</summary>
+        private static void SetMetaRow(EmgProgramResult r, int node, int ordinal, bool valid)
+        {
+            if (node >= r.KernelNodes.Count)
+            {
+                return;
+            }
+            EmgNode kn = r.KernelNodes[node];
+            for (int i = kn.FirstInstr; i < kn.FirstInstr + kn.InstrCount && i < r.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = r.KernelInstrs[i];
+                if (x.Ordinal == ordinal && x.Role > EmgConst.RoleLastRead && EmgMetaConst.KindOf(x.Port) >= 0)
+                {
+                    x.A = valid ? 1f : 0f;
+                    r.KernelInstrs[i] = x;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 反转（FGR-EMG-040 / 041）：按程序位置从前往后做全部反转（每条反转把它后面的指令序列倒过来），对逆序序列重新做节点分配、继承、内核行与元程序；
+        /// 反转之后的指令 fld.pull ↔ fld.push、回拉 → 前冲。没有生效的反转返回 null。
+        /// </summary>
+        private static EmgProgramResult BuildReverse(EmgProgramResult r, EmgCompiled c)
+        {
+            var order = new List<EmgProgramStep>(r.Steps);
+            int firstRev = -1;
+            for (int i = 0; i < order.Count; i++)
+            {
+                if (!order[i].Overflow && MetaKindOf(c, order[i]) == EmgMetaConst.Reverse)
+                {
+                    order.Reverse(i + 1, order.Count - i - 1);
+                    firstRev = firstRev < 0 ? i : firstRev;
+                }
+            }
+            if (firstRev < 0)
+            {
+                return null;
+            }
+            var t = new EmgProgramResult
+            {
+                RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
+            };
+            for (int i = 0; i < order.Count; i++)
+            {
+                EmgProgramStep s = order[i];
+                var x = new EmgProgramStep
+                {
+                    Ordinal = i, FirmwareId = s.FirmwareId, OwnerId = s.OwnerId, FromUplink = s.FromUplink, Core = s.Core, Promoted = s.Promoted, Kind = s.Kind,
+                    TrigEvent = s.TrigEvent, TrigParam = s.TrigParam, TrigCount = s.TrigCount, EventPort = s.EventPort, TableHeat = s.TableHeat, Flip = i > firstRev,
+                };
+                x.Decls.AddRange(s.Decls);
+                t.Steps.Add(x);
+            }
+            BuildTree(t);
+            Inherit(t, c);
+            Emit(t, c);
+            MetaPass(t, c);
+            return t;
+        }
+
+        /// <summary>逆序树里的端口取反：fld.pull ↔ fld.push，grm.mod.return（回拉）→ grm.mod.pierce（前冲，穿过目标继续向前）。</summary>
+        private static ushort FlipPort(ushort port)
+        {
+            string id = PortIds.TryGetValue(port, out string pid) ? pid : string.Empty;
+            string to = id == "fld.pull" ? "fld.push" : id == "fld.push" ? "fld.pull" : id == "grm.mod.return" ? "grm.mod.pierce" : null;
+            if (to != null)
+            {
+                foreach (KeyValuePair<ushort, string> kv in PortIds)
+                {
+                    if (kv.Value == to)
+                    {
+                        return kv.Key;
+                    }
+                }
+            }
+            return port;
         }
 
         /// <summary>原因的玩家文本（UX-01 的程序树预览也用它）。</summary>
         public static string NoteText(EmgProgramResult r, in EmgCompileNote n)
         {
             string name = n.Ordinal >= 0 && n.Ordinal < r.Steps.Count ? FirmwareKinds.DisplayName(r.Steps[n.Ordinal].OwnerId) ?? r.Steps[n.Ordinal].OwnerId : string.Empty;
-            return GameText.Format(n.Key, name, n.Node);
+            return GameText.Format(n.Key, name, n.Node, NoteLimit(n.Key));
         }
+
+        /// <summary>上限类原因文本的 {2}：当前配置里的上限（emg.meta.max_exec / emg.meta.defer_total_max，与编译期判定、内核同一来源）；其余原因为空。</summary>
+        public static string NoteLimit(string key) =>
+            key == NoteMetaExecCap ? Math.Max(1, TuningInt("emg.meta.max_exec", EmgMetaConst.DefaultMaxExec)).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : key == NoteMetaDeferCap ? Tuning("emg.meta.defer_total_max", EmgMetaConst.DefaultDeferMax).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty;
 
         // ── 1. 指令序列 ──
 
@@ -955,6 +1250,10 @@ namespace GameLogic.Campaign.Emergence
                     foreach (int di in s.Decls)
                     {
                         EmgDeclRow d = c.Decls[di];
+                        if (s.Flip && d.Dir == EmgDirs.Write)
+                        {
+                            d.Port = FlipPort(d.Port); // EMG3-META-01：逆序树里反转之后的场 / 位移写端取反
+                        }
                         string port = PortIds.TryGetValue(d.Port, out string pid) ? pid : string.Empty;
                         bool write = d.Dir == EmgDirs.Write;
                         // 默认只继承修饰写端；效果写端只在程序里有 grm.inherit 时一并继承（FG19A 第 0.3 节口径 5）。读端随修饰一并带上。

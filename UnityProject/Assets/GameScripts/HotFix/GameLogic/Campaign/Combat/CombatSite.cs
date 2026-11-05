@@ -380,6 +380,14 @@ namespace GameLogic.Campaign.Combat
             c.EmgFlashBandwidth = Math.Max(1, (int)Math.Round(Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth)));
             c.EmgFlashRange = Mathf.Max(0.5f, Tuning("emg.flash.range", EmgConst.DefaultFlashRange));
             c.EmgFlashStep = Mathf.Max(0.1f, Tuning("emg.flash.step", EmgConst.DefaultFlashStep));
+            // EMG3-META-01（FG19 FGR-EMG-040～042）：元程序的复制间隔、循环周期 / 次数 / 锚点、延后秒数 / 链累计上限、每次结算最多执行次数。
+            c.EmgMetaGap = Mathf.Max(0.01f, Tuning("emg.meta.repeat_gap", EmgMetaConst.DefaultGap));
+            c.EmgMetaMaxExec = Math.Max(1, (int)Math.Round(Tuning("emg.meta.max_exec", EmgMetaConst.DefaultMaxExec)));
+            c.EmgMetaLoopPeriod = Mathf.Max(0.05f, Tuning("emg.meta.loop_period", EmgMetaConst.DefaultLoopPeriod));
+            c.EmgMetaLoopMax = Math.Max(1, (int)Math.Round(Tuning("emg.meta.loop_max", EmgMetaConst.DefaultLoopMax)));
+            c.EmgMetaAnchor = Mathf.Max(0.05f, Tuning("emg.meta.loop_anchor_seconds", EmgMetaConst.DefaultAnchor));
+            c.EmgMetaDefer = Mathf.Max(0.01f, Tuning("emg.meta.defer_seconds", EmgMetaConst.DefaultDefer));
+            c.EmgMetaDeferMax = Mathf.Max(0f, Tuning("emg.meta.defer_total_max", EmgMetaConst.DefaultDeferMax));
             // EMG1-ENT-01（FG19 FGR-EMG-110～114）：实体层（残骸 / 破片 / 撞击 / 位移）随阶段 1 开；emg.stage = 0 时关，旧行为逐字不变。
             c.EmgEntity = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
             c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));
@@ -1483,7 +1491,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>登记进内核程序表（按完整字节去重，已有的返回原下标）。空程序返回 −1；表满 / 形状不合法也返回 −1（调用方给原因 <see cref="Emergence.EmgProgramCompiler.NoteTableFull"/>）。
         /// 放在桥接层：FG14 §5 硬约束 3，热更层只有 Campaign/Combat/ 能点名内核。</summary>
         public static int RegisterProgram(CombatKernel kernel, Emergence.EmgProgramResult r) =>
-            kernel == null || r == null || r.IsEmpty ? -1 : kernel.AddProgram(r.Program, r.KernelNodes, r.KernelInstrs);
+            kernel == null || r == null || r.IsEmpty ? -1
+            : r.Reverse != null && !r.Reverse.IsEmpty // EMG3-META-01（FGR-EMG-040 反转）：正序 / 逆序两棵树成对登记，逆序树在下一行
+                ? kernel.AddProgramPair(r.Program, r.KernelNodes, r.KernelInstrs, r.Reverse.Program, r.Reverse.KernelNodes, r.Reverse.KernelInstrs)
+                : kernel.AddProgram(r.Program, r.KernelNodes, r.KernelInstrs);
 
         /// <summary>程序的完整字节键（转发内核纯函数，与程序表去重同一把键；编译器拿它算程序签名）。</summary>
         public static string ProgramKey(in EmgProgram program, IReadOnlyList<EmgNode> nodes, IReadOnlyList<EmgInstr> instrs) =>

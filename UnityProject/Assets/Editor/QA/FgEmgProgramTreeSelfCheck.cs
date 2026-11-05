@@ -241,8 +241,9 @@ namespace GameLogic.EditorTools
                 GameSettings.SetLanguage(lang);
                 string[] missing = EmgProgramTreeText.ReasonKeys.Where(k => GameText.Get(k) == k || GameText.Get(EmgProgramTreeText.FixKey(k)) == EmgProgramTreeText.FixKey(k)
                                                                            || GameText.ContainsMarker(GameText.Get(k))).ToArray();
-                Expect(EmgProgramTreeText.ReasonKeys.Length == 8 && missing.Length == 0,
-                    $"[{lang}] 8 个原因键都有文本与解决办法{(missing.Length > 0 ? "，缺 " + string.Join("、", missing) : string.Empty)}（例：{GameText.Get(EmgProgramCompiler.NoteOverflow)} {GameText.Get(EmgProgramTreeText.FixKey(EmgProgramCompiler.NoteOverflow))}）");
+                // EMG3-META-01：+3 个元程序原因键（执行次数超上限 / 没有下游段 / 累计延后超上限；出现与消失在 FgEmgMetaSelfCheck A 段断言）
+                Expect(EmgProgramTreeText.ReasonKeys.Length == 11 && missing.Length == 0,
+                    $"[{lang}] 11 个原因键（8 个 + 元程序 3 个）都有文本与解决办法{(missing.Length > 0 ? "，缺 " + string.Join("、", missing) : string.Empty)}（例：{GameText.Get(EmgProgramCompiler.NoteOverflow)} {GameText.Get(EmgProgramTreeText.FixKey(EmgProgramCompiler.NoteOverflow))}）");
             }
             GameSettings.SetLanguage(GameLanguage.ZhCn);
 

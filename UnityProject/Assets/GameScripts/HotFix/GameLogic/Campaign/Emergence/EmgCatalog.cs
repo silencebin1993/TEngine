@@ -178,7 +178,8 @@ namespace GameLogic.Campaign.Emergence
         /// </summary>
         // EMG3-CHS-01（阶段 3 开，按推荐默认执行（2026-11-05），待用户确认）：chs.* 由本卡接通；节拍（evt.beat / tmp.*，EMG3-TMP）、跨机协同（sqd.* / evt.ping，EMG3-SQD）、
         // 元程序（meta.*，EMG3-META）、落点接线（grm.anchor）还没有执行者，用到它们的阶段 3 owner 整条继续走旧轨
-        public static readonly string[] PendingPorts = { "evt.react", "prop.heat", "evt.beat", "evt.ping", "tmp.", "sqd.", "meta.", "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
+        // EMG3-META-01：meta.* 由元程序执行者接通（CombatLogic.Meta）；元程序 owner 的条件读端（prop.heat 等）由元程序条件求值执行，不算未接通（见 Compile 的 metaOwners）
+        public static readonly string[] PendingPorts = { "evt.react", "prop.heat", "evt.beat", "evt.ping", "tmp.", "sqd.", "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
 
         /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>）。EMG2-RECL-01：物质端口的 modify（蔓延）已由内核执行（CombatLogic.EmgSpread），不再算未接通。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)
@@ -1024,9 +1025,18 @@ namespace GameLogic.Campaign.Emergence
             c.RawStage = raw;
             c.EffectiveStage = ClampStage(raw, ImplementedStage);
             var pending = new HashSet<int>();
+            var metaOwners = new HashSet<int>();
             foreach (EmgDeclRow d in c.Decls)
             {
-                if (d.StageGate >= 2 && c.PortIdByCode.TryGetValue(d.Port, out string pid) && IsPendingPort(pid, d.Role))
+                if (d.Dir == EmgDirs.Write && BinGames.Sim.Combat.EmgMetaConst.KindOf(d.Port) >= 0)
+                {
+                    metaOwners.Add(d.Owner);
+                }
+            }
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                bool metaCond = d.Dir == EmgDirs.Read && (d.Role == EmgRole.Condition || d.Role == EmgRole.Sense) && metaOwners.Contains(d.Owner); // EMG3-META-01：元程序条件 / 感知读端由元程序求值
+                if (d.StageGate >= 2 && c.PortIdByCode.TryGetValue(d.Port, out string pid) && IsPendingPort(pid, d.Role) && !metaCond)
                 {
                     pending.Add(d.Owner);
                 }

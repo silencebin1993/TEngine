@@ -54,9 +54,17 @@ namespace BinGames.Sim.Combat
             float baseDamage = math.max(0f, wp.Damage);
             // EMG1-GRM-01：根节点上的新动词（格斗侧偏；力场多个小脉冲 / 中心游移 / 越障 / 不被残骸挡；布区多块小落区 / 落点散开 / 越障 / 越过残骸）。没有程序时为空。
             EmgMods em = default;
-            if (wp.Program >= 0)
+            int prog = EmgShotProg(ref d, wp.Program); // EMG3-META-01：反转选了逆序树时按逆序树的根节点
+            if (prog >= 0)
             {
-                EmgModsOf(ref d, wp.Program, 0, out em);
+                ulong skip = 0UL;
+                if (EmgHasMeta(ref d, prog))
+                {
+                    // EMG3-META-01（FGR-EMG-040 / 043）：根节点下游修饰的条件 / 随机判定；格斗 / 力场 / 当场结算的射弹在出手点留“程序锚点”循环（布区由落区做宿主）
+                    double until = now + (d.Config.EmgMetaAnchor > 0f ? d.Config.EmgMetaAnchor : EmgMetaConst.DefaultAnchor);
+                    skip = EmgMetaLaunch(ref d, prog, 0, a, t, d.EmgCtx, d.Pos[a], EmgDir(d.Pos[t] - d.Pos[a]), until, r.Carrier != CombatCarrier.Field);
+                }
+                EmgModsOf(ref d, prog, 0, out em, skip);
             }
             // EMG1-ENT-01（DEBT-EMG1GRM01-04）：掩体规则开时，力场的主目标在障碍 / 残骸后面同样打不到（与圈内其余目标同一条 EmgPulseBlocked），圈内其余照常结算；报“被掩体挡下”。
             if (r.Carrier == CombatCarrier.Aura && EmgPulseBlocked(ref d, d.Pos[a], d.Pos[t], em))

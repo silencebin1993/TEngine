@@ -1409,6 +1409,11 @@ namespace BinGames.Sim.Combat
         /// 块数 0 = 块数机制关（emg.stage = 0）：反伤不限次数、不放破片，旧行为逐字不变。</summary>
         public byte EmgEraBlocks;
         public float EmgEraRefill;
+        /// <summary>EMG3-META-01（FG19 FGR-EMG-040～043，fg.TbHomeTuning emg.meta.*）：复制间隔、循环周期 / 锚点秒数、延后秒数 / 一条链累计上限（秒）、每次结算最多执行次数、循环最多次数。≤ 0 取 <see cref="EmgMetaConst"/> 初值。不进快照（每次开地点按表写）。</summary>
+        public float EmgMetaGap, EmgMetaLoopPeriod, EmgMetaAnchor, EmgMetaDefer, EmgMetaDeferMax;
+        public int EmgMetaMaxExec, EmgMetaLoopMax;
+        /// <summary>EMG3-META-01：地点种子（随机元程序的无状态哈希 <see cref="EmgRng"/>，与因果链、宿主、结算时刻一起取；热更层按世界种子与地点写，不进快照）。</summary>
+        public uint EmgSiteSeed;
         /// <summary>EMG2-MAT-01（FGR-EMG-081～083）：1 = 物质斑块层开（热更层在 emg.stage ≥ 2 时置位）——排放写端生成斑块（不再落读法驻留区）、残骸崩解为碎屑斑块、
         /// 斑块节拍 / 单位接触 / 弹体沾染 / evt.enter · evt.leave。0 = 阶段 1 行为逐字不变。</summary>
         public byte EmgPatchOn;

@@ -26,6 +26,8 @@ namespace GameLogic.Campaign.Combat
         /// <summary>EMG2-DISC-01：Prime 那一刻已有的事件端口计数 / 子载荷代（基线：旧快照里早就发生过的不算“新发现”）。</summary>
         internal readonly bool[] PortSeen = new bool[EmgConst.EventKinds + 1];
         internal int GenSeen;
+        /// <summary>EMG3-META-01（DEBT-EMG2DISC01-03）：已提示过的元程序种类位。</summary>
+        internal int MetaSeen;
         /// <summary>EMG2-DISC-01（FGR-EMG-184）：同一“受伤者 + 留下者 + 来源”上次发友伤通知的统一时钟步（持续接触不刷屏）。</summary>
         internal readonly Dictionary<(int, int, int), long> FriendlyAt = new Dictionary<(int, int, int), long>();
     }
@@ -204,6 +206,20 @@ namespace GameLogic.Campaign.Combat
                     }
                 }
             }
+            int meta = k.EmgMetaSeenMask;
+            int newMeta = meta & ~cur.MetaSeen;
+            if (newMeta != 0)
+            {
+                // EMG3-META-01（DEBT-EMG2DISC01-03）：第一次真的用到某种元程序（条件生效 / 随机挑选 / 复制 / 循环 / 反转 / 延后）
+                cur.MetaSeen = meta;
+                for (int m = 0; m < EmgMetaConst.Kinds; m++)
+                {
+                    if ((newMeta & (1 << m)) != 0)
+                    {
+                        ReactionDiscoveryService.RecordGrammar(state, ReactionDiscoveryService.MetaEntry(m), site.SiteId);
+                    }
+                }
+            }
             for (int e = 1; e <= EmgConst.EventKinds; e++)
             {
                 if (!cur.PortSeen[e] && k.EmgPortCountOf((EmgEventKind)e) > 0)
@@ -299,6 +315,7 @@ namespace GameLogic.Campaign.Combat
                 cur.PortSeen[e] = k.EmgPortCountOf((EmgEventKind)e) > 0;
             }
             cur.GenSeen = k.EmgGenSeenMask;
+            cur.MetaSeen = k.EmgMetaSeenMask;
             cur.Epoch = k.FeedEpoch;
             cur.Primed = true;
         }

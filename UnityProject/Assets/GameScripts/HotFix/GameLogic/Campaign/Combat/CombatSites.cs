@@ -27,6 +27,17 @@ namespace GameLogic.Campaign.Combat
         public static CombatSite Get(string siteId) =>
             siteId != null && Sites.TryGetValue(siteId, out CombatSite s) && !s.IsDisposed ? s : null;
 
+        /// <summary>EMG3-META-01：地点种子 = 战役随机种子 × 地点 ID 的 FNV-1a（与进程无关、读档一致）。</summary>
+        public static uint SiteSeed(CampaignState state, string siteId)
+        {
+            uint h = 2166136261u;
+            foreach (char ch in siteId ?? string.Empty)
+            {
+                h = (h ^ ch) * 16777619u;
+            }
+            return unchecked(h ^ ((uint)(state?.RandomSeed ?? 0).GetHashCode() * 2654435761u));
+        }
+
         /// <summary>
         /// 打开一个地点的战斗内核。<paramref name="resume"/>（读档恢复）时从存档快照恢复；快照损坏 / 格式不认识时如实通知并按记录重建。
         /// 不是恢复（新派遣、新战役）时丢弃该地点残留的旧快照。返回的地点由调用方与记录对账（补齐缺的机器 / 敌人）。
@@ -44,6 +55,7 @@ namespace GameLogic.Campaign.Combat
             }
             // EMG2-PERSIST-01（FGR-EMG-150，ADR T1 已核实）：家园内核在一局内常驻、随快照进存档；己方前哨是家园内核里的建筑群（FG8-OUT-01）。远征 / 室内每次派遣重建 → 野外寿命。
             cfg.EmgPersist = (byte)(siteId == HomeValleyLayout.RegionId && Emergence.EmgCatalog.Current.EffectiveStage >= 2 ? 1 : 0);
+            cfg.EmgSiteSeed = SiteSeed(state, siteId); // EMG3-META-01：随机元程序的无状态哈希按地点种子（同一战役同一地点同一结果，B25）
             var site = new CombatSite(siteId, cfg) { Rules = rules };
             Sites[siteId] = site;
             if (cfg.NavEnabled != 0)

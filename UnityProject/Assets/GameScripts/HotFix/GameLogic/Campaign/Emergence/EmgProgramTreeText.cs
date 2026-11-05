@@ -27,6 +27,8 @@ namespace GameLogic.Campaign.Emergence
         Flight = 11,
         /// <summary>EMG1-FIX-01：有旧读法的固件已按通道声明运行（旧存档蓝图重编译后的行为变化），附当前描述。</summary>
         Migrated = 12,
+        /// <summary>EMG3-META-01（FGR-EMG-040 反转）：逆序树标题（下面是逆序树的节点）。</summary>
+        ReverseTitle = 13,
     }
 
     public struct EmgTreeRow
@@ -40,6 +42,8 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>缩进层级（= 节点代号；节点内的指令再缩一层）。</summary>
         public int Depth;
         public bool Promoted, Duplicate, GenFull;
+        /// <summary>EMG3-META-01：这一行是元程序（行尾写明作用的下游段与执行次数）。</summary>
+        public bool Meta;
         /// <summary>原因行的文本键（emg.compile.*）。</summary>
         public string NoteKey;
     }
@@ -61,6 +65,7 @@ namespace GameLogic.Campaign.Emergence
         {
             EmgProgramCompiler.NoteOverflow, EmgProgramCompiler.NoteGenFull, EmgProgramCompiler.NoteNotFlashed, EmgProgramCompiler.NoteDuplicate,
             NoteFlashTruncated, NoteFlashRange, EmgProgramCompiler.NoteTableFull, EmgProgramCompiler.StaleContentKey,
+            EmgProgramCompiler.NoteMetaExecCap, EmgProgramCompiler.NoteMetaDeferCap, EmgProgramCompiler.NoteMetaEmpty, // EMG3-META-01（FGR-EMG-042）
         };
 
         public static string FixKey(string noteKey) => noteKey + ".fix";
@@ -69,9 +74,9 @@ namespace GameLogic.Campaign.Emergence
         public static bool SpawnsFlight(EmgProgramResult r) =>
             r != null && !r.IsEmpty && (r.Program.Flags & EmgProgramFlags.NeedsFlight) != 0 && (r.Carrier == 0 || r.Carrier == 2);
 
-        /// <summary>原因 + 解决办法的一行文本（{0} = 指令名）。</summary>
+        /// <summary>原因 + 解决办法的一行文本（{0} = 指令名；{2} = 上限类原因的当前上限，见 <see cref="EmgProgramCompiler.NoteLimit"/>）。</summary>
         public static string ReasonText(string noteKey, string instructionName) =>
-            GameText.Format(noteKey, instructionName ?? string.Empty) + "  " + GameText.Get(FixKey(noteKey));
+            GameText.Format(noteKey, instructionName ?? string.Empty, string.Empty, EmgProgramCompiler.NoteLimit(noteKey)) + "  " + GameText.Get(FixKey(noteKey));
 
         private static string F1(float v) => v.ToString("0.#", CultureInfo.InvariantCulture);
 
@@ -126,8 +131,17 @@ namespace GameLogic.Campaign.Emergence
                 };
                 into.Add(row);
             }
-            Add(into, EmgTreeRowKind.Heat, GameText.Format("emg.tree.heat", F1(r.HeatInstr), F1(r.HeatDecl), F1(r.HeatTrigger), r.ChildPayloads.ToString(CultureInfo.InvariantCulture),
-                F1(r.HeatChildren), F1(r.HeatTotal)), -1, -1, 0);
+            Add(into, EmgTreeRowKind.Heat, r.HeatMeta != 0f // EMG3-META-01：元程序加成单列（FGR-EMG-042）
+                ? GameText.Format("emg.tree.heat_meta", F1(r.HeatInstr), F1(r.HeatDecl), F1(r.HeatTrigger), r.ChildPayloads.ToString(CultureInfo.InvariantCulture),
+                    F1(r.HeatChildren), F1(r.HeatTotal), F1(r.HeatMeta))
+                : GameText.Format("emg.tree.heat", F1(r.HeatInstr), F1(r.HeatDecl), F1(r.HeatTrigger), r.ChildPayloads.ToString(CultureInfo.InvariantCulture),
+                    F1(r.HeatChildren), F1(r.HeatTotal)), -1, -1, 0);
+            if (r.Reverse != null && r.Reverse.Nodes.Count > 0)
+            {
+                // EMG3-META-01（FGR-EMG-040 反转）：逆序树（条件为真时用），同样逐节点列出
+                Add(into, EmgTreeRowKind.ReverseTitle, GameText.Get("emg.tree.reverse_title"), -1, -1, 0);
+                AddNode(r.Reverse, r.Reverse.Nodes[0], into);
+            }
             if (SpawnsFlight(r))
             {
                 // EMG1-TRIG-01（ADR U4，待用户确认）：程序需要飞行、载体允许实体化（射弹 / 无人机）时写明“以飞行弹体发射”。
@@ -235,10 +249,11 @@ namespace GameLogic.Campaign.Emergence
                 {
                     sb.Append(" · ").Append(GlyphOverflow).Append(' ').Append(GameText.Get("emg.tree.tag.gen_full"));
                 }
+                bool meta = AppendMeta(r, n.Index, e.Ordinal, sb);
                 into.Add(new EmgTreeRow
                 {
                     Kind = e.Inherited ? EmgTreeRowKind.Inherited : EmgTreeRowKind.Own, Text = sb.ToString(), Node = n.Index, Ordinal = e.Ordinal,
-                    Depth = n.Gen + 1, Promoted = promoted, Duplicate = dup, GenFull = genFull,
+                    Depth = n.Gen + 1, Promoted = promoted, Duplicate = dup, GenFull = genFull, Meta = meta,
                 });
             }
             foreach (EmgTreeNode c in r.Nodes)
@@ -248,6 +263,38 @@ namespace GameLogic.Campaign.Emergence
                     AddNode(r, c, into);
                 }
             }
+        }
+
+        /// <summary>
+        /// EMG3-META-01（FGR-EMG-038 / 040 / 042）：元程序行尾写“作用于下游 N 条（名字…）· 执行方式”；没有下游段 / 超上限的原因另在原因区（编译器的 emg.compile.meta_*）。
+        /// 只读编译结果（<see cref="EmgProgramResult.Metas"/>，与内核同一份），不另算。
+        /// </summary>
+        private static bool AppendMeta(EmgProgramResult r, int node, int ordinal, StringBuilder sb)
+        {
+            foreach (EmgMetaInfo m in r.Metas)
+            {
+                if (m.Node != node || m.Ordinal != ordinal)
+                {
+                    continue;
+                }
+                var names = new List<string>(m.Down.Count);
+                foreach (int o in m.Down)
+                {
+                    names.Add(StepName(r.Steps[o]));
+                }
+                string how = m.Kind switch
+                {
+                    EmgMetaConst.Repeat => GameText.Format("emg.tree.meta.repeat", m.Exec),
+                    EmgMetaConst.Loop => GameText.Format("emg.tree.meta.loop", F1(m.Delay), m.Exec),
+                    EmgMetaConst.If => GameText.Get("emg.tree.meta.if"),
+                    EmgMetaConst.Random => GameText.Get("emg.tree.meta.random"),
+                    EmgMetaConst.Reverse => GameText.Get("emg.tree.meta.reverse"),
+                    _ => GameText.Format("emg.tree.meta.defer", F1(m.Delay)),
+                };
+                sb.Append(" · ").Append(GameText.Format("emg.tree.tag.meta", m.Down.Count, names.Count > 0 ? string.Join(GameText.Get("signal.core.summary_sep"), names) : GameText.Get("emg.tree.meta.none"), how));
+                return true;
+            }
+            return false;
         }
 
         private static bool HasNote(EmgProgramResult r, string key, int ordinal, int node)

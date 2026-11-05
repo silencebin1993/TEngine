@@ -89,6 +89,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
         public const ushort PortChsGround = 1001, PortChsAirborne = 1002, PortChsMoving = 1003, PortChsWater = 1004;
         public const byte RoleCondition = 2;
+        /// <summary>EMG3-META-01（FG19 第 2.4 节）：元程序写端端口码 200～205（复制 / 循环 / 条件 / 随机 / 反转 / 延后，码 − 200 = <see cref="EmgMetaConst"/> 种类）；条件读端常用的属性端口码。</summary>
+        public const ushort PortMetaBase = 200, PortPropHeat = 624, PortPropIntegrity = 626, PortPhsBase = 901;
+        public const byte RoleSense = 3;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
@@ -233,6 +236,8 @@ namespace BinGames.Sim.Combat
         public int DepthWork;
         /// <summary>EMG2-DISC-01：本内核生成过的子载荷代（位 n = 第 n 代）；语法发现只比“新出现的位”，读档清空后重新置位也不会重复记录。</summary>
         public int GenSeen;
+        /// <summary>EMG3-META-01（DEBT-EMG2DISC01-03）：真的作用过的元程序种类（位 k = <see cref="EmgMetaConst"/> 种类 k）；语法发现“第一次用到某种元程序”，口径同 <see cref="GenSeen"/>。</summary>
+        public int MetaSeen;
         public long Enqueued;
         public long Processed;
         /// <summary>积压保护合并掉的条数（计数在被合并事件的 Code2 里，不丢）。</summary>
@@ -390,6 +395,12 @@ namespace BinGames.Sim.Combat
         NeedsFlight = 1,
         /// <summary>含接入固件的核心指令（FGR-EMG-037：信号离开时剥离）。</summary>
         HasCore = 2,
+        /// <summary>EMG3-META-01：节点里有元程序（meta.* 写端）——没有本位的程序不走任何元程序判定（O(1) 早退出，金标准逐字不变）。</summary>
+        HasMeta = 4,
+        /// <summary>EMG3-META-01（FGR-EMG-040 反转）：程序表里紧随其后（下标 + 1）是逆序树；开火时按 meta.reverse 的条件读端（本机积热 ≥ 幅度）选用。</summary>
+        HasReverse = 8,
+        /// <summary>本行是前一行的逆序树（只经 CombatKernel.AddProgramPair 登记，不参与去重）。</summary>
+        IsReverse = 16,
     }
 
     [Flags]
@@ -559,7 +570,7 @@ namespace BinGames.Sim.Combat
         public byte InstrCount;
         /// <summary>继承掩码（FGR-EMG-045：位 g = 从第 g 代祖先继承了修饰）。</summary>
         public byte InheritMask;
-        /// <summary>元程序掩码（阶段 3）。</summary>
+        /// <summary>元程序位（阶段 3，EMG3-META-01）：子节点 = 放出它的触发器的程序序号 + 1（元程序按序号判“下游段”，FGR-EMG-040；0 = 程序没有元程序）；根节点恒 0。</summary>
         public byte MetaMask;
     }
 

@@ -110,7 +110,7 @@ namespace BinGames.Sim.Combat
         private static int Round(float v) => v <= 0f ? 0 : math.max(1, (int)math.round(v));
 
         /// <summary>读程序 <paramref name="prog"/> 第 <paramref name="node"/> 个节点的写端指令，汇总成 <see cref="EmgMods"/>。O(节点指令数 ≤ 128)。溢出行不执行。</summary>
-        internal static bool EmgModsOf(ref CombatData d, int prog, int node, out EmgMods m)
+        internal static bool EmgModsOf(ref CombatData d, int prog, int node, out EmgMods m, ulong skip = 0UL)
         {
             m = default;
             if (prog < 0 || prog >= d.EmgPrograms.Length)
@@ -127,9 +127,9 @@ namespace BinGames.Sim.Combat
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0)
+                if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || (skip != 0UL && !EmgMetaAllowed(~skip, x.Ordinal)))
                 {
-                    continue;
+                    continue; // EMG3-META-01：出手时被条件 / 随机元程序关掉的下游修饰不生效（FGR-EMG-040“对修饰”列）
                 }
                 switch ((EmgVerb)x.Verb)
                 {
@@ -364,7 +364,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>武器程序根节点的连锁目标偏好（没有程序 / 没有连锁行为 0：沿用最近）。</summary>
         internal static EmgInstrFlags EmgChainPrefOf(ref CombatData d, in CombatWeapon wp) =>
-            wp.Program >= 0 && EmgModsOf(ref d, wp.Program, 0, out EmgMods m) ? m.ChainPref : EmgInstrFlags.None;
+            EmgShotProg(ref d, wp.Program) is int prog && prog >= 0 && EmgModsOf(ref d, prog, 0, out EmgMods m) ? m.ChainPref : EmgInstrFlags.None;
 
         // ─────────────────────────────── 飞行载荷：生成时写入修饰 ───────────────────────────────
 
@@ -374,7 +374,14 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static void EmgInitFlight(ref CombatData d, ref CombatProjectile pr, double2 aim, int targetId, bool root)
         {
-            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m))
+            ulong skip = 0UL;
+            if (EmgHasMeta(ref d, pr.Prog))
+            {
+                // EMG3-META-01：出手时被条件 / 随机关掉的下游修饰不写进弹道状态；节点里的循环跟着这发弹体开运行态（追射弹不再触发程序，不开）
+                skip = EmgMetaLaunch(ref d, pr.Prog, pr.Node, d.SlotOf(pr.Owner), targetId != 0 ? d.SlotOf(targetId) : -1, EmgProjHost(ref d, pr), pr.Pos,
+                    EmgDir((double2)pr.Vel), 0.0, pr.TrigUsed != uint.MaxValue);
+            }
+            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip))
             {
                 return;
             }
@@ -433,7 +440,8 @@ namespace BinGames.Sim.Combat
         {
             ratio = 1f;
             fan = 0f;
-            if (wp.Program < 0 || !EmgModsOf(ref d, wp.Program, 0, out EmgMods m) || m.Multi <= 1)
+            int prog = EmgShotProg(ref d, wp.Program);
+            if (prog < 0 || !EmgModsOf(ref d, prog, 0, out EmgMods m) || m.Multi <= 1)
             {
                 return 1;
             }

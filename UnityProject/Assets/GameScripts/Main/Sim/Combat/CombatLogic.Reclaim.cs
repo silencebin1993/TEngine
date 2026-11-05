@@ -102,7 +102,7 @@ namespace BinGames.Sim.Combat
         /// 子节点载荷（子弹药 / 子区）的事件：节点里被这个事件门控的回收修复 / 桥接 / 蔓延写端由内核执行（修复的是母机 host.Owner；FG19A 第 3 节混合固件、[触发, 桥接 / 蔓延]）。
         /// 同一事件同一节点的 salvage 写端合并处理一次。O(节点指令数²)，只在事件入队时。
         /// </summary>
-        internal static void EmgChildWrites(ref CombatData d, in EmgEvent e, in EmgCtx host)
+        internal static void EmgChildWrites(ref CombatData d, in EmgEvent e, in EmgCtx host, ulong allow = ulong.MaxValue, bool any = false)
         {
             EmgProgram p = d.EmgPrograms[e.Prog];
             if (e.Node < 0 || e.Node >= p.NodeCount || p.FirstNode + e.Node >= d.EmgNodes.Length)
@@ -118,7 +118,7 @@ namespace BinGames.Sim.Combat
                 EmgInstr x = d.EmgInstrs[i];
                 bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile; // EMG2-REACT-02（DEBT-EMG1FW01-03）：[子母弹, 追射] 子弹药命中后补射
                 if ((x.Verb != (byte)EmgVerb.Salvage && x.Verb != (byte)EmgVerb.Link && x.Verb != (byte)EmgVerb.Spread && !follow)
-                    || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead || !EmgGatedBy(ref d, first, end, x.Ordinal, evPort))
+                    || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead || !EmgMetaAllowed(allow, x.Ordinal) || !(any || EmgGatedBy(ref d, first, end, x.Ordinal, evPort)))
                 {
                     continue;
                 }

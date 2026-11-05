@@ -240,6 +240,10 @@ namespace BinGames.Sim.Combat
         /// 每个载荷节点同一事件码 ≤ emg.trig.max_per_host 次（TrigUsed 每条事件读端 2 比特）。穿透与“撞单位 / 障碍反弹”的发生处随 EMG1-GRM-01 的真实穿透 / 反弹接入，调的就是这里。</summary>
         internal static void EmgProjEvent(ref CombatData d, ref CombatProjectile pr, EmgEventKind k, int other, EmgEntKind otherKind, float value, float value2, ushort code, double2 pos)
         {
+            if (k == EmgEventKind.Expire && d.MetaRun.Length > 0)
+            {
+                EmgMetaHostEnd(ref d, EmgEntKind.Projectile, pr.Id, pos); // EMG3-META-01：跟随这发弹体的延后改在结束点执行
+            }
             if (pr.Prog < 0 || !EmgSiteListens(ref d, k))
             {
                 return;
@@ -317,6 +321,7 @@ namespace BinGames.Sim.Combat
                 d.EmgCtx.Instant = 1;
             }
             EmgQueueShotTimer(ref d, a, wp); // EMG1-TRIG-01：格斗 / 力场的定时从出手起算（DEBT-EMG1BUS01-03）
+            prog = EmgShotProg(ref d, prog); // EMG3-META-01：本次出手按积热选了逆序树时，近炸读的也是那棵树
             if (wp.Mode != CombatWeaponMode.Projectile && EmgSiteListens(ref d, EmgEventKind.Prox) && EmgReadSlot(ref d, prog, 0, EmgEventKind.Prox) >= 0)
             {
                 EmgCountProx(ref d);
@@ -431,6 +436,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            prog = EmgTreeOf(ref d, prog, owner); // EMG3-META-01（FGR-EMG-040 反转）：带逆序树的程序按本机积热选树，本次出手的子载荷 / 弹体都用选中的那棵（EmgShotProg）
             EmgScalars es = d.EmgS[0];
             int chain = es.NextChain++;
             d.EmgS[0] = es;
@@ -557,6 +563,10 @@ namespace BinGames.Sim.Combat
         /// <summary>无人机 / 哨戒桩到期或母机没了、从列表移除：evt.expire（Code = 寿命；宿主 = 无人机，程序 = 它此刻持有的那份，EMG1-FLASH-01）。</summary>
         internal static void EmgDroneExpire(ref CombatData d, in CombatDrone dr)
         {
+            if (d.MetaRun.Length > 0)
+            {
+                EmgMetaHostEnd(ref d, EmgEntKind.Drone, dr.Id, dr.Pos); // EMG3-META-01：跟随这架无人机的延后改在结束点执行
+            }
             if (d.EmgListen == 0u || dr.Weapon < 0 || dr.Weapon >= d.Weapons.Length)
             {
                 return;

@@ -85,19 +85,46 @@ namespace BinGames.Sim.Combat
     }
 
     /// <summary>
-    /// EMG3-CHS-01（ADR ⑩ 版本 18 一次铺好阶段 3 状态段）：元程序运行态（循环计数、延后队列，快照段 23）。本卡只铺结构与快照读写（表恒空），执行者归元程序卡（FG19 第 3.4 节）。
+    /// EMG3-CHS-01（ADR ⑩ 版本 18 一次铺好阶段 3 状态段）：元程序运行态（循环计数、延后队列，快照段 23）。
+    /// EMG3-META-01（FG19 第 3.4 节）接上执行：一条记录 = 到 <see cref="DueAt"/> 时按宿主执行一次节点 <see cref="Node"/> 里元程序 <see cref="Ordinal"/> 的下游段
+    /// （<see cref="Mode"/>：循环 = 宿主存续期间周期执行，<see cref="Loop"/> = 已执行次数；重放 = 复制 / 延后到点再结算一次，<see cref="Mask"/> = 要执行的程序序号位）。
+    /// 宿主还在时取它当时的位置，已结束时在 <see cref="Pos"/>（最后已知位置 / 结束点）执行。格式 18 段内只追加字段（短记录读到取缺省），不升版。
     /// </summary>
     [Serializable]
     [StructLayout(LayoutKind.Sequential)]
     public struct EmgMetaRun
     {
         public double DueAt;
+        /// <summary>出手者单位 ID。</summary>
         public int Unit;
         public int Prog;
         public int Chain;
         public byte Node;
         public byte Ordinal;
         public ushort Loop;
+        // ── EMG3-META-01 追加（段 23 记录尾部）──
+        /// <summary>宿主稳定 ID（弹体 / 区域 / 单位 ID）与种类（<see cref="EmgEntKind"/>）。</summary>
+        public int Host;
+        public byte HostKind;
+        /// <summary><see cref="EmgMetaConst"/>.Run*。</summary>
+        public byte Mode;
+        /// <summary>结算事件码（重放按它门控下游指令；循环 = 0，下游段不论各自的事件都执行）。</summary>
+        public byte Ev;
+        public byte Depth;
+        public ulong Mask;
+        public double2 Pos;
+        public float2 Dir;
+        /// <summary>结算目标单位 ID（命中目标；没有 = 0）。</summary>
+        public int Other;
+        public int Weapon;
+        public float Damage;
+        public byte Faction;
+        public byte Carrier;
+        public ushort PFlags;
+        public float ZoneRadius;
+        public float ZoneLife;
+        /// <summary>循环锚点（格斗 / 力场 / 即时射弹，FGR-EMG-043）的结束时刻；0 = 跟随宿主存续。</summary>
+        public double Until;
     }
 
     public static partial class CombatLogic

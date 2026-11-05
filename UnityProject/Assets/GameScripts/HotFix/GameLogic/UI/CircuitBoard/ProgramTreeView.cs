@@ -158,7 +158,7 @@ namespace GameLogic.UI.CircuitBoard
                 l.EnableInClassList("cb-pt-inherited", row.Kind == EmgTreeRowKind.Inherited);
                 l.EnableInClassList("cb-pt-overflow", row.Kind == EmgTreeRowKind.Overflow || row.Kind == EmgTreeRowKind.OverflowTitle || row.Duplicate || row.GenFull);
                 l.EnableInClassList("cb-pt-reason", row.Kind == EmgTreeRowKind.Reason || row.Kind == EmgTreeRowKind.OffPath || row.Kind == EmgTreeRowKind.Legacy);
-                l.EnableInClassList("cb-pt-title", row.Kind == EmgTreeRowKind.ReasonsTitle || row.Kind == EmgTreeRowKind.OverflowTitle);
+                l.EnableInClassList("cb-pt-title", row.Kind == EmgTreeRowKind.ReasonsTitle || row.Kind == EmgTreeRowKind.OverflowTitle || row.Kind == EmgTreeRowKind.ReverseTitle);
                 l.EnableInClassList("cb-pt-promoted", row.Promoted);
             }
         }

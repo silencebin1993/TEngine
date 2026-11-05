@@ -28,6 +28,9 @@ namespace GameLogic.Campaign.Content
 
         public static string EventEntry(int eventKind) => "evt." + eventKind.ToString(CultureInfo.InvariantCulture);
 
+        /// <summary>EMG3-META-01（DEBT-EMG2DISC01-03）：语法条目“第一次用到某种元程序”（种类 = 端口码 − 200）。</summary>
+        public static string MetaEntry(int metaKind) => "meta." + metaKind.ToString(CultureInfo.InvariantCulture);
+
         /// <summary>RecordFirst 写入新记录之后调用。</summary>
         public static void OnReactionDiscovered(CampaignState state, string reactionId, string siteId, Vector3? at)
         {
@@ -74,6 +77,11 @@ namespace GameLogic.Campaign.Content
             if (entryId.StartsWith("gen.", StringComparison.Ordinal))
             {
                 return GameText.Format("reaction.discovery.gen", entryId.Substring(4));
+            }
+            if (entryId.StartsWith("meta.", StringComparison.Ordinal) && int.TryParse(entryId.Substring(5), NumberStyles.Integer, CultureInfo.InvariantCulture, out int mk))
+            {
+                string pid = Emergence.EmgCatalog.Current.PortIdByCode.TryGetValue((ushort)(BinGames.Sim.Combat.EmgConst.PortMetaBase + mk), out string id) ? id : null;
+                return GameText.Format("reaction.discovery.meta", pid != null ? GameText.Get("emg.port." + pid + ".name") : entryId);
             }
             return int.TryParse(entryId.Substring(entryId.IndexOf('.') + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int e)
                 ? GameText.Format("reaction.discovery.event", Emergence.EmgProgramTreeText.EventName((BinGames.Sim.Combat.EmgEventKind)e))

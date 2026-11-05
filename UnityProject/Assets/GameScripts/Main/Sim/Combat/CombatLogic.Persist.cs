@@ -297,7 +297,7 @@ namespace BinGames.Sim.Combat
             }
             if ((pr.Flags & EmgProjFlags.Sub) != 0)
             {
-                EmgNodeEffects(ref d, pr.Prog, pr.Node, at, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth); // 子弹药在撞点执行自己节点的指令（与撞残骸同一口径）
+                EmgNodeEffects(ref d, pr.Prog, pr.Node, at, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Expire, d.SlotOf(pr.Owner), -1, pr.Chain, pr.Id)); // 子弹药在撞点执行自己节点的指令（与撞残骸同一口径）
             }
             EmgProjEvent(ref d, ref pr, EmgEventKind.Absorb, z.EmgId, EmgEntKind.Patch, dmg, 0f, 0, at);
             EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, z.EmgId, EmgEntKind.Patch, 0f, 0f, EmgCode.ExpireAbsorbed, at);

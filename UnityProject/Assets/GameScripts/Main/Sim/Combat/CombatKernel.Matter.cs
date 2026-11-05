@@ -520,7 +520,8 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 快照格式 18：阶段 3 状态段（EMG3-CHS-01，ADR ⑩ 一次铺好）───────────────────────────────
 
         private const int TraitRunFields = 20;
-        private const int MetaRunFields = 7;
+        /// <summary>EMG3-META-01：7 → 26（宿主、模式、结算事件、链深、序号位、位置、方向、目标、母载荷参数、锚点结束时刻追加在记录尾部；短记录读到取缺省）。</summary>
+        private const int MetaRunFields = 26;
 
         /// <summary>段 22 特性运行态、段 23 元程序运行态（执行者归元程序卡，本卡表恒空）、段 24 节拍计数。特性运行态按单位 ID 升序写（同一状态同一字节，读档续跑哈希一致）。</summary>
         private void WriteStage3Segments(BinaryWriter w, EmgSegmentWriter sw)
@@ -572,6 +573,25 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(m.Loop);
                 if (sw.F()) w.Write(m.DueAt);
                 if (sw.F()) w.Write(m.Chain);
+                if (sw.F()) w.Write(m.Host);
+                if (sw.F()) w.Write(m.HostKind);
+                if (sw.F()) w.Write(m.Mode);
+                if (sw.F()) w.Write(m.Ev);
+                if (sw.F()) w.Write(m.Depth);
+                if (sw.F()) w.Write(m.Mask);
+                if (sw.F()) w.Write(m.Pos.x);
+                if (sw.F()) w.Write(m.Pos.y);
+                if (sw.F()) w.Write(m.Dir.x);
+                if (sw.F()) w.Write(m.Dir.y);
+                if (sw.F()) w.Write(m.Other);
+                if (sw.F()) w.Write(m.Weapon);
+                if (sw.F()) w.Write(m.Damage);
+                if (sw.F()) w.Write(m.Faction);
+                if (sw.F()) w.Write(m.Carrier);
+                if (sw.F()) w.Write(m.PFlags);
+                if (sw.F()) w.Write(m.ZoneRadius);
+                if (sw.F()) w.Write(m.ZoneLife);
+                if (sw.F()) w.Write(m.Until);
                 sw.EndRecord();
             }
             sw.End();
@@ -645,7 +665,29 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) m.Loop = r.ReadUInt16();
                         if (sr.F()) m.DueAt = r.ReadDouble();
                         if (sr.F()) m.Chain = r.ReadInt32();
-                        if (!sr.RecordOk || m.Prog < -1 || m.Chain < 0 || double.IsNaN(m.DueAt))
+                        if (sr.F()) m.Host = r.ReadInt32();
+                        if (sr.F()) m.HostKind = r.ReadByte();
+                        if (sr.F()) m.Mode = r.ReadByte();
+                        if (sr.F()) m.Ev = r.ReadByte();
+                        if (sr.F()) m.Depth = r.ReadByte();
+                        if (sr.F()) m.Mask = r.ReadUInt64();
+                        if (sr.F()) m.Pos.x = r.ReadDouble();
+                        if (sr.F()) m.Pos.y = r.ReadDouble();
+                        if (sr.F()) m.Dir.x = r.ReadSingle();
+                        if (sr.F()) m.Dir.y = r.ReadSingle();
+                        if (sr.F()) m.Other = r.ReadInt32();
+                        if (sr.F()) m.Weapon = r.ReadInt32();
+                        if (sr.F()) m.Damage = r.ReadSingle();
+                        if (sr.F()) m.Faction = r.ReadByte();
+                        if (sr.F()) m.Carrier = r.ReadByte();
+                        if (sr.F()) m.PFlags = r.ReadUInt16();
+                        if (sr.F()) m.ZoneRadius = r.ReadSingle();
+                        if (sr.F()) m.ZoneLife = r.ReadSingle();
+                        if (sr.F()) m.Until = r.ReadDouble();
+                        // EMG3-META-01：坏值拒读；程序 / 节点下标越界的记录到点时丢弃、不执行（StepEmgMeta）
+                        if (!sr.RecordOk || m.Prog < -1 || m.Chain < 0 || double.IsNaN(m.DueAt) || double.IsInfinity(m.DueAt) || m.Mode > EmgMetaConst.RunFollow
+                            || m.Ev > EmgConst.EventKinds || m.Depth > EmgConst.MaxDepth || double.IsNaN(m.Pos.x) || double.IsNaN(m.Pos.y) || float.IsNaN(m.Dir.x) || float.IsNaN(m.Dir.y)
+                            || !(m.Damage >= 0f) || float.IsInfinity(m.Damage) || !(m.ZoneRadius >= 0f) || !(m.ZoneLife >= 0f) || double.IsNaN(m.Until))
                         {
                             return CombatLoadResult.InvalidValue;
                         }

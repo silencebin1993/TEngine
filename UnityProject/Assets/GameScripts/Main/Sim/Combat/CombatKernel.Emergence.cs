@@ -29,9 +29,9 @@ namespace BinGames.Sim.Combat
         /// </summary>
         public int AddProgram(in EmgProgram program, IReadOnlyList<EmgNode> nodes, IReadOnlyList<EmgInstr> instrs)
         {
-            if (!ProgramShapeValid(program, nodes, instrs))
+            if (!ProgramShapeValid(program, nodes, instrs) || (program.Flags & (EmgProgramFlags.HasReverse | EmgProgramFlags.IsReverse)) != 0)
             {
-                return -1;
+                return -1; // EMG3-META-01：带逆序树的程序只能成对登记（AddProgramPair），保证逆序树就在下一行
             }
             EnsureProgramIndex();
             string key = ProgramKey(program, nodes, instrs);
@@ -43,6 +43,46 @@ namespace BinGames.Sim.Combat
             {
                 return -1;
             }
+            int index = AppendProgram(program, nodes, instrs);
+            _programIndex[key] = index;
+            Touch();
+            SyncInstrActivation(); // EMG1-FUZZ-01：计数开着时新程序的指令行从 0 计
+            return index;
+        }
+
+        /// <summary>
+        /// EMG3-META-01（FGR-EMG-040 反转）：成对登记正序树与逆序树——正序树带 <see cref="EmgProgramFlags.HasReverse"/>，逆序树紧随其后（下标 + 1）、带 <see cref="EmgProgramFlags.IsReverse"/>。
+        /// 按两棵树合起来的完整字节去重（两棵树都计入签名）；返回正序树下标，形状不合法或表满（需 2 行）返回 −1、表不变。
+        /// </summary>
+        public int AddProgramPair(in EmgProgram program, IReadOnlyList<EmgNode> nodes, IReadOnlyList<EmgInstr> instrs, in EmgProgram reverse, IReadOnlyList<EmgNode> revNodes, IReadOnlyList<EmgInstr> revInstrs)
+        {
+            EmgProgram fwd = program, rev = reverse;
+            fwd.Flags = (fwd.Flags | EmgProgramFlags.HasReverse) & ~EmgProgramFlags.IsReverse;
+            rev.Flags = (rev.Flags | EmgProgramFlags.IsReverse) & ~EmgProgramFlags.HasReverse;
+            if (!ProgramShapeValid(fwd, nodes, instrs) || !ProgramShapeValid(rev, revNodes, revInstrs))
+            {
+                return -1;
+            }
+            EnsureProgramIndex();
+            string key = ProgramKey(fwd, nodes, instrs) + "|" + ProgramKey(rev, revNodes, revInstrs);
+            if (_programIndex.TryGetValue(key, out int at))
+            {
+                return at;
+            }
+            if (_d.EmgPrograms.Length + 2 > EmgConst.MaxPrograms)
+            {
+                return -1;
+            }
+            int index = AppendProgram(fwd, nodes, instrs);
+            AppendProgram(rev, revNodes, revInstrs);
+            _programIndex[key] = index;
+            Touch();
+            SyncInstrActivation();
+            return index;
+        }
+
+        private int AppendProgram(in EmgProgram program, IReadOnlyList<EmgNode> nodes, IReadOnlyList<EmgInstr> instrs)
+        {
             _d.EmgListen |= program.ListenMask; // EMG1-BUS-01（FGR-EMG-062）：地点级监听掩码在程序表变化时并上，不按帧
             EmgProgram p = program;
             p.FirstNode = _d.EmgNodes.Length;
@@ -59,13 +99,20 @@ namespace BinGames.Sim.Combat
             {
                 _d.EmgInstrs.Add(instrs[j]);
             }
-            int index = _d.EmgPrograms.Length;
             _d.EmgPrograms.Add(p);
-            _programIndex[key] = index;
-            Touch();
-            SyncInstrActivation(); // EMG1-FUZZ-01：计数开着时新程序的指令行从 0 计
-            return index;
+            return _d.EmgPrograms.Length - 1;
         }
+
+        /// <summary>EMG3-META-01：元程序运行态（循环计数、延后 / 复制队列）第 <paramref name="i"/> 条（自检、悬停用）。</summary>
+        public bool TryGetMetaRun(int i, out EmgMetaRun run)
+        {
+            bool ok = i >= 0 && i < _d.MetaRun.Length;
+            run = ok ? _d.MetaRun[i] : default;
+            return ok;
+        }
+
+        /// <summary>EMG3-META-01（DEBT-EMG2DISC01-03）：本内核真的作用过的元程序种类（位 k = EmgMetaConst 种类 k；语法发现“第一次用到某种元程序”）。</summary>
+        public int EmgMetaSeenMask => _d.EmgStats[0].MetaSeen;
 
         public bool TryGetProgram(int index, out EmgProgram p)
         {
@@ -376,7 +423,17 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < _d.EmgPrograms.Length; i++)
             {
                 ProgramLists(ref _d, i, out EmgProgram p, out List<EmgNode> nodes, out List<EmgInstr> instrs);
-                _programIndex[ProgramKey(p, nodes, instrs)] = i; // 同键取后者不会发生：登记时已去重；读档来的表也逐行校验过
+                if ((p.Flags & EmgProgramFlags.IsReverse) != 0)
+                {
+                    continue; // EMG3-META-01：逆序树随前一行的正序树成对去重
+                }
+                string key = ProgramKey(p, nodes, instrs);
+                if ((p.Flags & EmgProgramFlags.HasReverse) != 0 && i + 1 < _d.EmgPrograms.Length)
+                {
+                    ProgramLists(ref _d, i + 1, out EmgProgram rp, out List<EmgNode> rn, out List<EmgInstr> ri);
+                    key += "|" + ProgramKey(rp, rn, ri);
+                }
+                _programIndex[key] = i; // 同键取后者不会发生：登记时已去重；读档来的表也逐行校验过
             }
         }
 

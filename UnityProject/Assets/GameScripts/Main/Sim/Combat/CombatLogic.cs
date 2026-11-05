@@ -169,6 +169,11 @@ namespace BinGames.Sim.Combat
             {
                 StepEmgBus(ref d);
             }
+            // 5e'. EMG3-META-01：元程序运行态（复制 / 延后到点再结算、循环周期执行；放出的子载荷在紧接着的 5e 生成）。表空时 O(1)。
+            if (d.MetaRun.Length > 0)
+            {
+                StepEmgMeta(ref d);
+            }
             // 5e. EMG1-TRIG-01：待生成的子载荷 / 定时 / 根弹体（总线唤起之后、先进先出；池满 / 区域满 / 同链存活满顺延不丢）。
             if (d.EmgPending.Length > 0)
             {
@@ -1135,7 +1140,7 @@ namespace BinGames.Sim.Combat
             double2 start = from + (double2)(dir * (d.Radius[i] + wp.ProjectileRadius));
             // EMG1-KRN-01（ADR ③ / ⑨）：稳定 Id；带程序的武器发出的是 0 代根载荷（根节点），并开一条新的因果链。程序表为空时只多发一个号（不进状态哈希）。
             EmgScalars es = d.EmgS[0];
-            int prog = wp.Program;
+            int prog = EmgShotProg(ref d, wp.Program); // EMG3-META-01：反转选中的树
             int id = es.NextProjId++;
             // EMG1-BUS-01：这一发的链就是本次出手开的那条（EmgShotBegin 已发号，evt.fire 与弹体同链）；不在出手上下文里生成的才另开。
             bool opened = prog >= 0 && !(d.EmgCtx.Prog == prog && d.EmgCtx.Chain > 0);
@@ -2017,7 +2022,8 @@ namespace BinGames.Sim.Combat
                     }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
-                        EmgNodeEffects(ref d, pr.Prog, pr.Node, obstacleAt, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth);
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, obstacleAt, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth,
+                            EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Expire, d.SlotOf(pr.Owner), -1, pr.Chain, pr.Id));
                     }
                     EmgProjEvent(ref d, ref pr, EmgEventKind.Expire, 0, EmgEntKind.None, 0f, 0f, EmgCode.ExpireObstacle, obstacleAt);
                     CombatCounters co = d.Counters[0];
@@ -2127,7 +2133,8 @@ namespace BinGames.Sim.Combat
                     }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
-                        EmgNodeEffects(ref d, pr.Prog, pr.Node, hitPos, owner, pr.Faction, pr.Chain, pr.Depth);
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, hitPos, owner, pr.Faction, pr.Chain, pr.Depth,
+                            EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id)); // EMG3-META-01：与这次命中入队的判定同一函数
                         if (!heal)
                         {
                             EmgSubChain(ref d, pr, owner, hit, hitPos); // EMG1-GRM-01：子弹药节点上的连锁
@@ -2160,7 +2167,8 @@ namespace BinGames.Sim.Combat
                     }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
-                        EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次
+                        EmgNodeEffects(ref d, pr.Prog, pr.Node, next, d.SlotOf(pr.Owner), pr.Faction, pr.Chain, pr.Depth,
+                            EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Expire, d.SlotOf(pr.Owner), -1, pr.Chain, pr.Id)); // EMG1-TRIG-01：子弹药落点（寿命到）结算一次
                     }
                     // EMG1-BUS-01：寿命到；EMG1-GRM-01：抛射弹落地（Code = 落地）、折返弹回到发射者身边（Code = 折返）。
                     ushort why = (pr.Flags & EmgProjFlags.Lob) != 0 ? EmgCode.ExpireGround

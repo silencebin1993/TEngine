@@ -157,6 +157,10 @@ namespace BinGames.Sim.Combat
                 z.EmgSub = 1;
                 z.EmgWeapon = s.Weapon;
                 d.Zones[last] = z;
+                if (EmgHasMeta(ref d, s.Prog))
+                {
+                    EmgMetaLaunch(ref d, s.Prog, s.Node, ownerSlot, -1, EmgZoneHost(ref d, z), z.Pos, s.Dir, 0.0, true); // EMG3-META-01：子区存续期间的循环（FGR-EMG-043 布区列）
+                }
                 if (m.Knock > 0f || m.PullA > 0f || (m.SweepR > 0f && m.SweepRatio > 0f) || m.Chain > 0)
                 {
                     EmgSubZoneLanding(ref d, ref z, in m, want, ownerSlot, damage);
