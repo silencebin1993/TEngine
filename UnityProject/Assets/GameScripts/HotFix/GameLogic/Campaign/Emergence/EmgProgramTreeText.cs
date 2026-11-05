@@ -250,6 +250,15 @@ namespace GameLogic.Campaign.Emergence
                     sb.Append(" · ").Append(GlyphOverflow).Append(' ').Append(GameText.Get("emg.tree.tag.gen_full"));
                 }
                 bool meta = AppendMeta(r, n.Index, e.Ordinal, sb);
+                // EMG3-TMP-01（卡片“预览显示节拍指令的周期与相位”）：只读编译结果（与内核同一份）
+                if (EmgProgramCompiler.BeatOf(r, n.Index, e.Ordinal, out int period, out int phase))
+                {
+                    sb.Append(" · ").Append(GameText.Format("emg.tree.tag.beat", period, phase));
+                }
+                if (EmgProgramCompiler.SyncOf(r, n.Index, e.Ordinal))
+                {
+                    sb.Append(" · ").Append(GameText.Get("emg.tree.tag.sync"));
+                }
                 into.Add(new EmgTreeRow
                 {
                     Kind = e.Inherited ? EmgTreeRowKind.Inherited : EmgTreeRowKind.Own, Text = sb.ToString(), Node = n.Index, Ordinal = e.Ordinal,

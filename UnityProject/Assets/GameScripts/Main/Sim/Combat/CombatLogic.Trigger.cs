@@ -303,7 +303,7 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 生产点：入队 + 记待生成请求 ───────────────────────────────
 
         /// <summary>入队一条带宿主的事件；真的入了队（没被积压保护合并）且宿主节点有挂在这个事件上的触发子节点时，按子节点记待生成请求（未唤起）。</summary>
-        internal static void EmgEmitHosted(ref CombatData d, EmgEvent e, in EmgCtx host, float2 dir)
+        internal static void EmgEmitHosted(ref CombatData d, EmgEvent e, in EmgCtx host, float2 dir, ulong gate = ulong.MaxValue)
         {
             int before = d.EmgBus.Length;
             EmgEmit(ref d, e);
@@ -312,7 +312,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             // EMG3-META-01（FGR-EMG-040～042）：有元程序的程序在这里做一次结算的判定——条件 / 随机关掉的、延后的下游指令此刻不执行，复制 / 延后的再执行记进运行态
-            ulong allow = (d.EmgPrograms[e.Prog].Flags & EmgProgramFlags.HasMeta) != 0 ? EmgMetaSettle(ref d, d.EmgBus[before], host, dir) : ulong.MaxValue;
+            ulong allow = (d.EmgPrograms[e.Prog].Flags & EmgProgramFlags.HasMeta) != 0 ? EmgMetaSettle(ref d, d.EmgBus[before], host, dir) & gate : gate; // EMG3-TMP-01：evt.beat 只放行本拍执行的节拍指令
             if (e.Node == 0)
             {
                 EmgRootGated(ref d, d.EmgBus[before], host, allow);
@@ -850,6 +850,10 @@ namespace BinGames.Sim.Combat
                     };
                     EmgInitFlight(ref d, ref sub, s.Pos + (double2)(pd * reach), k >= 0 ? d.Id[k] : 0, false); // EMG1-GRM-01：子弹药按自己节点（含继承）的修饰
                     d.Projectiles.Add(sub);
+                    if (q == 0 && s.Done == 0)
+                    {
+                        EmgBeatAnchorSub(ref d, s, pd, each); // EMG3-TMP-01：子弹药节点读 evt.beat 时在放出点留节拍锚点（子弹药寿命 ≤ 0.5 秒，自己撑不到相位）；一次放出（一条待生成请求）只留一个，不按份数乘
+                    }
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesSpawned++;
                     d.Counters[0] = c;

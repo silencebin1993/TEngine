@@ -66,9 +66,16 @@ namespace BinGames.Sim.Combat
                 }
                 EmgModsOf(ref d, prog, 0, out em, skip);
             }
+            // EMG3-TMP-01：格斗 / 力场 / 当场结算的射弹读 evt.beat 时在出手点留节拍锚点（布区由落区做宿主）；主目标不可伤时不留（不触发读法）
+            bool beatAnchor = prog >= 0 && r.Carrier != CombatCarrier.Field && (d.EmgListen & EmgBit(EmgEventKind.Beat)) != 0u;
+            EmgCtx beatCtx = beatAnchor ? d.EmgCtx : default;
             // EMG1-ENT-01（DEBT-EMG1GRM01-04）：掩体规则开时，力场的主目标在障碍 / 残骸后面同样打不到（与圈内其余目标同一条 EmgPulseBlocked），圈内其余照常结算；报“被掩体挡下”。
             if (r.Carrier == CombatCarrier.Aura && EmgPulseBlocked(ref d, d.Pos[a], d.Pos[t], em))
             {
+                if (beatAnchor)
+                {
+                    EmgBeatAnchor(ref d, prog, a, t, beatCtx); // 圈内其余目标照常结算，节拍锚点照留
+                }
                 Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
                 StrikeCarrierArea(ref d, a, t, baseDamage, r, em);
                 return CombatFireResult.Covered;
@@ -78,6 +85,10 @@ namespace BinGames.Sim.Combat
             if (!DamageUnit(ref d, t, dealt, a))
             {
                 return CombatFireResult.Invulnerable; // Demo：首领阶段不可伤时结算失败，不打标记、不跳转。
+            }
+            if (beatAnchor)
+            {
+                EmgBeatAnchor(ref d, prog, a, t, beatCtx);
             }
             ReflectMelee(ref d, a, t, dealt);
             // EMG1-ENT-01（FGR-EMG-112）：击退读法（推铲 / 震荡）这一下把出手范围里的残骸推开（格斗按前方窄带、力场按一圈；每次出手一次，在主目标被击退之前按出手瞬间的位置算）。

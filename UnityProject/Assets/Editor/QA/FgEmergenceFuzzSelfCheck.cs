@@ -1448,6 +1448,8 @@ namespace GameLogic.EditorTools
             ["ter.obstacle"] = "地形障碍",
             ["ter.cover"] = "障碍 / 残骸",
             ["ent.projectile"] = "所有射弹武器的弹体",
+            ["tmp.beat"] = "内核全局节拍（CombatLogic.Tempo，每 emg.tempo.beat 一拍；EMG3-TMP-01，FgEmgTempoSelfCheck B / C）",
+            ["tmp.sync"] = "内核相位对齐（同机 ≥ 2 条节拍指令同拍执行；EMG3-TMP-01，FgEmgTempoSelfCheck D）",
         };
 
         /// <summary>派生源：读端口 ← 写这些端口的声明同样算写者（阶段 1 过渡动词）。</summary>

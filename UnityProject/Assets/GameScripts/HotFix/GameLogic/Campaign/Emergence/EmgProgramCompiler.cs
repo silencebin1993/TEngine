@@ -179,7 +179,8 @@ namespace GameLogic.Campaign.Emergence
         /// 即时命中没有飞行路径（入场引信装在连射器上永远不触发，FGR-EMG-221 零反应；按推荐默认执行，2026-11-02，待用户确认）。</summary>
         private static bool NeedsFlightEvent(EmgEventKind e) => e == EmgEventKind.Timer || e == EmgEventKind.Prox || e == EmgEventKind.Expire
                                                               || e == EmgEventKind.Bounce || e == EmgEventKind.Pierce
-                                                              || e == EmgEventKind.Enter || e == EmgEventKind.Leave;
+                                                              || e == EmgEventKind.Enter || e == EmgEventKind.Leave
+                                                              || e == EmgEventKind.Beat; // EMG3-TMP-01：射弹读法“每 N 拍从弹体当前位置放出子弹药（飞行中布弹）”只有飞行弹体做得到（FG19A fw_clock 行）
 
         /// <summary>根节点写这些端口 = 程序需要飞行（ADR ③）。EMG1-GRM-01：加上 grm.mod.multi——霰射“一次打出 3 份真实弹丸，每份各自命中、各自触发”只有飞行弹体做得到（待用户复核）。</summary>
         private static readonly string[] FlightMods =
@@ -549,8 +550,19 @@ namespace GameLogic.Campaign.Emergence
                 }
                 set.Add(field);
             }
+            var beatOrds = new HashSet<int>();
             foreach (EmgNode n in r.KernelNodes)
             {
+                // EMG3-TMP-01 审查修复（第 1 轮，FGR-EMG-019 单轨）：同节点同序号读 evt.beat 的效果写端由内核按拍执行（StepEmgBeat / EmgBeatKinetic），不再保留旧读法过渡字段（如谐振的 echo）
+                beatOrds.Clear();
+                for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+                {
+                    EmgInstr x = r.KernelInstrs[i];
+                    if (x.Role <= EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 && PortIds.TryGetValue(x.Port, out string bp) && bp == "evt.beat")
+                    {
+                        beatOrds.Add(x.Ordinal);
+                    }
+                }
                 for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
                 {
                     EmgInstr x = r.KernelInstrs[i];
@@ -579,7 +591,7 @@ namespace GameLogic.Campaign.Emergence
                     if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && (n.Parent < 0 || (!KernelInjectLive && fam != EmgFamily.Matter)))
                     {
                         // EMG1-FIX-01：根节点上由内核直接执行的写端（RootKernel，如追射 ent.projectile）不再保留旧读法过渡字段（否则旧回波与真补射两轨同时结算，FGR-EMG-019）
-                        bool kernelRoot = n.Parent < 0 && (x.Flags & EmgInstrFlags.RootKernel) != 0;
+                        bool kernelRoot = (n.Parent < 0 && (x.Flags & EmgInstrFlags.RootKernel) != 0) || beatOrds.Contains(x.Ordinal);
                         foreach (string f in kernelRoot ? Array.Empty<string>() : TransitionFields(pid))
                         {
                             Keep(fw, f);
@@ -681,6 +693,7 @@ namespace GameLogic.Campaign.Emergence
             Inherit(r, c);
             Emit(r, c);
             MetaPass(r, c);
+            TempoPass(r);
             r.Reverse = BuildReverse(r, c);
             if (r.Reverse != null)
             {
@@ -689,6 +702,87 @@ namespace GameLogic.Campaign.Emergence
                                                              + Combat.CombatSite.ProgramKey(r.Reverse.Program, r.Reverse.KernelNodes, r.Reverse.KernelInstrs)).ToString("X16");
             }
             return r;
+        }
+
+        // ── 6. 节拍（EMG3-TMP-01；FG19 FGR-EMG-171 / 172）──
+
+        /// <summary>
+        /// 节拍指令的周期与相位落进内核行（预览与内核共用这一份，热更层不另算拍序）：读 tmp.beat 的行幅度 = 周期（取整，≥ 1），param2 = 相位——
+        /// 声明 param2 &gt; 0 是显式相位（对周期取模），0 = 缺省相位 = 程序序号 % 周期（FGR-EMG-171“玩家调槽位顺序即调相位”）。
+        /// 程序有节拍读端（tmp.beat / tmp.sync）时子节点记放出它的触发器序号（MetaMask，与元程序同一口径），内核按拍只放出本拍执行的那条触发器的子载荷。O(指令数 + 节点数)。
+        /// </summary>
+        private static void TempoPass(EmgProgramResult r)
+        {
+            bool any = false;
+            for (int i = 0; i < r.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = r.KernelInstrs[i];
+                if (x.Role > EmgConst.RoleLastRead || (x.Port != EmgTempoConst.PortBeat && x.Port != EmgTempoConst.PortSync))
+                {
+                    continue;
+                }
+                any = true;
+                if (x.Port == EmgTempoConst.PortBeat)
+                {
+                    int period = Math.Max(1, (int)Math.Round(x.Amount));
+                    x.Amount = period;
+                    x.Param2 = x.Param2 > 0f ? (int)Math.Round(x.Param2) % period : x.Ordinal % period;
+                    r.KernelInstrs[i] = x;
+                }
+            }
+            if (!any)
+            {
+                return;
+            }
+            for (int j = 1; j < r.KernelNodes.Count && j < r.Nodes.Count; j++)
+            {
+                EmgNode kn = r.KernelNodes[j];
+                int t = r.Nodes[j].TriggerOrdinal;
+                kn.MetaMask = (byte)(t >= 0 && t < 255 ? t + 1 : 0);
+                r.KernelNodes[j] = kn;
+            }
+            r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");
+        }
+
+        /// <summary>预览用：这条指令在节点里读 tmp.beat 的周期与相位（编译结果），没有返回 false。</summary>
+        public static bool BeatOf(EmgProgramResult r, int node, int ordinal, out int period, out int phase)
+        {
+            period = phase = 0;
+            if (r == null || node < 0 || node >= r.KernelNodes.Count)
+            {
+                return false;
+            }
+            EmgNode n = r.KernelNodes[node];
+            for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = r.KernelInstrs[i];
+                if (x.Ordinal == ordinal && x.Port == EmgTempoConst.PortBeat && x.Role <= EmgConst.RoleLastRead)
+                {
+                    period = (int)Math.Round(x.Amount);
+                    phase = (int)Math.Round(x.Param2);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>预览用：这条指令在节点里读 tmp.sync（相位对齐的拍上执行）。</summary>
+        public static bool SyncOf(EmgProgramResult r, int node, int ordinal)
+        {
+            if (r == null || node < 0 || node >= r.KernelNodes.Count)
+            {
+                return false;
+            }
+            EmgNode n = r.KernelNodes[node];
+            for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = r.KernelInstrs[i];
+                if (x.Ordinal == ordinal && x.Port == EmgTempoConst.PortSync && x.Role <= EmgConst.RoleLastRead)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ── 5. 元程序（EMG3-META-01；FG19 FGR-EMG-040～043）──
@@ -929,6 +1023,7 @@ namespace GameLogic.Campaign.Emergence
             Inherit(t, c);
             Emit(t, c);
             MetaPass(t, c);
+            TempoPass(t); // 逆序树的缺省相位按逆序后的序号 % 周期（FGR-EMG-171）
             return t;
         }
 

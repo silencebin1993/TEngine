@@ -10,6 +10,8 @@ namespace BinGames.Sim.Combat
         public const byte Repeat = 0, Loop = 1, If = 2, Random = 3, Reverse = 4, Defer = 5, Kinds = 6;
         /// <summary>运行态记录的模式：循环（宿主存续期间周期执行）/ 重放（复制：同位置再结算）/ 跟随重放（延后：到点取宿主当时位置，宿主已结束则在结束点）。</summary>
         public const byte RunLoop = 0, RunReplay = 1, RunFollow = 2;
+        /// <summary>EMG3-TMP-01：节拍锚点（格斗 / 力场 / 当场结算出手读 evt.beat 时留在出手点，<see cref="EmgMetaRun.Until"/> 前按全局节拍执行；StepEmgMeta 只管到期移除）。</summary>
+        public const byte RunBeat = 3;
         public const float DefaultGap = 0.1f, DefaultLoopPeriod = 0.5f, DefaultAnchor = 2f, DefaultDefer = 1f, DefaultDeferMax = 3f;
         public const int DefaultMaxExec = 4, DefaultLoopMax = 8;
         /// <summary>只给 &lt; 64 的程序序号做位运算（一把武器 ≤ 4 槽 × 混合 2 条）；序号 ≥ 64 的指令不受元程序约束。</summary>
@@ -639,6 +641,14 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < n; i++)
             {
                 EmgMetaRun m = d.MetaRun[i];
+                if (m.Mode == EmgMetaConst.RunBeat)
+                {
+                    if (now <= m.Until + 1e-9)
+                    {
+                        d.MetaRun[write++] = m; // EMG3-TMP-01：节拍锚点由 StepEmgBeat 按拍执行，这里只在到期后移除
+                    }
+                    continue;
+                }
                 if (now + 1e-9 < m.DueAt)
                 {
                     d.MetaRun[write++] = m;

@@ -164,6 +164,8 @@ namespace BinGames.Sim.Combat
                 StepDroneCharge(ref d, dt); // DEBT-EMG2REACT02-04：哨戒桩电荷衰减
             }
 
+            // 5c''. EMG3-TMP-01（FGR-EMG-170～172）：全局节拍（拍序号 = ⌊模拟时间 ÷ emg.tempo.beat⌋，越过拍界时对读 evt.beat 的宿主出拍，本步总线处理）。没有程序读 evt.beat 时 O(1)。
+            StepEmgBeat(ref d);
             // 5d. EMG1-BUS-01：战斗事件总线（ADR-EMG-001 ④：StepReadings 之后、场地边界钳制之前；按 Seq 先进先出，每步 emg.bus.per_step 条，超出顺延不丢）。
             if (d.EmgBus.Length > 0)
             {

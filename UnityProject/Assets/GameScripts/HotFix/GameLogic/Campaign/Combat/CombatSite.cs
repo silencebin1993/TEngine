@@ -388,6 +388,7 @@ namespace GameLogic.Campaign.Combat
             c.EmgMetaAnchor = Mathf.Max(0.05f, Tuning("emg.meta.loop_anchor_seconds", EmgMetaConst.DefaultAnchor));
             c.EmgMetaDefer = Mathf.Max(0.01f, Tuning("emg.meta.defer_seconds", EmgMetaConst.DefaultDefer));
             c.EmgMetaDeferMax = Mathf.Max(0f, Tuning("emg.meta.defer_total_max", EmgMetaConst.DefaultDeferMax));
+            c.EmgBeatSeconds = Mathf.Max(0.05f, Tuning("emg.tempo.beat", EmgTempoConst.DefaultBeat)); // EMG3-TMP-01（FGR-EMG-170）：全局节拍
             // EMG1-ENT-01（FG19 FGR-EMG-110～114）：实体层（残骸 / 破片 / 撞击 / 位移）随阶段 1 开；emg.stage = 0 时关，旧行为逐字不变。
             c.EmgEntity = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
             c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));

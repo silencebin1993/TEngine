@@ -828,6 +828,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgChassisSelfCheck", FgEmgChassisSelfCheck.Run); // EMG3-CHS-01：四种现行底盘特性、chs.* 状态端口、冲刺 / 冲撞、哨戒桩导体、快照 18（FGT-EMG-050）
             Seg("FgEmgReservedChassisSelfCheck", FgEmgReservedChassisSelfCheck.Run); // EMG3-CHS-02：预留底盘特性（震地 / 空投 / 取水，测试底盘行）、测试行混进正式存档被拒（FGT-EMG-050）
             Seg("FgEmgMetaSelfCheck", FgEmgMetaSelfCheck.Run); // EMG3-META-01：元程序六条指令（FGT-EMG-052 / 014）
+            Seg("FgEmgTempoSelfCheck", FgEmgTempoSelfCheck.Run); // EMG3-TMP-01：全局节拍、周期与相位、相位对齐（FGT-EMG-053 同机部分、FGT-EMG-020 evt.beat 生产者）
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

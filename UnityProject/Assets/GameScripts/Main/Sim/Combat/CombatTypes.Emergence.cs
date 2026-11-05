@@ -276,6 +276,10 @@ namespace BinGames.Sim.Combat
         public long FragLost;
         public long Impacts;
         public long Pushes;
+        /// <summary>EMG3-TMP-01（调试计数，不进快照）：出拍时发出的 evt.beat 条数、用掉 tmp.sync 的次数（每机器每拍 ≤ 1）、节拍余振次数（en.kinetic × evt.beat）。</summary>
+        public long BeatsEmitted;
+        public long BeatSyncs;
+        public long BeatPulses;
         public int LastSeq;
         public int HasLast;
         public int LastDepthCutChain;

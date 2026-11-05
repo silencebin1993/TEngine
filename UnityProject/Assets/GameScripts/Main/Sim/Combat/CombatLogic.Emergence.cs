@@ -880,6 +880,11 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
+                // EMG3-TMP-01（FGR-EMG-171 / 172）：不在相位上的节拍指令、本拍没对齐时读 tmp.sync 的指令不唤起（按事件带的拍序号重算）
+                if (e.Kind == EmgEventKind.Beat && EmgBeatBlocked(ref d, n.FirstInstr, end, x.Ordinal, e))
+                {
+                    continue;
+                }
                 woken++;
                 if (x.Role == EmgConst.RoleTrigger)
                 {

@@ -685,7 +685,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) m.ZoneLife = r.ReadSingle();
                         if (sr.F()) m.Until = r.ReadDouble();
                         // EMG3-META-01：坏值拒读；程序 / 节点下标越界的记录到点时丢弃、不执行（StepEmgMeta）
-                        if (!sr.RecordOk || m.Prog < -1 || m.Chain < 0 || double.IsNaN(m.DueAt) || double.IsInfinity(m.DueAt) || m.Mode > EmgMetaConst.RunFollow
+                        if (!sr.RecordOk || m.Prog < -1 || m.Chain < 0 || double.IsNaN(m.DueAt) || double.IsInfinity(m.DueAt) || m.Mode > EmgMetaConst.RunBeat
                             || m.Ev > EmgConst.EventKinds || m.Depth > EmgConst.MaxDepth || double.IsNaN(m.Pos.x) || double.IsNaN(m.Pos.y) || float.IsNaN(m.Dir.x) || float.IsNaN(m.Dir.y)
                             || !(m.Damage >= 0f) || float.IsInfinity(m.Damage) || !(m.ZoneRadius >= 0f) || !(m.ZoneLife >= 0f) || double.IsNaN(m.Until))
                         {
