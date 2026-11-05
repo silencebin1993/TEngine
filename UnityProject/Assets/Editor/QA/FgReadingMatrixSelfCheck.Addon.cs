@@ -202,6 +202,61 @@ namespace GameLogic.EditorTools
             return null;
         }
 
+        /// <summary>EMG3-FW-02 修复轮（FGT-EMG-003 阶段 3 条件型新固件）：条件场景的观测。</summary>
+        internal sealed class Stage3Obs
+        {
+            public string Digest;
+            public long Subs, PingsSent, PingsDelivered, Syncs, Kills, Marks, Zones;
+            public EmgProgramResult Program;
+        }
+
+        /// <summary>正式路径编译：蓝图（接入口 <paramref name="uplink"/> + 本机固件位 <paramref name="local"/>）→ 程序。</summary>
+        internal static EmgProgramResult CompileStage3(string comp, string[] uplink, string[] local, out CombatWeapon w)
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, comp, null, null, local ?? Array.Empty<string>());
+            board.TrySetUplink(UplinkSlot);
+            BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, uplink);
+            w = CombatSite.MachineWeaponFrom(p);
+            EmgProgramResult program = EmgProgramCompiler.Compile(p);
+            if (!program.IsEmpty && w.Mode != CombatWeaponMode.Projectile)
+            {
+                w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
+            }
+            return program;
+        }
+
+        /// <summary>
+        /// 按正式路径编出攻击者、在矩阵场地跑 <paramref name="seconds"/> 秒。<paramref name="prepared"/> = 场上目标已被标记；<paramref name="edit"/> 改武器（条件提供者，如本机武器带标记）；
+        /// <paramref name="setup"/>(内核, 攻击者 ID, 场上单位 ID：[0] 攻击者、[1] 主目标、其余敌人) 造条件（中继、友机、低血目标）。
+        /// </summary>
+        internal static Stage3Obs RunStage3(string comp, string[] uplink, string[] local, bool prepared, float seconds, Func<CombatWeapon, CombatWeapon> edit = null,
+            Action<CombatKernel, int, int[]> setup = null)
+        {
+            EmgProgramResult program = CompileStage3(comp, uplink, local, out CombatWeapon w);
+            if (edit != null)
+            {
+                w = edit(w);
+            }
+            using Arena a = Arena.Build(w, prepared, null, program, comp);
+            a.Trace = true;
+            CombatKernel k = a.K;
+            setup?.Invoke(k, a.Ids[ArenaAttacker], a.Ids);
+            a.Run(seconds);
+            var o = new Stage3Obs
+            {
+                Program = program, Subs = k.EmgBusStats.SubSpawned, PingsSent = k.EmgBusStats.PingsSent, PingsDelivered = k.EmgBusStats.PingsDelivered, Syncs = k.EmgBusStats.BeatSyncs,
+                Kills = k.EmgEnqueuedOf(EmgEventKind.Kill), Marks = k.EmgEnqueuedOf(EmgEventKind.Marked), Zones = k.Counters.ZonesSpawned,
+            };
+            var sb = new StringBuilder();
+            for (int i = 0; i < ArenaCount; i++)
+            {
+                bool ok = k.TryGetUnit(a.Ids[i], out CombatUnitView v);
+                sb.Append((ok ? v.Health : 0f).ToString("F1", CultureInfo.InvariantCulture)).Append(ok && v.Alive ? 'A' : 'D').Append('|');
+            }
+            o.Digest = sb.Append('S').Append(o.Subs).Append('Z').Append(o.Zones).Append('T').Append(a.TraceHash.ToString("X16")).ToString();
+            return o;
+        }
+
         /// <summary>五种载体各自用来跑矩阵的作战组件（与 C 段同一组）。</summary>
         internal static IReadOnlyList<(FirmwareCarrier Carrier, string Component)> AddonCarriers => CarrierComponents;
 

@@ -93,6 +93,8 @@ namespace BinGames.Sim.Combat
         public const byte RoleCondition = 2;
         /// <summary>EMG3-META-01（FG19 第 2.4 节）：元程序写端端口码 200～205（复制 / 循环 / 条件 / 随机 / 反转 / 延后，码 − 200 = <see cref="EmgMetaConst"/> 种类）；条件读端常用的属性端口码。</summary>
         public const ushort PortMetaBase = 200, PortPropHeat = 624, PortPropIntegrity = 626, PortPhsBase = 901;
+        /// <summary>EMG3-FW-02（FG19A N30）：ent.wreck 端口码（作 condition：事件处留下 / 有残骸）。</summary>
+        public const ushort PortEntWreck = 605;
         public const byte RoleSense = 3;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;

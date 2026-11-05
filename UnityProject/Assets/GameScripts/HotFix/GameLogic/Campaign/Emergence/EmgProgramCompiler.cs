@@ -795,6 +795,35 @@ namespace GameLogic.Campaign.Emergence
             return false;
         }
 
+        /// <summary>
+        /// EMG3-FW-02（FGR-EMG-133；卡片负向“没有中继时写 evt.ping 的固件无友机接收，预览写原因，不报错”）：这条指令写 evt.ping（<paramref name="send"/> = true）或在根节点以 trigger 收听
+        /// evt.ping（false），<paramref name="channel"/> = 频道。子节点里的收听不会被触发（脉冲只按接收方根节点执行），返回 true 且 <paramref name="rootOnly"/> = true。与内核 EmgPingOut / EmgRootTrigGate 同口径。
+        /// </summary>
+        public static bool PingOf(EmgProgramResult r, int node, int ordinal, out bool send, out int channel, out bool rootOnly)
+        {
+            send = rootOnly = false;
+            channel = 0;
+            if (r == null || node < 0 || node >= r.KernelNodes.Count)
+            {
+                return false;
+            }
+            ushort ping = (ushort)(EventPortBase + (int)EmgEventKind.Ping);
+            EmgNode n = r.KernelNodes[node];
+            for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = r.KernelInstrs[i];
+                if (x.Ordinal != ordinal || x.Port != ping || (x.Flags & EmgInstrFlags.Overflow) != 0)
+                {
+                    continue;
+                }
+                channel = EmgSquadConst.ChannelOf(x.Amount);
+                send = x.Role > EmgConst.RoleLastRead;
+                rootOnly = !send && node != 0;
+                return send || x.Role == EmgConst.RoleTrigger;
+            }
+            return false;
+        }
+
         public static bool SyncOf(EmgProgramResult r, int node, int ordinal)
         {
             if (r == null || node < 0 || node >= r.KernelNodes.Count)

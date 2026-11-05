@@ -35,8 +35,9 @@ namespace GameLogic.EditorTools
         private const float Dt = 1f / 60f;
         private const byte Trig = EmgConst.RoleTrigger, Cond = EmgConst.RoleCondition, RoleEmit = 5, RoleModify = 6, RoleSpawn = 7;
         private const CombatUnitFlags Live = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled;
-        private const string IfMark = "fw_selftest_meta_ifmark", Rep = "fw_selftest_meta_repeat", Loop = "fw_selftest_meta_loop", Rnd = "fw_selftest_meta_random";
-        private const string Rev = "fw_selftest_meta_reverse", Def = "fw_selftest_meta_defer", IfHot = "fw_selftest_meta_ifhot";
+        // EMG3-FW-02：FG19A N01～N08 已落表（stageGate 3），自检改用正式固件行（FGT-EMG-052 用正式固件复跑）
+        private const string IfMark = "fw_ifmark", Rep = "fw_repeat", Loop = "fw_loop", Rnd = "fw_random";
+        private const string Rev = "fw_reverse", Def = "fw_defer", IfHot = "fw_ifhot";
         private const string Split = "fw_split", Pierce = "fw_pierce", Tractor = "fw_tractor", Boomerang = "fw_boomerang";
 
         private static StringBuilder _report;
@@ -72,7 +73,7 @@ namespace GameLogic.EditorTools
                 FirmwareKinds.ResetForTests();
                 CarrierReadings.Reload();
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
-                Step(CheckFuzzGap); // 真实表（不含测试行）：meta.* 落表前报缺口
+                Step(CheckFuzzGap); // 真实表：EMG3-FW-02 落表后 meta.* 缺口为 0
                 UseMetaCatalog();
                 Step(CheckCompile);
                 Step(CheckHeadline);
@@ -107,37 +108,16 @@ namespace GameLogic.EditorTools
 
         private static void UseMetaCatalog()
         {
+            // EMG3-FW-02：不再加测试行——正式表的 N01～N08 声明与原测试行同形（FG19A 第 6 节读端）
             EmgSource src = EmgCatalog.FromTables();
             string[] tests = { IfMark, Rep, Loop, Rnd, Rev, Def, IfHot };
-            Func<string, string, bool> owners = src.OwnerExists;
-            src.OwnerExists = (o, k) => Array.IndexOf(tests, o) >= 0 || owners(o, k);
-            AddDecls(src, IfMark, ("read", "evt.marked", "condition", 1f), ("write", "meta.if", "modify", 1f));
-            AddDecls(src, IfHot, ("read", "prop.heat", "condition", 0.5f), ("write", "meta.if", "modify", 1f));
-            AddDecls(src, Rep, ("read", "evt.hit", "trigger", 1f), ("write", "meta.repeat", "modify", 1f));
-            AddDecls(src, Loop, ("read", "evt.fire", "trigger", 1f), ("read", "prop.heat", "sense", 1f), ("write", "meta.loop", "modify", 1f));
-            AddDecls(src, Rnd, ("read", "evt.hit", "trigger", 1f), ("write", "meta.random", "modify", 1f));
-            AddDecls(src, Rev, ("read", "prop.heat", "condition", 0.5f), ("write", "meta.reverse", "modify", 1f));
-            AddDecls(src, Def, ("read", "evt.hit", "trigger", 1f), ("write", "meta.defer", "modify", 1f));
             EmgCatalog.OverrideForTests(src);
             EmgCompiled c = EmgCatalog.Current;
             string[] need = tests.Concat(new[] { Split, Pierce, Tractor, Boomerang }).ToArray();
             string[] inactive = need.Where(o => !c.OwnerIndex.TryGetValue(o, out int oi) || !c.OwnerActive(oi)).ToArray();
             Expect(c.Problems.Count == 0 && inactive.Length == 0 && c.EffectiveStage == 3,
-                $"测试目录：真实表 + 7 条元程序测试行（stageGate 3）零问题{(c.Problems.Count > 0 ? "：" + c.Problems[0] : string.Empty)}；元程序 owner 读 prop.heat 条件也走声明轨（meta.* 已接通，条件由元程序求值）"
+                $"正式表：7 条元程序正式固件（N01、N02、N04～N08，stageGate 3）零问题{(c.Problems.Count > 0 ? "：" + c.Problems[0] : string.Empty)}；元程序 owner 读 prop.heat 条件也走声明轨（meta.* 已接通，条件由元程序求值）"
                 + (inactive.Length > 0 ? "；未生效：" + string.Join("、", inactive) : string.Empty));
-        }
-
-        private static void AddDecls(EmgSource src, string owner, params (string dir, string port, string role, float amount)[] decls)
-        {
-            src.Decls.RemoveAll(d => d.Owner == owner);
-            for (int i = 0; i < decls.Length; i++)
-            {
-                src.Decls.Add(new EmgSource.Decl
-                {
-                    Id = owner + "." + (i + 1), Owner = owner, OwnerKind = "firmware", Seq = i + 1, Dir = decls[i].dir, Port = decls[i].port, Role = decls[i].role,
-                    Amount = decls[i].amount, Carriers = "all", TextKey = $"emg.decl.{owner}.{i + 1}", StageGate = 3,
-                });
-            }
         }
 
         private static EmgProgramResult P(params string[] local) => EmgProgramCompiler.Compile(Array.Empty<string>(), local, FirmwareCarrier.Projectile, 0);
@@ -771,12 +751,12 @@ namespace GameLogic.EditorTools
 
         private static void CheckFuzzGap()
         {
-            Line("  · A0. 正式表（未加测试行）：44 条现有固件没有 meta.* 写者——模糊测试器把 meta.* 报为“缺口（承接 EMG3-FW-02）”，不是失败");
+            Line("  · A0. 正式表：EMG3-FW-02 落表后 6 个 meta.* 写端都有正常游戏可获得的写者——模糊测试器的 meta.* 缺口清零（EMG3-META-01 时为 6 条，承接 EMG3-FW-02）");
             EmgCatalog.ResetForTests();
             var audit = FgEmergenceFuzzSelfCheck.AuditSources(EmgCatalog.FromTables(), 3, new HashSet<string>());
             var metaGaps = audit.Gaps.Where(g => g.Port.StartsWith("meta.", StringComparison.Ordinal)).ToList();
-            Expect(metaGaps.Count == 6 && metaGaps.All(g => g.Card == "EMG3-FW-02") && !audit.Failures.Any(f => f.Contains("meta.")),
-                $"meta.* 缺口 {metaGaps.Count} 条，承接 {string.Join("/", metaGaps.Select(g => g.Card).Distinct())}");
+            Expect(metaGaps.Count == 0 && !audit.Failures.Any(f => f.Contains("meta.")),
+                $"meta.* 缺口 {metaGaps.Count} 条（{string.Join("、", metaGaps.Select(g => g.Port + "→" + g.Card))}）、相关失败 {audit.Failures.Count(f => f.Contains("meta."))} 条");
         }
 
         // ── L. 5 载体读法补全（FGR-EMG-043；“出手点”统一按本次结算的结算点）──

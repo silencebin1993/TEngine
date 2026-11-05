@@ -846,7 +846,9 @@ namespace BinGames.Sim.Combat
                 {
                     return false;
                 }
-                int k = s.Ent == (int)EmgEventKind.Hit ? EmgSeekIndex(ref d, s) : -1;
+                // EMG3-FW-02（FG19A N42 / N31；FGR-EMG-172“对齐时把本拍各机器的触发器子载荷同时放出 = 齐射”）：相位对齐拍 / 信号脉冲触发的子载荷没有命中目标——
+                // 放出的第 k 份朝放出点第 k 近的敌人（齐射“向最近的 2 个敌人各放 1 份”：读 tmp.sync 的节拍触发器；脉冲在脉冲点放、朝那里最近的敌人），没有敌人才径向。其余节拍触发器（时钟脉冲）照旧径向
+                int k = s.Ent == (int)EmgEventKind.Hit || s.Ent == (int)EmgEventKind.Ping || (s.Ent == (int)EmgEventKind.Beat && EmgSyncTrigChild(ref d, s)) ? EmgSeekIndex(ref d, s) : -1;
                 float2 dir = k >= 0 ? EmgDir(d.Pos[k] - s.Pos) : EmgRadial(ref d, s);
                 if (k < 0 && s.Ent == (int)EmgEventKind.Timer && code != EmgConst.SubWave && math.lengthsq(s.Dir) > 1e-12f)
                 {
@@ -889,6 +891,29 @@ namespace BinGames.Sim.Combat
             EmgActNode(ref d, s.Prog, s.Node); // EMG1-FUZZ-01：子节点执行一次（只在模糊测试器开启计数时）
             EmgStat(ref d, 1);
             return true;
+        }
+
+        /// <summary>EMG3-FW-02（FGR-EMG-172 齐射，FG19A N42）：这份子载荷由读 tmp.sync condition 的节拍触发器放出（只在相位对齐拍上放）。按端口判，不认固件 ID。O(父节点指令数)，只在节拍子载荷生成时。</summary>
+        private static bool EmgSyncTrigChild(ref CombatData d, in EmgSpawn s)
+        {
+            if (s.Prog < 0 || s.Prog >= d.EmgPrograms.Length || !EmgNodeSpan(ref d, s.Prog, s.Node, out _, out _))
+            {
+                return false;
+            }
+            EmgNode c = d.EmgNodes[d.EmgPrograms[s.Prog].FirstNode + s.Node];
+            if (c.MetaMask == 0 || c.Parent < 0 || !EmgNodeSpan(ref d, s.Prog, c.Parent, out int first, out int end))
+            {
+                return false;
+            }
+            for (int j = first; j < end; j++)
+            {
+                EmgInstr r = d.EmgInstrs[j];
+                if (r.Ordinal == c.MetaMask - 1 && r.Port == EmgTempoConst.PortSync && r.Role == EmgConst.RoleCondition)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>命中触发的第 k 份子弹药（k = 已生成份数）指向“5 米内第 k 近的其他敌对单位”（治疗弹找己方）；不够就返回 −1（径向）。O(单位数 × (k + 1))，k ≤ 份数上限。</summary>

@@ -830,6 +830,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgMetaSelfCheck", FgEmgMetaSelfCheck.Run); // EMG3-META-01：元程序六条指令（FGT-EMG-052 / 014）
             Seg("FgEmgTempoSelfCheck", FgEmgTempoSelfCheck.Run); // EMG3-TMP-01：全局节拍、周期与相位、相位对齐（FGT-EMG-053 同机部分、FGT-EMG-020 evt.beat 生产者）
             Seg("FgEmgSquadSelfCheck", FgEmgSquadSelfCheck.Run); // EMG3-SQD-01：中继转发、信号脉冲、中继组相位对齐（FGT-EMG-051、FGT-EMG-053 中继组部分、FGT-EMG-020 evt.ping 生产者）
+            Seg("FgEmgStage3FirmwareSelfCheck", FgEmgStage3FirmwareSelfCheck.Run); // EMG3-FW-02：元程序、协同与齐射新固件落表（FGT-EMG-002 / 003 / 006 / 051 / 052，FGJ-EMG-3）
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

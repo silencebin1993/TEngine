@@ -154,6 +154,7 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static void EmgOnDeath(ref CombatData d, int t, int killerId, byte flags)
         {
+            bool wreck = false; // EMG3-FW-02 修复轮：本次阵亡是否生成了残骸（evt.kill Value2 = 1；击杀回传的 ent.wreck condition 按它判，不看残骸此刻是否已被同一事件里的回收修复拆走）
             if (EmgEntOn(ref d))
             {
                 EmgUnitState u = d.EmgUnit[t];
@@ -165,10 +166,10 @@ namespace BinGames.Sim.Combat
                 }
                 if ((flags & EmgConst.DeathNoWreck) == 0 && d.Kind[t] != (byte)CombatUnitKind.Structure)
                 {
-                    EmgSpawnWreck(ref d, t);
+                    wreck = EmgSpawnWreck(ref d, t);
                 }
             }
-            EmgOnKill(ref d, t, killerId);
+            EmgOnKill(ref d, t, killerId, wreck);
             EmgPartSalvage(ref d, t, killerId); // EMG2-RECL-01：拆解钳拆残骸（排在 evt.kill 之后：同装回收修复时只拆一次）
         }
 
@@ -238,12 +239,12 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 残骸 ───────────────────────────────
 
-        private static void EmgSpawnWreck(ref CombatData d, int t)
+        private static bool EmgSpawnWreck(ref CombatData d, int t)
         {
             float maxHp = d.MaxHp[t] * WreckHpRatioOf(ref d);
             if (!(maxHp > 0f) || !(d.Radius[t] > 0f))
             {
-                return;
+                return false;
             }
             EmgScalars es = d.EmgS[0];
             if (d.Wrecks.Length >= EmgConst.DefaultWreckCapacity)
@@ -278,6 +279,7 @@ namespace BinGames.Sim.Combat
             d.EmgS[0] = es;
             d.Wrecks.Add(w);
             EmgChainLog(ref d, EmgChainNode.Wreck, w.Chain, d.EmgCtx.Depth, w.Id, d.Id[t], w.Pos, killer, d.Kind[t]);
+            return true;
         }
 
         /// <summary>单位穿过残骸减速（FGR-EMG-113 作用 2）：单位中心在一块有耐久的残骸圆内时速度 × emg.wreck.slow；空中单位不受影响。不改寻路网格。</summary>

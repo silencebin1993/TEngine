@@ -156,7 +156,7 @@ namespace BinGames.Sim.Combat
             for (int h = 0; h < hosts.Length; h++)
             {
                 BeatHost b = hosts[h];
-                ulong exec = b.Reads & b.Beats & b.OnPhase;
+                ulong exec = EmgBeatExecNow(ref d, b, beat, b.Reads & b.Beats & b.OnPhase);
                 if (exec != 0UL)
                 {
                     machine[b.Owner] = (machine.TryGetValue(b.Owner, out ulong m) ? m : 0UL) | exec;
@@ -206,13 +206,61 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        /// <summary>
+        /// EMG3-FW-02（DEBT-EMG3TMP01-04，FGR-EMG-172“本拍执行”）：计入 tmp.sync 的节拍指令只算本拍真的执行的——去掉被元程序条件 / 随机关掉、被延后的（与出拍结算同一函数
+        /// <see cref="EmgMetaAllowNow"/>，同一组哈希键），以及读 chs.* condition、出手者此刻没有该底盘状态的。没有元程序、没有底盘条件时原样返回。O(节点指令数)，只在出拍时。
+        /// </summary>
+        private static ulong EmgBeatExecNow(ref CombatData d, in BeatHost b, long beat, ulong exec)
+        {
+            if (exec == 0UL || !EmgNodeSpan(ref d, b.Prog, b.Node, out int first, out int end))
+            {
+                return exec;
+            }
+            EmgCtx host = EmgBeatHostOf(ref d, b, out double2 pos, out _);
+            if (EmgHasMeta(ref d, b.Prog))
+            {
+                var e = new EmgEvent { Kind = EmgEventKind.Beat, EntKind = host.EntKind, Ent = host.Ent, Prog = b.Prog, Node = (byte)b.Node, Chain = host.Chain, Value = beat, Pos = pos };
+                int self = host.Owner >= 0 && host.Owner < d.Count ? host.Owner : -1;
+                int target = EmgMetaTarget(ref d, e, host);
+                uint zoneMat = host.EntKind == EmgEntKind.Zone ? EmgZoneSubj(ref d, host.Ent, ref target, out _) : EmgNotZone;
+                exec &= EmgMetaAllowNow(ref d, b.Prog, b.Node, EmgEventKind.Beat, self, target, host.Chain, host.Ent, zoneMat);
+            }
+            for (ulong m = exec; m != 0UL; m &= m - 1UL)
+            {
+                byte o = (byte)math.tzcnt(m);
+                if (EmgChsBlocked(ref d, host.Owner, first, end, o))
+                {
+                    exec &= ~EmgOrdBit(o);
+                }
+            }
+            return exec;
+        }
+
         /// <summary>对一台宿主发 evt.beat（Value = 拍序号，Code = 是否用掉了机器的 tmp.sync）：只放行本拍执行的序号位（根节点效果写端、子节点写端、触发放出的子载荷都按它）。
         /// 恒真事件不受“每宿主同一事件码 ≤ 3 次”限制（节拍本身按周期限频，FGR-EMG-065 管的是命中类事件的连发）。</summary>
         private static void EmgBeatEmit(ref CombatData d, in BeatHost b, long beat, ulong allow, bool sync)
         {
+            EmgCtx host = EmgBeatHostOf(ref d, b, out double2 pos, out float2 dir);
+            var e = new EmgEvent
+            {
+                Kind = EmgEventKind.Beat, Depth = host.Depth, EntKind = host.EntKind, Ent = host.Ent, Prog = b.Prog, Node = (byte)b.Node, Chain = host.Chain,
+                Code = sync ? EmgTempoConst.CodeSync : (ushort)0, Value = beat, Pos = pos,
+            };
+            EmgBusStats st = d.EmgStats[0];
+            st.BeatsEmitted++;
+            st.BeatSyncs += sync ? 1 : 0;
+            d.EmgStats[0] = st;
+            EmgCtx saved = d.EmgCtx;
+            d.EmgCtx = host;
+            EmgEmitHosted(ref d, e, host, dir, allow);
+            d.EmgCtx = saved;
+            EmgBeatKinetic(ref d, b, host, pos, allow, sync);
+        }
+
+        /// <summary>出拍宿主的上下文、位置与朝向（出拍结算与“本拍执行”计数共用）。</summary>
+        private static EmgCtx EmgBeatHostOf(ref CombatData d, in BeatHost b, out double2 pos, out float2 dir)
+        {
             EmgCtx host;
-            double2 pos;
-            float2 dir;
             switch (b.Kind)
             {
                 case BeatProj:
@@ -258,20 +306,7 @@ namespace BinGames.Sim.Combat
                     break;
                 }
             }
-            var e = new EmgEvent
-            {
-                Kind = EmgEventKind.Beat, Depth = host.Depth, EntKind = host.EntKind, Ent = host.Ent, Prog = b.Prog, Node = (byte)b.Node, Chain = host.Chain,
-                Code = sync ? EmgTempoConst.CodeSync : (ushort)0, Value = beat, Pos = pos,
-            };
-            EmgBusStats st = d.EmgStats[0];
-            st.BeatsEmitted++;
-            st.BeatSyncs += sync ? 1 : 0;
-            d.EmgStats[0] = st;
-            EmgCtx saved = d.EmgCtx;
-            d.EmgCtx = host;
-            EmgEmitHosted(ref d, e, host, dir, allow);
-            d.EmgCtx = saved;
-            EmgBeatKinetic(ref d, b, host, pos, allow, sync);
+            return host;
         }
 
         /// <summary>

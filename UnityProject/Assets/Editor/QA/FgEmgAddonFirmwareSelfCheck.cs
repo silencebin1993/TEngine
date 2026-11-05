@@ -108,8 +108,9 @@ namespace GameLogic.EditorTools
         {
             Line("  · A. 8 条追加在表尾、名表 44 条不动；stageGate / 端口 × 载体 / 准入 / 文本键 / 图标齐全");
             var rows = FirmwareKinds.Rows.Where(r => r != null && !FirmwareKinds.IsMixedRow(r)).Select(r => r.Id).ToList();
-            var addon = FirmwareKinds.AddonRows.Select(r => r.Id).ToList();
-            Expect(addon.SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(44).SequenceEqual(addon) && FirmwareKinds.BaseRows.Count == 44
+            // EMG3-FW-02 起表尾还有阶段 3 的 12 条（FgEmgStage3FirmwareSelfCheck 验），本段只验前 8 条（第 45～52 行）
+            var addon = FirmwareKinds.AddonRows.Select(r => r.Id).Take(Spec.Length).ToList();
+            Expect(addon.SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(44).Take(Spec.Length).SequenceEqual(addon) && FirmwareKinds.BaseRows.Count == 44
                    && FirmwareCatalog.BaseCount == FirmwareCatalog.ExpectedCount && addon.All(FirmwareCatalog.IsAddon) && addon.All(id => FirmwareCatalog.All.ContainsKey(id)),
                 $"新固件 {addon.Count} 条按 FG19A 顺序追加在正式固件表尾（第 45～52 行）：{string.Join("、", addon)}；名表 44 条 ID 与顺序不变；8 条都进固件目录（可装配 / 图鉴）");
             EmgSource src = EmgCatalog.FromTables();
@@ -369,7 +370,8 @@ namespace GameLogic.EditorTools
                     int fwWant = MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware && (e.Kind != MechanicCodexKind.Firmware || FirmwareKinds.IsObtainable(e.ContentId)));
                     string notOpen = GameText.Get("codex.firmware.not_open");
                     Expect(closed != null && scuttle != null && MechanicCodex.Hint(closed, s) == notOpen && (MechanicCodex.Hint(scuttle, s) == notOpen) == (stage < 1)
-                           && fwTotal == fwWant && fwTotal == MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware) - Spec.Count(x => x.Gate > stage),
+                           && fwTotal == fwWant && fwTotal == MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware) - Spec.Count(x => x.Gate > stage)
+                              - FirmwareKinds.AddonRows.Skip(Spec.Length).Count(r => !FirmwareKinds.IsObtainable(r.Id)), // EMG3-FW-02：阶段 3 的 12 条在阶段 0 / 1 同样不计
                         $"emg.stage = {stage}：图鉴里入场引信提示“{MechanicCodex.Hint(closed, s)}”、自毁装药提示“{MechanicCodex.Hint(scuttle, s)}”；固件页签总数 {fwTotal}（拿不到的 {Spec.Count(x => x.Gate > stage)} 条不计；"
                         + $"新固件计入 {string.Join("、", Spec.Where(x => MechanicCodex.Entries.Any(e => e.Kind == MechanicCodexKind.Firmware && e.ContentId == x.Id && MechanicCodex.IsUnlocked(e.Id))).Select(x => x.Id + "（已解锁）"))}）");
                 }

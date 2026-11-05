@@ -313,6 +313,25 @@ namespace GameLogic.EditorTools
             Expect(offset == 0 && pulsesOff == 0 && lossOff == 0f, $"两条错相位：对齐 {offset} 次、余振 {pulsesOff} 次（不读 tmp.sync 的节拍指令照放）");
             Expect(single == 0 && pulsesSingle == 0, $"只有一条节拍指令、3 发同时在飞：对齐 {single} 次（同一条指令按序号去重）");
             Expect(many == 4 && pulsesMany == 4, $"两条同相位、3 发同时在飞：对齐 {many} 次、余振 {pulsesMany} 次（每台机器每拍最多一次，不是 12 次）");
+            // EMG3-FW-02（DEBT-EMG3TMP01-04，FGR-EMG-172“本拍执行”）：被 chs.* 条件 / 元程序条件关掉的节拍指令不计入相位对齐
+            EmgInstr[] clock1Air = ClockI(1, 2, 0).Concat(new[] { Row(1, EmgConst.PortChsAirborne, Cond) }).ToArray(); // 第 2 条时钟要求离地，出手者着地
+            long chsGated = SyncRun(k => Prog(k, new[] { ClockI(0, 2, 0), clock1Air, ResI(2) }, 0, 1), 1, out long chsPulses, out _);
+            long chsHover = SyncRun(k => Prog(k, new[] { ClockI(0, 2, 0), clock1Air, ResI(2) }, 0, 1), 1, out long hoverPulses, out _, hover: true);
+            EmgInstr[] ifHot = { Row(1, (ushort)(EmgConst.PortMetaBase + EmgMetaConst.If), 6), Row(1, EmgConst.PortPropHeat, Cond, 0.5f) }; // [条件·过热] 关掉后面的时钟与谐振（冷武器）
+            long metaGated = SyncRun(k =>
+            {
+                var root = new[] { ClockI(0, 2, 0), ifHot, ClockI(2, 2, 0), ResI(3) };
+                var nodes = new List<EmgNode> { new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = (byte)root.Sum(x => x.Length) } };
+                foreach (int ord in new[] { 0, 2 })
+                {
+                    nodes.Add(new EmgNode { Parent = 0, Gen = 1, TrigEvent = EmgEventKind.Beat, TrigCount = 1, FirstInstr = nodes[0].InstrCount, InstrCount = 0, MetaMask = (byte)(ord + 1) });
+                }
+                return k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Beat) | (1u << (int)EmgEventKind.Fire), Flags = EmgProgramFlags.HasMeta }, nodes,
+                    root.SelectMany(x => x).ToList());
+            }, 1, out long metaPulses, out _);
+            Expect(chsGated == 0 && chsPulses == 0 && chsHover == 4 && hoverPulses == 4 && metaGated == 0 && metaPulses == 0,
+                $"被门控的节拍指令不计对齐（DEBT-EMG3TMP01-04）：第 2 条时钟读 chs.airborne、出手者着地 → 对齐 {chsGated} 次、余振 {chsPulses} 次；悬浮离地 → 对齐 {chsHover}、余振 {hoverPulses}；" +
+                $"[时钟, 条件·过热, 时钟, 谐振] 冷武器 → 对齐 {metaGated} 次、余振 {metaPulses} 次（修前各 4 次）");
             // 根容量 3（子节点 1）：[谐振, 时钟脉冲, 贯穿, 时钟脉冲] → 根里谐振 0、时钟 1 / 3（相位都是 1），贯穿进子弹药节点
             EmgProgramResult real = Pc(3, "fw_resonance", "fw_clock", "fw_pierce", "fw_clock");
             long realSync = SyncRun(k => CombatSite.RegisterProgram(k, real), 1, out long realPulses, out _);
@@ -349,11 +368,15 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>一台机器发 <paramref name="shots"/> 颗慢速弹（间隔 2 步），弹道旁 1 米外放一个敌人（余振半径 1.5 → 对齐 3 米够得着，平时够不着）。返回 tmp.sync 次数。</summary>
-        private static long SyncRun(Func<CombatKernel, int> build, int shots, out long pulses, out float hpLoss)
+        private static long SyncRun(Func<CombatKernel, int> build, int shots, out long pulses, out float hpLoss, bool hover = false)
         {
             using var k = new CombatKernel(Cfg(), 16);
             int prog = build(k);
             int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 0.2f, 10f)), 100f);
+            if (hover)
+            {
+                k.SetUnitTrait(me, EmgTraitConst.HoverFloat); // EMG3-FW-02：悬浮离地（chs.airborne）
+            }
             int foe = Unit(k, CombatFaction.Hostile, new double2(0, 25), -1, 5000f);
             int side = Unit(k, CombatFaction.Hostile, new double2(2.2, 0.5), -1, 5000f);
             for (int i = 0; i < shots; i++)

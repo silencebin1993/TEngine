@@ -213,6 +213,27 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            // EMG3-FW-02（FG19A N30 / N32）：同一条指令的 ent.wreck condition = 事件处留下了残骸（没留不广播、不计广播）；prop.heat sense = 脉冲点取被标记敌人里积热最高的一个
+            double2 at = e.Pos;
+            if (EmgNodeSpan(ref d, e.Prog, e.Node, out int first, out int end))
+            {
+                for (int j = first; j < end; j++)
+                {
+                    EmgInstr r = d.EmgInstrs[j];
+                    if (r.Ordinal != x.Ordinal)
+                    {
+                        continue;
+                    }
+                    if (r.Role == EmgConst.RoleCondition && r.Port == EmgConst.PortEntWreck && !EmgWreckAtEvent(ref d, e))
+                    {
+                        return;
+                    }
+                    if (r.Role == EmgConst.RoleSense && r.Port == EmgConst.PortPropHeat)
+                    {
+                        at = EmgHottestMarked(ref d, src, e.Kind == EmgEventKind.Marked && e.OtherKind == EmgEntKind.Unit ? d.SlotOf(e.Other) : -1, e.Pos);
+                    }
+                }
+            }
             int channel = EmgSquadConst.ChannelOf(x.Amount);
             EmgBusStats st = d.EmgStats[0];
             st.PingsSent++;
@@ -236,14 +257,55 @@ namespace BinGames.Sim.Combat
                 st = d.EmgStats[0];
                 st.PingsDelivered++;
                 d.EmgStats[0] = st;
-                EmgChainLog(ref d, EmgChainNode.Relay, e.Chain, e.Depth, (int)EmgEventKind.Ping, d.Id[src], e.Pos, d.Id[r], (byte)(EmgSquadConst.AuxPing + channel));
+                EmgChainLog(ref d, EmgChainNode.Relay, e.Chain, e.Depth, (int)EmgEventKind.Ping, d.Id[src], at, d.Id[r], (byte)(EmgSquadConst.AuxPing + channel));
                 EmgRelayFire(ref d, r, prog, gate, new EmgEvent
                 {
                     Kind = EmgEventKind.Ping, Depth = (byte)(e.Depth + 1), EntKind = EmgEntKind.Unit, Ent = d.Id[r], OtherKind = EmgEntKind.Unit, Other = d.Id[src],
-                    Prog = prog, Node = 0, Chain = e.Chain, Code = (ushort)channel, Value = channel, Pos = e.Pos,
+                    Prog = prog, Node = 0, Chain = e.Chain, Code = (ushort)channel, Value = channel, Pos = at,
                 });
             }
         }
+
+        /// <summary>
+        /// ent.wreck condition（FG19A N30“击杀并留下残骸”）：击杀事件 = 这次阵亡生成了残骸（evt.kill Value2 = 1，阵亡统一入口 EmgOnDeath 写入；
+        /// 同一事件里排在前面的回收修复已把它拆走也算留下过，结果与指令顺序无关）；其他事件 = 事件处 1 米内有残骸。O(残骸数)，只在脉冲发出时。
+        /// </summary>
+        private static bool EmgWreckAtEvent(ref CombatData d, in EmgEvent e)
+        {
+            if (e.Kind == EmgEventKind.Kill)
+            {
+                return e.Value2 > 0.5f;
+            }
+            for (int j = 0; j < d.Wrecks.Length; j++)
+            {
+                if (math.distancesq(d.Wrecks[j].Pos, e.Pos) <= 1.0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// prop.heat sense 作脉冲点（FG19A N32）：发出者的敌对单位（不含中立）里此刻被标记、积热最高的一个；同热时优先本次被标记的目标 <paramref name="target"/>，
+        /// 再取槽位小的；没有就用事件位置。O(单位数)，只在脉冲发出时。
+        /// </summary>
+        private static double2 EmgHottestMarked(ref CombatData d, int src, int target, double2 fallback)
+        {
+            double now = d.Scalars[0].Time;
+            int best = target >= 0 && target < d.Count && EmgMarkedFoe(ref d, src, target, now) ? target : -1;
+            for (int u = 0; u < d.Count; u++)
+            {
+                if (EmgMarkedFoe(ref d, src, u, now) && (best < 0 || d.Heat[u] > d.Heat[best]))
+                {
+                    best = u;
+                }
+            }
+            return best >= 0 ? d.Pos[best] : fallback;
+        }
+
+        private static bool EmgMarkedFoe(ref CombatData d, int src, int u, double now) =>
+            d.IsAlive(u) && d.Faction[u] != d.Faction[src] && d.Faction[u] != (byte)CombatFaction.Neutral && d.MarkedUntil[u] > now;
 
         /// <summary>
         /// FGR-EMG-172 中继组部分（DEBT-EMG3TMP01-02）：本拍各机器执行的节拍指令（<paramref name="machine"/>：单位 ID → 序号位）里，和别的机器同在一个中继组的，

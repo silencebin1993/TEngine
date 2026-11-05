@@ -61,6 +61,11 @@ namespace GameLogic.EditorTools
 
         /// <summary>FG19A N09～N16 中阶段 1 生效的 6 条（EMG1-FW-02 转来，DEBT-EMG1FW02-01）与 N14 / N15（阶段 2，报缺口）。</summary>
         private static readonly string[] AddonStage1 = { "fw_scuttle", "fw_bouncefuse", "fw_piercefuse", "fw_ventarc", "fw_coolback", "fw_water" };
+        /// <summary>EMG3-FW-02：FG19A 第 6 节阶段 3 落表的 12 条（N01～N08、N30～N32、N42）。</summary>
+        internal static readonly string[] Stage3Firmware =
+        {
+            "fw_ifmark", "fw_ifhot", "fw_ifair", "fw_repeat", "fw_loop", "fw_random", "fw_reverse", "fw_defer", "fw_killping", "fw_pingfire", "fw_markcast", "fw_volley",
+        };
         private static readonly string[] AddonStage2 = { "fw_enterfuse", "fw_uplinkpulse" };
 
         // ═════════════════════════════════ 入口 ═════════════════════════════════
@@ -778,6 +783,8 @@ namespace GameLogic.EditorTools
             public readonly List<string> Dead = new List<string>();
             /// <summary>条件型零反应（FG-GAP-179 口径）：定时在本载体射程内必先命中、读法写明条件的节点及其子节点，单列、不算死指令。</summary>
             public readonly List<string> CondZero = new List<string>();
+            /// <summary>出现过、但记为条件型零反应的固件（新颖度报告的“出现例数”照样计入）。</summary>
+            public readonly HashSet<string> CondFw = new HashSet<string>();
             public readonly List<string> Overflow = new List<string>();
             public readonly List<string> Capacity = new List<string>();
             public readonly HashSet<string> Keys = new HashSet<string>(StringComparer.Ordinal);
@@ -1072,7 +1079,8 @@ namespace GameLogic.EditorTools
                     act[x.Ordinal] = act.TryGetValue(x.Ordinal, out long v) ? v + n : n;
                 }
             }
-            HashSet<int> condNodes = TimerCondNodes(a, r.Case);
+            var squadOrds = new HashSet<int>();
+            HashSet<int> condNodes = TimerCondNodes(a, r.Case, squadOrds);
             foreach (EmgProgramStep s in prog.Steps)
             {
                 r.Instructions++;
@@ -1091,8 +1099,9 @@ namespace GameLogic.EditorTools
                     continue;
                 }
                 bool on = act.TryGetValue(s.Ordinal, out long c) && c > 0;
-                if (!on && OnlyOnNodes(prog, s.Ordinal, condNodes))
+                if (!on && (squadOrds.Contains(s.Ordinal) || OnlyOnNodes(prog, s.Ordinal, condNodes)))
                 {
+                    r.CondFw.Add(s.FirmwareId);
                     r.CondZero.Add($"{s.FirmwareId}（第 {s.Ordinal + 1} 位，{r.Case.Carrier}；{RowsOf(prog, s.Ordinal)}）");
                     continue;
                 }
@@ -1106,18 +1115,69 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>
+        /// EMG3-FW-02（同 FG-GAP-179 口径）：收听 / 广播 evt.ping 的指令（要有同一中继组里的另一台机器，固定集一例只有一台机器、没有中继）与读 tmp.sync 的指令
+        /// （要本机同一拍有 2 条以上节拍指令）在单机用例里本来就成立不了；该固件本载体读法写明“中继组” / “对齐”时，只豁免这条指令自身（<paramref name="ords"/>）
+        /// 与它的触发器放出的子节点（及其子孙，<paramref name="set"/>）——不豁免同节点里的其他指令（修复轮：原来整节点豁免，放在根节点时整个程序的死指令都被盖住）。按端口判，不按内容 ID。
+        /// </summary>
+        private static void SquadCondNodes(Arena a, FuzzCase c, HashSet<int> set, HashSet<int> ords)
+        {
+            ushort ping = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Ping);
+            string carrier = c.Carrier.ToString().ToLowerInvariant();
+            List<EmgNode> nodes = a.Program.KernelNodes;
+            for (int n = 0; n < nodes.Count; n++)
+            {
+                for (int j = nodes[n].FirstInstr; j < nodes[n].FirstInstr + nodes[n].InstrCount && j < a.Program.KernelInstrs.Count; j++)
+                {
+                    EmgInstr x = a.Program.KernelInstrs[j];
+                    bool listen = x.Port == ping && (x.Role == EmgConst.RoleTrigger || x.Role > EmgConst.RoleLastRead); // 收听或广播：单机、没有中继的用例里送达不了
+                    bool sync = x.Port == EmgTempoConst.PortSync && x.Role == EmgConst.RoleCondition;
+                    string fw = listen || sync ? a.Program.Steps.FirstOrDefault(st => st.Ordinal == x.Ordinal)?.FirmwareId : null;
+                    string reading = fw != null ? GameText.Get($"firmware.{fw}.read.{carrier}") + GameText.Get($"firmware.{fw}.desc") : string.Empty;
+                    if ((listen && reading.Contains("中继组")) || (sync && reading.Contains("对齐")))
+                    {
+                        ords.Add(x.Ordinal);
+                        for (int ch = 0; ch < a.Program.Nodes.Count && ch < nodes.Count; ch++)
+                        {
+                            if (a.Program.Nodes[ch].TriggerOrdinal == x.Ordinal)
+                            {
+                                set.Add(ch); // 这条触发器放出的子节点：脉冲 / 对齐拍不来就不放，其上指令同样成立不了
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private static HashSet<int> Grow(List<EmgNode> nodes, HashSet<int> set)
+        {
+            for (bool grew = set.Count > 0; grew;)
+            {
+                grew = false;
+                for (int n = 0; n < nodes.Count; n++)
+                {
+                    if (!set.Contains(n) && nodes[n].Parent >= 0 && set.Contains(nodes[n].Parent))
+                    {
+                        grew |= set.Add(n);
+                    }
+                }
+            }
+            return set;
+        }
+
+        /// <summary>
         /// FG-GAP-179 口径（EMG1-E2E-01 定，待用户复核）在固定集上的判定：读“定时”的节点，若载体最远打击距离 ÷ 实体化弹速 &lt; 定时秒数（哨戒桩 / 无人机按牵引绳，维修束按射程），
         /// 子弹在射程内必先命中、定时只在打空时才到点；该固件本载体读法写明“先命中则不空爆”时，这个节点及其子节点返回，其上全程不激活的指令记条件型零反应。
         /// 射程够的远射载体不走这里（<see cref="Build"/> 把目标放远造条件）；读法没写明条件的照旧算死指令。按端口 + 载体参数判，不按内容 ID。
         /// </summary>
-        private static HashSet<int> TimerCondNodes(Arena a, FuzzCase c)
+        private static HashSet<int> TimerCondNodes(Arena a, FuzzCase c, HashSet<int> squadOrds)
         {
             var set = new HashSet<int>();
             CombatWeapon w = a.W;
             bool summon = c.Carrier == FirmwareCarrier.Summon;
+            SquadCondNodes(a, c, set, squadOrds);
             if ((!summon && w.HasOutput != CombatConst.OutputRepair) || !(w.ProjectileSpeed > 0f) || a.Program.KernelNodes.Count == 0)
             {
-                return set;
+                return Grow(a.Program.KernelNodes, set);
             }
             float reach = summon ? (w.Reading.DroneLeash > 0f ? w.Reading.DroneLeash : 10f) + 1f : w.Range + 1.2f;
             float flight = reach / w.ProjectileSpeed;
@@ -1288,6 +1348,9 @@ namespace GameLogic.EditorTools
         {
             Line("  · A. 用例生成：可获得固件池、13 个主作战组件、4 种底盘、地点模板、阵营；N09～N16 的状态");
             int addonInPool = AddonStage1.Count(pools.Firmware.Contains);
+            // EMG3-FW-02：阶段 3 生效后 12 条新固件都在抽取池里（可获得且有机器实现），随机例会抽到它们（新颖度见报告“阶段 3 新固件”节）
+            var s3Missing = EmgCatalog.EffectiveStage >= 3 ? Stage3Firmware.Where(f => !pools.Firmware.Contains(f)).ToList() : new List<string>();
+            Expect(s3Missing.Count == 0, $"阶段 3 新固件 {Stage3Firmware.Length - s3Missing.Count} / {Stage3Firmware.Length} 条在抽取池里（emg.stage = {EmgCatalog.EffectiveStage}）{Detail(s3Missing)}");
             Expect(pools.Comps.Count == 13 && pools.Factions.Count >= 2 && addonInPool == AddonStage1.Length && pools.Firmware.Contains("fw_enterfuse") && pools.Firmware.Contains("fw_uplinkpulse")
                    && pools.Firmware.Count >= 44 && pools.PierceProvider != null,
                 $"抽取池：固件 {pools.Firmware.Count} 条（可获得且有机器实现，含混合固件 {pools.Firmware.Count(FirmwareKinds.IsMixed)} 条；阶段 1 生效的 N09～N13、N16 共 {addonInPool} 条在池里；阶段 2 端口已接通的 N14 在、fld.push 随 EMG2-FLD-01 接通后 N15 也在），" +
@@ -1698,9 +1761,14 @@ namespace GameLogic.EditorTools
             }
             // EMG2-MAT-01：N14 入场引信端口全部接通 → evt.enter 生效（不是缺口）；N15 接入冲击用到 fld.push（未接通）→ evt.uplink 记缺口、承接 EMG2-FLD-01
             var uplink = a.Gaps.Where(x => x.Port == "evt.uplink").ToList();
-            Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && a.Gaps.Any(x => x.Port == "evt.ping") && a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal))
-                   && a.Gaps.Any(x => x.Port.StartsWith("meta.", StringComparison.Ordinal)) && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 0,
-                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 meta.*、evt.ping、hij.*；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 随 fld.push 接通（EMG2-FLD-01）也已生效，不再是缺口（{uplink.Count}）");
+            // EMG3-FW-02（卡片“模糊测试器缺口清单里阶段 3 端口为空”）：N01～N08、N30～N32、N42 落表后 meta.*、evt.ping、tmp.sync 都有正常游戏可获得的写者 / 读者；
+            // 阶段 3 端口只剩 grm.anchor（N43 接线随 EMG3-FUSE-01 落表，看板在本卡之后）；阶段 4 的 hij.* 照旧报缺口
+            var stage3Gaps = a.Gaps.Where(x => EmgCatalog.FromTables().Ports.Any(p => p != null && p.Id == x.Port && p.Stage == 3)).ToList();
+            Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal))
+                   && !a.Gaps.Any(x => x.Port == "evt.ping" || x.Port == "tmp.sync" || x.Port.StartsWith("meta.", StringComparison.Ordinal))
+                   && stage3Gaps.All(x => x.Port == "grm.anchor" && x.Card == "EMG3-FUSE-01") && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 0,
+                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 hij.*；meta.* / evt.ping / tmp.sync 已由 EMG3-FW-02 落表清零；" +
+                $"阶段 3 端口的缺口 {stage3Gaps.Count} 个（{string.Join("、", stage3Gaps.Select(x => x.Port + "→" + x.Card))}，只允许 grm.anchor 承接 EMG3-FUSE-01）；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 随 fld.push 接通（EMG2-FLD-01）也已生效，不再是缺口（{uplink.Count}）");
         }
 
         // ═════════════════════════════════ D 负向 ═════════════════════════════════
@@ -2277,6 +2345,14 @@ namespace GameLogic.EditorTools
             foreach (var g in results.SelectMany(r => r.Ordinals).GroupBy(o => (o.Fw, o.Carrier)).Where(g => g.Any(o => !o.Active)).OrderByDescending(g => g.Count(o => !o.Active)))
             {
                 sb.AppendLine($"- {g.Key.Fw} × {g.Key.Carrier}：{g.Count(o => !o.Active)} / {g.Count()}");
+            }
+            sb.AppendLine();
+            // EMG3-FW-02（卡片“新固件新颖度进 FGT-EMG-070 报告”）：阶段 3 落表的 12 条各出现在几例、所在例的最高新颖度
+            sb.AppendLine("## 阶段 3 新固件（EMG3-FW-02，N01～N08、N30～N32、N42）");
+            foreach (string fw in Stage3Firmware)
+            {
+                var hit = results.Where(r => r.Ordinals.Any(o => o.Fw == fw) || r.CondFw.Contains(fw)).ToList();
+                sb.AppendLine($"- {fw}：出现 {hit.Count} 例（其中条件型零反应 {results.Count(r => r.CondFw.Contains(fw))} 例）、死指令 {results.SelectMany(r => r.Ordinals).Count(o => o.Fw == fw && !o.Active)} 次、所在例新颖度最高 {(hit.Count > 0 ? hit.Max(r => r.Novelty) : 0)}");
             }
             sb.AppendLine();
             sb.AppendLine("## 新颖度前 20");

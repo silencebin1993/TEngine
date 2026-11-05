@@ -284,8 +284,10 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>EMG1-FW-02：新固件的触发事件在 C2 的常规场景里不会自然发生（阵亡 / 反弹 / 穿透 / 过热 / 冷却完成……），要在条件场景里比。</summary>
+        // EMG3-FW-02：元程序固件（写 meta.*）也算条件型——要有下游段（末位 / 单独一条按 FGR-EMG-040 本来就没有作用）且多半要先造条件，零死对由 FgEmgStage3FirmwareSelfCheck B 段按条件场景逐载体比
         internal static bool IsConditionalAddon(EmgSource src, string fw) =>
-            src.Decls.Any(d => d.Owner == fw && d.Dir == "read" && d.Role == "trigger" && d.Port != "evt.hit" && d.Port != "evt.fire" && d.Port != "evt.expire");
+            src.Decls.Any(d => d.Owner == fw && ((d.Dir == "read" && d.Role == "trigger" && d.Port != "evt.hit" && d.Port != "evt.fire" && d.Port != "evt.expire")
+                                                 || (d.Dir == "write" && d.Port.StartsWith("meta.", StringComparison.Ordinal))));
 
         private static bool HasModWrite(string fw, FirmwareCarrier carrier)
         {
@@ -359,7 +361,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>按正式路径编出武器（接入口装 <paramref name="fws"/>）→ 程序 → 程序轨读法 → 内核编队攻击 4 游戏秒的行为指纹。</summary>
-        private static string DeclDigest(string comp, string[] fws, out EmgProgramResult program, out CombatReading reading)
+        internal static string DeclDigest(string comp, string[] fws, out EmgProgramResult program, out CombatReading reading)
         {
             BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, comp, null, null, Array.Empty<string>());
             board.TrySetUplink(UplinkSlot);

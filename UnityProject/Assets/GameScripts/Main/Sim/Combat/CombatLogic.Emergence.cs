@@ -662,8 +662,8 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>Kill 里：阵亡者自己的 evt.death（Value = 阵亡时积热）；击杀者的 evt.kill（Value = 溢出伤害；宿主 = 造成这次致死伤害的载荷，不在载荷结算里时 = 击杀者武器程序的根节点）。
-        /// Code = 阵亡者材质（实体档案材质随 EMG1-ENT-01 接上，现为 0）。</summary>
-        internal static void EmgOnKill(ref CombatData d, int t, int killerId)
+        /// Code = 阵亡者材质（实体档案材质随 EMG1-ENT-01 接上，现为 0）；Value2 = 1 表示这次阵亡生成了残骸（EMG3-FW-02 修复轮，击杀回传的 ent.wreck condition 读它）。</summary>
+        internal static void EmgOnKill(ref CombatData d, int t, int killerId, bool wreck = false)
         {
             if (d.EmgListen == 0u)
             {
@@ -680,11 +680,11 @@ namespace BinGames.Sim.Combat
             ushort mat = EmgUnitMaterial(ref d, t); // EMG1-ENT-01：evt.kill Code = 阵亡者材质（实体档案）
             if (d.EmgCtx.Prog >= 0 && ks >= 0 && ks == d.EmgCtx.Owner)
             {
-                EmgShotEvent(ref d, EmgEventKind.Kill, d.Id[t], overflow, 0f, mat, d.Pos[t]);
+                EmgShotEvent(ref d, EmgEventKind.Kill, d.Id[t], overflow, wreck ? 1f : 0f, mat, d.Pos[t]);
             }
             else if (ks >= 0 && ks != t)
             {
-                EmgUnitEvent(ref d, EmgEventKind.Kill, ks, d.Id[t], overflow, 0f, mat, d.Pos[t]);
+                EmgUnitEvent(ref d, EmgEventKind.Kill, ks, d.Id[t], overflow, wreck ? 1f : 0f, mat, d.Pos[t]);
             }
         }
 

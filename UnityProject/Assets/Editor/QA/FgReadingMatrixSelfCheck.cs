@@ -54,7 +54,7 @@ namespace GameLogic.EditorTools
         private const int UplinkSlot = 2;
 
         /// <summary>每种载体用来跑矩阵的作战组件（设计案 5.6）。</summary>
-        private static readonly (FirmwareCarrier Carrier, string Component)[] CarrierComponents =
+        internal static readonly (FirmwareCarrier Carrier, string Component)[] CarrierComponents =
         {
             (FirmwareCarrier.Projectile, ComponentCatalog.CompGunId),
             (FirmwareCarrier.Melee, ComponentCatalog.CompRamId),

@@ -96,6 +96,10 @@ namespace GameLogic.Campaign.Emergence
         public static string EventName(EmgEventKind e) =>
             EmgCatalog.Current.PortIdByCode.TryGetValue((ushort)(EmgConst.EventPortBase + (int)e), out string id) ? GameText.Get("emg.port." + id + ".name") : GameText.Get(UnknownKey);
 
+        /// <summary>“本机没装中继”原因（范围取调参 emg.relay.range，与内核同一口径）。</summary>
+        public static string PingNoRelayText() =>
+            GameText.Format("emg.tree.tag.ping_no_relay", Combat.CombatSite.Tuning("emg.relay.range", EmgSquadConst.DefaultRange).ToString("0.#", CultureInfo.InvariantCulture));
+
         /// <summary>
         /// 排出一个程序的预览行。<paramref name="offPathFirmware"/> 非空 = 接入口不在任何路径上、这些接入固件没进程序；
         /// <paramref name="tableFull"/> = 本程序登记进地点程序表时被拒（<see cref="EmgProgramCompiler.NoteTableFull"/>，由战斗地点给出）。
@@ -262,6 +266,19 @@ namespace GameLogic.Campaign.Emergence
                 if (EmgProgramCompiler.RelayedOf(r, n.Index, e.Ordinal))
                 {
                     sb.Append(" · ").Append(GameText.Get("emg.tree.tag.relay")); // EMG3-SQD-01（FGR-EMG-132）：可被中继转发
+                }
+                // EMG3-FW-02（FGR-EMG-133）：信号脉冲的频道与送达条件；本机没装中继时写明“只在友机中继范围内才有接收者”（不报错）；子节点里的收听不会被触发
+                if (EmgProgramCompiler.PingOf(r, n.Index, e.Ordinal, out bool send, out int channel, out bool rootOnly))
+                {
+                    sb.Append(" · ").Append(GameText.Format(send ? "emg.tree.tag.ping_send" : "emg.tree.tag.ping_listen", channel));
+                    if (rootOnly)
+                    {
+                        sb.Append(" · ").Append(GameText.Get("emg.tree.tag.ping_root_only"));
+                    }
+                    else if (!r.Relay)
+                    {
+                        sb.Append(" · ").Append(PingNoRelayText());
+                    }
                 }
                 into.Add(new EmgTreeRow
                 {
