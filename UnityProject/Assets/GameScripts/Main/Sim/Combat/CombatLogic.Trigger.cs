@@ -359,7 +359,7 @@ namespace BinGames.Sim.Combat
                     EmgInstr r = d.EmgInstrs[j];
                     gated = r.Ordinal == x.Ordinal && r.Role == EmgConst.RoleTrigger && r.Port == evPort;
                 }
-                if (!gated)
+                if (!gated || EmgChsBlocked(ref d, host.Owner, n.FirstInstr, end, x.Ordinal)) // EMG3-CHS-01：固件读 chs.* condition（FGR-EMG-141）
                 {
                     continue;
                 }

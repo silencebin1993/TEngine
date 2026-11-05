@@ -278,6 +278,26 @@ namespace GameLogic.Campaign.Combat
         private static string Three(string what, string who, string next) =>
             GameText.Format("emg.hover.label.what", what) + "\n" + GameText.Format("emg.hover.label.who", who) + "\n" + GameText.Format("emg.hover.label.next", next);
 
+        /// <summary>EMG3-CHS-01（卡片“底盘悬停显示特性名称与说明”）：机器悬停里的特性行；拖挂车上带着一块时写“车上带着一块油（N 秒后落下）”。没有特性返回 null。O(特性表行数)。</summary>
+        public static string TraitHoverLine(CombatSite site, int unitId)
+        {
+            if (site == null || site.IsDisposed)
+            {
+                return null;
+            }
+            byte kind = site.Kernel.TraitOf(unitId);
+            if (kind == EmgTraitConst.None || !EmgCatalog.TryGetTraitOfKind(kind, out EmgTraitRow row))
+            {
+                return null;
+            }
+            string line = EmgCatalog.TraitTip(row);
+            if (line != null && site.Kernel.TryGetTraitRun(unitId, out EmgTraitRun run) && run.TowMatter != 0 && run.TowT > 0f)
+            {
+                line += "\n" + GameText.Format("emg.trait.tow", EmgMatterCatalog.NameOf(run.TowMatter), F0(run.TowT));
+            }
+            return line;
+        }
+
         private static string F0(float v) => v.ToString("0.#", CultureInfo.InvariantCulture);
 
         /// <summary>残骸悬停（第 <paramref name="index"/> 块）：是什么（来源种类、耐久、质量）、谁造成的（击毁者 + 打碎过它的单位，最多 4 个）、接下来（挡弹 / 减速 / 崩破片门槛 / 剩余秒数）。</summary>

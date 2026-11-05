@@ -191,7 +191,8 @@ namespace GameLogic.EditorTools
             EmgCompiled c = EmgCatalog.Current;
             int onDecl = c.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
             EmgCatalog.ResetForTests();
-            Expect(real.RawStage == 2f && real.EffectiveStage == 2 && realOnDecl > 0 && c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
+            Expect(real.RawStage == 3f && real.EffectiveStage == 3 && // EMG3-CHS-01：正式表缺省 3
+                    realOnDecl > 0 && c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
                 $"正式表 fg.TbHomeTuning emg.stage = {real.RawStage:0}（生效 {real.EffectiveStage}，走声明轨 {realOnDecl} 个 owner）；对照 emg.stage = 0：生效阶段 {c.EffectiveStage}，{c.OwnerIds.Length} 个已声明 owner 里走声明轨的 {onDecl} 个（新路径全部关闭）");
             EmgSource src = EmgCatalog.FromTables();
             Func<string, (bool ok, float value)> tuning = src.Tuning;

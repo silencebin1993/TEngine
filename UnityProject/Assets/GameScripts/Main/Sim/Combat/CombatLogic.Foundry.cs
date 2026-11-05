@@ -673,7 +673,9 @@ namespace BinGames.Sim.Combat
                 if (p.ChargeKnock > 0f && CanDisplace(ref d, k))
                 {
                     double2 from = d.Pos[k];
-                    d.Pos[k] = MoveCollide(ref d, k, from, from + (double2)(f.ChargeDir * p.ChargeKnock));
+                    double2 want = from + (double2)(f.ChargeDir * p.ChargeKnock);
+                    // EMG3-CHS-01（DEBT-EMG1ENT01-06）：实体层开着时冲撞击退走统一位移入口（发 evt.push、撞墙 / 撞单位发 evt.impact）；emg.stage = 0 逐字同旧
+                    d.Pos[k] = EmgEntOn(ref d) ? EmgDisplaceUnit(ref d, k, from, want, i, EmgConst.PushCauseKnock) : MoveCollide(ref d, k, from, want);
                 }
                 Cue2(ref d, i, d.Id[k], dmg, d.Pos[k], 9, 0);
             }

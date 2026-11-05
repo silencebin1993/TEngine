@@ -793,6 +793,78 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        // ─────────────────────────────── EMG3-CHS-01：底盘特性与 chs.* 状态端口 ───────────────────────────────
+
+        /// <summary>写单位的底盘特性机制（热更层按 fg.TbChassisTrait 在生成 / 装配变化时写，与 SetUnitWeapon 同时机；O(带特性单位)）。不存在的单位、越界机制拒绝。</summary>
+        public bool SetUnitTrait(int unitId, byte kind)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0 || kind >= EmgTraitConst.Count)
+            {
+                return false;
+            }
+            if (_d.EmgUnit[i].Trait == kind)
+            {
+                return true;
+            }
+            CombatLogic.EmgSetTrait(ref _d, i, kind);
+            Touch();
+            return true;
+        }
+
+        /// <summary>FG-GAP-176：装 / 卸冲刺器（热更层按装配写）。不存在的单位拒绝。</summary>
+        public bool SetUnitDash(int unitId, bool on)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0)
+            {
+                return false;
+            }
+            CombatLogic.EmgSetDash(ref _d, i, on);
+            Touch();
+            return true;
+        }
+
+        /// <summary>写一种机制的 4 个参数（fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，不进快照）。</summary>
+        public void SetTraitParams(byte kind, Unity.Mathematics.float4 p)
+        {
+            if (kind < EmgTraitConst.Count && Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(p)))
+            {
+                _d.EmgTraitParams[kind] = p;
+            }
+        }
+
+        /// <summary>单位此刻的 chs.* 状态位（<see cref="EmgTraitConst"/>.Chs*；内核派生，热更层悬停 / 自检读）。不存在的单位 = 0。</summary>
+        public byte ChsOf(int unitId) => CombatLogic.ChsMask(ref _d, _d.SlotOf(unitId));
+
+        public byte TraitOf(int unitId)
+        {
+            int i = _d.SlotOf(unitId);
+            return i >= 0 ? _d.EmgUnit[i].Trait : EmgTraitConst.None;
+        }
+
+        /// <summary>拖带 / 拖挂运行态（悬停“车上带着一块油”、自检用）。</summary>
+        public bool TryGetTraitRun(int unitId, out EmgTraitRun run)
+        {
+            for (int r = 0; r < _d.TraitRun.Length; r++)
+            {
+                if (_d.TraitRun[r].Unit == unitId)
+                {
+                    run = _d.TraitRun[r];
+                    return true;
+                }
+            }
+            run = default;
+            return false;
+        }
+
+        public int TraitRunCount => _d.TraitRun.Length;
+        public int MetaRunCount => _d.MetaRun.Length;
+        public long BeatCount => _d.EmgS[0].BeatCount;
+
+        /// <summary>第 <paramref name="index"/> 架无人机的电荷（DEBT-EMG2REACT02-04）。越界 = 0。</summary>
+        public float DroneCharge(int index) => index >= 0 && index < _d.Drones.Length ? _d.Drones[index].Charge : 0f;
+
         public bool TryGetUnitEmg(int unitId, out short profile, out EmgUnitState state)
         {
             int i = _d.SlotOf(unitId);
@@ -834,7 +906,8 @@ namespace BinGames.Sim.Combat
         {
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
-                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -842,7 +915,7 @@ namespace BinGames.Sim.Combat
             {
                 EmgUnitState u = _d.EmgUnit[i];
                 if (_d.EProfile[i] != -1 || u.PrevMatterMask != 0u || u.LastHitBy != 0 || u.LastHitChain != 0 || u.HeatLatch != 0 || u.Mass != 0f || u.DeathFlags != 0 || u.EraMiss != 0 || u.EraRefillT != 0f
-                    || !u.Stage2Default)
+                    || !u.Stage2Default || u.Trait != 0)
                 {
                     return true;
                 }
@@ -863,8 +936,9 @@ namespace BinGames.Sim.Combat
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
             bool v17 = format >= 17;
+            bool v18 = format >= 18; // EMG3-CHS-01：段 22～24、单位段 + 特性、无人机段 + 电荷
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 5 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 3 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -942,7 +1016,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, v17 ? 9 + UnitStage2Fields : 9, _d.Count);
+            sw.Begin(EmgConst.SegUnits, (v17 ? 9 + UnitStage2Fields : 9) + (v18 ? 1 : 0), _d.Count);
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
@@ -958,6 +1032,10 @@ namespace BinGames.Sim.Combat
                 if (v17)
                 {
                     WriteUnitStage2(w, u, sw); // EMG2-MAT-01：尾部追加 22 个（温度、7 个累积量、相态位、7 个计时、6 个抗性覆盖）
+                }
+                if (v18)
+                {
+                    if (sw.F()) w.Write(u.Trait); // EMG3-CHS-01：格式 18 尾部追加（短段 / ≤ 17 版取 0）
                 }
                 sw.EndRecord();
             }
@@ -999,7 +1077,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegDrones, 4, _d.Drones.Length);
+            sw.Begin(EmgConst.SegDrones, v18 ? 5 : 4, _d.Drones.Length);
             for (int i = 0; i < _d.Drones.Length; i++)
             {
                 CombatDrone dr = _d.Drones[i];
@@ -1007,6 +1085,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(dr.Active); // EMG1-FLASH-01：尾部追加 3 个（短段读到 Active = 255 按全长、Strip / Pause = 0）
                 if (sw.F()) w.Write(dr.Strip);
                 if (sw.F()) w.Write(dr.Pause);
+                if (v18)
+                {
+                    if (sw.F()) w.Write(dr.Charge); // EMG3-CHS-01（DEBT-EMG2REACT02-04）：尾部追加，短段读到取 0
+                }
                 sw.EndRecord();
             }
             sw.End();
@@ -1085,6 +1167,10 @@ namespace BinGames.Sim.Combat
             if (v17)
             {
                 WriteMatterSegments(w, sw);
+            }
+            if (v18)
+            {
+                WriteStage3Segments(w, sw);
             }
 
             if (extraBytes > 0)
@@ -1228,6 +1314,8 @@ namespace BinGames.Sim.Combat
             public int[] DroneIds;
             /// <summary>EMG1-FLASH-01：无人机刷写字段（Active / Strip / Pause）、武器表头、变体表。</summary>
             public byte[] DroneFlash;
+            /// <summary>EMG3-CHS-01：无人机电荷（格式 18 段 8 尾部）。</summary>
+            public float[] DroneCharge;
             public Unity.Mathematics.int4[] FlashHead;
             public int[] FlashMap;
             /// <summary>EMG1-TRIG-01：区域 / 回波的宿主字段（读法表在 Emg 段之后读，FinishEmgLoad 再落）。</summary>
@@ -1431,6 +1519,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.EraMiss = r.ReadUInt16();
                         if (sr.F()) u.EraRefillT = r.ReadSingle();
                         ReadUnitStage2(r, sr, ref u); // EMG2-MAT-01：格式 17 单位段尾部（短段 / 格式 16 取 0）
+                        if (sr.F()) u.Trait = r.ReadByte(); // EMG3-CHS-01：格式 18 尾部（短段 / ≤ 17 版取 0）
                         if (!sr.RecordOk || !UnitEmgValid(prof, u))
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1487,6 +1576,7 @@ namespace BinGames.Sim.Combat
                     }
                     buf.DroneIds = new int[n];
                     buf.DroneFlash = new byte[n * 3];
+                    buf.DroneCharge = new float[n];
                     for (int i = 0; i < n; i++)
                     {
                         sr.Record(i);
@@ -1494,7 +1584,8 @@ namespace BinGames.Sim.Combat
                         buf.DroneFlash[i * 3] = sr.F() ? r.ReadByte() : (byte)255;
                         if (sr.F()) buf.DroneFlash[i * 3 + 1] = r.ReadByte();
                         if (sr.F()) buf.DroneFlash[i * 3 + 2] = r.ReadByte();
-                        if (!sr.RecordOk)
+                        if (sr.F()) buf.DroneCharge[i] = r.ReadSingle(); // EMG3-CHS-01：格式 18 尾部（短段取 0）
+                        if (!sr.RecordOk || !(buf.DroneCharge[i] >= 0f) || float.IsInfinity(buf.DroneCharge[i]))
                         {
                             return CombatLoadResult.InvalidValue;
                         }
@@ -1652,6 +1743,10 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegWires:
                 case EmgConst.SegCoatFx:
                     return ParseMatterSegment(r, sr, ref staging);
+                case EmgConst.SegTraits:
+                case EmgConst.SegMeta:
+                case EmgConst.SegTempo:
+                    return ParseStage3Segment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过
             }
@@ -1782,6 +1877,7 @@ namespace BinGames.Sim.Combat
                 dr.Active = buf?.DroneFlash != null ? buf.DroneFlash[i * 3] : (byte)255;
                 dr.Strip = buf?.DroneFlash != null ? buf.DroneFlash[i * 3 + 1] : (byte)0;
                 dr.Pause = buf?.DroneFlash != null ? buf.DroneFlash[i * 3 + 2] : (byte)0;
+                dr.Charge = buf?.DroneCharge != null ? buf.DroneCharge[i] : 0f;
                 if (dr.Id < 0 || (dr.Id > 0 && !ids.Add(dr.Id)) || dr.Strip > 1)
                 {
                     return CombatLoadResult.InvalidValue;
@@ -1933,7 +2029,7 @@ namespace BinGames.Sim.Combat
 
         private static bool UnitEmgValid(short profile, in EmgUnitState u) => profile >= -1 && u.LastHitBy >= 0 && u.LastHitChain >= 0 && u.HeatLatch <= 1
             && Finite(u.Mass) && u.Mass >= 0f && u.DeathFlags <= EmgConst.DeathNoWreck
-            && Finite(u.EraRefillT) && u.EraRefillT >= 0f;
+            && Finite(u.EraRefillT) && u.EraRefillT >= 0f && u.Trait < EmgTraitConst.Count;
 
         private static bool WreckValid(in EmgWreck k) =>
             k.Id > 0 && IsFinite(k.Pos) && !double.IsNaN(k.Born) && !double.IsNaN(k.Until) && !double.IsNaN(k.DwellSince)

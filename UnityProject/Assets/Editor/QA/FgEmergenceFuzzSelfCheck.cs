@@ -1541,6 +1541,23 @@ namespace GameLogic.EditorTools
             {
                 return "EMG2-RECL-01";
             }
+            // EMG3-CHS-01：阶段 3 开后仍未接通的端口
+            if (port == "evt.beat" || port.StartsWith("tmp.", StringComparison.Ordinal))
+            {
+                return "EMG3-TMP-01";
+            }
+            if (port == "evt.ping" || port.StartsWith("sqd.", StringComparison.Ordinal))
+            {
+                return "EMG3-SQD-01";
+            }
+            if (port.StartsWith("meta.", StringComparison.Ordinal))
+            {
+                return "EMG3-META-01";
+            }
+            if (port == "grm.anchor")
+            {
+                return "EMG3-FUSE-01";
+            }
             return "EMG2-RULE-01";
         }
 
@@ -1599,7 +1616,15 @@ namespace GameLogic.EditorTools
             Expect(a.Failures.Count == 0 && a.Effective > 0,
                 $"本阶段（emg.stage = {stage}）生效端口 {a.Effective} 个全部有源（生效声明写者 / 世界常驻源 {WorldSources.Count} 类 / 派生源 / 固定集实测发出的事件 {observed.Count} 种），本阶段生效端口的缺口清单为空{Detail(a.Failures)}");
             // EMG2-MAT-01：阶段 2 已开但端口按承接卡逐张接通（EmgCatalog.PendingPorts 非空）——出口模式核对上一个已出口的阶段；阶段 2 出口由 EMG2-E2E-01 在全部接通后核对。
-            int exitStage = EmgCatalog.PendingPorts.Length > 0 ? stage - 1 : stage;
+            // EMG3-CHS-01：阶段 3 开后，出口阶段 = 还有未接通端口的最低阶段 − 1（阶段 2 的 evt.react / prop.heat 仍未接通 → 仍核对阶段 1 出口；与原“阶段 2 已开、有未接通端口 → 阶段 1”同一口径）
+            int exitStage = stage;
+            foreach (EmgSource.Port pp in EmgCatalog.FromTables().Ports)
+            {
+                if (pp != null && EmgCatalog.IsPendingPort(pp.Id, EmgRole.None) && pp.Stage <= stage)
+                {
+                    exitStage = Math.Min(exitStage, pp.Stage - 1);
+                }
+            }
             SourceAudit exit = AuditSources(EmgCatalog.FromTables(), exitStage, observed, exitMode: true);
             // EMG1-E2E-01（卡片：出口模式跑一次并清零；FG-GAP-183）：stage ≤ 当前阶段、既无声明引用内核也不发出的端口必须为 0。
             var exitOnly = exit.Failures.Except(a.Failures).ToList();

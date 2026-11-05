@@ -299,23 +299,23 @@ namespace GameLogic.EditorTools
 
             // emg.stage 钳到已实现最高阶段
             EmgSource high = Clone(real);
-            high.Tuning = id => id == EmgCatalog.StageKey ? (true, 3f) : GridContent.TryGetTuning(id, out float v) ? (true, v) : (false, 0f);
+            high.Tuning = id => id == EmgCatalog.StageKey ? (true, 4f) : GridContent.TryGetTuning(id, out float v) ? (true, v) : (false, 0f);
             EmgCatalog.OverrideForTests(high);
             EmgCompiled hc = EmgCatalog.Current;
             bool track = EmgCatalog.IsOwnerOnDeclTrack("fw_split");
             EmgCatalog.OverrideForTests(null);
-            // EMG2-MAT-01 起已实现阶段 = 2：填 3 钳到 2，stageGate 1 的 fw_split 走声明轨。
-            Expect(hc.RawStage == 3f && hc.EffectiveStage == EmgCatalog.ImplementedStage && EmgCatalog.ImplementedStage == 2 && track
-                   && EmgCatalog.ClampStage(4f, 2) == 2 && EmgCatalog.ClampStage(1f, 2) == 1 && EmgCatalog.ClampStage(-1f, 2) == 0,
-                $"emg.stage 填 3（高于已实现阶段 {EmgCatalog.ImplementedStage}）→ 生效阶段钳到 {hc.EffectiveStage}，stageGate 1 的 fw_split 随之走声明轨；钳位函数：4→2、1→1、−1→0（已实现 2 时）");
+            // EMG3-CHS-01 起已实现阶段 = 3：填 4 钳到 3，stageGate 1 的 fw_split 走声明轨。
+            Expect(hc.RawStage == 4f && hc.EffectiveStage == EmgCatalog.ImplementedStage && EmgCatalog.ImplementedStage == 3 && track
+                   && EmgCatalog.ClampStage(4f, 3) == 3 && EmgCatalog.ClampStage(1f, 3) == 1 && EmgCatalog.ClampStage(-1f, 3) == 0,
+                $"emg.stage 填 4（高于已实现阶段 {EmgCatalog.ImplementedStage}）→ 生效阶段钳到 {hc.EffectiveStage}，stageGate 1 的 fw_split 随之走声明轨；钳位函数：4→3、1→1、−1→0（已实现 3 时）");
             // EMG2-MAT-01：正式表缺省 2——stageGate ≤ 1 的 owner 走声明轨；stageGate 2 的 owner 只要有一条声明用到还没有执行者的端口（按端口判，EmgCatalog.PendingPorts / 物质 modify）就整条留在旧轨。
             bool Pend(EmgSource.Decl d) => d.StageGate >= 2 && Enum.TryParse(d.Role, true, out EmgRole role) && EmgCatalog.IsPendingPort(d.Port, role);
             var groups = real.Decls.GroupBy(d => d.Owner).ToList();
-            bool expected = groups.All(g => EmgCatalog.IsOwnerOnDeclTrack(g.Key) == (g.Max(d => d.StageGate) <= 2 && !g.Any(Pend)));
+            bool expected = groups.All(g => EmgCatalog.IsOwnerOnDeclTrack(g.Key) == (g.Max(d => d.StageGate) <= 3 && !g.Any(Pend))); // EMG3-CHS-01：生效阶段 3
             int gated = groups.Count(g => g.Max(d => d.StageGate) == 2 && g.Any(Pend));
             int open2 = groups.Count(g => g.Max(d => d.StageGate) == 2 && !g.Any(Pend));
-            Expect(EmgCatalog.EffectiveStage == 2 && expected && gated > 0 && open2 > 0,
-                $"正式表 emg.stage = 2（EMG2-MAT-01 起缺省）：stageGate ≤ 1 的声明 owner 走声明轨；stageGate 2 的 {open2} 个端口已全部接通 → 声明轨、{gated} 个用到未接通端口 → 仍走旧 readFields");
+            Expect(EmgCatalog.EffectiveStage == 3 && expected && gated > 0 && open2 > 0,
+                $"正式表 emg.stage = 3（EMG3-CHS-01 起缺省）：stageGate ≤ 1 的声明 owner 走声明轨；stageGate 2 的 {open2} 个端口已全部接通 → 声明轨、{gated} 个用到未接通端口 → 仍走旧 readFields");
         }
 
         private static void Neg(string title, Action<EmgSource> mutate, Func<EmgCompiled, bool> notLeaked, string reasonPart)

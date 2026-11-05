@@ -283,6 +283,8 @@ namespace GameLogic.Campaign.Combat
             string line = EmgChainView.MachineProgramLine(site, unit);
             string era = EmgChainView.EraHoverLine(site, unit); // EMG1-FW-01（FGR-EMG-233 第 6 条）
             line = era == null ? line : line == null ? era : era + "\n" + line;
+            string trait = EmgChainView.TraitHoverLine(site, unit); // EMG3-CHS-01：底盘特性名称与说明（+ 车上带着的随车斑块）
+            line = trait == null ? line : line == null ? trait : trait + "\n" + line;
             if (line == null)
             {
                 return;

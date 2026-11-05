@@ -707,7 +707,9 @@ namespace GameLogic.Campaign.Emergence
             bool trig = false, anchor = false, meta = false, mod = false, eventSet = false;
             EmgDeclRow trigWrite = default;
             // EMG2-MAT-01（FGR-EMG-221 零反应）：修复出口上读“反弹”的固件永远不触发（修复弹体不反弹），按端口整条判本载体不适用，预览写原因而不是静默死指令
-            bool bounceNa = r.HealOnly && all.Exists(x => c.Decls[x].Dir == EmgDirs.Read && c.Decls[x].Port == EventPortBase + (int)EmgEventKind.Bounce);
+            // EMG3-CHS-01（阶段 3 开启后固定集重抽发现，按推荐默认执行（2026-11-05），待用户复核）：修复出口打不死任何东西，读“击杀”的固件同样整条按本载体不适用（同一口径，预览写原因）
+            bool bounceNa = r.HealOnly && all.Exists(x => c.Decls[x].Dir == EmgDirs.Read
+                                                         && (c.Decls[x].Port == EventPortBase + (int)EmgEventKind.Bounce || c.Decls[x].Port == EventPortBase + (int)EmgEventKind.Kill));
             foreach (int di in all)
             {
                 EmgDeclRow d = c.Decls[di];

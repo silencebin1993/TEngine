@@ -367,7 +367,7 @@ namespace GameLogic.EditorTools
             {
                 any = b.TryGetPatch(i, out z) && z.Matter == EmgMatterConst.Oil;
             }
-            Expect(CombatConst.FormatVersion == 17 && r == CombatLoadResult.Ok && any && z.RuleKey == 0 && z.Owners.x == ownerA,
+            Expect(CombatConst.FormatVersion == 18 && r == CombatLoadResult.Ok && any && z.RuleKey == 0 && z.Owners.x == ownerA,
                 $"D4 快照斑块段 40 字段（本 Story 之前）读入：规则键取 0、归属保留（{r}）；FormatVersion = {CombatConst.FormatVersion}");
         }
 

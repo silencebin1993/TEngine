@@ -956,7 +956,7 @@ namespace GameLogic.EditorTools
 
         /// <summary>
         /// 按 FGJ-M6 的规划把家园防线直接登记成建成的（测试捷径：放置 / 施工由旅程从正式入口走），按旅程的广播开关节奏推进到第 7.4 日：
-        /// 第一次突袭排定后关广播 → 第一波预警时开 → 第二波排定后关 → 第二波预警时开（之后不再关：第三波在预警前并成 2 级）。返回三波的计划与结算。
+        /// 第一次突袭排定后关广播 → 第一波预警时开 → 第二波排定后关 → 第二波预警时开（之后不再关：第三波在预警前并成 2 级）；那时第三波还没结算就推进到它结算（上限第 9 日）。返回三波的计划与结算。
         /// </summary>
         private static RaidRun RunDefensePlan(int seed, out string why)
         {
@@ -976,12 +976,15 @@ namespace GameLogic.EditorTools
             others.AddRange(hp.Refinery.Crude);
             var belts = hp.Plan.Routes.SelectMany(r => r.Path).ToList();
             BuildingRecord core = s.BuildingRecords.First(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeCore);
+            // EMG3-CHS-01 修复轮 3：波次节奏随阵地损失变（暴露按在役建筑耗电涨；轮式拖挂会把火墙的明火带回家园、多烧掉炮塔，种子 42 第三波推迟到第 7.8 日）。
+            // 推进到第 7.4 日时第三波还没结算就接着推进到它结算为止（上限第 9 日），断言照旧要三波都结算、都守住；结算完立刻停，不再碰第四波。
             long end = RaidDirectorService.DayTicks(7.4);
+            long cap = RaidDirectorService.DayTicks(9.0);
             int phase = 0;
             string secondId = null;
             var seenPlans = new HashSet<string>();
             var seenResults = new HashSet<int>();
-            while (GameClock.Ticks < end)
+            while (GameClock.Ticks < end || (GameClock.Ticks < cap && run.Results.Count < 3))
             {
                 WorldSimulation.StepMany(300);
                 float e = s.SignalExposure;
@@ -1162,7 +1165,7 @@ namespace GameLogic.EditorTools
         }
         private static void CheckDefensePlanHolds()
         {
-            Line("  · B2. FGJ-M6 的防线规划守得住（真实导演 + 真实攻城 + 真实炮塔 / 护盾 / 屏障；种子 42 与 1，按旅程的广播开关节奏推进到第 7.4 日）；火墙按第一次突袭的真实抵达点建出来后，之后的突袭里打出爆燃（FGT-DEF-002 阵地反应）");
+            Line("  · B2. FGJ-M6 的防线规划守得住（真实导演 + 真实攻城 + 真实炮塔 / 护盾 / 屏障；种子 42 与 1，按旅程的广播开关节奏推进到第 7.4 日，第三波还没结算就推进到它结算、上限第 9 日）；火墙按第一次突袭的真实抵达点建出来后，之后的突袭里打出爆燃（FGT-DEF-002 阵地反应）");
             foreach (int seed in new[] { 42, 1 })
             {
                 var sw = Stopwatch.StartNew();
@@ -1189,7 +1192,7 @@ namespace GameLogic.EditorTools
                 Expect(!run.CoreLost && first && three && fwOk && fwDeflag,
                     $"种子 {seed}：三波都守住、核心不丢（核心耐久最低 {run.CoreMin:F0}）；首袭 {p1?.Level} 级 {p1?.Trigger}、抵达第 {p1?.ArrivalTick} 步（宽限终点 {RaidDirectorService.GraceEndTick}）；" +
                     $"结算 [{string.Join("；", results.Select(r => $"{r.PlanId} {r.Level} 级 {RaidResultService.OutcomeText(r)} 击毁 {r.Killed}/{r.Unfolded} 损失 {RaidResultService.LossTotal(r)}"))}]；" +
-                    $"第二 / 三波建筑损失 {losses} 座（只记录）；广播开关 {run.Toggles}；火墙按第一次突袭的真实抵达点规划：{run.Firewall ?? "没算（第一次突袭没预警）"}；{fwRun}（{sw.Elapsed.TotalSeconds:F0} 秒）");
+                    $"第二 / 三波建筑损失 {losses} 座（只记录）；推进到第 {GameClock.Ticks / (double)RaidDirectorService.DayTicks(1.0):F2} 日；广播开关 {run.Toggles}；火墙按第一次突袭的真实抵达点规划：{run.Firewall ?? "没算（第一次突袭没预警）"}；{fwRun}（{sw.Elapsed.TotalSeconds:F0} 秒）");
             }
         }
 

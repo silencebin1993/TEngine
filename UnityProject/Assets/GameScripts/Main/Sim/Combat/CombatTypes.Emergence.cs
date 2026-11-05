@@ -81,6 +81,14 @@ namespace BinGames.Sim.Combat
         public const int SegWires = 20;
         /// <summary>EMG2-REACT-02：段 21 单位身上正在走的 C05 / C07 计时（同版本 17 追加，短档 / 旧档没有这段 = 空表）。</summary>
         public const int SegCoatFx = 21;
+        /// <summary>EMG3-CHS-01（快照格式 18，ADR ⑩：阶段 3 全部内核状态段一次铺好）：底盘特性运行态（拖带里程 / 拖挂随车斑块，段 22）、元程序运行态（循环计数、延后队列，段 23，执行者归元程序卡）、
+        /// 节拍计数（段 24）。读 ≤ 17 版：段不存在 = 空表 / 0。</summary>
+        public const int SegTraits = 22;
+        public const int SegMeta = 23;
+        public const int SegTempo = 24;
+        /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
+        public const ushort PortChsGround = 1001, PortChsAirborne = 1002, PortChsMoving = 1003, PortChsWater = 1004;
+        public const byte RoleCondition = 2;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
@@ -594,6 +602,9 @@ namespace BinGames.Sim.Combat
         public byte HeatLatch;
         /// <summary>EMG2-RECL-01：最近一次回收修复的结果（<see cref="EmgReclaimConst"/>.Note*；悬停写原因）。放在 HeatLatch 后的对齐空位里，不增大单位记录。快照 17 单位段尾追加（短段取 0 = 没有记录）。</summary>
         public byte ReclaimNote;
+        /// <summary>EMG3-CHS-01（FGR-EMG-140 / 141，ADR ⑧）：底盘特性机制（<see cref="EmgTraitConst"/>，0 = 没有）。热更层按 fg.TbChassisTrait 在生成 / 装配变化时写，内核只认机制、不认底盘 ID。
+        /// 放在 ReclaimNote 后的对齐空位里，不增大单位记录（ADR ⑬）。快照 18 单位段尾追加（短段 / 读 ≤ 17 版取 0）。</summary>
+        public byte Trait;
         /// <summary>EMG1-ENT-01：本单位质量（0 = 按档案 / 种类推算，见 CombatLogic.EmgUnitMass）。单位段第 6 个字段，短段读到取 0。</summary>
         public float Mass;
         /// <summary>EMG1-ENT-01：待处理的阵亡标志（外部血量单位收到“直接击毁”致死请求时置 <see cref="EmgConst.DeathNoWreck"/>，热更层判死回到阵亡入口时读走）。单位段第 7 个字段。</summary>
@@ -944,6 +955,9 @@ namespace BinGames.Sim.Combat
         public uint BlockSig;
         /// <summary>EMG2-PERSIST-01（不进快照）：活着的挡弹固态斑块数（重建哈希时算）；0 时弹体 / 即时命中一条比较跳过，不查哈希。</summary>
         public int AbsorbLive;
+
+        /// <summary>EMG3-CHS-01（ADR ⑩ 版本 18 一次铺好阶段 3 状态段）：全局节拍计数（FGR-EMG-170～172，节拍执行者归 EMG3-TMP 卡；本卡只铺段 24，读 ≤ 17 版取 0）。</summary>
+        public long BeatCount;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, NextWireId = 1, HashDirty = 1 };
     }

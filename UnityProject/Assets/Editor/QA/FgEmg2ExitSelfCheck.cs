@@ -87,7 +87,7 @@ namespace GameLogic.EditorTools
             Type batch = typeof(CombatSite).Assembly.GetTypes().FirstOrDefault(t => t.Name == "ReactionBatchService");
             Expect(batch == null, "FG10-REACT-01 回改：ReactionBatchService 已删除（批次开放 → 首次发现）");
             Expect(FgEmergenceRuleAuditSelfCheck.Exemptions.Length == 0, "装配反应豁免数 = 0");
-            Expect(EmgCatalog.EffectiveStage == 2, $"正式表 emg.stage 生效 2（现 {EmgCatalog.EffectiveStage}）");
+            Expect(EmgCatalog.EffectiveStage >= 2, $"正式表 emg.stage 生效 ≥ 2（现 {EmgCatalog.EffectiveStage}；EMG3-CHS-01 起缺省 3）");
             Expect(CampaignSaveService.CurrentSchemaVersion == 2, $"战役存档 schema 保持 2（FGR-EMG-212，现 {CampaignSaveService.CurrentSchemaVersion}）");
             Expect(CombatConst.FormatVersion >= 17, $"内核快照格式 ≥ 17（现 {CombatConst.FormatVersion}）");
         }

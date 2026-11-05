@@ -550,9 +550,9 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static double2 EmgDisplaceUnit(ref CombatData d, int k, double2 from, double2 want, int pusher, ushort cause, float speedOverride = -1f)
         {
-            if (EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, k)).Displace == 0)
+            if (EmgProfileAt(ref d, EmgUnitProfileIndex(ref d, k)).Displace == 0 || EmgTraitOf(ref d, k) == EmgTraitConst.FixedAnchor)
             {
-                return from;
+                return from; // EMG3-CHS-01：锚定特性同样不位移（场 / 推力 / 冲撞的统一入口）
             }
             double2 actual = MoveCollide(ref d, k, from, want);
             bool navBlocked = math.distancesq(actual, want) > 1e-6;

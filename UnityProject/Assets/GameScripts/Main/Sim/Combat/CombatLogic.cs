@@ -157,6 +157,12 @@ namespace BinGames.Sim.Combat
             }
             // 5c. EMG2-MAT-01（FGR-EMG-081～083）：物质斑块节拍（错相、每步 ≤ emg.patch.per_step 块）与单位接触（沾染 / 接触伤害 / evt.enter · evt.leave，本步总线处理）。没有斑块时 O(1)。
             StepMatter(ref d, dt);
+            // 5c'. EMG3-CHS-01（FGR-EMG-140）：碾压拖带 / 拖挂（接触之后：本步站到的斑块已知；总线之前）。没有这两种特性的单位时 O(1)。
+            StepChassis(ref d, dt);
+            if (d.Drones.Length > 0)
+            {
+                StepDroneCharge(ref d, dt); // DEBT-EMG2REACT02-04：哨戒桩电荷衰减
+            }
 
             // 5d. EMG1-BUS-01：战斗事件总线（ADR-EMG-001 ④：StepReadings 之后、场地边界钳制之前；按 Seq 先进先出，每步 emg.bus.per_step 条，超出顺延不丢）。
             if (d.EmgBus.Length > 0)
@@ -468,7 +474,7 @@ namespace BinGames.Sim.Combat
             }
             float2 desired = (float2)math.normalize(toTarget);
             bool blocked = FindBlockingObstacle(ref d, pos, desired, out double2 obstacle);
-            if (!blocked && !IsAir(ref d, i))
+            if (!blocked && !ChsAirborne(ref d, i)) // EMG3-CHS-01：离地不绕地面固态斑块
             {
                 blocked = EmgBlockAhead(ref d, pos, desired, d.Config.Lookahead, d.Config.AvoidRadius, out obstacle); // EMG2-REACT-01：阻路斑块与障碍圆同一套绕行
             }

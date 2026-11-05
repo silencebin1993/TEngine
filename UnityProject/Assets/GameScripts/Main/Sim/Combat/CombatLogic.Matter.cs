@@ -777,7 +777,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 hits.Clear();
-                bool air = IsAir(ref d, u);
+                bool air = ChsAirborne(ref d, u); // EMG3-CHS-01：离地（悬浮 / 云端空中）不吃地面层
                 uint mask = PatchesAt(ref d, d.Pos[u], air, ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);
                 EmgUnitState st = d.EmgUnit[u];
                 uint prev = st.PrevMatterMask;

@@ -513,7 +513,7 @@ namespace GameLogic.EditorTools
                 b.Step(Dt, t);
             }
             bool cont = k.StateHash() == b.StateHash() && Sig(k) == Sig(b);
-            Expect(lr == CombatLoadResult.Ok && before == after && same && cont && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 17
+            Expect(lr == CombatLoadResult.Ok && before == after && same && cont && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 18
                    && b.FlashHeadOf(bay.Self).Equals(k.FlashHeadOf(bay.Self)),
                 $"读档 {lr}：{before} → {after}（每架 Id:持有/全长-暂停，s = 已剥离 | 两台母机占用）；状态哈希一致 {same}，续跑 4 秒逐位相同 {cont}；格式 {CombatConst.FormatVersion}（阶段 1 追加的字段在格式 17 里照旧）");
 

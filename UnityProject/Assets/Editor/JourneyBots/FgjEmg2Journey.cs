@@ -235,8 +235,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail($"有固件在正常游戏里没有来源：{c.Get("fix.missing")}（{c.Get("fix.src")}）");
             }
             EmgCompiled cat = EmgCatalog.Current;
-            return cat.RawStage == 2f && cat.EffectiveStage == 2
-                ? StepOutcome.Done($"正式表 emg.stage = 2（生效 2）；来源：{c.Get("fix.src")}")
+            return cat.RawStage >= 2f && cat.EffectiveStage >= 2 // EMG3-CHS-01 起正式表缺省 3（阶段 2 机制照常生效）
+                ? StepOutcome.Done($"正式表 emg.stage = {cat.RawStage}（生效 {cat.EffectiveStage} ≥ 2）；来源：{c.Get("fix.src")}")
                 : StepOutcome.Fail($"正式表 emg.stage = {cat.RawStage}（生效 {cat.EffectiveStage}），阶段 2 出口应为 2");
         }
 

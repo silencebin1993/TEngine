@@ -199,9 +199,15 @@ namespace GameLogic.EditorTools
                     covered.Add(owner);
                     continue;
                 }
-                if (GapOwners.TryGetValue(owner, out string gap))
+                bool utility0 = owner.StartsWith("func_", StringComparison.Ordinal);
+                if (utility0 && g.Any(d => d.Dir == "write" && d.Port == "en.kinetic"))
                 {
-                    covered.Add(owner + "（" + gap + "）");
+                    // EMG3-CHS-01（FG-GAP-176 已偿还）：冲刺器的行为在内核位移（不进武器指纹）——起真实内核比“攻击命令下装 / 不装”的位移与 evt.push
+                    tested++;
+                    if (!FgEmgChassisSelfCheck.DashDiffers())
+                    {
+                        dead.Add(owner);
+                    }
                     continue;
                 }
                 bool utility = owner.StartsWith("func_", StringComparison.Ordinal);
@@ -235,12 +241,6 @@ namespace GameLogic.EditorTools
                 $"部件声明装 / 不装：{tested} 个部件在自身载体 / 宿主上行为指纹都不同（无人机舱装了才有无人机）{(dead.Count > 0 ? "；无差异：" + string.Join("、", dead) : string.Empty)}；" +
                 $"另由专段覆盖 {covered.Count} 个：{string.Join("、", covered)}");
         }
-
-        /// <summary>阶段 1 声明了、但 0.2 战斗里还没有落点的部件（已登记缺口，不计入“装 / 不装”对照）。</summary>
-        private static readonly Dictionary<string, string> GapOwners = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            { "func_dash", "FG-GAP-176：冲刺器没有冲刺 / 撞击行为" },
-        };
 
         private static CombatWeapon HostWeapon(string chassis, string primary, string utility)
         {

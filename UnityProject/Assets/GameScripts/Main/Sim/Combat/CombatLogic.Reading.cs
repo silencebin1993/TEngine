@@ -723,9 +723,9 @@ namespace BinGames.Sim.Combat
         internal static bool CanDisplace(ref CombatData d, int k)
         {
             byte kind = d.Kind[k];
-            if (kind == (byte)CombatUnitKind.Structure || kind == (byte)CombatUnitKind.Turret)
+            if (kind == (byte)CombatUnitKind.Structure || kind == (byte)CombatUnitKind.Turret || EmgTraitOf(ref d, k) == EmgTraitConst.FixedAnchor)
             {
-                return false;
+                return false; // EMG3-CHS-01：锚定（固定底盘）不受场与击退位移，按机制判、不按底盘 ID
             }
             return !(d.Faction[k] == (byte)CombatFaction.Hostile && d.Priority[k] == 0);
         }

@@ -43,7 +43,7 @@ namespace BinGames.Sim.Combat
         /// 17 = EMG2-MAT-01（FG19 FGR-EMG-081 / 082 / 211，ADR-EMG-001 ⑤ ⑩）：Emg 段追加阶段 2 的全部内核状态段——物质斑块（段 17，扩展字段的 CombatZone、独立列表）、
         /// 活跃场（段 18）、实体档案稳定键（段 19，DEBT-EMG1ENT01-07）；单位段尾部追加温度、7 个累积量、相态位与每量计时、6 个抗性覆盖；标量段尾部追加斑块可靠计数；
         /// 规则计数 256 槽沿用段 15（格式 16 起已是 256）。读取仍认 1～16：没有斑块 / 场（旧区域照旧是区域直到到期；“像物质的区域”转斑块归 EMG2-MAT-02）、累积量 / 相态 / 覆盖全 0、档案下标原样。</summary>
-        public const int FormatVersion = 17;
+        public const int FormatVersion = 18;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -480,6 +480,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-FLASH-01（FGR-EMG-036）：离母机过远暂停的末尾条数（内核每 0.25 游戏秒按距离重算，回到范围内归 0）。</summary>
         public byte Pause;
         public byte FlashPad;
+        /// <summary>EMG3-CHS-01（DEBT-EMG2REACT02-04，FG19B C04“哨戒桩也是导体”）：电荷（绝缘闪络可跳到哨戒桩；按 emg.trait 无关的传导衰减每秒 × <see cref="EmgTraitConst.DroneChargeKeep"/>）。
+        /// 快照 18 Emg 段 8 尾部追加（短段 / 读 ≤ 17 版取 0）。</summary>
+        public float Charge;
     }
 
     /// <summary>

@@ -193,6 +193,7 @@ namespace GameLogic.Campaign.Combat
             ApplyEmgSubForms(Kernel); // EMG1-TRIG-01：子形态参数按 fg.TbSubPayload 写进内核
             ApplyEntityProfiles(Kernel); // EMG1-ENT-01：实体档案按 fg.TbEntityProfile 写进内核
             ApplyMatters(Kernel); // EMG2-MAT-01：17 种物质按 fg.TbMatter 写进内核（斑块层开不开看 emg.stage）
+            ApplyTraitParams(Kernel); // EMG3-CHS-01：底盘特性参数按 fg.TbChassisTrait 的 emg.trait.* 写进内核（哪台车用哪条特性见 ApplyChassisTrait）
             ApplyRules(Kernel); // EMG2-RULE-01：通道规则 fg.TbChannelRule 编成内核规则（≤ 256）
             ApplyPhaseRules(Kernel); // EMG2-PHS-01：相态规则 fg.TbPhaseRule（7 个累积量的阈值 / 衰减 / 免疫窗 / 抗性列）
             ApplyFieldRules(Kernel); // EMG2-FLD-01：场 × 载体规则 fg.TbFieldCarrierRule（20 行）
@@ -243,6 +244,7 @@ namespace GameLogic.Campaign.Combat
             ApplyPhaseRules(k);
             ApplyFieldRules(k);
             ApplyReactionTables(k);
+            ApplyTraitParams(k); // EMG3-CHS-01
         }
 
         /// <summary>EMG2-REACT-01：把 <see cref="NamedReactionCatalog.LegacyResidueRow"/>（液洼 / 油迹 / 爬行者整片反应的残留参数，爆燃撤出旧表后从这一行取）写进内核；
@@ -504,6 +506,7 @@ namespace GameLogic.Campaign.Combat
                 NextFireAt = rec.NextCannonActionAtPlaySeconds,
             });
             AssignProfile(unit, Emergence.EmgEntityProfiles.ForChassis(rec.ChassisId), info.MassBonus); // EMG1-ENT-01：机器质量按底盘；EMG1-FW-01：× (1 + 部件加成)
+            ApplyDash(unit, info.UtilityId);
             return AttachMachine(rec, unit);
         }
 
@@ -511,6 +514,7 @@ namespace GameLogic.Campaign.Combat
         {
             _machineUnit[rec.LogicId] = unit;
             _unitMachine[unit] = rec.LogicId;
+            ApplyChassisTrait(unit, rec.ChassisId);
             var marker = new HomeValleyMachineMarker(rec.LogicId, rec.ChassisId, this, unit);
             _markerByUnit[unit] = marker;
             return marker;
@@ -886,6 +890,7 @@ namespace GameLogic.Campaign.Combat
             }
             MachineWeaponInfo info = ResolveMachineWeapon(state, logicId);
             Kernel.SetUnitWeapon(unit, info.WeaponIndex);
+            ApplyDash(unit, info.UtilityId);
             // EMG1-FW-01：装配变化后机器质量随部件加成重算（换下重甲即回到底盘质量）
             if (info.ChassisProfileRef > 0)
             {
@@ -2881,6 +2886,44 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>主核心阶段三·对空形态：按行为参数的齐射只打空中目标（首领状态机写）。</summary>
         public bool SetAirMode(int unitId, bool on) => !IsDisposed && Kernel.SetAirMode(unitId, on);
+
+        /// <summary>EMG3-CHS-01（FGR-EMG-140 / 141，ADR ⑧）：各机制的 4 个参数（表数据，建地点时写一次）。</summary>
+        private static void ApplyTraitParams(CombatKernel k)
+        {
+            // 下标 0（机制 None）借来放冲刺器参数（emg.dash.speed / seconds / cooldown，FG-GAP-176）
+            k.SetTraitParams(EmgTraitConst.None, new Unity.Mathematics.float4(Tuning("emg.dash.speed", EmgTraitConst.DefaultDashSpeed),
+                Tuning("emg.dash.seconds", EmgTraitConst.DefaultDashSeconds), Tuning("emg.dash.cooldown", EmgTraitConst.DefaultDashCooldown), 0f));
+            foreach (Emergence.EmgTraitRow t in Emergence.EmgCatalog.Current.Traits)
+            {
+                k.SetTraitParams((byte)t.Kind, new Unity.Mathematics.float4(t.P0, t.P1, t.P2, t.P3));
+            }
+        }
+
+        /// <summary>
+        /// EMG3-CHS-01：按 fg.TbChassisTrait 把这台车的特性机制写进内核（O(1)，生成时；读档的单位已带着快照里的机制，这里重写同值是空操作）。
+        /// 阶段 3 没开 / 预留底盘 / 没有特性行 → 0（逐字同旧）。只查表，不按底盘 ID 分支（FGR-EMG-013）。
+        /// </summary>
+        public void ApplyChassisTrait(int unit, string chassisId)
+        {
+            byte kind = Emergence.EmgCatalog.TryGetActiveTrait(chassisId, out Emergence.EmgTraitRow row) ? (byte)row.Kind : EmgTraitConst.None;
+            if (!IsDisposed && (kind != EmgTraitConst.None || Kernel.TraitOf(unit) != EmgTraitConst.None))
+            {
+                Kernel.SetUnitTrait(unit, kind);
+            }
+        }
+
+        /// <summary>
+        /// FG-GAP-176（EMG3-CHS-01）：功能槽部件声明“写 en.kinetic”（冲刺器）→ 内核给这台车开冲刺（执行攻击命令、目标在射程外冲刺距离内时冲上去，撞击结算 evt.impact）。
+        /// 按声明判、不按部件 ID（FGR-EMG-013）；阶段 3 没开时关（逐字同旧）。O(声明数)，只在生成 / 装配变化时。
+        /// </summary>
+        private void ApplyDash(int unit, string utilityId)
+        {
+            bool on = Emergence.EmgCatalog.EffectiveStage >= 3 && Emergence.EmgCatalog.OwnerDeclaresWrite(utilityId, "en.kinetic");
+            if (!IsDisposed && (on || Kernel.TryGetTraitRun(unit, out _)))
+            {
+                Kernel.SetUnitDash(unit, on);
+            }
+        }
 
         /// <summary>换一个单位的武器（狂暴：开火间隔缩短）。</summary>
         public bool SetUnitWeapon(int unitId, in CombatWeapon weapon) => !IsDisposed && Kernel.SetUnitWeapon(unitId, WeaponIndex(weapon));

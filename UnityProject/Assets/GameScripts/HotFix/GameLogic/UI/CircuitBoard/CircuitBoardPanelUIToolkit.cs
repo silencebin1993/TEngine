@@ -987,6 +987,9 @@ namespace GameLogic.UI.CircuitBoard
                 ChassisCatalog.All.Values, state,
                 _board != null ? (ChassisCatalog.ResolveArchetype(_board.ChassisId) ?? _board.ChassisId) : null,
                 includeEmptyOption: false);
+            // EMG3-CHS-01：底盘特性名称与说明（选项里写名称，悬停下拉框看说明；没生效时注明原因）
+            string chassisArch = _board != null ? (ChassisCatalog.ResolveArchetype(_board.ChassisId) ?? _board.ChassisId) : null;
+            _chassisDropdown.tooltip = Campaign.Emergence.EmgCatalog.TryGetTrait(chassisArch, out Campaign.Emergence.EmgTraitRow traitRow) ? Campaign.Emergence.EmgCatalog.TraitTip(traitRow) ?? string.Empty : string.Empty;
 
             // FG2-FW-02：主组件 / 功能组件的选项带载体（射弹 / 格斗·扇形……）；固定底盘上不兼容的照样列出但标明，选了给原因（FGR-FW-012）。
             PopulateDropdown(_primaryDropdown, _primaryIdsByIndex,
@@ -1030,6 +1033,7 @@ namespace GameLogic.UI.CircuitBoard
                 }
                 // 选项文本里不能出现 "/"：下拉菜单会把它当子菜单分隔符，把一项拆成两级菜单。
                 string label = $"{def.DisplayName}（{def.ScrapCost} 废料 · 负载 {def.Load}）";
+                label = Campaign.Emergence.EmgCatalog.TraitOption(def.Id, label); // EMG3-CHS-01：底盘选项带特性名称（非底盘没有特性行，原样）
                 string subtype = CarrierReadings.SubtypeName(def.Id);
                 if (subtype != null)
                 {

@@ -865,6 +865,11 @@ namespace BinGames.Sim.Combat
                     cut++;
                     continue;
                 }
+                // EMG3-CHS-01（FGR-EMG-141）：同一条固件读 chs.* condition、宿主单位此刻没有这个状态 → 本次不唤起（不认底盘 ID）
+                if (e.EntKind == EmgEntKind.Unit && EmgChsBlocked(ref d, d.SlotOf(e.Ent), n.FirstInstr, end, x.Ordinal))
+                {
+                    continue;
+                }
                 woken++;
                 if (x.Role == EmgConst.RoleTrigger)
                 {

@@ -517,6 +517,165 @@ namespace BinGames.Sim.Combat
             sw.End();
         }
 
+        // ─────────────────────────────── 快照格式 18：阶段 3 状态段（EMG3-CHS-01，ADR ⑩ 一次铺好）───────────────────────────────
+
+        private const int TraitRunFields = 20;
+        private const int MetaRunFields = 7;
+
+        /// <summary>段 22 特性运行态、段 23 元程序运行态（执行者归元程序卡，本卡表恒空）、段 24 节拍计数。特性运行态按单位 ID 升序写（同一状态同一字节，读档续跑哈希一致）。</summary>
+        private void WriteStage3Segments(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            int n = _d.TraitRun.Length;
+            var order = new int[n];
+            var ids = new int[n];
+            for (int i = 0; i < n; i++)
+            {
+                order[i] = i;
+                ids[i] = _d.TraitRun[i].Unit;
+            }
+            System.Array.Sort(ids, order);
+            sw.Begin(EmgConst.SegTraits, TraitRunFields, n);
+            for (int k = 0; k < n; k++)
+            {
+                EmgTraitRun x = _d.TraitRun[order[k]];
+                if (sw.F()) w.Write(x.Unit);
+                if (sw.F()) w.Write(x.Kind);
+                if (sw.F()) w.Write(x.Last.x);
+                if (sw.F()) w.Write(x.Last.y);
+                if (sw.F()) w.Write(x.Odo);
+                if (sw.F()) w.Write(x.DragId);
+                if (sw.F()) w.Write(x.DragMatter);
+                if (sw.F()) w.Write(x.DwellOn);
+                if (sw.F()) w.Write(x.Dwell);
+                if (sw.F()) w.Write(x.TowMatter);
+                if (sw.F()) w.Write(x.TowAmount);
+                if (sw.F()) w.Write(x.TowRadius);
+                if (sw.F()) w.Write(x.TowT);
+                if (sw.F()) w.Write(x.TowFrom);
+                if (sw.F()) w.Write(x.TowChain);
+                if (sw.F()) w.Write(x.Flags);
+                if (sw.F()) w.Write(x.DashDir.x);
+                if (sw.F()) w.Write(x.DashDir.y);
+                if (sw.F()) w.Write(x.DashT);
+                if (sw.F()) w.Write(x.DashCd);
+                sw.EndRecord();
+            }
+            sw.End();
+            sw.Begin(EmgConst.SegMeta, MetaRunFields, _d.MetaRun.Length);
+            for (int i = 0; i < _d.MetaRun.Length; i++)
+            {
+                EmgMetaRun m = _d.MetaRun[i];
+                if (sw.F()) w.Write(m.Unit);
+                if (sw.F()) w.Write(m.Prog);
+                if (sw.F()) w.Write(m.Node);
+                if (sw.F()) w.Write(m.Ordinal);
+                if (sw.F()) w.Write(m.Loop);
+                if (sw.F()) w.Write(m.DueAt);
+                if (sw.F()) w.Write(m.Chain);
+                sw.EndRecord();
+            }
+            sw.End();
+            sw.Begin(EmgConst.SegTempo, 1, 1);
+            if (sw.F()) w.Write(_d.EmgS[0].BeatCount);
+            sw.EndRecord();
+            sw.End();
+        }
+
+        private static CombatLoadResult ParseStage3Segment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            switch (sr.Tag)
+            {
+                case EmgConst.SegTraits:
+                {
+                    if (n > staging.Count)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    var seen = new HashSet<int>();
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var x = new EmgTraitRun();
+                        if (sr.F()) x.Unit = r.ReadInt32();
+                        if (sr.F()) x.Kind = r.ReadByte();
+                        if (sr.F()) x.Last.x = r.ReadDouble();
+                        if (sr.F()) x.Last.y = r.ReadDouble();
+                        if (sr.F()) x.Odo = r.ReadSingle();
+                        if (sr.F()) x.DragId = r.ReadInt32();
+                        if (sr.F()) x.DragMatter = r.ReadByte();
+                        if (sr.F()) x.DwellOn = r.ReadInt32();
+                        if (sr.F()) x.Dwell = r.ReadSingle();
+                        if (sr.F()) x.TowMatter = r.ReadByte();
+                        if (sr.F()) x.TowAmount = r.ReadSingle();
+                        if (sr.F()) x.TowRadius = r.ReadSingle();
+                        if (sr.F()) x.TowT = r.ReadSingle();
+                        if (sr.F()) x.TowFrom = r.ReadInt32();
+                        if (sr.F()) x.TowChain = r.ReadInt32();
+                        if (sr.F()) x.Flags = r.ReadByte();
+                        if (sr.F()) x.DashDir.x = r.ReadSingle();
+                        if (sr.F()) x.DashDir.y = r.ReadSingle();
+                        if (sr.F()) x.DashT = r.ReadSingle();
+                        if (sr.F()) x.DashCd = r.ReadSingle();
+                        if (!sr.RecordOk || x.Unit <= 0 || !seen.Add(x.Unit) || x.Kind >= EmgTraitConst.Count || (!EmgTraitConst.HasRun(x.Kind) && x.Flags == 0)
+                            || x.Flags > EmgTraitConst.FlagDash || !(x.DashT >= 0f) || !(x.DashCd >= 0f) || float.IsNaN(x.DashDir.x) || float.IsNaN(x.DashDir.y) || double.IsNaN(x.Last.x) || double.IsNaN(x.Last.y)
+                            || !(x.Odo >= 0f) || !(x.Dwell >= 0f) || !(x.TowAmount >= 0f) || !(x.TowRadius >= 0f) || float.IsNaN(x.TowT) || float.IsInfinity(x.TowT)
+                            || x.DragMatter > EmgMatterConst.Count || x.TowMatter > EmgMatterConst.Count || x.TowChain < 0 || float.IsInfinity(x.TowAmount))
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.TraitRun.Add(x);
+                    }
+                    return CombatLoadResult.Ok;
+                }
+                case EmgConst.SegMeta:
+                {
+                    if (n > EmgConst.PendingCapacity)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var m = new EmgMetaRun();
+                        if (sr.F()) m.Unit = r.ReadInt32();
+                        if (sr.F()) m.Prog = r.ReadInt32();
+                        if (sr.F()) m.Node = r.ReadByte();
+                        if (sr.F()) m.Ordinal = r.ReadByte();
+                        if (sr.F()) m.Loop = r.ReadUInt16();
+                        if (sr.F()) m.DueAt = r.ReadDouble();
+                        if (sr.F()) m.Chain = r.ReadInt32();
+                        if (!sr.RecordOk || m.Prog < -1 || m.Chain < 0 || double.IsNaN(m.DueAt))
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.MetaRun.Add(m);
+                    }
+                    return CombatLoadResult.Ok;
+                }
+                case EmgConst.SegTempo:
+                {
+                    if (n != 1)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    sr.Record(0);
+                    long beats = 0;
+                    if (sr.F()) beats = r.ReadInt64();
+                    if (!sr.RecordOk || beats < 0)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    EmgScalars es = staging.EmgS[0];
+                    es.BeatCount = beats;
+                    staging.EmgS[0] = es;
+                    return CombatLoadResult.Ok;
+                }
+                default:
+                    return CombatLoadResult.Ok;
+            }
+        }
+
         private static CombatLoadResult ParseMatterSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
         {
             int n = sr.Count;

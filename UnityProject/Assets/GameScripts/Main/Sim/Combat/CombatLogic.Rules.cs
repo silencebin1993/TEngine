@@ -415,12 +415,12 @@ namespace BinGames.Sim.Combat
                     float rad = math.min(z.Radius + r.P1, r.P2 > 0f ? r.P2 : z.Radius + r.P1);
                     KillPatch(ref d, i);
                     hostGone = true;
-                    EmgUnitsInCircle(ref d, pos, rad, r.SideValue, owner, false, 0f, r.Key, d.EmgRuleOwnersNow, chain);
+                    EmgUnitsInCircle(ref d, pos, rad, r.SideValue, owner, false, 0f, r.Key, d.EmgRuleOwnersNow, chain, z.Layer == EmgMatterConst.LayerGround);
                     EmgBurstPatches(ref d, pos, rad, r.P4, r.P3);
                     break;
                 }
                 case EmgRuleConst.OpArc:
-                    EmgUnitsInCircle(ref d, pos, z.Radius, r.SideValue, owner, true, r.P1 * z.Charge, r.Key, d.EmgRuleOwnersNow, chain);
+                    EmgUnitsInCircle(ref d, pos, z.Radius, r.SideValue, owner, true, r.P1 * z.Charge, r.Key, d.EmgRuleOwnersNow, chain, z.Layer == EmgMatterConst.LayerGround);
                     break;
                 case EmgRuleConst.OpFragment:
                 {
@@ -449,7 +449,7 @@ namespace BinGames.Sim.Combat
             }
             if (r.Side == EmgRuleConst.SideDamage && r.SideValue > 0f && r.Op != EmgRuleConst.OpBurst && r.Op != EmgRuleConst.OpArc)
             {
-                EmgUnitsInCircle(ref d, pos, math.max(0.5f, z.Radius), r.SideValue, owner, false, 0f, r.Key, d.EmgRuleOwnersNow, chain);
+                EmgUnitsInCircle(ref d, pos, math.max(0.5f, z.Radius), r.SideValue, owner, false, 0f, r.Key, d.EmgRuleOwnersNow, chain, z.Layer == EmgMatterConst.LayerGround);
             }
             EmgRuleSettle(ref d, r, chain, depth, owner, pos, z.EmgId);
             if (hostGone && kind0 == CombatConst.ZoneKindPool)
@@ -674,14 +674,15 @@ namespace BinGames.Sim.Combat
         /// <summary>
         /// 圈内地面单位（不分阵营：物质中立，FGR-EMG-083）：附带伤害 <paramref name="damage"/>（同阵营 × emg.matter.friendly_scale，走 DamageFrom，evt.hurt Code = 斑块）；
         /// <paramref name="arc"/> 时另给电荷累积量 <paramref name="charge"/>（FG19B E14：单位 phs.charge + 0.6 × 斑块电荷）。O(单位数)，只在规则结算时。
+        /// <paramref name="groundLayer"/> = 产物来自地面层斑块：离地（chs.airborne，悬浮与云端空中同一读法，EMG3-CHS-01）不受；否则（气体层 / 场）只排除云端空中单位（逐字同旧）。
         /// </summary>
-        private static void EmgUnitsInCircle(ref CombatData d, double2 pos, float radius, float damage, int ownerId, bool arc, float charge, int key, int4 owners, int chain)
+        private static void EmgUnitsInCircle(ref CombatData d, double2 pos, float radius, float damage, int ownerId, bool arc, float charge, int key, int4 owners, int chain, bool groundLayer)
         {
             int src = ownerId > 0 ? d.SlotOf(ownerId) : -1;
             float fs = d.Config.EmgFriendlyScale > 0f ? d.Config.EmgFriendlyScale : 1f;
             for (int u = 0; u < d.Count; u++)
             {
-                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure || IsAir(ref d, u) || math.distance(d.Pos[u], pos) > radius + d.Radius[u] * 0.5f)
+                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure || (groundLayer ? ChsAirborne(ref d, u) : IsAir(ref d, u)) || math.distance(d.Pos[u], pos) > radius + d.Radius[u] * 0.5f)
                 {
                     continue;
                 }
@@ -774,7 +775,7 @@ namespace BinGames.Sim.Combat
         /// <summary>单位过热（积热首次越过阈值）：站在 b 物质斑块里时按 event_matter 的 evt.overheat 规则喷蒸汽（V04 / V05），消耗那块斑块固定份量。</summary>
         internal static void EmgOverheatRules(ref CombatData d, int u)
         {
-            if (!EmgRulesOn(ref d) || d.EmgS[0].PatchLive <= 0 || IsAir(ref d, u))
+            if (!EmgRulesOn(ref d) || d.EmgS[0].PatchLive <= 0 || ChsAirborne(ref d, u))
             {
                 return;
             }
@@ -1151,7 +1152,7 @@ namespace BinGames.Sim.Combat
             double big = BigROf(ref d);
             for (int u = 0; u < d.Count; u++)
             {
-                if (d.IsAlive(u) && !IsAir(ref d, u) && d.Kind[u] != (byte)CombatUnitKind.Structure && math.distance(d.Pos[u], at) <= big && InAcid(ref d, d.Pos[u]) && !EmgMudded(ref d, u) && !EmgElecShed(ref d, u, q))
+                if (d.IsAlive(u) && !ChsAirborne(ref d, u) && d.Kind[u] != (byte)CombatUnitKind.Structure && math.distance(d.Pos[u], at) <= big && InAcid(ref d, d.Pos[u]) && !EmgMudded(ref d, u) && !EmgElecShed(ref d, u, q))
                 {
                     EmgAddAcc(ref d, u, EmgPhaseConst.Charge, q, ownerId);
                 }
@@ -1488,7 +1489,7 @@ namespace BinGames.Sim.Combat
             var hits = new NativeList<int2>(EmgMatterConst.ContactPerUnit + 1, Allocator.Temp);
             for (int u = 0; u < d.Count; u++)
             {
-                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure || (d.EmgUnit[u].PrevMatterMask & condMask) == 0u || IsAir(ref d, u) || EmgMudded(ref d, u)) // C07：泥浆附着不进传导图
+                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure || (d.EmgUnit[u].PrevMatterMask & condMask) == 0u || ChsAirborne(ref d, u) || EmgMudded(ref d, u)) // C07：泥浆附着不进传导图
                 {
                     continue;
                 }
@@ -1814,7 +1815,7 @@ namespace BinGames.Sim.Combat
                 if (patches && st.PrevMatterMask != 0u && d.Kind[u] != (byte)CombatUnitKind.Structure)
                 {
                     hits.Clear();
-                    PatchesAt(ref d, d.Pos[u], IsAir(ref d, u), ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);
+                    PatchesAt(ref d, d.Pos[u], ChsAirborne(ref d, u), ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);
                     float hot = amb;
                     for (int h = 0; h < hits.Length; h++)
                     {
@@ -1927,7 +1928,7 @@ namespace BinGames.Sim.Combat
         internal static double2 EmgAvoidAdjust(ref CombatData d, int i, double2 pos, double2 next)
         {
             if (d.EmgS[0].PatchLive <= 0 || !EmgPatchesOn(ref d) || d.Faction[i] != (byte)CombatFaction.Player || d.Has(i, CombatUnitFlags.NoHazardAvoid)
-                || d.Has(i, CombatUnitFlags.Possessed) || IsAir(ref d, i))
+                || d.Has(i, CombatUnitFlags.Possessed) || ChsAirborne(ref d, i))
             {
                 return next;
             }
@@ -2026,7 +2027,7 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static int EmgPathHazard(ref CombatData d, int i, double2 from, double2 to)
         {
-            if (d.EmgS[0].PatchLive <= 0 || !EmgPatchesOn(ref d) || IsAir(ref d, i))
+            if (d.EmgS[0].PatchLive <= 0 || !EmgPatchesOn(ref d) || ChsAirborne(ref d, i))
             {
                 return -1;
             }

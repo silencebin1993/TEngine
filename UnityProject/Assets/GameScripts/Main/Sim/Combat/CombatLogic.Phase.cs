@@ -302,7 +302,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            if (matter != 0u && !IsAir(ref d, i))
+            if (matter != 0u && !ChsAirborne(ref d, i))
             {
                 PhaseContact(ref d, i, matter, dt);
             }

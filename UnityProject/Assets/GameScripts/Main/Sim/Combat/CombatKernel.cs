@@ -3148,6 +3148,7 @@ namespace BinGames.Sim.Combat
             staging.EmgRuleOrder.CopyFrom(_d.EmgRuleOrder);
             staging.EmgPhases.CopyFrom(_d.EmgPhases); // EMG2-PHS-01：相态规则同是表数据
             staging.EmgFieldRules.CopyFrom(_d.EmgFieldRules); // EMG2-FLD-01：场 × 载体规则同是表数据
+            staging.EmgTraitParams.CopyFrom(_d.EmgTraitParams); // EMG3-CHS-01：底盘特性 / 冲刺参数同是表数据（emg.trait.* / emg.dash.*）
             staging.ShockBit = _d.ShockBit;
             CombatLogic.MigrateClarityPhase(ref staging); // EMG2-PHS-01（ADR ⑭ #5 #9、⑩ 15 → 17）：云端受寒 / 冻结 / 免疫窗 → 寒量与冻结相态；免疫位 → 抗性覆盖
             RemapProfiles(ref staging, _d.EmgProfileKeys);

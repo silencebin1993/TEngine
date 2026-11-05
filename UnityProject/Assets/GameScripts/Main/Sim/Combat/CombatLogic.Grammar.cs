@@ -257,8 +257,10 @@ namespace BinGames.Sim.Combat
         /// <summary>
         /// 寻的挑目标（FG19A 第 0.3 节第 8 条：已标记 &gt; 热信号 &gt; 最近）：<paramref name="radius"/> 内、<paramref name="fwd"/> 前方半平面里的敌对可选中单位；
         /// 偏好“热信号”只在候选之间确有热差时生效（无热差取最近）。没有候选返回 −1。O(单位数)，只在生成 / 目标阵亡时调用。
+        /// EMG3-CHS-01 修复轮（FgAct1SelfCheck C11）：<paramref name="nearestFallback"/> = false（开火时已有开火目标）时，偏好都不成立返回 −1、留在开火目标上，
+        /// 不改锁“最近”（与“没有偏好 → 开火目标”同一口径）。否则贴身混战里每一发都从正前方的开火目标拐向旁边略近的一个，按转向率拐不过去，两头都打不中，攻击命令永远打不完。
         /// </summary>
-        private static int EmgPickHoming(ref CombatData d, double2 pos, float2 fwd, float radius, byte want, EmgInstrFlags pref, int excludeId)
+        private static int EmgPickHoming(ref CombatData d, double2 pos, float2 fwd, float radius, byte want, EmgInstrFlags pref, int excludeId, bool nearestFallback = true)
         {
             double now = d.Scalars[0].Time;
             double r2 = (double)radius * radius;
@@ -304,7 +306,7 @@ namespace BinGames.Sim.Combat
             {
                 return hot;
             }
-            return nearest;
+            return nearestFallback ? nearest : -1;
         }
 
         /// <summary>
@@ -397,7 +399,7 @@ namespace BinGames.Sim.Combat
                 pr.Mods |= EmgProjMods.Steer;
                 if ((m.SteerPref & (EmgInstrFlags.PreferMarked | EmgInstrFlags.PreferHeat)) != 0 || targetId == 0)
                 {
-                    int k = EmgPickHoming(ref d, pr.Pos, dir, m.SteerRadius > 0f ? m.SteerRadius : 13f, want, m.SteerPref, 0);
+                    int k = EmgPickHoming(ref d, pr.Pos, dir, m.SteerRadius > 0f ? m.SteerRadius : 13f, want, m.SteerPref, 0, targetId == 0);
                     if (k >= 0)
                     {
                         pr.HomingTarget = d.Id[k];

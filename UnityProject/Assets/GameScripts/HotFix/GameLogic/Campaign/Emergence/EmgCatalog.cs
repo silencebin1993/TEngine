@@ -84,6 +84,8 @@ namespace GameLogic.Campaign.Emergence
         public float P0, P1, P2, P3;
         public byte Stage;
         public bool Reserved;
+        /// <summary>EMG3-CHS-01：名称 / 说明文本键（emg.trait.<短名>.name / .desc；蓝图编辑器与底盘悬停显示）。</summary>
+        public string NameKey, DescKey;
     }
 
     /// <summary>编译输入（与五张表一一对应的平铺行）：正式路径由 <see cref="EmgCatalog.FromTables"/> 从 Luban 表生成；自检直接构造坏行做负向矩阵。</summary>
@@ -166,7 +168,7 @@ namespace GameLogic.Campaign.Emergence
     {
         /// <summary>已实现的最高 FG-EMG 阶段：emg.stage 填得更高时钳到这里（卡片负向“emg.stage 填高于已实现阶段”）。EMG1-KRN-01 铺好阶段 1 内核结构后为 1；
         /// EMG2-MAT-01 铺好阶段 2 内核状态段（快照 17：斑块、累积量与相态、活跃场、规则计数）后提到 2。阶段 2 的端口按承接卡逐张接通，见 <see cref="PendingPorts"/>。</summary>
-        public const int ImplementedStage = 2;
+        public const int ImplementedStage = 3;
 
         /// <summary>
         /// EMG2-MAT-01（按推荐默认执行（2026-11-01），待用户确认）：阶段 2 已开、但内核还没有执行者的端口（按端口，不按内容 ID，FGR-EMG-013）。
@@ -174,7 +176,9 @@ namespace GameLogic.Campaign.Emergence
         /// 每张承接卡接通后从这里删掉对应项：fld.* → EMG2-FLD-01；ent.wreck → EMG2-RECL-01；en.* → EMG2-RULE-01（已接通）；evt.react 读端 → EMG2-REACT-02（DEBT-EMG2RULE01-08）；prop.heat → EMG2-PHS-01（DEBT-EMG2RULE01-11）；物质端口的 modify（蔓延 / 随车）→ EMG2-RECL-01。
         /// 前缀以“.”结尾按族匹配，否则整串匹配。
         /// </summary>
-        public static readonly string[] PendingPorts = { "evt.react", "prop.heat" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
+        // EMG3-CHS-01（阶段 3 开，按推荐默认执行（2026-11-05），待用户确认）：chs.* 由本卡接通；节拍（evt.beat / tmp.*，EMG3-TMP）、跨机协同（sqd.* / evt.ping，EMG3-SQD）、
+        // 元程序（meta.*，EMG3-META）、落点接线（grm.anchor）还没有执行者，用到它们的阶段 3 owner 整条继续走旧轨
+        public static readonly string[] PendingPorts = { "evt.react", "prop.heat", "evt.beat", "evt.ping", "tmp.", "sqd.", "meta.", "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
 
         /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>）。EMG2-RECL-01：物质端口的 modify（蔓延）已由内核执行（CombatLogic.EmgSpread），不再算未接通。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)
@@ -258,6 +262,63 @@ namespace GameLogic.Campaign.Emergence
         }
 
         public static void ResetForTests() => OverrideForTests(null);
+
+        /// <summary>
+        /// EMG3-CHS-01（FGR-EMG-140 / 141）：这种底盘此刻生效的特性行（阶段 3 已开、行阶段 ≤ 生效阶段、不是预留行）。底盘 → 特性只查 fg.TbChassisTrait，不在别处按底盘 ID 分支。
+        /// </summary>
+        public static bool TryGetActiveTrait(string chassisId, out EmgTraitRow row) =>
+            TryGetTrait(chassisId, out row) && !row.Reserved && row.Stage <= Current.EffectiveStage && row.Kind != EmgTraitKind.None;
+
+        /// <summary>EMG3-CHS-01：机制 → 特性行（悬停用：内核只存机制，名称 / 说明从表里这一行取）。</summary>
+        public static bool TryGetTraitOfKind(byte kind, out EmgTraitRow row)
+        {
+            foreach (EmgTraitRow t in Current.Traits)
+            {
+                if ((byte)t.Kind == kind)
+                {
+                    row = t;
+                    return true;
+                }
+            }
+            row = default;
+            return false;
+        }
+
+        /// <summary>
+        /// EMG3-CHS-01（卡片“蓝图编辑器与底盘悬停显示特性名称与说明”）：特性说明行“底盘特性：名称——说明”；没生效时注明原因（阶段 3 未开 / 预留底盘）。没有特性行返回 null。
+        /// </summary>
+        public static string TraitTip(in EmgTraitRow row)
+        {
+            if (string.IsNullOrEmpty(row.NameKey))
+            {
+                return null;
+            }
+            string name = Localization.GameText.Get(row.NameKey), desc = Localization.GameText.Get(row.DescKey);
+            if (row.Reserved || row.Stage > Current.EffectiveStage)
+            {
+                return Localization.GameText.Format("emg.trait.tip_off", name, desc, Localization.GameText.Get(row.Reserved ? "emg.trait.off_reserved" : "emg.trait.off_stage"));
+            }
+            return Localization.GameText.Format("emg.trait.tip", name, desc);
+        }
+
+        /// <summary>蓝图编辑器底盘选项文字：“原文 · 特性：名称”。没有特性行原样返回。</summary>
+        public static string TraitOption(string chassisId, string label) =>
+            TryGetTrait(chassisId, out EmgTraitRow row) && !string.IsNullOrEmpty(row.NameKey) ? Localization.GameText.Format("emg.trait.option", label, Localization.GameText.Get(row.NameKey)) : label;
+
+        /// <summary>这种底盘的特性行（不看是否生效；蓝图编辑器预览“阶段 3 未开 / 预留”时仍显示名称并注明）。
+        /// 机器记录的 ChassisId 是具体机型（erc_001 / 002 / 003），先经 <see cref="Content.ChassisCatalog.ResolveArchetype"/> 译成底盘内容 ID 再查表（审查 P0：直接查会 miss）。</summary>
+        public static bool TryGetTrait(string chassisId, out EmgTraitRow row)
+        {
+            EmgCompiled c = Current;
+            row = default;
+            string key = string.IsNullOrEmpty(chassisId) ? null : Content.ChassisCatalog.ResolveArchetype(chassisId) ?? chassisId;
+            if (key == null || !c.TraitByChassis.TryGetValue(key, out int k) || k < 0 || k >= c.Traits.Length)
+            {
+                return false;
+            }
+            row = c.Traits[k];
+            return true;
+        }
 
         /// <summary>此刻生效的 FG-EMG 阶段（emg.stage 钳到 0～<see cref="ImplementedStage"/>）。</summary>
         public static int EffectiveStage => Current.EffectiveStage;
@@ -949,6 +1010,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     Kind = kind, StatePort0 = spCodes.Count > 0 ? spCodes[0] : (ushort)0, StatePort1 = spCodes.Count > 1 ? spCodes[1] : (ushort)0,
                     P0 = param[0], P1 = param[1], P2 = param[2], P3 = param[3], Stage = (byte)t.Stage, Reserved = t.Reserved == 1,
+                    NameKey = t.NameKey, DescKey = t.DescKey,
                 });
             }
             c.Traits = traits.ToArray();

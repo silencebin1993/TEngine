@@ -1128,6 +1128,23 @@ namespace GameLogic.EditorTools
             }
             using (var k = new CombatKernel(Cfg(), 16))
             {
+                // EMG3-CHS-01 修复轮（FgAct1SelfCheck C11）：只有热信号偏好、候选之间没有热差 → 留在开火目标 N（远一点），不改锁更近的 C；
+                // C 确实更热时照旧改锁 C（偏好成立）
+                int ph = Tree(k, Root().Verb(EmgVerb.Steer, 1f, 30f, 180f, 13f, 0f, EmgInstrFlags.PreferHeat));
+                int w = k.AddWeapon(Flight(ph));
+                int me = Me(k, new double2(0, 0), w), me2 = Me(k, new double2(40, 0), w);
+                int nn = Foe(k, new double2(0, 9)), cc = Foe(k, new double2(1.5, 5));
+                int nn2 = Foe(k, new double2(40, 9)), cc2 = Foe(k, new double2(41.5, 5));
+                k.SetWeaponState(cc2, 60f, false, 0, 0);
+                k.FireAt(me, nn, k.Time);
+                k.FireAt(me2, nn2, k.Time);
+                var lockedBy = Projs(k).OrderBy(x => x.Pos.x).Select(x => x.HomingTarget).ToArray();
+                int flat = lockedBy.Length == 2 ? lockedBy[0] : -1, hotter = lockedBy.Length == 2 ? lockedBy[1] : -1;
+                Expect(flat == nn && hotter == cc2,
+                    $"热信号偏好不成立（没有热差）→ 留在开火目标 N（锁 {flat}，N = {nn}），不改锁更近的 C（否则贴身混战里每发都从开火目标拐向旁边一个、拐不过去两头落空）；C 更热时改锁 C（{hotter} = {cc2}）");
+            }
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
                 int p = Tree(k, Root().Verb(EmgVerb.Steer, 1f, 30f, 180f, 13f));
                 int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 10f, 3f)));
                 int first = Foe(k, new double2(0, 12));

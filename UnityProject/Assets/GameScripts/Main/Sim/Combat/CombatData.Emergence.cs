@@ -14,6 +14,12 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgWire> Wires;
         /// <summary>EMG2-REACT-02：单位身上正在走的 C05 / C07 计时（只有中招的单位才有一行）。</summary>
         public NativeList<EmgCoatFx> CoatFx;
+        /// <summary>EMG3-CHS-01：碾压拖带 / 拖挂单位的运行态（快照段 22；只有这两种特性的单位有一行）。</summary>
+        public NativeList<EmgTraitRun> TraitRun;
+        /// <summary>EMG3-CHS-01（ADR ⑩ 版本 18）：元程序运行态（快照段 23；本卡只铺结构，执行者归元程序卡，表恒空）。</summary>
+        public NativeList<EmgMetaRun> MetaRun;
+        /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
+        public NativeArray<float4> EmgTraitParams;
         /// <summary>EMG2-MAT-01：物质数值表（下标 = 物质码 1～17；热更层按 fg.TbMatter 写，是表数据，读档沿用当前的）。</summary>
         public NativeArray<EmgMatter> EmgMatters;
         /// <summary>EMG2-RULE-01：编好的通道规则（fg.TbChannelRule，≤ 256；表数据，读档沿用当前的）与按物质码的索引（int2 = EmgRuleOrder 里的起点、条数；按优先级升序）。</summary>
@@ -42,6 +48,9 @@ namespace BinGames.Sim.Combat
             Fields = new NativeList<EmgField>(4, Allocator.Persistent);
             Wires = new NativeList<EmgWire>(4, Allocator.Persistent);
             CoatFx = new NativeList<EmgCoatFx>(4, Allocator.Persistent);
+            TraitRun = new NativeList<EmgTraitRun>(4, Allocator.Persistent);
+            MetaRun = new NativeList<EmgMetaRun>(0, Allocator.Persistent);
+            EmgTraitParams = new NativeArray<float4>(EmgTraitConst.Count, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
             EmgRules = new NativeList<EmgRule>(8, Allocator.Persistent);
             EmgRuleIdx = new NativeArray<Unity.Mathematics.int2>(EmgRuleConst.IndexSlots, Allocator.Persistent);
@@ -119,6 +128,9 @@ namespace BinGames.Sim.Combat
             Fields.Dispose();
             Wires.Dispose();
             CoatFx.Dispose();
+            TraitRun.Dispose();
+            MetaRun.Dispose();
+            EmgTraitParams.Dispose();
             EmgMatters.Dispose();
             EmgRules.Dispose();
             EmgRuleIdx.Dispose();
@@ -188,6 +200,8 @@ namespace BinGames.Sim.Combat
             Fields.Clear();
             Wires.Clear();
             CoatFx.Clear();
+            TraitRun.Clear();
+            MetaRun.Clear();
             EmgStructPending.Clear();
             EmgStructOut.Clear();
             EmgPending.Clear();

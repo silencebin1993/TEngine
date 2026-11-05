@@ -204,7 +204,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// C04 闪络：这股电改跳 p3 米内最近的另一个导体（单位 / 导电斑块 / 残骸，含己方），量 × p1；附近没有导体就消散。
-        /// 哨戒桩不存电荷（无人机没有电荷状态），不算跳点（待用户复核的决策，证据 emg2-react-02）。O(单位 + 斑块 + 残骸)，只在闪络那一刻。
+        /// EMG3-CHS-01（DEBT-EMG2REACT02-04，格式 18）：哨戒桩（定点无人机）也是导体，算跳点（电荷记在 <see cref="CombatDrone.Charge"/>，每秒衰减）。O(单位 + 斑块 + 残骸 + 无人机)，只在闪络那一刻。
         /// </summary>
         private static void EmgCoatFlash(ref CombatData d, int u, in EmgRule r, float energy, int chain, byte depth)
         {
@@ -216,7 +216,7 @@ namespace BinGames.Sim.Combat
             }
             double2 pos = d.Pos[u];
             double best = reach + 1e-6;
-            int bestUnit = -1, bestPatch = -1, bestWreck = -1;
+            int bestUnit = -1, bestPatch = -1, bestWreck = -1, bestDrone = -1;
             for (int v = 0; v < d.Count; v++)
             {
                 if (v == u || !d.IsAlive(v) || d.Kind[v] == (byte)CombatUnitKind.Structure || IsAir(ref d, v) || !EmgUnitConducts(ref d, v))
@@ -261,7 +261,31 @@ namespace BinGames.Sim.Combat
                     bestWreck = w;
                 }
             }
-            if (bestUnit >= 0)
+            for (int k = 0; k < d.Drones.Length; k++)
+            {
+                CombatDrone dr = d.Drones[k];
+                if (dr.Anchored == 0)
+                {
+                    continue; // 只有哨戒桩（定点、落地）是导体；飞行无人机在空中，不接地面电弧
+                }
+                double dist = math.distance(pos, dr.Pos);
+                if (dist < best)
+                {
+                    best = dist;
+                    bestUnit = -1;
+                    bestPatch = -1;
+                    bestWreck = -1;
+                    bestDrone = k;
+                }
+            }
+            if (bestDrone >= 0)
+            {
+                CombatDrone dr = d.Drones[bestDrone];
+                dr.Charge += q;
+                d.Drones[bestDrone] = dr;
+                Cue(ref d, CombatEventKind.PhaseCue, u, d.Id[u], q, dr.Pos, 64); // 64 = 电弧连线（落点 = 哨戒桩）
+            }
+            else if (bestUnit >= 0)
             {
                 EmgAddAcc(ref d, bestUnit, EmgPhaseConst.Charge, q, d.Id[u], enterNow: false);
                 Cue(ref d, CombatEventKind.PhaseCue, bestUnit, d.Id[u], q, d.Pos[bestUnit], 64); // 64 = 电弧连线
@@ -647,7 +671,7 @@ namespace BinGames.Sim.Combat
             int killer = d.SlotOf(f.Owner);
             EmgDestroyDirect(ref d, u, killer);
             float rad = r.P1 > 0f ? r.P1 : 3f;
-            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f, r.Key, new int4(f.Owner, 0, 0, 0), f.Chain);
+            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f, r.Key, new int4(f.Owner, 0, 0, 0), f.Chain, false); // 场的湮灭爆发不是地面层斑块
             EmgBurstPatches(ref d, pos, rad, r.P4, r.P3);
             return true;
         }
@@ -729,7 +753,7 @@ namespace BinGames.Sim.Combat
             var inside = new NativeList<int2>(8, Allocator.Temp); // (Id, 槽位)
             for (int v = 0; v < d.Count; v++)
             {
-                if (!d.IsAlive(v) || IsAir(ref d, v) || !CanDisplace(ref d, v))
+                if (!d.IsAlive(v) || ChsAirborne(ref d, v) || !CanDisplace(ref d, v))
                 {
                     continue;
                 }
@@ -764,7 +788,7 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static double2 EmgBlockClamp(ref CombatData d, int i, double2 from, double2 to)
         {
-            if (!d.EmgUnit.IsCreated || d.Patches.Length == 0 || (i >= 0 && i < d.Count && IsAir(ref d, i)))
+            if (!d.EmgUnit.IsCreated || d.Patches.Length == 0 || (i >= 0 && i < d.Count && ChsAirborne(ref d, i))) // EMG3-CHS-01：离地（chs.airborne）不受地面固态斑块阻挡（ADR-EMG-001 固态斑块条）
             {
                 return to;
             }
