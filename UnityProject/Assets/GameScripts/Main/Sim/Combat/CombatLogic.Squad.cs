@@ -247,15 +247,15 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// FGR-EMG-172 中继组部分（DEBT-EMG3TMP01-02）：本拍各机器执行的节拍指令（<paramref name="machine"/>：单位 ID → 序号位）里，和别的机器同在一个中继组的，
-        /// 组内合计 ≥ 2 条就对这些机器置 tmp.sync。返回置位的机器集合（调用方 Dispose）。没有中继机器时返回空集合。O(本拍出拍机器数² × 中继机器数)。
+        /// 组内合计 ≥ 2 条就对这些机器置 tmp.sync。返回置位的机器集合（调用方查 IsCreated 后 Dispose）。没有中继机器时不分配、返回 default。O(本拍出拍机器数² × 中继机器数)。
         /// </summary>
         internal static NativeHashSet<int> EmgGroupSync(ref CombatData d, NativeHashMap<int, ulong> machine)
         {
-            var synced = new NativeHashSet<int>(4, Allocator.Temp);
             if (d.Relays.Length == 0 || machine.Count < 2)
             {
-                return synced;
+                return default;
             }
+            var synced = new NativeHashSet<int>(4, Allocator.Temp);
             NativeArray<int> ids = machine.GetKeyArray(Allocator.Temp);
             for (int i = 0; i < ids.Length; i++)
             {

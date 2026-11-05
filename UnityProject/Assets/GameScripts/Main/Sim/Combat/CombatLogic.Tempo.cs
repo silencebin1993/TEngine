@@ -167,7 +167,7 @@ namespace BinGames.Sim.Combat
             for (int h = 0; h < hosts.Length; h++)
             {
                 BeatHost b = hosts[h];
-                bool sync = machine.TryGetValue(b.Owner, out ulong em) && (math.countbits(em) >= 2 || group.Contains(b.Owner)) && !used.Contains(b.Owner);
+                bool sync = machine.TryGetValue(b.Owner, out ulong em) && (math.countbits(em) >= 2 || (group.IsCreated && group.Contains(b.Owner))) && !used.Contains(b.Owner);
                 ulong allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, sync);
                 if ((b.Reads & allow) == 0UL)
                 {
@@ -185,7 +185,10 @@ namespace BinGames.Sim.Combat
                 EmgBeatEmit(ref d, b, beat, allow, took);
             }
             used.Dispose();
-            group.Dispose();
+            if (group.IsCreated)
+            {
+                group.Dispose();
+            }
             machine.Dispose();
             hosts.Dispose();
         }

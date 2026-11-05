@@ -661,22 +661,17 @@ namespace BinGames.Sim.Combat
             {
                 for (int cx = x0; cx <= x1; cx++)
                 {
-                    if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(cx, cy), out int e, out NativeParallelMultiHashMapIterator<long> it))
+                    // FG-EMG-3 性能回收：斑块专用格链 + 只读引用（与 Cells 同一组登记；InsertNearest 按 (距离, Id) 排序截断，与遍历顺序无关）
+                    for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(cx, cy)] - 1; node >= 0;)
                     {
-                        continue;
-                    }
-                    do
-                    {
-                        if ((byte)d.EmgHash.Entries[e].w != EmgHash.KindPatch)
+                        int4 cell = d.EmgHash.PatchNodes[node];
+                        node = cell.w;
+                        int j = cell.z;
+                        if (cell.x != cx || cell.y != cy || j == i || j >= d.Patches.Length || ContainsX(near, j))
                         {
                             continue;
                         }
-                        int j = d.EmgHash.Refs[e];
-                        if (j == i || j >= d.Patches.Length || ContainsX(near, j))
-                        {
-                            continue;
-                        }
-                        CombatZone o = d.Patches[j];
+                        ref CombatZone o = ref d.Patches.ElementAt(j);
                         if (!PatchAlive(o) || o.Layer != z.Layer || IsLegacy(o))
                         {
                             continue; // EMG2-MAT-02：迁入斑块不合并、不被吸收（按区域载荷与时长结算）
@@ -688,7 +683,6 @@ namespace BinGames.Sim.Combat
                         }
                         InsertNearest(ref d, ref near, new int2(j, (int)math.min(dist * 1000.0, int.MaxValue)), cap);
                     }
-                    while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
                 }
             }
             for (int k = 0; k < near.Length; k++)
@@ -842,22 +836,18 @@ namespace BinGames.Sim.Combat
             // EMG2-MAT-02（ADR ⑤ / ⑭ #13；FG19B §1.4 第 11 条）：酸沼 = 常驻 mat.acid 虚拟世界源——不实体化为斑块、不进 EmgHash、不占槽，按点是否在危害区查询；
             // 只并进物质掩码（evt.enter / leave、PrevMatterMask、规则引擎读），接触伤害仍是 StepAcidMarsh（不另挂沾染，不双算）；离地实体不吃（地面层）。
             uint mask = !airborne && d.AcidShapes.Length > 0 && InAcid(ref d, p) ? 1u << EmgMatterConst.Acid : 0u;
-            if (!d.EmgHash.Cells.TryGetFirstValue(EmgHash.Key(EmgHash.CellOf(p.x), EmgHash.CellOf(p.y)), out int e, out NativeParallelMultiHashMapIterator<long> it))
+            // FG-EMG-3 性能回收：走斑块专用格链（与 Cells 里的斑块登记同一组，EmgHashAdd），只读引用；结果按 (距离, Id) 插入、掩码按位或，与遍历顺序无关
+            int pcx = EmgHash.CellOf(p.x), pcy = EmgHash.CellOf(p.y);
+            for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(pcx, pcy)] - 1; node >= 0;)
             {
-                return mask;
-            }
-            do
-            {
-                if ((byte)d.EmgHash.Entries[e].w != EmgHash.KindPatch)
+                int4 cell = d.EmgHash.PatchNodes[node];
+                node = cell.w;
+                int j = cell.z;
+                if (cell.x != pcx || cell.y != pcy || j >= d.Patches.Length)
                 {
                     continue;
                 }
-                int j = d.EmgHash.Refs[e];
-                if (j >= d.Patches.Length)
-                {
-                    continue;
-                }
-                CombatZone z = d.Patches[j];
+                ref CombatZone z = ref d.Patches.ElementAt(j);
                 if (!PatchAlive(z) || (airborne && z.Layer == EmgMatterConst.LayerGround))
                 {
                     continue;
@@ -874,7 +864,6 @@ namespace BinGames.Sim.Combat
                 }
                 InsertNearest(ref d, ref hits, new int2(j, (int)math.min(dist * 1000.0, int.MaxValue)), cap);
             }
-            while (d.EmgHash.Cells.TryGetNextValue(out e, ref it));
             return mask;
         }
 
