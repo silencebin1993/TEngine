@@ -64,6 +64,14 @@
       },
       "hash": "703ec434f4a5a56863991c8954015c3a3150ec37"
     },
+    "com.tripo3d.unitybridge": {
+      "version": "file:com.tripo3d.unitybridge",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.modules.jsonserialize": "1.0.0"
+      }
+    },
     "com.tuyoogame.yooasset": {
       "version": "file:YooAsset",
       "depth": 0,
