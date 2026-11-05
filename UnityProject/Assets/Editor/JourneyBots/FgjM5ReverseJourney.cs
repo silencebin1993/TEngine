@@ -61,7 +61,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("sel_b", "左键点另一台机器", 20, c => FgjM1Journey.ClickMachine(c, "workerB"), c => FgjM1Journey.TickSelected(c, "workerB"), retries: 4),
                 S("repair_gen", "右键点受损的发电机", 15, c => FgjM1Journey.RightClickBuilding(HomeValleyLayout.BuildingTypeGenerator),
                     c => FgjM1Journey.TickRepairOrdered(c, HomeValleyLayout.BuildingTypeGenerator), retries: 2),
-                S("wait_rep", "等仓库与发电机修好", 300, null, c => FgjM3Common.TickRepaired(c, HomeValleyLayout.BuildingTypeWarehouse, HomeValleyLayout.BuildingTypeGenerator)),
+                JourneyCommon.PureWait(S("wait_rep", "等仓库与发电机修好", 300, null, c => FgjM3Common.TickRepaired(c, HomeValleyLayout.BuildingTypeWarehouse, HomeValleyLayout.BuildingTypeGenerator))),
                 S("salv_sel", "左键点机器", 20, c => FgjM1Journey.ClickMachine(c, "workerA"), c => FgjM1Journey.TickSelected(c, "workerA"), retries: 4),
                 S("salvage", "右键点开局残骸（拆解）", 20, FgjM2Common.RightClickWreck, FgjM2Common.TickSalvageOrdered, retries: 4),
                 S("salv_wait", "等残骸拆完", 180, null, FgjM2Common.TickSalvageDone),
@@ -101,7 +101,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("place", "放发电机 2（电不够时）、仿真实验室、电路合成台", 200, null, c => P.TickActions(c, "r5", 40), retries: 2),
                 S("build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("built", "机器取料施工：全部建成、接上电；实验室开始把技术数据换成研究点", 900, null, c => M.TickBuilt(c, Batch, Array.Empty<string>(), true, "实验室与合成台")),
+                JourneyCommon.PureWait(S("built", "机器取料施工：全部建成、接上电；实验室开始把技术数据换成研究点", 900, null, c => M.TickBuilt(c, Batch, Array.Empty<string>(), true, "实验室与合成台"))),
 
                 // ── 2. 资源不足（正式熔合缺芯片基板）──
                 S("r2_open", "建造模式里左键点电路合成台，通用面板上点“熔合…”", 40, null,

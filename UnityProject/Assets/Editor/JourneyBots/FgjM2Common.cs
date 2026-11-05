@@ -1405,7 +1405,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         internal static void SampleFrame()
         {
-            if (!_sampling || Time.frameCount == _lastFrame)
+            if (!_sampling || Time.frameCount == _lastFrame || JourneyFastForward.Active) // 快进中的帧被额外模拟步拉长，不算游戏帧耗时
             {
                 return;
             }

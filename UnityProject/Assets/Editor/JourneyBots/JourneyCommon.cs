@@ -33,6 +33,13 @@ namespace GameLogic.EditorTools.JourneyBots
             Tick = tick,
         };
 
+        /// <summary>FG-EMG-3：把一步标成纯等待（开了 JOURNEY_FASTFORWARD 时这一步快进），见 <see cref="JourneyStep.PureWait"/>。</summary>
+        public static JourneyStep PureWait(JourneyStep step)
+        {
+            step.PureWait = true;
+            return step;
+        }
+
         // ── 进入游戏 ────────────────────────────────────────────────────────────────
 
         public static void EnterPlay(JourneyContext c)

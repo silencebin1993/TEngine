@@ -49,6 +49,11 @@ namespace GameLogic.EditorTools.JourneyBots
         public Func<JourneyContext, StepOutcome> Tick;
         /// <summary>重来之前的收拾（例如关掉半开的面板）；之后会再调 <see cref="OnEnter"/>。</summary>
         public Action<JourneyContext> OnRetry;
+        /// <summary>
+        /// FG-EMG-3：纯等待步骤——没有输入、只等游戏时间推进（等突袭预警、等施工、等分析……）。开了快进（JOURNEY_FASTFORWARD）时这一步按倍数快进，
+        /// 下一步恢复原倍速。只标有把握的；点击 / 按键 / 测倍速与暂停 / 有时间窗的步骤不标。用 <c>JourneyCommon.PureWait(S(...))</c> 标。
+        /// </summary>
+        public bool PureWait;
     }
 
     /// <summary>一条旅程：固定种子 + 有序步骤。旅程只描述“做什么、看什么”，超时 / 重试 / 报告 / 跨域重载都归 <see cref="JourneyRunner"/>。</summary>
@@ -193,6 +198,9 @@ namespace GameLogic.EditorTools.JourneyBots
         /// </summary>
         public Action<JourneyRunner, JourneyStep, int> CheckpointWriter;
 
+        /// <summary>FG-EMG-3：空等快进器；null = 关闭（默认），报告与 JSON 与没有快进时逐字相同。</summary>
+        public IJourneyFastForward FastForward;
+
         public JourneyRunner(JourneyDef journey, IJourneyStore store, IJourneyClock clock)
         {
             Journey = journey ?? throw new ArgumentNullException(nameof(journey));
@@ -229,7 +237,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>开始（清掉上一次的状态，包括上一趟步骤写下的全部变量）。</summary>
         public void Start()
         {
-            foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "transient", "entered", "checkpoints" })
+            foreach (string k in new[] { "result", "failStep", "failReason", "durations", "retries", "transient", "entered", "checkpoints", "ffStep", "ffTotals" })
             {
                 Store.SetString(k, string.Empty);
             }
@@ -258,6 +266,10 @@ namespace GameLogic.EditorTools.JourneyBots
             if (!string.IsNullOrEmpty(Journey.ResumedFrom))
             {
                 Write($"⚠ 断点续跑：从“{Journey.ResumedFrom}”之后接着跑（v{Journey.Version}）——只用于迭代；交付验收必须从主菜单完整跑：bash tools/unity-journey.sh {Journey.Id}");
+            }
+            if (FastForward != null)
+            {
+                Write($"⏩ 空等快进开启：倍数 {FastForward.Multiplier:0.##}，只在 {Journey.Steps.Count(s => s.PureWait)} 个纯等待步骤里快进（{string.Join(" ", Journey.Steps.Where(s => s.PureWait).Select(s => s.Id))}）");
             }
         }
 
@@ -317,11 +329,36 @@ namespace GameLogic.EditorTools.JourneyBots
                     Write($"[{StepIndex + 1}/{Journey.Steps.Count}] {step.Id} {step.Title}{(Attempt > 0 ? $"（第 {Attempt + 1} 次尝试）" : string.Empty)}");
                     step.OnEnter?.Invoke(_ctx);
                 }
-                outcome = step.Tick != null ? step.Tick(_ctx) : StepOutcome.Done();
+                StepOutcome? settled = null;
+                if (FastForward != null && step.PureWait)
+                {
+                    if (Store.GetString("ffStep", string.Empty) != StepKey())
+                    {
+                        Store.SetString("ffStep", StepKey());
+                        FastForward.Begin();
+                        Write($"  ⏩ 快进开始（纯等待步骤，目标 {FastForward.Multiplier:0.##} 倍）");
+                    }
+                    // 在看条件之前多走几步游戏时间；每多走一步看一次条件，满足就停在那一步（结果直接用，不再看第二次）。
+                    bool pausedInPump = FastForward.Pump(() =>
+                    {
+                        StepOutcome o = step.Tick != null ? step.Tick(_ctx) : StepOutcome.Done();
+                        settled = o.Status == JourneyStepStatus.Pending ? (StepOutcome?)null : o;
+                        return settled.HasValue;
+                    });
+                    if (!settled.HasValue && pausedInPump)
+                    {
+                        return true; // 额外的步里世界刚自动暂停：与正常节奏一样，下一次驱动再看
+                    }
+                }
+                outcome = settled ?? (step.Tick != null ? step.Tick(_ctx) : StepOutcome.Done());
             }
             catch (Exception e)
             {
                 outcome = StepOutcome.Fail($"步骤抛异常：{e.GetType().Name}: {e.Message}");
+            }
+            if (outcome.Status != JourneyStepStatus.Pending || StepElapsed > step.TimeoutSeconds)
+            {
+                EndFastForward(); // 离开这一步（完成 / 失败 / 重试 / 超时）之前恢复原倍速
             }
 
             switch (outcome.Status)
@@ -437,12 +474,49 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private string StepKey() => StepIndex.ToString(CultureInfo.InvariantCulture) + "#" + Attempt.ToString(CultureInfo.InvariantCulture);
 
+        /// <summary>FG-EMG-3：正在快进就结束这一段，写一行（游戏秒、真实秒、倍数），累计到全程汇总。</summary>
+        private void EndFastForward()
+        {
+            if (FastForward == null || Store.GetString("ffStep", string.Empty).Length == 0)
+            {
+                return;
+            }
+            Store.SetString("ffStep", string.Empty);
+            (double game, double real, double normal) = FastForward.End();
+            double[] t = FastForwardTotals();
+            Store.SetString("ffTotals", string.Join(",", new[] { t[0] + game, t[1] + real, t[2] + normal, t[3] + 1 }.Select(x => x.ToString("R", CultureInfo.InvariantCulture))));
+            Write($"  ⏩ 快进结束：{game:F0} 游戏秒用了 {real:F1} 真实秒（原倍速约 {normal:F1} 秒，实际约 {(real > 0 ? normal / real : 0):F1} 倍，目标 {FastForward.Multiplier:0.##} 倍），省约 {Math.Max(0, normal - real):F0} 秒");
+        }
+
+        /// <summary>全程快进累计：游戏秒、真实秒、原倍速本该用的真实秒、段数。</summary>
+        private double[] FastForwardTotals()
+        {
+            string[] parts = Store.GetString("ffTotals", string.Empty).Split(',');
+            var t = new double[4];
+            for (int i = 0; i < 4 && parts.Length == 4; i++)
+            {
+                double.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out t[i]);
+            }
+            return t;
+        }
+
+        private string FastForwardSummary()
+        {
+            if (FastForward == null)
+            {
+                return string.Empty;
+            }
+            double[] t = FastForwardTotals();
+            return $"；快进开启，倍数 {FastForward.Multiplier:0.##}，{t[3]:F0} 段纯等待共 {t[0]:F0} 游戏秒用了 {t[1]:F0} 真实秒，共省约 {Math.Max(0, t[2] - t[1]):F0} 秒";
+        }
+
         private void Finish(bool pass, string stepId, string reason)
         {
             if (!Active)
             {
                 return;
             }
+            EndFastForward();
             Store.SetString("active", "0");
             Store.SetString("result", pass ? ResultPass : ResultFail);
             Store.SetString("failStep", stepId ?? string.Empty);
@@ -453,7 +527,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 Write($"  ✗ 失败于 {stepId}{(s != null ? " " + s.Title : string.Empty)}：{reason}");
             }
             Write($"结论：{(pass ? ResultPass : ResultFail)}（{(pass ? "完成" : reason)}，报错 {Errors} 条，用时 {TotalElapsed:F1} 秒" +
-                  $"{(string.IsNullOrEmpty(Journey.ResumedFrom) ? string.Empty : $"；断点续跑：从“{Journey.ResumedFrom}”之后，只用于迭代，不是交付验收")}）");
+                  $"{(string.IsNullOrEmpty(Journey.ResumedFrom) ? string.Empty : $"；断点续跑：从“{Journey.ResumedFrom}”之后，只用于迭代，不是交付验收")}{FastForwardSummary()}）");
             try
             {
                 Journey.OnFinish?.Invoke(_ctx, pass);
@@ -479,6 +553,14 @@ namespace GameLogic.EditorTools.JourneyBots
             sb.Append("\"seconds\":").Append(TotalElapsed.ToString("F2", CultureInfo.InvariantCulture)).Append(',');
             sb.Append("\"resumedFrom\":").Append(Quote(Journey.ResumedFrom ?? string.Empty)).Append(',');
             sb.Append("\"checkpoints\":[").Append(string.Join(",", List("checkpoints").Select(Quote))).Append("],");
+            if (FastForward != null)
+            {
+                double[] t = FastForwardTotals();
+                sb.Append("\"fastForward\":{\"multiplier\":").Append(FastForward.Multiplier.ToString("R", CultureInfo.InvariantCulture))
+                    .Append(",\"gameSeconds\":").Append(t[0].ToString("F1", CultureInfo.InvariantCulture))
+                    .Append(",\"realSeconds\":").Append(t[1].ToString("F1", CultureInfo.InvariantCulture))
+                    .Append(",\"savedSeconds\":").Append(Math.Max(0, t[2] - t[1]).ToString("F1", CultureInfo.InvariantCulture)).Append("},");
+            }
             sb.Append("\"steps\":[");
             bool first = true;
             foreach (string d in List("durations"))

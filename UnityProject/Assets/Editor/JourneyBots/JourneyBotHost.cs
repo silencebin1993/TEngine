@@ -86,6 +86,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>完整跑（不是续跑）且没被关掉（BINGAMES_JOURNEY_CHECKPOINTS=0）时，在登记的断点步骤写断点。</summary>
         private static void AttachCheckpointWriter(JourneyRunner runner)
         {
+            runner.FastForward = JourneyFastForward.FromEnvironment(); // FG-EMG-3：JOURNEY_FASTFORWARD 未设 = null（关闭）
             if (string.IsNullOrEmpty(runner.Journey.ResumedFrom) && SessionState.GetString(Prefix + "Checkpoints", "1") == "1")
             {
                 runner.CheckpointWriter = (r, step, index) => JourneyCheckpoints.Write(r, step, index);

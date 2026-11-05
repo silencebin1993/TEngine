@@ -116,7 +116,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 // ── 5. 家园突袭：残骸与冷渣留在防线前，下次突袭仍在 ──
                 S("dr_speed3", "点世界栏 3 倍速", 10, c => ClickSpeed("WorldSpeed3"), c => TickSpeed(c, 3f), retries: 1),
                 S("raid1_fix", "进度夹具：靶子清场；剧情节点触发一波突袭（M6R 同一入口），预警快进", 15, c => RequestRaid(c, "r1"), c => TickRaidRequested(c, "r1")),
-                S("raid1_warn", "突袭预警：预警条写明抵达点（到达时自动暂停就按暂停键继续）", 300, null, c => TickWarned(c, "r1")),
+                JourneyCommon.PureWait(S("raid1_warn", "突袭预警：预警条写明抵达点（到达时自动暂停就按暂停键继续）", 300, null, c => TickWarned(c, "r1"))),
                 S("team", "左键点一台、Shift 左键加选其余几台", 60, null, TickSelectTeam, retries: 2),
                 S("rally", "右键抵达点靠核心一侧的地面：全队开到防线", 15, null, TickRally),
                 S("raid1_up", "命令栏机器列表点 H 车：接入（镜头直控），信号核里的过载生效", 30, c => FgjM1Journey.ClickMachineList(c, c.GetInt("m.h")), c => TickUplinked(c, "m.h"), retries: 3),
@@ -125,7 +125,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("raid1_end", "突袭结束（撤走的敌人路过时还在开火，余波算在这一步）：防线前有残骸、有冷渣；记下编号", 60, c => { if (SignalPresence.CurrentMachineLogicId != 0) JourneyInput.PressAction(GameActionId.ToggleCameraView); }, TickRaidEnd),
 
                 S("raid2_fix", "进度夹具：再触发一波突袭（剧情入口），预警快进", 15, c => RequestRaid(c, "r2"), c => TickRaidRequested(c, "r2")),
-                S("raid2_arrive", "下一波部队到达、展开攻城：结算基线里上次的残骸与冷渣仍在，同样的编号还在内核里（FGR-EMG-150）", 500, null, TickSecondRaid),
+                JourneyCommon.PureWait(S("raid2_arrive", "下一波部队到达、展开攻城：结算基线里上次的残骸与冷渣仍在，同样的编号还在内核里（FGR-EMG-150）", 500, null, TickSecondRaid)),
             };
             return new JourneyDef
             {

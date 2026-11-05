@@ -54,6 +54,7 @@ namespace GameLogic.EditorTools
                 CheckResumeAfterReload();
                 CheckTransientUiRetry();
                 CheckCatalog();
+                CheckFastForward();
             }
             catch (Exception e)
             {
@@ -91,6 +92,51 @@ namespace GameLogic.EditorTools
                 n++;
             }
             return n;
+        }
+
+        private sealed class FakeFastForward : IJourneyFastForward
+        {
+            public int Begins, Pumps, Ends;
+            public double Multiplier => 10;
+            public void Begin() => Begins++;
+            public bool Pump(Func<bool> settled)
+            {
+                Pumps++;
+                settled(); // 假装多走了一步、看一次条件
+                return false;
+            }
+            public (double game, double real, double normal) End()
+            {
+                Ends++;
+                return (300, 10, 100);
+            }
+        }
+
+        /// <summary>FG-EMG-3：快进只在纯等待步骤里调（进一次、每次驱动泵一次、离开前结束一次）；不开快进时报告里没有任何快进字样。</summary>
+        private static void CheckFastForward()
+        {
+            var clock = new FakeClock();
+            var ff = new FakeFastForward();
+            int waited = 0;
+            JourneyRunner r = NewRunner(clock, new MemoryJourneyStore(),
+                Step("click", c => StepOutcome.Done()),
+                JourneyCommon.PureWait(Step("idle", c => ++waited < 3 ? StepOutcome.Wait : StepOutcome.Done())),
+                Step("assert", c => ff.Ends == 1 ? StepOutcome.Done() : StepOutcome.Fail("下一步开始时快进还没结束")));
+            r.FastForward = ff;
+            r.Start();
+            Drive(r, clock);
+            // 驱动 1：泵里看一次（1，未满足）+ 照常看一次（2）；驱动 2：泵里看一次（3，满足）→ 直接用这个结果，不再看第二次。
+            Expect(r.Result == JourneyRunner.ResultPass && ff.Begins == 1 && ff.Pumps == 2 && waited == 3 && ff.Ends == 1
+                   && r.Lines.Count(l => l.Contains("⏩ 快进结束")) == 1 && r.Lines.Any(l => l.Contains("结论：PASS") && l.Contains("共省约 90 秒"))
+                   && r.SummaryJson(true).Contains("\"savedSeconds\":90.0"),
+                $"快进开：只在纯等待步骤里进出各一次（进 {ff.Begins}、泵 {ff.Pumps}、出 {ff.Ends}），泵里条件满足就直接用那次结果（条件共看 {waited} 次），进出各打一行，结论行与 JSON 写明省了多少");
+
+            var offClock = new FakeClock();
+            var off = NewRunner(offClock, new MemoryJourneyStore(), JourneyCommon.PureWait(Step("idle", c => StepOutcome.Done())));
+            off.Start();
+            Drive(off, offClock);
+            Expect(off.Result == JourneyRunner.ResultPass && !off.Lines.Any(l => l.Contains("快进")) && !off.SummaryJson(true).Contains("fastForward"),
+                "快进关（默认）：标了纯等待的步骤照常跑，报告与 JSON 里没有任何快进字样（与没有本功能时逐字相同）");
         }
 
         private static void CheckHappyPath()

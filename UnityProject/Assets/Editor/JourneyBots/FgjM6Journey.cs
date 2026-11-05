@@ -93,19 +93,19 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rt_queue1", "依次点分支筛选、左键点节点排进研究队列：工业 · 精炼塔、防御 · 屏障与闸门、防御 · 护盾发生器、防御 · 陷阱发射器、防御 · 维修无人机站（队列上限 5）", 90, null,
                     c => D.TickQueueAll(c, QueueOne(c)), retries: 2),
                 S("rt_close", "再按研发树键关闭研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, false), c => M.TickTreeOpen(c, false), retries: 1),
-                S("m6_built1", "机器取料施工：回收站、发电机 2、两座实验室、第一座炮塔建成接电（第一座炮塔装着默认蓝图、在战斗内核里待命）", 1200, null, TickBuiltFirst),
+                JourneyCommon.PureWait(S("m6_built1", "机器取料施工：回收站、发电机 2、两座实验室、第一座炮塔建成接电（第一座炮塔装着默认蓝图、在战斗内核里待命）", 1200, null, TickBuiltFirst)),
                 S("build_open2", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("m6_place2", "其余五座轻型炮塔围着核心放下（同一张默认蓝图）", 200, null, c => P.TickActions(c, "m6t", 40), retries: 2),
                 S("build_close2", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("wait_ref", "等研究：工业 · 精炼塔（要电塔时连同能源 · 电塔 T2）", 900, null, c => D.TickResearched(c, RefineryNodes(c))),
+                JourneyCommon.PureWait(S("wait_ref", "等研究：工业 · 精炼塔（要电塔时连同能源 · 电塔 T2）", 900, null, c => D.TickResearched(c, RefineryNodes(c)))),
                 S("build_open3", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("m6_place3", "放精炼链：精炼塔、废液池、燃油口外一格管线与储罐、酸液口接废液池、油井上的泵、原油管线（建造栏点条目、指着格子单击、按住左键拖）", 300, null,
                     c => P.TickActions(c, "m6r", 40), retries: 2),
                 S("build_close3", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 // ── 暴露：第一次突袭排定后关信号塔广播（第一次突袭固定 1 级；暴露再往上冲到 90 会开始 4 级周期计时）──
-                S("exp_first", "看暴露：高功率生产把暴露推过 30，突袭导演排定第一次突袭（暴露面板“家园突袭：已排定 1 波”；开局宽限到第 5 个游戏日）", 2400, null, TickFirstPlanned),
+                JourneyCommon.PureWait(S("exp_first", "看暴露：高功率生产把暴露推过 30，突袭导演排定第一次突袭（暴露面板“家园突袭：已排定 1 波”；开局宽限到第 5 个游戏日）", 2400, null, TickFirstPlanned)),
                 S("exp_off1", "左键点信号塔打开远征准备面板，勾上“关闭信号塔主动广播”（每 10 游戏秒暴露 −2，带宽 −3），点“关闭”", 60, null, c => D.TickBroadcast(c, true), retries: 2),
-                S("wait_def", "等研究：防御 · 屏障与闸门、防御 · 护盾发生器", 1500, null, c => D.TickResearched(c, D.NodeBarrier, D.NodeShield)),
+                JourneyCommon.PureWait(S("wait_def", "等研究：防御 · 屏障与闸门、防御 · 护盾发生器", 1500, null, c => D.TickResearched(c, D.NodeBarrier, D.NodeShield))),
                 S("build_open4", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("m6_place4", "护盾发生器贴着核心放下", 120, null, c => P.TickActions(c, "m6s", 40), retries: 2),
                 S("m6_walls", "核心外一圈屏障 T2：建造栏“防御”分类选屏障 T2，每段按住左键从一端拖到另一端（拖拽中地面画敌方来路预览，放下的是虚影）", 400, null, D.TickWalls, retries: 2),
@@ -114,7 +114,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rt_open2", "按研发树键打开研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, true), c => M.TickTreeOpen(c, true), retries: 1),
                 S("rt_queue2", "排进研究队列：防御 · 自动重建（维修无人机站之后）", 60, null, c => D.TickQueueAll(c, QueueTwo(c)), retries: 2),
                 S("rt_close2", "再按研发树键关闭研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, false), c => M.TickTreeOpen(c, false), retries: 1),
-                S("m6_built2", "机器取料施工（废料不够时等回收站拆出来）：六座炮塔、护盾发生器、精炼链与屏障圈全部建成；精炼塔开始出燃油、酸液进废液池", 2400, null, TickBuiltDefense),
+                JourneyCommon.PureWait(S("m6_built2", "机器取料施工（废料不够时等回收站拆出来）：六座炮塔、护盾发生器、精炼链与屏障圈全部建成；精炼塔开始出燃油、酸液进废液池", 2400, null, TickBuiltDefense)),
             };
             // 开局（放第一座炮塔之前）先给默认炮塔蓝图标接入口：之后造的炮塔都能接入。
             steps.InsertRange(steps.FindIndex(x => x.Id == "plan"), UplinkPortSteps());

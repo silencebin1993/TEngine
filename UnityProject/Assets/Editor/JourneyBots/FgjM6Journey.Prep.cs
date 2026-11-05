@@ -69,7 +69,7 @@ namespace GameLogic.EditorTools.JourneyBots
             S("m2_out", "右键点旁边的空地：第二台驶出出口", 30, null, c => FgjM3Journey.TickDriveOutOf(c, "m2"), retries: 3),
 
             // ── 自动重建：研究完成后在常驻规则面板新建（不圈区域 = 整个家园）──
-            S("wait_rebuild", "等研究：防御 · 陷阱发射器、防御 · 维修无人机站、防御 · 自动重建", 2400, null, c => D.TickResearched(c, D.NodeTrap, D.NodeDrone, D.NodeRebuild)),
+            JourneyCommon.PureWait(S("wait_rebuild", "等研究：防御 · 陷阱发射器、防御 · 维修无人机站、防御 · 自动重建", 2400, null, c => D.TickResearched(c, D.NodeTrap, D.NodeDrone, D.NodeRebuild))),
             S("rules_open", "按常驻规则键（默认 Alt+R）打开常驻规则面板", 10, c => JourneyInput.PressAction(GameActionId.OpenRules), TickRulesOpen, retries: 1),
             S("rules_new", "“新建”下拉选“自动重建”：新建一条规则（不圈区域 = 整个家园，研究已解锁）", 15, null, TickRuleCreated, retries: 1),
             S("rules_close", "点“关闭”关闭常驻规则面板", 10, c => FgjM1Journey.ClickUi(c, D.RulesHost, "RulesPanelClose"), TickRulesClosed, retries: 1),

@@ -62,7 +62,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>产线运行 / 等施工 / 离家这些“世界在跑、玩家在看”的步骤里每帧采一次（同一帧只采一次）。</summary>
         internal static void SampleFrame()
         {
-            if (Time.frameCount == _lastFrame)
+            if (Time.frameCount == _lastFrame || JourneyFastForward.Active) // 快进中的帧被额外模拟步拉长，不算游戏帧耗时
             {
                 return;
             }

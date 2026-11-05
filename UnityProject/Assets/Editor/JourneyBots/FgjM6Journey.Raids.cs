@@ -38,9 +38,9 @@ namespace GameLogic.EditorTools.JourneyBots
         private static IEnumerable<JourneyStep> RaidSteps() => new[]
         {
             // ── 第一次（1 级）突袭：炮塔挡住 ──
-            S("w1_warn", "等第一次突袭的预警（开局宽限到第 5 个游戏日）：左上角预警条一行（倒计时、来自哪个方向），通知“突袭预警”", 2600, null, TickFirstWarned),
+            JourneyCommon.PureWait(S("w1_warn", "等第一次突袭的预警（开局宽限到第 5 个游戏日）：左上角预警条一行（倒计时、来自哪个方向），通知“突袭预警”", 2600, null, TickFirstWarned)),
             S("exp_on1", "左键点信号塔，远征准备面板取消“关闭信号塔主动广播”（暴露重新上涨，引来下一波），点“关闭”", 60, null, c => D.TickBroadcast(c, false), retries: 2),
-            S("w1_arrive", "第一次突袭部队到达家园、按编成展开攻城（到达时自动暂停就按暂停键继续）", 400, null, c => TickArrived(c, "plan1")),
+            JourneyCommon.PureWait(S("w1_arrive", "第一次突袭部队到达家园、按编成展开攻城（到达时自动暂停就按暂停键继续）", 400, null, c => TickArrived(c, "plan1"))),
             S("w1_end", "炮塔按目标模式开火：第一次突袭被打退（全歼或撤退），归还核心没事；点“突袭结算”通知弹出条：突袭历史面板显示这一份结算", 400, null, c => TickRaidEnded(c, "plan1", "res1", true)),
             S("w1_wreck", "突袭历史面板顶部“残骸去向”下拉选“送回收站”（废料是这时最紧的：回收站拆的废墟有限，敌方残骸送进回收站出废料）", 15, PickWreckRecycler, TickWreckRecycler, retries: 1),
             S("w1_close", "Esc 关闭突袭历史面板", 10, c => JourneyInput.PressAction(GameActionId.Cancel), TickResultClosed, retries: 1),
@@ -73,7 +73,7 @@ namespace GameLogic.EditorTools.JourneyBots
             S("fw_lay", "火墙在工作：陷阱发射器一轮轮铺油膜带（消耗燃油），燃迹炮塔补给装满", 120, null, c => TickFirewallWorking(c)),
 
             // ── 第二波排定后关广播，出发远征 ──
-            S("w2_plan", "暴露回到 30 以上：突袭导演排定第二波（普通 1 级，按最短间隔排在第一波之后至少 1 个游戏日）", 900, null, TickSecondPlanned),
+            JourneyCommon.PureWait(S("w2_plan", "暴露回到 30 以上：突袭导演排定第二波（普通 1 级，按最短间隔排在第一波之后至少 1 个游戏日）", 900, null, TickSecondPlanned)),
             S("exp_off2", "左键点信号塔，勾上“关闭信号塔主动广播”（不让第二波在出发前升级），点“关闭”", 60, null, c => D.TickBroadcast(c, true), retries: 2),
             S("fw_ready", "火墙就绪、第二波已排定（之后出发远征）", 10, null, TickFirewallReady),
             S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
@@ -153,6 +153,7 @@ namespace GameLogic.EditorTools.JourneyBots
             S("scr_demo_off", "再按拆除模式键退出、按建造键关闭建造模式", 10, c => { if (c.GetInt("scrDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, false); } },
                 c => c.GetInt("scrDemo") == 0 || !FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("退出拆除模式") : c.StepElapsed < 0.4 ? StepOutcome.Wait : StepOutcome.Retry("没退出"), retries: 1),
             S("scr_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+            // 不标纯等待：TickRebuilt 有“至少看 180 真实秒”的窗口，快进会把窗口里的游戏时间放大 20 倍（FG-EMG-3 试点实测）。
             S("rebuilt", "被摧毁的建筑已经自动重建：两波里被摧毁的每一座都由自动重建规则派单、机器取料按原样重建好（规则日志可追溯）", 900, null, TickRebuilt),
         };
 

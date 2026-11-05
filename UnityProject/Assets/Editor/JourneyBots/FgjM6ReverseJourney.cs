@@ -91,7 +91,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("place", "放发电机 2、回收站与带、两座炮塔、陷阱发射器、泵与抽水线（故意少接泵旁那一格）", 300, null, c => P.TickActions(c, "rp", 40), retries: 2),
                 S("build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("built0", "机器取料施工：炮塔、发电机 2、回收站、陷阱发射器、泵与管线建成接电（屏障圈后面再拖）", 1500, null, c => TickBuilt(c, false)),
+                Idle("built0", "机器取料施工：炮塔、发电机 2、回收站、陷阱发射器、泵与管线建成接电（屏障圈后面再拖）", 1500, null, c => TickBuilt(c, false)),
 
                 // ── 1. 资源不足：陷阱缺水 → 补上管线 ──
                 S("r1_open", "建造模式里左键点陷阱发射器，通用面板上点“陷阱…”：防御面板打开", 30, null,
@@ -107,7 +107,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("walls_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("walls", "屏障 T2 按住左键一段段拖，把核心围起来（闸门位先空着，机器从那里进出）", 300, null, D.TickWalls, retries: 2),
                 S("walls_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("built", "机器取料施工：屏障圈建成（闸门位空着）", 1500, null, c => TickBuilt(c, true)),
+                Idle("built", "机器取料施工：屏障圈建成（闸门位空着）", 1500, null, c => TickBuilt(c, true)),
 
                 // ── 2. 路径失败：没留闸门就把核心围死 → 放置预览警告“机器将无法到达……” → 改放闸门 ──
                 S("pf_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
@@ -118,28 +118,28 @@ namespace GameLogic.EditorTools.JourneyBots
 
                 // ── 3. 暂停与倍速（第一波）──
                 S("ra_fix", "进度夹具：剧情节点触发一波 1 级突袭（正式的暴露触发由 FGJ-M6 覆盖）", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "ra")),
-                S("ra_warn", "等预警：左上角预警条一行（倒计时、来袭方向）", 600, null, c => TickWarned(c, "ra")),
-                S("ra_siege", "部队到达、攻城进行中（核心被屏障 + 闸门完全围住，敌人先打圈外够得着的建筑）", 400, null, c => TickSieging(c, "ra")),
+                Idle("ra_warn", "等预警：左上角预警条一行（倒计时、来袭方向）", 600, null, c => TickWarned(c, "ra")),
+                Idle("ra_siege", "部队到达、攻城进行中（核心被屏障 + 闸门完全围住，敌人先打圈外够得着的建筑）", 400, null, c => TickSieging(c, "ra")),
                 S("ra_pause", "按暂停键（攻城中）", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => GameClock.Paused, true), FgjM1ReverseJourney.TickPausedNow, retries: 1),
                 S("ra_frozen", "暂停 1.5 真实秒：攻城敌人的位置与耐久、陷阱铺设、世界步都不动", 15, null, TickSiegeFrozen),
                 S("ra_resume", "按暂停键恢复", 10, c => JourneyInput.PressToggleTo(GameActionId.TogglePause, () => GameClock.Paused, false),
                     c => c.StepElapsed < 0.5 ? StepOutcome.Wait : !GameClock.Paused ? StepOutcome.Done("恢复") : StepOutcome.Retry("还在暂停"), retries: 1),
                 S("ra_half", "按 0.5 倍速键：世界按游戏时间走（真实时间变慢），陷阱还在就按游戏时间每秒铺一轮", 60, c => JourneyInput.PressAction(GameActionId.SpeedHalf), c => TickLayRate(c, 0.5f, "half"), retries: 1),
                 S("ra_triple", "按 3 倍速键：世界走得是 0.5x 时的约 6 倍（陷阱还在就照样每游戏秒一轮）", 40, c => JourneyInput.PressAction(GameActionId.SpeedTriple), c => TickLayRate(c, 3f, "triple"), retries: 1),
-                S("ra_end", "这一波结束（撤退或全歼），核心没被打到", 400, null, c => TickRaidOver(c, "ra")),
+                Idle("ra_end", "这一波结束（撤退或全歼），核心没被打到", 400, null, c => TickRaidOver(c, "ra")),
                 S("ra_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建：左键点它，通用面板上点“重建 / 修复”（被摧毁的留着原样的虚影），机器修好；没有拆坏的就跳过", 600, null, TickWallRestored),
 
                 // ── 4. 存读档（第二波）──
                 S("rb_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rb")),
-                S("rb_warn", "等预警", 600, null, c => TickWarned(c, "rb")),
-                S("rb_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rb")),
+                Idle("rb_warn", "等预警", 600, null, c => TickWarned(c, "rb")),
+                Idle("rb_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rb")),
                 S("rb_esc", "按 Esc 打开暂停菜单（攻城中，世界暂停）", 10, c => FgjM1Journey.PressIf(GameActionId.Cancel, !PauseMenuUIToolkit.IsOpen), TickPauseForSave, retries: 1),
                 S("rb_quit", "点“保存并返回主菜单”，确认", 15, c => FgjM1Journey.ClickUi(c, "[PauseMenuHost]", "PauseSaveQuit"), FgjM1Journey.TickSaveConfirm),
                 S("rb_menu", "回到主菜单：存档里攻城 / 结算 / 突袭导演与存档那一刻逐项一致", 60, null, TickMenuAfterSave),
                 S("rb_load", "点“读取”，点刚才的存档槽", 20, c => FgjM1Journey.ClickUgui(c, "m_btn_Load"), FgjM1Journey.TickLoadSlot),
                 S("rb_loaded", "读档进入家园：攻城接着打——同一支部队、同一个剧场，敌人一台不多一台不少（阵亡 + 离场 + 在场 = 存档时在场）", 120, null, TickLoadedSiege),
                 S("rb_speed", "按 3 倍速键（读档后从 1x 开始）", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
-                S("rb_end", "这一波照常结束，只结算一次", 400, null, c => TickRaidOver(c, "rb")),
+                Idle("rb_end", "这一波照常结束，只结算一次", 400, null, c => TickRaidOver(c, "rb")),
                 S("rb_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建（下一波之前把圈补上）", 600, null, TickWallRestored),
 
                 // FG9-ACT1-01 修复轮：第二波可能把屏障圈外的解析台打成废墟（rb_wall 只修圈上 / 圈里的）——HEAD 上本旅程同样在 fu_ana_open 失败（解析台 Damaged、耐久 0）。
@@ -160,7 +160,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("fu_build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("fu_place", "放电路合成台", 120, null, c => P.TickActions(c, "fusyn", 30), retries: 2),
                 S("fu_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("fu_built", "机器取料施工：电路合成台建成接电", 600, null, c => M.TickBuilt(c, new[] { "synth" }, Array.Empty<string>(), false, "电路合成台")),
+                Idle("fu_built", "机器取料施工：电路合成台建成接电", 600, null, c => M.TickBuilt(c, new[] { "synth" }, Array.Empty<string>(), false, "电路合成台")),
                 S("fu_open", "建造模式里左键点电路合成台，通用面板上点“熔合…”", 40, null, c => M.TickSubPanel(c, "synth", "PrFusion", FusionOpen, "合成台面板打开"), retries: 2),
                 S("fu_pick", "固件 A 选过载、固件 B 选液氮", 15, null, TickPickPair, retries: 1),
                 S("fu_sim", "点“模拟熔合”：有配方，只花模拟费", 10, null, TickSimHit, retries: 1),
@@ -168,7 +168,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("fu_close", "按 Esc 关闭合成台面板（通用面板也关）", 15, null, c => M.TickCloseAll(c, () => !FusionPanelUIToolkit.IsOpen, "合成台面板"), retries: 1),
                 S("fu_build_close2", "按建造键关闭建造模式（开着的话）", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 S("rs_fix", "进度夹具：剧情节点再触发一波（2 级：FG-GAP-146，1 级部队在合成台旁的两座炮塔前损失过重撤退、拆不掉合成台）", 10, c => ApplyRaidFixture(c, 2), c => TickRaidRequested(c, "rs")),
-                S("rs_warn", "等预警（来袭方向与第一波相同：合成台就在抵达点旁边）", 600, null, c => TickWarned(c, "rs")),
+                Idle("rs_warn", "等预警（来袭方向与第一波相同：合成台就在抵达点旁边）", 600, null, c => TickWarned(c, "rs")),
                 S("rs_slow", "按 1 倍速键（部队快到了，留出在合成台上操作的时间）", 10, c => JourneyInput.PressAction(GameActionId.SpeedNormal), c => TickSpeedIs(c, 1f), retries: 1),
                 S("fu_open2", "左键点电路合成台，通用面板上点“熔合…”", 40, null, c => M.TickSubPanel(c, "synth", "PrFusion", FusionOpen, "合成台面板打开"), retries: 2),
                 S("fu_pick2", "固件 A 选过载、固件 B 选液氮", 15, null, TickPickPair, retries: 1),
@@ -183,15 +183,15 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rs_siege", "部队到达、展开攻城（合成台就在抵达点旁边；展开时自动暂停就按暂停键继续）", 400, null, c => TickSieging(c, "rs")),
                 S("fu_rolled", "攻城单位拆掉正在熔合的电路合成台：熔合事务回滚——父固件预留释放、芯片基板与技术数据退回、通知“熔合中止”；突袭结算记下合成台这处损失", 300, null, TickRaidRolledBack),
                 S("rs_fast", "按 3 倍速键", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
-                S("rs_end", "这一波结束（只结算一次）", 400, null, c => TickRaidOver(c, "rs")),
+                Idle("rs_end", "这一波结束（只结算一次）", 400, null, c => TickRaidOver(c, "rs")),
                 S("rs_wall", "这一波拆成废墟的屏障 / 闸门 / 圈里的建筑逐座重建", 600, null, TickWallRestored),
                 // FG10-E2E-01（FG-GAP-149）：前几波把核心从 1600 削到五六百，旅程从不修核心，后面两波打不打穿取决于真实时间节奏——这里像玩家一样把核心修满再开下一段。
                 S("rs_core", "左键点归还核心，通用面板上点“维修”（维修件不够时夹具补足，DEBT-FG10E2E01-05），等耐久回满", 900, null, c => TickCoreRepaired(c, "core")),
-                S("rs_ready", "第三波之前家园至少有两台机器（只剩一台就等归还核心应急打印第二台）", 900, null, TickTwoHomeMachines),
+                Idle("rs_ready", "第三波之前家园至少有两台机器（只剩一台就等归还核心应急打印第二台）", 900, null, TickTwoHomeMachines),
 
                 // ── 6. 目标死亡（第三波：两台家园机器先开到抵达点；部队快到时接入第一台、一展开就冲进敌群）──
                 S("rc_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rc")),
-                S("rc_warn", "等预警", 600, null, c => TickWarned(c, "rc")),
+                Idle("rc_warn", "等预警", 600, null, c => TickWarned(c, "rc")),
                 S("rc_list", "记下还活着的家园机器（前几波里可能已有机器阵亡、应急打印过），至多两台", 10, null, TickListVictims),
                 S("rc_sel_a0", "左键点第一台家园机器", 20, c => FgjM1Journey.ClickMachine(c, "victimA"), c => FgjM1Journey.TickSelected(c, "victimA"), retries: 8),
                 S("rc_send_a", "右键点预警条写的抵达点（右键地面 = 移动）：它从闸门出圈去迎敌", 30, c => RightClickArrival(c, "victimA"), c => TickSentToArrival(c, "victimA"), retries: 2),
@@ -217,9 +217,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rp_prio_t2c", "点“关闭”", 10, null, P.TickClosePanel, retries: 1),
                 S("rp_prio_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 S("rp_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rp")),
-                S("rp_warn", "等预警", 600, null, c => TickWarned(c, "rp")),
+                Idle("rp_warn", "等预警", 600, null, c => TickWarned(c, "rp")),
                 S("rp_gens", "记下现在还在发电的发电机（开局那台、圈里的发电机 2）", 10, null, TickListGens),
-                S("rp_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rp")),
+                Idle("rp_siege", "部队到达、攻城进行中", 400, null, c => TickSieging(c, "rp")),
                 S("rp_half", "按 0.5 倍速键（断链要在交战中做：3 倍速下这一波 20 秒就被炮塔打完，放慢世界、留出在发电机上操作的时间）", 10, c => JourneyInput.PressAction(GameActionId.SpeedHalf), c => TickSpeedIs(c, 0.5f), retries: 1),
                 S("rp_engage", "敌人进了圈里炮塔的射程，炮塔正在开火（内核武器开着、炮塔名下击毁或对敌伤害在涨）", 180, null, TickTurretsEngaged),
                 GenOpen("rp_gen0", 0), GenToggle("rp_off0", 0, true), GenClose("rp_close0", 0),
@@ -232,7 +232,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rp_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 S("rp_power", "来电：炮塔恢复有电、内核武器打开，敌人还在射程里就接着开火（炮塔名下击毁或对敌伤害又涨）", 120, null, TickTurretsPowered),
                 S("rp_fast", "按 3 倍速键", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
-                S("rp_end", "这一波被炮塔打退（只结算一次）", 400, null, c => TickRaidOver(c, "rp")),
+                Idle("rp_end", "这一波被炮塔打退（只结算一次）", 400, null, c => TickRaidOver(c, "rp")),
 
                 // ── 承接 DEBT-FG5RND06-03：真实突袭打死家园机器 → 黑匣子 → 陈列馆分析 → 技术数据 → 研究 ──
                 // 规划按“现有建筑都修好”算电（FgjM4Common.PlanGenerators）：rp 这一波拆掉的发电机先重建，否则陈列馆 / 实验室建成了也没电（2026-11-04 完整跑 bb_built Brownout）。
@@ -242,16 +242,20 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("bb_build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("bb_place", "放陈列馆、仿真实验室（电不够时连同发电机 2）", 200, null, c => P.TickActions(c, "bbp", 40), retries: 2),
                 S("bb_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                S("bb_built", "机器取料施工：陈列馆、实验室建成接电（陈列馆开始分析被突袭打死的家园机器的黑匣子）", 900, null, c => M.TickBuilt(c, new[] { "gallery", "lab" }, Array.Empty<string>(), true, "陈列馆与实验室")),
+                Idle("bb_built", "机器取料施工：陈列馆、实验室建成接电（陈列馆开始分析被突袭打死的家园机器的黑匣子）", 900, null, c => M.TickBuilt(c, new[] { "gallery", "lab" }, Array.Empty<string>(), true, "陈列馆与实验室")),
                 S("bb_rt_open", "按研发树键（默认 K）打开研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, true), c => M.TickTreeOpen(c, true), retries: 1),
                 S("bb_rt_q", "点“工业”分支、左键点“工业 · 实验室 T2”排进研究队列（仿真实验室把技术数据换成研究点）", 15, null, c => M.TickQueueNode(c, NodeLabT2), retries: 2),
                 S("bb_rt_close", "再按研发树键关闭研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, false), c => M.TickTreeOpen(c, false), retries: 1),
-                S("bb_done", "陈列馆分析完一台被真实突袭打死的家园机器的黑匣子（按队列先后，前几波阵亡的排在前面）：技术数据 +20 逐点入账（统计“黑匣子”收入），这期间实验室取技术数据换研究点", 1500, null, TickBlackBoxResearched),
+                Idle("bb_done", "陈列馆分析完一台被真实突袭打死的家园机器的黑匣子（按队列先后，前几波阵亡的排在前面）：技术数据 +20 逐点入账（统计“黑匣子”收入），这期间实验室取技术数据换研究点", 1500, null, TickBlackBoxResearched),
             },
         };
 
         private static JourneyStep S(string id, string title, double timeout, Action<JourneyContext> enter, Func<JourneyContext, StepOutcome> tick, int retries = 0) =>
             JourneyCommon.S(id, title, timeout, enter, tick, retries);
+
+        /// <summary>FG-EMG-3：纯等待步骤（没有输入、只等游戏时间：等预警 / 等部队抵达展开 / 等一波打完 / 等施工 / 等应急打印 / 等黑匣子分析）——开了 JOURNEY_FASTFORWARD 时快进。</summary>
+        private static JourneyStep Idle(string id, string title, double timeout, Action<JourneyContext> enter, Func<JourneyContext, StepOutcome> tick) =>
+            JourneyCommon.PureWait(S(id, title, timeout, enter, tick));
 
         private static StepOutcome TickPlay(JourneyContext c) =>
             JourneyCommon.TickPlay(c, TestSeed, () =>
@@ -561,6 +565,12 @@ namespace GameLogic.EditorTools.JourneyBots
         private static StepOutcome TickTwoHomeMachines(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
+            // FG-EMG-3 试点：撤走的敌人离开之前还在开火（“余波损失”），残血的机器可能在这之后才阵亡——先等这一波的敌人全部离开再数，
+            // 否则数完两台、下一波预警期间两台都被余波打死，rc_list 时一台都没有（快进第 3 次完整跑实测：结算后 44 / 50 游戏秒各死一台）。
+            if (D.Raiders().Count > 0)
+            {
+                return StepOutcome.Wait;
+            }
             List<MachineRecord> alive = HomeMachinesAlive();
             if (alive.Count >= 2)
             {
