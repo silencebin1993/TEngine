@@ -344,10 +344,21 @@ namespace BinGames.Sim.Combat
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
             ushort evPort = (ushort)(EmgConst.EventPortBase + (int)e.Kind);
             int emit = d.Config.EmgVerbEmit;
+            ushort pingPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Ping);
             bool salvaged = false;
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                if (x.Port == pingPort && x.Role > EmgConst.RoleLastRead)
+                {
+                    // EMG3-SQD-01（FGR-EMG-133）：写 evt.ping 的指令在它的生效事件（同一条指令的 trigger 读端）时广播频道；不看动词 / RootKernel 标记（按端口 + 角色）
+                    if ((x.Flags & EmgInstrFlags.Overflow) == 0 && EmgMetaAllowed(allow, x.Ordinal) && EmgTrigOn(ref d, n.FirstInstr, end, x.Ordinal, evPort, any)
+                        && !EmgChsBlocked(ref d, host.Owner, n.FirstInstr, end, x.Ordinal))
+                    {
+                        EmgPingOut(ref d, e, host, x);
+                    }
+                    continue;
+                }
                 bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile;
                 bool recl = x.Verb == (byte)EmgVerb.Salvage || x.Verb == (byte)EmgVerb.Link || x.Verb == (byte)EmgVerb.Spread; // EMG2-RECL-01
                 if ((x.Flags & EmgInstrFlags.RootKernel) == 0 || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead
@@ -416,6 +427,17 @@ namespace BinGames.Sim.Combat
                     NoteReading(ref d, CombatConst.ReadingFeedZone, e.Pos, owner);
                 }
             }
+        }
+
+        /// <summary>同一程序序号里有读 <paramref name="evPort"/> 的 trigger 读端（这条指令的生效事件就是本事件）；<paramref name="any"/> = 循环的周期执行不论生效事件。</summary>
+        private static bool EmgTrigOn(ref CombatData d, int first, int end, byte ordinal, ushort evPort, bool any)
+        {
+            for (int j = first; j < end && !any; j++)
+            {
+                EmgInstr r = d.EmgInstrs[j];
+                any = r.Ordinal == ordinal && r.Role == EmgConst.RoleTrigger && r.Port == evPort;
+            }
+            return any;
         }
 
         /// <summary>

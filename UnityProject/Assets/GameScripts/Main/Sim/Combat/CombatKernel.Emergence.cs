@@ -850,6 +850,58 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        // ─────────────────────────────── EMG3-SQD-01：信号中继（FGR-EMG-132）───────────────────────────────
+
+        /// <summary>
+        /// 装 / 卸信号中继（热更层按结构模块的 sqd.relay scope 声明在生成 / 装配变化时写，不认模块 ID）。装上时追加一行（已有就不动，保留本场计数），卸下时删掉这一行（按序删除，保持顺序）。
+        /// 不存在的单位拒绝。O(中继机器数)。
+        /// </summary>
+        public bool SetUnitRelay(int unitId, bool on)
+        {
+            if (_d.SlotOf(unitId) < 0)
+            {
+                return false;
+            }
+            for (int r = 0; r < _d.Relays.Length; r++)
+            {
+                if (_d.Relays[r].Unit == unitId)
+                {
+                    if (!on)
+                    {
+                        _d.Relays.RemoveAt(r);
+                        Touch();
+                    }
+                    return true;
+                }
+            }
+            if (on)
+            {
+                _d.Relays.Add(new EmgRelay { Unit = unitId, WinSec = -1 });
+                Touch();
+            }
+            return true;
+        }
+
+        /// <summary>这台机器装着信号中继时给出它的转发 / 限流计数（悬停“已转发 N 次 · 限流未转发 M 次”）。</summary>
+        public bool TryGetRelay(int unitId, out EmgRelay relay)
+        {
+            for (int r = 0; r < _d.Relays.Length; r++)
+            {
+                if (_d.Relays[r].Unit == unitId)
+                {
+                    relay = _d.Relays[r];
+                    return true;
+                }
+            }
+            relay = default;
+            return false;
+        }
+
+        public int RelayCount => _d.Relays.Length;
+
+        /// <summary>两台单位此刻是否同在一个中继组（某台活着的中继机器的中继范围内同时有两者；FGR-EMG-133 / 172）。</summary>
+        public bool SameRelayGroup(int unitA, int unitB) => CombatLogic.EmgSameRelayGroup(ref _d, _d.SlotOf(unitA), _d.SlotOf(unitB));
+
         // ─────────────────────────────── EMG3-CHS-01：底盘特性与 chs.* 状态端口 ───────────────────────────────
 
         /// <summary>写单位的底盘特性机制（热更层按 fg.TbChassisTrait 在生成 / 装配变化时写，与 SetUnitWeapon 同时机；O(带特性单位)）。不存在的单位、越界机制拒绝。</summary>
@@ -977,7 +1029,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1008,7 +1060,7 @@ namespace BinGames.Sim.Combat
             bool v17 = format >= 17;
             bool v18 = format >= 18; // EMG3-CHS-01：段 22～24、单位段 + 特性、无人机段 + 电荷
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 3 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 4 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1822,6 +1874,7 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegTraits:
                 case EmgConst.SegMeta:
                 case EmgConst.SegTempo:
+                case EmgConst.SegRelay:
                     return ParseStage3Segment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过

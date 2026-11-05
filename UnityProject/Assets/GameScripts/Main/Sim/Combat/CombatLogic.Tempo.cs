@@ -163,10 +163,11 @@ namespace BinGames.Sim.Combat
                 }
             }
             var used = new NativeHashSet<int>(4, Allocator.Temp); // 本拍已用掉 tmp.sync 的机器（只在这一步内有效，不进快照）
+            NativeHashSet<int> group = EmgGroupSync(ref d, machine); // EMG3-SQD-01（FGR-EMG-172 中继组部分）：同一中继组里两台机器同拍执行节拍指令也对齐
             for (int h = 0; h < hosts.Length; h++)
             {
                 BeatHost b = hosts[h];
-                bool sync = machine.TryGetValue(b.Owner, out ulong em) && math.countbits(em) >= 2 && !used.Contains(b.Owner);
+                bool sync = machine.TryGetValue(b.Owner, out ulong em) && (math.countbits(em) >= 2 || group.Contains(b.Owner)) && !used.Contains(b.Owner);
                 ulong allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, sync);
                 if ((b.Reads & allow) == 0UL)
                 {
@@ -184,6 +185,7 @@ namespace BinGames.Sim.Combat
                 EmgBeatEmit(ref d, b, beat, allow, took);
             }
             used.Dispose();
+            group.Dispose();
             machine.Dispose();
             hosts.Dispose();
         }

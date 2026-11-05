@@ -272,7 +272,7 @@ namespace GameLogic.Campaign.Combat
             int any = site.Kernel.PickUnit(at, PickRadius, false, true);
             // EMG1-CHAIN-01（FG-GAP-171）：带程序的己方机器没标签时也弹（附程序行）；没程序的己方单位照旧不弹。
             // EMG1-FW-01：装着爆炸反应装甲（块数机制开着）的己方单位没标签时也弹（附块数与补块倒计时）。
-            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _)) ? any : 0;
+            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _) || site.Kernel.TryGetRelay(any, out _)) ? any : 0; // EMG3-SQD-01：中继机器也弹（转发 / 限流计数）
         }
 
         private static bool HasProgram(CombatSite site, int unit) =>
@@ -285,6 +285,8 @@ namespace GameLogic.Campaign.Combat
             line = era == null ? line : line == null ? era : era + "\n" + line;
             string trait = EmgChainView.TraitHoverLine(site, unit); // EMG3-CHS-01：底盘特性名称与说明（+ 车上带着的随车斑块）
             line = trait == null ? line : line == null ? trait : trait + "\n" + line;
+            string relay = EmgChainView.RelayHoverLine(site, unit); // EMG3-SQD-01：中继范围、已转发 / 限流未转发次数
+            line = relay == null ? line : line == null ? relay : relay + "\n" + line;
             if (line == null)
             {
                 return;

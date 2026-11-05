@@ -180,7 +180,8 @@ namespace GameLogic.Campaign.Emergence
         // 元程序（meta.*，EMG3-META）、落点接线（grm.anchor）还没有执行者，用到它们的阶段 3 owner 整条继续走旧轨
         // EMG3-META-01：meta.* 由元程序执行者接通（CombatLogic.Meta）；元程序 owner 的条件读端（prop.heat 等）由元程序条件求值执行，不算未接通（见 Compile 的 metaOwners）
         // EMG3-TMP-01：evt.beat / tmp.*（tmp.beat、tmp.sync）由内核节拍执行者接通（CombatLogic.Tempo）；fw_clock / fw_resonance 整条切到声明轨
-        public static readonly string[] PendingPorts = { "evt.react", "prop.heat", "evt.ping", "sqd.", "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
+        // EMG3-SQD-01：sqd.relay（struct_relay 的 scope）与 evt.ping 由内核跨机协同执行者接通（CombatLogic.Squad）；evt.ping 在 N30～N32 落表（EMG3-FW-02）前没有表内写者 / 读者，模糊测试器报“缺口（承接 EMG3-FW-02）”
+        public static readonly string[] PendingPorts = { "evt.react", "prop.heat", "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
 
         /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>）。EMG2-RECL-01：物质端口的 modify（蔓延）已由内核执行（CombatLogic.EmgSpread），不再算未接通。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)
@@ -768,6 +769,7 @@ namespace GameLogic.Campaign.Emergence
                     }
                     if ((dir == EmgDirs.Read ? !IsReadRole(role) : !IsWriteRole(role)) || (role == EmgRole.Trigger && fam != EmgFamily.Event)
                         || (role == EmgRole.Scope && d.Port != "sqd.relay")
+                        || (d.Port == "sqd.relay" && (role != EmgRole.Scope || d.OwnerKind != "structure")) // EMG3-SQD-01（FGR-EMG-132）：sqd.relay 只由结构模块的 scope 声明提供，固件不能自写
                         || (dir == EmgDirs.Read && role != EmgRole.Condition && Array.IndexOf(ConditionOnlyPorts, d.Port) >= 0))
                     {
                         bad.Add($"{where} 角色 {d.Role} 不能用在 {d.Dir} {d.Port}");

@@ -203,10 +203,11 @@ namespace GameLogic.EditorTools
             Expect(active.Count == 4 && reserved.Count == 3 && EmgCatalog.TryGetActiveTrait("chassis_track", out _) && tr.Kind == EmgTraitKind.TrackDrag
                    && Mathf.Approximately(tr.P0, 1.5f) && Mathf.Approximately(tr.P1, 0.1f),
                 $"生效 {string.Join("、", active)}；预留 {string.Join("、", reserved)}（多足 / 飞行 / 船体归 EMG3-CHS-02）；履带参数取 emg.trait.track.*");
-            // EMG3-TMP-01：节拍（evt.beat / tmp.*）已由内核执行者接通，fw_clock / fw_resonance 切到声明轨（口径变化，登记 M10-BASELINE 差异表）；协同仍待 EMG3-SQD-01
-            Expect(EmgCatalog.IsOwnerOnDeclTrack("fw_clock") && EmgCatalog.IsOwnerOnDeclTrack("fw_resonance") && !EmgCatalog.IsOwnerOnDeclTrack("struct_relay")
-                   && EmgCatalog.IsOwnerOnDeclTrack("chassis_track") && EmgCatalog.IsOwnerOnDeclTrack("fw_burntrail"),
-                "阶段 3：节拍已接通（fw_clock / fw_resonance 在声明轨）；协同还没有执行者，struct_relay 继续走旧轨（PendingPorts）；底盘声明与阶段 1 固件照常在声明轨");
+            // EMG3-TMP-01：节拍（evt.beat / tmp.*）已由内核执行者接通，fw_clock / fw_resonance 切到声明轨（口径变化，登记 M10-BASELINE 差异表）；
+            // EMG3-SQD-01：协同（sqd.relay / evt.ping）已由内核跨机协同执行者接通，struct_relay 切到声明轨（口径变化：原断言“仍走旧轨”换成等价的“已接通”，L5）
+            Expect(EmgCatalog.IsOwnerOnDeclTrack("fw_clock") && EmgCatalog.IsOwnerOnDeclTrack("fw_resonance") && EmgCatalog.IsOwnerOnDeclTrack("struct_relay")
+                   && !EmgCatalog.IsPendingPort("sqd.relay", EmgRole.Scope) && EmgCatalog.IsOwnerOnDeclTrack("chassis_track") && EmgCatalog.IsOwnerOnDeclTrack("fw_burntrail"),
+                "阶段 3：节拍已接通（fw_clock / fw_resonance 在声明轨）；协同已接通（struct_relay 在声明轨，EMG3-SQD-01）；底盘声明与阶段 1 固件照常在声明轨");
             var missing = new List<string>();
             foreach (EmgTraitRow t in EmgCatalog.Current.Traits)
             {

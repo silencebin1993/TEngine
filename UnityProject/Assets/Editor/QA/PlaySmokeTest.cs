@@ -3595,6 +3595,23 @@ namespace GameLogic.EditorTools
             }
             Check(Campaign.Signal.FirmwareKinds.IsCore(Campaign.Content.FirmwareCatalog.FwOverloadId) && aiMachines > 0 && aiClean,
                 $"AI 边界：过载是核心固件；另外 {aiMachines} 台家园机器由 AI 驾驶，接入口是空槽、武器没有具名反应（AI 永远不用核心固件）");
+            // EMG3-SQD-01（FGR-EMG-132）：家园机器的中继登记走真实生成路径（CombatSite.ApplyRelay，按结构模块的 sqd.relay 声明）：登记 ⇔ 声明；中继机器悬停行无缺键
+            int relayWant = 0;
+            bool relayOk = true;
+            foreach (int id in homeCombat.MachineLogicIds)
+            {
+                if (!homeCombat.TryGetMachineWeapon(id, out Campaign.Combat.MachineWeaponInfo ri) || !homeCombat.TryGetMachineUnit(id, out int ru))
+                {
+                    continue;
+                }
+                bool want = Campaign.Emergence.EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(ri.StructureId)
+                            && Campaign.Emergence.EmgCatalog.PartReads("sqd.relay", Campaign.Emergence.EmgRole.Scope, new[] { ri.StructureId });
+                string hv = Campaign.Combat.EmgChainView.RelayHoverLine(homeCombat, ru);
+                relayWant += want ? 1 : 0;
+                relayOk &= homeCombat.Kernel.TryGetRelay(ru, out _) == want && (want ? hv != null && !Localization.GameText.ContainsMarker(hv) : hv == null);
+            }
+            Check(relayOk && homeCombat.Kernel.RelayCount == relayWant,
+                $"中继登记（EMG3-SQD-01）：家园 {homeCombat.MachineLogicIds.Count()} 台机器里装中继结构模块的 {relayWant} 台登记为中继机器（内核 {homeCombat.Kernel.RelayCount} 台），与声明一致");
             Campaign.Regions.HomeValleyMachineMarker b = SigCandidate(a);
             if (b == null)
             {

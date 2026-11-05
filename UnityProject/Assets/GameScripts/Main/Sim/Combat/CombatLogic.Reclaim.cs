@@ -113,9 +113,19 @@ namespace BinGames.Sim.Combat
             int first = n.FirstInstr, end = math.min(first + n.InstrCount, d.EmgInstrs.Length);
             ushort evPort = (ushort)(EmgConst.EventPortBase + (int)e.Kind);
             bool salvaged = false;
+            ushort pingPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Ping);
             for (int i = first; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                if (x.Port == pingPort && x.Role > EmgConst.RoleLastRead)
+                {
+                    // EMG3-SQD-01（FGR-EMG-133）：子弹药节点上的 evt.ping 写端（排在触发器后面的 [击杀回传] 等）在子弹药的生效事件时广播，脉冲点 = 事件位置
+                    if ((x.Flags & EmgInstrFlags.Overflow) == 0 && EmgMetaAllowed(allow, x.Ordinal) && (any || EmgGatedBy(ref d, first, end, x.Ordinal, evPort)))
+                    {
+                        EmgPingOut(ref d, e, host, x);
+                    }
+                    continue;
+                }
                 bool follow = x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile; // EMG2-REACT-02（DEBT-EMG1FW01-03）：[子母弹, 追射] 子弹药命中后补射
                 if ((x.Verb != (byte)EmgVerb.Salvage && x.Verb != (byte)EmgVerb.Link && x.Verb != (byte)EmgVerb.Spread && !follow)
                     || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead || !EmgMetaAllowed(allow, x.Ordinal) || !(any || EmgGatedBy(ref d, first, end, x.Ordinal, evPort)))

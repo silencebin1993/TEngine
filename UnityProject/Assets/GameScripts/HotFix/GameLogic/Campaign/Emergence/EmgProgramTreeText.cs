@@ -259,6 +259,10 @@ namespace GameLogic.Campaign.Emergence
                 {
                     sb.Append(" · ").Append(GameText.Get("emg.tree.tag.sync"));
                 }
+                if (EmgProgramCompiler.RelayedOf(r, n.Index, e.Ordinal))
+                {
+                    sb.Append(" · ").Append(GameText.Get("emg.tree.tag.relay")); // EMG3-SQD-01（FGR-EMG-132）：可被中继转发
+                }
                 into.Add(new EmgTreeRow
                 {
                     Kind = e.Inherited ? EmgTreeRowKind.Inherited : EmgTreeRowKind.Own, Text = sb.ToString(), Node = n.Index, Ordinal = e.Ordinal,

@@ -86,6 +86,8 @@ namespace BinGames.Sim.Combat
         public const int SegTraits = 22;
         public const int SegMeta = 23;
         public const int SegTempo = 24;
+        /// <summary>EMG3-SQD-01（FGR-EMG-132）：段 25 信号中继（装中继的机器 + 每秒限流计窗 + 转发 / 限流计数）。格式 18 内追加（ADR ⑩ 自描述段），短档 / 旧档没有这段 = 空表。</summary>
+        public const int SegRelay = 25;
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
         public const ushort PortChsGround = 1001, PortChsAirborne = 1002, PortChsMoving = 1003, PortChsWater = 1004;
         public const byte RoleCondition = 2;
@@ -280,6 +282,11 @@ namespace BinGames.Sim.Combat
         public long BeatsEmitted;
         public long BeatSyncs;
         public long BeatPulses;
+        /// <summary>EMG3-SQD-01（调试计数，不进快照；逐台的转发 / 限流计数在 <see cref="EmgRelay"/>，进快照）：中继转发触发、限流未转发、信号脉冲广播、脉冲送达次数。</summary>
+        public long RelayForwarded;
+        public long RelayCapped;
+        public long PingsSent;
+        public long PingsDelivered;
         public int LastSeq;
         public int HasLast;
         public int LastDepthCutChain;

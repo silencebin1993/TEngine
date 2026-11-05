@@ -1414,6 +1414,9 @@ namespace BinGames.Sim.Combat
         public int EmgMetaMaxExec, EmgMetaLoopMax;
         /// <summary>EMG3-TMP-01（fg.TbHomeTuning emg.tempo.beat）：全局节拍秒数；≤ 0 取 0.5 秒。不进快照（每次开地点按表写）。</summary>
         public float EmgBeatSeconds;
+        /// <summary>EMG3-SQD-01（fg.TbHomeTuning emg.relay.range / emg.relay.per_second）：中继范围（米）与每台中继机器每秒最多转发触发次数；≤ 0 取 12 米 / 4 次。不进快照（每次开地点按表写）。</summary>
+        public float EmgRelayRange;
+        public int EmgRelayPerSecond;
         /// <summary>EMG3-META-01：地点种子（随机元程序的无状态哈希 <see cref="EmgRng"/>，与因果链、宿主、结算时刻一起取；热更层按世界种子与地点写，不进快照）。</summary>
         public uint EmgSiteSeed;
         /// <summary>EMG2-MAT-01（FGR-EMG-081～083）：1 = 物质斑块层开（热更层在 emg.stage ≥ 2 时置位）——排放写端生成斑块（不再落读法驻留区）、残骸崩解为碎屑斑块、

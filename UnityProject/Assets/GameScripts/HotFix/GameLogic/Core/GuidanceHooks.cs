@@ -644,6 +644,9 @@ namespace GameLogic.Core
         /// <summary>EMG1-TRIG-01（FG19 FGR-EMG-034）：第一次有触发器放出子载荷（引导内容在 FG15-UX-04：触发事件、子弹药只执行自己节点、代际与份数）。</summary>
         public const string EmgFirstTrigger = "emg_first_trigger";
 
+        /// <summary>EMG3-SQD-01（FG19 FGR-EMG-132 / 133）：第一次有中继转发或信号脉冲送达（引导内容在 FG15-UX-04：中继范围、白名单事件、只转发事件不转发程序、每秒上限、热量记执行方）。</summary>
+        public const string EmgFirstRelay = "emg_first_relay";
+
         /// <summary>EMG2-MAT-01（FG19 FGR-EMG-080～083）：第一次出现物质斑块（引导内容在 FG15-UX-04：物质不分敌我、沾染、形状纹样怎么认、悬停看来源与后果）。</summary>
         public const string EmgFirstMatter = "emg_first_matter";
 
@@ -728,7 +731,7 @@ namespace GameLogic.Core
             SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
             ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
             ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
-            EmgFirstProgramTree, EmgFirstTrigger,
+            EmgFirstProgramTree, EmgFirstTrigger, EmgFirstRelay,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

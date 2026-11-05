@@ -18,6 +18,8 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgTraitRun> TraitRun;
         /// <summary>EMG3-CHS-01（ADR ⑩ 版本 18）：元程序运行态（快照段 23；本卡只铺结构，执行者归元程序卡，表恒空）。</summary>
         public NativeList<EmgMetaRun> MetaRun;
+        /// <summary>EMG3-SQD-01（FGR-EMG-132）：装信号中继的机器（快照段 25；热更层按结构模块的 sqd.relay scope 声明写，只有这些机器做转发遍历，ADR ④）。</summary>
+        public NativeList<EmgRelay> Relays;
         /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
         public NativeArray<float4> EmgTraitParams;
         /// <summary>EMG3-CHS-02：自检用测试水域（x, y = 圆心，z = 半径；z ≤ 0 = 没有）。正式水面地形（FG18-SEA-01）落地前 chs.water 只由它置位，正式路径恒 0；不进快照，读档沿用当前的。</summary>
@@ -52,6 +54,7 @@ namespace BinGames.Sim.Combat
             CoatFx = new NativeList<EmgCoatFx>(4, Allocator.Persistent);
             TraitRun = new NativeList<EmgTraitRun>(4, Allocator.Persistent);
             MetaRun = new NativeList<EmgMetaRun>(0, Allocator.Persistent);
+            Relays = new NativeList<EmgRelay>(0, Allocator.Persistent);
             EmgTraitParams = new NativeArray<float4>(EmgTraitConst.Count, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
             EmgRules = new NativeList<EmgRule>(8, Allocator.Persistent);
@@ -132,6 +135,7 @@ namespace BinGames.Sim.Combat
             CoatFx.Dispose();
             TraitRun.Dispose();
             MetaRun.Dispose();
+            Relays.Dispose();
             EmgTraitParams.Dispose();
             EmgMatters.Dispose();
             EmgRules.Dispose();
@@ -204,6 +208,7 @@ namespace BinGames.Sim.Combat
             CoatFx.Clear();
             TraitRun.Clear();
             MetaRun.Clear();
+            Relays.Clear();
             EmgStructPending.Clear();
             EmgStructOut.Clear();
             EmgPending.Clear();

@@ -599,7 +599,22 @@ namespace BinGames.Sim.Combat
             if (sw.F()) w.Write(_d.EmgS[0].BeatCount);
             sw.EndRecord();
             sw.End();
+            // EMG3-SQD-01：段 25 信号中继（按装上的先后顺序；限流计窗与计数随档接续）
+            sw.Begin(EmgConst.SegRelay, RelayFields, _d.Relays.Length);
+            for (int i = 0; i < _d.Relays.Length; i++)
+            {
+                EmgRelay x = _d.Relays[i];
+                if (sw.F()) w.Write(x.Unit);
+                if (sw.F()) w.Write(x.WinSec);
+                if (sw.F()) w.Write(x.Used);
+                if (sw.F()) w.Write(x.Forwarded);
+                if (sw.F()) w.Write(x.Dropped);
+                sw.EndRecord();
+            }
+            sw.End();
         }
+
+        private const int RelayFields = 5;
 
         private static CombatLoadResult ParseStage3Segment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
         {
@@ -711,6 +726,30 @@ namespace BinGames.Sim.Combat
                     EmgScalars es = staging.EmgS[0];
                     es.BeatCount = beats;
                     staging.EmgS[0] = es;
+                    return CombatLoadResult.Ok;
+                }
+                case EmgConst.SegRelay:
+                {
+                    if (n > 65536)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    var seen = new System.Collections.Generic.HashSet<int>();
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        var x = new EmgRelay { WinSec = -1 };
+                        if (sr.F()) x.Unit = r.ReadInt32();
+                        if (sr.F()) x.WinSec = r.ReadInt64();
+                        if (sr.F()) x.Used = r.ReadInt32();
+                        if (sr.F()) x.Forwarded = r.ReadInt64();
+                        if (sr.F()) x.Dropped = r.ReadInt64();
+                        if (!sr.RecordOk || x.Unit <= 0 || !seen.Add(x.Unit) || x.Used < 0 || x.Forwarded < 0 || x.Dropped < 0 || x.WinSec < -1)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.Relays.Add(x);
+                    }
                     return CombatLoadResult.Ok;
                 }
                 default:

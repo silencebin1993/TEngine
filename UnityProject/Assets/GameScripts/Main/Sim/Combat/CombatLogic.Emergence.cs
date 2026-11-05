@@ -179,20 +179,25 @@ namespace BinGames.Sim.Combat
                 return;
             }
             int prog = EmgUnitProg(ref d, slot);
-            if (EmgReadSlot(ref d, prog, 0, k) < 0)
-            {
-                return;
-            }
             bool inCtx = d.EmgCtx.Prog >= 0;
-            // EMG1-TRIG-01：单位级事件的触发子载荷在本单位处放出；被击朝向攻击者（FGR-EMG-034 表）。
-            int os = k == EmgEventKind.Hurt && other != 0 ? d.SlotOf(other) : -1;
-            float2 dir = os >= 0 ? EmgDir(d.Pos[os] - d.Pos[slot]) : float2.zero;
-            EmgEmitHosted(ref d, new EmgEvent
+            byte depth = inCtx ? d.EmgCtx.Depth : (byte)0;
+            int chain = inCtx ? d.EmgCtx.Chain : 0;
+            if (EmgReadSlot(ref d, prog, 0, k) >= 0)
             {
-                Kind = k, Depth = inCtx ? d.EmgCtx.Depth : (byte)0, EntKind = EmgEntKind.Unit, Ent = d.Id[slot],
-                OtherKind = other != 0 ? otherKind : EmgEntKind.None, Other = other, Prog = prog, Node = 0,
-                Chain = inCtx ? d.EmgCtx.Chain : 0, Code = code, Value = value, Value2 = value2, Pos = pos,
-            }, EmgUnitHost(ref d, slot), dir);
+                // EMG1-TRIG-01：单位级事件的触发子载荷在本单位处放出；被击朝向攻击者（FGR-EMG-034 表）。
+                int os = k == EmgEventKind.Hurt && other != 0 ? d.SlotOf(other) : -1;
+                float2 dir = os >= 0 ? EmgDir(d.Pos[os] - d.Pos[slot]) : float2.zero;
+                EmgEmitHosted(ref d, new EmgEvent
+                {
+                    Kind = k, Depth = depth, EntKind = EmgEntKind.Unit, Ent = d.Id[slot],
+                    OtherKind = other != 0 ? otherKind : EmgEntKind.None, Other = other, Prog = prog, Node = 0,
+                    Chain = chain, Code = code, Value = value, Value2 = value2, Pos = pos,
+                }, EmgUnitHost(ref d, slot), dir);
+            }
+            if (d.Relays.Length > 0)
+            {
+                EmgRelayOut(ref d, k, slot, depth, chain, other, otherKind, value, value2, code, pos); // EMG3-SQD-01：被击 / 击杀 / 标记由中继转发给范围内装中继的友机
+            }
         }
 
         /// <summary>当前宿主（出手单位 / 弹体命中结算 / 无人机）做宿主的事件；与弹体宿主同一条“每宿主同一事件码 ≤ 3 次”（计数在上下文里，出手结束即丢，弹体宿主拷回弹体）。</summary>
@@ -200,23 +205,27 @@ namespace BinGames.Sim.Combat
             EmgEntKind otherKind = EmgEntKind.Unit)
         {
             EmgCtx c = d.EmgCtx;
-            if (c.Prog < 0 || !EmgSiteListens(ref d, k))
+            if (!EmgSiteListens(ref d, k))
             {
                 return;
             }
-            int slot = EmgReadSlot(ref d, c.Prog, c.Node, k);
-            if (slot < 0 || !EmgHostCap(ref d, ref c.TrigUsed, slot))
+            int slot = c.Prog >= 0 ? EmgReadSlot(ref d, c.Prog, c.Node, k) : -1;
+            if (slot >= 0 && EmgHostCap(ref d, ref c.TrigUsed, slot))
             {
-                return;
+                d.EmgCtx.TrigUsed = c.TrigUsed;
+                // EMG1-TRIG-01：触发子载荷的方向 = 出手者 → 结算点（命中触发另按“5 米内其他敌对单位”取向）。
+                float2 dir = c.Owner >= 0 && c.Owner < d.Count ? EmgDir(pos - d.Pos[c.Owner]) : float2.zero;
+                EmgEmitHosted(ref d, new EmgEvent
+                {
+                    Kind = k, Depth = c.Depth, EntKind = c.EntKind, Ent = c.Ent, OtherKind = other != 0 ? otherKind : EmgEntKind.None, Other = other,
+                    Prog = c.Prog, Node = c.Node, Chain = c.Chain, Code = code, Value = value, Value2 = value2, Pos = pos,
+                }, c, dir);
             }
-            d.EmgCtx.TrigUsed = c.TrigUsed;
-            // EMG1-TRIG-01：触发子载荷的方向 = 出手者 → 结算点（命中触发另按“5 米内其他敌对单位”取向）。
-            float2 dir = c.Owner >= 0 && c.Owner < d.Count ? EmgDir(pos - d.Pos[c.Owner]) : float2.zero;
-            EmgEmitHosted(ref d, new EmgEvent
+            if (d.Relays.Length > 0 && c.EntKind != EmgEntKind.None)
             {
-                Kind = k, Depth = c.Depth, EntKind = c.EntKind, Ent = c.Ent, OtherKind = other != 0 ? otherKind : EmgEntKind.None, Other = other,
-                Prog = c.Prog, Node = c.Node, Chain = c.Chain, Code = code, Value = value, Value2 = value2, Pos = pos,
-            }, c, dir);
+                // EMG3-SQD-01（FGR-EMG-132）：出手者的命中 / 击杀 / 标记由中继转发（不论出手者自己有没有程序读它）
+                EmgRelayOut(ref d, k, c.Owner, c.Depth, c.Prog >= 0 ? c.Chain : 0, other, otherKind, value, value2, code, pos);
+            }
         }
 
         /// <summary>每宿主同一事件码 ≤ emg.trig.max_per_host 次（FGR-EMG-065）：<paramref name="used"/> 每条事件读端 2 比特；到上限计 PerHostCut、返回 false。
@@ -244,20 +253,23 @@ namespace BinGames.Sim.Combat
             {
                 EmgMetaHostEnd(ref d, EmgEntKind.Projectile, pr.Id, pos); // EMG3-META-01：跟随这发弹体的延后改在结束点执行
             }
-            if (pr.Prog < 0 || !EmgSiteListens(ref d, k))
+            if (!EmgSiteListens(ref d, k))
             {
                 return;
             }
-            int slot = EmgReadSlot(ref d, pr.Prog, pr.Node, k);
-            if (slot < 0 || !EmgHostCap(ref d, ref pr.TrigUsed, slot))
+            int slot = pr.Prog >= 0 ? EmgReadSlot(ref d, pr.Prog, pr.Node, k) : -1;
+            if (slot >= 0 && EmgHostCap(ref d, ref pr.TrigUsed, slot))
             {
-                return;
+                EmgEmitHosted(ref d, new EmgEvent
+                {
+                    Kind = k, Depth = pr.Depth, EntKind = EmgEntKind.Projectile, Ent = pr.Id, OtherKind = otherKind, Other = other,
+                    Prog = pr.Prog, Node = pr.Node, Chain = pr.Chain, Code = code, Value = value, Value2 = value2, Pos = pos,
+                }, EmgProjHost(ref d, pr), EmgDir((double2)pr.Vel));
             }
-            EmgEmitHosted(ref d, new EmgEvent
+            if (d.Relays.Length > 0)
             {
-                Kind = k, Depth = pr.Depth, EntKind = EmgEntKind.Projectile, Ent = pr.Id, OtherKind = otherKind, Other = other,
-                Prog = pr.Prog, Node = pr.Node, Chain = pr.Chain, Code = code, Value = value, Value2 = value2, Pos = pos,
-            }, EmgProjHost(ref d, pr), EmgDir((double2)pr.Vel));
+                EmgRelayOut(ref d, k, d.SlotOf(pr.Owner), pr.Depth, pr.Prog >= 0 ? pr.Chain : 0, other, otherKind, value, value2, code, pos); // EMG3-SQD-01：反弹 / 穿透
+            }
         }
 
         /// <summary>
@@ -632,6 +644,10 @@ namespace BinGames.Sim.Combat
                 d.EmgCtx = c;
                 EmgShotEvent(ref d, EmgEventKind.Hit, d.Id[t], damage, c.Hits, c.HitCode, d.Pos[t]);
                 c = d.EmgCtx;
+            }
+            else if (ours && d.Relays.Length > 0)
+            {
+                EmgRelayOut(ref d, EmgEventKind.Hit, c.Owner, c.Depth, 0, d.Id[t], EmgEntKind.Unit, damage, 0f, c.HitCode, d.Pos[t]); // EMG3-SQD-01：没有程序的出手命中也能被中继转发
             }
             if (EmgSiteListens(ref d, EmgEventKind.Hurt))
             {

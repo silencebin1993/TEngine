@@ -138,7 +138,7 @@ namespace GameLogic.Campaign.Combat
                     text = GameText.Format("emg.chain.node.friendly", PartyName(site, state, r.SrcUnit), PartyName(site, state, r.Other));
                     break;
                 case EmgChainNode.Relay:
-                    text = GameText.Get("emg.chain.node.relay");
+                    text = RelayNodeText(site, state, r);
                     break;
                 case EmgChainNode.Doctrine:
                     // EMG2-RULE-01（FGR-EMG-088）：Aux = 1 是 AI 避险的排斥动作——“由教义触发：避开危险物质”
@@ -277,6 +277,41 @@ namespace GameLogic.Campaign.Combat
 
         private static string Three(string what, string who, string next) =>
             GameText.Format("emg.hover.label.what", what) + "\n" + GameText.Format("emg.hover.label.who", who) + "\n" + GameText.Format("emg.hover.label.next", next);
+
+        /// <summary>
+        /// EMG3-SQD-01（FGR-EMG-132 / 133，FGR-BASE-020）：中继节点——“由中继转发：A 车命中（B 车执行）”；限流时“中继限流：B 车本秒已转发 4 次（每秒最多 4 次），A 车命中未转发”；
+        /// 信号脉冲“信号脉冲：A 车广播 0 号频道 → B 车”。SrcUnit = 事件源，Other = 执行方 / 中继机器，Key = 事件码，Aux = 转发 / 限流 / 2 + 频道。
+        /// </summary>
+        public static string RelayNodeText(CombatSite site, CampaignState state, in EmgChainRec r)
+        {
+            string src = PartyName(site, state, r.SrcUnit);
+            string dst = PartyName(site, state, r.Other);
+            if (r.Aux >= EmgSquadConst.AuxPing)
+            {
+                return GameText.Format("emg.chain.node.ping", src, (r.Aux - EmgSquadConst.AuxPing).ToString(CultureInfo.InvariantCulture), dst);
+            }
+            string ev = EmgProgramTreeText.EventName((EmgEventKind)r.Key);
+            if (r.Aux == EmgSquadConst.AuxCapped)
+            {
+                int cap = site != null && !site.IsDisposed && site.Kernel.Config.EmgRelayPerSecond > 0 ? site.Kernel.Config.EmgRelayPerSecond : EmgSquadConst.DefaultPerSecond;
+                return GameText.Format("emg.chain.node.relay_capped", dst, cap.ToString(CultureInfo.InvariantCulture), src, ev);
+            }
+            return GameText.Format("emg.chain.node.relay", src, ev, dst);
+        }
+
+        /// <summary>EMG3-SQD-01（卡片“限流满时多余触发计数可见”“限流时的原因文本”）：装中继的机器悬停一行——中继范围、白名单、已转发 / 限流未转发次数。不是中继机器返回 null。O(中继机器数)。</summary>
+        public static string RelayHoverLine(CombatSite site, int unitId)
+        {
+            if (site == null || site.IsDisposed || !site.Kernel.TryGetRelay(unitId, out EmgRelay r))
+            {
+                return null;
+            }
+            CombatConfig c = site.Kernel.Config;
+            float range = c.EmgRelayRange > 0f ? c.EmgRelayRange : EmgSquadConst.DefaultRange;
+            int cap = c.EmgRelayPerSecond > 0 ? c.EmgRelayPerSecond : EmgSquadConst.DefaultPerSecond;
+            return GameText.Format("emg.relay.hover", range.ToString("0.#", CultureInfo.InvariantCulture), r.Forwarded.ToString(CultureInfo.InvariantCulture),
+                r.Dropped.ToString(CultureInfo.InvariantCulture), cap.ToString(CultureInfo.InvariantCulture));
+        }
 
         /// <summary>EMG3-CHS-01（卡片“底盘悬停显示特性名称与说明”）：机器悬停里的特性行；拖挂车上带着一块时写“车上带着一块油（N 秒后落下）”。没有特性返回 null。O(特性表行数)。</summary>
         public static string TraitHoverLine(CombatSite site, int unitId)

@@ -126,6 +126,8 @@ namespace GameLogic.Campaign.Emergence
         public bool LobAllowed = true;
         /// <summary>EMG2-MAT-01：主组件是修复出口（没有攻击出口、声明 prop.integrity modify，与 CombatSite.MachineWeaponFrom 同一判定）——修复弹体不反弹（FG-GAP-178 ④），读 evt.bounce 的固件整条“本载体不适用”。</summary>
         public bool HealOnly;
+        /// <summary>EMG3-SQD-01（FGR-EMG-132）：这台车的结构模块提供 sqd.relay scope（struct_relay）——根节点上白名单事件的 trigger 读端可被中继转发（预览标注，<see cref="EmgProgramCompiler.RelayedOf"/>）。</summary>
+        public bool Relay;
         /// <summary>热量分项（FGR-EMG-016）：指令表值、声明 heat、触发节点（trigger_gen × 代号）、子载荷份数 × per_child。</summary>
         public float HeatInstr, HeatDecl, HeatTrigger, HeatChildren;
         /// <summary>溢出指令的表值热量：旧积热（BlueprintCircuitBoard.ComputeFirmwareHeat）按装着的固件算过，溢出“不计热量”所以要扣回。</summary>
@@ -218,7 +220,10 @@ namespace GameLogic.Campaign.Emergence
                 EmgCatalog.PartPropModify("prop.integrity", new[] { p.PrimaryId }, out float heal);
                 healOnly = heal > 0f;
             }
-            return Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly);
+            EmgProgramResult res = Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly);
+            // EMG3-SQD-01：结构模块声明 sqd.relay scope（按声明判，不认模块 ID）；与 CombatSite.ApplyRelay 同一判定
+            res.Relay = EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(p.StructureId) && EmgCatalog.PartReads("sqd.relay", EmgRole.Scope, new[] { p.StructureId });
+            return res;
         }
 
         // ── EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：刷写变体——无人机 / 哨戒桩只持有程序的前 k 条（带宽截断、距离暂停）或剥离核心后的前 k 条 ──
@@ -767,6 +772,29 @@ namespace GameLogic.Campaign.Emergence
         }
 
         /// <summary>预览用：这条指令在节点里读 tmp.sync（相位对齐的拍上执行）。</summary>
+        /// <summary>
+        /// EMG3-SQD-01（FGR-EMG-132）：这条指令“可被中继转发”——车上有中继（<see cref="EmgProgramResult.Relay"/>）、在根节点（转发按执行方的根节点执行）、
+        /// 有 role = trigger 且端口属于白名单（evt.hit / kill / marked / hurt / bounce / pierce）的读端。与内核 CombatLogic.EmgRootTrigGate 同口径。
+        /// </summary>
+        public static bool RelayedOf(EmgProgramResult r, int node, int ordinal)
+        {
+            if (r == null || !r.Relay || node != 0 || r.KernelNodes.Count == 0)
+            {
+                return false;
+            }
+            EmgNode n = r.KernelNodes[0];
+            for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = r.KernelInstrs[i];
+                if (x.Ordinal == ordinal && x.Role == EmgConst.RoleTrigger && (x.Flags & EmgInstrFlags.Overflow) == 0 && x.Port > EventPortBase
+                    && EmgSquadConst.Relayable((EmgEventKind)(x.Port - EventPortBase)))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public static bool SyncOf(EmgProgramResult r, int node, int ordinal)
         {
             if (r == null || node < 0 || node >= r.KernelNodes.Count)

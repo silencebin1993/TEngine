@@ -72,6 +72,8 @@ namespace GameLogic.Campaign.Combat
         public Emergence.EmgProgramResult Program;
         /// <summary>EMG1-FW-01（FGR-EMG-193 第 3 条）：机器质量加成（功能组件 + 结构模块写 prop.mass 的 modify 相加，封顶 emg.part.prop_sum_cap），0 = 按底盘。</summary>
         public float MassBonus;
+        /// <summary>EMG3-SQD-01：结构模块（struct_*，没有为 null）——它声明了 sqd.relay scope 时这台车是中继机器（<see cref="CombatSite.ApplyRelay"/>，按声明判，不认模块 ID）。</summary>
+        public string StructureId;
         /// <summary>EMG1-FW-01：底盘的实体档案下标 + 1（装配刷新时按它重写质量；0 = 解析失败 / 没有档案）。</summary>
         public short ChassisProfileRef;
         /// <summary>EMG1-PRG-01：程序没能登记进内核时的原因文本键（表满 <c>emg.compile.table_full</c>，武器退回只有基础攻击 + 旧读法），正常为 null。</summary>
@@ -389,6 +391,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgMetaDefer = Mathf.Max(0.01f, Tuning("emg.meta.defer_seconds", EmgMetaConst.DefaultDefer));
             c.EmgMetaDeferMax = Mathf.Max(0f, Tuning("emg.meta.defer_total_max", EmgMetaConst.DefaultDeferMax));
             c.EmgBeatSeconds = Mathf.Max(0.05f, Tuning("emg.tempo.beat", EmgTempoConst.DefaultBeat)); // EMG3-TMP-01（FGR-EMG-170）：全局节拍
+            c.EmgRelayRange = Mathf.Max(0.5f, Tuning("emg.relay.range", EmgSquadConst.DefaultRange)); // EMG3-SQD-01（FGR-EMG-132）：中继范围与每秒转发上限
+            c.EmgRelayPerSecond = Mathf.Max(1, Mathf.RoundToInt(Tuning("emg.relay.per_second", EmgSquadConst.DefaultPerSecond)));
             // EMG1-ENT-01（FG19 FGR-EMG-110～114）：实体层（残骸 / 破片 / 撞击 / 位移）随阶段 1 开；emg.stage = 0 时关，旧行为逐字不变。
             c.EmgEntity = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
             c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));
@@ -516,6 +520,7 @@ namespace GameLogic.Campaign.Combat
             });
             AssignProfile(unit, Emergence.EmgEntityProfiles.ForChassis(rec.ChassisId), info.MassBonus); // EMG1-ENT-01：机器质量按底盘；EMG1-FW-01：× (1 + 部件加成)
             ApplyDash(unit, info.UtilityId);
+            ApplyRelay(unit, info.StructureId);
             return AttachMachine(rec, unit);
         }
 
@@ -586,6 +591,7 @@ namespace GameLogic.Campaign.Combat
 
         private long _emgDepthCutSeen, _emgFanoutCutSeen, _emgLostSeen;
         private bool _emgMatterHookRaised;
+        private bool _emgRelayHookRaised;
 
         /// <summary>调试层：链深截断、扇出截断第一次出现时各记一行（之后计数照常累加、可随时读 <see cref="EmgBusDebugLine"/>）；队列满仍无处合并（丢失）每次出现都报警。O(1) / 步。</summary>
         private void WatchEmgBus()
@@ -900,6 +906,7 @@ namespace GameLogic.Campaign.Combat
             MachineWeaponInfo info = ResolveMachineWeapon(state, logicId);
             Kernel.SetUnitWeapon(unit, info.WeaponIndex);
             ApplyDash(unit, info.UtilityId);
+            ApplyRelay(unit, info.StructureId);
             // EMG1-FW-01：装配变化后机器质量随部件加成重算（换下重甲即回到底盘质量）
             if (info.ChassisProfileRef > 0)
             {
@@ -948,6 +955,7 @@ namespace GameLogic.Campaign.Combat
             BlueprintCircuitPreview p = resolution.Preview;
             info.PrimaryId = p.PrimaryId;
             info.UtilityId = p.UtilityId;
+            info.StructureId = p.StructureId;
             info.MassBonus = Emergence.EmgCatalog.PartPropModify("prop.mass", new[] { p.UtilityId, p.StructureId }, out _);
             info.ChassisProfileRef = (short)(Emergence.EmgEntityProfiles.ForChassis(p.ChassisId) + 1);
             info.Morph = MachineMorph.MaskOf(p); // FG1-VFX-01：机身状态 = 本次编译结果里生效固件的类别集合。
@@ -2011,6 +2019,12 @@ namespace GameLogic.Campaign.Combat
                 GuidanceHooks.Raise(GuidanceHooks.EmgFirstTrigger);
             }
             // EMG2-MAT-01：第一次出现物质斑块（内核计数，O(1)；引导内容归 FG15-UX-04）。
+            // EMG3-SQD-01：第一次有中继转发 / 信号脉冲送达（内核计数，O(1)；引导内容归 FG15-UX-04）。
+            if (!_emgRelayHookRaised && (Kernel.EmgBusStats.RelayForwarded > 0 || Kernel.EmgBusStats.PingsDelivered > 0))
+            {
+                _emgRelayHookRaised = true;
+                GuidanceHooks.Raise(GuidanceHooks.EmgFirstRelay);
+            }
             if (!_emgMatterHookRaised && Kernel.PatchStats.PatchesBorn > 0)
             {
                 _emgMatterHookRaised = true;
@@ -2932,6 +2946,20 @@ namespace GameLogic.Campaign.Combat
         /// FG-GAP-176（EMG3-CHS-01）：功能槽部件声明“写 en.kinetic”（冲刺器）→ 内核给这台车开冲刺（执行攻击命令、目标在射程外冲刺距离内时冲上去，撞击结算 evt.impact）。
         /// 按声明判、不按部件 ID（FGR-EMG-013）；阶段 3 没开时关（逐字同旧）。O(声明数)，只在生成 / 装配变化时。
         /// </summary>
+        /// <summary>
+        /// EMG3-SQD-01（FGR-EMG-132）：结构模块生效声明里有 sqd.relay scope（struct_relay）→ 内核把这台车登记为中继机器（中继范围内友机的白名单事件也触发它的 trigger 读端）。
+        /// 按声明判、不按模块 ID（FGR-EMG-013）；阶段 3 没开时声明不生效 = 不登记（逐字同旧）。O(声明数)，只在生成 / 装配变化时。
+        /// </summary>
+        public void ApplyRelay(int unit, string structureId)
+        {
+            bool on = Emergence.EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(structureId)
+                      && Emergence.EmgCatalog.PartReads("sqd.relay", Emergence.EmgRole.Scope, new[] { structureId });
+            if (!IsDisposed && (on || Kernel.TryGetRelay(unit, out _)))
+            {
+                Kernel.SetUnitRelay(unit, on);
+            }
+        }
+
         private void ApplyDash(int unit, string utilityId)
         {
             bool on = Emergence.EmgCatalog.EffectiveStage >= 3 && Emergence.EmgCatalog.OwnerDeclaresWrite(utilityId, "en.kinetic");

@@ -1445,6 +1445,7 @@ namespace GameLogic.EditorTools
             ["prop.integrity"] = "单位剩余耐久比例",
             ["fld.deflect"] = "敌方偏折单位（静默阵营偏折场）",
             ["chs.moving"] = "单位移动状态",
+            ["sqd.relay"] = "信号中继结构模块（struct_relay 的 scope 声明）的中继范围：装中继的机器周围 emg.relay.range 米（EMG3-SQD-01，内核 CombatLogic.Squad；FgEmgSquadSelfCheck）",
             ["ter.obstacle"] = "地形障碍",
             ["ter.cover"] = "障碍 / 残骸",
             ["ent.projectile"] = "所有射弹武器的弹体",
