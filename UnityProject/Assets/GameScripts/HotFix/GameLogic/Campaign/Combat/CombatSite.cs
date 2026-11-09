@@ -1165,6 +1165,17 @@ namespace GameLogic.Campaign.Combat
             var carrier = (FirmwareCarrier)program.Carrier;
             EmgNode root = program.KernelNodes[0];
             string[] mags = { "none", "a", "b", "c" };
+            // EMG3-E2E-01（FGJ-EMG-3 发现）：位于条件 / 随机元程序下游的连锁行不折进静态读法，由内核按每次结算的放行位执行（CombatLogic.EmgCondChainMods 同口径）
+            int condFrom = int.MaxValue;
+            for (int i = root.FirstInstr; i < root.FirstInstr + root.InstrCount && i < program.KernelInstrs.Count; i++)
+            {
+                EmgInstr x = program.KernelInstrs[i];
+                int kind = x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 ? EmgMetaConst.KindOf(x.Port) : -1;
+                if (kind == EmgMetaConst.If || kind == EmgMetaConst.Random)
+                {
+                    condFrom = Math.Min(condFrom, x.Ordinal);
+                }
+            }
             for (int i = root.FirstInstr; i < root.FirstInstr + root.InstrCount && i < program.KernelInstrs.Count; i++)
             {
                 EmgInstr x = program.KernelInstrs[i];
@@ -1181,6 +1192,10 @@ namespace GameLogic.Campaign.Combat
                     if (row.Port != x.Port || row.Carrier != program.Carrier || row.Verb < 1 || row.Verb > 25)
                     {
                         continue;
+                    }
+                    if (row.Verb == (int)EmgVerb.Chain && x.Verb == (byte)EmgVerb.Chain && x.Ordinal > condFrom)
+                    {
+                        continue; // 条件下游的连锁：内核动态执行
                     }
                     CarrierReadings.ApplyVerb(ref r, carrier, Emergence.EmgCatalog.Verbs[row.Verb - 1], row.A, row.B, row.C, mags[Math.Min(3, (int)row.Mag)], x.Amount, damageFromCompile);
                 }

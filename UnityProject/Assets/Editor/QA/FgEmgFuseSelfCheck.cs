@@ -363,6 +363,10 @@ namespace GameLogic.EditorTools
             uint chip = P(Mix).Program.ClueMask, split = P(Arc, Cool).Program.ClueMask, single = P(Cool).Program.ClueMask, arcOnly = P(Arc).Program.ClueMask;
             Expect(idx >= 0 && (chip & bit) != 0 && (split & bit) != 0 && (single & bit) == 0 && (arcOnly & bit) == 0,
                 $"D1 线索端口对（湿弧 = 电弧 en.elec / 连锁 × 冷却液 mat.coolant，配方书第 {idx + 1} 条）：熔合芯片与两父分装的程序都带这一位，单装冷却液 / 单装电弧不带（按端口，不看固件 ID）");
+            // EMG3-E2E-01（FGJ-M5 发现）：规则成立这条路——C03 短路的一端是沾染位 coat:2（浸湿），按“写的物质沾上这一位”展开后，[冷却液] × [电弧] 打出短路计湿弧同现（原来只计到漫流电弧）
+            string[] conduct = EmgRuleCatalog.RecipesOfKey(NamedReactionCatalog.StableKey("reaction_conduct"));
+            Expect(Array.IndexOf(conduct, "fusion.wetarc") >= 0 && Array.IndexOf(conduct, "fusion.floodarc") >= 0,
+                $"D1b 规则成立计同现（短路 = 浸湿 coat:2 × 电 en.elec）：配方 = {string.Join(" / ", conduct)}；冷却液、水都浸湿，湿弧与漫流电弧都计");
             using var k = NewKernel();
             CombatWeapon w = WeaponOf(k, P(Mix), out _);
             int a = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
@@ -383,6 +387,29 @@ namespace GameLogic.EditorTools
             Expect(dirty && got == 3 && again == 0 && k.EmgClueDirty == 0u,
                 $"D2 可靠计数 + 脏位：3 次出手（每次连锁跳 2 个目标、执行 2 个落点；期间规则成立 {settled} 次，规则成立与出手同一计数、按链去重）计 {got} 次同现——同一条链里只计一次；取走后清零（再取 {again}），脏位清空");
             CheckClueSave(idx, bit);
+            {
+                // EMG3-E2E-01（FGJ-M5 发现）D2b：跨机器——目标站在一摊冷却液里被浸湿（沾染位 2；本夹具不折旧读法，冷却液洼用 SpawnPatch 直接放），电弧机打它：
+                // 单位层 C03 短路成立，计湿弧同现（两父分装在不同机器上时，同现只能由规则成立计）
+                using var k2 = NewKernel();
+                int arc = Unit(k2, CombatFaction.Player, new double2(1, 0), k2.AddWeapon(WeaponOf(k2, P(Arc), out _)), 100f);
+                int tgt = Unit(k2, CombatFaction.Hostile, new double2(0, 5), -1, 5000f);
+                k2.SpawnPatch(EmgMatterConst.Coolant, new double2(0, 5), 2f, 1f, 30f);
+                for (int i = 0; i < 20; i++)
+                {
+                    k2.Step(Dt, k2.Time + Dt);
+                }
+                for (int s2 = 0; s2 < 3; s2++)
+                {
+                    k2.FireAt(arc, tgt, k2.Time);
+                    for (int i = 0; i < 20; i++)
+                    {
+                        k2.Step(Dt, k2.Time + Dt);
+                    }
+                }
+                int rules = k2.EmgScalars.RulesSettled, co = k2.EmgClueTake(idx);
+                k2.TryGetUnit(tgt, out CombatUnitView tv);
+                Expect(rules > 0 && co > 0, $"D2b 跨机器规则成立计同现：目标站在冷却液洼里浸湿、[电弧] 机打它 3 发，规则成立 {rules} 次、湿弧同现 {co} 次（> 0）；目标血 {tv.Health:0}、斑块 {k2.PatchCount}");
+            }
             int fi = -1;
             for (int i = 0; i < FusionCatalog.Recipes.Count; i++)
             {

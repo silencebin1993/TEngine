@@ -405,6 +405,20 @@ namespace GameLogic.Campaign.Emergence
                 ClueMask = r.Program.ClueMask == 0u ? 0u : ClueMaskOf(steps.GetRange(0, Math.Min(k, steps.Count)), c),
             };
             t.HeatAnchor = r.HeatAnchor;
+            if (r.Reverse != null)
+            {
+                // EMG3-E2E-01（DEBT-EMG3META01-02 ②，FGR-EMG-040）：刷写变体按留下的步骤重编逆序树（逆序树的序号是逆序后的位置，不能按原序号截），
+                // 登记时成对进程序表（CombatSite.RegisterProgram），刷写态下 [逆序编译] 照常按积热切树；截掉了反转本身 = 没有逆序树
+                var kept = new EmgProgramResult { RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly };
+                foreach (EmgProgramStep s in r.Steps)
+                {
+                    if (s.Ordinal <= cut && !(noCore && s.Core))
+                    {
+                        kept.Steps.Add(s);
+                    }
+                }
+                t.Reverse = BuildReverse(kept, c);
+            }
             return t;
         }
 

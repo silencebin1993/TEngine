@@ -2077,6 +2077,10 @@ namespace BinGames.Sim.Combat
                         d.EmgCtx.HitCode = (pr.Mods & EmgProjMods.Pierced) != 0 ? EmgCode.HitAfterPierce : EmgCode.HitAfterBounce; // EMG1-GRM-01
                     }
                     int hitId = d.Id[hit];
+                    // EMG3-E2E-01（DEBT-EMG3META01-03）：子弹药节点上条件 / 随机下游的无状态修饰（伤害倍率、破甲、爆圈、余击、连锁）按命中这一刻的条件判；没有元程序 = 0 / 1，逐字不变
+                    bool subHit = (pr.Flags & EmgProjFlags.Sub) != 0;
+                    ulong subSkip = subHit ? EmgSubHitSkip(ref d, pr, owner, hit) : 0UL;
+                    float subMul = subHit ? EmgSubCondDmg(ref d, pr, subSkip) : 1f;
                     if ((pr.Coat != 0u || (pr.FieldOnce & EmgFieldConst.OnceCharged) != 0) && !heal)
                     {
                         EmgCoatOnHit(ref d, hit, pr); // EMG2-MAT-01：命中时把沾上的物质带给目标
@@ -2084,7 +2088,7 @@ namespace BinGames.Sim.Combat
                     if (heal)
                     {
                         d.EmgCtx.HitCode = EmgCode.HitHeal; // EMG1-TRIG-01：治疗子弹药命中 = 修复（evt.hit Code = 修复）
-                        Heal(ref d, hit, pr.Damage, owner);
+                        Heal(ref d, hit, pr.Damage * subMul, owner);
                     }
                     else if ((pr.Flags & EmgProjFlags.Flight) != 0)
                     {
@@ -2093,11 +2097,11 @@ namespace BinGames.Sim.Combat
                     }
                     else
                     {
-                        float dmg = pr.Damage;
+                        float dmg = pr.Damage * subMul;
                         if (IsFrontalArmored(ref d, hit, fromSide))
                         {
                             // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的破甲由子弹药自己结算
-                            dmg *= (pr.Flags & EmgProjFlags.Sub) != 0 ? EmgSubArmorFactor(ref d, pr, hit) : math.max(0f, 1f - ArmorOf(ref d, hit));
+                            dmg *= (pr.Flags & EmgProjFlags.Sub) != 0 ? EmgSubArmorFactor(ref d, pr, hit, subSkip) : math.max(0f, 1f - ArmorOf(ref d, hit));
                         }
                         dmg *= BackMultiplier(ref d, hit, fromSide);
                         if ((pr.Flags & EmgProjFlags.Fragment) != 0 && IsFrozen(ref d, hit))
@@ -2131,7 +2135,18 @@ namespace BinGames.Sim.Combat
                         {
                             // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
                             ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
+                            // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁在命中时按条件重判（静态读法里没折这几行）
+                            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), out EmgMods condChain))
+                            {
+                                EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, dmg, condChain, true, d.Weapons[pr.Weapon].Reading);
+                            }
                         }
+                    }
+                    if (!subHit && !heal && pr.Prog >= 0 && d.EmgListen != 0u)
+                    {
+                        // EMG3-E2E-01（DEBT-EMG3TMP01-01）：射弹命中点留 2 拍谐振点（按机器各一个，最近一次命中点）；节点没有谐振 / 没人读 evt.beat 时立即返回
+                        EmgResonanceHit(ref d, pr.Prog, pr.Node, pr.Owner, pr.Owner, EmgEntKind.Unit, hitPos, hitId, pr.Damage, (byte)pr.Faction, pr.Weapon,
+                            (byte)CombatCarrier.Projectile, pr.Depth, pr.Chain);
                     }
                     if ((pr.Flags & EmgProjFlags.Sub) != 0)
                     {
@@ -2139,8 +2154,8 @@ namespace BinGames.Sim.Combat
                             EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id)); // EMG3-META-01：与这次命中入队的判定同一函数
                         if (!heal)
                         {
-                            EmgSubChain(ref d, pr, owner, hit, hitPos); // EMG1-GRM-01：子弹药节点上的连锁
-                            EmgSubSplash(ref d, pr, owner, hit, hitPos, pr.Damage); // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的爆圈 / 余击
+                            EmgSubChain(ref d, pr, owner, hit, hitPos, subMul); // EMG1-GRM-01：子弹药节点上的连锁
+                            EmgSubSplash(ref d, pr, owner, hit, hitPos, pr.Damage * subMul, subSkip); // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的爆圈 / 余击
                         }
                     }
                     EmgProjCtxEnd(ref d, ref pr);

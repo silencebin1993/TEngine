@@ -78,6 +78,8 @@ namespace GameLogic.EditorTools
                 Step(CheckCompile);
                 Step(CheckHeadline);
                 Step(CheckConditionMods);
+                Step(CheckCondChain);
+                Step(CheckExitDebts);
                 Step(CheckRepeat);
                 Step(CheckRandom);
                 Step(CheckDefer);
@@ -422,6 +424,194 @@ namespace GameLogic.EditorTools
             EmgProgramResult r = P(IfMark, Pierce);
             byte off = PierceOf(r, false), on = PierceOf(r, true);
             Expect((r.Program.Flags & EmgProgramFlags.NeedsFlight) != 0 && off == 0 && on == 1, $"未标记目标：剩余穿透 {off}；已标记目标：剩余穿透 {on}");
+        }
+
+        /// <summary>
+        /// EMG3-E2E-01（FGJ-EMG-3 发现）：[条件门·标记, 电弧] 走正式编译路径（电路板 → CompilePreview → MachineWeaponFrom → ProgramReading），根节点条件下游的连锁不进静态读法、由内核按放行位执行：
+        /// 即时射弹未标记不连锁、已标记连锁；飞行弹体按命中那一刻重判（出手后才标记 → 连锁；出手时已标记、命中前标记到期 → 不连锁，DEBT-EMG3META01-03 连锁部分）；对照：去掉条件门照常连锁。
+        /// </summary>
+        private static string _hopProbe;
+
+        private static void CheckCondChain()
+        {
+            Line("  · C2. 负向 / 正向：[条件门·标记, 电弧] 未标记不连锁、已标记连锁（即时射弹）；飞行弹体命中时重判；对照 [电弧] 无条件照常连锁（正式编译路径）");
+            float Hop(string[] fws, bool flight, int markMode, string comp = ComponentCatalog.CompGunId)
+            {
+                BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisWheelId, comp, null, null, fws);
+                BlueprintCircuitPreview p = BlueprintCircuitCompiler.CompilePreview(board);
+                EmgProgramResult program = EmgProgramCompiler.Compile(p);
+                CombatWeapon w = CombatSite.MachineWeaponFrom(p);
+                w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
+                using var k = new CombatKernel(Cfg(), 16);
+                w.Program = CombatSite.RegisterProgram(k, program);
+                w.Cooldown = 99f;
+                w.Range = 30f;
+                if (flight)
+                {
+                    w = Flight(w, 4f, 5f);
+                }
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+                int t = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 5000f);
+                int n = Unit(k, CombatFaction.Hostile, new double2(2.5, 4), -1, 5000f);
+                if (markMode == 1 || markMode == 3)
+                {
+                    k.SetMarkedUntil(t, markMode == 3 ? k.Time + 0.2 : 1e9); // 3 = 出手时已标记，0.2 秒后到期（飞行 1 秒才命中）
+                }
+                k.FireAt(me, t, k.Time);
+                StepN(k, 3);
+                if (markMode == 2)
+                {
+                    k.SetMarkedUntil(t, 1e9); // 出手后、命中前才标记
+                }
+                StepN(k, comp == ComponentCatalog.CompGunId ? 90 : 240);
+                _hopProbe = $"主靶掉血 {(k.TryGetUnit(t, out CombatUnitView tv) ? 5000f - tv.Health : -1f)}、弹体 {k.ProjectileCount}、飞行发射 {k.EmgBusStats.FlightShots}";
+                return k.TryGetUnit(n, out CombatUnitView v) ? 5000f - v.Health : -1f;
+            }
+            string[] gated = { IfMark, "fw_arcchain" }, plain = { "fw_arcchain" };
+            float off = Hop(gated, false, 0), on = Hop(gated, false, 1), ctl = Hop(plain, false, 0);
+            Expect(off == 0f && on > 0f && ctl > 0f, $"即时射弹：未标记邻靶掉血 {off}、已标记 {on}；对照 [电弧] 未标记 {ctl}");
+            float late = Hop(gated, true, 2);
+            string lateProbe = _hopProbe;
+            float expired = Hop(gated, true, 3), fOff = Hop(gated, true, 0);
+            Expect(late > 0f && expired == 0f && fOff == 0f, $"飞行弹体命中时重判：出手后才标记 → 邻靶掉血 {late}（{lateProbe}）；出手时已标记、命中前到期 → {expired}；始终未标记 → {fOff}");
+            // 无人机舱（召唤载体，不需要飞行）：无人机命中这一刻按条件重判（修前已标记也永远不连锁——静态读法去掉了连锁、无人机命中路径没补）
+            string bay = ComponentCatalog.CompDroneBayId;
+            float dOff = Hop(gated, false, 0, bay), dOn = Hop(gated, false, 1, bay);
+            string dProbe = _hopProbe;
+            float dCtl = Hop(plain, false, 0, bay);
+            float dBase = Hop(new[] { IfMark }, false, 1, bay); // 无人机按离自己最近挑目标，邻靶本身也会被直击：以“同样标记、没有电弧”的直击掉血为基线
+            Expect(dOff == dBase && dOn > dBase && dOn == dCtl, $"无人机舱：邻靶直击基线 {dBase}；未标记 {dOff}（= 基线，不连锁）、已标记 {dOn}（{dProbe}）；对照 [电弧] 未标记 {dCtl}（修前逻辑：已标记也 = 基线）");
+        }
+
+        // ── N. EMG3-E2E-01 承接的三条元程序债务（DEBT-EMG3META01-02 / 03 / 04，卡片“必须同时交付”，逐条关闭）──
+
+        private static void CheckExitDebts()
+        {
+            Line("  · N. 阶段 3 出口债务：重放 / 循环 / 延后放出的子载荷也发 evt.split、计分裂（-04）；子弹药条件下游的伤害倍率 / 爆圈命中时重判（-03）；无人机原地开火 [循环] 跟无人机存续、刷写变体带逆序树（-02）");
+            // DEBT-EMG3META01-04：根节点读 evt.split 的排放 = 链读端；每次分裂排 1 摊
+            // 根节点读 evt.split（链读端）：Tree 把它记进监听位，母载荷每次分裂都发 evt.split（Value = 份数、Code = 子代号、链深 + 1）
+            EmgInstr[] SplitRead(int ord) => new[] { Row(ord, Ev(EmgEventKind.Split), Trig) };
+            long sPlain = SplitRun(k => Tree(k, Root(TrigI(0, EmgEventKind.Hit), SplitRead(1)), Child(0)), false, 30, out int ePlain, out bool fPlain);
+            long sRep = SplitRun(k => Tree(k, Root(MetaI(0, EmgMetaConst.Repeat, EmgEventKind.Hit), TrigI(1, EmgEventKind.Hit), SplitRead(2)), Child(1)), false, 30, out int eRep, out bool fRep);
+            long sDef = SplitRun(k => Tree(k, Root(MetaI(0, EmgMetaConst.Defer, EmgEventKind.Hit), TrigI(1, EmgEventKind.Hit), SplitRead(2)), Child(1)), false, 90, out int eDef, out bool fDef);
+            long sLoop = SplitRun(k => Tree(k, Root(MetaI(0, EmgMetaConst.Loop), TrigI(1, EmgEventKind.Hit), SplitRead(2)), Child(1)), true, 60 * 6, out int eLoop, out bool fLoop);
+            Expect(sPlain == 1 && ePlain == 1 && sRep == 2 && eRep == 2 && fRep && sDef == 1 && eDef == 1 && sLoop == 8 && eLoop == 8 && fLoop,
+                $"DEBT-EMG3META01-04：[分裂] 分裂 {sPlain} 次、evt.split {ePlain} 条；[复制, 分裂] 重放那组也算——分裂 {sRep} 次、evt.split {eRep} 条（修前 1 / 1），重放那条在 0.1 秒后发出 {fRep}；"
+                + $"[延后, 分裂] 到点放出：分裂 {sDef} 次、evt.split {eDef} 条（修前 0 / 0）；[循环, 分裂] 飞行弹体 8 个周期：分裂 {sLoop} 次、evt.split {eLoop} 条（修前 0 / 0），份数 / 链深正确 {fLoop}");
+
+            // DEBT-EMG3META01-03：[分裂] → 子弹药节点 [条件门·标记, 伤害 ×3, 爆圈 2 米 ×0.5]；子弹药射向邻靶 B，C 在 B 旁 1 米
+            SubCondRun(0, out float offB, out float offC);
+            SubCondRun(1, out float onB, out float onC);
+            SubCondRun(2, out float lateB, out float lateC);
+            SubCondRun(3, out float goneB, out float goneC);
+            Expect(offB > 0f && Near(onB, 3f * offB, 0.05f) && offC == 0f && onC > 0f && Near(lateB, onB, 0.05f) && lateC > 0f && Near(goneB, offB, 0.05f) && goneC == 0f,
+                $"DEBT-EMG3META01-03：子弹药 [条件门·标记, 伤害 ×3, 爆圈]：邻靶未标记掉血 {offB:0.0}、旁边 {offC:0.0}；已标记 {onB:0.0} / {onC:0.0}；"
+                + $"放出后才标记（命中时重判）{lateB:0.0} / {lateC:0.0}；放出时已标记、命中前到期 {goneB:0.0} / {goneC:0.0}（修前伤害倍率与爆圈不看条件）");
+
+            // DEBT-EMG3META01-02 ①：无人机原地开火的 [循环, 排放] 跟无人机存续执行，无人机到期即停
+            DroneLoopRun(6f, out int dPools6, out int dRuns6, out double toDrone);
+            DroneLoopRun(1.6f, out int dPools2, out int dRuns2, out _);
+            Expect(dPools6 == 8 && dRuns6 == 0 && toDrone >= 0 && toDrone < 0.5 && dPools2 == 3 && dRuns2 == 0,
+                $"DEBT-EMG3META01-02 ①：无人机 [循环, 排放]（存续 6 秒）共排 {dPools6} 摊（到 emg.meta.loop_max = 8 即止，修前 0），首摊离无人机 {toDrone:0.00} 米；存续 1.6 秒排 {dPools2} 摊（第 0.5 / 1.0 / 1.5 秒），无人机到期运行态清空（剩 {dRuns2}）");
+
+            // DEBT-EMG3META01-02 ②：刷写变体（前 2 条 = [逆序编译, 分裂]）带逆序树，成对登记，按积热切树
+            EmgProgramResult t2 = EmgProgramCompiler.Truncate(P(Rev, Split, Pierce), 2, false);
+            EmgProgramResult t0 = EmgProgramCompiler.Truncate(P(Split, Rev, Pierce), 1, false); // 只剩 [分裂]：截掉了反转本身
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                int prog = CombatSite.RegisterProgram(k, t2);
+                bool pair = t2?.Reverse != null && k.TryGetProgram(prog, out EmgProgram fp) && k.TryGetProgram(prog + 1, out EmgProgram rp)
+                            && (fp.Flags & EmgProgramFlags.HasReverse) != 0 && (rp.Flags & EmgProgramFlags.IsReverse) != 0;
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog, 30f, true), 20f, 2f)), 100f);
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 20), -1, 5000f);
+                k.FireAt(me, foe, k.Time);
+                StepN(k, 1);
+                int cold = Projs(k).Select(p => p.Prog).DefaultIfEmpty(-9).Max();
+                k.FireAt(me, foe, k.Time);
+                StepN(k, 1);
+                int hot = Projs(k).Select(p => p.Prog).DefaultIfEmpty(-9).Max();
+                Expect(pair && cold == prog && hot == prog + 1 && t0 != null && t0.Reverse == null,
+                    $"DEBT-EMG3META01-02 ②：刷写变体（前 2 条）成对登记 {pair}；冷态用正序树（{cold}）、积热过半用逆序树（{hot}，修前变体没有逆序树、不切）；截掉反转本身的变体没有逆序树（{t0?.Reverse == null}）");
+            }
+        }
+
+        /// <summary>DEBT-EMG3META01-04：一台机器打远处的靶子（<paramref name="flight"/> = 慢速飞行弹体，循环用），返回分裂次数；<paramref name="pools"/> = evt.split 读端排的摊数。</summary>
+        private static long SplitRun(Func<CombatKernel, int> build, bool flight, int steps, out int events, out bool shape)
+        {
+            using var k = new CombatKernel(Cfg(), 16);
+            int prog = build(k);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(flight ? Flight(Instant(prog), 2f, 10f) : Instant(prog)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, flight ? 25 : 4), -1, 5000f);
+            k.FireAt(me, foe, k.Time);
+            events = 0;
+            shape = true;
+            int lastSeq = int.MinValue;
+            double firstAt = -1, lastAt = -1;
+            for (int i = 0; i < steps; i++)
+            {
+                StepN(k, 1);
+                if (k.TryGetLastEmgEvent(EmgEventKind.Split, out EmgEvent e) && e.Seq != lastSeq)
+                {
+                    lastSeq = e.Seq;
+                    events++;
+                    shape &= Near(e.Value, 1f) && e.Code == 1 && e.Prog == prog && e.Depth >= 1;
+                    firstAt = firstAt < 0 ? k.Time : firstAt;
+                    lastAt = k.Time;
+                }
+            }
+            shape &= events < 2 || lastAt - firstAt >= 0.09; // 重放 / 循环那条在之后的步发出，不是同一条重复计数
+            return k.EmgBusStats.Splits;
+        }
+
+        /// <summary>DEBT-EMG3META01-03：<paramref name="markMode"/> 0 = 不标记、1 = 一直标记、2 = 放出后命中前才标记、3 = 放出时已标记命中前到期。返回邻靶 B 与旁边 C 的掉血。</summary>
+        private static void SubCondRun(int markMode, out float lossB, out float lossC)
+        {
+            using var k = new CombatKernel(Cfg(), 16);
+            N child = new N { Parent = 0, On = EmgEventKind.Hit, Count = 1, TrigOrd = 0 }.Add(MetaI(1, EmgMetaConst.If, EmgEventKind.None, Ev(EmgEventKind.Marked)))
+                .Add(Row(2, 120, RoleModify, 1f, 3f, 0f, (byte)EmgVerb.Dmg), Row(3, 121, RoleModify, 1f, 2f, 0.5f, (byte)EmgVerb.Blast));
+            int prog = Tree(k, Root(TrigI(0, EmgEventKind.Hit)), child);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 5000f);
+            int b = Unit(k, CombatFaction.Hostile, new double2(1.6, 5.2), -1, 5000f);
+            int c = Unit(k, CombatFaction.Hostile, new double2(2.6, 5.2), -1, 5000f);
+            if (markMode == 1 || markMode == 3)
+            {
+                k.SetMarkedUntil(b, markMode == 3 ? k.Time + 1.5 * Dt : 1e9);
+            }
+            k.FireAt(me, foe, k.Time);
+            StepN(k, 2); // 子弹药已放出、还没命中
+            if (markMode == 2)
+            {
+                k.SetMarkedUntil(b, 1e9);
+            }
+            StepN(k, 40);
+            lossB = k.TryGetUnit(b, out CombatUnitView vb) ? 5000f - vb.Health : -1f;
+            lossC = k.TryGetUnit(c, out CombatUnitView vc) ? 5000f - vc.Health : -1f;
+        }
+
+        private static void DroneLoopRun(float seconds, out int pools, out int runsLeft, out double toDrone)
+        {
+            CombatConfig cfg = Cfg();
+            cfg.DroneReach = 4f;
+            using var k = new CombatKernel(cfg, 16);
+            int prog = Tree(k, Root(MetaI(0, EmgMetaConst.Loop), EmitI(1, EmgEventKind.Kill)));
+            CombatWeapon w = Instant(prog, 30f);
+            w.Reading = new CombatReading { Carrier = CombatCarrier.Summon, Drones = 1, DroneSeconds = seconds, DroneRatio = 1f, DroneCooldown = 10f, DroneLeash = 10f };
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 7), -1, 5000f);
+            k.FireAt(me, foe, k.Time);
+            toDrone = -1;
+            pools = 0; // 驻留区 6 秒就消失：取过程中的最多摊数（循环最多 8 次都在 4.5 秒内）
+            for (int i = 0; i < 60 * 7; i++)
+            {
+                StepN(k, 1);
+                pools = Math.Max(pools, Pools(k));
+                if (toDrone < 0 && Pools(k) > 0 && k.TryGetDrone(0, out CombatDrone dr))
+                {
+                    toDrone = math.distance(Zones(k).First(x => x.EmgProgRef == 0).Pos, dr.Pos);
+                }
+            }
+            runsLeft = k.MetaRunCount;
         }
 
         private static byte PierceOf(EmgProgramResult r, bool mark)

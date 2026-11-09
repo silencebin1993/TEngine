@@ -379,6 +379,8 @@ namespace BinGames.Sim.Combat
         {
             double2 pos = d.Pos[u];
             int slot = EmgRuleHit(ref d, r.Key, ownerId, d.Id[u], pos);
+            // EMG3-E2E-01（FGJ-M5 发现）：单位层沾染规则（C03 短路 = 浸湿 × 电 等）成立同样计熔合线索同现，与斑块层 EmgRuleSettle 同一计数、按链去重（原来只有斑块层计）
+            EmgClueCount(ref d, r.ClueMask, chain, rule: true);
             EmgScalars es = d.EmgS[0];
             es.RulesSettled++;
             d.EmgS[0] = es;

@@ -35,6 +35,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM10Journey.Id, FgjM10Journey.Build }, // FG10-E2E-01：M10 出口旅程（防腐涂层 → 沉淀湖 → 爆燃 → 洗礼塔 → 化工突袭与重新净化）
             { FgjEmg1Journey.Id, FgjEmg1Journey.Build }, // EMG1-E2E-01：FG-EMG 阶段 1 出口旅程（[分裂, 漏油] → 延时引信接入 → 空爆 → 因果链 → 离开 → 存读档）
             { FgjEmg2Journey.Id, FgjEmg2Journey.Build }, // EMG2-E2E-01：FG-EMG 阶段 2 出口旅程（燃烧区 → 通电水洼友伤 → 冻结碎裂 → 新发现 → 突袭留存）
+            { FgjEmg3Journey.Id, FgjEmg3Journey.Build }, // EMG3-E2E-01：FG-EMG 阶段 3 出口旅程（履带拖火线 → 悬浮跨燃烧区 → 中继放电 → 两台齐射 → 条件门连锁 → [若被标记, 复制, 分裂]）
         };
 
         public static IEnumerable<string> Ids => Builders.Keys;

@@ -55,9 +55,9 @@ namespace BinGames.Sim.Combat
             // EMG1-GRM-01：根节点上的新动词（格斗侧偏；力场多个小脉冲 / 中心游移 / 越障 / 不被残骸挡；布区多块小落区 / 落点散开 / 越障 / 越过残骸）。没有程序时为空。
             EmgMods em = default;
             int prog = EmgShotProg(ref d, wp.Program); // EMG3-META-01：反转选了逆序树时按逆序树的根节点
+            ulong skip = 0UL;
             if (prog >= 0)
             {
-                ulong skip = 0UL;
                 if (EmgHasMeta(ref d, prog))
                 {
                     // EMG3-META-01（FGR-EMG-040 / 043）：根节点下游修饰的条件 / 随机判定；格斗 / 力场 / 当场结算的射弹在出手点留“程序锚点”循环（布区由落区做宿主）
@@ -97,6 +97,11 @@ namespace BinGames.Sim.Combat
                 EmgShoveWrecks(ref d, a, t, d.Pos[a], r.Knockback, r.Carrier == CombatCarrier.Melee);
             }
             PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
+            // EMG3-E2E-01（FGJ-EMG-3 发现）：根节点条件 / 随机下游的连锁不在静态读法里，按这次出手的放行位执行（[条件门·标记, 电弧] 未标记不连锁）
+            if (prog >= 0 && EmgCondChainMods(ref d, prog, 0, ~skip, out EmgMods condChain))
+            {
+                EmgChainHops(ref d, d.Faction[a] == (byte)CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, a, t, d.Pos[t], dealt, condChain, true, r);
+            }
             // 载体投送的其余目标（格斗扇形 / 力场一圈）：逐目标读法，不锚定。
             if (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura)
             {
@@ -1689,11 +1694,36 @@ namespace BinGames.Sim.Combat
                 {
                     d.Drones.Add(fresh);
                 }
+                EmgDroneLoop(ref d, fresh, a);
                 CombatCounters c = d.Counters[0];
                 c.DronesLaunched++;
                 d.Counters[0] = c;
                 NoteReading(ref d, CombatConst.ReadingFeedDrone, at, a);
             }
+        }
+
+        /// <summary>
+        /// EMG3-E2E-01（DEBT-EMG3META01-02 ①；FGR-EMG-043 无人机列“放机后跟随无人机存续执行”）：放出一架不需要飞行的无人机时，它持有那份程序（刷写变体）根节点上作用于出手的
+        /// [循环] 以这架无人机为宿主开运行态，无人机到期 / 母机没了从列表移除即结束（<see cref="EmgMetaHostAt"/> 找不到宿主）。需要飞行的程序循环跟弹体（EmgInitFlight），这里不开，不重复。
+        /// 程序没有元程序直接返回（一条比较），没有新内核状态。
+        /// </summary>
+        private static void EmgDroneLoop(ref CombatData d, in CombatDrone dr, int a)
+        {
+            if (dr.Weapon < 0 || dr.Weapon >= d.Weapons.Length)
+            {
+                return;
+            }
+            CombatWeapon wp = d.Weapons[FlashExecWeapon(ref d, dr)];
+            if (wp.Program < 0 || wp.SpawnFlight != 0 || !EmgHasMeta(ref d, wp.Program))
+            {
+                return;
+            }
+            var host = new EmgCtx
+            {
+                Prog = wp.Program, Ent = dr.Id, EntKind = EmgEntKind.Drone, Owner = a, Damage = dr.Damage, Weapon = dr.Weapon, OwnerId = dr.Owner,
+                Faction = (byte)dr.Faction, Carrier = (byte)CombatCarrier.Summon, HurtSrc = (byte)EmgCode.SrcProjectile, HitCode = EmgCode.HitDirect,
+            };
+            EmgMetaLaunch(ref d, wp.Program, 0, a, -1, host, dr.Pos, EmgDir(dr.Pos - d.Pos[a]), 0.0, true);
         }
 
         /// <summary>无人机推进：母机阵亡 / 到期即消失；在母机牵引绳内追最近的敌对单位，按间隔命中（命中带母机武器的读法）；没有目标时回到母机身边。</summary>
@@ -1790,12 +1820,24 @@ namespace BinGames.Sim.Combat
                         if (DamageUnit(ref d, target, dealt, owner))
                         {
                             PerTarget(ref d, owner, target, dealt, r, dr.Pos);
+                            // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁不在静态读法里，无人机命中这一刻按条件重判（与 DeliverInstant / 射弹命中同口径）
+                            int dprog = EmgShotProg(ref d, wp.Program);
+                            if (dprog >= 0 && EmgCondChainMods(ref d, dprog, 0, EmgMetaAllowNow(ref d, dprog, 0, EmgEventKind.Hit, owner, target, d.EmgCtx.Chain, dr.Id), out EmgMods condChain))
+                            {
+                                EmgChainHops(ref d, want, owner, target, hitPos, dealt, condChain, true, r);
+                            }
                             // 无人机命中的锚定读法：伤害基数是无人机自己的伤害；不再补无人机（伴飞只在母机开火时补）；
                             // 以无人机为锚（viaDrone）——跃击不把母机拖向无人机自己挑的目标，回拉 / 脚下区域以无人机为中心（FGR-BASE-020）。
                             CombatWeapon droneWp = wp;
                             droneWp.Damage = dr.Damage;
                             droneWp.Reading.EscortDrones = 0;
                             Anchored(ref d, owner, target, hitPos, dealt, dr.Damage, droneWp, wasMarked, dr.Pos, true);
+                            if (d.EmgListen != 0u && d.EmgCtx.Prog >= 0)
+                            {
+                                // EMG3-E2E-01（DEBT-EMG3TMP01-01）：每架无人机最近一次命中点留 2 拍谐振点（FG19A 第 132 行无人机列）
+                                EmgResonanceHit(ref d, d.EmgCtx.Prog, 0, dr.Owner, dr.Id, EmgEntKind.Drone, hitPos, d.Id[target], dr.Damage, (byte)dr.Faction, dr.Weapon,
+                                    (byte)CombatCarrier.Summon, 0, d.EmgCtx.Chain);
+                            }
                         }
                         EmgShotEnd(ref d);
                     }

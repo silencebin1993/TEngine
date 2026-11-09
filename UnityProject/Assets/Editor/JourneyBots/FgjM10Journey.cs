@@ -126,7 +126,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("ml_close2", "再按任务日志键关闭", 10, c => JourneyInput.PressToggleTo(GameActionId.ToggleMissionLog, () => MissionLogUIToolkit.IsOpen, false),
                     c => MissionLogUIToolkit.IsOpen ? StepOutcome.Wait : StepOutcome.Done("任务日志已关闭"), retries: 1),
                 S("boss_go", "右键湖心平台上的地面：远征队开进湖心、进场，洗礼塔开战（灌注阶段，HUD 显示名称与分阶段血条）", 240, null, TickBossEngaged, retries: 1),
-                S("boss_fight", "右键反应塔（攻击），被打断就再右键：灌注 → 反应 → 泄压 → 击毁", 900, ApplyBossFixture, TickBossFight),
+                S("boss_fight", "灌注阶段先右键打掉 4 座泵站、后撤等斑块到期，再右键反应塔（攻击），被打断就再右键：灌注 → 反应 → 泄压 → 击毁", 900, ApplyBossFixture, TickBossFight),
                 S("boss_won", "洗礼塔击毁：奖励只发一次（反应增幅 + 流体固件、首领三选一数据包、反应核入库），澄净领地平定", 30, null, TickBossWon),
 
                 // ── 5. 回家应对化工突袭、重新净化 ──
@@ -1361,17 +1361,22 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>
-        /// 夹具（EMG2-BOSS-01）：远征队每台耐久提到 500。从前 8 台裸 ERC-003 打得赢，推断靠塔被自己的灌注 / 引发烧掉约一半耐久（DEBT-EMG2REACT02-06，已修）；
+        /// 夹具（EMG2-BOSS-01）：远征队每台耐久提到 BossFixtureHealth。从前 8 台裸 ERC-003 打得赢，推断靠塔被自己的灌注 / 引发烧掉约一半耐久（DEBT-EMG2REACT02-06，已修）；
         /// 塔现在只挨玩家的伤害，8 台 100 耐久的车打不完 2400。这条旅程验流程不验数值，强度归 FG15-BAL-01（FG-GAP-166）。
+        /// EMG3-E2E-01 修复轮（实测，_emg3e2e01/m10-diag*.txt）：500 耐久时胜负临界（11-04 与验证轮前一次通过，验证轮 16:05 与本轮两次诊断全灭）——
+        /// 根因是反应阶段的点火把站在斑块里的车积热顶满、整场锁火（见 TickBossFight），改为先打泵站的打法后不再赌；
+        /// 1500 耐久给打泵站 + 打塔阶段的持续损耗（环形喷淋、召来的小兵）留余量：改打法后实测每台最多掉 411～457（_emg3e2e01/m10-fix2.txt、m10-full-fix.txt），500 耐久只剩约 40～90，仍算临界。断言不变。
         /// </summary>
+        private const float BossFixtureHealth = 1500f;
+
         private static void ApplyBossFixture(JourneyContext c)
         {
             foreach (int id in AliveTeam(c))
             {
                 if (MachineRegistry.TryGetRecord(id, out MachineRecord m))
                 {
-                    m.MaxHealth = 500f;
-                    m.Health = 500f;
+                    m.MaxHealth = BossFixtureHealth;
+                    m.Health = BossFixtureHealth;
                 }
             }
         }
@@ -1398,7 +1403,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     return StepOutcome.Fail($"洗礼塔被击毁，但没有依次经过灌注 → 反应 → 泄压（阶段 {ph}）");
                 }
-                return StepOutcome.Done($"右键反应塔 {c.GetInt("boss.rc")} 次：阶段 {c.Get("phases")}；灌注 {BaptismTowerBoss.FillsPoured} 片、主动反应 {BaptismTowerBoss.ReactionsTriggered} 次、泄压 {BaptismTowerBoss.VentsOpened} 次、复位 {BaptismTowerBoss.Resets} 次；{TeamHp(c)}");
+                return StepOutcome.Done($"右键泵站 {c.GetInt("boss.pc")} 次、反应塔 {c.GetInt("boss.rc")} 次：阶段 {c.Get("phases")}；灌注 {BaptismTowerBoss.FillsPoured} 片、主动反应 {BaptismTowerBoss.ReactionsTriggered} 次、泄压 {BaptismTowerBoss.VentsOpened} 次、复位 {BaptismTowerBoss.Resets} 次；{TeamHp(c)}");
             }
             if (AliveTeam(c).Count == 0)
             {
@@ -1414,9 +1419,79 @@ namespace GameLogic.EditorTools.JourneyBots
                 RegionEnemyRecord tw = BaptismTowerBoss.Tower(s);
                 c.Log($"[{F(c.StepElapsed, "0")}s] {BaptismTowerBoss.PhaseName(phase)}：反应塔 {F(tw?.Health ?? 0, "0")}/{F(tw?.MaxHealth ?? 0, "0")}、泵站存活 {BaptismTowerBoss.PumpsAlive(s)}、伤害倍率 {F(BaptismTowerBoss.DamageMult(s), "0.##")}；{TeamHp(c)}；攻击中 {AliveTeam(c).Count(id => Cmd(id) == (int)CombatCommandKind.Attack)} 台");
             }
+            // 战况记录（每 5 真实秒；只记录不断言）：每台耐久 / 离塔距离 / 是否站在灌注斑块里、召来的小兵、具名反应累计——首领强度调参（FG15-BAL-01）与临界排查用
+            if ((int)(c.StepElapsed / 5) > c.GetInt(FgjM3Common.SK(c, "diag")))
+            {
+                c.SetInt(FgjM3Common.SK(c, "diag"), (int)(c.StepElapsed / 5));
+                ClarityBossRecord br = BaptismTowerBoss.Record(s);
+                Vector2 tAt = BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.TowerInstanceId);
+                string Where(int id)
+                {
+                    Vector2 p = PosOf(id);
+                    ClarityBossFill f = br?.Active?.FirstOrDefault(x => x != null && (p - new Vector2(x.X, x.Y)).sqrMagnitude <= x.R * x.R);
+                    string fire = Home != null && Home.TryGetMachineUnit(id, out int u) && Home.Kernel.TryGetUnit(u, out CombatUnitView uv)
+                        ? $" 热 {F(uv.Heat, "0.##")} 下次开火 {F((float)(uv.NextFireAt - Home.Kernel.Time), "0.#")}s 命令 {uv.Command}→{uv.CommandTarget}{(Home.Kernel.TryGetStatus(u, out uint sm, out _, out _, out _, out _) && sm != 0u ? " 状态 0x" + sm.ToString("X") : string.Empty)}"
+                        : string.Empty;
+                    return $"{Label(id)} {TeamHpOf(id)} 距塔 {F(Vector2.Distance(p, tAt), "0.#")}{(f != null ? " 在" + f.Tag + (br.ReactFill == f.Serial ? "(预警)" : string.Empty) : string.Empty)}{fire}";
+                }
+                int wave = br?.WaveUnits?.Count(u => Home != null && Home.IsUnitAlive(u)) ?? 0;
+                string waveAt = string.Join("、", (br?.WaveUnits ?? Array.Empty<int>()).Where(u => Home != null && Home.IsUnitAlive(u))
+                    .Select(u => Home.Kernel.TryGetUnit(u, out CombatUnitView v) ? $"{F(v.Health, "0")}hp 距塔 {F(Vector2.Distance(new Vector2((float)v.Position.x, (float)v.Position.y), tAt), "0.#")}" : "?"));
+                c.Log($"    战况 [{F(c.StepElapsed, "0")}s] 流体 {br?.Active?.Length ?? 0} 片、召来存活 {wave}（{waveAt}）；{string.Join("、", AliveTeam(c).Select(Where))}；{ReactionReport()}");
+            }
+            // EMG3-E2E-01 修复轮（先弄清规则再下命令，实测 _emg3e2e01/m10-diag3.txt）：反应阶段塔每隔 react_seconds 点着“站着最多己方机器”的那片灌注斑块，
+            // 站在里面 / 沾了酸的车被点着后积热顶到 2 倍过热阈值（热 ≈ 199）、持续燃烧，整场锁火（塔耐久停住十几秒不动），胜负只看谁没被点着——临界。
+            // 玩家打法：灌注阶段先打掉 4 座泵站（被打掉就停掉它的流体），退到塔外等场上斑块到期（fill_life_seconds），再打塔：反应阶段没有斑块可点，结果与点击时刻无关。
+            Vector2 centroid = Centroid(c);
+            ClarityBossRecord rec = BaptismTowerBoss.Record(s);
+            int fills = rec?.Active?.Count(f => f != null && f.UntilTick > GameClock.Ticks) ?? 0;
+            if (phase == BaptismPhase.Fill && (BaptismTowerBoss.PumpsAlive(s) > 0 || fills > 0))
+            {
+                int pump = -1;
+                float best = float.MaxValue;
+                for (int i = 0; i < BaptismTowerBoss.PumpCount; i++)
+                {
+                    float d = BaptismTowerBoss.Pump(s, i)?.IsAlive == true ? Vector2.Distance(BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.PumpInstanceId(i)), centroid) : float.MaxValue;
+                    if (d < best)
+                    {
+                        best = d;
+                        pump = i;
+                    }
+                }
+                if (JourneyInput.Holding)
+                {
+                    return StepOutcome.Wait;
+                }
+                if (pump >= 0)
+                {
+                    bool retarget = c.GetInt("boss.pump") != pump + 1;
+                    bool idle = AliveTeam(c).Any(id => Cmd(id) != (int)CombatCommandKind.Attack);
+                    if ((retarget || idle && NowMs() - c.GetLong(FgjM3Common.SK(c, "rcAt")) > 3000)
+                        && FgjM3Common.TryClick(BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.PumpInstanceId(pump)), 1))
+                    {
+                        c.SetInt("boss.pump", pump + 1);
+                        c.SetLong(FgjM3Common.SK(c, "rcAt"), NowMs());
+                        c.SetInt("boss.pc", c.GetInt("boss.pc") + 1);
+                        if (retarget)
+                        {
+                            c.Log($"[{F(c.StepElapsed, "0")}s] 右键泵站 {pump}（灌 {BaptismTowerBoss.FluidOf(s, pump)}，剩 {BaptismTowerBoss.PumpsAlive(s)} 座）");
+                        }
+                    }
+                    return StepOutcome.Wait;
+                }
+                if (c.GetInt("boss.back") == 0)
+                {
+                    Vector2 towerPos = BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.TowerInstanceId);
+                    if (FgjM3Common.TryClick(towerPos + (centroid - towerPos).normalized * 30f, 1))
+                    {
+                        c.SetInt("boss.back", 1);
+                        c.Log($"[{F(c.StepElapsed, "0")}s] 泵站全毁，右键塔外 30 格的地面后撤，等场上 {fills} 片斑块到期；{TeamHp(c)}");
+                    }
+                }
+                return StepOutcome.Wait;
+            }
             // FG-GAP-140 的临时做法（玩家也这么操作）：攻击命令直线逼近、被地形角落卡在射程外不动 → 先右键塔旁地面（移动走寻路）走近，下面再右键塔。
             // EMG2-BOSS-01：撤掉场地区域后幸存的两台卡在拐角里不再被挤开，这一步才稳定复现。寻路局部避让归 FG15-SYS-02。
-            Vector2 centroid = Centroid(c);
             if (NowMs() - c.GetLong(FgjM3Common.SK(c, "stuckAt")) > 5000)
             {
                 Vector2 towerAt = BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.TowerInstanceId);

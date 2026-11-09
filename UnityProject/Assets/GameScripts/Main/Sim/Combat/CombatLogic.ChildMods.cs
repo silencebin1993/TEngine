@@ -15,16 +15,17 @@ namespace BinGames.Sim.Combat
         private const uint SaltSubZone = 0x5A2Du;
 
         /// <summary>子弹药命中正面装甲时的减伤系数：1 − 装甲 × (1 − 破甲)。</summary>
-        internal static float EmgSubArmorFactor(ref CombatData d, in CombatProjectile pr, int hit)
+        /// <remarks><paramref name="skip"/> = 命中这一刻被条件 / 随机关掉的行（<see cref="EmgSubHitSkip"/>；EMG3-E2E-01，DEBT-EMG3META01-03）。</remarks>
+        internal static float EmgSubArmorFactor(ref CombatData d, in CombatProjectile pr, int hit, ulong skip = 0UL)
         {
-            float pierce = pr.Prog >= 0 && EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m) ? m.ArmorPierce : 0f;
+            float pierce = pr.Prog >= 0 && EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip) ? m.ArmorPierce : 0f;
             return math.max(0f, 1f - ArmorOf(ref d, hit) * (1f - math.saturate(pierce)));
         }
 
-        /// <summary>子弹药命中后：爆圈（命中处 r 米内其他敌对单位各吃 b 倍）与余击（c 米内最近的 a 个其他目标各吃 b 倍）。O(单位数 × 余击数)。</summary>
-        internal static void EmgSubSplash(ref CombatData d, in CombatProjectile pr, int owner, int hit, double2 hitPos, float dmg)
+        /// <summary>子弹药命中后：爆圈（命中处 r 米内其他敌对单位各吃 b 倍）与余击（c 米内最近的 a 个其他目标各吃 b 倍）。O(单位数 × 余击数)。<paramref name="skip"/> 同上。</summary>
+        internal static void EmgSubSplash(ref CombatData d, in CombatProjectile pr, int owner, int hit, double2 hitPos, float dmg, ulong skip = 0UL)
         {
-            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m) || !(dmg > 0f))
+            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip) || !(dmg > 0f))
             {
                 return;
             }

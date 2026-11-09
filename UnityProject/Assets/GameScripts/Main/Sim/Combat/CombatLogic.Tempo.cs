@@ -35,6 +35,8 @@ namespace BinGames.Sim.Combat
             public int Node;
             /// <summary>读 evt.beat 的指令序号位 / 读 tmp.beat 的 / 其中本拍在相位上的 / 读 tmp.sync 的。</summary>
             public ulong Reads, Beats, OnPhase, Syncs;
+            /// <summary>本宿主执行的序号位（谐振点只执行谐振那几条；计机器对齐仍按 <see cref="Reads"/>：谐振点带着载荷的节拍相位）。</summary>
+            public ulong Mask;
         }
 
         private static float EmgBeatSeconds(ref CombatData d) => d.Config.EmgBeatSeconds > 0f ? d.Config.EmgBeatSeconds : EmgTempoConst.DefaultBeat;
@@ -119,7 +121,7 @@ namespace BinGames.Sim.Combat
                 CombatProjectile pr = d.Projectiles[i];
                 if (pr.Prog >= 0 && (pr.Flags & EmgProjFlags.Sub) == 0) // 子弹药由放出点的节拍锚点代为执行（EmgBeatAnchorSub），不重复出拍
                 {
-                    EmgBeatCollect(ref d, ref hosts, BeatProj, i, pr.Owner, pr.Prog, pr.Node, beat);
+                    EmgBeatCollect(ref d, ref hosts, BeatProj, i, pr.Owner, pr.Prog, pr.Node, beat, ulong.MaxValue);
                 }
             }
             for (int i = 0; i < d.Zones.Length; i++)
@@ -127,7 +129,7 @@ namespace BinGames.Sim.Combat
                 CombatZone z = d.Zones[i];
                 if (z.EmgProgRef > 0)
                 {
-                    EmgBeatCollect(ref d, ref hosts, BeatZone, i, z.Owner, z.EmgProgRef - 1, z.EmgNode, beat);
+                    EmgBeatCollect(ref d, ref hosts, BeatZone, i, z.Owner, z.EmgProgRef - 1, z.EmgNode, beat, ulong.MaxValue);
                 }
             }
             for (int i = 0; i < d.Drones.Length; i++)
@@ -135,7 +137,7 @@ namespace BinGames.Sim.Combat
                 CombatDrone dr = d.Drones[i];
                 if (dr.Weapon >= 0 && dr.Weapon < d.Weapons.Length)
                 {
-                    EmgBeatCollect(ref d, ref hosts, BeatDrone, i, dr.Owner, d.Weapons[FlashExecWeapon(ref d, dr)].Program, 0, beat);
+                    EmgBeatCollect(ref d, ref hosts, BeatDrone, i, dr.Owner, d.Weapons[FlashExecWeapon(ref d, dr)].Program, 0, beat, ulong.MaxValue);
                 }
             }
             for (int i = 0; i < d.MetaRun.Length; i++)
@@ -143,7 +145,7 @@ namespace BinGames.Sim.Combat
                 EmgMetaRun m = d.MetaRun[i];
                 if (m.Mode == EmgMetaConst.RunBeat && now <= m.Until + 1e-9)
                 {
-                    EmgBeatCollect(ref d, ref hosts, BeatAnchor, i, m.Unit, m.Prog, m.Node, beat);
+                    EmgBeatCollect(ref d, ref hosts, BeatAnchor, i, m.Unit, m.Prog, m.Node, beat, m.Mask);
                 }
             }
             if (hosts.Length == 0)
@@ -167,8 +169,10 @@ namespace BinGames.Sim.Combat
             for (int h = 0; h < hosts.Length; h++)
             {
                 BeatHost b = hosts[h];
-                bool sync = machine.TryGetValue(b.Owner, out ulong em) && (math.countbits(em) >= 2 || (group.IsCreated && group.Contains(b.Owner))) && !used.Contains(b.Owner);
-                ulong allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, sync);
+                // EMG3-E2E-01（DEBT-EMG3TMP01-01）：谐振点（只放行谐振的锚点）的对齐单独记一份——原来谐振与齐射等由同一宿主一次执行，挪到命中点后不能抢走在飞弹体 / 无人机本拍的对齐
+                int key = b.Kind == BeatAnchor && b.Mask != ulong.MaxValue ? ~b.Owner : b.Owner;
+                bool sync = machine.TryGetValue(b.Owner, out ulong em) && (math.countbits(em) >= 2 || (group.IsCreated && group.Contains(b.Owner))) && !used.Contains(key);
+                ulong allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, sync) & b.Mask;
                 if ((b.Reads & allow) == 0UL)
                 {
                     continue; // 这台宿主本拍没有要执行的节拍读端：不入队
@@ -176,11 +180,11 @@ namespace BinGames.Sim.Combat
                 bool took = sync && (b.Syncs & b.Reads & allow) != 0UL;
                 if (took)
                 {
-                    used.Add(b.Owner);
+                    used.Add(key);
                 }
                 else
                 {
-                    allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, false);
+                    allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, false) & b.Mask;
                 }
                 EmgBeatEmit(ref d, b, beat, allow, took);
             }
@@ -193,7 +197,8 @@ namespace BinGames.Sim.Combat
             hosts.Dispose();
         }
 
-        private static void EmgBeatCollect(ref CombatData d, ref NativeList<BeatHost> hosts, byte kind, int index, int owner, int prog, int node, long beat)
+        /// <summary><paramref name="mask"/>：本宿主执行的序号位（<see cref="BeatHost.Mask"/>）。节拍锚点 = 记录里的 Mask（普通锚点全放行；谐振点只放行谐振那几条，EMG3-E2E-01），其余宿主全放行。</summary>
+        private static void EmgBeatCollect(ref CombatData d, ref NativeList<BeatHost> hosts, byte kind, int index, int owner, int prog, int node, long beat, ulong mask)
         {
             if (!EmgNodeSpan(ref d, prog, node, out int first, out int end))
             {
@@ -202,7 +207,7 @@ namespace BinGames.Sim.Combat
             EmgBeatScan(ref d, first, end, beat, out ulong reads, out ulong beats, out ulong onPhase, out ulong syncs);
             if (reads != 0UL)
             {
-                hosts.Add(new BeatHost { Kind = kind, Index = index, Owner = owner, Prog = prog, Node = node, Reads = reads, Beats = beats, OnPhase = onPhase, Syncs = syncs });
+                hosts.Add(new BeatHost { Kind = kind, Index = index, Owner = owner, Prog = prog, Node = node, Reads = reads, Beats = beats, OnPhase = onPhase, Syncs = syncs, Mask = mask });
             }
         }
 
@@ -311,10 +316,14 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// en.kinetic × evt.beat（FG19A fw_resonance 行“余振”）：根节点上写 en.kinetic（inject）、且同一条固件读 evt.beat 触发的指令，本拍在宿主位置余振一次——
-        /// 半径 = param2 米内的敌对单位各吃 宿主伤害 × 幅度 的动能伤害；用掉 tmp.sync 的拍半径 × 2。出手者已不在时不结算（没有攻击者归属）。O(节点指令数 + 单位数)，只在出拍时。
+        /// 半径 = param2 米内的敌对单位各吃 宿主伤害 × 幅度 的动能伤害（宿主 = 锚点 / 谐振点 / 区域；在飞弹体与无人机不在此刻位置余振）；用掉 tmp.sync 的拍半径 × 2。出手者已不在时不结算（没有攻击者归属）。O(节点指令数 + 单位数)，只在出拍时。
         /// </summary>
         private static void EmgBeatKinetic(ref CombatData d, in BeatHost b, in EmgCtx host, double2 pos, ulong allow, bool sync)
         {
+            if (b.Kind == BeatProj || b.Kind == BeatDrone)
+            {
+                return; // EMG3-E2E-01（DEBT-EMG3TMP01-01，FG19A 第 132 行）：射弹 / 无人机在“最近一次命中点”余振（命中时留的谐振点），不在弹体 / 无人机此刻的位置
+            }
             if (!EmgNodeSpan(ref d, b.Prog, b.Node, out int first, out int end) || host.Owner < 0 || host.Owner >= d.Count || !d.IsAlive(host.Owner))
             {
                 return;
@@ -390,16 +399,17 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// 每台机器、每个程序节点只留一个节拍锚点：已有就刷新到这一次的结算点与 2 秒时限（连射不叠锚点，节拍执行次数按机器而不是按出手 / 份数增长；锚点数 ≤ 机器数 × 节点数）。
-        /// O(运行态条数)，只在读 evt.beat 的出手 / 子弹药放出时。
+        /// 谐振点（<see cref="EmgResonanceHit"/>）另按宿主（机器 / 每架无人机）与放行位各留一个，时限 = 2 拍（<paramref name="seconds"/>）。
+        /// O(运行态条数)，只在读 evt.beat 的出手 / 子弹药放出 / 谐振命中时。
         /// </summary>
-        private static void EmgBeatAnchorPut(ref CombatData d, EmgMetaRun rec)
+        private static void EmgBeatAnchorPut(ref CombatData d, EmgMetaRun rec, double seconds = 0.0)
         {
-            double until = d.Scalars[0].Time + (d.Config.EmgMetaAnchor > 0f ? d.Config.EmgMetaAnchor : EmgMetaConst.DefaultAnchor);
+            double until = d.Scalars[0].Time + (seconds > 0.0 ? seconds : d.Config.EmgMetaAnchor > 0f ? d.Config.EmgMetaAnchor : EmgMetaConst.DefaultAnchor);
             rec.DueAt = rec.Until = until;
             for (int i = 0; i < d.MetaRun.Length; i++)
             {
                 EmgMetaRun m = d.MetaRun[i];
-                if (m.Mode == EmgMetaConst.RunBeat && m.Unit == rec.Unit && m.Prog == rec.Prog && m.Node == rec.Node)
+                if (m.Mode == EmgMetaConst.RunBeat && m.Unit == rec.Unit && m.Prog == rec.Prog && m.Node == rec.Node && m.Host == rec.Host && m.HostKind == rec.HostKind && m.Mask == rec.Mask)
                 {
                     d.MetaRun[i] = rec;
                     return;
@@ -411,6 +421,46 @@ namespace BinGames.Sim.Combat
                 return;
             }
             d.MetaRun.Add(rec);
+        }
+
+        /// <summary>节点里的谐振位：写 en.kinetic（inject）、且同一条指令读 evt.beat（<paramref name="reads"/>）的序号位。O(节点指令数)。</summary>
+        private static ulong EmgResonanceBits(ref CombatData d, int first, int end, ulong reads)
+        {
+            ulong bits = 0UL;
+            for (int i = first; i < end && reads != 0UL; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if (x.Port == EmgConst.PortKinetic && x.Role == EmgTempoConst.RoleInject && (x.Flags & EmgInstrFlags.Overflow) == 0 && x.Amount > 0f)
+                {
+                    bits |= EmgOrdBit(x.Ordinal) & reads;
+                }
+            }
+            return bits;
+        }
+
+        /// <summary>
+        /// EMG3-E2E-01（DEBT-EMG3TMP01-01；FG19A 第 132 行谐振 5 载体读法）：射弹 / 无人机这一下命中，载荷节点上有谐振时，在命中点留（刷新）一个 2 拍的谐振点——
+        /// 一个只放行谐振那几条的节拍锚点（快照段 23 已有的 RunBeat 记录，不加新内核状态）：射弹按机器、无人机按每架各留一个，之后每拍在“最近一次命中点”余振，2 拍后移除。
+        /// 格斗 / 即时射弹的锚点本来就在命中点（<see cref="EmgBeatAnchor"/>），力场在圈内、布区在区域里，不经这里。没有监听 evt.beat 时 O(1)。
+        /// </summary>
+        internal static void EmgResonanceHit(ref CombatData d, int prog, int node, int unitId, int hostId, EmgEntKind hostKind, double2 at, int other, float damage, byte faction, int weapon,
+            byte carrier, byte depth, int chain)
+        {
+            if (prog < 0 || (d.EmgListen & EmgBit(EmgEventKind.Beat)) == 0u || !EmgNodeSpan(ref d, prog, node, out int first, out int end))
+            {
+                return;
+            }
+            EmgBeatScan(ref d, first, end, 0, out ulong reads, out _, out _, out _);
+            ulong bits = EmgResonanceBits(ref d, first, end, reads);
+            if (bits == 0UL)
+            {
+                return;
+            }
+            EmgBeatAnchorPut(ref d, new EmgMetaRun
+            {
+                Unit = unitId, Prog = prog, Chain = chain, Node = (byte)node, Host = hostId, HostKind = (byte)hostKind, Mode = EmgMetaConst.RunBeat, Depth = depth, Mask = bits,
+                Pos = at, Other = other, Weapon = weapon, Damage = math.max(0f, damage), Faction = faction, Carrier = carrier,
+            }, 2.0 * EmgBeatSeconds(ref d));
         }
     }
 }

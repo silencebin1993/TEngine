@@ -70,7 +70,7 @@ namespace GameLogic.Campaign.Emergence
                     HashSet<ushort> pa = EmgProgramCompiler.CluePortsOf(r.ParentA), pb = EmgProgramCompiler.CluePortsOf(r.ParentB);
                     foreach ((ushort a, ushort b) in pairs)
                     {
-                        if ((pa.Contains(a) && pb.Contains(b)) || (pa.Contains(b) && pb.Contains(a)))
+                        if ((ClueHas(pa, a) && ClueHas(pb, b)) || (ClueHas(pa, b) && ClueHas(pb, a)))
                         {
                             list.Add(r.Id);
                             break;
@@ -81,6 +81,27 @@ namespace GameLogic.Campaign.Emergence
             ids = list.ToArray();
             c.RecipesByKey[key] = ids;
             return ids;
+        }
+
+        /// <summary>
+        /// EMG3-E2E-01（FGJ-M5 发现）：线索端口集合里有没有规则这一端。沾染端（coat:N，码 = CoatBase + N）不是任何固件的写端口，按“写的物质沾上的是这一位”展开：
+        /// 某物质端口在集合里、且 fg.TbMatter 的 coatBit = N 就算（C03 短路 = 浸湿 × 电：冷却液、水都浸湿，[冷却液] × [电弧] 计湿弧同现）。按端口，不按固件 / 反应 ID（FGR-EMG-013）。
+        /// </summary>
+        private static bool ClueHas(HashSet<ushort> ports, ushort code)
+        {
+            if (code < EmgRuleConst.CoatBase)
+            {
+                return ports.Contains(code);
+            }
+            EmgMatterCatalog.Compiled m = EmgMatterCatalog.Current;
+            for (int k = 1; k <= EmgMatterConst.Count; k++)
+            {
+                if (m.Rows[k].Valid && m.Rows[k].CoatBit == code - EmgRuleConst.CoatBase && ports.Contains((ushort)(EmgMatterConst.PortBase + k)))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         public static void Reload() => _current = null;

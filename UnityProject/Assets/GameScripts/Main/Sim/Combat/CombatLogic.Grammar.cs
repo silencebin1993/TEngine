@@ -762,17 +762,24 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>子弹药节点上的连锁（继承来的 / 自己的 chain 行）：命中后按偏好跳几次，每跳伤害按衰减。主目标已结算。</summary>
-        internal static void EmgSubChain(ref CombatData d, in CombatProjectile pr, int owner, int hit, double2 hitPos)
+        internal static void EmgSubChain(ref CombatData d, in CombatProjectile pr, int owner, int hit, double2 hitPos, float dmgMul = 1f)
         {
-            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m) || m.Chain == 0 || !(m.ChainRange > 0f))
+            // EMG3-E2E-01（FGJ-EMG-3 发现）：条件 / 随机元程序下游的连锁按这次命中的放行位（与 EmgNodeEffects 同一函数；没有元程序 = 全放行）
+            ulong allow = pr.Prog >= 0 ? EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id) : ulong.MaxValue;
+            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, allow == ulong.MaxValue ? 0UL : ~allow) || m.Chain == 0 || !(m.ChainRange > 0f))
             {
                 return;
             }
-            byte want = pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player;
+            EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, pr.Damage * dmgMul, m);
+        }
+
+        /// <summary>从 <paramref name="hit"/> 起按 <paramref name="m"/> 的连锁行跳几次（每跳 × 衰减，偏好已标记 / 导电）；主目标已结算。子弹药连锁与根节点条件下游的连锁共用。
+        /// <paramref name="root"/>：根节点条件下游的连锁（替代静态读法里那段连锁）——与静态连锁同口径，跳点落接线锚点（EmgAnchorConst.Chain）、按武器读法 <paramref name="st"/> 上状态。</summary>
+        internal static void EmgChainHops(ref CombatData d, byte want, int owner, int hit, double2 hitPos, float dmg, in EmgMods m, bool root = false, in CombatReading st = default)
+        {
             var hitList = new FixedList128Bytes<int>();
             hitList.Add(hit);
             double2 at = hitPos;
-            float dmg = pr.Damage;
             ushort hc = d.EmgCtx.HitCode;
             d.EmgCtx.HitCode = EmgCode.HitChain;
             for (int q = 0; q < m.Chain; q++)
@@ -785,6 +792,16 @@ namespace BinGames.Sim.Combat
                 hitList.Add(k);
                 dmg *= m.ChainFalloff > 0f ? m.ChainFalloff : 1f;
                 DamageUnit(ref d, k, dmg, owner);
+                if (root)
+                {
+                    d.EmgCtx.HitCode = hc;
+                    EmgAnchorAt(ref d, EmgAnchorConst.Chain, d.EmgCtx, d.Pos[k], k); // EMG3-FUSE-01：连锁跳点是落点（没有接线的程序 O(1) 返回）
+                    if (st.StatusMask != 0u)
+                    {
+                        ApplyStatus(ref d, k, st.StatusMask, st.StatusSeconds, st.StatusDps, st.StatusSlow, st.StatusVuln, owner, dmg);
+                    }
+                    d.EmgCtx.HitCode = EmgCode.HitChain;
+                }
                 EmgMarkJumpReact(ref d, owner, k, m.ChainPref); // EMG1-CHAIN-01：按“已标记”偏好跳到已标记目标 → reaction_marktag 计数 + evt.react
                 at = d.Pos[k];
             }

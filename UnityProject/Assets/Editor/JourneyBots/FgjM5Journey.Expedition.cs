@@ -65,10 +65,16 @@ namespace GameLogic.EditorTools.JourneyBots
             ReactionSessionRecord sess = ReactionAttribution.Current(St, FracturedCityLayout.RegionId, create: false);
             ReactionShareRecord row = sess?.Reactions?.FirstOrDefault(r => r.ReactionId == FgjM2Common.Conduct);
             int need = FusionCatalog.CluePartialMin;
-            if (row != null && row.Count >= need)
+            // EMG3-E2E-01 修复：EMG3-FUSE-01 起线索按“两父端口同链同现”（同一条链只计一次，会比“短路”次数少），后面要熔合的是这两台机器的配方（冷却液 × 电弧），
+            // 所以还要等这条配方的同现次数也到部分线索门槛（不放宽门槛；不够就接着打下一个敌人）
+            string recipe = FusionCatalog.TryGetByPair(FgjM2Common.FwWet, FgjM2Common.FwShock, out FusionRecipeDef pair) ? pair.Id : string.Empty;
+            int co = sess?.FusionCo?.FirstOrDefault(r => r != null && r.ReactionId == recipe)?.Count ?? 0;
+            string coAll = string.Join("、", (sess?.FusionCo ?? Array.Empty<ReactionShareRecord>()).Where(r => r != null).Select(r => $"{r.ReactionId} {r.Count}"));
+            if (row != null && row.Count >= need && co >= need)
             {
                 c.SetInt("conduct", row.Count);
-                return StepOutcome.Done($"远征场次“{ReactionAttribution.Title(sess)}”记下“{FgjM2Common.ConductName}” {row.Count} 次（部分线索门槛 {need}、完整线索门槛 {FusionCatalog.ClueFullMin}）");
+                return StepOutcome.Done($"远征场次“{ReactionAttribution.Title(sess)}”记下“{FgjM2Common.ConductName}” {row.Count} 次、配方 {recipe} 两父端口同链同现 {co} 次" +
+                                        $"（部分线索门槛 {need}、完整线索门槛 {FusionCatalog.ClueFullMin}；本场同现：{coAll}）");
             }
             CombatSite site = GameRoot.FracturedCity.Combat;
             int a = c.GetInt("wetM");
@@ -78,10 +84,10 @@ namespace GameLogic.EditorTools.JourneyBots
                 int n = c.GetInt("reissue");
                 if (n >= 8)
                 {
-                    return StepOutcome.Fail($"右键了 {n + 1} 个敌人，“{FgjM2Common.ConductName}”只有 {row?.Count ?? 0} 次（门槛 {need}）");
+                    return StepOutcome.Fail($"右键了 {n + 1} 个敌人，“{FgjM2Common.ConductName}”只有 {row?.Count ?? 0} 次、配方 {recipe} 同现 {co} 次（门槛 {need}；本场同现：{coAll}）");
                 }
                 c.SetInt("reissue", n + 1);
-                c.Log($"目标 {c.Get("enemy")} 已不在（攻击命令结束、没有自己找别的敌人）；“{FgjM2Common.ConductName}”已 {row?.Count ?? 0} 次，右键下一个最近的敌人");
+                c.Log($"目标 {c.Get("enemy")} 已不在（攻击命令结束、没有自己找别的敌人）；“{FgjM2Common.ConductName}”已 {row?.Count ?? 0} 次、配方 {recipe} 同现 {co} 次，右键下一个最近的敌人");
                 FgjM2Common.RightClickFcEnemy(c);
             }
             return StepOutcome.Wait;
@@ -173,7 +179,12 @@ namespace GameLogic.EditorTools.JourneyBots
             CampaignState s = St;
             FusionState f = FusionService.StateOf(s);
             // EMG3-FUSE-01：线索来源改为“两父端口同链同现”，新线索不再挂反应 ID（ReactionId 为空），按“来自这次远征”找
-            FusionClueRecord clue = f?.Clues?.LastOrDefault(x => x != null && x.SessionKind == ReactionAttribution.KindExpedition);
+            // EMG3-E2E-01 修复：同一条同现会给端口重叠的几条配方各一条线索（湿弧 = 冷却液 × 电弧、漫流电弧 = 蔓延 × 电弧），后者的父固件玩家没有，
+            // 点“按这条线索选固件”只会提示“没有这枚固件”；本旅程后续要正式熔合，取两条父固件都在手上的那条（没有就退回最后一条，由断言报出）
+            var held = new HashSet<string>(FusionService.Candidates(s).Select(x => x.FirmwareId), StringComparer.Ordinal);
+            FusionClueRecord clue = f?.Clues?.LastOrDefault(x => x != null && x.SessionKind == ReactionAttribution.KindExpedition
+                                                                 && FusionCatalog.TryGet(x.RecipeId, out FusionRecipeDef r) && held.Contains(r.ParentA) && held.Contains(r.ParentB))
+                                    ?? f?.Clues?.LastOrDefault(x => x != null && x.SessionKind == ReactionAttribution.KindExpedition);
             string fw = c.Get("rawFw");
             PrimitiveChipRecord raw = s.PrimitiveChips?.LastOrDefault(x => x != null && x.CardDefId == fw);
             if (clue == null || raw == null)

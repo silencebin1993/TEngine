@@ -567,6 +567,58 @@ namespace BinGames.Sim.Combat
             return ~allow & units;
         }
 
+        /// <summary>
+        /// EMG3-E2E-01（FGJ-EMG-3 发现；DEBT-EMG3META01-03 的连锁部分）：根节点上位于条件 / 随机元程序下游的连锁行不折进静态读法（CombatSite.FoldProgramReadings 同口径），
+        /// 由命中结算按本次放行位 <paramref name="allow"/> 动态执行。返回这几条里被放行的连锁汇总；程序没有元程序 / 没有这类行 / 都没放行返回 false。O(节点指令数 × 元程序数)。
+        /// </summary>
+        internal static bool EmgCondChainMods(ref CombatData d, int prog, int node, ulong allow, out EmgMods m)
+        {
+            m = default;
+            ulong gated = EmgGatedUnits(ref d, prog, node);
+            return (gated & allow) != 0UL && EmgModsOf(ref d, prog, node, out m, ~(gated & allow)) && m.Chain > 0 && m.ChainRange > 0f;
+        }
+
+        /// <summary>节点上位于条件 / 随机元程序下游的程序序号位（这些行的无状态修饰在结算那一刻按条件判）。程序没有元程序返回 0（一条比较）。O(节点指令数 × 元程序数)。</summary>
+        internal static ulong EmgGatedUnits(ref CombatData d, int prog, int node)
+        {
+            if (!EmgHasMeta(ref d, prog) || !EmgNodeSpan(ref d, prog, node, out int first, out int end))
+            {
+                return 0UL;
+            }
+            ulong units = EmgMetaScan(ref d, first, end, out ulong metas);
+            ulong gated = 0UL;
+            for (ulong q = metas; q != 0UL; q &= q - 1UL)
+            {
+                byte o = (byte)math.tzcnt(q);
+                if (EmgMetaRow(ref d, first, end, o, out int kind) >= 0 && (kind == EmgMetaConst.If || kind == EmgMetaConst.Random))
+                {
+                    gated |= units & EmgAbove(o);
+                }
+            }
+            return gated;
+        }
+
+        /// <summary>
+        /// EMG3-E2E-01（DEBT-EMG3META01-03）：子弹药命中这一刻被条件 / 随机关掉的下游修饰位（给 <see cref="EmgModsOf"/> 的 skip）。只管条件 / 随机下游的行，
+        /// 不在下游的行照常（延后下游的命中修饰也照常，不因延后丢掉）。程序没有元程序返回 0。
+        /// </summary>
+        internal static ulong EmgSubHitSkip(ref CombatData d, in CombatProjectile pr, int owner, int hit)
+        {
+            ulong gated = pr.Prog >= 0 ? EmgGatedUnits(ref d, pr.Prog, pr.Node) : 0UL;
+            return gated == 0UL ? 0UL : gated & ~EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id);
+        }
+
+        /// <summary>子弹药命中这一刻生效的条件 / 随机下游伤害倍率（出手时只乘不在下游的那几行，<see cref="EmgSpawnSub"/>）。没有这类行 = 1。</summary>
+        internal static float EmgSubCondDmg(ref CombatData d, in CombatProjectile pr, ulong skip)
+        {
+            ulong gated = pr.Prog >= 0 ? EmgGatedUnits(ref d, pr.Prog, pr.Node) : 0UL;
+            if ((gated & ~skip) == 0UL || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, ~(gated & ~skip)))
+            {
+                return 1f;
+            }
+            return m.DmgMul > 0f ? m.DmgMul : 1f;
+        }
+
         /// <summary>循环周期：0.5 秒；同一条循环带 prop.heat 感知读端时“本机越热周期越短”= 周期 × (1 − 0.5 × 积热比例)（FG19A N05），下限 0.1 秒。</summary>
         private static double EmgLoopPeriod(ref CombatData d, int first, int end, byte ord, int self, float period)
         {
@@ -800,6 +852,8 @@ namespace BinGames.Sim.Combat
             EmgProgram p = d.EmgPrograms[e.Prog];
             int maxChildren = EmgMaxChildren(ref d);
             bool checkedDepth = false;
+            int released = 0;
+            byte gen = 0;
             for (int j = 1; j < p.NodeCount; j++)
             {
                 int ni = p.FirstNode + j;
@@ -833,6 +887,13 @@ namespace BinGames.Sim.Combat
                     ZoneRadius = host.ZoneRadius, ZoneLife = host.ZoneLife, Flags = host.PFlags & EmgProjFlags.Heal, Pos = e.Pos, Dir = dir,
                     Other = !loop && e.Kind == EmgEventKind.Hit ? e.Other : 0, Ent = loop ? (int)EmgEventKind.Timer : (int)e.Kind,
                 });
+                released += math.min((int)c.TrigCount, maxChildren);
+                gen = c.Gen;
+            }
+            if (released > 0)
+            {
+                // EMG3-E2E-01（DEBT-EMG3META01-04）：重放 / 循环放出的子载荷与正常唤起同一出口——计放出、写分裂链日志、发 evt.split（链读端看得到这一次分裂）
+                EmgSplitOut(ref d, e, loop ? (int)EmgEventKind.Timer : (int)e.Kind, released, gen);
             }
         }
     }

@@ -73,6 +73,7 @@ namespace GameLogic.EditorTools
                 Step(CheckProducer);
                 Step(CheckPhase);
                 Step(CheckSync);
+                Step(CheckResonancePoint);
                 Step(CheckCarriers);
                 Step(CheckNested);
                 Step(CheckTiming);
@@ -309,10 +310,11 @@ namespace GameLogic.EditorTools
             long offset = SyncRun(k => Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 1), ResI(2) }, 0, 1), 1, out long pulsesOff, out float lossOff);
             long single = SyncRun(k => Prog(k, new[] { ClockI(0, 2, 0), ResI(1) }, 0), 3, out long pulsesSingle, out _);
             long many = SyncRun(k => Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 0), ResI(2) }, 0, 1), 3, out long pulsesMany, out _);
-            Expect(aligned == 4 && pulses == 4 && hpLoss > 0f, $"两条同相位：4.2 秒内对齐 {aligned} 次（第 2、4、6、8 拍）、余振 {pulses} 次，旁边的敌人掉血 {hpLoss:0.0}");
+            // EMG3-E2E-01（DEBT-EMG3TMP01-01，FG19A 第 132 行）：射弹在“最近一次命中点”余振，飞行中还没命中过不余振（命中点余振与半径 ×2 见 N 段）；对齐计数不变
+            Expect(aligned == 4 && pulses == 0 && hpLoss == 0f, $"两条同相位：4.2 秒内对齐 {aligned} 次（第 2、4、6、8 拍）；飞行中没命中过 → 余振 {pulses} 次、弹道旁的敌人掉血 {hpLoss:0.0}（修前在弹体位置余振 4 次）");
             Expect(offset == 0 && pulsesOff == 0 && lossOff == 0f, $"两条错相位：对齐 {offset} 次、余振 {pulsesOff} 次（不读 tmp.sync 的节拍指令照放）");
             Expect(single == 0 && pulsesSingle == 0, $"只有一条节拍指令、3 发同时在飞：对齐 {single} 次（同一条指令按序号去重）");
-            Expect(many == 4 && pulsesMany == 4, $"两条同相位、3 发同时在飞：对齐 {many} 次、余振 {pulsesMany} 次（每台机器每拍最多一次，不是 12 次）");
+            Expect(many == 4 && pulsesMany == 0, $"两条同相位、3 发同时在飞：对齐 {many} 次（每台机器每拍最多一次，不是 12 次）、飞行中余振 {pulsesMany} 次");
             // EMG3-FW-02（DEBT-EMG3TMP01-04，FGR-EMG-172“本拍执行”）：被 chs.* 条件 / 元程序条件关掉的节拍指令不计入相位对齐
             EmgInstr[] clock1Air = ClockI(1, 2, 0).Concat(new[] { Row(1, EmgConst.PortChsAirborne, Cond) }).ToArray(); // 第 2 条时钟要求离地，出手者着地
             long chsGated = SyncRun(k => Prog(k, new[] { ClockI(0, 2, 0), clock1Air, ResI(2) }, 0, 1), 1, out long chsPulses, out _);
@@ -329,13 +331,13 @@ namespace GameLogic.EditorTools
                 return k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Beat) | (1u << (int)EmgEventKind.Fire), Flags = EmgProgramFlags.HasMeta }, nodes,
                     root.SelectMany(x => x).ToList());
             }, 1, out long metaPulses, out _);
-            Expect(chsGated == 0 && chsPulses == 0 && chsHover == 4 && hoverPulses == 4 && metaGated == 0 && metaPulses == 0,
+            Expect(chsGated == 0 && chsPulses == 0 && chsHover == 4 && hoverPulses == 0 && metaGated == 0 && metaPulses == 0,
                 $"被门控的节拍指令不计对齐（DEBT-EMG3TMP01-04）：第 2 条时钟读 chs.airborne、出手者着地 → 对齐 {chsGated} 次、余振 {chsPulses} 次；悬浮离地 → 对齐 {chsHover}、余振 {hoverPulses}；" +
                 $"[时钟, 条件·过热, 时钟, 谐振] 冷武器 → 对齐 {metaGated} 次、余振 {metaPulses} 次（修前各 4 次）");
             // 根容量 3（子节点 1）：[谐振, 时钟脉冲, 贯穿, 时钟脉冲] → 根里谐振 0、时钟 1 / 3（相位都是 1），贯穿进子弹药节点
             EmgProgramResult real = Pc(3, "fw_resonance", "fw_clock", "fw_pierce", "fw_clock");
             long realSync = SyncRun(k => CombatSite.RegisterProgram(k, real), 1, out long realPulses, out _);
-            Expect(realSync == 4 && realPulses == 4, $"真实编译 [谐振, 时钟脉冲, 贯穿, 时钟脉冲]（根里时钟序号 1 / 3，相位都是 1）：对齐 {realSync} 次、余振 {realPulses} 次");
+            Expect(realSync == 4 && realPulses == 0, $"真实编译 [谐振, 时钟脉冲, 贯穿, 时钟脉冲]（根里时钟序号 1 / 3，相位都是 1）：对齐 {realSync} 次、飞行中余振 {realPulses} 次");
             // 审查修复（第 1 轮，FGT-EMG-053 齐射）：读 tmp.sync 的触发器只在对齐拍放出它的子载荷（MetaMask + EmgBeatBlocked 路径），每台机器每拍一次
             List<int> volley = FlightRun(k => Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 0), SyncTrigI(2) }, 0, 1, 2), 252, out _, out _);
             List<int> volleyOff = FlightRun(k => Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 1), SyncTrigI(2) }, 0, 1, 2), 252, out _, out _);
@@ -388,6 +390,134 @@ namespace GameLogic.EditorTools
             pulses = k.EmgBusStats.BeatPulses;
             hpLoss = k.TryGetUnit(side, out CombatUnitView v) ? 5000f - v.Health : -1f;
             return k.EmgBusStats.BeatSyncs;
+        }
+
+        // ── D2. 谐振命中点（EMG3-E2E-01 关闭 DEBT-EMG3TMP01-01；FG19A 第 132 行“命中点留 2 拍谐振点”）──
+
+        private static void CheckResonancePoint()
+        {
+            Line("  · D2. 谐振命中点（DEBT-EMG3TMP01-01）：射弹命中点留 2 拍谐振点，对齐拍在命中点余振（半径 ×2）；错相位不余振；第二发命中后刷新到最近一次命中点；无人机每架按自己的命中点；2 拍后移除；存读档接续");
+            Func<CombatKernel, int> aligned = k => Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 0), ResI(2) }, 0, 1);
+            Func<CombatKernel, int> offset = k => Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 1), ResI(2) }, 0, 1);
+            ResRun(aligned, false, out long pulses, out float lossFoe, out float lossSide, out int anchorMask, out int runsLeft, out long subs, out _, out _);
+            ResRun(offset, false, out long pulsesOff, out _, out float lossSideOff, out _, out _, out _, out _, out _);
+            Expect(pulses == 1 && Near(lossSide, 3f, 0.01f) && lossFoe >= 12.9f && anchorMask == 1 << 2 && runsLeft == 0 && subs == 0,
+                $"同相位：命中（约 0.25 秒）后留谐振点（只放行谐振那条，放行位 {anchorMask}），2 拍内第 2 拍对齐、在命中点余振 {pulses} 次——2.3 米外的敌人掉血 {lossSide:0.0}（3 米半径够到，平时 1.5 米够不到），"
+                + $"被打的敌人 {lossFoe:0.0}（直击 10 + 余振 3）；时钟不在谐振点放子弹药（{subs} 份）；2 拍后谐振点移除（剩 {runsLeft}）");
+            Expect(pulsesOff == 0 && lossSideOff == 0f, $"负向：错相位（没有对齐拍）谐振点不余振（{pulsesOff} 次、旁边掉血 {lossSideOff:0.0}）");
+            ResRun(aligned, true, out long pulses2, out _, out float lossSide1, out _, out _, out _, out float lossSide2, out int anchors2);
+            Expect(pulses2 == 1 && lossSide1 == 0f && Near(lossSide2, 3f, 0.01f) && anchors2 == 1,
+                $"最近一次命中点：第二发打另一侧后谐振点刷新（{anchors2} 个），对齐拍只在第二个命中点余振——第一处旁边掉血 {lossSide1:0.0}、第二处 {lossSide2:0.0}");
+            // 存读档：谐振点（快照段 23 的 RunBeat 记录，放行位一起存）中途存档 → 新内核读档 → 续跑逐步哈希一致
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                int prog = aligned(k);
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 10f, 10f)), 100f);
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 3), -1, 5000f);
+                int side = Unit(k, CombatFaction.Hostile, new double2(2.3, 2.5), -1, 5000f);
+                k.FireAt(me, foe, k.Time);
+                StepN(k, 36); // 0.6 秒：已命中、谐振点在，还没到对齐拍
+                int runs = k.MetaRunCount;
+                byte[] snap = k.Serialize();
+                using var c = new CombatKernel(Cfg(), 16);
+                bool loaded = c.Load(snap) == CombatLoadResult.Ok && c.MetaRunCount == runs && c.StateHash() == k.StateHash() && c.EmgStateHash() == k.EmgStateHash();
+                bool every = true;
+                for (int i = 0; i < 120; i++)
+                {
+                    StepN(k, 1);
+                    StepN(c, 1);
+                    every &= k.StateHash() == c.StateHash();
+                }
+                float lk = k.TryGetUnit(side, out CombatUnitView vk) ? 5000f - vk.Health : -1f, lc = c.TryGetUnit(side, out CombatUnitView vc) ? 5000f - vc.Health : -1f;
+                Expect(runs == 1 && loaded && every && Near(lk, 3f, 0.01f) && lk == lc && k.EmgBusStats.BeatPulses == c.EmgBusStats.BeatPulses,
+                    $"存读档：谐振点 {runs} 个中途存档，读档一致 {loaded}、续跑 120 步逐步哈希一致 {every}；读档后照样在命中点余振（旁边掉血 {lk:0.0} / {lc:0.0}）");
+            }
+            // 无人机：每架按自己最近一次命中点（宿主 = 无人机），无人机原地开火不在无人机此刻位置余振
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                int prog = aligned(k);
+                CombatWeapon w = Instant(prog, 30f, CombatCarrier.Summon);
+                w.Reading = new CombatReading { Carrier = CombatCarrier.Summon, Drones = 1, DroneSeconds = 6f, DroneRatio = 1f, DroneCooldown = 10f, DroneLeash = 10f };
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 6), -1, 5000f);
+                k.FireAt(me, foe, k.Time);
+                bool found = false;
+                EmgMetaRun an = default;
+                for (int i = 0; i < 60 * 3 && !found; i++)
+                {
+                    StepN(k, 1);
+                    for (int j = 0; j < k.MetaRunCount && !found; j++)
+                    {
+                        found = k.TryGetMetaRun(j, out an) && an.Mode == EmgMetaConst.RunBeat && an.HostKind == (byte)EmgEntKind.Drone && an.Mask == 1UL << 2;
+                    }
+                }
+                bool droneId = found && k.TryGetDrone(0, out CombatDrone dr) && dr.Id == an.Host;
+                Expect(found && droneId && math.distance(an.Pos, new double2(0, 6)) < 0.01,
+                    $"无人机：命中后按这架无人机（Id {an.Host}，与无人机一致 {droneId}）留谐振点，位置 = 命中点（离靶 {math.distance(an.Pos, new double2(0, 6)):0.00} 米）");
+            }
+            // 审查修复（EMG3-E2E-01 修复轮）：谐振点的对齐单独记，不抢同机在飞弹体本拍的 tmp.sync——[时钟, 时钟, 谐振, 齐射]：一发长寿命弹在飞，
+            // 另一发每拍开头打近靶、命中点一直有谐振点；对齐拍照样放齐射（修前逻辑：谐振点先占对齐，齐射 4 拍全丢，8 份）
+            long VolleyRes(bool near, out long resPulses)
+            {
+                using var k = new CombatKernel(Cfg(), 16);
+                int prog = Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 0), ResI(2), SyncTrigI(3) }, 0, 1, 3);
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 4f, 10f)), 100f);
+                int far = Unit(k, CombatFaction.Hostile, new double2(0, 25), -1, 5000f);
+                int close = Unit(k, CombatFaction.Hostile, new double2(1.2, 0), -1, 5000f);
+                k.FireAt(me, far, k.Time);
+                for (int s = 0; s < 252; s++)
+                {
+                    if (near && s % 30 == 2)
+                    {
+                        k.FireAt(me, close, k.Time); // 0.3 秒内命中，不跨拍界
+                    }
+                    StepN(k, 1);
+                }
+                resPulses = k.EmgBusStats.BeatPulses;
+                return Subs(k);
+            }
+            long vAlone = VolleyRes(false, out long pAlone), vRes = VolleyRes(true, out long pRes);
+            Expect(vAlone == 12 && vRes == 12 && pAlone == 0 && pRes == 4,
+                $"同机谐振点 + 在飞弹体齐射：只有在飞弹体时放 {vAlone} 份（4 拍 × 两条时钟 + 齐射）；命中点一直有谐振点时 {vRes} 份（修前逻辑：谐振点先占对齐、齐射全丢，8 份）、谐振点余振 {pRes} 次（对齐拍各 1）");
+        }
+
+        private static bool Near(float a, float b, float eps) => Math.Abs(a - b) <= eps;
+
+        /// <summary>
+        /// 一台机器对 (0, 3) 打一发快弹（10 米 / 秒，约 0.25 秒命中），2.3 米外放一个敌人；<paramref name="second"/> = 0.6 秒时对 (−3, 0) 再打一发（旁边 2.3 米外另放一个敌人）。跑 2 秒。
+        /// </summary>
+        private static void ResRun(Func<CombatKernel, int> build, bool second, out long pulses, out float lossFoe, out float lossSide, out int anchorMask, out int runsLeft, out long subs,
+            out float lossSide2, out int anchors2)
+        {
+            using var k = new CombatKernel(Cfg(), 16);
+            int prog = build(k);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 10f, 10f)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 3), -1, 5000f);
+            int side = Unit(k, CombatFaction.Hostile, new double2(2.3, 2.5), -1, 5000f);
+            int foe2 = Unit(k, CombatFaction.Hostile, new double2(-3, 0), -1, 5000f);
+            int side2 = Unit(k, CombatFaction.Hostile, new double2(-2.5, 2.3), -1, 5000f);
+            k.FireAt(me, foe, k.Time);
+            StepN(k, 24); // 0.4 秒：已命中、还没出拍
+            anchorMask = k.MetaRunCount == 1 && k.TryGetMetaRun(0, out EmgMetaRun an) ? (int)an.Mask : -1;
+            anchors2 = -1;
+            if (second)
+            {
+                StepN(k, 12);
+                k.FireAt(me, foe2, k.Time);
+                StepN(k, 18); // 0.9 秒：第二发已命中
+                anchors2 = k.MetaRunCount;
+                StepN(k, 66);
+            }
+            else
+            {
+                StepN(k, 96);
+            }
+            pulses = k.EmgBusStats.BeatPulses;
+            lossFoe = k.TryGetUnit(foe, out CombatUnitView vf) ? 5000f - vf.Health : -1f;
+            lossSide = k.TryGetUnit(side, out CombatUnitView vs) ? 5000f - vs.Health : -1f;
+            lossSide2 = k.TryGetUnit(side2, out CombatUnitView v2) ? 5000f - v2.Health : -1f;
+            runsLeft = k.MetaRunCount;
+            subs = Subs(k);
         }
 
         // ── E. 5 载体（FG19A fw_clock 行：格斗 / 力场锚点 2 秒、布区存续期间、无人机每架）──

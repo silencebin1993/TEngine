@@ -541,6 +541,23 @@ namespace GameLogic.EditorTools.JourneyBots
                     n++;
                 }
             }
+            return n + OilPatches(k, double.NegativeInfinity);
+        }
+
+        /// <summary>
+        /// EMG3-E2E-01 修复：阶段 2 起（EMG2-MAT-01，emg.stage ≥ 2 斑块层开着）排放行落成物质斑块（CombatLogic.EmgEmitPatch），不再是带油状态位的区域；
+        /// 油一摊 = 区域里的油区 + 斑块表里物质 = 油的斑块（迁入斑块已由 TryGetZone 计过，这里跳过）。
+        /// </summary>
+        private static int OilPatches(CombatKernel k, double t0)
+        {
+            int n = 0;
+            for (int i = 0; i < k.PatchSlots; i++)
+            {
+                if (k.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Oil && z.Born >= t0 && (z.PFlags & EmgMatterConst.FlagLegacy) == 0)
+                {
+                    n++;
+                }
+            }
             return n;
         }
 
@@ -556,7 +573,7 @@ namespace GameLogic.EditorTools.JourneyBots
                     n++;
                 }
             }
-            return n;
+            return n + OilPatches(k, t0);
         }
 
         /// <summary>在飞的子弹药（<paramref name="prog"/> &lt; 0 = 不限程序）。</summary>

@@ -617,9 +617,18 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgSplitOut(ref d, e, (int)e.Kind, count, gen);
+        }
+
+        /// <summary>
+        /// 一次放出子载荷之后（正常唤起与元程序重放 / 循环 <see cref="EmgMetaChildren"/> 同一出口，EMG3-E2E-01 关闭 DEBT-EMG3META01-04）：计一次放出、写分裂链日志、按需发 evt.split。
+        /// <paramref name="key"/> = 唤起它的事件码（循环 = evt.timer）。
+        /// </summary>
+        internal static void EmgSplitOut(ref CombatData d, in EmgEvent e, int key, int count, byte gen)
+        {
             EmgStat(ref d, 0);
             // EMG1-CHAIN-01：触发放出子载荷（链深 + 1；Key = 唤起它的事件码，Aux = 子代号）
-            EmgChainLog(ref d, EmgChainNode.Trigger, e.Chain, (byte)(e.Depth + 1), (int)e.Kind, e.EntKind == EmgEntKind.Unit ? e.Ent : 0, e.Pos, 0, gen);
+            EmgChainLog(ref d, EmgChainNode.Trigger, e.Chain, (byte)(e.Depth + 1), key, e.EntKind == EmgEntKind.Unit ? e.Ent : 0, e.Pos, 0, gen);
             // evt.split：宿主 = 母载荷（Node = 父节点），Value = 份数，Code = 子代号；链深 + 1。只在宿主节点读它时入队（FGR-EMG-062）。
             if (EmgSiteListens(ref d, EmgEventKind.Split) && EmgReadSlot(ref d, e.Prog, e.Node, EmgEventKind.Split) >= 0)
             {
@@ -858,7 +867,14 @@ namespace BinGames.Sim.Combat
                     float off = total > 1 ? EmgConst.TimerFanDeg * ((float)s.Done / (total - 1) - 0.5f) : 0f;
                     dir = Rotate(math.normalize(s.Dir), math.radians(off));
                 }
-                float each = damage * (cm.DmgMul > 0f ? cm.DmgMul : 1f) * (pellets > 1 ? (cm.MultiRatio > 0f ? cm.MultiRatio : 0.4f) : 1f);
+                float mul = cm.DmgMul;
+                ulong gatedRows = EmgGatedUnits(ref d, s.Prog, s.Node);
+                if (gatedRows != 0UL)
+                {
+                    // EMG3-E2E-01（DEBT-EMG3META01-03）：条件 / 随机下游的伤害倍率不在放出时乘，命中那一刻按条件重判（EmgSubCondDmg）
+                    mul = EmgModsOf(ref d, s.Prog, s.Node, out EmgMods cb, gatedRows) ? cb.DmgMul : 0f;
+                }
+                float each = damage * (mul > 0f ? mul : 1f) * (pellets > 1 ? (cm.MultiRatio > 0f ? cm.MultiRatio : 0.4f) : 1f);
                 float reach = form.Speed * form.Life;
                 float subMass = EmgSubMass(ref d, s); // EMG1-FUZZ-01（DEBT-EMG1ENT01-08）：子弹药质量 = 母载荷 ÷ 份数
                 for (int q = 0; q < pellets; q++)
@@ -1337,6 +1353,11 @@ namespace BinGames.Sim.Combat
             if (!DamageUnit(ref d, hit, dealt, owner))
             {
                 return;
+            }
+            // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁不在静态读法里，命中这一刻按条件重判后执行
+            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), out EmgMods condChain))
+            {
+                EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, dealt, condChain, true, r);
             }
             if (owner < 0)
             {
