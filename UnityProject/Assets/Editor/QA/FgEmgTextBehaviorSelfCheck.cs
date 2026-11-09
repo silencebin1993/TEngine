@@ -277,12 +277,13 @@ namespace GameLogic.EditorTools
             string fd = Desc(FwFollow), fr = Read(FwFollow, FirmwareCarrier.Projectile);
             Expect(spawn.Verb == (byte)EmgVerb.Spawn && EmgCatalog.VerbCode("spawn") == (int)EmgVerb.Spawn && (spawn.Flags & EmgInstrFlags.RootKernel) != 0
                    && Near(spawn.A, 0.1f) && Near(spawnMelee.A, 0f) && Near(spawn.Amount, 1f) && Near(spawn.Param2, 0.5f)
-                   && skip != null && skip(FwFollow, "feedback") && !skip(FwFollow, EmgProgramCompiler.TagsField)
+                   && skip != null && skip(FwFollow, "feedback") && FirmwareKinds.TagsOf(FwFollow).Length == 0
+                   && CarrierReadings.AllCarriers.All(c => !Read(FwFollow, c).Contains("电击")) // DEBT-EMG1FIX01-01：FG19A 迁移表“追射：电击删除”，五种载体读法都不再附带
                    && fd.Contains($"{F(spawn.A)} 秒") && fd.Contains($"{F(spawn.Amount)} 枚") && fd.Contains("一半") && fd.Contains("不会再次追射") && !fd.Contains("立刻补一发")
                    && fr.Contains($"{F(spawn.A)} 秒") && fr.Contains("50%") && Read(FwFollow, FirmwareCarrier.Melee).Contains("立刻")
                    && !StatusTagCatalog.TryGet("FeedbackHit", out _),
                 $"追射（D-14，FG-GAP-153）：根节点 ent.projectile 由内核执行（RootKernel，射弹延迟 {F(spawn.A)} 秒 / 格斗 {F(spawnMelee.A)} 秒，{F(spawn.Amount)} 发 × {F(spawn.Param2)} 倍），"
-                + "旧回波字段 feedback 不再结算（单轨），追击标记已从 fg.TbStatusTag 撤下；描述“" + fd + "”");
+                + "旧回波字段 feedback 不再结算（单轨），追击标记已从 fg.TbStatusTag 撤下；不再附带「电击」标签（五种载体读法都没有）；描述“" + fd + "”");
 
             UseStage(2); // 磁聚 stageGate 2
             try

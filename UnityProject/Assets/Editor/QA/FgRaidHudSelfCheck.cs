@@ -1187,7 +1187,7 @@ namespace GameLogic.EditorTools
         {
             near = default;
             far = default;
-            BlueprintVersionRecord version = BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, ComponentCatalog.CompGunId, null, null, new[] { "fw_coolant" }).ToVersion(1, 0f);
+            BlueprintVersionRecord version = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisFixedId, ComponentCatalog.CompGunId, null, null, new[] { "fw_coolant" }).ToVersion(1, 0f);
             s.BlueprintRecords = (s.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != BpWet)
                 .Append(new BlueprintRecord { BlueprintId = BpWet, DisplayName = "冷却炮塔", ActiveVersion = 1, Versions = new[] { version } }).ToArray();
             for (float d = 8f; d <= 22f; d += 1f)

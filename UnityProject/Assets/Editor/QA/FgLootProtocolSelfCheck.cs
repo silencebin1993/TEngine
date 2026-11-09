@@ -284,7 +284,7 @@ namespace GameLogic.EditorTools
             string[] before = board.FirmwareSlots.ToArray();
             int rejC1 = ItemProtocol.RejectedCount;
             CircuitOpResult machine = board.TrySetFirmware(s, 1, fw);
-            BlueprintCircuitBoard turret = BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, ComponentCatalog.CompCannonId, null, null, Array.Empty<string>());
+            BlueprintCircuitBoard turret = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisFixedId, ComponentCatalog.CompCannonId, null, null, Array.Empty<string>());
             CircuitOpResult turretSet = turret.TrySetFirmware(s, 0, fw);
             bool trap = FirmwareKinds.CanInstall(s, fw, FirmwareHost.Trap, out string trapKey);
             bool core = FirmwareKinds.CanInstall(s, fw, FirmwareHost.SignalCore, out _);

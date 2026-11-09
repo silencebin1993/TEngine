@@ -948,9 +948,14 @@ namespace BinGames.Sim.Combat
             EmgNode n = d.EmgNodes[p.FirstNode + c.Node];
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
             ushort hitPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Hit);
+            bool chs = c.Owner >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                if (chs && EmgChsBlocked(ref d, c.Owner, n.FirstInstr, end, x.Ordinal))
+                {
+                    continue; // DEBT-EMG3CHS01-02：命中结算的场 / 壁撞 / 子节点命中写端 / 注能同样按出手者门控同序号 chs.* condition（同 EmgRootGated）
+                }
                 if (x.Verb == (byte)EmgVerb.Field)
                 {
                     // EMG2-FLD-01（FGR-EMG-112）：结算点展开场——没有 trigger 读端的场写端在命中处生成（有 trigger 的由 EmgRootGated / 子节点触发执行）；同一次出手打中多个目标只生成一个

@@ -109,8 +109,10 @@ namespace BinGames.Sim.Combat
 
         private static int Round(float v) => v <= 0f ? 0 : math.max(1, (int)math.round(v));
 
-        /// <summary>读程序 <paramref name="prog"/> 第 <paramref name="node"/> 个节点的写端指令，汇总成 <see cref="EmgMods"/>。O(节点指令数 ≤ 128)。溢出行不执行。</summary>
-        internal static bool EmgModsOf(ref CombatData d, int prog, int node, out EmgMods m, ulong skip = 0UL)
+        /// <summary>读程序 <paramref name="prog"/> 第 <paramref name="node"/> 个节点的写端指令，汇总成 <see cref="EmgMods"/>。O(节点指令数 ≤ 128)。溢出行不执行。
+        /// <paramref name="owner"/> = 出手者槽位（DEBT-EMG3CHS01-02）：≥ 0 时同序号读 chs.* condition、出手者此刻没有该状态的行不生效（同 <see cref="EmgRootGated"/>）；
+        /// 结算处（出手、生成、命中、落下、收回、子区节拍）都传。&lt; 0 = 不判，只给飞行中逐步读参数的调用方：修饰开关（pr.Mods / 次数）出手时已按出手者判过（<see cref="EmgInitFlight"/>），与元程序 skip 同口径。</summary>
+        internal static bool EmgModsOf(ref CombatData d, int prog, int node, out EmgMods m, ulong skip = 0UL, int owner = -1)
         {
             m = default;
             if (prog < 0 || prog >= d.EmgPrograms.Length)
@@ -124,12 +126,14 @@ namespace BinGames.Sim.Combat
             }
             EmgNode n = d.EmgNodes[p.FirstNode + node];
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            bool chs = owner >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || (skip != 0UL && !EmgMetaAllowed(~skip, x.Ordinal)))
+                if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || (skip != 0UL && !EmgMetaAllowed(~skip, x.Ordinal))
+                    || (chs && EmgChsBlocked(ref d, owner, n.FirstInstr, end, x.Ordinal)))
                 {
-                    continue; // EMG3-META-01：出手时被条件 / 随机元程序关掉的下游修饰不生效（FGR-EMG-040“对修饰”列）
+                    continue; // EMG3-META-01：出手时被条件 / 随机元程序关掉的下游修饰不生效（FGR-EMG-040“对修饰”列）；DEBT-EMG3CHS01-02：出手者没有同序号 chs.* condition 要的状态
                 }
                 switch ((EmgVerb)x.Verb)
                 {
@@ -363,8 +367,8 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>武器程序根节点的连锁目标偏好（没有程序 / 没有连锁行为 0：沿用最近）。</summary>
-        internal static EmgInstrFlags EmgChainPrefOf(ref CombatData d, in CombatWeapon wp) =>
-            EmgShotProg(ref d, wp.Program) is int prog && prog >= 0 && EmgModsOf(ref d, prog, 0, out EmgMods m) ? m.ChainPref : EmgInstrFlags.None;
+        internal static EmgInstrFlags EmgChainPrefOf(ref CombatData d, in CombatWeapon wp, int owner) =>
+            EmgShotProg(ref d, wp.Program) is int prog && prog >= 0 && EmgModsOf(ref d, prog, 0, out EmgMods m, 0UL, owner) ? m.ChainPref : EmgInstrFlags.None;
 
         // ─────────────────────────────── 飞行载荷：生成时写入修饰 ───────────────────────────────
 
@@ -381,7 +385,7 @@ namespace BinGames.Sim.Combat
                 skip = EmgMetaLaunch(ref d, pr.Prog, pr.Node, d.SlotOf(pr.Owner), targetId != 0 ? d.SlotOf(targetId) : -1, EmgProjHost(ref d, pr), pr.Pos,
                     EmgDir((double2)pr.Vel), 0.0, pr.TrigUsed != uint.MaxValue);
             }
-            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip))
+            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip, d.SlotOf(pr.Owner)))
             {
                 return;
             }
@@ -436,12 +440,12 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>多份载荷（射弹 Multi）：本次出手分成几份、每份伤害比例与扇角（没有为 1 份、比例 1）。</summary>
-        internal static int EmgPellets(ref CombatData d, in CombatWeapon wp, out float ratio, out float fan)
+        internal static int EmgPellets(ref CombatData d, in CombatWeapon wp, int owner, out float ratio, out float fan)
         {
             ratio = 1f;
             fan = 0f;
             int prog = EmgShotProg(ref d, wp.Program);
-            if (prog < 0 || !EmgModsOf(ref d, prog, 0, out EmgMods m) || m.Multi <= 1)
+            if (prog < 0 || !EmgModsOf(ref d, prog, 0, out EmgMods m, 0UL, owner) || m.Multi <= 1)
             {
                 return 1;
             }
@@ -715,10 +719,13 @@ namespace BinGames.Sim.Combat
             EmgNode n = d.EmgNodes[p.FirstNode + pr.Node];
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
             float ratio = 0f, radius = 0f;
+            int owner = d.SlotOf(pr.Owner);
+            bool chs = owner >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if (x.Port != EmgConst.PortKinetic || x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || !(x.Param2 > 0f))
+                if (x.Port != EmgConst.PortKinetic || x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || !(x.Param2 > 0f)
+                    || (chs && EmgChsBlocked(ref d, owner, n.FirstInstr, end, x.Ordinal))) // DEBT-EMG3CHS01-02：按出手者门控同序号 chs.* condition
                 {
                     continue;
                 }
@@ -766,7 +773,7 @@ namespace BinGames.Sim.Combat
         {
             // EMG3-E2E-01（FGJ-EMG-3 发现）：条件 / 随机元程序下游的连锁按这次命中的放行位（与 EmgNodeEffects 同一函数；没有元程序 = 全放行）
             ulong allow = pr.Prog >= 0 ? EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id) : ulong.MaxValue;
-            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, allow == ulong.MaxValue ? 0UL : ~allow) || m.Chain == 0 || !(m.ChainRange > 0f))
+            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, allow == ulong.MaxValue ? 0UL : ~allow, owner) || m.Chain == 0 || !(m.ChainRange > 0f))
             {
                 return;
             }

@@ -1122,9 +1122,11 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.Set(tk, string.Empty);
                 return StepOutcome.Wait;
             }
+            string k = n.ToString(CultureInfo.InvariantCulture);
             WorkOrderRecord order = HomeValleyWorkOrders.FindActiveRepair(s, w.BuildingId);
             if (order != null)
             {
+                c.SetInt(FgjM3Common.SK(c, "ord" + k), 1);
                 if (ProductionPanelUIToolkit.IsOpen && NowMs() - c.GetLong(FgjM3Common.SK(c, "cl")) > 900)
                 {
                     c.SetLong(FgjM3Common.SK(c, "cl"), NowMs());
@@ -1132,7 +1134,31 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 return StepOutcome.Wait; // 机器取料修 / 重建
             }
-            string k = n.ToString(CultureInfo.InvariantCulture);
+            // 重建完工按“设置保留”恢复成禁用（被拆那一刻是禁用的，FGR-BASE-020 / DisabledWhenDestroyed；rp_off 禁用后这一波拆掉的发电机就是这样）：
+            // 玩家要它发电，打开面板点“启用”（2026-11-10 验证跑：只认 Operational 当修好，工单完成后又走回“点建筑”、而这一次的点击键已用过，报成“面板没打开”）
+            if (w.ConstructionState == BuildingConstructionState.Disabled && BuildingOps.Durability(w) > 0.5f)
+            {
+                if (c.GetInt(FgjM3Common.SK(c, "reen" + k + ".logged")) == 0)
+                {
+                    c.SetInt(FgjM3Common.SK(c, "reen" + k + ".logged"), 1);
+                    c.Log($"{BuildingOps.NameOf(w)} {D.Cell(new GridCell(w.GridX, w.GridY))} 重建完工：被拆时是禁用的，按设置保留恢复成禁用 → 打开面板点“启用”");
+                }
+                if (!(ProductionPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.BuildingId == w.BuildingId))
+                {
+                    StepOutcome o = P.TickOpenPanel(c, w.BuildingTypeId, new GridCell(w.GridX, w.GridY), "reen" + k);
+                    return o.Status == JourneyStepStatus.Retry ? o : StepOutcome.Wait;
+                }
+                if (!FgjM3Common.Once(c, "reen" + k + ".tg", () => FgjM3Common.ClickPanelBodyButton(P.PanelHost, "ProductionPanelBody", "BpEnable")))
+                {
+                    return StepOutcome.Wait;
+                }
+                return FgjM3Common.SinceMs(c, "reen" + k + ".tg") < 1500 ? StepOutcome.Wait : StepOutcome.Retry($"重建后点“启用”没生效：{JourneyInput.LastUiFailure}");
+            }
+            if (c.GetInt(FgjM3Common.SK(c, "ord" + k)) == 1)
+            {
+                // 工单没了、建筑还是废墟：不是“面板没打开”，照实报（原来会落到下面已用过的点击键上，报成面板没打开）。
+                return StepOutcome.Fail($"{BuildingOps.NameOf(w)} {D.Cell(new GridCell(w.GridX, w.GridY))} 的重建工单没完成就没了（{w.ConstructionState}，耐久 {BuildingOps.Durability(w):F0}/{BuildingOps.MaxDurability(w.BuildingTypeId):F0}）");
+            }
             if (!(ProductionPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.BuildingId == w.BuildingId))
             {
                 StepOutcome o = P.TickOpenPanel(c, w.BuildingTypeId, new GridCell(w.GridX, w.GridY), "wall" + k);

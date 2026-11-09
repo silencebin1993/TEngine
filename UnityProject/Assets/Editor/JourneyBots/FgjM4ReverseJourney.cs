@@ -458,7 +458,7 @@ namespace GameLogic.EditorTools.JourneyBots
                     return StepOutcome.Retry($"按倍速键后是 {GameClock.Speed}x");
                 }
                 c.SetLong(FgjM3Common.SK(c, "tick0"), GameClock.Ticks);
-                c.SetLong(FgjM3Common.SK(c, "d0"), d.Rec.Completed);
+                c.Set(FgjM3Common.SK(c, "d0"), DrillUnits(d).ToString("R", CultureInfo.InvariantCulture));
                 c.SetLong(FgjM3Common.SK(c, "real0"), FgjM3Common.NowMs());
                 FgjM3Common.Mark(c, "t0");
                 return StepOutcome.Wait;
@@ -469,7 +469,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             double realSec = (FgjM3Common.NowMs() - c.GetLong(FgjM3Common.SK(c, "real0"))) / 1000.0;
-            long n = d.Rec.Completed - c.GetLong(FgjM3Common.SK(c, "d0"));
+            double n = DrillUnits(d) - double.Parse(c.Get(FgjM3Common.SK(c, "d0")), NumberStyles.Float, CultureInfo.InvariantCulture);
             double perGameMin = n / gameSec * 60.0;
             double perRealMin = n / realSec * 60.0;
             double design = 60.0 / Math.Max(0.01, d.Def.CycleSeconds) * Math.Max(1, d.Def.CycleAmount);
@@ -483,9 +483,14 @@ namespace GameLogic.EditorTools.JourneyBots
                 ratio = $"；按真实时间是 0.5x 时的 {r:F1} 倍（理论 6 倍，帧节奏有抖动）";
             }
             return Math.Abs(perGameMin - design) <= Math.Max(2.0, design * 0.08) && ratioOk
-                ? StepOutcome.Done($"{speed}x：{gameSec:F1} 游戏秒（{realSec:F1} 真实秒）提取钻出矿 {n} 份 = 每游戏分钟 {perGameMin:F1}（表里 {design:F0}）{ratio}")
-                : StepOutcome.Fail($"{speed}x 时提取钻的速率不对：每游戏分钟 {perGameMin:F1}（表里 {design:F0}）{ratio}");
+                ? StepOutcome.Done($"{speed}x：{gameSec:F1} 游戏秒（{realSec:F1} 真实秒）提取钻出矿 {n:F2} 份 = 每游戏分钟 {perGameMin:F1}（表里 {design:F0}）{ratio}")
+                : StepOutcome.Fail($"{speed}x 时提取钻的速率不对：{gameSec:F1} 游戏秒出矿 {n:F2} 份 = 每游戏分钟 {perGameMin:F1}（表里 {design:F0}）{ratio}");
         }
+
+        /// <summary>提取钻已完成的份数 + 正在做的那一份的进度（按游戏步）。窗口正好是 10 个周期：只数整份时两端相位差几步就会多数 / 少数 1 份（±10%，超过容差 8%），
+        /// 按进度连续计数才量的是速率本身（2026-11-10 验证跑 3x 数到 11 份 = 33/分的根因）。</summary>
+        private static double DrillUnits(ProductionService.Producer d) =>
+            d.Rec.Completed + (d.Rec.Running && d.Rec.Duration > 0 ? (double)d.Rec.Progress / d.Rec.Duration : 0.0);
 
         // ── 4. 目标死亡：拆掉工作中的精炼炉 ─────────────────────────────────────────────
 

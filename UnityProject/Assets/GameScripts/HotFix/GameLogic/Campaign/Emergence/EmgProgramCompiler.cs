@@ -776,7 +776,8 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>
         /// 节拍指令的周期与相位落进内核行（预览与内核共用这一份，热更层不另算拍序）：读 tmp.beat 的行幅度 = 周期（取整，≥ 1），param2 = 相位——
         /// 声明 param2 &gt; 0 是显式相位（对周期取模），0 = 缺省相位 = 程序序号 % 周期（FGR-EMG-171“玩家调槽位顺序即调相位”）。
-        /// 程序有节拍读端（tmp.beat / tmp.sync）时子节点记放出它的触发器序号（MetaMask，与元程序同一口径），内核按拍只放出本拍执行的那条触发器的子载荷。O(指令数 + 节点数)。
+        /// 程序有节拍读端（tmp.beat / tmp.sync）时子节点记放出它的触发器序号（MetaMask，与元程序同一口径），内核按拍只放出本拍执行的那条触发器的子载荷；
+        /// 程序有 chs.* condition 时同样记（DEBT-EMG3CHS01-02：内核入队时按出手者门控放出它的触发器）。O(指令数 + 节点数)。
         /// </summary>
         private static void TempoPass(EmgProgramResult r)
         {
@@ -796,6 +797,11 @@ namespace GameLogic.Campaign.Emergence
                     x.Param2 = x.Param2 > 0f ? (int)Math.Round(x.Param2) % period : InstrPosition(r, x.Ordinal) % period;
                     r.KernelInstrs[i] = x;
                 }
+            }
+            // DEBT-EMG3CHS01-02：读 chs.* condition 的程序同样记（内核入队时按出手者、按放出它的触发器门控子载荷，EmgQueueChildren）；现有正式固件只有元程序 [若离地] 读它，没有元程序 / 节拍 / chs 的程序逐字不变
+            for (int i = 0; i < r.KernelInstrs.Count && !any; i++)
+            {
+                any = r.KernelInstrs[i].Role == EmgConst.RoleCondition && r.KernelInstrs[i].Port >= EmgConst.PortChsGround && r.KernelInstrs[i].Port <= EmgConst.PortChsWater;
             }
             if (!any)
             {

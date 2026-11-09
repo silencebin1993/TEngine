@@ -18,7 +18,7 @@ namespace GameLogic.Campaign.Content
         public const string ChassisHoverId = "chassis_hover";
         /// <summary>FG2-FW-02（FGR-FW-012、FG06 FGR-DEF-001）：炮塔的固定底盘。兼容表（冲刺器装不上、推铲读作击退铲）从本 Story 起生效；
         /// FG6-DEF-01 起炮塔开放（放置 / 施工 / 目标模式 / 补给 = <see cref="Defense.TurretService"/>），固定底盘进基础蓝图库（来源 BaseBlueprint，不再要解锁记录）。</summary>
-        public const string ChassisFixedId = CarrierReadings.FixedChassisId;
+        public const string ChassisFixedId = "chassis_fixed";
 
         private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
         {

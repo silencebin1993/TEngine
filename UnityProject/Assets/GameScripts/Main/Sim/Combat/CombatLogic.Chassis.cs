@@ -209,30 +209,32 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static bool EmgChsBlocked(ref CombatData d, int host, int first, int end, byte ordinal)
         {
-            byte have = 0;
-            bool got = false;
+            byte need = EmgChsNeed(ref d, first, end, ordinal);
+            return need != 0 && host >= 0 && host < d.Count && (ChsMask(ref d, host) & need) != need;
+        }
+
+        /// <summary>同一程序序号里 chs.* condition 读端要求的状态位（多条按“且”合成一个掩码；没有 = 0，调用方据此早退出、不去找宿主）。O(节点指令数)。</summary>
+        internal static byte EmgChsNeed(ref CombatData d, int first, int end, byte ordinal)
+        {
+            byte need = 0;
             for (int j = first; j < end; j++)
             {
                 EmgInstr r = d.EmgInstrs[j];
-                if (r.Ordinal != ordinal || r.Role != EmgConst.RoleCondition)
+                if (r.Ordinal == ordinal && r.Role == EmgConst.RoleCondition)
                 {
-                    continue;
+                    need |= ChsBitOfPort(r.Port);
                 }
-                byte need = ChsBitOfPort(r.Port);
-                if (need == 0)
-                {
-                    continue;
-                }
-                if (host < 0 || host >= d.Count)
-                {
-                    return false;
-                }
-                if (!got)
-                {
-                    have = ChsMask(ref d, host);
-                    got = true;
-                }
-                if ((have & need) == 0)
+            }
+            return need;
+        }
+
+        /// <summary>节点 [first, end) 上有没有 chs.* condition 读端（没有 = 调用方不必逐行 <see cref="EmgChsBlocked"/>，DEBT-EMG3CHS01-02）。O(节点指令数)。</summary>
+        internal static bool EmgChsAny(ref CombatData d, int first, int end)
+        {
+            for (int j = first; j < end; j++)
+            {
+                EmgInstr r = d.EmgInstrs[j];
+                if (r.Role == EmgConst.RoleCondition && ChsBitOfPort(r.Port) != 0)
                 {
                     return true;
                 }

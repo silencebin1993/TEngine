@@ -348,7 +348,7 @@ namespace GameLogic.EditorTools
                  "（EMG2-REACT-01：短路已端口化、主结果不是倍率，这里用仍在标签表里的电解对账；短路的计数 / 日志 / 声音见 D2 / E1）");
             NewState(9402, unlockAll: true);
             CombatWeapon wet = WeaponFor("fw_corrode");
-            CombatWeapon shock = WeaponFor("fw_followup");
+            CombatWeapon shock = WeaponFor("fw_arcchain"); // DEBT-EMG1FIX01-01：追射已撤电击，通电改用电弧链（en.elec 注入 0.3 ≥ C08 门槛 0.2）
             using (var a = new Arena(true))
             {
                 int mw = a.Machine(wet);

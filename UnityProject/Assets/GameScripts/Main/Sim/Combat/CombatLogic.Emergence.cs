@@ -904,7 +904,8 @@ namespace BinGames.Sim.Combat
                     cut++;
                     continue;
                 }
-                // EMG3-CHS-01（FGR-EMG-141）：同一条固件读 chs.* condition、宿主单位此刻没有这个状态 → 本次不唤起（不认底盘 ID）
+                // EMG3-CHS-01（FGR-EMG-141）：同一条固件读 chs.* condition、宿主单位此刻没有这个状态 → 本次不唤起（不认底盘 ID）。
+                // 子载荷放不放另在入队处按出手者、按放出它的那条触发器判（EmgQueueChildren，DEBT-EMG3CHS01-02），弹体 / 区域 / 无人机宿主同样适用
                 if (e.EntKind == EmgEntKind.Unit && EmgChsBlocked(ref d, d.SlotOf(e.Ent), n.FirstInstr, end, x.Ordinal))
                 {
                     continue;

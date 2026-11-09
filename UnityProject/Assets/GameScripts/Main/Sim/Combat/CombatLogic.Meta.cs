@@ -571,11 +571,11 @@ namespace BinGames.Sim.Combat
         /// EMG3-E2E-01（FGJ-EMG-3 发现；DEBT-EMG3META01-03 的连锁部分）：根节点上位于条件 / 随机元程序下游的连锁行不折进静态读法（CombatSite.FoldProgramReadings 同口径），
         /// 由命中结算按本次放行位 <paramref name="allow"/> 动态执行。返回这几条里被放行的连锁汇总；程序没有元程序 / 没有这类行 / 都没放行返回 false。O(节点指令数 × 元程序数)。
         /// </summary>
-        internal static bool EmgCondChainMods(ref CombatData d, int prog, int node, ulong allow, out EmgMods m)
+        internal static bool EmgCondChainMods(ref CombatData d, int prog, int node, ulong allow, int owner, out EmgMods m)
         {
             m = default;
             ulong gated = EmgGatedUnits(ref d, prog, node);
-            return (gated & allow) != 0UL && EmgModsOf(ref d, prog, node, out m, ~(gated & allow)) && m.Chain > 0 && m.ChainRange > 0f;
+            return (gated & allow) != 0UL && EmgModsOf(ref d, prog, node, out m, ~(gated & allow), owner) && m.Chain > 0 && m.ChainRange > 0f;
         }
 
         /// <summary>节点上位于条件 / 随机元程序下游的程序序号位（这些行的无状态修饰在结算那一刻按条件判）。程序没有元程序返回 0（一条比较）。O(节点指令数 × 元程序数)。</summary>
@@ -612,7 +612,7 @@ namespace BinGames.Sim.Combat
         internal static float EmgSubCondDmg(ref CombatData d, in CombatProjectile pr, ulong skip)
         {
             ulong gated = pr.Prog >= 0 ? EmgGatedUnits(ref d, pr.Prog, pr.Node) : 0UL;
-            if ((gated & ~skip) == 0UL || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, ~(gated & ~skip)))
+            if ((gated & ~skip) == 0UL || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, ~(gated & ~skip), d.SlotOf(pr.Owner)))
             {
                 return 1f;
             }
@@ -854,6 +854,7 @@ namespace BinGames.Sim.Combat
             bool checkedDepth = false;
             int released = 0;
             byte gen = 0;
+            bool span = EmgNodeSpan(ref d, e.Prog, e.Node, out int pf, out int pe);
             for (int j = 1; j < p.NodeCount; j++)
             {
                 int ni = p.FirstNode + j;
@@ -865,6 +866,10 @@ namespace BinGames.Sim.Combat
                 if (c.Parent != e.Node || c.TrigCount == 0 || c.MetaMask == 0 || !EmgMetaAllowed(mask, (byte)(c.MetaMask - 1)) || (!loop && c.TrigEvent != e.Kind))
                 {
                     continue;
+                }
+                if (span && EmgChsBlocked(ref d, host.Owner, pf, pe, (byte)(c.MetaMask - 1)))
+                {
+                    continue; // DEBT-EMG3CHS01-02：重放 / 循环放出的子载荷与正常唤起同样按出手者门控放出它的触发器的 chs.* condition
                 }
                 if (!checkedDepth)
                 {

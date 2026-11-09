@@ -105,7 +105,7 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>调参查询（emg.stage、emg.trait.*）；返回 false = 表里没有。</summary>
         public Func<string, (bool ok, float value)> Tuning = id => GridContent.TryGetTuning(id, out float v) ? (true, v) : (false, 0f);
         /// <summary>底盘 ID 是否存在（非预留底盘的外键）。</summary>
-        public Func<string, bool> ChassisExists = id => Content.ChassisCatalog.TryGet(id, out _) || id == Content.CarrierReadings.FixedChassisId;
+        public Func<string, bool> ChassisExists = id => Content.ChassisCatalog.TryGet(id, out _); // 固定底盘也在 ChassisCatalog.All 里
         /// <summary>声明 owner 外键：按 ownerKind 查对应的内容目录（底盘另由 <see cref="ChassisExists"/> + 预留底盘特性行判定）。</summary>
         public Func<string, string, bool> OwnerExists = DefaultOwnerExists;
 
@@ -429,7 +429,12 @@ namespace GameLogic.Campaign.Emergence
         }
 
         /// <summary>FG-GAP-169：这个部件有没有声明“写 <paramref name="port"/>”。不看声明是否生效：回滚（emg.stage = 0）时旧轨同样要知道它是哪类部件。</summary>
-        public static bool OwnerDeclaresWrite(string owner, string port)
+        public static bool OwnerDeclaresWrite(string owner, string port) => OwnerDeclares(owner, port, EmgDirs.Write);
+
+        /// <summary>FG-GAP-169（EMG3 出口补缺口）：这个部件有没有声明“读 <paramref name="port"/>”（任何角色）。同样不看是否生效（回滚到阶段 0 时中继仍算中继）。</summary>
+        public static bool OwnerDeclaresRead(string owner, string port) => OwnerDeclares(owner, port, EmgDirs.Read);
+
+        private static bool OwnerDeclares(string owner, string port, EmgDirs dir)
         {
             EmgCompiled c = Current;
             if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !c.PortIndexById.TryGetValue(port, out int pi))
@@ -439,7 +444,7 @@ namespace GameLogic.Campaign.Emergence
             ushort code = c.Ports[pi].Code;
             foreach (EmgDeclRow d in c.Decls)
             {
-                if (d.Owner == oi && d.Dir == EmgDirs.Write && d.Port == code)
+                if (d.Owner == oi && d.Dir == dir && d.Port == code)
                 {
                     return true;
                 }

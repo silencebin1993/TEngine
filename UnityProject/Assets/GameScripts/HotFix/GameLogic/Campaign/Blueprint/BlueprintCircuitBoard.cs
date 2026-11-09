@@ -1030,8 +1030,8 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>公开供 UI 摘要实时展示带宽成本，与 <see cref="ToVersion"/> 落盘同一计算。</summary>
         public int ComputeBandwidthCost()
         {
-            // DEMO-CONTENT-LOCK.md §2.4："信号中继...机体带宽需求+1"——目前唯一有明确带宽数字的组件。
-            return StructureId == ComponentCatalog.StructRelayId ? 1 : 0;
+            // DEMO-CONTENT-LOCK.md §2.4："信号中继...机体带宽需求+1"。FG-GAP-169：按声明判——结构模块声明读 sqd.relay（中继作用域，FGR-EMG-132 只许结构模块提供）就 +1，不认模块 ID
+            return Emergence.EmgCatalog.OwnerDeclaresRead(StructureId, "sqd.relay") ? 1 : 0;
         }
 
         /// <summary>DEMO-CONTENT-LOCK.md §2.4/§5 字面数字："一般主武器基础伤害+15%、额外热量+15"；

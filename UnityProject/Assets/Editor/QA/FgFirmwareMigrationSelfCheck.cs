@@ -604,7 +604,11 @@ namespace GameLogic.EditorTools
                 string[] declared = FirmwareKinds.TagsOf(r.Id).OrderBy(x => x, StringComparer.Ordinal).ToArray();
                 // EMG1-FW-01（FG19A D-13、FG19 第 11 节第 7 行）：时钟脉冲误贴的 Blood 已从表里去掉；旧组合引擎模块（GeneCatalog，Demo 冻结）仍贴，只在这里登记为已知勘误，不再要求表与模块一致
                 // EMG1-FIX-01（FG19A 第 1.6 节迁移表）：壁撞不再贴撞壁（改由撞击点冲击承接），追击标记（FeedbackHit）已从表里撤下——旧模块仍贴，同样登记为已知勘误
-                string[] actualStatus = actual?.Where(t => StatusTagCatalog.IsStatus(t) && !(r.Id == "fw_clock" && t == "Blood") && !(r.Id == "fw_wallslam" && t == "WallImpact")).ToArray();
+                // DEBT-EMG1FIX01-01（FG19A 迁移表“追射：电击删除”）：追射的电击已从表里删，旧模块 gene_synapse 仍贴，同样登记。
+                // 勘误只在声明轨生效时成立：声明轨固件不进旧引擎编译（BlueprintCircuitCompiler），实战不贴；退回旧轨就照旧要求表 = 模块
+                string[] actualStatus = actual?.Where(t => StatusTagCatalog.IsStatus(t)
+                    && !(((r.Id == "fw_clock" && t == "Blood") || (r.Id == "fw_wallslam" && t == "WallImpact") || (r.Id == "fw_followup" && t == "Shock"))
+                         && GameLogic.Campaign.Emergence.EmgCatalog.IsOwnerOnDeclTrack(r.Id))).ToArray();
                 string[] unregistered = actual?.Where(t => !StatusTagCatalog.TryGet(t, out _) && !FgEmgTextBehaviorSelfCheck.RetiredEngineTags.Contains(t)).ToArray() ?? Array.Empty<string>();
                 if (actual == null || !actualStatus.SequenceEqual(declared) || unregistered.Length > 0)
                 {

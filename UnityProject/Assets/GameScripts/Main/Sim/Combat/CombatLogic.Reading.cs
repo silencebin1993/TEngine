@@ -64,7 +64,7 @@ namespace BinGames.Sim.Combat
                     double until = now + (d.Config.EmgMetaAnchor > 0f ? d.Config.EmgMetaAnchor : EmgMetaConst.DefaultAnchor);
                     skip = EmgMetaLaunch(ref d, prog, 0, a, t, d.EmgCtx, d.Pos[a], EmgDir(d.Pos[t] - d.Pos[a]), until, r.Carrier != CombatCarrier.Field);
                 }
-                EmgModsOf(ref d, prog, 0, out em, skip);
+                EmgModsOf(ref d, prog, 0, out em, skip, a);
             }
             // EMG3-TMP-01：格斗 / 力场 / 当场结算的射弹读 evt.beat 时在出手点留节拍锚点（布区由落区做宿主）；主目标不可伤时不留（不触发读法）
             bool beatAnchor = prog >= 0 && r.Carrier != CombatCarrier.Field && (d.EmgListen & EmgBit(EmgEventKind.Beat)) != 0u;
@@ -98,7 +98,7 @@ namespace BinGames.Sim.Combat
             }
             PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
             // EMG3-E2E-01（FGJ-EMG-3 发现）：根节点条件 / 随机下游的连锁不在静态读法里，按这次出手的放行位执行（[条件门·标记, 电弧] 未标记不连锁）
-            if (prog >= 0 && EmgCondChainMods(ref d, prog, 0, ~skip, out EmgMods condChain))
+            if (prog >= 0 && EmgCondChainMods(ref d, prog, 0, ~skip, a, out EmgMods condChain))
             {
                 EmgChainHops(ref d, d.Faction[a] == (byte)CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, a, t, d.Pos[t], dealt, condChain, true, r);
             }
@@ -460,7 +460,7 @@ namespace BinGames.Sim.Combat
                 int max = math.min(r.ChainHits, CombatConst.MaxReadingTargets);
                 double2 at = hitPos;
                 float dmg = dealt;
-                EmgInstrFlags chainPref = EmgChainPrefOf(ref d, wp); // EMG1-GRM-01：程序里连锁的目标偏好（已标记 > 导电 > 最近）；没有偏好沿用最近
+                EmgInstrFlags chainPref = EmgChainPrefOf(ref d, wp, a); // EMG1-GRM-01：程序里连锁的目标偏好（已标记 > 导电 > 最近）；没有偏好沿用最近
                 for (int q = 0; q < max; q++)
                 {
                     int k = chainPref == EmgInstrFlags.None ? NearestExcept(ref d, at, r.ChainRange, want, ref hit) : EmgChainPick(ref d, at, r.ChainRange, want, ref hit, chainPref);
@@ -1252,7 +1252,7 @@ namespace BinGames.Sim.Combat
                 EmgMods zm = default;
                 if (subRule)
                 {
-                    EmgModsOf(ref d, zone.EmgProgRef - 1, zone.EmgNode, out zm);
+                    EmgModsOf(ref d, zone.EmgProgRef - 1, zone.EmgNode, out zm, 0UL, owner);
                 }
                 int n = d.Count;
                 for (int k = 0; k < n; k++)
@@ -1822,7 +1822,7 @@ namespace BinGames.Sim.Combat
                             PerTarget(ref d, owner, target, dealt, r, dr.Pos);
                             // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁不在静态读法里，无人机命中这一刻按条件重判（与 DeliverInstant / 射弹命中同口径）
                             int dprog = EmgShotProg(ref d, wp.Program);
-                            if (dprog >= 0 && EmgCondChainMods(ref d, dprog, 0, EmgMetaAllowNow(ref d, dprog, 0, EmgEventKind.Hit, owner, target, d.EmgCtx.Chain, dr.Id), out EmgMods condChain))
+                            if (dprog >= 0 && EmgCondChainMods(ref d, dprog, 0, EmgMetaAllowNow(ref d, dprog, 0, EmgEventKind.Hit, owner, target, d.EmgCtx.Chain, dr.Id), owner, out EmgMods condChain))
                             {
                                 EmgChainHops(ref d, want, owner, target, hitPos, dealt, condChain, true, r);
                             }

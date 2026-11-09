@@ -7914,7 +7914,7 @@ namespace GameLogic.EditorTools
                 $"目标模式立即生效：炮塔记录 = {r?.TargetMode}，按钮“{(panel != null && slot >= 0 ? panel.ModeButton(slot).text : string.Empty)}”，消息“{panel?.MessageText}”");
             // FG6-DEF-01 审查修复（FGR-DEF-005 接入走正式入口）：测试捷径给测试炮塔装一张带接入口的固定底盘蓝图（电路编辑器里标接入口由 FG1 自检覆盖），
             // 然后点炮塔面板的“接入”按钮。
-            Campaign.Blueprint.BlueprintCircuitBoard board = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(Campaign.Content.CarrierReadings.FixedChassisId,
+            Campaign.Blueprint.BlueprintCircuitBoard board = Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(Campaign.Content.ChassisCatalog.ChassisFixedId,
                 Campaign.Content.ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
             board.TrySetUplink(2);
             state.BlueprintRecords = (state.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(x => x.BlueprintId != SmokeTurretPortBp)

@@ -46,13 +46,9 @@ namespace GameLogic.EditorTools
         /// 同一符号多写一处、出现清单外的新违例、或清单里的某条修掉了（次数变少）却没同步改清单，都判失败。承接：
         /// 编译器：静默标记器 → EMG1-FW-01（func_marker 声明切轨），铸造重炮开火方式 → EMG1-TRIG-01（根载荷实体化改按组件行数据），散热鳍 → EMG2-RULE-01（struct_fin 声明阶段 2）；
         /// 编译器调用的 BlueprintCircuitBoard 热量 / 带宽函数：重炮 + 过载配对积热（熔穿过载的热量侧）已由 EMG2-REACT-01 清零（重型射弹载体 + en.heat 写端 → P03 开火者代价），
-        /// 中继带宽 → EMG1-FW-01 写 struct_relay 声明、EMG3-SQD-01 中继转发切轨；CarrierReadings 固定底盘分支 → EMG3-CHS-01（锚定特性按 chs.* 状态端口生效）。
+        /// 中继带宽、CarrierReadings 固定底盘分支已由 EMG3 出口补缺口清零（中继带宽按 sqd.relay 读声明、固定底盘按底盘特性表“锚定”行，G 段断言），存量 = 0，FG-GAP-169 Closed。
         /// </summary>
-        public static readonly string[] LegacyBaseline =
-        {
-            "BlueprintCircuitBoard.cs|ComponentCatalog.StructRelayId|1",
-            "CarrierReadings.cs|\"chassis_fixed\"|1",
-        };
+        public static readonly string[] LegacyBaseline = Array.Empty<string>();
 
         /// <summary>形似内容 ID、实为别的东西的字面量（BlueprintCircuitBoard 的 CircuitOpResult 错误码），不计入审计。只放经核实的条目。</summary>
         private static readonly string[] NotContentIds = { "\"chassis_required\"", "\"chassis_locked\"" };
@@ -87,6 +83,7 @@ namespace GameLogic.EditorTools
                 Step(CheckNegativeMatrix);
                 Step(CheckSourceAudit);
                 Step(CheckRegression);
+                Step(CheckLegacyClosed);
             }
             finally
             {
@@ -544,6 +541,49 @@ namespace GameLogic.EditorTools
                 $"铸造重炮 + 过载：熔穿过载（{cannonRx}），每发积热 {cannonHeat:0.#}（= 65；内核首发积热 65 另由 FgCombatKernelSelfCheck / FgCoreFirmwareBoundarySelfCheck 真开火断言）");
             Expect(Mathf.Approximately(beamOver - beamBase, 15f) && beamRx == null,
                 $"切割束 + 过载：每发积热 = 基础 {beamBase:0.#} + 15 = {beamOver:0.#}，不触发熔穿过载（光束动能 0）");
+        }
+
+        // ── G FG-GAP-169 收尾（EMG3 出口补缺口）──
+        private static void CheckLegacyClosed()
+        {
+            Line("  · G. FG-GAP-169 收尾：中继带宽按 sqd.relay 读声明、固定底盘按底盘特性表“锚定”行判定——改表即改行为（不认内容 ID），回滚 emg.stage = 0 照旧");
+            string relay = ComponentCatalog.StructRelayId, cargo = ComponentCatalog.StructCargoId, fix = ChassisCatalog.ChassisFixedId, hover = ChassisCatalog.ChassisHoverId;
+            int Bw(string structure) => BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisTrackId, ComponentCatalog.CompGunId, null, structure, Array.Empty<string>()).ComputeBandwidthCost();
+            bool Dash(string chassis) => CarrierReadings.CanMount(chassis, ComponentCatalog.FuncDashId, out _, out _);
+            EmgSource real = EmgCatalog.FromTables();
+            try
+            {
+                Expect(Bw(relay) == 1 && Bw(cargo) == 0 && Bw(null) == 0, $"真实表：结构 = 信号中继带宽 +{Bw(relay)}，货舱 +{Bw(cargo)}，空槽 +{Bw(null)}");
+                Expect(CarrierReadings.IsFixedChassis(fix) && !CarrierReadings.IsFixedChassis(ChassisCatalog.ChassisTrackId) && !CarrierReadings.IsFixedChassis(hover) && !CarrierReadings.IsFixedChassis(null)
+                       && !Dash(fix) && Dash(ChassisCatalog.ChassisTrackId),
+                    "真实表：只有带“锚定”特性行的固定底盘算炮塔底盘（冲刺器装不上），履带 / 悬浮 / 空值不算");
+                // 改表：中继作用域声明挪给货舱（同一 owner 整条 stageGate 3），固定底盘的锚定行挪给悬浮
+                EmgSource moved = Clone(real);
+                EmgSource.Decl scope = moved.Decls.First(d => d.Owner == relay && d.Port == "sqd.relay");
+                moved.Decls.Remove(scope);
+                foreach (EmgSource.Decl d in moved.Decls.Where(d => d.Owner == cargo))
+                {
+                    d.StageGate = 3;
+                }
+                moved.Decls.Add(CopyDecl(scope, cargo, moved.Decls.Where(d => d.Owner == cargo).Max(d => d.Seq) + 1));
+                moved.Traits.RemoveAll(t => t.Chassis == hover);
+                moved.Traits.First(t => t.Kind == nameof(EmgTraitKind.FixedAnchor)).Chassis = hover;
+                EmgCatalog.OverrideForTests(moved);
+                Expect(EmgCatalog.Current.Problems.Count == 0 && Bw(cargo) == 1 && Bw(relay) == 0,
+                    $"改表：sqd.relay 声明挪给货舱 → 货舱带宽 +{Bw(cargo)}、信号中继 +{Bw(relay)}（编译问题 {EmgCatalog.Current.Problems.Count}）");
+                Expect(CarrierReadings.IsFixedChassis(hover) && !CarrierReadings.IsFixedChassis(fix) && !Dash(hover) && Dash(fix),
+                    "改表：锚定行挪给悬浮 → 悬浮按炮塔底盘判（冲刺器装不上），固定底盘不再是（判定只读表，不认 chassis_fixed）");
+                // 回滚：emg.stage = 0 时兼容表与带宽照旧（两者早于 FG19）
+                EmgSource off = Clone(real);
+                off.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : real.Tuning(id);
+                EmgCatalog.OverrideForTests(off);
+                Expect(EmgCatalog.EffectiveStage == 0 && Bw(relay) == 1 && CarrierReadings.IsFixedChassis(fix) && !Dash(fix),
+                    $"回滚 emg.stage = 0：信号中继带宽仍 +{Bw(relay)}，固定底盘仍是炮塔底盘（不看阶段）");
+            }
+            finally
+            {
+                EmgCatalog.OverrideForTests(null);
+            }
         }
 
         // ── 工具 ──

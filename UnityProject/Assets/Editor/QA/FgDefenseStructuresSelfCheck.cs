@@ -1251,7 +1251,7 @@ namespace GameLogic.EditorTools
             PipeNetworkService.TryPlace(s, far, PipePieceKind.Pipe, 0, 0);
             PipeNetworkService.Kernel.AddProducer(far.X, far.Y, Fluid("fuel"), 50000, 50000);
             // 燃迹炮塔：固定底盘 + 连射器 + 燃迹（命中挂“火”标签）。炮塔的燃油补给由 FG6-DEF-01 自检覆盖，这里用测试捷径装满一匣（不是本 Story 的行为）。
-            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, ComponentCatalog.CompGunId, null, null, new[] { Burn });
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisFixedId, ComponentCatalog.CompGunId, null, null, new[] { Burn });
             BlueprintVersionRecord version = board.ToVersion(1, 0f);
             s.BlueprintRecords = (s.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != BpBurn)
                 .Append(new BlueprintRecord { BlueprintId = BpBurn, DisplayName = "燃迹炮塔", ActiveVersion = 1, Versions = new[] { version } }).ToArray();

@@ -1134,7 +1134,7 @@ namespace GameLogic.EditorTools
             CombatReading none = CarrierReadings.Build(ComponentCatalog.CompGunId, null, null, true);
             Expect(unknown.Carrier == CombatCarrier.Projectile && !unknown.HasFirmwareReading && !none.HasFirmwareReading
                    && CarrierReadings.FieldsOf("fw_nope").Count == 0 && !CarrierReadings.HasReading("organ_focus")
-                   && CarrierReadings.CanMount(null, ComponentCatalog.FuncDashId, out _, out _) && CarrierReadings.CanMount(CarrierReadings.FixedChassisId, ComponentCatalog.StructCargoId, out _, out _),
+                   && CarrierReadings.CanMount(null, ComponentCatalog.FuncDashId, out _, out _) && CarrierReadings.CanMount(ChassisCatalog.ChassisFixedId, ComponentCatalog.StructCargoId, out _, out _),
                 "未知组件按射弹、未知 / 不是固件 / 空的固件没有读法；空底盘不拦；结构模块不在作战组件兼容表里、固定底盘照常可装");
         }
 

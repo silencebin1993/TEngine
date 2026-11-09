@@ -1089,7 +1089,7 @@ namespace GameLogic.EditorTools
             DefenseService.TrySetTrapPattern(s, trap.BuildingId, DefenseCatalog.PatternLine);
             GameLogic.Campaign.Logistics.PipeNetworkService.TryPlace(s, fw.PipeEnd, BinGames.Sim.Logistics.PipePieceKind.Pipe, 0, 0);
             GameLogic.Campaign.Logistics.PipeNetworkService.Kernel.AddProducer(fw.PipeEnd.X, fw.PipeEnd.Y, GameLogic.Campaign.Logistics.PipeNetworkService.FluidId("fuel"), 5_000_000, 5_000_000); // 5000 升：旅程里是精炼塔持续出油（720 升 / 分钟），这里够铺满到第 7.4 日
-            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, ComponentCatalog.CompGunId, null, null, new[] { Burn });
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisFixedId, ComponentCatalog.CompGunId, null, null, new[] { Burn });
             BlueprintVersionRecord version = board.ToVersion(1, 0f);
             s.BlueprintRecords = (s.BlueprintRecords ?? Array.Empty<BlueprintRecord>()).Where(r => r.BlueprintId != BpBurnM6)
                 .Append(new BlueprintRecord { BlueprintId = BpBurnM6, DisplayName = "燃迹炮塔", ActiveVersion = 1, Versions = new[] { version } }).ToArray();

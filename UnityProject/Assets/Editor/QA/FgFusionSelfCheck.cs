@@ -55,9 +55,6 @@ namespace GameLogic.EditorTools
     /// </summary>
     public static class FgFusionSelfCheck
     {
-        /// <summary>FG-GAP-174：线索标签检查暂缓的配方（EMG3-FUSE-01 重做线索时删掉）。</summary>
-        private static readonly string[] ClueTagPending = { "fusion.rustclock", "fusion.rustbomb" };
-
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const string PanelUxml = "Assets/GameRes/Raw/UI/UiKit/FusionPanel.uxml";
         private const string QueueRowUxml = "Assets/GameRes/Raw/UI/UiKit/FusionQueueRow.uxml";
@@ -385,8 +382,10 @@ namespace GameLogic.EditorTools
                 (code == 0 ? (src.SequenceEqual(rt) ? string.Empty : $"\n源：{string.Join(" / ", src.Take(4))}\n表：{string.Join(" / ", rt.Take(4))}") : "：" + output));
 
             var bad = new List<string>();
-            foreach (FusionRecipeDef r in FusionCatalog.Recipes)
+            int clueCarriers = 0;
+            for (int ri = 0; ri < FusionCatalog.Recipes.Count; ri++)
             {
+                FusionRecipeDef r = FusionCatalog.Recipes[ri];
                 bool parents = FirmwareKinds.TryGetParents(r.MixId, out string a, out string b) && r.Matches(a, b) && !FirmwareKinds.IsMixed(a) && !FirmwareKinds.IsMixed(b);
                 bool core = FirmwareKinds.IsCore(r.MixId) == (FirmwareKinds.IsCore(r.ParentA) || FirmwareKinds.IsCore(r.ParentB));
                 int la = FirmwareCatalog.TryGet(r.ParentA, out MechanicalContentDef da) ? da.Load : 0;
@@ -404,21 +403,24 @@ namespace GameLogic.EditorTools
                 bool name = GameText.TryGet(r.NameKey, GameLanguage.ZhCn, out string zh) && GameText.TryGet(r.NameKey, GameLanguage.En, out string en)
                             && !string.IsNullOrWhiteSpace(zh) && !string.IsNullOrWhiteSpace(en) && FirmwareKinds.DisplayName(r.MixId) == zh
                             && !zh.Contains(FirmwareKinds.DisplayName(r.ParentA) + FirmwareKinds.DisplayName(r.ParentB));
-                // EMG1-FW-01（FG-GAP-174）：fw_clock 去掉误贴的 Blood 后，这两条配方的线索标签检查暂缓（与 tools/cell_tables/fgdata_fusion.py CLUE_TAG_PENDING 同表），反应存在照查
-                bool reaction = NamedReactionCatalog.TryGet(r.Reaction, out GameConfig.fg.Reaction rx)
-                                && (Array.IndexOf(ClueTagPending, r.Id) >= 0
-                                    || (HasTag(r.ParentA, rx.TagA) && HasTag(r.ParentB, rx.TagB)) || (HasTag(r.ParentA, rx.TagB) && HasTag(r.ParentB, rx.TagA)));
+                // EMG3-FUSE-01 起线索 = 两父端口同链同现、一律按端口对（端口对分属两父由 tools/cell_tables/fgdata_fusion.py CLUE_PAIRS 逐条校验）；这里逐条看编译结果：
+                // 至少一个载体上，两父分装的程序与熔合芯片自己的程序都带本配方位、单装任一父都不带。原“反应标签分在两父”检查随 DEBT-EMG1FIX01-01 退役（reaction 列只给旧记录迁移用），反应存在照查
+                uint bit = ri < 32 ? 1u << ri : 0u;
+                int okCarriers = CarrierReadings.AllCarriers.Count(c => bit != 0u && (MaskOf(c, r.ParentA, r.ParentB) & bit) != 0u && (MaskOf(c, r.MixId) & bit) != 0u
+                                                                         && (MaskOf(c, r.ParentA) & bit) == 0u && (MaskOf(c, r.ParentB) & bit) == 0u);
+                clueCarriers += okCarriers;
+                bool reaction = NamedReactionCatalog.TryGet(r.Reaction, out _) && okCarriers > 0;
                 bool acquire = FirmwareKinds.SourceOf(r.MixId) == "fusion" && !FirmwareKinds.IsEnemyProtocol(r.MixId) && FirmwareRestoreService.IsRestorable(r.MixId) == false
                                && CarrierReadings.AllCarriers.All(c => !string.IsNullOrEmpty(FirmwareKinds.Reading(r.MixId, c)));
                 if (!(parents && core && load && fields && tagOk && catOk && name && reaction && acquire))
                 {
-                    bad.Add($"{r.Id}（父 {parents} 核心 {core} 负载 {load} 读法 {fields} 标签 {tagOk} 类别 {catOk} 名 {name} 反应 {reaction} 来源 {acquire}）");
+                    bad.Add($"{r.Id}（父 {parents} 核心 {core} 负载 {load} 读法 {fields} 标签 {tagOk} 类别 {catOk} 名 {name} 反应 + 线索 {reaction}（线索成立的载体 {okCarriers} 个）来源 {acquire}）");
                 }
             }
             int coreMixes = FusionCatalog.Recipes.Count(r => FirmwareKinds.IsCore(r.MixId));
             Expect(bad.Count == 0 && FusionCatalog.Problems.Count == 0 && coreMixes >= 1 && FusionCatalog.Families.All(f => FusionCatalog.CountInFamily(f) > 0),
                 $"A2 FGR-FW-050 混合固件（{FusionCatalog.Recipes.Count} 条）逐条：两条父固件都是正式固件；任一父固件是核心 ⇔ 它是核心（{coreMixes} 条核心混合固件）；负载 = 较大值 + {FusionCatalog.LoadBonus}；" +
-                "读法字段 = 父固件按 fg.TbFusionMerge 加法叠加、受上限约束；标签 = 并集；两个类别取自父固件；名字来自配方表文本键（不拼名字）；配方的反应标签分在两条父固件上；来源“熔合”、不走数据复原；4 个类别都有配方" +
+                $"读法字段 = 父固件按 fg.TbFusionMerge 加法叠加、受上限约束；标签 = 并集；两个类别取自父固件；名字来自配方表文本键（不拼名字）；线索按端口对逐条成立（两父分装与熔合芯片的程序都带本配方位、单装不带，合计 {clueCarriers} 个配方 × 载体，EMG3-FUSE-01）；来源“熔合”、不走数据复原；4 个类别都有配方" +
                 (bad.Count > 0 ? "；问题：" + string.Join("；", bad) : string.Empty) + (FusionCatalog.Problems.Count > 0 ? "；表问题：" + string.Join("；", FusionCatalog.Problems) : string.Empty));
 
             Expect(FusionCatalog.SimTech == 5 && FusionCatalog.FormalTech == 30 && FusionCatalog.FormalSubstrate == 2 && FusionCatalog.BurnSubstrate == 3 && FusionCatalog.LoadBonus == 1
@@ -451,17 +453,7 @@ namespace GameLogic.EditorTools
                 "配方书快捷键 Alt+F（可重绑，动作登记表）；通知类型 4 种（都记进离家报告“研究与解析”段）；30 条混合固件都有占位图标（芯片外形 + 区分字 + 类别角标）" + (missing.Count > 0 ? "；缺文本：" + string.Join("、", missing) : string.Empty));
         }
 
-        private static bool HasTag(string fw, string tag)
-        {
-            foreach (string t in FirmwareKinds.TagsOf(fw))
-            {
-                if (t == tag || (StatusTagCatalog.TryGet(t, out GameConfig.fg.StatusTag row) && row.AliasOf == tag))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
+        private static uint MaskOf(FirmwareCarrier c, params string[] fw) => Campaign.Emergence.EmgProgramCompiler.Compile(Array.Empty<string>(), fw, c).Program.ClueMask;
 
         // ── B 模拟熔合（FGT-RND-005 前半）──────────────────────────────────────────
 

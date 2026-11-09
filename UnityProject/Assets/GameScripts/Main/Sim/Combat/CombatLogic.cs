@@ -2136,7 +2136,7 @@ namespace BinGames.Sim.Combat
                             // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
                             ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
                             // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁在命中时按条件重判（静态读法里没折这几行）
-                            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), out EmgMods condChain))
+                            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), owner, out EmgMods condChain))
                             {
                                 EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, dmg, condChain, true, d.Weapons[pr.Weapon].Reading);
                             }

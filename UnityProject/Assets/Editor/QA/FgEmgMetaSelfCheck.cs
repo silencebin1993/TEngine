@@ -27,13 +27,13 @@ namespace GameLogic.EditorTools
     /// 与真实内核（CombatKernel）断言行为：A 编译（下游段 / 执行次数 / 上限原因 / 热量 / 逆序树 / 2 代节点 / 目录与模糊测试器缺口）；B [若目标被标记, 复制, 分裂] 两组子弹药；
     /// C 条件为假下游修饰不生效；D 复制各载体与上限；E 随机（确定性、每次选 1 条）；F 延后（宿主结束在结束点、宿主还在取当时位置、累计超上限不执行、暂停）；
     /// G 循环（飞行沿途、宿主提前结束、≤ 8 次、格斗锚点、布区存续）；H 反转（按本机积热选树）；I 存读档（延后队列与循环计数一致、续跑哈希一致；I3 段 23 短记录）；
-    /// L 5 载体读法补全（无人机 / 布区 / 当场结算的延后位置 / 力场多命中）；M 条件读端六类各一正一反；J 空场景早退出与发现；K 耗时。
+    /// L 5 载体读法补全（无人机 / 布区 / 当场结算的延后位置 / 力场多命中）；M 条件读端六类各一正一反；O 非元程序 chs.* condition 对弹体 / 区域 / 无人机宿主按出手者门控（DEBT-EMG3CHS01-02）；J 空场景早退出与发现；K 耗时。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgEmgMetaSelfCheck）；单段：bash tools/unity-validate.sh GameLogic.EditorTools.FgEmgMetaSelfCheck.RunFromMenu。
     /// </summary>
     public static class FgEmgMetaSelfCheck
     {
         private const float Dt = 1f / 60f;
-        private const byte Trig = EmgConst.RoleTrigger, Cond = EmgConst.RoleCondition, RoleEmit = 5, RoleModify = 6, RoleSpawn = 7;
+        private const byte Trig = EmgConst.RoleTrigger, Cond = EmgConst.RoleCondition, RoleEmit = 5, RoleModify = 6, RoleSpawn = 7, RoleInject = 8;
         private const CombatUnitFlags Live = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled;
         // EMG3-FW-02：FG19A N01～N08 已落表（stageGate 3），自检改用正式固件行（FGT-EMG-052 用正式固件复跑）
         private const string IfMark = "fw_ifmark", Rep = "fw_repeat", Loop = "fw_loop", Rnd = "fw_random";
@@ -90,6 +90,8 @@ namespace GameLogic.EditorTools
                 Step(CheckShortRecord);
                 Step(CheckCarriers);
                 Step(CheckCondPorts);
+                Step(CheckChsHosts); // EMG3 出口补缺口：DEBT-EMG3CHS01-02
+                Step(CheckChsEffects); // 同上第 2 轮：落点效果、命中结算、无状态修饰、折叠轨守卫
                 Step(CheckEmptyAndDiscovery);
                 Step(CheckPerformance);
             }
@@ -1174,6 +1176,290 @@ namespace GameLogic.EditorTools
             int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(flight ? Flight(w, 20f, 2f) : w), 100f);
             int foe = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 500f);
             setup?.Invoke(k, me, foe);
+            k.FireAt(me, foe, k.Time);
+            StepN(k, 40);
+            return Subs(k);
+        }
+
+        // ── O. 非元程序固件的 chs.* condition：统一按出手者门控（DEBT-EMG3CHS01-02，EMG3 出口补缺口）──
+
+        private static void CheckChsHosts()
+        {
+            Line("  · O. DEBT-EMG3CHS01-02：非元程序固件读 chs.* condition，弹体 / 区域 / 无人机宿主与单位宿主同样按出手者门控（触发器放子载荷、子节点写端、元程序重放）");
+            foreach ((string name, int host, EmgEntKind kind) in new[] { ("飞行弹体", 0, EmgEntKind.Projectile), ("布区", 1, EmgEntKind.Zone), ("无人机", 2, EmgEntKind.Drone) })
+            {
+                long air = ChsHostRun(host, true, true, out _), ground = ChsHostRun(host, false, true, out EmgEntKind gk), open = ChsHostRun(host, false, false, out _);
+                Expect(air >= 1 && ground == 0 && open >= 1 && gk == kind,
+                    $"{name}宿主（着地那次的命中事件宿主 = {gk}）[命中放子载荷 + 同序号 chs.airborne condition]：离地出手者放 {air} 份、着地 {ground} 份；对照不读 chs.*：着地放 {open} 份");
+            }
+            long pAir = ChsChildPing(true), pGround = ChsChildPing(false);
+            Expect(pAir >= 1 && pGround == 0, $"子节点写端（子弹药命中时广播脉冲，同序号读 chs.airborne condition，EmgChildWrites）：离地出手者广播 {pAir} 次、着地 {pGround} 次");
+            long rAir = ChsRepeatRun(true), rGround = ChsRepeatRun(false);
+            Expect(rAir == 2 && rGround == 0, $"[复制, 命中放子载荷 + chs.airborne condition]（元程序自己的触发器也读命中、同一事件唤起）：离地出手者放 {rAir} 份（本次 + 0.1 秒后重放）、着地 {rGround} 份（本次入队与重放 EmgMetaChildren 都按出手者拦下）");
+            // 真实编译器：测试表给分裂补一条 chs.airborne condition（整条 stageGate 3）——没有元程序 / 节拍也记子节点 MetaMask，真内核里离地放、着地不放
+            EmgSource src = EmgCatalog.FromTables();
+            foreach (EmgSource.Decl dd in src.Decls.Where(x => x.Owner == Split))
+            {
+                dd.StageGate = 3;
+            }
+            EmgSource.Decl cd = FgEmergenceRuleAuditSelfCheck.CopyDecl(src.Decls.First(x => x.Owner == Split), Split, src.Decls.Where(x => x.Owner == Split).Max(x => x.Seq) + 1);
+            cd.Dir = "read";
+            cd.Port = "chs.airborne";
+            cd.Role = "condition";
+            cd.Amount = 1f;
+            cd.Param2 = 0f;
+            cd.Heat = 0f;
+            src.Decls.Add(cd);
+            EmgCatalog.OverrideForTests(src);
+            try
+            {
+                EmgProgramResult r = P(Split);
+                bool masked = r.KernelNodes.Count >= 2 && r.KernelNodes.Skip(1).All(n => n.MetaMask == 1) && (r.Program.Flags & EmgProgramFlags.HasMeta) == 0;
+                long cAir = CompiledChsRun(r, true), cGround = CompiledChsRun(r, false);
+                Expect(EmgCatalog.Current.Problems.Count == 0 && masked && cAir >= 1 && cGround == 0,
+                    $"真实编译 [分裂 + chs.airborne condition]：子节点 MetaMask = {string.Join(",", r.KernelNodes.Skip(1).Select(n => n.MetaMask))}（无 HasMeta），离地出手者放 {cAir} 份、着地 {cGround} 份");
+            }
+            finally
+            {
+                EmgCatalog.OverrideForTests(null);
+            }
+        }
+
+        /// <summary>DEBT-EMG3CHS01-02 第 2 轮：子节点落点效果（EmgNodeEffects）、命中结算（EmgHitInject）、无状态修饰（EmgModsOf）同样按出手者门控同序号 chs.* condition；旧读法折叠轨不可达（守卫）。</summary>
+        private static void CheckChsEffects()
+        {
+            Line("  · O2. DEBT-EMG3CHS01-02 第 2 轮：子节点落点排放、命中结算的场 / 壁撞、撞障碍冲击、根 / 子节点无状态修饰（飞行与即时出手）按出手者门控 chs.*；读 chs.* condition 的固件不走旧读法折叠轨");
+            var hit = new[] { Row(0, Ev(EmgEventKind.Hit), Trig), Row(0, 100, RoleSpawn, 1f, 0f, 0f, (byte)EmgVerb.SubPayload) };
+            EmgInstr emit = Row(1, (ushort)(EmgMatterConst.PortBase + EmgMatterConst.Oil), RoleEmit, 1f, 1.5f, 6f, (byte)EmgCatalog.VerbCode("emit"));
+            EmgInstr field = Row(0, EmgFieldConst.PortPush, RoleEmit, 2f, 0f, 0f, (byte)EmgVerb.Field);
+            field.Param2 = 1f;
+            EmgInstr Pierce(int ord) => Row(ord, 111, RoleModify, 1f, 1f, 0f, (byte)EmgVerb.PassThrough);
+            EmgInstr Air(int ord) => Row(ord, EmgConst.PortChsAirborne, Cond);
+            EmgInstr multi = Row(0, 113, RoleModify, 3f, 1f, 0.6f, (byte)EmgVerb.Multi); // 布区多块小落区（3 块）
+            EmgInstr bounce = Row(0, 114, RoleModify, 2f, 0f, 0f, (byte)EmgVerb.Ricochet);
+            bounce.Param2 = 2f; // 只认障碍面（壁撞的 grm.mod.bounce）；序号 0 不读 chs.*，两边都反弹
+            EmgInstr Obs(int ord) => Row(ord, EmgConst.PortObstacle, Cond);
+            EmgInstr Kin(int ord, float amount, float a, float radius)
+            {
+                EmgInstr x = Row(ord, EmgConst.PortKinetic, RoleInject, amount, a);
+                x.Param2 = radius;
+                return x;
+            }
+            EmgInstr push = Kin(0, 1f, 1.5f, 0f), impact = Kin(1, 0.5f, 0f, 5f);
+            Func<CombatKernel, int, float> pools = (k, f) => Pools(k), fields = (k, f) => k.EmgScalars.FieldsBorn;
+            Func<CombatKernel, int, float> rootPierce = (k, f) => Projs(k).Where(p => (p.Flags & EmgProjFlags.Sub) == 0).Select(p => (float)p.PierceLeft).DefaultIfEmpty(-1f).Max();
+            Func<CombatKernel, int, float> subPierce = (k, f) => Projs(k).Where(p => (p.Flags & EmgProjFlags.Sub) != 0).Select(p => (float)p.PierceLeft).DefaultIfEmpty(-1f).Max();
+            Func<CombatKernel, int, float> extraZones = (k, f) => Zones(k).Count(z => z.EmgProgRef != 0) - 1f; // 带程序的落区比原本 1 块多出的块数
+            Func<CombatKernel, int, float> shoved = (k, f) => k.TryGetUnit(f, out CombatUnitView v) ? (float)math.distance(v.Position, new double2(0, 6)) : -1f;
+            Func<CombatKernel, int, float> hurt = (k, f) => k.TryGetUnit(f, out CombatUnitView v) ? 100000f - v.Health : -1f;
+            (string Name, EmgInstr[] Root, EmgInstr[] Gated, EmgInstr[] Open, ChsFx Fx, Func<CombatKernel, int, float> Probe)[] cases =
+            {
+                ("子节点落点排放（EmgNodeEffects）", hit, new[] { Air(1), emit }, new[] { emit }, ChsFx.Instant, pools),
+                ("命中结算的场写端（EmgHitInject）", null, new[] { Air(0), field }, new[] { field }, ChsFx.Instant, fields),
+                ("根弹体穿透修饰（EmgModsOf ← EmgInitFlight）", null, new[] { Air(0), Pierce(0) }, new[] { Pierce(0) }, ChsFx.Flight, rootPierce),
+                ("子弹药穿透修饰（EmgModsOf ← EmgSpawnSub / EmgInitFlight）", hit, new[] { Air(1), Pierce(1) }, new[] { Pierce(1) }, ChsFx.Instant, subPierce),
+                ("即时出手根节点修饰（布区多块小落区，EmgModsOf ← DeliverInstant）：多出的落区块数", null, new[] { Air(0), multi }, new[] { multi }, ChsFx.Field, extraZones),
+                ("命中结算的壁撞推开（EmgHitInject → EmgWallSlamPush）：目标被推开的米数", null, new[] { Air(0), Obs(0), push }, new[] { Obs(0), push }, ChsFx.Wall, shoved),
+                ("撞障碍冲击（EmgObstacleKinetic；反弹修饰在不读 chs.* 的序号 0，两边都反弹）：主目标吃的冲击伤害", null, new[] { bounce, Air(1), Obs(1), impact }, new[] { bounce, Obs(1), impact }, ChsFx.Obstacle, hurt),
+            };
+            foreach ((string name, EmgInstr[] root, EmgInstr[] gated, EmgInstr[] open, ChsFx fx, Func<CombatKernel, int, float> probe) in cases)
+            {
+                // 有 root：gated / open 是子节点（命中放 1 份子载荷）；没有 root：它们就是根节点
+                float air = ChsEffectRun(true, root, gated, fx, probe), ground = ChsEffectRun(false, root, gated, fx, probe), ctl = ChsEffectRun(false, root, open, fx, probe);
+                Expect(air >= 1f && ground == 0f && ctl >= 1f, $"{name} + 同序号 chs.airborne condition：离地出手者 {air}、着地 {ground}；对照不读 chs.*：着地 {ctl}");
+            }
+            // 旧读法折叠轨（DEBT-EMG3CHS01-02 原文“旧 readFields 轨的效果也不读 chs.*”）：炮塔兼容轨原样结算固件旧字段 / 旧标签，机器的根节点过渡字段与旧动词折叠（FoldProgramReadings）
+            // 都在出手前折成数值、没有逐行执行点。守卫：读 chs.* condition 的固件在 5 载体上旧读法与折叠都为空（读法与不装它逐字相同），这条路不可达；新固件要在这些字段上读 chs.*，先换内核动词（FGR-EMG-019 第 3 条）
+            List<string> owners = ChsCondOwners(), leaks = ChsFoldLeaks(owners);
+            Expect(owners.Count > 0 && leaks.Count == 0, $"守卫：读 chs.* condition 的固件 [{string.Join(", ", owners)}] × 5 载体，旧读法字段 / 旧标签与根节点旧动词折叠都为空{(leaks.Count > 0 ? "；泄漏：" + string.Join("、", leaks) : "")}");
+            // 守卫自身的对照：测试表给有旧读法的电容（capacitor:1.6;scale:1.3）补一条 chs.airborne condition，守卫必须报出来
+            EmgSource src = EmgCatalog.FromTables();
+            foreach (EmgSource.Decl dd in src.Decls.Where(x => x.Owner == "fw_capacitor"))
+            {
+                dd.StageGate = 3; // chs.* 端口阶段 3 可用，整条切轨（同 O 段给分裂补 condition）
+            }
+            EmgSource.Decl cd = FgEmergenceRuleAuditSelfCheck.CopyDecl(src.Decls.First(x => x.Owner == "fw_capacitor"), "fw_capacitor", src.Decls.Where(x => x.Owner == "fw_capacitor").Max(x => x.Seq) + 1);
+            cd.Dir = "read";
+            cd.Port = "chs.airborne";
+            cd.Role = "condition";
+            cd.Amount = 1f;
+            cd.Param2 = 0f;
+            cd.Heat = 0f;
+            src.Decls.Add(cd);
+            EmgCatalog.OverrideForTests(src);
+            try
+            {
+                List<string> o2 = ChsCondOwners(), l2 = ChsFoldLeaks(o2);
+                Expect(EmgCatalog.Current.Problems.Count == 0 && o2.Contains("fw_capacitor") && l2.Any(x => x.StartsWith("fw_capacitor", StringComparison.Ordinal)),
+                    $"守卫对照：测试表给电容（旧读法 capacitor / scale）补 chs.airborne condition（表问题 {EmgCatalog.Current.Problems.Count} 条）→ 守卫报出 {l2.Count} 处（{string.Join("、", l2.Take(5))}）");
+            }
+            finally
+            {
+                EmgCatalog.OverrideForTests(null);
+            }
+        }
+
+        /// <summary>声明里有 chs.* condition 读端的固件（底盘自己的声明行不进程序，不算）。</summary>
+        private static List<string> ChsCondOwners()
+        {
+            EmgCompiled cat = EmgCatalog.Current;
+            var chs = new HashSet<ushort> { EmgConst.PortChsGround, EmgConst.PortChsAirborne, EmgConst.PortChsMoving, EmgConst.PortChsWater };
+            return cat.Decls.Where(x => x.Dir == EmgDirs.Read && x.Role == EmgRole.Condition && chs.Contains(x.Port)).Select(x => cat.OwnerIds[x.Owner]).Where(FirmwareCatalog.All.ContainsKey).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
+        }
+
+        /// <summary>每条固件 × 5 载体：装上它的旧读法（炮塔兼容轨口径）或根节点折叠结果与不装它不同 = 泄漏。</summary>
+        private static List<string> ChsFoldLeaks(List<string> owners)
+        {
+            var leaks = new List<string>();
+            foreach (string fw in owners)
+            {
+                foreach ((FirmwareCarrier car, string comp) in FgReadingMatrixSelfCheck.CarrierComponents)
+                {
+                    CombatReading bare = CarrierReadings.Build(comp, null, null, Array.Empty<string>(), false);
+                    bool legacy = !CarrierReadings.Build(comp, null, null, new[] { fw }, false).Equals(bare);
+                    bool folded = !CombatSite.FoldProgramReadings(bare, EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { fw }, car), false).Equals(bare);
+                    if (legacy || folded)
+                    {
+                        leaks.Add($"{fw} × {car}（{(legacy ? "旧读法" : "")}{(legacy && folded ? " + " : "")}{(folded ? "折叠" : "")}）");
+                    }
+                }
+            }
+            return leaks;
+        }
+
+        /// <summary>O2 夹具：即时射弹 / 飞行弹体 / 即时布区 / 即时射弹 + 实体层（壁撞推动要它）/ 飞行弹体 + 弹道上一个障碍。</summary>
+        private enum ChsFx : byte { Instant, Flight, Field, Wall, Obstacle }
+
+        /// <summary>手写程序：<paramref name="root"/> 为空时 <paramref name="rows"/> 就是根节点；否则 rows 是命中放出的子节点（MetaMask = 1）。返回步进中观测值（参数 = 主目标 Id）的最大值。</summary>
+        private static float ChsEffectRun(bool hover, EmgInstr[] root, EmgInstr[] rows, ChsFx fx, Func<CombatKernel, int, float> probe)
+        {
+            CombatConfig cfg = Cfg();
+            cfg.EmgEntity = (byte)(fx == ChsFx.Wall ? 1 : 0);
+            using var k = new CombatKernel(cfg, 32);
+            var instrs = new List<EmgInstr>(root ?? rows);
+            var nodes = new List<EmgNode> { new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = (byte)instrs.Count } };
+            if (root != null)
+            {
+                nodes.Add(new EmgNode { Parent = 0, Gen = 1, TrigEvent = EmgEventKind.Hit, TrigCount = 1, FirstInstr = instrs.Count, InstrCount = (byte)rows.Length, MetaMask = 1 });
+                instrs.AddRange(rows);
+            }
+            int prog = k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Hit) | (1u << (int)EmgEventKind.Fire) }, nodes, instrs);
+            CombatWeapon w = Instant(prog, 30f, false, fx == ChsFx.Field ? CombatCarrier.Field : CombatCarrier.Projectile);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(fx == ChsFx.Flight || fx == ChsFx.Obstacle ? Flight(w, 20f, 2f) : w), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 6), -1, 100000f);
+            Unit(k, CombatFaction.Hostile, new double2(1.5, 6.5), -1, 100000f);
+            if (fx == ChsFx.Obstacle)
+            {
+                k.SetObstacles(new List<float3> { new float3(0f, 3.5f, 1f) }); // 弹道上的障碍：撞点离主目标约 3.6 米（冲击半径 5 米内），弹体被反弹、打不到主目标
+            }
+            if (hover)
+            {
+                k.SetUnitTrait(me, EmgTraitConst.HoverFloat);
+            }
+            k.FireAt(me, foe, k.Time);
+            float best = probe(k, foe);
+            for (int s = 0; s < 120; s++)
+            {
+                StepN(k, 1);
+                best = Math.Max(best, probe(k, foe));
+            }
+            return best;
+        }
+
+        private static long CompiledChsRun(EmgProgramResult r, bool hover)
+        {
+            using var k = new CombatKernel(Cfg(), 16);
+            int prog = CombatSite.RegisterProgram(k, r);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 5000f);
+            Unit(k, CombatFaction.Hostile, new double2(1.5, 5), -1, 5000f);
+            if (hover)
+            {
+                k.SetUnitTrait(me, EmgTraitConst.HoverFloat);
+            }
+            k.FireAt(me, foe, k.Time);
+            StepN(k, 40);
+            return Subs(k);
+        }
+
+        /// <summary>普通程序（没有元程序 / 节拍；子节点 MetaMask 只在读 chs.* condition 时记，同编译器 TempoPass）：命中放 1 份子载荷，可选同序号 chs.airborne condition。<paramref name="host"/>：0 飞行弹体 / 1 布区 / 2 无人机。</summary>
+        private static long ChsHostRun(int host, bool hover, bool cond, out EmgEntKind hitHost)
+        {
+            CombatConfig cfg = Cfg();
+            cfg.DroneReach = 4f; // 同 DroneRun
+            using var k = new CombatKernel(cfg, 16);
+            var rows = new List<EmgInstr> { Row(0, Ev(EmgEventKind.Hit), Trig) };
+            if (cond)
+            {
+                rows.Add(Row(0, EmgConst.PortChsAirborne, Cond));
+            }
+            rows.Add(Row(0, 100, RoleSpawn, 1f, 0f, 0f, (byte)EmgVerb.SubPayload));
+            var nodes = new List<EmgNode>
+            {
+                new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = (byte)rows.Count },
+                new EmgNode { Parent = 0, Gen = 1, TrigEvent = EmgEventKind.Hit, TrigCount = 1, FirstInstr = rows.Count, InstrCount = 0, MetaMask = (byte)(cond ? 1 : 0) }, // 编译器口径：有 chs.* condition 才记
+            };
+            int prog = k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Hit) | (1u << (int)EmgEventKind.Fire) }, nodes, rows);
+            CombatWeapon w = Instant(prog, 30f, false, host == 1 ? CombatCarrier.Field : CombatCarrier.Projectile);
+            if (host == 0)
+            {
+                w = Flight(w, 20f, 2f);
+            }
+            else if (host == 2)
+            {
+                w.Reading = new CombatReading { Carrier = CombatCarrier.Summon, Drones = 1, DroneSeconds = 6f, DroneRatio = 1f, DroneCooldown = 10f, DroneLeash = 10f };
+            }
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, host == 2 ? 7 : 4), -1, 5000f);
+            if (hover)
+            {
+                k.SetUnitTrait(me, EmgTraitConst.HoverFloat);
+            }
+            k.FireAt(me, foe, k.Time);
+            StepN(k, 240);
+            hitHost = k.TryGetLastEmgEvent(EmgEventKind.Hit, out EmgEvent e) ? e.EntKind : EmgEntKind.None;
+            return Subs(k);
+        }
+
+        /// <summary>[命中放子载荷] → 子弹药节点 [命中时广播 1 号频道 + 同序号 chs.airborne condition]：根节点不读 chs.*，子弹药两边都放出，只有子节点写端受门控。</summary>
+        private static long ChsChildPing(bool hover)
+        {
+            using var k = new CombatKernel(Cfg(), 32);
+            var rows = new List<EmgInstr>
+            {
+                Row(0, Ev(EmgEventKind.Hit), Trig), Row(0, 100, RoleSpawn, 1f, 0f, 0f, (byte)EmgVerb.SubPayload),
+                Row(1, Ev(EmgEventKind.Hit), Trig), Row(1, EmgConst.PortChsAirborne, Cond), Row(1, Ev(EmgEventKind.Ping), RoleEmit, 1f),
+            };
+            var nodes = new List<EmgNode>
+            {
+                new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = 2 },
+                new EmgNode { Parent = 0, Gen = 1, TrigEvent = EmgEventKind.Hit, TrigCount = 1, FirstInstr = 2, InstrCount = 3, MetaMask = 1 },
+            };
+            int prog = k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Hit) | (1u << (int)EmgEventKind.Fire) }, nodes, rows);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 6), -1, 100000f);
+            Unit(k, CombatFaction.Hostile, new double2(1.5, 6.5), -1, 100000f);
+            if (hover)
+            {
+                k.SetUnitTrait(me, EmgTraitConst.HoverFloat);
+            }
+            k.FireAt(me, foe, k.Time);
+            long rootSent = k.EmgBusStats.PingsSent;
+            StepN(k, 120);
+            return rootSent == 0 && Subs(k) >= 1 ? k.EmgBusStats.PingsSent : -1;
+        }
+
+        private static long ChsRepeatRun(bool hover)
+        {
+            using var k = new CombatKernel(Cfg(), 16);
+            EmgInstr[] trig = { Row(1, Ev(EmgEventKind.Hit), Trig), Row(1, EmgConst.PortChsAirborne, Cond), Row(1, 100, RoleSpawn, 1f, 0f, 0f, (byte)EmgVerb.SubPayload) };
+            int prog = Tree(k, Root(MetaI(0, EmgMetaConst.Repeat, EmgEventKind.Hit), trig), Child(1));
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 5000f);
+            if (hover)
+            {
+                k.SetUnitTrait(me, EmgTraitConst.HoverFloat);
+            }
             k.FireAt(me, foe, k.Time);
             StepN(k, 40);
             return Subs(k);

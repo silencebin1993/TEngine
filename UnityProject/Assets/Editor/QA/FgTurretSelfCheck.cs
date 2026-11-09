@@ -358,7 +358,7 @@ namespace GameLogic.EditorTools
         }
 
         internal static BlueprintCircuitBoard Fixed(string primary, params string[] firmware) =>
-            BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, primary, null, null, firmware ?? Array.Empty<string>());
+            BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisFixedId, primary, null, null, firmware ?? Array.Empty<string>());
 
         internal static TurretRecord Rec(CampaignState s, BuildingRecord b) => b != null ? TurretService.Find(s, b.BuildingId) : null;
 
@@ -501,7 +501,7 @@ namespace GameLogic.EditorTools
                 GuidanceHooks.TurretFirstSupplyShort, GuidanceHooks.TurretFirstKill }.All(h => GuidanceHooks.Known.Contains(h));
             bool codex = t.TbCodexEntry.DataList.Any(c => c.Id == "codex.defense.turret") && BuildingOps.Service(L)?.CodexId == "codex.defense.turret";
             bool notify = NotificationCatalog.TryGetType("turret_supply", out NotifyTypeDef nt) && nt.Tier == NotifyLevel.Warning;
-            bool chassis = ChassisCatalog.All.TryGetValue(CarrierReadings.FixedChassisId, out MechanicalContentDef fixedDef) && fixedDef.Source == MechanicalContentSource.BaseBlueprint;
+            bool chassis = ChassisCatalog.All.TryGetValue(ChassisCatalog.ChassisFixedId, out MechanicalContentDef fixedDef) && fixedDef.Source == MechanicalContentSource.BaseBlueprint;
             Expect(keys.Length >= 90 && zh && badEn.Length == 0 && hooks && codex && notify && chassis,
                 $"A3 新文本 {keys.Length} 个中英都有（英文里有中文 / 缺的：{string.Join("、", badEn.Take(6))}）；6 个引导钩子；图鉴“炮塔”（建筑面板“?”指向它）；“炮塔缺补给”（警告）通知；固定底盘进基础蓝图库（{hooks}/{codex}/{notify}/{chassis}）");
         }
@@ -513,7 +513,7 @@ namespace GameLogic.EditorTools
             CampaignState s = NewWorld(6101, scrap: 900);
             CombatSite site = Site;
             BlueprintRecord light = BlueprintEditorService.Find(s, BpLight);
-            bool seededLight = light != null && light.Versions[0].ChassisId == CarrierReadings.FixedChassisId && light.Versions[0].PrimaryId == ComponentCatalog.CompGunId
+            bool seededLight = light != null && light.Versions[0].ChassisId == ChassisCatalog.ChassisFixedId && light.Versions[0].PrimaryId == ComponentCatalog.CompGunId
                                && TurretService.StateOf(s).DefaultsSeeded;
             bool heavyLocked = !MechanicalContentUnlock.IsUnlocked(s, ComponentCatalog.CompCannonId) && BlueprintEditorService.Find(s, BpHeavy) == null;
             GridCell? heavySpot = FgProductionSelfCheck.FindFree(s, H, 7f, 22f);

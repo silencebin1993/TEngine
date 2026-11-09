@@ -361,8 +361,8 @@ namespace GameLogic.EditorTools
                             overMachine.Add($"{main}+{util ?? "无"}={machine}");
                         }
                         // 炮塔：固定底盘能装的组件组合（炮塔本体模型随 FG6-DEF-01，按同一 L 档预留剪影同量）
-                        bool turretOk = CarrierReadings.CanMount(CarrierReadings.FixedChassisId, main, out _, out _)
-                                        && (util == null || CarrierReadings.CanMount(CarrierReadings.FixedChassisId, util, out _, out _));
+                        bool turretOk = CarrierReadings.CanMount(ChassisCatalog.ChassisFixedId, main, out _, out _)
+                                        && (util == null || CarrierReadings.CanMount(ChassisCatalog.ChassisFixedId, util, out _, out _));
                         if (turretOk && machine > maxTurret)
                         {
                             maxTurret = machine;

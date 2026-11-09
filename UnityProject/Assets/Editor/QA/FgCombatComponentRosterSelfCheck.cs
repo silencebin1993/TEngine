@@ -189,7 +189,7 @@ namespace GameLogic.EditorTools
             Expect(ps.UtilityId == ComponentCatalog.FuncSpikesId && Mathf.Approximately(ws.Reading.Thorns, spikes.Thorns) && Mathf.Approximately(ws.Reading.ThornsFlat, spikes.Damage)
                    && Mathf.Approximately(ws.Reading.ThornsReach, spikes.ThornsReach) && ws.Reading.Carrier == CombatCarrier.Projectile && wPlain.Reading.Thorns == 0f,
                 "连射器 + 尖刺外装：武器仍是连射器的射弹载体，另带反伤（比例 / 固定值 / 触及 = 表）；不装尖刺外装的没有反伤");
-            bool turret = NewComponents.All(id => CarrierReadings.CanMount(CarrierReadings.FixedChassisId, id, out _, out _));
+            bool turret = NewComponents.All(id => CarrierReadings.CanMount(ChassisCatalog.ChassisFixedId, id, out _, out _));
             Expect(turret, "5 个新组件都能装上固定底盘（炮塔）：直接兼容（冲刺器仍是唯一不兼容的）");
             MachineMorphMaskCheck();
         }

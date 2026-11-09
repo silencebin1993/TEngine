@@ -698,7 +698,7 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
-            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(CarrierReadings.FixedChassisId, primary, null, null, firmware);
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisFixedId, primary, null, null, firmware);
             BlueprintVersionRecord v = board.ToVersion(1, s.PlaySeconds);
             s.BlueprintRecords = s.BlueprintRecords.Append(new BlueprintRecord
             {

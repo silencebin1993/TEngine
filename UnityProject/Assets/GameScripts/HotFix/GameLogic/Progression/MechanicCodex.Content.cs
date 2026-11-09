@@ -495,7 +495,7 @@ namespace GameLogic.Progression
                 sb.AppendLine(Line("codex.label.values", d.ValuesSummary));
             }
             sb.AppendLine(Line("codex.label.load", d.Load, d.ScrapCost));
-            if (!CarrierReadings.CanMount(CarrierReadings.FixedChassisId, id, out string reasonKey, out string adjustedKey))
+            if (!CarrierReadings.CanMount(ChassisCatalog.ChassisFixedId, id, out string reasonKey, out string adjustedKey))
             {
                 sb.AppendLine(Line("codex.label.turret_no", GameText.Format(reasonKey, d.DisplayName)));
             }

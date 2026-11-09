@@ -30,8 +30,6 @@ namespace GameLogic.Campaign.Content
     /// </summary>
     public static class CarrierReadings
     {
-        public const string FixedChassisId = "chassis_fixed";
-
         private static TbCombatComponent _components;
         private static TbCarrierReading _readings;
         private static TbCombatComponent _componentsOverride;
@@ -122,8 +120,10 @@ namespace GameLogic.Campaign.Content
         public static string SubtypeName(string componentId) =>
             TryGetComponent(componentId, out CombatComponent row) && HasKey(row.SubtypeKey) ? GameText.Get(row.SubtypeKey) : null;
 
+        /// <summary>固定底盘（炮塔）= 底盘特性表里机制为“锚定”的底盘（fg.TbChassisTrait 的 FixedAnchor 行；FG-GAP-169 ③，不认底盘 ID）。
+        /// 不看 emg.stage：兼容表、炮塔宿主从 FG2-FW-02 / FG6-DEF-01 起就生效，回滚到阶段 0 也照旧；机器记录的具体机型先由 EmgCatalog.TryGetTrait 译成底盘内容 ID。</summary>
         public static bool IsFixedChassis(string chassisId) =>
-            string.Equals(ChassisCatalog.ResolveArchetype(chassisId) ?? chassisId, FixedChassisId, StringComparison.Ordinal);
+            Emergence.EmgCatalog.TryGetTrait(chassisId, out Emergence.EmgTraitRow row) && row.Kind == Emergence.EmgTraitKind.FixedAnchor;
 
         // ─────────────────────────────── 固定底盘兼容（FGR-FW-012）───────────────────────────────
 

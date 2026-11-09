@@ -538,6 +538,7 @@ namespace BinGames.Sim.Combat
         {
             EmgProgram p = d.EmgPrograms[e.Prog];
             int maxChildren = EmgMaxChildren(ref d);
+            int pf = -1, pe = -1;
             for (int j = 1; j < p.NodeCount; j++)
             {
                 int ni = p.FirstNode + j;
@@ -549,6 +550,12 @@ namespace BinGames.Sim.Combat
                 if (c.Parent != e.Node || c.TrigEvent != e.Kind || c.TrigCount == 0 || (c.MetaMask > 0 && !EmgMetaAllowed(allow, (byte)(c.MetaMask - 1))))
                 {
                     continue; // EMG3-META-01：放出它的触发器被元程序关掉（条件为假 / 随机没选中 / 延后到点再放）
+                }
+                // DEBT-EMG3CHS01-02（FGR-EMG-141）：放出它的那条触发器读 chs.* condition、出手者（host.Owner）此刻没有这个状态 → 不放。
+                // 单位 / 弹体 / 区域 / 无人机宿主同一判定；有 chs.* condition 的程序编译期必记 MetaMask（EmgProgramCompiler.TempoPass），MetaMask = 0 的程序没有可判的，零开销
+                if (c.MetaMask > 0 && (pf >= 0 || EmgNodeSpan(ref d, e.Prog, e.Node, out pf, out pe)) && EmgChsBlocked(ref d, host.Owner, pf, pe, (byte)(c.MetaMask - 1)))
+                {
+                    continue;
                 }
                 // 格斗 / 力场：一次出手对扇形 / 圈内每个单位各算一次命中，触发只按主目标一次（FGR-EMG-034 表第 1 行、FGR-EMG-035）。
                 if (e.Kind == EmgEventKind.Hit && host.EntKind == EmgEntKind.Unit
@@ -850,7 +857,7 @@ namespace BinGames.Sim.Combat
             else
             {
                 // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的多份载荷分成真实弹丸（一份的弹丸一起放，弹体池放不下整份留到下一步，扇角不丢）、伤害倍率
-                EmgModsOf(ref d, s.Prog, s.Node, out EmgMods cm);
+                EmgModsOf(ref d, s.Prog, s.Node, out EmgMods cm, 0UL, ownerSlot);
                 int pellets = cm.Multi > 1 ? cm.Multi : 1;
                 if (d.Projectiles.Length + pellets > d.Config.ProjectileCapacity)
                 {
@@ -872,7 +879,7 @@ namespace BinGames.Sim.Combat
                 if (gatedRows != 0UL)
                 {
                     // EMG3-E2E-01（DEBT-EMG3META01-03）：条件 / 随机下游的伤害倍率不在放出时乘，命中那一刻按条件重判（EmgSubCondDmg）
-                    mul = EmgModsOf(ref d, s.Prog, s.Node, out EmgMods cb, gatedRows) ? cb.DmgMul : 0f;
+                    mul = EmgModsOf(ref d, s.Prog, s.Node, out EmgMods cb, gatedRows, ownerSlot) ? cb.DmgMul : 0f;
                 }
                 float each = damage * (mul > 0f ? mul : 1f) * (pellets > 1 ? (cm.MultiRatio > 0f ? cm.MultiRatio : 0.4f) : 1f);
                 float reach = form.Speed * form.Life;
@@ -995,7 +1002,7 @@ namespace BinGames.Sim.Combat
             CombatWeapon wp = d.Weapons[s.Weapon];
             int t = d.SlotOf(s.Other);
             double2 to = t >= 0 && d.IsAlive(t) ? d.Pos[t] : s.Pos + (double2)s.Dir;
-            if (t >= 0 && d.IsAlive(t) && math.lengthsq(s.Dir) > 1e-12f && EmgPellets(ref d, wp, out _, out _) > 1)
+            if (t >= 0 && d.IsAlive(t) && math.lengthsq(s.Dir) > 1e-12f && EmgPellets(ref d, wp, d.SlotOf(s.Owner), out _, out _) > 1)
             {
                 to = s.Pos + (double2)s.Dir * math.distance(d.Pos[t], s.Pos); // EMG1-GRM-01 审查修复：多份载荷排队的弹丸保留各自扇角（Dir = 出手时这一份的方向）
             }
@@ -1219,7 +1226,7 @@ namespace BinGames.Sim.Combat
             int chain = wprog >= 0 && d.EmgCtx.Prog == wprog && d.EmgCtx.Chain > 0 ? d.EmgCtx.Chain : 0;
             EmgProjFlags flags = EmgProjFlags.Flight | extra;
             // EMG1-GRM-01：多份载荷（霰射：一次出手 N 发真实弹丸，扇面均分、各 a 倍伤害，各自命中、各自触发）。一份时逐字同旧。
-            int pellets = EmgPellets(ref d, wp, out float ratio, out float fan);
+            int pellets = EmgPellets(ref d, wp, a, out float ratio, out float fan);
             if (pellets > 1 && chain == 0 && wprog >= 0)
             {
                 EmgScalars es0 = d.EmgS[0];
@@ -1355,7 +1362,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁不在静态读法里，命中这一刻按条件重判后执行
-            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), out EmgMods condChain))
+            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), owner, out EmgMods condChain))
             {
                 EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, dealt, condChain, true, r);
             }
@@ -1425,12 +1432,13 @@ namespace BinGames.Sim.Combat
             }
             EmgNode n = d.EmgNodes[p.FirstNode + node];
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            bool chs = ownerSlot >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if (!EmgMetaAllowed(allow, x.Ordinal))
+                if (!EmgMetaAllowed(allow, x.Ordinal) || (chs && EmgChsBlocked(ref d, ownerSlot, n.FirstInstr, end, x.Ordinal)))
                 {
-                    continue; // EMG3-META-01：元程序关掉 / 推迟的下游指令
+                    continue; // EMG3-META-01：元程序关掉 / 推迟的下游指令；DEBT-EMG3CHS01-02：出手者此刻没有同序号 chs.* condition 要的状态（同 EmgRootGated）
                 }
                 if (!emitOnly && x.Verb == (byte)EmgVerb.Field && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
                 {

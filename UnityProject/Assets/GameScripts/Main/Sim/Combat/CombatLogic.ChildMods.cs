@@ -18,14 +18,14 @@ namespace BinGames.Sim.Combat
         /// <remarks><paramref name="skip"/> = 命中这一刻被条件 / 随机关掉的行（<see cref="EmgSubHitSkip"/>；EMG3-E2E-01，DEBT-EMG3META01-03）。</remarks>
         internal static float EmgSubArmorFactor(ref CombatData d, in CombatProjectile pr, int hit, ulong skip = 0UL)
         {
-            float pierce = pr.Prog >= 0 && EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip) ? m.ArmorPierce : 0f;
+            float pierce = pr.Prog >= 0 && EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip, d.SlotOf(pr.Owner)) ? m.ArmorPierce : 0f;
             return math.max(0f, 1f - ArmorOf(ref d, hit) * (1f - math.saturate(pierce)));
         }
 
         /// <summary>子弹药命中后：爆圈（命中处 r 米内其他敌对单位各吃 b 倍）与余击（c 米内最近的 a 个其他目标各吃 b 倍）。O(单位数 × 余击数)。<paramref name="skip"/> 同上。</summary>
         internal static void EmgSubSplash(ref CombatData d, in CombatProjectile pr, int owner, int hit, double2 hitPos, float dmg, ulong skip = 0UL)
         {
-            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip) || !(dmg > 0f))
+            if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip, owner) || !(dmg > 0f))
             {
                 return;
             }
@@ -80,7 +80,7 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static bool EmgSpawnSubZone(ref CombatData d, ref EmgSpawn s, int code, in EmgSubForm form, float damage, int ownerSlot, CombatFaction faction)
         {
-            EmgModsOf(ref d, s.Prog, s.Node, out EmgMods m);
+            EmgModsOf(ref d, s.Prog, s.Node, out EmgMods m, 0UL, ownerSlot);
             int parts = m.Multi > 1 ? m.Multi : 1;
             if (d.Zones.Length + parts > d.ZoneCap && CountZones(ref d, CombatConst.ZoneKindReading) + parts > d.ZoneCap)
             {
@@ -232,7 +232,7 @@ namespace BinGames.Sim.Combat
         /// <summary>子区收回（到期）时的回响：区内敌对单位再吃一个节拍 × c（evt.hit Code = 回响）。</summary>
         private static void EmgSubZoneEcho(ref CombatData d, in CombatZone z)
         {
-            if (!EmgModsOf(ref d, z.EmgProgRef - 1, z.EmgNode, out EmgMods m) || !(m.EchoRatio > 0f) || !(z.Dps > 0f))
+            if (!EmgModsOf(ref d, z.EmgProgRef - 1, z.EmgNode, out EmgMods m, 0UL, d.SlotOf(z.Owner)) || !(m.EchoRatio > 0f) || !(z.Dps > 0f))
             {
                 return;
             }
