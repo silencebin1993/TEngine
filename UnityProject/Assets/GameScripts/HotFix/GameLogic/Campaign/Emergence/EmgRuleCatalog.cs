@@ -20,6 +20,10 @@ namespace GameLogic.Campaign.Emergence
             public readonly List<EmgRule> Rules = new List<EmgRule>();
             public readonly List<string> Ids = new List<string>();
             public readonly Dictionary<int, string> TextByKey = new Dictionary<int, string>();
+            /// <summary>EMG3-FUSE-01（FGR-EMG-044 线索）：计数键 → 这个键下各行的两个端口码（同名反应的几行共用一个键；熔合线索按“规则两端口 = 两父的线索端口”认同链同现）。</summary>
+            public readonly Dictionary<int, List<(ushort A, ushort B)>> PortsByKey = new Dictionary<int, List<(ushort A, ushort B)>>();
+            /// <summary>EMG3-FUSE-01：计数键 → 它对应的熔合配方 ID（按端口对，懒算缓存）。</summary>
+            public readonly Dictionary<int, string[]> RecipesByKey = new Dictionary<int, string[]>();
             public readonly List<string> Problems = new List<string>();
             /// <summary>EMG2-REACT-01：带开火者代价的那一行（FG19B §0.4：全表只有 P03 填 cost.heat）——代价、条件阈值（注热 ÷ 300、动能）、计入的图鉴条目。没有 = CostHeat 0。</summary>
             public float CostHeat, CostC1, CostC2;
@@ -30,6 +34,54 @@ namespace GameLogic.Campaign.Emergence
         private static Compiled _current;
 
         public static Compiled Current => _current ??= Compile(Load(), EmgRuleConst.Capacity);
+
+        /// <summary>
+        /// EMG3-FUSE-01（FGR-EMG-044“两父的端口在同一条因果链里同现”）：一条规则在一条链里成立 = 它的两个端口在这条链里同现——这个计数键下任一行的两端口分别落在
+        /// 某配方两父的线索端口里（<see cref="EmgProgramCompiler.CluePortsOf"/>，顺序不限），就记作该配方同现。按端口，不按固件 / 反应 ID（FGR-EMG-013）。只在规则计数变化时查（缓存）。
+        /// </summary>
+        /// <summary>计数键 <paramref name="key"/> 对应的配方位（FusionCatalog.Recipes 顺序，与编译器 ClueMaskOf 同一套位号，≤ 32）——下发给内核，规则成立与出手走同一个按链去重的计数。</summary>
+        public static uint ClueMaskOfKey(int key)
+        {
+            string[] ids = RecipesOfKey(key);
+            IReadOnlyList<Economy.FusionRecipeDef> recipes = Economy.FusionCatalog.Recipes;
+            uint mask = 0u;
+            for (int i = 0; ids.Length > 0 && recipes != null && i < recipes.Count && i < 32; i++)
+            {
+                if (Array.IndexOf(ids, recipes[i].Id) >= 0)
+                {
+                    mask |= 1u << i;
+                }
+            }
+            return mask;
+        }
+
+        public static string[] RecipesOfKey(int key)
+        {
+            Compiled c = Current;
+            if (c.RecipesByKey.TryGetValue(key, out string[] ids))
+            {
+                return ids;
+            }
+            var list = new List<string>(2);
+            if (c.PortsByKey.TryGetValue(key, out List<(ushort A, ushort B)> pairs))
+            {
+                foreach (Economy.FusionRecipeDef r in Economy.FusionCatalog.Recipes)
+                {
+                    HashSet<ushort> pa = EmgProgramCompiler.CluePortsOf(r.ParentA), pb = EmgProgramCompiler.CluePortsOf(r.ParentB);
+                    foreach ((ushort a, ushort b) in pairs)
+                    {
+                        if ((pa.Contains(a) && pb.Contains(b)) || (pa.Contains(b) && pb.Contains(a)))
+                        {
+                            list.Add(r.Id);
+                            break;
+                        }
+                    }
+                }
+            }
+            ids = list.ToArray();
+            c.RecipesByKey[key] = ids;
+            return ids;
+        }
 
         public static void Reload() => _current = null;
 
@@ -117,6 +169,11 @@ namespace GameLogic.Campaign.Emergence
                     continue;
                 }
                 int key = NamedReactionCatalog.StableKey(r.Named != "none" ? r.Named : r.Id);
+                if (!c.PortsByKey.TryGetValue(key, out List<(ushort A, ushort B)> kp))
+                {
+                    c.PortsByKey[key] = kp = new List<(ushort A, ushort B)>(2);
+                }
+                kp.Add((a, b));
                 c.Rules.Add(new EmgRule
                 {
                     Key = key, IdKey = NamedReactionCatalog.StableKey(r.Id), Pair = (byte)pair, Cond = (byte)Math.Max(0, cond), Op = (byte)op, Main = (byte)main,

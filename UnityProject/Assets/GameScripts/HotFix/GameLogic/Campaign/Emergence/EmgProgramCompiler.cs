@@ -46,6 +46,25 @@ namespace GameLogic.Campaign.Emergence
         public bool Overflow;
         /// <summary>EMG3-META-01（FGR-EMG-040 反转）：逆序树里位于反转之后的指令——写端 fld.pull ↔ fld.push 互换、grm.mod.return（回拉）→ grm.mod.pierce（前冲）。</summary>
         public bool Flip;
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合芯片展开出的内置接线（不占节点容量、不占刷写带宽、不显示为独立固件）。</summary>
+        public bool Builtin;
+        /// <summary>EMG3-FUSE-01（FG19A 第 4.2 节）：这条指令的写端产生的落点种类（EmgAnchorConst；0 = 不接线）。</summary>
+        public byte AnchorKind;
+    }
+
+    /// <summary>EMG3-FUSE-01：一处接线在预览里的说明——接线的程序序号、A / B 的序号、落点种类、每次结算最多执行几个落点、是否生效（无效时 Note = 原因文本键）、编译期热量。</summary>
+    public struct EmgAnchorInfo
+    {
+        public int Ordinal;
+        public int A;
+        public int B;
+        public byte Kind;
+        public int MaxLandings;
+        public bool Valid;
+        public string Note;
+        public float Heat;
+        /// <summary>复制到落点的 B 的效果写端行数（预览“每个落点执行 N 条”）。</summary>
+        public int Copies;
     }
 
     /// <summary>EMG3-META-01（FGR-EMG-038 / 042）：一条元程序在预览里的说明——作用的节点、序号、种类（EmgMetaConst）、下游段（程序序号）、每次结算执行次数、是否生效、累计延后秒数。</summary>
@@ -139,9 +158,13 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>程序完整字节键的 64 位哈希 + 内容版本（同一程序同一内容版本同签名，IC-REQ-010）。空程序为空串。</summary>
         public string Signature = string.Empty;
         public bool IsEmpty => Steps.Count == 0;
-        public float HeatTotal => HeatInstr + HeatDecl + HeatTrigger + HeatChildren + HeatMeta;
+        public float HeatTotal => HeatInstr + HeatDecl + HeatTrigger + HeatChildren + HeatMeta + HeatAnchor;
+        /// <summary>EMG3-FUSE-01（ADR ②、FGR-EMG-016）：每处生效的接线编译期计 emg.fuse.anchor_max × emg.fuse.anchor_heat，不按实际落点数计。</summary>
+        public float HeatAnchor;
+        /// <summary>EMG3-FUSE-01：接线说明（预览分项显示，与内核同一份编译结果）。</summary>
+        public readonly List<EmgAnchorInfo> Anchors = new List<EmgAnchorInfo>(1);
         /// <summary>武器每发积热要在旧算法之上加的量（旧算法已含指令表值，这里只加新分项并扣回溢出指令）。</summary>
-        public float WeaponHeatDelta => HeatDecl + HeatTrigger + HeatChildren + HeatMeta - HeatOverflowInstr;
+        public float WeaponHeatDelta => HeatDecl + HeatTrigger + HeatChildren + HeatMeta + HeatAnchor - HeatOverflowInstr;
         /// <summary>EMG3-META-01（FGR-EMG-042）：元程序加成——复制段 ×（执行次数 − 1）、循环段 × (emg.heat.loop_factor − 1)、随机段按平均值（少于原和时为负）；条件 / 反转 / 延后不加段热量。</summary>
         public float HeatMeta;
         /// <summary>EMG3-META-01：元程序说明（预览“下游段与执行次数”；与内核同一份编译结果）。</summary>
@@ -194,6 +217,11 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>EMG1-FW-02（FG-GAP-177）：声明的适用载体（carriers）不含当前主组件 → 这条指令整条不编译，预览写原因（仍占程序位置）。</summary>
         public const string NoteCarrierNa = "emg.compile.carrier_na";
 
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044）：接线前面或后面没有指令（首位 / 末位，或那条溢出了）/ A 与 B 不在同一节点 / A 的写端没有落点（预混：A、B 同点执行）/
+        /// B 只有修饰写端（修饰照常作用于节点、不接线）/ 这种落点内核尚未接通（承接卡见 FG-GAP）/ A 一次结算的落点可能超过上限（超出的不执行）。</summary>
+        public const string NoteAnchorDangling = "emg.compile.anchor_dangling", NoteAnchorSplit = "emg.compile.anchor_split", NoteAnchorNone = "emg.compile.anchor_none",
+            NoteAnchorModOnly = "emg.compile.anchor_mod_only", NoteAnchorPending = "emg.compile.anchor_pending", NoteAnchorCapped = "emg.compile.anchor_capped", NoteAnchorNoExec = "emg.compile.anchor_noexec";
+
         // ── 目录派生的查找表（目录换了才重建；只在编译时用，不按帧）──
         private static EmgCompiled _for;
         private static readonly Dictionary<int, List<int>> DeclsByOwner = new Dictionary<int, List<int>>();
@@ -238,7 +266,7 @@ namespace GameLogic.Campaign.Emergence
             }
             foreach (EmgProgramStep s in r.Steps)
             {
-                if (!s.Overflow && !(noCore && s.Core))
+                if (!s.Overflow && !s.Builtin && !(noCore && s.Core)) // EMG3-FUSE-01：内置接线不占刷写带宽
                 {
                     list.Add(s);
                 }
@@ -346,6 +374,22 @@ namespace GameLogic.Campaign.Emergence
             {
                 return null;
             }
+            // EMG3-FUSE-01：落点接线尾段按 B 的序号截（A 的序号总在 B 之前）
+            bool anchored = false;
+            if (r.KernelNodes.Count > 0)
+            {
+                EmgNode lastNode = r.KernelNodes[r.KernelNodes.Count - 1];
+                for (int i = lastNode.FirstInstr + lastNode.InstrCount; i < r.KernelInstrs.Count; i++)
+                {
+                    EmgInstr x = r.KernelInstrs[i];
+                    if (x.Ordinal > cut || (noCore && (x.Flags & EmgInstrFlags.Core) != 0))
+                    {
+                        continue;
+                    }
+                    t.KernelInstrs.Add(x);
+                    anchored = true;
+                }
+            }
             // 根节点的触发读端还在、它放出的子节点读的是“飞行中”事件 → 仍需飞行（与编译器同一口径）
             foreach (EmgNode n in t.KernelNodes)
             {
@@ -353,10 +397,14 @@ namespace GameLogic.Campaign.Emergence
             }
             t.Program = new EmgProgram
             {
-                Flags = (r.Program.Flags & ~(EmgProgramFlags.NeedsFlight | EmgProgramFlags.HasCore))
-                        | (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None),
+                Flags = (r.Program.Flags & ~(EmgProgramFlags.NeedsFlight | EmgProgramFlags.HasCore | EmgProgramFlags.HasAnchor))
+                        | (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None)
+                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None),
                 ListenMask = listen, HeatPerShot = r.Program.HeatPerShot,
+                // EMG3-FUSE-01：刷写截断 / 剥核心的变体按留下的指令重算线索掩码（B 被截掉就不再算同现）
+                ClueMask = r.Program.ClueMask == 0u ? 0u : ClueMaskOf(steps.GetRange(0, Math.Min(k, steps.Count)), c),
             };
+            t.HeatAnchor = r.HeatAnchor;
             return t;
         }
 
@@ -731,7 +779,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     int period = Math.Max(1, (int)Math.Round(x.Amount));
                     x.Amount = period;
-                    x.Param2 = x.Param2 > 0f ? (int)Math.Round(x.Param2) % period : x.Ordinal % period;
+                    x.Param2 = x.Param2 > 0f ? (int)Math.Round(x.Param2) % period : InstrPosition(r, x.Ordinal) % period;
                     r.KernelInstrs[i] = x;
                 }
             }
@@ -747,6 +795,21 @@ namespace GameLogic.Campaign.Emergence
                 r.KernelNodes[j] = kn;
             }
             r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");
+        }
+
+        /// <summary>EMG3-FUSE-01：程序序号对应的“指令在程序里的序号”（FGR-EMG-171 缺省相位）——接线（内置或独立）只是 A、B 之间的连接，不计：
+        /// 熔合芯片与 [A, 接线, B] 的相位相同（FGT-EMG-054 逐字节等价），也与 [A, B] 相同（混合固件展开为 2 条，FGR-EMG-044）。</summary>
+        internal static int InstrPosition(EmgProgramResult r, int ordinal)
+        {
+            int n = ordinal;
+            for (int i = 0; i < ordinal && i < r.Steps.Count; i++)
+            {
+                if (r.Steps[i].Kind == EmgStepKind.Anchor)
+                {
+                    n--;
+                }
+            }
+            return n;
         }
 
         /// <summary>预览用：这条指令在节点里读 tmp.beat 的周期与相位（编译结果），没有返回 false。</summary>
@@ -1072,6 +1135,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     Ordinal = i, FirmwareId = s.FirmwareId, OwnerId = s.OwnerId, FromUplink = s.FromUplink, Core = s.Core, Promoted = s.Promoted, Kind = s.Kind,
                     TrigEvent = s.TrigEvent, TrigParam = s.TrigParam, TrigCount = s.TrigCount, EventPort = s.EventPort, TableHeat = s.TableHeat, Flip = i > firstRev,
+                    Builtin = s.Builtin, AnchorKind = s.AnchorKind, // EMG3-FUSE-01：逆序树里接线照常按新序列的前后两条判
                 };
                 x.Decls.AddRange(s.Decls);
                 t.Steps.Add(x);
@@ -1113,6 +1177,7 @@ namespace GameLogic.Campaign.Emergence
         public static string NoteLimit(string key) =>
             key == NoteMetaExecCap ? Math.Max(1, TuningInt("emg.meta.max_exec", EmgMetaConst.DefaultMaxExec)).ToString(System.Globalization.CultureInfo.InvariantCulture)
             : key == NoteMetaDeferCap ? Tuning("emg.meta.defer_total_max", EmgMetaConst.DefaultDeferMax).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
+            : key == NoteAnchorCapped ? Math.Max(1, TuningInt("emg.fuse.anchor_max", 4)).ToString(System.Globalization.CultureInfo.InvariantCulture) // EMG3-FUSE-01
             : string.Empty;
 
         // ── 1. 指令序列 ──
@@ -1129,7 +1194,18 @@ namespace GameLogic.Campaign.Emergence
                 bool core = FirmwareKinds.IsCore(id);
                 if (FirmwareKinds.TryGetParents(id, out string a, out string b))
                 {
+                    // EMG3-FUSE-01（FGR-EMG-044、FG19A 第 4.1 节“A / B 的取法”）：熔合 = [A, 接线, B] 压进 1 槽；落点更丰富（单次落点上限更大，第 4.2 节“单次上限”列）的一方作 A，
+                    // 一样丰富 / 都没有落点时按配方表父 A（第 4.3 节 #24 湮灭镜像“偏折 → 处决”即场 4 > 处决 1）；写 grm.trig 的父 A 不换（B 本来就进它的子节点）
+                    if (!OwnerWrites(c, a, "grm.trig") && OwnerLandingCap(c, b, r.Carrier) > OwnerLandingCap(c, a, r.Carrier))
+                    {
+                        (a, b) = (b, a);
+                    }
                     AddOwner(r, c, id, a, fromUplink, core);
+                    r.Steps.Add(new EmgProgramStep
+                    {
+                        Ordinal = r.Steps.Count, FirmwareId = id, OwnerId = string.Empty, FromUplink = fromUplink, Core = core, Kind = EmgStepKind.Anchor, Builtin = true,
+                        EventPort = (ushort)(EventPortBase + (int)EmgEventKind.Fire),
+                    });
                     AddOwner(r, c, id, b, fromUplink, core);
                 }
                 else
@@ -1197,6 +1273,7 @@ namespace GameLogic.Campaign.Emergence
                 r.Notes.Add(new EmgCompileNote { Key = NoteCarrierNa, Ordinal = s.Ordinal, Node = -1 });
             }
             s.Kind = trig ? EmgStepKind.Trigger : anchor ? EmgStepKind.Anchor : meta ? EmgStepKind.Meta : mod ? EmgStepKind.Modify : EmgStepKind.Effect;
+            s.AnchorKind = AnchorKindOf(c, s.Decls); // EMG3-FUSE-01：按写端口种类（FG19A 第 4.2 节），不看固件 ID
             if (trig)
             {
                 if (s.TrigParam == 0f)
@@ -1232,7 +1309,7 @@ namespace GameLogic.Campaign.Emergence
             EmgTreeNode cur = root;
             foreach (EmgProgramStep s in r.Steps)
             {
-                if (s.Promoted)
+                if (s.Promoted || s.Builtin) // EMG3-FUSE-01：内置接线不另占容量
                 {
                     continue;
                 }
@@ -1379,6 +1456,7 @@ namespace GameLogic.Campaign.Emergence
             float trigGen = Tuning("emg.heat.trigger_gen", 2f), perChild = Tuning("emg.heat.per_child", 1f);
             var mult = new int[r.Nodes.Count];
             var keys = new Dictionary<(ushort port, EmgRole role, ushort evt, float filter), int>(8);
+            var magOf = new List<byte>(16); // EMG3-FUSE-01：每行的 fg.TbPortCarrier mag 列（接线复制行按它乘幅度）
             uint listen = 0;
             bool flight = false, core = false;
             foreach (EmgTreeNode n in r.Nodes)
@@ -1389,6 +1467,14 @@ namespace GameLogic.Campaign.Emergence
                 foreach (EmgTreeEntry e in n.Entries)
                 {
                     EmgProgramStep s = r.Steps[e.Ordinal];
+                    if (s.Kind == EmgStepKind.Anchor)
+                    {
+                        if (!e.Inherited)
+                        {
+                            r.HeatInstr += s.TableHeat; // 独立接线：只占 1 条容量；不生成节点、不生成可执行行（ADR ②），代价在接线热量里
+                        }
+                        continue;
+                    }
                     bool draw = !e.Inherited && (HasWrite(c, s, "mat.water") || HasWrite(c, s, "mat.coolant")); // EMG3-CHS-02 取水：按写端端口判，不按固件 ID
                     if (e.Inherited)
                     {
@@ -1462,11 +1548,13 @@ namespace GameLogic.Campaign.Emergence
                             Flags = (e.Inherited ? EmgInstrFlags.Inherited : EmgInstrFlags.None) | (s.Core ? EmgInstrFlags.Core : EmgInstrFlags.None)
                                     | (write ? PreferenceOf(c, s, port) : EmgInstrFlags.None),
                         };
+                        byte mag = 0;
                         int pcKey = d.Port << 3 | ResolveCarrier(c, r.Carrier, n.Parent);
                         // EMG1-FW-01：物质端口同一对有排放 / 扩散两行，按声明角色选行（modify = 扩散 / 随车，emit = 排放；FG19A 第 3.2 节）
                         if (write && (d.Role == EmgRole.Modify && SpreadAt.TryGetValue(pcKey, out int pci) || PortCarrierAt.TryGetValue(pcKey, out pci)))
                         {
                             EmgPortCarrierRow pc = c.PortCarriers[pci];
+                            mag = (byte)pc.Mag;
                             x.Verb = pc.Verb;
                             x.A = pc.A;
                             x.B = pc.B;
@@ -1501,6 +1589,7 @@ namespace GameLogic.Campaign.Emergence
                         flight |= n.Index == 0 && write && Array.IndexOf(FlightMods, port) >= 0;
                         core |= s.Core;
                         r.KernelInstrs.Add(x);
+                        magOf.Add(mag);
                     }
                 }
                 if (n.Parent >= 0)
@@ -1522,10 +1611,12 @@ namespace GameLogic.Campaign.Emergence
                 });
             }
             r.HeatChildren = perChild * r.ChildPayloads;
+            bool anchored = AnchorPass(r, c, magOf);
             r.Program = new EmgProgram
             {
-                Flags = (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None),
-                ListenMask = listen, HeatPerShot = r.HeatTotal,
+                Flags = (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None)
+                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None),
+                ListenMask = listen, HeatPerShot = r.HeatTotal, ClueMask = ClueMaskOf(r.Steps, c),
             };
             r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");
         }
@@ -1787,6 +1878,366 @@ namespace GameLogic.Campaign.Emergence
                 h = (h ^ ch) * 1099511628211UL;
             }
             return h;
+        }
+
+        // ── 7. 落点接线（EMG3-FUSE-01；FG19 FGR-EMG-044；FG19A 第 4.1、4.2 节；ADR-EMG-001 ②）──
+
+
+        /// <summary>
+        /// 指令写端产生的落点种类（FG19A 第 4.2 节表，按写端口种类取、不看固件 ID）：多个写端都有落点时取表里靠前的一种。
+        /// grm.trig（B 本来就进子节点）、落点排放的物质、homing / multi / drift / lob、纯数值、相态 = 不接线（预混，A、B 同点执行）。
+        /// </summary>
+        private static byte AnchorKindOf(EmgCompiled c, List<int> decls)
+        {
+            bool fireTrig = false;
+            foreach (int di in decls)
+            {
+                EmgDeclRow d = c.Decls[di];
+                fireTrig |= d.Dir == EmgDirs.Read && d.Role == EmgRole.Trigger && d.Port == EventPortBase + (int)EmgEventKind.Fire;
+            }
+            byte best = EmgAnchorConst.None;
+            foreach (int di in decls)
+            {
+                EmgDeclRow d = c.Decls[di];
+                if (d.Dir != EmgDirs.Write || !PortIds.TryGetValue(d.Port, out string port))
+                {
+                    continue;
+                }
+                EmgFamily fam = EmgCatalog.FamilyOf(port);
+                byte k = port switch
+                {
+                    "grm.mod.chain" => EmgAnchorConst.Chain,
+                    "grm.mod.bounce" => EmgAnchorConst.Bounce,
+                    "grm.mod.pierce" => EmgAnchorConst.Pierce,
+                    "grm.mod.return" => EmgAnchorConst.Return,
+                    "grm.mod.orbit" => EmgAnchorConst.Orbit,
+                    "ent.projectile" when d.Role == EmgRole.Spawn => EmgAnchorConst.Follow,
+                    "ent.drone" => EmgAnchorConst.Drone,
+                    "ent.wreck" => EmgAnchorConst.Wreck,
+                    "prop.integrity" => EmgAnchorConst.Execute,
+                    "prop.conductive" => EmgAnchorConst.Wire,
+                    "evt.marked" => EmgAnchorConst.Marked,
+                    _ => fam == EmgFamily.Matter && d.Role == EmgRole.Modify ? EmgAnchorConst.Spread
+                        : fam == EmgFamily.Matter && d.Role == EmgRole.Emit && fireTrig ? EmgAnchorConst.Trail
+                        : fam == EmgFamily.Field ? EmgAnchorConst.Field
+                        : fam == EmgFamily.Energy && d.Role == EmgRole.Inject ? EmgAnchorConst.Inject
+                        : EmgAnchorConst.None,
+                };
+                if (k != EmgAnchorConst.None && (best == EmgAnchorConst.None || k < best))
+                {
+                    best = k;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>一条 owner 在本载体上的落点种类（熔合芯片按它决定 A / B 的先后）。</summary>
+        private static byte OwnerAnchorKind(EmgCompiled c, string owner, byte carrier)
+        {
+            if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !DeclsByOwner.TryGetValue(oi, out List<int> all))
+            {
+                return EmgAnchorConst.None;
+            }
+            byte bit = (byte)(1 << carrier);
+            var on = new List<int>(all.Count);
+            foreach (int di in all)
+            {
+                if ((c.Decls[di].Carriers & bit) != 0)
+                {
+                    on.Add(di);
+                }
+            }
+            return AnchorKindOf(c, on);
+        }
+
+        /// <summary>一条 owner 在本载体上的单次落点上限（没有落点 = 0）：熔合芯片按它比“落点更丰富”。</summary>
+        private static int OwnerLandingCap(EmgCompiled c, string owner, byte carrier)
+        {
+            byte kind = OwnerAnchorKind(c, owner, carrier);
+            return kind == EmgAnchorConst.None || !c.OwnerIndex.TryGetValue(owner, out int oi) || !DeclsByOwner.TryGetValue(oi, out List<int> all) ? 0 : MaxLandingsOf(c, kind, all);
+        }
+
+        private static bool OwnerWrites(EmgCompiled c, string owner, string port)
+        {
+            if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !DeclsByOwner.TryGetValue(oi, out List<int> all))
+            {
+                return false;
+            }
+            foreach (int di in all)
+            {
+                if (c.Decls[di].Dir == EmgDirs.Write && PortIds.TryGetValue(c.Decls[di].Port, out string p) && p == port)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool ReadsTrigger(EmgCompiled c, List<int> decls)
+        {
+            foreach (int di in decls)
+            {
+                if (c.Decls[di].Dir == EmgDirs.Read && c.Decls[di].Role == EmgRole.Trigger)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static int NodeOfOwn(EmgProgramResult r, int ordinal)
+        {
+            foreach (EmgTreeNode n in r.Nodes)
+            {
+                foreach (EmgTreeEntry e in n.Entries)
+                {
+                    if (!e.Inherited && e.Ordinal == ordinal)
+                    {
+                        return n.Index;
+                    }
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// 每处接线 [A, 接线, B]（独立接线或内置接线）：B 的效果写端（物质、能量、相态、实体、事件、场）复制一份、加 Anchored 与 A 的落点种类，放进程序尾段；A 的写端行记落点种类；
+        /// 生效的接线编译期计 emg.fuse.anchor_max × emg.fuse.anchor_heat 热量（ADR ②、FGR-EMG-016）。无效时写原因（首位 / 末位 / 溢出、A B 不在同一节点、A 没有落点、B 只有修饰、落点内核未接通），不复制、不计热量。
+        /// 返回 true = 程序有 Anchored 尾段。O(程序长度 × 节点行数)，只在装配变化时。
+        /// </summary>
+        private static bool AnchorPass(EmgProgramResult r, EmgCompiled c, List<byte> magOf)
+        {
+            int amax = Math.Max(1, TuningInt("emg.fuse.anchor_max", 4));
+            float aheat = Math.Max(0f, Tuning("emg.fuse.anchor_heat", 1f));
+            List<EmgInstr> tail = null;
+            foreach (EmgProgramStep w in r.Steps)
+            {
+                if (w.Kind != EmgStepKind.Anchor || w.Overflow)
+                {
+                    continue;
+                }
+                var info = new EmgAnchorInfo { Ordinal = w.Ordinal, A = -1, B = -1, MaxLandings = amax };
+                EmgProgramStep a = w.Ordinal > 0 ? r.Steps[w.Ordinal - 1] : null;
+                EmgProgramStep b = w.Ordinal + 1 < r.Steps.Count ? r.Steps[w.Ordinal + 1] : null;
+                int node = -1;
+                if (a == null || b == null || a.Overflow || b.Overflow || a.Kind == EmgStepKind.Anchor || b.Kind == EmgStepKind.Anchor)
+                {
+                    info.Note = NoteAnchorDangling;
+                }
+                else
+                {
+                    info.A = a.Ordinal;
+                    info.B = b.Ordinal;
+                    info.Kind = a.AnchorKind;
+                    node = NodeOfOwn(r, a.Ordinal);
+                    if (a.Kind == EmgStepKind.Trigger || a.AnchorKind == EmgAnchorConst.None)
+                    {
+                        info.Note = NoteAnchorNone; // 触发器：B 本来就进 A 的子节点；其余：预混
+                    }
+                    else if (node < 0 || NodeOfOwn(r, b.Ordinal) != node)
+                    {
+                        info.Note = NoteAnchorSplit;
+                    }
+                    else if (!EmgAnchorConst.InKernel(a.AnchorKind) || (a.AnchorKind == EmgAnchorConst.Inject && ReadsTrigger(c, a.Decls)))
+                    {
+                        // 修复第 2 轮：事件门控的注能（过热泄放 / 回波 / 谐振）在内核走事件脉冲分支，那里没有注能落点钩子（只有命中注能 EmgHitInject 有），归 EMG4-FUSE-02
+                        info.Note = NoteAnchorPending;
+                    }
+                }
+                if (info.Note == null)
+                {
+                    EmgNode kn = r.KernelNodes[node];
+                    int copies = 0, noExec = 0, emitVerb = EmgCatalog.VerbCode("emit");
+                    for (int i = kn.FirstInstr; i < kn.FirstInstr + kn.InstrCount; i++)
+                    {
+                        EmgInstr x = r.KernelInstrs[i];
+                        if (x.Ordinal != b.Ordinal || x.Role <= EmgConst.RoleLastRead || x.Verb == 0 || (x.Flags & (EmgInstrFlags.Inherited | EmgInstrFlags.Overflow)) != 0
+                            || !PortIds.TryGetValue(x.Port, out string port) || IsMod(port) || IsStructural(port))
+                        {
+                            continue;
+                        }
+                        EmgFamily fam = EmgCatalog.FamilyOf(port);
+                        if (fam != EmgFamily.Matter && fam != EmgFamily.Energy && fam != EmgFamily.Phase && fam != EmgFamily.Entity && fam != EmgFamily.Event && fam != EmgFamily.Field)
+                        {
+                            continue; // 修饰写端照常作用于节点、不接线（FG19A 第 4.1 节）
+                        }
+                        if (!EmgAnchorConst.Executable(x.Verb, x.Port, emitVerb))
+                        {
+                            noExec++; // 内核在落点上没有这族写端的执行者（en.kinetic 注入、ent.drone、evt.* 等）：写原因、不复制，不做静默死指令
+                            continue;
+                        }
+                        byte mag = i < magOf.Count ? magOf[i] : (byte)0;
+                        EmgInstr y = x;
+                        y.Flags = (x.Flags & ~(EmgInstrFlags.Inherited | EmgInstrFlags.RootKernel | EmgInstrFlags.MagA | EmgInstrFlags.MagB | EmgInstrFlags.MagC)) | EmgInstrFlags.Anchored
+                                  | (mag switch { 1 => EmgInstrFlags.MagA, 2 => EmgInstrFlags.MagB, 3 => EmgInstrFlags.MagC, _ => EmgInstrFlags.None });
+                        y.AnchorKind = a.AnchorKind;
+                        (tail ??= new List<EmgInstr>(4)).Add(y);
+                        copies++;
+                    }
+                    if (copies == 0)
+                    {
+                        info.Note = noExec > 0 ? NoteAnchorNoExec : NoteAnchorModOnly;
+                    }
+                    else
+                    {
+                        for (int i = kn.FirstInstr; i < kn.FirstInstr + kn.InstrCount; i++)
+                        {
+                            EmgInstr x = r.KernelInstrs[i];
+                            if (x.Ordinal == a.Ordinal && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Inherited) == 0)
+                            {
+                                x.AnchorKind = a.AnchorKind;
+                                r.KernelInstrs[i] = x;
+                            }
+                        }
+                        info.Valid = true;
+                        info.Copies = copies;
+                        info.Heat = amax * aheat;
+                        r.HeatAnchor += info.Heat;
+                        if (MaxLandingsOf(c, a.AnchorKind, a.Decls) > amax)
+                        {
+                            r.Notes.Add(new EmgCompileNote { Key = NoteAnchorCapped, Ordinal = w.Ordinal, Node = node });
+                        }
+                        if (noExec > 0)
+                        {
+                            r.Notes.Add(new EmgCompileNote { Key = NoteAnchorNoExec, Ordinal = w.Ordinal, Node = node }); // 生效，但 B 的部分写端在落点上不执行
+                        }
+                    }
+                }
+                if (info.Note != null && !(w.Builtin && info.Note == NoteAnchorNone))
+                {
+                    r.Notes.Add(new EmgCompileNote { Key = info.Note, Ordinal = w.Ordinal, Node = node });
+                }
+                r.Anchors.Add(info);
+            }
+            if (tail == null)
+            {
+                return false;
+            }
+            r.KernelInstrs.AddRange(tail);
+            return true;
+        }
+
+        /// <summary>A 一次结算最多产生几个落点（FG19A 第 4.2 节“单次上限”列：跳数 / 反弹数 / 穿透数取 A 的幅度，其余按表）——超过 emg.fuse.anchor_max 时预览写“超出的落点不执行”。</summary>
+        private static int MaxLandingsOf(EmgCompiled c, byte kind, List<int> decls)
+        {
+            if (kind == EmgAnchorConst.Chain || kind == EmgAnchorConst.Bounce || kind == EmgAnchorConst.Pierce)
+            {
+                string want = kind == EmgAnchorConst.Chain ? "grm.mod.chain" : kind == EmgAnchorConst.Bounce ? "grm.mod.bounce" : "grm.mod.pierce";
+                foreach (int di in decls)
+                {
+                    EmgDeclRow d = c.Decls[di];
+                    if (d.Dir == EmgDirs.Write && PortIds.TryGetValue(d.Port, out string port) && port == want)
+                    {
+                        return (int)Math.Round(d.Amount);
+                    }
+                }
+            }
+            return kind == EmgAnchorConst.Return || kind == EmgAnchorConst.Wire ? 2 : kind >= EmgAnchorConst.Follow ? 1 : 4;
+        }
+
+        // ── 8. 熔合线索的端口对（EMG3-FUSE-01；FGR-EMG-044“两父的端口在同一条因果链里同现”；FG05 FGR-RND-044 线索来源改写）──
+
+        private static EmgCompiled _clueFor;
+        private static readonly Dictionary<string, HashSet<ushort>> CluePorts = new Dictionary<string, HashSet<ushort>>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// 一条父固件的线索端口 = 它声明的写端口（语法结构 grm.anchor / grm.inherit 与语法修饰 grm.mod.* 除外：fw_overload / fw_capacitor 都写 grm.mod.power，不能让 [电容, 漏油] 算闪燃过载）
+        /// + 节拍族读端（时钟脉冲按 tmp.beat 认，FG19A 第 4.3 节线索端口对列）。按端口，不按固件 ID（FGR-EMG-013）。
+        /// </summary>
+        public static HashSet<ushort> CluePortsOf(string owner)
+        {
+            EmgCompiled c = EmgCatalog.Current;
+            EnsureIndex(c);
+            if (!ReferenceEquals(_clueFor, c))
+            {
+                CluePorts.Clear();
+                _clueFor = c;
+            }
+            if (string.IsNullOrEmpty(owner))
+            {
+                return new HashSet<ushort>();
+            }
+            if (CluePorts.TryGetValue(owner, out HashSet<ushort> set))
+            {
+                return set;
+            }
+            set = new HashSet<ushort>();
+            if (c.OwnerIndex.TryGetValue(owner, out int oi) && DeclsByOwner.TryGetValue(oi, out List<int> all))
+            {
+                foreach (int di in all)
+                {
+                    if (IsCluePort(c.Decls[di]))
+                    {
+                        set.Add(c.Decls[di].Port);
+                    }
+                }
+            }
+            CluePorts[owner] = set;
+            return set;
+        }
+
+        /// <summary>线索端口口径（父固件与程序里的指令同一口径）：写端口（grm.anchor / grm.inherit / grm.mod.* 除外）或节拍族读端。</summary>
+        private static bool IsCluePort(EmgDeclRow d)
+        {
+            if (!PortIds.TryGetValue(d.Port, out string port) || port == "grm.anchor" || port == "grm.inherit" || port.StartsWith("grm.mod.", StringComparison.Ordinal))
+            {
+                return false;
+            }
+            return d.Dir == EmgDirs.Write || EmgCatalog.FamilyOf(port) == EmgFamily.Tempo;
+        }
+
+        /// <summary>
+        /// 程序一次出手里同现的熔合配方端口对（位 i = 配方书第 i 条，FusionCatalog.Recipes 顺序，≤ 32）：两条不同的、未溢出的指令分别带父 A、父 B 的线索端口。
+        /// 熔合芯片自己展开的两条也算（一槽两指令）；同一条链（一次出手）只计一次由内核按出手计数保证。O(配方 × 指令²)，只在装配变化时。
+        /// </summary>
+        private static uint ClueMaskOf(IReadOnlyList<EmgProgramStep> steps, EmgCompiled c)
+        {
+            IReadOnlyList<Economy.FusionRecipeDef> recipes = Economy.FusionCatalog.Recipes;
+            if (recipes == null || recipes.Count == 0 || steps.Count < 2)
+            {
+                return 0u;
+            }
+            var portsOf = new List<HashSet<ushort>>(steps.Count);
+            foreach (EmgProgramStep s in steps)
+            {
+                var ps = new HashSet<ushort>();
+                if (!s.Overflow && s.Kind != EmgStepKind.Anchor)
+                {
+                    foreach (int di in s.Decls)
+                    {
+                        if (IsCluePort(c.Decls[di])) // 读端（节拍族除外）不算同现：只读 mat.fire 的指令不等于链上有明火
+                        {
+                            ps.Add(c.Decls[di].Port);
+                        }
+                    }
+                }
+                portsOf.Add(ps);
+            }
+            uint mask = 0u;
+            for (int i = 0; i < recipes.Count && i < 32; i++)
+            {
+                HashSet<ushort> pa = CluePortsOf(recipes[i].ParentA), pb = CluePortsOf(recipes[i].ParentB);
+                if (pa.Count == 0 || pb.Count == 0)
+                {
+                    continue;
+                }
+                for (int x = 0; x < portsOf.Count && (mask & (1u << i)) == 0; x++)
+                {
+                    if (!portsOf[x].Overlaps(pa))
+                    {
+                        continue;
+                    }
+                    for (int y = 0; y < portsOf.Count; y++)
+                    {
+                        if (y != x && portsOf[y].Overlaps(pb))
+                        {
+                            mask |= 1u << i;
+                            break;
+                        }
+                    }
+                }
+            }
+            return mask;
         }
     }
 }

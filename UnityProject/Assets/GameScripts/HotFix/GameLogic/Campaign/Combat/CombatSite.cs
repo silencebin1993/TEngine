@@ -370,6 +370,7 @@ namespace GameLogic.Campaign.Combat
             c.EmgBusPerStep = Math.Max(1, (int)Math.Round(Tuning("emg.bus.per_step", EmgConst.DefaultBusPerStep)));
             c.EmgMaxFanout = Math.Max(1, (int)Math.Round(Tuning("emg.bus.max_fanout", EmgConst.DefaultMaxFanout)));
             c.EmgMaxPerHost = Mathf.Clamp((int)Math.Round(Tuning("emg.trig.max_per_host", EmgConst.DefaultMaxPerHost)), 1, EmgConst.DefaultMaxPerHost);
+            c.EmgAnchorMax = Mathf.Clamp((int)Math.Round(Tuning("emg.fuse.anchor_max", 4f)), 1, 16); // EMG3-FUSE-01（ADR ②）
             c.EmgCoolRatio = Mathf.Clamp(Tuning("emg.heat.cool_ratio", EmgConst.DefaultCoolRatio), 0.01f, 1f);
             (c.EmgFinWetMul, c.EmgFinWetMatters) = Emergence.EmgCatalog.HeatSinkWet(); // EMG3-FW-01：散热件泡在冷却液 / 水里的倍率（按声明）
             // EMG1-TRIG-01（FG19 FGR-EMG-034）：子载荷伤害比例、每次触发份数上限、同链同时存活上限；排放动词码（阶段 1 映射到读法驻留区）。
@@ -1305,6 +1306,12 @@ namespace GameLogic.Campaign.Combat
                     Log.Error("[EmgRuleCatalog] " + p);
                 }
                 return false;
+            }
+            for (int i = 0; i < c.Rules.Count; i++)
+            {
+                EmgRule r = c.Rules[i];
+                r.ClueMask = Emergence.EmgRuleCatalog.ClueMaskOfKey(r.Key); // EMG3-FUSE-01：规则成立的线索计数在内核里按链去重
+                c.Rules[i] = r;
             }
             if (!kernel.SetEmgRules(c.Rules))
             {

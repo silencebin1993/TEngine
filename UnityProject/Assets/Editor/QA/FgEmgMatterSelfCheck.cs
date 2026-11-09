@@ -282,7 +282,7 @@ namespace GameLogic.EditorTools
             bool split = EmgCatalog.IsOwnerOnDeclTrack("fw_split");
             bool amplify = EmgCatalog.IsOwnerOnDeclTrack("fw_amplify"); // EMG2-RECL-01：物质 modify、ent.wreck 接通后，“未接通端口闸”改看仍待接通的 evt.react，闸本身的断言不变
             bool pending = !EmgCatalog.IsPendingPort("fld.pull", EmgRole.Spawn) && !EmgCatalog.IsPendingPort("ent.wreck", EmgRole.Modify) && !EmgCatalog.IsPendingPort("mat.oil", EmgRole.Modify) && !EmgCatalog.IsPendingPort("mat.oil", EmgRole.Emit)
-                           && !EmgCatalog.IsPendingPort("evt.enter", EmgRole.Trigger) && !EmgCatalog.IsPendingPort("evt.react", EmgRole.Trigger) && EmgCatalog.IsPendingPort("grm.anchor", EmgRole.Modify);
+                           && !EmgCatalog.IsPendingPort("evt.enter", EmgRole.Trigger) && !EmgCatalog.IsPendingPort("evt.react", EmgRole.Trigger) && !EmgCatalog.IsPendingPort("grm.anchor", EmgRole.Modify); // EMG3-FUSE-01：grm.anchor 也已接通
             Expect(stage == 3 && EmgCatalog.ImplementedStage == 3 && Cfg().EmgPatchOn == 1 // EMG3-CHS-01：正式表缺省 3（阶段 2 机制照常）
                     && fuse && tractor && spread && amplify && split && pending,
                 $"真实表 emg.stage 缺省 2（生效 {stage}）、斑块层开；入场引信（端口全部接通）走声明轨 {fuse}；牵引（fld.*，EMG2-FLD-01 已接通）走声明轨 {tractor}；蔓延（物质 modify，EMG2-RECL-01 已接通）走声明轨 {spread}；增幅（evt.react 已由 EMG3-FW-01 接通）走声明轨 {amplify}；未接通端口闸只剩 grm.anchor；阶段 1 的分裂照旧 {split}（按端口判，不按内容 ID）");
@@ -815,7 +815,7 @@ namespace GameLogic.EditorTools
                 StepN(a, 50);
                 byte[] snap = a.Serialize();
                 CombatLoadResult lr = b.Load(snap);
-                bool same = lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == 18 && CombatConst.FormatVersion == 18 && a.StateHash() == b.StateHash()
+                bool same = lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 18 && a.StateHash() == b.StateHash()
                             && a.PatchCount == b.PatchCount && a.PatchStats.PatchesBorn == b.PatchStats.PatchesBorn;
                 for (int i = 0; i < 300; i++)
                 {

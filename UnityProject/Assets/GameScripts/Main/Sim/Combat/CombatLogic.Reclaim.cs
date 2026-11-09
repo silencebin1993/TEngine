@@ -698,6 +698,7 @@ namespace BinGames.Sim.Combat
             float maxR = PatchMaxRadiusOf(ref d);
             double now = d.Scalars[0].Time;
             EmgScalars es = d.EmgS[0];
+            var spots = new FixedList512Bytes<double2>(); // EMG3-FUSE-01：被扩散的斑块中心是落点（循环结束、标量写回后再执行接线）
             for (int j = 0; j < d.Patches.Length; j++)
             {
                 CombatZone z = d.Patches[j];
@@ -717,8 +718,16 @@ namespace BinGames.Sim.Combat
                 d.Patches[j] = z;
                 es.SpreadStarts++;
                 es.HashDirty = 1;
+                if (spots.Length < spots.Capacity)
+                {
+                    spots.Add(z.Pos);
+                }
             }
             d.EmgS[0] = es;
+            for (int q = 0; q < spots.Length && EmgProgAnchored(ref d, host.Prog); q++)
+            {
+                EmgAnchorAt(ref d, EmgAnchorConst.Spread, host, spots[q], -1, x.Ordinal);
+            }
         }
     }
 }

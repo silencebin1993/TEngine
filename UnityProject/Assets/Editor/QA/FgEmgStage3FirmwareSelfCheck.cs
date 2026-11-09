@@ -54,6 +54,7 @@ namespace GameLogic.EditorTools
         {
             ("fw_ifmark", "meta.if"), ("fw_ifhot", "meta.if"), ("fw_ifair", "meta.if"), ("fw_repeat", "meta.repeat"), ("fw_loop", "meta.loop"), ("fw_random", "meta.random"),
             ("fw_reverse", "meta.reverse"), ("fw_defer", "meta.defer"), ("fw_killping", "evt.ping"), ("fw_pingfire", "grm.trig"), ("fw_markcast", "evt.ping"), ("fw_volley", "grm.trig"),
+            ("fw_anchorwire", "grm.anchor"), // EMG3-FUSE-01：N43 接线进 FGT-EMG-002 / 003 / 006（行为验收在 FgEmgFuseSelfCheck）
         };
 
         [MenuItem("BinGames/QA/自检/元程序、协同与齐射新固件（EMG3-FW-02）")]
@@ -144,9 +145,9 @@ namespace GameLogic.EditorTools
             Line("  · A. 12 条追加在 N09～N16 之后（第 53～64 行）、名表 44 条与 EMG1 的 8 条不动；stageGate 3、准入、写端口 5 载体、文本键与占位图标齐；三选一追加行排在 EMG1 行之后");
             var rows = FirmwareKinds.Rows.Where(r => r != null && !FirmwareKinds.IsMixedRow(r)).Select(r => r.Id).ToList();
             var addon = FirmwareKinds.AddonRows.Select(r => r.Id).ToList();
-            Expect(addon.Count == 20 && addon.Skip(8).SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(52).SequenceEqual(addon.Skip(8)) && FirmwareKinds.BaseRows.Count == 44
+            Expect(addon.Count == 8 + Spec.Length && addon.Skip(8).SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(52).SequenceEqual(addon.Skip(8)) && FirmwareKinds.BaseRows.Count == 44
                    && FirmwareCatalog.BaseCount == FirmwareCatalog.ExpectedCount && addon.All(FirmwareCatalog.IsAddon) && Spec.All(s => FirmwareCatalog.All.ContainsKey(s.Id)),
-                $"新固件 12 条按 FG19A 顺序追加在表尾第 53～64 行（{string.Join("、", addon.Skip(8))}）；名表 44 条、EMG1 的 8 条（{string.Join("、", addon.Take(8))}）不动；都进固件目录");
+                $"新固件 {Spec.Length} 条按 FG19A 顺序追加在表尾第 53～{52 + Spec.Length} 行（{string.Join("、", addon.Skip(8))}）；名表 44 条、EMG1 的 8 条（{string.Join("、", addon.Take(8))}）不动；都进固件目录");
             EmgSource src = EmgCatalog.FromTables();
             var ports = src.Ports.ToDictionary(p => p.Id, p => p, StringComparer.Ordinal);
             var bad = new List<string>();
@@ -204,8 +205,8 @@ namespace GameLogic.EditorTools
             var picks = LootPickCatalog.Rows.Where(r => FirmwareCatalog.IsAddon(r.Target)).ToList();
             var e1 = picks.Where(r => addon.Take(8).Contains(r.Target)).ToList();
             var e3 = picks.Where(r => Spec.Any(s => s.Id == r.Target)).ToList();
-            Expect(e1.Count > 0 && e3.Count == 12 && e3.All(r => r.SortOrder >= 1000) && e1.Max(r => r.SortOrder) < e3.Min(r => r.SortOrder) && e1.Min(r => r.SortOrder) == 1000,
-                $"fg.TbLootPick：EMG1 追加行 {e1.Count} 行 sortOrder {e1.Min(r => r.SortOrder)}～{e1.Max(r => r.SortOrder)}（不变），阶段 3 的 12 行 {(e3.Count > 0 ? e3.Min(r => r.SortOrder) + "～" + e3.Max(r => r.SortOrder) : "无")} 接在后面（权重 1，临时值）");
+            Expect(e1.Count > 0 && e3.Count == Spec.Length && e3.All(r => r.SortOrder >= 1000) && e1.Max(r => r.SortOrder) < e3.Min(r => r.SortOrder) && e1.Min(r => r.SortOrder) == 1000,
+                $"fg.TbLootPick：EMG1 追加行 {e1.Count} 行 sortOrder {e1.Min(r => r.SortOrder)}～{e1.Max(r => r.SortOrder)}（不变），阶段 3 的 {Spec.Length} 行 {(e3.Count > 0 ? e3.Min(r => r.SortOrder) + "～" + e3.Max(r => r.SortOrder) : "无")} 接在后面（权重 1，临时值）");
         }
 
         // ── B. 零死对（FGT-EMG-003）──
@@ -305,8 +306,8 @@ namespace GameLogic.EditorTools
                         }
                     }
                     int e1Open = FirmwareKinds.AddonRows.Take(8).Count(r => FirmwareKinds.IsObtainable(r.Id));
-                    Expect(leaked.Count == 0 && open == (stage >= 3 ? 12 : 0) && e1Open == 8,
-                        $"emg.stage = {stage}：阶段 3 新固件开放 {open} / 12 条（杂兵残骸来源的进掉落，精英来源的只进三选一）；EMG1 的 8 条照常开放 {e1Open}{Detail(leaked)}");
+                    Expect(leaked.Count == 0 && open == (stage >= 3 ? Spec.Length : 0) && e1Open == 8,
+                        $"emg.stage = {stage}：阶段 3 新固件开放 {open} / {Spec.Length} 条（杂兵残骸来源的进掉落，精英来源的只进三选一）；EMG1 的 8 条照常开放 {e1Open}{Detail(leaked)}");
                 }
             }
             finally

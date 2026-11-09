@@ -259,6 +259,8 @@ namespace BinGames.Sim.Combat
         /// <summary>伴生物质码（0 = 没有）。</summary>
         public byte By;
         public byte Side, Stage;
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044 线索）：这条规则成立时同现的熔合配方位（热更层按端口对算好，CombatSite.ApplyRules 下发；0 = 不对应任何配方）。表数据，不进快照。</summary>
+        public uint ClueMask;
     }
 
     /// <summary>

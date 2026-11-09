@@ -1054,10 +1054,25 @@ namespace GameLogic.Campaign.Economy
                     counts.Add(x.Count);
                 }
             }
+            // EMG3-FUSE-01（FGR-EMG-044）：同链同现的配方计数（按配方书顺序，确定性）
+            var recipes = new List<string>();
+            var rc = new List<int>();
+            foreach (FusionRecipeDef def in FusionCatalog.Recipes)
+            {
+                foreach (ReactionShareRecord x in r.FusionCo ?? Array.Empty<ReactionShareRecord>())
+                {
+                    if (x != null && x.ReactionId == def.Id && x.Count > 0)
+                    {
+                        recipes.Add(def.Id);
+                        rc.Add(x.Count);
+                    }
+                }
+            }
             var snap = new FusionPendingRecord
             {
                 SessionId = r.SessionId, Kind = r.Kind ?? string.Empty, SiteId = r.SiteId ?? string.Empty, Ordinal = r.Ordinal,
-                EndTick = r.EndTick, Reactions = ids.ToArray(), Counts = counts.ToArray(),
+                EndTick = r.EndTick, Reactions = r.ClueModel == 0 ? ids.ToArray() : Array.Empty<string>(), Counts = r.ClueModel == 0 ? counts.ToArray() : Array.Empty<int>(),
+                Recipes = recipes.ToArray(), RecipeCounts = rc.ToArray(), ClueModel = 1,
             };
             if (LabAvailable(s))
             {
@@ -1100,6 +1115,45 @@ namespace GameLogic.Campaign.Economy
                 list.RemoveRange(0, list.Count - AnalyzedKeep);
             }
             f.AnalyzedSessions = list.ToArray();
+            int made = 0;
+            // EMG3-FUSE-01 迁移：本卡之前开着的场次 / 先存着的战斗记录（Reactions 非空）按旧的“具名反应触发次数”规则分析一次（攒的进度不丢），再按同链同现分析
+            made = AnalyzeLegacy(s, p, made);
+            p.Recipes ??= Array.Empty<string>();
+            p.RecipeCounts ??= Array.Empty<int>();
+            var byCount = new List<int>();
+            for (int i = 0; i < p.Recipes.Length && i < p.RecipeCounts.Length; i++)
+            {
+                if (p.RecipeCounts[i] >= FusionCatalog.CluePartialMin)
+                {
+                    byCount.Add(i);
+                }
+            }
+            byCount.Sort((a, b) =>
+            {
+                int c = p.RecipeCounts[b].CompareTo(p.RecipeCounts[a]);
+                return c != 0 ? c : string.CompareOrdinal(p.Recipes[a], p.Recipes[b]);
+            });
+            foreach (int i in byCount)
+            {
+                if (made >= FusionCatalog.CluePerSession)
+                {
+                    break;
+                }
+                if (FusionCatalog.TryGet(p.Recipes[i], out FusionRecipeDef r)
+                    && AddOrUpgradeClue(s, r, p.RecipeCounts[i] >= FusionCatalog.ClueFullMin, string.Empty, p.RecipeCounts[i], p.Kind, p.SiteId, p.Ordinal))
+                {
+                    made++;
+                }
+            }
+        }
+
+        /// <summary>旧口径（FG5-RND-04 FGR-RND-044 原文）：触发次数 ≥ 部分线索门槛的具名反应按次数从多到少，每条反应给一条还没发现、线索还能升级的配方（按配方书顺序）。
+        /// EMG3-FUSE-01 起只用于迁移旧场次 / 旧战斗记录（ClueModel = 0 时记下的 Reactions），新场次的 Reactions 为空。返回累计给出的线索数。</summary>
+        private static int AnalyzeLegacy(CampaignState s, FusionPendingRecord p, int made)
+        {
+            FusionState f = StateOf(s);
+            p.Reactions ??= Array.Empty<string>();
+            p.Counts ??= Array.Empty<int>();
             var order = new List<int>();
             for (int i = 0; i < p.Reactions.Length && i < p.Counts.Length; i++)
             {
@@ -1113,7 +1167,6 @@ namespace GameLogic.Campaign.Economy
                 int c = p.Counts[b].CompareTo(p.Counts[a]);
                 return c != 0 ? c : string.CompareOrdinal(p.Reactions[a], p.Reactions[b]);
             });
-            int made = 0;
             foreach (int i in order)
             {
                 if (made >= FusionCatalog.CluePerSession)
@@ -1140,6 +1193,7 @@ namespace GameLogic.Campaign.Economy
                     made++;
                 }
             }
+            return made;
         }
 
         public static FusionClueRecord ClueOf(FusionState f, string recipeId)
@@ -1255,7 +1309,12 @@ namespace GameLogic.Campaign.Economy
             {
                 string tagA = string.Empty;
                 string tagB = string.Empty;
-                if (NamedReactionCatalog.TryGet(c.ReactionId, out GameConfig.fg.Reaction row))
+                if (string.IsNullOrEmpty(c.ReactionId))
+                {
+                    tagA = CluePortName(r.ParentA); // EMG3-FUSE-01：同链同现的线索写两父的线索端口
+                    tagB = CluePortName(r.ParentB);
+                }
+                else if (NamedReactionCatalog.TryGet(c.ReactionId, out GameConfig.fg.Reaction row))
                 {
                     tagA = StatusTagCatalog.NameOf(row.TagA) ?? row.TagA;
                     tagB = StatusTagCatalog.NameOf(row.TagB) ?? row.TagB;
@@ -1273,6 +1332,26 @@ namespace GameLogic.Campaign.Economy
                 text += GameText.Format("fusion.clue.discovered", r.Name);
             }
             return text;
+        }
+
+        /// <summary>EMG3-FUSE-01：父固件的线索端口（码最小的一条，确定性）的玩家名（emg.port.&lt;id&gt;.name）。</summary>
+        private static string CluePortName(string parent)
+        {
+            int best = int.MaxValue, bestGrm = int.MaxValue;
+            foreach (ushort code in Emergence.EmgProgramCompiler.CluePortsOf(parent))
+            {
+                bool grammar = Emergence.EmgCatalog.Current.PortIdByCode.TryGetValue(code, out string pid) && pid.StartsWith("grm.", StringComparison.Ordinal);
+                if (grammar)
+                {
+                    bestGrm = Math.Min(bestGrm, code);
+                }
+                else
+                {
+                    best = Math.Min(best, code);
+                }
+            }
+            best = best != int.MaxValue ? best : bestGrm; // 有物质 / 能量 / 场这类效果端口时写它（“电荷与冷却液”），只有语法端口时才写语法端口（“触发器”）
+            return best != int.MaxValue && Emergence.EmgCatalog.Current.PortIdByCode.TryGetValue((ushort)best, out string id) ? GameText.Get("emg.port." + id + ".name") : string.Empty;
         }
 
         /// <summary>物资分布（悬停物品图标）：正式熔合在办项上的芯片基板与技术数据（O(在办任务数)，只在分布重建时）。</summary>

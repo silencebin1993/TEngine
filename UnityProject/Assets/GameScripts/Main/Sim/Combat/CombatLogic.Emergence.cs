@@ -205,6 +205,11 @@ namespace BinGames.Sim.Combat
             EmgEntKind otherKind = EmgEntKind.Unit)
         {
             EmgCtx c = d.EmgCtx;
+            if (k == EmgEventKind.Pierce || k == EmgEventKind.Bounce)
+            {
+                // EMG3-FUSE-01（FG19A 第 4.2 节）：穿透点 / 反弹点是落点（不论程序有没有读这个事件；没有接线的程序 O(1) 返回）
+                EmgAnchorAt(ref d, k == EmgEventKind.Pierce ? EmgAnchorConst.Pierce : EmgAnchorConst.Bounce, c, pos, other != 0 && otherKind == EmgEntKind.Unit ? d.SlotOf(other) : -1);
+            }
             if (!EmgSiteListens(ref d, k))
             {
                 return;
@@ -252,6 +257,10 @@ namespace BinGames.Sim.Combat
             if (k == EmgEventKind.Expire && d.MetaRun.Length > 0)
             {
                 EmgMetaHostEnd(ref d, EmgEntKind.Projectile, pr.Id, pos); // EMG3-META-01：跟随这发弹体的延后改在结束点执行
+            }
+            if ((k == EmgEventKind.Pierce || k == EmgEventKind.Bounce) && EmgProgAnchored(ref d, pr.Prog))
+            {
+                EmgAnchorAt(ref d, k == EmgEventKind.Pierce ? EmgAnchorConst.Pierce : EmgAnchorConst.Bounce, EmgProjHost(ref d, pr), pos, other != 0 && otherKind == EmgEntKind.Unit ? d.SlotOf(other) : -1); // EMG3-FUSE-01
             }
             if (!EmgSiteListens(ref d, k))
             {
@@ -321,6 +330,10 @@ namespace BinGames.Sim.Combat
             int prog = wp.Program;
             EmgHostBegin(ref d, prog, a, d.Id[a], EmgEntKind.Unit, src, d.Pos[a], t);
             EmgFillShot(ref d, a, t, wp); // EMG1-TRIG-01：母载荷参数（触发子载荷用）
+            if (prog >= 0 && prog < d.EmgPrograms.Length && d.EmgPrograms[prog].ClueMask != 0u)
+            {
+                EmgClueCount(ref d, d.EmgPrograms[prog].ClueMask, d.EmgCtx.Chain); // EMG3-FUSE-01：一次出手 = 一条因果链，端口对同现只计一次（与规则成立同一计数、按链去重）
+            }
             if (prog < 0 || d.EmgListen == 0u)
             {
                 return;

@@ -315,7 +315,7 @@ namespace GameLogic.EditorTools
             int gated = groups.Count(g => g.Max(d => d.StageGate) == 2 && g.Any(Pend));
             int open2 = groups.Count(g => g.Max(d => d.StageGate) == 2 && !g.Any(Pend));
             // EMG3-FW-01（FGT-EMG-055）：evt.react / prop.heat 接通后表里没有 owner 再被闸住；闸本身仍在（grm.anchor 等 N43 落表）
-            Expect(EmgCatalog.EffectiveStage == 3 && expected && gated == 0 && open2 > 0 && EmgCatalog.IsPendingPort("grm.anchor", EmgRole.Modify),
+            Expect(EmgCatalog.EffectiveStage == 3 && expected && gated == 0 && open2 > 0 && EmgCatalog.PendingPorts.Length == 0, // EMG3-FUSE-01：N43 落表后闸清空
                 $"正式表 emg.stage = 3：stageGate ≤ 3 的声明 owner 全部走声明轨；stageGate 2 的 {open2} 个 owner 端口全部接通 → 声明轨、{gated} 个仍被未接通端口闸住（EMG3-FW-01 起应为 0；闸只剩 grm.anchor）");
         }
 

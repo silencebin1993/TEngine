@@ -10,6 +10,32 @@ namespace BinGames.Sim.Combat
     /// 本卡只铺结构、发号与快照（格式 16）：程序表为空、总线为空、没有残骸时，行为与 <see cref="CombatKernel.StateHash"/> 与 M10 基线逐字不变；
     /// 执行（编译器 / 总线消费 / 触发器 / 动词 / 残骸生成）由 EMG1-PRG-01、BUS-01、TRIG-01、GRM-01、ENT-01 接上。
     /// </summary>
+    /// <summary>
+    /// EMG3-FUSE-01（FG19A 第 4.2 节，ADR ② 枚举 EmgAnchorKind）：落点接线的落点种类——编译器按 A 的写端口种类记在 A 的写端行与 B 的 Anchored 复制行（<see cref="EmgInstr.AnchorKind"/>），
+    /// 内核在对应落点处执行同种类的 Anchored 行。0 = 不接线。<see cref="KernelMask"/> = 内核已有落点执行者的种类（其余种类编译期写原因、不复制、不计热量）。
+    /// </summary>
+    public static class EmgAnchorConst
+    {
+        public const byte None = 0, Chain = 1, Bounce = 2, Pierce = 3, Return = 4, Orbit = 5, Trail = 6, Spread = 7, Field = 8, Inject = 9, Follow = 10, Drone = 11,
+            Wreck = 12, Execute = 13, Wire = 14, Marked = 15;
+        /// <summary>
+        /// 阶段 3 内核已接通的落点：连锁跳点、反弹点、穿透点、扩散斑块中心、场生成点、能量注入的直接目标（FG-GAP-205 / DEBT-EMG3FUSE01-01 登记其余 9 种与
+        /// 场 / 注能的完整落点集，承接 EMG4-FUSE-02；燃迹的沿途排放在本机出手上仍走过渡读法字段 trail，没有逐段回调点）。
+        /// </summary>
+        public const uint KernelMask = (1u << Chain) | (1u << Bounce) | (1u << Pierce) | (1u << Spread) | (1u << Field) | (1u << Inject);
+        public static bool InKernel(byte kind) => kind != None && kind < 32 && (KernelMask & (1u << kind)) != 0;
+
+        /// <summary>
+        /// 一条 B 的效果写端在落点上有没有执行者（与 CombatLogic.EmgAnchorExec 同一口径）：场、蔓延、导线、追射弹、注热 / 注电 / 注磁 / 注腐蚀、排放。
+        /// 其余（en.kinetic 注入、ent.drone、evt.*、prop.* 等）编译期写原因、不复制、不计热量，避免静默死指令。
+        /// </summary>
+        public static bool Executable(byte verb, ushort port, int emitVerb) =>
+            verb == (byte)EmgVerb.Field || verb == (byte)EmgVerb.Spread || verb == (byte)EmgVerb.Link
+            || (verb == (byte)EmgVerb.Spawn && port == EmgConst.PortProjectile)
+            || (verb == (byte)EmgVerb.Inject && (port == EmgConst.PortHeat || port == EmgConst.PortElec || port == EmgConst.PortMag || port == EmgRuleConst.PortCorrode))
+            || (emitVerb != 0 && verb == emitVerb);
+    }
+
     public static class EmgConst
     {
         /// <summary>每个程序最多几个节点 / 几条指令行（ADR ②：理论最大 4 槽 × 混合 2 条 = 8 条自有指令 + 继承副本、节点 ≤ 13，留余量）。
@@ -88,6 +114,10 @@ namespace BinGames.Sim.Combat
         public const int SegTempo = 24;
         /// <summary>EMG3-SQD-01（FGR-EMG-132）：段 25 信号中继（装中继的机器 + 每秒限流计窗 + 转发 / 限流计数）。格式 18 内追加（ADR ⑩ 自描述段），短档 / 旧档没有这段 = 空表。</summary>
         public const int SegRelay = 25;
+        /// <summary>EMG3-FUSE-01（格式 19 内追加，自描述段）：段 26 熔合线索去重状态（32 条记录 = 每条配方：环头 + 最近计过的 <see cref="ClueRing"/> 个链号），同链只计一次随档接续。旧档没有这段 = 空。</summary>
+        public const int SegClue = 26;
+        /// <summary>EMG3-FUSE-01：熔合线索配方位数与每条配方记住的最近计过的链数（CombatData.EmgClue：[0, 32) 待取走次数、[32, 64) 环头、其后 32 × 8 链号环、规则路径上一次计数的链号与步号低 32 位）。</summary>
+        public const int ClueSlots = 32, ClueRing = 8, ClueRuleChain = ClueSlots * 2 + ClueSlots * ClueRing, ClueRuleStep = ClueRuleChain + ClueSlots, ClueLen = ClueRuleStep + ClueSlots;
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
         public const ushort PortChsGround = 1001, PortChsAirborne = 1002, PortChsMoving = 1003, PortChsWater = 1004;
         public const byte RoleCondition = 2;
@@ -414,6 +444,8 @@ namespace BinGames.Sim.Combat
         HasReverse = 8,
         /// <summary>本行是前一行的逆序树（只经 CombatKernel.AddProgramPair 登记，不参与去重）。</summary>
         IsReverse = 16,
+        /// <summary>EMG3-FUSE-01（ADR ② 落点接线）：程序有接线复制出的 <see cref="EmgInstrFlags.Anchored"/> 指令（在全部节点指令之后的尾段）——没有本位的程序不走任何落点判定（O(1) 早退出）。</summary>
+        HasAnchor = 32,
     }
 
     [Flags]
@@ -561,6 +593,8 @@ namespace BinGames.Sim.Combat
         public uint ListenMask;
         /// <summary>每次出手的热量（编译期算好，FGR-EMG-016）。</summary>
         public float HeatPerShot;
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044 熔合线索）：本程序一次出手（= 一条因果链）里同现的熔合配方端口对（位 i = 配方书第 i 条，编译期按端口算好；格式 19 起进快照）。</summary>
+        public uint ClueMask;
     }
 
     /// <summary>程序树的一个节点（ADR ②，16 字节）。<see cref="FirstInstr"/> 是指令表里的绝对下标；根节点 Parent = −1、Gen = 0。</summary>
@@ -982,6 +1016,18 @@ namespace BinGames.Sim.Combat
 
         /// <summary>EMG3-CHS-01（ADR ⑩ 版本 18 一次铺好阶段 3 状态段）：全局节拍计数（FGR-EMG-170～172，节拍执行者归 EMG3-TMP 卡；本卡只铺段 24，读 ≤ 17 版取 0）。</summary>
         public long BeatCount;
+
+        /// <summary>EMG3-FUSE-01（ADR ② 落点接线）：本次结算（链 + 节点 + 步）已执行的接线落点数（到 emg.fuse.anchor_max 就停；不进快照，只在同一步内有效）与累计执行 / 截断次数（自检）。</summary>
+        public int AnchorChain;
+        public int AnchorNode;
+        public long AnchorStep;
+        public int AnchorUsed;
+        public int AnchorFired;
+        public int AnchorCut;
+        /// <summary>EMG3-FUSE-01：熔合线索计数的脏位（位 i = 配方 i 有新增同现；热更层取走后清零，不进快照）。</summary>
+        public uint ClueDirty;
+        /// <summary>EMG3-FUSE-01：正在执行 Anchored 行（Anchored 指令不再挂接线，不递归；不进快照）。</summary>
+        public byte AnchorBusy;
 
         public static EmgScalars Initial => new EmgScalars { NextProjId = 1, NextDroneId = 1, NextWreckId = 1, NextPatchId = 1, NextFieldId = 1, NextChain = 1, NextZoneId = 1, NextWireId = 1, HashDirty = 1 };
     }

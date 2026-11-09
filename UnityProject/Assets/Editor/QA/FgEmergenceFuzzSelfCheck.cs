@@ -65,6 +65,7 @@ namespace GameLogic.EditorTools
         internal static readonly string[] Stage3Firmware =
         {
             "fw_ifmark", "fw_ifhot", "fw_ifair", "fw_repeat", "fw_loop", "fw_random", "fw_reverse", "fw_defer", "fw_killping", "fw_pingfire", "fw_markcast", "fw_volley",
+            "fw_anchorwire", // EMG3-FUSE-01：N43 接线（grm.anchor）进阶段 3 全量（FGT-EMG-003）
         };
         private static readonly string[] AddonStage2 = { "fw_enterfuse", "fw_uplinkpulse" };
 
@@ -452,7 +453,9 @@ namespace GameLogic.EditorTools
             }
             if (c.Carrier == FirmwareCarrier.Summon && c.Program.Any(id => pools.Reads(id, "evt.expire")))
             {
-                c.Seconds = Math.Max(c.Seconds, SummonExpireSeconds);
+                // 同时读“击杀”的停火推迟到碎靶改令结束后 1 秒（Build 里的 CeaseStep），时长跟着加
+                float late = c.Program.Any(id => pools.Reads(id, "evt.kill")) ? BaitAtSeconds + 3f - CeaseAtSeconds : 0f;
+                c.Seconds = Math.Max(c.Seconds, SummonExpireSeconds + late);
             }
             string[] prog = c.Program;
             int reader = Array.FindIndex(prog, id => pools.Reads(id, "evt.pierce"));
@@ -702,6 +705,11 @@ namespace GameLogic.EditorTools
             if (c.Carrier == FirmwareCarrier.Summon && ProgramReads(a.Program, EmgEventKind.Expire))
             {
                 a.CeaseStep = Mathf.RoundToInt(CeaseAtSeconds / Dt);
+                if (a.BaitStep >= 0)
+                {
+                    // 同时读“击杀”（改令打碎靶 → 2 秒后改回主目标）：停火排在改回之后，否则改回主目标那一下又开了火、桩一直续命不到期（EMG3-FUSE-01 接力 #62）
+                    a.CeaseStep = a.BaitStep + 2 * SwitchSteps + SwitchSteps;
+                }
             }
             return a;
         }
@@ -1766,9 +1774,9 @@ namespace GameLogic.EditorTools
             var stage3Gaps = a.Gaps.Where(x => EmgCatalog.FromTables().Ports.Any(p => p != null && p.Id == x.Port && p.Stage == 3)).ToList();
             Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal))
                    && !a.Gaps.Any(x => x.Port == "evt.ping" || x.Port == "tmp.sync" || x.Port.StartsWith("meta.", StringComparison.Ordinal))
-                   && stage3Gaps.All(x => x.Port == "grm.anchor" && x.Card == "EMG3-FUSE-01") && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 0,
+                   && stage3Gaps.Count == 0 && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 0,
                 $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 hij.*；meta.* / evt.ping / tmp.sync 已由 EMG3-FW-02 落表清零；" +
-                $"阶段 3 端口的缺口 {stage3Gaps.Count} 个（{string.Join("、", stage3Gaps.Select(x => x.Port + "→" + x.Card))}，只允许 grm.anchor 承接 EMG3-FUSE-01）；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 随 fld.push 接通（EMG2-FLD-01）也已生效，不再是缺口（{uplink.Count}）");
+                $"阶段 3 端口的缺口 {stage3Gaps.Count} 个（{string.Join("、", stage3Gaps.Select(x => x.Port + "→" + x.Card))}；EMG3-FUSE-01 落表 N43 后应为 0）；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 随 fld.push 接通（EMG2-FLD-01）也已生效，不再是缺口（{uplink.Count}）");
         }
 
         // ═════════════════════════════════ D 负向 ═════════════════════════════════

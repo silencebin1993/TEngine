@@ -92,7 +92,7 @@ namespace GameLogic.EditorTools
             int formal = FirmwareKinds.Rows.Count(r => !r.Id.StartsWith("fw_mix_", StringComparison.Ordinal));
             // EMG1-FW-02（FGT-EMG-002 新增行准入）：名表 44 条 + FG19A 第 6 节新固件 8 条（N09～N16）；EMG3-FW-02 再加阶段 3 的 12 条（N01～N08、N30～N32、N42）
             int addon = FirmwareKinds.AddonRows.Count;
-            Expect(formal == 44 + addon && addon == 20 && fwOwners.Count == formal && undeclared.Count == 0 && rejected.Count == 0 && fwOwners.All(kinds.Contains),
+            Expect(formal == 44 + addon && addon == 21 && fwOwners.Count == formal && undeclared.Count == 0 && rejected.Count == 0 && fwOwners.All(kinds.Contains),
                 $"fg.TbFirmwareKind 正式固件 {formal} 条（名表 44 + 新固件 {addon}）：已声明 {fwOwners.Count} 条、全部准入且都在固件表{(undeclared.Count > 0 ? "；未声明：" + string.Join("、", undeclared) : string.Empty)}{(rejected.Count > 0 ? "；被拒：" + string.Join("；", rejected) : string.Empty)}");
             // func_spikes 是部件，不在准入范围，但按同标准自查（FGR-EMG-233 第 5 条）
             Expect(EmgCatalog.Admit(EmgCatalog.DeclsOf(src, "func_spikes"), ports, out string spikes),

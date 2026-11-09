@@ -145,7 +145,7 @@ namespace GameLogic.Campaign.Combat
                 {
                     continue;
                 }
-                EmgRuleSeen += dc;
+                EmgRuleSeen += dc; // EMG3-FUSE-01：规则成立的熔合线索已在内核按链去重计数（EmgRule.ClueMask → EmgClueCount），走下面的线索脏位，这里不再按命中次数加
                 ReactionAttribution.AddInteractions(state, site.SiteId, dc); // EMG2-DISC-01（B19）：交互次数含没有图鉴名字的通道规则
                 string rid = NamedReactionCatalog.IdOfKey(k.EmgRuleKeyAt(slot));
                 if (rid == null)
@@ -157,6 +157,25 @@ namespace GameLogic.Campaign.Combat
                 var at = new Vector2((float)f.Pos.x, (float)f.Pos.y);
                 OnCountedReaction(site, state, rid, dc, f.Src, f.Target, at, observed, now);
                 site.OnDeclCoreReaction(state, f.Src, rid, dc, at); // DEBT-EMG1CHAIN01-06：核心固件冷却 / 暴露 / 提示与旧轨一致
+            }
+            // EMG3-FUSE-01（FGR-EMG-044 线索来源）：熔合配方端口对同链同现——内核按出手可靠计数 + 脏位，这里只在脏位非 0 时逐位取走（O(配方数)，不按帧扫描）
+            uint clue = k.EmgClueDirty;
+            if (clue != 0u)
+            {
+                IReadOnlyList<Economy.FusionRecipeDef> recipes = Economy.FusionCatalog.Recipes;
+                for (int i = 0; i < 32; i++)
+                {
+                    if ((clue & (1u << i)) == 0)
+                    {
+                        continue;
+                    }
+                    int co = k.EmgClueTake(i);
+                    if (co > 0 && recipes != null && i < recipes.Count)
+                    {
+                        ReactionAttribution.AddFusionCo(state, site.SiteId, recipes[i].Id, co);
+                    }
+                }
+                k.EmgClueClearDirty();
             }
             if (countsOnly)
             {

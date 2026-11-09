@@ -612,6 +612,22 @@ namespace BinGames.Sim.Combat
                 sw.EndRecord();
             }
             sw.End();
+            // EMG3-FUSE-01：段 26 熔合线索去重状态（每条配方：环头 + 最近计过的链号，同链只计一次，读档后不重复计）
+            bool clueOk = _d.EmgClue.IsCreated && _d.EmgClue.Length >= EmgConst.ClueLen;
+            sw.Begin(EmgConst.SegClue, 4 + EmgConst.ClueRing, EmgConst.ClueSlots);
+            for (int i = 0; i < EmgConst.ClueSlots; i++)
+            {
+                if (sw.F()) w.Write(clueOk ? _d.EmgClue[EmgConst.ClueSlots + i] : 0);
+                for (int j = 0; j < EmgConst.ClueRing; j++)
+                {
+                    if (sw.F()) w.Write(clueOk ? _d.EmgClue[EmgConst.ClueSlots * 2 + i * EmgConst.ClueRing + j] : 0);
+                }
+                if (sw.F()) w.Write(clueOk ? _d.EmgClue[EmgConst.ClueRuleChain + i] : 0);
+                if (sw.F()) w.Write(clueOk ? _d.EmgClue[EmgConst.ClueRuleStep + i] : 0);
+                if (sw.F()) w.Write(clueOk ? _d.EmgClue[i] : 0); // 修复第 2 轮：尾部追加还没被热更层取走的同现次数（存档落在步与取走之间也不丢；短段读到取 0）
+                sw.EndRecord();
+            }
+            sw.End();
         }
 
         private const int RelayFields = 5;
@@ -749,6 +765,43 @@ namespace BinGames.Sim.Combat
                             return CombatLoadResult.InvalidValue;
                         }
                         staging.Relays.Add(x);
+                    }
+                    return CombatLoadResult.Ok;
+                }
+                case EmgConst.SegClue:
+                {
+                    if (n > EmgConst.ClueSlots || !staging.EmgClue.IsCreated || staging.EmgClue.Length < EmgConst.ClueLen)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        int head = sr.F() ? r.ReadInt32() : 0;
+                        bool bad = head < 0 || head >= EmgConst.ClueRing;
+                        for (int j = 0; j < EmgConst.ClueRing; j++)
+                        {
+                            int chain = sr.F() ? r.ReadInt32() : 0;
+                            bad |= chain < 0;
+                            staging.EmgClue[EmgConst.ClueSlots * 2 + i * EmgConst.ClueRing + j] = chain;
+                        }
+                        int ruleChain = sr.F() ? r.ReadInt32() : 0;
+                        int ruleStep = sr.F() ? r.ReadInt32() : 0;
+                        int pending = sr.F() ? r.ReadInt32() : 0;
+                        if (!sr.RecordOk || bad || ruleChain < 0 || pending < 0)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.EmgClue[EmgConst.ClueSlots + i] = head;
+                        staging.EmgClue[EmgConst.ClueRuleChain + i] = ruleChain;
+                        staging.EmgClue[EmgConst.ClueRuleStep + i] = ruleStep;
+                        staging.EmgClue[i] = pending;
+                        if (pending > 0)
+                        {
+                            EmgScalars es = staging.EmgS[0]; // 脏位不进快照，由待取走次数重建（段 26 在标量段之后读）
+                            es.ClueDirty |= 1u << i;
+                            staging.EmgS[0] = es;
+                        }
                     }
                     return CombatLoadResult.Ok;
                 }

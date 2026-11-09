@@ -29,6 +29,8 @@ namespace GameLogic.Campaign.Emergence
         Migrated = 12,
         /// <summary>EMG3-META-01（FGR-EMG-040 反转）：逆序树标题（下面是逆序树的节点）。</summary>
         ReverseTitle = 13,
+        /// <summary>EMG3-FUSE-01：一处接线（A → B、落点种类、每次结算最多几个落点、每个落点执行几条、编译期热量；无效时写原因）。</summary>
+        Anchor = 14,
     }
 
     public struct EmgTreeRow
@@ -66,9 +68,29 @@ namespace GameLogic.Campaign.Emergence
             EmgProgramCompiler.NoteOverflow, EmgProgramCompiler.NoteGenFull, EmgProgramCompiler.NoteNotFlashed, EmgProgramCompiler.NoteDuplicate,
             NoteFlashTruncated, NoteFlashRange, EmgProgramCompiler.NoteTableFull, EmgProgramCompiler.StaleContentKey,
             EmgProgramCompiler.NoteMetaExecCap, EmgProgramCompiler.NoteMetaDeferCap, EmgProgramCompiler.NoteMetaEmpty, // EMG3-META-01（FGR-EMG-042）
+            EmgProgramCompiler.NoteAnchorDangling, EmgProgramCompiler.NoteAnchorSplit, EmgProgramCompiler.NoteAnchorNone, EmgProgramCompiler.NoteAnchorModOnly, // EMG3-FUSE-01
+            EmgProgramCompiler.NoteAnchorPending, EmgProgramCompiler.NoteAnchorCapped, EmgProgramCompiler.NoteAnchorNoExec,
         };
 
         public static string FixKey(string noteKey) => noteKey + ".fix";
+
+        /// <summary>
+        /// EMG3-FUSE-01（FGR-EMG-044、FGT-EMG-054）：每处接线一行——生效：“接线：A → B · 落点：跳点 · 每次结算最多 4 个落点、每个落点执行 B 的 K 条效果 · 热量 +4（4 × 1）”；
+        /// 无效：“接线未生效：原因”（原因的解决办法另在原因区）。只读编译结果（<see cref="EmgProgramResult.Anchors"/>，与内核同一份）。
+        /// </summary>
+        private static void AddAnchors(EmgProgramResult r, List<EmgTreeRow> into)
+        {
+            foreach (EmgAnchorInfo a in r.Anchors)
+            {
+                string an = a.A >= 0 && a.A < r.Steps.Count ? StepName(r.Steps[a.A]) : GameText.Get("emg.tree.anchor.missing");
+                string bn = a.B >= 0 && a.B < r.Steps.Count ? StepName(r.Steps[a.B]) : GameText.Get("emg.tree.anchor.missing");
+                string text = a.Valid
+                    ? GameText.Format("emg.tree.anchor.on", an, bn, GameText.Get("emg.anchor.kind." + a.Kind), a.MaxLandings, a.Copies, F1(a.Heat),
+                        F1(Combat.CombatSite.Tuning("emg.fuse.anchor_heat", 1f)))
+                    : GameText.Format("emg.tree.anchor.off", an, bn, GameText.Format(a.Note ?? EmgProgramCompiler.NoteAnchorDangling, an, string.Empty, string.Empty));
+                Add(into, EmgTreeRowKind.Anchor, text, -1, a.Ordinal, 0);
+            }
+        }
 
         /// <summary>EMG1-TRIG-01：编译器判“需要飞行”且载体是射弹（0）或无人机（2）——这两类组件在 FG19A 第 2.1.1 节都允许实体化。</summary>
         public static bool SpawnsFlight(EmgProgramResult r) =>
@@ -83,7 +105,7 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>指令在预览里的名字：父固件名；混合固件展开的写“父名（混合名 展开）”。</summary>
         public static string StepName(EmgProgramStep s)
         {
-            string owner = FirmwareName(s.OwnerId);
+            string owner = s.Builtin ? GameText.Get("emg.tree.anchor.builtin") : FirmwareName(s.OwnerId); // EMG3-FUSE-01：熔合芯片的内置接线
             return s.FirmwareId != s.OwnerId ? GameText.Format("emg.tree.entry.mixed", owner, FirmwareName(s.FirmwareId)) : owner;
         }
 
@@ -151,6 +173,7 @@ namespace GameLogic.Campaign.Emergence
                 // EMG1-TRIG-01（ADR U4，待用户确认）：程序需要飞行、载体允许实体化（射弹 / 无人机）时写明“以飞行弹体发射”。
                 Add(into, EmgTreeRowKind.Flight, GameText.Get("emg.tree.spawn_flight"), -1, -1, 0);
             }
+            AddAnchors(r, into);
             bool title = false;
             for (int i = 0; i < r.Notes.Count; i++)
             {

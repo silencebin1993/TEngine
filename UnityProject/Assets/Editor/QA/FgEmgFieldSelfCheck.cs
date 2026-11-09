@@ -619,7 +619,7 @@ namespace GameLogic.EditorTools
             Line("  · I. 正式路径：fld.* 接通后 9 个 owner 切到声明轨；牵引 / 磁聚命中处展开真场；接入冲击只在接入时放；部件场（电晕场）；emg.stage = 0 回旧轨");
             string[] owners = { "fw_tractor", "fw_magnet", "fw_vortex", "fw_deflect", "fw_shockwave", "fw_uplinkpulse", "comp_shovel", "comp_corona", "comp_pulser" };
             var off = owners.Where(o => !EmgCatalog.IsOwnerOnDeclTrack(o)).ToList();
-            Expect(off.Count == 0 && !EmgCatalog.IsPendingPort("fld.magnet", EmgRole.Spawn) && !EmgCatalog.IsPendingPort("evt.react", EmgRole.Trigger) && EmgCatalog.IsPendingPort("grm.anchor", EmgRole.Modify),
+            Expect(off.Count == 0 && !EmgCatalog.IsPendingPort("fld.magnet", EmgRole.Spawn) && !EmgCatalog.IsPendingPort("evt.react", EmgRole.Trigger) && !EmgCatalog.IsPendingPort("grm.anchor", EmgRole.Modify),
                 $"fld.* 不再是未接通端口（EMG3-FW-01 起 evt.react 也已接通，只剩 grm.anchor；按端口判）；写 fld.* 的 9 个 owner 全部走声明轨{(off.Count > 0 ? "；未切：" + string.Join("、", off) : string.Empty)}");
             (int fields, ushort port, float mag, double pulled) Fire(string fw)
             {

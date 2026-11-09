@@ -43,7 +43,9 @@ namespace BinGames.Sim.Combat
         /// 17 = EMG2-MAT-01（FG19 FGR-EMG-081 / 082 / 211，ADR-EMG-001 ⑤ ⑩）：Emg 段追加阶段 2 的全部内核状态段——物质斑块（段 17，扩展字段的 CombatZone、独立列表）、
         /// 活跃场（段 18）、实体档案稳定键（段 19，DEBT-EMG1ENT01-07）；单位段尾部追加温度、7 个累积量、相态位与每量计时、6 个抗性覆盖；标量段尾部追加斑块可靠计数；
         /// 规则计数 256 槽沿用段 15（格式 16 起已是 256）。读取仍认 1～16：没有斑块 / 场（旧区域照旧是区域直到到期；“像物质的区域”转斑块归 EMG2-MAT-02）、累积量 / 相态 / 覆盖全 0、档案下标原样。</summary>
-        public const int FormatVersion = 18;
+        /// 19 = EMG3-FUSE-01（FG19 FGR-EMG-044、ADR-EMG-001 ②）：程序表允许在全部节点指令之后带落点接线的 Anchored 尾段（程序标志 HasAnchor），程序记录追加熔合线索掩码 ClueMask。
+        /// 读取仍认 1～18：没有尾段、掩码 0（旧程序不接线、不计线索；装配重算后按新编译结果追加）。
+        public const int FormatVersion = 19;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -1360,6 +1362,8 @@ namespace BinGames.Sim.Combat
         public int EmgBusPerStep;
         public int EmgMaxFanout;
         public int EmgMaxPerHost;
+        /// <summary>EMG3-FUSE-01：接线每次结算最多执行的落点数 emg.fuse.anchor_max（≤ 0 = 4）。</summary>
+        public int EmgAnchorMax;
         public float EmgCoolRatio;
         /// <summary>EMG3-FW-01（FG19A 第 2.2 节散热鳍：prop.heat modify，身下有 condition 读端所列物质的斑块时 × param2）：装了散热件（<see cref="CombatUnitFlags.HeatSink"/>）的单位
         /// 站在 <see cref="EmgFinWetMatters"/>（物质码位掩码）任一种斑块里时，散热件那份散热 × <see cref="EmgFinWetMul"/>。0 = 不生效（旧轨 / 阶段 &lt; 2）。
@@ -1465,6 +1469,7 @@ namespace BinGames.Sim.Combat
             EmgBusPerStep = EmgConst.DefaultBusPerStep,
             EmgMaxFanout = EmgConst.DefaultMaxFanout,
             EmgMaxPerHost = EmgConst.DefaultMaxPerHost,
+            EmgAnchorMax = 4,
             EmgCoolRatio = EmgConst.DefaultCoolRatio,
             EmgSubDmgRatio = EmgConst.DefaultSubDmgRatio,
             EmgMaxChildren = EmgConst.DefaultMaxChildren,

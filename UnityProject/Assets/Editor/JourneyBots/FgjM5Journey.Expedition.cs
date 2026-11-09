@@ -172,7 +172,8 @@ namespace GameLogic.EditorTools.JourneyBots
             // 关掉了自动打开的离家报告；本步只核对线索与芯片（原来撤离当场就核对、又没等报告打开，报告随后盖住了下一步的信号核键）。
             CampaignState s = St;
             FusionState f = FusionService.StateOf(s);
-            FusionClueRecord clue = f?.Clues?.LastOrDefault(x => x != null && x.SessionKind == ReactionAttribution.KindExpedition && x.ReactionId == FgjM2Common.Conduct);
+            // EMG3-FUSE-01：线索来源改为“两父端口同链同现”，新线索不再挂反应 ID（ReactionId 为空），按“来自这次远征”找
+            FusionClueRecord clue = f?.Clues?.LastOrDefault(x => x != null && x.SessionKind == ReactionAttribution.KindExpedition);
             string fw = c.Get("rawFw");
             PrimitiveChipRecord raw = s.PrimitiveChips?.LastOrDefault(x => x != null && x.CardDefId == fw);
             if (clue == null || raw == null)
@@ -196,7 +197,7 @@ namespace GameLogic.EditorTools.JourneyBots
             c.Set("clue.other", (clue.KnownParent ?? def.ParentA) == def.ParentA ? def.ParentB : def.ParentA);
             c.Set("mixId", def.MixId);
             c.Set("rawPart", raw.PartId);
-            return StepOutcome.Done($"线索“{FusionService.ClueText(s, clue)}”（{(clue.Full ? "完整" : "部分")}线索，来自这次远征，“{FgjM2Common.ConductName}” {clue.Count} 次）指向配方“{GameLogic.Localization.GameText.Get(def.NameKey)}”；" +
+            return StepOutcome.Done($"线索“{FusionService.ClueText(s, clue)}”（{(clue.Full ? "完整" : "部分")}线索，来自这次远征，两父端口同链同现 {clue.Count} 次）指向配方“{GameLogic.Localization.GameText.Get(def.NameKey)}”；" +
                                     $"通知“新的熔合线索”；带回的协议数据盒变成一枚未破解的“{M.FwName(fw)}”芯片（{raw.PartId}，▲未破解）");
         }
     }

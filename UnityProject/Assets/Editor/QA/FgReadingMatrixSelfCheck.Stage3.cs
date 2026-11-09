@@ -206,7 +206,9 @@ namespace GameLogic.EditorTools
             // 阶段 3 的元程序（写 meta.*）与协同 / 齐射（读 evt.kill / evt.ping / evt.marked / tmp.sync）由 FgEmgStage3FirmwareSelfCheck B 段与 G 段（5 载体 × 首位 / 末位条件场景）比
             List<string> list = FirmwareKinds.BaseRows.Select(r => r.Id).Where(id => !Stage3Conditional(src, id))
                 .Concat(FirmwareKinds.AddonRows.Select(r => r.Id).Where(id => !IsConditionalAddon(src, id)))
-                .Where(id => gate.TryGetValue(id, out int g) && g <= 3).ToList();
+                .Where(id => gate.TryGetValue(id, out int g) && g <= 3)
+                // EMG3-FUSE-01：接线（写 grm.anchor）是语法结构，单独放首位 / 末位按设计不起作用、预览写原因（FgEmgFuseSelfCheck B6）；行为由 [A, 接线, B] 的 C1 / C3 比
+                .Where(id => !src.Decls.Any(d => d.Owner == id && d.Port == "grm.anchor")).ToList();
             var cond = FirmwareKinds.BaseRows.Select(r => r.Id).Where(id => Stage3Conditional(src, id)).ToList();
             Line($"    条件型固件 {cond.Count} 条（{string.Join("、", cond)}）：行为要先造出条件（交互 / 被击 / 击杀残骸 / 地面液体 / 中继组对齐），" +
                  "反应增幅见下方交互场景，其余由各自专段在阶段 ≥ 2 的条件场景里逐载体比对（FgEmgFieldSelfCheck 偏折、FgEmgReclaimSelfCheck 回收 / 蔓延、FgEmgTempoSelfCheck 谐振）");

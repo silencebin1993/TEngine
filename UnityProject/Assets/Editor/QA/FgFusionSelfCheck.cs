@@ -776,35 +776,52 @@ namespace GameLogic.EditorTools
 
         private static void Raid(CampaignState s, string key, string reaction, int count)
         {
+            // EMG3-FUSE-01：线索来源改为同链同现——这场按“该反应对应的配方书第一条”记 count 次同现（反应次数照记，供归因面板）
             ReactionAttribution.BeginRaid(s, key);
             ReactionAttribution.AddReaction(s, HomeValleyLayout.RegionId, reaction, count, count * 4.0);
+            ReactionAttribution.AddFusionCo(s, HomeValleyLayout.RegionId, FusionCatalog.Recipes.First(r => r.Reaction == reaction).Id, count);
             ReactionAttribution.EndRaid(s);
         }
+
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044）：一场突袭里某条配方的两父端口同链同现 <paramref name="count"/> 次（新口径的线索来源）。</summary>
+        private static void RaidCo(CampaignState s, string key, string recipeId, int count)
+        {
+            ReactionAttribution.BeginRaid(s, key);
+            ReactionAttribution.AddFusionCo(s, HomeValleyLayout.RegionId, recipeId, count);
+            ReactionAttribution.EndRaid(s);
+        }
+
+        private static string PortName(string id) => GameText.Get("emg.port." + id + ".name");
 
         private static void CheckClues()
         {
             CampaignState s = NewWorld(9607);
             FusionState f = FusionService.StateOf(s);
             int touch0 = GuidanceHooks.TouchCount;
-            Raid(s, "fu-r1", "reaction_deflagrate", FusionCatalog.CluePartialMin - 1);
-            bool below = f.Clues.Length == 0;
-            Raid(s, "fu-r2", "reaction_deflagrate", FusionCatalog.CluePartialMin);
+            // EMG3-FUSE-01：线索来源 = 两父端口同链同现（燃迹 mat.fire × 漏油 mat.oil）；具名反应次数不再给线索
+            ReactionAttribution.BeginRaid(s, "fu-r0");
+            ReactionAttribution.AddReaction(s, HomeValleyLayout.RegionId, "reaction_deflagrate", FusionCatalog.ClueFullMin, 1);
+            ReactionAttribution.EndRaid(s);
+            bool reactionIgnored = f.Clues.Length == 0;
+            RaidCo(s, "fu-r1", NapalmRecipe, FusionCatalog.CluePartialMin - 1);
+            bool below = f.Clues.Length == 0 && reactionIgnored;
+            RaidCo(s, "fu-r2", NapalmRecipe, FusionCatalog.CluePartialMin);
             FusionClueRecord partial = FusionService.ClueOf(f, NapalmRecipe);
             string partialText = FusionService.ClueText(s, partial);
-            bool partialOk = partial != null && !partial.Full && partial.KnownParent == Burn && partialText.Contains("燃烧") && partialText.Contains("油污")
+            bool partialOk = partial != null && !partial.Full && partial.KnownParent == Burn && partialText.Contains(PortName("mat.fire")) && partialText.Contains(PortName("mat.oil")) && partialText.Contains("同一条因果链")
                              && partialText.Contains(FirmwareKinds.DisplayName(Burn)) && !partialText.Contains(FirmwareKinds.DisplayName(Oil)) && partialText.Contains("突袭")
                              && f.FirstClueSeen && GameSettings.HasSeenGuidanceHook(GuidanceHooks.FusionFirstClue) && MechanicCodex.IsUnlocked("codex.research.recipe_book")
                              && NotificationCenter.History.Any(n => n.Type.Id == "fusion_clue");
-            Raid(s, "fu-r3", "reaction_deflagrate", FusionCatalog.ClueFullMin);
+            RaidCo(s, "fu-r3", NapalmRecipe, FusionCatalog.ClueFullMin);
             FusionClueRecord full = FusionService.ClueOf(f, NapalmRecipe);
             string fullText = FusionService.ClueText(s, full);
             bool upgraded = full != null && full.Full && full.Count == FusionCatalog.ClueFullMin && f.Clues.Count(c => c.RecipeId == NapalmRecipe) == 1
-                            && fullText.Contains($"同时出现 {FusionCatalog.ClueFullMin} 次") && fullText.Contains(FirmwareKinds.DisplayName(Burn) + " + " + FirmwareKinds.DisplayName(Oil));
-            Raid(s, "fu-r4", "reaction_deflagrate", FusionCatalog.ClueFullMin);
+                            && fullText.Contains($"同现 {FusionCatalog.ClueFullMin} 次") && fullText.Contains(FirmwareKinds.DisplayName(Burn) + " + " + FirmwareKinds.DisplayName(Oil));
+            RaidCo(s, "fu-r4", "fusion.flashover", FusionCatalog.ClueFullMin);
             FusionClueRecord second = f.Clues.FirstOrDefault(c => c.RecipeId == "fusion.flashover");
             Expect(below && partialOk && upgraded && second != null && second.Full,
-                $"G1 线索：一场突袭里爆燃（燃烧 + 油污）{FusionCatalog.CluePartialMin - 1} 次不给线索；{FusionCatalog.CluePartialMin} 次 → 部分线索“{partialText}”（只知道一条父固件）；" +
-                $"{FusionCatalog.ClueFullMin} 次 → 升级成完整线索“{fullText}”（同一条配方只留一条）；再来一场 → 指向同一反应的下一条配方（闪燃过载）；第一次拿到线索发引导钩子（图鉴“配方书与线索”解锁）、发“新的熔合线索”通知");
+                $"G1 线索（EMG3-FUSE-01 新口径：两父端口同链同现）：具名反应爆燃 {FusionCatalog.ClueFullMin} 次不再给线索；明火 × 油同现 {FusionCatalog.CluePartialMin - 1} 次不给线索；{FusionCatalog.CluePartialMin} 次 → 部分线索“{partialText}”（只知道一条父固件）；" +
+                $"{FusionCatalog.ClueFullMin} 次 → 升级成完整线索“{fullText}”（同一条配方只留一条）；另一条配方（闪燃过载：注热 × 油）按自己的同现给线索；第一次拿到线索发引导钩子（图鉴“配方书与线索”解锁）、发“新的熔合线索”通知");
 
             // 同一场只分析一次；结束时一次性生成（不在战斗中实时统计）
             int n0 = f.Clues.Length;
@@ -814,7 +831,7 @@ namespace GameLogic.EditorTools
             // 没有仿真实验室：战斗记录先存着，建好实验室后在世界步里分析
             CampaignState s2 = NewWorld(9608, lab: false);
             FusionState f2 = FusionService.StateOf(s2);
-            Raid(s2, "fu-p1", "reaction_conduct", FusionCatalog.ClueFullMin);
+            RaidCo(s2, "fu-p1", "fusion.wetarc", FusionCatalog.ClueFullMin);
             bool pending = f2.Clues.Length == 0 && f2.Pending.Length == 1;
             GridCell? lc = F.FindFree(s2, ResearchCatalog.LabTypeId, 6f, 30f);
             if (lc.HasValue)
@@ -822,16 +839,28 @@ namespace GameLogic.EditorTools
                 F.Built(s2, ResearchCatalog.LabTypeId, "lab-late", lc.Value);
             }
             WorldSimulation.StepMany(2);
-            bool analysed = f2.Pending.Length == 0 && f2.Clues.Length == 1 && f2.Clues[0].Full && FusionCatalog.TryGet(f2.Clues[0].RecipeId, out FusionRecipeDef cr) && cr.Reaction == "reaction_conduct";
+            bool analysed = f2.Pending.Length == 0 && f2.Clues.Length == 1 && f2.Clues[0].Full && FusionCatalog.TryGet(f2.Clues[0].RecipeId, out FusionRecipeDef cr) && cr.Id == "fusion.wetarc";
             // 上限：最多 fusion.clue_per_session 条
             CampaignState s3 = NewWorld(9609);
             ReactionAttribution.BeginRaid(s3, "fu-many");
-            foreach (string rid in new[] { "reaction_deflagrate", "reaction_conduct", "reaction_steam", "reaction_thermalshock", "reaction_dissolve" })
+            foreach (string rid in new[] { NapalmRecipe, "fusion.wetarc", "fusion.steamjet", "fusion.thermalspike", "fusion.etchslick" })
             {
-                ReactionAttribution.AddReaction(s3, HomeValleyLayout.RegionId, rid, FusionCatalog.ClueFullMin + 1, 1);
+                ReactionAttribution.AddFusionCo(s3, HomeValleyLayout.RegionId, rid, FusionCatalog.ClueFullMin + 1);
             }
             ReactionAttribution.EndRaid(s3);
             bool capped = FusionService.StateOf(s3).Clues.Length == FusionCatalog.CluePerSession;
+            // EMG3-FUSE-01 迁移：本卡之前存档里开着的场次（ClueModel = 0）攒的“具名反应次数”结束时按旧规则分析一次，不丢进度
+            CampaignState s4 = NewWorld(9611);
+            ReactionAttribution.BeginRaid(s4, "fu-old");
+            ReactionSessionRecord old = ReactionAttribution.Current(s4, HomeValleyLayout.RegionId, create: true);
+            if (old != null)
+            {
+                old.ClueModel = 0;
+            }
+            ReactionAttribution.AddReaction(s4, HomeValleyLayout.RegionId, "reaction_deflagrate", FusionCatalog.ClueFullMin, 1);
+            ReactionAttribution.EndRaid(s4);
+            bool migrated = old != null && FusionService.ClueOf(FusionService.StateOf(s4), NapalmRecipe)?.Full == true;
+            Expect(migrated, "G3 EMG3-FUSE-01 旧档迁移：旧场次（ClueModel 0）里爆燃攒到完整线索门槛 → 结束时按旧规则给出燃油喷流的完整线索（攒的进度不丢）；新场次只认同链同现");
             Expect(once && pending && analysed && capped,
                 $"G2 同一场只分析一次；没有仿真实验室时这场战斗记录先存着（面板写“有 1 场战斗记录等仿真实验室分析”），建好实验室后在世界步里分析出线索；一场最多 {FusionCatalog.CluePerSession} 条线索");
         }
@@ -881,24 +910,29 @@ namespace GameLogic.EditorTools
             {
                 site.Kernel.SetHealth(scoutUnit, 3000f, 3000f, true);
             }
-            for (int i = 0; i < 90 && (CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate")) - c0 < FusionCatalog.ClueFullMin; i++)
+            // EMG3-FUSE-01：线索按“同一条链只计一次”，跑到场次的同现链数够完整线索（或 45 秒）为止——不再按规则命中次数推进
+            for (int i = 0; i < 90 && SessCo(s) < FusionCatalog.ClueFullMin; i++)
             {
                 WorldSimulation.StepMany(GameClock.StepHz / 2);
 
             }
             int kernelCount = (CombatSite.ReactionCountOf(site?.Kernel, "reaction_deflagrate")) - c0;
             ReactionSessionRecord sess = ReactionAttribution.Current(s, FracturedCityLayout.RegionId, create: false);
-            int sessCount = sess?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_deflagrate")?.Count ?? 0;
+            int sessCount = sess?.FusionCo?.FirstOrDefault(r => r.ReactionId == "fusion.flashover")?.Count ?? 0; // EMG3-FUSE-01：爆燃规则成立 = 注热 × 油同链同现
             ReactionAttribution.CloseExpedition(s, FracturedCityLayout.RegionId); // 撤离（ExpeditionReturnService 同一入口）
-            FusionClueRecord clue = FusionService.ClueOf(FusionService.StateOf(s), NapalmRecipe);
+            // EMG3-FUSE-01：爆燃规则的两端口是 油 × 注热（fg.TbChannelRule E01），按端口落在闪燃过载（过载 en.heat × 漏油 mat.oil）上；燃油喷流（明火 × 油）要两父在同一程序里
+            FusionClueRecord clue = FusionService.ClueOf(FusionService.StateOf(s), "fusion.flashover");
             string text = FusionService.ClueText(s, clue);
             bool fullExpected = sessCount >= FusionCatalog.ClueFullMin;
-            Expect(kernelCount >= FusionCatalog.CluePartialMin && sessCount == kernelCount && clue != null && clue.Count == sessCount && clue.Full == fullExpected
-                   && clue.SessionKind == ReactionAttribution.KindExpedition && text.Contains("燃烧") && text.Contains("油污") && text.Contains($"{sessCount} 次")
-                   && text.Contains(FirmwareKinds.DisplayName(Burn)) && text.Contains("远征"),
-                $"H FGT-RND-007：破碎都市里燃迹机 + 漏油机编队攻击侦察机，战斗内核真实打出爆燃 {kernelCount} 次（场次记 {sessCount} 次）；撤离关场次后仿真实验室分析，生成线索“{text}”" +
+            Expect(sessCount >= FusionCatalog.CluePartialMin && sessCount <= kernelCount && clue != null && clue.Count == sessCount && clue.Full == fullExpected
+                   && clue.SessionKind == ReactionAttribution.KindExpedition && text.Contains(PortName("en.heat")) && text.Contains(PortName("mat.oil")) && text.Contains($"{sessCount} 次")
+                   && text.Contains(FirmwareKinds.DisplayName("fw_overload")) && text.Contains("远征"),
+                $"H FGT-RND-007：破碎都市里燃迹机 + 漏油机编队攻击侦察机，战斗内核真实打出爆燃 {kernelCount} 次（场次按链去重记 {sessCount} 次 ≤ 规则次数：同一条链只计一次、不多计）；撤离关场次后仿真实验室分析，生成线索“{text}”" +
                 $"（{(clue?.Full ?? false ? "完整" : "部分")}线索）");
         }
+
+        private static int SessCo(CampaignState s) =>
+            ReactionAttribution.Current(s, FracturedCityLayout.RegionId, create: false)?.FusionCo?.FirstOrDefault(r => r.ReactionId == "fusion.flashover")?.Count ?? 0;
 
         private static int RuleIndex(string reactionId)
         {
@@ -1158,7 +1192,7 @@ namespace GameLogic.EditorTools
                 panel.Refresh(force: true);
                 FusionClueRecord clue = FusionService.StateOf(s).Clues.OrderByDescending(c => c.Serial).First(); // 最新的一条 = 这场突袭给的
                 bool book = FusionPanelUIToolkit.IsOpen && panel.ClueRowCount == FusionService.StateOf(s).Clues.Length && panel.ClueRowText(0).StartsWith("（新）")
-                            && panel.ClueRowText(0).Contains("同时出现") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.FusionFirstRecipeBook);
+                            && panel.ClueRowText(0).Contains("同一条因果链里同现") && GameSettings.HasSeenGuidanceHook(GuidanceHooks.FusionFirstRecipeBook);
                 FusionCatalog.TryGet(clue.RecipeId, out FusionRecipeDef cr);
                 Click(panel.ClueUseButton(0));
                 bool picked = panel.SelectedA == cr.ParentA && panel.SelectedB == cr.ParentB;

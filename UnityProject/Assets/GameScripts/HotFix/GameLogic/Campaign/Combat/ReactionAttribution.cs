@@ -120,6 +120,35 @@ namespace GameLogic.Campaign.Combat
             }
         }
 
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044）：一步里熔合配方 <paramref name="recipeId"/> 的两父端口在 <paramref name="count"/> 条因果链里同现（内核脏位取走的增量）。</summary>
+        public static void AddFusionCo(CampaignState state, string siteId, string recipeId, int count)
+        {
+            if (count <= 0 || string.IsNullOrEmpty(recipeId))
+            {
+                return;
+            }
+            ReactionSessionRecord s = Current(state, siteId, create: true);
+            if (s == null)
+            {
+                return;
+            }
+            s.FusionCo ??= Array.Empty<ReactionShareRecord>();
+            foreach (ReactionShareRecord r in s.FusionCo)
+            {
+                if (r != null && r.ReactionId == recipeId)
+                {
+                    r.Count += count;
+                    Revision++;
+                    return;
+                }
+            }
+            var grown = new ReactionShareRecord[s.FusionCo.Length + 1];
+            Array.Copy(s.FusionCo, grown, s.FusionCo.Length);
+            grown[grown.Length - 1] = new ReactionShareRecord { ReactionId = recipeId, Count = count };
+            s.FusionCo = grown;
+            Revision++;
+        }
+
         /// <summary>一步里某条反应触发了 <paramref name="count"/> 次、打在敌对阵营身上的额外伤害 <paramref name="damage"/>。</summary>
         public static void AddReaction(CampaignState state, string siteId, string reactionId, int count, double damage)
         {
@@ -484,6 +513,7 @@ namespace GameLogic.Campaign.Combat
         {
             var rec = new ReactionSessionRecord
             {
+                ClueModel = 1, // EMG3-FUSE-01：新场次按同链同现给线索
                 SessionId = "rs-" + stats.NextReactionSessionSerial.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 Kind = kind,
                 SiteId = siteId,

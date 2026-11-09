@@ -1035,6 +1035,10 @@ namespace GameLogic.Campaign
         public long EndTick;
         public string[] Reactions = Array.Empty<string>();
         public int[] Counts = Array.Empty<int>();
+        /// <summary>EMG3-FUSE-01：同链同现口径的配方 ID 与次数（ClueModel = 1）；ClueModel = 0 的旧记录按 Reactions / Counts 用旧规则分析一次（迁移，不丢进度）。</summary>
+        public string[] Recipes = Array.Empty<string>();
+        public int[] RecipeCounts = Array.Empty<int>();
+        public int ClueModel;
     }
 
     /// <summary>
@@ -2608,6 +2612,10 @@ namespace GameLogic.Campaign
         /// <summary>这一场里敌对阵营受到的全部伤害（占比的分母）。</summary>
         public double TotalDamage;
         public ReactionShareRecord[] Reactions = Array.Empty<ReactionShareRecord>();
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044 线索来源改写）：这一场各熔合配方的“两父端口同链同现”次数（ReactionId = 配方 ID，Count = 同现的出手条数；内核可靠计数 + 脏位累加）。</summary>
+        public ReactionShareRecord[] FusionCo = Array.Empty<ReactionShareRecord>();
+        /// <summary>EMG3-FUSE-01：线索口径（0 = 本卡之前的存档里开着的场次：结束时线索按旧的“具名反应触发次数”分析一次，不丢进度；1 = 同链同现）。</summary>
+        public int ClueModel;
         // EMG2-DISC-01（FG19 FGR-EMG-182，B19）：新增字段缺省为空 / 0，不升 schema（FGR-EMG-212）；旧场次显示 0。
         /// <summary>这一场所有规则的结算次数（含没有图鉴名字的通道规则）。</summary>
         public int InteractionCount;

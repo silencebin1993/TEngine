@@ -159,7 +159,7 @@ namespace GameLogic.EditorTools
         {
             Line("  · A. 结构布局（FGR-EMG-061 / ADR ② ④ ⑦ ⑬）");
             int ev = UnsafeUtility.SizeOf<EmgEvent>(), pg = UnsafeUtility.SizeOf<EmgProgram>(), nd = UnsafeUtility.SizeOf<EmgNode>(), ins = UnsafeUtility.SizeOf<EmgInstr>();
-            Expect(ev == 56 && pg == 16 && nd == 16 && ins == 28, $"事件记录 {ev} 字节（ADR ④ 定 56）；程序 / 节点 / 指令 {pg} / {nd} / {ins} 字节（ADR ② 定 16 / 16 / 28）");
+            Expect(ev == 56 && pg == 20 && nd == 16 && ins == 28, $"事件记录 {ev} 字节（ADR ④ 定 56）；程序 / 节点 / 指令 {pg} / {nd} / {ins} 字节（ADR ② 定 16 / 16 / 28；EMG3-FUSE-01 程序记录 + 熔合线索掩码 4 字节 = 20）");
 
             int proj = UnsafeUtility.SizeOf<CombatProjectile>();
             int inc = proj - 64; // 格式 15 的 CombatProjectile = 64 字节
@@ -319,7 +319,7 @@ namespace GameLogic.EditorTools
             byte[] snap = k.Serialize();
             using var b = new CombatKernel(k.Config, 64);
             CombatLoadResult lr = b.Load(snap);
-            bool same = lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 18
+            bool same = lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 18
                         && b.StateHash() == k.StateHash() && b.EmgStateHash() == k.EmgStateHash() && b.ProgramCount == k.ProgramCount
                         && b.EmgBusPending == 2 && b.WreckCount == 1 && b.TryGetUnitEmg(gun, out short prof, out EmgUnitState us) && prof == 3 && us.LastHitBy == 2
                         && b.TryGetEmgEvent(1, out EmgEvent e1) && k.TryGetEmgEvent(1, out EmgEvent e0) && e1.Seq == e0.Seq && e1.Chain == e0.Chain && e1.Kind == EmgEventKind.Timer

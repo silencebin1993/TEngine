@@ -614,6 +614,7 @@ namespace BinGames.Sim.Combat
         private static void EmgRuleSettle(ref CombatData d, in EmgRule r, int chain, byte depth, int ownerId, double2 pos, int patchId)
         {
             int slot = EmgRuleHit(ref d, r.Key, ownerId, 0, pos);
+            EmgClueCount(ref d, r.ClueMask, chain, rule: true); // EMG3-FUSE-01：规则两端口落在某配方两父的线索端口里 = 同链同现（跨机器由这里计；同一条链已由出手计过就不再计）
             EmgScalars es = d.EmgS[0];
             es.RulesSettled++;
             d.EmgS[0] = es;
@@ -956,6 +957,7 @@ namespace BinGames.Sim.Combat
                     if (x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 && !EmgOrdinalTriggered(ref d, n.FirstInstr, end, x.Ordinal))
                     {
                         EmgHitField(ref d, x, t, c); // 修复轮：按宿主载体展开（FG19A 第 1.4 节电磁场控 5 载体）
+                        EmgAnchorAt(ref d, EmgAnchorConst.Field, c, d.Pos[t], t, x.Ordinal); // EMG3-FUSE-01：场生成点是落点
                     }
                     continue;
                 }
@@ -1010,6 +1012,7 @@ namespace BinGames.Sim.Combat
                     }
                 }
                 EmgChainLog(ref d, EmgChainNode.Inject, c.Chain, c.Depth, x.Port, EmgIdOf(ref d, c.Owner), at, d.Id[t]);
+                EmgAnchorAt(ref d, EmgAnchorConst.Inject, c, at, t, x.Ordinal); // EMG3-FUSE-01：被注入能量的单位是落点
             }
             return inj;
         }

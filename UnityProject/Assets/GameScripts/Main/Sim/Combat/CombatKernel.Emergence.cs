@@ -114,6 +114,28 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG3-META-01（DEBT-EMG2DISC01-03）：本内核真的作用过的元程序种类（位 k = EmgMetaConst 种类 k；语法发现“第一次用到某种元程序”）。</summary>
         public int EmgMetaSeenMask => _d.EmgStats[0].MetaSeen;
 
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合线索有新增同现的配方位（热更层逐位 <see cref="EmgClueTake"/> 后 <see cref="EmgClueClearDirty"/>；O(1) 判空）。</summary>
+        public uint EmgClueDirty => _d.EmgS[0].ClueDirty;
+
+        /// <summary>取走配方位 <paramref name="i"/> 的同现次数并清零（可靠计数：不丢、不重复）。</summary>
+        public int EmgClueTake(int i)
+        {
+            if (!_d.EmgClue.IsCreated || i < 0 || i >= 32 || i >= _d.EmgClue.Length)
+            {
+                return 0;
+            }
+            int n = _d.EmgClue[i];
+            _d.EmgClue[i] = 0;
+            return n;
+        }
+
+        public void EmgClueClearDirty()
+        {
+            EmgScalars es = _d.EmgS[0];
+            es.ClueDirty = 0;
+            _d.EmgS[0] = es;
+        }
+
         public bool TryGetProgram(int index, out EmgProgram p)
         {
             bool ok = index >= 0 && index < _d.EmgPrograms.Length;
@@ -387,7 +409,15 @@ namespace BinGames.Sim.Combat
                 }
                 next += n.InstrCount;
             }
-            if (next != instrs.Count)
+            // EMG3-FUSE-01（ADR ②）：节点指令之后可以有落点接线的 Anchored 尾段（只在带 HasAnchor 的程序上；尾段每行都必须带 Anchored 与内核已接通的落点种类）
+            for (int i = next; i < instrs.Count; i++)
+            {
+                if ((program.Flags & EmgProgramFlags.HasAnchor) == 0 || (instrs[i].Flags & EmgInstrFlags.Anchored) == 0 || !EmgAnchorConst.InKernel(instrs[i].AnchorKind))
+                {
+                    return false;
+                }
+            }
+            if (next > instrs.Count)
             {
                 return false;
             }
@@ -1060,7 +1090,7 @@ namespace BinGames.Sim.Combat
             bool v17 = format >= 17;
             bool v18 = format >= 18; // EMG3-CHS-01：段 22～24、单位段 + 特性、无人机段 + 电荷
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 4 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1381,7 +1411,7 @@ namespace BinGames.Sim.Combat
             sw.End();
         }
 
-        private const int ProgramFields = 6;
+        private const int ProgramFields = 7; // EMG3-FUSE-01：+ ClueMask
         private const int NodeFields = 10;
         private const int InstrFields = 11;
         private const int WeaponFields = 2;
@@ -1396,6 +1426,7 @@ namespace BinGames.Sim.Combat
             if (Put(sw)) w.Write((ushort)p.Flags);
             if (Put(sw)) w.Write(p.ListenMask);
             if (Put(sw)) w.Write(p.HeatPerShot);
+            if (Put(sw)) w.Write(p.ClueMask);
         }
 
         private static void WriteNodeRec(BinaryWriter w, in EmgNode n, EmgSegmentWriter sw)
@@ -1532,6 +1563,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) p.Flags = (EmgProgramFlags)r.ReadUInt16();
                         if (sr.F()) p.ListenMask = r.ReadUInt32();
                         if (sr.F()) p.HeatPerShot = r.ReadSingle();
+                        if (sr.F()) p.ClueMask = r.ReadUInt32(); // EMG3-FUSE-01（格式 19）：旧段没有这一列 = 0
                         if (!sr.RecordOk)
                         {
                             return CombatLoadResult.InvalidValue;
@@ -1875,6 +1907,7 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegMeta:
                 case EmgConst.SegTempo:
                 case EmgConst.SegRelay:
+                case EmgConst.SegClue:
                     return ParseStage3Segment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过

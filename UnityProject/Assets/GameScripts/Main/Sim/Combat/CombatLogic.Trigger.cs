@@ -405,6 +405,7 @@ namespace BinGames.Sim.Combat
                 {
                     // EMG2-FLD-01：事件门控的场写端在事件位置展开（单位级事件 = 本单位处；接入冲击 = 接入时以本机为心；被击 = 按宿主载体展开，见 EmgGatedField）
                     EmgGatedField(ref d, x, e, host);
+                    EmgAnchorAt(ref d, EmgAnchorConst.Field, host, e.Pos, e.OtherKind == EmgEntKind.Unit && e.Other != 0 ? d.SlotOf(e.Other) : -1, x.Ordinal); // EMG3-FUSE-01
                     continue;
                 }
                 float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
@@ -1663,6 +1664,228 @@ namespace BinGames.Sim.Combat
             at = pr.Prev + (next - pr.Prev) * t;
             EmgStat(ref d, 6);
             return true;
+        }
+
+        // ─────────────────────────────── EMG3-FUSE-01 落点接线（ADR-EMG-001 ②；FG19 FGR-EMG-044；FG19A 第 4.1、4.2 节）───────────────────────────────
+
+        /// <summary>程序有落点接线（HasAnchor）——没有的程序 O(1) 返回，金标准与空场景不变。</summary>
+        internal static bool EmgProgAnchored(ref CombatData d, int prog) =>
+            prog >= 0 && prog < d.EmgPrograms.Length && (d.EmgPrograms[prog].Flags & EmgProgramFlags.HasAnchor) != 0;
+
+        /// <summary>
+        /// A 的写端在本次结算产生了一个 <paramref name="kind"/> 种类的落点（跳点 / 反弹点 / 穿透点 / 扩散斑块中心 / 场作用点 / 注入点）：
+        /// 在 <paramref name="pos"/>、以 <paramref name="target"/> 为对象内联执行宿主节点挂着的同种类 Anchored 行（B 的效果写端复制，编译期放在程序尾段）一次。
+        /// 不经事件总线入队、继承宿主的链、不加链深（FGR-EMG-061 / 064）；每次结算（链 + 节点 + 步）的落点数到 CombatConfig.EmgAnchorMax 就停（计数在不进快照的标量里）；
+        /// Anchored 行本身不再挂接线（AnchorBusy，不递归）。B 的条件读端照常（底盘条件 EmgChsBlocked）。O(尾段行数 × 节点行数)，只在带接线的程序上。
+        /// <paramref name="src"/> = 产生这个落点的那一行的程序序号：只执行 B = src + 2 的复制行（[A, 接线, B] 的序号相邻），B 自己或第三条同族写端产生的点不算 A 的落点；
+        /// −1 = 落点由节点修饰（连锁 / 反弹 / 穿透）产生，不按序号筛。
+        /// </summary>
+        internal static void EmgAnchorAt(ref CombatData d, byte kind, in EmgCtx host, double2 pos, int target, int src = -1)
+        {
+            if (!EmgProgAnchored(ref d, host.Prog))
+            {
+                return;
+            }
+            EmgProgram p = d.EmgPrograms[host.Prog];
+            if (host.Node < 0 || host.Node >= p.NodeCount || p.FirstNode + p.NodeCount > d.EmgNodes.Length || d.EmgS[0].AnchorBusy != 0)
+            {
+                return;
+            }
+            EmgNode root = d.EmgNodes[p.FirstNode], last = d.EmgNodes[p.FirstNode + p.NodeCount - 1], n = d.EmgNodes[p.FirstNode + host.Node];
+            int tail = last.FirstInstr + last.InstrCount, end = math.min(root.FirstInstr + p.InstrTotal, d.EmgInstrs.Length), nEnd = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            EmgScalars es = d.EmgS[0];
+            long step = d.Scalars[0].Steps;
+            if (es.AnchorChain != host.Chain || es.AnchorNode != host.Node || es.AnchorStep != step)
+            {
+                es.AnchorChain = host.Chain;
+                es.AnchorNode = host.Node;
+                es.AnchorStep = step;
+                es.AnchorUsed = 0;
+            }
+            int max = d.Config.EmgAnchorMax > 0 ? d.Config.EmgAnchorMax : 4;
+            bool counted = false;
+            for (int i = tail; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if (x.AnchorKind != kind || (x.Flags & EmgInstrFlags.Anchored) == 0 || (src >= 0 && x.Ordinal != src + 2) || !EmgOrdinalIn(ref d, n.FirstInstr, nEnd, x.Ordinal)
+                    || EmgChsBlocked(ref d, host.Owner, n.FirstInstr, nEnd, x.Ordinal))
+                {
+                    continue;
+                }
+                if (!counted)
+                {
+                    if (es.AnchorUsed >= max)
+                    {
+                        es.AnchorCut++; // 超出 emg.fuse.anchor_max 的落点不执行
+                        break;
+                    }
+                    counted = true;
+                    es.AnchorUsed++;
+                    es.AnchorFired++;
+                    es.AnchorBusy = 1;
+                    d.EmgS[0] = es;
+                }
+                EmgAnchorExec(ref d, x, host, pos, target);
+                es = d.EmgS[0];
+            }
+            es.AnchorBusy = 0;
+            d.EmgS[0] = es;
+        }
+
+        /// <summary>节点 [first, end) 里有这个程序序号的行——B 与 A 在同一节点（继承副本不另接线）。</summary>
+        private static bool EmgOrdinalIn(ref CombatData d, int first, int end, byte ordinal)
+        {
+            for (int j = first; j < end; j++)
+            {
+                if (d.EmgInstrs[j].Ordinal == ordinal)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>在落点执行一条 Anchored 效果写端：排放 → 斑块（斑块层没开时落驻留区）、注能 → 对象单位 + 落点斑块、场 / 蔓延 / 导线 / 追射按事件门控的同一实现（落点当事件位置）。</summary>
+        private static void EmgAnchorExec(ref CombatData d, in EmgInstr x, in EmgCtx host, double2 pos, int target)
+        {
+            bool unit = target >= 0 && target < d.Count && d.IsAlive(target);
+            var e = new EmgEvent
+            {
+                Kind = EmgEventKind.Hit, Depth = host.Depth, EntKind = host.EntKind, Ent = host.Ent, OtherKind = unit ? EmgEntKind.Unit : EmgEntKind.None, Other = unit ? d.Id[target] : 0,
+                Prog = host.Prog, Node = host.Node, Chain = host.Chain, Pos = pos,
+            };
+            if (x.Verb == (byte)EmgVerb.Field)
+            {
+                EmgGatedField(ref d, x, e, host);
+                return;
+            }
+            if (x.Verb == (byte)EmgVerb.Spread)
+            {
+                EmgSpread(ref d, e, host, x);
+                return;
+            }
+            if (x.Verb == (byte)EmgVerb.Link)
+            {
+                EmgLink(ref d, e, host, x);
+                return;
+            }
+            if (x.Verb == (byte)EmgVerb.Spawn && x.Port == EmgConst.PortProjectile)
+            {
+                EmgQueueFollow(ref d, e, host, x);
+                return;
+            }
+            int ownerId = EmgIdOf(ref d, host.Owner);
+            if (x.Verb == (byte)EmgVerb.Inject)
+            {
+                if (!(x.Amount > 0f))
+                {
+                    return;
+                }
+                if (unit)
+                {
+                    if (x.Port == EmgConst.PortHeat)
+                    {
+                        EmgAddUnitHeat(ref d, target, x.Amount);
+                    }
+                    else if (x.Port == EmgConst.PortElec)
+                    {
+                        if (!EmgElecShed(ref d, target, x.Amount))
+                        {
+                            EmgAddAcc(ref d, target, EmgPhaseConst.Charge, x.Amount, ownerId);
+                        }
+                    }
+                    else if (x.Port == EmgConst.PortMag)
+                    {
+                        EmgAddAcc(ref d, target, EmgPhaseConst.Magnetize, x.Amount, ownerId);
+                    }
+                    else if (x.Port == EmgRuleConst.PortCorrode && EmgPatchesOn(ref d))
+                    {
+                        EmgAddAcc(ref d, target, EmgPhaseConst.Corrode, x.Amount, ownerId); // 与命中注入腐蚀度同一实现（EmgChildHitWrite）
+                    }
+                }
+                if (x.Port == EmgRuleConst.PortCorrode)
+                {
+                    return; // 腐蚀度只注单位，不加热 / 充电斑块
+                }
+                if (x.Port != EmgConst.PortMag && EmgPatchesOn(ref d))
+                {
+                    EmgInjectPatches(ref d, pos, math.max(0.5f, x.Param2), x.Port, x.Amount, host.Chain, host.Depth, ownerId);
+                }
+                EmgChainLog(ref d, EmgChainNode.Inject, host.Chain, host.Depth, x.Port, ownerId, pos, unit ? d.Id[target] : 0);
+                return;
+            }
+            if (x.Verb != d.Config.EmgVerbEmit)
+            {
+                return;
+            }
+            float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
+            float b = (x.Flags & EmgInstrFlags.MagB) != 0 ? x.B * x.Amount : x.B;
+            if (!(a > 0f) || !(b > 0f) || EmgEmitPatch(ref d, x, pos, a, b, host.Owner, host.Chain, host.Depth))
+            {
+                return;
+            }
+            int bit = (int)math.round(x.C) - 1;
+            uint mask = bit >= 0 && bit < 32 ? 1u << bit : 0u;
+            int owner = host.Owner >= 0 && host.Owner < d.Count ? host.Owner : -1;
+            if (SpawnZone(ref d, owner, (CombatFaction)host.Faction, pos, a, b, 0f, 0f, 1f, mask, 0f, 0f, 0f, 0f))
+            {
+                SetLastZoneLook(ref d, CombatZoneLook.Pool);
+                NoteReading(ref d, CombatConst.ReadingFeedZone, pos, owner);
+            }
+        }
+
+        /// <summary>EMG3-FUSE-01（FGR-EMG-044 熔合线索）：一次出手的程序覆盖了哪些配方端口对（编译期掩码），各计 1 次并置脏位；热更层按脏位取走（O(配方数)，只在带掩码的程序出手时）。</summary>
+        /// 出手（程序掩码，<paramref name="rule"/> = false）与规则成立（规则行的配方掩码，跨机器的同现）走同一个计数：每条配方记住最近由出手计过的 ClueRing 条链号（环）——
+        /// 出手：链号在环里不再计，否则进环、计 1；规则成立：链号在环里（这条链的同现已由出手计过）不计，同一条链同一步只计一次（长期存在的斑块合并后沿用一个链号，
+        /// 跨步的再次成立按新一次同现计，DEBT-EMG3FUSE01-02）。没有链号（环境反应）不计。状态随快照段 26 存读档。O(配方位 × 环长)，只在带掩码的出手 / 对应配方的规则成立时。
+        internal static void EmgClueCount(ref CombatData d, uint mask, int chain, bool rule = false)
+        {
+            if (mask == 0u || chain <= 0 || !d.EmgClue.IsCreated || d.EmgClue.Length < EmgConst.ClueLen)
+            {
+                return;
+            }
+            uint added = 0u;
+            for (int i = 0; i < EmgConst.ClueSlots; i++)
+            {
+                if ((mask & (1u << i)) == 0)
+                {
+                    continue;
+                }
+                int ring = EmgConst.ClueSlots * 2 + i * EmgConst.ClueRing;
+                bool seen = false;
+                for (int j = 0; j < EmgConst.ClueRing && !seen; j++)
+                {
+                    seen = d.EmgClue[ring + j] == chain;
+                }
+                if (seen)
+                {
+                    continue;
+                }
+                if (rule)
+                {
+                    int step = unchecked((int)d.Scalars[0].Steps);
+                    if (d.EmgClue[EmgConst.ClueRuleChain + i] == chain && d.EmgClue[EmgConst.ClueRuleStep + i] == step)
+                    {
+                        continue;
+                    }
+                    d.EmgClue[EmgConst.ClueRuleChain + i] = chain;
+                    d.EmgClue[EmgConst.ClueRuleStep + i] = step;
+                    d.EmgClue[i] = d.EmgClue[i] + 1;
+                    added |= 1u << i;
+                    continue;
+                }
+                int head = d.EmgClue[EmgConst.ClueSlots + i];
+                d.EmgClue[ring + head] = chain;
+                d.EmgClue[EmgConst.ClueSlots + i] = (head + 1) % EmgConst.ClueRing;
+                d.EmgClue[i] = d.EmgClue[i] + 1;
+                added |= 1u << i;
+            }
+            if (added != 0u)
+            {
+                EmgScalars es = d.EmgS[0];
+                es.ClueDirty |= added;
+                d.EmgS[0] = es;
+            }
         }
     }
 }

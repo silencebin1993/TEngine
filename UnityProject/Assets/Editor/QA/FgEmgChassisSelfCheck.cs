@@ -191,7 +191,7 @@ namespace GameLogic.EditorTools
                         && (byte)EmgTraitKind.FixedAnchor == EmgTraitConst.FixedAnchor && (byte)EmgTraitKind.LeggedStomp == EmgTraitConst.LeggedStomp && (byte)EmgTraitKind.AirDrop == EmgTraitConst.AirDrop
                         && (byte)EmgTraitKind.HullDraw == EmgTraitConst.HullDraw;
             Expect(same, "EmgTraitKind（热更）与 EmgTraitConst（内核）逐个同值");
-            Expect(EmgCatalog.ImplementedStage == 3 && EmgCatalog.EffectiveStage == 3 && CombatConst.FormatVersion == 18,
+            Expect(EmgCatalog.ImplementedStage == 3 && EmgCatalog.EffectiveStage == 3 && CombatConst.FormatVersion >= 18,
                 $"阶段 3：已实现 {EmgCatalog.ImplementedStage}、生效 {EmgCatalog.EffectiveStage}（emg.stage 缺省 3）；快照格式 {CombatConst.FormatVersion}");
             EmgCatalog.TryGetTrait("chassis_track", out EmgTraitRow tr);
             var active = new List<string>();

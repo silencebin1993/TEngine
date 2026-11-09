@@ -183,8 +183,8 @@ namespace GameLogic.Campaign.Emergence
         // EMG3-SQD-01：sqd.relay（struct_relay 的 scope）与 evt.ping 由内核跨机协同执行者接通（CombatLogic.Squad）；evt.ping 在 N30～N32 落表（EMG3-FW-02）前没有表内写者 / 读者，模糊测试器报“缺口（承接 EMG3-FW-02）”
         // EMG3-FW-01（FGT-EMG-055 全量单轨）：evt.react 读端由载荷宿主的 evt.react 接通（CombatLogic.EmgReactHosted，反应增幅 D-12，DEBT-EMG2RULE01-08）；
         // prop.heat modify 由内核散热执行（散热鳍：声明幅度 → CombatWeapon.HeatSinkBonus，condition 物质 × param2 → CombatConfig.EmgFinWetMul，DEBT-EMG2RULE01-11）。
-        // 只剩 grm.anchor（N43 接线随 EMG3-FUSE-01 落表；表里现无声明用到它）。
-        public static readonly string[] PendingPorts = { "grm.anchor" }; // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
+        // EMG3-FUSE-01：grm.anchor（N43 接线）落表并由编译器复制 + 内核落点执行（ADR ②），阶段 3 端口全部接通。
+        public static readonly string[] PendingPorts = Array.Empty<string>(); // EMG2-RULE-01：en.* 移出；EMG2-FLD-01：fld.* 移出；EMG2-RECL-01：ent.wreck（拆残骸）与物质 modify（蔓延）移出
 
         /// <summary>声明行用到的端口在当前实现里还没有执行者（见 <see cref="PendingPorts"/>）。EMG2-RECL-01：物质端口的 modify（蔓延）已由内核执行（CombatLogic.EmgSpread），不再算未接通。</summary>
         public static bool IsPendingPort(string portId, EmgRole role)
