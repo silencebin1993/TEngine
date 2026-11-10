@@ -623,7 +623,7 @@ namespace BinGames.Sim.Combat
             EmgScalars es = d.EmgS[0];
             es.RulesSettled++;
             d.EmgS[0] = es;
-            EmgChainLog(ref d, EmgChainNode.Rule, chain, depth, r.Key, ownerId, pos, patchId, r.Product);
+            EmgChainLog(ref d, EmgChainNode.Rule, chain, depth, r.Key, ownerId, pos, patchId, r.Product, codex: r.Codex != 0);
             if (slot >= 0)
             {
                 EmgEntityEvent(ref d, EmgEventKind.React, EmgEntKind.Patch, patchId, EmgEntKind.None, 0, d.EmgRuleCount[slot], 0f, (ushort)slot, pos);

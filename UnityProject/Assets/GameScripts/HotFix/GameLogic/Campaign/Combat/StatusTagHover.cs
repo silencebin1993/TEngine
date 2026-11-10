@@ -309,6 +309,8 @@ namespace GameLogic.Campaign.Combat
         private static void AppendProgramLine(CombatSite site, int unit, ref TooltipContent content)
         {
             string line = EmgChainView.MachineProgramLine(site, unit);
+            string three = EmgChainView.UnitHoverLine(site, CampaignSession.Current, unit); // EMG4-CODEX-01（DEBT-EMG1CHAIN01-04）：单位“是什么 / 谁造成的 / 接下来”三段，放最前
+            line = three == null ? line : line == null ? three : three + "\n" + line;
             string era = EmgChainView.EraHoverLine(site, unit); // EMG1-FW-01（FGR-EMG-233 第 6 条）
             line = era == null ? line : line == null ? era : era + "\n" + line;
             string trait = EmgChainView.TraitHoverLine(site, unit); // EMG3-CHS-01：底盘特性名称与说明（+ 车上带着的随车斑块）

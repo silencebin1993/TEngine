@@ -3282,6 +3282,12 @@ namespace GameLogic.EditorTools
                 {
                     bad.Add($"{tab}（{codex.CurrentTab}，{codex.ItemCount} 条）");
                 }
+                // EMG4-CODEX-01：组合图鉴页签 = 每条具名交互一条 + 语法条目（FGR-EMG-183），没发现的是剪影
+                if (tab == Progression.MechanicCodex.TabReaction
+                    && codex.ItemCount < Campaign.Content.NamedReactionCatalog.Rows.Count + System.Linq.Enumerable.Count(Progression.MechanicCodex.GrammarIds()))
+                {
+                    bad.Add($"组合图鉴只有 {codex.ItemCount} 条（应 ≥ 具名交互 + 语法条目）");
+                }
             }
             Check(codex != null && Progression.MechanicCodex.Tabs.Length == 16 && bad.Count == 0,
                 $"图鉴 16 个页签逐个点开，每页都有条目并选中一条{(bad.Count == 0 ? string.Empty : "：" + string.Join("、", bad))}");

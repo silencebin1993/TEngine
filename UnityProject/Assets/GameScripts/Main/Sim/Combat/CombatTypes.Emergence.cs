@@ -141,6 +141,12 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：“极限”按根出手计数的表长（2 的幂；链号单调递增，最近 256 条链互不冲突）与缺省门槛（emg.codex.extreme_count）。
+        /// shortcut: 按 chain &amp; 255 直映射，激战中链号几秒转一圈，仍在结算的长寿斑块链会和新链互相清零（含已记极限位），大规模战斗会系统性少记极限；计数表不进快照，读档后在途链从 0 计。
+        /// 要精确得按链号开放寻址并在链结束时回收（DEBT-EMG4CODEX01-01，承接 FG15-SYS-02）。</summary>
+        public const int ChainTally = 256;
+        public const int DefaultExtremeCount = 12;
+        public const int TallyExtremeBit = 0x100;
         // ── EMG1-FLASH-01（FGR-EMG-036；fg.TbHomeTuning emg.flash.*）：刷写带宽初值（运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）──
         public const int DefaultFlashBandwidth = 8;
         public const float DefaultFlashRange = 8f;
@@ -764,6 +770,9 @@ namespace BinGames.Sim.Combat
         public ushort PushCause;
         /// <summary>EMG1-CHAIN-01（ADR ⑨ 产物归属，修复轮）：击毁者单位 ID（持久，进残骸段第 27 个字段；占 PushCause 后的对齐空位，结构仍 120 字节）。环被覆盖 / 读档后悬停“谁造成的”至少还有它。0 = 不明。</summary>
         public int Killer;
+        /// <summary>EMG4-CODEX-01（DEBT-EMG1CHAIN01-02，ADR ⑨ 4 个归属）：持久归属——击毁者 + 之后打碎它的单位（最早 3 个 + 最近 1 个），环被覆盖 / 读档后仍完整。
+        /// 残骸段尾部追加第 28～31 个字段，短段（本卡之前的快照）读到取 0 = 回落“击毁者 + 环”的旧读法。结构 120 → 136 字节（256 块 ≈ 34 KB，ADR ⑬ 内存估算“约 30 KB”的量级不变）。</summary>
+        public int4 Owners;
 
         /// <summary>实体档案下标（继承原单位；−1 = 种类默认）。不钳位：−2 这类坏值照原样留着，由校验拒绝。</summary>
         public short Profile

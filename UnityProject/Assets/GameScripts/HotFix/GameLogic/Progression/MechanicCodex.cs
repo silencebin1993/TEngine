@@ -51,6 +51,8 @@ namespace GameLogic.Progression
         Hazard = 15,
         /// <summary>FG9-UX-01（FGR-UX-051“资料库按存档保存”）：资料库（剧情，fg.TbNarrativeEntry）。解锁状态只看当前存档，不进跨存档的图鉴文件。</summary>
         Lore = 16,
+        /// <summary>EMG4-CODEX-01（FGR-EMG-183）：组合图鉴的语法条目（第一次组成某代子弹药 / 用到某种元程序 / 由某种事件唤起程序）。</summary>
+        Grammar = 17,
     }
 
     /// <summary>一条机制图鉴条目（fg.TbCodexEntry 的运行时视图；links / hooks 已拆好）。FG2-FW-05：固件 / 反应条目由各自的表生成，
@@ -251,6 +253,8 @@ namespace GameLogic.Progression
                     return Campaign.Signal.FirmwareKinds.DisplayName(e.ContentId) ?? e.ContentId;
                 case MechanicCodexKind.Reaction:
                     return Campaign.Content.NamedReactionCatalog.NameOf(e.ContentId) ?? e.ContentId;
+                case MechanicCodexKind.Grammar:
+                    return GrammarTitle(e);
                 case MechanicCodexKind.Item:
                 case MechanicCodexKind.Recipe:
                     return GameLogic.Localization.GameText.Get(e.TitleKey);
@@ -272,6 +276,8 @@ namespace GameLogic.Progression
                     return Campaign.Signal.FirmwareLibrary.BuildDetail(state, e.ContentId);
                 case MechanicCodexKind.Reaction:
                     return ReactionBody(e.ContentId, state);
+                case MechanicCodexKind.Grammar:
+                    return GrammarBody(e, state);
                 case MechanicCodexKind.Item:
                     return Campaign.Economy.EconomyCodex.ItemBody(e.ContentId, state);
                 case MechanicCodexKind.Recipe:
@@ -307,7 +313,10 @@ namespace GameLogic.Progression
                     {
                         return GameLogic.Localization.GameText.Get("reaction.codex.unreachable");
                     }
-                    return GameLogic.Localization.GameText.Get("reaction.codex.locked");
+                    // EMG4-CODEX-01（FGR-EMG-183）：剪影下面写由哪两类通道产生（不给配方）；没有规则行的（标记跳转）沿用通用提示
+                    return ComboHint(e.ContentId) ?? GameLogic.Localization.GameText.Get("reaction.codex.locked");
+                case MechanicCodexKind.Grammar:
+                    return GrammarHint(e);
                 case MechanicCodexKind.Research:
                     Campaign.Economy.ResearchNodeDef rn = Campaign.Economy.ResearchCatalog.Find(e.ContentId);
                     return GameLogic.Localization.GameText.Format("codex.research.node.locked",
@@ -372,10 +381,8 @@ namespace GameLogic.Progression
                 sb.AppendLine(GameLogic.Localization.GameText.Format("codex.reaction.firmware", string.Join(Campaign.Signal.FirmwareLibrary.Sep, names)));
             }
             Campaign.ReactionFirstTriggerRecord first = Campaign.Combat.ReactionFeedback.FirstRecordOf(state, reactionId);
-            sb.AppendLine(first != null
-                ? GameLogic.Localization.GameText.Format("reaction.codex.first", GameLogic.UI.Kit.ReactionAttributionView.TickText(first.Tick),
-                    Campaign.Combat.CombatSites.SiteName(first.SiteId))
-                : GameLogic.Localization.GameText.Get("codex.reaction.elsewhere"));
+            sb.AppendLine(first != null ? FirstLine(first) : GameLogic.Localization.GameText.Get("codex.reaction.elsewhere"));
+            AppendCombo(sb, reactionId, state); // EMG4-CODEX-01：两侧端口、主结果、首次快照、次数、极限
             return sb.ToString().TrimEnd();
         }
 
@@ -645,6 +652,7 @@ namespace GameLogic.Progression
                 _entries.Add(e);
                 _byId[e.Id] = e;
             }
+            AddGrammarEntries(ref order); // EMG4-CODEX-01：语法条目排在具名交互之后（同一页签）
             AddEconomyEntries();
         }
 

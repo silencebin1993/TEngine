@@ -108,6 +108,8 @@ namespace BinGames.Sim.Combat
         public byte Matter;
         public byte Flags;
         public short Pad;
+        /// <summary>EMG4-CODEX-01（FG-GAP-194，FGR-EMG-184）：斑块归属里的己方单位 ID（还在场的己方优先，否则第一个已不在场的，由热更层按机器登记判断；0 = 没有 / 只有敌方）。建筑友伤提示用。</summary>
+        public int By;
     }
 
     /// <summary>
@@ -267,6 +269,8 @@ namespace BinGames.Sim.Combat
         /// <summary>伴生物质码（0 = 没有）。</summary>
         public byte By;
         public byte Side, Stage;
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：这条规则的计数键在组合图鉴里有条目（1 = 有；named = none 且没有反应行的 = 0）。“极限”只记在有条目的规则上。表数据，不进快照。</summary>
+        public byte Codex;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044 线索）：这条规则成立时同现的熔合配方位（热更层按端口对算好，CombatSite.ApplyRules 下发；0 = 不对应任何配方）。表数据，不进快照。</summary>
         public uint ClueMask;
     }

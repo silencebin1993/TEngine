@@ -13,6 +13,7 @@ using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Defense;
 using GameLogic.Campaign.Economy;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Logistics;
 using GameLogic.Campaign.Nav;
@@ -1184,6 +1185,7 @@ namespace GameLogic.EditorTools
             bool inKernel = Site.TryGetTurretState(serial, out TurretUnitState us0) && us0.Alive;
             float t0 = TurretService.DurabilityOf(s, turret), p0 = BuildingOps.Durability(pole);
             int left0 = PipeLeakService.TurretsLeftToKernel, burns0 = PipeLeakService.AreaBurns;
+            int ffStruct0 = PipeLeakService.StructFriendlyPosted, ffNotes0 = NotifyCount("friendly_fire");
             Site.Kernel.SpawnPatch(EmgMatterConst.Acid, new double2(turret.Position.x, turret.Position.y), 1.5f, 1f, 30f);
             Site.Kernel.SpawnPatch(EmgMatterConst.Acid, new double2(pole.Position.x, pole.Position.y), 1.5f, 1f, 30f);
             F.Seconds(4f);
@@ -1191,6 +1193,18 @@ namespace GameLogic.EditorTools
             Expect(inKernel && pLost > 0f && tLost > 0f && PipeLeakService.AreaBurns > burns0 && PipeLeakService.TurretsLeftToKernel > left0,
                 $"K1 酸斑块盖住电塔与炮塔 4 秒（正式路径：内核聚合 → 家园对账）：电塔按 structDps 掉耐久 {pLost:0.#}；炮塔在内核（{inKernel}）只吃内核接触 {tLost:0.#}，" +
                 $"对账跳过炮塔 {PipeLeakService.TurretsLeftToKernel - left0} 次（不双算，ADR ⑤）");
+            // EMG4-CODEX-01（FG-GAP-194，FGR-EMG-184 / B08）：没有归属的斑块（上面两块）烧设施不算友伤；己方（炮塔单位）留下的酸烧到电塔 → 警告级友伤通知，写几处设施 / 谁留下 / 什么物质，可定位；持续烧不刷屏
+            bool noOwnerQuiet = PipeLeakService.StructFriendlyPosted == ffStruct0 && NotifyCount("friendly_fire") == ffNotes0;
+            Site.TryGetTurretState(serial, out TurretUnitState us1);
+            float p1 = BuildingOps.Durability(pole);
+            Site.Kernel.SpawnPatch(EmgMatterConst.Acid, new double2(pole.Position.x, pole.Position.y), 1.5f, 1f, 30f, us1.UnitId);
+            F.Seconds(4f);
+            NotificationEntry ff = NotificationCenter.History.LastOrDefault(n => n.Type != null && n.Type.Id == "friendly_fire");
+            string ffText = ff?.Latest?.DetailText ?? string.Empty;
+            int posted = PipeLeakService.StructFriendlyPosted - ffStruct0;
+            Expect(noOwnerQuiet && us1.UnitId != 0 && BuildingOps.Durability(pole) < p1 && posted >= 1 && posted <= 6 && ff != null && ff.Level == NotifyLevel.Warning && ff.Latest.HasLocation
+                   && ffText.Contains(EmgMatterCatalog.NameOf(EmgMatterConst.Acid)) && !GameText.ContainsMarker(ffText),
+                $"K2 FG-GAP-194：无归属斑块烧设施不发友伤（{noOwnerQuiet}）；炮塔 #{us1.UnitId} 留下的酸烧电塔 4 秒 → 友伤通知 {posted} 条（每 1 游戏秒最多一条），警告级可定位“{ffText}”");
         }
 
         private static void CheckObservedEqualsUnobserved()

@@ -197,7 +197,7 @@ namespace GameLogic.Campaign.Emergence
                 kp.Add((a, b));
                 c.Rules.Add(new EmgRule
                 {
-                    Key = key, IdKey = NamedReactionCatalog.StableKey(r.Id), Pair = (byte)pair, Cond = (byte)Math.Max(0, cond), Op = (byte)op, Main = (byte)main,
+                    Key = key, IdKey = NamedReactionCatalog.StableKey(r.Id), Codex = NamedReactionCatalog.TryGet(r.Named != "none" ? r.Named : r.Id, out _) ? (byte)1 : (byte)0, Pair = (byte)pair, Cond = (byte)Math.Max(0, cond), Op = (byte)op, Main = (byte)main,
                     A = a, B = b, C1 = r.C1, C2 = r.C2, P1 = r.P1, P2 = r.P2, P3 = r.P3, P4 = r.P4, Life = r.Life, LifeMul = r.LifeMul, Product = product, By = by,
                     ByAmount = r.ByAmount, ByTemp = r.ByTemp, ByLife = r.ByLife, ConsA = r.ConsumeA, ConsB = r.ConsumeB,
                     Side = r.Side == "side.damage" ? EmgRuleConst.SideDamage : r.Side == "side.mult" ? EmgRuleConst.SideMult : EmgRuleConst.SideNone, SideValue = r.SideValue,

@@ -509,6 +509,22 @@ namespace GameLogic.Campaign
         public long Tick;
         /// <summary>发生在哪个地点（图鉴“首次触发于……”）。</summary>
         public string SiteId = string.Empty;
+        // EMG4-CODEX-01（FG19 FGR-EMG-183 / 194）：组合图鉴条目——首次发现时的因果链快照、本存档已触发次数、“极限”标记。新增字段缺省为空 / 0，旧档读入照常（不升 schema，FGR-EMG-212）。
+        /// <summary>首次发现时出手的一方（哪台机器 / 哪个敌人；旧档 Known = false）。</summary>
+        public Combat.ReactionLogParty Source;
+        /// <summary>首次发现时参与的固件（与反应日志同一取法）与部件（出手机器的主组件、功能件）。</summary>
+        public string[] FirmwareIds = Array.Empty<string>();
+        public string[] PartIds = Array.Empty<string>();
+        /// <summary>首次发现的地点坐标（地面 x / z）；HasPos = false 为旧档。</summary>
+        public bool HasPos;
+        public float X;
+        public float Y;
+        /// <summary>本存档已触发次数（可靠计数累加；旧档从 0 起，显示时至少 1）。</summary>
+        public long Count;
+        /// <summary>“极限”：本存档记过极限没有、第一次记的时刻与地点；技术数据奖励按事务号只发一次。</summary>
+        public bool Extreme;
+        public long ExtremeTick;
+        public string ExtremeSiteId = string.Empty;
     }
 
     /// <summary>ERD-DAT-006 EventLedger 的单条一次性事件记录。

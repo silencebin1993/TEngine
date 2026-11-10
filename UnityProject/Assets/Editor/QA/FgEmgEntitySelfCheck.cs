@@ -640,6 +640,20 @@ namespace GameLogic.EditorTools
                     $"重击（50 × 1.0 ≥ 40）被残骸挡下并崩出 {frags.Count} 片：2 代 / Prog −1 / 链深 1 / 归出手者 / 每片 5 伤害 / 16 米每秒、背离受击方向");
                 Expect(Hp(k, behind) < 200f && k.EmgEnqueuedOf(EmgEventKind.Hit) > hitsBefore && eh.EntKind == EmgEntKind.Projectile && eh.Prog == -1 && eh.Depth == 1 && eh.Other == behind,
                     $"破片打中残骸后的敌人（{Hp(k, behind)}），命中发 evt.hit（宿主 = 破片、链深 {eh.Depth}）");
+                // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：打碎残骸的单位持久记在残骸上——环写满覆盖后、读档后（环从空开始）归属仍完整，不再从环派生
+                EmgWreck w0 = Wrecks(k)[0];
+                for (int i = 0; i < 300; i++)
+                {
+                    k.EmgChainLogForTests(EmgChainNode.Shot, 9000 + i, 77);
+                }
+                int4 afterRing = k.EmgWreckOwners(w0.Id);
+                using (var r2 = NewKernel())
+                {
+                    CombatLoadResult lr = r2.Load(k.Serialize());
+                    int4 afterLoad = r2.EmgWreckOwners(w0.Id);
+                    Expect(w0.Owners.x == me && afterRing.x == me && lr == CombatLoadResult.Ok && r2.EmgChainRecordCount == 0 && afterLoad.x == me && r2.StateHash() == k.StateHash(),
+                        $"打碎残骸的单位 #{me} 持久归属（{w0.Owners}）：环写满 300 条后 {afterRing}、读档后（环 {r2.EmgChainRecordCount} 条，{lr}）{afterLoad}；状态哈希一致");
+                }
             }
             using (CombatKernel k = NewKernel())
             {

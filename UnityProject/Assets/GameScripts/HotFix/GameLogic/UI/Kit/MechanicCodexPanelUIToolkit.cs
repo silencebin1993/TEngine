@@ -333,13 +333,15 @@ namespace GameLogic.UI.Kit
                 MechanicCodexEntry e = _scratch[i];
                 _itemIds.Add(e.Id);
                 bool unlocked = MechanicCodex.IsUnlocked(e.Id);
-                b.text = unlocked ? MechanicCodex.Title(e) : GameText.Get("codex.panel.locked_title");
+                b.text = MechanicCodex.ListTitle(e, state); // EMG4-CODEX-01：组合图鉴里记过“极限”的前面加 ◆（形状为主，B15）
                 b.EnableInClassList("cx-item-locked", !unlocked);
                 b.EnableInClassList("cx-item-selected", e.Id == _selectedId);
             }
             bool noMatch = _scratch.Count == 0 && _searchText.Trim().Length > 0;
-            _noMatch.EnableInClassList("uk-hidden", !noMatch);
-            _noMatch.text = noMatch ? GameText.Get("codex.panel.no_match") : string.Empty;
+            // EMG4-CODEX-01（卡片负向“第一次打开”）：组合图鉴一条都没发现时写空状态提示（同一行提示位，搜索无结果优先）
+            string empty = noMatch ? null : MechanicCodex.EmptyHint(_tab);
+            _noMatch.EnableInClassList("uk-hidden", !noMatch && empty == null);
+            _noMatch.text = noMatch ? GameText.Get("codex.panel.no_match") : empty ?? string.Empty;
 
             MechanicCodexEntry sel = MechanicCodex.Find(_selectedId);
             _related.Clear();

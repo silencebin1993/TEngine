@@ -10,6 +10,7 @@ using UnityEngine;
 namespace GameLogic.Campaign.Combat
 {
     /// <summary>反应日志里的一方（触发者 / 目标）：只存 ID，显示时按当前语言翻译。</summary>
+    [Serializable] // EMG4-CODEX-01：组合图鉴首次发现快照随存档保存（ReactionFirstTriggerRecord.Source）
     public struct ReactionLogParty
     {
         /// <summary>内核单位种类；<see cref="Known"/> = false 时是查不到的单位（已阵亡被回收等）。</summary>

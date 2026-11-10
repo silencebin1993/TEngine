@@ -674,8 +674,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             NotificationEntry n = notes[notes.Count - 1];
-            string text = n.Latest?.Detail ?? string.Empty;
             string party = site.TryGetMachineUnit(e, out int ue) ? EmgChainView.PartyName(site, St, ue) : string.Empty;
+            // EMG4-CODEX-01（FG-GAP-194）：己方斑块烧自家设施也走“友伤”同类聚合——取这条聚合里写到 E 车的那一条，不赌最后一条是谁
+            string text = n.Members.LastOrDefault(m => (m.Detail ?? string.Empty).Contains(party))?.Detail ?? n.Latest?.Detail ?? string.Empty;
             if (n.Level != NotifyLevel.Warning || !n.HasAnyLocation || !text.Contains(party))
             {
                 return StepOutcome.Fail($"友伤通知不对：“{text}”（级别 {n.Level}、可定位 {n.HasAnyLocation}，应写到 {party}）");

@@ -552,10 +552,51 @@ namespace GameLogic.Campaign.Logistics
             foreach (int key in AreaKeys)
             {
                 EmgStructHit h = AreaHits[key];
-                BurnArea(state, new GridCell(Mathf.RoundToInt((float)h.Pos.x), Mathf.RoundToInt((float)h.Pos.y)), h.Radius, h.Damage, skipTurrets: true);
+                int hurt = BurnArea(state, new GridCell(Mathf.RoundToInt((float)h.Pos.x), Mathf.RoundToInt((float)h.Pos.y)), h.Radius, h.Damage, skipTurrets: true);
                 AreaBurns++;
+                if (hurt > 0 && h.By != 0)
+                {
+                    NotifyFriendlyStructures(state, h, hurt);
+                }
             }
             AreaHits.Clear();
+        }
+
+        /// <summary>EMG4-CODEX-01（FG-GAP-194，FGR-EMG-184 / B08）：本次对账建筑 / 传送带 / 管线发出的友伤通知条数（自检）。</summary>
+        public static int StructFriendlyPosted { get; private set; }
+
+        private static readonly Dictionary<int, long> StructFriendlyAt = new Dictionary<int, long>();
+
+        /// <summary>
+        /// 己方留下的物质（明火 / 酸 / 熔融）烧到自家设施：与单位友伤同一类通知（警告级、同类聚合、可定位），文本写几处设施、谁留下的、什么物质；
+        /// 同一块斑块每 emg.friendly.notify_seconds 游戏秒最多一条（持续烧不刷屏）。归属是敌方或已不在场的非机器单位不发（与单位友伤同一口径）。O(1)。
+        /// </summary>
+        private static void NotifyFriendlyStructures(CampaignState state, in EmgStructHit h, int hurt)
+        {
+            CombatSite site = HomeSite;
+            if (site == null || site.IsDisposed)
+            {
+                return;
+            }
+            bool own = site.Kernel.TryGetUnit(h.By, out CombatUnitView v) ? v.Faction == CombatFaction.Player : site.TryGetMachineOfUnit(h.By, out _);
+            if (!own)
+            {
+                return;
+            }
+            long gap = Math.Max(1L, (long)(Feedback.ReactionPopups.Tuning("emg.friendly.notify_seconds", 1f) * GameClock.StepHz));
+            long now = GameClock.Ticks;
+            if (StructFriendlyAt.TryGetValue(h.Key, out long at) && now >= at && now - at < gap)
+            {
+                return;
+            }
+            if (StructFriendlyAt.Count >= 256)
+            {
+                StructFriendlyAt.Clear(); // 斑块 Id 只增不复用：只留近期的（清掉最多多发一条）
+            }
+            StructFriendlyAt[h.Key] = now;
+            string detail = GameText.Format("emg.friendly.structure", hurt, EmgChainView.PartyName(site, state, h.By), Emergence.EmgMatterCatalog.NameOf(h.Matter));
+            NotificationCenter.Post("friendly_fire", detail, new Vector3((float)h.Pos.x, 0f, (float)h.Pos.y));
+            StructFriendlyPosted++;
         }
 
         /// <summary>读档 / 新会话后第一次有家园战斗地点时：内核里没有记录的液洼区域移除；记录里有、内核里没有的（旧快照写的是不认识液洼的格式）重新登记；
@@ -726,11 +767,12 @@ namespace GameLogic.Campaign.Logistics
 
         /// <summary>一圈里的管线、传送带、建筑各扣 <paramref name="dmg"/>（建筑本次对账只扣一次）。O(半径内格数)。
         /// <paramref name="skipTurrets"/> = 物质斑块条目：炮塔血量在内核、已由内核斑块接触结算（ADR ⑤），这里不再扣（液洼残留是中立区域，内核跳过炮塔，仍由这里扣）。</summary>
-        private static void BurnArea(CampaignState state, GridCell center, float radius, float dmg, bool skipTurrets = false)
+        private static int BurnArea(CampaignState state, GridCell center, float radius, float dmg, bool skipTurrets = false)
         {
+            int hurt = 0; // EMG4-CODEX-01：返回本次扣了血的管线 / 传送带 / 建筑处数（友伤通知用）
             if (dmg <= 0f || !(radius > 0f))
             {
-                return;
+                return 0;
             }
             int amount = Math.Max(1, Mathf.RoundToInt(dmg));
             int reach = Mathf.CeilToInt(radius);
@@ -749,11 +791,13 @@ namespace GameLogic.Campaign.Logistics
                     {
                         PipeNetworkService.TryDamage(state, cell, amount, out _);
                         FireHits++;
+                        hurt++;
                     }
                     if (BeltNetworkService.HpOf(cell) >= 0)
                     {
                         BeltNetworkService.TryDamage(state, cell, amount, out _);
                         FireHits++;
+                        hurt++;
                     }
                     string occ = map?.OccupantAt(cell);
                     if (!string.IsNullOrEmpty(occ) && BurnedBuildings.Add(occ))
@@ -767,10 +811,12 @@ namespace GameLogic.Campaign.Logistics
                         {
                             BuildingOps.ApplyDamage(state, occ, dmg);
                             FireHits++;
+                            hurt++;
                         }
                     }
                 }
             }
+            return hurt;
         }
 
         /// <summary>这一圈里有没有己方管线、传送带或建成的建筑（泄漏起火告警用）。</summary>

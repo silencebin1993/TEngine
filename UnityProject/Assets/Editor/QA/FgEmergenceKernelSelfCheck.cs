@@ -173,7 +173,8 @@ namespace GameLogic.EditorTools
             int wreck = UnsafeUtility.SizeOf<EmgWreck>();
             // EMG2-MAT-01：阶段 2 状态段一次铺齐（温度 / 7 个累积量 / 相态掩码与计时 / 6 项抗性覆盖）后 102 字节，比 ADR ⑬ 的“约 92 B”多 10 B；
             // 按每地点 4096 单位算 ≈ 0.4 MB，仍在 ADR ⑬ 每地点合计 < 1.5 MB 之内（证据记偏差）。
-            Expect(unit <= 92 + 16 && (long)unit * 4096 <= 512 * 1024 && wreck * EmgConst.DefaultWreckCapacity <= 30 * 1024,
+            // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：残骸加 4 个持久归属（+16 B → 136 B），满容量 ≈ 34 KB，比 ADR ⑬ 的“约 30 KB”多 4 KB，仍在每地点合计 < 1.5 MB 之内（证据记偏差）；再长要先改 ADR ⑬。
+            Expect(unit <= 92 + 16 && (long)unit * 4096 <= 512 * 1024 && wreck <= 136 && wreck * EmgConst.DefaultWreckCapacity <= 34 * 1024,
                 $"每单位涌现段 {unit} 字节（阶段 2 全量；ADR ⑬ 约 92 字节 / 单位，容差 16；4096 单位 {unit * 4096 / 1024.0:F0} KB ≤ 512 KB）；残骸 {wreck} 字节 × {EmgConst.DefaultWreckCapacity} = {wreck * EmgConst.DefaultWreckCapacity / 1024.0:F1} KB ≤ 30 KB");
 
             EmgCompiled c = EmgCatalog.Current;
@@ -580,7 +581,7 @@ namespace GameLogic.EditorTools
             {
                 cases.Add(("事件节点 200", Patch(snap, d => d[bseg.at + progEv * bseg.stride + 28] = 200), CombatLoadResult.InvalidValue)); // 记录内偏移：码/深/种/种 4 + Code×2 4 + Ent/Other/Prog/Chain/Seq 20 = 28
             }
-            (int at, int stride) kseg = FindSegment(snap, EmgConst.SegWrecks, 27, k.WreckCount); // EMG1-ENT-01：20 → 26 个字段（尾部 +6 滑行 / 推动）；EMG1-CHAIN-01：+1 击毁者
+            (int at, int stride) kseg = FindSegment(snap, EmgConst.SegWrecks, 31, k.WreckCount); // EMG1-ENT-01：20 → 26 个字段（尾部 +6 滑行 / 推动）；EMG1-CHAIN-01：+1 击毁者；EMG4-CODEX-01：+4 持久归属
             cases.Add(("残骸耐久非数", Patch(snap, d => WriteInt(d, kseg.at + 44, BitConverter.SingleToInt32Bits(float.NaN))), CombatLoadResult.InvalidValue));
             if (k.ProjectileCount >= 2)
             {

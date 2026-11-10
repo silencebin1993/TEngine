@@ -42,6 +42,12 @@ namespace BinGames.Sim.Combat
                 _d.EmgAttrRows.RemoveRange(0, cutAttr); // EMG2-DISC-01：交互伤害同一口径
             }
             _d.EmgAttrPublished = 0;
+            int cutX = System.Math.Min(_d.EmgExtremePublished, _d.EmgExtreme.Length);
+            if (cutX > 0)
+            {
+                _d.EmgExtreme.RemoveRange(0, cutX); // EMG4-CODEX-01：极限列表同一口径
+            }
+            _d.EmgExtremePublished = 0;
         }
 
         /// <summary>交出本步脏列表并清掉这些槽的去重标记（修复：上一步刚交出的槽在两步之间又被即时出手命中时，要能再进下一步的列表）。热更层按累计差值读，同槽重复出现无害。</summary>
@@ -56,6 +62,7 @@ namespace BinGames.Sim.Combat
             _d.EmgEraDirtyPublished = _d.EmgEraDirty.Length;
             _d.EmgFriendlyPublished = _d.EmgFriendly.Length;
             _d.EmgAttrPublished = _d.EmgAttrRows.Length;
+            _d.EmgExtremePublished = _d.EmgExtreme.Length;
             EmgBusStats st = _d.EmgStats[0];
             _d.EmgDepthPublished = st.DepthWork;
             st.DepthWork = 0;
@@ -95,6 +102,11 @@ namespace BinGames.Sim.Combat
         public int EmgAttrCount => _d.EmgAttrRows.Length;
 
         public EmgAttrRow EmgAttrAt(int i) => i >= 0 && i < _d.EmgAttrRows.Length ? _d.EmgAttrRows[i] : default;
+
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：本步记“极限”的规则稳定键条数与第 <paramref name="i"/> 条（一条链一次；热更层按稳定键找图鉴条目）。O(本步极限数)。</summary>
+        public int EmgExtremeRows => _d.EmgExtremePublished;
+
+        public int EmgExtremeAt(int i) => i >= 0 && i < _d.EmgExtremePublished ? _d.EmgExtreme[i] : 0;
 
         /// <summary>EMG2-DISC-01：本步因果链记录到的最大链深（统计“最长链深”）。</summary>
         public int EmgStepMaxDepth => _d.EmgDepthPublished;
@@ -149,14 +161,20 @@ namespace BinGames.Sim.Combat
         /// </summary>
         public int4 EmgChainOwners(int chain) => CombatLogic.EmgChainAttr(ref _d, chain, out _);
 
-        /// <summary>一块残骸的归属（ADR ⑨ 4 个规则）：持久的击毁者（<see cref="EmgWreck.Killer"/>，环被覆盖 / 读档后仍在）+ 之后打碎它的单位（环里 Key = 残骸 Id 的破片记录，从旧到新）。O(残骸数 + 环长)，只在悬停时调。</summary>
+        /// <summary>一块残骸的归属（ADR ⑨ 4 个规则）：持久归属（<see cref="EmgWreck.Owners"/>：击毁者 + 之后打碎它的单位，环被覆盖 / 读档后仍在）+ 环里 Key = 残骸 Id 的破片记录（从旧到新，去重）。O(残骸数 + 环长)，只在悬停时调。</summary>
         public int4 EmgWreckOwners(int wreckId)
         {
             int4 o = int4.zero;
             int wi = WreckIndexOf(wreckId);
             if (wi >= 0)
             {
-                CombatLogic.EmgOwnersAdd(ref o, _d.Wrecks[wi].Killer);
+                // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：持久归属（击毁者 + 打碎它的单位）在前，环被覆盖 / 读档后仍完整；环里的同一批记录按去重不再重复加，
+                // 只补持久归属里没有的（本卡之前的快照读进来的残骸）
+                o = _d.Wrecks[wi].Owners;
+                if (o.x == 0)
+                {
+                    CombatLogic.EmgOwnersAdd(ref o, _d.Wrecks[wi].Killer);
+                }
             }
             int n = _d.EmgRingHead[1];
             for (int i = n - 1; i >= 0 && wreckId > 0; i--)
@@ -188,8 +206,8 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>测试 / 调试：直接写一条环记录（与内核写入同一函数）。</summary>
-        public void EmgChainLogForTests(EmgChainNode kind, int chain, int srcUnit, int other = 0, int parent = 0, int key = 0) =>
-            CombatLogic.EmgChainLog(ref _d, kind, chain, 0, key, srcUnit, double2.zero, other, 0, parent);
+        public void EmgChainLogForTests(EmgChainNode kind, int chain, int srcUnit, int other = 0, int parent = 0, int key = 0, byte depth = 0, bool codex = true) =>
+            CombatLogic.EmgChainLog(ref _d, kind, chain, depth, key, srcUnit, double2.zero, other, 0, parent, codex);
 
         // ─────────────────────────────── 悬停拾取（FGR-EMG-181；逐实体扫描在内核，热更层只拼一件的文字）───────────────────────────────
 

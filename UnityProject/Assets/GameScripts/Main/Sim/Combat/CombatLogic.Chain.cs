@@ -12,13 +12,17 @@ namespace BinGames.Sim.Combat
     public static partial class CombatLogic
     {
         /// <summary>写一条因果链记录（环满覆盖最旧的）。链号 ≤ 0 不写——残骸例外：没有程序的击毁也记（Key = 残骸 Id，悬停“被谁击毁”用；残骸只在实体层开着时生成，正式流程照样不写）。</summary>
-        internal static void EmgChainLog(ref CombatData d, EmgChainNode kind, int chain, byte depth, int key, int srcUnit, double2 pos, int other = 0, byte aux = 0, int parent = 0)
+        internal static void EmgChainLog(ref CombatData d, EmgChainNode kind, int chain, byte depth, int key, int srcUnit, double2 pos, int other = 0, byte aux = 0, int parent = 0, bool codex = true)
         {
             if (chain <= 0 && kind != EmgChainNode.Wreck)
             {
                 return;
             }
             EmgDepthNote(ref d, depth);
+            if (chain > 0)
+            {
+                EmgExtremeTally(ref d, kind, chain, depth, key, srcUnit, codex);
+            }
             int head = d.EmgRingHead[0];
             d.EmgRing[head] = new EmgChainRec
             {
@@ -26,6 +30,51 @@ namespace BinGames.Sim.Combat
             };
             d.EmgRingHead[0] = (head + 1) & (EmgConst.ChainRing - 1);
             d.EmgRingHead[1] = math.min(d.EmgRingHead[1] + 1, EmgConst.ChainRing);
+        }
+
+        /// <summary>
+        /// EMG4-CODEX-01（FGR-EMG-194）：按根出手（链号）累计规则结算次数与最大链深；链深达 <see cref="EmgConst.MaxDepth"/> 或结算满 emg.codex.extreme_count 次时，
+        /// 把这条链最近一条规则的稳定键记进本步“极限”列表（每条链只记一次；还没有规则结算的链等第一条规则）。O(1)，只在写环记录时走（链号为 0 的正式流程不走）。
+        /// </summary>
+        private static void EmgExtremeTally(ref CombatData d, EmgChainNode kind, int chain, byte depth, int key, int srcUnit, bool codex)
+        {
+            int at = chain & (EmgConst.ChainTally - 1);
+            int4 t = d.EmgChainTally[at];
+            if (t.x != chain)
+            {
+                t = new int4(chain, 0, 0, 0);
+            }
+            if ((t.z & EmgConst.TallyExtremeBit) != 0)
+            {
+                return;
+            }
+            if (kind == EmgChainNode.Shot)
+            {
+                // 极限是玩家破格组合的奖励（FG19 第 52 行）：根出手不是己方（含被劫持后归己方的）单位的链直接封掉，不计不报
+                int s = d.SlotOf(srcUnit);
+                if (s >= 0 && d.Faction[s] != (byte)CombatFaction.Player)
+                {
+                    t.z |= EmgConst.TallyExtremeBit;
+                    d.EmgChainTally[at] = t;
+                    return;
+                }
+            }
+            t.z = math.max(t.z, depth);
+            if (kind == EmgChainNode.Rule && key != 0)
+            {
+                t.y++;
+                if (codex)
+                {
+                    t.w = key; // 只记有图鉴条目的规则：无名规则（沸腾、融化……）照样计次，但极限落到这条链最近一条有条目的规则上
+                }
+            }
+            int need = d.Config.EmgExtremeCount > 0 ? d.Config.EmgExtremeCount : EmgConst.DefaultExtremeCount;
+            if (t.w != 0 && (t.z >= EmgConst.MaxDepth || t.y >= need))
+            {
+                t.z |= EmgConst.TallyExtremeBit;
+                d.EmgExtreme.Add(t.w);
+            }
+            d.EmgChainTally[at] = t;
         }
 
         /// <summary>出手者槽位 → 单位 ID（−1 / 越界 = 0）。</summary>

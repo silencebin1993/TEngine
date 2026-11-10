@@ -634,7 +634,7 @@ namespace BinGames.Sim.Combat
             if (m.StructDps > 0f)
             {
                 // EMG2-MAT-02（ADR ⑤ / DEBT-EMG2MAT01-02）：建筑 / 传送带 / 管线吃斑块——按斑块聚合进设施受击脏列表（热更层按格结算，不遍历斑块）；明火另标燃烧（烧产线）
-                AddStructHit(ref d, z.EmgId, z.Pos, z.Radius, m.StructDps * elapsed, z.Matter, z.Matter == EmgMatterConst.Fire ? EmgMatterConst.HitFire : (byte)0);
+                AddStructHit(ref d, z.EmgId, z.Pos, z.Radius, m.StructDps * elapsed, z.Matter, z.Matter == EmgMatterConst.Fire ? EmgMatterConst.HitFire : (byte)0, EmgOwnSideOwner(ref d, z.Owners));
             }
             if (EmgPatchRules(ref d, i, now))
             {

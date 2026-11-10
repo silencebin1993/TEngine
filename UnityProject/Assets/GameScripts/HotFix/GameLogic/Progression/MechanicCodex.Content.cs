@@ -1021,6 +1021,7 @@ namespace GameLogic.Progression
                     }
                 }
             }
+            n += SyncCombo(s); // EMG4-CODEX-01：组合图鉴（具名交互 + 语法条目）按存档补解锁——读旧档时已发现条目完整
             // B18：旧档第一次进入战役可能一次补几十条——只写一次盘、只递增一次版本（标题索引只重建一次）。
             CommitBatch(n > 0 || extra);
             return n;

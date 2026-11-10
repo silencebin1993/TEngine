@@ -192,7 +192,7 @@ namespace GameLogic.EditorTools
             int tags = NamedReactionCatalog.Rows.Count(r => r.Kind == NamedReactionCatalog.KindTag);
             int asm = NamedReactionCatalog.Rows.Count(r => r.Kind == NamedReactionCatalog.KindAssembly);
             int ruled = NamedReactionCatalog.Rows.Count(r => r.Kind == NamedReactionCatalog.KindRule);
-            Expect(code == 0 && rx.Count > 0 && rx.Count == NamedReactionCatalog.Rows.Count && diffs.Count == 0 && NamedReactionCatalog.LoadError == null && tags == 0 && ruled == 18 && asm == 0,
+            Expect(code == 0 && rx.Count > 0 && rx.Count == NamedReactionCatalog.Rows.Count && diffs.Count == 0 && NamedReactionCatalog.LoadError == null && tags == 0 && ruled == 29 && asm == 0, // EMG4-CODEX-01：+11 条斑块级具名交互（DEBT-EMG2RULE01-07）
                 $"fg.TbReaction {NamedReactionCatalog.Rows.Count} 行与源 {rx.Count} 行逐字段一致（标签反应 {tags}、通道规则驱动 {ruled}、装配反应 {asm}）{Detail(diffs)}");
             Expect(NamedReactionCatalog.TagRules.Select((r, i) => (r, i)).All(x => x.i == 0 || NamedReactionCatalog.TagRules[x.i - 1].Priority < x.r.Priority)
                    && NamedReactionCatalog.BuildKernelRules().Length == tags,
@@ -380,8 +380,8 @@ namespace GameLogic.EditorTools
                 }
             }
             uint physical = NamedReactionCatalog.BitOf("Physical");
-            Expect(bad.Count == 0 && unreachable.Count == 0 && ported.Count == 18 && physical != 0u && (reach & physical) == 0u,
-                $"44 条固件能挂上的状态位 {CountBits(reach)} 个；18 条通道规则驱动的按端口可达（碎裂不再靠没有固件会挂的“动能”标签）{Detail(bad)}");
+            Expect(bad.Count == 0 && unreachable.Count == 0 && ported.Count == 29 && physical != 0u && (reach & physical) == 0u,
+                $"44 条固件能挂上的状态位 {CountBits(reach)} 个；29 条通道规则驱动的按端口可达（EMG4-CODEX-01 +11 条斑块级具名交互）（碎裂不再靠没有固件会挂的“动能”标签）{Detail(bad)}");
         }
 
         // ── E. 正式版战斗内核：每条反应触发 / 不触发 ──────────────────────────────
@@ -815,7 +815,7 @@ namespace GameLogic.EditorTools
             var badBatch = new List<string>();
             foreach (KeyValuePair<string, string[]> kv in SpecBatches)
             {
-                string[] mine = NamedReactionCatalog.Rows.Where(r => r.Batch == kv.Key).Select(r => r.Id).OrderBy(x => x).ToArray();
+                string[] mine = NamedReactionCatalog.Rows.Where(r => r.Batch == kv.Key && SpecNames.ContainsKey(r.Id)).Select(r => r.Id).OrderBy(x => x).ToArray(); // EMG4-CODEX-01：批次已退役（FGR-EMG-190），只核 FG02 名表里的 18 条；后补的斑块级具名交互不属于 FGR-FW-042 的批次分配
                 if (!mine.SequenceEqual(kv.Value.OrderBy(x => x)))
                 {
                     badBatch.Add($"{kv.Key}: {string.Join(",", mine)}");

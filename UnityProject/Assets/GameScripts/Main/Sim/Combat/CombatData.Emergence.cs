@@ -148,6 +148,8 @@ namespace BinGames.Sim.Combat
             EmgDirtyMark = new NativeArray<byte>(EmgConst.RuleSlots, Allocator.Persistent);
             EmgEraDirty = new NativeList<int>(8, Allocator.Persistent);
             EmgFriendly = new NativeList<int3>(8, Allocator.Persistent);
+            EmgExtreme = new NativeList<int>(4, Allocator.Persistent);
+            EmgChainTally = new NativeArray<int4>(EmgConst.ChainTally, Allocator.Persistent);
             EmgAttrRows = new NativeList<EmgAttrRow>(8, Allocator.Persistent);
         }
 
@@ -208,6 +210,8 @@ namespace BinGames.Sim.Combat
             EmgDirtyMark.Dispose();
             EmgEraDirty.Dispose();
             EmgFriendly.Dispose();
+            EmgExtreme.Dispose();
+            EmgChainTally.Dispose();
             EmgAttrRows.Dispose();
         }
 
@@ -283,6 +287,12 @@ namespace BinGames.Sim.Combat
             EmgEraDirtyPublished = 0;
             EmgFriendly.Clear();
             EmgFriendlyPublished = 0;
+            EmgExtreme.Clear();
+            EmgExtremePublished = 0;
+            for (int i = 0; i < EmgChainTally.Length; i++)
+            {
+                EmgChainTally[i] = int4.zero;
+            }
             EmgAttrRows.Clear();
             EmgAttrPublished = 0;
             EmgAttr = default;

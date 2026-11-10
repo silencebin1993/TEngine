@@ -327,7 +327,8 @@ namespace GameLogic.EditorTools
             bool namedAct1 = lake != null && !HomeExplorationService.TerritoryVisible(s, lake) && ClarityRows().All(r => NamedReactionCatalog.IsNamed(s, r.Id));
             string hint = MechanicCodex.Hint(entry, s);
             bool tipInBody = MechanicCodex.Body(entry, s).Contains(ReactionDiscoveryService.TipOf(burn));
-            Expect(namedAct1 && hint == GameText.Get("reaction.codex.locked") && tipInBody && (s.OpenReactionBatches?.Length ?? 0) == 0,
+            bool comboHint = hint.StartsWith(GameText.Get("codex.combo.locked_hint").Split('“')[0], StringComparison.Ordinal) && !(StatusTagCatalog.NameOf(burn.TagA) is string tagName && tagName.Length > 0 && hint.Contains(tagName)); // EMG4-CODEX-01：剪影只写通道类别、不给配方
+            Expect(namedAct1 && comboHint && tipInBody && (s.OpenReactionBatches?.Length ?? 0) == 0,
                 $"D1 第一幕（领地不在地图上）四条都报名字（{namedAct1}），图鉴提示“{hint}”，正文含打法提示（{tipInBody}），批次字段空");
 
             // D2 种子无关（B25）：种子测试集里每个世界都有澄净领地，第一幕第一次结算就算首次发现。

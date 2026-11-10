@@ -312,7 +312,7 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── 设施受击聚合（ADR ⑤）───────────────────────────────
 
         /// <summary>记一条设施受击（同键合并：伤害相加、位置 / 半径取最新、标志或起来）。O(待发布条目)。</summary>
-        internal static void AddStructHit(ref CombatData d, int key, double2 pos, float radius, float damage, byte matter, byte flags)
+        internal static void AddStructHit(ref CombatData d, int key, double2 pos, float radius, float damage, byte matter, byte flags, int by = 0)
         {
             if (key == 0 || !(radius > 0f))
             {
@@ -330,6 +330,7 @@ namespace BinGames.Sim.Combat
                 h.Radius = radius;
                 h.Matter = matter;
                 h.Flags |= flags;
+                h.By = by != 0 ? by : h.By;
                 d.EmgStructPending[i] = h;
                 return;
             }
@@ -341,7 +342,31 @@ namespace BinGames.Sim.Combat
                 es.StructHitsDropped++;
                 d.EmgS[0] = es;
             }
-            d.EmgStructPending.Add(new EmgStructHit { Key = key, Pos = pos, Radius = radius, Damage = math.max(0f, damage), Matter = matter, Flags = flags });
+            d.EmgStructPending.Add(new EmgStructHit { Key = key, Pos = pos, Radius = radius, Damage = math.max(0f, damage), Matter = matter, Flags = flags, By = by });
+        }
+
+        /// <summary>EMG4-CODEX-01（FG-GAP-194）：归属里的己方单位——还在场的己方优先；都不在场时取第一个不在场的（热更层按机器登记判断是不是己方）；只有敌方返回 0。与 EmgFriendlyNote 同一取法。</summary>
+        internal static int EmgOwnSideOwner(ref CombatData d, int4 owners)
+        {
+            int gone = 0;
+            for (int q = 0; q < 4; q++)
+            {
+                int id = owners[q];
+                if (id == 0)
+                {
+                    continue;
+                }
+                int slot = d.SlotOf(id);
+                if (slot < 0)
+                {
+                    gone = gone != 0 ? gone : id;
+                }
+                else if (d.Faction[slot] == (byte)CombatFaction.Player)
+                {
+                    return id;
+                }
+            }
+            return gone;
         }
 
         /// <summary>每步一次：待发布条目按先进先出发布最多 64 条（已发布表满 256 条 = 没有消费者时不发布，条目留在待发布表里按键合并；待发布表也封顶 256 条，见 <see cref="AddStructHit"/>）。</summary>

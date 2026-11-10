@@ -384,7 +384,7 @@ namespace BinGames.Sim.Combat
             EmgScalars es = d.EmgS[0];
             es.RulesSettled++;
             d.EmgS[0] = es;
-            EmgChainLog(ref d, EmgChainNode.Rule, chain, depth, r.Key, ownerId, pos, d.Id[u], r.Product);
+            EmgChainLog(ref d, EmgChainNode.Rule, chain, depth, r.Key, ownerId, pos, d.Id[u], r.Product, codex: r.Codex != 0);
             if (slot >= 0)
             {
                 EmgEntityEvent(ref d, EmgEventKind.React, EmgEntKind.Unit, d.Id[u], EmgEntKind.None, 0, d.EmgRuleCount[slot], 0f, (ushort)slot, pos);
@@ -709,7 +709,6 @@ namespace BinGames.Sim.Combat
             }
             double2 pos = d.Pos[u];
             int unitId = d.Id[u];
-            EmgChainLog(ref d, EmgChainNode.Rule, f.Chain, f.Depth, r.Key, f.Owner, pos, unitId, 0);
             EmgRuleSettle(ref d, r, f.Chain, f.Depth, f.Owner, pos, unitId);
             int killer = d.SlotOf(f.Owner);
             EmgDestroyDirect(ref d, u, killer);

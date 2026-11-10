@@ -457,6 +457,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgShoveRefMass = Mathf.Max(0.1f, Tuning("emg.push.ref_mass", EmgConst.DefaultShoveRefMass));
             // EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁“只跳已标记”确实跳到已标记目标时记在哪个图鉴条目上（按稳定键；内核不认内容 ID）。
             c.EmgMarkTagKey = NamedReactionCatalog.StableKey(MechanicalReactionCatalog.ReactionMarkJumpId);
+            // EMG4-CODEX-01（FGR-EMG-194）：一次根出手结算多少次交互记“极限”（链深达 3 另算）。
+            c.EmgExtremeCount = Math.Max(1, (int)Math.Round(Tuning("emg.codex.extreme_count", EmgConst.DefaultExtremeCount)));
             // EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲块数机制随阶段 1 开（emg.stage = 0 时块数 0 = 旧轨：反伤不限次数、不放破片）。
             c.EmgEraBlocks = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? Mathf.Clamp((int)Math.Round(Tuning("emg.era.blocks", 12f)) & ~1, 2, 16) : 0);
             c.EmgEraRefill = Mathf.Max(0.1f, Tuning("emg.era.refill_seconds", 3f));

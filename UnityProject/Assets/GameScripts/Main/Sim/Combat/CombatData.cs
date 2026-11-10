@@ -362,6 +362,11 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-FW-01（FGR-EMG-184 / 233 第 3 条）：本步破片误伤同阵营单位的命中（x = 受伤单位 ID，y = 破片归属单位 ID）；热更层只读它发友伤通知。不进快照。</summary>
         public NativeList<int3> EmgFriendly;
         public int EmgFriendlyPublished;
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：本步记“极限”的规则稳定键（一次根出手链深达 3 或结算满 emg.codex.extreme_count 次交互，每条链只记一次；同一交出口径）。不进快照。</summary>
+        public NativeList<int> EmgExtreme;
+        public int EmgExtremePublished;
+        /// <summary>EMG4-CODEX-01：按链号直接映射的计数表（下标 = 链号 &amp; (ChainTally − 1)；x = 链号，y = 规则结算次数，z = 最大链深 | 已记极限位 0x100，w = 最近一条规则的稳定键）。不进快照、不进哈希。</summary>
+        public NativeArray<int4> EmgChainTally;
         // ── EMG2-DISC-01（FGR-EMG-182 / 184）：交互伤害记账（全部不进快照、不进状态哈希；热更层每步读一次已合并的结果，读档后从空开始）──
         /// <summary>本步的交互伤害（按“规则键 + 归属”合并；脏列表同一交出口径）。</summary>
         public NativeList<EmgAttrRow> EmgAttrRows;

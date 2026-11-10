@@ -22,6 +22,8 @@ namespace GameLogic.Campaign.Economy
         public const string Terminal = "terminal";
         /// <summary>FG8-LOOT-02：三选一没选的候选转成的技术数据（事务号 lootpick:数据包ID）。</summary>
         public const string Loot = "loot";
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：组合图鉴“极限”首次奖励（事务号 codex-extreme:条目）。</summary>
+        public const string Codex = "codex";
         public const string Lab = "lab";
         public const string FusionSim = "fusion_sim";
         public const string Fusion = "fusion";
@@ -30,7 +32,7 @@ namespace GameLogic.Campaign.Economy
         public const string Other = "other";
 
         /// <summary>收入的来源（统计面板按这个顺序列）。</summary>
-        public static readonly string[] IncomeSources = { Analysis, Wreck, BlackBox, Relic, Terminal, Loot, Other };
+        public static readonly string[] IncomeSources = { Analysis, Wreck, BlackBox, Relic, Terminal, Loot, Codex, Other };
 
         /// <summary>支出的去处（统计面板按这个顺序列）。</summary>
         public static readonly string[] ExpenseSinks = { Lab, FusionSim, Fusion, Restore, Blueprint, Other };
@@ -69,6 +71,10 @@ namespace GameLogic.Campaign.Economy
             if (transactionId.StartsWith(LootPickService.TxPrefix, StringComparison.Ordinal))
             {
                 return Loot;
+            }
+            if (transactionId.StartsWith(Content.ReactionDiscoveryService.ExtremeTxPrefix, StringComparison.Ordinal))
+            {
+                return Codex;
             }
             if (transactionId.StartsWith("firmware_restore_tx_", StringComparison.Ordinal))
             {

@@ -22,7 +22,12 @@ namespace GameLogic.Campaign.Content
         /// <summary>本次运行发出的“新发现”通知条数（自检用）。</summary>
         public static int Posted { get; private set; }
 
-        public static void ResetForTests() => Posted = 0;
+        public static void ResetForTests()
+        {
+            Posted = 0;
+            ExtremeMarked = 0;
+            ExtremeRewarded = 0;
+        }
 
         public static string GenEntry(int gen) => "gen." + gen.ToString(CultureInfo.InvariantCulture);
 
@@ -54,6 +59,7 @@ namespace GameLogic.Campaign.Content
             };
             list.Sort((a, b) => string.CompareOrdinal(a.EntryId, b.EntryId));
             state.GrammarDiscoveries = list.ToArray();
+            Progression.MechanicCodex.Unlock(Progression.MechanicCodex.GrammarEntryId(entryId)); // EMG4-CODEX-01：语法条目进组合图鉴（跨存档，D-17）
             Discovered(state, siteId);
             Post(GrammarText(entryId), null);
             return true;
@@ -87,6 +93,70 @@ namespace GameLogic.Campaign.Content
                 ? GameText.Format("reaction.discovery.event", Emergence.EmgProgramTreeText.EventName((BinGames.Sim.Combat.EmgEventKind)e))
                 : entryId;
         }
+
+        // ─────────────────────────────── EMG4-CODEX-01：极限奖励 / 发现计数 ───────────────────────────────
+
+        /// <summary>技术数据奖励的事务号前缀（统计面板“组合图鉴极限”行，TechDataFlow.Codex）。</summary>
+        public const string ExtremeTxPrefix = "codex-extreme:";
+        public const string ExtremeNotifyType = "codex_extreme";
+
+        /// <summary>本次运行记下的“极限”条数与发出的奖励次数（自检用）。</summary>
+        public static int ExtremeMarked { get; private set; }
+        public static int ExtremeRewarded { get; private set; }
+
+        /// <summary>一次根出手结算多少次交互记“极限”（emg.codex.extreme_count；内核 CombatConfig.EmgExtremeCount 同一个值）。</summary>
+        public static int ExtremeCount => Math.Max(1, (int)Math.Round(Feedback.ReactionPopups.Tuning("emg.codex.extreme_count", BinGames.Sim.Combat.EmgConst.DefaultExtremeCount)));
+
+        public static int ExtremeReward => Math.Max(0, (int)Math.Round(Feedback.ReactionPopups.Tuning("emg.codex.extreme_reward", 20f)));
+
+        /// <summary>
+        /// FGR-EMG-194（FG19 第 14 节 #14 按推荐默认执行）：内核报来一次根出手达到链深 3 或结算 ≥ emg.codex.extreme_count 次交互，落在具名交互 <paramref name="reactionId"/> 上——
+        /// 本存档第一次时在条目上记“极限”，并按事务号 codex-extreme:&lt;条目&gt; 给一次技术数据（经济账本去重：同一条只发一次，读档后也不重发）。只记录、不封堵、不改数值。
+        /// 还没有发现记录的（理论上同一步先发现后记极限，不会出现）不记。返回 true = 这一次新记了极限。
+        /// </summary>
+        public static bool OnExtreme(CampaignState state, string reactionId, string siteId)
+        {
+            ReactionFirstTriggerRecord r = Combat.ReactionFeedback.FirstRecordOf(state, reactionId);
+            if (r == null || r.Extreme)
+            {
+                return false;
+            }
+            int reward = ExtremeReward;
+            string tx = ExtremeTxPrefix + reactionId;
+            bool paid = false;
+            ResourceTransactionRecord rec = CampaignEconomyLedger.Find(state, tx);
+            if (reward > 0 && rec?.State != ResourceTransactionState.Committed)
+            {
+                if (rec == null)
+                {
+                    CampaignEconomyLedger.ProposeProduce(state, tx, reactionId, CampaignEconomyLedger.ResourceTechData, reward);
+                    CampaignEconomyLedger.Reserve(state, tx);
+                    CampaignEconomyLedger.MarkRunning(state, tx);
+                }
+                paid = CampaignEconomyLedger.Commit(state, tx).Success;
+                if (!paid)
+                {
+                    return false; // 账本没记上：先不标极限，下一次达到极限再试（不吞奖励）
+                }
+                ExtremeRewarded++;
+                Economy.HomeInventory.Touch();
+            }
+            r.Extreme = true;
+            r.ExtremeTick = GameClock.Ticks;
+            r.ExtremeSiteId = siteId ?? string.Empty;
+            ExtremeMarked++;
+            Progression.MechanicCodex.Touch();
+            string name = NamedReactionCatalog.NameOf(reactionId) ?? reactionId;
+            NotificationCenter.Post(ExtremeNotifyType, paid ? GameText.Format("codex.combo.extreme_notify", name, reward) : GameText.Format("codex.combo.extreme_notify_nopay", name), null);
+            return true;
+        }
+
+        /// <summary>
+        /// 成就“组合图鉴发现 N 种交互”（FG15-SYS-04）与结局统计发现数（FG13-END-06）的计数接口：组合图鉴里已解锁的具名交互条目数（跨存档，D-17）；
+        /// <paramref name="withGrammar"/> 另加语法条目。只读图鉴解锁集合，O(条目数)。
+        /// </summary>
+        public static int DiscoveredInteractionCount(bool withGrammar = false) =>
+            Progression.MechanicCodex.UnlockedCountOf(Progression.MechanicCodexKind.Reaction) + (withGrammar ? Progression.MechanicCodex.UnlockedCountOf(Progression.MechanicCodexKind.Grammar) : 0);
 
         /// <summary>图鉴里这条反应的打法提示（reaction.&lt;id&gt;.tip；没有返回 null）。</summary>
         public static string TipOf(GameConfig.fg.Reaction row)

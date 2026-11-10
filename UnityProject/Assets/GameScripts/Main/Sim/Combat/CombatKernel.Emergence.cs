@@ -1292,7 +1292,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWrecks, 27, _d.Wrecks.Length);
+            sw.Begin(EmgConst.SegWrecks, 31, _d.Wrecks.Length);
             for (int i = 0; i < _d.Wrecks.Length; i++)
             {
                 EmgWreck k = _d.Wrecks[i];
@@ -1323,6 +1323,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(k.PushBy);
                 if (sw.F()) w.Write(k.PushCause);
                 if (sw.F()) w.Write(k.Killer); // EMG1-CHAIN-01：尾部追加击毁者，短段读到取 0 = 不明
+                if (sw.F()) w.Write(k.Owners.x); // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：尾部追加 4 个持久归属，短段读到取 0
+                if (sw.F()) w.Write(k.Owners.y);
+                if (sw.F()) w.Write(k.Owners.z);
+                if (sw.F()) w.Write(k.Owners.w);
                 sw.EndRecord();
             }
             sw.End();
@@ -1847,6 +1851,10 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) k.PushBy = r.ReadInt32();
                         if (sr.F()) k.PushCause = r.ReadUInt16();
                         if (sr.F()) k.Killer = r.ReadInt32();
+                        if (sr.F()) k.Owners.x = r.ReadInt32();
+                        if (sr.F()) k.Owners.y = r.ReadInt32();
+                        if (sr.F()) k.Owners.z = r.ReadInt32();
+                        if (sr.F()) k.Owners.w = r.ReadInt32();
                         if (!sr.RecordOk)
                         {
                             return CombatLoadResult.InvalidValue;

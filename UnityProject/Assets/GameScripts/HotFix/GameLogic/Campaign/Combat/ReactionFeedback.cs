@@ -177,6 +177,16 @@ namespace GameLogic.Campaign.Combat
                 }
                 k.EmgClueClearDirty();
             }
+            // EMG4-CODEX-01（FGR-EMG-194）：本步记“极限”的根出手（内核按链计数，一条链一次；O(本步极限数)），与是否观察无关
+            int extreme = k.EmgExtremeRows;
+            for (int j = 0; j < extreme; j++)
+            {
+                string rid = NamedReactionCatalog.IdOfKey(k.EmgExtremeAt(j));
+                if (rid != null)
+                {
+                    ReactionDiscoveryService.OnExtreme(state, rid, site.SiteId);
+                }
+            }
             if (countsOnly)
             {
                 return;
@@ -352,6 +362,7 @@ namespace GameLogic.Campaign.Combat
 
             int sourceId = k.ReactionLastSourceOf(ruleIndex);
             ReactionLogParty source = Party(site, state, sourceId);
+            string[] fwIds = ParticipatingFirmware(site, source, k.ReactionRule(ruleIndex).Pair);
             ReactionLog.Add(state, new ReactionLogEntry
             {
                 Tick = GameClock.Ticks,
@@ -363,9 +374,10 @@ namespace GameLogic.Campaign.Combat
                 Count = count,
                 Source = source,
                 Target = Party(site, state, k.ReactionLastTargetOf(ruleIndex)),
-                FirmwareIds = ParticipatingFirmware(site, source, k.ReactionRule(ruleIndex).Pair),
+                FirmwareIds = fwIds,
                 Position = ground,
             });
+            NoteCodex(site, state, rid, first, count, source, fwIds, ground);
             Revision++;
 
             if (!named)
@@ -418,6 +430,9 @@ namespace GameLogic.Campaign.Combat
             ReactionLogParty source = Party(site, state, sourceUnit);
             // EMG2-REACT-01：已端口化的具名交互（表里还有沾染配对）参与固件按配对认、并补旧标签轨的声音 + 字幕；装配反应（无配对）沿用核心固件与它们自己的提示时刻。
             uint pair = NamedReactionCatalog.TryGet(reactionId, out GameConfig.fg.Reaction row) ? NamedReactionCatalog.BitOf(row.TagA) | NamedReactionCatalog.BitOf(row.TagB) : 0u;
+            string[] fwIds = pair != 0u ? ParticipatingFirmware(site, source, pair)
+                : FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>();
+            NoteCodex(site, state, reactionId, first, count, source, fwIds, ground);
             ReactionLog.Add(state, new ReactionLogEntry
             {
                 Tick = GameClock.Ticks,
@@ -429,8 +444,7 @@ namespace GameLogic.Campaign.Combat
                 Count = count,
                 Source = source,
                 Target = targetUnit > 0 ? Party(site, state, targetUnit) : new ReactionLogParty { Known = true, LabelKey = "reaction.log.ground" }, // EMG2-REACT-02：斑块层结算没有目标单位
-                FirmwareIds = pair != 0u ? ParticipatingFirmware(site, source, pair)
-                    : FirmwareOf(site, source) is string[] fwOfSource ? AssemblyFirmware(fwOfSource) : Array.Empty<string>(),
+                FirmwareIds = fwIds,
                 Position = ground,
             });
             Revision++;
@@ -458,6 +472,37 @@ namespace GameLogic.Campaign.Combat
                 }
                 CameraNudge.Begin(new Vector3(ground.x, 0f, ground.y), NudgeSeconds, NudgeFraction);
             }
+        }
+
+        /// <summary>
+        /// EMG4-CODEX-01（FGR-EMG-183）：组合图鉴条目的本存档记录——已触发次数按可靠计数累加（O(记录数) ≤ 约 30，只在规则结算的那一步）；
+        /// 首次发现这一次写因果链快照：出手的一方、参与的固件、出手机器的部件（主组件 / 功能件）、地点坐标（地点名已在 SiteId）。没有记录（未命名）不写。
+        /// </summary>
+        private static void NoteCodex(CombatSite site, CampaignState state, string reactionId, bool first, int count, in ReactionLogParty source, string[] firmwareIds, Vector2 ground)
+        {
+            ReactionFirstTriggerRecord r = FirstRecordOf(state, reactionId);
+            if (r == null)
+            {
+                return;
+            }
+            r.Count += Math.Max(0, count);
+            if (!first)
+            {
+                return;
+            }
+            r.Source = source;
+            r.FirmwareIds = firmwareIds ?? Array.Empty<string>();
+            r.PartIds = source.Kind == CombatUnitKind.Machine && source.LogicId > 0 && site.TryGetMachineWeapon(source.LogicId, out MachineWeaponInfo info)
+                ? PartsOf(info) : Array.Empty<string>();
+            r.HasPos = true;
+            r.X = ground.x;
+            r.Y = ground.y;
+        }
+
+        private static string[] PartsOf(in MachineWeaponInfo info)
+        {
+            bool p = !string.IsNullOrEmpty(info.PrimaryId), u = !string.IsNullOrEmpty(info.UtilityId);
+            return p && u ? new[] { info.PrimaryId, info.UtilityId } : p ? new[] { info.PrimaryId } : u ? new[] { info.UtilityId } : Array.Empty<string>();
         }
 
         /// <summary>装配反应不读标签：参与的固件取这台机器生效固件里的核心 / 限制器类（标记跳转、过载都是核心固件带进来的）。</summary>

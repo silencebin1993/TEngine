@@ -174,8 +174,9 @@ namespace GameLogic.EditorTools
             int closedFw = fwEntries.Count(e => !FirmwareKinds.IsObtainable(e.ContentId) && !MechanicCodex.IsUnlocked(e.Id));
             Expect(FirmwareCatalog.BaseCount == 44 && fw.Count == nFw && fwEntries.Count == nFw && missing.Count == 0 && MechanicCodex.CountIn(MechanicCodex.TabFirmware) == nFw - closedFw,
                 $"固件目录 {fw.Count} 条，图鉴固件条目 {fwEntries.Count} 条，一一对应；固件页签计数 {MechanicCodex.CountIn(MechanicCodex.TabFirmware)} = {nFw} − 当前阶段拿不到的 {closedFw}{(missing.Count > 0 ? "；缺：" + string.Join("、", missing) : "")}");
-            Expect(rxEntries.Count == reactions && reactions >= 18 && MechanicCodex.CountIn(MechanicCodex.TabReaction) == reactions,
-                $"具名反应 {reactions} 条，图鉴反应页签 {rxEntries.Count} 条");
+            int grammar = MechanicCodex.GrammarIds().Count(); // EMG4-CODEX-01：组合图鉴页签另含语法条目
+            Expect(rxEntries.Count == reactions && reactions >= 18 && MechanicCodex.CountIn(MechanicCodex.TabReaction) == reactions + grammar,
+                $"具名反应 {reactions} 条，图鉴反应页签 {rxEntries.Count} 条（页签另含语法条目 {grammar} 条）");
             var bad = new List<string>();
             foreach (MechanicCodexEntry e in fwEntries)
             {

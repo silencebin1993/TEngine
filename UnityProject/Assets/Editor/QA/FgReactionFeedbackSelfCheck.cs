@@ -924,7 +924,7 @@ namespace GameLogic.EditorTools
                 Click(panel.TabButton(ReactionLogPanelUIToolkit.Tab.Codex));
                 string codex = string.Join("\n", Enumerable.Range(0, panel.VisibleRowCount).Select(panel.RowText));
                 bool codexOk = !panel.FilterBarVisible && codex.Contains("短路") && codex.Contains("首次触发") && codex.Contains("？？？") && !codex.Contains("热震\n")
-                               && codex.Contains(GameText.Get("reaction.codex.locked")) && !codex.Contains("尚未开放命名") && !codex.Contains("无法触发") && panel.FooterText.Contains("1 / 18"); // EMG2-REACT-01：碎裂改走端口后 18 条全部可达
+                               && codex.Contains(GameText.Get("reaction.codex.locked")) && !codex.Contains("尚未开放命名") && !codex.Contains("无法触发") && panel.FooterText.Contains("1 / " + NamedReactionCatalog.Rows.Count); // EMG4-CODEX-01：+11 条斑块级具名交互；EMG2-REACT-01：碎裂改走端口后 18 条全部可达
                 ReactionLog.Clear();
                 panel.SelectTab(ReactionLogPanelUIToolkit.Tab.Log);
                 panel.SelectFilter(ReactionLogFilter.All);

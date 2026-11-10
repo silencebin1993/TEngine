@@ -275,6 +275,47 @@ namespace GameLogic.Campaign.Combat
             return names.Count > 0 ? string.Join(GameText.Get("emg.chain.list_sep"), names) : GameText.Get("emg.chain.party.unknown");
         }
 
+        /// <summary>
+        /// EMG4-CODEX-01（DEBT-EMG1CHAIN01-04，FGR-EMG-181）：悬停敌方 / 己方单位的三段——是什么（名字 + 种类）、谁造成的（身上相态的来源；内核只记最近一次来源）、
+        /// 接下来会怎样（相态还剩几秒 / 正在累积的量到多少会进哪个相态）。只读这一个单位的内核状态，O(相态种类数)，悬停时才调。不是单位返回 null。
+        /// </summary>
+        public static string UnitHoverLine(CombatSite site, CampaignState state, int unitId)
+        {
+            if (site == null || site.IsDisposed || !site.Kernel.TryGetUnit(unitId, out CombatUnitView v))
+            {
+                return null;
+            }
+            string what = GameText.Format("emg.hover.unit.what", PartyName(site, state, unitId), KindName((byte)v.Kind));
+            string who = GameText.Get("emg.hover.unit.who_none"), next = GameText.Get("emg.hover.unit.next_none");
+            if (site.Kernel.TryGetUnitEmg(unitId, out _, out EmgUnitState s))
+            {
+                float bestAcc = 0f;
+                for (int k = 0; k < EmgPhaseConst.Hack; k++)
+                {
+                    if ((s.PhaseMask & (1 << k)) != 0)
+                    {
+                        if (s.LastHitBy != 0)
+                        {
+                            who = GameText.Format("emg.hover.unit.who_phase", EmgPhaseFeedback.PhaseName(k), PartyName(site, state, s.LastHitBy));
+                        }
+                        next = GameText.Format("emg.hover.unit.next_phase", EmgPhaseFeedback.PhaseName(k), F1(math.max(0f, CombatLogic.PhsTOf(s, k))));
+                        bestAcc = float.MaxValue; // 已在相态里：“接下来”写到期，不再看累积
+                        continue;
+                    }
+                    EmgPhaseRule r = site.Kernel.PhaseRuleAt(k);
+                    float frac = r.Enter > 0f ? CombatLogic.AccOf(s, k) / r.Enter : 0f;
+                    if (frac > 0.001f && frac > bestAcc)
+                    {
+                        bestAcc = frac;
+                        next = GameText.Format("emg.hover.unit.next_acc", EmgPhaseFeedback.AccName(k), Mathf.RoundToInt(100f * frac).ToString(CultureInfo.InvariantCulture), EmgPhaseFeedback.PhaseName(k));
+                    }
+                }
+            }
+            return Three(what, who, next);
+        }
+
+        private static string F1(float x) => x.ToString("0.0", CultureInfo.InvariantCulture);
+
         private static string Three(string what, string who, string next) =>
             GameText.Format("emg.hover.label.what", what) + "\n" + GameText.Format("emg.hover.label.who", who) + "\n" + GameText.Format("emg.hover.label.next", next);
 

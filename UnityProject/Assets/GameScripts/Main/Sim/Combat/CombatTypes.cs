@@ -1452,6 +1452,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-CHAIN-01（FGR-EMG-084 阶段 1 计数路径）：连锁按“已标记”偏好确实跳到已标记目标时计数用的图鉴条目稳定键（热更层按 fg.TbReaction 写；0 = 不计）。
         /// 内核不认内容 ID，只认这个数（FGR-EMG-013）。</summary>
         public int EmgMarkTagKey;
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194，fg.TbHomeTuning emg.codex.extreme_count）：一次根出手结算多少次交互记“极限”（≤ 0 用 <see cref="EmgConst.DefaultExtremeCount"/>）。</summary>
+        public int EmgExtremeCount;
         /// <summary>EMG1-FW-01（FGR-EMG-233，fg.TbHomeTuning emg.era.blocks / refill_seconds）：爆炸反应装甲每台总块数（2～16 的偶数，左右侧裙各一半）与每补回 1 块的秒数。
         /// 块数 0 = 块数机制关（emg.stage = 0）：反伤不限次数、不放破片，旧行为逐字不变。</summary>
         public byte EmgEraBlocks;
