@@ -463,6 +463,7 @@ namespace GameLogic.Campaign.Defense
                 float max = BuildingOps.MaxDurability(b.BuildingTypeId);
                 float hp = Mathf.Clamp(BuildingOps.Durability(b), 1f, max);
                 site.SpawnTurretUnit(r.Serial, center, radius, hp, max, w0, TurretCatalog.TierArmor(tier), false, Vector2.up, 0f);
+                site.ApplyTurretFlagBehavior(r.Serial, p?.PrimaryId); // EMG4-LOOT-01 修复轮 1：环形喷淋架（枢轴喷灌）
                 b.Health = hp;
                 rt.LastPushedHp = hp;
                 rt.Tier = tier;
@@ -520,6 +521,7 @@ namespace GameLogic.Campaign.Defense
                     {
                         site.SetTurretWeapon(r.Serial, w);
                     }
+                    site.ApplyTurretFlagBehavior(r.Serial, p.PrimaryId); // EMG4-LOOT-01 修复轮 1：换主组件后标志组件行为跟着变
                     rt.WeaponPushed = true;
                 }
                 site.SetTurretFlag(r.Serial, CombatUnitFlags.HeatSink, p.HasHeatSinkStructure);

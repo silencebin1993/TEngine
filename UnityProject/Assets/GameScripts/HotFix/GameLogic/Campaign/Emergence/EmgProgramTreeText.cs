@@ -112,7 +112,8 @@ namespace GameLogic.Campaign.Emergence
         public const string UnknownKey = "emg.tree.unknown";
 
         /// <summary>固件显示名；表里没登记显示名时写“未登记名称”，不把内容 ID 露给玩家（B16）。</summary>
-        public static string FirmwareName(string firmwareId) => FirmwareKinds.DisplayName(firmwareId) ?? GameText.Get(UnknownKey);
+        public static string FirmwareName(string firmwareId) => FirmwareKinds.DisplayName(firmwareId)
+            ?? (Content.CarrierReadings.TryGetComponent(firmwareId, out GameConfig.fg.CombatComponent comp) ? GameText.Get(comp.NameKey) : GameText.Get(UnknownKey)); // EMG4-LOOT-01：主组件内置指令写组件名
 
         /// <summary>事件的玩家名（端口名文本 emg.port.&lt;id&gt;.name）。</summary>
         public static string EventName(EmgEventKind e) =>

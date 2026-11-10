@@ -51,6 +51,8 @@ namespace GameLogic.Campaign.Emergence
         public bool Flip;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合芯片展开出的内置接线（不占节点容量、不占刷写带宽、不显示为独立固件）。</summary>
         public bool Builtin;
+        /// <summary>EMG4-LOOT-01 修复轮 1（FGR-FAC-009）：主组件自带的程序声明编成的内置指令（放在根节点、另加一格容量，不挤占固件槽、不占刷写带宽）。</summary>
+        public bool Innate;
         /// <summary>EMG3-FUSE-01（FG19A 第 4.2 节）：这条指令的写端产生的落点种类（EmgAnchorConst；0 = 不接线）。</summary>
         public byte AnchorKind;
     }
@@ -254,7 +256,7 @@ namespace GameLogic.Campaign.Emergence
                 EmgCatalog.PartPropModify("prop.integrity", new[] { p.PrimaryId }, out float heal);
                 healOnly = heal > 0f;
             }
-            EmgProgramResult res = Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly, baseGen);
+            EmgProgramResult res = Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly, baseGen, p.PrimaryId);
             // EMG3-SQD-01：结构模块声明 sqd.relay scope（按声明判，不认模块 ID）；与 CombatSite.ApplyRelay 同一判定
             res.Relay = EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(p.StructureId) && EmgCatalog.PartReads("sqd.relay", EmgRole.Scope, new[] { p.StructureId });
             return res;
@@ -272,7 +274,7 @@ namespace GameLogic.Campaign.Emergence
             }
             foreach (EmgProgramStep s in r.Steps)
             {
-                if (!s.Overflow && !s.Builtin && !(noCore && s.Core)) // EMG3-FUSE-01：内置接线不占刷写带宽
+                if (!s.Overflow && !s.Builtin && !s.Innate && !(noCore && s.Core)) // EMG3-FUSE-01：内置接线不占刷写带宽；EMG4-LOOT-01：主组件内置指令同样
                 {
                     list.Add(s);
                 }
@@ -744,8 +746,9 @@ namespace GameLogic.Campaign.Emergence
         /// <param name="rootCapacity">≤ 0 = 按公式 C0 = 机器固件槽数 + 接入口配额；自检可给别的值验证“配额变了公式不变”（FGR-EMG-039）。</param>
         /// <param name="lobAllowed">主组件可抛射（作战组件表 flightLob）；false 时 lob 动词不执行并给原因 <see cref="NoteLobStraight"/>（光束：曲射只留落点扬尘）。</param>
         /// <param name="baseGen">EMG4-HIJ-02：根节点代号（1 = 镜像复制品，见 <see cref="CompileCopy"/>）；容量公式不变 C(gen) = max(1, C0 / 2^gen)。</param>
+        /// <param name="innateOwner">EMG4-LOOT-01 修复轮 1：主组件 ID——它自己的声明里有程序写端时编成一条内置指令（<see cref="AddInnate"/>）；null = 没有。</param>
         public static EmgProgramResult Compile(IReadOnlyList<string> uplinkFirmwareIds, IReadOnlyList<string> localFirmwareIds, FirmwareCarrier carrier, int rootCapacity = 0,
-            bool lobAllowed = true, ICollection<string> skipUplink = null, bool healOnly = false, int baseGen = 0)
+            bool lobAllowed = true, ICollection<string> skipUplink = null, bool healOnly = false, int baseGen = 0, string innateOwner = null)
         {
             EmgCompiled c = EmgCatalog.Current;
             EnsureIndex(c);
@@ -760,6 +763,7 @@ namespace GameLogic.Campaign.Emergence
             };
             AddSlots(r, c, uplinkFirmwareIds, true, skipUplink);
             AddSlots(r, c, localFirmwareIds, false, null);
+            AddInnate(r, c, innateOwner);
             if (r.IsEmpty)
             {
                 return r; // 全空程序：武器照常基础攻击，不登记程序（Program = −1）
@@ -794,7 +798,7 @@ namespace GameLogic.Campaign.Emergence
             int cut = kept[Math.Min(k, kept.Count) - 1].Ordinal;
             for (int i = 0; i < t.Steps.Count; i++)
             {
-                if (t.Steps[i].Ordinal > cut && !t.Steps[i].Overflow && !t.Steps[i].Builtin)
+                if (t.Steps[i].Ordinal > cut && !t.Steps[i].Overflow && !t.Steps[i].Builtin && !t.Steps[i].Innate)
                 {
                     EmgProgramStep c = t.Steps[i].CloneStep();
                     c.Overflow = true;
@@ -1221,7 +1225,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     Ordinal = i, FirmwareId = s.FirmwareId, OwnerId = s.OwnerId, FromUplink = s.FromUplink, Core = s.Core, Promoted = s.Promoted, Kind = s.Kind,
                     TrigEvent = s.TrigEvent, TrigParam = s.TrigParam, TrigCount = s.TrigCount, EventPort = s.EventPort, TableHeat = s.TableHeat, Flip = i > firstRev,
-                    Builtin = s.Builtin, AnchorKind = s.AnchorKind, // EMG3-FUSE-01：逆序树里接线照常按新序列的前后两条判
+                    Builtin = s.Builtin, Innate = s.Innate, AnchorKind = s.AnchorKind, // EMG3-FUSE-01：逆序树里接线照常按新序列的前后两条判
                 };
                 x.Decls.AddRange(s.Decls);
                 t.Steps.Add(x);
@@ -1299,6 +1303,39 @@ namespace GameLogic.Campaign.Emergence
                     AddOwner(r, c, id, id, fromUplink, core);
                 }
             }
+        }
+
+        /// <summary>
+        /// EMG4-LOOT-01 修复轮 1（FGR-FAC-009，承接 FG-GAP-150；规则只看端口，FGR-EMG-013）：主组件自己的声明里有程序写端（mat.* 排放、hij.* 注入、grm.* 语法修饰）时，
+        /// 与固件同一套编译编成一条内置指令——放在根节点、另加一格容量（不挤占固件槽与接入配额）、不计指令热量、不占刷写带宽。
+        /// 阵营标志组件（喷淋臂 / 环形喷淋架“命中 → 排放酸液”、干扰发射器“注入入侵度”、驻锄曲射炮“抛射”）靠它生效；
+        /// 其余组件的声明只写能量 / 实体 / 场 / 属性端口（由读法与部件场在别处结算），没有程序写端，不受影响。
+        /// </summary>
+        private static void AddInnate(EmgProgramResult r, EmgCompiled c, string owner)
+        {
+            if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !c.OwnerActive(oi) || !DeclsByOwner.TryGetValue(oi, out List<int> all)
+                || !all.Exists(x => ProgramWrite(c.Decls[x])))
+            {
+                return;
+            }
+            int before = r.Steps.Count;
+            AddOwner(r, c, owner, owner, false, false);
+            if (r.Steps.Count > before)
+            {
+                EmgProgramStep s = r.Steps[r.Steps.Count - 1];
+                s.Innate = true;
+                s.TableHeat = 0f;
+            }
+        }
+
+        private static bool ProgramWrite(EmgDeclRow d)
+        {
+            if (d.Dir != EmgDirs.Write || !PortIds.TryGetValue(d.Port, out string pid))
+            {
+                return false;
+            }
+            EmgFamily f = EmgCatalog.FamilyOf(pid);
+            return f == EmgFamily.Matter || f == EmgFamily.Hijack || f == EmgFamily.Grammar;
         }
 
         private static void AddOwner(EmgProgramResult r, EmgCompiled c, string firmwareId, string owner, bool fromUplink, bool core)
@@ -1380,7 +1417,15 @@ namespace GameLogic.Campaign.Emergence
             EmgTreeNode root = NewNode(r, -1, r.BaseGen, null); // EMG4-HIJ-02：镜像复制品的根是 1 代
             foreach (EmgProgramStep s in r.Steps)
             {
-                if (!s.Promoted)
+                if (s.Innate)
+                {
+                    root.Capacity++; // EMG4-LOOT-01：主组件内置指令另占一格，不挤固件
+                    Place(r, root, s);
+                }
+            }
+            foreach (EmgProgramStep s in r.Steps)
+            {
+                if (!s.Promoted || s.Innate)
                 {
                     continue;
                 }
@@ -1395,7 +1440,7 @@ namespace GameLogic.Campaign.Emergence
             EmgTreeNode cur = root;
             foreach (EmgProgramStep s in r.Steps)
             {
-                if (s.Promoted || s.Builtin) // EMG3-FUSE-01：内置接线不另占容量
+                if (s.Promoted || s.Builtin || s.Innate) // EMG3-FUSE-01：内置接线不另占容量；EMG4-LOOT-01：主组件内置指令已放进根
                 {
                     continue;
                 }

@@ -1138,6 +1138,39 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>
+        /// EMG4-LOOT-01 修复轮 1（FGR-FAC-009；B10）：装配变化后改单位的行为参数行（标志组件带来的潜伏 / 架炮驻锄 / 枢轴喷灌；-1 = 没有）。
+        /// 换了行就清掉旧行为留下的状态（潜伏 / 现形预警、架设、喷灌臂），卸下的部件不再生效、新装的从头开始。
+        /// </summary>
+        public bool SetBehaviorProfile(int id, int profile)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || profile < -1 || profile >= _d.Profiles.Length)
+            {
+                return false;
+            }
+            if (_d.BProfile[i] == profile)
+            {
+                return true;
+            }
+            _d.BProfile[i] = profile;
+            CombatSilentUnit sl = _d.Silent[i];
+            sl.Still = 0f;
+            sl.Reveal = 0f;
+            _d.Silent[i] = sl;
+            _d.Set(i, CombatUnitFlags.Stealthed, false);
+            CombatFoundryUnit f = _d.Foundry[i];
+            f.Deploy = 0;
+            f.DeployT = 0f;
+            _d.Foundry[i] = f;
+            CombatClarityUnit c = _d.Clarity[i];
+            c.Pivot = 0;
+            c.PivotT = 0f;
+            _d.Clarity[i] = c;
+            Touch();
+            return true;
+        }
+
         /// <summary>FG6-DEF-01：单位当前的装甲减伤比例（不存在 = 0）。</summary>
         public float ArmorOf(int id)
         {
@@ -4443,7 +4476,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>FG9-FAC-02：读回的铸造状态必须在取值范围内（阶段字节、发数非负、计时有限）。</summary>
         private static bool FoundryValid(in CombatFoundryUnit f) =>
-            f.Salvo <= 2 && f.Deploy <= 2 && f.Charge <= 2 && f.AirMode <= 1 && f.MineState <= 1 && f.SalvoLeft >= 0 && f.SalvoLeft <= 64
+            f.Salvo <= 2 && f.Deploy <= 3 && f.Charge <= 2 && f.AirMode <= 1 && f.MineState <= 1 && f.SalvoLeft >= 0 && f.SalvoLeft <= 64
             && f.SalvoTarget >= 0 && f.ChargeSeq >= 0 && f.RamBy >= 0 && f.RamSeq >= 0 && f.MineOwner >= 0
             && Finite(f.SalvoT) && Finite(f.DeployT) && Finite(f.ChargeT) && Finite(f.ChargeDir.x) && Finite(f.ChargeDir.y) && Finite(f.MineT)
             && Finite(f.MineLife) && Finite(f.LayT) && !double.IsNaN(f.AnchorPos.x) && !double.IsNaN(f.AnchorPos.y)

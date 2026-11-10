@@ -65,7 +65,7 @@ namespace GameLogic.EditorTools
             string dist = string.Join("；", owners.GroupBy(o => (o.Kind, o.Gate)).OrderBy(g => g.Key.Kind, StringComparer.Ordinal).ThenBy(g => g.Key.Gate)
                 .Select(g => $"{g.Key.Kind} 阶段 {g.Key.Gate}：{g.Count()}"));
             int Count(string kind) => owners.Count(o => o.Kind == kind);
-            Expect(off.Count == 0 && pending.Count == 0 && mixedOff.Count == 0 && Count("firmware") >= 52 && mixed == 30 && Count("component") >= 15 && Count("structure") == 4 && Count("chassis") == 7,
+            Expect(off.Count == 0 && pending.Count == 0 && mixedOff.Count == 0 && Count("firmware") >= 52 && mixed == 30 && Count("component") >= 15 && Count("structure") == 6 /* EMG4-LOOT-01：+ 吸波伪装罩、装甲裙板 */ && Count("chassis") == 7,
                 $"FGT-EMG-055 清单：声明 owner 分布（{dist}）；stageGate ≤ 3 而不在声明轨的 {off.Count} 个{Detail(off)}；用到未接通端口（{string.Join("、", EmgCatalog.PendingPorts)}）的 {pending.Count} 个{Detail(pending)}；" +
                 $"30 条混合固件两父都在声明轨（不在的 {mixedOff.Count}）");
             Line($"    stageGate = 4（仍走旧轨）的 owner：表内 {gate4.Count} 个{(gate4.Count > 0 ? "：" + string.Join("、", gate4) : string.Empty)}；" +

@@ -12530,6 +12530,11 @@ namespace GameLogic.EditorTools
             bool cards = panel != null && Enumerable.Range(0, 3).All(i => panel.CardName(i).Length > 0 && panel.CardMeta(i).Contains("占货舱") && panel.CardCompare(i).StartsWith("对比"));
             Check(cards && panel.ChooseEnabled(0) && panel.ReasonText.Length == 0 && panel.WhereText.Contains("入库"),
                 $"三张候选卡（“{panel?.CardName(0)}”：“{panel?.CardMeta(0)}”；“{panel?.CardCompare(0)}”），在家园可以直接选（去向“{panel?.WhereText}”）");
+            // EMG4-LOOT-01（FGR-EMG-191）：通道源候选（固件 / 部件）带“新交互”提示行，非通道源（材料 / 数据核心）不显示；三张卡同样展示
+            Campaign.LootPackageRecord hp = panel != null ? Campaign.Economy.LootPickService.Find(state, panel.CurrentPacketId) : null;
+            bool hints = hp != null && Enumerable.Range(0, Math.Min(3, hp.Candidates.Length)).All(i =>
+                (Campaign.Economy.LootInteractionHint.OwnerOf(hp.Candidates[i]) != null) == (panel.CardHint(i).Contains("新交互")));
+            Check(hints, $"候选卡的新交互提示（“{panel?.CardHint(0)}”）：通道源才显示、三张卡同样展示");
             CheckNoTextMarkers("待分拣面板");
             int tech = panel != null ? Campaign.Economy.LootPickService.LeftoverTechIf(Campaign.Economy.LootPickService.Find(state, id), 0) : 0;
             long tech0 = long.Parse(SessionState.GetString(K + "LootTech", "0"), System.Globalization.CultureInfo.InvariantCulture);

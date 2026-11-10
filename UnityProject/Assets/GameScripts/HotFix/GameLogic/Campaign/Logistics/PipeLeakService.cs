@@ -578,7 +578,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return;
             }
-            bool own = site.Kernel.TryGetUnit(h.By, out CombatUnitView v) ? v.Faction == CombatFaction.Player : site.TryGetMachineOfUnit(h.By, out _);
+            bool own = site.IsPlayerUnit(h.By);
             if (!own)
             {
                 return;

@@ -128,9 +128,12 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             Line("  · A. 设计案 5.6 名表 16 个作战组件全部在表里；新 5 个的载体与投送参数、目录条目（中英文名 / 说明）、电路装配编译、固定底盘兼容；说明里的数与表同源");
-            var ids = CarrierReadings.Components.Select(c => c.Id).ToList();
+            // EMG4-LOOT-01（FGR-FAC-009）：表里另有阵营标志组件行（faction ≠ none，现有载体的阵营变体，不在设计案 5.6 名表里）——名表断言只数非标志组件行（硬规矩 (9)①，M10-BASELINE 差异表）
+            var ids = CarrierReadings.Components.Where(c => string.IsNullOrEmpty(c.Faction) || c.Faction == "none").Select(c => c.Id).ToList();
+            int flags = CarrierReadings.Components.Count(c => !string.IsNullOrEmpty(c.Faction) && c.Faction != "none");
             var roster = MachineMorph.MorphComponents;
-            Expect(ids.Count == 16 && roster.All(ids.Contains) && NewComponents.All(ids.Contains), $"fg.TbCombatComponent {ids.Count} 行 = 名表 16 个（{string.Join("、", ids)}）");
+            Expect(ids.Count == 16 && roster.All(ids.Contains) && NewComponents.All(ids.Contains) && flags == 4,
+                $"fg.TbCombatComponent 名表 16 个（{string.Join("、", ids)}）+ 阵营标志组件 {flags} 行");
             CarrierReadings.TryGetComponent(ComponentCatalog.CompOrbitId, out CombatComponent orbit);
             CarrierReadings.TryGetComponent(ComponentCatalog.CompSentryId, out CombatComponent sentry);
             CarrierReadings.TryGetComponent(ComponentCatalog.CompPulserId, out CombatComponent pulser);

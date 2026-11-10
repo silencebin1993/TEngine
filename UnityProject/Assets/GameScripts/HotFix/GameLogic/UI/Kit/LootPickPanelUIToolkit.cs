@@ -57,6 +57,12 @@ namespace GameLogic.UI.Kit
         private readonly Label[] _cmp = new Label[Cards];
         private readonly Label[] _tech = new Label[Cards];
         private readonly Button[] _choose = new Button[Cards];
+        private readonly Label[] _hint = new Label[Cards];
+        private readonly Label[] _hintList = new Label[Cards];
+        // EMG4-LOOT-01：新交互提示按数据包缓存，打开 / 换数据包时才重算（FGR-EMG-191“打开数据包时算一次”）
+        private LootInteractionHint.Hint[] _hints;
+        private string _hintPacket;
+        private int _hintLanguage = -1;
         private Label _message;
         private Label _heldTitle;
         private ScrollView _heldList;
@@ -88,6 +94,25 @@ namespace GameLogic.UI.Kit
         public string CardMeta(int i) => i >= 0 && i < Cards ? _meta[i]?.text ?? string.Empty : string.Empty;
         public string CardCompare(int i) => i >= 0 && i < Cards ? _cmp[i]?.text ?? string.Empty : string.Empty;
         public string CardTech(int i) => i >= 0 && i < Cards ? _tech[i]?.text ?? string.Empty : string.Empty;
+        public string CardHint(int i) => i >= 0 && i < Cards ? _hint[i]?.text ?? string.Empty : string.Empty;
+        public string CardHintList(int i) => i >= 0 && i < Cards ? _hintList[i]?.text ?? string.Empty : string.Empty;
+        public bool CardHintExpanded(int i) => i >= 0 && i < Cards && _hintList[i] != null && !_hintList[i].ClassListContains("uk-hidden");
+        /// <summary>这张卡上的样式类（三张卡同样展示的断言用：不按 N 加任何类）。</summary>
+        public IEnumerable<string> CardClasses(int i) => i >= 0 && i < Cards && _card[i] != null ? _card[i].GetClasses() : Array.Empty<string>();
+        public IEnumerable<string> HintClasses(int i) => i >= 0 && i < Cards && _hint[i] != null ? _hint[i].GetClasses() : Array.Empty<string>();
+        /// <summary>重算过几次新交互提示（不按帧算的断言用）。</summary>
+        public int HintComputes { get; private set; }
+
+        /// <summary>悬停卡片：展开 / 收起交互列表（不是通道源的候选没有列表）。</summary>
+        public void SetHintExpanded(int i, bool on)
+        {
+            if (i < 0 || i >= Cards || _hintList[i] == null)
+            {
+                return;
+            }
+            _hintList[i].EnableInClassList("uk-hidden", !on || string.IsNullOrEmpty(_hintList[i].text));
+        }
+
         public bool CardIsNew(int i) => i >= 0 && i < Cards && _new[i] != null && !_new[i].ClassListContains("uk-hidden");
         public bool CardHasClass(int i, string cls) => i >= 0 && i < Cards && _card[i] != null && _card[i].ClassListContains(cls);
         public bool ChooseEnabled(int i) => i >= 0 && i < Cards && _choose[i] != null && _choose[i].enabledSelf;
@@ -220,9 +245,14 @@ namespace GameLogic.UI.Kit
                 _meta[i] = root.Q<Label>("LootPickMeta" + i);
                 _cmp[i] = root.Q<Label>("LootPickCmp" + i);
                 _tech[i] = root.Q<Label>("LootPickTech" + i);
+                _hint[i] = root.Q<Label>("LootPickHint" + i);
+                _hintList[i] = root.Q<Label>("LootPickHintList" + i);
                 _choose[i] = root.Q<Button>("LootPickChoose" + i);
                 int index = i;
                 _choose[i].clicked += () => Choose(index);
+                // EMG4-LOOT-01：悬停卡片展开交互列表（未发现的只写两侧通道类别）
+                _card[i].RegisterCallback<PointerEnterEvent>(_ => SetHintExpanded(index, true));
+                _card[i].RegisterCallback<PointerLeaveEvent>(_ => SetHintExpanded(index, false));
             }
             _message = root.Q<Label>("LootPickMessage");
             _heldTitle = root.Q<Label>("LootPickHeldTitle");
@@ -257,6 +287,7 @@ namespace GameLogic.UI.Kit
                 UiEscapeStack.Push(this, () => SetOpen(false));
                 _messageText = null;
                 _key = 0;
+                _hintPacket = null; // 重新打开：按当下的拥有 / 发现记录重算一次
                 Refresh(force: true);
             }
             else
@@ -415,6 +446,13 @@ namespace GameLogic.UI.Kit
                 _pause.EnableInClassList("uk-hidden", can || GameClock.Paused || why == "loot.pick.reason.ground" || why == LootPickService.ReasonGoHome);
                 _where.text = can ? GameText.Get(atDepot ? "loot.pick.where.depot" : "loot.pick.where.cargo") : string.Empty;
                 _cargo.text = can && !atDepot ? LootPickService.CargoText(s, p) : string.Empty;
+                if (_hints == null || _hintPacket != p.PacketId || _hintLanguage != (int)GameText.Language)
+                {
+                    _hints = LootInteractionHint.For(s, p);
+                    _hintPacket = p.PacketId;
+                    _hintLanguage = (int)GameText.Language;
+                    HintComputes++;
+                }
                 for (int i = 0; i < Cards; i++)
                 {
                     LootCandidateRecord c = i < p.Candidates.Length ? p.Candidates[i] : null;
@@ -427,6 +465,13 @@ namespace GameLogic.UI.Kit
                     _meta[i].text = LootPickService.MetaText(s, c);
                     _cmp[i].text = LootPickService.CompareText(s, c);
                     _tech[i].text = GameText.Format("loot.pick.leftover", LootPickService.LeftoverTechIf(p, i));
+                    LootInteractionHint.Hint h = i < _hints.Length ? _hints[i] : null;
+                    string hintLine = LootInteractionHint.LineOf(h);
+                    _hint[i].text = hintLine;
+                    _hint[i].EnableInClassList("uk-hidden", string.IsNullOrEmpty(hintLine));
+                    bool expanded = !_hintList[i].ClassListContains("uk-hidden");
+                    _hintList[i].text = LootInteractionHint.ListOf(h);
+                    SetHintExpanded(i, expanded);
                     bool isNew = LootPickService.IsNew(s, c);
                     _new[i].EnableInClassList("uk-hidden", !isNew);
                     _new[i].text = GameText.Get("loot.pick.new");

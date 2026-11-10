@@ -88,6 +88,20 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>
+        /// EMG4-LOOT-01 修复轮 1：这个单位的普通开火是否由澄净阶段接管——敌方按 <see cref="ClarityOwnsAttack"/>；己方只接管枢轴喷灌（环形喷淋架，<see cref="StepClarity"/> 只给己方跑这一种），
+        /// 别的澄净参数（被劫持的喷洒车等）照旧普通开火。
+        /// </summary>
+        internal static bool ClarityOwnsAttackFor(ref CombatData d, int i)
+        {
+            if (d.Faction[i] == (byte)CombatFaction.Hostile)
+            {
+                return ClarityOwnsAttack(ref d, i);
+            }
+            int bp = d.BProfile[i];
+            return bp >= 0 && bp < d.Profiles.Length && d.Profiles[bp].PivotRadius > 0f;
+        }
+
+        /// <summary>
         /// 腐蚀蜂群“专门腐蚀建筑”（行为参数 StructPref）：射程内最近的己方建筑 / 炮塔（存活、可选中、没潜行、不是只受区域伤害的单位），并列取槽位大者；没有返回 -1。
         /// O(局部格子 + 单位)，与 <see cref="FindTarget"/> 同一套格子查询。
         /// </summary>
@@ -202,7 +216,8 @@ namespace BinGames.Sim.Combat
                 }
                 StepPhase(ref d, i, dt, now); // EMG2-PHS-01：7 个累积量与相态（取代云端 StepChill）
                 StepStick(ref d, i, dt); // EMG2-REACT-01（C06）：胶膜固化粘住计时
-                if (d.Faction[i] != (byte)CombatFaction.Hostile || IsImmobile(ref d, i) || d.Behavior[i] == (byte)CombatBehavior.Puddle)
+                bool hostile = d.Faction[i] == (byte)CombatFaction.Hostile;
+                if ((!hostile && d.Faction[i] != (byte)CombatFaction.Player) || IsImmobile(ref d, i) || d.Behavior[i] == (byte)CombatBehavior.Puddle)
                 {
                     continue;
                 }
@@ -212,6 +227,15 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 CombatBehaviorProfile p = d.Profiles[bp];
+                if (!hostile)
+                {
+                    // EMG4-LOOT-01 修复轮 1（FGR-FAC-009 环形喷淋架“枢轴喷灌”，规则与敌方版本一致）：己方只跑枢轴喷灌；炮塔要先启用武器（通电 / 有补给，与普通开火同一开关）
+                    if (p.PivotRadius > 0f && (d.Kind[i] != (byte)CombatUnitKind.Turret || d.Has(i, CombatUnitFlags.WeaponEnabled)))
+                    {
+                        StepPivot(ref d, i, in p, dt, now);
+                    }
+                    continue;
+                }
                 if (p.SprayRange > 0f)
                 {
                     StepSpray(ref d, ref grid, i, in p, dt);
@@ -472,7 +496,8 @@ namespace BinGames.Sim.Combat
         {
             CombatClarityUnit c = d.Clarity[i];
             double2 center = d.Pos[i];
-            int nearest = NearestPlayerGround(ref d, center, p.PivotRadius, out double2 at);
+            byte foe = d.Faction[i] == (byte)CombatFaction.Hostile ? (byte)CombatFaction.Player : (byte)CombatFaction.Hostile; // EMG4-LOOT-01：己方环形喷淋架扫敌方
+            int nearest = NearestPlayerGround(ref d, center, p.PivotRadius, out double2 at, foe);
             if (c.Pivot == 0)
             {
                 if (nearest < 0)
@@ -530,10 +555,14 @@ namespace BinGames.Sim.Combat
             FxOf(ref d, p.SprayStatus, out float sdps, out float sslow, out float svuln);
             float dmg = math.max(0f, p.PivotDps) * math.max(1f, p.PivotWidth) / math.max(1f, p.PivotSpeed);
             bool hitBuilding = false;
+            // EMG4-LOOT-01 修复轮 1：己方喷灌臂扫中 = 这把武器的一次出手（evt.hit 进它的程序：环形喷淋架声明的“命中 → 排放酸液”在被扫中的目标脚下生成斑块）；
+            // 敌方的喷灌照旧不开出手上下文（逐字不变）。
+            int w = d.Weapon[i];
+            bool shot = false;
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {
-                if (k == i || d.Faction[k] != (byte)CombatFaction.Player || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
+                if (k == i || d.Faction[k] != foe || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
                 {
                     continue;
                 }
@@ -547,9 +576,21 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 hitBuilding |= IsBuilding(ref d, k);
+                if (!shot && foe == (byte)CombatFaction.Hostile && w >= 0 && w < d.Weapons.Length && d.Weapons[w].Program >= 0)
+                {
+                    shot = true;
+                    EmgShotBegin(ref d, i, k, d.Weapons[w]);
+                }
                 if (dmg > 0f)
                 {
-                    DamageFrom(ref d, k, dmg, i, EmgCode.SrcMelee);
+                    if (shot)
+                    {
+                        DamageUnit(ref d, k, dmg, i); // 在出手上下文里结算（DamageFrom 会换成无程序的来源上下文，evt.hit 进不了程序）
+                    }
+                    else
+                    {
+                        DamageFrom(ref d, k, dmg, i, EmgCode.SrcMelee);
+                    }
                 }
                 if ((p.SprayChill > 0f ? p.SprayStatus & ~d.FrozenBit : p.SprayStatus) != 0u && d.IsAlive(k))
                 {
@@ -559,7 +600,14 @@ namespace BinGames.Sim.Combat
                 cc.PivotHits++;
                 d.Counters[0] = cc;
             }
-            MarkSiegeAttack(ref d, i, hitBuilding);
+            if (shot)
+            {
+                EmgShotEnd(ref d);
+            }
+            if (foe == (byte)CombatFaction.Player)
+            {
+                MarkSiegeAttack(ref d, i, hitBuilding);
+            }
         }
 
         /// <summary>方向的角度（度，0 = +x，逆时针）。</summary>
@@ -578,8 +626,8 @@ namespace BinGames.Sim.Combat
             return x > 180f ? x - 360f : x;
         }
 
-        /// <summary>半径内最近的己方地面单位（含建筑 / 炮塔；不含空中）。</summary>
-        private static int NearestPlayerGround(ref CombatData d, double2 pos, float radius, out double2 at)
+        /// <summary>半径内最近的己方地面单位（含建筑 / 炮塔；不含空中）。<paramref name="faction"/> = 找哪一方（EMG4-LOOT-01：己方环形喷淋架找敌方；缺省己方，旧调用逐字不变）。</summary>
+        private static int NearestPlayerGround(ref CombatData d, double2 pos, float radius, out double2 at, byte faction = (byte)CombatFaction.Player)
         {
             int best = -1;
             double bestD = double.MaxValue;
@@ -587,7 +635,7 @@ namespace BinGames.Sim.Combat
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {
-                if (d.Faction[k] != (byte)CombatFaction.Player || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
+                if (d.Faction[k] != faction || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable) || IsAir(ref d, k))
                 {
                     continue;
                 }

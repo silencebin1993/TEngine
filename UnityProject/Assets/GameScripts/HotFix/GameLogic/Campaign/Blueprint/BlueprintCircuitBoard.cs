@@ -52,6 +52,8 @@ namespace GameLogic.Campaign.Blueprint
         ComponentNotOnFixedChassis,
         /// <summary>EMG1-FW-01（FGR-EMG-193 第 2 条）：同一台机器装了两件同名部件（旧存档 / 外部改动）——库存不动，蓝图标红、拒绝再保存（文本 emg.compile.part_duplicate）。</summary>
         PartDuplicate,
+        /// <summary>EMG4-LOOT-01（FGR-FAC-009）：一台机器装的阵营标志组件超过上限 emg.flag.max_per_machine。</summary>
+        FlagLimit,
     }
 
     public sealed class CircuitIssue
@@ -112,6 +114,23 @@ namespace GameLogic.Campaign.Blueprint
                 }
             }
             return false;
+        }
+
+        public const string FlagLimitKey = "emg.compile.flag_limit";
+
+        /// <summary>EMG4-LOOT-01（FGR-FAC-009“一台机器可以混装不同阵营的标志组件，数量上限与兼容代价”）：每台机器最多装几件阵营标志组件（初值 2）。
+        /// 兼容代价沿用跨阵营蓝图的“异派技术”暴露（<see cref="CampaignExposureLedger"/>，FactionTags ≥ 2）。</summary>
+        public static int MaxFlagParts => Grid.GridContent.TryGetTuning("emg.flag.max_per_machine", out float v) ? Math.Max(0, (int)Math.Round(v)) : 2;
+
+        /// <summary>本机部件位里的阵营标志组件件数（内容定义带阵营的部件）。</summary>
+        public int FlagPartCount()
+        {
+            int n = 0;
+            foreach (string id in new[] { PrimaryId, UtilityId, StructureId })
+            {
+                n += !string.IsNullOrEmpty(id) && MechanicalContentFacade.TryGet(id, out MechanicalContentDef d) && !string.IsNullOrEmpty(d.Faction) ? 1 : 0;
+            }
+            return n;
         }
 
         /// <summary>本机部件位里重复的同名部件数（0 = 没有重复）。读档后蓝图校验用。</summary>
@@ -880,6 +899,11 @@ namespace GameLogic.Campaign.Blueprint
             {
                 result.Add(CircuitIssueCode.PartDuplicate, GameText.Get(PartDuplicateKey));
             }
+            int flags = FlagPartCount();
+            if (flags > MaxFlagParts)
+            {
+                result.Add(CircuitIssueCode.FlagLimit, GameText.Format(FlagLimitKey, flags, MaxFlagParts));
+            }
             if (!string.IsNullOrEmpty(FirmwareSlots[0]) && !FirmwareCatalog.TryGet(FirmwareSlots[0], out _))
             {
                 result.Add(CircuitIssueCode.FirmwareUnknown, $"固件槽0 内容 '{FirmwareSlots[0]}' 未知。");
@@ -1115,7 +1139,9 @@ namespace GameLogic.Campaign.Blueprint
                 {
                     return;
                 }
-                string tag = def.Category == MechanicalContentCategory.Firmware ? FactionTagForFirmware(contentId) : FactionTagFor(def.Source);
+                // EMG4-LOOT-01（GDD §5.4）：阵营标志组件把它的阵营写进蓝图标签
+                string tag = !string.IsNullOrEmpty(def.Faction) ? def.Faction
+                    : def.Category == MechanicalContentCategory.Firmware ? FactionTagForFirmware(contentId) : FactionTagFor(def.Source);
                 if (tag != null && !tags.Contains(tag))
                 {
                     tags.Add(tag);

@@ -514,6 +514,9 @@ namespace GameLogic.Campaign.Combat
             {
                 flags &= ~(CombatUnitFlags.Alive | CombatUnitFlags.Targetable);
             }
+            // EMG4-LOOT-01（FGR-FAC-009）：阵营标志组件 / 结构模块的专属行为给内核参数——与敌方同一套潜伏 / 正面装甲 / 架炮驻锄结算（改造时 RefreshMachineWeapon 同一个函数重算）
+            int flagProfile = FlagBehaviorProfile(info.PrimaryId, info.StructureId);
+            FlagFrontalArmor(info.StructureId, out float frontal, out float frontalHalf);
             int unit = Kernel.Spawn(new CombatSpawn
             {
                 ExtKey = rec.LogicId,
@@ -528,7 +531,10 @@ namespace GameLogic.Campaign.Combat
                 Health = rec.Health,
                 MaxHealth = rec.MaxHealth,
                 Weapon = info.WeaponIndex,
-                BehaviorProfile = -1,
+                BehaviorProfile = flagProfile,
+                ArmorFraction = frontal,
+                ArmorHalfAngleDeg = frontalHalf,
+                ArmorFacing = frontal > 0f ? new float2(0f, 1f) : default, // 修复轮 1（P2）：没装裙板的机器保持内核默认朝向（反应装甲选块 / 破片方向与旧版逐字一致）
                 Priority = 1,
                 Heat = rec.WeaponHeat,
                 AimReadyAt = rec.CannonAimReadyAtPlaySeconds,
@@ -588,6 +594,68 @@ namespace GameLogic.Campaign.Combat
         }
 
         public bool TryGetMachineUnit(int logicId, out int unitId) => _machineUnit.TryGetValue(logicId, out unitId);
+
+        /// <summary>
+        /// EMG4-LOOT-01 修复轮 1（FGR-FAC-009“规则与敌方版本一致”，承接 FG-GAP-150）：标志组件 / 结构模块带来的内核行为参数行（没有 = −1）。
+        /// 结构模块按声明（端口 × 角色）读：读 chs.moving condition 的幅度 = 静止多少秒潜伏、参数 2 = 现形预警秒（吸波伪装罩）；
+        /// 主组件按作战组件表 behaviorOf 指向的敌人行读两组参数（同一套内核结算、同一组数）：架炮驻锄 / 高抛近距盲区（驻锄曲射炮 ← 铸造步进炮）、
+        /// 枢轴喷灌（环形喷淋架 ← 沉淀巨罐）；敌人行的移动 / 巡逻 / 血量等列不读。只在出生 / 装配变化时调用，O(1)。
+        /// </summary>
+        public int FlagBehaviorProfile(string primaryId, string structureId)
+        {
+            var p = new CombatBehaviorProfile();
+            bool any = false;
+            if (Emergence.EmgCatalog.PartDeclAmount(structureId, "chs.moving", Emergence.EmgDirs.Read, Emergence.EmgRole.Condition, out float lurk, out float reveal) && lurk > 0f)
+            {
+                p.LurkSeconds = lurk;
+                p.RevealSeconds = Mathf.Max(0.8f, reveal);
+                any = true;
+            }
+            if (!string.IsNullOrEmpty(primaryId) && Content.CarrierReadings.TryGetComponent(primaryId, out GameConfig.fg.CombatComponent comp)
+                && !string.IsNullOrEmpty(comp.BehaviorOf) && comp.BehaviorOf != "none" && Content.EnemyDefs.TryGet(comp.BehaviorOf, out GameConfig.fg.MechEnemy row))
+            {
+                if (row.DeploySeconds > 0f || row.MinRange > 0f)
+                {
+                    p.DeploySeconds = row.DeploySeconds;
+                    p.MinRange = row.MinRange;
+                    any = true;
+                }
+                if (row.Behavior == Content.EnemyDefs.BehaviorPivot || row.Behavior == Content.EnemyDefs.BehaviorRingSpray)
+                {
+                    var e = new CombatBehaviorProfile();
+                    EnemyClarityParams.Apply(row, ref e, 1f, false);
+                    p.PivotRadius = e.PivotRadius;
+                    p.PivotWidth = e.PivotWidth;
+                    p.PivotSpeed = e.PivotSpeed;
+                    p.PivotWarn = e.PivotWarn;
+                    p.PivotDps = e.PivotDps;
+                    p.SprayStatus = e.SprayStatus;
+                    p.SprayStatusSeconds = e.SprayStatusSeconds;
+                    any = e.PivotRadius > 0f || any;
+                }
+            }
+            return any && Kernel != null ? ProfileIndex(p) : -1;
+        }
+
+        /// <summary>EMG4-LOOT-01：结构模块的正面装甲（读 evt.hurt trigger 的幅度 = 正面减伤比例、参数 2 = 正面锥半角度；装甲裙板）。没有 = 0。</summary>
+        public static void FlagFrontalArmor(string structureId, out float fraction, out float halfAngleDeg)
+        {
+            Emergence.EmgCatalog.PartDeclAmount(structureId, "evt.hurt", Emergence.EmgDirs.Read, Emergence.EmgRole.Trigger, out float f, out float half);
+            fraction = Mathf.Clamp(f, 0f, 0.95f);
+            halfAngleDeg = fraction > 0f ? Mathf.Max(0f, half) : 0f;
+        }
+
+        /// <summary>EMG4-LOOT-01 修复轮 1：炮塔的标志组件行为（环形喷淋架只能装固定底盘）——建成 / 换主组件后由 TurretService 调用。</summary>
+        public void ApplyTurretFlagBehavior(int serial, string primaryId)
+        {
+            if (Kernel != null && _turretUnit.TryGetValue(serial, out int unit))
+            {
+                Kernel.SetBehaviorProfile(unit, FlagBehaviorProfile(primaryId, null));
+            }
+        }
+
+        /// <summary>这个内核单位是不是己方（查不到单位时按“是不是机器”判）。桥接层外的系统用它，不直接碰内核（FG14 §5 硬约束 3）。</summary>
+        public bool IsPlayerUnit(int unitId) => Kernel != null && Kernel.TryGetUnit(unitId, out CombatUnitView v) ? v.Faction == CombatFaction.Player : TryGetMachineOfUnit(unitId, out _);
 
         /// <summary>
         /// EMG1-BUS-01（FGR-EMG-066）：热更层来源的战斗事件（接入 / 断开 / 拾取 / 夺控 / 归还）在两步之间注入本地点内核（内核一步是同步执行完的，这里调用时不在步内）。
@@ -952,6 +1020,14 @@ namespace GameLogic.Campaign.Combat
             Kernel.SetUnitWeapon(unit, info.WeaponIndex);
             ApplyDash(unit, info.UtilityId);
             ApplyRelay(unit, info.StructureId);
+            // EMG4-LOOT-01 修复轮 1（FGR-FAC-009；B10）：改造装上 / 卸下标志组件后专属行为跟着变（潜伏档位、架炮驻锄、正面装甲），与出生时同一个函数
+            Kernel.SetBehaviorProfile(unit, FlagBehaviorProfile(info.PrimaryId, info.StructureId));
+            FlagFrontalArmor(info.StructureId, out float frontal, out float frontalHalf);
+            if (frontal > 0f && Kernel.ArmorOf(unit) <= 0f)
+            {
+                Kernel.SetFacing(unit, new float2(0f, 1f)); // 修复轮 2（P2）：改造新装上裙板 = 与出生同一个初始朝向；已有装甲（含读档）不动朝向
+            }
+            Kernel.SetArmor(unit, frontal, frontalHalf);
             // EMG1-FW-01：装配变化后机器质量随部件加成重算（换下重甲即回到底盘质量）
             if (info.ChassisProfileRef > 0)
             {
@@ -3435,6 +3511,19 @@ namespace GameLogic.Campaign.Combat
                 }
             }
             _profileIndex.Clear();
+            // EMG4-LOOT-01 修复轮 2（B10 / FGR-BASE-021）：行为参数表与武器表同样按快照重建去重键——不重建的话读档后 RefreshMachineWeapon / 炮塔重推
+            // 查不到旧行、追加一行新下标，SetBehaviorProfile 把它当成“换了行”清掉潜伏 / 架设 / 喷灌臂状态，参数表还随每次读档变长。重复键取最小下标（= 连续跑时第一次登记的那行）。
+            for (int p = 0; p < Kernel.ProfileCount; p++)
+            {
+                if (Kernel.TryGetProfile(p, out CombatBehaviorProfile cp))
+                {
+                    string pk = CombatKernel.ProfileKey(cp);
+                    if (!_profileIndex.ContainsKey(pk))
+                    {
+                        _profileIndex[pk] = p;
+                    }
+                }
+            }
             var orphans = new List<int>();
             for (int slot = 0; slot < Kernel.SlotCount; slot++)
             {

@@ -133,8 +133,18 @@ namespace GameLogic.Campaign.Content
         {
             reasonKey = null;
             adjustedReadingKey = null;
-            if (string.IsNullOrEmpty(componentId) || !IsFixedChassis(chassisId))
+            if (string.IsNullOrEmpty(componentId))
             {
+                return true;
+            }
+            if (!IsFixedChassis(chassisId))
+            {
+                // EMG4-LOOT-01（FGR-FAC-009 环形喷淋架“仅固定底盘”）：只能装在固定底盘的组件，移动底盘拒绝并给原因
+                if (TryGetComponent(componentId, out CombatComponent fixedRow) && fixedRow.FixedOnly == 1)
+                {
+                    reasonKey = "component.mount.fixed_only";
+                    return false;
+                }
                 return true;
             }
             if (!TryGetComponent(componentId, out CombatComponent row))

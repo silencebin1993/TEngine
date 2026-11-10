@@ -77,7 +77,22 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
+                // EMG4-LOOT-01 修复轮 1（FGR-FAC-009 驻锄曲射炮，规则与敌方架炮驻锄一致）：带架设参数的己方单位——收炮中这一步不执行命令（命令保留），
+                // 架设中 / 已架设时本步的位移撤回（架设中不能移动），玩家要它走时先收炮。没有行为参数的单位 O(1) 跳过。
+                if (d.BProfile[i] >= 0 && StepPlayerDeploy(ref d, i, dt))
+                {
+                    continue;
+                }
+                double2 before = d.Pos[i];
                 StepPlayerUnit(ref d, ref grid, i, dt);
+                if (d.BProfile[i] >= 0)
+                {
+                    PlayerDeployMoveLock(ref d, i, before);
+                }
+                if (d.Armor[i].x > 0f && d.Kind[i] == (byte)CombatUnitKind.Machine)
+                {
+                    FaceMotion(ref d, i); // EMG4-LOOT-01（FGR-FAC-009 装甲裙板）：带正面装甲的己方机器朝移动方向推进（正面减伤按朝向结算）
+                }
             }
 
             StepHijacks(ref d, dt); // EMG4-HIJ-01：期满 / 劫持者阵亡 → 自毁（空表一次比较）
@@ -695,6 +710,19 @@ namespace BinGames.Sim.Combat
             UnitAttack(ref d, i, t, wp);
         }
 
+        /// <summary>EMG4-LOOT-01：这一步移动了就把朝向（装甲朝向）对准移动方向。O(1)。</summary>
+        private static void FaceMotion(ref CombatData d, int i)
+        {
+            double2 mv = d.Pos[i] - d.Prev[i];
+            if (math.lengthsq(mv) <= 1e-8)
+            {
+                return;
+            }
+            float2 f = (float2)math.normalize(mv);
+            float4 a = d.Armor[i];
+            d.Armor[i] = new float4(a.x, a.y, f.x, f.y);
+        }
+
         /// <summary>
         /// FG6-DEF-01（FGR-DEF-002“默认 360° 旋转，转速由组件决定”）：把单位的朝向（装甲朝向）朝 <paramref name="target"/> 转至多 <paramref name="maxDeg"/> 度。
         /// 返回转完后夹角是否在 <see cref="CombatConfig.TurretAimToleranceDeg"/> 以内（对准了）。O(1)，确定性（只用单精度向量旋转）。
@@ -1049,12 +1077,14 @@ namespace BinGames.Sim.Combat
             // FG9-FAC-01（FGR-FAC-008“移动或开火时展开现形”、① 专属行为 ≥ 0.8 秒预警）：带潜伏参数的敌方单位不会从潜伏里直接出手——
             // 潜伏中要开火 → 这一次只现形（开始展桅预警），预警（RevealSeconds）没结束之前也不出手。伏击 / 驻守 / 瞄准线三条路径选定目标时已经先查过；
             // 突袭者（含行进拦截的就地交战）与攻城单位走到这里才第一次查（调用方已重置冷却：预警结束后的下一个冷却点再出手）。没有潜伏参数的单位 O(1) 直接放行。
-            if (d.Faction[i] == (byte)CombatFaction.Hostile && SilentHold(ref d, i))
+            // EMG4-LOOT-01 修复轮 1：带潜伏参数的己方单位（吸波伪装罩 / 被劫持的潜伏型敌机）同一道门槛（规则与敌方一致）；没有行为参数 O(1) 放行
+            if (d.BProfile[i] >= 0 && SilentHold(ref d, i))
             {
                 return;
             }
             // FG10-FAC-01：喷淋 / 枢轴喷灌 / 自爆单位的武器列描述的是专属攻击（澄净阶段结算，有预警），普通开火路径不出手（否则会在预警之外多打一发）。
-            if (d.Faction[i] == (byte)CombatFaction.Hostile && ClarityOwnsAttack(ref d, i))
+            // EMG4-LOOT-01 修复轮 1：己方炮塔装环形喷淋架（枢轴喷灌）同样由澄净阶段结算，普通开火不出手
+            if (d.BProfile[i] >= 0 && ClarityOwnsAttackFor(ref d, i))
             {
                 return;
             }
@@ -1064,11 +1094,8 @@ namespace BinGames.Sim.Combat
                 return;
             }
             EmgShotBegin(ref d, i, t, wp); // EMG1-BUS-01：一次出手（evt.fire；带程序的武器开一条因果链）
-            if (d.Faction[i] == (byte)CombatFaction.Hostile)
-            {
-                SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露
-            }
-            else if (wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, i, t, wp.Damage, wp))
+            SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露（EMG4-LOOT-01：己方潜伏单位同样；没有行为参数 O(1) 返回）
+            if (d.Faction[i] != (byte)CombatFaction.Hostile && wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, i, t, wp.Damage, wp))
             {
                 CombatCounters rc = d.Counters[0];
                 rc.ShotsFired++;
@@ -1213,6 +1240,10 @@ namespace BinGames.Sim.Combat
         {
             CombatFireResult r = FireAtCore(ref d, a, t);
             EmgShotEnd(ref d); // EMG1-BUS-01：本次出手的宿主上下文到此为止（含重炮）
+            if ((r == CombatFireResult.Ok || r == CombatFireResult.Launched || r == CombatFireResult.Covered) && d.BProfile[a] >= 0)
+            {
+                SilentNoteFired(ref d, a); // EMG4-LOOT-01 修复轮 1（FGR-FAC-008“开火即现形”）：己方潜伏单位开火后静止计时清零
+            }
             return r;
         }
 
@@ -1296,6 +1327,20 @@ namespace BinGames.Sim.Combat
             if (IsAir(ref d, t) && !CanHitAir(ref d, a))
             {
                 return CombatFireResult.CannotHitAir; // FG10-FAC-01（FGR-AIR-010）：格斗 / 力场 / 布区打不到空中目标
+            }
+            if (d.BProfile[a] >= 0)
+            {
+                // EMG4-LOOT-01 修复轮 1（FGR-FAC-008 / 009，规则与敌方版本一致）：带行为参数的单位（装吸波伪装罩 / 驻锄曲射炮的己方机器）出手前的同一道门槛——
+                // 潜伏中开火先现形、预警满 RevealSeconds 才出手；带架设参数的先放下驻锄（架设中报“瞄准中”），目标贴进高抛近距盲区打不到。没有行为参数 O(1) 跳过。
+                if (SilentHold(ref d, a))
+                {
+                    return CombatFireResult.StillAiming;
+                }
+                CombatFireResult deploy = PlayerDeployGate(ref d, a, t);
+                if (deploy != CombatFireResult.Ok)
+                {
+                    return deploy;
+                }
             }
             CombatWeapon wp = d.Weapons[w];
             if (wp.Mode == CombatWeaponMode.Cannon)

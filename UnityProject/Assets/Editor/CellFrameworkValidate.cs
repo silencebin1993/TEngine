@@ -838,6 +838,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgTerrainSelfCheck", FgEmgTerrainSelfCheck.Run); // EMG4-TER-01：熔坑（FGT-EMG-060 熔坑部分；冻结桥随水面 FG18-SEA-01，DEBT-EMG4TER01-01）
             Seg("FgEmgGroundMarkSelfCheck", FgEmgGroundMarkSelfCheck.Run); // EMG4-TER-02：战痕写入家园格网（FGT-EMG-060 战痕部分、FGT-EMG-041 迁移部分）
             Seg("FgEmgCodexSelfCheck", FgEmgCodexSelfCheck.Run); // EMG4-CODEX-01：组合图鉴完整界面与极限奖励（FGT-EMG-063 / 062 图鉴部分，DEBT-EMG2RULE01-07 / DEBT-EMG1CHAIN01-04）
+            Seg("FgEmgLootHintSelfCheck", FgEmgLootHintSelfCheck.Run); // EMG4-LOOT-01：三选一新交互提示、部件通道源与重复部件（FGT-EMG-062 三选一 N 与重复部件部分；FG-GAP-150 标志组件 E 段）
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

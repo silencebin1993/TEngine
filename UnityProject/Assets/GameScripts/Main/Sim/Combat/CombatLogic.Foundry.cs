@@ -741,6 +741,121 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        // ─────────────────── EMG4-LOOT-01 修复轮 1：己方驻锄曲射炮（FGR-FAC-009，规则与敌方架炮驻锄 / 高抛曲射一致）───────────────────
+        // 状态同一个 CombatFoundryUnit（随快照进存档）：Deploy 0 未架设、1 架设中、2 已架设、3 收炮中（己方才有：玩家要它走时先收炮，FG09“收炮也要时间”）。
+        // 敌方的架设由瞄准线读法自己找目标（DeployHold）；己方只在玩家的出手里架设（攻击命令 / 直控 / 驻防，FireAt），不替玩家找目标（FGR-BASE-020）。
+
+        /// <summary>己方出手门槛：目标在高抛近距盲区里打不到（报射程外）；带架设参数时先放下驻锄——未架设就开始架设，架设中 / 收炮中报“瞄准中”，架好才出手。</summary>
+        private static CombatFireResult PlayerDeployGate(ref CombatData d, int a, int t)
+        {
+            int bp = d.BProfile[a];
+            if (bp < 0 || bp >= d.Profiles.Length)
+            {
+                return CombatFireResult.Ok;
+            }
+            CombatBehaviorProfile p = d.Profiles[bp];
+            if (InBlindSpot(ref d, a, t))
+            {
+                return CombatFireResult.OutOfRange; // 与敌方同一判定（中心距 − 目标半径 < MinRange）：贴身就是应对
+            }
+            if (p.DeploySeconds <= 0f)
+            {
+                return CombatFireResult.Ok;
+            }
+            CombatFoundryUnit f = d.Foundry[a];
+            if (f.Deploy == 2)
+            {
+                return CombatFireResult.Ok;
+            }
+            if (f.Deploy == 0)
+            {
+                if (Frozen(ref d, a))
+                {
+                    return CombatFireResult.Frozen;
+                }
+                f.Deploy = 1;
+                f.DeployT = math.max(0.8f, p.DeploySeconds);
+                f.AnchorPos = d.Pos[a];
+                d.Foundry[a] = f;
+                Cue2(ref d, a, d.Id[t], f.DeployT, d.Pos[a], 7, 0); // 与敌方同一个提示码（支腿落地 + 炮口抬升的预警）
+            }
+            return CombatFireResult.StillAiming;
+        }
+
+        /// <summary>
+        /// 每步（己方、带行为参数的单位）：架设 / 收炮计时；架设中或已架设被击退 / 冻结 → 回到未架设（与敌方同一条，FG09 第 10 节负向）。
+        /// 返回 true = 正在收炮：这一步不执行命令（命令保留，收好后接着走）。没有架设参数 O(1) 返回。
+        /// </summary>
+        private static bool StepPlayerDeploy(ref CombatData d, int i, float dt)
+        {
+            int bp = d.BProfile[i];
+            if (bp >= d.Profiles.Length || d.Profiles[bp].DeploySeconds <= 0f)
+            {
+                return false;
+            }
+            CombatFoundryUnit f = d.Foundry[i];
+            if (f.Deploy == 0)
+            {
+                return false;
+            }
+            bool frozen = Frozen(ref d, i);
+            if (f.Deploy != 3 && (math.distancesq(d.Pos[i], f.AnchorPos) > 0.0025 || frozen))
+            {
+                f.Deploy = 0;
+                f.DeployT = 0f;
+                d.Foundry[i] = f;
+                return false;
+            }
+            if ((f.Deploy == 1 || f.Deploy == 3) && !frozen)
+            {
+                f.DeployT -= dt;
+                if (f.DeployT <= 0f)
+                {
+                    f.Deploy = f.Deploy == 1 ? (byte)2 : (byte)0;
+                    f.DeployT = 0f;
+                }
+                d.Foundry[i] = f;
+            }
+            return f.Deploy == 3;
+        }
+
+        /// <summary>
+        /// 架设中 / 已架设的己方单位本步被命令挪动了：撤回这一步的位移（架设中不能移动）；玩家确实要它走（移动 / 撤退 / 工单 / 守点 / 驻防交战、直控推杆、攻击目标在射程外）
+        /// 就开始收炮，收炮时长 = 架设时长。编队互推、攻击射程内的原地小挪动只撤回、不收炮。
+        /// </summary>
+        private static void PlayerDeployMoveLock(ref CombatData d, int i, double2 before)
+        {
+            CombatFoundryUnit f = d.Foundry[i];
+            if ((f.Deploy != 1 && f.Deploy != 2) || math.distancesq(d.Pos[i], before) <= 1e-10)
+            {
+                return;
+            }
+            d.Pos[i] = before;
+            if (!PlayerWantsToMove(ref d, i))
+            {
+                return;
+            }
+            int bp = d.BProfile[i];
+            f.Deploy = 3;
+            f.DeployT = math.max(0.8f, d.Profiles[bp].DeploySeconds);
+            d.Foundry[i] = f;
+        }
+
+        private static bool PlayerWantsToMove(ref CombatData d, int i)
+        {
+            if (d.Has(i, CombatUnitFlags.Possessed))
+            {
+                return math.lengthsq(d.Direct[i]) > 0.0001f;
+            }
+            CombatCommand c = d.Cmd[i];
+            if (c.Kind == CombatCommandKind.Attack)
+            {
+                int t = d.SlotOf(c.Target);
+                return t >= 0 && math.distance(d.Pos[i], d.Pos[t]) > c.AttackRange;
+            }
+            return c.Kind != CombatCommandKind.None || d.Siege[i].GuardRadius > 0f;
+        }
+
         /// <summary>被冻结（减速状态 ≥ 90%，或 FG10-FAC-01 液氮受寒满）。</summary>
         private static bool Frozen(ref CombatData d, int i) => (d.StatusSlow[i] >= 0.9f && d.StatusActive(i, d.Scalars[0].Time)) || IsFrozen(ref d, i);
 

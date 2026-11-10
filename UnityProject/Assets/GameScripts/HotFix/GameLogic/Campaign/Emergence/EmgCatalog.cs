@@ -434,6 +434,33 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>FG-GAP-169（EMG3 出口补缺口）：这个部件有没有声明“读 <paramref name="port"/>”（任何角色）。同样不看是否生效（回滚到阶段 0 时中继仍算中继）。</summary>
         public static bool OwnerDeclaresRead(string owner, string port) => OwnerDeclares(owner, port, EmgDirs.Read);
 
+        /// <summary>
+        /// EMG4-LOOT-01：<paramref name="owner"/> 已生效声明里（端口, 方向, 角色）这一行的幅度与参数 2（没有 / 未生效返回 false）。
+        /// 部件的被动行为按“端口 × 角色”读参数（不认部件 ID，FGR-EMG-013）：结构模块读 chs.moving condition（幅度 &gt; 0）= 静止满幅度秒潜伏、参数 2 = 现形预警秒；
+        /// 结构模块读 evt.hurt trigger（幅度 &gt; 0）= 受击按正面锥减伤（幅度 = 减伤比例、参数 2 = 正面锥半角度）。
+        /// </summary>
+        public static bool PartDeclAmount(string owner, string port, EmgDirs dir, EmgRole role, out float amount, out float param2)
+        {
+            amount = 0f;
+            param2 = 0f;
+            EmgCompiled c = Current;
+            if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !c.OwnerActive(oi) || !c.PortIndexById.TryGetValue(port, out int pi))
+            {
+                return false;
+            }
+            ushort code = c.Ports[pi].Code;
+            foreach (EmgDeclRow d in c.Decls)
+            {
+                if (d.Owner == oi && d.Dir == dir && d.Role == role && d.Port == code)
+                {
+                    amount = d.Amount;
+                    param2 = d.Param2;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         private static bool OwnerDeclares(string owner, string port, EmgDirs dir)
         {
             EmgCompiled c = Current;

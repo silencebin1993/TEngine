@@ -66,6 +66,8 @@ namespace GameLogic.Campaign.Economy
         public static float DepotRadius => Math.Max(1f, Tuning("loot.pick.depot_radius", 24f));
         public static float CheckSeconds => Math.Max(0.1f, Tuning("loot.pick.check_seconds", 1f));
         public static int LogMax => Math.Max(1, (int)Math.Round(Tuning("loot.pick.log_max", 64f)));
+        /// <summary>EMG4-LOOT-01（FGR-EMG-193）：仓库满时一件重复部件拆成的技术数据（初值）。</summary>
+        public static int DismantleTech => Math.Max(0, (int)Math.Round(Tuning("loot.pick.dismantle_tech", 2f)));
         public static float PerfMs => Math.Max(0.001f, Tuning("loot.pick.perf_ms", 0.5f));
 
         private static float Tuning(string id, float fallback) => GridContent.TryGetTuning(id, out float v) ? v : fallback;

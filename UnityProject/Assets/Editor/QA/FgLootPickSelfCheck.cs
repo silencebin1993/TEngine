@@ -1184,7 +1184,7 @@ namespace GameLogic.EditorTools
             return new Vector2(ok.X, ok.Y);
         }
 
-        private static Vector2 CoreNear(CampaignState s)
+        internal static Vector2 CoreNear(CampaignState s)
         {
             GridCell c = HomeGridService.CorePivot(s);
             GridCell ok = SiegeService.NearestPassable(new GridCell(c.X + 5, c.Y - 5), 8);
@@ -1192,7 +1192,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>测试捷径：确保有一座运转中的仓库（入库容量；仓库施工与维修由 FG3-LOG-02 / FG4-ECO-05 覆盖）。</summary>
-        private static void EnsureWarehouse(CampaignState s)
+        internal static void EnsureWarehouse(CampaignState s)
         {
             BuildingRecord wh = s.BuildingRecords.FirstOrDefault(b => b != null && BuildingOps.IsWarehouse(b) && !HomeGridService.IsRelocationGhost(b));
             if (wh != null)
@@ -1259,7 +1259,7 @@ namespace GameLogic.EditorTools
             return ids;
         }
 
-        private static CampaignState NewWorld(int seed, bool observe = true, int version = 3)
+        internal static CampaignState NewWorld(int seed, bool observe = true, int version = 3)
         {
             WorldSimulation.UnloadAll();
             GameClock.ResetSession();
@@ -1287,7 +1287,7 @@ namespace GameLogic.EditorTools
             return s;
         }
 
-        private static CampaignState Reload(int fromSlot)
+        internal static CampaignState Reload(int fromSlot)
         {
             WorldSimulation.UnloadAll();
             GameClock.ResetSession();
@@ -1310,7 +1310,7 @@ namespace GameLogic.EditorTools
             return r.State;
         }
 
-        private static int Spawn(CampaignState s, Vector2 at, string chassis, string blueprint)
+        internal static int Spawn(CampaignState s, Vector2 at, string chassis, string blueprint)
         {
             MachineOpResult r = MachineRegistry.SpawnMachine(chassis, blueprint, HomeValleyLayout.RegionId, at, 120f, 120f);
             if (r.Success && MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec))

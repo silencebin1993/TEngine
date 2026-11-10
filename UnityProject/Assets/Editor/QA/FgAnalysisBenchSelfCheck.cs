@@ -227,7 +227,7 @@ namespace GameLogic.EditorTools
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
 
-        private static CampaignState NewWorld(int seed, bool observe = true, int scrap = 600)
+        internal static CampaignState NewWorld(int seed, bool observe = true, int scrap = 600)
         {
             HomeValleyPowerGrid.ResetForTests();
             PowerEnvironment.ResetForTests();
@@ -288,7 +288,7 @@ namespace GameLogic.EditorTools
 
         private static AnalysisQueueItemRecord Q(CampaignState s, string id) => HomeValleyAnalysis.Find(s, id);
 
-        private static bool RunToEnd(CampaignState s, string queueId, int maxSeconds = 120) =>
+        internal static bool RunToEnd(CampaignState s, string queueId, int maxSeconds = 120) =>
             StepUntil(() => Q(s, queueId) != null && !HomeValleyAnalysis.IsActiveEntry(Q(s, queueId)), maxSeconds);
 
         /// <summary>一件还没解锁的组件 / 模块（按 ID 排序取第 <paramref name="skip"/> 个；不依赖固定内容）。</summary>

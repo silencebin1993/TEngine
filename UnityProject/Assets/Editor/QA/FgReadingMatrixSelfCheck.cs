@@ -208,6 +208,10 @@ namespace GameLogic.EditorTools
                     c.FieldPlace, c.DroneMode, c.EchoCount.ToString(CultureInfo.InvariantCulture), F(c.EchoDelay), F(c.EchoRatio), F(c.Thorns), F(c.ThornsReach),
                     // EMG1-TRIG-01：根载荷实体化参数（FG19A 第 2.1.1 节）
                     c.Flight, F(c.FlightSpeed), F(c.FlightRadius), F(c.FlightLifeScale), c.FlightLob.ToString(CultureInfo.InvariantCulture), F(c.Kinetic),
+                    // EMG4-LOOT-01：阵营标志组件的阵营 / 仅固定底盘
+                    c.Faction, c.FixedOnly.ToString(CultureInfo.InvariantCulture),
+                    // EMG4-LOOT-01 修复轮 1：标志组件内核专属行为参数来源（敌人行）
+                    c.BehaviorOf,
                 };
                 Compare(f, mine, cdiff);
             }
@@ -527,7 +531,9 @@ namespace GameLogic.EditorTools
             foreach (CombatComponent c in CarrierReadings.Components)
             {
                 bool ok = CarrierReadings.CanMount(fixedId, c.Id, out string reason, out string adjusted);
-                bool mobileOk = CarrierReadings.CanMount(HomeValleyLayout.Erc003ChassisId, c.Id, out string mr, out string ma) && mr == null && ma == null;
+                // EMG4-LOOT-01：仅固定底盘的组件（环形喷淋架）在移动底盘上被拒并给原因，其余移动底盘全部可装
+                bool mobileCan = CarrierReadings.CanMount(HomeValleyLayout.Erc003ChassisId, c.Id, out string mr, out string ma);
+                bool mobileOk = c.FixedOnly == 1 ? !mobileCan && mr == "component.mount.fixed_only" : mobileCan && mr == null && ma == null;
                 bool expect = c.Turret switch
                 {
                     "no" => !ok && reason == c.TurretReasonKey && adjusted == null,

@@ -253,7 +253,8 @@ namespace GameLogic.EditorTools
                         p.Firmware.Add(row.Id);
                     }
                 }
-                p.Comps.AddRange(CarrierReadings.Components.Where(c => c.Slot == "main").Select(c => c.Id));
+                // EMG4-LOOT-01：阵营标志组件（faction ≠ none，同载体的阵营变体）不进模糊池，固定集与满载基线保持可比；它们的交战覆盖见 DEBT-EMG4LOOT01-02
+                p.Comps.AddRange(CarrierReadings.Components.Where(c => c.Slot == "main" && c.Faction == "none").Select(c => c.Id));
                 foreach (GameConfig.fg.MechEnemy e in EnemyDefs.Rows)
                 {
                     if (e == null || EnemyDefs.IsBoss(e) || EnemyDefs.IsStructure(e) || !(e.MaxHp > 0f) || string.IsNullOrEmpty(e.Faction))

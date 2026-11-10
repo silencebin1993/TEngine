@@ -882,7 +882,62 @@ namespace GameLogic.Campaign.Economy
             {
                 return true;
             }
+            if (c.Kind == LootPickCatalog.KindModule && DuplicateStockItem(s, c.TargetId) != null)
+            {
+                return true; // EMG4-LOOT-01：重复部件进组件库存，仓库满了就拆成技术数据（不拒绝、不丢）
+            }
             return HomeInventory.Space(s, item) >= Math.Max(1, c.Amount);
+        }
+
+        // ───────────────────── EMG4-LOOT-01：重复部件（FGR-EMG-193 / FGR-LOOT-020 第 5 条）─────────────────────
+
+        /// <summary>仓库满时重复部件拆成技术数据的账本事务号前缀：lootpick-dismantle:分拣物品 ID。</summary>
+        public const string DismantleTxPrefix = "lootpick-dismantle:";
+        /// <summary>本进程累计：重复部件进库存 / 被拆成技术数据的件数（自检读点）。</summary>
+        public static int DuplicatesStocked { get; private set; }
+        public static int DuplicatesDismantled { get; private set; }
+
+        /// <summary>
+        /// 这件部件已经掌握（蓝图已解锁）时，重复获得进哪种组件库存：作战 / 功能组件 → 作战组件（combat_component）、结构模块 → 结构模块（structure_module），
+        /// 与装配站每台机器每个槽位消耗的物品同一种（fg.TbAssemblyMaterial）= 多一台车能装。不做 Mk 等级、不做同名堆叠、不改任何数值。
+        /// 还没掌握的（第一次获得）返回 null：照旧送解析台破解得蓝图（敌方接口组件，FGR-LOOT-011）。底盘部件没有三选一候选，也返回 null。
+        /// </summary>
+        public static string DuplicateStockItem(CampaignState s, string componentId)
+        {
+            if (string.IsNullOrEmpty(componentId) || !MechanicalContentUnlock.IsUnlocked(s, componentId) || !MechanicalContentFacade.TryGet(componentId, out MechanicalContentDef d))
+            {
+                return null;
+            }
+            switch (d.Category)
+            {
+                case MechanicalContentCategory.MainComponent:
+                case MechanicalContentCategory.FunctionComponent:
+                    return "combat_component";
+                case MechanicalContentCategory.Structure:
+                    return "structure_module";
+                default:
+                    return null;
+            }
+        }
+
+        public static string DuplicateStockItem(CampaignState s, LootCandidateRecord c) =>
+            c != null && c.Kind == LootPickCatalog.KindModule ? DuplicateStockItem(s, c.TargetId) : null;
+
+        /// <summary>重复部件入库：组件库存 +件数；放不下的部分拆成技术数据（每件 <see cref="LootPickCatalog.DismantleTech"/>），给一条字幕——不静默丢弃。</summary>
+        private static void DeliverDuplicatePart(CampaignState s, string stockItem, string componentId, int amount, string salvageId)
+        {
+            int n = Math.Max(1, amount);
+            int stored = ItemCatalog.TryGet(stockItem, out ItemDef item) ? HomeInventory.Add(s, item, n) : 0;
+            DuplicatesStocked += stored;
+            int rest = n - stored;
+            if (rest <= 0)
+            {
+                return;
+            }
+            int tech = rest * LootPickCatalog.DismantleTech;
+            GrantTech(s, DismantleTxPrefix + (salvageId ?? componentId), componentId, tech);
+            DuplicatesDismantled += rest;
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, GameText.Format("loot.pick.dup.dismantled", Feedback.FeedbackCues.ContentName(componentId), rest, tech));
         }
 
         public readonly struct PickResult
@@ -1023,6 +1078,9 @@ namespace GameLogic.Campaign.Economy
                     break;
                 case LootPickCatalog.KindFirmware:
                     FieldLootService.DeliverEnemyItem(s, AnalysisCatalog.EncryptedFirmwareId, targetId, OriginPick, at, salvageId);
+                    break;
+                case LootPickCatalog.KindModule when DuplicateStockItem(s, targetId) is string stock:
+                    DeliverDuplicatePart(s, stock, targetId, amount, salvageId);
                     break;
                 case LootPickCatalog.KindModule:
                 case LootPickCatalog.KindCore:
@@ -1250,6 +1308,12 @@ namespace GameLogic.Campaign.Economy
                     // EMG1-FW-02：三选一卡面的读 / 写端口由声明生成（与固件详情页同一函数）
                     string ports = Emergence.EmgProgramTreeText.PortsLine(c.TargetId);
                     return ports == null ? cmp : cmp + "\n" + ports;
+                }
+                case LootPickCatalog.KindModule when DuplicateStockItem(s, c.TargetId) is string stock:
+                {
+                    ItemDef item = ItemCatalog.Find(stock);
+                    string dup = GameText.Format("loot.pick.cmp.module.dup", Feedback.FeedbackCues.ContentName(c.TargetId), item?.Name ?? stock, HomeInventory.Stock(s, stock));
+                    return item != null && HomeInventory.Space(s, item) <= 0 ? dup + "\n" + GameText.Format("loot.pick.cmp.module.dup_full", LootPickCatalog.DismantleTech) : dup;
                 }
                 case LootPickCatalog.KindModule:
                     return GameText.Format("loot.pick.cmp.module", Feedback.FeedbackCues.ContentName(c.TargetId),

@@ -152,6 +152,9 @@ namespace GameLogic.Campaign.Content
         /// <c>production/qa/evidence/er4-content-01-mechanical-content-batch-1.md</c>，
         /// 这里只存 ID 供代码/测试引用，不重复整段文案）。</summary>
         public string DebtId;
+
+        /// <summary>EMG4-LOOT-01（FGR-FAC-009）：阵营标志组件的阵营键（silent / foundry / clarity / overclock）；普通内容 null。蓝图阵营标签与标志组件上限读它。</summary>
+        public string Faction;
     }
 
     /// <summary>供审计/测试遍历用的只读集合别名。</summary>

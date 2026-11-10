@@ -25,6 +25,8 @@ namespace GameLogic.Campaign.Content
         public const string StructRelayId = "struct_relay";
         public const string StructArmorId = "struct_armor";
         public const string StructFinId = "struct_fin";
+        public const string StructStealthCloakId = "struct_stealth_cloak";
+        public const string StructArmorSkirtId = "struct_armor_skirt";
 
         // ── FG2-FW-02 新建作战组件（设计案 5.6；每种载体至少一个；名称 / 说明 / 数值来自 fg.TbCombatComponent）──
         public const string CompRamId = "comp_ram";
@@ -311,6 +313,60 @@ namespace GameLogic.Campaign.Content
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-08",
             },
+            // EMG4-LOOT-01（FGR-FAC-009，承接 FG-GAP-150）：silent 阵营标志组件，重甲的阵营变体（不新增载体类型）；专属行为来自 fg.TbChannelDecl 声明（ComponentCatalog 不写行为）
+            [StructStealthCloakId] = new MechanicalContentDef
+            {
+                Id = StructStealthCloakId,
+                Category = MechanicalContentCategory.Structure,
+                DisplayName = "吸波伪装罩",
+                Description = "静默阵营的重甲变体：机器静止一段时间后收拢贴地潜伏，不能被远程锁定；移动、开火或被范围伤害命中即现形。",
+                Source = MechanicalContentSource.EliteDrop,
+                SourceDetail = "阵营标志组件：精英 / 首领三选一掉落“敌方接口组件”，解析台破解后得到蓝图（GDD §6.5、§9）。",
+                Slot = "结构",
+                ScrapCost = 24,
+                Load = 3,
+                ValuesSummary = "重甲同样加质量；静止满 3 秒潜伏，现形后 0.9 秒展开（fg.TbChannelDecl 声明幅度）。",
+                AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
+                IconId = "icon_struct_stealth_cloak",
+                ModelId = "primitive:capsule",
+                ActionId = "CombatSite.SpawnMachine → EmgCatalog.PartFlagBehavior（声明 → 内核行为参数）",
+                VfxId = "vfx_none_placeholder",
+                SfxId = "",
+                PreviewId = "preview_struct_stealth_cloak",
+                SaveCompatible = true,
+                LockedHintText = "精英 / 首领掉落的敌方接口组件，送解析台破解后才能写进蓝图量产。",
+                SilhouetteNote = "保留静默外壳与紫色发光、占机体约 30%、接缝青蓝信号缝合线（美术规范 03 §9；占位低模）。",
+                LegacyFacadeId = null,
+                DebtId = "DEBT-EMG4LOOT01-01",
+                Faction = "silent",
+            },
+            // EMG4-LOOT-01（FGR-FAC-009，承接 FG-GAP-150）：foundry 阵营标志组件，重甲的阵营变体（不新增载体类型）；专属行为来自 fg.TbChannelDecl 声明（ComponentCatalog 不写行为）
+            [StructArmorSkirtId] = new MechanicalContentDef
+            {
+                Id = StructArmorSkirtId,
+                Category = MechanicalContentCategory.Structure,
+                DisplayName = "装甲裙板",
+                Description = "铸造阵营的重甲变体：正面挂一圈厚裙板，正面受击大幅减伤，侧后照常；机器朝移动方向推进。",
+                Source = MechanicalContentSource.EliteDrop,
+                SourceDetail = "阵营标志组件：精英 / 首领三选一掉落“敌方接口组件”，解析台破解后得到蓝图（GDD §6.5、§9）。",
+                Slot = "结构",
+                ScrapCost = 24,
+                Load = 3,
+                ValuesSummary = "重甲同样加质量；正面 ±60° 受击减伤 50%（fg.TbChannelDecl 声明幅度）。",
+                AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
+                IconId = "icon_struct_armor_skirt",
+                ModelId = "primitive:capsule",
+                ActionId = "CombatSite.SpawnMachine → EmgCatalog.PartFlagBehavior（声明 → 内核行为参数）",
+                VfxId = "vfx_none_placeholder",
+                SfxId = "",
+                PreviewId = "preview_struct_armor_skirt",
+                SaveCompatible = true,
+                LockedHintText = "精英 / 首领掉落的敌方接口组件，送解析台破解后才能写进蓝图量产。",
+                SilhouetteNote = "保留铸造外壳与橙色发光、占机体约 30%、接缝青蓝信号缝合线（美术规范 03 §9；占位低模）。",
+                LegacyFacadeId = null,
+                DebtId = "DEBT-EMG4LOOT01-01",
+                Faction = "foundry",
+            },
         };
 
         private static Dictionary<string, MechanicalContentDef> _merged;
@@ -381,14 +437,16 @@ namespace GameLogic.Campaign.Content
             string carrier = CarrierReadings.TryParseCarrier(row.Carrier, out Signal.FirmwareCarrier c) ? CarrierReadings.CarrierName(c) : row.Carrier;
             string subtype = CarrierReadings.SubtypeName(row.Id) ?? carrier;
             bool main = row.Slot == "main";
+            bool enemy = row.Source == "enemy"; // EMG4-LOOT-01：阵营标志组件（敌方接口组件，精英 / 首领掉落 → 解析台破解后才能写进蓝图）
             return new MechanicalContentDef
             {
                 Id = row.Id,
                 Category = main ? MechanicalContentCategory.MainComponent : MechanicalContentCategory.FunctionComponent,
                 DisplayName = GameText.Get(row.NameKey),
                 Description = GameText.Get(row.DescKey),
-                Source = MechanicalContentSource.BaseBlueprint,
-                SourceDetail = GameText.Get("component.source.base"),
+                Source = enemy ? MechanicalContentSource.EliteDrop : MechanicalContentSource.BaseBlueprint,
+                SourceDetail = GameText.Get(enemy ? "component.source.enemy" : "component.source.base"),
+                Faction = enemy && row.Faction != "none" ? row.Faction : null,
                 Slot = main ? "主组件" : "功能组件", // 槽位识别串（与 Demo 条目同一取值，代码按它分组；界面显示走载体名）
                 ScrapCost = Math.Max(0, row.Scrap),
                 Load = Math.Max(1, row.Load),
@@ -402,7 +460,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_weapon_fire",
                 PreviewId = "preview_" + row.Id,
                 SaveCompatible = true,
-                LockedHintText = GameText.Get("component.source.base"),
+                LockedHintText = GameText.Get(enemy ? "component.source.enemy" : "component.source.base"),
                 SilhouetteNote = $"载体 {row.Carrier}；三套机身状态由 FG2-VFX-02 交付（MachineMorphLibrary，占位低模 → DEBT-FG2VFX02-01）。",
                 LegacyFacadeId = row.LegacyOrgan == "none" ? null : row.LegacyOrgan,
                 DebtId = "DEBT-FG2VFX02-01",

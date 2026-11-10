@@ -59,6 +59,9 @@ public sealed partial class CombatComponent : Luban.BeanBase
         FlightLifeScale = _buf.ReadFloat();
         FlightLob = _buf.ReadInt();
         Kinetic = _buf.ReadFloat();
+        Faction = _buf.ReadString();
+        FixedOnly = _buf.ReadInt();
+        BehaviorOf = _buf.ReadString();
     }
 
     public static CombatComponent DeserializeCombatComponent(ByteBuf _buf)
@@ -226,6 +229,18 @@ public sealed partial class CombatComponent : Luban.BeanBase
     /// 动能系数(FG19B &#167;6.3)
     /// </summary>
     public readonly float Kinetic;
+    /// <summary>
+    /// 阵营标志组件的阵营(FGR-FAC-009;蓝图阵营标签):none=不是标志组件/silent/foundry/clarity/overclock
+    /// </summary>
+    public readonly string Faction;
+    /// <summary>
+    /// 1=只能装在固定底盘上(环形喷淋架,FGR-FAC-009“仅固定底盘”);0=不限
+    /// </summary>
+    public readonly int FixedOnly;
+    /// <summary>
+    /// 阵营标志组件的内核专属行为参数取自哪一行敌人(fg.TbMechEnemy 外键,阵营须一致;只读架炮驻锄 / 高抛盲区 / 枢轴喷灌三组);none=没有
+    /// </summary>
+    public readonly string BehaviorOf;
    
     public const int __ID__ = -2113875684;
     public override int GetTypeId() => __ID__;
@@ -277,6 +292,9 @@ public sealed partial class CombatComponent : Luban.BeanBase
         + "flightLifeScale:" + FlightLifeScale + ","
         + "flightLob:" + FlightLob + ","
         + "kinetic:" + Kinetic + ","
+        + "faction:" + Faction + ","
+        + "fixedOnly:" + FixedOnly + ","
+        + "behaviorOf:" + BehaviorOf + ","
         + "}";
     }
 }

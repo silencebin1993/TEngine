@@ -27,7 +27,9 @@ namespace BinGames.Sim.Combat
             int possessed = -2; // 懒查：第一次遇到断链束单位时才扫一遍
             for (int i = 0; i < n; i++)
             {
-                if (!d.IsAlive(i) || d.Faction[i] != (byte)CombatFaction.Hostile)
+                // EMG4-LOOT-01（FGR-FAC-009 吸波伪装罩）：己方机器带潜伏参数时同一套潜伏结算（规则与敌方版本一致）；偏折场 / 断链束仍只给敌方
+                bool hostile = d.Faction[i] == (byte)CombatFaction.Hostile;
+                if (!d.IsAlive(i) || (!hostile && d.Faction[i] != (byte)CombatFaction.Player))
                 {
                     continue;
                 }
@@ -46,11 +48,11 @@ namespace BinGames.Sim.Combat
                 {
                     StepLurk(ref d, ref grid, i, in p, ref sl, dt);
                 }
-                if (p.DeflectRadius > 0f)
+                if (hostile && p.DeflectRadius > 0f)
                 {
                     StepDeflect(ref d, i, in p, ref sl, dt);
                 }
-                if (p.SeverRange > 0f)
+                if (hostile && p.SeverRange > 0f)
                 {
                     if (possessed == -2)
                     {
