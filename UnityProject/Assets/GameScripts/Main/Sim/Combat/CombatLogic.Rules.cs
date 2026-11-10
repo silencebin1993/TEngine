@@ -155,7 +155,8 @@ namespace BinGames.Sim.Combat
         {
             switch (r.Cond)
             {
-                case EmgRuleConst.CondTempGe: return z.Temp >= r.C1;
+                // EMG4-TER-02（FG19B V03）：焦土圈里“点燃”（产物 = 明火）的阈值下调 emg.terrain.scorch_ignite；没有焦土圈时多一次长度比较
+                case EmgRuleConst.CondTempGe: return z.Temp >= r.C1 || (d.ScorchGround.Length > 0 && r.Product == EmgMatterConst.Fire && z.Temp >= r.C1 - ScorchIgniteOf(ref d) && EmgScorchedAt(ref d, z.Pos));
                 case EmgRuleConst.CondTempLt: return z.Temp < r.C1;
                 case EmgRuleConst.CondTempGeConcLt: return z.Temp >= r.C1 && z.Conc < r.C2;
                 case EmgRuleConst.CondTempGeConcGe: return z.Temp >= r.C1 && z.Conc >= r.C2;
@@ -761,6 +762,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             EmgPitFeed(ref d, z, EmgRuleConst.CondPitAcid); // EMG4-TER-01（V07，evt.expire）：到期时的份量在可熔地面累计
+            EmgScorchFeed(ref d, z); // EMG4-TER-02（V03，evt.expire）：家园明火到期时累计燃烧秒，满 20 秒留下焦土
             int2 ix = d.EmgRuleIdx[EmgMatterConst.Count + 1 + z.Matter];
             for (int k = ix.x; k < ix.x + ix.y; k++)
             {

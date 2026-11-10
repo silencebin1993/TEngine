@@ -45,6 +45,8 @@ namespace GameLogic.Campaign.Emergence
         private static uint _floodSig;
         private static BuildingRecord[] _floodBuildings;
         private static CampaignState _floodState;
+        private static int _floodMarkRev;
+        private static readonly List<int2> PitOpen = new List<int2>(256);
 
         /// <summary>自检读点：泛洪次数（没变化不泛洪）与最近一次耗时。</summary>
         public static int Floods { get; private set; }
@@ -56,6 +58,7 @@ namespace GameLogic.Campaign.Emergence
 
         public static void ResetSessionState()
         {
+            GroundMarkService.ResetSessionState(); // EMG4-TER-02
             _floodSig = 0u;
             _floodBuildings = null;
             _floodState = null;
@@ -77,7 +80,7 @@ namespace GameLogic.Campaign.Emergence
         public static bool IsClearTarget(string targetId) => targetId != null && targetId.StartsWith(TargetPrefix, StringComparison.Ordinal);
 
         public static string TargetOf(byte kind, int id) =>
-            TargetPrefix + (kind == EmgPersistItem.KindWreck ? "w:" : kind == EmgPersistItem.KindPit ? "k:" : "p:") + id.ToString(CultureInfo.InvariantCulture);
+            TargetPrefix + (kind == EmgPersistItem.KindWreck ? "w:" : kind == EmgPersistItem.KindPit ? "k:" : kind == EmgPersistItem.KindMark ? "g:" : "p:") + id.ToString(CultureInfo.InvariantCulture);
 
         private static bool TryParse(string targetId, out byte kind, out int id)
         {
@@ -88,16 +91,38 @@ namespace GameLogic.Campaign.Emergence
                 return false;
             }
             char c = targetId[TargetPrefix.Length];
-            kind = c == 'w' ? EmgPersistItem.KindWreck : c == 'k' ? EmgPersistItem.KindPit : EmgPersistItem.KindPatch; // EMG4-TER-01：k = 熔坑（填平）
-            return (c == 'w' || c == 'p' || c == 'k') && int.TryParse(targetId.Substring(TargetPrefix.Length + 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out id);
+            kind = c == 'w' ? EmgPersistItem.KindWreck : c == 'k' ? EmgPersistItem.KindPit : c == 'g' ? EmgPersistItem.KindMark : EmgPersistItem.KindPatch; // EMG4-TER-01：k = 熔坑（填平）；EMG4-TER-02：g = 战痕
+            return (c == 'w' || c == 'p' || c == 'k' || c == 'g') && int.TryParse(targetId.Substring(TargetPrefix.Length + 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out id);
         }
 
         public static bool TryGetTarget(string targetId, out EmgPersistItem item)
         {
             item = default;
             CombatSite site = Home;
-            return site != null && TryParse(targetId, out byte kind, out int id) && site.PersistSite && site.TryGetPersist(kind, id, out item);
+            if (!TryParse(targetId, out byte kind, out int id))
+            {
+                return false;
+            }
+            if (kind == EmgPersistItem.KindMark)
+            {
+                // EMG4-TER-02：战痕在战役存档里（不在内核），不依赖家园内核在不在
+                GroundMarkRecord r = GroundMarkService.Find(MarkState, id);
+                if (r != null)
+                {
+                    item = MarkItem(r);
+                }
+                return r != null;
+            }
+            return site != null && site.PersistSite && site.TryGetPersist(kind, id, out item);
         }
+
+        /// <summary>EMG4-TER-02：战痕所在的战役（家园格网绑定的那一局；夹具没绑寻路时取当前会话）。</summary>
+        private static CampaignState MarkState => NavService.BoundState ?? CampaignSession.Current;
+
+        private static EmgPersistItem MarkItem(GroundMarkRecord r) => new EmgPersistItem
+        {
+            Kind = EmgPersistItem.KindMark, Id = r.Id, Pos = new double2(r.X, r.Y), Radius = r.Radius, Blocks = r.Kind == EmgGroundMarkConst.KindPit,
+        };
 
         /// <summary>工单 / 通知里写的目标名：“固化胶块（x, y）”；目标已经没了只写“残骸”或“固态斑块”。</summary>
         public static string DescribeTarget(string targetId)
@@ -105,11 +130,14 @@ namespace GameLogic.Campaign.Emergence
             if (!TryGetTarget(targetId, out EmgPersistItem it))
             {
                 bool parsed = TryParse(targetId, out byte gone, out _);
-                return GameText.Get(parsed && gone == EmgPersistItem.KindWreck ? "emg.hover.wreck.title" : parsed && gone == EmgPersistItem.KindPit ? "emg.persist.target_pit" : "emg.persist.target_solid");
+                return GameText.Get(parsed && gone == EmgPersistItem.KindWreck ? "emg.hover.wreck.title" : parsed && gone == EmgPersistItem.KindPit ? "emg.persist.target_pit"
+                    : parsed && gone == EmgPersistItem.KindMark ? "emg.mark.target" : "emg.persist.target_solid");
             }
             GridCell c = NavService.CellOf(it.Pos.x, it.Pos.y);
             string name = it.Kind == EmgPersistItem.KindWreck ? GameText.Get("emg.hover.wreck.title")
-                : it.Kind == EmgPersistItem.KindPit ? GameText.Get("emg.persist.target_pit") : EmgMatterCatalog.NameOf(it.Matter);
+                : it.Kind == EmgPersistItem.KindPit ? GameText.Get("emg.persist.target_pit")
+                : it.Kind == EmgPersistItem.KindMark ? GameText.Format("emg.mark.hover.title", GroundMarkService.NameOf(GroundMarkService.Find(MarkState, it.Id)?.Kind ?? 0))
+                : EmgMatterCatalog.NameOf(it.Matter);
             return GameText.Format("emg.persist.work_target", name, c.X, c.Y);
         }
 
@@ -175,10 +203,58 @@ namespace GameLogic.Campaign.Emergence
         }
 
         /// <summary>工作单完工：移除目标。目标已经没了返回 false。</summary>
-        public static bool TryClearTarget(string targetId)
+        public static bool TryClearTarget(string targetId) => TryClearTarget(MarkState, targetId);
+
+        /// <summary>
+        /// 工作单完工：移除目标。EMG4-TER-02：战痕 = 这一处的格回到空地（熔坑战痕连同圈里的内核熔坑一起填平）；内核熔坑填平时格网上同处的熔坑一并填平——两边始终一致。
+        /// </summary>
+        public static bool TryClearTarget(CampaignState state, string targetId)
         {
             CombatSite site = Home;
-            return site != null && TryParse(targetId, out byte kind, out int id) && site.ClearPersist(kind, id);
+            if (!TryParse(targetId, out byte kind, out int id))
+            {
+                return false;
+            }
+            HomeGridMap map = state != null ? HomeGridService.MapFor(state) : null;
+            if (kind == EmgPersistItem.KindMark)
+            {
+                GroundMarkRecord r = GroundMarkService.Find(state, id);
+                if (r == null)
+                {
+                    return false;
+                }
+                if (r.Kind == EmgGroundMarkConst.KindPit && site != null && site.PersistSite)
+                {
+                    for (int i = site.PitCount - 1; i >= 0; i--)
+                    {
+                        EmgPit pit = site.PitAt(i);
+                        if (math.distance(pit.Pos, new double2(r.X, r.Y)) <= r.Radius + 0.5)
+                        {
+                            site.ClearPersist(EmgPersistItem.KindPit, pit.Id);
+                        }
+                    }
+                }
+                return GroundMarkService.Clear(state, map, id);
+            }
+            if (site == null)
+            {
+                return false;
+            }
+            EmgPersistItem pitItem = default;
+            bool pitKind = (kind == EmgPersistItem.KindPit || kind == EmgPersistItem.KindPatch) && site.TryGetPersist(kind, id, out pitItem);
+            if (!site.ClearPersist(kind, id))
+            {
+                return false;
+            }
+            if (pitKind && kind == EmgPersistItem.KindPit)
+            {
+                GroundMarkService.ClearPitAt(state, map, pitItem.Pos);
+            }
+            else if (pitKind)
+            {
+                GroundMarkService.ClearSolidAt(state, map, pitItem.Pos); // 清玻化层 / 冰：同处的玻化地面 / 冻土战痕一并清掉
+            }
+            return true;
         }
 
         /// <summary>框里（闭区间，任意两角）的长期留存物：圆心在框内，或点一格时圆盖住这一格。</summary>
@@ -191,6 +267,14 @@ namespace GameLogic.Campaign.Emergence
                 return;
             }
             site.CollectPersist(Items);
+            // EMG4-TER-02：战痕（格网地面材质）同走“清除场地物”；有内核熔坑代表的熔坑战痕不重复列（k: 那一张会连格网一起填平）
+            foreach (GroundMarkRecord r in state?.World?.GroundMarks ?? Array.Empty<GroundMarkRecord>())
+            {
+                if (r != null && !GroundMarkService.HasKernelPit(site, r))
+                {
+                    Items.Add(MarkItem(r));
+                }
+            }
             int minX = Math.Min(a.X, b.X), maxX = Math.Max(a.X, b.X), minY = Math.Min(a.Y, b.Y), maxY = Math.Max(a.Y, b.Y);
             bool single = minX == maxX && minY == maxY;
             foreach (EmgPersistItem it in Items)
@@ -304,7 +388,7 @@ namespace GameLogic.Campaign.Emergence
         private static void CheckBlocks(CampaignState state, SoftlockState st, CombatSite site)
         {
             uint sig = site.PersistSignature();
-            if (ReferenceEquals(_floodState, state) && sig == _floodSig && ReferenceEquals(_floodBuildings, state.BuildingRecords))
+            if (ReferenceEquals(_floodState, state) && sig == _floodSig && ReferenceEquals(_floodBuildings, state.BuildingRecords) && _floodMarkRev == GroundMarkService.Revision)
             {
                 return;
             }
@@ -315,8 +399,17 @@ namespace GameLogic.Campaign.Emergence
             _floodState = state;
             _floodSig = sig;
             _floodBuildings = state.BuildingRecords;
+            _floodMarkRev = GroundMarkService.Revision;
             site.CollectPersist(Items);
             Items.RemoveAll(it => it.Kind != EmgPersistItem.KindWreck && !it.Blocks); // 冷渣 / 冰 / 玻化层能走，不算堵路
+            // EMG4-TER-02：没有内核熔坑代表的格网熔坑（地形本身不可通行）同样参与堵路归因；有内核熔坑的由那件代表
+            foreach (GroundMarkRecord r in state.World?.GroundMarks ?? Array.Empty<GroundMarkRecord>())
+            {
+                if (r != null && r.Kind == EmgGroundMarkConst.KindPit && !GroundMarkService.HasKernelPit(site, r))
+                {
+                    Items.Add(MarkItem(r));
+                }
+            }
             if (Items.Count == 0)
             {
                 SetBlocks(st, Array.Empty<PersistBlockRecord>());
@@ -357,6 +450,10 @@ namespace GameLogic.Campaign.Emergence
             ExtraSet.Clear();
             foreach (EmgPersistItem it in Items)
             {
+                if (it.Kind == EmgPersistItem.KindMark)
+                {
+                    continue; // 格网熔坑的格本来就是不可通行地形；外接圆可能盖住别的格，不能整圆当墙
+                }
                 ForCircle(it, it.Radius + 0.5f, c =>
                 {
                     if (ExtraSet.Add(CellKey(c)))
@@ -420,7 +517,8 @@ namespace GameLogic.Campaign.Emergence
                     Probes.Clear();
                     Owners.Clear();
                     TargetRings(Probes, Owners, true);
-                    NavService.Kernel.Reachability(NavConst.ClassPlayer, min, max, Sources, null, Probes, Owners, possible, ignoreDynamic: true);
+                    GroundMarkService.CollectPitCells(state, HomeGridService.MapFor(state), PitOpen); // 格网熔坑填平后回到空地：基线同样假设它不在（内核熔坑底下的原值也已是熔坑地形）
+                    NavService.Kernel.Reachability(NavConst.ClassPlayer, min, max, Sources, null, Probes, Owners, possible, ignoreDynamic: true, extraOpen: PitOpen);
                     Floods++;
                 }
                 if (!possible[t])
@@ -465,7 +563,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     r.Alerted = true;
                     GridCell c = NavService.CellOf(r.X, r.Y);
-                    NotificationCenter.Post(NotifyBlocked, GameText.Format(r.Kind == EmgPersistItem.KindPit ? "emg.persist.blocked_pit" : r.Blocks ? "emg.persist.blocked_solid" : "emg.persist.blocked_wreck", TargetName(state, r.Key), c.X, c.Y),
+                    NotificationCenter.Post(NotifyBlocked, GameText.Format(r.Kind == EmgPersistItem.KindPit || r.Kind == EmgPersistItem.KindMark ? "emg.persist.blocked_pit" : r.Blocks ? "emg.persist.blocked_solid" : "emg.persist.blocked_wreck", TargetName(state, r.Key), c.X, c.Y),
                         new Vector3(r.X, 0f, r.Y));
                 }
             }

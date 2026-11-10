@@ -415,6 +415,7 @@ namespace GameLogic.Campaign.Combat
             c.EmgPitRadius = Mathf.Max(0.3f, Tuning("emg.terrain.pit_radius", EmgPitConst.DefaultRadius));
             c.EmgPitGather = Mathf.Max(0.5f, Tuning("emg.terrain.pit_gather", EmgPitConst.DefaultGather));
             c.EmgMeltCodes = MeltCodes();
+            c.EmgScorchIgnite = Mathf.Max(0f, Tuning("emg.terrain.scorch_ignite", EmgGroundMarkConst.DefaultScorchIgnite)); // EMG4-TER-02（V03）：焦土上点燃阈值下调
             c.EmgReclaimMaxRatio = Mathf.Clamp(Tuning("emg.reclaim.max_ratio", EmgReclaimConst.DefaultMaxRatio), 0f, 1f); // EMG2-RECL-01（FGR-EMG-115）
             c.EmgReclaimHpPerMass = Mathf.Max(0f, Tuning("emg.reclaim.hp_per_mass", EmgReclaimConst.DefaultHpPerMass));
             c.EmgReclaimInterval = Mathf.Max(0.1f, Tuning("emg.reclaim.interval", EmgReclaimConst.DefaultInterval));
@@ -2059,6 +2060,31 @@ namespace GameLogic.Campaign.Combat
             Nav.NavService.SyncDynamicBlocks(_navBlockCircles);
         }
 
+        private CampaignState _scorchState;
+        private int _scorchRevision = -1;
+        private readonly System.Collections.Generic.List<Unity.Mathematics.float3> _scorchCircles = new System.Collections.Generic.List<Unity.Mathematics.float3>(8);
+
+        /// <summary>
+        /// EMG4-TER-02（FG19B V03，FGR-EMG-153“下一场战斗载入时转为长期标记”）：家园内核的焦土圈跟战役存档里的焦土战痕走——每步一次 O(1) 版本号比较，
+        /// 战痕变了（新写、合并、清除、读档换了一局）才 O(战痕数 ≤ 64) 重写。远征 / 室内地点没有家园格网，不写。
+        /// </summary>
+        private void SyncScorchGround()
+        {
+            if (!Kernel.PersistSite)
+            {
+                return;
+            }
+            CampaignState state = Nav.NavService.BoundState;
+            if (ReferenceEquals(state, _scorchState) && Emergence.GroundMarkService.Revision == _scorchRevision)
+            {
+                return;
+            }
+            _scorchState = state;
+            _scorchRevision = Emergence.GroundMarkService.Revision;
+            Emergence.GroundMarkService.CollectScorch(state, _scorchCircles);
+            Kernel.SetScorchGround(_scorchCircles);
+        }
+
         private Grid.HomeGridMap _meltMap;
         private int _meltEdit = -1;
         private readonly System.Collections.Generic.List<Unity.Mathematics.int4> _meltEdits = new System.Collections.Generic.List<Unity.Mathematics.int4>(16);
@@ -2088,7 +2114,13 @@ namespace GameLogic.Campaign.Combat
             {
                 if (e.z >= 0 && e.z < 64) // 255 = 只改了污染，地形沿用生成采样
                 {
-                    _meltCells.Add(new Unity.Mathematics.float3(e.x, e.y, (codes & (1ul << e.z)) != 0ul ? EmgPitConst.CellMeltable : EmgPitConst.CellNotMeltable));
+                    bool melt = (codes & (1ul << e.z)) != 0ul;
+                    // EMG4-TER-02：可熔性与生成基线相同的格不写覆盖（空地上的焦土 / 玻化地面 / 冻土），内核覆盖表不随战痕膨胀
+                    if (map.TryGetBaseTerrain(new Grid.GridCell(e.x, e.y), out byte baseCode) && baseCode < 64 && melt == ((codes & (1ul << baseCode)) != 0ul))
+                    {
+                        continue;
+                    }
+                    _meltCells.Add(new Unity.Mathematics.float3(e.x, e.y, melt ? EmgPitConst.CellMeltable : EmgPitConst.CellNotMeltable));
                 }
             }
             Kernel.SetMeltGround(_meltCells);
@@ -2151,6 +2183,7 @@ namespace GameLogic.Campaign.Combat
             if (_emgEntity)
             {
                 SyncMeltOverrides(); // EMG4-TER-01 修复轮 1：本步结算前同步家园改过的地形
+                SyncScorchGround(); // EMG4-TER-02：存档里的焦土战痕 → 内核焦土圈（O(1) 版本比较）
             }
             Kernel.Step(dt, time);
             WatchEmgBus();
@@ -2473,6 +2506,13 @@ namespace GameLogic.Campaign.Combat
                 case CombatEventKind.HijackEnded:
                 case CombatEventKind.HijackRefused:
                     HandleHijackEvent(state, e); // EMG4-HIJ-01（ADR ⑰）：劫持开始 / 结束 / 被拒，O(1)
+                    return;
+                case CombatEventKind.GroundMark:
+                    // EMG4-TER-02（FGR-EMG-153）：家园 / 前哨战痕按格写进格网（O(本次标记覆盖的格数 + 战痕数 ≤ 64)；内核只在长期留存地点发）
+                    if (PersistSite && state != null)
+                    {
+                        Emergence.GroundMarkService.Apply(state, Grid.HomeGridService.MapFor(state), e.Code, e.Pos, e.Value);
+                    }
                     return;
                 case CombatEventKind.Seized:
                 case CombatEventKind.SeizeEnded:

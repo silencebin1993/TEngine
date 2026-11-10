@@ -25,6 +25,7 @@ namespace BinGames.Sim.Combat
         /// <summary>第 <paramref name="born"/> 块长期留存固态刚生成：超物质软上限或总额时，最早的（不含它自己）崩解为碎屑。O(斑块数)，只在固态斑块生成那一刻。</summary>
         internal static void EmgPersistCap(ref CombatData d, int born)
         {
+            EmgSolidMark(ref d, born); // EMG4-TER-02：长期留存的玻化层 / 冰同时在格网留下玻化地面 / 冻土战痕（两条调用点都在“长期留存固态生成”那一刻）
             byte matter = d.Patches[born].Matter;
             int quota = MatterOf(ref d, matter).Quota, max = PersistPatchMaxOf(ref d);
             for (int guard = 0; guard < 2; guard++)

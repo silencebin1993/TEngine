@@ -223,13 +223,17 @@ namespace BinGames.Sim.Combat
             // EMG2-REACT-01：单位层沾染行（C）与相态 × 能量行（P03）的条件
             CondInjectGe = 15, CondCoats = 16, CondSameHit = 17,
             // EMG4-TER-01（FG19B V06 / V07）：熔融金属凝固 / 酸到期时在可熔地面累计
-            CondPitMolten = 18, CondPitAcid = 19;
+            CondPitMolten = 18, CondPitAcid = 19,
+            // EMG4-TER-02（FG19B V03）：明火到期时在家园“同一位置”累计燃烧秒
+            CondHomeBurn = 20;
         /// <summary>结算方式：0 = 承接卡接上（本卡落表、占容量、不结算）。</summary>
         public const byte OpDeferred = 0, OpConvert = 1, OpMoveOver = 2, OpDilute = 3, OpDouse = 4, OpErode = 5, OpSplit = 6, OpSpawn = 7, OpBurst = 8, OpArc = 9, OpFragment = 10, OpVent = 11,
             // EMG2-REACT-01：单位层沾染行（C01 / C02 脚下生成、C03 电弧、C06 粘住）
             OpCoatSpawn = 12, OpCoatArc = 13, OpStick = 14, OpCoatFlash = 15, OpCoatTrail = 16, OpCoatSlow = 17,
             // EMG4-TER-01：熔坑（T 类 ter.mark；c1 = 同一位置累计份量阈值）
-            OpMeltPit = 18, OpLast = 18;
+            OpMeltPit = 18,
+            // EMG4-TER-02：焦土（T 类 ter.mark；c1 = 同一位置累计燃烧秒阈值）
+            OpScorch = 19, OpLast = 19;
         public const byte MainS = 1, MainT = 2, MainB = 3, MainP = 4;
         public const byte SideNone = 0, SideDamage = 1, SideMult = 2;
         /// <summary>“不改温度”的哨兵（表里写 −999）。</summary>

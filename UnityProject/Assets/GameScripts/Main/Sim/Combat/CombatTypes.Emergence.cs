@@ -122,6 +122,8 @@ namespace BinGames.Sim.Combat
         public const int SegPit = 28;
         public const int SegPitAcc = 29;
         public const int SegPitStats = 30;
+        /// <summary>EMG4-TER-02（格式 20 内追加，自描述段）：段 31 焦土“同一位置”累计点（x, y, 累计燃烧秒, 最大火势半径）。与段 28～30 一起只在有地形状态时写；读不含这段的快照 = 没有累计。</summary>
+        public const int SegScorchAcc = 31;
         /// <summary>EMG3-FUSE-01：熔合线索配方位数与每条配方记住的最近计过的链数（CombatData.EmgClue：[0, 32) 待取走次数、[32, 64) 环头、其后 32 × 8 链号环、规则路径上一次计数的链号与步号低 32 位）。</summary>
         public const int ClueSlots = 32, ClueRing = 8, ClueRuleChain = ClueSlots * 2 + ClueSlots * ClueRing, ClueRuleStep = ClueRuleChain + ClueSlots, ClueLen = ClueRuleStep + ClueSlots;
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
@@ -1196,9 +1198,24 @@ namespace BinGames.Sim.Combat
         public const byte SourceMolten = 1, SourceAcid = 2;
         /// <summary>MeltGround 逐格覆盖项的 z（x、y = 格坐标）：这格现在不是 / 是可熔地面（家园地形被玩家改过的格）。</summary>
         public const float CellNotMeltable = -1f, CellMeltable = -2f;
-        /// <summary>CombatData.PitStats 下标：下一个 ID、形成、上限满未生效、填平、可熔地面以外的累计（不计入）。</summary>
-        public const int StatNextId = 0, StatBorn = 1, StatCapped = 2, StatFilled = 3, StatOffGround = 4, StatLen = 5;
+        /// <summary>CombatData.PitStats 下标：下一个 ID、形成、上限满未生效、填平、可熔地面以外的累计（不计入）；
+        /// EMG4-TER-02 段尾追加：焦土形成次数、发出的地面标记玩法事件数（段 30 自描述，旧档短段缺的两项取 0）。</summary>
+        public const int StatNextId = 0, StatBorn = 1, StatCapped = 2, StatFilled = 3, StatOffGround = 4, StatScorchBorn = 5, StatMarks = 6, StatLen = 7;
         public const int PitFields = 7, AccFields = 4;
+    }
+
+    /// <summary>
+    /// EMG4-TER-02（FG19 FGR-EMG-153，FG19B V03，ADR-EMG-001 ⑩）：地面标记（战痕）。内核只在长期留存地点（家园 / 前哨，<see cref="CombatConfig.EmgPersist"/>）
+    /// 发 <see cref="CombatEventKind.GroundMark"/> 玩法事件（受每步 64 条、顺延不丢）；写格网、合并、上限、清除都在热更层，O(本次标记数)。
+    /// 焦土圈（<see cref="CombatData.ScorchGround"/>）是热更层按存档里的战痕写回的派生量：圈里可燃斑块的点燃阈值下调 <see cref="CombatConfig.EmgScorchIgnite"/>。
+    /// </summary>
+    public static class EmgGroundMarkConst
+    {
+        /// <summary>事件 Code：焦土（V03）/ 玻化地面（长期留存的玻化层生成）/ 冻土（长期留存的冰生成）/ 熔坑（V06 / V07 成坑）。</summary>
+        public const byte KindScorch = 1, KindGlazed = 2, KindFrozen = 3, KindPit = 4, KindLast = 4;
+        public const float DefaultScorchIgnite = 40f;
+        /// <summary>焦土圈上限（与热更层 emg.terrain.marks_max 同值；派生量，防无界增长）。</summary>
+        public const int ScorchGroundCapacity = 64;
     }
 
     /// <summary>EMG4-HIJ-01：一台被劫持的敌机（快照段 27）。按稳定单位 ID 记，压实挪槽位不影响。</summary>

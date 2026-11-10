@@ -394,11 +394,17 @@ namespace BinGames.Sim.Nav
         /// 放置预览的可达性（镜像，Burst 泛洪）：在矩形区域里从 <paramref name="sources"/> 出发，把 <paramref name="extraBlocked"/> 当作障碍，
         /// 每个 owner 的探测格只要有一个被泛洪到就是可达。<paramref name="reached"/> 长度 = owner 数。
         /// <paramref name="ignoreDynamic"/> = 假设阻路斑块都不在（只掀开底下本来能走的格）。
+        /// <paramref name="extraOpen"/> = 另外假设能走的格（EMG4-TER-02：格网熔坑地形，填平后回到空地）。
         /// </summary>
         public void Reachability(int cls, int2 min, int2 max, IReadOnlyList<int2> sources, IReadOnlyList<int2> extraBlocked,
-            IReadOnlyList<int2> probes, IReadOnlyList<int> probeOwner, bool[] reached, bool ignoreDynamic = false)
+            IReadOnlyList<int2> probes, IReadOnlyList<int> probeOwner, bool[] reached, bool ignoreDynamic = false, IReadOnlyList<int2> extraOpen = null)
         {
             List<int2> open = ignoreDynamic ? OpenUnderDynamic(cls) : null;
+            if (extraOpen != null && extraOpen.Count > 0)
+            {
+                open ??= new List<int2>(extraOpen.Count);
+                open.AddRange(extraOpen);
+            }
             var through = ToNative(open);
             int ownerCount = reached.Length;
             var src = ToNative(sources);

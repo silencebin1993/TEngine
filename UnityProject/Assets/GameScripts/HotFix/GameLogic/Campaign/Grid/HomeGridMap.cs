@@ -181,6 +181,19 @@ namespace GameLogic.Campaign.Grid
         }
 
         /// <summary>取（必要时同步生成）格子所在的区块。</summary>
+        /// <summary>EMG4-TER-02：已加载且改过的区块里这一格的生成基线地形（没加载 / 没改过返回 false）。不生成区块。</summary>
+        public bool TryGetBaseTerrain(GridCell cell, out byte code)
+        {
+            ChunkAddress a = GridMath.Address(cell, ChunkSize);
+            code = 0;
+            if (!_chunks.TryGetValue(Key(a.ChunkX, a.ChunkY), out Chunk chunk) || chunk.BaseTerrain == null)
+            {
+                return false;
+            }
+            code = chunk.BaseTerrain[a.LocalY * ChunkSize + a.LocalX];
+            return true;
+        }
+
         public Chunk ChunkAt(GridCell cell, out int index)
         {
             ChunkAddress a = GridMath.Address(cell, ChunkSize);
@@ -281,7 +294,11 @@ namespace GameLogic.Campaign.Grid
             {
                 if (r != null && r.SurfaceId == SurfaceId)
                 {
-                    _savedDiffs[Key(r.ChunkX, r.ChunkY)] = r.DiffPayload;
+                    string payload = DropUnregisteredTerrain(r.ChunkX, r.ChunkY, r.DiffPayload);
+                    if (payload != null)
+                    {
+                        _savedDiffs[Key(r.ChunkX, r.ChunkY)] = payload;
+                    }
                 }
             }
             // 已加载的区块立刻套用（通常 SetSavedDiffs 在建图后、生成任何区块前调用）。
@@ -292,6 +309,50 @@ namespace GameLogic.Campaign.Grid
             // FG7-ENV-04：归还面积按读进来的差异精确重算（之后区块被生成、套用差异时不再改变它）。
             ReturnedCells = RecountReturnedCells();
         }
+
+        /// <summary>
+        /// EMG4-TER-02（FG19 FGR-EMG-153，ADR-EMG-001 ⑩“地形层新字节值只追加”）：存档差异里的地形字节值必须在地形层取值表 fg.TbGridTerrain 里登记；
+        /// 读到表外的值（旧档 / 回滚 / 外部改坏）→ 这一格的地形按“原生成值”处理（去掉地形位，污染位照留），记 Error，不坏档。
+        /// 返回处理后的编码（整块都只剩表外地形时返回 null = 这个区块按生成重来）；解码失败原样返回（由 <see cref="ApplySavedDiff"/> 报错，读档时已整体校验）。
+        /// 地形表为空（没载入配置的夹具）时不做判断，原样返回。
+        /// </summary>
+        private string DropUnregisteredTerrain(int cx, int cy, string payload)
+        {
+            if (GridContent.Terrains == null || GridContent.Terrains.Count == 0 || !WorldDiffCodec.TryDecode(payload, ChunkSize, _diffScratch, out _))
+            {
+                return payload;
+            }
+            int bad = 0;
+            byte first = 0;
+            var kept = new List<ChunkCellDiff>(_diffScratch.Count);
+            foreach (ChunkCellDiff d in _diffScratch)
+            {
+                if ((d.Mask & ChunkCellDiff.TerrainBit) == 0 || GridContent.TerrainByCode(d.Terrain) != null)
+                {
+                    kept.Add(d);
+                    continue;
+                }
+                if (bad++ == 0)
+                {
+                    first = d.Terrain;
+                }
+                byte mask = (byte)(d.Mask & ~ChunkCellDiff.TerrainBit);
+                if (mask != 0)
+                {
+                    kept.Add(new ChunkCellDiff(d.Index, mask, 0, d.Pollution));
+                }
+            }
+            if (bad == 0)
+            {
+                return payload;
+            }
+            UnregisteredTerrainCells += bad;
+            Log.Error($"[HomeGridMap] 表面 {SurfaceId} 区块 ({cx},{cy}) 的存档差异有 {bad} 格地形字节值不在地形表 fg.TbGridTerrain 里（例如 {first}）：这些格按原生成值处理（FGR-EMG-153）");
+            return kept.Count == 0 ? null : WorldDiffCodec.Encode(ChunkSize, kept);
+        }
+
+        /// <summary>EMG4-TER-02：读档时按“原生成值”处理掉的表外地形格数（自检读点）。</summary>
+        public int UnregisteredTerrainCells { get; private set; }
 
         private void ApplySavedDiff(Chunk chunk)
         {

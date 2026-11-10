@@ -836,6 +836,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgSeizeSelfCheck", FgEmgSeizeSelfCheck.Run); // EMG4-HIJ-02：夺控 / 瘫痪 / 反向接入、槽位封锁重编、三类共用事件、镜像复制（FGT-EMG-061 / 010）
             Seg("FgEmgStage4FirmwareSelfCheck", FgEmgStage4FirmwareSelfCheck.Run); // EMG4-FW-01：劫持新固件落表 N39～N41（FGT-EMG-002 / 003 / 006 / 061，FGJ-EMG-4 第一步，DEBT-EMG4HIJ01-01）
             Seg("FgEmgTerrainSelfCheck", FgEmgTerrainSelfCheck.Run); // EMG4-TER-01：熔坑（FGT-EMG-060 熔坑部分；冻结桥随水面 FG18-SEA-01，DEBT-EMG4TER01-01）
+            Seg("FgEmgGroundMarkSelfCheck", FgEmgGroundMarkSelfCheck.Run); // EMG4-TER-02：战痕写入家园格网（FGT-EMG-060 战痕部分、FGT-EMG-041 迁移部分）
         }
 
         /// <summary>跑一段：计时、统计本段写进报告的通过 / 失败 / 性能警告条数；只跑点名段时跳过其余段。异常照常抛出（与原来一样中止后面的段）。</summary>

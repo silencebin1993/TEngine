@@ -242,7 +242,7 @@ namespace GameLogic.EditorTools
         private static void CheckData()
         {
             Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 43 && GridContent.StartLayout.Count == 17 /* FG8-DROP-01：+ 投送站（42 → 43）；FG7-ENV-04：+ 净化塔（41 → 42）；FG6-DEF-03：+ 维修无人机站（40 → 41）；FG6-DEF-02：+ 屏障 T1～T3、闸门、护盾、陷阱（34 → 40） */ // FG5-RND-04：+ 电路合成台（29 → 30）；FG5-RND-05：+ 监听站（30 → 31）；FG5-RND-06：+ 黑匣子陈列馆（31 → 32）；FG6-DEF-01：+ 轻型 / 重型炮塔座（32 → 34）
-                   && GridContent.Terrains.Count == 7, $"五张格网表已加载：建筑格网属性 {GridContent.Buildings.Count}、开局布局 {GridContent.StartLayout.Count}、地形 {GridContent.Terrains.Count}");
+                   && GridContent.Terrains.Count == 11 /* EMG4-TER-02：+ 焦土 / 玻化地面 / 冻土 / 熔坑四种战痕地面材质（7 → 11） */, $"五张格网表已加载：建筑格网属性 {GridContent.Buildings.Count}、开局布局 {GridContent.StartLayout.Count}、地形 {GridContent.Terrains.Count}");
             var missing = FgContentTables.Buildings.Where(b => !GridContent.TryGetBuilding(b.TypeId, out _)).Select(b => b.TypeId).ToList();
             Expect(missing.Count == 0, $"fg.TbBuilding 的每座建筑都有占地（缺：{string.Join(",", missing)}）");
 

@@ -30,6 +30,10 @@ namespace BinGames.Sim.Combat
         public NativeArray<int> PitStats;
         /// <summary>EMG4-TER-01：可熔地面圆（x, y, 半径；远征地点按生成内容里的废墟格写）。派生量（热更层按生成规则写），不进快照，读档沿用当前的。</summary>
         public NativeList<float3> MeltGround;
+        /// <summary>EMG4-TER-02（FG19B V03）：焦土“同一位置”累计点（x, y, 累计燃烧秒, 最大火势半径；快照段 31，≤ <see cref="EmgPitConst.AccCapacity"/>）。</summary>
+        public NativeList<float4> ScorchAcc;
+        /// <summary>EMG4-TER-02：焦土圈（x, y, 半径；热更层按战役存档里的战痕写，≤ <see cref="EmgGroundMarkConst.ScorchGroundCapacity"/>）。派生量，不进快照，读档沿用当前的。</summary>
+        public NativeList<float3> ScorchGround;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合线索同现计数（下标 = 配方书序号，≤ 32）；热更层按 <see cref="EmgScalars.ClueDirty"/> 取走后清零（可靠计数 + 脏位，不按帧扫描；待取走次数与去重环随快照段 26 存读档，脏位读档时由待取走次数重建）。</summary>
         public NativeArray<int> EmgClue;
         /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
@@ -72,6 +76,8 @@ namespace BinGames.Sim.Combat
             PitAcc = new NativeList<float4>(0, Allocator.Persistent);
             PitStats = new NativeArray<int>(EmgPitConst.StatLen, Allocator.Persistent);
             MeltGround = new NativeList<float3>(0, Allocator.Persistent);
+            ScorchAcc = new NativeList<float4>(0, Allocator.Persistent);
+            ScorchGround = new NativeList<float3>(0, Allocator.Persistent);
             EmgClue = new NativeArray<int>(EmgConst.ClueLen, Allocator.Persistent); // EMG3-FUSE-01：[0, 32) 待取走的同现次数，其后各配方的环头与最近计过的链号环
             EmgTraitParams = new NativeArray<float4>(EmgTraitConst.Count, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
@@ -159,6 +165,8 @@ namespace BinGames.Sim.Combat
             PitAcc.Dispose();
             PitStats.Dispose();
             MeltGround.Dispose();
+            ScorchAcc.Dispose();
+            ScorchGround.Dispose();
             EmgClue.Dispose();
             EmgTraitParams.Dispose();
             EmgMatters.Dispose();
@@ -236,6 +244,7 @@ namespace BinGames.Sim.Combat
             Hijacks.Clear();
             Pits.Clear();
             PitAcc.Clear();
+            ScorchAcc.Clear();
             for (int i = 0; i < PitStats.Length; i++)
             {
                 PitStats[i] = 0;

@@ -165,6 +165,130 @@ namespace BinGames.Sim.Combat
             d.PitStats[EmgPitConst.StatBorn]++;
             EmgPushOutCircle(ref d, pos, radius);
             EmgRuleSettle(ref d, r, z.EmgChain, z.EmgDepth, z.Owner, pos, z.EmgId);
+            EmgGroundMark(ref d, EmgGroundMarkConst.KindPit, pos, radius, id); // EMG4-TER-02：家园 / 前哨的熔坑同时写进格网（战痕）
+        }
+
+        // ── EMG4-TER-02（FG19 FGR-EMG-153，FG19B V03）：地面标记（战痕）。只在长期留存地点发玩法事件（每步 64 条、顺延不丢），写格网在热更层。──
+
+        private static float ScorchIgniteOf(ref CombatData d) => d.Config.EmgScorchIgnite > 0f ? d.Config.EmgScorchIgnite : EmgGroundMarkConst.DefaultScorchIgnite;
+
+        /// <summary>长期留存地点（家园 / 前哨）出现一处战痕：发 <see cref="CombatEventKind.GroundMark"/> 玩法事件并计数。远征 / 室内地点（不由家园格网承载，FG19 第 14 节 #15）不发。</summary>
+        internal static void EmgGroundMark(ref CombatData d, byte kind, double2 pos, float radius, int sourceId)
+        {
+            if (d.Config.EmgPersist == 0)
+            {
+                return;
+            }
+            d.PitStats[EmgPitConst.StatMarks]++;
+            Gameplay(ref d, CombatEventKind.GroundMark, -1, sourceId, math.max(0.5f, radius), 0f, pos, kind, 0);
+        }
+
+        /// <summary>长期留存固态刚生成（<see cref="EmgPersistCap"/> 入口）：玻化层 → 玻化地面、冰 → 冻土战痕。其余物质一次比较返回。</summary>
+        internal static void EmgSolidMark(ref CombatData d, int born)
+        {
+            CombatZone z = d.Patches[born];
+            byte kind = z.Matter == EmgMatterConst.Glass ? EmgGroundMarkConst.KindGlazed : z.Matter == EmgMatterConst.Ice ? EmgGroundMarkConst.KindFrozen : (byte)0;
+            if (kind != 0)
+            {
+                EmgGroundMark(ref d, kind, z.Pos, z.R0 > 0f ? z.R0 : z.Radius, z.EmgId);
+            }
+        }
+
+        /// <summary>
+        /// V03：明火斑块 <paramref name="z"/> 到期（evt.expire）时，在长期留存地点把这块火烧过的秒数记进“同一位置”累计点（合并半径同熔坑 emg.terrain.pit_gather）；
+        /// 累计到规则阈值 c1（20 秒）→ 结算这一处并发焦土地面标记。不是家园、不是明火、没有这条规则行时一次判断就返回。
+        /// </summary>
+        internal static void EmgScorchFeed(ref CombatData d, in CombatZone z)
+        {
+            if (d.Config.EmgPersist == 0 || z.Matter != EmgMatterConst.Fire || !d.EmgRules.IsCreated)
+            {
+                return;
+            }
+            int2 ix = d.EmgRuleIdx[EmgMatterConst.Count + 1 + z.Matter];
+            int rule = -1;
+            for (int k = ix.x; k < ix.x + ix.y; k++)
+            {
+                int ri = d.EmgRuleOrder[k];
+                if (d.EmgRules[ri].Op == EmgRuleConst.OpScorch && d.EmgRules[ri].Cond == EmgRuleConst.CondHomeBurn)
+                {
+                    rule = ri;
+                    break;
+                }
+            }
+            if (rule < 0)
+            {
+                return;
+            }
+            double now = d.Scalars[0].Time;
+            float burned = (float)math.max(0.0, math.min(now, z.Until) - z.Born);
+            if (!(burned > 0f))
+            {
+                return;
+            }
+            float gather = PitGatherOf(ref d);
+            int at = -1;
+            double best = double.MaxValue;
+            for (int a = 0; a < d.ScorchAcc.Length; a++)
+            {
+                float4 c = d.ScorchAcc[a];
+                double dist = math.distance(new double2(c.x, c.y), z.Pos);
+                if (dist < gather && dist < best)
+                {
+                    best = dist;
+                    at = a;
+                }
+            }
+            if (at < 0)
+            {
+                var fresh = new float4((float)z.Pos.x, (float)z.Pos.y, 0f, 0f);
+                if (d.ScorchAcc.Length < EmgPitConst.AccCapacity)
+                {
+                    at = d.ScorchAcc.Length;
+                    d.ScorchAcc.Add(fresh);
+                }
+                else
+                {
+                    at = 0;
+                    for (int a = 1; a < d.ScorchAcc.Length; a++)
+                    {
+                        if (d.ScorchAcc[a].z < d.ScorchAcc[at].z)
+                        {
+                            at = a;
+                        }
+                    }
+                    d.ScorchAcc[at] = fresh;
+                }
+            }
+            float4 acc = d.ScorchAcc[at];
+            acc.x = (acc.x * acc.z + (float)z.Pos.x * burned) / (acc.z + burned); // 按燃烧秒加权：焦土落在烧得最久的地方
+            acc.y = (acc.y * acc.z + (float)z.Pos.y * burned) / (acc.z + burned);
+            acc.z += burned;
+            acc.w = math.max(acc.w, math.max(z.R0, z.Radius));
+            EmgRule r = d.EmgRules[rule];
+            if (acc.z < r.C1)
+            {
+                d.ScorchAcc[at] = acc;
+                return;
+            }
+            d.ScorchAcc.RemoveAt(at); // 到阈值：这一处结算掉，之后同一处再烧 20 秒再记一次（热更层按“同一格反复标记”合并）
+            var pos = new double2(acc.x, acc.y);
+            d.PitStats[EmgPitConst.StatScorchBorn]++;
+            EmgRuleSettle(ref d, r, z.EmgChain, z.EmgDepth, z.Owner, pos, z.EmgId);
+            EmgGroundMark(ref d, EmgGroundMarkConst.KindScorch, pos, math.max(1f, acc.w), z.EmgId);
+        }
+
+        /// <summary>点 <paramref name="p"/> 在不在焦土圈里（V03“焦土上的可燃斑块点燃阈值 −40 度”）。没有焦土圈时一次长度比较。</summary>
+        internal static bool EmgScorchedAt(ref CombatData d, double2 p)
+        {
+            for (int k = 0; k < d.ScorchGround.Length; k++)
+            {
+                float3 c = d.ScorchGround[k];
+                if (math.distancesq(p, new double2(c.x, c.y)) <= (double)c.z * c.z)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>点 <paramref name="p"/>（单位半径 <paramref name="me"/>）落在哪个熔坑里（−1 = 没有）。O(熔坑数 ≤ 8)。</summary>

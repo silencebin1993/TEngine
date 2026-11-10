@@ -903,6 +903,9 @@ namespace BinGames.Sim.Combat
         SeizeEnded = 27,
         /// <summary>EMG4-HIJ-02（DEBT-EMG1FW02-03）：夺控中的机器被击倒——瘫痪，不阵亡、不发 Killed / evt.death、自毁装药不起爆（不丢）。Unit=机器，Other=击倒者。</summary>
         SeizeDowned = 28,
+        /// <summary>EMG4-TER-02（FG19 FGR-EMG-153，ADR-EMG-001 ⑨）：长期留存地点（家园 / 前哨）出现一处战痕（不丢）。Code=<see cref="EmgGroundMarkConst"/> 种类，Pos=中心，Value=半径（米），Other=来源 Id（熔坑 Id / 斑块 Id）。
+        /// 热更层按格写进家园格网地面材质（差异存档），每地点 ≤ emg.terrain.marks_max 处、超出合并相邻。</summary>
+        GroundMark = 29,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -1429,6 +1432,8 @@ namespace BinGames.Sim.Combat
         public float EmgPitGather;
         /// <summary>EMG4-TER-01：可熔地面的地形码位（fg.TbGridTerrain meltable = 1 的 code；位 n = 地形码 n）。有生成器的寻路镜像（家园）按生成规则逐格判断。不进快照。</summary>
         public ulong EmgMeltCodes;
+        /// <summary>EMG4-TER-02（FG19B V03，fg.TbHomeTuning emg.terrain.scorch_ignite）：焦土圈里可燃斑块的点燃阈值下调度数。≤ 0 取 <see cref="EmgGroundMarkConst.DefaultScorchIgnite"/>。不进快照。</summary>
+        public float EmgScorchIgnite;
         /// <summary>EMG2-PERSIST-01（fg.TbHomeTuning emg.wreck.ignite_temp / flammable_min / burn_rate）：残骸点燃。</summary>
         public float EmgWreckIgniteTemp;
         public float EmgWreckFlammableMin;

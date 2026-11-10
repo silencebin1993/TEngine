@@ -34,6 +34,10 @@ namespace GameLogic.Campaign
         /// <summary>FG3-GEN-01（FG17 第 4、6 节）：玩家在战略地图上加的标记与备注。唯一写入口 <c>WorldGen.WorldMapMarkers</c>。</summary>
         public MapMarkerRecord[] MapMarkers = Array.Empty<MapMarkerRecord>();
         public int NextMapMarkerSerial = 1;
+        /// <summary>EMG4-TER-02（FG19 FGR-EMG-153 / 154）：家园格网上的战痕（己方前哨站只是这张格网上、家园内核里的建筑群；远征地点不写）（焦土 / 玻化地面 / 冻土 / 熔坑）：每处的中心、半径、种类（≤ emg.terrain.marks_max，超出合并相邻）。
+        /// 地面材质本身走区块差异（<see cref="ChunkDiffs"/>）；这里是“一处战痕”的索引，用于计数合并、悬停、清除工作单与内核焦土圈。只加字段，旧档 = 空。唯一写入口 <c>Emergence.GroundMarkService</c>。</summary>
+        public GroundMarkRecord[] GroundMarks = Array.Empty<GroundMarkRecord>();
+        public int NextGroundMarkId = 1;
         /// <summary>FG8-GEN-02：外延区以内的阵营领地主力据点与领地之间的零散前哨已经登记成据点（新战役一次，幂等；外延区的按揭开范围按需登记）。</summary>
         public bool TerritoryOutpostsSeeded;
         /// <summary>FG9-ACT1-01（DEBT-FG0ARCH01-01 / DEBT-FG8EXP03-06）：两个远征地点里的领地驻军据点已经登记成据点（kind = site；幂等；旧档第一次载入时补登记）。
@@ -75,6 +79,19 @@ namespace GameLogic.Campaign
         /// <summary>序号（显示“标记 N”）。</summary>
         public int Serial;
         public string Note = string.Empty;
+    }
+
+    /// <summary>EMG4-TER-02：一处战痕（家园表面格坐标，1 格 = 1 米）。<see cref="Kind"/> = <c>EmgGroundMarkConst</c> 种类（1 焦土、2 玻化地面、3 冻土、4 熔坑）。</summary>
+    [Serializable]
+    public sealed class GroundMarkRecord
+    {
+        public int Id;
+        public int Kind;
+        public float X;
+        public float Y;
+        public float Radius;
+        /// <summary>同一处被标记了几次（“同一格反复标记”与超上限合并都计在这里）。</summary>
+        public int Hits = 1;
     }
 
     /// <summary>一个被玩家或事件修改过的区块。<see cref="DiffPayload"/> 的编码由 FG0-ARCH-05 定义。</summary>
@@ -2789,6 +2806,7 @@ namespace GameLogic.Campaign
             s.World ??= new WorldGenState();
             s.World.ChunkDiffs ??= Array.Empty<ChunkDiffRecord>();
             s.World.MapMarkers ??= Array.Empty<MapMarkerRecord>();
+            s.World.GroundMarks ??= Array.Empty<GroundMarkRecord>(); // EMG4-TER-02：旧存档没有战痕 = 空
             s.World.AnchorChecks ??= Array.Empty<AnchorCheckRecord>(); // FG8-GEN-02：旧存档没有这一项
             s.World.InteriorFocusId ??= string.Empty;
             s.Progress ??= new CampaignProgressState();

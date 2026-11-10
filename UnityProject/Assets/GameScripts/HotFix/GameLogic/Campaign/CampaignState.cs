@@ -367,6 +367,7 @@ namespace GameLogic.Campaign
                 .OrderBy(r => r.X).ThenBy(r => r.Y).ToArray();
             World.ChunkDiffs = World.ChunkDiffs
                 .OrderBy(r => r.SurfaceId, StringComparer.Ordinal).ThenBy(r => r.ChunkX).ThenBy(r => r.ChunkY).ToArray();
+            World.GroundMarks = World.GroundMarks.Where(r => r != null && r.Id > 0).OrderBy(r => r.Id).ToArray(); // EMG4-TER-02
             Notifications.Entries = Notifications.Entries
                 .OrderBy(r => r.Id).ToArray();
             // FG9-NAR-01：资料库按收到的先后排序、去掉空记录（同一状态同一字节）。

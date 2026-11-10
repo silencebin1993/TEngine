@@ -3279,7 +3279,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>EMG2-PERSIST-01：清除完工——目标还在就移除并消耗预留废料；目标先没了全额返还（不白扣）。</summary>
         private static void CompleteSiteClear(CampaignState state, WorkOrderRecord order)
         {
-            if (Emergence.SitePersistService.TryClearTarget(order.TargetId))
+            if (Emergence.SitePersistService.TryClearTarget(state, order.TargetId))
             {
                 if (!string.IsNullOrEmpty(order.ReservedItemId) && order.ReservedItemAmount > 0)
                 {

@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using BinGames.Sim.Combat;
 using GameLogic.Campaign.Content;
+using GameLogic.Campaign.Emergence;
 using GameLogic.Core;
 using GameLogic.Localization;
 using GameLogic.UI.Kit;
@@ -75,6 +76,8 @@ namespace GameLogic.Campaign.Combat
         public const int PatchHoverKeyBase = 50000000;
         /// <summary>EMG4-TER-01：熔坑悬停键 = −(基数 + 熔坑 Id)，在残骸与物质斑块之间。</summary>
         public const int PitHoverKeyBase = 40000000;
+        /// <summary>EMG4-TER-02：战痕悬停键 = −(基数 + 战痕 Id)，在残骸与熔坑之间（最低优先：地上有东西时先说东西）。</summary>
+        public const int MarkHoverKeyBase = 30000000;
 
         private static int _hoveredEmg;
         private static readonly System.Func<TooltipContent> EmgProvider = ProvideEmg;
@@ -110,7 +113,13 @@ namespace GameLogic.Campaign.Combat
             }
             // EMG2-MAT-01（FGR-EMG-181）：物质斑块（最低优先：子弹药 / 残骸压在斑块上时先给它们）
             int pz = k.PickPatch(at);
-            return pz >= 0 && k.TryGetPatch(pz, out CombatZone patch) ? -(PatchHoverKeyBase + patch.EmgId) : 0;
+            if (pz >= 0 && k.TryGetPatch(pz, out CombatZone patch))
+            {
+                return -(PatchHoverKeyBase + patch.EmgId);
+            }
+            // EMG4-TER-02（B05）：家园格网上的战痕（焦土 / 玻化地面 / 冻土 / 熔坑），O(战痕数 ≤ 64)
+            GroundMarkRecord mark = site.PersistSite ? GroundMarkService.At(CampaignSession.Current, at) : null;
+            return mark != null ? -(MarkHoverKeyBase + mark.Id) : 0;
         }
 
         /// <summary>自检：光标停在地面点上（与 <see cref="Tick"/> 同一套单位 → 无人机 → 子弹药 / 残骸的拾取顺序）。返回涌现悬停键（0 = 没有）。</summary>
@@ -163,6 +172,10 @@ namespace GameLogic.Campaign.Combat
             if (id >= PitHoverKeyBase)
             {
                 return EmgChainView.PitContent(site, state, id - PitHoverKeyBase);
+            }
+            if (id >= MarkHoverKeyBase)
+            {
+                return GroundMarkService.HoverContent(state, id - MarkHoverKeyBase); // EMG4-TER-02
             }
             int w = site.Kernel.WreckIndexOf(id - WreckHoverKeyBase);
             return w >= 0 ? EmgChainView.WreckContent(site, state, w) : null;

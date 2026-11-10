@@ -1084,6 +1084,22 @@ namespace BinGames.Sim.Combat
 
         private const int UnknownSegmentTagForTests = 9999;
 
+        /// <summary>测试用（EMG4-TER-02，ADR 短段条款）：模拟 EMG4-TER-01 写出的快照——段 30 只有前 5 个字段、没有段 31。</summary>
+        public byte[] SerializeTer01ShapeForTests()
+        {
+            _omitScorchSegForTests = true;
+            try
+            {
+                return SerializeFormat(CombatConst.FormatVersion, EmgConst.SegPitStats, 5, 0);
+            }
+            finally
+            {
+                _omitScorchSegForTests = false;
+            }
+        }
+
+        private bool _omitScorchSegForTests;
+
         private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes, int format = CombatConst.FormatVersion)
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
@@ -1091,8 +1107,8 @@ namespace BinGames.Sim.Combat
             bool v18 = format >= 18; // EMG3-CHS-01：段 22～24、单位段 + 特性、无人机段 + 电荷
             bool v20 = format >= 20; // EMG4-HIJ-01：段 27 信号劫持
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段只在有熔坑状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? 3 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1924,6 +1940,7 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegPit:
                 case EmgConst.SegPitAcc:
                 case EmgConst.SegPitStats:
+                case EmgConst.SegScorchAcc: // EMG4-TER-02
                     return ParsePitSegment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过
@@ -1933,7 +1950,7 @@ namespace BinGames.Sim.Combat
         // ── EMG4-TER-01：段 28 熔坑 / 29 累计点 / 30 计数（同版本 20 内追加的自描述段，DEBT-EMG4HIJ01-03）──
         private bool PitState()
         {
-            if (_d.Pits.Length > 0 || _d.PitAcc.Length > 0)
+            if (_d.Pits.Length > 0 || _d.PitAcc.Length > 0 || _d.ScorchAcc.Length > 0)
             {
                 return true;
             }
@@ -1981,6 +1998,21 @@ namespace BinGames.Sim.Combat
             }
             sw.EndRecord();
             sw.End();
+            if (_omitScorchSegForTests)
+            {
+                return;
+            }
+            sw.Begin(EmgConst.SegScorchAcc, EmgPitConst.AccFields, _d.ScorchAcc.Length); // EMG4-TER-02：焦土累计点
+            for (int i = 0; i < _d.ScorchAcc.Length; i++)
+            {
+                Unity.Mathematics.float4 a = _d.ScorchAcc[i];
+                if (sw.F()) w.Write(a.x);
+                if (sw.F()) w.Write(a.y);
+                if (sw.F()) w.Write(a.z);
+                if (sw.F()) w.Write(a.w);
+                sw.EndRecord();
+            }
+            sw.End();
         }
 
         private static CombatLoadResult ParsePitSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
@@ -2024,6 +2056,19 @@ namespace BinGames.Sim.Combat
                         return CombatLoadResult.InvalidValue;
                     }
                     staging.PitAcc.Add(a);
+                }
+                else if (sr.Tag == EmgConst.SegScorchAcc)
+                {
+                    var a = new Unity.Mathematics.float4();
+                    if (sr.F()) a.x = r.ReadSingle();
+                    if (sr.F()) a.y = r.ReadSingle();
+                    if (sr.F()) a.z = r.ReadSingle();
+                    if (sr.F()) a.w = r.ReadSingle();
+                    if (!sr.RecordOk || !Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(a)) || a.z < 0f || a.w < 0f || staging.ScorchAcc.Length >= EmgPitConst.AccCapacity)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    staging.ScorchAcc.Add(a);
                 }
                 else
                 {

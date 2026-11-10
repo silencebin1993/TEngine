@@ -3110,6 +3110,10 @@ namespace BinGames.Sim.Combat
             {
                 staging.MeltGround.Add(_d.MeltGround[i]); // EMG4-TER-01：可熔地面圆是派生量（热更层按生成规则写），读档沿用当前的
             }
+            for (int i = 0; i < _d.ScorchGround.Length; i++)
+            {
+                staging.ScorchGround.Add(_d.ScorchGround[i]); // EMG4-TER-02：焦土圈是派生量（热更层按存档战痕写），读档沿用当前的
+            }
             staging.MineCap = _d.MineCap;
             // FG10-FAC-01：酸沼、标签状态位、投放目标是派生量（热更层写），读档沿用当前的。
             for (int i = 0; i < _d.AcidShapes.Length; i++)

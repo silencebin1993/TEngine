@@ -333,8 +333,8 @@ namespace GameLogic.EditorTools
             Line("  · A. 规则行、调参、可熔地面标记");
             EmgRuleCatalog.Compiled c = EmgRuleCatalog.Current;
             int Op(string id) => c.Ids.IndexOf(id) is int i && i >= 0 ? c.Rules[i].Op : -1;
-            Expect(Op("reaction_meltpit") == EmgRuleConst.OpMeltPit && Op("reaction_meltpit_acid") == EmgRuleConst.OpMeltPit && Op("reaction_icebridge") == EmgRuleConst.OpDeferred && Op("reaction_scorch") == EmgRuleConst.OpDeferred && c.Ok,
-                $"A1（V06 {Op("reaction_meltpit")} / V07 {Op("reaction_meltpit_acid")} / V08 {Op("reaction_icebridge")} / V03 {Op("reaction_scorch")}，编译 {c.Ok}）V06 / V07 熔坑改为内核结算（meltpit）；V08 冻结桥仍 deferred（水面未落地，DEBT-EMG4TER01-01 → FG18-SEA-01）、V03 焦土仍 deferred（EMG4-TER-02）");
+            Expect(Op("reaction_meltpit") == EmgRuleConst.OpMeltPit && Op("reaction_meltpit_acid") == EmgRuleConst.OpMeltPit && Op("reaction_icebridge") == EmgRuleConst.OpDeferred && Op("reaction_scorch") == EmgRuleConst.OpScorch && c.Ok,
+                $"A1（V06 {Op("reaction_meltpit")} / V07 {Op("reaction_meltpit_acid")} / V08 {Op("reaction_icebridge")} / V03 {Op("reaction_scorch")}，编译 {c.Ok}）V06 / V07 熔坑改为内核结算（meltpit）；V08 冻结桥仍 deferred（水面未落地，DEBT-EMG4TER01-01 → FG18-SEA-01），V03 焦土由 EMG4-TER-02 接上（scorch）");
             Expect(Math.Abs(MoltenThreshold - 30f) < 1e-4f && Math.Abs(AcidThreshold - 40f) < 1e-4f && GridContent.TuningInt("emg.terrain.pit_max") == 8
                    && GridContent.Tuning("emg.terrain.pit_radius") > 0f && GridContent.Tuning("emg.terrain.pit_gather") > 0f,
                 $"A2 阈值与上限来自表：熔融金属 ≥ {MoltenThreshold}、酸 ≥ {AcidThreshold}、每地点 ≤ {GridContent.TuningInt("emg.terrain.pit_max")}、半径 {GridContent.Tuning("emg.terrain.pit_radius")} 米、合并半径 {GridContent.Tuning("emg.terrain.pit_gather")} 米");
@@ -707,10 +707,11 @@ namespace GameLogic.EditorTools
             Expect(openBefore && k.PitCount == 1 && rec != null && rec.Kind == EmgPersistItem.KindPit && rec.Blocks && NotifyCount(SitePersistService.NotifyBlocked) > notes
                    && last.Contains("熔坑") && alarm.Key != null && alarm.HasLocation,
                 $"K1 缺口开着时不报；熔坑补上缺口 → 警告“{last}”、记录种类 = 熔坑、位置（{rec?.X:0.0},{rec?.Y:0.0}）、告警栏可定位");
-            k.ClearPersist(EmgPersistItem.KindPit, k.PitAt(0).Id);
+            // EMG4-TER-02：熔坑同时写进家园格网（熔坑地形不可通行），填平走正式完工入口（内核熔坑与格网熔坑一起填平），不再直接删内核熔坑
+            SitePersistService.TryClearTarget(s, SitePersistService.TargetOf(EmgPersistItem.KindPit, k.PitAt(0).Id));
             WorldSimulation.StepMany(3);
             SitePersistService.Check(s);
-            Expect(st.PersistBlocks.All(r => r.Key != store.BuildingId), "K2 填平熔坑后下一次检查警告解除（缺口重新打通）");
+            Expect(st.PersistBlocks.All(r => r.Key != store.BuildingId), "K2 填平熔坑（完工入口：内核熔坑 + 格网熔坑一起填平）后下一次检查警告解除（缺口重新打通）");
         }
 
         // ── I 真文件存读档 ─────────────────────────────────────────────────
