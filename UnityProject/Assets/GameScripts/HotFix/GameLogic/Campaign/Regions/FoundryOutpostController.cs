@@ -718,14 +718,14 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            RegionEnemyRecord target = FoundryOutpostRegion.TryFindEnemyInAim(state, origin, aimDir);
+            string target = FoundryOutpostRegion.TryFindEnemyInAim(state, origin, aimDir);
             if (target == null)
             {
                 Log.Info("[FoundryOutpostController] 直控攻击：瞄准方向/射程内没有可命中的敌人。");
                 return;
             }
 
-            FoundryOutpostRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed,
+            FoundryOutpostRegion.TryAttackEnemy(state, _possessed.LogicId, target, state.RandomSeed,
                 isAiSource: false, attackerPosition: origin);
         }
 

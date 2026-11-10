@@ -37,8 +37,18 @@ namespace BinGames.Sim.Combat
             return -1;
         }
 
-        /// <summary>某名玩家（劫持者所在阵营只有己方一种，按全局计）此刻劫持着几台。</summary>
-        internal static int EmgHijackCount(ref CombatData d) => d.Hijacks.Length;
+        /// <summary>某名玩家（劫持者所在阵营只有己方一种，按全局计）此刻劫持着几台（只数信号劫持方向；夺控记录同表但不占劫持上限，EMG4-HIJ-02）。O(表长)。</summary>
+        internal static int EmgHijackCount(ref CombatData d)
+        {
+            int n = 0;
+            for (int h = 0; h < d.Hijacks.Length; h++)
+            {
+                n += d.Hijacks[h].IsSeize ? 0 : 1;
+            }
+            return n;
+        }
+
+        private static float SeizeRecoverOf(ref CombatData d) => d.Config.EmgSeizeRecoverRatio > 0f ? math.min(1f, d.Config.EmgSeizeRecoverRatio) : EmgHijackConst.DefaultRecoverRatio;
 
         /// <summary>hij.hack 注入：只对敌对目标（注入方是己方、目标是敌方；反之亦然）加入侵度。返回实际增加量。</summary>
         internal static float EmgHackInject(ref CombatData d, int t, in EmgCtx c, float amount)
@@ -50,7 +60,7 @@ namespace BinGames.Sim.Combat
             if (d.Faction[c.Owner] == (byte)CombatFaction.Player && EmgResist(ref d, t, EmgPhaseConst.ResHack) >= 1f)
             {
                 // 精英 / 首领（入侵抗性下限 1，含外部血量首领）：被打时按抗性拒绝并写原因（FG19 第 14 节 #8 推荐默认）；入侵度不会累积，阵亡时不再判。热更层按单位去重通知
-                Gameplay(ref d, CombatEventKind.HijackRefused, t, d.Id[c.Owner], d.Hijacks.Length, HijackMaxOf(ref d), d.Pos[t], EmgHijackConst.RefuseResist, 0);
+                Gameplay(ref d, CombatEventKind.HijackRefused, t, d.Id[c.Owner], EmgHijackCount(ref d), HijackMaxOf(ref d), d.Pos[t], EmgHijackConst.RefuseResist, 0);
                 return 0f;
             }
             float got = EmgAddAcc(ref d, t, EmgPhaseConst.Hack, amount, d.Id[c.Owner]);
@@ -77,14 +87,15 @@ namespace BinGames.Sim.Combat
                 return false; // 不是被己方单位击毁 / 结构 / 外部血量单位：照常阵亡（不写拒绝原因：玩家没有“劫持它”的出手）
             }
             int max = HijackMaxOf(ref d);
+            int have = EmgHijackCount(ref d);
             if (EmgResist(ref d, t, EmgPhaseConst.ResHack) >= 1f)
             {
-                Gameplay(ref d, CombatEventKind.HijackRefused, t, killerId, d.Hijacks.Length, max, d.Pos[t], EmgHijackConst.RefuseResist, 0);
+                Gameplay(ref d, CombatEventKind.HijackRefused, t, killerId, have, max, d.Pos[t], EmgHijackConst.RefuseResist, 0);
                 return false;
             }
-            if (d.Hijacks.Length >= max)
+            if (have >= max)
             {
-                Gameplay(ref d, CombatEventKind.HijackRefused, t, killerId, d.Hijacks.Length, max, d.Pos[t], EmgHijackConst.RefuseCap, 0);
+                Gameplay(ref d, CombatEventKind.HijackRefused, t, killerId, have, max, d.Pos[t], EmgHijackConst.RefuseCap, 0);
                 return false;
             }
             // 刷写带宽（FGR-EMG-036）：占用 = 原生程序条数；带宽不够时截到放得下（武器换成刷写变体表里“前 k 条”那一把，没有变体表 = 不占带宽）
@@ -145,7 +156,158 @@ namespace BinGames.Sim.Combat
             d.Siege[t] = sg;
             byte reason = r.EndReason != 0 ? r.EndReason : EmgHijackConst.EndDestroyed;
             Gameplay(ref d, CombatEventKind.HijackEnded, t, r.Hijacker, 0f, 0f, d.Pos[t], reason, 0);
+            EmgReleaseEvent(ref d, t, r.Hijacker, reason, r.Source);
             return r.Hijacker;
+        }
+
+        /// <summary>evt.release 生产者（FG19 第 5 节码 27：劫持、夺控、封锁结束；Code = 结束原因 × 256 + 来源低 8 位）。没有监听者时不入队。</summary>
+        private static void EmgReleaseEvent(ref CombatData d, int t, int other, byte reason, ushort source)
+        {
+            if (d.EmgListen != 0u && EmgSiteListens(ref d, EmgEventKind.Release))
+            {
+                EmgUnitEvent(ref d, EmgEventKind.Release, t, other, 0f, 0f, (ushort)(reason << 8 | (source & 0xFF)), d.Pos[t]);
+            }
+        }
+
+        // ── EMG4-HIJ-02 夺控（敌方 → 己方机器，FG19 FGR-EMG-165；FG10 FGR-EVT-021～022；FG11 FGR-END-022 阶段三）──
+        // 与信号劫持同一张表（d.Hijacks，Flags 带 FlagSeize）、同一个行为种类（Hijacked：内核自主按教义行动、不读编队命令），只是方向相反：
+        // 己方机器翻成敌对阵营，攻击原来的同伴；击倒 = 瘫痪（不阵亡，FlagDowned）；期满 / 反向接入 / 调用方解除 → 归还（不自毁）。
+
+        /// <summary>夺控一台己方单位：存活、己方、非结构、没有被接入（Possessed）、没有被劫持 / 夺控。seconds ≤ 0 = 直到调用方解除。O(表长)。</summary>
+        internal static EmgSeizeResult EmgSeize(ref CombatData d, int t, float seconds, int seizerId, ushort source)
+        {
+            if (t < 0 || t >= d.Count)
+            {
+                return EmgSeizeResult.NoUnit;
+            }
+            if (d.IsAlive(t) && (d.Behavior[t] == (byte)CombatBehavior.Hijacked || EmgHijackIndexOf(ref d, d.Id[t]) >= 0))
+            {
+                return EmgSeizeResult.Controlled; // 已被夺控 / 是被劫持体：三类状态互不覆盖
+            }
+            if (!d.IsAlive(t) || d.Faction[t] != (byte)CombatFaction.Player || d.Kind[t] == (byte)CombatUnitKind.Structure)
+            {
+                return EmgSeizeResult.NotMachine;
+            }
+            if (d.Has(t, CombatUnitFlags.Possessed))
+            {
+                return EmgSeizeResult.Uplinked;
+            }
+            CombatSiegeUnit sg = d.Siege[t];
+            d.Hijacks.Add(new EmgHijack
+            {
+                Unit = d.Id[t], Hijacker = seizerId, Until = seconds > 0f ? d.Scalars[0].Time + seconds : 0.0, OrigFaction = d.Faction[t], OrigBehavior = d.Behavior[t],
+                SiegeRole = sg.Role, SiegeGroup = sg.Group, OrigWeapon = d.Weapon[t], Flags = EmgHijackConst.FlagSeize, Source = source,
+            });
+            sg.Role = 0;
+            sg.Group = 0;
+            sg.Mode = 0;
+            d.Siege[t] = sg;
+            d.Faction[t] = (byte)CombatFaction.Hostile;
+            d.Behavior[t] = (byte)CombatBehavior.Hijacked;
+            d.Cmd[t] = default;
+            d.Cycle[t] = 0f;
+            Gameplay(ref d, CombatEventKind.Seized, t, seizerId, math.max(0f, seconds), d.Hp[t], d.Pos[t], (byte)(source & 0xFF), 0);
+            if (d.EmgListen != 0u && EmgSiteListens(ref d, EmgEventKind.Seize))
+            {
+                EmgUnitEvent(ref d, EmgEventKind.Seize, t, seizerId, math.max(0f, seconds), 0f, source, d.Pos[t]); // evt.seize 生产者（读者 N41 反夺控随 EMG4-FW-01）
+            }
+            return EmgSeizeResult.Ok;
+        }
+
+        /// <summary>阵亡统一入口之前：夺控中的机器被击倒 → 瘫痪（DEBT-EMG1FW02-03：不走 MarkDead / Kill 的后续，不发 Killed / evt.death，自毁装药不起爆）。不是夺控记录返回 false。</summary>
+        internal static bool EmgSeizeDown(ref CombatData d, int t, int killerId)
+        {
+            int h = EmgHijackIndexOf(ref d, d.Id[t]);
+            if (h < 0 || !d.Hijacks[h].IsSeize)
+            {
+                return false;
+            }
+            EmgHijack r = d.Hijacks[h];
+            if (r.IsDowned)
+            {
+                return true; // 已瘫痪：重复的致死结算什么都不做
+            }
+            r.Flags |= EmgHijackConst.FlagDowned;
+            r.ReleaseAt = 0.0; // 瘫痪中的反向接入作废：机器不能动，等夺控结束恢复
+            d.Hijacks[h] = r;
+            d.Hp[t] = 0f;
+            d.Cmd[t] = default;
+            d.Set(t, CombatUnitFlags.Targetable, false);
+            EmgUnitState u = d.EmgUnit[t];
+            u.DeathFlags = 0; // 不是阵亡：直接击毁记下的“不留残骸”作废
+            d.EmgUnit[t] = u;
+            Gameplay(ref d, CombatEventKind.SeizeDowned, t, killerId, 0f, 0f, d.Pos[t], (byte)(r.Source & 0xFF), 0);
+            return true;
+        }
+
+        /// <summary>夺控结束：还原阵营、行为、攻城职能，瘫痪的恢复到 emg.seize.recover_ratio 耐久并重新可选中；发 SeizeEnded 与 evt.release。</summary>
+        internal static void EmgSeizeRelease(ref CombatData d, int h, byte reason)
+        {
+            EmgHijack r = d.Hijacks[h];
+            d.Hijacks.RemoveAt(h);
+            int t = d.SlotOf(r.Unit);
+            if (t < 0 || !d.IsAlive(t))
+            {
+                return;
+            }
+            d.Faction[t] = r.OrigFaction;
+            d.Behavior[t] = r.OrigBehavior;
+            CombatSiegeUnit sg = d.Siege[t];
+            sg.Role = r.SiegeRole;
+            sg.Group = r.SiegeGroup;
+            d.Siege[t] = sg;
+            d.Cmd[t] = default;
+            d.Cycle[t] = 0f;
+            if (r.IsDowned)
+            {
+                d.Hp[t] = math.max(d.Hp[t], math.max(0.001f, d.MaxHp[t] * SeizeRecoverOf(ref d)));
+                d.Set(t, CombatUnitFlags.Targetable, true);
+            }
+            EmgUnitState u = d.EmgUnit[t];
+            AccPut(ref u, EmgPhaseConst.Hack, 0f); // 夺控期间被己方 hij.hack 打进的入侵度作废（自己人不判劫持）
+            d.EmgUnit[t] = u;
+            Gameplay(ref d, CombatEventKind.SeizeEnded, t, r.Hijacker, 0f, d.Hp[t], d.Pos[t], reason, r.IsDowned ? (byte)1 : (byte)0);
+            EmgReleaseEvent(ref d, t, r.Hijacker, reason, r.Source);
+            EmgEndAttacksOn(ref d, t);
+        }
+
+        /// <summary>
+        /// 夺控结束：机器回到己方，己方对它的攻击命令以“目标丢失”结束（否则攻击者会一直追着自己人打出“不是敌方”）；修复出口的命令照旧（回到己方正好能修）。
+        /// 事件序列同命令自然结束（TickCommand）。O(单位数)，只在归还时一次。
+        /// </summary>
+        private static void EmgEndAttacksOn(ref CombatData d, int t)
+        {
+            int id = d.Id[t];
+            for (int i = 0; i < d.Count; i++)
+            {
+                CombatCommand cmd = d.Cmd[i];
+                if (i == t || cmd.Kind != CombatCommandKind.Attack || cmd.Target != id || !d.IsAlive(i) || d.Faction[i] != d.Faction[t])
+                {
+                    continue;
+                }
+                int w = d.Weapon[i];
+                if (w >= 0 && w < d.Weapons.Length && d.Weapons[w].HasOutput == CombatConst.OutputRepair && d.Weapons[w].Mode != CombatWeaponMode.Cannon)
+                {
+                    continue;
+                }
+                d.Cmd[i] = default;
+                byte navFail = d.NavFail[i];
+                DropRoute(ref d, i);
+                d.NavSt[i] = (byte)CombatNavState.None;
+                Gameplay(ref d, CombatEventKind.CommandEnded, i, id, navFail, 0f, d.Pos[i], (byte)CombatEndReason.TargetLost, (byte)CombatCommandKind.Attack);
+            }
+        }
+
+        /// <summary>按单位 ID 解除夺控（反向接入完成 / 调用方解除 / 地点卸载）。不是夺控记录返回 false。</summary>
+        internal static bool EmgSeizeReleaseUnit(ref CombatData d, int unitId, byte reason)
+        {
+            int h = EmgHijackIndexOf(ref d, unitId);
+            if (h < 0 || !d.Hijacks[h].IsSeize)
+            {
+                return false;
+            }
+            EmgSeizeRelease(ref d, h, reason);
+            return true;
         }
 
         /// <summary>每步（己方单位之后）：期满或劫持者已不在 → 自毁（走 Kill，击杀者 = 劫持者，留残骸）。O(劫持数)，空表直接返回。</summary>
@@ -166,6 +328,18 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 int hk = d.SlotOf(r.Hijacker);
+                if (r.IsSeize)
+                {
+                    // 夺控：反向接入引导完成 → 夺回；期满（0 = 直到解除）→ 归还；有单位来源且来源已不在 → 归还。都不自毁
+                    byte why = r.ReleaseAt > 0.0 && now >= r.ReleaseAt ? EmgHijackConst.EndReclaimed
+                        : r.Until > 0.0 && now >= r.Until ? EmgHijackConst.EndExpired
+                        : r.Hijacker != 0 && (hk < 0 || !d.IsAlive(hk)) ? EmgHijackConst.EndHijackerLost : (byte)0;
+                    if (why != 0)
+                    {
+                        EmgSeizeRelease(ref d, h, why);
+                    }
+                    continue;
+                }
                 byte reason = hk < 0 || !d.IsAlive(hk) ? EmgHijackConst.EndHijackerLost : now >= r.Until ? EmgHijackConst.EndExpired : (byte)0;
                 if (reason == 0)
                 {
@@ -184,6 +358,11 @@ namespace BinGames.Sim.Combat
         private static void StepHijackedUnit(ref CombatData d, ref CombatGrid grid, int i, float dt)
         {
             d.Cmd[i] = default;
+            int h = EmgHijackIndexOf(ref d, d.Id[i]);
+            if (h >= 0 && d.Hijacks[h].IsDowned)
+            {
+                return; // EMG4-HIJ-02：瘫痪的被夺控机器什么都不做，等夺控结束恢复
+            }
             int bp = d.BProfile[i];
             float speed = bp >= 0 && bp < d.Profiles.Length && d.Profiles[bp].Speed > 0f ? d.Profiles[bp].Speed : d.Speed[i];
             speed = SlowedSpeed(ref d, i, speed);
@@ -213,8 +392,7 @@ namespace BinGames.Sim.Combat
                 MoveToward(ref d, i, pos, d.Pos[seek], speed * dt, math.max(0.5, range * 0.9));
                 return;
             }
-            int h = EmgHijackIndexOf(ref d, d.Id[i]);
-            int hk = h >= 0 ? d.SlotOf(d.Hijacks[h].Hijacker) : -1;
+            int hk = h >= 0 ? d.SlotOf(d.Hijacks[h].Hijacker) : -1; // 夺控者为 0（信号幽灵）时没有可跟随的单位：原地待命
             if (hk >= 0)
             {
                 MoveToward(ref d, i, pos, d.Pos[hk], speed * dt, EmgHijackConst.FollowStop + d.Radius[i] + d.Radius[hk]);

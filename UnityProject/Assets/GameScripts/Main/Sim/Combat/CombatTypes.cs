@@ -895,6 +895,12 @@ namespace BinGames.Sim.Combat
         HijackEnded = 24,
         /// <summary>EMG4-HIJ-01：入侵度满时阵亡但劫持不成立（Code=<see cref="EmgHijackConst"/> 拒绝原因：上限满 / 入侵抗性），单位照常阵亡。Unit=阵亡者，Other=击杀者，Value=当前台数，Value2=上限。</summary>
         HijackRefused = 25,
+        /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-165）：己方机器被夺控（不丢）。Unit=机器，Other=夺控者（0 = 无单位来源，如信号幽灵），Value=持续秒（0 = 直到解除），Value2=耐久，Code=来源码低 8 位。</summary>
+        Seized = 26,
+        /// <summary>EMG4-HIJ-02：夺控结束，机器归还玩家（不丢）。Unit=机器，Other=夺控者，Value2=归还后的耐久，Code=<see cref="EmgHijackConst"/> 结束原因，Code2=1 表示归还前处于瘫痪。</summary>
+        SeizeEnded = 27,
+        /// <summary>EMG4-HIJ-02（DEBT-EMG1FW02-03）：夺控中的机器被击倒——瘫痪，不阵亡、不发 Killed / evt.death、自毁装药不起爆（不丢）。Unit=机器，Other=击倒者。</summary>
+        SeizeDowned = 28,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -1402,6 +1408,8 @@ namespace BinGames.Sim.Combat
         public float EmgHijackHpRatio;
         public int EmgHijackMax;
         public float EmgHijackEliteResist;
+        /// <summary>EMG4-HIJ-02（fg.TbHomeTuning emg.seize.recover_ratio）：夺控结束时瘫痪的机器恢复到的耐久比例。≤ 0 取 <see cref="EmgHijackConst.DefaultRecoverRatio"/>。</summary>
+        public float EmgSeizeRecoverRatio;
         /// <summary>EMG1-ENT-01：1 = 实体层开（热更层在 emg.stage ≥ 1 时置位）——机器 / 敌人 / 炮塔阵亡生成残骸，残骸挡弹、减速、可被推动，破片、撞击与位移事件，
         /// 外部血量单位记最后攻击者。0 = 旧行为逐字不变（emg.stage = 0 的正式流程不生成残骸）。</summary>
         public byte EmgEntity;

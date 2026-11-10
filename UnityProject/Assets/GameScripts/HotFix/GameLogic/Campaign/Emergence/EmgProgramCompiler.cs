@@ -23,6 +23,9 @@ namespace GameLogic.Campaign.Emergence
     /// <summary>程序里的一条指令（一个程序位置）。混合固件展开为两条，父 A 在前（FGR-EMG-044）。</summary>
     public sealed class EmgProgramStep
     {
+        /// <summary>EMG4-HIJ-02：浅拷贝（持有型截断把被截掉的步骤副本记为溢出，不改原程序的步骤对象）。</summary>
+        public EmgProgramStep CloneStep() => (EmgProgramStep)MemberwiseClone();
+
         /// <summary>程序序号（0 起，= 在指令序列里的位置）。</summary>
         public int Ordinal;
         /// <summary>插在槽里的固件（混合固件是混合固件本身）。</summary>
@@ -139,6 +142,9 @@ namespace GameLogic.Campaign.Emergence
         public readonly Dictionary<int, List<EmgMergeSource>> MergeSources = new Dictionary<int, List<EmgMergeSource>>();
         public EmgProgram Program;
         public int RootCapacity;
+        /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-164）：根节点的代号。0 = 普通程序；1 = 镜像复制品（1 代程序：根容量 C(1)，触发器子载荷从 2 代起，2 代再触发 = 代际已满）。</summary>
+        public int BaseGen;
+        public bool IsCopy => BaseGen > 0;
         public int ContentVersion;
         public byte Carrier;
         /// <summary>EMG1-GRM-01：主组件可抛射（false = 光束：lob 动词不执行，给原因 emg.compile.lob_straight）。</summary>
@@ -234,7 +240,7 @@ namespace GameLogic.Campaign.Emergence
         public static EmgProgramResult Compile(BlueprintCircuitPreview p) => Compile(p, null);
 
         /// <param name="skipUplink">EMG1-E2E-01 修复轮（FGR-SIG-033 声明轨）：接入口里正在冷却的核心固件——不编进程序（冷却中这条反应不发动，固件照样插着）；null = 不跳过。</param>
-        public static EmgProgramResult Compile(BlueprintCircuitPreview p, ICollection<string> skipUplink)
+        public static EmgProgramResult Compile(BlueprintCircuitPreview p, ICollection<string> skipUplink, int baseGen = 0)
         {
             if (p == null)
             {
@@ -248,7 +254,7 @@ namespace GameLogic.Campaign.Emergence
                 EmgCatalog.PartPropModify("prop.integrity", new[] { p.PrimaryId }, out float heal);
                 healOnly = heal > 0f;
             }
-            EmgProgramResult res = Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly);
+            EmgProgramResult res = Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly, baseGen);
             // EMG3-SQD-01：结构模块声明 sqd.relay scope（按声明判，不认模块 ID）；与 CombatSite.ApplyRelay 同一判定
             res.Relay = EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(p.StructureId) && EmgCatalog.PartReads("sqd.relay", EmgRole.Scope, new[] { p.StructureId });
             return res;
@@ -330,7 +336,7 @@ namespace GameLogic.Campaign.Emergence
             EnsureIndex(c);
             var t = new EmgProgramResult
             {
-                RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
+                RootCapacity = r.RootCapacity, BaseGen = r.BaseGen, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
                 HeatInstr = r.HeatInstr, HeatDecl = r.HeatDecl, HeatTrigger = r.HeatTrigger, HeatChildren = r.HeatChildren, HeatOverflowInstr = r.HeatOverflowInstr,
                 HeatDraw = r.HeatDraw, ChildPayloads = r.ChildPayloads, HeatMeta = r.HeatMeta,
             };
@@ -399,7 +405,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 Flags = (r.Program.Flags & ~(EmgProgramFlags.NeedsFlight | EmgProgramFlags.HasCore | EmgProgramFlags.HasAnchor))
                         | (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None)
-                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None),
+                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None) | (r.BaseGen > 0 ? EmgProgramFlags.IsCopy : EmgProgramFlags.None),
                 ListenMask = listen, HeatPerShot = r.Program.HeatPerShot,
                 // EMG3-FUSE-01：刷写截断 / 剥核心的变体按留下的指令重算线索掩码（B 被截掉就不再算同现）
                 ClueMask = r.Program.ClueMask == 0u ? 0u : ClueMaskOf(steps.GetRange(0, Math.Min(k, steps.Count)), c),
@@ -409,7 +415,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 // EMG3-E2E-01（DEBT-EMG3META01-02 ②，FGR-EMG-040）：刷写变体按留下的步骤重编逆序树（逆序树的序号是逆序后的位置，不能按原序号截），
                 // 登记时成对进程序表（CombatSite.RegisterProgram），刷写态下 [逆序编译] 照常按积热切树；截掉了反转本身 = 没有逆序树
-                var kept = new EmgProgramResult { RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly };
+                var kept = new EmgProgramResult { RootCapacity = r.RootCapacity, BaseGen = r.BaseGen, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly };
                 foreach (EmgProgramStep s in r.Steps)
                 {
                     if (s.Ordinal <= cut && !(noCore && s.Core))
@@ -737,14 +743,16 @@ namespace GameLogic.Campaign.Emergence
 
         /// <param name="rootCapacity">≤ 0 = 按公式 C0 = 机器固件槽数 + 接入口配额；自检可给别的值验证“配额变了公式不变”（FGR-EMG-039）。</param>
         /// <param name="lobAllowed">主组件可抛射（作战组件表 flightLob）；false 时 lob 动词不执行并给原因 <see cref="NoteLobStraight"/>（光束：曲射只留落点扬尘）。</param>
+        /// <param name="baseGen">EMG4-HIJ-02：根节点代号（1 = 镜像复制品，见 <see cref="CompileCopy"/>）；容量公式不变 C(gen) = max(1, C0 / 2^gen)。</param>
         public static EmgProgramResult Compile(IReadOnlyList<string> uplinkFirmwareIds, IReadOnlyList<string> localFirmwareIds, FirmwareCarrier carrier, int rootCapacity = 0,
-            bool lobAllowed = true, ICollection<string> skipUplink = null, bool healOnly = false)
+            bool lobAllowed = true, ICollection<string> skipUplink = null, bool healOnly = false, int baseGen = 0)
         {
             EmgCompiled c = EmgCatalog.Current;
             EnsureIndex(c);
             var r = new EmgProgramResult
             {
                 RootCapacity = rootCapacity > 0 ? rootCapacity : BlueprintCircuitBoard.FirmwareSlotCount + UplinkCompiler.Quota,
+                BaseGen = Math.Max(0, Math.Min(EmgConst.MaxGen, baseGen)),
                 ContentVersion = CampaignSaveService.CurrentContentVersion,
                 Carrier = (byte)carrier,
                 LobAllowed = lobAllowed,
@@ -769,6 +777,47 @@ namespace GameLogic.Campaign.Emergence
                                                              + Combat.CombatSite.ProgramKey(r.Reverse.Program, r.Reverse.KernelNodes, r.Reverse.KernelInstrs)).ToString("X16");
             }
             return r;
+        }
+
+        /// <summary>
+        /// EMG4-HIJ-02（FGR-EMG-164 / 036）：持有型截断——镜像复制品按剩余带宽只持有前 <paramref name="k"/> 条：<see cref="Truncate"/> 之后把第 k 条之后的步骤（副本）记为溢出，
+        /// 这样 <see cref="FlashSteps"/>、刷写变体表全长与内核“复制品占母机带宽”都按 k 条算。k ≤ 0 返回 null（= 只有基础攻击）。
+        /// </summary>
+        public static EmgProgramResult TruncateHeld(EmgProgramResult r, int k)
+        {
+            EmgProgramResult t = Truncate(r, k, false);
+            List<EmgProgramStep> kept = t != null ? FlashSteps(t, false) : null;
+            if (kept == null || kept.Count == 0)
+            {
+                return null;
+            }
+            int cut = kept[Math.Min(k, kept.Count) - 1].Ordinal;
+            for (int i = 0; i < t.Steps.Count; i++)
+            {
+                if (t.Steps[i].Ordinal > cut && !t.Steps[i].Overflow && !t.Steps[i].Builtin)
+                {
+                    EmgProgramStep c = t.Steps[i].CloneStep();
+                    c.Overflow = true;
+                    t.Steps[i] = c;
+                }
+            }
+            return t;
+        }
+
+        /// <summary>镜像复制品不能再被复制（FGR-EMG-164 代际）的原因键。</summary>
+        public const string NoteCopyRefused = "emg.mirror.refuse_copy";
+
+        /// <summary>
+        /// EMG4-HIJ-02（FG19 FGR-EMG-164；FG09 镜像体）：镜像复制——把玩家最近一次发动的固件按“本地版本”编成复制品：
+        /// 1 代程序（根代号 1、容量 C(1)，现值 2），混合固件照常展开为 2 条后再受容量约束；复制触发器时它放出的子载荷是 2 代（容量 C(2)），
+        /// 2 代里的触发器“代际已满”——子载荷按容量截断。来源本身就是复制品（<paramref name="sourceIsCopy"/>）时拒绝（返回 null，<paramref name="refuseKey"/> = <see cref="NoteCopyRefused"/>）。
+        /// 占镜像体刷写带宽由 <see cref="Combat.CombatSite.MirrorCopy"/> 截断并登记（内核 FlashSelfCopy 计入母机占用）。只按端口与位置编，不认内容 ID（FGR-EMG-013）。
+        /// </summary>
+        /// <param name="p">镜像体的预览：主组件 = 镜像体自己的作战组件（载体），机器固件 = 复制来的固件（本地版本，不插接入口，见 <see cref="Combat.CombatSite.EnemyPreview"/>）。</param>
+        public static EmgProgramResult CompileCopy(BlueprintCircuitPreview p, bool sourceIsCopy, out string refuseKey)
+        {
+            refuseKey = sourceIsCopy ? NoteCopyRefused : null;
+            return sourceIsCopy ? null : Compile(p, null, 1);
         }
 
         // ── 6. 节拍（EMG3-TMP-01；FG19 FGR-EMG-171 / 172）──
@@ -1146,7 +1195,7 @@ namespace GameLogic.Campaign.Emergence
             }
             var t = new EmgProgramResult
             {
-                RootCapacity = r.RootCapacity, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
+                RootCapacity = r.RootCapacity, BaseGen = r.BaseGen, ContentVersion = r.ContentVersion, Carrier = r.Carrier, LobAllowed = r.LobAllowed, HealOnly = r.HealOnly,
             };
             for (int i = 0; i < order.Count; i++)
             {
@@ -1311,7 +1360,7 @@ namespace GameLogic.Campaign.Emergence
 
         private static void BuildTree(EmgProgramResult r)
         {
-            EmgTreeNode root = NewNode(r, -1, 0, null);
+            EmgTreeNode root = NewNode(r, -1, r.BaseGen, null); // EMG4-HIJ-02：镜像复制品的根是 1 代
             foreach (EmgProgramStep s in r.Steps)
             {
                 if (!s.Promoted)
@@ -1635,7 +1684,7 @@ namespace GameLogic.Campaign.Emergence
             r.Program = new EmgProgram
             {
                 Flags = (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None)
-                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None),
+                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None) | (r.BaseGen > 0 ? EmgProgramFlags.IsCopy : EmgProgramFlags.None), // EMG4-HIJ-02：镜像复制品
                 ListenMask = listen, HeatPerShot = r.HeatTotal, ClueMask = ClueMaskOf(r.Steps, c),
             };
             r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");

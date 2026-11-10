@@ -272,7 +272,7 @@ namespace GameLogic.Campaign.Combat
             int any = site.Kernel.PickUnit(at, PickRadius, false, true);
             // EMG1-CHAIN-01（FG-GAP-171）：带程序的己方机器没标签时也弹（附程序行）；没程序的己方单位照旧不弹。
             // EMG1-FW-01：装着爆炸反应装甲（块数机制开着）的己方单位没标签时也弹（附块数与补块倒计时）。
-            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _) || site.Kernel.TryGetRelay(any, out _)) ? any : 0; // EMG3-SQD-01：中继机器也弹（转发 / 限流计数）
+            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _) || site.Kernel.TryGetRelay(any, out _) || site.Kernel.TryGetSeize(any, out _, out _, out _, out _)) ? any : 0; // EMG3-SQD-01：中继机器也弹（转发 / 限流计数）
         }
 
         private static bool HasProgram(CombatSite site, int unit) =>
@@ -289,7 +289,7 @@ namespace GameLogic.Campaign.Combat
             line = relay == null ? line : line == null ? relay : relay + "\n" + line;
             string enemy = site.EnemyProgramLine(CampaignSession.Current, unit); // EMG4-HIJ-01（FGR-EMG-162）：敌方单位的程序（读写端口）
             line = enemy == null ? line : line == null ? enemy : line + "\n" + enemy;
-            string hijack = site.HijackHoverLine(unit); // EMG4-HIJ-01：劫持剩余时间、由教义触发、不接受编队命令
+            string hijack = site.HijackHoverLine(unit) ?? site.SeizeHoverLine(unit); // EMG4-HIJ-01：劫持剩余时间、由教义触发、不接受编队命令；EMG4-HIJ-02：夺控来源 / 剩余 / 瘫痪 / 反向接入
             line = hijack == null ? line : line == null ? hijack : hijack + "\n" + line;
             if (line == null)
             {

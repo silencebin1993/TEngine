@@ -157,6 +157,17 @@ namespace GameLogic.Campaign.Signal
                     continue;
                 }
                 var slot = new UplinkHudSlot { Index = i, FirmwareId = content, State = UplinkSlotState.Empty, Reason = string.Empty };
+                string blockedWhy = SignalSeizeService.BlockedReason(s, i);
+                if (blockedWhy.Length > 0)
+                {
+                    // EMG4-HIJ-02（FGR-EMG-165）：被封锁的槽——固件保留、不插入，写来源与“按空槽重编、冷却不重置”；是触发器时写“下游指令回到上一层节点”
+                    slot.Raw = content.Length > 0 && FirmwareKinds.IsRaw(s, content);
+                    slot.Core = content.Length > 0 && FirmwareKinds.IsCore(content);
+                    slot.State = UplinkSlotState.Offline;
+                    slot.Reason = blockedWhy;
+                    into.Slots.Add(slot);
+                    continue;
+                }
                 if (i >= activeSlots)
                 {
                     // FGR-ECO-020“断电时对应槽位失效……HUD 给出提示”：固件保留、不插入，写明原因（失效 / 未解锁）。

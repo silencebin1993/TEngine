@@ -629,6 +629,7 @@ namespace GameLogic.UI.SignalCore
                 Button b = _slotButtons[i];
                 bool open = SignalCoreService.IsSlotUnlocked(s, i);
                 string content = SignalCoreService.SlotContentId(s, i);
+                bool live = SignalCoreService.IsSlotActive(s, i) && !SignalSeizeService.IsBlocked(s, i); // EMG4-HIJ-02：被封锁的槽按失效显示、写封锁原因
                 string body;
                 if (content.Length > 0)
                 {
@@ -637,7 +638,7 @@ namespace GameLogic.UI.SignalCore
                     body = FirmwareKinds.KindLabel(kind) + " " + (FirmwareKinds.DisplayName(content) ?? content)
                            + (raw ? "  " + GameText.Get("signal.core.raw_tag") : string.Empty);
                     b.EnableInClassList("sc-item-raw", raw);
-                    if (!SignalCoreService.IsSlotActive(s, i))
+                    if (!live)
                     {
                         body += "\n" + SlotShortLine(s, i); // FG4-ECO-11：失效（断电等）/ 未解锁的槽里固件保留、不生效
                     }
@@ -645,13 +646,13 @@ namespace GameLogic.UI.SignalCore
                 }
                 else
                 {
-                    body = SignalCoreService.IsSlotActive(s, i) ? GameText.Get("signal.core.slot_empty") : SlotShortLine(s, i);
+                    body = live ? GameText.Get("signal.core.slot_empty") : SlotShortLine(s, i);
                     b.EnableInClassList("sc-item-core", false);
                     b.EnableInClassList("sc-item-raw", false);
                 }
                 b.text = GameText.Format("signal.core.slot_index", i + 1) + "  " + body;
                 b.EnableInClassList("sc-item-locked", !open);
-                b.EnableInClassList("sc-item-offline", open && !SignalCoreService.IsSlotActive(s, i));
+                b.EnableInClassList("sc-item-offline", open && !live);
                 b.EnableInClassList("sc-item-selected", i == _selectedSlot);
             }
             _unequip.text = GameText.Get("signal.core.unequip");
@@ -909,7 +910,8 @@ namespace GameLogic.UI.SignalCore
                 Title = GameText.Format("signal.core.slot_index", index + 1),
                 Body = content.Length > 0
                     ? (FirmwareKinds.DisplayName(content) ?? content) + "\n" + FirmwareKinds.KindTip(kind) + RawTip(s, content) + ReadingTip(content)
-                    : SignalCoreService.IsSlotActive(s, index)
+                      + (SignalSeizeService.IsBlocked(s, index) ? "\n" + SignalCoreService.SlotStatusLine(s, index) : string.Empty) // EMG4-HIJ-02：封锁原因
+                    : SignalCoreService.IsSlotActive(s, index) && !SignalSeizeService.IsBlocked(s, index)
                         ? GameText.Get("signal.core.hint")
                         : SignalCoreService.SlotStatusLine(s, index), // FG4-ECO-11：失效原因 / 解锁要什么、关键材料从哪里获得
                 CodexEntryId = GameLogic.Progression.MechanicCodex.FirmwareEntryId(content), // FG2-FW-05：悬停按图鉴键跳到固件条目

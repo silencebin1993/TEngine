@@ -611,6 +611,9 @@ namespace BinGames.Sim.Combat
             }
             switch ((CombatBehavior)d.Behavior[i])
             {
+                case CombatBehavior.Hijacked:
+                    StepHijackedUnit(ref d, ref grid, i, dt); // EMG4-HIJ-02：被夺控的己方机器按同一教义攻击原来的同伴
+                    break;
                 case CombatBehavior.HoldFire:
                     StepHoldFire(ref d, ref grid, i, dt);
                     break;
@@ -1619,6 +1622,10 @@ namespace BinGames.Sim.Combat
             // EMG4-HIJ-01（ADR ⑰）：发击杀类事件之前——被劫持单位阵亡先还原原阵营（击杀者 = 劫持者，掉落与击杀在这里结算一次）；入侵度满的敌机改为重启为己方
             if (d.Behavior[t] == (byte)CombatBehavior.Hijacked)
             {
+                if (EmgSeizeDown(ref d, t, killerId))
+                {
+                    return; // EMG4-HIJ-02（DEBT-EMG1FW02-03）：被夺控的己方机器被击倒 = 瘫痪，不阵亡、不发 Killed / evt.death、自毁装药不起爆
+                }
                 killerId = EmgHijackRelease(ref d, t, killerId);
             }
             else if (EmgTryHijack(ref d, t, killerId))

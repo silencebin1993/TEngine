@@ -24,6 +24,17 @@ namespace GameLogic.Campaign.Combat
         public static IEnumerable<CombatSite> All => Sites.Values;
         public static int Count => Sites.Count;
 
+        /// <summary>EMG4-HIJ-02：全部地点里被夺控的机器台数（HUD 早退出用；字典结构体枚举器，不分配）。O(地点数 × 夺控记录数)。</summary>
+        public static int SeizeTotal()
+        {
+            int n = 0;
+            foreach (CombatSite site in Sites.Values)
+            {
+                n += site?.Kernel != null && !site.IsDisposed ? site.Kernel.SeizeCount : 0;
+            }
+            return n;
+        }
+
         public static CombatSite Get(string siteId) =>
             siteId != null && Sites.TryGetValue(siteId, out CombatSite s) && !s.IsDisposed ? s : null;
 

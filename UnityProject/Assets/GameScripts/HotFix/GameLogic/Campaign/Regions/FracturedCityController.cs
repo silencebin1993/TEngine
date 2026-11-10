@@ -667,14 +667,14 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            RegionEnemyRecord target = FracturedCityRegion.TryFindEnemyInAim(state, origin, aimDir);
+            string target = FracturedCityRegion.TryFindEnemyInAim(state, origin, aimDir);
             if (target == null)
             {
                 Log.Info("[FracturedCityController] 直控攻击：瞄准方向/射程内没有可命中的敌人。");
                 return;
             }
 
-            FracturedCityRegion.TryAttackEnemy(state, _possessed.LogicId, target.EnemyInstanceId, state.RandomSeed,
+            FracturedCityRegion.TryAttackEnemy(state, _possessed.LogicId, target, state.RandomSeed,
                 isAiSource: false);
         }
 

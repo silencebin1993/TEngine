@@ -149,12 +149,26 @@ namespace GameLogic.Campaign.Signal
             {
                 ids[i] = string.Empty;
             }
+            // EMG4-HIJ-02（FGR-EMG-165）：被封锁的槽里的固件按空槽重编译（程序树按 FGR-EMG-031 重排），解除立即恢复；冷却按内容 ID 记，不受影响
+            SignalSlotBlockRecord[] blocks = s?.SignalCore?.SlotBlocks;
+            for (int b = 0; blocks != null && b < blocks.Length; b++)
+            {
+                if (blocks[b] != null && blocks[b].Slot >= 0 && blocks[b].Slot < ids.Length)
+                {
+                    ids[blocks[b].Slot] = string.Empty;
+                }
+            }
             return ids;
         }
 
         /// <summary>这个槽现在为什么不生效（生效的槽返回空串）：失效（已解锁但阵列断电 / 禁用 / 被摧毁）写原因，未解锁写要什么、从哪里获得。</summary>
         public static string SlotStatusLine(CampaignState s, int index)
         {
+            string blocked = SignalSeizeService.BlockedReason(s, index); // EMG4-HIJ-02：被封锁写来源与“按空槽重编、冷却不重置”
+            if (blocked.Length > 0)
+            {
+                return blocked;
+            }
             if (IsSlotActive(s, index))
             {
                 return string.Empty;
@@ -169,6 +183,9 @@ namespace GameLogic.Campaign.Signal
 
         /// <summary>FG4-ECO-11：超控阵列的已解锁 / 生效等级变了（<see cref="OverrideArrayService.OnPowerApplied"/>）：版本 +1，接入中的机器按新的生效槽重编译。</summary>
         public static void NotifyOverrideChanged() => Revision++;
+
+        /// <summary>EMG4-HIJ-02：槽位封锁 / 解除（<see cref="SignalSeizeService"/>）：版本 +1，接入中的机器按新的生效槽重编译（同 <see cref="NotifyOverrideChanged"/>）。</summary>
+        public static void NotifySlotBlockChanged() => Revision++;
 
         /// <summary>解锁第 <paramref name="index"/>（0 起）号槽需要的超控阵列等级（初始槽为 0）。</summary>
         public static int TierForSlot(int index) => Math.Max(0, index + 1 - InitialSlots);

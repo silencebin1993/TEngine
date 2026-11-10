@@ -2084,6 +2084,19 @@ namespace GameLogic.Campaign
         /// 只用来判断“这一次是不是真的变了”——失效 / 恢复的通知与引导钩子只在真正翻转时发，读档后不重复提醒。</summary>
         public int OverrideBuiltTierSeen;
         public int OverrideActiveTierSeen;
+
+        // ── EMG4-HIJ-02（FG19 FGR-EMG-165 槽位封锁）── 只加字段、不升域版本：旧档读成空 = 没有被封锁的槽。
+        /// <summary>被敌方封锁的信号核槽位（余烬主机等；唯一写入口 <c>Signal.SignalSeizeService</c>）。封锁中的槽里的固件按空槽重编译，冷却不重置；解除立即恢复。</summary>
+        public SignalSlotBlockRecord[] SlotBlocks = Array.Empty<SignalSlotBlockRecord>();
+    }
+
+    /// <summary>EMG4-HIJ-02：一个被封锁的信号核槽位（下标 0 = 1 号槽）、来源码（<c>SignalSeizeService.Source*</c>）与封锁时刻（统一时钟步）。</summary>
+    [Serializable]
+    public sealed class SignalSlotBlockRecord
+    {
+        public int Slot;
+        public int Source;
+        public long SinceTick;
     }
 
     /// <summary>FG1-SIG-04：一台处于安全模式的机器（只运行本地常规固件，接入口为空，继续执行最后一条命令或 AI 教义）。</summary>
@@ -3067,6 +3080,7 @@ namespace GameLogic.Campaign
             s.SignalCore.CoreCooldowns ??= Array.Empty<SignalCoreCooldownRecord>();
             s.SignalCore.SafeModes ??= Array.Empty<SignalSafeModeRecord>();
             s.SignalCore.RecentUplinks ??= Array.Empty<int>();
+            s.SignalCore.SlotBlocks ??= Array.Empty<SignalSlotBlockRecord>();
             s.LootPackets ??= new LootPacketState();
             s.Stats ??= new StatsState();
             s.Stats.ReactionSessions ??= Array.Empty<ReactionSessionRecord>();

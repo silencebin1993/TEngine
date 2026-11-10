@@ -1715,7 +1715,7 @@ namespace GameLogic.EditorTools
                     return "EMG4-FW-01"; // EMG4-HIJ-01：内核已有生产者（劫持成立时入队），读者随劫持新固件落表
                 case "evt.seize":
                 case "evt.release":
-                    return "EMG4-HIJ-02"; // 夺控与反向接入
+                    return "EMG4-FW-01"; // EMG4-HIJ-02：生产者已落地（夺控 / 劫持 / 夺控结束、槽位封锁 / 解除注入），读者 N41 反夺控随劫持新固件落表
                 case "evt.beat":
                     return "EMG3-TMP-01";
                 case "evt.phase":

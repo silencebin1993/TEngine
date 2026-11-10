@@ -450,6 +450,8 @@ namespace BinGames.Sim.Combat
         IsReverse = 16,
         /// <summary>EMG3-FUSE-01（ADR ② 落点接线）：程序有接线复制出的 <see cref="EmgInstrFlags.Anchored"/> 指令（在全部节点指令之后的尾段）——没有本位的程序不走任何落点判定（O(1) 早退出）。</summary>
         HasAnchor = 32,
+        /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-164）：镜像复制品（1 代程序，根节点代号 1）——不能再被复制；持有它的单位按程序条数占自己的刷写带宽。</summary>
+        IsCopy = 64,
     }
 
     [Flags]
@@ -1131,11 +1133,29 @@ namespace BinGames.Sim.Combat
         public const int DefaultMax = 2;
         /// <summary>没有目标时跟随劫持者停在多远（米）。</summary>
         public const float FollowStop = 3f;
-        /// <summary>HijackEnded.Code：期满自毁 / 劫持者阵亡连带自毁 / 被击毁（含读档后找不到单位）。</summary>
-        public const byte EndExpired = 1, EndHijackerLost = 2, EndDestroyed = 3;
+        /// <summary>HijackEnded / SeizeEnded.Code：期满（劫持 = 自毁；夺控 = 归还）/ 劫持者（夺控者）阵亡 / 被击毁（含读档后找不到单位）/
+        /// EMG4-HIJ-02：反向接入夺回 / 调用方解除（事件结束、首领阶段结束）。</summary>
+        public const byte EndExpired = 1, EndHijackerLost = 2, EndDestroyed = 3, EndReclaimed = 4, EndReleased = 5;
         /// <summary>HijackRefused.Code：劫持上限已满 / 入侵抗性满（精英、首领默认）。</summary>
         public const byte RefuseCap = 1, RefuseResist = 2;
-        public const int Fields = 11;
+        /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-165）：同一张表里的方向与状态位——0 = 信号劫持（玩家 → 敌机）；FlagSeize = 夺控（敌方 → 己方机器）；FlagDowned = 夺控中被击倒（瘫痪，不阵亡）。</summary>
+        public const int FlagSeize = 1, FlagDowned = 2;
+        /// <summary>EMG4-HIJ-02（FG10 FGR-EVT-021 / 022，fg.TbHomeTuning emg.seize.*）：信号幽灵夺控 45 秒、反向接入引导 3 秒、瘫痪 / 夺回后恢复到的耐久比例。</summary>
+        public const float DefaultSeizeSeconds = 45f, DefaultReclaimSeconds = 3f, DefaultRecoverRatio = 0.3f;
+        public const int Fields = 13;
+    }
+
+    /// <summary>EMG4-HIJ-02：发起夺控的结果（内核只认单位属性，不认内容 ID）。</summary>
+    public enum EmgSeizeResult : byte
+    {
+        Ok = 0,
+        NoUnit,
+        /// <summary>不是存活的己方非结构单位（敌机、炮塔结构、已阵亡）。</summary>
+        NotMachine,
+        /// <summary>玩家正接入在这台里（FG13 FGR-END-022“永远不会夺取玩家当前所在的那台机器”）。</summary>
+        Uplinked,
+        /// <summary>已经被夺控 / 是被劫持体（三类状态互不覆盖）。</summary>
+        Controlled,
     }
 
     /// <summary>EMG4-HIJ-01：一台被劫持的敌机（快照段 27）。按稳定单位 ID 记，压实挪槽位不影响。</summary>
@@ -1155,5 +1175,14 @@ namespace BinGames.Sim.Combat
         /// <summary>占用劫持者的刷写条数（= 原生程序条数，带宽不够时截到放得下，FGR-EMG-036）。</summary>
         public int Held;
         public int OrigWeapon;
+        /// <summary>EMG4-HIJ-02：方向与状态位（<see cref="EmgHijackConst.FlagSeize"/> / <see cref="EmgHijackConst.FlagDowned"/>；0 = 信号劫持）。快照段 27 第 11 个字段（原预留位）。</summary>
+        public int Flags;
+        /// <summary>EMG4-HIJ-02：反向接入引导完成的时刻（0 = 没有在引导）。</summary>
+        public double ReleaseAt;
+        /// <summary>EMG4-HIJ-02：夺控来源码（热更层定义：信号幽灵 / 根权限压制……，随 evt.seize 的 Code 发出）。</summary>
+        public ushort Source;
+
+        public bool IsSeize => (Flags & EmgHijackConst.FlagSeize) != 0;
+        public bool IsDowned => (Flags & EmgHijackConst.FlagDowned) != 0;
     }
 }

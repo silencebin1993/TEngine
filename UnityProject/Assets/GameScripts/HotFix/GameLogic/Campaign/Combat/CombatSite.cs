@@ -387,6 +387,7 @@ namespace GameLogic.Campaign.Combat
             c.EmgHijackHpRatio = Tuning("emg.hijack.hp_ratio", EmgHijackConst.DefaultHpRatio);
             c.EmgHijackMax = Math.Max(1, (int)Math.Round(Tuning("emg.hijack.max", EmgHijackConst.DefaultMax)));
             c.EmgHijackEliteResist = Tuning("emg.hijack.elite_resist", 1f);
+            c.EmgSeizeRecoverRatio = Tuning("emg.seize.recover_ratio", EmgHijackConst.DefaultRecoverRatio); // EMG4-HIJ-02
             c.EmgFlashRange = Mathf.Max(0.5f, Tuning("emg.flash.range", EmgConst.DefaultFlashRange));
             c.EmgFlashStep = Mathf.Max(0.1f, Tuning("emg.flash.step", EmgConst.DefaultFlashStep));
             // EMG3-META-01（FG19 FGR-EMG-040～042）：元程序的复制间隔、循环周期 / 次数 / 锚点、延后秒数 / 链累计上限、每次结算最多执行次数。
@@ -1048,7 +1049,7 @@ namespace GameLogic.Campaign.Combat
                 program = hit.P;
                 return hit.W;
             }
-            CombatWeapon built = BuildEnemyWeapon(w, component, firmware, row, out program);
+            CombatWeapon built = BuildEnemyWeapon(w, component, firmware, row.Id, out program);
             _enemyWeapons[key] = (built, program);
             return built;
         }
@@ -1056,18 +1057,24 @@ namespace GameLogic.Campaign.Combat
         private readonly Dictionary<(string, float, int), (CombatWeapon, Emergence.EmgProgramResult)> _enemyWeapons =
             new Dictionary<(string, float, int), (CombatWeapon, Emergence.EmgProgramResult)>();
 
-        private CombatWeapon BuildEnemyWeapon(CombatWeapon w, string component, List<string> firmware, GameConfig.fg.MechEnemy row, out Emergence.EmgProgramResult program)
+        private CombatWeapon BuildEnemyWeapon(CombatWeapon w, string component, List<string> firmware, string label, out Emergence.EmgProgramResult program)
         {
             BlueprintCircuitPreview p = EnemyPreview(component, firmware);
             program = Emergence.EmgProgramCompiler.Compile(p);
-            if (program.IsEmpty)
+            return EnemyProgramWeapon(p, w, program, component, label);
+        }
+
+        /// <summary>敌方 / 镜像复制品：编好的程序登记进程序表，读法换声明轨，登记刷写变体（总登记）。空程序 / 表满原样返回（表满写 Warning）。</summary>
+        private CombatWeapon EnemyProgramWeapon(BlueprintCircuitPreview p, CombatWeapon w, Emergence.EmgProgramResult program, string component, string label)
+        {
+            if (program == null || program.IsEmpty)
             {
                 return WithPartField(component, w);
             }
             int index = RegisterProgram(Kernel, program);
             if (index < 0)
             {
-                Log.Warning($"[CombatSite] {SiteId} 程序表已满，敌方武器 {row.Id} 退回旧读法（DEBT-EMG1KRN01-01）。");
+                Log.Warning($"[CombatSite] {SiteId} 程序表已满，敌方武器 {label} 退回旧读法（DEBT-EMG1KRN01-01）。");
                 return WithPartField(component, w);
             }
             CombatWeapon local = w;
@@ -1842,7 +1849,7 @@ namespace GameLogic.Campaign.Combat
         public bool TryGetEnemyUnit(string enemyInstanceId, out int unitId)
         {
             unitId = 0;
-            return enemyInstanceId != null && _enemyUnit.TryGetValue(enemyInstanceId, out unitId);
+            return enemyInstanceId != null && (_enemyUnit.TryGetValue(enemyInstanceId, out unitId) || TryGetSeizedHostileUnit(enemyInstanceId, out unitId));
         }
 
         public bool TryGetEnemyOfUnit(int unitId, out string enemyInstanceId) => _unitEnemy.TryGetValue(unitId, out enemyInstanceId);
@@ -2389,6 +2396,11 @@ namespace GameLogic.Campaign.Combat
                 case CombatEventKind.HijackRefused:
                     HandleHijackEvent(state, e); // EMG4-HIJ-01（ADR ⑰）：劫持开始 / 结束 / 被拒，O(1)
                     return;
+                case CombatEventKind.Seized:
+                case CombatEventKind.SeizeEnded:
+                case CombatEventKind.SeizeDowned:
+                    HandleSeizeEvent(e); // EMG4-HIJ-02（FGR-EMG-165）：夺控开始 / 瘫痪 / 归还，O(1)
+                    return;
                 case CombatEventKind.Healed:
                 {
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);
@@ -2408,6 +2420,10 @@ namespace GameLogic.Campaign.Combat
                         {
                             // FG9-UX-01（FGR-FAC-005）：敌人打中己方机器 = 遭遇（攻击者的敌人记录走同一个索引，O(1)）。
                             Progression.MechanicCodex.OnEnemyEncountered(FindEnemyRecord(state, e.Other)?.EnemyTypeId);
+                            if (mrec.Health - e.Value <= 0f && TryDownSeized(mrec, e.Unit, e.Other))
+                            {
+                                return; // EMG4-HIJ-02（DEBT-EMG1FW02-03）：夺控中的机器被击倒 = 瘫痪，不走 MarkDeadByLogicId（不阵亡、自毁装药不起爆）
+                            }
                             MachineRegistry.ApplyDamage(logicId, e.Value);
                             SyncMachineHealth(mrec);
                         }
@@ -2924,7 +2940,7 @@ namespace GameLogic.Campaign.Combat
                 return false;
             }
             int unit = Kernel.FindNearest(new double2(point.x, point.y), radius, CombatFaction.Hostile);
-            return unit > 0 && _unitEnemy.TryGetValue(unit, out enemyInstanceId);
+            return unit > 0 && (_unitEnemy.TryGetValue(unit, out enemyInstanceId) || TrySeizedHostileId(unit, out enemyInstanceId)); // EMG4-HIJ-02：被夺控的机器也能右键攻击
         }
 
         /// <summary>直控瞄准：锥形范围内第一个存活敌方单位对应的具名敌人（逐单位扫描在内核）。</summary>
@@ -2937,7 +2953,7 @@ namespace GameLogic.Campaign.Combat
             }
             int unit = Kernel.FindFirstInCone(new double2(origin.x, origin.y), new float2(aimDirection.x, aimDirection.y), range, halfAngleDeg,
                 CombatFaction.Hostile);
-            return unit > 0 && _unitEnemy.TryGetValue(unit, out enemyInstanceId);
+            return unit > 0 && (_unitEnemy.TryGetValue(unit, out enemyInstanceId) || TrySeizedHostileId(unit, out enemyInstanceId)); // EMG4-HIJ-02：直控也能瞄准被夺控的机器
         }
 
         /// <summary>障碍（锚点净空圈：x, y, 半径）。进场时写一次。</summary>

@@ -570,6 +570,19 @@ namespace GameLogic.Campaign.Signal
                 return Reject(UplinkFailure.ViewLeaving, logicId, source);
             }
             UplinkFailure f = ValidateCore(s, logicId, out HomeValleyMachineMarker marker);
+            if (f == UplinkFailure.None && SignalSeizeService.IsSeized(logicId))
+            {
+                // EMG4-HIJ-02（FG10 FGR-EVT-022 反向接入）：覆盖判定沿用 FG01（上面 ValidateCore 已过）；不进机器、不拉镜头，引导几秒后夺回控制（内核到点结算）
+                bool ok = SignalSeizeService.BeginReclaim(logicId, out string reclaimText);
+                SetFeedback(reclaimText);
+                if (ok)
+                {
+                    AcceptedCount++;
+                    Revision++;
+                    FeedbackCues.Raise(FeedbackCueId.CommandAck, null, FeedbackCues.MachineChassisSfx(logicId));
+                }
+                return new UplinkRequestResult(ok, ok ? UplinkFailure.None : UplinkFailure.Busy, logicId, reclaimText, false);
+            }
             if (f == UplinkFailure.None && IsUplinked(s, logicId))
             {
                 f = UplinkFailure.AlreadyUplinked;
@@ -638,6 +651,11 @@ namespace GameLogic.Campaign.Signal
             while (next != 0 && next != from && tried.Add(next))
             {
                 UplinkFailure f = ValidateCore(s, next);
+                if (f == UplinkFailure.None && SignalSeizeService.IsSeized(next))
+                {
+                    next = control.NextCandidateAfter(next); // EMG4-HIJ-02：Tab 切换跳过被夺控的机器（对它接入 = 反向接入，只在玩家点名时发起）
+                    continue;
+                }
                 if (f == UplinkFailure.None)
                 {
                     return Request(next, UplinkSource.Cycle);
@@ -1588,6 +1606,13 @@ namespace GameLogic.Campaign.Signal
             {
                 return _feedback;
             }
+            string line = SteadyLine(s, id);
+            string seized = SignalSeizeService.HudLine(s); // EMG4-HIJ-02：被夺控的机器、被封锁的槽（FGR-EMG-165“HUD 显示”）——附加行，不盖掉投影 / 炮塔 / 常驻状态
+            return seized.Length == 0 ? line : line.Length == 0 ? seized : line + "\n" + seized;
+        }
+
+        private static string SteadyLine(CampaignState s, int id)
+        {
             if (id == 0 && Economy.TestRangeService.TryGetUplinkedProjection(out _, out _, out string projection))
             {
                 // FG5-RND-03：信号在靶场的仿真投影里（不在真实机器里）——信号位置 HUD 写明，不让玩家以为信号还在核心。
@@ -1619,7 +1644,7 @@ namespace GameLogic.Campaign.Signal
             bool feedbackActive = _feedback.Length > 0 && Now < _feedbackUntil;
             int jumpKey = (int)Math.Ceiling(JumpCooldownRemaining(s));
             return HashCode.Combine(HashCode.Combine(Revision, CurrentMachine(s), cooldownKey, feedbackActive, SignalCoreService.Revision, FirmwareKinds.Revision, (int)GameText.Language),
-                SignalLinkService.WarningRevision, jumpKey, Economy.TestRangeService.Revision, Defense.TurretUplink.Revision);
+                SignalLinkService.WarningRevision, jumpKey, Economy.TestRangeService.Revision, Defense.TurretUplink.Revision, SignalSeizeService.HudKey(s));
         }
 
         /// <summary>接入中的常驻状态：插了什么（冷却中的标出剩余秒数）、没插入的逐条原因、没有接入口 / 信号核为空 / 接入口没接通。</summary>

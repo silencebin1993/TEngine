@@ -353,7 +353,7 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>直控攻击的锥形命中判定，同 <see cref="FracturedCityRegion.TryFindEnemyInAim"/>。</summary>
-        public static RegionEnemyRecord TryFindEnemyInAim(CampaignState state, Vector2 origin, Vector2 aimDirection)
+        public static string TryFindEnemyInAim(CampaignState state, Vector2 origin, Vector2 aimDirection)
         {
             if (state?.RegionEnemies == null || aimDirection.sqrMagnitude < 1e-6f)
             {
@@ -364,7 +364,7 @@ namespace GameLogic.Campaign.Regions
             if (site != null)
             {
                 return site.TryFindEnemyInCone(origin, aimDirection, FoundryOutpostLayout.DirectAttackRange, FoundryOutpostLayout.DirectAttackAimHalfAngleDeg,
-                    out string id) ? FindEnemy(state, id) : null;
+                    out string id) && (FindEnemy(state, id) != null || CombatSite.IsSeizedHostileId(id)) ? id : null; // EMG4-HIJ-02：被夺控的机器也能被直控打
             }
             Vector2 dirNorm = aimDirection.normalized;
             float cosHalf = Mathf.Cos(FoundryOutpostLayout.DirectAttackAimHalfAngleDeg * Mathf.Deg2Rad);
@@ -383,7 +383,7 @@ namespace GameLogic.Campaign.Regions
                 float cosAngle = Vector2.Dot(dirNorm, toTarget.normalized);
                 if (cosAngle >= cosHalf)
                 {
-                    return enemy;
+                    return enemy.EnemyInstanceId;
                 }
             }
             return null;
@@ -413,11 +413,11 @@ namespace GameLogic.Campaign.Regions
                 return ActionResult.Fail("没有活动的铸造前哨会话。");
             }
             RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
-            if (enemy == null)
+            if (enemy == null && !CombatSite.IsSeizedHostileId(enemyInstanceId)) // EMG4-HIJ-02：被夺控的机器没有敌人记录，目标由战斗地点解析
             {
                 return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
             }
-            if (!enemy.IsAlive)
+            if (enemy != null && !enemy.IsAlive)
             {
                 return ActionResult.Fail("目标已阵亡。");
             }

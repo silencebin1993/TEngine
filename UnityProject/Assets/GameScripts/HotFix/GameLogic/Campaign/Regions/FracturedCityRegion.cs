@@ -212,7 +212,7 @@ namespace GameLogic.Campaign.Regions
         /// 同一设计语言的独立最小实现（目标类型是 <see cref="RegionEnemyRecord"/> 而非
         /// <see cref="CombatTargetRecord"/>，破碎都市此前完全没有直控攻击入口，ER5-SILENT-01 首次补上，
         /// 满足验收卡"玩家策略/直控各打一场"里的直控那一半）。</summary>
-        public static RegionEnemyRecord TryFindEnemyInAim(CampaignState state, Vector2 origin, Vector2 aimDirection)
+        public static string TryFindEnemyInAim(CampaignState state, Vector2 origin, Vector2 aimDirection)
         {
             if (state?.RegionEnemies == null || aimDirection.sqrMagnitude < 1e-6f)
             {
@@ -223,7 +223,7 @@ namespace GameLogic.Campaign.Regions
             if (site != null)
             {
                 return site.TryFindEnemyInCone(origin, aimDirection, FracturedCityLayout.DirectAttackRange, FracturedCityLayout.DirectAttackAimHalfAngleDeg,
-                    out string id) ? FindEnemy(state, id) : null;
+                    out string id) && (FindEnemy(state, id) != null || CombatSite.IsSeizedHostileId(id)) ? id : null; // EMG4-HIJ-02：被夺控的机器也能被直控打
             }
             Vector2 dirNorm = aimDirection.normalized;
             float cosHalf = Mathf.Cos(FracturedCityLayout.DirectAttackAimHalfAngleDeg * Mathf.Deg2Rad);
@@ -242,7 +242,7 @@ namespace GameLogic.Campaign.Regions
                 float cosAngle = Vector2.Dot(dirNorm, toTarget.normalized);
                 if (cosAngle >= cosHalf)
                 {
-                    return enemy;
+                    return enemy.EnemyInstanceId;
                 }
             }
             return null;
@@ -329,11 +329,11 @@ namespace GameLogic.Campaign.Regions
                 return ActionResult.Fail("没有活动的破碎都市会话。");
             }
             RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
-            if (enemy == null)
+            if (enemy == null && !CombatSite.IsSeizedHostileId(enemyInstanceId)) // EMG4-HIJ-02：被夺控的机器没有敌人记录，目标由战斗地点解析
             {
                 return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
             }
-            if (!enemy.IsAlive)
+            if (enemy != null && !enemy.IsAlive)
             {
                 return ActionResult.Fail("目标已阵亡。");
             }

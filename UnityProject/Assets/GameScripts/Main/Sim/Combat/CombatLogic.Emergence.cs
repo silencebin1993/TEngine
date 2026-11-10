@@ -512,7 +512,20 @@ namespace BinGames.Sim.Combat
                     used += d.Hijacks[h].Held; // EMG4-HIJ-01（FGR-EMG-163 / 036）：被劫持的敌机占劫持者的刷写带宽
                 }
             }
-            return used;
+            return used + FlashSelfCopy(ref d, ownerId);
+        }
+
+        /// <summary>EMG4-HIJ-02（FGR-EMG-164）：母机自己正在用镜像复制品（程序带 IsCopy）时，复制品按它的程序条数占母机自己的刷写带宽。不是 = 0（一次查表）。</summary>
+        internal static int FlashSelfCopy(ref CombatData d, int ownerId)
+        {
+            int s = d.SlotOf(ownerId);
+            if (s < 0 || !d.IsAlive(s))
+            {
+                return 0;
+            }
+            int w = d.Weapon[s];
+            int p = w >= 0 && w < d.Weapons.Length ? d.Weapons[w].Program : -1;
+            return p >= 0 && p < d.EmgPrograms.Length && (d.EmgPrograms[p].Flags & EmgProgramFlags.IsCopy) != 0 ? math.max(0, FlashHeadOf(ref d, w).y) : 0;
         }
 
         /// <summary>这架此刻开火用的武器：没有变体表 = 放出它的武器（旧行为逐字不变）；有 = 变体表里“前 (持有 − 暂停) 条”那一行。</summary>

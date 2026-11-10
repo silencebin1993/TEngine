@@ -650,6 +650,12 @@ namespace GameLogic.Core
         /// <summary>EMG4-HIJ-01（FG19 FGR-EMG-163）：第一次信号劫持成功（引导内容在 FG15-UX-04：入侵度、阵亡时重启、30 秒期满自毁、同时 2 台、精英首领抗性、占刷写带宽）。</summary>
         public const string EmgFirstHijack = "emg_first_hijack";
 
+        /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-165）：第一次有己方机器被夺控（引导内容在 FG15-UX-04：被夺控的机器攻击你、击倒只会瘫痪、对它发起接入 = 反向接入夺回）。</summary>
+        public const string EmgFirstSeize = "emg_first_seize";
+
+        /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-165）：第一次信号核槽位被封锁（引导内容在 FG15-UX-04：被封槽按空槽重编、触发器下游回到上一层、解除立即恢复、冷却不重置）。</summary>
+        public const string EmgFirstSlotBlock = "emg_first_slot_block";
+
         /// <summary>EMG2-MAT-01（FG19 FGR-EMG-080～083）：第一次出现物质斑块（引导内容在 FG15-UX-04：物质不分敌我、沾染、形状纹样怎么认、悬停看来源与后果）。</summary>
         public const string EmgFirstMatter = "emg_first_matter";
 
@@ -734,7 +740,7 @@ namespace GameLogic.Core
             SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
             ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
             ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
-            EmgFirstProgramTree, EmgFirstTrigger, EmgFirstRelay, EmgFirstHijack,
+            EmgFirstProgramTree, EmgFirstTrigger, EmgFirstRelay, EmgFirstHijack, EmgFirstSeize, EmgFirstSlotBlock,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -286,6 +286,11 @@ namespace GameLogic.EditorTools
                                && WorldView.Director.HeadingDirect && home.PossessedMachineLogicId == null && WeaponIndexOf(site, a) == aiIndex;
                 hud.Refresh();
                 string pendingText = hud.UplinkStatusText;
+                EmgSeizeResult seizeMidway = SignalSeizeService.Seize(s, a, SignalSeizeService.SourceRoot, 45f); // EMG4-HIJ-02：过渡中的目标算“玩家所在”，不能被夺控
+                if (seizeMidway == EmgSeizeResult.Ok)
+                {
+                    SignalSeizeService.Release(a); // 回归时别让后面的断言连锁失败
+                }
                 Frames(3);
                 bool stillPending = SignalUplinkService.IsPending && SignalPresence.AtCore;
                 Frames(6);
@@ -301,6 +306,8 @@ namespace GameLogic.EditorTools
                 Expect(upInfo.Uplinked && upWeapon.Reaction == CombatReaction.MeltOverload && upInfo.WeaponIndex != aiIndex && unitUsesIt
                        && res.Success && res.Preview.UplinkFirmwareIds.SequenceEqual(new[] { FirmwareCatalog.FwOverloadId }),
                     $"插入固件并重编译：接入口插入过载、战斗内核里这台机器换成“熔穿过载”武器（行 {aiIndex} → {upInfo.WeaponIndex}）");
+                Expect(seizeMidway == EmgSeizeResult.Uplinked && !SignalSeizeService.IsSeized(a) && upInfo.Uplinked,
+                    $"EMG4-HIJ-02（FGR-END-022 / FGR-SIG-090）：接入过渡中夺控这台被拒（{seizeMidway}），过渡结束照常接入、没有接进敌方控制的机器");
                 Expect(GuidanceHooks.Known.Contains(GuidanceHooks.SignalFirstUplink) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.SignalFirstUplink),
                     $"第一次接入完成发出引导钩子 {GuidanceHooks.SignalFirstUplink}（已登记，引导内容在 FG15-UX-04）");
                 SignalUplinkChange entered = Changes.LastOrDefault();
@@ -1198,6 +1205,18 @@ namespace GameLogic.EditorTools
                 Frames(1);
                 Expect(reinserted && Changes.Last().InsertedFirmwareIds.SequenceEqual(new[] { FirmwareCatalog.FwOverloadId, FirmwareCatalog.FwHomingId }),
                     "接入中在家园改信号核（卸下寻的、再装回并加第 3 枚）：接入的机器下一帧就按新的信号核重新插入、重编译，并发出形变更新事件");
+                // EMG4-HIJ-02（FGR-EMG-165 / FGT-EMG-010）：接入中封锁过载所在的 1 号槽 → 同一条重编路径按空槽重插、内核武器没有熔穿过载；解除 → 下一帧恢复
+                CombatWeapon beforeBlock = WeaponOf(WorldSimulation.Home.Combat, a);
+                SignalSeizeService.BlockSlot(s, 0, SignalSeizeService.SourceEmber);
+                Frames(1);
+                string[] blockedIds = Changes.Last().InsertedFirmwareIds;
+                CombatWeapon blockedWeapon = WeaponOf(WorldSimulation.Home.Combat, a);
+                SignalSeizeService.UnblockSlot(s, 0);
+                Frames(1);
+                CombatWeapon restoredWeapon = WeaponOf(WorldSimulation.Home.Combat, a);
+                Expect(beforeBlock.Reaction == CombatReaction.MeltOverload && !blockedIds.Contains(FirmwareCatalog.FwOverloadId) && blockedWeapon.Reaction != CombatReaction.MeltOverload
+                       && Changes.Last().InsertedFirmwareIds.SequenceEqual(new[] { FirmwareCatalog.FwOverloadId, FirmwareCatalog.FwHomingId }) && restoredWeapon.Reaction == beforeBlock.Reaction,
+                    $"槽位封锁走正式重编：封 1 号槽 → 插入 [{string.Join(",", blockedIds)}]、内核武器反应 {blockedWeapon.Reaction}；解除 → 恢复过载 + 寻的、反应 {restoredWeapon.Reaction}");
                 AdvanceRealTime(5f);
                 hud.Refresh();
                 string over = hud.UplinkStatusText;
