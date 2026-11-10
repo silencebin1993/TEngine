@@ -1021,9 +1021,12 @@ namespace GameLogic.Campaign.Combat
             }
             noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
             noteKey ??= program.Notes.Exists(n => n.Key == Emergence.EmgProgramCompiler.NoteLobStraight) ? Emergence.EmgProgramCompiler.NoteLobStraight : null;
-            RegisterFlashVariants(p, local, w, program);
+            // EMG4-FW-01（FG19A N40 劫持中继）：带劫持中继的程序也登记刷写变体——它劫持的敌机按剩余带宽执行“前 k 条”（去核心列表）
             // EMG2-FLD-01 修复轮：部件场在程序出口统一写上——机器、炮塔（TurretService）、试验场（TestRangeService）同一条路径（FGR-EMG-013 规则只看端口）
-            return WithPartField(p.PrimaryId, w);
+            // EMG4-FW-01：先写部件场再登记刷写变体——变体表挂在单位真正用的那把武器上（电晕场这类带部件场的组件原先登记在没有部件场的那把上，查不到表），变体同样带部件场
+            w = WithPartField(p.PrimaryId, w);
+            RegisterFlashVariants(p, local, w, program, always: Emergence.EmgProgramCompiler.HasHijackFlash(program));
+            return w;
         }
 
         /// <summary>
@@ -1081,8 +1084,9 @@ namespace GameLogic.Campaign.Combat
             w.Program = index;
             w.Reading = w.Mode != CombatWeaponMode.Projectile ? ProgramReading(p, w.Reading, program) : InjectTrimmedReading(p, w.Reading, program);
             ApplySpawnFlight(ref w, program, component);
+            w = WithPartField(component, w); // EMG4-FW-01：同 WithProgram——变体表挂在带部件场的最终武器上
             RegisterFlashVariants(p, local, w, program, always: true);
-            return WithPartField(component, w);
+            return w;
         }
 
         /// <summary>敌方组装的预览（只给编译器与读法用：主组件 + 机器固件，没有接入口）。</summary>
@@ -1161,7 +1165,7 @@ namespace GameLogic.Campaign.Combat
             {
                 ApplySpawnFlight(ref v, t, p.PrimaryId);
             }
-            return WeaponIndex(v);
+            return WeaponIndex(WithPartField(p.PrimaryId, v)); // EMG4-FW-01：变体与最终武器同样带部件场（截断程序不截组件本身的场）
         }
 
         /// <summary>

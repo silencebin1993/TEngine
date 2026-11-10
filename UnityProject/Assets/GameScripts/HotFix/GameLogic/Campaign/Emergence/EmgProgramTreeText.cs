@@ -303,6 +303,11 @@ namespace GameLogic.Campaign.Emergence
                         sb.Append(" · ").Append(PingNoRelayText());
                     }
                 }
+                // EMG4-FW-01（FG19A N40）：劫持中继作用在被劫持的敌机上（不扩大本机继承），预览写明对象与带宽
+                if (!e.Inherited && EmgProgramCompiler.HijackFlashOf(r, e.Ordinal))
+                {
+                    sb.Append(" · ").Append(GameText.Format("emg.tree.tag.hijack_flash", Combat.CombatSite.Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth).ToString("0", CultureInfo.InvariantCulture)));
+                }
                 into.Add(new EmgTreeRow
                 {
                     Kind = e.Inherited ? EmgTreeRowKind.Inherited : EmgTreeRowKind.Own, Text = sb.ToString(), Node = n.Index, Ordinal = e.Ordinal,

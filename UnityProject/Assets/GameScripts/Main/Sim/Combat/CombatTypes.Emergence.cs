@@ -129,6 +129,8 @@ namespace BinGames.Sim.Combat
         public const ushort PortEntWreck = 605;
         /// <summary>EMG4-HIJ-01（FG19 2.7 节）：hij.hack 写端口码（role = inject：命中给目标加入侵度 phs.hack，FGR-EMG-163）。</summary>
         public const ushort PortHack = 1201;
+        /// <summary>EMG4-FW-01（FG19 2.7 节、FG19A N40 / N41）：hij.hijacked / hij.seized 状态端口码（只作 condition：目标处于被劫持 / 本机被夺控或信号核槽位被封锁）。</summary>
+        public const ushort PortHijacked = 1202, PortSeized = 1203;
         public const byte RoleSense = 3;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
@@ -452,6 +454,8 @@ namespace BinGames.Sim.Combat
         HasAnchor = 32,
         /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-164）：镜像复制品（1 代程序，根节点代号 1）——不能再被复制；持有它的单位按程序条数占自己的刷写带宽。</summary>
         IsCopy = 64,
+        /// <summary>EMG4-FW-01（FG19A N40 劫持中继）：程序里有“读 hij.hijacked condition、写 grm.inherit”的指令——它劫持的敌机改刷本程序（去核心列表，按带宽截断，FGR-EMG-036 / 163）。</summary>
+        HijackFlash = 128,
     }
 
     [Flags]
@@ -1140,9 +1144,11 @@ namespace BinGames.Sim.Combat
         public const byte RefuseCap = 1, RefuseResist = 2;
         /// <summary>EMG4-HIJ-02（FG19 FGR-EMG-165）：同一张表里的方向与状态位——0 = 信号劫持（玩家 → 敌机）；FlagSeize = 夺控（敌方 → 己方机器）；FlagDowned = 夺控中被击倒（瘫痪，不阵亡）。</summary>
         public const int FlagSeize = 1, FlagDowned = 2;
+        /// <summary>EMG4-FW-01（FG19A N40）：被劫持的敌机接受了母机程序刷写（武器 = 母机武器的去核心刷写变体，Held = 持有条数）。</summary>
+        public const int FlagFlashed = 4;
         /// <summary>EMG4-HIJ-02（FG10 FGR-EVT-021 / 022，fg.TbHomeTuning emg.seize.*）：信号幽灵夺控 45 秒、反向接入引导 3 秒、瘫痪 / 夺回后恢复到的耐久比例。</summary>
         public const float DefaultSeizeSeconds = 45f, DefaultReclaimSeconds = 3f, DefaultRecoverRatio = 0.3f;
-        public const int Fields = 13;
+        public const int Fields = 15;
     }
 
     /// <summary>EMG4-HIJ-02：发起夺控的结果（内核只认单位属性，不认内容 ID）。</summary>
@@ -1181,6 +1187,10 @@ namespace BinGames.Sim.Combat
         public double ReleaseAt;
         /// <summary>EMG4-HIJ-02：夺控来源码（热更层定义：信号幽灵 / 根权限压制……，随 evt.seize 的 Code 发出）。</summary>
         public ushort Source;
+        /// <summary>EMG4-FW-01（N40 劫持中继，FGR-EMG-036 距离衰减）：改刷来源 = 劫持者当时的武器（查它的去核心变体表；−1 = 没有改刷）。同版本 20 内追加（短记录读成 −1）。</summary>
+        public int FlashWeapon;
+        /// <summary>EMG4-FW-01：改刷体离劫持者过远暂停的末尾条数（每 0.25 游戏秒按距离重算，与无人机同一口径）。</summary>
+        public byte Pause;
 
         public bool IsSeize => (Flags & EmgHijackConst.FlagSeize) != 0;
         public bool IsDowned => (Flags & EmgHijackConst.FlagDowned) != 0;

@@ -142,10 +142,11 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Line("  · A. 12 条追加在 N09～N16 之后（第 53～64 行）、名表 44 条与 EMG1 的 8 条不动；stageGate 3、准入、写端口 5 载体、文本键与占位图标齐；三选一追加行排在 EMG1 行之后");
+            Line("  · A. 阶段 3 新固件追加在 N09～N16 之后（第 53 行起，条数见下行）、名表 44 条与 EMG1 的 8 条不动；stageGate 3、准入、写端口 5 载体、文本键与占位图标齐；三选一追加行排在 EMG1 行之后");
             var rows = FirmwareKinds.Rows.Where(r => r != null && !FirmwareKinds.IsMixedRow(r)).Select(r => r.Id).ToList();
             var addon = FirmwareKinds.AddonRows.Select(r => r.Id).ToList();
-            Expect(addon.Count == 8 + Spec.Length && addon.Skip(8).SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(52).SequenceEqual(addon.Skip(8)) && FirmwareKinds.BaseRows.Count == 44
+            // EMG4-FW-01：阶段 4 的 3 条（N39～N41）接在阶段 3 之后（FgEmgStage4FirmwareSelfCheck A 段核），这里只核阶段 3 这一段不动
+            Expect(addon.Count >= 8 + Spec.Length && addon.Skip(8).Take(Spec.Length).SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(52).Take(Spec.Length).SequenceEqual(addon.Skip(8).Take(Spec.Length)) && FirmwareKinds.BaseRows.Count == 44
                    && FirmwareCatalog.BaseCount == FirmwareCatalog.ExpectedCount && addon.All(FirmwareCatalog.IsAddon) && Spec.All(s => FirmwareCatalog.All.ContainsKey(s.Id)),
                 $"新固件 {Spec.Length} 条按 FG19A 顺序追加在表尾第 53～{52 + Spec.Length} 行（{string.Join("、", addon.Skip(8))}）；名表 44 条、EMG1 的 8 条（{string.Join("、", addon.Take(8))}）不动；都进固件目录");
             EmgSource src = EmgCatalog.FromTables();

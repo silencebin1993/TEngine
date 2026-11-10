@@ -66,8 +66,29 @@ namespace GameLogic.Campaign.Combat
             {
                 return null;
             }
-            return GameText.Format("emg.hijack.hover", Mathf.CeilToInt(remaining).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            string line = GameText.Format("emg.hijack.hover", Mathf.CeilToInt(remaining).ToString(System.Globalization.CultureInfo.InvariantCulture),
                 held.ToString(System.Globalization.CultureInfo.InvariantCulture)) + "\n" + GameText.Get("emg.hijack.hover.doctrine");
+            if (!Kernel.HijackFlashed(unitId))
+            {
+                return line;
+            }
+            line += "\n" + GameText.Get("emg.hijack.hover.flashed"); // EMG4-FW-01：N40 劫持中继改刷了劫持者程序
+            int pause = Kernel.HijackFlashPause(unitId); // FGR-EMG-036：离劫持者过远暂停末尾条数，与无人机同一句
+            return pause > 0 ? line + "\n" + GameText.Format("emg.flash.hover.range", pause.ToString(System.Globalization.CultureInfo.InvariantCulture)) : line;
+        }
+
+        /// <summary>
+        /// EMG4-FW-01（卡片“精英 / 首领入侵抗性默认 1 时重启注入的悬停写不可劫持原因”）：敌方单位的有效入侵抗性 ≥ 1 时写“不可劫持”与原因（按单位属性求出的抗性，不按 ID）。
+        /// 不是敌方单位 / 正被劫持 / 可以劫持返回 null。O(1)。
+        /// </summary>
+        public string UnhackableHoverLine(int unitId)
+        {
+            if (IsDisposed || !TryGetEnemyOfUnit(unitId, out _) || Kernel.TryGetHijack(unitId, out _, out _, out _))
+            {
+                return null;
+            }
+            float resist = Kernel.EffectiveResist(unitId, EmgPhaseConst.ResHack);
+            return resist >= 1f ? GameText.Format("emg.hijack.hover.unhackable", resist.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)) : null;
         }
 
         /// <summary>悬停：敌方单位的程序（FGR-EMG-162“击杀悬停显示敌方单位的程序（读写端口）”）。不是敌方单位 / 没有声明返回 null。</summary>

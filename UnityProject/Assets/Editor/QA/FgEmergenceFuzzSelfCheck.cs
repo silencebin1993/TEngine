@@ -613,6 +613,9 @@ namespace GameLogic.EditorTools
                 Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled | CombatUnitFlags.ExternalHealth,
                 Position = double2.zero, Home = double2.zero, Radius = 0.6f, Speed = fixedChassis ? 0f : 4f, Health = 2000f, MaxHealth = 2000f, Weapon = wi, BehaviorProfile = -1,
             });
+            // EMG4-FW-01（用例集随新固件入池换了一批后实测：悬浮机 [条件门·离地, 时钟脉冲…] 子节点全程不激活）：本机按正式路径带上底盘特性（CombatSite 机器生成同一入口），
+            // 否则 chs.* 条件 / 离地读法在模糊测试里一律按“没有特性”求值，悬浮的“离地”永远不成立
+            a.Site.ApplyChassisTrait(a.Me, c.Chassis);
             // 主目标：正面装甲朝着本机（与 FgReadingMatrixSelfCheck 条件场景同一摆法）。
             // 先造条件（FGR-EMG-220）：读“定时”的飞行程序把目标放到定时到点之后才够得着的距离
             //（延时引信“提前命中不空爆”，目标太近时定时永远不到点）；攻击命令的接战距离随之放宽，玩家正常也会远距离下令。
@@ -1574,12 +1577,17 @@ namespace GameLogic.EditorTools
             ["ent.unit"] = "场上所有单位（实体族“单位”端口；EMG3-FW-01 阶段 2 出口核对登记）",
             ["prop.flammable"] = "实体档案可燃性（fg.TbEntityProfile；EMG2-PERSIST-01 残骸 / 单位着火按它）",
             ["tmp.sync"] = "内核相位对齐（同机 ≥ 2 条节拍指令同拍执行；EMG3-TMP-01，FgEmgTempoSelfCheck D）",
+            // EMG4-FW-01（N41 反夺控的读端）：夺控 / 槽位封锁由敌方经统一入口 SignalSeizeService 发起（内核 CombatLogic.EmgSeize 发 evt.seize；封锁注入给接入中的机器），
+            // 正式调用方是信号幽灵（FG12-EVT-03）、余烬主机（FG11-BOSS-01）、根权限压制（FG13-END-05），见 DEBT-EMG4FW01-01；FgEmgStage4FirmwareSelfCheck F / FgEmgSeizeSelfCheck G 实测
+            ["evt.seize"] = "敌方夺控 / 槽位封锁（SignalSeizeService → 内核 EmgSeize 与封锁注入；EMG4-HIJ-02；正式调用方未落地：DEBT-EMG4FW01-01）",
+            ["hij.seized"] = "机器被夺控 / 接入中槽位被封锁的状态（同上，内核夺控记录 FlagSeize；正式调用方未落地：DEBT-EMG4FW01-01）",
         };
 
         /// <summary>派生源：读端口 ← 写这些端口的声明同样算写者（阶段 1 过渡动词）。</summary>
         internal static readonly Dictionary<string, string> DerivedSources = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["prop.charge"] = "en.elec",
+            ["hij.hijacked"] = "hij.hack", // EMG4-FW-01：被劫持状态由入侵度满后阵亡拦截产生（重启注入写 hij.hack → 内核 EmgTryHijack）
         };
 
         internal sealed class SourceAudit
@@ -1712,10 +1720,12 @@ namespace GameLogic.EditorTools
             switch (port)
             {
                 case "evt.hijack":
-                    return "EMG4-FW-01"; // EMG4-HIJ-01：内核已有生产者（劫持成立时入队），读者随劫持新固件落表
-                case "evt.seize":
                 case "evt.release":
-                    return "EMG4-FW-01"; // EMG4-HIJ-02：生产者已落地（夺控 / 劫持 / 夺控结束、槽位封锁 / 解除注入），读者 N41 反夺控随劫持新固件落表
+                    // EMG4-FW-01：N39～N41 落表后 evt.seize 有了读者（N41）；evt.hijack / evt.release 的生产者已在内核（HIJ-01 / HIJ-02），FG19A 43 条里没有读它们的固件——
+                    // 按“已有生产者、读者未落表”记缺口（与 evt.split 等同口径），去向由阶段 4 出口裁决（FG-GAP-210）
+                    return "EMG4-E2E-02（FG-GAP-210）";
+                case "evt.seize":
+                    return "EMG4-FW-01";
                 case "evt.beat":
                     return "EMG3-TMP-01";
                 case "evt.phase":
@@ -1778,10 +1788,16 @@ namespace GameLogic.EditorTools
             // EMG3-FW-02（卡片“模糊测试器缺口清单里阶段 3 端口为空”）：N01～N08、N30～N32、N42 落表后 meta.*、evt.ping、tmp.sync 都有正常游戏可获得的写者 / 读者；
             // 阶段 3 端口只剩 grm.anchor（N43 接线随 EMG3-FUSE-01 落表，看板在本卡之后）；阶段 4 的 hij.* 照旧报缺口
             var stage3Gaps = a.Gaps.Where(x => EmgCatalog.FromTables().Ports.Any(p => p != null && p.Id == x.Port && p.Stage == 3)).ToList();
-            Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal))
+            // EMG4-FW-01（卡片“关闭 EMG4-HIJ-01 留下的 hij.* 缺口，模糊测试器缺口清单里阶段 4 端口为空”；DEBT-EMG4HIJ01-01）：N39～N41 落表后 hij.* 与 evt.seize 都有生效的读写者；
+            // 阶段 4 端口里只剩 evt.hijack / evt.release（内核已有生产者、FG19A 没有读它们的固件，按“已有生产者、读者未落表”记缺口，FG-GAP-210），没有一个承接 EMG4-FW-01
+            var stage4Gaps = a.Gaps.Where(x => EmgCatalog.FromTables().Ports.Any(p => p != null && p.Id == x.Port && p.Stage == 4)).ToList();
+            var stage4Bare = stage4Gaps.Where(x => x.Port != "evt.hijack" && x.Port != "evt.release").ToList();
+            Expect(a.Gaps.Count > 0 && a.Gaps.All(x => !string.IsNullOrEmpty(x.Card)) && !a.Gaps.Any(x => x.Port.StartsWith("hij.", StringComparison.Ordinal) || x.Port == "evt.seize" || x.Card == "EMG4-FW-01")
+                   && stage4Bare.Count == 0
                    && !a.Gaps.Any(x => x.Port == "evt.ping" || x.Port == "tmp.sync" || x.Port.StartsWith("meta.", StringComparison.Ordinal))
                    && stage3Gaps.Count == 0 && !a.Gaps.Any(x => x.Port == "evt.enter") && uplink.Count == 0,
-                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：含 hij.*；meta.* / evt.ping / tmp.sync 已由 EMG3-FW-02 落表清零；" +
+                $"未被生效声明引用的已注册端口 {a.Gaps.Count} 个逐条报“缺口（承接 <卡>）”（不算通过、不静默跳过）：hij.* / evt.seize 已由 EMG4-FW-01 落表清零（阶段 4 端口的缺口只剩已有生产者的 {string.Join("、", stage4Gaps.Select(x => x.Port + "→" + x.Card))}，" +
+                $"其余 {stage4Bare.Count} 个）；meta.* / evt.ping / tmp.sync 已由 EMG3-FW-02 落表清零；" +
                 $"阶段 3 端口的缺口 {stage3Gaps.Count} 个（{string.Join("、", stage3Gaps.Select(x => x.Port + "→" + x.Card))}；EMG3-FUSE-01 落表 N43 后应为 0）；N14 的读端 evt.enter 已生效，N15 的读端 evt.uplink 随 fld.push 接通（EMG2-FLD-01）也已生效，不再是缺口（{uplink.Count}）");
         }
 

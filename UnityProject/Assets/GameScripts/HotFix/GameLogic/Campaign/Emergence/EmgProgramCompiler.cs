@@ -931,6 +931,23 @@ namespace GameLogic.Campaign.Emergence
         /// EMG3-FW-02（FGR-EMG-133；卡片负向“没有中继时写 evt.ping 的固件无友机接收，预览写原因，不报错”）：这条指令写 evt.ping（<paramref name="send"/> = true）或在根节点以 trigger 收听
         /// evt.ping（false），<paramref name="channel"/> = 频道。子节点里的收听不会被触发（脉冲只按接收方根节点执行），返回 true 且 <paramref name="rootOnly"/> = true。与内核 EmgPingOut / EmgRootTrigGate 同口径。
         /// </summary>
+        /// <summary>EMG4-FW-01（FG19A N40）：这一条指令是劫持中继（读 hij.hijacked condition 的指令行在内核行里，且整个程序带 HijackFlash）。只在预览重建时调用。</summary>
+        public static bool HijackFlashOf(EmgProgramResult r, int ordinal)
+        {
+            if (!HasHijackFlash(r))
+            {
+                return false;
+            }
+            foreach (EmgInstr x in r.KernelInstrs)
+            {
+                if (x.Ordinal == ordinal && x.Port == EmgConst.PortHijacked && x.Role == EmgConst.RoleCondition && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public static bool PingOf(EmgProgramResult r, int node, int ordinal, out bool send, out int channel, out bool rootOnly)
         {
             send = rootOnly = false;
@@ -1450,7 +1467,7 @@ namespace GameLogic.Campaign.Emergence
             bool widened = false; // 程序里有写 grm.inherit 的指令：触发器 / 效果也进继承候选
             foreach (EmgProgramStep s in r.Steps)
             {
-                widened |= !s.Overflow && HasWrite(c, s, "grm.inherit");
+                widened |= !s.Overflow && WidensInherit(c, s);
             }
             var candidates = new List<EmgTreeEntry>(8);
             // 按建节点顺序处理（父节点总在子节点之前）；继承来的触发器在 2 代以内再放子节点，追加到表尾、随后处理。
@@ -1517,10 +1534,11 @@ namespace GameLogic.Campaign.Emergence
 
         private static void Emit(EmgProgramResult r, EmgCompiled c)
         {
-            bool widened = false;
+            bool widened = false, hijackFlash = false;
             foreach (EmgProgramStep s in r.Steps)
             {
-                widened |= !s.Overflow && HasWrite(c, s, "grm.inherit");
+                widened |= !s.Overflow && WidensInherit(c, s);
+                hijackFlash |= !s.Overflow && IsHijackFlash(c, s);
             }
             float trigGen = Tuning("emg.heat.trigger_gen", 2f), perChild = Tuning("emg.heat.per_child", 1f);
             var mult = new int[r.Nodes.Count];
@@ -1646,7 +1664,8 @@ namespace GameLogic.Campaign.Emergence
                                 var mediumCarrier = (FirmwareCarrier)ResolveCarrier(c, r.Carrier, n.Parent);
                                 x.A = mediumCarrier == FirmwareCarrier.Melee || mediumCarrier == FirmwareCarrier.Aura ? 0f : d.Param2 > 0f ? d.Param2 : x.A;
                             }
-                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port) || IsRootKernelWrite(port, d.Role) || medium || IsTriggeredEmitWithoutTransition(c, s, port, d.Role)) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta)
+                            if (n.Parent < 0 && x.Verb != 0 && (IsRootKernelOwner(s.OwnerId) || IsRootKernelPort(port) || IsRootKernelWrite(port, d.Role) || medium || IsTriggeredEmitWithoutTransition(c, s, port, d.Role)) && EmgCatalog.FamilyOf(port) is var rkFam && rkFam != EmgFamily.Grammar && rkFam != EmgFamily.Meta
+                                && rkFam != EmgFamily.Hijack) // EMG4-FW-01：hij.hack 注入由内核命中注入执行者执行（EmgHitInject → EmgHackInject，FGR-EMG-163），不走根节点生效事件
                             {
                                 x.Flags |= EmgInstrFlags.RootKernel | (pc.Mag switch { 1 => EmgInstrFlags.MagA, 2 => EmgInstrFlags.MagB, 3 => EmgInstrFlags.MagC, _ => EmgInstrFlags.None });
                             }
@@ -1684,7 +1703,8 @@ namespace GameLogic.Campaign.Emergence
             r.Program = new EmgProgram
             {
                 Flags = (flight ? EmgProgramFlags.NeedsFlight : EmgProgramFlags.None) | (core ? EmgProgramFlags.HasCore : EmgProgramFlags.None)
-                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None) | (r.BaseGen > 0 ? EmgProgramFlags.IsCopy : EmgProgramFlags.None), // EMG4-HIJ-02：镜像复制品
+                        | (anchored ? EmgProgramFlags.HasAnchor : EmgProgramFlags.None) | (r.BaseGen > 0 ? EmgProgramFlags.IsCopy : EmgProgramFlags.None) // EMG4-HIJ-02：镜像复制品
+                        | (hijackFlash ? EmgProgramFlags.HijackFlash : EmgProgramFlags.None), // EMG4-FW-01：N40 劫持中继
                 ListenMask = listen, HeatPerShot = r.HeatTotal, ClueMask = ClueMaskOf(r.Steps, c),
             };
             r.Signature = r.ContentVersion + "-" + Fnv64(Combat.CombatSite.ProgramKey(r.Program, r.KernelNodes, r.KernelInstrs)).ToString("X16");
@@ -1875,6 +1895,29 @@ namespace GameLogic.Campaign.Emergence
                 PortIds[kv.Key] = kv.Value;
             }
         }
+
+        /// <summary>
+        /// EMG4-FW-01（FG19A N40 劫持中继）：写 grm.inherit、且同一条指令读 hij.hijacked condition——作用对象是被劫持的敌机（它改刷本程序，内核 EmgTryHijack），
+        /// 不扩大本机自己的编译期继承（目标没被劫持时不执行，FGR-EMG-033 的扩大继承只看无条件的 grm.inherit）。按端口判，不认内容 ID。
+        /// </summary>
+        private static bool IsHijackFlash(EmgCompiled c, EmgProgramStep s) => HasWrite(c, s, "grm.inherit") && HasCondRead(c, s, "hij.hijacked");
+
+        private static bool WidensInherit(EmgCompiled c, EmgProgramStep s) => HasWrite(c, s, "grm.inherit") && !HasCondRead(c, s, "hij.hijacked");
+
+        private static bool HasCondRead(EmgCompiled c, EmgProgramStep s, string port)
+        {
+            foreach (int di in s.Decls)
+            {
+                if (c.Decls[di].Dir == EmgDirs.Read && c.Decls[di].Role == EmgRole.Condition && PortIds.TryGetValue(c.Decls[di].Port, out string pid) && pid == port)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>程序（编译结果）带 N40 劫持中继：它劫持的敌机改刷本程序（预览 / 悬停 / 武器结算登记刷写变体用）。</summary>
+        public static bool HasHijackFlash(EmgProgramResult r) => r != null && (r.Program.Flags & EmgProgramFlags.HijackFlash) != 0;
 
         private static bool HasWrite(EmgCompiled c, EmgProgramStep s, string port)
         {

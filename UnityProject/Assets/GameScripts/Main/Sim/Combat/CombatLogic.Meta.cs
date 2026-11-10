@@ -196,6 +196,14 @@ namespace BinGames.Sim.Combat
             {
                 return hasSelf && (ChsMask(ref d, self) & chs) != 0;
             }
+            if (p == EmgConst.PortHijacked)
+            {
+                return hasWho && EmgHijackedNow(ref d, who); // EMG4-FW-01：目标（没有目标 = 自身）处于被劫持
+            }
+            if (p == EmgConst.PortSeized)
+            {
+                return hasSelf && EmgSeizedNow(ref d, self); // EMG4-FW-01：本机被夺控
+            }
             return false;
         }
 

@@ -80,7 +80,7 @@ namespace BinGames.Sim.Combat
                 StepPlayerUnit(ref d, ref grid, i, dt);
             }
 
-            StepHijacks(ref d); // EMG4-HIJ-01：期满 / 劫持者阵亡 → 自毁（空表一次比较）
+            StepHijacks(ref d, dt); // EMG4-HIJ-01：期满 / 劫持者阵亡 → 自毁（空表一次比较）
 
             // 3. 散热
             for (int i = 0; i < n; i++)

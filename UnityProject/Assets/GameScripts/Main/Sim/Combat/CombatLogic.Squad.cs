@@ -183,9 +183,12 @@ namespace BinGames.Sim.Combat
         /// 中继组（FGR-EMG-133 / 172）：有一台活着的同阵营中继机器，<paramref name="a"/> 与 <paramref name="b"/> 都在它的中继范围内（中继机器本身也算在自己的组里）。
         /// O(中继机器数)。
         /// </summary>
-        internal static bool EmgSameRelayGroup(ref CombatData d, int a, int b)
+        internal static bool EmgSameRelayGroup(ref CombatData d, int a, int b) => a >= 0 && a < d.Count && EmgSameRelayGroup(ref d, a, b, d.Faction[a]);
+
+        /// <summary>按阵营 <paramref name="fa"/> 判中继组（EMG4-FW-01：被夺控的机器此刻是敌对阵营，求援脉冲按它原来的阵营找组）。</summary>
+        private static bool EmgSameRelayGroup(ref CombatData d, int a, int b, byte fa)
         {
-            if (d.Relays.Length == 0 || a < 0 || b < 0 || a >= d.Count || b >= d.Count || d.Faction[a] != d.Faction[b])
+            if (d.Relays.Length == 0 || a < 0 || b < 0 || a >= d.Count || b >= d.Count || fa != d.Faction[b])
             {
                 return false;
             }
@@ -193,7 +196,7 @@ namespace BinGames.Sim.Combat
             for (int r = 0; r < d.Relays.Length; r++)
             {
                 int m = d.SlotOf(d.Relays[r].Unit);
-                if (m >= 0 && d.IsAlive(m) && d.Faction[m] == d.Faction[a] && math.distance(d.Pos[m], d.Pos[a]) <= range && math.distance(d.Pos[m], d.Pos[b]) <= range)
+                if (m >= 0 && d.IsAlive(m) && d.Faction[m] == fa && math.distance(d.Pos[m], d.Pos[a]) <= range && math.distance(d.Pos[m], d.Pos[b]) <= range)
                 {
                     return true;
                 }
@@ -215,6 +218,7 @@ namespace BinGames.Sim.Combat
             }
             // EMG3-FW-02（FG19A N30 / N32）：同一条指令的 ent.wreck condition = 事件处留下了残骸（没留不广播、不计广播）；prop.heat sense = 脉冲点取被标记敌人里积热最高的一个
             double2 at = e.Pos;
+            bool seizedCond = false;
             if (EmgNodeSpan(ref d, e.Prog, e.Node, out int first, out int end))
             {
                 for (int j = first; j < end; j++)
@@ -228,6 +232,18 @@ namespace BinGames.Sim.Combat
                     {
                         return;
                     }
+                    // EMG4-FW-01（FG19A N41 反夺控）：hij.seized condition = 本机被夺控，或本机正被接入、收到的是槽位封锁注入的 evt.seize（封锁状态在热更层信号核域，
+                    // 内核只在注入时知道；内核夺控本来就拒绝接入中的机器，所以接入中的机器收到 evt.seize 只可能是封锁）。不成立时不广播、不计广播
+                    if (r.Role == EmgConst.RoleCondition && r.Port == EmgConst.PortSeized
+                        && !(EmgSeizedNow(ref d, src) || (e.Kind == EmgEventKind.Seize && d.Has(src, CombatUnitFlags.Possessed) && EmgHijackIndexOf(ref d, d.Id[src]) < 0)))
+                    {
+                        return;
+                    }
+                    seizedCond |= r.Role == EmgConst.RoleCondition && r.Port == EmgConst.PortSeized;
+                    if (r.Role == EmgConst.RoleCondition && r.Port == EmgConst.PortHijacked && !EmgHijackedNow(ref d, src))
+                    {
+                        return;
+                    }
                     if (r.Role == EmgConst.RoleSense && r.Port == EmgConst.PortPropHeat)
                     {
                         at = EmgHottestMarked(ref d, src, e.Kind == EmgEventKind.Marked && e.OtherKind == EmgEntKind.Unit ? d.SlotOf(e.Other) : -1, e.Pos);
@@ -235,6 +251,9 @@ namespace BinGames.Sim.Combat
                 }
             }
             int channel = EmgSquadConst.ChannelOf(x.Amount);
+            int sh = seizedCond ? EmgHijackIndexOf(ref d, d.Id[src]) : -1;
+            // 只有带 hij.seized condition 的指令（N41 反夺控）按原阵营找中继组（向原来的同伴求援）；其他 ping 写者（N30 / N32）被夺控时按此刻阵营，不向玩家中继组报敌方战果
+            byte fa = sh >= 0 && d.Hijacks[sh].IsSeize ? d.Hijacks[sh].OrigFaction : d.Faction[src];
             EmgBusStats st = d.EmgStats[0];
             st.PingsSent++;
             d.EmgStats[0] = st;
@@ -250,7 +269,7 @@ namespace BinGames.Sim.Combat
                 }
                 int prog = EmgUnitProg(ref d, r);
                 ulong gate = EmgRootTrigGate(ref d, prog, EmgEventKind.Ping, channel);
-                if (gate == 0UL || !EmgSameRelayGroup(ref d, src, r))
+                if (gate == 0UL || !EmgSameRelayGroup(ref d, src, r, fa))
                 {
                     continue;
                 }

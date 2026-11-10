@@ -554,16 +554,18 @@ namespace BinGames.Sim.Combat
             dt > 0f && math.floor(now / EmgConst.FlashInterval) != math.floor((now - dt) / EmgConst.FlashInterval);
 
         /// <summary>距离衰减：离母机超过 emg.flash.range 后，每再远 emg.flash.step（不足一档按一档）暂停末尾 1 条，最多暂停到 0 条；回到范围内为 0。</summary>
-        internal static byte FlashPauseOf(ref CombatData d, in CombatDrone dr, int ownerSlot)
+        internal static byte FlashPauseOf(ref CombatData d, in CombatDrone dr, int ownerSlot) => FlashPauseAt(ref d, FlashHeld(ref d, dr), dr.Pos, d.Pos[ownerSlot]);
+
+        /// <summary>同上，按持有条数与两点位置（无人机与 EMG4-FW-01 改刷的被劫持敌机共用，FGR-EMG-036“适用”含 FGR-EMG-163）。</summary>
+        internal static byte FlashPauseAt(ref CombatData d, int held, double2 pos, double2 ownerPos)
         {
-            int held = FlashHeld(ref d, dr);
             if (held <= 0)
             {
                 return 0;
             }
             float range = d.Config.EmgFlashRange > 0f ? d.Config.EmgFlashRange : EmgConst.DefaultFlashRange;
             float step = d.Config.EmgFlashStep > 0f ? d.Config.EmgFlashStep : EmgConst.DefaultFlashStep;
-            double over = math.distance(dr.Pos, d.Pos[ownerSlot]) - range;
+            double over = math.distance(pos, ownerPos) - range;
             return over <= 0.0 ? (byte)0 : (byte)math.min(held, (int)math.ceil(over / step));
         }
 

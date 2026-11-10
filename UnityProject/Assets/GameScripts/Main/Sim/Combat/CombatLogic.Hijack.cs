@@ -37,6 +37,27 @@ namespace BinGames.Sim.Combat
             return -1;
         }
 
+        /// <summary>EMG4-FW-01（FG19A N40）：这把武器的程序带 <see cref="EmgProgramFlags.HijackFlash"/>（编译器按端口判：hij.hijacked condition + grm.inherit 写端，不认内容 ID）。</summary>
+        private static bool EmgHijackFlashOf(ref CombatData d, int w)
+        {
+            int p = w >= 0 && w < d.Weapons.Length ? d.Weapons[w].Program : -1;
+            return p >= 0 && p < d.EmgPrograms.Length && (d.EmgPrograms[p].Flags & EmgProgramFlags.HijackFlash) != 0;
+        }
+
+        /// <summary>EMG4-FW-01（hij.hijacked condition）：单位此刻处于被信号劫持（劫持方向的记录，夺控不算）。O(劫持数)。</summary>
+        internal static bool EmgHijackedNow(ref CombatData d, int i)
+        {
+            int h = i >= 0 && i < d.Count ? EmgHijackIndexOf(ref d, d.Id[i]) : -1;
+            return h >= 0 && !d.Hijacks[h].IsSeize;
+        }
+
+        /// <summary>EMG4-FW-01（hij.seized condition）：单位此刻被夺控（夺控方向的记录，含瘫痪）。O(劫持数)。</summary>
+        internal static bool EmgSeizedNow(ref CombatData d, int i)
+        {
+            int h = i >= 0 && i < d.Count ? EmgHijackIndexOf(ref d, d.Id[i]) : -1;
+            return h >= 0 && d.Hijacks[h].IsSeize;
+        }
+
         /// <summary>某名玩家（劫持者所在阵营只有己方一种，按全局计）此刻劫持着几台（只数信号劫持方向；夺控记录同表但不占劫持上限，EMG4-HIJ-02）。O(表长)。</summary>
         internal static int EmgHijackCount(ref CombatData d)
         {
@@ -101,10 +122,22 @@ namespace BinGames.Sim.Combat
             // 刷写带宽（FGR-EMG-036）：占用 = 原生程序条数；带宽不够时截到放得下（武器换成刷写变体表里“前 k 条”那一把，没有变体表 = 不占带宽）
             int w = d.Weapon[t];
             int4 head = FlashHeadOf(ref d, w);
-            int held = 0;
-            if (head.x >= 0)
+            int held = 0, hflags = 0;
+            int free = FlashBandwidthOf(ref d) - FlashUsedBy(ref d, killerId, -1);
+            int mw = d.Weapon[ks];
+            int4 mh = FlashHeadOf(ref d, mw);
+            if (mh.x >= 0 && mh.z > 0 && free > 0 && EmgHijackFlashOf(ref d, mw))
             {
-                held = math.clamp(FlashBandwidthOf(ref d) - FlashUsedBy(ref d, killerId, -1), 0, head.y);
+                // EMG4-FW-01（FG19A N40 劫持中继）：劫持者程序带“hij.hijacked 条件 + grm.inherit”→ 被劫持的敌机改刷劫持者程序（与无人机同一口径：执行母机武器的刷写变体），
+                // 用去核心列表（AI 不用核心固件，FGR-SIG-090），持有条数按劫持者剩余带宽截断；原生程序搁置，劫持结束（EmgHijackRelease）还原，阵亡效果按原生程序与原阵营。
+                // 离劫持者过远按 FGR-EMG-036 暂停末尾条数（StepHijacks 每 0.25 游戏秒重算）。带宽已满时照旧带原生程序（下面的分支）
+                held = math.min(free, mh.z);
+                d.Weapon[t] = d.FlashMap[mh.x + mh.y + 1 + held];
+                hflags = EmgHijackConst.FlagFlashed;
+            }
+            else if (head.x >= 0)
+            {
+                held = math.clamp(free, 0, head.y);
                 if (held < head.y && head.x + held < d.FlashMap.Length)
                 {
                     d.Weapon[t] = d.FlashMap[head.x + held];
@@ -114,7 +147,7 @@ namespace BinGames.Sim.Combat
             d.Hijacks.Add(new EmgHijack
             {
                 Unit = d.Id[t], Hijacker = killerId, Until = d.Scalars[0].Time + HijackSecondsOf(ref d), OrigFaction = d.Faction[t], OrigBehavior = d.Behavior[t],
-                SiegeRole = sg.Role, SiegeGroup = sg.Group, Held = held, OrigWeapon = w,
+                SiegeRole = sg.Role, SiegeGroup = sg.Group, Held = held, OrigWeapon = w, Flags = hflags, FlashWeapon = hflags != 0 ? mw : -1,
             });
             // 退出攻城 / 突袭队伍：认领键（队伍键）释放，剩余计数随内核点数减一（SiegeService.CheckGroups 按内核计数对账）
             sg.Role = 0;
@@ -150,6 +183,10 @@ namespace BinGames.Sim.Combat
             d.Hijacks.RemoveAt(h);
             d.Faction[t] = r.OrigFaction;
             d.Behavior[t] = r.OrigBehavior;
+            if ((r.Flags & EmgHijackConst.FlagFlashed) != 0 && r.OrigWeapon >= 0 && r.OrigWeapon < d.Weapons.Length)
+            {
+                d.Weapon[t] = r.OrigWeapon; // EMG4-FW-01：改刷体结束时还原原生武器——随后的 evt.death 按原生程序与原阵营结算，不以敌方阵营执行玩家的阵亡触发（例如自毁装药）
+            }
             CombatSiegeUnit sg = d.Siege[t];
             sg.Role = r.SiegeRole;
             sg.Group = r.SiegeGroup;
@@ -311,13 +348,14 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>每步（己方单位之后）：期满或劫持者已不在 → 自毁（走 Kill，击杀者 = 劫持者，留残骸）。O(劫持数)，空表直接返回。</summary>
-        internal static void StepHijacks(ref CombatData d)
+        internal static void StepHijacks(ref CombatData d, float dt)
         {
             if (d.Hijacks.Length == 0)
             {
                 return;
             }
             double now = d.Scalars[0].Time;
+            bool flashTick = d.FlashHead.Length > 0 && FlashTick(now, dt); // EMG4-FW-01：改刷体的距离衰减与无人机同一节拍
             for (int h = d.Hijacks.Length - 1; h >= 0; h--)
             {
                 EmgHijack r = d.Hijacks[h];
@@ -343,12 +381,36 @@ namespace BinGames.Sim.Combat
                 byte reason = hk < 0 || !d.IsAlive(hk) ? EmgHijackConst.EndHijackerLost : now >= r.Until ? EmgHijackConst.EndExpired : (byte)0;
                 if (reason == 0)
                 {
+                    if (flashTick && (r.Flags & EmgHijackConst.FlagFlashed) != 0)
+                    {
+                        EmgHijackFlashDecay(ref d, h, s, hk);
+                    }
                     continue;
                 }
                 r.EndReason = reason;
                 d.Hijacks[h] = r;
                 Kill(ref d, s, r.Hijacker);
             }
+        }
+
+        /// <summary>EMG4-FW-01（FGR-EMG-036 / 163）：改刷体离劫持者超过 emg.flash.range 后每再远 emg.flash.step 暂停末尾 1 条，执行武器换成去核心列表“前 (持有 − 暂停) 条”那一把。</summary>
+        private static void EmgHijackFlashDecay(ref CombatData d, int h, int s, int hk)
+        {
+            EmgHijack r = d.Hijacks[h];
+            int4 mh = FlashHeadOf(ref d, r.FlashWeapon);
+            if (mh.x < 0)
+            {
+                return; // 旧记录没有改刷来源：保持当前武器
+            }
+            int held = math.min(r.Held, mh.z);
+            byte pause = FlashPauseAt(ref d, held, d.Pos[s], d.Pos[hk]);
+            if (pause == r.Pause)
+            {
+                return;
+            }
+            r.Pause = pause;
+            d.Hijacks[h] = r;
+            d.Weapon[s] = d.FlashMap[mh.x + mh.y + 1 + held - pause];
         }
 
         /// <summary>

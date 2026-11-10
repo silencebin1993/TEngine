@@ -1941,6 +1941,8 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(x.Flags); // EMG4-HIJ-02：原预留位 = 方向与状态位（夺控 / 瘫痪；旧记录读成 0 = 信号劫持）
                 if (sw.F()) w.Write(x.ReleaseAt); // EMG4-HIJ-02：同版本 20 内追加（自描述段，读到短记录 = 0）
                 if (sw.F()) w.Write(x.Source);
+                if (sw.F()) w.Write(x.FlashWeapon); // EMG4-FW-01：同版本 20 内追加（自描述段，读到短记录 = −1 / 0）
+                if (sw.F()) w.Write(x.Pause);
                 sw.EndRecord();
             }
             sw.End();
@@ -1957,7 +1959,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < n; i++)
             {
                 sr.Record(i);
-                var x = new EmgHijack { OrigFaction = (byte)CombatFaction.Hostile, OrigWeapon = -1 };
+                var x = new EmgHijack { OrigFaction = (byte)CombatFaction.Hostile, OrigWeapon = -1, FlashWeapon = -1 };
                 if (sr.F()) x.Unit = r.ReadInt32();
                 if (sr.F()) x.Hijacker = r.ReadInt32();
                 if (sr.F()) x.Until = r.ReadDouble();
@@ -1971,10 +1973,13 @@ namespace BinGames.Sim.Combat
                 if (sr.F()) x.Flags = r.ReadInt32();
                 if (sr.F()) x.ReleaseAt = r.ReadDouble();
                 if (sr.F()) x.Source = r.ReadUInt16();
+                if (sr.F()) x.FlashWeapon = r.ReadInt32();
+                if (sr.F()) x.Pause = r.ReadByte();
                 if (!sr.RecordOk || x.Unit <= 0 || !seen.Add(x.Unit) || double.IsNaN(x.Until) || double.IsInfinity(x.Until) || x.OrigFaction > (byte)CombatFaction.Neutral
                     || x.OrigBehavior > (byte)CombatBehavior.Hijacked || x.Held < 0 || x.EndReason > EmgHijackConst.EndReleased
-                    || (x.Flags & ~(EmgHijackConst.FlagSeize | EmgHijackConst.FlagDowned)) != 0 || (x.IsDowned && !x.IsSeize)
-                    || double.IsNaN(x.ReleaseAt) || double.IsInfinity(x.ReleaseAt) || x.ReleaseAt < 0.0)
+                    || (x.Flags & ~(EmgHijackConst.FlagSeize | EmgHijackConst.FlagDowned | EmgHijackConst.FlagFlashed)) != 0 || (x.IsDowned && !x.IsSeize)
+                    || ((x.Flags & EmgHijackConst.FlagFlashed) != 0 && x.IsSeize) // EMG4-FW-01：劫持中继只对信号劫持方向
+                    || double.IsNaN(x.ReleaseAt) || double.IsInfinity(x.ReleaseAt) || x.ReleaseAt < 0.0 || x.FlashWeapon < -1 || x.Pause > x.Held)
                 {
                     return CombatLoadResult.InvalidValue;
                 }
@@ -2049,6 +2054,20 @@ namespace BinGames.Sim.Combat
             remaining = h >= 0 ? (float)System.Math.Max(0.0, _d.Hijacks[h].Until - _d.Scalars[0].Time) : 0f;
             held = h >= 0 ? _d.Hijacks[h].Held : 0;
             return h >= 0;
+        }
+
+        /// <summary>EMG4-FW-01（FG19A N40 劫持中继）：这台被劫持的敌机接受了劫持者程序刷写（武器 = 劫持者武器的去核心刷写变体）。不是被劫持单位返回 false。</summary>
+        public bool HijackFlashed(int unitId)
+        {
+            int h = CombatLogic.EmgHijackIndexOf(ref _d, unitId);
+            return h >= 0 && !_d.Hijacks[h].IsSeize && (_d.Hijacks[h].Flags & EmgHijackConst.FlagFlashed) != 0;
+        }
+
+        /// <summary>EMG4-FW-01（FGR-EMG-036）：改刷体离劫持者过远、此刻暂停的末尾条数（悬停“离母机过远，暂停 N 条”）。不是改刷体返回 0。</summary>
+        public int HijackFlashPause(int unitId)
+        {
+            int h = CombatLogic.EmgHijackIndexOf(ref _d, unitId);
+            return h >= 0 && !_d.Hijacks[h].IsSeize && (_d.Hijacks[h].Flags & EmgHijackConst.FlagFlashed) != 0 ? _d.Hijacks[h].Pause : 0;
         }
 
         // ── EMG4-HIJ-02 夺控（敌方 → 己方机器）：热更层在两步之间调用（O(表长)），与信号劫持同一张表、同一快照段 ──
