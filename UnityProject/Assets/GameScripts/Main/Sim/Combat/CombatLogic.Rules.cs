@@ -472,6 +472,10 @@ namespace BinGames.Sim.Combat
         private static void EmgConvertInPlace(ref CombatData d, int i, in EmgRule r, float amount, double now)
         {
             CombatZone z = d.Patches[i];
+            if (z.Matter != r.Product)
+            {
+                EmgPitFeed(ref d, z, EmgRuleConst.CondPitMolten); // EMG4-TER-01（V06，evt.phase）：转化前的样子（物质 / 位置 / 份量）在可熔地面累计
+            }
             EmgMatter m = MatterOf(ref d, r.Product);
             if (!m.Valid || amount <= 0.01f)
             {
@@ -756,6 +760,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgPitFeed(ref d, z, EmgRuleConst.CondPitAcid); // EMG4-TER-01（V07，evt.expire）：到期时的份量在可熔地面累计
             int2 ix = d.EmgRuleIdx[EmgMatterConst.Count + 1 + z.Matter];
             for (int k = ix.x; k < ix.x + ix.y; k++)
             {

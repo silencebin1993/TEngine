@@ -118,6 +118,10 @@ namespace BinGames.Sim.Combat
         public const int SegClue = 26;
         /// <summary>EMG4-HIJ-01（快照格式 20，ADR ⑩ ⑰）：段 27 信号劫持（<see cref="EmgHijack"/>，按劫持先后）。读 ≤ 19 版：段不存在 = 没有劫持。</summary>
         public const int SegHijack = 27;
+        /// <summary>EMG4-TER-01（格式 20 内追加，自描述段；DEBT-EMG4HIJ01-03）：段 28 熔坑、段 29 熔坑累计点、段 30 熔坑计数。只在有熔坑状态时写（没有时快照与哈希逐字不变）；读不含这些段的 20 版快照 = 没有熔坑。</summary>
+        public const int SegPit = 28;
+        public const int SegPitAcc = 29;
+        public const int SegPitStats = 30;
         /// <summary>EMG3-FUSE-01：熔合线索配方位数与每条配方记住的最近计过的链数（CombatData.EmgClue：[0, 32) 待取走次数、[32, 64) 环头、其后 32 × 8 链号环、规则路径上一次计数的链号与步号低 32 位）。</summary>
         public const int ClueSlots = 32, ClueRing = 8, ClueRuleChain = ClueSlots * 2 + ClueSlots * ClueRing, ClueRuleStep = ClueRuleChain + ClueSlots, ClueLen = ClueRuleStep + ClueSlots;
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
@@ -1162,6 +1166,39 @@ namespace BinGames.Sim.Combat
         Uplinked,
         /// <summary>已经被夺控 / 是被劫持体（三类状态互不覆盖）。</summary>
         Controlled,
+    }
+
+    /// <summary>
+    /// EMG4-TER-01（FG19 FGR-EMG-152，FG19B V06 / V07，ADR ⑯）：熔坑——可熔地面被熔融金属 / 酸烧穿的小圆坑。地面单位不可进入（离地不受影响），
+    /// 家园上不能建造、可被清除工作单填平；家园寻路镜像随它增量更新（与阻路斑块同一条通道）。快照段 28。
+    /// </summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgPit
+    {
+        public double2 Pos;
+        public double Born;
+        public float Radius;
+        /// <summary>稳定 ID（每地点单调，<see cref="EmgPitConst.StatNextId"/>）。</summary>
+        public int Id;
+        /// <summary>来源（<see cref="EmgPitConst.SourceMolten"/> / <see cref="EmgPitConst.SourceAcid"/>）。</summary>
+        public byte Source;
+        public int Chain;
+    }
+
+    /// <summary>EMG4-TER-01：熔坑常量（初值；运行时取 CombatConfig 里热更层按 emg.terrain.* 写的值）。</summary>
+    public static class EmgPitConst
+    {
+        public const int DefaultMax = 8;
+        public const float DefaultRadius = 1.5f, DefaultGather = 3f;
+        /// <summary>“同一位置”累计点上限（满了替换累计最少的那个；不是玩法数值，只防无界增长）。</summary>
+        public const int AccCapacity = 32;
+        public const byte SourceMolten = 1, SourceAcid = 2;
+        /// <summary>MeltGround 逐格覆盖项的 z（x、y = 格坐标）：这格现在不是 / 是可熔地面（家园地形被玩家改过的格）。</summary>
+        public const float CellNotMeltable = -1f, CellMeltable = -2f;
+        /// <summary>CombatData.PitStats 下标：下一个 ID、形成、上限满未生效、填平、可熔地面以外的累计（不计入）。</summary>
+        public const int StatNextId = 0, StatBorn = 1, StatCapped = 2, StatFilled = 3, StatOffGround = 4, StatLen = 5;
+        public const int PitFields = 7, AccFields = 4;
     }
 
     /// <summary>EMG4-HIJ-01：一台被劫持的敌机（快照段 27）。按稳定单位 ID 记，压实挪槽位不影响。</summary>

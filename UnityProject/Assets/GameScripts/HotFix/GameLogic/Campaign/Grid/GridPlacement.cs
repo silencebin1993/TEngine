@@ -85,6 +85,9 @@ namespace GameLogic.Campaign.Grid
         // ── FG8-EXP-04（只追加）──
         /// <summary>FG-GAP-127：没回收的遗迹点（或留着人类遗产的地方）周围不能建造——免得自己的建筑把回收入口堵死、机器走不到。</summary>
         RelicSite,
+        // ── EMG4-TER-01（只追加）──
+        /// <summary>FGR-EMG-152：熔坑上的空格不能建造（先用“清除场地物”填平；已有建筑不受影响）。</summary>
+        MeltPit,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -158,6 +161,7 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.EntranceProtect: return new GridReason(code, "grid.reason.entrance_protect_plain");
                 // FG8-EXP-04（FG-GAP-127）：带参数（遗迹点坐标）的由 HomeGridService.ValidatePlacement 构造，这里给无参数时的稳定文本。
                 case GridBlockReason.RelicSite: return new GridReason(code, "grid.reason.relic_site_plain");
+                case GridBlockReason.MeltPit: return new GridReason(code, "grid.reason.melt_pit");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }

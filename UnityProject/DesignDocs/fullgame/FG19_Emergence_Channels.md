@@ -950,11 +950,13 @@
 **FGR-EMG-151 阶段 4：冻结桥**
 - 冰斑块覆盖在“水面”（`ter.water`）上时，地面单位可以通行；内核寻路镜像把冰覆盖区标为可通行，融化后恢复。同时最多 `emg.terrain.bridge_max`（8）座。
 - 冰融化时桥上的单位：被推到最近的陆地，不阵亡（防软锁，B11）；飞行与悬浮不受影响。
+- 2026-11-10 EMG4-TER-01 开工核对：水面地形仍未落地（战斗内核没有水面，`chs.water` 只由自检测试水域置位），冻结桥不开工，V08 保持 deferred。
 - 依赖水面地形（FG18 海与空、DEBT-FG10BOSS01-02 湖面地形）；水面未落地前本条不开工，**随水面 Story（FG18-SEA-01）交付**：EMG4-TER-01 届时只交付熔坑，冻结桥登记 DEBT-EMG4TER01-01（条件性）承接到 FG18-SEA-01，FGJ-EMG-4 的冻结桥一步同时移出。
 
 **FGR-EMG-152 阶段 4：熔坑**
 - 熔融金属或酸液在“可熔地面”（生成规则标记的工业铁板、混凝土楼板，`ter.ground`）上累积到阈值 → 熔坑：一块不可通行的小区域，寻路镜像更新，家园上不能建造。每地点 ≤ `emg.terrain.pit_max`（8）个。
 - 熔坑可以被工作单填平（耗材料，B03 可取消）。
+- **EMG4-TER-01 已落地（2026-11-10）**：“可熔地面”= `fg.TbGridTerrain` 新列 `meltable` = 1 的地形（目前只有废墟 `ruin`：坍塌的工业铁板 / 混凝土楼板），生成规则按种子铺出、任意种子成立；家园内核按寻路镜像里的世界生成参数逐格取生成地形码（与区块生成同一个纯函数），玩家改过地形的格（拆完的废墟变空地等）由热更层按当前地形写逐格覆盖、优先于生成采样（修复轮 1），远征 / 室内地点由热更层把生成内容里的可熔格写成圆（派生量，不进快照）。V06（熔融金属凝固 / 淬火 = 原地相变）与 V07（酸到期）op = `meltpit`，转化前 / 到期时的份量记进合并半径 `emg.terrain.pit_gather` 内的累计点（熔融金属与酸分开记），某种份量到规则阈值（30 / 40）在加权位置形成半径 `emg.terrain.pit_radius` 的熔坑；已有熔坑附近不再累计；满 `emg.terrain.pit_max` 不生效、计数并发信息级通知 `pit_capped`。熔坑：地面单位不可进入（生成时推出、之后与阻路斑块同一套绕行），离地不受影响；家园寻路镜像随阻路集合签名增量更新（与 EMG2-PERSIST-01 同一条转发通道，差异同 FGR-EMG-154 那条）；家园建造校验 `GridBlockReason.MeltPit`（新放置、搬迁、挪规划、旋转新占的格与传送带 / 管线件逐格都拦；这座建筑现在就占着的格放行，已有建筑不受影响）；“清除场地物”工作单填平（`SitePersistService` 目标种类 `k:`，预留 `emg.persist.clear_scrap`、取消全额返还（点一格命中的全都已有单子 = 整组取消，熔坑与盖在上面的冷渣一起退）、堵路警告同口径）。全部事件驱动，没有每步遍历。快照 20 内追加段 28～30（只在有熔坑状态时写，FormatVersion 不升）。自检 `FgEmgTerrainSelfCheck`。
 
 **FGR-EMG-153 阶段 4：战痕写入家园格网**
 - 家园与前哨（`HomeGridMap` 覆盖的表面）上，长时间燃烧、玻化、冻结、熔坑等结果按格写入地面材质（焦土 / 玻化地面 / 冻土 / 熔坑），走现有差异存档；下一场战斗载入该地点时，这些地面材质转为长期斑块或寻路标记。
@@ -1480,6 +1482,7 @@
 | `emg.era.blocks` | 12（爆炸反应装甲每台总块数，左右侧裙各 6；2～16 的偶数，FGR-EMG-233，2026-10-26 用户批准） | `emg.era.refill_seconds` | 3 秒（每补回 1 块的间隔，FGR-EMG-233） |
 | `emg.persist.clear_seconds` | 6 秒（清除工作单到现场后的工时，EMG2-PERSIST-01） | `emg.persist.clear_scrap` | 2（开单预留废料，完工才消耗） |
 | `emg.trait.legged.splash` | 0.15（震地从脚下液体斑块溅出的份量比例，EMG3-CHS-02） | `emg.trait.legged.dust` | 0.5（震地不在液体里时扬起的粉尘份量，EMG3-CHS-02） |
+| `emg.terrain.pit_radius` | 1.5 米（熔坑半径，EMG4-TER-01 新增，待 FG15-BAL-01） | `emg.terrain.pit_gather` | 3 米（熔融金属 / 酸“同一位置”累计的合并半径；已有熔坑这么近不再累计，EMG4-TER-01 新增） |
 
 - 上面两个世界级键由 ADR-EMG-001 ⑬ 提出、在本节正式登记（ADR 第 0 节“只新增 `emg.stage`”一句随之修正）；地形上限一律用本表的 `emg.terrain.pit_max` / `emg.terrain.bridge_max`，不另起 `emg.ter.*` 键名。FG19B 第 10 节另有本附录专属调参键（`emg.patch.per_step`、`emg.patch.reserve_world`、`emg.conduct.max_visits` 等），不与本表重复。
 - `emg.era.*` 两个键（2026-10-26 用户批准第 3 层后新增）用调参键、不在 `fg.TbCombatComponent` 加列：只有一个组件用，加列要给全部组件行填值并改 `check_luban`；内核按“带反伤读法”生效，与组件 ID 无关（FGR-EMG-013）。破片片数在声明 `amount`，每片参数按 FG19B 第 10 节的做法（破片与系数不另设调参键）放 `fg.TbEntityProfile`（FG19B 第 2.9 节），不另设键。

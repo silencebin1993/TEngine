@@ -3106,6 +3106,10 @@ namespace BinGames.Sim.Combat
                 staging.SlagZones.Add(_d.SlagZones[i]);
             }
             staging.SlagMult = _d.SlagMult;
+            for (int i = 0; i < _d.MeltGround.Length; i++)
+            {
+                staging.MeltGround.Add(_d.MeltGround[i]); // EMG4-TER-01：可熔地面圆是派生量（热更层按生成规则写），读档沿用当前的
+            }
             staging.MineCap = _d.MineCap;
             // FG10-FAC-01：酸沼、标签状态位、投放目标是派生量（热更层写），读档沿用当前的。
             for (int i = 0; i < _d.AcidShapes.Length; i++)
@@ -4751,6 +4755,17 @@ namespace BinGames.Sim.Combat
                         B = new float4(0.18f, wleft, 0x7FD4FF, CombatConst.EffectKindZone + (float)CombatZoneLook.Residue),
                     });
                 }
+            }
+            // EMG4-TER-01（FGR-EMG-152）：熔坑——近黑网格圆片（占位外观，美术阶段替换；与区域同一次绘制调用），外圈满 = 长期存在。
+            for (int p = 0; p < D.Pits.Length; p++)
+            {
+                EmgPit pit = D.Pits[p];
+                double2 pp = pit.Pos - Origin;
+                Effects.Add(new CombatInstance
+                {
+                    A = new float4((float)pp.x, (float)pp.y, (float)pp.x, (float)pp.y),
+                    B = new float4(pit.Radius, 1f, CombatConst.EffectPitColor, CombatConst.EffectKindZone + (float)CombatZoneLook.Web),
+                });
             }
             // EMG2-FLD-01（FGR-EMG-112）：活跃场——“冲击环”外观（外扩环 = 场在起作用），颜色按场端口区分（形状同为环、颜色为辅；推斥环随时间扩到全半径），外圈 = 剩余存续。占位外观，美术阶段替换。
             for (int f = 0; f < D.Fields.Length; f++)

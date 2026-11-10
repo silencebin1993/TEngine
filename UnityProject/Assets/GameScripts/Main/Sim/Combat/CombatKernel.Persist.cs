@@ -6,7 +6,8 @@ namespace BinGames.Sim.Combat
     /// <summary>EMG2-PERSIST-01：一件长期留存物（残骸或固态斑块）的只读摘要。</summary>
     public struct EmgPersistItem
     {
-        public const byte KindWreck = 1, KindPatch = 2;
+        /// <summary>EMG4-TER-01：熔坑同走“清除场地物”工作单（填平），Id = 熔坑稳定 ID。</summary>
+        public const byte KindWreck = 1, KindPatch = 2, KindPit = 3;
         public byte Kind;
         public int Id;
         public double2 Pos;
@@ -27,7 +28,7 @@ namespace BinGames.Sim.Combat
         public bool PersistSite => _d.Config.EmgPersist != 0;
 
         /// <summary>活着的阻路斑块集合的签名（没有 = 0）；每步算准，变了才把覆盖格推进寻路镜像。</summary>
-        public uint BlockSig => _d.EmgS[0].BlockSig;
+        public uint BlockSig => _d.EmgS[0].BlockSig ^ CombatLogic.EmgPitSig(ref _d); // EMG4-TER-01：熔坑与阻路斑块同一条镜像更新通道
 
         /// <summary>长期留存崩解 / 工作单清除 / 固态挡弹的可靠计数（进快照）。</summary>
         public (int Capped, int Cleared, int Absorbs) PersistCounts
@@ -80,12 +81,30 @@ namespace BinGames.Sim.Combat
                     });
                 }
             }
+            for (int i = 0; i < _d.Pits.Length; i++)
+            {
+                EmgPit p = _d.Pits[i];
+                into.Add(new EmgPersistItem { Kind = EmgPersistItem.KindPit, Id = p.Id, Pos = p.Pos, Radius = p.Radius, Blocks = true, Born = p.Born });
+            }
         }
 
         /// <summary>按稳定 Id 取一件长期留存物（工作单走到目标、核对目标还在）。</summary>
         public bool TryGetPersist(byte kind, int id, out EmgPersistItem item)
         {
             item = default;
+            if (kind == EmgPersistItem.KindPit)
+            {
+                for (int i = 0; i < _d.Pits.Length; i++)
+                {
+                    EmgPit pit = _d.Pits[i];
+                    if (pit.Id == id)
+                    {
+                        item = new EmgPersistItem { Kind = kind, Id = id, Pos = pit.Pos, Radius = pit.Radius, Blocks = true, Born = pit.Born };
+                        return true;
+                    }
+                }
+                return false;
+            }
             if (kind == EmgPersistItem.KindWreck)
             {
                 for (int i = 0; i < _d.Wrecks.Length; i++)
@@ -120,7 +139,14 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            CombatLogic.EmgPersistClear(ref _d, kind, id);
+            if (kind == EmgPersistItem.KindPit)
+            {
+                CombatLogic.EmgPitFill(ref _d, id); // EMG4-TER-01：填平（计 PitStats 填平数，不计 PersistCleared）
+            }
+            else
+            {
+                CombatLogic.EmgPersistClear(ref _d, kind, id);
+            }
             Touch();
             return true;
         }
@@ -143,7 +169,7 @@ namespace BinGames.Sim.Combat
                     h = (h ^ (uint)z.EmgId ^ 0x5bd1e995u) * 16777619u + 1u;
                 }
             }
-            return h;
+            return h ^ CombatLogic.EmgPitSig(ref _d);
         }
 
         /// <summary>阻路斑块的圆（x, y, 半径）：推进寻路镜像用，只在 <see cref="BlockSig"/> 变化时调用。</summary>
@@ -158,6 +184,52 @@ namespace BinGames.Sim.Combat
                     into.Add(new float3((float)z.Pos.x, (float)z.Pos.y, z.Radius));
                 }
             }
+            for (int i = 0; i < _d.Pits.Length; i++)
+            {
+                into.Add(new float3((float)_d.Pits[i].Pos.x, (float)_d.Pits[i].Pos.y, _d.Pits[i].Radius)); // EMG4-TER-01：熔坑覆盖格同样写进寻路镜像
+            }
         }
+
+        // ── EMG4-TER-01 熔坑（FGR-EMG-152）：热更层读点（全部 O(熔坑数 ≤ 8) 或 O(1)）──
+
+        public int PitCount => _d.Pits.Length;
+
+        public EmgPit PitAt(int i) => i >= 0 && i < _d.Pits.Length ? _d.Pits[i] : default;
+
+        /// <summary>熔坑可靠计数：形成 / 上限满未生效 / 填平 / 落在可熔地面以外没计入（进快照）。</summary>
+        public (int Born, int Capped, int Filled, int OffGround) PitCounts =>
+            (_d.PitStats[EmgPitConst.StatBorn], _d.PitStats[EmgPitConst.StatCapped], _d.PitStats[EmgPitConst.StatFilled], _d.PitStats[EmgPitConst.StatOffGround]);
+
+        /// <summary>“同一位置”累计点数（自检读点）。</summary>
+        public int PitAccCount => _d.PitAcc.Length;
+
+        /// <summary>某格中心（x, y）是否落在熔坑里（家园建造校验：空格不能建造）。</summary>
+        public bool PitCovers(double x, double y)
+        {
+            for (int i = 0; i < _d.Pits.Length; i++)
+            {
+                if (math.distance(new double2(x, y), _d.Pits[i].Pos) < _d.Pits[i].Radius)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>写本地点的可熔地面圆（远征地点按生成内容；家园只写玩家改过地形的逐格覆盖（z &lt; 0，见 <see cref="EmgPitConst.CellNotMeltable"/>），其余按生成规则逐格判断）。派生量，不进快照。</summary>
+        public void SetMeltGround(IReadOnlyList<float3> circles)
+        {
+            _d.MeltGround.Clear();
+            if (circles != null)
+            {
+                for (int i = 0; i < circles.Count; i++)
+                {
+                    _d.MeltGround.Add(circles[i]);
+                }
+            }
+        }
+
+        /// <summary>这一点是不是可熔地面（悬停 / 自检；与内核结算同一个判断）。</summary>
+        public bool MeltableAt(double2 p) => CombatLogic.EmgMeltableAt(ref _d, p);
     }
 }

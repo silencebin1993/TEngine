@@ -122,9 +122,9 @@ namespace GameLogic.Campaign.Emergence
         private static readonly string[] Pairs = { "", "matter_matter", "matter_energy", "event_matter", "coat_matter", "phase_energy", "prop_field", "matter_entity" };
         private static readonly string[] Conds = { "", "overlap", "overlap_dry", "temp_ge", "temp_lt", "temp_ge_conc_lt", "temp_ge_conc_ge", "temp_le_for", "temp_gt_for", "charge_ge",
             "charge_ge_conc_ge", "kinetic_ge", "expire", "expire_temp_lt", "overheat_in",
-            "inject_ge", "coats", "same_hit" }; // EMG2-REACT-01：单位层沾染行与 P03（与内核 EmgRuleConst.Cond* 同序，只追加）
+            "inject_ge", "coats", "same_hit", "pit_molten", "pit_acid" }; // EMG4-TER-01：V06 / V07 熔坑 // EMG2-REACT-01：单位层沾染行与 P03（与内核 EmgRuleConst.Cond* 同序，只追加）
         private static readonly string[] Ops = { "deferred", "convert", "moveover", "dilute", "douse", "erode", "split", "spawn", "burst", "arc", "fragment", "vent",
-            "coatspawn", "coatarc", "stick", "coatflash", "coattrail", "coatslow" }; // EMG2-REACT-01 / 02：单位层沾染行（与内核 EmgRuleConst.Op* 同序，只追加）
+            "coatspawn", "coatarc", "stick", "coatflash", "coattrail", "coatslow", "meltpit" }; // EMG4-TER-01：熔坑（T 类 ter.mark，内核按端口码结算） // EMG2-REACT-01 / 02：单位层沾染行（与内核 EmgRuleConst.Op* 同序，只追加）
 
         /// <summary>
         /// 编译。<paramref name="capacity"/> = emg.rule.capacity（夹到 ≤ 256）；行数超过它整表拒绝（卡片负向“规则超 256 行被表校验拒绝”）。
@@ -179,7 +179,7 @@ namespace GameLogic.Campaign.Emergence
                 }
                 byte product = ProductMatter(r.Product);
                 byte by = r.ByProduct == "none" ? (byte)0 : EmgMatterConst.MatterOfPort(PortCode(ports, r.ByProduct));
-                if (op != EmgRuleConst.OpDeferred && (main == EmgRuleConst.MainS || main == EmgRuleConst.MainT) && product == 0)
+                if (op != EmgRuleConst.OpDeferred && op != EmgRuleConst.OpMeltPit && (main == EmgRuleConst.MainS || main == EmgRuleConst.MainT) && product == 0)
                 {
                     c.Problems.Add($"{r.Id}：S / T 类结算方式 {r.Op} 的产物 {r.Product} 不是物质");
                     continue;

@@ -410,6 +410,11 @@ namespace GameLogic.Campaign.Combat
             c.EmgWreckFlammableMin = Mathf.Clamp(Tuning("emg.wreck.flammable_min", EmgConst.DefaultWreckFlammableMin), 0.01f, 1f);
             c.EmgWreckBurnRate = Mathf.Max(0.001f, Tuning("emg.wreck.burn_rate", EmgConst.DefaultWreckBurnRate));
             c.EmgPersistPatchMax = Mathf.Max(1, (int)Math.Round(Tuning("emg.persist.patch_max", 128f))); // EMG2-PERSIST-01（EmgPersist 由 CombatSites.Open 按地点写）
+            // EMG4-TER-01（FGR-EMG-152）：熔坑上限 / 半径 / 同一位置合并半径；可熔地面 = fg.TbGridTerrain meltable = 1 的地形码（生成规则标记，任意种子成立）
+            c.EmgPitMax = Mathf.Max(1, (int)Math.Round(Tuning("emg.terrain.pit_max", EmgPitConst.DefaultMax)));
+            c.EmgPitRadius = Mathf.Max(0.3f, Tuning("emg.terrain.pit_radius", EmgPitConst.DefaultRadius));
+            c.EmgPitGather = Mathf.Max(0.5f, Tuning("emg.terrain.pit_gather", EmgPitConst.DefaultGather));
+            c.EmgMeltCodes = MeltCodes();
             c.EmgReclaimMaxRatio = Mathf.Clamp(Tuning("emg.reclaim.max_ratio", EmgReclaimConst.DefaultMaxRatio), 0f, 1f); // EMG2-RECL-01（FGR-EMG-115）
             c.EmgReclaimHpPerMass = Mathf.Max(0f, Tuning("emg.reclaim.hp_per_mass", EmgReclaimConst.DefaultHpPerMass));
             c.EmgReclaimInterval = Mathf.Max(0.1f, Tuning("emg.reclaim.interval", EmgReclaimConst.DefaultInterval));
@@ -698,6 +703,35 @@ namespace GameLogic.Campaign.Combat
                 Log.Info(EmgFieldDebugLine());
             }
             _fieldCappedSeen = capped;
+        }
+
+        /// <summary>EMG4-TER-01：可熔地面的地形码位（fg.TbGridTerrain meltable = 1；码 ≥ 64 的地形不参与）。</summary>
+        public static ulong MeltCodes()
+        {
+            ulong codes = 0ul;
+            IReadOnlyList<GameConfig.fg.GridTerrain> rows = GridContent.Terrains;
+            for (int i = 0; rows != null && i < rows.Count; i++)
+            {
+                if (rows[i] != null && rows[i].Meltable == 1 && rows[i].Code >= 0 && rows[i].Code < 64)
+                {
+                    codes |= 1ul << rows[i].Code;
+                }
+            }
+            return codes;
+        }
+
+        private int _pitCappedSeen = -1;
+
+        /// <summary>EMG4-TER-01（卡片负向“熔坑上限满：不生效并提示”）：上限满未生效的计数涨了就发一条信息级通知（带位置 = 最近的熔坑；O(1) / 步）。</summary>
+        private void WatchPits()
+        {
+            int capped = Kernel.PitCounts.Capped;
+            if (_pitCappedSeen >= 0 && capped > _pitCappedSeen && Kernel.PitCount > 0)
+            {
+                EmgPit last = Kernel.PitAt(Kernel.PitCount - 1);
+                Notifications.NotificationCenter.Post("pit_capped", GameText.Format("emg.pit.capped", Kernel.PitCount), new Vector3((float)last.Pos.x, 0f, (float)last.Pos.y));
+            }
+            _pitCappedSeen = capped;
         }
 
         /// <summary>崩解第一次出现、以及满容量崩解每次增加时记一行（调试层；O(1) / 步）。</summary>
@@ -2025,6 +2059,41 @@ namespace GameLogic.Campaign.Combat
             Nav.NavService.SyncDynamicBlocks(_navBlockCircles);
         }
 
+        private Grid.HomeGridMap _meltMap;
+        private int _meltEdit = -1;
+        private readonly System.Collections.Generic.List<Unity.Mathematics.int4> _meltEdits = new System.Collections.Generic.List<Unity.Mathematics.int4>(16);
+        private readonly System.Collections.Generic.List<Unity.Mathematics.float3> _meltCells = new System.Collections.Generic.List<Unity.Mathematics.float3>(16);
+
+        /// <summary>
+        /// EMG4-TER-01 修复轮 1（FGR-EMG-152 / B25）：家园的可熔判断跟当前地形走——玩家改过地形的格（拆完的废墟变空地等）作为逐格覆盖写进内核，
+        /// 内核先查覆盖再回退生成采样。每步一次 O(1) 版本号比较；地形真的改了才 O(已修改区块格数) 重收集（与底图重画同一个入口）。
+        /// </summary>
+        private void SyncMeltOverrides()
+        {
+            if (!Kernel.PersistSite || Kernel.Config.EmgMeltCodes == 0ul)
+            {
+                return;
+            }
+            Grid.HomeGridMap map = Grid.HomeGridService.BoundMap(Nav.NavService.BoundState);
+            if (map == null || (ReferenceEquals(map, _meltMap) && map.TerrainEditRevision == _meltEdit))
+            {
+                return;
+            }
+            _meltMap = map;
+            _meltEdit = map.TerrainEditRevision;
+            map.CollectCellOverrides(_meltEdits);
+            _meltCells.Clear();
+            ulong codes = Kernel.Config.EmgMeltCodes;
+            foreach (Unity.Mathematics.int4 e in _meltEdits)
+            {
+                if (e.z >= 0 && e.z < 64) // 255 = 只改了污染，地形沿用生成采样
+                {
+                    _meltCells.Add(new Unity.Mathematics.float3(e.x, e.y, (codes & (1ul << e.z)) != 0ul ? EmgPitConst.CellMeltable : EmgPitConst.CellNotMeltable));
+                }
+            }
+            Kernel.SetMeltGround(_meltCells);
+        }
+
         public void UnbindNav()
         {
             if (!IsDisposed)
@@ -2079,6 +2148,10 @@ namespace GameLogic.Campaign.Combat
             {
                 ConfigureReactions();
             }
+            if (_emgEntity)
+            {
+                SyncMeltOverrides(); // EMG4-TER-01 修复轮 1：本步结算前同步家园改过的地形
+            }
             Kernel.Step(dt, time);
             WatchEmgBus();
             if (_emgEntity)
@@ -2086,6 +2159,7 @@ namespace GameLogic.Campaign.Combat
                 WatchWrecks(); // EMG1-ENT-01
                 WatchPatches(); // EMG2-MAT-01
                 SyncNavBlocks(); // EMG2-PERSIST-01
+                WatchPits(); // EMG4-TER-01
             }
             WatchFields(); // EMG2-FLD-01
             ProcessEvents();
@@ -3104,6 +3178,15 @@ namespace GameLogic.Campaign.Combat
         {
             foundry = default;
             return !IsDisposed && Kernel.TryGetFoundry(unitId, out foundry);
+        }
+
+        /// <summary>EMG4-TER-01：远征地点的可熔地面圆（按生成内容里的可熔格写；家园由 <see cref="SyncMeltOverrides"/> 写改过地形的逐格覆盖，其余按寻路镜像的生成规则逐格判断）。</summary>
+        public void SetMeltGround(IReadOnlyList<float3> circles)
+        {
+            if (!IsDisposed)
+            {
+                Kernel.SetMeltGround(circles);
+            }
         }
 
         /// <summary>熔渣热区（派生量；家园 / 星球内核按规划层的危害区写入）。</summary>

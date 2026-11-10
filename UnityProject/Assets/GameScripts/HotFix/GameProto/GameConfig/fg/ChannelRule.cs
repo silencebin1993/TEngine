@@ -97,7 +97,7 @@ public sealed partial class ChannelRule : Luban.BeanBase
     /// </summary>
     public readonly string Product;
     /// <summary>
-    /// 内核结算方式(convert/moveover/dilute/douse/erode/split/spawn/burst/arc/fragment/vent/deferred)
+    /// 内核结算方式(convert/moveover/dilute/douse/erode/split/spawn/burst/arc/fragment/vent/meltpit/deferred)
     /// </summary>
     public readonly string Op;
     /// <summary>

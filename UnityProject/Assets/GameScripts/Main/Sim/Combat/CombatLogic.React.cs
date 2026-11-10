@@ -793,6 +793,12 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgPushOutCircle(ref d, z.Pos, z.Radius);
+        }
+
+        /// <summary>圈内可推动的地面单位按 Id 升序推到圆外（阻路斑块、EMG4-TER-01 熔坑共用）。O(单位数)，只在生成那一刻。</summary>
+        internal static void EmgPushOutCircle(ref CombatData d, double2 center, float radius)
+        {
             var inside = new NativeList<int2>(8, Allocator.Temp); // (Id, 槽位)
             for (int v = 0; v < d.Count; v++)
             {
@@ -800,7 +806,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                if (math.distance(d.Pos[v], z.Pos) < z.Radius + d.Radius[v])
+                if (math.distance(d.Pos[v], center) < radius + d.Radius[v])
                 {
                     inside.Add(new int2(d.Id[v], v));
                 }
@@ -809,10 +815,10 @@ namespace BinGames.Sim.Combat
             for (int k = 0; k < inside.Length; k++)
             {
                 int v = inside[k].y;
-                double2 away = d.Pos[v] - z.Pos;
+                double2 away = d.Pos[v] - center;
                 double len = math.length(away);
                 double2 dir = len > 1e-6 ? away / len : new double2(1, 0);
-                d.Pos[v] = z.Pos + dir * (z.Radius + d.Radius[v] + 0.05);
+                d.Pos[v] = center + dir * (radius + d.Radius[v] + 0.05);
             }
             EmgScalars es = d.EmgS[0];
             es.BlockPushed += inside.Length;
@@ -831,7 +837,15 @@ namespace BinGames.Sim.Combat
         /// </summary>
         internal static double2 EmgBlockClamp(ref CombatData d, int i, double2 from, double2 to)
         {
-            if (!d.EmgUnit.IsCreated || d.Patches.Length == 0 || (i >= 0 && i < d.Count && ChsAirborne(ref d, i))) // EMG3-CHS-01：离地（chs.airborne）不受地面固态斑块阻挡（ADR-EMG-001 固态斑块条）
+            if (!d.EmgUnit.IsCreated || (i >= 0 && i < d.Count && ChsAirborne(ref d, i))) // EMG3-CHS-01：离地（chs.airborne）不受地面固态斑块阻挡（ADR-EMG-001 固态斑块条）
+            {
+                return to;
+            }
+            if (d.Pits.Length > 0)
+            {
+                to = EmgPitClamp(ref d, i, from, to); // EMG4-TER-01：熔坑不可进入（离地已在上面排除）
+            }
+            if (d.Patches.Length == 0)
             {
                 return to;
             }
@@ -901,6 +915,10 @@ namespace BinGames.Sim.Combat
         private static bool EmgBlockAhead(ref CombatData d, double2 pos, float2 dir, float look, float me, out double2 center)
         {
             center = default;
+            if (d.Pits.Length > 0 && EmgPitAhead(ref d, pos, dir, look, me, out center))
+            {
+                return true; // EMG4-TER-01：熔坑同样局部绕行
+            }
             if (!d.EmgUnit.IsCreated || d.Patches.Length == 0)
             {
                 return false;

@@ -26,6 +26,7 @@ public sealed partial class GridTerrain : Luban.BeanBase
         Color = _buf.ReadString();
         Pattern = _buf.ReadString();
         NavCost = _buf.ReadInt();
+        Meltable = _buf.ReadInt();
     }
 
     public static GridTerrain DeserializeGridTerrain(ByteBuf _buf)
@@ -61,6 +62,10 @@ public sealed partial class GridTerrain : Luban.BeanBase
     /// 地面单位通行代价倍率(FG0-ARCH-06 层级寻路):0=不可通行,1=正常,2~15=绕着走更划算;不影响移动速度
     /// </summary>
     public readonly int NavCost;
+    /// <summary>
+    /// 1=可熔地面(EMG4-TER-01,FGR-EMG-152 ter.ground:熔融金属/酸累积到阈值会烧出熔坑);只影响战斗内核,不是世界生成输入
+    /// </summary>
+    public readonly int Meltable;
    
     public const int __ID__ = -578070718;
     public override int GetTypeId() => __ID__;
@@ -79,6 +84,7 @@ public sealed partial class GridTerrain : Luban.BeanBase
         + "color:" + Color + ","
         + "pattern:" + Pattern + ","
         + "navCost:" + NavCost + ","
+        + "meltable:" + Meltable + ","
         + "}";
     }
 }

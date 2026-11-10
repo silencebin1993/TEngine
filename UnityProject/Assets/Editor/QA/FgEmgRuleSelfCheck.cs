@@ -195,8 +195,8 @@ namespace GameLogic.EditorTools
             IReadOnlyList<GameConfig.fg.ChannelRule> rows = ConfigSystem.Instance.Tables.TbChannelRule.DataList;
             EmgRuleCatalog.Compiled c = EmgRuleCatalog.Current;
             int live = c.Rules.Count(r => r.Op != EmgRuleConst.OpDeferred);
-            Expect(rows.Count == 61 && c.Ok && c.Rules.Count == 61 && live == 50,
-                $"fg.TbChannelRule {rows.Count} 行（FG19B 第 2 节 61 行），编译 {c.Rules.Count} 条、问题 {c.Problems.Count}；内核结算 {live} 条（M 18 + E 20 + V 4 阶段 2 行，C01～C08 八条单位沾染行；P / F / W 由各自的相态、场、残骸步按端口找行，阶段 4 的 V 由承接卡接上）");
+            Expect(rows.Count == 61 && c.Ok && c.Rules.Count == 61 && live == 52,
+                $"fg.TbChannelRule {rows.Count} 行（FG19B 第 2 节 61 行），编译 {c.Rules.Count} 条、问题 {c.Problems.Count}；内核结算 {live} 条（M 18 + E 20 + V 4 阶段 2 行，C01～C08 八条单位沾染行，EMG4-TER-01 起 + V06 / V07 熔坑 = 52；P / F / W 由各自的相态、场、残骸步按端口找行；仍 deferred 的 V03 焦土随 EMG4-TER-02、V08 冻结桥随水面 FG18-SEA-01）");
             Expect(c.Rules.All(r => (r.A >= 300 && r.A < 1200) || (r.A >= EmgRuleConst.CoatBase && r.A < EmgRuleConst.CoatBase + 32))
                    && c.Rules.All(r => (r.B >= 300 && r.B < 1200) || (r.B >= EmgRuleConst.CoatBase && r.B < EmgRuleConst.CoatBase + 32)),
                 "内核规则两侧只有端口码（300～1199）或沾染位码（2000 + 位号），没有任何内容 ID / 规则名（FGR-EMG-013 / 084）");

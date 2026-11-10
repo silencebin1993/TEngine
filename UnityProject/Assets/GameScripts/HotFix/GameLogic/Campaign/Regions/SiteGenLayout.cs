@@ -37,6 +37,21 @@ namespace GameLogic.Campaign.Regions
         public readonly List<byte> ObstacleTerrain = new List<byte>(64);
         /// <summary>可以穿过的废墟碎石格（只做表现，不挡路）。</summary>
         public readonly List<Vector2> Rubble = new List<Vector2>(64);
+        /// <summary>EMG4-TER-01（FGR-EMG-152）：可熔地面的取样格（fg.TbGridTerrain meltable = 1，可走、在 Demo 矩形外）；每格代表 <see cref="MeltStep"/> 见方。</summary>
+        public readonly List<Vector2> Meltable = new List<Vector2>(64);
+        public int MeltStep = 1;
+
+        /// <summary>EMG4-TER-01：可熔地面写给战斗内核的圆（x, y, 半径 = 取样格半对角线，盖住整格）。</summary>
+        public List<Unity.Mathematics.float3> MeltCircles()
+        {
+            var list = new List<Unity.Mathematics.float3>(Meltable.Count);
+            float r = MeltStep * 0.71f;
+            foreach (Vector2 p in Meltable)
+            {
+                list.Add(new Unity.Mathematics.float3(p.x, p.y, r));
+            }
+            return list;
+        }
         public readonly List<SiteGarrisonPoint> Garrisons = new List<SiteGarrisonPoint>(4);
         /// <summary>熔渣热区（x, y, 半径）。</summary>
         public readonly List<Vector3> SlagZones = new List<Vector3>(4);
@@ -214,6 +229,7 @@ namespace GameLogic.Campaign.Regions
 
             // ── 取样格（窗口内每 step 格一个，行优先；Demo 矩形里的格只参与连通，不产生障碍）──
             int step = Math.Max(1, row.SampleStep);
+            c.MeltStep = step;
             int nx = Math.Max(1, Mathf.FloorToInt(2f * row.HalfX / step) + 1);
             int ny = Math.Max(1, Mathf.FloorToInt((row.MaxY - row.MinY) / step) + 1);
             int n = nx * ny;
@@ -250,6 +266,10 @@ namespace GameLogic.Campaign.Regions
                 if (walk[k] && !demo && GridContent.TerrainByCode(terrain[k])?.Id == "ruin" && c.Rubble.Count < 240)
                 {
                     c.Rubble.Add(local[k]);
+                }
+                if (walk[k] && !demo && GridContent.TerrainByCode(terrain[k])?.Meltable == 1 && c.Meltable.Count < 1024)
+                {
+                    c.Meltable.Add(local[k]); // EMG4-TER-01：可熔地面由生成规则标记（与区块生成同一个采样函数，任意种子成立）
                 }
             }
             // ── 障碍圆（修复轮，第 1 轮审查 P1）：原来按离中心由近到远只留 obstacleMax 个、其余丢掉（四到七成悬崖 / 水面在地点里不存在）。

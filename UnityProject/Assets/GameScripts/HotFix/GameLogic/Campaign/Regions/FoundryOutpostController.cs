@@ -1345,6 +1345,7 @@ namespace GameLogic.Campaign.Regions
             _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
             // FG9-ACT1-01（ADR-FAC-003 第 9 节第 13 条的承接）：前哨外圈的熔渣热区——区内武器散热变慢，敌我同一规则（派生量，进场 / 读档都重写一次）。
             Env.SlagHeatService.ApplySiteZones(_combat, _siteGen);
+            _combat.SetMeltGround(_siteGen?.MeltCircles()); // EMG4-TER-01：可熔地面（派生量，进场 / 读档都重写一次）
             RegionRecord region = FoundryOutpostRegion.Find(state);
             if (!restored)
             {

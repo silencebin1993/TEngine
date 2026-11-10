@@ -384,6 +384,24 @@ namespace GameLogic.Campaign.Combat
             return new TooltipContent { Title = line, Body = detail + "\n" + coat };
         }
 
+        /// <summary>EMG4-TER-01：熔坑悬停（按稳定 Id；没了返回 null）——是什么、为什么过不去 / 不能建、家园上怎么填平。</summary>
+        public static TooltipContent PitContent(CombatSite site, CampaignState state, int pitId)
+        {
+            if (site == null || site.IsDisposed)
+            {
+                return null;
+            }
+            for (int i = 0; i < site.PitCount; i++)
+            {
+                if (site.PitAt(i).Id == pitId)
+                {
+                    string hint = site.PersistSite ? Emergence.SitePersistService.HoverHint(state, site, EmgPersistItem.KindPit, pitId) : GameText.Get("emg.pit.hover.away");
+                    return new TooltipContent { Title = GameText.Get("emg.persist.target_pit"), Body = GameText.Get("emg.pit.hover.body") + "\n" + hint };
+                }
+            }
+            return null;
+        }
+
         /// <summary>子弹药 / 破片悬停（弹体下标 <paramref name="index"/>）。不是子弹药 / 破片返回 null。</summary>
         public static TooltipContent ProjectileContent(CombatSite site, CampaignState state, int index)
         {

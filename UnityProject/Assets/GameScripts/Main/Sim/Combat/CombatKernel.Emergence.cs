@@ -1059,7 +1059,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || PitState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1091,7 +1091,8 @@ namespace BinGames.Sim.Combat
             bool v18 = format >= 18; // EMG3-CHS-01：段 22～24、单位段 + 特性、无人机段 + 电荷
             bool v20 = format >= 20; // EMG4-HIJ-01：段 27 信号劫持
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段只在有熔坑状态时写（没有时快照与哈希逐字不变）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? 3 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1332,6 +1333,10 @@ namespace BinGames.Sim.Combat
             if (v20)
             {
                 WriteHijackSegment(w, sw);
+            }
+            if (pits)
+            {
+                WritePitSegments(w, sw);
             }
 
             if (extraBytes > 0)
@@ -1916,9 +1921,128 @@ namespace BinGames.Sim.Combat
                     return ParseStage3Segment(r, sr, ref staging);
                 case EmgConst.SegHijack:
                     return ParseHijackSegment(r, sr, ref staging);
+                case EmgConst.SegPit:
+                case EmgConst.SegPitAcc:
+                case EmgConst.SegPitStats:
+                    return ParsePitSegment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过
             }
+        }
+
+        // ── EMG4-TER-01：段 28 熔坑 / 29 累计点 / 30 计数（同版本 20 内追加的自描述段，DEBT-EMG4HIJ01-03）──
+        private bool PitState()
+        {
+            if (_d.Pits.Length > 0 || _d.PitAcc.Length > 0)
+            {
+                return true;
+            }
+            for (int i = 0; i < _d.PitStats.Length; i++)
+            {
+                if (_d.PitStats[i] != 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private void WritePitSegments(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            sw.Begin(EmgConst.SegPit, EmgPitConst.PitFields, _d.Pits.Length);
+            for (int i = 0; i < _d.Pits.Length; i++)
+            {
+                EmgPit p = _d.Pits[i];
+                if (sw.F()) w.Write(p.Pos.x);
+                if (sw.F()) w.Write(p.Pos.y);
+                if (sw.F()) w.Write(p.Born);
+                if (sw.F()) w.Write(p.Radius);
+                if (sw.F()) w.Write(p.Id);
+                if (sw.F()) w.Write(p.Source);
+                if (sw.F()) w.Write(p.Chain);
+                sw.EndRecord();
+            }
+            sw.End();
+            sw.Begin(EmgConst.SegPitAcc, EmgPitConst.AccFields, _d.PitAcc.Length);
+            for (int i = 0; i < _d.PitAcc.Length; i++)
+            {
+                Unity.Mathematics.float4 a = _d.PitAcc[i];
+                if (sw.F()) w.Write(a.x);
+                if (sw.F()) w.Write(a.y);
+                if (sw.F()) w.Write(a.z);
+                if (sw.F()) w.Write(a.w);
+                sw.EndRecord();
+            }
+            sw.End();
+            sw.Begin(EmgConst.SegPitStats, EmgPitConst.StatLen, 1);
+            for (int i = 0; i < EmgPitConst.StatLen; i++)
+            {
+                if (sw.F()) w.Write(_d.PitStats[i]);
+            }
+            sw.EndRecord();
+            sw.End();
+        }
+
+        private static CombatLoadResult ParsePitSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            if (n > 1024)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            for (int i = 0; i < n; i++)
+            {
+                sr.Record(i);
+                if (sr.Tag == EmgConst.SegPit)
+                {
+                    var p = new EmgPit();
+                    double x = 0, y = 0;
+                    if (sr.F()) x = r.ReadDouble();
+                    if (sr.F()) y = r.ReadDouble();
+                    if (sr.F()) p.Born = r.ReadDouble();
+                    if (sr.F()) p.Radius = r.ReadSingle();
+                    if (sr.F()) p.Id = r.ReadInt32();
+                    if (sr.F()) p.Source = r.ReadByte();
+                    if (sr.F()) p.Chain = r.ReadInt32();
+                    p.Pos = new Unity.Mathematics.double2(x, y);
+                    if (!sr.RecordOk || p.Id <= 0 || !Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(p.Pos)) || !double.IsFinite(p.Born) || !(p.Radius > 0f) || !float.IsFinite(p.Radius)
+                        || p.Source < EmgPitConst.SourceMolten || p.Source > EmgPitConst.SourceAcid)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    staging.Pits.Add(p);
+                }
+                else if (sr.Tag == EmgConst.SegPitAcc)
+                {
+                    var a = new Unity.Mathematics.float4();
+                    if (sr.F()) a.x = r.ReadSingle();
+                    if (sr.F()) a.y = r.ReadSingle();
+                    if (sr.F()) a.z = r.ReadSingle();
+                    if (sr.F()) a.w = r.ReadSingle();
+                    if (!sr.RecordOk || !Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(a)) || a.z < 0f || a.w < 0f || staging.PitAcc.Length >= EmgPitConst.AccCapacity)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    staging.PitAcc.Add(a);
+                }
+                else
+                {
+                    for (int k = 0; k < EmgPitConst.StatLen; k++)
+                    {
+                        if (sr.F()) staging.PitStats[k] = r.ReadInt32();
+                    }
+                    bool idsOk = true;
+                    for (int k = 0; k < staging.Pits.Length; k++)
+                    {
+                        idsOk &= staging.Pits[k].Id <= staging.PitStats[EmgPitConst.StatNextId]; // 发号器不能落后于已有熔坑（否则读档后重号）
+                    }
+                    if (!sr.RecordOk || !idsOk)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                }
+            }
+            return CombatLoadResult.Ok;
         }
 
         // ── EMG4-HIJ-01：段 27 信号劫持（按劫持先后；每条 11 个字段）──

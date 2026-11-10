@@ -152,6 +152,8 @@ namespace BinGames.Sim.Combat
         public const int EffectNeutralColor = 0xB0B0B0;
         /// <summary>EMG1-ENT-01：残骸的占位颜色（深灰，与中立区域的浅灰区分）。</summary>
         public const int EffectWreckColor = 0x5C5752;
+        /// <summary>EMG4-TER-01：熔坑占位色（近黑带暗红，和残骸的深灰、冷渣区分）。</summary>
+        public const int EffectPitColor = 0x2A1210;
         /// <summary>FG10-FAC-01：澄净专属行为的预警画面（喷嘴蓄压落点、枢轴扫臂前方扇区、自爆引信半径、投放落点）用的琥珀黄，与阵营色、状态色都区分开。</summary>
         public const int EffectWarnColor = 0xFFD23C;
     }
@@ -1421,6 +1423,12 @@ namespace BinGames.Sim.Combat
         public byte EmgPersist;
         /// <summary>EMG2-PERSIST-01（fg.TbHomeTuning emg.persist.patch_max）：每地点长期留存固态斑块上限，满了最早的崩解为碎屑。</summary>
         public int EmgPersistPatchMax;
+        /// <summary>EMG4-TER-01（FGR-EMG-152；fg.TbHomeTuning emg.terrain.pit_max / pit_radius / pit_gather）：每地点熔坑上限、熔坑半径（米）、“同一位置”累计的合并半径（米）。≤ 0 取 <see cref="EmgPitConst"/> 初值。不进快照。</summary>
+        public int EmgPitMax;
+        public float EmgPitRadius;
+        public float EmgPitGather;
+        /// <summary>EMG4-TER-01：可熔地面的地形码位（fg.TbGridTerrain meltable = 1 的 code；位 n = 地形码 n）。有生成器的寻路镜像（家园）按生成规则逐格判断。不进快照。</summary>
+        public ulong EmgMeltCodes;
         /// <summary>EMG2-PERSIST-01（fg.TbHomeTuning emg.wreck.ignite_temp / flammable_min / burn_rate）：残骸点燃。</summary>
         public float EmgWreckIgniteTemp;
         public float EmgWreckFlammableMin;

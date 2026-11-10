@@ -98,6 +98,7 @@ namespace GameLogic.Campaign.Regions
             _combat = CombatSites.Open(SiteId, state, resume, _content != null ? _content.Rules : new InteriorCombatRules(), out bool restored);
             _combat.Squad = SquadCommands;
             _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
+            _combat.SetMeltGround(_melt); // EMG4-TER-01：室内可熔地面（按室内表面的生成地形，派生量）
             SyncCombatMachines(state);
             _combat.RefreshAllMachineWeapons(state);
             _content?.OnOpened(state, _combat, resume, restored); // FG9-FAC-01：大厅的敌人、首领开战（新进入时）、伏笔地点
@@ -379,18 +380,27 @@ namespace GameLogic.Campaign.Regions
             _machineMarkers.RemoveAll(m => m == null || !MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) || !r.IsAlive || r.RegionId != SiteId);
         }
 
+        /// <summary>EMG4-TER-01：室内可熔地面圆（按室内表面的生成地形，派生量）。</summary>
+        private readonly List<Unity.Mathematics.float3> _melt = new List<Unity.Mathematics.float3>(64);
+
         /// <summary>立柱与墙的障碍：读室内表面的地形（悬崖格 = 墙 / 立柱）。立柱按 2×2 块合成一个圆；墙沿边每 2 格一个圆，入口留空。</summary>
         private void BuildObstacles(CampaignState state)
         {
             _obstacles.Clear();
             _pillars.Clear();
+            _melt.Clear();
             HomeGridMap map = WorldGenService.MapFor(state, SiteId);
             byte cliff = GridContent.TerrainCode("cliff");
             for (int y = 1; y < Height - 1; y++)
             {
                 for (int x = 1; x < Width - 1; x++)
                 {
-                    if (map.GetTerrain(new GridCell(x, y)) != cliff)
+                    byte code = map.GetTerrain(new GridCell(x, y));
+                    if (code != cliff && GridContent.TerrainByCode(code)?.Meltable == 1 && _melt.Count < 1024)
+                    {
+                        _melt.Add(new Unity.Mathematics.float3(x + 0.5f, y + 0.5f, 0.71f)); // 格 (x, y) 占 [x, x+1]（立柱左下角同一口径）
+                    }
+                    if (code != cliff)
                     {
                         continue;
                     }

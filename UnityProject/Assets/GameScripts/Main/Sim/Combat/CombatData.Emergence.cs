@@ -22,6 +22,14 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgRelay> Relays;
         /// <summary>EMG4-HIJ-01（FGR-EMG-163，ADR ⑰）：被信号劫持的敌机（快照段 27；每名玩家 ≤ emg.hijack.max，空表时每步一次长度比较）。</summary>
         public NativeList<EmgHijack> Hijacks;
+        /// <summary>EMG4-TER-01（FGR-EMG-152）：熔坑（快照段 28；≤ emg.terrain.pit_max，空表时移动只多一次长度比较）。</summary>
+        public NativeList<EmgPit> Pits;
+        /// <summary>EMG4-TER-01（FG19B V06 / V07“同一位置累计”）：累计点（x, y, 熔融金属份量, 酸份量；快照段 29，≤ <see cref="EmgPitConst.AccCapacity"/>）。</summary>
+        public NativeList<float4> PitAcc;
+        /// <summary>EMG4-TER-01：熔坑计数与发号（下标见 <see cref="EmgPitConst"/>；快照段 30）。</summary>
+        public NativeArray<int> PitStats;
+        /// <summary>EMG4-TER-01：可熔地面圆（x, y, 半径；远征地点按生成内容里的废墟格写）。派生量（热更层按生成规则写），不进快照，读档沿用当前的。</summary>
+        public NativeList<float3> MeltGround;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合线索同现计数（下标 = 配方书序号，≤ 32）；热更层按 <see cref="EmgScalars.ClueDirty"/> 取走后清零（可靠计数 + 脏位，不按帧扫描；待取走次数与去重环随快照段 26 存读档，脏位读档时由待取走次数重建）。</summary>
         public NativeArray<int> EmgClue;
         /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
@@ -60,6 +68,10 @@ namespace BinGames.Sim.Combat
             MetaRun = new NativeList<EmgMetaRun>(0, Allocator.Persistent);
             Relays = new NativeList<EmgRelay>(0, Allocator.Persistent);
             Hijacks = new NativeList<EmgHijack>(0, Allocator.Persistent);
+            Pits = new NativeList<EmgPit>(0, Allocator.Persistent);
+            PitAcc = new NativeList<float4>(0, Allocator.Persistent);
+            PitStats = new NativeArray<int>(EmgPitConst.StatLen, Allocator.Persistent);
+            MeltGround = new NativeList<float3>(0, Allocator.Persistent);
             EmgClue = new NativeArray<int>(EmgConst.ClueLen, Allocator.Persistent); // EMG3-FUSE-01：[0, 32) 待取走的同现次数，其后各配方的环头与最近计过的链号环
             EmgTraitParams = new NativeArray<float4>(EmgTraitConst.Count, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
@@ -143,6 +155,10 @@ namespace BinGames.Sim.Combat
             MetaRun.Dispose();
             Relays.Dispose();
             Hijacks.Dispose();
+            Pits.Dispose();
+            PitAcc.Dispose();
+            PitStats.Dispose();
+            MeltGround.Dispose();
             EmgClue.Dispose();
             EmgTraitParams.Dispose();
             EmgMatters.Dispose();
@@ -218,6 +234,12 @@ namespace BinGames.Sim.Combat
             MetaRun.Clear();
             Relays.Clear();
             Hijacks.Clear();
+            Pits.Clear();
+            PitAcc.Clear();
+            for (int i = 0; i < PitStats.Length; i++)
+            {
+                PitStats[i] = 0;
+            }
             for (int i = 0; i < EmgClue.Length; i++)
             {
                 EmgClue[i] = 0;

@@ -1276,6 +1276,7 @@ namespace GameLogic.Campaign.Regions
             _combat = CombatSites.Open(SiteId, state, resume, _combatRules, out bool restored);
             _combat.Squad = SquadCommands;
             _combat.SetObstacles(CombatDemoContent.Obstacles(_obstacles));
+            _combat.SetMeltGround(_siteGen?.MeltCircles()); // EMG4-TER-01：可熔地面（派生量，进场 / 读档都重写一次）
             RegionRecord region = FracturedCityRegion.Find(state);
             if (!restored)
             {

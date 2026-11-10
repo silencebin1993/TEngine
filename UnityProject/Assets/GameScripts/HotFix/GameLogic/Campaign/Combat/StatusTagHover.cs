@@ -73,6 +73,8 @@ namespace GameLogic.Campaign.Combat
         public const int ProjHoverKeyBase = 100000000;
         /// <summary>EMG2-MAT-01：物质斑块悬停键 = −(基数 + 斑块 Id)，在残骸（3000000…）与子弹药（100000000…）之间。</summary>
         public const int PatchHoverKeyBase = 50000000;
+        /// <summary>EMG4-TER-01：熔坑悬停键 = −(基数 + 熔坑 Id)，在残骸与物质斑块之间。</summary>
+        public const int PitHoverKeyBase = 40000000;
 
         private static int _hoveredEmg;
         private static readonly System.Func<TooltipContent> EmgProvider = ProvideEmg;
@@ -96,6 +98,15 @@ namespace GameLogic.Campaign.Combat
             if (w >= 0 && k.TryGetWreck(w, out EmgWreck wr))
             {
                 return -(WreckHoverKeyBase + wr.Id);
+            }
+            // EMG4-TER-01：熔坑（凝成的冷渣盖在坑上时先说坑：它决定能不能走、能不能建）
+            for (int i = 0; i < site.PitCount; i++)
+            {
+                EmgPit pit = site.PitAt(i);
+                if (math.distance(at, pit.Pos) <= pit.Radius)
+                {
+                    return -(PitHoverKeyBase + pit.Id);
+                }
             }
             // EMG2-MAT-01（FGR-EMG-181）：物质斑块（最低优先：子弹药 / 残骸压在斑块上时先给它们）
             int pz = k.PickPatch(at);
@@ -148,6 +159,10 @@ namespace GameLogic.Campaign.Combat
             {
                 int pz = site.Kernel.PatchIndexOf(id - PatchHoverKeyBase);
                 return pz >= 0 ? EmgChainView.PatchContent(site, state, pz) : null;
+            }
+            if (id >= PitHoverKeyBase)
+            {
+                return EmgChainView.PitContent(site, state, id - PitHoverKeyBase);
             }
             int w = site.Kernel.WreckIndexOf(id - WreckHoverKeyBase);
             return w >= 0 ? EmgChainView.WreckContent(site, state, w) : null;

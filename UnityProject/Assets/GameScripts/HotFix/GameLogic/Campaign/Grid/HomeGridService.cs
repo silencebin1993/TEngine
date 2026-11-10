@@ -719,6 +719,14 @@ namespace GameLogic.Campaign.Grid
                         break;
                     }
                 }
+                // EMG4-TER-01（FGR-EMG-152，FG19 第 9 节“熔坑出现在建筑格”）：熔坑上的空格不能建造——新放置、搬迁、挪规划、旋转多占的格都拦；
+                // 只有这座建筑（或它的规划 / 搬迁源）现在就占着的格放行：已有建筑不受影响（原地旋转 / 升级照常）。
+                bool ownCell = occ != 0 && map.OccupantId(occ) is string self && (self == ignoreBuildingId || self == ignoreBuildingId2);
+                if (!ownCell && Emergence.SitePersistService.PitAtCell(c.X, c.Y))
+                {
+                    r.Add(GridReason.Of(GridBlockReason.MeltPit));
+                    ok = false;
+                }
                 // FG8-GEN-02（卡片负向“室内入口被己方建筑堵住 → 入口保护范围内禁止建造，并说明原因”）：与上面同一套逐格校验，不另写判定。
                 for (int k = 0; k < EntranceGuards.Count; k++)
                 {
@@ -868,6 +876,12 @@ namespace GameLogic.Campaign.Grid
                     ok = false;
                     break;
                 }
+            }
+            // EMG4-TER-01 修复轮 1（FGR-EMG-152“家园上不能建造”）：熔坑格也不能铺传送带；管线 / 泵 / 储罐 / 阀门经 ValidatePipeCell 同一条。
+            if (Emergence.SitePersistService.PitAtCell(cell.X, cell.Y))
+            {
+                r.Add(GridReason.Of(GridBlockReason.MeltPit));
+                ok = false;
             }
             r.CellOk.Add(ok);
             return r;

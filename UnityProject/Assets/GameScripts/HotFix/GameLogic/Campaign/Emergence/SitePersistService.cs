@@ -67,10 +67,17 @@ namespace GameLogic.Campaign.Emergence
 
         // ── 目标 ID ──────────────────────────────────────────────────────
 
+        /// <summary>EMG4-TER-01（FGR-EMG-152“家园上不能建造”）：家园格 (x, y) 的中心是否落在熔坑里（建造校验逐格调；O(熔坑数 ≤ 8)）。</summary>
+        public static bool PitAtCell(int x, int y)
+        {
+            CombatSite site = Home;
+            return site != null && site.PersistSite && site.PitCovers(x, y);
+        }
+
         public static bool IsClearTarget(string targetId) => targetId != null && targetId.StartsWith(TargetPrefix, StringComparison.Ordinal);
 
         public static string TargetOf(byte kind, int id) =>
-            TargetPrefix + (kind == EmgPersistItem.KindWreck ? "w:" : "p:") + id.ToString(CultureInfo.InvariantCulture);
+            TargetPrefix + (kind == EmgPersistItem.KindWreck ? "w:" : kind == EmgPersistItem.KindPit ? "k:" : "p:") + id.ToString(CultureInfo.InvariantCulture);
 
         private static bool TryParse(string targetId, out byte kind, out int id)
         {
@@ -81,8 +88,8 @@ namespace GameLogic.Campaign.Emergence
                 return false;
             }
             char c = targetId[TargetPrefix.Length];
-            kind = c == 'w' ? EmgPersistItem.KindWreck : EmgPersistItem.KindPatch;
-            return (c == 'w' || c == 'p') && int.TryParse(targetId.Substring(TargetPrefix.Length + 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out id);
+            kind = c == 'w' ? EmgPersistItem.KindWreck : c == 'k' ? EmgPersistItem.KindPit : EmgPersistItem.KindPatch; // EMG4-TER-01：k = 熔坑（填平）
+            return (c == 'w' || c == 'p' || c == 'k') && int.TryParse(targetId.Substring(TargetPrefix.Length + 2), NumberStyles.Integer, CultureInfo.InvariantCulture, out id);
         }
 
         public static bool TryGetTarget(string targetId, out EmgPersistItem item)
@@ -97,10 +104,12 @@ namespace GameLogic.Campaign.Emergence
         {
             if (!TryGetTarget(targetId, out EmgPersistItem it))
             {
-                return GameText.Get(TryParse(targetId, out byte gone, out _) && gone == EmgPersistItem.KindWreck ? "emg.hover.wreck.title" : "emg.persist.target_solid");
+                bool parsed = TryParse(targetId, out byte gone, out _);
+                return GameText.Get(parsed && gone == EmgPersistItem.KindWreck ? "emg.hover.wreck.title" : parsed && gone == EmgPersistItem.KindPit ? "emg.persist.target_pit" : "emg.persist.target_solid");
             }
             GridCell c = NavService.CellOf(it.Pos.x, it.Pos.y);
-            string name = it.Kind == EmgPersistItem.KindWreck ? GameText.Get("emg.hover.wreck.title") : EmgMatterCatalog.NameOf(it.Matter);
+            string name = it.Kind == EmgPersistItem.KindWreck ? GameText.Get("emg.hover.wreck.title")
+                : it.Kind == EmgPersistItem.KindPit ? GameText.Get("emg.persist.target_pit") : EmgMatterCatalog.NameOf(it.Matter);
             return GameText.Format("emg.persist.work_target", name, c.X, c.Y);
         }
 
@@ -212,7 +221,7 @@ namespace GameLogic.Campaign.Emergence
         }
 
         /// <summary>
-        /// 建造模式“清除场地物”的一次点选 / 框选（B02）：框里没有单子的都下单；只点中一件且它已有单子 = 取消（全额返还）。返回给状态行的文本，<paramref name="denied"/> = 什么也没做。
+        /// 建造模式“清除场地物”的一次点选 / 框选（B02）：框里没有单子的都下单；点一格（或框里只有一件）且命中的全都已有单子 = 全部取消（全额返还）。返回给状态行的文本，<paramref name="denied"/> = 什么也没做。
         /// </summary>
         public static string ApplyBox(CampaignState state, GridCell a, GridCell b, out bool denied)
         {
@@ -224,9 +233,14 @@ namespace GameLogic.Campaign.Emergence
                 denied = true;
                 return GameText.Get("emg.persist.clear_none");
             }
-            if (list.Count == 1 && ActiveOrder(state, TargetOf(list[0].Kind, list[0].Id)) != null)
+            // 修复轮 1（B03）：点一格（或框里只有一件）且命中的全都已有单子 = 整组取消、全额返还——熔融金属熔坑上盖着同格的冷渣，一次点中两件，“再点一次取消”要对两张都成立。
+            bool single = a.X == b.X && a.Y == b.Y;
+            if ((single || list.Count == 1) && list.TrueForAll(it => ActiveOrder(state, TargetOf(it.Kind, it.Id)) != null))
             {
-                CancelClear(state, TargetOf(list[0].Kind, list[0].Id));
+                foreach (EmgPersistItem it in list)
+                {
+                    CancelClear(state, TargetOf(it.Kind, it.Id));
+                }
                 return GameText.Get("emg.persist.clear_cancelled");
             }
             int ordered = 0, already = 0;
@@ -451,7 +465,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     r.Alerted = true;
                     GridCell c = NavService.CellOf(r.X, r.Y);
-                    NotificationCenter.Post(NotifyBlocked, GameText.Format(r.Blocks ? "emg.persist.blocked_solid" : "emg.persist.blocked_wreck", TargetName(state, r.Key), c.X, c.Y),
+                    NotificationCenter.Post(NotifyBlocked, GameText.Format(r.Kind == EmgPersistItem.KindPit ? "emg.persist.blocked_pit" : r.Blocks ? "emg.persist.blocked_solid" : "emg.persist.blocked_wreck", TargetName(state, r.Key), c.X, c.Y),
                         new Vector3(r.X, 0f, r.Y));
                 }
             }
