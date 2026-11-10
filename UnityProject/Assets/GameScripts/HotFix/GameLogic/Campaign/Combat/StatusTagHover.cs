@@ -287,6 +287,10 @@ namespace GameLogic.Campaign.Combat
             line = trait == null ? line : line == null ? trait : trait + "\n" + line;
             string relay = EmgChainView.RelayHoverLine(site, unit); // EMG3-SQD-01：中继范围、已转发 / 限流未转发次数
             line = relay == null ? line : line == null ? relay : relay + "\n" + line;
+            string enemy = site.EnemyProgramLine(CampaignSession.Current, unit); // EMG4-HIJ-01（FGR-EMG-162）：敌方单位的程序（读写端口）
+            line = enemy == null ? line : line == null ? enemy : line + "\n" + enemy;
+            string hijack = site.HijackHoverLine(unit); // EMG4-HIJ-01：劫持剩余时间、由教义触发、不接受编队命令
+            line = hijack == null ? line : line == null ? hijack : hijack + "\n" + line;
             if (line == null)
             {
                 return;
@@ -334,7 +338,9 @@ namespace GameLogic.Campaign.Combat
             TooltipContent tags = BuildContent(site.Kernel, _hoveredUnit);
             if (_hoveredEnemyType != null)
             {
-                return EnemyContent(_hoveredEnemyType, tags);
+                TooltipContent enemy = EnemyContent(_hoveredEnemyType, tags);
+                AppendProgramLine(site, _hoveredUnit, ref enemy); // EMG4-HIJ-01（FGR-EMG-162）：敌方程序（读写端口）与劫持状态行
+                return enemy;
             }
             AppendProgramLine(site, _hoveredUnit, ref tags); // EMG1-CHAIN-01（FG-GAP-171）
             return tags;

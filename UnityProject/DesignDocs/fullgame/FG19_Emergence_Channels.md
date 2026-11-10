@@ -996,6 +996,7 @@
 - 占用劫持者的刷写带宽（= 其原生程序条数，FGR-EMG-036）；每名玩家同时 ≤ `emg.hijack.max`（2）台。
 - 精英与首领：入侵抗性默认 1（不可劫持），是否开放待用户确认。
 - 题材口径：玩家是信号，劫持 = 在敌机控制器里写入一段重启程序，与“玩家是信号”的设定一致；代码内部状态位 `Infected`（`Sim/SimTypes.cs:315-316`）不改名、不复用。
+- **EMG4-HIJ-01 已落地（2026-11-10）**：内核 `Sim/Combat/CombatLogic.Hijack.cs`——`hij.hack`（码 1201）inject 写端在命中处经 `EmgAddAcc` 给敌对目标加入侵度；`CombatLogic.Kill` 发击杀类事件之前调 `EmgTryHijack`（入侵度 ≥ `phs.hijacked` 阈值、敌方非结构非外部血量、击杀者是存活己方单位、入侵抗性 < 1、台数 < `emg.hijack.max`），成立时不阵亡、改发玩法事件 `Hijacked`（23），不成立写 `HijackRefused`（25，上限满 / 抗性）；行为种类 `Hijacked`（16）由内核自主运行（射程内打最近敌人、感知内靠近、否则跟随劫持者，不读编队命令）；期满 / 劫持者阵亡 / 被击毁都回到 `Kill`，先还原原阵营 / 行为 / 攻城职能、发 `HijackEnded`（24），再照常 Killed（击杀者 = 劫持者）、留残骸、掉落与击杀只结算一次；劫持瞬间清攻城职能与队伍（队伍计数减一），期满时 SiegeKilled 带原队伍一次。精英与首领入侵抗性下限 `emg.hijack.elite_resist`（缺省 1，按 Elite / 外部血量 / 首领核心属性判，不按 ID）。刷写带宽：敌方组装武器总登记刷写变体表，劫持时占劫持者 min(原生条数, 剩余带宽) 条，不够时武器换成“前 k 条”变体。敌方组装武器经 `CombatSite.EnemyWeapon` 与玩家同一编译器编程序（DEBT-EMG3FW01-01 关闭），击杀悬停与图鉴显示敌方程序（读写端口）。`hij.hijacked` condition 与 N39～N41 正式固件随 EMG4-FW-01。
 
 **FGR-EMG-164 镜像复制按继承规则（FG11-FAC-01）**
 - 镜像体复制玩家在其附近最近一次发动的核心固件，得到“本地版本”（`FG09:246`）。按本文：复制品是 1 代程序，容量 `C(1)`，占镜像体自身的刷写带宽；复制品不能再被复制（代际），复制触发器时其子载荷按容量截断。
@@ -1155,6 +1156,7 @@
 - **EMG3-CHS-01 已落地（2026-11-05）**：`CombatConst.FormatVersion` = 18，一次铺好阶段 3 内核状态段——段 22 底盘特性运行态（拖带里程 / 源斑块、拖挂停留计时与随车斑块、冲刺计时，按单位 ID 升序写）、段 23 元程序运行态（循环计数、延后队列；本卡只铺结构，执行者归元程序卡）、段 24 节拍计数；单位段尾部追加特性机制 `Trait`（对齐空位，不增大记录）、无人机段尾部追加电荷（哨戒桩作导体，DEBT-EMG2REACT02-04）。读 ≤ 17 版快照：特性 0、运行态 / 元程序表空、节拍 0、无人机电荷 0。随车斑块装在车上、不在斑块表里，存读档天然不复制。
 - `emg.stage` 缺省提到 3（EMG3-CHS-01）：阶段 3 端口按承接卡逐张接通，`chs.*` 由本卡接通；`evt.beat` / `evt.ping` / `tmp.*` / `sqd.*` / `meta.*` / `grm.anchor` 仍列在 `EmgCatalog.PendingPorts`，用到它们的 stageGate 3 owner（fw_clock、fw_resonance、struct_relay）整条继续走旧读法。
 - **EMG3-TMP-01 已落地（2026-11-05）**：不升格式（仍 18）。`evt.beat` / `tmp.*` 由内核节拍执行者接通（`CombatLogic.Tempo.cs`），从 `EmgCatalog.PendingPorts` 删除，fw_clock / fw_resonance 整条切到声明轨。拍序号 = ⌊模拟时间 ÷ `emg.tempo.beat`⌋，只在地点有程序读 `evt.beat` 时推进（段 24，读 ≤ 17 版快照下一步直接接到当前拍、不补发；没有监听者时 StateHash 逐字不变）。宿主 = 在飞弹体、带程序的区域、无人机，以及格斗 / 力场 / 即时射弹在结算点留的 2 秒节拍锚点（段 23 运行态 Mode = RunBeat）。相位由编译器落进 tmp.beat 行 param2（声明 param2 > 0 为显式相位，0 = 程序序号 % 周期）；`tmp.sync` 按“同一台机器本拍执行的不同节拍指令序号 ≥ 2”判、每台机器每拍最多用一次，作 condition 时门控（FG-GAP-199：与 FG19A 谐振行“每拍余振”不一致，待用户复核）；跨中继组对齐归 EMG3-SQD-01（DEBT-EMG3TMP01-02）。
+- **EMG4-HIJ-01 已落地（2026-11-10）**：`CombatConst.FormatVersion` = 20（ADR ⑩ 表里阶段 4 原记“19”，因 EMG3-FUSE-01 已占用 19，阶段 4 顺延为 20），一次铺好阶段 4 内核状态段——段 27 信号劫持（单位 / 劫持者 / 到期时刻 / 原阵营 / 原行为 / 原攻城职能与队伍 / 占用刷写条数 / 原武器）；熔坑（EMG4-TER-01）在同版本 20 内另开自描述段追加；冻结桥依赖的水面未落地，挂 FG18-SEA-01（DEBT-EMG4TER01-01），届时同样追加新段，不留空占位。读 ≤ 19 版快照：没有劫持。`emg.stage` 缺省提到 4（`EmgCatalog.ImplementedStage` = 4）。
 - 武器表与程序表读档后由 `MachineLoadoutRegistry.Changed` 重算（现机制），快照里在飞的弹体按快照结构读完。
 
 **FGR-EMG-212 战役存档：新增字段缺省为空，不升 schema（采用 ADR-EMG-001 ⑩）**

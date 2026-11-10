@@ -39,7 +39,7 @@ namespace GameLogic.EditorTools
             EmgCatalog.ResetForTests();
             EmgCompiled c = EmgCatalog.Current;
             EmgSource src = EmgCatalog.FromTables();
-            Expect(c.EffectiveStage == 3, $"真实表 emg.stage 生效阶段 = {c.EffectiveStage}（阶段 3 口径）");
+            Expect(c.EffectiveStage >= 3, $"真实表 emg.stage 生效阶段 = {c.EffectiveStage}（阶段 3 口径，EMG4-HIJ-01 起缺省 4）");
             CheckStage3Inventory(src, c);
             CheckStage3SingleTrackCompare(src);
             CheckStage3ZeroDead(src);

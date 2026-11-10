@@ -733,7 +733,7 @@ namespace GameLogic.Campaign.Defense
                 {
                     alive -= RetreatFallback(state, site, g, alive);
                 }
-                if (alive == 0)
+                if (alive == 0 && site.CountHijackedInGroup(key) == 0) // EMG4-HIJ-01：还有被劫持的成员时等它期满（那次 SiegeKilled 进本次突袭结算）再收尾
                 {
                     FinishScratch.Add(g);
                 }

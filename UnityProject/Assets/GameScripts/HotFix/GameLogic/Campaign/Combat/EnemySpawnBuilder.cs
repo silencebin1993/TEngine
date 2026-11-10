@@ -104,7 +104,7 @@ namespace GameLogic.Campaign.Combat
             };
             if (hasWeapon)
             {
-                spawn.Weapon = site.WeaponIndex(WeaponOf(state, row));
+                spawn.Weapon = site.WeaponIndex(site.EnemyWeapon(state, row)); // EMG4-HIJ-01：组装敌人与玩家同一套编译器（FGR-EMG-160）
             }
             if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row) || EnemyClarityParams.Has(row))
             {
@@ -131,6 +131,7 @@ namespace GameLogic.Campaign.Combat
         /// <summary>
         /// 敌人的武器：数值（射程 / 伤害 × 难度 / 冷却 / 瞄准线）来自敌人表。FG9-FAC-02（DEBT-FG9DATA01-02 的铸造部分）：带 assembled 标签的敌人
         /// 按“组件与固件”列装配——第一个作战组件决定载体与投送（撞角 = 格斗扇形、炮管 = 射弹……），固件按玩家同一套读法表翻译（<see cref="CarrierReadings.Build(string, string, string, IReadOnlyList{string}, bool)"/>，FGR-FAC-003 同一套规则）。
+        /// EMG4-HIJ-01：这里只给“程序前的底子”（旧读法）；战斗地点生成敌人走 <see cref="CombatSite.EnemyWeapon(CampaignState, MechEnemy)"/>——同一套编译器编程序、读法单轨（FGR-EMG-160，DEBT-EMG3FW01-01）。
         /// </summary>
         public static CombatWeapon WeaponOf(CampaignState state, MechEnemy row)
         {

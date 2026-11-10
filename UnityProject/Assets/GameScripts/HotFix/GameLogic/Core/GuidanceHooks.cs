@@ -647,6 +647,9 @@ namespace GameLogic.Core
         /// <summary>EMG3-SQD-01（FG19 FGR-EMG-132 / 133）：第一次有中继转发或信号脉冲送达（引导内容在 FG15-UX-04：中继范围、白名单事件、只转发事件不转发程序、每秒上限、热量记执行方）。</summary>
         public const string EmgFirstRelay = "emg_first_relay";
 
+        /// <summary>EMG4-HIJ-01（FG19 FGR-EMG-163）：第一次信号劫持成功（引导内容在 FG15-UX-04：入侵度、阵亡时重启、30 秒期满自毁、同时 2 台、精英首领抗性、占刷写带宽）。</summary>
+        public const string EmgFirstHijack = "emg_first_hijack";
+
         /// <summary>EMG2-MAT-01（FG19 FGR-EMG-080～083）：第一次出现物质斑块（引导内容在 FG15-UX-04：物质不分敌我、沾染、形状纹样怎么认、悬停看来源与后果）。</summary>
         public const string EmgFirstMatter = "emg_first_matter";
 
@@ -731,7 +734,7 @@ namespace GameLogic.Core
             SiteFirstGarrisonDestroyed, SiteFirstContactSeen, SiteFirstContactIdentified,
             ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
             ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
-            EmgFirstProgramTree, EmgFirstTrigger, EmgFirstRelay,
+            EmgFirstProgramTree, EmgFirstTrigger, EmgFirstRelay, EmgFirstHijack,
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

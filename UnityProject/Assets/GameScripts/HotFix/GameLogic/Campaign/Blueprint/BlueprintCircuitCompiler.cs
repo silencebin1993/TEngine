@@ -82,6 +82,9 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>FG1-SIG-02：本次编译实际生效的固件（机器电路自己的固件在前，接入口插入的在后）。</summary>
         public string[] FirmwareIds = Array.Empty<string>();
 
+        /// <summary>EMG4-HIJ-01（FGR-EMG-160）：敌方组装武器的预览——伤害取敌人表（读法不按编译结果改伤害倍率），其余与玩家同一套编译器。</summary>
+        public bool FixedDamage;
+
         /// <summary>FG1-SIG-02：接入口所在格（没有接入口为 0）。AI 驾驶与你接入时相同。</summary>
         public int UplinkSlot;
 

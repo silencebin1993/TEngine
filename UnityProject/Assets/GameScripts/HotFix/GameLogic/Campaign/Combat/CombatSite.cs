@@ -382,6 +382,11 @@ namespace GameLogic.Campaign.Combat
             c.EmgCover = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
             // EMG1-FLASH-01（FG19 FGR-EMG-036）：每台母机的刷写带宽、刷写距离、超出后每再远多少米失效末尾 1 条。
             c.EmgFlashBandwidth = Math.Max(1, (int)Math.Round(Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth)));
+            // EMG4-HIJ-01（FGR-EMG-163）：劫持时长 / 重启耐久 / 同时台数 / 精英与首领入侵抗性下限（1 = 不可劫持，FG19 第 14 节 #8 推荐默认）
+            c.EmgHijackSeconds = Tuning("emg.hijack.seconds", EmgHijackConst.DefaultSeconds);
+            c.EmgHijackHpRatio = Tuning("emg.hijack.hp_ratio", EmgHijackConst.DefaultHpRatio);
+            c.EmgHijackMax = Math.Max(1, (int)Math.Round(Tuning("emg.hijack.max", EmgHijackConst.DefaultMax)));
+            c.EmgHijackEliteResist = Tuning("emg.hijack.elite_resist", 1f);
             c.EmgFlashRange = Mathf.Max(0.5f, Tuning("emg.flash.range", EmgConst.DefaultFlashRange));
             c.EmgFlashStep = Mathf.Max(0.1f, Tuning("emg.flash.step", EmgConst.DefaultFlashStep));
             // EMG3-META-01（FG19 FGR-EMG-040～042）：元程序的复制间隔、循环周期 / 次数 / 锚点、延后秒数 / 链累计上限、每次结算最多执行次数。
@@ -1021,14 +1026,79 @@ namespace GameLogic.Campaign.Combat
         }
 
         /// <summary>
+        /// EMG4-HIJ-01（FG19 FGR-EMG-160，DEBT-EMG3FW01-01）：敌方组装武器与玩家同一套编译器——“组件与固件”列编成程序、登记进本地点程序表，
+        /// 读法换成声明轨（ProgramReading：程序里固件的旧 readFields 一律跳过，单轨），伤害仍取敌人表（FixedDamage）、不加热量；同时登记刷写变体表（劫持时按带宽截断）。
+        /// 空程序（emg.stage = 0 / 没有固件）原样返回旧读法武器。只在敌人生成 / 首领武器参数变化时调用，O(程序长度)。
+        /// </summary>
+        public CombatWeapon EnemyWeapon(CampaignState state, GameConfig.fg.MechEnemy row) => EnemyWeapon(state, row, out _);
+
+        public CombatWeapon EnemyWeapon(CampaignState state, GameConfig.fg.MechEnemy row, out Emergence.EmgProgramResult program)
+        {
+            CombatWeapon w = EnemySpawnBuilder.WeaponOf(state, row);
+            program = null;
+            if (Kernel == null || !EnemyDefs.HasTag(row, EnemyDefs.TagAssembled) || !EnemySpawnBuilder.TryAssembly(row, out string component, out List<string> firmware))
+            {
+                return w;
+            }
+            // 同一地点、同一敌人行、同一难度伤害只编一次（读档对账 / 首领重算时逐个敌人生成，避免重复编译与刷写变体登记；表 / 阶段换了按版本号失效）
+            var key = (row.Id, w.Damage, Emergence.EmgCatalog.Revision);
+            if (_enemyWeapons.TryGetValue(key, out (CombatWeapon W, Emergence.EmgProgramResult P) hit)
+                && (hit.P == null || hit.P.IsEmpty || RegisterProgram(Kernel, hit.P) == hit.W.Program)) // 读档换过程序表：下标对不上就重编
+            {
+                program = hit.P;
+                return hit.W;
+            }
+            CombatWeapon built = BuildEnemyWeapon(w, component, firmware, row, out program);
+            _enemyWeapons[key] = (built, program);
+            return built;
+        }
+
+        private readonly Dictionary<(string, float, int), (CombatWeapon, Emergence.EmgProgramResult)> _enemyWeapons =
+            new Dictionary<(string, float, int), (CombatWeapon, Emergence.EmgProgramResult)>();
+
+        private CombatWeapon BuildEnemyWeapon(CombatWeapon w, string component, List<string> firmware, GameConfig.fg.MechEnemy row, out Emergence.EmgProgramResult program)
+        {
+            BlueprintCircuitPreview p = EnemyPreview(component, firmware);
+            program = Emergence.EmgProgramCompiler.Compile(p);
+            if (program.IsEmpty)
+            {
+                return WithPartField(component, w);
+            }
+            int index = RegisterProgram(Kernel, program);
+            if (index < 0)
+            {
+                Log.Warning($"[CombatSite] {SiteId} 程序表已满，敌方武器 {row.Id} 退回旧读法（DEBT-EMG1KRN01-01）。");
+                return WithPartField(component, w);
+            }
+            CombatWeapon local = w;
+            w.Program = index;
+            w.Reading = w.Mode != CombatWeaponMode.Projectile ? ProgramReading(p, w.Reading, program) : InjectTrimmedReading(p, w.Reading, program);
+            ApplySpawnFlight(ref w, program, component);
+            RegisterFlashVariants(p, local, w, program, always: true);
+            return WithPartField(component, w);
+        }
+
+        /// <summary>敌方组装的预览（只给编译器与读法用：主组件 + 机器固件，没有接入口）。</summary>
+        public static BlueprintCircuitPreview EnemyPreview(string component, IReadOnlyList<string> firmware)
+        {
+            string[] fw = firmware != null ? new List<string>(firmware).ToArray() : Array.Empty<string>();
+            return new BlueprintCircuitPreview
+            {
+                PrimaryId = component, HasCombatOutput = true, FixedDamage = true, HasCannonPrimary = Emergence.EmgRuleCatalog.IsHeavyProjectile(component),
+                FirmwareIds = fw, LocalFirmwareIds = fw,
+            };
+        }
+
+        /// <summary>
         /// EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：会放无人机 / 哨戒桩的武器，按“只刷前 k 条”（全长列表）与“剥离核心后只剩前 k 条”（去核心列表）各登记一把变体武器，
         /// 挂成内核的刷写变体表：无人机开火时内核按它持有的条数（带宽截断 − 距离暂停，剥离后换列表）查表换武器——程序与读法一起截，截到 0 条 = 只有基础攻击。
         /// 只在装配结算时调用（与 <see cref="WithProgram(BlueprintCircuitPreview, CombatWeapon, out Emergence.EmgProgramResult, out string)"/> 同一次），O(程序长度 × 读法重建)；
         /// 同一把武器（完整字节去重）只登记一次。不认内容 ID：条数、核心标记都来自编译结果（FGR-EMG-013）。
         /// </summary>
-        private void RegisterFlashVariants(BlueprintCircuitPreview p, CombatWeapon local, CombatWeapon final, Emergence.EmgProgramResult program)
+        private void RegisterFlashVariants(BlueprintCircuitPreview p, CombatWeapon local, CombatWeapon final, Emergence.EmgProgramResult program, bool always = false)
         {
-            if (Kernel == null || final.Reading.Drones + final.Reading.EscortDrones <= 0)
+            // EMG4-HIJ-01：敌方组装武器总登记（always）——被劫持时按劫持者剩余带宽换成“前 k 条”那一把（FGR-EMG-163 占刷写带宽）
+            if (Kernel == null || (!always && final.Reading.Drones + final.Reading.EscortDrones <= 0))
             {
                 return;
             }
@@ -1112,7 +1182,7 @@ namespace GameLogic.Campaign.Combat
         private static CombatReading FlashReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program, Emergence.EmgProgramResult truncated,
             HashSet<string> dropped)
         {
-            bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
+            bool damageFromCompile = !p.FixedDamage && !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
             // EMG1-FW-01：变体读法的跳过规则按“截断后的程序”定（被截掉的指令不编译，它的固件旧字段与过渡字段都不结算）；截到 0 条 = 全部固件按截断前的单轨口径去掉
             Func<string, string, bool> skip = Emergence.EmgProgramCompiler.LegacySkip(truncated ?? program);
             CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
@@ -1135,7 +1205,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return reading;
             }
-            bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
+            bool damageFromCompile = !p.FixedDamage && !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
             CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile, skip);
             r.DamageScale = reading.DamageScale;
             return r;
@@ -1147,7 +1217,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return reading;
             }
-            bool damageFromCompile = !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
+            bool damageFromCompile = !p.FixedDamage && !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
             // EMG1-FW-01（FGR-EMG-019 单轨）：程序里的固件旧字段 / 旧标签一律跳过，只留根节点效果写端的过渡字段（EmgProgramCompiler.LegacySkip）
             CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
                 Emergence.EmgProgramCompiler.LegacySkip(program));
@@ -1840,6 +1910,10 @@ namespace GameLogic.Campaign.Combat
         public int FlushPendingEvents()
         {
             int rounds = 0;
+            if (!IsDisposed)
+            {
+                Kernel.ExpireAllHijacks(); // EMG4-HIJ-01：劫持中的单位按期满结算（掉落 / 击杀只结算一次），不随卸载原样复活
+            }
             while (!IsDisposed && Kernel.GameplayPending > 0 && rounds < 100000)
             {
                 ProcessEvents();
@@ -2310,6 +2384,11 @@ namespace GameLogic.Campaign.Combat
                     }
                     return;
                 }
+                case CombatEventKind.Hijacked:
+                case CombatEventKind.HijackEnded:
+                case CombatEventKind.HijackRefused:
+                    HandleHijackEvent(state, e); // EMG4-HIJ-01（ADR ⑰）：劫持开始 / 结束 / 被拒，O(1)
+                    return;
                 case CombatEventKind.Healed:
                 {
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);

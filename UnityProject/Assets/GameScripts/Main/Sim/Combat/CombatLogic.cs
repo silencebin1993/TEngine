@@ -80,6 +80,8 @@ namespace BinGames.Sim.Combat
                 StepPlayerUnit(ref d, ref grid, i, dt);
             }
 
+            StepHijacks(ref d); // EMG4-HIJ-01：期满 / 劫持者阵亡 → 自毁（空表一次比较）
+
             // 3. 散热
             for (int i = 0; i < n; i++)
             {
@@ -274,6 +276,11 @@ namespace BinGames.Sim.Combat
             if (IsImmobile(ref d, i))
             {
                 return; // FG10-FAC-01（液氮“冻结”）：冻住的机器 / 炮塔这一步什么都不做（命令保留、计时暂停，解冻后接着执行）
+            }
+            if (d.Behavior[i] == (byte)CombatBehavior.Hijacked)
+            {
+                StepHijackedUnit(ref d, ref grid, i, dt); // EMG4-HIJ-01：劫持体按 AI 教义行动，不读编队命令
+                return;
             }
             if (d.Has(i, CombatUnitFlags.Possessed))
             {
@@ -1609,6 +1616,15 @@ namespace BinGames.Sim.Combat
                 return;
             }
             killerId = EmgResolveKiller(ref d, t, killerId); // EMG1-ENT-01：热更层判死传 0 的外部血量单位，击杀者取最后一次伤害请求的攻击者
+            // EMG4-HIJ-01（ADR ⑰）：发击杀类事件之前——被劫持单位阵亡先还原原阵营（击杀者 = 劫持者，掉落与击杀在这里结算一次）；入侵度满的敌机改为重启为己方
+            if (d.Behavior[t] == (byte)CombatBehavior.Hijacked)
+            {
+                killerId = EmgHijackRelease(ref d, t, killerId);
+            }
+            else if (EmgTryHijack(ref d, t, killerId))
+            {
+                return;
+            }
             d.Set(t, CombatUnitFlags.Alive, false);
             d.Set(t, CombatUnitFlags.Targetable, false);
             d.Hp[t] = 0f;

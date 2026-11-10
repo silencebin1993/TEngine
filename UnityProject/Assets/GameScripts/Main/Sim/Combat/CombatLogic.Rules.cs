@@ -735,6 +735,10 @@ namespace BinGames.Sim.Combat
             byte ov = k switch { 0 => st.Res0, 1 => st.Res1, 2 => st.Res2, 3 => st.Res3, 4 => st.Res4, _ => st.Res5 };
             float floor = k == EmgPhaseConst.ResCorrode && d.PlayerAcidResist > 0f && d.Faction[u] == (byte)CombatFaction.Player && d.Kind[u] == (byte)CombatUnitKind.Machine
                 ? d.PlayerAcidResist : 0f; // ADR ⑦：防腐涂层作己方机器腐蚀抗性下限
+            if (k == EmgPhaseConst.ResHack && HackRanked(ref d, u))
+            {
+                floor = math.max(floor, EliteHackResistOf(ref d)); // EMG4-HIJ-01：精英与首领入侵抗性默认 1（FG19 第 14 节 #8，按单位属性）
+            }
             return math.saturate(math.max(math.max(prof, ov / 255f), floor));
         }
 
@@ -975,6 +979,16 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
+                if (x.Port == EmgConst.PortHack)
+                {
+                    // EMG4-HIJ-01（FGR-EMG-163）：hij.hack 注入写端——命中给敌对目标加入侵度（不依赖物质层；有别的触发读端的这一行由那个事件执行）
+                    if (x.Verb == (byte)EmgVerb.Inject && x.Role > EmgConst.RoleLastRead && (x.Flags & (EmgInstrFlags.Overflow | EmgInstrFlags.RootKernel)) == 0 && x.Amount > 0f
+                        && !EmgOtherTrigger(ref d, n.FirstInstr, end, x.Ordinal, hitPort))
+                    {
+                        EmgHackInject(ref d, t, c, x.Amount);
+                    }
+                    continue;
+                }
                 if (!patchesOn || x.Verb != (byte)EmgVerb.Inject || x.Role <= EmgConst.RoleLastRead || (x.Flags & (EmgInstrFlags.Overflow | EmgInstrFlags.RootKernel)) != 0
                     || (x.Port != EmgConst.PortHeat && x.Port != EmgConst.PortElec && x.Port != EmgConst.PortMag) || !(x.Amount > 0f))
                 {
@@ -1020,6 +1034,20 @@ namespace BinGames.Sim.Combat
                 EmgAnchorAt(ref d, EmgAnchorConst.Inject, c, at, t, x.Ordinal); // EMG3-FUSE-01：被注入能量的单位是落点
             }
             return inj;
+        }
+
+        /// <summary>同一序号的指令有不是 <paramref name="hitPort"/> 的触发读端（这条写端由那个事件执行，不在命中处执行）。</summary>
+        private static bool EmgOtherTrigger(ref CombatData d, int first, int end, byte ordinal, ushort hitPort)
+        {
+            for (int j = first; j < end; j++)
+            {
+                EmgInstr r = d.EmgInstrs[j];
+                if (r.Ordinal == ordinal && r.Role == EmgConst.RoleTrigger && r.Port != hitPort)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>

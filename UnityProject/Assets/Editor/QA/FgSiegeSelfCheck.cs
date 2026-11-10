@@ -134,6 +134,7 @@ namespace GameLogic.EditorTools
                 Step(CheckRetreatLosses);
                 Step(CheckRetreatTime);
                 Step(CheckAnnihilation);
+                Step(CheckHijackedLastMember);
                 Step(CheckFormalJourney);
                 Step(CheckSaveLoad);
                 Step(CheckTimingMatrix);
@@ -1081,6 +1082,45 @@ namespace GameLogic.EditorTools
             bool theaterOff = !SiegeService.StateOf(s).TheaterActive && site.SiegeStructUnitCount == 0 && ReactionAttribution.Current(s, HomeValleyLayout.RegionId, false) == null;
             Expect(removed && h != null && h.EndReason == RaidDirectorService.EndDestroyed && theaterOff && GameSettings.HasSeenGuidanceHook(GuidanceHooks.SiegeFirstDestroyed),
                 $"E3 全歼：队伍移除、发“突袭部队被全歼”（{removed}）；计划进历史结束原因 = {h?.EndReason}（突袭历史 FG6-DEF-08 读它）；没有队伍攻城了 → 剧场关、建筑结构单位移出内核、反应归因场次结束（{theaterOff}）");
+        }
+
+        /// <summary>
+        /// EMG4-HIJ-01 复审（FGR-EMG-163“攻城 / 突袭队伍对账不出错”）：队伍最后一台被劫持 → 劫持期内队伍不收尾、不结算；
+        /// 30 秒期满自毁那次 SiegeKilled 仍记进本次突袭结算（不分流成野外掉落），之后才全歼收尾。
+        /// </summary>
+        private static void CheckHijackedLastMember()
+        {
+            CampaignState s = NewWorld(7013);
+            CombatSite site = Site;
+            Vector2 at = OutsidePoint(s, 40f);
+            TransitGroupRecord g = Arrive(s, at, "foundry", new[] { "foundry.strider" }, new[] { 2 });
+            Seconds(1f);
+            var ids = new List<int>();
+            site.SiegeRaiderIds(Key(g), ids);
+            if (ids.Count != 2)
+            {
+                Fail($"E4 测试准备：突袭队伍展开 {ids.Count} 台（要 2 台）");
+                return;
+            }
+            // 测试捷径：劫持者 = 一台远处的无敌己方机器；入侵度直接加满（hij.hack 命中的累积由 FgEmgHijackSelfCheck C 段覆盖）
+            int hacker = site.Kernel.Spawn(new CombatSpawn
+            {
+                ExtKey = -1, Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.Commanded,
+                Flags = CombatUnitFlags.Alive | CombatUnitFlags.Invulnerable, Position = new double2(at.x + 8f, at.y), Home = new double2(at.x + 8f, at.y),
+                Radius = 0.5f, Speed = 0f, Health = 1000f, MaxHealth = 1000f, Weapon = -1, BehaviorProfile = -1, Priority = 1,
+            });
+            site.Kernel.Kill(ids[1], 0);
+            site.Kernel.AddAccum(ids[0], EmgPhaseConst.Hack, 1f);
+            site.Kernel.Kill(ids[0], hacker);
+            bool hijacked = site.Kernel.TryGetUnit(ids[0], out CombatUnitView v) && v.Behavior == CombatBehavior.Hijacked;
+            Seconds(SiegeCatalog.SyncSeconds * 2f + 0.2f);
+            RaidResultRecord r = RaidResultService.OpenFor(s, g.GroupId);
+            bool held = WorldTransitSystem.Find(s, g.GroupId) != null && SiegeService.IsSieging(g) && r != null && r.EndTick < 0 && r.Killed == 1 && Alive(g) == 0
+                        && site.CountHijackedInGroup(Key(g)) == 1;
+            StepUntil(() => WorldTransitSystem.Find(s, g.GroupId) == null, 40);
+            bool done = WorldTransitSystem.Find(s, g.GroupId) == null && r != null && r.Killed == 2 && r.EndTick >= 0 && site.CountHijackedInGroup(Key(g)) == 0;
+            Expect(hijacked && held && done,
+                $"E4 队伍最后一台被劫持：劫持期内队伍不收尾（劫持 {hijacked}、仍在攻城且结算未结束、已击毁 {r?.Killed} 台：{held}）；期满自毁后那一台记进同一份突袭结算（击毁 {r?.Killed} = 2）再全歼收尾（{done}）");
         }
 
         // ── F 正式旅程（剧情突袭 → 出发 → 沿地形行进 → 到达展开）───────────────────────

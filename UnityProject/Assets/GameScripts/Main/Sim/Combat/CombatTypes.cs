@@ -45,7 +45,10 @@ namespace BinGames.Sim.Combat
         /// 规则计数 256 槽沿用段 15（格式 16 起已是 256）。读取仍认 1～16：没有斑块 / 场（旧区域照旧是区域直到到期；“像物质的区域”转斑块归 EMG2-MAT-02）、累积量 / 相态 / 覆盖全 0、档案下标原样。</summary>
         /// 19 = EMG3-FUSE-01（FG19 FGR-EMG-044、ADR-EMG-001 ②）：程序表允许在全部节点指令之后带落点接线的 Anchored 尾段（程序标志 HasAnchor），程序记录追加熔合线索掩码 ClueMask。
         /// 读取仍认 1～18：没有尾段、掩码 0（旧程序不接线、不计线索；装配重算后按新编译结果追加）。
-        public const int FormatVersion = 19;
+        /// 20 = EMG4-HIJ-01（FG19 FGR-EMG-163 / 211，ADR-EMG-001 ⑩ ⑰：阶段 4 内核状态段一次铺好）：Emg 段追加段 27 信号劫持（被劫持单位 / 劫持者 / 原阵营 / 原行为 / 到期时刻 / 原攻城职能与队伍 /
+        /// 占用的刷写条数 / 原武器），被劫持单位的阵营与行为（Hijacked = 16）照旧在单位段里。熔坑归 EMG4-TER-01（同版本 20 内另开自描述段追加，ADR ⑩“只追加”）；冻结桥依赖的水面未落地，
+        /// 挂 FG18-SEA-01（DEBT-EMG4TER01-01），届时同样追加新段，不留空占位。读取仍认 1～19：没有劫持（段不存在 = 空表）。
+        public const int FormatVersion = 20;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -570,6 +573,9 @@ namespace BinGames.Sim.Combat
         /// <summary>FG10-FAC-01（沉淀巨罐被击毁后的“会爬行的腐蚀液”）：内核在巨罐阵亡处生成的匿名小单位——慢速爬向感知范围内最近的己方地面单位，接触时按节拍腐蚀
         /// （多滩之间不叠加，见 <see cref="CombatClarityUnit.PuddleTick"/>），存活 SplitLife 秒后蒸发。参数取母体的行为参数 Split*。</summary>
         Puddle = 15,
+        /// <summary>EMG4-HIJ-01（FG19 FGR-EMG-163，ADR-EMG-001 ⑰）：被信号劫持的敌机——阵营暂为己方，按 AI 教义行动（攻击射程 / 感知内最近的敌对单位，没有目标时跟随劫持者），
+        /// 不接受编队命令；原阵营、原行为、劫持者、到期时刻记在 <see cref="EmgHijack"/>（快照段 27）。</summary>
+        Hijacked = 16,
     }
 
     /// <summary>单位状态位。</summary>
@@ -883,6 +889,12 @@ namespace BinGames.Sim.Combat
         LinkSevered = 21,
         /// <summary>FG10-FAC-01（灭活无人机）：投放完成——热更层让目标点（净化塔）周围再次污染（走玩法事件，不丢）。Unit=无人机（投放后自毁），Pos=目标点，Value=目标点半径。</summary>
         Repolluted = 22,
+        /// <summary>EMG4-HIJ-01（ADR ⑰）：敌机入侵度满时阵亡 → 不发 Killed，改发本事件（不丢）。Unit=被劫持单位，Other=劫持者，Value=持续秒，Code=原阵营。热更层：记录不算阵亡、掉落与击杀推迟。</summary>
+        Hijacked = 23,
+        /// <summary>EMG4-HIJ-01：劫持结束（紧接着同一单位的 Killed，击杀者 = 劫持者）。Unit=被劫持单位，Other=劫持者，Code=<see cref="EmgHijackConst"/> 结束原因。</summary>
+        HijackEnded = 24,
+        /// <summary>EMG4-HIJ-01：入侵度满时阵亡但劫持不成立（Code=<see cref="EmgHijackConst"/> 拒绝原因：上限满 / 入侵抗性），单位照常阵亡。Unit=阵亡者，Other=击杀者，Value=当前台数，Value2=上限。</summary>
+        HijackRefused = 25,
 
         // ── 提示事件（有上限，可丢弃）──
         /// <summary>己方普通武器开火（Unit=攻击者，Other=目标）。</summary>
@@ -1385,6 +1397,11 @@ namespace BinGames.Sim.Combat
         public int EmgFlashBandwidth;
         public float EmgFlashRange;
         public float EmgFlashStep;
+        /// <summary>EMG4-HIJ-01（fg.TbHomeTuning emg.hijack.seconds / hp_ratio / max / elite_resist）：劫持持续秒、重启耐久比例、每名玩家同时台数、精英与首领的入侵抗性下限（1 = 不可劫持，FG19 第 14 节 #8 推荐默认）。≤ 0 取 <see cref="EmgHijackConst"/> 初值。</summary>
+        public float EmgHijackSeconds;
+        public float EmgHijackHpRatio;
+        public int EmgHijackMax;
+        public float EmgHijackEliteResist;
         /// <summary>EMG1-ENT-01：1 = 实体层开（热更层在 emg.stage ≥ 1 时置位）——机器 / 敌人 / 炮塔阵亡生成残骸，残骸挡弹、减速、可被推动，破片、撞击与位移事件，
         /// 外部血量单位记最后攻击者。0 = 旧行为逐字不变（emg.stage = 0 的正式流程不生成残骸）。</summary>
         public byte EmgEntity;

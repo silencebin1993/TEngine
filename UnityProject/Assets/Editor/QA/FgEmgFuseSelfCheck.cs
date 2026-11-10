@@ -330,7 +330,7 @@ namespace GameLogic.EditorTools
             CombatLoadResult lr = c.Load(snap);
             bool clue = c.TryGetProgram(prog, out EmgProgram cp) && k.TryGetProgram(prog, out EmgProgram kp) && cp.ClueMask == kp.ClueMask && cp.ClueMask != 0u
                         && (cp.Flags & EmgProgramFlags.HasAnchor) != 0;
-            bool same = lr == CombatLoadResult.Ok && c.StateHash() == k.StateHash() && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion == 19;
+            bool same = lr == CombatLoadResult.Ok && c.StateHash() == k.StateHash() && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 19; // EMG4-HIJ-01 升到 20
             bool every = true;
             for (int i = 0; i < 60; i++)
             {

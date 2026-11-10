@@ -20,6 +20,8 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgMetaRun> MetaRun;
         /// <summary>EMG3-SQD-01（FGR-EMG-132）：装信号中继的机器（快照段 25；热更层按结构模块的 sqd.relay scope 声明写，只有这些机器做转发遍历，ADR ④）。</summary>
         public NativeList<EmgRelay> Relays;
+        /// <summary>EMG4-HIJ-01（FGR-EMG-163，ADR ⑰）：被信号劫持的敌机（快照段 27；每名玩家 ≤ emg.hijack.max，空表时每步一次长度比较）。</summary>
+        public NativeList<EmgHijack> Hijacks;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合线索同现计数（下标 = 配方书序号，≤ 32）；热更层按 <see cref="EmgScalars.ClueDirty"/> 取走后清零（可靠计数 + 脏位，不按帧扫描；待取走次数与去重环随快照段 26 存读档，脏位读档时由待取走次数重建）。</summary>
         public NativeArray<int> EmgClue;
         /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
@@ -57,6 +59,7 @@ namespace BinGames.Sim.Combat
             TraitRun = new NativeList<EmgTraitRun>(4, Allocator.Persistent);
             MetaRun = new NativeList<EmgMetaRun>(0, Allocator.Persistent);
             Relays = new NativeList<EmgRelay>(0, Allocator.Persistent);
+            Hijacks = new NativeList<EmgHijack>(0, Allocator.Persistent);
             EmgClue = new NativeArray<int>(EmgConst.ClueLen, Allocator.Persistent); // EMG3-FUSE-01：[0, 32) 待取走的同现次数，其后各配方的环头与最近计过的链号环
             EmgTraitParams = new NativeArray<float4>(EmgTraitConst.Count, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
@@ -139,6 +142,7 @@ namespace BinGames.Sim.Combat
             TraitRun.Dispose();
             MetaRun.Dispose();
             Relays.Dispose();
+            Hijacks.Dispose();
             EmgClue.Dispose();
             EmgTraitParams.Dispose();
             EmgMatters.Dispose();
@@ -213,6 +217,7 @@ namespace BinGames.Sim.Combat
             TraitRun.Clear();
             MetaRun.Clear();
             Relays.Clear();
+            Hijacks.Clear();
             for (int i = 0; i < EmgClue.Length; i++)
             {
                 EmgClue[i] = 0;

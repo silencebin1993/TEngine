@@ -119,7 +119,7 @@ namespace GameLogic.EditorTools
             EmgCompiled c = EmgCatalog.Current;
             string[] need = tests.Concat(new[] { Split, Pierce, Tractor, Boomerang }).ToArray();
             string[] inactive = need.Where(o => !c.OwnerIndex.TryGetValue(o, out int oi) || !c.OwnerActive(oi)).ToArray();
-            Expect(c.Problems.Count == 0 && inactive.Length == 0 && c.EffectiveStage == 3,
+            Expect(c.Problems.Count == 0 && inactive.Length == 0 && c.EffectiveStage >= 3, // EMG4-HIJ-01：阶段 4 起 ≥ 3
                 $"正式表：7 条元程序正式固件（N01、N02、N04～N08，stageGate 3）零问题{(c.Problems.Count > 0 ? "：" + c.Problems[0] : string.Empty)}；元程序 owner 读 prop.heat 条件也走声明轨（meta.* 已接通，条件由元程序求值）"
                 + (inactive.Length > 0 ? "；未生效：" + string.Join("、", inactive) : string.Empty));
         }

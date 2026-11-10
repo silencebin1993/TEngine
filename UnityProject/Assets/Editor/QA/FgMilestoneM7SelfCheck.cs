@@ -269,7 +269,8 @@ namespace GameLogic.EditorTools
 
         // ── C. 缺口清零 ────────────────────────────────────────────────────────────
 
-        private static readonly Regex FirstMilestone = new Regex(@"M(\d+)");
+        // FG-M7S（海与空，独立里程碑）不是 FG-M7：数字后紧跟 S 的不算；[\d] 防止 M17S 回溯成 M1。
+        private static readonly Regex FirstMilestone = new Regex(@"M(\d+)(?![\dS])");
 
         private static int FirstMilestoneOf(string s)
         {

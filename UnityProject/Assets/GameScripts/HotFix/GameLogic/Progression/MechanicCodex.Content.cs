@@ -683,6 +683,11 @@ namespace GameLogic.Progression
             {
                 sb.AppendLine(Line("codex.label.trait", trait));
             }
+            string program = Campaign.Combat.CombatSite.EnemyProgramText(row); // EMG4-HIJ-01（FGR-EMG-162）：图鉴显示敌方程序（读写端口）
+            if (program != null)
+            {
+                sb.AppendLine(program);
+            }
         }
 
         private static void FactionBody(StringBuilder sb, MechanicCodexEntry e)

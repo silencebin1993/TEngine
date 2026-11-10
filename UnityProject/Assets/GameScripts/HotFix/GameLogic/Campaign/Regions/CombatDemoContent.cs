@@ -105,7 +105,7 @@ namespace GameLogic.Campaign.Regions
                     float want = row.WeaponCooldown * (s == CoreBossState.Berserk ? FoundryOutpostCoreBoss.BerserkCooldownMult : 1f);
                     if (!Mathf.Approximately(current.Cooldown, want))
                     {
-                        CombatWeapon w = EnemySpawnBuilder.WeaponOf(state, row);
+                        CombatWeapon w = site.EnemyWeapon(state, row); // EMG4-HIJ-01：首领组装武器同样走程序轨
                         w.Cooldown = want;
                         site.SetUnitWeapon(core, w);
                     }

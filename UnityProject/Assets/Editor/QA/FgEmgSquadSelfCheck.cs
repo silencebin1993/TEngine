@@ -214,7 +214,7 @@ namespace GameLogic.EditorTools
         private static uint Bit(EmgEventKind e) => 1u << (int)e;
 
         /// <summary>“事件 → 放 1 份子载荷”的程序：根节点每条指令 = 读 <paramref name="evs"/>[i] 的 trigger（幅度 = 频道）+ 放子载荷，每条一个子节点。</summary>
-        private static int TrigProg(CombatKernel k, float channel, params EmgEventKind[] evs)
+        internal static int TrigProg(CombatKernel k, float channel, params EmgEventKind[] evs)
         {
             var instrs = new List<EmgInstr>();
             var nodes = new List<EmgNode> { default };
@@ -234,7 +234,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>“命中时广播 <paramref name="channel"/> 号频道脉冲”的程序（与 N30～N32 同形：事件 trigger + evt.ping emit）。</summary>
-        private static int PingProg(CombatKernel k, int channel) =>
+        internal static int PingProg(CombatKernel k, int channel) =>
             k.AddProgram(new EmgProgram { ListenMask = Bit(EmgEventKind.Hit) | Bit(EmgEventKind.Fire) }, new[] { new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = 2 } },
                 new[] { Row(0, Ev(EmgEventKind.Hit), Trig), Row(0, Ev(EmgEventKind.Ping), RoleEmit, channel) });
 

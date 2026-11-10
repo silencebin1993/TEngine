@@ -1660,6 +1660,9 @@ namespace GameLogic.EditorTools
 
         private static bool PendingDecl(EmgSource.Decl d) => Enum.TryParse(d.Role, true, out EmgRole role) && EmgCatalog.IsPendingPort(d.Port, role);
 
+        /// <summary>最近一个已出口的 FG-EMG 阶段（阶段出口卡 E2E 完成时提一级：EMG3-E2E-01 → 3；EMG4-E2E-02 → 4）。</summary>
+        private const int ExitedStage = 3;
+
         /// <summary>未接通端口的承接卡（与 EmgCatalog.PendingPorts 注释同一张映射）。</summary>
         private static string PendingCard(string port, string role)
         {
@@ -1709,9 +1712,10 @@ namespace GameLogic.EditorTools
             switch (port)
             {
                 case "evt.hijack":
+                    return "EMG4-FW-01"; // EMG4-HIJ-01：内核已有生产者（劫持成立时入队），读者随劫持新固件落表
                 case "evt.seize":
                 case "evt.release":
-                    return "EMG4-HIJ-01";
+                    return "EMG4-HIJ-02"; // 夺控与反向接入
                 case "evt.beat":
                     return "EMG3-TMP-01";
                 case "evt.phase":
@@ -1748,7 +1752,9 @@ namespace GameLogic.EditorTools
             // EMG2-MAT-01：阶段 2 已开但端口按承接卡逐张接通（EmgCatalog.PendingPorts 非空）——出口模式核对上一个已出口的阶段；阶段 2 出口由 EMG2-E2E-01 在全部接通后核对。
             // EMG3-CHS-01：阶段 3 开后，出口阶段 = 还有未接通端口的最低阶段 − 1（与原“阶段 2 已开、有未接通端口 → 阶段 1”同一口径）。
             // EMG3-FW-01：evt.react / prop.heat 接通后只剩 grm.anchor（stage 3）→ 核对阶段 2 出口；暴露的 8 个端口都是内核产物（evt.phase 生产者、规则产物斑块），登记为生产者 / 规则产物源
-            int exitStage = stage;
+            // EMG4-HIJ-01：阶段 4 已开（内核状态段与 hij.hack 执行者先行），但阶段 4 的内容（N39～N41、熔坑、夺控）按承接卡逐张落表——出口模式核对最近一个已出口的阶段；
+            // 阶段 4 出口由 EMG4-E2E-02 把 ExitedStage 提到 4 后核对（那时 stage ≤ 4 的端口必须全部有人引用）。
+            int exitStage = Math.Min(stage, ExitedStage);
             foreach (EmgSource.Port pp in EmgCatalog.FromTables().Ports)
             {
                 if (pp != null && EmgCatalog.IsPendingPort(pp.Id, EmgRole.None) && pp.Stage <= stage)

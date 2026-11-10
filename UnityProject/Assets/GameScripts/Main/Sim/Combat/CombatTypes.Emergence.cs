@@ -116,6 +116,8 @@ namespace BinGames.Sim.Combat
         public const int SegRelay = 25;
         /// <summary>EMG3-FUSE-01（格式 19 内追加，自描述段）：段 26 熔合线索去重状态（32 条记录 = 每条配方：环头 + 最近计过的 <see cref="ClueRing"/> 个链号），同链只计一次随档接续。旧档没有这段 = 空。</summary>
         public const int SegClue = 26;
+        /// <summary>EMG4-HIJ-01（快照格式 20，ADR ⑩ ⑰）：段 27 信号劫持（<see cref="EmgHijack"/>，按劫持先后）。读 ≤ 19 版：段不存在 = 没有劫持。</summary>
+        public const int SegHijack = 27;
         /// <summary>EMG3-FUSE-01：熔合线索配方位数与每条配方记住的最近计过的链数（CombatData.EmgClue：[0, 32) 待取走次数、[32, 64) 环头、其后 32 × 8 链号环、规则路径上一次计数的链号与步号低 32 位）。</summary>
         public const int ClueSlots = 32, ClueRing = 8, ClueRuleChain = ClueSlots * 2 + ClueSlots * ClueRing, ClueRuleStep = ClueRuleChain + ClueSlots, ClueLen = ClueRuleStep + ClueSlots;
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
@@ -125,6 +127,8 @@ namespace BinGames.Sim.Combat
         public const ushort PortMetaBase = 200, PortPropHeat = 624, PortPropIntegrity = 626, PortPhsBase = 901;
         /// <summary>EMG3-FW-02（FG19A N30）：ent.wreck 端口码（作 condition：事件处留下 / 有残骸）。</summary>
         public const ushort PortEntWreck = 605;
+        /// <summary>EMG4-HIJ-01（FG19 2.7 节）：hij.hack 写端口码（role = inject：命中给目标加入侵度 phs.hack，FGR-EMG-163）。</summary>
+        public const ushort PortHack = 1201;
         public const byte RoleSense = 3;
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
@@ -1117,5 +1121,39 @@ namespace BinGames.Sim.Combat
 
         /// <summary>[0, 1) 均匀值（取哈希高 24 位）。</summary>
         public static float Unit(uint a, uint b, uint salt, uint seed) => (Hash(a, b, salt, seed) >> 8) * (1f / 16777216f);
+    }
+
+    /// <summary>EMG4-HIJ-01（FG19 FGR-EMG-163，ADR-EMG-001 ⑰）：信号劫持的初值与原因码（数值以 fg.TbHomeTuning emg.hijack.* 为准）。</summary>
+    public static class EmgHijackConst
+    {
+        public const float DefaultSeconds = 30f;
+        public const float DefaultHpRatio = 0.3f;
+        public const int DefaultMax = 2;
+        /// <summary>没有目标时跟随劫持者停在多远（米）。</summary>
+        public const float FollowStop = 3f;
+        /// <summary>HijackEnded.Code：期满自毁 / 劫持者阵亡连带自毁 / 被击毁（含读档后找不到单位）。</summary>
+        public const byte EndExpired = 1, EndHijackerLost = 2, EndDestroyed = 3;
+        /// <summary>HijackRefused.Code：劫持上限已满 / 入侵抗性满（精英、首领默认）。</summary>
+        public const byte RefuseCap = 1, RefuseResist = 2;
+        public const int Fields = 11;
+    }
+
+    /// <summary>EMG4-HIJ-01：一台被劫持的敌机（快照段 27）。按稳定单位 ID 记，压实挪槽位不影响。</summary>
+    [Serializable]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct EmgHijack
+    {
+        public int Unit;
+        public int Hijacker;
+        public double Until;
+        public byte OrigFaction;
+        public byte OrigBehavior;
+        public byte SiegeRole;
+        /// <summary>结束原因（StepHijacks 置好再调 Kill；0 = 被击毁）。</summary>
+        public byte EndReason;
+        public int SiegeGroup;
+        /// <summary>占用劫持者的刷写条数（= 原生程序条数，带宽不够时截到放得下，FGR-EMG-036）。</summary>
+        public int Held;
+        public int OrigWeapon;
     }
 }

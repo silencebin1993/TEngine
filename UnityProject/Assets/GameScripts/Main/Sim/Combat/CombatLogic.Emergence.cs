@@ -505,6 +505,13 @@ namespace BinGames.Sim.Combat
                     used += FlashHeld(ref d, dr);
                 }
             }
+            for (int h = 0; h < d.Hijacks.Length; h++)
+            {
+                if (d.Hijacks[h].Hijacker == ownerId)
+                {
+                    used += d.Hijacks[h].Held; // EMG4-HIJ-01（FGR-EMG-163 / 036）：被劫持的敌机占劫持者的刷写带宽
+                }
+            }
             return used;
         }
 

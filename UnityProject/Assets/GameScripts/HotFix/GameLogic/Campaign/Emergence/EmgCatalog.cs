@@ -168,7 +168,7 @@ namespace GameLogic.Campaign.Emergence
     {
         /// <summary>已实现的最高 FG-EMG 阶段：emg.stage 填得更高时钳到这里（卡片负向“emg.stage 填高于已实现阶段”）。EMG1-KRN-01 铺好阶段 1 内核结构后为 1；
         /// EMG2-MAT-01 铺好阶段 2 内核状态段（快照 17：斑块、累积量与相态、活跃场、规则计数）后提到 2。阶段 2 的端口按承接卡逐张接通，见 <see cref="PendingPorts"/>。</summary>
-        public const int ImplementedStage = 3;
+        public const int ImplementedStage = 4; // EMG4-HIJ-01：阶段 4 内核状态段（快照 20：劫持）铺好、hij.hack 写端由内核劫持执行者接通
 
         /// <summary>
         /// EMG2-MAT-01（按推荐默认执行（2026-11-01），待用户确认）：阶段 2 已开、但内核还没有执行者的端口（按端口，不按内容 ID，FGR-EMG-013）。

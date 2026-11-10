@@ -1059,7 +1059,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1089,8 +1089,9 @@ namespace BinGames.Sim.Combat
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
             bool v17 = format >= 17;
             bool v18 = format >= 18; // EMG3-CHS-01：段 22～24、单位段 + 特性、无人机段 + 电荷
+            bool v20 = format >= 20; // EMG4-HIJ-01：段 27 信号劫持
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1327,6 +1328,10 @@ namespace BinGames.Sim.Combat
             if (v18)
             {
                 WriteStage3Segments(w, sw);
+            }
+            if (v20)
+            {
+                WriteHijackSegment(w, sw);
             }
 
             if (extraBytes > 0)
@@ -1909,9 +1914,125 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegRelay:
                 case EmgConst.SegClue:
                     return ParseStage3Segment(r, sr, ref staging);
+                case EmgConst.SegHijack:
+                    return ParseHijackSegment(r, sr, ref staging);
                 default:
                     return CombatLoadResult.Ok; // 不认识的段（较晚提交新增的）：整段跳过
             }
+        }
+
+        // ── EMG4-HIJ-01：段 27 信号劫持（按劫持先后；每条 11 个字段）──
+        private void WriteHijackSegment(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            sw.Begin(EmgConst.SegHijack, EmgHijackConst.Fields, _d.Hijacks.Length);
+            for (int i = 0; i < _d.Hijacks.Length; i++)
+            {
+                EmgHijack x = _d.Hijacks[i];
+                if (sw.F()) w.Write(x.Unit);
+                if (sw.F()) w.Write(x.Hijacker);
+                if (sw.F()) w.Write(x.Until);
+                if (sw.F()) w.Write(x.OrigFaction);
+                if (sw.F()) w.Write(x.OrigBehavior);
+                if (sw.F()) w.Write(x.SiegeRole);
+                if (sw.F()) w.Write(x.EndReason);
+                if (sw.F()) w.Write(x.SiegeGroup);
+                if (sw.F()) w.Write(x.Held);
+                if (sw.F()) w.Write(x.OrigWeapon);
+                if (sw.F()) w.Write(0); // 预留：同版本 20 内追加字段从这里之后写
+                sw.EndRecord();
+            }
+            sw.End();
+        }
+
+        private static CombatLoadResult ParseHijackSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            if (n > 1024)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            var seen = new System.Collections.Generic.HashSet<int>();
+            for (int i = 0; i < n; i++)
+            {
+                sr.Record(i);
+                var x = new EmgHijack { OrigFaction = (byte)CombatFaction.Hostile, OrigWeapon = -1 };
+                if (sr.F()) x.Unit = r.ReadInt32();
+                if (sr.F()) x.Hijacker = r.ReadInt32();
+                if (sr.F()) x.Until = r.ReadDouble();
+                if (sr.F()) x.OrigFaction = r.ReadByte();
+                if (sr.F()) x.OrigBehavior = r.ReadByte();
+                if (sr.F()) x.SiegeRole = r.ReadByte();
+                if (sr.F()) x.EndReason = r.ReadByte();
+                if (sr.F()) x.SiegeGroup = r.ReadInt32();
+                if (sr.F()) x.Held = r.ReadInt32();
+                if (sr.F()) x.OrigWeapon = r.ReadInt32();
+                if (sr.F()) r.ReadInt32();
+                if (!sr.RecordOk || x.Unit <= 0 || !seen.Add(x.Unit) || double.IsNaN(x.Until) || double.IsInfinity(x.Until) || x.OrigFaction > (byte)CombatFaction.Neutral
+                    || x.OrigBehavior > (byte)CombatBehavior.Hijacked || x.Held < 0 || x.EndReason > EmgHijackConst.EndDestroyed)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Hijacks.Add(x);
+            }
+            return CombatLoadResult.Ok;
+        }
+
+        // ── EMG4-HIJ-01 公开读数（热更层悬停 / 自检；O(劫持数)）──
+        public int HijackCount => _d.Hijacks.Length;
+
+        public int HijackMax => CombatLogic.HijackMaxOf(ref _d);
+
+        /// <summary>地点卸载 / 撤离前：还在劫持中的单位一律按期满自毁结算（HijackEnded 期满 + Killed，击杀者 = 劫持者），不随内核释放而“原样复活”。O(劫持数)。返回结算台数。</summary>
+        public int ExpireAllHijacks()
+        {
+            int n = 0;
+            for (int h = _d.Hijacks.Length - 1; h >= 0; h--)
+            {
+                if (h >= _d.Hijacks.Length)
+                {
+                    continue;
+                }
+                EmgHijack r = _d.Hijacks[h];
+                int s = _d.SlotOf(r.Unit);
+                if (s < 0 || !_d.IsAlive(s))
+                {
+                    _d.Hijacks.RemoveAt(h);
+                    continue;
+                }
+                r.EndReason = EmgHijackConst.EndExpired;
+                _d.Hijacks[h] = r;
+                CombatLogic.Kill(ref _d, s, r.Hijacker);
+                n++;
+            }
+            if (n > 0)
+            {
+                Touch();
+            }
+            return n;
+        }
+
+        /// <summary>原属攻城 / 突袭队伍 <paramref name="group"/>、此刻被劫持着的台数（O(劫持数)）：SiegeService 在它们期满结算前不收尾这支队伍（FGR-EMG-163“队伍对账不出错”）。</summary>
+        public int CountHijackedInGroup(int group)
+        {
+            int n = 0;
+            for (int h = 0; h < _d.Hijacks.Length; h++)
+            {
+                if (_d.Hijacks[h].SiegeGroup == group)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        /// <summary>单位 <paramref name="unitId"/> 是否被劫持：劫持者、剩余游戏秒、占用刷写条数。</summary>
+        public bool TryGetHijack(int unitId, out int hijacker, out float remaining, out int held)
+        {
+            int h = CombatLogic.EmgHijackIndexOf(ref _d, unitId);
+            hijacker = h >= 0 ? _d.Hijacks[h].Hijacker : 0;
+            remaining = h >= 0 ? (float)System.Math.Max(0.0, _d.Hijacks[h].Until - _d.Scalars[0].Time) : 0f;
+            held = h >= 0 ? _d.Hijacks[h].Held : 0;
+            return h >= 0;
         }
 
         private static CombatLoadResult ParsePending(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
