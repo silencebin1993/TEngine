@@ -5217,6 +5217,8 @@ namespace GameLogic.EditorTools
                 Check(saved.Success && reg.Success, $"测试捷径：搬运机回厂改造为“切割束 + 拖尾 + 寻的”（保存 {saved.Success}，登记 {reg.Success}{(reg.Success ? "" : "：" + reg.Message)}）");
             }
             SessionState.SetFloat(K + "JammerHp", jammer != null ? jammer.Health : -1f);
+            SessionState.SetInt(K + "TrailMachine", refit);
+            SessionState.SetString(K + "ZoneFeed0", (site?.Kernel.ReadingFeedCountOf(BinGames.Sim.Combat.CombatConst.ReadingFeedZone) ?? 0).ToString());
             SessionState.SetString(K + "RuinsTicks", GameClock.Ticks.ToString());
             city?.SquadCommands.DebugSelectMany(ids);
             city?.SquadCommands.IssueAttack(Campaign.Regions.FracturedCityLayout.JammerSpawnId, paused: false);
@@ -5252,17 +5254,24 @@ namespace GameLogic.EditorTools
                 }
             }
             Check(maxGap < 0.5f, $"机器表现对象跟随内核位置插值（最大偏差 {maxGap:F3} 米 < 一步位移）");
-            // FG2-FW-02（DEBT-FG2FW01-01）：固件读法在真实 Play 的地点内核里生效——带驻留 / 拖尾读法的机器开过火就留下区域，画面上画出来。
-            bool zoneReading = site != null && MachineRegistry.AllRecords.Any(m => m != null && m.IsAlive && m.RegionId == Campaign.Regions.FracturedCityLayout.RegionId
-                && site.TryGetMachineWeapon(m.LogicId, out Campaign.Combat.MachineWeaponInfo mw) && mw.WeaponIndex >= 0
-                && site.Kernel.TryGetWeapon(mw.WeaponIndex, out BinGames.Sim.Combat.CombatWeapon kw) && kw.Reading.ZoneSeconds > 0f);
-            long zonesSpawned = site?.Kernel.Counters.ZonesSpawned ?? 0;
+            // FG2-FW-02（DEBT-FG2FW01-01）：固件读法在真实 Play 的地点内核里生效——带拖尾的机器开过火就留下区域，画面上画出来。
+            // EMG4-FUSE-02（FG-GAP-205）起拖尾的过渡读法区域退役，改由内核沿途排放真斑块（CombatLogic.EmgTrailEmit）：数这台机器排出的斑块与“区域展开”读法进给。
+            int trailMachine = SessionState.GetInt(K + "TrailMachine", 0);
+            int trailUnit = site != null && site.TryGetMachineUnit(trailMachine, out int tu) ? tu : 0;
+            int trailPatches = 0;
+            for (int j = 0; site != null && trailUnit != 0 && j < site.Kernel.PatchSlots; j++)
+            {
+                if (site.Kernel.TryGetPatch(j, out BinGames.Sim.Combat.CombatZone pz) && pz.Radius > 0f && pz.Owner == trailUnit)
+                {
+                    trailPatches++;
+                }
+            }
+            long feed = (site?.Kernel.ReadingFeedCountOf(BinGames.Sim.Combat.CombatConst.ReadingFeedZone) ?? 0) - long.Parse(SessionState.GetString(K + "ZoneFeed0", "0"));
             int fx = site?.Renderer?.LastEffectInstances ?? -1;
-            Write($"  - 读法：生成区域 {zonesSpawned} 块，当前 {site?.Kernel.ZoneCount} 块，画面区域 / 无人机实例 {fx}");
-            int zonesNow = site?.Kernel.ZoneCount ?? 0;
+            Write($"  - 读法：拖尾机器排出的斑块当前 {trailPatches} 块，区域展开读法进给 {feed} 次，画面区域 / 无人机实例 {fx}");
             bool gpu = site?.Renderer != null && site.Renderer.GpuAvailable;
-            Check(zoneReading && zonesSpawned > 0 && (!gpu || zonesNow == 0 || fx >= zonesNow),
-                $"真实 Play 里带拖尾读法的机器打出区域（共 {zonesSpawned} 块，当前 {zonesNow} 块，画面实例 {fx}{(gpu ? "" : "，无 GPU 不画")}）");
+            Check(trailUnit != 0 && trailPatches > 0 && feed > 0 && (!gpu || fx >= trailPatches),
+                $"真实 Play 里带拖尾读法的机器打出区域（排出斑块 {trailPatches} 块，读法进给 {feed} 次，画面实例 {fx}{(gpu ? "" : "，无 GPU 不画")}）");
             Next(230, "FG2-FW-03：光标移到带状态标签的单位上（头顶图标 + 悬停读数）");
         }
 

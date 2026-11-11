@@ -76,6 +76,20 @@ namespace GameLogic.EditorTools.JourneyBots
             JourneyCommon.PureWait(S("w2_plan", "暴露回到 30 以上：突袭导演排定第二波（普通 1 级，按最短间隔排在第一波之后至少 1 个游戏日）", 900, null, TickSecondPlanned)),
             S("exp_off2", "左键点信号塔，勾上“关闭信号塔主动广播”（不让第二波在出发前升级），点“关闭”", 60, null, c => D.TickBroadcast(c, true), retries: 2),
             S("fw_ready", "火墙就绪、第二波已排定（之后出发远征）", 10, null, TickFirewallReady),
+            // EMG4-E2E-01（按推荐默认执行 2026-11-11，待用户确认）：EMG4-FUSE-02 起燃迹排真明火、物质不认敌我，第二波后火墙余火并成半径约 8 米的一片，
+            // 屏障圈里离燃迹炮塔 4～9 米的两座实验室都会烧成受损、不能再拆（DEBT-EMG4E2E01-03 → FG15-BAL-01）。研究到这里都做完了：
+            // 按规则（不赌火势临界）趁还没点火先把两座实验室拆了，全额返还的废料留着补火墙 / 重建；后面 fw2s_* / scr_* 找不到实验室就按原逻辑跳过。
+            S("lab_open", "研究都做完了、燃迹火墙会烧到圈里的建筑：趁还没点火，按建造键打开建造模式（拆掉两座用不着的仿真实验室换废料）", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
+            S("lab_demo", "按拆除模式键（默认 X）", 10, c => JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, true),
+                c => c.StepElapsed < 0.4 ? StepOutcome.Wait : FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("进入拆除模式") : StepOutcome.Retry("没进拆除模式"), retries: 1),
+            S("lab1_ask", "左键点第一座仿真实验室：标记拆除（有后果时先弹确认框写明）", 20, c => { c.SetInt("eDemo1", 1); c.Set("eDemo1.lab", "lab1"); }, c => TickLabDemolishAsk(c, "eDemo1"), retries: 2),
+            S("lab1_ok", "弹了确认框就点“确认”：机器上门拆、全额返还废料", 10, c => { if (UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c, "eDemo1"), retries: 1),
+            S("lab2_ask", "左键点第二座仿真实验室：标记拆除（有后果时先弹确认框写明）", 20, c => { c.SetInt("eDemo2", 1); c.Set("eDemo2.lab", "lab2"); }, c => TickLabDemolishAsk(c, "eDemo2"), retries: 2),
+            S("lab2_ok", "弹了确认框就点“确认”：机器上门拆、全额返还废料", 10, c => { if (UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c, "eDemo2"), retries: 1),
+            S("lab_demo_off", "再按拆除模式键退出", 10, c => JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, false),
+                c => !FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("退出拆除模式") : c.StepElapsed < 0.4 ? StepOutcome.Wait : StepOutcome.Retry("没退出"), retries: 1),
+            S("lab_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+            JourneyCommon.PureWait(S("lab_gone", "等机器上门拆完两座实验室、全额返还废料", 600, c => c.SetInt("labScrap0", St.Scrap), TickLabsGone)),
             S("prep_open", "左键点信号塔打开远征准备面板", 15, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeSignalTower, !GameRoot.HomeValley.IsExpeditionPrepPanelOpen),
                 FgjM1Journey.TickPrepOpen, retries: 2),
             S("prep_pick", "勾选出征名单（两台新机 + 一台满足人数）", 20, c => { c.SetInt("wetM", c.GetInt("m1")); c.SetInt("shockM", c.GetInt("m2")); }, FgjM2Common.TickRosterPicked),
@@ -86,19 +100,11 @@ namespace GameLogic.EditorTools.JourneyBots
             S("w2_alert", "远征途中家园遇袭：远征 HUD 左上弹出紧急通知（倒计时、家园状态小窗：核心耐久、关键建筑、来袭敌人）", 900, null, c => TickAwayAlert(c, "plan2")),
             S("w2_jump", "点“跳回家园（H）”：信号回到归还核心、镜头飞回家园（远征队交给 AI）", 30, c => FgjM1Journey.ClickUi(c, D.RaidHost, "RaidAwayJump"), TickJumpedHome, retries: 1),
             S("exp_on2", "左键点信号塔，取消“关闭信号塔主动广播”（引来第三波），点“关闭”", 60, null, c => D.TickBroadcast(c, false), retries: 2),
-            S("w2_turret", "看预警条上第二波的来袭方向，建造模式里左键点离它最近、带接入口的那座炮塔，通用面板上点“炮塔…”：炮塔面板打开", 30, ChooseUplinkTurret,
-                c => M.TickSubPanel(c, "upt", "PrTurret", () => TurretPanelUIToolkit.IsOpen, "炮塔面板打开"), retries: 2),
-            S("w2_uplink", "炮塔面板点“接入”：信号进入这座炮塔（突袭条换成炮塔读数：热量、耐久、补给）", 15, c => FgjM1Journey.ClickUi(c, D.TurretHost, "TurretUplink"), TickTurretUplinked, retries: 1),
-            S("w2_unpanel", "Esc 关掉炮塔面板与通用面板，按建造键关掉建造模式（左键交给炮塔开火）", 20, null, TickUplinkCleared, retries: 1),
-            S("w2_fire", "第二波到达：左键点进攻的敌人，接入的炮塔亲自瞄准开火（左键 = 亲自开火）；直到这一波被打退", 500, null, TickManualFire),
-            S("w2_leave", "按接入键离开炮塔：信号回到归还核心", 10, c => JourneyInput.PressAction(GameActionId.ToggleCameraView), TickTurretLeft, retries: 1),
-            S("w3_plan", "留在家园等第三波排定（按 3 倍速键；暴露回到 30 以上，导演按最短间隔排在第二波之后至少 1 个游戏日）", 900,
-                c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), TickThirdPlanned),
-            // 修复轮续：第三波排定后不再关广播（上一版的 exp_off3 去掉）——补好火墙之后家园照常高耗电，暴露继续涨，第三波在预警前并成 2 级；
-            // 1 级的第三波在两道火墙下一座建筑都拆不掉（续跑实测：全部击毁、损失 0、爆燃 61 次），“被摧毁的建筑已经自动重建”就无从证明。
+            // EMG4-E2E-01 续做轮：补火墙挪到跳回家园之后、第二波到达之前（预警条已经写明来袭方向）——燃迹火墙的余火在第二波后会烧掉圈里的炮塔 / 屏障，
+            // 自动重建随即用掉库存废料；等波次打完再补，废料总是 0（续跑实测 0 / 47 等满 600 秒）。拆实验室返还的废料趁这时用上，第二波就能踩到第二道油膜带。
             // ── 补火墙（修复轮续：第二波的抵达点和第一波不同——种子 42 第一波从西南来、第二波从西北来，西南那道油膜带离第二波抵达点 9 米多，敌人踩不到油；
             //    玩家在家看到这一点，在第二波抵达点旁补一道：离它最近的炮塔也换上燃迹、旁边放陷阱发射器朝抵达点铺油，燃油从第一道火墙的管线接过去）──
-            S("fw2_plan", "第二波的抵达点不在第一道油膜带旁时：按第二波的抵达点再规划一道火墙（离它最近的炮塔改装成燃迹、旁边放陷阱发射器朝抵达点铺油膜带，燃油管线从第一道火墙的管线接过去）；在旁边就跳过", 30, null, TickFirewall2Plan),
+            S("fw2_plan", "看预警条上第二波的抵达点，不在第一道油膜带旁时：按它再规划一道火墙（离它最近的炮塔改装成燃迹、旁边放陷阱发射器朝抵达点铺油膜带，燃油管线从第一道火墙的管线接过去）；在旁边就跳过", 30, NoteArrival2, TickFirewall2Plan),
             S("fw2s_open", "补火墙的废料不够时：按建造键打开建造模式（够就跳过）", 10, c => { if (c.GetInt("fwDemo") == 1) { FgjM3Common.PressBuild(true); } },
                 c => c.GetInt("fwDemo") == 0 ? StepOutcome.Done("跳过") : FgjM3Common.TickBuild(c, true), retries: 1),
             S("fw2s_demo", "按拆除模式键（默认 X）", 10, c => { if (c.GetInt("fwDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, true); } },
@@ -129,6 +135,16 @@ namespace GameLogic.EditorTools.JourneyBots
             S("fw2_build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
             S("fw2_lay", "第二道火墙在工作：陷阱发射器铺油膜带，燃迹炮塔补给装满", 120, null,
                 c => c.GetInt("fw2.on") == 0 ? StepOutcome.Done("跳过") : TickFirewallWorking(c, "trap2", "fwt2")),
+            S("w2_turret", "看预警条上第二波的来袭方向，建造模式里左键点离它最近、带接入口的那座炮塔，通用面板上点“炮塔…”：炮塔面板打开", 30, ChooseUplinkTurret,
+                c => M.TickSubPanel(c, "upt", "PrTurret", () => TurretPanelUIToolkit.IsOpen, "炮塔面板打开"), retries: 2),
+            S("w2_uplink", "炮塔面板点“接入”：信号进入这座炮塔（突袭条换成炮塔读数：热量、耐久、补给）", 15, c => FgjM1Journey.ClickUi(c, D.TurretHost, "TurretUplink"), TickTurretUplinked, retries: 1),
+            S("w2_unpanel", "Esc 关掉炮塔面板与通用面板，按建造键关掉建造模式（左键交给炮塔开火）", 20, null, TickUplinkCleared, retries: 1),
+            S("w2_fire", "第二波到达：左键点进攻的敌人，接入的炮塔亲自瞄准开火（左键 = 亲自开火）；直到这一波被打退", 500, null, TickManualFire),
+            S("w2_leave", "按接入键离开炮塔：信号回到归还核心", 10, c => JourneyInput.PressAction(GameActionId.ToggleCameraView), TickTurretLeft, retries: 1),
+            S("w3_plan", "留在家园等第三波排定（按 3 倍速键；暴露回到 30 以上，导演按最短间隔排在第二波之后至少 1 个游戏日）", 900,
+                c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), TickThirdPlanned),
+            // 修复轮续：第三波排定后不再关广播（上一版的 exp_off3 去掉）——补好火墙之后家园照常高耗电，暴露继续涨，第三波在预警前并成 2 级；
+            // 1 级的第三波在两道火墙下一座建筑都拆不掉（续跑实测：全部击毁、损失 0、爆燃 61 次），“被摧毁的建筑已经自动重建”就无从证明。
             S("w2_back", "按跳回上一台机器键（默认 J）：跨地点远距离跳转回远征队", 30, c => JourneyInput.PressAction(GameActionId.JumpPreviousMachine), TickJumpedBack, retries: 2),
 
             // ── 第三波：留在远征队，家园自己守 ──
@@ -572,6 +588,24 @@ namespace GameLogic.EditorTools.JourneyBots
                                    (demo ? "；废料不够：先拆掉第二座仿真实验室（研究都做完了，全额返还）" : string.Empty));
         }
 
+        private static StepOutcome TickLabsGone(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            BuildingRecord l1 = P.Bld(c, "lab1");
+            BuildingRecord l2 = P.Bld(c, "lab2");
+            if (l1 == null && l2 == null)
+            {
+                return StepOutcome.Done($"两座仿真实验室都拆完了：废料 {c.GetInt("labScrap0")} → {St.Scrap}（全额返还，留着补火墙 / 重建）");
+            }
+            int tick = (int)(c.StepElapsed / 30);
+            if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
+            {
+                c.SetInt(FgjM3Common.SK(c, "log"), tick);
+                c.Log($"等拆实验室：第一座 {l1?.ConstructionState.ToString() ?? "已拆"}、第二座 {l2?.ConstructionState.ToString() ?? "已拆"}；废料 {St.Scrap}");
+            }
+            return StepOutcome.Wait;
+        }
+
         /// <summary>废料够 <paramref name="need"/> 了就过（回收站把敌方残骸拆成废料）；每 30 秒记一行。</summary>
         private static StepOutcome TickScrapFor(JourneyContext c, int need)
         {
@@ -872,17 +906,23 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>第二波来袭方向（预警条那一行的抵达点）最近、蓝图带接入口的炮塔（开局标好的接入口：六座炮塔都能接入；燃迹炮塔也能）。</summary>
+        /// <summary>第二波预警条上的抵达点记下来（补火墙 fw2_plan 用；这一波打完计划记录就清掉了）。</summary>
+        private static void NoteArrival2(JourneyContext c)
+        {
+            RaidPlanRecord p2 = RaidDirectorService.FindPlan(St, c.Get("plan2"));
+            if (p2 != null)
+            {
+                c.Set("ap2.x", ((float)p2.ArriveX).ToString("R", CultureInfo.InvariantCulture));
+                c.Set("ap2.y", ((float)p2.ArriveY).ToString("R", CultureInfo.InvariantCulture));
+            }
+        }
+
         private static void ChooseUplinkTurret(JourneyContext c)
         {
             CampaignState s = St;
             RaidPlanRecord p2 = RaidDirectorService.FindPlan(s, c.Get("plan2"));
             Vector2 at = p2 != null ? new Vector2((float)p2.ArriveX, (float)p2.ArriveY) : D.CoreCenter(s);
-            if (p2 != null)
-            {
-                // 第二波预警条上的抵达点：这一波打完计划记录就清掉了，补火墙（fw2_plan）要用。
-                c.Set("ap2.x", at.x.ToString("R", CultureInfo.InvariantCulture));
-                c.Set("ap2.y", at.y.ToString("R", CultureInfo.InvariantCulture));
-            }
+            NoteArrival2(c);
             BuildingRecord best = null;
             foreach (BuildingRecord b in s.BuildingRecords)
             {
@@ -1227,7 +1267,9 @@ namespace GameLogic.EditorTools.JourneyBots
             ConfirmRequest r = UiConfirmDialog.Current;
             if (r == null)
             {
-                return StepOutcome.Retry($"拆除模式点实验室既没标记拆除也没弹确认框（“{HomeValleyBuildMode.Current?.StatusText}”）");
+                BuildingRecord other = P.Bld(c, key == "lab2" ? "lab1" : "lab2");
+                return StepOutcome.Retry($"拆除模式点实验室既没标记拆除也没弹确认框（“{HomeValleyBuildMode.Current?.StatusText}”）；{ScrapLabName(key)} 状态 {lab.ConstructionState}、耐久 {lab.Health:0}/{BuildingOps.MaxDurability(lab.BuildingTypeId):0}、"
+                                         + $"上次挨打第 {lab.LastHitTick} 步（现第 {GameClock.Ticks} 步）；另一座 {other?.ConstructionState}、耐久 {other?.Health:0}");
             }
             return StepOutcome.Done($"确认框“{r.Title}”：{string.Join("；", r.Consequences.Concat(r.Lines))}");
         }

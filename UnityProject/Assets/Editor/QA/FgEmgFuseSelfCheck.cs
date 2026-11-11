@@ -423,6 +423,7 @@ namespace GameLogic.EditorTools
 
             // C13：物质不认敌我——行进中开火，弹道上站着一台己方机器，段点照排（原 EmgFriendlyOn 跳过，已删）
             float onAlly;
+            long feed;
             using (var k = NewKernel())
             {
                 CombatWeapon w = WeaponOf(k, P("fw_burntrail"), out _);
@@ -434,10 +435,14 @@ namespace GameLogic.EditorTools
                 {
                     k.Step(Dt, k.Time + Dt);
                 }
+                long feed0 = k.ReadingFeedCountOf(CombatConst.ReadingFeedZone);
                 k.FireAt(a, t, k.Time);
                 k.Step(Dt, k.Time + Dt);
                 onAlly = FireNear(k, new double2(0, 4.6), 1f);
+                feed = k.ReadingFeedCountOf(CombatConst.ReadingFeedZone) - feed0;
             }
+            // EMG4-E2E-01 修复轮（冒烟发现）：过渡读法 trail 退役后沿途排放也要给“区域展开”读法反馈（音效 / 弹字），一发只报一次
+            Expect(feed == 1, $"C13b 沿途排放给读法反馈：一发燃迹排了多段，区域展开读法进给 {feed} 次（= 1）");
             Expect(onAlly > 0f, $"C13 物质不认敌我：行进中开火、弹道上站着己方机器，它身边 1 米内照样排了明火 {onAlly:0.00}（> 0；段距 1.5 米，FG19A 第 2 节第 33 行）");
         }
 

@@ -1021,7 +1021,8 @@ namespace GameLogic.EditorTools.JourneyBots
             bool slow = GameClock.SlowMotionStarts > c.GetInt("slow0");
             bool nudge = CameraNudge.Starts > c.GetInt("nudge0");
             bool codex = MechanicCodex.IsUnlocked(MechanicCodex.ReactionEntryId(Conduct));
-            ReactionLogEntry entry = ReactionLog.All.LastOrDefault(e => e.ReactionId == Conduct);
+            // 核“首次”那条：等弹字的几帧里两台可能又打出短路、追加一条非首次的“×N”（快进下更容易），取最后一条会误判（EMG4-E2E-01 修复轮）
+            ReactionLogEntry entry = ReactionLog.All.FirstOrDefault(e => e.ReactionId == Conduct && e.First) ?? ReactionLog.All.LastOrDefault(e => e.ReactionId == Conduct);
             string line = entry != null ? ReactionLog.Describe(St, entry) : string.Empty;
             bool logOk = entry != null && entry.Source.Kind == BinGames.Sim.Combat.CombatUnitKind.Machine && (entry.Source.LogicId == a || entry.Source.LogicId == b)
                          && entry.FirmwareIds.Length >= 1 && entry.First;
@@ -1138,7 +1139,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 if (chosen == null)
                 {
-                    return StepOutcome.Fail($"找不到带上组合两台的出征名单（可出征 {eligible.Count} 台）");
+                    ExpeditionDepartureService.RosterValidation v = ExpeditionDepartureService.ValidateRoster(s, eligible.Select(m => m.LogicId).Union(new[] { a, b }).ToList());
+                    return StepOutcome.Fail($"找不到带上组合两台的出征名单（可出征 {eligible.Count} 台：{string.Join("、", snap.Machines.Select(m => $"#{m.LogicId}{(m.Eligible ? "" : "不可")}"))}；组合 #{a}/#{b}；"
+                                            + $"全带上校验 {v.Success}、武器 {v.HasWeapon}、货位 {v.TotalCargoSlots}、带宽 {v.TotalBandwidth}/{v.BandwidthCapacity}、阻塞“{string.Join(" / ", v.BlockingReasons)}”）");
                 }
                 c.Set("roster", string.Join(",", chosen.Select(x => x.ToString(CultureInfo.InvariantCulture))));
                 c.SetInt("rosterIdx", 0);

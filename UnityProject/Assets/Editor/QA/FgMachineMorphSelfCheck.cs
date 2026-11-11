@@ -299,9 +299,15 @@ namespace GameLogic.EditorTools
             // 组件目录必须 = 有机身状态的 6 个 + 登记待补的，新增组件两边都没登记会被这里拦下。
             var catalogCombat = ComponentCatalog.All.Values.Where(c => c.Slot == "主组件" || c.Slot == "功能组件").Select(c => c.Id).OrderBy(x => x).ToList();
             var morphComps = MachineMorph.MorphComponents.Concat(MachineMorph.PendingMorphComponents).OrderBy(x => x).ToList();
-            Expect(MachineMorph.MorphComponents.Count == 16 && MachineMorph.PendingMorphComponents.Count == 0 && catalogCombat.SequenceEqual(morphComps)
-                   && MachineMorph.MorphComponents.Distinct().Count() == 16,
-                $"作战组件 {catalogCombat.Count} 个（{string.Join("、", catalogCombat)}）= 有机身状态的 {MachineMorph.MorphComponents.Count} 个（名表 16 个全部；登记待补 {MachineMorph.PendingMorphComponents.Count} 个）");
+            // EMG4-LOOT-01 的 4 个阵营标志作战组件登记待补，要求每个都写在 DEBT-EMG4E2E01-02 里且该行未关（关了就得把它们挪进 MorphComponents）。
+            string repo = FgProductionSelfCheck.LocateRepo();
+            string regPath = repo == null ? null : Path.Combine(repo, "production", "design", "full-game", "FG-GAP-REGISTER.md");
+            string debt = (regPath != null && File.Exists(regPath) ? File.ReadAllLines(regPath, Encoding.UTF8) : Array.Empty<string>())
+                .FirstOrDefault(l => l.StartsWith("| DEBT-EMG4E2E01-02 ", StringComparison.Ordinal)) ?? string.Empty;
+            bool pendingLogged = MachineMorph.PendingMorphComponents.All(debt.Contains) && debt.TrimEnd().EndsWith("| Open |", StringComparison.Ordinal);
+            Expect(MachineMorph.MorphComponents.Count == 16 && pendingLogged && catalogCombat.SequenceEqual(morphComps)
+                   && MachineMorph.MorphComponents.Distinct().Count() == 16 && !MachineMorph.PendingMorphComponents.Intersect(MachineMorph.MorphComponents).Any(),
+                $"作战组件 {catalogCombat.Count} 个（{string.Join("、", catalogCombat)}）= 有机身状态的 {MachineMorph.MorphComponents.Count} 个（名表 16 个全部）+ 登记待补 {MachineMorph.PendingMorphComponents.Count} 个（{string.Join("、", MachineMorph.PendingMorphComponents)}，DEBT-EMG4E2E01-02 Open {pendingLogged}）");
             var fuseOnly = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompGunId, FirmwareIds = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwSplitId } };
             var mixed = new BlueprintCircuitPreview { PrimaryId = ComponentCatalog.CompGunId, FirmwareIds = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwTrailId, FirmwareCatalog.FwOverloadId } };
             var noComp = new BlueprintCircuitPreview { PrimaryId = null, UtilityId = null, FirmwareIds = new[] { FirmwareCatalog.FwTrailId } };

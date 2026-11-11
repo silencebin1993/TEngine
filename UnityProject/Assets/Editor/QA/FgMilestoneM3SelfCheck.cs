@@ -458,7 +458,9 @@ namespace GameLogic.EditorTools
             string row = reg.Split('\n').FirstOrDefault(l => l.StartsWith("| DEBT-FG3GEN01-08 ", StringComparison.Ordinal)) ?? string.Empty;
             // FG7-ENV-04：净化塔降级 / 化工再污染的写入口（PurificationService）——同样走 HomeGridMap.SetPollution，区块差异进存档、TerrainEditRevision 触发底图按覆盖表重画（DEBT-FG3GEN01-08 的机制），
             // 底图随净化变化由 FgPurificationSelfCheck M1 断言。
-            string[] allowed = { "ProductionService.cs", "PurificationService.cs" };
+            // EMG4-TER-02：战痕 / 熔坑写格网（GroundMarkService）——同样走 HomeGridMap.SetTerrain → Touch 升 TerrainEditRevision、进区块差异，底图按覆盖表重画；
+            // 底图覆盖含战痕格由 FgEmgGroundMarkSelfCheck F1 断言。
+            string[] allowed = { "ProductionService.cs", "PurificationService.cs", "GroundMarkService.cs" };
             List<string> unknown = writers.Where(w => !allowed.Contains(w)).ToList();
             string mapCode = ReadRepo("TEngine/UnityProject/Assets/GameScripts/HotFix/GameLogic/UI/Kit/WorldMapShared.cs") ?? string.Empty;
             bool overlay = mapCode.Contains("CollectCellOverrides") && mapCode.Contains("TerrainEditRevision");

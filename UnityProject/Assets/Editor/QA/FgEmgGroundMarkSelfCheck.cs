@@ -497,9 +497,12 @@ namespace GameLogic.EditorTools
             BurnTwice(k, at, WorldSeconds);
             WorldSeconds(0.5f);
             GroundMarkRecord rec = s.World.GroundMarks.FirstOrDefault(r => r.Kind == EmgGroundMarkConst.KindScorch);
+            var overrides = new List<Unity.Mathematics.int4>();
+            map.CollectCellOverrides(overrides);
+            bool onBaseMap = overrides.Any(o => o.x == g.X && o.y == g.Y && o.z == Code("scorched")); // DEBT-FG3GEN01-08：战略地图底图覆盖表含这一格
             int scorchedCells = Enumerable.Range(-3, 7).SelectMany(dy => Enumerable.Range(-3, 7).Select(dx => map.GetTerrain(new GridCell(g.X + dx, g.Y + dy)))).Count(t => t == Code("scorched"));
-            Expect(rec != null && map.GetTerrain(g) == Code("scorched") && scorchedCells >= 3 && map.StateOf(GridMath.Address(g, map.ChunkSize).ChunkX, GridMath.Address(g, map.ChunkSize).ChunkY) == ChunkState.Modified,
-                $"F1 家园同一处烧满 20 秒：格网 ({g.X},{g.Y}) 一带 {scorchedCells} 格写成焦土（区块进差异存档），记 1 处战痕（{Marks(s)}）");
+            Expect(rec != null && map.GetTerrain(g) == Code("scorched") && scorchedCells >= 3 && map.StateOf(GridMath.Address(g, map.ChunkSize).ChunkX, GridMath.Address(g, map.ChunkSize).ChunkY) == ChunkState.Modified && onBaseMap,
+                $"F1 家园同一处烧满 20 秒：格网 ({g.X},{g.Y}) 一带 {scorchedCells} 格写成焦土（区块进差异存档、地图底图覆盖表含这一格 {onBaseMap}），记 1 处战痕（{Marks(s)}）");
             WorldSeconds(0.2f);
             Expect(k.ScorchGroundCount == 1 && k.ScorchedAt(at), "F2 焦土战痕写回内核焦土圈（下一步起圈里点燃阈值下调）");
             WorldSeconds(12f); // 明火排的烟（气体斑块）飘在上面时悬停先说烟；等它散了再看地面

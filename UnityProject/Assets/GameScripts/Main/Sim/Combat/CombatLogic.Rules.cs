@@ -1434,6 +1434,9 @@ namespace BinGames.Sim.Combat
             // 定点累加（1/65536 度）：整数加法与邻居遍历顺序无关——空间哈希的桶内顺序随槽位插入顺序变，读档会重排槽位，浮点累加顺序不同会让续跑分叉（EMG2-PHS-01 模糊存读档 #61）
             var dT = new NativeArray<long>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
             var isSrc = new NativeArray<byte>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            // EMG4-E2E-01 修复轮（FGJ-M6 发现）：每块斑块本节拍收到的交换系数之和 Σ k × w（同样定点累加）。重叠邻居多时 Σ > 1 会过冲、Σ > 2 发散
+            // （实测家园火墙余火里斑块温度振荡到 ±10¹¹ 度、把建筑 / 机器全烧毁）；写回时按 Σ 归一，新温度落在自己与邻居温度的凸组合里。Σ ≤ 1 时逐字不变。
+            var wSum = new NativeArray<long>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
             int n = math.min(src.Length, budget);
             int start = 0;
             if (n < src.Length)
@@ -1483,10 +1486,12 @@ namespace BinGames.Sim.Combat
                             float k = ex * (float)ratio * lf;
                             float wj = fixJ ? 1f : fixI ? 0f : o.Amount / math.max(1e-3f, z.Amount + o.Amount);
                             dT[i] += FixHeat(k * (o.Temp - z.Temp) * wj);
+                            wSum[i] += FixHeat(k * wj);
                             if (isSrc[j] == 0)
                             {
                                 float wi = fixI ? 1f : fixJ ? 0f : z.Amount / math.max(1e-3f, z.Amount + o.Amount);
                                 dT[j] += FixHeat(k * (z.Temp - o.Temp) * wi);
+                                wSum[j] += FixHeat(k * wi);
                             }
                         }
                     }
@@ -1499,7 +1504,8 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                float t = z.Temp + (float)(dT[i] * (1.0 / HeatFixScale));
+                double sum = wSum[i] * (1.0 / HeatFixScale);
+                float t = z.Temp + (float)(dT[i] * (1.0 / HeatFixScale) / (sum > 1.0 ? sum : 1.0));
                 if (isSrc[i] != 0 && t > amb)
                 {
                     t = math.max(amb, t - cool);
@@ -1508,6 +1514,7 @@ namespace BinGames.Sim.Combat
             }
             dT.Dispose();
             isSrc.Dispose();
+            wSum.Dispose();
             src.Dispose();
             return n;
         }

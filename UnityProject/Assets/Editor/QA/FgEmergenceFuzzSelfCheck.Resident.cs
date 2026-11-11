@@ -928,7 +928,9 @@ namespace GameLogic.EditorTools
                     }
                     else if (row.Cond == "temp_le_for")
                     {
-                        k.SpawnPatch(EmgMatterConst.Ice, p + new double2(1.2, 0), 2f, 5f, 40f); // 冷源：冰不回温，传导把水 / 冷却液压到阈值以下
+                        // 冷源：定温液氮（-196 度）擦边重叠（重叠比约 0.05 < 冻结规则的 0.2，不直接冻上），传导把水 / 冷却液压到阈值以下。
+                        // EMG4-E2E-01 修复轮：原来用 -10 度的冰，按份量加权的平衡温度高于冷却液的 -30 度阈值，只靠热交换过冲（系数和 > 1）才偶然够到；热交换归一后改用真正够冷的冷源
+                        k.SpawnPatch(EmgMatterConst.Cryo, p + new double2(3.2, 0), 1f, 2f, 40f);
                     }
                     else if (r.B == EmgConst.PortElec && MatterOf(r.A) == EmgMatterConst.Dust)
                     {

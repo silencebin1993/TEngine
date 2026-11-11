@@ -25,7 +25,7 @@ namespace GameLogic.EditorTools
     /// R1～R6. IC-REQ-022 反向场景映射（资源 / 条件不足、目标死亡、断网 / 失联、暂停与倍速、存读档、路径失败）+ 本里程碑承接项（FG-GAP-161、DEBT-FG8EXP02-03、DEBT-FG10BOSS01-03）。
     /// C. 缺口清零：门禁第一个里程碑是 M10 的缺口全部 Closed / 部分关闭（剩余另有门禁）/ 顺延；本 Story 的登记与关闭在表里。
     /// D. 试玩包：FG-M10 四份材料齐全，目录登记“待用户试玩、不阻塞”。
-    /// E. 需求覆盖（IC-REQ-020）：里程碑“必须完成”六项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M10 步骤；澄净标志组件（FGR-FAC-009）顺延 FG-GAP-150。
+    /// E. 需求覆盖（IC-REQ-020）：里程碑“必须完成”六项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M10 步骤；澄净标志组件（FGR-FAC-009）由 EMG4-LOOT-01 补做（FG-GAP-150 Closed）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgMilestoneM10SelfCheck）；单段：bash tools/unity-validate.sh --segment FgMilestoneM10SelfCheck。
     /// </summary>
     public static class FgMilestoneM10SelfCheck
@@ -373,7 +373,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckRequirementCoverage()
         {
-            Line("  · E. 需求覆盖（IC-REQ-020）：FG-M10“必须完成”六项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M10 步骤；澄净标志组件顺延 FG-GAP-150");
+            Line("  · E. 需求覆盖（IC-REQ-020）：FG-M10“必须完成”六项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M10 步骤；澄净标志组件由 EMG4-LOOT-01 补做（FG-GAP-150 Closed）");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
             JourneyDef m10 = JourneyCatalog.Create(FgjM10Journey.Id);
             var map = new (string What, string Segment, string Step)[]
@@ -399,8 +399,11 @@ namespace GameLogic.EditorTools
             string reg = ReadRepo(Register) ?? string.Empty;
             string row = reg.Split('\n').FirstOrDefault(x => x.StartsWith("| FG-GAP-150 ", StringComparison.Ordinal)) ?? string.Empty;
             string[] cols = row.Trim().Trim('|').Split('|').Select(x => x.Trim()).ToArray();
-            bool deferred = cols.Length >= 7 && cols[2].Contains("FGR-FAC-009") && cols[4].Contains("澄净") && FirstMilestoneOf(cols[5]) > 10 && !cols[6].StartsWith("Closed", StringComparison.Ordinal);
-            Expect(deferred, $"澄净标志组件（FGR-FAC-009 后半）没有实现：已在 FG-GAP-150 登记、承接写明澄净、门禁晚于 M10（{deferred}），不冒充已覆盖");
+            string[] flags = { "comp_spray_arm", "comp_ring_sprinkler" };
+            string[] missing = flags.Where(id => !GameLogic.Campaign.Content.ComponentCatalog.All.ContainsKey(id)).ToArray();
+            bool closed = cols.Length >= 7 && cols[2].Contains("FGR-FAC-009") && cols[4].Contains("澄净") && cols[6].StartsWith("Closed", StringComparison.Ordinal) && cols[6].Contains("EMG4-LOOT-01");
+            Expect(closed && missing.Length == 0 && segments.Contains("FgEmgLootHintSelfCheck"),
+                $"澄净标志组件（FGR-FAC-009 后半：喷淋臂、环形喷淋架）已由 EMG4-LOOT-01 补做：FG-GAP-150 Closed（{closed}）、组件目录缺 {missing.Length} 个、FgEmgLootHintSelfCheck 登记在全量自检");
         }
 
         // ── 工具 ─────────────────────────────────────────────────────────────────

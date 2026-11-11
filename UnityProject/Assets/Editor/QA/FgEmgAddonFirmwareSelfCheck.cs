@@ -375,11 +375,17 @@ namespace GameLogic.EditorTools
                         $"emg.stage = {stage}：图鉴里入场引信提示“{MechanicCodex.Hint(closed, s)}”、自毁装药提示“{MechanicCodex.Hint(scuttle, s)}”；固件页签总数 {fwTotal}（拿不到的 {Spec.Count(x => x.Gate > stage)} 条不计；"
                         + $"新固件计入 {string.Join("、", Spec.Where(x => MechanicCodex.Entries.Any(e => e.Kind == MechanicCodexKind.Firmware && e.ContentId == x.Id && MechanicCodex.IsUnlocked(e.Id))).Select(x => x.Id + "（已解锁）"))}）");
                 }
-                // 三选一候选行在表里排在全部既有行之后（既有行 ID / 顺序不动）
+                // 三选一候选行在表里排在全部既有行之后（既有行 ID / 顺序不动）；EMG4-LOOT-01 的阵营标志组件行（sortOrder ≥ 2000，fgdata_lootpick.FLAG_PICKS）
+                // 有意再排在新固件行之后（DEBT-EMG4LOOT01-04，M10-BASELINE 差异表）
                 var rows = LootPickCatalog.Rows.ToList();
                 int firstAddon = rows.FindIndex(r => FirmwareCatalog.IsAddon(r.Target));
-                Expect(firstAddon > 0 && rows.Skip(firstAddon).All(r => FirmwareCatalog.IsAddon(r.Target)) && rows.Where(r => FirmwareCatalog.IsAddon(r.Target)).All(r => r.SortOrder >= 1000),
-                    $"fg.TbLootPick：新固件 {rows.Count - firstAddon} 行追加在既有 {firstAddon} 行之后（sortOrder ≥ 1000，权重 = 同类基础固件，临时值）");
+                int firstFlag = rows.FindIndex(r => r.SortOrder >= 2000);
+                int addonEnd = firstFlag < 0 ? rows.Count : firstFlag;
+                Expect(firstAddon > 0 && firstFlag > firstAddon
+                       && rows.Skip(firstAddon).Take(addonEnd - firstAddon).All(r => FirmwareCatalog.IsAddon(r.Target) && r.SortOrder >= 1000)
+                       && rows.Skip(addonEnd).All(r => r.SortOrder >= 2000 && !FirmwareCatalog.IsAddon(r.Target) && r.Kind == "module")
+                       && rows.Take(firstAddon).All(r => r.SortOrder < 1000),
+                    $"fg.TbLootPick：新固件 {addonEnd - firstAddon} 行追加在既有 {firstAddon} 行之后（sortOrder 1000 起，权重 = 同类基础固件，临时值），阵营标志组件 {rows.Count - addonEnd} 行再排在其后（sortOrder 2000 起）");
             }
             finally
             {

@@ -291,6 +291,31 @@ namespace GameLogic.EditorTools
                 }
                 Expect(steps > 0 && steps <= 45, $"油与明火重叠 0.3：第 {steps} 步（{steps / 60f:0.##} 秒）油被点燃，≤ 0.75 秒（45 步，含传导节拍与斑块节拍的相位，FGT-EMG-033）");
             }
+            using (CombatKernel k = NewKernel())
+            {
+                // EMG4-E2E-01 修复轮（FGJ-M6 家园余火里斑块温度振荡到 ±10¹¹ 度）：一块水同时压在 6 块不会合并的明火里（Σ 交换系数 = 6 × 0.4 = 2.4），
+                // 修前一个节拍就过冲到约 1900 度、随后正负发散；按 Σ 归一后任何非定温斑块都不超过明火的 800 度、不低于常温
+                for (int i = 0; i < 6; i++)
+                {
+                    k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 6f, 1f, 30f, 0, false, 0);
+                }
+                k.SpawnPatch(EmgMatterConst.Water, new double2(0, 0), 1f, 1f, 0f, 0, false, 0);
+                float hi = float.MinValue, lo = float.MaxValue;
+                int fires = CountOf(k, EmgMatterConst.Fire);
+                for (int s = 0; s < 60; s++)
+                {
+                    StepN(k, 1);
+                    for (int j = 0; j < k.PatchSlots; j++)
+                    {
+                        if (k.TryGetPatch(j, out CombatZone pz) && pz.Radius > 0f && pz.Matter != EmgMatterConst.Fire)
+                        {
+                            hi = math.max(hi, pz.Temp);
+                            lo = math.min(lo, pz.Temp);
+                        }
+                    }
+                }
+                Expect(fires == 6 && hi <= 800.5f && lo >= 0f, $"多块定温热源重叠（{fires} 块明火压着一块水）：非明火斑块温度始终在 {lo:0}～{hi:0} 度（≤ 800、不为负，热交换按交换系数之和归一不过冲）");
+            }
         }
 
         // ── C 电 ─────────────────────────────────────────────────────────────

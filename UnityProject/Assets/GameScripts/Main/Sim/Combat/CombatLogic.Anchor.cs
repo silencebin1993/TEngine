@@ -42,17 +42,25 @@ namespace BinGames.Sim.Combat
                 // FG19A 第 2 节第 33 / 34 行（燃迹 / 拖尾读 chs.moving sense）：本机静止开火时不铺线，同样份量在终结点堆成一块；非弹道载体（或目标贴脸）同样只在终结点排
                 EmgInstr y = x;
                 y.Amount = (x.Amount > 0f ? x.Amount : 1f) * n;
-                EmgEmitPatch(ref d, y, end, a, b, host.Owner, e.Chain, e.Depth);
+                if (EmgEmitPatch(ref d, y, end, a, b, host.Owner, e.Chain, e.Depth))
+                {
+                    NoteReading(ref d, CombatConst.ReadingFeedZone, end, host.Owner); // 拖尾退役过渡读法后，沿途排放照样给“区域展开”读法反馈（音效 / 弹字，FG2-FW-04）
+                }
                 if (anchored)
                 {
                     EmgAnchorAt(ref d, EmgAnchorConst.Trail, host, end, EmgNearestHostile(ref d, end, math.max(1f, a), host.Faction, -1), x.Ordinal);
                 }
                 return true;
             }
+            bool fed = false;
             for (int i = 0; i < n; i++)
             {
                 double2 p = math.lerp(from, to, (i + 0.5) / n);
-                EmgEmitPatch(ref d, x, p, a, b, host.Owner, e.Chain, e.Depth);
+                if (EmgEmitPatch(ref d, x, p, a, b, host.Owner, e.Chain, e.Depth) && !fed)
+                {
+                    fed = true;
+                    NoteReading(ref d, CombatConst.ReadingFeedZone, p, host.Owner); // 一发只报一次
+                }
                 if (anchored)
                 {
                     EmgAnchorAt(ref d, EmgAnchorConst.Trail, host, p, EmgNearestHostile(ref d, p, math.max(1f, a), host.Faction, -1), x.Ordinal);

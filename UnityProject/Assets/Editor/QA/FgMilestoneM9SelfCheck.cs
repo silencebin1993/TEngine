@@ -26,7 +26,7 @@ namespace GameLogic.EditorTools
     /// R1～R6. IC-REQ-022 反向场景映射（资源 / 条件不足、目标死亡、断网 / 失联、暂停与倍速、存读档、路径失败）。
     /// C. 缺口清零：门禁第一个里程碑是 M9 的缺口全部 Closed / 部分关闭（剩余另有门禁）/ 顺延（写明新门禁）；本 Story 的登记与关闭在表里。
     /// D. 试玩包：FG-M9 五份材料齐全，目录登记“待用户试玩、不阻塞”，并写明出口旅程断点可做试玩存档。
-    /// E. 需求覆盖（IC-REQ-020）：里程碑“必须完成”7 条（拆成 9 项）里 8 项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M9 步骤；FGR-FAC-009 嵌合机队标志组件未实现，登记 FG-GAP-150 顺延。
+    /// E. 需求覆盖（IC-REQ-020）：里程碑“必须完成”7 条（拆成 9 项）里 8 项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M9 步骤；FGR-FAC-009 嵌合机队标志组件由 EMG4-LOOT-01 补做（FG-GAP-150 Closed，FgEmgLootHintSelfCheck E 段断言）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgMilestoneM9SelfCheck）；单段：bash tools/unity-validate.sh GameLogic.EditorTools.FgMilestoneM9SelfCheck.RunFromMenu。
     /// </summary>
     public static class FgMilestoneM9SelfCheck
@@ -384,7 +384,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckRequirementCoverage()
         {
-            Line("  · E. 需求覆盖（IC-REQ-020）：FG-M9“必须完成”7 条拆成 9 项：8 项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M9 步骤；FGR-FAC-009 未实现、登记 FG-GAP-150 顺延");
+            Line("  · E. 需求覆盖（IC-REQ-020）：FG-M9“必须完成”7 条拆成 9 项：8 项各有自检段且登记在全量自检，能进旅程的另有 FGJ-M9 步骤；FGR-FAC-009 由 EMG4-LOOT-01 补做（FG-GAP-150 Closed）");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
             JourneyDef m9 = JourneyCatalog.Create(FgjM9Journey.Id);
             var map = new (string What, string Segment, string Step)[]
@@ -411,12 +411,16 @@ namespace GameLogic.EditorTools
             Expect(bad.Count == 0 && segments.Contains("FgMilestoneM9SelfCheck"),
                 $"{map.Length} 项各有自检段且登记在全量自检，6 项另有 FGJ-M9 旅程步骤（寂听主脑首领战、静默专属行为、6～10 小时节奏由自检 / 试玩覆盖）；[M9 出口] 本身登记在全量自检" +
                 (bad.Count == 0 ? string.Empty : "；缺：" + string.Join("、", bad)));
-            // 第 9 项 FGR-FAC-009（嵌合机队阵营标志组件框架 + 静默 / 铸造标志组件）：M9 没有 Story 承接、没有实现——如实登记顺延，不算覆盖。
+            // 第 9 项 FGR-FAC-009（嵌合机队阵营标志组件框架 + 静默 / 铸造标志组件）：M9 漏排卡，EMG4-LOOT-01 补做并关闭 FG-GAP-150；
+            // 这里核：登记 Closed 且写明 EMG4-LOOT-01、静默 / 铸造的 4 个标志组件在组件目录里、断言段 FgEmgLootHintSelfCheck 登记在全量自检。
             string reg = ReadRepo("production/design/full-game/FG-GAP-REGISTER.md") ?? string.Empty;
             string row = reg.Split('\n').FirstOrDefault(x => x.StartsWith("| FG-GAP-150 ", StringComparison.Ordinal)) ?? string.Empty;
             string[] cols = row.Trim().Trim('|').Split('|').Select(x => x.Trim()).ToArray();
-            bool deferred = cols.Length >= 7 && cols[2].Contains("FGR-FAC-009") && FirstMilestoneOf(cols[5]) > 9 && !cols[6].StartsWith("Closed", StringComparison.Ordinal) && cols[6].Contains("待用户");
-            Expect(deferred, $"FGR-FAC-009 嵌合机队标志组件没有实现：已登记 FG-GAP-150（门禁晚于 M9、待用户复核顺延，{deferred}），不冒充已覆盖");
+            string[] flags = { "comp_jammer", "struct_stealth_cloak", "comp_brace_mortar", "struct_armor_skirt" };
+            string[] missing = flags.Where(id => !GameLogic.Campaign.Content.ComponentCatalog.All.ContainsKey(id)).ToArray();
+            bool closed = cols.Length >= 7 && cols[2].Contains("FGR-FAC-009") && cols[6].StartsWith("Closed", StringComparison.Ordinal) && cols[6].Contains("EMG4-LOOT-01");
+            Expect(closed && missing.Length == 0 && segments.Contains("FgEmgLootHintSelfCheck"),
+                $"FGR-FAC-009 嵌合机队标志组件（静默 / 铸造 4 个）已由 EMG4-LOOT-01 补做：FG-GAP-150 Closed（{closed}）、组件目录缺 {missing.Length} 个{(missing.Length > 0 ? "（" + string.Join("、", missing) + "）" : "")}、FgEmgLootHintSelfCheck 登记在全量自检");
         }
 
         // ── 工具 ─────────────────────────────────────────────────────────────────
