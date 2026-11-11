@@ -377,6 +377,7 @@ namespace BinGames.Sim.Combat
         /// <summary>单位宿主的规则结算记账：可靠计数 + 因果链“规则”节点 + evt.react（宿主 = 单位，Code = 计数槽）。</summary>
         private static int EmgUnitRuleSettle(ref CombatData d, in EmgRule r, int chain, byte depth, int ownerId, int u)
         {
+            EmgActRule(ref d, r); // EMG4-FUZZ-01：按行成立计数（只在模糊测试器开启计数时）
             double2 pos = d.Pos[u];
             int slot = EmgRuleHit(ref d, r.Key, ownerId, d.Id[u], pos);
             // EMG3-E2E-01（FGJ-M5 发现）：单位层沾染规则（C03 短路 = 浸湿 × 电 等）成立同样计熔合线索同现，与斑块层 EmgRuleSettle 同一计数、按链去重（原来只有斑块层计）

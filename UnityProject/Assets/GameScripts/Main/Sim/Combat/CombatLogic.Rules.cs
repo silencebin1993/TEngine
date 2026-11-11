@@ -618,6 +618,7 @@ namespace BinGames.Sim.Combat
         /// <summary>计数 + 因果链“规则”+ 按需 evt.react（宿主 = 斑块，Code = 计数槽下标，Value = 累计次数）。</summary>
         private static void EmgRuleSettle(ref CombatData d, in EmgRule r, int chain, byte depth, int ownerId, double2 pos, int patchId)
         {
+            EmgActRule(ref d, r); // EMG4-FUZZ-01：按行成立计数（只在模糊测试器开启计数时）
             int slot = EmgRuleHit(ref d, r.Key, ownerId, 0, pos);
             EmgClueCount(ref d, r.ClueMask, chain, rule: true); // EMG3-FUSE-01：规则两端口落在某配方两父的线索端口里 = 同链同现（跨机器由这里计；同一条链已由出手计过就不再计）
             EmgScalars es = d.EmgS[0];
@@ -1857,7 +1858,14 @@ namespace BinGames.Sim.Combat
                     float hot = amb;
                     for (int h = 0; h < hits.Length; h++)
                     {
-                        hot = math.max(hot, d.Patches[hits[h].x].Temp);
+                        CombatZone hz = d.Patches[hits[h].x];
+                        // EMG4-FUZZ-01（模糊测试器 #313 / #410 发现）：熔穿中的单位每 2 秒在身下漏熔融金属（PhaseDuring），漏出的那摊回灌结构积热，累积量永远降不到退出线、武器积热钉在 2 倍阈值——
+                        // 自己漏出的熔融金属（以及它原地冷成的熔渣，转化保留排放者）不给自己回灌热（别的单位 / 别人排的照常吃热）
+                        if ((hz.Matter == EmgMatterConst.Molten || hz.Matter == EmgMatterConst.Slag) && hz.Owner == d.Id[u])
+                        {
+                            continue;
+                        }
+                        hot = math.max(hot, hz.Temp);
                     }
                     if (hot > amb + 30f)
                     {

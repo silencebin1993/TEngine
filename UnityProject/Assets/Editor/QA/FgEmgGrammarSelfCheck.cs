@@ -1210,6 +1210,24 @@ namespace GameLogic.EditorTools
                     }
                 }
             }
+            // EMG4-FUZZ-01（#390，FG19A 第 1.1 节第 12 行扩口）：prop.mass 写端（动词 Mass ×2）= 弹体质量 1 → 2，命中比它轻的目标沿飞行方向撞退 1 米；不轻于它的、没有该写端的不动
+            foreach ((bool mass, float foeMass) in new[] { (true, 1.5f), (true, 5f), (false, 0.5f) })
+            {
+                using (var k = new CombatKernel(Cfg(), 16))
+                {
+                    N root = Root().Read(EmgEventKind.Hit, Trig);
+                    int p = Tree(k, mass ? root.Verb(EmgVerb.Mass, 2f) : root);
+                    int me = Me(k, new double2(0, 0), k.AddWeapon(Flight(p, 30f, 2f)));
+                    int foe = Foe(k, new double2(0, 4));
+                    k.SetUnitProfile(foe, -1, foeMass);
+                    k.FireAt(me, foe, k.Time);
+                    StepN(k, 30);
+                    double moved = Pos(k, foe).y - 4.0;
+                    bool knocked = mass && foeMass < 2f;
+                    Expect(Near(Hp(k, foe), 190f) && (knocked ? moved > 0.9 && moved < 1.1 : Math.Abs(moved) < 1e-3),
+                        $"扩口加重 {(mass ? "×2" : "无")} × 目标质量 {foeMass}：命中掉 10（{Hp(k, foe)}），{(knocked ? "被撞退约 1 米" : "不动")}（位移 {moved:0.###} 米）");
+                }
+            }
             using (var k = new CombatKernel(Cfg(), 16))
             {
                 // [跳弹, 壁撞]：单位面 1 次、障碍面 2 次，分开计

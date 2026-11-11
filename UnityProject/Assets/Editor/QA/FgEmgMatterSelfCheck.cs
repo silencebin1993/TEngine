@@ -797,7 +797,8 @@ namespace GameLogic.EditorTools
                 bool tomb = a.PatchSlots > a.PatchCount;
                 a.SpawnPatch(EmgMatterConst.Oil, new double2(20, 0), 1f, 1f, 30f);
                 b.SpawnPatch(EmgMatterConst.Oil, new double2(20, 0), 1f, 1f, 30f);
-                bool layout = !Patches(a).Select(z => z.EmgId).SequenceEqual(Patches(b).Select(z => z.EmgId)); // 槽位顺序不同（连续跑复用空槽、读档后压实追加）
+                // EMG4-FUZZ-01 起斑块段每条另记槽位、读档放回原槽（CombatKernel.Matter PlacePatchSlots；常驻固定集发现压实后续跑的存读档不一致）：两边槽位顺序相同、新斑块复用同一个空槽
+                bool layout = Patches(a).Select(z => z.EmgId).SequenceEqual(Patches(b).Select(z => z.EmgId));
                 bool same = lr == CombatLoadResult.Ok && a.StateHash() == b.StateHash();
                 for (int i = 0; i < 120; i++)
                 {
@@ -806,7 +807,7 @@ namespace GameLogic.EditorTools
                     same &= a.StateHash() == b.StateHash();
                 }
                 Expect(tomb && layout && same,
-                    $"墓碑槽复用：存档时有空槽 {tomb}，读档后两边槽位顺序不同 {layout}（{string.Join(",", Patches(a).Select(z => z.EmgId))} / {string.Join(",", Patches(b).Select(z => z.EmgId))}），StateHash 读档后与续跑 120 步逐步一致 {same}");
+                    $"墓碑槽复用：存档时有空槽 {tomb}，读档后两边槽位顺序相同（墓碑槽随档保留）{layout}（{string.Join(",", Patches(a).Select(z => z.EmgId))} / {string.Join(",", Patches(b).Select(z => z.EmgId))}），StateHash 读档后与续跑 120 步逐步一致 {same}");
             }
             using (CombatKernel a = NewKernel())
             using (CombatKernel b = NewKernel())

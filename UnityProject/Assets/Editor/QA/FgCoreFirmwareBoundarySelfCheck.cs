@@ -530,6 +530,7 @@ namespace GameLogic.EditorTools
             CommitVia(g);
             float hpAim = armor.Health;
             double nextAim = NextFire(site, a);
+            int absorb0 = site.Kernel.PersistCounts.Absorbs;
             fo.SquadCommands.DebugSelectMany(new[] { a });
             fo.SquadCommands.IssueAttack(left, paused: false);
             guard = 0;
@@ -538,9 +539,12 @@ namespace GameLogic.EditorTools
                 WorldSimulation.StepMany(1);
             }
             float aimHit = hpAim - armor.Health;
+            // EMG4-FUZZ-01：熔穿不再被自己漏的熔融金属回灌热，护甲机约 15 秒后退出熔穿、身下熔融冷成熔渣——这一发被它挡下（冷渣掩护，FGR-EMG 固态挡弹）是正常结果；
+            // 挡下与命中都证明这一发真打出去了，“没发动熔穿过载”看提示与核心发动次数（熔穿过载命中只有 33，命中时仍按 ≥ 普通重炮判）
+            bool slagAbsorbed = site.Kernel.PersistCounts.Absorbs > absorb0;
             Expect(reup.Uplinked && reup.ReactionGated && aiming && NextFire(site, a) != nextAim && FeedbackCues.CountOf(FeedbackCueId.ReactionMeltOverload) == melt1
-                   && SignalUplinkService.CoreFiredCount == fired1 && aimHit >= FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct) - 0.05f /* EMG2-REACT-01：先前的熔穿让护甲机装甲失效、站在熔融金属里，伤害只会更高；“没发动”看提示与发动次数 */,
-                $"接入中开始瞄准、瞄准没完就交还：AI 打完的这一发是普通重炮（{aimHit:F1}），不发动熔穿过载、不记核心冷却");
+                   && SignalUplinkService.CoreFiredCount == fired1 && (slagAbsorbed && aimHit == 0f || aimHit >= FracturedCityLayout.CannonBaseDamage * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct) - 0.05f /* EMG2-REACT-01：先前的熔穿让护甲机装甲失效、站在熔融金属里，伤害只会更高；“没发动”看提示与发动次数 */),
+                $"接入中开始瞄准、瞄准没完就交还：AI 打完的这一发是普通重炮（{(slagAbsorbed ? "被护甲机身下冷渣挡下" : aimHit.ToString("F1"))}），不发动熔穿过载、不记核心冷却");
         }
 
         // ── E. Demo 内容迁移 ──────────────────────────────────────────────────────

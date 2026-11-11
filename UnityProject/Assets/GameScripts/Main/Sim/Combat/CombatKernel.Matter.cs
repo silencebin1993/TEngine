@@ -304,7 +304,7 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 快照格式 17：物质段 ───────────────────────────────
 
-        private const int PatchFields = 41; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段；EMG2-DISC-01：再追加 RuleKey（同版本 17 只追加，短段取缺省）
+        private const int PatchFields = 42; // EMG2-MAT-02：段尾追加迁入斑块的区域载荷 11 个字段；EMG2-DISC-01：再追加 RuleKey；EMG4-FUZZ-01：再追加槽位（同版本只追加，短段取缺省）
         private const int FieldFields = 13; // EMG2-FLD-01 修复轮：段尾追加 Swept（同版本 17 只追加，短段取 0）
         private const int UnitStage2Fields = 26; // EMG2-RECL-01：再追加 ReclaimCdQ、ReclaimNote
         private const int WireFields = 12; // 下标缓存 IdxA / IdxB 不写（读档后斑块槽位会重排，写了会让同一状态写出不同字节） // EMG2-REACT-01：段尾追加 StickT；EMG2-FLD-01：再追加 FieldCdQ（同版本 17 只追加，短段取 0）
@@ -393,7 +393,8 @@ namespace BinGames.Sim.Combat
         {
             sw.Begin(EmgConst.SegPatches, PatchFields, _d.EmgS[0].PatchLive);
             // 按斑块 Id 升序写（规范顺序）：连续跑里新斑块复用墓碑槽、读档后列表是压实的，按槽位写会让同一状态写出不同字节、
-            // 涌现哈希随槽位布局变（FGT-EMG-040 读档续跑哈希必须一致）。读回即按 Id 有序、无墓碑。
+            // 涌现哈希随槽位布局变（FGT-EMG-040 读档续跑哈希必须一致）。EMG4-FUZZ-01：每块另写原槽位（段尾追加字段），读回放回原槽（PlacePatchSlots，空槽补墓碑），
+            // 读档后槽位布局与连续跑一致（后续新斑块复用同一墓碑槽）；旧档短段没有槽位字段时照旧按 Id 压实。
             var order = new long[_d.EmgS[0].PatchLive];
             int n = 0;
             for (int i = 0; i < _d.Patches.Length && n < order.Length; i++)
@@ -406,7 +407,8 @@ namespace BinGames.Sim.Combat
             System.Array.Sort(order, 0, n);
             for (int oi = 0; oi < n; oi++)
             {
-                CombatZone z = _d.Patches[(int)(order[oi] & 0xFFFFFFFFL)];
+                int slot = (int)(order[oi] & 0xFFFFFFFFL);
+                CombatZone z = _d.Patches[slot];
                 if (sw.F()) w.Write(z.Pos.x);
                 if (sw.F()) w.Write(z.Pos.y);
                 if (sw.F()) w.Write(z.Radius);
@@ -449,6 +451,9 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(z.Chill);
                 if (sw.F()) w.Write(z.Growth);
                 if (sw.F()) w.Write(z.RuleKey);
+                // EMG4-FUZZ-01（模糊测试器常驻固定集发现：读档续跑哈希不一致）：槽位是状态——新斑块复用最前面的墓碑槽、合并 / 扩散按下标比较取第一个（FGR-EMG-213），
+                // 读回压实会让之后的结算换一个斑块，读档后若干步哈希分叉。仍按 Id 写（同一状态同一字节），每条另记槽位，读回放回原槽（中间补墓碑）。
+                if (sw.F()) w.Write(slot);
                 sw.EndRecord();
             }
             sw.End();
@@ -810,6 +815,41 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        /// <summary>EMG4-FUZZ-01：按快照里的槽位把读回的斑块放回原槽（中间补墓碑 = Matter 0）。全部带槽位才放；任一缺槽位（旧短段）保持压实。槽位越界 / 重复判坏值。</summary>
+        private static CombatLoadResult PlacePatchSlots(ref CombatData staging, System.Collections.Generic.List<int> slots)
+        {
+            if (slots.Count == 0 || slots.Exists(x => x < 0))
+            {
+                return CombatLoadResult.Ok;
+            }
+            int len = 0;
+            foreach (int x in slots)
+            {
+                if (x >= EmgMatterConst.DefaultCapacity)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                len = math.max(len, x + 1);
+            }
+            var placed = new CombatZone[len];
+            var used = new bool[len];
+            for (int i = 0; i < slots.Count; i++)
+            {
+                if (used[slots[i]])
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                used[slots[i]] = true;
+                placed[slots[i]] = staging.Patches[i];
+            }
+            staging.Patches.Clear();
+            for (int i = 0; i < len; i++)
+            {
+                staging.Patches.Add(placed[i]);
+            }
+            return CombatLoadResult.Ok;
+        }
+
         private static CombatLoadResult ParseMatterSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
         {
             int n = sr.Count;
@@ -822,6 +862,7 @@ namespace BinGames.Sim.Combat
                         return CombatLoadResult.InvalidValue;
                     }
                     var ids = new HashSet<int>();
+                    var slots = new System.Collections.Generic.List<int>(n);
                     for (int i = 0; i < n; i++)
                     {
                         sr.Record(i);
@@ -868,6 +909,9 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) z.Chill = r.ReadSingle();
                         if (sr.F()) z.Growth = r.ReadSingle();
                         if (sr.F()) z.RuleKey = r.ReadInt32();
+                        int slot = -1;
+                        if (sr.F()) slot = r.ReadInt32(); // EMG4-FUZZ-01：短段（较早写出的快照）没有槽位 → −1，按 Id 压实（与修前相同）
+                        slots.Add(slot);
                         // EMG2-MAT-02：迁入斑块的载荷校验（种类只能是读法 / 陷阱场地 / 液洼 / 喷淋池 / 油迹；液洼的 Owner 必须是液洼号的相反数）；非迁入斑块恒为斑块种类、中立
                         bool legacy = (z.PFlags & EmgMatterConst.FlagLegacy) != 0;
                         if (legacy ? z.Kind > CombatConst.ZoneKindSlick || (z.Kind == CombatConst.ZoneKindLeak && z.Owner >= 0)
@@ -888,7 +932,7 @@ namespace BinGames.Sim.Combat
                         }
                         staging.Patches.Add(z);
                     }
-                    return CombatLoadResult.Ok;
+                    return PlacePatchSlots(ref staging, slots);
                 }
                 case EmgConst.SegFields:
                     if (n > EmgMatterConst.FieldCapacity)
@@ -1007,15 +1051,16 @@ namespace BinGames.Sim.Combat
         private static void RemapProfiles(ref CombatData staging, NativeList<int> current)
         {
             EmgScalars es = staging.EmgS[0];
-            es.PatchLive = staging.Patches.Length;
+            es.PatchLive = 0;
             for (int i = 0; i < staging.Patches.Length; i++)
             {
+                es.PatchLive += staging.Patches[i].Matter != 0 ? 1 : 0; // EMG4-FUZZ-01：读回放回原槽后中间有墓碑（Matter 0），只数活斑块
                 es.NextPatchId = math.max(es.NextPatchId, staging.Patches[i].EmgId + 1);
             }
             // 短段（没写到 Id 的较早记录）按读入顺序补发 Id，接在已用最大号之后。
             for (int i = 0; i < staging.Patches.Length; i++)
             {
-                if (staging.Patches[i].EmgId == 0)
+                if (staging.Patches[i].EmgId == 0 && staging.Patches[i].Matter != 0)
                 {
                     CombatZone z = staging.Patches[i];
                     z.EmgId = es.NextPatchId++;

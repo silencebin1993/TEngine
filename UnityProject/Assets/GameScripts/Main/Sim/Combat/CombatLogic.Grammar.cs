@@ -385,6 +385,12 @@ namespace BinGames.Sim.Combat
                 skip = EmgMetaLaunch(ref d, pr.Prog, pr.Node, d.SlotOf(pr.Owner), targetId != 0 ? d.SlotOf(targetId) : -1, EmgProjHost(ref d, pr), pr.Pos,
                     EmgDir((double2)pr.Vel), 0.0, pr.TrigUsed != uint.MaxValue);
             }
+            float massMul = EmgMassMul(ref d, pr.Prog, pr.Node, skip, d.SlotOf(pr.Owner));
+            if (massMul > 0f)
+            {
+                pr.Mass = EmgProjMass(ref d, pr) * massMul; // EMG4-FUZZ-01（#390）：prop.mass 写端 = 本载荷质量 × 幅度（穿透消耗、撞击动能、撞退都读它）
+                pr.Flags |= EmgProjFlags.Massive;
+            }
             if (pr.Prog < 0 || !EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m, skip, d.SlotOf(pr.Owner)))
             {
                 return;
@@ -437,6 +443,51 @@ namespace BinGames.Sim.Combat
                     pr.Life = (float)math.distance(aim, pr.Pos) / speed; // 落到瞄准点（目标脚下）
                 }
             }
+        }
+
+        /// <summary>EMG4-FUZZ-01（#390，FG19A 第 1.1 节第 12 行扩口）：节点上 prop.mass 写端（动词 Mass，按端口 × 载体解析）的质量倍数；没有 = 0。
+        /// 与 <see cref="EmgModsOf"/> 同口径跳过溢出行、元程序关掉的行、出手者不满足 chs.* condition 的行。O(节点指令数)，只在出手时。</summary>
+        internal static float EmgMassMul(ref CombatData d, int prog, int node, ulong skip, int owner)
+        {
+            if (prog < 0 || prog >= d.EmgPrograms.Length)
+            {
+                return 0f;
+            }
+            EmgProgram p = d.EmgPrograms[prog];
+            if (node < 0 || node >= p.NodeCount || p.FirstNode + node >= d.EmgNodes.Length)
+            {
+                return 0f;
+            }
+            EmgNode n = d.EmgNodes[p.FirstNode + node];
+            int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            bool chs = owner >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
+            float mul = 0f;
+            for (int i = n.FirstInstr; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if (x.Verb != (byte)EmgVerb.Mass || x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0
+                    || (skip != 0UL && !EmgMetaAllowed(~skip, x.Ordinal)) || (chs && EmgChsBlocked(ref d, owner, n.FirstInstr, end, x.Ordinal)))
+                {
+                    continue;
+                }
+                mul = math.max(mul, x.Amount);
+            }
+            return mul;
+        }
+
+        /// <summary>FG19A 第 1.1 节第 12 行 / 第 1.2 节扩口：“比弹体轻的目标被撞退 1 米”。</summary>
+        internal const float MassKnockMeters = 1f;
+
+        /// <summary>EMG4-FUZZ-01（#390）：带 prop.mass 写端的载荷命中比它轻的单位，沿飞行方向撞退 <see cref="MassKnockMeters"/> 米（走 Displace：结构 / 炮塔 / 不可位移的不动，途中撞障碍按实体层结算）。
+        /// 不带 <see cref="EmgProjFlags.Massive"/> 的弹体 O(1) 返回。</summary>
+        internal static void EmgMassKnock(ref CombatData d, in CombatProjectile pr, int owner, int hit)
+        {
+            if ((pr.Flags & EmgProjFlags.Massive) == 0 || hit < 0 || !d.IsAlive(hit) || EmgUnitMass(ref d, hit) >= EmgProjMass(ref d, pr))
+            {
+                return;
+            }
+            float2 dir = math.normalizesafe(pr.Vel, new float2(0f, 1f));
+            Displace(ref d, hit, d.Pos[hit] - (double2)dir, -MassKnockMeters, 0.0, owner, EmgConst.PushCauseKnock);
         }
 
         /// <summary>多份载荷（射弹 Multi）：本次出手分成几份、每份伤害比例与扇角（没有为 1 份、比例 1）。</summary>

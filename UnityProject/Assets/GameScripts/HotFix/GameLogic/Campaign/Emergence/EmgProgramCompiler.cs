@@ -764,11 +764,13 @@ namespace GameLogic.Campaign.Emergence
             AddSlots(r, c, uplinkFirmwareIds, true, skipUplink);
             AddSlots(r, c, localFirmwareIds, false, null);
             AddInnate(r, c, innateOwner);
+            HealInertPass(r, c);
             if (r.IsEmpty)
             {
                 return r; // 全空程序：武器照常基础攻击，不登记程序（Program = −1）
             }
             BuildTree(r);
+            HealInertPass(r, c); // 触发器全部溢出（根节点容量放不下）时程序其实没有子载荷节点：建树后再判一次（#276，触发器之前已判过的不重复）
             Inherit(r, c);
             Emit(r, c);
             MetaPass(r, c);
@@ -1406,6 +1408,77 @@ namespace GameLogic.Campaign.Emergence
                 s.TrigCount = Math.Max(1, Math.Min(TuningInt("emg.trig.max_children", 4), (int)Math.Round(trigWrite.Amount)));
             }
             r.Steps.Add(s);
+        }
+
+        /// <summary>
+        /// EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02；FG-GAP-178 ④“本载体不适用”同一口径扩展，按推荐默认执行（2026-11-11），待用户复核）：修复出口的命中结算只修复——
+        /// 内核修复弹体 / 当场修复命中友军时只调 Heal（CombatLogic.cs 弹体命中 heal 分支），不执行命中结算类写端：入侵（hij.*，只对敌对目标，CombatLogic.Hijack）、
+        /// 无生效事件的注能 / 施加 / 展开场 / 打击修饰（连锁、反弹、体积、破甲、载荷质量）、“命中”生效的打击修饰、走旧读法过渡（驻留区 / 拖尾）的物质排放（修复命中不结算读法；
+        /// 模糊测试器实测：维修束上单装酸液 / 漏油 / 黏胶 0 块斑块）。整条程序没有触发器（没有子载荷节点）时，
+        /// 写端全是这些的固件整条按本载体不适用（预览写 emg.compile.carrier_na，仍占程序位置）；有触发器的程序不动（治疗子弹药另有执行点，见 EmgNodeEffects）。按端口 / 角色判，不认内容 ID。
+        /// </summary>
+        private static void HealInertPass(EmgProgramResult r, EmgCompiled c)
+        {
+            if (!r.HealOnly || r.Steps.Exists(st => st.Kind == EmgStepKind.Trigger && !st.Overflow))
+            {
+                return;
+            }
+            foreach (EmgProgramStep s in r.Steps)
+            {
+                if (s.Innate || s.Builtin || s.Overflow || s.Decls.Count == 0 || !HealInert(c, s, r.LobAllowed))
+                {
+                    continue;
+                }
+                s.Decls.Clear();
+                s.Promoted = false;
+                s.Kind = EmgStepKind.Effect;
+                s.TrigEvent = EmgEventKind.None;
+                s.EventPort = (ushort)(EventPortBase + (int)EmgEventKind.Fire);
+                s.AnchorKind = AnchorKindOf(c, s.Decls);
+                r.Notes.Add(new EmgCompileNote { Key = NoteCarrierNa, Ordinal = s.Ordinal, Node = -1 });
+            }
+        }
+
+        private static readonly string[] HealInertMods = { "grm.mod.chain", "grm.mod.bounce", "grm.mod.size", "grm.mod.armor", "prop.mass" };
+
+        private static bool HealInert(EmgCompiled c, EmgProgramStep s, bool lobAllowed)
+        {
+            bool write = false, untriggered = true, hitOnly = true;
+            foreach (int di in s.Decls)
+            {
+                EmgDeclRow d = c.Decls[di];
+                if (d.Dir == EmgDirs.Read && d.Role == EmgRole.Trigger)
+                {
+                    untriggered = false;
+                    hitOnly &= d.Port == EventPortBase + (int)EmgEventKind.Hit;
+                }
+            }
+            foreach (int di in s.Decls)
+            {
+                EmgDeclRow d = c.Decls[di];
+                if (d.Dir != EmgDirs.Write)
+                {
+                    continue;
+                }
+                write = true;
+                string port = PortIds.TryGetValue(d.Port, out string pid) ? pid : string.Empty;
+                EmgFamily f = EmgCatalog.FamilyOf(port);
+                // 物质排放：走旧读法过渡（驻留区 / 拖尾，修复命中不结算读法）的不执行；由内核在生效事件处直接排斑块的（EmgRootGated，见 Emit 里 RootKernel 的判定）照常执行
+                bool legacyEmit = d.Role == EmgRole.Emit && f == EmgFamily.Matter
+                                  && !(IsRootKernelOwner(s.OwnerId) || IsMediumEmit(c, s, port, d.Role) || IsTriggeredEmitWithoutTransition(c, s, port, d.Role));
+                bool inert = f == EmgFamily.Hijack || legacyEmit
+                             || (hitOnly && d.Role == EmgRole.Modify && Array.IndexOf(HealInertMods, port) >= 0)
+                             || (untriggered && (d.Role == EmgRole.Inject || d.Role == EmgRole.Apply || (d.Role == EmgRole.Spawn && f == EmgFamily.Field)))
+                             // 审查 P1 修复轮（按行为判死，#302 / #328）：“命中”生效的注能只在造成伤害的命中里结算（CombatLogic.EmgHitInject），追加弹体（ent.projectile）对修复宿主直接返回（EmgQueueFollow）
+                             || (hitOnly && (d.Role == EmgRole.Inject || (d.Role == EmgRole.Spawn && port == "ent.projectile")))
+                             // 修复轮 1 第 2 棒（#276）：光束不可曲射（NoteLobStraight），修复光束连落点扬尘也不结算，曲射修饰在修复出口上同样不适用
+                             || (!lobAllowed && d.Role == EmgRole.Modify && port == "grm.mod.lob");
+                if (!inert)
+                {
+                    return false;
+                }
+            }
+            return write;
         }
 
         // ── 2. 节点分配（FGR-EMG-031、032）──

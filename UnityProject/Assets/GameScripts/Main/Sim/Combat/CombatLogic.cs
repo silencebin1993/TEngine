@@ -2210,6 +2210,10 @@ namespace BinGames.Sim.Combat
                             }
                         }
                     }
+                    if (!heal && (pr.Flags & EmgProjFlags.Massive) != 0)
+                    {
+                        EmgMassKnock(ref d, pr, owner, hit); // EMG4-FUZZ-01（#390）：扩口加重的载荷把比它轻的目标撞退
+                    }
                     if (!subHit && !heal && pr.Prog >= 0 && d.EmgListen != 0u)
                     {
                         // EMG3-E2E-01（DEBT-EMG3TMP01-01）：射弹命中点留 2 拍谐振点（按机器各一个，最近一次命中点）；节点没有谐振 / 没人读 evt.beat 时立即返回

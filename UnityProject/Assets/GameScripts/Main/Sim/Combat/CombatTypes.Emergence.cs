@@ -525,6 +525,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-MAT-01（DEBT-EMG1TRIG01-05）：入口 = 驻守开火 / 炮塔自动开火（原即时命中 DeliverInstant(…, namedReactions: false)）实体化的弹体——
         /// 命中照原入口不发具名反应（标记跳转），与不需要飞行时逐字一致；编队攻击 / 直控（FireAtCore）的弹体不带此位。</summary>
         NoNamed = 256,
+        /// <summary>EMG4-FUZZ-01（#390，FG19A 第 1.1 节第 12 行）：本载荷节点有 prop.mass 写端（质量已 × 幅度写进 <see cref="CombatProjectile.Mass"/>）——命中比它轻的单位撞退。
+        /// 出手时由 EmgInitFlight 按节点判一次，命中处 O(1) 查本位（高 8 位，随快照记号段尾字段持久）。</summary>
+        Massive = 512,
     }
 
     /// <summary>

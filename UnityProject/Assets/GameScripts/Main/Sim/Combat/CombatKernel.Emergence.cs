@@ -550,12 +550,30 @@ namespace BinGames.Sim.Combat
         /// <summary>第 <paramref name="instr"/> 行指令（指令表绝对下标）累计被执行 / 唤起的次数（计数关着时恒 0）。</summary>
         public int InstrActivations(int instr) => instr >= 0 && instr < _d.EmgAct.Length ? _d.EmgAct[instr] : 0;
 
+        /// <summary>EMG4-FUZZ-01：本行 id 稳定键（<see cref="EmgRule.IdKey"/>）的规则行累计成立次数（计数关着时恒 0）。同一计数键的多行分开计。</summary>
+        public int EmgRuleRowActivations(int idKey)
+        {
+            for (int i = 0; idKey != 0 && i < _d.EmgRowAct.Length && i < _d.EmgRules.Length; i++)
+            {
+                if (_d.EmgRules[i].IdKey == idKey)
+                {
+                    return _d.EmgRowAct[i];
+                }
+            }
+            return 0;
+        }
+
         private void SyncInstrActivation()
         {
             int n = _actOn ? _d.EmgInstrs.Length : 0;
             if (_d.EmgAct.Length != n)
             {
                 _d.EmgAct.Resize(n, NativeArrayOptions.ClearMemory);
+            }
+            int rows = _actOn ? _d.EmgRules.Length : 0;
+            if (_d.EmgRowAct.Length != rows)
+            {
+                _d.EmgRowAct.Resize(rows, NativeArrayOptions.ClearMemory);
             }
         }
 

@@ -375,6 +375,19 @@ namespace BinGames.Sim.Combat
         // ─────────────────────────────── EMG1-FUZZ-01：按指令行的激活计数（ADR-EMG-001 ⑫）───────────────────────────────
         // 只在模糊测试器打开计数时 EmgAct 的长度 = 指令表行数，否则长度 0：每个计数点只多一条长度比较。不进快照、不进状态哈希。
 
+        /// <summary>EMG4-FUZZ-01：规则行成立一次（按 id 稳定键找行；只在模糊测试器开启计数时，O(规则数 ≤ 256)）。</summary>
+        internal static void EmgActRule(ref CombatData d, in EmgRule r)
+        {
+            for (int i = 0; i < d.EmgRowAct.Length && i < d.EmgRules.Length; i++)
+            {
+                if (d.EmgRules[i].IdKey == r.IdKey)
+                {
+                    d.EmgRowAct[i] = d.EmgRowAct[i] + 1;
+                    return;
+                }
+            }
+        }
+
         /// <summary>第 <paramref name="i"/> 行指令被事件唤起一次。</summary>
         private static void EmgActRow(ref CombatData d, int i)
         {
@@ -404,7 +417,7 @@ namespace BinGames.Sim.Combat
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if ((x.Flags & EmgInstrFlags.Overflow) != 0 || EmgOrdinalTriggered(ref d, n, x.Ordinal))
+                if ((x.Flags & EmgInstrFlags.Overflow) != 0 || EmgOrdinalTriggered(ref d, n, x.Ordinal, node > 0))
                 {
                     continue;
                 }
@@ -413,13 +426,16 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>节点里同一程序序号有没有事件触发读端行（有 = 这条指令由事件门控）。</summary>
-        private static bool EmgOrdinalTriggered(ref CombatData d, in EmgNode n, byte ordinal)
+        /// <remarks>EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）：子节点（<paramref name="child"/>）上的 evt.fire 恒真触发不算事件门控——子载荷没有“出手”事件，放出这一下就是它的出手，
+        /// 其修饰在放出时按节点整体结算（<see cref="EmgModsOf"/> 不看触发读端），原来漏计成 0 次激活。只改模糊测试器的计数，不改状态。</remarks>
+        private static bool EmgOrdinalTriggered(ref CombatData d, in EmgNode n, byte ordinal, bool child = false)
         {
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            ushort fire = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Fire);
             for (int j = n.FirstInstr; j < end; j++)
             {
                 EmgInstr y = d.EmgInstrs[j];
-                if (y.Ordinal == ordinal && y.Role == EmgConst.RoleTrigger && y.Port > EmgConst.EventPortBase && y.Port <= EmgConst.EventPortBase + EmgConst.EventKinds)
+                if (y.Ordinal == ordinal && y.Role == EmgConst.RoleTrigger && y.Port > EmgConst.EventPortBase && y.Port <= EmgConst.EventPortBase + EmgConst.EventKinds && !(child && y.Port == fire))
                 {
                     return true;
                 }

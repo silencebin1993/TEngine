@@ -34,11 +34,13 @@ namespace GameLogic.EditorTools
     /// D 负向（构造的死指令、无源端口、NaN、卡死、积压都必须被报出）；E 涌现满载性能场景（多地点，阶段 1 只判 FGR-EMG-200 绝对预算并存为“上一次”）。
     /// 单段：bash tools/unity-validate.sh FgEmergenceFuzzSelfCheck。
     /// </summary>
-    public static class FgEmergenceFuzzSelfCheck
+    public static partial class FgEmergenceFuzzSelfCheck
     {
         private const float Dt = 1f / 60f;
         public const int FixedSeed = 20261030;
-        public const int FixedCount = 64;
+        /// <summary>EMG4-FUZZ-01（FGR-EMG-223 阶段 4 常驻）：固定用例集 500 例、≤ 10 分钟（<see cref="FixedBudgetSeconds"/>）。</summary>
+        public const int FixedCount = 500;
+        public const double FixedBudgetSeconds = 600.0;
         public const float CaseSeconds = 8f;
         private const int UplinkSlot = 2;
         private const int SessionSlot = 7;
@@ -47,6 +49,12 @@ namespace GameLogic.EditorTools
         public const int StallRiseSteps = 120;
         private const float DeathAtSeconds = 6.5f;
         private const float CooledSeconds = 14f;
+        /// <summary>读“冷却完成”的用例时长：5 秒停火 + 后撤 14 米（约 4 秒）+ 无人机到期 + 积热从 2 倍阈值散到一半（散热 10 / 秒）。
+        /// EMG4-FUZZ-01（#313 / #410 实测）：自己铺的火 / 熔渣把本机点燃，燃烧期间积热钉在上限到第 12～17 秒，之后按 10 / 秒散到一半还要 15 秒——时长 40 秒。</summary>
+        private const float CoolSeconds = 40f;
+        /// <summary>读“冷却完成”的用例：第 CoolHeatAtSeconds 秒起补积热到过热，第 CoolCeaseSeconds 秒停火。</summary>
+        private const float CoolHeatAtSeconds = 3f;
+        private const float CoolCeaseSeconds = 5f;
 
         private static StringBuilder _report;
         private static int _fail;
@@ -88,7 +96,7 @@ namespace GameLogic.EditorTools
         {
             _report = report;
             _fail = 0;
-            Line("\n[组合模糊测试器] 固定 64 例 + 有源缺口 + 负向 + 涌现满载（EMG1-FUZZ-01；FGT-EMG-070 / 071 阶段 1、FGT-EMG-042）");
+            Line($"\n[组合模糊测试器] 常驻固定 {FixedCount} 例 + 有源缺口 + 负向 + 新颖度空间 + 涌现满载（EMG4-FUZZ-01；FGT-EMG-070 常驻、FGT-EMG-071 全满载、FGT-EMG-042）");
             Env env = Env.Enter();
             try
             {
@@ -97,11 +105,15 @@ namespace GameLogic.EditorTools
                 WarmUp(pools);
                 Step(() => CheckCoverage(pools));
                 List<string> observed = null;
-                Step(() => observed = CheckFixedCases(pools));
+                List<CaseResult> fixedResults = null;
+                Step(() => observed = CheckFixedCases(pools, out fixedResults));
+                Step(() => CheckNoveltySpace(pools, fixedResults));
                 Step(() => CheckSources(observed ?? new List<string>()));
                 Step(() => CheckNegatives(pools));
+                Step(() => CheckResidentNegatives(pools));
                 Step(() => CheckSubMass(pools));
                 Step(CheckFullLoad);
+                Step(CheckFullLoadMax);
             }
             finally
             {
@@ -316,11 +328,16 @@ namespace GameLogic.EditorTools
             public float Seconds = CaseSeconds;
             /// <summary>负向：场地不放任何条件源（偏折单位、障碍、残骸、热目标）。</summary>
             public bool NoWorldSources;
+            /// <summary>EMG4-FUZZ-01（FGR-EMG-220 阶段 3 起“2～3 台己方机器协同”）：同装配的僚机台数（0～2）与是否装信号中继结构模块（struct_relay）。</summary>
+            public int Mates;
+            public bool Relay;
+            /// <summary>EMG4-FUZZ-01（DEBT-EMG2REACT02-02）：规则行定向用例的规则 ID（fg.TbChannelRule.id；null = 不是）。</summary>
+            public string RuleId;
 
             public string[] Program => Uplink.Concat(Local).ToArray();
 
             public string Text => $"#{Index} {Comp}({Carrier})/{Chassis}{(Func != null ? "+" + Func : string.Empty)} " +
-                                  $"[{string.Join(",", Uplink)}{(Uplinked ? "|接入" : "|无接入")}|{string.Join(",", Local)}] {Site} {Faction}×{Enemies}{(Tag != null ? " " + Tag : string.Empty)}";
+                                  $"[{string.Join(",", Uplink)}{(Uplinked ? "|接入" : "|无接入")}|{string.Join(",", Local)}] {Site} {Faction}×{Enemies}{(Mates > 0 ? $" 协同×{Mates + 1}{(Relay ? "+中继" : string.Empty)}" : string.Empty)}{(Tag != null ? " " + Tag : string.Empty)}";
         }
 
         private static FirmwareCarrier CarrierOf(string comp) =>
@@ -386,6 +403,8 @@ namespace GameLogic.EditorTools
                 EnsureConditions(c, pools);
                 list.Add(c);
             }
+            AddSquadCases(list, pools, rnd); // EMG4-FUZZ-01：2～3 台己方机器协同（含中继）
+            AddRuleCases(list, pools, rnd); // EMG4-FUZZ-01（DEBT-EMG2REACT02-02）：规则表每行一例定向场景
             while (list.Count < count)
             {
                 list.Add(RandomCase(rnd, list.Count, pools, CaseSeconds, list.Count));
@@ -444,9 +463,18 @@ namespace GameLogic.EditorTools
         /// </summary>
         private static void EnsureConditions(FuzzCase c, Pools pools)
         {
+            if (!c.Uplinked && c.Program.Any(id => pools.Reads(id, "evt.uplink")))
+            {
+                // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）先造条件：读“接入”的程序插上信号核（接入口不装固件，本机槽不变）——Build 按正式入口注入 evt.uplink；没插信号核时永远没有接入事件
+                c.Uplinked = true;
+                c.Tag = (c.Tag != null ? c.Tag + " " : string.Empty) + "补接入";
+            }
+            EnsureBeats(c, pools);
             if (c.Program.Any(id => pools.Reads(id, "evt.cooled")))
             {
-                c.Seconds = Math.Max(c.Seconds, CooledSeconds); // 开局贴着过热阈值：过热 → 散热回落到阈值 × emg.heat.cool_ratio 要 7～10 秒（与 FgEmgAddonFirmwareSelfCheck 同一造法）
+                // 开局贴着过热阈值：过热 → 散热回落到阈值 × emg.heat.cool_ratio（与 FgEmgAddonFirmwareSelfCheck 同一造法）；EMG4-FUZZ-01：一直开火的格斗 / 力场 / 无人机积热回不到一半，
+                // Build 里 4 秒后停火（玩家撤下过热的机器），停火后无人机到期、积热从上限（2 倍阈值）散到一半要 15 秒左右，时长跟着加
+                c.Seconds = Math.Max(c.Seconds, CoolSeconds);
             }
             if (c.Program.Any(id => pools.Reads(id, "evt.bounce")))
             {
@@ -458,6 +486,7 @@ namespace GameLogic.EditorTools
                 float late = c.Program.Any(id => pools.Reads(id, "evt.kill")) ? BaitAtSeconds + 3f - CeaseAtSeconds : 0f;
                 c.Seconds = Math.Max(c.Seconds, SummonExpireSeconds + late);
             }
+            EnsureHackWriter(c, pools);
             string[] prog = c.Program;
             int reader = Array.FindIndex(prog, id => pools.Reads(id, "evt.pierce"));
             if (reader < 0 || pools.PierceProvider == null || prog.Any(id => pools.Writes(id, "grm.mod.pierce")))
@@ -478,6 +507,56 @@ namespace GameLogic.EditorTools
             c.Tag = (c.Tag != null ? c.Tag + " " : string.Empty) + "补穿透写者";
         }
 
+        /// <summary>
+        /// EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）先造条件：读 tmp.sync（相位对齐，FGR-EMG-172）的程序要本机同一拍有 2 条以上节拍指令执行——程序里节拍指令（读 evt.beat 且读 tmp.beat）不到 2 条时，
+        /// 换成 [读者, 节拍, 填充, 节拍]：两条节拍在第 1 / 3 位（周期 2 时相位都是 1，同拍执行），读者在第一层——触发器后面紧跟的那条落进它的子节点，填充垫在中间，两条节拍与读者都留在第一层（重炮这类短命弹体只在第一层宿主上出拍）。按端口查，不按内容 ID。
+        /// </summary>
+        private static void EnsureBeats(FuzzCase c, Pools pools)
+        {
+            string[] prog = c.Program;
+            int reader = Array.FindIndex(prog, id => pools.Reads(id, "tmp.sync"));
+            string clock = pools.Firmware.Where(id => !FirmwareKinds.IsMixed(id) && pools.Reads(id, "evt.beat") && pools.Reads(id, "tmp.beat")).OrderBy(id => id, StringComparer.Ordinal).FirstOrDefault();
+            if (reader < 0 || clock == null || prog.Count(id => pools.Reads(id, "tmp.beat")) >= 2)
+            {
+                return;
+            }
+            string filler = prog.FirstOrDefault(id => id != prog[reader] && !FirmwareKinds.IsMixed(id) && !pools.Reads(id, "tmp.beat") && !pools.Writes(id, "grm.trig")) ?? FgReadingMatrixSelfCheck.AddonFiller;
+            c.Uplinked = true;
+            c.Uplink = new[] { prog[reader], clock };
+            c.Local = new[] { filler, clock };
+            c.Tag = (c.Tag != null ? c.Tag + " " : string.Empty) + "补节拍";
+        }
+
+        /// <summary>
+        /// EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）先造条件：读 hij.hijacked 条件（FG19A N40 劫持中继）的程序要有被它自己劫持的单位——劫持只在“入侵度满的杂兵被本机击毁”时成立，
+        /// 程序里没有写 hij.hack 的指令时在读者前面补一条入侵写者（按端口查，同穿透写者的补法）；场地另放一个耐久约 2.5 发的杂兵并令本机先打它（Build）。
+        /// </summary>
+        private static void EnsureHackWriter(FuzzCase c, Pools pools)
+        {
+            string[] prog = c.Program;
+            int reader = Array.FindIndex(prog, id => pools.Reads(id, "hij.hijacked"));
+            string writer = pools.Firmware.Where(id => !FirmwareKinds.IsMixed(id) && pools.Writes(id, "hij.hack")).OrderBy(id => id, StringComparer.Ordinal).FirstOrDefault();
+            if (reader < 0 || writer == null || prog.Any(id => pools.Writes(id, "hij.hack")))
+            {
+                return;
+            }
+            var list = prog.ToList();
+            list.Remove(prog[reader]);
+            list.Insert(0, prog[reader]);
+            list.Insert(0, writer);
+            c.Uplinked = true;
+            list = list.Take(4).ToList();
+            c.Uplink = list.Take(2).ToArray();
+            c.Local = list.Skip(2).ToArray();
+            c.Tag = (c.Tag != null ? c.Tag + " " : string.Empty) + "补入侵写者";
+        }
+
+        private static ushort PortCode(string id) => EmgCatalog.Current.PortIdByCode.FirstOrDefault(kv => kv.Value == id).Key;
+
+        private static bool ProgramWritesPort(EmgProgramResult r, ushort port) => r != null && r.KernelInstrs.Any(x => x.Port == port && x.Role > EmgConst.RoleLastRead);
+
+        private static bool ProgramReadsPort(EmgProgramResult r, ushort port) => r != null && r.KernelInstrs.Any(x => x.Port == port && x.Role >= EmgConst.RoleTrigger && x.Role <= EmgConst.RoleLastRead);
+
         // ═════════════════════════════════ 场地 ═════════════════════════════════
 
         private sealed class Arena : IDisposable
@@ -489,6 +568,7 @@ namespace GameLogic.EditorTools
             public CombatWeapon W;
             public EmgProgramResult Program;
             public bool Preheat;
+            public bool Airborne;
             public int KillStep = -1;
             /// <summary>偏折单位（−1 = 没有）：偏折场罩住主目标（不罩本机），每 4 游戏秒展开 1 秒（与首领状态机同一入口 SetDeflectPhase），
             /// 展开时打主目标被反弹（evt.bounce 世界源）、收起时正常命中（evt.hit）。</summary>
@@ -499,10 +579,27 @@ namespace GameLogic.EditorTools
             public int BaitStep = -1;
             public int Bait = -1;
             public double2 BaitAt;
+            /// <summary>EMG4-FUZZ-01：读“目标被劫持”的用例开局先打的杂兵（−1 = 没有）。</summary>
+            public int HijackBait = -1;
+            /// <summary>EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）：读“夺控”的协同用例在第 SeizeStep 步夺控僚机 SeizeUnit（同程序）2 游戏秒，夺控者 = 主目标（−1 = 不夺控；内核正式入口 CombatKernel.Seize）。</summary>
+            public int SeizeStep = -1;
+            public int SeizeUnit = -1;
+            /// <summary>改令打碎靶后保持的步数：默认 2 秒；重炮这类慢出手按冷却 + 瞄准 + 飞行算，窗口里至少打到碎靶一发（DEBT-EMG4FUZZ01-02）。</summary>
+            public int BaitHold = 2 * SwitchSteps;
+            /// <summary>补积热的步区间 [PreheatFrom, PreheatTo)：读过热的从开局起 3 秒；读冷却完成的在第 3～5 秒（先正常打一阵，再过热、停火散热）。</summary>
+            public int PreheatFrom;
+            /// <summary>补碎靶的耐久（与开局那个同一档：当场结算的载体 = 母载荷一击 + 余量，其余 0.1）。</summary>
+            public float BaitHp = 0.1f;
+            /// <summary>读冷却完成、能走的机器：停火那一步同时后撤（离开自己铺的火 / 熔渣，站在热区里散热回不到一半）。</summary>
+            public bool CoolRetreat;
+            public int PreheatTo = PreheatSteps;
             public float Engage;
             public double T;
             public readonly List<int> Hostiles = new List<int>();
             public List<float3> Obstacles = new List<float3>();
+            /// <summary>EMG4-FUZZ-01：规则行定向场景（null = 没有）与僚机（协同用例）。</summary>
+            public RuleScene Rule;
+            public List<int> Mates = new List<int>();
 
             public void Dispose() => Site?.Dispose();
 
@@ -537,13 +634,18 @@ namespace GameLogic.EditorTools
                 if (i == CeaseStep)
                 {
                     K.ClearCommand(Me);
+                    if (CoolRetreat)
+                    {
+                        K.IssueCommand(Me, CombatCommandKind.Move, new double2(-12.0, -8.0), 0, 0.5f, 0f, 0f, false);
+                    }
                 }
                 if (i == BaitStep)
                 {
-                    Bait = Bait >= 0 ? Bait : K.Spawn(Hostile(BaitAt, W.Damage + 0.05f, 0.4f, -1));
+                    // 碎靶已被打主目标的溅射 / 子载荷提前打掉（重炮实测：开局那发的余波就打死 0.1 耐久的碎靶，改令打一个死目标、整个窗口不开火）：改令这一刻在原处补一个
+                    Bait = Bait >= 0 && K.TryGetUnit(Bait, out CombatUnitView bv) && (bv.Flags & CombatUnitFlags.Alive) != 0 ? Bait : K.Spawn(Hostile(BaitAt, BaitHp, 0.4f, -1));
                     K.IssueCommand(Me, CombatCommandKind.Attack, BaitAt, Bait, 0.5f, Engage, 0.5f, false);
                 }
-                else if (BaitStep >= 0 && i == BaitStep + 2 * SwitchSteps)
+                else if (BaitStep >= 0 && i == BaitStep + BaitHold)
                 {
                     K.IssueCommand(Me, CombatCommandKind.Attack, MainAt, Target, 0.5f, Engage, 0.5f, false);
                 }
@@ -555,9 +657,26 @@ namespace GameLogic.EditorTools
                 {
                     K.Kill(Me, 0); // 己方机器血量在热更层（外部血量），判死走 Kernel.Kill(unit, 0)（ADR-EMG-001 ⑦，与 CombatSite.OnMachineDied 同一入口）
                 }
+                if (i == SeizeStep && SeizeUnit >= 0)
+                {
+                    K.Seize(SeizeUnit, 2f, Target, 0);
+                }
+                if (Preheat && i >= PreheatFrom && i < PreheatTo && W.OverheatAt > 0f && K.TryGetUnit(Me, out CombatUnitView mv) && (mv.Flags & CombatUnitFlags.Overheated) == 0 && mv.Heat < W.OverheatAt - 0.5f * Mathf.Max(0.02f, W.HeatPerShot))
+                {
+                    // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）：开局贴阈值的积热在接近目标的路上被散热吃掉（实测 coolback 6 例全程没过热）——窗口里没过热、且积热低到下一发过不了阈值时补回阈值下沿，下一发即过热。
+                    // 只在“下一发过不了阈值”时补（不是每步补）：SetWeaponState 会打断重炮的瞄准，每步补的话重炮整个窗口一发都打不出（#353 实测）。只看内核状态与步号
+                    K.SetWeaponState(Me, W.OverheatAt - 0.01f, false, mv.AimReadyAt, mv.NextFireAt);
+                }
                 if (Prism >= 0 && i > 0 && i % SwitchSteps == 0)
                 {
-                    K.SetDeflectPhase(Prism, (byte)(i / SwitchSteps % 4 == 0 ? 2 : 0), PhaseHold); // 每 4 秒展开 1 秒：反弹有机会、重炮这类慢出手也有 3 秒能正常命中
+                    // 每 4 秒展开 1 秒，另在第 7k+5、7k+6 秒多展开（再多一档 8k+1 实测让重炮每发都被弹、9 例命中类指令全死，已撤；重炮真开火在瞄准 1 秒之后，#197 每发落在 4k+2 秒，7k+6 接住第 6 秒那发）：反弹有机会、重炮这类慢出手也有大半时间能正常命中；
+                    // EMG4-FUZZ-01：重炮出手周期正好 4 秒（冷却 3 + 瞄准 1），只按 4 秒轮换时每发都落在收起的 3 秒里、永远不反弹（fw_bouncefuse 实测 0 次），加一档错开周期的窗口
+                    long sec = i / SwitchSteps;
+                    K.SetDeflectPhase(Prism, (byte)(sec % 4 == 0 || sec % 7 >= 5 ? 2 : 0), PhaseHold);
+                }
+                if (Rule != null)
+                {
+                    RuleStep(this, i);
                 }
                 Site.Step(Dt, T);
                 T += Dt;
@@ -573,11 +692,18 @@ namespace GameLogic.EditorTools
         /// <summary>读“定时”的程序：主目标放在弹体飞这么多秒才到的距离（阶段 1 定时最长的延时引信 0.6 秒，留余量）。</summary>
         private const double TimerReachSeconds = 1.0;
 
+        /// <summary>读“节拍”的飞行程序：主目标放在弹体飞这么多秒才到的距离（拍长 0.5 秒）。</summary>
+        private const double BeatReachSeconds = 0.6;
+
         /// <summary>召唤载体读“终结”的用例：开打这么多秒后停火；用例时长 = 停火 + 最长召唤存续（哨戒桩 14 秒）+ 1 秒。</summary>
         private const float CeaseAtSeconds = 4f;
         private const float BaitAtSeconds = 4f;
         private const int ChildBaitSteps = 6;
         private const float SummonExpireSeconds = CeaseAtSeconds + 15f;
+        /// <summary>读过热 / 冷却完成的用例：头这么多步没过热就把积热补回阈值下沿（Arena.StepOnce）。</summary>
+        private const int PreheatSteps = 180;
+        /// <summary>读“夺控”的协同用例：开打这么多秒后夺控一台僚机。</summary>
+        private const float SeizeAtSeconds = 3f;
 
         private static CombatConfig Config()
         {
@@ -586,12 +712,14 @@ namespace GameLogic.EditorTools
             return cfg;
         }
 
-        private static Arena Build(FuzzCase c, bool counting, Pools pools)
+        /// <param name="pin">EMG4-FUZZ-01 按行为判死（去掉一条指令重跑）：场景布置（主目标距离、先造条件的诱饵 / 预热 / 判死 / 停火）按原用例的程序与武器定，
+        /// 只换程序本身，否则“去掉这条”会连带改场景、行为差异不是这条指令造成的。null = 按本用例自己的程序布置。</param>
+        private static Arena Build(FuzzCase c, bool counting, Pools pools, Arena pin = null)
         {
-            var a = new Arena { Site = new CombatSite("fuzz_" + c.Site, Config()) };
+            var a = new Arena { Site = new CombatSite("fuzz_" + c.Site, ConfigFor(c)) };
             CombatKernel k = a.K;
             k.InstrActivationCounting = counting;
-            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(c.Chassis, c.Comp, c.Func, null, c.Local);
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(c.Chassis, c.Comp, c.Func, c.Relay ? ComponentCatalog.StructRelayId : null, c.Local);
             BlueprintCircuitPreview p;
             if (c.Uplinked)
             {
@@ -605,8 +733,16 @@ namespace GameLogic.EditorTools
             bool fixedChassis = CarrierReadings.IsFixedChassis(c.Chassis);
             CombatWeapon w = CombatSite.MachineWeaponFrom(p);
             w = a.Site.WithProgram(p, w, out EmgProgramResult program, out _);
+            if (pin != null)
+            {
+                // 去掉重跑（按行为判死）：每发积热 / 取水热按原用例固定——固件表热量是成本不是效果，否则凡带热量的固件去掉后积热必变、永远判不成死指令（审查 P1）
+                w.HeatPerShot = pin.W.HeatPerShot;
+                w.DrawHeat = pin.W.DrawHeat;
+            }
             a.Program = program ?? new EmgProgramResult();
             a.W = w;
+            EmgProgramResult sp = pin != null ? pin.Program : a.Program; // 场景布置看的程序 / 武器（见 pin）
+            CombatWeapon sw = pin != null ? pin.W : w;
             int wi = a.Site.WeaponIndex(w);
             a.Me = k.Spawn(new CombatSpawn
             {
@@ -617,19 +753,25 @@ namespace GameLogic.EditorTools
             // EMG4-FW-01（用例集随新固件入池换了一批后实测：悬浮机 [条件门·离地, 时钟脉冲…] 子节点全程不激活）：本机按正式路径带上底盘特性（CombatSite 机器生成同一入口），
             // 否则 chs.* 条件 / 离地读法在模糊测试里一律按“没有特性”求值，悬浮的“离地”永远不成立
             a.Site.ApplyChassisTrait(a.Me, c.Chassis);
+            a.Airborne = (k.ChsOf(a.Me) & EmgTraitConst.ChsAirborne) != 0; // 底盘特性决定，全程不变（FG-GAP-215 判恒不成立的门用；判死时这台场地已释放）
             // 主目标：正面装甲朝着本机（与 FgReadingMatrixSelfCheck 条件场景同一摆法）。
             // 先造条件（FGR-EMG-220）：读“定时”的飞行程序把目标放到定时到点之后才够得着的距离
             //（延时引信“提前命中不空爆”，目标太近时定时永远不到点）；攻击命令的接战距离随之放宽，玩家正常也会远距离下令。
             // 固定底盘不会走：主目标放进贴身载体的触及（推铲 / 脉冲器接近距离 2.5 + 目标半径 = 3.0 米，3.0 米外的目标它永远够不着）
             a.MainAt = fixedChassis ? new double2(2.4, 0.3) : new double2(3.0, 0.3);
             a.Engage = 6f;
-            if ((w.SpawnFlight == 1 || w.Mode == CombatWeaponMode.Projectile) && w.ProjectileSpeed > 0f)
+            // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）：读“节拍”的飞行程序，宿主是在飞的弹体（FG19A 第 1 节射弹读法“需要飞行”）——3 米外的目标飞 0.1 秒，出手周期与 0.5 秒拍长互质不了时每发都落在两拍之间（实测重炮 / 维修束全程 0 拍），
+            // 目标放到飞 0.3 秒的距离（不超出射程）；维修束的受损友军同理放远
+            bool beatFlight = sw.ProjectileSpeed > 0f && ProgramReads(sp, EmgEventKind.Beat) && !ProgramReads(sp, EmgEventKind.Timer);
+            double beatFar = beatFlight ? Math.Min(sw.ProjectileSpeed * BeatReachSeconds + 1.5, Math.Max(3.0, sw.Range - 0.8)) : 0;
+            if ((sw.SpawnFlight == 1 || sw.Mode == CombatWeaponMode.Projectile) && sw.ProjectileSpeed > 0f)
             {
-                double far = ProgramReads(a.Program, EmgEventKind.Timer) ? w.ProjectileSpeed * TimerReachSeconds + 1.5 : 0;
+                double far = ProgramReads(sp, EmgEventKind.Timer) ? sw.ProjectileSpeed * TimerReachSeconds + 1.5 : beatFar;
                 if (far > 3.0)
                 {
                     a.MainAt = new double2(0.3, -far); // 正下方：随机敌人只在 ±60° 扇面里，弹道上没有别的敌人先挡住（否则 0.6 秒前就命中）
-                    a.Engage = (float)far + 1f;
+                    // EMG4-FUZZ-01：接战距离不超过武器射程——原来 far + 1 = 24.5 米 > 重炮射程 20，机器以为已在接战距离内、原地不动也打不着（#353 实测第一发之后再不开火）
+                    a.Engage = sw.Mode == CombatWeaponMode.Cannon && sw.Range > 1f ? Mathf.Min((float)far + 1f, sw.Range - 0.5f) : (float)far + 1f; // 只收重炮：机枪的有效射程不按 Range 算，收了反而定时打不到（#28 实测）
                 }
             }
             CombatSpawn main = Hostile(a.MainAt, 5000f, 0.5f, -1);
@@ -639,6 +781,8 @@ namespace GameLogic.EditorTools
             a.Target = k.Spawn(main);
             a.Hostiles.Add(a.Target);
             // 按阵营抽的敌人（真实表的耐久 / 半径 / 武器），种子决定站位
+            ushort timerPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Timer);
+            bool childTimer = sp.KernelNodes.Count > 1 && sp.KernelInstrs.Skip(sp.KernelNodes[0].FirstInstr + sp.KernelNodes[0].InstrCount).Any(x => x.Port == timerPort && x.Role == EmgConst.RoleTrigger);
             var er = new System.Random(c.EnemySeed);
             List<GameConfig.fg.MechEnemy> rows = pools.EnemiesByFaction.TryGetValue(c.Faction ?? string.Empty, out List<GameConfig.fg.MechEnemy> l) ? l : pools.EnemiesByFaction.Values.First();
             for (int i = 1; i < c.Enemies; i++)
@@ -646,6 +790,12 @@ namespace GameLogic.EditorTools
                 GameConfig.fg.MechEnemy row = rows[er.Next(rows.Count)];
                 double ang = math.radians(-60.0 + er.NextDouble() * 120.0);
                 double dist = 2.5 + er.NextDouble() * 6.5;
+                if (childTimer && math.distance(new double2(math.cos(ang), math.sin(ang)) * dist, a.MainAt) < Mathf.Clamp(row.Radius, 0.3f, 1.5f) + 1.5)
+                {
+                    // EMG4-FUZZ-01（#321 实测）先造条件：子节点读“定时”的程序，子载荷在主目标处放出（命中终结），贴着主目标的随机敌人（半径到 1.5 米）一出生就被撞上、定时永远到不了点——
+                    // 这样的随机敌人沿原方向挪远（随机数序列不变）。按端口查
+                    dist += Mathf.Clamp(row.Radius, 0.3f, 1.5f) + 3.0;
+                }
                 int weapon = row.WeaponDamage > 0f && row.WeaponRange > 0f
                     ? a.Site.WeaponIndex(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, Range = row.WeaponRange, Damage = row.WeaponDamage, Cooldown = Mathf.Max(0.2f, row.WeaponCooldown) })
                     : -1;
@@ -653,10 +803,11 @@ namespace GameLogic.EditorTools
                 a.Hostiles.Add(k.Spawn(s));
             }
             // 维修类载体的友方目标（受损的己方结构；耐久上限足够大，整例都修不满）
+            double2 allyAt = beatFlight && w.HasOutput == CombatConst.OutputRepair ? math.normalize(new double2(-1.5, 1.0)) * beatFar : new double2(-1.5, 1.0);
             int ally = k.Spawn(new CombatSpawn
             {
                 ExtKey = 0, Kind = CombatUnitKind.Structure, Faction = CombatFaction.Player, Behavior = CombatBehavior.None, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
-                Position = new double2(-1.5, 1.0), Home = new double2(-1.5, 1.0), Radius = 0.6f, Health = 200f, MaxHealth = 100000f, Weapon = -1, BehaviorProfile = -1,
+                Position = allyAt, Home = allyAt, Radius = 0.6f, Health = 200f, MaxHealth = 100000f, Weapon = -1, BehaviorProfile = -1,
             });
             // 第二个受损友军在第一个身后同一方向：修复弹体穿过第一个才有“穿透”（维修束 + 穿透类固件）
             k.Spawn(new CombatSpawn
@@ -664,58 +815,169 @@ namespace GameLogic.EditorTools
                 ExtKey = 0, Kind = CombatUnitKind.Structure, Faction = CombatFaction.Player, Behavior = CombatBehavior.None, Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
                 Position = new double2(-3.0, 2.0), Home = new double2(-3.0, 2.0), Radius = 0.6f, Health = 200f, MaxHealth = 100000f, Weapon = -1, BehaviorProfile = -1,
             });
-            if (!c.NoWorldSources)
+            // 子节点读“定时”（子弹药飞 0.6 秒空爆，FG19A 第 1.1 节第 6 行“先命中则不空爆”）：径向放出的子弹药 0.6 秒内撞上偏折单位 / 侧翼一圈就永远不到点（实测 #321 fw_delayfuse 格斗子节点 0 次、4 发被偏折场弹掉），
+            // 这类程序不放世界源与侧翼一圈（与用例字段 NoWorldSources 同一开关）
+            if (!c.NoWorldSources && !childTimer)
             {
-                AddWorldSources(a, c.Site);
+                // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02，#197 实测）先造条件：读“反弹”的射弹载体——重炮弹体半径大，主目标露在 0.8 米场外的那半边先被弹体碰到、弹体中心进不了场，全程 0 次反弹；
+                // 场半径放到 1.6 米（罩住主目标全身，场边离本机仍 &gt; 1 米；格斗 / 无人机贴近目标出手，不放大）。按端口 + 载体判
+                AddWorldSources(a, c.Site, sw.Reading.Carrier == CombatCarrier.Projectile && ProgramReads(sp, EmgEventKind.Bounce) ? 1.6f : 0.8f, markMain: !ProgramWrites(sp, EmgEventKind.Marked));
             }
-            if (ProgramReads(a.Program, EmgEventKind.Bounce))
+            // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）先造条件，按载体 / 端口（场景按原用例的程序定，去掉重跑时不变）：
+            // ① 格斗：基础扇形（推铲半角 60°）外、加宽后（寻的 +24° × 幅度、侧偏、体积）够得着的侧翼敌人——主目标方向偏 70°、2.2 米
+            // ② 写穿透的格斗：主目标身后 1.8 米、侧偏 1 米（PierceBehind 横向 ≤ 半径 + 0.6）的敌人，避开主目标后面那块残骸
+            // ③ 写穿透的力场 / 布区：本机与主目标之间一块小残骸（掩体），不穿透时脉冲打不到 / 布区落在残骸前（EmgPulseBlocked / EmgDropPoint）
+            // ④ 写破甲的程序：随机敌人带正面装甲（50%），破甲才有东西可破
+            // ⑤ 读“目标被劫持”（N40 劫持中继）：耐久约 2.5 发的杂兵，本机开局先打它——入侵度两发满阈值（FG19A N39），击毁那一下被劫持（CombatLogic.EmgTryHijack）
+            double2 mainDir = math.normalizesafe(a.MainAt, new double2(1.0, 0.0));
+            if (sw.Reading.Carrier == CombatCarrier.Melee && !childTimer)
+            {
+                // 一侧每 15° 一个（70°～160°）：加宽量（寻的 +24° × 0.85 ≈ 20°）大于间隔，不论基础扇形已被别的固件加宽到多少，总有一个只在加宽后才够得着
+                for (int deg = 70; deg <= 160; deg += 15)
+                {
+                    double ang = -math.radians(deg);
+                    a.Hostiles.Add(k.Spawn(Hostile(new double2(mainDir.x * math.cos(ang) - mainDir.y * math.sin(ang), mainDir.x * math.sin(ang) + mainDir.y * math.cos(ang)) * 2.2, 5000f, 0.4f, -1)));
+                }
+            }
+            if (ProgramWritesPort(sp, PortCode("grm.mod.pierce")))
+            {
+                if (sw.Reading.Carrier == CombatCarrier.Melee)
+                {
+                    a.Hostiles.Add(k.Spawn(Hostile(a.MainAt + mainDir * 1.8 + new double2(-mainDir.y, mainDir.x) * 1.0, 5000f, 0.5f, -1)));
+                }
+                else if (sw.Reading.Carrier == CombatCarrier.Aura || c.Carrier == FirmwareCarrier.Field)
+                {
+                    k.TryAddWreck(new EmgWreck { Pos = a.MainAt * 0.55, Radius = 0.3f, Hp = 1e6f, MaxHp = 1e6f, Until = 1e9 }, out _);
+                }
+            }
+            if (ProgramWritesPort(sp, PortCode("grm.mod.armor")))
+            {
+                foreach (int id in a.Hostiles.Skip(1).ToList())
+                {
+                    k.SetArmor(id, 0.5f, 90f); // 朝向沿用 Hostile 的 (-1, 0)（朝本机一侧）
+                }
+            }
+            if (ProgramWritesPort(sp, PortCode("prop.conductive")))
+            {
+                // 审查 P1 修复轮（按行为判死）先造条件：桥接导线（evt.hit 门控的 prop.conductive 写端，CombatLogic.EmgLink）的 B 端要 A 处 5 米内另有一个导体——
+                // 随机敌人 / 世界残骸都不导电，全程拉不出导线。本机与主目标连线中点侧偏 1.2 米放一小片水（导电斑块，不罩本机也不罩主目标）。按端口
+                k.SpawnPatch(EmgMatterConst.Water, a.MainAt * 0.5 + new double2(-mainDir.y, mainDir.x) * 1.2, 0.5f, 1f, 0f, 0, true);
+            }
+            // 修复轮 1 第 2 棒先造条件（#353）：写反弹修饰（grm.mod.bounce）的程序——命中后弹向命中点 6 米内另一个敌人（CombatLogic.Grammar EmgChainPick），
+            // 随机敌人可能都在 6 米外；主目标侧旁 2.5 米放一个敌人（耐久高，不挡本机与主目标的连线）。按端口
+            if (sp.KernelInstrs.Any(x => x.Role > EmgConst.RoleLastRead && EmgCatalog.Current.PortIdByCode.TryGetValue(x.Port, out string bid) && bid == "grm.mod.bounce"))
+            {
+                double2 side = new double2(-mainDir.y, mainDir.x) * 2.5;
+                a.Hostiles.Add(k.Spawn(Hostile(a.MainAt + side, 5000f, 0.5f, -1)));
+            }
+            bool repairCarrier = w.HasOutput == CombatConst.OutputRepair && w.Mode != CombatWeaponMode.Cannon;
+            if (ProgramReadsPort(sp, EmgConst.PortHijacked) && !repairCarrier)
+            {
+                // 格斗一次挥击可多段命中（实测 #295 环刃两击打死 2.5 发耐久的碎靶），击杀那一击的入侵度在阵亡判定之后才记（CombatLogic.Kill → EmgTryHijack 只看已有累积）：格斗按 4.5 发
+                float baitShots = sw.Reading.Carrier == CombatCarrier.Melee ? 4.5f : 2.5f;
+                // 上限耐久放高：劫持成立后按上限 × 劫持耐久比（0.3）重启为己方，旁边的敌人当步就会打它——原先上限 = 当前耐久（约 8 点），
+                // 重启后被身旁持枪的敌人一枪打死、劫持当步解除（#295 实测：CombatLogic.Kill ← StepHostileUnit），改刷来不及留下任何行为
+                CombatSpawn bait = Hostile(a.MainAt + new double2(-1.0, 0.6), Mathf.Max(1f, sw.Damage) * baitShots + 0.05f, 0.4f, -1);
+                bait.MaxHealth = 2000f;
+                a.HijackBait = k.Spawn(bait);
+                a.Hostiles.Add(a.HijackBait);
+            }
+            if (ProgramReads(sp, EmgEventKind.Bounce))
             {
                 // 读“反弹”的程序：被偏折场弹回的方向（本机身后）放一个敌人，反弹放出的子载荷才有东西可打（FGR-EMG-220 先造条件）
                 a.Hostiles.Add(k.Spawn(Hostile(new double2(-2.6, -0.4), 5000f, 1.2f, -1))); // 半径大一些：无人机子弹（4.8 米射程）从场边往回飞也够得着
             }
-            if (c.Carrier == FirmwareCarrier.Field && a.Program.Steps.Any(st => st.Kind == EmgStepKind.Trigger) && ProgramReads(a.Program, EmgEventKind.Hit))
+            if (c.Carrier == FirmwareCarrier.Field && sp.Steps.Any(st => st.Kind == EmgStepKind.Trigger) && ProgramReads(sp, EmgEventKind.Hit))
             {
                 // EMG2-MAT-01：力场的子载荷是小脉冲（触及 1.2 米，在脉冲结束处放出）——子节点读“命中”的程序在本机贴身处放一个敌人，子脉冲才有东西可打（FGR-EMG-220 先造条件）
                 a.Hostiles.Add(k.Spawn(Hostile(new double2(0.8, -0.6), 5000f, 0.5f, -1)));
             }
-            if (ProgramReads(a.Program, EmgEventKind.Kill))
+            if (ProgramReads(sp, EmgEventKind.Kill))
             {
                 // EMG2-RECL-01：读“击杀”的程序（回收修复及其混合固件）——主目标 5000 耐久、8 秒打不死（FGR-EMG-220 先造条件）：放一个碎靶，开打 4 秒后玩家改令打它 2 秒；子节点读者另见 Arena.BaitChildPayload。
                 // 格斗 / 力场当场结算、一圈全打，子载荷生成在被令攻击的目标身上、同一步撞上它：碎靶到改令那一步才生成在本机一侧（固定底盘也够得着），耐久 = 母载荷一击 + 余量，母打不死、子收尾
-                bool instantHost = w.Reading.Carrier == CombatCarrier.Melee || w.Reading.Carrier == CombatCarrier.Aura;
+                bool instantHost = sw.Reading.Carrier == CombatCarrier.Melee || sw.Reading.Carrier == CombatCarrier.Aura;
                 a.BaitAt = instantHost ? new double2(-1.5, -0.5) : a.MainAt + new double2(-1.0, 0.0);
-                a.Bait = instantHost ? -1 : k.Spawn(Hostile(a.BaitAt, 0.1f, 0.4f, -1));
+                a.BaitHp = instantHost ? Mathf.Max(0.1f, sw.Damage) + 0.05f : 0.1f;
+                a.Bait = instantHost ? -1 : k.Spawn(Hostile(a.BaitAt, a.BaitHp, 0.4f, -1));
                 a.BaitStep = Mathf.RoundToInt(BaitAtSeconds / Dt);
+                // 慢出手（重炮冷却 + 瞄准 + 22 m/s 飞行）2 秒窗口里一发都打不到碎靶（实测 fw_reclaim 两例全程 0 击杀）：窗口按出手节奏放宽，上限 6 秒
+                float cadence = Mathf.Max(0f, sw.Cooldown) + Mathf.Max(0f, sw.AimSeconds) + (sw.ProjectileSpeed > 0f ? (float)math.length(a.BaitAt) / sw.ProjectileSpeed : 0f) + 0.5f;
+                a.BaitHold = Mathf.Clamp(Mathf.CeilToInt(cadence / Dt), 2 * SwitchSteps, 6 * SwitchSteps);
+                if (ProgramWritesPort(sp, PortCode("ent.wreck")))
+                {
+                    // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）先造条件：击杀即拆的回收（evt.kill → ent.wreck）要击杀点旁边有残骸——碎靶不留残骸，场上那块世界源残骸可能已被同程序的腐蚀 / 熔断拆掉；
+                    // 碎靶旁边放一块耐久很高的残骸（按端口，回收只拆 1 块）
+                    k.TryAddWreck(new EmgWreck { Pos = a.BaitAt + new double2(0.0, -0.9), Radius = 0.4f, Hp = 1e6f, MaxHp = 1e6f, Until = 1e9 }, out _);
+                }
             }
             // 条件按端口：读过热 / 冷却完成 → 开局积热贴着过热阈值；读阵亡 → 6.5 秒判死（FG19A 第 1.8 节）
-            a.Preheat = ProgramReads(a.Program, EmgEventKind.Overheat) || ProgramReads(a.Program, EmgEventKind.Cooled);
-            if (a.Preheat && w.OverheatAt > 0f)
+            a.Preheat = ProgramReads(sp, EmgEventKind.Overheat) || ProgramReads(sp, EmgEventKind.Cooled);
+            if (ProgramReads(sp, EmgEventKind.Cooled))
+            {
+                // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）读冷却完成：开局就过热时头 4 秒全在过热里、停火后程序别的指令一次都没出手（实测 #15 / #313）——先正常打 3 秒，第 3～5 秒补积热到阈值下沿（下一发过热），然后停火散热
+                a.PreheatFrom = fixedChassis ? 0 : Mathf.RoundToInt(CoolHeatAtSeconds / Dt); // 定点底盘追不上被击退的目标、往往只有开局那一发（#141 实测），从开局补
+                a.PreheatTo = Mathf.RoundToInt(CoolCeaseSeconds / Dt);
+                // 无人机舱停火后积热原地钉在 2 倍阈值 20 秒（#266 实测），能走的母机后撤到 14 米外；EMG4-FUZZ-01（#313 / #410）：自己铺的火 / 熔渣在脚下持续注热，能走的一律后撤（玩家把过热的机器撤离火场）
+                a.CoolRetreat = !fixedChassis;
+            }
+            else if (a.Preheat && w.OverheatAt > 0f)
             {
                 k.SetWeaponState(a.Me, w.OverheatAt - 0.01f, false, 0, 0);
             }
-            if (c.Uplinked && ProgramReads(a.Program, EmgEventKind.Uplink))
+            if (c.Uplinked && ProgramReads(sp, EmgEventKind.Uplink))
             {
                 // EMG2-FLD-01：读“接入”的程序（N15 接入冲击）——正式路径在信号接入时由热更层注入 evt.uplink（CombatSites.OnUplinkChanged），用例开局按同一入口注入一次（FGR-EMG-220 先造条件）
                 k.InjectEmgUnitEvent(EmgEventKind.Uplink, a.Me, 0);
             }
-            if (ProgramReads(a.Program, EmgEventKind.Death))
+            if (ProgramReads(sp, EmgEventKind.Hurt))
+            {
+                // EMG4-FUZZ-01（DEBT-EMG4FUZZ01-02）先造条件：读“受击”的程序要有敌人打本机——随机敌人多是原地不动、射程够不着本机（实测静默派 9 个敌人全程 0 次受击）：
+                // 本机身后侧放一个 5 米射程、每秒 1 点伤害的敌人（离本机比离受损友军近，按“离自己最近”挑目标先打本机）
+                int shooter = a.Site.WeaponIndex(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, Range = 5f, Damage = 1f, Cooldown = 1f });
+                k.Spawn(Hostile(new double2(-1.2, -2.0), 5000f, 0.5f, shooter));
+            }
+            if (ProgramReads(sp, EmgEventKind.Death))
             {
                 a.KillStep = Mathf.RoundToInt(Mathf.Min(DeathAtSeconds, c.Seconds - 1f) / Dt);
             }
             // 修复出口（维修束）只对己方出手：玩家对受损友军下“攻击”命令 = 修它（FGR-BASE-020 玩家显式命令；与 RepairFire 同一入口）
-            bool repair = w.HasOutput == CombatConst.OutputRepair && w.Mode != CombatWeaponMode.Cannon;
-            k.IssueCommand(a.Me, CombatCommandKind.Attack, repair ? new double2(-1.5, 1.0) : a.MainAt, repair ? ally : a.Target, 0.5f, a.Engage, 0.5f, false);
+            bool repair = repairCarrier;
+            int firstTarget = repair ? ally : a.HijackBait >= 0 ? a.HijackBait : a.Target;
+            k.IssueCommand(a.Me, CombatCommandKind.Attack, repair ? allyAt : a.HijackBait >= 0 ? a.MainAt + new double2(-1.0, 0.6) : a.MainAt, firstTarget, 0.5f, a.Engage, 0.5f, false);
+            SpawnMates(a, c, wi, fixedChassis, repair ? ally : a.Target, repair ? allyAt : a.MainAt); // EMG4-FUZZ-01：协同用例的僚机（同装配、同命令）
+            if (ProgramReads(sp, EmgEventKind.Cooled) && a.CeaseStep < 0)
+            {
+                // 停火散热（玩家撤下过热的机器）：排在碎靶窗口之后。EMG4-FUZZ-01（#353 实测）：重炮出手周期 4 秒（1、5、9 秒），第 5 秒那发（瞄准 1 秒、第 6 秒出膛）正好撞上停火、一直过不了阈值——重炮宽限瞄准时长 + 0.25 秒（按武器模式，不按内容 ID）
+                a.CeaseStep = a.BaitStep >= 0 ? a.BaitStep + a.BaitHold + SwitchSteps : Mathf.RoundToInt((CoolCeaseSeconds + (sw.Mode == CombatWeaponMode.Cannon ? sw.AimSeconds + 0.25f : 0f)) / Dt);
+            }
+            if (a.Mates.Count > 0 && ProgramReads(sp, EmgEventKind.Seize))
+            {
+                // 先造条件（按端口）：读“夺控”的协同程序——开打 3 秒后主目标夺控一台僚机 2 秒（内核正式入口；正式调用方随 FG11-BOSS-01 / FG12-EVT-03 落地，DEBT-EMG4FW01-01）
+                a.SeizeUnit = a.Mates[0];
+                a.SeizeStep = Mathf.RoundToInt(SeizeAtSeconds / Dt);
+            }
+            if (c.RuleId != null)
+            {
+                a.Rule = SetupRuleScene(a, c.RuleId); // EMG4-FUZZ-01：规则行定向场景（在远离本机交战区的地方铺两侧条件）
+            }
             // 召唤载体读“终结”：无人机 / 桩每次母机开火都续命，只在停火后到期——先打 CeaseAtSeconds 秒再撤销命令（玩家停火），让它们到期（FGR-EMG-220 先造条件）
-            if (c.Carrier == FirmwareCarrier.Summon && ProgramReads(a.Program, EmgEventKind.Expire))
+            if (c.Carrier == FirmwareCarrier.Summon && ProgramReads(sp, EmgEventKind.Expire))
             {
                 a.CeaseStep = Mathf.RoundToInt(CeaseAtSeconds / Dt);
                 if (a.BaitStep >= 0)
                 {
                     // 同时读“击杀”（改令打碎靶 → 2 秒后改回主目标）：停火排在改回之后，否则改回主目标那一下又开了火、桩一直续命不到期（EMG3-FUSE-01 接力 #62）
-                    a.CeaseStep = a.BaitStep + 2 * SwitchSteps + SwitchSteps;
+                    a.CeaseStep = a.BaitStep + a.BaitHold + SwitchSteps;
                 }
             }
             return a;
+        }
+
+        private static bool ProgramWrites(EmgProgramResult r, EmgEventKind e)
+        {
+            ushort port = (ushort)(EmgConst.EventPortBase + (int)e);
+            return r != null && r.KernelInstrs.Any(x => x.Port == port && x.Role > EmgConst.RoleLastRead);
         }
 
         private static bool ProgramReads(EmgProgramResult r, EmgEventKind e)
@@ -746,13 +1008,14 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>场地条件源（地点模板决定障碍 / 残骸的多少与摆法）：偏折单位（evt.bounce 世界源）、障碍、残骸、热信号目标、标记与浸湿（与 FgReadingMatrixSelfCheck 条件场景同一造法）。</summary>
-        private static void AddWorldSources(Arena a, string site)
+        /// <param name="markMain">false = 主目标不预先标记（写 evt.marked 的程序：预先标到 1e9 会把它的标记写端整条盖掉，#197 fw_lockcache；读“被标记”的另两个敌人照常预标）。</param>
+        private static void AddWorldSources(Arena a, string site, float deflectRadius = 0.8f, bool markMain = true)
         {
             CombatKernel k = a.K;
             // 偏折单位：场（半径 0.8 米）罩住主目标与热信号目标（离本机最近的两个敌人，无人机按“离自己最近”挑目标），不罩本机，也不罩贴近目标出手的无人机（停在触及 0.96 米 + 目标半径处）——飞行弹体从场外飞进场边才反弹，反弹点在场外，反弹放出的子载荷往回飞不会一出生就被同一个场再弹掉；
             // 展开 / 收起按 SwitchSteps 轮换（Arena.StepOnce）
             CombatSpawn prism = Hostile(new double2(2.7, -0.3), 5000f, 0.5f, -1);
-            prism.BehaviorProfile = k.AddProfile(new CombatBehaviorProfile { DeflectRadius = 0.8f, DeflectReflect = 0.5f, DeflectWarn = 0.5f, DeflectUp = PhaseHold, DeflectGap = PhaseHold });
+            prism.BehaviorProfile = k.AddProfile(new CombatBehaviorProfile { DeflectRadius = deflectRadius, DeflectReflect = 0.5f, DeflectWarn = 0.5f, DeflectUp = PhaseHold, DeflectGap = PhaseHold });
             a.Prism = k.Spawn(prism);
             k.SetFlag(a.Prism, CombatUnitFlags.DeflectArmed, true);
             k.SetDeflectPhase(a.Prism, 2, PhaseHold);
@@ -774,7 +1037,10 @@ namespace GameLogic.EditorTools
             {
                 foreach (int id in a.Hostiles.Take(3))
                 {
-                    k.SetMarkedUntil(id, 1e9);
+                    if (markMain || id != a.Target)
+                    {
+                        k.SetMarkedUntil(id, 1e9);
+                    }
                     k.ApplyStatus(id, wet, 1e7f, 0f, 0f, 0f, 0);
                 }
             }
@@ -786,6 +1052,11 @@ namespace GameLogic.EditorTools
         {
             public FuzzCase Case;
             public readonly Dictionary<int, int> RuleHits = new Dictionary<int, int>();
+            /// <summary>EMG4-FUZZ-01：按规则行（fg.TbChannelRule.id）的成立次数。</summary>
+            public readonly Dictionary<string, int> RowHits = new Dictionary<string, int>(StringComparer.Ordinal);
+            /// <summary>EMG4-FUZZ-01（DEBT-EMG1FUZZ01-02）：内核激活过、但按行为判死的指令（去掉后行为指纹逐项相同）；也计入 <see cref="Dead"/>。</summary>
+            public readonly List<string> BehaviorDead = new List<string>();
+            public int BehaviorChecked;
             public string Crash;
             public string Stall;
             public string Determinism;
@@ -826,9 +1097,11 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>一例：主跑（计数开、逐步观察）+ 确定性重跑（计数关、不观察）+ 中途存读档续跑；<paramref name="full"/> 时抽样再跑一次“作业线程 1 + 观察读取 + 空推进帧”的变体。</summary>
-        internal static CaseResult Evaluate(FuzzCase c, bool full, Pools pools = null, bool variant = false)
+        /// <param name="behavior">EMG4-FUZZ-01（DEBT-EMG1FUZZ01-02）：按行为判死指令（内核激活过的每条指令去掉后重跑，行为指纹逐项相同 = 死指令）。缺省 = <paramref name="full"/>。</param>
+        internal static CaseResult Evaluate(FuzzCase c, bool full, Pools pools = null, bool variant = false, bool? behavior = null)
         {
             pools ??= Pools.Build();
+            bool judge = behavior ?? full;
             var r = new CaseResult { Case = c };
             int steps = Mathf.RoundToInt(c.Seconds / Dt);
             r.Steps = steps;
@@ -838,21 +1111,37 @@ namespace GameLogic.EditorTools
                 {
                     MainRun(a, r, steps);
                 }
-                if (r.Crash != null || !full)
+                if (r.Crash != null || (!full && !judge))
                 {
                     return r;
                 }
+                ulong print = 0;
+                Arena pin;
                 using (Arena b = Build(c, false, pools))
                 {
                     for (int i = 0; i < steps; i++)
                     {
                         b.StepOnce(i);
+                        if (judge && i % PrintEvery == PrintEvery - 1)
+                        {
+                            print = MixPrint(print, b);
+                        }
                     }
+                    print = MixPrint(print, b);
+                    pin = new Arena { Program = b.Program, W = b.W };
                     ulong h = Hash(b.K);
-                    if (h != r.Hash)
+                    if (full && h != r.Hash)
                     {
                         r.Determinism = $"同种子重跑（计数关、不观察）状态哈希 {h:X16} ≠ 主跑 {r.Hash:X16}";
                     }
+                }
+                if (judge)
+                {
+                    JudgeBehavior(c, pools, steps, r, print, pin);
+                }
+                if (!full)
+                {
+                    return r;
                 }
                 r.SaveLoad = SaveLoadRun(c, pools, steps, r.Hash);
                 if (variant)
@@ -909,6 +1198,10 @@ namespace GameLogic.EditorTools
                 r.MaxPending = Math.Max(r.MaxPending, pending);
                 r.Stall = StallOf(i, wall, before, k.Steps, pending, ref prevPending, ref rise);
                 Scan(a, r, i, dmgCap, heatCap, perChainCap, perChain);
+                if (i % PrintEvery == 0 && k.HijackCount > 0)
+                {
+                    r.Keys.Add("hijack"); // EMG4-FUZZ-01：劫持族的交互键（FG19A 7.2 维度贡献表）
+                }
             }
             ms.Sort();
             r.P99Ms = ms.Count > 0 ? ms[Math.Min(ms.Count - 1, (int)(ms.Count * 0.99))] : 0;
@@ -959,6 +1252,7 @@ namespace GameLogic.EditorTools
                     r.RuleHits[key] = fired;
                 }
             }
+            CollectRows(a, r, st);
         }
 
         /// <summary>每步扫描：NaN / 无穷（单位、弹体、无人机、区域）→ 崩溃；数值溢出（耐久越界、积热、单发伤害、同链子载荷数）→ 失败。</summary>
@@ -1134,6 +1428,7 @@ namespace GameLogic.EditorTools
         private static void SquadCondNodes(Arena a, FuzzCase c, HashSet<int> set, HashSet<int> ords)
         {
             ushort ping = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Ping);
+            bool squad = c.Mates > 0 && c.Relay; // EMG4-FUZZ-01：协同用例有同一中继组的僚机，收听 / 广播 evt.ping 能送达，不豁免
             string carrier = c.Carrier.ToString().ToLowerInvariant();
             List<EmgNode> nodes = a.Program.KernelNodes;
             for (int n = 0; n < nodes.Count; n++)
@@ -1141,7 +1436,7 @@ namespace GameLogic.EditorTools
                 for (int j = nodes[n].FirstInstr; j < nodes[n].FirstInstr + nodes[n].InstrCount && j < a.Program.KernelInstrs.Count; j++)
                 {
                     EmgInstr x = a.Program.KernelInstrs[j];
-                    bool listen = x.Port == ping && (x.Role == EmgConst.RoleTrigger || x.Role > EmgConst.RoleLastRead); // 收听或广播：单机、没有中继的用例里送达不了
+                    bool listen = !squad && x.Port == ping && (x.Role == EmgConst.RoleTrigger || x.Role > EmgConst.RoleLastRead); // 收听或广播：单机、没有中继的用例里送达不了
                     bool sync = x.Port == EmgTempoConst.PortSync && x.Role == EmgConst.RoleCondition;
                     string fw = listen || sync ? a.Program.Steps.FirstOrDefault(st => st.Ordinal == x.Ordinal)?.FirmwareId : null;
                     string reading = fw != null ? GameText.Get($"firmware.{fw}.read.{carrier}") + GameText.Get($"firmware.{fw}.desc") : string.Empty;
@@ -1286,11 +1581,15 @@ namespace GameLogic.EditorTools
                 a.StepOnce(i);
             }
             CombatSiteRecord rec = a.Site.Snapshot();
-            var b = new Arena { Site = new CombatSite("fuzz_" + c.Site, Config()), Me = a.Me, Target = a.Target, Prism = a.Prism, KillStep = a.KillStep, CeaseStep = a.CeaseStep, T = a.T, BaitStep = a.BaitStep, Bait = a.Bait, BaitAt = a.BaitAt, MainAt = a.MainAt, Engage = a.Engage, W = a.W };
+            var b = new Arena { Site = new CombatSite("fuzz_" + c.Site, ConfigFor(c)), Me = a.Me, Target = a.Target, Prism = a.Prism, HijackBait = a.HijackBait, KillStep = a.KillStep, CeaseStep = a.CeaseStep, T = a.T, BaitStep = a.BaitStep, Bait = a.Bait, BaitAt = a.BaitAt, MainAt = a.MainAt, Engage = a.Engage, W = a.W, Rule = a.Rule, Mates = a.Mates, Preheat = a.Preheat, PreheatFrom = a.PreheatFrom, PreheatTo = a.PreheatTo, SeizeStep = a.SeizeStep, SeizeUnit = a.SeizeUnit, BaitHold = a.BaitHold, BaitHp = a.BaitHp, CoolRetreat = a.CoolRetreat };
             try
             {
                 // 内核层读回地点快照（与 FgReadingMatrixSelfCheck.AddonSaveLoad 同一做法）：CombatSite.TryRestore 会按机器登记表对账，
                 // 本场地的机器不在战役登记表里（外部键 0）会被当孤儿移除——那是战役对账，不是快照往返要测的东西。新地点的构造已按正式流程登记反应 / 子形态 / 实体档案。
+                if (a.Rule?.Melt != null)
+                {
+                    b.K.SetMeltGround(a.Rule.Melt); // 可熔地面是派生量（热更层按生成规则写），读档沿用当前内核的：读档前先按地点下发（与正式载入同序）
+                }
                 CombatLoadResult lr = b.K.Load(Convert.FromBase64String(rec.Payload));
                 if (lr != CombatLoadResult.Ok)
                 {
@@ -1309,7 +1608,7 @@ namespace GameLogic.EditorTools
                     b.StepOnce(i);
                 }
                 ulong h = Hash(b.K);
-                return h == expected ? null : $"中途存读档续跑终局哈希 {h:X16} ≠ 连续跑 {expected:X16}";
+                return h == expected ? null : $"中途存读档续跑终局哈希 {h:X16} ≠ 连续跑 {expected:X16}（{SaveLoadDiverge(c, pools, steps)}）";
             }
             finally
             {
@@ -1391,7 +1690,7 @@ namespace GameLogic.EditorTools
 
         // ═════════════════════════════════ C 固定 64 例 ═════════════════════════════════
 
-        private static List<string> CheckFixedCases(Pools pools)
+        private static List<string> CheckFixedCases(Pools pools, out List<CaseResult> fixedResults)
         {
             Line($"  · C. 固定用例集 {FixedCount} 例（种子 {FixedSeed}，每例 {CaseSeconds} 游戏秒、1 倍速 {Mathf.RoundToInt(CaseSeconds / Dt)} 步；真实编译器 + CombatSite + 内核，无画面）");
             var sw = Stopwatch.StartNew();
@@ -1402,6 +1701,7 @@ namespace GameLogic.EditorTools
                 results.Add(Evaluate(c, full: true, pools, variant: c.Index % 8 == 3));
             }
             sw.Stop();
+            fixedResults = results;
             // 覆盖
             var directed = cases.Where(c => c.Tag != null && c.Tag.StartsWith("定向", StringComparison.Ordinal)).ToList();
             var dirBad = new List<string>();
@@ -1436,7 +1736,7 @@ namespace GameLogic.EditorTools
             Expect(stall.Count == 0, $"零卡死：单步墙钟最大 {results.Max(r => r.MaxMs):F2} ms（≤ {StallStepMs}）、事件队列没有连续 2 秒只增不减、时间都在前进{Detail(stall.Select(r => r.Case.Text + "：" + r.Stall))}");
             int ords = results.Sum(r => r.Ordinals.Count);
             Expect(dead.Count == 0 && ords > 0,
-                $"零死指令：{ords} 个指令位置全程激活次数 > 0（内核按指令行计数，合并行记给每个来源）；容量溢出 {results.Sum(r => r.OverflowSteps)}、幂等合并 {results.Sum(r => r.MergedSteps)}、" +
+                $"零死指令：{ords} 个指令位置全程激活次数 > 0（内核按指令行计数，合并行记给每个来源），其中 {results.Sum(r => r.BehaviorChecked)} 个另按行为判（去掉后重跑行为指纹必须不同，DEBT-EMG1FUZZ01-02）、按行为判死 {results.Sum(r => r.BehaviorDead.Count)}；容量溢出 {results.Sum(r => r.OverflowSteps)}、幂等合并 {results.Sum(r => r.MergedSteps)}、" +
                 $"旧轨（stageGate &gt; 1）{results.Sum(r => r.LegacySteps)} 条不计；条件型零反应（FG-GAP-179 口径：定时在本载体射程内必先命中、读法写明“先命中则不空爆”）{results.Sum(r => r.CondZero.Count)} 条单列"
                 + $"{(results.Any(r => r.CondZero.Count > 0) ? "（" + string.Join("；", results.Where(r => r.CondZero.Count > 0).Select(r => $"#{r.Case.Index} {string.Join("，", r.CondZero)}")) + "）" : string.Empty)}"
                 + $"{Detail(dead.Select(r => r.Case.Text + "：" + string.Join("，", r.Dead)))}");
@@ -1461,7 +1761,8 @@ namespace GameLogic.EditorTools
             Expect(directed16.Count == 16 && missing16.Count == 0,
                 $"规则可达（规则四）：16 条具名反应每条至少触发过一次（随机例打到 {random16} 条、定向场景补全；定向 {string.Join(" ", directed16.Select(kv => kv.Key.Replace("reaction_", string.Empty) + ":" + kv.Value))}）；" +
                 $"规则分布：随机例共触发 {randomKeys.Count} / {EmgRuleCatalog.Current.Rules.Select(x => x.Key).Distinct().Count()} 个稳定键{Detail(missing16)}");
-            Line($"    · 本段 {results.Count} 例共 {results.Sum(r => r.Steps)} 步 × 3 遍（主跑 / 确定性 / 存读档）+ {variants} 例变体，墙钟 {sw.Elapsed.TotalSeconds:F1} 秒；子载荷生成 {results.Sum(r => r.SubSpawned)} 份，" +
+            CheckResident(cases, results, sw.Elapsed.TotalSeconds);
+            Line($"    · 本段 {results.Count} 例共 {results.Sum(r => r.Steps)} 步 × 3 遍（主跑 / 确定性 / 存读档）+ {variants} 例变体 + 按行为判死重跑 {results.Sum(r => r.BehaviorChecked)} 遍，墙钟 {sw.Elapsed.TotalSeconds:F1} 秒；子载荷生成 {results.Sum(r => r.SubSpawned)} 份，" +
                  $"链深截断 {results.Sum(r => r.DepthCut)} 次；单例内核步 p99 最大 {results.Max(r => r.P99Ms):F3} ms");
             string path = WriteReport("_emg-fuzz-fixed.md", $"固定集 seed={FixedSeed} count={FixedCount}", results);
             Line($"    · 报告（FGR-EMG-222：新颖度前 20、死指令清单、帧耗前 20、事件分布）：{path ?? "（没找到证据目录，未写）"}");
@@ -1980,7 +2281,7 @@ namespace GameLogic.EditorTools
             public readonly List<double> SumMs = new List<double>();
             public readonly double[] SiteMs = new double[3];
             public int MaxProjectiles, MinProjectiles = int.MaxValue, MaxDrones, Wrecks, Machines, MinHostiles = int.MaxValue, MinTurrets = int.MaxValue;
-            public int MinPatches = int.MaxValue, MinFields = int.MaxValue, MaxHomePatches;
+            public int MinPatches = int.MaxValue, MinFields = int.MaxValue, MaxHomePatches, MinPatchesAll, MinDrones = int.MaxValue;
             public long Enqueued, Processed, SubSpawned, Injected;
             public int MaxProcessedPerStep, MaxPending, Rise, MaxRise;
             public long Alloc;
@@ -2053,9 +2354,11 @@ namespace GameLogic.EditorTools
         {
             UseStage(stage);
             var st = new LoadStats();
+            st.MinPatchesAll = int.MaxValue;
+            _maxWorldDone = false;
             CombatBench.Spec spec = CombatBench.PerfSpec();
             CombatBench.Spec expedition = spec;
-            expedition.RaiderHp *= 3f; // 远征多了 120 台机器一起打：突袭者耐久 ×3，让“200 敌人 + ≥1,500 弹体”在测量窗口里持续同时存在（与 combat.perf.hp_scale 同一用意）
+            expedition.RaiderHp *= _maxLoad != 0 ? 4.5f : 3f; // EMG4-FUZZ-01：加满（烟雾 / 蒸汽挪外环后不再遮蔽，火力更密，测量窗口里会打掉 1 个）再 ×1.5，只改耐久不改数量； 远征多了 120 台机器一起打：突袭者耐久 ×3，让“200 敌人 + ≥1,500 弹体”在测量窗口里持续同时存在（与 combat.perf.hp_scale 同一用意）
             var sites = new[] { new CombatSite("fuzz_load_expedition", Config()), new CombatSite("fuzz_load_home", Config()), new CombatSite("fuzz_load_outpost", Config()) };
             var machines = new List<int>[sites.Length];
             try
@@ -2135,6 +2438,8 @@ namespace GameLogic.EditorTools
                     st.MinProjectiles = Math.Min(st.MinProjectiles, pc);
                     st.MaxProjectiles = Math.Max(st.MaxProjectiles, pc);
                     st.MaxDrones = Math.Max(st.MaxDrones, sites[0].Kernel.DroneCount + sites[1].Kernel.DroneCount);
+                    st.MinDrones = Math.Min(st.MinDrones, sites[0].Kernel.DroneCount);
+                    st.MinPatchesAll = Math.Min(st.MinPatchesAll, sites[0].Kernel.PatchCount);
                     if (i % 60 == 0)
                     {
                         st.MinHostiles = Math.Min(st.MinHostiles, sites[0].Kernel.CountAlive(CombatFaction.Hostile));
@@ -2176,11 +2481,52 @@ namespace GameLogic.EditorTools
             byte[] mats = { EmgMatterConst.Oil, EmgMatterConst.Water, EmgMatterConst.Coolant, EmgMatterConst.Polymer, EmgMatterConst.Debris, EmgMatterConst.Dust, EmgMatterConst.Smoke, EmgMatterConst.Steam };
             const int side = 34;
             CombatKernel k = sites[0].Kernel;
-            for (int n = 1024 - k.PatchCount; n > 0; n--) // 只补缺口：SpawnPatch 是排队的（每步额度），多要只会堆“软上限并入”的空转，那不是满载而是刷生成
+            if ((_maxLoad & MaxPatches) == 0)
             {
-                int cell = seq++ % (side * side);
-                var at = new double2((cell % side - side / 2) * 2.6, (cell / side - side / 2) * 2.6);
-                k.SpawnPatch(mats[seq % mats.Length], at, 1f, 1f, 8f);
+                for (int n = 1024 - k.PatchCount; n > 0; n--) // 只补缺口：SpawnPatch 是排队的（每步额度），多要只会堆“软上限并入”的空转，那不是满载而是刷生成
+                {
+                    int cell = seq++ % (side * side);
+                    var at = new double2((cell % side - side / 2) * 2.6, (cell / side - side / 2) * 2.6);
+                    k.SpawnPatch(mats[seq % mats.Length], at, 1f, 1f, 8f);
+                }
+            }
+            else
+            {
+                // 加满（FGR-EMG-203 斑块 1024 = 世界源保留 96 + 17 种物质软上限合计 928，FG19B 第 0 节第 6 条）：按种类只补到各自软上限（MatterRow.Quota），
+                // 存续 30 秒——补的量 = 到期的量，不刷“软上限并入”的空转。上面 8 种不挡弹不伤人的照旧铺在战场格子上；其余 9 种（冰、玻璃、火、酸、熔融等挡弹 / 伤人）铺在 70～90 米外环，
+                // 不打散 1500 弹体的战斗，斑块层的节拍、合并、传导开销照样全量发生
+                var have = new int[EmgMatterConst.Count + 1];
+                for (int i = 0; i < k.PatchSlots; i++)
+                {
+                    if (k.TryGetPatch(i, out CombatZone z) && z.Matter <= EmgMatterConst.Count)
+                    {
+                        have[z.Matter]++;
+                    }
+                }
+                for (byte m = 1; m <= EmgMatterConst.Count; m++)
+                {
+                    // EMG4-FUZZ-01 续做（加满弹体最少 1357 < 1500 的根因）：烟雾 / 蒸汽按软上限铺满战场后遮蔽单位（CombatLogic.Field EmgObscured：烟里 3 米 / 蒸汽 6 米外选不中目标），
+                    // 机器选不到目标就不开火，弹体掉到 1357；这两种也铺到外环（块数不变，斑块层开销照样全量），常规满载（上面那支，8 秒存续）不动
+                    bool near = Array.IndexOf(mats, m) >= 0 && m != EmgMatterConst.Smoke && m != EmgMatterConst.Steam;
+                    for (int n = k.MatterRow(m).Quota - have[m]; n > 0; n--)
+                    {
+                        int cell = seq++;
+                        double2 at = near
+                            ? new double2((cell % (side * side) % side - side / 2) * 2.6, (cell % (side * side) / side - side / 2) * 2.6)
+                            : new double2(Math.Cos(2 * Math.PI * (cell % 240) / 240.0) * (70.0 + 10.0 * (cell / 240 % 3)), Math.Sin(2 * Math.PI * (cell % 240) / 240.0) * (70.0 + 10.0 * (cell / 240 % 3)));
+                        k.SpawnPatch(m, at, 1f, 1f, 30f);
+                    }
+                }
+                if (!_maxWorldDone)
+                {
+                    // 世界源（液洼）在 110 米外一圈常驻，只在开场放一次
+                    _maxWorldDone = true;
+                    for (int w = 0; w < 96; w++)
+                    {
+                        double ang = 2 * Math.PI * w / 96.0;
+                        k.SpawnPatch(EmgMatterConst.Water, new double2(Math.Cos(ang) * 110.0, Math.Sin(ang) * 110.0), 1f, 1f, 1e5f, 0, true);
+                    }
+                }
             }
             for (int f = k.FieldCount; f < 64; f++)
             {
@@ -2221,7 +2567,7 @@ namespace GameLogic.EditorTools
             for (int s = 0; s < sites.Length; s++)
             {
                 List<EmgEvent> h = hosts[s];
-                int count = s == 0 ? (step % 60 == 30 ? LoadEventsPeak : LoadEventsPerStep) : s == 1 ? HomeEventsPerStep : 0;
+                int count = s == 0 ? ((_maxLoad & MaxEvents) != 0 || step % 60 == 30 ? LoadEventsPeak : LoadEventsPerStep) : s == 1 ? HomeEventsPerStep : 0; // 加满场景：远征每步 512（FGR-EMG-203“事件持续 512 / 步”）
                 for (int j = 0; j < count && h.Count > 0; j++)
                 {
                     bool ok = sites[s].Kernel.InjectEmgEvent(h[cursor++ % h.Count]);
@@ -2292,6 +2638,7 @@ namespace GameLogic.EditorTools
         {
             var weapons = new int[LoadLoadouts.Length];
             var progs = new int[LoadLoadouts.Length];
+            var loadW = new CombatWeapon[LoadLoadouts.Length];
             for (int i = 0; i < LoadLoadouts.Length; i++)
             {
                 BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisWheelId, LoadLoadouts[i].Comp, null, null, Array.Empty<string>());
@@ -2299,7 +2646,18 @@ namespace GameLogic.EditorTools
                 BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, LoadLoadouts[i].Uplink);
                 CombatWeapon w = site.WithProgram(p, CombatSite.MachineWeaponFrom(p));
                 weapons[i] = site.WeaponIndex(w);
+                loadW[i] = w;
                 progs[i] = w.Program;
+            }
+            int bay8 = -1;
+            if ((_maxLoad & MaxDrones) != 0 && count >= 100)
+            {
+                // 加满（FGR-EMG-203 无人机 512）：远征 120 台里 72 台换成无人机舱、每台挂满 8 架（CombatConst.MaxDronesPerOwner）。
+                // shortcut: 架数直接写进满载装配的读法（正式内容里机舱 2 架 + 固件加架最多 5～6 架），只用于量容量满额时的开销；真实打法的无人机规模随 FG15-SYS-02 实机复测
+                int bi = Array.FindIndex(LoadLoadouts, l => l.Comp == ComponentCatalog.CompDroneBayId);
+                CombatWeapon bw = loadW[bi];
+                bw.Reading.Drones = CombatConst.MaxDronesPerOwner;
+                bay8 = site.WeaponIndex(bw);
             }
             var ids = new List<int>(count);
             for (int i = 0; i < count; i++)
@@ -2310,7 +2668,7 @@ namespace GameLogic.EditorTools
                 {
                     ExtKey = 0, Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.Commanded,
                     Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled | CombatUnitFlags.ExternalHealth,
-                    Position = at, Home = at, Radius = 0.6f, Speed = 4f, Health = 400f, MaxHealth = 400f, Weapon = weapons[i % weapons.Length], BehaviorProfile = -1, Priority = 1,
+                    Position = at, Home = at, Radius = 0.6f, Speed = 4f, Health = 400f, MaxHealth = 400f, Weapon = bay8 >= 0 && i % 5 < 3 ? bay8 : weapons[i % weapons.Length], BehaviorProfile = -1, Priority = 1,
                 }));
             }
             for (int i = 0; i < LoadLoadouts.Length && i < ids.Count; i++)
@@ -2408,6 +2766,7 @@ namespace GameLogic.EditorTools
                 }
             }
             sb.AppendLine("- 规则触发分布（稳定键:次数）：" + string.Join(" ", results.SelectMany(r => r.RuleHits).GroupBy(kv => kv.Key).OrderBy(g => g.Key).Select(g => $"{g.Key}:{g.Sum(kv => kv.Value)}")));
+            AppendResidentReport(sb, results);
             string dir = EvidenceDir();
             if (dir == null)
             {

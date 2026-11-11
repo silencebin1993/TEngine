@@ -574,7 +574,9 @@ namespace BinGames.Sim.Combat
                     Count = (byte)math.min((int)c.TrigCount, maxChildren), SubForm = c.SubForm != 0 ? c.SubForm : EmgSubFormOf(host.Carrier),
                     Prog = e.Prog, Chain = e.Chain, Owner = host.OwnerId, Weapon = host.Weapon, Faction = host.Faction, Damage = host.Damage,
                     ZoneRadius = host.ZoneRadius, ZoneLife = host.ZoneLife, Flags = host.PFlags & EmgProjFlags.Heal, Pos = e.Pos, Dir = dir,
-                    Other = e.Kind == EmgEventKind.Hit ? e.Other : 0, Ent = (int)e.Kind,
+                    // EMG4-FUZZ-01（模糊测试器 #321 发现）：命中终结（evt.expire，Code = ExpireHit）在被击单位的位置放子载荷——与命中触发同口径不再撞那个单位，
+                    // 否则子载荷一出生就在被击单位体内、当步全部撞回它（子母弹“抛出 4 枚”变成原地再打 4 下，挂在下面的定时永远到不了点）
+                    Other = e.Kind == EmgEventKind.Hit || (e.Kind == EmgEventKind.Expire && e.Code == EmgCode.ExpireHit) ? e.Other : 0, Ent = (int)e.Kind,
                 });
             }
         }
