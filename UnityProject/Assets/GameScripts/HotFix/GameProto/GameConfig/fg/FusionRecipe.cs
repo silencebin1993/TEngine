@@ -27,6 +27,8 @@ public sealed partial class FusionRecipe : Luban.BeanBase
         Reaction = _buf.ReadString();
         NameKey = _buf.ReadString();
         SortOrder = _buf.ReadInt();
+        ClueA = _buf.ReadString();
+        ClueB = _buf.ReadString();
     }
 
     public static FusionRecipe DeserializeFusionRecipe(ByteBuf _buf)
@@ -66,6 +68,14 @@ public sealed partial class FusionRecipe : Luban.BeanBase
     /// 配方书排序
     /// </summary>
     public readonly int SortOrder;
+    /// <summary>
+    /// 线索端口对第 1 端(fg.TbChannelPort id 或 mat.*;按 FG19A 第 4.3 节,与 parentA 同侧,不同侧时运行时按两父交换)
+    /// </summary>
+    public readonly string ClueA;
+    /// <summary>
+    /// 线索端口对第 2 端
+    /// </summary>
+    public readonly string ClueB;
    
     public const int __ID__ = -1802039585;
     public override int GetTypeId() => __ID__;
@@ -85,6 +95,8 @@ public sealed partial class FusionRecipe : Luban.BeanBase
         + "reaction:" + Reaction + ","
         + "nameKey:" + NameKey + ","
         + "sortOrder:" + SortOrder + ","
+        + "clueA:" + ClueA + ","
+        + "clueB:" + ClueB + ","
         + "}";
     }
 }

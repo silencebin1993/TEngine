@@ -906,6 +906,18 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>EMG4-FUSE-02（FG-GAP-206）：写入线索侧位表（下标 = 端口码，见 <see cref="CombatData.EmgClueSides"/>）；长度不对拒绝。</summary>
+        public bool SetEmgClueSides(ulong[] sides)
+        {
+            if (sides == null || sides.Length != EmgConst.ClueSidePorts)
+            {
+                return false;
+            }
+            _d.EmgClueSides.CopyFrom(sides);
+            Touch();
+            return true;
+        }
+
         public EmgFieldRule FieldRuleAt(int k) => k >= 0 && k < EmgFieldConst.RuleCount ? _d.EmgFieldRules[k] : default;
 
         /// <summary>EMG2-FLD-01：在 (x, y) 展开一个场（自检 / 调试入口；正式路径由声明轨 fld.* 写端与部件场生成）。返回是否生效（满 64 不生效、计数可见）。</summary>
@@ -3191,6 +3203,7 @@ namespace BinGames.Sim.Combat
             staging.EmgRuleOrder.CopyFrom(_d.EmgRuleOrder);
             staging.EmgPhases.CopyFrom(_d.EmgPhases); // EMG2-PHS-01：相态规则同是表数据
             staging.EmgFieldRules.CopyFrom(_d.EmgFieldRules); // EMG2-FLD-01：场 × 载体规则同是表数据
+            staging.EmgClueSides.CopyFrom(_d.EmgClueSides); // EMG4-FUSE-02：线索侧位表同是表数据
             staging.EmgTraitParams.CopyFrom(_d.EmgTraitParams); // EMG3-CHS-01：底盘特性 / 冲刺参数同是表数据（emg.trait.* / emg.dash.*）
             staging.WaterTest = _d.WaterTest; // EMG3-CHS-02：测试水域不进快照（自检桩）
             staging.ShockBit = _d.ShockBit;

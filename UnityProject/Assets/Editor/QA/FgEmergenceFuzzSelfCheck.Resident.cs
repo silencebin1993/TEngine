@@ -1431,6 +1431,19 @@ namespace GameLogic.EditorTools
                         var o = x.SumMs.OrderBy(v => v).ToList();
                         ablation.Add($"去掉{name}：平均 {x.SumMs.Average():F3} / p99 {o[Math.Min(o.Count - 1, (int)(o.Count * 0.99))]:F3} ms");
                     }
+                    // EMG4-FUSE-02 修复第 3 轮：本卡把燃迹从“1 块”改成沿途 1～4 个段点（每段一块斑块 + 段点己方检查），这里把段点压回 1 个，量这部分多出的开销
+                    _maxLoad = MaxAll;
+                    try
+                    {
+                        CombatAblation.TrailSegments.Data = 1;
+                        LoadStats t = MeasureLoad(EmgCatalog.ImplementedStage, warm, measure);
+                        var o = t.SumMs.OrderBy(v => v).ToList();
+                        ablation.Add($"燃迹段点压回 1 个：平均 {t.SumMs.Average():F3} / p99 {o[Math.Min(o.Count - 1, (int)(o.Count * 0.99))]:F3} ms");
+                    }
+                    finally
+                    {
+                        CombatAblation.TrailSegments.Data = 0;
+                    }
                 }
             }
             finally

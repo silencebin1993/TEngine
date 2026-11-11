@@ -1519,9 +1519,10 @@ namespace GameLogic.Campaign.Combat
             for (int i = 0; i < c.Rules.Count; i++)
             {
                 EmgRule r = c.Rules[i];
-                r.ClueMask = Emergence.EmgRuleCatalog.ClueMaskOfKey(r.Key); // EMG3-FUSE-01：规则成立的线索计数在内核里按链去重
+                r.ClueMask = Emergence.EmgRuleCatalog.ClueMaskOfPair(r.A, r.B); // EMG3-FUSE-01：规则成立的线索计数在内核里按链去重；EMG4-FUSE-02：按这一行自己的两端口匹配配方（FG-GAP-206 ③）
                 c.Rules[i] = r;
             }
+            kernel.SetEmgClueSides(Emergence.EmgRuleCatalog.ClueSides()); // EMG4-FUSE-02：线索按链上两侧端口实际出现计数
             if (!kernel.SetEmgRules(c.Rules))
             {
                 Log.Error("[EmgRuleCatalog] 内核拒绝了规则表（码越界或超容量）");

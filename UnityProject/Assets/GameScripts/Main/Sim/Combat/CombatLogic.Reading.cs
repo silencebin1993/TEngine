@@ -46,6 +46,7 @@ namespace BinGames.Sim.Combat
             {
                 Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
                 LaunchDrones(ref d, a, wp, r.Drones + r.EscortDrones, t);
+                EmgAnchorAt(ref d, EmgAnchorConst.Drone, d.EmgCtx, d.Pos[a], t); // EMG4-FUSE-02
                 return CombatFireResult.Ok;
             }
 
@@ -138,11 +139,13 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[t] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[t], wp.MarkSeconds, 0f, 0, d.Pos[t]); // EMG1-BUS-01：evt.marked（宿主 = 打上标记的这次出手）
+                EmgAnchorAt(ref d, EmgAnchorConst.Marked, d.EmgCtx, d.Pos[t], t); // EMG4-FUSE-02：被标记的目标是落点（没有接线的程序 O(1) 返回）
             }
             Anchored(ref d, a, t, primaryPos, dealt, baseDamage, wp, wasMarked, d.Pos[a], false);
             if (r.EscortDrones > 0)
             {
                 LaunchDrones(ref d, a, wp, r.EscortDrones);
+                EmgAnchorAt(ref d, EmgAnchorConst.Drone, d.EmgCtx, d.Pos[a], t); // EMG4-FUSE-02：放出的伴飞是落点（在放出处执行 B 一次）
             }
             return CombatFireResult.Ok;
         }
@@ -405,7 +408,13 @@ namespace BinGames.Sim.Combat
             }
             if (r.ExecuteBelow > 0f && d.IsAlive(t) && d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= r.ExecuteBelow && !d.Has(t, CombatUnitFlags.Invulnerable))
             {
+                double2 at = d.Pos[t];
                 DamageUnit(ref d, t, d.Hp[t] + 1f, a);
+                if (a >= 0 && d.EmgCtx.Owner == a)
+                {
+                    // EMG4-FUSE-02 修复轮（审查 P1）：第一层的处决走过渡读法 ExecuteBelow，被处决的目标处同样是落点（与子节点 EmgTargetWrite 同口径；没有接线的程序 O(1) 返回）
+                    EmgAnchorAt(ref d, EmgAnchorConst.Execute, d.EmgCtx, at, -1);
+                }
             }
             if (r.Knockback > 0f && a >= 0 && d.IsAlive(t))
             {

@@ -242,6 +242,8 @@ namespace BinGames.Sim.Combat
         public const float KeepTemp = -998f;
         /// <summary>EMG2-REACT-02：子节点效果写端按端口码结算（fg.TbChannelPort，与 fgdata_emg 同值）。</summary>
         public const ushort PortCorrode = 907, PortMarked = 316, PortIntegrity = 626, PortFragment = 606, PortDrone = 602;
+        /// <summary>EMG4-FUSE-02：线索端口对里的结构 / 节拍端口码（grm.trig、tmp.beat，fg.TbChannelPort）。</summary>
+        public const ushort PortTrig = 100, PortBeat = 1301;
         /// <summary>按物质码建的两张索引：[0, 18) = a 侧物质（matter_matter / matter_energy），[18, 36) = b 侧物质（event_matter）。</summary>
         public const int IndexSlots = (EmgMatterConst.Count + 1) * 2;
         // 传导 / 热（FG19B 第 1.4 节、第 10 节初值；运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）

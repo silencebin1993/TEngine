@@ -961,12 +961,17 @@ namespace BinGames.Sim.Combat
             int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
             ushort hitPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Hit);
             bool chs = c.Owner >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
+            bool clue = p.ClueMask != 0u;
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
                 if (chs && EmgChsBlocked(ref d, c.Owner, n.FirstInstr, end, x.Ordinal))
                 {
                     continue; // DEBT-EMG3CHS01-02：命中结算的场 / 壁撞 / 子节点命中写端 / 注能同样按出手者门控同序号 chs.* condition（同 EmgRootGated）
+                }
+                if (clue && x.Role > EmgConst.RoleLastRead && (x.Flags & (EmgInstrFlags.Overflow | EmgInstrFlags.Anchored)) == 0 && !EmgOrdinalTriggered(ref d, n.FirstInstr, end, x.Ordinal))
+                {
+                    EmgClueSeen(ref d, c.Chain, x.Port); // EMG4-FUSE-02：没有触发读端的写端在命中处结算（含走旧读法过渡的落点排放），算这条链上出现了它的端口；被底盘条件拦下的不算（放在门控之后）
                 }
                 if (x.Verb == (byte)EmgVerb.Field)
                 {
@@ -975,6 +980,7 @@ namespace BinGames.Sim.Combat
                     {
                         EmgHitField(ref d, x, t, c); // 修复轮：按宿主载体展开（FG19A 第 1.4 节电磁场控 5 载体）
                         EmgAnchorAt(ref d, EmgAnchorConst.Field, c, d.Pos[t], t, x.Ordinal); // EMG3-FUSE-01：场生成点是落点
+                        EmgFieldAnchors(ref d, c, x, d.Pos[t], t); // EMG4-FUSE-02：场内受力 / 被扫过的单位也是落点
                     }
                     continue;
                 }
@@ -1039,6 +1045,9 @@ namespace BinGames.Sim.Combat
                     }
                 }
                 EmgChainLog(ref d, EmgChainNode.Inject, c.Chain, c.Depth, x.Port, EmgIdOf(ref d, c.Owner), at, d.Id[t]);
+                EmgClueSeen(ref d, c.Chain, x.Port); // EMG4-FUSE-02：命中注能在链上出现
+                // EMG4-FUSE-02：被加热 / 充电的斑块也是落点——先按注入那一刻已有的斑块取（B 在落点上刚排出的斑块不算 A 的落点），再执行目标单位那一个
+                EmgInjectSpots(ref d, c, x.Port, at, math.max(0.5f, x.Param2), x.Ordinal);
                 EmgAnchorAt(ref d, EmgAnchorConst.Inject, c, at, t, x.Ordinal); // EMG3-FUSE-01：被注入能量的单位是落点
             }
             return inj;
@@ -1110,6 +1119,16 @@ namespace BinGames.Sim.Combat
                     return false; // 门控在别的事件上：不是“命中时”的写端
                 }
             }
+            return EmgTargetWrite(ref d, t, c, x, n.FirstInstr, end);
+        }
+
+        /// <summary>
+        /// 一条“落在目标上”的效果写端（子弹药 / 子区落点与 EMG4-FUSE-02 接线落点共用，同一实现）：腐蚀度注入、余震（en.kinetic 带延迟）、数据链标记、处决（完整度 ≤ 阈值直接击毁并炸破片，
+        /// 破片数取 [<paramref name="first"/>, <paramref name="end"/>) 里同序号的 ent.fragment 行）、无人机。返回 true = 这一条已结算。
+        /// 标记 / 处决 / 无人机同时是接线落点（EmgAnchorConst.Marked / Execute / Drone），带接线的程序在这里挂钩子（Anchored 行本身不再递归，AnchorBusy）。
+        /// </summary>
+        internal static bool EmgTargetWrite(ref CombatData d, int t, in EmgCtx c, in EmgInstr x, int first, int end)
+        {
             int owner = c.Owner;
             float strike = c.Strike > 0f ? c.Strike : c.Damage;
             switch (x.Port)
@@ -1118,6 +1137,7 @@ namespace BinGames.Sim.Combat
                     if (x.Amount > 0f && EmgPatchesOn(ref d))
                     {
                         EmgAddAcc(ref d, t, EmgPhaseConst.Corrode, x.Amount, EmgIdOf(ref d, owner));
+                        EmgClueSeen(ref d, c.Chain, x.Port); // EMG4-FUSE-02
                         return true;
                     }
                     return false;
@@ -1126,6 +1146,7 @@ namespace BinGames.Sim.Combat
                     {
                         d.MarkedUntil[t] = math.max(d.MarkedUntil[t], d.Scalars[0].Time + x.Amount);
                         EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[t], x.Amount, 0f, 0, d.Pos[t]);
+                        EmgAnchorAt(ref d, EmgAnchorConst.Marked, c, d.Pos[t], t, x.Ordinal); // EMG4-FUSE-02：被标记的目标是落点
                         return true;
                     }
                     return false;
@@ -1143,7 +1164,7 @@ namespace BinGames.Sim.Combat
                     if (d.MaxHp[t] > 0f && d.Hp[t] / d.MaxHp[t] <= below && !d.Has(t, CombatUnitFlags.Invulnerable))
                     {
                         int frags = 0;
-                        for (int j = n.FirstInstr; j < end; j++)
+                        for (int j = first; j < end; j++)
                         {
                             EmgInstr f = d.EmgInstrs[j];
                             if (f.Ordinal == x.Ordinal && f.Port == EmgRuleConst.PortFragment && f.Role > EmgConst.RoleLastRead)
@@ -1152,6 +1173,7 @@ namespace BinGames.Sim.Combat
                             }
                         }
                         double2 at = d.Pos[t];
+                        EmgClueSeen(ref d, c.Chain, x.Port); // EMG4-FUSE-02：处决在链上出现
                         EmgDestroyDirect(ref d, t, owner);
                         EmgEntityParams ep = d.EmgEntParams[0];
                         for (int q = 0; q < frags && c.Depth < EmgConst.MaxDepth; q++)
@@ -1159,6 +1181,7 @@ namespace BinGames.Sim.Combat
                             float a = 2f * math.PI * q / math.max(1, frags);
                             EmgSpawnFragment(ref d, at, new float2(math.cos(a), math.sin(a)), EmgIdOf(ref d, owner), (CombatFaction)c.Faction, (byte)(c.Depth + 1), c.Chain, ep.FragDamage, ep.FragSpeed, ep.FragRange);
                         }
+                        EmgAnchorAt(ref d, EmgAnchorConst.Execute, c, at, -1, x.Ordinal); // EMG4-FUSE-02：被处决的目标处是落点
                     }
                     return true;
                 }
@@ -1169,6 +1192,7 @@ namespace BinGames.Sim.Combat
                     {
                         CombatReading dr = d.Weapons[c.Weapon].Reading;
                         LaunchDrones(ref d, owner, d.Weapons[c.Weapon], dr.Drones + dr.EscortDrones + (int)math.round(x.Amount), t); // 在本机原有架数上多放（无人机舱载体同 FG19A“多放”），重复命中不再累加
+                        EmgAnchorAt(ref d, EmgAnchorConst.Drone, c, d.Pos[owner], t, x.Ordinal); // EMG4-FUSE-02：放出的伴飞是落点（在放出处执行 B 一次，单次上限 1）
                         return true;
                     }
                     return false;

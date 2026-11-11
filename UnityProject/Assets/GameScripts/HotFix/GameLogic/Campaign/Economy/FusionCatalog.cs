@@ -23,6 +23,8 @@ namespace GameLogic.Campaign.Economy
         public string Reaction;
         public string NameKey;
         public int SortOrder;
+        /// <summary>EMG4-FUSE-02（DEBT-EMG3EXIT-01）：FG19A 第 4.3 节线索端口对（fg.TbChannelPort id；"mat.*" = 那一侧父固件的任一 mat.* 线索端口）。</summary>
+        public string ClueA, ClueB;
 
         public string Name => GameText.Get(NameKey);
 
@@ -276,7 +278,7 @@ namespace GameLogic.Campaign.Economy
                 var def = new FusionRecipeDef
                 {
                     Id = row.Id, MixId = row.MixId, ParentA = row.ParentA, ParentB = row.ParentB, Family = row.Family,
-                    Reaction = row.Reaction, NameKey = row.NameKey, SortOrder = row.SortOrder,
+                    Reaction = row.Reaction, NameKey = row.NameKey, SortOrder = row.SortOrder, ClueA = row.ClueA, ClueB = row.ClueB,
                 };
                 ById[def.Id] = def;
                 ByMix[def.MixId] = def;

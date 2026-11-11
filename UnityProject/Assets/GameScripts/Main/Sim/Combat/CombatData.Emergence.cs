@@ -36,6 +36,10 @@ namespace BinGames.Sim.Combat
         public NativeList<float3> ScorchGround;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合线索同现计数（下标 = 配方书序号，≤ 32）；热更层按 <see cref="EmgScalars.ClueDirty"/> 取走后清零（可靠计数 + 脏位，不按帧扫描；待取走次数与去重环随快照段 26 存读档，脏位读档时由待取走次数重建）。</summary>
         public NativeArray<int> EmgClue;
+        /// <summary>EMG4-FUSE-02：线索在途登记（[配方 × ClueHalfRing]：x = 链号、y = 已出现的侧位 1 / 2），随快照段 32。</summary>
+        public NativeArray<int2> EmgClueHalf;
+        /// <summary>EMG4-FUSE-02：端口码 → 线索侧位（位 2i = 配方 i 的第 1 侧、2i + 1 = 第 2 侧）。表数据（热更层按 FG19A 第 4.3 节端口对下发），不进快照、读档沿用当前表。</summary>
+        public NativeArray<ulong> EmgClueSides;
         /// <summary>EMG3-CHS-01：底盘特性参数（下标 = <see cref="EmgTraitConst"/> 机制，4 个参数 = fg.TbChassisTrait paramKeys 的 emg.trait.* 值；表数据，读档沿用当前的）。</summary>
         public NativeArray<float4> EmgTraitParams;
         /// <summary>EMG3-CHS-02：自检用测试水域（x, y = 圆心，z = 半径；z ≤ 0 = 没有）。正式水面地形（FG18-SEA-01）落地前 chs.water 只由它置位，正式路径恒 0；不进快照，读档沿用当前的。</summary>
@@ -79,6 +83,8 @@ namespace BinGames.Sim.Combat
             ScorchAcc = new NativeList<float4>(0, Allocator.Persistent);
             ScorchGround = new NativeList<float3>(0, Allocator.Persistent);
             EmgClue = new NativeArray<int>(EmgConst.ClueLen, Allocator.Persistent); // EMG3-FUSE-01：[0, 32) 待取走的同现次数，其后各配方的环头与最近计过的链号环
+            EmgClueHalf = new NativeArray<int2>(EmgConst.ClueSlots * EmgConst.ClueHalfRing, Allocator.Persistent);
+            EmgClueSides = new NativeArray<ulong>(EmgConst.ClueSidePorts, Allocator.Persistent);
             EmgTraitParams = new NativeArray<float4>(EmgTraitConst.Count, Allocator.Persistent);
             EmgMatters = new NativeArray<EmgMatter>(EmgMatterConst.Count + 1, Allocator.Persistent);
             EmgRules = new NativeList<EmgRule>(8, Allocator.Persistent);
@@ -171,6 +177,8 @@ namespace BinGames.Sim.Combat
             ScorchAcc.Dispose();
             ScorchGround.Dispose();
             EmgClue.Dispose();
+            EmgClueHalf.Dispose();
+            EmgClueSides.Dispose();
             EmgTraitParams.Dispose();
             EmgMatters.Dispose();
             EmgRules.Dispose();
@@ -258,6 +266,10 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < EmgClue.Length; i++)
             {
                 EmgClue[i] = 0;
+            }
+            for (int i = 0; i < EmgClueHalf.Length; i++)
+            {
+                EmgClueHalf[i] = default;
             }
             EmgStructPending.Clear();
             EmgStructOut.Clear();

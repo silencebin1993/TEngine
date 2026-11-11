@@ -346,9 +346,14 @@ namespace BinGames.Sim.Combat
             int emit = d.Config.EmgVerbEmit;
             ushort pingPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Ping);
             bool salvaged = false;
+            bool clue = p.ClueMask != 0u;
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                if (clue && x.Role > EmgConst.RoleLastRead && x.Verb != (byte)EmgVerb.Spread && (x.Flags & (EmgInstrFlags.Overflow | EmgInstrFlags.Anchored)) == 0 && EmgMetaAllowed(allow, x.Ordinal) && EmgTrigOn(ref d, n.FirstInstr, end, x.Ordinal, evPort, any))
+                {
+                    EmgClueSeen(ref d, e.Chain, x.Port); // EMG4-FUSE-02：被这个事件门控的写端在这里结算（含走旧读法过渡的排放），算这条链上出现了它的端口；蔓延不算它液体的排放，由 EmgSpread 扩开时记“液体扩散”
+                }
                 if (x.Port == pingPort && x.Role > EmgConst.RoleLastRead)
                 {
                     // EMG3-SQD-01（FGR-EMG-133）：写 evt.ping 的指令在它的生效事件（同一条指令的 trigger 读端）时广播频道；不看动词 / RootKernel 标记（按端口 + 角色）
@@ -405,12 +410,19 @@ namespace BinGames.Sim.Combat
                 {
                     // EMG2-FLD-01：事件门控的场写端在事件位置展开（单位级事件 = 本单位处；接入冲击 = 接入时以本机为心；被击 = 按宿主载体展开，见 EmgGatedField）
                     EmgGatedField(ref d, x, e, host);
-                    EmgAnchorAt(ref d, EmgAnchorConst.Field, host, e.Pos, e.OtherKind == EmgEntKind.Unit && e.Other != 0 ? d.SlotOf(e.Other) : -1, x.Ordinal); // EMG3-FUSE-01
+                    int fo = e.OtherKind == EmgEntKind.Unit && e.Other != 0 ? d.SlotOf(e.Other) : -1;
+                    EmgAnchorAt(ref d, EmgAnchorConst.Field, host, e.Pos, fo, x.Ordinal); // EMG3-FUSE-01
+                    EmgFieldAnchors(ref d, host, x, e.Pos, fo); // EMG4-FUSE-02：场内受力 / 被扫过的单位
                     continue;
                 }
                 float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
                 float b = (x.Flags & EmgInstrFlags.MagB) != 0 ? x.B * x.Amount : x.B;
                 if (!(a > 0f) || !(b > 0f))
+                {
+                    continue;
+                }
+                // EMG4-FUSE-02（FG19A 第 4.2 节）：读 evt.fire 的物质排放 = 沿途排放，按长度均分段点排斑块（取代过渡读法 trail）
+                if (x.Verb == emit && e.Kind == EmgEventKind.Fire && EmgPatchesOn(ref d) && EmgTrailEmit(ref d, x, e, host, a, b, n.FirstInstr, end))
                 {
                     continue;
                 }
@@ -426,6 +438,16 @@ namespace BinGames.Sim.Combat
                 {
                     SetLastZoneLook(ref d, x.Verb == (byte)EmgVerb.Inject ? CombatZoneLook.Pulse : CombatZoneLook.Pool); // 注电 = 外扩冲击环，排放 = 液池
                     NoteReading(ref d, CombatConst.ReadingFeedZone, e.Pos, owner);
+                }
+                if (x.Verb == (byte)EmgVerb.Inject)
+                {
+                    EmgClueSeen(ref d, e.Chain, x.Port); // EMG4-FUSE-02：事件门控的注能（含腐蚀度）在链上出现
+                }
+                if (x.Verb == (byte)EmgVerb.Inject && EmgProgAnchored(ref d, host.Prog))
+                {
+                    // EMG4-FUSE-02（DEBT-EMG3FUSE01-01“事件门控的注能”）：过热泄放 / 回波 / 谐振这类事件门控的注能——脉冲处的单位与被加热 / 充电的斑块是落点
+                    EmgInjectSpots(ref d, host, x.Port, e.Pos, a, x.Ordinal);
+                    EmgAnchorAt(ref d, EmgAnchorConst.Inject, host, e.Pos, e.OtherKind == EmgEntKind.Unit && e.Other != 0 ? d.SlotOf(e.Other) : -1, x.Ordinal);
                 }
             }
         }
@@ -465,10 +487,12 @@ namespace BinGames.Sim.Combat
                 EmgStat(ref d, 4);
                 return;
             }
+            EmgClueSeen(ref d, e.Chain, EmgConst.PortProjectile); // EMG4-FUSE-02：链上出现了追射（ent.projectile）
+            int retarget = EmgFollowRetarget(ref d, host, e.Other, x.Ordinal); // EMG4-FUSE-02：接线的追射改打 5 米内另一目标、B 刷写给它；没有第二目标 = 重复无效，照常打原目标
             d.EmgPending.Add(new EmgSpawn
             {
-                Kind = EmgConst.PendFollow, Armed = 1, Count = (byte)math.clamp(Round(x.Amount), 1, EmgConst.DefaultMaxChildren),
-                At = d.Scalars[0].Time + math.max(0f, x.A), Pos = e.Pos, Other = e.Other, Owner = host.OwnerId, Weapon = host.Weapon,
+                Kind = EmgConst.PendFollow, Armed = 1, Count = (byte)math.clamp(Round(x.Amount), 1, EmgConst.DefaultMaxChildren), Flags = retarget != 0 ? EmgProjFlags.AnchorFollow : EmgProjFlags.None,
+                At = d.Scalars[0].Time + math.max(0f, x.A), Pos = e.Pos, Other = retarget != 0 ? retarget : e.Other, Owner = host.OwnerId, Weapon = host.Weapon,
                 Damage = (host.Strike > 0f ? host.Strike : host.Damage) * (x.Param2 > 0f ? x.Param2 : EmgSubRatio(ref d)), Faction = host.Faction, Prog = e.Prog, Node = 0, Chain = e.Chain,
                 Depth = (byte)math.min(e.Depth + 1, EmgConst.MaxDepth), SubForm = host.Carrier,
             });
@@ -493,6 +517,12 @@ namespace BinGames.Sim.Combat
             {
                 EmgCtx saved = d.EmgCtx;
                 d.EmgCtx = new EmgCtx { Prog = -1, Owner = o, OwnerId = s.Owner, Faction = s.Faction, Weapon = -1 };
+                if ((s.Flags & EmgProjFlags.AnchorFollow) != 0)
+                {
+                    // EMG4-FUSE-02：格斗 / 力场的追射当场追加一记——落点 = 第二目标处，以母程序为宿主执行 B（Prog −1 的伤害上下文不再进命中注能）
+                    EmgAnchorAt(ref d, EmgAnchorConst.Follow, new EmgCtx { Prog = s.Prog, Node = 0, Chain = s.Chain, Depth = s.Depth, Owner = o, OwnerId = s.Owner, Faction = s.Faction, Weapon = s.Weapon,
+                        EntKind = EmgEntKind.Unit, Ent = s.Owner, Carrier = s.SubForm }, d.Pos[t], t);
+                }
                 DamageUnit(ref d, t, s.Damage, o);
                 d.EmgCtx = saved;
                 s.Count--;
@@ -523,7 +553,7 @@ namespace BinGames.Sim.Combat
             var pr = new CombatProjectile
             {
                 Id = id, Prog = s.Prog, Chain = s.Chain, Node = 0, Depth = s.Depth, Pos = start, Prev = start, Vel = dir * speed, Owner = s.Owner, Weapon = -1,
-                Damage = s.Damage, Radius = radius, Life = life, Faction = (CombatFaction)s.Faction, Flags = EmgProjFlags.Flight, TrigUsed = uint.MaxValue,
+                Damage = s.Damage, Radius = radius, Life = life, Faction = (CombatFaction)s.Faction, Flags = EmgProjFlags.Flight | (s.Flags & EmgProjFlags.AnchorFollow), TrigUsed = uint.MaxValue,
             };
             EmgInitFlight(ref d, ref pr, d.Pos[t], s.Other, true);
             d.Projectiles.Add(pr);
@@ -536,6 +566,11 @@ namespace BinGames.Sim.Combat
 
         private static void EmgQueueChildren(ref CombatData d, in EmgEvent e, in EmgCtx host, float2 dir, ulong allow = ulong.MaxValue)
         {
+            EmgClueSeen(ref d, e.Chain, EmgRuleConst.PortTrig); // EMG4-FUSE-02：触发器放子载荷（grm.trig）；节拍事件放的另记 tmp.beat
+            if (e.Kind == EmgEventKind.Beat)
+            {
+                EmgClueSeen(ref d, e.Chain, EmgRuleConst.PortBeat);
+            }
             EmgProgram p = d.EmgPrograms[e.Prog];
             int maxChildren = EmgMaxChildren(ref d);
             int pf = -1, pe = -1;
@@ -1197,7 +1232,7 @@ namespace BinGames.Sim.Combat
                 EmgActNode(ref d, prog, 0); // EMG1-FUZZ-01：没有事件监听也是一次修复出手（无条件修饰 / 效果照样执行；只在模糊测试器开启计数时，不改状态）
                 return;
             }
-            EmgHostBegin(ref d, prog, i, d.Id[i], EmgEntKind.Unit, (byte)EmgCode.SrcOther, d.Pos[i], target);
+            EmgHostBegin(ref d, prog, i, d.Id[i], EmgEntKind.Unit, (byte)EmgCode.SrcOther, d.Pos[i]);
             EmgCtx c = d.EmgCtx;
             c.Damage = amount;
             c.Weapon = d.Weapon[i];
@@ -1209,6 +1244,7 @@ namespace BinGames.Sim.Combat
             int w = d.Weapon[i];
             c.Instant = (byte)(w >= 0 && w < d.Weapons.Length && !EmgFlightOn(d.Weapons[w]) ? 1 : 0); // EMG1-FUZZ-01：当场修复 = 载荷当场终结（EmgShotEnd 发 evt.expire）
             d.EmgCtx = c;
+            EmgHostFire(ref d, d.Pos[i], target);
         }
 
         // ─────────────────────────────── 根载荷实体化（SpawnFlight）───────────────────────────────
@@ -1389,6 +1425,7 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[hit] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[hit], wp.MarkSeconds, 0f, 0, d.Pos[hit]);
+                EmgAnchorAt(ref d, EmgAnchorConst.Marked, d.EmgCtx, d.Pos[hit], hit); // EMG4-FUSE-02
             }
             Anchored(ref d, owner, hit, hitPos, dealt, wp.Damage, wp, wasMarked, d.Pos[owner], false);
         }
@@ -1756,7 +1793,7 @@ namespace BinGames.Sim.Combat
                     es.AnchorBusy = 1;
                     d.EmgS[0] = es;
                 }
-                EmgAnchorExec(ref d, x, host, pos, target);
+                EmgAnchorExec(ref d, x, host, pos, target, tail, end);
                 es = d.EmgS[0];
             }
             es.AnchorBusy = 0;
@@ -1777,9 +1814,28 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>在落点执行一条 Anchored 效果写端：排放 → 斑块（斑块层没开时落驻留区）、注能 → 对象单位 + 落点斑块、场 / 蔓延 / 导线 / 追射按事件门控的同一实现（落点当事件位置）。</summary>
-        private static void EmgAnchorExec(ref CombatData d, in EmgInstr x, in EmgCtx host, double2 pos, int target)
+        private static void EmgAnchorExec(ref CombatData d, in EmgInstr x, in EmgCtx host, double2 pos, int target, int first, int last)
         {
             bool unit = target >= 0 && target < d.Count && d.IsAlive(target);
+            // EMG4-FUSE-02（DEBT-EMG3FUSE01-01 ③）：动能注入（余震）、数据链标记、处决、破片、伴飞——与子弹药落点同一实现（EmgTargetWrite），对象 = 落点上的单位
+            if (x.Port == EmgRuleConst.PortMarked || x.Port == EmgRuleConst.PortIntegrity || x.Port == EmgRuleConst.PortDrone || (x.Verb == (byte)EmgVerb.Inject && x.Port == EmgConst.PortKinetic))
+            {
+                if (unit)
+                {
+                    EmgTargetWrite(ref d, target, host, x, first, last);
+                }
+                return;
+            }
+            if (x.Port == EmgRuleConst.PortFragment)
+            {
+                EmgAnchorFragments(ref d, x, host, pos, first, last);
+                return;
+            }
+            if (x.Port == EmgConst.EventPortBase + (int)EmgEventKind.Ping)
+            {
+                EmgPingOut(ref d, new EmgEvent { Kind = EmgEventKind.Hit, Depth = host.Depth, EntKind = host.EntKind, Ent = host.Ent, Prog = host.Prog, Node = host.Node, Chain = host.Chain, Pos = pos }, host, x);
+                return;
+            }
             var e = new EmgEvent
             {
                 Kind = EmgEventKind.Hit, Depth = host.Depth, EntKind = host.EntKind, Ent = host.Ent, OtherKind = unit ? EmgEntKind.Unit : EmgEntKind.None, Other = unit ? d.Id[target] : 0,
@@ -1831,6 +1887,7 @@ namespace BinGames.Sim.Combat
                     }
                     else if (x.Port == EmgRuleConst.PortCorrode && EmgPatchesOn(ref d))
                     {
+                        EmgClueSeen(ref d, host.Chain, x.Port);
                         EmgAddAcc(ref d, target, EmgPhaseConst.Corrode, x.Amount, ownerId); // 与命中注入腐蚀度同一实现（EmgChildHitWrite）
                     }
                 }
@@ -1865,6 +1922,98 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        /// <summary>
+        /// EMG4-FUSE-02（FGR-EMG-044“两父端口在同一条因果链里同现”；FG-GAP-206 ①）：出手时为程序掩码里的每条配方登记这条链（侧位清零；满了挤掉链号最小 = 最早的一条）。
+        /// 之后同一条链上的写端执行时调 <see cref="EmgClueSeen"/>，两侧端口都出现才计 1 次（EmgClueCount 按链去重）。O(配方位 × 环长)，只在带掩码的出手时。
+        /// </summary>
+        internal static void EmgClueArm(ref CombatData d, uint mask, int chain)
+        {
+            if (mask == 0u || chain <= 0 || !d.EmgClueHalf.IsCreated)
+            {
+                return;
+            }
+            for (int i = 0; i < EmgConst.ClueSlots; i++)
+            {
+                if ((mask & (1u << i)) == 0)
+                {
+                    continue;
+                }
+                int b = i * EmgConst.ClueHalfRing, oldest = b;
+                bool have = false;
+                for (int j = b; j < b + EmgConst.ClueHalfRing && !have; j++)
+                {
+                    have = d.EmgClueHalf[j].x == chain;
+                    if (d.EmgClueHalf[j].x == 0 || (d.EmgClueHalf[oldest].x != 0 && d.EmgClueHalf[j].x < d.EmgClueHalf[oldest].x))
+                    {
+                        oldest = j; // 空位优先，其次链号最小（最早）的
+                    }
+                }
+                if (!have)
+                {
+                    d.EmgClueHalf[oldest] = new int2(chain, 0);
+                }
+            }
+        }
+
+        /// <summary>
+        /// EMG4-FUSE-02：链 <paramref name="chain"/> 上执行了一条写端口 <paramref name="port"/>（排放 / 注能 / 场 / 追射 / 拆残骸 / 处决 / 触发器 / 节拍）——按线索侧位表给已登记这条链的配方记侧位，
+        /// 两侧都出现即计 1 次并清掉登记。没有登记的链（环境 / 规则产物 / 没带掩码的程序）不计。端口不是任何配方的线索端口时 O(1) 返回。
+        /// </summary>
+        internal static void EmgClueSeen(ref CombatData d, int chain, int port)
+        {
+            if (chain <= 0 || port <= 0 || port >= EmgConst.ClueSidePorts || !d.EmgClueSides.IsCreated)
+            {
+                return;
+            }
+            ulong sides = d.EmgClueSides[port];
+            for (int i = 0; sides != 0ul && i < EmgConst.ClueSlots; i++, sides >>= 2)
+            {
+                int side = (int)(sides & 3ul);
+                if (side == 0)
+                {
+                    continue;
+                }
+                int b = i * EmgConst.ClueHalfRing;
+                for (int j = b; j < b + EmgConst.ClueHalfRing; j++)
+                {
+                    int2 h = d.EmgClueHalf[j];
+                    if (h.x != chain)
+                    {
+                        continue;
+                    }
+                    h.y |= side;
+                    if (h.y == 3)
+                    {
+                        d.EmgClueHalf[j] = default;
+                        EmgClueCount(ref d, 1u << i, chain);
+                    }
+                    else
+                    {
+                        d.EmgClueHalf[j] = h;
+                    }
+                    break;
+                }
+            }
+        }
+
+        /// <summary>配方 <paramref name="i"/> 有这条链的在途登记就清掉并返回 true。</summary>
+        private static bool EmgClueDisarm(ref CombatData d, int i, int chain)
+        {
+            if (!d.EmgClueHalf.IsCreated)
+            {
+                return false;
+            }
+            for (int j = i * EmgConst.ClueHalfRing; j < (i + 1) * EmgConst.ClueHalfRing; j++)
+            {
+                if (d.EmgClueHalf[j].x == chain)
+                {
+                    d.EmgClueHalf[j] = default;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>EMG3-FUSE-01（FGR-EMG-044 熔合线索）：一次出手的程序覆盖了哪些配方端口对（编译期掩码），各计 1 次并置脏位；热更层按脏位取走（O(配方数)，只在带掩码的程序出手时）。</summary>
         /// 出手（程序掩码，<paramref name="rule"/> = false）与规则成立（规则行的配方掩码，跨机器的同现）走同一个计数：每条配方记住最近由出手计过的 ClueRing 条链号（环）——
         /// 出手：链号在环里不再计，否则进环、计 1；规则成立：链号在环里（这条链的同现已由出手计过）不计，同一条链同一步只计一次（长期存在的斑块合并后沿用一个链号，
@@ -1892,7 +2041,9 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                if (rule)
+                // EMG4-FUSE-02：这条链出手时登记过、两侧还没都出现，规则成立 = 同现成立——按出手那一路计（进链环），之后的出手侧位不再重复计
+                bool asRule = rule && !EmgClueDisarm(ref d, i, chain);
+                if (asRule)
                 {
                     int step = unchecked((int)d.Scalars[0].Steps);
                     if (d.EmgClue[EmgConst.ClueRuleChain + i] == chain && d.EmgClue[EmgConst.ClueRuleStep + i] == step)

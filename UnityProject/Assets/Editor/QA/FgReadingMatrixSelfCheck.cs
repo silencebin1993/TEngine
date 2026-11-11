@@ -937,6 +937,7 @@ namespace GameLogic.EditorTools
                 Fail("存档前给破碎都市地点内核补未处理事件失败");
             }
             WorldSimulation.SyncAllForSave();
+            int wrecksAtSave = midSite != null ? midSite.Kernel.WreckCount : -1; // EMG4-FUSE-02：残骸数按存档那一刻核对往返（拖尾改内核段点后这 2 秒里可能多打掉一个敌人，不再恒为样例的 1 个）
             SaveResult mid = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
             WorldSimulation.StepMany(120);
             ulong continuous = SiteHash();
@@ -958,9 +959,9 @@ namespace GameLogic.EditorTools
             short sp = -2;
             EmgUnitState sst = default;
             bool unitSeg = site != null && site.TryGetMachineUnit(sprayer, out int su) && site.Kernel.TryGetUnitEmg(su, out sp, out sst);
-            bool emgKept = site != null && site.Kernel.ProgramCount == _seedProgCount + 1 && site.Kernel.EmgBusPending == 2 && site.Kernel.WreckCount == 1
+            bool emgKept = site != null && site.Kernel.ProgramCount == _seedProgCount + 1 && site.Kernel.EmgBusPending == 2 && wrecksAtSave >= 1 && site.Kernel.WreckCount == wrecksAtSave
                            && unitSeg && chassisProf >= 0 && sp == chassisProf && sst.LastHitBy == 2 && sst.LastHitChain == 1;
-            Expect(emgKept, $"涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 {_seedProgCount + 1} 行（含样例 1 行）、未处理事件 2 条、残骸 1 个、喷洒机的单位段都在（样例状态字段原样读回，档案 = 底盘档案 {chassisProf}；以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
+            Expect(emgKept, $"涌现状态随真实战役存档（CampaignAutoSaveService → 地点快照格式 16）进出：程序表 {_seedProgCount + 1} 行（含样例 1 行）、未处理事件 2 条、残骸（存档时的数目）、喷洒机的单位段都在（样例状态字段原样读回，档案 = 底盘档案 {chassisProf}；以上倍速 / 暂停 / 观察 / 存读档哈希都含这些状态）"
                             + (emgKept ? string.Empty : $"；实际：程序 {site?.Kernel.ProgramCount}、未处理 {site?.Kernel.EmgBusPending}、残骸 {site?.Kernel.WreckCount}、步数 {site?.Kernel.Steps}、单位段 {unitSeg} 档案 {sp} 上次命中 {sst.LastHitBy} 链 {sst.LastHitChain}"));
         }
 

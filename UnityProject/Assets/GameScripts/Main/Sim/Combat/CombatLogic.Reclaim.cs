@@ -49,6 +49,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             bool repair = false, claw = false;
+            byte ord = 0;
             for (int i = firstInstr; i < endInstr; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
@@ -56,6 +57,10 @@ namespace BinGames.Sim.Combat
                     || !EmgGatedBy(ref d, firstInstr, endInstr, x.Ordinal, evPort))
                 {
                     continue;
+                }
+                if (!repair && !claw)
+                {
+                    ord = x.Ordinal;
                 }
                 if (x.Param2 > 0f)
                 {
@@ -71,7 +76,17 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            EmgSalvageCore(ref d, owner, EmgKillWreck(ref d, e.Pos), repair, claw || EmgOwnerClaw(ref d, owner), e.Other);
+            int wk = EmgKillWreck(ref d, e.Pos);
+            if (wk >= 0)
+            {
+                EmgClueSeen(ref d, e.Chain, EmgConst.PortEntWreck); // EMG4-FUSE-02：拆残骸在链上出现
+            }
+            double2 wpos = wk >= 0 && wk < d.Wrecks.Length ? d.Wrecks[wk].Pos : e.Pos;
+            EmgSalvageCore(ref d, owner, wk, repair, claw || EmgOwnerClaw(ref d, owner), e.Other);
+            if (wk >= 0 && EmgProgAnchored(ref d, host.Prog))
+            {
+                EmgAnchorAt(ref d, EmgAnchorConst.Wreck, host, wpos, -1, ord); // EMG4-FUSE-02：被拆解的残骸处是落点（溶断回收“在残骸处溅酸”）
+            }
         }
 
         private static bool EmgOwnerClaw(ref CombatData d, int slot)
@@ -394,6 +409,13 @@ namespace BinGames.Sim.Combat
             });
             es.WiresBorn++;
             d.EmgS[0] = es;
+            if (EmgProgAnchored(ref d, host.Prog))
+            {
+                // EMG4-FUSE-02（FG19A 第 4.2 节 prop.conductive 行，单次上限 2）：导线两端是落点
+                double2 pb = kind == EmgWireConst.EndUnit ? d.Pos[bidx] : kind == EmgWireConst.EndWreck ? d.Wrecks[bidx].Pos : d.Patches[bidx].Pos;
+                EmgAnchorAt(ref d, EmgAnchorConst.Wire, host, ca, kindA == EmgWireConst.EndUnit ? aidx : -1, x.Ordinal);
+                EmgAnchorAt(ref d, EmgAnchorConst.Wire, host, pb, kind == EmgWireConst.EndUnit ? bidx : -1, x.Ordinal);
+            }
         }
 
         /// <summary>导线一端此刻的下标（单位槽位 / 残骸下标 / 斑块槽位；用缓存、对不上再查）。−1 = 这一端已经消失。</summary>
@@ -726,6 +748,10 @@ namespace BinGames.Sim.Combat
                 }
             }
             d.EmgS[0] = es;
+            if (spots.Length > 0)
+            {
+                EmgClueSeen(ref d, host.Chain, EmgConst.PortClueSpread); // EMG4-FUSE-02（DEBT-EMG3EXIT-01）：液体真的扩开了才算链上出现“液体扩散”
+            }
             for (int q = 0; q < spots.Length && EmgProgAnchored(ref d, host.Prog); q++)
             {
                 EmgAnchorAt(ref d, EmgAnchorConst.Spread, host, spots[q], -1, x.Ordinal);

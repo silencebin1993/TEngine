@@ -161,6 +161,7 @@ namespace GameLogic.EditorTools
                 bool declOnly = FirmwareKinds.TryGetRow(o, out GameConfig.fg.FirmwareKind row) && FirmwareKinds.IsDeclOnlyRow(row);
                 bool medium = mine.Any(d => d.Dir == EmgDirs.Write && d.Role == EmgRole.Modify && cat.PortIdByCode[d.Port].StartsWith("mat.", StringComparison.Ordinal));
                 bool beat = mine.Any(d => d.Dir == EmgDirs.Read && cat.PortIdByCode[d.Port] == "evt.beat");
+                bool fireTrig = mine.Any(d => d.Dir == EmgDirs.Read && d.Role == EmgRole.Trigger && cat.PortIdByCode[d.Port] == "evt.fire");
                 bool trigHere = false;
                 foreach (EmgDeclRow d in mine.Where(d => d.Dir == EmgDirs.Write && (d.Carriers & bit) != 0))
                 {
@@ -174,10 +175,12 @@ namespace GameLogic.EditorTools
                     }
                     tags = true;
                     bool kernel = EmgProgramCompiler.IsRootKernelPort(port) || EmgProgramCompiler.IsRootKernelWrite(port, d.Role) || declOnly
-                                  || (medium && d.Role == EmgRole.Emit && port.StartsWith("mat.", StringComparison.Ordinal)) || (beat && port == "en.kinetic");
+                                  || (medium && d.Role == EmgRole.Emit && port.StartsWith("mat.", StringComparison.Ordinal)) || (beat && port == "en.kinetic")
+                                  || (fireTrig && d.Role == EmgRole.Emit && port.StartsWith("mat.", StringComparison.Ordinal)); // EMG4-FUSE-02：读 evt.fire 的物质排放 = 沿途排放，由内核按段点执行（FG19A 第 4.2 节）
                     if (!kernel)
                     {
-                        keep.UnionWith(EmgProgramCompiler.TransitionFields(port));
+                        // EMG4-FUSE-02：物质过渡字段只留 owner 自己有的那个（混合行读法是两父相加，与编译器 LegacySkip 同口径）
+                        keep.UnionWith(EmgProgramCompiler.TransitionFields(port).Where(f => !port.StartsWith("mat.", StringComparison.Ordinal) || CarrierReadings.FieldsOf(o).Any(of => of.Item1 == f)));
                     }
                 }
                 afterTrig |= trigHere;

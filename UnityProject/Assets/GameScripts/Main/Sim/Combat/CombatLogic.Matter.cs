@@ -1066,6 +1066,7 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
+            EmgClueSeen(ref d, chain, x.Port); // EMG4-FUSE-02：程序的物质排放在链上出现（规则产物走 EmgRuleSpawn，不经这里）
             int owner = ownerSlot >= 0 && ownerSlot < d.Count ? d.Id[ownerSlot] : 0;
             float amount = x.Amount > 0f ? x.Amount : 1f;
             EmgTraitEmit(ref d, ownerSlot, matter, ref radius, ref amount); // EMG3-CHS-02：空投半径 × 0.6；在水面上的取水单位排水 / 冷却液 × 1.5

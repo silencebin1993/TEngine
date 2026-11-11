@@ -19,21 +19,25 @@ namespace BinGames.Sim.Combat
         public const byte None = 0, Chain = 1, Bounce = 2, Pierce = 3, Return = 4, Orbit = 5, Trail = 6, Spread = 7, Field = 8, Inject = 9, Follow = 10, Drone = 11,
             Wreck = 12, Execute = 13, Wire = 14, Marked = 15;
         /// <summary>
-        /// 阶段 3 内核已接通的落点：连锁跳点、反弹点、穿透点、扩散斑块中心、场生成点、能量注入的直接目标（FG-GAP-205 / DEBT-EMG3FUSE01-01 登记其余 9 种与
-        /// 场 / 注能的完整落点集，承接 EMG4-FUSE-02；燃迹的沿途排放在本机出手上仍走过渡读法字段 trail，没有逐段回调点）。
+        /// 内核已接通的落点（EMG4-FUSE-02 起 FG19A 第 4.2 节 15 种全部接通，FG-GAP-205 / DEBT-EMG3FUSE01-01 关闭）：连锁跳点、反弹点、穿透点、折返点与回程终点、绕行每 90°、
+        /// 沿途段点（CombatLogic.EmgTrailEmit）、扩散斑块中心、场生成点 + 场内受力单位 + 被反射的弹体、注能目标 + 被加热 / 充电的斑块、追射弹（改打 5 米内另一目标）、伴飞、
+        /// 被拆解的残骸、被处决的目标、导线两端、被标记的目标。
         /// </summary>
-        public const uint KernelMask = (1u << Chain) | (1u << Bounce) | (1u << Pierce) | (1u << Spread) | (1u << Field) | (1u << Inject);
+        public const uint KernelMask = (1u << Chain) | (1u << Bounce) | (1u << Pierce) | (1u << Return) | (1u << Orbit) | (1u << Trail) | (1u << Spread) | (1u << Field)
+                                       | (1u << Inject) | (1u << Follow) | (1u << Drone) | (1u << Wreck) | (1u << Execute) | (1u << Wire) | (1u << Marked);
         public static bool InKernel(byte kind) => kind != None && kind < 32 && (KernelMask & (1u << kind)) != 0;
 
         /// <summary>
-        /// 一条 B 的效果写端在落点上有没有执行者（与 CombatLogic.EmgAnchorExec 同一口径）：场、蔓延、导线、追射弹、注热 / 注电 / 注磁 / 注腐蚀、排放。
-        /// 其余（en.kinetic 注入、ent.drone、evt.*、prop.* 等）编译期写原因、不复制、不计热量，避免静默死指令。
+        /// 一条 B 的效果写端在落点上有没有执行者（与 CombatLogic.EmgAnchorExec 同一口径）：场、蔓延、导线、追射弹、注热 / 注电 / 注磁 / 注腐蚀、排放；
+        /// EMG4-FUSE-02 起另有动能注入（余震）、数据链标记 evt.marked、频道广播 evt.ping、处决 prop.integrity、破片 ent.fragment、伴飞 ent.drone（与子弹药落点同一实现 EmgTargetWrite）。
+        /// 其余（属性修饰 prop.mass / prop.heat 等）编译期写原因、不复制、不计热量，避免静默死指令。
         /// </summary>
         public static bool Executable(byte verb, ushort port, int emitVerb) =>
             verb == (byte)EmgVerb.Field || verb == (byte)EmgVerb.Spread || verb == (byte)EmgVerb.Link
-            || (verb == (byte)EmgVerb.Spawn && port == EmgConst.PortProjectile)
-            || (verb == (byte)EmgVerb.Inject && (port == EmgConst.PortHeat || port == EmgConst.PortElec || port == EmgConst.PortMag || port == EmgRuleConst.PortCorrode))
-            || (emitVerb != 0 && verb == emitVerb);
+            || (verb == (byte)EmgVerb.Spawn && port == EmgConst.PortProjectile) || port == EmgRuleConst.PortFragment || port == EmgRuleConst.PortDrone
+            || (verb == (byte)EmgVerb.Inject && (port == EmgConst.PortHeat || port == EmgConst.PortElec || port == EmgConst.PortMag || port == EmgRuleConst.PortCorrode || port == EmgConst.PortKinetic))
+            || port == EmgRuleConst.PortMarked || port == EmgRuleConst.PortIntegrity || port == EmgConst.EventPortBase + (int)EmgEventKind.Ping
+            || (emitVerb != 0 && verb == emitVerb && port >= EmgMatterConst.PortBase && port < EmgMatterConst.PortBase + 100);
     }
 
     public static class EmgConst
@@ -124,6 +128,14 @@ namespace BinGames.Sim.Combat
         public const int SegPitStats = 30;
         /// <summary>EMG4-TER-02（格式 20 内追加，自描述段）：段 31 焦土“同一位置”累计点（x, y, 累计燃烧秒, 最大火势半径）。与段 28～30 一起只在有地形状态时写；读不含这段的快照 = 没有累计。</summary>
         public const int SegScorchAcc = 31;
+        /// <summary>EMG4-FUSE-02（格式 20 内追加，自描述段；FG-GAP-206 / DEBT-EMG3FUSE01-02）：段 32 熔合线索“出手已登记、两侧端口还没都出现”的链（每条配方 <see cref="ClueHalfRing"/> 条：链号 + 已出现的侧位）。
+        /// 只在有登记时写（没有时快照与哈希逐字不变）；读不含这段的快照 = 没有在途登记。</summary>
+        public const int SegClueHalf = 32;
+        /// <summary>EMG4-FUSE-02：每条配方记住几条在途登记的链；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
+        /// shortcut: 同一配方同时在途超过 8 条链时最早的登记被挤掉、那条链不再计（少计不多计），需要精确时按链号开放寻址（FG15-SYS-02 复核）。</summary>
+        public const int ClueHalfRing = 8, ClueSidePorts = 1400;
+        /// <summary>EMG4-FUSE-02（DEBT-EMG3EXIT-01）：线索专用伪端口码“液体扩散”（地面液体端口的 modify 写端 = 蔓延真的扩开了斑块）。真端口码按族从 100 起（fg.TbChannelPort），99 不冲突。</summary>
+        public const ushort PortClueSpread = 99;
         /// <summary>EMG3-FUSE-01：熔合线索配方位数与每条配方记住的最近计过的链数（CombatData.EmgClue：[0, 32) 待取走次数、[32, 64) 环头、其后 32 × 8 链号环、规则路径上一次计数的链号与步号低 32 位）。</summary>
         public const int ClueSlots = 32, ClueRing = 8, ClueRuleChain = ClueSlots * 2 + ClueSlots * ClueRing, ClueRuleStep = ClueRuleChain + ClueSlots, ClueLen = ClueRuleStep + ClueSlots;
         /// <summary>EMG3-CHS-01（FG19 第 2.7 节）：底盘状态端口码 chs.ground / airborne / moving / water（读端只作 condition / sense，FGR-EMG-141）。</summary>
@@ -528,6 +540,10 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG4-FUZZ-01（#390，FG19A 第 1.1 节第 12 行）：本载荷节点有 prop.mass 写端（质量已 × 幅度写进 <see cref="CombatProjectile.Mass"/>）——命中比它轻的单位撞退。
         /// 出手时由 EmgInitFlight 按节点判一次，命中处 O(1) 查本位（高 8 位，随快照记号段尾字段持久）。</summary>
         Massive = 512,
+        /// <summary>EMG4-FUSE-02（FG19A 第 4.2 节追射行）：接线的追射弹（改打 5 米内第二目标）——命中点是 A 的落点，执行 B（CombatLogic.EmgAnchorHit）。随快照记号段尾字段持久。</summary>
+        AnchorFollow = 1024,
+        /// <summary>EMG4-FUSE-02（FG19A 第 4.2 节 fld.* 行“被反射的弹体”）：被带场落点接线的偏折场反射的弹体——命中点以场主人的武器程序执行 B。随快照记号段尾字段持久。</summary>
+        AnchorReflect = 2048,
     }
 
     /// <summary>

@@ -228,7 +228,8 @@ namespace GameLogic.Campaign.Emergence
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：接线前面或后面没有指令（首位 / 末位，或那条溢出了）/ A 与 B 不在同一节点 / A 的写端没有落点（预混：A、B 同点执行）/
         /// B 只有修饰写端（修饰照常作用于节点、不接线）/ 这种落点内核尚未接通（承接卡见 FG-GAP）/ A 一次结算的落点可能超过上限（超出的不执行）。</summary>
         public const string NoteAnchorDangling = "emg.compile.anchor_dangling", NoteAnchorSplit = "emg.compile.anchor_split", NoteAnchorNone = "emg.compile.anchor_none",
-            NoteAnchorModOnly = "emg.compile.anchor_mod_only", NoteAnchorPending = "emg.compile.anchor_pending", NoteAnchorCapped = "emg.compile.anchor_capped", NoteAnchorNoExec = "emg.compile.anchor_noexec";
+            NoteAnchorModOnly = "emg.compile.anchor_mod_only", NoteAnchorPending = "emg.compile.anchor_pending", NoteAnchorCapped = "emg.compile.anchor_capped", NoteAnchorNoExec = "emg.compile.anchor_noexec",
+            NoteAnchorFollowSolo = "emg.compile.anchor_follow_solo", NoteAnchorFollowChild = "emg.compile.anchor_follow_child";
 
         // ── 目录派生的查找表（目录换了才重建；只在编译时用，不按帧）──
         private static EmgCompiled _for;
@@ -669,7 +670,11 @@ namespace GameLogic.Campaign.Emergence
                         bool kernelRoot = (n.Parent < 0 && (x.Flags & EmgInstrFlags.RootKernel) != 0) || beatOrds.Contains(x.Ordinal);
                         foreach (string f in kernelRoot ? Array.Empty<string>() : TransitionFields(pid))
                         {
-                            Keep(fw, f);
+                            // EMG4-FUSE-02：物质过渡字段只留这条指令的 owner 自己有的那个（混合芯片的读法是两父相加：燃迹的沿途排放改由内核执行后，漏油的驻留区不能把燃迹的 trail 也留下来）
+                            if (fam != EmgFamily.Matter || OwnerHasField(r.Steps[x.Ordinal].OwnerId, f))
+                            {
+                                Keep(fw, f);
+                            }
                         }
                         Keep(fw, TagsField);
                     }
@@ -1292,13 +1297,14 @@ namespace GameLogic.Campaign.Emergence
                     {
                         (a, b) = (b, a);
                     }
-                    AddOwner(r, c, id, a, fromUplink, core);
+                    // 修复轮（FGT-EMG-054 逐条等价）：两半的“核心指令”按各自父固件的类别记，与玩家手摆的 [A, 接线, B] 一致（原来按混合固件整体记，B 半边会多出 Core 标记）
+                    AddOwner(r, c, id, a, fromUplink, FirmwareKinds.IsCore(a));
                     r.Steps.Add(new EmgProgramStep
                     {
                         Ordinal = r.Steps.Count, FirmwareId = id, OwnerId = string.Empty, FromUplink = fromUplink, Core = core, Kind = EmgStepKind.Anchor, Builtin = true,
                         EventPort = (ushort)(EventPortBase + (int)EmgEventKind.Fire),
                     });
-                    AddOwner(r, c, id, b, fromUplink, core);
+                    AddOwner(r, c, id, b, fromUplink, FirmwareKinds.IsCore(b));
                 }
                 else
                 {
@@ -1932,14 +1938,19 @@ namespace GameLogic.Campaign.Emergence
             {
                 return false;
             }
-            bool trig = false;
+            bool trig = false, fireTrig = false;
             foreach (int di in s.Decls)
             {
                 trig |= c.Decls[di].Dir == EmgDirs.Read && c.Decls[di].Role == EmgRole.Trigger;
+                fireTrig |= c.Decls[di].Dir == EmgDirs.Read && c.Decls[di].Role == EmgRole.Trigger && c.Decls[di].Port == EventPortBase + (int)EmgEventKind.Fire;
             }
             if (!trig)
             {
                 return false;
+            }
+            if (fireTrig)
+            {
+                return true; // EMG4-FUSE-02（FG19A 第 4.2 节“沿途排放的 mat.*（读 evt.fire）”）：沿途排放由内核按长度均分段点排真斑块（CombatLogic.EmgTrailEmit），过渡读法 trail 退役（FG-GAP-205）
             }
             // 审查修复（第 1 轮）：按这条声明的 owner（混合固件 = 父固件）自己的旧字段判——混合行的 readFields 是两父相加，另一父的驻留区 / 拖尾只排它自己那种物质
             foreach ((string f, float _) in CarrierReadings.FieldsOf(s.OwnerId))
@@ -1950,6 +1961,18 @@ namespace GameLogic.Campaign.Emergence
                 }
             }
             return true;
+        }
+
+        private static bool OwnerHasField(string owner, string field)
+        {
+            foreach ((string f, float _) in CarrierReadings.FieldsOf(owner))
+            {
+                if (f == field)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static bool IsRootKernelOwner(string owner) =>
@@ -2268,10 +2291,13 @@ namespace GameLogic.Campaign.Emergence
                     {
                         info.Note = NoteAnchorSplit;
                     }
-                    else if (!EmgAnchorConst.InKernel(a.AnchorKind) || (a.AnchorKind == EmgAnchorConst.Inject && ReadsTrigger(c, a.Decls)))
+                    else if (!EmgAnchorConst.InKernel(a.AnchorKind))
                     {
-                        // 修复第 2 轮：事件门控的注能（过热泄放 / 回波 / 谐振）在内核走事件脉冲分支，那里没有注能落点钩子（只有命中注能 EmgHitInject 有），归 EMG4-FUSE-02
-                        info.Note = NoteAnchorPending;
+                        info.Note = NoteAnchorPending; // EMG4-FUSE-02：15 种落点内核全部接通（含事件门控注能的脉冲分支 EmgRootGated），只剩防御性分支
+                    }
+                    else if (a.AnchorKind == EmgAnchorConst.Follow && node != 0)
+                    {
+                        info.Note = NoteAnchorFollowChild; // EMG4-FUSE-02 修复第 2 轮：补射记录固定挂根节点，子节点里的追射接线内核不改打、不带 B（CombatLogic.EmgFollowRetarget）——不复制、不计热，不做静默死指令
                     }
                 }
                 if (info.Note == null)
@@ -2281,13 +2307,15 @@ namespace GameLogic.Campaign.Emergence
                     for (int i = kn.FirstInstr; i < kn.FirstInstr + kn.InstrCount; i++)
                     {
                         EmgInstr x = r.KernelInstrs[i];
-                        if (x.Ordinal != b.Ordinal || x.Role <= EmgConst.RoleLastRead || x.Verb == 0 || (x.Flags & (EmgInstrFlags.Inherited | EmgInstrFlags.Overflow)) != 0
+                        bool ping = x.Port == EmgConst.EventPortBase + (int)EmgEventKind.Ping; // 频道广播按端口 + 角色执行、没有动词（CombatLogic.EmgRootGated / EmgAnchorExec），不能当“只有修饰”跳过
+                        if (x.Ordinal != b.Ordinal || x.Role <= EmgConst.RoleLastRead || (x.Verb == 0 && !ping) || (x.Flags & (EmgInstrFlags.Inherited | EmgInstrFlags.Overflow)) != 0
                             || !PortIds.TryGetValue(x.Port, out string port) || IsMod(port) || IsStructural(port))
                         {
                             continue;
                         }
                         EmgFamily fam = EmgCatalog.FamilyOf(port);
-                        if (fam != EmgFamily.Matter && fam != EmgFamily.Energy && fam != EmgFamily.Phase && fam != EmgFamily.Entity && fam != EmgFamily.Event && fam != EmgFamily.Field)
+                        if (fam != EmgFamily.Matter && fam != EmgFamily.Energy && fam != EmgFamily.Phase && fam != EmgFamily.Entity && fam != EmgFamily.Event && fam != EmgFamily.Field
+                            && port != "prop.integrity") // EMG4-FUSE-02：处决（prop.integrity 改写）在落点执行（FG19A 第 4.3 节湮灭镜像）
                         {
                             continue; // 修饰写端照常作用于节点、不接线（FG19A 第 4.1 节）
                         }
@@ -2330,6 +2358,10 @@ namespace GameLogic.Campaign.Emergence
                         if (noExec > 0)
                         {
                             r.Notes.Add(new EmgCompileNote { Key = NoteAnchorNoExec, Ordinal = w.Ordinal, Node = node }); // 生效，但 B 的部分写端在落点上不执行
+                        }
+                        if (a.AnchorKind == EmgAnchorConst.Follow)
+                        {
+                            r.Notes.Add(new EmgCompileNote { Key = NoteAnchorFollowSolo, Ordinal = w.Ordinal, Node = node }); // EMG4-FUSE-02：没有第二个目标 = 重复无效（FGR-EMG-017），预览写原因
                         }
                     }
                 }
@@ -2398,13 +2430,20 @@ namespace GameLogic.Campaign.Emergence
                 {
                     if (IsCluePort(c.Decls[di]))
                     {
-                        set.Add(c.Decls[di].Port);
+                        set.Add(ClueCodeOf(c.Decls[di]));
                     }
                 }
             }
             CluePorts[owner] = set;
             return set;
         }
+
+        /// <summary>
+        /// 线索端口码：地面液体端口的 modify 写端（蔓延的“液体扩散”，FG19A 第 236 行）记作 <see cref="EmgConst.PortClueSpread"/>，不记成那种液体的排放——
+        /// 只装 [冷却液, 电弧] 不算漫流电弧、[蔓延, 电弧] 不算湿弧（DEBT-EMG3EXIT-01 / FG-GAP-206 ③）。按端口 + 角色，不看固件 ID（FGR-EMG-013）。
+        /// </summary>
+        private static ushort ClueCodeOf(EmgDeclRow d) =>
+            d.Role == EmgRole.Modify && PortIds.TryGetValue(d.Port, out string id) && id.StartsWith("mat.", StringComparison.Ordinal) ? EmgConst.PortClueSpread : d.Port;
 
         /// <summary>线索端口口径（父固件与程序里的指令同一口径）：写端口（grm.anchor / grm.inherit / grm.mod.* 除外）或节拍族读端。</summary>
         private static bool IsCluePort(EmgDeclRow d)
@@ -2417,8 +2456,61 @@ namespace GameLogic.Campaign.Emergence
         }
 
         /// <summary>
-        /// 程序一次出手里同现的熔合配方端口对（位 i = 配方书第 i 条，FusionCatalog.Recipes 顺序，≤ 32）：两条不同的、未溢出的指令分别带父 A、父 B 的线索端口。
-        /// 熔合芯片自己展开的两条也算（一槽两指令）；同一条链（一次出手）只计一次由内核按出手计数保证。O(配方 × 指令²)，只在装配变化时。
+        /// EMG4-FUSE-02（DEBT-EMG3EXIT-01；FG19A 第 4.3 节“线索端口对”列）：配方 <paramref name="r"/> 的线索端口对两侧的端口码集合。
+        /// 端口写明的一侧只认那个端口；"mat.*" 一侧 = 4.3 节“液体扩散”：只认液体端口的 modify 写端（<see cref="EmgConst.PortClueSpread"/>，内核在蔓延真的扩开斑块时记），不认任一液体排放。
+        /// 侧与父的对应：clueA 归父 A、clueB 归父 B；父 A 没有 clueA 而父 B 有（4.3 节 A / B 与配方表相反的几条）时两侧交换。按端口，不看固件 ID（FGR-EMG-013）。
+        /// 端口对没登记 / 端口不在表里 → 两侧为空（这条配方不计线索，fgdata_fusion validate 保证 30 条都登记）。
+        /// </summary>
+        public static void CluePairOf(Economy.FusionRecipeDef r, out HashSet<ushort> sideA, out HashSet<ushort> sideB)
+        {
+            sideA = new HashSet<ushort>();
+            sideB = new HashSet<ushort>();
+            if (r == null || string.IsNullOrEmpty(r.ClueA) || string.IsNullOrEmpty(r.ClueB))
+            {
+                return;
+            }
+            HashSet<ushort> pa = CluePortsOf(r.ParentA), pb = CluePortsOf(r.ParentB);
+            bool swap = !SideHas(pa, r.ClueA) && SideHas(pb, r.ClueA) && SideHas(pa, r.ClueB);
+            Side(sideA, r.ClueA, swap ? pb : pa);
+            Side(sideB, r.ClueB, swap ? pa : pb);
+        }
+
+        private static bool SideHas(HashSet<ushort> ports, string want)
+        {
+            if (want == "mat.*")
+            {
+                return ports.Contains(EmgConst.PortClueSpread);
+            }
+            return PortCodeOf(want, out ushort code) && ports.Contains(code);
+        }
+
+        private static bool PortCodeOf(string id, out ushort code)
+        {
+            EmgCompiled c = EmgCatalog.Current;
+            bool ok = c.PortIndexById.TryGetValue(id, out int pi) && pi >= 0 && pi < c.Ports.Length;
+            code = ok ? c.Ports[pi].Code : (ushort)0;
+            return ok;
+        }
+
+        private static void Side(HashSet<ushort> into, string want, HashSet<ushort> parent)
+        {
+            if (want == "mat.*")
+            {
+                if (parent.Contains(EmgConst.PortClueSpread))
+                {
+                    into.Add(EmgConst.PortClueSpread); // 4.3 节“液体扩散”= 液体端口的 modify 写端（蔓延），不是该父任一液体排放
+                }
+            }
+            else if (PortCodeOf(want, out ushort code))
+            {
+                into.Add(code);
+            }
+        }
+
+        /// <summary>
+        /// 程序一次出手里同现的熔合配方端口对（位 i = 配方书第 i 条，FusionCatalog.Recipes 顺序，≤ 32）：两条不同的、未溢出的指令分别带端口对的一侧与另一侧
+        /// （EMG4-FUSE-02：按 FG19A 第 4.3 节逐条端口对，<see cref="CluePairOf"/>；原来按“父 A 任一线索端口 × 父 B 任一线索端口”，13 条配方比设计宽）。
+        /// 熔合芯片自己展开的两条也算（一槽两指令）；位只表示“这一发可能同现”，内核在链上两侧端口真的出现时才计数（EmgClueSeen）。O(配方 × 指令²)，只在装配变化时。
         /// </summary>
         private static uint ClueMaskOf(IReadOnlyList<EmgProgramStep> steps, EmgCompiled c)
         {
@@ -2437,7 +2529,7 @@ namespace GameLogic.Campaign.Emergence
                     {
                         if (IsCluePort(c.Decls[di])) // 读端（节拍族除外）不算同现：只读 mat.fire 的指令不等于链上有明火
                         {
-                            ps.Add(c.Decls[di].Port);
+                            ps.Add(ClueCodeOf(c.Decls[di]));
                         }
                     }
                 }
@@ -2446,7 +2538,7 @@ namespace GameLogic.Campaign.Emergence
             uint mask = 0u;
             for (int i = 0; i < recipes.Count && i < 32; i++)
             {
-                HashSet<ushort> pa = CluePortsOf(recipes[i].ParentA), pb = CluePortsOf(recipes[i].ParentB);
+                CluePairOf(recipes[i], out HashSet<ushort> pa, out HashSet<ushort> pb);
                 if (pa.Count == 0 || pb.Count == 0)
                 {
                     continue;

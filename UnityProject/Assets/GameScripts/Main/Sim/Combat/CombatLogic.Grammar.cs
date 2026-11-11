@@ -534,6 +534,10 @@ namespace BinGames.Sim.Combat
                 double dist = math.length(to);
                 if (dist <= ReturnHomeDist(ref d, o, pr))
                 {
+                    if (EmgProgAnchored(ref d, pr.Prog))
+                    {
+                        EmgAnchorAt(ref d, EmgAnchorConst.Return, EmgProjHost(ref d, pr), pr.Pos, -1); // EMG4-FUSE-02：回程终点是落点
+                    }
                     pr.Life = math.min(pr.Life, 0f); // 回到发射者身边：本步终结（evt.expire Code = 折返）
                     pr.Vel = float2.zero;
                     return false;
@@ -591,7 +595,13 @@ namespace BinGames.Sim.Combat
             }
             double dTheta = speed / radius * dt;
             int lap = (int)math.floor(pr.ModT / (2f * math.PI));
+            int quarter = (int)math.floor(pr.ModT / (0.5f * math.PI));
             pr.ModT += (float)dTheta;
+            int quarterNow = (int)math.floor(pr.ModT / (0.5f * math.PI));
+            if (quarterNow != quarter && quarterNow <= 4 && EmgProgAnchored(ref d, pr.Prog))
+            {
+                EmgAnchorAt(ref d, EmgAnchorConst.Orbit, EmgProjHost(ref d, pr), pr.Pos, -1); // EMG4-FUSE-02：绕行轨迹每 90° 是落点（第一圈 4 个，FG19A 第 4.2 节）
+            }
             if ((int)math.floor(pr.ModT / (2f * math.PI)) != lap)
             {
                 pr.Intercepts = 0; // 拦截上限按每圈计（FG19A 第 1.4 节第 42 行：每圈 ≤ 2 发）
@@ -698,6 +708,10 @@ namespace BinGames.Sim.Combat
             {
                 EmgModsOf(ref d, pr.Prog, pr.Node, out EmgMods m);
                 pr.Mods = (pr.Mods & ~EmgProjMods.Return) | EmgProjMods.Returning;
+                if (EmgProgAnchored(ref d, pr.Prog))
+                {
+                    EmgAnchorAt(ref d, EmgAnchorConst.Return, EmgProjHost(ref d, pr), hitPos, d.SlotOf(hitId)); // EMG4-FUSE-02：折返点是落点（FG19A 第 4.2 节，单次上限 2）
+                }
                 pr.Damage *= m.ReturnRatio > 0f ? m.ReturnRatio : 0.6f;
                 pr.IgnoreUnit = hitId;
                 pr.Pos = hitPos;

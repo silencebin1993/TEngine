@@ -1400,6 +1400,11 @@ namespace GameLogic.EditorTools
                 $"家园训练靶自动交战：射程外 3 秒不尝试（{farAttacks}），进入 {HomeValleyCombatTargets.EngageRange} 米后按 5 秒间隔尝试（11 秒 {nearAttacks} 次；打空后等再生），结算走同一出口");
 
             // 厂内机器（仍占用工厂出口）：不参与自动交战、也不消耗交战冷却（Demo TickAutoEngage 对厂内机器直接跳过）；驶出工厂后冷却已就绪，下一步就尝试。
+            // EMG4-FUSE-02：先退到射程外等冷却走完再回到靶前进厂——原来靠“打空靶子后等再生”恰好让最后一次攻击落在冷却已就绪的时刻；ERC-003 的拖尾（fw_trail 读 evt.fire）
+            // 改由内核按段点排污泥斑块（不再是带每秒伤害的读法驻留区）后靶子掉血节奏变了，最后一次攻击落点随之变化，前提不再成立（M10-BASELINE 差异表）
+            Place(home.Combat, logic, HomeValleyLayout.LowThreatTargetPosition + new Vector2(20f, 0f));
+            WorldSimulation.StepMany(60 * 6);
+            Place(home.Combat, logic, HomeValleyLayout.LowThreatTargetPosition + new Vector2(6f, 0f));
             MachineRegistry.TryGetRecord(logic, out MachineRecord rec);
             rec.IsInFactory = true;
             CombatSites.SyncFactoryState(rec);

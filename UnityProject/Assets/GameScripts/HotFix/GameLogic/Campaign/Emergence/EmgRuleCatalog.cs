@@ -55,6 +55,54 @@ namespace GameLogic.Campaign.Emergence
             return mask;
         }
 
+        /// <summary>
+        /// EMG4-FUSE-02（FG-GAP-206 ③“同名反应多行共用计数键时按行匹配配方”）：一条规则行自己的两端口 (<paramref name="a"/>, <paramref name="b"/>) 落在哪些配方的端口对两侧
+        /// （<see cref="EmgProgramCompiler.CluePairOf"/>，顺序不限）——下发给内核的是每行自己的配方位，不再是计数键下所有行的并集。
+        /// </summary>
+        public static uint ClueMaskOfPair(ushort a, ushort b)
+        {
+            IReadOnlyList<Economy.FusionRecipeDef> recipes = Economy.FusionCatalog.Recipes;
+            uint mask = 0u;
+            for (int i = 0; recipes != null && i < recipes.Count && i < 32; i++)
+            {
+                EmgProgramCompiler.CluePairOf(recipes[i], out HashSet<ushort> pa, out HashSet<ushort> pb);
+                if ((ClueHas(pa, a) && ClueHas(pb, b)) || (ClueHas(pa, b) && ClueHas(pb, a)))
+                {
+                    mask |= 1u << i;
+                }
+            }
+            return mask;
+        }
+
+        /// <summary>
+        /// EMG4-FUSE-02（FG-GAP-206 ①）：内核线索侧位表——下标 = 端口码，位 2i = 配方 i 端口对第 1 侧、位 2i + 1 = 第 2 侧（<see cref="EmgProgramCompiler.CluePairOf"/>）。
+        /// 内核在链上执行写端时按它给出手登记过的配方记侧位，两侧都出现才计线索（CombatLogic.EmgClueSeen）。
+        /// </summary>
+        public static ulong[] ClueSides()
+        {
+            var sides = new ulong[EmgConst.ClueSidePorts];
+            IReadOnlyList<Economy.FusionRecipeDef> recipes = Economy.FusionCatalog.Recipes;
+            for (int i = 0; recipes != null && i < recipes.Count && i < 32; i++)
+            {
+                EmgProgramCompiler.CluePairOf(recipes[i], out HashSet<ushort> pa, out HashSet<ushort> pb);
+                foreach (ushort c in pa)
+                {
+                    if (c < sides.Length)
+                    {
+                        sides[c] |= 1ul << (2 * i);
+                    }
+                }
+                foreach (ushort c in pb)
+                {
+                    if (c < sides.Length)
+                    {
+                        sides[c] |= 1ul << (2 * i + 1);
+                    }
+                }
+            }
+            return sides;
+        }
+
         public static string[] RecipesOfKey(int key)
         {
             Compiled c = Current;
@@ -67,7 +115,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 foreach (Economy.FusionRecipeDef r in Economy.FusionCatalog.Recipes)
                 {
-                    HashSet<ushort> pa = EmgProgramCompiler.CluePortsOf(r.ParentA), pb = EmgProgramCompiler.CluePortsOf(r.ParentB);
+                    EmgProgramCompiler.CluePairOf(r, out HashSet<ushort> pa, out HashSet<ushort> pb); // EMG4-FUSE-02：按 FG19A 第 4.3 节端口对（DEBT-EMG3EXIT-01）
                     foreach ((ushort a, ushort b) in pairs)
                     {
                         if ((ClueHas(pa, a) && ClueHas(pb, b)) || (ClueHas(pa, b) && ClueHas(pb, a)))

@@ -328,12 +328,9 @@ namespace BinGames.Sim.Combat
                 : carrier == CombatCarrier.Field ? (byte)EmgCode.SrcZone
                 : carrier == CombatCarrier.Aura ? (byte)EmgCode.SrcField : (byte)EmgCode.SrcOther;
             int prog = wp.Program;
-            EmgHostBegin(ref d, prog, a, d.Id[a], EmgEntKind.Unit, src, d.Pos[a], t);
+            EmgHostBegin(ref d, prog, a, d.Id[a], EmgEntKind.Unit, src, d.Pos[a], armClue: true);
             EmgFillShot(ref d, a, t, wp); // EMG1-TRIG-01：母载荷参数（触发子载荷用）
-            if (prog >= 0 && prog < d.EmgPrograms.Length && d.EmgPrograms[prog].ClueMask != 0u)
-            {
-                EmgClueCount(ref d, d.EmgPrograms[prog].ClueMask, d.EmgCtx.Chain); // EMG3-FUSE-01：一次出手 = 一条因果链，端口对同现只计一次（与规则成立同一计数、按链去重）
-            }
+            EmgHostFire(ref d, d.Pos[a], t);
             if (prog < 0 || d.EmgListen == 0u)
             {
                 return;
@@ -467,10 +464,10 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>
-        /// 一个宿主开始结算：先记伤害来源与出手者（没有程序也记，evt.hurt 的来源码用）；带程序时开一条新因果链、成为宿主（0 代根节点、链深 0），按需发 evt.fire
-        /// （Value / Value2 = 从 <paramref name="from"/> 指向目标的方向）。
+        /// 一个宿主开始结算：先记伤害来源与出手者（没有程序也记，evt.hurt 的来源码用）；带程序时开一条新因果链、成为宿主（0 代根节点、链深 0）。
+        /// evt.fire 由调用方填好母载荷参数后用 <see cref="EmgHostFire"/> 发（修复第 3 轮①）。
         /// </summary>
-        private static void EmgHostBegin(ref CombatData d, int prog, int owner, int ent, EmgEntKind kind, byte src, double2 from, int t)
+        private static void EmgHostBegin(ref CombatData d, int prog, int owner, int ent, EmgEntKind kind, byte src, double2 from, bool armClue = false)
         {
             d.EmgCtx = EmgCtx.Source(owner, kind, src);
             if (prog < 0)
@@ -484,7 +481,21 @@ namespace BinGames.Sim.Combat
             EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, EmgIdOf(ref d, owner), from); // EMG1-CHAIN-01：一次出手开一条链
             EmgActNode(ref d, prog, 0); // EMG1-FUZZ-01：根节点执行一次（只在模糊测试器开启计数时）
             d.EmgCtx = new EmgCtx { Prog = prog, Chain = chain, Ent = ent, Owner = owner, Node = 0, Depth = 0, EntKind = kind, HurtSrc = src, HitCode = EmgCode.HitDirect };
-            if (d.EmgListen == 0u)
+            if (armClue && prog < d.EmgPrograms.Length && d.EmgPrograms[prog].ClueMask != 0u)
+            {
+                // EMG4-FUSE-02（FG-GAP-206 ①）：出手只登记，链上两侧端口真的都出现了才计（EmgClueSeen；脱靶 / 没结算的不计）。
+                // 修复轮：登记必须在发 evt.fire 之前——读 evt.fire 的写端（燃迹沿途排放等）当场结算，晚登记会漏掉这一侧
+                EmgClueArm(ref d, d.EmgPrograms[prog].ClueMask, chain);
+            }
+        }
+
+        /// <summary>
+        /// 发本次出手的 evt.fire（Value / Value2 = 从 <paramref name="from"/> 指向目标的方向）。调用方先把宿主的 Faction / Carrier / MainTarget 等母载荷参数填进 d.EmgCtx 再调：
+        /// 读 evt.fire 的写端（燃迹沿途排放、事件门控的场 / 落点）当场结算，要用这些字段（EMG4-FUSE-02 修复第 3 轮①：原来在 EmgHostBegin 里先发、后填，敌方出手按 Faction 0 = 玩家判敌我）。
+        /// </summary>
+        private static void EmgHostFire(ref CombatData d, double2 from, int t)
+        {
+            if (d.EmgCtx.Prog < 0 || d.EmgListen == 0u)
             {
                 return;
             }
@@ -612,7 +623,7 @@ namespace BinGames.Sim.Combat
         /// 随后的伤害发 evt.hit / evt.kill、被击者 evt.hurt 的来源 = 弹体（无人机是射击）。与 <see cref="EmgShotEnd"/> 成对。</summary>
         internal static void EmgDroneBegin(ref CombatData d, in CombatDrone dr, int owner, int t, int prog)
         {
-            EmgHostBegin(ref d, prog, owner, dr.Id, EmgEntKind.Drone, (byte)EmgCode.SrcProjectile, dr.Pos, t);
+            EmgHostBegin(ref d, prog, owner, dr.Id, EmgEntKind.Drone, (byte)EmgCode.SrcProjectile, dr.Pos);
             EmgCtx c = d.EmgCtx; // EMG1-TRIG-01：母载荷参数（无人机子弹）
             c.Damage = dr.Damage;
             c.Weapon = dr.Weapon;
@@ -621,6 +632,7 @@ namespace BinGames.Sim.Combat
             c.Carrier = (byte)CombatCarrier.Summon;
             c.MainTarget = d.Id[t];
             d.EmgCtx = c;
+            EmgHostFire(ref d, dr.Pos, t);
         }
 
         /// <summary>无人机 / 哨戒桩到期或母机没了、从列表移除：evt.expire（Code = 寿命；宿主 = 无人机，程序 = 它此刻持有的那份，EMG1-FLASH-01）。</summary>
@@ -669,6 +681,7 @@ namespace BinGames.Sim.Combat
         {
             EmgAttrTake(ref d, t, damage); // EMG2-DISC-01（FGR-EMG-182 / 184）：这次伤害若来自规则产物，记交互伤害 / 友伤（先取走，下面的连带伤害各算各的）
             EmgCtx c0 = d.EmgCtx;
+            EmgAnchorHit(ref d, t, c0); // EMG4-FUSE-02：追射弹 / 被反射弹体的命中点是 A 的落点（没有记号 O(1) 返回）
             if (c0.Prog >= 0 && c0.EntKind != EmgEntKind.None && attacker == c0.Owner)
             {
                 float2 inj = EmgHitInject(ref d, t, c0); // EMG2-RULE-01：命中注能（en.heat / en.elec / en.mag 写端）与壁撞推动；不依赖总线监听

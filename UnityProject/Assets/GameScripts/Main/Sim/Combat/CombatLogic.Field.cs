@@ -125,6 +125,7 @@ namespace BinGames.Sim.Combat
             es.NextFieldId = id + 1;
             es.FieldsBorn++;
             d.EmgS[0] = es;
+            EmgClueSeen(ref d, chain, port); // EMG4-FUSE-02：场在链上出现
             d.Fields.Add(new EmgField
             {
                 Pos = pos, Born = now, Until = now + seconds, Radius = radius, Strength = 1f, Id = id, Owner = ownerId, Chain = chain, Port = (ushort)port,
@@ -783,6 +784,7 @@ namespace BinGames.Sim.Combat
                         if (!frag && FieldLive(rule) && (pr.FieldOnce & EmgFieldConst.OnceDeflect) == 0 && FieldRelation(rule.Faction, ff, pr.Faction) && !EmgEvadesDeflect(ref d, pr))
                         {
                             EmgReflectCore(ref d, ref pr, f.Owner, ff, rule.Amount);
+                            EmgReflectAnchor(ref d, ref pr, f.Owner); // EMG4-FUSE-02：被反射的弹体是偏折场的落点
                             pr.FieldOnce |= EmgFieldConst.OnceDeflect;
                             reflected = true;
                         }
@@ -861,7 +863,7 @@ namespace BinGames.Sim.Combat
             pr.Faction = to;
             pr.Owner = sourceId;
             pr.Weapon = -1; // 反弹回来的弹体不再带原方读法
-            pr.Flags &= ~(EmgProjFlags.Flight | EmgProjFlags.Heal | EmgProjFlags.Sub | EmgProjFlags.Overload | EmgProjFlags.ViaDrone | EmgProjFlags.Lob);
+            pr.Flags &= ~(EmgProjFlags.Flight | EmgProjFlags.Heal | EmgProjFlags.Sub | EmgProjFlags.Overload | EmgProjFlags.ViaDrone | EmgProjFlags.Lob | EmgProjFlags.AnchorFollow | EmgProjFlags.AnchorReflect);
             pr.IgnoreUnit = 0;
             pr.Mods = EmgProjMods.None;
             pr.ModQ = 0;

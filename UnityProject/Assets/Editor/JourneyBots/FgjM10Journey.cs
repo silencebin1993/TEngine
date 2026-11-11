@@ -1371,12 +1371,31 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static void ApplyBossFixture(JourneyContext c)
         {
+            // EMG4-FUSE-02（正式打法，修复第 3 轮定稿；根因见 production/qa/evidence/fgj-m10-boss-diagnosis.md 第四节）：燃迹现在排 800 度真明火（FG19A 第 2 节第 33 行），
+            // 带燃迹的连射器持续开火会在自己身边 / 前进路线上积火 → 着火 → 武器积热顶到 2 倍过热线停火，有没有首领灌的油都一样（自燃锁火）。
+            // 玩家打首领前回厂改造：第 2 版只留连射器、不带燃迹（夹具，同 FgEmgProgramSelfCheck“回厂改造换到第 2 版”的记录 + 登记做法）；燃迹 × 油污爬行者已在 op_fight 验过。
+            CampaignState s = St;
+            BlueprintRecord bp = s.BlueprintRecords.FirstOrDefault(b => b.BlueprintId == BpFire);
+            if (bp != null && bp.Versions.All(v => v.Version != 2))
+            {
+                BlueprintCircuitBoard plain = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
+                bp.Versions = bp.Versions.Append(plain.ToVersion(2, 0f)).ToArray();
+            }
             foreach (int id in AliveTeam(c))
             {
                 if (MachineRegistry.TryGetRecord(id, out MachineRecord m))
                 {
                     m.MaxHealth = BossFixtureHealth;
                     m.Health = BossFixtureHealth;
+                    if (Home != null && Home.TryGetMachineUnit(id, out int u) && Home.Kernel.TryGetUnit(u, out CombatUnitView uv))
+                    {
+                        Home.Kernel.SetWeaponState(u, 0f, false, uv.AimReadyAt, uv.NextFireAt); // 夹具除耐久外也清热量（前一段带燃迹打出的积热不带进首领战）
+                    }
+                    if (bp != null)
+                    {
+                        m.BlueprintVersion = 2;
+                        MachineLoadoutRegistry.Register(s, id, BpFire, 2);
+                    }
                 }
             }
         }
@@ -1432,7 +1451,25 @@ namespace GameLogic.EditorTools.JourneyBots
                     string fire = Home != null && Home.TryGetMachineUnit(id, out int u) && Home.Kernel.TryGetUnit(u, out CombatUnitView uv)
                         ? $" 热 {F(uv.Heat, "0.##")} 下次开火 {F((float)(uv.NextFireAt - Home.Kernel.Time), "0.#")}s 命令 {uv.Command}→{uv.CommandTarget}{(Home.Kernel.TryGetStatus(u, out uint sm, out _, out _, out _, out _) && sm != 0u ? " 状态 0x" + sm.ToString("X") : string.Empty)}"
                         : string.Empty;
-                    return $"{Label(id)} {TeamHpOf(id)} 距塔 {F(Vector2.Distance(p, tAt), "0.#")}{(f != null ? " 在" + f.Tag + (br.ReactFill == f.Serial ? "(预警)" : string.Empty) : string.Empty)}{fire}";
+                    // EMG4-FUSE-02 修复第 2 轮：最近的明火斑块（距离 / 半径 / 份量，排查是不是站进了自己的火里）
+                    string near = string.Empty;
+                    if (Home != null)
+                    {
+                        float bd = float.MaxValue;
+                        for (int i = 0; i < Home.Kernel.PatchSlots; i++)
+                        {
+                            if (Home.Kernel.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Fire)
+                            {
+                                float dz = Vector2.Distance(p, new Vector2((float)z.Pos.x, (float)z.Pos.y));
+                                if (dz < bd)
+                                {
+                                    bd = dz;
+                                    near = $" 最近明火 {F(dz, "0.#")}/r{F(z.Radius, "0.#")}/{F(z.Amount, "0.#")}份";
+                                }
+                            }
+                        }
+                    }
+                    return $"{Label(id)} {TeamHpOf(id)} 距塔 {F(Vector2.Distance(p, tAt), "0.#")}{(f != null ? " 在" + f.Tag + (br.ReactFill == f.Serial ? "(预警)" : string.Empty) : string.Empty)}{fire}{near}";
                 }
                 int wave = br?.WaveUnits?.Count(u => Home != null && Home.IsUnitAlive(u)) ?? 0;
                 string waveAt = string.Join("、", (br?.WaveUnits ?? Array.Empty<int>()).Where(u => Home != null && Home.IsUnitAlive(u))
@@ -1447,16 +1484,21 @@ namespace GameLogic.EditorTools.JourneyBots
             int fills = rec?.Active?.Count(f => f != null && f.UntilTick > GameClock.Ticks) ?? 0;
             if (phase == BaptismPhase.Fill && (BaptismTowerBoss.PumpsAlive(s) > 0 || fills > 0))
             {
-                int pump = -1;
-                float best = float.MaxValue;
-                for (int i = 0; i < BaptismTowerBoss.PumpCount; i++)
+                int pump = c.GetInt("boss.pick") - 1;
+                if (pump < 0 || BaptismTowerBoss.Pump(s, pump)?.IsAlive != true) // 认定的泵站打掉之前不换目标（车队走动、重心变了也不换）
                 {
-                    float d = BaptismTowerBoss.Pump(s, i)?.IsAlive == true ? Vector2.Distance(BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.PumpInstanceId(i)), centroid) : float.MaxValue;
-                    if (d < best)
+                    pump = -1;
+                    float best = float.MaxValue;
+                    for (int i = 0; i < BaptismTowerBoss.PumpCount; i++)
                     {
-                        best = d;
-                        pump = i;
+                        float d = BaptismTowerBoss.Pump(s, i)?.IsAlive == true ? Vector2.Distance(BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.PumpInstanceId(i)), centroid) : float.MaxValue;
+                        if (d < best)
+                        {
+                            best = d;
+                            pump = i;
+                        }
                     }
+                    c.SetInt("boss.pick", pump + 1);
                 }
                 if (JourneyInput.Holding)
                 {

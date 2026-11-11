@@ -372,7 +372,7 @@ namespace GameLogic.EditorTools
             (int code, string output) = F.RunPython(F.LocateRepo(), "tools/cell_tables/fgdata.py --dump");
             string[] src = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("FR\t") || l.StartsWith("FM\t")).ToArray();
             var rt = new List<string>();
-            rt.AddRange(t.TbFusionRecipe.DataList.Select(r => string.Join("\t", "FR", r.Id, r.MixId, r.ParentA, r.ParentB, r.Family, r.Reaction, r.NameKey, r.SortOrder)));
+            rt.AddRange(t.TbFusionRecipe.DataList.Select(r => string.Join("\t", "FR", r.Id, r.MixId, r.ParentA, r.ParentB, r.Family, r.Reaction, r.NameKey, r.SortOrder, r.ClueA, r.ClueB)));
             // 合并上限是浮点：按两位小数比（源数据 repr 与运行时单精度的十进制写法不同）。
             rt.AddRange(t.TbFusionMerge.DataList.Select(r => string.Join("\t", "FM", r.Field, r.Cap.ToString("0.00", CultureInfo.InvariantCulture))));
             src = src.Select(l => l.StartsWith("FM\t") ? string.Join("\t", "FM", l.Split('\t')[1],
