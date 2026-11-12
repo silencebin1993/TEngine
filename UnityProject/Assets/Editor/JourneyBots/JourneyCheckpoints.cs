@@ -95,6 +95,13 @@ namespace GameLogic.EditorTools.JourneyBots
 
         public static string Dir(string root, string journeyId, string stepId) => Path.Combine(root, journeyId, stepId);
 
+        /// <summary>
+        /// EMG4-E2E-02（卡片负向“M10 基线的三个旧存档样本读入后跑完一段旅程”，FGT-EMG-041）：环境变量 BINGAMES_JOURNEY_OLD_SAVE=1
+        /// （tools/unity-journey.sh --old-save-sample）把断点当“旧版本存档样本”——内容版本可以比当前低（读档走正式迁移 / 对账），
+        /// 之前步骤有任何变化（编号 / 标题 / 超时 / 重试次数或顺序）都放行，只要求断点步骤序号一致（旅程、种子、存档 schema、生成器版本仍必须一致），代码指纹不同自动放行；报告写明。
+        /// </summary>
+        public static bool OldSaveSampleMode => Environment.GetEnvironmentVariable("BINGAMES_JOURNEY_OLD_SAVE") == "1";
+
         /// <summary>仓库根（有 tools/cell_tables/gen_all.py 的目录），从工程目录往上找（真工程与两个影子工程都在仓库根下）。</summary>
         public static string RepoRoot()
         {
@@ -266,12 +273,20 @@ namespace GameLogic.EditorTools.JourneyBots
                 why = $"种子不匹配：断点 {meta.seed}，当前旅程 {def.Seed}";
                 return false;
             }
-            if (meta.stepIndex != idx || meta.stepsHash != StepsHash(def, idx))
+            bool oldSample = OldSaveSampleMode;
+            string sampleNote = null;
+            if (meta.stepIndex != idx || (meta.stepsHash != StepsHash(def, idx) && !oldSample))
             {
                 why = $"“{stepId}”及之前的步骤变了（编号 / 标题 / 超时 / 重试次数或顺序；断点在第 {meta.stepIndex + 1} 步，当前在第 {idx + 1} 步）";
                 return false;
             }
-            if (meta.saveSchema != env.SaveSchema || meta.contentVersion != env.ContentVersion || meta.generatorVersion != env.GeneratorVersion)
+            if (oldSample)
+            {
+                sampleNote = $"旧存档样本模式：断点写于 {meta.writtenLocal}（内容版本 v{meta.contentVersion} → 当前 v{env.ContentVersion}" +
+                             (meta.stepsHash != StepsHash(def, idx) ? "；之前步骤已有变化（只核了步骤序号）" : string.Empty) + "），检验旧档读入后接着跑后面的步骤";
+            }
+            bool contentOk = oldSample ? meta.contentVersion <= env.ContentVersion : meta.contentVersion == env.ContentVersion;
+            if (meta.saveSchema != env.SaveSchema || !contentOk || meta.generatorVersion != env.GeneratorVersion)
             {
                 why = $"存档格式 / 内容版本 / 世界生成器版本不匹配：断点 v{meta.saveSchema}/{meta.contentVersion}/生成器 v{meta.generatorVersion}，" +
                       $"当前 v{env.SaveSchema}/{env.ContentVersion}/生成器 v{env.GeneratorVersion}";
@@ -280,12 +295,16 @@ namespace GameLogic.EditorTools.JourneyBots
             if (meta.codeHash != env.CodeHash)
             {
                 string text = $"游戏代码或配置表 / 界面资源（预制体、UXML、USS）与写断点时不同（指纹 {Short(meta.codeHash)} → {Short(env.CodeHash)}）";
-                if (!allowCodeChange)
+                if (!allowCodeChange && !oldSample)
                 {
                     why = text + "：断点里的世界是旧代码跑出来的；改了代码请完整跑（只想迭代后面的步骤、明知风险时加 --allow-code-change）";
                     return false;
                 }
-                codeWarning = text + "，按 --allow-code-change 放行：断点来自旧代码，结论只供迭代参考";
+                codeWarning = oldSample ? null : text + "，按 --allow-code-change 放行：断点来自旧代码，结论只供迭代参考";
+            }
+            if (sampleNote != null)
+            {
+                codeWarning = sampleNote;
             }
             return true;
         }

@@ -1822,6 +1822,9 @@ namespace GameLogic.EditorTools
             ["evt.unlink"] = "信号离开时热更层注入（CombatSites.OnUplinkChanged；FgEmgFlashSelfCheck）",
             ["evt.pickup"] = "机器拾取时热更层注入（CargoService → CombatSites.InjectEmgPickup；FgEmgBusSelfCheck）",
             ["evt.phase"] = "单位进 / 出相态时内核发（CombatLogic.Phase EnterPhase / ExitPhase；EMG2-PHS-01，FgEmgPhaseSelfCheck）", // EMG3-FW-01：阶段 2 出口核对暴露（原被 evt.react 未接通挡在阶段 1 出口）
+            // EMG4-E2E-02（FG-GAP-210 阶段 4 出口裁决：维持“已有生产者、读者未落表”缺口口径，与 evt.split 等同；FG19A 43 条里没有读它们的固件，补读者 = 扩内容，不在 FG-EMG）
+            ["evt.hijack"] = "劫持成立时内核发（CombatLogic.Hijack；EMG4-HIJ-01；FgEmgSeizeSelfCheck“共用事件：劫持成立发 evt.hijack”）",
+            ["evt.release"] = "劫持 / 夺控 / 封锁结束时内核与 SignalSeizeService 发（CombatLogic.Hijack、SignalSeizeService.InjectHost；EMG4-HIJ-02；FgEmgSeizeSelfCheck“劫持结束同样发 evt.release”）",
         };
 
         /// <summary>
@@ -1984,7 +1987,7 @@ namespace GameLogic.EditorTools
         private static bool PendingDecl(EmgSource.Decl d) => Enum.TryParse(d.Role, true, out EmgRole role) && EmgCatalog.IsPendingPort(d.Port, role);
 
         /// <summary>最近一个已出口的 FG-EMG 阶段（阶段出口卡 E2E 完成时提一级：EMG3-E2E-01 → 3；EMG4-E2E-02 → 4）。</summary>
-        private const int ExitedStage = 3;
+        internal const int ExitedStage = 4; // EMG4-E2E-02（DEBT-EMG4HIJ01-02）：阶段 4 出口
 
         /// <summary>未接通端口的承接卡（与 EmgCatalog.PendingPorts 注释同一张映射）。</summary>
         private static string PendingCard(string port, string role)
@@ -2037,8 +2040,8 @@ namespace GameLogic.EditorTools
                 case "evt.hijack":
                 case "evt.release":
                     // EMG4-FW-01：N39～N41 落表后 evt.seize 有了读者（N41）；evt.hijack / evt.release 的生产者已在内核（HIJ-01 / HIJ-02），FG19A 43 条里没有读它们的固件——
-                    // 按“已有生产者、读者未落表”记缺口（与 evt.split 等同口径），去向由阶段 4 出口裁决（FG-GAP-210）
-                    return "EMG4-E2E-02（FG-GAP-210）";
+                    // 按“已有生产者、读者未落表”记缺口（与 evt.split 等同口径）；EMG4-E2E-02 阶段 4 出口裁决维持此口径（FG-GAP-210 Closed），读者随固件扩充按 FGR-EMG-014 准入另开卡
+                    return "FG-GAP-210（维持缺口：读者随固件扩充另开卡）";
                 case "evt.seize":
                     return "EMG4-FW-01";
                 case "evt.beat":
@@ -2067,6 +2070,13 @@ namespace GameLogic.EditorTools
             };
         }
 
+        /// <summary>读 Editor/QA 下的自检源码（核对别段的断言原文仍在；影子工程没有根仓路径时用工程内同一文件）。</summary>
+        private static string QaSource(string file)
+        {
+            string path = System.IO.Path.Combine(Application.dataPath, "Editor/QA", file);
+            return System.IO.File.Exists(path) ? System.IO.File.ReadAllText(path) : string.Empty;
+        }
+
         private static void CheckSources(List<string> observed)
         {
             Line("  · B. 有源（规则三）与已登记缺口：只判 stage ≤ emg.stage 的端口；事件端口的写者 = 固定集实测发出过");
@@ -2091,9 +2101,13 @@ namespace GameLogic.EditorTools
             // EMG1-E2E-01（卡片：出口模式跑一次并清零；FG-GAP-183）：stage ≤ 当前阶段、既无声明引用内核也不发出的端口必须为 0。
             var exitOnly = exit.Failures.Except(a.Failures).ToList();
             var kernelOnly = exit.Gaps.Where(g => g.Why.StartsWith("本阶段已有生产者", StringComparison.Ordinal)).Select(g => g.Port).ToList();
-            Expect(exitOnly.Count == 0,
-                $"出口模式（AuditSources exitMode，阶段 {exitStage} 出口，FG19 第 12 节规则三；生效阶段 {stage}、未接通端口 {EmgCatalog.PendingPorts.Length} 族）：stage ≤ {exitStage} 却无人引用的端口 {exitOnly.Count} 个{Detail(exitOnly)}；" +
-                $"已有阶段 1 生产者、读者未落表 {kernelOnly.Count} 个（记缺口）：{string.Join("、", kernelOnly)}");
+            Expect(exitOnly.Count == 0 && exitStage == ExitedStage,
+                $"出口模式（AuditSources exitMode，核对阶段 {exitStage} = 已出口阶段 {ExitedStage}（DEBT-EMG4HIJ01-02：有未接通端口时会降级，降级即失败），阶段 {exitStage} 出口，FG19 第 12 节规则三；生效阶段 {stage}、未接通端口 {EmgCatalog.PendingPorts.Length} 族）：stage ≤ {exitStage} 却无人引用的端口 {exitOnly.Count} 个{Detail(exitOnly)}；" +
+                $"已有生产者、读者未落表 {kernelOnly.Count} 个（记缺口）：{string.Join("、", kernelOnly)}");
+            // EMG4-E2E-02（FG-GAP-210）：两个劫持事件端口按“已有生产者、读者未落表”记缺口——生产者由 FgEmgSeizeSelfCheck 实测（下面核对断言原文仍在）
+            string seizeSrc = QaSource("FgEmgSeizeSelfCheck.cs");
+            Expect(kernelOnly.Contains("evt.hijack") && kernelOnly.Contains("evt.release") && seizeSrc.Contains("共用事件：劫持成立发 evt.hijack") && seizeSrc.Contains("劫持结束同样发 evt.release"),
+                $"FG-GAP-210 裁决：evt.hijack / evt.release 在阶段 4 出口模式里记“已有生产者、读者未落表”缺口（不是失败），生产者断言在 FgEmgSeizeSelfCheck（{string.Join("、", kernelOnly.Where(p => p == "evt.hijack" || p == "evt.release"))}）");
             foreach (IGrouping<string, (string Port, string Card, string Why)> g in a.Gaps.GroupBy(x => x.Card).OrderBy(g => g.Key, StringComparer.Ordinal))
             {
                 Line($"    · 缺口（承接 {g.Key}）{g.Count()} 个：{string.Join("、", g.Select(x => x.Port))}");

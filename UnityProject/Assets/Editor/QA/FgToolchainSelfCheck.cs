@@ -291,6 +291,29 @@ namespace GameLogic.EditorTools
             Expect(allowed && whyAllow == null && warnAllow != null && warnAllow.Contains("--allow-code-change") && warnAllow.Contains("只供迭代参考"),
                 $"代码指纹不同时只有显式 --allow-code-change 才放行，并写明“{warnAllow}”");
 
+            // EMG4-E2E-02（FGT-EMG-041）：旧存档样本模式（BINGAMES_JOURNEY_OLD_SAVE=1）只放宽“内容版本更低 / 之前步骤有变化（只核步骤序号）/ 代码指纹”，其余照旧拒绝
+            string prevOld = Environment.GetEnvironmentVariable("BINGAMES_JOURNEY_OLD_SAVE");
+            try
+            {
+                Environment.SetEnvironmentVariable("BINGAMES_JOURNEY_OLD_SAVE", "1");
+                var newer = new JourneyCheckpoints.EnvInfo { CodeHash = "bbbb2222", SaveSchema = 2, ContentVersion = 2, GeneratorVersion = 2 };
+                bool oldOk = JourneyCheckpoints.Validate(SampleDef(titleB: "乙（改）"), "b", good, newer, false, out string whyOld, out string warnOld);
+                JourneyCheckpoints.Meta future = MetaFor(def, "b", env);
+                future.contentVersion = 3;
+                bool futureOk = JourneyCheckpoints.Validate(def, "b", future, newer, false, out string whyFuture, out _);
+                bool schemaOk = JourneyCheckpoints.Validate(def, "b", good, new JourneyCheckpoints.EnvInfo { CodeHash = "bbbb2222", SaveSchema = 3, ContentVersion = 2, GeneratorVersion = 2 }, false, out string whySchema, out _);
+                JourneyCheckpoints.Meta shifted = MetaFor(def, "b", env);
+                shifted.stepIndex = 0;
+                bool shiftOk = JourneyCheckpoints.Validate(def, "b", shifted, newer, false, out string whyShift, out _);
+                Expect(oldOk && whyOld == null && warnOld != null && warnOld.Contains("旧存档样本模式") && warnOld.Contains("v1 → 当前 v2") && warnOld.Contains("之前步骤已有变化")
+                       && !futureOk && whyFuture.Contains("内容版本") && !schemaOk && whySchema.Contains("存档格式") && !shiftOk && whyShift.Contains("之前的步骤变了"),
+                    $"旧存档样本模式：内容版本 v1 读进 v2、之前步骤有变化（只核步骤序号）、代码指纹不同 → 放行并写明“{warnOld}”；内容版本更高 / schema 不同 / 步骤序号不同照旧拒绝（{whyFuture}｜{whySchema}｜{whyShift}）");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("BINGAMES_JOURNEY_OLD_SAVE", prevOld);
+            }
+
             string refusal = JourneyBotHost.RefusalReport("FGJ-M3", "rate_t1", "旅程版本不匹配");
             Expect(refusal.Contains("请重新完整跑：bash tools/unity-journey.sh FGJ-M3") && refusal.Contains("结论：FAIL（断点不可用，没有开跑）") && refusal.Contains("旅程版本不匹配"),
                 "断点不可用时的报告：写明原因、“请重新完整跑”的命令、结论 FAIL（不开跑，命令行退出码 3）");
