@@ -42,11 +42,17 @@ namespace BinGames.Sim.Combat
         {
             CombatReading r = wp.Reading;
             double now = d.Scalars[0].Time;
+            int prog = EmgShotProg(ref d, wp.Program); // EMG3-META-01：反转选了逆序树时按逆序树的根节点
             if (r.Carrier == CombatCarrier.Summon)
             {
+                if (prog >= 0)
+                {
+                    // EMG4-CLEAN-01（FG-GAP-207）：根节点条件 / 随机下游的读法行（无人机数等）按这次出手的放行位补上；无人机命中时另按命中那一刻重判
+                    EmgGatedReading(ref d, prog, EmgCondAllow(ref d, prog, 0, EmgEventKind.Fire, a, t, d.EmgCtx.Chain, -1), ref r);
+                }
                 Cue(ref d, CombatEventKind.Fired, a, d.Id[t], 0f, d.Pos[t], 0);
                 LaunchDrones(ref d, a, wp, r.Drones + r.EscortDrones, t);
-                EmgAnchorAt(ref d, EmgAnchorConst.Drone, d.EmgCtx, d.Pos[a], t); // EMG4-FUSE-02
+                EmgAnchorAt(ref d, EmgAnchorConst.Drone, d.EmgCtx, d.Pos[a], t, -1, EmgRootWriterMask(ref d, d.EmgCtx.Prog, EmgRuleConst.PortDrone)); // EMG4-FUSE-02；EMG4-CLEAN-01：按来源序号筛（DEBT-EMG4FUSE02-06）
                 return CombatFireResult.Ok;
             }
 
@@ -55,7 +61,6 @@ namespace BinGames.Sim.Combat
             float baseDamage = math.max(0f, wp.Damage);
             // EMG1-GRM-01：根节点上的新动词（格斗侧偏；力场多个小脉冲 / 中心游移 / 越障 / 不被残骸挡；布区多块小落区 / 落点散开 / 越障 / 越过残骸）。没有程序时为空。
             EmgMods em = default;
-            int prog = EmgShotProg(ref d, wp.Program); // EMG3-META-01：反转选了逆序树时按逆序树的根节点
             ulong skip = 0UL;
             if (prog >= 0)
             {
@@ -66,7 +71,11 @@ namespace BinGames.Sim.Combat
                     skip = EmgMetaLaunch(ref d, prog, 0, a, t, d.EmgCtx, d.Pos[a], EmgDir(d.Pos[t] - d.Pos[a]), until, r.Carrier != CombatCarrier.Field);
                 }
                 EmgModsOf(ref d, prog, 0, out em, skip, a);
+                // EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：根节点条件 / 随机下游的读法行（威力、体积、破甲、处决、连锁……）按这次出手的放行位补到读法副本上
+                EmgGatedReading(ref d, prog, ~skip, ref r);
             }
+            CombatWeapon gw = wp;
+            gw.Reading = r; // 锚定读法与伴飞用同一份（放行后的）读法
             // EMG3-TMP-01：格斗 / 力场 / 当场结算的射弹读 evt.beat 时在出手点留节拍锚点（布区由落区做宿主）；主目标不可伤时不留（不触发读法）
             bool beatAnchor = prog >= 0 && r.Carrier != CombatCarrier.Field && (d.EmgListen & EmgBit(EmgEventKind.Beat)) != 0u;
             EmgCtx beatCtx = beatAnchor ? d.EmgCtx : default;
@@ -98,11 +107,6 @@ namespace BinGames.Sim.Combat
                 EmgShoveWrecks(ref d, a, t, d.Pos[a], r.Knockback, r.Carrier == CombatCarrier.Melee);
             }
             PerTarget(ref d, a, t, dealt, r, d.Pos[a]);
-            // EMG3-E2E-01（FGJ-EMG-3 发现）：根节点条件 / 随机下游的连锁不在静态读法里，按这次出手的放行位执行（[条件门·标记, 电弧] 未标记不连锁）
-            if (prog >= 0 && EmgCondChainMods(ref d, prog, 0, ~skip, a, out EmgMods condChain))
-            {
-                EmgChainHops(ref d, d.Faction[a] == (byte)CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, a, t, d.Pos[t], dealt, condChain, true, r);
-            }
             // 载体投送的其余目标（格斗扇形 / 力场一圈）：逐目标读法，不锚定。
             if (r.Carrier == CombatCarrier.Melee || r.Carrier == CombatCarrier.Aura)
             {
@@ -139,13 +143,17 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[t] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[t], wp.MarkSeconds, 0f, 0, d.Pos[t]); // EMG1-BUS-01：evt.marked（宿主 = 打上标记的这次出手）
-                EmgAnchorAt(ref d, EmgAnchorConst.Marked, d.EmgCtx, d.Pos[t], t); // EMG4-FUSE-02：被标记的目标是落点（没有接线的程序 O(1) 返回）
+                if (EmgRootWriterMask(ref d, d.EmgCtx.Prog, EmgRuleConst.PortMarked) == 0UL)
+                {
+                    // EMG4-CLEAN-01（DEBT-EMG4FUSE02-06）：这是功能组件的标记；根节点有写 evt.marked 的固件时，那条固件的标记在命中处按自己的序号落点（EmgRootMarkWrite），组件标记不再连带执行它的 B
+                    EmgAnchorAt(ref d, EmgAnchorConst.Marked, d.EmgCtx, d.Pos[t], t); // EMG4-FUSE-02
+                }
             }
-            Anchored(ref d, a, t, primaryPos, dealt, baseDamage, wp, wasMarked, d.Pos[a], false);
+            Anchored(ref d, a, t, primaryPos, dealt, baseDamage, gw, wasMarked, d.Pos[a], false);
             if (r.EscortDrones > 0)
             {
-                LaunchDrones(ref d, a, wp, r.EscortDrones);
-                EmgAnchorAt(ref d, EmgAnchorConst.Drone, d.EmgCtx, d.Pos[a], t); // EMG4-FUSE-02：放出的伴飞是落点（在放出处执行 B 一次）
+                LaunchDrones(ref d, a, gw, r.EscortDrones);
+                EmgAnchorAt(ref d, EmgAnchorConst.Drone, d.EmgCtx, d.Pos[a], t, -1, EmgRootWriterMask(ref d, d.EmgCtx.Prog, EmgRuleConst.PortDrone)); // EMG4-FUSE-02：放出的伴飞是落点；EMG4-CLEAN-01：按来源序号筛
             }
             return CombatFireResult.Ok;
         }
@@ -413,7 +421,7 @@ namespace BinGames.Sim.Combat
                 if (a >= 0 && d.EmgCtx.Owner == a)
                 {
                     // EMG4-FUSE-02 修复轮（审查 P1）：第一层的处决走过渡读法 ExecuteBelow，被处决的目标处同样是落点（与子节点 EmgTargetWrite 同口径；没有接线的程序 O(1) 返回）
-                    EmgAnchorAt(ref d, EmgAnchorConst.Execute, d.EmgCtx, at, -1);
+                    EmgAnchorAt(ref d, EmgAnchorConst.Execute, d.EmgCtx, at, -1, -1, EmgRootWriterMask(ref d, d.EmgCtx.Prog, EmgRuleConst.PortIntegrity)); // EMG4-CLEAN-01（DEBT-EMG4FUSE02-06）：按来源序号筛
                 }
             }
             if (r.Knockback > 0f && a >= 0 && d.IsAlive(t))
@@ -887,10 +895,6 @@ namespace BinGames.Sim.Combat
             }
             return m;
         }
-
-        /// <summary>规则除了“这一击 × 倍率”以外还有没有别的效果（附加标签 / 残留区域）。</summary>
-        private static bool HasNonDamageEffect(in CombatReactionRule rule) =>
-            rule.Grant != 0u || (rule.ResidueBit != 0u && rule.ResidueSeconds > 0f && rule.ResidueRadius > 0f);
 
         /// <summary>槽位的阵营（无效槽位 = 己方，沿用旧的区域默认）。</summary>
         private static CombatFaction FactionOfSlot(ref CombatData d, int slot) =>
@@ -1825,16 +1829,16 @@ namespace BinGames.Sim.Combat
                             d.Drones[write++] = dr;
                             continue;
                         }
+                        // EMG4-CLEAN-01（FG-GAP-207、DEBT-EMG3META01-03 同口径）：根节点条件 / 随机下游的读法行不在静态读法里，无人机命中这一刻按条件重判后补到读法副本上
+                        int dprog = EmgShotProg(ref d, wp.Program);
+                        if (dprog >= 0 && EmgGatedReading(ref d, dprog, EmgCondAllow(ref d, dprog, 0, EmgEventKind.Hit, owner, target, d.EmgCtx.Chain, dr.Id), ref r))
+                        {
+                            wp.Reading = r;
+                        }
                         float dealt = StrikeDamage(ref d, owner, target, dr.Damage, r, dr.Pos, false, 0f);
                         if (DamageUnit(ref d, target, dealt, owner))
                         {
                             PerTarget(ref d, owner, target, dealt, r, dr.Pos);
-                            // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁不在静态读法里，无人机命中这一刻按条件重判（与 DeliverInstant / 射弹命中同口径）
-                            int dprog = EmgShotProg(ref d, wp.Program);
-                            if (dprog >= 0 && EmgCondChainMods(ref d, dprog, 0, EmgMetaAllowNow(ref d, dprog, 0, EmgEventKind.Hit, owner, target, d.EmgCtx.Chain, dr.Id), owner, out EmgMods condChain))
-                            {
-                                EmgChainHops(ref d, want, owner, target, hitPos, dealt, condChain, true, r);
-                            }
                             // 无人机命中的锚定读法：伤害基数是无人机自己的伤害；不再补无人机（伴飞只在母机开火时补）；
                             // 以无人机为锚（viaDrone）——跃击不把母机拖向无人机自己挑的目标，回拉 / 脚下区域以无人机为中心（FGR-BASE-020）。
                             CombatWeapon droneWp = wp;

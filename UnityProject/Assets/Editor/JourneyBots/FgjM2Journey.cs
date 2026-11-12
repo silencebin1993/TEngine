@@ -86,6 +86,9 @@ namespace GameLogic.EditorTools.JourneyBots
                     FgjM1Journey.TickEditorOpen, retries: 1),
                 S("cb_pick", "在蓝图列表点 ERC-003 蓝图", 10, FgjM1Journey.ClickErc003Row, FgjM1Journey.TickErc003Open, retries: 1),
                 S("cb_wet", "固件槽 1 下拉选冷却液", 10, c => FgjM2Common.PickFirmwareSlot0(c, FgjM2Common.FwWet), c => FgjM2Common.TickFirmwareSlot0(c, FgjM2Common.FwWet), retries: 1),
+                // EMG4-CLEAN-01 修复轮 4（硬规矩 (2)，与 FGJ-M2R 同做法）：默认 ERC-003 第 2 位是拖尾，出手沿射线排污泥、斑块长大后盖到出手者脚下，物质不认敌我，
+                // 3 倍速下约 6 真实秒毒死电弧机（验证工人那次撤回时 #4 血 56、jr12 PASS 那次只剩 12）。本旅程测短路与图鉴，与拖尾无关：像玩家一样把第 2 位卸空；电弧版从这一版改出来，同样不带拖尾
+                S("cb_slot2", "固件槽 2 选“（空）”（卸下拖尾）", 10, FgjM2ReverseJourney.PickSlot1Empty, FgjM2ReverseJourney.TickSlot1Empty, retries: 1),
                 S("cb_save", "点“保存”", 10, c => FgjM1Journey.ClickUi(c, FgjM2Common.CircuitHost, "SaveButton"), c => FgjM2Common.TickSavedWithFirmware(c, FgjM2Common.FwWet, "verWet"), retries: 1),
                 S("cb_close", "按 Esc 关闭蓝图编辑器", 10, c => FgjM1Journey.PressIf(GameActionId.Cancel, GameRoot.HomeValley.IsCircuitBoardPanelOpen), FgjM1Journey.TickEditorClosed, retries: 1),
                 S("fac_open", "左键点装配站打开生产面板", 10, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeAssemblyStation, !GameRoot.HomeValley.IsFactoryPanelOpen),
@@ -117,6 +120,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 // ── 第 3 步：触发第一幕开放的具名反应，看到首次慢放和图鉴解锁 ──
                 S("attack_dummy", "右键点低威胁靶（右键敌人 = 攻击）：两台一起打，打出“短路”", 90, c => { FgjM2Common.BeginSampling(); FgjM2Common.RightClickDummy(c); },
                     c => FgjM2Common.TickFirstConduct(c, GameRoot.HomeValley.Combat, "家园低威胁靶上"), retries: 3),
+                // EMG4-CLEAN-01 修复轮 2：打出短路后撤回预备区再看图鉴（导电水洼与家园别的机器排的污泥都不分敌我）；撤回时有一台已死直接判失败
+                S("back", "右键预备区地面：两台撤回预备区（不在靶旁的导电水洼里停留）", 40, FgjM2Common.RightClickStaging, FgjM2Common.TickPulledBack, retries: 3),
                 S("codex_open", "按图鉴键（默认 C）打开图鉴", 10, c => FgjM1Journey.PressIf(GameActionId.OpenCodex, !MechanicCodexPanelUIToolkit.IsOpen), FgjM2Common.TickCodexOpen, retries: 1),
                 S("codex_tab", "点“反应”页签", 10, FgjM2Common.ClickReactionTab, FgjM2Common.TickReactionTab, retries: 1),
                 S("codex_entry", "点“短路”条目：已解锁，写着配料与能提供配料的固件", 10, FgjM2Common.ClickConductEntry, FgjM2Common.TickConductEntry, retries: 2),

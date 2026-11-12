@@ -659,8 +659,8 @@ namespace GameLogic.EditorTools
             using (var site = new CombatSite("emgflash-stage0", CombatSite.ConfigFromTuning()))
             {
                 CombatWeapon w0 = site.WithProgram(pv0, CombatSite.MachineWeaponFrom(pv0), out EmgProgramResult r0, out _);
-                Expect(r0.IsEmpty && site.Kernel.FlashHeadOf(site.WeaponIndex(w0)).x < 0 && CombatKernel.WeaponKey(w0) == CombatKernel.WeaponKey(CombatSite.MachineWeaponFrom(pv0)),
-                    "负向：emg.stage = 0 时程序为空、不挂变体表，武器键与旧路径逐字相同");
+                Expect(EmgCatalog.EffectiveStage == 4 && !r0.IsEmpty,
+                    "负向（EMG4-CLEAN-01）：emg.stage 填 0 不再生效——无人机舱照常编出程序（旧路径分支已删）");
             }
             EmgCatalog.ResetForTests();
         }

@@ -880,14 +880,12 @@ namespace GameLogic.EditorTools
 
         private static void CheckStageZero()
         {
-            Line("  · H. emg.stage = 0（回滚开关）：五条固件都不进程序、照旧走原读法，预览没有“已按新机制运行”");
+            Line("  · H. 负向（EMG4-CLEAN-01）：emg.stage 填 0 不再生效——五条固件照常进程序、走声明轨");
             UseStage(0);
             try
             {
-                bool allEmpty = new[] { FwSplit, FwDelay, FwWall, FwFollow, FwMagnet }.All(fw => Compile(fw).IsEmpty && !EmgCatalog.IsOwnerOnDeclTrack(fw));
-                var rows = new List<EmgTreeRow>();
-                EmgProgramTreeText.BuildRows(Compile(FwFollow), rows);
-                Expect(allEmpty && rows.All(x => x.Kind != EmgTreeRowKind.Migrated), "阶段 0：程序为空、都不在声明轨（旧读法照旧），预览无新机制说明");
+                bool allOn = EmgCatalog.EffectiveStage == 4 && new[] { FwSplit, FwDelay, FwWall, FwFollow, FwMagnet }.All(fw => !Compile(fw).IsEmpty && EmgCatalog.IsOwnerOnDeclTrack(fw));
+                Expect(allOn, "填 0：五条固件都进程序、都在声明轨（低值不再生效，旧读法分支已删）");
             }
             finally
             {

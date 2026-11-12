@@ -270,6 +270,7 @@ namespace GameLogic.EditorTools
                 foreach (int stage in new[] { 3, 4 })
                 {
                     UseStage(stage);
+                    int eff = EmgCatalog.EffectiveStage; // EMG4-CLEAN-01：填低值不再生效
                     var leaked = new List<string>();
                     int open = 0;
                     foreach ((string id, _) in Spec)
@@ -281,7 +282,7 @@ namespace GameLogic.EditorTools
                         bool inPick = pool.Any(p => p.Target == id);
                         bool inRestore = FirmwareRestoreService.Candidates(s).Contains(id);
                         bool obtainable = FirmwareKinds.IsObtainable(id) && FirmwareKinds.HasMachineImplementation(id);
-                        bool want = stage >= 4;
+                        bool want = eff >= 4;
                         bool wantDrop = want && row.Source == "salvage";
                         if (inPick && inRestore && obtainable && inDrop == wantDrop)
                         {
@@ -293,8 +294,8 @@ namespace GameLogic.EditorTools
                         }
                     }
                     int prior = FirmwareKinds.AddonRows.Take(8 + FgEmgStage3FirmwareSelfCheck.Spec.Length).Count(r => FirmwareKinds.IsObtainable(r.Id));
-                    Expect(leaked.Count == 0 && open == (stage >= 4 ? Spec.Length : 0) && prior == 8 + FgEmgStage3FirmwareSelfCheck.Spec.Length,
-                        $"emg.stage = {stage}：阶段 4 新固件开放 {open} / {Spec.Length} 条（负向：stageGate 未生效时不进掉落 / 三选一 / 复原、不能装机）；阶段 1 / 3 的 {prior} 条照常开放{Detail(leaked)}");
+                    Expect(leaked.Count == 0 && open == (eff >= 4 ? Spec.Length : 0) && eff == 4 && prior == 8 + FgEmgStage3FirmwareSelfCheck.Spec.Length,
+                        $"emg.stage 填 {stage}（不再生效，生效 {eff}）：阶段 4 新固件开放 {open} / {Spec.Length} 条（负向：stageGate 未生效时不进掉落 / 三选一 / 复原、不能装机）；阶段 1 / 3 的 {prior} 条照常开放{Detail(leaked)}");
                 }
             }
             finally

@@ -511,6 +511,12 @@ namespace BinGames.Sim.Combat
         /// （<see cref="CombatLogic"/>.EmgRootGated：排放 / 注电 → 驻留区 + 状态位，A 半径、B 秒数、C 状态位 + 1，Mag 位指明哪个参数乘幅度）。
         /// 有旧读法轨的固件根节点效果仍由热更层折进读法（不带本位，内核不执行，避免两轨同时结算）。</summary>
         RootKernel = 1024,
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：程序尾段的“根节点读法行”——根节点上位于条件 / 随机元程序下游（正序或逆序树任一棵）的那几条固件，
+        /// 读法贡献不折进武器静态读法，由热更层逐条记成本行（Verb = 旧读法动作码 1～25，A / B / C 已乘幅度，Param2 = 落位 0 命中 / 1 中点 / 2 自身，Ordinal = 来源指令序号），
+        /// 内核在出手 / 命中处按本次放行位补到读法副本上（<see cref="CombatLogic"/>.EmgGatedReading）。只在尾段、只读不写端口；不进快照（程序是内容）。
+        /// </summary>
+        LegacyRoot = 2048,
     }
 
     [Flags]
@@ -1227,8 +1233,9 @@ namespace BinGames.Sim.Combat
         /// <summary>MeltGround 逐格覆盖项的 z（x、y = 格坐标）：这格现在不是 / 是可熔地面（家园地形被玩家改过的格）。</summary>
         public const float CellNotMeltable = -1f, CellMeltable = -2f;
         /// <summary>CombatData.PitStats 下标：下一个 ID、形成、上限满未生效、填平、可熔地面以外的累计（不计入）；
-        /// EMG4-TER-02 段尾追加：焦土形成次数、发出的地面标记玩法事件数（段 30 自描述，旧档短段缺的两项取 0）。</summary>
-        public const int StatNextId = 0, StatBorn = 1, StatCapped = 2, StatFilled = 3, StatOffGround = 4, StatScorchBorn = 5, StatMarks = 6, StatLen = 7;
+        /// EMG4-TER-02 段尾追加：焦土形成次数、发出的地面标记玩法事件数（段 30 自描述，旧档短段缺的两项取 0）。
+        /// EMG4-CLEAN-01（DEBT-EMG4TER01-04）段尾追加：最近一次被上限挡掉的那一处坐标（厘米定点 x / y；旧档短段缺省 0）。</summary>
+        public const int StatNextId = 0, StatBorn = 1, StatCapped = 2, StatFilled = 3, StatOffGround = 4, StatScorchBorn = 5, StatMarks = 6, StatCapX = 7, StatCapY = 8, StatLen = 9;
         public const int PitFields = 7, AccFields = 4;
     }
 

@@ -125,6 +125,8 @@ namespace BinGames.Sim.Combat
         public float ZoneLife;
         /// <summary>循环锚点（格斗 / 力场 / 即时射弹，FGR-EMG-043）的结束时刻；0 = 跟随宿主存续。</summary>
         public double Until;
+        /// <summary>EMG4-CLEAN-01（DEBT-EMG4FUZZ01-05）：结算事件的 Code（重放按它还原事件，例如命中终结 ExpireHit 放的子载荷不撞被击单位）；段 23 记录尾部追加，短记录读到 0。</summary>
+        public ushort Code;
     }
 
     public static partial class CombatLogic

@@ -372,10 +372,22 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            ulong mask = ulong.MaxValue;
+            if (carrier == (byte)CombatCarrier.Projectile && EmgNodeSpan(ref d, s.Prog, s.Node, out int first, out int end))
+            {
+                // EMG4-CLEAN-01（FG-GAP-209）：飞行子弹药上的谐振改在子弹药命中点余振（EmgResonanceHit），放出点锚点去掉谐振位；只剩谐振读节拍时不留锚点
+                EmgBeatScan(ref d, first, end, 0, out ulong reads, out _, out _, out _);
+                ulong res = EmgResonanceBits(ref d, first, end, reads);
+                if (res != 0UL && (reads & ~res) == 0UL)
+                {
+                    return;
+                }
+                mask = ~res;
+            }
             EmgBeatAnchorPut(ref d, new EmgMetaRun
             {
                 Unit = s.Owner, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Host = s.Owner, HostKind = (byte)EmgEntKind.Unit, Mode = EmgMetaConst.RunBeat,
-                Depth = s.Depth, Mask = ulong.MaxValue, Pos = s.Pos, Dir = dir, Other = s.Other, Weapon = s.Weapon, Damage = math.max(0f, damage), Faction = s.Faction,
+                Depth = s.Depth, Mask = mask, Pos = s.Pos, Dir = dir, Other = s.Other, Weapon = s.Weapon, Damage = math.max(0f, damage), Faction = s.Faction,
                 Carrier = carrier, PFlags = (ushort)(s.Flags & EmgProjFlags.Heal), ZoneRadius = math.max(0f, s.ZoneRadius), ZoneLife = math.max(0f, s.ZoneLife),
             });
         }

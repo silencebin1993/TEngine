@@ -417,81 +417,15 @@ namespace GameLogic.EditorTools
 
         private static void CheckSpikes()
         {
-            // EMG1-E2E-01：本段是旧轨“尖刺外装”被动反伤（不限次数、反伤弹字进给）的回归；正式表 emg.stage = 1 起同一部件按爆炸反应装甲结算
-            // （块数、破片、evt.hit，FGR-EMG-233，FgReadingMatrixSelfCheck 的 EMG1-FW-01 段验），这里显式注入 0 跑旧轨（回滚开关），段尾还原。
+            // EMG4-CLEAN-01：emg.stage 只保留 4，旧轨“尖刺外装不限次数反伤”随双轨清理删除（现行口径 = 爆炸反应装甲，FgEmgEraSelfCheck A～G）；这里改验负向：填 0 不再回旧轨
             FgEmgProgramSelfCheck.UseStage0Catalog();
-            try { CheckSpikesLegacy(); } finally { GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests(); }
-        }
-
-        private static void CheckSpikesLegacy()
-        {
-            Line("  · F. 尖刺外装（被动反伤）：近身即时攻击 → 攻击者吃 4 + 这一击 × 0.5（直接开火与敌人驻守开火两条路径）；远程不反伤；没装不反伤；反伤不连锁；弹字进给");
-            CarrierReadings.TryGetComponent(ComponentCatalog.FuncSpikesId, out CombatComponent sp);
-            float expect = sp.Damage + 10f * sp.Thorns;
-            CombatWeapon spiked = WeaponFor(ComponentCatalog.CompGunId, ComponentCatalog.FuncSpikesId);
-            CombatWeapon plain = WeaponFor(ComponentCatalog.CompGunId, null);
-            var claws = new CombatWeapon { Mode = CombatWeaponMode.Instant, Range = 2.5f, Damage = 10f, Cooldown = 1f, HasOutput = 1 };
-            var gun = new CombatWeapon { Mode = CombatWeaponMode.Instant, Range = 14f, Damage = 10f, Cooldown = 1f, HasOutput = 1 };
-
-            using (CombatKernel k = NewKernel(8))
+            try
             {
-                int ws = k.AddWeapon(spiked);
-                int we = k.AddWeapon(claws);
-                int me = k.Spawn(Machine(double2.zero, ws));
-                int h = k.Spawn(Hostile(new double2(1.5, 0), 1000f, we, CombatBehavior.None));
-                long feed0 = k.ReadingFeedCountOf(CombatConst.ReadingFeedThorns);
-                CombatFireResult r = k.FireAt(h, me, k.Time);
-                Expect(r == CombatFireResult.Ok && Mathf.Approximately(Lost(k, me), 10f) && Mathf.Approximately(Lost(k, h), expect)
-                       && k.ReadingFeedCountOf(CombatConst.ReadingFeedThorns) == feed0 + 1,
-                    $"敌人贴身打一下：机器掉 10，敌人吃反伤 {Lost(k, h):0.##}（= {sp.Damage} + 10 × {sp.Thorns}），反伤弹字进给 +1");
+                CombatConfig cfg0 = GameLogic.Campaign.Combat.CombatSite.ConfigFromTuning();
+                Expect(GameLogic.Campaign.Emergence.EmgCatalog.EffectiveStage == 4 && cfg0.EmgEraBlocks > 0,
+                    $"  · F. 尖刺外装：emg.stage 填 0 不再回旧轨被动反伤（生效阶段 {GameLogic.Campaign.Emergence.EmgCatalog.EffectiveStage}，块数机制 {cfg0.EmgEraBlocks} 块）");
             }
-            using (CombatKernel k = NewKernel(8))
-            {
-                int ws = k.AddWeapon(spiked);
-                int we = k.AddWeapon(claws);
-                int me = k.Spawn(Machine(double2.zero, ws, 400f, 400f));
-                int h = k.Spawn(Hostile(new double2(1.5, 0), 1000f, we, CombatBehavior.HoldFire));
-                Run(k, 3.5f);
-                float taken = Lost(k, me);
-                int hits = (int)Math.Round(taken / 10f);
-                Expect(hits >= 3 && Mathf.Abs(Lost(k, h) - hits * expect) < 0.05f,
-                    $"敌人驻守开火（真实行为步进）3.5 秒打了 {hits} 下：每下都反伤，共 {Lost(k, h):0.##}");
-            }
-            using (CombatKernel k = NewKernel(8))
-            {
-                int ws = k.AddWeapon(spiked);
-                int we = k.AddWeapon(gun);
-                int me = k.Spawn(Machine(double2.zero, ws));
-                int h = k.Spawn(Hostile(new double2(8, 0), 1000f, we, CombatBehavior.None));
-                k.FireAt(h, me, k.Time);
-                Expect(Lost(k, me) > 0f && Lost(k, h) == 0f, "8 米外的即时射击：机器挨打，但不算近战、不反伤");
-            }
-            using (CombatKernel k = NewKernel(8))
-            {
-                int wp = k.AddWeapon(plain);
-                int we = k.AddWeapon(claws);
-                int me = k.Spawn(Machine(double2.zero, wp));
-                int h = k.Spawn(Hostile(new double2(1.5, 0), 1000f, we, CombatBehavior.None));
-                k.FireAt(h, me, k.Time);
-                Expect(Lost(k, me) > 0f && Lost(k, h) == 0f, "没装尖刺外装：贴身挨打也不反伤");
-            }
-            using (CombatKernel k = NewKernel(8))
-            {
-                // 反伤不连锁：机器（液压刺锤 + 尖刺外装）打一个也带反伤的敌人——敌人反伤一次，机器的反伤不因“被反伤”再触发。
-                CombatWeapon ramSpiked = WeaponFor(ComponentCatalog.CompRamId, ComponentCatalog.FuncSpikesId);
-                CombatWeapon foeThorns = claws;
-                foeThorns.Reading.Thorns = 0.5f;
-                foeThorns.Reading.ThornsFlat = 2f;
-                foeThorns.Reading.ThornsReach = 1.5f;
-                int wm = k.AddWeapon(ramSpiked);
-                int wf = k.AddWeapon(foeThorns);
-                int me = k.Spawn(Machine(double2.zero, wm));
-                int h = k.Spawn(Hostile(new double2(1.5, 0), 1000f, wf, CombatBehavior.None));
-                k.FireAt(me, h, k.Time);
-                CarrierReadings.TryGetComponent(ComponentCatalog.CompRamId, out CombatComponent ram);
-                Expect(Mathf.Approximately(Lost(k, h), ram.Damage) && Mathf.Approximately(Lost(k, me), 2f + ram.Damage * 0.5f),
-                    $"双方都带反伤：敌人挨 {Lost(k, h):0.##}（只有刺锤本身），机器吃一次反伤 {Lost(k, me):0.##}，不来回弹");
-            }
+            finally { GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests(); }
         }
 
         // ── G. 区域 / 无人机外观（DEBT-FG2FW02-02）────────────────────────────────────

@@ -70,6 +70,7 @@ namespace GameLogic.Campaign.Emergence
             EmgProgramCompiler.NoteMetaExecCap, EmgProgramCompiler.NoteMetaDeferCap, EmgProgramCompiler.NoteMetaEmpty, // EMG3-META-01（FGR-EMG-042）
             EmgProgramCompiler.NoteAnchorDangling, EmgProgramCompiler.NoteAnchorSplit, EmgProgramCompiler.NoteAnchorNone, EmgProgramCompiler.NoteAnchorModOnly, // EMG3-FUSE-01
             EmgProgramCompiler.NoteAnchorPending, EmgProgramCompiler.NoteAnchorCapped, EmgProgramCompiler.NoteAnchorNoExec,
+            EmgProgramCompiler.NoteGateNever, EmgProgramCompiler.NoteDriftFullCircle, // EMG4-CLEAN-01（FG-GAP-215）
         };
 
         public static string FixKey(string noteKey) => noteKey + ".fix";

@@ -133,8 +133,10 @@ namespace GameLogic.EditorTools
                 Expect(EmgProgramTreeText.PartPropLine("prop.mass", null, "struct_cargo") == GameText.Format("emg.part.prop_sum", GameText.Get("emg.port.prop.mass.name"), "20"),
                     $"未超上限时预览只写合计：{EmgProgramTreeText.PartPropLine("prop.mass", null, "struct_cargo")}");
                 UseStage(0);
-                Expect(EmgCatalog.PartPropModify("prop.mass", new[] { null, "struct_armor" }, out _) == 0f && EmgProgramTreeText.PartPropLine("prop.mass", null, "struct_armor") == null,
-                    "emg.stage = 0：部件声明不生效，没有加成、预览不显示（正式流程逐字不变）");
+                // EMG4-CLEAN-01（卡片负向）：emg.stage 只保留 4，填 0 不再关掉部件声明
+                Expect(EmgCatalog.EffectiveStage == 4 && Mathf.Approximately(EmgCatalog.PartPropModify("prop.mass", new[] { null, "struct_armor" }, out _), 0.5f)
+                       && EmgProgramTreeText.PartPropLine("prop.mass", null, "struct_armor") != null,
+                    "负向：emg.stage 填 0 不再生效——重甲的部件声明照常加成 +50%、预览照常显示（旧轨分支已删）");
             }
             finally
             {

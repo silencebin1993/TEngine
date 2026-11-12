@@ -827,15 +827,17 @@ namespace GameLogic.EditorTools
             GameLogic.Campaign.Blueprint.BlueprintCircuitPreview tp = GameLogic.Campaign.Blueprint.UplinkCompiler.CompileUplinked(board, new[] { "fw_overload" });
             var prof = new GameLogic.Campaign.Defense.TurretProfileDef { Range = 10f, TurnRate = 180f, ProjectileSpeed = 20f, ProjectileRadius = 0.3f };
             CombatWeapon tw0 = GameLogic.Campaign.Defense.TurretService.BuildWeapon(tp, prof, 1f, 0, false, false, false);
+            // EMG4-CLEAN-01：战斗入口只读声明参数，旧 readFields 兼容读法（对照基准）改由单参数 MachineWeaponFrom（预览口径）给出
+            CombatReading old = CombatSite.MachineWeaponFrom(tp).Reading;
             using (var site = new CombatSite("emgphase-turret", CombatSite.ConfigFromTuning()))
             {
                 CombatWeapon tw = site.WithProgram(tp, tw0, out EmgProgramResult tres, out _);
                 float ig3 = IgniteAfterHit(tw.Reading, out float h3);
                 Expect(slotOk && tw0.Mode == CombatWeaponMode.Projectile && tw.Program >= 0 && tres != null && !tres.IsEmpty
-                       && (tw0.Reading.StatusMask & fire) != 0u && tw0.Reading.HeatBurstAt > 0f
+                       && (old.StatusMask & fire) != 0u && old.HeatBurstAt > 0f && tw0.Reading.HeatBurstAt == 0f
                        && (tw.Reading.StatusMask & fire) == 0u && tw.Reading.HeatBurstAt == 0f && tw.Reading.DamageScale == tw0.Reading.DamageScale
                        && h3 > 0f && ig3 == 0f,
-                    $"炮塔弹体单轨：装过载后读法 Fire 位 {(tw.Reading.StatusMask & fire) != 0u}（装前 {(tw0.Reading.StatusMask & fire) != 0u}）、heatburst {tw.Reading.HeatBurstAt:0.##}（装前 {tw0.Reading.HeatBurstAt:0.##}）、" +
+                    $"炮塔弹体单轨：装过载后读法 Fire 位 {(tw.Reading.StatusMask & fire) != 0u}（旧读法 {(old.StatusMask & fire) != 0u}）、heatburst {tw.Reading.HeatBurstAt:0.##}（旧读法 {old.HeatBurstAt:0.##}、战斗入口装前 {tw0.Reading.HeatBurstAt:0.##}）、" +
                     $"程序下标 {tw.Program}；一发命中结构积热 {h3:0.##}、着火度 {ig3:0.##}");
             }
             // 3) 子弹药落点注能：子节点带 en.elec 注入的子弹药打中目标 → 目标电荷累积（落点矩阵见 FgReadingMatrixSelfCheck C2“注入类排在触发器后”）

@@ -290,8 +290,8 @@ namespace GameLogic.EditorTools
             {
                 UseStage(1);
                 using CombatKernel k1 = NewKernel();
-                Expect(Cfg().EmgPatchOn == 0 && !EmgCatalog.IsOwnerOnDeclTrack("fw_enterfuse") && !k1.SpawnPatch(EmgMatterConst.Oil, double2.zero, 1f) && k1.PatchCount == 0,
-                    "emg.stage = 1（回滚对照）：斑块层关、入场引信不生效、注入斑块被拒（阶段 1 行为）");
+                Expect(EmgCatalog.EffectiveStage == 4 && Cfg().EmgPatchOn == 1 && EmgCatalog.IsOwnerOnDeclTrack("fw_enterfuse") && k1.SpawnPatch(EmgMatterConst.Oil, double2.zero, 1f) && k1.PatchCount == 1,
+                    "负向（EMG4-CLEAN-01）：emg.stage 填 1 不再生效——斑块层照开、入场引信走声明轨、注入斑块照常（阶段 1 回滚分支已删）");
             }
             finally
             {
@@ -1091,8 +1091,8 @@ namespace GameLogic.EditorTools
                 UseStage(1);
                 var oil1 = Run(new[] { "fw_split", "fw_oilleak" }, true);
                 var tank1 = Run(new[] { "fw_water" }, false);
-                Expect(oil1.patches.Count == 0 && oil1.zones == oil1.subs && oil1.subs >= 1 && tank1.patches.Count == 0 && tank1.zones >= 1,
-                    $"emg.stage = 1 对照：同一程序不生成斑块（{oil1.patches.Count} / {tank1.patches.Count}），[分裂, 漏油] 落驻留区 {oil1.zones} 块（= 子弹药 {oil1.subs}）、水箱外排落驻留区 {tank1.zones} 块");
+                Expect(oil1.patches.Count >= 1 && oil1.zones == 0 && oil1.subs >= 1 && tank1.patches.Count == 1 && tank1.zones == 0,
+                    $"负向（EMG4-CLEAN-01）：emg.stage 填 1 不再退回驻留区——同一程序照样生成斑块（{oil1.patches.Count} / {tank1.patches.Count}），[分裂, 漏油] 驻留区 {oil1.zones} 块（子弹药 {oil1.subs}）、水箱外排驻留区 {tank1.zones} 块");
             }
             finally
             {

@@ -252,9 +252,12 @@ namespace GameLogic.Campaign.Content
             Build(primaryId, utilityId, chassisId, firmwareIds, damageFromCompile, null);
 
         /// <param name="skipField">EMG1-GRM-01：(固件, 字段) → true 时这一字段不按旧读法结算（已切到声明轨、由程序动词承接的修饰字段，FGR-EMG-019 同一 owner 不两轨同时结算）。</param>
+        /// <param name="fieldsOf">EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：固件 → 参与结算的读法字段。缺省 = 旧 readFields（只剩炮塔 / 重炮弹体武器的兼容读法与预览、对账用）；
+        /// 声明轨传 <see cref="Emergence.EmgCatalog.DeclLegacyOf"/>（声明参数 legacy 列）。</param>
         public static CombatReading Build(string primaryId, string utilityId, string chassisId, IReadOnlyList<string> firmwareIds, bool damageFromCompile,
-            Func<string, string, bool> skipField)
+            Func<string, string, bool> skipField, Func<string, IReadOnlyList<(string Field, float Magnitude)>> fieldsOf = null)
         {
+            fieldsOf ??= FieldsOf;
             var r = new CombatReading();
             FirmwareCarrier carrier = FirmwareCarrier.Projectile;
             if (TryGetComponent(primaryId, out CombatComponent comp))
@@ -299,7 +302,7 @@ namespace GameLogic.Campaign.Content
             {
                 foreach (string fw in firmwareIds)
                 {
-                    foreach ((string field, float mag) in FieldsOf(fw))
+                    foreach ((string field, float mag) in fieldsOf(fw))
                     {
                         if (skipField != null && skipField(fw, field))
                         {
@@ -403,138 +406,72 @@ namespace GameLogic.Campaign.Content
         public static void ApplyVerb(ref CombatReading r, FirmwareCarrier carrier, string verb, float a, float b, float c, string magTarget, float mag, bool damageFromCompile,
             string place = "none", string rowId = null)
         {
+            MulMag(ref a, ref b, ref c, magTarget, mag);
+            CarrierReadingVerb v = VerbOf(verb);
+            if (v == CarrierReadingVerb.Dmg && damageFromCompile)
+            {
+                return; // 伤害由电路编译给出（固件的能量改动已算在里面）
+            }
+            // EMG4-CLEAN-01：动作结算与内核补执行根节点读法行共用 BinGames.Sim.Combat.CombatReadingVerbs（同一动作两处结果一致）
+            if (!CombatReadingVerbs.Apply(ref r, (byte)v, a, b, c, PlaceCode(place), carrier == FirmwareCarrier.Summon))
+            {
+                Log.Error($"[CarrierReadings] 读法行 {rowId ?? "(程序)"} 的动作 {verb} 不认识（check_luban R26 / R39 应已拦下）。");
+            }
+        }
+
+        private static void MulMag(ref float a, ref float b, ref float c, string magTarget, float mag)
+        {
             switch (magTarget)
             {
                 case "a": a *= mag; break;
                 case "b": b *= mag; break;
                 case "c": c *= mag; break;
             }
-            switch (VerbOf(verb))
+        }
+
+        private static byte PlaceCode(string place) => place switch { "mid" => 1, "self" => 2, _ => 0 };
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：根节点上位于条件 / 随机元程序下游的那条指令，它的读法贡献不折进静态读法，
+        /// 记成一条内核“根节点读法行”（<see cref="EmgInstrFlags.LegacyRoot"/>，参数已乘幅度；内核 CombatLogic.EmgGatedReading 按放行位补执行）。
+        /// 出手间隔（cooldown，电容蓄力）属于武器节奏、在出手前就要定，仍折进静态读法（返回 false，调用方照常 <see cref="ApplyVerb"/>）。
+        /// </summary>
+        public static bool TryRecordVerb(List<EmgInstr> ops, int ordinal, string verb, float a, float b, float c, string magTarget, float mag, bool damageFromCompile, string place = "none")
+        {
+            CarrierReadingVerb v = VerbOf(verb);
+            if (v == CarrierReadingVerb.Cooldown || v == CarrierReadingVerb.Unknown)
             {
-                case CarrierReadingVerb.Dmg:
-                    if (!damageFromCompile && a > 0f)
-                    {
-                        r.DamageScale = (r.DamageScale > 0f ? r.DamageScale : 1f) * a;
-                    }
-                    break;
-                case CarrierReadingVerb.Cooldown:
-                    if (a > 0f)
-                    {
-                        r.CooldownScale = (r.CooldownScale > 0f ? r.CooldownScale : 1f) * a;
-                    }
-                    break;
-                case CarrierReadingVerb.Extra:
-                    r.ExtraHits += Count(a);
-                    r.ExtraRatio = Math.Max(r.ExtraRatio, b);
-                    r.ExtraRadius = Math.Max(r.ExtraRadius, c);
-                    break;
-                case CarrierReadingVerb.Pierce:
-                    r.PierceHits += Count(a);
-                    r.PierceRange = Math.Max(r.PierceRange, b);
-                    r.PierceRatio = Math.Max(r.PierceRatio, c);
-                    break;
-                case CarrierReadingVerb.Chain:
-                    r.ChainHits += Count(a);
-                    r.ChainRange = Math.Max(r.ChainRange, b);
-                    r.ChainFalloff = Math.Max(r.ChainFalloff, c);
-                    break;
-                case CarrierReadingVerb.Blast:
-                    r.BlastRadius = Math.Max(r.BlastRadius, a);
-                    r.BlastRatio = Math.Max(r.BlastRatio, b);
-                    break;
-                case CarrierReadingVerb.Sweep:
-                    r.SweepRadius = Math.Max(r.SweepRadius, a);
-                    r.SweepRatio = Math.Max(r.SweepRatio, b);
-                    break;
-                case CarrierReadingVerb.Echo:
-                    r.EchoCount += Count(a);
-                    r.EchoDelay = r.EchoDelay > 0f ? Math.Min(r.EchoDelay, b) : b;
-                    r.EchoRatio = Math.Max(r.EchoRatio, c);
-                    break;
-                case CarrierReadingVerb.Pull:
-                    r.PullStrength = Math.Max(r.PullStrength, a);
-                    r.PullRadius = Math.Max(r.PullRadius, b);
-                    if (c > 0.5f)
-                    {
-                        r.PullToAttacker = 1;
-                    }
-                    break;
-                case CarrierReadingVerb.Knock:
-                    r.Knockback += a;
-                    break;
-                case CarrierReadingVerb.Lunge:
-                    r.Lunge = Math.Max(r.Lunge, a);
-                    break;
-                case CarrierReadingVerb.Armor:
-                    r.ArmorPierce = Math.Min(1f, r.ArmorPierce + a);
-                    break;
-                case CarrierReadingVerb.Execute:
-                    r.ExecuteBelow = Math.Max(r.ExecuteBelow, a);
-                    break;
-                case CarrierReadingVerb.Leech:
-                    break; // EMG2-RECL-01：旧“伤害转修复”退役（回收修复改为拆残骸，内核 CombatLogic.Reclaim）；动词码保留只为对齐 EmgCatalog.Verbs
-                case CarrierReadingVerb.Amp:
-                    r.StatusAmp += a;
-                    break;
-                case CarrierReadingVerb.Zone:
-                    r.ZoneRadius = Math.Max(r.ZoneRadius, a);
-                    r.ZoneSeconds = Math.Max(r.ZoneSeconds, b);
-                    r.ZoneDps += c;
-                    r.ZonePlacement = place switch
-                    {
-                        "mid" => CombatZonePlacement.Midpoint,
-                        "self" => CombatZonePlacement.Attacker,
-                        _ => CombatZonePlacement.HitPoint,
-                    };
-                    break;
-                case CarrierReadingVerb.ZoneGrow:
-                    r.ZoneGrowth += a;
-                    break;
-                case CarrierReadingVerb.ZoneTick:
-                    if (a > 0f)
-                    {
-                        r.ZoneTickScale = (r.ZoneTickScale > 0f ? r.ZoneTickScale : 1f) * a;
-                    }
-                    break;
-                case CarrierReadingVerb.Weave:
-                    // a = 搜索半径，b = 持续秒数，c = 减速比例（fg.TbCarrierReading weave 行）；伤害比例在 Build 末尾取 reading.weave.dps_ratio。
-                    r.WeaveRadius = Math.Max(r.WeaveRadius, a);
-                    r.WeaveSeconds = Math.Max(r.WeaveSeconds, b);
-                    r.WeaveSlow = Math.Max(r.WeaveSlow, c);
-                    break;
-                case CarrierReadingVerb.Escort:
-                    r.EscortDrones += Count(a);
-                    break;
-                case CarrierReadingVerb.Drones:
-                    r.Drones += Count(a);
-                    break;
-                case CarrierReadingVerb.HeatBurst:
-                    r.HeatBurstAt = r.HeatBurstAt > 0f ? Math.Min(r.HeatBurstAt, a) : a;
-                    r.HeatBurstRadius = Math.Max(r.HeatBurstRadius, b);
-                    r.HeatBurstRatio = Math.Max(r.HeatBurstRatio, c);
-                    break;
-                case CarrierReadingVerb.Jump:
-                    r.JumpRange = Math.Max(r.JumpRange, a);
-                    r.JumpFalloff = Math.Max(r.JumpFalloff, b);
-                    r.JumpMax += Count(c);
-                    break;
-                case CarrierReadingVerb.Reach:
-                    if (carrier == FirmwareCarrier.Summon)
-                    {
-                        r.DroneLeash += a;
-                    }
-                    else
-                    {
-                        r.Area += a;
-                    }
-                    break;
-                case CarrierReadingVerb.Cone:
-                    r.Cone += a;
-                    break;
-                default:
-                    Log.Error($"[CarrierReadings] 读法行 {rowId ?? "(程序)"} 的动作 {verb} 不认识（check_luban R26 / R39 应已拦下）。");
-                    break;
+                return false;
             }
+            MulMag(ref a, ref b, ref c, magTarget, mag);
+            if (v == CarrierReadingVerb.Dmg && (damageFromCompile || a <= 0f))
+            {
+                return true; // 与 ApplyVerb 同口径：不改读法
+            }
+            ops.Add(new EmgInstr
+            {
+                Port = 0, Role = (byte)Emergence.EmgRole.Modify, Ordinal = (byte)Math.Min(255, Math.Max(0, ordinal)), Verb = (byte)v, A = a, B = b, C = c,
+                Param2 = PlaceCode(place), Amount = 1f, Flags = EmgInstrFlags.LegacyRoot,
+            });
+            return true;
+        }
+
+        /// <summary>EMG4-CLEAN-01：一个旧读法字段按本载体的读法行记成根节点读法行（与 <see cref="ApplyField"/> 同一组行）；出手间隔行照常折进 <paramref name="r"/>。没有行返回 false。</summary>
+        public static bool RecordField(ref CombatReading r, List<EmgInstr> ops, int ordinal, FirmwareCarrier carrier, string field, float mag, bool damageFromCompile)
+        {
+            EnsureLoaded();
+            if (!_byFieldCarrier.TryGetValue((field, carrier), out List<CarrierReading> rows))
+            {
+                return false;
+            }
+            foreach (CarrierReading row in rows)
+            {
+                if (!TryRecordVerb(ops, ordinal, row.Verb, row.A, row.B, row.C, row.Mag, mag, damageFromCompile, row.Place))
+                {
+                    Accumulate(ref r, carrier, row, mag, damageFromCompile);
+                }
+            }
+            return true;
         }
 
         private static int Count(float v) => v <= 0f ? 0 : Math.Max(1, (int)Math.Round(v));

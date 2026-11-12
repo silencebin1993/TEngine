@@ -284,6 +284,7 @@ namespace GameLogic.EditorTools
                 foreach (int stage in new[] { 2, 3 })
                 {
                     UseStage(stage);
+                    int eff = EmgCatalog.EffectiveStage; // EMG4-CLEAN-01：填低值不再生效
                     var leaked = new List<string>();
                     int open = 0;
                     foreach ((string id, _) in Spec)
@@ -295,7 +296,7 @@ namespace GameLogic.EditorTools
                         bool inPick = pool.Any(p => p.Target == id);
                         bool inRestore = FirmwareRestoreService.Candidates(s).Contains(id);
                         bool obtainable = FirmwareKinds.IsObtainable(id) && FirmwareKinds.HasMachineImplementation(id);
-                        bool want = stage >= 3;
+                        bool want = eff >= 3;
                         bool wantDrop = want && row.Source == "salvage";
                         if (inPick && inRestore && obtainable && inDrop == wantDrop)
                         {
@@ -307,8 +308,8 @@ namespace GameLogic.EditorTools
                         }
                     }
                     int e1Open = FirmwareKinds.AddonRows.Take(8).Count(r => FirmwareKinds.IsObtainable(r.Id));
-                    Expect(leaked.Count == 0 && open == (stage >= 3 ? Spec.Length : 0) && e1Open == 8,
-                        $"emg.stage = {stage}：阶段 3 新固件开放 {open} / {Spec.Length} 条（杂兵残骸来源的进掉落，精英来源的只进三选一）；EMG1 的 8 条照常开放 {e1Open}{Detail(leaked)}");
+                    Expect(leaked.Count == 0 && open == (eff >= 3 ? Spec.Length : 0) && eff == 4 && e1Open == 8,
+                        $"emg.stage 填 {stage}（不再生效，生效 {eff}）：阶段 3 新固件开放 {open} / {Spec.Length} 条（杂兵残骸来源的进掉落，精英来源的只进三选一）；EMG1 的 8 条照常开放 {e1Open}{Detail(leaked)}");
                 }
             }
             finally

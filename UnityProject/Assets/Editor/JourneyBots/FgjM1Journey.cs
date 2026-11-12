@@ -284,15 +284,20 @@ namespace GameLogic.EditorTools.JourneyBots
                     return;
                 }
                 // FG5-E2E-01：机器模型被界面（左下角区域指挥栏等）挡住时点它露出来的那一部分；整台都被挡住就先平移镜头。
-                if (JourneyInput.TryVisiblePointOf(m.View.transform, out Vector3 screen, out _))
+                if (JourneyInput.TryVisiblePointOf(m.View.transform, out Vector3 screen, out string why))
                 {
+                    LastMachineClickWhy = string.Empty;
                     JourneyInput.ClickScreen(screen);
                     return;
                 }
+                LastMachineClickWhy = why;
                 JourneyInput.DeferWorldClick(() => ClickMachine(c, key));
                 FgjM3Common.PanTo(m.Position);
             }
         }
+
+        /// <summary>最近一次左键点机器没点出去的原因（TryVisiblePointOf 给的；点出去了为空）。诊断用。</summary>
+        internal static string LastMachineClickWhy { get; private set; } = string.Empty;
 
         internal static StepOutcome TickSelected(JourneyContext c, string key)
         {
@@ -301,9 +306,16 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             int id = c.GetInt(key);
-            return GameRoot.HomeValley.SelectedMachineLogicId == id
-                ? StepOutcome.Done($"左键选中 {Label(id)}")
-                : StepOutcome.Retry($"左键后选中的是 {GameRoot.HomeValley.SelectedMachineLogicId}（选点：{JourneyInput.LastVisiblePointNote}；点击那两帧：{JourneyInput.LastWorldClickTrace}）");
+            if (GameRoot.HomeValley.SelectedMachineLogicId == id)
+            {
+                return StepOutcome.Done($"左键选中 {Label(id)}");
+            }
+            // EMG4-CLEAN-01 修复轮 5：选点备注可能是上一次点建筑留下的，补上目标机器自己在哪、镜头在哪，点不到时能看出是平移不到还是被挡住。
+            Unity.Mathematics.float2 f = Campaign.WorldSim.WorldView.Director.StrategyFocus;
+            string where = HomeMarker(id, out HomeValleyMachineMarker m)
+                ? $"目标 {Label(id)} 在 {m.Position}、画面内 {JourneyInput.OnScreen(m.Position, 0.08f)}、视图 {(m.View.gameObject.activeInHierarchy ? "显示" : "隐藏")}"
+                : $"目标 {Label(id)} 没有家园标记";
+            return StepOutcome.Retry($"左键后选中的是 {GameRoot.HomeValley.SelectedMachineLogicId}（{where}；镜头焦点 ({f.x:F1}, {f.y:F1})、{Campaign.WorldSim.WorldView.Director.Mode}、战略输入 {InputRouter.Owns(InputScope.Strategy)}、暂停 {GameClock.Paused}；没点出去的原因：{(LastMachineClickWhy.Length > 0 ? LastMachineClickWhy : "无")}；上一次点得到时的选点：{JourneyInput.LastVisiblePointNote}；点击那两帧：{JourneyInput.LastWorldClickTrace}）");
         }
 
         internal static void RightClickBuilding(string typeId) => ClickBuildingVisible(typeId, 1);

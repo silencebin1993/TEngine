@@ -986,7 +986,7 @@ namespace GameLogic.EditorTools
             {
                 BlueprintCircuitPreview tp = Preview(ComponentCatalog.CompGunId, fw);
                 CombatWeapon t0 = TurretService.BuildWeapon(tp, prof, 1f, 0, false, false, false);
-                before = t0.Reading;
+                before = CombatSite.MachineWeaponFrom(tp).Reading; // EMG4-CLEAN-01：旧 readFields 兼容读法作对照（战斗入口 BuildWeapon 已只读声明参数）
                 return site.WithProgram(tp, t0, out _, out _);
             }
             using (var site = new CombatSite(SiteId, SiteCfg()))

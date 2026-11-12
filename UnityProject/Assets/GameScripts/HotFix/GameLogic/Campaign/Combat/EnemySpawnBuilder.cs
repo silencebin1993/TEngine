@@ -147,7 +147,7 @@ namespace GameLogic.Campaign.Combat
             };
             if (EnemyDefs.HasTag(row, EnemyDefs.TagAssembled) && TryAssembly(row, out string component, out List<string> firmware))
             {
-                w.Reading = CarrierReadings.Build(component, null, null, firmware, damageFromCompile: false);
+                w.Reading = CarrierReadings.Build(component, null, null, firmware, false, null, Emergence.EmgCatalog.DeclLegacyOf); // EMG4-CLEAN-01：战斗不读 readFields，只按声明参数；有程序时 EnemyProgramWeapon 按声明轨重建
             }
             return w;
         }

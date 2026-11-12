@@ -79,6 +79,7 @@ namespace GameLogic.EditorTools
                 Step(CheckHeadline);
                 Step(CheckConditionMods);
                 Step(CheckCondChain);
+                Step(CheckRootGated); // EMG4-CLEAN-01：FG-GAP-207 / 208、DEBT-EMG3META01-01、DEBT-EMG4FUSE02-06
                 Step(CheckExitDebts);
                 Step(CheckRepeat);
                 Step(CheckRandom);
@@ -93,6 +94,7 @@ namespace GameLogic.EditorTools
                 Step(CheckChsHosts); // EMG3 出口补缺口：DEBT-EMG3CHS01-02
                 Step(CheckChsEffects); // 同上第 2 轮：落点效果、命中结算、无状态修饰、折叠轨守卫
                 Step(CheckEmptyAndDiscovery);
+                Step(CheckNeverGates); // EMG4-CLEAN-01：FG-GAP-215 恒不成立条件的预览原因
                 Step(CheckPerformance);
             }
             catch (Exception e)
@@ -485,6 +487,136 @@ namespace GameLogic.EditorTools
             Expect(dOff == dBase && dOn > dBase && dOn == dCtl, $"无人机舱：邻靶直击基线 {dBase}；未标记 {dOff}（= 基线，不连锁）、已标记 {dOn}（{dProbe}）；对照 [电弧] 未标记 {dCtl}（修前逻辑：已标记也 = 基线）");
         }
 
+        /// <summary>正式编译路径跑一套装配：返回主靶、邻靶在“最后一发”里的掉血与这套装配记下的根节点读法行数。hot = 先空开一发把积热打到过半（反转选逆序树）。</summary>
+        private static string _rootGatedProbe;
+
+        private static (float Main, float Side, int Ops) RootGatedShot(string comp, string[] fws, bool marked, bool hot, int settle = 90, double sideX = 2.5, bool flight = false)
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisWheelId, comp, null, null, fws);
+            BlueprintCircuitPreview p = BlueprintCircuitCompiler.CompilePreview(board);
+            // 机器电路只有 2 个固件槽：三条的程序按“同一台机器装满接入口”直接给预览（编译器 / 读法走的都是这两个列表）
+            p.LocalFirmwareIds = (string[])fws.Clone();
+            p.FirmwareIds = (string[])fws.Clone();
+            EmgProgramResult program = EmgProgramCompiler.Compile(p);
+            CombatWeapon w = CombatSite.MachineWeaponFrom(p);
+            w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
+            int ops = program.LegacyOps?.Count ?? 0;
+            using var k = new CombatKernel(Cfg(), 16);
+            w.Program = CombatSite.RegisterProgram(k, program);
+            w.Cooldown = 0f;
+            w.Range = 30f;
+            w.HeatPerShot = 10f;
+            w.OverheatAt = 15f;
+            w.RecoverBelow = 4f;
+            w.Dissipation = 0.001f; // 近乎不散热（0 = 走缺省散热）：空开一发后积热留在过半
+            w.HeatSinkBonus = 0f;
+            if (flight)
+            {
+                w = Flight(w, 20f, 2f); // 反转按积热选树走飞行弹体（与 H 段同一夹具）
+            }
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+            int t = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 50000f);
+            int n = Unit(k, CombatFaction.Hostile, new double2(sideX, 4), -1, 50000f);
+            if (marked)
+            {
+                k.SetMarkedUntil(t, 1e9);
+            }
+            float Hp(int u) => k.TryGetUnit(u, out CombatUnitView v) ? v.Health : -1f;
+            if (hot)
+            {
+                k.FireAt(me, t, k.Time);
+                StepN(k, settle); // 这一发落地；积热 10 / 15 ≥ 50%（散热 0），下一发选逆序树
+            }
+            float m0 = Hp(t), s0 = Hp(n);
+            k.FireAt(me, t, k.Time);
+            StepN(k, 1);
+            int shotProg = Projs(k).Select(q => q.Prog).DefaultIfEmpty(-9).Max();
+            StepN(k, settle - 1);
+            _rootGatedProbe = $"逆序树 {(program.Reverse != null ? "有" : "无")}、程序 {w.Program}、这一发弹体程序 {shotProg}、读法行 {ops}、本机积热 {(k.TryGetUnit(me, out CombatUnitView mv) ? mv.Heat : -1f):0.0}";
+            return (m0 - Hp(t), s0 - Hp(n), ops);
+        }
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01；FGR-EMG-019 第 3 点、FGR-EMG-040“对修饰”列）：根节点上位于条件 / 随机下游的“直接改武器读法”的修饰
+        /// （威力、过渡字段、连锁）不再静态折进读法，由内核按放行位执行——正式编译路径（电路板 → CompilePreview → ProgramReading → RegisterProgram）。
+        /// </summary>
+        private static void CheckRootGated()
+        {
+            Line("  · C3. 负向 / 正向：[条件门·标记, 电容蓄力] 未标记伤害 = 不带电容、已标记 = 只带电容；逆序树里连锁不消失、不连两次；过渡字段（动能回响）同样受控；无元程序时不记读法行");
+            string ram = ComponentCatalog.CompRamId;
+            // FG-GAP-207：体积（grm.mod.size，扩口的旧字段 scale 在射弹载体上折成爆圈；邻靶在主靶 1 米外，只有爆圈打得到）
+            string gun0 = ComponentCatalog.CompGunId;
+            var baseOff = RootGatedShot(gun0, new[] { IfMark }, false, false, 30, 1.0);
+            var gOff = RootGatedShot(gun0, new[] { IfMark, "fw_flare" }, false, false, 30, 1.0);
+            var gOn = RootGatedShot(gun0, new[] { IfMark, "fw_flare" }, true, false, 30, 1.0);
+            var ctlOn = RootGatedShot(gun0, new[] { "fw_flare" }, true, false, 30, 1.0);
+            Expect(gOff.Ops > 0 && ctlOn.Ops == 0 && baseOff.Side == 0f && gOff.Side == 0f && gOn.Side > 0f && Math.Abs(gOn.Side / gOn.Main - ctlOn.Side / ctlOn.Main) < 1e-3f,
+                $"FG-GAP-207 体积：[条件门·标记, 扩口] 未标记邻靶（爆圈）掉血 {gOff.Side}（不带扩口 {baseOff.Side}）、已标记 {gOn.Side}（邻 / 主 {gOn.Side / Math.Max(1e-3f, gOn.Main):F3}，只带扩口 {ctlOn.Side / Math.Max(1e-3f, ctlOn.Main):F3}）；根节点读法行 {gOff.Ops} 条，无元程序 {ctlOn.Ops} 条");
+            // DEBT-EMG3META01-01：过渡字段（en.kinetic 的旧字段 echo = 回响再结算）同样受条件控制
+            var eBase = RootGatedShot(ram, new[] { IfMark }, true, false, 240);
+            var eOff = RootGatedShot(ram, new[] { IfMark, "fw_echo" }, false, false, 240);
+            var eBaseOff = RootGatedShot(ram, new[] { IfMark }, false, false, 240);
+            var eOn = RootGatedShot(ram, new[] { IfMark, "fw_echo" }, true, false, 240);
+            var eCtl = RootGatedShot(ram, new[] { "fw_echo" }, true, false, 240);
+            Expect(eOff.Ops > 0 && Math.Abs(eOff.Main - eBaseOff.Main) < 1e-3f && Math.Abs(eOn.Main - eCtl.Main) < 1e-3f && eCtl.Main > eBase.Main + 0.5f,
+                $"DEBT-EMG3META01-01 过渡字段：[条件门·标记, 回响] 未标记 {eOff.Main}（不带回响 {eBaseOff.Main}）、已标记 {eOn.Main}（只带回响 {eCtl.Main}，不带 {eBase.Main}）；读法行 {eOff.Ops} 条");
+            // FG-GAP-208 ①：[逆序编译, 条件门·标记, 电弧] 积热过半切逆序树（= [逆序, 电弧, 条件门]，电弧不在下游）→ 未标记照样连锁；冷态正序树未标记不连锁
+            string gun = ComponentCatalog.CompGunId;
+            string[] rcm = { Rev, IfMark, "fw_arcchain" }, rmc = { Rev, "fw_arcchain", IfMark };
+            var cold = RootGatedShot(gun, rcm, false, false, 30, 2.5, true);
+            var hotOff = RootGatedShot(gun, rcm, false, true, 30, 2.5, true);
+            string hotProbe = _rootGatedProbe;
+            var ctl = RootGatedShot(gun, new[] { Rev, "fw_arcchain" }, false, true, 30, 2.5, true);
+            float Ratio((float Main, float Side, int Ops) x) => x.Main > 0f ? x.Side / x.Main : -1f;
+            Expect(cold.Side == 0f && hotOff.Side > 0f && Math.Abs(Ratio(hotOff) - Ratio(ctl)) < 1e-3f,
+                $"FG-GAP-208 ①：冷态（正序树，电弧在条件下游）未标记邻靶掉血 {cold.Side}；积热过半（逆序树，电弧不在下游）未标记 {hotOff.Side}（邻 / 主 {Ratio(hotOff):F3}，对照无条件 {Ratio(ctl):F3}；{hotProbe}）");
+            // FG-GAP-208 ①②：[逆序编译, 电弧, 条件门·标记] 积热且已标记 → 逆序树电弧在条件下游、放行 → 只连一次（与对照同比例；修前静态 + 动态各连一次）
+            var hotOn = RootGatedShot(gun, rmc, true, true, 30, 2.5, true);
+            var hotOff2 = RootGatedShot(gun, rmc, false, true, 30, 2.5, true);
+            Expect(hotOn.Side > 0f && Math.Abs(Ratio(hotOn) - Ratio(ctl)) < 1e-3f && hotOff2.Side == 0f,
+                $"FG-GAP-208 ②：逆序树电弧在条件下游——已标记邻 / 主 {Ratio(hotOn):F3}（对照 {Ratio(ctl):F3}，不连两次）、未标记邻靶 {hotOff2.Side}");
+            // 修复轮 2（审查 P1）：重炮当场结算（FireCannon）与炮塔弹体（BuildWeapon 把伤害倍率折进单发伤害）同样受门控——[条件门·标记, 电容蓄力] 未标记 = 不带电容、已标记 = 只带电容
+            foreach (bool turret in new[] { false, true })
+            {
+                // 重炮主组件：伤害不经电路编译、电容的伤害倍率真乘上（连射器按电路编译伤害，电容只改出手间隔，测不出门控）；炮塔不接入 = 弹体模式
+                string comp = ComponentCatalog.CompCannonId;
+                float cBase = GatedHit(comp, turret, new[] { IfMark }, false), cOff = GatedHit(comp, turret, new[] { IfMark, "fw_capacitor" }, false);
+                float cOn = GatedHit(comp, turret, new[] { IfMark, "fw_capacitor" }, true), cCtl = GatedHit(comp, turret, new[] { "fw_capacitor" }, true);
+                Expect(cBase > 0f && Math.Abs(cOff - cBase) < 1e-3f && cOn > cOff * 1.2f && Math.Abs(cOn - cCtl) < 1e-3f,
+                    $"{(turret ? "重炮弹体炮塔（不接入，TurretService.BuildWeapon + WithProgram）" : "重炮当场结算（FireCannon）")}：[条件门·标记, 电容蓄力] 未标记一发 {cOff:0.00}（不带电容 {cBase:0.00}）、已标记 {cOn:0.00}（只带电容 {cCtl:0.00}）");
+            }
+        }
+
+        /// <summary>修复轮 2：正式武器入口（重炮机器 = MachineWeaponFrom + WithProgram；炮塔 = TurretService.BuildWeapon + WithProgram）打一发，返回目标掉血。</summary>
+        private static float GatedHit(string comp, bool turret, string[] fws, bool marked)
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(ChassisCatalog.ChassisWheelId, comp, null, null, fws);
+            BlueprintCircuitPreview p = BlueprintCircuitCompiler.CompilePreview(board);
+            p.LocalFirmwareIds = (string[])fws.Clone();
+            p.FirmwareIds = (string[])fws.Clone();
+            using var site = new CombatSite("emgmeta-gatedhit", CombatSite.ConfigFromTuning());
+            CombatWeapon w0 = turret
+                ? GameLogic.Campaign.Defense.TurretService.BuildWeapon(p, new GameLogic.Campaign.Defense.TurretProfileDef { Range = 30f, TurnRate = 720f, ProjectileSpeed = 30f, ProjectileRadius = 0.3f }, 1f, 0, false, false, false)
+                : CombatSite.MachineWeaponFrom(p, false);
+            CombatWeapon w = site.WithProgram(p, w0);
+            w.Range = 30f;
+            CombatKernel k = site.Kernel;
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+            int t = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 50000f);
+            if (marked)
+            {
+                k.SetMarkedUntil(t, 1e9);
+            }
+            float Hp() => k.TryGetUnit(t, out CombatUnitView v) ? v.Health : -1f;
+            float h0 = Hp();
+            for (int i = 0; i < 200 && Hp() == h0; i++)
+            {
+                k.FireAt(me, t, k.Time); // 重炮先瞄准 1 秒再开火；炮塔弹体飞到再结算
+                StepN(k, 1);
+            }
+            return h0 - Hp();
+        }
+
         // ── N. EMG3-E2E-01 承接的三条元程序债务（DEBT-EMG3META01-02 / 03 / 04，卡片“必须同时交付”，逐条关闭）──
 
         private static void CheckExitDebts()
@@ -655,6 +787,28 @@ namespace GameLogic.EditorTools
                 StepN(k, 10);
                 Expect(now == 1 && Pools(k) == 2, $"[复制, 命中排放]：命中当场排 {now} 摊、0.1 秒后同位置再排 1 摊（共 {Pools(k)}）——同一条排放结算两次只有复制能做到");
             }
+            // EMG4-CLEAN-01（DEBT-EMG4FUZZ01-05）：[复制, 子母弹（读 evt.expire）] 射弹命中即止 = 命中终结（ExpireHit）。复制 0.1 秒后重放放出的子母弹与正常唤起同口径不撞被击单位：
+            // 被击单位失血与不复制时相同（只吃主弹那一下），子载荷数翻倍（修前重放事件不带 Code，子母弹在被击单位体内放出、当步撞回它）
+            long ExpireRun(bool repeat, out float lost)
+            {
+                using var k = new CombatKernel(Cfg(), 16);
+                var root = new List<EmgInstr[]>();
+                if (repeat)
+                {
+                    root.Add(MetaI(0, EmgMetaConst.Repeat, EmgEventKind.Expire));
+                }
+                root.Add(TrigI(root.Count, EmgEventKind.Expire));
+                int prog = Tree(k, Root(root.ToArray()), Child(root.Count - 1, EmgEventKind.Expire, 4));
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 20f, 3f)), 100f);
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 4), -1, 5000f);
+                k.FireAt(me, foe, k.Time);
+                StepN(k, 60);
+                lost = k.TryGetUnit(foe, out CombatUnitView v) ? 5000f - v.Health : 5000f;
+                return Subs(k);
+            }
+            long subs1 = ExpireRun(false, out float lost1), subs2 = ExpireRun(true, out float lost2);
+            Expect(subs1 >= 1 && subs2 == subs1 * 2 && lost1 > 0f && Near(lost2, lost1),
+                $"DEBT-EMG4FUZZ01-05 [复制, 子母弹]（命中终结）：不复制放出 {subs1} 份、被击单位失血 {lost1:0.0}；复制放出 {subs2} 份（应翻倍）、被击单位失血 {lost2:0.0}（应相同——重放的子母弹不撞被击单位）");
         }
 
         private static long RepeatRun(CombatCarrier car, int layers, int maxExec = 0)
@@ -908,6 +1062,34 @@ namespace GameLogic.EditorTools
         }
 
         // ── J. 空场景早退出、发现、模糊测试器缺口 ──
+
+        /// <summary>EMG4-CLEAN-01（FG-GAP-215）：条件门对本机恒不成立 / 整圈挥击上的侧偏，编译期写预览原因；会成立的不写（负向）。</summary>
+        private static void CheckNeverGates()
+        {
+            Line("  · P. FG-GAP-215：[若离地] 装在不离地底盘、[若已标记] 装在修复出口、[抖动] 装在整圈挥击上 → 预览写原因；离地底盘 / 有攻击出口 / 扇形挥击不写");
+            int Count(EmgProgramResult r, string key) => r.Notes.Count(n => n.Key == key);
+            EmgProgramResult air = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_ifair", "fw_split" }, FirmwareCarrier.Projectile);
+            EmgProgramResult air2 = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_ifair", "fw_split" }, FirmwareCarrier.Projectile);
+            EmgProgramCompiler.AddNeverNotes(air, "chassis_wheel", false);
+            EmgProgramCompiler.AddNeverNotes(air2, "chassis_hover", false);
+            EmgProgramResult heal = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { IfMark, "fw_split" }, FirmwareCarrier.Projectile, healOnly: true);
+            EmgProgramResult hit = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { IfMark, "fw_split" }, FirmwareCarrier.Projectile);
+            EmgProgramCompiler.AddNeverNotes(heal, "chassis_wheel", false);
+            EmgProgramCompiler.AddNeverNotes(hit, "chassis_wheel", false);
+            EmgProgramResult ring = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_jitter" }, FirmwareCarrier.Melee);
+            EmgProgramResult cone = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_jitter" }, FirmwareCarrier.Melee);
+            EmgProgramCompiler.AddNeverNotes(ring, "chassis_wheel", true);
+            EmgProgramCompiler.AddNeverNotes(cone, "chassis_wheel", false);
+            var rows = new List<EmgTreeRow>();
+            EmgProgramTreeText.BuildRows(air, rows);
+            string why = GameText.Get(EmgProgramCompiler.NoteGateNever);
+            Expect(!air.IsEmpty && Count(air, EmgProgramCompiler.NoteGateNever) == 1 && Count(air2, EmgProgramCompiler.NoteGateNever) == 0
+                   && Count(heal, EmgProgramCompiler.NoteGateNever) == 1 && Count(hit, EmgProgramCompiler.NoteGateNever) == 0
+                   && Count(ring, EmgProgramCompiler.NoteDriftFullCircle) == 1 && Count(cone, EmgProgramCompiler.NoteDriftFullCircle) == 0
+                   && why != EmgProgramCompiler.NoteGateNever && rows.Any(x => x.Text != null && x.Text.Contains("恒不成立")),
+                $"轮式 [若离地, 分裂] 原因 {Count(air, EmgProgramCompiler.NoteGateNever)} 条、悬浮 {Count(air2, EmgProgramCompiler.NoteGateNever)} 条；修复出口 [若已标记, 分裂] {Count(heal, EmgProgramCompiler.NoteGateNever)} 条、攻击出口 {Count(hit, EmgProgramCompiler.NoteGateNever)} 条；" +
+                $"整圈 [抖动] {Count(ring, EmgProgramCompiler.NoteDriftFullCircle)} 条、扇形 {Count(cone, EmgProgramCompiler.NoteDriftFullCircle)} 条；预览行写“{why}”");
+        }
 
         private static void CheckEmptyAndDiscovery()
         {

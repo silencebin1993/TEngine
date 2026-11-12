@@ -93,6 +93,9 @@ namespace GameLogic.EditorTools.JourneyBots
                     FgjM1Journey.TickEditorOpen, retries: 1),
                 S("cb_pick", "点 ERC-003 蓝图", 10, FgjM1Journey.ClickErc003Row, FgjM1Journey.TickErc003Open, retries: 1),
                 S("cb_wet", "固件槽 1 选冷却液", 10, c => FgjM2Common.PickFirmwareSlot0(c, FgjM2Common.FwWet), c => FgjM2Common.TickFirmwareSlot0(c, FgjM2Common.FwWet), retries: 1),
+                // EMG4-CLEAN-01 修复轮 3（硬规矩 (2)）：默认 ERC-003 第 2 位是拖尾——出手沿途排污泥（读 chs.moving，冲刺器跃击时一直在动），斑块合并长大后盖到出手者自己脚下，
+                // 物质不认敌我，叠满 6 dps 的毒，这条反向旅程的暂停 / 目标死亡 / 存读档期间两台一直站在里面被毒死（探针实测，证据修复轮 3）。本旅程测的是短路的反向情形，与拖尾无关：像玩家一样把第 2 位卸空；电弧版从这一版改出来，同样不带拖尾。
+                S("cb_slot2", "固件槽 2 选“（空）”（卸下拖尾）", 10, PickSlot1Empty, TickSlot1Empty, retries: 1),
                 S("cb_save", "点“保存”", 10, c => FgjM1Journey.ClickUi(c, FgjM2Common.CircuitHost, "SaveButton"), c => FgjM2Common.TickSavedWithFirmware(c, FgjM2Common.FwWet, "verWet"), retries: 1),
                 S("cb_close", "按 Esc 关闭蓝图编辑器", 10, c => FgjM1Journey.PressIf(GameActionId.Cancel, GameRoot.HomeValley.IsCircuitBoardPanelOpen), FgjM1Journey.TickEditorClosed, retries: 1),
                 S("fac_open", "左键点装配站", 10, c => FgjM1Journey.ClickBuildingIf(HomeValleyLayout.BuildingTypeAssemblyStation, !GameRoot.HomeValley.IsFactoryPanelOpen),
@@ -138,9 +141,11 @@ namespace GameLogic.EditorTools.JourneyBots
 
                 // ── 4. 目标死亡（训练靶被打空 → 命令结束 → 复位后再打）──
                 S("r4_dead", "训练靶被打空：两台的攻击命令结束，不自己去找别的目标", 120, null, TickDummyDestroyed),
+                S("r4_back0", "右键预备区地面：两台撤回预备区再等靶复位（不在靶旁干等：靶复位要十几秒，家园别的机器在自动交战距离里会接着打它）", 40, FgjM2Common.RightClickStaging, FgjM2Common.TickPulledBack, retries: 3),
                 S("r4_regen", "等训练靶满血复位", 60, null, TickDummyRegen),
                 S("r4_box", "再框选预备区的两台", 15, FgjM2Common.BoxSelectStaging, c => FgjM2Common.TickPairSelected(c, GameRoot.HomeValley.SquadCommands), retries: 4),
                 S("r4_again", "右键点训练靶：又打出短路，但不再慢放", 90, BeginAgain, TickConductAgainNoSlow, retries: 3),
+                S("r4_back", "右键预备区地面：两台撤回预备区再存档（读档后从预备区重新开打，与 r4_again 同一起点）", 40, FgjM2Common.RightClickStaging, FgjM2Common.TickPulledBack, retries: 3),
 
                 // ── 5. 存读档 ──
                 S("r5_esc", "按 Esc 打开暂停菜单", 10, c => FgjM1Journey.PressIf(GameActionId.Cancel, !PauseMenuUIToolkit.IsOpen), TickPauseForSave, retries: 1),
@@ -150,6 +155,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("r5_loaded", "读档进入家园：逐项一致、图鉴短路条目仍解锁", 120, null, TickLoaded),
                 S("r5_box", "框选预备区的两台", 15, FgjM2Common.BoxSelectStaging, c => FgjM2Common.TickPairSelected(c, GameRoot.HomeValley.SquadCommands), retries: 4),
                 S("r5_again", "右键点训练靶：读档后照常打出短路、不再慢放（首次记录读回来了）", 90, BeginAgain, TickConductAgainNoSlow, retries: 3),
+                S("r5_back", "右键预备区地面：两台撤回预备区再出征", 40, FgjM2Common.RightClickStaging, FgjM2Common.TickPulledBack, retries: 3),
 
                 // ── 6. 断网 / 失联（破碎都市干扰场）──
                 S("r6_speed", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
@@ -172,6 +178,29 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static JourneyStep S(string id, string title, double timeout, Action<JourneyContext> enter, Func<JourneyContext, StepOutcome> tick, int retries = 0) =>
             JourneyCommon.S(id, title, timeout, enter, tick, retries);
+
+        internal static void PickSlot1Empty(JourneyContext c)
+        {
+            UnityEngine.UIElements.DropdownField dd = JourneyInput.FindUitk<UnityEngine.UIElements.DropdownField>(FgjM2Common.CircuitHost, "Firmware1Dropdown");
+            string empty = dd?.choices?.FirstOrDefault(x => x == "（空）");
+            c.Set("slot2Choices", dd?.choices == null ? string.Empty : string.Join("／", dd.choices.Take(6)));
+            if (dd != null && empty != null && JourneyInput.IsClickable(dd))
+            {
+                dd.value = empty;
+            }
+        }
+
+        internal static StepOutcome TickSlot1Empty(JourneyContext c)
+        {
+            if (c.StepElapsed < 0.5)
+            {
+                return StepOutcome.Wait;
+            }
+            GameLogic.Campaign.Blueprint.BlueprintCircuitBoard b = FgjM1Journey.Panel()?.Board;
+            return b != null && string.IsNullOrEmpty(b.FirmwareSlots[1])
+                ? StepOutcome.Done($"固件槽 2 选“（空）”：只剩固件槽 1 的 {FgjM2Common.FwName(b.FirmwareSlots[0])}")
+                : StepOutcome.Retry($"固件槽 2 仍是 {b?.FirmwareSlots[1]}（下拉选项 {c.Get("slot2Choices")}）");
+        }
 
         // ── 3. 暂停 ──────────────────────────────────────────────────────────────────
 
@@ -314,7 +343,9 @@ namespace GameLogic.EditorTools.JourneyBots
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CombatTargetRecord t = Dummy;
-            return t != null && t.Health >= t.MaxHealth ? StepOutcome.Done($"训练靶满血复位（{t.Health:F0}）") : StepOutcome.Wait;
+            // EMG4-CLEAN-01 修复轮 2：靶复位那一下就回满血，但预备区旁的家园机器（M1 那台切割束，在训练靶自动交战距离里）可能同一步就又打它一下——
+            // 只认“复位了、能点了”（血 > 0），不赌轮询那一帧恰好停在满血（实测一次 60 秒都没看到满血）
+            return t != null && t.Health > 0f ? StepOutcome.Done($"训练靶复位（{t.Health:F0}/{t.MaxHealth:F0}）") : StepOutcome.Wait;
         }
 
         private static void BeginAgain(JourneyContext c)

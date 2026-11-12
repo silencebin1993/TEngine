@@ -592,9 +592,11 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail("第三波来之前家园一台机器都没有（应急打印没救回来？）");
             }
+            c.SetInt("rc.prints0", SoftlockService.StateOf(St)?.PrintCount ?? 0); // EMG4-CLEAN-01 修复轮 3：应急打印按打印记录判，不按通知类型名子串
+            c.SetInt("rc.notes0", PrintNotes()); // 修复轮 5：通知只认 rc_list 之后新增的，前几波的打印通知不算
             c.SetInt("victimA", alive[0].LogicId);
             c.SetInt("victimB", alive.Count > 1 ? alive[1].LogicId : 0);
-            return StepOutcome.Done($"家园机器 {string.Join("、", alive.Select(m => FgjM1Journey.Label(m.LogicId)))}");
+            return StepOutcome.Done($"家园机器 {string.Join("、", alive.Select(m => $"{FgjM1Journey.Label(m.LogicId)} 在 {(FgjM1Journey.HomeMarker(m.LogicId, out HomeValleyMachineMarker mk) ? mk.Position.ToString() : "无标记")}"))}");
         }
 
         private static StepOutcome OnGen(JourneyContext c, int i, Func<string, GridCell, StepOutcome> act)
@@ -1586,6 +1588,27 @@ namespace GameLogic.EditorTools.JourneyBots
             return StepOutcome.Done(d <= 3f ? $"{FgjM1Journey.Label(b)} 已经在抵达点附近（{d:F1} 米）" : $"{FgjM1Journey.Label(b)} 动身去抵达点 {ArrivalOf(c)}（从闸门出圈）");
         }
 
+        /// <summary>应急打印类通知的累计条数（同类聚合的按成员数算）。</summary>
+        private static int PrintNotes()
+        {
+            string t = NotificationCatalog.TypeForCue(GameLogic.Campaign.Feedback.FeedbackCueId.EmergencyPrint)?.Id;
+            return t == null ? 0 : NotificationCenter.History.Where(e => e.Type?.Id == t).Sum(e => e.Count);
+        }
+
+        /// <summary>下一个游戏日开始的游戏时间（秒）：DayOf 加 1 的那一刻。</summary>
+        private static double NextDayStart(double now)
+        {
+            int day = GameClock.DayOf(now);
+            // DayOf 的起始小时偏移不公开：在 (现在, 现在 + 一天] 里二分找 DayOf 变化的那一刻（到 0.1 秒）。
+            double lo = now, hi = now + GameClock.DaySeconds;
+            while (hi - lo > 0.1)
+            {
+                double mid = (lo + hi) * 0.5;
+                if (GameClock.DayOf(mid) > day) { hi = mid; } else { lo = mid; }
+            }
+            return hi;
+        }
+
         private static List<int> Victims(JourneyContext c) =>
             (c.Get("victims") ?? string.Empty).Split(',').Where(x => !string.IsNullOrEmpty(x)).Select(x => int.Parse(x, CultureInfo.InvariantCulture)).ToList();
 
@@ -1632,11 +1655,30 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             int max = victims.Count > 0 ? victims.Max() : 0;
-            MachineRecord printed = MachineRegistry.AllRecords.Where(x => x != null && x.IsAlive && x.RegionId == HomeValleyLayout.RegionId && x.LogicId > max).OrderByDescending(x => x.LogicId).FirstOrDefault();
-            bool note = NotificationCenter.History.Any(e => e.Type?.Id != null && e.Type.Id.Contains("emergency"));
-            if (printed == null || !note)
+            // EMG4-CLEAN-01 修复轮 3：①超时从“全灭那一刻”算（原来按整步耗时 380 秒算，打死机器本身就用掉 380 秒时，全灭那一拍打印还没轮到就判失败）；
+            // ②认打印记录（次数涨了、编号比受害机器大），不要求打印出来的机器此刻还活着（残余部队可能接着把它打死，打印照样发生过）；
+            // ③通知只认应急打印那一类（原来子串 "emergency" 会被核心应急产废料 core_emergency_scrap 误满足）。
+            SoftlockState sl = SoftlockService.StateOf(s);
+            MachineRecord printed = sl != null && sl.PrintCount > c.GetInt("rc.prints0") && sl.LastPrintLogicId > max
+                                    && MachineRegistry.TryGetRecord(sl.LastPrintLogicId, out MachineRecord pm) && pm.RegionId == HomeValleyLayout.RegionId ? pm : null;
+            // EMG4-CLEAN-01 修复轮 5：每个游戏日只应急打印一次（SoftlockService.CheckPrint）。前几波已经用掉今天的名额时，全灭后要到第二天才打印——
+            // 原来按“全灭后 120 真实秒”判，前几波死没死机器（战斗临界结果）决定这一步过不过。现在按游戏时间判：今天名额还在 → 全灭后 30 游戏秒内；
+            // 今天已用掉 → 第二天开始后 30 游戏秒内。与真实时间、快进、倍速都无关。
+            if (c.GetLong("rc.dueMs") == 0)
             {
-                return c.StepElapsed < 380 ? StepOutcome.Wait : StepOutcome.Fail($"家园机器全灭后没有应急打印（家园机器 {SoftlockService.CountHomeMachines()} 台，应急打印通知 {note}）");
+                double now = GameClock.GameSeconds;
+                double from = printed == null && SoftlockService.PrintedToday(s) ? NextDayStart(now) : now;
+                c.SetLong("rc.dueMs", (long)((from + 30.0) * 1000.0));
+                c.Set("rc.dueWhy", from > now ? $"今天的应急打印名额已用掉（第 {sl?.LastPrintDay} 天），等第 {GameClock.DayOf(from)} 天" : "今天的名额还在");
+                c.Log($"家园机器全灭（第 {GameClock.DayOf(now)} 天）：{c.Get("rc.dueWhy")}，应急打印最迟在游戏时间 {from + 30.0:F0} 秒（现在 {now:F0}）");
+            }
+            int notes = PrintNotes() - c.GetInt("rc.notes0");
+            if (printed == null || notes <= 0)
+            {
+                double late = GameClock.GameSeconds - c.GetLong("rc.dueMs") / 1000.0;
+                return late < 0 ? StepOutcome.Wait
+                    : StepOutcome.Fail($"家园机器全灭、到期 {late:F0} 游戏秒后还没有应急打印（{c.Get("rc.dueWhy")}；家园机器 {SoftlockService.CountHomeMachines()} 台，打印次数 {sl?.PrintCount} / 全灭前 {c.GetInt("rc.prints0")}，" +
+                                       $"今天已打印过 {SoftlockService.PrintedToday(s)}，rc_list 之后新增应急打印通知 {notes} 条）");
             }
             int boxes = victims.Count(id => BlackBoxService.Find(s, id) != null);
             return StepOutcome.Done($"{string.Join("、", victims.Select(FgjM1Journey.Label))} 都被突袭部队打死、家园机器全灭 → 应急打印出 {FgjM1Journey.Label(printed.LogicId)}（{printed.ChassisId}，应急打印通知）；黑匣子回收 {boxes}/{victims.Count}；第三波共 {(c.Get("rc.plans") ?? string.Empty).Split(',').Length} 波");

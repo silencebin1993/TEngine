@@ -173,7 +173,7 @@ namespace GameLogic.EditorTools
             EmgCompiled c = EmgCatalog.Current;
             string[] need = { Homing, Split, Pierce, Delay, Scatter, Ricochet, Wallslam, Corrode, LockCache, Oil, Acid, Swarm, Vent, WeakHoming, ArcChain, MarkTag, "fw_fork" };
             string[] missing = need.Where(o => !c.OwnerIndex.ContainsKey(o)).ToArray();
-            Expect(c.Problems.Count == 0 && c.EffectiveStage == 1 && missing.Length == 0,
+            Expect(c.Problems.Count == 0 && c.EffectiveStage == 4 && missing.Length == 0,
                 $"测试目录：真实表 + 6 条测试声明编译无问题（{c.Problems.Count} 条{(c.Problems.Count > 0 ? "：" + c.Problems[0] : string.Empty)}），生效阶段 {c.EffectiveStage}；用到的 {need.Length} 个 owner 都在声明轨{(missing.Length > 0 ? "，缺 " + string.Join("、", missing) : string.Empty)}");
         }
 
@@ -556,8 +556,8 @@ namespace GameLogic.EditorTools
             }
             UseStage0Catalog();
             EmgProgramResult stage0 = P(A(Homing), A(Split, Split));
-            Expect(EmgCatalog.EffectiveStage == 0 && stage0.IsEmpty && stage0.LegacyOwners.Count == 3,
-                $"emg.stage = 0（回滚对照；正式表阶段 1 出口起缺省 1）：全部 owner 走旧轨，程序为空（旧路径照旧，FGR-EMG-019）");
+            Expect(EmgCatalog.EffectiveStage == 4 && !stage0.IsEmpty && stage0.LegacyOwners.Count == 0,
+                $"负向（EMG4-CLEAN-01）：emg.stage 填 0 不再生效——生效阶段 {EmgCatalog.EffectiveStage}，程序照常编出、走旧轨 {stage0.LegacyOwners.Count} 个（旧路径已删）");
             UseStage1Catalog();
 
             BlueprintCircuitPreview pv = UplinkCompiler.CompileUplinked(GunBoard(true, Pierce, Oil), new[] { Split });
@@ -643,7 +643,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckSitePipeline()
         {
-            Line("  · J. 正式流程（家园）：机器按装配编程序并写回武器；接入（信号核 [分裂]）后程序 = 接入在前；接入中途换装配重编；断开回本地程序；真实存档读档后程序下标写回、去重不长表；emg.stage = 0 武器逐字不变");
+            Line("  · J. 正式流程（家园）：机器按装配编程序并写回武器；接入（信号核 [分裂]）后程序 = 接入在前；接入中途换装配重编；断开回本地程序；真实存档读档后程序下标写回、去重不长表；emg.stage 填 0 不再生效");
             CampaignState s = NewWorld(7102);
             CombatSite site = Home;
             SetBlueprint(s, GunBoard(true, Pierce, Oil), GunBoard(true, Oil, Pierce));
@@ -732,9 +732,9 @@ namespace GameLogic.EditorTools
             int lid = cs.MachineRecords.First(r => r.BlueprintId == Bp).LogicId;
             Home.RefreshMachineWeapon(cs, lid);
             BlueprintCircuitPreview p0 = MachineLoadoutRegistry.ResolveForPilot(cs, lid, cs.RandomSeed).Preview;
-            bool same = KernelWeapon(Home, lid, out CombatWeapon w0) && w0.Program == -1 && CombatKernel.WeaponKey(w0) == CombatKernel.WeaponKey(CombatSite.MachineWeaponFrom(p0));
+            bool same = KernelWeapon(Home, lid, out CombatWeapon w0) && w0.Program >= 0 && p0 != null;
             UseStage1Catalog();
-            Expect(same, "emg.stage = 0（回滚对照）：同一台机器重新结算后武器没有程序，参数与只走旧路径时逐字相同（旧旅程不变）");
+            Expect(same, "负向（EMG4-CLEAN-01）：emg.stage 填 0 后同一台机器重新结算，武器照常带程序（低值不再回旧轨）");
         }
 
         private static void SignalCoreTestEquip(CampaignState s, string firmwareId, int slot)

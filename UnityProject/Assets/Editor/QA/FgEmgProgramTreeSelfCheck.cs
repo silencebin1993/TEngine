@@ -77,7 +77,7 @@ namespace GameLogic.EditorTools
                 FirmwareCatalog.Invalidate();
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 FgEmgProgramSelfCheck.UseStage1Catalog();
-                Expect(EmgCatalog.EffectiveStage == 1, $"测试目录：真实表 + FG19A 测试声明，生效阶段 {EmgCatalog.EffectiveStage}");
+                Expect(EmgCatalog.EffectiveStage == 4, $"测试目录：真实表 + FG19A 测试声明，生效阶段 {EmgCatalog.EffectiveStage}（EMG4-CLEAN-01：只保留 4）");
                 Step(CheckFixedPrograms);
                 Step(CheckReasons);
                 Step(CheckPromoted);
@@ -242,8 +242,8 @@ namespace GameLogic.EditorTools
                 string[] missing = EmgProgramTreeText.ReasonKeys.Where(k => GameText.Get(k) == k || GameText.Get(EmgProgramTreeText.FixKey(k)) == EmgProgramTreeText.FixKey(k)
                                                                            || GameText.ContainsMarker(GameText.Get(k))).ToArray();
                 // EMG3-META-01：+3 个元程序原因键（执行次数超上限 / 没有下游段 / 累计延后超上限；出现与消失在 FgEmgMetaSelfCheck A 段断言）
-                Expect(EmgProgramTreeText.ReasonKeys.Length == 18 && missing.Length == 0, // EMG3-FUSE-01：+7 个接线原因键（修复第 1 轮 + anchor_noexec）
-                    $"[{lang}] 18 个原因键（8 个 + 元程序 3 个 + 接线 7 个）都有文本与解决办法{(missing.Length > 0 ? "，缺 " + string.Join("、", missing) : string.Empty)}（例：{GameText.Get(EmgProgramCompiler.NoteOverflow)} {GameText.Get(EmgProgramTreeText.FixKey(EmgProgramCompiler.NoteOverflow))}）");
+                Expect(EmgProgramTreeText.ReasonKeys.Length == 20 && missing.Length == 0, // EMG3-FUSE-01：+7 个接线原因键；EMG4-CLEAN-01：+2 个恒不成立原因键（FG-GAP-215，出现与否在 FgEmgMetaSelfCheck P 段断言）
+                    $"[{lang}] 20 个原因键（8 个 + 元程序 3 个 + 接线 7 个 + 恒不成立 2 个）都有文本与解决办法{(missing.Length > 0 ? "，缺 " + string.Join("、", missing) : string.Empty)}（例：{GameText.Get(EmgProgramCompiler.NoteOverflow)} {GameText.Get(EmgProgramTreeText.FixKey(EmgProgramCompiler.NoteOverflow))}）");
             }
             GameSettings.SetLanguage(GameLanguage.ZhCn);
 
@@ -368,8 +368,8 @@ namespace GameLogic.EditorTools
             FgEmgProgramSelfCheck.UseStage0Catalog(); // EMG1-E2E-01：正式表已是 1，旧读法对照显式注入 emg.stage = 0（回滚开关）
             List<EmgTreeRow> legacy = Rows(EmgProgramCompiler.Compile(BlueprintCircuitCompiler.CompilePreview(FgEmgProgramSelfCheck.GunBoard(false, Split))));
             FgEmgProgramSelfCheck.UseStage1Catalog();
-            Expect(legacy.Count == 2 && legacy[0].Kind == EmgTreeRowKind.Empty && legacy[1].Kind == EmgTreeRowKind.Legacy && legacy[1].Text.Contains(FirmwareKinds.DisplayName(Split)),
-                $"emg.stage = 0 装着分裂：{Flat(legacy)}");
+            Expect(legacy.All(x => x.Kind != EmgTreeRowKind.Legacy) && legacy.All(x => x.Kind != EmgTreeRowKind.Empty),
+                $"负向（EMG4-CLEAN-01）：emg.stage 填 0 装着分裂，预览照常是程序树、没有“仍按原读法结算”行：{Flat(legacy)}");
 
             BlueprintCircuitBoard off = FgEmgProgramSelfCheck.GunBoard(false, Pierce, Oil);
             int offSlot = Enumerable.Range(1, BlueprintCircuitLayout.SlotCount - 2).FirstOrDefault(i => BlueprintCircuitLayout.IsUplinkCandidate(i) && string.IsNullOrEmpty(off.SlotContentIds[i]) && !off.IsOnSourceSinkPath(i));

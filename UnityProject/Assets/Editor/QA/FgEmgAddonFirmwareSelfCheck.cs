@@ -281,15 +281,15 @@ namespace GameLogic.EditorTools
                 AddonObs both = RunAddonCondition("comp_gun", new[] { "fw_corrode", "fw_acid" }, AddonCond.Pierce, 3f);
                 AddonObs corrode = RunAddonCondition("comp_gun", new[] { "fw_corrode" }, AddonCond.Pierce, 3f);
                 AddonObs acid = RunAddonCondition("comp_gun", new[] { "fw_acid" }, AddonCond.Pierce, 3f);
-                Expect(acid.Zones.Count > dry.Zones.Count && both.Zones.Count >= acid.Zones.Count && corrode.Zones.Count == dry.Zones.Count,
-                    $"[腐蚀弹头, 酸液]（阶段 1）：终结排酸照常生效、同装不被吞（只装酸液 {acid.Zones.Count} 块、同装 {both.Zones.Count} 块）；腐蚀弹头走过渡读法不排酸（只装 {corrode.Zones.Count} 块 = 不装 {dry.Zones.Count} 块，命中排酸随阶段 2）");
+                Expect(acid.Zones.Count > dry.Zones.Count && both.Zones.Count >= acid.Zones.Count && corrode.Zones.Count > dry.Zones.Count,
+                    $"[腐蚀弹头, 酸液]（阶段 4，EMG4-CLEAN-01 删阶段 1 过渡口径）：终结排酸照常生效、同装不被吞（只装酸液 {acid.Zones.Count} 块、同装 {both.Zones.Count} 块）；腐蚀弹头命中排酸（只装 {corrode.Zones.Count} 块 > 不装 {dry.Zones.Count} 块）");
                 // emg.stage = 0：声明不生效、程序为空、没有旧读法 → 与不装逐字相同（也拿不到，见 C 段）
                 UseStage(0);
                 AddonObs off = RunAddonCondition("comp_gun", new[] { "fw_coolback" }, AddonCond.Heat, 14f);
                 AddonObs offCtl = RunAddonCondition("comp_gun", Array.Empty<string>(), AddonCond.Heat, 14f);
                 EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_coolback" }, FirmwareCarrier.Projectile);
-                Expect(pr.IsEmpty && pr.LegacyOwners.Contains("fw_coolback") && off.Zones.Count == offCtl.Zones.Count && off.Splits == 0,
-                    $"emg.stage = 0：冷却回流不进程序（走旧轨且没有旧读法）、不落区（{off.Zones.Count} = 不装 {offCtl.Zones.Count}）");
+                Expect(EmgCatalog.EffectiveStage == 4 && !pr.IsEmpty && pr.LegacyOwners.Count == 0 && off.Zones.Count > offCtl.Zones.Count,
+                    $"负向：emg.stage 填 0 不再生效——冷却回流照常进程序、冷却完成照常落冷却液（{off.Zones.Count} 块 > 不装 {offCtl.Zones.Count} 块）");
             }
             finally
             {
@@ -339,6 +339,7 @@ namespace GameLogic.EditorTools
                 foreach (int stage in new[] { 0, 1 })
                 {
                     UseStage(stage);
+                    int eff = EmgCatalog.EffectiveStage; // EMG4-CLEAN-01：emg.stage 只保留 4，填低值不再关闭来源（负向）
                     var open = new List<string>();
                     var leaked = new List<string>();
                     foreach ((string id, int gate) in Spec)
@@ -349,7 +350,7 @@ namespace GameLogic.EditorTools
                         bool inPick = pool.Any(p => p.Target == id);
                         bool inRestore = FirmwareRestoreService.Candidates(s).Contains(id);
                         bool obtainable = FirmwareKinds.IsObtainable(id) && FirmwareKinds.HasMachineImplementation(id);
-                        bool want = gate <= stage;
+                        bool want = gate <= eff;
                         if (inDrop && inPick && inRestore && obtainable)
                         {
                             open.Add(id);
@@ -361,18 +362,18 @@ namespace GameLogic.EditorTools
                     }
                     int baseSalvage = FirmwareKinds.BaseRows.Count(r => r.Protocol == "enemy" && r.Source == "salvage");
                     int dropBase = new[] { "silent", "foundry", "clarity", "overclock" }.Sum(f => LootCatalog.EnemyFirmwareOf(f).Count(x => !FirmwareCatalog.IsAddon(x)));
-                    Expect(leaked.Count == 0 && open.Count == Spec.Count(x => x.Gate <= stage) && dropBase == baseSalvage,
-                        $"emg.stage = {stage}：开放 {open.Count} 条（{string.Join("、", open)}）；名表杂兵残骸固件仍全部可掉（{dropBase}/{baseSalvage}）{Detail(leaked)}");
+                    Expect(leaked.Count == 0 && open.Count == Spec.Count(x => x.Gate <= eff) && eff == 4 && dropBase == baseSalvage,
+                        $"emg.stage 填 {stage}（不再生效，生效 {eff}）：开放 {open.Count} 条（{string.Join("、", open)}）；名表杂兵残骸固件仍全部可掉（{dropBase}/{baseSalvage}）{Detail(leaked)}");
                     // 图鉴：拿不到的新固件不提示获取途径、不计入固件页签总数
                     MechanicCodexEntry closed = MechanicCodex.Entries.FirstOrDefault(e => e.Kind == MechanicCodexKind.Firmware && e.ContentId == "fw_enterfuse");
                     MechanicCodexEntry scuttle = MechanicCodex.Entries.FirstOrDefault(e => e.Kind == MechanicCodexKind.Firmware && e.ContentId == "fw_scuttle");
                     int fwTotal = MechanicCodex.CountIn(MechanicCodex.TabFirmware);
                     int fwWant = MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware && (e.Kind != MechanicCodexKind.Firmware || FirmwareKinds.IsObtainable(e.ContentId)));
                     string notOpen = GameText.Get("codex.firmware.not_open");
-                    Expect(closed != null && scuttle != null && MechanicCodex.Hint(closed, s) == notOpen && (MechanicCodex.Hint(scuttle, s) == notOpen) == (stage < 1)
-                           && fwTotal == fwWant && fwTotal == MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware) - Spec.Count(x => x.Gate > stage)
+                    Expect(closed != null && scuttle != null && (MechanicCodex.Hint(closed, s) == notOpen) == (eff < 2) && (MechanicCodex.Hint(scuttle, s) == notOpen) == (eff < 1)
+                           && fwTotal == fwWant && fwTotal == MechanicCodex.Entries.Count(e => e.Tab == MechanicCodex.TabFirmware) - Spec.Count(x => x.Gate > eff)
                               - FirmwareKinds.AddonRows.Skip(Spec.Length).Count(r => !FirmwareKinds.IsObtainable(r.Id)), // EMG3-FW-02：阶段 3 的 12 条在阶段 0 / 1 同样不计
-                        $"emg.stage = {stage}：图鉴里入场引信提示“{MechanicCodex.Hint(closed, s)}”、自毁装药提示“{MechanicCodex.Hint(scuttle, s)}”；固件页签总数 {fwTotal}（拿不到的 {Spec.Count(x => x.Gate > stage)} 条不计；"
+                        $"emg.stage 填 {stage}（生效 {eff}）：图鉴里入场引信提示“{MechanicCodex.Hint(closed, s)}”、自毁装药提示“{MechanicCodex.Hint(scuttle, s)}”；固件页签总数 {fwTotal}（拿不到的 {Spec.Count(x => x.Gate > eff)} 条不计；"
                         + $"新固件计入 {string.Join("、", Spec.Where(x => MechanicCodex.Entries.Any(e => e.Kind == MechanicCodexKind.Firmware && e.ContentId == x.Id && MechanicCodex.IsUnlocked(e.Id))).Select(x => x.Id + "（已解锁）"))}）");
                 }
                 // 三选一候选行在表里排在全部既有行之后（既有行 ID / 顺序不动）；EMG4-LOOT-01 的阵营标志组件行（sortOrder ≥ 2000，fgdata_lootpick.FLAG_PICKS）

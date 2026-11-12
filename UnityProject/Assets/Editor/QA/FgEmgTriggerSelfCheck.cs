@@ -81,6 +81,7 @@ namespace GameLogic.EditorTools
                 Step(CheckObstacles);
                 Step(CheckSplitOil);
                 Step(CheckRepair);
+                Step(CheckRootMark); // EMG4-CLEAN-01：FG-GAP-214
                 Step(CheckSaveLoad);
                 Step(CheckHotfix);
                 Step(CheckPerformance);
@@ -172,6 +173,29 @@ namespace GameLogic.EditorTools
             return k.AddProgram(new EmgProgram { ListenMask = mask }, nodes, instrs);
         }
 
+        /// <summary>EMG4-CLEAN-01（FG-GAP-214）：第一层的 [锁定缓存]（命中时标记 4 秒）/ [扩散]（出手时标记 2 秒）命中后目标被标记、发 evt.marked；没装的对照不标记。</summary>
+        private static void CheckRootMark()
+        {
+            Line("  · M. FG-GAP-214：程序第一层的 evt.marked 写端（命中 / 出手门控）在命中结算处执行——目标被标记、发 evt.marked；对照不装不标记");
+            (bool marked, double until, long events) Run(string fw)
+            {
+                EmgProgramResult r = fw == null ? null : EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { fw }, FirmwareCarrier.Projectile);
+                using var k = new CombatKernel(Cfg(), 16);
+                int p = r == null || r.IsEmpty ? -1 : k.AddProgram(r.Program, r.KernelNodes, r.KernelInstrs);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(Instant(p)));
+                int a = Foe(k, new double2(0, 4), 500f);
+                k.FireAt(me, a, k.Time);
+                StepN(k, 2);
+                k.TryGetUnit(a, out CombatUnitView v);
+                return (v.MarkedUntil > k.Time, v.MarkedUntil - k.Time, k.EmgEnqueuedOf(EmgEventKind.Marked));
+            }
+            var lc = Run("fw_lockcache");
+            var wide = Run("fw_wide");
+            var none = Run(null);
+            Expect(lc.marked && lc.until > 3.5 && lc.events >= 1 && wide.marked && wide.until > 1.5 && wide.until <= 2.01 && !none.marked && none.events == 0,
+                $"第一层 [锁定缓存] 命中后目标标记剩 {lc.until:0.00} 秒、evt.marked {lc.events} 次；[扩散] 剩 {wide.until:0.00} 秒（程序里没有读 evt.marked 的指令，总线按需不入队：{wide.events} 次）；不装：标记 {none.marked}、{none.events} 次");
+        }
+
         private static CombatConfig Cfg()
         {
             CombatConfig c = CombatConfig.Default;
@@ -236,6 +260,17 @@ namespace GameLogic.EditorTools
         }
 
         private static List<CombatProjectile> Subs(CombatKernel k) => Projectiles(k, EmgProjFlags.Sub);
+
+        /// <summary>EMG4-CLEAN-01：油斑块数（正式地点登记了物质表，排放落斑块）。</summary>
+        private static int OilPatches(CombatKernel k)
+        {
+            int n = 0;
+            for (int i = 0; i < k.PatchSlots; i++)
+            {
+                n += k.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Oil ? 1 : 0;
+            }
+            return n;
+        }
 
         private static List<CombatZone> Zones(CombatKernel k)
         {
@@ -924,7 +959,7 @@ namespace GameLogic.EditorTools
                 EmgProgramResult r = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_split", "fw_oilleak" }, FirmwareCarrier.Projectile);
                 int emit = EmgCatalog.VerbCode("emit");
                 uint oilBit = NamedReactionCatalog.BitOf("Oil");
-                bool shape = c.EffectiveStage == 1 && r.KernelNodes.Count == 2 && r.KernelNodes[1].TrigEvent == EmgEventKind.Hit && r.KernelNodes[1].TrigCount >= 1
+                bool shape = c.EffectiveStage == 4 && r.KernelNodes.Count == 2 && r.KernelNodes[1].TrigEvent == EmgEventKind.Hit && r.KernelNodes[1].TrigCount >= 1
                              && (r.Program.Flags & EmgProgramFlags.NeedsFlight) == 0
                              && r.KernelInstrs.Skip(r.KernelNodes[1].FirstInstr).Take(r.KernelNodes[1].InstrCount).Any(x => x.Verb == emit && Near(x.A, 1.5f) && Near(x.B, 6f));
                 int n = Math.Min((int)r.KernelNodes[1].TrigCount, 4);
@@ -1339,7 +1374,7 @@ namespace GameLogic.EditorTools
                     }
                     GameClock.SetSpeed(1f);
                     hashes.Add(k.StateHash());
-                    oils.Add(Zones(k).Count(z => z.StatusMask == NamedReactionCatalog.BitOf("Oil")));
+                    oils.Add(Zones(k).Count(z => z.StatusMask == NamedReactionCatalog.BitOf("Oil")) + OilPatches(k)); // EMG4-CLEAN-01：阶段 4 物质层恒开，正式地点的漏油落成油斑块
                     hooks.Add(touched.Contains(GuidanceHooks.EmgFirstTrigger));
                     info = $"内核武器程序 {w.Program}、开火 {fr}";
                     if (speed == 3f)

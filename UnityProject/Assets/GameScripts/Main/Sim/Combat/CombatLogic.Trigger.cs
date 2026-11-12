@@ -409,10 +409,12 @@ namespace BinGames.Sim.Combat
                 if (x.Verb == (byte)EmgVerb.Field)
                 {
                     // EMG2-FLD-01：事件门控的场写端在事件位置展开（单位级事件 = 本单位处；接入冲击 = 接入时以本机为心；被击 = 按宿主载体展开，见 EmgGatedField）
-                    EmgGatedField(ref d, x, e, host);
-                    int fo = e.OtherKind == EmgEntKind.Unit && e.Other != 0 ? d.SlotOf(e.Other) : -1;
-                    EmgAnchorAt(ref d, EmgAnchorConst.Field, host, e.Pos, fo, x.Ordinal); // EMG3-FUSE-01
-                    EmgFieldAnchors(ref d, host, x, e.Pos, fo); // EMG4-FUSE-02：场内受力 / 被扫过的单位
+                    if (EmgGatedField(ref d, x, e, host, out double2 fat, out float fr)) // EMG4-CLEAN-01（DEBT-EMG4FUSE02-03）：场没生成（冷却 / 场位满）不挂落点、不执行 B
+                    {
+                        int fo = e.OtherKind == EmgEntKind.Unit && e.Other != 0 ? d.SlotOf(e.Other) : -1;
+                        EmgAnchorAt(ref d, EmgAnchorConst.Field, host, e.Pos, fo, x.Ordinal); // EMG3-FUSE-01
+                        EmgFieldAnchors(ref d, host, x, fat, fo, fr); // EMG4-FUSE-02：场内受力 / 被扫过的单位（按场实际中心 / 半径）
+                    }
                     continue;
                 }
                 float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
@@ -1384,6 +1386,11 @@ namespace BinGames.Sim.Combat
                 return;
             }
             CombatWeapon wp = d.Weapons[pr.Weapon];
+            if (pr.Prog >= 0 && pr.Node == 0)
+            {
+                // EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：根节点条件 / 随机下游的读法行按命中这一刻的放行位补到读法副本上（与无人机命中 / 当场结算同口径）
+                EmgGatedReading(ref d, pr.Prog, EmgCondAllow(ref d, pr.Prog, 0, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), ref wp.Reading);
+            }
             bool viaDrone = (pr.Flags & EmgProjFlags.ViaDrone) != 0;
             if (viaDrone)
             {
@@ -1398,11 +1405,6 @@ namespace BinGames.Sim.Combat
             if (!DamageUnit(ref d, hit, dealt, owner))
             {
                 return;
-            }
-            // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁不在静态读法里，命中这一刻按条件重判后执行
-            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), owner, out EmgMods condChain))
-            {
-                EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, dealt, condChain, true, r);
             }
             if (owner < 0)
             {
@@ -1425,7 +1427,11 @@ namespace BinGames.Sim.Combat
             {
                 d.MarkedUntil[hit] = now + wp.MarkSeconds;
                 EmgShotEvent(ref d, EmgEventKind.Marked, d.Id[hit], wp.MarkSeconds, 0f, 0, d.Pos[hit]);
-                EmgAnchorAt(ref d, EmgAnchorConst.Marked, d.EmgCtx, d.Pos[hit], hit); // EMG4-FUSE-02
+                if (EmgRootWriterMask(ref d, d.EmgCtx.Prog, EmgRuleConst.PortMarked) == 0UL)
+                {
+                    // EMG4-CLEAN-01（DEBT-EMG4FUSE02-06）：这是功能组件的标记；根节点有写 evt.marked 的固件时，那条固件的标记在命中处按自己的序号落点（EmgRootMarkWrite），组件标记不再连带执行它的 B
+                    EmgAnchorAt(ref d, EmgAnchorConst.Marked, d.EmgCtx, d.Pos[hit], hit); // EMG4-FUSE-02
+                }
             }
             Anchored(ref d, owner, hit, hitPos, dealt, wp.Damage, wp, wasMarked, d.Pos[owner], false);
         }
@@ -1746,9 +1752,9 @@ namespace BinGames.Sim.Combat
         /// 不经事件总线入队、继承宿主的链、不加链深（FGR-EMG-061 / 064）；每次结算（链 + 节点 + 步）的落点数到 CombatConfig.EmgAnchorMax 就停（计数在不进快照的标量里）；
         /// Anchored 行本身不再挂接线（AnchorBusy，不递归）。B 的条件读端照常（底盘条件 EmgChsBlocked）。O(尾段行数 × 节点行数)，只在带接线的程序上。
         /// <paramref name="src"/> = 产生这个落点的那一行的程序序号：只执行 B = src + 2 的复制行（[A, 接线, B] 的序号相邻），B 自己或第三条同族写端产生的点不算 A 的落点；
-        /// −1 = 落点由节点修饰（连锁 / 反弹 / 穿透）产生，不按序号筛。
+        /// −1 = 落点由节点修饰（连锁 / 反弹 / 穿透）产生，不按序号筛。<paramref name="srcMask"/> ≠ 0（读法合并的效果，EmgRootWriterMask）：B 的序号 − 2 落在这些位上的复制行才执行。
         /// </summary>
-        internal static void EmgAnchorAt(ref CombatData d, byte kind, in EmgCtx host, double2 pos, int target, int src = -1)
+        internal static void EmgAnchorAt(ref CombatData d, byte kind, in EmgCtx host, double2 pos, int target, int src = -1, ulong srcMask = 0UL)
         {
             if (!EmgProgAnchored(ref d, host.Prog))
             {
@@ -1775,7 +1781,11 @@ namespace BinGames.Sim.Combat
             for (int i = tail; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
-                if (x.AnchorKind != kind || (x.Flags & EmgInstrFlags.Anchored) == 0 || (src >= 0 && x.Ordinal != src + 2) || !EmgOrdinalIn(ref d, n.FirstInstr, nEnd, x.Ordinal)
+                if (x.AnchorKind != kind || (x.Flags & EmgInstrFlags.Anchored) == 0 || (src >= 0 && x.Ordinal != src + 2)
+                    || (srcMask != 0UL && (x.Ordinal < 2 || ((srcMask & EmgOrdBit(x.Ordinal - 2)) == 0UL
+                        // 修复轮 2：同一条固件装两次时同端口写端被编译器并成一行（序号取小的那条），线接在第二条后面——A 在本节点只剩读端行、没有自己的写端行，按落点种类认它（种类本身来自 A 的写端口）
+                        && EmgOrdinalWrites(ref d, n.FirstInstr, nEnd, x.Ordinal - 2))))
+                    || !EmgOrdinalIn(ref d, n.FirstInstr, nEnd, x.Ordinal)
                     || EmgChsBlocked(ref d, host.Owner, n.FirstInstr, nEnd, x.Ordinal))
                 {
                     continue;

@@ -28,6 +28,8 @@ namespace GameLogic.Campaign.Emergence
 
         /// <summary>程序序号（0 起，= 在指令序列里的位置）。</summary>
         public int Ordinal;
+        /// <summary>EMG4-CLEAN-01（FG-GAP-208）：逆序树的步骤对应正序树里的哪一条（正序序号）；正序树自己为 −1。</summary>
+        public int Src = -1;
         /// <summary>插在槽里的固件（混合固件是混合固件本身）。</summary>
         public string FirmwareId;
         /// <summary>声明的 owner（混合固件展开后是父固件）。</summary>
@@ -179,6 +181,11 @@ namespace GameLogic.Campaign.Emergence
         public readonly List<EmgMetaInfo> Metas = new List<EmgMetaInfo>(2);
         /// <summary>EMG3-META-01（FGR-EMG-040 反转）：程序里有反转时的逆序树（同一套步骤按反转后的顺序编译，序号 = 逆序后的位置）；没有 = null。</summary>
         public EmgProgramResult Reverse;
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：根节点上位于条件 / 随机下游（正序或逆序树任一棵）的固件读法贡献——不折进静态读法，
+        /// 由 CombatSite.ProgramReading 记成 <see cref="EmgInstrFlags.LegacyRoot"/> 行（序号 = 正序序号），登记程序时接在尾段（逆序树按 <see cref="EmgProgramStep.Src"/> 换成逆序序号）。没有为 null。
+        /// </summary>
+        public List<EmgInstr> LegacyOps;
     }
 
     /// <summary>
@@ -259,8 +266,64 @@ namespace GameLogic.Campaign.Emergence
             }
             EmgProgramResult res = Compile(p.UplinkFirmwareIds, p.LocalFirmwareIds, carrier, 0, lob, skipUplink, healOnly, baseGen, p.PrimaryId);
             // EMG3-SQD-01：结构模块声明 sqd.relay scope（按声明判，不认模块 ID）；与 CombatSite.ApplyRelay 同一判定
-            res.Relay = EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(p.StructureId) && EmgCatalog.PartReads("sqd.relay", EmgRole.Scope, new[] { p.StructureId });
+            res.Relay = !string.IsNullOrEmpty(p.StructureId) && EmgCatalog.PartReads("sqd.relay", EmgRole.Scope, new[] { p.StructureId });
+            AddNeverNotes(res, p.ChassisId, carrier == FirmwareCarrier.Melee && comp != null && comp.Cone >= 179.9f);
             return res;
+        }
+
+        /// <summary>EMG4-CLEAN-01（FG-GAP-215）：条件门对这台机器恒不成立（读 chs.airborne、底盘不会离地；读 evt.marked、修复出口目标是友军）。</summary>
+        public const string NoteGateNever = "emg.compile.gate_never";
+        /// <summary>EMG4-CLEAN-01（FG-GAP-215）：只写侧偏（grm.mod.drift）的指令装在挥击已是整圈的格斗主组件上。</summary>
+        public const string NoteDriftFullCircle = "emg.compile.drift_fullcircle";
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-215，与 emg.compile.carrier_na 同一口径）：按底盘特性 / 修复出口 / 挥击扇形给“本机恒不成立”的指令写预览原因（指令照常编译、占位、计热）。
+        /// 按端口判，不认内容 ID（FGR-EMG-013）。O(指令数)，只在装配结算 / 预览时。
+        /// shortcut: 整圈只看主组件表的 cone（固件再加的扇角不计），以后有固件能把扇形加到整圈时改读折完的读法。
+        /// </summary>
+        public static void AddNeverNotes(EmgProgramResult r, string chassisId, bool fullCircle)
+        {
+            if (r == null || r.IsEmpty)
+            {
+                return;
+            }
+            EmgCompiled c = EmgCatalog.Current;
+            ushort Code(string id) => c.PortIndexById.TryGetValue(id, out int i) ? c.Ports[i].Code : (ushort)0;
+            ushort metaIf = Code("meta.if"), air = Code("chs.airborne"), marked = Code("evt.marked"), drift = Code("grm.mod.drift");
+            bool canAir = EmgCatalog.TryGetTrait(chassisId, out EmgTraitRow t) && !t.Reserved
+                          && BinGames.Sim.Combat.EmgTraitConst.IsAirborneKind((byte)t.Kind);
+            var gates = new HashSet<int>();
+            var driftOnly = new Dictionary<int, bool>();
+            foreach (EmgInstr x in r.KernelInstrs)
+            {
+                if (x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                {
+                    if (x.Port == metaIf && metaIf != 0)
+                    {
+                        gates.Add(x.Ordinal);
+                    }
+                    driftOnly[x.Ordinal] = (!driftOnly.TryGetValue(x.Ordinal, out bool d) || d) && x.Port == drift && drift != 0;
+                }
+            }
+            var noted = new HashSet<int>();
+            foreach (EmgInstr x in r.KernelInstrs)
+            {
+                if (gates.Contains(x.Ordinal) && x.Role >= EmgConst.RoleTrigger && x.Role <= EmgConst.RoleLastRead
+                    && ((x.Port == air && air != 0 && !canAir) || (x.Port == marked && marked != 0 && r.HealOnly)) && noted.Add(x.Ordinal))
+                {
+                    r.Notes.Add(new EmgCompileNote { Key = NoteGateNever, Ordinal = x.Ordinal, Node = -1 });
+                }
+            }
+            if (fullCircle)
+            {
+                foreach (KeyValuePair<int, bool> kv in driftOnly)
+                {
+                    if (kv.Value)
+                    {
+                        r.Notes.Add(new EmgCompileNote { Key = NoteDriftFullCircle, Ordinal = kv.Key, Node = -1 });
+                    }
+                }
+            }
         }
 
         // ── EMG1-FLASH-01（FG19 FGR-EMG-036 / 037；ADR ③）：刷写变体——无人机 / 哨戒桩只持有程序的前 k 条（带宽截断、距离暂停）或剥离核心后的前 k 条 ──
@@ -524,13 +587,13 @@ namespace GameLogic.Campaign.Emergence
             {
                 // EMG2-PHS-01：阶段 ≥ 2 注热由内核落点结算进结构积热累积量（命中注能要物质层，EMG2-RULE-01 接通），过渡字段 heatburst 退役（DEBT-EMG1FW01-03）；
                 // emg.stage = 1 的回滚对照里内核不注能，仍保留 heatburst（不让过载在阶段 1 变成死指令）
-                "en.heat" => KernelInjectLive ? Array.Empty<string>() : new[] { "heatburst" },
+                "en.heat" => Array.Empty<string>(), // EMG4-CLEAN-01：emg.stage 只保留 4，阶段 1 回滚对照的 heatburst 过渡删掉
                 "en.kinetic" => new[] { "echo" },
                 "ent.drone" => new[] { "inherit" },
                 "ent.projectile" => new[] { "feedback" },
                 "prop.integrity" or "phs.corrode" => new[] { "explode" },
                 // EMG2-RECL-01：阶段 ≥ 2 桥接由内核拉真导线（CombatLogic.EmgLink），旧减速网过渡字段退役；emg.stage = 1 的回滚对照仍用减速网
-                "prop.conductive" => KernelInjectLive ? Array.Empty<string>() : new[] { "weave" },
+                "prop.conductive" => Array.Empty<string>(), // EMG4-CLEAN-01：阶段 1 回滚对照的减速网过渡删掉
                 _ => Array.Empty<string>(),
             };
         }
@@ -542,7 +605,7 @@ namespace GameLogic.Campaign.Emergence
         /// 同一写端原先在本机出手上挂的旧标签退役。按端口给，不按固件 ID（FGR-EMG-013）。
         /// 电击 Shock 随 EMG2-REACT-02 退役（短路 / 电解 / 绝缘都读注入量，不读标签）。
         /// </summary>
-        public static string[] RetiredTags(string port) => !KernelInjectLive ? Array.Empty<string>() : port switch
+        public static string[] RetiredTags(string port) => port switch
         {
             "en.heat" => new[] { "Fire" },
             "en.elec" => new[] { "Charged", "Shock" }, // EMG2-REACT-02：电击 = 一次 en.elec 注入（FG19B §3.1 位 4、§12 #3）
@@ -550,8 +613,6 @@ namespace GameLogic.Campaign.Emergence
             _ => Array.Empty<string>(),
         };
 
-        /// <summary>内核命中注能（EmgHitInject）此刻有执行者：生效阶段 ≥ 2（物质层开着，CombatSite.ConfigFromTuning 同一判断）。阶段 1 回滚对照里注入类仍走过渡字段与旧标签。</summary>
-        public static bool KernelInjectLive => EmgCatalog.EffectiveStage >= 2;
 
         /// <summary><see cref="LegacySkip"/> 的逐标签伪字段：(固件, TagField(tag)) → true 时这个旧标签不进读法（CarrierReadings.Build 同名约定）。</summary>
         public static string TagField(string tag) => TagsField + ":" + tag;
@@ -664,7 +725,7 @@ namespace GameLogic.Campaign.Emergence
                     }
                     // EMG2-REACT-02（DEBT-EMG1FW01-03 余部）：子节点上的效果写端全部由内核在落点结算（CombatLogic.EmgChildHitWrite / EmgChildWrites / 排放），本机出手上不再留过渡字段与旧标签（FGR-EMG-019 单轨）；
                     // emg.stage = 1 的回滚对照里内核不注能，仍按旧过渡口径
-                    if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && (n.Parent < 0 || (!KernelInjectLive && fam != EmgFamily.Matter)))
+                    if (fam != EmgFamily.Grammar && fam != EmgFamily.Meta && n.Parent < 0)
                     {
                         // EMG1-FIX-01：根节点上由内核直接执行的写端（RootKernel，如追射 ent.projectile）不再保留旧读法过渡字段（否则旧回波与真补射两轨同时结算，FGR-EMG-019）
                         bool kernelRoot = (n.Parent < 0 && (x.Flags & EmgInstrFlags.RootKernel) != 0) || beatOrds.Contains(x.Ordinal);
@@ -685,7 +746,8 @@ namespace GameLogic.Campaign.Emergence
             {
                 if (fw == null || !onDecl.Contains(fw))
                 {
-                    return false;
+                    // EMG4-CLEAN-01（FGR-EMG-019：stageGate = 4 之外没有旧轨）：没进程序的固件（冷却中的核心固件等）不按读法字段结算；旧标签照旧
+                    return fw != null && !field.StartsWith(TagsField, StringComparison.Ordinal);
                 }
                 if (field.StartsWith(tagPrefix, StringComparison.Ordinal))
                 {
@@ -693,36 +755,6 @@ namespace GameLogic.Campaign.Emergence
                 }
                 return !(keep.TryGetValue(fw, out HashSet<string> k) && k.Contains(field));
             };
-        }
-
-        /// <summary>
-        /// EMG2-PHS-01 审查修复（第 2 轮，FGR-EMG-019 单轨）：只跳过能量注入写端退役的那部分旧读法——<see cref="RetiredTags"/> 的逐标签伪字段与过渡字段 heatburst，
-        /// 其余字段不动。给沿用 FGR-FW-012 兼容读法的炮塔弹体武器用（弹体带程序下标，命中同样经 EmgHitInject 注能）。阶段 1 / 空程序 → null（不跳）。
-        /// EMG2-RECL-01：由内核执行回收修复 / 桥接 / 蔓延的固件（根节点经 EmgRootGated、子节点经 EmgChildWrites，弹体同样如此），旧字段全部跳过（return / weave / linger / scale），同样只走一轨。
-        /// </summary>
-        public static Func<string, string, bool> InjectSkip(EmgProgramResult r)
-        {
-            Func<string, string, bool> legacy = KernelInjectLive ? LegacySkip(r) : null;
-            if (legacy == null)
-            {
-                return null;
-            }
-            var kernelOwners = new HashSet<string>(StringComparer.Ordinal);
-            foreach (EmgNode n in r.KernelNodes)
-            {
-                for (int i = n.FirstInstr; i < n.FirstInstr + n.InstrCount && i < r.KernelInstrs.Count; i++)
-                {
-                    EmgInstr x = r.KernelInstrs[i];
-                    // 与内核执行条件同口径：根节点看 RootKernel（EmgRootGated），子节点不打这个标记、只看写端未溢出（EmgChildWrites）
-                    bool runs = n.Parent < 0 ? (x.Flags & EmgInstrFlags.RootKernel) != 0 : (x.Flags & EmgInstrFlags.Overflow) == 0 && x.Role > EmgConst.RoleLastRead;
-                    if (runs && x.Ordinal < r.Steps.Count && (x.Verb == (byte)EmgVerb.Salvage || x.Verb == (byte)EmgVerb.Link || x.Verb == (byte)EmgVerb.Spread))
-                    {
-                        kernelOwners.Add(r.Steps[x.Ordinal].FirmwareId);
-                    }
-                }
-            }
-            string tagPrefix = TagsField + ":";
-            return (fw, field) => ((fw != null && kernelOwners.Contains(fw)) || field.StartsWith(tagPrefix, StringComparison.Ordinal) || field == "heatburst") && legacy(fw, field);
         }
 
         /// <summary>根节点上写某个只改数字端口（<paramref name="port"/>）且已编译的固件（同一条装两次只算一次）：数值折叠只汇总这些固件的旧字段。</summary>
@@ -1230,7 +1262,7 @@ namespace GameLogic.Campaign.Emergence
                 EmgProgramStep s = order[i];
                 var x = new EmgProgramStep
                 {
-                    Ordinal = i, FirmwareId = s.FirmwareId, OwnerId = s.OwnerId, FromUplink = s.FromUplink, Core = s.Core, Promoted = s.Promoted, Kind = s.Kind,
+                    Ordinal = i, Src = s.Ordinal, FirmwareId = s.FirmwareId, OwnerId = s.OwnerId, FromUplink = s.FromUplink, Core = s.Core, Promoted = s.Promoted, Kind = s.Kind,
                     TrigEvent = s.TrigEvent, TrigParam = s.TrigParam, TrigCount = s.TrigCount, EventPort = s.EventPort, TableHeat = s.TableHeat, Flip = i > firstRev,
                     Builtin = s.Builtin, Innate = s.Innate, AnchorKind = s.AnchorKind, // EMG3-FUSE-01：逆序树里接线照常按新序列的前后两条判
                 };
@@ -1858,7 +1890,7 @@ namespace GameLogic.Campaign.Emergence
             var baseR = new CombatReading { DamageScale = 1f, CooldownScale = 1f };
             CombatReading rd = baseR;
             bool any = false;
-            foreach ((string field, float mag) in CarrierReadings.FieldsOf(firmwareId))
+            foreach ((string field, float mag) in EmgCatalog.DeclLegacyOf(firmwareId)) // EMG4-CLEAN-01：声明参数 legacy 列，不读 readFields
             {
                 if (Array.IndexOf(fields, field) >= 0)
                 {
@@ -1905,7 +1937,7 @@ namespace GameLogic.Campaign.Emergence
         /// 地面物质的 modify（蔓延）。按端口 × 角色，不按内容 ID。阶段 1 回滚对照不标（桥接走减速网过渡）。
         /// </summary>
         public static bool IsRootKernelWrite(string port, EmgRole role) =>
-            KernelInjectLive && port != null && (port == "ent.wreck" || port == "prop.conductive" || (role == EmgRole.Modify && port.StartsWith("mat.", StringComparison.Ordinal)));
+            port != null && (port == "ent.wreck" || port == "prop.conductive" || (role == EmgRole.Modify && port.StartsWith("mat.", StringComparison.Ordinal)));
 
         /// <summary>
         /// EMG2-RECL-01（FG19A 第 1.3 节第 35 行）：同一条声明里还改写地面物质（modify）的 owner，它的物质排放是给改写当介质的：阶段 ≥ 2 由内核排真斑块
@@ -1913,7 +1945,7 @@ namespace GameLogic.Campaign.Emergence
         /// </summary>
         private static bool IsMediumEmit(EmgCompiled c, EmgProgramStep s, string port, EmgRole role)
         {
-            if (!KernelInjectLive || role != EmgRole.Emit || port == null || !port.StartsWith("mat.", StringComparison.Ordinal))
+            if (role != EmgRole.Emit || port == null || !port.StartsWith("mat.", StringComparison.Ordinal))
             {
                 return false;
             }
@@ -1934,7 +1966,7 @@ namespace GameLogic.Campaign.Emergence
         /// </summary>
         private static bool IsTriggeredEmitWithoutTransition(EmgCompiled c, EmgProgramStep s, string port, EmgRole role)
         {
-            if (!KernelInjectLive || role != EmgRole.Emit || port == null || !port.StartsWith("mat.", StringComparison.Ordinal))
+            if (role != EmgRole.Emit || port == null || !port.StartsWith("mat.", StringComparison.Ordinal))
             {
                 return false;
             }
@@ -1953,7 +1985,7 @@ namespace GameLogic.Campaign.Emergence
                 return true; // EMG4-FUSE-02（FG19A 第 4.2 节“沿途排放的 mat.*（读 evt.fire）”）：沿途排放由内核按长度均分段点排真斑块（CombatLogic.EmgTrailEmit），过渡读法 trail 退役（FG-GAP-205）
             }
             // 审查修复（第 1 轮）：按这条声明的 owner（混合固件 = 父固件）自己的旧字段判——混合行的 readFields 是两父相加，另一父的驻留区 / 拖尾只排它自己那种物质
-            foreach ((string f, float _) in CarrierReadings.FieldsOf(s.OwnerId))
+            foreach ((string f, float _) in EmgCatalog.DeclLegacyOf(s.OwnerId))
             {
                 if (Array.IndexOf(MatterTransition, f) >= 0)
                 {
@@ -1965,7 +1997,7 @@ namespace GameLogic.Campaign.Emergence
 
         private static bool OwnerHasField(string owner, string field)
         {
-            foreach ((string f, float _) in CarrierReadings.FieldsOf(owner))
+            foreach ((string f, float _) in EmgCatalog.DeclLegacyOf(owner))
             {
                 if (f == field)
                 {

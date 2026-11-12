@@ -526,7 +526,7 @@ namespace BinGames.Sim.Combat
 
         private const int TraitRunFields = 20;
         /// <summary>EMG3-META-01：7 → 26（宿主、模式、结算事件、链深、序号位、位置、方向、目标、母载荷参数、锚点结束时刻追加在记录尾部；短记录读到取缺省）。</summary>
-        private const int MetaRunFields = 26;
+        private const int MetaRunFields = 27;
 
         /// <summary>段 22 特性运行态、段 23 元程序运行态（执行者归元程序卡，本卡表恒空）、段 24 节拍计数。特性运行态按单位 ID 升序写（同一状态同一字节，读档续跑哈希一致）。</summary>
         private void WriteStage3Segments(BinaryWriter w, EmgSegmentWriter sw)
@@ -597,6 +597,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(m.ZoneRadius);
                 if (sw.F()) w.Write(m.ZoneLife);
                 if (sw.F()) w.Write(m.Until);
+                if (sw.F()) w.Write(m.Code); // EMG4-CLEAN-01（DEBT-EMG4FUZZ01-05）段尾追加
                 sw.EndRecord();
             }
             sw.End();
@@ -720,6 +721,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) m.ZoneRadius = r.ReadSingle();
                         if (sr.F()) m.ZoneLife = r.ReadSingle();
                         if (sr.F()) m.Until = r.ReadDouble();
+                        if (sr.F()) m.Code = r.ReadUInt16();
                         // EMG3-META-01：坏值拒读；程序 / 节点下标越界的记录到点时丢弃、不执行（StepEmgMeta）
                         if (!sr.RecordOk || m.Prog < -1 || m.Chain < 0 || double.IsNaN(m.DueAt) || double.IsInfinity(m.DueAt) || m.Mode > EmgMetaConst.RunBeat
                             || m.Ev > EmgConst.EventKinds || m.Depth > EmgConst.MaxDepth || double.IsNaN(m.Pos.x) || double.IsNaN(m.Pos.y) || float.IsNaN(m.Dir.x) || float.IsNaN(m.Dir.y)

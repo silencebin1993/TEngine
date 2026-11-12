@@ -463,7 +463,7 @@ namespace BinGames.Sim.Combat
             {
                 bool fl = follow[g] != 0;
                 EmgMetaEnqueue(ref d, fl ? EmgMetaConst.RunFollow : EmgMetaConst.RunReplay, e.Prog, e.Node, firstMeta, masks[g] & ~noReplay, d.Scalars[0].Time + offs[g], 0.0,
-                    e.Kind, fl ? deferAt : e.Pos, dir, e.Other != 0 && e.OtherKind == EmgEntKind.Unit ? e.Other : host.MainTarget, e.Chain, e.Depth, host);
+                    e.Kind, fl ? deferAt : e.Pos, dir, e.Other != 0 && e.OtherKind == EmgEntKind.Unit ? e.Other : host.MainTarget, e.Chain, e.Depth, host, e.Code);
             }
             return allow;
         }
@@ -518,7 +518,7 @@ namespace BinGames.Sim.Combat
         }
 
         private static void EmgMetaEnqueue(ref CombatData d, byte mode, int prog, int node, byte ord, ulong mask, double dueAt, double until, EmgEventKind ev, double2 pos, float2 dir,
-            int other, int chain, byte depth, in EmgCtx host)
+            int other, int chain, byte depth, in EmgCtx host, ushort code = 0)
         {
             if (mask == 0UL)
             {
@@ -533,7 +533,7 @@ namespace BinGames.Sim.Combat
             {
                 DueAt = dueAt, Unit = host.OwnerId, Prog = prog, Chain = chain, Node = (byte)node, Ordinal = ord, Host = host.Ent, HostKind = (byte)host.EntKind, Mode = mode,
                 Ev = (byte)ev, Depth = depth, Mask = mask, Pos = pos, Dir = dir, Other = other, Weapon = host.Weapon, Damage = math.max(0f, host.Damage), Faction = host.Faction,
-                Carrier = host.Carrier, PFlags = (ushort)host.PFlags, ZoneRadius = math.max(0f, host.ZoneRadius), ZoneLife = math.max(0f, host.ZoneLife), Until = until,
+                Carrier = host.Carrier, PFlags = (ushort)host.PFlags, ZoneRadius = math.max(0f, host.ZoneRadius), ZoneLife = math.max(0f, host.ZoneLife), Until = until, Code = code,
             });
         }
 
@@ -576,14 +576,52 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>
-        /// EMG3-E2E-01（FGJ-EMG-3 发现；DEBT-EMG3META01-03 的连锁部分）：根节点上位于条件 / 随机元程序下游的连锁行不折进静态读法（CombatSite.FoldProgramReadings 同口径），
-        /// 由命中结算按本次放行位 <paramref name="allow"/> 动态执行。返回这几条里被放行的连锁汇总；程序没有元程序 / 没有这类行 / 都没放行返回 false。O(节点指令数 × 元程序数)。
+        /// EMG4-CLEAN-01：结算这一刻条件 / 随机元程序的放行位（不去掉被延后的：无状态读法 / 命中写端不因延后丢掉，同 <see cref="EmgSubHitSkip"/>）；非执行单位的位都置 1。
+        /// 程序没有元程序返回全 1（一条比较）。O(节点指令数 × 元程序数)。
         /// </summary>
-        internal static bool EmgCondChainMods(ref CombatData d, int prog, int node, ulong allow, int owner, out EmgMods m)
+        internal static ulong EmgCondAllow(ref CombatData d, int prog, int node, EmgEventKind ev, int self, int target, int chain, int hostEnt)
         {
-            m = default;
-            ulong gated = EmgGatedUnits(ref d, prog, node);
-            return (gated & allow) != 0UL && EmgModsOf(ref d, prog, node, out m, ~(gated & allow), owner) && m.Chain > 0 && m.ChainRange > 0f;
+            if (!EmgHasMeta(ref d, prog) || !EmgNodeSpan(ref d, prog, node, out int first, out int end))
+            {
+                return ulong.MaxValue;
+            }
+            ulong units = EmgMetaScan(ref d, first, end, out ulong metas);
+            if (metas == 0UL)
+            {
+                return ulong.MaxValue;
+            }
+            int seen = 0;
+            return EmgMetaGate(ref d, first, end, units, metas, ev, self, target, (uint)chain, (uint)hostEnt, ref seen) | ~units;
+        }
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：根节点上位于条件 / 随机元程序下游的固件读法贡献（威力、体积、破甲、处决、连锁、过渡字段……）不在静态读法里，
+        /// 由热更层记成程序尾段的 <see cref="EmgInstrFlags.LegacyRoot"/> 行；这里按本次结算的放行位 <paramref name="allow"/> 把放行的行补到读法副本 <paramref name="r"/> 上。
+        /// 正序 / 逆序树各自带尾段（序号按各自的树），所以切树后同一条固件的去留一致、不重复。程序没有元程序 O(1) 返回 false（只比一个标志位）；否则 O(尾段行数)。
+        /// </summary>
+        internal static bool EmgGatedReading(ref CombatData d, int prog, ulong allow, ref CombatReading r)
+        {
+            if (!EmgHasMeta(ref d, prog))
+            {
+                return false;
+            }
+            EmgProgram p = d.EmgPrograms[prog];
+            if (p.NodeCount < 1 || p.FirstNode + p.NodeCount > d.EmgNodes.Length)
+            {
+                return false;
+            }
+            EmgNode root = d.EmgNodes[p.FirstNode], last = d.EmgNodes[p.FirstNode + p.NodeCount - 1];
+            int end = math.min(root.FirstInstr + p.InstrTotal, d.EmgInstrs.Length);
+            bool summon = r.Carrier == CombatCarrier.Summon, any = false;
+            for (int i = last.FirstInstr + last.InstrCount; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if ((x.Flags & EmgInstrFlags.LegacyRoot) != 0 && EmgMetaAllowed(allow, x.Ordinal))
+                {
+                    any |= CombatReadingVerbs.Apply(ref r, x.Verb, x.A, x.B, x.C, (byte)x.Param2, summon);
+                }
+            }
+            return any;
         }
 
         /// <summary>节点上位于条件 / 随机元程序下游的程序序号位（这些行的无状态修饰在结算那一刻按条件判）。程序没有元程序返回 0（一条比较）。O(节点指令数 × 元程序数)。</summary>
@@ -826,7 +864,7 @@ namespace BinGames.Sim.Combat
             var e = new EmgEvent
             {
                 Kind = (EmgEventKind)m.Ev, Pos = pos, Other = m.Other, OtherKind = m.Other != 0 ? EmgEntKind.Unit : EmgEntKind.None, Prog = m.Prog, Node = m.Node,
-                Chain = m.Chain, Depth = m.Depth, Ent = m.Host, EntKind = (EmgEntKind)m.HostKind,
+                Chain = m.Chain, Depth = m.Depth, Ent = m.Host, EntKind = (EmgEntKind)m.HostKind, Code = m.Code,
             };
             int owner = d.SlotOf(m.Unit);
             var host = new EmgCtx
@@ -898,7 +936,8 @@ namespace BinGames.Sim.Combat
                     Count = (byte)math.min((int)c.TrigCount, maxChildren), SubForm = c.SubForm != 0 ? c.SubForm : EmgSubFormOf(host.Carrier),
                     Prog = e.Prog, Chain = e.Chain, Owner = host.OwnerId, Weapon = host.Weapon, Faction = host.Faction, Damage = host.Damage,
                     ZoneRadius = host.ZoneRadius, ZoneLife = host.ZoneLife, Flags = host.PFlags & EmgProjFlags.Heal, Pos = e.Pos, Dir = dir,
-                    Other = !loop && e.Kind == EmgEventKind.Hit ? e.Other : 0, Ent = loop ? (int)EmgEventKind.Timer : (int)e.Kind,
+                    // EMG4-CLEAN-01（DEBT-EMG4FUZZ01-05）：与正常唤起（EmgInvoke）同口径——命中 / 命中终结（ExpireHit）放的子载荷不撞被击单位
+                    Other = !loop && (e.Kind == EmgEventKind.Hit || (e.Kind == EmgEventKind.Expire && e.Code == EmgCode.ExpireHit)) ? e.Other : 0, Ent = loop ? (int)EmgEventKind.Timer : (int)e.Kind,
                 });
                 released += math.min((int)c.TrigCount, maxChildren);
                 gen = c.Gen;
@@ -907,6 +946,143 @@ namespace BinGames.Sim.Combat
             {
                 // EMG3-E2E-01（DEBT-EMG3META01-04）：重放 / 循环放出的子载荷与正常唤起同一出口——计放出、写分裂链日志、发 evt.split（链读端看得到这一次分裂）
                 EmgSplitOut(ref d, e, loop ? (int)EmgEventKind.Timer : (int)e.Kind, released, gen);
+            }
+        }
+    }
+    /// <summary>
+    /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01）：一条旧读法动作（动作码 = fg.TbCarrierReading verb 列的序号 1～25，参数已乘幅度）结算进读法。
+    /// 热更层静态折叠（CarrierReadings.ApplyVerb）与内核按放行位补执行根节点读法行（<see cref="CombatLogic"/>.EmgGatedReading）共用这一份，同一动作两处结果一致。
+    /// 不认识的动作码返回 false（不改读法）。
+    /// </summary>
+    public static class CombatReadingVerbs
+    {
+        public const byte Dmg = 1, Cooldown = 2, Extra = 3, Pierce = 4, Chain = 5, Blast = 6, Sweep = 7, Echo = 8, Pull = 9, Knock = 10, Lunge = 11, Armor = 12,
+            Execute = 13, Leech = 14, Amp = 15, Zone = 16, ZoneGrow = 17, ZoneTick = 18, Weave = 19, Escort = 20, Drones = 21, HeatBurst = 22, Jump = 23, Reach = 24, Cone = 25;
+        public const byte LastVerb = 25;
+
+        private static int Count(float v) => v <= 0f ? 0 : math.max(1, (int)math.round(v));
+
+        /// <summary><paramref name="place"/>：0 命中点 / 1 中点 / 2 攻击者（只给 Zone）；<paramref name="summon"/>：召唤载体（Reach 加在无人机拴绳上）。</summary>
+        public static bool Apply(ref CombatReading r, byte verb, float a, float b, float c, byte place, bool summon)
+        {
+            switch (verb)
+            {
+                case Dmg:
+                    if (a > 0f)
+                    {
+                        r.DamageScale = (r.DamageScale > 0f ? r.DamageScale : 1f) * a;
+                    }
+                    return true;
+                case Cooldown:
+                    if (a > 0f)
+                    {
+                        r.CooldownScale = (r.CooldownScale > 0f ? r.CooldownScale : 1f) * a;
+                    }
+                    return true;
+                case Extra:
+                    r.ExtraHits += Count(a);
+                    r.ExtraRatio = math.max(r.ExtraRatio, b);
+                    r.ExtraRadius = math.max(r.ExtraRadius, c);
+                    return true;
+                case Pierce:
+                    r.PierceHits += Count(a);
+                    r.PierceRange = math.max(r.PierceRange, b);
+                    r.PierceRatio = math.max(r.PierceRatio, c);
+                    return true;
+                case Chain:
+                    r.ChainHits += Count(a);
+                    r.ChainRange = math.max(r.ChainRange, b);
+                    r.ChainFalloff = math.max(r.ChainFalloff, c);
+                    return true;
+                case Blast:
+                    r.BlastRadius = math.max(r.BlastRadius, a);
+                    r.BlastRatio = math.max(r.BlastRatio, b);
+                    return true;
+                case Sweep:
+                    r.SweepRadius = math.max(r.SweepRadius, a);
+                    r.SweepRatio = math.max(r.SweepRatio, b);
+                    return true;
+                case Echo:
+                    r.EchoCount += Count(a);
+                    r.EchoDelay = r.EchoDelay > 0f ? math.min(r.EchoDelay, b) : b;
+                    r.EchoRatio = math.max(r.EchoRatio, c);
+                    return true;
+                case Pull:
+                    r.PullStrength = math.max(r.PullStrength, a);
+                    r.PullRadius = math.max(r.PullRadius, b);
+                    if (c > 0.5f)
+                    {
+                        r.PullToAttacker = 1;
+                    }
+                    return true;
+                case Knock:
+                    r.Knockback += a;
+                    return true;
+                case Lunge:
+                    r.Lunge = math.max(r.Lunge, a);
+                    return true;
+                case Armor:
+                    r.ArmorPierce = math.min(1f, r.ArmorPierce + a);
+                    return true;
+                case Execute:
+                    r.ExecuteBelow = math.max(r.ExecuteBelow, a);
+                    return true;
+                case Leech:
+                    return true; // EMG2-RECL-01：旧“伤害转修复”退役，动作码保留只为对齐
+                case Amp:
+                    r.StatusAmp += a;
+                    return true;
+                case Zone:
+                    r.ZoneRadius = math.max(r.ZoneRadius, a);
+                    r.ZoneSeconds = math.max(r.ZoneSeconds, b);
+                    r.ZoneDps += c;
+                    r.ZonePlacement = place == 1 ? CombatZonePlacement.Midpoint : place == 2 ? CombatZonePlacement.Attacker : CombatZonePlacement.HitPoint;
+                    return true;
+                case ZoneGrow:
+                    r.ZoneGrowth += a;
+                    return true;
+                case ZoneTick:
+                    if (a > 0f)
+                    {
+                        r.ZoneTickScale = (r.ZoneTickScale > 0f ? r.ZoneTickScale : 1f) * a;
+                    }
+                    return true;
+                case Weave:
+                    r.WeaveRadius = math.max(r.WeaveRadius, a);
+                    r.WeaveSeconds = math.max(r.WeaveSeconds, b);
+                    r.WeaveSlow = math.max(r.WeaveSlow, c);
+                    return true;
+                case Escort:
+                    r.EscortDrones += Count(a);
+                    return true;
+                case Drones:
+                    r.Drones += Count(a);
+                    return true;
+                case HeatBurst:
+                    r.HeatBurstAt = r.HeatBurstAt > 0f ? math.min(r.HeatBurstAt, a) : a;
+                    r.HeatBurstRadius = math.max(r.HeatBurstRadius, b);
+                    r.HeatBurstRatio = math.max(r.HeatBurstRatio, c);
+                    return true;
+                case Jump:
+                    r.JumpRange = math.max(r.JumpRange, a);
+                    r.JumpFalloff = math.max(r.JumpFalloff, b);
+                    r.JumpMax += Count(c);
+                    return true;
+                case Reach:
+                    if (summon)
+                    {
+                        r.DroneLeash += a;
+                    }
+                    else
+                    {
+                        r.Area += a;
+                    }
+                    return true;
+                case Cone:
+                    r.Cone = math.min(180f, r.Cone + a);
+                    return true;
+                default:
+                    return false;
             }
         }
     }

@@ -74,6 +74,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPhase);
                 Step(CheckSync);
                 Step(CheckResonancePoint);
+                Step(CheckSubResonance); // EMG4-CLEAN-01：FG-GAP-209
                 Step(CheckCarriers);
                 Step(CheckNested);
                 Step(CheckTiming);
@@ -390,6 +391,53 @@ namespace GameLogic.EditorTools
             pulses = k.EmgBusStats.BeatPulses;
             hpLoss = k.TryGetUnit(side, out CombatUnitView v) ? 5000f - v.Health : -1f;
             return k.EmgBusStats.BeatSyncs;
+        }
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-209）：谐振装在子弹药节点上——子弹药命中时在命中点留 2 拍谐振点（按机器 × 节点），放出点不再留带谐振位的节拍锚点（修前在放出点按拍余振）。
+        /// 手写程序：根节点 [时钟（每拍放子弹药）]，子节点 [谐振]。
+        /// </summary>
+        private static void CheckSubResonance()
+        {
+            Line("  · D3. 子弹药谐振（FG-GAP-209）：子弹药命中点留谐振点（只放行谐振那条），放出点不留锚点");
+            using var k = new CombatKernel(Cfg(), 16);
+            var instrs = new List<EmgInstr>(ClockI(0, 1, 0));
+            int rootN = instrs.Count;
+            instrs.AddRange(ResI(1));
+            var nodes = new List<EmgNode>
+            {
+                new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = (byte)rootN },
+                new EmgNode { Parent = 0, Gen = 1, TrigEvent = EmgEventKind.Beat, TrigCount = 1, FirstInstr = rootN, InstrCount = (byte)(instrs.Count - rootN), MetaMask = 1 },
+            };
+            int prog = k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Beat) | (1u << (int)EmgEventKind.Fire) }, nodes, instrs);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 2f, 10f)), 100f);
+            double2 foePos = new double2(0, 6);
+            int foe = Unit(k, CombatFaction.Hostile, foePos, -1, 5000f);
+            k.FireAt(me, foe, k.Time);
+            bool atHit = false, atRelease = false;
+            long subs = 0;
+            for (int i = 0; i < 60 * 4; i++)
+            {
+                StepN(k, 1);
+                for (int j = 0; j < k.MetaRunCount; j++)
+                {
+                    if (!k.TryGetMetaRun(j, out EmgMetaRun an) || an.Mode != EmgMetaConst.RunBeat || an.Node != 1)
+                    {
+                        continue;
+                    }
+                    if (math.distance(an.Pos, foePos) < 0.8 && an.Mask == 1UL << 1)
+                    {
+                        atHit = true;
+                    }
+                    else if ((an.Mask & (1UL << 1)) != 0UL)
+                    {
+                        atRelease = true;
+                    }
+                }
+                subs = Math.Max(subs, k.EmgBusStats.SubSpawned);
+            }
+            Expect(prog >= 0 && subs > 0 && atHit && !atRelease,
+                $"子弹药 {subs} 份；命中点（靶位 0.8 米内）留了只放行谐振的谐振点 {atHit}；放出点带谐振位的锚点 {atRelease}（修前 = true，在放出点余振）");
         }
 
         // ── D2. 谐振命中点（EMG3-E2E-01 关闭 DEBT-EMG3TMP01-01；FG19A 第 132 行“命中点留 2 拍谐振点”）──

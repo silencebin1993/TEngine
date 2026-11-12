@@ -133,6 +133,10 @@ namespace GameLogic.Campaign.Regions
             View = view;
             view?.Bind(this);
             view?.SetSelected(IsSelected);
+            if (view != null && MachineRegistry.TryGetRecord(LogicId, out MachineRecord rec) && !rec.IsAlive)
+            {
+                view.SetPickable(false); // 镜头回到家园时重建的表现：阵亡的机身同样不接点选
+            }
             GameLogic.View.SignalLinkView.OnViewAttached(this); // FG1-SIG-04：安全模式头顶图标。
             GameLogic.View.MachineMorphView.OnViewAttached(this); // FG1-VFX-01：机身形变（按当前编译结果直接到位）。
         }

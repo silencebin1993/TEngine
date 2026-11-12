@@ -1591,7 +1591,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckNegatives()
         {
-            Line("  · G. 负向：炮塔（固定底盘，弹体武器）沿用 FGR-FW-012 兼容表——弹体不带修饰、读法不变；没有修饰的弹体逐字不变；写修饰端口的固件不再按旧修饰字段结算（单轨，不双算）；emg.stage = 0 掩体规则关");
+            Line("  · G. 负向：炮塔（固定底盘，弹体武器）走声明轨（EMG4-CLEAN-01）——带程序时弹体按根节点修饰、没有程序逐字不变；没有修饰的弹体逐字不变；写修饰端口的固件不再按旧修饰字段结算（单轨，不双算）；emg.stage = 0 掩体规则关");
             EmgProgramResult homing = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_homing" }, FirmwareCarrier.Projectile);
             using (var k = new CombatKernel(Cfg(), 16))
             {
@@ -1607,8 +1607,23 @@ namespace GameLogic.EditorTools
                 int foe = Foe(k, new double2(0, 8));
                 k.FireAt(turret, foe, k.Time);
                 CombatProjectile b = Projs(k).FirstOrDefault();
-                Expect(b.Mods == EmgProjMods.None && b.SteerLeft == 0f && b.PierceLeft == 0 && CombatKernel.WeaponKey(bolt) == key0,
-                    "炮塔的弹体武器 + [寻的]：不置 SpawnFlight、弹体不带任何修饰状态、武器键不变（固定底盘沿用兼容表）");
+                // EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：弹体武器（炮塔 / 重炮）不再沿用 FGR-FW-012 兼容读法——出弹同样按根节点弹道修饰写弹体（寻的 = 转向），仍不置 SpawnFlight
+                Expect(bolt.SpawnFlight == 0 && (b.Mods & EmgProjMods.Steer) != 0 && b.SteerLeft > 0f && b.PierceLeft == 0 && CombatKernel.WeaponKey(bolt) == key0,
+                    $"炮塔的弹体武器 + [寻的]：不置 SpawnFlight、武器键不变，弹体按程序带转向修饰（修饰 {b.Mods}、转向额度 {b.SteerLeft:0.#}°、穿透 {b.PierceLeft}）");
+            }
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                // 对照：没有程序的弹体武器出弹逐字不变（不带任何修饰）
+                var bare = new CombatWeapon
+                {
+                    Mode = CombatWeaponMode.Projectile, HasOutput = 1, TargetMode = CombatTargetMode.Nearest, Range = 60f, Damage = 10f, Cooldown = 0f,
+                    ProjectileSpeed = 10f, ProjectileRadius = 0.2f, ProjectileLife = 3f, Program = -1,
+                };
+                int turret = Me(k, new double2(0, 0), k.AddWeapon(bare));
+                int foe = Foe(k, new double2(0, 8));
+                k.FireAt(turret, foe, k.Time);
+                CombatProjectile b = Projs(k).FirstOrDefault();
+                Expect(b.Id != 0 && b.Mods == EmgProjMods.None && b.SteerLeft == 0f && b.PierceLeft == 0, "没有程序的弹体武器：弹体不带任何修饰状态（逐字同旧）");
             }
             // 单轨：格斗 + [跳弹] 在 emg.stage = 1 时击退只算一次（程序轨 1.2 米），与 emg.stage = 0 的旧轨同值
             var ram = new BlueprintCircuitPreview

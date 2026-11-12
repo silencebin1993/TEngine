@@ -33,7 +33,7 @@ namespace GameLogic.EditorTools
                  "程序轨读法 = 独立按声明推出的“只留根节点效果写端过渡字段”读法，新旧两轨同时结算（不跳旧字段）必须被比出来");
             EmgSource src = EmgCatalog.FromTables();
             Func<string, (bool ok, float value)> tuning = src.Tuning;
-            src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
+            // EMG4-CLEAN-01：emg.stage 只保留 4，本段不再覆盖阶段（阶段 1 / 2 回滚对照随旧轨删除；单轨比对的现行口径见 C5）
             try
             {
                 EmgCatalog.OverrideForTests(src);
@@ -53,7 +53,6 @@ namespace GameLogic.EditorTools
                 foreach ((FirmwareCarrier carrier, string comp) in CarrierComponents)
                 {
                     string baseline = DeclDigest(comp, new[] { DeclFiller }, out _, out _);
-                    string trigBase = DeclDigest(comp, new[] { TriggerFiller }, out _, out _);
                     foreach (string fw in stage1)
                     {
                         if (fw == DeclFiller)
@@ -80,24 +79,13 @@ namespace GameLogic.EditorTools
                         {
                             combos++;
                             trigPairs++;
-                            if (DeclDigest(comp, new[] { TriggerFiller, fw }, out _, out _) == trigBase)
-                            {
-                                dead.Add($"{carrier}/{fw}（触发器后）");
-                            }
                         }
                         // 单轨比对（只做单条程序：独立推导的保留字段 = 该固件声明里写端口的过渡字段；修饰 / 触发 / 只改数字的写端不保留旧字段）
-                        string why = SingleTrackProblem(comp, carrier, fw, false);
-                        if (why != null)
-                        {
-                            dual.Add($"{carrier}/{fw}：{why}");
-                        }
                     }
                 }
                 sw.Stop();
                 // EMG2-PHS-01（DEBT-EMG1FW01-03 注入类，卡片“C2 触发器后对照改断言落点”）：命中注能在阶段 ≥ 2 才有内核执行者（物质层），本段临时把生效阶段提到 2——
                 // 注入写端排在触发器后只在子弹药 / 子区落点结算：有目标累积到注入量，且本机主目标的累积量低于同一条固件放根节点（本机命中注入）时；不再靠本机出手上的过渡字段 / 旧标签“有差异”。
-                src.Tuning = id => id == EmgCatalog.StageKey ? (true, 2f) : tuning(id);
-                EmgCatalog.OverrideForTests(src);
                 var stage2Dead = new List<string>();
                 var stage2Fields = new List<string>();
                 int stage2Pairs = 0;
@@ -139,15 +127,13 @@ namespace GameLogic.EditorTools
                         }
                     }
                 }
-                src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
-                EmgCatalog.OverrideForTests(src);
-                Expect(stage1.Count >= 30 && dead.Count == 0 && trigPairs >= 40,
-                    $"阶段 1 走声明轨的 {stage1.Count} 条固件 × 5 载体 × 首位 / 末位 + 效果固件在触发器后（{trigPairs} 对）共 {combos} 对全部有行为指纹差异，死对 {dead.Count} 对（{sw.ElapsedMilliseconds} 毫秒）{(dead.Count > 0 ? "：" + string.Join("、", dead) : string.Empty)}");
+                Expect(stage1.Count >= 30 && dead.Count == 0 && trigPairs >= 40 && EmgCatalog.EffectiveStage == 4,
+                    $"stageGate ≤ 1 的 {stage1.Count} 条固件 × 5 载体 × 首位 / 末位（阶段 4 口径；效果固件在触发器后的 {trigPairs} 对由下一条按落点判）共 {combos} 对全部有行为指纹差异，死对 {dead.Count} 对（{sw.ElapsedMilliseconds} 毫秒）{(dead.Count > 0 ? "：" + string.Join("、", dead) : string.Empty)}");
                 Expect(stage2Pairs >= 40 && stage2Dead.Count == 0, $"阶段 2 效果固件排在触发器后（{stage2Pairs} 对）在子弹药 / 子区落点都有行为差异，死对 {stage2Dead.Count}：{string.Join("、", stage2Dead)}");
                 Expect(stage2Fields.Count == 0, $"阶段 2 效果固件排在触发器后：本机出手的读法与只有触发器时逐字段一致（过渡字段已撤）{Detail(stage2Fields)}");
                 Expect(injectPairs >= 5 && landing.Count == 0,
                     $"注入类（en.heat / en.elec / en.mag）排在触发器后：{injectPairs} 对全部只在子弹药 / 子区落点注能（因果链注入记录全在链深 ≥ 1，本机出手 0 次；单条放根节点时本机命中注能）{Detail(landing)}");
-                Expect(dual.Count == 0, $"单轨比对：{stage1.Count - 1} 条 × 5 载体的程序轨读法与独立推导的单轨读法逐字段一致（同一 owner 不两轨同时结算）{Detail(dual)}");
+                _ = dual; // EMG4-CLEAN-01：阶段 1 过渡口径的单轨比对随旧轨删除（现行阶段 4 单轨比对 = C5 CheckStage3SingleTrackCompare）
                 // 负向：把旧轨字段也算进去（不跳旧字段 = 两轨同时结算），比对必须报失败
                 string caught = SingleTrackProblem("comp_gun", FirmwareCarrier.Projectile, "fw_split", true);
                 string caught2 = SingleTrackProblem("comp_sprayer", FirmwareCarrier.Field, "fw_cluster", true);

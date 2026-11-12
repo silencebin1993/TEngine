@@ -128,6 +128,19 @@ namespace GameLogic.EditorTools
                         }
                     }
                 }
+                // EMG4-CLEAN-01：emg.stage 只保留 4，物质排放落成斑块（阶段 1 过渡口径的驻留区已删）——斑块同样记进“出现过的区域”，水 / 冷却液斑块按浸湿位（2）记
+                for (int z = 0; z < k.PatchSlots; z++)
+                {
+                    if (k.TryGetPatch(z, out CombatZone patch) && seen.Add((patch.Born, patch.Pos.x, patch.Pos.y)))
+                    {
+                        uint pm = patch.StatusMask | (patch.Matter == EmgMatterConst.Water || patch.Matter == EmgMatterConst.Coolant ? 1u << 2 : 0u);
+                        o.Zones.Add((pm, patch.Pos, math.distance(patch.Pos, hv.Position) < 1.0));
+                        if (newSubs && math.distance(patch.Pos, o.AttackerPosAtEvent) < 1.0)
+                        {
+                            o.SubsAtDeath++;
+                        }
+                    }
+                }
                 for (int pi = 0; pi < k.ProjectileCount; pi++)
                 {
                     if (k.TryGetProjectile(pi, out CombatProjectile pr))
@@ -183,6 +196,10 @@ namespace GameLogic.EditorTools
             CombatConfig cfg = CombatSite.ConfigFromTuning();
             cfg.NavEnabled = 0;
             using var b = new CombatKernel(cfg, 32);
+            // EMG4-CLEAN-01：阶段 4 物质层恒开，读档内核要与竞技场（Arena.Build）同样登记物质 / 规则 / 相态表（内容表不进快照，正式地点在构造时登记）
+            CombatSite.ApplyMatters(b);
+            CombatSite.ApplyRules(b);
+            CombatSite.ApplyPhaseRules(b);
             CombatLoadResult lr = b.Load(snap);
             if (lr != CombatLoadResult.Ok)
             {
@@ -193,12 +210,12 @@ namespace GameLogic.EditorTools
             {
                 a.K.Step(Dt, a.K.Time + Dt);
                 b.Step(Dt, b.Time + Dt);
-                if (a.K.StateHash() != b.StateHash() || a.K.EmgStateHash() != b.EmgStateHash() || a.K.ZoneCount != b.ZoneCount)
+                if (a.K.StateHash() != b.StateHash() || a.K.EmgStateHash() != b.EmgStateHash() || a.K.ZoneCount != b.ZoneCount || a.K.PatchCount != b.PatchCount)
                 {
-                    return $"续跑第 {i} 步分叉（区域 {a.K.ZoneCount} / {b.ZoneCount}）";
+                    return $"续跑第 {i} 步分叉（区域 {a.K.ZoneCount} / {b.ZoneCount}，斑块 {a.K.PatchCount} / {b.PatchCount}）";
                 }
             }
-            zonesAfter = b.Counters.ZonesSpawned;
+            zonesAfter = b.Counters.ZonesSpawned + b.PatchCount;
             return null;
         }
 

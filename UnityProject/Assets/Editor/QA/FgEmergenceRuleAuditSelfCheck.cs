@@ -102,7 +102,7 @@ namespace GameLogic.EditorTools
             Tables t = ConfigSystem.Instance.Tables;
             var rt = new List<string>();
             rt.AddRange(t.TbChannelPort.DataList.Select(r => J("EP", r.Id, r.Family, r.Code, r.Dirs, r.NumericOnly, r.Perceive, r.CarrierImpl, r.Unit, r.NameKey, r.DescKey, r.Shape, r.Color, r.Stage)));
-            rt.AddRange(t.TbChannelDecl.DataList.Select(r => J("ED", r.Id, r.Owner, r.OwnerKind, r.Seq, r.Dir, r.Port, r.Role, Py(r.Amount), Py(r.Param2), r.Carriers, Py(r.Heat), r.TextKey, r.StageGate)));
+            rt.AddRange(t.TbChannelDecl.DataList.Select(r => J("ED", r.Id, r.Owner, r.OwnerKind, r.Seq, r.Dir, r.Port, r.Role, Py(r.Amount), Py(r.Param2), r.Carriers, Py(r.Heat), r.TextKey, r.StageGate, r.Legacy)));
             rt.AddRange(t.TbPortCarrier.DataList.Select(r => J("EC", r.Id, r.Port, r.Carrier, r.Verb, Py(r.A), Py(r.B), Py(r.C), r.Mag, r.TextKey)));
             rt.AddRange(t.TbSubPayload.DataList.Select(r => J("ES", r.Id, r.Code, r.Carrier, Py(r.Speed), Py(r.Life), Py(r.LifeRatio), Py(r.Radius), Py(r.RadiusRatio), Py(r.Kinetic), r.KineticInherit, r.NameKey)));
             rt.AddRange(t.TbChassisTrait.DataList.Select(r => J("ET", r.Id, r.Chassis, r.Kind, r.AppliesTo, r.StatePorts, r.ParamKeys, r.Stage, r.Reserved, r.NameKey, r.DescKey)));
@@ -305,6 +305,19 @@ namespace GameLogic.EditorTools
             Expect(hc.RawStage == 5f && hc.EffectiveStage == EmgCatalog.ImplementedStage && EmgCatalog.ImplementedStage == 4 && track
                    && EmgCatalog.ClampStage(5f, 4) == 4 && EmgCatalog.ClampStage(4f, 3) == 3 && EmgCatalog.ClampStage(1f, 4) == 1 && EmgCatalog.ClampStage(-1f, 4) == 0,
                 $"emg.stage 填 5（高于已实现阶段 {EmgCatalog.ImplementedStage}）→ 生效阶段钳到 {hc.EffectiveStage}，stageGate 1 的 fw_split 随之走声明轨；钳位函数：5→4、（已实现 3 时）4→3、1→1、−1→0");
+            // EMG4-CLEAN-01（卡片负向“删除后把 emg.stage 设回低值不再生效”）：填 0～3 一律生效 4，全部已声明 owner 都在声明轨、程序不为空
+            foreach (float low in new[] { 0f, 1f, 2f, 3f })
+            {
+                EmgSource lowSrc = Clone(real);
+                lowSrc.Tuning = id => id == EmgCatalog.StageKey ? (true, low) : GridContent.TryGetTuning(id, out float v) ? (true, v) : (false, 0f);
+                EmgCatalog.OverrideForTests(lowSrc);
+                EmgCompiled lc = EmgCatalog.Current;
+                int onDecl = lc.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
+                EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_split", "fw_oilleak" }, FirmwareCarrier.Projectile);
+                EmgCatalog.OverrideForTests(null);
+                Expect(lc.RawStage == low && lc.EffectiveStage == 4 && onDecl == lc.OwnerIds.Length && !pr.IsEmpty && pr.LegacyOwners.Count == 0,
+                    $"负向：emg.stage 填 {low} 不再生效——生效阶段 {lc.EffectiveStage}，{onDecl}/{lc.OwnerIds.Length} 个 owner 在声明轨，[分裂, 漏油] 程序 {(pr.IsEmpty ? "为空" : "不为空")}、走旧轨 {pr.LegacyOwners.Count} 个（旧轨分支已删）");
+            }
             // EMG2-MAT-01：正式表缺省 2——stageGate ≤ 1 的 owner 走声明轨；stageGate 2 的 owner 只要有一条声明用到还没有执行者的端口（按端口判，EmgCatalog.PendingPorts / 物质 modify）就整条留在旧轨。
             bool Pend(EmgSource.Decl d) => d.StageGate >= 2 && Enum.TryParse(d.Role, true, out EmgRole role) && EmgCatalog.IsPendingPort(d.Port, role);
             var groups = real.Decls.GroupBy(d => d.Owner).ToList();
@@ -573,12 +586,12 @@ namespace GameLogic.EditorTools
                     $"改表：sqd.relay 声明挪给货舱 → 货舱带宽 +{Bw(cargo)}、信号中继 +{Bw(relay)}（编译问题 {EmgCatalog.Current.Problems.Count}）");
                 Expect(CarrierReadings.IsFixedChassis(hover) && !CarrierReadings.IsFixedChassis(fix) && !Dash(hover) && Dash(fix),
                     "改表：锚定行挪给悬浮 → 悬浮按炮塔底盘判（冲刺器装不上），固定底盘不再是（判定只读表，不认 chassis_fixed）");
-                // 回滚：emg.stage = 0 时兼容表与带宽照旧（两者早于 FG19）
+                // EMG4-CLEAN-01：emg.stage 填 0 不再生效（只保留 4）；兼容表与带宽照旧
                 EmgSource off = Clone(real);
                 off.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : real.Tuning(id);
                 EmgCatalog.OverrideForTests(off);
-                Expect(EmgCatalog.EffectiveStage == 0 && Bw(relay) == 1 && CarrierReadings.IsFixedChassis(fix) && !Dash(fix),
-                    $"回滚 emg.stage = 0：信号中继带宽仍 +{Bw(relay)}，固定底盘仍是炮塔底盘（不看阶段）");
+                Expect(EmgCatalog.EffectiveStage == 4 && Bw(relay) == 1 && CarrierReadings.IsFixedChassis(fix) && !Dash(fix),
+                    $"emg.stage 填 0（不再生效，生效阶段 {EmgCatalog.EffectiveStage}）：信号中继带宽仍 +{Bw(relay)}，固定底盘仍是炮塔底盘");
             }
             finally
             {

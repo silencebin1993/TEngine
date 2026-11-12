@@ -412,6 +412,14 @@ namespace BinGames.Sim.Combat
             // EMG3-FUSE-01（ADR ②）：节点指令之后可以有落点接线的 Anchored 尾段（只在带 HasAnchor 的程序上；尾段每行都必须带 Anchored 与内核已接通的落点种类）
             for (int i = next; i < instrs.Count; i++)
             {
+                if ((instrs[i].Flags & EmgInstrFlags.LegacyRoot) != 0)
+                {
+                    if ((instrs[i].Flags & EmgInstrFlags.Anchored) != 0 || instrs[i].Verb < 1 || instrs[i].Verb > CombatReadingVerbs.LastVerb)
+                    {
+                        return false; // EMG4-CLEAN-01：根节点读法行只认旧读法动作码 1～25
+                    }
+                    continue;
+                }
                 if ((program.Flags & EmgProgramFlags.HasAnchor) == 0 || (instrs[i].Flags & EmgInstrFlags.Anchored) == 0 || !EmgAnchorConst.InKernel(instrs[i].AnchorKind))
                 {
                     return false;

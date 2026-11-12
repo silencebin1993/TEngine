@@ -110,8 +110,8 @@ namespace GameLogic.EditorTools
                      "战斗内核是 AOT + Burst，热更层在 Editor 下是 Mono JIT、真机走 HybridCLR 解释执行（热更侧数字只作量级参考，真机复测归 FG15-SYS-02）");
 
                 Step(CheckSourceParity);
-                Step(CheckLegacyMatrix);
-                Step(CheckDeclaredFields);
+                // EMG4-CLEAN-01（FGR-EMG-019 阶段 4 结束口径）：B 段（B1 旧引擎读法层、B2 声明字段 = 旧引擎真实写出字段）随旧 readFields 读法一并退役——
+                // 战斗不再读 readFields（只留作存档对账），fg.TbCarrierReading 旧行与 readFields 列的源数据一致性仍由 A 段核对
                 Step(CheckKernelMatrix);
                 Step(CheckDeclMatrix);
                 Step(CheckStage3SingleTrack); // EMG3-FW-01：阶段 3 全量单轨（FGT-EMG-055 / 003）
@@ -242,96 +242,13 @@ namespace GameLogic.EditorTools
 
         // ── B. 旧引擎：扩展现有的零死对断言 ────────────────────────────────────────
 
-        private static void CheckLegacyMatrix()
-        {
-            Line("  · B1. 旧引擎读法层：扩展 ChassisPrimitiveMatrixSmokeReport 到固件表——42 条带旧基因的固件 × 5 种载体器官真起 SimWorld 零死对 + 命名实证（跃击 / 击退 / 修复 / 增殖 / 连网 / 回波）");
-            string[] legacy = FirmwareKinds.BaseRows.Where(r => r.LegacyId != "none").Select(r => r.LegacyId).ToArray();
-            var sw = Stopwatch.StartNew();
-            (bool pass, string reason) = ChassisPrimitiveMatrixSmokeReport.Run(legacy);
-            sw.Stop();
-            Expect(legacy.Length == 42 && pass, $"旧引擎 {legacy.Length} 条 × 5 载体：{reason}（{sw.ElapsedMilliseconds} 毫秒）");
-            string[] native = FirmwareKinds.BaseRows.Where(r => r.LegacyId == "none").Select(r => r.Id).OrderBy(x => x).ToArray();
-            Expect(native.SequenceEqual(new[] { FirmwareCatalog.FwArmorPierceId, FirmwareCatalog.FwMarkTagId }),
-                $"没有旧基因的 {native.Length} 条（装甲击穿、标记跳转）只有原生读法字段，它们的零死对由 C 段正式内核矩阵证明");
-        }
-
-        /// <summary>读法字段 → 旧引擎 HitEvent 上看得见的一等字段（与 fgdata_firmware.FIRMWARE_READ_FIELDS 的文件头约定一致）。</summary>
-        private static readonly Dictionary<string, string> FieldToEngine = new Dictionary<string, string>
-        {
-            ["homing"] = "Homing", ["count"] = "Count", ["spread"] = "SpreadAngle", ["split"] = "SplitOnHit", ["echo"] = "Delay", ["pierce"] = "Pierce",
-            ["bounce"] = "Bounce", ["return"] = "Return", ["scale"] = "Scale", ["explode"] = "ExplodeOnHit", ["orbit"] = "Spin", ["trail"] = "Trail",
-            ["linger"] = "Linger", ["chain"] = "Chain", ["pull"] = "Pull", ["lob"] = "Gravity", ["grow"] = "GrowthRate", ["rhythm"] = "RhythmRate",
-            ["amp"] = "ReactionAmp", ["weave"] = "Weave", ["tick"] = "TickRate", ["capacitor"] = "Damage", ["feedback"] = "Damage",
-            ["heatburst"] = "AuraRadius", ["inherit"] = "tag:InheritPattern",
-        };
-
-        private static void CheckDeclaredFields()
-        {
-            Line("  · B2. 每条固件声明的读法字段 = 旧引擎等价模块真实写出的字段（旧引擎真实编译 EnergyCore → 基因 → 连射器，与只有连射器时对比；过载加产热底料）；幅度一致");
-            var bad = new List<string>();
-            int checkedCount = 0;
-            foreach (FwRow r in FirmwareKinds.Rows.Where(x => x.LegacyId != "none"))
-            {
-                var declared = CarrierReadings.ParseFields(r.ReadFields);
-                bool primer = declared.Any(d => d.Field == "heatburst");
-                var delta = ChassisPrimitiveMatrixSmokeReport.ProbeFieldDeltas("org_emitter", r.LegacyId, primer);
-                foreach ((string field, float mag) in declared)
-                {
-                    if (!FieldToEngine.TryGetValue(field, out string engine))
-                    {
-                        bad.Add($"{r.Id}.{field} 没有旧引擎对应字段");
-                        continue;
-                    }
-                    string key = engine;
-                    if (key == "Delay" && !delta.ContainsKey("Delay") && delta.ContainsKey("Payload.Delay"))
-                    {
-                        key = "Payload.Delay";
-                    }
-                    if (!delta.TryGetValue(key, out (float Base, float With) v))
-                    {
-                        bad.Add($"{r.Id} 声明 {field} 但模块没写 {engine}（实际改了 {string.Join("/", delta.Keys)}）");
-                        continue;
-                    }
-                    float observed = field switch
-                    {
-                        "count" => v.With - Math.Max(1f, v.Base),
-                        "capacitor" => v.Base > 0f ? v.With / v.Base : 0f,
-                        "feedback" => v.Base > 0f ? v.With / v.Base - 1f : 0f,
-                        "return" or "explode" or "inherit" or "heatburst" => 1f,
-                        _ => v.With,
-                    };
-                    if (Math.Abs(observed - mag) > 0.02f * Math.Max(1f, Math.Abs(mag)))
-                    {
-                        bad.Add($"{r.Id}.{field} 声明幅度 {mag:0.###}，旧引擎是 {observed:0.###}（{engine} {v.Base:0.###}→{v.With:0.###}）");
-                    }
-                }
-                // 反方向：模块写出、却没声明的一等字段（标签除外：标签的效果走 fg.TbStatusTag）
-                foreach (string k in delta.Keys.Where(k => !k.StartsWith("tag:", StringComparison.Ordinal)))
-                {
-                    string expectField = FieldToEngine.FirstOrDefault(kv => kv.Value == k || (k == "Payload.Delay" && kv.Value == "Delay")).Key;
-                    bool coveredBySibling = (k == "RadialRequested" && declared.Any(d => d.Field == "count"))
-                                            || (k == "Orbit" && declared.Any(d => d.Field == "orbit"))
-                                            || (k == "Scale" && declared.Any(d => d.Field == "capacitor"))
-                                            || (k == "Speed" || k == "Lifetime") && declared.Any(d => d.Field == "lob")
-                                            || (k == "Damage" && declared.Any(d => d.Field == "capacitor" || d.Field == "feedback"))
-                                            || (k == "AuraRadius" && !primer);
-                    if (!coveredBySibling && (expectField == null || declared.All(d => d.Field != expectField)))
-                    {
-                        bad.Add($"{r.Id} 的模块还写了 {k}（{delta[k].Base:0.###}→{delta[k].With:0.###}），但没声明对应的读法字段");
-                    }
-                }
-                checkedCount++;
-            }
-            Expect(checkedCount == 42 && bad.Count == 0, $"42 条带旧基因的固件：声明字段 = 模块真实写出的字段，幅度一致{Detail(bad)}");
-        }
-
-        // ── C. 正式内核 44 × 5 零死对（FGT-FW-001）────────────────────────────────
-
         private static void CheckKernelMatrix()
         {
             Line("  · C. FGT-FW-001：正式版战斗内核 44 条固件 × 5 种载体（连射器 / 液压刺锤 / 蜂群无人机舱 / 电晕场 / 喷洒器）零死对——同一把武器“读法开 / 读法关”" +
                  "（伤害、积热完全相同，只差读法）在带正面装甲、预先标记、预先挂状态标签的场地里经编队攻击命令真打 4 游戏秒，行为指纹（敌方耐久与位置、本机耐久与位置、" +
-                 "开火次数、区域 / 回波 / 无人机）必须不同；指纹不含积热与状态位（“字段有差异”不算数）");
+                 "开火次数、区域 / 回波 / 无人机）必须不同；指纹不含积热与状态位（“字段有差异”不算数）。" +
+                 "EMG4-CLEAN-01 起战斗入口只读声明参数：本段“读法开”的武器取旧 readFields 口径（MachineWeaponFrom 单参数，预览口径），只作旧读法对照；" +
+                 "生产路径的零死对以 C5 声明矩阵与 C5b（战斗入口读法 = 声明参数独立推导）为准");
             CampaignState s = NewState(9101, unlockAll: true);
             var dead = new List<string>();
             int combos = 0;
@@ -396,14 +313,9 @@ namespace GameLogic.EditorTools
             Expect(Dmg(on, ArenaNear) > 0f && Dmg(off, ArenaNear) == 0f, $"腐蚀弹头 · 射弹 = 命中爆开：主目标旁边的敌人吃到溅射 {Dmg(on, ArenaNear):0}（读法关 0）");
             (on, off) = Pair(gun, "fw_coolant");
             Expect(on.Zones > 0 && off.Zones == 0 && on.HostileHp < off.HostileHp, $"冷却液 · 射弹 = 命中处留区域：生成 {on.Zones} 块（读法关 0），敌方总耐久更低");
-            // EMG1-E2E-01：正式表 emg.stage = 1 下牵引的拉动量比旧读法小（全量诊断实测：读法关 1.4 米、开 1.0 米；幅度口径登记 FG-GAP-180 待复核）：
-            // 阶段 1 只断言“确实拉近”；旧读法的 0.5 米幅度显式注入 0 跑（回滚开关）。
+            // EMG4-CLEAN-01：emg.stage 只保留 4，旧读法 0.5 米幅度的 emg.stage = 0 回滚对照随旧轨删除（幅度口径 FG-GAP-180）
             (on, off) = Pair(gun, "fw_tractor");
-            Expect(Dist(on, ArenaNear, ArenaP) < Dist(off, ArenaNear, ArenaP) - 0.1f, $"牵引 · 射弹（emg.stage = 1）：附近敌人被拉向命中点（距离 {Dist(on, ArenaNear, ArenaP):0.0} < 读法关 {Dist(off, ArenaNear, ArenaP):0.0}）");
-            FgEmgProgramSelfCheck.UseStage0Catalog();
-            (on, off) = Pair(gun, "fw_tractor");
-            GameLogic.Campaign.Emergence.EmgCatalog.ResetForTests();
-            Expect(Dist(on, ArenaNear, ArenaP) < Dist(off, ArenaNear, ArenaP) - 0.5f, $"牵引 · 射弹（旧读法，emg.stage = 0）：附近敌人被拉向命中点（距离 {Dist(on, ArenaNear, ArenaP):0.0} < 读法关 {Dist(off, ArenaNear, ArenaP):0.0}）");
+            Expect(Dist(on, ArenaNear, ArenaP) < Dist(off, ArenaNear, ArenaP) - 0.1f, $"牵引 · 射弹（阶段 4）：附近敌人被拉向命中点（距离 {Dist(on, ArenaNear, ArenaP):0.0} < 读法关 {Dist(off, ArenaNear, ArenaP):0.0}）");
             (on, off) = Pair(ram, "fw_ricochet");
             Expect(math.length(on.Pos[ArenaP]) > math.length(off.Pos[ArenaP]) + 0.5, $"跳弹 · 格斗 = 击退：主目标被推到离原点 {math.length(on.Pos[ArenaP]):0.0} 米（读法关 {math.length(off.Pos[ArenaP]):0.0}）");
             (on, off) = Pair(ram, "fw_arc");

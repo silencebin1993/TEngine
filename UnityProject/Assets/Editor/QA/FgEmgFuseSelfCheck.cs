@@ -584,6 +584,8 @@ namespace GameLogic.EditorTools
         {
             public int Fired, Dead, Pings, Drones;
             public float Amt, Lost;
+            /// <summary>冷却液斑块中心在 Fx.Probe / Fx.Probe2 1 米内的份量（DEBT-EMG4FUSE02-03：落点在哪个单位脚下）。</summary>
+            public float AtProbe, AtProbe2;
         }
 
         private sealed class Fx
@@ -599,6 +601,11 @@ namespace GameLogic.EditorTools
             public byte PreMatter;
             public double2 PrePos;
             public float OverheatAt, InjectHeat;
+            /// <summary>改宿主载体（DEBT-EMG4FUSE02-03：格斗场在身前）；null = 夹具缺省（射弹）。</summary>
+            public CombatCarrier? Carrier;
+            /// <summary>开火前先用远处的场占满场位（emg.field.capacity 64），本机的场生成不了。</summary>
+            public int PreFields;
+            public double2 Probe = new double2(-999, -999), Probe2 = new double2(-999, -999);
         }
 
         /// <summary>一台机器（0, 0）按 <paramref name="f"/> 布置开一次火（或只注热到过热），跑 f.Steps 步；返回接线执行次数、全场冷却液份量、敌人失血 / 击毁数、频道广播次数。</summary>
@@ -624,6 +631,10 @@ namespace GameLogic.EditorTools
                 w.Reading.Carrier = CombatCarrier.Projectile;
             }
             w.MarkSeconds = f.MarkSeconds;
+            if (f.Carrier.HasValue)
+            {
+                w.Reading.Carrier = f.Carrier.Value;
+            }
             int a = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
             var ids = new List<int>();
             var hp0 = new List<float>();
@@ -643,6 +654,10 @@ namespace GameLogic.EditorTools
                 k.SpawnPatch(f.PreMatter, f.PrePos, 1f, 1f, 30f);
                 k.Step(Dt, k.Time + Dt);
             }
+            for (int i = 0; i < f.PreFields; i++)
+            {
+                k.SpawnField(EmgFieldConst.PortCorona, 200 + i * 3, 200, 1f, 60f, 0, CombatFaction.Hostile);
+            }
             if (f.InjectHeat > 0f)
             {
                 k.InjectUnitHeat(a, f.InjectHeat);
@@ -661,6 +676,8 @@ namespace GameLogic.EditorTools
                 if (z.Matter == EmgMatterConst.Coolant)
                 {
                     run.Amt += z.Amount;
+                    run.AtProbe += math.distance(z.Pos, f.Probe) < 1.0 ? z.Amount : 0f;
+                    run.AtProbe2 += math.distance(z.Pos, f.Probe2) < 1.0 ? z.Amount : 0f;
                 }
             }
             for (int i = 0; i < ids.Count; i++)
@@ -704,6 +721,35 @@ namespace GameLogic.EditorTools
                 new Fx { Enemies = line3, Hp = new[] { 5000f, 12f, 12f }, MaxHp = new[] { 5000f, 100f, 100f } }, (c, t) => c.Dead > t.Dead, r => $"击毁 {r.Dead}");
             Case("B = 伴飞 ent.drone（蜂群）", P(Arc, Wire, "fw_swarm"), P(Arc, "fw_swarm"), new Fx { Enemies = line3 }, (c, t) => c.Drones > t.Drones, r => $"伴飞 {r.Drones}");
             Expect(ok == n, $"C9 其余落点种类与 B 执行者的内核行为（熔合芯片写法 [A, 接线, B] vs 对照 [A, B]：接线执行 ≥ 1、对照 0，且落点上出现 B 的效果）：通过 {ok}/{n}——{string.Join("；", lines)}");
+
+            // EMG4-CLEAN-01（DEBT-EMG4FUSE02-06）负向：两条写 evt.marked 的固件（广角 = 出手时标记、锁定缓存 = 命中时标记）只给锁定缓存接线，另带武器自带标记（功能组件）——
+            // 广角的标记与组件标记都不连带执行 B（修前钩子 src = −1：组件标记也执行锁定缓存的 B）
+            Run3 one = Play(P("fw_lockcache", Wire, Cool), new Fx { MarkSeconds = 4f });
+            Run3 two = Play(P("fw_wide", "fw_lockcache", Wire, Cool), new Fx { MarkSeconds = 4f });
+            Run3 none = Play(P("fw_wide", "fw_lockcache", Cool), new Fx { MarkSeconds = 4f });
+            Expect(one.Fired >= 1 && two.Fired == one.Fired && none.Fired == 0,
+                $"DEBT-EMG4FUSE02-06：只接锁定缓存一条线——单写端接线执行 {one.Fired} 次；加上广角（同类写端，没接线）+ 组件标记后 {two.Fired} 次（应相等）；都不接线 {none.Fired} 次");
+            // 修复轮 2（审查 P1）：读法合并的伴飞分不出来自哪一条——两条蜂群只接一条线时，不论线接在第一条还是第二条后面，B 都执行（与单写端同次数），都不接线 0 次
+            var swarmFx = new Fx { Legacy = true };
+            Run3 s1 = Play(P("fw_swarm", Wire, Cool), swarmFx);
+            Run3 s2nd = Play(P("fw_swarm", "fw_swarm", Wire, Cool), swarmFx);
+            Run3 s1st = Play(P("fw_swarm", Wire, Cool, "fw_swarm"), swarmFx);
+            Run3 s0 = Play(P("fw_swarm", "fw_swarm", Cool), swarmFx);
+            Expect(s1.Fired >= 1 && s2nd.Fired == s1.Fired && s1st.Fired == s1.Fired && s0.Fired == 0,
+                $"DEBT-EMG4FUSE02-06 两条同类写端（蜂群 × 2）只接一条线：[蜂群, 蜂群, 接线, 冷却液] 执行 {s2nd.Fired} 次、[蜂群, 接线, 冷却液, 蜂群] {s1st.Fired} 次（都应 = 单写端 {s1.Fired}）；都不接线 {s0.Fired} 次（应 0）");
+
+            // EMG4-CLEAN-01（DEBT-EMG4FUSE02-03）：格斗载体的牵引场（半径 4）在身前半个半径处（本机 (0,0) 打 (0,5) → 场心 (0,2)）。
+            // 场内落点按场实际中心取：(-2,-0.5) 离场心 3.2 米（在场内、离命中点 5.9 米）有 B；(2.5,7) 离命中点 3.2 米、离场心 5.6 米（修前按命中点 × 幅度近似会算进去）没有 B
+            double2 inF = new double2(-2, -0.5), nearHit = new double2(2.5, 7);
+            var melee = new Fx { Carrier = CombatCarrier.Melee, Enemies = new[] { new double2(0, 5), inF, nearHit }, Probe = inF, Probe2 = nearHit, Steps = 10 };
+            Run3 mf = Play(P("fw_tractor", Wire, Cool), melee), mc = Play(P("fw_tractor", Cool), melee);
+            Expect(mf.Fired >= 2 && mc.Fired == 0 && mf.AtProbe > 1e-3f && mf.AtProbe2 < 1e-3f,
+                $"DEBT-EMG4FUSE02-03 格斗牵引场的场内落点 = 场实际中心（身前半个半径）/ 半径内的单位：接线 {mf.Fired}（对照 {mc.Fired}），场内单位脚下冷却液 {mf.AtProbe:0.00}（> 0）、离命中点近但在场外的单位脚下 {mf.AtProbe2:0.00}（应 0）");
+            // 负向：场位满（远处先占满 64 个场）→ 本机的牵引场生成不了 → 不挂任何落点、不执行 B
+            var full = new Fx { PreFields = 64, Steps = 10 };
+            Run3 ff = Play(P("fw_tractor", Wire, Cool), full), fo = Play(P("fw_tractor", Wire, Cool), new Fx { Steps = 10 });
+            Expect(fo.Fired >= 1 && ff.Fired == 0 && ff.Amt < fo.Amt,
+                $"DEBT-EMG4FUSE02-03 负向：场位满时场没生成——接线执行 {ff.Fired}（应 0；场位空时 {fo.Fired}），冷却液 {ff.Amt:0.00}（场位空时 {fo.Amt:0.00}）");
         }
 
         /// <summary>湮灭镜像：敌人（血 10%）的弹体打中本机 → 偏折场展开 → 下一发被反射回去，带着处决打中敌人 → 直接击毁；对照 [偏折, 处决] 反射弹不带处决，敌人只掉 10 血。</summary>

@@ -55,6 +55,7 @@ namespace GameLogic.EditorTools
                 Step(CheckGapGate);
                 Step(CheckPlaytestPackage);
                 Step(CheckViewHandover);
+                Step(CheckDeadBodyNotPickable);
             }
             finally
             {
@@ -475,6 +476,52 @@ namespace GameLogic.EditorTools
                 GameLogic.View.SignalLinkView.OnViewDetached(id);
                 UnityEngine.Object.DestroyImmediate(goA);
                 UnityEngine.Object.DestroyImmediate(goB);
+                CampaignSession.Clear();
+            }
+        }
+
+        /// <summary>EMG4-CLEAN-01 修复轮 5（FGJ-M6R 实跑：活机器停在阵亡机器的机身上，左键先打到机身、点不中活机器）。</summary>
+        private static void CheckDeadBodyNotPickable()
+        {
+            Line("  · I. 阵亡机器的机身不接点选：挂表现时记录已阵亡 → 碰撞体关掉；活机器照常能点；SetPickable(false) 关掉全部碰撞体");
+            CampaignState s = NewState(10106);
+            CampaignSession.Set(Slot, s);
+            GameObject goDead = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            GameObject goLive = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            int idA = 0, idB = 0;
+            try
+            {
+                MachineOpResult a = MachineRegistry.SpawnMachine(GameLogic.Campaign.Regions.HomeValleyLayout.Erc002ChassisId, GameLogic.Campaign.Regions.HomeValleyLayout.BlueprintHaulerId,
+                    GameLogic.Campaign.Regions.HomeValleyLayout.RegionId, Vector2.zero, 100f, 100f);
+                MachineOpResult b = MachineRegistry.SpawnMachine(GameLogic.Campaign.Regions.HomeValleyLayout.Erc002ChassisId, GameLogic.Campaign.Regions.HomeValleyLayout.BlueprintHaulerId,
+                    GameLogic.Campaign.Regions.HomeValleyLayout.RegionId, Vector2.zero, 100f, 100f);
+                if (!a.Success || !b.Success || !MachineRegistry.TryGetRecord(a.LogicId, out MachineRecord dead))
+                {
+                    Expect(false, $"造不出两台测试机器：{a.Message} / {b.Message}");
+                    return;
+                }
+                idA = a.LogicId;
+                idB = b.LogicId;
+                dead.IsAlive = false; // 只翻记录（MarkDeadByLogicId 的副作用与本条无关）
+                var viewDead = goDead.AddComponent<GameLogic.Campaign.Regions.MachineView>();
+                var viewLive = goLive.AddComponent<GameLogic.Campaign.Regions.MachineView>();
+                new GameLogic.Campaign.Regions.HomeValleyMachineMarker(a.LogicId, dead.ChassisId, null, 0).AttachView(viewDead);
+                new GameLogic.Campaign.Regions.HomeValleyMachineMarker(b.LogicId, dead.ChassisId, null, 0).AttachView(viewLive);
+                bool deadOff = !goDead.GetComponent<Collider>().enabled;
+                bool liveOn = goLive.GetComponent<Collider>().enabled;
+                viewLive.SetPickable(false);
+                bool toggled = !goLive.GetComponent<Collider>().enabled;
+                Expect(deadOff && liveOn && toggled, $"阵亡机身碰撞体关（{deadOff}）；活机器碰撞体开（{liveOn}）；SetPickable(false) 生效（{toggled}）");
+            }
+            finally
+            {
+                foreach (int id in new[] { idA, idB })
+                {
+                    GameLogic.View.MachineMorphView.OnViewDetached(id);
+                    GameLogic.View.SignalLinkView.OnViewDetached(id);
+                }
+                UnityEngine.Object.DestroyImmediate(goDead);
+                UnityEngine.Object.DestroyImmediate(goLive);
                 CampaignSession.Clear();
             }
         }

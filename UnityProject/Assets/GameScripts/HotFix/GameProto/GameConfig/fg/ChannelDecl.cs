@@ -32,6 +32,7 @@ public sealed partial class ChannelDecl : Luban.BeanBase
         Heat = _buf.ReadFloat();
         TextKey = _buf.ReadString();
         StageGate = _buf.ReadInt();
+        Legacy = _buf.ReadString();
     }
 
     public static ChannelDecl DeserializeChannelDecl(ByteBuf _buf)
@@ -91,6 +92,10 @@ public sealed partial class ChannelDecl : Luban.BeanBase
     /// 本条从哪一阶段起生效(同一 owner 全部相同,整条切轨 FGR-EMG-019)
     /// </summary>
     public readonly int StageGate;
+    /// <summary>
+    /// EMG4-CLEAN-01 声明参数:本条写端的过渡 / 数值折叠读法字段(字段:幅度;…,none=没有),生成器按端口从 owner 的旧 readFields 抄;战斗按它结算、不再读 readFields(FGR-EMG-019 第 3 点)
+    /// </summary>
+    public readonly string Legacy;
    
     public const int __ID__ = -893712768;
     public override int GetTypeId() => __ID__;
@@ -115,6 +120,7 @@ public sealed partial class ChannelDecl : Luban.BeanBase
         + "heat:" + Heat + ","
         + "textKey:" + TextKey + ","
         + "stageGate:" + StageGate + ","
+        + "legacy:" + Legacy + ","
         + "}";
     }
 }

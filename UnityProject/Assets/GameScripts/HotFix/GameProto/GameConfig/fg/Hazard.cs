@@ -28,6 +28,7 @@ public sealed partial class Hazard : Luban.BeanBase
         Color = _buf.ReadString();
         StoryId = _buf.ReadString();
         SortOrder = _buf.ReadInt();
+        Ports = _buf.ReadString();
     }
 
     public static Hazard DeserializeHazard(ByteBuf _buf)
@@ -71,6 +72,10 @@ public sealed partial class Hazard : Luban.BeanBase
     /// 图例排序
     /// </summary>
     public readonly int SortOrder;
+    /// <summary>
+    /// 世界常驻源端口(fg.TbChannelPort.id,逗号分隔;none=不提供;三选一新交互 N 按它计,FGR-EMG-191,FG-GAP-213)
+    /// </summary>
+    public readonly string Ports;
    
     public const int __ID__ = -525815297;
     public override int GetTypeId() => __ID__;
@@ -91,6 +96,7 @@ public sealed partial class Hazard : Luban.BeanBase
         + "color:" + Color + ","
         + "storyId:" + StoryId + ","
         + "sortOrder:" + SortOrder + ","
+        + "ports:" + Ports + ","
         + "}";
     }
 }

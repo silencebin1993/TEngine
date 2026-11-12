@@ -1121,6 +1121,10 @@ namespace GameLogic.EditorTools
                 {
                     for (int i = 0; i < steps; i++)
                     {
+                        if (ForkInject == 1 && i == steps / 2)
+                        {
+                            Fork(b.K);
+                        }
                         b.StepOnce(i);
                         if (judge && i % PrintEvery == PrintEvery - 1)
                         {
@@ -1173,6 +1177,11 @@ namespace GameLogic.EditorTools
         }
 
         private static ulong Hash(CombatKernel k) => k.StateHash() ^ (k.EmgStateHash() * 0x9E3779B97F4A7C15UL);
+
+        /// <summary>EMG4-CLEAN-01（DEBT-EMG4FUZZ01-05）：可控分叉注入口，只给 G 段负向用——1 = 确定性重跑在中点多放一个远处的场、2 = 存读档读回后多放一个，检测器必须判失败。平时 0。</summary>
+        internal static int ForkInject;
+
+        private static void Fork(CombatKernel k) => k.SpawnField(EmgFieldConst.PortCorona, 900, 900, 1f, 600f, 0, CombatFaction.Hostile);
 
         private static void MainRun(Arena a, CaseResult r, int steps)
         {
@@ -1602,6 +1611,10 @@ namespace GameLogic.EditorTools
                 if (b.K.StateHash() != a.K.StateHash())
                 {
                     return "读档后状态哈希与存档时不同";
+                }
+                if (ForkInject == 2)
+                {
+                    Fork(b.K);
                 }
                 for (int i = half; i < steps; i++)
                 {

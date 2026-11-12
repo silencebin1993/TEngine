@@ -202,6 +202,9 @@ namespace BinGames.Sim.Combat
         public (int Born, int Capped, int Filled, int OffGround) PitCounts =>
             (_d.PitStats[EmgPitConst.StatBorn], _d.PitStats[EmgPitConst.StatCapped], _d.PitStats[EmgPitConst.StatFilled], _d.PitStats[EmgPitConst.StatOffGround]);
 
+        /// <summary>EMG4-CLEAN-01（DEBT-EMG4TER01-04）：最近一次因上限满没形成熔坑的那一处（米；从没挡过 = 原点）。</summary>
+        public double2 PitLastCappedPos => new double2(_d.PitStats[EmgPitConst.StatCapX], _d.PitStats[EmgPitConst.StatCapY]) / 100.0;
+
         /// <summary>“同一位置”累计点数（自检读点）。</summary>
         public int PitAccCount => _d.PitAcc.Length;
 

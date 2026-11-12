@@ -378,8 +378,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgMaxChildren = Math.Max(1, (int)Math.Round(Tuning("emg.trig.max_children", EmgConst.DefaultMaxChildren)));
             c.EmgMaxPayloads = Math.Max(1, (int)Math.Round(Tuning("emg.tree.max_payloads", EmgConst.DefaultMaxPayloads)));
             c.EmgVerbEmit = Emergence.EmgCatalog.VerbCode("emit");
-            // EMG1-GRM-01：阶段 1 起的掩体规则（力场脉冲 / 布区投放受障碍、残骸阻挡，曲射 / 贯穿越过）；emg.stage = 0 时关，旧行为逐字不变。
-            c.EmgCover = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
+            // EMG1-GRM-01：掩体规则（力场脉冲 / 布区投放受障碍、残骸阻挡，曲射 / 贯穿越过）；EMG4-CLEAN-01：emg.stage 只保留 4，恒开（旧轨分支已删）。
+            c.EmgCover = 1;
             // EMG1-FLASH-01（FG19 FGR-EMG-036）：每台母机的刷写带宽、刷写距离、超出后每再远多少米失效末尾 1 条。
             c.EmgFlashBandwidth = Math.Max(1, (int)Math.Round(Tuning("emg.flash.bandwidth", EmgConst.DefaultFlashBandwidth)));
             // EMG4-HIJ-01（FGR-EMG-163）：劫持时长 / 重启耐久 / 同时台数 / 精英与首领入侵抗性下限（1 = 不可劫持，FG19 第 14 节 #8 推荐默认）
@@ -401,8 +401,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgBeatSeconds = Mathf.Max(0.05f, Tuning("emg.tempo.beat", EmgTempoConst.DefaultBeat)); // EMG3-TMP-01（FGR-EMG-170）：全局节拍
             c.EmgRelayRange = Mathf.Max(0.5f, Tuning("emg.relay.range", EmgSquadConst.DefaultRange)); // EMG3-SQD-01（FGR-EMG-132）：中继范围与每秒转发上限
             c.EmgRelayPerSecond = Mathf.Max(1, Mathf.RoundToInt(Tuning("emg.relay.per_second", EmgSquadConst.DefaultPerSecond)));
-            // EMG1-ENT-01（FG19 FGR-EMG-110～114）：实体层（残骸 / 破片 / 撞击 / 位移）随阶段 1 开；emg.stage = 0 时关，旧行为逐字不变。
-            c.EmgEntity = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? 1 : 0);
+            // EMG1-ENT-01（FG19 FGR-EMG-110～114）：实体层（残骸 / 破片 / 撞击 / 位移）；EMG4-CLEAN-01：恒开。
+            c.EmgEntity = 1;
             c.EmgWreckSeconds = Mathf.Max(1f, Tuning("emg.wreck.seconds", EmgConst.DefaultWreckSeconds));
             c.EmgWreckHpRatio = Mathf.Clamp(Tuning("emg.wreck.hp_ratio", EmgConst.DefaultWreckHpRatio), 0.01f, 1f);
             c.EmgWreckSlow = Mathf.Clamp(Tuning("emg.wreck.slow", EmgConst.DefaultWreckSlow), 0.05f, 1f);
@@ -423,8 +423,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgWireHeatDelta = Mathf.Max(0.01f, Tuning("emg.wire.heat_delta", EmgWireConst.HeatDelta));
             c.EmgImpactVMin = Mathf.Max(0.1f, Tuning("emg.impact.v_min", EmgConst.DefaultImpactVMin));
             c.EmgPushDMin = Mathf.Max(0.01f, Tuning("emg.push.d_min", EmgConst.DefaultPushDMin));
-            // EMG2-MAT-01（FG19 FGR-EMG-081～083；FG19B 第 8、10 节）：物质斑块层随阶段 2 开；emg.stage ≤ 1 时关，阶段 1 行为逐字不变。
-            c.EmgPatchOn = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 2 ? 1 : 0);
+            // EMG2-MAT-01（FG19 FGR-EMG-081～083；FG19B 第 8、10 节）：物质斑块层；EMG4-CLEAN-01：恒开——“像物质的区域”不再按阶段退回旧区域（映射不出 / 斑块层满仍落区域，FGR-EMG-087）。
+            c.EmgPatchOn = 1;
             c.EmgPatchCapacity = Mathf.Clamp((int)Math.Round(Tuning("emg.patch.capacity", EmgMatterConst.DefaultCapacity)), 1, EmgMatterConst.DefaultCapacity);
             c.EmgPatchReserve = Mathf.Clamp((int)Math.Round(Tuning("emg.patch.reserve_world", EmgMatterConst.DefaultReserveWorld)), 0, c.EmgPatchCapacity);
             c.EmgPatchPerStep = Math.Max(1, (int)Math.Round(Tuning("emg.patch.per_step", EmgMatterConst.DefaultPerStep)));
@@ -459,8 +459,8 @@ namespace GameLogic.Campaign.Combat
             c.EmgMarkTagKey = NamedReactionCatalog.StableKey(MechanicalReactionCatalog.ReactionMarkJumpId);
             // EMG4-CODEX-01（FGR-EMG-194）：一次根出手结算多少次交互记“极限”（链深达 3 另算）。
             c.EmgExtremeCount = Math.Max(1, (int)Math.Round(Tuning("emg.codex.extreme_count", EmgConst.DefaultExtremeCount)));
-            // EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲块数机制随阶段 1 开（emg.stage = 0 时块数 0 = 旧轨：反伤不限次数、不放破片）。
-            c.EmgEraBlocks = (byte)(Emergence.EmgCatalog.Current.EffectiveStage >= 1 ? Mathf.Clamp((int)Math.Round(Tuning("emg.era.blocks", 12f)) & ~1, 2, 16) : 0);
+            // EMG1-FW-01（FGR-EMG-233）：爆炸反应装甲块数机制（EMG4-CLEAN-01：旧轨“块数 0 = 反伤不限次数”删掉）。
+            c.EmgEraBlocks = (byte)Mathf.Clamp((int)Math.Round(Tuning("emg.era.blocks", 12f)) & ~1, 2, 16);
             c.EmgEraRefill = Mathf.Max(0.1f, Tuning("emg.era.refill_seconds", 3f));
             return c;
         }
@@ -793,14 +793,14 @@ namespace GameLogic.Campaign.Combat
 
         private int _pitCappedSeen = -1;
 
-        /// <summary>EMG4-TER-01（卡片负向“熔坑上限满：不生效并提示”）：上限满未生效的计数涨了就发一条信息级通知（带位置 = 最近的熔坑；O(1) / 步）。</summary>
+        /// <summary>EMG4-TER-01（卡片负向“熔坑上限满：不生效并提示”）：上限满未生效的计数涨了就发一条信息级通知（位置 = 这次被挡掉的那一处，DEBT-EMG4TER01-04；O(1) / 步）。</summary>
         private void WatchPits()
         {
             int capped = Kernel.PitCounts.Capped;
             if (_pitCappedSeen >= 0 && capped > _pitCappedSeen && Kernel.PitCount > 0)
             {
-                EmgPit last = Kernel.PitAt(Kernel.PitCount - 1);
-                Notifications.NotificationCenter.Post("pit_capped", GameText.Format("emg.pit.capped", Kernel.PitCount), new Vector3((float)last.Pos.x, 0f, (float)last.Pos.y));
+                double2 at = Kernel.PitLastCappedPos;
+                Notifications.NotificationCenter.Post("pit_capped", GameText.Format("emg.pit.capped", Kernel.PitCount), new Vector3((float)at.x, 0f, (float)at.y));
             }
             _pitCappedSeen = capped;
         }
@@ -993,6 +993,10 @@ namespace GameLogic.Campaign.Combat
             if (_machineUnit.TryGetValue(logicId, out int unit))
             {
                 Kernel.Kill(unit, 0);
+                if (_markerByUnit.TryGetValue(unit, out HomeValleyMachineMarker marker) && marker.View != null)
+                {
+                    marker.View.SetPickable(false); // 机身留在原地，但不再挡住站在它上面的活机器的点选
+                }
             }
         }
 
@@ -1110,6 +1114,18 @@ namespace GameLogic.Campaign.Combat
                 return WithPartField(p?.PrimaryId, w);
             }
             CombatWeapon local = w; // EMG1-FLASH-01：变体武器从同一把本地武器出发
+            // EMG1-GRM-01：机器武器的读法换成“声明轨”——写修饰端口的固件不再按旧修饰字段结算，根节点上的旧动词行按 fg.TbPortCarrier 折进读法。
+            // 炮塔的弹体武器（Mode = 弹体，固定底盘）沿用 FGR-FW-012 兼容表，读法不动。
+            // EMG4-CLEAN-01：先算读法（条件 / 随机下游的读法行记进 program.LegacyOps），再登记程序（这几行接在尾段）
+            CombatReading programReading = ProgramReading(p, w.Reading, program); // EMG4-CLEAN-01：弹体武器（炮塔 / 重炮）也走声明轨，不再按 FGR-FW-012 兼容读法读 readFields
+            float projDamage = w.Damage;
+            if (w.Mode == CombatWeaponMode.Projectile && program.LegacyOps != null)
+            {
+                // 修复轮 2（审查 P1）：BuildWeapon 按全部固件的声明参数把伤害倍率折进了单发伤害（含条件 / 随机下游的电容蓄力）；有门控行时改按静态读法的倍率重折，门后那份由内核命中时按放行位乘（StepProjectiles）
+                float folded = MachineWeaponFrom(p, false).Reading.DamageScale;
+                projDamage = Mathf.Max(0f, w.Damage) / (folded > 0f ? folded : 1f) * (programReading.DamageScale > 0f ? programReading.DamageScale : 1f);
+            }
+            programReading.DamageScale = w.Mode == CombatWeaponMode.Projectile ? w.Reading.DamageScale : programReading.DamageScale; // 弹体武器：伤害倍率沿用传入读法（TurretService.BuildWeapon 已折进 Damage 并置 1，原 InjectTrimmedReading 同口径）
             int index = RegisterProgram(Kernel, program);
             if (index < 0)
             {
@@ -1119,19 +1135,11 @@ namespace GameLogic.Campaign.Combat
                 return WithPartField(p.PrimaryId, w);
             }
             w.Program = index;
+            w.Damage = projDamage;
             float raw = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, w.HeatPerShot + program.WeaponHeatDelta * raw);
             w.DrawHeat = Mathf.Min(w.HeatPerShot, Mathf.Max(0f, program.HeatDraw * raw)); // EMG3-CHS-02 取水：内核只在水面上的取水单位出手时扣掉这份
-            if (w.Mode != CombatWeaponMode.Projectile)
-            {
-                // EMG1-GRM-01：机器武器的读法换成“声明轨”——写修饰端口的固件不再按旧修饰字段结算，根节点上的旧动词行按 fg.TbPortCarrier 折进读法。
-                // 炮塔的弹体武器（Mode = 弹体，固定底盘）沿用 FGR-FW-012 兼容表，读法不动。
-                w.Reading = ProgramReading(p, w.Reading, program);
-            }
-            else
-            {
-                w.Reading = InjectTrimmedReading(p, w.Reading, program);
-            }
+            w.Reading = programReading;
             noteKey = ApplySpawnFlight(ref w, program, p.PrimaryId) ?? noteKey;
             noteKey ??= program.Notes.Exists(n => n.Key == Emergence.EmgProgramCompiler.NoteLobStraight) ? Emergence.EmgProgramCompiler.NoteLobStraight : null;
             // EMG4-FW-01（FG19A N40 劫持中继）：带劫持中继的程序也登记刷写变体——它劫持的敌机按剩余带宽执行“前 k 条”（去核心列表）
@@ -1187,6 +1195,8 @@ namespace GameLogic.Campaign.Combat
             {
                 return WithPartField(component, w);
             }
+            CombatReading programReading = ProgramReading(p, w.Reading, program); // EMG4-CLEAN-01：先读法后登记；弹体武器同样走声明轨
+            programReading.DamageScale = w.Mode == CombatWeaponMode.Projectile ? w.Reading.DamageScale : programReading.DamageScale;
             int index = RegisterProgram(Kernel, program);
             if (index < 0)
             {
@@ -1195,7 +1205,7 @@ namespace GameLogic.Campaign.Combat
             }
             CombatWeapon local = w;
             w.Program = index;
-            w.Reading = w.Mode != CombatWeaponMode.Projectile ? ProgramReading(p, w.Reading, program) : InjectTrimmedReading(p, w.Reading, program);
+            w.Reading = programReading;
             ApplySpawnFlight(ref w, program, component);
             w = WithPartField(component, w); // EMG4-FW-01：同 WithProgram——变体表挂在带部件场的最终武器上
             RegisterFlashVariants(p, local, w, program, always: true);
@@ -1264,6 +1274,8 @@ namespace GameLogic.Campaign.Combat
             HashSet<string> dropped = Emergence.EmgProgramCompiler.FlashDroppedFirmware(program, k, noCore);
             CombatWeapon v = local;
             v.HeatPerShot = final.HeatPerShot;
+            // EMG4-CLEAN-01：先按截断后的程序算读法（记根节点读法行），再登记；登记失败退回“只有基础攻击”的读法
+            CombatReading vr = v.Mode != CombatWeaponMode.Projectile && t != null ? FlashReading(p, local.Reading, program, t, dropped) : default;
             int index = t != null ? RegisterProgram(Kernel, t) : -1;
             if (t != null && index < 0)
             {
@@ -1272,7 +1284,7 @@ namespace GameLogic.Campaign.Combat
             v.Program = index;
             if (v.Mode != CombatWeaponMode.Projectile)
             {
-                v.Reading = FlashReading(p, local.Reading, program, index >= 0 ? t : null, dropped);
+                v.Reading = index >= 0 ? vr : FlashReading(p, local.Reading, program, null, dropped);
             }
             if (index >= 0)
             {
@@ -1309,32 +1321,18 @@ namespace GameLogic.Campaign.Combat
             bool damageFromCompile = !p.FixedDamage && !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
             // EMG1-FW-01：变体读法的跳过规则按“截断后的程序”定（被截掉的指令不编译，它的固件旧字段与过渡字段都不结算）；截到 0 条 = 全部固件按截断前的单轨口径去掉
             Func<string, string, bool> skip = Emergence.EmgProgramCompiler.LegacySkip(truncated ?? program);
-            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
-                (fw, field) => dropped.Contains(fw) || (skip != null && skip(fw, field)));
-            return FoldProgramReadings(r, truncated, damageFromCompile);
+            Func<string, string, bool> s2 = (fw, field) => dropped.Contains(fw) || (skip != null && skip(fw, field));
+            if (truncated == null || truncated.IsEmpty)
+            {
+                return CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile, s2, Emergence.EmgCatalog.DeclLegacyOf); // EMG4-CLEAN-01：声明参数，不读 readFields
+            }
+            return GatedReading(p, truncated, ReadingFirmware(p), damageFromCompile, s2); // EMG4-CLEAN-01：变体同样按截断后的程序记根节点读法行
         }
 
         /// <summary>
         /// EMG1-GRM-01（FGR-EMG-018 / 019；FG19A 第 3.2 节）：程序轨的武器读法——先按旧读法重建、去掉“写修饰端口的固件”的修饰字段（不两轨同时结算），
         /// 再把根节点上解析成旧动词的修饰行（格斗 / 力场 / 布区的大多数格子，以及连锁、体积、破甲、威力）按 fg.TbPortCarrier 参数 × 声明幅度折进读法。O(程序长度 × 端口行)，只在装配结算时。
         /// </summary>
-        /// <summary>
-        /// EMG2-PHS-01 审查修复（第 2 轮）：炮塔弹体武器的兼容读法里，去掉能量注入写端退役的旧标签与 heatburst（内核落点注能已承接，FGR-EMG-019 单轨），其余读法逐字不动。
-        /// 伤害倍率沿用传入读法的值（TurretService.BuildWeapon 已把它折进 Damage 并置 1）。
-        /// </summary>
-        public static CombatReading InjectTrimmedReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program)
-        {
-            Func<string, string, bool> skip = Emergence.EmgProgramCompiler.InjectSkip(program);
-            if (skip == null)
-            {
-                return reading;
-            }
-            bool damageFromCompile = !p.FixedDamage && !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
-            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile, skip);
-            r.DamageScale = reading.DamageScale;
-            return r;
-        }
-
         public static CombatReading ProgramReading(BlueprintCircuitPreview p, CombatReading reading, Emergence.EmgProgramResult program)
         {
             if (program == null || program.IsEmpty)
@@ -1343,9 +1341,133 @@ namespace GameLogic.Campaign.Combat
             }
             bool damageFromCompile = !p.FixedDamage && !p.HasCannonPrimary && !(CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f);
             // EMG1-FW-01（FGR-EMG-019 单轨）：程序里的固件旧字段 / 旧标签一律跳过，只留根节点效果写端的过渡字段（EmgProgramCompiler.LegacySkip）
-            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile,
-                Emergence.EmgProgramCompiler.LegacySkip(program));
-            return FoldProgramReadings(r, program, damageFromCompile);
+            // EMG4-CLEAN-01（DEBT-EMG3META01-01）：只出现在条件 / 随机下游的固件，它的过渡字段不进静态读法、记成根节点读法行（内核按放行位补执行）
+            return GatedReading(p, program, ReadingFirmware(p), damageFromCompile, Emergence.EmgProgramCompiler.LegacySkip(program));
+        }
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208、DEBT-EMG3META01-01；FGR-EMG-019 第 3 点、FGR-EMG-040）：声明轨读法的唯一出口——按跳过规则重建读法、折根节点旧动词行；
+        /// 根节点上位于条件 / 随机下游（正序或逆序树任一棵，<see cref="GatedOrdinals"/>）的指令与“只出现在这些位置的固件”的过渡字段不进静态读法，
+        /// 记进 <see cref="Emergence.EmgProgramResult.LegacyOps"/>（登记程序时接在尾段，内核 EmgGatedReading 在出手 / 命中处按放行位补到读法副本上）。
+        /// 没有条件 / 随机元程序时 LegacyOps = null、结果与旧做法逐字一致。
+        /// </summary>
+        private static CombatReading GatedReading(BlueprintCircuitPreview p, Emergence.EmgProgramResult program, IReadOnlyList<string> firmware, bool damageFromCompile,
+            Func<string, string, bool> skip)
+        {
+            program.LegacyOps = null;
+            HashSet<int> gated = GatedOrdinals(program);
+            Dictionary<string, int> gatedFw = gated != null ? GatedOnlyFirmware(program, gated) : null;
+            List<(string Fw, string Field)> held = null;
+            Func<string, string, bool> s2 = skip;
+            if (gatedFw != null && gatedFw.Count > 0)
+            {
+                s2 = (fw, field) =>
+                {
+                    if (skip != null && skip(fw, field))
+                    {
+                        return true;
+                    }
+                    if (!gatedFw.ContainsKey(fw) || field.StartsWith("#", StringComparison.Ordinal))
+                    {
+                        return false; // 旧标签不是读法动作，照常（声明轨固件的旧标签已由 LegacySkip 跳过）
+                    }
+                    (held ??= new List<(string, string)>()).Add((fw, field));
+                    return true;
+                };
+            }
+            CombatReading r = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, firmware, damageFromCompile, s2, Emergence.EmgCatalog.DeclLegacyOf); // EMG4-CLEAN-01：过渡字段取声明参数 legacy 列
+            if (held != null)
+            {
+                var ops = program.LegacyOps ??= new List<EmgInstr>();
+                foreach ((string fw, string field) in held)
+                {
+                    foreach ((string f, float mag) in Emergence.EmgCatalog.DeclLegacyOf(fw))
+                    {
+                        if (f == field)
+                        {
+                            CarrierReadings.RecordField(ref r, ops, gatedFw[fw], (FirmwareCarrier)program.Carrier, field, mag, damageFromCompile);
+                        }
+                    }
+                }
+            }
+            r = FoldRoot(r, program, damageFromCompile, gated);
+            r.Cone = Math.Min(180f, r.Cone);
+            return r;
+        }
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-208）：根节点上位于条件 / 随机元程序下游的写端序号（正序序号）——正序树与逆序树任一棵里在下游就算（内核按当前选中的树放行，
+        /// 两棵树尾段都带这几条，切树后同一条固件去留一致）。与内核 EmgGatedUnits 同口径（序号 ≥ 64 不受元程序约束）。没有返回 null。
+        /// </summary>
+        public static HashSet<int> GatedOrdinals(Emergence.EmgProgramResult program)
+        {
+            HashSet<int> g = null;
+            CollectGated(program, false, ref g);
+            CollectGated(program?.Reverse, true, ref g);
+            return g;
+        }
+
+        private static void CollectGated(Emergence.EmgProgramResult t, bool reverse, ref HashSet<int> g)
+        {
+            if (t == null || t.IsEmpty || t.KernelNodes.Count == 0)
+            {
+                return;
+            }
+            EmgNode root = t.KernelNodes[0];
+            int end = Math.Min(root.FirstInstr + root.InstrCount, t.KernelInstrs.Count);
+            int from = int.MaxValue;
+            for (int i = root.FirstInstr; i < end; i++)
+            {
+                EmgInstr x = t.KernelInstrs[i];
+                int kind = x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 ? EmgMetaConst.KindOf(x.Port) : -1;
+                if (kind == EmgMetaConst.If || kind == EmgMetaConst.Random)
+                {
+                    from = Math.Min(from, x.Ordinal);
+                }
+            }
+            for (int i = root.FirstInstr; from != int.MaxValue && i < end; i++)
+            {
+                EmgInstr x = t.KernelInstrs[i];
+                if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || EmgMetaConst.KindOf(x.Port) >= 0 || x.Ordinal <= from || x.Ordinal >= EmgMetaConst.MaxOrdinal)
+                {
+                    continue;
+                }
+                int src = !reverse ? x.Ordinal : x.Ordinal < t.Steps.Count ? t.Steps[x.Ordinal].Src : -1;
+                if (src >= 0)
+                {
+                    (g ??= new HashSet<int>()).Add(src);
+                }
+            }
+        }
+
+        /// <summary>只出现在下游位置的固件 → 它（第一条）的正序序号；同一条固件另有不在下游的步骤时按不受控处理（照常折进静态读法）。</summary>
+        private static Dictionary<string, int> GatedOnlyFirmware(Emergence.EmgProgramResult program, HashSet<int> gated)
+        {
+            var res = new Dictionary<string, int>(StringComparer.Ordinal);
+            var free = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Emergence.EmgProgramStep s in program.Steps)
+            {
+                if (string.IsNullOrEmpty(s.FirmwareId) || s.Overflow)
+                {
+                    continue;
+                }
+                if (gated.Contains(s.Ordinal))
+                {
+                    if (!res.ContainsKey(s.FirmwareId))
+                    {
+                        res[s.FirmwareId] = s.Ordinal;
+                    }
+                }
+                else
+                {
+                    free.Add(s.FirmwareId);
+                }
+            }
+            foreach (string f in free)
+            {
+                res.Remove(f);
+            }
+            return res;
         }
 
         /// <summary>EMG1-GRM-01：根节点（0 代）上动词是旧读法动词（1～25）的写端行，逐条按 fg.TbPortCarrier 该端口 × 本载体的全部旧动词行折进读法（幅度 = 声明 amount）。</summary>
@@ -1355,21 +1477,26 @@ namespace GameLogic.Campaign.Combat
             {
                 return r;
             }
+            program.LegacyOps = null;
+            r = FoldRoot(r, program, damageFromCompile, GatedOrdinals(program));
+            r.Cone = Math.Min(180f, r.Cone);
+            return r;
+        }
+
+        /// <summary>
+        /// 根节点写端行折进读法；序号在 <paramref name="gated"/> 里的（条件 / 随机下游）不折，记进 <see cref="Emergence.EmgProgramResult.LegacyOps"/>（EMG4-CLEAN-01，
+        /// 取代 EMG3-E2E-01 只挡连锁的 condFrom：全部旧动词与数值折叠字段一起交内核按放行位执行，连锁与其余读法共用同一份已命中列表，FG-GAP-208 ②）。
+        /// </summary>
+        private static CombatReading FoldRoot(CombatReading r, Emergence.EmgProgramResult program, bool damageFromCompile, HashSet<int> gated)
+        {
+            if (program == null || program.IsEmpty || program.KernelNodes.Count == 0)
+            {
+                return r;
+            }
             Emergence.EmgCompiled c = Emergence.EmgCatalog.Current;
             var carrier = (FirmwareCarrier)program.Carrier;
             EmgNode root = program.KernelNodes[0];
             string[] mags = { "none", "a", "b", "c" };
-            // EMG3-E2E-01（FGJ-EMG-3 发现）：位于条件 / 随机元程序下游的连锁行不折进静态读法，由内核按每次结算的放行位执行（CombatLogic.EmgCondChainMods 同口径）
-            int condFrom = int.MaxValue;
-            for (int i = root.FirstInstr; i < root.FirstInstr + root.InstrCount && i < program.KernelInstrs.Count; i++)
-            {
-                EmgInstr x = program.KernelInstrs[i];
-                int kind = x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 ? EmgMetaConst.KindOf(x.Port) : -1;
-                if (kind == EmgMetaConst.If || kind == EmgMetaConst.Random)
-                {
-                    condFrom = Math.Min(condFrom, x.Ordinal);
-                }
-            }
             for (int i = root.FirstInstr; i < root.FirstInstr + root.InstrCount && i < program.KernelInstrs.Count; i++)
             {
                 EmgInstr x = program.KernelInstrs[i];
@@ -1377,7 +1504,8 @@ namespace GameLogic.Campaign.Combat
                 {
                     continue;
                 }
-                if (FoldLegacyNumeric(ref r, c, program, x, carrier, damageFromCompile))
+                List<EmgInstr> ops = gated != null && gated.Contains(x.Ordinal) ? program.LegacyOps ??= new List<EmgInstr>() : null;
+                if (FoldLegacyNumeric(ref r, c, program, x, carrier, damageFromCompile, ops))
                 {
                     continue;
                 }
@@ -1387,14 +1515,17 @@ namespace GameLogic.Campaign.Combat
                     {
                         continue;
                     }
-                    if (row.Verb == (int)EmgVerb.Chain && x.Verb == (byte)EmgVerb.Chain && x.Ordinal > condFrom)
+                    string verb = Emergence.EmgCatalog.Verbs[row.Verb - 1], mag = mags[Math.Min(3, (int)row.Mag)];
+                    if (ops == null || !CarrierReadings.TryRecordVerb(ops, x.Ordinal, verb, row.A, row.B, row.C, mag, x.Amount, damageFromCompile))
                     {
-                        continue; // 条件下游的连锁：内核动态执行
+                        CarrierReadings.ApplyVerb(ref r, carrier, verb, row.A, row.B, row.C, mag, x.Amount, damageFromCompile);
                     }
-                    CarrierReadings.ApplyVerb(ref r, carrier, Emergence.EmgCatalog.Verbs[row.Verb - 1], row.A, row.B, row.C, mags[Math.Min(3, (int)row.Mag)], x.Amount, damageFromCompile);
                 }
             }
-            r.Cone = Math.Min(180f, r.Cone);
+            if (program.LegacyOps != null && program.LegacyOps.Count == 0)
+            {
+                program.LegacyOps = null;
+            }
             return r;
         }
 
@@ -1411,7 +1542,8 @@ namespace GameLogic.Campaign.Combat
         /// （广角 spread:60 → 格斗扇形 +30°、力场 +2 米、布区 +1.5 米，与 FG19A 第 1.1 节第 94 行逐格一致），不再拿声明幅度（广角写的是 30°）去乘体积行。
         /// 没有对应旧字段的固件（新固件）走 fg.TbPortCarrier 行 × 声明幅度。返回 true = 已按旧字段折过。
         /// </summary>
-        private static bool FoldLegacyNumeric(ref CombatReading r, Emergence.EmgCompiled c, Emergence.EmgProgramResult program, EmgInstr x, FirmwareCarrier carrier, bool damageFromCompile)
+        private static bool FoldLegacyNumeric(ref CombatReading r, Emergence.EmgCompiled c, Emergence.EmgProgramResult program, EmgInstr x, FirmwareCarrier carrier, bool damageFromCompile,
+            List<EmgInstr> ops = null)
         {
             foreach ((string port, string[] fields) in NumericLegacy)
             {
@@ -1423,7 +1555,7 @@ namespace GameLogic.Campaign.Combat
                 var sum = new Dictionary<string, float>(StringComparer.Ordinal);
                 foreach (string fw in Emergence.EmgProgramCompiler.RootWriters(program, x.Port)) // EMG1-FW-01：只汇总根节点上写这个端口的固件
                 {
-                    foreach ((string field, float mag) in CarrierReadings.FieldsOf(fw))
+                    foreach ((string field, float mag) in Emergence.EmgCatalog.DeclLegacyOf(fw)) // EMG4-CLEAN-01：数值折叠幅度取声明参数 legacy 列
                     {
                         if (Array.IndexOf(fields, field) >= 0)
                         {
@@ -1436,7 +1568,9 @@ namespace GameLogic.Campaign.Combat
                 {
                     if (sum.TryGetValue(field, out float mag))
                     {
-                        any |= CarrierReadings.ApplyField(ref r, carrier, field, mag, damageFromCompile);
+                        // EMG4-CLEAN-01：条件 / 随机下游的这一行记成根节点读法行（出手间隔仍折进静态读法）
+                        any |= ops != null ? CarrierReadings.RecordField(ref r, ops, x.Ordinal, carrier, field, mag, damageFromCompile)
+                            : CarrierReadings.ApplyField(ref r, carrier, field, mag, damageFromCompile);
                     }
                 }
                 return any;
@@ -1718,6 +1852,39 @@ namespace GameLogic.Campaign.Combat
         /// <summary>登记进内核程序表（按完整字节去重，已有的返回原下标）。空程序返回 −1；表满 / 形状不合法也返回 −1（调用方给原因 <see cref="Emergence.EmgProgramCompiler.NoteTableFull"/>）。
         /// 放在桥接层：FG14 §5 硬约束 3，热更层只有 Campaign/Combat/ 能点名内核。</summary>
         public static int RegisterProgram(CombatKernel kernel, Emergence.EmgProgramResult r) =>
+            r?.LegacyOps != null && r.LegacyOps.Count > 0 && kernel != null ? RegisterWithOps(kernel, r) : RegisterPlain(kernel, r);
+
+        /// <summary>
+        /// EMG4-CLEAN-01（FG-GAP-207 / 208）：带根节点读法行的程序——正序树尾段接 <see cref="Emergence.EmgProgramResult.LegacyOps"/>（正序序号），
+        /// 逆序树尾段接同一组行、序号换成逆序后的位置（<see cref="Emergence.EmgProgramStep.Src"/>）。内核按完整字节去重，读法行不同的两套装配不会合并。
+        /// </summary>
+        private static int RegisterWithOps(CombatKernel kernel, Emergence.EmgProgramResult r)
+        {
+            var fwd = new List<EmgInstr>(r.KernelInstrs);
+            fwd.AddRange(r.LegacyOps);
+            if (r.Reverse == null || r.Reverse.IsEmpty)
+            {
+                return kernel.AddProgram(r.Program, r.KernelNodes, fwd);
+            }
+            var revOf = new Dictionary<int, int>();
+            foreach (Emergence.EmgProgramStep s in r.Reverse.Steps)
+            {
+                if (s.Src >= 0)
+                {
+                    revOf[s.Src] = s.Ordinal;
+                }
+            }
+            var rev = new List<EmgInstr>(r.Reverse.KernelInstrs);
+            foreach (EmgInstr op in r.LegacyOps)
+            {
+                EmgInstr y = op;
+                y.Ordinal = (byte)(revOf.TryGetValue(op.Ordinal, out int ro) ? ro : op.Ordinal);
+                rev.Add(y);
+            }
+            return kernel.AddProgramPair(r.Program, r.KernelNodes, fwd, r.Reverse.Program, r.Reverse.KernelNodes, rev);
+        }
+
+        private static int RegisterPlain(CombatKernel kernel, Emergence.EmgProgramResult r) =>
             kernel == null || r == null || r.IsEmpty ? -1
             : r.Reverse != null && !r.Reverse.IsEmpty // EMG3-META-01（FGR-EMG-040 反转）：正序 / 逆序两棵树成对登记，逆序树在下一行
                 ? kernel.AddProgramPair(r.Program, r.KernelNodes, r.KernelInstrs, r.Reverse.Program, r.Reverse.KernelNodes, r.Reverse.KernelInstrs)
@@ -1744,7 +1911,12 @@ namespace GameLogic.Campaign.Combat
         /// FG2-FW-02：载体与固件读法由 <see cref="CarrierReadings.Build"/> 按“主组件的载体 × 生效固件的读法字段”查表翻译（<see cref="CombatWeapon.Reading"/>）；
         /// FG2-FW-02 新建的作战组件（格斗 / 无人机 / 力场 / 布区）用表里的基础伤害；即时命中武器也按固件积热（DEBT-FG1SIG06-02）。
         /// </summary>
-        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p) => MachineWeaponFrom(p, false);
+        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p) => MachineWeaponFrom(p, false, null);
+
+        /// <summary>EMG4-CLEAN-01（FGR-EMG-019 阶段 4 结束口径）：战斗入口（机器装配、炮塔、试验场）——固件只按声明参数（fg.TbChannelDecl legacy 列）进基础读法，战斗不读 readFields；
+        /// 有程序时读法由 <see cref="WithProgram(BlueprintCircuitPreview, CombatWeapon, CampaignState, out Emergence.EmgProgramResult, out string)"/> 按声明轨整套重建。
+        /// 单参数重载保留旧 readFields 口径，只给装配预览（每发伤害 / 刷写预判）与 FgReadingMatrixSelfCheck 的旧读法对照用。</summary>
+        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p, bool suppressReaction) => MachineWeaponFrom(p, suppressReaction, Emergence.EmgCatalog.DeclLegacyOf);
 
         /// <summary>FG2-FW-02：机器的基础出手间隔（游戏秒，fg.TbHomeTuning combat.machine.attack_interval）——编队攻击命令的攻击间隔与即时命中武器的冷却同一个数
         /// （驻守开火的炮塔、直控蓄力门槛都按它 × 读法的出手间隔倍率）。</summary>
@@ -1766,7 +1938,7 @@ namespace GameLogic.Campaign.Combat
         }
 
         /// <summary><paramref name="suppressReaction"/>：FG1-SIG-03 核心固件冷却中——反应不发动（熔穿过载不额外积热、不穿甲；标记跳转不跳），其余参数不变。</summary>
-        public static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p, bool suppressReaction)
+        private static CombatWeapon MachineWeaponFrom(BlueprintCircuitPreview p, bool suppressReaction, Func<string, IReadOnlyList<(string Field, float Magnitude)>> fieldsOf)
         {
             var w = new CombatWeapon
             {
@@ -1796,7 +1968,7 @@ namespace GameLogic.Campaign.Combat
                 w.Reaction = !suppressReaction && p.ReactionId == MechanicalReactionCatalog.ReactionMeltOverloadId ? CombatReaction.MeltOverload : CombatReaction.None;
                 // FG2-FW-02：重炮是射弹载体；伤害是固定值（不经电路编译），“伤害倍率”读法（电容蓄力）按表乘上。
                 w.BeamHit = (byte)(Emergence.EmgRuleCatalog.IsBeam(p.PrimaryId) ? 1 : 0);
-                w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: false);
+                w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), false, null, fieldsOf);
                 w.FuseTrace = FuseTraceOf(p);
                 return w;
             }
@@ -1816,7 +1988,7 @@ namespace GameLogic.Campaign.Combat
             float rawHeatI = p.RawHeatMultiplier > 0f ? p.RawHeatMultiplier : 1f;
             w.HeatPerShot = Mathf.Max(0f, p.FirmwareHeatPerShot) * rawHeatI;
             w.BeamHit = (byte)(Emergence.EmgRuleCatalog.IsBeam(p.PrimaryId) ? 1 : 0);
-            w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), damageFromCompile: !fixedDamage);
+            w.Reading = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, ReadingFirmware(p), !fixedDamage, null, fieldsOf);
             // EMG1-CHAIN-01（FGR-EMG-084 / 019 同一 owner 单轨）：触发这条装配反应的固件已走声明轨（它的 grm.mod.chain“只跳已标记”在程序里跳、在内核计数），
             // 旧装配反应对同一武器不再结算跳转与计数——同一次跳转不计两次。没走声明轨（emg.stage = 0 的正式流程）逐字同旧。
             // EMG2-REACT-01（FGR-EMG-021 豁免撤销）：标记跳转只由固件“以 evt.marked 为条件写 grm.mod.chain”的只跳已标记连锁产生（内核 EmgMarkJumpReact 计数），
@@ -3267,7 +3439,7 @@ namespace GameLogic.Campaign.Combat
         /// </summary>
         public void ApplyRelay(int unit, string structureId)
         {
-            bool on = Emergence.EmgCatalog.EffectiveStage >= 3 && !string.IsNullOrEmpty(structureId)
+            bool on = !string.IsNullOrEmpty(structureId)
                       && Emergence.EmgCatalog.PartReads("sqd.relay", Emergence.EmgRole.Scope, new[] { structureId });
             if (!IsDisposed && (on || Kernel.TryGetRelay(unit, out _)))
             {
@@ -3277,7 +3449,7 @@ namespace GameLogic.Campaign.Combat
 
         private void ApplyDash(int unit, string utilityId)
         {
-            bool on = Emergence.EmgCatalog.EffectiveStage >= 3 && Emergence.EmgCatalog.OwnerDeclaresWrite(utilityId, "en.kinetic");
+            bool on = Emergence.EmgCatalog.OwnerDeclaresWrite(utilityId, "en.kinetic");
             if (!IsDisposed && (on || Kernel.TryGetTraitRun(unit, out _)))
             {
                 Kernel.SetUnitDash(unit, on);

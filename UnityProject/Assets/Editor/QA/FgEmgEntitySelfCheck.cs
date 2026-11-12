@@ -364,15 +364,15 @@ namespace GameLogic.EditorTools
             Expect(Near(pDrone.Mass, 0.5f) && pDrone.Sub == 0 && Near(pSentry.Mass, 6f) && pSentry.Sub == 1 && pSentry.Displace == 0,
                 $"无人机质量 {pDrone.Mass}；哨戒桩质量 {pSentry.Mass}、插地不位移（{drones.Count} 架）");
 
-            // 开关：emg.stage 0 → 实体层关；1 → 开，调参进 CombatConfig
+            // EMG4-CLEAN-01（卡片负向）：emg.stage 只保留 4——填 0 不再关实体层；调参进 CombatConfig
             UseStage(0);
             CombatConfig off = CombatSite.ConfigFromTuning();
             UseStage(1);
             CombatConfig on = CombatSite.ConfigFromTuning();
             EmgCatalog.ResetForTests();
-            Expect(off.EmgEntity == 0 && on.EmgEntity == 1 && Near(on.EmgWreckSeconds, 90f) && Near(on.EmgWreckHpRatio, 0.5f) && Near(on.EmgWreckSlow, 0.5f)
+            Expect(off.EmgEntity == 1 && on.EmgEntity == 1 && Near(on.EmgWreckSeconds, 90f) && Near(on.EmgWreckHpRatio, 0.5f) && Near(on.EmgWreckSlow, 0.5f)
                    && Near(on.EmgImpactVMin, 4f) && Near(on.EmgPushDMin, 0.5f) && Near(on.EmgKnockSeconds, 0.2f) && Near(on.EmgShoveRefMass, 10f),
-                $"emg.stage 0 → 实体层关（{off.EmgEntity}），1 → 开（{on.EmgEntity}）；emg.wreck.seconds {on.EmgWreckSeconds} / hp_ratio {on.EmgWreckHpRatio} / slow {on.EmgWreckSlow}、v_min {on.EmgImpactVMin}、d_min {on.EmgPushDMin}");
+                $"负向：emg.stage 填 0 / 1 实体层都开（{off.EmgEntity} / {on.EmgEntity}，低值不再生效）；emg.wreck.seconds {on.EmgWreckSeconds} / hp_ratio {on.EmgWreckHpRatio} / slow {on.EmgWreckSlow}、v_min {on.EmgImpactVMin}、d_min {on.EmgPushDMin}");
             Expect(GridContent.TryGetTuning("emg.wreck.capacity", out float cap) && (int)cap == EmgConst.DefaultWreckCapacity,
                 $"emg.wreck.capacity = {cap} 与内核常量 {EmgConst.DefaultWreckCapacity}（快照读档防坏值用同一个数）一致");
             string covered = GameText.Get("combat.fire.covered");

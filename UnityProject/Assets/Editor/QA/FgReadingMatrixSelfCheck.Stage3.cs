@@ -49,6 +49,129 @@ namespace GameLogic.EditorTools
             CheckStage3Parts(src);
             CheckStage3Sourced(src);
             CheckStage3SaveLoad();
+            CheckDeclLegacy(src);
+        }
+
+        // ── C5b. EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：战斗不读 readFields ──
+        private static void CheckDeclLegacy(EmgSource src)
+        {
+            Line("  · C5b. EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：战斗不读 readFields——过渡 / 数值折叠字段取声明参数 legacy 列；readFields 只留作对账");
+            EmgCatalog.ResetForTests();
+            IReadOnlyList<(string Field, float Magnitude)> Expected(string owner)
+            {
+                var allow = new HashSet<string>(StringComparer.Ordinal);
+                foreach (EmgSource.Decl d in src.Decls.Where(d => d != null && d.Owner == owner && d.Dir == "write"))
+                {
+                    allow.UnionWith(EmgProgramCompiler.TransitionFields(d.Port));
+                    allow.UnionWith(EmgProgramCompiler.NumericLegacyFields(d.Port));
+                }
+                return CarrierReadings.FieldsOf(owner).Where(f => allow.Contains(f.Field)).ToList();
+            }
+            string Text(IEnumerable<(string Field, float Magnitude)> l) => string.Join(";", l.Select(f => f.Field + ":" + f.Magnitude.ToString("0.###", CultureInfo.InvariantCulture)));
+            // 1. 对账：每条固件（含混合芯片 = 两父相加）的声明参数 = 旧 readFields 里属于它写端口的那几个字段（同名同幅度同序）
+            var bad = new List<string>();
+            int n = 0, withLegacy = 0;
+            foreach (FwRow row in FirmwareKinds.Rows.Where(r => r != null))
+            {
+                n++;
+                IReadOnlyList<(string Field, float Magnitude)> got = EmgCatalog.DeclLegacyOf(row.Id), want;
+                if (GameLogic.Campaign.Economy.FusionCatalog.TryGetByMix(row.Id, out GameLogic.Campaign.Economy.FusionRecipeDef def))
+                {
+                    var merged = new List<(string Field, float Magnitude)>();
+                    foreach ((string f, float m) in Expected(def.ParentA).Concat(Expected(def.ParentB)))
+                    {
+                        int k = merged.FindIndex(e => e.Field == f);
+                        if (k < 0) merged.Add((f, m)); else merged[k] = (f, merged[k].Magnitude + m);
+                    }
+                    for (int i = 0; i < merged.Count; i++)
+                    {
+                        if (GameLogic.Campaign.Economy.FusionCatalog.TryGetCap(merged[i].Field, out float cap))
+                        {
+                            merged[i] = (merged[i].Field, Mathf.Min(merged[i].Magnitude, cap));
+                        }
+                    }
+                    want = merged;
+                    // 两父相加后的字段也必须是芯片自己 readFields 的子集（同幅度）
+                    foreach ((string f, float m) in merged)
+                    {
+                        if (!CarrierReadings.FieldsOf(row.Id).Any(x => x.Field == f && Mathf.Abs(x.Magnitude - m) < 1e-4f))
+                        {
+                            bad.Add($"{row.Id}：两父声明参数 {f}:{m} 不在芯片 readFields（{row.ReadFields}）里");
+                        }
+                    }
+                }
+                else
+                {
+                    want = Expected(row.Id);
+                }
+                withLegacy += got.Count > 0 ? 1 : 0;
+                if (Text(got) != Text(want))
+                {
+                    bad.Add($"{row.Id}：声明参数 [{Text(got)}] ≠ readFields 对账 [{Text(want)}]");
+                }
+            }
+            Expect(bad.Count == 0 && withLegacy > 0, $"声明参数 legacy 列与旧 readFields 对账：{n} 条固件、其中 {withLegacy} 条带过渡 / 数值折叠字段，全部一致{(bad.Count > 0 ? "；不一致：" + string.Join("；", bad.Take(8)) : string.Empty)}");
+            // 2. 行为：战斗读法从声明参数来——临时拿掉某条固件的声明参数（readFields 不动），程序读法随之改变；恢复后回到原值
+            foreach (string fw in new[] { "fw_wide", "fw_oilleak", "fw_echo" }) // 广角：声明幅度 30 ≠ 旧字段 spread:60（扩口两者都是 1.5，拿掉看不出差别）
+            {
+                BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
+                board.TrySetUplink(UplinkSlot);
+                BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, new[] { fw });
+                EmgProgramResult prog = EmgProgramCompiler.Compile(p, null);
+                CombatReading baseR = CombatSite.MachineWeaponFrom(p).Reading;
+                CombatReading with = CombatSite.ProgramReading(p, baseR, prog);
+                EmgCatalog.Current.LegacyByOwner.Remove(fw);
+                CombatReading without = CombatSite.ProgramReading(p, baseR, EmgProgramCompiler.Compile(p, null));
+                EmgCatalog.ResetForTests();
+                CombatReading again = CombatSite.ProgramReading(p, baseR, EmgProgramCompiler.Compile(p, null));
+                bool still = CarrierReadings.FieldsOf(fw).Count > 0;
+                Expect(!with.Equals(without) && with.Equals(again) && still,
+                    $"{fw}（连射器）：拿掉声明参数后程序读法改变（{!with.Equals(without)}：体积 {with.BlastRadius:0.##}→{without.BlastRadius:0.##}、驻留 {with.ZoneSeconds:0.##}→{without.ZoneSeconds:0.##}、余震 {with.EchoCount}→{without.EchoCount}），" +
+                    $"恢复后与原值相同（{with.Equals(again)}）；readFields 仍在（{still}，只作对账）");
+            }
+            // 3. 战斗入口（机器装配 / 炮塔 / 试验场共用的 MachineWeaponFrom(p, 冷却) 与敌方组装武器）也不读 readFields：
+            //    程序为空 / 程序表满退回时的基础读法 = 只按声明参数结算；readFields 里不属于声明参数的字段（霰射额外目标、电弧连锁……）不进战斗读法。
+            //    独立推导：用旧 readFields 但跳过 Expected 以外的字段（幅度来自旧表，与声明参数来源不同）。单参数重载（预览 / 旧读法对照）仍按旧口径。
+            int differ = 0, compared = 0;
+            var badEntry = new List<string>();
+            foreach (FwRow row in FirmwareKinds.Rows.Where(r => r != null && CarrierReadings.FieldsOf(r.Id).Count > 0 && !r.Id.StartsWith("fw_mix_", StringComparison.Ordinal)))
+            {
+                BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
+                board.TrySetUplink(UplinkSlot);
+                BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, new[] { row.Id });
+                if (!p.FirmwareIds.Contains(row.Id))
+                {
+                    continue;
+                }
+                compared++;
+                var allow = new HashSet<string>(Expected(row.Id).Select(f => f.Field), StringComparer.Ordinal);
+                bool fixedDamage = CarrierReadings.TryGetComponent(p.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f;
+                CombatReading oracle = CarrierReadings.Build(p.PrimaryId, p.UtilityId, p.ChassisId, CombatSite.ReadingFirmware(p), !fixedDamage,
+                    (fw, field) => fw == row.Id && !field.StartsWith("#", StringComparison.Ordinal) && !allow.Contains(field)); // 旧标签（tags 列，不是 readFields）照旧
+                CombatReading battle = CombatSite.MachineWeaponFrom(p, false).Reading;
+                CombatReading legacy = CombatSite.MachineWeaponFrom(p).Reading;
+                if (!battle.Equals(oracle))
+                {
+                    badEntry.Add(row.Id);
+                }
+                if (!battle.Equals(legacy))
+                {
+                    differ++;
+                }
+            }
+            CombatReading wideBattle, wideNoDecl;
+            {
+                BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
+                board.TrySetUplink(UplinkSlot);
+                BlueprintCircuitPreview p = UplinkCompiler.CompileUplinked(board, new[] { "fw_wide" });
+                wideBattle = CombatSite.MachineWeaponFrom(p, false).Reading;
+                EmgCatalog.Current.LegacyByOwner.Remove("fw_wide");
+                wideNoDecl = CombatSite.MachineWeaponFrom(p, false).Reading;
+                EmgCatalog.ResetForTests();
+            }
+            Expect(compared > 20 && badEntry.Count == 0 && differ > 0 && !wideBattle.Equals(wideNoDecl),
+                $"战斗入口基础读法只按声明参数：{compared} 条固件（连射器）全部 = 独立推导（跳过非声明参数字段）{(badEntry.Count > 0 ? "；不一致：" + string.Join("/", badEntry.Take(8)) : string.Empty)}；" +
+                $"其中 {differ} 条与旧 readFields 口径不同（> 0：旧字段确实不再进战斗）；拿掉 fw_wide 声明参数后战斗读法改变（{!wideBattle.Equals(wideNoDecl)}）");
         }
 
         // ── A. 清单 ──
@@ -607,7 +730,7 @@ namespace GameLogic.EditorTools
                       && Mathf.Abs((80f - wet) - (dis + declAmount * mul)) < 0.2f && Mathf.Abs(wet - cool) < 1e-3f && Mathf.Abs(oil - dry) < 1e-3f;
             Expect(ok, $"散热鳍（声明轨）：散热件那份 = 声明幅度 {declAmount}/秒（武器 HeatSinkBonus {wf.HeatSinkBonus}）；1 秒积热 80 → 不装 {bare:0.##}、装 {dry:0.##}、站水里 {wet:0.##}、站冷却液里 {cool:0.##}、站油污里 {oil:0.##}" +
                        $"（基础散热 {dis}，泡液倍率 {mul}，物质掩码 0x{mask:X}）");
-            // 旧轨对照：emg.stage = 1（散热鳍 stageGate 2 未到）→ 常量 +5、泡水不加倍
+            // EMG4-CLEAN-01：原“旧轨对照 emg.stage = 1”改为负向——低值不再生效
             EmgSource s1 = EmgCatalog.FromTables();
             Func<string, (bool ok, float value)> t0 = s1.Tuning;
             s1.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : t0(id);
@@ -616,9 +739,10 @@ namespace GameLogic.EditorTools
                 EmgCatalog.OverrideForTests(s1);
                 CombatWeapon wl = CombatSite.MachineWeaponFrom(UplinkCompiler.CompileUplinked(withFin, Array.Empty<string>()));
                 float legacyWet = HeatAfter(wl, true, EmgMatterConst.Water);
-                Expect(!EmgCatalog.IsOwnerOnDeclTrack(fin) && Mathf.Approximately(wl.HeatSinkBonus, FracturedCityLayout.HeatSinkBonusDissipationPerSecond)
-                       && EmgCatalog.HeatSinkWet().mul == 0f && Mathf.Abs((80f - legacyWet) - (wl.Dissipation + wl.HeatSinkBonus)) < 0.2f,
-                    $"旧轨对照（emg.stage = 1）：散热鳍走旧轨，散热 +{wl.HeatSinkBonus} 常量、泡水不加倍（1 秒 80 → {legacyWet:0.##}）——同一 owner 只走一轨");
+                // EMG4-CLEAN-01（卡片负向）：emg.stage 填回 1 不再生效——散热鳍仍走声明轨、泡水仍加倍（旧轨“常量 +5、泡水不加倍”已删）
+                Expect(EmgCatalog.EffectiveStage == 4 && EmgCatalog.IsOwnerOnDeclTrack(fin) && Mathf.Approximately(wl.HeatSinkBonus, declAmount)
+                       && Mathf.Abs(legacyWet - wet) < 1e-3f,
+                    $"负向：emg.stage 填回 1 不再生效（生效阶段 {EmgCatalog.EffectiveStage}）：散热鳍仍走声明轨，散热件 {wl.HeatSinkBonus}/秒、站水里 1 秒 80 → {legacyWet:0.##}（= 阶段 4 的 {wet:0.##}）");
             }
             finally
             {

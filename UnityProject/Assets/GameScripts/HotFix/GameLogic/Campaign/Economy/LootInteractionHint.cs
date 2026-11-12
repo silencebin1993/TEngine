@@ -150,19 +150,39 @@ namespace GameLogic.Campaign.Economy
                     OwnedTriggers.Add(port);
                 }
             }
+            CollectWorldSources(Provided);
+        }
+
+        /// <summary>FGR-EMG-191“世界常驻源”：泄漏流体（fg.TbFluidLeak.matter）与地点危害带端口（fg.TbHazard.ports，EMG4-CLEAN-01 / FG-GAP-213）。表读不到时只按玩家拥有的内容算。</summary>
+        public static void CollectWorldSources(ICollection<string> into)
+        {
             try
             {
                 foreach (GameConfig.fg.FluidLeak l in global::ConfigSystem.Instance.Tables?.TbFluidLeak?.DataList ?? (IReadOnlyList<GameConfig.fg.FluidLeak>)Array.Empty<GameConfig.fg.FluidLeak>())
                 {
                     if (l != null && !string.IsNullOrEmpty(l.Matter) && l.Matter != "none")
                     {
-                        Provided.Add(l.Matter); // 世界常驻源：泄漏流体（FGR-EMG-191“世界常驻源”）
+                        into.Add(l.Matter);
+                    }
+                }
+                foreach (GameConfig.fg.Hazard hz in global::ConfigSystem.Instance.Tables?.TbHazard?.DataList ?? (IReadOnlyList<GameConfig.fg.Hazard>)Array.Empty<GameConfig.fg.Hazard>())
+                {
+                    if (hz == null || string.IsNullOrEmpty(hz.Ports) || hz.Ports == "none")
+                    {
+                        continue;
+                    }
+                    foreach (string port in hz.Ports.Split(','))
+                    {
+                        if (port.Length > 0)
+                        {
+                            into.Add(port);
+                        }
                     }
                 }
             }
             catch (Exception)
             {
-                // 泄漏表读不到：只按玩家拥有的内容算
+                // 表读不到：只按玩家拥有的内容算
             }
         }
 

@@ -1063,7 +1063,7 @@ namespace GameLogic.EditorTools
             Expect(tower.Health < hp1, $"I2 正向对照：油片压到塔身上再点着 → 塔掉血（{hp1:0} → {tower.Health:0}），I1 的“不掉血”不是测不到");
         }
 
-        /// <summary>K 回滚开关：斑块层关（emg.stage = 1）→ 灌注退回中立区域，首领照样能打（ADR ⑮）。</summary>
+        /// <summary>K（EMG4-CLEAN-01 改负向）：emg.stage 只保留 4——表里填回 1 不再关斑块层，灌注照样是斑块（原“退回中立区域”回滚分支已删）。</summary>
         private static void CheckRollback()
         {
             EmgSource src = EmgCatalog.FromTables();
@@ -1090,8 +1090,8 @@ namespace GameLogic.EditorTools
                     StepSeconds(1.5f);
                 }
                 bool tagged = f != null && home.TryGetMachineUnit(m, out int mu) && home.Kernel.TryGetStatus(mu, out uint mask, out _, out _, out _, out _) && (mask & Bit(f.Tag)) != 0u;
-                Expect(f != null && f.PatchId == 0 && ReservedPatches(home) == 0 && tagged,
-                    $"K1 回滚（emg.stage = 1，斑块层关）：灌注退回中立区域（斑块 Id {f?.PatchId}），机器站进去照样沾上{f?.Tag}（{tagged}）");
+                Expect(EmgCatalog.EffectiveStage == 4 && f != null && f.PatchId != 0 && ReservedPatches(home) > 0,
+                    $"K1 负向：emg.stage 填回 1 不再生效（生效阶段 {EmgCatalog.EffectiveStage}）：灌注仍是斑块（斑块 Id {f?.PatchId}、世界源斑块 {ReservedPatches(home)}），不退回中立区域（机器沾上{f?.Tag}：{tagged}）");
             }
             finally
             {

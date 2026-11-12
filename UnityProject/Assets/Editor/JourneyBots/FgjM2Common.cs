@@ -814,6 +814,46 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>
+        /// EMG4-CLEAN-01 修复轮 2（硬规矩 (2) 先弄清游戏规则再下命令）：打出短路后右键预备区把组合的两台撤回来——两台都装着拖尾，出手时沿途 / 在靶处排污泥，
+        /// 物质不认敌我（FG19），停在靶旁会沾上中毒（每层 2 秒伤、可叠层）、命令结束后还在自动交战距离里接着打靶；预备区离靶 16 格，超出自动交战距离。
+        /// </summary>
+        internal static StepOutcome TickPulledBack(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            if (c.StepElapsed < 0.8 || PanPending(c, RightClickStaging) || JustClicked(c))
+            {
+                return StepOutcome.Wait;
+            }
+            Vector2 stage = Point(c, "stage");
+            int a = c.GetInt("wetM");
+            int b = c.GetInt("shockM");
+            if (!HomePos(a, out Vector2 pa) || !HomePos(b, out Vector2 pb))
+            {
+                return StepOutcome.Fail("组合的两台机器不见了（撤回之前已被打死）");
+            }
+            if (Hp(a) <= 0f || Hp(b) <= 0f)
+            {
+                // 修复轮 3：打死的机器也“停着、离靶 8 格以上”，原来会被当成撤回成功，失败拖到出征名单才暴露
+                return StepOutcome.Fail($"撤回之前组合的两台已有一台被打死（血量 {Hp(a):F0} / {Hp(b):F0}；它站在拖尾排的污泥里中毒）");
+            }
+            float da = Vector2.Distance(pa, stage), db = Vector2.Distance(pb, stage);
+            CombatSite site = GameRoot.HomeValley.Combat;
+            bool MovingNow(int id) => site.TryGetMachineUnit(id, out int u) && site.TryGetCommand(u, out BinGames.Sim.Combat.CombatCommand cm) && cm.Kind == BinGames.Sim.Combat.CombatCommandKind.Move;
+            // 撤回 = 到了预备区，或已停下且离靶 8 格以上（两台挤同一个点时编队会把后到的那台排开几格；要的是离开靶旁的污泥）
+            Vector2 dummyAt = HomeValleyLayout.LowThreatTargetPosition;
+            bool Out(int id, Vector2 p, float dStage) => dStage <= 4f || (!MovingNow(id) && Vector2.Distance(p, dummyAt) >= 8f);
+            if (Out(a, pa, da) && Out(b, pb, db))
+            {
+                return StepOutcome.Done($"右键预备区地面：两台撤回（{Label(a)} 离预备区中心 {da:F1} 格、离靶 {Vector2.Distance(pa, dummyAt):F1} 格；{Label(b)} {db:F1} / {Vector2.Distance(pb, dummyAt):F1} 格；血量 {Hp(a):F0} / {Hp(b):F0}）");
+            }
+            bool moving = MovingNow(a) || MovingNow(b);
+            return moving || c.StepElapsed < 20 ? StepOutcome.Wait
+                : StepOutcome.Retry($"右键预备区后两台没在往回开（{Label(a)} 离中心 {da:F1} 格、{Label(b)} {db:F1} 格；{GameRoot.HomeValley.SquadCommands.RecentEvents.LastOrDefault()}）");
+        }
+
+        private static float Hp(int logicId) => MachineRegistry.TryGetRecord(logicId, out MachineRecord r) ? r.Health : -1f;
+
+        /// <summary>
         /// 拖框选中组合的两台（拖出的框与地面指示器同一个矩形）：框按两台此刻的实际位置拉（外扩 2 格），它们打过靶、不在预备区中心时也框得到；
         /// 框里若还有别的机器（例如路过的工程机），选择集就不止两台——检查会如实报出来并重拉。
         /// </summary>
@@ -856,6 +896,14 @@ namespace GameLogic.EditorTools.JourneyBots
         internal static void RightClickDummy(JourneyContext c)
         {
             Vector2 t = HomeValleyLayout.LowThreatTargetPosition;
+            CombatTargetRecord dummy = HomeValleyCombatTargets.Find(St, HomeValleyCombatTargets.LowThreatTargetId);
+            if (dummy != null && dummy.Health <= 0f)
+            {
+                // EMG4-CLEAN-01 修复轮 2：训练靶刚被打空、还在复位（家园别的机器在自动交战距离里会打它）——这时右键落在空地 = 移动命令，
+                // 组合的两台会开到靶旁、站进自己拖尾排的污泥里（物质不认敌我，FG19；沾上中毒）。等它复位再点（PanPending 每 0.35 秒重试）
+                c.Set("flyFirst", "1");
+                return;
+            }
             c.SetInt("slow0", GameClock.SlowMotionStarts);
             c.SetInt("nudge0", CameraNudge.Starts);
             c.SetLong("spawn0", ReactionPopups.SpawnedCount);
@@ -939,11 +987,11 @@ namespace GameLogic.EditorTools.JourneyBots
             int n = c.GetInt("dummyReissue");
             if (n >= 5)
             {
-                return StepOutcome.Fail($"训练靶打空 / 复位后又右键了 {n} 次，仍没打出短路（反应计数 {ReactionCount(site) - c.GetInt("conduct0")}）");
+                return StepOutcome.Fail($"训练靶打空 / 复位后又右键了 {n} 次，仍没打出短路（反应计数 {ReactionCount(site) - c.GetInt("conduct0")}）；{DummyDiag(site)}");
             }
             c.SetInt("dummyReissue", n + 1);
             c.SetLong("reissueAtMs", NowMs());
-            c.Log($"两台的攻击命令已结束（训练靶被打空后复位、没有自己再找目标），像玩家一样再右键训练靶（第 {n + 1} 次）");
+            c.Log($"两台的攻击命令已结束（训练靶被打空后复位、没有自己再找目标），像玩家一样再右键训练靶（第 {n + 1} 次）；{DummyDiag(site)}");
             Vector2 tp = HomeValleyLayout.LowThreatTargetPosition;
             if (JourneyCommon.PanToward(tp, 0.3f))
             {
@@ -952,6 +1000,31 @@ namespace GameLogic.EditorTools.JourneyBots
                 c.SetLong("clickedAtMs", NowMs());
             }
             return null;
+        }
+
+        /// <summary>训练靶附近的诊断（失败时写进旅程日志）：靶 16 格内的家园机器（距离 / 命令 / 血量）与靶 4 格内的斑块（物质码 × 半径）。O(机器 + 斑块)，只在重下命令时。</summary>
+        internal static string DummyDiag(CombatSite site)
+        {
+            Vector2 t = HomeValleyLayout.LowThreatTargetPosition;
+            var parts = new List<string>();
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m != null && m.IsAlive && HomePos(m.LogicId, out Vector2 p) && Vector2.Distance(p, t) <= 16f)
+                {
+                    parts.Add($"{Label(m.LogicId)} {Vector2.Distance(p, t):F1} 格 {CommandOf(site, m.LogicId)} 血 {m.Health:F0}");
+                }
+            }
+            var patches = new List<string>();
+            BinGames.Sim.Combat.CombatKernel k = site?.Kernel;
+            for (int i = 0; k != null && i < k.PatchSlots; i++)
+            {
+                if (k.TryGetPatch(i, out BinGames.Sim.Combat.CombatZone z) && Vector2.Distance(new Vector2((float)z.Pos.x, (float)z.Pos.y), t) <= z.Radius + 4f)
+                {
+                    patches.Add($"m{z.Matter}×{z.Radius:F1}");
+                }
+            }
+            CombatTargetRecord d = HomeValleyCombatTargets.Find(St, HomeValleyCombatTargets.LowThreatTargetId);
+            return $"靶血 {d?.Health:F0}；靶 16 格内机器 [{string.Join("；", parts)}]；靶旁斑块 [{string.Join(" ", patches)}]";
         }
 
         internal static int ReactionCount(CombatSite site)

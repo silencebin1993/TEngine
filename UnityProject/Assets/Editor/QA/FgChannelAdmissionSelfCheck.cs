@@ -180,10 +180,10 @@ namespace GameLogic.EditorTools
 
         private static void CheckDualTrack()
         {
-            Line("  · D. 双轨（FGR-EMG-019）：emg.stage = 0 时全部 owner 走旧 readFields；emg.stage = 1 时 stageGate ≤ 1 的 owner 切到声明轨，stageGate ≥ 2 的仍走旧轨");
-            // EMG1-E2E-01（DEBT-EMG1KRN01-02）：阶段 1 出口起正式表缺省 emg.stage = 1；阶段 0（回滚对照）显式注入调参。
+            Line("  · D. 单轨（EMG4-CLEAN-01，FGR-EMG-019 阶段 4 结束口径）：emg.stage 只保留 4，全部已声明 owner 走声明轨；填低值不再生效；声明轨固件不改旧组合引擎的 TotalNormalizedDamage 预览");
             EmgCompiled real = EmgCatalog.Current;
             int realOnDecl = real.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
+            int maxGate = real.Decls.Length == 0 ? 0 : real.Decls.Max(d => d.StageGate);
             EmgSource src0 = EmgCatalog.FromTables();
             Func<string, (bool ok, float value)> tuning0 = src0.Tuning;
             src0.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : tuning0(id);
@@ -191,52 +191,24 @@ namespace GameLogic.EditorTools
             EmgCompiled c = EmgCatalog.Current;
             int onDecl = c.OwnerIds.Count(EmgCatalog.IsOwnerOnDeclTrack);
             EmgCatalog.ResetForTests();
-            Expect(real.RawStage == 4f && real.EffectiveStage == 4 && // EMG4-HIJ-01：正式表缺省 4
-                    realOnDecl > 0 && c.RawStage == 0f && c.EffectiveStage == 0 && onDecl == 0 && c.OwnerIds.Length > 0,
-                $"正式表 fg.TbHomeTuning emg.stage = {real.RawStage:0}（生效 {real.EffectiveStage}，走声明轨 {realOnDecl} 个 owner）；对照 emg.stage = 0：生效阶段 {c.EffectiveStage}，{c.OwnerIds.Length} 个已声明 owner 里走声明轨的 {onDecl} 个（新路径全部关闭）");
-            EmgSource src = EmgCatalog.FromTables();
-            Func<string, (bool ok, float value)> tuning = src.Tuning;
-            src.Tuning = id => id == EmgCatalog.StageKey ? (true, 1f) : tuning(id);
-            var gateOf = src.Decls.GroupBy(d => d.Owner).ToDictionary(g => g.Key, g => g.First().StageGate, StringComparer.Ordinal);
-            try
+            Expect(real.RawStage == 4f && real.EffectiveStage == 4 && realOnDecl == real.OwnerIds.Length && maxGate <= 4
+                    && c.RawStage == 0f && c.EffectiveStage == 4 && onDecl == c.OwnerIds.Length && c.OwnerIds.Length > 0,
+                $"正式表 emg.stage = {real.RawStage:0}（生效 {real.EffectiveStage}）：{realOnDecl}/{real.OwnerIds.Length} 个 owner 走声明轨（stageGate 最大 {maxGate}，stageGate = 4 之外没有走旧轨的 owner）；" +
+                $"负向：填 0 不再生效（生效 {c.EffectiveStage}，走声明轨 {onDecl}/{c.OwnerIds.Length}）");
+            var gateOf = real.OwnerIds.ToDictionary(o => o, o => 0, StringComparer.Ordinal);
+            // 卡片“切轨的 owner 不再改 TotalNormalizedDamage”（GeneCatalog 旧编译只留给预览，ComposeEngine 保留为基础伤害计算器）：声明轨固件装上与不装相同
+            float Tnd(string fw)
             {
-                EmgCatalog.OverrideForTests(src);
-                var wrong = gateOf.Where(kv => EmgCatalog.IsOwnerOnDeclTrack(kv.Key) != (kv.Value <= 1)).Select(kv => $"{kv.Key}(stageGate {kv.Value})").ToList();
-                var later = gateOf.Where(kv => kv.Value >= 2 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => $"{kv.Key}={kv.Value}").OrderBy(x => x, StringComparer.Ordinal).ToList();
-                Expect(wrong.Count == 0 && later.Contains("fw_amplify=2"),
-                    $"emg.stage = 1：stageGate ≤ 1 的 {gateOf.Count(kv => kv.Value <= 1)} 个 owner 走声明轨，stageGate ≥ 2 的 {gateOf.Count(kv => kv.Value >= 2)} 个仍走旧轨（不计入阶段 1 指纹与零死对）；阶段 1 仍走旧轨的固件：{string.Join("、", later)}{(wrong.Count > 0 ? "；不对：" + string.Join("、", wrong) : string.Empty)}");
-                // 卡片“切轨的 owner 不再改 TotalNormalizedDamage”：阶段 1 下声明轨固件不进旧组合引擎的伤害预览（与不装时相同）；阶段 0 对照照旧改伤害
-                float Tnd(string fw)
-                {
-                    var b = GameLogic.Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(GameLogic.Campaign.Regions.HomeValleyLayout.Erc003ChassisId, "comp_gun", null, null,
-                        fw == null ? Array.Empty<string>() : new[] { fw });
-                    return GameLogic.Campaign.Blueprint.BlueprintCircuitCompiler.CompilePreview(b).TotalNormalizedDamage;
-                }
-                float none1 = Tnd(null);
-                var changed1 = gateOf.Where(kv => kv.Value <= 1 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => kv.Key)
-                    .Where(fw => Math.Abs(Tnd(fw) - none1) > 1e-4f).ToList();
-                EmgCatalog.OverrideForTests(src0);
-                float none0 = Tnd(null);
-                var changed0 = gateOf.Where(kv => kv.Value <= 1 && kv.Key.StartsWith("fw_", StringComparison.Ordinal)).Select(kv => kv.Key)
-                    .Where(fw => Math.Abs(Tnd(fw) - none0) > 1e-4f).ToList();
-                EmgCatalog.OverrideForTests(src);
-                Expect(changed1.Count == 0 && changed0.Count > 0,
-                    $"TotalNormalizedDamage：emg.stage = 1 时声明轨固件装上与不装相同（改动 {changed1.Count} 条{(changed1.Count > 0 ? "：" + string.Join("、", changed1) : string.Empty)}）；" +
-                    $"对照 emg.stage = 0 时旧组合引擎里有 {changed0.Count} 条会改它（如 {string.Join("、", changed0.Take(3))}）");
-                // 负向：stageGate 高于 emg.stage 的声明不生效——把寻的改成 stageGate 2，阶段 1 下它回到旧轨，程序里不再有它
-                foreach (EmgSource.Decl d in src.Decls.Where(d => d.Owner == "fw_homing"))
-                {
-                    d.StageGate = 2;
-                }
-                EmgCatalog.OverrideForTests(src);
-                EmgProgramResult pr = EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { "fw_homing" }, FirmwareCarrier.Projectile);
-                Expect(!EmgCatalog.IsOwnerOnDeclTrack("fw_homing") && pr.IsEmpty && pr.LegacyOwners.Contains("fw_homing"),
-                    "负向：寻的 stageGate 改为 2、emg.stage = 1 → 声明不生效，程序为空、寻的列入“仍按原读法结算”（单轨回到旧 readFields）");
+                var b = GameLogic.Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(GameLogic.Campaign.Regions.HomeValleyLayout.Erc003ChassisId, "comp_gun", null, null,
+                    fw == null ? Array.Empty<string>() : new[] { fw });
+                return GameLogic.Campaign.Blueprint.BlueprintCircuitCompiler.CompilePreview(b).TotalNormalizedDamage;
             }
-            finally
-            {
-                EmgCatalog.ResetForTests();
-            }
+            float none = Tnd(null);
+            var fws = real.OwnerIds.Where(o => o.StartsWith("fw_", StringComparison.Ordinal)).ToList();
+            var changed = fws.Where(fw => Math.Abs(Tnd(fw) - none) > 1e-4f).ToList();
+            Expect(fws.Count >= 40 && changed.Count == 0,
+                $"TotalNormalizedDamage：{fws.Count} 条声明轨固件装上与不装相同（改动 {changed.Count} 条{(changed.Count > 0 ? "：" + string.Join("、", changed) : string.Empty)}）");
+            _ = gateOf;
         }
 
         /// <summary>EMG1-TRIG-01（FG19A 第 2.1.1 节；FG19 FGR-EMG-035）：作战组件表的根载荷实体化列——允许实体化的组件缺值即失败（运行时不退回即时命中）；0 弹速只对不实体化的行合法。</summary>

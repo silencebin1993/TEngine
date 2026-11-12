@@ -111,16 +111,12 @@ namespace BinGames.Sim.Combat
         /// 场的完整落点集（FG19A 第 4.2 节 fld.* 行）：场生成点之外，场内受力 / 会被扫过的单位（生成那一刻在场半径内、与场敌对的单位；推斥环按最终半径）各是一个落点。
         /// 偏折场的落点是被它反射的弹体（<see cref="EmgReflectAnchor"/>），不在这里。<paramref name="skip"/> = 生成点已当落点对象的单位（不重复执行）。上限随 emg.fuse.anchor_max。
         /// </summary>
-        internal static void EmgFieldAnchors(ref CombatData d, in EmgCtx host, in EmgInstr x, double2 center, int skip)
+        internal static void EmgFieldAnchors(ref CombatData d, in EmgCtx host, in EmgInstr x, double2 center, int skip, float r)
         {
+            // EMG4-CLEAN-01（DEBT-EMG4FUSE02-03）：中心 / 半径 = 场生成函数返回的实际值（格斗身前、力场本机半径、布区落区……），不再按命中点 × 指令幅度近似
             if (!EmgProgAnchored(ref d, host.Prog) || x.Port == EmgFieldConst.PortDeflect)
             {
                 return;
-            }
-            float r = x.Amount > 0f ? x.Amount : 2f;
-            if (host.Carrier == (byte)CombatCarrier.Summon)
-            {
-                r = math.min(r, EmgFieldConst.DroneFieldRadius);
             }
             for (int u = 0; u < d.Count; u++)
             {
@@ -252,6 +248,43 @@ namespace BinGames.Sim.Combat
                 float ang = 2f * math.PI * q / math.max(1, frags);
                 EmgSpawnFragment(ref d, pos, new float2(math.cos(ang), math.sin(ang)), EmgIdOf(ref d, host.Owner), (CombatFaction)host.Faction, (byte)(host.Depth + 1), host.Chain, ep.FragDamage, ep.FragSpeed, ep.FragRange);
             }
+        }
+
+        /// <summary>
+        /// EMG4-CLEAN-01（DEBT-EMG4FUSE02-06）：读法产生的标记 / 伴飞 / 处决（武器读法合并后的一次效果，分不出来自哪一条）归到根节点上全部写 <paramref name="port"/> 的指令，
+        /// 返回它们的序号位给落点钩子按序号筛接线（只执行紧跟在某条同类写端后面的接线行：两条同类写端只接了一条线时，B 只按那一条执行一次，另一条不连带执行）；
+        /// 根节点没有这样的写端返回 0（效果来自组件本身，沿用“全部同类落点行”）。O(根节点指令数)，只在有接线的程序上调。
+        /// </summary>
+        /// <summary>修复轮 2：节点 [<paramref name="first"/>, <paramref name="end"/>) 里序号 <paramref name="ordinal"/> 有没有自己的写端行（没溢出）——同一条固件装两次时后一条的同端口写端并进前一条、自己只剩读端行。O(节点指令数)，只在带接线的程序上。</summary>
+        internal static bool EmgOrdinalWrites(ref CombatData d, int first, int end, int ordinal)
+        {
+            for (int j = first; j < end; j++)
+            {
+                EmgInstr x = d.EmgInstrs[j];
+                if (x.Ordinal == ordinal && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        internal static ulong EmgRootWriterMask(ref CombatData d, int prog, ushort port)
+        {
+            if (!EmgProgAnchored(ref d, prog) || !EmgNodeSpan(ref d, prog, 0, out int first, out int end))
+            {
+                return 0UL;
+            }
+            ulong m = 0UL;
+            for (int i = first; i < end; i++)
+            {
+                EmgInstr x = d.EmgInstrs[i];
+                if (x.Port == port && x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0)
+                {
+                    m |= EmgOrdBit(x.Ordinal);
+                }
+            }
+            return m;
         }
 
         /// <summary>程序尾段有 <paramref name="kind"/> 种类、复制自 B = <paramref name="src"/> + 2 的 Anchored 行（[A, 接线, B] 的序号相邻）。O(尾段行数)。</summary>

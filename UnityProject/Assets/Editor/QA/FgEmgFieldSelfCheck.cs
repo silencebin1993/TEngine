@@ -647,7 +647,7 @@ namespace GameLogic.EditorTools
                 src0.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : t0(id);
                 EmgCatalog.OverrideForTests(src0);
                 var legacy = Fire("fw_tractor");
-                Expect(legacy.fields == 0, $"对照 emg.stage = 0：牵引回旧读法，不生成场（{legacy.fields}）");
+                Expect(EmgCatalog.EffectiveStage == 4 && legacy.fields == 1, $"负向（EMG4-CLEAN-01）：emg.stage 填 0 不再生效——牵引照常展开牵引场（{legacy.fields}），不回旧读法");
             }
             finally
             {

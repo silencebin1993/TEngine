@@ -157,6 +157,8 @@ namespace BinGames.Sim.Combat
             if (d.Pits.Length >= PitMaxOf(ref d))
             {
                 d.PitStats[EmgPitConst.StatCapped]++; // 卡片负向“熔坑上限满（不生效并提示）”：热更层看到计数涨了提示一次
+                d.PitStats[EmgPitConst.StatCapX] = (int)math.round(pos.x * 100.0); // DEBT-EMG4TER01-04：被挡掉的这一处（进快照段 30，读档后通知位置一致）
+                d.PitStats[EmgPitConst.StatCapY] = (int)math.round(pos.y * 100.0);
                 return;
             }
             float radius = PitRadiusOf(ref d);

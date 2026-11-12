@@ -434,7 +434,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckStageZero()
         {
-            Line("  · G. emg.stage = 0 回旧轨：反伤不限次数、不放破片、块位不变");
+            Line("  · G. 负向（EMG4-CLEAN-01）：emg.stage 填 0 不再回旧轨——块数机制照常（旧轨“反伤不限次数、不放破片”已删）");
             try
             {
                 UseStage(0);
@@ -445,8 +445,8 @@ namespace GameLogic.EditorTools
                 {
                     k.FireAt(h, me, k.Time);
                 }
-                Expect(k.Config.EmgEraBlocks == 0 && Mathf.Abs(Lost(k, h) - 15 * Expected(10f)) < 0.05f && Frags(k).Count == 0 && Miss(k, me) == 0 && Intact(k, me) == -1,
-                    $"15 次即时命中：每次都反伤（共 {Lost(k, h):0.##}）、没有破片、没有块数读数（旧轨，正式流程逐字不变）");
+                Expect(k.Config.EmgEraBlocks > 0 && Intact(k, me) >= 0 && Intact(k, me) < k.Config.EmgEraBlocks && Frags(k).Count > 0,
+                    $"emg.stage 填 0：15 次即时命中后块数机制照常（块数 {k.Config.EmgEraBlocks}、剩 {Intact(k, me)} 块、放出破片 {Frags(k).Count} 片、反伤共 {Lost(k, h):0.##}）");
             }
             finally
             {

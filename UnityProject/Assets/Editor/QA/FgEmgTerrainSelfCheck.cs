@@ -629,6 +629,21 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(Mathf.RoundToInt(16f / Dt));
             Expect(spots.Count >= 9 + 1 && k.PitCount == 8 && k.PitCounts.Capped >= 1 && NotifyCount("pit_capped") > notes,
                 $"H8 正式上限 8：{spots.Count} 处凝满后熔坑 {k.PitCount} 个，多出的不形成（{k.PitCounts.Capped} 次）并发一条信息级提示（“熔坑已到上限”）");
+            // EMG4-CLEAN-01（DEBT-EMG4TER01-04）：通知位置 = 这次被挡掉的那一处（不是最后一个已有熔坑）；坐标进快照段 30，读档后一致
+            NotificationEntry capNote = NotificationCenter.History.LastOrDefault(e => e.Type?.Id == "pit_capped");
+            double2 capAt = k.PitLastCappedPos;
+            bool capIsSpot = spots.Any(c => math.distance(new double2(c.X, c.Y), capAt) < 1.5);
+            bool capNotPit = Enumerable.Range(0, k.PitCount).All(i => math.distance(k.PitAt(i).Pos, capAt) > 0.5);
+            byte[] capSnap = k.Serialize();
+            CombatConfig capCfg = CombatSite.ConfigFromTuning();
+            capCfg.NavEnabled = 0;
+            double2 capLoaded;
+            using (var capK = new CombatKernel(capCfg, 16))
+            {
+                capLoaded = capK.Load(capSnap) == CombatLoadResult.Ok ? capK.PitLastCappedPos : new double2(-999, -999);
+            }
+            Expect(capNote != null && capIsSpot && capNotPit && capNote.Latest != null && capNote.Latest.HasLocation && math.distance(new double2(capNote.Latest.Location.x, capNote.Latest.Location.z), capAt) < 0.05 && math.distance(capLoaded, capAt) < 1e-6,
+                $"H8b 上限满通知的位置 = 被挡掉的那一处（{capAt.x:0.0}, {capAt.y:0.0}）：是凝满点之一 {capIsSpot}、不在任何已有熔坑上 {capNotPit}，通知坐标（{capNote?.Latest?.Location.x:0.0}, {capNote?.Latest?.Location.z:0.0}）；读档后 {capLoaded.x:0.0}, {capLoaded.y:0.0}");
             // 修复轮 1（审查 P1）：搬迁 / 挪规划（asPlayerPlacement = false）也不能落到熔坑上（另建一座完好的仓库来搬：上面那座压在熔坑上已被烫坏，受损建筑本来就不能搬）
             EmgPit far = Enumerable.Range(0, k.PitCount).Select(k.PitAt).FirstOrDefault(p => side == null || math.distance(p.Pos, new double2(side.Value.X, side.Value.Y)) > 8);
             GridCell pc = NavService.CellOf(far.Pos.x, far.Pos.y);

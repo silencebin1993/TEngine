@@ -1189,7 +1189,7 @@ namespace BinGames.Sim.Combat
             {
                 EmgChainLog(ref d, EmgChainNode.Shot, chain, 0, 0, d.Id[i], from); // EMG1-CHAIN-01
             }
-            d.Projectiles.Add(new CombatProjectile
+            var pr = new CombatProjectile
             {
                 Id = id,
                 Prog = prog,
@@ -1203,7 +1203,13 @@ namespace BinGames.Sim.Combat
                 Radius = wp.ProjectileRadius,
                 Life = wp.ProjectileLife > 0f ? wp.ProjectileLife : (wp.Range * 1.25f) / math.max(0.01f, wp.ProjectileSpeed),
                 Faction = (CombatFaction)d.Faction[i],
-            });
+            };
+            if (prog >= 0)
+            {
+                // EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：弹体武器（炮塔 / 重炮）同样按根节点的弹道修饰写弹体（与 EmgTrySpawnFlight 同一入口），读法换声明轨、不再读 readFields
+                EmgInitFlight(ref d, ref pr, d.Pos[t], d.Id[t], true);
+            }
+            d.Projectiles.Add(pr);
             CombatCounters c = d.Counters[0];
             c.ProjectilesSpawned++;
             d.Counters[0] = c;
@@ -1485,13 +1491,20 @@ namespace BinGames.Sim.Combat
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
                 EmgOnOverheat(ref d, a, heat); // EMG1-BUS-01：evt.overheat
             }
+            // EMG4-CLEAN-01 修复轮 2（审查 P1，FG-GAP-207 / 208）：当场结算的重炮同样按出手放行位把根节点条件 / 随机下游的读法行补到读法副本上（与 DeliverInstant 同口径；没有元程序 O(1)）
+            CombatWeapon gw = wp;
+            int cprog = EmgShotProg(ref d, wp.Program);
+            if (cprog >= 0)
+            {
+                EmgGatedReading(ref d, cprog, EmgCondAllow(ref d, cprog, 0, EmgEventKind.Fire, a, t, d.EmgCtx.Chain, -1), ref gw.Reading);
+            }
             if (EmgFlightOn(wp))
             {
                 // EMG1-TRIG-01（ADR ③）：重炮 + 需要飞行的程序：瞄准阶段与熔穿过载（积热 / 反应）照常，真开火这一下生成重型弹体，过载的穿甲在命中时加。
-                EmgFireFlight(ref d, a, t, d.Weapon[a], wp, overload ? EmgProjFlags.Overload : EmgProjFlags.None);
-                if (wp.Reading.EscortDrones > 0)
+                EmgFireFlight(ref d, a, t, d.Weapon[a], wp, overload ? EmgProjFlags.Overload : EmgProjFlags.None); // 弹体命中时另按命中那一刻放行（EmgFlightHit）
+                if (gw.Reading.EscortDrones > 0)
                 {
-                    LaunchDrones(ref d, a, wp, wp.Reading.EscortDrones);
+                    LaunchDrones(ref d, a, gw, gw.Reading.EscortDrones);
                 }
                 return CombatFireResult.Launched;
             }
@@ -1507,15 +1520,15 @@ namespace BinGames.Sim.Combat
             float pierce = 0f; // EMG2-REACT-01：熔穿过载旧“本发额外穿甲 +30%”退役（FG19B P03，预期差异）；PierceBonus 字段保留只为快照不变
             bool wasMarked = d.MarkedUntil[t] > now;
             double2 hitPos = d.Pos[t];
-            float damage = StrikeDamage(ref d, a, t, wp.Damage, wp.Reading, d.Pos[a], true, pierce);
+            float damage = StrikeDamage(ref d, a, t, gw.Damage, gw.Reading, d.Pos[a], true, pierce);
             if (!DamageUnit(ref d, t, damage, a))
             {
                 return CombatFireResult.Invulnerable;
             }
-            CannonReadingHit(ref d, a, t, hitPos, damage, wp, wasMarked);
-            if (wp.Reading.EscortDrones > 0)
+            CannonReadingHit(ref d, a, t, hitPos, damage, gw, wasMarked);
+            if (gw.Reading.EscortDrones > 0)
             {
-                LaunchDrones(ref d, a, wp, wp.Reading.EscortDrones);
+                LaunchDrones(ref d, a, gw, gw.Reading.EscortDrones);
             }
             return CombatFireResult.Ok;
         }
@@ -2166,6 +2179,18 @@ namespace BinGames.Sim.Combat
                     else
                     {
                         float dmg = pr.Damage * subMul;
+                        // EMG4-CLEAN-01（FG-GAP-207 / 208）：根弹体的读法行里根节点条件 / 随机下游的那几行按本次命中的放行位补到读法副本上，与 EmgFlightHit 同一口径（无元程序 O(1)）；
+                        // 修复轮 2（审查 P1）：弹体武器的伤害倍率已折进单发伤害（TurretService.BuildWeapon），门后放行的伤害倍率行（电容蓄力）在这里乘上
+                        bool rootRead = (pr.Flags & EmgProjFlags.Sub) == 0 && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length;
+                        CombatWeapon pw = rootRead ? d.Weapons[pr.Weapon] : default;
+                        if (rootRead && pr.Prog >= 0)
+                        {
+                            float s0 = pw.Reading.DamageScale > 0f ? pw.Reading.DamageScale : 1f;
+                            if (EmgGatedReading(ref d, pr.Prog, EmgCondAllow(ref d, pr.Prog, 0, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), ref pw.Reading) && pw.Mode == CombatWeaponMode.Projectile)
+                            {
+                                dmg *= (pw.Reading.DamageScale > 0f ? pw.Reading.DamageScale : 1f) / s0;
+                            }
+                        }
                         if (IsFrontalArmored(ref d, hit, fromSide))
                         {
                             // EMG1-FW-01（DEBT-EMG1GRM01-05）：子弹药节点上的破甲由子弹药自己结算
@@ -2199,24 +2224,20 @@ namespace BinGames.Sim.Combat
                             }
                         }
                         // EMG1-TRIG-01：子弹药不读根读法，只执行自己节点的指令（下面）。
-                        if (landed && (pr.Flags & EmgProjFlags.Sub) == 0 && pr.Weapon >= 0 && pr.Weapon < d.Weapons.Length)
+                        if (landed && rootRead)
                         {
-                            // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）。
-                            ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, d.Weapons[pr.Weapon], fromSide);
-                            // EMG3-E2E-01（DEBT-EMG3META01-03 连锁部分）：根节点条件 / 随机下游的连锁在命中时按条件重判（静态读法里没折这几行）
-                            if (pr.Prog >= 0 && EmgCondChainMods(ref d, pr.Prog, pr.Node, EmgMetaAllowNow(ref d, pr.Prog, pr.Node, EmgEventKind.Hit, owner, hit, pr.Chain, pr.Id), owner, out EmgMods condChain))
-                            {
-                                EmgChainHops(ref d, pr.Faction == CombatFaction.Player ? (byte)CombatFaction.Hostile : (byte)CombatFaction.Player, owner, hit, hitPos, dmg, condChain, true, d.Weapons[pr.Weapon].Reading);
-                            }
+                            // FG2-FW-02：弹体武器的读法在命中那一刻结算（开火者阵亡后照常，回收修复 / 跃击跳过）；读法副本已在上面按放行位补好。
+                            ProjectileReadingHit(ref d, owner, hit, hitPos, dmg, pw, fromSide);
                         }
                     }
                     if (!heal && (pr.Flags & EmgProjFlags.Massive) != 0)
                     {
                         EmgMassKnock(ref d, pr, owner, hit); // EMG4-FUZZ-01（#390）：扩口加重的载荷把比它轻的目标撞退
                     }
-                    if (!subHit && !heal && pr.Prog >= 0 && d.EmgListen != 0u)
+                    if (!heal && pr.Prog >= 0 && d.EmgListen != 0u)
                     {
                         // EMG3-E2E-01（DEBT-EMG3TMP01-01）：射弹命中点留 2 拍谐振点（按机器各一个，最近一次命中点）；节点没有谐振 / 没人读 evt.beat 时立即返回
+                        // EMG4-CLEAN-01（FG-GAP-209）：子弹药节点上的谐振同样在子弹药最近一次命中点留谐振点（按机器 × 节点各一个），放出点锚点不再带谐振位（EmgBeatAnchorSub）
                         EmgResonanceHit(ref d, pr.Prog, pr.Node, pr.Owner, pr.Owner, EmgEntKind.Unit, hitPos, hitId, pr.Damage, (byte)pr.Faction, pr.Weapon,
                             (byte)CombatCarrier.Projectile, pr.Depth, pr.Chain);
                     }

@@ -188,14 +188,16 @@ namespace GameLogic.EditorTools
                     r.CondZero.Add($"{fw}（第 {ordinal + 1} 位，{carrier}；只广播 evt.ping，同组僚机同一套程序、没有收听者，送达不了——同上口径）");
                     continue;
                 }
-                if (FullCircleDrift(pin, ordinal))
+                // EMG4-CLEAN-01（FG-GAP-215 关闭）：恒不成立 / 整圈侧偏只在编译结果带了预览原因时才按条件型零反应豁免（按编译提示判）；
+                // 没有提示的照常去掉重跑按行为判（会被判死）——预览不提示 = 回归
+                if (FullCircleDrift(pin, ordinal) && pin.Program.Notes.Any(n => n.Key == EmgProgramCompiler.NoteDriftFullCircle && n.Ordinal == ordinal))
                 {
-                    r.CondZero.Add($"{fw}（第 {ordinal + 1} 位，{carrier}；写端只有侧偏 grm.mod.drift，本机格斗挥击已是整圈（扇形半角 {pin.W.Reading.Cone:F0}°），转动挥击方向不改变覆盖——已登记缺口 FG-GAP-215，预览暂不提示，承接 EMG4-CLEAN-01）");
+                    r.CondZero.Add($"{fw}（第 {ordinal + 1} 位，{carrier}；写端只有侧偏 grm.mod.drift，本机格斗挥击已是整圈（扇形半角 {pin.W.Reading.Cone:F0}°）——预览已提示 emg.compile.drift_fullcircle）");
                     continue;
                 }
-                if (ConstFalseGate(pin, ordinal) is string gate)
+                if (ConstFalseGate(pin, ordinal) is string gate && pin.Program.Notes.Any(n => n.Key == EmgProgramCompiler.NoteGateNever && n.Ordinal < ordinal))
                 {
-                    r.CondZero.Add($"{fw}（第 {ordinal + 1} 位，{carrier}；{gate}——已登记缺口 FG-GAP-215，预览暂不提示，承接 EMG4-CLEAN-01）");
+                    r.CondZero.Add($"{fw}（第 {ordinal + 1} 位，{carrier}；{gate}——预览已提示 emg.compile.gate_never）");
                     continue;
                 }
                 r.BehaviorChecked++;
@@ -1404,6 +1406,29 @@ namespace GameLogic.EditorTools
             fake.RowHits["M01"] = 1;
             List<string> miss = MissingRows(new[] { fake }, new[] { "M01", "M02", "reaction_icebridge" });
             Expect(miss.Count == 1 && miss[0] == "M02", $"规则行没触发被报出（{string.Join("、", miss)}），已登记缺口的 reaction_icebridge 单列不重复报");
+            // 5. EMG4-CLEAN-01（DEBT-EMG4FUZZ01-05）：确定性 / 存读档检测器的分叉负向——同一用例分别在确定性重跑、读档续跑里注入一处分叉（远处多一个场），必须判出；不注入时两项都不报
+            var fc = new FuzzCase
+            {
+                Index = 953, Comp = ComponentCatalog.CompGunId, Carrier = FirmwareCarrier.Projectile, Chassis = ChassisCatalog.ChassisWheelId, Site = "home",
+                Faction = pools.Factions[0], Enemies = 3, EnemySeed = 7, Seconds = 3f, Tag = "负向：注入分叉",
+            };
+            CaseResult clean, detFork, saveFork;
+            try
+            {
+                ForkInject = 0;
+                clean = Evaluate(fc, full: true, pools, behavior: false);
+                ForkInject = 1;
+                detFork = Evaluate(fc, full: true, pools, behavior: false);
+                ForkInject = 2;
+                saveFork = Evaluate(fc, full: true, pools, behavior: false);
+            }
+            finally
+            {
+                ForkInject = 0;
+            }
+            Expect(clean.Crash == null && clean.Determinism == null && clean.SaveLoad == null && detFork.Determinism != null && saveFork.SaveLoad != null && saveFork.Determinism == null,
+                $"分叉负向（{fc.Text}）：不注入 确定性 {clean.Determinism ?? "无报"} / 存读档 {clean.SaveLoad ?? "无报"}{(clean.Crash != null ? " 崩溃 " + clean.Crash : string.Empty)}；" +
+                $"确定性重跑注入 → {detFork.Determinism ?? "没判出"}；读档续跑注入 → {saveFork.SaveLoad ?? "没判出"}");
         }
         // ═════════════════════════════════ ⑦ 涌现满载“加满” ═════════════════════════════════
 

@@ -92,7 +92,7 @@ namespace GameLogic.Campaign.Emergence
     public sealed class EmgSource
     {
         public sealed class Port { public string Id, Family, Dirs, Unit, NameKey, DescKey, Shape, Color; public int Code, NumericOnly, Perceive, CarrierImpl, Stage; }
-        public sealed class Decl { public string Id, Owner, OwnerKind, Dir, Port, Role, Carriers, TextKey; public int Seq, StageGate; public float Amount, Param2, Heat; }
+        public sealed class Decl { public string Id, Owner, OwnerKind, Dir, Port, Role, Carriers, TextKey, Legacy; public int Seq, StageGate; public float Amount, Param2, Heat; }
         public sealed class PortCarrier { public string Id, Port, Carrier, Verb, Mag, TextKey; public float A, B, C; }
         public sealed class Sub { public string Id, Carrier, NameKey; public int Code, KineticInherit; public float Speed, Life, LifeRatio, Radius, RadiusRatio, Kinetic; }
         public sealed class Trait { public string Id, Chassis, Kind, AppliesTo, StatePorts, ParamKeys, NameKey, DescKey; public int Stage, Reserved; }
@@ -142,6 +142,8 @@ namespace GameLogic.Campaign.Emergence
         public readonly Dictionary<string, int> PortIndexById = new Dictionary<string, int>(StringComparer.Ordinal);
         public readonly Dictionary<ushort, string> PortIdByCode = new Dictionary<ushort, string>();
         public readonly Dictionary<string, int> OwnerIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+        /// <summary>EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：owner → 声明参数 legacy 列（过渡 / 数值折叠读法字段，按声明行顺序、同名字段只取一次）。战斗按它结算，不读 readFields。</summary>
+        public readonly Dictionary<string, List<(string Field, float Magnitude)>> LegacyByOwner = new Dictionary<string, List<(string, float)>>(StringComparer.Ordinal);
         public readonly Dictionary<string, int> TraitByChassis = new Dictionary<string, int>(StringComparer.Ordinal);
         /// <summary>carrierImpl 写端口却没有任何 fg.TbPortCarrier 行、也没有声明写到它的端口：FGR-EMG-015 规则三的“已登记缺口”（不静默通过，由承接卡清零）。</summary>
         public readonly List<string> RegisteredGaps = new List<string>();
@@ -238,6 +240,55 @@ namespace GameLogic.Campaign.Emergence
         public static int Revision { get; private set; }
 
         /// <summary>当前编译结果（懒加载；表重载后调 <see cref="Reload"/>）。</summary>
+        /// <summary>
+        /// EMG4-CLEAN-01（FGR-EMG-019 第 3 点）：一条固件的过渡 / 数值折叠读法字段——声明参数 legacy 列（不读 fg.TbFirmwareKind.readFields）。
+        /// 混合芯片 = 两父相加并按字段封顶（A 的字段在前、B 新增的接在后面，与 FusionCatalog.MergeFields 同一合并）。没有返回空表。
+        /// </summary>
+        public static IReadOnlyList<(string Field, float Magnitude)> DeclLegacyOf(string firmwareId)
+        {
+            if (firmwareId == null)
+            {
+                return Array.Empty<(string, float)>();
+            }
+            EmgCompiled c = Current;
+            if (c.LegacyByOwner.TryGetValue(firmwareId, out List<(string Field, float Magnitude)> own))
+            {
+                return own;
+            }
+            if (!Economy.FusionCatalog.TryGetByMix(firmwareId, out Economy.FusionRecipeDef def))
+            {
+                return Array.Empty<(string, float)>();
+            }
+            var sum = new List<(string Field, float Magnitude)>();
+            foreach (string parent in new[] { def.ParentA, def.ParentB })
+            {
+                if (parent == null || !c.LegacyByOwner.TryGetValue(parent, out List<(string Field, float Magnitude)> pl))
+                {
+                    continue;
+                }
+                foreach ((string f, float m) in pl)
+                {
+                    int k = sum.FindIndex(e => e.Field == f);
+                    if (k < 0)
+                    {
+                        sum.Add((f, m));
+                    }
+                    else
+                    {
+                        sum[k] = (f, sum[k].Magnitude + m);
+                    }
+                }
+            }
+            for (int i = 0; i < sum.Count; i++)
+            {
+                if (Economy.FusionCatalog.TryGetCap(sum[i].Field, out float cap))
+                {
+                    sum[i] = (sum[i].Field, Math.Min(sum[i].Magnitude, cap)); // 与 FusionCatalog.MergeFields 同一封顶
+                }
+            }
+            return sum;
+        }
+
         public static EmgCompiled Current
         {
             get
@@ -712,7 +763,7 @@ namespace GameLogic.Campaign.Emergence
                 src.Decls.Add(new EmgSource.Decl
                 {
                     Id = r.Id, Owner = r.Owner, OwnerKind = r.OwnerKind, Seq = r.Seq, Dir = r.Dir, Port = r.Port, Role = r.Role, Amount = r.Amount,
-                    Param2 = r.Param2, Carriers = r.Carriers, Heat = r.Heat, TextKey = r.TextKey, StageGate = r.StageGate,
+                    Param2 = r.Param2, Carriers = r.Carriers, Heat = r.Heat, TextKey = r.TextKey, StageGate = r.StageGate, Legacy = r.Legacy,
                 });
             }
             foreach (PortCarrier r in t.TbPortCarrier.DataList)
@@ -938,6 +989,24 @@ namespace GameLogic.Campaign.Emergence
                 finalDecls.Add(row);
             }
             c.Decls = finalDecls.ToArray();
+            foreach (EmgSource.Decl d in src.Decls)
+            {
+                if (d.Legacy == null || d.Legacy == "none" || d.Legacy.Length == 0 || !c.OwnerIndex.ContainsKey(d.Owner))
+                {
+                    continue;
+                }
+                if (!c.LegacyByOwner.TryGetValue(d.Owner, out List<(string Field, float Magnitude)> list))
+                {
+                    c.LegacyByOwner[d.Owner] = list = new List<(string, float)>();
+                }
+                foreach ((string f, float m) in Content.CarrierReadings.ParseFields(d.Legacy))
+                {
+                    if (!list.Exists(e => e.Field == f))
+                    {
+                        list.Add((f, m));
+                    }
+                }
+            }
             c.OwnerIds = kept.ToArray();
 
             // 端口 × 载体
@@ -1109,7 +1178,8 @@ namespace GameLogic.Campaign.Emergence
                 bad.Add("fg.TbHomeTuning 缺少 emg.stage（FG19 第 18 节）");
             }
             c.RawStage = raw;
-            c.EffectiveStage = ClampStage(raw, ImplementedStage);
+            // EMG4-CLEAN-01（FGR-EMG-019 阶段 4 结束口径）：双轨清理后 emg.stage 只保留 4——表里填低值不再生效（旧轨分支已删，没有可回退的执行者）；行仍必须存在（缺行照报）
+            c.EffectiveStage = ImplementedStage;
             var pending = new HashSet<int>();
             var metaOwners = new HashSet<int>();
             foreach (EmgDeclRow d in c.Decls)

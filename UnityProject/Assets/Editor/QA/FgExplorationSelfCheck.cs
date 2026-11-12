@@ -387,7 +387,7 @@ namespace GameLogic.EditorTools
                 "-c \"import sys;sys.path.insert(0,'tools/cell_tables');import fgdata_explore as p;print('\\n'.join(l for l in p.dump_lines() if l.startswith('RLR') or l.startswith('HZD')))\"");
             var src = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("RLR\t", StringComparison.Ordinal) || l.StartsWith("HZD\t", StringComparison.Ordinal)).ToList();
             var rt = t.TbRelicRing.DataList.Select(r => string.Join("\t", "RLR", r.Id, r.MinDistance, r.TechData, Py(r.RecoverSeconds), r.NameKey, r.LoreKeys, r.SortOrder))
-                .Concat(t.TbHazard.DataList.Select(h => string.Join("\t", "HZD", h.Id, h.TerritoryId, h.BeltKind, h.NameKey, h.EffectKey, h.CounterKey, h.Color, h.StoryId, h.SortOrder))).ToList();
+                .Concat(t.TbHazard.DataList.Select(h => string.Join("\t", "HZD", h.Id, h.TerritoryId, h.BeltKind, h.NameKey, h.EffectKey, h.CounterKey, h.Color, h.StoryId, h.SortOrder, h.Ports))).ToList();
             bool table = code == 0 && src.Count == 8 && src.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(rt.OrderBy(x => x, StringComparer.Ordinal));
             IReadOnlyList<RelicRing> rings = HomeExplorationService.Rings;
             bool ringsOk = rings.Count == 4 && rings[0].MinDistance == 0 && rings.Zip(rings.Skip(1), (a, b) => b.MinDistance > a.MinDistance && b.TechData >= a.TechData).All(x => x)

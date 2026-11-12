@@ -962,9 +962,15 @@ namespace BinGames.Sim.Combat
             ushort hitPort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Hit);
             bool chs = c.Owner >= 0 && EmgChsAny(ref d, n.FirstInstr, end);
             bool clue = p.ClueMask != 0u;
+            // EMG4-CLEAN-01（FG-GAP-207 同根）：根节点条件 / 随机下游的命中写端（注能、场、壁撞、标记、入侵）按命中这一刻的放行位执行；没有元程序 = 全放行（一条比较）
+            ulong allow = n.Parent < 0 && EmgHasMeta(ref d, c.Prog) ? EmgCondAllow(ref d, c.Prog, c.Node, EmgEventKind.Hit, c.Owner, t, c.Chain, c.Ent) : ulong.MaxValue;
             for (int i = n.FirstInstr; i < end; i++)
             {
                 EmgInstr x = d.EmgInstrs[i];
+                if (allow != ulong.MaxValue && x.Role > EmgConst.RoleLastRead && EmgMetaConst.KindOf(x.Port) < 0 && !EmgMetaAllowed(allow, x.Ordinal))
+                {
+                    continue;
+                }
                 if (chs && EmgChsBlocked(ref d, c.Owner, n.FirstInstr, end, x.Ordinal))
                 {
                     continue; // DEBT-EMG3CHS01-02：命中结算的场 / 壁撞 / 子节点命中写端 / 注能同样按出手者门控同序号 chs.* condition（同 EmgRootGated）
@@ -978,9 +984,12 @@ namespace BinGames.Sim.Combat
                     // EMG2-FLD-01（FGR-EMG-112）：结算点展开场——没有 trigger 读端的场写端在命中处生成（有 trigger 的由 EmgRootGated / 子节点触发执行）；同一次出手打中多个目标只生成一个
                     if (x.Role > EmgConst.RoleLastRead && (x.Flags & EmgInstrFlags.Overflow) == 0 && !EmgOrdinalTriggered(ref d, n.FirstInstr, end, x.Ordinal))
                     {
-                        EmgHitField(ref d, x, t, c); // 修复轮：按宿主载体展开（FG19A 第 1.4 节电磁场控 5 载体）
-                        EmgAnchorAt(ref d, EmgAnchorConst.Field, c, d.Pos[t], t, x.Ordinal); // EMG3-FUSE-01：场生成点是落点
-                        EmgFieldAnchors(ref d, c, x, d.Pos[t], t); // EMG4-FUSE-02：场内受力 / 被扫过的单位也是落点
+                        // 修复轮：按宿主载体展开（FG19A 第 1.4 节电磁场控 5 载体）；EMG4-CLEAN-01（DEBT-EMG4FUSE02-03）：场没生成不挂落点，场内落点按场实际中心 / 半径
+                        if (EmgHitField(ref d, x, t, c, out double2 fat, out float fr))
+                        {
+                            EmgAnchorAt(ref d, EmgAnchorConst.Field, c, d.Pos[t], t, x.Ordinal); // EMG3-FUSE-01：场生成点是落点
+                            EmgFieldAnchors(ref d, c, x, fat, t, fr); // EMG4-FUSE-02：场内受力 / 被扫过的单位也是落点
+                        }
                     }
                     continue;
                 }
@@ -990,6 +999,11 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 if (n.Parent >= 0 && EmgChildHitWrite(ref d, t, c, x, n, end, hitPort))
+                {
+                    continue;
+                }
+                // EMG4-CLEAN-01（FG-GAP-214）：第一层（根节点）写 evt.marked 的指令——命中或出手门控（出手的这一下命中即是它的落点）、没有别的触发——在命中结算处执行，与子节点同一实现
+                if (n.Parent < 0 && x.Port == EmgRuleConst.PortMarked && (x.Flags & EmgInstrFlags.RootKernel) == 0 && EmgRootMarkWrite(ref d, t, c, x, n, end, hitPort))
                 {
                     continue;
                 }
@@ -1113,10 +1127,29 @@ namespace BinGames.Sim.Combat
             {
                 EmgInstr r = d.EmgInstrs[j];
                 // 子载荷自己不开火，evt.fire 门控的伴飞写端在它落地生效这一下放出（FG19A 第 21 行“放出伴飞”的子节点读法）
-                bool droneOnFire = x.Port == EmgRuleConst.PortDrone && r.Port == EmgConst.EventPortBase + (int)EmgEventKind.Fire;
+                bool droneOnFire = (x.Port == EmgRuleConst.PortDrone || x.Port == EmgRuleConst.PortMarked) && r.Port == EmgConst.EventPortBase + (int)EmgEventKind.Fire; // EMG4-CLEAN-01（FG-GAP-214）：出手门控的标记同样在子载荷落地这一下执行
                 if (r.Ordinal == x.Ordinal && r.Role == EmgConst.RoleTrigger && r.Port != hitPort && !droneOnFire)
                 {
                     return false; // 门控在别的事件上：不是“命中时”的写端
+                }
+            }
+            return EmgTargetWrite(ref d, t, c, x, n.FirstInstr, end);
+        }
+
+        /// <summary>EMG4-CLEAN-01（FG-GAP-214）：根节点的 evt.marked 写端在命中处执行的条件：同序号触发读端只有命中 / 出手（或没有）。O(节点指令数)。</summary>
+        private static bool EmgRootMarkWrite(ref CombatData d, int t, in EmgCtx c, in EmgInstr x, in EmgNode n, int end, ushort hitPort)
+        {
+            if (x.Role <= EmgConst.RoleLastRead || (x.Flags & EmgInstrFlags.Overflow) != 0 || !d.IsAlive(t))
+            {
+                return false;
+            }
+            ushort firePort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Fire);
+            for (int j = n.FirstInstr; j < end; j++)
+            {
+                EmgInstr r = d.EmgInstrs[j];
+                if (r.Ordinal == x.Ordinal && r.Role == EmgConst.RoleTrigger && r.Port != hitPort && r.Port != firePort)
+                {
+                    return false; // 门控在别的事件上（阵亡 / 反弹 / 过热……）：由那个事件执行
                 }
             }
             return EmgTargetWrite(ref d, t, c, x, n.FirstInstr, end);

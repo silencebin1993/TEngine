@@ -20,6 +20,9 @@ using HitEvent = ComposeEngine.Core.HitEvent;
 namespace GameLogic.MetabolicSlice.DebugTools
 {
     /// <summary>
+    /// 【旧引擎对照】EMG4-CLEAN-01（FGR-EMG-019 阶段 4 结束口径）：战斗已不走旧反应 / 旧读法路径，本探针只作“旧引擎行为对照”留档（FgReactionProbeSelfCheck 比对用），
+    /// 结果不再驱动任何战斗规则；不要据此新增内容。
+    ///
     /// FG2-FW-03（FG02 FGR-FW-040“先核实，再命名”）：旧反应引擎的行为探针。
     ///
     /// 旧引擎（ComposeEngine）的反应规则藏在预编译 DLL 里，触发配对与效果不能凭名字或说明猜。这里对**运行时真实注册表**

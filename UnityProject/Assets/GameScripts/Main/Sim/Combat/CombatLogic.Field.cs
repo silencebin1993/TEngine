@@ -148,9 +148,13 @@ namespace BinGames.Sim.Combat
         /// 格斗 = 场在本机处，场内的近身攻击者被弹到场外；无人机 = 场在离攻击者最近的一架本机无人机处（没有无人机时在本机处）；
         /// 力场 = 半径取本机力场半径；布区 = 场落在本机与攻击者正中、存续取本机布区时长。其余事件在事件位置。按事件端口 × 载体判，不认内容 ID（FGR-EMG-013）。
         /// </summary>
-        private static bool EmgGatedField(ref CombatData d, in EmgInstr x, in EmgEvent e, in EmgCtx host)
+        private static bool EmgGatedField(ref CombatData d, in EmgInstr x, in EmgEvent e, in EmgCtx host) => EmgGatedField(ref d, x, e, host, out _, out _);
+
+        /// <summary>EMG4-CLEAN-01（DEBT-EMG4FUSE02-03）：同上，另返回场实际的中心 <paramref name="at"/> 与半径 <paramref name="r"/>（场内落点按它取）；返回 false = 场没生成（冷却 / 场位满）。</summary>
+        private static bool EmgGatedField(ref CombatData d, in EmgInstr x, in EmgEvent e, in EmgCtx host, out double2 at, out float r)
         {
-            float r = x.Amount > 0f ? x.Amount : 2f;
+            r = x.Amount > 0f ? x.Amount : 2f;
+            at = e.Pos;
             float s = x.Param2 > 0f ? x.Param2 : 1f;
             double now = d.Scalars[0].Time;
             // 修复轮：偏折场的内置冷却（fieldrule_deflect_payload.param 秒，FG19A 第 43 行“内置冷却 3 秒”）按宿主记——冷却中再挨打不展开、不弹开，持续挨打不会挤满 64 个场位
@@ -163,7 +167,6 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            double2 at = e.Pos;
             int os = e.Kind == EmgEventKind.Hurt && e.Other != 0 ? d.SlotOf(e.Other) : -1;
             if (os >= 0)
             {
@@ -217,11 +220,12 @@ namespace BinGames.Sim.Combat
         /// 无人机 = 命中点的小场（半径 ≤ 3 米）；力场 = 以本机为心、半径取本机力场半径、同一宿主同一端口只留一个场（每次脉冲续期，力场“变成”这个场）；
         /// 布区 = 落区中心、半径与存续取落区的、同样只留一个续期。只按端口 × 载体判，不认内容 ID（FGR-EMG-013）；力场一次脉冲打中多个目标仍只有一个场。
         /// </summary>
-        private static void EmgHitField(ref CombatData d, in EmgInstr x, int t, in EmgCtx c)
+        /// <remarks>EMG4-CLEAN-01（DEBT-EMG4FUSE02-03）：返回场是否生成（场位满 = false）与实际中心 / 半径，场内落点按它取。</remarks>
+        private static bool EmgHitField(ref CombatData d, in EmgInstr x, int t, in EmgCtx c, out double2 at, out float r)
         {
-            float r = x.Amount > 0f ? x.Amount : 2f;
+            r = x.Amount > 0f ? x.Amount : 2f;
             float s = x.Param2 > 0f ? x.Param2 : 1f;
-            double2 at = d.Pos[t];
+            at = d.Pos[t];
             int os = d.SlotOf(c.OwnerId);
             bool single = false;
             switch ((CombatCarrier)c.Carrier)
@@ -259,7 +263,7 @@ namespace BinGames.Sim.Combat
                     single = true;
                     break;
             }
-            EmgSpawnField(ref d, x.Port, at, r, s, c.OwnerId, (CombatFaction)c.Faction, c.Chain, c.Depth, single);
+            return EmgSpawnField(ref d, x.Port, at, r, s, c.OwnerId, (CombatFaction)c.Faction, c.Chain, c.Depth, single);
         }
 
         /// <summary>同一条声明（序号）有没有 trigger 读端：有的由事件门控（EmgRootGated / 子节点触发）执行，命中注能处不再重复生成。</summary>

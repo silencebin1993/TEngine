@@ -165,12 +165,14 @@ namespace GameLogic.EditorTools
         // ── A 新交互 N / M ──────────────────────────────────────────────────────
 
         /// <summary>独立实现（直接读原表 fg.TbChannelDecl，不经编译结果）：候选 owner 的 (N, M)。</summary>
-        private static (int n, int m) Oracle(CampaignState s, string owner)
+        private static (int n, int m) Oracle(CampaignState s, string owner, bool hazards = true)
         {
             Tables t = ConfigSystem.Instance.Tables;
             int stage = EmgCatalog.EffectiveStage;
             var chips = new HashSet<string>((s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Where(c => c != null).Select(c => c.CardDefId));
             var provided = new HashSet<string>(t.TbFluidLeak.DataList.Select(l => l.Matter).Where(m => !string.IsNullOrEmpty(m) && m != "none"));
+            // EMG4-CLEAN-01（FG-GAP-213）：危害带端口也是世界常驻源（独立实现直接读 fg.TbHazard.ports）
+            if (hazards) provided.UnionWith(t.TbHazard.DataList.Where(h => !string.IsNullOrEmpty(h.Ports) && h.Ports != "none").SelectMany(h => h.Ports.Split(',')).Where(x => x.Length > 0));
             var cand = new HashSet<string>();
             foreach (GameConfig.fg.ChannelDecl d in t.TbChannelDecl.DataList)
             {
@@ -254,6 +256,13 @@ namespace GameLogic.EditorTools
                     }
                 }
             }
+            // EMG4-CLEAN-01（FG-GAP-213）：危害带端口计入世界常驻源——至少一个候选因危害带多出新交互，且提示与含危害带的独立实现一致（上面逐个比过）
+            // 基础蓝图内容恒解锁、本身就写 en.heat / mat.acid，危害带对 N 的贡献在新战役里被盖住；这里直接验生产代码的世界常驻源集合含危害带端口，独立实现（A1 上面逐个比过）读同一列
+            var world = new HashSet<string>();
+            LootInteractionHint.CollectWorldSources(world);
+            var hzPorts = t.TbHazard.DataList.Where(h => h.Ports != "none").SelectMany(h => h.Ports.Split(',')).Distinct().ToList();
+            Expect(hzPorts.Contains("mat.acid") && hzPorts.Contains("en.heat") && hzPorts.All(world.Contains) && t.TbFluidLeak.DataList.Where(l => l.Matter != "none").All(l => world.Contains(l.Matter)),
+                $"A1b FG-GAP-213：生产代码的世界常驻源集合含危害带端口 {string.Join("、", hzPorts)}（fg.TbHazard.ports）与泄漏流体，共 {world.Count} 个");
             Expect(bad == 0 && total > 40 && withN > 0, $"A1 {total} 个通道源作候选（{fws.Count} 条固件 + {parts.Count} 个部件 / 底盘特性），N / M 与直接读原表的独立实现逐个一致（{withN} 个 N > 0）");
 
             // A2 拥有一件能接上的内容后 N 增加；A3 发现后 N − 1、M + 1

@@ -270,7 +270,7 @@ namespace GameLogic.EditorTools
                 $"全部 {rows.Count} 个 assembled 敌人行逐行：装了固件的 {compiled} 个与玩家同一编译器编出程序并登记进地点程序表、LegacyOwners 为空（旧 readFields 不再结算）；没有固件的 {noFw.Count} 个（{string.Join("、", noFw)}）只有基础读法"
                 + (bad.Count > 0 ? "；未编出：" + string.Join("、", bad) : string.Empty) + (legacy.Count > 0 ? "；回落旧轨：" + string.Join("；", legacy) : string.Empty));
 
-            // emg.stage = 0（回滚对照）：同一行编不出程序、退回旧读法
+            // EMG4-CLEAN-01：原“emg.stage = 0 回滚对照（编不出程序）”改负向：填 0 不再生效
             EmgSource zero = EmgCatalog.FromTables();
             Func<string, (bool, float)> baseTuning = zero.Tuning;
             zero.Tuning = id => id == EmgCatalog.StageKey ? (true, 0f) : baseTuning(id);
@@ -278,13 +278,13 @@ namespace GameLogic.EditorTools
             bool offEmpty;
             try
             {
-                offEmpty = rows.All(r => EnemySpawnBuilder.TryAssembly(r, out string comp, out List<string> fw) && EmgProgramCompiler.Compile(CombatSite.EnemyPreview(comp, fw)).IsEmpty);
+                offEmpty = EmgCatalog.EffectiveStage == 4 && rows.All(r => !EnemySpawnBuilder.TryAssembly(r, out string comp, out List<string> fw) || fw.Count == 0 || !EmgProgramCompiler.Compile(CombatSite.EnemyPreview(comp, fw)).IsEmpty);
             }
             finally
             {
                 EmgCatalog.ResetForTests();
             }
-            Expect(offEmpty, "对照 emg.stage = 0：全部 assembled 敌人编出空程序（武器退回旧读法，开关可回滚）");
+            Expect(offEmpty, "负向（EMG4-CLEAN-01）：emg.stage 填 0 不再生效——装了固件的 assembled 敌人照常编出程序（旧读法回滚分支已删）");
 
             // 开 / 关在内核里结算的结果不同：同一敌人行，程序轨武器 vs 旧读法武器，打同一台机器 6 秒，比内核可观察结果
             int differ = 0;
