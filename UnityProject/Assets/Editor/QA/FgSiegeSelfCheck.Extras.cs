@@ -515,7 +515,7 @@ namespace GameLogic.EditorTools
             long off = Run(false, out _, out _);
             Expect(holding && on > 0 && hit > 0 && off == 0,
                 $"L5 DEBT-FG4ECO07-02 驻防机器守点交战：驻防岗守在指定的屏障边（{holding}），朝驻防点 {SiegeCatalog.GuardRadius:F0} 格以内最近的敌人交战 {on} 次（射程外在半径内靠近、射程内原地打；{hit} 台突袭者掉血）；" +
-                $"不是驻防岗的机器不替玩家开火（{off} 次，FGR-BASE-020）" + (on > 0 ? string.Empty : GuardDiag));
+                $"不是驻防岗的机器不走守点（守点开火 {off} 次：不追击、不回驻防点；EMGR-CMD-01 起射程内有敌人时按教义原地自卫，另计 SiegeService.SelfDefenseShots = {SiegeService.SelfDefenseShots}）" + (on > 0 ? string.Empty : GuardDiag));
         }
         // ── M 表现 ───────────────────────────────────────────────────────────
 

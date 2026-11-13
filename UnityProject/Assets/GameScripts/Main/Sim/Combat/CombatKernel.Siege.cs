@@ -404,6 +404,24 @@ namespace BinGames.Sim.Combat
             _d.Siege[i] = su;
             return true;
         }
+
+        /// <summary>EMGR-CMD-01（FG-GAP-142）：设置 / 清掉己方机器的“交给教义自卫”标记（清掉时连“正在自卫交战”位一起清）。值没变不写。返回是否找到单位。</summary>
+        public bool SetMachineSelfDefense(int unitId, bool on)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0)
+            {
+                return false;
+            }
+            CombatSiegeUnit su = _d.Siege[i];
+            byte v = on ? (byte)(su.SelfDefense | CombatSiegeConst.SelfDefenseOn) : (byte)0;
+            if (su.SelfDefense != v)
+            {
+                su.SelfDefense = v;
+                _d.Siege[i] = su;
+            }
+            return true;
+        }
         /// <summary>离某点最近的存活、可选中的指定阵营与种类的单位（半径内；并列取槽位小者）。0 = 没有。O(单位数)。</summary>
         public int FindNearestKind(double2 point, float radius, CombatFaction faction, CombatUnitKind kind)
         {

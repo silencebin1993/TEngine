@@ -37,6 +37,9 @@ namespace BinGames.Sim.Combat
         public const int MaxRectCells = 512 * 512;
         /// <summary>还没结算的溅射命中格上限（满了丢弃并计数）。</summary>
         public const int ImpactCap = 4096;
+        /// <summary>EMGR-CMD-01（FG-GAP-142）：<see cref="CombatSiegeUnit.SelfDefense"/> 的位——热更层写“交给教义自卫”，内核写“此刻射程内有敌人、正按教义自卫交战”（悬停来源）。</summary>
+        public const byte SelfDefenseOn = 1;
+        public const byte SelfDefenseEngaged = 2;
     }
 
     /// <summary>突袭单位的职能（<see cref="CombatSiegeUnit.Role"/>）。0 = 不是攻城单位（Demo 敌人、原型突袭者照旧）。</summary>
@@ -86,6 +89,12 @@ namespace BinGames.Sim.Combat
         /// </summary>
         public double2 GuardPost;
         public float GuardRadius;
+        /// <summary>
+        /// EMGR-CMD-01（FG-GAP-142，GDD §8.3“非接入单位按自身装配和教义战斗”）：位 <see cref="CombatSiegeConst.SelfDefenseOn"/> = 热更层判定“没被接入、当前装配打得出伤害”，
+        /// 命令为 None / Move / WorkMove 且不在守点之下时原地还手（不追击、不改命令）；位 <see cref="CombatSiegeConst.SelfDefenseEngaged"/> = 内核这一步射程内有敌人（悬停写来源）。
+        /// 随快照进 Emg 单位段尾部（同版本 20 内追加，短段读到取 0）。
+        /// </summary>
+        public byte SelfDefense;
     }
 
     /// <summary>FG6-DEF-05：攻城剧场配置（热更层在突袭展开 / 读档后写入；不进快照）。</summary>
@@ -139,6 +148,9 @@ namespace BinGames.Sim.Combat
         public long GuardTicks;
         public long GuardEngaged;
         public int GuardLastResult;
+        /// <summary>EMGR-CMD-01：教义自卫（原地还手）开火的次数、射程内有敌人的单位步数（与守点计数分开记）。</summary>
+        public long SelfDefenseShots;
+        public long SelfDefenseEngaged;
     }
 
     /// <summary>一个结构单位上一次写进格子缓存的样子（变化检测用）。</summary>
@@ -1686,22 +1698,38 @@ namespace BinGames.Sim.Combat
             CombatLogic.Separate(ref d, ref grid, i, speed, dt);
         }
 
+        /// <summary>EMGR-CMD-01：这一步没走教义自卫（接入 / 劫持 / 改了攻击等命令）→ 清掉“正在自卫交战”位（O(1)，没设时不写）。</summary>
+        public static void ClearSelfDefenseEngaged(ref CombatData d, int i)
+        {
+            CombatSiegeUnit su = d.Siege[i];
+            if ((su.SelfDefense & CombatSiegeConst.SelfDefenseEngaged) != 0)
+            {
+                su.SelfDefense = (byte)(su.SelfDefense & ~CombatSiegeConst.SelfDefenseEngaged);
+                d.Siege[i] = su;
+            }
+        }
+
         /// <summary>
         /// FG6-DEF-05（DEBT-FG4ECO07-02，FGR-DEF-043“守在指定点、按教义交战”）：空闲的驻防机器——驻防点 GuardRadius 内最近的敌人（并列取槽位小者）：
         /// 射程内按武器节奏开火（与编队攻击同一套 FireAt：瞄准、热量、装甲）；射程外朝它靠近，但不走出守点半径；半径内没有敌人 → 回到驻防点。
         /// 每单位 O(半径内的格)，确定性（只看步内状态）。
+        /// EMGR-CMD-01（FG-GAP-142）：<paramref name="fireOnly"/> = 教义自卫——以本机当前位置为心、半径 = 武器交战距离选敌（同一套网格选敌、CanHitAir、FireAt 与冷却），
+        /// 只开火：不靠近、不回守点、不动命令；守点计数不变，另记 SelfDefenseShots / SelfDefenseEngaged，并写悬停用的 SelfDefenseEngaged 位。
+        /// 自卫不锁定潜伏中（Stealthed）与只吃范围伤害（AreaOnly，子母雷）的目标（FireAt 对它们必然拒绝）；守点路径按卡片“现有守点逻辑不变”保持原选敌（会朝潜伏目标靠近）。
         /// </summary>
-        public static void StepGuard(ref CombatData d, ref CombatGrid grid, int i, float dt)
+        public static void StepGuard(ref CombatData d, ref CombatGrid grid, int i, float dt, bool fireOnly = false)
         {
             CombatSiegeUnit su = d.Siege[i];
             int w = d.Weapon[i];
             double2 pos = d.Pos[i];
-            double2 post = su.GuardPost;
-            float radius = su.GuardRadius;
+            double2 post = fireOnly ? pos : su.GuardPost;
+            bool armed = w >= 0 && w < d.Weapons.Length;
+            float range = armed ? CombatLogic.EngageRange(ref d, i, d.Weapons[w]) : 0f;
+            float radius = fireOnly ? range : su.GuardRadius;
             float speed = CombatLogic.SlowedSpeed(ref d, i, d.Speed[i]);
             int best = -1;
             double bestDist = double.MaxValue;
-            if (w >= 0 && w < d.Weapons.Length)
+            if (armed)
             {
                 double reach = radius + grid.MaxRadius;
                 int cx0 = grid.CellOf(post.x - reach);
@@ -1720,11 +1748,16 @@ namespace BinGames.Sim.Combat
                         {
                             int k = grid.Slots[e];
                             if (d.Faction[k] != (byte)CombatFaction.Hostile || !d.IsAlive(k) || !d.Has(k, CombatUnitFlags.Targetable)
-                                || math.distance(post, d.Pos[k]) > radius || (CombatLogic.IsAir(ref d, k) && !CombatLogic.CanHitAir(ref d, i)))
+                                || (fireOnly && (d.Has(k, CombatUnitFlags.Stealthed) || d.Has(k, CombatUnitFlags.AreaOnly)))
+                                || (!fireOnly && math.distance(post, d.Pos[k]) > radius) || (CombatLogic.IsAir(ref d, k) && !CombatLogic.CanHitAir(ref d, i)))
                             {
                                 continue; // FG10-FAC-01：格斗 / 力场 / 布区的驻防机器不追打不到的空中单位
                             }
                             double dist = EdgeDistance(ref d, i, k);
+                            if (fireOnly && dist > range)
+                            {
+                                continue; // 自卫只打射程内的（与下面开火的外沿距离同一口径）
+                            }
                             if (dist < bestDist || (dist == bestDist && k < best))
                             {
                                 bestDist = dist;
@@ -1736,12 +1769,49 @@ namespace BinGames.Sim.Combat
             }
             su.HealCd -= dt;
             CombatSiegeStats gs = d.SiegeState.IsCreated ? d.SiegeState.Stats[0] : default;
+            if (fireOnly)
+            {
+                if (best >= 0)
+                {
+                    gs.SelfDefenseEngaged++;
+                    if (su.HealCd <= 0f)
+                    {
+                        bool gated = CombatLogic.PlayerFireGated(ref d, i);
+                        CombatFireResult r = CombatLogic.FireAt(ref d, i, best);
+                        if (r == CombatFireResult.StillAiming && gated)
+                        {
+                            su.HealCd = 0.2f; // 修复轮 1：现形预警 / 架驻锄中——不是一发、不走整段冷却，门槛过了立刻开火
+                        }
+                        else if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming || r == CombatFireResult.Launched || r == CombatFireResult.Covered)
+                        {
+                            su.HealCd = math.max(0.05f, CombatLogic.EffectiveCooldown(d.Weapons[w]));
+                            gs.SelfDefenseShots++;
+                        }
+                        else
+                        {
+                            su.HealCd = 0.2f; // 过热 / 瞄准中断…：稍后再试（与守点同一口径）
+                        }
+                    }
+                    su.SelfDefense |= CombatSiegeConst.SelfDefenseEngaged;
+                }
+                else
+                {
+                    su.SelfDefense = (byte)(su.SelfDefense & ~CombatSiegeConst.SelfDefenseEngaged);
+                }
+                su.HealCd = math.max(su.HealCd, -1f);
+                d.Siege[i] = su;
+                if (d.SiegeState.IsCreated)
+                {
+                    d.SiegeState.Stats[0] = gs;
+                }
+                return;
+            }
+            su.SelfDefense = (byte)(su.SelfDefense & ~CombatSiegeConst.SelfDefenseEngaged); // 守点交战不是“自卫”：悬停不写自卫来源
             gs.GuardTicks++;
             if (best >= 0)
             {
                 gs.GuardEngaged++;
                 CombatWeapon wp = d.Weapons[w];
-                float range = CombatLogic.EngageRange(ref d, i, wp);
                 if (bestDist <= range)
                 {
                     if (su.HealCd <= 0f)

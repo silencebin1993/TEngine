@@ -320,6 +320,7 @@ namespace GameLogic.Campaign.Combat
             Kernel?.Dispose();
             Kernel = null;
             _machineUnit.Clear();
+            _selfDefenseLogged.Clear(); // EMGR-CMD-01
             _unitMachine.Clear();
             _enemyUnit.Clear();
             _unitEnemy.Clear();
@@ -570,6 +571,7 @@ namespace GameLogic.Campaign.Combat
             Sync?.Unbind(unit);
             Kernel?.Despawn(unit);
             _machineUnit.Remove(logicId);
+            _selfDefenseLogged.Remove(logicId); // EMGR-CMD-01：机器离开本地点不留残记
             _unitMachine.Remove(unit);
             _markerByUnit.Remove(unit);
             _machineWeapons.Remove(logicId);
@@ -3665,6 +3667,7 @@ namespace GameLogic.Campaign.Combat
                 }
             }
             _machineUnit.Clear();
+            _selfDefenseLogged.Clear(); // EMGR-CMD-01
             _unitMachine.Clear();
             _enemyUnit.Clear();
             _unitEnemy.Clear();

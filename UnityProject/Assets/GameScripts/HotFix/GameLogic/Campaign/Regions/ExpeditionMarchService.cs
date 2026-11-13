@@ -813,8 +813,8 @@ namespace GameLogic.Campaign.Regions
         /// FG8-E2E-01（FGJ-M8 实跑发现：星球上的远征队对据点驻军 / 精英残部 / 巡逻完全不还手——家园内核的自动交战只认 Demo 的低威胁训练靶）：
         /// AI 教义的自卫交战，复用内核守点教义（FG6-DEF-05 StepGuard：有武器才开火、射程外只在守点半径内靠近、半径内没敌人回驻防点）。
         /// 复审修复（P1）：不再由热更层直接下内核攻击命令——没有攻击出口的成员会接到一条永远完不成的攻击、追击没有边界、“待命”被顶掉、命令栏刷拒绝行。现在每游戏秒：
-        /// 被接入（直控）或当前装配打不出伤害（<see cref="CombatSite.CanMachineAttack"/>）的成员不交给教义（清掉守点，“待命”的守备命令原样保留）；
-        /// 正在执行命令（玩家的移动 / 攻击、行军的前进 / 返回）的成员清掉守点、听命令；没有命令的成员（走到了站位、被截断停下）驻防点 = 停下的位置（已在守点就不改），
+        /// 被接入（直控）或当前装配打不出伤害（<see cref="CombatSite.SyncDoctrineSelfDefense"/>，EMGR-CMD-01 起与驻防对账共用）的成员不交给教义（清掉守点与自卫标记，“待命”的守备命令原样保留）；
+        /// 正在执行命令（玩家的移动 / 攻击、行军的前进 / 返回）的成员清掉守点、听命令——移动类命令途中由内核按“教义自卫”标记原地还手（EMGR-CMD-01，不追击、不改行军命令）；没有命令的成员（走到了站位、被截断停下）驻防点 = 停下的位置（已在守点就不改），
         /// 半径 expedition.march.engage_radius；“待命”的成员驻防点 = 守备点：守备点半径内出现敌人时让出守备命令交给教义，敌人没了按原守备点恢复“待命”。
         /// 只看步序号（每游戏秒），与观察无关；O(成员数) 次 AOT 查询。不改行军命令（<see cref="ExpeditionMarchState.Command"/>）。
         /// 返回：有成员正被教义占用（驻防点半径内有敌人，或打完还在走回驻防点）——这时不判“路线被截断”。
@@ -832,7 +832,9 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 home.TryGetMachineGuard(id, out Vector2 post, out float guardRadius);
-                if (home.IsMachinePossessed(id) || !home.CanMachineAttack(id))
+                // EMGR-CMD-01：与攻城服务驻防对账共用一个判定（被接入 / 打不出伤害 → 不交给教义），并写内核“教义自卫”标记：
+                // 执行前进 / 返回（移动命令）时原地还手、仍按行军命令走；没有命令时下面的守点教义优先。
+                if (!home.SyncDoctrineSelfDefense(id))
                 {
                     if (guardRadius > 0f)
                     {

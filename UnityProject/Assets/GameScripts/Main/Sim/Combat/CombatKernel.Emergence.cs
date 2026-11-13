@@ -1217,7 +1217,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegUnits, (v17 ? 9 + UnitStage2Fields : 9) + (v18 ? 1 : 0), _d.Count);
+            sw.Begin(EmgConst.SegUnits, (v17 ? 9 + UnitStage2Fields : 9) + (v18 ? 1 : 0) + (v20 ? 1 : 0), _d.Count); // EMGR-CMD-01：版本 20 内 + 教义自卫标记
             for (int i = 0; i < _d.Count; i++)
             {
                 EmgUnitState u = _d.EmgUnit[i];
@@ -1237,6 +1237,10 @@ namespace BinGames.Sim.Combat
                 if (v18)
                 {
                     if (sw.F()) w.Write(u.Trait); // EMG3-CHS-01：格式 18 尾部追加（短段 / ≤ 17 版取 0）
+                }
+                if (v20)
+                {
+                    if (sw.F()) w.Write(_d.Siege[i].SelfDefense); // EMGR-CMD-01（FG-GAP-142）：同版本 20 内追加（自描述段，短段读到取 0 = 没交给教义自卫）
                 }
                 sw.EndRecord();
             }
@@ -1749,12 +1753,17 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.EraRefillT = r.ReadSingle();
                         ReadUnitStage2(r, sr, ref u); // EMG2-MAT-01：格式 17 单位段尾部（短段 / 格式 16 取 0）
                         if (sr.F()) u.Trait = r.ReadByte(); // EMG3-CHS-01：格式 18 尾部（短段 / ≤ 17 版取 0）
-                        if (!sr.RecordOk || !UnitEmgValid(prof, u))
+                        byte selfDefense = 0;
+                        if (sr.F()) selfDefense = r.ReadByte(); // EMGR-CMD-01：版本 20 内追加（短段取 0）
+                        if (!sr.RecordOk || !UnitEmgValid(prof, u) || (selfDefense & ~(CombatSiegeConst.SelfDefenseOn | CombatSiegeConst.SelfDefenseEngaged)) != 0)
                         {
                             return CombatLoadResult.InvalidValue;
                         }
                         staging.EProfile[i] = prof;
                         staging.EmgUnit[i] = u;
+                        CombatSiegeUnit ssu = staging.Siege[i];
+                        ssu.SelfDefense = selfDefense;
+                        staging.Siege[i] = ssu;
                     }
                     return CombatLoadResult.Ok;
                 case EmgConst.SegProjectiles:

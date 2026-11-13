@@ -469,6 +469,8 @@ namespace GameLogic.EditorTools
             // EMGR-NAV-01（FG-GAP-140 / 136）：右键攻击直线不通才寻路（L 形墙后能打到、封死以“无法到达”结束、开阔地与修改前逐步哈希一致）、
             // 攻击 / 移动卡住先从当前位置重寻一次（次数按低 7 位）、目标移动重要路线、负向矩阵、家园正式入口与存读档 / 倍速 / 观察 / 暂停。
             Seg("FgNavAttackSelfCheck", FgNavSelfCheck.RunAttackNav);
+            // EMGR-CMD-01（FG-GAP-142）：非接入机器按教义原地自卫（移动 / 赶路 / 施工 / 远征行军途中还手不改命令、负向矩阵、悬停来源、存读档 / 倍速 / 观察 / 暂停）。
+            Seg("FgSelfDefenseSelfCheck", FgNavSelfCheck.RunSelfDefense);
             // FG0-QA-01：旅程机器人框架的失败路径（重试、步骤超时、总超时、报错即失败、报告、域重载后续跑、旅程登记）。
             // 旅程本身要进 Play（tools/unity-journey.sh），性能基线要搭后期大场景（tools/unity-perf-baseline.sh），都不在全量自检里。
             Seg("JourneyRunnerSelfCheck", JourneyRunnerSelfCheck.Run);

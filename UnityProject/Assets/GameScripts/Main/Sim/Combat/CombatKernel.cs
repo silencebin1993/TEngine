@@ -2534,6 +2534,10 @@ namespace BinGames.Sim.Combat
                 Mix(ref h, hsu.GuardPost.x);
                 Mix(ref h, hsu.GuardPost.y);
                 Mix(ref h, hsu.GuardRadius);
+                if (hsu.SelfDefense != 0)
+                {
+                    Mix(ref h, hsu.SelfDefense); // EMGR-CMD-01：只在设了标记时混入（没有标记的状态哈希逐字不变）
+                }
                 CombatCommand c = _d.Cmd[i];
                 Mix(ref h, (int)c.Kind);
                 Mix(ref h, c.Target);

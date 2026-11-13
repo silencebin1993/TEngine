@@ -46,7 +46,7 @@ namespace GameLogic.EditorTools
     /// F 性能：2,000 格路线工作线程耗时（冷 / 热）、大量请求时主线程每步开销。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>。
     /// </summary>
-    public static class FgNavSelfCheck
+    public static partial class FgNavSelfCheck
     {
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const int Slot = 0;

@@ -1223,6 +1223,16 @@ namespace GameLogic.EditorTools
             int eliteUnits = 0;
             if (living.Count > 0)
             {
+                // EMGR-CMD-01（FG-GAP-142）：① 里战斗机按教义边走边还手，燃迹明火（不认敌我，FG-EMG 已定）落在自己前进的路上，带着燃烧进 ④
+                // （实测 ④ 开始时 14 / 120、每秒约 −6，走不到残部就烧光）。④ 只测残部刷新与醒来（交战胜负由 ① 与 FGJ-M8 elite_* 覆盖），
+                // 夹具在队伍处补一台满血战斗履带一起走近，不赌 ① 的残血能不能走到（总控硬规矩 2）。
+                MachineOpResult fresh = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, HomeValleyLayout.RegionId, Center(living), 120f, 120f);
+                if (fresh.Success)
+                {
+                    MachineLoadoutRegistry.Register(S, fresh.LogicId, HomeValleyLayout.BlueprintErc003Id, 1);
+                    WorldSimulation.StepMany(2);
+                    living.Add(fresh.LogicId);
+                }
                 Select(home, living);
                 home.SquadCommands.IssueMoveTo(ra + (Center(living) - ra).normalized * 8f, false);
                 remEngaged = StepUntil(() => rem.Engaged, Hz * 300, Hz / 2);
@@ -1230,7 +1240,9 @@ namespace GameLogic.EditorTools
             }
             Expect(remEngaged && eliteUnits == TerritoryControlService.Row(tid).EliteCount && rem.ReinforceStopped && GameSettings.HasSeenGuidanceHook(GuidanceHooks.WorldFirstEliteRemnant),
                 $"L2 ④ 已收复领地里精英残部刷新（{rem.OutpostId}，离队伍 {F1(Vector2.Distance(ra, c))} 格、不增援）：右键地面走近，醒来 {eliteUnits} 台精英迎战" +
-                "（击溃精英、留下数据包的玩家路径由 FGJ-M8 elite_move / elite_killed 实跑，同一个残部机制）");
+                "（击溃精英、留下数据包的玩家路径由 FGJ-M8 elite_move / elite_killed 实跑，同一个残部机制）" +
+                (remEngaged && eliteUnits == TerritoryControlService.Row(tid).EliteCount ? string.Empty
+                    : $"【诊断：存活战斗机 {living.Count} 台、残部醒来 {remEngaged}、应有精英 {TerritoryControlService.Row(tid).EliteCount}、残部已毁 {rem.Destroyed}】"));
         }
 
         // ── L3 遗产片段（DEBT-FG8EXP04-04）──────────────────────────────────────────

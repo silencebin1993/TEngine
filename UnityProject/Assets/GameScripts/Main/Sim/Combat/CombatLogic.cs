@@ -294,11 +294,13 @@ namespace BinGames.Sim.Combat
             }
             if (d.Behavior[i] == (byte)CombatBehavior.Hijacked)
             {
+                CombatSiegeLogic.ClearSelfDefenseEngaged(ref d, i); // EMGR-CMD-01：被劫持 / 被接入的这一步起不再算“教义自卫交战”
                 StepHijackedUnit(ref d, ref grid, i, dt); // EMG4-HIJ-01：劫持体按 AI 教义行动，不读编队命令
                 return;
             }
             if (d.Has(i, CombatUnitFlags.Possessed))
             {
+                CombatSiegeLogic.ClearSelfDefenseEngaged(ref d, i);
                 // Demo：受控机排除在编队接管之外（命令保留，释放后恢复）；位移来自直控输入。
                 float2 dir = d.Direct[i];
                 if (math.lengthsq(dir) > 0.0001f)
@@ -362,9 +364,28 @@ namespace BinGames.Sim.Combat
             }
 
             // FG6-DEF-05（DEBT-FG4ECO07-02）：空闲的驻防机器守点交战（有命令时听命令：工单赶路、玩家命令优先）。
-            if (d.Siege[i].GuardRadius > 0f && d.Cmd[i].Kind == CombatCommandKind.None && d.Kind[i] == (byte)CombatUnitKind.Machine)
+            // EMGR-CMD-01（FG-GAP-142）：否则带“教义自卫”标记、命令为 None / Move / WorkMove 的机器原地还手（fireOnly：不追击、不动命令与工单）；
+            // 攻击 / 守备 / 撤退等其它命令不叠开火（玩家命令优先）。else-if：同一步同一台只走一条，不会两次开火。
+            CombatSiegeUnit gsu = d.Siege[i];
+            CombatCommandKind gk = d.Cmd[i].Kind;
+            if (d.Kind[i] == (byte)CombatUnitKind.Machine)
             {
-                CombatSiegeLogic.StepGuard(ref d, ref grid, i, dt);
+                if (gsu.GuardRadius > 0f && gk == CombatCommandKind.None)
+                {
+                    CombatSiegeLogic.StepGuard(ref d, ref grid, i, dt);
+                }
+                // 修复轮 1：潜伏中的己方机器（吸波伪装罩）不因教义自卫自己现形——被打 / 移动 / 被侦测现形后才还手（FGR-BASE-020 不替玩家做决定）；
+                // 驻锄曲射炮只在停着时架炮自卫：移动途中架炮会撤回这一步位移再收炮，走走停停、一发也打不出（违反“不离开命令”）。
+                else if ((gsu.SelfDefense & CombatSiegeConst.SelfDefenseOn) != 0 && !d.Has(i, CombatUnitFlags.EngageHold) // 厂内机器不参与自动交战（与 StepAutoEngage 同一口径）
+                         && !d.Has(i, CombatUnitFlags.Stealthed)
+                         && (gk == CombatCommandKind.None || ((gk == CombatCommandKind.Move || gk == CombatCommandKind.WorkMove) && !HasDeploy(ref d, i))))
+                {
+                    CombatSiegeLogic.StepGuard(ref d, ref grid, i, dt, fireOnly: true);
+                }
+                else
+                {
+                    CombatSiegeLogic.ClearSelfDefenseEngaged(ref d, i);
+                }
             }
 
             CombatBehavior b = (CombatBehavior)d.Behavior[i];

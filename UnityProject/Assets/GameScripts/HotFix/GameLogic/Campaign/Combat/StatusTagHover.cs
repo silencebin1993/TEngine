@@ -300,7 +300,7 @@ namespace GameLogic.Campaign.Combat
             int any = site.Kernel.PickUnit(at, PickRadius, false, true);
             // EMG1-CHAIN-01（FG-GAP-171）：带程序的己方机器没标签时也弹（附程序行）；没程序的己方单位照旧不弹。
             // EMG1-FW-01：装着爆炸反应装甲（块数机制开着）的己方单位没标签时也弹（附块数与补块倒计时）。
-            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _) || site.Kernel.TryGetRelay(any, out _) || site.Kernel.TryGetSeize(any, out _, out _, out _, out _)) ? any : 0; // EMG3-SQD-01：中继机器也弹（转发 / 限流计数）
+            return any != 0 && (site.TryGetEnemyOfUnit(any, out _) || HasProgram(site, any) || site.Kernel.TryGetEra(any, out _, out _, out _, out _) || site.Kernel.TryGetRelay(any, out _) || site.Kernel.TryGetSeize(any, out _, out _, out _, out _) || site.IsSelfDefending(any)) ? any : 0; // EMGR-CMD-01：正按教义自卫交战的己方机器也弹（写来源） // EMG3-SQD-01：中继机器也弹（转发 / 限流计数）
         }
 
         private static bool HasProgram(CombatSite site, int unit) =>
@@ -323,6 +323,8 @@ namespace GameLogic.Campaign.Combat
             line = unhackable == null ? line : line == null ? unhackable : line + "\n" + unhackable;
             string hijack = site.HijackHoverLine(unit) ?? site.SeizeHoverLine(unit); // EMG4-HIJ-01：劫持剩余时间、由教义触发、不接受编队命令；EMG4-HIJ-02：夺控来源 / 剩余 / 瘫痪 / 反向接入
             line = hijack == null ? line : line == null ? hijack : hijack + "\n" + line;
+            string doctrine = site.SelfDefenseHoverLine(unit); // EMGR-CMD-01（FGR-BASE-020）：非接入的机器正按教义原地还手 → “由教义触发：自卫交战”
+            line = doctrine == null ? line : line == null ? doctrine : doctrine + "\n" + line;
             if (line == null)
             {
                 return;

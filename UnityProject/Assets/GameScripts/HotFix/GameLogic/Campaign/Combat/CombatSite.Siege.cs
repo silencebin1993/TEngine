@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BinGames.Sim.Combat;
 using GameLogic.Core;
+using GameLogic.Localization;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -279,6 +280,43 @@ namespace GameLogic.Campaign.Combat
         /// </summary>
         public bool SetMachineGuard(int logicId, Vector2 post, float radius) =>
             !IsDisposed && _machineUnit.TryGetValue(logicId, out int unit) && Kernel.SetMachineGuard(unit, new double2(post.x, post.y), radius);
+
+        private readonly HashSet<int> _selfDefenseLogged = new HashSet<int>();
+
+        /// <summary>EMGR-CMD-01：开始一段教义自卫交战的次数（每台机器从“没在交战”到“在交战”记一次；对账时采样，诊断 / 自检用）。</summary>
+        public long SelfDefenseEngagements { get; private set; }
+
+        /// <summary>
+        /// EMGR-CMD-01（FG-GAP-142，GDD §8.3，FGR-BASE-020 例外“AI 教义范围内的战斗行为”）：能不能交给教义——没被接入，当前装配打得出伤害（<see cref="CanMachineAttack"/>）。
+        /// 攻城服务的驻防对账与远征行军的自卫维护共用这一个判定；按判定写内核“教义自卫”标记（命令为 None / Move / WorkMove 且不在守点之下时原地还手）。
+        /// 从“没在交战”变成“在交战”时写一行日志（来源可追溯）。返回判定结果；机器不在本地点返回 false。O(1)。
+        /// </summary>
+        public bool SyncDoctrineSelfDefense(int logicId)
+        {
+            if (IsDisposed || !_machineUnit.TryGetValue(logicId, out int unit))
+            {
+                return false;
+            }
+            bool on = !IsMachinePossessed(logicId) && CanMachineAttack(logicId);
+            Kernel.SetMachineSelfDefense(unit, on);
+            if (!on || !IsSelfDefending(unit))
+            {
+                _selfDefenseLogged.Remove(logicId);
+            }
+            else if (_selfDefenseLogged.Add(logicId))
+            {
+                SelfDefenseEngagements++;
+                TEngine.Log.Info($"[CombatSite] {MachineNaming.Long(logicId)}：{GameText.Get("doctrine.selfdefense")}（射程内有敌人，原地还手，命令与工单不变）");
+            }
+            return on;
+        }
+
+        /// <summary>EMGR-CMD-01：这台单位此刻是否正按教义自卫交战（内核写的位：射程内有敌人、原地还手）。</summary>
+        public bool IsSelfDefending(int unitId) =>
+            !IsDisposed && Kernel.TryGetSiegeUnit(unitId, out CombatSiegeUnit su) && (su.SelfDefense & CombatSiegeConst.SelfDefenseEngaged) != 0;
+
+        /// <summary>EMGR-CMD-01（FGR-BASE-020）：悬停写来源“由教义触发：自卫交战”；没在自卫交战返回 null。</summary>
+        public string SelfDefenseHoverLine(int unitId) => IsSelfDefending(unitId) ? GameText.Get("doctrine.selfdefense") : null;
         /// <summary>离 <paramref name="at"/> 最近的己方机器（半径内）。0 = 没有。</summary>
         public int FindNearestMachine(Vector2 at, float radius) =>
             IsDisposed ? 0 : Kernel.FindNearestKind(new double2(at.x, at.y), radius, CombatFaction.Player, CombatUnitKind.Machine);

@@ -841,6 +841,17 @@ namespace BinGames.Sim.Combat
             d.Foundry[i] = f;
         }
 
+        /// <summary>EMGR-CMD-01：单位带架设参数（驻锄曲射炮）。O(1)。</summary>
+        internal static bool HasDeploy(ref CombatData d, int i)
+        {
+            int bp = d.BProfile[i];
+            return bp >= 0 && bp < d.Profiles.Length && d.Profiles[bp].DeploySeconds > 0f;
+        }
+
+        /// <summary>EMGR-CMD-01：出手门槛还没过（现形预警中 / 驻锄没架好）——这时 FireAt 的 StillAiming 不是打出的一发。O(1)。</summary>
+        internal static bool PlayerFireGated(ref CombatData d, int i) =>
+            d.BProfile[i] >= 0 && (d.Silent[i].Reveal > 0f || (HasDeploy(ref d, i) && d.Foundry[i].Deploy != 2));
+
         private static bool PlayerWantsToMove(ref CombatData d, int i)
         {
             if (d.Has(i, CombatUnitFlags.Possessed))

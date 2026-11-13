@@ -28,6 +28,8 @@ namespace GameLogic.Campaign.Defense
         public static int InterceptCount { get; private set; }
         public static int InterceptRegroups { get; private set; }
         public static long GuardShots { get; private set; }
+        /// <summary>EMGR-CMD-01：家园内核里教义自卫（原地还手）累计开火次数（对账时采样；读档后从 0 记）。</summary>
+        public static long SelfDefenseShots { get; private set; }
 
         private static void StepIntercepts(CampaignState state, CombatSite site, long ticksBefore, int worldHz)
         {
@@ -258,7 +260,11 @@ namespace GameLogic.Campaign.Defense
                     }
                 }
                 site.SetMachineGuard(m.LogicId, post, guard ? radius : 0f);
+                // EMGR-CMD-01（FG-GAP-142）：其余（没在守点之下的）机器按共用判定交给教义自卫——没被接入、打得出伤害的原地还手，不追击、不改命令与工单；
+                // 守点之下的驻防机器内核先走守点（同一步不会两次开火），在去驻防点的路上（赶路命令）照样原地还手。
+                site.SyncDoctrineSelfDefense(m.LogicId);
             }
+            SelfDefenseShots = site.SiegeStats.SelfDefenseShots;
         }
     }
 }
