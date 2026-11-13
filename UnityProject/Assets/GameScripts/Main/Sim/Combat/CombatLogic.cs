@@ -418,26 +418,28 @@ namespace BinGames.Sim.Combat
                 }
                 cmd.Pos = d.Pos[t];
                 double distA = math.distance(pos, cmd.Pos);
-                // FG2-FW-02：格斗 / 力场这类要贴近的载体按武器的接近距离收紧命令射程（目标半径算进去）；固件读法的出手间隔倍率（电容蓄力）乘在冷却上。
-                float attackRange = cmd.AttackRange;
-                int wi = d.Weapon[i];
-                float cdScale = 1f;
-                if (wi >= 0 && wi < d.Weapons.Length)
-                {
-                    CombatReading rd = d.Weapons[wi].Reading;
-                    if (rd.Approach > 0f)
-                    {
-                        attackRange = math.min(attackRange, rd.Approach + d.Radius[t]);
-                    }
-                    if (rd.CooldownScale > 0f)
-                    {
-                        cdScale = rd.CooldownScale;
-                    }
-                }
+                float attackRange = AttackRangeOf(ref d, i, t, cmd.AttackRange, out float cdScale);
                 bool inRangeA = distA <= attackRange;
                 if (!inRangeA)
                 {
-                    StepTowards(ref d, i, pos, cmd.Pos, dt);
+                    // EMGR-NAV-01（FG-GAP-140）：直线不通才寻路——开阔地（直线通）照旧直线逼近、行为与哈希不变；被墙角 / 高差挡住时走层级寻路绕到射程内
+                    if (d.NavSt[i] != (byte)CombatNavState.None || AttackNeedsRoute(ref d, i, pos, cmd.Pos, attackRange))
+                    {
+                        if (TickAttackRoute(ref d, i, ref cmd, pos, attackRange, dt, out reason))
+                        {
+                            return true;
+                        }
+                    }
+                    else
+                    {
+                        StepTowards(ref d, i, pos, cmd.Pos, dt);
+                    }
+                }
+                else if (d.NavSt[i] != (byte)CombatNavState.None)
+                {
+                    // 进了射程：放下路线（目标再跑出射程时重新判断直线通不通）；在飞的寻路结果按状态作废
+                    DropRoute(ref d, i);
+                    d.NavSt[i] = (byte)CombatNavState.None;
                 }
                 cmd.AtkCd -= dt;
                 if (inRangeA && cmd.AtkCd <= 0f)
@@ -483,14 +485,152 @@ namespace BinGames.Sim.Combat
                 cmd.Stuck = 0;
                 return false;
             }
-            cmd.Stuck++;
-            if (cmd.Stuck < d.Config.MaxStuckStrikes)
+            // 直线移动没有路线可重要（不套重寻）；次数按低 7 位读（EMGR-NAV-01）
+            int strikes = StuckCount(cmd) + 1;
+            cmd.Stuck = (byte)((cmd.Stuck & StuckRetryBit) | strikes);
+            if (strikes < d.Config.MaxStuckStrikes)
             {
-                Gameplay(ref d, CombatEventKind.CommandStuckStrike, i, 0, cmd.Stuck, d.Config.MaxStuckStrikes, pos, 0, (byte)cmd.Kind);
+                Gameplay(ref d, CombatEventKind.CommandStuckStrike, i, 0, strikes, d.Config.MaxStuckStrikes, pos, 0, (byte)cmd.Kind);
                 return false;
             }
             reason = CombatEndReason.Stuck;
             return true;
+        }
+
+        /// <summary>攻击命令的有效射程：格斗 / 力场这类要贴近的载体按武器的接近距离收紧命令射程（目标半径算进去，FG2-FW-02）；
+        /// <paramref name="cdScale"/> = 固件读法的出手间隔倍率（电容蓄力），乘在冷却上。</summary>
+        private static float AttackRangeOf(ref CombatData d, int i, int t, float baseRange, out float cdScale)
+        {
+            float attackRange = baseRange;
+            int wi = d.Weapon[i];
+            cdScale = 1f;
+            if (wi >= 0 && wi < d.Weapons.Length)
+            {
+                CombatReading rd = d.Weapons[wi].Reading;
+                if (rd.Approach > 0f)
+                {
+                    attackRange = math.min(attackRange, rd.Approach + d.Radius[t]);
+                }
+                if (rd.CooldownScale > 0f)
+                {
+                    cdScale = rd.CooldownScale;
+                }
+            }
+            return attackRange;
+        }
+
+        /// <summary>
+        /// EMGR-NAV-01（FG-GAP-140）：射程外的攻击命令要不要走寻路——寻路地点、地面单位、本机所在格可走，且从本机格到“离目标正好一个射程”的逼近点直线不通。
+        /// 判逼近点而不是目标格：目标压在建筑 / 不可走格上时开阔地照旧直线逼近（只要走到射程内，不必走进目标格）。
+        /// </summary>
+        private static bool AttackNeedsRoute(ref CombatData d, int i, double2 pos, double2 target, float range)
+        {
+            if (d.Config.NavEnabled == 0 || d.Clarity[i].Air != 0)
+            {
+                return false; // 不寻路的地点 / 空中单位（不受格网，FG10-FAC-01）：照旧直线
+            }
+            int cls = ClassOf(ref d, i);
+            int2 from = CellOf(pos);
+            if (!Walkable(ref d, from, cls))
+            {
+                return false; // 本机压在不可走格里（被新建筑压住）：照旧直线走出来（格网碰撞放行）
+            }
+            double dist = math.distance(pos, target);
+            double2 aim = dist > range && dist > 1e-9 ? target + (pos - target) * (range / dist) : pos;
+            return !NavSearch.LineClear(ref d.Nav, from, CellOf(aim), cls);
+        }
+
+        /// <summary>
+        /// EMGR-NAV-01（FG-GAP-140）：射程外、直线被地形挡住的攻击命令沿寻路路线逼近（就近路线：目标压在建筑上也能走到旁边）。
+        /// 目标偏离路线（完整路线：终点离目标当前格超过 2 格；就近路线：终点打不到目标）时从当前位置重新要路线（等待时沿旧路线继续走）；
+        /// 寻路失败 / 就近点打不到 → 无法到达（原因随事件交给热更层）；走不动（与移动命令共用看门狗，先重寻一次）→ 受阻。
+        /// </summary>
+        private static bool TickAttackRoute(ref CombatData d, int i, ref CombatCommand cmd, double2 pos, float range, float dt, out CombatEndReason reason)
+        {
+            reason = CombatEndReason.None;
+            var st = (CombatNavState)d.NavSt[i];
+            if (st == CombatNavState.None || st == CombatNavState.NeedRoute)
+            {
+                RequestAttackRoute(ref d, i, ref cmd);
+                st = CombatNavState.Awaiting;
+            }
+            if (st == CombatNavState.Awaiting)
+            {
+                if (d.RouteLen[i] > 0)
+                {
+                    FollowRoute(ref d, i, ChillSpeed(ref d, i, d.Speed[i]), dt);
+                }
+                return false;
+            }
+            if (st == CombatNavState.Failed)
+            {
+                reason = CombatEndReason.Unreachable;
+                return true;
+            }
+            if (d.RouteIdx[i] >= d.RouteLen[i] - 1 && math.distancesq(pos, d.RouteEnd[i]) <= 0.25)
+            {
+                // 走到路线终点仍在射程外（目标走开了）：直线通就改回直线逼近，否则从这里重新要路线
+                if (AttackNeedsRoute(ref d, i, pos, cmd.Pos, range))
+                {
+                    RequestAttackRoute(ref d, i, ref cmd);
+                }
+                else
+                {
+                    DropRoute(ref d, i);
+                    d.NavSt[i] = (byte)CombatNavState.None;
+                    StepTowards(ref d, i, pos, cmd.Pos, dt);
+                }
+                return false;
+            }
+            FollowRoute(ref d, i, ChillSpeed(ref d, i, d.Speed[i]), dt);
+            cmd.ProgTimer -= dt;
+            if (cmd.ProgTimer > 0f)
+            {
+                return false;
+            }
+            cmd.ProgTimer = d.Config.ProgressInterval;
+            if (AttackRouteStale(ref d, i, cmd.Pos, range))
+            {
+                RequestAttackRoute(ref d, i, ref cmd); // 目标移动超过 2 格：从当前位置重新要路线（节拍 = ProgressInterval，一台最多每拍一条）
+                return false;
+            }
+            if (NavStuckStrike(ref d, i, ref cmd, pos))
+            {
+                reason = CombatEndReason.Stuck;
+                return true;
+            }
+            return false;
+        }
+
+        private static void RequestAttackRoute(ref CombatData d, int i, ref CombatCommand cmd)
+        {
+            EmitNavRequest(ref d, i, CellOf(cmd.Pos), (byte)NavRequestFlags.AllowPartial);
+            cmd.HasLast = 0; // 新路线的剩余长度不和旧路线比
+        }
+
+        /// <summary>攻击路线是否已跟不上目标：完整路线终点离目标当前格超过 2 格；就近路线（目标走不到）终点到目标超出射程（超出搜索范围的就近路线走到头再要）。</summary>
+        private static bool AttackRouteStale(ref CombatData d, int i, double2 target, float range)
+        {
+            double2 end = d.RouteEnd[i];
+            var fail = (NavFailReason)d.NavFail[i];
+            if (fail == NavFailReason.None)
+            {
+                int2 a = CellOf(end);
+                int2 b = CellOf(target);
+                return math.max(math.abs(a.x - b.x), math.abs(a.y - b.y)) > 2;
+            }
+            return fail != NavFailReason.SearchLimit && math.distance(end, target) > range;
+        }
+
+        /// <summary>寻路内核交回攻击命令的就近路线时用（<see cref="CombatKernel.ApplyRoute"/>）：终点打不到目标 = 无法到达。目标已不在时交给命令推进判“目标丢失”。</summary>
+        internal static bool AttackRouteOutOfReach(ref CombatData d, int i, double2 end)
+        {
+            int t = d.SlotOf(d.Cmd[i].Target);
+            if (t < 0 || !d.IsAlive(t))
+            {
+                return false;
+            }
+            return math.distance(end, d.Pos[t]) > AttackRangeOf(ref d, i, t, d.Cmd[i].AttackRange, out _);
         }
 
         /// <summary>朝目标推进一步，带最小局部避障（Demo RegionSquadCommandSystem.StepTowards 逐行对应）。返回这一步是否在绕障。</summary>
@@ -2431,6 +2571,12 @@ namespace BinGames.Sim.Combat
 
         // ─────────────────────────────── 寻路（FG0-ARCH-06）───────────────────────────────
 
+        // shortcut: CombatCommand.Stuck 低 7 位是受阻次数、最高位是“已从当前位置重新要过一次路线”的重试记号（EMGR-NAV-01，不改快照布局）；要记更多状态时拆字段并升 FormatVersion
+        public const byte StuckRetryBit = 0x80;
+
+        /// <summary>命令的受阻次数（<see cref="CombatCommand.Stuck"/> 低 7 位；读次数的地方一律用它）。</summary>
+        public static int StuckCount(in CombatCommand cmd) => cmd.Stuck & 0x7F;
+
         /// <summary>世界坐标 → 格子（格心在整数处，四舍五入到最近格心）。与寻路内核、热更层的换算一致。</summary>
         public static int2 CellOf(double2 p) => new int2((int)math.floor(p.x + 0.5), (int)math.floor(p.y + 0.5));
 
@@ -2556,7 +2702,26 @@ namespace BinGames.Sim.Combat
                 }
             }
             d.RouteIdx[i] = idx;
-            d.Pos[i] = MoveCollide(ref d, i, p0, p);
+            double2 moved = MoveCollide(ref d, i, p0, p);
+            d.Pos[i] = moved;
+            // EMGR-NAV-01 ③（FG-GAP-136，种子 42 实测）：被分离推开 / 贴边滑动离开规划的直线段后，从实际位置直奔下一个路点会穿过不可走格，
+            // 动作正好顺着格边时贴边滑动也滑不动 → 原地站桩。被挡（走出的不到应走的一半）且本机格直线到不了当前路点时，把 RouteIdx 退回上一个能直线到达的路点。
+            if (idx > 0 && idx < len && d.Config.NavEnabled != 0 && math.distancesq(p0, moved) < 0.25 * math.distancesq(p0, p))
+            {
+                int cls = ClassOf(ref d, i);
+                int2 cur = CellOf(moved);
+                if (!NavSearch.LineClear(ref d.Nav, cur, CellOf(RouteTarget(ref d, i, idx)), cls))
+                {
+                    for (int k = idx - 1; k >= 0; k--)
+                    {
+                        if (NavSearch.LineClear(ref d.Nav, cur, CellOf(RouteTarget(ref d, i, k)), cls))
+                        {
+                            d.RouteIdx[i] = k;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         /// <summary>沿路线剩余的长度（受阻判定、热更层赶路看门狗用）。</summary>
@@ -2650,22 +2815,49 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             cmd.ProgTimer = d.Config.ProgressInterval;
+            if (NavStuckStrike(ref d, i, ref cmd, pos))
+            {
+                reason = CombatEndReason.Stuck;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 寻路命令的受阻看门狗（移动类命令与攻击绕障共用；调用方按 ProgressInterval 节拍调用）：按剩余路线长度核对进度。
+        /// 无进展累计到 MaxStuckStrikes 时，第一次先从当前位置重新要一次路线（重寻记号置位、清进度记录，FG-GAP-136），
+        /// 重寻后仍无进展才返回 true（以“受阻”结束）；有进展连记号一起清零（之后再卡住可再重寻一次）。
+        /// </summary>
+        private static bool NavStuckStrike(ref CombatData d, int i, ref CombatCommand cmd, double2 pos)
+        {
             float distNow = (float)RemainingRouteLength(ref d, i);
-            bool progressed = cmd.HasLast == 0 || (cmd.LastDist - distNow) >= d.Config.MinProgress || distNow <= cmd.Arrive;
+            bool first = cmd.HasLast == 0; // 第一次核对（新命令 / 重寻后的新路线）只记距离，不算进展、不清计数与重寻记号
+            bool progressed = (cmd.LastDist - distNow) >= d.Config.MinProgress || distNow <= cmd.Arrive;
             cmd.LastDist = distNow;
             cmd.HasLast = 1;
+            if (first)
+            {
+                return false;
+            }
             if (progressed)
             {
                 cmd.Stuck = 0;
                 return false;
             }
-            cmd.Stuck++;
-            if (cmd.Stuck < d.Config.MaxStuckStrikes)
+            int strikes = StuckCount(cmd) + 1;
+            if (strikes < d.Config.MaxStuckStrikes)
             {
-                Gameplay(ref d, CombatEventKind.CommandStuckStrike, i, 0, cmd.Stuck, d.Config.MaxStuckStrikes, pos, 0, (byte)cmd.Kind);
+                cmd.Stuck = (byte)((cmd.Stuck & StuckRetryBit) | strikes);
+                Gameplay(ref d, CombatEventKind.CommandStuckStrike, i, 0, strikes, d.Config.MaxStuckStrikes, pos, 0, (byte)cmd.Kind);
                 return false;
             }
-            reason = CombatEndReason.Stuck;
+            if ((cmd.Stuck & StuckRetryBit) == 0)
+            {
+                cmd.Stuck = StuckRetryBit;
+                cmd.HasLast = 0;
+                d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+                return false;
+            }
             return true;
         }
 

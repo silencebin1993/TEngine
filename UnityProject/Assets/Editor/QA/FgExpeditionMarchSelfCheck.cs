@@ -47,7 +47,7 @@ namespace GameLogic.EditorTools
     /// - M4 出发事务失败整体回滚；M5 真实行军到达（用时 ≈ 路线 / 速度、整队同行、到达通知不抢镜头、进入地点）；
     /// - M6 观察 / 不观察 / 0.5x～3x / 暂停结果一致（含途中交战，FGT-EXP-012）；M7 行军中存读档：存档后不读档接着走（内存里那份）与读档接着走，到达的步与到达后状态一致（FGT-EXP-011 行军部分）；
     /// - M8 覆盖：走出覆盖前提醒、覆盖外只执行最后命令、不能接入、铺中继回到覆盖后控制恢复、返回家园结算（FGT-EXP-002）；
-    /// - M9 途中静默夜；M10 途中家园遇袭（不自动召回，玩家可召回；镜头随队走远 = 玩家在远征，DEBT-FG6DEF07-06；最慢成员阵亡后提速）；M11 地形阻挡绕行与路线截断；M11b 覆盖外截断按最后的“前进”自动重试（FG-GAP-136）（停下、说明、打通后再前进能到）；
+    /// - M9 途中静默夜；M10 途中家园遇袭（不自动召回，玩家可召回；镜头随队走远 = 玩家在远征，DEBT-FG6DEF07-06；最慢成员阵亡后提速）；M11 地形阻挡绕行与路线截断；M11b 覆盖外截断按最后的“前进”自动重试（FG-GAP-136）（停下、说明、打通后再前进能到；EMGR-NAV-01 起移入 FgExpeditionNavRetrySelfCheck 段，并验自动重试后仍截断的可定位提示）；
     /// - M12 到达失败（真实行军走到集结点：地点不开放 / 载入中途出错整体回滚，队伍照最后的“前进”在集结点等候、到点自动重试进入；集结点在覆盖外时玩家命令被拒）；
     /// - M15 途中遇敌（据点 / 巡逻 / 突袭各一次、读档后不重复）与危害带提示（进入一次、离开复位、再进再提示）；M13 界面（世界栏行军条、战略地图、名册、跟随镜头、布局探针）；M14 旧档兼容。
     /// 测试捷径（登记在证据里）：区域解锁 / 重新锁定直接改区域状态、覆盖用中继塔记录夹具、截断用悬崖地形夹具、M12 用故障注入点、M15 的据点（SpawnOutpost）与临时危害带（规划层 HazardWidth）夹具。
@@ -70,7 +70,7 @@ namespace GameLogic.EditorTools
             "exp.check.hard.destination_pending", "exp.check.hard.destination_unreachable", "exp.check.hard.home_not_loaded",
             "exp.state.standby", "exp.state.marching", "exp.state.engaged", "exp.state.returning", "exp.state.returned",
             "exp.cue.tag", "exp.cue.out_of_coverage", "exp.cue.back_in_coverage", "exp.cue.edge", "exp.cue.edge_detail", "exp.cue.halted",
-            "exp.cue.halted_detail", "exp.cue.arrival_failed", "exp.cue.returned", "exp.cue.returned_detail", "exp.cue.arrived", "exp.cue.encounter",
+            "exp.cue.halted_detail", "exp.cue.halted_retry_failed", "exp.cue.arrival_failed", "exp.cue.returned", "exp.cue.returned_detail", "exp.cue.arrived", "exp.cue.encounter",
             "exp.cue.encounter.outpost", "exp.cue.encounter.patrol", "exp.cue.encounter.raid", "exp.cue.hazard", "exp.cue.hazard_detail",
             "exp.cue.wiped_on_march", "exp.cmd.advance", "exp.cmd.hold", "exp.cmd.return", "exp.cmd.follow", "exp.cmd.goto_site",
             "exp.cmd.tip.advance", "exp.cmd.tip.hold", "exp.cmd.tip.return", "exp.cmd.tip.coverage", "exp.march.bar", "exp.march.bar_eta",
@@ -99,13 +99,25 @@ namespace GameLogic.EditorTools
             }
         }
 
-        public static int Run(StringBuilder report)
+        public static int Run(StringBuilder report) => RunSteps(report,
+            "\n[远征行军] 锚点（种子 / 可达）、出发事务与回滚、真实行军到达、观察 / 倍速 / 暂停一致、存读档接着走、覆盖内外命令与接入、途中静默夜 / 家园遇袭、地形绕行与截断、到达失败回滚、界面（FG8-EXP-02）",
+            CheckData, CheckAnchors, CheckDeparture, CheckDepartureRollback, CheckMarchToArrival, CheckObservationAndSpeed, CheckSaveLoadContinue,
+            CheckCoverageCommands, CheckSilentNight, CheckHomeRaid, CheckObstacleAndTruncation, CheckArrivalFailure,
+            CheckEncountersAndHazard, CheckSelfDefense, CheckUi, CheckLegacySave);
+
+        /// <summary>EMGR-NAV-01（FG-GAP-136）新段：种子 42 第一次远征整队走到、不判截断；自动重试后仍被截断时给一次可定位提示。
+        /// 单段：bash tools/unity-validate.sh --segment FgExpeditionNavRetrySelfCheck（已并入 RunAll）。</summary>
+        public static int RunNavRetry(StringBuilder report) => RunSteps(report,
+            "\n[远征卡位重试] 种子 42 第一次远征整队走到、不判截断；自动重试后仍被截断给一次可定位提示（EMGR-NAV-01）",
+            CheckSeed42FirstMarch, CheckTruncationOutOfCoverage);
+
+        private static int RunSteps(StringBuilder report, string header, params Action[] steps)
         {
             _report = report;
             _fail = 0;
             _pass = 0;
             PerfLines.Clear();
-            Line("\n[远征行军] 锚点（种子 / 可达）、出发事务与回滚、真实行军到达、观察 / 倍速 / 暂停一致、存读档接着走、覆盖内外命令与接入、途中静默夜 / 家园遇袭、地形绕行与截断、到达失败回滚、界面（FG8-EXP-02）");
+            Line(header);
             if (Application.isPlaying)
             {
                 Line("  - Play 模式下跳过（会改写存档目录与世界）");
@@ -133,23 +145,10 @@ namespace GameLogic.EditorTools
                 CameraDirector.RealDeltaTime = () => 0.05f;
                 GameRoot.BindWorldProviders();
 
-                Step(CheckData);
-                Step(CheckAnchors);
-                Step(CheckDeparture);
-                Step(CheckDepartureRollback);
-                Step(CheckMarchToArrival);
-                Step(CheckObservationAndSpeed);
-                Step(CheckSaveLoadContinue);
-                Step(CheckCoverageCommands);
-                Step(CheckSilentNight);
-                Step(CheckHomeRaid);
-                Step(CheckObstacleAndTruncation);
-                Step(CheckTruncationOutOfCoverage);
-                Step(CheckArrivalFailure);
-                Step(CheckEncountersAndHazard);
-                Step(CheckSelfDefense);
-                Step(CheckUi);
-                Step(CheckLegacySave);
+                foreach (Action step in steps)
+                {
+                    Step(step);
+                }
                 foreach (string p in PerfLines)
                 {
                     Line("  · " + p);
@@ -926,11 +925,24 @@ namespace GameLogic.EditorTools
                 long at = m.ArrivalRetryTick;
                 StepUntil(() => GameClock.Ticks > at + 3, retrySteps + 30, chunk: 1);
                 bool reHalted = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Halted == ExpeditionMarchService.HaltRouteTruncated, 4000);
-                bool quiet = ExpeditionMarchService.HaltRetryCount >= retry0 + 1 && reHalted && FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 + 1
+                // EMGR-NAV-01（FG-GAP-136 ④）：自动重试后仍被截断 → 再给一次可定位提示（“N 台仍走不到，已原地停下等命令”，带队伍位置）
+                bool teamAt = ExpeditionMarchService.TryTeamCenter(CampaignSession.Current, out Vector2 teamCenter, out _);
+                int stillShort = ExpeditionMarchService.AlivePlanetMembers(CampaignSession.Current).Count;
+                string retryText = GameText.Format("exp.cue.halted_retry_failed", stillShort);
+                NotificationMember retryNote = NotificationCenter.History.SelectMany(e => e.Members)
+                    .LastOrDefault(mm => mm.DetailText == retryText);
+                bool retryCued = reHalted && FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 + 2 && retryNote != null && retryNote.HasLocation
+                                 && teamAt && Vector2.Distance(new Vector2(retryNote.Location.x, retryNote.Location.z), teamCenter) < 3f;
+                // 再到点再重试一次、仍走不进去：只记日志，不再重复提示
+                long at2 = ExpeditionMarchService.Current(now).ArrivalRetryTick;
+                StepUntil(() => GameClock.Ticks > at2 + 3, retrySteps + 30, chunk: 1);
+                bool reHalted2 = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Halted == ExpeditionMarchService.HaltRouteTruncated, 4000);
+                bool quiet = ExpeditionMarchService.HaltRetryCount >= retry0 + 2 && reHalted2 && FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 + 2
                              && m.Command == (int)ExpeditionMarchService.Command.Advance && m.Phase == ExpeditionMarchService.PhaseOutbound;
-                Expect(halted && rejected && cued && quiet,
+                Expect(halted && rejected && cued && retryCued && quiet,
                     $"M11b 覆盖外被截断（没有中继 / 投送站）：停下并提示“{GameText.Get("exp.cue.halted")}”一次（{halted && cued}），玩家“前进”被拒（{why}：{rejected}）；" +
-                    $"{ExpeditionMarchService.ArrivalRetrySeconds:0} 游戏秒后按最后的“前进”自动重试（{ExpeditionMarchService.HaltRetryCount - retry0} 次），仍走不进去再停下、不重复提示、命令不变（{quiet}）");
+                    $"{ExpeditionMarchService.ArrivalRetrySeconds:0} 游戏秒后按最后的“前进”自动重试，仍走不进去再停下并给一次可定位提示“{retryText}”（定位到队伍：{retryCued}）；" +
+                    $"之后再重试仍走不进去只记日志、不重复提示、命令不变（共自动重试 {ExpeditionMarchService.HaltRetryCount - retry0} 次：{quiet}）");
 
                 // 打通（地形还原）：下一次自动重试走进去、进入远征地点——玩家不用任何操作，不软锁。
                 foreach ((GridCell cell, byte was) in ring)
@@ -950,6 +962,144 @@ namespace GameLogic.EditorTools
                     map.SetTerrain(cell, was);
                 }
             }
+        }
+
+        // ── EMGR-NAV-01 种子 42 第一次远征（FG-GAP-136）──────────────────────────────
+
+        /// <summary>
+        /// 种子 42 新档第一次远征破碎都市（FGJ-M8 开局夹具同一支四台：ERC-001 ×1 + ERC-003 ×3，核心旁出厂、真实信号覆盖）：
+        /// 整队走到锚点进入地点，途中不判“路线被截断”、不出截断提示。逐步记下每台的受阻计数 / 重寻记号与第一次受阻、放弃时的位置与周围格网（根因写进证据）。
+        /// </summary>
+        private static void CheckSeed42FirstMarch()
+        {
+            CampaignState s = NewWorld(42);
+            // FGJ-M8 开局：两台工人先修好受损的仓库、信号塔、发电机（信号塔通电 +5 带宽、覆盖按真实信号塔）——这里直接记为修好（测试捷径，登记在证据里）。
+            foreach (BuildingRecord b in s.BuildingRecords.Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && (b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator
+                         || b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse || b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)).ToList())
+            {
+                b.ConstructionState = BuildingConstructionState.Operational;
+                b.Health = BuildingOps.MaxDurability(b.BuildingTypeId);
+            }
+            HomeValleyPowerGrid.Recompute(s);
+            WorldSimulation.StepMany(5);
+            GridCell core = HomeGridService.CorePivot(s);
+            (string chassis, string bp)[] team =
+            {
+                (HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id),
+                (HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id),
+                (HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id),
+                (HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id),
+            };
+            var ids = new List<int>();
+            for (int i = 0; i < team.Length; i++)
+            {
+                GridCell at = SiegeService.NearestPassable(new GridCell(core.X - 6 + i * 3, core.Y - 9), 10);
+                MachineOpResult r = MachineRegistry.SpawnMachine(team[i].chassis, team[i].bp, HomeValleyLayout.RegionId, new Vector2(at.X, at.Y), 100f, 100f);
+                if (r.Success && MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec))
+                {
+                    MachineLoadoutRegistry.Register(s, rec.LogicId, rec.BlueprintId, rec.BlueprintVersion);
+                    ids.Add(r.LogicId);
+                }
+            }
+            WorldSimulation.StepMany(3);
+            ExpeditionSiteAnchors.EnsureResolved(s);
+            ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(ids.ToArray(), true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            if (ids.Count != team.Length || !dep.Success)
+            {
+                Fail($"种子 42 第一次远征前提：出厂 {ids.Count}/{team.Length} 台、出发 {dep.Outcome}（{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）");
+                return;
+            }
+            int cues0 = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted);
+            int n = ids.Count;
+            var maxStrike = new int[n];
+            var retries = new int[n];
+            var hadRetryBit = new bool[n];
+            var firstStrike = new string[n];
+            var gaveUp = new string[n];
+            var hadMove = new bool[n];
+            var lastStrikes = new int[n];
+            bool everHalted = false;
+            long t0 = GameClock.Ticks;
+            bool done = StepUntil(() =>
+            {
+                CampaignState cur = CampaignSession.Current;
+                ExpeditionMarchState m = ExpeditionMarchService.Current(cur);
+                if (m.Phase == ExpeditionMarchService.PhaseAtSite)
+                {
+                    return true;
+                }
+                everHalted |= m.Halted == ExpeditionMarchService.HaltRouteTruncated;
+                CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+                for (int k = 0; k < n && home != null; k++)
+                {
+                    if (!home.TryGetMachineUnit(ids[k], out int unit))
+                    {
+                        continue;
+                    }
+                    bool has = home.TryGetCommand(unit, out CombatCommand c) && c.Kind != CombatCommandKind.None;
+                    int strikes = has ? CombatLogic.StuckCount(c) : 0;
+                    bool bit = has && (c.Stuck & CombatLogic.StuckRetryBit) != 0;
+                    if (bit && !hadRetryBit[k])
+                    {
+                        retries[k]++;
+                    }
+                    hadRetryBit[k] = bit;
+                    if (strikes > 0 && firstStrike[k] == null)
+                    {
+                        firstStrike[k] = DescribeUnit(home, unit, ids[k]);
+                    }
+                    maxStrike[k] = Math.Max(maxStrike[k], strikes);
+                    // 移动命令带着受阻计数消失 = 以“受阻”放弃（走到站位的正常结束前一拍没有受阻计数）
+                    if (hadMove[k] && !has && lastStrikes[k] > 0 && gaveUp[k] == null)
+                    {
+                        gaveUp[k] = DescribeUnit(home, unit, ids[k]);
+                    }
+                    hadMove[k] = has && c.Kind == CombatCommandKind.Move;
+                    lastStrikes[k] = strikes;
+                }
+                return everHalted;
+            }, 40000, chunk: 1);
+            double seconds = (GameClock.Ticks - t0) / (double)GameClock.StepHz;
+            for (int k = 0; k < n; k++)
+            {
+                if (firstStrike[k] != null || gaveUp[k] != null)
+                {
+                    Line($"  · 诊断：成员 {ids[k]}（{Rec(ids[k])?.ChassisId}）最多连续受阻 {maxStrike[k]} 次、从当前位置重寻 {retries[k]} 次；第一次受阻 {firstStrike[k]}；放弃命令 {gaveUp[k] ?? "无"}");
+                }
+            }
+            CampaignState after = CampaignSession.Current;
+            bool atSite = done && !everHalted && ExpeditionMarchService.Current(after).Phase == ExpeditionMarchService.PhaseAtSite
+                          && ids.All(id => Rec(id)?.RegionId == FracturedCityLayout.RegionId);
+            bool quiet = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 && gaveUp.All(g => g == null);
+            Expect(atSite && quiet,
+                $"种子 42 新档第一次远征破碎都市（ERC-001 ×1 + ERC-003 ×3，FGJ-M8 开局同一支）：{seconds:0.0} 游戏秒整队走到锚点并进入地点（{atSite}），" +
+                $"途中没有成员放弃命令、不判“路线被截断”、不出截断提示（{quiet}）；受阻计数最多 {maxStrike.Max()} 次、从当前位置重寻共 {retries.Sum()} 次（FG-GAP-136）");
+        }
+
+        /// <summary>诊断用：单位位置、寻路状态、剩余路线、下 3 个路点，以及周围 7×7 格的通行（# 不可走、@ 本机所在格）。</summary>
+        private static string DescribeUnit(CombatSite home, int unit, int logicId)
+        {
+            home.TryGetMachinePosition(logicId, out Vector2 p);
+            home.TryGetNavState(unit, out CombatNavState st, out NavFailReason fail);
+            var route = new List<double2>();
+            home.CopyRoute(unit, route);
+            GridCell c = NavService.CellOf(p.x, p.y);
+            var sb = new StringBuilder();
+            sb.Append($"@({p.x:0.00},{p.y:0.00}) 格 {c.X},{c.Y} 步 {GameClock.Ticks} 寻路 {st}/{fail} 剩余 {home.RemainingRoute(unit):0.0} 路点");
+            for (int i = 0; i < Math.Min(3, route.Count); i++)
+            {
+                sb.Append($" ({route[i].x:0.0},{route[i].y:0.0})");
+            }
+            sb.Append(" 周围[");
+            for (int dy = 3; dy >= -3; dy--)
+            {
+                for (int dx = -3; dx <= 3; dx++)
+                {
+                    sb.Append(dx == 0 && dy == 0 ? '@' : NavService.Kernel != null && NavService.Kernel.Passable(c.X + dx, c.Y + dy, NavConst.ClassPlayer) ? '.' : '#');
+                }
+                sb.Append(dy > -3 ? "/" : "]");
+            }
+            return sb.ToString();
         }
 
         // ── M12 到达失败 ─────────────────────────────────────────────────────────

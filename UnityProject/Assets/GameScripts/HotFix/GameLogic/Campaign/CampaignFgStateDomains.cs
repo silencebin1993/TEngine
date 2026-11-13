@@ -394,6 +394,8 @@ namespace GameLogic.Campaign
         /// <summary>FG9-E2E-01（FG-GAP-136）：路线被截断后玩家下不了命令时，按最后的命令自动重试过（同一趟、同一阶段里再被截断不重复提示；玩家下令 / 换阶段时复位）。
         /// 截断时 <see cref="ArrivalRetryTick"/> 同样记下一次自动重试的世界步。</summary>
         public bool HaltAutoRetried;
+        /// <summary>EMGR-NAV-01（FG-GAP-136 ④）：自动重试后仍被截断的可定位提示已发（同一趟、同一阶段只发一次；玩家下令 / 换阶段时与 <see cref="HaltAutoRetried"/> 一起复位）。旧档没有 = 假。</summary>
+        public bool HaltRetryCued;
         /// <summary>当前所在危害带的领地 ID（没有 = 空串；进入时提醒一次，离开后复位）。</summary>
         public string HazardZoneId = string.Empty;
         /// <summary>FG8-GEN-02：队伍中心当前所在的阵营领地 ID（不在领地里 = 空串；进入时提醒一次“进入 ××”，离开后复位）。</summary>

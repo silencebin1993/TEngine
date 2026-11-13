@@ -483,6 +483,7 @@ namespace GameLogic.Campaign.Regions
             m.Halted = HaltNone;
             m.ArrivalFailReason = string.Empty; // 玩家重新下了令：之后再没进去照常提示
             m.HaltAutoRetried = false;
+            m.HaltRetryCued = false;
             m.OrdersPending = !IssueOrders(s, m);
             CommandCount++;
             return true;
@@ -588,6 +589,7 @@ namespace GameLogic.Campaign.Regions
             m.ArrivalFailReason = string.Empty;
             m.ArrivalRetryTick = 0;
             m.HaltAutoRetried = false;
+            m.HaltRetryCued = false;
             m.HazardZoneId = string.Empty;
             m.EncounteredIds = Array.Empty<string>();
             m.VisitedSite = false; // FG8-EXP-05：这一趟还没进过地点
@@ -683,6 +685,7 @@ namespace GameLogic.Campaign.Regions
                 m.Phase = phase;
                 m.PhaseTick = GameClock.Ticks;
                 m.HaltAutoRetried = false;
+                m.HaltRetryCued = false;
             }
             if (phase != PhaseOutbound && phase != PhaseReturning)
             {
@@ -793,13 +796,16 @@ namespace GameLogic.Campaign.Regions
                 bool repeat = m.HaltAutoRetried; // 自动重试后仍被截断：只记日志、不重复提示
                 m.Halted = HaltRouteTruncated;
                 m.ArrivalRetryTick = GameClock.Ticks + Math.Max(1L, (long)Math.Round(ArrivalRetrySeconds * GameClock.StepHz));
-                if (!repeat)
+                bool retryCue = repeat && !m.HaltRetryCued;
+                if (!repeat || retryCue)
                 {
+                    // EMGR-NAV-01（FG-GAP-136 ④）：自动重试后仍被截断也给一次可定位的提示（同一趟同一阶段只一次，之后的重试只记日志）
+                    m.HaltRetryCued |= retryCue;
                     HaltCueCount++;
                     Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ExpeditionMarchHalted, center,
-                        GameText.Format("exp.cue.halted_detail", alive - near));
+                        GameText.Format(retryCue ? "exp.cue.halted_retry_failed" : "exp.cue.halted_detail", alive - near));
                 }
-                Log.Warning($"[ExpeditionMarchService] 远征队路线被截断：{alive - near} 台没能走到目的地，原地待命（等新命令；玩家下不了命令时第 {m.ArrivalRetryTick} 步按最后的命令自动重试）{(repeat ? "（自动重试后仍被截断，不重复提示）" : string.Empty)}。");
+                Log.Warning($"[ExpeditionMarchService] 远征队路线被截断：{alive - near} 台没能走到目的地，原地待命（等新命令；玩家下不了命令时第 {m.ArrivalRetryTick} 步按最后的命令自动重试）{(repeat && !retryCue ? "（自动重试后仍被截断，已提示过，不重复提示）" : retryCue ? "（自动重试后仍被截断，已提示）" : string.Empty)}。");
             }
         }
 

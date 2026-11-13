@@ -77,6 +77,7 @@ namespace BinGames.Sim.Combat
             {
                 c.MaxStuckStrikes = 3;
             }
+            c.MaxStuckStrikes = Math.Min(c.MaxStuckStrikes, 127); // EMGR-NAV-01：CombatCommand.Stuck 低 7 位是次数、最高位是重寻记号
             c.StatusStackCap = Math.Max(0, Math.Min(CombatConst.MaxStatusStacks, c.StatusStackCap));
             _d = CombatData.Create(c, capacity);
             _dummyNav = NavGrid.Create(8, null, false, default, null, null, 0, 1);
@@ -220,6 +221,16 @@ namespace BinGames.Sim.Combat
                 _d.RouteEnd[i] = tc.x == end.x && tc.y == end.y ? target : new double2(end.x, end.y);
                 _d.NavSt[i] = (byte)CombatNavState.Following;
                 _d.NavFail[i] = (byte)(status == NavStatus.Partial ? reason : NavFailReason.None);
+                // EMGR-NAV-01（FG-GAP-140）：攻击命令的就近路线（目标走不到）终点仍打不到目标 = 无法到达（不走过去发呆）；
+                // 超出搜索范围的就近路线照走、到头再要——但从这里要的就近路线终点还在本格（再要也不会更近）同样判无法到达，不原地反复要路线
+                int2 endCell = CombatLogic.CellOf(_d.RouteEnd[i]);
+                int2 hereCell = CombatLogic.CellOf(_d.Pos[i]);
+                if (status == NavStatus.Partial && _d.Cmd[i].Kind == CombatCommandKind.Attack
+                    && (reason != NavFailReason.SearchLimit || (endCell.x == hereCell.x && endCell.y == hereCell.y))
+                    && CombatLogic.AttackRouteOutOfReach(ref _d, i, _d.RouteEnd[i]))
+                {
+                    _d.NavSt[i] = (byte)CombatNavState.Failed;
+                }
             }
             else
             {

@@ -72,13 +72,23 @@ namespace GameLogic.EditorTools
             }
         }
 
-        public static int Run(StringBuilder report)
+        public static int Run(StringBuilder report) => RunSteps(report, "\n[层级寻路] 层级寻路与休眠唤醒（FG0-ARCH-06）", "[层级寻路]",
+            CheckData, CheckSynthBasics, CheckAgainstBruteForce, CheckCacheIndependence, CheckSharing, CheckIncrementalAndRequeue, CheckDetourAndRecheck, CheckIslandUnreachable, CheckRouteClearAfterExit, CheckPendingSnapshot, CheckCombatFollow, CheckCombatRetarget, CheckCombatRouteCutAndSnapshot, CheckSeparation, CheckHomeDetourAndCut, CheckCommandDestinationVisual, CheckWorkOrderUnreachable, CheckSquadUnreachableAndFog, CheckSquadCommandNotHijacked, CheckSquadCommandDropsHaulCargo, CheckBuildPreviewWarning, CheckRaidRoute, CheckRaidBlockedCore, CheckMassRequests, CheckSaveLoadMidFlight, CheckObservationAndSpeed, CheckDormancyEquivalence, CheckProximityWake, CheckWakeQueueBudget, CheckSeedIndependence, CheckLongRoutePerformance);
+
+        /// <summary>EMGR-NAV-01（FG-GAP-140 / FG-GAP-136）新段：右键攻击直线不通才寻路、绕障走到射程内开火，无法到达 / 受阻有原因；寻路命令卡住先从当前位置重寻一次。
+        /// 单段：bash tools/unity-validate.sh --segment FgNavAttackSelfCheck（已并入 RunAll）。</summary>
+        public static int RunAttackNav(StringBuilder report) => RunSteps(report,
+            "\n[攻击绕障] 右键攻击射程外直线不通才寻路、绕障开火、无法到达 / 受阻给原因、卡住先重寻一次、负向矩阵（EMGR-NAV-01）", "[攻击绕障]",
+            CheckAttackAroundWall, CheckAttackUnreachable, CheckAttackOpenGroundHash, CheckStuckRetry, CheckAttackTargetMoves, CheckAttackNegatives,
+            CheckAttackHomeRealPath, CheckAttackHomeMatrix);
+
+        private static int RunSteps(StringBuilder report, string header, string tag, params Action[] steps)
         {
             _report = report;
             _fail = 0;
             _pass = 0;
             PerfLines.Clear();
-            Line("\n[层级寻路] 层级寻路与休眠唤醒（FG0-ARCH-06）");
+            Line(header);
             GameLanguage originalLanguage = GameSettings.Language;
             CampaignState originalSession = CampaignSession.Current;
             int originalSlot = CampaignSession.ActiveSlotIndex;
@@ -110,37 +120,10 @@ namespace GameLogic.EditorTools
                      $"Burst 编译={(Unity.Burst.BurstCompiler.IsEnabled ? "开" : "关")}（作业声明同步编译）。寻路批次在工作线程（Schedule），" +
                      "耗时是 Editor 下的 Burst 作业；真机 IL2CPP 下内核同为 Burst AOT（相同或更快），热更层走 HybridCLR 解释执行另测（FG15-SYS-02）");
 
-                Step(CheckData);
-                Step(CheckSynthBasics);
-                Step(CheckAgainstBruteForce);
-                Step(CheckCacheIndependence);
-                Step(CheckSharing);
-                Step(CheckIncrementalAndRequeue);
-                Step(CheckDetourAndRecheck);
-                Step(CheckIslandUnreachable);
-                Step(CheckRouteClearAfterExit);
-                Step(CheckPendingSnapshot);
-                Step(CheckCombatFollow);
-                Step(CheckCombatRetarget);
-                Step(CheckCombatRouteCutAndSnapshot);
-                Step(CheckSeparation);
-                Step(CheckHomeDetourAndCut);
-                Step(CheckCommandDestinationVisual);
-                Step(CheckWorkOrderUnreachable);
-                Step(CheckSquadUnreachableAndFog);
-                Step(CheckSquadCommandNotHijacked);
-                Step(CheckSquadCommandDropsHaulCargo);
-                Step(CheckBuildPreviewWarning);
-                Step(CheckRaidRoute);
-                Step(CheckRaidBlockedCore);
-                Step(CheckMassRequests);
-                Step(CheckSaveLoadMidFlight);
-                Step(CheckObservationAndSpeed);
-                Step(CheckDormancyEquivalence);
-                Step(CheckProximityWake);
-                Step(CheckWakeQueueBudget);
-                Step(CheckSeedIndependence);
-                Step(CheckLongRoutePerformance);
+                foreach (Action step in steps)
+                {
+                    Step(step);
+                }
                 foreach (string p in PerfLines)
                 {
                     Line("  · 性能：" + p);
@@ -205,7 +188,7 @@ namespace GameLogic.EditorTools
                     // 临时目录清理失败不影响结论。
                 }
             }
-            Line($"  · [层级寻路] 断言通过 {_pass}，失败 {_fail}");
+            Line($"  · {tag} 断言通过 {_pass}，失败 {_fail}");
             return _fail;
         }
 
@@ -854,11 +837,14 @@ namespace GameLogic.EditorTools
             public double T;
             public readonly List<CombatEvent> Events = new List<CombatEvent>();
 
-            public Pipe(NavKernel nav, float separation = 0.5f)
+            /// <summary>EMGR-NAV-01：内核本步新发出的寻路请求累计数（下一步交给寻路内核前数）。</summary>
+            public int Requests;
+
+            public Pipe(NavKernel nav, float separation = 0.5f, bool navEnabled = true)
             {
                 Nav = nav;
                 CombatConfig cfg = CombatSite.ConfigFromTuning();
-                cfg.NavEnabled = 1;
+                cfg.NavEnabled = navEnabled ? (byte)1 : (byte)0;
                 cfg.SeparationFactor = separation;
                 K = new CombatKernel(cfg, 64);
                 K.BindNav(nav.Mirror);
@@ -881,6 +867,7 @@ namespace GameLogic.EditorTools
                 Nav.CollectFromCombat(K, 1, Tick);
                 Nav.TrySchedule(Tick);
                 K.Step(Dt, T);
+                Requests += K.NavPendingCount;
                 CombatEvent[] ev = K.DrainGameplay(1 << 20, out int n);
                 for (int i = 0; i < n; i++)
                 {
@@ -1318,9 +1305,11 @@ namespace GameLogic.EditorTools
             return s;
         }
 
-        private static int SpawnHomeMachine(CampaignState s, Vector2 at, bool noAutoWork = true, int settleSteps = 2)
+        private static int SpawnHomeMachine(CampaignState s, Vector2 at, bool noAutoWork = true, int settleSteps = 2, bool combat = false)
         {
-            MachineOpResult r = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, at, 100f, 100f);
+            MachineOpResult r = combat
+                ? MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, HomeValleyLayout.RegionId, at, 100f, 100f)
+                : MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, at, 100f, 100f);
             if (!r.Success)
             {
                 Fail("登记测试机器失败：" + r.Message);
@@ -2320,7 +2309,7 @@ namespace GameLogic.EditorTools
                   .Append(" cmd=").Append(c.Kind).Append('@').Append(c.Pos.x.ToString("R")).Append(',').Append(c.Pos.y.ToString("R"))
                   .Append(" atk=").Append(c.AtkCd.ToString("R"))
                   .Append(" prog=").Append(c.ProgTimer.ToString("R")).Append(" last=").Append(c.LastDist.ToString("R")).Append('/').Append(c.HasLast)
-                  .Append(" stuck=").Append(c.Stuck).Append(" nav=").Append(ns).Append('/').Append(nf)
+                  .Append(" stuck=").Append(CombatLogic.StuckCount(c)).Append((c.Stuck & CombatLogic.StuckRetryBit) != 0 ? "R" : "").Append(" nav=").Append(ns).Append('/').Append(nf)
                   .Append(" rem=").Append(k.RemainingRoute(v.Id).ToString("R")).Append('\n');
             }
             return sb.ToString();
@@ -2678,6 +2667,579 @@ namespace GameLogic.EditorTools
                 $"FG15 长距离寻路：{cells} 格以上的路线（实测 {lens.Min():F0}～{lens.Max():F0} 格）在工作线程上 {warm.Max():F2} ms ≤ {budget} ms（热缓存）；冷启动最大 {cold.Max():F2} ms" +
                 "（途经的区块第一次要按种子生成地形，见证据文件与 ADR）；路线每段都畅通",
                 PerfGate.Le(warm.Max(), budget, "热缓存长路线最大 ms"));
+        }
+
+        // ── F 右键攻击绕障与卡位重寻（EMGR-NAV-01：FG-GAP-140 / FG-GAP-136）────────────────────────
+
+        /// <summary>L 形墙：竖墙 x=30（y ≤ 20）+ 横墙 y=20（x 30～44）；目标在墙后的口袋里（口袋只向东开口），本机在墙西侧，直线被竖墙挡住。</summary>
+        private static bool LWall(int x, int y) => (x == 30 && y <= 20) || (y == 20 && x >= 30 && x <= 44);
+
+        /// <summary>带即时武器的己方机器（命令驱动）。</summary>
+        private static int Gunner(CombatKernel k, double2 pos, float speed = 6f, int profile = -1)
+        {
+            int w = k.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, Range = 80f, Damage = 10f, Cooldown = 0.5f });
+            return k.Spawn(new CombatSpawn
+            {
+                ExtKey = -1,
+                Kind = CombatUnitKind.Machine,
+                Faction = CombatFaction.Player,
+                Behavior = CombatBehavior.Commanded,
+                Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.ExternalHealth | CombatUnitFlags.WeaponEnabled,
+                Position = pos,
+                Home = pos,
+                Radius = 0.9f,
+                Speed = speed,
+                Health = 100f,
+                MaxHealth = 100f,
+                Weapon = w,
+                BehaviorProfile = profile,
+                Priority = 1,
+                ArmorHalfAngleDeg = 90f,
+                ArmorFacing = new float2(0f, -1f),
+            });
+        }
+
+        /// <summary>不动、不还手的敌方目标。</summary>
+        private static int Dummy(CombatKernel k, double2 pos, float hp) => k.Spawn(new CombatSpawn
+        {
+            ExtKey = -1,
+            Kind = CombatUnitKind.Enemy,
+            Faction = CombatFaction.Hostile,
+            Behavior = CombatBehavior.None,
+            Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable,
+            Position = pos,
+            Home = pos,
+            Radius = 0.8f,
+            Speed = 0f,
+            Health = hp,
+            MaxHealth = hp,
+            Weapon = -1,
+            BehaviorProfile = -1,
+            Priority = 1,
+            ArmorHalfAngleDeg = 90f,
+            ArmorFacing = new float2(0f, -1f),
+        });
+
+        private static void Attack(CombatKernel k, int unit, int target, float range = 6f, bool pending = false)
+        {
+            k.TryGetPosition(target, out double2 tp);
+            k.IssueCommand(unit, CombatCommandKind.Attack, tp, target, 0.5f, range, 0.5f, pending);
+        }
+
+        private static CombatEvent EndOf(Pipe p, int unit) => p.Events.LastOrDefault(e => e.Kind == CombatEventKind.CommandEnded && e.Unit == unit);
+
+        private static void CheckAttackAroundWall()
+        {
+            using NavKernel nav = Synth(2, 1, LWall);
+            using var p = new Pipe(nav, 0f);
+            int m = Gunner(p.K, new double2(10, 8));
+            int t = Dummy(p.K, new double2(40, 8), 30f);
+            Attack(p.K, m, t);
+            bool clear = true;
+            bool routed = false;
+            int firstHit = -1;
+            double hitDist = -1;
+            int step = 0;
+            for (; step < 60 * 40 && p.K.IsAlive(t); step++)
+            {
+                p.Step();
+                clear &= UnitCellOk(nav, p.K, m, NavConst.ClassPlayer);
+                routed |= p.K.TryGetNavState(m, out CombatNavState st, out _) && st == CombatNavState.Following;
+                if (firstHit < 0 && p.Events.Any(e => e.Kind == CombatEventKind.AttackOutcome && e.Unit == m && (CombatFireResult)e.Code == CombatFireResult.Ok))
+                {
+                    firstHit = step;
+                    p.K.TryGetPosition(m, out double2 mp);
+                    hitDist = math.distance(mp, new double2(40, 8));
+                }
+            }
+            CombatEvent end = EndOf(p, m);
+            Expect(routed && clear && firstHit > 0 && hitDist <= 6.01 && !p.K.IsAlive(t) && (CombatEndReason)end.Code == CombatEndReason.TargetDestroyed,
+                $"右键攻击 L 形墙后的目标（直线被墙挡住）：射程外改走层级寻路（{routed}），绕过墙角、全程不踏进不可走格（{clear}），" +
+                $"第 {firstHit} 步在离目标 {hitDist:F2} 米（≤ 射程 6）处开火命中，第 {step} 步击毁、命令以“击毁目标”结束（旧行为：贴着竖墙停在射程外不动，FG-GAP-140）");
+        }
+
+        private static void CheckAttackUnreachable()
+        {
+            Func<int, int, bool> ring = (x, y) => Ring(x, y, 44, 16, 9);
+            using NavKernel nav = Synth(2, 1, ring);
+            using var p = new Pipe(nav, 0f);
+            int m = Gunner(p.K, new double2(10, 16));
+            int t = Dummy(p.K, new double2(44, 16), 30f);
+            Attack(p.K, m, t);
+            int ended = -1;
+            for (int i = 0; i < 120 && ended < 0; i++)
+            {
+                p.Step();
+                if (EndOf(p, m).Kind == CombatEventKind.CommandEnded)
+                {
+                    ended = i;
+                }
+            }
+            CombatEvent end = EndOf(p, m);
+            p.K.TryGetPosition(m, out double2 after);
+            var fail = (NavFailReason)(int)end.Value;
+            string why = NavService.FailText(fail, NavService.CellOf(end.Pos.x, end.Pos.y));
+            bool hit = p.Events.Any(e => e.Kind == CombatEventKind.AttackOutcome && e.Unit == m);
+            Expect(ended > 0 && (CombatEndReason)end.Code == CombatEndReason.Unreachable && fail != NavFailReason.None && math.distance(end.Pos, new double2(44, 16)) < 1e-6
+                   && !string.IsNullOrEmpty(why) && why.Contains(GameText.Get("nav.fail.unreachable")) && math.distance(after, new double2(10, 16)) < 0.5 && !hit && !p.K.TryGetCommand(m, out _),
+                $"右键攻击四面被悬崖围死的目标（围栏半径 9 > 射程 6，就近点也打不到）：第 {ended} 步以“无法到达”结束（原因 {fail}：“{why}”，事件位置 = 目标点供通知定位），" +
+                "不走过去贴墙发呆、不开火，命令清空");
+        }
+
+        private static void CheckAttackOpenGroundHash()
+        {
+            // 开阔地（直线通）：寻路地点上的攻击命令与“不寻路的内核”（修改前的攻击分支原样，NavEnabled = 0）逐步哈希一致，且一条寻路请求都不发。
+            using NavKernel navA = Synth(2, 1, (x, y) => false);
+            using NavKernel navB = Synth(2, 1, (x, y) => false);
+            // 分离只在寻路地点生效（NavEnabled = 0 的内核不分离），两边都关掉分离，只比攻击分支本身。
+            using var a = new Pipe(navA, 0f);
+            using var b = new Pipe(navB, 0f, navEnabled: false);
+            var obstacles = new List<float3> { new float3(30f, 15f, 2f) };
+            foreach (Pipe p in new[] { a, b })
+            {
+                p.K.SetObstacles(obstacles);
+                int m1 = Gunner(p.K, new double2(8, 10));
+                int m2 = Gunner(p.K, new double2(9, 12));
+                int t = Dummy(p.K, new double2(52, 20), 400f);
+                Attack(p.K, m1, t);
+                Attack(p.K, m2, t);
+            }
+            bool same = true;
+            int forkAt = -1;
+            for (int i = 0; i < 900; i++)
+            {
+                a.Step();
+                b.Step();
+                if (same && a.K.StateHash() != b.K.StateHash())
+                {
+                    same = false;
+                    forkAt = i;
+                }
+            }
+            bool fired = a.Events.Count(e => e.Kind == CombatEventKind.AttackOutcome && (CombatFireResult)e.Code == CombatFireResult.Ok) > 4;
+            Line($"  · 开阔地攻击 900 步末哈希 {a.K.StateHash():X16}（寻路地点）/ {b.K.StateHash():X16}（不寻路内核）");
+            Expect(same && a.Requests == 0 && fired,
+                $"开阔地右键攻击（直线通，中途有障碍圆要绕）：与修改前的攻击分支（不寻路内核）900 步逐步哈希一致（{(same ? "一致" : "第 " + forkAt + " 步分叉")}），" +
+                $"寻路请求 {a.Requests} 条，两台都走到射程内开火（回归约束只管直线通的这一支）");
+        }
+
+        private static void CheckStuckRetry()
+        {
+            // 走不动（速度 0，例如瘫痪）：每秒核对一次进度——受阻 1、2 次提示，第 3 次先从当前位置重新要路线（重寻记号置位），重寻后再受阻 1、2 次，第 3 次才以“受阻”结束。
+            foreach (CombatCommandKind kind in new[] { CombatCommandKind.Move, CombatCommandKind.Attack })
+            {
+                using NavKernel nav = Synth(2, 1, LWall);
+                using var p = new Pipe(nav, 0f);
+                int m = Gunner(p.K, new double2(10, 8), speed: 0f);
+                int t = Dummy(p.K, new double2(40, 8), 1e4f);
+                if (kind == CombatCommandKind.Attack)
+                {
+                    Attack(p.K, m, t);
+                }
+                else
+                {
+                    p.K.IssueCommand(m, CombatCommandKind.Move, new double2(40, 8), 0, 1.2f, 0f, 0f, false);
+                }
+                int bitAt = -1;
+                int ended = -1;
+                byte[] snap = null;
+                byte[] navSnap = null;
+                long snapTick = 0;
+                double snapT = 0;
+                int eventsAtSnap = 0;
+                for (int i = 0; i < 60 * 20 && ended < 0; i++)
+                {
+                    p.Step();
+                    if (bitAt < 0 && p.K.TryGetCommand(m, out CombatCommand c) && (c.Stuck & CombatLogic.StuckRetryBit) != 0)
+                    {
+                        bitAt = i;
+                        snap = p.K.Serialize();
+                        navSnap = nav.SerializePending();
+                        snapTick = p.Tick;
+                        snapT = p.T;
+                        eventsAtSnap = p.Events.Count;
+                    }
+                    if (EndOf(p, m).Kind == CombatEventKind.CommandEnded)
+                    {
+                        ended = i;
+                    }
+                }
+                ulong aEndHash = p.K.StateHash();
+                List<int> strikes = p.Events.Where(e => e.Kind == CombatEventKind.CommandStuckStrike && e.Unit == m).Select(e => (int)e.Value).ToList();
+                CombatEvent end = EndOf(p, m);
+                Expect(strikes.SequenceEqual(new[] { 1, 2, 1, 2 }) && bitAt > 0 && ended > bitAt && (CombatEndReason)end.Code == CombatEndReason.Stuck && p.Requests == 2,
+                    $"{kind} 被持续卡住（速度 0）：受阻提示次数 [{string.Join(",", strikes)}]（期望 1,2,1,2——重寻记号置位后事件里仍是 1、2，不是 129、130），" +
+                    $"第 {bitAt} 步第一次判卡住先从当前位置重寻（寻路请求共 {p.Requests} 条），重寻后仍走不动第 {ended} 步才以“{(CombatEndReason)end.Code}”结束");
+                if (snap == null)
+                {
+                    continue;
+                }
+                // 重寻记号置位、路线在飞时存档：读回后接着跑与不存档逐步哈希一致、同一步以“受阻”结束（记号随快照与哈希走，FormatVersion 不变）。
+                using NavKernel navB = Synth(2, 1, LWall);
+                NavLoadResult nl = navB.LoadPending(navSnap);
+                using var b = new Pipe(navB, 0f);
+                CombatLoadResult lr = b.K.Load(snap);
+                b.Tick = snapTick;
+                b.T = snapT;
+                bool bitKept = b.K.TryGetCommand(m, out CombatCommand bc) && (bc.Stuck & CombatLogic.StuckRetryBit) != 0 && CombatLogic.StuckCount(bc) == 0;
+                int bEnded = -1;
+                for (int i = 0; i < 60 * 20 && bEnded < 0; i++)
+                {
+                    b.Step();
+                    if (EndOf(b, m).Kind == CombatEventKind.CommandEnded)
+                    {
+                        bEnded = i + bitAt + 1;
+                    }
+                }
+                List<int> bStrikes = b.Events.Where(e => e.Kind == CombatEventKind.CommandStuckStrike && e.Unit == m).Select(e => (int)e.Value).ToList();
+                List<int> aAfter = p.Events.Skip(eventsAtSnap).Where(e => e.Kind == CombatEventKind.CommandStuckStrike && e.Unit == m).Select(e => (int)e.Value).ToList();
+                Expect(nl == NavLoadResult.Ok && lr == CombatLoadResult.Ok && bitKept && bEnded == ended && b.K.StateHash() == aEndHash && bStrikes.SequenceEqual(aAfter)
+                       && (CombatEndReason)EndOf(b, m).Code == CombatEndReason.Stuck,
+                    $"{kind} 重寻记号置位时存读档（内核快照格式 {CombatConst.FormatVersion} 不变：记号在 CombatCommand.Stuck 最高位）：读回后记号还在，接着跑同样在第 {bEnded} 步以“受阻”结束，" +
+                    $"其后的受阻提示 [{string.Join(",", bStrikes)}] 与不存档一致");
+            }
+
+            // 有进展会清零（连记号一起）：重寻后能走了 → 记号清掉；之后再卡住还能再重寻一次，再卡住才判“受阻”。
+            using NavKernel nav2 = Synth(2, 1, LWall);
+            using var q = new Pipe(nav2, 0f);
+            int u = Gunner(q.K, new double2(10, 8), speed: 0f);
+            q.K.IssueCommand(u, CombatCommandKind.Move, new double2(40, 8), 0, 1.2f, 0f, 0f, false);
+            int phase = 0;
+            bool cleared = false;
+            int qEnded = -1;
+            for (int i = 0; i < 60 * 30 && qEnded < 0; i++)
+            {
+                q.Step();
+                q.K.TryGetCommand(u, out CombatCommand c);
+                if (phase == 0 && (c.Stuck & CombatLogic.StuckRetryBit) != 0)
+                {
+                    q.K.SetSpeed(u, 6f);
+                    phase = 1;
+                }
+                else if (phase == 1 && c.HasLast == 1 && c.Stuck == 0 && q.K.TryGetNavState(u, out CombatNavState st, out _) && st == CombatNavState.Following && i > 0)
+                {
+                    q.K.TryGetPosition(u, out double2 now);
+                    if (math.distance(now, new double2(10, 8)) > 2.0)
+                    {
+                        cleared = true;
+                        q.K.SetSpeed(u, 1e-4f); // SetSpeed 不收 0：近乎不动，每拍进展远小于 MinProgress
+                        phase = 2;
+                    }
+                }
+                if (EndOf(q, u).Kind == CombatEventKind.CommandEnded)
+                {
+                    qEnded = i;
+                }
+            }
+            List<int> qs = q.Events.Where(e => e.Kind == CombatEventKind.CommandStuckStrike && e.Unit == u).Select(e => (int)e.Value).ToList();
+            Expect(cleared && qs.SequenceEqual(new[] { 1, 2, 1, 2, 1, 2 }) && q.Requests == 3 && (CombatEndReason)EndOf(q, u).Code == CombatEndReason.Stuck,
+                $"重寻后走动了（有进展）→ 次数与重寻记号一起清零（{cleared}）；再被卡住时又先重寻一次（寻路请求共 {q.Requests} 条），受阻提示 [{string.Join(",", qs)}]，第 {qEnded} 步才以“受阻”结束");
+        }
+
+        private static void CheckAttackTargetMoves()
+        {
+            using NavKernel nav = Synth(2, 1, LWall);
+            using var p = new Pipe(nav, 0f);
+            int m = Gunner(p.K, new double2(10, 8));
+            int t = Dummy(p.K, new double2(40, 8), 1e4f);
+            Attack(p.K, m, t, range: 3f);
+            bool following = false;
+            for (int i = 0; i < 120 && !following; i++)
+            {
+                p.Step();
+                following = p.K.TryGetNavState(m, out CombatNavState st, out _) && st == CombatNavState.Following;
+            }
+            // 目标只挪 1 格（≤ 2 格）：不重要路线。
+            int r0 = p.Requests;
+            p.K.SetPosition(t, new double2(41, 8));
+            for (int i = 0; i < 150; i++)
+            {
+                p.Step();
+            }
+            int r1 = p.Requests;
+            // 目标挪 5 格（> 2 格）：下一拍核对时从当前位置重要路线，新路线终点跟到目标新位置。
+            var moved = new double2(36, 3);
+            p.K.SetPosition(t, moved);
+            for (int i = 0; i < 60 + nav.Config.LatencySteps + 10; i++)
+            {
+                p.Step();
+            }
+            int r2 = p.Requests;
+            var route = new List<double2>();
+            p.K.CopyRoute(m, route);
+            bool endFollows = route.Count > 0 && math.distance(route[route.Count - 1], moved) <= 1.5;
+            // 目标一直在动（每步挪一点，5 秒）：请求数受核对节拍约束（每台每拍最多一条），不会每步刷请求。
+            int r3 = p.Requests;
+            for (int i = 0; i < 300; i++)
+            {
+                double x = 34 + 8 * Math.Abs(Math.Sin(i / 40.0));
+                p.K.SetPosition(t, new double2(x, 4 + 10 * Math.Abs(Math.Cos(i / 55.0))));
+                p.Step();
+            }
+            int burst = p.Requests - r3;
+            int hitStep = -1;
+            for (int i = 0; i < 60 * 30 && hitStep < 0; i++)
+            {
+                p.Step();
+                if (p.Events.Any(e => e.Kind == CombatEventKind.AttackOutcome && e.Unit == m && (CombatFireResult)e.Code == CombatFireResult.Ok))
+                {
+                    hitStep = i;
+                }
+            }
+            Expect(following && r1 == r0 && r2 > r1 && endFollows && burst <= 6 && hitStep >= 0,
+                $"寻路途中目标移动：挪 1 格不重要路线（请求 {r0} → {r1}）；挪 5 格后下一拍从当前位置重要路线（{r1} → {r2}），新路线终点跟到目标新位置（{endFollows}）；" +
+                $"目标持续移动 5 秒只发 {burst} 条请求（≤ 每秒 1 条 + 1）；最终追上开火（第 {hitStep} 步）");
+        }
+
+        private static void CheckAttackNegatives()
+        {
+            // 目标在寻路途中死亡 / 潜伏 / 变 AreaOnly：命令以“目标丢失 / 击毁”结束，路线与寻路状态清空，单位不再沿旧路线走。
+            foreach (string mode in new[] { "dead", "stealth", "areaonly" })
+            {
+                using NavKernel nav = Synth(2, 1, LWall);
+                using var p = new Pipe(nav, 0f);
+                int m = Gunner(p.K, new double2(10, 8));
+                int t = Dummy(p.K, new double2(40, 8), 1e4f);
+                Attack(p.K, m, t);
+                for (int i = 0; i < 60; i++)
+                {
+                    p.Step();
+                }
+                if (mode == "dead")
+                {
+                    p.K.Kill(t, 0);
+                }
+                else
+                {
+                    p.K.SetFlag(t, mode == "stealth" ? CombatUnitFlags.Stealthed : CombatUnitFlags.AreaOnly, true);
+                }
+                p.Step();
+                p.K.TryGetPosition(m, out double2 at);
+                for (int i = 0; i < 60; i++)
+                {
+                    p.Step();
+                }
+                p.K.TryGetPosition(m, out double2 later);
+                CombatEvent end = EndOf(p, m);
+                p.K.TryGetNavState(m, out CombatNavState st, out _);
+                Expect(end.Kind == CombatEventKind.CommandEnded && (CombatEndReason)end.Code == CombatEndReason.TargetLost && st == CombatNavState.None
+                       && p.K.RemainingRoute(m) < 0 && math.distance(at, later) < 1e-9 && !p.K.TryGetCommand(m, out _),
+                    $"寻路途中目标{(mode == "dead" ? "阵亡" : mode == "stealth" ? "潜伏" : "变成只能范围攻击（AreaOnly）")}：命令以“{(CombatEndReason)end.Code}”结束，路线清空、寻路状态 {st}、单位原地停下不沿旧路线走");
+            }
+
+            // 暂停中下令（待执行命令）：标记“已排队”，内核不推进就不发请求；恢复后第一步开始执行（清标记、发寻路请求）。
+            {
+                using NavKernel nav = Synth(2, 1, LWall);
+                using var p = new Pipe(nav, 0f);
+                int m = Gunner(p.K, new double2(10, 8));
+                int t = Dummy(p.K, new double2(40, 8), 1e4f);
+                Attack(p.K, m, t, pending: true);
+                p.K.TryGetUnit(m, out CombatUnitView v0);
+                bool queued = (v0.Flags & CombatUnitFlags.PendingCommand) != 0 && p.Requests == 0;
+                p.Step();
+                p.K.TryGetUnit(m, out CombatUnitView v1);
+                Expect(queued && (v1.Flags & CombatUnitFlags.PendingCommand) == 0 && p.Requests == 1,
+                    $"暂停中下达攻击：先标“已排队”、不发请求（{queued}），恢复后第一步开始执行并发出寻路请求（{p.Requests} 条）");
+            }
+
+            // 寻路结果按序号作废：等路线时改下另一条攻击（目标在开阔处、直线通）→ 旧结果交回也不采纳，单位按新命令直线逼近。
+            {
+                using NavKernel nav = Synth(2, 1, LWall);
+                using var p = new Pipe(nav, 0f);
+                int m = Gunner(p.K, new double2(10, 8));
+                int t = Dummy(p.K, new double2(40, 8), 1e4f);
+                int t2 = Dummy(p.K, new double2(10, 28), 1e4f);
+                Attack(p.K, m, t);
+                p.Step();
+                bool awaiting = p.K.TryGetNavState(m, out CombatNavState s0, out _) && s0 == CombatNavState.Awaiting;
+                Attack(p.K, m, t2);
+                bool straight = true;
+                bool neverRouted = true;
+                for (int i = 0; i < 180; i++)
+                {
+                    p.Step();
+                    p.K.TryGetPosition(m, out double2 q);
+                    straight &= Math.Abs(q.x - 10) < 0.5;
+                    neverRouted &= p.K.TryGetNavState(m, out CombatNavState st, out _) ? st == CombatNavState.None : true;
+                }
+                p.K.TryGetPosition(m, out double2 end);
+                Expect(awaiting && straight && neverRouted && p.Requests == 1 && math.distance(end, new double2(10, 28)) <= 6.01,
+                    $"等路线时改下攻击开阔处的目标：旧寻路结果交回不采纳（寻路状态一直 None：{neverRouted}），单位沿直线逼近新目标（{straight}），请求只有最初 1 条");
+            }
+
+            // 空中单位不受格网：照旧直线（越过墙），不发寻路请求。
+            {
+                using NavKernel nav = Synth(2, 1, LWall);
+                using var p = new Pipe(nav, 0f);
+                int prof = p.K.AddProfile(new CombatBehaviorProfile { Airborne = 1f });
+                int m = Gunner(p.K, new double2(10, 8), profile: prof);
+                int t = Dummy(p.K, new double2(40, 8), 30f);
+                Attack(p.K, m, t);
+                bool crossed = false;
+                for (int i = 0; i < 60 * 10 && p.K.IsAlive(t); i++)
+                {
+                    p.Step();
+                    p.K.TryGetPosition(m, out double2 q);
+                    crossed |= q.x > 30.5 && q.y < 20;
+                }
+                Expect(p.Requests == 0 && crossed && !p.K.IsAlive(t),
+                    $"空中单位右键攻击墙后的目标：不受格网、照旧直线飞过墙（{crossed}），不发寻路请求（{p.Requests} 条），击毁目标");
+            }
+
+            // 被接入的机器：直控输入优先（命令保留、不推进、不发请求）。
+            {
+                using NavKernel nav = Synth(2, 1, LWall);
+                using var p = new Pipe(nav, 0f);
+                int m = Gunner(p.K, new double2(10, 8));
+                int t = Dummy(p.K, new double2(40, 8), 1e4f);
+                p.K.SetFlag(m, CombatUnitFlags.Possessed, true);
+                p.K.SetDirectInput(m, new float2(0f, 1f));
+                Attack(p.K, m, t);
+                for (int i = 0; i < 60; i++)
+                {
+                    p.Step();
+                }
+                p.K.TryGetPosition(m, out double2 q);
+                bool kept = p.K.TryGetCommand(m, out CombatCommand c) && c.Kind == CombatCommandKind.Attack;
+                Expect(p.Requests == 0 && kept && Math.Abs(q.x - 10) < 1e-6 && q.y > 13.5,
+                    $"被接入的机器下了攻击命令：位移只来自直控（1 秒 +{q.y - 8:F2} 米、x 不变），攻击命令保留不推进，不发寻路请求");
+            }
+        }
+
+        // 家园正式入口：右键敌人 = 攻击（RegionSquadCommandSystem.IssueAttack，与右键点敌人同一条路径）。
+        private const string KernelHostilePrefix = "unit:";
+
+        private static int HomeHostile(HomeValleyController home, Vector2 at, float hp) => Dummy(home.Combat.Kernel, new double2(at.x, at.y), hp);
+
+        /// <summary>家园里找一块空地，用悬崖围一圈（半径 14 &gt; 家园攻击射程 12；<paramref name="gap"/> 时在远离机器的东侧留 3 格缺口）把目标围在中间，机器放在西侧 16 格（围栏外 2 格、空地内）。
+        /// 开局只探明核心附近：先揭开核心周围 90 格（测试捷径，登记在证据里）再找 35×35 的空地（找不到就整平）。</summary>
+        private static bool BuildHomeAttack(int seed, bool gap, out HomeValleyController home, out int machine, out int unit, out GridCell center)
+        {
+            CampaignState s = NewCampaign(seed);
+            home = WorldSimulation.LoadHome(resume: false);
+            machine = 0;
+            unit = 0;
+            center = default;
+            HomeGridService.RevealArea(s, new Vector2(HomeGridService.CorePivot(s).X, HomeGridService.CorePivot(s).Y), 90f);
+            GridCell? open = FindOpenArea(s, 17, 30, 70);
+            if (open == null)
+            {
+                Fail("家园找不到空地做右键攻击绕障" + _openAreaMiss);
+                return false;
+            }
+            center = open.Value;
+            CliffRing(s, center, 14, 1, gap ? new Func<int, int, bool>((dx, dy) => dx == 14 && Math.Abs(dy) <= 1) : null);
+            var spawnCell = new GridCell(center.X - 16, center.Y);
+            if (!Passable(spawnCell))
+            {
+                Fail($"右键攻击绕障前提：机器出生格 {spawnCell.X},{spawnCell.Y} 不可走（空地中心 {center.X},{center.Y}）");
+                return false;
+            }
+            machine = SpawnHomeMachine(s, new Vector2(spawnCell.X, spawnCell.Y), combat: true);
+            unit = HomeHostile(home, new Vector2(center.X, center.Y), 40f);
+            WorldSimulation.StepMany(2);
+            home.SquadCommands.DebugSelectMany(new[] { machine });
+            home.SquadCommands.IssueAttack(KernelHostilePrefix + unit, paused: false);
+            return machine != 0 && unit != 0;
+        }
+
+        private static void CheckAttackHomeRealPath()
+        {
+            if (!BuildHomeAttack(8821, gap: true, out HomeValleyController home, out int id, out int unit, out GridCell center))
+            {
+                return;
+            }
+            home.Combat.TryGetMachineMarker(id, out HomeValleyMachineMarker marker);
+            bool issued = home.Combat.TryGetCommand(marker.UnitId, out CombatCommand c0) && c0.Kind == CombatCommandKind.Attack;
+            bool clear = true;
+            string firstBad = string.Empty;
+            int steps = 0;
+            for (; steps < 60 * 60 && home.Combat.Kernel.IsAlive(unit); steps++)
+            {
+                WorldSimulation.StepMany(1);
+                if (TryUnitPos(marker, out double2 q) && !Passable(CellOf(q)) && clear)
+                {
+                    clear = false;
+                    firstBad = $"（第 {steps} 步踩到不可走格 {CellOf(q).X},{CellOf(q).Y}，空地中心 {center.X},{center.Y}）";
+                }
+            }
+            bool killed = !home.Combat.Kernel.IsAlive(unit);
+            Expect(issued && killed && clear,
+                $"家园正式入口（选中战斗机器、右键敌人 = 攻击）：目标被半径 14 的悬崖围着（> 射程 12）、缺口在背面，机器从缺口绕进去，第 {steps} 步击毁（{killed}），全程不踏进不可走格（{clear}）{firstBad}；下令即接到攻击命令（{issued}）");
+
+            // 四面封死：命令以“无法到达”结束，命令栏写明原因、发可定位通知，机器交还 AI。
+            if (!BuildHomeAttack(8822, gap: false, out HomeValleyController home2, out int id2, out _, out GridCell c2))
+            {
+                return;
+            }
+            int notesBefore = NotificationCenter.History.Count(e => e.Type?.Id == "unreachable");
+            WorldSimulation.StepMany(60);
+            string ev = home2.SquadCommands.RecentEvents.LastOrDefault() ?? string.Empty;
+            int notesAfter = NotificationCenter.History.Count(e => e.Type?.Id == "unreachable");
+            home2.Combat.TryGetMachineMarker(id2, out HomeValleyMachineMarker m2);
+            bool noCmd = !home2.Combat.TryGetCommand(m2.UnitId, out _);
+            Expect(ev.Contains(GameText.Get("nav.fail.unreachable")) && notesAfter > notesBefore && noCmd,
+                $"家园右键攻击四面被悬崖封死的目标：命令以明确原因结束（“{ev}”），发可定位通知，不挂着命令发呆");
+        }
+
+        private static void CheckAttackHomeMatrix()
+        {
+            // 等路线时存档（攻击命令的寻路请求在飞）：读档接着跑、0.5x / 2x / 3x、镜头逐帧观察、暂停，结果都与无头连续跑一致。
+            if (!BuildHomeAttack(8823, gap: true, out HomeValleyController home, out int id, out int unit, out _))
+            {
+                return;
+            }
+            home.Combat.TryGetMachineMarker(id, out HomeValleyMachineMarker marker);
+            WorldSimulation.StepMany(1); // 内核这一步发出攻击绕障的寻路请求（等路线）
+            bool awaiting = home.Combat.TryGetNavState(marker.UnitId, out CombatNavState st, out _) && st == CombatNavState.Awaiting;
+            SaveResult r = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            if (!r.Success)
+            {
+                Fail("攻击绕障存档写入失败：" + r.Message);
+                return;
+            }
+            const int steps = 1500;
+            RestoreSave(Slot);
+            long target = GameClock.Ticks + steps;
+            WorldSimulation.StepMany(steps);
+            string headless = Digest(CampaignSession.Current);
+            bool killed = !CombatSites.Get(HomeValleyLayout.RegionId).Kernel.IsAlive(unit);
+            RestoreSave(Slot);
+            var reader = new SilentReader();
+            InputRouter.DebugSetReader(reader);
+            int frame = 0;
+            while (GameClock.Ticks < target && frame < 5000)
+            {
+                WorldSimulation.Frame(1f / 60f, target);
+                frame++;
+            }
+            InputRouter.DebugSetReader(null);
+            string observed = Digest(CampaignSession.Current);
+            var bySpeed = new List<string>();
+            foreach (float speed in new[] { 0.5f, 2f, 3f })
+            {
+                RestoreSave(Slot);
+                GameClock.SetSpeed(speed);
+                int guard = 0;
+                while (GameClock.Ticks < target && guard++ < 20000)
+                {
+                    WorldSimulation.Frame(1f / 60f, target);
+                }
+                GameClock.SetSpeed(1f);
+                bySpeed.Add(Digest(CampaignSession.Current));
+            }
+            RestoreSave(Slot);
+            string beforePause = Digest(CampaignSession.Current);
+            GameClock.SetPaused(true);
+            for (int i = 0; i < 120; i++)
+            {
+                WorldSimulation.Frame(1f / 60f);
+            }
+            string paused = Digest(CampaignSession.Current);
+            GameClock.SetPaused(false);
+            Expect(awaiting && killed && observed == headless && bySpeed.All(x => x == headless) && beforePause == paused,
+                $"右键攻击绕障、寻路请求在飞时存档（{awaiting}）：读档无头跑 {steps} 步击毁目标（{killed}）；逐帧观察、0.5x / 2x / 3x 跑到同一步结果逐字段一致；暂停 2 秒真实时间不走步" +
+                (observed == headless ? string.Empty : "\n    无头=" + headless + "\n    观察=" + observed));
         }
 
         // ── 工具 ────────────────────────────────────────────────────────────────────
