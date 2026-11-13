@@ -222,6 +222,9 @@ namespace GameLogic.EditorTools
             Row(ord, Ev(EmgEventKind.Beat), Trig), Row(ord, EmgTempoConst.PortBeat, Cond, period, phase), Row(ord, 100, RoleSpawn, 1f, 0f, (byte)EmgVerb.SubPayload),
         };
 
+        /// <summary>只计拍的节拍指令：evt.beat 触发 + tmp.beat 条件，不带效果（凑“本拍执行 ≥ 2 条”的对齐，又不放子载荷干扰掉血读数）。</summary>
+        private static EmgInstr[] TickI(int ord, int period, int phase) => new[] { Row(ord, Ev(EmgEventKind.Beat), Trig), Row(ord, EmgTempoConst.PortBeat, Cond, period, phase) };
+
         /// <summary>谐振（与 fw_resonance 同形）：evt.beat 触发 + tmp.sync 条件 + en.kinetic 注入（幅度 0.3、半径 1.5 米）。</summary>
         private static EmgInstr[] ResI(int ord) => new[]
         {
@@ -572,7 +575,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckCarriers()
         {
-            Line("  · E. 5 载体：格斗 / 力场 / 即时射弹在结算点留 2 秒节拍锚点（第 0.25 秒出手 → 第 2、4 拍各放 1 份，2.25 秒后锚点移除）；布区存续期间按拍；每架无人机按拍");
+            Line("  · E. 5 载体：格斗 / 力场 / 即时射弹每次出手在结算点留 2 秒节拍锚点（第 0.25 秒出手 → 第 2、4 拍各放 1 份，2.25 秒后锚点移除；EMGR-TRIG-01 连挥各留一个、换目标旧锚点照常）；布区存续期间按拍；每架无人机按拍");
             foreach (CombatCarrier car in new[] { CombatCarrier.Melee, CombatCarrier.Aura, CombatCarrier.Projectile })
             {
                 using var k = new CombatKernel(Cfg(), 16);
@@ -583,11 +586,12 @@ namespace GameLogic.EditorTools
                 k.FireAt(me, foe, k.Time);
                 int anchors = k.MetaRunCount;
                 StepN(k, 60 * 3);
-                Expect(anchors == 1 && Subs(k) == 2 && k.MetaRunCount == 0, $"{car}：锚点 {anchors} 个，放出 {Subs(k)} 份，3 秒后锚点 {k.MetaRunCount} 个");
+                Expect(anchors == 1 && Subs(k) == 2 && k.MetaRunCount == 0, $"{car}：出手一次锚点 {anchors} 个，放出 {Subs(k)} 份，3 秒后锚点 {k.MetaRunCount} 个");
             }
             using (var k = new CombatKernel(Cfg(), 16))
             {
-                // 格斗连挥 3 下：锚点只有 1 个（刷新到最后一下），带出手伤害；两条同相位 + 谐振在锚点处余振（对齐拍 3 米够到被打的敌人）
+                // EMGR-TRIG-01（FG-GAP-218）：格斗连挥 3 下 = 3 个锚点（每下各留一个，不再刷新成一个），各带出手伤害；两条同相位时钟各锚点每个对齐拍各放 1 份（余波随射速增加）；
+                // 审查修复（第 1 轮）：谐振拆成一个按机器合并的谐振点（只放行谐振位，刷新到最近一次挥击点），普通锚点不带谐振位——余振次数 = 对齐拍数，不随锚点数增加
                 int prog = Prog(k, new[] { ClockI(0, 2, 0), ClockI(1, 2, 0), ResI(2) }, 0, 1);
                 int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog, 3f, CombatCarrier.Melee)), 100f);
                 int foe = Unit(k, CombatFaction.Hostile, new double2(0, 1.6), -1, 5000f);
@@ -597,13 +601,61 @@ namespace GameLogic.EditorTools
                     k.FireAt(me, foe, k.Time);
                     StepN(k, 3);
                 }
-                k.TryGetMetaRun(0, out EmgMetaRun an);
-                int anchors = k.MetaRunCount;
+                AnchorSplit(k, 1UL << 2, out int anchors, out int resPts, out _);
+                bool each = k.MetaRunCount > 0;
+                for (int j = 0; j < k.MetaRunCount; j++)
+                {
+                    each &= k.TryGetMetaRun(j, out EmgMetaRun an) && an.Damage == 10f && an.Other == foe;
+                }
                 float hp0 = k.TryGetUnit(foe, out CombatUnitView v0) ? v0.Health : -1f;
                 StepN(k, 60 * 3);
                 float hp1 = k.TryGetUnit(foe, out CombatUnitView v1) ? v1.Health : -1f;
-                Expect(anchors == 1 && an.Damage == 10f && an.Other == foe && k.EmgBusStats.BeatPulses == 2 && hp0 - hp1 >= 5.9f,
-                    $"格斗连挥 3 下：锚点 {anchors} 个（伤害 {an.Damage}、目标 {an.Other == foe}）；锚点 2 秒内余振 {k.EmgBusStats.BeatPulses} 次，被打的敌人因余振掉血 {hp0 - hp1:0.0}");
+                Expect(anchors == 3 && resPts == 1 && each && Subs(k) == 12 && k.EmgBusStats.BeatPulses == 2 && hp0 - hp1 >= 5.9f && k.MetaRunCount == 0,
+                    $"格斗连挥 3 下：普通锚点 {anchors} 个 + 谐振点 {resPts} 个（每个伤害 10、目标是被打的敌人 {each}）；2 秒内 3 锚点 × 2 拍 × 2 条时钟共放 {Subs(k)} 份（12；修前 1 个锚点只放 4 份）；"
+                    + $"余振 {k.EmgBusStats.BeatPulses} 次（对齐拍 2 个），被打的敌人掉血 {hp0 - hp1:0.0}；3 秒后锚点 {k.MetaRunCount} 个");
+            }
+            CheckResonanceLatest();
+            CheckSubPulseAnchors();
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                // 负向：换目标——先打 A 再打 B，A 处的旧挥击点锚点不被 B 刷走，照常在 A 处按拍放余波
+                int prog = Prog(k, new[] { ClockI(0, 2, 0) }, 0);
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog, 3f, CombatCarrier.Melee)), 100f);
+                double2 pa = new double2(0, 1.6), pb = new double2(0, -1.6);
+                int fa = Unit(k, CombatFaction.Hostile, pa, -1, 5000f);
+                int fb = Unit(k, CombatFaction.Hostile, pb, -1, 5000f);
+                StepN(k, 15);
+                k.FireAt(me, fa, k.Time);
+                StepN(k, 6);
+                k.FireAt(me, fb, k.Time);
+                bool atA = false, atB = false;
+                for (int j = 0; j < k.MetaRunCount; j++)
+                {
+                    if (k.TryGetMetaRun(j, out EmgMetaRun an))
+                    {
+                        atA |= math.distance(an.Pos, pa) < 0.01 && an.Other == fa;
+                        atB |= math.distance(an.Pos, pb) < 0.01 && an.Other == fb;
+                    }
+                }
+                int anchors = k.MetaRunCount;
+                StepN(k, 60 * 3);
+                Expect(anchors == 2 && atA && atB && Subs(k) == 4 && k.MetaRunCount == 0,
+                    $"换目标：先打 A 再打 B 后锚点 {anchors} 个（A 处 {atA}、B 处 {atB}；修前只剩 B 处一个）；两处各在第 2、4 拍放 1 份，共 {Subs(k)} 份（4）");
+            }
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                // 负向：锚点容量满（DEBT-EMGRTRIG01-01）——4096 是上限，满了新锚点被拒绝并计 stat 4（总线 SpawnLost），已有锚点不受影响
+                int prog = Prog(k, new[] { ClockI(0, 2, 0) }, 0);
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog, 3f, CombatCarrier.Melee)), 100f);
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 1.6), -1, 1e9f);
+                long lost0 = k.EmgBusStats.SpawnLost;
+                int over = 5;
+                for (int i = 0; i < EmgConst.PendingCapacity + over; i++)
+                {
+                    k.FireAt(me, foe, k.Time);
+                }
+                Expect(k.MetaRunCount == EmgConst.PendingCapacity && k.EmgBusStats.SpawnLost - lost0 == over,
+                    $"连挥 {EmgConst.PendingCapacity + over} 下：锚点 {k.MetaRunCount} 个（上限 {EmgConst.PendingCapacity}），拒绝计数 stat 4 +{k.EmgBusStats.SpawnLost - lost0}（{over}）");
             }
             using (var k = new CombatKernel(Cfg(), 16))
             {
@@ -632,14 +684,164 @@ namespace GameLogic.EditorTools
             }
         }
 
+        /// <summary>运行态表里的节拍记录按放行位分两类：普通锚点（Mask 不含谐振位 <paramref name="res"/>）与谐振点（Mask == 谐振位）；<paramref name="resAt"/> = 最后一个谐振点。</summary>
+        private static void AnchorSplit(CombatKernel k, ulong res, out int anchors, out int resPts, out EmgMetaRun resAt)
+        {
+            anchors = resPts = 0;
+            resAt = default;
+            for (int j = 0; j < k.MetaRunCount; j++)
+            {
+                if (!k.TryGetMetaRun(j, out EmgMetaRun an))
+                {
+                    continue;
+                }
+                if (an.Mask == res)
+                {
+                    resPts++;
+                    resAt = an;
+                }
+                else if ((an.Mask & res) == 0UL)
+                {
+                    anchors++;
+                }
+            }
+        }
+
+        private static float Hp(CombatKernel k, int unit) => k.TryGetUnit(unit, out CombatUnitView v) ? v.Health : -1f;
+
+        /// <summary>
+        /// EMGR-TRIG-01 审查修复（第 1 轮，FG19A 第 132 行谐振格斗 / 力场列）：谐振从普通锚点拆出成按机器合并的谐振点——
+        /// 格斗 / 即时射弹 [计拍, 计拍, 谐振] 先打 A 再打 B：普通锚点 A、B 各一个，谐振点只有一个、在 B；对齐拍余振打到 B，A 不吃余振（修前两处锚点各带谐振位，对齐给最旧的 A）。
+        /// 力场连出手 3 次：普通锚点 3 个，谐振点 1 个、存续刷新到最后一次出手。
+        /// </summary>
+        private static void CheckResonanceLatest()
+        {
+            const ulong res = 1UL << 2;
+            foreach (CombatCarrier car in new[] { CombatCarrier.Melee, CombatCarrier.Projectile })
+            {
+                using var k = new CombatKernel(Cfg(), 16);
+                int prog = Prog(k, new[] { TickI(0, 2, 0), TickI(1, 2, 0), ResI(2) });
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog, 3f, car)), 100f);
+                double2 pa = new double2(0, 2), pb = new double2(0, -2); // 相距 4 米：对齐拍余振半径 3 米（+ 0.5 单位半径）够不到另一处
+                int fa = Unit(k, CombatFaction.Hostile, pa, -1, 5000f);
+                int fb = Unit(k, CombatFaction.Hostile, pb, -1, 5000f);
+                StepN(k, 15);
+                k.FireAt(me, fa, k.Time);
+                StepN(k, 6);
+                k.FireAt(me, fb, k.Time);
+                AnchorSplit(k, res, out int anchors, out int resPts, out EmgMetaRun rp);
+                bool atB = resPts == 1 && math.distance(rp.Pos, pb) < 0.01 && rp.Other == fb;
+                float a0 = Hp(k, fa), b0 = Hp(k, fb);
+                StepN(k, 60 * 3);
+                float lossA = a0 - Hp(k, fa), lossB = b0 - Hp(k, fb);
+                Expect(anchors == 2 && atB && lossA == 0f && Near(lossB, 6f, 0.01f) && k.EmgBusStats.BeatPulses == 2 && k.MetaRunCount == 0,
+                    $"{car} 先打 A 再打 B：普通锚点 {anchors} 个、谐振点 {resPts} 个在 B 处（{atB}）；对齐拍余振 {k.EmgBusStats.BeatPulses} 次全在 B——B 掉血 {lossB:0.0}（2 × 3）、A 掉血 {lossA:0.0}（0；修前余振落在最旧的 A 处）");
+            }
+            using (var k = new CombatKernel(Cfg(), 16))
+            {
+                int prog = Prog(k, new[] { TickI(0, 2, 0), TickI(1, 2, 0), ResI(2) });
+                int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog, 3f, CombatCarrier.Aura)), 100f);
+                int foe = Unit(k, CombatFaction.Hostile, new double2(0, 1.6), -1, 5000f);
+                StepN(k, 15);
+                double last = 0;
+                for (int i = 0; i < 3; i++)
+                {
+                    last = k.Time;
+                    k.FireAt(me, foe, k.Time);
+                    StepN(k, 3);
+                }
+                AnchorSplit(k, res, out int anchors, out int resPts, out EmgMetaRun rp);
+                bool refreshed = resPts == 1 && Math.Abs(rp.Until - (last + 2.0)) < 1e-6 && math.distance(rp.Pos, new double2(0, 0)) < 0.01;
+                StepN(k, 60 * 3);
+                Expect(anchors == 3 && refreshed && k.EmgBusStats.BeatPulses == 2 && k.MetaRunCount == 0,
+                    $"力场连出手 3 次：普通锚点 {anchors} 个（每次一个）、谐振点 {resPts} 个（在本机脉冲点、存续刷新到最后一次出手 + 2 秒：{refreshed}）；余振 {k.EmgBusStats.BeatPulses} 次（对齐拍 2 个）");
+            }
+        }
+
+        /// <summary>
+        /// EMGR-TRIG-01 审查补测（FG-GAP-218，ChildMods 小场脉冲）：力场命中放 2 份小场脉冲、节点带 [多块 3] 与读 evt.beat 的计拍——6 块脉冲各在自己的脉冲点留一个锚点
+        /// （修前一次放出只留一个，在母放出点）。
+        /// </summary>
+        private static void CheckSubPulseAnchors()
+        {
+            using var k = new CombatKernel(Cfg(), 16);
+            var instrs = new List<EmgInstr> { Row(0, Ev(EmgEventKind.Hit), Trig), Row(1, 113, 6, 3f, 0f, (byte)EmgVerb.Multi) };
+            instrs.AddRange(TickI(2, 2, 0));
+            var nodes = new List<EmgNode>
+            {
+                new EmgNode { Parent = -1, FirstInstr = 0, InstrCount = 1 },
+                new EmgNode { Parent = 0, Gen = 1, TrigEvent = EmgEventKind.Hit, TrigCount = 2, FirstInstr = 1, InstrCount = (byte)(instrs.Count - 1) },
+            };
+            int prog = k.AddProgram(new EmgProgram { ListenMask = (1u << (int)EmgEventKind.Beat) | (1u << (int)EmgEventKind.Hit) }, nodes, instrs);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(prog, 3f, CombatCarrier.Aura)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 2), -1, 5000f);
+            StepN(k, 15);
+            k.FireAt(me, foe, k.Time);
+            StepN(k, 1);
+            var pulses = new List<double2>();
+            for (int i = 0; i < k.ZoneCount; i++)
+            {
+                if (k.TryGetZone(i, out CombatZone z) && z.EmgSub == 1)
+                {
+                    pulses.Add(z.Pos);
+                }
+            }
+            int matched = 0, aura = 0;
+            var used = new HashSet<int>();
+            for (int j = 0; j < k.MetaRunCount; j++)
+            {
+                if (!k.TryGetMetaRun(j, out EmgMetaRun an))
+                {
+                    continue;
+                }
+                aura += an.Carrier == (byte)CombatCarrier.Aura ? 1 : 0;
+                int hit = pulses.FindIndex(p => math.distance(p, an.Pos) < 1e-6);
+                if (hit >= 0 && used.Add(hit))
+                {
+                    matched++;
+                }
+            }
+            int distinct = pulses.Select(p => (Math.Round(p.x, 4), Math.Round(p.y, 4))).Distinct().Count();
+            Expect(pulses.Count == 6 && distinct == 6 && k.MetaRunCount == 6 && matched == 6 && aura == 6,
+                $"力场放 2 份 × 多块 3 = 小场脉冲 {pulses.Count} 块（位置各不相同 {distinct}）；锚点 {k.MetaRunCount} 个，与各自脉冲点一一对应 {matched}、载体记力场 {aura}（修前一次放出只留 1 个）");
+        }
+
         /// <summary>嵌套：真实编译 [时钟脉冲, 时钟脉冲] 第 2 条在子弹药节点（相位 1）；子弹药寿命 0.5 秒撑不到相位，由放出点的 2 秒节拍锚点代为执行。</summary>
         private static void CheckNested()
         {
-            Line("  · E2. 嵌套在子弹药里的节拍指令：放出点留 2 秒节拍锚点（每台机器每个节点一个，新放出刷新位置与时限），第 3、5、7 拍再放：4.2 秒共 4 + 3 = 7 份");
+            Line("  · E2. 嵌套在子弹药里的节拍指令：每枚子弹药在放出点各留 2 秒节拍锚点（EMGR-TRIG-01，FG-GAP-218），第 2 / 4 / 6 拍放出的 3 枚各在之后 2 秒内的奇数拍再放：4.2 秒共 4 + 5 = 9 份");
             EmgProgramResult r = P(FirmwareCarrier.Projectile, "fw_clock", "fw_clock");
             List<int> at = FlightRun(k => CombatSite.RegisterProgram(k, r), 252, out _, out _);
-            int[] want = { 60, 90, 120, 150, 180, 210, 240 };
+            int[] want = { 60, 90, 120, 150, 150, 180, 210, 210, 240 }; // 根 60/120/180/240；第 60 步那枚 → 90、150；第 120 步 → 150、210；第 180 步 → 210（修前合并成 1 个锚点只有 90/150/210，共 7 份）
             Expect(at.SequenceEqual(want), $"放出步号 [{string.Join(", ", at)}]（期望 [{string.Join(", ", want)}]）");
+            CheckRustBomb();
+        }
+
+        /// <summary>EMGR-TRIG-01（FG19A:574 fw_mix_rustbomb“每枚子弹药每 2 拍再放 1 枚二级弹”）：真实编译的锈蚀子母弹，母弹命中处抛 4 枚子弹药后立即消失，4 枚各留锚点，2 秒共 8 枚二级弹。</summary>
+        private static void CheckRustBomb()
+        {
+            EmgProgramResult r = P(FirmwareCarrier.Projectile, "fw_mix_rustbomb");
+            using var k = new CombatKernel(Cfg(), 16);
+            int prog = CombatSite.RegisterProgram(k, r);
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Flight(Instant(prog), 10f, 10f)), 100f);
+            int foe = Unit(k, CombatFaction.Hostile, new double2(0, 3), -1, 5000f);
+            k.FireAt(me, foe, k.Time);
+            int released = -1, inFlight = -1, anchors = -1;
+            for (int s = 1; s <= 120 && released < 0; s++)
+            {
+                StepN(k, 1);
+                if (Subs(k) >= 4)
+                {
+                    released = s;
+                    inFlight = k.ProjectileCount;
+                    anchors = k.MetaRunCount;
+                }
+            }
+            long first = Subs(k);
+            StepN(k, 60 * 2 + 15); // 放出后 2.25 秒：锚点 2 秒时限已过
+            long second = Subs(k) - first;
+            Expect(prog >= 0 && released > 0 && first == 4 && inFlight == 4 && anchors == 4 && second == 8 && k.MetaRunCount == 0,
+                $"锈蚀子母弹：第 {released} 步母弹命中处抛 {first} 枚子弹药（在飞 {inFlight} 颗 = 母弹已消失），留锚点 {anchors} 个；之后 2 秒共放二级弹 {second} 枚（8；修前合并成 1 个锚点只有 2 枚），锚点到期移除（剩 {k.MetaRunCount}）");
         }
 
         // ── F. 暂停与 0.5x～3x（B09）──
@@ -701,7 +903,9 @@ namespace GameLogic.EditorTools
             k.FireAt(a, fa, k.Time);
             StepN(k, 40);
             k.FireAt(b, fb, k.Time);
-            StepN(k, 35); // 第 75 步：拍序号 2，锚点还在
+            StepN(k, 5);
+            k.FireAt(b, fb, k.Time); // EMGR-TRIG-01：连挥两下 = 两个锚点，一起进段 23
+            StepN(k, 30); // 第 75 步：拍序号 2，锚点还在
             long beatAt = k.BeatCount;
             long subsAt = Subs(k); // 总线计数是调试量、不进快照：比读档后的增量
             int runs = k.MetaRunCount;
@@ -716,7 +920,7 @@ namespace GameLogic.EditorTools
                 StepN(c, 1);
                 every &= k.StateHash() == c.StateHash() && k.BeatCount == c.BeatCount;
             }
-            Expect(same && every && beatAt == 2 && runs == 1 && Subs(k) - subsAt == Subs(c) && Subs(c) > 0 && c.BeatCount == 12
+            Expect(same && every && beatAt == 2 && runs == 2 && Subs(k) - subsAt == Subs(c) && Subs(c) > 0 && c.BeatCount == 12
                    && c.EmgBusStats.BeatSyncs > 0,
                 $"存档时拍序号 {beatAt}、锚点 {runs} 个（读档 {lr}、读后一致 {same}）；续跑 300 步逐步哈希一致（{every}），拍序号接续到 {c.BeatCount}；读档后子弹药 {Subs(k) - subsAt}/{Subs(c)} 份");
             using var old = new CombatKernel(Cfg(), 16);

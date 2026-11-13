@@ -82,7 +82,8 @@ namespace GameLogic.Campaign.Regions
                         continue;
                     }
                     // FG2-FW-02（B13）：与内核同源的每发伤害（重炮 55、新作战组件用表里的伤害、读法的伤害倍率都算进去）。
-                    firepower += Combat.CombatSite.MachineHitDamage(resolution.Preview);
+                    // EMGR-TRIG-01：光束每段伤害按段长缩过，火力按一次机器出手（与其余武器同一口径）折回
+                    firepower += Combat.CombatSite.MachineIntervalDamage(resolution.Preview);
                 }
             }
 

@@ -1349,12 +1349,13 @@ namespace GameLogic.Campaign.Emergence
         /// EMG4-LOOT-01 修复轮 1（FGR-FAC-009，承接 FG-GAP-150；规则只看端口，FGR-EMG-013）：主组件自己的声明里有程序写端（mat.* 排放、hij.* 注入、grm.* 语法修饰）时，
         /// 与固件同一套编译编成一条内置指令——放在根节点、另加一格容量（不挤占固件槽与接入配额）、不计指令热量、不占刷写带宽。
         /// 阵营标志组件（喷淋臂 / 环形喷淋架“命中 → 排放酸液”、干扰发射器“注入入侵度”、驻锄曲射炮“抛射”）靠它生效；
-        /// 其余组件的声明只写能量 / 实体 / 场 / 属性端口（由读法与部件场在别处结算），没有程序写端，不受影响。
+        /// EMGR-TRIG-01 起，没有场写端的主组件上的命中注能写端（切割束 en.heat）同样编成内置指令（<see cref="InnateHitInject"/>）；
+        /// 其余组件的声明只写动能 / 实体 / 场 / 属性端口（由读法与部件场在别处结算），没有程序写端，不受影响。
         /// </summary>
         private static void AddInnate(EmgProgramResult r, EmgCompiled c, string owner)
         {
             if (string.IsNullOrEmpty(owner) || !c.OwnerIndex.TryGetValue(owner, out int oi) || !c.OwnerActive(oi) || !DeclsByOwner.TryGetValue(oi, out List<int> all)
-                || !all.Exists(x => ProgramWrite(c.Decls[x])))
+                || !(all.Exists(x => ProgramWrite(c.Decls[x])) || InnateHitInject(c, all)))
             {
                 return;
             }
@@ -1366,6 +1367,30 @@ namespace GameLogic.Campaign.Emergence
                 s.Innate = true;
                 s.TableHeat = 0f;
             }
+        }
+
+        /// <summary>
+        /// EMGR-TRIG-01（FG19A:348 comp_beam“en.heat inject 每段 20 热量单位”，此前没有任何执行点）：主组件声明了命中注能写端（en.heat / en.elec / en.mag inject）、且没有场写端
+        /// （场组件的注能随场结算，FGR-EMG-120）时，同样编成内置指令——每次命中给目标与命中点斑块注能，与固件的注能写端同一条执行路径。
+        /// 动能（en.kinetic）是载体动能系数（FG19B §6.3），不在这里。按端口 × 角色判，不认组件 ID。
+        /// </summary>
+        private static bool InnateHitInject(EmgCompiled c, List<int> all)
+        {
+            bool inject = false;
+            foreach (int x in all)
+            {
+                EmgDeclRow d = c.Decls[x];
+                if (d.Dir != EmgDirs.Write || !PortIds.TryGetValue(d.Port, out string pid))
+                {
+                    continue;
+                }
+                if (EmgCatalog.FamilyOf(pid) == EmgFamily.Field)
+                {
+                    return false;
+                }
+                inject |= d.Role == EmgRole.Inject && (pid == "en.heat" || pid == "en.elec" || pid == "en.mag");
+            }
+            return inject;
         }
 
         private static bool ProgramWrite(EmgDeclRow d)

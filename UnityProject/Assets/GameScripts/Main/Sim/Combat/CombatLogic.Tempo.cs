@@ -169,8 +169,9 @@ namespace BinGames.Sim.Combat
             for (int h = 0; h < hosts.Length; h++)
             {
                 BeatHost b = hosts[h];
-                // EMG3-E2E-01（DEBT-EMG3TMP01-01）：谐振点（只放行谐振的锚点）的对齐单独记一份——原来谐振与齐射等由同一宿主一次执行，挪到命中点后不能抢走在飞弹体 / 无人机本拍的对齐
-                int key = b.Kind == BeatAnchor && b.Mask != ulong.MaxValue ? ~b.Owner : b.Owner;
+                // EMG3-E2E-01（DEBT-EMG3TMP01-01）：谐振点（只放行谐振的锚点）的对齐单独记一份——原来谐振与齐射等由同一宿主一次执行，挪到命中点后不能抢走在飞弹体 / 无人机本拍的对齐。
+                // EMGR-TRIG-01 审查修复：谐振点的 Mask 是它读端的子集（只放谐振位）；普通锚点的 Mask = ~谐振位（含非读端位），与在飞弹体 / 无人机同记在机器上
+                int key = b.Kind == BeatAnchor && (b.Mask & ~b.Reads) == 0UL ? ~b.Owner : b.Owner;
                 bool sync = machine.TryGetValue(b.Owner, out ulong em) && (math.countbits(em) >= 2 || (group.IsCreated && group.Contains(b.Owner))) && !used.Contains(key);
                 ulong allow = EmgBeatAllow(b.Beats, b.OnPhase, b.Syncs, sync) & b.Mask;
                 if ((b.Reads & allow) == 0UL)
@@ -372,24 +373,13 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            ulong mask = ulong.MaxValue;
-            if (carrier == (byte)CombatCarrier.Projectile && EmgNodeSpan(ref d, s.Prog, s.Node, out int first, out int end))
-            {
-                // EMG4-CLEAN-01（FG-GAP-209）：飞行子弹药上的谐振改在子弹药命中点余振（EmgResonanceHit），放出点锚点去掉谐振位；只剩谐振读节拍时不留锚点
-                EmgBeatScan(ref d, first, end, 0, out ulong reads, out _, out _, out _);
-                ulong res = EmgResonanceBits(ref d, first, end, reads);
-                if (res != 0UL && (reads & ~res) == 0UL)
-                {
-                    return;
-                }
-                mask = ~res;
-            }
-            EmgBeatAnchorPut(ref d, new EmgMetaRun
+            // EMG4-CLEAN-01（FG-GAP-209）：飞行子弹药上的谐振改在子弹药命中点余振（EmgResonanceHit），放出点不留谐振点；小场脉冲（力场）的谐振在脉冲点留谐振点
+            EmgBeatAnchorSplit(ref d, new EmgMetaRun
             {
                 Unit = s.Owner, Prog = s.Prog, Chain = s.Chain, Node = s.Node, Host = s.Owner, HostKind = (byte)EmgEntKind.Unit, Mode = EmgMetaConst.RunBeat,
-                Depth = s.Depth, Mask = mask, Pos = s.Pos, Dir = dir, Other = s.Other, Weapon = s.Weapon, Damage = math.max(0f, damage), Faction = s.Faction,
+                Depth = s.Depth, Pos = s.Pos, Dir = dir, Other = s.Other, Weapon = s.Weapon, Damage = math.max(0f, damage), Faction = s.Faction,
                 Carrier = carrier, PFlags = (ushort)(s.Flags & EmgProjFlags.Heal), ZoneRadius = math.max(0f, s.ZoneRadius), ZoneLife = math.max(0f, s.ZoneLife),
-            });
+            }, carrier != (byte)CombatCarrier.Projectile);
         }
 
         /// <summary>格斗 / 力场 / 当场结算的出手读 evt.beat 时，在结算点留“程序锚点”（emg.meta.loop_anchor_seconds，缺省 2 秒，FG19A 第 1 节 5 载体读法），锚点存续期间按全局节拍执行。
@@ -400,25 +390,51 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            EmgBeatAnchorPut(ref d, new EmgMetaRun
+            EmgBeatAnchorSplit(ref d, new EmgMetaRun
             {
                 Unit = d.Id[a], Prog = prog, Chain = host.Chain, Node = 0, Host = d.Id[a], HostKind = (byte)EmgEntKind.Unit, Mode = EmgMetaConst.RunBeat,
-                Depth = host.Depth, Mask = ulong.MaxValue, Pos = host.Carrier == (byte)CombatCarrier.Aura ? d.Pos[a] : d.Pos[t], Dir = EmgDir(d.Pos[t] - d.Pos[a]),
+                Depth = host.Depth, Pos = host.Carrier == (byte)CombatCarrier.Aura ? d.Pos[a] : d.Pos[t], Dir = EmgDir(d.Pos[t] - d.Pos[a]),
                 Other = d.Id[t], Weapon = host.Weapon, Damage = math.max(0f, host.Damage), Faction = host.Faction, Carrier = host.Carrier, PFlags = (ushort)host.PFlags,
                 ZoneRadius = math.max(0f, host.ZoneRadius), ZoneLife = math.max(0f, host.ZoneLife),
-            });
+            }, true);
         }
 
         /// <summary>
-        /// 每台机器、每个程序节点只留一个节拍锚点：已有就刷新到这一次的结算点与 2 秒时限（连射不叠锚点，节拍执行次数按机器而不是按出手 / 份数增长；锚点数 ≤ 机器数 × 节点数）。
-        /// 谐振点（<see cref="EmgResonanceHit"/>）另按宿主（机器 / 每架无人机）与放行位各留一个，时限 = 2 拍（<paramref name="seconds"/>）。
-        /// O(运行态条数)，只在读 evt.beat 的出手 / 子弹药放出 / 谐振命中时。
+        /// EMGR-TRIG-01 审查修复（第 1 轮）：把谐振位（<see cref="EmgResonanceBits"/>）从节拍锚点里拆出来——普通锚点每次出手 / 每枚子弹药 / 每个小场脉冲各留一个（Mask = ~谐振位，
+        /// 只剩谐振读节拍时不留）；<paramref name="resHere"/> 时谐振位另留一个只放行谐振的谐振点，按宿主合并、刷新到这次结算点（FG19A 第 132 行“每拍在最近一次挥击命中点余振”
+        /// “每拍在力场圈内余振”），存续与锚点同长。飞行子弹药（resHere = false）的谐振在它自己的命中点留（<see cref="EmgResonanceHit"/>）。O(节点指令数)。
         /// </summary>
-        private static void EmgBeatAnchorPut(ref CombatData d, EmgMetaRun rec, double seconds = 0.0)
+        private static void EmgBeatAnchorSplit(ref CombatData d, EmgMetaRun rec, bool resHere)
+        {
+            ulong reads = ulong.MaxValue, res = 0UL;
+            if (EmgNodeSpan(ref d, rec.Prog, rec.Node, out int first, out int end))
+            {
+                EmgBeatScan(ref d, first, end, 0, out reads, out _, out _, out _);
+                res = EmgResonanceBits(ref d, first, end, reads);
+            }
+            if ((reads & ~res) != 0UL)
+            {
+                rec.Mask = ~res;
+                EmgBeatAnchorPut(ref d, rec);
+            }
+            if (resHere && res != 0UL)
+            {
+                rec.Mask = res;
+                EmgBeatAnchorPut(ref d, rec, merge: true);
+            }
+        }
+
+        /// <summary>
+        /// 每次出手 / 每枚子弹药各留一个节拍锚点（EMGR-TRIG-01，FG-GAP-218：FG19A fw_clock 行“挥击点留 2 秒程序锚点”、fw_mix_rustbomb“每枚子弹药每 2 拍”——没有按机器合并的条文），
+        /// 连射时旧锚点照常在自己的结算点按拍执行到时限（缺省 <paramref name="seconds"/> = emg.meta.loop_anchor_seconds）。只有谐振点（<paramref name="merge"/>：<see cref="EmgResonanceHit"/>、
+        /// <see cref="EmgBeatAnchorSplit"/>）按宿主（机器 / 每架无人机）与放行位合并成一个、刷新到最近一次命中点（FG19A 第 132 行“最近一次命中点”）。
+        /// 容量 <see cref="EmgConst.PendingCapacity"/> 满了拒绝并计 stat 4（与元程序循环 / 延后共用运行态表，DEBT-EMGRTRIG01-01）。普通锚点 O(1)；谐振点 O(运行态条数)。
+        /// </summary>
+        private static void EmgBeatAnchorPut(ref CombatData d, EmgMetaRun rec, double seconds = 0.0, bool merge = false)
         {
             double until = d.Scalars[0].Time + (seconds > 0.0 ? seconds : d.Config.EmgMetaAnchor > 0f ? d.Config.EmgMetaAnchor : EmgMetaConst.DefaultAnchor);
             rec.DueAt = rec.Until = until;
-            for (int i = 0; i < d.MetaRun.Length; i++)
+            for (int i = 0; merge && i < d.MetaRun.Length; i++)
             {
                 EmgMetaRun m = d.MetaRun[i];
                 if (m.Mode == EmgMetaConst.RunBeat && m.Unit == rec.Unit && m.Prog == rec.Prog && m.Node == rec.Node && m.Host == rec.Host && m.HostKind == rec.HostKind && m.Mask == rec.Mask)
@@ -453,7 +469,7 @@ namespace BinGames.Sim.Combat
         /// <summary>
         /// EMG3-E2E-01（DEBT-EMG3TMP01-01；FG19A 第 132 行谐振 5 载体读法）：射弹 / 无人机这一下命中，载荷节点上有谐振时，在命中点留（刷新）一个 2 拍的谐振点——
         /// 一个只放行谐振那几条的节拍锚点（快照段 23 已有的 RunBeat 记录，不加新内核状态）：射弹按机器、无人机按每架各留一个，之后每拍在“最近一次命中点”余振，2 拍后移除。
-        /// 格斗 / 即时射弹的锚点本来就在命中点（<see cref="EmgBeatAnchor"/>），力场在圈内、布区在区域里，不经这里。没有监听 evt.beat 时 O(1)。
+        /// 格斗 / 即时射弹 / 力场（含小场脉冲）的谐振点在结算点留（<see cref="EmgBeatAnchorSplit"/>，同样按宿主合并到最近一次），布区在区域里，不经这里。没有监听 evt.beat 时 O(1)。
         /// </summary>
         internal static void EmgResonanceHit(ref CombatData d, int prog, int node, int unitId, int hostId, EmgEntKind hostKind, double2 at, int other, float damage, byte faction, int weapon,
             byte carrier, byte depth, int chain)
@@ -472,7 +488,7 @@ namespace BinGames.Sim.Combat
             {
                 Unit = unitId, Prog = prog, Chain = chain, Node = (byte)node, Host = hostId, HostKind = (byte)hostKind, Mode = EmgMetaConst.RunBeat, Depth = depth, Mask = bits,
                 Pos = at, Other = other, Weapon = weapon, Damage = math.max(0f, damage), Faction = faction, Carrier = carrier,
-            }, 2.0 * EmgBeatSeconds(ref d));
+            }, 2.0 * EmgBeatSeconds(ref d), true);
         }
     }
 }

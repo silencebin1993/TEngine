@@ -963,6 +963,8 @@ namespace GameLogic.EditorTools
             return null;
         }
 
+        private static Vector2 SupplyTargetDir => Dir(0f);
+
         private static void CheckSupply()
         {
             CampaignState s = NewWorld(6105, scrap: 2000);
@@ -988,7 +990,9 @@ namespace GameLogic.EditorTools
                 return;
             }
             Vector2 c = wet.Position;
-            int target = Hostile(site, c + Dir(200f) * 8f, 100000f, 100000f);
+            // EMGR-TRIG-01 修自检夹具：本段按全地点开火计数判“只有补给炮塔在打”；原靶位（炮塔西南 8 米）落在种子 6105 开局切割束搬运机的射程里，
+            // EMGR-CMD-01 起空闲机器按教义自卫还手，它会替炮塔开火——靶改放炮塔正东 8 米（离开局机器 27 米，出射程），三处同一靶位
+            int target = Hostile(site, c + SupplyTargetDir * 8f, 100000f, 100000f);
             long shots0 = Shots(site);
             Seconds(3f);
             BuildingStatus st = BuildingStatusService.Evaluate(s, wet);
@@ -1014,7 +1018,7 @@ namespace GameLogic.EditorTools
             Seconds(1f);
             bool recovered = !Readout(s, wet).SupplyShort;
             long s5 = Shots(site);
-            target = Hostile(site, c + Dir(200f) * 8f, 100000f, 100000f);
+            target = Hostile(site, c + SupplyTargetDir * 8f, 100000f, 100000f);
             Seconds(2f);
             bool toggled = recovered && Shots(site) - s5 == 1 && Readout(s, wet).SupplyShort;
             bool cooled = NotifyCount("turret_supply") == n1;
@@ -1023,7 +1027,7 @@ namespace GameLogic.EditorTools
             Clear(site);
             site.SetTurretAmmo(wetSerial, 1f);
             Seconds(1f);
-            target = Hostile(site, c + Dir(200f) * 8f, 100000f, 100000f);
+            target = Hostile(site, c + SupplyTargetDir * 8f, 100000f, 100000f);
             Seconds(2f);
             bool again = NotifyCount("turret_supply") == n1 + 1;
             Expect(steady && toggled && cooled && stillQuiet && again,

@@ -937,10 +937,8 @@ namespace BinGames.Sim.Combat
                     };
                     EmgInitFlight(ref d, ref sub, s.Pos + (double2)(pd * reach), k >= 0 ? d.Id[k] : 0, false); // EMG1-GRM-01：子弹药按自己节点（含继承）的修饰
                     d.Projectiles.Add(sub);
-                    if (q == 0 && s.Done == 0)
-                    {
-                        EmgBeatAnchorSub(ref d, s, pd, each); // EMG3-TMP-01：子弹药节点读 evt.beat 时在放出点留节拍锚点（子弹药寿命 ≤ 0.5 秒，自己撑不到相位）；一次放出（一条待生成请求）只留一个，不按份数乘
-                    }
+                    // EMG3-TMP-01：子弹药节点读 evt.beat 时在放出点留节拍锚点（子弹药寿命 ≤ 0.5 秒，自己撑不到相位）；EMGR-TRIG-01（FG-GAP-218）：每枚子弹药各留一个（FG19A fw_mix_rustbomb“每枚子弹药”）
+                    EmgBeatAnchorSub(ref d, s, pd, each);
                     CombatCounters c = d.Counters[0];
                     c.ProjectilesSpawned++;
                     d.Counters[0] = c;

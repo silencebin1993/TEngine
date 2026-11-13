@@ -1932,6 +1932,13 @@ namespace GameLogic.Campaign.Combat
         /// （驻守开火的炮塔、直控蓄力门槛都按它 × 读法的出手间隔倍率）。</summary>
         public static float MachineAttackInterval => Tuning("combat.machine.attack_interval", 1.2f);
 
+        /// <summary>EMGR-TRIG-01（DEBT-EMG1TRIG01-04，FG19A 第 2.1.1 节“每 0.5 秒一段作为一枚载荷”）：光束切段间隔（游戏秒，fg.TbEmgTuning emg.trig.beam_interval）。</summary>
+        public static float BeamInterval => Mathf.Max(0.05f, Tuning("emg.trig.beam_interval", 0.5f));
+
+        /// <summary>光束每段占一次机器出手的份额（段长 ÷ 机器出手间隔，0.5 / 1.2）：每段伤害、自身积热按它缩放，秒伤与每秒自身积热不变。
+        /// 补给炮塔不按它缩：一段 = 一发补给（FGR-DEF-004“每发”），每秒补给消耗约 2.4 倍，交 FG15-BAL-01（FG-GAP-230）。</summary>
+        public static float BeamSegmentShare => BeamInterval / Mathf.Max(0.05f, MachineAttackInterval);
+
         /// <summary>FG2-FW-02（B13）：这套装配每发实际打出的基础伤害（与 <see cref="MachineWeaponFrom(BlueprintCircuitPreview)"/> 同源：新作战组件用表里的伤害、
         /// 重炮 55、连射器 / 切割束按电路编译伤害，再乘读法的伤害倍率；不含装甲 / 侧后 / 状态这些按目标结算的部分）。
         /// 电路编辑器、双态预览、远征预测、家园低威胁靶都读它，玩家看到的数就是内核打出的数。没有攻击出口为 0。</summary>
@@ -1945,6 +1952,14 @@ namespace GameLogic.Campaign.Combat
             CombatWeapon w = MachineWeaponFrom(p);
             float scale = w.Reading.DamageScale > 0f ? w.Reading.DamageScale : 1f;
             return Mathf.Max(0f, w.Damage) * scale;
+        }
+
+        /// <summary>EMGR-TRIG-01：一次机器出手（<see cref="MachineAttackInterval"/>）折算的伤害——光束按段长缩过的每段伤害折回（÷ <see cref="BeamSegmentShare"/>），
+        /// 其余武器 = <see cref="MachineHitDamage(BlueprintCircuitPreview)"/>。远征火力预测这类“按出手次数合计”的口径用它，不因切段把切割束算小。</summary>
+        public static float MachineIntervalDamage(BlueprintCircuitPreview p)
+        {
+            float hit = MachineHitDamage(p);
+            return p != null && !p.HasCannonPrimary && Emergence.EmgRuleCatalog.IsBeam(p.PrimaryId) ? hit / BeamSegmentShare : hit;
         }
 
         /// <summary><paramref name="suppressReaction"/>：FG1-SIG-03 核心固件冷却中——反应不发动（熔穿过载不额外积热、不穿甲；标记跳转不跳），其余参数不变。</summary>
@@ -2014,6 +2029,15 @@ namespace GameLogic.Campaign.Combat
                     w.Damage = Mathf.Max(0f, Tuning("emg.repair.hp_per_shot", 10f)) * heal;
                     w.Range = Mathf.Max(0.5f, Tuning("emg.repair.range", 8f));
                 }
+            }
+            if (w.BeamHit != 0)
+            {
+                // EMGR-TRIG-01（DEBT-EMG1TRIG01-04，FG19A:348 / :371）：光束每 emg.trig.beam_interval 一段，一段 = 一次出手 = 一枚载荷（命中注热每段照表 20）；
+                // 每段伤害与自身积热按段长 ÷ 机器出手间隔缩放，秒伤与每秒自身积热不变。重型射弹分支不可能是光束（细分 heavy ≠ beam），只在这里切段
+                float share = BeamSegmentShare;
+                w.Cooldown = BeamInterval;
+                w.Damage *= share;
+                w.HeatPerShot *= share;
             }
             w.FuseTrace = FuseTraceOf(p);
             return w;

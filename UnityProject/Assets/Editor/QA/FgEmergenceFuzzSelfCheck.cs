@@ -1081,7 +1081,7 @@ namespace GameLogic.EditorTools
             public double P99Ms;
             public double MaxMs;
             public int MaxPending;
-            public long SubSpawned;
+            public long SubSpawned, SpawnLost;
             public long DepthCut;
             public ulong Hash;
             /// <summary>定位用：出手 / 实体化 / 弹体数与武器寿命、主目标距离（只进报告）。</summary>
@@ -1221,6 +1221,7 @@ namespace GameLogic.EditorTools
                 r.Backlog = $"事件队列峰值 {r.MaxPending} 条 > 容量 {EmgConst.BusCapacity} 的 50%";
             }
             r.SubSpawned = st.SubSpawned;
+            r.SpawnLost = st.SpawnLost;
             r.DepthCut = st.DepthCut;
             r.Hash = Hash(k);
             for (int e = 1; e <= EmgConst.EventKinds; e++)
@@ -1247,6 +1248,7 @@ namespace GameLogic.EditorTools
             if (st.FragLost > 0) r.Capacity.Add($"破片丢失 {st.FragLost}");
             if (st.Lost > 0) r.Capacity.Add($"总线满未入队 {st.Lost}");
             if (st.Merged > 0) r.Capacity.Add($"积压合并 {st.Merged}");
+            if (st.SpawnLost > 0) r.Capacity.Add($"运行态 / 待生成满拒绝（stat 4）{st.SpawnLost}");
             JudgeOrdinals(a, r);
             r.Diag = $"出手 {cc.ShotsFired}、实体化 {st.FlightShots}、弹体 {cc.ProjectilesSpawned}、命中 {cc.ProjectilesHit}、到期 {cc.ProjectilesExpired}、反弹 {cc.ShotsReflected}；" +
                      $"武器寿命 {a.W.ProjectileLife:0.##} 秒、弹速 {a.W.ProjectileSpeed:0.#}、主目标距离 {math.length(a.MainAt):0.#} 米";
@@ -1766,6 +1768,8 @@ namespace GameLogic.EditorTools
             var capHits = results.Where(r => r.Capacity.Count > 0).ToList();
             Line($"    · 平庸（只报告）：{plain} 例除基础伤害外没有任何交互；容量（只报告）：{capHits.Count} 例命中上限或截断——" +
                  string.Join("；", capHits.Take(6).Select(r => $"#{r.Case.Index} {string.Join("、", r.Capacity)}")));
+            // EMGR-TRIG-01（DEBT-EMGRTRIG01-01）：节拍锚点按出手保留后盯运行态满拒绝（stat 4，与元程序循环 / 延后、待生成队列同一计数），只报告
+            Line($"    · stat 4（运行态 / 待生成队列满拒绝，只报告）：{results.Count} 例合计 {results.Sum(r => r.SpawnLost)}");
             // EMG2-REACT-02（FGT-EMG-070、FGR-EMG-015 规则四）：16 条具名反应在固定用例集里每条至少触发一次；随机例打不到的由定向场景补（配料要两侧凑齐，随机装配不保证）
             var randomKeys = new HashSet<int>(results.SelectMany(x => x.RuleHits.Keys));
             Dictionary<string, int> directed16 = FgEmgReact2SelfCheck.FireEachNamedOnce();
@@ -2309,7 +2313,7 @@ namespace GameLogic.EditorTools
             public readonly double[] SiteMs = new double[3];
             public int MaxProjectiles, MinProjectiles = int.MaxValue, MaxDrones, Wrecks, Machines, MinHostiles = int.MaxValue, MinTurrets = int.MaxValue;
             public int MinPatches = int.MaxValue, MinFields = int.MaxValue, MaxHomePatches, MinPatchesAll, MinDrones = int.MaxValue;
-            public long Enqueued, Processed, SubSpawned, Injected;
+            public long Enqueued, Processed, SubSpawned, Injected, SpawnLost;
             public int MaxProcessedPerStep, MaxPending, Rise, MaxRise;
             public long Alloc;
         }
@@ -2341,6 +2345,7 @@ namespace GameLogic.EditorTools
             Line($"    · 三地点内核之和每世界步：阶段 1 平均 {avgOn:F3} / p99 {p99On:F3} ms（远征 {on.SiteMs[0] / measure:F3}、家园 {on.SiteMs[1] / measure:F3}、前哨 {on.SiteMs[2] / measure:F3}）；" +
                  $"同场景 emg.stage = 0（程序为空、没有事件负载）平均 {avgOff:F3} / p99 {p99Off:F3} ms；涌现新增 = 两次独立运行的平均之差 {addAvg:F3} ms（p99 之差 {addP99:F3} ms 只作参考：两次运行逐步不配对，差值没有分位意义）；" +
                  $"测量 {measure} 步托管分配 {on.Alloc / 1024.0:F1} KB");
+            Line($"    · stat 4（节拍锚点 / 元程序运行态与待生成队列满拒绝，DEBT-EMGRTRIG01-01，只报告）：三地点合计 {on.SpawnLost}");
             bool scale = on.MinProjectiles >= 1500 && on.Wrecks >= 400 && on.Machines >= 120 && on.SubSpawned > 0 && on.MaxDrones > 0;
             Expect(scale, $"满载规模达标：测量窗口弹体始终 ≥ 1500（{on.MinProjectiles}）、带程序机器 {on.Machines} ≥ 120、残骸 {on.Wrecks} ≥ 400、有子载荷（{on.SubSpawned}）与无人机（{on.MaxDrones}）");
             PerfGate.Expect(true,
@@ -2487,6 +2492,7 @@ namespace GameLogic.EditorTools
                 st.Enqueued = sites[0].Kernel.EmgBusStats.Enqueued - enq0;
                 st.Processed = Processed(sites) - proc0;
                 st.SubSpawned = sites[0].Kernel.EmgBusStats.SubSpawned + sites[1].Kernel.EmgBusStats.SubSpawned - sub0;
+                st.SpawnLost = sites.Sum(s => s.Kernel.EmgBusStats.SpawnLost); // 整段（预热 + 测量）三地点合计
             }
             finally
             {

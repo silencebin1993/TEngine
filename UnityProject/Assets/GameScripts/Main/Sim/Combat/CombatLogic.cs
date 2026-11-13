@@ -465,7 +465,10 @@ namespace BinGames.Sim.Combat
                 cmd.AtkCd -= dt;
                 if (inRangeA && cmd.AtkCd <= 0f)
                 {
-                    cmd.AtkCd = cmd.AttackCooldown * cdScale;
+                    // EMGR-TRIG-01（DEBT-EMG1TRIG01-04，FG19A 第 2.1.1 节）：光束武器按自己的切段间隔出手（每段伤害已按段长缩放），不按命令带的机器出手间隔——
+                    // 攻击间隔的唯一消费点，所有下达入口（编队 / 远征 / 区域控制器 / 靶场）一并生效，命令期间换了武器也按当前武器
+                    int wi = d.Weapon[i];
+                    cmd.AtkCd = (wi >= 0 && wi < d.Weapons.Length && d.Weapons[wi].BeamHit != 0 ? d.Weapons[wi].Cooldown : cmd.AttackCooldown) * cdScale;
                     CombatFireResult r = FireAt(ref d, i, t);
                     bool destroyed = r == CombatFireResult.Ok && !d.IsAlive(t);
                     Gameplay(ref d, CombatEventKind.AttackOutcome, i, cmd.Target, 0f, 0f, d.Pos[t], (byte)r, (byte)(destroyed ? 1 : 0));

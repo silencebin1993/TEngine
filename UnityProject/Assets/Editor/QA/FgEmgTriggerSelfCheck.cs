@@ -73,6 +73,7 @@ namespace GameLogic.EditorTools
                 GridContent.Reload();
                 EmgCatalog.ResetForTests();
                 Step(CheckData);
+                Step(CheckBeam); // EMGR-TRIG-01：A2 切割束切段
                 Step(CheckTriggers);
                 Step(CheckMainTargetAndTimer);
                 Step(CheckDepth);
@@ -171,6 +172,259 @@ namespace GameLogic.EditorTools
                 }
             }
             return k.AddProgram(new EmgProgram { ListenMask = mask }, nodes, instrs);
+        }
+
+        // ── A2. 切割束切段（EMGR-TRIG-01，DEBT-EMG1TRIG01-04；FG19A:348 / :371，FG19:471）──
+
+        /// <summary>真实规则表的内核（物质、规则、相态；<paramref name="coats"/> = 再登记沾染位与具名反应表，与战斗地点同一套）。</summary>
+        private static CombatKernel RealKernel(bool coats)
+        {
+            CombatConfig c = CombatSite.ConfigFromTuning();
+            c.NavEnabled = 0;
+            var k = new CombatKernel(c, 64);
+            CombatSite.ApplyEmgSubForms(k);
+            CombatSite.ApplyEntityProfiles(k);
+            CombatSite.ApplyMatters(k);
+            CombatSite.ApplyRules(k);
+            CombatSite.ApplyPhaseRules(k);
+            if (coats)
+            {
+                k.SetClarityBits(NamedReactionCatalog.BitOf("Acid"), NamedReactionCatalog.BitOf("Wet"), NamedReactionCatalog.BitOf("Oil"), NamedReactionCatalog.BitOf("Fire"),
+                    NamedReactionCatalog.BitOf("Frozen"), NamedReactionCatalog.BitOf("Shock"));
+                k.SetReactionRules(NamedReactionCatalog.BuildKernelRules());
+                CombatSite.ApplyLegacyResidue(k);
+                k.SetStatusFx(NamedReactionCatalog.BuildStatusFx());
+            }
+            return k;
+        }
+
+        /// <summary>正式路径的切割束：默认蓝图 + 接入口装 <paramref name="fws"/>（接入后的装配）→ 编译预览。</summary>
+        private static BlueprintCircuitPreview BeamPreview(params string[] fws)
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompBeamId, null, null, Array.Empty<string>());
+            board.TrySetUplink(2);
+            return UplinkCompiler.CompileUplinked(board, fws);
+        }
+
+        private static BlueprintCircuitPreview GunPreview()
+        {
+            BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>());
+            return BlueprintCircuitCompiler.CompilePreview(board);
+        }
+
+        /// <summary>预览 → MachineWeaponFrom → 编译程序 → 程序轨读法 → 登记进内核（与战斗地点 WithProgram 同一顺序）。</summary>
+        private static CombatWeapon BeamWeapon(CombatKernel k, BlueprintCircuitPreview p)
+        {
+            CombatWeapon w = CombatSite.MachineWeaponFrom(p);
+            EmgProgramResult program = EmgProgramCompiler.Compile(p);
+            if (!program.IsEmpty)
+            {
+                w.Reading = CombatSite.ProgramReading(p, w.Reading, program);
+                w.Program = CombatSite.RegisterProgram(k, program);
+                CombatSite.ApplySpawnFlight(ref w, program, p.PrimaryId);
+            }
+            return w;
+        }
+
+        private static float PatchTemp(CombatKernel k, byte matter, double2 at, out bool found)
+        {
+            for (int i = 0; i < k.PatchSlots; i++)
+            {
+                if (k.TryGetPatch(i, out CombatZone z) && z.Matter == matter && math.distance(z.Pos, at) < 0.6)
+                {
+                    found = true;
+                    return z.Temp;
+                }
+            }
+            found = false;
+            return 0f;
+        }
+
+        private static bool MatterNear(CombatKernel k, byte matter, double2 at, float within)
+        {
+            for (int i = 0; i < k.PatchSlots; i++)
+            {
+                if (k.TryGetPatch(i, out CombatZone z) && z.Matter == matter && math.distance(z.Pos, at) <= within)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>记热量的靶（1e6 血）：带一把不开火（没有攻击出口）、不散热、过热线极高的武器，命中注入的热原样累在它的积热上（单位层注热的可观察量）。</summary>
+        private static int HeatFoe(CombatKernel k, double2 p) =>
+            Foe(k, p, 1e6f, k.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 0, Range = 0.1f, OverheatAt = 1e6f, RecoverBelow = 0f, Dissipation = 0f }));
+
+        private static int Segs(CombatKernel k, int foe, float hp0, float per) => per > 0f ? (int)Math.Round((hp0 - Hp(k, foe)) / per) : -1;
+
+        /// <summary>切割束编队攻击一名敌人 <paramref name="seconds"/> 秒，敌人站在 10 份油斑块（半径 1.8 米）中央（<paramref name="edge"/> = false，会沾上油）或站在斑块外沿 2.2 米处
+        /// （命中点 0.5 米注能半径仍够到斑块、人不在油里，只靠斑块升温）：返回点燃时刻（油斑块没了或 2.5 米内出现明火；-1 = 没点着）与每 0.5 秒的斑块温度曲线。真实规则表 + 沾染。</summary>
+        private static float OilRun(bool overload, bool edge, float seconds, out string curve, out int hits)
+        {
+            using CombatKernel k = RealKernel(true);
+            BlueprintCircuitPreview p = BeamPreview(overload ? new[] { FirmwareCatalog.FwOverloadId } : Array.Empty<string>());
+            CombatWeapon w = BeamWeapon(k, p);
+            float per = CombatSite.MachineHitDamage(p);
+            int me = Me(k, new double2(0, 0), k.AddWeapon(w), 1000f);
+            var at = new double2(0, 4);
+            k.SpawnPatch(EmgMatterConst.Oil, at, 1.8f, 10f, 120f);
+            double2 fp = edge ? at + new double2(2.2, 0) : at;
+            int foe = Foe(k, fp, 1e6f);
+            k.IssueCommand(me, CombatCommandKind.Attack, fp, foe, 0.5f, w.Range, CombatSite.MachineAttackInterval, false);
+            var sb = new StringBuilder();
+            float ignited = -1f;
+            int n = (int)(seconds * 60f);
+            for (int s = 1; s <= n; s++)
+            {
+                StepN(k, 1);
+                float temp = PatchTemp(k, EmgMatterConst.Oil, at, out bool oil);
+                if (ignited < 0f && (!oil || MatterNear(k, EmgMatterConst.Fire, at, 2.5f)))
+                {
+                    ignited = s / 60f;
+                }
+                if (s % 30 == 2) // 每段出手（第 1、31、61……步）后一步取峰值
+                {
+                    sb.Append(oil ? $"{s / 60f:0.00}s {temp:0}° " : $"{s / 60f:0.00}s 已燃 ");
+                }
+            }
+            hits = Segs(k, foe, 1e6f, per);
+            curve = sb.ToString().TrimEnd();
+            return ignited;
+        }
+
+        /// <summary>
+        /// A2（EMGR-TRIG-01，DEBT-EMG1TRIG01-04；FG19A 第 2.1.1 节“每 0.5 秒一段作为一枚载荷”、FG19A:348 每段 20 热、FG19:471 光束按 emg.trig.beam_interval 切段）：
+        /// ① 武器：冷却 = beam_interval、每段伤害 / 自身积热 × 0.5/1.2（秒伤不变）、一次出手折算伤害不变；补给炮塔一段 = 一发补给（不缩，FG-GAP-230）；敌方光束精英不带光束标记、节拍仍按敌人表。
+        /// ② 编队攻击命令（下令传机器出手间隔 1.2）持续 1 秒 = 2 枚载荷、注热 40；③ 目标中途死亡 / 换目标、接入后手动开火同一间隔；
+        /// ④ 0.5x～3x 只改步数、暂停不出手；⑤ 过载切割束 4 秒内点燃 10 份油；单台（不过载）10 份油的实测升温曲线记录给 FG-GAP-222。
+        /// </summary>
+        private static void CheckBeam()
+        {
+            Line("  · A2. 切割束切段（EMGR-TRIG-01）：每 emg.trig.beam_interval（0.5 秒）一段 = 一枚载荷、每段注热 20；伤害 / 自身积热 × 0.5/1.2；编队攻击同一间隔；过载 4 秒内点燃 10 份油");
+            float share = CombatSite.BeamSegmentShare;
+            float seg = CombatSite.BeamInterval;
+            BlueprintCircuitPreview bare = BeamPreview(), over = BeamPreview(FirmwareCatalog.FwOverloadId);
+            CombatWeapon wb = CombatSite.MachineWeaponFrom(bare), wo = CombatSite.MachineWeaponFrom(over);
+            float baseDmg = CarrierReadings.TryGetComponent(bare.PrimaryId, out GameConfig.fg.CombatComponent comp) && comp.Damage > 0f ? comp.Damage : bare.TotalNormalizedDamage;
+            float rawHeat = over.RawHeatMultiplier > 0f ? over.RawHeatMultiplier : 1f;
+            Expect(Near(seg, 0.5f) && Near(share, 0.5f / CombatSite.MachineAttackInterval) && wb.BeamHit == 1 && Near(wb.Cooldown, seg) && baseDmg > 0f && Near(wb.Damage, baseDmg * share, 1e-3f)
+                   && wo.HeatPerShot > 0f && Near(wo.HeatPerShot, Mathf.Max(0f, over.FirmwareHeatPerShot) * rawHeat * share, 1e-3f)
+                   && Near(CombatSite.MachineIntervalDamage(bare), CombatSite.MachineHitDamage(bare) / share, 1e-3f),
+                $"切割束武器：冷却 {wb.Cooldown:0.##} 秒（= emg.trig.beam_interval {seg:0.##}），每段伤害 {wb.Damage:0.##}（= {baseDmg:0.##} × {share:0.###}），过载每段自身积热 {wo.HeatPerShot:0.##}"
+                   + $"（= {over.FirmwareHeatPerShot * rawHeat:0.##} × {share:0.###}）；一次出手折算伤害 {CombatSite.MachineIntervalDamage(bare):0.##}（远征火力预测用，不因切段变小）");
+            var prof = new GameLogic.Campaign.Defense.TurretProfileDef { Range = 30f, TurnRate = 720f, ProjectileSpeed = 30f, ProjectileRadius = 0.3f };
+            CombatWeapon tb = GameLogic.Campaign.Defense.TurretService.BuildWeapon(bare, prof, 1f, 0, true, false, false);
+            CombatWeapon tg = GameLogic.Campaign.Defense.TurretService.BuildWeapon(GunPreview(), prof, 1f, 0, true, false, false);
+            Expect(Near(tb.Cooldown, seg) && tb.BeamHit == 1 && Near(tb.Damage, wb.Damage, 1e-3f) && Near(tb.AmmoPerShot, 1f) && Near(tg.AmmoPerShot, 1f) && tg.BeamHit == 0,
+                $"切割束炮塔：每段冷却 {tb.Cooldown:0.##} 秒、每段伤害 {tb.Damage:0.##}（与机器同源）、一段 = 一发补给（{tb.AmmoPerShot:0.##}，FGR-DEF-004“每发”；每秒消耗变多交 FG15-BAL-01）；连射器炮塔每发补给 {tg.AmmoPerShot:0.##}、无光束标记");
+            var enemies = new List<string>();
+            bool enemyOk = true;
+            foreach (string id in new[] { "enemy_echo_hunter", "enemy_listener", "enemy_prism" })
+            {
+                if (!EnemyDefs.TryGet(id, out GameConfig.fg.MechEnemy row))
+                {
+                    enemyOk = false;
+                    enemies.Add($"{id} 缺行");
+                    continue;
+                }
+                CombatWeapon ew = EnemySpawnBuilder.WeaponOf(new CampaignState(), row);
+                bool listsBeam = row.Components != null && row.Components.Contains(ComponentCatalog.CompBeamId);
+                bool assembled = EnemyDefs.HasTag(row, EnemyDefs.TagAssembled);
+                enemyOk &= listsBeam == (id != "enemy_prism") && (!listsBeam || !assembled) && ew.BeamHit == 0 && Near(ew.Cooldown, row.WeaponCooldown);
+                enemies.Add($"{id} 组件列有切割束 {listsBeam}、组装标签 {assembled}、光束标记 {ew.BeamHit}、冷却 {ew.Cooldown:0.##}");
+            }
+            Expect(enemyOk, "核对敌方带 comp_beam 的两种寂听精英：都没有组装标签，武器是敌人表的即时命中（冷却 = 表值、每发有瞄准线预警），不走组件读法与切段——将来给它们加组装标签时这条会失败，提醒按切割束规则复核——"
+                   + string.Join("；", enemies));
+
+            // ② 持续 1 秒 = 2 枚载荷、40 热（目标积热：靶带一把不开火、不散热、过热线极高的武器，命中注热原样记在它的积热上；没有斑块，伤害只来自切割束）
+            using (CombatKernel k = RealKernel(false))
+            {
+                CombatWeapon w = BeamWeapon(k, bare);
+                float per = CombatSite.MachineHitDamage(bare);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(w), 1000f);
+                int foe = HeatFoe(k, new double2(0, 4));
+                k.IssueCommand(me, CombatCommandKind.Attack, new double2(0, 4), foe, 0.5f, w.Range, CombatSite.MachineAttackInterval, false);
+                StepN(k, 60);
+                int hits = Segs(k, foe, 1e6f, per);
+                float keep = 1f - k.EffectiveResist(foe, 1);
+                float heat = (k.TryGetUnit(foe, out CombatUnitView hv) ? hv.Heat : -1f) / Mathf.Max(1e-3f, keep);
+                Expect(hits == 2 && Near(heat, 40f, 0.01f) && w.Program >= 0,
+                    $"编队攻击命令（下令带机器出手间隔 {CombatSite.MachineAttackInterval:0.#} 秒）持续 1 秒：命中 {hits} 段（2；修前 1）、注热 {heat:0.#}（40 = 2 × 20，目标热抗折减前；修前 0：主组件的 en.heat 注入没有执行点，本卡编成内置指令）；每段伤害 {per:0.##}");
+            }
+
+            // ③ 目标中途死亡 → 换目标
+            using (CombatKernel k = RealKernel(false))
+            {
+                CombatWeapon w = BeamWeapon(k, bare);
+                float per = CombatSite.MachineHitDamage(bare);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(w), 1000f);
+                int a = Foe(k, new double2(0, 4), per * 1.5f);
+                int b = Foe(k, new double2(3, 3), 1e6f);
+                k.IssueCommand(me, CombatCommandKind.Attack, new double2(0, 4), a, 0.5f, w.Range, CombatSite.MachineAttackInterval, false);
+                int died = -1;
+                for (int s = 1; s <= 120 && died < 0; s++)
+                {
+                    StepN(k, 1);
+                    died = Hp(k, a) <= 0f ? s : -1;
+                }
+                bool cmdEnded = !k.TryGetCommand(me, out CombatCommand cc) || cc.Kind != CombatCommandKind.Attack || cc.Target != a;
+                k.IssueCommand(me, CombatCommandKind.Attack, new double2(3, 3), b, 0.5f, w.Range, CombatSite.MachineAttackInterval, false);
+                StepN(k, 60);
+                int onB = Segs(k, b, 1e6f, per);
+                Expect(died > 25 && died <= 40 && cmdEnded && onB == 2,
+                    $"目标中途死亡：第 2 段（第 {died} 步，≈ 0.5 秒）击毁 A、攻击命令结束（{cmdEnded}）；改打 B 后 1 秒内命中 {onB} 段（2），不再打 A");
+            }
+
+            // ③' 接入后手动开火（直控点击入口 FireAt：不蓄力的武器每次点击出手一次，Demo 口径不按冷却限速）：每次点击 = 一段（每段伤害、一枚载荷、注热 20）
+            using (CombatKernel k = RealKernel(false))
+            {
+                BlueprintCircuitPreview up = BeamPreview();
+                CombatWeapon w = BeamWeapon(k, up);
+                float per = CombatSite.MachineHitDamage(up);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(w), 1000f);
+                int b = HeatFoe(k, new double2(0, 4));
+                int ok = 0;
+                for (int i = 0; i < 3; i++)
+                {
+                    ok += k.FireAt(me, b, k.Time) == CombatFireResult.Ok ? 1 : 0;
+                    StepN(k, 20);
+                }
+                float heat = (k.TryGetUnit(b, out CombatUnitView hv) ? hv.Heat : -1f) / Mathf.Max(1e-3f, 1f - k.EffectiveResist(b, 1));
+                Expect(ok == 3 && Segs(k, b, 1e6f, per) == 3 && Near(heat, 60f, 0.01f),
+                    $"接入后的切割束手动开火 3 次：出手 {ok} 次、命中 {Segs(k, b, 1e6f, per)} 段（每次点击一段，伤害 = 每段 {per:0.##}）、注热 {heat:0.#}（60 = 3 × 20）");
+            }
+
+            // ④ 暂停与 0.5x～3x：倍速只改固定步数（同一游戏时间同一段数），暂停不调 Step、不出手
+            var speeds = new List<string>();
+            bool speedOk = true;
+            foreach (float speed in new[] { 0f, 0.5f, 1f, 2f, 3f })
+            {
+                using CombatKernel k = RealKernel(false);
+                CombatWeapon w = BeamWeapon(k, bare);
+                float per = CombatSite.MachineHitDamage(bare);
+                int me = Me(k, new double2(0, 0), k.AddWeapon(w), 1000f);
+                int foe = Foe(k, new double2(0, 4), 1e6f);
+                k.IssueCommand(me, CombatCommandKind.Attack, new double2(0, 4), foe, 0.5f, w.Range, CombatSite.MachineAttackInterval, false);
+                StepN(k, 1); // 下令后第一步出第 1 段（暂停中下令则在恢复后的第一步）
+                int steps = (int)Math.Round(65 * speed); // 真实 1.08 秒 × 倍速 的固定步
+                StepN(k, steps);
+                int hits = Segs(k, foe, 1e6f, per);
+                int want = steps / 30 + 1;
+                speedOk &= hits == want;
+                speeds.Add($"{speed}x:{hits}/{want}");
+            }
+            Expect(speedOk, $"真实 1.08 秒内的段数（实际/期望，游戏时间 ÷ 0.5 + 1；暂停只有恢复后第一段）：{string.Join(" ", speeds)}");
+
+            // ⑤ 点油：过载切割束 4 秒内点燃 10 份油（真实规则表 + 沾染）；单台不过载的实测升温曲线（含 40 度 / 秒散热）
+            float igOverEdge = OilRun(true, true, 4f, out string cOverEdge, out int hOver);
+            float igOver = OilRun(true, false, 4f, out string cOver, out _);
+            float igBare = OilRun(false, false, 6f, out string cBare, out _);
+            float igBareEdge = OilRun(false, true, 6f, out string cBareEdge, out int hBare);
+            Expect(igOverEdge > 0f && igOverEdge <= 4f && hOver > 0 && igOver > 0f && igOver <= 4f,
+                $"过载切割束点燃 10 份油（≤ 4 秒）：敌人站在油斑块外沿、只靠斑块升温第 {igOverEdge:0.00} 秒整片爆燃（命中 {hOver} 段；曲线 {cOverEdge}）；敌人站在油里第 {igOver:0.00} 秒（曲线 {cOver}）");
+            Line($"    · 实测（FG-GAP-222，只记录不判）：单台不过载、敌人站在油里（沾油，每段 20 热够 C01 单次门槛）{(igBare > 0f ? $"第 {igBare:0.00} 秒点燃" : "6 秒内没点着")}：{cBare}");
+            Line($"    · 实测（FG-GAP-222，只记录不判）：单台不过载、敌人站在油斑块外沿（只靠斑块升温，含 40 度 / 秒散热）{(igBareEdge > 0f ? $"第 {igBareEdge:0.00} 秒点燃" : "6 秒内没点着")}（命中 {hBare} 段）：{cBareEdge}");
         }
 
         /// <summary>EMG4-CLEAN-01（FG-GAP-214）：第一层的 [锁定缓存]（命中时标记 4 秒）/ [扩散]（出手时标记 2 秒）命中后目标被标记、发 evt.marked；没装的对照不标记。</summary>
