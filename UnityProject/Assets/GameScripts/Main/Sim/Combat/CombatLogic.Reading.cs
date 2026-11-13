@@ -34,6 +34,14 @@ namespace BinGames.Sim.Combat
         private static float ZoneStatusSecondsOf(ref CombatData d) => d.Config.ZoneStatusSeconds > 0f ? d.Config.ZoneStatusSeconds : DefaultZoneStatusSeconds;
         private static float WeaveMarginOf(ref CombatData d) => d.Config.WeaveMargin > 0f ? d.Config.WeaveMargin : DefaultWeaveMargin;
 
+        /// <summary>
+        /// 本步（时刻 <paramref name="now"/>、步长 <paramref name="dt"/>）是否跨过一个 <paramref name="period"/> 秒的节拍边界（按游戏时刻对齐，不存状态；暂停 dt = 0 不跨）。
+        /// FG-GAP-160：now 是精确的 Ticks / StepHz，dt 却是 float(1 / StepHz)、略大于精确步长；不加余量时整拍后一步的 now − dt 落回上一拍，同一拍结算两次。
+        /// 所有跨拍判定一律走这里（余量与 FG10-FAC-01 酸沼同为 1e-6 秒）。
+        /// </summary>
+        public static bool CrossedTick(double now, float dt, double period) =>
+            math.floor((now + 1e-6) / period) != math.floor((now - dt + 1e-6) / period);
+
         // ─────────────────────────────── 投送 ───────────────────────────────
 
         /// <summary>即时命中武器的一次投送（编队攻击 / 直控点击的 <see cref="FireAt"/> 与驻守开火的 <see cref="UnitAttack"/> 共用）。
@@ -1003,7 +1011,7 @@ namespace BinGames.Sim.Combat
         {
             double now = d.Scalars[0].Time;
             float statusTick = StatusTickOf(ref d);
-            bool tick = math.floor(now / statusTick) != math.floor((now - dt) / statusTick);
+            bool tick = CrossedTick(now, dt, statusTick);
             int n = d.Count;
             // 状态位效果表配置了（正式地点）才逐位到期：没配置的旧地点 / 测试内核不知道哪份效果属于哪一位，沿用整组到期。
             bool perBit = DotMaskOf(ref d) != 0u || AnyFx(ref d);

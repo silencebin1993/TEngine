@@ -159,13 +159,13 @@ namespace GameLogic.EditorTools.JourneyBots
                 FgjM1Journey.TickReturnedHome, retries: 1),
             S("away_open", "按离家报告键（默认 Alt+H）打开离家报告：“突袭”一段有两波的时间线（预警 / 到达 / 展开 / 结束）与两次选择（跳回家园 / 留在远征队）", 30, null, TickAwayReport, retries: 1),
             S("away_close", "点“关闭”关闭离家报告", 10, c => FgjM1Journey.ClickUi(c, D.AwayHost, "AwayReportClose"), TickAwayClosed, retries: 1),
-            // ── 废料不够重建：拆掉一座用不着的实验室换废料（研究都做完了；拆除全额返还投入）──
+            // ── 废料不够重建：拆掉一座用不着的建筑换废料（实验室：研究都做完了；两座都拆了就拆精炼塔已被烧毁、暂时没用的废液池；拆除全额返还投入）──
             S("scr_open", "废料不够重建时：按建造键打开建造模式（够就跳过）", 10, c => { if (NeedScrap(c)) { FgjM3Common.PressBuild(true); } },
-                c => !NeedScrap(c) ? StepOutcome.Done($"废料 {St.Scrap} 够重建（等料的要 {c.GetInt("scrNeed")}），不用拆") : FgjM3Common.TickBuild(c, true), retries: 1),
+                c => !NeedScrap(c) ? ScrapSkip(c) : FgjM3Common.TickBuild(c, true), retries: 1),
             S("scr_demo", "按拆除模式键（默认 X）", 10, c => { if (c.GetInt("scrDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, true); } },
                 c => c.GetInt("scrDemo") == 0 ? StepOutcome.Done("跳过") : c.StepElapsed < 0.4 ? StepOutcome.Wait : FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("进入拆除模式") : StepOutcome.Retry("没进拆除模式"), retries: 1),
-            S("scr_ask", "左键点一座用不着的仿真实验室（第二座还在就点第二座，补火墙时拆掉了就点第一座）：标记拆除（有后果时先弹确认框写明）", 20, null, c => TickLabDemolishAsk(c), retries: 2),
-            S("scr_ok", "弹了确认框就点“确认”：实验室标记拆除，机器上门拆、全额返还废料", 10, c => { if (c.GetInt("scrDemo") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c), retries: 1),
+            S("scr_ask", "左键点一座用不着的建筑（第二座实验室还在就点它，拆掉了点第一座；两座都拆了且精炼塔已毁就点废液池）：标记拆除（有后果时先弹确认框写明）", 20, null, c => TickLabDemolishAsk(c), retries: 2),
+            S("scr_ok", "弹了确认框就点“确认”：标记拆除，机器上门拆、全额返还废料", 10, c => { if (c.GetInt("scrDemo") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c), retries: 1),
             S("scr_demo_off", "再按拆除模式键退出、按建造键关闭建造模式", 10, c => { if (c.GetInt("scrDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, false); } },
                 c => c.GetInt("scrDemo") == 0 || !FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("退出拆除模式") : c.StepElapsed < 0.4 ? StepOutcome.Wait : StepOutcome.Retry("没退出"), retries: 1),
             S("scr_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
@@ -1220,17 +1220,39 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                 }
             }
-            bool demo = need > 0 && s.Scrap < need && P.Bld(c, ScrapLabKey(c)) != null;
+            bool demo = need > 0 && s.Scrap < need && ScrapBld(c, ScrapLabKey(c)) != null;
             c.SetInt("scrNeed", need);
             c.SetInt("scrDecided", 1);
             c.SetInt("scrDemo", demo ? 1 : 0);
             return demo;
         }
 
-        /// <summary>拆来换废料的实验室：第二座还在就拆第二座；补火墙时已经拆掉了就拆第一座（M6 的研究都做完了）。</summary>
-        private static string ScrapLabKey(JourneyContext c) => P.Bld(c, "lab2") != null ? "lab2" : "lab1";
+        /// <summary>拆来换废料的实验室：第二座还在就拆第二座；补火墙时已经拆掉了就拆第一座（M6 的研究都做完了）。
+        /// EMGR-E2E-00：两座实验室在出发远征前已拆掉（补第二道火墙、免得被余火烧坏）时，退到废液池——它只接精炼塔的酸液，精炼塔被余火烧毁（要 80 废料重建）后暂时用不着；
+        /// 拆掉全额返还 30 废料，够自动重建先把最便宜的那几座（屏障 6）派单。上一版没有退路时直接跳过、还写“废料 0 够重建”，rebuilt 只能靠核心应急每分钟 1 份废料碰运气（r4 超时）。</summary>
+        private static string ScrapLabKey(JourneyContext c) => P.Bld(c, "lab2") != null ? "lab2" : P.Bld(c, "lab1") != null ? "lab1" : "pond";
 
-        private static string ScrapLabName(string key) => key == "lab2" ? "第二座仿真实验室" : "第一座仿真实验室";
+        private static BuildingRecord ScrapBld(JourneyContext c, string key) => key == "pond" ? IdlePond(St) : P.Bld(c, key);
+
+        /// <summary>用不着的废液池：建成在用、而它服务的精炼塔已被摧毁（虚影等重建）。没有就 null（不拆在用的产线）。</summary>
+        private static BuildingRecord IdlePond(CampaignState s)
+        {
+            BuildingRecord[] all = (s?.BuildingRecords ?? Array.Empty<BuildingRecord>()).Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId).ToArray();
+            bool towerDown = all.Any(b => b.BuildingTypeId == "refinery_tower" && b.ConstructionState == BuildingConstructionState.Damaged)
+                             && !all.Any(b => b.BuildingTypeId == "refinery_tower" && b.ConstructionState == BuildingConstructionState.Operational);
+            return towerDown ? all.FirstOrDefault(b => b.BuildingTypeId == "waste_pond" && b.ConstructionState == BuildingConstructionState.Operational && !HomeValleyController.IsPlannedGhost(b)) : null;
+        }
+
+        private static string ScrapLabName(string key) => key == "lab2" ? "第二座仿真实验室" : key == "lab1" ? "第一座仿真实验室" : "废液池（精炼塔已被烧毁，暂时用不着）";
+
+        /// <summary>scr_open 不用拆的两种情况分开写：废料真够；或者不够但没有用不着的建筑可拆（如实写明，rebuilt 照常按新口径判）。</summary>
+        private static StepOutcome ScrapSkip(JourneyContext c)
+        {
+            int need = c.GetInt("scrNeed");
+            return St.Scrap >= need || need == 0
+                ? StepOutcome.Done($"废料 {St.Scrap} 够重建（等料的要 {need}），不用拆")
+                : StepOutcome.Done($"废料 {St.Scrap} 不够重建（等料的要 {need}），但没有用不着的建筑可拆（实验室都已拆掉、精炼塔还在用废液池），不拆");
+        }
 
         private static StepOutcome TickLabDemolishAsk(JourneyContext c, string flag = "scrDemo")
         {
@@ -1244,7 +1266,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 key = ScrapLabKey(c);
                 c.Set(flag + ".lab", key);
             }
-            BuildingRecord lab = P.Bld(c, key);
+            BuildingRecord lab = ScrapBld(c, key);
             if (lab == null)
             {
                 return StepOutcome.Fail($"{ScrapLabName(key)}不见了");
@@ -1404,7 +1426,28 @@ namespace GameLogic.EditorTools.JourneyBots
             IEnumerable<RuleLogRecord> tail = (d?.Log ?? Array.Empty<RuleLogRecord>()).Where(e => e != null && e.Rule == rule).Reverse().Take(3);
             parts.Add($"R{rule} 日志尾 [{string.Join(" | ", tail.Select(e => $"第 {e.Tick} 步 {e.Key}({string.Join(",", e.Args ?? Array.Empty<string>())})"))}]");
             parts.Add($"待处理事件 {d?.Pending?.Length ?? 0}（{string.Join(",", (d?.Pending ?? Array.Empty<RuleEventRecord>()).Select(p => p.Kind + ":" + p.EntityId))}）");
+            parts.Add($"R{rule} 日志统计 [{string.Join("；", (d?.Log ?? Array.Empty<RuleLogRecord>()).Where(e => e != null && e.Rule == rule).GroupBy(e => e.Key).Select(g => $"{g.Key}×{g.Count()}（{string.Join(",", g.Select(e => $"{e.EntityId}@{e.Tick}").Take(12))}）"))}]");
+            parts.Add(EconDiag(s));
             return string.Join("；", parts);
+        }
+
+        /// <summary>EMGR-E2E-00：废料来源诊断——回收站（建成 / 电 / 状态 / 输入输出 / 脚下废墟余量）、敌方残骸库存与累计、核心应急产废料、未完成施工单按目标分组。</summary>
+        private static string EconDiag(CampaignState s)
+        {
+            var rec = new List<string>();
+            foreach (ProductionService.Producer p in ProductionService.All)
+            {
+                if (p?.Def == null || p.Def.Mode != ProducerMode.Recycler)
+                {
+                    continue;
+                }
+                int ruin = p.RuinCells.Sum(x => ProductionService.RuinRemaining(s, x));
+                rec.Add($"{p.Building.BuildingId} {p.Building.ConstructionState}/{p.Building.PowerState} {p.State} 运行 {p.Rec.Running} 入 {ProductionService.Total(p.Rec.In)} 出 {ProductionService.Total(p.Rec.Out)} 废墟余 {ruin}/{p.RuinCells.Count} 格");
+            }
+            IEnumerable<string> builds = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Where(o => o != null && o.Kind == WorkOrderKind.Build && HomeValleyWorkOrders.IsActive(o))
+                .GroupBy(o => (o.TargetId ?? string.Empty).Split(':')[0]).Select(g => $"{g.Key}×{g.Count()}");
+            return $"回收站 [{string.Join("；", rec)}]；仓库敌方残骸 {HomeInventory.Stock(s, AnalysisCatalog.WreckId)}、累计残骸 {RaidResultService.StateOf(s)?.TotalWrecks}；"
+                   + $"核心应急产废料 {SoftlockService.CoreScrapStatus(s) ?? "未进行"}（累计 {SoftlockService.StateOf(s)?.CoreScrapProduced}）；施工单目标 [{string.Join("；", builds)}]";
         }
     }
 }

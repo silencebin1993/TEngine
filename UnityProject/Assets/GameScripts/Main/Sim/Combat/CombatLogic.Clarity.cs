@@ -537,7 +537,7 @@ namespace BinGames.Sim.Combat
             }
             d.Clarity[i] = c;
             float tick = ZoneTickOf(ref d);
-            if (math.floor(now / tick) == math.floor((now - dt) / tick))
+            if (!CrossedTick(now, dt, tick))
             {
                 return;
             }
@@ -906,7 +906,7 @@ namespace BinGames.Sim.Combat
         private static void StepPuddleContact(ref CombatData d, float dt, double now)
         {
             float tick = ZoneTickOf(ref d);
-            if (math.floor(now / tick) == math.floor((now - dt) / tick))
+            if (!CrossedTick(now, dt, tick))
             {
                 return;
             }
@@ -964,8 +964,8 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static void StepAcidMarsh(ref CombatData d, float dt, double now)
         {
-            // 每游戏秒一次：dt 是 float(1/StepHz)，略大于精确值；不加余量时整秒后一步的 now − dt 落回上一秒，会再结算一次（实测每秒 2 次，FG10-FAC-01 本机验证）。
-            if (d.AcidShapes.Length == 0 || !(d.AcidPct > 0f) || math.floor(now + 1e-6) == math.floor(now - dt + 1e-6))
+            // 每游戏秒一次（跨拍判定带余量，见 CrossedTick；FG10-FAC-01 实测不带余量每秒 2 次）。
+            if (d.AcidShapes.Length == 0 || !(d.AcidPct > 0f) || !CrossedTick(now, dt, 1.0))
             {
                 return;
             }

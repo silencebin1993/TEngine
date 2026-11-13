@@ -26,7 +26,8 @@ namespace GameLogic.EditorTools
     /// E 熔穿（漏熔融金属、正面装甲失效）；F 破甲（碎屑、质量 × 0.6、装甲失效、阈值退出）；G 磁化（弹体被吸偏 / 对照直飞）；H 燃烧（4 × L 持续伤害、与燃烧标签不叠两份、进水熄灭）；
     /// I 抗性（档案寒抗 0.5 只吃一半、覆盖寒抗 1 冻不住、清掉回档案值、防腐涂层作机器腐蚀抗性下限、电抗日覆盖）；J 上限；K 标签换算（冻结标签 → 寒量 0.3、不再挂易伤位）；
     /// L evt.phase 生产者与对照（无监听不入队）；M 存读档（冻结途中读档续跑哈希一致、读 15 版快照把云端受寒 / 冻结 / 免疫位映射成寒量 / 冻结 / 抗性覆盖）；
-    /// N 暂停与 0.5x～3x（按游戏秒）；O 头顶图标（相态在前、累积进度点、合计 ≤ 4）与悬停（抗性满写原因）；P 注入类固件撤过渡字段与旧标签（DEBT-EMG1FW01-03）；Q 400 单位相态步进耗时（只测一次）。
+    /// N 暂停与 0.5x～3x（按游戏秒）；O 头顶图标（相态在前、累积进度点、合计 ≤ 4）与悬停（抗性满写原因）；P 注入类固件撤过渡字段与旧标签（DEBT-EMG1FW01-03）；Q 400 单位相态步进耗时（只测一次）；
+    /// R 真实时钟节拍（FG-GAP-160：判拍函数 20 秒 80 / 40 / 10 拍、状态持续伤害 3 秒 6 拍、熔穿 10 秒漏 5 次，与累加时钟一致）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgEmgPhaseSelfCheck）；单段：bash tools/unity-validate.sh GameLogic.EditorTools.FgEmgPhaseSelfCheck.RunFromMenu。
     /// </summary>
     public static class FgEmgPhaseSelfCheck
@@ -83,6 +84,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPhaseEvent);
                 Step(CheckSaveLoad);
                 Step(CheckSpeed);
+                Step(CheckRealClockTicks);
                 Step(CheckIconsAndHover);
                 Step(CheckInjectLegacy);
                 Step(CheckPerf);
@@ -693,6 +695,80 @@ namespace GameLogic.EditorTools
             {
                 p.Dispose();
             }
+        }
+
+        // ── R 真实时钟节拍（FG-GAP-160）──────────────────────────────────────
+
+        /// <summary>
+        /// 区域控制器按 Step(GameClock.StepSeconds, GameClock.GameSeconds) 推进：时刻是精确的 s / StepHz，步长是 float。其余段的累加时钟（Time + dt）测不出整拍双结算，这里按真实时钟驱动。
+        /// </summary>
+        private static void CheckRealClockTicks()
+        {
+            int hz = GameClock.StepHz;
+            float dt = GameClock.StepSeconds;
+            double At(int s) => s / (double)hz;
+            int Count(double period, bool legacy)
+            {
+                int c = 0;
+                for (int s = 1; s <= 20 * hz; s++)
+                {
+                    double now = At(s);
+                    c += (legacy ? math.floor(now / period) != math.floor((now - dt) / period) : CombatLogic.CrossedTick(now, dt, period)) ? 1 : 0;
+                }
+                return c;
+            }
+            int q = Count(0.25, false), h = Count(0.5, false), two = Count(2.0, false);
+            Expect(q == 80 && h == 40 && two == 10,
+                $"判拍函数按真实时钟 20 游戏秒：0.25 / 0.5 / 2 秒节拍 {q} / {h} / {two} 拍（应 80 / 40 / 10；不带余量的旧写法 {Count(0.25, true)} / {Count(0.5, true)} / {Count(2.0, true)}）");
+
+            const uint dotBit = 1u << 20; // 未配置效果表的位：只走 ApplyStatus 给的每秒伤害
+            float Dot(bool real)
+            {
+                CombatConfig c = CombatSite.ConfigFromTuning();
+                c.NavEnabled = 0;
+                var k = new CombatKernel(c, 8);
+                try
+                {
+                    int foe = Foe(k, new double2(0, 0), 400f, -1, null);
+                    k.ApplyStatus(foe, dotBit, 10f, 4f, 0f, 0f, 0);
+                    float h0 = Hp(k, foe);
+                    for (int s = 1; s <= 3 * hz; s++)
+                    {
+                        k.Step(dt, real ? At(s) : k.Time + dt);
+                    }
+                    return h0 - Hp(k, foe);
+                }
+                finally
+                {
+                    k.Dispose();
+                }
+            }
+            float dotReal = Dot(true), dotAcc = Dot(false);
+            Expect(math.abs(dotReal - 12f) < 1e-3f && math.abs(dotAcc - dotReal) < 1e-3f,
+                $"状态持续伤害 4 / 秒、0.5 秒节拍，真实时钟 3 游戏秒掉血 {dotReal:0.##}（应 6 拍 × 2 = 12；累加时钟 {dotAcc:0.##}）");
+
+            EmgPhaseRule r = EmgPhaseCatalog.Current.Rules[Heat];
+            float Melt(bool real)
+            {
+                CombatKernel k = NewKernel();
+                try
+                {
+                    int foe = Foe(k, new double2(0, 0));
+                    k.InjectUnitHeat(foe, 400f);
+                    for (int s = 1; s <= 10 * hz + 10; s++)
+                    {
+                        k.Step(dt, real ? At(s) : k.Time + dt);
+                    }
+                    return k.InPhase(foe, Heat) ? Molten(k) : -1f;
+                }
+                finally
+                {
+                    k.Dispose();
+                }
+            }
+            float meltReal = Melt(true), meltAcc = Melt(false), want = r.P1 + math.floor(10f / r.P3) * r.P2;
+            Expect(math.abs(meltReal - want) < 1e-3f && math.abs(meltAcc - meltReal) < 1e-3f,
+                $"熔穿维持 10 游戏秒（真实时钟）：身下熔融金属 {meltReal:0.##} 份（应 进入 {r.P1:0.#} + 每 {r.P3:0.#} 秒 {r.P2:0.#} 份 × {math.floor(10f / r.P3):0} 次 = {want:0.##}；累加时钟 {meltAcc:0.##}）");
         }
 
         // ── O 图标与悬停 ─────────────────────────────────────────────────────

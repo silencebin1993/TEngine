@@ -12,15 +12,18 @@ using GameLogic.Campaign.Economy;
 using GameLogic.Campaign.Emergence;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Nav;
+using GameLogic.Campaign.Primitive;
 using GameLogic.Campaign.Regions;
 using GameLogic.Campaign.Signal;
 using GameLogic.Core;
 using GameLogic.Localization;
+using GameLogic.Notifications;
 using GameLogic.Progression;
 using GameLogic.Stage;
 using GameLogic.View;
 using GameLogic.Campaign.WorldSim;
 using GameLogic.UI.Kit;
+using GameLogic.UI.SignalCore;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -37,7 +40,10 @@ namespace GameLogic.EditorTools.JourneyBots
     /// 轻量口径（用户 2026-10-12）：每个新系统被真实输入触发一次并断言结果。夹具写在步骤标题里：<see cref="ApplyFixture"/>（正式固件记为已获得，先断言在正常游戏里有来源）、
     /// <see cref="ApplySquadFixture"/>（蓝图与机器直接出厂 + 一台正式敌人表的杂兵（EnemySpawnBuilder 真实生成，不动的装甲机）+ 不还手的敌方靶子）、
     /// <see cref="ApplyPitFixture"/>（可熔地面上放一摊熔融金属，熔穿排放由 FGJ-EMG-2 覆盖；凝固成坑走内核 V06）、<see cref="ApplyLootFixture"/>（精英数据包，候选固定为
-    /// 一件已掌握的作战组件 + 两条固件，精英掉落由 FGJ-M8 覆盖；分拣走正式面板）。反向（永久改变堵路警告、槽位封锁后重排恢复）按轻量口径 b 由单段自检覆盖（B 段）。
+    /// 一件已掌握的作战组件 + 两条固件，精英掉落由 FGJ-M8 覆盖；分拣走正式面板）。
+    /// 反向（FG19 第 16 节，出口核对补缺口 2026-11-12，取代 ADR-EMG-007 决定 2 的轻量口径 b）：<see cref="ApplyWallFixture"/>（熔坑格背后登记一座仓库、固化胶块围一圈只留熔坑格做缺口）
+    /// → 熔坑补上缺口出堵路警告、点通知弹出条镜头飞到熔坑、填平后解除；<see cref="ApplySlotFixture"/>（信号核两槽装固件）→ 余烬主机封锁 1 号槽（正式来源随 FG11-BOSS-01，调它将来调用的同一入口）
+    /// → 通知 / HUD / 信号核面板写原因、接入程序按空槽重排 → 按来源解除后恢复同签名。
     /// 用法：bash tools/unity-journey.sh FGJ-EMG-4；断点 emg_fix / squad_fix / hj_end / pit_fill / loot_fix（--from 续跑）。
     /// </summary>
     public static class FgjEmg4Journey
@@ -83,28 +89,38 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("hj_fight", "被劫持的装甲机用自己原生的武器（武器不变、不改刷劫持者程序）打射程内的敌方靶子：靶子掉血", 60, null, TickNativeFight),
                 S("hj_end", "等期满（30 游戏秒，3 倍速）：装甲机自毁，劫持结束、击毁只结算一次（敌人记录阵亡、留残骸）", 60, null, TickExpire),
 
-                // ── 2. 熔坑：出现 → 工作单填平 ──
-                S("pit_fix", "地形夹具：离核心不远的可熔地面（废墟里的铁板、混凝土楼板）上放一摊熔融金属（35 份；熔穿排放由 FGJ-EMG-2 覆盖）→ 凝固累计 ≥ 30 份，内核 V06 烧出熔坑：这一格不可通行、不能建造（原因写熔坑）", 60, ApplyPitFixture, TickPit),
+                // ── 2. 熔坑：出现 → 堵路警告（反向）→ 工作单填平 → 警告解除 ──
+                S("wall_fix", "堵路夹具：离核心不远、背后开阔的可熔地面，往背离核心 5 格处登记一座仓库（建造由 FGJ-M3 覆盖），以它为心、半径 5 用固化胶块（固态阻路斑块）围一圈，只在这格可熔地面留缺口：缺口开着时不报堵路", 30, ApplyWallFixture, TickWallOpen),
+                S("pit_fix", "地形夹具：缺口那格可熔地面（废墟里的铁板、混凝土楼板）上放一摊熔融金属（35 份；熔穿排放由 FGJ-EMG-2 覆盖）→ 凝固累计 ≥ 30 份，内核 V06 烧出熔坑：这一格不可通行、不能建造（原因写熔坑）", 60, ApplyPitFixture, TickPit),
+                S("block_warn", "反向（FG19 第 16 节“永久改变堵路警告”）：熔坑补上缺口 → 警告级通知“熔坑堵死了归还核心到仓库的唯一通路……位置 (x, y)”、告警栏一行可定位；点这条通知弹出条，镜头飞到熔坑", 45, null, TickBlockWarn, retries: 1),
                 S("build_open", "按建造键（默认 B）打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
                 S("clear_tool", "点建造栏“清除场地物”工具", 10, c => FgjM1Journey.ClickUi(c, FgjM3Common.BuildHost, "BuildClearSite"), TickClearTool, retries: 2),
                 S("clear_click", "左键点熔坑那一格：开“填平熔坑”工作单（复用清除工作单，预留废料，工单目标写“熔坑”）", 20, null, TickClearClick, retries: 2),
                 S("build_close", "再按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 S("pit_fill", "等空闲工程机领单到现场填平（3 倍速）：熔坑消失、这一格又能走、又能建造", 240, null, TickPitFilled),
+                S("block_clear", "填平后下一次堵路检查：缺口重新打通，堵路警告与告警栏那一行解除", 40, null, TickBlockClear),
 
                 // ── 3. 三选一：新交互提示 → 重复作战组件只多一件库存 ──
                 S("loot_fix", "掉落夹具：仓库修好（新局仓库受损、容量 0，修建筑由 FGJ-M1 覆盖）；家园里一个精英数据包（候选 = 一件已掌握的作战组件 + 两条固件；精英掉落由 FGJ-M8 覆盖）", 15, ApplyLootFixture, TickLootFixture),
                 S("pick_open", "点顶栏“待分拣”打开数据包面板：固件 / 部件卡片写“与你现有的固件 / 部件可产生 N 种新交互（已发现 M 种）”，重复作战组件卡片写“重复获得只加库存”", 25, null, TickPickOpen),
                 S("pick_dup", "点重复作战组件那张卡片的“选这个”：作战组件库存 +1（多一台车能装），不进解析台、不改数值", 20, null, TickPickDup),
                 S("pick_close", "Esc 关闭待分拣面板", 10, c => JourneyInput.PressAction(GameActionId.Cancel), TickPickClosed, retries: 1),
+
+                // ── 4. 反向（FG19 第 16 节“槽位封锁后程序重排并恢复”）──
+                S("sb_fix", "封锁夹具：信号核 1 号槽装 [分裂]（触发器）、2 号槽装 [寻的]（芯片入库与装槽由 FGJ-EMG-1 覆盖）：接入程序根 = 分裂、子弹药一代 = 寻的", 15, ApplySlotFixture, TickSlotFixture),
+                S("sb_block", "余烬主机封锁 1 号槽（正式来源是 FG11-BOSS-01 的首领技能；这里调它将来调用的同一入口 SignalSeizeService.BlockSlot）：警告级通知“第 1 槽被余烬主机封锁……按空槽重编译，冷却不重置”，HUD 状态行写被封锁的槽", 15, ApplySlotBlock, TickSlotBlocked),
+                S("sb_open", "按信号核键（默认 P）打开信号核面板：1 号槽写“被余烬主机封锁……它是触发器……下游指令回到上一层节点”；接入程序按空槽重排（根 = 寻的，没有子弹药节点）", 10, c => FgjM1Journey.PressIf(GameActionId.OpenSignalCore, !SignalCoreHudUIToolkit.IsOpen), TickSlotPanel, retries: 1),
+                S("sb_lift", "首领被击毁，按来源解除（SignalSeizeService.UnblockAll(余烬主机)）：通知“第 1 槽已恢复”，面板 1 号槽回到 [分裂]、HUD 不再写封锁，接入程序与封锁前同签名", 15, ApplySlotLift, TickSlotLifted),
+                S("sb_close", "再按信号核键关闭面板", 10, c => FgjM1Journey.PressIf(GameActionId.OpenSignalCore, SignalCoreHudUIToolkit.IsOpen), FgjM1Journey.TickCoreClosed, retries: 1),
             };
             return new JourneyDef
             {
                 Id = Id,
-                Title = "FG-EMG 阶段 4 出口：[重启注入] 劫持一台敌机 → 它带原生程序作战、期满自毁 → 熔坑出现并由工作单填平 → 三选一显示“可产生 N 种新交互” → 重复拿到同一作战组件只多一件库存（冻结桥随水面 FG18-SEA-01；模糊测试器常驻由 RunAll 覆盖）",
+                Title = "FG-EMG 阶段 4 出口：[重启注入] 劫持一台敌机 → 它带原生程序作战、期满自毁 → 熔坑出现、堵路警告（反向）、由工作单填平后解除 → 三选一显示“可产生 N 种新交互” → 重复拿到同一作战组件只多一件库存 → 槽位封锁后程序重排并恢复（反向）（冻结桥随水面 FG18-SEA-01；模糊测试器常驻由 RunAll 覆盖）",
                 Seed = TestSeed,
                 TotalTimeoutSeconds = 1200,
                 OnFinish = Cleanup,
-                Version = 1,
+                Version = 2,
                 CheckpointAfter = new[] { "emg_fix", "squad_fix", "hj_end", "pit_fill", "loot_fix" },
                 Steps = steps,
             };
@@ -493,8 +509,8 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static bool MeltableCode(byte code) => GridContent.TerrainByCode(code)?.Meltable == 1;
 
-        /// <summary>离核心 from～to 格、本格与 4 邻格都是可熔地面、能走、没有建筑、在覆盖里的格（按到核心距离由近到远，确定性）。</summary>
-        private static GridCell? FindMeltable(CampaignState s, int from, int to)
+        /// <summary>离核心 from～to 格、本格与 4 邻格都是可熔地面、能走、没有建筑、在覆盖里、且满足 <paramref name="extra"/> 的格（按到核心距离由近到远，确定性）。</summary>
+        private static GridCell? FindMeltable(CampaignState s, int from, int to, Func<GridCell, bool> extra = null)
         {
             HomeGridMap map = HomeGridService.MapFor(s);
             GridCell core = HomeGridService.CorePivot(s);
@@ -515,7 +531,8 @@ namespace GameLogic.EditorTools.JourneyBots
                             byte t = map.GetTerrain(n);
                             ok &= MeltableCode(t) && (GridContent.TerrainByCode(t)?.NavCost ?? 0) > 0 && map.OccupantAt(n) == null;
                         }
-                        if (ok && NavService.PassableNow(cell.X, cell.Y, NavConst.ClassPlayer) && SignalCoverageService.Sample(HomeValleyLayout.RegionId, new Vector2(cell.X, cell.Y)).Covered)
+                        if (ok && NavService.PassableNow(cell.X, cell.Y, NavConst.ClassPlayer) && SignalCoverageService.Sample(HomeValleyLayout.RegionId, new Vector2(cell.X, cell.Y)).Covered
+                            && (extra == null || extra(cell)))
                         {
                             return cell;
                         }
@@ -525,23 +542,145 @@ namespace GameLogic.EditorTools.JourneyBots
             return null;
         }
 
+        // ── 堵路夹具（反向：永久改变堵路警告，FGR-EMG-154；与 FgEmgTerrainSelfCheck K 段同一几何，缺口改成正落在两块胶块中点）──
+
+        /// <summary>围圈：仓库在熔坑格背离核心 <see cref="WallR"/> 格处，<see cref="WallN"/> 个等分点里跳过熔坑格两侧最近的两个（熔坑格正落在它们中点），
+        /// 其余各放一块固化胶块（半径 1.5，相邻两块中心 1.95 米）。缺口两侧胶块离熔坑格 2.9 米：空着时 1 格宽能过，熔坑（半径 1.5）补上就堵死。</summary>
+        private const int WallN = 16;
+
+        private const double WallR = 5;
+
+        /// <summary>围圈的圆心（熔坑格背离核心 5 格）；圆心周围 9×9 能走、没有建筑（放得下 5×3 的仓库，圈里通到缺口）。</summary>
+        private static bool WallSite(CampaignState s, GridCell g, GridCell core, out double2 center)
+        {
+            double2 dir = math.normalizesafe(new double2(g.X - core.X, g.Y - core.Y), new double2(1, 0));
+            center = new double2(g.X, g.Y) + dir * WallR;
+            return OpenDisk(s, new Vector2((float)center.x, (float)center.y), 4);
+        }
+
+        private static void ApplyWallFixture(JourneyContext c)
+        {
+            CampaignState s = St;
+            if (s == null || c.GetInt("wall.set") == 1)
+            {
+                return;
+            }
+            c.SetInt("wall.set", 1);
+            GridCell core = HomeGridService.CorePivot(s);
+            GridCell? g = FindMeltable(s, 8, 60, x => WallSite(s, x, core, out _));
+            if (g == null)
+            {
+                c.Set("pit.err", "离核心 8～60 格找不到覆盖里、背后 5 格开阔（放得下仓库和围圈）的可熔地面");
+                return;
+            }
+            WallSite(s, g.Value, core, out double2 cc);
+            FgjM3Common.SetCell(c, "pit.g", g.Value);
+            BuildingRecord store = FgProductionSelfCheck.Built(s, HomeValleyLayout.BuildingTypeWarehouse, "emg4-pit-store", new GridCell((int)Math.Round(cc.x), (int)Math.Round(cc.y)));
+            c.Set("wall.store", store.BuildingId);
+            CombatKernel k = Home.Kernel;
+            double phi = Math.Atan2(g.Value.Y - cc.y, g.Value.X - cc.x);
+            int n = 0;
+            for (int i = 1; i < WallN - 1; i++) // i = 0 与 WallN − 1 是熔坑格两侧最近的两个点 = 缺口
+            {
+                double a = phi + (i + 0.5) * Math.PI * 2 / WallN;
+                n += k.SpawnPatch(EmgMatterConst.Cured, new double2(cc.x + WallR * Math.Cos(a), cc.y + WallR * Math.Sin(a)), 1.5f) ? 1 : 0;
+            }
+            c.SetInt("wall.n", n);
+            c.Set("wall.at", $"仓库 ({F(cc.x, "0")},{F(cc.y, "0")})、缺口 {FgjM3Common.Cell(g.Value)}");
+        }
+
+        private static PersistBlockRecord StoreBlock(JourneyContext c) =>
+            SoftlockService.StateOf(St)?.PersistBlocks.FirstOrDefault(r => r != null && r.Key == c.Get("wall.store"));
+
+        private static StepOutcome TickWallOpen(JourneyContext c)
+        {
+            if (c.Get("pit.err", string.Empty).Length > 0)
+            {
+                return StepOutcome.Fail(c.Get("pit.err"));
+            }
+            JourneyCommon.ResumeIfAutoPaused(c);
+            if (c.GetInt("wall.n") != WallN - 2)
+            {
+                return StepOutcome.Fail($"固化胶块只生成了 {c.GetInt("wall.n")} 块（应 {WallN - 2}）");
+            }
+            if (c.StepElapsed < 9) // 堵路检查每 10 游戏秒一次（3 倍速约 3.3 秒），等过两次
+            {
+                return StepOutcome.Wait;
+            }
+            PersistBlockRecord rec = StoreBlock(c);
+            return rec != null
+                ? StepOutcome.Fail($"缺口还开着就报了堵路（种类 {rec.Kind}、位置 ({F(rec.X)},{F(rec.Y)})）：围圈缺口太窄")
+                : StepOutcome.Done($"{c.Get("wall.at")}；{WallN - 2} 块固化胶块围圈，缺口开着时不报堵路（堵路记录 {SoftlockService.StateOf(St).PersistBlocks.Length} 条，没有这座仓库）");
+        }
+
+        private static StepOutcome TickBlockWarn(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            CampaignState s = St;
+            PersistBlockRecord rec = StoreBlock(c);
+            if (rec == null)
+            {
+                return c.StepElapsed < 35 ? StepOutcome.Wait : StepOutcome.Fail($"熔坑补上缺口 35 秒没报堵路（堵路记录 {SoftlockService.StateOf(s).PersistBlocks.Length} 条，熔坑 {Home.Kernel.PitCount} 个）");
+            }
+            string key = "persist:" + c.Get("wall.store");
+            HomeValleyAlarms.AlertRecord alarm = HomeValleyAlarms.Collect(s).FirstOrDefault(a => a.Key == key);
+            if (rec.Kind != EmgPersistItem.KindPit || !rec.Blocks || alarm.Key == null || !alarm.HasLocation)
+            {
+                return StepOutcome.Fail($"堵路记录不对：点名种类 {rec.Kind}（应熔坑 {EmgPersistItem.KindPit}）、阻路 {rec.Blocks}；告警栏这一行 {alarm.Key != null}、可定位 {alarm.HasLocation}");
+            }
+            if (!FgjM3Common.Done(c, "clk"))
+            {
+                bool? clicked = FgjM6Common.ClickToast(SitePersistService.NotifyBlocked, out NotificationEntry e);
+                if (clicked == null)
+                {
+                    return c.StepElapsed < 40 ? StepOutcome.Wait : StepOutcome.Retry("堵路通知弹出条没出现 / 已经收起");
+                }
+                if (clicked == false)
+                {
+                    return StepOutcome.Retry("点不到堵路通知弹出条：" + JourneyInput.LastUiFailure);
+                }
+                c.Set(FgjM3Common.SK(c, "text"), e.Text ?? string.Empty);
+                FgjM3Common.Mark(c, "clk");
+                c.SetLong(FgjM3Common.SK(c, "at"), NowMs());
+                return StepOutcome.Wait;
+            }
+            if (NowMs() - c.GetLong(FgjM3Common.SK(c, "at")) < 1500)
+            {
+                return StepOutcome.Wait;
+            }
+            string text = c.Get(FgjM3Common.SK(c, "text"));
+            float2 f = WorldView.Director.StrategyFocus;
+            float d = Vector2.Distance(new Vector2(f.x, f.y), new Vector2(rec.X, rec.Y));
+            if (!text.Contains("熔坑") || d >= 8f)
+            {
+                return StepOutcome.Fail($"点了堵路通知弹出条：文字“{text}”（应写熔坑与位置）、镜头中心 ({F(f.x, "0")},{F(f.y, "0")}) 离熔坑 ({F(rec.X)},{F(rec.Y)}) {F(d)} 格（应 < 8）");
+            }
+            return StepOutcome.Done($"熔坑补上缺口 → 堵路警告“{text}”、告警栏“{alarm.RowText}”；点弹出条镜头飞到熔坑（镜头中心离它 {F(d)} 格）");
+        }
+
+        private static StepOutcome TickBlockClear(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            string key = "persist:" + c.Get("wall.store");
+            bool rec = StoreBlock(c) != null, alarm = HomeValleyAlarms.Collect(St).Any(a => a.Key == key);
+            if (rec || alarm)
+            {
+                return c.StepElapsed < 35 ? StepOutcome.Wait : StepOutcome.Fail($"熔坑填平 35 秒后堵路还在：记录 {rec}、告警栏 {alarm}");
+            }
+            return StepOutcome.Done("熔坑填平后下一次检查：缺口重新打通，这座仓库的堵路警告与告警栏那一行都解除");
+        }
+
         private static void ApplyPitFixture(JourneyContext c)
         {
             CampaignState s = St;
-            if (s == null || c.GetInt("pit.set") == 1)
+            if (s == null || c.GetInt("pit.set") == 1 || c.Get("pit.err", string.Empty).Length > 0)
             {
                 return;
             }
-            GridCell? g = FindMeltable(s, 8, 60);
-            if (g == null)
-            {
-                c.Set("pit.err", "离核心 8～60 格找不到覆盖里的可熔地面");
-                return;
-            }
-            FgjM3Common.SetCell(c, "pit.g", g.Value);
+            GridCell g = FgjM3Common.GetCell(c, "pit.g"); // 围圈缺口那一格（wall_fix 选定）
             c.SetInt("pit.set", 1);
             c.SetInt("pit.born0", Home.Kernel.PitCounts.Born);
-            Home.Kernel.SpawnPatch(EmgMatterConst.Molten, new double2(g.Value.X, g.Value.Y), 1f, 35f);
+            Home.Kernel.SpawnPatch(EmgMatterConst.Molten, new double2(g.X, g.Y), 1f, 35f);
         }
 
         private static int PitNear(CombatKernel k, GridCell g)
@@ -811,6 +950,152 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Wait;
             }
             return !LootPickPanelUIToolkit.IsOpen ? StepOutcome.Done("Esc 关闭待分拣面板") : StepOutcome.Retry("面板还开着");
+        }
+
+        // ── 4. 反向：槽位封锁 → 程序重排 → 恢复（FGT-EMG-061 / 010；与 FgEmgSeizeSelfCheck H 段同一组固件）──
+
+        private const string CoreTrig = "fw_split", CoreNext = "fw_homing";
+
+        private const int Ember = SignalSeizeService.SourceEmber;
+
+        /// <summary>接入程序（信号核按槽位顺序、只含生效且没被封锁的槽，与接入结算 / 双态预览同一输入 ActiveContentIds）。</summary>
+        private static EmgProgramResult CoreProgram(CampaignState s) =>
+            EmgProgramCompiler.Compile(SignalCoreService.ActiveContentIds(s).Where(x => x.Length > 0).ToArray(), Array.Empty<string>(), FirmwareCarrier.Projectile);
+
+        private static string Tree(EmgProgramResult r) =>
+            string.Join(" | ", r.Nodes.Select(n => $"{n.Gen}代:" + string.Join("+", n.Entries.Select(e => r.Steps.First(st => st.Ordinal == e.Ordinal).FirmwareId.Replace("fw_", string.Empty)))));
+
+        private static string LastNote(string typeId) => NotificationCenter.History.LastOrDefault(e => e.Type?.Id == typeId)?.Text ?? string.Empty;
+
+        private static string HudSlotLine => GameText.Format("emg.seize.hud.slot", "1", SignalSeizeService.SourceName(Ember));
+
+        private static void ApplySlotFixture(JourneyContext c)
+        {
+            CampaignState s = St;
+            if (s == null || c.GetInt("sb.set") == 1)
+            {
+                return;
+            }
+            c.SetInt("sb.set", 1);
+            string[] fw = { CoreTrig, CoreNext };
+            for (int i = 0; i < fw.Length; i++)
+            {
+                string part = PrimitiveInventory.AddBurnedChip(s, fw[i]);
+                SignalCoreResult r = part != null ? SignalCoreService.TryEquip(s, part, i) : default;
+                if (part == null || !r.Success)
+                {
+                    c.Set("sb.err", $"{fw[i]} 装进 {i + 1} 号槽失败（芯片 {part ?? "没入库"}：{r.Message}）");
+                    return;
+                }
+            }
+            EmgProgramResult p = CoreProgram(s);
+            c.Set("sb.tree0", Tree(p));
+            c.Set("sb.sig0", p.Signature);
+        }
+
+        private static StepOutcome TickSlotFixture(JourneyContext c)
+        {
+            if (c.Get("sb.err", string.Empty).Length > 0)
+            {
+                return StepOutcome.Fail(c.Get("sb.err"));
+            }
+            if (c.StepElapsed < 0.5)
+            {
+                return StepOutcome.Wait;
+            }
+            string tree = c.Get("sb.tree0");
+            return tree == "0代:split | 1代:homing"
+                ? StepOutcome.Done($"信号核 1 号槽 [分裂]、2 号槽 [寻的]；接入程序 {tree}（分裂是触发器，寻的在它放出的子弹药一代）")
+                : StepOutcome.Fail($"封锁前接入程序应为“0代:split | 1代:homing”，实际“{tree}”");
+        }
+
+        private static void ApplySlotBlock(JourneyContext c)
+        {
+            if (St == null || c.GetInt("sb.blocked") != 0)
+            {
+                return;
+            }
+            c.SetInt("sb.n0", SignalSeizeService.SlotBlockedCount);
+            c.SetInt("sb.blocked", SignalSeizeService.BlockSlot(St, 0, Ember) ? 1 : -1);
+        }
+
+        private static StepOutcome TickSlotBlocked(JourneyContext c)
+        {
+            CampaignState s = St;
+            if (c.StepElapsed < 0.8)
+            {
+                return StepOutcome.Wait;
+            }
+            string note = LastNote("emg_slot_blocked"), hud = SignalCoreHudUIToolkit.Instance?.UplinkStatusText ?? string.Empty;
+            bool ok = c.GetInt("sb.blocked") == 1 && SignalSeizeService.SlotBlockedCount == c.GetInt("sb.n0") + 1 && SignalSeizeService.IsBlocked(s, 0)
+                      && SignalCoreService.ActiveContentIds(s)[0].Length == 0 && SignalCoreService.SlotContentId(s, 0) == CoreTrig
+                      && note.Contains(GameText.Get("emg.seize.source.ember")) && hud.Contains(HudSlotLine);
+            if (!ok)
+            {
+                return c.StepElapsed < 5 ? StepOutcome.Wait
+                    : StepOutcome.Fail($"封锁 1 号槽不对：入口返回 {c.GetInt("sb.blocked")}、封锁 {SignalSeizeService.IsBlocked(s, 0)}、生效列表 1 号槽“{SignalCoreService.ActiveContentIds(s)[0]}”（应空）、固件仍在槽里 {SignalCoreService.SlotContentId(s, 0) == CoreTrig}；通知“{note}”；HUD“{hud.Replace('\n', '｜')}”（应含“{HudSlotLine}”）");
+            }
+            return StepOutcome.Done($"余烬主机封锁 1 号槽：通知“{note}”；HUD“{hud.Replace('\n', '｜')}”；固件仍在槽里、生效列表按空槽");
+        }
+
+        private static StepOutcome TickSlotPanel(JourneyContext c)
+        {
+            if (c.StepElapsed < 0.6)
+            {
+                return StepOutcome.Wait;
+            }
+            SignalCoreHudUIToolkit hud = SignalCoreHudUIToolkit.Instance;
+            if (!SignalCoreHudUIToolkit.IsOpen || hud == null || !hud.PanelVisible)
+            {
+                return StepOutcome.Retry("信号核面板没打开：" + FgjM1Journey.UiFail(c));
+            }
+            string slot = hud.SlotText(0), tree = Tree(CoreProgram(St));
+            string reason = GameText.Format("emg.seize.slot.reason", SignalSeizeService.SourceName(Ember)), trig = GameText.Get("emg.seize.slot.trigger_note");
+            if (!slot.Contains(reason) || !slot.Contains(trig) || hud.SlotText(1).Contains(reason))
+            {
+                return c.StepElapsed < 4 ? StepOutcome.Wait : StepOutcome.Fail($"面板 1 号槽“{slot.Replace('\n', '｜')}”应写“{reason}{trig}”；2 号槽“{hud.SlotText(1).Replace('\n', '｜')}”不应写封锁");
+            }
+            if (tree != "0代:homing")
+            {
+                return StepOutcome.Fail($"封锁触发器后接入程序应按空槽重排为“0代:homing”（下游回到上一层节点），实际“{tree}”（封锁前 {c.Get("sb.tree0")}）");
+            }
+            c.Set("sb.tree1", tree);
+            return StepOutcome.Done($"信号核面板 1 号槽“{slot.Replace('\n', '｜')}”；接入程序重排 {c.Get("sb.tree0")} → {tree}");
+        }
+
+        private static void ApplySlotLift(JourneyContext c)
+        {
+            if (St == null || c.GetInt("sb.lifted") != 0)
+            {
+                return;
+            }
+            c.SetInt("sb.r0", SignalSeizeService.SlotRestoredCount);
+            c.SetInt("sb.lifted", SignalSeizeService.UnblockAll(St, Ember) + 1); // +1：0 = 还没调
+        }
+
+        private static StepOutcome TickSlotLifted(JourneyContext c)
+        {
+            CampaignState s = St;
+            if (c.StepElapsed < 0.8)
+            {
+                return StepOutcome.Wait;
+            }
+            SignalCoreHudUIToolkit hud = SignalCoreHudUIToolkit.Instance;
+            string slot = hud?.SlotText(0) ?? string.Empty, status = hud?.UplinkStatusText ?? string.Empty, note = LastNote("emg_slot_restored");
+            EmgProgramResult p = CoreProgram(s);
+            bool ok = c.GetInt("sb.lifted") - 1 == 1 && SignalSeizeService.SlotRestoredCount == c.GetInt("sb.r0") + 1 && !SignalSeizeService.IsBlocked(s, 0)
+                      && SignalCoreService.ActiveContentIds(s)[0] == CoreTrig && note.Contains(GameText.Get("emg.seize.source.ember"))
+                      && !slot.Contains(GameText.Get("emg.seize.slot.trigger_note")) && !status.Contains(HudSlotLine);
+            if (!ok)
+            {
+                return c.StepElapsed < 5 ? StepOutcome.Wait
+                    : StepOutcome.Fail($"解除不对：解除 {c.GetInt("sb.lifted") - 1} 槽（应 1）、仍封锁 {SignalSeizeService.IsBlocked(s, 0)}、生效列表 1 号槽“{SignalCoreService.ActiveContentIds(s)[0]}”；通知“{note}”；面板 1 号槽“{slot.Replace('\n', '｜')}”；HUD“{status.Replace('\n', '｜')}”");
+            }
+            if (Tree(p) != c.Get("sb.tree0") || p.Signature != c.Get("sb.sig0"))
+            {
+                return StepOutcome.Fail($"解除后接入程序应与封锁前同签名：{Tree(p)}（{p.Signature}），封锁前 {c.Get("sb.tree0")}（{c.Get("sb.sig0")}）");
+            }
+            return StepOutcome.Done($"按来源解除：通知“{note}”；面板 1 号槽“{slot.Replace('\n', '｜')}”；接入程序恢复 {Tree(p)}（与封锁前同签名）");
         }
     }
 }

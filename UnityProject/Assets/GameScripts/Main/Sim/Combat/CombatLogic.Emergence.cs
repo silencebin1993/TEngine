@@ -578,7 +578,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>本步是否跨过一个 0.25 游戏秒的刷写节拍（按模拟时间对齐：暂停 dt = 0 不跨，倍速按游戏秒同样每 0.25 秒一次；不存状态，读档后照样对齐）。</summary>
         internal static bool FlashTick(double now, float dt) =>
-            dt > 0f && math.floor(now / EmgConst.FlashInterval) != math.floor((now - dt) / EmgConst.FlashInterval);
+            dt > 0f && CrossedTick(now, dt, EmgConst.FlashInterval);
 
         /// <summary>距离衰减：离母机超过 emg.flash.range 后，每再远 emg.flash.step（不足一档按一档）暂停末尾 1 条，最多暂停到 0 条；回到范围内为 0。</summary>
         internal static byte FlashPauseOf(ref CombatData d, in CombatDrone dr, int ownerSlot) => FlashPauseAt(ref d, FlashHeld(ref d, dr), dr.Pos, d.Pos[ownerSlot]);

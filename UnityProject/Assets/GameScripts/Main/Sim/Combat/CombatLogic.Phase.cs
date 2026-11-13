@@ -433,7 +433,7 @@ namespace BinGames.Sim.Combat
             {
                 case EmgPhaseConst.Overheat:
                     // 每 p3 秒再漏 p2 份熔融金属（按游戏时刻跨格判定，不另存计时；暂停不推进）
-                    if (r.P3 > 0f && r.P2 > 0f && math.floor(now / r.P3) != math.floor((now - dt) / r.P3))
+                    if (r.P3 > 0f && r.P2 > 0f && CrossedTick(now, dt, r.P3))
                     {
                         EmgRequestPatch(ref d, EmgMatterConst.Molten, d.Pos[i], math.max(0.6f, d.Radius[i]), r.P2, 0f, d.Id[i], 0, 0);
                     }

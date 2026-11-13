@@ -768,8 +768,10 @@ namespace GameLogic.EditorTools
             CampaignState s = NewWorld(seed, observe, 100);
             pausedHeld = true;
             CombatKernel k = HomeKernel;
+            // 明火自带 22 秒寿命：单块就跨过焦土 20 秒阈值（两块相邻会并成一块，只记一次燃烧秒）。原先按默认 18 秒，靠站在火里的机器烧毁排放给明火续时
+            // 才过 20 秒，焦土出不出取决于持续伤害节拍（FG-GAP-160 修前双结算烧死两台机器续到 21.8 秒）；现在机器续时只会推迟到期，窗口 30 秒留足余量。
             GridCell g = FindSpot(s, Open) ?? HomeGridService.CorePivot(s);
-            k.SpawnPatch(EmgMatterConst.Fire, new double2(g.X, g.Y), 1.5f, 40f);
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(g.X, g.Y), 1.5f, 40f, 22f);
             k.SpawnPatch(EmgMatterConst.Fire, new double2(g.X + 1, g.Y), 1.5f, 30f);
             k.SpawnPatch(EmgMatterConst.Glass, new double2(g.X - 6, g.Y), 1.5f, 10f);
             WorldSimulation.StepMany(2);
@@ -786,7 +788,7 @@ namespace GameLogic.EditorTools
                 GameClock.SetPaused(false);
             }
             GameClock.SetSpeed(speed);
-            long target = GameClock.Ticks + GameClock.StepHz * 25;
+            long target = GameClock.Ticks + GameClock.StepHz * 30;
             int frames = 0;
             while (GameClock.Ticks < target && frames < 60 * 600)
             {
@@ -810,7 +812,7 @@ namespace GameLogic.EditorTools
                 same &= d == reference;
             }
             Expect(paused && same && reference.Contains(":1@") && reference.Contains(":2@"),
-                $"J1 暂停 120 帧不烧、不写格；0.5x / 1x / 3x 跑同样 25 游戏秒结果逐字一致（{reference}）");
+                $"J1 暂停 120 帧不烧、不写格；0.5x / 1x / 3x 跑同样 30 游戏秒结果逐字一致（{reference}）");
             string seen = Scenario(Seeds[2], true, 1f, false, out _);
             string unseen = Scenario(Seeds[2], false, 1f, false, out _);
             Expect(seen == unseen, $"J2 B24 家园不被观察时结果一致（{unseen}）");
