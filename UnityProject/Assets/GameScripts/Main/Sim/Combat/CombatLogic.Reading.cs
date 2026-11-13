@@ -40,7 +40,10 @@ namespace BinGames.Sim.Combat
         /// 所有跨拍判定一律走这里（余量与 FG10-FAC-01 酸沼同为 1e-6 秒）。
         /// </summary>
         public static bool CrossedTick(double now, float dt, double period) =>
-            math.floor((now + 1e-6) / period) != math.floor((now - dt + 1e-6) / period);
+            math.floor((now + TickEps) / period) != math.floor((now - dt + TickEps) / period);
+
+        /// <summary>跨拍 / 间隔判定的时刻余量（秒）：CrossedTick 与电荷规则最短间隔（EMGR-RULE-01）共用。</summary>
+        internal const double TickEps = 1e-6;
 
         // ─────────────────────────────── 投送 ───────────────────────────────
 

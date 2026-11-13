@@ -826,6 +826,7 @@ namespace GameLogic.EditorTools
             // 中立与离地、接触伤害 Code 4、弹体沾染 / 抛射、入场引信、残骸崩解成碎屑、快照 17 往返 / 16 版 / 短长段 / 档案稳定键、确定性与倍速、悬停与调试行、耗时。
             Seg("FgEmgMatterSelfCheck", FgEmgMatterSelfCheck.Run);
             Seg("FgEmgRuleSelfCheck", FgEmgRuleSelfCheck.Run); // EMG2-RULE-01：通道规则引擎与能量传导（FgEmgMatterSelfCheck 的规则段，单独成段）
+            Seg("FgEmgRuleTickSelfCheck", FgEmgRuleSelfCheck.RunTick); // EMGR-RULE-01：电解限速、热交换每拍回温（与场面大小无关）
             Seg("FgEmgPhaseSelfCheck", FgEmgPhaseSelfCheck.Run); // EMG2-PHS-01：相变累积量与单位相态（FGT-EMG-034 / 020 evt.phase）
             Seg("FgEmgFieldSelfCheck", FgEmgFieldSelfCheck.Run); // EMG2-FLD-01：场与载体互作（FGT-EMG-036 / 037 场推动 / 073 阶段 2）
             Seg("FgEmgReactSelfCheck", FgEmgReactSelfCheck.Run); // EMG2-REACT-01：五条定稿反应与装配反应端口化（FGT-EMG-030 / 032 / 004）

@@ -1399,14 +1399,15 @@ namespace BinGames.Sim.Combat
             EmgScalars es = d.EmgS[0];
             es.ConductTicks++;
             d.EmgS[0] = es;
-            // 热交换、电、磁化各有自己的访问预算（规格的 ≤ 256 是给电 BFS 的；共用会让热源一多电就饿死）；超出时按节拍序号轮转起点，没轮到的下一节拍先处理（顺延，不固定截断）
+            // 电、磁化各有自己的访问预算（规格的 ≤ 256 是给电 BFS 的），超出时按节拍序号轮转起点，没轮到的下一节拍先处理（顺延，不固定截断）；
+            // 热交换不设预算（EMGR-RULE-01，FG19B §1.4 第 2、3 条）：所有热源每拍都交换、都回落，熔融转冷渣、油挨明火点燃的时间与场面大小无关
             int budget = VisitsOf(ref d);
             int phase = (int)((d.Scalars[0].Steps / ConductSteps(ref d, dt)) & 0x3fffffff);
             int visits = 0;
             if (any)
             {
                 EmgHashEnsure(ref d);
-                visits += EmgHeatExchange(ref d, budget, phase);
+                visits += EmgHeatExchange(ref d);
                 if (d.Wires.Length > 0)
                 {
                     visits += EmgWireTick(ref d); // EMG2-RECL-01：导线上的热与同类液体均分
@@ -1445,8 +1446,9 @@ namespace BinGames.Sim.Combat
         /// <summary>
         /// 热交换（FG19B 第 1.4 节第 2、3 条）：偏离常温的斑块（热源）按 Id 升序，与重叠邻居交换 ΔT_a = 0.4 × 重叠比 × (T_b − T_a) × m_b ÷ (m_a + m_b)（地面 / 气体之间 × 0.5，
         /// 定温源视质量无穷大、自己不变）；高于常温的每秒回落 40 度。先算增量再统一写回（结果与访问顺序无关）。返回访问数。
+        /// EMGR-RULE-01（perf-cut-audit P11）：不设访问预算、不轮转，每个传导节拍所有热源都处理；满载帧耗见 DEBT-EMGRRULE01-01。
         /// </summary>
-        private static int EmgHeatExchange(ref CombatData d, int budget, int phase)
+        private static int EmgHeatExchange(ref CombatData d)
         {
             float amb = AmbientOf(ref d), ex = ExchangeOf(ref d), cool = CoolRateOf(ref d) * ConductTickOf(ref d);
             var src = new NativeList<int2>(16, Allocator.Temp); // (Id, 下标)
@@ -1466,24 +1468,13 @@ namespace BinGames.Sim.Combat
             src.Sort(new Int2XComparer());
             // 定点累加（1/65536 度）：整数加法与邻居遍历顺序无关——空间哈希的桶内顺序随槽位插入顺序变，读档会重排槽位，浮点累加顺序不同会让续跑分叉（EMG2-PHS-01 模糊存读档 #61）
             var dT = new NativeArray<long>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
-            var isSrc = new NativeArray<byte>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
             // EMG4-E2E-01 修复轮（FGJ-M6 发现）：每块斑块本节拍收到的交换系数之和 Σ k × w（同样定点累加）。重叠邻居多时 Σ > 1 会过冲、Σ > 2 发散
             // （实测家园火墙余火里斑块温度振荡到 ±10¹¹ 度、把建筑 / 机器全烧毁）；写回时按 Σ 归一，新温度落在自己与邻居温度的凸组合里。Σ ≤ 1 时逐字不变。
             var wSum = new NativeArray<long>(d.Patches.Length, Allocator.Temp, NativeArrayOptions.ClearMemory);
-            int n = math.min(src.Length, budget);
-            int start = 0;
-            if (n < src.Length)
-            {
-                EmgCarried(ref d);
-                start = (int)((long)phase * n % src.Length); // 轮转：Id 靠后的热源每 ⌈热源数 ÷ 预算⌉ 个节拍至少处理一次
-            }
+            int n = src.Length;
             for (int s = 0; s < n; s++)
             {
-                isSrc[src[(start + s) % src.Length].y] = 1;
-            }
-            for (int s = 0; s < n; s++)
-            {
-                int i = src[(start + s) % src.Length].y;
+                int i = src[s].y;
                 ref CombatZone z = ref d.Patches.ElementAt(i);
                 bool fixI = MatterOf(ref d, z.Matter).FixedTemp != 0 || PatchWorld(z);
                 int x0 = EmgHash.CellOf(z.Pos.x - z.Radius), x1 = EmgHash.CellOf(z.Pos.x + z.Radius);
@@ -1520,7 +1511,7 @@ namespace BinGames.Sim.Combat
                             float wj = fixJ ? 1f : fixI ? 0f : o.Amount / math.max(1e-3f, z.Amount + o.Amount);
                             dT[i] += FixHeat(k * (o.Temp - z.Temp) * wj);
                             wSum[i] += FixHeat(k * wj);
-                            if (isSrc[j] == 0)
+                            if (!(math.abs(o.Temp - amb) > 0.5f)) // 邻居不是热源（本节拍不会自己再处理一遍）才由这里给它记增量；写回前温度不变，与上面选热源同一判据
                             {
                                 float wi = fixI ? 1f : fixJ ? 0f : z.Amount / math.max(1e-3f, z.Amount + o.Amount);
                                 dT[j] += FixHeat(k * (z.Temp - o.Temp) * wi);
@@ -1538,15 +1529,15 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 double sum = wSum[i] * (1.0 / HeatFixScale);
+                bool hot = math.abs(z.Temp - amb) > 0.5f; // 热源（写回前的温度）才回温
                 float t = z.Temp + (float)(dT[i] * (1.0 / HeatFixScale) / (sum > 1.0 ? sum : 1.0));
-                if (isSrc[i] != 0 && t > amb)
+                if (hot && t > amb)
                 {
                     t = math.max(amb, t - cool);
                 }
                 z.Temp = t;
             }
             dT.Dispose();
-            isSrc.Dispose();
             wSum.Dispose();
             src.Dispose();
             return n;
@@ -1811,7 +1802,7 @@ namespace BinGames.Sim.Combat
             public int Compare(int4 a, int4 b) => a.x != b.x ? a.x.CompareTo(b.x) : a.w.CompareTo(b.w);
         }
 
-        /// <summary>电荷条件的规则（E14～E17）在传导节拍、BFS 之后求值：带电斑块按 Id 升序，每块只结算优先级最小的一条成立的规则（同一宿主一个节拍一条）。</summary>
+        /// <summary>电荷条件的规则（E14～E17）在传导节拍、BFS 之后求值：带电斑块按 Id 升序，每块只结算优先级最小的一条成立的规则（同一宿主一个节拍一条）；charge_ge 的 c2 &gt; 0 时同一宿主两次结算至少隔 c2 秒（E16 = 1 秒）。</summary>
         private static void EmgChargeRules(ref CombatData d)
         {
             if (!EmgRulesOn(ref d))
@@ -1849,6 +1840,12 @@ namespace BinGames.Sim.Combat
                         continue;
                     }
                     bool ok = z.Charge >= r.C1 && (r.Cond != EmgRuleConst.CondChargeGeConcGe || z.Conc >= r.C2);
+                    // EMGR-RULE-01（FG19B E16“每块每秒最多 1 次”）：charge_ge 的 c2 = 同一宿主两次结算的最短间隔（秒），0 = 不限；上次结算时刻记 CondSince（进快照），余量与 CrossedTick 同为 TickEps。
+                    // shortcut: CondSince 与 temp_*_for 持续条件共用（酸没有 temp_*_for 规则）；同一宿主将来同时有持续条件规则与限频电荷规则时要另开字段。
+                    if (ok && r.Cond == EmgRuleConst.CondChargeGe && r.C2 > 0f && z.CondSince > 0 && now - z.CondSince < r.C2 - TickEps)
+                    {
+                        ok = false;
+                    }
                     if (!ok)
                     {
                         continue;
@@ -1869,7 +1866,13 @@ namespace BinGames.Sim.Combat
                     es.RulesDeferred += satisfied - 1;
                     d.EmgS[0] = es;
                 }
-                EmgApplyRule(ref d, d.EmgRules[chosen], i, -1, now);
+                EmgRule pick = d.EmgRules[chosen];
+                if (pick.Cond == EmgRuleConst.CondChargeGe && pick.C2 > 0f)
+                {
+                    z.CondSince = now; // 先写回再结算：结算会改宿主（缩小 / 转化；转化会把 CondSince 清零）
+                    d.Patches[i] = z;
+                }
+                EmgApplyRule(ref d, pick, i, -1, now);
             }
             hosts.Dispose();
         }

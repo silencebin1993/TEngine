@@ -85,7 +85,7 @@ public sealed partial class ChannelRule : Luban.BeanBase
     /// </summary>
     public readonly float C1;
     /// <summary>
-    /// 条件阈值 2
+    /// 条件阈值 2(charge_ge:同一宿主两次结算的最短间隔秒,0 = 不限;EMGR-RULE-01)
     /// </summary>
     public readonly float C2;
     /// <summary>

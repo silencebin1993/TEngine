@@ -28,10 +28,11 @@ namespace GameLogic.EditorTools
     /// J 存读档（传导途中读档续跑哈希一致、传导相位按步序号）；K 传导那一步的尖峰耗时（只测一次）。
     /// 修复第 1 轮补：B 重叠 0.3 ≤ 0.75 秒点燃；C2 单节拍 ≤ 6 跳与跨节拍收敛、访问预算顺延、M14 淤塞阻断；C3 站在导电斑块里的单位是节点（斑块 ↔ 单位）；
     /// L 磁化注入与单位间传播（× 0.7 × 磁性、q_min、跳数上限、不接触不传）；H 接入机器不绕、带电水洼、链号 0 的危险物、迁入斑块按阵营、攻击移动按射程截断；
-    /// K2 热交换与电传导各有预算、超出按节拍轮转。
+    /// K2 热交换不设预算（EMGR-RULE-01：300 块热源每块每拍都回温、都交换），电传导预算仍生效、超出按节拍轮转。
+    /// EMGR-RULE-01 另有单独一段 FgEmgRuleTickSelfCheck（FgEmgRuleSelfCheck.Tick.cs：电解限速、热交换每拍与场面大小无关）。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgEmgRuleSelfCheck）；单段：bash tools/unity-validate.sh GameLogic.EditorTools.FgEmgRuleSelfCheck.RunFromMenu。
     /// </summary>
-    public static class FgEmgRuleSelfCheck
+    public static partial class FgEmgRuleSelfCheck
     {
         private const float Dt = 1f / 60f;
         private const CombatUnitFlags Live = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled;
@@ -62,13 +63,7 @@ namespace GameLogic.EditorTools
             Line($"  · 环境：Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，处理器 {SystemInfo.processorType}（{SystemInfo.processorCount} 线程）；内核单线程 IJob + Burst（Editor 下同步编译，真机 IL2CPP + Burst，耗时只作量级参考）");
             try
             {
-                ConfigSystem.Instance.Load();
-                GameText.Reload();
-                GridContent.Reload();
-                EmgCatalog.ResetForTests();
-                EmgEntityProfiles.Reload();
-                EmgMatterCatalog.Reload();
-                EmgRuleCatalog.Reload();
+                LoadCatalogs();
                 Step(CheckTable);
                 Step(CheckHeat);
                 Step(CheckElectric);
@@ -99,6 +94,17 @@ namespace GameLogic.EditorTools
         }
 
         // ── 夹具 ─────────────────────────────────────────────────────────────
+
+        private static void LoadCatalogs()
+        {
+            ConfigSystem.Instance.Load();
+            GameText.Reload();
+            GridContent.Reload();
+            EmgCatalog.ResetForTests();
+            EmgEntityProfiles.Reload();
+            EmgMatterCatalog.Reload();
+            EmgRuleCatalog.Reload();
+        }
 
         private static CombatKernel NewKernel(int cap = 64, int visits = 0, int hops = 0)
         {
@@ -973,38 +979,92 @@ namespace GameLogic.EditorTools
             Expect(conductN >= 19 && spike <= 0.4, $"传导步尖峰增量 {spike:0.###} ms ≤ 2 × 0.2 ms（失败线）；斑块 {n} 块 + 200 单位");
         }
 
-        // ── K2 访问预算不互相挤占 ────────────────────────────────────────────
+        // ── K2 热交换不设预算、电预算仍生效 ──────────────────────────────────
 
         private static void CheckBudgetSplit()
         {
-            Line("  · K2. 访问预算不互相挤占（FGR-EMG-091 / ADR ⑬）：非常温斑块多于预算时热交换按节拍轮转、电传导另有自己的预算——电照样传到，Id 最大的明火照样点燃相邻的油（小场景：预算调到 16、30 块冰作热源）");
-            using CombatKernel k = NewKernel(visits: 16);
-            for (int i = 0; i < 30; i++)
+            Line("  · K2. 热交换不设访问预算（EMGR-RULE-01，FG19B §1.4 第 2、3 条）：热源多于电预算 256 时每块每拍都回温、都交换；电 BFS 的预算仍生效（FGR-EMG-091 / ADR ⑬）");
+            float cool = 40f * 0.25f;
+            using (CombatKernel k = BigQuotaKernel())
             {
-                k.SpawnPatch(EmgMatterConst.Ice, new double2(100 + i % 6 * 2.0, i / 6 * 2.0), 0.5f, 2f, 0f, 0, false, 0); // 远处互不相交的冰：-10 度，不回温，每节拍都是热源
+                SpawnMany(k, 300, i => (EmgMatterConst.Molten, new double2(i % 20 * 3.0, i / 20 * 3.0), 0.5f, 2f));
+                ToNextConduct(k);
+                Dictionary<int, float> t0 = Patches(k).Where(z => z.Matter == EmgMatterConst.Molten).ToDictionary(z => z.EmgId, z => z.Temp);
+                ToNextConduct(k);
+                List<CombatZone> after = Patches(k).Where(z => z.Matter == EmgMatterConst.Molten && t0.ContainsKey(z.EmgId)).ToList();
+                int cooled = after.Count(z => Mathf.Abs(t0[z.EmgId] - z.Temp - cool) < 0.01f);
+                Expect(t0.Count == 300 && after.Count == 300 && cooled == 300 && k.PatchStats.ConductLastVisits >= 300,
+                    $"300 块互不相交的熔融金属（热源 300 > 预算 256）：一个传导节拍后 {cooled} / {after.Count} 块各回落 {cool} 度（每秒 40 度 × 0.25 秒），本拍访问 {k.PatchStats.ConductLastVisits}（旧口径轮转时只有 256 块回落）");
+            }
+            using (CombatKernel k = BigQuotaKernel())
+            {
+                // 300 对“冰压着常温水”：冰 -10 度是热源；水被冰吸热说明这对热源本拍交换过
+                SpawnMany(k, 600, i => (i % 2 == 0 ? EmgMatterConst.Ice : EmgMatterConst.Water, new double2(i / 2 % 20 * 4.0, i / 2 / 20 * 4.0), 1f, i % 2 == 0 ? 2f : 5f));
+                ToNextConduct(k);
+                List<CombatZone> ps = Patches(k);
+                int ice = ps.Count(z => z.Matter == EmgMatterConst.Ice), water = ps.Count(z => z.Matter == EmgMatterConst.Water);
+                Dictionary<int, float> w0 = ps.Where(z => z.Matter == EmgMatterConst.Water).ToDictionary(z => z.EmgId, z => z.Temp);
+                ToNextConduct(k);
+                ps = Patches(k);
+                int chilled = ps.Count(z => z.Matter == EmgMatterConst.Water && w0.TryGetValue(z.EmgId, out float t) && z.Temp < t - 0.5f);
+                int warmed = ps.Count(z => z.Matter == EmgMatterConst.Ice && z.Temp > -10f + 0.01f);
+                Expect(ice == 300 && water == 300 && chilled == 300 && warmed == 300,
+                    $"300 块冰各压着一块常温水（热源 ≥ 300 > 256）：又一个传导节拍后 {chilled} / {water} 块水继续变冷、{warmed} / {ice} 块冰升温（每对都交换，不轮转）");
+            }
+            using (CombatKernel k = BigQuotaKernel(visits: 4))
+            {
+                SpawnMany(k, 30, i => (EmgMatterConst.Molten, new double2(200 + i % 6 * 3.0, i / 6 * 3.0), 0.5f, 2f));
+                for (int i = 0; i < 8; i++)
+                {
+                    k.SpawnPatch(EmgMatterConst.Water, new double2(3 * i, 0), 2f, 5f, 0f, 0, false, 3);
+                }
+                ToNextConduct(k);
+                Dictionary<int, float> t0 = Patches(k).Where(z => z.Matter == EmgMatterConst.Molten).ToDictionary(z => z.EmgId, z => z.Temp);
+                k.InjectPatchEnergy(new double2(0, 0), 0.5f, EmgConst.PortElec, 4f, 3);
+                int carried0 = k.PatchStats.ConductCarried;
+                ToNextConduct(k);
+                int cooled = Patches(k).Count(z => z.Matter == EmgMatterConst.Molten && t0.TryGetValue(z.EmgId, out float t) && Mathf.Abs(t - z.Temp - cool) < 0.01f);
+                bool carried = k.PatchStats.ConductCarried > carried0;
+                float c4 = Charge(k, new double2(12, 0)), c6 = Charge(k, new double2(18, 0));
+                Expect(t0.Count == 30 && cooled == 30 && carried && c4 > 0f && c6 <= 0f,
+                    $"访问预算调到 4（小场景）：30 块熔融金属 {cooled} / 30 块照样每拍回落（热交换不吃预算）；电 BFS 仍到 4 次访问即停、顺延 +{k.PatchStats.ConductCarried - carried0}，第 5 块水洼带电 {c4:0.###}、第 7 块还没轮到 {c6:0.###}");
+            }
+        }
+
+        /// <summary>
+        /// 大场面夹具：冰 / 熔融 / 水的每地点软上限（fg.TbMatter quota 40 / 32 / 64）调到 600，用单一物质摆出几百块热源（总上限 1024 − 世界源保留 96 不变）。
+        /// 只改夹具的软上限，不改热交换与回落的任何参数。
+        /// </summary>
+        private static CombatKernel BigQuotaKernel(int visits = 0)
+        {
+            CombatKernel k = NewKernel(visits: visits);
+            var rows = EmgMatterCatalog.Current.Rows.ToList();
+            foreach (byte m in new[] { EmgMatterConst.Ice, EmgMatterConst.Molten, EmgMatterConst.Water })
+            {
+                EmgMatter r = rows[m];
+                r.Quota = 600;
+                rows[m] = r;
+            }
+            if (!k.SetMatters(rows))
+            {
+                Fail("大场面夹具：内核拒绝了调高软上限的物质表");
+            }
+            return k;
+        }
+
+        /// <summary>批量生成斑块：每 30 块推进一步（每步生成额度 emg.patch.spawn_per_step），生成完再推进一步落地。</summary>
+        private static void SpawnMany(CombatKernel k, int count, Func<int, (byte m, double2 p, float r, float amount)> make)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                (byte m, double2 p, float r, float amount) = make(i);
+                k.SpawnPatch(m, p, r, amount, 0f, 0, false, 0);
+                if (i % 30 == 29)
+                {
+                    StepN(k, 1);
+                }
             }
             StepN(k, 1);
-            k.SpawnPatch(EmgMatterConst.Fire, new double2(40, 0), 2f, 1f, 60f, 0, false, 7); // Id 排在所有冰之后的热源
-            k.SpawnPatch(EmgMatterConst.Oil, new double2(42.34, 0), 2f, 5f, 0f, 0, false, 0);
-            for (int i = 0; i < 4; i++)
-            {
-                k.SpawnPatch(EmgMatterConst.Water, new double2(3 * i, 0), 2f, 5f, 0f, 0, false, 3);
-            }
-            StepN(k, 1);
-            int ice = CountOf(k, EmgMatterConst.Ice);
-            k.InjectPatchEnergy(new double2(0, 0), 0.5f, EmgConst.PortElec, 1f, 3);
-            int carried0 = k.PatchStats.ConductCarried;
-            ToNextConduct(k);
-            float c3 = Charge(k, new double2(9, 0));
-            bool carried = k.PatchStats.ConductCarried > carried0;
-            int lit = -1;
-            for (int s = 1; s <= 180 && lit < 0; s++)
-            {
-                StepN(k, 1);
-                lit = CountOf(k, EmgMatterConst.Oil) == 0 ? s : -1;
-            }
-            Expect(ice >= 30 && carried && c3 > 0f, $"冰 {ice} 块 + 明火 + 油都在升温（热源 > 预算 16，热交换顺延 {k.PatchStats.ConductCarried - carried0} 次）：第 4 块水洼照样带电 {c3:0.###}（电 BFS 不再拿热交换剩下的预算）");
-            Expect(lit > 0, $"Id 最大的明火在第 {lit} 步点燃相邻的油（热交换按节拍轮转起点，排在 16 名之后的热源也轮得到）");
         }
 
         // ── 断言 ─────────────────────────────────────────────────────────────
