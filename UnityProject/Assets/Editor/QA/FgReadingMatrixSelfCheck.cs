@@ -976,7 +976,7 @@ namespace GameLogic.EditorTools
             using (Arena a = Arena.Build(w, prepared: true, tight))
             {
                 a.Run(4f);
-                Expect(a.K.ZoneCount <= 2 && a.K.Counters.ReadingRefused > 0, $"区域上限 2：同时最多 {a.K.ZoneCount} 块，拒绝 {a.K.Counters.ReadingRefused} 次（不抛异常）");
+                Expect(a.K.ZoneCount <= 2 && a.K.Counters.ReadingRefused > 0, $"区域上限 2：同时最多 {a.K.ZoneCount} 块，拒绝 {a.K.Counters.ReadingRefused} 次（不抛异常；这些驻留 / 霰射区域带程序或映射不出物质，照旧落区域、受区域上限；迁入斑块不占名额见 FgEmgCapacitySelfCheck B1～B3）");
             }
             CombatWeapon bay = WeaponFor(ComponentCatalog.CompDroneBayId, HomeValleyLayout.Erc003ChassisId);
             using (Arena a = Arena.Build(bay, prepared: true))
@@ -1105,6 +1105,7 @@ namespace GameLogic.EditorTools
             double p95 = samples[(int)(samples.Count * 0.95)];
             double budget = CombatSite.Tuning("combat.perf.step_budget_ms", 6f);
             PerfLines.Add($"内核单步 200 读法机器 + 200 敌人：平均 {avg:0.000} 毫秒、p95 {p95:0.000} 毫秒（区域 {k.ZoneCount}、无人机 {k.DroneCount}、回波 {k.EchoCount}；预算 {budget} 毫秒，Editor batchmode、同步 Burst）");
+            Expect(k.Counters.ReadingRefused == 0, $"J0 后期规模（EMGR-MAT-01，上限 2048、迁入交斑块层）：读法区域被拒 {k.Counters.ReadingRefused} 次（应 0；区域 {k.ZoneCount - k.LegacyPatchCount} 块、迁入斑块 {k.LegacyPatchCount} 块）");
             ExpectPerf(k.Counters.ZonesSpawned > 0 && k.DroneCount > 0, $"单步平均 {avg:0.000} 毫秒 < 预算 {budget} 毫秒（读法确实在跑：区域 {k.Counters.ZonesSpawned} 块、无人机 {k.DroneCount} 架）", PerfGate.Lt(avg, budget, "单步平均 ms"));
 
             var swb = Stopwatch.StartNew();

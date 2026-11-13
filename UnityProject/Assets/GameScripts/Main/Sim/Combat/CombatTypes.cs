@@ -70,8 +70,9 @@ namespace BinGames.Sim.Combat
         /// <summary>直控移动的坐标钳制“不限”。</summary>
         public const double NoClamp = 1e30;
 
-        /// <summary>FG2-FW-02：配置里没填（0）时的区域 / 回波 / 无人机容量（超出的不生成并计数，不抛异常）。</summary>
-        public const int DefaultZoneCapacity = 512;
+        /// <summary>FG2-FW-02：配置里没填（0）时的区域 / 回波 / 无人机容量（超出的不生成并计数，不抛异常）。
+        /// EMGR-MAT-01：区域 512 → 2048（与 reading.capacity.zones 一起改；迁入斑块不占这个名额；2048 仍是上限，DEBT-EMGRMAT01-01 交 FG15-SYS-02 网格化）。</summary>
+        public const int DefaultZoneCapacity = 2048;
         public const int DefaultEchoCapacity = 1024;
 
         /// <summary>FG6-DEF-02 复审修复：配置里没填（0）时，陷阱发射器场地自己的上限（与读法区域分开计数，互不挤占）。</summary>
@@ -93,7 +94,7 @@ namespace BinGames.Sim.Combat
         /// <summary>FG10-FAC-01（油污爬行者“留下油迹”）：中立的油迹（站进去的己方机器与敌人都挂上油）。与管线液洼同一套整片反应（遇到燃烧等能和油起反应、会留残留的标签就整片变成残留区域，
         /// 双方都挨——“可以用燃迹反过来利用”），但由内核按时长自己消失，不进热更层的液洼对账。阶段同液洼（<see cref="LeakPhasePuddle"/> / <see cref="LeakPhaseReacted"/>）。</summary>
         public const byte ZoneKindSlick = 4;
-        /// <summary>FG10-FAC-01：配置没填（0）时喷淋池 + 油迹的共用上限（超出的不生成并计数）。</summary>
+        /// <summary>FG10-FAC-01：配置没填（0）时喷淋池 + 油迹的共用上限（只管照旧落成区域的那些：斑块层开着时它们是迁入斑块，按 FG19B:221 并入物质斑块的同种软上限与总上限，EMGR-MAT-01；超出的不生成并记 EmgScalars.PoolRefused）。</summary>
         public const int DefaultPoolZoneCapacity = 192;
         /// <summary>FG10-FAC-01（审查修复）：阵亡 / 攻城击毁事件的 Code2 里这一位 = 自毁（不是被谁击毁；SiegeKilled 的第 0 位仍是精英）。</summary>
         public const byte KillSelfDestructBit = 2;

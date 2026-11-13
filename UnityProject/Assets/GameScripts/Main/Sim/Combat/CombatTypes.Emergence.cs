@@ -1018,6 +1018,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-MAT-02（不进快照，调试计数）：迁入斑块生成数 / 斑块层满照旧落区域数 / 读 ≤ 16 版快照转成斑块数 / 设施受击条目顺延的步数。</summary>
         public int LegacyBorn;
         public int LegacyKeptZone;
+        /// <summary>EMGR-MAT-01（不进快照，调试计数）：喷淋池 / 油迹照旧落区域时撞上 clarity.pool.cap 没生成的次数（斑块层关着、或斑块层满退回区域时）。</summary>
+        public int PoolRefused;
         public int LegacyMigrated;
         public int StructHitsDeferred;
         /// <summary>待发布表满（没有消费者的地点）丢掉的最旧条目数。</summary>

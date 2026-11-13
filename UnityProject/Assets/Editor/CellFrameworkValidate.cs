@@ -831,6 +831,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgReactSelfCheck", FgEmgReactSelfCheck.Run); // EMG2-REACT-01：五条定稿反应与装配反应端口化（FGT-EMG-030 / 032 / 004）
             Seg("FgEmgReact2SelfCheck", FgEmgReact2SelfCheck.Run); // EMG2-REACT-02：其余 11 条具名反应（FGT-EMG-030 全量、FGT-EMG-032 扩到 11 条）
             Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02
+            Seg("FgEmgCapacitySelfCheck", FgEmgCapacitySelfCheck.Run); // EMGR-MAT-01：敌方结构单位挨斑块、读法区域上限 2048 与迁入交斑块层、喷淋池 / 油迹并入物质斑块上限（拒绝计数可见）
             Seg("FgEmgReclaimSelfCheck", FgEmgReclaimSelfCheck.Run); // EMG2-RECL-01：回收修复拆残骸、桥接导线、蔓延真扩散（FGT-EMG-037 / 033 / 031 对应部分）
             Seg("FgEmgPersistSelfCheck", FgEmgPersistSelfCheck.Run); // EMG2-PERSIST-01：场地物长期留存、固态挡弹、抛射再弹、清除工作单、堵路警告（FGT-EMG-060 阶段 2、FGT-EMG-040、FGT-EMG-036 第 2 条）
             Seg("FgEmg2ExitSelfCheck", FgEmg2ExitSelfCheck.Run); // EMG2-E2E-01：阶段 2 出口门禁、反向场景映射、右键修复

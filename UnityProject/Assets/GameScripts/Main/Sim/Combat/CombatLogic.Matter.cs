@@ -164,10 +164,6 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 combat++;
-                if (IsLegacy(z))
-                {
-                    continue; // EMG2-MAT-02：迁入斑块只占总数，不当合并对象、不被软 / 总上限挤掉（等价迁移期按区域时长到期）
-                }
                 if (z.Layer == m.Layer && !PatchKept(ref d, z) && (oldestLayer < 0 || Older(z, d.Patches[oldestLayer])))
                 {
                     oldestLayer = i; // EMG2-PERSIST-01：总上限不挤长期留存固态（它们只按 emg.persist.patch_max 崩解为碎屑）
@@ -180,6 +176,12 @@ namespace BinGames.Sim.Combat
                 if (oldestSame < 0 || Older(z, d.Patches[oldestSame]))
                 {
                     oldestSame = i;
+                }
+                if (IsLegacy(z))
+                {
+                    // EMGR-MAT-01（FG19B:221“并入物质斑块上限”）：迁入斑块计入同种 / 总上限、可被选作最早提前到期；
+                    // shortcut: 迁入斑块带区域载荷、没法按份量合并，不当合并对象；迁入斑块改写成真物质后再并入合并
+                    continue;
                 }
                 double dist = math.distance(z.Pos, pos);
                 if (dist < nearD || (dist == nearD && z.EmgId < d.Patches[nearest].EmgId))
@@ -318,7 +320,7 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone z = d.Patches[i];
-                if (PatchAlive(z) && !PatchInReserve(z) && !IsLegacy(z) && !PatchKept(ref d, z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best])))
+                if (PatchAlive(z) && !PatchInReserve(z) && !PatchKept(ref d, z) && z.Layer == layer && (best < 0 || Older(z, d.Patches[best]))) // EMGR-MAT-01：迁入斑块同样可让位
                 {
                     best = i;
                 }
@@ -754,7 +756,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// 单位按槽位分桶（桶数 = 节拍 ÷ 步长，0.25 秒 ≈ 15 桶），每步只处理一桶；倍速只改每帧步数、不改步长，所以 0.5x～3x 结果一致（FGR-EMG-213）。
-        /// 建筑（血量在热更层）不在这里结算——按 ADR ⑤ 聚合进受击脏列表归 EMG2-MAT-02（DEBT-EMG2MAT01-02）；炮塔血量在内核，直接结算。
+        /// 己方结构单位（家园建筑等，血量在热更层）不在这里结算——按 ADR ⑤ 聚合进受击脏列表（EMG2-MAT-02）；炮塔与敌方 / 中立结构单位直接结算（EMGR-MAT-01）。
         /// </summary>
         private static void StepPatchContact(ref CombatData d, float dt)
         {
@@ -766,7 +768,9 @@ namespace BinGames.Sim.Combat
             var hits = new NativeList<int2>(EmgMatterConst.ContactPerUnit + 1, Allocator.Temp);
             for (int u = bucket; u < d.Count; u += buckets)
             {
-                if (!d.IsAlive(u) || d.Kind[u] == (byte)CombatUnitKind.Structure)
+                // EMGR-MAT-01（FG-GAP-217，FGR-EMG-083 单位含敌人）：只跳过己方结构单位（家园建筑由 PipeLeakService 按设施受击结算，不扣两遍）；
+                // 敌方 / 中立结构单位照常接触，外部血量的首领 / 核心经 DamageFrom → 伤害请求走同一条外部血量路径
+                if (!d.IsAlive(u) || (d.Kind[u] == (byte)CombatUnitKind.Structure && d.Faction[u] == (byte)CombatFaction.Player))
                 {
                     continue;
                 }

@@ -1096,14 +1096,6 @@ namespace BinGames.Sim.Combat
             // FG10-FAC-01：喷淋池与油迹共用自己的上限（大量喷洒车不挤掉玩家的读法区域）。
             bool pool = kind == CombatConst.ZoneKindPool || kind == CombatConst.ZoneKindSlick;
             int cap = field ? d.FieldZoneCap : pool ? d.PoolZoneCap : d.ZoneCap;
-            if (d.Zones.Length + d.EmgS[0].PatchLive >= cap && CountZones(ref d, kind) >= cap)
-            {
-                if (!field && !pool)
-                {
-                    RefuseReading(ref d); // 场地被拒由调用方（陷阱发射器）逐座计数并写进状态行；喷淋池 / 油迹满了直接不生成
-                }
-                return false;
-            }
             double now = d.Scalars[0].Time;
             float interval = ZoneTickOf(ref d) / (tickScale > 0f ? tickScale : 1f);
             var made = new CombatZone
@@ -1127,6 +1119,8 @@ namespace BinGames.Sim.Combat
             };
             // EMG2-MAT-02（FGR-EMG-087）：像物质的区域（驻留 / 拖尾 / 反应残留 / 喷淋池 / 油迹）在斑块层开着时迁入 Patches（带区域载荷，同一段节拍代码结算）；
             // 映射不出物质（减速 / 电击……）或斑块层满了就照旧落成区域（不丢）。
+            // EMGR-MAT-01（FG19B:221，DEBT-FG2FW02-06）：迁入斑块不受区域上限（读法 2048 / 场地 / 喷淋池 192）约束，交斑块层自己的软 / 总上限降级；
+            // 照旧落成区域时才按区域上限判（只数 Zones，迁入斑块不占区域名额）。
             int at = migrate ? EmgPlaceLegacy(ref d, made) : -1;
             if (at >= 0)
             {
@@ -1134,6 +1128,20 @@ namespace BinGames.Sim.Combat
             }
             else
             {
+                if (d.Zones.Length >= cap && CountZones(ref d, kind) >= cap)
+                {
+                    if (pool)
+                    {
+                        EmgScalars es = d.EmgS[0];
+                        es.PoolRefused++; // 喷淋池 / 油迹落区域时满了：不生成，计数可见（调试层）
+                        d.EmgS[0] = es;
+                    }
+                    else if (!field)
+                    {
+                        RefuseReading(ref d); // 场地被拒由调用方（陷阱发射器）逐座计数并写进状态行
+                    }
+                    return false;
+                }
                 d.LastZoneAt = d.Zones.Length;
                 d.Zones.Add(made);
             }
@@ -1143,7 +1151,7 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
-        /// <summary>某一种区域此刻有几块（只在总数接近上限时调用）。</summary>
+        /// <summary>某一种区域此刻在 Zones 里有几块（只在总数接近上限时调用；迁入斑块不算）。</summary>
         private static int CountZones(ref CombatData d, byte kind)
         {
             bool pool = kind == CombatConst.ZoneKindPool || kind == CombatConst.ZoneKindSlick;
@@ -1156,7 +1164,7 @@ namespace BinGames.Sim.Combat
                     n++;
                 }
             }
-            return n + LegacyOfKind(ref d, kind, pool); // EMG2-MAT-02：迁入斑块照旧占本种区域的上限（等价）
+            return n; // EMGR-MAT-01：迁入斑块归斑块层上限，不再占区域名额
         }
 
         /// <summary>FG6-DEF-02（FGR-DEF-013 陷阱发射器）：不属于任何单位的场地（陷阱发射器铺的油膜带 / 冷却液带 / 电磁场……），与读法区域同一套结算（节拍伤害、挂标签、触发反应）。

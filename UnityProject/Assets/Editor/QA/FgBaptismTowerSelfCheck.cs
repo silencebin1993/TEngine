@@ -340,7 +340,9 @@ namespace GameLogic.EditorTools
             // C2 主动反应：预警 ≥ 0.8 秒；落在机器最多的那片流体上；站在里面的敌方单位同样起反应（借力打力）。
             // 召来的液氮泵车的池子能把油片冻到点不着（规则涌现，不是缺陷）：这里只验塔引发那一下，先撤掉那一波，等一片新鲜的油
             home.DespawnSiegeGroup(BaptismTowerBoss.WaveKey);
-            ClarityBossFill target = WaitFill(home, r, "Oil") ?? r.Active.LastOrDefault();
+            // FG-GAP-227：EMGR-NAV-01 / CMD-01 之后前面 B 段的战况不同（机器按教义自卫），等到的那片油落在两片酸上，14 步内按物质规则混成油泥（Sludge），塔就不再把它当油、改挑别片（实测）。
+            //   这里只验塔的引发：等一片没和别的斑块相叠的新鲜油。
+            ClarityBossFill target = WaitFill(home, r, "Oil", isolated: true) ?? r.Active.LastOrDefault();
             int bait = 0;
             if (target != null)
             {
@@ -373,9 +375,10 @@ namespace GameLogic.EditorTools
             }
             StepSeconds(1);
             bool baitHit = bait != 0 && (target.Tag == "Wet" ? Lost(home, bait) > 0f : home.Kernel.TryGetStatus(bait, out uint bm, out _, out _, out _, out _) && (bm & Bit("Fire")) != 0u);
-            Expect(target != null && reactWarn > 0 && reactAt - reactWarn >= GameClock.TicksFor(0.8) && pickedSerial == target.Serial && baitHit,
+            bool c2 = target != null && reactWarn > 0 && reactAt - reactWarn >= GameClock.TicksFor(0.8) && pickedSerial == target.Serial && baitHit;
+            Expect(c2,
                 $"C2 主动反应：预警 {(reactAt - reactWarn) / (float)GameClock.StepHz:0.00} 秒（≥ 0.8），挑中机器站着的那片{target?.Tag}（{pickedSerial == target?.Serial}）并{(trigger == "Shock" ? "通电" : "点燃")}；" +
-                $"站在里面的敌方单位同样挨到（借力打力，{baitHit}）");
+                $"站在里面的敌方单位同样挨到（借力打力，{baitHit}）" + (c2 ? string.Empty : DiagC2(s, home, r, target, m, pickedSerial)));
 
             // D 泄压：封闭时减伤且冻不住，泄压时增伤且能冻住（热震打得出来）。
             BaptismTowerBoss.ApplyDamage(s, tower, tower.MaxHealth);
@@ -791,10 +794,12 @@ namespace GameLogic.EditorTools
                 s.Progress.Act = Math.Max(2, s.Progress.Act);
             }
             BaptismTowerBoss.TryArena(s, out Vector2 center);
+            // FG-GAP-227：EMGR-CMD-01 起战斗履带按教义自卫，10 米处 12 台会把塔打穿反应阶段（实测进泄压、耐久 680 / 2400），量不到“波次 + 灌注 + 主动反应同时在跑”的那一段。
+            // 改用 12 台 ERC-001 纯货舱搬运（没有主组件、打不出伤害，不交给教义；搬运轮式 ERC-002 能打，实测同样把塔打掉）：与 EMGR-CMD-01 前的测量口径（12 台不开火的机器）相同；自卫开火的开销由 FgNavSelfCheck 自卫段与满载模糊测试覆盖。
             for (int i = 0; i < 12; i++)
             {
                 float a = i * Mathf.PI * 2f / 12f;
-                Spawn(s, center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * 10f);
+                Spawn(s, center + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * 10f, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id);
             }
             StepSeconds(2);
             RegionEnemyRecord tower = BaptismTowerBoss.Tower(s);
@@ -819,8 +824,21 @@ namespace GameLogic.EditorTools
             bool ok = BaptismTowerBoss.PhaseOf(s) == BaptismPhase.React && r.WaveSpawned;
             // 120 帧 = 8.33 ms / 帧；3x 时每帧平均 1.5 步，世界模拟约占一半帧预算 → 每步 ≤ 2 ms。Editor batchmode 无渲染负载、Mono 未 IL2CPP，比真机偏慢。
             PerfGate.Expect(ok,
-                $"P1 首领战整步（12 台机器 + 反应塔 + 泵站 + {r.WaveUnits.Length} 台召来单位 + {r.Active.Length} 片流体，{n} 步，Editor batchmode）：平均 {avg:0.000} ms / 最大 {max:0.000} ms",
+                $"P1 首领战整步（12 台纯货舱搬运机 + 反应塔 + 泵站 + {r.WaveUnits.Length} 台召来单位 + {r.Active.Length} 片流体，{n} 步，Editor batchmode）：平均 {avg:0.000} ms / 最大 {max:0.000} ms",
                 new[] { PerfGate.Le(avg, 2.0, "首领战每步平均 ms") }, Expect, Line);
+            if (!ok)
+            {
+                Line($"    【P1 诊断】阶段 {BaptismTowerBoss.PhaseOf(s)}、耐久 {tower?.Health:0}/{tower?.MaxHealth:0}、波次 {r.WaveSpawned}、全场自卫开火 {WorldSimulation.Home?.Combat?.SiegeStats.SelfDefenseShots}");
+            }
+        }
+
+        private static string DiagC2(CampaignState s, CombatSite home, ClarityBossRecord r, ClarityBossFill target, int m, int picked)
+        {
+            ClarityBossFill pf = r.Active.FirstOrDefault(f => f.Serial == picked);
+            string tpatch = target != null && home.TryGetPatchById(target.PatchId, out CombatZone z) ? $"斑块物质 {z.Matter} 位置 ({z.Pos.x:0.0},{z.Pos.y:0.0})" : "斑块已无";
+            string mp = home.TryGetMachineUnit(m, out int mu) && home.Kernel.TryGetUnit(mu, out CombatUnitView mv) ? $"({mv.Position.x:0.0},{mv.Position.y:0.0})" : "无";
+            return $"【诊断：阶段 {BaptismTowerBoss.PhaseOf(s)}、耐久 {BaptismTowerBoss.Tower(s)?.Health:0}、目标 #{target?.Serial} {target?.Tag} 记录 ({target?.X:0.0},{target?.Y:0.0}) {tpatch}、挑中 #{picked} {pf?.Tag}、机器 {mp}、" +
+                   $"在场流体 {string.Join(" ", r.Active.Select(f => f.Serial + f.Tag))}、全场自卫开火 {home.SiegeStats.SelfDefenseShots}】";
         }
 
         private static void SaveNow()
@@ -882,13 +900,14 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>等场上出现一片还新鲜（剩 ≥ 25 秒）、还是原物质的 <paramref name="tag"/> 流体。</summary>
-        private static ClarityBossFill WaitFill(CombatSite site, ClarityBossRecord r, string tag)
+        private static ClarityBossFill WaitFill(CombatSite site, ClarityBossRecord r, string tag, bool isolated = false)
         {
             for (int i = 0; i < GameClock.StepHz * 60; i++)
             {
                 foreach (ClarityBossFill f in r.Active)
                 {
-                    if (f.Tag == tag && f.UntilTick - GameClock.Ticks >= GameClock.TicksFor(25f) && site.TryGetPatchById(f.PatchId, out CombatZone z) && z.Matter == BaptismTowerBoss.MatterOfFluid(tag))
+                    if (f.Tag == tag && f.UntilTick - GameClock.Ticks >= GameClock.TicksFor(25f) && site.TryGetPatchById(f.PatchId, out CombatZone z) && z.Matter == BaptismTowerBoss.MatterOfFluid(tag)
+                        && (!isolated || !Overlapped(site, site.Kernel.PatchIndexOf(f.PatchId), z)))
                     {
                         return f;
                     }
@@ -896,6 +915,19 @@ namespace GameLogic.EditorTools
                 WorldSimulation.StepMany(1);
             }
             return null;
+        }
+
+        /// <summary>FG-GAP-227：这块地面斑块有没有和别的地面斑块相叠（相叠的油会按物质规则和酸混成油泥，塔就不再把它当油）。</summary>
+        private static bool Overlapped(CombatSite site, int self, CombatZone z)
+        {
+            for (int k = 0; k < site.Kernel.PatchSlots; k++)
+            {
+                if (site.Kernel.TryGetPatch(k, out CombatZone o) && k != self && o.Layer == z.Layer && math.distance(o.Pos, z.Pos) < o.Radius + z.Radius)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>把机器与诱饵摆上这片（机器最多的那片才被挑中），等塔真的引发到这一片；每半秒把机器按回去。</summary>
@@ -1155,9 +1187,9 @@ namespace GameLogic.EditorTools
             Priority = 1,
         };
 
-        private static int Spawn(CampaignState s, Vector2 at)
+        private static int Spawn(CampaignState s, Vector2 at, string chassis = HomeValleyLayout.Erc003ChassisId, string blueprint = HomeValleyLayout.BlueprintErc003Id)
         {
-            MachineOpResult r = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, HomeValleyLayout.RegionId, at, 5000f, 5000f);
+            MachineOpResult r = MachineRegistry.SpawnMachine(chassis, blueprint, HomeValleyLayout.RegionId, at, 5000f, 5000f);
             if (r.Success && MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec))
             {
                 MachineLoadoutRegistry.Register(s, rec.LogicId, rec.BlueprintId, rec.BlueprintVersion);

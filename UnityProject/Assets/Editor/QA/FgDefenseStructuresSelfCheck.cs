@@ -1344,7 +1344,7 @@ namespace GameLogic.EditorTools
             int fieldsNow = 0;
             for (int i = 0; i < site.Kernel.ZoneCount; i++)
             {
-                if (site.Kernel.TryGetZone(i, out CombatZone z) && z.Kind == CombatConst.ZoneKindField)
+                if (site.Kernel.TryGetZone(i, out CombatZone z) && z.Kind == CombatConst.ZoneKindField && (z.PFlags & EmgMatterConst.FlagLegacy) == 0) // EMGR-MAT-01：迁入斑块（前面 G 铺的油膜带）归斑块层上限，不占场地名额
                 {
                     fieldsNow++;
                 }
@@ -1360,11 +1360,21 @@ namespace GameLogic.EditorTools
             // EMG2-REACT-01 / EMG2-MAT-02：燃迹读法与爆燃的燃烧区现在是物质斑块（明火），不再占区域池——“照常生成”= 区域或斑块有新增、读法区域没被拒
             int born2 = site.Kernel.PatchStats.PatchesBorn + site.Kernel.PatchStats.PatchesMerged; // 新生成或并进已有明火斑块都算
             bool readingOk = reacted2 && after.ReadingRefused == before.ReadingRefused; // 明火斑块可能顺延到下一步才生成，“不挤掉”以读法区域被拒数不变为准
+            // EMGR-MAT-01（FG19B:221）：油膜带映射得出物质，场地满时照常迁入斑块层（交斑块层软 / 总上限），不被场地上限拒绝
+            int legacyBorn0 = site.Kernel.PatchStats.LegacyBorn;
+            StepUntil(() => site.Kernel.PatchStats.LegacyBorn > legacyBorn0, 4);
+            bool oilLaid = site.Kernel.PatchStats.LegacyBorn > legacyBorn0 && TrapRo(s, trap).FieldsRefused == 0;
+            // 映射不出物质的电磁场照旧落区域：场地满了才被拒，状态行写明“场地已满”
+            DefenseService.TrySetTrapFirmware(s, trap.BuildingId, Arc);
             StepUntil(() => TrapRo(s, trap).FieldsRefused > 0, 4);
             TrapReadout full = TrapRo(s, trap);
             string reason = BuildingStatusService.Evaluate(s, trap).Reason;
-            bool told = full.FieldsRefused > 0 && reason.Contains("场地已满") && DefenseService.LastRefusedFields > 0;
-            Expect(poolFull && readingOk && told,
+            // EMGR-MAT-01：场地满时油膜带照常迁入斑块，燃迹炮塔的火会顺着新铺的油烧到陷阱本身（燃迹真明火烧己方建筑），状态行按既有优先级先报“受损”；
+            // 面板的“场地已满”行必须在，状态行没被受损顶掉时也必须写明
+            bool told = full.FieldsRefused > 0 && (full.FieldsFullLine ?? string.Empty).Contains("场地已满") && DefenseService.LastRefusedFields > 0
+                        && (reason.Contains("场地已满") || reason.Contains("受损"));
+            Line($"      G2 场地满时：油膜带照常迁入斑块（新迁入 {site.Kernel.PatchStats.LegacyBorn - legacyBorn0} 块，被拒 0：{oilLaid}）；换电磁场后被拒 {full.FieldsRefused} 块");
+            Expect(poolFull && readingOk && oilLaid && told,
                 $"G2 陷阱场地铺满（上限 {cap}，已铺 {fieldsNow}）不挤掉读法区域：燃迹炮塔照样爆燃（反应 {c1}→{Deflag(site)}），读法区域 / 明火斑块照常生成（斑块 +{born2 - born1}）" +
                 $"（{before.ZonesSpawned}→{after.ZonesSpawned}，被拒 {before.ReadingRefused}→{after.ReadingRefused}）；陷阱状态行写明“{reason.Replace("\n", " / ")}”");
             Clear(site);

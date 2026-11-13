@@ -76,7 +76,7 @@ namespace BinGames.Sim.Combat
         /// 把一块区域落成迁入斑块：返回 Patches 下标，−1 = 没迁（层没开 / 映射不出物质 / 斑块总上限或世界源保留额满——调用方照旧落区域，不丢）。
         /// 计时（Born / Until / NextTick / 节拍）原样保留；补发斑块 Id；不占每步生成额度（区域本来就是即时生成，顺延会改时序）。
         /// </summary>
-        internal static int EmgPlaceLegacy(ref CombatData d, in CombatZone zone, byte matter = 0, bool world = false)
+        internal static int EmgPlaceLegacy(ref CombatData d, in CombatZone zone, byte matter = 0, bool world = false, bool load = false)
         {
             if (!EmgPatchesOn(ref d) || zone.EmgProgRef > 0 || zone.EmgSub != 0)
             {
@@ -87,7 +87,7 @@ namespace BinGames.Sim.Combat
             {
                 return -1;
             }
-            int free = -1, worldN = 0, combat = 0;
+            int free = -1, worldN = 0, combat = 0, sameCount = 0, oldestSame = -1;
             for (int i = 0; i < d.Patches.Length; i++)
             {
                 CombatZone p = d.Patches[i];
@@ -105,7 +105,28 @@ namespace BinGames.Sim.Combat
                 else
                 {
                     combat++;
+                    if (p.Matter == m)
+                    {
+                        sameCount++;
+                        if (oldestSame < 0 || Older(p, d.Patches[oldestSame]))
+                        {
+                            oldestSame = i;
+                        }
+                    }
                 }
+            }
+            EmgMatter mt = MatterOf(ref d, m);
+            // 读旧档（load）不挤占：旧档里已经在场的区域原样转过来，超出的同种由之后新生成的斑块逐块挤掉；挤掉一块后总上限仍满就不挤（不白丢）
+            if (!world && !load && mt.Quota > 0 && sameCount >= mt.Quota && oldestSame >= 0 && combat - 1 < PatchCapOf(ref d) - PatchReserveOf(ref d))
+            {
+                // EMGR-MAT-01（FG19B:221 / §8.1，FG19:688“满了让最早的提前到期，不静默”）：迁入斑块同样按同种软上限判，正常斑块与迁入斑块都算；
+                // 迁入斑块没法按份量合并，所以直接让同种最早的那块（不论来源）提前到期
+                KillPatch(ref d, oldestSame);
+                EmgScalars soft = d.EmgS[0];
+                soft.PatchSoftExpired++;
+                d.EmgS[0] = soft;
+                combat--;
+                free = free < 0 || oldestSame < free ? oldestSame : free;
             }
             if (world ? worldN >= PatchReserveOf(ref d) : combat >= PatchCapOf(ref d) - PatchReserveOf(ref d))
             {
@@ -114,7 +135,6 @@ namespace BinGames.Sim.Combat
                 d.EmgS[0] = full;
                 return -1;
             }
-            EmgMatter mt = MatterOf(ref d, m);
             CombatZone z = zone;
             z.Matter = m;
             z.Layer = mt.Layer;
@@ -138,21 +158,6 @@ namespace BinGames.Sim.Combat
             }
             d.Patches.Add(z);
             return d.Patches.Length - 1;
-        }
-
-        /// <summary>某种区域此刻有几块迁入斑块（只在区域总数接近上限时调用；<paramref name="pool"/> = 喷淋池与油迹共用上限）。</summary>
-        private static int LegacyOfKind(ref CombatData d, byte kind, bool pool)
-        {
-            int n = 0;
-            for (int i = 0; i < d.Patches.Length; i++)
-            {
-                CombatZone p = d.Patches[i];
-                if (IsLegacy(p) && (p.Kind == kind || (pool && (p.Kind == CombatConst.ZoneKindPool || p.Kind == CombatConst.ZoneKindSlick))))
-                {
-                    n++;
-                }
-            }
-            return n;
         }
 
         /// <summary>最近一次 SpawnZone 生成的那块（在 Zones 或 Patches 里）。</summary>
@@ -227,7 +232,8 @@ namespace BinGames.Sim.Combat
                     }
                 }
                 ZoneTick(ref d, ref z, -1, i, now);
-                if (d.Patches[i].Matter != 0)
+                // 节拍里可能生成斑块把本块挤掉、新斑块复用了槽位 i：按 Id 核对，不拿旧副本盖掉新斑块（EMGR-MAT-01 修复轮 2）
+                if (d.Patches[i].Matter != 0 && d.Patches[i].EmgId == z.EmgId)
                 {
                     d.Patches[i] = z;
                 }
@@ -417,7 +423,7 @@ namespace BinGames.Sim.Combat
                                  && (zn.Kind == CombatConst.ZoneKindLeak || zn.Kind == CombatConst.ZoneKindPool || zn.Kind == CombatConst.ZoneKindSlick
                                      || (zn.Kind == CombatConst.ZoneKindReading && zn.Look != CombatZoneLook.Pulse && zn.Look != CombatZoneLook.Web));
                 bool world = zn.Kind == CombatConst.ZoneKindLeak && zn.Phase == CombatConst.LeakPhasePuddle;
-                if (candidate && EmgPlaceLegacy(ref d, zn, 0, world) >= 0)
+                if (candidate && EmgPlaceLegacy(ref d, zn, 0, world, load: true) >= 0)
                 {
                     moved++;
                     continue;
