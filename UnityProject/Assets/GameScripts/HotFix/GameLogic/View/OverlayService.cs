@@ -378,6 +378,7 @@ namespace GameLogic.View
             int lines = 0;
             int markers = 0;
             int badges = 0;
+            int frames = 0; // 顶棚方框：合并网格画，不占线条池
             switch (kind)
             {
                 case OverlayKind.Flow:
@@ -397,11 +398,15 @@ namespace GameLogic.View
                     markers = DrawConstruction(state);
                     break;
                 case OverlayKind.Roof:
-                    markers = DrawRoofs(state);
+                    frames = DrawRoofs(state);
                     break;
                 case OverlayKind.Pollution:
                     markers = DrawPurifiers(state);
                     break;
+            }
+            if (kind != OverlayKind.Roof)
+            {
+                HideRoofFrames();
             }
             for (int i = lines + markers; i < Lines.Count; i++)
             {
@@ -415,7 +420,7 @@ namespace GameLogic.View
                 Badges[i]?.SetVisible(false);
             }
             DrawnLines = lines;
-            DrawnMarkers = markers;
+            DrawnMarkers = markers + frames;
             DrawnBadges = badges;
             PickLabels();
             LastRedrawMs = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
@@ -725,18 +730,37 @@ namespace GameLogic.View
 
         // ── 施工状态：每处施工一个方框（颜色 + 线宽区分状态）+ 标签 ─────────────
 
+        /// <summary>上一次重建施工状态时因 overlay.max_markers 没画框的施工数（标签候选照常有；自检读）。</summary>
+        public static int ConstructionFramesSkipped { get; private set; }
+        /// <summary>上一次重建的标签候选数（显示的只挑离镜头焦点近的 overlay.max_labels 条；自检读）。</summary>
+        public static int LabelCandidates => Candidates.Count;
+
         private static int DrawConstruction(CampaignState state)
         {
             HomeValleyConstruction.CollectQueue(state, Queue);
             int markers = 0;
             int cap = MaxMarkers;
+            ConstructionFramesSkipped = 0;
+            if (Queue.Count > cap)
+            {
+                // EMGR-GL-02（FG-GAP-221；ADR-LOG-008：框有上限）：超出时按离镜头焦点由近到远挑框；标签候选不受上限，全部照常加（PickLabels 再挑）。
+                Vector2 focus = CameraFocus();
+                Queue.Sort((a, b) => (a.Position - focus).sqrMagnitude.CompareTo((b.Position - focus).sqrMagnitude));
+            }
             foreach (HomeValleyConstruction.QueueEntry e in Queue)
             {
+                SiteTone(e.Order, out Color color, out float width, out byte tone);
+                Candidates.Add(new OverlayLabel
+                {
+                    World = new Vector3(e.Position.x, 1.4f, e.Position.y),
+                    Text = GameText.Format("overlay.label.construction", e.Name, e.Status),
+                    Tone = tone,
+                });
                 if (markers >= cap)
                 {
-                    break;
+                    ConstructionFramesSkipped++;
+                    continue;
                 }
-                SiteTone(e.Order, out Color color, out float width, out byte tone);
                 LineRenderer r = LineAt(markers++);
                 Style(r, color, width, true);
                 float h = 1.6f;
@@ -747,12 +771,6 @@ namespace GameLogic.View
                 r.positionCount = 4;
                 r.SetPositions(Square);
                 r.enabled = true;
-                Candidates.Add(new OverlayLabel
-                {
-                    World = new Vector3(e.Position.x, 1.4f, e.Position.y),
-                    Text = GameText.Format("overlay.label.construction", e.Name, e.Status),
-                    Tone = tone,
-                });
             }
             return markers;
         }
@@ -762,36 +780,44 @@ namespace GameLogic.View
 
         /// <summary>
         /// FG7-ENV-03（FG07 第 4 节：顶棚覆盖叠加层）：每块顶棚一个方框——已建成 = 青色实线（框里的格子不受酸雨和沙暴影响），施工中 = 灰色细线；
-        /// 每 4×4 块一片（16×16 格）一个标签写这一片有几块。O(顶棚块数)，只在刷新点重建；超过 overlay.max_markers 的不画。
+        /// 每 4×4 块一片（16×16 格）一个标签写这一片有几块。O(顶棚块数)，只在刷新点重建。
+        /// EMGR-GL-02（FG-GAP-221；ADR-ENV-003 第 9 条“每块一个方框”）：方框全部合成一个网格（同 <see cref="RoofView"/> 的做法），不占线条池、不受 overlay.max_markers 限制；返回方框数。
         /// </summary>
         private static int DrawRoofs(CampaignState state)
         {
             Campaign.Env.RoofService.CollectBlocks(state, RoofScratch);
-            int markers = 0;
-            int cap = MaxMarkers;
             int n = Campaign.Env.RoofService.BlockCells;
             RoofPatch.Clear();
+            RoofVerts.Clear();
+            RoofColors.Clear();
+            RoofTris.Clear();
             foreach (Campaign.Env.RoofPlanBlock b in RoofScratch)
             {
                 long patch = ((long)Campaign.Env.RoofService.FloorDiv(b.Bx, 4) << 32) ^ (uint)Campaign.Env.RoofService.FloorDiv(b.By, 4);
                 int packed = RoofPatch.TryGetValue(patch, out int v) ? v : 0;
                 RoofPatch[patch] = packed + (b.State == 0 ? 1 : 1 << 16);
-                if (markers >= cap)
-                {
-                    continue;
-                }
                 bool built = b.State == 0;
-                LineRenderer r = LineAt(markers++);
-                Style(r, built ? new Color(0.25f, 0.85f, 0.95f, 0.95f) : new Color(0.7f, 0.7f, 0.75f, 0.8f), built ? 0.3f : 0.15f, true);
-                float x0 = b.Bx * n - 0.5f, y0 = b.By * n - 0.5f, x1 = x0 + n, y1 = y0 + n;
-                Square[0] = new Vector3(x0 + 0.1f, 0.3f, y0 + 0.1f);
-                Square[1] = new Vector3(x1 - 0.1f, 0.3f, y0 + 0.1f);
-                Square[2] = new Vector3(x1 - 0.1f, 0.3f, y1 - 0.1f);
-                Square[3] = new Vector3(x0 + 0.1f, 0.3f, y1 - 0.1f);
-                r.positionCount = 4;
-                r.SetPositions(Square);
-                r.enabled = true;
+                float x0 = b.Bx * n - 0.5f + 0.1f, y0 = b.By * n - 0.5f + 0.1f, x1 = x0 + n - 0.2f, y1 = y0 + n - 0.2f;
+                AddFrame(x0, y0, x1, y1, built ? 0.3f : 0.15f, built ? new Color(0.25f, 0.85f, 0.95f, 0.95f) : new Color(0.7f, 0.7f, 0.75f, 0.8f));
             }
+            if (_roofFrameGo == null)
+            {
+                _roofFrameGo = new GameObject("OverlayRoofFrames");
+                _roofFrameGo.transform.SetParent(_root.transform, false);
+                _roofFrameMesh ??= new Mesh { name = "OverlayRoofFrameMesh", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                _roofFrameGo.AddComponent<MeshFilter>().sharedMesh = _roofFrameMesh;
+                var mr = _roofFrameGo.AddComponent<MeshRenderer>();
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                mr.sharedMaterial = ViewMaterials.Get("Sprites/Default", Color.white); // 颜色在顶点色里（已建成青、施工中灰）
+            }
+            _roofFrameMesh.Clear();
+            _roofFrameMesh.SetVertices(RoofVerts);
+            _roofFrameMesh.SetColors(RoofColors);
+            _roofFrameMesh.SetTriangles(RoofTris, 0);
+            _roofFrameMesh.RecalculateBounds();
+            RoofFrames = RoofScratch.Count;
+            _roofFrameGo.SetActive(RoofFrames > 0);
             foreach (KeyValuePair<long, int> kv in RoofPatch)
             {
                 int px = (int)(kv.Key >> 32);
@@ -808,7 +834,57 @@ namespace GameLogic.View
                     Tone = 0,
                 });
             }
-            return markers;
+            return RoofFrames;
+        }
+
+        private static GameObject _roofFrameGo;
+        private static Mesh _roofFrameMesh;
+        private static readonly List<Vector3> RoofVerts = new List<Vector3>(256);
+        private static readonly List<Color> RoofColors = new List<Color>(256);
+        private static readonly List<int> RoofTris = new List<int>(768);
+
+        /// <summary>顶棚覆盖叠加层此刻画着的方框数（0 = 没画；自检读）。</summary>
+        public static int RoofFrames { get; private set; }
+        /// <summary>顶棚方框网格的顶点数（每框 8 个；自检核对网格真的画了每一块 / 全拆后清空）。</summary>
+        public static int RoofFrameVertices => _roofFrameMesh != null ? _roofFrameMesh.vertexCount : 0;
+
+        /// <summary>地面上一个空心方框（外框与内框之间 4 条宽 <paramref name="w"/> 的带，和原来的线框同宽、同中线）。</summary>
+        private static void AddFrame(float x0, float y0, float x1, float y1, float w, Color c)
+        {
+            int i = RoofVerts.Count;
+            float h = w * 0.5f;
+            const float y = 0.3f;
+            RoofVerts.Add(new Vector3(x0 - h, y, y0 - h));
+            RoofVerts.Add(new Vector3(x1 + h, y, y0 - h));
+            RoofVerts.Add(new Vector3(x1 + h, y, y1 + h));
+            RoofVerts.Add(new Vector3(x0 - h, y, y1 + h));
+            RoofVerts.Add(new Vector3(x0 + h, y, y0 + h));
+            RoofVerts.Add(new Vector3(x1 - h, y, y0 + h));
+            RoofVerts.Add(new Vector3(x1 - h, y, y1 - h));
+            RoofVerts.Add(new Vector3(x0 + h, y, y1 - h));
+            for (int k = 0; k < 8; k++)
+            {
+                RoofColors.Add(c);
+            }
+            for (int k = 0; k < 4; k++)
+            {
+                int o0 = i + k, o1 = i + (k + 1) % 4, i0 = o0 + 4, i1 = o1 + 4;
+                RoofTris.Add(o0);
+                RoofTris.Add(i1);
+                RoofTris.Add(o1);
+                RoofTris.Add(o0);
+                RoofTris.Add(i0);
+                RoofTris.Add(i1);
+            }
+        }
+
+        private static void HideRoofFrames()
+        {
+            RoofFrames = 0;
+            if (_roofFrameGo != null && _roofFrameGo.activeSelf)
+            {
+                _roofFrameGo.SetActive(false);
+            }
         }
 
         private const int CircleSegments = 48;
@@ -1033,6 +1109,7 @@ namespace GameLogic.View
             {
                 b?.SetVisible(false);
             }
+            HideRoofFrames();
             DrawnLines = 0;
             DrawnMarkers = 0;
             DrawnBadges = 0;

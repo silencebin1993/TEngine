@@ -95,14 +95,15 @@ namespace GameLogic.Campaign.Defense
                 var list = new List<string>(p.Triggers) { kind };
                 p.Triggers = list.ToArray();
             }
-            // shortcut: 后台通道正替它算路线（RouteAwaiting）时不改目标——通道结果只能由 AdoptRoute 取走，中途改目标会占死通道；通道空出后的下一次“针对净化塔”触发再改。
-            if (kind == RaidCatalog.TriggerPurification && p.State < StateWarned && p.RouteState != RouteAwaiting)
+            if (kind == RaidCatalog.TriggerPurification && p.State < StateWarned)
             {
                 // FG10-RAID-01 修复轮 1（P2）：“针对净化塔”并进来时同样改打净化塔最多的那一处；目标变了按出发地失效同一套重排（重选出发地、重要路线、预报作废）。
+                // EMGR-GL-02（FG-GAP-219）：正在后台通道等路线（RouteAwaiting）时也改——旧路线作废（放弃通道、通道空出、存档时提前取出的结果丢掉），再重要。
                 string kind0 = p.TargetKind, id0 = p.TargetId;
                 SelectPurifierTarget(s, p);
                 if (p.TargetKind != kind0 || p.TargetId != id0)
                 {
+                    ReleaseRoute(StateOf(s), p);
                     SelectOrigin(s, StateOf(s), p);
                     p.State = StatePlanning;
                     p.RouteState = RouteNeed;
@@ -768,6 +769,25 @@ namespace GameLogic.Campaign.Defense
         }
 
         /// <summary>
+        /// 这个计划不再要它正在等的那条路线（计划结束 / 改目标）：后台通道正替它算就放弃；它占着通道到采纳步的，通道空出来（不管结果是否已在存档时取出——存档与否逐步一致）；
+        /// 存档时提前取出的结果作废（不会被 <see cref="AdoptRoute"/> 当成新目标的路线采纳）。
+        /// </summary>
+        private static void ReleaseRoute(RaidDirectorState d, RaidPlanRecord p)
+        {
+            if (LaneOwns(p))
+            {
+                NavService.CancelBackground();
+            }
+            if (p.RouteState == RouteAwaiting && p.RouteAdoptTick == d.LaneBusyUntilTick)
+            {
+                d.LaneBusyUntilTick = -1;
+            }
+            p.PendingRoute = false;
+            p.PendingX = Array.Empty<int>();
+            p.PendingY = Array.Empty<int>();
+        }
+
+        /// <summary>
         /// 存档前（WorldSimulation.SyncAllForSave）：后台通道正替某个计划算的那一条，现在取出来存进计划（还没到采纳步就先不用）——读档后在同一采纳步交到，与不存档逐步一致。
         /// </summary>
         public static void WriteTo(CampaignState s)
@@ -1103,14 +1123,7 @@ namespace GameLogic.Campaign.Defense
                     keep.Add(p);
                     continue;
                 }
-                if (LaneOwns(p))
-                {
-                    NavService.CancelBackground(); // 不再要的路线：释放后台通道
-                }
-                if (p.RouteState == RouteAwaiting && p.RouteAdoptTick == d.LaneBusyUntilTick)
-                {
-                    d.LaneBusyUntilTick = -1; // 占着通道的计划结束了（不管结果是否已在存档时取出）：通道空闲
-                }
+                ReleaseRoute(d, p);
                 hist.Add(new RaidHistoryRecord
                 {
                     PlanId = p.PlanId, Wave = p.Wave, Trigger = p.Trigger, Faction = p.Faction, Level = p.Level, Units = p.UnitTotal,

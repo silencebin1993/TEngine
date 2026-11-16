@@ -122,6 +122,7 @@ namespace GameLogic.EditorTools
                 Step(CheckForecast);
                 Step(CheckRoof);
                 Step(CheckRoofDemolishConfirm);
+                Step(CheckOverlayUncapped);
                 Step(CheckAcid);
                 Step(CheckSandstorm);
                 Step(CheckColdSnap);
@@ -342,6 +343,144 @@ namespace GameLogic.EditorTools
         {
             int placed = RoofService.PlaceBox(s, Cell(bx, by, 0, 0), Cell(bx, by, 3, 3));
             return placed == 1 && StepUntil(() => RoofService.HasBlock(s, bx, by), maxSeconds * Hz);
+        }
+
+        // ── R3 EMGR-GL-02（FG-GAP-221）：顶棚 / 施工叠加层不封顶 ───────────────────────────────────
+
+        /// <summary>
+        /// FG07:149、ADR-ENV-003 第 9 条“每块一个方框”（无上限）：300 块已建成 + 300 块施工中的顶棚，顶棚覆盖叠加层每块都有框（一个合并网格，不受 overlay.max_markers）；
+        /// ADR-LOG-008“框有上限”：300 张施工单 &gt; 框上限时框按离镜头焦点由近到远挑、多出的只跳过画框，标签候选 300 张全有——镜头对着队列最后那一张时它有框也有标签。
+        /// 负向：施工单在两个刷新点之间完成（取消）——下一个刷新点框与标签一起撤掉；顶棚全拆后网格清空。
+        /// </summary>
+        private static void CheckOverlayUncapped()
+        {
+            CampaignState s = NewWorld(5531);
+            GridCell core = HomeGridService.CorePivot(s);
+            HomeGridService.RevealArea(s, new Vector2(core.X, core.Y), 140f);
+            int cap = GridContent.TuningInt("overlay.max_markers");
+            int cbx = RoofService.BlockOf(core.X), cby = RoofService.BlockOf(core.Y);
+            // 300 块施工中的顶棚：每次拖一块（真实规划入口，一块一张施工单），从核心向外一圈圈铺；不推进时间，施工单都还在队列里。
+            var planned = new List<(int Bx, int By)>();
+            int ring = 2;
+            for (; ring <= 30 && planned.Count < 300; ring++)
+            {
+                for (int dy = -ring; dy <= ring && planned.Count < 300; dy++)
+                {
+                    for (int dx = -ring; dx <= ring && planned.Count < 300; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) == ring && RoofService.PlaceBox(s, Cell(cbx + dx, cby + dy, 0, 0), Cell(cbx + dx, cby + dy, 0, 0)) == 1)
+                        {
+                            planned.Add((cbx + dx, cby + dy));
+                        }
+                    }
+                }
+            }
+            // 300 块已建成的顶棚（测试捷径 = 读一个已经盖了 300 块的存档；施工流程见 R1），放在施工中那一片外面。
+            var built = new List<RoofRecord>();
+            for (int r = ring + 1; r <= ring + 30 && built.Count < 300; r++)
+            {
+                for (int dy = -r; dy <= r && built.Count < 300; dy++)
+                {
+                    for (int dx = -r; dx <= r && built.Count < 300; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) == r)
+                        {
+                            built.Add(new RoofRecord { Bx = cbx + dx, By = cby + dy });
+                        }
+                    }
+                }
+            }
+            RoofService.StateOf(s).Built = built.ToArray();
+            OverlayService.Set(OverlayKind.Roof);
+            OverlayService.RedrawNow();
+            double roofMs = OverlayService.LastRedrawMs; // P18 帧耗：只在刷新点重建，量一次记证据（真机复测在 FG15-SYS-02）
+            int blocks = RoofService.BuiltCount(s) + RoofService.PlannedCount(s);
+            GameObject roofGo = GameObject.Find("OverlayRoofFrames");
+            Expect(planned.Count == 300 && built.Count == 300 && blocks == 600 && blocks > cap && OverlayService.DrawnMarkers == blocks && OverlayService.RoofFrames == blocks
+                   && OverlayService.RoofFrameVertices == blocks * 8 && roofGo != null && roofGo.activeInHierarchy,
+                $"R3 顶棚覆盖不封顶：已建成 {built.Count} + 施工中 {planned.Count} = {blocks} 块（框上限 {cap}），叠加层 {OverlayService.DrawnMarkers} 个方框、合并网格 {OverlayService.RoofFrameVertices} 个顶点（每框 8 个），一次绘制；这次刷新点重建 {roofMs:0.00} ms（Editor batchmode 一次测量）");
+
+            // 施工状态：镜头对着队列最后一张（离核心最远、排在最后——原来超过上限连框带标签一起丢）。
+            OverlayService.Set(OverlayKind.Construction);
+            var queue = new List<HomeValleyConstruction.QueueEntry>();
+            HomeValleyConstruction.CollectQueue(s, queue);
+            HomeValleyConstruction.QueueEntry last = queue[queue.Count - 1];
+            Camera cam = WorldView.Camera != null ? WorldView.Camera : Camera.main;
+            GameObject tempCam = null;
+            if (cam == null)
+            {
+                tempCam = new GameObject("GL02Camera");
+                cam = tempCam.AddComponent<Camera>();
+            }
+            Vector3 camPos = cam.transform.position;
+            Quaternion camRot = cam.transform.rotation;
+            bool lastFramed, lastLabeled, nearestFramed;
+            double buildMs;
+            int skipped, candidates;
+            try
+            {
+                cam.transform.SetPositionAndRotation(new Vector3(last.Position.x, 40f, last.Position.y), Quaternion.Euler(90f, 0f, 0f));
+                OverlayService.RedrawNow();
+                buildMs = OverlayService.LastRedrawMs;
+                skipped = OverlayService.ConstructionFramesSkipped;
+                candidates = OverlayService.LabelCandidates;
+                List<Vector2> frames = ConstructionFrameCenters();
+                lastFramed = frames.Any(f => (f - last.Position).sqrMagnitude < 0.01f);
+                lastLabeled = OverlayService.Labels.Any(l => (new Vector2(l.World.x, l.World.z) - last.Position).sqrMagnitude < 0.01f);
+                // 框的挑选 = 离焦点最近的 cap 个：画了框的最远一个不比没画框的最近一个远。
+                float[] d = queue.Select(q => (q.Position - last.Position).sqrMagnitude).OrderBy(x => x).ToArray();
+                float framedMax = frames.Count > 0 ? frames.Max(f => (f - last.Position).sqrMagnitude) : float.MaxValue;
+                nearestFramed = frames.Count == cap && framedMax <= d[cap - 1] + 1e-3f;
+                // 负向：这张施工单在两个刷新点之间完成（取消）——下一个刷新点框与标签一起撤掉，框数仍是上限、跳过的少一张。
+                WorkOrderRecord lastOrder = last.Order;
+                bool cancelled = lastOrder != null && PlanHistory.CancelSite(s, lastOrder);
+                OverlayService.RedrawNow();
+                bool gone = cancelled && !ConstructionFrameCenters().Any(f => (f - last.Position).sqrMagnitude < 0.01f)
+                            && !OverlayService.Labels.Any(l => (new Vector2(l.World.x, l.World.z) - last.Position).sqrMagnitude < 0.01f)
+                            && OverlayService.LabelCandidates == queue.Count - 1 && OverlayService.ConstructionFramesSkipped == skipped - 1 && OverlayService.DrawnMarkers == cap;
+                Expect(queue.Count == 300 && OverlayService.Active == OverlayKind.Construction && skipped == queue.Count - cap && candidates == queue.Count && lastFramed && lastLabeled && nearestFramed && gone,
+                    $"R3 施工状态：{queue.Count} 张施工单 > 框上限 {cap}——框按离镜头焦点由近到远挑（{nearestFramed}），只跳过 {skipped} 张的框，标签候选 {candidates} 张全有；" +
+                    $"镜头对着队列最后一张：有框 {lastFramed}、有标签 {lastLabeled}（这次刷新点重建 {buildMs:0.00} ms）；负向：它在刷新点之间完成（取消）后，下一个刷新点框与标签一起撤掉 {gone}");
+            }
+            finally
+            {
+                cam.transform.SetPositionAndRotation(camPos, camRot);
+                if (tempCam != null)
+                {
+                    Object.DestroyImmediate(tempCam);
+                }
+            }
+
+            // 负向：顶棚全拆（拆除模式框选完整包住全部块：已建成的拆掉、施工中的取消）→ 叠加层网格清空、不画。
+            int minBx = built.Min(b => b.Bx), maxBx = built.Max(b => b.Bx), minBy = built.Min(b => b.By), maxBy = built.Max(b => b.By);
+            int removed = RoofService.DemolishBox(s, Cell(minBx, minBy, 0, 0), Cell(maxBx, maxBy, RoofService.BlockCells - 1, RoofService.BlockCells - 1));
+            OverlayService.Set(OverlayKind.Roof);
+            OverlayService.RedrawNow();
+            Expect(removed > 0 && RoofService.BuiltCount(s) == 0 && RoofService.PlannedCount(s) == 0 && OverlayService.RoofFrames == 0 && OverlayService.RoofFrameVertices == 0
+                   && OverlayService.DrawnMarkers == 0 && (roofGo == null || !roofGo.activeSelf),
+                $"R3 负向：顶棚全拆（拆 / 取消 {removed} 块）后叠加层网格清空：方框 {OverlayService.RoofFrames}、顶点 {OverlayService.RoofFrameVertices}、网格物体不画");
+            OverlayService.Set(OverlayKind.None);
+        }
+
+        /// <summary>叠加层线条池里此刻画着的方框（4 点闭合线）的中心。</summary>
+        private static List<Vector2> ConstructionFrameCenters()
+        {
+            var list = new List<Vector2>();
+            GameObject root = GameObject.Find("LogisticsOverlay");
+            if (root == null)
+            {
+                return list;
+            }
+            var pts = new Vector3[4];
+            foreach (LineRenderer r in root.GetComponentsInChildren<LineRenderer>(false))
+            {
+                if (r.enabled && r.positionCount == 4 && r.loop)
+                {
+                    r.GetPositions(pts);
+                    list.Add(new Vector2((pts[0].x + pts[2].x) * 0.5f, (pts[0].z + pts[2].z) * 0.5f));
+                }
+            }
+            return list;
         }
 
         // ── D1 数据 ───────────────────────────────────────────────────────────────

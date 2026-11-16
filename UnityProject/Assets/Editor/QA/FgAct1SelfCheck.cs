@@ -59,6 +59,9 @@ namespace GameLogic.EditorTools
         private const string Fo = FoundryOutpostLayout.RegionId;
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private static readonly int[] Seeds = { 1, 42, 20261017 };
+        /// <summary>EMGR-GL-02（FG-GAP-220）：远征地点生成内容另加 6313、8704——破碎都市合并到最后一档仍超障碍圆软上限的种子（原来远处 2～3 块悬崖 / 水面被截断）。</summary>
+        private static readonly int[] SiteSeeds = { 1, 42, 20261017, 6313, 8704 };
+        private static int _overCapSeed;
 
         private static StringBuilder _report;
         private static int _fail;
@@ -507,7 +510,9 @@ namespace GameLogic.EditorTools
         private static void CheckSiteLayoutSeeds()
         {
             var fingerprints = new List<string>();
-            foreach (int seed in Seeds)
+            int overCapSites = 0;
+            _overCapSeed = 0;
+            foreach (int seed in SiteSeeds)
             {
                 CampaignState s = NewWorld(seed);
                 foreach (string site in new[] { City, Fo })
@@ -523,7 +528,7 @@ namespace GameLogic.EditorTools
                     // 地形障碍 = 星球真实地形（按锚点朝向变换后的格不可通行）。
                     WorldTerrainSource src = WorldGenService.ContextFor(s).Source;
                     // 修复轮（第 1 轮审查 P1）：每个障碍圆的圆心都是星球真实地形里不可通行的格（全部核对，不再只抽查 12 个）；
-                    // 窗口里全部不可通行格都被障碍圆盖住（一格不丢，不截断），障碍数不超上限。
+                    // 窗口里全部不可通行格都被障碍圆盖住（一格不丢，不截断）。EMGR-GL-02：obstacleMax 是软上限——合并到最后一档仍超的全部保留、OverCap 记超出数。
                     bool real = true;
                     foreach (Vector3 o in c.Obstacles)
                     {
@@ -532,14 +537,20 @@ namespace GameLogic.EditorTools
                         real &= GridContent.TerrainByCode(terrain)?.NavCost == 0;
                     }
                     bool coveredAll = c.BlockedSamples > 0 && c.CoveredBlocked == c.BlockedSamples && string.IsNullOrEmpty(c.Problem);
+                    bool softCap = c.OverCap == Math.Max(0, c.Obstacles.Count - c.Row.ObstacleMax) && (c.OverCap == 0 || c.MergeLevel == 2);
+                    overCapSites += c.OverCap > 0 ? 1 : 0;
+                    if (c.OverCap > 0 && site == City && _overCapSeed == 0)
+                    {
+                        _overCapSeed = seed;
+                    }
                     // 铸造前哨：驻军（连同围着它的一圈单位）与熔渣热区都在核心门封锁线以下；封锁线以上只有 Demo 核心区，外圈的禁区里没有障碍。
                     bool below = site != Fo || (c.Garrisons.All(g => g.Local.y <= FoundryOutpostLayout.CoreGateBlockLineY - 6f)
                                                 && c.SlagZones.All(z => z.y + z.z <= FoundryOutpostLayout.CoreGateBlockLineY)
                                                 && c.Obstacles.All(o => !c.InOuterBand(new Vector2(o.x, o.y))));
-                    Expect(c.Garrisons.Count == c.Row.Garrisons && outside && demoClear && real && coveredAll && below && c.Obstacles.Count <= c.Row.ObstacleMax && c.ReachableSamples > 0
+                    Expect(c.Garrisons.Count == c.Row.Garrisons && outside && demoClear && real && coveredAll && below && softCap && c.ReachableSamples > 0
                            && (site != Fo || c.SlagZones.Count == c.Row.SlagZones),
                         $"C1 种子 {seed} {site}：{c.Garrisons.Count} 处驻军都在 Demo 矩形外 {c.Row.Margin} 米、与入口连通（按放好的障碍圆重算）、不压地形障碍{(site == Fo ? "、都在核心门封锁线以下" : "")}；" +
-                        $"不可通行格 {c.BlockedSamples} 个全部被 {c.Obstacles.Count} 个障碍圆盖住（{c.CoveredBlocked}/{c.BlockedSamples}，合并档位 {c.MergeLevel}，上限 {c.Row.ObstacleMax}），圆心全部取自星球真实地形；" +
+                        $"不可通行格 {c.BlockedSamples} 个全部被 {c.Obstacles.Count} 个障碍圆盖住（{c.CoveredBlocked}/{c.BlockedSamples}，合并档位 {c.MergeLevel}，软上限 {c.Row.ObstacleMax}、超出 {c.OverCap} 个全部保留），圆心全部取自星球真实地形；" +
                         $"Demo 矩形里没有生成内容；熔渣热区 {c.SlagZones.Count}；可走取样 {c.ReachableSamples}/{c.WalkableSamples}{(string.IsNullOrEmpty(c.Problem) ? "" : "；问题：" + c.Problem)}");
                     fingerprints.Add(string.Join(";", c.Garrisons.Select(g => $"{g.Local.x},{g.Local.y}")));
                     SiteGenContent again = SiteGenLayout.For(s, site);
@@ -550,7 +561,15 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(fingerprints.Distinct().Count() == fingerprints.Count,
-                "C1b B25：驻军位置随种子变化（3 个种子 × 2 个地点的驻军布局互不相同，不依赖固定坐标）");
+                $"C1b B25：驻军位置随种子变化（{SiteSeeds.Length} 个种子 × 2 个地点的驻军布局互不相同，不依赖固定坐标）");
+            // C1c EMGR-GL-02（FG-GAP-220；ADR-NAR-002 §9 第 3 条“外圈真实地形不截断”）：种子 6313 / 8704 的破碎都市合并到最后一档仍超软上限——超出的圆全部保留（C1 已核一格不丢），OverCap 可见。
+            Expect(overCapSites > 0, $"C1c 软上限真的被越过过：{overCapSites} 个“种子 × 地点”合并到最后一档仍超 obstacleMax，超出的全部保留、不可通行格一格不丢（原来远处被截断）");
+            // C1d 负向：窗口里一格不可通行的都没有（0 个障碍圆）——不放圆、OverCap = 0、Problem 为空（地点照常生成，战斗内核障碍表为空）。
+            var none = new SiteGenContent { SiteId = City };
+            typeof(SiteGenLayout).GetMethod("CoverObstacles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                ?.Invoke(null, new object[] { none, null, 3, 4, 4, new Vector2[16], new byte[16], new bool[16] });
+            Expect(none.BlockedSamples == 0 && none.Obstacles.Count == 0 && none.OverCap == 0 && string.IsNullOrEmpty(none.Problem),
+                $"C1d 负向：0 个不可通行格 → 0 个障碍圆、OverCap {none.OverCap}、问题“{none.Problem}”");
         }
 
         private static void CheckGarrisonRegistration()
@@ -1063,24 +1082,41 @@ namespace GameLogic.EditorTools
                 $"F1 性能预算：生成内容每个地点 < 60 ms（实测 {cityMs:0.0} / {foMs:0.0}）；信号侦测 + 节奏检查每次 < 200 µs（实测 {stepUs:0.0}，各自每 1～2 游戏秒才跑一次）");
 
             // 修复轮（障碍圆上限 120 → 160）：破碎都市里三台机器正在和驻军交战时，整个世界一步（家园 + 地点战斗内核的避障 / 视线遍历全部障碍）的耗时。
-            CampaignState s3 = NewWorld(42);
-            int[] team = { Spawn(s3, HomeValleyLayout.RegionId, new Vector2(3f, 3f)), Spawn(s3, HomeValleyLayout.RegionId, new Vector2(5f, 3f)), Spawn(s3, HomeValleyLayout.RegionId, new Vector2(7f, 3f)) };
-            FracturedCityController city = EnterCityTeam(s3, team);
-            WorldSimulation.StepMany(3);
-            SiteGarrisonPoint g0 = city.SiteGen.Garrisons.OrderBy(g => (g.Local - SiteGenLayout.EntryLocal(City)).sqrMagnitude).First();
-            string target = NearestGarrisonUnit(s3, city.Combat, g0, team);
-            city.SquadCommands.DebugSelectMany(team);
-            if (target != null)
+            double CityFightUs(int seed, out SiteGenContent gen, out int enemies)
             {
-                city.SquadCommands.IssueAttack(target, false);
+                CampaignState s3 = NewWorld(seed);
+                int[] team = { Spawn(s3, HomeValleyLayout.RegionId, new Vector2(3f, 3f)), Spawn(s3, HomeValleyLayout.RegionId, new Vector2(5f, 3f)), Spawn(s3, HomeValleyLayout.RegionId, new Vector2(7f, 3f)) };
+                FracturedCityController city = EnterCityTeam(s3, team);
+                WorldSimulation.StepMany(3);
+                SiteGarrisonPoint g0 = city.SiteGen.Garrisons.OrderBy(g => (g.Local - SiteGenLayout.EntryLocal(City)).sqrMagnitude).First();
+                string target = NearestGarrisonUnit(s3, city.Combat, g0, team);
+                city.SquadCommands.DebugSelectMany(team);
+                if (target != null)
+                {
+                    city.SquadCommands.IssueAttack(target, false);
+                }
+                WorldSimulation.StepMany(GameClock.StepHz * 5);
+                var watch = Stopwatch.StartNew();
+                const int steps = 600;
+                WorldSimulation.StepMany(steps);
+                gen = city.SiteGen;
+                enemies = city.Combat.EnemyIds.Count();
+                return watch.Elapsed.TotalMilliseconds * 1000.0 / steps;
             }
-            WorldSimulation.StepMany(GameClock.StepHz * 5);
-            sw.Restart();
-            const int steps = 600;
-            WorldSimulation.StepMany(steps);
-            double worldUs = sw.Elapsed.TotalMilliseconds * 1000.0 / steps;
-            Line($"  - 性能：破碎都市交战中（障碍圆 {city.SiteGen.Obstacles.Count} 个、地点敌人 {city.Combat.EnemyIds.Count()} 个）整个世界一步 {worldUs:0.0} µs");
-            Expect(worldUs < 2000.0, $"F2 性能预算：地点交战中整个世界一步 < 2000 µs（实测 {worldUs:0.0}，障碍圆 {city.SiteGen.Obstacles.Count} 个；Editor batchmode 一次测量，真机门禁在 FG15-SYS-02）");
+            double worldUs = CityFightUs(42, out SiteGenContent gen42, out int foes42);
+            Line($"  - 性能：破碎都市交战中（障碍圆 {gen42.Obstacles.Count} 个、地点敌人 {foes42} 个）整个世界一步 {worldUs:0.0} µs");
+            Expect(worldUs < 2000.0, $"F2 性能预算：地点交战中整个世界一步 < 2000 µs（实测 {worldUs:0.0}，障碍圆 {gen42.Obstacles.Count} 个；Editor batchmode 一次测量，真机门禁在 FG15-SYS-02）");
+            // F3 EMGR-GL-02（FG-GAP-220）：超软上限的种子（全部障碍圆保留、不截断）同样交战一次，量一次记证据（避障 / 视线按障碍数线性，超出的几个圆约 +2%）。
+            if (_overCapSeed > 0)
+            {
+                double ocUs = CityFightUs(_overCapSeed, out SiteGenContent genOc, out int foesOc);
+                Line($"  - 性能：种子 {_overCapSeed} 破碎都市交战中（障碍圆 {genOc.Obstacles.Count} 个，超软上限 {genOc.OverCap} 个全部保留；地点敌人 {foesOc} 个）整个世界一步 {ocUs:0.0} µs");
+                Expect(ocUs < 2000.0, $"F3 性能预算：超软上限的种子 {_overCapSeed} 地点交战中整个世界一步 < 2000 µs（实测 {ocUs:0.0}，障碍圆 {genOc.Obstacles.Count} 个、超出 {genOc.OverCap}；Editor batchmode 一次测量，真机复测在 FG15-SYS-02）");
+            }
+            else
+            {
+                Fail("F3 没有超软上限的种子可量（C1c 应已失败）");
+            }
         }
 
         // ───────────────────────────── 工具 ─────────────────────────────

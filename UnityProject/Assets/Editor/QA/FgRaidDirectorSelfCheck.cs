@@ -1754,13 +1754,28 @@ namespace GameLogic.EditorTools
             // J9：出发时从据点驻军里抽人随队，撤回出发地时还给据点（不超过上限）。
             OutpostRecord nest = WorldOutpostSystem.Find(w, p.OriginId);
             int g0 = nest.Garrison;
+            // EMGR-CMD-01 起带武器的家园机器按教义自卫（射程内有敌人原地还手），这股 1 级静默突袭会在家园被打光（结束原因 destroyed，驻军不还——这是对的）。
+            // J9 测“撤回出发地时还驻军”，不赌战斗结果：先按游戏规则把家园带武器的机器右键移到背向据点、离核心 150 格的地方（远在射程外），再等突袭到时间上限撤回。
+            HomeValleyController hv = WorldSimulation.Home;
+            int[] armed = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId && !m.IsInFactory && hv.Combat.CanMachineAttack(m.LogicId))
+                .Select(m => m.LogicId).ToArray();
+            if (armed.Length > 0)
+            {
+                Vector2 away = new Vector2(core.X, core.Y) - new Vector2(nest.CellX - core.X, nest.CellY - core.Y).normalized * 150f;
+                HomeGridService.RevealArea(w, away, 30f);
+                hv.SquadCommands.DebugSelectMany(armed);
+                hv.SquadCommands.IssueMoveTo(away, false);
+            }
             bool departed = RunUntil(() => p.State >= RaidDirectorService.StateDeparted, 200);
             TransitGroupRecord g = WorldTransitSystem.Find(w, p.GroupId);
             int taken = g?.GarrisonTaken ?? -1;
             bool tookOk = departed && g != null && taken == Math.Min(p.UnitTotal, Math.Max(0, g0 - 1)) && nest.Garrison == g0 - taken;
             bool back = g != null && RunUntil(() => WorldTransitSystem.Find(w, p.GroupId) == null, 600);
             bool restored = back && nest.Garrison == Math.Min(nest.GarrisonCap, g0 - taken + taken);
-            Expect(tookOk && restored, $"J9 据点是集结点：出发时驻军 {g0} 里抽 {taken} 台随队（至少留 1 台守家），到达后时间上限撤回出发地离场，驻军还回 {nest.Garrison}");
+            TransitGroupRecord left = WorldTransitSystem.Find(w, p.GroupId);
+            RaidHistoryRecord hist = D(w).History.LastOrDefault(h => h != null && h.PlanId == p.PlanId);
+            Expect(tookOk && restored, $"J9 据点是集结点：出发时驻军 {g0} 里抽 {taken} 台随队（至少留 1 台守家），到达后时间上限撤回出发地离场，驻军还回 {nest.Garrison}（家园带武器的机器 {armed.Length} 台已先移到射程外）" +
+                                       (tookOk && restored ? string.Empty : $"（出发 {departed}、离场 {back}；队伍 {left?.State.ToString() ?? "已不在"} 剩 {left?.UnitCount}；计划 {p.State} 结束原因 {hist?.EndReason ?? p.EndReason}；据点 {(nest.Destroyed ? "已摧毁" : "在")}）"));
         }
 
         private static void CheckExposurePanel(CampaignState s)

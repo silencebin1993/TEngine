@@ -130,6 +130,7 @@ namespace GameLogic.EditorTools
                 Step(CheckSwarmTrail);
                 Step(CheckSiegeCharge);
                 Step(CheckPurifierPlanTarget);
+                Step(CheckPurifierRetargetWhileRouting);
                 Step(CheckTimingAndObservation);
                 Step(CheckTerritoryObservation);
                 Step(CheckAwayMarchAcidAndRepollution);
@@ -608,6 +609,127 @@ namespace GameLogic.EditorTools
             F.Seconds(1.1f);
             Expect(pre && plan.TargetKind == RaidDirectorService.TargetOutpost && plan.TargetId == outpost.OutpostId && plan.Revision > rev0,
                 $"G2 “针对净化塔”并进还没预警的计划（{pre}）：目标改成净化塔那一处 {plan.TargetKind}/{plan.TargetId}，变更序号 {rev0} → {plan.Revision}");
+        }
+
+        // ─────────────── G2b 等路线时并进“针对净化塔”（EMGR-GL-02，FG-GAP-219；FG09:228、FG10-RAID-01“优先攻击净化塔”） ───────────────
+
+        private static void CheckPurifierRetargetWhileRouting()
+        {
+            string s1 = RetargetWhileRouting(10709, 1, out bool ok1, out string d1, out _);
+            string s2 = RetargetWhileRouting(10709, 2, out bool ok2, out string d2, out _);
+            string s0 = RetargetWhileRouting(10709, 0, out bool ok0, out string d0, out RaidPlanRecord plan);
+            Expect(ok0 && ok1 && ok2 && s0.Length > 0 && s1 == s0 && s2 == s0,
+                $"G2b 普通突袭正在后台通道等路线时并进“针对净化塔”：同样改打净化塔那一处，旧路线作废（放弃通道、通道空出、预报作废），在新采纳步按新目标采纳；" +
+                $"存档时提前取出的旧结果被丢弃、不被采纳；存档后接着跑、读档再跑都与不存档逐字段一致\n  不存档：{d0}\n  存档后：{d1}\n  读档后：{d2}" +
+                (s1 == s0 ? string.Empty : $"\n不存档：{s0}\n存档后：{s1}") + (s2 == s0 ? string.Empty : $"\n读档后：{s2}"));
+            if (plan == null || !ok0)
+            {
+                return;
+            }
+            // 负向（现状保留）：已发预警的计划不改目标——预警后家园旁多出比前哨站更多的净化塔、再来“针对净化塔”，这份计划的目标、路线与变更序号都不变。
+            CampaignState s = CampaignSession.Current;
+            F.StepUntil(() => plan.State >= RaidDirectorService.StateScheduled, 60);
+            if (plan.State == RaidDirectorService.StateScheduled && plan.WarnTick - 2 > GameClock.Ticks)
+            {
+                GameClock.SkipForTests(s, plan.WarnTick - 2 - GameClock.Ticks);
+            }
+            F.StepUntil(() => plan.State >= RaidDirectorService.StateWarned, 10);
+            BuildingRecord core = Core(s);
+            int near = 0;
+            for (int i = 0; i < 5; i++)
+            {
+                near += O.PlaceNear(s, Purifier, new Vector2(core.GridX, core.GridY), 6f, 40f) != null ? 1 : 0;
+            }
+            OwnOutpostService.Sync(s);
+            string kind0 = plan.TargetKind, id0 = plan.TargetId;
+            int rev0 = plan.Revision, route0 = plan.RouteX.Length, rx0 = s.Raids.Director.TriggersReceived;
+            RaidDirectorService.OnPurificationTowerTargeted(s);
+            F.Seconds(1.1f);
+            Expect(plan.State >= RaidDirectorService.StateWarned && near >= 4 && s.Raids.Director.TriggersReceived > rx0
+                   && plan.TargetKind == kind0 && plan.TargetId == id0 && plan.Revision == rev0 && plan.RouteX.Length == route0,
+                $"G2b 负向：已预警（{plan.State}）的计划并进“针对净化塔”不改目标：家园旁又放了 {near} 座净化塔（多于前哨站），目标仍是 {plan.TargetKind}/{plan.TargetId}、变更序号 {rev0} → {plan.Revision}、路线 {route0} → {plan.RouteX.Length} 点");
+        }
+
+        /// <summary>
+        /// 一份普通计划（目标家园）正在后台通道等路线（raid.route_latency_seconds 内）时，净化塔前哨站出现、“针对净化塔”并进来。
+        /// mode 0 不存档；1 并进前存档（后台通道的旧结果在存档时被提前取出存进计划）后接着跑；2 同一时刻存档后读档再跑。返回改目标起 20 游戏秒后的导演快照。
+        /// </summary>
+        private static string RetargetWhileRouting(int seed, int mode, out bool ok, out string detail, out RaidPlanRecord plan)
+        {
+            ok = false;
+            plan = null;
+            CampaignState s = NewWorld(seed);
+            s.Progress.Act = Math.Max(2, s.Progress.Act);
+            RaidDirectorService.OnPurificationTowerTargeted(s); // 还没有净化塔：目标按常规选（家园）
+            RaidPlanRecord p = null;
+            for (int i = 0; i < GameClock.StepHz * 30 && (p == null || p.RouteState != RaidDirectorService.RouteAwaiting); i++)
+            {
+                WorldSimulation.StepMany(1);
+                p ??= s.Raids.Director.Plans.FirstOrDefault(x => x != null && !x.Exempt);
+            }
+            if (p == null || p.RouteState != RaidDirectorService.RouteAwaiting || p.TargetKind != RaidDirectorService.TargetHome)
+            {
+                detail = $"测试准备：没有在等路线、目标为家园的普通计划（{p?.RouteState} / {p?.TargetKind}）";
+                return string.Empty;
+            }
+            string planId = p.PlanId;
+            long adopt0 = p.RouteAdoptTick;
+            int nav0 = p.NavSerial;
+            bool owned0 = NavService.BackgroundActive && NavService.BackgroundOwnerKey == p.Serial && NavService.BackgroundSerial == nav0 && s.Raids.Director.LaneBusyUntilTick == adopt0;
+            // 净化塔前哨站：离核心 340 格、3 座以上（按种子地形找空地，B25）。
+            Vector2? spot = O.FindSpot(s, 340f, 6);
+            int placed = 0;
+            for (int i = 0; spot.HasValue && i < Math.Max(3, RaidCatalog.TargetOutpostMinBuildings); i++)
+            {
+                placed += O.PlaceNear(s, Purifier, spot.Value, 0f, 18f) != null ? 1 : 0;
+            }
+            OwnOutpostService.Sync(s);
+            OwnOutpostRecord outpost = spot.HasValue ? OwnOutpostService.Nearest(s, spot.Value) : null;
+            bool pending = mode == 0;
+            if (mode >= 1)
+            {
+                WorldSimulation.SyncAllForSave();
+                SaveResult save = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+                pending = save.Success && p.PendingRoute && p.PendingX.Length > 0 && !NavService.BackgroundActive;
+                if (mode == 2)
+                {
+                    s = RestoreSlot(out string fail);
+                    if (s == null)
+                    {
+                        detail = "读档失败：" + fail;
+                        return string.Empty;
+                    }
+                    OwnOutpostService.Sync(s);
+                    p = s.Raids.Director.Plans.First(x => x != null && x.PlanId == planId);
+                    pending &= p.PendingRoute && p.PendingX.Length > 0 && !NavService.BackgroundActive;
+                }
+            }
+            int rev0 = p.Revision;
+            long t0 = GameClock.Ticks;
+            RaidDirectorService.OnPurificationTowerTargeted(s);
+            for (int i = 0; i < GameClock.StepHz * 2 && p.TargetKind == RaidDirectorService.TargetHome; i++)
+            {
+                WorldSimulation.StepMany(1);
+            }
+            long tMerge = GameClock.Ticks;
+            bool retarget = outpost != null && p.TargetKind == RaidDirectorService.TargetOutpost && p.TargetId == outpost.OutpostId && tMerge < adopt0;
+            bool released = !(NavService.BackgroundActive && NavService.BackgroundOwnerKey == p.Serial && NavService.BackgroundSerial == nav0)
+                            && s.Raids.Director.LaneBusyUntilTick != adopt0 && !p.PendingRoute && p.PendingX.Length == 0;
+            bool stale = p.Revision > rev0 && p.State == RaidDirectorService.StatePlanning;
+            // 新路线：通道空出后立刻重新要，在新的采纳步采纳；路线终点在净化塔前哨站（存档时取出的那条通往家园的旧路线没有被采纳）。
+            F.StepUntil(() => p.RouteState == RaidDirectorService.RouteReady || p.RouteState == RaidDirectorService.RouteFailed, 30);
+            int last = p.RouteX.Length - 1;
+            BuildingRecord core = Core(s);
+            double toTarget = last >= 0 ? Math.Sqrt(Sq(p.RouteX[last] - p.TargetX) + Sq(p.RouteY[last] - p.TargetY)) : double.MaxValue;
+            double toCore = last >= 0 ? Math.Sqrt(Sq(p.RouteX[last] - core.GridX) + Sq(p.RouteY[last] - core.GridY)) : 0;
+            bool fresh = p.NavSerial != nav0 && p.RouteReadyTick > adopt0 && toTarget < 40 && toCore > 200;
+            StepTicks(t0 + GameClock.StepHz * 20 - GameClock.Ticks);
+            ok = owned0 && placed >= 3 && retarget && released && stale && fresh && pending;
+            detail = $"等路线（通道占到第 {adopt0} 步 {owned0}）时放 {placed} 座净化塔，第 {tMerge} 步并进 → 目标 {p.TargetKind}/{p.TargetId} {retarget}；" +
+                     $"旧通道释放、存档时取出的旧结果丢弃 {released}（存档取出 {(mode == 0 ? "—" : pending.ToString())}）；预报作废（变更序号 {rev0} → {p.Revision}）{stale}；" +
+                     $"新路线第 {p.RouteReadyTick} 步采纳、终点离新目标 {toTarget:0} 格、离核心 {toCore:0} 格 {fresh}";
+            plan = p;
+            return RaidDirectorService.Snapshot(s);
         }
 
         // ─────────────────────────────── H 倍速 / 暂停 / 观察（FGR-BASE-021） ───────────────────────────────

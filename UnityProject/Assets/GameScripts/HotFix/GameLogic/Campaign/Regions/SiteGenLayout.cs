@@ -63,6 +63,8 @@ namespace GameLogic.Campaign.Regions
         public int BlockedSamples;
         public int CoveredBlocked;
         public int MergeLevel;
+        /// <summary>EMGR-GL-02（FG-GAP-220）：合并到最后一档仍超 obstacleMax（软上限）的障碍圆数——全部保留，只作诊断与日志；不入档（地点内容每次按种子重算）。</summary>
+        public int OverCap;
         /// <summary>修复轮（第 1 轮审查 P1“核心门只按 Y 线判断”）：外圈的上沿。铸造前哨 = 核心门封锁线——封锁线以上只有 Demo 手工的核心区（核心区两侧与上方是要塞外墙外的禁区，
         /// 不放生成内容、不能进入），核心门 / 首领场地“越过 Y 线”的判定因此仍然等价于“进了核心区”；破碎都市没有核心门，= 正无穷。</summary>
         public float OuterMaxY = float.PositiveInfinity;
@@ -274,7 +276,7 @@ namespace GameLogic.Campaign.Regions
             }
             // ── 障碍圆（修复轮，第 1 轮审查 P1）：原来按离中心由近到远只留 obstacleMax 个、其余丢掉（四到七成悬崖 / 水面在地点里不存在）。
             //    现在用“内切大圆 + 逐档合并”盖住全部不可通行格：先按到最近可走格的距离从大到小放圆（内部一个大圆盖住一片），
-            //    放完还超过上限就逐档放宽合并（细长地形相邻两格 / 3×3 合一个圆），保证一格不丢；最后一档仍超上限才截断并写进 Problem（自检断言没有截断）。
+            //    放完还超过上限就逐档放宽合并（细长地形相邻两格 / 3×3 合一个圆），保证一格不丢；最后一档仍超上限也全部保留（软上限，记 OverCap，EMGR-GL-02）。
             CoverObstacles(c, row, step, nx, ny, local, terrain, blocked);
             // ── 与入口连通的可走格（4 邻接洪泛；入口 = Demo 撤离点所在的取样格）——按放好的障碍圆重算（合并档位的圆会多盖住一点可走格，
             //    驻军只放在“按真实障碍圆仍连通”的格上）──
@@ -551,14 +553,9 @@ namespace GameLogic.Campaign.Regions
             }
             if (circles.Count > cap)
             {
-                // 最后一档仍超上限：离窗口中心由近到远保留（可见日志；自检断言不发生）。
-                circles.Sort((a, b) =>
-                {
-                    int d = (local[a.Cell] - c.Center).sqrMagnitude.CompareTo((local[b.Cell] - c.Center).sqrMagnitude);
-                    return d != 0 ? d : a.Cell.CompareTo(b.Cell);
-                });
-                c.Problem += $"地形障碍合并到第 {c.MergeLevel} 档仍有 {circles.Count} 个圆（上限 {cap}），远处的被截断；";
-                circles.RemoveRange(cap, circles.Count - cap);
+                // EMGR-GL-02（FG-GAP-220；ADR-NAR-002 §9 第 3 条“外圈真实地形不截断”）：obstacleMax 是软上限（战斗内核障碍表不限长）——最后一档仍超的全部保留，记 OverCap + 日志。
+                c.OverCap = circles.Count - cap;
+                Log.Info($"[SiteGenLayout] {c.SiteId}：地形障碍合并到第 {c.MergeLevel} 档仍有 {circles.Count} 个圆，超软上限 {cap} 共 {c.OverCap} 个，全部保留（真实地形不截断）");
             }
             foreach ((int k, float r) in circles)
             {
