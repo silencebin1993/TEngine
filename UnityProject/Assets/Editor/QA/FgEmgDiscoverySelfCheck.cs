@@ -93,6 +93,7 @@ namespace GameLogic.EditorTools
                 Step(CheckAggregate);
                 Step(CheckOldSave);
                 Step(CheckAttribution);
+                Step(CheckDepartedCredit);
                 Step(CheckOwnersCap);
                 Step(CheckFriendly);
                 Step(CheckObservation);
@@ -180,6 +181,14 @@ namespace GameLogic.EditorTools
         {
             var map = (Dictionary<int, int>)typeof(CombatSite).GetField("_unitMachine", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(site);
             map[unit] = logicId;
+        }
+
+        /// <summary>EMGR-GL-01：同时登记“机器 → 单位”，让正式的 <see cref="CombatSite.RemoveMachine"/>（撤离 / 阵亡后清理）能注销它。</summary>
+        private static void BindMachineFull(CombatSite site, int unit, int logicId)
+        {
+            BindMachine(site, unit, logicId);
+            var map = (Dictionary<int, int>)typeof(CombatSite).GetField("_machineUnit", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(site);
+            map[logicId] = unit;
         }
 
         private static ReactionSessionRecord Session(CampaignState s) => ReactionAttribution.Current(s, SiteId, create: false);
@@ -460,6 +469,86 @@ namespace GameLogic.EditorTools
         }
 
         // ── E 交互伤害归因（FGT-EMG-038）───────────────────────────────────────
+
+        /// <summary>E3b（EMGR-GL-01，DEBT-EMG2DISC01-04 前半，FGR-EMG-182）：已撤离 / 阵亡的机器留下的斑块之后造成的伤害仍分给它；同一机器换单位 ID 回来按 LogicId 去重。</summary>
+        private static void CheckDepartedCredit()
+        {
+            CampaignState s = NewState(9611);
+            using var site = NewSite();
+            CombatKernel k = site.Kernel;
+            int a = Unit(k, CombatFaction.Player, new double2(40, 0));
+            int b = Unit(k, CombatFaction.Player, new double2(40, 10));
+            BindMachineFull(site, a, 201);
+            BindMachineFull(site, b, 202);
+            Unit(k, CombatFaction.Hostile, new double2(3, 0));
+            StepSite(site, 1);
+            // A 铺油后撤离（正式注销入口 RemoveMachine），B 再点火
+            k.SpawnPatch(EmgMatterConst.Oil, new double2(3, 0), 2f, 5f, 0f, a, false, 0);
+            site.RemoveMachine(201, export: false);
+            bool gone = !site.TryGetMachineOfUnit(a, out _) && !site.IsPlayerUnit(a) && site.TryGetCreditMachine(a, out int credA) && credA == 201;
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 8f, b, false, 7);
+            StepSite(site, 300);
+            ReactionSessionRecord sess = Session(s);
+            double cred(ReactionSessionRecord r, int logic) => r?.Credits?.FirstOrDefault(c => c.LogicId == logic)?.Damage ?? 0;
+            Expect(gone && sess != null && cred(sess, 201) > 0 && cred(sess, 202) > 0,
+                $"E3b A 铺油后撤离、B 点火：A 仍分到 {cred(sess, 201):0.0}、B {cred(sess, 202):0.0}；撤离后 A 的单位不再算在场（不是玩家单位、悬停 / 反馈查不到），只有归因查得到 {gone}");
+
+            // 同一台机器换单位 ID 回来：归属里旧、新两个单位 + B → 按 LogicId 去重，两台各一半（不是三份）
+            int a2 = Unit(k, CombatFaction.Player, new double2(40, 20));
+            BindMachineFull(site, a2, 201);
+            CampaignState s2 = NewState(9612);
+            ReactionAttribution.Current(s2, SiteId, create: true);
+            int key = NamedReactionCatalog.StableKey("reaction_deflagrate");
+            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = key, Owners = new int4(a, a2, b, 0), Damage = 90 });
+            ReactionSessionRecord sess2 = ReactionAttribution.Current(s2, SiteId, create: false);
+            Expect(sess2 != null && sess2.Credits.Length == 2 && Math.Abs(cred(sess2, 201) - 45) < 1e-9 && Math.Abs(cred(sess2, 202) - 45) < 1e-9
+                   && Math.Abs(sess2.Credits.Sum(c => c.Damage) - 90) < 1e-9,
+                $"E3b 同一机器换单位 ID 回来（旧 {a} / 新 {a2}）+ B 共 90 伤害：去重后两台各 {cred(sess2, 201)} / {cred(sess2, 202)}，合计守恒、不重复计");
+
+            // 机器阵亡当步斑块结算：C 铺的油在 C 被击毁的那一步照样烧敌人并分给 C；之后清理注销（RemoveMachine）也照样分
+            // （新地点，与上面同一布局：不与上一场的残留斑块混在一起）
+            sess = null;
+            CampaignState s3 = NewState(9613);
+            using var site3 = NewSite();
+            k = site3.Kernel;
+            int c = Unit(k, CombatFaction.Player, new double2(40, 0));
+            int b3 = Unit(k, CombatFaction.Player, new double2(40, 10));
+            BindMachineFull(site3, c, 203);
+            BindMachineFull(site3, b3, 202);
+            Unit(k, CombatFaction.Hostile, new double2(3, 0));
+            StepSite(site3, 1);
+            k.SpawnPatch(EmgMatterConst.Oil, new double2(3, 0), 2f, 5f, 0f, c, false, 0);
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 8f, b3, false, 7);
+            sess = ReactionAttribution.Current(s3, SiteId, create: true);
+            double c0 = cred(sess, 203);
+            bool deadMapped = false;
+            int4 rowOwners = int4.zero;
+            int rowsSeen = 0;
+            for (int i = 0; i < 300 && cred(sess, 203) <= c0; i++)
+            {
+                if (i == 0)
+                {
+                    k.Kill(c, 0); // 阵亡：内核单位死了，记录驱动的清理还没来——映射仍在
+                }
+                StepSite(site3, 1);
+                deadMapped = site3.TryGetCreditMachine(c, out int lc) && lc == 203;
+                for (int j = 0; j < k.EmgAttrCount; j++)
+                {
+                    rowsSeen++;
+                    rowOwners = k.EmgAttrAt(j).Owners;
+                }
+            }
+            double cDead = cred(sess, 203);
+            site3.RemoveMachine(203, export: false);
+            StepSite(site3, 120);
+            double cAfter = cred(sess, 203);
+            Expect(deadMapped && cDead > c0 && cAfter > cDead,
+                $"E3b 机器阵亡当步斑块结算：C 阵亡后它的油照样分给它（{c0:0.0} → {cDead:0.0}），阵亡清理注销后继续分（→ {cAfter:0.0}）；映射仍在 {deadMapped}，交互伤害行 {rowsSeen}（最后一行归属 {rowOwners}，C = {c}）");
+            if (site.TryGetCreditMachine(999999, out _))
+            {
+                Fail("E3b 未登记的单位不应查到机器");
+            }
+        }
 
         private static void CheckAttribution()
         {

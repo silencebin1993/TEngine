@@ -121,6 +121,7 @@ namespace GameLogic.EditorTools
                 Step(CheckNoRoom);
                 Step(CheckSiteVisuals);
                 Step(CheckSaveLoad);
+                Step(CheckGroundIndex);
                 Step(CheckSpeedAndObservation);
                 Step(CheckUi);
                 Step(CheckSeedSetAndPerf);
@@ -866,6 +867,108 @@ namespace GameLogic.EditorTools
             LootHeldRecord fresh = st2.Held.FirstOrDefault(h => h.ItemId == "electronic");
             Expect(fresh != null && fresh.HeldId == CargoService.HeldPrefix + serial && !CargoService.IsAutoPickup(back, "alloy") && HomeValleyCargo.FindGroundItemBySalvageId(back, "cargotest:s2") != null,
                 $"H2 读档后接着自动拾取（新货舱记录 {fresh?.HeldId}，序号接着编），合金仍然关着、地上的合金没被捡");
+        }
+
+        // ── H3 地面物索引（EMGR-GL-01，DEBT-FG7ENV03-06）────────────────────────────
+
+        /// <summary>任意增删（生成 / 重复生成 / 拾取预留 / 放回 / 外部整体替换数组 / 读档）后，按 ID 与按 SalvageId 的查找结果 = 线性扫“第一个匹配”。</summary>
+        private static void CheckGroundIndex()
+        {
+            CampaignState s = NewWorld(8307);
+            var rng = new System.Random(8307);
+            var ids = new List<string>();
+            int mismatches = 0, checks = 0, idempotentBad = 0, replaceBad = 0;
+            void Verify(CampaignState st, IEnumerable<string> probe)
+            {
+                foreach (string sid in probe)
+                {
+                    checks++;
+                    GroundItemRecord bySid = HomeValleyCargo.FindGroundItemBySalvageId(st, sid);
+                    GroundItemRecord expSid = st.GroundItems.FirstOrDefault(g => g != null && g.SalvageInstanceId == sid);
+                    GroundItemRecord byId = HomeValleyCargo.FindGroundItem(st, "ground:" + sid);
+                    GroundItemRecord expId = st.GroundItems.FirstOrDefault(g => g != null && g.GroundItemId == "ground:" + sid);
+                    mismatches += ReferenceEquals(bySid, expSid) && ReferenceEquals(byId, expId) ? 0 : 1;
+                }
+            }
+            string res = ItemCatalog.ResourceTypeOf("metal_ore");
+            var held = new List<HomeValleyCargo.HaulTicket>();
+            for (int op = 0; op < 3000; op++)
+            {
+                int roll = rng.Next(100);
+                if (roll < 45 || ids.Count == 0)
+                {
+                    string sid = "gidx:" + op.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    ids.Add(sid);
+                    HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, new Vector2(op % 50, op / 50), res, 1 + op % 7, sid);
+                }
+                else if (roll < 55)
+                {
+                    // 同一 SalvageId 重复生成：幂等（返回既有记录、数组不变长）
+                    string sid = ids[rng.Next(ids.Count)];
+                    GroundItemRecord before = HomeValleyCargo.FindGroundItemBySalvageId(s, sid);
+                    int len = s.GroundItems.Length;
+                    GroundItemRecord got = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, Vector2.zero, res, 99, sid);
+                    idempotentBad += before != null && (!ReferenceEquals(got, before) || s.GroundItems.Length != len) ? 1 : 0;
+                }
+                else if (roll < 80)
+                {
+                    HomeValleyCargo.HaulTicket t = HomeValleyCargo.TryReserveHaul(s, "ground:" + ids[rng.Next(ids.Count)]);
+                    if (t != null)
+                    {
+                        held.Add(t);
+                    }
+                }
+                else if (roll < 90 && held.Count > 0)
+                {
+                    int k = rng.Next(held.Count);
+                    HomeValleyCargo.DropHaul(s, held[k], new Vector2(-1f, -1f)); // 放回地面：同一 SalvageId 回来
+                    held.RemoveAt(k);
+                }
+                else if (roll < 95)
+                {
+                    // 整批追加（DropForHaulBatch 的落地路径）
+                    var batch = new List<GroundItemRecord>();
+                    for (int q = 0; q < 5; q++)
+                    {
+                        string sid = "gidx:b" + op.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + q.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                        ids.Add(sid);
+                        batch.Add(new GroundItemRecord { GroundItemId = "ground:" + sid, SalvageInstanceId = sid, RegionId = HomeValleyLayout.RegionId, ResourceType = res, Amount = 1 });
+                    }
+                    HomeValleyCargo.AppendGroundItems(s, batch);
+                }
+                else
+                {
+                    // 外部整体替换数组（CargoService / GroundLootExpiry 等的写法）：打乱顺序、删掉一部分、再塞进一份同 SalvageId 的重复记录，然后立刻查找
+                    List<GroundItemRecord> list = s.GroundItems.Where(_ => rng.Next(10) != 0).OrderBy(_ => rng.Next()).ToList();
+                    if (list.Count > 0)
+                    {
+                        GroundItemRecord src = list[rng.Next(list.Count)];
+                        list.Add(new GroundItemRecord { GroundItemId = src.GroundItemId, SalvageInstanceId = src.SalvageInstanceId, RegionId = src.RegionId, ResourceType = src.ResourceType, Amount = 1 });
+                    }
+                    s.GroundItems = list.ToArray();
+                    string probe = list.Count > 0 ? list[0].SalvageInstanceId : null;
+                    replaceBad += probe != null && !ReferenceEquals(HomeValleyCargo.FindGroundItemBySalvageId(s, probe), list[0]) ? 1 : 0;
+                }
+                Verify(s, new[] { ids[rng.Next(ids.Count)], ids[rng.Next(ids.Count)], "gidx:none" });
+            }
+            Verify(s, ids);
+            Expect(mismatches == 0 && idempotentBad == 0 && replaceBad == 0 && checks > ids.Count,
+                $"H3 地面物索引：3,000 次随机增删（生成 / 重复生成 / 拾取 / 放回 / 整批追加 / 外部整体替换含重复记录）后 {checks:N0} 次查找与线性扫“第一个匹配”全同（不一致 {mismatches}）；重复生成幂等（违例 {idempotentBad}）；外部替换后立刻查找对（违例 {replaceBad}）");
+
+            // 读档后立刻查找：新 state 自己的索引，不串到旧 state
+            s.GroundItems = s.GroundItems.GroupBy(g => g.GroundItemId).Select(gr => gr.First()).ToArray(); // 存档前去掉测试塞的重复记录（正式流程不会产生）
+            HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, Vector2.one, res, 5, "gidx:saved");
+            GroundItemRecord oldRef = HomeValleyCargo.FindGroundItemBySalvageId(s, "gidx:saved");
+            SaveResult sv = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            CampaignState back = Reload(Slot);
+            GroundItemRecord loaded = back != null ? HomeValleyCargo.FindGroundItemBySalvageId(back, "gidx:saved") : null;
+            int backMismatch = mismatches;
+            if (back != null)
+            {
+                Verify(back, ids);
+            }
+            Expect(sv.Success && back != null && loaded != null && !ReferenceEquals(loaded, oldRef) && loaded.Amount == 5 && mismatches == backMismatch,
+                $"H4 读档后立刻查找：读回的地面物（{back?.GroundItems.Length} 份）按 SalvageId / ID 查到的是新 state 里的记录、与线性扫一致");
         }
 
         // ── I 暂停 / 倍速 / 观察 ─────────────────────────────────────────────────

@@ -170,6 +170,10 @@ namespace GameLogic.Campaign.Combat
 
         private readonly Dictionary<int, int> _machineUnit = new Dictionary<int, int>();
         private readonly Dictionary<int, int> _unitMachine = new Dictionary<int, int>();
+        /// <summary>EMGR-GL-01（DEBT-EMG2DISC01-04 前半）：已从本地点注销（撤离 / 阵亡后清理 / 派遣）的单位 → 机器，只给交互伤害归因用（<see cref="TryGetCreditMachine"/>）。
+        /// 内核单位 ID 单调递增、同一内核里不复用；换内核（Dispose / 读档 TryRestore）时清空——读档后仍能分到归 FG15-SYS-01。
+        /// shortcut: 同一内核里只增不减，条目数 = 本地点累计注销的机器单位数（每次撤离 / 阵亡一条，几十到几百量级）；若出现长驻地点反复进出上万次再按场次清理。</summary>
+        private readonly Dictionary<int, int> _departedUnitMachine = new Dictionary<int, int>();
         private readonly Dictionary<string, int> _enemyUnit = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<int, string> _unitEnemy = new Dictionary<int, string>();
         private readonly List<string> _keys = new List<string>();
@@ -322,6 +326,7 @@ namespace GameLogic.Campaign.Combat
             _machineUnit.Clear();
             _selfDefenseLogged.Clear(); // EMGR-CMD-01
             _unitMachine.Clear();
+            _departedUnitMachine.Clear();
             _enemyUnit.Clear();
             _unitEnemy.Clear();
             _markerByUnit.Clear();
@@ -573,6 +578,7 @@ namespace GameLogic.Campaign.Combat
             _machineUnit.Remove(logicId);
             _selfDefenseLogged.Remove(logicId); // EMGR-CMD-01：机器离开本地点不留残记
             _unitMachine.Remove(unit);
+            _departedUnitMachine[unit] = logicId; // EMGR-GL-01：它留下的斑块之后造成的伤害仍分给它
             _markerByUnit.Remove(unit);
             _machineWeapons.Remove(logicId);
         }
@@ -857,6 +863,11 @@ namespace GameLogic.Campaign.Combat
         }
 
         public bool TryGetMachineOfUnit(int unitId, out int logicId) => _unitMachine.TryGetValue(unitId, out logicId);
+
+        /// <summary>EMGR-GL-01：交互伤害归因用的“单位 → 机器”——在场的优先，已注销（撤离 / 阵亡）的兜底。只给归因用：
+        /// 是否玩家单位、悬停、反馈等仍走 <see cref="TryGetMachineOfUnit"/>（已撤离的单位不算在场）。</summary>
+        public bool TryGetCreditMachine(int unitId, out int logicId) =>
+            _unitMachine.TryGetValue(unitId, out logicId) || _departedUnitMachine.TryGetValue(unitId, out logicId);
 
         private readonly List<int2> _coverageChanges = new List<int2>(8);
 
@@ -3701,6 +3712,7 @@ namespace GameLogic.Campaign.Combat
             _machineUnit.Clear();
             _selfDefenseLogged.Clear(); // EMGR-CMD-01
             _unitMachine.Clear();
+            _departedUnitMachine.Clear();
             _enemyUnit.Clear();
             _unitEnemy.Clear();
             _markerByUnit.Clear();

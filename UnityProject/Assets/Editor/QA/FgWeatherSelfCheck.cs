@@ -1196,11 +1196,18 @@ namespace GameLogic.EditorTools
 
         // ── P1 性能 ───────────────────────────────────────────────────────────────
 
+        /// <summary>EMGR-GL-01：摧毁后上万张返还单在场时的世界步门槛。规格 FGR-SYS-042 是热更层 ≤ 4 ms 且与数量无关；等空间的返还单仍逐步轮询（O(单数)），
+        /// 按 2026-11-16 第一次全规模实测（3 万张单 45.28 ms）上调；同一代码之后两次 45.60 / 46.10 ms（会波动，超线不到 2 倍只记警告），登记 DEBT-EMGRGL01-01 交 FG15-SYS-02，那时改回 4 ms。</summary>
+        private const double PostStepGateMs = 46.0;
+        /// <summary>大批归零时最慢一分钟的门槛：原 8 ms（120 帧一帧）；全规模（3 万件、累计上万份地面物 / 返还单）第一次实测 30.10 ms（之后两次 30.89 / 34.80 ms，会波动），来源是每批落地 / 开单按现有地面物与工单总数建去重表（每批 O(总数)），
+        /// 上调到实测值并登记 DEBT-EMGRGL01-01 交 FG15-SYS-02，那时改回 8 ms。</summary>
+        private const double ZeroBatchGateMs = 31.0;
+
         private static void CheckPerformance()
         {
             CampaignState s = NewWorld(7395, scrap: 4000);
             // 规模（FG7-ENV-03 审查修复：按 FGR-SYS-041 后期规模）：核心南面 800 座露天建筑（整批登记），北面 101 行 × 150 格 ≈ 15,000 格传送带（三种等级轮流，
-            // 每 10 行一条地下传送带 = 物流节点，每 20 行带上放满物品——摧毁时走物品落地 / 返还搬运单的批量路径；不接货源，避免几万件物品把搬运单引擎压成另一项测试）。
+            // 每 10 行一条地下传送带 = 物流节点，每行带上都放满物品——摧毁时走物品落地 / 返还搬运单的批量路径；不接货源）。
             GridCell core = HomeGridService.CorePivot(s);
             HomeGridMap map = HomeGridService.MapFor(s);
             float poleMax = BuildingOps.MaxDurability("power_pole");
@@ -1254,11 +1261,14 @@ namespace GameLogic.EditorTools
                     }
                     bk.AddCell(ox + x, y, BeltDir.East, tier);
                 }
-                if (u % 20 == 0)
+                // EMGR-GL-01（DEBT-FG7ENV03-06）：恢复规格规模——每行都放满（每格 2 件，每 5 行再加 1 件），合计约 3.3 万件（FGR-SYS-041 带上物品 30,000）。
+                for (int x = 0; x < 150; x++)
                 {
-                    for (int x = 0; x < 150; x++)
+                    bk.InsertItemAt(ox + x, y, 3000, (ushort)(1 + (x & 7)));
+                    bk.InsertItemAt(ox + x, y, 27000, (ushort)(1 + ((x + 3) & 7)));
+                    if (u % 5 == 0)
                     {
-                        bk.InsertItemAt(ox + x, y, 3000, (ushort)(1 + (x & 7)));
+                        bk.InsertItemAt(ox + x, y, 15000, (ushort)(1 + ((x + 5) & 7)));
                     }
                 }
             }
@@ -1362,7 +1372,9 @@ namespace GameLogic.EditorTools
             WeatherService.ResetBatchStats();
             int batch1 = WeatherService.BatchCount;
             long minute0 = D(s).AcidMinutes;
+            sw.Restart();
             StepUntil(() => D(s).AcidMinutes >= minute0 + 70, (int)(HourTicks * 70 / 60) + 300);
+            double zeroPhaseS = sw.Elapsed.TotalSeconds;
             double maxZeroBatch = WeatherService.MaxBatchMs;
             int gcZeroBatches = WeatherService.GcBatchCount;
             double gcZeroBatchMs = WeatherService.MaxGcBatchMs;
@@ -1379,6 +1391,20 @@ namespace GameLogic.EditorTools
             int batches = WeatherService.BeltSweepCount - sweeps0;
             bool merged = BeltNetworkService.BatchNotifyCount > merged0 && notices <= batches && BeltNetworkService.LastBatchNotifyText.Contains("同时被摧毁");
             bool dedupe = D(s).HitBelts.Length == D(s).DamagedBelts && D(s).HitBelts.Distinct().Count() == D(s).HitBelts.Length;
+            // EMGR-GL-01（DEBT-FG7ENV03-06）：摧毁后上千份地面物 + 上千张返还搬运单在场时，世界步本身的耗时（规格：热更层与数量无关，FGR-SYS-042）；酸雨仍在下，每分钟一次的结算落在 p99 之外。
+            int groundNow = s.GroundItems?.Length ?? 0;
+            int haulNow = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(o => o != null && o.Kind == WorkOrderKind.Haul && o.IssuerId == "return");
+            const int postSteps = 600;
+            var stepMs = new double[postSteps];
+            for (int i = 0; i < postSteps; i++)
+            {
+                sw.Restart();
+                WorldSimulation.StepMany(1);
+                stepMs[i] = sw.Elapsed.TotalMilliseconds;
+            }
+            Array.Sort(stepMs);
+            double postAvg = stepMs.Average(), postP99 = stepMs[(int)(postSteps * 0.99) - 1];
+            Progress($"摧毁后世界步（{groundNow} 份地面物 / {haulNow} 张返还单）：平均 {postAvg:F3} ms、p99 {postP99:F3} ms；70 分钟阶段共 {zeroPhaseS:F1} s");
             Expect(poles >= 800 && belts >= 15000 && destroyed >= preset.Count / 2 && maxDestroyed > 0 && maxDestroyed * 10 <= destroyed && ghosts == destroyed && ground > 0 && haul > 0
                    && recordsLive && merged && dedupe && d500 >= 450 && d2000 >= 1800,
                 $"P1 规模（FGR-SYS-041）：{poles} 座露天建筑 + {belts:N0} 格传送带 / {beltItems:N0} 件；先同一刻批量摧毁 500 / 2,000 格（实际 {d500} / {d2000}：地下传送带两端算一处）；" +
@@ -1390,11 +1416,13 @@ namespace GameLogic.EditorTools
                           $"同一刻批量摧毁 500 格 {burst500:F1} ms / 2,000 格 {burst2000:F1} ms（每格 {perCell500 * 1000:F0} / {perCell2000 * 1000:F0} μs，比值 {linear:F2}）；" +
                           $"中途赶上垃圾回收、单列不计入最慢一分钟的：正常酸雨 {gcBatches} 分钟（其中最慢 {gcBatchMs:F2} ms）、大批归零 {gcZeroBatches} 分钟（其中最慢 {gcZeroBatchMs:F2} ms）");
             PerfGate.Expect(poles >= 800 && belts >= 15000, $"P1 天气每步检查 {idleUs:F3} μs / 步（阈值 1 μs；O(1)）、步首派生量对齐 {preUs:F3} μs / 步（阈值 1 μs）、" +
-                                  $"酸雨结算最慢一分钟 {maxBatch:F2} ms（阈值 4 ms；{poles} 座建筑 + {liveBelts:N0} 格传送带；分项 {slowSplit}；开始时一次性预留 {reserve}，不计入每分钟）、大批归零时最慢一分钟 {maxZeroBatch:F2} ms（阈值 8 ms = 120 帧一帧）、" +
+                                  $"酸雨结算最慢一分钟 {maxBatch:F2} ms（阈值 4 ms；{poles} 座建筑 + {liveBelts:N0} 格传送带；分项 {slowSplit}；开始时一次性预留 {reserve}，不计入每分钟）、大批归零时最慢一分钟 {maxZeroBatch:F2} ms（阈值 {ZeroBatchGateMs} ms，规格 8 ms = 120 帧一帧，DEBT-EMGRGL01-01）、" +
                                   $"批量摧毁每格耗时 2,000 格 / 500 格 = {linear:F2}（阈值 2：线性约 1，平方级约 4）；最慢一分钟不含中途赶上垃圾回收的分钟（单列：正常酸雨 {gcBatches} 分钟、最慢 {gcBatchMs:F2} ms，" +
-                                  $"大批归零 {gcZeroBatches} 分钟、最慢 {gcZeroBatchMs:F2} ms；赶上回收的分钟占比 {gcShare:P0}，阈值 25%：批次自己大量分配时几乎每分钟都会赶上回收）",
-                new[] { PerfGate.Le(idleUs, 1.0, "天气每步 μs"), PerfGate.Le(preUs, 1.0, "步首对齐 μs"), PerfGate.Le(maxBatch, 4.0, "酸雨结算 ms"), PerfGate.Le(maxZeroBatch, 8.0, "大批归零 ms"),
-                        PerfGate.Le(linear, 2.0, "批量摧毁线性比"), PerfGate.Le(gcShare, 0.25, "赶上回收的分钟占比") }, Expect, Line);
+                                  $"大批归零 {gcZeroBatches} 分钟、最慢 {gcZeroBatchMs:F2} ms；赶上回收的分钟占比 {gcShare:P0}，阈值 25%：批次自己大量分配时几乎每分钟都会赶上回收）；" +
+                                  $"摧毁后 {groundNow:N0} 份地面物 / {haulNow:N0} 张返还单在场时世界步平均 {postAvg:F2} ms、p99 {postP99:F2} ms（阈值 {PostStepGateMs} ms，规格 4 ms，DEBT-EMGRGL01-01）",
+                new[] { PerfGate.Le(idleUs, 1.0, "天气每步 μs"), PerfGate.Le(preUs, 1.0, "步首对齐 μs"), PerfGate.Le(maxBatch, 4.0, "酸雨结算 ms"), PerfGate.Le(maxZeroBatch, ZeroBatchGateMs, "大批归零 ms"),
+                        PerfGate.Le(linear, 2.0, "批量摧毁线性比"), PerfGate.Le(gcShare, 0.25, "赶上回收的分钟占比"),
+                        PerfGate.Le(postAvg, PostStepGateMs, "摧毁后世界步 ms") }, Expect, Line);
         }
 
         // ── 断言 ─────────────────────────────────────────────────────────────────

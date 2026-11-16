@@ -946,10 +946,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return 0;
             }
-            var next = new GroundItemRecord[old.Length + spawned.Count];
-            Array.Copy(old, next, old.Length);
-            spawned.CopyTo(next, old.Length);
-            state.GroundItems = next;
+            HomeValleyCargo.AppendGroundItems(state, spawned); // EMGR-GL-01：同一次整体换数组，顺带就地同步地面物索引
             HomeValleyWorkOrders.TryCreateHaulPools(state, haul);
             return dropped;
         }

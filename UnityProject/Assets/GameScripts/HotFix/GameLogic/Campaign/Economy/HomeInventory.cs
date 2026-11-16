@@ -33,7 +33,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>能被家园仓库收、能上传送带（固体且有传送带编号）。</summary>
         public static bool IsBeltStorable(ItemDef item) => item != null && item.Form == ItemForm.Solid && item.BeltId != 0;
 
-        /// <summary>家园里有没有运转中的仓库（容量来源）。O(建筑数)：调用方在一次批量操作里只查一次。</summary>
+        /// <summary>家园里有没有运转中的仓库（容量来源）。仓库候选按建筑数组引用缓存（数组换了才重扫 O(建筑数)），每次调用只查候选的运转状态 O(仓库数)。</summary>
         public static bool WarehouseOperational(CampaignState state)
         {
             BuildingRecord[] records = state?.BuildingRecords;
@@ -41,16 +41,32 @@ namespace GameLogic.Campaign.Economy
             {
                 return false;
             }
-            foreach (BuildingRecord b in records)
+            // EMGR-GL-01（DEBT-FG7ENV03-06）：每张等空间的返还搬运单每步都问这里，原来每次扫全部建筑（后期 800+ 座）。
+            // 候选（归还谷地的仓库）按数组引用缓存，同 BuildingOps.WarehousesOf；建造状态原地会变，所以每次现查候选的状态。结果与整表扫相同。
+            if (!ReferenceEquals(records, _whOpIndexed))
             {
-                if (b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse
-                    && b.ConstructionState == BuildingConstructionState.Operational)
+                _whOpIndexed = records;
+                WhOpCandidates.Clear();
+                foreach (BuildingRecord b in records)
+                {
+                    if (b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse)
+                    {
+                        WhOpCandidates.Add(b);
+                    }
+                }
+            }
+            for (int i = 0; i < WhOpCandidates.Count; i++)
+            {
+                if (WhOpCandidates[i].ConstructionState == BuildingConstructionState.Operational)
                 {
                     return true;
                 }
             }
             return false;
         }
+
+        private static BuildingRecord[] _whOpIndexed;
+        private static readonly List<BuildingRecord> WhOpCandidates = new List<BuildingRecord>();
 
         public static int VaultCapacity => Math.Max(1, GridContent.TuningInt("eco.vault.capacity"));
 

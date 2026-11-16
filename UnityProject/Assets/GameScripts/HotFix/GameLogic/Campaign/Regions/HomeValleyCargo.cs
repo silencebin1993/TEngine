@@ -87,9 +87,77 @@ namespace GameLogic.Campaign.Regions
 
         // ── 地面物 ──────────────────────────────────────────────────────────────
 
+        /// <summary>EMGR-GL-01（DEBT-FG7ENV03-06）：按 ID 查地面物，O(1)。结果与线性扫“第一个匹配”相同。
+        /// 约定：改地面物必须整体替换 <see cref="CampaignState.GroundItems"/> 数组（不得原地改元素或改已有记录的 ID）——索引按数组引用判新旧。</summary>
         public static GroundItemRecord FindGroundItem(CampaignState state, string groundItemId)
         {
-            return state?.GroundItems?.FirstOrDefault(g => g.GroundItemId == groundItemId);
+            GroundIndex idx = IndexOf(state);
+            if (idx == null)
+            {
+                return null;
+            }
+            if (groundItemId == null)
+            {
+                return state.GroundItems.FirstOrDefault(g => g != null && g.GroundItemId == null); // 键为空字典存不了，走线性扫（极少见）
+            }
+            return idx.ById.TryGetValue(groundItemId, out GroundItemRecord g0) ? g0 : null;
+        }
+
+        /// <summary>地面物索引（按 ID / 按 SalvageId，各取数组里第一个匹配）。挂在 state 上随 state 回收（弱表），读档换出的新 state 自己重建。</summary>
+        private sealed class GroundIndex
+        {
+            public GroundItemRecord[] Source;
+            public readonly Dictionary<string, GroundItemRecord> ById = new Dictionary<string, GroundItemRecord>(StringComparer.Ordinal);
+            public readonly Dictionary<string, GroundItemRecord> BySalvage = new Dictionary<string, GroundItemRecord>(StringComparer.Ordinal);
+            /// <summary>数组里有重复键（只可能来自外部整体写入）：删除时不能就地同步，下次查找整表重建。</summary>
+            public bool HasDup;
+
+            public void Add(GroundItemRecord g)
+            {
+                if (g == null)
+                {
+                    return;
+                }
+                if (g.GroundItemId != null && !ById.TryAdd(g.GroundItemId, g))
+                {
+                    HasDup = true;
+                }
+                if (g.SalvageInstanceId != null && !BySalvage.TryAdd(g.SalvageInstanceId, g))
+                {
+                    HasDup = true;
+                }
+            }
+
+            public void Rebuild(GroundItemRecord[] source)
+            {
+                ById.Clear();
+                BySalvage.Clear();
+                HasDup = false;
+                Source = source;
+                for (int i = 0; i < source.Length; i++)
+                {
+                    Add(source[i]);
+                }
+            }
+        }
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CampaignState, GroundIndex> GroundIndexes =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<CampaignState, GroundIndex>();
+
+        /// <summary>取（必要时重建）索引：数组引用变了 = 外部整体替换过（CargoService / GroundLootExpiry / DropPodService / HomeValleyConstruction / 读档规整），整表重建一次。</summary>
+        private static GroundIndex IndexOf(CampaignState state)
+        {
+            if (state == null)
+            {
+                return null;
+            }
+            state.GroundItems ??= Array.Empty<GroundItemRecord>();
+            GroundIndex idx = GroundIndexes.GetValue(state, _ => new GroundIndex());
+            if (!ReferenceEquals(idx.Source, state.GroundItems))
+            {
+                idx.Rebuild(state.GroundItems);
+            }
+            return idx;
         }
 
         /// <summary>家园能不能存这种资源：物品表里的固体（仓库）与保管库物品（FG4-ECO-01，关闭 DEBT-FG3LOG02-01）；流体、数字资源、实体、表里没有的都不行。
@@ -100,7 +168,16 @@ namespace GameLogic.Campaign.Regions
 
         public static GroundItemRecord FindGroundItemBySalvageId(CampaignState state, string salvageInstanceId)
         {
-            return state?.GroundItems?.FirstOrDefault(g => g.SalvageInstanceId == salvageInstanceId);
+            GroundIndex idx = IndexOf(state);
+            if (idx == null)
+            {
+                return null;
+            }
+            if (salvageInstanceId == null)
+            {
+                return state.GroundItems.FirstOrDefault(g => g != null && g.SalvageInstanceId == null);
+            }
+            return idx.BySalvage.TryGetValue(salvageInstanceId, out GroundItemRecord g0) ? g0 : null;
         }
 
         /// <summary>在地面生成一份新物品。幂等：同一 <paramref name="salvageInstanceId"/> 已存在于地面
@@ -124,15 +201,58 @@ namespace GameLogic.Campaign.Regions
                 Amount = amount,
                 SalvageInstanceId = salvageInstanceId,
             };
-            state.GroundItems = (state.GroundItems ?? Array.Empty<GroundItemRecord>()).Append(item).ToArray();
+            GroundItemRecord[] old = state.GroundItems; // 上面的查找已保证非空且索引对齐本数组
+            var next = new GroundItemRecord[old.Length + 1];
+            Array.Copy(old, next, old.Length);
+            next[old.Length] = item;
+            state.GroundItems = next;
+            if (GroundIndexes.TryGetValue(state, out GroundIndex idx) && ReferenceEquals(idx.Source, old))
+            {
+                idx.Source = next; // 就地同步：批量生成时不必每件都整表重建
+                idx.Add(item);
+            }
             return item;
+        }
+
+        /// <summary>整批追加地面物（调用方已判重，见 <see cref="HomeValleyConstruction.DropForHaulBatch"/>）：一次换数组，索引就地同步，不必下次查找时整表重建。</summary>
+        public static void AppendGroundItems(CampaignState state, IReadOnlyList<GroundItemRecord> items)
+        {
+            GroundItemRecord[] old = state.GroundItems ?? Array.Empty<GroundItemRecord>();
+            var next = new GroundItemRecord[old.Length + items.Count];
+            Array.Copy(old, next, old.Length);
+            for (int i = 0; i < items.Count; i++)
+            {
+                next[old.Length + i] = items[i];
+            }
+            state.GroundItems = next;
+            if (GroundIndexes.TryGetValue(state, out GroundIndex idx) && ReferenceEquals(idx.Source, old))
+            {
+                idx.Source = next;
+                for (int i = 0; i < items.Count; i++)
+                {
+                    idx.Add(items[i]);
+                }
+            }
         }
 
         private static void RemoveGroundItem(CampaignState state, string groundItemId)
         {
-            state.GroundItems = (state.GroundItems ?? Array.Empty<GroundItemRecord>())
-                .Where(g => g.GroundItemId != groundItemId)
-                .ToArray();
+            GroundItemRecord[] old = state.GroundItems ?? Array.Empty<GroundItemRecord>();
+            GroundItemRecord[] next = old.Where(g => g.GroundItemId != groundItemId).ToArray();
+            state.GroundItems = next;
+            // 就地同步（无重复键时被删的就是索引里那一份）；有重复键或空 ID 时不同步，下次查找按新数组整表重建。
+            if (GroundIndexes.TryGetValue(state, out GroundIndex idx) && ReferenceEquals(idx.Source, old) && !idx.HasDup && groundItemId != null)
+            {
+                idx.Source = next;
+                if (idx.ById.TryGetValue(groundItemId, out GroundItemRecord gone))
+                {
+                    idx.ById.Remove(groundItemId);
+                    if (gone.SalvageInstanceId != null)
+                    {
+                        idx.BySalvage.Remove(gone.SalvageInstanceId);
+                    }
+                }
+            }
         }
 
         // ── 搬运两阶段票据 ──────────────────────────────────────────────────────

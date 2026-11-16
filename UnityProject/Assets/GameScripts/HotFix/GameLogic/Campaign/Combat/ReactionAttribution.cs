@@ -6,6 +6,7 @@ using GameLogic.Campaign.Feedback;
 using GameLogic.Campaign.Regions;
 using GameLogic.Core;
 using GameLogic.Localization;
+using Unity.Mathematics;
 
 namespace GameLogic.Campaign.Combat
 {
@@ -222,7 +223,8 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>
         /// 内核合并好的一条交互伤害：进这一场的交互伤害；有规则键的按键记到对应行（具名 = 反应 ID，通道规则 = 稳定键文本）；按归属里的机器平分（最多 4 台，敌方与炮塔不分）。
-        /// shortcut: 机器的单位已注销时分不到（通常是撤离后的残留斑块），要算全时需内核存 LogicId，统计面板要求逐机完全守恒时再改。
+        /// EMGR-GL-01：单位已注销（撤离 / 阵亡）的机器照样分到（<see cref="CombatSite.TryGetCreditMachine"/>），按 LogicId 去重——同一台机器换单位 ID 回来只算一份。
+        /// shortcut: 读档后换了内核，注销前的单位 → 机器表不在了，读档前铺下的斑块之后的伤害分不到；要算全需归属里直接存 LogicId，归 FG15-SYS-01（DEBT-EMG2DISC01-04 后半）。
         /// </summary>
         public static void AddInteractionDamage(CampaignState state, CombatSite site, in EmgAttrRow row)
         {
@@ -236,17 +238,26 @@ namespace GameLogic.Campaign.Combat
             {
                 AddReaction(state, site.SiteId, NamedReactionCatalog.IdOfKey(row.Key) ?? RuleRowId(row.Key), 0, row.Damage);
             }
+            int4 ids = int4.zero;
             int machines = 0;
             for (int q = 0; q < 4; q++)
             {
-                machines += row.Owners[q] != 0 && site.TryGetMachineOfUnit(row.Owners[q], out _) ? 1 : 0;
-            }
-            for (int q = 0; q < 4 && machines > 0; q++)
-            {
-                if (row.Owners[q] != 0 && site.TryGetMachineOfUnit(row.Owners[q], out int logicId))
+                if (row.Owners[q] != 0 && site.TryGetCreditMachine(row.Owners[q], out int logicId))
                 {
-                    AddCredit(s, logicId, row.Damage / machines);
+                    bool seen = false;
+                    for (int j = 0; j < machines; j++)
+                    {
+                        seen |= ids[j] == logicId;
+                    }
+                    if (!seen)
+                    {
+                        ids[machines++] = logicId;
+                    }
                 }
+            }
+            for (int j = 0; j < machines; j++)
+            {
+                AddCredit(s, ids[j], row.Damage / machines);
             }
             Revision++;
         }
