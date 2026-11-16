@@ -324,13 +324,25 @@ namespace GameLogic.EditorTools.JourneyBots
             // 命令在靶被打空的那一步结束（内核：目标不可选中 → 攻击命令结束）；给两三步。
             if (FgjM2Common.IsAttacking(site, a) || FgjM2Common.IsAttacking(site, b))
             {
-                return c.GetInt("deadWait") < 20 ? Bump(c, "deadWait") : StepOutcome.Fail("训练靶打空后两台还在执行攻击命令");
+                return c.GetInt("deadWait") < 20 ? Bump(c, "deadWait") : StepOutcome.Fail($"训练靶打空后两台还在执行攻击命令（{CmdDiag(site, a)}；{CmdDiag(site, b)}）");
             }
             bool idle = !site.TryGetMachineUnit(a, out int ua) || !site.TryGetCommand(ua, out BinGames.Sim.Combat.CombatCommand ca) || ca.Kind == BinGames.Sim.Combat.CombatCommandKind.None;
             bool idleB = !site.TryGetMachineUnit(b, out int ub) || !site.TryGetCommand(ub, out BinGames.Sim.Combat.CombatCommand cb) || cb.Kind == BinGames.Sim.Combat.CombatCommandKind.None;
             return idle && idleB
                 ? StepOutcome.Done($"训练靶被打空（{t.Health:F0}/{t.MaxHealth:F0}）：两台的攻击命令结束，没有自己去找别的目标（{GameRoot.HomeValley.SquadCommands.RecentEvents.LastOrDefault()}）；靶 {t.RegenCooldownRemaining:F1} 秒后复位")
                 : StepOutcome.Fail("训练靶打空后两台接着执行了别的命令（玩家没要求）");
+        }
+
+        /// <summary>失败诊断：机器的内核命令、目标是否存活 / 可选中、是否冻结 / 麻痹（不能动时命令保留）。</summary>
+        private static string CmdDiag(CombatSite site, int id)
+        {
+            if (!site.TryGetMachineUnit(id, out int u) || !site.Kernel.TryGetUnit(u, out BinGames.Sim.Combat.CombatUnitView v))
+            {
+                return $"#{id} 无单位";
+            }
+            bool tAlive = site.Kernel.TryGetUnit(v.CommandTarget, out BinGames.Sim.Combat.CombatUnitView tv) && site.Kernel.IsAlive(v.CommandTarget);
+            return $"#{id} 命令 {v.Command} → 单位 {v.CommandTarget}（存活 {tAlive}、可选中 {(tv.Flags & BinGames.Sim.Combat.CombatUnitFlags.Targetable) != 0}、血 {tv.Health:F0}）；" +
+                   $"冻结 {site.Kernel.InPhase(u, BinGames.Sim.Combat.EmgPhaseConst.Chill)}、麻痹 {site.Kernel.InPhase(u, BinGames.Sim.Combat.EmgPhaseConst.Charge)}；游戏第 {GameClock.Ticks} 步";
         }
 
         private static StepOutcome Bump(JourneyContext c, string key)

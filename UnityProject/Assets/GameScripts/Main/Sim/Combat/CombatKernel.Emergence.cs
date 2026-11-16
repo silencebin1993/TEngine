@@ -1233,7 +1233,7 @@ namespace BinGames.Sim.Combat
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
             w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 28 : 27) : 12, 1);
+            sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 29 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -1265,6 +1265,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(es.SolidAbsorbs);
                 if (sw.F()) w.Write(es.WreckFires);
                 if (sw.F()) w.Write(es.TallyFloor); // EMGR-TALLY-01：尾部追加（哈希与旧档不写；读不到 = 旧档，取 NextChain）
+                if (sw.F()) w.Write(es.MatterFlushPending); // EMGR-E2E-01（DEBT-EMGRFIELD01-01）：尾部追加 1 B（哈希不写；读不到 = 旧档，取 0 = 原行为）
             }
             sw.EndRecord();
             sw.End();
@@ -1756,6 +1757,7 @@ namespace BinGames.Sim.Combat
                     ReadPatchCounts(r, sr, ref es); // EMG2-MAT-01：格式 17 标量段尾部的斑块计数（短段 / 格式 16 取 0）
                     buf.HadTallyFloor = sr.F();
                     if (buf.HadTallyFloor) es.TallyFloor = r.ReadInt32(); // EMGR-TALLY-01：读不到 = 旧档，FinishEmgLoad 取 NextChain
+                    if (sr.F()) es.MatterFlushPending = r.ReadByte(); // EMGR-E2E-01：读不到 = 旧档，取 0
                     if (!sr.RecordOk || es.NextProjId < 1 || es.NextDroneId < 1 || es.NextWreckId < 1 || es.NextPatchId < 1 || es.NextFieldId < 1 || es.NextChain < 1
                         || es.NextZoneId < 1 || es.WrecksBorn < 0 || es.WrecksAged < 0 || es.WrecksCapped < 0 || es.WrecksDestroyed < 0 || es.TallyFloor < 0)
                     {

@@ -166,6 +166,11 @@ namespace GameLogic.EditorTools.JourneyBots
                 c => c.GetInt("scrDemo") == 0 ? StepOutcome.Done("跳过") : c.StepElapsed < 0.4 ? StepOutcome.Wait : FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("进入拆除模式") : StepOutcome.Retry("没进拆除模式"), retries: 1),
             S("scr_ask", "左键点一座用不着的建筑（第二座实验室还在就点它，拆掉了点第一座；两座都拆了且精炼塔已毁就点废液池）：标记拆除（有后果时先弹确认框写明）", 20, null, c => TickLabDemolishAsk(c), retries: 2),
             S("scr_ok", "弹了确认框就点“确认”：标记拆除，机器上门拆、全额返还废料", 10, c => { if (c.GetInt("scrDemo") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c), retries: 1),
+            // EMGR-E2E-01 修复轮 2：一座的返还不够最便宜的那座重建（炮塔 50 / 发电机 60，废液池只返还 30）时，接着拆同样因精炼塔被毁而断了燃油的陷阱发射器（够了就跳过）。
+            S("scr_ask2", "返还还不够最便宜的那座重建：左键点第二座用不着的建筑（精炼塔已毁、断了燃油的陷阱发射器）：标记拆除（够了就跳过）", 20, null, c => TickLabDemolishAsk(c, "scrDemo2"), retries: 2),
+            S("scr_ok2", "弹了确认框就点“确认”", 10, c => { if (c.GetInt("scrDemo2") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c, "scrDemo2"), retries: 1),
+            S("scr_ask3", "还不够：左键点第三座用不着的建筑（另一台断了燃油的陷阱发射器）：标记拆除（够了就跳过）", 20, null, c => TickLabDemolishAsk(c, "scrDemo3"), retries: 2),
+            S("scr_ok3", "弹了确认框就点“确认”", 10, c => { if (c.GetInt("scrDemo3") == 1 && UiConfirmDialog.IsOpen) { FgjM1Journey.ClickUi(c, "[UiKitOverlayHost]", "ConfirmOk"); } }, c => TickLabMarked(c, "scrDemo3"), retries: 1),
             S("scr_demo_off", "再按拆除模式键退出、按建造键关闭建造模式", 10, c => { if (c.GetInt("scrDemo") == 1) { JourneyInput.PressToggleTo(GameActionId.DemolishMode, () => FgjM3Common.Mode.DemolishMode, false); } },
                 c => c.GetInt("scrDemo") == 0 || !FgjM3Common.Mode.DemolishMode ? StepOutcome.Done("退出拆除模式") : c.StepElapsed < 0.4 ? StepOutcome.Wait : StepOutcome.Retry("没退出"), retries: 1),
             S("scr_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
@@ -1208,22 +1213,63 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             CampaignState s = St;
             int need = 0;
+            int cheapest = int.MaxValue;
+            var targetIds = new HashSet<string>();
             foreach (string k in new[] { "res2", "res3" })
             {
                 RaidResultRecord r = RaidResultService.Find(s, c.GetInt(k));
                 foreach (RaidLossRecord x in r?.Losses ?? Array.Empty<RaidLossRecord>())
                 {
                     BuildingRecord b = x.Kind == "building" || x.Kind == "turret" || x.Kind == "defense" ? HomeGridService.FindBuilding(s, x.Id) : null;
-                    if (b != null && b.ConstructionState == BuildingConstructionState.Damaged && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null)
+                    if (b != null && b.ConstructionState == BuildingConstructionState.Damaged && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null && targetIds.Add(b.BuildingId))
                     {
-                        need += Math.Max(0, BuildingOps.RebuildScrapFor(b));
+                        int cost = Math.Max(0, BuildingOps.RebuildScrapFor(b));
+                        need += cost;
+                        cheapest = Math.Min(cheapest, cost);
                     }
                 }
             }
-            bool demo = need > 0 && s.Scrap < need && ScrapBld(c, ScrapLabKey(c)) != null;
+            // EMGR-E2E-01 修复轮 2：自动重建 R2 要“一次凑齐”（FG-GAP-189），仓库里先要有最便宜那座的全款；R2 按等料顺序把废料先派给更便宜、也在等料的别的虚影
+            // （如被余火烧掉的屏障 6），传送带虚影的施工单又在逐份取料（FG-GAP-224 临时降级 = 玩家拆闲置建筑换废料）——拆到返还合计 ≥ 最便宜那座 + 更便宜的等料虚影 + 10 份余量为止。
+            int lump = 0;
+            if (cheapest != int.MaxValue)
+            {
+                lump = cheapest + 10;
+                foreach (BuildingRecord b in s.BuildingRecords ?? Array.Empty<BuildingRecord>())
+                {
+                    if (b != null && b.RegionId == HomeValleyLayout.RegionId && b.ConstructionState == BuildingConstructionState.Damaged && !targetIds.Contains(b.BuildingId)
+                        && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null && BuildingOps.RebuildScrapFor(b) is int cb && cb >= 0 && cb < cheapest)
+                    {
+                        lump += cb;
+                    }
+                }
+            }
+            var picks = new List<string>();
+            int refund = 0;
+            foreach (string key in new[] { "lab2", "lab1", "pond", "trap", "trap2" })
+            {
+                if (need <= 0 || s.Scrap + refund >= lump || picks.Count >= 3)
+                {
+                    break;
+                }
+                BuildingRecord b = ScrapBld(c, key);
+                if (b != null)
+                {
+                    picks.Add(key);
+                    refund += Math.Max(0, BuildingOps.RebuildScrapFor(b));
+                }
+            }
+            bool demo = need > 0 && s.Scrap < need && picks.Count > 0;
             c.SetInt("scrNeed", need);
+            c.SetInt("scrLump", lump);
             c.SetInt("scrDecided", 1);
             c.SetInt("scrDemo", demo ? 1 : 0);
+            string[] flags = { "scrDemo", "scrDemo2", "scrDemo3" };
+            for (int i = 0; i < flags.Length; i++)
+            {
+                c.SetInt(flags[i], demo && i < picks.Count ? 1 : 0);
+                c.Set(flags[i] + ".lab", demo && i < picks.Count ? picks[i] : string.Empty);
+            }
             return demo;
         }
 
@@ -1232,18 +1278,32 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 拆掉全额返还 30 废料，够自动重建先把最便宜的那几座（屏障 6）派单。上一版没有退路时直接跳过、还写“废料 0 够重建”，rebuilt 只能靠核心应急每分钟 1 份废料碰运气（r4 超时）。</summary>
         private static string ScrapLabKey(JourneyContext c) => P.Bld(c, "lab2") != null ? "lab2" : P.Bld(c, "lab1") != null ? "lab1" : "pond";
 
-        private static BuildingRecord ScrapBld(JourneyContext c, string key) => key == "pond" ? IdlePond(St) : P.Bld(c, key);
+        private static BuildingRecord ScrapBld(JourneyContext c, string key) => key == "pond" ? IdlePond(St) : key == "trap" || key == "trap2" ? IdleTrap(c, key) : P.Bld(c, key);
+
+        /// <summary>EMGR-E2E-01 修复轮 2：断了燃油、暂时用不着的陷阱发射器（火墙一 / 二）：它铺的油来自精炼塔，精炼塔已被摧毁（虚影等重建）时同废液池一样暂时用不着。没有就 null。</summary>
+        private static BuildingRecord IdleTrap(JourneyContext c, string key)
+        {
+            BuildingRecord b = HomeGridService.FindBuilding(St, c.Get(key + ".id"));
+            return b != null && RefineryDown(St) && b.ConstructionState == BuildingConstructionState.Operational && !HomeValleyController.IsPlannedGhost(b) ? b : null;
+        }
 
         /// <summary>用不着的废液池：建成在用、而它服务的精炼塔已被摧毁（虚影等重建）。没有就 null（不拆在用的产线）。</summary>
         private static BuildingRecord IdlePond(CampaignState s)
         {
             BuildingRecord[] all = (s?.BuildingRecords ?? Array.Empty<BuildingRecord>()).Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId).ToArray();
-            bool towerDown = all.Any(b => b.BuildingTypeId == "refinery_tower" && b.ConstructionState == BuildingConstructionState.Damaged)
-                             && !all.Any(b => b.BuildingTypeId == "refinery_tower" && b.ConstructionState == BuildingConstructionState.Operational);
-            return towerDown ? all.FirstOrDefault(b => b.BuildingTypeId == "waste_pond" && b.ConstructionState == BuildingConstructionState.Operational && !HomeValleyController.IsPlannedGhost(b)) : null;
+            return RefineryDown(s) ? all.FirstOrDefault(b => b.BuildingTypeId == "waste_pond" && b.ConstructionState == BuildingConstructionState.Operational && !HomeValleyController.IsPlannedGhost(b)) : null;
         }
 
-        private static string ScrapLabName(string key) => key == "lab2" ? "第二座仿真实验室" : key == "lab1" ? "第一座仿真实验室" : "废液池（精炼塔已被烧毁，暂时用不着）";
+        /// <summary>精炼塔已被摧毁（虚影等重建）、家园里没有在用的精炼塔：废液池与靠它出燃油的陷阱发射器暂时用不着。</summary>
+        private static bool RefineryDown(CampaignState s)
+        {
+            BuildingRecord[] all = (s?.BuildingRecords ?? Array.Empty<BuildingRecord>()).Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId).ToArray();
+            return all.Any(b => b.BuildingTypeId == "refinery_tower" && b.ConstructionState == BuildingConstructionState.Damaged)
+                   && !all.Any(b => b.BuildingTypeId == "refinery_tower" && b.ConstructionState == BuildingConstructionState.Operational);
+        }
+
+        private static string ScrapLabName(string key) => key == "lab2" ? "第二座仿真实验室" : key == "lab1" ? "第一座仿真实验室"
+            : key == "trap" ? "第一道火墙的陷阱发射器（精炼塔已被烧毁、断了燃油）" : key == "trap2" ? "第二道火墙的陷阱发射器（精炼塔已被烧毁、断了燃油）" : "废液池（精炼塔已被烧毁，暂时用不着）";
 
         /// <summary>scr_open 不用拆的两种情况分开写：废料真够；或者不够但没有用不着的建筑可拆（如实写明，rebuilt 照常按新口径判）。</summary>
         private static StepOutcome ScrapSkip(JourneyContext c)

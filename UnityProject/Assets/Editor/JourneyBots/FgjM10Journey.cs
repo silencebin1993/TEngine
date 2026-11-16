@@ -1532,22 +1532,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 return StepOutcome.Wait;
             }
-            // FG-GAP-140 的临时做法（玩家也这么操作）：攻击命令直线逼近、被地形角落卡在射程外不动 → 先右键塔旁地面（移动走寻路）走近，下面再右键塔。
-            // EMG2-BOSS-01：撤掉场地区域后幸存的两台卡在拐角里不再被挤开，这一步才稳定复现。寻路局部避让归 FG15-SYS-02。
-            if (NowMs() - c.GetLong(FgjM3Common.SK(c, "stuckAt")) > 5000)
-            {
-                Vector2 towerAt = BaptismTowerBoss.PartPosition(s, BaptismTowerBoss.TowerInstanceId);
-                bool stuck = Vector2.Distance(centroid, towerAt) > 16f && Vector2.Distance(centroid, new Vector2(c.GetLong(FgjM3Common.SK(c, "stuckX")) / 100f, c.GetLong(FgjM3Common.SK(c, "stuckY")) / 100f)) < 0.5f;
-                c.SetLong(FgjM3Common.SK(c, "stuckAt"), NowMs());
-                c.SetLong(FgjM3Common.SK(c, "stuckX"), Mathf.RoundToInt(centroid.x * 100f));
-                c.SetLong(FgjM3Common.SK(c, "stuckY"), Mathf.RoundToInt(centroid.y * 100f));
-                if (stuck && !JourneyInput.Holding && FgjM3Common.TryClick(towerAt + (centroid - towerAt).normalized * 9f, 1))
-                {
-                    c.Log($"[{F(c.StepElapsed, "0")}s] 攻击命令卡在射程外（FG-GAP-140），先右键塔旁地面走近");
-                    c.SetLong(FgjM3Common.SK(c, "rcAt"), NowMs());
-                    return StepOutcome.Wait;
-                }
-            }
+            // EMGR-NAV-01（FG-GAP-140 已修）：攻击命令直线不通时内核自己走寻路绕到射程内，不再“先右键塔旁地面走近”（EMGR-E2E-01 撤掉临时打法）。
             // 有人没在打反应塔（被灌注 / 召来的小兵打断、刚开战）：右键反应塔（攻击）。
             int attacking = AliveTeam(c).Count(id => Cmd(id) == (int)CombatCommandKind.Attack);
             if (attacking < AliveTeam(c).Count && !JourneyInput.Holding && NowMs() - c.GetLong(FgjM3Common.SK(c, "rcAt")) > 3000)

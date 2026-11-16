@@ -340,6 +340,7 @@ namespace BinGames.Sim.Combat
             d.Patches[i] = z;
             EmgScalars es = d.EmgS[0];
             es.PatchLive = math.max(0, es.PatchLive - 1);
+            es.MatterFlushPending = es.PatchLive == 0 ? (byte)1 : es.MatterFlushPending; // DEBT-EMGRFIELD01-01：清空最后一块（不论在不在节拍里）下一次斑块步补 leave
             es.HashDirty = 1;
             d.EmgS[0] = es;
         }
@@ -437,7 +438,7 @@ namespace BinGames.Sim.Combat
                 EmgHashEnsure(ref d); // EMG2-PERSIST-01：长期留存地点每步把 BlockSig 算准（最后一块阻路斑块消失那一步也算），热更层据此同步寻路镜像
             }
             StepConduct(ref d, dt); // EMG2-RULE-01：传导节拍（每 15 步一次，按步序号对齐；没有斑块也要衰减 / 传单位身上的电荷与磁化）
-            if (d.EmgS[0].PatchLive <= 0 && !marsh)
+            if (d.EmgS[0].PatchLive <= 0 && !marsh && d.EmgS[0].MatterFlushPending == 0)
             {
                 return;
             }
@@ -456,6 +457,12 @@ namespace BinGames.Sim.Combat
             if (d.Drones.Length > 0)
             {
                 StepDroneMatter(ref d, marsh); // EMGR-FIELD-01（FGR-EMG-060 第 14、15 行，无人机按单位算）：无人机机身进 / 离气体层斑块（哨戒桩含地面层与酸沼）
+            }
+            if (d.EmgS[0].MatterFlushPending != 0)
+            {
+                EmgScalars fs = d.EmgS[0];
+                fs.MatterFlushPending = 0; // 本步已走过接触或 FlushMatterLeave（单位 / 无人机掩码都已与斑块层对齐）
+                d.EmgS[0] = fs;
             }
         }
 

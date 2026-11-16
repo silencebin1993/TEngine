@@ -618,9 +618,9 @@ namespace GameLogic.EditorTools
             using var b = new CombatKernel(a.Config, 64);
             CombatLoadResult lr = b.Load(snap);
             bool same = lr == CombatLoadResult.Ok && b.EmgChainTallyForTests().SequenceEqual(atSave) && b.PatchStats.TallyFloor == 0 && b.StateHash() == a.StateHash() && b.EmgStateHash() == a.EmgStateHash();
-            Expect(hashSame && markedAtSave.Length == 1 && same && rows == 3 && empty.Length - emptyPre.Length == 4 && snap.Length - pre.Length == 4 + 14 + 16 * rows,
+            Expect(hashSame && markedAtSave.Length == 1 && same && rows == 3 && empty.Length - emptyPre.Length == 4 + 1 && snap.Length - pre.Length == 4 + 1 + 14 + 16 * rows, // EMGR-E2E-01：标量段第 29 字段 MatterFlushPending 1 B 一并只在新形里写
                 $"T4a 快照段 33 往返：3 行（在途 / 敌方封印 / 已记极限）读回逐位一致（{lr}），下限 0；计数不进状态哈希（结算前后哈希不变）；"
-                + $"空表不写段 33、只多标量第 28 字段 4 B，有计数时段 33 = 14 B 段头 + {rows} × 16 B（快照 {snap.Length} / 旧形 {pre.Length} 字节）");
+                + $"空表不写段 33、只多标量第 28 字段 4 B（+ 第 29 字段 1 B），有计数时段 33 = 14 B 段头 + {rows} × 16 B（快照 {snap.Length} / 旧形 {pre.Length} 字节）");
 
             void Follow(CombatKernel k)
             {
@@ -706,7 +706,7 @@ namespace GameLogic.EditorTools
             int4[] full = k.EmgChainTallyForTests();
             int fullRows = full.Count(t => t.x != 0);
             byte[] fullSnap = k.Serialize(), preSnap = k.SerializePreTallyForTests();
-            int segBytes = fullSnap.Length - preSnap.Length - 4;
+            int segBytes = fullSnap.Length - preSnap.Length - 4 - 1; // 标量第 28 字段 4 B + 第 29 字段 MatterFlushPending 1 B（EMGR-E2E-01）
             using var kr = new CombatKernel(k.Config, 64);
             bool fullRound = kr.Load(fullSnap) == CombatLoadResult.Ok && kr.EmgChainTallyForTests().SequenceEqual(full);
             chains[last] = k.EmgIssueChainForTests();

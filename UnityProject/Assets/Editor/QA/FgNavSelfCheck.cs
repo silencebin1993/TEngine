@@ -1354,15 +1354,15 @@ namespace GameLogic.EditorTools
         /// 开局只探明核心附近、地形起伏按种子而定，有的种子附近没有够大的天然平地：这时退而找一块已探索、没有建筑与障碍的方形区域，
         /// 把里面的地形整平成空地（测试布景，同 <see cref="CliffRing"/>），不让用例依赖某个种子恰好有平地。
         /// </summary>
-        internal static GridCell? FindOpenArea(CampaignState s, int half, int minR, int maxR)
+        internal static GridCell? FindOpenArea(CampaignState s, int half, int minR, int maxR, Func<GridCell, bool> centerOk = null)
         {
-            GridCell? natural = FindOpenAreaCore(s, half, minR, maxR, flatten: false);
+            GridCell? natural = FindOpenAreaCore(s, half, minR, maxR, flatten: false, centerOk);
             if (natural != null)
             {
                 return natural;
             }
             string naturalMiss = _openAreaMiss;
-            GridCell? made = FindOpenAreaCore(s, half, minR, maxR, flatten: true);
+            GridCell? made = FindOpenAreaCore(s, half, minR, maxR, flatten: true, centerOk);
             if (made == null)
             {
                 _openAreaMiss = naturalMiss + "；整平也找不到：" + _openAreaMiss;
@@ -1370,7 +1370,7 @@ namespace GameLogic.EditorTools
             return made;
         }
 
-        private static GridCell? FindOpenAreaCore(CampaignState s, int half, int minR, int maxR, bool flatten)
+        private static GridCell? FindOpenAreaCore(CampaignState s, int half, int minR, int maxR, bool flatten, Func<GridCell, bool> centerOk = null)
         {
             HomeGridMap map = HomeGridService.MapFor(s);
             GridCell core = HomeGridService.CorePivot(s);
@@ -1399,7 +1399,7 @@ namespace GameLogic.EditorTools
                         }
                         centers++;
                         var c = new GridCell(core.X + dx, core.Y + dy);
-                        bool ok = true;
+                        bool ok = centerOk == null || centerOk(c); // EMGR-E2E-01：调用方另加的中心条件（FGJ-EMG-R 要求在信号覆盖里）
                         for (int y = -half; y <= half && ok; y++)
                         {
                             for (int x = -half; x <= half && ok; x++)

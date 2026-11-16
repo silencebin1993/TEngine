@@ -225,7 +225,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Retry($"装入没成功（{SignalCoreHudUIToolkit.Instance?.FeedbackText}；{FgjM1Journey.UiFail(c)}）");
         }
 
-        private static bool OpenDisk(CampaignState s, Vector2 p, int r)
+        internal static bool OpenDisk(CampaignState s, Vector2 p, int r)
         {
             for (int x = -r; x <= r; x++)
             {
@@ -241,20 +241,20 @@ namespace GameLogic.EditorTools.JourneyBots
             return true;
         }
 
-        private static int SpawnTarget(CombatKernel k, Vector2 p)
+        internal static int SpawnTarget(CombatKernel k, Vector2 p, CombatUnitKind kind = CombatUnitKind.Enemy, float hp = 8000f)
         {
             int id = k.Spawn(new CombatSpawn
             {
-                ExtKey = -1, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.None,
+                ExtKey = -1, Kind = kind, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.None,
                 Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled,
-                Position = new double2(p.x, p.y), Home = new double2(p.x, p.y), Radius = 0.5f, Speed = 0f, Health = 8000f, MaxHealth = 8000f,
+                Position = new double2(p.x, p.y), Home = new double2(p.x, p.y), Radius = 0.5f, Speed = 0f, Health = hp, MaxHealth = hp,
                 Weapon = -1, BehaviorProfile = -1, Priority = 1, ArmorHalfAngleDeg = 90f, ArmorFraction = 0f, ArmorFacing = new float2(0f, -1f),
             });
             k.SetUnitProfile(id, EmgEntityProfiles.ForEnemy("material.steel", false), 0f); // 钢壳：导电，电弧能连锁 / 带电
             return id;
         }
 
-        private static BlueprintRecord AddBlueprint(CampaignState s, string id, string chassis, string primary, string utility, string structure, string[] firmware, bool uplink)
+        internal static BlueprintRecord AddBlueprint(CampaignState s, string id, string chassis, string primary, string utility, string structure, string[] firmware, bool uplink)
         {
             BlueprintCircuitBoard board = BlueprintCircuitBoard.CreateDefault(chassis, primary, utility, structure, firmware);
             if (uplink && !Enumerable.Range(0, 9).Any(i => board.TrySetUplink(i).Success))
@@ -408,7 +408,7 @@ namespace GameLogic.EditorTools.JourneyBots
         // ── 下令 ────────────────────────────────────────────────────────────────
 
         /// <summary>选中的机器右键靶子下令攻击，每 2 秒最多点一次。返回“这台已在执行攻击命令”。</summary>
-        private static bool OrderAttack(JourneyContext c, string machineKey, string targetKey)
+        internal static bool OrderAttack(JourneyContext c, string machineKey, string targetKey)
         {
             int id = c.GetInt(machineKey);
             if (FgjM2Common.IsAttacking(Home, id))
@@ -430,7 +430,7 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>选中的机器右键地面下令移动（只点一次成功的）。返回“命令已发出”。</summary>
-        private static bool OrderMove(JourneyContext c, string machineKey, Vector2 goal)
+        internal static bool OrderMove(JourneyContext c, string machineKey, Vector2 goal)
         {
             if (c.GetInt(machineKey + ".sent") == 1)
             {
@@ -452,7 +452,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return false;
         }
 
-        private static StepOutcome Cleared(JourneyContext c, StepOutcome done, params string[] targetKeys)
+        internal static StepOutcome Cleared(JourneyContext c, StepOutcome done, params string[] targetKeys)
         {
             // 这一段的靶子清场：机器不再往这里打，下一段互不串（夹具）。
             foreach (string key in targetKeys)

@@ -685,6 +685,8 @@ namespace GameLogic.EditorTools
                          && Zone(r, out CombatZone zz) && Mathf.Abs(zz.Radius - radii.Last()) < 0.05f;
             Expect(grows, $"B3 一直漏：液洼半径 {r0:F2} → {radii.Last():F2} 米（最大 {PipeLeakService.MaxRadius:F2}）逐步扩大，内核区域同步（{string.Join(" / ", radii.Select(x => x.ToString("F2")))}）");
 
+            // EMGR-CMD-01 起开局机器按教义自卫还手（离液洼约 4 米），它的弹体会点着液洼——本段要“没有火”，把开局机器挪出射程（测试夹具）
+            F.ParkMachinesAwayFrom(Site, new Vector2(c.X, c.Y), 30f);
             int foe = Dummy(new Vector2(c.X + 0.4f, c.Y));
             int far = Dummy(new Vector2(c.X + 8f, c.Y + 8f));
             F.Seconds(1.2f);

@@ -405,7 +405,6 @@ namespace GameLogic.EditorTools
 
         /// <summary>真实交战：每 0.5 游戏秒给没在攻击的存活成员下“右键敌人 = 攻击”（玩家同一个编队命令入口，目标 = 最近的内核敌方单位），直到 <paramref name="done"/>。</summary>
         private static readonly List<string> FightLog = new List<string>();
-        private const float ApproachCells = 9f;
 
         private static bool Fight(IReadOnlyList<int> team, Vector2 at, Func<bool> done, int maxSeconds)
         {
@@ -430,29 +429,15 @@ namespace GameLogic.EditorTools
                 if (u > 0 && site.Kernel.TryGetUnit(u, out BinGames.Sim.Combat.CombatUnitView hu))
                 {
                     var hp = new Vector2((float)hu.Position.x, (float)hu.Position.y);
-                    // 玩家的做法：离得远（攻击命令按直线逼近，地形挡住会停在射程外，FG-GAP-140）先右键地面走过去（移动走层级寻路），进了射程再右键敌人攻击。
-                    var far = new List<int>();
+                    // 玩家的做法：右键敌人 = 攻击；离得远、直线被地形挡住时攻击命令自己走层级寻路绕过去（EMGR-NAV-01 修了 FG-GAP-140，EMGR-E2E-01 撤掉“先右键地面走近”的临时打法）。
                     var near = new List<int>();
                     foreach (int id in team.Where(Alive))
                     {
-                        if (!site.TryGetMachineUnit(id, out int mu) || !site.TryGetCommand(mu, out BinGames.Sim.Combat.CombatCommand c))
-                        {
-                            continue;
-                        }
-                        float dist = Vector2.Distance(PosOf(id), hp);
-                        if (dist > ApproachCells && c.Kind != BinGames.Sim.Combat.CombatCommandKind.Move)
-                        {
-                            far.Add(id);
-                        }
-                        else if (dist <= ApproachCells && c.Kind != BinGames.Sim.Combat.CombatCommandKind.Attack)
+                        if (site.TryGetMachineUnit(id, out int mu) && site.TryGetCommand(mu, out BinGames.Sim.Combat.CombatCommand c)
+                            && c.Kind != BinGames.Sim.Combat.CombatCommandKind.Attack)
                         {
                             near.Add(id);
                         }
-                    }
-                    if (far.Count > 0)
-                    {
-                        Select(home, far);
-                        home.SquadCommands.IssueMoveTo(hp, false);
                     }
                     if (near.Count > 0)
                     {

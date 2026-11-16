@@ -36,6 +36,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjEmg1Journey.Id, FgjEmg1Journey.Build }, // EMG1-E2E-01：FG-EMG 阶段 1 出口旅程（[分裂, 漏油] → 延时引信接入 → 空爆 → 因果链 → 离开 → 存读档）
             { FgjEmg2Journey.Id, FgjEmg2Journey.Build }, // EMG2-E2E-01：FG-EMG 阶段 2 出口旅程（燃烧区 → 通电水洼友伤 → 冻结碎裂 → 新发现 → 突袭留存）
             { FgjEmg3Journey.Id, FgjEmg3Journey.Build }, // EMG3-E2E-01：FG-EMG 阶段 3 出口旅程（履带拖火线 → 悬浮跨燃烧区 → 中继放电 → 两台齐射 → 条件门连锁 → [若被标记, 复制, 分裂]）
+            { FgjEmgRJourney.Id, FgjEmgRJourney.Build }, // EMGR-E2E-01：补功能批次 EMG-R 出口旅程（右键攻击绕悬崖 → 移动途中教义自卫 → 敌方结构单位挨油与明火 → 切割束 0.5 秒一段 → 入场引信穿场分裂、机器进出场 → 存读档）
             { FgjEmg4Journey.Id, FgjEmg4Journey.Build }, // EMG4-E2E-01：FG-EMG 阶段 4 出口旅程（重启注入劫持 → 原生程序作战 → 期满自毁 → 熔坑出现并由工作单填平 → 三选一新交互提示 → 重复作战组件只加库存）
         };
 

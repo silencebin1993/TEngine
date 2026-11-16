@@ -1293,6 +1293,8 @@ namespace GameLogic.EditorTools
             int c0 = Deflag(site);
             uint oilBit = NamedReactionCatalog.BitOf("Oil");
             uint fireBit = NamedReactionCatalog.BitOf("Fire");
+            // EMGR-CMD-01 起开局机器按教义自卫还手，会抢在燃迹炮塔之前点着油膜带上的敌人——本段只验“陷阱 + 燃迹炮塔”，把开局机器挪出射程（测试夹具）
+            FgProductionSelfCheck.ParkMachinesAwayFrom(site, enemyAt, 30f);
             int enemy = Hostile(site, enemyAt, 100000f);
             bool oiled = StepUntil(() => site.Kernel.TryGetStatus(enemy, out uint mask, out _, out _, out _, out _) && (mask & oilBit) != 0, 6);
             int residue0 = 0;

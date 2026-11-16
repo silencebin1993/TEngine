@@ -1022,6 +1022,11 @@ namespace BinGames.Sim.Combat
         public int PatchSpawnedStep;
         /// <summary>活着的斑块数（不进快照：快照只写活斑块，读档后 = 斑块表长度；没有斑块时斑块步 O(1) 跳过）。</summary>
         public int PatchLive;
+        /// <summary>
+        /// EMGR-E2E-01（DEBT-EMGRFIELD01-01；进快照：标量段第 29 字段，不进状态哈希，旧档读不到取 0）：最后一块斑块被 KillPatch 清掉（节拍外：碾压 / 规则转化 / 长期留存清理……）后，
+        /// 下一次斑块步要补一次 FlushMatterLeave（单位 / 无人机身上还记着的物质位当场发 evt.leave），补完清 0；之后斑块步照旧 O(1) 跳过。
+        /// </summary>
+        public byte MatterFlushPending;
         /// <summary>EMG2-MAT-02（不进快照，调试计数）：迁入斑块生成数 / 斑块层满照旧落区域数 / 读 ≤ 16 版快照转成斑块数 / 设施受击条目顺延的步数。</summary>
         public int LegacyBorn;
         public int LegacyKeptZone;

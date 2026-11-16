@@ -317,6 +317,29 @@ namespace GameLogic.EditorTools
             return null;
         }
 
+        /// <summary>
+        /// 测试夹具（EMGR-E2E-01 修复轮）：把 <paramref name="at"/> 周围 <paramref name="radius"/> 米内的己方机器沿背离方向挪到 radius + 15 米外。
+        /// EMGR-CMD-01 起空闲机器按教义自卫还手，开局机器离靶太近时会替被测设施开火（或点燃被测液洼），用来隔离“只有被测系统在动”的段落。返回挪了几台。
+        /// </summary>
+        internal static int ParkMachinesAwayFrom(GameLogic.Campaign.Combat.CombatSite site, Vector2 at, float radius)
+        {
+            int moved = 0;
+            for (int guard = 0; guard < 32; guard++)
+            {
+                int unit = site.FindNearestMachine(at, radius);
+                if (unit == 0 || !site.Kernel.TryGetUnit(unit, out BinGames.Sim.Combat.CombatUnitView v))
+                {
+                    break;
+                }
+                Vector2 p = new Vector2((float)v.Position.x, (float)v.Position.y);
+                Vector2 dir = (p - at).sqrMagnitude > 1e-4f ? (p - at).normalized : Vector2.up;
+                Vector2 to = at + dir * (radius + 15f);
+                site.Kernel.SetPosition(unit, new Unity.Mathematics.double2(to.x, to.y));
+                moved++;
+            }
+            return moved;
+        }
+
         /// <summary>核心附近一块 w×h 的空地（每格都能放一座 1×1 建筑、能铺传送带 / 管线），返回左下角。按种子地形找，不写死坐标（B25）。</summary>
         internal static GridCell? FindArea(CampaignState s, int w, int h, float fromCore = 9f, float toCore = 24f)
         {

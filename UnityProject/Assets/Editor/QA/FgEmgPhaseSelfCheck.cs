@@ -75,6 +75,7 @@ namespace GameLogic.EditorTools
                 Step(CheckFreeze);
                 Step(CheckFreezeBreak);
                 Step(CheckStun);
+                Step(CheckImmobileAttackEnds);
                 Step(CheckMeltdown);
                 Step(CheckBreach);
                 Step(CheckMagnet);
@@ -361,6 +362,56 @@ namespace GameLogic.EditorTools
             {
                 k.Dispose();
             }
+        }
+
+        /// <summary>
+        /// EMGR-E2E-01 修复轮 2（FGR-BASE-020 / B02 × FG10-FAC-01 / EMG2-PHS-01；FGJ-M2R r4_dead 偶发失败的根因）：麻痹 / 冻结中的机器命令保留、原地不动；
+        /// 但它攻击的目标死了（Kill）或不可选中了（训练靶打空 = 不可选中）时，攻击命令当步结束（CommandEnded / TargetLost），不等恢复，也不改打身边别的敌人。
+        /// 修复前：不能动的这一步整段跳过（含 TickCommand），命令挂到恢复（麻痹 1 秒、冻结更久）。
+        /// </summary>
+        private static void CheckImmobileAttackEnds()
+        {
+            var parts = new List<string>();
+            bool ok = true;
+            foreach (int phase in new[] { Charge, Chill })
+            {
+                foreach (bool kill in new[] { true, false })
+                {
+                    CombatKernel k = NewKernel();
+                    try
+                    {
+                        int me = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(Instant(1f, 4f)), 500f);
+                        int foe = Foe(k, new double2(0, 20));
+                        Foe(k, new double2(2.5, 2.5)); // 身边另一个敌人：命令结束后不能自己改打它
+                        k.IssueCommand(me, CombatCommandKind.Attack, new double2(0, 20), foe, 0.5f, 4f, 1f, false);
+                        StepN(k, 2);
+                        k.AddAccum(me, phase, 5f);
+                        StepN(k, 2);
+                        bool held = k.InPhase(me, phase) && k.TryGetCommand(me, out CombatCommand c0) && c0.Kind == CombatCommandKind.Attack && c0.Target == foe;
+                        double2 p0 = Pos(k, me);
+                        k.DrainGameplay(1000, out _);
+                        bool gone = kill ? k.Kill(foe, 0) : k.SetFlag(foe, CombatUnitFlags.Targetable, false);
+                        k.Step(Dt, k.Time + Dt);
+                        CombatEvent[] ev = k.DrainGameplay(1000, out int n);
+                        int lost = 0;
+                        for (int j = 0; j < n; j++)
+                        {
+                            lost += ev[j].Kind == CombatEventKind.CommandEnded && ev[j].Code == (byte)CombatEndReason.TargetLost ? 1 : 0;
+                        }
+                        bool ended = !k.TryGetCommand(me, out _);
+                        StepN(k, 3);
+                        bool still = k.InPhase(me, phase) && !k.TryGetCommand(me, out _) && math.distance(Pos(k, me), p0) < 1e-6;
+                        bool pass = held && gone && lost == 1 && ended && still;
+                        ok &= pass;
+                        parts.Add($"{(phase == Charge ? "麻痹" : "冻结")}·{(kill ? "目标被击毁" : "目标不可选中")}：不能动时命令保留 {held}、目标没了的下一步命令结束 {ended}（TargetLost 事件 {lost} 条）、之后仍不能动且原地、没改打身边的敌人 {still}");
+                    }
+                    finally
+                    {
+                        k.Dispose();
+                    }
+                }
+            }
+            Expect(ok, "不能动的机器攻击目标没了，攻击命令当步结束（FGR-BASE-020）：" + string.Join("；", parts));
         }
 
         // ── E 熔穿 / F 破甲 ──────────────────────────────────────────────────

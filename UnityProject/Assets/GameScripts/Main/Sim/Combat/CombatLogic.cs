@@ -290,7 +290,16 @@ namespace BinGames.Sim.Combat
         {
             if (IsImmobile(ref d, i))
             {
-                return; // FG10-FAC-01（液氮“冻结”）：冻住的机器 / 炮塔这一步什么都不做（命令保留、计时暂停，解冻后接着执行）
+                // FG10-FAC-01（液氮“冻结”）/ EMG2-PHS-01（麻痹）：冻住 / 麻痹的机器这一步什么都不做（命令保留、计时暂停，恢复后接着执行）。
+                // EMGR-E2E-01 修复轮 2 唯一例外：攻击命令的目标已死 / 不可选中时当步结束（与 TickCommand 同一判据、同一结束事件），
+                // 不让被麻痹的机器挂着“攻击一个已经没了的目标”直到恢复（FGR-BASE-020 / B02：目标没了命令就结束，不自己另找目标）。
+                CombatCommand held = d.Cmd[i];
+                if (held.Kind == CombatCommandKind.Attack && AttackTargetLost(ref d, held.Target))
+                {
+                    d.Set(i, CombatUnitFlags.PendingCommand, false);
+                    EndCommand(ref d, i, held, CombatEndReason.TargetLost);
+                }
+                return;
             }
             if (d.Behavior[i] == (byte)CombatBehavior.Hijacked)
             {
@@ -323,33 +332,7 @@ namespace BinGames.Sim.Combat
                 bool done = TickCommand(ref d, i, ref cmd, dt, out CombatEndReason reason);
                 if (done)
                 {
-                    int target = cmd.Target;
-                    CombatCommandKind kind = cmd.Kind;
-                    double2 targetPos = cmd.Pos;
-                    cmd = default;
-                    d.Cmd[i] = cmd;
-                    byte navFail = d.NavFail[i];
-                    DropRoute(ref d, i);
-                    d.NavSt[i] = (byte)CombatNavState.None;
-                    if (kind == CombatCommandKind.WorkMove)
-                    {
-                        if (reason == CombatEndReason.Unreachable)
-                        {
-                            // FG0-ARCH-06：目标无法到达——不原地发呆，把原因交给热更层（工单转等待并通知）。
-                            // 事件位置 = 赶路目标点（没有工单的直接移动命令靠它把通知定位到玩家想去的地方）。
-                            Gameplay(ref d, CombatEventKind.WorkBlocked, i, 0, navFail, 0f, targetPos, navFail, (byte)kind);
-                        }
-                        else
-                        {
-                            Gameplay(ref d, CombatEventKind.WorkArrived, i, 0, 0f, 0f, d.Pos[i], 0, 0);
-                        }
-                    }
-                    else
-                    {
-                        // 无法到达时事件位置 = 命令目标点（通知定位到玩家想去的地方）；其余 = 执行者位置（与 Demo 一致）。
-                        Gameplay(ref d, CombatEventKind.CommandEnded, i, target, navFail, 0f,
-                            reason == CombatEndReason.Unreachable ? targetPos : d.Pos[i], (byte)reason, (byte)kind);
-                    }
+                    EndCommand(ref d, i, cmd, reason);
                 }
                 else
                 {
@@ -399,6 +382,44 @@ namespace BinGames.Sim.Combat
             }
         }
 
+        /// <summary>命令结束：清命令与路线，按种类发 WorkArrived / WorkBlocked / CommandEnded（原因与位置口径同 Demo）。</summary>
+        private static void EndCommand(ref CombatData d, int i, in CombatCommand cmd, CombatEndReason reason)
+        {
+            int target = cmd.Target;
+            CombatCommandKind kind = cmd.Kind;
+            double2 targetPos = cmd.Pos;
+            d.Cmd[i] = default;
+            byte navFail = d.NavFail[i];
+            DropRoute(ref d, i);
+            d.NavSt[i] = (byte)CombatNavState.None;
+            if (kind == CombatCommandKind.WorkMove)
+            {
+                if (reason == CombatEndReason.Unreachable)
+                {
+                    // FG0-ARCH-06：目标无法到达——不原地发呆，把原因交给热更层（工单转等待并通知）。
+                    // 事件位置 = 赶路目标点（没有工单的直接移动命令靠它把通知定位到玩家想去的地方）。
+                    Gameplay(ref d, CombatEventKind.WorkBlocked, i, 0, navFail, 0f, targetPos, navFail, (byte)kind);
+                }
+                else
+                {
+                    Gameplay(ref d, CombatEventKind.WorkArrived, i, 0, 0f, 0f, d.Pos[i], 0, 0);
+                }
+            }
+            else
+            {
+                // 无法到达时事件位置 = 命令目标点（通知定位到玩家想去的地方）；其余 = 执行者位置（与 Demo 一致）。
+                Gameplay(ref d, CombatEventKind.CommandEnded, i, target, navFail, 0f,
+                    reason == CombatEndReason.Unreachable ? targetPos : d.Pos[i], (byte)reason, (byte)kind);
+            }
+        }
+
+        /// <summary>攻击命令的目标没了：不存在 / 已死 / 不可选中 / 潜伏（FG9-FAC-01）/ 只能范围伤害（FG9-FAC-02 子母雷不能被单体锁定）。</summary>
+        private static bool AttackTargetLost(ref CombatData d, int targetId)
+        {
+            int t = d.SlotOf(targetId);
+            return t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || d.Has(t, CombatUnitFlags.Stealthed) || d.Has(t, CombatUnitFlags.AreaOnly);
+        }
+
         /// <summary>返回 true = 命令结束（成功或失败都算），<paramref name="reason"/> 为原因。</summary>
         private static bool TickCommand(ref CombatData d, int i, ref CombatCommand cmd, float dt, out CombatEndReason reason)
         {
@@ -431,12 +452,12 @@ namespace BinGames.Sim.Combat
 
             if (cmd.Kind == CombatCommandKind.Attack)
             {
-                int t = d.SlotOf(cmd.Target);
-                if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || d.Has(t, CombatUnitFlags.Stealthed) || d.Has(t, CombatUnitFlags.AreaOnly))
+                if (AttackTargetLost(ref d, cmd.Target))
                 {
                     reason = CombatEndReason.TargetLost; // FG9-FAC-01：目标潜伏 = 不能再远程锁定；FG9-FAC-02：子母雷不能被单体锁定
                     return true;
                 }
+                int t = d.SlotOf(cmd.Target);
                 cmd.Pos = d.Pos[t];
                 double distA = math.distance(pos, cmd.Pos);
                 float attackRange = AttackRangeOf(ref d, i, t, cmd.AttackRange, out float cdScale);

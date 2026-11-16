@@ -937,9 +937,15 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     return StepOutcome.Fail($"敌人在开火距离内却不在画面里（{c.Get("f.geo")}）");
                 }
+                // EMGR-E2E-01 修复轮 2：敌人落在画面角上的界面（工单面板等）下面时，像玩家一样点它旁边露出来的地面（点选半径内最近的敌人就是它），不隔着界面点。
+                if (!VisibleFirePoint(site, foe, tp, me, out Vector2 aim))
+                {
+                    c.Set("f.geo", c.Get("f.geo") + $"；敌人及点选半径内的地面都被界面挡住（{JourneyInput.UiCoverAt(JourneyInput.ScreenOf(tp))}）");
+                    return c.StepElapsed < 50 ? StepOutcome.Wait : StepOutcome.Retry($"直控开火点不到敌人（{c.Get("f.geo")}）");
+                }
                 c.SetLong(FgjM3Common.SK(c, "fireAt"), NowMs());
                 c.SetInt("f.clicks", c.GetInt("f.clicks") + 1);
-                JourneyInput.Click(tp); // 直控左键点敌人：家园直控对敌方内核单位开火（EMG1-E2E-01 起）
+                JourneyInput.Click(aim); // 直控左键点敌人：家园直控对敌方内核单位开火（EMG1-E2E-01 起）
                 return c.StepElapsed < 50 ? StepOutcome.Wait : StepOutcome.Retry($"直控开火没看到接入程序的根弹体（点击 {c.GetInt("f.clicks")} 次；{c.Get("f.geo")}）");
             }
             // phase 1：已按离开
@@ -981,6 +987,33 @@ namespace GameLogic.EditorTools.JourneyBots
             c.SetInt("slot", CampaignSession.ActiveSlotIndex);
             return StepOutcome.Done($"直控左键开火 {c.GetInt("f.clicks")} 次：根弹体在飞时按退出接入键离开（第 {c.GetLong("f.leaveTick")} 步），武器回 AI 程序 {c.GetInt("prog.ai")}；" +
                                     $"离开后同一颗根弹体飞行中空爆：{c.Get("f.burst")}；子弹药按原程序（{up}）走完：分裂 +{splits}、新增油区 {oil}、定时事件 +{k.EmgPortCountOf(EmgEventKind.Timer) - c.GetLong("f.timer0")}，在飞弹体清零");
+        }
+
+        /// <summary>直控左键要点的地面：敌人脚下没被界面挡住就点它；挡住了就在点选半径（<see cref="HomeValleyController.DirectPickRadius"/>）内、
+        /// 由近到远、先朝机器（画面中心）方向找一处露出来的地面，且那里最近的敌人仍是它。找不到返回 false。</summary>
+        private static bool VisibleFirePoint(CombatSite site, int foe, Vector2 tp, Vector2 me, out Vector2 aim)
+        {
+            aim = tp;
+            if (JourneyInput.UiCoverAt(JourneyInput.ScreenOf(tp)) == null)
+            {
+                return true;
+            }
+            Vector2 toMe = (me - tp).normalized;
+            foreach (float r in new[] { 0.8f, 1.5f, 2.1f })
+            {
+                foreach (float deg in new[] { 0f, 35f, -35f, 70f, -70f })
+                {
+                    Vector2 p = tp + (Vector2)(Quaternion.Euler(0f, 0f, deg) * toMe) * r;
+                    if (JourneyInput.OnScreen(p, 0.03f) && JourneyInput.UiCoverAt(JourneyInput.ScreenOf(p)) == null
+                        && site.FindNearestHostile(p, HomeValleyController.DirectPickRadius) == foe)
+                    {
+                        aim = p;
+                        JourneyInput.AlternatePointClicks++;
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         /// <summary>接入程序在飞的根弹体（不是子弹药）。</summary>

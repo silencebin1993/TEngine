@@ -50,6 +50,7 @@ namespace GameLogic.EditorTools
                 Step(CheckEdgeBits);
                 Step(CheckEdgeNegative);
                 Step(CheckEdgeSaveLoad);
+                Step(CheckEdgeKillFlush);
                 Step(CheckEdgeWreck);
             }
             catch (Exception e)
@@ -488,6 +489,43 @@ namespace GameLogic.EditorTools
         }
 
         // ── F. 存读档 / 暂停 / 倍速 ───────────────────────────────────────────
+
+        /// <summary>
+        /// EMGR-E2E-01（DEBT-EMGRFIELD01-01）：最后一块斑块不是在节拍里到期、而是被 KillPatch 提前清掉（这里走首领战复位同一入口 ClearReservedPatches）且没有酸沼时，
+        /// 下一步单位与无人机照样各补发一次 evt.leave、物质位清零；清空那一刻存档、读档后同样补发且状态哈希与不读档一致；之后不重复发。
+        /// </summary>
+        private static void CheckEdgeKillFlush()
+        {
+            Line("  · H. DEBT-EMGRFIELD01-01：最后一块斑块被提前清掉（KillPatch，非节拍到期、无酸沼）→ 下一步单位与哨戒桩各补 1 条 evt.leave、物质位清零；清空时存读档同样补发；不重复");
+            using (CombatKernel a = NewKernel())
+            using (CombatKernel b = NewKernel())
+            {
+                int listen = EdgeListen(a);
+                int w = a.AddWeapon(Instant(1f, listen));
+                int me = Unit(a, CombatFaction.Player, new double2(0, 0), w, kind: CombatUnitKind.Turret);
+                int post = a.AddDroneForTests(new double2(1, 0), me, CombatFaction.Player, true, 30f, w);
+                int pid = a.SpawnReservedPatch(EmgMatterConst.Oil, new double2(0, 0), 3f, 1f, 60f);
+                var la = new EdgeLog();
+                EdgeRun(a, 20, la);
+                uint um = UnitMask(a, me) & EmgFieldConst.MatterBits, dm = DroneMask(a, post) & EmgFieldConst.MatterBits;
+                int cleared = a.ClearReservedPatches();
+                byte[] snap = a.Serialize();
+                CombatLoadResult rb = b.Load(snap);
+                var la2 = new EdgeLog();
+                var lb = new EdgeLog();
+                EdgeRun(a, 1, la2);
+                EdgeRun(b, 1, lb);
+                uint um2 = UnitMask(a, me) & EmgFieldConst.MatterBits, dm2 = DroneMask(a, post) & EmgFieldConst.MatterBits;
+                uint bm2 = (UnitMask(b, me) | DroneMask(b, post)) & EmgFieldConst.MatterBits;
+                bool sameHash = a.StateHash() == b.StateHash();
+                EdgeRun(a, 60, la2);
+                Expect(pid != 0 && la.EnterRaw == 2 && um == 1u << EmgMatterConst.Oil && dm == 1u << EmgMatterConst.Oil && cleared == 1 && a.PatchCount == 0
+                       && la2.LeaveRaw == 2 && la2.Leave.Count == 1 && la2.Leave[0].Code == EmgMatterConst.Oil && (um2 | dm2) == 0u,
+                    $"炮塔与哨戒桩站在首领灌注油斑里（enter {la.EnterRaw} 条，掩码 {um:X} / {dm:X}）→ 提前撤掉 {cleared} 块（剩 {a.PatchCount}）：下一步补发 leave 共 {la2.LeaveRaw} 条（Code {la2.Leave.FirstOrDefault().Code}），掩码 {um2:X} / {dm2:X}；再跑 60 步不重复");
+                Expect(rb == CombatLoadResult.Ok && lb.LeaveRaw == 2 && bm2 == 0u && sameHash,
+                    $"撤掉之后、补发之前存档 → 读档：下一步同样补 leave {lb.LeaveRaw} 条、掩码 {bm2:X}；与不读档的状态哈希一致 {sameHash}（{rb}）");
+            }
+        }
 
         private static void CheckEdgeSaveLoad()
         {
