@@ -1932,7 +1932,8 @@ namespace BinGames.Sim.Combat
 
         /// <summary>
         /// EMG4-FUSE-02（FGR-EMG-044“两父端口在同一条因果链里同现”；FG-GAP-206 ①）：出手时为程序掩码里的每条配方登记这条链（侧位清零；满了挤掉链号最小 = 最早的一条）。
-        /// 之后同一条链上的写端执行时调 <see cref="EmgClueSeen"/>，两侧端口都出现才计 1 次（EmgClueCount 按链去重）。O(配方位 × 环长)，只在带掩码的出手时。
+        /// 之后同一条链上的写端执行时调 <see cref="EmgClueSeen"/>，两侧端口都出现才计 1 次（EmgClueCount 按链去重）。O(配方位 × 窗口)，只在带掩码的出手时。
+        /// EMGR-FUSE-01：每配方 128 格按链号哈希开放寻址（<see cref="EmgClueProbe"/>）；窗口满挤掉窗口里最早的一格并计 EmgScalars.ClueHalfEvicted（不碰别的配方）。
         /// </summary>
         internal static void EmgClueArm(ref CombatData d, uint mask, int chain)
         {
@@ -1940,27 +1941,66 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            int evicted = 0;
             for (int i = 0; i < EmgConst.ClueSlots; i++)
             {
-                if ((mask & (1u << i)) == 0)
+                if ((mask & (1u << i)) != 0)
                 {
-                    continue;
-                }
-                int b = i * EmgConst.ClueHalfRing, oldest = b;
-                bool have = false;
-                for (int j = b; j < b + EmgConst.ClueHalfRing && !have; j++)
-                {
-                    have = d.EmgClueHalf[j].x == chain;
-                    if (d.EmgClueHalf[j].x == 0 || (d.EmgClueHalf[oldest].x != 0 && d.EmgClueHalf[j].x < d.EmgClueHalf[oldest].x))
-                    {
-                        oldest = j; // 空位优先，其次链号最小（最早）的
-                    }
-                }
-                if (!have)
-                {
-                    d.EmgClueHalf[oldest] = new int2(chain, 0);
+                    evicted += EmgClueInsert(d.EmgClueHalf, i, chain, 0);
                 }
             }
+            if (evicted > 0)
+            {
+                EmgScalars es = d.EmgS[0];
+                es.ClueHalfEvicted += evicted;
+                d.EmgS[0] = es;
+            }
+        }
+
+        /// <summary>EMGR-FUSE-01：链号 → 配方行内的起始格（Fibonacci 哈希；任意正链号都落在 [0, ClueHalfRing)，连续 / 等差的链号也散开）。</summary>
+        internal static int EmgClueHome(int chain) => (int)(((uint)chain * 2654435769u) >> (32 - EmgConst.ClueHalfBits));
+
+        /// <summary>
+        /// EMGR-FUSE-01：在配方 <paramref name="i"/> 的在途登记里找链 <paramref name="chain"/>——从起始格起探测 ClueHalfWindow 格，在本配方行内回绕（不越到别的配方），整窗扫完（删格不留墓碑）。
+        /// 找到返回下标，否则 −1；<paramref name="free"/> = 窗口里第一个空格（没有 = −1），<paramref name="oldest"/> = 窗口里链号最小（最早）的非空格。登记 / 记侧位 / 清登记 / 读旧档重插都走这里。
+        /// </summary>
+        internal static int EmgClueProbe(NativeArray<int2> half, int i, int chain, out int free, out int oldest)
+        {
+            int b = i * EmgConst.ClueHalfRing, home = EmgClueHome(chain);
+            free = -1;
+            oldest = -1;
+            for (int k = 0; k < EmgConst.ClueHalfWindow; k++)
+            {
+                int j = b + ((home + k) & (EmgConst.ClueHalfRing - 1));
+                int x = half[j].x;
+                if (x == chain)
+                {
+                    return j;
+                }
+                if (x == 0)
+                {
+                    if (free < 0)
+                    {
+                        free = j;
+                    }
+                }
+                else if (oldest < 0 || x < half[oldest].x)
+                {
+                    oldest = j;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>EMGR-FUSE-01：配方 <paramref name="i"/> 登记链 <paramref name="chain"/>（已登记 = 不动）；窗口满时挤掉窗口里最早的一格并返回 1（调用方计数），否则返回 0。</summary>
+        internal static int EmgClueInsert(NativeArray<int2> half, int i, int chain, int side)
+        {
+            if (EmgClueProbe(half, i, chain, out int free, out int oldest) >= 0)
+            {
+                return 0;
+            }
+            half[free >= 0 ? free : oldest] = new int2(chain, side);
+            return free >= 0 ? 0 : 1;
         }
 
         /// <summary>
@@ -1981,25 +2021,21 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                int b = i * EmgConst.ClueHalfRing;
-                for (int j = b; j < b + EmgConst.ClueHalfRing; j++)
+                int j = EmgClueProbe(d.EmgClueHalf, i, chain, out _, out _);
+                if (j < 0)
                 {
-                    int2 h = d.EmgClueHalf[j];
-                    if (h.x != chain)
-                    {
-                        continue;
-                    }
-                    h.y |= side;
-                    if (h.y == 3)
-                    {
-                        d.EmgClueHalf[j] = default;
-                        EmgClueCount(ref d, 1u << i, chain);
-                    }
-                    else
-                    {
-                        d.EmgClueHalf[j] = h;
-                    }
-                    break;
+                    continue;
+                }
+                int2 h = d.EmgClueHalf[j];
+                h.y |= side;
+                if (h.y == 3)
+                {
+                    d.EmgClueHalf[j] = default;
+                    EmgClueCount(ref d, 1u << i, chain);
+                }
+                else
+                {
+                    d.EmgClueHalf[j] = h;
                 }
             }
         }
@@ -2011,15 +2047,13 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
-            for (int j = i * EmgConst.ClueHalfRing; j < (i + 1) * EmgConst.ClueHalfRing; j++)
+            int j = EmgClueProbe(d.EmgClueHalf, i, chain, out _, out _);
+            if (j < 0)
             {
-                if (d.EmgClueHalf[j].x == chain)
-                {
-                    d.EmgClueHalf[j] = default;
-                    return true;
-                }
+                return false;
             }
-            return false;
+            d.EmgClueHalf[j] = default;
+            return true;
         }
 
         /// <summary>EMG3-FUSE-01（FGR-EMG-044 熔合线索）：一次出手的程序覆盖了哪些配方端口对（编译期掩码），各计 1 次并置脏位；热更层按脏位取走（O(配方数)，只在带掩码的程序出手时）。</summary>

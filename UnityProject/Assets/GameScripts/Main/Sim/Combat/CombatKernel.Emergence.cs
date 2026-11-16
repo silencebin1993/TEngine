@@ -136,6 +136,74 @@ namespace BinGames.Sim.Combat
             _d.EmgS[0] = es;
         }
 
+        /// <summary>EMGR-FUSE-01：配方 <paramref name="recipe"/> 的在途登记格数（O(128)，自检 / 调试用）。</summary>
+        public int EmgClueHalfLive(int recipe)
+        {
+            int n = 0;
+            for (int s = 0; recipe >= 0 && recipe < EmgConst.ClueSlots && s < EmgConst.ClueHalfRing; s++)
+            {
+                n += _d.EmgClueHalf[recipe * EmgConst.ClueHalfRing + s].x != 0 ? 1 : 0;
+            }
+            return n;
+        }
+
+        /// <summary>EMGR-FUSE-01：配方行内第 <paramref name="slot"/> 格（x = 链号、y = 已出现的侧位）。</summary>
+        public Unity.Mathematics.int2 EmgClueHalfAt(int recipe, int slot) =>
+            recipe >= 0 && recipe < EmgConst.ClueSlots && slot >= 0 && slot < EmgConst.ClueHalfRing ? _d.EmgClueHalf[recipe * EmgConst.ClueHalfRing + slot] : default;
+
+        /// <summary>EMGR-FUSE-01：链号在配方行内的起始格（探测窗口从这里起 <see cref="EmgConst.ClueHalfWindow"/> 格）。</summary>
+        public static int EmgClueHomeOf(int chain) => CombatLogic.EmgClueHome(chain);
+
+        /// <summary>EMGR-FUSE-01 测试用：直接走出手登记 / 写端记侧位（与 EmgHostBegin、各写端同一实现）。</summary>
+        public void EmgClueArmForTests(uint mask, int chain) => CombatLogic.EmgClueArm(ref _d, mask, chain);
+
+        public void EmgClueSeenForTests(int chain, int port) => CombatLogic.EmgClueSeen(ref _d, chain, port);
+
+        /// <summary>EMGR-FUSE-01 测试用：直接写一格（造“格号不在链的探测窗口里”的坏档）。</summary>
+        public void EmgClueHalfSetForTests(int recipe, int slot, int chain, int side) => _d.EmgClueHalf[recipe * EmgConst.ClueHalfRing + slot] = new Unity.Mathematics.int2(chain, side);
+
+        /// <summary>EMGR-FUSE-01 测试用：段 32 按 EMGR-FUSE-01 之前的 8 格全长布局写（3 字段、含空格，下标 = 配方 × 8 + 格，每配方最多 8 条、和旧代码一样从第 7 格往前填），模拟旧提交写出的档。</summary>
+        public byte[] SerializeClueHalfLegacyForTests()
+        {
+            _legacyClueHalfForTests = true;
+            try
+            {
+                return Serialize();
+            }
+            finally
+            {
+                _legacyClueHalfForTests = false;
+            }
+        }
+
+        private bool _legacyClueHalfForTests;
+
+        private void WriteClueHalfLegacy(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            var old = new Unity.Mathematics.int2[EmgConst.ClueSlots * EmgConst.ClueHalfLegacyRing];
+            for (int i = 0; i < EmgConst.ClueSlots; i++)
+            {
+                int j = EmgConst.ClueHalfLegacyRing - 1;
+                for (int s = 0; s < EmgConst.ClueHalfRing && j >= 0; s++)
+                {
+                    Unity.Mathematics.int2 h = _d.EmgClueHalf[i * EmgConst.ClueHalfRing + s];
+                    if (h.x != 0)
+                    {
+                        old[i * EmgConst.ClueHalfLegacyRing + j--] = h;
+                    }
+                }
+            }
+            sw.Begin(EmgConst.SegClueHalf, 3, old.Length);
+            for (int i = 0; i < old.Length; i++)
+            {
+                if (sw.F()) w.Write(i);
+                if (sw.F()) w.Write(old[i].x);
+                if (sw.F()) w.Write(old[i].y);
+                sw.EndRecord();
+            }
+            sw.End();
+        }
+
         public bool TryGetProgram(int index, out EmgProgram p)
         {
             bool ok = index >= 0 && index < _d.EmgPrograms.Length;
@@ -1393,14 +1461,33 @@ namespace BinGames.Sim.Combat
             {
                 WritePitSegments(w, sw);
             }
-            if (half)
+            if (half && _legacyClueHalfForTests)
             {
-                sw.Begin(EmgConst.SegClueHalf, 3, _d.EmgClueHalf.Length);
+                WriteClueHalfLegacy(w, sw);
+            }
+            else if (half)
+            {
+                // EMGR-FUSE-01：只写非空格、4 字段（旧布局下标让较早提交读到也落在同一配方；按行内格号原样写回，读档后探测位置与哈希逐字一致）
+                int n = 0;
                 for (int i = 0; i < _d.EmgClueHalf.Length; i++)
                 {
-                    if (sw.F()) w.Write(i);
+                    if (_d.EmgClueHalf[i].x != 0)
+                    {
+                        n++;
+                    }
+                }
+                sw.Begin(EmgConst.SegClueHalf, 4, n);
+                for (int i = 0; i < _d.EmgClueHalf.Length; i++)
+                {
+                    if (_d.EmgClueHalf[i].x == 0)
+                    {
+                        continue;
+                    }
+                    int slot = i % EmgConst.ClueHalfRing;
+                    if (sw.F()) w.Write(i / EmgConst.ClueHalfRing * EmgConst.ClueHalfLegacyRing + slot % EmgConst.ClueHalfLegacyRing);
                     if (sw.F()) w.Write(_d.EmgClueHalf[i].x);
                     if (sw.F()) w.Write(_d.EmgClueHalf[i].y);
+                    if (sw.F()) w.Write(slot);
                     sw.EndRecord();
                 }
                 sw.End();
@@ -2007,22 +2094,41 @@ namespace BinGames.Sim.Combat
                     return ParsePitSegment(r, sr, ref staging);
                 case EmgConst.SegClueHalf: // EMG4-FUSE-02
                 {
-                    if (sr.Count > EmgConst.ClueSlots * EmgConst.ClueHalfRing)
+                    // EMGR-FUSE-01：≤ 3 字段 = 旧 8 格全长布局（含空格，下标 = 配方 × 8 + 格）：按 下标 / 8 取配方号重新插入（不能按原下标写回，否则配方错位）；
+                    // ≥ 4 字段 = 新布局（只有非空格）：按配方 + 行内格号原样写回，格号必须在这条链的探测窗口里、同一格不能写两次
+                    bool legacy = sr.Fields < 4;
+                    if (sr.Count > EmgConst.ClueSlots * (legacy ? EmgConst.ClueHalfLegacyRing : EmgConst.ClueHalfRing))
                     {
                         return CombatLoadResult.InvalidValue;
                     }
                     for (int i = 0; i < sr.Count; i++)
                     {
                         sr.Record(i);
-                        int at = -1, chain = 0, side = 0;
+                        int at = -1, chain = 0, side = 0, slot = -1;
                         if (sr.F()) at = r.ReadInt32();
                         if (sr.F()) chain = r.ReadInt32();
                         if (sr.F()) side = r.ReadInt32();
-                        if (!sr.RecordOk || at < 0 || at >= staging.EmgClueHalf.Length || chain < 0 || side < 0 || side > 3)
+                        if (sr.F()) slot = r.ReadInt32();
+                        int recipe = at / EmgConst.ClueHalfLegacyRing;
+                        if (!sr.RecordOk || at < 0 || recipe >= EmgConst.ClueSlots || chain < 0 || side < 0 || side > 3)
                         {
                             return CombatLoadResult.InvalidValue;
                         }
-                        staging.EmgClueHalf[at] = new Unity.Mathematics.int2(chain, side);
+                        if (legacy)
+                        {
+                            if (chain > 0)
+                            {
+                                CombatLogic.EmgClueInsert(staging.EmgClueHalf, recipe, chain, side); // 旧行最多 8 条 < 窗口 16，不会挤掉
+                            }
+                            continue;
+                        }
+                        if (chain == 0 || slot < 0 || slot >= EmgConst.ClueHalfRing || slot % EmgConst.ClueHalfLegacyRing != at % EmgConst.ClueHalfLegacyRing
+                            || ((slot - CombatLogic.EmgClueHome(chain)) & (EmgConst.ClueHalfRing - 1)) >= EmgConst.ClueHalfWindow
+                            || staging.EmgClueHalf[recipe * EmgConst.ClueHalfRing + slot].x != 0)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.EmgClueHalf[recipe * EmgConst.ClueHalfRing + slot] = new Unity.Mathematics.int2(chain, side);
                     }
                     return CombatLoadResult.Ok;
                 }

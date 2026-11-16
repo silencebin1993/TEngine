@@ -735,7 +735,7 @@ namespace GameLogic.Campaign.Combat
             EmgScalars s = Kernel.PatchStats;
             return $"[EmgPatch] {SiteId} 斑块 {Kernel.PatchCount}/{Kernel.Config.EmgPatchCapacity}（世界源保留 {Kernel.Config.EmgPatchReserve}）· 生成 {s.PatchesBorn} · 合并 {s.PatchesMerged} · 到期 {s.PatchesExpired} · "
                    + $"软上限并入 {s.PatchSoftMerged} / 提前到期 {s.PatchSoftExpired} · 总上限并入 {s.PatchCapMerged} / 提前到期 {s.PatchCapExpired} · 丢弃 {s.PatchDropped} · 顺延 {s.PatchDeferred} · 残骸成碎屑 {s.WrecksToDebris} · "
-                   + $"区域 {Kernel.ZoneCount - Kernel.LegacyPatchCount}/{Kernel.Config.ZoneCapacity}（迁入斑块 {Kernel.LegacyPatchCount}）· 读法被拒 {Kernel.Counters.ReadingRefused} · 斑块满落区域 {s.LegacyKeptZone} · 喷淋池 / 油迹被拒 {s.PoolRefused}"; // EMGR-MAT-01：拒绝可见
+                   + $"区域 {Kernel.ZoneCount - Kernel.LegacyPatchCount}/{Kernel.Config.ZoneCapacity}（迁入斑块 {Kernel.LegacyPatchCount}）· 读法被拒 {Kernel.Counters.ReadingRefused} · 斑块满落区域 {s.LegacyKeptZone} · 喷淋池 / 油迹被拒 {s.PoolRefused} · 线索登记挤掉 {s.ClueHalfEvicted}"; // EMGR-MAT-01：拒绝可见；EMGR-FUSE-01：线索窗口满可见
         }
 
         private int _patchDegradeSeen;
@@ -747,7 +747,7 @@ namespace GameLogic.Campaign.Combat
         private void WatchPatches()
         {
             EmgScalars s = Kernel.PatchStats;
-            int degrade = s.PatchSoftMerged + s.PatchSoftExpired + s.PatchCapMerged + s.PatchCapExpired + s.PatchDropped + s.PoolRefused + (int)Kernel.Counters.ReadingRefused; // EMGR-MAT-01：区域被拒同样记一行
+            int degrade = s.PatchSoftMerged + s.PatchSoftExpired + s.PatchCapMerged + s.PatchCapExpired + s.PatchDropped + s.PoolRefused + (int)Kernel.Counters.ReadingRefused + s.ClueHalfEvicted; // EMGR-MAT-01：区域被拒同样记一行；EMGR-FUSE-01：线索登记挤掉同样记一行
             if (degrade > _patchDegradeSeen && Kernel.Time >= _patchLogAt)
             {
                 Log.Info(EmgPatchDebugLine()); // 调试行要扫斑块表：满载持续降级时每秒最多一行

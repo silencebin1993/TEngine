@@ -53,12 +53,20 @@ namespace GameLogic.EditorTools
             }
         }
 
-        public static int Run(StringBuilder report)
+        public static int Run(StringBuilder report) =>
+            Session(report, "熔合重做", "EMG3-FUSE-01：一槽两指令、落点接线（N43）与同链线索（FGT-EMG-054）", CheckData, CheckCompile, CheckNegative, CheckKernel, CheckSpeedAndSave, CheckClue, CheckEmpty);
+
+        /// <summary>EMGR-FUSE-01 段 FgEmgFuseClueSelfCheck：熔合线索在途登记 128 格开放寻址（DEBT-EMG4FUSE02-01）、快照段 32 新旧布局、玻化弹文案（DEBT-EMG4FUSE02-04）。
+        /// 单段：bash tools/unity-validate.sh --segment FgEmgFuseClueSelfCheck。</summary>
+        public static int RunClueTable(StringBuilder report) =>
+            Session(report, "熔合线索登记", "EMGR-FUSE-01：在途登记不挤掉（每配方 128 格、窗口 16）、段 32 新旧布局、玻化弹文案（FGR-EMG-044）", CheckClueTable, CheckClueFlight, CheckClueLayouts, CheckVitrifyText);
+
+        private static int Session(StringBuilder report, string tag, string title, params Action[] checks)
         {
             _report = report;
             _fail = 0;
             _pass = 0;
-            Line("\n[熔合重做] EMG3-FUSE-01：一槽两指令、落点接线（N43）与同链线索（FGT-EMG-054）");
+            Line($"\n[{tag}] {title}");
             Line($"  · 环境：Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，处理器 {SystemInfo.processorType}（{SystemInfo.processorCount} 线程）；内核单线程（Editor 下 Mono / Burst，真机 IL2CPP，耗时只作量级参考）");
             GameLanguage lang = GameSettings.Language;
             try
@@ -70,24 +78,21 @@ namespace GameLogic.EditorTools
                 CarrierReadings.Reload();
                 EmgCatalog.OverrideForTests(EmgCatalog.FromTables());
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
-                Step(CheckData);
-                Step(CheckCompile);
-                Step(CheckNegative);
-                Step(CheckKernel);
-                Step(CheckSpeedAndSave);
-                Step(CheckClue);
-                Step(CheckEmpty);
+                foreach (Action check in checks)
+                {
+                    Step(check);
+                }
             }
             catch (Exception e)
             {
-                Fail($"熔合重做自检抛异常：{e}");
+                Fail($"{tag}自检抛异常：{e}");
             }
             finally
             {
                 EmgCatalog.ResetForTests();
                 GameSettings.SetLanguage(lang);
             }
-            Line($"  · [熔合重做] 断言通过 {_pass}，失败 {_fail}");
+            Line($"  · [{tag}] 断言通过 {_pass}，失败 {_fail}");
             return _fail;
         }
 
@@ -1096,6 +1101,368 @@ namespace GameLogic.EditorTools
             Expect(si >= 0 && (r.Program.ClueMask & (1u << si)) != 0u && seg && load && every && kGot == 1 && cGot == kGot && sensed && lostGot == 0,
                 $"D9 线索在途登记随快照段 32 往返：出手 3 步、弹在飞时存档（快照 {snap.Length} 字节 > 段 32 丢掉侧位的对照档 {cut.Length} 字节：{seg}）；读档续跑 90 步逐步哈希一致 {every}，" +
                 $"同现原档 {kGot} / 读档 {cGot}（应都为 1）；段 32 丢掉侧位的档读档后哈希与原档不同 {sensed}、同现 {lostGot}（应 0：燃迹那一侧丢了，命中时只出现冷却液一侧）；即时命中（不存档）同现 {instGot}（读档成功 {load}，掩码 {r.Program.ClueMask:X}）");
+        }
+
+        // ── F. EMGR-FUSE-01：线索在途登记每配方 128 格、按链号哈希开放寻址（窗口 16）；段 32 新旧布局；玻化弹文案 ──
+
+        private const ushort SideA = 500, SideB = 501;
+
+        /// <summary>直接测登记表用的内核：正式配置 + 自定线索侧位表（端口 500 = 配方 3 / 4 的一侧、501 = 另一侧），登记 / 记侧位走正式实现（EmgClueArm / EmgClueSeen）。</summary>
+        private static CombatKernel TableKernel()
+        {
+            CombatKernel k = NewKernel();
+            var sides = new ulong[EmgConst.ClueSidePorts];
+            sides[SideA] = (1ul << 6) | (1ul << 8);
+            sides[SideB] = (2ul << 6) | (2ul << 8);
+            k.SetEmgClueSides(sides);
+            return k;
+        }
+
+        private static string Row(CombatKernel k, int recipe) =>
+            string.Join(",", Enumerable.Range(0, EmgConst.ClueHalfRing).Select(s => k.EmgClueHalfAt(recipe, s)).Select(h => h.x + ":" + h.y));
+
+        private static bool RowHas(CombatKernel k, int recipe, int chain) => Enumerable.Range(0, EmgConst.ClueHalfRing).Any(s => k.EmgClueHalfAt(recipe, s).x == chain);
+
+        private static void CheckClueTable()
+        {
+            Line($"  · 登记表：每配方 {EmgConst.ClueHalfRing} 格 × {EmgConst.ClueSlots} 配方 × 8 字节 = {EmgConst.ClueSlots * EmgConst.ClueHalfRing * 8} 字节 / 内核（原 8 格 = {EmgConst.ClueSlots * EmgConst.ClueHalfLegacyRing * 8} 字节，+{EmgConst.ClueSlots * (EmgConst.ClueHalfRing - EmgConst.ClueHalfLegacyRing) * 8}）；探测窗口 {EmgConst.ClueHalfWindow}");
+            using (var k = TableKernel())
+            {
+                int[] chains = Enumerable.Range(0, 40).Select(i => 1 + 5 * i).ToArray(); // 间隔 5：同一时刻别的链也在发号
+                foreach (int c in chains)
+                {
+                    k.EmgClueArmForTests((1u << 3) | (1u << 4), c);
+                }
+                int live3 = k.EmgClueHalfLive(3), live4 = k.EmgClueHalfLive(4), ev = k.PatchStats.ClueHalfEvicted;
+                foreach (int c in chains)
+                {
+                    k.EmgClueSeenForTests(c, SideA);
+                }
+                int half = k.EmgClueTake(3);
+                foreach (int c in chains)
+                {
+                    k.EmgClueSeenForTests(c, SideB);
+                }
+                int t3 = k.EmgClueTake(3), t4 = k.EmgClueTake(4);
+                Expect(live3 == 40 && live4 == 40 && ev == 0 && half == 0 && t3 == 40 && t4 == 40 && k.EmgClueHalfLive(3) == 0 && k.EmgClueHalfLive(4) == 0,
+                    $"F1 同配方 40 条链同时在途（两条配方同一出手登记）：登记 {live3} / {live4} 格（原 8 格时最多 8）、挤掉 {ev}；只出现一侧计 {half}（应 0）；两侧都出现后各计 {t3} / {t4}（应 40），登记全部清空");
+            }
+            using (var k = TableKernel())
+            {
+                const int home = 124; // 窗口 124..127 → 回绕到本行 0..11
+                var same = new List<int>();
+                for (int c = 1; same.Count < 17 && c < 1000000; c++)
+                {
+                    if (CombatKernel.EmgClueHomeOf(c) == home)
+                    {
+                        same.Add(c);
+                    }
+                }
+                var other = new List<int>();
+                for (int c = 1; other.Count < 6; c++)
+                {
+                    if (CombatKernel.EmgClueHomeOf(c) < 12)
+                    {
+                        other.Add(c); // 配方 5 行首：窗口若溢出本行就会碰到它们
+                    }
+                }
+                foreach (int c in other)
+                {
+                    k.EmgClueArmForTests(1u << 5, c);
+                }
+                string before5 = Row(k, 5);
+                for (int n = 0; n < 16; n++)
+                {
+                    k.EmgClueArmForTests(1u << 4, same[n]);
+                }
+                int ev16 = k.PatchStats.ClueHalfEvicted;
+                k.EmgClueArmForTests(1u << 4, same[16]);
+                int ev17 = k.PatchStats.ClueHalfEvicted;
+                int tail = Enumerable.Range(home, EmgConst.ClueHalfRing - home).Count(s => k.EmgClueHalfAt(4, s).x != 0);
+                int head = Enumerable.Range(0, EmgConst.ClueHalfWindow - (EmgConst.ClueHalfRing - home)).Count(s => k.EmgClueHalfAt(4, s).x != 0);
+                bool gone = !RowHas(k, 4, same[0]) && RowHas(k, 4, same[16]);
+                foreach (int c in same)
+                {
+                    k.EmgClueSeenForTests(c, SideA);
+                    k.EmgClueSeenForTests(c, SideB);
+                }
+                int t4 = k.EmgClueTake(4), t5 = k.EmgClueTake(5);
+                Expect(same.Count == 17 && ev16 == 0 && ev17 == 1 && tail == 4 && head == 12 && gone && t4 == 16 && t5 == 0 && Row(k, 5) == before5 && k.EmgClueHalfLive(5) == other.Count,
+                    $"F2 探测窗口满（17 条链起始格同为 {home}）：前 16 条占满窗口（行尾 {tail} 格 + 回绕到本行行首 {head} 格，不越到下一配方）、挤掉 {ev16}；第 17 条挤掉窗口里最早的一条（计数 {ev17}，可见于 EmgScalars.ClueHalfEvicted 与 CombatSite 调试行），" +
+                    $"被挤掉的 {same[0]} 已不在、新链 {same[16]} 在 {gone}；两侧出现后计 {t4}（应 16：被挤掉那条少计不多计）；配方 5 行首的 {other.Count} 条登记原样不动、不计（{t5}）");
+            }
+            using (var k = TableKernel())
+            {
+                int[] big = { int.MaxValue, int.MaxValue - 1, 1 << 30 };
+                bool inRange = big.All(c => CombatKernel.EmgClueHomeOf(c) >= 0 && CombatKernel.EmgClueHomeOf(c) < EmgConst.ClueHalfRing);
+                foreach (int c in big)
+                {
+                    k.EmgClueArmForTests(1u << 3, c);
+                }
+                k.EmgClueArmForTests(1u << 3, 0);
+                k.EmgClueArmForTests(1u << 3, -5);
+                int live = k.EmgClueHalfLive(3);
+                foreach (int c in big)
+                {
+                    k.EmgClueSeenForTests(c, SideA);
+                    k.EmgClueSeenForTests(c, SideB);
+                }
+                int got = k.EmgClueTake(3);
+                Expect(inRange && live == 3 && got == 3 && k.EmgClueHalfLive(3) == 0,
+                    $"F3 链号回绕边界：int 最大值附近的链号起始格都在 [0, {EmgConst.ClueHalfRing})（{inRange}），登记 {live} 格（链号 0 / 负数不登记）、两侧出现后计 {got}（应 3）");
+            }
+            using (var k = TableKernel())
+            {
+                for (int n = 0; n < 3; n++)
+                {
+                    k.EmgClueArmForTests((1u << 3) | (1u << 4), 77); // 同一步同一条链多次出手登记
+                }
+                int live = k.EmgClueHalfLive(3);
+                k.EmgClueSeenForTests(77, SideA);
+                k.EmgClueSeenForTests(77, SideA);
+                k.EmgClueSeenForTests(77, SideB);
+                k.EmgClueSeenForTests(77, SideB);
+                k.EmgClueSeenForTests(77, SideA);
+                int t3 = k.EmgClueTake(3), t4 = k.EmgClueTake(4);
+                Expect(live == 1 && t3 == 1 && t4 == 1 && k.EmgClueHalfLive(3) == 0,
+                    $"F4 同一步同链多次结算：同一条链登记 3 次只占 {live} 格；两侧各出现两次、计完后再出现一次，每条配方只计 {t3} / {t4} 次（应 1）");
+            }
+            using (var k = TableKernel())
+            {
+                k.EmgClueArmForTests(1u << 3, 9);
+                int bad = (CombatKernel.EmgClueHomeOf(31) + 40) & (EmgConst.ClueHalfRing - 1);
+                k.EmgClueHalfSetForTests(4, bad, 31, 1); // 格号不在链 31 的探测窗口里（坏档）
+                using var c = NewKernel();
+                CombatLoadResult lr = c.Load(k.Serialize());
+                Expect(lr != CombatLoadResult.Ok, $"F5 负向：段 32 新布局里格号不在这条链的探测窗口内（坏档 / 篡改）读档被拒（{lr}），不静默放进找不到的格");
+            }
+        }
+
+        private struct Flight
+        {
+            public int Peak, Paused, End, Evicted, Taken, LoadTaken;
+            public bool Every, Loaded;
+        }
+
+        /// <summary>一台机器对 9 米外的敌人连发 <paramref name="shots"/> 发飞行弹（10 米 / 秒，每步一发，全部发完时第一发还在飞），按 <paramref name="speed"/> 倍步长推进；
+        /// 记录发完时这条配方的在途登记格数、可选暂停 30 步、可选此刻存档读档后与原档逐步比哈希，最后取同现次数。</summary>
+        private static Flight InFlight(EmgProgramResult r, int recipe, int shots, float speed, bool pause = false, bool save = false)
+        {
+            using var k = NewKernel();
+            CombatWeapon w = WeaponOf(k, r, out _);
+            w.SpawnFlight = 1;
+            w.ProjectileSpeed = 10f;
+            w.ProjectileRadius = 0.15f;
+            w.ProjectileLife = 3f;
+            int a = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f);
+            int t = Unit(k, CombatFaction.Hostile, new double2(0, 9), -1, 100000f);
+            float dt = Dt * speed;
+            for (int s = 0; s < shots; s++)
+            {
+                k.FireAt(a, t, k.Time);
+                k.Step(dt, k.Time + dt);
+            }
+            var f = new Flight { Peak = k.EmgClueHalfLive(recipe), Every = true };
+            if (pause)
+            {
+                for (int i = 0; i < 30; i++)
+                {
+                    k.Step(0f, k.Time);
+                }
+                f.Paused = k.EmgClueHalfLive(recipe);
+            }
+            CombatKernel c = null;
+            try
+            {
+                if (save)
+                {
+                    c = NewKernel();
+                    f.Loaded = c.Load(k.Serialize()) == CombatLoadResult.Ok;
+                    f.Every = c.StateHash() == k.StateHash();
+                }
+                for (int i = 0; i < (int)(150 / speed); i++)
+                {
+                    k.Step(dt, k.Time + dt);
+                    if (c != null)
+                    {
+                        c.Step(dt, c.Time + dt);
+                        f.Every &= c.StateHash() == k.StateHash();
+                    }
+                }
+                f.End = k.EmgClueHalfLive(recipe);
+                f.Evicted = k.PatchStats.ClueHalfEvicted;
+                f.Taken = k.EmgClueTake(recipe);
+                f.LoadTaken = c?.EmgClueTake(recipe) ?? -1;
+            }
+            finally
+            {
+                c?.Dispose();
+            }
+            return f;
+        }
+
+        private static int RecipeIndex(string id) => FusionCatalog.Recipes.ToList().FindIndex(x => x.Id == id);
+
+        private static void CheckClueFlight()
+        {
+            int steam = RecipeIndex("fusion.steamjet"), wet = RecipeIndex("fusion.wetarc");
+            EmgProgramResult trail = P("fw_burntrail", Cool), arc = P(Arc, Cool);
+            string Show(Flight f) => $"在途 {f.Peak}、结束 {f.End}、挤掉 {f.Evicted}、计 {f.Taken}";
+            Flight[] nine = new[] { 0.5f, 1f, 3f }.Select(s => InFlight(trail, steam, 9, s)).ToArray();
+            Expect(steam >= 0 && nine.All(f => f.Peak == 9 && f.End == 0 && f.Evicted == 0 && f.Taken == 9),
+                $"F6 同配方 9 发在途全部计到（[燃迹, 冷却液] → 蒸汽喷流，DEBT-EMG4FUSE02-01；原 8 格时第 1 发被挤掉只计 8）：0.5x / 1x / 3x 各 {string.Join(" / ", nine.Select(Show))}（应 9 / 0 / 0 / 9）");
+            Flight[] forty = new[] { 0.5f, 1f }.Select(s => InFlight(arc, wet, 40, s)).ToArray();
+            Expect(wet >= 0 && forty.All(f => f.Peak == 40 && f.End == 0 && f.Evicted == 0 && f.Taken == 40),
+                $"F7 同配方 40 发在途全部计到（[电弧, 冷却液] → 湿弧）：0.5x / 1x 各 {string.Join(" / ", forty.Select(Show))}（应 40 / 0 / 0 / 40）");
+            Flight p = InFlight(trail, steam, 9, 1f, pause: true, save: true);
+            Expect(p.Paused == p.Peak && p.Peak == 9 && p.Loaded && p.Every && p.Taken == 9 && p.LoadTaken == p.Taken,
+                $"F8 暂停与段 32 往返：9 发在途时暂停 30 步登记不变（{p.Peak} → {p.Paused}）；此刻存档（新布局）读档，续跑 150 步逐步哈希一致 {p.Every}，同现原档 {p.Taken} / 读档 {p.LoadTaken}（应都 9；读档成功 {p.Loaded}）");
+        }
+
+        /// <summary>两台机器各 4 发飞行弹：[燃迹, 冷却液]（蒸汽喷流，燃迹那侧出手即出现）与 [电弧, 冷却液]（湿弧，两侧都在命中时）——和改代码前存的旧档样本同一场景。</summary>
+        private static CombatKernel TwoRecipeScene()
+        {
+            CombatKernel k = NewKernel();
+            CombatWeapon wa = WeaponOf(k, P("fw_burntrail", Cool), out _), wb = WeaponOf(k, P(Arc, Cool), out _);
+            wa.SpawnFlight = wb.SpawnFlight = 1;
+            wa.ProjectileSpeed = wb.ProjectileSpeed = 10f;
+            wa.ProjectileRadius = wb.ProjectileRadius = 0.15f;
+            wa.ProjectileLife = wb.ProjectileLife = 3f;
+            int a = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(wa), 100f);
+            int ta = Unit(k, CombatFaction.Hostile, new double2(0, 9), -1, 5000f);
+            int b = Unit(k, CombatFaction.Player, new double2(20, 0), k.AddWeapon(wb), 100f);
+            int tb = Unit(k, CombatFaction.Hostile, new double2(20, 9), -1, 5000f);
+            for (int s = 0; s < 4; s++)
+            {
+                k.FireAt(a, ta, k.Time);
+                k.FireAt(b, tb, k.Time);
+                k.Step(Dt, k.Time + Dt);
+            }
+            k.Step(Dt, k.Time + Dt);
+            return k;
+        }
+
+        private static int LiveAll(CombatKernel k) => Enumerable.Range(0, EmgConst.ClueSlots).Sum(k.EmgClueHalfLive);
+
+        private static void CheckClueLayouts()
+        {
+            int steam = RecipeIndex("fusion.steamjet"), wet = RecipeIndex("fusion.wetarc");
+            using var k = TwoRecipeScene();
+            byte[] legacy = k.SerializeClueHalfLegacyForTests(), fresh = k.Serialize(), three = k.SerializeEmgShapeForTests(EmgConst.SegClueHalf, 3, 0);
+            ulong h0 = k.StateHash();
+            int ks = k.EmgClueHalfLive(steam), kw = k.EmgClueHalfLive(wet);
+            using var c = NewKernel();
+            bool load = c.Load(legacy) == CombatLoadResult.Ok;
+            int cs = c.EmgClueHalfLive(steam), cw = c.EmgClueHalfLive(wet), all = LiveAll(c);
+            bool same0 = c.StateHash() == h0, every = true;
+            for (int i = 0; i < 120; i++)
+            {
+                k.Step(Dt, k.Time + Dt);
+                c.Step(Dt, c.Time + Dt);
+                every &= k.StateHash() == c.StateHash();
+            }
+            int kts = k.EmgClueTake(steam), ktw = k.EmgClueTake(wet), cts = c.EmgClueTake(steam), ctw = c.EmgClueTake(wet);
+            Expect(steam >= 0 && wet >= 0 && ks == 4 && kw == 4 && load && cs == 4 && cw == 4 && all == 8 && same0 && every && kts == 4 && ktw == 4 && cts == kts && ctw == ktw,
+                $"F9 旧 8 格快照（3 字段全长布局，下标 = 配方 × 8 + 格：蒸汽喷流在 {steam * 8}～{steam * 8 + 7}、湿弧在 {wet * 8}～{wet * 8 + 7}）读入：按 下标 / 8 取配方号重插，蒸汽喷流 {cs} 格、湿弧 {cw} 格、全部配方合计 {all} 格（应 4 / 4 / 8，不错位到别的配方）；" +
+                $"读入后状态哈希与原档相同 {same0}，续跑 120 步逐步一致 {every}，同现原档 {kts} / {ktw}、读档 {cts} / {ctw}（应都 4 / 4，计数延续）");
+            using var x = TableKernel();
+            x.EmgClueArmForTests(1u << 3 | 1u << 0, 999); // 读档前残留的登记：读档后必须不剩
+            bool l1 = x.Load(legacy) == CombatLoadResult.Ok, e1 = x.StateHash() == h0;
+            bool l2 = x.Load(fresh) == CombatLoadResult.Ok, e2 = x.StateHash() == h0;
+            bool l3 = x.Load(legacy) == CombatLoadResult.Ok, e3 = x.StateHash() == h0;
+            bool l4 = x.Load(three) == CombatLoadResult.Ok, e4 = x.StateHash() == h0 && LiveAll(x) == 8;
+            Expect(l1 && e1 && l2 && e2 && l3 && e3 && l4 && e4 && fresh.Length < legacy.Length,
+                $"F10 旧档 + 新档交替读（同一内核，读前留着别的登记）：旧 → 新 → 旧 → 新布局截成 3 字段，四次读档都成功（{l1}/{l2}/{l3}/{l4}）、状态哈希都与原档相同（{e1}/{e2}/{e3}/{e4}）；" +
+                $"新布局只写非空格：快照 {fresh.Length} 字节 < 旧全长布局 {legacy.Length} 字节；3 字段时按 下标 / 8 也落回同一配方（较早提交读新档同样不错位）");
+        }
+
+        /// <summary>DEBT-EMG4FUSE02-04（用户默认“玻化弹改文档不改实现”）：文案与结果一致——①玻化弹（燃迹 → 曲射）真实打一发，段点浓粉尘遇明火是尘爆（E05）成立；
+        /// ②E04 玻化与 E05 尘爆按同一个浓度阈值分流，图鉴里玻化反应的说明（reaction.vitrify.desc）写的就是这个阈值和“浓的是尘爆”；③配方仍挂玻化反应、线索端口对仍是明火 × 粉尘（实现不改）。</summary>
+        private static void CheckVitrifyText()
+        {
+            EmgRuleCatalog.Compiled cat = EmgRuleCatalog.Current;
+            int iv = cat.Ids.IndexOf("reaction_vitrify"), ib = cat.Ids.IndexOf("reaction_dustburst");
+            float split = iv >= 0 ? cat.Rules[iv].C2 : -1f;
+            bool sameSplit = iv >= 0 && ib >= 0 && Math.Abs(cat.Rules[iv].C2 - cat.Rules[ib].C2) < 1e-4f && split > 0f;
+            using var k = NewKernel();
+            k.InstrActivationCounting = true;
+            CombatWeapon w = WeaponOf(k, P("fw_mix_glassburst"), out _);
+            int a = Unit(k, CombatFaction.Player, new double2(0, 0), k.AddWeapon(w), 100f, 4f);
+            int t = Unit(k, CombatFaction.Hostile, new double2(0, 4.25), -1, 5000f);
+            Unit(k, CombatFaction.Hostile, new double2(0, 7.5), -1, 5000f);
+            Unit(k, CombatFaction.Hostile, new double2(0, 10.75), -1, 5000f);
+            k.IssueCommand(a, CombatCommandKind.Move, new double2(-30, 0), 0, 0.2f, 0f, 0f, false); // 燃迹读 chs.moving：行进中开火才沿途铺线（同 C7）
+            for (int i = 0; i < 3; i++)
+            {
+                k.Step(Dt, k.Time + Dt);
+            }
+            k.FireAt(a, t, k.Time);
+            for (int i = 0; i < 60; i++)
+            {
+                k.Step(Dt, k.Time + Dt);
+            }
+            int burst = ib >= 0 ? k.EmgRuleRowActivations(cat.Rules[ib].IdKey) : -1, glass = iv >= 0 ? k.EmgRuleRowActivations(cat.Rules[iv].IdKey) : -1;
+            string desc = GameText.Get("reaction.vitrify.desc");
+            string splitText = split.ToString("0.0#", System.Globalization.CultureInfo.InvariantCulture);
+            bool text = desc.Contains(splitText) && desc.Contains("尘爆");
+            int gi = RecipeIndex("fusion.glassburst");
+            bool recipe = gi >= 0 && FusionCatalog.Recipes[gi].Reaction == "reaction_vitrify" && (P("fw_mix_glassburst").Program.ClueMask & (1u << gi)) != 0u;
+            Expect(sameSplit && burst > 0 && text && recipe,
+                $"F11 玻化弹文案与结果一致（DEBT-EMG4FUSE02-04；FG19A 第 4.3 节第 8 行 / 第 6 节第 15 行已按此改写）：真实打一发，段点浓粉尘遇明火尘爆成立 {burst} 次（> 0）、玻化 {glass} 次；" +
+                $"E04 玻化 / E05 尘爆同一浓度阈值 {splitText}（{sameSplit}），图鉴玻化说明写了阈值与“浓的是尘爆”（{text}）；配方仍挂玻化反应、线索位不变（{recipe}，实现不改）");
+        }
+
+        /// <summary>
+        /// EMGR-FUSE-01 交 EMGR-E2E-01：读改代码前用旧代码存的旧档样本（环境变量 BINGAMES_CLUE_SAMPLE = .bin 路径，旁边同名 .txt 记着旧代码的登记与续跑 120 步的同现次数），
+        /// 断言：读档成功、每条登记落回原配方且链号与侧位一致、没有多出的登记、续跑 120 步各配方同现次数与旧代码相同。
+        /// 跑法：BINGAMES_CLUE_SAMPLE=F:/Project/BinGames/production/qa/evidence/emgr-fuse-01-oldclue-sample.bin bash tools/unity-validate.sh GameLogic.EditorTools.FgEmgFuseSelfCheck.RunLegacySampleFromMenu
+        /// </summary>
+        public static void RunLegacySampleFromMenu()
+        {
+            var report = new StringBuilder();
+            int fail = Session(report, "旧档样本", "EMGR-FUSE-01：旧代码写的段 32（8 格）读入新登记表", CheckLegacySample);
+            report.AppendLine(fail == 0 ? "全部通过" : $"失败 {fail} 项");
+            Debug.Log(report.ToString());
+            if (Application.isBatchMode)
+            {
+                EditorApplication.Exit(fail == 0 ? 0 : 1);
+            }
+        }
+
+        private static void CheckLegacySample()
+        {
+            string bin = Environment.GetEnvironmentVariable("BINGAMES_CLUE_SAMPLE") ?? string.Empty;
+            string txt = System.IO.Path.ChangeExtension(bin, ".txt");
+            if (!System.IO.File.Exists(bin) || !System.IO.File.Exists(txt))
+            {
+                Fail($"旧档样本不存在：{bin}（环境变量 BINGAMES_CLUE_SAMPLE）");
+                return;
+            }
+            string[] lines = System.IO.File.ReadAllLines(txt);
+            var slots = lines.Where(l => l.StartsWith("slot ")).Select(l => l.Split(' ')).Select(p => (Recipe: int.Parse(p[3]), Chain: int.Parse(p[5]), Side: int.Parse(p[7]))).ToList();
+            var takes = lines.Where(l => l.StartsWith("take ")).Select(l => l.Split(' ')).ToDictionary(p => int.Parse(p[1]), p => int.Parse(p[2]));
+            using var k = NewKernel();
+            bool load = k.Load(System.IO.File.ReadAllBytes(bin)) == CombatLoadResult.Ok;
+            bool placed = slots.All(e => Enumerable.Range(0, EmgConst.ClueHalfRing).Any(s => k.EmgClueHalfAt(e.Recipe, s).x == e.Chain && k.EmgClueHalfAt(e.Recipe, s).y == e.Side));
+            int all = LiveAll(k);
+            for (int i = 0; i < 120; i++)
+            {
+                k.Step(Dt, k.Time + Dt);
+            }
+            var got = new List<string>();
+            bool same = true;
+            for (int i = 0; i < FusionCatalog.Recipes.Count; i++)
+            {
+                int n = k.EmgClueTake(i);
+                takes.TryGetValue(i, out int want);
+                same &= n == want;
+                if (n != 0 || want != 0)
+                {
+                    got.Add($"{FusionCatalog.Recipes[i].Id} {n}（旧代码 {want}）");
+                }
+            }
+            Expect(load && slots.Count >= 6 && placed && all == slots.Count && same,
+                $"旧档样本 {System.IO.Path.GetFileName(bin)}：读档 {load}；旧代码的 {slots.Count} 条登记全部落回原配方、链号与侧位一致 {placed}，合计 {all} 格；续跑 120 步同现 {string.Join("、", got)}，与旧代码相同 {same}");
         }
 
         private static void Expect(bool condition, string message)

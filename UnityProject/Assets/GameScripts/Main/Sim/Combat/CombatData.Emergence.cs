@@ -36,7 +36,7 @@ namespace BinGames.Sim.Combat
         public NativeList<float3> ScorchGround;
         /// <summary>EMG3-FUSE-01（FGR-EMG-044）：熔合线索同现计数（下标 = 配方书序号，≤ 32）；热更层按 <see cref="EmgScalars.ClueDirty"/> 取走后清零（可靠计数 + 脏位，不按帧扫描；待取走次数与去重环随快照段 26 存读档，脏位读档时由待取走次数重建）。</summary>
         public NativeArray<int> EmgClue;
-        /// <summary>EMG4-FUSE-02：线索在途登记（[配方 × ClueHalfRing]：x = 链号、y = 已出现的侧位 1 / 2），随快照段 32。</summary>
+        /// <summary>EMG4-FUSE-02：线索在途登记（[配方 × ClueHalfRing]：x = 链号、y = 已出现的侧位 1 / 2），随快照段 32。EMGR-FUSE-01：每配方 128 格按链号哈希开放寻址（CombatLogic.EmgClueProbe），32 × 128 × 8 字节 = 32 KB。</summary>
         public NativeArray<int2> EmgClueHalf;
         /// <summary>EMG4-FUSE-02：端口码 → 线索侧位（位 2i = 配方 i 的第 1 侧、2i + 1 = 第 2 侧）。表数据（热更层按 FG19A 第 4.3 节端口对下发），不进快照、读档沿用当前表。</summary>
         public NativeArray<ulong> EmgClueSides;

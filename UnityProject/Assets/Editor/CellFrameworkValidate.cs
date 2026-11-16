@@ -845,6 +845,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgSquadSelfCheck", FgEmgSquadSelfCheck.Run); // EMG3-SQD-01：中继转发、信号脉冲、中继组相位对齐（FGT-EMG-051、FGT-EMG-053 中继组部分、FGT-EMG-020 evt.ping 生产者）
             Seg("FgEmgStage3FirmwareSelfCheck", FgEmgStage3FirmwareSelfCheck.Run); // EMG3-FW-02：元程序、协同与齐射新固件落表（FGT-EMG-002 / 003 / 006 / 051 / 052，FGJ-EMG-3）
             Seg("FgEmgFuseSelfCheck", FgEmgFuseSelfCheck.Run); // EMG3-FUSE-01：熔合一槽两指令、落点接线 N43、同链线索（FGT-EMG-054）
+            Seg("FgEmgFuseClueSelfCheck", FgEmgFuseSelfCheck.RunClueTable); // EMGR-FUSE-01：线索在途登记 128 格开放寻址、段 32 新旧布局、玻化弹文案（DEBT-EMG4FUSE02-01 / 04）
             Seg("FgEmgHijackSelfCheck", FgEmgHijackSelfCheck.Run); // EMG4-HIJ-01：敌方同程序、信号劫持、快照 20（FGT-EMG-061 / 002 / 040）
             Seg("FgEmgSeizeSelfCheck", FgEmgSeizeSelfCheck.Run); // EMG4-HIJ-02：夺控 / 瘫痪 / 反向接入、槽位封锁重编、三类共用事件、镜像复制（FGT-EMG-061 / 010）
             Seg("FgEmgStage4FirmwareSelfCheck", FgEmgStage4FirmwareSelfCheck.Run); // EMG4-FW-01：劫持新固件落表 N39～N41（FGT-EMG-002 / 003 / 006 / 061，FGJ-EMG-4 第一步，DEBT-EMG4HIJ01-01）

@@ -128,12 +128,13 @@ namespace BinGames.Sim.Combat
         public const int SegPitStats = 30;
         /// <summary>EMG4-TER-02（格式 20 内追加，自描述段）：段 31 焦土“同一位置”累计点（x, y, 累计燃烧秒, 最大火势半径）。与段 28～30 一起只在有地形状态时写；读不含这段的快照 = 没有累计。</summary>
         public const int SegScorchAcc = 31;
-        /// <summary>EMG4-FUSE-02（格式 20 内追加，自描述段；FG-GAP-206 / DEBT-EMG3FUSE01-02）：段 32 熔合线索“出手已登记、两侧端口还没都出现”的链（每条配方 <see cref="ClueHalfRing"/> 条：链号 + 已出现的侧位）。
-        /// 只在有登记时写（没有时快照与哈希逐字不变）；读不含这段的快照 = 没有在途登记。</summary>
+        /// <summary>EMG4-FUSE-02（格式 20 内追加，自描述段；FG-GAP-206 / DEBT-EMG3FUSE01-02）：段 32 熔合线索“出手已登记、两侧端口还没都出现”的链。
+        /// 只在有登记时写（没有时快照与哈希逐字不变）；读不含这段的快照 = 没有在途登记。EMGR-FUSE-01：≥ 4 字段 = 只写非空格（旧布局下标 = 配方 × 8 + 格号低 3 位、链号、侧位、配方行内格号）；
+        /// ≤ 3 字段 = EMGR-FUSE-01 之前的 8 格全长布局（下标 = 配方 × 8 + 格），读时按 下标 / 8 取配方号重新插入。</summary>
         public const int SegClueHalf = 32;
-        /// <summary>EMG4-FUSE-02：每条配方记住几条在途登记的链；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
-        /// shortcut: 同一配方同时在途超过 8 条链时最早的登记被挤掉、那条链不再计（少计不多计），需要精确时按链号开放寻址（FG15-SYS-02 复核）。</summary>
-        public const int ClueHalfRing = 8, ClueSidePorts = 1400;
+        /// <summary>EMGR-FUSE-01（DEBT-EMG4FUSE02-01）：每条配方的在途登记格数（2 的幂，按链号哈希开放寻址）与探测窗口；旧布局每配方 8 格；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
+        /// shortcut: 16 格探测窗口全满时挤掉窗口里链号最小（最早）的登记并计数 EmgScalars.ClueHalfEvicted（少计不多计；DEBT-EMGRFUSE01-01 交 FG15-SYS-02 按实测再定）。</summary>
+        public const int ClueHalfBits = 7, ClueHalfRing = 1 << ClueHalfBits, ClueHalfWindow = 16, ClueHalfLegacyRing = 8, ClueSidePorts = 1400;
         /// <summary>EMG4-FUSE-02（DEBT-EMG3EXIT-01）：线索专用伪端口码“液体扩散”（地面液体端口的 modify 写端 = 蔓延真的扩开了斑块）。真端口码按族从 100 起（fg.TbChannelPort），99 不冲突。</summary>
         public const ushort PortClueSpread = 99;
         /// <summary>EMG3-FUSE-01：熔合线索配方位数与每条配方记住的最近计过的链数（CombatData.EmgClue：[0, 32) 待取走次数、[32, 64) 环头、其后 32 × 8 链号环、规则路径上一次计数的链号与步号低 32 位）。</summary>
@@ -1028,6 +1029,8 @@ namespace BinGames.Sim.Combat
         /// <summary>规则结算次数 / 本节拍还有别的规则成立、按优先级留到下一节拍的次数（FGR-EMG-084 同一宿主一个节拍只结算一条）。</summary>
         public int RulesSettled;
         public int RulesDeferred;
+        /// <summary>EMGR-FUSE-01（不进快照，调试 / 自检计数）：熔合线索在途登记的探测窗口满、挤掉最早一格的次数（那条链少计，计数可见、不静默）。</summary>
+        public int ClueHalfEvicted;
         /// <summary>EMG2-PHS-01（不进快照，调试 / 自检计数）：进入相态次数。</summary>
         public int PhaseEnters;
         /// <summary>传导节拍数 / 累计节点访问 / 因访问上限把剩余能量顺延到下一节拍的次数 / 最近一个传导节拍的访问数。</summary>
