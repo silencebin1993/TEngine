@@ -829,6 +829,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgRuleTickSelfCheck", FgEmgRuleSelfCheck.RunTick); // EMGR-RULE-01：电解限速、热交换每拍回温（与场面大小无关）
             Seg("FgEmgPhaseSelfCheck", FgEmgPhaseSelfCheck.Run); // EMG2-PHS-01：相变累积量与单位相态（FGT-EMG-034 / 020 evt.phase）
             Seg("FgEmgFieldSelfCheck", FgEmgFieldSelfCheck.Run); // EMG2-FLD-01：场与载体互作（FGT-EMG-036 / 037 场推动 / 073 阶段 2）
+            Seg("FgEmgFieldEdgeSelfCheck", FgEmgFieldSelfCheck.RunEdges); // EMGR-FIELD-01：场的进场 / 离场事件（弹体 / 单位 / 无人机机身、入场引信穿 6 种场、物质位与场位、存读档）
             Seg("FgEmgReactSelfCheck", FgEmgReactSelfCheck.Run); // EMG2-REACT-01：五条定稿反应与装配反应端口化（FGT-EMG-030 / 032 / 004）
             Seg("FgEmgReact2SelfCheck", FgEmgReact2SelfCheck.Run); // EMG2-REACT-02：其余 11 条具名反应（FGT-EMG-030 全量、FGT-EMG-032 扩到 11 条）
             Seg("FgEmgMigrationSelfCheck", FgEmgMigrationSelfCheck.Run); // EMG2-MAT-02

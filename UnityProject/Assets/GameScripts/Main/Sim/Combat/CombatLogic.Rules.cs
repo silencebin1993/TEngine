@@ -1918,7 +1918,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 EmgUnitState st = d.EmgUnit[u];
-                if (patches && st.PrevMatterMask != 0u && d.Kind[u] != (byte)CombatUnitKind.Structure)
+                if (patches && (st.PrevMatterMask & EmgFieldConst.MatterBits) != 0u && d.Kind[u] != (byte)CombatUnitKind.Structure) // EMGR-FIELD-01：场位不算“在斑块里”
                 {
                     hits.Clear();
                     PatchesAt(ref d, d.Pos[u], ChsAirborne(ref d, u), ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);

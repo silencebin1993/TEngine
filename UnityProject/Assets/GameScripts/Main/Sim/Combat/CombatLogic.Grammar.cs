@@ -245,7 +245,7 @@ namespace BinGames.Sim.Combat
                 return true;
             }
             // EMG2-RULE-01（FGR-EMG-091 末条）：站在导电斑块（导电 ≥ 0.3）里的单位同样算“导电”，连锁优先跳它（兑现电弧“沿湿面优先”）
-            uint inside = d.EmgUnit[k].PrevMatterMask;
+            uint inside = d.EmgUnit[k].PrevMatterMask & EmgFieldConst.MatterBits; // EMGR-FIELD-01：只看物质位
             for (int m = 1; inside != 0u && m <= EmgMatterConst.Count; m++)
             {
                 if ((inside & (1u << m)) != 0u && MatterOf(ref d, m).Conductive >= EmgRuleConst.DefaultConductMinStrength)

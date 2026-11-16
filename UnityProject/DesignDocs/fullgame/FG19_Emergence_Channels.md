@@ -585,7 +585,7 @@
 | 11 | `evt.hurt` | 被击 | 单位受到伤害 | Unit，Attacker，Value，Code=来源（近战 / 弹体 / 区域 / 斑块 / 场 / 撞击），Dir | 单位 | 是 | 否 | `Damaged`(2) |
 | 12 | `evt.overheat` | 过热 | 武器积热首次越过过热阈值 | Unit，Value=积热 | 单位 | 是 | 否 | `Overheat`(35，提示) |
 | 13 | `evt.cooled` | 冷却完成 | 过热后积热回落到阈值 × `emg.heat.cool_ratio`（0.5）以下 | Unit | 单位 | 是 | 否 | 无 |
-| 14 | `evt.enter` | 进场 | 实体（单位 / 弹体 / 无人机 / 残骸）进入斑块或场 | Entity，Patch / Field，Code=物质码或场端口码 | 物质层；场 | 是 | 否 | 无 |
+| 14 | `evt.enter` | 进场 | 实体（单位 / 弹体 / 无人机机身；残骸不发，见 ADR-EMG-001 ④，EMGR-FIELD-01、FG-GAP-231）进入斑块或场（含静默阵营单位展开的偏折场，Other = 场源单位） | Entity，Patch / Field，Code=物质码或场端口码 | 物质层；场 | 是 | 否 | 无 |
 | 15 | `evt.leave` | 离场 | 离开斑块或场 | 同上 | 物质层；场 | 是 | 否 | 无 |
 | 16 | `evt.marked` | 被标记 | 单位被标记 | Unit，Marker，Value=秒 | 标记器；写此端口的固件 | 是 | **是** | `MachineMarked`(9，仅敌标己) |
 | 17 | `evt.uplink` | 接入 | 信号进入机器 | Unit | 热更注入 | 是 | 否 | 内核无 |

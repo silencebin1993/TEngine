@@ -623,7 +623,7 @@ namespace BinGames.Sim.Combat
             sl.Deflect = phase;
             sl.DeflectT = seconds;
             _d.Silent[i] = sl;
-            CombatLogic.RebuildDeflectActive(ref _d);
+            CombatLogic.RebuildDeflectActive(ref _d, edges: true); // EMGR-FIELD-01：拨到收起时场里的单位 / 无人机补发 evt.leave
             Touch();
             return true;
         }
@@ -953,7 +953,8 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>EMG2-FLD-01 自检入口：在 pos 放一架无人机（anchored = 插地的哨戒桩），归属 ownerId（须是活着的单位）；不打人（NextHit 远在以后）。返回下标。</summary>
-        public int AddDroneForTests(double2 pos, int ownerId, CombatFaction faction, bool anchored, float leash = 30f)
+        /// <summary>测试用：放一架无人机 / 哨戒桩（<paramref name="weapon"/> = 它所属武器下标，EMGR-FIELD-01 用来带程序；−1 = 没有程序）。</summary>
+        public int AddDroneForTests(double2 pos, int ownerId, CombatFaction faction, bool anchored, float leash = 30f, int weapon = -1)
         {
             EmgScalars es = _d.EmgS[0];
             int id = math.max(1, es.NextDroneId);
@@ -962,7 +963,7 @@ namespace BinGames.Sim.Combat
             double now = _d.Scalars[0].Time;
             _d.Drones.Add(new CombatDrone
             {
-                Pos = pos, Prev = pos, Until = now + 600.0, NextHit = now + 600.0, Owner = ownerId, Weapon = -1, Leash = leash, Cooldown = 1f, Faction = faction,
+                Pos = pos, Prev = pos, Until = now + 600.0, NextHit = now + 600.0, Owner = ownerId, Weapon = weapon, Leash = leash, Cooldown = 1f, Faction = faction,
                 Anchored = (byte)(anchored ? 1 : 0), Anchor = pos, Id = id, Active = 255,
             });
             Touch();

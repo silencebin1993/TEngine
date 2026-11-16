@@ -656,6 +656,31 @@ namespace BinGames.Sim.Combat
             d.EmgCtx = EmgCtx.None;
         }
 
+        /// <summary>
+        /// EMGR-FIELD-01（FGR-EMG-060 第 14、15 行，无人机机身按单位算）：无人机 / 哨戒桩做宿主的 evt.enter / evt.leave——程序 = 它此刻执行的那份（EMG1-FLASH-01），根节点；
+        /// 母载荷参数（伤害 / 武器 / 阵营 / 召唤载体）同节拍宿主，触发的子载荷在事件位置放出。地点没人读时 O(1) 返回（FGR-EMG-062）。
+        /// </summary>
+        internal static void EmgDroneEvent(ref CombatData d, in CombatDrone dr, EmgEventKind k, int other, EmgEntKind otherKind, ushort code, double2 pos)
+        {
+            if (!EmgSiteListens(ref d, k) || dr.Weapon < 0 || dr.Weapon >= d.Weapons.Length)
+            {
+                return;
+            }
+            int prog = d.Weapons[FlashExecWeapon(ref d, dr)].Program;
+            if (prog < 0)
+            {
+                return;
+            }
+            EmgCtx saved = d.EmgCtx;
+            d.EmgCtx = new EmgCtx
+            {
+                Prog = prog, Ent = dr.Id, EntKind = EmgEntKind.Drone, Owner = d.SlotOf(dr.Owner), Damage = dr.Damage, Weapon = dr.Weapon, OwnerId = dr.Owner,
+                Faction = (byte)dr.Faction, Carrier = (byte)CombatCarrier.Summon, HurtSrc = (byte)EmgCode.SrcProjectile, HitCode = EmgCode.HitDirect,
+            };
+            EmgShotEvent(ref d, k, other, 0f, 0f, code, pos, otherKind);
+            d.EmgCtx = saved;
+        }
+
         /// <summary>一发弹体命中结算期间以它为宿主（DamageUnit / Kill 据此发 evt.hit、evt.hurt 的来源与链、evt.kill 的宿主）；没有程序也记来源。
         /// 每宿主计数从弹体拷进上下文，<see cref="EmgProjCtxEnd"/> 拷回。</summary>
         private static void EmgProjCtxBegin(ref CombatData d, in CombatProjectile pr) => d.EmgCtx = EmgProjHost(ref d, pr); // EMG1-TRIG-01：连同母载荷参数

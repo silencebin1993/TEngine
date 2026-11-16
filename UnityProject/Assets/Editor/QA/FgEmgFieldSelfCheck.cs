@@ -23,7 +23,7 @@ namespace GameLogic.EditorTools
     /// EMG2-FLD-01 场与载体互作（FG19 FGR-EMG-112、120～122；FG19B 第 5 节 fg.TbFieldCarrierRule；FGT-EMG-036、037 场推动部分、073 阶段 2 部分）：
     /// 起真实内核（CombatSite 同一套表写入），断言 6 种实体被场推动 / 不动、弹体穿场与斑块的载荷改写、容量 64、存读档、暂停与 0.5x～3x、声明轨固件与部件场的正式路径。
     /// </summary>
-    public static class FgEmgFieldSelfCheck
+    public static partial class FgEmgFieldSelfCheck
     {
         private const float Dt = 1f / 60f;
         private const CombatUnitFlags Live = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled;

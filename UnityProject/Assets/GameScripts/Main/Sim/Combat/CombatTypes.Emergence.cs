@@ -697,7 +697,7 @@ namespace BinGames.Sim.Combat
     [StructLayout(LayoutKind.Sequential)]
     public struct EmgUnitState
     {
-        /// <summary>上一个接触节拍所在物质的掩码（evt.enter / evt.leave 做差用，ADR ④）。</summary>
+        /// <summary>上一个接触节拍所在物质的掩码（evt.enter / evt.leave 做差用，ADR ④）：位 1～17 物质码（接触节拍写），位 18～23 场（StepFields 写，EMGR-FIELD-01），见 <see cref="EmgFieldConst.MatterBits"/>。</summary>
         public uint PrevMatterMask;
         /// <summary>外部血量单位最后一次受击的攻击者单位 ID 与链 ID（击杀归属，ADR ⑦ 第 2 条）。</summary>
         public int LastHitBy;
@@ -774,7 +774,7 @@ namespace BinGames.Sim.Combat
         /// <summary>来源单位的外部键（回收与对账用）。</summary>
         public int SrcExtKey;
         public uint Coat;
-        public uint PrevMatterMask;
+        // EMGR-FIELD-01（ADR-EMG-001 ④ 改写）：原 PrevMatterMask 已删——残骸不发 evt.enter / leave（没有程序读残骸的进出事件），快照段 10 第 16 个字段保留为 0 占位
         /// <summary>实体档案下标 + 1（0 = 种类默认）。与 <see cref="CombatWeapon.ProgramRef"/> 同一做法：结构默认值就是“种类默认”，生成残骸时漏写不会误指第 0 号档案；读写一律用 <see cref="Profile"/>。</summary>
         public short ProfileRef;
         /// <summary>来源单位种类（<see cref="CombatUnitKind"/>）。</summary>

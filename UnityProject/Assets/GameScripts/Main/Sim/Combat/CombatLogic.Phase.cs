@@ -297,7 +297,7 @@ namespace BinGames.Sim.Combat
         internal static void StepPhase(ref CombatData d, int i, float dt, double now)
         {
             EmgUnitState s0 = d.EmgUnit[i];
-            uint matter = s0.PrevMatterMask;
+            uint matter = s0.PrevMatterMask & EmgFieldConst.MatterBits; // EMGR-FIELD-01：场位不进接触增益
             if (s0.PhaseMask == 0 && math.all(s0.AccA == 0f) && math.all(s0.AccB == 0f) && math.all(s0.PhsTA == 0f) && math.all(s0.PhsTB == 0f) && matter == 0u)
             {
                 return;

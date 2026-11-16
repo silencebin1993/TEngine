@@ -491,6 +491,9 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG3-CHS-01（DEBT-EMG2REACT02-04，FG19B C04“哨戒桩也是导体”）：电荷（绝缘闪络可跳到哨戒桩；按 emg.trait 无关的传导衰减每秒 × <see cref="EmgTraitConst.DroneChargeKeep"/>）。
         /// 快照 18 Emg 段 8 尾部追加（短段 / 读 ≤ 17 版取 0）。</summary>
         public float Charge;
+        /// <summary>EMGR-FIELD-01（FGR-EMG-060 第 14、15 行，ADR-EMG-001 ④）：上一步所在的物质（位 1～17，只有气体层）与场（位 18～23）掩码，evt.enter / evt.leave 做差用。
+        /// 快照 Emg 段 8 尾部追加（同版本 20 内，自描述；短段取 0 = 读档后第一拍在场内的发一次 enter）。</summary>
+        public uint PrevMatterMask;
     }
 
     /// <summary>

@@ -1282,7 +1282,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegDrones, v18 ? 5 : 4, _d.Drones.Length);
+            sw.Begin(EmgConst.SegDrones, (v18 ? 5 : 4) + (v20 ? 1 : 0), _d.Drones.Length);
             for (int i = 0; i < _d.Drones.Length; i++)
             {
                 CombatDrone dr = _d.Drones[i];
@@ -1293,6 +1293,10 @@ namespace BinGames.Sim.Combat
                 if (v18)
                 {
                     if (sw.F()) w.Write(dr.Charge); // EMG3-CHS-01（DEBT-EMG2REACT02-04）：尾部追加，短段读到取 0
+                }
+                if (v20)
+                {
+                    if (sw.F()) w.Write(dr.PrevMatterMask); // EMGR-FIELD-01：同版本 20 内尾部追加（自描述，短段取 0）；读档后不重复发 enter
                 }
                 sw.EndRecord();
             }
@@ -1342,7 +1346,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(k.Chain);
                 if (sw.F()) w.Write(k.SrcExtKey);
                 if (sw.F()) w.Write(k.Coat);
-                if (sw.F()) w.Write(k.PrevMatterMask);
+                if (sw.F()) w.Write(0u); // EMGR-FIELD-01：原残骸物质掩码（无读者已删），字段位保留占位，旧档按位读不错位
                 if (sw.F()) w.Write(k.Profile);
                 if (sw.F()) w.Write(k.SrcKind);
                 if (sw.F()) w.Write(k.DwellMatter);
@@ -1546,6 +1550,7 @@ namespace BinGames.Sim.Combat
             public byte[] DroneFlash;
             /// <summary>EMG3-CHS-01：无人机电荷（格式 18 段 8 尾部）。</summary>
             public float[] DroneCharge;
+            public uint[] DroneMask;
             public Unity.Mathematics.int4[] FlashHead;
             public int[] FlashMap;
             /// <summary>EMG1-TRIG-01：区域 / 回波的宿主字段（读法表在 Emg 段之后读，FinishEmgLoad 再落）。</summary>
@@ -1815,6 +1820,7 @@ namespace BinGames.Sim.Combat
                     buf.DroneIds = new int[n];
                     buf.DroneFlash = new byte[n * 3];
                     buf.DroneCharge = new float[n];
+                    buf.DroneMask = new uint[n];
                     for (int i = 0; i < n; i++)
                     {
                         sr.Record(i);
@@ -1823,7 +1829,8 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) buf.DroneFlash[i * 3 + 1] = r.ReadByte();
                         if (sr.F()) buf.DroneFlash[i * 3 + 2] = r.ReadByte();
                         if (sr.F()) buf.DroneCharge[i] = r.ReadSingle(); // EMG3-CHS-01：格式 18 尾部（短段取 0）
-                        if (!sr.RecordOk || !(buf.DroneCharge[i] >= 0f) || float.IsInfinity(buf.DroneCharge[i]))
+                        if (sr.F()) buf.DroneMask[i] = r.ReadUInt32(); // EMGR-FIELD-01：版本 20 内尾部（短段取 0）
+                        if (!sr.RecordOk || !(buf.DroneCharge[i] >= 0f) || float.IsInfinity(buf.DroneCharge[i]) || (buf.DroneMask[i] & ~(EmgFieldConst.MatterBits | EmgFieldConst.FieldBits)) != 0u)
                         {
                             return CombatLoadResult.InvalidValue;
                         }
@@ -1885,7 +1892,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) k.Chain = r.ReadInt32();
                         if (sr.F()) k.SrcExtKey = r.ReadInt32();
                         if (sr.F()) k.Coat = r.ReadUInt32();
-                        if (sr.F()) k.PrevMatterMask = r.ReadUInt32();
+                        if (sr.F()) r.ReadUInt32(); // EMGR-FIELD-01：原残骸物质掩码占位，读过即丢（残骸不发进出事件）
                         if (sr.F()) k.Profile = r.ReadInt16();
                         if (sr.F()) k.SrcKind = r.ReadByte();
                         if (sr.F()) k.DwellMatter = r.ReadByte();
@@ -2538,6 +2545,7 @@ namespace BinGames.Sim.Combat
                 dr.Strip = buf?.DroneFlash != null ? buf.DroneFlash[i * 3 + 1] : (byte)0;
                 dr.Pause = buf?.DroneFlash != null ? buf.DroneFlash[i * 3 + 2] : (byte)0;
                 dr.Charge = buf?.DroneCharge != null ? buf.DroneCharge[i] : 0f;
+                dr.PrevMatterMask = buf?.DroneMask != null ? buf.DroneMask[i] : 0u;
                 if (dr.Id < 0 || (dr.Id > 0 && !ids.Add(dr.Id)) || dr.Strip > 1)
                 {
                     return CombatLoadResult.InvalidValue;

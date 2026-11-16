@@ -30,6 +30,17 @@ namespace BinGames.Sim.Combat
 
         public static bool IsFieldPort(int port) => port >= PortPull && port <= PortCorona;
 
+        /// <summary>
+        /// EMGR-FIELD-01（ADR-EMG-001 ④ PrevMatterMask 场预留位）：单位 / 弹体 / 无人机的 32 位接触掩码里，位 1～17 = 物质码（位 0 不用），位 18～23 = 6 种场（端口 701～706 依次）。
+        /// 物质接触写回只改 <see cref="MatterBits"/>，场的进出差分只改 <see cref="FieldBits"/>，两边互不覆盖；“在不在斑块里”的判断一律先 &amp; MatterBits。
+        /// </summary>
+        public const int FieldBitBase = 18;
+        public const uint MatterBits = (1u << FieldBitBase) - 1u, FieldBits = 0x3Fu << FieldBitBase;
+
+        public static uint FieldBit(ushort port) => IsFieldPort(port) ? 1u << (FieldBitBase + port - PortPull) : 0u;
+
+        public static ushort PortOfBit(int bit) => (ushort)(PortPull + bit - FieldBitBase);
+
         /// <summary>缺省值 = FG19B 第 5 节（力的大小 FG19B 写“—”，按“位移 = 力 ÷ 质量”取初值，FG15-BAL-01 再调）；热更层按 fg.TbFieldCarrierRule 覆盖。</summary>
         public static EmgFieldRule Default(int k) => k switch
         {
@@ -364,7 +375,12 @@ namespace BinGames.Sim.Combat
                 // 修复轮 3 复核：不能改成“只在 n != before 时重建”——格掩码不进快照，读档后没有弹体的那一步弹体段不重建，掩码为空、场不作用（模糊存读档 #51 漩涡场分叉）；重建本身每步只有几微秒（满载 64 场时整个场步三地点合计 0.02 ms）
                 EmgRebuildFieldMasks(ref d);
             }
-            if (n == 0 || !(dt > 0f))
+            if (n == 0 && d.DeflectActive.Length == 0)
+            {
+                EmgFlushFieldLeave(ref d); // EMGR-FIELD-01：最后一个场消失的那一步，还记着场位的单位 / 无人机当场发 evt.leave（弹体在弹体段补）；之后没有场就不再进本段（静默偏折场展开时照走下面的循环记进出）
+                return;
+            }
+            if (!(dt > 0f))
             {
                 return;
             }
@@ -398,7 +414,10 @@ namespace BinGames.Sim.Combat
                 int pusher = 0;
                 ushort cause = 0;
                 int movable = -1;
-                ulong candidates = d.EmgHash.FieldMaskOnSegment(pos, pos, d.Radius[u]);
+                // EMGR-FIELD-01（FGR-EMG-060 第 14、15 行）：本步所在场的端口位（与受力同一次几何判定），与上一步的场位做差发 evt.enter / leave；不读这两个事件时只多一次位或
+                uint fprev = d.EmgUnit.ElementAt(u).PrevMatterMask & EmgFieldConst.FieldBits, fnow = 0u;
+                bool cut = false;
+                ulong candidates = n > 0 ? d.EmgHash.FieldMaskOnSegment(pos, pos, d.Radius[u]) : 0ul;
                 while (candidates != 0ul)
                 {
                     int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
@@ -413,12 +432,14 @@ namespace BinGames.Sim.Combat
                     {
                         continue;
                     }
+                    fnow |= EmgFieldConst.FieldBit(f.Port);
                     CombatFaction ff = (CombatFaction)f.Faction;
                     if (f.Port == EmgFieldConst.PortDeflect)
                     {
                         // EMG2-REACT-02（F01 湮灭）：低完整度单位在敌对偏折场里被压溃起爆；敌我同一条（FGR-EMG-160）
                         if (annihilate >= 0 && FieldRelation(EmgFieldConst.FacHostile, ff, uf) && EmgAnnihilate(ref d, u, d.EmgRules[annihilate], f))
                         {
+                            cut = true; // 单位已被压溃：后面的场没扫，不做差（不给已阵亡单位补 leave）
                             break;
                         }
                         continue;
@@ -468,6 +489,16 @@ namespace BinGames.Sim.Combat
                     pusher = pusher == 0 ? f.Owner : pusher;
                     cause = cause == 0 ? f.Port : cause; // 修复轮：evt.push 原因 = 第一个起作用的场端口（与残骸一侧同口径，不再一律记推斥）
                 }
+                if (!cut && d.DeflectActive.Length > 0 && Deflected(ref d, pos, out _, out _, d.Radius[u], u))
+                {
+                    fnow |= EmgFieldConst.FieldBit(EmgFieldConst.PortDeflect); // 静默阵营的偏折场（FG9-FAC-01，不在场表里）同记偏折场位；场源自己不算进自己的场
+                }
+                if (!cut && fnow != fprev && d.IsAlive(u))
+                {
+                    ref EmgUnitState fst = ref d.EmgUnit.ElementAt(u);
+                    fst.PrevMatterMask = (fst.PrevMatterMask & EmgFieldConst.MatterBits) | fnow; // 只改场位，物质位由接触节拍写
+                    EmgFieldEdges(ref d, u, -1, fnow, fprev, pos, d.Radius[u], now);
+                }
                 double sp = math.length(v);
                 if (sp < 1e-6)
                 {
@@ -488,7 +519,7 @@ namespace BinGames.Sim.Combat
                 int by = 0;
                 ushort cause = 0;
                 float kmag = -1f;
-                ulong candidates = d.EmgHash.FieldMaskOnSegment(k.Pos, k.Pos, k.Radius);
+                ulong candidates = n > 0 ? d.EmgHash.FieldMaskOnSegment(k.Pos, k.Pos, k.Radius) : 0ul;
                 while (candidates != 0ul)
                 {
                     int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
@@ -540,14 +571,12 @@ namespace BinGames.Sim.Combat
             for (int i = 0; i < d.Drones.Length; i++)
             {
                 CombatDrone dr = d.Drones[i];
-                if (dr.Anchored != 0)
-                {
-                    continue; // 哨戒桩插地，不被场推动（FGR-EMG-112）
-                }
+                bool anchored = dr.Anchored != 0; // 哨戒桩插地，不被场推动（FGR-EMG-112）；进出场照样记（EMGR-FIELD-01，无人机机身按单位算）
+                uint fprev = dr.PrevMatterMask & EmgFieldConst.FieldBits, fnow = 0u;
                 double2 v = double2.zero;
                 EmgEntityProps dp = default;
                 bool props = false;
-                ulong candidates = d.EmgHash.FieldMaskOnSegment(dr.Pos, dr.Pos, 0.0);
+                ulong candidates = n > 0 ? d.EmgHash.FieldMaskOnSegment(dr.Pos, dr.Pos, 0.0) : 0ul;
                 while (candidates != 0ul)
                 {
                     int j = math.tzcnt(candidates); // 下标升序，与全表扫描同序
@@ -558,7 +587,12 @@ namespace BinGames.Sim.Combat
                     }
                     EmgField f = d.Fields[j];
                     double r = FieldRadiusNow(f, now);
-                    if (f.Port == EmgFieldConst.PortCorona || f.Port == EmgFieldConst.PortDeflect || math.distancesq(dr.Pos, f.Pos) > r * r)
+                    if (math.distancesq(dr.Pos, f.Pos) > r * r)
+                    {
+                        continue;
+                    }
+                    fnow |= EmgFieldConst.FieldBit(f.Port);
+                    if (anchored || f.Port == EmgFieldConst.PortCorona || f.Port == EmgFieldConst.PortDeflect)
                     {
                         continue;
                     }
@@ -580,20 +614,125 @@ namespace BinGames.Sim.Combat
                     }
                     v += dir * (rule.Amount * f.Strength * (magnet ? dp.Magnetic : 1f) / math.max(0.1f, dp.Mass));
                 }
+                if (d.DeflectActive.Length > 0 && Deflected(ref d, dr.Pos, out _, out _))
+                {
+                    fnow |= EmgFieldConst.FieldBit(EmgFieldConst.PortDeflect); // 静默偏折场：只记进出，不推无人机
+                }
+                double2 at = dr.Pos;
+                bool edge = fnow != fprev;
+                if (edge)
+                {
+                    dr.PrevMatterMask = (dr.PrevMatterMask & EmgFieldConst.MatterBits) | fnow;
+                    d.Drones[i] = dr;
+                }
                 if (math.lengthsq(v) > 1e-12)
                 {
                     dr.Pos += v * dt;
                     d.Drones[i] = dr;
                     pushes++;
                 }
+                if (edge)
+                {
+                    EmgFieldEdges(ref d, -1, i, fnow, fprev, at, 0.0, now); // 写回之后再发（事件结算可能改到无人机表）
+                }
             }
-            if (d.Patches.Length > 0 && EmgPatchesOn(ref d))
+            if (n > 0 && d.Patches.Length > 0 && EmgPatchesOn(ref d))
             {
                 pushes += EmgFieldGas(ref d, n, now, dt, fu);
             }
             es = d.EmgS[0];
             es.FieldPushes += pushes;
             d.EmgS[0] = es;
+        }
+
+        /// <summary>
+        /// EMGR-FIELD-01（FGR-EMG-060 第 14、15 行；FG19 :459“进入的斑块 / 场中心”）：单位（<paramref name="u"/> ≥ 0）或无人机机身（<paramref name="drone"/> ≥ 0）的场位差分发 evt.enter / evt.leave。
+        /// Code = 场端口码；进场 Other = 场 Id（同端口重叠取下标最小的）、位置 = 场中心；离场 Other = 0、位置 = 实体处。同一端口的两个场之间移动不算离场。地点没人读这两个事件时不入队（FGR-EMG-062）。
+        /// </summary>
+        private static void EmgFieldEdges(ref CombatData d, int u, int drone, uint fnow, uint fprev, double2 at, double radius, double now)
+        {
+            if (!EmgSiteListens(ref d, EmgEventKind.Enter) && !EmgSiteListens(ref d, EmgEventKind.Leave))
+            {
+                return;
+            }
+            uint entered = fnow & ~fprev, left = fprev & ~fnow;
+            while (entered != 0u)
+            {
+                int b = math.tzcnt(entered);
+                entered &= entered - 1u;
+                ushort port = EmgFieldConst.PortOfBit(b);
+                int f = FirstFieldAt(ref d, port, at, radius, now);
+                if (f < 0 && port == EmgFieldConst.PortDeflect && Deflected(ref d, at, out int s, out _, radius, u))
+                {
+                    EmgEntityEdge(ref d, u, drone, EmgEventKind.Enter, d.Id[s], EmgEntKind.Unit, port, d.Pos[s]); // 静默偏折场：Other = 场源单位（与反射的 evt.bounce 同口径）、位置 = 场心
+                    continue;
+                }
+                EmgEntityEdge(ref d, u, drone, EmgEventKind.Enter, f >= 0 ? d.Fields[f].Id : 0, EmgEntKind.Field, port, f >= 0 ? d.Fields[f].Pos : at);
+            }
+            while (left != 0u)
+            {
+                int b = math.tzcnt(left);
+                left &= left - 1u;
+                EmgEntityEdge(ref d, u, drone, EmgEventKind.Leave, 0, EmgEntKind.Field, EmgFieldConst.PortOfBit(b), at);
+            }
+        }
+
+        /// <summary>单位或无人机机身做宿主的进 / 离场事件（无人机走 <see cref="EmgDroneEvent"/>）。</summary>
+        internal static void EmgEntityEdge(ref CombatData d, int u, int drone, EmgEventKind k, int other, EmgEntKind otherKind, ushort code, double2 pos)
+        {
+            if (u >= 0)
+            {
+                EmgUnitEvent(ref d, k, u, other, 0f, 0f, code, pos, otherKind);
+            }
+            else if (drone >= 0 && drone < d.Drones.Length)
+            {
+                EmgDroneEvent(ref d, d.Drones[drone], k, other, otherKind, code, pos);
+            }
+        }
+
+        private static int FirstFieldAt(ref CombatData d, ushort port, double2 p, double radius, double now)
+        {
+            for (int j = 0; j < d.Fields.Length; j++)
+            {
+                ref EmgField f = ref d.Fields.ElementAt(j);
+                double r = FieldRadiusNow(f, now) + radius;
+                if (f.Port == port && math.distancesq(p, f.Pos) <= r * r)
+                {
+                    return j;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>EMGR-FIELD-01：最后一个场到期的那一步，还记着场位的单位 / 无人机发 evt.leave 并清场位（物质位不动）。一次 O(单位 + 无人机)，只在场表清空时。</summary>
+        private static void EmgFlushFieldLeave(ref CombatData d)
+        {
+            double now = d.Scalars[0].Time;
+            for (int u = 0; u < d.Count; u++)
+            {
+                uint prev = d.EmgUnit.ElementAt(u).PrevMatterMask & EmgFieldConst.FieldBits;
+                if (prev == 0u)
+                {
+                    continue;
+                }
+                d.EmgUnit.ElementAt(u).PrevMatterMask &= EmgFieldConst.MatterBits;
+                if (d.IsAlive(u))
+                {
+                    EmgFieldEdges(ref d, u, -1, 0u, prev, d.Pos[u], d.Radius[u], now);
+                }
+            }
+            for (int i = 0; i < d.Drones.Length; i++)
+            {
+                CombatDrone dr = d.Drones[i];
+                uint prev = dr.PrevMatterMask & EmgFieldConst.FieldBits;
+                if (prev == 0u)
+                {
+                    continue;
+                }
+                dr.PrevMatterMask &= EmgFieldConst.MatterBits;
+                d.Drones[i] = dr;
+                EmgFieldEdges(ref d, -1, i, 0u, prev, dr.Pos, 0.0, now);
+            }
         }
 
         /// <summary>
@@ -745,8 +884,25 @@ namespace BinGames.Sim.Combat
         internal static bool EmgProjFields(ref CombatData d, ref CombatProjectile pr, double2 next, bool airborne, float dt)
         {
             ulong candidates = d.Fields.Length == 0 || airborne ? 0ul : d.EmgHash.FieldMaskOnSegment(pr.Prev, next, pr.Radius);
+            // EMGR-FIELD-01（FGR-EMG-060 第 14、15 行）：本步线段碰到的场的端口位与上一步做差——新进的在结算场效果之前发 evt.enter（偏折场反射会清掉程序），离开的在末尾发 evt.leave
+            uint fprev = pr.PrevMatterMask & EmgFieldConst.FieldBits, fnow = 0u;
+            if (!airborne && d.DeflectActive.Length > 0 && Deflected(ref d, next, out int ds, out _))
+            {
+                // 静默阵营的偏折场（FG9-FAC-01，不在场表里；FG19 第 886 行“穿过敌方偏折场 → 反射”的那个场）：与 TryReflectProjectile 同一次判定（本步终点），进场在反射之前发
+                fnow = EmgFieldConst.FieldBit(EmgFieldConst.PortDeflect);
+                if ((fprev & fnow) == 0u && pr.Prog >= 0)
+                {
+                    EmgProjEvent(ref d, ref pr, EmgEventKind.Enter, d.Id[ds], EmgEntKind.Unit, 0f, 0f, EmgFieldConst.PortDeflect, d.Pos[ds]);
+                }
+            }
             if (candidates == 0ul)
             {
+                uint gone = fprev & ~fnow;
+                pr.PrevMatterMask |= fnow;
+                if (gone != 0u)
+                {
+                    EmgProjFieldLeave(ref d, ref pr, gone, next); // 场刚消失 / 弹体离开所有场 / 抛射升空
+                }
                 return false;
             }
             double now = d.Scalars[0].Time;
@@ -768,6 +924,15 @@ namespace BinGames.Sim.Combat
                 if (math.distancesq(next, f.Pos) > r * r && SegmentCircleT(pr.Prev, next, f.Pos, (float)r) < 0)
                 {
                     continue;
+                }
+                uint fb = EmgFieldConst.FieldBit(f.Port);
+                if ((fnow & fb) == 0u)
+                {
+                    fnow |= fb;
+                    if ((fprev & fb) == 0u && pr.Prog >= 0)
+                    {
+                        EmgProjEvent(ref d, ref pr, EmgEventKind.Enter, f.Id, EmgEntKind.Field, 0f, 0f, f.Port, f.Pos);
+                    }
                 }
                 CombatFaction ff = (CombatFaction)f.Faction;
                 switch (f.Port)
@@ -853,7 +1018,26 @@ namespace BinGames.Sim.Combat
                 es.ProjReflected += reflected ? 1 : 0;
                 d.EmgS[0] = es;
             }
+            // 被反射的弹体已去掉程序（EmgReflectCore），剩下没扫的场不再有读者：按已扫到的记位，不补发
+            uint left = fprev & ~fnow;
+            pr.PrevMatterMask = (pr.PrevMatterMask & EmgFieldConst.MatterBits) | fnow;
+            if (left != 0u && !reflected)
+            {
+                EmgProjFieldLeave(ref d, ref pr, left, next);
+            }
             return reflected;
+        }
+
+        /// <summary>EMGR-FIELD-01：弹体离开 <paramref name="left"/> 里的场（Code = 场端口码、Other = 0、位置 = 本步终点），清掉这些场位；物质位不动。被销毁的弹体不走这里（不给已销毁实体补 leave）。</summary>
+        private static void EmgProjFieldLeave(ref CombatData d, ref CombatProjectile pr, uint left, double2 at)
+        {
+            pr.PrevMatterMask &= ~left;
+            while (left != 0u && pr.Prog >= 0)
+            {
+                int b = math.tzcnt(left);
+                left &= left - 1u;
+                EmgProjEvent(ref d, ref pr, EmgEventKind.Leave, 0, EmgEntKind.Field, 0f, 0f, EmgFieldConst.PortOfBit(b), at);
+            }
         }
 
         /// <summary>反射一发弹体：掉头、发 evt.bounce（面 = 场）、改为场方阵营并清掉原程序与弹道修饰（与静默偏折场 TryReflectProjectile 同一口径）。</summary>

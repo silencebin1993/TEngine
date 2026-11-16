@@ -59,7 +59,7 @@ namespace BinGames.Sim.Combat
 
             MaybeCompact(ref d);
             MaybeCompactRoutes(ref d);
-            RebuildDeflectActive(ref d); // FG9-FAC-01：压实可能挪了槽位
+            RebuildDeflectActive(ref d, edges: true); // FG9-FAC-01：压实可能挪了槽位（EMGR-FIELD-01：步间场源被移除也补发 leave）
 
             int n = d.Count;
             for (int i = 0; i < n; i++)
@@ -136,7 +136,7 @@ namespace BinGames.Sim.Combat
             // 4c. FG10-FAC-01：澄净专属语法（死亡效果、受寒、喷淋 / 枢轴 / 自爆、喷淋池冲洗、酸沼、分裂液接触）。
             StepClarity(ref d, ref grid, dt);
             StepMagnetized(ref d, dt); // EMG2-PHS-01：磁化单位是弱磁源，弹体转向
-            RebuildDeflectActive(ref d);
+            RebuildDeflectActive(ref d, edges: true);
             grid.Dispose();
 
             // 5. 弹体
@@ -158,7 +158,7 @@ namespace BinGames.Sim.Combat
             StepReadings(ref d, dt);
 
             // 5e. EMG2-FLD-01（FGR-EMG-112 / 121）：活跃场到期与对单位 / 残骸 / 无人机的作用（残骸滑行之前，本步被场带动的残骸本步滑）。没有场时 O(1)。
-            if (d.Fields.Length > 0)
+            if (d.Fields.Length > 0 || d.DeflectActive.Length > 0) // EMGR-FIELD-01：静默偏折场（不在场表里）展开时也要记单位 / 无人机的进出
             {
                 StepFields(ref d, dt);
             }
@@ -2154,7 +2154,7 @@ namespace BinGames.Sim.Combat
                 orbiting |= (pr.Mods & EmgProjMods.Orbit) != 0;
                 // EMG1-GRM-01：抛射弹体在空中不碰单位 / 障碍 / 护盾 / 偏折场，落地那一步才结算（落到目标脚下，FG19A 第 1.1 节第 11 行）。
                 bool airborne = (pr.Flags & EmgProjFlags.Lob) != 0 && pr.Life > 0f;
-                if (d.EmgS[0].PatchLive > 0 || pr.PrevMatterMask != 0u)
+                if (d.EmgS[0].PatchLive > 0 || (pr.PrevMatterMask & EmgFieldConst.MatterBits) != 0u) // EMGR-FIELD-01：只看物质位（场位由 EmgProjFields 管）
                 {
                     EmgProjMatter(ref d, ref pr, next, airborne); // EMG2-MAT-01（FGR-EMG-083）：穿过斑块沾染、进 / 离发 evt.enter / evt.leave；地点没有斑块且弹体不在斑块里时不查（最后一块消失后补发 leave、清掩码）
                 }
@@ -2175,7 +2175,7 @@ namespace BinGames.Sim.Combat
                 {
                     EmgProjTrail(ref d, ref pr, next); // EMG2-FLD-01：带油带火的弹体沿途拖出明火
                 }
-                if (d.Fields.Length > 0 && EmgProjFields(ref d, ref pr, next, airborne, dt))
+                if ((d.Fields.Length > 0 || d.DeflectActive.Length > 0 || (pr.PrevMatterMask & EmgFieldConst.FieldBits) != 0u) && EmgProjFields(ref d, ref pr, next, airborne, dt)) // EMGR-FIELD-01：最后一个场消失后补发 leave；静默偏折场的进场在反射之前发
                 {
                     d.Projectiles[write++] = pr; // EMG2-FLD-01：被偏折场反射，下一步起按场方阵营飞回去
                     continue;

@@ -52,7 +52,7 @@ namespace BinGames.Sim.Combat
         public int Chain;
         /// <summary>沾染位（独立于单位 Status 的物质沾染，FGR-EMG-020 第 5 条后备）。</summary>
         public uint Coat;
-        /// <summary>上一步所在物质掩码（evt.enter / evt.leave 做差，ADR ④）。</summary>
+        /// <summary>上一步所在物质掩码（evt.enter / evt.leave 做差，ADR ④）：位 1～17 物质码（EmgProjMatter 写），位 18～23 场（EmgProjFields 写，EMGR-FIELD-01）。</summary>
         public uint PrevMatterMask;
         /// <summary>每条触发指令 2 比特的已触发计数（emg.trig.max_per_host）。</summary>
         public uint TrigUsed;

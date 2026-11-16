@@ -280,9 +280,14 @@ namespace BinGames.Sim.Combat
             }
         }
 
-        /// <summary>本步展开中的偏折场（敌方、存活、带 DeflectArmed、阶段 = 展开）。压实之后与每步末尾重算；O(单位)。</summary>
-        public static void RebuildDeflectActive(ref CombatData d)
+        /// <summary>
+        /// 本步展开中的偏折场（敌方、存活、带 DeflectArmed、阶段 = 展开）。压实之后与每步末尾重算；O(单位)。
+        /// <paramref name="edges"/>（步内与首领状态机拨相位时为 true，读档时 false）：最后一个静默偏折场收起 / 场源阵亡、又没有场表里的场时，StepFields 不再运行，
+        /// 还记着偏折场位的单位 / 无人机当场发 evt.leave（EMGR-FIELD-01；弹体在弹体段按场位补）。
+        /// </summary>
+        public static void RebuildDeflectActive(ref CombatData d, bool edges = false)
         {
+            bool was = d.DeflectActive.Length > 0;
             d.DeflectActive.Clear();
             for (int i = 0; i < d.Count; i++)
             {
@@ -291,17 +296,21 @@ namespace BinGames.Sim.Combat
                     d.DeflectActive.Add(i);
                 }
             }
+            if (edges && was && d.DeflectActive.Length == 0 && d.Fields.Length == 0)
+            {
+                EmgFlushFieldLeave(ref d);
+            }
         }
 
-        /// <summary>目标 <paramref name="t"/> 是否在某个展开中的偏折场里（返回场源槽位与反弹比例）。O(展开中的偏折场数)。</summary>
-        private static bool Deflected(ref CombatData d, double2 at, out int source, out float reflect)
+        /// <summary>点 <paramref name="at"/>（外扩 <paramref name="pad"/>，单位按半径算）是否在某个展开中的偏折场里（返回场源槽位与反弹比例；<paramref name="skip"/> = 不算的场源，单位不算进自己的场）。O(展开中的偏折场数)。</summary>
+        private static bool Deflected(ref CombatData d, double2 at, out int source, out float reflect, double pad = 0.0, int skip = -1)
         {
             source = -1;
             reflect = 0f;
             for (int k = 0; k < d.DeflectActive.Length; k++)
             {
                 int s = d.DeflectActive[k];
-                if (s < 0 || s >= d.Count || !d.IsAlive(s) || d.Silent[s].Deflect != 2)
+                if (s < 0 || s >= d.Count || s == skip || !d.IsAlive(s) || d.Silent[s].Deflect != 2)
                 {
                     continue;
                 }
@@ -311,7 +320,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 CombatBehaviorProfile p = d.Profiles[bp];
-                if (math.distance(d.Pos[s], at) <= p.DeflectRadius)
+                if (math.distance(d.Pos[s], at) <= p.DeflectRadius + pad)
                 {
                     source = s;
                     reflect = p.DeflectReflect;

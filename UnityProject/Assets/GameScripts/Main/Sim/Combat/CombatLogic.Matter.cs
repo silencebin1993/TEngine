@@ -453,6 +453,54 @@ namespace BinGames.Sim.Combat
             {
                 FlushMatterLeave(ref d);
             }
+            if (d.Drones.Length > 0)
+            {
+                StepDroneMatter(ref d, marsh); // EMGR-FIELD-01（FGR-EMG-060 第 14、15 行，无人机按单位算）：无人机机身进 / 离气体层斑块（哨戒桩含地面层与酸沼）
+            }
+        }
+
+        /// <summary>
+        /// EMGR-FIELD-01：无人机机身（游走无人机离地，只碰气体层斑块，FG19B §1.4 第 1 条；插地的哨戒桩地面层也碰）每步按所在点算物质位，与上一步做差发 evt.enter / evt.leave（Code = 物质码，进场 Other = 斑块 Id、位置 = 斑块中心）；
+        /// 写回只改物质位，场位由 StepFields 管。最后一块斑块消失的那一步掩码为 0，当场补发 leave。O(无人机)，只在有斑块（或刚清空）或有酸沼时；无人机不吃斑块的接触效果（沾染 / 伤害只对单位，FGR-EMG-083）。
+        /// 酸沼是虚拟世界源、不算进 PatchLive：有酸沼时照查（与单位侧 StepPatchContact 同口径），否则插在酸沼里的哨戒桩会随别处斑块的有无反复进出（EMGR-FIELD-01 修复轮 1）。
+        /// </summary>
+        private static void StepDroneMatter(ref CombatData d, bool marsh)
+        {
+            bool live = d.EmgS[0].PatchLive > 0 || marsh;
+            var hits = new NativeList<int2>(EmgMatterConst.ContactPerUnit + 1, Allocator.Temp);
+            for (int i = 0; i < d.Drones.Length; i++)
+            {
+                CombatDrone dr = d.Drones[i];
+                uint prev = dr.PrevMatterMask & EmgFieldConst.MatterBits;
+                hits.Clear();
+                uint mask = live ? PatchesAt(ref d, dr.Pos, dr.Anchored == 0, ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false) : 0u; // 哨戒桩插地：地面层也算
+                if (mask == prev)
+                {
+                    continue;
+                }
+                dr.PrevMatterMask = (dr.PrevMatterMask & EmgFieldConst.FieldBits) | mask;
+                d.Drones[i] = dr;
+                if (!EmgSiteListens(ref d, EmgEventKind.Enter) && !EmgSiteListens(ref d, EmgEventKind.Leave))
+                {
+                    continue;
+                }
+                uint entered = mask & ~prev, left = prev & ~mask;
+                while (entered != 0u)
+                {
+                    int b = math.tzcnt(entered);
+                    entered &= entered - 1u;
+                    int p = HitOfMatter(ref d, hits, b);
+                    p = p >= 0 ? p : FirstPatchOfMatterAt(ref d, dr.Pos, b);
+                    EmgEntityEdge(ref d, -1, i, EmgEventKind.Enter, p >= 0 ? d.Patches[p].EmgId : 0, EmgEntKind.Patch, (ushort)b, p >= 0 ? d.Patches[p].Pos : dr.Pos);
+                }
+                while (left != 0u)
+                {
+                    int b = math.tzcnt(left);
+                    left &= left - 1u;
+                    EmgEntityEdge(ref d, -1, i, EmgEventKind.Leave, 0, EmgEntKind.Patch, (ushort)b, dr.Pos);
+                }
+            }
+            hits.Dispose();
         }
 
         /// <summary>最后一块斑块消失的那一步：还记着物质掩码的单位当场发 evt.leave 并清掩码（之后没有斑块就不再走接触，O(1)）。一次 O(单位)，只在斑块层清空时。</summary>
@@ -462,12 +510,12 @@ namespace BinGames.Sim.Combat
             for (int u = 0; u < d.Count; u++)
             {
                 EmgUnitState st = d.EmgUnit[u];
-                uint prev = st.PrevMatterMask;
+                uint prev = st.PrevMatterMask & EmgFieldConst.MatterBits;
                 if (prev == 0u)
                 {
                     continue;
                 }
-                st.PrevMatterMask = 0u;
+                st.PrevMatterMask &= EmgFieldConst.FieldBits; // EMGR-FIELD-01：只清物质位，场位保留
                 d.EmgUnit[u] = st;
                 if (d.IsAlive(u))
                 {
@@ -778,10 +826,10 @@ namespace BinGames.Sim.Combat
                 bool air = ChsAirborne(ref d, u); // EMG3-CHS-01：离地（悬浮 / 云端空中）不吃地面层
                 uint mask = PatchesAt(ref d, d.Pos[u], air, ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);
                 EmgUnitState st = d.EmgUnit[u];
-                uint prev = st.PrevMatterMask;
+                uint prev = st.PrevMatterMask & EmgFieldConst.MatterBits;
                 if (mask != prev)
                 {
-                    st.PrevMatterMask = mask;
+                    st.PrevMatterMask = (st.PrevMatterMask & EmgFieldConst.FieldBits) | mask; // EMGR-FIELD-01：只改物质位，场位由 StepFields 管
                     d.EmgUnit[u] = st;
                     EmgMatterEdges(ref d, u, mask, prev, hits);
                 }
@@ -968,12 +1016,12 @@ namespace BinGames.Sim.Combat
                     }
                 }
             }
-            uint prev = pr.PrevMatterMask;
+            uint prev = pr.PrevMatterMask & EmgFieldConst.MatterBits;
             if (mask == prev)
             {
                 return;
             }
-            pr.PrevMatterMask = mask;
+            pr.PrevMatterMask = (pr.PrevMatterMask & EmgFieldConst.FieldBits) | mask; // EMGR-FIELD-01：只改物质位，场位由 EmgProjFields 管
             if (pr.Prog < 0)
             {
                 return;
