@@ -852,6 +852,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgTerrainSelfCheck", FgEmgTerrainSelfCheck.Run); // EMG4-TER-01：熔坑（FGT-EMG-060 熔坑部分；冻结桥随水面 FG18-SEA-01，DEBT-EMG4TER01-01）
             Seg("FgEmgGroundMarkSelfCheck", FgEmgGroundMarkSelfCheck.Run); // EMG4-TER-02：战痕写入家园格网（FGT-EMG-060 战痕部分、FGT-EMG-041 迁移部分）
             Seg("FgEmgCodexSelfCheck", FgEmgCodexSelfCheck.Run); // EMG4-CODEX-01：组合图鉴完整界面与极限奖励（FGT-EMG-063 / 062 图鉴部分，DEBT-EMG2RULE01-07 / DEBT-EMG1CHAIN01-04）
+            Seg("FgEmgCodexTallySelfCheck", FgEmgCodexSelfCheck.RunTally); // EMGR-TALLY-01：极限计数表 4096 格、冲突保新链与丢弃计数、快照段 33、旧档下限（DEBT-EMG4CODEX01-01、DEBT-EMGRTALLY01-01 / 02）
             Seg("FgEmgLootHintSelfCheck", FgEmgLootHintSelfCheck.Run); // EMG4-LOOT-01：三选一新交互提示、部件通道源与重复部件（FGT-EMG-062 三选一 N 与重复部件部分；FG-GAP-150 标志组件 E 段）
             Seg("FgEmgEpicExitSelfCheck", FgEmgEpicExitSelfCheck.Run); // EMG4-E2E-02：FG-EMG Epic 收尾门禁、四阶段反向场景合集（IC-REQ-022；排在各涌现段之后，同进程时核它们本轮结果）
         }

@@ -132,6 +132,9 @@ namespace BinGames.Sim.Combat
         /// 只在有登记时写（没有时快照与哈希逐字不变）；读不含这段的快照 = 没有在途登记。EMGR-FUSE-01：≥ 4 字段 = 只写非空格（旧布局下标 = 配方 × 8 + 格号低 3 位、链号、侧位、配方行内格号）；
         /// ≤ 3 字段 = EMGR-FUSE-01 之前的 8 格全长布局（下标 = 配方 × 8 + 格），读时按 下标 / 8 取配方号重新插入。</summary>
         public const int SegClueHalf = 32;
+        /// <summary>EMGR-TALLY-01（格式 20 内追加，自描述段；FGR-EMG-194、FG00 B10）：段 33“极限”按根出手的计数表，只写非零行（链号、规则结算次数、最大链深 | 已记极限位、最近一条有条目的规则稳定键，每行 16 B），
+        /// 读档按链号落回同一格。只在有计数时写；不进状态哈希（<c>EmgStateHash</c> 不写这段，也不写标量段第 28 字段 <see cref="EmgScalars.TallyFloor"/>）。读不含这段的快照 = 空表。</summary>
+        public const int SegChainTally = 33;
         /// <summary>EMGR-FUSE-01（DEBT-EMG4FUSE02-01）：每条配方的在途登记格数（2 的幂，按链号哈希开放寻址）与探测窗口；旧布局每配方 8 格；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
         /// shortcut: 16 格探测窗口全满时挤掉窗口里链号最小（最早）的登记并计数 EmgScalars.ClueHalfEvicted（少计不多计；DEBT-EMGRFUSE01-01 交 FG15-SYS-02 按实测再定）。</summary>
         public const int ClueHalfBits = 7, ClueHalfRing = 1 << ClueHalfBits, ClueHalfWindow = 16, ClueHalfLegacyRing = 8, ClueSidePorts = 1400;
@@ -154,10 +157,10 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG1-CHAIN-01：每地点因果链环形记录条数 emg.chain.ring（2 的幂，按位与取下标）与规则计数槽数（按稳定键开放寻址，槽位一经分配本场不挪）。</summary>
         public const int ChainRing = 256;
         public const int RuleSlots = 256;
-        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：“极限”按根出手计数的表长（2 的幂；链号单调递增，最近 256 条链互不冲突）与缺省门槛（emg.codex.extreme_count）。
-        /// shortcut: 按 chain &amp; 255 直映射，激战中链号几秒转一圈，仍在结算的长寿斑块链会和新链互相清零（含已记极限位），大规模战斗会系统性少记极限；计数表不进快照，读档后在途链从 0 计。
-        /// 要精确得按链号开放寻址并在链结束时回收（DEBT-EMG4CODEX01-01，承接 FG15-SYS-02）。</summary>
-        public const int ChainTally = 256;
+        /// <summary>EMG4-CODEX-01（FGR-EMG-194）：“极限”按根出手计数的表长（2 的幂；下标 = 链号 &amp; (ChainTally − 1)，链号单调递增，最近 4096 条链互不冲突）与缺省门槛（emg.codex.extreme_count）。
+        /// EMGR-TALLY-01（DEBT-EMG4CODEX01-01）：同格已是更新的链时较早那条链停计（不清新链的计数与封印位，不会误发），计 <see cref="EmgScalars.TallyEvicted"/>；计数表进快照段 <see cref="SegChainTally"/>（B10）。
+        /// shortcut: 4096 格直映射、冲突保新链——同时在途超过 4096 条链时较早的链可能少记一次极限（不误发）；要精确得按链号开放寻址并在链结束时回收（DEBT-EMGRTALLY01-01，承接 FG15-SYS-02）。</summary>
+        public const int ChainTally = 4096;
         public const int DefaultExtremeCount = 12;
         public const int TallyExtremeBit = 0x100;
         // ── EMG1-FLASH-01（FGR-EMG-036；fg.TbHomeTuning emg.flash.*）：刷写带宽初值（运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）──
@@ -976,6 +979,9 @@ namespace BinGames.Sim.Combat
         public int NextFieldId;
         /// <summary>下一个因果链 ID（ADR ⑨：每次根出手 / 世界源排放 / 热更注入分配一个；从 1 起，0 = 没有链）。</summary>
         public int NextChain;
+        /// <summary>EMGR-TALLY-01（标量段第 28 字段：进快照、不进哈希）：链号低于它的链不再计“极限”。读不含这个字段的旧档时取读档时的 NextChain——旧档没有计数表（敌方链的封印位也丢了），
+        /// 读档那一刻在途的链宁少记不误发（D7，DEBT-EMGRTALLY01-02）；新开战场 / 新档为 0。</summary>
+        public int TallyFloor;
         /// <summary>总线序号（下一条事件的 Seq）。</summary>
         public int EmgSeq;
         /// <summary>总线头指针（已处理到哪；运行时量——快照只写未处理的事件，读档后为 0）。</summary>
@@ -1031,6 +1037,8 @@ namespace BinGames.Sim.Combat
         public int RulesDeferred;
         /// <summary>EMGR-FUSE-01（不进快照，调试 / 自检计数）：熔合线索在途登记的探测窗口满、挤掉最早一格的次数（那条链少计，计数可见、不静默）。</summary>
         public int ClueHalfEvicted;
+        /// <summary>EMGR-TALLY-01（不进快照，调试 / 自检计数）：“极限”计数表同格已是更新的链、较早那条链这次没计的次数（少记不误发，计数可见、不静默；DEBT-EMGRTALLY01-01）。</summary>
+        public int TallyEvicted;
         /// <summary>EMG2-PHS-01（不进快照，调试 / 自检计数）：进入相态次数。</summary>
         public int PhaseEnters;
         /// <summary>传导节拍数 / 累计节点访问 / 因访问上限把剩余能量顺延到下一节拍的次数 / 最近一个传导节拍的访问数。</summary>

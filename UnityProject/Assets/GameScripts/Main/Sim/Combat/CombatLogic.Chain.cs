@@ -38,10 +38,22 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static void EmgExtremeTally(ref CombatData d, EmgChainNode kind, int chain, byte depth, int key, int srcUnit, bool codex)
         {
+            if (chain < d.EmgS[0].TallyFloor)
+            {
+                return; // EMGR-TALLY-01：读旧档那一刻在途的链（旧档没有计数表、敌方封印位也丢了）——宁少记不误发（D7，DEBT-EMGRTALLY01-02）
+            }
             int at = chain & (EmgConst.ChainTally - 1);
             int4 t = d.EmgChainTally[at];
             if (t.x != chain)
             {
+                if (t.x > chain)
+                {
+                    // EMGR-TALLY-01：同格已是更新的链——较早这条链停计，不清新链的计数与封印位（不会因此误发），丢弃次数可见（DEBT-EMGRTALLY01-01）
+                    EmgScalars es = d.EmgS[0];
+                    es.TallyEvicted++;
+                    d.EmgS[0] = es;
+                    return;
+                }
                 t = new int4(chain, 0, 0, 0);
             }
             if ((t.z & EmgConst.TallyExtremeBit) != 0)

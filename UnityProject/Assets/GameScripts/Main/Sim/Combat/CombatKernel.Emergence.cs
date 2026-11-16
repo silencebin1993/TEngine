@@ -1126,7 +1126,7 @@ namespace BinGames.Sim.Combat
         {
             using var ms = new MemoryStream(256 + _d.Projectiles.Length * 48);
             using var w = new BinaryWriter(ms);
-            WriteEmg(w, 0, int.MaxValue, 0);
+            WriteEmg(w, 0, int.MaxValue, 0, CombatConst.FormatVersion, true); // EMGR-TALLY-01：计数表段 33 与标量段第 28 字段不进哈希
             w.Flush();
             ulong h = 14695981039346656037UL;
             byte[] buf = ms.GetBuffer();
@@ -1194,7 +1194,33 @@ namespace BinGames.Sim.Combat
 
         private bool _omitScorchSegForTests;
 
-        private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes, int format = CombatConst.FormatVersion)
+        /// <summary>测试用（EMGR-TALLY-01）：模拟本卡之前写出的快照——标量段 27 字段（没有 TallyFloor）、没有段 33 计数表。</summary>
+        public byte[] SerializePreTallyForTests()
+        {
+            _preTallyForTests = true;
+            try
+            {
+                return Serialize();
+            }
+            finally
+            {
+                _preTallyForTests = false;
+            }
+        }
+
+        private bool _preTallyForTests;
+
+        private int TallyRows()
+        {
+            int n = 0;
+            for (int i = 0; i < _d.EmgChainTally.Length; i++)
+            {
+                n += _d.EmgChainTally[i].x != 0 ? 1 : 0;
+            }
+            return n;
+        }
+
+        private void WriteEmg(BinaryWriter w, int shortTag, int fieldCap, int extraBytes, int format = CombatConst.FormatVersion, bool hash = false)
         {
             var sw = new EmgSegmentWriter(w, shortTag, fieldCap, extraBytes);
             bool v17 = format >= 17;
@@ -1202,10 +1228,12 @@ namespace BinGames.Sim.Combat
             bool v20 = format >= 20; // EMG4-HIJ-01：段 27 信号劫持
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
             bool half = v20 && ClueHalfState(); // EMG4-FUSE-02：段 32 只在有在途线索登记时写
+            bool tallyOut = v20 && !hash && !_preTallyForTests; // EMGR-TALLY-01：标量段第 28 字段 TallyFloor + 段 33 计数表（不进哈希；测试可模拟本卡之前的旧档）
+            int tallyRows = tallyOut ? TallyRows() : 0;
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
-            sw.Begin(EmgConst.SegScalars, v17 ? 27 : 12, 1);
+            sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 28 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
             if (sw.F()) w.Write(es.NextDroneId);
             if (sw.F()) w.Write(es.NextWreckId);
@@ -1236,6 +1264,7 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(es.PersistCleared);
                 if (sw.F()) w.Write(es.SolidAbsorbs);
                 if (sw.F()) w.Write(es.WreckFires);
+                if (sw.F()) w.Write(es.TallyFloor); // EMGR-TALLY-01：尾部追加（哈希与旧档不写；读不到 = 旧档，取 NextChain）
             }
             sw.EndRecord();
             sw.End();
@@ -1492,6 +1521,25 @@ namespace BinGames.Sim.Combat
                 }
                 sw.End();
             }
+            if (tallyRows > 0)
+            {
+                // EMGR-TALLY-01：段 33 只写非零行，格位由链号决定（读档按链号原样落回同一格）
+                sw.Begin(EmgConst.SegChainTally, 4, tallyRows);
+                for (int i = 0; i < _d.EmgChainTally.Length; i++)
+                {
+                    Unity.Mathematics.int4 t = _d.EmgChainTally[i];
+                    if (t.x == 0)
+                    {
+                        continue;
+                    }
+                    if (sw.F()) w.Write(t.x);
+                    if (sw.F()) w.Write(t.y);
+                    if (sw.F()) w.Write(t.z);
+                    if (sw.F()) w.Write(t.w);
+                    sw.EndRecord();
+                }
+                sw.End();
+            }
 
             if (extraBytes > 0)
             {
@@ -1644,6 +1692,8 @@ namespace BinGames.Sim.Combat
             public CombatZone[] ZoneHosts;
             public CombatEcho[] EchoHosts;
             public bool HadSeq;
+            /// <summary>EMGR-TALLY-01：标量段带第 28 字段 TallyFloor（没有 = 本卡之前的旧档）。</summary>
+            public bool HadTallyFloor;
         }
 
         private static CombatLoadResult ParseEmg(BinaryReader r, ref CombatData staging, int bodyLen, out EmgLoadBuffer buf)
@@ -1704,8 +1754,10 @@ namespace BinGames.Sim.Combat
                     if (sr.F()) es.WrecksCapped = r.ReadInt32();
                     if (sr.F()) es.WrecksDestroyed = r.ReadInt32();
                     ReadPatchCounts(r, sr, ref es); // EMG2-MAT-01：格式 17 标量段尾部的斑块计数（短段 / 格式 16 取 0）
+                    buf.HadTallyFloor = sr.F();
+                    if (buf.HadTallyFloor) es.TallyFloor = r.ReadInt32(); // EMGR-TALLY-01：读不到 = 旧档，FinishEmgLoad 取 NextChain
                     if (!sr.RecordOk || es.NextProjId < 1 || es.NextDroneId < 1 || es.NextWreckId < 1 || es.NextPatchId < 1 || es.NextFieldId < 1 || es.NextChain < 1
-                        || es.NextZoneId < 1 || es.WrecksBorn < 0 || es.WrecksAged < 0 || es.WrecksCapped < 0 || es.WrecksDestroyed < 0)
+                        || es.NextZoneId < 1 || es.WrecksBorn < 0 || es.WrecksAged < 0 || es.WrecksCapped < 0 || es.WrecksDestroyed < 0 || es.TallyFloor < 0)
                     {
                         return CombatLoadResult.InvalidValue;
                     }
@@ -2092,6 +2144,29 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegPitStats:
                 case EmgConst.SegScorchAcc: // EMG4-TER-02
                     return ParsePitSegment(r, sr, ref staging);
+                case EmgConst.SegChainTally: // EMGR-TALLY-01：按链号落回同一格；同一格两行 / 坏值整份拒绝
+                {
+                    if (n > EmgConst.ChainTally)
+                    {
+                        return CombatLoadResult.InvalidValue;
+                    }
+                    for (int i = 0; i < n; i++)
+                    {
+                        sr.Record(i);
+                        Unity.Mathematics.int4 t = default;
+                        if (sr.F()) t.x = r.ReadInt32();
+                        if (sr.F()) t.y = r.ReadInt32();
+                        if (sr.F()) t.z = r.ReadInt32();
+                        if (sr.F()) t.w = r.ReadInt32();
+                        int at = t.x & (EmgConst.ChainTally - 1);
+                        if (!sr.RecordOk || t.x <= 0 || t.y < 0 || t.z < 0 || t.z > (EmgConst.TallyExtremeBit | 0xFF) || staging.EmgChainTally[at].x != 0)
+                        {
+                            return CombatLoadResult.InvalidValue;
+                        }
+                        staging.EmgChainTally[at] = t;
+                    }
+                    return CombatLoadResult.Ok;
+                }
                 case EmgConst.SegClueHalf: // EMG4-FUSE-02
                 {
                     // EMGR-FUSE-01：≤ 3 字段 = 旧 8 格全长布局（含空格，下标 = 配方 × 8 + 格）：按 下标 / 8 取配方号重新插入（不能按原下标写回，否则配方错位）；
@@ -2706,7 +2781,15 @@ namespace BinGames.Sim.Combat
             {
                 return tr;
             }
-            es.NextChain = Math.Max(es.NextChain, maxChain + 1);
+            es.NextChain = Math.Max(es.NextChain, maxChain + 1); // EMGR-TALLY-01：计数表行按原样读回（正式流程的链号都 < NextChain；测试直写的链号不抬发号器，保持存读档哈希一致）
+            if (buf == null || !buf.HadTallyFloor)
+            {
+                es.TallyFloor = es.NextChain; // EMGR-TALLY-01：旧档没有计数表——读档那一刻在途的链不再计极限（宁少记不误发，DEBT-EMGRTALLY01-02）
+            }
+            if (es.TallyFloor > es.NextChain)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
             es.BusHead = 0;
             staging.EmgS[0] = es;
             return CombatLoadResult.Ok;

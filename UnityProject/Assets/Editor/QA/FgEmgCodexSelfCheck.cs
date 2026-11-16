@@ -65,12 +65,21 @@ namespace GameLogic.EditorTools
             }
         }
 
-        public static int Run(StringBuilder report)
+        public static int Run(StringBuilder report) =>
+            Session(report, "组合图鉴与极限奖励", "FGR-EMG-183 / 194 / 162（FGT-EMG-063 / 062）",
+                CheckEntries, CheckDiscoverySnapshot, CheckGrammar, CheckExtreme, CheckSaveLoad, CheckNoBonus, CheckUnitHover, CheckEnemyProgram, CheckPanel);
+
+        /// <summary>EMGR-TALLY-01（FGR-EMG-194、FG00 B10 / D7；DEBT-EMG4CODEX01-01、DEBT-EMGRTALLY01-01 / 02）：极限计数表 4096 格、冲突保新链、进快照段 33、旧档下限。可单独运行。</summary>
+        public static int RunTally(StringBuilder report) =>
+            Session(report, "极限计数不漏记不误发", "EMGR-TALLY-01：300 条在途链、冲突保新链与丢弃计数、快照段 33 往返、旧档下限（FGR-EMG-194，B10 / D7）",
+                CheckTallyFlight, CheckTallyConflict, CheckTallySnapshot, CheckTallyLegacy, CheckTallyNegative);
+
+        private static int Session(StringBuilder report, string tag, string title, params Action[] checks)
         {
             _report = report;
             _fail = 0;
             _pass = 0;
-            Line("\n[组合图鉴与极限奖励] FGR-EMG-183 / 194 / 162（FGT-EMG-063 / 062）");
+            Line($"\n[{tag}] {title}");
             if (Application.isPlaying)
             {
                 Line("  - Play 模式下跳过（会改写存档目录）");
@@ -95,15 +104,10 @@ namespace GameLogic.EditorTools
                 Directory.CreateDirectory(_dir);
                 FreshCodex("main");
                 FeedbackCues.ObservedSiteProvider = () => null;
-                Step(CheckEntries);
-                Step(CheckDiscoverySnapshot);
-                Step(CheckGrammar);
-                Step(CheckExtreme);
-                Step(CheckSaveLoad);
-                Step(CheckNoBonus);
-                Step(CheckUnitHover);
-                Step(CheckEnemyProgram);
-                Step(CheckPanel);
+                foreach (Action check in checks)
+                {
+                    Step(check);
+                }
             }
             catch (Exception e)
             {
@@ -137,7 +141,7 @@ namespace GameLogic.EditorTools
                 {
                 }
             }
-            Line($"  · [组合图鉴与极限奖励] 断言通过 {_pass}，失败 {_fail}");
+            Line($"  · [{tag}] 断言通过 {_pass}，失败 {_fail}");
             return _fail;
         }
 
@@ -484,6 +488,278 @@ namespace GameLogic.EditorTools
             StepSite(site, 2);
             Expect(ReactionFeedback.FirstRecordOf(s, "reaction_freeze").Extreme && s.TechData == tech0 + 4 * reward && ReactionDiscoveryService.ExtremeMarked == marked0 + 1,
                 $"D8 无名规则：越过门槛的那次落在无名规则上，极限仍记到这条链上一条具名交互“冰封”（+{reward}）；只有无名规则的链不记（本步新记 {ReactionDiscoveryService.ExtremeMarked - marked0} 条）");
+        }
+
+        // ── T 极限计数表（EMGR-TALLY-01：4096 格、冲突保新链、快照段 33、旧档下限）─────────
+
+        private static int NeedOf(CombatKernel k) => k.Config.EmgExtremeCount > 0 ? k.Config.EmgExtremeCount : EmgConst.DefaultExtremeCount;
+
+        private static void TallyRules(CombatKernel k, int chain, int src, int key, int n, byte depth = 0)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                k.EmgChainLogForTests(EmgChainNode.Rule, chain, src, 0, 0, key, depth);
+            }
+        }
+
+        private static List<int> Extremes(CombatKernel k) => Enumerable.Range(0, k.EmgExtremeRows).Select(k.EmgExtremeAt).ToList();
+
+        private static void KStep(CombatKernel k) => k.Step(Dt, k.Time + Dt);
+
+        /// <summary>只有内核的夹具（存读档逐位比较用）：一台己方、一台敌方，都不开火。</summary>
+        private static CombatKernel TallyKernel(out int me, out int foe)
+        {
+            CombatConfig cfg = CombatSite.ConfigFromTuning();
+            cfg.NavEnabled = 0;
+            var k = new CombatKernel(cfg, 64);
+            me = Unit(k, CombatFaction.Player, new double2(0, 0));
+            foe = Unit(k, CombatFaction.Hostile, new double2(30, 0));
+            KStep(k);
+            return k;
+        }
+
+        private static int SlotOfChain(int chain) => chain & (EmgConst.ChainTally - 1);
+
+        private static void CheckTallyFlight()
+        {
+            FreshCodex("tally-flight");
+            CampaignState s = NewState(9711);
+            ReactionFeedback.RecordFirst(s, "reaction_deflagrate", SiteId);
+            using var site = NewSite();
+            CombatKernel k = site.Kernel;
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0));
+            StepSite(site, 1);
+            int need = NeedOf(k), key = Key("reaction_deflagrate"), reward = ReactionDiscoveryService.ExtremeReward;
+            long tech0 = s.TechData;
+            var chains = new int[300];
+            for (int i = 0; i < chains.Length; i++)
+            {
+                chains[i] = k.EmgIssueChainForTests();
+                k.EmgChainLogForTests(EmgChainNode.Shot, chains[i], me);
+                TallyRules(k, chains[i], me, key, need - 1);
+            }
+            StepSite(site, 1);
+            int before = k.EmgExtremeRows;
+            TallyRules(k, chains[0], me, key, 1); // 最早开的链在 299 条更新的链之后才越过门槛
+            StepSite(site, 1);
+            List<int> first = Extremes(k);
+            bool rewarded = ReactionFeedback.FirstRecordOf(s, "reaction_deflagrate").Extreme && s.TechData == tech0 + reward;
+            for (int i = 1; i < chains.Length; i++)
+            {
+                TallyRules(k, chains[i], me, key, 1);
+            }
+            StepSite(site, 1);
+            int rest = k.EmgExtremeRows;
+            Expect(EmgConst.ChainTally == 4096 && before == 0 && first.Count == 1 && first[0] == key && rewarded && rest == chains.Length - 1 && s.TechData == tech0 + reward
+                   && k.PatchStats.TallyEvicted == 0 && SlotOfChain(chains[256]) != SlotOfChain(chains[0]),
+                $"T1 300 条根出手同时在途（各差 1 次到门槛 {need}）：最早那条在 299 条新链之后越过门槛仍记极限（{first.Count} 条，技术数据 +{s.TechData - tech0}），"
+                + $"其余 299 条同一步各记一次（{rest} 条，同一条目只发一次奖励），冲突丢弃 {k.PatchStats.TallyEvicted}（旧 256 格时第 1 与第 257 条同格会互相清零）");
+        }
+
+        private static void CheckTallyConflict()
+        {
+            FreshCodex("tally-conflict");
+            CampaignState s = NewState(9712);
+            ReactionFeedback.RecordFirst(s, "reaction_sticky", SiteId);
+            ReactionFeedback.RecordFirst(s, "reaction_conduct", SiteId);
+            using var site = NewSite();
+            CombatKernel k = site.Kernel;
+            int me = Unit(k, CombatFaction.Player, new double2(0, 0));
+            int foe = Unit(k, CombatFaction.Hostile, new double2(30, 0));
+            StepSite(site, 1);
+            int need = NeedOf(k), sticky = Key("reaction_sticky"), conduct = Key("reaction_conduct");
+            long tech0 = s.TechData;
+            int enemy = k.EmgIssueChainForTests();
+            k.EmgChainLogForTests(EmgChainNode.Shot, enemy, foe); // 敌方根出手：这条链封印
+            int mine = 0;
+            for (int i = 0; i < EmgConst.ChainTally; i++)
+            {
+                mine = k.EmgIssueChainForTests(); // 第 4096 条新链与敌方链同格
+            }
+            k.EmgChainLogForTests(EmgChainNode.Shot, mine, me);
+            TallyRules(k, mine, me, conduct, need - 1);
+            int ev0 = k.PatchStats.TallyEvicted;
+            TallyRules(k, enemy, foe, sticky, need + 2, 3); // 敌方旧链在新链之后回来：链深 3、超过门槛
+            int dropped = k.PatchStats.TallyEvicted - ev0;
+            StepSite(site, 1);
+            int enemyRows = k.EmgExtremeRows;
+            bool enemyQuiet = !ReactionFeedback.FirstRecordOf(s, "reaction_sticky").Extreme && s.TechData == tech0;
+            TallyRules(k, mine, me, conduct, 1);
+            StepSite(site, 1);
+            List<int> mineRows = Extremes(k);
+            bool mineOk = mineRows.Count == 1 && mineRows[0] == conduct && ReactionFeedback.FirstRecordOf(s, "reaction_conduct").Extreme && s.TechData == tech0 + ReactionDiscoveryService.ExtremeReward;
+            Expect(SlotOfChain(mine) == SlotOfChain(enemy) && enemyRows == 0 && enemyQuiet && mineOk,
+                $"T2 D7 敌方链被新链挤格（链 {enemy} 与 {mine} 同格）：敌方旧链在新链之后回来结算 {need + 2} 次、链深 3 → 不记、不发技术数据；"
+                + $"新链的计数没被旧链清掉，再 1 次即到门槛记极限（+{s.TechData - tech0}）");
+            string line = site.EmgPatchDebugLine();
+            Expect(dropped == need + 2 && line.Contains("极限计数冲突丢弃 " + k.PatchStats.TallyEvicted),
+                $"T3 冲突丢弃计数可见：旧链这 {need + 2} 次结算没计、TallyEvicted +{dropped}，调试层一行写着（…{line.Substring(Math.Max(0, line.Length - 24))}）");
+        }
+
+        private static void CheckTallySnapshot()
+        {
+            using CombatKernel a = TallyKernel(out int me, out int foe);
+            int need = NeedOf(a), k1 = Key("reaction_deflagrate"), k2 = Key("reaction_conduct");
+            int p = a.EmgIssueChainForTests(), e = a.EmgIssueChainForTests(), x = a.EmgIssueChainForTests();
+            ulong h0 = a.StateHash(), eh0 = a.EmgStateHash();
+            byte[] empty = a.Serialize(), emptyPre = a.SerializePreTallyForTests();
+            a.EmgChainLogForTests(EmgChainNode.Shot, p, me);
+            a.EmgChainLogForTests(EmgChainNode.Shot, e, foe);
+            a.EmgChainLogForTests(EmgChainNode.Shot, x, me);
+            TallyRules(a, p, me, k1, need - 1, 2); // 在途：差 1 次
+            TallyRules(a, e, foe, k2, 3); // 敌方：已封印
+            TallyRules(a, x, me, k2, need); // 已记过极限
+            bool hashSame = a.StateHash() == h0 && a.EmgStateHash() == eh0;
+            KStep(a);
+            int[] markedAtSave = Extremes(a).ToArray();
+            int4[] atSave = a.EmgChainTallyForTests();
+            int rows = atSave.Count(t => t.x != 0);
+            byte[] snap = a.Serialize(), pre = a.SerializePreTallyForTests();
+            using var b = new CombatKernel(a.Config, 64);
+            CombatLoadResult lr = b.Load(snap);
+            bool same = lr == CombatLoadResult.Ok && b.EmgChainTallyForTests().SequenceEqual(atSave) && b.PatchStats.TallyFloor == 0 && b.StateHash() == a.StateHash() && b.EmgStateHash() == a.EmgStateHash();
+            Expect(hashSame && markedAtSave.Length == 1 && same && rows == 3 && empty.Length - emptyPre.Length == 4 && snap.Length - pre.Length == 4 + 14 + 16 * rows,
+                $"T4a 快照段 33 往返：3 行（在途 / 敌方封印 / 已记极限）读回逐位一致（{lr}），下限 0；计数不进状态哈希（结算前后哈希不变）；"
+                + $"空表不写段 33、只多标量第 28 字段 4 B，有计数时段 33 = 14 B 段头 + {rows} × 16 B（快照 {snap.Length} / 旧形 {pre.Length} 字节）");
+
+            void Follow(CombatKernel k)
+            {
+                TallyRules(k, p, me, k1, 1, 2);
+                TallyRules(k, e, foe, k2, need + 2, 3);
+                TallyRules(k, x, me, k2, 2);
+                KStep(k);
+            }
+
+            Follow(a);
+            Follow(b);
+            List<int> ra = Extremes(a), rb = Extremes(b);
+            Expect(ra.Count == 1 && ra[0] == k1 && ra.SequenceEqual(rb) && a.EmgChainTallyForTests().SequenceEqual(b.EmgChainTallyForTests()) && a.StateHash() == b.StateHash(),
+                $"T4b B10 存档后接着玩 = 一直玩（暂停中存读档、没走步）：在途链再 1 次即记极限（不存档 {ra.Count} 条 / 读档后 {rb.Count} 条，同一条目），敌方封印链结算 {need + 2} 次仍不记，"
+                + "已记过的不重记；之后两边计数表逐位一致");
+        }
+
+        private static void CheckTallyLegacy()
+        {
+            using CombatKernel a = TallyKernel(out int me, out int foe);
+            int need = NeedOf(a), k1 = Key("reaction_deflagrate"), k2 = Key("reaction_sticky");
+            int p = a.EmgIssueChainForTests(), e = a.EmgIssueChainForTests();
+            a.EmgChainLogForTests(EmgChainNode.Shot, p, me);
+            a.EmgChainLogForTests(EmgChainNode.Shot, e, foe);
+            TallyRules(a, p, me, k1, need - 1);
+            KStep(a);
+            int4[] atSave = a.EmgChainTallyForTests();
+            byte[] old = a.SerializePreTallyForTests(), fresh = a.Serialize(), v19 = a.SerializeFormatForTests(19);
+            using var c = new CombatKernel(a.Config, 64);
+            CombatLoadResult lo = c.Load(old);
+            int floor = c.PatchStats.TallyFloor, next = c.EmgScalars.NextChain;
+            bool emptyTable = c.EmgChainTallyForTests().All(t => t.x == 0);
+            TallyRules(c, e, foe, k2, need + 2, 3); // 敌方链的封印位随旧档丢了：没有下限就会被当成新链误发
+            TallyRules(c, p, me, k1, 1);
+            KStep(c);
+            int legacyRows = c.EmgExtremeRows;
+            int n = c.EmgIssueChainForTests();
+            c.EmgChainLogForTests(EmgChainNode.Shot, n, me);
+            TallyRules(c, n, me, k1, need);
+            KStep(c);
+            List<int> newRows = Extremes(c);
+            Expect(lo == CombatLoadResult.Ok && old.Length < fresh.Length && emptyTable && floor == next && floor > e && legacyRows == 0 && newRows.Count == 1 && newRows[0] == k1,
+                $"T5 D7 读本卡之前的旧档（标量段 27 字段、没有段 33）：可读（{lo}），下限 = 读档时的下一个链号 {floor}；在途敌方链结算 {need + 2} 次、链深 3 不记不发（{legacyRows} 条），"
+                + $"在途己方链这次少记（DEBT-EMGRTALLY01-02 宁少记不误发）；读档后新开的链照常记极限（{newRows.Count} 条）");
+            using var c19 = new CombatKernel(a.Config, 64);
+            CombatLoadResult l19 = c19.Load(v19);
+            Expect(l19 == CombatLoadResult.Ok && c19.PatchStats.TallyFloor == c19.EmgScalars.NextChain && c19.PatchStats.TallyFloor > e,
+                $"T5b 格式 19 旧档（{l19}）同样取下限 = 下一个链号 {c19.PatchStats.TallyFloor}");
+
+            // 负向：旧档 + 新档交替读——下限与计数表每次都按这份档重来，不带上一份
+            using var d = new CombatKernel(a.Config, 64);
+            CombatLoadResult l1 = d.Load(old);
+            int f1 = d.PatchStats.TallyFloor;
+            CombatLoadResult l2 = d.Load(fresh);
+            int f2 = d.PatchStats.TallyFloor;
+            bool tbl2 = d.EmgChainTallyForTests().SequenceEqual(atSave);
+            TallyRules(d, p, me, k1, 1);
+            KStep(d);
+            int r2 = d.EmgExtremeRows;
+            CombatLoadResult l3 = d.Load(old);
+            int f3 = d.PatchStats.TallyFloor;
+            bool tbl3 = d.EmgChainTallyForTests().All(t => t.x == 0);
+            TallyRules(d, e, foe, k2, need + 2, 3);
+            TallyRules(d, p, me, k1, 1);
+            KStep(d);
+            int r3 = d.EmgExtremeRows;
+            Expect(l1 == CombatLoadResult.Ok && l2 == CombatLoadResult.Ok && l3 == CombatLoadResult.Ok && f1 == next && f2 == 0 && tbl2 && r2 == 1 && f3 == next && tbl3 && r3 == 0,
+                $"T6 负向 旧档 → 新档 → 旧档交替读：下限 {f1} → {f2} → {f3}；读新档后计数表逐位还原、在途链再 1 次即记（{r2} 条）；再读旧档后表清空、在途链不记不发（{r3} 条）");
+        }
+
+        private static void CheckTallyNegative()
+        {
+            using CombatKernel k = TallyKernel(out int me, out _);
+            int need = NeedOf(k), key = Key("reaction_deflagrate"), last = EmgConst.ChainTally;
+            // 计数表满：4096 条链各占一格（各结算 1 次），第 4097 条与第 1 条同格
+            var chains = new int[EmgConst.ChainTally + 1];
+            for (int i = 0; i < last; i++)
+            {
+                chains[i] = k.EmgIssueChainForTests();
+                k.EmgChainLogForTests(EmgChainNode.Shot, chains[i], me);
+                TallyRules(k, chains[i], me, key, 1);
+            }
+            int4[] full = k.EmgChainTallyForTests();
+            int fullRows = full.Count(t => t.x != 0);
+            byte[] fullSnap = k.Serialize(), preSnap = k.SerializePreTallyForTests();
+            int segBytes = fullSnap.Length - preSnap.Length - 4;
+            using var kr = new CombatKernel(k.Config, 64);
+            bool fullRound = kr.Load(fullSnap) == CombatLoadResult.Ok && kr.EmgChainTallyForTests().SequenceEqual(full);
+            chains[last] = k.EmgIssueChainForTests();
+            k.EmgChainLogForTests(EmgChainNode.Shot, chains[last], me);
+            TallyRules(k, chains[last], me, key, need - 1);
+            int ev0 = k.PatchStats.TallyEvicted;
+            TallyRules(k, chains[0], me, key, need); // 最早那条：格已被第 4097 条占了
+            int dropped = k.PatchStats.TallyEvicted - ev0;
+            KStep(k);
+            int rowsOld = k.EmgExtremeRows;
+            TallyRules(k, chains[last], me, key, 1);
+            KStep(k);
+            int rowsNew = k.EmgExtremeRows;
+            Expect(fullRows == EmgConst.ChainTally && fullRound && SlotOfChain(chains[last]) == SlotOfChain(chains[0]) && dropped == need && rowsOld == 0 && rowsNew == 1
+                   && segBytes == 14 + 16 * EmgConst.ChainTally,
+                $"T7 负向 计数表满（{fullRows} 行，每内核 {full.Length * 16 / 1024} KB，原 256 格 4 KB）：整表存读档逐位一致，快照段 33 = {segBytes} B（14 B 段头 + 4096 × 16 B）；"
+                + $"第 4097 条链挤掉第 1 条，第 1 条再结算 {need} 次没计（丢弃 +{dropped}，误发 {rowsOld} 条），新链照常记极限（{rowsNew} 条）");
+
+            // 链号回绕：c、c + 4096、c + 8192 落同一格——更大的链号占格，更小的来者丢弃计数、不清掉大链号的计数
+            using CombatKernel w = TallyKernel(out int wm, out _);
+            int c0 = w.EmgIssueChainForTests(), c1 = 0, c2 = 0;
+            for (int i = 0; i < 2 * EmgConst.ChainTally; i++)
+            {
+                int c = w.EmgIssueChainForTests();
+                c1 = c == c0 + EmgConst.ChainTally ? c : c1;
+                c2 = c == c0 + 2 * EmgConst.ChainTally ? c : c2;
+            }
+            TallyRules(w, c0, wm, key, 3);
+            TallyRules(w, c2, wm, key, need - 1);
+            int e0 = w.PatchStats.TallyEvicted;
+            TallyRules(w, c1, wm, key, need);
+            TallyRules(w, c0, wm, key, need);
+            int dr = w.PatchStats.TallyEvicted - e0;
+            int4 slot = w.EmgChainTallyForTests()[SlotOfChain(c0)];
+            KStep(w);
+            int r8a = w.EmgExtremeRows;
+            TallyRules(w, c2, wm, key, 1);
+            KStep(w);
+            int r8b = w.EmgExtremeRows;
+            Expect(c1 > 0 && c2 > 0 && SlotOfChain(c1) == SlotOfChain(c0) && SlotOfChain(c2) == SlotOfChain(c0) && dr == 2 * need && slot.x == c2 && slot.y == need - 1 && r8a == 0 && r8b == 1,
+                $"T8 负向 链号回绕（{c0} / {c1} / {c2} 同格）：{c2} 占格后 {c1}、{c0} 各结算 {need} 次都丢弃（+{dr}）、不清 {c2} 的计数（{slot.y} 次），{c2} 再 1 次即记（{r8b} 条），误发 {r8a} 条");
+
+            // 同一步同一条链多次结算：只记一次、封印后不再累计
+            int s9 = w.EmgIssueChainForTests();
+            w.EmgChainLogForTests(EmgChainNode.Shot, s9, wm);
+            TallyRules(w, s9, wm, key, 3 * need, 3);
+            KStep(w);
+            int r9 = w.EmgExtremeRows;
+            int4 t9 = w.EmgChainTallyForTests()[SlotOfChain(s9)];
+            TallyRules(w, s9, wm, key, need);
+            KStep(w);
+            Expect(r9 == 1 && (t9.z & EmgConst.TallyExtremeBit) != 0 && t9.y == 1 && w.EmgExtremeRows == 0,
+                $"T9 负向 同一步同一条链结算 {3 * need} 次（链深 3）：本步只记 {r9} 次极限、第一次就封印（计到 {t9.y} 次即停）；下一步再结算 {need} 次不重记（{w.EmgExtremeRows} 条）");
         }
 
         // ── E 存读档、旧档、跨存档补解锁 ─────────────────────────────────────

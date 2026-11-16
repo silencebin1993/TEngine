@@ -205,6 +205,9 @@ namespace BinGames.Sim.Combat
             return chain;
         }
 
+        /// <summary>测试（EMGR-TALLY-01）：“极限”计数表整表副本（存读档前后逐位比较）。</summary>
+        public int4[] EmgChainTallyForTests() => _d.EmgChainTally.ToArray();
+
         /// <summary>测试 / 调试：直接写一条环记录（与内核写入同一函数）。</summary>
         public void EmgChainLogForTests(EmgChainNode kind, int chain, int srcUnit, int other = 0, int parent = 0, int key = 0, byte depth = 0, bool codex = true) =>
             CombatLogic.EmgChainLog(ref _d, kind, chain, depth, key, srcUnit, double2.zero, other, 0, parent, codex);
