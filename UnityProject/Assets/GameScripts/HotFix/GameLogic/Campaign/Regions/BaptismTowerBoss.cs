@@ -1035,7 +1035,8 @@ namespace GameLogic.Campaign.Regions
             HashSet<int> marching = null;
             if (forEngage && ExpeditionMarchService.IsMarching(s))
             {
-                marching = new HashSet<int>(ExpeditionMarchService.AlivePlanetMembers(s));
+                marching = new HashSet<int>();
+                ExpeditionMarchService.CollectPlanetMembers(s, marching); // FG11-REG-01：全部在星球上行军的队伍
             }
             int n = 0;
             foreach (MachineRecord m in MachineRegistry.AllRecords)

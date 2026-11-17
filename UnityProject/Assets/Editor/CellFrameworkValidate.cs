@@ -53,7 +53,7 @@ namespace GameLogic.EditorTools
         /// 日志末尾输出每段耗时排行；<see cref="RunSegments"/> 按环境变量 BINGAMES_VALIDATE_SEGMENTS 只跑点名的段（迭代用，交付仍跑全量）。
         /// 段的顺序、内容与原来逐行调用完全相同；某段抛异常时与原来一样中止后面的段并记一条失败。
         /// </summary>
-        [MenuItem("BinGames/QA/自检/细胞阶段框架")]
+        [MenuItem("QA/自检/细胞阶段框架")]
         public static void RunAll()
         {
             // FG-TOOL-02：BINGAMES_VALIDATE_SHARD="i/n" 时只跑第 i 片（tools/unity-verify-parallel.sh 用；两片日志合并、覆盖核对通过才算全量）。
@@ -692,6 +692,7 @@ namespace GameLogic.EditorTools
             Seg("FgExpeditionMarchSelfCheck", FgExpeditionMarchSelfCheck.Run);
             // EMGR-NAV-01（FG-GAP-136）：种子 42 第一次远征整队走到、不判截断（卡位从当前位置重寻）；覆盖外截断自动重试后仍走不到给一次可定位提示（M11b 并入本段）。
             Seg("FgExpeditionNavRetrySelfCheck", FgExpeditionMarchSelfCheck.RunNavRetry);
+            Seg("FgMultiExpeditionSelfCheck", FgExpeditionMarchSelfCheck.RunMulti); // FG11-REG-01（FG-GAP-016）
             // FG8-GEN-02 阵营领地与室内场地（FG17 FGR-GEN-021～024、040、042、090；FGT-GEN-004 / 006）：数据、生成器 v3 与旧版本存档、规划层规则（3 个种子）、
             // 锚点冲突重试、可达性（3 个种子）、领地内容与据点登记、外延区按需登记、缓存 / 终端、入口保护、室内进出 / 倍速 / 存读档、名称提示、检查单危害、地点覆盖根、Demo 模板回归、性能、布局探针。
             Seg("FgTerritorySelfCheck", FgTerritorySelfCheck.Run);
@@ -755,6 +756,7 @@ namespace GameLogic.EditorTools
             // 攻城单位专属参数与绝缘涂层、反制每日锁定（FGT-FAC-005）与情报行；反馈与图鉴；性能。
             Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
             Seg("FgOverclockFactionSelfCheck", FgOverclockFactionSelfCheck.Run); // FG11-FAC-01
+            Seg("FgHeatDataCitySelfCheck", FgHeatDataCitySelfCheck.Run); // FG11-REG-01
             // FG10-REG-01 沉淀湖领地：模板与湖心平台锚点、防腐涂层（DEBT-FG8QST01-03）、没有涂层进酸沼先拒绝并说明（软门槛）、样品车接车点在带外、第一次进入的阵营介绍。
             Seg("FgSettlingLakeSelfCheck", FgSettlingLakeSelfCheck.Run);
             // FG10-REACT-01 化工反应开放：可得性探针、澄净不怕酸的负向、澄净领地出现时开放并通知、图鉴打法、首次触发慢放。

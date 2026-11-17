@@ -152,6 +152,51 @@ namespace GameLogic.Campaign.WorldGen
                     BoxMaxX = a.OriginX + outer,
                     BoxMaxY = a.OriginY + outer,
                 });
+                AddWaterRing(zones, a, flat);
+            }
+        }
+
+        /// <summary>
+        /// FG11-REG-01（生成器 v4，DEBT-FG10BOSS01-02“湖心平台四周没有湖”）：平整范围外 waterRing 格宽的一圈强制为水面（Stamp，被平整范围覆盖回可建地），
+        /// 再沿“原点 → 归还核心”方向铺一条 causewayWidth 半宽的堤道（一串无过渡带的平整圆盘，穿过水环一直铺到领地圈外），保证从家园走得到平台。
+        /// 只看锚点行与规划层，确定；as3 全是 0 = 空操作（v3 逐格不变）。
+        /// </summary>
+        private static void AddWaterRing(List<WorldGenZone> zones, PlannedAnchor a, byte flat)
+        {
+            int ring = a.Row != null ? a.Row.WaterRing : 0;
+            int half = a.Row != null ? a.Row.CausewayWidth : 0;
+            if (ring <= 0 || half <= 0)
+            {
+                return;
+            }
+            int outer = a.FootprintRadius + ring;
+            zones.Add(WorldPlan.Stamp(a.OriginX, a.OriginY, outer, GridContent.TerrainCode("water")));
+            // 模板 +Y 背向核心 → 朝核心 = ForwardDeg + 180。
+            int toward = a.ForwardDeg + 180;
+            long fx = WorldPlan.Cos(toward);
+            long fy = WorldPlan.Cos(toward - 90);
+            int step = Math.Max(1, half);
+            // 堤道一直铺到领地圈外（湖区本身按地貌风格水面偏多，只穿过水环会在湖里断头：FgWorldGenHomeSelfCheck FGT-GEN-004 种子 1 实测）。
+            int length = outer + 2 + (a.Territory != null ? a.Territory.Radius : 0);
+            for (int d = Math.Max(0, a.FootprintRadius - half); d <= length; d += step)
+            {
+                int cx = a.OriginX + (int)((d * fx + 32768) >> 16);
+                int cy = a.OriginY + (int)((d * fy + 32768) >> 16);
+                zones.Add(new WorldGenZone
+                {
+                    Kind = WorldGenZoneKind.Flatten,
+                    CenterX = cx,
+                    CenterY = cy,
+                    X1 = cx,
+                    Y1 = cy,
+                    Radius = half,
+                    HazardWidth = 0,
+                    Code = flat,
+                    BoxMinX = cx - half,
+                    BoxMinY = cy - half,
+                    BoxMaxX = cx + half,
+                    BoxMaxY = cy + half,
+                });
             }
         }
 

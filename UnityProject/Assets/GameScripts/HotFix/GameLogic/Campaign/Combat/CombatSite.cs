@@ -883,6 +883,18 @@ namespace GameLogic.Campaign.Combat
             return true;
         }
 
+        /// <summary>FG11-REG-01：机器武器此刻的过热点（热量上限；高温辐射区内已乘倍率、运转中的冷却塔圈内恢复）。没有武器 / 不在内核 = false。</summary>
+        public bool TryGetMachineOverheatAt(int logicId, out float cap)
+        {
+            cap = 0f;
+            if (!_machineUnit.TryGetValue(logicId, out int unit))
+            {
+                return false;
+            }
+            cap = Kernel.OverheatAtFor(unit);
+            return cap > 0f;
+        }
+
         public bool TryGetMachineMarker(int logicId, out HomeValleyMachineMarker marker)
         {
             marker = null;
@@ -3577,6 +3589,15 @@ namespace GameLogic.Campaign.Combat
             if (!IsDisposed)
             {
                 Kernel.SetHeatRadiation(shapes, capMult, dissMult);
+            }
+        }
+
+        /// <summary>FG11-REG-01：写入运转中的冷却塔遗址圈（派生量，CoolingTowerService 打开 / 读档 / 塔被摧毁时重写）。</summary>
+        public void SetCoolingZones(IReadOnlyList<float3> circles)
+        {
+            if (!IsDisposed)
+            {
+                Kernel.SetCoolingZones(circles);
             }
         }
 

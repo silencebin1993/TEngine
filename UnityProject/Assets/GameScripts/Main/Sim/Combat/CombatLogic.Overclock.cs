@@ -433,6 +433,23 @@ namespace BinGames.Sim.Combat
 
         /// <summary>武器过热点（热量上限）：高温辐射区内 × RadCapMult。所有“积热到过热点”的判定走这里（敌我同一规则）。</summary>
         internal static float OverheatAtOf(ref CombatData d, int i, in CombatWeapon wp) =>
-            d.RadCapMult > 0f && i >= 0 && i < d.Count && InRadiation(ref d, i) ? wp.OverheatAt * d.RadCapMult : wp.OverheatAt;
+            d.RadCapMult > 0f && i >= 0 && i < d.Count && InRadiation(ref d, i) && !InCooling(ref d, i) ? wp.OverheatAt * d.RadCapMult : wp.OverheatAt;
+
+        /// <summary>FG11-REG-01：单位在某座运转中的冷却塔圈里（热量上限恢复）。O(塔数，个位数)；只在辐射区内才查。</summary>
+        private static bool InCooling(ref CombatData d, int i)
+        {
+            double2 pos = d.Pos[i];
+            for (int k = 0; k < d.CoolZones.Length; k++)
+            {
+                float3 c = d.CoolZones[k];
+                double dx = pos.x - c.x;
+                double dy = pos.y - c.y;
+                if (dx * dx + dy * dy <= (double)c.z * c.z)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 }

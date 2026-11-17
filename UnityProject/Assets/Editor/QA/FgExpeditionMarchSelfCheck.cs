@@ -111,6 +111,193 @@ namespace GameLogic.EditorTools
             "\n[远征卡位重试] 种子 42 第一次远征整队走到、不判截断；自动重试后仍被截断给一次可定位提示（EMGR-NAV-01）",
             CheckSeed42FirstMarch, CheckTruncationOutOfCoverage);
 
+        /// <summary>FG11-REG-01（FG-GAP-016）新段：多支远征同时在外——两支分头出发、同时真实行军、切换主队、同一目的地被拒、
+        /// 一支在地点里时另一支在集结点等候（site-busy）、存读档两支都在、撤离后另一支自动进入、各自的离家报告各自结算。
+        /// 单段：bash tools/unity-validate.sh --segment FgMultiExpeditionSelfCheck（已并入 RunAll）。</summary>
+        public static int RunMulti(StringBuilder report) => RunSteps(report,
+            "\n[多支远征同时在外] 分头出发、同时行军、切换主队、同一目的地被拒、地点占用时等候并自动重试、存读档、各自结算（FG11-REG-01 / FG-GAP-016）",
+            CheckMultiExpedition, CheckMultiExpeditionLedger);
+
+        /// <summary>修复第 1 轮（审查 P1）：两份离家报告同时开着时，家园缺料瓶颈各记各的（不互相清零）；非主队成员随舱落地、带回关键物记进它自己那份结算。</summary>
+        private static void CheckMultiExpeditionLedger()
+        {
+            CampaignState s = NewWorld(5202);
+            RegionRecord foundry = FoundryOutpostRegion.Find(s);
+            if (foundry != null && foundry.State == RegionState.Locked)
+            {
+                foundry.State = RegionState.Available;
+            }
+            int a = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -6f));
+            int b = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(6f, -6f));
+            int c = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -9f));
+            int d = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(6f, -9f));
+            ExpeditionSiteAnchors.EnsureResolved(s);
+            StepUntil(() => ExpeditionSiteAnchors.IsResolved(s, FracturedCityLayout.RegionId) && ExpeditionSiteAnchors.IsResolved(s, FoundryOutpostLayout.RegionId), 3000);
+            var dep1 = ExpeditionDepartureService.TryDepart(new[] { a, b }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            var dep2 = ExpeditionDepartureService.TryDepart(new[] { c, d }, true, ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost);
+            s = CampaignSession.Current;
+            ExpeditionExtraTeam[] xs = ExpeditionMarchService.Extras(s);
+            if (!dep1.Success || !dep2.Success || xs.Length != 1 || !xs[0].AwayHasOpen || !s.Stats.AwayReports.HasOpen)
+            {
+                Fail($"多支远征记账前提：两支出发、两份报告开着（{dep1.Outcome} / {dep2.Outcome} / 其它队伍 {xs.Length}）");
+                return;
+            }
+            AwayReportRecord primary = s.Stats.AwayReports.Open, other = xs[0].AwayOpen;
+
+            // ── X6 缺料瓶颈各记各的：一座建筑缺料 N 步（生产步每步调一次 OnStarve，同 ProductionService.RecordStarve）──
+            const int n = 7;
+            const string item = "selfcheck_starve_item";
+            var fake = new ProducerRecord { BuildingId = "selfcheck_starve_building" };
+            ProducerRecord[] originalProducers = s.Economy.Producers;
+            s.Economy.Producers = originalProducers.Append(fake).ToArray();
+            long pTicks, oTicks;
+            try
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    AwayReportService.OnStarve(s, fake, item, 1);
+                }
+                pTicks = AwayReportService.CollectStarve(s, primary, clear: false).Where(x => x.BuildingId == fake.BuildingId && x.ItemId == item).Sum(x => x.Ticks);
+                oTicks = AwayReportService.CollectStarve(s, other, clear: false).Where(x => x.BuildingId == fake.BuildingId && x.ItemId == item).Sum(x => x.Ticks);
+            }
+            finally
+            {
+                s.Economy.Producers = originalProducers;
+            }
+            Expect(pTicks == n && oTicks == n,
+                $"X6 两份离家报告同时开着时一座建筑缺料 {n} 步：主队那份瓶颈记 {pTicks} 步、另一支那份记 {oTicks} 步，都应是 {n}（FGT-ECO-007 报告与实际一致）");
+
+            // ── X7 非主队成员随舱落地、带回关键物：记进它自己那份结算，主队那份不变 ──
+            int primaryItems = primary.Settlement?.Items?.Length ?? 0;
+            int[] primaryLanded = primary.Settlement?.Landed ?? Array.Empty<int>();
+            bool landed = ExpeditionSettlementService.OnMemberLanded(s, a); // DropPodService.Step OnReturnArrive 落回投送站的同一入口
+            bool settling = ExpeditionSettlementService.IsSettlingMember(s, a);
+            var q = new RegionQuestItemRecord { SalvageInstanceId = "selfcheck_multi_key", RegionId = FracturedCityLayout.RegionId, ContentId = "selfcheck_multi_key", State = RegionQuestItemState.Carried, CarrierLogicId = a };
+            ExpeditionSettlementService.NoteQuestItem(s, q, a); // CargoService.DeliverQuestItem 带回关键物的同一入口
+            bool own = landed && settling && other.Settlement?.Landed != null && other.Settlement.Landed.Contains(a)
+                       && (other.Settlement.Items ?? Array.Empty<SettleItemRecord>()).Any(x => x.TargetId == q.SalvageInstanceId);
+            bool untouched = (primary.Settlement?.Items?.Length ?? 0) == primaryItems && (primary.Settlement?.Landed ?? Array.Empty<int>()).SequenceEqual(primaryLanded)
+                             && !(primary.Settlement?.Items ?? Array.Empty<SettleItemRecord>()).Any(x => x.TargetId == q.SalvageInstanceId);
+            bool primaryOwn = ExpeditionSettlementService.OnMemberLanded(s, c) && primary.Settlement?.Landed != null && primary.Settlement.Landed.Contains(c)
+                              && !(other.Settlement.Landed ?? Array.Empty<int>()).Contains(c);
+            Expect(own && untouched && primaryOwn,
+                $"X7 非主队（破碎都市队）成员随回收舱落地、带回关键物：记进它自己那份结算（{own}），主队那份的落地名单与带回物品不变（{untouched}）；主队成员落地仍记进主队那份（{primaryOwn}）");
+        }
+
+        private static void CheckMultiExpedition()
+        {
+            CampaignState s = NewWorld(5201);
+            RegionRecord foundry = FoundryOutpostRegion.Find(s);
+            if (foundry != null && foundry.State == RegionState.Locked)
+            {
+                foundry.State = RegionState.Available;
+            }
+            int a = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -6f));
+            int b = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(6f, -6f));
+            int c = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -9f));
+            int d = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(6f, -9f));
+            int e = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(8f, -9f));
+            ExpeditionSiteAnchors.EnsureResolved(s);
+            StepUntil(() => ExpeditionSiteAnchors.IsResolved(s, FracturedCityLayout.RegionId) && ExpeditionSiteAnchors.IsResolved(s, FoundryOutpostLayout.RegionId), 3000);
+            string single0 = null;
+            bool singleRefused = !ExpeditionMarchService.CycleFocus(s, out single0) && single0 == "focus-single";
+
+            // ── 两支分头出发 ──
+            var dep1 = ExpeditionDepartureService.TryDepart(new[] { a, b }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            var dep2 = ExpeditionDepartureService.TryDepart(new[] { c, d }, true, ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost);
+            s = CampaignSession.Current;
+            if (!dep1.Success || !dep2.Success)
+            {
+                Fail($"多支远征前提：两支出发（{dep1.Outcome}：{string.Join("，", dep1.Reasons ?? Array.Empty<string>())} / {dep2.Outcome}：{string.Join("，", dep2.Reasons ?? Array.Empty<string>())}）");
+                return;
+            }
+            ExpeditionMarchState t2 = ExpeditionMarchService.Current(s);
+            ExpeditionExtraTeam[] xs = ExpeditionMarchService.Extras(s);
+            ExpeditionMarchState t1 = xs.Length == 1 ? xs[0].March : null;
+            bool two = ExpeditionMarchService.ActiveTeamCount(s) == 2 && t1 != null && t1.SiteId == FracturedCityLayout.RegionId && t2.SiteId == FoundryOutpostLayout.RegionId
+                       && t1.TeamNumber == 1 && t2.TeamNumber == 2 && t1.Members.SequenceEqual(new[] { a, b }.OrderBy(x => x)) && t2.Members.SequenceEqual(new[] { c, d }.OrderBy(x => x));
+            bool reports = s.Stats.AwayReports.HasOpen && s.Stats.AwayReports.Open.RegionId == FoundryOutpostLayout.RegionId
+                           && xs[0].AwayHasOpen && xs[0].AwayOpen.RegionId == FracturedCityLayout.RegionId;
+            bool roster = MachineRoster.EffectiveRole(s, Rec(a)) == MachineRole.OnExpedition && MachineRoster.EffectiveRole(s, Rec(c)) == MachineRole.OnExpedition
+                          && MachineRoster.IsHome(Rec(e)) && ExpeditionMarchService.TeamOf(s, a) == t1 && ExpeditionMarchService.TeamOf(s, c) == t2;
+            var busy = ExpeditionDepartureService.TryDepart(new[] { e }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            var snapBusy = ExpeditionDepartureService.BuildPrepSnapshot(s, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            bool sameRefused = busy.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && busy.Reasons.Contains("destination-busy") && snapBusy.BlockedReason == "destination-busy"
+                               && ExpeditionChecklistService.DescribeHard("destination-busy") == GameText.Get("exp.march.reason.destination_busy");
+            Expect(singleRefused && two && reports && roster && sameRefused,
+                $"X1 两支分头出发（FG-GAP-016）：只有一支 / 没有在外时“切换远征队”被拒（{singleRefused}）；破碎都市 2 台 + 铸造前哨 2 台同时在外、编号 1 / 2、名单各自（{two}）；" +
+                $"各自开着一份离家报告（{reports}）；四台都是“远征中”、留家的那台还在家园（{roster}）；再派往已有队伍在去的目的地被拒“{GameText.Get("exp.march.reason.destination_busy")}”（{sameRefused}）");
+
+            // ── 同时真实行军 ──
+            ExpeditionSiteAnchors.TryGet(s, FracturedCityLayout.RegionId, out Vector2 ruinsAt);
+            ExpeditionSiteAnchors.TryGet(s, FoundryOutpostLayout.RegionId, out Vector2 foundryAt);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            float a0 = DistanceToGoal(home, a, ruinsAt), c0 = DistanceToGoal(home, c, foundryAt);
+            var prep = ExpeditionDepartureService.BuildPrepSnapshot(s, ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost);
+            WorldSimulation.StepMany(400);
+            float a1 = DistanceToGoal(home, a, ruinsAt), c1 = DistanceToGoal(home, c, foundryAt);
+            bool both = a1 < a0 - 5f && c1 < c0 - 5f && CommandTowards(home, a, ruinsAt, 6f) && CommandTowards(home, c, foundryAt, 6f);
+            string others = WorldBarHudUIToolkit.OtherTeamsText(s);
+            bool hud = others.Contains(GameText.Format("exp.team.other", 1, GameText.Get(ExpeditionMarchService.StatusTextKey(ExpeditionMarchService.TeamStatus.Marching)), GameText.Get(ExpeditionTextKeys.SiteNameKey(FracturedCityLayout.RegionId))).Split('·')[0].Trim())
+                       && ExpeditionMarchService.TeamLabel(s, t2).Contains("2");
+            bool focus = ExpeditionMarchService.CycleFocus(s, out _) && ReferenceEquals(ExpeditionMarchService.Current(s), t1) && ExpeditionMarchService.Extras(s)[0].March == t2
+                         && s.Stats.AwayReports.Open.RegionId == FracturedCityLayout.RegionId;
+            Expect(both && hud && focus,
+                $"X2 两支同时真实行军（家园战斗内核每步都推两支）：破碎都市队离锚点 {a0:0} → {a1:0} 格、铸造前哨队 {c0:0} → {c1:0} 格，内核命令各指各的锚点（{both}）；" +
+                $"行军条写其它队伍“{others}”（{hud}）；“切换远征队”后主队换成第 1 队、离家报告“当前一份”跟着换（{focus}）");
+
+            // ── 一支在地点里，另一支在集结点等候 ──
+            bool in1 = ExpeditionMarchService.ArriveNowForTests(s, observeSite: false);
+            s = CampaignSession.Current;
+            ExpeditionMarchService.CycleFocus(s, out _); // 地点里的那支也能切走
+            ExpeditionMarchState wait = ExpeditionMarchService.Current(s);
+            bool refusedIn = !ExpeditionMarchService.ArriveNowForTests(s, observeSite: false);
+            s = CampaignSession.Current;
+            wait = ExpeditionMarchService.TeamOf(s, c);
+            ExpeditionMarchState site = ExpeditionMarchService.TeamOf(s, a);
+            bool waiting = in1 && refusedIn && wait != null && wait.Phase == ExpeditionMarchService.PhaseOutbound && wait.Halted == ExpeditionMarchService.HaltArrivalFailed
+                           && wait.ArrivalFailReason == "site-busy" && site != null && site.Phase == ExpeditionMarchService.PhaseAtSite
+                           && WorldSimulation.ActiveExpedition?.SiteId == FracturedCityLayout.RegionId && Rec(a).RegionId == FracturedCityLayout.RegionId && Rec(c).RegionId == HomeValleyLayout.RegionId;
+            Expect(waiting,
+                $"X3 同一时刻只能载入一个远征地点：第 1 队进了破碎都市，第 2 队走到铸造前哨集结点时在原地等候（{wait?.ArrivalFailReason}：“{GameText.Get(ExpeditionTextKeys.ReasonKey("site-busy"))}”），没有被拉进别的地点、机器还在星球上（{waiting}）");
+
+            // ── 存读档：两支都在 ──
+            SaveResult saved = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            RestoreSave(Slot);
+            GameRoot.ResumeFracturedCity(); // 与主菜单“继续”同一条：存档时在外的远征地点一起载入（GameRoot.ResumeCampaign）
+            s = CampaignSession.Current;
+            ExpeditionMarchState w2 = ExpeditionMarchService.TeamOf(s, c);
+            ExpeditionMarchState s2 = ExpeditionMarchService.TeamOf(s, a);
+            int openReports = (s.Stats.AwayReports.HasOpen ? 1 : 0) + ExpeditionMarchService.Extras(s).Count(x => x.AwayHasOpen);
+            bool loaded = saved.Success && ExpeditionMarchService.ActiveTeamCount(s) == 2 && w2 != null && w2.ArrivalFailReason == "site-busy" && w2.TeamNumber == 2
+                          && s2 != null && s2.Phase == ExpeditionMarchService.PhaseAtSite && openReports == 2 && WorldSimulation.ActiveExpedition?.SiteId == FracturedCityLayout.RegionId;
+            Expect(loaded, $"X4 两支在外时存读档（B10）：读档后仍是两支、第 2 队还在集结点等候、第 1 队在地点里、两份离家报告都开着（{openReports}；{loaded}）");
+
+            // ── 撤离后另一支自动进入；各自结算 ──
+            ExpeditionReturnService.ReturnResult evac = ExpeditionReturnService.TryConfirmEvacuation();
+            s = CampaignSession.Current;
+            ExpeditionMarchState back = ExpeditionMarchService.TeamOf(s, a);
+            bool evacOk = evac.Success && back != null && back.Phase == ExpeditionMarchService.PhaseReturning && WorldSimulation.ActiveExpedition == null;
+            bool entered = StepUntil(() => WorldSimulation.ActiveExpedition?.SiteId == FoundryOutpostLayout.RegionId, (int)(ExpeditionMarchService.ArrivalRetrySeconds + 10f) * GameClock.StepHz);
+            s = CampaignSession.Current;
+            ExpeditionMarchState inFoundry = ExpeditionMarchService.Current(s);
+            bool auto = evacOk && entered && inFoundry.Phase == ExpeditionMarchService.PhaseAtSite && inFoundry.SiteId == FoundryOutpostLayout.RegionId && Rec(c).RegionId == FoundryOutpostLayout.RegionId
+                        && s.Stats.AwayReports.HasOpen && s.Stats.AwayReports.Open.RegionId == FoundryOutpostLayout.RegionId;
+            int reportsBefore = s.Stats.AwayReports.Reports?.Length ?? 0;
+            ExpeditionMarchService.CycleFocus(s, out _);
+            bool returned = ExpeditionMarchService.ReturnNowForTests(s);
+            WorldSimulation.StepMany(2);
+            s = CampaignSession.Current;
+            AwayReportRecord[] done = s.Stats.AwayReports.Reports ?? Array.Empty<AwayReportRecord>();
+            bool settled = returned && done.Length == reportsBefore + 1 && done[done.Length - 1].RegionId == FracturedCityLayout.RegionId
+                           && ExpeditionMarchService.Current(s).Phase == ExpeditionMarchService.PhaseAtSite && ExpeditionMarchService.Current(s).SiteId == FoundryOutpostLayout.RegionId
+                           && ExpeditionMarchService.Extras(s).Length == 0 && s.Stats.AwayReports.HasOpen && s.Stats.AwayReports.Open.RegionId == FoundryOutpostLayout.RegionId
+                           && MachineRoster.IsHome(Rec(a)) && ExpeditionMarchService.ActiveTeamCount(s) == 1;
+            Expect(auto && settled,
+                $"X5 第 1 队撤离（{evac.Success}，走回家园）后，等候的第 2 队按“前进”自动重试进入铸造前哨（{auto}）；第 1 队到家只结算它自己那份离家报告（破碎都市），" +
+                $"第 2 队那份还开着、它成为唯一在外的主队、结束的队伍从列表里清掉（{settled}）");
+        }
+
         private static int RunSteps(StringBuilder report, string header, params Action[] steps)
         {
             _report = report;
@@ -349,10 +536,11 @@ namespace GameLogic.EditorTools
             bool counted = FracturedCityRegion.Find(now).ExpeditionCount == countBefore + 1;
             bool report = now.Stats?.AwayReports != null && now.Stats.AwayReports.HasOpen && now.Stats.AwayReports.Open.RegionId == FracturedCityLayout.RegionId;
             ExpeditionDepartureService.DepartureResult second = ExpeditionDepartureService.TryDepart(new[] { c }, true);
-            bool blocked = second.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && second.Reasons.Contains("expedition-underway")
-                           && ExpeditionDepartureService.BuildPrepSnapshot(now).BlockedReason == "expedition-underway";
+            // FG11-REG-01（FG-GAP-016）：多支远征可以同时在外；同一个目的地同一时刻只派一支——再派往同一处被拒（destination-busy），多支同时在外由 FgMultiExpeditionSelfCheck 验。
+            bool blocked = second.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && second.Reasons.Contains("destination-busy")
+                           && ExpeditionDepartureService.BuildPrepSnapshot(now).BlockedReason == "destination-busy";
             Expect(away && roster && noWork && counted && report && blocked,
-                $"M3 远征在外各处同一判据（行军阶段地点还没载入）：信号核锁定（{away}）、名册“{MachineRoster.PlaceText(now, Rec(a))}”且不算在家园（{roster}）、不接家园工作单 / 规则派遣（{noWork}）、出击 +1（{counted}）、离家报告已开（{report}）、再派第二支被拒（{blocked}）");
+                $"M3 远征在外各处同一判据（行军阶段地点还没载入）：信号核锁定（{away}）、名册“{MachineRoster.PlaceText(now, Rec(a))}”且不算在家园（{roster}）、不接家园工作单 / 规则派遣（{noWork}）、出击 +1（{counted}）、离家报告已开（{report}）、再派往同一目的地被拒（{blocked}）");
         }
 
         // ── M4 出发事务回滚 ──────────────────────────────────────────────────────

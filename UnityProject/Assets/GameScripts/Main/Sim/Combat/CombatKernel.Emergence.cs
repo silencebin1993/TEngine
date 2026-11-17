@@ -2467,6 +2467,21 @@ namespace BinGames.Sim.Combat
 
         public int HeatRadiationZoneCount => _d.RadZones.Length;
 
+        /// <summary>FG11-REG-01：写入运转中的冷却塔遗址（x, y, 半径）。圈内高温辐射的热量上限倍率不生效。派生量，不进快照。</summary>
+        public void SetCoolingZones(System.Collections.Generic.IReadOnlyList<Unity.Mathematics.float3> circles)
+        {
+            _d.CoolZones.Clear();
+            if (circles != null)
+            {
+                for (int k = 0; k < circles.Count; k++)
+                {
+                    _d.CoolZones.Add(circles[k]);
+                }
+            }
+        }
+
+        public int CoolingZoneCount => _d.CoolZones.Length;
+
         /// <summary>FG11-FAC-01：某单位武器此刻的过热点（高温辐射区内已乘热量上限倍率；自检 / 悬停用）。</summary>
         public float OverheatAtFor(int unitId)
         {

@@ -188,7 +188,7 @@ namespace GameLogic.Campaign
             }
             if (m != null && m.IsAlive && Regions.ExpeditionMarchService.IsTeamMember(s, m.LogicId))
             {
-                return GameText.Format("exp.roster.place", GameText.Get(Regions.ExpeditionMarchService.StatusTextKey(Regions.ExpeditionMarchService.StatusOf(s))));
+                return GameText.Format("exp.roster.place", GameText.Get(Regions.ExpeditionMarchService.StatusTextKey(Regions.ExpeditionMarchService.StatusOf(Regions.ExpeditionMarchService.TeamOf(s, m.LogicId)))));
             }
             return GameText.Get("roster.place.away");
         }

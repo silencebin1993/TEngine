@@ -104,6 +104,11 @@ namespace GameLogic.Campaign.WorldGen
                 {
                     sb.Append(Join(a.Id, a.TerritoryId, a.Kind, a.TemplateId, Q(a.RadialMin), Q(a.RadialMax), a.AngleMode, a.JitterDeg, a.FootprintRadius, a.BlendWidth,
                         a.SurfaceId, a.EntryRadius, a.ProtectRadius, a.MinGap)).Append(';');
+                    if (a.WaterRing > 0 || a.CausewayWidth > 0)
+                    {
+                        // FG11-REG-01（v4 起）：水环与堤道只在非 0 时列出——as3 全是 0，v3 的清单与冻结基准逐字相同。
+                        sb.Append(Join("ring", a.Id, a.WaterRing, a.CausewayWidth)).Append(';');
+                    }
                     if (WorldGenContent.HasSet(a.TemplateId))
                     {
                         templates.Add(a.TemplateId);

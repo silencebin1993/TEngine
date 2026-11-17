@@ -313,6 +313,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return LockedConditionsText(CampaignSession.Current);
             }
+            if (reason == "destination-busy")
+            {
+                return GameText.Get("exp.march.reason.destination_busy"); // FG11-REG-01（FG-GAP-016）：多支远征可以同时在外，同一目的地一次一支
+            }
             if (reason == "expedition-underway")
             {
                 return GameText.Get("expedition.reason.underway"); // FG0-ARCH-01 既有文本：远征在外时家园照常运行，但不能再派第二支

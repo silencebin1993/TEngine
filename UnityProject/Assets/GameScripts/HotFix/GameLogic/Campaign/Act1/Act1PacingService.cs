@@ -352,9 +352,7 @@ namespace GameLogic.Campaign
                     {
                         return false;
                     }
-                    ExpeditionMarchState march = ExpeditionMarchService.Current(s);
-                    bool teamOut = march?.Members != null && march.Members.Length > 0
-                        && march.Phase != ExpeditionMarchService.PhaseNone && march.Phase != ExpeditionMarchService.PhaseReturned;
+                    bool teamOut = ExpeditionMarchService.ActiveTeamCount(s) > 0; // FG11-REG-01：任意一支在外
                     return !teamOut && !WorldSimulation.IsSiteLoaded(arg);
                 }
                 case CondLeader:

@@ -299,6 +299,17 @@ namespace GameLogic.Campaign.Regions
         public override void OnKeyedTargetDamaged(CombatSite site, string key, float damage, float healthAfter, int attackerLogicId, bool killed)
         {
             CampaignState state = CampaignSession.Current;
+            if (Env.CoolingTowerService.IsTowerKey(key))
+            {
+                // FG11-REG-01：冷却塔遗址被打空——这一带不再恢复热量上限（受伤只在内核里扣，不另记）。
+                Vector2 at = site.TryGetEnemyPosition(key, out Vector2 p) ? p : Vector2.zero;
+                FeedbackCues.RaiseAt(killed ? FeedbackCueId.EnemyDestroyed : FeedbackCueId.EnemyHit, at);
+                if (killed)
+                {
+                    Env.CoolingTowerService.OnTowerDestroyed(state, key);
+                }
+                return;
+            }
             if (Env.EmNoiseService.IsEmitterKey(key))
             {
                 // FG9-FAC-01：电磁噪声发射器被打空——这一片噪声消失（受伤只在内核里扣，不另记）。

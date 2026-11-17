@@ -86,6 +86,48 @@ namespace GameLogic.Campaign.Economy
         /// <summary>正在记的报告（没有远征在外 = null）。</summary>
         public static AwayReportRecord Current(CampaignState state) => IsOpen(state) ? state.Stats.AwayReports.Open : null;
 
+        /// <summary>FG11-REG-01 修复第 1 轮（FG-GAP-016）：名单里有这台机器的进行中报告（主队那份或其它队伍的那份；没有返回 null）。O(队伍数 × 成员数)，只在落地 / 带回这类事件时调。</summary>
+        public static AwayReportRecord OpenReportOf(CampaignState state, int logicId)
+        {
+            AwayReportRecord open = Current(state);
+            if (open?.Members != null && Array.IndexOf(open.Members, logicId) >= 0)
+            {
+                return open;
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                ExpeditionExtraTeam x = extras[xi];
+                if (x != null && x.AwayHasOpen && x.AwayOpen?.Members != null && Array.IndexOf(x.AwayOpen.Members, logicId) >= 0)
+                {
+                    return x.AwayOpen;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>第 <paramref name="serial"/> 份报告此刻是否开着（主队或其它队伍）。O(队伍数)。</summary>
+        private static bool IsOpenSerial(CampaignState state, int serial)
+        {
+            if (serial == 0)
+            {
+                return false;
+            }
+            if (Current(state)?.Serial == serial)
+            {
+                return true;
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen?.Serial == serial)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>已结算的报告，最新的在前（界面的“最近 3 份”）。</summary>
         public static List<AwayReportRecord> Recent(CampaignState state)
         {
@@ -353,7 +395,24 @@ namespace GameLogic.Campaign.Economy
         /// <summary>生产统计记账点（<see cref="ProductionStats"/>）：离家期间的产出 / 消耗。</summary>
         public static void OnRecord(CampaignState state, string itemId, long amount, bool produced)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnRecordTo(open, state, itemId, amount, produced);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnRecordTo(extras[xi].AwayOpen, state, itemId, amount, produced);
+                }
+            }
+        }
+
+        private static void OnRecordTo(AwayReportRecord r, CampaignState state, string itemId, long amount, bool produced)
+        {
             if (r == null || string.IsNullOrEmpty(itemId) || amount <= 0)
             {
                 return;
@@ -373,25 +432,98 @@ namespace GameLogic.Campaign.Economy
         /// <summary>生产步的缺料记账（<see cref="ProductionService"/>）：记在建筑自己身上（O(1)，不分配），结算时汇总成瓶颈。</summary>
         public static void OnStarve(CampaignState state, ProducerRecord rec, string itemId, int ticks)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnStarveTo(open, state, rec, itemId, ticks);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnStarveTo(extras[xi].AwayOpen, state, rec, itemId, ticks);
+                }
+            }
+        }
+
+        private static void OnStarveTo(AwayReportRecord r, CampaignState state, ProducerRecord rec, string itemId, int ticks)
+        {
             if (r == null || rec == null || string.IsNullOrEmpty(itemId) || ticks <= 0)
             {
                 return;
             }
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            if (rec.AwaySerial != r.Serial)
+            // 修复第 1 轮（审查 P1）：多份报告同时开着时每份各占一个槽（按报告序号），不再共用一个槽互相清零。
+            // 第 1 份用原有的 AwaySerial / AwayStarve，其余在 AwayMore；序号对不上的槽只在它那份已不再开着时才回收。
+            if (rec.AwaySerial == r.Serial)
+            {
+                ProductionService.Add(ref rec.AwayStarve, itemId, ticks);
+                Tick(t0);
+                return;
+            }
+            AwayStarveSlot[] more = rec.AwayMore ?? (rec.AwayMore = Array.Empty<AwayStarveSlot>());
+            for (int i = 0; i < more.Length; i++)
+            {
+                if (more[i] != null && more[i].Serial == r.Serial)
+                {
+                    ProductionService.Add(ref more[i].Starve, itemId, ticks);
+                    Tick(t0);
+                    return;
+                }
+            }
+            if (!IsOpenSerial(state, rec.AwaySerial))
             {
                 rec.AwaySerial = r.Serial;
                 rec.AwayStarve = Array.Empty<ItemStackRecord>();
+                ProductionService.Add(ref rec.AwayStarve, itemId, ticks);
+                Tick(t0);
+                return;
             }
-            ProductionService.Add(ref rec.AwayStarve, itemId, ticks);
+            AwayStarveSlot slot = null;
+            for (int i = 0; i < more.Length && slot == null; i++)
+            {
+                if (more[i] != null && !IsOpenSerial(state, more[i].Serial))
+                {
+                    slot = more[i];
+                }
+            }
+            if (slot == null)
+            {
+                slot = new AwayStarveSlot();
+                var next = new AwayStarveSlot[more.Length + 1];
+                Array.Copy(more, next, more.Length);
+                next[more.Length] = slot;
+                rec.AwayMore = next;
+            }
+            slot.Serial = r.Serial;
+            slot.Starve = Array.Empty<ItemStackRecord>();
+            ProductionService.Add(ref slot.Starve, itemId, ticks);
             Tick(t0);
         }
 
         /// <summary>电网结算写回（<see cref="HomeValleyPowerGrid"/>）：按“此刻缺电停机的建筑”开 / 关一段停电。</summary>
         public static void OnPowerApplied(CampaignState state, string[] brownoutIds)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnPowerAppliedTo(open, state, brownoutIds);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnPowerAppliedTo(extras[xi].AwayOpen, state, brownoutIds);
+                }
+            }
+        }
+
+        private static void OnPowerAppliedTo(AwayReportRecord r, CampaignState state, string[] brownoutIds)
+        {
             if (r == null)
             {
                 return;
@@ -449,7 +581,24 @@ namespace GameLogic.Campaign.Economy
         /// <summary>电网每游戏秒（<see cref="HomeValleyPowerGrid.WorldStep"/>）：累加发电（按类别）/ 需要 / 实际供上 / 储能充放，统计缺电秒数。O(电网数 × 发电类别)。</summary>
         public static void OnPowerSecond(CampaignState state, PowerKernel kernel)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnPowerSecondTo(open, state, kernel);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnPowerSecondTo(extras[xi].AwayOpen, state, kernel);
+                }
+            }
+        }
+
+        private static void OnPowerSecondTo(AwayReportRecord r, CampaignState state, PowerKernel kernel)
+        {
             if (r == null || kernel == null)
             {
                 return;
@@ -497,7 +646,24 @@ namespace GameLogic.Campaign.Economy
         /// <summary>机器受到伤害（<see cref="MachineRegistry.ApplyDamage"/>，唯一的外部伤害写入口）。</summary>
         public static void OnMachineDamaged(CampaignState state, MachineRecord m)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnMachineDamagedTo(open, state, m);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnMachineDamagedTo(extras[xi].AwayOpen, state, m);
+                }
+            }
+        }
+
+        private static void OnMachineDamagedTo(AwayReportRecord r, CampaignState state, MachineRecord m)
+        {
             if (r == null || m == null)
             {
                 return;
@@ -519,7 +685,24 @@ namespace GameLogic.Campaign.Economy
         /// <summary>机器阵亡（<see cref="MachineRegistry.MarkDeadByLogicId"/>，存活 → 阵亡的唯一翻转点）。</summary>
         public static void OnMachineDied(CampaignState state, MachineRecord m, Vector2 at)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnMachineDiedTo(open, state, m, at);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnMachineDiedTo(extras[xi].AwayOpen, state, m, at);
+                }
+            }
+        }
+
+        private static void OnMachineDiedTo(AwayReportRecord r, CampaignState state, MachineRecord m, Vector2 at)
+        {
             if (r == null || m == null)
             {
                 return;
@@ -547,11 +730,28 @@ namespace GameLogic.Campaign.Economy
         /// <summary>通知中心（<see cref="NotificationCenter"/>）：登记了离家报告分段的通知逐条记进报告（不受通知聚合影响）。</summary>
         public static void OnNotification(CampaignState state, NotifyTypeDef def, NotificationMember member)
         {
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnNotificationTo(open, state, def, member);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnNotificationTo(extras[xi].AwayOpen, state, def, member);
+                }
+            }
+        }
+
+        private static void OnNotificationTo(AwayReportRecord r, CampaignState state, NotifyTypeDef def, NotificationMember member)
+        {
             if (def == null || member == null || string.IsNullOrEmpty(def.AwaySection) || def.AwaySection == "none")
             {
                 return;
             }
-            AwayReportRecord r = Current(state);
             if (r == null)
             {
                 return;
@@ -587,7 +787,24 @@ namespace GameLogic.Campaign.Economy
         /// <summary>常驻规则写触发日志（<see cref="StandingRuleService"/>）：离家期间的规则动作（FG-GAP-098）。</summary>
         public static void OnRuleLog(CampaignState state, RuleLogRecord e)
         {
-            AwayReportRecord r = Current(state);
+            // FG11-REG-01（FG-GAP-016）：同时在外的每支远征队各有一份进行中的报告，家园里发生的事记进每一份。
+            AwayReportRecord open = Current(state);
+            if (open != null)
+            {
+                OnRuleLogTo(open, state, e);
+            }
+            ExpeditionExtraTeam[] extras = state?.Grid?.ExpeditionTeam?.Extras;
+            for (int xi = 0; extras != null && xi < extras.Length; xi++)
+            {
+                if (extras[xi] != null && extras[xi].AwayHasOpen && extras[xi].AwayOpen != null)
+                {
+                    OnRuleLogTo(extras[xi].AwayOpen, state, e);
+                }
+            }
+        }
+
+        private static void OnRuleLogTo(AwayReportRecord r, CampaignState state, RuleLogRecord e)
+        {
             if (r == null || e == null)
             {
                 return;
@@ -697,27 +914,47 @@ namespace GameLogic.Campaign.Economy
             foreach (ProducerRecord p in state?.Economy?.Producers ?? Array.Empty<ProducerRecord>())
             {
                 CloseScans++;
-                if (p == null || p.AwaySerial != r.Serial || p.AwayStarve == null)
+                if (p == null)
                 {
                     continue;
                 }
-                BuildingRecord b = HomeGridService.FindBuilding(state, p.BuildingId);
-                foreach (ItemStackRecord s in p.AwayStarve)
+                if (p.AwaySerial == r.Serial && p.AwayStarve != null)
                 {
-                    if (s != null && s.Amount > 0)
+                    AppendStarve(list, state, p, p.AwayStarve);
+                    if (clear)
                     {
-                        list.Add(new AwayStarveRecord { ItemId = s.ItemId, BuildingId = p.BuildingId, Ticks = s.Amount, X = b?.Position.x ?? 0f, Y = b?.Position.y ?? 0f });
+                        p.AwayStarve = Array.Empty<ItemStackRecord>();
+                        p.AwaySerial = 0;
                     }
                 }
-                if (clear)
+                foreach (AwayStarveSlot slot in p.AwayMore ?? Array.Empty<AwayStarveSlot>())
                 {
-                    p.AwayStarve = Array.Empty<ItemStackRecord>();
-                    p.AwaySerial = 0;
+                    if (slot != null && slot.Serial == r.Serial && slot.Starve != null)
+                    {
+                        AppendStarve(list, state, p, slot.Starve);
+                        if (clear)
+                        {
+                            slot.Starve = Array.Empty<ItemStackRecord>();
+                            slot.Serial = 0;
+                        }
+                    }
                 }
             }
             list.Sort((a, b) => a.Ticks != b.Ticks ? b.Ticks.CompareTo(a.Ticks)
                 : string.CompareOrdinal(a.ItemId, b.ItemId) != 0 ? string.CompareOrdinal(a.ItemId, b.ItemId) : string.CompareOrdinal(a.BuildingId, b.BuildingId));
             return list;
+        }
+
+        private static void AppendStarve(List<AwayStarveRecord> list, CampaignState state, ProducerRecord p, ItemStackRecord[] starve)
+        {
+            BuildingRecord b = HomeGridService.FindBuilding(state, p.BuildingId);
+            foreach (ItemStackRecord s in starve)
+            {
+                if (s != null && s.Amount > 0)
+                {
+                    list.Add(new AwayStarveRecord { ItemId = s.ItemId, BuildingId = p.BuildingId, Ticks = s.Amount, X = b?.Position.x ?? 0f, Y = b?.Position.y ?? 0f });
+                }
+            }
         }
 
         /// <summary>这次远征的反应伤害归因场次：同一地点、出发之后开的那一场（FG2-FW-04；GAP-055 远征段）。</summary>

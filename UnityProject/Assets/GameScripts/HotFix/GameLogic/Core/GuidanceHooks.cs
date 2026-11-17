@@ -741,6 +741,9 @@ namespace GameLogic.Core
             ClarityFirstSpray, ClarityFirstFreeze, ClarityFirstBurst, ClarityFirstSlickIgnite, ClarityFirstPivot, ClarityFirstSplit,
             ClarityFirstAcid, ClarityFirstPoolWashed, ClarityFirstDrone, ClarityFirstAir, ClarityFirstBoss,
             EmgFirstProgramTree, EmgFirstTrigger, EmgFirstRelay, EmgFirstHijack, EmgFirstSeize, EmgFirstSlotBlock,
+            // FG11-FAC-01 的超频钩子（fgdata_overclock.OVERCLOCK_HOOKS；FG11-REG-01 跑 FgUplinkHudSelfCheck 时发现漏登记，图鉴条目引用它们）。
+            "overclock.first_shutdown", "overclock.first_vent", "overclock.first_melt", "overclock.first_burst",
+            "overclock.first_mode", "overclock.first_mirror", "overclock.first_radiation", "overclock.first_aura",
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

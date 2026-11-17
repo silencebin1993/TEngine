@@ -53,6 +53,9 @@ namespace GameLogic.Campaign.Regions
             FoundryOutpost = 2,
         }
 
+        /// <summary>目的地对应的地点 ID。</summary>
+        public static string TargetSiteId(ExpeditionTarget target) => target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId;
+
         /// <summary>FG8-EXP-01 修复轮（卡片结果“指定目的地”）：可派的目的地＝当前非 Locked 的区域，
         /// 按默认优先级排序（铸造前哨外围在前，与旧的自动解析一致）。派遣准备面板的目的地下拉框只列这些；
         /// 已清理的破碎都市仍列出（可以再派，ADR-EXP-001 第 6 节待用户复核）。</summary>
@@ -235,7 +238,8 @@ namespace GameLogic.Campaign.Regions
             WorkOrderRecord activeOrder = HomeValleyWorkOrders.FindActiveOrderForMachine(state, record.LogicId);
             bool uninterruptible = IsUninterruptibleOrder(activeOrder);
 
-            bool inHomeRegion = record.RegionId == HomeValleyLayout.RegionId;
+            // FG11-REG-01（FG-GAP-016）：正在星球上行军的别的远征队成员虽然 RegionId 还是家园，但已经出门——不能再编进这一支。
+            bool inHomeRegion = record.RegionId == HomeValleyLayout.RegionId && !ExpeditionMarchService.IsMarchMember(state, record.LogicId);
             // FG8-EXP-01 Opus 返工：伤势只是提醒（FGR-EXP-001），不影响可派资格；不可派的只有“此刻不在可派位置”的机器。
             bool eligible = record.IsAlive && inHomeRegion && !record.IsInFactory && !uninterruptible;
             string ineligibleReason = eligible ? null
@@ -401,13 +405,12 @@ namespace GameLogic.Campaign.Regions
             }
 
             ExpeditionTarget target = ResolveTarget(state, requested);
-            // FG8-EXP-02：远征在外 = 星球上行军中或远征地点已载入（行军阶段地点还没载入，只看地点会漏判）。
-            if (ExpeditionMarchService.IsAway(state))
+            // FG11-REG-01（FG-GAP-016）：可以同时有多支远征队在外（留在家园的机器照常编队派遣）；只有选中的目的地已有队伍在去 / 在里面时不能派，
+            // 给出明确原因（换一个目的地，或等那支撤离）而不是让按钮静默失效。
+            if (target != ExpeditionTarget.None && ExpeditionMarchService.SiteTaken(state, TargetSiteId(target)))
             {
-                // FG0-ARCH-01：派遣不再退出家园，玩家可以在远征途中回家园打开远征准备——同一时刻只允许一支远征队在外
-                // （多支远征属于 FG8-EXP-01，FG-GAP-016），给出明确原因而不是让按钮静默失效。
-                RegionRecord underway = FracturedCityRegion.Find(state);
-                return new PrepSnapshot(false, "expedition-underway", Array.Empty<MachineIntel>(),
+                RegionRecord underway = target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostRegion.Find(state) : FracturedCityRegion.Find(state);
+                return new PrepSnapshot(false, "destination-busy", Array.Empty<MachineIntel>(),
                     HomeValleySignal.BandwidthCapacity(state), 0, null, underway?.EnemyAlertLevel ?? 0f,
                     underway?.ExpeditionCount ?? 0, ExpeditionTarget.None, null,
                     AdaptationCatalog.None, null, null, null, null, false, null);
@@ -662,16 +665,15 @@ namespace GameLogic.Campaign.Regions
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "no-active-campaign" }, null);
             }
 
-            // FG8-EXP-02：远征在外（已在地点，或还在星球上行军 / 返程）时不能再派。
-            if (ExpeditionMarchService.IsAway(precheckState))
-            {
-                return new DepartureResult(DepartureOutcome.Blocked, new[] { "expedition-underway" }, null);
-            }
-
             ExpeditionTarget target = ResolveTarget(precheckState, requested);
             if (target == ExpeditionTarget.None)
             {
                 return new DepartureResult(DepartureOutcome.Blocked, new[] { "region-locked" }, null);
+            }
+            // FG11-REG-01（FG-GAP-016）：别的远征队在外不再拦（多支同时在外）；同一个目的地同一时刻只派一支。
+            if (ExpeditionMarchService.SiteTaken(precheckState, TargetSiteId(target)))
+            {
+                return new DepartureResult(DepartureOutcome.Blocked, new[] { "destination-busy" }, null);
             }
 
             RosterValidation validation = ValidateRoster(precheckState, selectedLogicIds);
@@ -681,7 +683,7 @@ namespace GameLogic.Campaign.Regions
             }
 
             // FG8-EXP-02：远征队要沿地形走到目的地锚点——锚点还在寻路校验中 / 根本走不到时不能出发（说明原因，不进事务）。
-            string targetSiteId = target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostLayout.RegionId : FracturedCityLayout.RegionId;
+            string targetSiteId = TargetSiteId(target);
             ExpeditionSiteAnchors.EnsureResolved(precheckState);
             if (!ExpeditionSiteAnchors.IsResolved(precheckState, targetSiteId))
             {

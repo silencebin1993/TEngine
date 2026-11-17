@@ -364,7 +364,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>同一支在外远征队里还活着、同一地点的机器（离 <paramref name="at"/> 最近的；同距离按 LogicId 小的）。不在远征队里返回 0。</summary>
         public static int Teammate(CampaignState s, int deadId, Vector2 at)
         {
-            ExpeditionMarchState march = ExpeditionMarchService.Current(s);
+            ExpeditionMarchState march = ExpeditionMarchService.TeamOf(s, deadId); // FG11-REG-01：阵亡者所在的那支队伍
             if (march?.Members == null || !ExpeditionMarchService.IsTeamMember(s, deadId))
             {
                 return 0;
@@ -848,7 +848,7 @@ namespace GameLogic.Campaign.Economy
             {
                 return holder;
             }
-            ExpeditionMarchState march = ExpeditionMarchService.Current(s);
+            ExpeditionMarchState march = ExpeditionMarchService.TeamOf(s, holder); // FG11-REG-01：持有者所在的那支队伍
             if (march?.Members == null || !ExpeditionMarchService.IsTeamMember(s, holder))
             {
                 return 0;

@@ -124,6 +124,8 @@ namespace GameLogic.Campaign.Economy
 
         public static string LevelSuffix(int level) => level == 2 ? GameText.Get("cargo.state.full") : level == 1 ? GameText.Get("cargo.state.warn") : string.Empty;
 
+        private static readonly List<int> TeamScratch = new List<int>(16);
+
         private static bool Alive(int id, out MachineRecord m) => MachineRegistry.TryGetRecord(id, out m) && m != null && m.IsAlive;
 
         /// <summary>货舱界面列出的机器：在外的远征队里还活着的成员 + 货舱里有分拣 / 拾取的货或携带关键物的存活机器（LogicId 升序）。O(成员数 + 货舱记录数 + 关键物条数)。</summary>
@@ -134,10 +136,9 @@ namespace GameLogic.Campaign.Economy
             {
                 return;
             }
-            ExpeditionMarchState march = ExpeditionMarchService.Current(s);
-            if (march?.Members != null)
+            ExpeditionMarchService.CollectTeamMembers(s, TeamScratch); // FG11-REG-01：全部在外的队伍
             {
-                foreach (int id in march.Members)
+                foreach (int id in TeamScratch)
                 {
                     if (ExpeditionMarchService.IsTeamMember(s, id) && Alive(id, out _) && !into.Contains(id))
                     {
@@ -165,9 +166,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>是否有在外的远征队（星球上行军或在远征地点里）。</summary>
         public static bool TeamOut(CampaignState s)
         {
-            ExpeditionMarchState m = ExpeditionMarchService.Current(s);
-            return m?.Members != null && m.Members.Length > 0
-                   && (m.Phase == ExpeditionMarchService.PhaseOutbound || m.Phase == ExpeditionMarchService.PhaseReturning || m.Phase == ExpeditionMarchService.PhaseAtSite);
+            return ExpeditionMarchService.ActiveTeamCount(s) > 0; // FG11-REG-01：任意一支在外
         }
 
         /// <summary>一组机器的总占用 / 总容量，返回其中最严重的状态（0 / 1 / 2）。</summary>
@@ -726,8 +725,8 @@ namespace GameLogic.Campaign.Economy
             Members.Clear();
             if (team)
             {
-                ExpeditionMarchState march = ExpeditionMarchService.Current(s);
-                foreach (int id in march.Members)
+                ExpeditionMarchService.CollectTeamMembers(s, TeamScratch); // FG11-REG-01：全部在外的队伍
+                foreach (int id in TeamScratch)
                 {
                     if (Alive(id, out MachineRecord m) && !m.IsInFactory)
                     {
@@ -938,7 +937,7 @@ namespace GameLogic.Campaign.Economy
             QuestDelivered++;
             if (team)
             {
-                ExpeditionSettlementService.NoteQuestItem(s, q);
+                ExpeditionSettlementService.NoteQuestItem(s, q, carrier.LogicId);
             }
             if (Env.HeritageService.IsHeritage(q))
             {

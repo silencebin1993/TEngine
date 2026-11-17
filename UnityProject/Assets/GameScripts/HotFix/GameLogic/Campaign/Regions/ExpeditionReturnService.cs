@@ -226,6 +226,8 @@ namespace GameLogic.Campaign.Regions
                 return ReturnResult.Fail("use-abandon-for-wipe");
             }
             CampaignState state = CampaignSession.Current;
+            // FG11-REG-01（FG-GAP-016）：多支远征同时在外时，地点里的那支先换成主队（下面的行军 / 结算 / 离家报告都对着主队）。
+            ExpeditionMarchService.FocusSiteTeam(state);
             if (state == null)
             {
                 return ReturnResult.Fail("no-active-campaign");
@@ -287,6 +289,8 @@ namespace GameLogic.Campaign.Regions
                 return ReturnResult.Fail("not-wiped");
             }
             CampaignState state = CampaignSession.Current;
+            // FG11-REG-01（FG-GAP-016）：多支远征同时在外时，地点里的那支先换成主队（下面的行军 / 结算 / 离家报告都对着主队）。
+            ExpeditionMarchService.FocusSiteTeam(state);
             if (state == null)
             {
                 return ReturnResult.Fail("no-active-campaign");

@@ -67,9 +67,10 @@ namespace GameLogic.Campaign.Economy
         // ─────────────────────────────── 远征途中带回的关键物 ───────────────────────────────
 
         /// <summary>远征队成员把一件区域关键物 / 黑匣子 / 遗产带回家园（<see cref="CargoService.DeliverQuestItem"/>）：记进这一次远征的结算。没有进行中的报告时不记。</summary>
-        public static void NoteQuestItem(CampaignState s, RegionQuestItemRecord q)
+        public static void NoteQuestItem(CampaignState s, RegionQuestItemRecord q, int carrierLogicId)
         {
-            AwayReportRecord r = AwayReportService.Current(s);
+            // FG11-REG-01 修复第 1 轮（FG-GAP-016）：记进携带者所在队伍那份报告，不是主队那份。
+            AwayReportRecord r = AwayReportService.OpenReportOf(s, carrierLogicId);
             if (r == null || q == null)
             {
                 return;
@@ -86,7 +87,7 @@ namespace GameLogic.Campaign.Economy
         /// </summary>
         public static bool OnMemberLanded(CampaignState s, int logicId)
         {
-            AwayReportRecord r = AwayReportService.Current(s);
+            AwayReportRecord r = AwayReportService.OpenReportOf(s, logicId); // FG-GAP-016：这台所在队伍的那份
             if (r?.Members == null || Array.IndexOf(r.Members, logicId) < 0)
             {
                 return false;
@@ -123,7 +124,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>这台机器带回的关键物要不要记进进行中的远征结算：分批接回、已经随舱落地的成员（<see cref="ExpeditionSettlementRecord.Landed"/>）。行军名单里的成员由调用方另判。</summary>
         public static bool IsSettlingMember(CampaignState s, int logicId)
         {
-            int[] landed = AwayReportService.Current(s)?.Settlement?.Landed;
+            int[] landed = AwayReportService.OpenReportOf(s, logicId)?.Settlement?.Landed;
             return landed != null && Array.IndexOf(landed, logicId) >= 0;
         }
 
@@ -527,7 +528,12 @@ namespace GameLogic.Campaign.Economy
             {
                 return null;
             }
-            AwayReportRecord open = AwayReportService.Current(s);
+            // FG11-REG-01 修复第 1 轮（FG-GAP-016）：进行中的报告取这批机器所在队伍的那份（多支同时在外时不一定是主队）。
+            AwayReportRecord open = null;
+            foreach (int id in machines)
+            {
+                open ??= AwayReportService.OpenReportOf(s, id);
+            }
             // 修复第 3 轮：分批接回、先落地那批的卸货发生在远征结束之前——进行中的报告里记了它们（Landed）时回写这一份，不去碰上一次远征的结算。
             bool openLanded = false;
             foreach (int id in machines)

@@ -38,7 +38,7 @@ namespace GameLogic.EditorTools
         private const string Bots = "TEngine/UnityProject/Assets/Editor/JourneyBots/";
         private const string Register = "production/design/full-game/FG-GAP-REGISTER.md";
 
-        [MenuItem("BinGames/QA/自检/M10 出口")]
+        [MenuItem("QA/自检/M10 出口")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -132,7 +132,7 @@ namespace GameLogic.EditorTools
         {
             ("s.Progress.Act = ", "ApplyFixture", 1, "开局第 2 幕 DEBT-FG10E2E01-01"),
             ("TerritoryControlService.MarkLeaderDefeated(", "ApplyFixture", 1, "铸造平定 DEBT-FG10E2E01-01"),
-            ("FgProductionSelfCheck.Built(", "ApplyFixture", 2, "中继链 + 湖区硬放中继 DEBT-FG10E2E01-01 / -04"),
+            ("FgProductionSelfCheck.Built(", "RelayChain", 1, "中继链（每座过正式放置校验；FG11-REG-01 删掉了湖区硬放 DEBT-FG10E2E01-04）DEBT-FG10E2E01-01"),
             ("MachineRegistry.SpawnMachine(", "ApplyFixture", 1, "远征队 8 台 DEBT-FG10E2E01-01"),
             ("MachineRegistry.SpawnMachine(", "ApplyHomeFixture", 1, "留守队 4 台 DEBT-FG10E2E01-02"),
             ("WorldOutpostSystem.SpawnOutpost(", "ApplyOutpostFixture", 1, "湖边据点 DEBT-FG10E2E01-03"),

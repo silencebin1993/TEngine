@@ -278,6 +278,22 @@ namespace GameLogic.UI.Kit
                             HazardId = hz?.Id, Tint = HomeExplorationService.HazardColor(hz),
                         });
                     }
+                    // FG11-REG-01（“冷却塔的范围标记”）：运转中的冷却塔遗址画成恢复热量上限的范围圈（只画已显示领地里、已探索的；塔被摧毁后圈消失）。
+                    foreach (Campaign.Env.CoolingTowerService.Tower tw in Campaign.Env.CoolingTowerService.Towers(state))
+                    {
+                        PlannedTerritory ct = plan.Find(tw.TerritoryId);
+                        if (ct == null || (ct.Act > act && !HomeExplorationService.TerritoryVisible(state, ct)) || Campaign.Env.CoolingTowerService.IsDestroyed(state, tw.Id)
+                            || !map.IsExploredNoLoad(new GridCell(tw.X, tw.Y)))
+                        {
+                            continue;
+                        }
+                        float cr = Campaign.Env.CoolingTowerService.Radius;
+                        Circles.Add(new WorldMapCircle
+                        {
+                            Layer = WorldMapLayer.Territory, X = tw.X, Y = tw.Y, Radius = cr, OuterRadius = cr,
+                            Label = GameText.Format("cooling.map.label", Mathf.RoundToInt(cr).ToString()), HazardId = "cooling_tower", Tint = new Color(0.35f, 0.75f, 1f, 1f),
+                        });
+                    }
                     // FG8-GEN-02（FGR-GEN-024 / 042）：手工锚点（按表的 mapAct 幕次显示；预留区永远不显示，FGR-GEN-041）。
                     foreach (PlannedAnchor a in plan.Anchors)
                     {
@@ -576,6 +592,22 @@ namespace GameLogic.UI.Kit
         /// </summary>
         private void CollectExpedition(CampaignState state, in WorldMapView view, double margin)
         {
+            CollectOneExpedition(state, view, margin);
+            // FG11-REG-01（FG-GAP-016）：同时在外的其它队伍也画（路线、图标、目的地；标签带编号）。
+            WorldMapView v = view;
+            int n = ExpeditionMarchService.Extras(state).Length;
+            for (int i = 0; i < n; i++)
+            {
+                ExpeditionMarchService.ReadExtra(state, i, () =>
+                {
+                    CollectOneExpedition(state, v, margin);
+                    return 0;
+                });
+            }
+        }
+
+        private void CollectOneExpedition(CampaignState state, in WorldMapView view, double margin)
+        {
             GameLogic.Campaign.ExpeditionMarchState m = ExpeditionMarchService.Current(state);
             int phase = m?.Phase ?? ExpeditionMarchService.PhaseNone;
             if (phase != ExpeditionMarchService.PhaseOutbound && phase != ExpeditionMarchService.PhaseReturning && phase != ExpeditionMarchService.PhaseAtSite)
@@ -608,7 +640,7 @@ namespace GameLogic.UI.Kit
             string etaText = st == ExpeditionMarchService.TeamStatus.Standby ? GameText.Get("exp.map.eta_hold")
                 : eta >= 0 ? GameText.Format("exp.map.eta", GameLogic.Core.GameClock.FormatGameDuration(eta)) : GameText.Get("exp.map.eta_planning");
             Add(WorldMapItemKind.Expedition, WorldMapLayer.Own, "expedition:" + m.SiteId, at.x, at.y,
-                GameText.Format("exp.map.label", ExpeditionTeamService.DisplayName(state), GameText.Get(ExpeditionMarchService.StatusTextKey(st)), etaText), team);
+                GameText.Format("exp.map.label", ExpeditionMarchService.TeamLabel(state, m), GameText.Get(ExpeditionMarchService.StatusTextKey(st)), etaText), team);
         }
 
         /// <summary>

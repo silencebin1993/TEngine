@@ -354,6 +354,19 @@ namespace GameLogic.Campaign
         /// <summary>FG8-EXP-02 第 0 批（FG8-GEN-02“远征地点迁入星球格网”的最小部分前移）：两个远征地点在星球表面上的锚点——
         /// 按世界种子确定、经层级寻路校验从家园可达。唯一写入口 <see cref="Regions.ExpeditionSiteAnchors"/>。只加字段：旧档没有 = 读档后重新解析。</summary>
         public ExpeditionSiteAnchorRecord[] Anchors = Array.Empty<ExpeditionSiteAnchorRecord>();
+        /// <summary>FG11-REG-01（FG-GAP-016“多支远征同时在外”）：除 <see cref="March"/>（主队：HUD、战略地图指挥、镜头跟随、远征地点都对着它）之外同时在外的远征队。
+        /// 每支自带行军记录与进行中的离家报告；唯一写入口 <see cref="Regions.ExpeditionMarchService"/>（出发时主队还在外就把主队挪进来，切换主队 / 到达地点时互换）。只加字段：旧档没有 = 只有一支。</summary>
+        public ExpeditionExtraTeam[] Extras = Array.Empty<ExpeditionExtraTeam>();
+    }
+
+    /// <summary>FG11-REG-01（FG-GAP-016）：同时在外的另一支远征队（见 <see cref="ExpeditionTeamState.Extras"/>）。全部字段进存档。</summary>
+    [Serializable]
+    public sealed class ExpeditionExtraTeam
+    {
+        public ExpeditionMarchState March = new ExpeditionMarchState();
+        /// <summary>这支队伍的离家报告是否开着（与 <see cref="AwayReportState.HasOpen"/> 同义，主队互换时一起换）。</summary>
+        public bool AwayHasOpen;
+        public AwayReportRecord AwayOpen = new AwayReportRecord();
     }
 
     /// <summary>
@@ -364,6 +377,8 @@ namespace GameLogic.Campaign
     [Serializable]
     public sealed class ExpeditionMarchState
     {
+        /// <summary>FG11-REG-01（FG-GAP-016）：第几支远征队（1 起，出发时取当时在外队伍里没用过的最小编号；旧档 0 = 第 1 支）。有多支同时在外时界面写“远征队 N”。</summary>
+        public int TeamNumber;
         /// <summary>0 = 没有远征在外；1 = 去程（星球上，往目的地锚点走）；2 = 在远征地点里（地点已载入）；3 = 返程（星球上，往家园走）；4 = 已返回（记录保留到下一次出发，显示“已返回”）。</summary>
         public int Phase;
         /// <summary>目的地地点（<see cref="Regions.FracturedCityLayout.RegionId"/> / <see cref="Regions.FoundryOutpostLayout.RegionId"/>）。</summary>
@@ -1355,6 +1370,8 @@ namespace GameLogic.Campaign
         /// <summary>FG4-ECO-09（离家报告的瓶颈）：这座建筑在第 <see cref="AwaySerial"/> 份离家报告期间缺每种物品的世界步数（随生产步 O(1) 累加，结算时汇总）。</summary>
         public int AwaySerial;
         public ItemStackRecord[] AwayStarve = Array.Empty<ItemStackRecord>();
+        /// <summary>FG11-REG-01 修复第 1 轮（FG-GAP-016）：同时开着的其它离家报告各自的缺料计数（每份一个槽，按报告序号；结算后序号清 0 留作复用）。只加字段：旧档没有 = 空。</summary>
+        public AwayStarveSlot[] AwayMore = Array.Empty<AwayStarveSlot>();
         /// <summary>FG7-ENV-04 净化塔：已累计、还没换成一次降级的“有电有冷却液”世界步数（满 purify.hours_per_level 游戏小时降一环 1 级；读档后接着同一进度）。</summary>
         public long PurifyTicks;
         /// <summary>FG7-ENV-04 净化塔：上一个生产步是否有电有冷却液在净化（净化区 = 这类塔的范围；进存档，读档后第一步酸雨结算就与一直跑的一致）。</summary>
@@ -2513,6 +2530,14 @@ namespace GameLogic.Campaign
         public long ExpireTick;
     }
 
+    /// <summary>FG11-REG-01 修复第 1 轮：一座建筑在第 <see cref="Serial"/> 份离家报告期间缺每种物品的世界步数（见 <see cref="ProducerRecord.AwayMore"/>）。</summary>
+    [Serializable]
+    public sealed class AwayStarveSlot
+    {
+        public int Serial;
+        public ItemStackRecord[] Starve = Array.Empty<ItemStackRecord>();
+    }
+
     /// <summary>FG4-ECO-09：一座建筑在离家期间缺一种物品的累计步数。</summary>
     [Serializable]
     public sealed class AwayStarveRecord
@@ -2840,6 +2865,7 @@ namespace GameLogic.Campaign
             s.Factions.ClarityBoss.Active ??= Array.Empty<ClarityBossFill>();
             s.Factions.NoiseEmittersDestroyed ??= Array.Empty<string>();
             s.Factions.NoiseZonesNoticed ??= Array.Empty<string>();
+            s.Factions.CoolingTowersDestroyed ??= Array.Empty<string>(); // FG11-REG-01
             s.Factions.SilentCounterId ??= string.Empty;
             s.Factions.PoisRead ??= Array.Empty<string>();
             s.Factions.SilentBoss.CounterId ??= string.Empty;
@@ -2883,6 +2909,21 @@ namespace GameLogic.Campaign
             s.Grid.ExpeditionTeam.March.HazardZoneId ??= string.Empty;
             s.Grid.ExpeditionTeam.March.EncounteredIds ??= Array.Empty<string>();
             s.Grid.ExpeditionTeam.Anchors ??= Array.Empty<ExpeditionSiteAnchorRecord>();
+            s.Grid.ExpeditionTeam.Extras ??= Array.Empty<ExpeditionExtraTeam>();
+            foreach (ExpeditionExtraTeam x in s.Grid.ExpeditionTeam.Extras)
+            {
+                if (x == null)
+                {
+                    continue;
+                }
+                x.March ??= new ExpeditionMarchState();
+                x.March.SiteId ??= string.Empty;
+                x.March.Members ??= Array.Empty<int>();
+                x.March.HazardZoneId ??= string.Empty;
+                x.March.EncounteredIds ??= Array.Empty<string>();
+                x.AwayOpen ??= new AwayReportRecord();
+                EnsureAwayReport(x.AwayOpen);
+            }
             if (s.Grid.NextInstanceSerial < 2)
             {
                 s.Grid.NextInstanceSerial = 2;
@@ -2976,6 +3017,14 @@ namespace GameLogic.Campaign
                     r.FluidHeld ??= Array.Empty<long>();
                     r.BurnTarget ??= string.Empty;
                     r.AwayStarve ??= Array.Empty<ItemStackRecord>(); // FG4-ECO-09
+                    r.AwayMore ??= Array.Empty<AwayStarveSlot>(); // FG11-REG-01
+                    foreach (AwayStarveSlot slot in r.AwayMore)
+                    {
+                        if (slot != null)
+                        {
+                            slot.Starve ??= Array.Empty<ItemStackRecord>();
+                        }
+                    }
                 }
             }
             // FG4-ECO-10：软锁保底与死锁检测（旧存档没有 = 空；开局机器视为已经播种过——那时早就有机器记录了）。

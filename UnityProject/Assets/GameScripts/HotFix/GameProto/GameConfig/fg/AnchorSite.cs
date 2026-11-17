@@ -39,6 +39,8 @@ public sealed partial class AnchorSite : Luban.BeanBase
         MapAct = _buf.ReadInt();
         NameKey = _buf.ReadString();
         DescKey = _buf.ReadString();
+        WaterRing = _buf.ReadInt();
+        CausewayWidth = _buf.ReadInt();
     }
 
     public static AnchorSite DeserializeAnchorSite(ByteBuf _buf)
@@ -126,6 +128,14 @@ public sealed partial class AnchorSite : Luban.BeanBase
     /// 说明文本键(悬停 / 入口面板)
     /// </summary>
     public readonly string DescKey;
+    /// <summary>
+    /// 平整范围外一圈强制为水面的宽度(格;0=没有):湖心平台四周的湖
+    /// </summary>
+    public readonly int WaterRing;
+    /// <summary>
+    /// 穿过水环通向归还核心一侧的堤道半宽(格;0=没有;有水环时必须 &gt;0,保证可达)
+    /// </summary>
+    public readonly int CausewayWidth;
    
     public const int __ID__ = 189255433;
     public override int GetTypeId() => __ID__;
@@ -157,6 +167,8 @@ public sealed partial class AnchorSite : Luban.BeanBase
         + "mapAct:" + MapAct + ","
         + "nameKey:" + NameKey + ","
         + "descKey:" + DescKey + ","
+        + "waterRing:" + WaterRing + ","
+        + "causewayWidth:" + CausewayWidth + ","
         + "}";
     }
 }

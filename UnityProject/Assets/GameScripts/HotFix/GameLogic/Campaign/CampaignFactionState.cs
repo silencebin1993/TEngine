@@ -47,6 +47,8 @@ namespace GameLogic.Campaign
         public string[] AcidZonesNoticed = Array.Empty<string>();
         /// <summary>FG11-FAC-01：已经提示过“进入高温辐射”的辐射区（外圈带 = 领地 ID#belt，领地里的 = 领地 ID#序号；同一片只提示一次）。</summary>
         public string[] RadiationZonesNoticed = Array.Empty<string>();
+        /// <summary>FG11-REG-01：被摧毁的冷却塔遗址（塔 ID = 领地 ID#序号 / 领地 ID#belt序号；唯一写入口 <c>Env.CoolingTowerService</c>）。旧档没有 = 全部运转中。</summary>
+        public string[] CoolingTowersDestroyed = Array.Empty<string>();
         /// <summary>FG11-FAC-01（FGR-FAC-004）：超频反制锁定的游戏日与对策行 ID（fg.TbRaidCounter；空 = 当天没有对策）。</summary>
         public int OverclockCounterDay;
         public string OverclockCounterId = string.Empty;

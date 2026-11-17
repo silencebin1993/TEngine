@@ -29,6 +29,9 @@ namespace BinGames.Sim.Combat
         /// <summary>高温辐射区内的热量上限倍率与散热倍率（不在区里 = 1）。</summary>
         public float RadCapMult;
         public float RadDissMult;
+        /// <summary>FG11-REG-01（FG09 第 7 章“站在运转中的冷却塔附近可以恢复热量上限”）：运转中的冷却塔遗址（x, y, 半径；格）。派生量不进快照，热更层打开 / 读档 / 塔被摧毁时写。
+        /// 圈内高温辐射的热量上限倍率不生效（散热倍率照常）。</summary>
+        public NativeList<float3> CoolZones;
         /// <summary>EMG4-TER-01（FGR-EMG-152）：熔坑（快照段 28；≤ emg.terrain.pit_max，空表时移动只多一次长度比较）。</summary>
         public NativeList<EmgPit> Pits;
         /// <summary>EMG4-TER-01（FG19B V06 / V07“同一位置累计”）：累计点（x, y, 熔融金属份量, 酸份量；快照段 29，≤ <see cref="EmgPitConst.AccCapacity"/>）。</summary>
@@ -85,6 +88,7 @@ namespace BinGames.Sim.Combat
             Hijacks = new NativeList<EmgHijack>(0, Allocator.Persistent);
             Overclocks = new NativeList<CombatOverclock>(0, Allocator.Persistent);
             RadZones = new NativeList<float4>(0, Allocator.Persistent);
+            CoolZones = new NativeList<float3>(0, Allocator.Persistent);
             Pits = new NativeList<EmgPit>(0, Allocator.Persistent);
             PitAcc = new NativeList<float4>(0, Allocator.Persistent);
             PitStats = new NativeArray<int>(EmgPitConst.StatLen, Allocator.Persistent);
@@ -181,6 +185,7 @@ namespace BinGames.Sim.Combat
             Hijacks.Dispose();
             Overclocks.Dispose();
             RadZones.Dispose();
+            CoolZones.Dispose();
             Pits.Dispose();
             PitAcc.Dispose();
             PitStats.Dispose();

@@ -64,7 +64,7 @@ namespace GameLogic.EditorTools
         private static FakeReader _reader;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 整个世界同时运行")]
+        [MenuItem("QA/自检/FG 整个世界同时运行")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -961,9 +961,10 @@ namespace GameLogic.EditorTools
                 ExpeditionMarchService.ArriveNowForTests(CampaignSession.Current);
             }
             ExpeditionDepartureService.PrepSnapshot snap = ExpeditionDepartureService.BuildPrepSnapshot(s2);
-            Expect(again.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && again.Reasons.Contains("expedition-underway")
-                   && !snap.RegionReachable && snap.BlockedReason == "expedition-underway" && WorldSimulation.FracturedCity.IsLoaded,
-                $"远征在外时再次派遣被拒（原因“{GameText.Get("expedition.reason.underway")}”），在外的远征不受影响");
+            // FG11-REG-01（FG-GAP-016）：多支远征可以同时在外；同一目的地一次一支——再派往同一处被拒。
+            Expect(again.Outcome == ExpeditionDepartureService.DepartureOutcome.Blocked && again.Reasons.Contains("destination-busy")
+                   && !snap.RegionReachable && snap.BlockedReason == "destination-busy" && WorldSimulation.FracturedCity.IsLoaded,
+                $"远征在外时再派往同一目的地被拒（原因“{GameText.Get("exp.march.reason.destination_busy")}”），在外的远征不受影响");
             WorldSimulation.UnloadAll();
         }
 

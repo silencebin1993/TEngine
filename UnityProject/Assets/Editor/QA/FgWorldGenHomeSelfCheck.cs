@@ -81,7 +81,7 @@ namespace GameLogic.EditorTools
         public const string ExtremeCode = "R0O2P2D0S0";
         public const string RelaxedCode = "R1O1P1D1S1";
 
-        [MenuItem("BinGames/QA/自检/FG 家园区生成（FG3-GEN-01）")]
+        [MenuItem("QA/自检/FG 家园区生成（FG3-GEN-01）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -731,6 +731,11 @@ namespace GameLogic.EditorTools
                 {
                     targets.Add((t.Id, t.CenterX, t.CenterY));
                 }
+                // FG11-REG-01：手工锚点的入口也要走得到（v4 湖心平台四周是水环，只有堤道一条路）。
+                foreach (PlannedAnchor a in ctx.Plan.Anchors)
+                {
+                    targets.Add(("锚点 " + a.Id, a.EntryX, a.EntryY));
+                }
                 foreach (WorldFeature f in WorldFeatures.HomeZoneNests(ctx))
                 {
                     targets.Add((f.Id, f.X, f.Y));
@@ -765,8 +770,45 @@ namespace GameLogic.EditorTools
                 }
             }
             Expect(unreached.Count == 0 && searched > 60,
-                $"FGT-GEN-004 可达：8 个种子共 {searched} 条层级寻路（从核心出发）全部走到——每个阵营领地、白潮滩头预留区、全部家园区侦察巢与家园区遗迹点；" +
+                $"FGT-GEN-004 可达：8 个种子共 {searched} 条层级寻路（从核心出发）全部走到——每个阵营领地、白潮滩头预留区、全部手工锚点入口（含 v4 湖心平台，经堤道）、全部家园区侦察巢与家园区遗迹点（目标取最近的、所在可走连通块 ≥ {MinTargetPatch} 格的格子，湖里零星小岛不算）；" +
                 $"河流按周期留浅滩不隔断（最长单次 {worstMs:F1} ms，共展开 {expanded} 个节点）" + (unreached.Count == 0 ? string.Empty : "——" + string.Join("；", unreached.Take(5))));
+        }
+
+        /// <summary>
+        /// FG11-REG-01：从 (x, y) 起 4 邻接漫水，可走（非悬崖、非水面）的连通块至少 <paramref name="min"/> 格返回 true（数到 min 就停，O(min)）。
+        /// 湖里零星几格的自然小岛不是“领地”，寻路目标不取它（生成器 v4 湖心平台的水环盖住了澄净领地中心，最近的可走格是 9 格的小岛，种子 1 实测）。
+        /// </summary>
+        /// <summary>寻路目标所在的可走连通块至少这么多格（8×8，一支小队能站下）。</summary>
+        private const int MinTargetPatch = 64;
+
+        private static bool PatchAtLeast(WorldGenContext ctx, int x, int y, int min)
+        {
+            byte cliff = ctx.Source.Params.CodeCliff;
+            byte water = ctx.Source.Params.CodeWater;
+            var visited = new HashSet<long> { ((long)x << 32) ^ (uint)y };
+            var q = new Queue<(int x, int y)>();
+            q.Enqueue((x, y));
+            int walkable = 1; // 起点由调用方保证可走
+            while (q.Count > 0 && walkable < min)
+            {
+                (int cx, int cy) = q.Dequeue();
+                for (int d = 0; d < 4 && walkable < min; d++)
+                {
+                    int nx = cx + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                    int ny = cy + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                    if (!visited.Add(((long)nx << 32) ^ (uint)ny))
+                    {
+                        continue;
+                    }
+                    byte t = Sample(ctx, nx, ny);
+                    if (t != cliff && t != water)
+                    {
+                        walkable++;
+                        q.Enqueue((nx, ny));
+                    }
+                }
+            }
+            return walkable >= min;
         }
 
         private static bool NearestWalkable(WorldGenContext ctx, int x, int y, int r, out int wx, out int wy)
@@ -784,7 +826,7 @@ namespace GameLogic.EditorTools
                             continue;
                         }
                         byte t = Sample(ctx, x + dx, y + dy);
-                        if (t != cliff && t != water)
+                        if (t != cliff && t != water && PatchAtLeast(ctx, x + dx, y + dy, MinTargetPatch))
                         {
                             wx = x + dx;
                             wy = y + dy;
@@ -1748,7 +1790,7 @@ namespace GameLogic.EditorTools
             }
         }
 
-        [MenuItem("BinGames/QA/截图/正式 PCG 地貌")]
+        [MenuItem("QA/截图/正式 PCG 地貌")]
         public static void RunPcgVisualFromMenu()
         {
             const string output = "F:/Project/BinGames/production/qa/evidence/pcg-formal-render.png";

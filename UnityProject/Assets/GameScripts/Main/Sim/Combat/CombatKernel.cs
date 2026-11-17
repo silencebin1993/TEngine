@@ -3176,6 +3176,10 @@ namespace BinGames.Sim.Combat
             {
                 staging.RadZones.Add(_d.RadZones[i]); // FG11-FAC-01：高温辐射区是派生量（热更层写），读档沿用当前的
             }
+            for (int i = 0; i < _d.CoolZones.Length; i++)
+            {
+                staging.CoolZones.Add(_d.CoolZones[i]); // FG11-REG-01：冷却塔圈同为派生量
+            }
             staging.RadCapMult = _d.RadCapMult;
             staging.RadDissMult = _d.RadDissMult;
             for (int i = 0; i < _d.MeltGround.Length; i++)

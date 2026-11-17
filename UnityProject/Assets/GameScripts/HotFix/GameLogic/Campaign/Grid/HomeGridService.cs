@@ -625,6 +625,12 @@ namespace GameLogic.Campaign.Grid
             // FG7-ENV-04（FGR-ENV-040 / FGR-LOG-012）：2 级及以上不能建造，只豁免净化塔（传送带走自己的逐格校验，本来就不拦）。
             bool pollutionExempt = Env.PurificationService.IsPollutionExempt(typeId);
             int exemptLevel = 0;
+            // FG11-REG-01（FG-GAP-164 三选一的第 3 项，按推荐默认执行 2026-11-17，待用户确认）：有防腐涂层后，信号中继可以建在 1～2 级污染上
+            // （沉淀湖湖区不再“一进湖就失联”）；3 级与其它建筑照旧。只改中继这一种建筑的阻挡等级。
+            bool relay = typeId == HomeValleyLayout.BuildingTypeSignalRelay;
+            int relayBlock = relay && Env.AcidMarshService.HasCoating(state) ? Math.Max(blockLevel, GridContent.TuningInt("grid.relay_coated_block_level")) : blockLevel;
+            bool relayCoatedUsed = false;
+            bool relayNeedsCoating = false;
             for (int i = 0; i < r.Cells.Count; i++)
             {
                 GridCell c = r.Cells[i];
@@ -663,8 +669,13 @@ namespace GameLogic.Campaign.Grid
                 {
                     exemptLevel = Math.Max(exemptLevel, p);
                 }
+                else if (relay && p >= blockLevel && p < relayBlock)
+                {
+                    relayCoatedUsed = true; // 防腐涂层：中继可以压在这一格上
+                }
                 else if (p >= blockLevel)
                 {
+                    relayNeedsCoating |= relay && relayBlock == blockLevel && p < GridContent.TuningInt("grid.relay_coated_block_level");
                     r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
                     ok = false;
                 }
@@ -773,6 +784,14 @@ namespace GameLogic.Campaign.Grid
             if (lightPolluted > 0)
             {
                 r.Warnings.Add(Localization.GameText.Format("grid.warn.pollution", lightPolluted, lightLevel));
+            }
+            if (relayCoatedUsed)
+            {
+                r.Notes.Add(Localization.GameText.Format("grid.note.relay_coated", (relayBlock - 1).ToString()));
+            }
+            else if (relayNeedsCoating)
+            {
+                r.Notes.Add(Localization.GameText.Format("grid.note.relay_needs_coating", (GridContent.TuningInt("grid.relay_coated_block_level") - 1).ToString()));
             }
             if (exemptLevel > 0)
             {

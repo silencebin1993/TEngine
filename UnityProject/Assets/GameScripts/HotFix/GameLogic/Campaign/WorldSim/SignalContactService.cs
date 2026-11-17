@@ -239,16 +239,17 @@ namespace GameLogic.Campaign.WorldSim
         }
 
         /// <summary>在外的远征队成员的星球位置（在远征地点里的取地点入口）。没有在外的队伍返回 false。</summary>
+        private static readonly List<int> TeamScratch = new List<int>(16);
+
         private static bool CollectMembers(CampaignState s)
         {
             MemberScratch.Clear();
-            ExpeditionMarchState march = Regions.ExpeditionMarchService.Current(s);
-            if (march?.Members == null || march.Members.Length == 0 || march.Phase == Regions.ExpeditionMarchService.PhaseNone
-                || march.Phase == Regions.ExpeditionMarchService.PhaseReturned)
+            Regions.ExpeditionMarchService.CollectTeamMembers(s, TeamScratch); // FG11-REG-01：全部在外的队伍
+            if (TeamScratch.Count == 0)
             {
                 return false;
             }
-            foreach (int id in march.Members)
+            foreach (int id in TeamScratch)
             {
                 if (!MachineRegistry.TryGetRecord(id, out MachineRecord m) || m == null || !m.IsAlive)
                 {

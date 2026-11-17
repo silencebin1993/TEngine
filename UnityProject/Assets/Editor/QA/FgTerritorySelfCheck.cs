@@ -65,7 +65,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 阵营领地与室内场地")]
+        [MenuItem("QA/自检/FG 阵营领地与室内场地")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -82,7 +82,7 @@ namespace GameLogic.EditorTools
         /// 一次性探针（不在全量自检里）：种子测试集（50 个）× 标准设置，6 个锚点从家园出发的层级寻路可达——DEBT-FG8GEN02-06 / -09 的风险摸底，结果写进证据。
         /// 单独跑：bash tools/unity-validate.sh GameLogic.EditorTools.FgTerritorySelfCheck.ProbeReachSeedSet（约 2 分钟）。
         /// </summary>
-        [MenuItem("BinGames/QA/探针/FG 锚点可达（种子测试集）")]
+        [MenuItem("QA/探针/FG 锚点可达（种子测试集）")]
         public static void ProbeReachSeedSet()
         {
             _probeOnly = true;
@@ -260,7 +260,7 @@ namespace GameLogic.EditorTools
                     r.GarrisonPerTier, r.PatrolEvery, r.PatrolRadius, Py(r.CacheChance), r.CacheScrap, Py(r.CacheSeconds), Py(r.TerminalChance), r.TerminalTech, Py(r.TerminalSeconds),
                     r.TerminalLoreKeys, Py(r.RelicFactor), Py(r.SideChance), r.AnchorClearance, r.IntroKey))
                 .Concat(t.TbAnchorSite.DataList.Select(a => string.Join("\t", "ANC", a.Key, a.Set, a.Id, a.TerritoryId, a.Kind, a.TemplateId, Py(a.RadialMin), Py(a.RadialMax), a.AngleMode,
-                    a.JitterDeg, a.FootprintRadius, a.BlendWidth, a.SurfaceId, a.EntryRadius, a.ProtectRadius, a.MinGap, a.ReachCheck, a.MapAct, a.NameKey, a.DescKey)))
+                    a.JitterDeg, a.FootprintRadius, a.BlendWidth, a.SurfaceId, a.EntryRadius, a.ProtectRadius, a.MinGap, a.ReachCheck, a.MapAct, a.NameKey, a.DescKey, a.WaterRing, a.CausewayWidth)))
                 .Concat(t.TbAnchorTemplatePoint.DataList.Select(p => string.Join("\t", "ATP", p.Key, p.Template, p.PointId, p.Kind, Py(p.LocalX), Py(p.LocalY), Py(p.Radius), p.NameKey)))
                 .ToList();
             bool table = code == 0 && src.Count == rt.Count && src.Count >= 40 && src.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(rt.OrderBy(x => x, StringComparer.Ordinal));
@@ -268,10 +268,11 @@ namespace GameLogic.EditorTools
                                  (table ? string.Empty : $"（源 {src.Count} 行 / 运行时 {rt.Count} 行，python 退出码 {code}）"));
 
             WorldGenVersion v3 = WorldGenContent.Version(3);
-            Expect(WorldGenVersions.Current == 3 && v3.TemplateSet == "tt3" && v3.AnchorSet == "as3" && v3.OuterZoneDistance == 2500 && v3.TerritorySet == "t1"
+            // FG11-REG-01：新战役改用 v4（锚点集合 as4，只多湖心平台的水环 + 堤道）；v3 行与 as3 不变、旧 v3 存档继续按 v3 生成（M10-BASELINE 差异表）。
+            Expect(WorldGenVersions.Current >= 3 && v3.TemplateSet == "tt3" && v3.AnchorSet == "as3" && v3.OuterZoneDistance == 2500 && v3.TerritorySet == "t1"
                    && WorldGenContent.Version(2).TemplateSet == WorldGenContent.NoSet && WorldGenContent.Version(1).AnchorSet == WorldGenContent.NoSet
                    && WorldGenContent.TemplatesFor(v3).Count == 4 && WorldGenContent.AnchorsFor(v3).Count == 6,
-                $"A2 生成器 v3 入表并成为新战役版本：模板 tt3（四个阵营领地）、锚点 as3（{WorldGenContent.AnchorsFor(v3).Count} 个）、外延区起点 {v3.OuterZoneDistance} 格；v1 / v2 行这些列都是 none（旧世界不读）");
+                $"A2 生成器 v3 入表（FG8-GEN-02 起为新战役版本；FG11-REG-01 起新战役用 v{WorldGenVersions.Current}，v3 行不变）：模板 tt3（四个阵营领地）、锚点 as3（{WorldGenContent.AnchorsFor(v3).Count} 个）、外延区起点 {v3.OuterZoneDistance} 格；v1 / v2 行这些列都是 none（旧世界不读）");
 
             var keys = new List<string>
             {
@@ -1876,6 +1877,8 @@ namespace GameLogic.EditorTools
                 buf.WriteInt(1);
                 buf.WriteString("world.anchor.baptism_platform.name");
                 buf.WriteString("world.anchor.baptism_platform.desc");
+                buf.WriteInt(0); // FG11-REG-01：waterRing（as3 = 0）
+                buf.WriteInt(0); // FG11-REG-01：causewayWidth（as3 = 0）
             }
             return buf;
         }

@@ -103,6 +103,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("truck_go", "按回到核心键（默认 Home）镜头回家园，右键核心旁的地面：货运车开回家园 → 主线完成，防腐涂层蓝图到手（“防腐涂层已生效”）", 300, null, TickTruckDelivered),
                 S("jump_team", "命令栏机器列表点一台远征队：接入（远距离跳转，镜头到湖外圈的远征队）", 40, c => FgjM1Journey.ClickMachineList(c, AliveTeam(c)[0]), TickJumpTeam, retries: 3),
                 S("jump_exit", "按接入 / 退出接入键（默认 M）回战略视角（镜头留在远征队那里）", 20, c => JourneyInput.PressAction(GameActionId.ToggleCameraView), TickBackToStrategy, retries: 2),
+                S("lake_relay", "中继链夹具（FG11-REG-01 / FG-GAP-164：有防腐涂层后中继可建在 2 级污染上）：从链尾接着往湖心平台建中继，每座过正式放置校验（建中继由 FGJ-M8 覆盖）",
+                    20, ApplyLakeRelays, TickLakeRelays),
 
                 // ── 2. 进入沉淀湖：涂层放行 + 阵营介绍 ──
                 S("sel2", "左键点一台远征队、Shift 左键加选其余几台", 60, null, TickSelectTeam, retries: 2),
@@ -285,62 +287,10 @@ namespace GameLogic.EditorTools.JourneyBots
             Vector2 toHome = (core - pickup).normalized;
             SetV(c, "pickup", pickup);
 
-            // 中继链：从核心（覆盖 150）起，每一座立在上一座覆盖里、尽量往湖心推（中继 200）；湖区污染 ≥ 2 的格子不能建造，推不动就停。
+            // 中继链：从核心（覆盖 150）起，每一座立在上一座覆盖里、尽量往湖心推（中继 200）；经正式放置校验，湖区污染 2 级在拿到防腐涂层前不能建造，推不动就停
+            // （FG11-REG-01 / FG-GAP-164 第 3 项：涂层到手后由 lake_relay 步接着往湖心推；原“湖区硬放”夹具 DEBT-FG10E2E01-04 已删）。
             var relays = new List<string>();
-            Vector2 last = core;
-            float lastRadius = SignalCoverageService.CoreRadius;
-            for (int n = 0; n < 16; n++)
-            {
-                Vector2 dir = (center - last).normalized;
-                Vector2 perp = new Vector2(-dir.y, dir.x);
-                GridCell? best = null;
-                for (float d = lastRadius - 8f; d >= 40f && !best.HasValue; d -= 4f)
-                {
-                    HomeGridService.RevealArea(s, last + dir * d, 70f); // 第一幕沿这条路探索过（探索由 FGJ-M1 / M8 覆盖）
-                    for (int k = 0; k <= 20 && !best.HasValue; k++)
-                    {
-                        float o = (k % 2 == 0 ? 1f : -1f) * (k + 1) / 2 * 6f;
-                        Vector2 p = last + dir * d + perp * o;
-                        if (Vector2.Distance(p, last) > lastRadius - 8f)
-                        {
-                            continue;
-                        }
-                        var g = new GridCell(Mathf.RoundToInt(p.x), Mathf.RoundToInt(p.y));
-                        GridPlacementResult v = HomeGridService.ValidatePlacement(s, HomeValleyLayout.BuildingTypeSignalRelay, g, 0, asPlayerPlacement: false, checkCost: false);
-                        if (v.Ok)
-                        {
-                            best = g;
-                        }
-                        else if (k == 0)
-                        {
-                            _lastWhy = string.Join("/", v.Reasons.Select(x => x.Code.ToString()));
-                        }
-                    }
-                }
-                if (!best.HasValue || Vector2.Distance(new Vector2(best.Value.X, best.Value.Y), center) > Vector2.Distance(last, center) - 20f)
-                {
-                    relays.Add($"[推不动：{_lastWhy}]");
-                    // 湖区污染 ≥ 2，玩家建不了中继（A 段交接登记缺口）：夹具硬放到湖心平台旁，让平台上能右键下令（DEBT-FG10E2E01-04）。
-                    BaptismTowerBoss.TryArena(s, out Vector2 arena0);
-                    for (int m = 0; m < 6 && Vector2.Distance(last, arena0) > 60f; m++)
-                    {
-                        Vector2 step = last + (arena0 - last).normalized * Mathf.Min(185f, Vector2.Distance(last, arena0) - 40f);
-                        GridCell hg = SiegeService.NearestPassable(new GridCell(Mathf.RoundToInt(step.x), Mathf.RoundToInt(step.y)), 12);
-                        BuildingRecord hb = FgProductionSelfCheck.Built(s, HomeValleyLayout.BuildingTypeSignalRelay, "m10_lakerelay" + m, hg);
-                        last = hb.Position;
-                        relays.Add($"<湖区硬放 ({hg.X},{hg.Y})>");
-                    }
-                    break;
-                }
-                BuildingRecord b = FgProductionSelfCheck.Built(s, HomeValleyLayout.BuildingTypeSignalRelay, "m10_relay" + n, best.Value);
-                last = b.Position;
-                lastRadius = 200f;
-                relays.Add($"({best.Value.X},{best.Value.Y})");
-                if (Vector2.Distance(last, center) < 60f)
-                {
-                    break;
-                }
-            }
+            Vector2 last = RelayChain(c, CorePos, SignalCoverageService.CoreRadius, LakeCenter, "m10_relay", relays);
             SetV(c, "lastRelay", last);
             c.Set("fix.relays", string.Join(" ", relays));
 
@@ -938,6 +888,91 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 在远征队旁、覆盖里、往湖心约 40 格处登记一处 1 级、小股驻军（含油污爬行者的最小人数，≤ 6）的澄净据点（WorldOutpostSystem.SpawnOutpost 同一记录，驻军编成按 fg.TbTerritoryControl 循环：喷洒车、腐蚀蜂群、油污爬行者），
         /// 不增援。醒来、展开、交战、油污爬行者着火爆燃、击毁全走正式系统。
         /// </summary>
+        /// <summary>
+        /// 中继链（DEBT-FG10E2E01-01；建中继与探索由 FGJ-M8 覆盖）：从 <paramref name="from"/> 起，每一座立在上一座覆盖里、尽量往 <paramref name="goal"/> 推；
+        /// 每个候选格都过正式放置校验（<see cref="HomeGridService.ValidatePlacement"/>，含污染等级与 FG-GAP-164 的涂层放宽），推不动就停。返回最后一座的位置。
+        /// </summary>
+        private static Vector2 RelayChain(JourneyContext c, Vector2 from, float fromRadius, Vector2 goal, string idPrefix, List<string> relays)
+        {
+            CampaignState s = St;
+            Vector2 last = from;
+            float lastRadius = fromRadius;
+            for (int n = 0; n < 16; n++)
+            {
+                Vector2 dir = (goal - last).normalized;
+                Vector2 perp = new Vector2(-dir.y, dir.x);
+                GridCell? best = null;
+                for (float d = lastRadius - 8f; d >= 40f && !best.HasValue; d -= 4f)
+                {
+                    HomeGridService.RevealArea(s, last + dir * d, 70f); // 第一幕沿这条路探索过（探索由 FGJ-M1 / M8 覆盖）
+                    for (int k = 0; k <= 20 && !best.HasValue; k++)
+                    {
+                        float o = (k % 2 == 0 ? 1f : -1f) * (k + 1) / 2 * 6f;
+                        Vector2 p = last + dir * d + perp * o;
+                        if (Vector2.Distance(p, last) > lastRadius - 8f)
+                        {
+                            continue;
+                        }
+                        var g = new GridCell(Mathf.RoundToInt(p.x), Mathf.RoundToInt(p.y));
+                        GridPlacementResult v = HomeGridService.ValidatePlacement(s, HomeValleyLayout.BuildingTypeSignalRelay, g, 0, asPlayerPlacement: false, checkCost: false);
+                        if (v.Ok)
+                        {
+                            best = g;
+                        }
+                        else if (k == 0)
+                        {
+                            _lastWhy = string.Join("/", v.Reasons.Select(x => x.Code.ToString()));
+                        }
+                    }
+                }
+                if (!best.HasValue || Vector2.Distance(new Vector2(best.Value.X, best.Value.Y), goal) > Vector2.Distance(last, goal) - 20f)
+                {
+                    relays.Add($"[推不动：{_lastWhy}]");
+                    break;
+                }
+                BuildingRecord b = FgProductionSelfCheck.Built(s, HomeValleyLayout.BuildingTypeSignalRelay, idPrefix + n, best.Value);
+                last = b.Position;
+                lastRadius = 200f;
+                relays.Add($"({best.Value.X},{best.Value.Y})");
+                if (Vector2.Distance(last, goal) < 60f)
+                {
+                    break;
+                }
+            }
+            SignalCoverageService.Invalidate();
+            return last;
+        }
+
+        /// <summary>
+        /// FG11-REG-01（FG-GAP-164 第 3 项）：防腐涂层到手后，中继链接着往湖心平台推（每座过正式放置校验：湖区 2 级污染此时可建，3 级仍不行），
+        /// 让远征队进湖后仍在信号覆盖里、平台上能右键下令。取代 DEBT-FG10E2E01-04 的“湖区硬放”。
+        /// </summary>
+        private static void ApplyLakeRelays(JourneyContext c)
+        {
+            CampaignState s = St;
+            if (s == null || c.Get("fix.lake_relays", string.Empty).Length > 0)
+            {
+                return;
+            }
+            Vector2 goal = BaptismTowerBoss.TryArena(s, out Vector2 arena) ? arena : LakeCenter;
+            var relays = new List<string>();
+            Vector2 last = RelayChain(c, V(c, "lastRelay"), 200f, goal, "m10_lakerelay", relays);
+            SetV(c, "lastRelay", last);
+            c.Set("fix.lake_relays", string.Join(" ", relays));
+        }
+
+        private static StepOutcome TickLakeRelays(JourneyContext c)
+        {
+            Vector2 goal = BaptismTowerBoss.TryArena(St, out Vector2 arena) ? arena : LakeCenter;
+            float gap = Vector2.Distance(V(c, "lastRelay"), goal);
+            string why = $"有涂层后中继链往湖心推：{c.Get("fix.lake_relays", "-")}；最后一座离湖心平台 {gap:0} 格（中继覆盖 200）";
+            if (!AcidMarshService.HasCoating(St))
+            {
+                return StepOutcome.Fail("还没有防腐涂层——" + why);
+            }
+            return gap <= 160f ? StepOutcome.Done(why) : StepOutcome.Fail("湖区中继推不到湖心平台旁——" + why);
+        }
+
         private static void ApplyOutpostFixture(JourneyContext c)
         {
             CampaignState s = St;

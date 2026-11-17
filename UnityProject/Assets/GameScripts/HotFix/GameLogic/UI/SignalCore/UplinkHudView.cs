@@ -236,6 +236,10 @@ namespace GameLogic.UI.SignalCore
             _heat.text = _snap.Overheated
                 ? GameText.Format("uplink.hud.heat", F0(_snap.Heat), F0(_snap.HeatMax)) + " · " + GameText.Format("uplink.hud.overheated", F0(_snap.HeatRecover))
                 : GameText.Format("uplink.hud.heat", F0(_snap.Heat), F0(_snap.HeatMax));
+            if (!string.IsNullOrEmpty(_snap.HeatCapNote))
+            {
+                _heat.text += " · " + _snap.HeatCapNote; // FG11-REG-01：热量上限变化（高温辐射 / 冷却塔恢复）
+            }
             _heat.EnableInClassList("uh-warn", _snap.Overheated);
             SetFill(_heatFill, _snap.HeatMax > 0f ? _snap.Heat / _snap.HeatMax : 0f);
             float battery01 = _snap.BatteryMax > 0f ? _snap.Battery / _snap.BatteryMax : 0f;

@@ -70,6 +70,8 @@ namespace GameLogic.Campaign.Signal
         public float Heat;
         public float HeatMax;
         public float HeatRecover;
+        /// <summary>FG11-REG-01（“热量上限变化在接入 HUD 上可见”）：热量上限此刻的变化说明（高温辐射 -25% / 冷却塔已恢复；不在辐射区 = 空串）。</summary>
+        public string HeatCapNote = string.Empty;
         public bool Overheated;
         public float Battery;
         public float BatteryMax;
@@ -231,15 +233,25 @@ namespace GameLogic.Campaign.Signal
             into.Heat = 0f;
             into.Overheated = false;
             into.Exposure = s?.SignalExposure ?? 0f;
+            into.HeatCapNote = string.Empty;
             if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord rec) || rec == null)
             {
                 return;
+            }
+            if (rec.RegionId == Regions.HomeValleyLayout.RegionId)
+            {
+                into.HeatCapNote = Env.CoolingTowerService.HudNote(s, MachineRegistry.TryGetLivePosition(logicId, out Vector2 live) ? live : rec.WorldPosition);
             }
             CombatSite site = CombatSites.Get(rec.RegionId);
             if (site != null && site.TryGetMachineHeat(logicId, out float heat, out bool over))
             {
                 into.Heat = heat;
                 into.Overheated = over;
+                // FG11-REG-01：热量上限读内核同一口径（高温辐射区里 ×0.75，运转中的冷却塔圈里恢复）；恢复线不缩放（内核只看 RecoverBelow，修复第 1 轮）。
+                if (site.TryGetMachineOverheatAt(logicId, out float heatCap) && into.HeatMax > 0f && Mathf.Abs(heatCap - into.HeatMax) > 1e-3f)
+                {
+                    into.HeatMax = heatCap;
+                }
             }
             else
             {
@@ -262,7 +274,7 @@ namespace GameLogic.Campaign.Signal
         public static int VitalsKey(UplinkHudSnapshot v) =>
             HashCode.Combine(HashCode.Combine(Mathf.RoundToInt(v.Heat), v.Overheated, Mathf.RoundToInt(v.Battery), Mathf.RoundToInt(v.Health), Mathf.RoundToInt(v.HealthMax), v.Injuries.Length),
                 Mathf.RoundToInt(v.LinkStrength01 * 100f), v.LinkLevel, Mathf.CeilToInt(v.LinkGraceLeft), Mathf.RoundToInt(v.LinkMarginCells),
-                Mathf.RoundToInt(v.Exposure * 10f), (int)GameText.Language);
+                HashCode.Combine(Mathf.RoundToInt(v.Exposure * 10f), (int)GameText.Language, Mathf.RoundToInt(v.HeatMax), v.HeatCapNote));
 
         // ── 链路强度 ───────────────────────────────────────────────────────────
 

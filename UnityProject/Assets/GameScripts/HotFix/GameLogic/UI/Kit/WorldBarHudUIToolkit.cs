@@ -313,6 +313,7 @@ namespace GameLogic.UI.Kit
             _marchHold = root.Q<Button>("WorldMarchHold");
             _marchReturn = root.Q<Button>("WorldMarchReturn");
             _marchFollow = root.Q<Button>("WorldMarchFollow");
+            _marchSwitch = root.Q<Button>("WorldMarchSwitch");
             _marchReason = root.Q<Label>("WorldMarchReason");
             // FG8-LOOT-02：待分拣数据包计数（点开待分拣面板；悬停写现在能不能分拣）。
             _packets = root.Q<Button>("WorldPacketCount");
@@ -344,6 +345,54 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_marchHold, () => MarchTip("exp.cmd.hold", "exp.cmd.tip.hold"));
             UiTooltip.Attach(_marchReturn, () => MarchTip("exp.cmd.return", "exp.cmd.tip.return"));
             UiTooltip.Attach(_marchFollow, () => new TooltipContent { Title = _marchFollow.text, Body = GameText.Get("exp.follow.started") });
+            if (_marchSwitch != null)
+            {
+                // FG11-REG-01（FG-GAP-016）：多支远征同时在外时切换行军条 / 远程命令 / 镜头跟随对着的那支。
+                _marchSwitch.clicked += SwitchTeam;
+                UiTooltip.Attach(_marchSwitch, () => new TooltipContent { Title = GameText.Get("exp.cmd.switch_team"), Body = GameText.Get("exp.cmd.tip.switch_team") });
+            }
+        }
+
+        private Button _marchSwitch;
+
+        /// <summary>FG11-REG-01：切换主队（多支远征同时在外）。被拒时写原因（拒绝音 + 字幕）。</summary>
+        public void SwitchTeam()
+        {
+            CampaignState state = CampaignSession.Current;
+            _returnConfirm = null;
+            if (ExpeditionMarchService.CycleFocus(state, out string failure))
+            {
+                _marchFailure = null;
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.CommandAck);
+            }
+            else
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, GameText.Get(ExpeditionTextKeys.ReasonKey(failure)));
+            }
+            RefreshMarch(state);
+        }
+
+        /// <summary>FG11-REG-01：其它同时在外的队伍一行一段（“第 2 队 · 行军中 · 约 1:20 到达”），没有返回空串。自检读。</summary>
+        public static string OtherTeamsText(CampaignState state)
+        {
+            ExpeditionExtraTeam[] xs = ExpeditionMarchService.Extras(state);
+            var parts = new System.Collections.Generic.List<string>(xs.Length);
+            for (int i = 0; i < xs.Length; i++)
+            {
+                ExpeditionMarchState x = xs[i]?.March;
+                if (x == null || (x.Phase != ExpeditionMarchService.PhaseOutbound && x.Phase != ExpeditionMarchService.PhaseReturning && x.Phase != ExpeditionMarchService.PhaseAtSite))
+                {
+                    continue;
+                }
+                int index = i;
+                string st = GameText.Get(ExpeditionMarchService.StatusTextKey(ExpeditionMarchService.ReadExtra(state, index, () => ExpeditionMarchService.StatusOf(state))));
+                double eta = ExpeditionMarchService.ReadExtra(state, index, () => ExpeditionMarchService.EtaSeconds(state));
+                string where = GameText.Get(ExpeditionTextKeys.SiteNameKey(x.SiteId));
+                parts.Add(eta >= 0
+                    ? GameText.Format("exp.team.other_eta", Math.Max(1, x.TeamNumber), st, where, GameClock.FormatGameDuration(eta))
+                    : GameText.Format("exp.team.other", Math.Max(1, x.TeamNumber), st, where));
+            }
+            return parts.Count == 0 ? string.Empty : GameText.Format("exp.team.others", string.Join(GameText.Get("exp.team.others_sep"), parts));
         }
 
         private Button _packets;
@@ -493,7 +542,7 @@ namespace GameLogic.UI.Kit
             ExpeditionMarchState m = ExpeditionMarchService.Current(state);
             int phase = m?.Phase ?? ExpeditionMarchService.PhaseNone;
             ExpeditionMarchService.TeamStatus status = ExpeditionMarchService.StatusOf(state);
-            string name = ExpeditionTeamService.DisplayName(state);
+            string name = ExpeditionMarchService.TeamLabel(state, m); // FG11-REG-01：多支在外时带编号
             string statusText = GameText.Get(ExpeditionMarchService.StatusTextKey(status));
             bool onPlanet = phase == ExpeditionMarchService.PhaseOutbound || phase == ExpeditionMarchService.PhaseReturning;
             string text;
@@ -514,6 +563,11 @@ namespace GameLogic.UI.Kit
             else
             {
                 text = GameText.Format("exp.march.bar", name, statusText);
+            }
+            string others = OtherTeamsText(state);
+            if (others.Length > 0)
+            {
+                text += GameText.Get("exp.team.others_sep") + others;
             }
             if (_marchStatus.text != text)
             {
@@ -538,6 +592,11 @@ namespace GameLogic.UI.Kit
             }
             bool atSite = phase == ExpeditionMarchService.PhaseAtSite;
             SetVisible(_marchFollow, onPlanet || atSite);
+            SetVisible(_marchSwitch, ExpeditionMarchService.ActiveTeamCount(state) > 1);
+            if (_marchSwitch != null)
+            {
+                _marchSwitch.text = GameText.Get("exp.cmd.switch_team");
+            }
             if (_marchFollow != null)
             {
                 _marchFollow.text = atSite ? GameText.Get("exp.cmd.goto_site") : GameText.Get("exp.cmd.follow");

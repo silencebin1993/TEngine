@@ -694,7 +694,7 @@ namespace GameLogic.Campaign.WorldSim
                     Economy.StandingRuleService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                     // FG4-ECO-09：离家报告与远征状态对齐（O(1)）：旧档读档时正在远征却没有报告 → 从此刻开一份；报告开着但远征已不在 → 按“其它方式结束”结算。
                     // FG8-EXP-02：星球上行军的远征也算在外（行军阶段还没有远征地点载入）。
-                    Economy.AwayReportService.Reconcile(state, ActiveExpedition?.SiteId ?? Regions.ExpeditionMarchService.AwaySiteId(state));
+                    Economy.AwayReportService.Reconcile(state, Regions.ExpeditionMarchService.ReportSiteId(state)); // FG11-REG-01：主队那一份（多支在外时地点可能是另一支的）
                 }
                 // FG7-ENV-01：昼夜——整游戏秒检查是否跨过入夜 / 天亮（O(1)，只看步序号，与观察无关；光照与太阳能由游戏秒直接算出，没有存档状态）。
                 Env.DayNightCycle.WorldStep(state, GameClock.Ticks, GameClock.StepHz);

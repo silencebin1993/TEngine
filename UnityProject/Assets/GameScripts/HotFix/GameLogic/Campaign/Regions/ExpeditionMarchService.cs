@@ -181,27 +181,221 @@ namespace GameLogic.Campaign.Regions
 
         public static ExpeditionMarchState Current(CampaignState s) => s?.Grid?.ExpeditionTeam?.March;
 
-        /// <summary>远征队在星球上走着（去程或返程，含待命 / 截断停下）。</summary>
-        public static bool IsMarching(CampaignState s) => Current(s) is { Phase: PhaseOutbound or PhaseReturning };
+        /// <summary>有远征队在星球上走着（任意一支：去程或返程，含待命 / 截断停下）。FG11-REG-01 起看全部同时在外的队伍。</summary>
+        public static bool IsMarching(CampaignState s)
+        {
+            if (OnPlanet(Current(s)))
+            {
+                return true;
+            }
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                if (OnPlanet(x?.March))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ─────────────── FG11-REG-01（FG-GAP-016）：多支远征同时在外 ───────────────
+        // 主队 = GridState.ExpeditionTeam.March（HUD 指挥、战略地图高亮、镜头跟随、远征地点、离家报告的“当前一份”都对着它）；
+        // 其它同时在外的队伍在 ExpeditionTeamState.Extras 里，每支自带行军记录与进行中的离家报告。每步把每支临时换成主队、走同一套逻辑再换回，
+        // 所以行军 / 到达 / 返回 / 结算只有一套实现。同一时刻只有一个远征地点能载入：一支在地点里时，另一支到了集结点就等候（site-busy，到点自动重试）。
+
+        /// <summary>同时在外的其它远征队（不含主队；没有返回空数组，不分配）。</summary>
+        public static ExpeditionExtraTeam[] Extras(CampaignState s) => s?.Grid?.ExpeditionTeam?.Extras ?? Array.Empty<ExpeditionExtraTeam>();
+
+        private static bool OnPlanet(ExpeditionMarchState m) => m is { Phase: PhaseOutbound or PhaseReturning };
+
+        private static bool IsActiveTeam(ExpeditionMarchState m) => m is { Phase: PhaseOutbound or PhaseAtSite or PhaseReturning };
+
+        /// <summary>此刻在外（行军中 / 在地点里 / 返程中）的远征队数。</summary>
+        public static int ActiveTeamCount(CampaignState s)
+        {
+            int n = IsActiveTeam(Current(s)) ? 1 : 0;
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                n += IsActiveTeam(x?.March) ? 1 : 0;
+            }
+            return n;
+        }
+
+        /// <summary>这台机器所在的在外远征队（没有返回 null）。O(队伍数 × 成员数)。</summary>
+        public static ExpeditionMarchState TeamOf(CampaignState s, int logicId)
+        {
+            ExpeditionMarchState p = Current(s);
+            if (IsActiveTeam(p) && p.Members != null && Array.IndexOf(p.Members, logicId) >= 0)
+            {
+                return p;
+            }
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                if (IsActiveTeam(x?.March) && x.March.Members != null && Array.IndexOf(x.March.Members, logicId) >= 0)
+                {
+                    return x.March;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>主队与 <paramref name="x"/> 互换（行军记录 + 进行中的离家报告一起换）。</summary>
+        private static void SwapPrimary(CampaignState s, ExpeditionExtraTeam x)
+        {
+            ExpeditionTeamState t = s.Grid.ExpeditionTeam;
+            (t.March, x.March) = (x.March, t.March);
+            AwayReportState d = s.Stats?.AwayReports;
+            if (d != null)
+            {
+                (d.HasOpen, x.AwayHasOpen) = (x.AwayHasOpen, d.HasOpen);
+                (d.Open, x.AwayOpen) = (x.AwayOpen, d.Open);
+            }
+        }
+
+        private static int ExtraIndexOf(CampaignState s, ExpeditionMarchState m)
+        {
+            ExpeditionExtraTeam[] xs = Extras(s);
+            for (int i = 0; i < xs.Length; i++)
+            {
+                if (xs[i] != null && ReferenceEquals(xs[i].March, m))
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>只读：把第 <paramref name="index"/> 支其它队伍临时换成主队，读一次（界面写其它队伍的状态 / 预计到达 / 路线用），再换回。</summary>
+        public static T ReadExtra<T>(CampaignState s, int index, Func<T> read)
+        {
+            ExpeditionExtraTeam[] xs = Extras(s);
+            if (read == null || index < 0 || index >= xs.Length || xs[index] == null)
+            {
+                return default;
+            }
+            SwapPrimary(s, xs[index]);
+            try
+            {
+                return read();
+            }
+            finally
+            {
+                SwapPrimary(s, xs[index]);
+            }
+        }
+
+        /// <summary>界面上写的队伍名：只有一支在外时就是远征队的名字；多支同时在外时加编号（“远征队 · 第 2 队”）。</summary>
+        public static string TeamLabel(CampaignState s, ExpeditionMarchState m)
+        {
+            string name = ExpeditionTeamService.DisplayName(s);
+            return ActiveTeamCount(s) > 1 ? GameText.Format("exp.team.numbered", name, Math.Max(1, m?.TeamNumber ?? 1)) : name;
+        }
+
+        /// <summary>
+        /// 切换主队（HUD 的“切换远征队”）：下一支在外的队伍成为主队（远程命令、预计到达、战略地图高亮、镜头跟随对着它）。
+        /// 在远征地点里的那支也能切走：撤离 / 放弃 / 离开地点的入口会先把它换回主队（<see cref="FocusSiteTeam"/>）。只有一支在外时 focus-single。
+        /// </summary>
+        public static bool CycleFocus(CampaignState s, out string failure)
+        {
+            failure = null;
+            ExpeditionExtraTeam[] xs = Extras(s);
+            if (s?.Grid?.ExpeditionTeam == null || ActiveTeamCount(s) < 2)
+            {
+                failure = "focus-single";
+                return false;
+            }
+            for (int i = 0; i < xs.Length; i++)
+            {
+                if (IsActiveTeam(xs[i]?.March))
+                {
+                    SwapPrimary(s, xs[i]);
+                    // 换下来的主队排到队尾，连续切换按顺序轮一圈。
+                    var list = new List<ExpeditionExtraTeam>(xs);
+                    ExpeditionExtraTeam moved = list[i];
+                    list.RemoveAt(i);
+                    list.Add(moved);
+                    s.Grid.ExpeditionTeam.Extras = list.ToArray();
+                    FocusCount++;
+                    return true;
+                }
+            }
+            failure = "focus-single";
+            return false;
+        }
+
+        /// <summary>切换主队成功的次数（自检读）。</summary>
+        public static int FocusCount { get; private set; }
+
+        /// <summary>有队伍在远征地点里、但不是主队时，把它换成主队（撤离 / 放弃 / 离开地点入口先调用）。O(队伍数)。</summary>
+        public static void FocusSiteTeam(CampaignState s)
+        {
+            if (s?.Grid?.ExpeditionTeam == null || Current(s)?.Phase == PhaseAtSite)
+            {
+                return;
+            }
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                if (x?.March != null && x.March.Phase == PhaseAtSite)
+                {
+                    SwapPrimary(s, x);
+                    return;
+                }
+            }
+        }
+
+        /// <summary>主队已结束（没有远征 / 已返回）而还有其它队伍在外：在外的那支成为主队；结束且报告已关的其它队伍从列表里去掉。</summary>
+        private static void CompactTeams(CampaignState s)
+        {
+            ExpeditionTeamState t = s.Grid.ExpeditionTeam;
+            ExpeditionExtraTeam[] xs = t.Extras ?? Array.Empty<ExpeditionExtraTeam>();
+            if (xs.Length == 0)
+            {
+                return;
+            }
+            if (!IsActiveTeam(t.March))
+            {
+                for (int i = 0; i < xs.Length; i++)
+                {
+                    if (IsActiveTeam(xs[i]?.March))
+                    {
+                        SwapPrimary(s, xs[i]);
+                        break;
+                    }
+                }
+            }
+            int keep = 0;
+            foreach (ExpeditionExtraTeam x in xs)
+            {
+                keep += x != null && (IsActiveTeam(x.March) || x.AwayHasOpen) ? 1 : 0;
+            }
+            if (keep == xs.Length)
+            {
+                return;
+            }
+            var list = new List<ExpeditionExtraTeam>(keep);
+            foreach (ExpeditionExtraTeam x in xs)
+            {
+                if (x != null && (IsActiveTeam(x.March) || x.AwayHasOpen))
+                {
+                    list.Add(x);
+                }
+            }
+            t.Extras = list.ToArray();
+        }
 
         /// <summary>
         /// 远征在外的统一判据（FGR-SIG-011 远征途中不能改信号核、“同一时刻一支远征队”、离家报告）：星球上行军中，或远征地点已载入。
         /// 所有读“远征在外”的地方都走这里——行军阶段 <see cref="WorldSimulation.ActiveExpedition"/> 为 null，只看它会漏判。
         /// </summary>
-        public static bool IsAway(CampaignState s) => IsMarching(s) || WorldSimulation.ActiveExpedition != null;
+        public static bool IsAway(CampaignState s) => IsMarching(s) || WorldSimulation.ActiveExpedition != null || ActiveTeamCount(s) > 0;
 
         /// <summary>星球上行军时的目的地地点；不在行军中返回 null（已进入地点时由 <see cref="WorldSimulation.ActiveExpedition"/> 给出）。</summary>
-        public static string AwaySiteId(CampaignState s) => IsMarching(s) ? Current(s).SiteId : null;
+        public static string AwaySiteId(CampaignState s) => OnPlanet(Current(s)) ? Current(s).SiteId : null; // 主队（离家报告“当前一份”对着它）
 
         /// <summary>这台机器是不是正在星球上行军的远征队成员（不接家园工作单 / 规则派遣，名册显示“远征中”）。O(成员数)。</summary>
         public static bool IsMarchMember(CampaignState s, int logicId)
         {
-            ExpeditionMarchState m = Current(s);
-            if (m == null || (m.Phase != PhaseOutbound && m.Phase != PhaseReturning) || m.Members == null)
-            {
-                return false;
-            }
-            return Array.IndexOf(m.Members, logicId) >= 0;
+            return OnPlanet(TeamOf(s, logicId));
         }
 
         public static bool IsMarchMember(int logicId) => IsMarchMember(CampaignSession.Current, logicId);
@@ -209,9 +403,62 @@ namespace GameLogic.Campaign.Regions
         /// <summary>这台机器是不是在外的远征队成员（星球上行军中，或在远征地点里）。名册写远征队状态用。O(成员数)。</summary>
         public static bool IsTeamMember(CampaignState s, int logicId)
         {
-            ExpeditionMarchState m = Current(s);
-            return m?.Members != null && (m.Phase == PhaseOutbound || m.Phase == PhaseReturning || m.Phase == PhaseAtSite)
-                && Array.IndexOf(m.Members, logicId) >= 0;
+            return TeamOf(s, logicId) != null;
+        }
+
+        /// <summary>FG11-REG-01（FG-GAP-016）：全部在外队伍的名单（主队在前，其它队伍按列表顺序；阵亡的也在，调用方自己筛）。O(队伍数 × 成员数)。</summary>
+        public static void CollectTeamMembers(CampaignState s, List<int> into)
+        {
+            into.Clear();
+            ExpeditionMarchState p = Current(s);
+            if (IsActiveTeam(p) && p.Members != null)
+            {
+                into.AddRange(p.Members);
+            }
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                if (IsActiveTeam(x?.March) && x.March.Members != null)
+                {
+                    into.AddRange(x.March.Members);
+                }
+            }
+        }
+
+        /// <summary>FG11-REG-01：全部在星球上行军的队伍里、还活着且在家园所在星球表面上的成员（加进 <paramref name="into"/>）。</summary>
+        public static void CollectPlanetMembers(CampaignState s, ICollection<int> into)
+        {
+            AddPlanet(Current(s), into);
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                AddPlanet(x?.March, into);
+            }
+        }
+
+        private static void AddPlanet(ExpeditionMarchState m, ICollection<int> into)
+        {
+            if (!OnPlanet(m) || m.Members == null)
+            {
+                return;
+            }
+            foreach (int id in m.Members)
+            {
+                if (MachineRegistry.TryGetRecord(id, out MachineRecord rec) && rec != null && rec.IsAlive && rec.RegionId == HomeValleyLayout.RegionId)
+                {
+                    into.Add(id);
+                }
+            }
+        }
+
+        /// <summary>离家报告“当前一份”（主队）对应的地点：主队在外 = 它的目的地；没有队伍认领已载入的地点（旧档）= 那个地点；否则 null。</summary>
+        public static string ReportSiteId(CampaignState s)
+        {
+            ExpeditionMarchState p = Current(s);
+            if (p is { Phase: PhaseOutbound or PhaseAtSite or PhaseReturning })
+            {
+                return p.Phase == PhaseAtSite && WorldSimulation.ActiveExpedition != null ? WorldSimulation.ActiveExpedition.SiteId : p.SiteId;
+            }
+            IWorldSite exp = WorldSimulation.ActiveExpedition;
+            return exp != null && !AnyTeamAtSite(s) ? exp.SiteId : null;
         }
 
         /// <summary>行军目的地（去程 = 锚点，返程 = 归还核心）。</summary>
@@ -256,7 +503,7 @@ namespace GameLogic.Campaign.Regions
         {
             center = default;
             alive = 0;
-            if (!IsMarching(s))
+            if (!OnPlanet(Current(s)))
             {
                 return false;
             }
@@ -286,9 +533,11 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>远征队五态（FGR-EXP-012）：交战优先；待命 = 下了“待命”、路线被截断、到达失败、或在地点里没有交战；没有远征在外也是待命。</summary>
-        public static TeamStatus StatusOf(CampaignState s)
+        public static TeamStatus StatusOf(CampaignState s) => StatusOf(Current(s));
+
+        /// <summary>FG11-REG-01：某一支队伍的五态（多支在外时名册按机器所在的那支写）。</summary>
+        public static TeamStatus StatusOf(ExpeditionMarchState m)
         {
-            ExpeditionMarchState m = Current(s);
             switch (m?.Phase ?? PhaseNone)
             {
                 case PhaseOutbound:
@@ -350,7 +599,7 @@ namespace GameLogic.Campaign.Regions
         {
             into.Clear();
             CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
-            if (!IsMarching(s) || home == null || home.IsDisposed)
+            if (!OnPlanet(Current(s)) || home == null || home.IsDisposed)
             {
                 return 0;
             }
@@ -389,7 +638,7 @@ namespace GameLogic.Campaign.Regions
         {
             alive = 0;
             int near = 0;
-            if (!IsMarching(s) || !TryGetGoal(s, out Vector2 goal))
+            if (!OnPlanet(Current(s)) || !TryGetGoal(s, out Vector2 goal))
             {
                 return 0;
             }
@@ -542,9 +791,10 @@ namespace GameLogic.Campaign.Regions
                 failure = "no-campaign";
                 return false;
             }
-            if (IsAway(s))
+            // FG11-REG-01（FG-GAP-016）：可以同时有多支远征队在外；同一个目的地同一时刻只派一支（地点一次只载入一支队伍）。
+            if (SiteTaken(s, siteId))
             {
-                failure = "expedition-underway";
+                failure = "destination-busy";
                 return false;
             }
             if (WorldSimulation.Home == null || !WorldSimulation.Home.IsLoaded || CombatSites.Get(HomeValleyLayout.RegionId) == null)
@@ -574,7 +824,17 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
             ids.Sort();
+            int number = NextTeamNumber(s);
+            if (IsActiveTeam(s.Grid.ExpeditionTeam.March))
+            {
+                // 主队还在外：把它（连同它进行中的离家报告）挪进其它队伍，新出发的这支成为主队（出发事务随后为它开离家报告）。
+                var holder = new ExpeditionExtraTeam { March = new ExpeditionMarchState(), AwayHasOpen = false, AwayOpen = new AwayReportRecord() };
+                var list = new List<ExpeditionExtraTeam>(Extras(s)) { holder };
+                s.Grid.ExpeditionTeam.Extras = list.ToArray();
+                SwapPrimary(s, holder);
+            }
             ExpeditionMarchState m = s.Grid.ExpeditionTeam.March ??= new ExpeditionMarchState();
+            m.TeamNumber = number;
             m.Phase = PhaseOutbound;
             m.SiteId = siteId;
             m.Members = ids.ToArray();
@@ -601,6 +861,48 @@ namespace GameLogic.Campaign.Regions
             return true;
         }
 
+        /// <summary>这个目的地已有远征队在去 / 在里面（返程中的不算：地点已经让出来了）。</summary>
+        public static bool SiteTaken(CampaignState s, string siteId)
+        {
+            if (string.IsNullOrEmpty(siteId))
+            {
+                return false;
+            }
+            if (WorldSimulation.ActiveExpedition != null && WorldSimulation.ActiveExpedition.SiteId == siteId)
+            {
+                return true;
+            }
+            ExpeditionMarchState p = Current(s);
+            if (p is { Phase: PhaseOutbound or PhaseAtSite } && p.SiteId == siteId)
+            {
+                return true;
+            }
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                if (x?.March is { Phase: PhaseOutbound or PhaseAtSite } && x.March.SiteId == siteId)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static int NextTeamNumber(CampaignState s)
+        {
+            for (int n = 1; ; n++)
+            {
+                bool used = IsActiveTeam(Current(s)) && Math.Max(1, Current(s).TeamNumber) == n;
+                foreach (ExpeditionExtraTeam x in Extras(s))
+                {
+                    used |= IsActiveTeam(x?.March) && Math.Max(1, x.March.TeamNumber) == n;
+                }
+                if (!used)
+                {
+                    return n;
+                }
+            }
+        }
+
         // ─────────────────────────────── 每步 ───────────────────────────────
 
         /// <summary>
@@ -613,13 +915,37 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            ExpeditionMarchState m = s.Grid.ExpeditionTeam.March;
-            if (m == null)
+            if (s.Grid.ExpeditionTeam.March == null)
             {
                 return;
             }
-            Reconcile(s, m);
             bool everySecond = GameClock.Ticks % Math.Max(1, GameClock.StepHz) == 0;
+            StepTeam(s, s.Grid.ExpeditionTeam.March, true, everySecond);
+            // FG11-REG-01（FG-GAP-016）：其它同时在外的队伍各自走同一套逻辑（临时换成主队，步完换回；按列表顺序，确定）。
+            ExpeditionExtraTeam[] xs = Extras(s);
+            for (int i = 0; i < xs.Length; i++)
+            {
+                ExpeditionExtraTeam x = xs[i];
+                if (x?.March == null || !IsActiveTeam(x.March))
+                {
+                    continue;
+                }
+                SwapPrimary(s, x);
+                try
+                {
+                    StepTeam(s, s.Grid.ExpeditionTeam.March, false, everySecond);
+                }
+                finally
+                {
+                    SwapPrimary(s, x);
+                }
+            }
+            CompactTeams(s);
+        }
+
+        private static void StepTeam(CampaignState s, ExpeditionMarchState m, bool primary, bool everySecond)
+        {
+            Reconcile(s, m, primary);
             switch (m.Phase)
             {
                 case PhaseOutbound:
@@ -639,14 +965,18 @@ namespace GameLogic.Campaign.Regions
         /// 与世界对齐（O(1)）：远征地点在运行但记录不是“在地点”（旧档读进来、自检直接载入地点）→ 记为在地点；
         /// 记录是“在地点”但地点已卸载（撤离 / 放弃 / 卸载）→ 有成员活着回到家园 = 已返回，否则 = 没有远征在外。
         /// </summary>
-        private static void Reconcile(CampaignState s, ExpeditionMarchState m)
+        private static void Reconcile(CampaignState s, ExpeditionMarchState m, bool primary)
         {
             IWorldSite exp = WorldSimulation.ActiveExpedition;
             if (exp != null && m.Phase != PhaseAtSite)
             {
-                AdoptAtSite(m, exp.SiteId);
+                // 多支在外时只有“没有任何队伍认领这个地点”才由主队收养（旧档 / 自检直接载入地点）；其它队伍在行军就继续行军。
+                if (primary && !AnyTeamAtSite(s))
+                {
+                    AdoptAtSite(m, exp.SiteId);
+                }
             }
-            else if (exp == null && m.Phase == PhaseAtSite)
+            else if (m.Phase == PhaseAtSite && (exp == null || exp.SiteId != m.SiteId))
             {
                 bool anyHome = false;
                 foreach (int id in m.Members ?? Array.Empty<int>())
@@ -655,6 +985,22 @@ namespace GameLogic.Campaign.Regions
                 }
                 SetPhase(m, anyHome ? PhaseReturned : PhaseNone);
             }
+        }
+
+        private static bool AnyTeamAtSite(CampaignState s)
+        {
+            if (Current(s)?.Phase == PhaseAtSite)
+            {
+                return true;
+            }
+            foreach (ExpeditionExtraTeam x in Extras(s))
+            {
+                if (x?.March?.Phase == PhaseAtSite)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static void AdoptAtSite(ExpeditionMarchState m, string siteId)
@@ -1090,9 +1436,24 @@ namespace GameLogic.Campaign.Regions
             {
                 _arrivalQueuedFor = null;
             }
-            if (!ReferenceEquals(CampaignSession.Current, s) || !ReferenceEquals(Current(s), m) || m.Phase != PhaseOutbound)
+            if (!ReferenceEquals(CampaignSession.Current, s) || m.Phase != PhaseOutbound)
             {
                 return;
+            }
+            int extra = ReferenceEquals(Current(s), m) ? -1 : ExtraIndexOf(s, m);
+            if (extra < 0 && !ReferenceEquals(Current(s), m))
+            {
+                return;
+            }
+            // FG11-REG-01（FG-GAP-016）：同一时刻只有一个远征地点能载入——另一支队伍在地点里时在集结点等候，到点自动重试。
+            if (WorldSimulation.ActiveExpedition != null)
+            {
+                FailArrival(s, m, "site-busy");
+                return;
+            }
+            if (extra >= 0)
+            {
+                SwapPrimary(s, Extras(s)[extra]); // 进地点的这支成为主队（地点里的撤离 / 结算对着主队）
             }
             int slot = CampaignSession.ActiveSlotIndex;
             string siteId = m.SiteId;
@@ -1376,6 +1737,31 @@ namespace GameLogic.Campaign.Regions
         /// </summary>
         public static void OnMembersBoardedPod(CampaignState s, IReadOnlyList<int> ids)
         {
+            // FG11-REG-01（FG-GAP-016）：登舱的成员属于其它队伍时，临时把那支换成主队再走同一套。
+            for (int i = 0; ids != null && i < ids.Count; i++)
+            {
+                ExpeditionMarchState owner = TeamOf(s, ids[i]);
+                int xi = owner == null || ReferenceEquals(owner, Current(s)) ? -1 : ExtraIndexOf(s, owner);
+                if (xi >= 0)
+                {
+                    ExpeditionExtraTeam x = Extras(s)[xi];
+                    SwapPrimary(s, x);
+                    try
+                    {
+                        OnMembersBoardedPodPrimary(s, ids);
+                    }
+                    finally
+                    {
+                        SwapPrimary(s, x);
+                    }
+                    return;
+                }
+            }
+            OnMembersBoardedPodPrimary(s, ids);
+        }
+
+        private static void OnMembersBoardedPodPrimary(CampaignState s, IReadOnlyList<int> ids)
+        {
             ExpeditionMarchState m = Current(s);
             if (m?.Members == null || ids == null || ids.Count == 0 || (m.Phase != PhaseOutbound && m.Phase != PhaseReturning))
             {
@@ -1432,6 +1818,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            FocusSiteTeam(s);
             ExpeditionMarchState m = s.Grid.ExpeditionTeam.March ??= new ExpeditionMarchState();
             var ids = new List<int>(survivors ?? Array.Empty<int>());
             ids.Sort();
@@ -1551,6 +1938,7 @@ namespace GameLogic.Campaign.Regions
         /// <summary>离开远征地点（<see cref="ExpeditionReturnService"/> 撤离 / 全灭放弃之后调用）：撤离 = 已返回；全灭放弃 = 没有远征在外。</summary>
         public static void OnLeftSite(CampaignState s, bool wiped)
         {
+            FocusSiteTeam(s);
             ExpeditionMarchState m = Current(s);
             if (m == null)
             {
@@ -1586,7 +1974,7 @@ namespace GameLogic.Campaign.Regions
         public static readonly string[] ReasonCodes =
         {
             "no-march", "at-site", "silent-night", "out-of-coverage", "no-members", "destination-pending", "site-unavailable",
-            "autosave-failed", "transaction-failed", "rollback-failed", "unknown",
+            "autosave-failed", "transaction-failed", "rollback-failed", "unknown", "site-busy", "focus-single", "destination-busy",
         };
 
         /// <summary>五态全集。</summary>
