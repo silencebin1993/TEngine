@@ -178,11 +178,36 @@ namespace GameLogic.Campaign.Regions
                 b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId == buildingTypeId);
         }
 
+        /// <summary>
+        /// FG11-RAID-01（FG-GAP-185“应急打印避开仍有危险的位置”）：核心旁的出生点落在还在烧蚀的斑块 / 燃烧液洼里时，挪到圈外（内核已有的危险查询
+        /// <see cref="Combat.CombatSite.StructHazardEscape"/>，与机器撤出危险格同一个落点算法）；家园没载入 / 没有危险时就是核心位置。
+        /// </summary>
+        public static Vector2 RescueSpawnPoint() => AvoidHazard(HomeValleyLayout.Core.Position);
+
+        /// <summary>FG11-RAID-01：<paramref name="at"/> 在危险里就挪到圈外，否则原样返回（家园没载入时原样）。</summary>
+        public static Vector2 AvoidHazard(Vector2 at)
+        {
+            Combat.CombatSite site = HomeSite;
+            return site != null && site.StructHazardEscape(at, out Vector2 safe) ? safe : at;
+        }
+
+        /// <summary>FG11-RAID-01：<paramref name="at"/> 是否落在还在烧蚀的斑块 / 燃烧液洼里（家园没载入 = 否）。</summary>
+        public static bool InHazard(Vector2 at)
+        {
+            Combat.CombatSite site = HomeSite;
+            return site != null && site.StructHazardEscape(at, out _);
+        }
+
+        private static Combat.CombatSite HomeSite =>
+            WorldSim.WorldSimulation.Home != null && WorldSim.WorldSimulation.Home.IsLoaded && WorldSim.WorldSimulation.Home.Combat != null && !WorldSim.WorldSimulation.Home.Combat.IsDisposed
+                ? WorldSim.WorldSimulation.Home.Combat
+                : null;
+
         private static void SpawnRescueMachine(CampaignState state, Action<WorkOrderRecord> beginMovement)
         {
             MachineOpResult result = MachineRegistry.SpawnMachine(
                 HomeValleyLayout.ErcRescueChassisId, "emergency:erc_rescue",
-                HomeValleyLayout.RegionId, HomeValleyLayout.Core.Position, RescueMachineHealth, RescueMachineHealth);
+                HomeValleyLayout.RegionId, RescueSpawnPoint(), RescueMachineHealth, RescueMachineHealth);
             if (!result.Success)
             {
                 Log.Warning($"[HomeValleySoftlockGuard] 紧急机生成失败：{result.Message}");

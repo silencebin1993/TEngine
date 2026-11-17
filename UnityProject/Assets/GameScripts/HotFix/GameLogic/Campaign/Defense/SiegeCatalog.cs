@@ -111,6 +111,9 @@ namespace GameLogic.Campaign.Defense
         public static float PerfFieldUpdateMs => Math.Max(0.1f, T("siege.perf.field_update_ms", 4f));
         public static float PerfStepMs => Math.Max(0.1f, T("siege.perf.step_ms", 2f));
 
+        /// <summary>攻城覆盖：表里 &gt; 0 用覆盖，否则取敌人表（DEBT-FG9DATA01-04）。</summary>
+        public static float Pick(float siegeOverride, float enemyValue) => siegeOverride > 0f ? siegeOverride : enemyValue;
+
         private static float T(string id, float fallback)
         {
             if (GridContent.TryGetTuning(id, out float v))
@@ -203,16 +206,59 @@ namespace GameLogic.Campaign.Defense
         /// （偏好 0），其它类别的偏好整体后移 siege.clarity.other_shift_m：净化塔比别的目标远不到这么多就先打净化塔，没有净化塔时照常按职能打
         /// （流场起点整体加同一个数，路线不变）。剧场是一张共享流场：同时在场的别的阵营队伍同一时刻也按这张表走（ADR-RAID-001 决策 2）。没有澄净队伍 = <see cref="RoleBias"/>。
         /// </summary>
-        public static IReadOnlyList<int> RoleBiasFor(bool clarity)
+        public static IReadOnlyList<int> RoleBiasFor(bool clarity) => RoleBiasFor(clarity, false);
+
+        /// <summary>
+        /// FG11-RAID-01（FG09 第 7 章“突袭特点：猎犬直扑发电设施”）：攻城剧场里有超频队伍时，破坏职能（超频猎犬 / 镜像体）的发电设施仍是主目标（偏好 0），
+        /// 破坏职能的其它类别（信号设施、监听站、核心、其它）整体后移 siege.overclock.other_shift_m——发电设施比信号塔远不到这么多就先扑发电设施；没有发电设施时照常按职能打。
+        /// 只改破坏职能这一行（突击 / 攻城不变）；与澄净表叠加（两个阵营同时在场时先叠澄净再叠超频）。共享流场口径同 ADR-RAID-001 决策 2。
+        /// </summary>
+        public static IReadOnlyList<int> RoleBiasFor(bool clarity, bool overclock)
         {
             EnsureLoaded();
-            if (!clarity)
+            if (clarity)
             {
-                return Bias;
+                BuildClarity();
+            }
+            if (!overclock)
+            {
+                return clarity ? ClarityBias : Bias;
+            }
+            BuildOverclock();
+            return clarity ? ClarityOverclockBias : OverclockBias;
+        }
+
+        /// <summary>FG11-RAID-01：超频在场时破坏职能的非发电类别后移（米）。</summary>
+        public static float OverclockOtherShiftMeters => Math.Max(0f, T("siege.overclock.other_shift_m", 60f));
+
+        private static readonly int[] OverclockBias = new int[CombatSiegeConst.RoleCount * CombatSiegeConst.CategoryCount];
+        private static readonly int[] ClarityOverclockBias = new int[CombatSiegeConst.RoleCount * CombatSiegeConst.CategoryCount];
+        private static int _overclockBuiltRevision = -1;
+
+        private static void BuildOverclock()
+        {
+            if (_overclockBuiltRevision == Revision)
+            {
+                return;
             }
             BuildClarity();
-            return ClarityBias;
+            _overclockBuiltRevision = Revision;
+            int power = math.tzcnt((int)CombatSiegeConst.CatPower);
+            int purify = math.tzcnt((int)CombatSiegeConst.CatPurify);
+            int shift = (int)Math.Round(OverclockOtherShiftMeters * 10f);
+            int row = (int)CombatSiegeRole.Sabotage - 1;
+            for (int i = 0; i < OverclockBias.Length; i++)
+            {
+                int r = i / CombatSiegeConst.CategoryCount;
+                int c = i % CombatSiegeConst.CategoryCount;
+                bool move = r == row && c != power;
+                OverclockBias[i] = Shift(Bias[i], move, shift);
+                // 澄净与超频同时在场（ADR-RAID-002 决策 1）：破坏职能里发电设施（猎犬直扑）与净化塔（澄净优先）都是主目标、各取原偏好，其余类别两边后移叠加。
+                ClarityOverclockBias[i] = r != row ? ClarityBias[i] : c == power ? Bias[i] : c == purify ? ClarityBias[i] : Shift(ClarityBias[i], true, shift);
+            }
         }
+
+        private static int Shift(int b, bool move, int shift) => !move || b >= CombatSiegeConst.Inf ? b : Math.Min(CombatSiegeConst.Inf, b + shift);
 
         public static IReadOnlyList<int> RoleMasksFor(bool clarity)
         {
@@ -358,9 +404,16 @@ namespace GameLogic.Campaign.Defense
             foreach (SiegeUnit row in units.DataList)
             {
                 MechEnemy e = row != null ? enemies.GetOrDefault(row.EnemyTypeId) : null;
-                if (row == null || e == null || row.Speed <= 0f || row.Range <= 0f || row.Damage <= 0f || row.Cooldown <= 0f || row.ProjectileSpeed <= 0f)
+                // FG11-RAID-01（DEBT-FG9DATA01-04）：速度 / 半径 / 射程 / 伤害 / 冷却以敌人表为唯一来源；fg.TbSiegeUnit 这五列只是“攻城覆盖”——0 = 取敌人表，
+                // 非 0 = 攻城时与区域不同的数（只允许区域数值不适用于攻城的旧单位，生成器 fgdata_siege.validate 拒绝与敌人表相同的重复值；ADR-RAID-002）。
+                float speed = e == null ? 0f : Pick(row.Speed, e.Speed);
+                float radius = e == null ? 0f : Pick(row.Radius, e.Radius);
+                float range = e == null ? 0f : Pick(row.Range, e.WeaponRange);
+                float damage = e == null ? 0f : Pick(row.Damage, e.WeaponDamage);
+                float cooldown = e == null ? 0f : Pick(row.Cooldown, e.WeaponCooldown);
+                if (row == null || e == null || speed <= 0f || range <= 0f || damage <= 0f || cooldown <= 0f || row.ProjectileSpeed <= 0f)
                 {
-                    ProblemList.Add($"fg.TbSiegeUnit {row?.EnemyTypeId}：敌人不在 fg.TbMechEnemy 或参数 ≤ 0");
+                    ProblemList.Add($"fg.TbSiegeUnit {row?.EnemyTypeId}：敌人不在 fg.TbMechEnemy 或合并后的参数 ≤ 0");
                     continue;
                 }
                 UnitByEnemy[row.EnemyTypeId] = new SiegeUnitDef
@@ -368,11 +421,11 @@ namespace GameLogic.Campaign.Defense
                     EnemyTypeId = row.EnemyTypeId,
                     Hp = Math.Max(1f, e.MaxHp),
                     FrontalReduction = Math.Max(0f, Math.Min(0.95f, e.FrontalDamageReduction)),
-                    Speed = row.Speed,
-                    Radius = Math.Max(0.2f, row.Radius),
-                    Range = row.Range,
-                    Damage = row.Damage,
-                    Cooldown = row.Cooldown,
+                    Speed = speed,
+                    Radius = Math.Max(0.2f, radius),
+                    Range = range,
+                    Damage = damage,
+                    Cooldown = cooldown,
                     ProjectileSpeed = row.ProjectileSpeed,
                     ProjectileRadius = Math.Max(0.05f, row.ProjectileRadius),
                     StructureMult = Math.Max(0.01f, row.StructureMult),

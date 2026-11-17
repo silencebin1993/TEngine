@@ -43,23 +43,23 @@ public sealed partial class SiegeUnit : Luban.BeanBase
     /// </summary>
     public readonly string EnemyTypeId;
     /// <summary>
-    /// 移动速度(米/游戏秒)
+    /// 攻城覆盖:移动速度(米/游戏秒);0=取敌人表 speed
     /// </summary>
     public readonly float Speed;
     /// <summary>
-    /// 半径(米)
+    /// 攻城覆盖:半径(米);0=取敌人表 radius
     /// </summary>
     public readonly float Radius;
     /// <summary>
-    /// 射程(米)
+    /// 攻城覆盖:射程(米);0=取敌人表 weaponRange
     /// </summary>
     public readonly float Range;
     /// <summary>
-    /// 每发伤害
+    /// 攻城覆盖:每发伤害;0=取敌人表 weaponDamage
     /// </summary>
     public readonly float Damage;
     /// <summary>
-    /// 开火间隔(游戏秒)
+    /// 攻城覆盖:开火间隔(游戏秒);0=取敌人表 weaponCooldown
     /// </summary>
     public readonly float Cooldown;
     /// <summary>

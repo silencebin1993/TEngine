@@ -36,6 +36,33 @@ namespace BinGames.Sim.Combat
             return true;
         }
 
+        /// <summary>
+        /// FG11-RAID-01（FG09 第 7 章“突袭特点：熔断者冲墙自爆”）：攻城中带熔断语法（行为参数 OcMeltHp &gt; 0）的单位顶到它正在打的己方结构（屏障 / 炮塔 / 建筑）→
+        /// 进入熔断，引信与耐久触发同一个（≥ 0.8 秒，表里 2 秒，预警 Cue 照发）。只看行为参数不认单位 ID（FGR-EMG-013）；已在熔断 / 待泄爆的不重复进入。O(超频表长)，只在开火到点那一步。
+        /// </summary>
+        internal static bool OcMeltOnContact(ref CombatData d, int i)
+        {
+            if (d.Overclocks.Length == 0 || !OcProfile(ref d, i, out CombatBehaviorProfile p) || p.OcMeltHp <= 0f)
+            {
+                return false;
+            }
+            int k = OcIndexOf(ref d, d.Id[i]);
+            if (k < 0)
+            {
+                return false;
+            }
+            CombatOverclock r = d.Overclocks[k];
+            if (r.State == CombatOverclockConst.StateMelting || r.State == CombatOverclockConst.StatePendingBurst)
+            {
+                return false;
+            }
+            r.State = CombatOverclockConst.StateMelting;
+            r.Until = d.Scalars[0].Time + math.max(0.8f, p.OcMeltFuse);
+            d.Overclocks[k] = r;
+            Cue(ref d, CombatEventKind.OverclockCue, i, 0, p.OcBurstRadius, d.Pos[i], CombatOverclockConst.CueMeltWarn);
+            return true;
+        }
+
         /// <summary>停机 / 排气中：不移动、不开火（停机计时照常走，冻结不叠加额外停机，FG09 第 10 节）。</summary>
         internal static bool OcHolds(ref CombatData d, int i)
         {

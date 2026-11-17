@@ -842,8 +842,12 @@ namespace GameLogic.Campaign.Defense
         /// 各摧毁入口调用（建筑结构单位阵亡、炮塔座被毁、防御建筑被毁、机器阵亡、维修无人机被击落）：有进行中的结算时记到最早展开的那一份。
         /// 明细至多 raid.result.losses_max 条（合计照常累加）；第一处损失另记一条过程。
         /// </summary>
-        public static void NoteLoss(CampaignState s, string kind, string id, Vector2 at)
+        /// <remarks>FG11-RAID-01（FG-GAP-185）：<paramref name="source"/> = 致命伤害的来源码（<see cref="Combat.CombatSite.DamageSourceOf"/>）；null 时取机器阵亡前
+        /// 由伤害请求登记的 <see cref="PendingSite"/> / <see cref="PendingAttacker"/>（同一调用栈内，用完即清），都没有记空串。记进损失明细并写进余波日志——余波里是谁在打一目了然。</remarks>
+        public static void NoteLoss(CampaignState s, string kind, string id, Vector2 at, string source = null)
         {
+            source ??= PendingSite != null ? PendingSite.DamageSourceOf(PendingAttacker, s) : string.Empty;
+            PendingSite = null;
             RaidResultState st = StateOf(s);
             if (st == null || st.CoreLost)
             {
@@ -882,13 +886,13 @@ namespace GameLogic.Campaign.Defense
             {
                 var list = new List<RaidLossRecord>(r.Losses)
                 {
-                    new RaidLossRecord { Tick = GameClock.Ticks, Kind = kind ?? string.Empty, Id = id ?? string.Empty, Name = name, X = at.x, Y = at.y },
+                    new RaidLossRecord { Tick = GameClock.Ticks, Kind = kind ?? string.Empty, Id = id ?? string.Empty, Name = name, X = at.x, Y = at.y, Source = source },
                 };
                 r.Losses = list.ToArray();
             }
             if (aftermath)
             {
-                TEngine.Log.Info($"[RaidResultService] 突袭结算 #{r.Serial} 余波损失：{KindText(kind)} {name}（结算后 {GameClock.Ticks - r.EndTick} 步），合计 {LossTotal(r)}");
+                TEngine.Log.Info($"[RaidResultService] 突袭结算 #{r.Serial} 余波损失：{KindText(kind)} {name}（结算后 {GameClock.Ticks - r.EndTick} 步，来源 {(source.Length > 0 ? source : "unknown")}），合计 {LossTotal(r)}");
             }
             Revision++;
         }
@@ -929,6 +933,10 @@ namespace GameLogic.Campaign.Defense
             Revision++;
             return true;
         }
+
+        /// <summary>FG11-RAID-01（FG-GAP-185）：机器受到的伤害请求正在结算时的地点与攻击者（CombatSite 伤害请求处理前写、处理后清；同步调用栈内由 <see cref="NoteLoss"/> 解析成来源码）。</summary>
+        public static Combat.CombatSite PendingSite;
+        public static int PendingAttacker;
 
         /// <summary>机器阵亡（<see cref="MachineRegistry.MarkDeadByLogicId"/> 唯一翻转点）：家园里的机器在攻城期间阵亡记一处损失。</summary>
         public static void OnMachineDied(CampaignState s, MachineRecord m, Vector2 at)

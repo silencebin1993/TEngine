@@ -919,7 +919,7 @@ namespace GameLogic.Campaign.Defense
                 {
                     // 炮塔耐久归零 = 炮塔座被摧毁（FGR-ECO-013：留下虚影，可以重建；设置保留）。
                     BuildingRecord b = HomeGridService.FindBuilding(state, r.BuildingId);
-                    RaidResultService.NoteLoss(state, RaidResultService.KindTurret, r.BuildingId, b?.Position ?? Vector2.zero); // FG6-DEF-08：突袭结算的损失
+                    RaidResultService.NoteLoss(state, RaidResultService.KindTurret, r.BuildingId, b?.Position ?? Vector2.zero, site.DamageSourceOf(e.Other, state)); // FG6-DEF-08：突袭结算的损失（FG11-RAID-01：记来源）
                     site.RemoveTurretUnit(serial);
                     if (Rt.TryGetValue(serial, out Runtime rt))
                     {

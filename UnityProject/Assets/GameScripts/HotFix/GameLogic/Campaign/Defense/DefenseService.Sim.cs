@@ -1033,7 +1033,7 @@ namespace GameLogic.Campaign.Defense
             ReleaseTrapConsumer(r);
             if (b != null)
             {
-                RaidResultService.NoteLoss(state, RaidResultService.KindDefense, b.BuildingId, b.Position); // FG6-DEF-08：突袭结算的损失
+                RaidResultService.NoteLoss(state, RaidResultService.KindDefense, b.BuildingId, b.Position, site.DamageSourceOf(e.Other, state)); // FG6-DEF-08：突袭结算的损失（FG11-RAID-01：记来源）
                 DestroyBuilding(state, b);
                 if (DefenseCatalog.BlocksMovement(b.BuildingTypeId))
                 {

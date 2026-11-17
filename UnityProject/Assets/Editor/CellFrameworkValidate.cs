@@ -767,6 +767,9 @@ namespace GameLogic.EditorTools
             // FG11-BOSS-01 余烬主机：升频 / 槽位封锁 / 熔毁倒计时、奖励与平定、复位重试、存读档与倍速、室内教义自卫（FG-GAP-226）、反夺控正式入口（DEBT-EMG4FW01-01）。
             Seg("FgEmberHostSelfCheck", FgEmberHostSelfCheck.Run);
             Seg("FgClarityRaidSelfCheck", FgClarityRaidSelfCheck.Run);
+            // FG11-RAID-01 超频突袭：猎犬直扑发电设施、熔断者冲墙自爆（负向：屏障前集体自爆）、预警写明特点、超频发动与反制、攻城数值同源（DEBT-FG9DATA01-04）、
+            // 暂停倍速与存读档、伤害来源与应急打印避险（FG-GAP-185）。
+            Seg("FgOverclockRaidSelfCheck", FgOverclockRaidSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);
             // FG9-BAL-01 第一幕平衡：节奏机器人（加速模拟，真实世界逐步推进）在 3 个测试种子上走完第一幕、每个节奏点偏差 ≤ 25%（FGT-BAL-004 第一幕部分）；

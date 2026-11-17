@@ -1655,7 +1655,12 @@ namespace BinGames.Sim.Combat
             if (inRange && cycle <= 0f)
             {
                 d.Cycle[i] = CombatLogic.UnitCooldown(ref d, i, wp);
+                bool structHit = !retreat && IsSiegeStructure(ref d, t);
                 CombatLogic.UnitAttack(ref d, i, t, wp);
+                if (structHit && d.IsAlive(i))
+                {
+                    CombatLogic.OcMeltOnContact(ref d, i); // FG11-RAID-01：熔断者冲墙自爆（顶到正在打的结构才进熔断；离墙远的不爆）
+                }
             }
 
             // 4. 移动

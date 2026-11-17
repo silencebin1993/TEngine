@@ -366,7 +366,7 @@ namespace GameLogic.Campaign.Defense
             if (HomeValleyPowerGrid.ApplyBuildingDestroyed(state, b.BuildingId))
             {
                 st.TotalDestroyedBuildings++;
-                RaidResultService.NoteLoss(state, RaidResultService.KindBuilding, b.BuildingId, b.Position); // FG6-DEF-08：突袭结算的损失
+                RaidResultService.NoteLoss(state, RaidResultService.KindBuilding, b.BuildingId, b.Position, site.DamageSourceOf(e.Other, state)); // FG6-DEF-08：突袭结算的损失（FG11-RAID-01：记来源）
             }
         }
 

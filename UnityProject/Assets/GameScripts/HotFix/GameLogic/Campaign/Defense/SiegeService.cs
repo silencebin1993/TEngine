@@ -621,17 +621,21 @@ namespace GameLogic.Campaign.Defense
         private static void ApplyRoles(CampaignState state, CombatSite site, bool force = true)
         {
             bool clarity = AnyClaritySieging(state);
-            site.SetSiegeRoles(SiegeCatalog.RoleMasksFor(clarity), SiegeCatalog.RoleBiasFor(clarity));
+            // FG11-RAID-01：有超频队伍在攻城 → 破坏职能（猎犬）以发电设施为主目标（SiegeCatalog.RoleBiasFor 的超频表）。
+            site.SetSiegeRoles(SiegeCatalog.RoleMasksFor(clarity), SiegeCatalog.RoleBiasFor(clarity, AnyFactionSieging(state, Content.EnemyDefs.FactionOverclock)));
             ClarityRaidService.ApplyPolluteTargets(state, site, clarity, force); // 灭活无人机的投放目标（净化塔；只在澄净攻城时）
         }
 
         /// <summary>正在攻城的队伍里有没有澄净的（队伍的阵营；旧档没记时按所属计划）。</summary>
-        public static bool AnyClaritySieging(CampaignState state)
+        public static bool AnyClaritySieging(CampaignState state) => AnyFactionSieging(state, RaidCatalog.FactionChemical);
+
+        /// <summary>正在攻城的队伍里有没有 <paramref name="faction"/> 的（队伍的阵营；旧档没记时按所属计划）。O(队伍数)。</summary>
+        public static bool AnyFactionSieging(CampaignState state, string faction)
         {
             foreach (TransitGroupRecord g in SiegingGroups(state))
             {
                 string f = !string.IsNullOrEmpty(g.Faction) ? g.Faction : RaidDirectorService.FindPlan(state, g.PlanId)?.Faction;
-                if (f == RaidCatalog.FactionChemical)
+                if (f == faction)
                 {
                     return true;
                 }
@@ -685,25 +689,38 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
-            TransitGroupRecord[] groups = state.Raids?.InTransit ?? Array.Empty<TransitGroupRecord>();
             foreach (int key in OrphanScratch)
             {
-                bool owned = false;
-                foreach (TransitGroupRecord g in groups)
-                {
-                    if (g != null && (g.Engaged || g.Intercepted) && KeyOf(g) == key)
-                    {
-                        owned = true;
-                        break;
-                    }
-                }
-                // FG8-EXP-03：正在迎战的据点 / 巡逻也是主人；FG10-BOSS-01：洗礼塔战斗中召来的那一波也是。
-                if (!owned && !TerritoryControlService.OwnsKey(state, key) && !Regions.BaptismTowerBoss.OwnsKey(state, key))
+                if (GroupOwnerOf(state, key) == null)
                 {
                     site.DespawnSiegeGroup(key);
                     OrphansRemoved++;
                 }
             }
+        }
+
+        public const string OwnerRaid = "raid";
+        public const string OwnerTerritory = "territory";
+        public const string OwnerBoss = "boss";
+
+        /// <summary>
+        /// 内核攻城组（队伍键）的主人：<see cref="OwnerRaid"/> = 突袭行进队伍（交战 / 拦截中）；<see cref="OwnerTerritory"/> = 正在迎战的据点 / 巡逻（FG8-EXP-03）；
+        /// <see cref="OwnerBoss"/> = 洗礼塔战斗中召来的那一波（FG10-BOSS-01）；null = 无主（对账时收回）。无主收回与伤害来源码（FG-GAP-185）共用这一个判定。O(行进队伍数)。
+        /// </summary>
+        public static string GroupOwnerOf(CampaignState state, int key)
+        {
+            if (state == null || key <= 0)
+            {
+                return null;
+            }
+            foreach (TransitGroupRecord g in state.Raids?.InTransit ?? Array.Empty<TransitGroupRecord>())
+            {
+                if (g != null && (g.Engaged || g.Intercepted) && KeyOf(g) == key)
+                {
+                    return OwnerRaid;
+                }
+            }
+            return TerritoryControlService.OwnsKey(state, key) ? OwnerTerritory : Regions.BaptismTowerBoss.OwnsKey(state, key) ? OwnerBoss : null;
         }
         // ─────────────────────────────── 撤退、收拢、全歼 ───────────────────────────────
 

@@ -2879,7 +2879,17 @@ namespace GameLogic.Campaign.Combat
                             {
                                 return; // EMG4-HIJ-02（DEBT-EMG1FW02-03）：夺控中的机器被击倒 = 瘫痪，不走 MarkDeadByLogicId（不阵亡、自毁装药不起爆）
                             }
-                            MachineRegistry.ApplyDamage(logicId, e.Value);
+                            // FG11-RAID-01（FG-GAP-185）：这一下打死机器时损失记来源（只记攻击者 ID，阵亡时才解析成来源码，不为每次命中分配字符串）
+                            Defense.RaidResultService.PendingSite = this;
+                            Defense.RaidResultService.PendingAttacker = e.Other;
+                            try
+                            {
+                                MachineRegistry.ApplyDamage(logicId, e.Value);
+                            }
+                            finally
+                            {
+                                Defense.RaidResultService.PendingSite = null;
+                            }
                             SyncMachineHealth(mrec);
                         }
                         return;

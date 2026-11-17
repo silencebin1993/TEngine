@@ -176,6 +176,9 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
+        /// <summary>FG11-RAID-01：阵营的“突袭特点”文本键（FG09 各阵营章节）；空阵营返回 null。</summary>
+        public static string TraitKey(string faction) => string.IsNullOrEmpty(faction) ? null : "raid.trait." + faction;
+
         /// <summary>这个阵营有没有突袭编成（没有的阵营不会被选中发动突袭；化工 / 超频的单位在 FG10-FAC-01 / FG11-FAC-01）。</summary>
         public static bool HasUnits(string faction)
         {

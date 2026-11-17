@@ -136,6 +136,8 @@ namespace GameLogic.Campaign
         public string Name = string.Empty;
         public float X;
         public float Y;
+        /// <summary>FG11-RAID-01（FG-GAP-185）：致命伤害的来源码（field / gone:id / raid:队伍:敌人 / hostile:敌人 / player:种类；旧档与没登记来源 = 空串）。</summary>
+        public string Source = string.Empty;
     }
 
     /// <summary>FG6-DEF-08：一个击毁者的贡献。</summary>

@@ -313,7 +313,17 @@ namespace GameLogic.Campaign.Defense
                 return head + "\n" + GameText.Get("raid.warning.comp_unknown");
             }
             return head + "\n" + GameText.Format("raid.warning.faction", FactionText(p), RaidCatalog.LevelName(p.Level), v.Units) + " · "
-                   + CompositionText(p) + " · " + CounterText(p);
+                   + TraitText(p) + " · " + CompositionText(p) + " · " + CounterText(p);
+        }
+
+        /// <summary>
+        /// FG11-RAID-01（FG09 各阵营“突袭特点”，卡片“预警情报写明‘高速突击’的特点”）：有情报时预警写明这个阵营的突袭特点（文本键 raid.trait.&lt;阵营&gt;，
+        /// 生成器 fgdata_raid.validate 保证编成表里每个阵营都有一行）；没有这一行的阵营返回空串。
+        /// </summary>
+        public static string TraitText(RaidPlanRecord p)
+        {
+            string key = RaidCatalog.TraitKey(p?.Faction);
+            return key != null && GameText.Has(key) ? GameText.Format("raid.warning.trait", GameText.Get(key)) : string.Empty;
         }
 
         /// <summary>预警条一行的悬停说明（触发、目标、出发地、预计抵达、编成 / 反制）。</summary>
@@ -332,12 +342,17 @@ namespace GameLogic.Campaign.Defense
             string arrive = GameClock.FormatDayTime(Math.Max(0, v.ArrivalTick) / (double)Math.Max(1, GameClock.StepHz));
             string comp = v.IntelKnown ? CompositionText(p) : GameText.Get("raid.warning.comp_unknown");
             string counter = v.IntelKnown ? CounterText(p) : string.Empty;
+            string trait = v.IntelKnown ? TraitText(p) : string.Empty;
             // 文本表里不放换行：逐行一个键，这里按行拼接；没有情报时不写“针对”一行。
             var sb = new StringBuilder();
             sb.Append(GameText.Format("raid.warning.tip.trigger", trig.ToString())).Append('\n');
             sb.Append(GameText.Format("raid.warning.tip.target", TargetText(p))).Append('\n');
             sb.Append(GameText.Format("raid.warning.tip.origin", OriginText(p), WaveDirectionText(v))).Append('\n');
             sb.Append(GameText.Format("raid.warning.tip.arrive", arrive)).Append('\n');
+            if (!string.IsNullOrEmpty(trait))
+            {
+                sb.Append(trait).Append('\n');
+            }
             sb.Append(comp).Append('\n');
             if (!string.IsNullOrEmpty(counter))
             {

@@ -249,14 +249,16 @@ namespace GameLogic.Campaign.Economy
                         {
                             continue;
                         }
-                        if (Nav.NavService.Kernel.Passable(c0.X + dx, c0.Y + dy, BinGames.Sim.Nav.NavConst.ClassPlayer))
+                        // FG11-RAID-01（FG-GAP-185）：应急打印避开仍有危险的位置（还在烧蚀的斑块 / 燃烧液洼，内核危险查询）
+                        if (Nav.NavService.Kernel.Passable(c0.X + dx, c0.Y + dy, BinGames.Sim.Nav.NavConst.ClassPlayer)
+                            && !Regions.HomeValleySoftlockGuard.InHazard(new Vector2(c0.X + dx, c0.Y + dy)))
                         {
                             return new Vector2(c0.X + dx, c0.Y + dy);
                         }
                     }
                 }
             }
-            return anchor;
+            return Regions.HomeValleySoftlockGuard.AvoidHazard(anchor);
         }
 
         // ── 核心应急产废料（FGR-ECO-070）──────────────────────────────────────────────
