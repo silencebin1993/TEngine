@@ -51,7 +51,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/因果链与可靠计数")]
+        [MenuItem("QA/自检/因果链与可靠计数")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -495,7 +495,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckChainRecords()
         {
-            Line("  · C1. 链继承：一次出手开一条链，触发放出的子弹药与触发记录同链、链深 + 1；4 个归属保留最早 3 个 + 最近 1 个；链深 3 截断记“链深已达上限”");
+            Line("  · C1. 链继承：一次出手开一条链，触发放出的子弹药与触发记录同链、链深 + 1；8 个归属，满格先挤在场的非己方、再挤最早的己方；链深 3 截断记“链深已达上限”");
             using (var k = new CombatKernel(Cfg(), 16))
             {
                 int w = k.AddWeapon(Melee(k, Compile(Split)));
@@ -518,15 +518,24 @@ namespace GameLogic.EditorTools
                 Expect(shot.Chain > 0 && shot.SrcUnit == me && trig.Chain == shot.Chain && trig.Depth == 1 && trig.Key == (int)EmgEventKind.Hit && trig.Aux == 1
                        && subs.Count > 0 && subs.All(s => s.Chain == shot.Chain && s.Depth == 1) && shot.Kind == ring[0].Kind,
                     $"[分裂]：出手记录（链 {shot.Chain}、源 = 出手机器）→ 触发记录（同链、链深 {trig.Depth}、命中时、第 {trig.Aux} 代）→ {subs.Count} 发子弹药都在链 {shot.Chain}、链深 1");
-                int4 owners = k.EmgChainOwners(shot.Chain);
-                Expect(owners.x == me && owners.y == 0, $"链上归属 = 出手机器（{owners}）");
+                EmgOwners owners = k.EmgChainOwners(shot.Chain);
+                Expect(owners[0] == me && owners[1] == 0, $"链上归属 = 出手机器（{owners}）");
             }
-            int4 o = int4.zero;
-            foreach (int id in new[] { 11, 0, 12, 11, 13, 14, 15, 16 })
+            using (var ko = new CombatKernel(Cfg(), 16))
             {
-                CombatLogic.EmgOwnersAdd(ref o, id);
+                // FG11-ATTR-01（ADR ⑨ 更正，FGR-EMG-182 8 格）：0 不记、重复不记、按出现先后填满 8 格；都不在场（按己方留着）时满了挤掉最早的
+                EmgOwners o = default;
+                foreach (int id in new[] { 11, 0, 12, 11, 13, 14, 15, 16, 17, 18, 19, 20 })
+                {
+                    o = ko.EmgOwnersAddForTests(o, id);
+                }
+                bool order = true;
+                for (int q = 0; q < EmgOwners.Cap; q++)
+                {
+                    order &= o[q] == 13 + q;
+                }
+                Expect(order, $"8 个归属的取舍：依次加 11、0、12、11（重复）、13～20 → {o}（0 不记、重复不记、满 8 格后挤掉最早的 11、12）");
             }
-            Expect(o.x == 11 && o.y == 12 && o.z == 13 && o.w == 16, $"4 个归属的取舍：依次加 11、0、12、11（重复）、13、14、15、16 → {o}（0 不记、重复不记、满了保留最早 3 个 + 最近 1 个）");
             using (var k = new CombatKernel(Cfg(), 16))
             {
                 // 真实残骸：A 击毁 → B、C、D、E 先后打碎它（环里的残骸 / 破片记录），归属 = A、B、C、E
@@ -541,20 +550,20 @@ namespace GameLogic.EditorTools
                 {
                     k.EmgChainLogForTests(EmgChainNode.Fragment, 50 + striker, striker, 0, wr.Chain, wr.Id);
                 }
-                int4 wo = k.EmgWreckOwners(wr.Id);
-                Expect(wreck && wo.x == a && wo.y == 901 && wo.z == 902 && wo.w == 904,
-                    $"残骸归属：击毁者 {a} + 打碎它的 901～904 → {wo}（最早 3 个 + 最近 1 个；残骸 Id {wr.Id}）");
+                EmgOwners wo = k.EmgWreckOwners(wr.Id);
+                Expect(wreck && wo[0] == a && wo[1] == 901 && wo[2] == 902 && wo[3] == 903 && wo[4] == 904,
+                    $"残骸归属：击毁者 {a} + 打碎它的 901～904 → {wo}（FG11-ATTR-01：8 格，5 台都在；残骸 Id {wr.Id}）");
                 // 修复轮（审查 P1）：击毁者持久存在残骸上——环写满覆盖后、读档后（环从空开始）悬停仍显示击毁者
                 for (int i = 0; i < 300; i++)
                 {
                     k.EmgChainLogForTests(EmgChainNode.Shot, 5000 + i, 77);
                 }
-                int4 afterRing = k.EmgWreckOwners(wr.Id);
+                EmgOwners afterRing = k.EmgWreckOwners(wr.Id);
                 using (var r = new CombatKernel(Cfg(), 16))
                 {
                     CombatLoadResult res = r.Load(k.Serialize());
-                    int4 afterLoad = r.EmgWreckOwners(wr.Id);
-                    Expect(wr.Killer == a && afterRing.x == a && afterRing.y == 0 && res == CombatLoadResult.Ok && r.EmgChainRecordCount == 0 && afterLoad.x == a && afterLoad.y == 0,
+                    EmgOwners afterLoad = r.EmgWreckOwners(wr.Id);
+                    Expect(wr.Killer == a && afterRing[0] == a && afterRing[1] == 0 && res == CombatLoadResult.Ok && r.EmgChainRecordCount == 0 && afterLoad[0] == a && afterLoad[1] == 0,
                         $"残骸持久击毁者 {wr.Killer}：环写满 300 条覆盖后归属 {afterRing}、读档后（环 {r.EmgChainRecordCount} 条，{res}）归属 {afterLoad}——都还是击毁者 {a}");
                 }
             }

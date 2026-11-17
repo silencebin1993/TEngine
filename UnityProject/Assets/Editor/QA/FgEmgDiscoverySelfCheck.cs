@@ -44,7 +44,7 @@ namespace GameLogic.EditorTools
         private static int _pass;
         private static string _dir;
 
-        [MenuItem("BinGames/QA/自检/首次发现与交互伤害归因")]
+        [MenuItem("QA/自检/首次发现与交互伤害归因")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -95,6 +95,12 @@ namespace GameLogic.EditorTools
                 Step(CheckAttribution);
                 Step(CheckDepartedCredit);
                 Step(CheckOwnersCap);
+                Step(CheckAttrDot);
+                Step(CheckAttrUnitLayer);
+                Step(CheckAttrPersist);
+                Step(CheckAttrNoGameplay);
+                Step(CheckAttrSpeed);
+                Step(CheckAttrHome);
                 Step(CheckFriendly);
                 Step(CheckObservation);
                 Step(CheckSaveRoundTrip);
@@ -168,9 +174,9 @@ namespace GameLogic.EditorTools
             }
         }
 
-        private static int Unit(CombatKernel k, CombatFaction f, double2 p, int weapon = -1, float hp = 100000f) => k.Spawn(new CombatSpawn
+        private static int Unit(CombatKernel k, CombatFaction f, double2 p, int weapon = -1, float hp = 100000f, CombatUnitKind? kind = null) => k.Spawn(new CombatSpawn
         {
-            ExtKey = -1, Kind = f == CombatFaction.Player ? CombatUnitKind.Machine : CombatUnitKind.Enemy, Faction = f,
+            ExtKey = -1, Kind = kind ?? (f == CombatFaction.Player ? CombatUnitKind.Machine : CombatUnitKind.Enemy), Faction = f,
             Behavior = CombatBehavior.None, Flags = Live, Position = p, Home = p, Radius = 0.5f, Speed = 0f, Health = hp, MaxHealth = hp,
             Weapon = weapon, BehaviorProfile = -1, Priority = 1, ArmorHalfAngleDeg = 90f, ArmorFraction = 0f,
             ArmorFacing = f == CombatFaction.Player ? new float2(0f, 1f) : new float2(0f, -1f),
@@ -376,7 +382,7 @@ namespace GameLogic.EditorTools
             {
                 any = b.TryGetPatch(i, out z) && z.Matter == EmgMatterConst.Oil;
             }
-            Expect(CombatConst.FormatVersion >= 18 && r == CombatLoadResult.Ok && any && z.RuleKey == 0 && z.Owners.x == ownerA,
+            Expect(CombatConst.FormatVersion >= 18 && r == CombatLoadResult.Ok && any && z.RuleKey == 0 && z.Owners[0] == ownerA,
                 $"D4 快照斑块段 40 字段（本 Story 之前）读入：规则键取 0、归属保留（{r}）；FormatVersion = {CombatConst.FormatVersion}");
         }
 
@@ -499,7 +505,7 @@ namespace GameLogic.EditorTools
             CampaignState s2 = NewState(9612);
             ReactionAttribution.Current(s2, SiteId, create: true);
             int key = NamedReactionCatalog.StableKey("reaction_deflagrate");
-            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = key, Owners = new int4(a, a2, b, 0), Damage = 90 });
+            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = key, Owners = EmgOwners.Of(a, a2, b), Damage = 90 });
             ReactionSessionRecord sess2 = ReactionAttribution.Current(s2, SiteId, create: false);
             Expect(sess2 != null && sess2.Credits.Length == 2 && Math.Abs(cred(sess2, 201) - 45) < 1e-9 && Math.Abs(cred(sess2, 202) - 45) < 1e-9
                    && Math.Abs(sess2.Credits.Sum(c => c.Damage) - 90) < 1e-9,
@@ -522,7 +528,7 @@ namespace GameLogic.EditorTools
             sess = ReactionAttribution.Current(s3, SiteId, create: true);
             double c0 = cred(sess, 203);
             bool deadMapped = false;
-            int4 rowOwners = int4.zero;
+            EmgOwners rowOwners = default;
             int rowsSeen = 0;
             for (int i = 0; i < 300 && cred(sess, 203) <= c0; i++)
             {
@@ -564,7 +570,8 @@ namespace GameLogic.EditorTools
             Ignite(k, 0, a, b);
             int key = NamedReactionCatalog.StableKey("reaction_deflagrate");
             double seenRowDamage = 0;
-            int4 seenOwners = int4.zero;
+            EmgOwners seenOwners = default;
+            int keyRows = 0, keyRowsBoth = 0;
             for (int i = 0; i < 300; i++)
             {
                 StepSite(site, 1);
@@ -574,15 +581,18 @@ namespace GameLogic.EditorTools
                     if (row.Key == key)
                     {
                         seenRowDamage += row.Damage;
-                        seenOwners = row.Owners.y != 0 ? row.Owners : seenOwners; // 另有一行归属只有点火方（单位身上的沾染反应：沾染来源不进内核，DEBT-EMG2DISC01-02）
+                        seenOwners = row.Owners;
+                        keyRows++;
+                        // FG11-ATTR-01（规格口径 FGR-EMG-130 / 182，删掉“只看有第二个归属的那一行”的过滤）：斑块层产物与单位身上的沾染反应，每一行都要同时归 A 和 B
+                        keyRowsBoth += row.Owners.Has(a) && row.Owners.Has(b) ? 1 : 0;
                     }
                 }
             }
             ReactionSessionRecord sess = Session(s);
             ReactionShareRecord share = sess?.Reactions.FirstOrDefault(r => r.ReactionId == "reaction_deflagrate");
-            bool owners = seenOwners.x == a && seenOwners.y == b && seenOwners.z == 0;
+            bool owners = keyRows > 0 && keyRowsBoth == keyRows;
             Expect(sess != null && share != null && seenRowDamage > 0 && owners && Math.Abs(share.Damage - seenRowDamage) < 1e-6,
-                $"E1 A 的明火点着 B 的油（爆燃）：产物烧到敌人的伤害归“爆燃”（场次 {share?.Damage:0.0} = 内核 {seenRowDamage:0.0}），归属 = A、B（{seenOwners}）");
+                $"E1 A 的明火点着 B 的油（爆燃）：产物烧到敌人的伤害归“爆燃”（场次 {share?.Damage:0.0} = 内核 {seenRowDamage:0.0}），{keyRowsBoth}/{keyRows} 行都归 A、B（末行 {seenOwners}）");
             bool bounded = sess != null && sess.InteractionDamage >= (share?.Damage ?? 0) - 1e-6 && sess.InteractionDamage <= sess.TotalDamage + 1e-6;
             double cred(int logic) => sess?.Credits?.FirstOrDefault(c => c.LogicId == logic)?.Damage ?? 0;
             Expect(bounded && cred(101) > 0 && cred(102) > 0 && sess.InteractionCount >= 1 && sess.MaxChainDepth >= 1,
@@ -591,14 +601,14 @@ namespace GameLogic.EditorTools
             // 平分：两台 → 各一半；再多算一台敌人不分（只分机器）
             CampaignState s2 = NewState(9606);
             ReactionAttribution.Current(s2, SiteId, create: true);
-            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = key, Owners = new int4(a, b, e, 0), Damage = 90 });
+            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = key, Owners = EmgOwners.Of(a, b, e), Damage = 90 });
             ReactionSessionRecord sess2 = ReactionAttribution.Current(s2, SiteId, create: false);
             double c1 = sess2.Credits.FirstOrDefault(c => c.LogicId == 101)?.Damage ?? 0, c2 = sess2.Credits.FirstOrDefault(c => c.LogicId == 102)?.Damage ?? 0;
             Expect(Math.Abs(c1 - 45) < 1e-9 && Math.Abs(c2 - 45) < 1e-9 && sess2.Credits.Length == 2 && Math.Abs(sess2.InteractionDamage - 90) < 1e-9,
                 $"E3 平分：归属两台机器 + 一个敌人，90 伤害 → 机器各 {c1} / {c2}，合计守恒");
             // 没有规则键的产物（排放的物质）：进交互伤害总量，不记到任何反应行
             int rows0 = sess2.Reactions.Length;
-            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = 0, Owners = new int4(a, 0, 0, 0), Damage = 10 });
+            ReactionAttribution.AddInteractionDamage(s2, site, new EmgAttrRow { Key = 0, Owners = EmgOwners.Of(a), Damage = 10 });
             Expect(sess2.Reactions.Length == rows0 && Math.Abs(sess2.InteractionDamage - 100) < 1e-9, "E4 规则键 0：进总量、不开反应行");
             // 没有名字的通道规则：有行、显示规则说明，不写“未知反应”
             int ruleKey = 0;
@@ -652,7 +662,7 @@ namespace GameLogic.EditorTools
                 for (int j = 0; j < k3.EmgAttrCount; j++)
                 {
                     EmgAttrRow row = k3.EmgAttrAt(j);
-                    fragRow |= row.Key == 0 && row.Owners.x == m && row.Damage > 0;
+                    fragRow |= row.Key == 0 && row.Owners[0] == m && row.Damage > 0;
                 }
             }
             Expect(fragRow && Session(s3)?.Credits.FirstOrDefault(c => c.LogicId == 201)?.Damage > 0, "E6 破片命中敌人：记交互伤害并归放出者");
@@ -666,17 +676,34 @@ namespace GameLogic.EditorTools
 
         private static void CheckOwnersCap()
         {
-            int4 o = int4.zero;
-            foreach (int id in new[] { 1, 2, 3, 4, 5, 3 })
-            {
-                CombatLogic.EmgOwnersAdd(ref o, id);
-            }
-            Expect(o.x == 1 && o.y == 2 && o.z == 3 && o.w == 5, $"F1 ADR ⑨：5 台机器（含重复）→ 最早 3 台 + 最近 1 台（{o}）");
-
-            NewState(9608);
+            // F1 FG11-ATTR-01（ADR ⑨ 更正，FGR-EMG-182 按推荐默认 8 格，DEBT-EMG2DISC01-06）：0 / 重复不记；满 8 格先挤在场的非己方机器（敌方 / 炮塔），再挤最早的己方；格满时新来的敌方 / 炮塔不进
+            CampaignState s = NewState(9608);
             using var site = NewSite();
             CombatKernel k = site.Kernel;
+            int foe = Unit(k, CombatFaction.Hostile, new double2(90, 90));
+            int turret = Unit(k, CombatFaction.Player, new double2(92, 90), kind: CombatUnitKind.Turret);
+            int[] m = Enumerable.Range(0, 8).Select(i => Unit(k, CombatFaction.Player, new double2(94 + 2 * i, 90))).ToArray();
+            EmgOwners o = default;
+            foreach (int id in new[] { foe, 0, m[0], foe, m[1], m[2], m[3], m[4], m[5], m[6] })
+            {
+                o = k.EmgOwnersAddForTests(o, id);
+            }
+            bool full = o.Count == 8 && o[0] == foe;
+            o = k.EmgOwnersAddForTests(o, m[7]);
+            bool foeOut = !o.Has(foe) && Enumerable.Range(0, 8).All(q => o[q] == m[q]);
+            o = k.EmgOwnersAddForTests(o, turret);
+            bool turretOut = !o.Has(turret) && Enumerable.Range(0, 8).All(q => o[q] == m[q]);
+            o = k.EmgOwnersAddForTests(o, 999999); // 不在场（阵亡 / 撤离的机器）按己方留着：挤掉最早的 m0
+            bool oldestOut = !o.Has(m[0]) && o[7] == 999999 && Enumerable.Range(0, 7).All(q => o[q] == m[q + 1]);
+            Expect(full && foeOut && turretOut && oldestOut,
+                $"F1 8 格挤出：敌人 + 7 台机器满格（{full}）→ 第 8 台机器挤掉敌人（{foeOut}）→ 炮塔格满不进（{turretOut}）→ 不在场的机器挤掉最早的己方（{oldestOut}）；末态 {o}");
+
             int[] u = Enumerable.Range(0, 5).Select(i => Unit(k, CombatFaction.Player, new double2(3 * i, 40))).ToArray();
+            for (int i = 0; i < 5; i++)
+            {
+                BindMachine(site, u[i], 301 + i);
+            }
+            Unit(k, CombatFaction.Hostile, new double2(12, 0));
             StepSite(site, 1);
             k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 40f, u[0], false, 9);
             for (int i = 1; i < 5; i++)
@@ -684,8 +711,8 @@ namespace GameLogic.EditorTools
                 k.SpawnPatch(EmgMatterConst.Oil, new double2(3 * i, 0), 2f, 5f, 0f, u[i]);
             }
             int key = NamedReactionCatalog.StableKey("reaction_deflagrate");
-            int4 last = int4.zero;
-            for (int step = 0; step < 1500 && math.all(last == int4.zero); step++)
+            EmgOwners last = default;
+            for (int step = 0; step < 1500 && last.IsEmpty; step++)
             {
                 StepSite(site, 1);
                 for (int i = 0; i < k.PatchSlots; i++)
@@ -696,13 +723,548 @@ namespace GameLogic.EditorTools
                     }
                 }
             }
-            Expect(last.x == u[0] && last.y == u[1] && last.z == u[2] && last.w == u[4],
-                $"F2 负向：链上 5 台机器（一排油依次点着）→ 最后一块明火归属 = 最早 3 台 + 最近 1 台（{last}，机器 {string.Join(",", u)}）");
+            StepSite(site, 180);
+            ReactionSessionRecord sess = Session(s);
+            double[] cred = Enumerable.Range(0, 5).Select(i => sess?.Credits?.FirstOrDefault(c => c.LogicId == 301 + i)?.Damage ?? 0).ToArray();
+            Expect(last.Count == 5 && u.All(id => last.Has(id)) && cred.All(c => c > 0),
+                $"F2 链上 5 台机器（一排油依次点着，5 台漏油车）→ 最后一块明火归属 = 5 台都在（{last}，机器 {string.Join(",", u)}；不再是旧口径“最早 3 + 最近 1”）；场次里 5 台都分到（{string.Join(" / ", cred.Select(c => c.ToString("0.0")))}）");
             // 相态节点的源单位是被推进相态的受击者，来源在第二单位：受击者不算归属（一发液氮冻住多个敌人不占归属槽）
             k.EmgChainLogForTests(EmgChainNode.Phase, 5551, u[0], u[1]);
             k.EmgChainLogForTests(EmgChainNode.Phase, 5552, u[0]);
-            int4 phase = k.EmgChainOwners(5551), phaseNoSrc = k.EmgChainOwners(5552);
-            Expect(phase.x == u[1] && phase.y == 0 && math.all(phaseNoSrc == int4.zero), $"F3 相态节点归来源、不归受击者（{phase}；没有来源时 {phaseNoSrc}）");
+            EmgOwners phase = k.EmgChainOwners(5551), phaseNoSrc = k.EmgChainOwners(5552);
+            Expect(phase[0] == u[1] && phase[1] == 0 && phaseNoSrc.IsEmpty, $"F3 相态节点归来源、不归受击者（{phase}；没有来源时 {phaseNoSrc}）");
+        }
+
+        // ── L FG11-ATTR-01 交互伤害归因补全（FGR-EMG-130 / 181 / 182，FGT-EMG-024；DEBT-EMG2DISC01-01 / -02 / -05 / -06、DEBT-EMG1CHAIN01-04）──
+
+        private static double RowsSum(CombatKernel k, Func<EmgAttrRow, bool> pick = null)
+        {
+            double t = 0;
+            for (int j = 0; j < k.EmgAttrCount; j++)
+            {
+                EmgAttrRow r = k.EmgAttrAt(j);
+                t += pick == null || pick(r) ? r.Damage : 0;
+            }
+            return t;
+        }
+
+        private static float Hp(CombatKernel k, int id) => k.TryGetUnit(id, out CombatUnitView v) ? v.Health : 0f;
+
+        private static int FireBit => math.tzcnt(NamedReactionCatalog.BitOf("Fire"));
+
+        private static int CoatRowsOf(CombatKernel k, int unit, int bit = -1)
+        {
+            int n = 0;
+            for (int i = 0; i < k.CoatAttrCount; i++)
+            {
+                n += k.CoatAttrAt(i).Unit == unit && (bit < 0 || k.CoatAttrAt(i).Bit == bit) ? 1 : 0;
+            }
+            return n;
+        }
+
+        /// <summary>敌人站进 <paramref name="owner"/> 的明火直到被斑块挂上燃烧位（沾染来源表有行）。</summary>
+        private static bool CoatInFire(CombatSite site, int enemy, int maxSteps = 240)
+        {
+            for (int i = 0; i < maxSteps; i++)
+            {
+                StepSite(site, 1);
+                if (CoatRowsOf(site.Kernel, enemy) > 0 && site.Kernel.StatusBitSecondsLeft(enemy, FireBit) > 0)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>L1 残留计入、L2 重叠只记一次、L3 同一位先后两台车只算最后一台（别的来源再挂删行）、L4 阵亡当步。</summary>
+        private static void CheckAttrDot()
+        {
+            // L1：A 的明火沾上燃烧位后离开：残留那几秒的持续伤害（含燃烧相态）全部计入交互伤害、归 A；交互伤害 = 敌人实际掉血（不多不少）
+            CampaignState s = NewState(9630);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                BindMachine(site, a, 101);
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 30f, a);
+                bool coated = CoatInFire(site, e);
+                k.SetPosition(e, new double2(0, 40));
+                StepSite(site, 1);
+                double left = k.StatusBitSecondsLeft(e, FireBit);
+                float hp0 = Hp(k, e);
+                double rows = 0, rowsA = 0;
+                for (int i = 0; i < 60 * 12; i++)
+                {
+                    StepSite(site, 1);
+                    rows += RowsSum(k);
+                    rowsA += RowsSum(k, r => r.Owners.Has(a));
+                }
+                float loss = hp0 - Hp(k, e);
+                bool exact = loss > 0 && Math.Abs(rows - loss) <= 1e-3 * Math.Max(1.0, loss);
+                Expect(coated && left > 0.5 && rowsA > 0 && exact && CoatRowsOf(k, e) == 0,
+                    $"L1 离开明火后残留 {left:0.0} 秒：之后 12 秒掉血 {loss:0.00} = 交互伤害 {rows:0.00}（归 A {rowsA:0.00}）；位到期后沾染来源行删掉（剩 {CoatRowsOf(k, e)}）");
+
+                // L3：同一单位同一位被两台车先后沾（A 的明火 → B 的明火）：只有一行、归最后沾上的 B；别的来源（C 的武器）再挂同一位：删行，持续伤害不再算交互
+                int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+                int cMachine = Unit(k, CombatFaction.Player, new double2(60, 20));
+                BindMachine(site, b, 102);
+                int e3 = Unit(k, CombatFaction.Hostile, new double2(20, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(20, 0), 2f, 1f, 30f, a);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(40, 0), 2f, 1f, 30f, b);
+                bool byA = CoatInFire(site, e3);
+                EmgOwners firstOwners = byA ? k.CoatAttrAt(Enumerable.Range(0, k.CoatAttrCount).First(i => k.CoatAttrAt(i).Unit == e3)).Owners : default;
+                k.SetPosition(e3, new double2(40, 0));
+                bool byB = false;
+                for (int i = 0; i < 240 && !byB; i++)
+                {
+                    StepSite(site, 1);
+                    byB = CoatRowsOf(k, e3) == 1 && Enumerable.Range(0, k.CoatAttrCount).Any(q => k.CoatAttrAt(q).Unit == e3 && k.CoatAttrAt(q).Owners.Has(b) && !k.CoatAttrAt(q).Owners.Has(a));
+                }
+                k.SetPosition(e3, new double2(40, 60));
+                StepSite(site, 1);
+                k.ApplyStatus(e3, NamedReactionCatalog.BitOf("Fire"), 6f, 0f, 0f, 0f, cMachine);
+                StepSite(site, 1);
+                int rowsAfterWeapon = CoatRowsOf(k, e3);
+                int bitSrc = k.StatusBitSourceOf(e3, FireBit);
+                Expect(byA && firstOwners.Has(a) && byB && rowsAfterWeapon == 0 && bitSrc == cMachine,
+                    $"L3 同一位先后被 A、B 的明火沾上：先 {firstOwners}，再换成只归 B（{byB}，一行）；C 的武器再挂同一位 → 沾染来源行删掉（剩 {rowsAfterWeapon}），这一位来源 = C（{bitSrc}）");
+            }
+
+            // L2：两块明火（A、B）重叠沾同一位：持续伤害只记一次——交互伤害合计 = 实际掉血（旧口径按块各记一次会多记）
+            NewState(9631);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 30f, a);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(0.5, 0), 2f, 1f, 30f, b);
+                StepSite(site, 1);
+                float hp0 = Hp(k, e);
+                double rows = 0;
+                int maxRows = 0;
+                for (int i = 0; i < 60 * 5; i++)
+                {
+                    StepSite(site, 1);
+                    rows += RowsSum(k);
+                    maxRows = Math.Max(maxRows, CoatRowsOf(k, e, FireBit));
+                }
+                float loss = hp0 - Hp(k, e);
+                Expect(loss > 0 && Math.Abs(rows - loss) <= 1e-3 * Math.Max(1.0, loss) && maxRows == 1,
+                    $"L2 两块重叠的明火沾同一位：5 秒掉血 {loss:0.00} = 交互伤害 {rows:0.00}（不重复记）；燃烧位的沾染来源始终 1 行（最多 {maxRows}）");
+            }
+
+            // L4：单位阵亡当步结算：残留燃烧的最后一拍打死它——这一拍照样计交互伤害归 A；之后沾染来源行随单位删掉
+            CampaignState s4 = NewState(9632);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                BindMachine(site, a, 101);
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 30f, a);
+                bool coated = CoatInFire(site, e);
+                k.SetPosition(e, new double2(0, 40));
+                k.SetHealth(e, 0.5f, 100000f, true);
+                double killStepRows = 0;
+                bool died = false;
+                for (int i = 0; i < 60 * 4 && !died; i++)
+                {
+                    StepSite(site, 1);
+                    died = !k.IsAlive(e);
+                    killStepRows = died ? RowsSum(k, r => r.Owners.Has(a)) : 0;
+                }
+                StepSite(site, 1);
+                double credA = Session(s4)?.Credits?.FirstOrDefault(c => c.LogicId == 101)?.Damage ?? 0;
+                Expect(coated && died && killStepRows > 0 && credA > 0 && CoatRowsOf(k, e) == 0,
+                    $"L4 负向：残留燃烧打死敌人的那一步照样计交互伤害（{killStepRows:0.00}，A 分到 {credA:0.00}）；阵亡后沾染来源行删掉（剩 {CoatRowsOf(k, e)}）");
+            }
+        }
+
+        /// <summary>L5 B 的油被 A 点着 B 分到（单位层，FGR-EMG-130）、L6 A 点着后 B 冻过一下燃烧伤害仍归 A、L7 破片在环外仍带规则键。</summary>
+        private static void CheckAttrUnitLayer()
+        {
+            CampaignState s = NewState(9633);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+                BindMachine(site, a, 101);
+                BindMachine(site, b, 102);
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Oil, new double2(0, 0), 2f, 5f, 0f, b);
+                uint oil = NamedReactionCatalog.BitOf("Oil");
+                bool oiled = false;
+                for (int i = 0; i < 240 && !oiled; i++)
+                {
+                    StepSite(site, 1);
+                    oiled = k.TryGetStatus(e, out uint m, out _, out _, out _, out _) && (m & oil) != 0u;
+                }
+                k.SetPosition(e, new double2(0, 40)); // 离开油（斑块层的 A 点 B 不参与：只看单位身上的沾染反应）
+                StepSite(site, 1);
+                int oilSrc = k.StatusBitSourceOf(e, math.tzcnt(oil));
+                k.ApplyStatus(e, NamedReactionCatalog.BitOf("Fire"), 2f, 0f, 0f, 0f, a); // A 点着沾了 B 的油的敌人（C01）
+                bool rowBoth = false, productBoth = false;
+                for (int i = 0; i < 120; i++)
+                {
+                    for (int j = 0; j < k.EmgAttrCount; j++)
+                    {
+                        EmgAttrRow r = k.EmgAttrAt(j);
+                        rowBoth |= r.Key != 0 && r.Owners.Has(a) && r.Owners.Has(b);
+                    }
+                    for (int q = 0; q < k.PatchSlots; q++)
+                    {
+                        productBoth |= k.TryGetPatch(q, out CombatZone z) && z.RuleKey != 0 && z.Owners.Has(a) && z.Owners.Has(b);
+                    }
+                    StepSite(site, 1);
+                }
+                ReactionSessionRecord sess = Session(s);
+                double c1 = sess?.Credits?.FirstOrDefault(c => c.LogicId == 101)?.Damage ?? 0, c2 = sess?.Credits?.FirstOrDefault(c => c.LogicId == 102)?.Damage ?? 0;
+                Expect(oiled && oilSrc == b && rowBoth && productBoth && c1 > 0 && c2 > 0,
+                    $"L5 敌人身上沾了 B 的油（来源 {oilSrc}）被 A 点着：沾染反应的伤害行与产物明火都同时归 A、B（{rowBoth} / {productBoth}），两台都分到（{c1:0.0} / {c2:0.0}）");
+            }
+
+            CampaignState s6 = NewState(9634);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+                BindMachine(site, a, 101);
+                BindMachine(site, b, 102);
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.AddAccum(e, EmgPhaseConst.Ignite, k.PhaseRuleAt(EmgPhaseConst.Ignite).Enter * 3f, a);
+                StepSite(site, 30);
+                k.AddAccum(e, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 3f, b); // B 冻过一下
+                k.TryGetPhaseSource(e, EmgPhaseConst.Chill, out int chillSrc);
+                double burnA = 0, burnB = 0;
+                bool burning = false;
+                for (int i = 0; i < 120; i++)
+                {
+                    StepSite(site, 1);
+                    burning |= k.TryGetUnitEmg(e, out _, out EmgUnitState st) && (st.PhaseMask & (1 << EmgPhaseConst.Ignite)) != 0;
+                    burnA += RowsSum(k, r => r.Key == 0 && r.Owners.Has(a));
+                    burnB += RowsSum(k, r => r.Owners.Has(b));
+                }
+                k.TryGetPhaseSource(e, EmgPhaseConst.Ignite, out int igniteSrc);
+                ReactionSessionRecord sess = Session(s6);
+                double c1 = sess?.Credits?.FirstOrDefault(c => c.LogicId == 101)?.Damage ?? 0, c2 = sess?.Credits?.FirstOrDefault(c => c.LogicId == 102)?.Damage ?? 0;
+                Expect(burning && chillSrc == b && burnA > 0 && burnB == 0 && c1 > 0 && c2 == 0 && (igniteSrc == a || igniteSrc == 0),
+                    $"L6 A 点着后 B 冻过一下（寒量来源 {chillSrc}）：燃烧伤害 {burnA:0.00} 仍归 A、B 没分到（{burnB:0.00}；场次 {c1:0.0} / {c2:0.0}）");
+            }
+
+            // L6b（FG11-ATTR-01 审查修复）：A 只点了一点（着火度没到阈值）→ 自然衰减到 0（之后单位全零，StepPhase 开头提前返回）→ 中立明火（没有来源）点着：燃烧伤害不记到 A 名下
+            CampaignState s6b = NewState(9644);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                BindMachine(site, a, 101);
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.AddAccum(e, EmgPhaseConst.Ignite, k.PhaseRuleAt(EmgPhaseConst.Ignite).Enter * 0.5f, a);
+                k.TryGetPhaseSource(e, EmgPhaseConst.Ignite, out int src0);
+                bool drained = false;
+                for (int i = 0; i < 60 * 30 && !drained; i++)
+                {
+                    StepSite(site, 1);
+                    drained = k.TryGetUnitEmg(e, out _, out EmgUnitState st) && CombatLogic.AccOf(st, EmgPhaseConst.Ignite) == 0f && CombatLogic.PhsTOf(st, EmgPhaseConst.Ignite) == 0f;
+                }
+                StepSite(site, 30);
+                float hp0 = Hp(k, e);
+                k.AddAccum(e, EmgPhaseConst.Ignite, k.PhaseRuleAt(EmgPhaseConst.Ignite).Enter * 3f);
+                double burnA = 0;
+                bool burning = false;
+                for (int i = 0; i < 120; i++)
+                {
+                    StepSite(site, 1);
+                    burning |= k.TryGetUnitEmg(e, out _, out EmgUnitState st) && (st.PhaseMask & (1 << EmgPhaseConst.Ignite)) != 0;
+                    burnA += RowsSum(k, r => r.Owners.Has(a));
+                }
+                k.TryGetPhaseSource(e, EmgPhaseConst.Ignite, out int igniteSrc);
+                ReactionSessionRecord sess = Session(s6b);
+                double c1 = sess?.Credits?.FirstOrDefault(c => c.LogicId == 101)?.Damage ?? 0;
+                Expect(src0 == a && drained && burning && Hp(k, e) < hp0 && igniteSrc == 0 && burnA == 0 && c1 == 0,
+                    $"L6b A 只点了一点（来源 {src0}）→ 衰减到 0 {drained} → 中立明火点着：燃烧掉血 {hp0 - Hp(k, e):0.00}、相态来源 {igniteSrc}、记到 A 的 {burnA:0.00}（场次 {c1:0.0}）——不算 A 的交互伤害");
+            }
+
+            // L7：破片所在链的规则节点已被环覆盖（环写满 300 条别的记录）：破片伤害仍带规则键与链上归属（持久链归属表），规则行合计 = 交互伤害总量
+            CampaignState s7 = NewState(9635);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(0, 30));
+                int m = Unit(k, CombatFaction.Player, new double2(0, 0));
+                BindMachine(site, a, 101);
+                BindMachine(site, m, 201);
+                Unit(k, CombatFaction.Hostile, new double2(4, 0));
+                StepSite(site, 1);
+                int key = NamedReactionCatalog.StableKey("reaction_deflagrate");
+                int chain = k.EmgIssueChainForTests();
+                k.EmgChainLogForTests(EmgChainNode.Rule, chain, a, 0, 0, key);
+                for (int i = 1; i <= 300; i++)
+                {
+                    k.EmgChainLogForTests(EmgChainNode.Shot, chain + i, 77);
+                }
+                EmgOwners viaTable = k.EmgChainOwnersKey(chain, out int tableKey);
+                k.SpawnFragmentForTests(new double2(1, 0), new float2(1f, 0f), m, CombatFaction.Player, 12f, 18f, 7f, chain);
+                bool keyed = false;
+                for (int i = 0; i < 60; i++)
+                {
+                    StepSite(site, 1);
+                    for (int j = 0; j < k.EmgAttrCount; j++)
+                    {
+                        EmgAttrRow r = k.EmgAttrAt(j);
+                        keyed |= r.Key == key && r.Owners.Has(a) && r.Damage > 0;
+                    }
+                }
+                ReactionSessionRecord sess = Session(s7);
+                ReactionShareRecord share = sess?.Reactions?.FirstOrDefault(r => r.ReactionId == "reaction_deflagrate");
+                Expect(k.EmgChainRecordCount == EmgConst.ChainRing && tableKey == key && viaTable.Has(a) && keyed && share != null && Math.Abs(share.Damage - sess.InteractionDamage) < 1e-6,
+                    $"L7 破片在环外（环 {k.EmgChainRecordCount} 条已覆盖规则节点）：持久链归属给出键 {tableKey} 与归属 {viaTable}；破片伤害记到“爆燃”行 {share?.Damage:0.0} = 交互伤害总量 {sess?.InteractionDamage:0.0}");
+            }
+
+            // L7b（审查修复）：只有规则节点与最早的出手者被挤出环、同一条链后写的记录还在环里：键与最早的出手者仍从持久表补上，规则行合计 = 交互伤害总量
+            CampaignState s7b = NewState(9645);
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(0, 30));
+                int m = Unit(k, CombatFaction.Player, new double2(0, 0));
+                BindMachine(site, a, 101);
+                BindMachine(site, m, 201);
+                Unit(k, CombatFaction.Hostile, new double2(4, 0));
+                StepSite(site, 1);
+                int key = NamedReactionCatalog.StableKey("reaction_deflagrate");
+                int chain = k.EmgIssueChainForTests();
+                k.EmgChainLogForTests(EmgChainNode.Rule, chain, a, 0, 0, key);
+                for (int i = 1; i <= 300; i++)
+                {
+                    k.EmgChainLogForTests(EmgChainNode.Shot, chain + i, 77);
+                }
+                k.EmgChainLogForTests(EmgChainNode.Shot, chain, m); // 同链后写的记录留在环里
+                EmgOwners via = k.EmgChainOwnersKey(chain, out int viaKey);
+                k.SpawnFragmentForTests(new double2(1, 0), new float2(1f, 0f), m, CombatFaction.Player, 12f, 18f, 7f, chain);
+                bool keyed = false;
+                for (int i = 0; i < 60; i++)
+                {
+                    StepSite(site, 1);
+                    for (int j = 0; j < k.EmgAttrCount; j++)
+                    {
+                        EmgAttrRow r = k.EmgAttrAt(j);
+                        keyed |= r.Key == key && r.Owners.Has(a) && r.Owners.Has(m) && r.Damage > 0;
+                    }
+                }
+                ReactionSessionRecord sess = Session(s7b);
+                ReactionShareRecord share = sess?.Reactions?.FirstOrDefault(r => r.ReactionId == "reaction_deflagrate");
+                Expect(viaKey == key && via.Has(a) && via.Has(m) && keyed && share != null && Math.Abs(share.Damage - sess.InteractionDamage) < 1e-6,
+                    $"L7b 规则节点被挤出、同链后段还在环里：键 {viaKey}、归属 {via}（表在前、环在后合并）；破片伤害记到“爆燃”行 {share?.Damage:0.0} = 交互伤害总量 {sess?.InteractionDamage:0.0}");
+            }
+        }
+
+        /// <summary>L8 新快照段往返、读档后在途沾染照样归因、L9 旧档（格式 22，没有归因段）缺省可读。</summary>
+        private static void CheckAttrPersist()
+        {
+            NewState(9636);
+            using var site = NewSite();
+            CombatKernel k = site.Kernel;
+            int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+            int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+            int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+            StepSite(site, 1);
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 30f, a);
+            bool coated = CoatInFire(site, e);
+            k.SetPosition(e, new double2(0, 40));
+            k.AddAccum(e, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 0.5f, b);
+            int chain = k.EmgIssueChainForTests();
+            k.EmgChainLogForTests(EmgChainNode.Rule, chain, a, 0, 0, 4242);
+            StepSite(site, 1);
+            string Dump(CombatKernel q)
+            {
+                var sb = new StringBuilder();
+                for (int i = 0; i < q.CoatAttrCount; i++)
+                {
+                    EmgCoatAttr c = q.CoatAttrAt(i);
+                    sb.Append($"c{c.Unit}:{c.Bit}:{c.Key}:{c.Matter}:{c.Chain}:{c.Owners};");
+                }
+                for (int bit = 0; bit < 32; bit++)
+                {
+                    sb.Append(q.StatusBitSourceOf(e, bit)).Append(',');
+                }
+                for (int ph = 0; ph < EmgPhaseConst.Count; ph++)
+                {
+                    q.TryGetPhaseSource(e, ph, out int src);
+                    sb.Append('p').Append(src);
+                }
+                q.TryGetChainOwn(chain, out EmgChainOwn row);
+                sb.Append($";ch{row.Chain}:{row.Key}:{row.Owners}");
+                return sb.ToString();
+            }
+            byte[] data = k.Serialize();
+            using var site2 = NewSite();
+            CombatKernel c2 = site2.Kernel;
+            CombatLoadResult r = c2.Load(data);
+            string d0 = Dump(k), d1 = Dump(c2);
+            c2.TryGetPhaseSource(e, EmgPhaseConst.Chill, out int chillSrc);
+            bool round = r == CombatLoadResult.Ok && d0 == d1 && c2.StateHash() == k.StateHash() && c2.CoatAttrCount > 0 && chillSrc == b && c2.StatusBitSourceOf(e, FireBit) == a
+                         && c2.TryGetChainOwn(chain, out EmgChainOwn own) && own.Key == 4242 && CombatKernel.PeekFormat(data) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 23;
+            double r0 = 0, r1 = 0;
+            for (int i = 0; i < 60 * 6; i++)
+            {
+                StepSite(site, 1);
+                StepSite(site2, 1);
+                r0 += RowsSum(k, x => x.Owners.Has(a));
+                r1 += RowsSum(c2, x => x.Owners.Has(a));
+            }
+            Expect(coated && round && r1 > 0 && Math.Abs(r0 - r1) < 1e-6 && c2.StateHash() == k.StateHash(),
+                $"L8 新快照段往返（格式 {CombatConst.FormatVersion}，{r}）：沾染来源 / 状态位来源 / 相态来源 / 链归属逐字一致、StateHash 一致；读档后在途沾染照样归 A（连续 {r0:0.00} / 读档 {r1:0.00}）");
+
+            // L9 旧档：格式 22（本卡之前）没有段 36～38、归属只有 4 格：读入 Ok，来源全空（悬停“来源不明”），之后照常结算、不报错
+            k.ApplyStatus(e, NamedReactionCatalog.BitOf("Fire"), 3f, 0f, 0f, 0f, a); // 存档时身上还在烧：读档后要照常掉血
+            byte[] old = k.SerializeFormatForTests(22);
+            using var site3 = NewSite();
+            CombatKernel c3 = site3.Kernel;
+            CombatLoadResult r3 = c3.Load(old);
+            c3.TryGetPhaseSource(e, EmgPhaseConst.Chill, out int oldChill);
+            bool empty = r3 == CombatLoadResult.Ok && CombatKernel.PeekFormat(old) == 22 && c3.CoatAttrCount == 0 && oldChill == 0 && c3.StatusBitSourceOf(e, FireBit) == 0 && !c3.TryGetChainOwn(chain, out _);
+            float hp0 = Hp(c3, e);
+            StepSite(site3, 60);
+            float hp1 = Hp(c3, e);
+            c3.ApplyStatus(e, NamedReactionCatalog.BitOf("Fire"), 3f, 0f, 0f, 0f, b);
+            int newSrc = c3.StatusBitSourceOf(e, FireBit);
+            Expect(empty && hp1 < hp0 && newSrc == b,
+                $"L9 旧档（格式 22）读入 {r3}：沾染来源 {c3.CoatAttrCount} 行、相态来源 {oldChill}、链归属空；读档后照常结算（还在烧，掉血 {hp0 - hp1:0.00}）；读档后新挂上的燃烧位照常登记来源 {newSrc}");
+        }
+
+        /// <summary>L10 只改统计、不改血量胜负：同一场景两份，一份每步抹掉全部归因数据，逐步比血量 / 存活 / 位置 / 状态位 / 相态，必须完全一致。</summary>
+        private static void CheckAttrNoGameplay()
+        {
+            NewState(9637);
+            using var s1 = NewSite();
+            using var s2 = NewSite();
+            var ids = new List<int>();
+            foreach (CombatSite site in new[] { s1, s2 })
+            {
+                CombatKernel k = site.Kernel;
+                ids.Clear();
+                int a = Unit(k, CombatFaction.Player, new double2(40, 0));
+                int b = Unit(k, CombatFaction.Player, new double2(40, 10));
+                ids.Add(a);
+                ids.Add(b);
+                for (int i = 0; i < 5; i++)
+                {
+                    ids.Add(Unit(k, CombatFaction.Hostile, new double2(3 * i, 0), hp: 120f));
+                }
+                ids.Add(Unit(k, CombatFaction.Hostile, new double2(0, 20), hp: 120f));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 40f, a, false, 9);
+                for (int i = 1; i < 5; i++)
+                {
+                    k.SpawnPatch(EmgMatterConst.Oil, new double2(3 * i, 0), 2f, 5f, 0f, i % 2 == 0 ? a : b);
+                }
+                k.ApplyStatus(ids[7], NamedReactionCatalog.BitOf("Oil"), 10f, 0f, 0f, 0f, b);
+                k.ApplyStatus(ids[7], NamedReactionCatalog.BitOf("Fire"), 2f, 0f, 0f, 0f, a);
+                k.AddAccum(ids[3], EmgPhaseConst.Chill, 5f, b);
+            }
+            string State(CombatKernel k)
+            {
+                var sb = new StringBuilder();
+                foreach (int id in ids)
+                {
+                    k.TryGetUnit(id, out CombatUnitView v);
+                    k.TryGetStatus(id, out uint m, out _, out _, out _, out _);
+                    k.TryGetUnitEmg(id, out _, out EmgUnitState st);
+                    sb.Append($"{id}:{v.Alive}:{v.Health:R}:{v.Position.x:R},{v.Position.y:R}:{m:X}:{st.PhaseMask};");
+                }
+                return sb.ToString();
+            }
+            int diffAt = -1;
+            double attrRows = 0;
+            int deaths = 0;
+            for (int i = 0; i < 60 * 15 && diffAt < 0; i++)
+            {
+                s2.Kernel.EmgScrambleAttrForTests();
+                StepSite(s1, 1);
+                StepSite(s2, 1);
+                attrRows += RowsSum(s1.Kernel);
+                if (State(s1.Kernel) != State(s2.Kernel))
+                {
+                    diffAt = i;
+                }
+            }
+            foreach (int id in ids)
+            {
+                deaths += s1.Kernel.IsAlive(id) ? 0 : 1;
+            }
+            Expect(diffAt < 0 && attrRows > 0 && deaths > 0,
+                $"L10 只改统计不改玩法：同一场景每步抹掉全部归因数据，15 秒逐步比血量 / 存活 / 位置 / 状态位 / 相态完全一致（{(diffAt < 0 ? "一致" : "第 " + diffAt + " 步分叉")}；期间交互伤害 {attrRows:0.0}、阵亡 {deaths} 个）");
+        }
+
+        /// <summary>L11 暂停与 0.5x～3x：离开明火后的残留燃烧按游戏秒计入（暂停不记不掉血、各倍速相同）。</summary>
+        private static void CheckAttrSpeed()
+        {
+            (double Rows, double Loss, double PauseRows, bool PauseHeld) Run(float speed)
+            {
+                NewState(9638);
+                using var site = NewSite();
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                int e = Unit(k, CombatFaction.Hostile, new double2(0, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 30f, a);
+                CoatInFire(site, e);
+                k.SetPosition(e, new double2(0, 40));
+                StepSite(site, 1);
+                double left0 = k.StatusBitSecondsLeft(e, FireBit);
+                float hpP = Hp(k, e);
+                double pauseRows = 0;
+                for (int i = 0; i < 120; i++)
+                {
+                    site.Step(0f, k.Time);
+                    pauseRows += RowsSum(k);
+                }
+                bool held = Math.Abs(k.StatusBitSecondsLeft(e, FireBit) - left0) < 1e-9 && Hp(k, e) == hpP && CoatRowsOf(k, e) == 1;
+                float hp0 = Hp(k, e);
+                double rows = 0, until = k.Time + 10.0;
+                while (k.Time < until)
+                {
+                    site.Step(Dt * speed, k.Time + Dt * speed);
+                    rows += RowsSum(k);
+                }
+                return (rows, hp0 - Hp(k, e), pauseRows, held);
+            }
+            var slow = Run(0.5f);
+            var normal = Run(1f);
+            var fast = Run(3f);
+            bool exact((double Rows, double Loss, double PauseRows, bool PauseHeld) x) => x.Loss > 0 && Math.Abs(x.Rows - x.Loss) <= 1e-3 * Math.Max(1.0, x.Loss);
+            double tick = normal.Rows / 6.0; // 残留约 3 秒 = 6 拍；倍速之间最多差一拍（到期落在步长粒度内）
+            Expect(exact(slow) && exact(normal) && exact(fast) && slow.PauseRows == 0 && normal.PauseHeld && slow.PauseHeld && fast.PauseHeld
+                   && Math.Abs(slow.Rows - normal.Rows) <= tick + 1e-6 && Math.Abs(fast.Rows - normal.Rows) <= tick + 1e-6,
+                $"L11 暂停 120 帧：残留秒数、血量、沾染来源不变、不记交互伤害；倍速 0.5x / 1x / 3x：残留燃烧掉血 = 交互伤害（{slow.Rows:0.00} / {normal.Rows:0.00} / {fast.Rows:0.00}）");
+        }
+
+        /// <summary>L12 负向：家园平时（没有进行中的突袭）交互伤害不进任何场次（FG02:211，DEBT-EMG2DISC01-05① 按规格关闭），首次发现照常记。</summary>
+        private static void CheckAttrHome()
+        {
+            CampaignState s = NewState(9639);
+            CombatConfig cfg = CombatSite.ConfigFromTuning();
+            cfg.NavEnabled = 0;
+            using var home = new CombatSite(GameLogic.Campaign.Regions.HomeValleyLayout.RegionId, cfg);
+            int sessions = s.Stats?.ReactionSessions?.Length ?? 0;
+            ReactionAttribution.AddInteractionDamage(s, home, new EmgAttrRow { Key = NamedReactionCatalog.StableKey("reaction_deflagrate"), Owners = EmgOwners.Of(1), Damage = 50 });
+            bool noSession = (s.Stats?.ReactionSessions?.Length ?? 0) == sessions && ReactionAttribution.Current(s, home.SiteId, create: true) == null
+                             && ReactionAttribution.KindOfSite(s, home.SiteId) == null;
+            bool recorded = ReactionFeedback.RecordFirst(s, "reaction_deflagrate", home.SiteId);
+            Expect(noSession && recorded, $"L12 家园平时没有突袭：交互伤害不进场次（场次 {sessions} 条不变），首次发现照常记（{recorded}）");
         }
 
         // ── G 友伤（FGT-EMG-038、FGR-EMG-184）──────────────────────────────────
@@ -889,7 +1451,7 @@ namespace GameLogic.EditorTools
                 CombatLoadResult r = c.Load(data);
                 string Dump(CombatKernel q) => string.Join(" ", Enumerable.Range(0, q.PatchSlots).Select(i => q.TryGetPatch(i, out CombatZone z) ? $"{z.EmgId}:{z.Matter}:{z.RuleKey}:{z.Owners}" : "-").OrderBy(x => x, StringComparer.Ordinal));
                 string before = Dump(k), after = Dump(c);
-                Expect(r == CombatLoadResult.Ok && before == after && before.Contains($":{key}:") && before.Contains($"int4({a},") && c.StateHash() == k.StateHash(),
+                Expect(r == CombatLoadResult.Ok && before == after && before.Contains($":{key}:") && before.Contains($"o({a},") && c.StateHash() == k.StateHash(),
                     $"I1 内核快照往返：爆燃产物的规则键与归属逐块保留（{after}），StateHash 一致（{r}）");
             }
             ReactionDiscoveryService.RecordGrammar(s, ReactionDiscoveryService.GenEntry(1), SiteId);
@@ -937,12 +1499,12 @@ namespace GameLogic.EditorTools
                 for (int j = 0; j < k.EmgAttrCount; j++)
                 {
                     EmgAttrRow row = k.EmgAttrAt(j);
-                    rowHasChain |= row.Owners.x == a && row.Owners.y == b; // 不进快照的本步伤害行可以继续用环派生的归属
+                    rowHasChain |= row.Owners[0] == a && row.Owners[1] == b; // 不进快照的本步伤害行可以继续用环派生的归属
                 }
             }
             string Products(CombatKernel q) => string.Join(" ", Enumerable.Range(0, q.PatchSlots).Select(i => q.TryGetPatch(i, out CombatZone z) && z.RuleKey != 0 ? $"{z.EmgId}:{z.Matter}:{z.RuleKey}:{z.Owners}" : null).Where(x => x != null).OrderBy(x => x, StringComparer.Ordinal));
             string p0 = Products(k), p1 = Products(c);
-            Expect(r == CombatLoadResult.Ok && p0.Length > 0 && p0 == p1 && p0.Contains($"int4({b},") && !p0.Contains($"int4({a},") && c.StateHash() == k.StateHash() && rowHasChain,
+            Expect(r == CombatLoadResult.Ok && p0.Length > 0 && p0 == p1 && p0.Contains($"o({b},0,") && !p0.Contains($"o({a},") && !p0.Contains($",{a},") && c.StateHash() == k.StateHash() && rowHasChain,
                 $"I3 读档后继续跑含 OpCoatSpawn：产物归属只用持久数据（连续 {p0}，读档 {p1}），StateHash 一致；不进快照的伤害行仍含链上单位（{rowHasChain}）");
         }
 

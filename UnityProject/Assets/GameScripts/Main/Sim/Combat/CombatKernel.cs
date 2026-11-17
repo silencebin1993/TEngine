@@ -963,9 +963,9 @@ namespace BinGames.Sim.Combat
         public ulong FieldMaskAtForTests(double x, double y) => _d.EmgHash.FieldMaskOnSegment(new double2(x, y), new double2(x, y), 0.0);
 
         /// <summary>EMG2-FLD-01 自检入口：放一片普通破片（FGR-EMG-114，2 代、不执行程序），走与碎裂 / 爆炸反应装甲同一个 EmgSpawnFragment。</summary>
-        public bool SpawnFragmentForTests(double2 at, float2 dir, int ownerId, CombatFaction faction, float damage, float speed, float range)
+        public bool SpawnFragmentForTests(double2 at, float2 dir, int ownerId, CombatFaction faction, float damage, float speed, float range, int chain = 0)
         {
-            bool ok = CombatLogic.EmgSpawnFragment(ref _d, at, dir, ownerId, faction, 1, 0, damage, speed, range);
+            bool ok = CombatLogic.EmgSpawnFragment(ref _d, at, dir, ownerId, faction, 1, math.max(0, chain), damage, speed, range); // FG11-ATTR-01：可指定所在链（环外仍带规则键的用例）
             Touch();
             return ok;
         }
@@ -1003,14 +1003,14 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>EMG2-PHS-01：给单位第 k 个累积量加 amount（按抗性 / 免疫窗 / 上限；自检与热更注入用，与内核来源同一个入口）。返回实际增加量。</summary>
-        public float AddAccum(int id, int k, float amount)
+        public float AddAccum(int id, int k, float amount, int sourceId = 0)
         {
             int i = _d.SlotOf(id);
             if (i < 0)
             {
                 return 0f;
             }
-            float got = CombatLogic.EmgAddAcc(ref _d, i, k, amount);
+            float got = CombatLogic.EmgAddAcc(ref _d, i, k, amount, sourceId); // FG11-ATTR-01：可带来源（相态来源用例）
             Touch();
             return got;
         }
@@ -1046,14 +1046,14 @@ namespace BinGames.Sim.Combat
         public int PhaseEnters => _d.EmgS[0].PhaseEnters;
 
         /// <summary>FG10-FAC-01（液氮）：给单位加受寒（测试夹具 / 将来玩家侧的液氮来源；与内核里的喷淋同一个入口）。</summary>
-        public bool ChillUnit(int id, float amount)
+        public bool ChillUnit(int id, float amount, int sourceId = 0)
         {
             int i = _d.SlotOf(id);
             if (i < 0)
             {
                 return false;
             }
-            CombatLogic.ApplyChill(ref _d, i, amount);
+            CombatLogic.ApplyChill(ref _d, i, amount, sourceId);
             Touch();
             return true;
         }

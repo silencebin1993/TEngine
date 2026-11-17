@@ -24,10 +24,18 @@ namespace BinGames.Sim.Combat
                 EmgExtremeTally(ref d, kind, chain, depth, key, srcUnit, codex);
             }
             int head = d.EmgRingHead[0];
-            d.EmgRing[head] = new EmgChainRec
+            var rec = new EmgChainRec
             {
                 Chain = chain, Parent = parent, Kind = kind, Depth = depth, Aux = aux, Key = key, SrcUnit = srcUnit, Other = other, Pos = pos, Time = d.Scalars[0].Time,
             };
+            d.EmgRing[head] = rec;
+            // FG11-ATTR-01 ④：同步登记持久链归属（与 EmgChainAttr 扫环同一口径：记录归它自己的链与父链）
+            int recOwner = EmgChainRecOwner(rec);
+            EmgChainOwnNote(ref d, chain, kind, key, recOwner);
+            if (parent > 0 && parent != chain)
+            {
+                EmgChainOwnNote(ref d, parent, kind, key, recOwner);
+            }
             d.EmgRingHead[0] = (head + 1) & (EmgConst.ChainRing - 1);
             d.EmgRingHead[1] = math.min(d.EmgRingHead[1] + 1, EmgConst.ChainRing);
         }
@@ -172,31 +180,5 @@ namespace BinGames.Sim.Combat
             }
         }
 
-        /// <summary>
-        /// ADR ⑨ 归属：最多 4 个单位 ID、按出现先后；已在里面的不重复；满 4 个时保留最早 3 个 + 最近 1 个（第 4 格被新来的替换）。0 不记。
-        /// </summary>
-        public static void EmgOwnersAdd(ref int4 owners, int id)
-        {
-            if (id == 0 || owners.x == id || owners.y == id || owners.z == id || owners.w == id)
-            {
-                return;
-            }
-            if (owners.x == 0)
-            {
-                owners.x = id;
-            }
-            else if (owners.y == 0)
-            {
-                owners.y = id;
-            }
-            else if (owners.z == 0)
-            {
-                owners.z = id;
-            }
-            else
-            {
-                owners.w = id; // 满了：最早 3 个不动，第 4 格永远是最近的那个
-            }
-        }
     }
 }

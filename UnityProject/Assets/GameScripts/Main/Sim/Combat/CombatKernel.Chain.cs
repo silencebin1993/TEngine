@@ -156,24 +156,34 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>
-        /// 一条链上参与的单位（ADR ⑨ 归属，最多 4 个：按出现先后，超过时保留最早 3 个 + 最近 1 个）：从旧到新扫环（O(环长)，只在悬停 / 打开叠加时调），
-        /// 本链及以它为父链的记录里的源单位 / 第二单位都算（破片的打击者、残骸的击毁者）。
+        /// 一条链上参与的单位（ADR ⑨ 归属，FG11-ATTR-01 起最多 8 个：按出现先后，满格先挤非己方机器）：从旧到新扫环（O(环长)，只在悬停 / 打开叠加时调），
+        /// 本链及以它为父链的记录里的源单位 / 第二单位都算（破片的打击者、残骸的击毁者）；环里没有这条链时查持久链归属表。
         /// </summary>
-        public int4 EmgChainOwners(int chain) => CombatLogic.EmgChainAttr(ref _d, chain, out _);
+        public EmgOwners EmgChainOwners(int chain) => CombatLogic.EmgChainAttr(ref _d, chain, out _);
+
+        /// <summary>FG11-ATTR-01 ④：一条链的归属与最近规则键（同 <see cref="EmgChainOwners"/>，另给键；自检用）。</summary>
+        public EmgOwners EmgChainOwnersKey(int chain, out int key) => CombatLogic.EmgChainAttr(ref _d, chain, out key);
+
+        /// <summary>FG11-ATTR-01（自检）：按内核同一规则往归属里加一个单位（满 8 格先挤非己方机器）。</summary>
+        public EmgOwners EmgOwnersAddForTests(EmgOwners o, int id)
+        {
+            CombatLogic.EmgOwnersAdd(ref _d, ref o, id);
+            return o;
+        }
 
         /// <summary>一块残骸的归属（ADR ⑨ 4 个规则）：持久归属（<see cref="EmgWreck.Owners"/>：击毁者 + 之后打碎它的单位，环被覆盖 / 读档后仍在）+ 环里 Key = 残骸 Id 的破片记录（从旧到新，去重）。O(残骸数 + 环长)，只在悬停时调。</summary>
-        public int4 EmgWreckOwners(int wreckId)
+        public EmgOwners EmgWreckOwners(int wreckId)
         {
-            int4 o = int4.zero;
+            EmgOwners o = default;
             int wi = WreckIndexOf(wreckId);
             if (wi >= 0)
             {
                 // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：持久归属（击毁者 + 打碎它的单位）在前，环被覆盖 / 读档后仍完整；环里的同一批记录按去重不再重复加，
                 // 只补持久归属里没有的（本卡之前的快照读进来的残骸）
                 o = _d.Wrecks[wi].Owners;
-                if (o.x == 0)
+                if (o[0] == 0)
                 {
-                    CombatLogic.EmgOwnersAdd(ref o, _d.Wrecks[wi].Killer);
+                    CombatLogic.EmgOwnersAdd(ref _d, ref o, _d.Wrecks[wi].Killer);
                 }
             }
             int n = _d.EmgRingHead[1];
@@ -186,11 +196,11 @@ namespace BinGames.Sim.Combat
                 }
                 if (r.Kind == EmgChainNode.Wreck)
                 {
-                    CombatLogic.EmgOwnersAdd(ref o, r.Other);
+                    CombatLogic.EmgOwnersAdd(ref _d, ref o, r.Other);
                 }
                 else if (r.Kind == EmgChainNode.Fragment)
                 {
-                    CombatLogic.EmgOwnersAdd(ref o, r.SrcUnit);
+                    CombatLogic.EmgOwnersAdd(ref _d, ref o, r.SrcUnit);
                 }
             }
             return o;

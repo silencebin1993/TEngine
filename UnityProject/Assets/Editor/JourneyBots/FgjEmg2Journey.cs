@@ -487,7 +487,7 @@ namespace GameLogic.EditorTools.JourneyBots
             CombatZone? fire = null;
             for (int i = 0; i < k.PatchSlots && fire == null; i++)
             {
-                if (k.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Fire && z.RuleKey == key && math.any(z.Owners == ua) && math.any(z.Owners == ub))
+                if (k.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Fire && z.RuleKey == key && z.Owners.Has(ua) && z.Owners.Has(ub))
                 {
                     fire = z;
                 }
@@ -496,7 +496,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return c.StepElapsed < 90 ? StepOutcome.Wait : StepOutcome.Fail($"爆燃 {n} 次，没有归属 A + B 两台车（单位 {ua} / {ub}）的燃烧区：交互伤害归因断了");
             }
-            int4 o = fire.Value.Owners;
+            EmgOwners o = fire.Value.Owners;
             k.TryGetUnit(c.GetInt("t1"), out CombatUnitView tv);
             return Cleared(c, "t1", StepOutcome.Done($"B 车点火：爆燃 {c.GetLong("oil.def0")} → {n} 次，明火斑块半径 {F(fire.Value.Radius)}，归属 {o}（A、B 两台）；靶子耐久 {F(tv.Health, "0")} / {F(tv.MaxHealth, "0")}"));
         }

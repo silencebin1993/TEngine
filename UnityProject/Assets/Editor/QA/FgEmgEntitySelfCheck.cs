@@ -38,7 +38,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/实体残骸破片撞击")]
+        [MenuItem("QA/自检/实体残骸破片撞击")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -646,12 +646,12 @@ namespace GameLogic.EditorTools
                 {
                     k.EmgChainLogForTests(EmgChainNode.Shot, 9000 + i, 77);
                 }
-                int4 afterRing = k.EmgWreckOwners(w0.Id);
+                EmgOwners afterRing = k.EmgWreckOwners(w0.Id);
                 using (var r2 = NewKernel())
                 {
                     CombatLoadResult lr = r2.Load(k.Serialize());
-                    int4 afterLoad = r2.EmgWreckOwners(w0.Id);
-                    Expect(w0.Owners.x == me && afterRing.x == me && lr == CombatLoadResult.Ok && r2.EmgChainRecordCount == 0 && afterLoad.x == me && r2.StateHash() == k.StateHash(),
+                    EmgOwners afterLoad = r2.EmgWreckOwners(w0.Id);
+                    Expect(w0.Owners[0] == me && afterRing[0] == me && lr == CombatLoadResult.Ok && r2.EmgChainRecordCount == 0 && afterLoad[0] == me && r2.StateHash() == k.StateHash(),
                         $"打碎残骸的单位 #{me} 持久归属（{w0.Owners}）：环写满 300 条后 {afterRing}、读档后（环 {r2.EmgChainRecordCount} 条，{lr}）{afterLoad}；状态哈希一致");
                 }
             }

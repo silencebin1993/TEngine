@@ -162,6 +162,7 @@ namespace BinGames.Sim.Combat
             AccPut(ref u, EmgPhaseConst.Hack, 0f); // 入侵度用掉了：重启后从 0 起（自己人不会再被劫持判定）
             u.DeathFlags = 0; // “直接击毁”记下的不留残骸作废：这次没有阵亡
             d.EmgUnit[t] = u;
+            EmgPhaseSrcPut(ref d, t, EmgPhaseConst.Hack, 0); // 入侵度清零，来源一并清（FG11-ATTR-01 ①）
             d.Cycle[t] = 0f;
             Gameplay(ref d, CombatEventKind.Hijacked, t, killerId, HijackSecondsOf(ref d), d.Hp[t], d.Pos[t], d.Hijacks[d.Hijacks.Length - 1].OrigFaction, 0);
             if (d.EmgListen != 0u && EmgSiteListens(ref d, EmgEventKind.Hijack))
@@ -303,6 +304,7 @@ namespace BinGames.Sim.Combat
             EmgUnitState u = d.EmgUnit[t];
             AccPut(ref u, EmgPhaseConst.Hack, 0f); // 夺控期间被己方 hij.hack 打进的入侵度作废（自己人不判劫持）
             d.EmgUnit[t] = u;
+            EmgPhaseSrcPut(ref d, t, EmgPhaseConst.Hack, 0); // 入侵度清零，来源一并清（FG11-ATTR-01 ①）
             Gameplay(ref d, CombatEventKind.SeizeEnded, t, r.Hijacker, 0f, d.Hp[t], d.Pos[t], reason, r.IsDowned ? (byte)1 : (byte)0);
             EmgReleaseEvent(ref d, t, r.Hijacker, reason, r.Source);
             EmgEndAttacksOn(ref d, t);

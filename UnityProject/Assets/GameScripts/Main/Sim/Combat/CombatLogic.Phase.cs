@@ -98,6 +98,10 @@ namespace BinGames.Sim.Combat
             }
             AccPut(ref s, k, after);
             d.EmgUnit[u] = s;
+            if (!inPhase && sourceId > 0)
+            {
+                EmgPhaseSrcPut(ref d, u, k, sourceId); // FG11-ATTR-01 ①：累积阶段的来源（悬停“谁造成的”）；没有来源的增益（脚下物质 / 环境 / 传导）不覆盖
+            }
             if (enterNow && !inPhase && r.ExitMode != EmgPhaseConst.ExitDeath && after >= r.Enter)
             {
                 EnterPhase(ref d, u, k, sourceId);
@@ -122,7 +126,11 @@ namespace BinGames.Sim.Combat
             s.PhaseMask = (ushort)(s.PhaseMask | (1 << k));
             if (sourceId > 0 && !d.Has(u, CombatUnitFlags.ExternalHealth))
             {
-                s.LastHitBy = sourceId; // EMG2-DISC-01：相态持续伤害的归属（外部血量单位这个字段已是“最后一次伤害请求者”）；不加每单位字段（K1）
+                s.LastHitBy = sourceId; // 残骸击毁者的回退（CreateWreck）沿用；相态的归属改由 EmgPhaseSrc 记（FG11-ATTR-01 ④）
+            }
+            if (sourceId > 0)
+            {
+                EmgPhaseSrcPut(ref d, u, k, sourceId); // FG11-ATTR-01 ④：这个相态归进入它的来源；进入时没给来源 = 沿用本轮累积阶段的来源（出相态 / 累积归零时已清，不会是上一次相态的旧来源）
             }
             PhsTPut(ref s, k, math.max(0f, r.MinDwell));
             if (k == EmgPhaseConst.Charge)
@@ -173,6 +181,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             s.PhaseMask = (ushort)(s.PhaseMask & ~(1 << k));
+            EmgPhaseSrcPut(ref d, u, k, 0); // FG11-ATTR-01 ①：出相态清来源，下一次进相态不显示这次的来源
             PhsTPut(ref s, k, math.max(0f, r.Guard));
             if (k == EmgPhaseConst.Chill || k == EmgPhaseConst.Charge || broken)
             {
@@ -315,6 +324,10 @@ namespace BinGames.Sim.Combat
                 bool inPhase = (s.PhaseMask & (1 << k)) != 0;
                 if (!inPhase && acc == 0f && t == 0f)
                 {
+                    if (EmgPhaseSrcOf(ref d, i, k) != 0)
+                    {
+                        EmgPhaseSrcPut(ref d, i, k, 0); // FG11-ATTR-01 ①：累积量归零 = 这一轮结束，来源一并清
+                    }
                     continue;
                 }
                 float rate = 1f;
@@ -358,6 +371,10 @@ namespace BinGames.Sim.Combat
                     PhsTPut(ref s, k, t);
                     AccPut(ref s, k, acc);
                     d.EmgUnit[i] = s;
+                    if (acc == 0f && t == 0f)
+                    {
+                        EmgPhaseSrcPut(ref d, i, k, 0); // FG11-ATTR-01 审查修复：当场清，下一步单位全零会在开头提前返回、走不到循环开头的清理
+                    }
                     if (t <= 0f && acc >= r.Enter && r.ExitMode != EmgPhaseConst.ExitDeath)
                     {
                         EnterPhase(ref d, i, k, 0);
@@ -485,8 +502,9 @@ namespace BinGames.Sim.Combat
             float dps = perStack * math.max(0, level - tagStacks);
             if (dps > 0f)
             {
-                // EMG2-DISC-01：相变效果 = 交互伤害（FGR-EMG-182）；归属取最后一个把它推进相态的单位，没有规则键（燃烧不是一次规则结算）
-                EmgAttrBegin(ref d, 0, new int4(d.EmgUnit[i].LastHitBy, 0, 0, 0), EmgFriendlyCode.Reaction, 0);
+                // EMG2-DISC-01：相变效果 = 交互伤害（FGR-EMG-182），没有规则键（燃烧不是一次规则结算）。
+                // FG11-ATTR-01 ④（DEBT-EMG2DISC01-05②）：归燃烧相态自己的来源（A 点着后 B 冻过一下，燃烧伤害仍归 A；外部血量单位同样按相态来源，不再是最后一次伤害请求者）
+                EmgAttrBegin(ref d, 0, EmgOwners.Of(EmgPhaseSrcOf(ref d, i, EmgPhaseConst.Ignite)), EmgFriendlyCode.Reaction, 0);
                 DamageFrom(ref d, i, dps * dt, -1, EmgCode.SrcZone);
                 d.EmgAttr.On = 0;
             }
@@ -625,8 +643,8 @@ namespace BinGames.Sim.Combat
                 side0.Prog = -1;
                 d.EmgCtx = side0;
             }
-            int4 shatterOwners = EmgChainAttr(ref d, saved.Chain, out _);
-            EmgOwnersAdd(ref shatterOwners, attackerId);
+            EmgOwners shatterOwners = EmgChainAttr(ref d, saved.Chain, out _);
+            EmgOwnersAdd(ref d, ref shatterOwners, attackerId);
             EmgAttrBegin(ref d, ri >= 0 ? d.EmgRules[ri].Key : 0, shatterOwners, EmgFriendlyCode.Reaction, saved.Chain); // EMG2-DISC-01：碎裂的附带伤害
             if (kill)
             {

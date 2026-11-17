@@ -52,7 +52,7 @@ namespace GameLogic.EditorTools
         private static int _pass;
         private static string _dir;
 
-        [MenuItem("BinGames/QA/自检/组合图鉴与极限奖励")]
+        [MenuItem("QA/自检/组合图鉴与极限奖励")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -858,6 +858,61 @@ namespace GameLogic.EditorTools
                    && building.Contains("50%") && building.Contains(EmgPhaseFeedback.PhaseName(EmgPhaseConst.Charge)) && !GameText.ContainsMarker(calm + building)
                    && EmgChainView.UnitHoverLine(site, s, 99999) == null,
                 $"G1 悬停单位三段：是什么 / 谁造成的 / 接下来——平静时“{calm?.Replace("\n", " | ")}”；累积电荷一半时“{building?.Replace("\n", " | ")}”；不存在的单位不出");
+
+            // FG11-ATTR-01 ①（DEBT-EMG1CHAIN01-04 重开部分）正向：累积阶段也显示“谁造成的”；没有来源的累积写“来源不明（环境 / 斑块）”
+            int f2 = Unit(k, CombatFaction.Hostile, new double2(12, 0));
+            StepSite(site, 1);
+            k.AddAccum(f2, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 0.5f, a);
+            string accWho = EmgChainView.UnitHoverLine(site, s, f2);
+            string wantAcc = GameText.Format("emg.hover.unit.who_acc", EmgPhaseFeedback.AccName(EmgPhaseConst.Chill), EmgChainView.PartyName(site, s, a));
+            string wantUnknownAcc = GameText.Format("emg.hover.unit.who_acc_unknown", EmgPhaseFeedback.AccName(EmgPhaseConst.Charge));
+            Expect(accWho != null && accWho.Contains(wantAcc) && building.Contains(wantUnknownAcc) && !GameText.ContainsMarker(accWho),
+                $"G1 正向：A 给敌人加了一半寒量 → 悬停“{accWho?.Replace("\n", " | ")}”（含“{wantAcc}”）；没有来源的电荷累积写“{wantUnknownAcc}”");
+
+            // 负向：A 冻住它 → 解冻、免疫窗过去 → 环境（没有来源）再冻住：悬停不显示上一次相态的来源 A
+            int f3 = Unit(k, CombatFaction.Hostile, new double2(18, 0));
+            StepSite(site, 1);
+            k.AddAccum(f3, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 3f, a);
+            string frozenByA = EmgChainView.UnitHoverLine(site, s, f3);
+            bool inPhase(int id) => k.TryGetUnitEmg(id, out _, out EmgUnitState st) && (st.PhaseMask & (1 << EmgPhaseConst.Chill)) != 0;
+            bool ready(int id) => k.TryGetUnitEmg(id, out _, out EmgUnitState st) && (st.PhaseMask & (1 << EmgPhaseConst.Chill)) == 0 && CombatLogic.PhsTOf(st, EmgPhaseConst.Chill) <= 0f;
+            bool wasIn = inPhase(f3);
+            for (int i = 0; i < 60 * 60 && !ready(f3); i++)
+            {
+                StepSite(site, 1);
+            }
+            bool thawed = ready(f3);
+            k.AddAccum(f3, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 3f);
+            string frozenAgain = EmgChainView.UnitHoverLine(site, s, f3);
+            string wantA = GameText.Format("emg.hover.unit.who_phase", EmgPhaseFeedback.PhaseName(EmgPhaseConst.Chill), EmgChainView.PartyName(site, s, a));
+            string wantUnknown = GameText.Format("emg.hover.unit.who_phase_unknown", EmgPhaseFeedback.PhaseName(EmgPhaseConst.Chill));
+            Expect(wasIn && thawed && inPhase(f3) && frozenByA.Contains(wantA) && frozenAgain.Contains(wantUnknown) && !frozenAgain.Contains(wantA),
+                $"G1 负向：A 冻住时“{frozenByA?.Replace("\n", " | ")}”；解冻 {thawed}、环境再冻住后“{frozenAgain?.Replace("\n", " | ")}”——不显示上一次的来源 A");
+
+            // 负向（FG11-ATTR-01 审查修复）：A 只加了一半寒量、没进相态 → 自然衰减到 0（之后单位全零，StepPhase 开头提前返回）→ 环境再累积 / 再冻住：都不显示 A
+            int f4 = Unit(k, CombatFaction.Hostile, new double2(24, 0));
+            StepSite(site, 1);
+            k.AddAccum(f4, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 0.5f, a);
+            bool srcA = k.TryGetPhaseSource(f4, EmgPhaseConst.Chill, out int src0) && src0 == a;
+            bool drained(int id) => k.TryGetUnitEmg(id, out _, out EmgUnitState st) && CombatLogic.AccOf(st, EmgPhaseConst.Chill) == 0f && CombatLogic.PhsTOf(st, EmgPhaseConst.Chill) == 0f;
+            int steps = 0;
+            for (; steps < 60 * 60 && !drained(f4); steps++)
+            {
+                StepSite(site, 1);
+            }
+            bool decayed = drained(f4) && !inPhase(f4);
+            StepSite(site, 30); // 全零后再走几步：走的是提前返回
+            k.TryGetPhaseSource(f4, EmgPhaseConst.Chill, out int srcAfter);
+            k.AddAccum(f4, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 0.5f);
+            string envAcc = EmgChainView.UnitHoverLine(site, s, f4);
+            string wantUnknownChill = GameText.Format("emg.hover.unit.who_acc_unknown", EmgPhaseFeedback.AccName(EmgPhaseConst.Chill));
+            string wantAccA = GameText.Format("emg.hover.unit.who_acc", EmgPhaseFeedback.AccName(EmgPhaseConst.Chill), EmgChainView.PartyName(site, s, a));
+            k.AddAccum(f4, EmgPhaseConst.Chill, k.PhaseRuleAt(EmgPhaseConst.Chill).Enter * 3f);
+            string envFrozen = EmgChainView.UnitHoverLine(site, s, f4);
+            k.TryGetPhaseSource(f4, EmgPhaseConst.Chill, out int srcFrozen);
+            Expect(srcA && decayed && srcAfter == 0 && envAcc != null && envAcc.Contains(wantUnknownChill) && !envAcc.Contains(wantAccA)
+                   && inPhase(f4) && srcFrozen == 0 && envFrozen.Contains(wantUnknown) && !envFrozen.Contains(wantA),
+                $"G1 负向（累积衰减）：A 加一半寒量（来源 {src0}）→ {steps} 步衰减到 0、再空走 30 步后来源 {srcAfter}；环境再累积“{envAcc?.Replace("\n", " | ")}”、再冻住“{envFrozen?.Replace("\n", " | ")}”——都不显示 A");
         }
 
         // ── H 图鉴里可查看敌方单位的程序（FGR-EMG-162，EMG4-HIJ-01 落地）─────────

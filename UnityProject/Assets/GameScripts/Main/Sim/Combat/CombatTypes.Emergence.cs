@@ -139,6 +139,10 @@ namespace BinGames.Sim.Combat
         public const int SegOverclock = 34;
         /// <summary>FG11-REACT-01（格式 22，自描述段；FG-GAP-228）：段 35 酸沼上次电解时刻（每条：形状 x / y / 内半径 / 外半径、时刻）。只在登记过时写，读不含这段的快照 = 空表。</summary>
         public const int SegMarshElec = 35;
+        /// <summary>FG11-ATTR-01（格式 23）：段 36 每单位来源（状态位来源 + 相态来源，只写有非零值的单位）、段 37 沾染来源、段 38 持久链归属；都只在非空时写。</summary>
+        public const int SegUnitSrc = 36;
+        public const int SegCoatAttr = 37;
+        public const int SegChainOwn = 38;
         /// <summary>EMGR-FUSE-01（DEBT-EMG4FUSE02-01）：每条配方的在途登记格数（2 的幂，按链号哈希开放寻址）与探测窗口；旧布局每配方 8 格；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
         /// shortcut: 16 格探测窗口全满时挤掉窗口里链号最小（最早）的登记并计数 EmgScalars.ClueHalfEvicted（少计不多计；DEBT-EMGRFUSE01-01 交 FG15-SYS-02 按实测再定）。</summary>
         public const int ClueHalfBits = 7, ClueHalfRing = 1 << ClueHalfBits, ClueHalfWindow = 16, ClueHalfLegacyRing = 8, ClueSidePorts = 1400;
@@ -165,6 +169,8 @@ namespace BinGames.Sim.Combat
         /// EMGR-TALLY-01（DEBT-EMG4CODEX01-01）：同格已是更新的链时较早那条链停计（不清新链的计数与封印位，不会误发），计 <see cref="EmgScalars.TallyEvicted"/>；计数表进快照段 <see cref="SegChainTally"/>（B10）。
         /// shortcut: 4096 格直映射、冲突保新链——同时在途超过 4096 条链时较早的链可能少记一次极限（不误发）；要精确得按链号开放寻址并在链结束时回收（DEBT-EMGRTALLY01-01，承接 FG15-SYS-02）。</summary>
         public const int ChainTally = 4096;
+        /// <summary>FG11-ATTR-01 ④：持久链归属表长（2 的幂，直映射；512 条链 ≥ 因果链环 256 条记录能覆盖的链数，环里还在的链一定在表里；每条 40 B，共 20 KB / 地点）。</summary>
+        public const int ChainOwnSlots = 512;
         public const int DefaultExtremeCount = 12;
         public const int TallyExtremeBit = 0x100;
         // ── EMG1-FLASH-01（FGR-EMG-036；fg.TbHomeTuning emg.flash.*）：刷写带宽初值（运行时取 CombatConfig 里热更层写的值，≤ 0 用这里）──
@@ -803,9 +809,9 @@ namespace BinGames.Sim.Combat
         public ushort PushCause;
         /// <summary>EMG1-CHAIN-01（ADR ⑨ 产物归属，修复轮）：击毁者单位 ID（持久，进残骸段第 27 个字段；占 PushCause 后的对齐空位，结构仍 120 字节）。环被覆盖 / 读档后悬停“谁造成的”至少还有它。0 = 不明。</summary>
         public int Killer;
-        /// <summary>EMG4-CODEX-01（DEBT-EMG1CHAIN01-02，ADR ⑨ 4 个归属）：持久归属——击毁者 + 之后打碎它的单位（最早 3 个 + 最近 1 个），环被覆盖 / 读档后仍完整。
-        /// 残骸段尾部追加第 28～31 个字段，短段（本卡之前的快照）读到取 0 = 回落“击毁者 + 环”的旧读法。结构 120 → 136 字节（256 块 ≈ 34 KB，ADR ⑬ 内存估算“约 30 KB”的量级不变）。</summary>
-        public int4 Owners;
+        /// <summary>EMG4-CODEX-01（DEBT-EMG1CHAIN01-02，ADR ⑨ 归属，FG11-ATTR-01 起 8 格）：持久归属——击毁者 + 之后打碎它的单位（满格先挤在场的非己方机器、再挤最早的己方），环被覆盖 / 读档后仍完整。
+        /// 残骸段尾部追加第 28～31 个字段，短段（本卡之前的快照）读到取 0 = 回落“击毁者 + 环”的旧读法。结构 120 → 136 字节；FG11-ATTR-01 扩到 8 格后 152 字节（256 块 ≈ 38 KB，ADR ⑬ 已同步）。</summary>
+        public EmgOwners Owners;
 
         /// <summary>实体档案下标（继承原单位；−1 = 种类默认）。不钳位：−2 这类坏值照原样留着，由校验拒绝。</summary>
         public short Profile
@@ -1153,7 +1159,7 @@ namespace BinGames.Sim.Combat
         public short Done;
         /// <summary>EMG2-DISC-01：顺延斑块的规则键与归属（规则产物被本步额度顺延时不丢归因）；其余种类 0。</summary>
         public int RuleKey;
-        public int4 Owners;
+        public EmgOwners Owners;
     }
 
     /// <summary>EMG1-TRIG-01：fg.TbSubPayload 一行的内核副本（下标 = 子形态码；热更层按表写入，缺省为 FG19A 第 2.1.1 节初值）。</summary>

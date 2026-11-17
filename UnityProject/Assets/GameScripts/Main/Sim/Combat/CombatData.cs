@@ -209,6 +209,8 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-04（DEBT-FG2FW03-02，格式 5）：每个状态位自己的到期时间（每单位 <see cref="CombatConst.StatusBitStride"/> 格，槽位 i 的位 b 在 i × 32 + b）。
         /// <see cref="StatusUntil"/> 仍是这些时间里最晚的一个（“这个单位还有没有标签”的快速判断）；先挂的标签先到期，到期只清那一位并按剩下的位重算效果。</summary>
         public NativeList<double> StatusBitUntil;
+        /// <summary>FG11-ATTR-01 ③（DEBT-EMG2DISC01-02）：每个状态位最后由哪个单位挂上（单位 Id；布局同 <see cref="StatusBitUntil"/>，不进 EmgUnitState）。位到期 / 被清 / 被消耗时归 0；进快照段 36。</summary>
+        public NativeList<int> StatusBitSource;
         /// <summary>FG2-FW-04 修复（格式 6）：区域减速位（<see cref="CombatConst.StatusBitZoneSlow"/>）自己的减速值。<see cref="StatusSlow"/> 是所有来源取大后的结果；
         /// 减速标签逐位到期后按剩下的位重算时，区域减速从这里取起点，不再沿用混合最大值（否则已到期的减速标签的数值会残留到区域减速位到期）。</summary>
         public NativeList<float> StatusZoneSlow;
@@ -379,9 +381,11 @@ namespace BinGames.Sim.Combat
         public int EmgAttrPublished;
         /// <summary>下一次 DamageUnit 属于哪条交互（瞬时量）。</summary>
         public EmgAttrScope EmgAttr;
+        /// <summary>FG11-ATTR-01 ② / ③：这一次 ApplyStatus 的沾染来自哪块斑块（EmgPatchTouch 开、ApplyStatus 后关；瞬时量）。</summary>
+        public EmgAttrScope EmgCoatIn;
         /// <summary>正在结算的规则（瞬时量）：这段时间生成 / 转化的斑块继承它的键与归属。</summary>
         public int EmgRuleKeyNow;
-        public int4 EmgRuleOwnersNow;
+        public EmgOwners EmgRuleOwnersNow;
         /// <summary>上一步交出的最大链深（工作值在 EmgBusStats.DepthWork：步进跑在作业里，CombatData 是值拷贝，跨步状态要放原生数组）。</summary>
         public int EmgDepthPublished;
 
@@ -425,6 +429,7 @@ namespace BinGames.Sim.Combat
                 StatusSource = new NativeList<int>(capacity, Allocator.Persistent),
                 StatusStacks = new NativeList<ulong>(capacity, Allocator.Persistent),
                 StatusBitUntil = new NativeList<double>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
+                StatusBitSource = new NativeList<int>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
                 StatusZoneSlow = new NativeList<float>(capacity, Allocator.Persistent),
                 Ammo = new NativeList<float>(capacity, Allocator.Persistent),
                 Siege = new NativeList<CombatSiegeUnit>(capacity, Allocator.Persistent),
@@ -530,6 +535,7 @@ namespace BinGames.Sim.Combat
             StatusSource.Dispose();
             StatusStacks.Dispose();
             StatusBitUntil.Dispose();
+            StatusBitSource.Dispose();
             StatusZoneSlow.Dispose();
             Ammo.Dispose();
             Siege.Dispose();
@@ -652,6 +658,7 @@ namespace BinGames.Sim.Combat
             for (int b = 0; b < CombatConst.StatusBitStride; b++)
             {
                 StatusBitUntil.Add(0);
+                StatusBitSource.Add(0);
             }
             StatusZoneSlow.Add(0f);
             Ammo.Add(math.max(0f, s.Ammo));
@@ -714,6 +721,7 @@ namespace BinGames.Sim.Combat
             for (int b = 0; b < CombatConst.StatusBitStride; b++)
             {
                 StatusBitUntil[to * CombatConst.StatusBitStride + b] = StatusBitUntil[from * CombatConst.StatusBitStride + b];
+                StatusBitSource[to * CombatConst.StatusBitStride + b] = StatusBitSource[from * CombatConst.StatusBitStride + b];
             }
             StatusZoneSlow[to] = StatusZoneSlow[from];
             Ammo[to] = Ammo[from];
@@ -767,6 +775,7 @@ namespace BinGames.Sim.Combat
             StatusSource.ResizeUninitialized(length);
             StatusStacks.ResizeUninitialized(length);
             StatusBitUntil.ResizeUninitialized(length * CombatConst.StatusBitStride);
+            StatusBitSource.ResizeUninitialized(length * CombatConst.StatusBitStride);
             StatusZoneSlow.ResizeUninitialized(length);
             Ammo.ResizeUninitialized(length);
             Siege.ResizeUninitialized(length);

@@ -94,14 +94,28 @@ namespace BinGames.Sim.Combat
             double2 pos = d.Pos[u];
             int chain = saved.Chain > 0 ? saved.Chain : d.EmgUnit[u].LastHitChain;
             byte depth = saved.Chain > 0 ? saved.Depth : (byte)0;
-            // EMG2-DISC-01：单位身上的反应没有“斑块归属”。本步伤害行（不进快照）归这条链上的单位 + 这次的来源（ADR ⑨）；
-            // 产物斑块和顺延记录进快照与 StateHash，环读档后是空的，所以它们只继承键、归属由 EmgOwnersOfNew 取来源（否则存读档后分叉）。
+            // FG11-ATTR-01 ③（DEBT-EMG2DISC01-02 / -05④，FGR-EMG-130“A 车铺油、B 车点火”）：归属 = 沾染来源（挂上 a / b 位的斑块归属或单位，持久数据）
+            // + 这一次带来沾染的斑块归属 + 链上单位（环派生，只进不进快照的本步伤害行）+ 点火方（这一次的来源）。
+            // 产物斑块和顺延记录进快照与 StateHash，环读档后是空的：EmgRuleOwnersNow 只放持久数据（沾染来源 + 这一次的斑块 + 点火方），否则存读档后分叉。
             int key0 = d.EmgRuleKeyNow;
-            int4 owners0 = d.EmgRuleOwnersNow;
-            int4 coatOwners = EmgChainAttr(ref d, chain, out _);
-            EmgOwnersAdd(ref coatOwners, srcId);
+            EmgOwners owners0 = d.EmgRuleOwnersNow;
+            EmgOwners persist = default;
+            EmgCoatSourcesAdd(ref d, u, rule.A - EmgRuleConst.CoatBase, ref persist);
+            if (rule.B >= EmgRuleConst.CoatBase)
+            {
+                EmgCoatSourcesAdd(ref d, u, rule.B - EmgRuleConst.CoatBase, ref persist);
+            }
+            if (d.EmgCoatIn.On != 0)
+            {
+                persist = EmgOwnersMerge(ref d, persist, d.EmgCoatIn.Owners);
+            }
+            EmgOwners coatOwners = EmgOwnersMerge(ref d, persist, EmgChainAttr(ref d, chain, out _));
+            EmgOwnersAdd(ref d, ref coatOwners, srcId);
+            EmgOwnersAdd(ref d, ref persist, srcId);
+            EmgAttrScope coatIn = d.EmgCoatIn;
+            d.EmgCoatIn.On = 0; // 结算里给别的单位挂的状态不是这块斑块挂的（ApplyStatus 返回前再恢复，本单位这一位照常登记）
             d.EmgRuleKeyNow = rule.Key;
-            d.EmgRuleOwnersNow = int4.zero;
+            d.EmgRuleOwnersNow = persist;
             switch (rule.Op)
             {
                 case EmgRuleConst.OpCoatSpawn:
@@ -114,6 +128,7 @@ namespace BinGames.Sim.Combat
                             EmgUnitState ig = d.EmgUnit[u];
                             AccPut(ref ig, EmgPhaseConst.Ignite, 0f); // EmgSetAcc 只升不降：“着火度清零”直接写 0（含本次燃烧标签刚加的增益）
                             d.EmgUnit[u] = ig;
+                            EmgPhaseSrcPut(ref d, u, EmgPhaseConst.Ignite, 0); // 着火度清零 = 这一轮结束，来源一并清（FG11-ATTR-01 ①）
                             if (InPhase(ref d, u, EmgPhaseConst.Ignite))
                             {
                                 ExitPhase(ref d, u, EmgPhaseConst.Ignite, true);
@@ -169,6 +184,7 @@ namespace BinGames.Sim.Combat
             }
             d.EmgRuleKeyNow = key0;
             d.EmgRuleOwnersNow = owners0;
+            d.EmgCoatIn = coatIn;
             d.EmgCtx = saved;
             es = d.EmgS[0];
             es.CoatBusy = 0;
@@ -313,7 +329,7 @@ namespace BinGames.Sim.Combat
 
         /// <summary>C03：本单位电荷注入 × p1；电弧跳向 p3 米内最多 p2 个导电（prop.conductive ≥ 0.3）或带同一沾染（浸湿）的单位（含己方、中立），第 k 跳 × p4^k；每跳附带伤害。
         /// <paramref name="injected"/>：这份电荷已由命中注能（EmgHitInject）加过 1 倍，这里只补 (p1 − 1) 倍，合计 = 注入 × p1。</summary>
-        private static void EmgCoatArc(ref CombatData d, int u, in EmgRule r, float energy, uint coatBit, bool injected, in int4 owners)
+        private static void EmgCoatArc(ref CombatData d, int u, in EmgRule r, float energy, uint coatBit, bool injected, in EmgOwners owners)
         {
             float base0 = math.max(0f, energy);
             float mul = r.P1 > 0f ? r.P1 : 2f;
@@ -415,6 +431,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
+            EmgBitSourceClear(ref d, u, d.Status[u] & bits); // FG11-ATTR-01 ③：被消耗的沾染位不再有来源
             d.Status[u] &= ~bits;
             ulong stacks = d.StatusStacks[u];
             uint c = bits;
@@ -714,7 +731,7 @@ namespace BinGames.Sim.Combat
             int killer = d.SlotOf(f.Owner);
             EmgDestroyDirect(ref d, u, killer);
             float rad = r.P1 > 0f ? r.P1 : 3f;
-            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f, r.Key, new int4(f.Owner, 0, 0, 0), f.Chain, false); // 场的湮灭爆发不是地面层斑块
+            EmgUnitsInCircle(ref d, pos, rad, r.SideValue, f.Owner, false, 0f, r.Key, EmgOwners.Of(f.Owner), f.Chain, false); // 场的湮灭爆发不是地面层斑块
             EmgBurstPatches(ref d, pos, rad, r.P4, r.P3);
             return true;
         }

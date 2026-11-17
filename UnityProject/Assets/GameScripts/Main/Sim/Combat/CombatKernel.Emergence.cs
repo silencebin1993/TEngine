@@ -1232,8 +1232,10 @@ namespace BinGames.Sim.Combat
             int tallyRows = tallyOut ? TallyRows() : 0;
             bool oc = format >= 21 && _d.Overclocks.Length > 0; // FG11-FAC-01：段 34 只在有超频记录时写（没有时快照与哈希逐字不变）
             bool marshElec = format >= 22 && _d.MarshElecShape.Length > 0; // FG11-REACT-01：段 35 只在酸沼电解过时写
+            bool v23 = format >= 23; // FG11-ATTR-01：归属 8 格（斑块 / 残骸 / 顺延段尾追加 4 个）+ 段 36～38 归因
+            int attrSegs = AttrSegmentCount(format, hash, out int attrUnitRows, out int attrChainRows);
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + attrSegs + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 29 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1427,7 +1429,7 @@ namespace BinGames.Sim.Combat
             }
             sw.End();
 
-            sw.Begin(EmgConst.SegWrecks, 31, _d.Wrecks.Length);
+            sw.Begin(EmgConst.SegWrecks, v23 ? 35 : 31, _d.Wrecks.Length);
             for (int i = 0; i < _d.Wrecks.Length; i++)
             {
                 EmgWreck k = _d.Wrecks[i];
@@ -1458,15 +1460,22 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(k.PushBy);
                 if (sw.F()) w.Write(k.PushCause);
                 if (sw.F()) w.Write(k.Killer); // EMG1-CHAIN-01：尾部追加击毁者，短段读到取 0 = 不明
-                if (sw.F()) w.Write(k.Owners.x); // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：尾部追加 4 个持久归属，短段读到取 0
-                if (sw.F()) w.Write(k.Owners.y);
-                if (sw.F()) w.Write(k.Owners.z);
-                if (sw.F()) w.Write(k.Owners.w);
+                if (sw.F()) w.Write(k.Owners.Lo.x); // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：尾部追加 4 个持久归属，短段读到取 0
+                if (sw.F()) w.Write(k.Owners.Lo.y);
+                if (sw.F()) w.Write(k.Owners.Lo.z);
+                if (sw.F()) w.Write(k.Owners.Lo.w);
+                if (v23)
+                {
+                    if (sw.F()) w.Write(k.Owners.Hi.x); // FG11-ATTR-01：归属第 5～8 格（尾部追加，短段读到取 0）
+                    if (sw.F()) w.Write(k.Owners.Hi.y);
+                    if (sw.F()) w.Write(k.Owners.Hi.z);
+                    if (sw.F()) w.Write(k.Owners.Hi.w);
+                }
                 sw.EndRecord();
             }
             sw.End();
 
-            WriteTriggerSegments(w, sw, v17);
+            WriteTriggerSegments(w, sw, v17, v23);
 
             sw.Begin(EmgConst.SegFlash, 1, _d.FlashMap.Length);
             for (int i = 0; i < _d.FlashMap.Length; i++)
@@ -1479,7 +1488,7 @@ namespace BinGames.Sim.Combat
             WriteChainSegments(w, sw);
             if (v17)
             {
-                WriteMatterSegments(w, sw);
+                WriteMatterSegments(w, sw, v23);
             }
             if (v18)
             {
@@ -1496,6 +1505,10 @@ namespace BinGames.Sim.Combat
             if (marshElec)
             {
                 WriteMarshElecSegment(w, sw);
+            }
+            if (attrSegs > 0)
+            {
+                WriteAttrSegments(w, sw, attrUnitRows, attrChainRows);
             }
             if (pits)
             {
@@ -1562,9 +1575,10 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>EMG1-TRIG-01：待生成表（段 11）、区域宿主字段（段 12，按区域表逐条）、回波宿主字段（段 13，按回波表逐条）。</summary>
-        private void WriteTriggerSegments(BinaryWriter w, EmgSegmentWriter sw, bool v17)
+        private void WriteTriggerSegments(BinaryWriter w, EmgSegmentWriter sw, bool v17, bool v23)
         {
-            sw.Begin(EmgConst.SegPending, v17 ? 31 : 25, _d.EmgPending.Length); // EMG2-MAT-01（格式 17）：+ 记号高 8 位；EMG2-DISC-01：+ 顺延斑块的规则键与归属（只追加）
+            // FG11-ATTR-01：v23 = 顺延斑块的归属第 5～8 格（格式 23 起尾部追加）
+            sw.Begin(EmgConst.SegPending, (v17 ? 31 : 25) + (v23 ? 4 : 0), _d.EmgPending.Length); // EMG2-MAT-01（格式 17）：+ 记号高 8 位；EMG2-DISC-01：+ 顺延斑块的规则键与归属（只追加）
             for (int i = 0; i < _d.EmgPending.Length; i++)
             {
                 EmgSpawn s = _d.EmgPending[i];
@@ -1597,10 +1611,17 @@ namespace BinGames.Sim.Combat
                 {
                     if (sw.F()) w.Write((byte)((ushort)s.Flags >> 8));
                     if (sw.F()) w.Write(s.RuleKey);
-                    if (sw.F()) w.Write(s.Owners.x);
-                    if (sw.F()) w.Write(s.Owners.y);
-                    if (sw.F()) w.Write(s.Owners.z);
-                    if (sw.F()) w.Write(s.Owners.w);
+                    if (sw.F()) w.Write(s.Owners.Lo.x);
+                    if (sw.F()) w.Write(s.Owners.Lo.y);
+                    if (sw.F()) w.Write(s.Owners.Lo.z);
+                    if (sw.F()) w.Write(s.Owners.Lo.w);
+                }
+                if (v23)
+                {
+                    if (sw.F()) w.Write(s.Owners.Hi.x);
+                    if (sw.F()) w.Write(s.Owners.Hi.y);
+                    if (sw.F()) w.Write(s.Owners.Hi.z);
+                    if (sw.F()) w.Write(s.Owners.Hi.w);
                 }
                 sw.EndRecord();
             }
@@ -2057,10 +2078,14 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) k.PushBy = r.ReadInt32();
                         if (sr.F()) k.PushCause = r.ReadUInt16();
                         if (sr.F()) k.Killer = r.ReadInt32();
-                        if (sr.F()) k.Owners.x = r.ReadInt32();
-                        if (sr.F()) k.Owners.y = r.ReadInt32();
-                        if (sr.F()) k.Owners.z = r.ReadInt32();
-                        if (sr.F()) k.Owners.w = r.ReadInt32();
+                        if (sr.F()) k.Owners.Lo.x = r.ReadInt32();
+                        if (sr.F()) k.Owners.Lo.y = r.ReadInt32();
+                        if (sr.F()) k.Owners.Lo.z = r.ReadInt32();
+                        if (sr.F()) k.Owners.Lo.w = r.ReadInt32();
+                        if (sr.F()) k.Owners.Hi.x = r.ReadInt32(); // FG11-ATTR-01（格式 23 起）
+                        if (sr.F()) k.Owners.Hi.y = r.ReadInt32();
+                        if (sr.F()) k.Owners.Hi.z = r.ReadInt32();
+                        if (sr.F()) k.Owners.Hi.w = r.ReadInt32();
                         if (!sr.RecordOk)
                         {
                             return CombatLoadResult.InvalidValue;
@@ -2155,6 +2180,10 @@ namespace BinGames.Sim.Combat
                     return ParseOverclockSegment(r, sr, ref staging);
                 case EmgConst.SegMarshElec:
                     return ParseMarshElecSegment(r, sr, ref staging);
+                case EmgConst.SegUnitSrc:
+                case EmgConst.SegCoatAttr:
+                case EmgConst.SegChainOwn:
+                    return ParseAttrSegment(r, sr, ref staging); // FG11-ATTR-01
                 case EmgConst.SegPit:
                 case EmgConst.SegPitAcc:
                 case EmgConst.SegPitStats:
@@ -2840,10 +2869,14 @@ namespace BinGames.Sim.Combat
                 if (sr.F()) genDone = r.ReadInt16();
                 if (sr.F()) s.Flags |= (EmgProjFlags)(r.ReadByte() << 8); // EMG2-MAT-01：记号高 8 位
                 if (sr.F()) s.RuleKey = r.ReadInt32();
-                if (sr.F()) s.Owners.x = r.ReadInt32();
-                if (sr.F()) s.Owners.y = r.ReadInt32();
-                if (sr.F()) s.Owners.z = r.ReadInt32();
-                if (sr.F()) s.Owners.w = r.ReadInt32();
+                if (sr.F()) s.Owners.Lo.x = r.ReadInt32();
+                if (sr.F()) s.Owners.Lo.y = r.ReadInt32();
+                if (sr.F()) s.Owners.Lo.z = r.ReadInt32();
+                if (sr.F()) s.Owners.Lo.w = r.ReadInt32();
+                if (sr.F()) s.Owners.Hi.x = r.ReadInt32(); // FG11-ATTR-01（格式 23 起）
+                if (sr.F()) s.Owners.Hi.y = r.ReadInt32();
+                if (sr.F()) s.Owners.Hi.z = r.ReadInt32();
+                if (sr.F()) s.Owners.Hi.w = r.ReadInt32();
                 s.Gen = (byte)(genDone & 0xF);
                 s.Done = (short)(genDone >> 4);
                 if (!sr.RecordOk)

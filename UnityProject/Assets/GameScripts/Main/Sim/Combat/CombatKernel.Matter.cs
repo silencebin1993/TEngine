@@ -403,9 +403,9 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>段 17 斑块（只写活斑块，按表内顺序）、段 18 活跃场、段 19 实体档案稳定键。</summary>
-        private void WriteMatterSegments(BinaryWriter w, EmgSegmentWriter sw)
+        private void WriteMatterSegments(BinaryWriter w, EmgSegmentWriter sw, bool v23)
         {
-            sw.Begin(EmgConst.SegPatches, PatchFields, _d.EmgS[0].PatchLive);
+            sw.Begin(EmgConst.SegPatches, PatchFields + (v23 ? 4 : 0), _d.EmgS[0].PatchLive); // FG11-ATTR-01：格式 23 起段尾追加归属第 5～8 格
             // 按斑块 Id 升序写（规范顺序）：连续跑里新斑块复用墓碑槽、读档后列表是压实的，按槽位写会让同一状态写出不同字节、
             // 涌现哈希随槽位布局变（FGT-EMG-040 读档续跑哈希必须一致）。EMG4-FUZZ-01：每块另写原槽位（段尾追加字段），读回放回原槽（PlacePatchSlots，空槽补墓碑），
             // 读档后槽位布局与连续跑一致（后续新斑块复用同一墓碑槽）；旧档短段没有槽位字段时照旧按 Id 压实。
@@ -445,10 +445,10 @@ namespace BinGames.Sim.Combat
                 if (sw.F()) w.Write(z.BurnSeconds);
                 if (sw.F()) w.Write(z.MoltenAccum);
                 if (sw.F()) w.Write(z.CondSince);
-                if (sw.F()) w.Write(z.Owners.x);
-                if (sw.F()) w.Write(z.Owners.y);
-                if (sw.F()) w.Write(z.Owners.z);
-                if (sw.F()) w.Write(z.Owners.w);
+                if (sw.F()) w.Write(z.Owners.Lo.x);
+                if (sw.F()) w.Write(z.Owners.Lo.y);
+                if (sw.F()) w.Write(z.Owners.Lo.z);
+                if (sw.F()) w.Write(z.Owners.Lo.w);
                 if (sw.F()) w.Write(z.EmgId);
                 if (sw.F()) w.Write(z.EmgChain);
                 if (sw.F()) w.Write(z.EmgDepth);
@@ -468,6 +468,13 @@ namespace BinGames.Sim.Combat
                 // EMG4-FUZZ-01（模糊测试器常驻固定集发现：读档续跑哈希不一致）：槽位是状态——新斑块复用最前面的墓碑槽、合并 / 扩散按下标比较取第一个（FGR-EMG-213），
                 // 读回压实会让之后的结算换一个斑块，读档后若干步哈希分叉。仍按 Id 写（同一状态同一字节），每条另记槽位，读回放回原槽（中间补墓碑）。
                 if (sw.F()) w.Write(slot);
+                if (v23)
+                {
+                    if (sw.F()) w.Write(z.Owners.Hi.x); // FG11-ATTR-01（ADR ⑨ 更正：归属 8 格），短段读到取 0
+                    if (sw.F()) w.Write(z.Owners.Hi.y);
+                    if (sw.F()) w.Write(z.Owners.Hi.z);
+                    if (sw.F()) w.Write(z.Owners.Hi.w);
+                }
                 sw.EndRecord();
             }
             sw.End();
@@ -906,10 +913,10 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) z.BurnSeconds = r.ReadSingle();
                         if (sr.F()) z.MoltenAccum = r.ReadSingle();
                         if (sr.F()) z.CondSince = r.ReadDouble();
-                        if (sr.F()) z.Owners.x = r.ReadInt32();
-                        if (sr.F()) z.Owners.y = r.ReadInt32();
-                        if (sr.F()) z.Owners.z = r.ReadInt32();
-                        if (sr.F()) z.Owners.w = r.ReadInt32();
+                        if (sr.F()) z.Owners.Lo.x = r.ReadInt32();
+                        if (sr.F()) z.Owners.Lo.y = r.ReadInt32();
+                        if (sr.F()) z.Owners.Lo.z = r.ReadInt32();
+                        if (sr.F()) z.Owners.Lo.w = r.ReadInt32();
                         if (sr.F()) z.EmgId = r.ReadInt32();
                         if (sr.F()) z.EmgChain = r.ReadInt32();
                         if (sr.F()) z.EmgDepth = r.ReadByte();
@@ -927,6 +934,10 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) z.RuleKey = r.ReadInt32();
                         int slot = -1;
                         if (sr.F()) slot = r.ReadInt32(); // EMG4-FUZZ-01：短段（较早写出的快照）没有槽位 → −1，按 Id 压实（与修前相同）
+                        if (sr.F()) z.Owners.Hi.x = r.ReadInt32(); // FG11-ATTR-01（格式 23 起）
+                        if (sr.F()) z.Owners.Hi.y = r.ReadInt32();
+                        if (sr.F()) z.Owners.Hi.z = r.ReadInt32();
+                        if (sr.F()) z.Owners.Hi.w = r.ReadInt32();
                         slots.Add(slot);
                         // EMG2-MAT-02：迁入斑块的载荷校验（种类只能是读法 / 陷阱场地 / 液洼 / 喷淋池 / 油迹；液洼的 Owner 必须是液洼号的相反数）；非迁入斑块恒为斑块种类、中立
                         bool legacy = (z.PFlags & EmgMatterConst.FlagLegacy) != 0;

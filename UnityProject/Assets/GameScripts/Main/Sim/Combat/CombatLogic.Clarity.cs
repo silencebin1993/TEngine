@@ -250,18 +250,19 @@ namespace BinGames.Sim.Combat
                 }
             }
             StepCoatFx(ref d, dt); // EMG2-REACT-02（C05 / C07）：酸液滴火、泥浆计时
+            StepCoatAttr(ref d); // FG11-ATTR-01 ②：沾染来源表随位到期 / 单位阵亡删行
             StepAcidMarsh(ref d, dt, now);
             StepPuddleContact(ref d, dt, now);
         }
 
         /// <summary>给单位加受寒（液氮命中 / 液氮池节拍）。EMG2-PHS-01：并入寒量累积量（EmgAddAcc：冻结中 / 免疫窗内不加、按寒抗折减、满了进入冻结）；空中单位不加。</summary>
-        internal static void ApplyChill(ref CombatData d, int k, float amount)
+        internal static void ApplyChill(ref CombatData d, int k, float amount, int sourceId = 0)
         {
             if (!(amount > 0f) || k < 0 || k >= d.Count || !d.IsAlive(k) || d.Clarity[k].Air != 0)
             {
                 return;
             }
-            EmgAddAcc(ref d, k, EmgPhaseConst.Chill, amount);
+            EmgAddAcc(ref d, k, EmgPhaseConst.Chill, amount, sourceId); // FG11-ATTR-01 ①：喷淋者 / 液氮池的放出者是寒量来源
         }
 
         /// <summary>冻结的敌方单位：架炮驻锄回到未架设（FG09 第 10 节负向“架设到一半被冻结”）。</summary>
@@ -426,7 +427,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (p.SprayChill > 0f)
                 {
-                    ApplyChill(ref d, k, p.SprayChill);
+                    ApplyChill(ref d, k, p.SprayChill, d.Id[i]);
                 }
                 hitBuilding |= IsBuilding(ref d, k);
                 hits++;

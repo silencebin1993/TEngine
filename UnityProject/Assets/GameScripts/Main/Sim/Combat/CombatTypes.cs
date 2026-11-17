@@ -51,7 +51,9 @@ namespace BinGames.Sim.Combat
         /// 21 = FG11-FAC-01（FG09 FGR-FAC-008 超频专属语法）：行为参数行尾部追加超频参数 22 个（冲刺 / 停机 / 蓄热连射 / 光环 / 熔断 / 泄爆 / 前倾加速 / 超频状态循环）；
         /// Emg 段追加段 34 超频运行状态（只在有记录时写）。读取仍认 1～20：参数为 0、没有超频记录。
         /// 22 = FG11-REACT-01（FG-GAP-228，FG19B E16“每块每秒最多 1 次”）：Emg 段追加段 35 酸沼上次电解时刻（只在登记过时写）。读取仍认 1～21：没有登记（下一次注电即可电解）。
-        public const int FormatVersion = 22;
+        /// 23 = FG11-ATTR-01（FGR-EMG-182，ADR-EMG-001 ⑨ 更正）：同一产物的归属 4 → 8 格（斑块段 17、残骸段 10、顺延段 11 记录尾部各追加 4 个字段）；
+        /// Emg 段追加段 36 每单位来源（状态位来源 + 相态来源）、段 37 斑块沾染来源、段 38 持久链归属（都只在非空时写）。读取仍认 1～22：归属后 4 格为空、没有来源记录（悬停“来源不明”）。
+        public const int FormatVersion = 23;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -431,8 +433,8 @@ namespace BinGames.Sim.Combat
         public float MoltenAccum;
         /// <summary>规则条件开始满足的时刻（W01 / W02 停留秒数，EMG2-RULE-01 用）。</summary>
         public double CondSince;
-        /// <summary>归属：链上最多 4 台机器的单位 ID（ADR ⑨；合并时取份量大者）。</summary>
-        public int4 Owners;
+        /// <summary>归属：链上最多 8 个单位 ID（ADR ⑨，FG11-ATTR-01 起 8 格；满格挤出规则见 EmgOwnersAdd）。</summary>
+        public EmgOwners Owners;
         /// <summary>EMG2-DISC-01（FGR-EMG-182）：生成 / 转化出这块斑块的规则稳定键（0 = 不是规则产物，如排放写端）；这块斑块造成的伤害按它统计。</summary>
         public int RuleKey;
         public byte Matter;

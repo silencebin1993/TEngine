@@ -849,7 +849,9 @@ namespace BinGames.Sim.Combat
                 touched &= touched - 1u;
                 int idx = baseIdx + b;
                 d.StatusBitUntil[idx] = (before & (1u << b)) != 0u ? math.max(d.StatusBitUntil[idx], until) : until;
+                d.StatusBitSource[idx] = source >= 0 && source < d.Count ? d.Id[source] : 0; // FG11-ATTR-01 ③：这一位最后由谁挂上（单位层反应的“沾染来源”）
             }
+            EmgCoatAttrNote(ref d, k, mask); // FG11-ATTR-01 ②：斑块挂上的位登记斑块归因，别的来源挂上的删旧行
             int cap = StackCapOf(ref d);
             ulong stacks = d.StatusStacks[k];
             uint dotMask = DotMaskOf(ref d);
@@ -889,6 +891,7 @@ namespace BinGames.Sim.Combat
 
         private static void ClearStatus(ref CombatData d, int k)
         {
+            EmgBitSourceClear(ref d, k, d.Status[k]);
             d.Status[k] = 0u;
             d.StatusStacks[k] = 0UL;
             d.StatusDps[k] = 0f;
@@ -1033,6 +1036,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (!d.IsAlive(k) || d.StatusUntil[k] <= now)
                 {
+                    EmgBitSourceClear(ref d, k, d.Status[k]); // FG11-ATTR-01 ③：整组到期，来源一并清
                     d.Status[k] = 0u;
                     d.StatusStacks[k] = 0UL;
                     d.StatusDps[k] = 0f;
@@ -1058,6 +1062,7 @@ namespace BinGames.Sim.Combat
                     }
                     if (expired != 0u)
                     {
+                        EmgBitSourceClear(ref d, k, expired);
                         d.Status[k] &= ~expired;
                         ulong stacks = d.StatusStacks[k];
                         uint e = expired;
@@ -1083,7 +1088,9 @@ namespace BinGames.Sim.Combat
                 if (tick && d.StatusDps[k] > 0f)
                 {
                     d.EmgMergeCont = 1; // EMG1-ENT-01：状态持续伤害对外部血量单位按步合并成一条请求
+                    EmgCoatDotBegin(ref d, k); // FG11-ATTR-01 ②（DEBT-EMG2DISC01-01）：斑块挂上的持续伤害位按占比计交互伤害（只记账，不改这一拍的伤害）
                     DamageUnit(ref d, k, d.StatusDps[k] * statusTick, d.SlotOf(d.StatusSource[k]));
+                    d.EmgAttr.On = 0;
                     d.EmgMergeCont = 0;
                 }
             }
@@ -1330,7 +1337,7 @@ namespace BinGames.Sim.Combat
                         }
                         if (zone.Chill > 0f)
                         {
-                            ApplyChill(ref d, k, zone.Chill);
+                            ApplyChill(ref d, k, zone.Chill, zone.Owner > 0 ? zone.Owner : 0);
                         }
                     }
                     if (tickDamage > 0f)

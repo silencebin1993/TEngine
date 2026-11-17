@@ -262,10 +262,10 @@ namespace GameLogic.Campaign.Combat
             return string.Join(GameText.Get("emg.chain.list_sep"), names);
         }
 
-        private static string Owners(CombatSite site, CampaignState state, int4 o)
+        private static string Owners(CombatSite site, CampaignState state, in EmgOwners o)
         {
-            var names = new List<string>(4);
-            for (int q = 0; q < 4; q++)
+            var names = new List<string>(EmgOwners.Cap);
+            for (int q = 0; q < EmgOwners.Cap; q++)
             {
                 if (o[q] != 0)
                 {
@@ -276,7 +276,7 @@ namespace GameLogic.Campaign.Combat
         }
 
         /// <summary>
-        /// EMG4-CODEX-01（DEBT-EMG1CHAIN01-04，FGR-EMG-181）：悬停敌方 / 己方单位的三段——是什么（名字 + 种类）、谁造成的（身上相态的来源；内核只记最近一次来源）、
+        /// EMG4-CODEX-01（DEBT-EMG1CHAIN01-04，FGR-EMG-181）：悬停敌方 / 己方单位的三段——是什么（名字 + 种类）、谁造成的（身上相态 / 正在累积的量的来源，每相态一份，FG11-ATTR-01）、
         /// 接下来会怎样（相态还剩几秒 / 正在累积的量到多少会进哪个相态）。只读这一个单位的内核状态，O(相态种类数)，悬停时才调。不是单位返回 null。
         /// </summary>
         public static string UnitHoverLine(CombatSite site, CampaignState state, int unitId)
@@ -290,16 +290,19 @@ namespace GameLogic.Campaign.Combat
             if (site.Kernel.TryGetUnitEmg(unitId, out _, out EmgUnitState s))
             {
                 float bestAcc = 0f;
+                int accK = -1;
                 for (int k = 0; k < EmgPhaseConst.Hack; k++)
                 {
                     if ((s.PhaseMask & (1 << k)) != 0)
                     {
-                        if (s.LastHitBy != 0)
-                        {
-                            who = GameText.Format("emg.hover.unit.who_phase", EmgPhaseFeedback.PhaseName(k), PartyName(site, state, s.LastHitBy));
-                        }
+                        // FG11-ATTR-01 ④：相态归它自己的来源（每相态一份，进相态时没有来源 = 来源不明，不显示上一次相态的旧来源）
+                        site.Kernel.TryGetPhaseSource(unitId, k, out int src);
+                        who = src != 0
+                            ? GameText.Format("emg.hover.unit.who_phase", EmgPhaseFeedback.PhaseName(k), PartyName(site, state, src))
+                            : GameText.Format("emg.hover.unit.who_phase_unknown", EmgPhaseFeedback.PhaseName(k));
                         next = GameText.Format("emg.hover.unit.next_phase", EmgPhaseFeedback.PhaseName(k), F1(math.max(0f, CombatLogic.PhsTOf(s, k))));
                         bestAcc = float.MaxValue; // 已在相态里：“接下来”写到期，不再看累积
+                        accK = -1;
                         continue;
                     }
                     EmgPhaseRule r = site.Kernel.PhaseRuleAt(k);
@@ -307,8 +310,17 @@ namespace GameLogic.Campaign.Combat
                     if (frac > 0.001f && frac > bestAcc)
                     {
                         bestAcc = frac;
+                        accK = k;
                         next = GameText.Format("emg.hover.unit.next_acc", EmgPhaseFeedback.AccName(k), Mathf.RoundToInt(100f * frac).ToString(CultureInfo.InvariantCulture), EmgPhaseFeedback.PhaseName(k));
                     }
+                }
+                if (accK >= 0)
+                {
+                    // FG11-ATTR-01 ①（DEBT-EMG1CHAIN01-04 重开部分）：累积阶段也显示来源（正在累积最多的那一项）
+                    site.Kernel.TryGetPhaseSource(unitId, accK, out int src);
+                    who = src != 0
+                        ? GameText.Format("emg.hover.unit.who_acc", EmgPhaseFeedback.AccName(accK), PartyName(site, state, src))
+                        : GameText.Format("emg.hover.unit.who_acc_unknown", EmgPhaseFeedback.AccName(accK));
                 }
             }
             return Three(what, who, next);
@@ -464,8 +476,8 @@ namespace GameLogic.Campaign.Combat
                 return null;
             }
             string who = GameText.Format("emg.hover.sub.who", owner);
-            int4 chainOwners = site.Kernel.EmgChainOwners(p.Chain);
-            if (chainOwners.y != 0)
+            EmgOwners chainOwners = site.Kernel.EmgChainOwners(p.Chain);
+            if (chainOwners[1] != 0)
             {
                 who += GameText.Get("emg.chain.clause_sep") + GameText.Format("emg.hover.chain_owners", Owners(site, state, chainOwners)); // 跨机结果：链上的各台机器
             }

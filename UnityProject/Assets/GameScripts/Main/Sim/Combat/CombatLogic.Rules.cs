@@ -249,16 +249,16 @@ namespace BinGames.Sim.Combat
         /// <summary>结算一条规则（宿主斑块 <paramref name="i"/>，另一方 <paramref name="j"/>，−1 = 没有）。返回 true = 宿主被转化 / 消失。</summary>
         private static bool EmgApplyRule(ref CombatData d, in EmgRule r, int i, int j, double now)
         {
-            // EMG2-DISC-01（ADR ⑨ 归属）：参与方的归属并进宿主（先出现的在前，满 4 个时保留最早 3 个 + 最近 1 个）；这条规则结算期间生成 / 转化的斑块继承键与归属
+            // EMG2-DISC-01（ADR ⑨ 归属）：参与方的归属并进宿主（先出现的在前，最多 8 个，满格先挤在场的非己方机器、再挤最早的己方，见 EmgOwnersAdd）；这条规则结算期间生成 / 转化的斑块继承键与归属
             CombatZone host = d.Patches[i];
             if (j >= 0)
             {
                 CombatZone other = d.Patches[j];
-                host.Owners = other.Born <= host.Born ? EmgOwnersMerge(other.Owners, host.Owners) : EmgOwnersMerge(host.Owners, other.Owners);
+                host.Owners = other.Born <= host.Born ? EmgOwnersMerge(ref d, other.Owners, host.Owners) : EmgOwnersMerge(ref d, host.Owners, other.Owners);
                 d.Patches[i] = host;
             }
             int key0 = d.EmgRuleKeyNow;
-            int4 owners0 = d.EmgRuleOwnersNow;
+            EmgOwners owners0 = d.EmgRuleOwnersNow;
             d.EmgRuleKeyNow = r.Key;
             d.EmgRuleOwnersNow = host.Owners;
             bool settled = EmgApplyRuleBody(ref d, r, i, j, now);
@@ -278,7 +278,7 @@ namespace BinGames.Sim.Combat
                 int src = EmgHottestNeighbor(ref d, i);
                 if (src >= 0)
                 {
-                    z.Owners = EmgOwnersMerge(d.Patches[src].Owners, z.Owners); // EMG2-DISC-01：热源在链上先出现
+                    z.Owners = EmgOwnersMerge(ref d, d.Patches[src].Owners, z.Owners); // EMG2-DISC-01：热源在链上先出现
                     d.EmgRuleOwnersNow = z.Owners;
                     d.Patches[i] = z;
                 }
@@ -678,7 +678,7 @@ namespace BinGames.Sim.Combat
         /// <paramref name="arc"/> 时另给电荷累积量 <paramref name="charge"/>（FG19B E14：单位 phs.charge + 0.6 × 斑块电荷）。O(单位数)，只在规则结算时。
         /// <paramref name="groundLayer"/> = 产物来自地面层斑块：离地（chs.airborne，悬浮与云端空中同一读法，EMG3-CHS-01）不受；否则（气体层 / 场）只排除云端空中单位（逐字同旧）。
         /// </summary>
-        private static void EmgUnitsInCircle(ref CombatData d, double2 pos, float radius, float damage, int ownerId, bool arc, float charge, int key, int4 owners, int chain, bool groundLayer)
+        private static void EmgUnitsInCircle(ref CombatData d, double2 pos, float radius, float damage, int ownerId, bool arc, float charge, int key, in EmgOwners owners, int chain, bool groundLayer)
         {
             int src = ownerId > 0 ? d.SlotOf(ownerId) : -1;
             float fs = d.Config.EmgFriendlyScale > 0f ? d.Config.EmgFriendlyScale : 1f;
@@ -896,7 +896,7 @@ namespace BinGames.Sim.Combat
                             o.EmgChain = chain;
                             o.EmgDepth = depth;
                         }
-                        EmgOwnersAdd(ref o.Owners, ownerId); // EMG2-DISC-01：注能者进这块斑块的归属（A 的油被 B 点着，结果算两台，ADR ⑨）
+                        EmgOwnersAdd(ref d, ref o.Owners, ownerId); // EMG2-DISC-01：注能者进这块斑块的归属（A 的油被 B 点着，结果算两台，ADR ⑨）
                         d.Patches[j] = o;
                         n++;
                     }

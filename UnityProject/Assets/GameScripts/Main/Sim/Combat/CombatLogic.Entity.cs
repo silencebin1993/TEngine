@@ -274,7 +274,7 @@ namespace BinGames.Sim.Combat
             // EMG1-CHAIN-01：残骸继承击毁它的那条链（Key = 残骸 Id，Aux = 来源单位种类，源 = 被击毁者，Other = 击毁者）；击毁者另持久存在残骸上
             int killer = d.EmgCtx.Owner >= 0 && d.EmgCtx.Owner < d.Count ? d.Id[d.EmgCtx.Owner] : d.EmgUnit[t].LastHitBy;
             w.Killer = killer;
-            EmgOwnersAdd(ref w.Owners, killer); // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）
+            EmgOwnersAdd(ref d, ref w.Owners, killer); // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）
             es.WrecksBorn++;
             es.HashDirty = 1;
             d.EmgS[0] = es;
@@ -385,11 +385,11 @@ namespace BinGames.Sim.Combat
             }
             EmgWreck k = d.Wrecks[w];
             // EMG4-CODEX-01（DEBT-EMG1CHAIN01-02）：打碎它的单位持久记在残骸上（旧快照读进来的残骸没有归属：先补击毁者，保持“击毁者在前”的顺序）
-            if (k.Owners.x == 0)
+            if (k.Owners[0] == 0)
             {
-                EmgOwnersAdd(ref k.Owners, k.Killer);
+                EmgOwnersAdd(ref d, ref k.Owners, k.Killer);
             }
-            EmgOwnersAdd(ref k.Owners, ownerId);
+            EmgOwnersAdd(ref d, ref k.Owners, ownerId);
             d.Wrecks[w] = k;
             // EMG1-CHAIN-01：破片走打击者的链，Parent = 残骸的链（跨机结果在因果链里同时显示各台机器）；Key = 残骸 Id，Aux = 片数
             EmgChainLog(ref d, EmgChainNode.Fragment, chain > 0 ? chain : k.Chain, (byte)(depth + 1), k.Id, ownerId, k.Pos, 0, (byte)math.min(ep.FragCount, 255), chain > 0 ? k.Chain : 0);

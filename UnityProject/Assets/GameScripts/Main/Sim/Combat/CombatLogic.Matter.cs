@@ -172,7 +172,7 @@ namespace BinGames.Sim.Combat
                 return false;
             }
             int key0 = d.EmgRuleKeyNow;
-            int4 owners0 = d.EmgRuleOwnersNow;
+            EmgOwners owners0 = d.EmgRuleOwnersNow;
             d.EmgRuleKeyNow = s.RuleKey;
             d.EmgRuleOwnersNow = s.Owners;
             EmgPlacePatch(ref d, s.SubForm, s.Pos, s.ZoneRadius, s.Damage, s.ZoneLife, s.Owner, s.Chain, s.Depth, s.Gen, s.Faction);
@@ -1005,12 +1005,21 @@ namespace BinGames.Sim.Combat
             int src = z.Owner > 0 ? d.SlotOf(z.Owner) : -1;
             if (m.CoatBit >= 0 && m.CoatBit < 31)
             {
+                // FG11-ATTR-01 ② / ③（取代 EMG2-DISC-01 的接触节拍估算）：这一次沾染来自这块斑块——ApplyStatus 按（单位, 位）登记斑块归因，
+                // 持续伤害在 StepStatus 按位扣时计交互伤害（离开后残留的秒数照算、重叠斑块只记一次），单位层反应把这块斑块的归属算进去
+                d.EmgCoatIn = new EmgAttrScope { On = 1, Key = z.RuleKey, Owners = z.Owners, Friendly = z.Matter, Chain = z.EmgChain, Share = 1f };
                 ApplyStatus(ref d, u, 1u << m.CoatBit, m.CoatSeconds, 0f, 0f, 0f, src);
-                EmgCoatDotNote(ref d, u, z, m.CoatBit, elapsed); // EMG2-DISC-01（FGR-EMG-182 / 184）
+                d.EmgCoatIn.On = 0;
+            }
+            if (d.IsAlive(u))
+            {
+                EmgPhaseSrcFromPatch(ref d, u, z); // FG11-ATTR-01 ①：脚下斑块的放出者 = 这块物质给的累积量的来源
             }
             if (z.Matter == EmgMatterConst.Molten && d.IsAlive(u))
             {
+                d.EmgCoatIn = new EmgAttrScope { On = 1, Key = z.RuleKey, Owners = z.Owners, Friendly = z.Matter, Chain = z.EmgChain, Share = 1f }; // FG11-ATTR-01 ③：点火方 = 这块熔融斑块的归属
                 EmgCoatReact(ref d, u, 0u, MoltenContactHeat, 0f, src); // EMG2-REACT-02（FG19B C01 / C05“进入明火 / 熔融斑块”，DEBT-EMG2REACT01-04）：沾油 / 带酸的单位踩熔融金属
+                d.EmgCoatIn.On = 0;
             }
             if (m.ContactSlow > 0f && d.IsAlive(u))
             {

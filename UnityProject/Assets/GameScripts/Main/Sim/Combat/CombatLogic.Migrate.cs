@@ -143,7 +143,7 @@ namespace BinGames.Sim.Combat
             z.Temp = mt.TempInit;
             z.Conc = 1f;
             z.R0 = z.Radius;
-            z.Owners = new int4(z.Owner > 0 ? z.Owner : 0, 0, 0, 0);
+            z.Owners = EmgOwners.Of(z.Owner > 0 ? z.Owner : 0);
             EmgScalars es = d.EmgS[0];
             z.EmgId = es.NextPatchId++;
             es.PatchesBorn++;
@@ -352,10 +352,10 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>EMG4-CODEX-01（FG-GAP-194）：归属里的己方单位——还在场的己方优先；都不在场时取第一个不在场的（热更层按机器登记判断是不是己方）；只有敌方返回 0。与 EmgFriendlyNote 同一取法。</summary>
-        internal static int EmgOwnSideOwner(ref CombatData d, int4 owners)
+        internal static int EmgOwnSideOwner(ref CombatData d, in EmgOwners owners)
         {
             int gone = 0;
-            for (int q = 0; q < 4; q++)
+            for (int q = 0; q < EmgOwners.Cap; q++)
             {
                 int id = owners[q];
                 if (id == 0)

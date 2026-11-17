@@ -14,6 +14,12 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgWire> Wires;
         /// <summary>EMG2-REACT-02：单位身上正在走的 C05 / C07 计时（只有中招的单位才有一行）。</summary>
         public NativeList<EmgCoatFx> CoatFx;
+        /// <summary>FG11-ATTR-01 ②：斑块挂上的沾染位的归因（稀疏表，见 <see cref="EmgCoatAttr"/>；进快照段 37）。</summary>
+        public NativeList<EmgCoatAttr> CoatAttr;
+        /// <summary>FG11-ATTR-01 ① / ④：每单位每相态（含累积阶段）的来源单位 Id（单位 × <see cref="EmgPhaseConst.Count"/>，不进 EmgUnitState；进快照段 36）。</summary>
+        public NativeList<int> EmgPhaseSrc;
+        /// <summary>FG11-ATTR-01 ④：持久链归属（直映射 <see cref="EmgConst.ChainOwnSlots"/> 格；进快照段 38）。</summary>
+        public NativeArray<EmgChainOwn> EmgChainOwns;
         /// <summary>EMG3-CHS-01：碾压拖带 / 拖挂单位的运行态（快照段 22；只有这两种特性的单位有一行）。</summary>
         public NativeList<EmgTraitRun> TraitRun;
         /// <summary>EMG3-CHS-01（ADR ⑩ 版本 18）：元程序运行态（快照段 23；本卡只铺结构，执行者归元程序卡，表恒空）。</summary>
@@ -82,6 +88,9 @@ namespace BinGames.Sim.Combat
             Fields = new NativeList<EmgField>(4, Allocator.Persistent);
             Wires = new NativeList<EmgWire>(4, Allocator.Persistent);
             CoatFx = new NativeList<EmgCoatFx>(4, Allocator.Persistent);
+            CoatAttr = new NativeList<EmgCoatAttr>(4, Allocator.Persistent);
+            EmgPhaseSrc = new NativeList<int>(capacity * EmgPhaseConst.Count, Allocator.Persistent);
+            EmgChainOwns = new NativeArray<EmgChainOwn>(EmgConst.ChainOwnSlots, Allocator.Persistent);
             TraitRun = new NativeList<EmgTraitRun>(4, Allocator.Persistent);
             MetaRun = new NativeList<EmgMetaRun>(0, Allocator.Persistent);
             Relays = new NativeList<EmgRelay>(0, Allocator.Persistent);
@@ -179,6 +188,9 @@ namespace BinGames.Sim.Combat
             Fields.Dispose();
             Wires.Dispose();
             CoatFx.Dispose();
+            CoatAttr.Dispose();
+            EmgPhaseSrc.Dispose();
+            EmgChainOwns.Dispose();
             TraitRun.Dispose();
             MetaRun.Dispose();
             Relays.Dispose();
@@ -245,18 +257,27 @@ namespace BinGames.Sim.Combat
         {
             EProfile.Add(-1);
             EmgUnit.Add(default);
+            for (int k = 0; k < EmgPhaseConst.Count; k++)
+            {
+                EmgPhaseSrc.Add(0);
+            }
         }
 
         private void EmgMoveSlot(int from, int to)
         {
             EProfile[to] = EProfile[from];
             EmgUnit[to] = EmgUnit[from];
+            for (int k = 0; k < EmgPhaseConst.Count; k++)
+            {
+                EmgPhaseSrc[to * EmgPhaseConst.Count + k] = EmgPhaseSrc[from * EmgPhaseConst.Count + k];
+            }
         }
 
         private void EmgTruncate(int length)
         {
             EProfile.ResizeUninitialized(length);
             EmgUnit.ResizeUninitialized(length);
+            EmgPhaseSrc.ResizeUninitialized(length * EmgPhaseConst.Count);
         }
 
         /// <summary>清掉随战斗走的涌现状态（总线、残骸、发号器）。程序表与武器表一样是“表”，另行覆盖。</summary>
@@ -268,6 +289,7 @@ namespace BinGames.Sim.Combat
             Fields.Clear();
             Wires.Clear();
             CoatFx.Clear();
+            CoatAttr.Clear();
             TraitRun.Clear();
             MetaRun.Clear();
             Relays.Clear();
@@ -324,11 +346,15 @@ namespace BinGames.Sim.Combat
             {
                 EmgChainTally[i] = int4.zero;
             }
+            for (int i = 0; i < EmgChainOwns.Length; i++)
+            {
+                EmgChainOwns[i] = default;
+            }
             EmgAttrRows.Clear();
             EmgAttrPublished = 0;
             EmgAttr = default;
             EmgRuleKeyNow = 0;
-            EmgRuleOwnersNow = int4.zero;
+            EmgRuleOwnersNow = default;
             EmgDepthPublished = 0;
         }
 
