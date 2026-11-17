@@ -11739,6 +11739,9 @@ namespace GameLogic.EditorTools
         private static int NotifyMemberCount(string typeId) => Notifications.NotificationCenter.History
             .Where(e => e?.Type?.Id == typeId).Sum(e => e.Members.Count);
 
+        /// <summary>室内进出这一段先走地下中继大厅、再走数据中心（FG11-BOSS-01）；当前走哪一处记在 SessionState（域重载后仍在）。</summary>
+        private static string Surf => SessionState.GetString(K + "InteriorSurface", "relay_hall");
+
         private static void StepInteriorPrepare(double inStep)
         {
             if (inStep < 0.3)
@@ -11746,7 +11749,7 @@ namespace GameLogic.EditorTools
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            Campaign.WorldGen.PlannedAnchor gate = Campaign.Regions.InteriorSiteService.EntranceFor(state, "relay_hall");
+            Campaign.WorldGen.PlannedAnchor gate = Campaign.Regions.InteriorSiteService.EntranceFor(state, Surf);
             int machine = HomeMachines().FirstOrDefault(id => HomeCombat() != null && HomeCombat().TryGetMachineUnit(id, out _)
                                                               && !Campaign.Regions.ExpeditionMarchService.IsMarchMember(state, id));
             if (gate == null || machine <= 0 || !MachineRegistry.TryGetRecord(machine, out MachineRecord rec))
@@ -11789,7 +11792,7 @@ namespace GameLogic.EditorTools
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, Campaign.Regions.InteriorSiteService.EntranceFor(state, "relay_hall"));
+            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, Campaign.Regions.InteriorSiteService.EntranceFor(state, Surf));
             bool clickable = WorldPointClickable(e, out string blocker);
             Check(clickable, $"入口标记在画面里、没被界面挡住（{(clickable ? "可点" : WorldClickDiag(e))}）");
             ClickWorld(new Vector3(e.x, 0f, e.y));
@@ -11805,7 +11808,7 @@ namespace GameLogic.EditorTools
             }
             InputRouter.DebugSetReader(null);
             WorldPlacesHudUIToolkit hud = WorldPlacesHudUIToolkit.Instance;
-            string name = Campaign.Regions.InteriorSiteService.SurfaceName("relay_hall");
+            string name = Campaign.Regions.InteriorSiteService.SurfaceName(Surf);
             bool open = WorldPlacesHudUIToolkit.PanelOpen && hud != null && hud.PanelTitleText.Contains(name) && hud.GoEnabled;
             Check(open, $"真实鼠标点入口：入口面板“{hud?.PanelTitleText}”/“{hud?.PanelNearText?.Replace("\n", " ")}”，“{hud?.GoText}”可点（{hud?.GoEnabled}）" +
                         (open ? string.Empty : $"——原因“{hud?.PanelReasonText}”；{SessionState.GetString(K + "InteriorClickDiag", string.Empty)}"));
@@ -11830,19 +11833,19 @@ namespace GameLogic.EditorTools
             }
             CampaignState state = CampaignSession.Current;
             int machine = SessionState.GetInt(K + "InteriorMachine", 0);
-            Campaign.Regions.InteriorSiteController site = WorldSimulation.Interior("relay_hall");
-            bool inside = MachineRegistry.TryGetRecord(machine, out MachineRecord rec) && rec.RegionId == "relay_hall";
-            bool observed = WorldView.IsObserved("relay_hall");
+            Campaign.Regions.InteriorSiteController site = WorldSimulation.Interior(Surf);
+            bool inside = MachineRegistry.TryGetRecord(machine, out MachineRecord rec) && rec.RegionId == Surf;
+            bool observed = WorldView.IsObserved(Surf);
             int views = Object.FindObjectsByType<Campaign.Regions.MachineView>(FindObjectsInactive.Exclude, FindObjectsSortMode.None)
                 .Count(v => v.Marker != null && site != null && v.Marker.Site == site.Combat);
-            bool root = GameObject.Find("[InteriorRoot_relay_hall]") != null;
+            bool root = GameObject.Find("[InteriorRoot_" + Surf + "]") != null;
             int notes = NotifyMemberCount("interior_transit") - SessionState.GetInt(K + "InteriorNotes0", 0);
             int entered = Campaign.Regions.InteriorSiteService.EnterCount - SessionState.GetInt(K + "InteriorEnter0", 0);
-            Check(site != null && inside && observed && views >= 1 && root && notes == 1 && entered == 1 && Campaign.Regions.InteriorSiteService.TransitionText.Contains(Campaign.Regions.InteriorSiteService.SurfaceName("relay_hall")),
+            Check(site != null && inside && observed && views >= 1 && root && notes == 1 && entered == 1 && Campaign.Regions.InteriorSiteService.TransitionText.Contains(Campaign.Regions.InteriorSiteService.SurfaceName(Surf)),
                 $"进入地下中继大厅：机器转进室内（{inside}），镜头切过去（{observed}），室内表现对象 {views} 个、场地根节点 {root}，过渡“{Campaign.Regions.InteriorSiteService.TransitionText}”，通知中心“室内进出” {notes} 条");
             CheckNoTextMarkers("室内场地");
             // FG9-FAC-01：大厅里有首领与守卫（按表播种、有表现对象），进门即开战（阶段一·藏身），首领 HUD 可见且写出阶段（真实 Play 帧里的 UI Toolkit 面板）。
-            Transform content = GameObject.Find("[InteriorRoot_relay_hall]")?.transform.Find("[RelayHallContent]");
+            Transform content = GameObject.Find("[InteriorRoot_" + Surf + "]")?.transform.Find("[RelayHallContent]");
             int enemyViews = 0;
             if (content != null)
             {
@@ -11851,16 +11854,28 @@ namespace GameLogic.EditorTools
                     enemyViews += ch.name.StartsWith("Enemy_", System.StringComparison.Ordinal) ? 1 : 0;
                 }
             }
+            if (Surf == Campaign.Regions.EmberHostBoss.SiteId)
+            {
+                // FG11-BOSS-01：数据中心的余烬主机进门即开战（阶段一·升频），守卫 + 本体有表现对象，首领 HUD 可见并写出阶段。
+                Campaign.Regions.EmberPhase ember = Campaign.Regions.EmberHostBoss.PhaseOf(state);
+                bool emberHud = GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastVisible
+                                && GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Contains(Campaign.Regions.EmberHostBoss.PhaseName(Campaign.Regions.EmberPhase.Upclock));
+                Check(ember == Campaign.Regions.EmberPhase.Upclock && enemyViews >= 5 && emberHud,
+                    $"数据中心的首领战（FG11-BOSS-01）：余烬主机进门即开战（{ember}），敌人表现对象 {enemyViews} 个，首领 HUD 可见并写出阶段（{emberHud}：“{GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Split('\n')[0]}”）");
+            }
             Campaign.Regions.SilentMindPhase bossPhase = Campaign.Regions.SilentMindBoss.PhaseOf(state);
             bool hud = GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastVisible
                        && GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Contains(Campaign.Regions.SilentMindBoss.PhaseName(Campaign.Regions.SilentMindPhase.Hiding));
-            Check(bossPhase == Campaign.Regions.SilentMindPhase.Hiding && enemyViews >= 12 && hud,
-                $"地下中继大厅的首领战（FG9-FAC-01）：寂听主脑进门即开战（{bossPhase}），大厅敌人表现对象 {enemyViews} 个，首领 HUD 可见并写出阶段（{hud}：“{GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Split('\n')[0]}”）");
+            if (Surf == "relay_hall")
+            {
+                Check(bossPhase == Campaign.Regions.SilentMindPhase.Hiding && enemyViews >= 12 && hud,
+                    $"地下中继大厅的首领战（FG9-FAC-01）：寂听主脑进门即开战（{bossPhase}），大厅敌人表现对象 {enemyViews} 个，首领 HUD 可见并写出阶段（{hud}：“{GameLogic.UI.SilentMind.SilentMindHudUIToolkit.LastText.Split('\n')[0]}”）");
+            }
             if (site != null && site.Combat.TryGetMachineUnit(machine, out int unit))
             {
                 // 测试捷径（= 机器在室内走到出口旁）：瞬移到出口旁 exitRadius 格内（不压在出口标记上），镜头对准出口。
                 site.Combat.SetUnitPosition(unit, site.ExitPoint + new Vector2(2.5f, 2f));
-                WorldView.FlyTo("relay_hall", site.ExitPoint);
+                WorldView.FlyTo(Surf, site.ExitPoint);
             }
             Next(443, "镜头对准出口后，真实鼠标左键点出口标记");
         }
@@ -11871,7 +11886,7 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            Campaign.Regions.InteriorSiteController site = WorldSimulation.Interior("relay_hall");
+            Campaign.Regions.InteriorSiteController site = WorldSimulation.Interior(Surf);
             if (site == null)
             {
                 Check(false, "室内场地已不在（机器全部阵亡或被卸载）");
@@ -11910,19 +11925,29 @@ namespace GameLogic.EditorTools
             }
             CampaignState state = CampaignSession.Current;
             int machine = SessionState.GetInt(K + "InteriorMachine", 0);
-            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, Campaign.Regions.InteriorSiteService.EntranceFor(state, "relay_hall"));
+            Vector2 e = Campaign.WorldGen.TerritoryAnchorChecks.EntryOf(state, Campaign.Regions.InteriorSiteService.EntranceFor(state, Surf));
             bool back = MachineRegistry.TryGetRecord(machine, out MachineRecord rec) && rec.RegionId == Campaign.Regions.HomeValleyLayout.RegionId
                         && MachineRegistry.TryGetLivePosition(machine, out Vector2 live) && Vector2.Distance(live, e) < 20f;
-            bool unloaded = WorldSimulation.Interior("relay_hall") == null && GameObject.Find("[InteriorRoot_relay_hall]") == null;
+            bool unloaded = WorldSimulation.Interior(Surf) == null && GameObject.Find("[InteriorRoot_" + Surf + "]") == null;
             bool home = WorldView.IsObserved(Campaign.Regions.HomeValleyLayout.RegionId);
             int notes = NotifyMemberCount("interior_transit") - SessionState.GetInt(K + "InteriorNotes0", 0);
             Check(back && unloaded && home && notes == 2,
                 $"离开室内：机器回到地表入口旁（{back}），室内空了自动卸载（{unloaded}），镜头回到家园（{home}），通知中心“室内进出”共 {notes} 条");
             // FG9-FAC-01：首领战没打完全员撤出 → 首领复位到开战前，记下止步阶段（ER7-FAIL-01 同一语义）。
+            if (Surf == Campaign.Regions.EmberHostBoss.SiteId)
+            {
+                Campaign.Regions.EmberPhase emberAfter = Campaign.Regions.EmberHostBoss.PhaseOf(state);
+                int emberLast = Campaign.Regions.EmberHostBoss.Record(state)?.LastReachedPhase ?? -1;
+                Check(emberAfter == Campaign.Regions.EmberPhase.Dormant && emberLast == (int)Campaign.Regions.EmberPhase.Upclock,
+                    $"撤出数据中心后余烬主机复位（{emberAfter}），记下上次止步于{Campaign.Regions.EmberHostBoss.PhaseName((Campaign.Regions.EmberPhase)Math.Max(0, emberLast))}");
+            }
             Campaign.Regions.SilentMindPhase after = Campaign.Regions.SilentMindBoss.PhaseOf(state);
             int last = Campaign.Regions.SilentMindBoss.Record(state)?.LastReachedPhase ?? -1;
-            Check(after == Campaign.Regions.SilentMindPhase.Dormant && last == (int)Campaign.Regions.SilentMindPhase.Hiding,
-                $"撤出地下中继大厅后寂听主脑复位（{after}），记下上次止步于{Campaign.Regions.SilentMindBoss.PhaseName((Campaign.Regions.SilentMindPhase)Math.Max(0, last))}");
+            if (Surf == "relay_hall")
+            {
+                Check(after == Campaign.Regions.SilentMindPhase.Dormant && last == (int)Campaign.Regions.SilentMindPhase.Hiding,
+                    $"撤出地下中继大厅后寂听主脑复位（{after}），记下上次止步于{Campaign.Regions.SilentMindBoss.PhaseName((Campaign.Regions.SilentMindPhase)Math.Max(0, last))}");
+            }
             // 夹具还原：机器放回原位，撤掉覆盖注入。
             string[] f = SessionState.GetString(K + "InteriorBack", "0,0").Split(',');
             var origin = new Vector2(float.Parse(f[0], System.Globalization.CultureInfo.InvariantCulture), float.Parse(f[1], System.Globalization.CultureInfo.InvariantCulture));
@@ -11932,6 +11957,14 @@ namespace GameLogic.EditorTools
             }
             Campaign.Signal.SignalCoverageService.OverrideForTests = null;
             Campaign.Signal.SignalCoverageService.Invalidate();
+            if (Surf == "relay_hall")
+            {
+                // FG11-BOSS-01：同一套室内进出路径再走一遍数据中心（余烬主机的首领场地；新增的玩家可见路径进冒烟）。
+                SessionState.SetString(K + "InteriorSurface", Campaign.Regions.EmberHostBoss.SiteId);
+                Next(439, "FG11-BOSS-01：测试捷径——一台家园机器开到数据中心入口旁（入口附近视为有中继覆盖），镜头飞过去");
+                return;
+            }
+            SessionState.EraseString(K + "InteriorSurface");
             Next(446, "FG8-EXP-03：测试捷径——一台家园机器开到最近的静默领地据点旁");
         }
 

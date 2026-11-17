@@ -38,7 +38,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/QA/自检/反馈音效与字幕")]
+        [MenuItem("QA/自检/反馈音效与字幕")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

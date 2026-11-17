@@ -145,6 +145,12 @@ namespace GameLogic.Campaign.Feedback
         EmgPhaseEnter,
         /// <summary>EMG2-PHS-01：相态被打断（冻结被击碎 / 受热解冻、燃烧被水扑灭）。</summary>
         EmgPhaseBroken,
+        // ── FG11-BOSS-01 余烬主机（FGR-FAC-006 阶段提示；FGR-FAC-002 预警 ≥ 0.8 秒）──
+        EmberVentWarn,
+        EmberVent,
+        /// <summary>熔毁倒计时的警报（开始、剩 30 秒、最后 10 秒每秒一次）。</summary>
+        EmberCountdown,
+        EmberBlast,
 
         Max,
     }

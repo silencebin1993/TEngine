@@ -391,6 +391,17 @@ namespace GameLogic.Campaign.Regions
         /// </summary>
         public static string BossPreview(CampaignState s, string surfaceId)
         {
+            if (s != null && surfaceId == EmberHostBoss.SiteId)
+            {
+                // FG11-BOSS-01：数据中心入口说明——首领名与三阶段（有效弱点情报时写散热口节奏）、上次止步于第几阶段。
+                if (EmberHostBoss.IsDefeated(s))
+                {
+                    return "\n" + GameText.Get("boss.ember.notify.defeated");
+                }
+                string ember = "\n" + GameText.Get(EmberHostBoss.IntelKnown(s) ? "boss.ember.entrance.preview" : "boss.ember.entrance.unknown");
+                int lastEmber = EmberHostBoss.Record(s)?.LastReachedPhase ?? 0;
+                return lastEmber > 0 ? ember + "\n" + GameText.Format("boss.ember.hud.last_phase", EmberHostBoss.PhaseName((EmberPhase)lastEmber)) : ember;
+            }
             if (s == null || surfaceId != SilentMindBoss.SiteId)
             {
                 return string.Empty;

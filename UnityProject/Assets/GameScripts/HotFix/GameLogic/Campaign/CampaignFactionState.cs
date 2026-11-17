@@ -17,6 +17,9 @@ namespace GameLogic.Campaign
         /// <summary>FG10-BOSS-01：洗礼塔（唯一写入口 <c>Regions.BaptismTowerBoss</c>）。</summary>
         public ClarityBossRecord ClarityBoss = new ClarityBossRecord();
 
+        /// <summary>FG11-BOSS-01：余烬主机（唯一写入口 <c>Regions.EmberHostBoss</c>）。</summary>
+        public EmberBossRecord EmberBoss = new EmberBossRecord();
+
         /// <summary>被摧毁的噪声发射器（危害区 ID = 领地 ID#序号；唯一写入口 <c>Env.EmNoiseService</c>）。</summary>
         public string[] NoiseEmittersDestroyed = Array.Empty<string>();
 
@@ -99,6 +102,38 @@ namespace GameLogic.Campaign
         public bool RewardsGranted;
         /// <summary>这一次挑战开始时锁定的静默反制（大厅里按它追加编成）。</summary>
         public string CounterId = string.Empty;
+    }
+
+    /// <summary>
+    /// FG11-BOSS-01：余烬主机首领战（阶段存档稳定码见 <c>Regions.EmberPhase</c>）。全部计时是统一时钟的步（暂停不走、倍速按游戏时间、与观察无关）。
+    /// 场地升温对内核的热量上限倍率是派生量（按 <see cref="HeatLevel"/> 算），内核打开 / 读档时重写，不进内核快照。
+    /// </summary>
+    [Serializable]
+    public sealed class EmberBossRecord
+    {
+        public int Phase;
+        /// <summary>第几次挑战（每次开战 +1；被封锁的槽按（种子, 第几次）派生，读档一致）。</summary>
+        public int Attempt;
+        public long EngagedTick;
+        public long DefeatedTick;
+        public bool RewardsGranted;
+        /// <summary>上一次复位时止步的阶段（重试前显示）；历史最高阶段。</summary>
+        public int LastReachedPhase;
+        public int BestPhase;
+        /// <summary>升频：已经升了几级温；下一次升温的步。</summary>
+        public int HeatLevel;
+        public long NextHeatTick;
+        /// <summary>散热口开合周期的起点步；上一步所处的段（0 闭合 / 1 预警 / 2 张开，用于只在切换时发提示）。</summary>
+        public long VentCycleTick;
+        public int VentState;
+        /// <summary>阶段二封锁的信号核槽号（0 起；-1 = 没封锁成功或已解除）；还立着的数据尖刺数（发“还剩几根”的通知用）。</summary>
+        public int BlockedSlot = -1;
+        public int SpikesLeft;
+        /// <summary>熔毁倒计时到期的步（阶段三；其余为 0）；上一次响倒计时警报时的整秒数（-1 = 还没响）。</summary>
+        public long MeltdownEndTick;
+        public int LastBeepSecond = -1;
+        /// <summary>熔毁已经发生过（之后战斗继续，阶段 = 熔毁之后）。</summary>
+        public bool MeltedDown;
     }
 
     /// <summary>FG10-BOSS-01：洗礼塔场上的一片流体（泵站灌的油 / 酸 / 水；战斗内核里是一块中立区域，这里只记位置与到期，供主动反应挑目标与 HUD）。</summary>

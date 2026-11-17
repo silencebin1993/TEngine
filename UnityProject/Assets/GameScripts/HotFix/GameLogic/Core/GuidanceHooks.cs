@@ -744,6 +744,8 @@ namespace GameLogic.Core
             // FG11-FAC-01 的超频钩子（fgdata_overclock.OVERCLOCK_HOOKS；FG11-REG-01 跑 FgUplinkHudSelfCheck 时发现漏登记，图鉴条目引用它们）。
             "overclock.first_shutdown", "overclock.first_vent", "overclock.first_melt", "overclock.first_burst",
             "overclock.first_mode", "overclock.first_mirror", "overclock.first_radiation", "overclock.first_aura",
+            // FG11-BOSS-01 余烬主机（fgdata_overclock.OVERCLOCK_HOOKS；槽位封锁沿用 EmgFirstSlotBlock）。
+            "ember.first_boss", "ember.first_meltdown",
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

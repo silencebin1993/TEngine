@@ -24,6 +24,7 @@ namespace GameLogic.Campaign.Regions
     ///   <see cref="RelayHallCombatRules.ApplyExternalEnemyDamage"/> 交给状态机；阶段变了同步内核标志并对账召唤物。
     /// - 全灭 / 全员撤出（室内卸载且删快照）→ <see cref="SilentMindBoss.ResetToPreFight"/>（ER7-FAIL-01 同一语义）；读档 / 世界卸载不复位。
     /// - 伏笔地点（fg.TbInteriorPoint kind = poi）：内核兴趣点，机器走近即读取，收进资料库（FG9-NAR-01）并提示一次。
+    /// - FG11-BOSS-01：数据中心（data_center）用同一套室内内容，首领换成 <see cref="EmberHostBoss"/>（按 SiteId 分派，其余敌人 / 掉落 / 表现照旧）。
     /// - 表现（被观察时）：敌人占位几何体 + 头顶标记（按读法 / 标签 / 阶段着色），偏折场光环、断链束光线、中继节点亮起 / 真节点、主脑藏身时隐藏；
     ///   刷新由事件驱动（阵亡 / 潜伏 / 偏折场阶段 / 首领修订号），另每 0.25 真实秒对账一次可见的静默状态（大厅内容有上限，O(大厅敌人数) ≤ 约 20）。
     /// </summary>
@@ -48,9 +49,15 @@ namespace GameLogic.Campaign.Regions
         private const string TransparentShader = "Sprites/Default";
         private static readonly List<Renderer> RendererScratch = new List<Renderer>(8);
 
+        /// <summary>FG11-BOSS-01：这一处室内的首领是余烬主机（数据中心），否则是寂听主脑（地下中继大厅）。</summary>
+        public readonly bool IsEmber;
+
+        private int BossRevision => IsEmber ? EmberHostBoss.Revision : SilentMindBoss.Revision;
+
         public RelayHallContent(string siteId)
         {
             SiteId = siteId;
+            IsEmber = siteId == EmberHostBoss.SiteId;
             Rules = new RelayHallCombatRules(this);
             foreach (InteriorPoint p in RelayHallLayout.Points(siteId))
             {
@@ -88,7 +95,11 @@ namespace GameLogic.Campaign.Regions
                 combat.SetPois(pts, reached);
             }
             RegionEnemySites.SeedEncounters(state, SiteId, EnemyDefs.ConditionBase);
-            if (!resume)
+            if (!resume && IsEmber)
+            {
+                EmberHostBoss.Engage(state);
+            }
+            else if (!resume)
             {
                 SilentMindBoss.Engage(state);
                 string counter = SilentMindBoss.Record(state)?.CounterId;
@@ -106,7 +117,14 @@ namespace GameLogic.Campaign.Regions
             SilentCombatFeedback.Changed -= OnSilentChanged;
             if (dropRecord && state != null)
             {
-                SilentMindBoss.ResetToPreFight(state, wiped);
+                if (IsEmber)
+                {
+                    EmberHostBoss.ResetToPreFight(state, wiped);
+                }
+                else
+                {
+                    SilentMindBoss.ResetToPreFight(state, wiped);
+                }
             }
             DestroyVisuals();
             _combat = null;
@@ -119,9 +137,16 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
-            SilentMindBoss.Tick(state);
+            if (IsEmber)
+            {
+                EmberHostBoss.Tick(state);
+            }
+            else
+            {
+                SilentMindBoss.Tick(state);
+            }
             int records = state.RegionEnemies?.Length ?? 0;
-            if (SilentMindBoss.Revision != _bossRevision || records != _recordsSeen)
+            if (BossRevision != _bossRevision || records != _recordsSeen)
             {
                 Reconcile(state);
             }
@@ -134,8 +159,15 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             CombatDemoContent.ReconcileEnemies(_combat, state, SiteId);
-            SilentMindBoss.SyncFlags(_combat, state);
-            _bossRevision = SilentMindBoss.Revision;
+            if (IsEmber)
+            {
+                EmberHostBoss.SyncSite(_combat, state);
+            }
+            else
+            {
+                SilentMindBoss.SyncFlags(_combat, state);
+            }
+            _bossRevision = BossRevision;
             _recordsSeen = state.RegionEnemies?.Length ?? 0;
             _dirtyVisuals = true;
         }
@@ -242,7 +274,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _visualTimer -= Time.unscaledDeltaTime;
-            if (!_dirtyVisuals && _visualTimer > 0f && _bossRevision == SilentMindBoss.Revision)
+            if (!_dirtyVisuals && _visualTimer > 0f && _bossRevision == BossRevision)
             {
                 return;
             }
@@ -279,9 +311,14 @@ namespace GameLogic.Campaign.Regions
                 CombatUnitFlags flags = unitKnown && _combat.UnitHasFlag(unit, CombatUnitFlags.Alive) ? FlagsOf(unit) : CombatUnitFlags.None;
                 bool alive = e.IsAlive && (flags & CombatUnitFlags.Alive) != 0;
                 bool stealth = (flags & CombatUnitFlags.Stealthed) != 0;
-                bool hiddenCore = e.EnemyInstanceId == SilentMindBoss.CoreInstanceId && (phase == SilentMindPhase.Hiding || phase == SilentMindPhase.Dormant);
+                bool hiddenCore = !IsEmber && e.EnemyInstanceId == SilentMindBoss.CoreInstanceId && (phase == SilentMindPhase.Hiding || phase == SilentMindPhase.Dormant);
                 Color c = EnemyDefs.TryGet(e.EnemyTypeId, out MechEnemy row) ? EnemyDefs.ViewColor(row) : Color.magenta;
-                int node = SilentMindBoss.NodeIndexOf(e.EnemyInstanceId);
+                int node = IsEmber ? -1 : SilentMindBoss.NodeIndexOf(e.EnemyInstanceId);
+                if (IsEmber && e.EnemyInstanceId == EmberHostBoss.CoreInstanceId && alive && EmberHostBoss.PhaseOf(state) != EmberPhase.Lockout) // 阶段二不可伤：不亮“重创窗口”
+                {
+                    int vent = EmberHostBoss.VentStateAt(EmberHostBoss.Record(state), GameClock.Ticks);
+                    c = vent == 2 ? new Color(1f, 0.95f, 0.4f) : vent == 1 ? new Color(1f, 0.6f, 0.15f) : c; // 散热口张开 = 亮黄（重创窗口），预警 = 橙
+                }
                 if (node >= 0 && boss != null && alive && phase == SilentMindPhase.Hiding)
                 {
                     if (node == boss.JumpTarget)
@@ -458,7 +495,7 @@ namespace GameLogic.Campaign.Regions
         public override bool ApplyExternalEnemyDamage(CombatSite site, RegionEnemyRecord enemy, float damage)
         {
             CampaignState state = CampaignSession.Current;
-            (bool ok, string reason) = SilentMindBoss.ApplyDamage(state, enemy, damage);
+            (bool ok, string reason) = _content.IsEmber ? EmberHostBoss.ApplyDamage(state, enemy, damage) : SilentMindBoss.ApplyDamage(state, enemy, damage);
             if (ok)
             {
                 FeedbackCues.RaiseAt(FeedbackCueId.EnemyHit, enemy.Position);
@@ -467,11 +504,19 @@ namespace GameLogic.Campaign.Regions
             {
                 Log.Info($"[RelayHall] 对 {enemy.EnemyInstanceId} 的伤害未结算：{reason}");
             }
-            SilentMindBoss.SyncFlags(site, state);
+            if (_content.IsEmber)
+            {
+                EmberHostBoss.SyncSite(site, state);
+            }
+            else
+            {
+                SilentMindBoss.SyncFlags(site, state);
+            }
             return ok;
         }
 
-        public override string InvulnerableDetail(RegionEnemyRecord enemy) => SilentMindBoss.InvulnerableDetail(CampaignSession.Current, enemy);
+        public override string InvulnerableDetail(RegionEnemyRecord enemy) =>
+            _content.IsEmber ? EmberHostBoss.InvulnerableDetail(CampaignSession.Current, enemy) : SilentMindBoss.InvulnerableDetail(CampaignSession.Current, enemy);
 
         public override void OnPoiReached(CombatSite site, int poiIndex, int logicId, Vector2 machinePosition) => _content.OnPoiReached(poiIndex);
     }

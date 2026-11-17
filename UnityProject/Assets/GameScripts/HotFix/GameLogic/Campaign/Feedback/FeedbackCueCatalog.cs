@@ -270,6 +270,15 @@ namespace GameLogic.Campaign.Feedback
                 CaptionKey = "overclock.cue.mode_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 三态切换预警（颜色 + 音效）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMode, SfxId = "sfx_boss_phase", Tag = "超频", Caption = "失控超算体切换状态", TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.mode", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 三态切换" });
+            // FG11-BOSS-01 余烬主机：音效借用现有短音（占位，DEBT-FG11BOSS01-01 美术 / 音频阶段替换）。倒计时警报不限流到 1 秒以下（每秒一次）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberVentWarn, SfxId = "sfx_alarm_warning", Tag = "首领", Caption = "散热口即将张开", TagKey = "boss.ember.cue.tag",
+                CaptionKey = "boss.ember.cue.vent_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 1.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 散热口预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberVent, SfxId = "sfx_boss_phase", Tag = "首领", Caption = "散热口张开：重创窗口", TagKey = "boss.ember.cue.tag",
+                CaptionKey = "boss.ember.cue.vent", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 散热口张开（弱点窗口）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberCountdown, SfxId = "sfx_alarm_warning", Tag = "首领", Caption = "熔毁倒计时", TagKey = "boss.ember.cue.tag",
+                CaptionKey = "boss.ember.cue.countdown", Tone = FeedbackTone.Danger, CaptionSeconds = 1f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 倒计时音效（卡片必须同时交付）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberBlast, SfxId = "sfx_enemy_cannon", Shake = 0.6f, Tag = "首领", Caption = "熔毁：全场重创", TagKey = "boss.ember.cue.tag",
+                CaptionKey = "boss.ember.cue.blast", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 熔毁" });
 
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });

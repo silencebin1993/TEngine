@@ -56,7 +56,7 @@ namespace GameLogic.Campaign.Regions
         private CameraDirector _cameraDirector => IsActive && WorldView.Director.IsBound ? WorldView.Director : null;
         private const float AttackRange = 8f;
 
-        /// <summary>FG9-FAC-01：有手工点位的室内（地下中继大厅）的敌人与首领内容；没有点位的室内（数据中心，FG11-BOSS-01）为 null。</summary>
+        /// <summary>FG9-FAC-01：有手工点位的室内（地下中继大厅、FG11-BOSS-01 起的数据中心）的敌人与首领内容；没有点位的室内为 null。</summary>
         private readonly RelayHallContent _content;
         public RelayHallContent Content => _content;
 
@@ -280,6 +280,12 @@ namespace GameLogic.Campaign.Regions
             }
             SquadCommands.TickSim(dt);
             _combat?.Step(dt, GameClock.GameSeconds);
+            // FG11-BOSS-01（FG-GAP-226，GDD §8.3 / FGR-BASE-020 例外“AI 教义范围内的战斗行为”）：与地表同一个教义自卫判定——每 siege.sync_seconds
+            // 对本地点机器调 CombatSite.SyncDoctrineSelfDefense（没被接入、打得出伤害的，右键移动途中 / 空闲时射程内有敌人原地还手）。只看步序号，与观察无关。
+            if (_combat != null && GameClock.Ticks % SelfDefenseSyncSteps == 0)
+            {
+                SyncSelfDefense();
+            }
             _content?.SimStep(CampaignSession.Current); // FG9-FAC-01：首领状态机（与观察无关）
             // 室内一台存活机器都不剩（全部阵亡）：本步提交后卸载（战斗快照删除），镜头若在这里就回到地表。内核计数 O(1)；记录侧只在名册变了才数。
             if (_combat != null && !_unloadQueued && _combat.CountAliveMachines() == 0)
@@ -296,6 +302,20 @@ namespace GameLogic.Campaign.Regions
                     string site = SiteId;
                     GameLogic.Notifications.NotificationCenter.Post("interior_transit", Localization.GameText.Format("interior.notify.wiped", name), new Vector3(ExitPoint.x, 0f, ExitPoint.y));
                     WorldSimulation.RunAfterStep(() => WorldSimulation.UnloadInterior(site, dropRecord: true));
+                }
+            }
+        }
+
+        private static long SelfDefenseSyncSteps => Math.Max(1, (long)Math.Round(Defense.SiegeCatalog.SyncSeconds * GameClock.StepHz));
+
+        /// <summary>FG-GAP-226：本地点每台机器的教义自卫标记（O(本地点机器数)，每 siege.sync_seconds 一次，与攻城对账同一节奏）。</summary>
+        private void SyncSelfDefense()
+        {
+            foreach (HomeValleyMachineMarker m in _machineMarkers)
+            {
+                if (m != null)
+                {
+                    _combat.SyncDoctrineSelfDefense(m.LogicId);
                 }
             }
         }
@@ -378,6 +398,7 @@ namespace GameLogic.Campaign.Regions
                 _combat.RemoveMachine(stale, export: false);
             }
             _machineMarkers.RemoveAll(m => m == null || !MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord r) || !r.IsAlive || r.RegionId != SiteId);
+            SyncSelfDefense(); // FG-GAP-226：进场 / 追加进入 / 读档的机器立即写教义自卫标记
         }
 
         /// <summary>EMG4-TER-01：室内可熔地面圆（按室内表面的生成地形，派生量）。</summary>
@@ -463,7 +484,7 @@ namespace GameLogic.Campaign.Regions
                 SafePoint = ExitPoint + new Vector2(0f, 3f),
                 Obstacles = _obstacles,
                 ClampDestination = ClampInside,
-                // FG9-FAC-01：右键敌人 = 攻击（地下中继大厅）；没有内容的室内（数据中心）没有敌人，FG11-BOSS-01 接上。
+                // FG9-FAC-01：右键敌人 = 攻击（地下中继大厅；FG11-BOSS-01 起数据中心同一套）。
                 FindHostileNear = (p, r) => _content?.FindHostileNear(p, r),
                 ResolveHostile = id => _content?.ResolveHostile(id),
                 Site = _combat,

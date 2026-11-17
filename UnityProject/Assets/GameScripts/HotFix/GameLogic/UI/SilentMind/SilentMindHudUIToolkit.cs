@@ -90,6 +90,11 @@ namespace GameLogic.UI.SilentMind
                 // FG10-BOSS-01：同一套首领 HUD 结构，寂听主脑不显示时显示洗礼塔（两者不会同时进行：一个在地下大厅，一个在星球表面）。
                 visible = BaptismTowerHud.Compose(s, out title, out hpPct, out markPct, out hp, out lines);
             }
+            if (!visible)
+            {
+                // FG11-BOSS-01：余烬主机（数据中心）同一套首领 HUD 结构。
+                visible = EmberHostHud.Compose(s, out title, out hpPct, out markPct, out hp, out lines);
+            }
             LastVisible = visible;
             _panel.EnableInClassList(VisibleClass, visible);
             if (!visible)

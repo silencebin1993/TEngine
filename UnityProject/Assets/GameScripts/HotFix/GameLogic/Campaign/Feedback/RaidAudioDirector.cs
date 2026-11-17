@@ -82,7 +82,8 @@ namespace GameLogic.Campaign.Feedback
                     break;
                 }
             }
-            if (Regions.BaptismTowerBoss.IsFighting(s))
+            // FG11-BOSS-01 修复轮 1（FGR-FAC-006）：余烬主机开战也切首领战音乐层（全员离开即复位，IsEngaged 随之为假）；占位曲同 DEBT-FG10BOSS01-01
+            if (Regions.BaptismTowerBoss.IsFighting(s) || Regions.EmberHostBoss.IsEngaged(s))
             {
                 return PhaseBoss;
             }

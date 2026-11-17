@@ -764,6 +764,8 @@ namespace GameLogic.EditorTools
             Seg("FgClarityReactionSelfCheck", FgClarityReactionSelfCheck.Run);
             // FG10-BOSS-01 洗礼塔：三阶段（灌注 / 反应 / 泄压）、泵站停流体、主动反应与借力打力、热震、奖励与平定、复位重试、HUD。
             Seg("FgBaptismTowerSelfCheck", FgBaptismTowerSelfCheck.Run);
+            // FG11-BOSS-01 余烬主机：升频 / 槽位封锁 / 熔毁倒计时、奖励与平定、复位重试、存读档与倍速、室内教义自卫（FG-GAP-226）、反夺控正式入口（DEBT-EMG4FW01-01）。
+            Seg("FgEmberHostSelfCheck", FgEmberHostSelfCheck.Run);
             Seg("FgClarityRaidSelfCheck", FgClarityRaidSelfCheck.Run);
             // FG9-ACT1-01：第一幕节奏台账与开放门槛、远征地点生成内容（驻军计入控制度）、诱饵中继假信号点、伏笔、第二幕变化。
             Seg("FgAct1SelfCheck", FgAct1SelfCheck.Run);

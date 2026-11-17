@@ -2861,6 +2861,7 @@ namespace GameLogic.Campaign
             s.Factions ??= new FactionState();
             s.Factions.SilentBoss ??= new SilentBossRecord();
             s.Factions.ClarityBoss ??= new ClarityBossRecord(); // FG10-BOSS-01
+            s.Factions.EmberBoss ??= new EmberBossRecord(); // FG11-BOSS-01：旧档没有 = 首领未遭遇
             s.Factions.ClarityBoss.WaveUnits ??= Array.Empty<int>();
             s.Factions.ClarityBoss.Active ??= Array.Empty<ClarityBossFill>();
             s.Factions.NoiseEmittersDestroyed ??= Array.Empty<string>();

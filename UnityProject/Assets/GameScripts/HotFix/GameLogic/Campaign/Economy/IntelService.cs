@@ -729,12 +729,14 @@ namespace GameLogic.Campaign.Economy
         public static bool BossEncountered(CampaignState s, IntelBossDef b) =>
             (b?.Rule == IntelCatalog.BossRuleFoundryCore && FoundryOutpostCoreBoss.IsInitialized(FoundryOutpostRegion.Find(s)))
             || (b?.Rule == IntelCatalog.BossRuleSilentMind && SilentMindBoss.WasEncountered(s)) // FG9-FAC-01
-            || (b?.Rule == IntelCatalog.BossRuleBaptismTower && BaptismTowerBoss.WasEncountered(s)); // FG10-E2E-01（DEBT-FG10BOSS01-03）
+            || (b?.Rule == IntelCatalog.BossRuleBaptismTower && BaptismTowerBoss.WasEncountered(s)) // FG10-E2E-01（DEBT-FG10BOSS01-03）
+            || (b?.Rule == IntelCatalog.BossRuleEmberHost && EmberHostBoss.WasEncountered(s)); // FG11-BOSS-01
 
         public static bool BossDefeated(CampaignState s, IntelBossDef b) =>
             (b?.Rule == IntelCatalog.BossRuleFoundryCore && FoundryOutpostCoreBoss.GetState(FoundryOutpostRegion.Find(s)) == CoreBossState.Destroyed)
             || (b?.Rule == IntelCatalog.BossRuleSilentMind && SilentMindBoss.IsDefeated(s)) // FG9-FAC-01
-            || (b?.Rule == IntelCatalog.BossRuleBaptismTower && BaptismTowerBoss.IsDefeated(s)); // FG10-E2E-01
+            || (b?.Rule == IntelCatalog.BossRuleBaptismTower && BaptismTowerBoss.IsDefeated(s)) // FG10-E2E-01
+            || (b?.Rule == IntelCatalog.BossRuleEmberHost && EmberHostBoss.IsDefeated(s)); // FG11-BOSS-01
 
         /// <summary>当前幕能截获、还没截获的第一个舰队片段。</summary>
         public static IntelFragmentDef NextFragment(CampaignState s)
@@ -1137,7 +1139,11 @@ namespace GameLogic.Campaign.Economy
 
         /// <summary>首领阶段机制：数值来自首领本身的常量（单一真相）。</summary>
         public static string BossPhasesText(IntelBossDef b) =>
-            b?.Rule == IntelCatalog.BossRuleBaptismTower
+            b?.Rule == IntelCatalog.BossRuleEmberHost
+                // FG11-BOSS-01：余烬主机——升温间隔、热量上限下限、阶段二门槛、熔毁倒计时来自 boss.ember.* 调参（单一真相）。
+                ? GameText.Format(b.PhasesKey, Mathf.RoundToInt(EmberHostBoss.HeatStepSeconds), Mathf.RoundToInt(EmberHostBoss.HeatCapMin * 100f),
+                    Mathf.RoundToInt(EmberHostBoss.Phase2HpFraction * 100f), Mathf.RoundToInt(EmberHostBoss.MeltdownSeconds))
+            : b?.Rule == IntelCatalog.BossRuleBaptismTower
                 // FG10-E2E-01：洗礼塔——阶段门槛、泄压周期与时长来自 boss.clarity.* 调参（单一真相）。
                 ? GameText.Format(b.PhasesKey, Mathf.RoundToInt(BaptismTowerBoss.Phase2HpFraction * 100f), Mathf.RoundToInt(BaptismTowerBoss.Phase3HpFraction * 100f),
                     Mathf.RoundToInt(BaptismTowerBoss.VentCycleSeconds), Mathf.RoundToInt(BaptismTowerBoss.VentSeconds))
@@ -1151,7 +1157,10 @@ namespace GameLogic.Campaign.Economy
                     Mathf.RoundToInt(FoundryOutpostCoreBoss.Phase3HealthFraction * 100f), Mathf.RoundToInt(FoundryOutpostCoreBoss.AntiAirSeconds));
 
         public static string BossWeaknessText(IntelBossDef b) =>
-            b?.Rule == IntelCatalog.BossRuleBaptismTower
+            b?.Rule == IntelCatalog.BossRuleEmberHost
+                ? GameText.Format(b.WeaknessKey, Mathf.RoundToInt(EmberHostBoss.VentCycleSeconds), Mathf.RoundToInt(EmberHostBoss.VentOpenSeconds),
+                    EmberHostBoss.VentDamageMult.ToString("0.#"), EmberHostBoss.SealedDamageMult.ToString("0.##"))
+            : b?.Rule == IntelCatalog.BossRuleBaptismTower
                 ? GameText.Format(b.WeaknessKey, BaptismTowerBoss.SealedDamageMult.ToString("0.#"), BaptismTowerBoss.VentDamageMult.ToString("0.#"))
             : b?.Rule == IntelCatalog.BossRuleSilentMind
                 ? GameText.Format(b.WeaknessKey, SilentMindBoss.RealNodeLabel(CampaignSession.Current), SilentMindBoss.ExposedDamageMult.ToString("0.#"))
