@@ -151,6 +151,10 @@ namespace BinGames.Sim.Combat
         public float AcidDilute;
         /// <summary>FG10-REG-01：玩家机器的酸蚀抗性下限（防腐涂层，派生量；0 = 没有涂层）。</summary>
         public float PlayerAcidResist;
+        /// <summary>FG11-REACT-01（FG-GAP-228，FG19B E16“每块每秒最多 1 次”）：每块酸沼（按形状值登记）上次电解的游戏时刻，形状与时刻成对、同下标。
+        /// 内核状态：进快照段 35 与状态哈希；只登记电解过的形状（≤ 形状数），热更层改写酸沼时去掉不再存在的形状。</summary>
+        public NativeList<float4> MarshElecShape;
+        public NativeList<double> MarshElecAt;
         /// <summary>FG10-FAC-01：内核不认识标签名——酸蚀 / 湿润 / 油 / 燃烧在本地点的状态位（热更层按 fg.TbStatusTag 写；0 = 没有这个标签，相关规则不生效）。派生量。</summary>
         public uint AcidBit;
         public uint WetBit;
@@ -430,6 +434,8 @@ namespace BinGames.Sim.Combat
                 ClarityPending = new NativeList<CombatClarityPending>(4, Allocator.Persistent),
                 SlagZones = new NativeList<float3>(4, Allocator.Persistent),
                 AcidShapes = new NativeList<float4>(4, Allocator.Persistent),
+                MarshElecShape = new NativeList<float4>(4, Allocator.Persistent),
+                MarshElecAt = new NativeList<double>(4, Allocator.Persistent),
                 PolluteTargets = new NativeList<float3>(4, Allocator.Persistent),
                 SiegeState = CombatSiegeData.Create(),
                 Cmd = new NativeList<CombatCommand>(capacity, Allocator.Persistent),
@@ -533,6 +539,8 @@ namespace BinGames.Sim.Combat
             ClarityPending.Dispose();
             SlagZones.Dispose();
             AcidShapes.Dispose();
+            MarshElecShape.Dispose();
+            MarshElecAt.Dispose();
             PolluteTargets.Dispose();
             SiegeState.Dispose();
             Cmd.Dispose();

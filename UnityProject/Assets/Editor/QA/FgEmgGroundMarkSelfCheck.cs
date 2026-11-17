@@ -358,7 +358,7 @@ namespace GameLogic.EditorTools
                 $"A2 V03 焦土接上内核结算（op scorch、cond home_burn、阈值 {(i >= 0 ? c.Rules[i].C1 : -1)} 秒）");
             Expect(GridContent.TuningInt("emg.terrain.marks_max") == 64 && Math.Abs(GridContent.Tuning("emg.terrain.scorch_ignite") - 40f) < 1e-4f && CombatSite.ConfigFromTuning().EmgScorchIgnite == 40f,
                 $"A3 每地点 ≤ {GridContent.TuningInt("emg.terrain.marks_max")} 处、焦土点燃阈值下调 {GridContent.Tuning("emg.terrain.scorch_ignite")} 度（来自表，内核配置同值）");
-            Expect(CombatConst.FormatVersion == 20, $"A4 快照版本仍是 20（段 31 只追加，FormatVersion = {CombatConst.FormatVersion}）");
+            Expect(CombatConst.FormatVersion >= 20, $"A4 段 31 只追加、不因焦土升版本（20 版起认，FormatVersion = {CombatConst.FormatVersion}；21 / 22 由 FG11-FAC-01 / FG11-REACT-01 升）");
         }
 
         // ── B 内核：V03 焦土累计 ──────────────────────────────────────────────

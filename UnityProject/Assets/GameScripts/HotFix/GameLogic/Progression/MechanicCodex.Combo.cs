@@ -197,7 +197,7 @@ namespace GameLogic.Progression
             var results = new List<string>();
             foreach (GameConfig.fg.ChannelRule r in rows)
             {
-                string pair = GameText.Format("codex.combo.pair", PortName(r.A), PortName(r.B));
+                string pair = GameText.Format("codex.combo.pair", PortName(r.A), PortName(r.B), ChannelName(r.A), ChannelName(r.B)); // FG11-REACT-01：两侧端口名 + 通道类别
                 if (!pairs.Contains(pair))
                 {
                     pairs.Add(pair);

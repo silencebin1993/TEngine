@@ -50,7 +50,8 @@ namespace BinGames.Sim.Combat
         /// 挂 FG18-SEA-01（DEBT-EMG4TER01-01），届时同样追加新段，不留空占位。读取仍认 1～19：没有劫持（段不存在 = 空表）。
         /// 21 = FG11-FAC-01（FG09 FGR-FAC-008 超频专属语法）：行为参数行尾部追加超频参数 22 个（冲刺 / 停机 / 蓄热连射 / 光环 / 熔断 / 泄爆 / 前倾加速 / 超频状态循环）；
         /// Emg 段追加段 34 超频运行状态（只在有记录时写）。读取仍认 1～20：参数为 0、没有超频记录。
-        public const int FormatVersion = 21;
+        /// 22 = FG11-REACT-01（FG-GAP-228，FG19B E16“每块每秒最多 1 次”）：Emg 段追加段 35 酸沼上次电解时刻（只在登记过时写）。读取仍认 1～21：没有登记（下一次注电即可电解）。
+        public const int FormatVersion = 22;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -1273,6 +1274,8 @@ namespace BinGames.Sim.Combat
         public float OcBurstRadius;
         /// <summary>过热泄爆伤害（波及半径内所有单位，包括它的友军，FGR-FAC-003）。</summary>
         public float OcBurstDamage;
+        /// <summary>FG11-REACT-01（格式 22）：过热泄爆注热（热量单位，FG19A 第 0.1 节）——半径内单位积热、斑块升温；来自该敌人行 en.heat inject 声明的幅度（0 = 不注热）。</summary>
+        public float OcBurstHeat;
         /// <summary>1 = 死亡时过热泄爆（超频猎犬）。</summary>
         public float OcDeathBurst;
         /// <summary>前倾加速：直线移动每秒速度 +本值（倍率）。</summary>

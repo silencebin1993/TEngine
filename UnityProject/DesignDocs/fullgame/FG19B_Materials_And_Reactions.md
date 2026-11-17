@@ -355,7 +355,7 @@
 | E13 | `reaction_thaw` | none | `mat.ice` | `en.heat` | T > 0 持续 1 秒 | S | `mat.water` | 冰融成水，份量 × 0.8，T 1。桥上单位的保底见 V08 与 FGR-EMG-151 | — | none | 28 |
 | E14 | `reaction_conduct` | `reaction_conduct` | `mat.water` | `en.elec` | 斑块电荷 ≥ 0.2 | P | `topo.arc` | 导电水洼：带电期间每传导节拍（0.25 秒）对斑块里的全部单位放电（含己方、中立），每个单位 `phs.charge` + 0.6 × 斑块电荷；电弧在单位之间连线显示。麻痹由 `phase_charge` 自然产生（§3.3），不另写产物 | — | `side.damage 2`（每单位每节拍） | 30 |
 | E15 | `reaction_conduct_coolant` | `reaction_conduct` | `mat.coolant` | `en.elec` | 斑块电荷 ≥ 0.3（导电只有中） | P | `topo.arc` | 同 E14 | — | `side.damage 2` | 31 |
-| E16 | `reaction_electrolysis` | `reaction_electrolysis` | `mat.acid` | `en.elec` | 斑块电荷 ≥ 0.4；每块每秒最多 1 次 | S | `mat.debris` | 电解析出：在酸斑块中心生成金属碎屑，份量 = 0.2 × 酸。碎屑导电、磁性高，进传导图，可被 F02 磁扫吸起 | 酸：20% | none | 33 |
+| E16 | `reaction_electrolysis` | `reaction_electrolysis` | `mat.acid` | `en.elec` | 斑块电荷 ≥ 0.4；每块每秒最多 1 次（酸沼按每块沼的形状同口径计，FG11-REACT-01 / FG-GAP-228） | S | `mat.debris` | 电解析出：在酸斑块中心生成金属碎屑，份量 = 0.2 × 酸。碎屑导电、磁性高，进传导图，可被 F02 磁扫吸起 | 酸：20% | none | 33 |
 | E17 | `reaction_dustburst_spark` | `reaction_dustburst` | `mat.dust` | `en.elec` | 斑块电荷 ≥ 0.3 且浓度 ≥ 0.6 | P | `topo.burst` | 同 E05 | 粉尘：全部 | `side.damage 30` | 35 |
 | E18 | `reaction_icebreak` | none | `mat.ice` | `en.kinetic` | 累计动能 ≥ 耐久 40 | P | `topo.fragment` | 冰碎：冰碴破片 3 片（§2.9）；伴生水，份量 × 0.5 | 冰：全部 | none | 73 |
 | E19 | `reaction_glassbreak` | none | `mat.glass` | `en.kinetic` | 累计 ≥ 20 | P | `topo.fragment` | 玻璃破片 5 片 | 全部 | none | 74 |

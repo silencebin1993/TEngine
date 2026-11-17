@@ -85,7 +85,7 @@ namespace GameLogic.Campaign.Content
 
         /// <summary>
         /// EMG2-REACT-02（DEBT-EMG2REACT01-10）：这条反应的核心固件冷却记在哪条固件上——熔穿过载 = 这套装配里写 en.heat 注入的那条（按端口，不认 ID）；
-        /// 没给装配（<paramref name="assembly"/> = null，信号上行 / 靶场 / 图鉴）时记在过载上。
+        /// 没给装配（<paramref name="assembly"/> = null，只剩就绪 / 电路板提示这类假设性问法）或装配里没有写热注入的固件时返回过载。
         /// </summary>
         public static string TriggerFirmwareOf(string reactionId, System.Collections.Generic.IEnumerable<string> assembly)
         {
@@ -103,7 +103,9 @@ namespace GameLogic.Campaign.Content
                         }
                     }
                 }
-                return FirmwareCatalog.FwOverloadId; // shortcut: 没给装配的调用方（信号上行 / 靶场 / 图鉴）仍算在过载上，别的写热固件的冷却归属见 DEBT-EMG2REACT02-01
+                // FG11-REACT-01（DEBT-EMG2REACT02-01 关闭）：信号上行 / 靶场的冷却结算都传接入口装配；仍不传装配的只剩“假设你接入 X 会怎样”的就绪提示与电路板提示
+                // （还没有装配，代表固件取过载），以及装配里没有写 en.heat 注入的固件（此时这条反应不由核心固件发动，调用方按 Contains 判不门控）。
+                return FirmwareCatalog.FwOverloadId;
             }
             if (reactionId == ReactionMarkJumpId)
             {

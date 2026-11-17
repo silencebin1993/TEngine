@@ -465,7 +465,7 @@ namespace GameLogic.EditorTools
             d.Load(data);
             d.Load(plain);
             Expect(d.PitCount == 0 && d.BlockSig == 0u, "F4 有熔坑的内核读回没有熔坑段的旧档：熔坑清掉、阻路签名归零（镜像随之恢复）");
-            Expect(CombatConst.FormatVersion == 20, $"F5 快照版本仍是 20（FormatVersion = {CombatConst.FormatVersion}）");
+            Expect(CombatConst.FormatVersion >= 20, $"F5 熔坑段只追加、不因熔坑升版本（20 版起认，FormatVersion = {CombatConst.FormatVersion}；21 / 22 由 FG11-FAC-01 / FG11-REACT-01 升）");
         }
 
         // ── G 种子无关：可熔地面 = 生成规则标记 ──────────────────────────────────

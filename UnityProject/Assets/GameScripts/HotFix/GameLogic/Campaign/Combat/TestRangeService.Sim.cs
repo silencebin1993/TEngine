@@ -466,6 +466,10 @@ namespace GameLogic.Campaign.Economy
         private static bool IsCoreGated(BlueprintCircuitPreview p) =>
             p != null && SignalUplinkService.IsCoreGatedReaction(p.ReactionId, p.UplinkFirmwareIds);
 
+        /// <summary>FG11-REACT-01（DEBT-EMG2REACT02-01）：投影当前生效的接入口固件（混合固件展开）；没有投影或没接入口 = null（冷却归属回到过载）。</summary>
+        private static List<string> AssemblyOf(Projection p) =>
+            p?.Active?.UplinkFirmwareIds != null ? FirmwareKinds.ExpandMixed(p.Active.UplinkFirmwareIds) : null;
+
         private static int WeaponOf(CombatSite site, Projection p, bool suppressed)
         {
             BlueprintCircuitPreview active = p.Active;
@@ -778,9 +782,10 @@ namespace GameLogic.Campaign.Economy
                 }
                 session.SeenEmg[slot] = c;
                 string rid = NamedReactionCatalog.IdOfKey(k.EmgRuleKeyAt(slot));
-                string fw = rid != null ? MechanicalReactionCatalog.TriggerFirmwareOf(rid) : null;
+                session.ByUnit.TryGetValue(k.EmgRuleFeedAt(slot).Src, out Projection fired);
+                string fw = rid != null ? MechanicalReactionCatalog.TriggerFirmwareOf(rid, AssemblyOf(fired)) : null; // FG11-REACT-01（DEBT-EMG2REACT02-01）：按出手投影的接入口装配判
                 float cd = fw != null ? FirmwareKinds.CoreCooldownSeconds(fw) : 0f;
-                if (cd > 0f && session.ByUnit.TryGetValue(k.EmgRuleFeedAt(slot).Src, out Projection fired) && fired.CoreGated && fired.CoreReadyAt < 0)
+                if (cd > 0f && fired != null && fired.CoreGated && fired.CoreReadyAt < 0)
                 {
                     fired.CoreReadyAt = now + cd;
                     ApplyWeapon(session, fired, suppressed: true);
@@ -901,7 +906,7 @@ namespace GameLogic.Campaign.Economy
                     // FGR-SIG-033：信号带进来的核心固件发动一次 → 冷却（按表的冷却秒数）；冷却期间反应不发动，固件照样插着。
                     if (src.CoreGated && e.Code2 != 0)
                     {
-                        string fw = MechanicalReactionCatalog.TriggerFirmwareOf(rid);
+                        string fw = MechanicalReactionCatalog.TriggerFirmwareOf(rid, AssemblyOf(src)); // FG11-REACT-01（DEBT-EMG2REACT02-01）
                         float cd = fw != null ? FirmwareKinds.CoreCooldownSeconds(fw) : 0f;
                         if (cd > 0f)
                         {

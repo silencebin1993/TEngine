@@ -401,6 +401,14 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 DamageFrom(ref d, k, p.OcBurstDamage, self, EmgCode.SrcZone);
+                if (p.OcBurstHeat > 0f && d.IsAlive(k))
+                {
+                    EmgAddUnitHeat(ref d, k, p.OcBurstHeat); // FG11-REACT-01：泄爆是热爆（声明 en.heat inject）：半径内单位积热
+                }
+            }
+            if (p.OcBurstHeat > 0f && EmgPatchesOn(ref d))
+            {
+                EmgInjectPatches(ref d, pos, radius, EmgConst.PortHeat, p.OcBurstHeat, 0, 0, self >= 0 ? d.Id[self] : 0); // 斑块升温（点燃油、玻化粉尘、蒸发水……由规则表结算）
             }
             Cue(ref d, CombatEventKind.OverclockCue, self, 0, radius, pos, CombatOverclockConst.CueBurst);
         }

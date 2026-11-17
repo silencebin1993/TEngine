@@ -720,6 +720,20 @@ namespace BinGames.Sim.Combat
                     }
                 }
             }
+            // FG11-REACT-01：按形状值保留每块沼的上次电解时刻（读档前后改写同一组形状时冷却照旧），去掉不再存在的形状
+            for (int j = _d.MarshElecShape.Length - 1; j >= 0; j--)
+            {
+                bool kept = false;
+                for (int k = 0; k < _d.AcidShapes.Length && !kept; k++)
+                {
+                    kept = math.all(_d.AcidShapes[k] == _d.MarshElecShape[j]);
+                }
+                if (!kept)
+                {
+                    _d.MarshElecShape.RemoveAt(j);
+                    _d.MarshElecAt.RemoveAt(j);
+                }
+            }
             _d.AcidPct = pctPerSecond > 0f ? math.min(1f, pctPerSecond) : 0f;
             _d.AcidDilute = wetMult > 0f ? math.min(1f, wetMult) : 1f;
             _d.PlayerAcidResist = playerResist > 0f ? math.saturate(playerResist) : 0f;
@@ -4456,6 +4470,10 @@ namespace BinGames.Sim.Combat
                 w.Write(p.OcModeRate);
                 w.Write(p.OcModeShield);
             }
+            if (format >= 22)
+            {
+                w.Write(p.OcBurstHeat); // FG11-REACT-01：泄爆注热
+            }
         }
 
         /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
@@ -4465,7 +4483,7 @@ namespace BinGames.Sim.Combat
             if (!NonNeg(p.OcDashSpeed) || !NonNeg(p.OcDashHeat) || !NonNeg(p.OcCool) || !NonNeg(p.OcShutdown) || !NonNeg(p.OcVuln) || !NonNeg(p.OcRampHeat)
                 || !NonNeg(p.OcRampMax) || !NonNeg(p.OcAuraRange) || !NonNeg(p.OcAuraRate) || !NonNeg(p.OcMeltHp) || p.OcMeltHp > 1f || !NonNeg(p.OcMeltFuse)
                 || !NonNeg(p.OcBurstRadius) || !NonNeg(p.OcBurstDamage) || !NonNeg(p.OcDeathBurst) || !NonNeg(p.OcLeanRate) || !NonNeg(p.OcLeanMax) || !NonNeg(p.OcLeanTurn)
-                || !NonNeg(p.OcModeCycle) || !NonNeg(p.OcModeWarn) || !NonNeg(p.OcModeSpeed) || !NonNeg(p.OcModeRate) || !NonNeg(p.OcModeShield) || p.OcModeShield > 1f)
+                || !NonNeg(p.OcModeCycle) || !NonNeg(p.OcModeWarn) || !NonNeg(p.OcModeSpeed) || !NonNeg(p.OcModeRate) || !NonNeg(p.OcModeShield) || p.OcModeShield > 1f || !NonNeg(p.OcBurstHeat))
             {
                 return false;
             }
@@ -4749,6 +4767,10 @@ namespace BinGames.Sim.Combat
                 p.OcModeSpeed = r.ReadSingle();
                 p.OcModeRate = r.ReadSingle();
                 p.OcModeShield = r.ReadSingle();
+            }
+            if (format >= 22)
+            {
+                p.OcBurstHeat = r.ReadSingle(); // FG11-REACT-01；≤ 21 版 = 0（不注热）
             }
             return p;
         }

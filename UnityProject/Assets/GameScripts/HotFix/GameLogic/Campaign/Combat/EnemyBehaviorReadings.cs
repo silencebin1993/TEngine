@@ -496,6 +496,9 @@ namespace GameLogic.Campaign.Combat
             p.OcMeltFuse = row.OcMeltHp > 0f ? Math.Max(0.8f, row.OcMeltFuse) : 0f;
             p.OcBurstRadius = row.OcBurstRadius;
             p.OcBurstDamage = row.OcBurstDamage * dm;
+            // FG11-REACT-01：泄爆注热取这一行的 en.heat inject 声明幅度（按端口声明，不认单位 ID）；没有泄爆的单位不注
+            p.OcBurstHeat = row.OcBurstRadius > 0f && Emergence.EmgCatalog.PartDeclAmount(row.Id, "en.heat", Emergence.EmgDirs.Write, Emergence.EmgRole.Inject, out float burstHeat, out _)
+                ? Math.Max(0f, burstHeat) : 0f;
             p.OcDeathBurst = row.OcDeathBurst;
             p.OcLeanRate = row.OcLeanRate;
             p.OcLeanMax = row.OcLeanMax;

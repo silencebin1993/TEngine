@@ -1153,7 +1153,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || _d.MarshElecShape.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1231,8 +1231,9 @@ namespace BinGames.Sim.Combat
             bool tallyOut = v20 && !hash && !_preTallyForTests; // EMGR-TALLY-01：标量段第 28 字段 TallyFloor + 段 33 计数表（不进哈希；测试可模拟本卡之前的旧档）
             int tallyRows = tallyOut ? TallyRows() : 0;
             bool oc = format >= 21 && _d.Overclocks.Length > 0; // FG11-FAC-01：段 34 只在有超频记录时写（没有时快照与哈希逐字不变）
+            bool marshElec = format >= 22 && _d.MarshElecShape.Length > 0; // FG11-REACT-01：段 35 只在酸沼电解过时写
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 29 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1491,6 +1492,10 @@ namespace BinGames.Sim.Combat
             if (oc)
             {
                 WriteOverclockSegment(w, sw);
+            }
+            if (marshElec)
+            {
+                WriteMarshElecSegment(w, sw);
             }
             if (pits)
             {
@@ -2148,6 +2153,8 @@ namespace BinGames.Sim.Combat
                     return ParseHijackSegment(r, sr, ref staging);
                 case EmgConst.SegOverclock:
                     return ParseOverclockSegment(r, sr, ref staging);
+                case EmgConst.SegMarshElec:
+                    return ParseMarshElecSegment(r, sr, ref staging);
                 case EmgConst.SegPit:
                 case EmgConst.SegPitAcc:
                 case EmgConst.SegPitStats:
@@ -2438,6 +2445,67 @@ namespace BinGames.Sim.Combat
             }
             return CombatLoadResult.Ok;
         }
+
+        // ── FG11-REACT-01：段 35 酸沼上次电解时刻（每条 5 个字段：形状四元、时刻）──
+        private void WriteMarshElecSegment(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            sw.Begin(EmgConst.SegMarshElec, 5, _d.MarshElecShape.Length);
+            for (int i = 0; i < _d.MarshElecShape.Length; i++)
+            {
+                Unity.Mathematics.float4 sh = _d.MarshElecShape[i];
+                if (sw.F()) w.Write(sh.x);
+                if (sw.F()) w.Write(sh.y);
+                if (sw.F()) w.Write(sh.z);
+                if (sw.F()) w.Write(sh.w);
+                if (sw.F()) w.Write(_d.MarshElecAt[i]);
+                sw.EndRecord();
+            }
+            sw.End();
+        }
+
+        private static CombatLoadResult ParseMarshElecSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            if (n > 256)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            for (int i = 0; i < n; i++)
+            {
+                sr.Record(i);
+                var sh = new Unity.Mathematics.float4();
+                double at = 0;
+                if (sr.F()) sh.x = r.ReadSingle();
+                if (sr.F()) sh.y = r.ReadSingle();
+                if (sr.F()) sh.z = r.ReadSingle();
+                if (sr.F()) sh.w = r.ReadSingle();
+                if (sr.F()) at = r.ReadDouble();
+                if (!sr.RecordOk || !Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(sh)) || !(sh.w > 0f) || sh.z < 0f || sh.z > sh.w || double.IsNaN(at) || double.IsInfinity(at))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.MarshElecShape.Add(sh);
+                staging.MarshElecAt.Add(at);
+            }
+            return CombatLoadResult.Ok;
+        }
+
+        /// <summary>FG11-REACT-01：某块酸沼（形状）上次电解的时刻；没登记过返回 false（自检 / 悬停）。</summary>
+        public bool TryGetMarshElecAt(Unity.Mathematics.float4 shape, out double at)
+        {
+            for (int i = 0; i < _d.MarshElecShape.Length; i++)
+            {
+                if (Unity.Mathematics.math.all(_d.MarshElecShape[i] == shape))
+                {
+                    at = _d.MarshElecAt[i];
+                    return true;
+                }
+            }
+            at = 0;
+            return false;
+        }
+
+        public int MarshElecCount => _d.MarshElecShape.Length;
 
         /// <summary>FG11-FAC-01：超频记录条数（自检 / 悬停）。</summary>
         public int OverclockCount => _d.Overclocks.Length;

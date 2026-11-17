@@ -757,6 +757,7 @@ namespace GameLogic.EditorTools
             Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
             Seg("FgOverclockFactionSelfCheck", FgOverclockFactionSelfCheck.Run); // FG11-FAC-01
             Seg("FgHeatDataCitySelfCheck", FgHeatDataCitySelfCheck.Run); // FG11-REG-01
+            Seg("FgOverclockReactionSelfCheck", FgOverclockReactionSelfCheck.Run); // FG11-REACT-01 超频反应开放：酸沼电解限速、超频内容下四条有源、图鉴 / 悬停、核心冷却按装配
             // FG10-REG-01 沉淀湖领地：模板与湖心平台锚点、防腐涂层（DEBT-FG8QST01-03）、没有涂层进酸沼先拒绝并说明（软门槛）、样品车接车点在带外、第一次进入的阵营介绍。
             Seg("FgSettlingLakeSelfCheck", FgSettlingLakeSelfCheck.Run);
             // FG10-REACT-01 化工反应开放：可得性探针、澄净不怕酸的负向、澄净领地出现时开放并通知、图鉴打法、首次触发慢放。

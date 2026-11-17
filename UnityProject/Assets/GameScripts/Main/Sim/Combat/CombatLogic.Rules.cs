@@ -1259,11 +1259,52 @@ namespace BinGames.Sim.Combat
                 EmgRule r = d.EmgRules[d.EmgRuleOrder[k]];
                 if (r.Op == EmgRuleConst.OpSpawn && ChargeCond(r.Cond) && amount >= r.C1)
                 {
+                    // FG11-REACT-01（FG-GAP-228）：与酸斑块同口径——charge_ge 的 c2 = 同一块沼（形状）两次电解的最短间隔，冷却中只导电不析出
+                    if (r.Cond == EmgRuleConst.CondChargeGe && r.C2 > 0f && !EmgMarshElecReady(ref d, at, r.C2))
+                    {
+                        break;
+                    }
                     EmgRuleSpawn(ref d, r.Product, at, r.P2 > 0f ? r.P2 : 1f, r.P1 * MarshNominalAcid, r.P3, r.Life, ownerId, chain, depth);
                     EmgRuleSettle(ref d, r, chain, depth, ownerId, at, 0);
                     break;
                 }
             }
+        }
+
+        /// <summary>注入点所在的那块沼（第一个包含它的形状）此刻能否再电解；能则记下本次时刻。冷却余量与斑块限速同为 TickEps。O(形状 + 已登记形状)。</summary>
+        private static bool EmgMarshElecReady(ref CombatData d, double2 at, float gap)
+        {
+            int s = -1;
+            for (int k = 0; k < d.AcidShapes.Length && s < 0; k++)
+            {
+                float4 sh = d.AcidShapes[k];
+                double dx = at.x - sh.x, dy = at.y - sh.y, r2 = dx * dx + dy * dy;
+                if (r2 <= (double)sh.w * sh.w && r2 >= (double)sh.z * sh.z)
+                {
+                    s = k;
+                }
+            }
+            if (s < 0)
+            {
+                return true;
+            }
+            float4 shape = d.AcidShapes[s];
+            double now = d.Scalars[0].Time;
+            for (int j = 0; j < d.MarshElecShape.Length; j++)
+            {
+                if (math.all(d.MarshElecShape[j] == shape))
+                {
+                    if (now - d.MarshElecAt[j] < gap - TickEps)
+                    {
+                        return false;
+                    }
+                    d.MarshElecAt[j] = now;
+                    return true;
+                }
+            }
+            d.MarshElecShape.Add(shape);
+            d.MarshElecAt.Add(now);
+            return true;
         }
 
         /// <summary>酸沼是虚拟世界源、没有份量：E16“份量 = 0.2 × 酸”按一块标准酸斑块的份量折算。</summary>

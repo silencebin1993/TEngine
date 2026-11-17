@@ -388,7 +388,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return false;
             }
-            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
+            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId, FirmwareKinds.ExpandMixed(EffectiveInserted(s, logicId))); // FG11-REACT-01（DEBT-EMG2REACT02-01）：按这台的接入口装配判
             return fw != null && FirmwareKinds.IsCore(fw) && CooldownRemaining(s, fw) > 0;
         }
 
@@ -417,9 +417,10 @@ namespace GameLogic.Campaign.Signal
         /// </summary>
         public static bool IsCoreGatedReaction(string reactionId, string[] uplinkFirmwareIds)
         {
-            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
             // FG5-RND-04：接入口里的核心混合固件按父固件算（含“过载”的混合固件同样受过载的冷却门控）。
-            return fw != null && uplinkFirmwareIds != null && FirmwareKinds.ExpandMixed(uplinkFirmwareIds).Contains(fw)
+            List<string> expanded = uplinkFirmwareIds != null ? FirmwareKinds.ExpandMixed(uplinkFirmwareIds) : null;
+            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId, expanded); // FG11-REACT-01（DEBT-EMG2REACT02-01）：冷却记在这套接入口里写 en.heat 注入的那条
+            return fw != null && expanded != null && expanded.Contains(fw)
                    && FirmwareKinds.IsCore(fw) && FirmwareKinds.CoreCooldownSeconds(fw) > 0f;
         }
 
@@ -1353,7 +1354,7 @@ namespace GameLogic.Campaign.Signal
             {
                 return;
             }
-            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
+            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId, FirmwareKinds.ExpandMixed(EffectiveInserted(s, logicId))); // FG11-REACT-01（DEBT-EMG2REACT02-01）
             if (fw == null || !FirmwareKinds.IsCore(fw))
             {
                 return;
@@ -1379,13 +1380,14 @@ namespace GameLogic.Campaign.Signal
         /// FG6-DEF-01（FGR-DEF-005 接入炮塔，插入核心固件）：信号在炮塔里、炮塔打出了核心固件的具名反应——按信号上的冷却结算（与机器同一份冷却、同一次暴露计数），
         /// 冷却中再来的发动不延长、不重复计数。炮塔不是机器（没有 LogicId），冷却开始后由炮塔服务自己重编译。
         /// </summary>
-        public static void OnHostReactionFired(CampaignState s, string reactionId)
+        /// <param name="assembly">FG11-REACT-01（DEBT-EMG2REACT02-01）：宿主接入口里生效的固件（按它判冷却记在哪条上）；null = 信号核当前生效槽位。</param>
+        public static void OnHostReactionFired(CampaignState s, string reactionId, IEnumerable<string> assembly = null)
         {
             if (s == null)
             {
                 return;
             }
-            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId);
+            string fw = MechanicalReactionCatalog.TriggerFirmwareOf(reactionId, FirmwareKinds.ExpandMixed(assembly ?? SignalCoreService.ActiveContentIds(s)));
             if (fw == null || !FirmwareKinds.IsCore(fw))
             {
                 return;
