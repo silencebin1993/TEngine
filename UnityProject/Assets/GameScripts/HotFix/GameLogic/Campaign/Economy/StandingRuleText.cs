@@ -353,7 +353,14 @@ namespace GameLogic.Campaign.Economy
                     return DescribeOrder(state, o);
                 }
             }
-            return null;
+            int fireRule = FireWaitRule(state, buildingId); // EMG-R 出口补缺口（FG-GAP-224）：被摧毁、自动重建在等火灭
+            if (fireRule > 0)
+            {
+                return GameText.Format("rules.trace.fire_wait", GameText.Format("rules.label", fireRule));
+            }
+            // EMG-R 出口补缺口第 5 轮（FG-GAP-189 规则 (c)）：被摧毁、自动重建在等材料——写明原因（攒不齐时附“不为它预留”）
+            string wait = RebuildWaitReason(state, buildingId, out int waitRule);
+            return wait != null ? GameText.Format("rules.trace.rebuild_wait", GameText.Format("rules.label", waitRule), wait) : null;
         }
 
         /// <summary>规则派出 / 改动过的工单：“由规则 R3 触发” / “优先级由规则 R2 提高”；不是规则的返回 null。</summary>
@@ -376,6 +383,10 @@ namespace GameLogic.Campaign.Economy
                 return null;
             }
             string label = GameText.Format("rules.label", o.RuleSerial);
+            if (HomeValleyWorkOrders.IsFireHeld(o))
+            {
+                return GameText.Format("rules.trace.fire_hold", label); // DEBT-EMGREXIT-06：派出后那里起火，施工挂起等火灭
+            }
             switch (o.Kind)
             {
                 case WorkOrderKind.Repair:

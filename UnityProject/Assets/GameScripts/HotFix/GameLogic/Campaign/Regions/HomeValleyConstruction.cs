@@ -45,6 +45,9 @@ namespace GameLogic.Campaign.Regions
         /// <summary>“等待材料”的原因码：materials:&lt;还差&gt;:&lt;库存&gt;。</summary>
         public const string MaterialsReasonPrefix = "materials:";
 
+        /// <summary>EMG-R 出口补缺口第 4 轮（DEBT-EMGREXIT-06）：自动重建派出的单那里后来起火——施工挂起（机器撤出、已送到的材料留在现场仍记在这张单名下），火灭后自动续做。</summary>
+        public const string FireHoldReason = "fire-hold";
+
         /// <summary>返还物搬运单等仓库腾出空间时的原因码（机器没有被占用）。</summary>
         public const string ReturnWaitReason = "return-waiting-space";
 
@@ -383,12 +386,24 @@ namespace GameLogic.Campaign.Regions
             NeededMaterials(state, order, NeedScratch);
             for (int i = 0; i < NeedScratch.Count; i++)
             {
-                if (StockOf(state, NeedScratch[i]) > 0)
+                if (FetchableStock(state, order, NeedScratch[i]) > 0)
                 {
                     return NeedScratch[i];
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// 这张施工单这一趟能取用的库存。EMG-R 出口补缺口第 4 轮（FG-GAP-189，按推荐默认执行 2026-11-17，待用户确认）：自动重建派出的传送带虚影单按摧毁先后排队，
+        /// 废料要先扣掉排在它前面、还在等一次凑齐的建筑重建费（<see cref="Economy.StandingRuleService.ReservedScrapFor"/>）；别的单、别的材料 = 库存本身。
+        /// </summary>
+        public static int FetchableStock(CampaignState state, WorkOrderRecord order, string resourceType)
+        {
+            int stock = StockOf(state, resourceType);
+            return resourceType == CampaignEconomyLedger.ResourceScrap && order != null && order.RuleQueueTick > 0 && stock > 0
+                ? Math.Max(0, stock - Economy.StandingRuleService.ReservedScrapFor(state, order, out _))
+                : stock;
         }
 
         /// <summary>还缺的材料里有没有家园里有货的（施工单能不能派机器去取）。</summary>
@@ -579,7 +594,7 @@ namespace GameLogic.Campaign.Regions
                 return TryFetchItem(state, order, machine, material);
             }
             int need = NeedOf(state, order, material);
-            int stock = Mathf.FloorToInt(state.Scrap);
+            int stock = FetchableStock(state, order, material); // FG-GAP-189：自动重建的虚影单不取用预留给前面那座的废料
             int load = Math.Min(need, Math.Min(CarryFor(machine), stock));
             if (load <= 0)
             {
@@ -2102,12 +2117,24 @@ namespace GameLogic.Campaign.Regions
                 into.Add(new QueueEntry(o, HomeValleyWorkOrders.DescribeTarget(state, o), DescribeStatus(state, o, ref onBelts), Fraction(state, o), SitePosition(state, o)));
             }
             // FG3-LOG-03：被摧毁的传送带留下的虚影排在最后（没有施工单，等玩家点“重建”）。
+            HashSet<string> fire = null;
+            bool fireRead = false;
             foreach (PlannedBeltRecord p in state.Grid?.PlannedBelts ?? Array.Empty<PlannedBeltRecord>())
             {
                 if (p != null && p.Destroyed && UnbuiltCells(p) > 0)
                 {
+                    if (!fireRead)
+                    {
+                        fire = Economy.StandingRuleService.FireWaitIds(state); // EMG-R 出口补缺口（FG-GAP-224）：自动重建等火灭的虚影写明
+                        fireRead = true;
+                    }
                     int i = NextUnbuilt(p);
-                    into.Add(new QueueEntry(null, DestroyedName(p, i), DestroyedStatus(p, i), 0f, new Vector2(p.Xs[i], p.Ys[i]), p.PlanId));
+                    string status = DestroyedStatus(p, i);
+                    if (fire != null && fire.Contains(p.PlanId))
+                    {
+                        status = GameText.Format("build.queue.destroyed_fire", status);
+                    }
+                    into.Add(new QueueEntry(null, DestroyedName(p, i), status, 0f, new Vector2(p.Xs[i], p.Ys[i]), p.PlanId));
                 }
             }
         }
@@ -2392,6 +2419,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return Env.SilentNightService.HoldText(state); // FG7-ENV-02：静默夜期间新放的规划，等结束后开工。
             }
+            if (order.State == WorkOrderState.Waiting && reason == FireHoldReason)
+            {
+                return GameText.Format("build.status.fire_hold", GameText.Format("rules.label", order.RuleSerial)); // DEBT-EMGREXIT-06：等火灭，火灭了自动继续
+            }
             if (order.State == WorkOrderState.Waiting && reason != null && reason.StartsWith(MaterialsReasonPrefix, StringComparison.Ordinal))
             {
                 // FG4-ECO-11：卡住的是废料以外的材料（例如关键材料）时写明是哪种、从哪儿来。
@@ -2409,6 +2440,15 @@ namespace GameLogic.Campaign.Regions
                 }
                 // FG4-ECO-11 审查修复（P2）：只写废料自己的缺口（额外材料逐种在悬停里列出），不与关键材料件数相加。
                 int need = NeedOf(state, order, CampaignEconomyLedger.ResourceScrap);
+                int scrapStock = StockOf(state, CampaignEconomyLedger.ResourceScrap);
+                string holder = null;
+                int held = order.RuleQueueTick > 0 && scrapStock > 0 ? Economy.StandingRuleService.ReservedScrapFor(state, order, out holder) : 0;
+                if (held > 0)
+                {
+                    // FG-GAP-189：仓库里有废料，但先留给更早被摧毁、要一次凑齐的那座——写明“等材料（预留给 X）”。
+                    return GameText.Format("build.status.waiting_reserved", Economy.StandingRuleService.ReserveHolderName(state, holder), MaterialName(CampaignEconomyLedger.ResourceScrap),
+                        need.ToString(CultureInfo.InvariantCulture), scrapStock.ToString(CultureInfo.InvariantCulture), Math.Min(held, scrapStock).ToString(CultureInfo.InvariantCulture));
+                }
                 // FG3-E2E-01：仓库输出口把库存推上了传送带（在途不算库存）——写明在带上的件数与办法（端口面板“停止输出”），B06。
                 if (onBeltsCache < 0)
                 {

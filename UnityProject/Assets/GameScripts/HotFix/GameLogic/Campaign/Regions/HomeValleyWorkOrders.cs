@@ -1347,6 +1347,11 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            if (Economy.StandingRuleService.IsRuleRebuild(state, order) && Economy.StandingRuleService.RebuildSiteBurning(state, order))
+            {
+                HoldForFire(state, order); // DEBT-EMGREXIT-06：到了仓库 / 现场那一刻那里在烧——不取料、不进场、不施工，等火灭
+                return;
+            }
             if (order.Kind == WorkOrderKind.Build && ArriveBuildLeg(state, order))
             {
                 return;
@@ -1414,6 +1419,105 @@ namespace GameLogic.Campaign.Regions
             {
                 HomeValleyConstruction.NotifyWaitingMaterials(state, order, need);
             }
+            // FG-GAP-189：仓库里有废料、却预留给更早被摧毁的那座——规则日志写一次“等材料（预留给 X）”（施工队列由 DescribeStatus 写明）。
+            if (order.RuleQueueTick > 0 && HomeValleyConstruction.StockOf(state, CampaignEconomyLedger.ResourceScrap) > 0
+                && Economy.StandingRuleService.ReservedScrapFor(state, order, out string holder) > 0)
+            {
+                Economy.StandingRuleService.NoteReservedWait(state, order, holder);
+            }
+        }
+
+        // ── EMG-R 出口补缺口第 4 轮（DEBT-EMGREXIT-06）：自动重建派出的单那里后来起火 ──────────────────────
+
+        /// <summary>
+        /// 自动重建派出的单（被摧毁建筑的重建单 / 传送带虚影的施工单）派出之后那里才起火（任何 structDps &gt; 0 的斑块或燃烧液洼，按数值判）：
+        /// 取料、送料、逐格施工哪一段都挂起——机器撤出（放掉机器、停下移动，不再往危险格里走；货舱里这一趟的材料退回仓库），
+        /// 已送到现场的材料留在原地、仍记在这张单名下（重建单开单时预留的废料事务原样保留），单子转为“等火灭”（施工队列 / 建筑面板写明）；
+        /// 火灭后回到待分配池自动续做（施工进度保留）。玩家手动取消照旧（全额退回）。
+        /// 与派工评估同一节奏（≤ 每 0.5 秒，派工之前先跑：在烧的单这一轮不会被派出去），另在到达那一刻再判一次（<see cref="OnArrivedAtWork"/>）。
+        /// O(在办工单数)，在烧的判断在内核里算（O(斑块 + 区域)，只对自动重建的单）。
+        /// </summary>
+        private static void HoldRuleRebuildsOnFire(CampaignState state)
+        {
+            WorkOrderRecord[] orders = state.WorkOrders;
+            if (orders == null)
+            {
+                return;
+            }
+            for (int i = 0; i < orders.Length; i++)
+            {
+                WorkOrderRecord o = orders[i];
+                if (o == null || IsTerminal(o.State) || o.RuleSerial <= 0 || (o.Kind != WorkOrderKind.Repair && o.Kind != WorkOrderKind.Build))
+                {
+                    continue;
+                }
+                bool held = IsFireHeld(o);
+                if (!held && !Economy.StandingRuleService.IsRuleRebuild(state, o))
+                {
+                    continue; // 挂着的单即使规则后来被删了也照样等火灭后续做（不会永远挂着）
+                }
+                bool fire = Economy.StandingRuleService.RebuildSiteBurning(state, o);
+                if (held && !fire)
+                {
+                    ResumeFromFire(state, o);
+                }
+                else if (!held && fire)
+                {
+                    HoldForFire(state, o);
+                }
+            }
+        }
+
+        /// <summary>这张单正因为那里起火挂着（等火灭）。</summary>
+        public static bool IsFireHeld(WorkOrderRecord o) =>
+            o != null && o.State == WorkOrderState.Waiting && o.FailureReason == HomeValleyConstruction.FireHoldReason;
+
+        private static void HoldForFire(CampaignState state, WorkOrderRecord o)
+        {
+            PathWatch.Remove(o.WorkOrderId);
+            WaitingWatch.Remove(o.WorkOrderId);
+            int machine = o.AssignedMachineLogicId;
+            ReleaseBuildMachine(state, o, dropOnly: false); // 货舱里这一趟退回仓库（不丢）；现场已有的材料不动
+            // 审查 r5：机器已经站在火里（在现场施工 / 正穿过）就撤到圈外，不是原地停下；不在火里才停下移动（下一次 Tick 开头，这一轮又被派去做别的活的不停）。
+            if (machine > 0 && !EvacuateFromFire(machine) && !PendingMovementRelease.Contains(machine))
+            {
+                PendingMovementRelease.Add(machine);
+            }
+            o.AssignedMachineLogicId = 0;
+            o.State = WorkOrderState.Waiting;
+            o.FailureReason = HomeValleyConstruction.FireHoldReason;
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            Economy.StandingRuleService.NoteFireHold(state, o, hold: true);
+        }
+
+        /// <summary>
+        /// 机器此刻站在会烧蚀设施的斑块 / 燃烧液洼里：给它一条走到圈外的移动（落点由内核按斑块圆心与半径算，<see cref="Combat.CombatSite.StructHazardEscape"/>），返回 true；
+        /// 不在火里、家园没载入（纯逻辑 Tick 的自检）返回 false（调用方照旧停下移动）。
+        /// </summary>
+        private static bool EvacuateFromFire(int machine)
+        {
+            Combat.CombatSite site = WorldSim.WorldSimulation.Home != null && WorldSim.WorldSimulation.Home.IsLoaded ? WorldSim.WorldSimulation.Home.Combat : null;
+            if (site == null || !site.TryGetMachinePosition(machine, out Vector2 at) || !site.StructHazardEscape(at, out Vector2 safe)
+                || !site.TryGetMachineMarker(machine, out HomeValleyMachineMarker marker))
+            {
+                return false;
+            }
+            marker.CommandMoveTo(new Vector3(safe.x, 1f, safe.y));
+            return true;
+        }
+
+        private static void ResumeFromFire(CampaignState state, WorkOrderRecord o)
+        {
+            o.State = WorkOrderState.Ready;
+            o.FailureReason = null;
+            if (o.Kind == WorkOrderKind.Build)
+            {
+                o.Leg = HomeValleyConstruction.MaterialsStillNeeded(state, o) > 0 ? 1 : 0; // 现场材料够了直接去现场，不够先去取（已送到的不重复取）
+            }
+            MarkAssignmentDirty();
+            HomeValleyConstruction.Touch();
+            Economy.StandingRuleService.NoteFireHold(state, o, hold: false);
         }
 
         /// <summary>已经发过“等待材料”通知的施工单（瞬态；读档后同一张单最多再提醒一次）。</summary>
@@ -1805,11 +1909,13 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 // 还缺的材料里，按取料顺序找第一种还有预算的（废料优先）：分到了就去取，一种都分不到就等。
+                // FG-GAP-189：自动重建派出的虚影单不取用预留给更早被摧毁、要一次凑齐的那几座的废料（预算先扣掉预留）。
                 string pick = null;
                 HomeValleyConstruction.NeededMaterials(state, o, FetchNeedScratch);
+                int reservedScrap = o.RuleQueueTick > 0 ? Economy.StandingRuleService.ReservedScrapFor(state, o, out _) : 0;
                 for (int k = 0; k < FetchNeedScratch.Count && pick == null; k++)
                 {
-                    if (BudgetOf(state, FetchNeedScratch[k]) > 0)
+                    if (BudgetOf(state, FetchNeedScratch[k]) - (FetchNeedScratch[k] == CampaignEconomyLedger.ResourceScrap ? reservedScrap : 0) > 0)
                     {
                         pick = FetchNeedScratch[k];
                     }
@@ -1830,6 +1936,11 @@ namespace GameLogic.Campaign.Regions
                 {
                     EnterWaitingMaterials(state, o); // 排不上：等待材料（不派机器空跑）。
                     changed = true;
+                }
+                else if (reservedScrap > 0 && HomeValleyConstruction.StockOf(state, CampaignEconomyLedger.ResourceScrap) > 0
+                         && Economy.StandingRuleService.ReservedScrapFor(state, o, out string holder) > 0)
+                {
+                    Economy.StandingRuleService.NoteReservedWait(state, o, holder); // FG-GAP-189：本来就在等料、仓库来了废料却预留给前面那座——规则日志写一次“等材料（预留给 X）”
                 }
             }
             FetchCandidates.Clear();
@@ -2406,6 +2517,7 @@ namespace GameLogic.Campaign.Regions
             }
             _assignTimer = 0f;
             _assignDirty = false;
+            HoldRuleRebuildsOnFire(state); // DEBT-EMGREXIT-06：派工之前先把那里起火的自动重建单挂起 / 火灭的放回池
 
             // FG4-ECO-07：岗位维持（驻防岗的机器没有在办工单时派回驻防点）与已结束工单的清理（DEBT-FG3LOG02-09），都在这次评估里做，不每帧跑。
             MachineRoster.KeepRoles(state, isDirectControlled);

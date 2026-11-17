@@ -2029,7 +2029,7 @@ namespace GameLogic.Campaign
         public float Y;
     }
 
-    /// <summary>等下一个模拟步处理的事件：destroyed（建筑被摧毁）/ expedition（远征返回，带机器）/ rebuild_retry（自动重建等材料）。</summary>
+    /// <summary>等下一个模拟步处理的事件：destroyed（建筑被摧毁）/ expedition（远征返回，带机器）/ rebuild_retry（自动重建等材料 / 等火灭）/ belt_ghost（传送带虚影）。</summary>
     [Serializable]
     public sealed class RuleEventRecord
     {
@@ -2038,6 +2038,14 @@ namespace GameLogic.Campaign
         public int[] Machines = Array.Empty<int>();
         public long Tick;
         public int Rule;
+        /// <summary>EMG-R 出口补缺口（FG-GAP-224）：自动重建因为格子还在烧在等火灭（建筑 rebuild_retry / 传送带虚影 belt_ghost；只在定时检查步重查，原因切换时才写日志）。旧档无此字段 = false。</summary>
+        public bool FireWait;
+        /// <summary>EMG-R 出口补缺口第 4 轮（审查 P2“按单记原因”）：这一张在等的原因参数（等材料：“@b:建筑|@raw:缺多少”；等火灭：“@b:建筑”或传送带那一格）。
+        /// 规则面板只有一个原因位，显示排在最前面还在等的那张；别的单派出不清掉它。旧档无此字段 = null（按 EntityId 补）。</summary>
+        public string IssueArg;
+        /// <summary>EMG-R 出口补缺口第 5 轮（审查 r5）：这座等材料的建筑因为废料预留给它、挡住了后面的传送带虚影，已经写过一条“等材料（预留给 X）”规则日志（同一次摧毁只写一条）。
+        /// 随存档、重试时带着（原来是进程级静态集合，读回早档 / 新开局后不再写）。旧档无此字段 = false。</summary>
+        public bool ReserveNoted;
     }
 
     /// <summary>信号核（FG1-SIG-01 / FG01 FGR-SIG-010～012、第 6 章存档）。唯一写入口 <c>Signal.SignalCoreService</c>。

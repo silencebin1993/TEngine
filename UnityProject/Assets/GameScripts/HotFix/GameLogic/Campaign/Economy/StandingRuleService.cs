@@ -2135,7 +2135,7 @@ namespace GameLogic.Campaign.Economy
                 switch (e.Kind)
                 {
                     case EventDestroyed:
-                        HandleDestroyed(state, e.EntityId, retry);
+                        HandleDestroyed(state, e, retry);
                         break;
                     case EventRebuildRetry:
                         // 等材料的重建：只在定时检查步重试（O(等待数)，不每步重试）。
@@ -2152,7 +2152,14 @@ namespace GameLogic.Campaign.Economy
                         HandleExpedition(state, e.Machines);
                         break;
                     case EventBeltGhost:
-                        HandleBeltGhost(state, e.EntityId); // FG6-DEF-03：被摧毁的传送带 / 物流节点
+                        if (e.FireWait && !retryDue)
+                        {
+                            retry.Add(e); // EMG-R 出口补缺口（FG-GAP-224）：等火灭的虚影同等材料的重建一样只在定时检查步重查
+                        }
+                        else
+                        {
+                            HandleBeltGhost(state, e.EntityId, retry, e.FireWait, e.Tick); // FG6-DEF-03：被摧毁的传送带 / 物流节点
+                        }
                         break;
                 }
             }
@@ -2161,13 +2168,14 @@ namespace GameLogic.Campaign.Economy
                 retry.AddRange(d.Pending);
                 d.Pending = retry.ToArray();
             }
+            SyncRebuildIssues(state, d);
         }
 
         private static bool OnlyRetries(RuleEventRecord[] events)
         {
             foreach (RuleEventRecord e in events)
             {
-                if (e != null && e.Kind != EventRebuildRetry)
+                if (e != null && e.Kind != EventRebuildRetry && !(e.Kind == EventBeltGhost && e.FireWait))
                 {
                     return false;
                 }
@@ -2175,23 +2183,11 @@ namespace GameLogic.Campaign.Economy
             return true;
         }
 
-        private static bool HasRetry(CampaignState state, int rule, string exceptBuilding)
-        {
-            foreach (RuleEventRecord e in Domain(state).Pending)
-            {
-                if (e != null && e.Kind == EventRebuildRetry && e.Rule == rule && e.EntityId != exceptBuilding)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         // FG6-DEF-03：RebuildRuleFor（类型范围 + 重建区域）在 StandingRuleService.Rebuild.cs。
 
-        private static void HandleDestroyed(CampaignState state, string buildingId, List<RuleEventRecord> retry)
+        private static void HandleDestroyed(CampaignState state, RuleEventRecord e, List<RuleEventRecord> retry)
         {
-            BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
+            BuildingRecord b = HomeGridService.FindBuilding(state, e.EntityId);
             if (b == null || b.ConstructionState != BuildingConstructionState.Damaged)
             {
                 return;
@@ -2201,7 +2197,7 @@ namespace GameLogic.Campaign.Economy
             {
                 return; // 没有玩家开的自动重建：留下虚影，等玩家自己点“重建”（FGR-BASE-020）。
             }
-            TryRebuild(state, r, b, retry, first: true);
+            TryRebuild(state, r, b, retry, first: true, since: e.Tick);
         }
 
         private static void RetryRebuild(CampaignState state, RuleEventRecord e, List<RuleEventRecord> retry)
@@ -2212,22 +2208,39 @@ namespace GameLogic.Campaign.Economy
                 || HomeValleyWorkOrders.FindActiveRepair(state, b.BuildingId) != null
                 || !Covers(r, b.BuildingTypeId, CellOf(b))) // FG6-DEF-03：等材料期间区域被关掉 / 范围改了 = 不再等
             {
-                // 不用再等了（建筑已被重建 / 拆掉、玩家自己派了单、规则停用）：清掉“等材料”的原因。
-                if (r != null && r.IssueKey == "rules.issue.rebuild_wait" && !HasRetry(state, r.Serial, e.EntityId))
-                {
-                    SetIssue(state, r, null, null);
-                }
-                return;
+                return; // 不用再等了（建筑已被重建 / 拆掉、玩家自己派了单、规则停用）：不再排队；规则上的原因由 SyncRebuildIssues 换成下一张还在等的（没有就清掉）。
             }
-            TryRebuild(state, r, b, retry, first: false);
+            TryRebuild(state, r, b, retry, first: false, wasFire: e.FireWait, since: e.Tick, noted: e.ReserveNoted);
         }
 
-        private static void TryRebuild(CampaignState state, StandingRuleRecord r, BuildingRecord b, List<RuleEventRecord> retry, bool first)
+        private static bool IsRebuildWaitIssue(string key) => key == "rules.issue.rebuild_wait" || key == IssueRebuildFire;
+
+        /// <param name="since">这座建筑被摧毁的那一步（排队顺序；补排时没有摧毁记录 = 补排这一步）。重试时原样带着，不按重试时刻重排。</param>
+        /// <param name="noted">这座已经写过“等材料（预留给它）”的规则日志（<see cref="RuleEventRecord.ReserveNoted"/>，重试时带着）。</param>
+        private static void TryRebuild(CampaignState state, StandingRuleRecord r, BuildingRecord b, List<RuleEventRecord> retry, bool first, bool wasFire = false, long since = -1,
+            bool noted = false)
         {
             if (HomeValleyWorkOrders.FindActiveRepair(state, b.BuildingId) != null)
             {
                 return;
             }
+            long tick = since >= 0 ? since : GameClock.Ticks;
+            // EMG-R 出口补缺口（FG-GAP-224，FGR-DEF-015 / FGR-BASE-020）：占地里还在烧（会烧蚀设施的斑块 / 燃烧液洼）——不派单、不扣料、不把机器派进火里，
+            // 等火灭（定时检查步重查）；开始等火的那一次写日志 + 通知，之后不刷屏；规则原因按单记（SyncRebuildIssues）。
+            if (BurningAt(b))
+            {
+                retry.Add(new RuleEventRecord { Kind = EventRebuildRetry, EntityId = b.BuildingId, Rule = r.Serial, Tick = tick, FireWait = true, IssueArg = "@b:" + b.BuildingId });
+                if (!wasFire)
+                {
+                    AddLog(state, r.Serial, "rules.log.rebuild_fire", BuildingKey(b.BuildingId), LabelArg(r.Serial), "@b:" + b.BuildingId);
+                    NotificationCenter.Post("standing_rule", Expand(state, "rules.log.rebuild_fire", new[] { LabelArg(r.Serial), "@b:" + b.BuildingId }),
+                        new Vector3(b.Position.x, 0f, b.Position.y));
+                }
+                return;
+            }
+            first |= wasFire; // 火灭后头一次缺料：照常写一次“等材料”
+            // EMG-R 出口补缺口第 5 轮（FG-GAP-189 规则 (b)，总控更正 2026-11-17，按推荐默认执行（2026-11-17），待用户确认）：整单之间不互相预留——
+            // 按摧毁先后检查（待处理事件的顺序），谁的材料现在够谁先派单；前面的付不起，后面付得起的照常派。预留只挡逐份取料的传送带虚影（ReservedScrapFor）。
             if (BuildingOps.TryOrderRepair(state, b.BuildingId, out string message))
             {
                 WorkOrderRecord o = HomeValleyWorkOrders.FindActiveRepair(state, b.BuildingId);
@@ -2235,18 +2248,18 @@ namespace GameLogic.Campaign.Economy
                 {
                     o.RuleSerial = r.Serial;
                 }
-                if (r.IssueKey == "rules.issue.rebuild_wait")
-                {
-                    SetIssue(state, r, null, null);
-                }
                 Fired(state, r, "rules.log.rebuild", BuildingKey(b.BuildingId), LabelArg(r.Serial), "@b:" + b.BuildingId);
                 return;
             }
-            retry.Add(new RuleEventRecord { Kind = EventRebuildRetry, EntityId = b.BuildingId, Rule = r.Serial, Tick = GameClock.Ticks });
+            int cost = BuildingOps.RebuildScrapFor(b);
+            if (cost > 0 && !ScrapAttainable(state, cost, out string why))
+            {
+                message += GameText.Get("rules.sep_dot") + why; // 规则 (c)：攒不齐 / 超出仓库上限——不为它预留，写明原因（规则面板 / 规则日志 / 建筑面板）
+            }
+            retry.Add(new RuleEventRecord { Kind = EventRebuildRetry, EntityId = b.BuildingId, Rule = r.Serial, Tick = tick, IssueArg = "@b:" + b.BuildingId + "|@raw:" + message, ReserveNoted = noted });
             if (first)
             {
                 AddLog(state, r.Serial, "rules.log.rebuild_wait", BuildingKey(b.BuildingId), LabelArg(r.Serial), "@b:" + b.BuildingId, "@raw:" + message);
-                SetIssue(state, r, "rules.issue.rebuild_wait", "@b:" + b.BuildingId + "|@raw:" + message);
                 NotificationCenter.Post("standing_rule", Expand(state, "rules.log.rebuild_wait", new[] { LabelArg(r.Serial), "@b:" + b.BuildingId, "@raw:" + message }),
                     new Vector3(b.Position.x, 0f, b.Position.y));
             }
@@ -2470,7 +2483,7 @@ namespace GameLogic.Campaign.Economy
             r.IssueKey = key;
             r.IssueArg = arg;
             Revision++;
-            if (key.Length > 0 && key != "rules.issue.rebuild_wait")
+            if (key.Length > 0 && !IsRebuildWaitIssue(key)) // 等材料 / 等火灭由自动重建自己写日志与通知
             {
                 // 原因只在变化时写一条日志 + 一条警告（同类聚合、可定位），不每分钟刷屏（B08）。
                 string reason = FormatArgs(key, arg);

@@ -621,6 +621,9 @@ namespace GameLogic.Campaign
         public int ReservedItemAmount;
         /// <summary>FG4-ECO-06（FGR-ECO-031 可追溯）：派出 / 改动这张工单的常驻规则编号（3 = “由规则 R3 触发”；0 = 不是规则派的）。</summary>
         public int RuleSerial;
+        /// <summary>EMG-R 出口补缺口第 4 轮（FG-GAP-189）：自动重建派出的传送带虚影施工单 = 那份虚影被摧毁的那一步（GameClock.Ticks），按摧毁先后排队、
+        /// 不取用排在它前面等一次凑齐的重建单还差的废料。旧存档 / 不是自动重建 = 0（不受预留限制）。</summary>
+        public long RuleQueueTick;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

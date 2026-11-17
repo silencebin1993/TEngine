@@ -136,6 +136,15 @@ namespace GameLogic.EditorTools
                 Step(CheckZoneRebuild);
                 Step(CheckBeltRebuild);
                 Step(CheckMaterialShortage);
+                Step(CheckRebuildWaitsForFire);
+                Step(CheckUndergroundGhostWaitsForFire);
+                Step(CheckRebuildQueueReserve);
+                Step(CheckRebuildReserveUnattainable);
+                Step(CheckFireAfterDispatchBuilding);
+                Step(CheckFireAfterDispatchOnSite);
+                Step(CheckFireAfterDispatchBelt);
+                Step(CheckFireWaitSaveLoadAndIssues);
+                Step(CheckLegacyIssueArg);
                 Step(CheckZoneNegatives);
                 Step(CheckBuildModeAndPanel);
                 Step(CheckSaveLoad);
@@ -1137,6 +1146,934 @@ namespace GameLogic.EditorTools
             bool noDouble = once && s.Scrap == give - cost - beltCost && orders == 1 && r.IssueKey.Length == 0;
             Expect(noDouble,
                 $"D6 材料到位后各重建一次：废料 {give} → {s.Scrap}（= 减去建筑重建造价 {cost} 与一格传送带 {beltCost}，不重复扣料），这座建筑只有 1 张重建单（两条规则都覆盖也不重复派）（{noDouble}）");
+        }
+
+        /// <summary>
+        /// EMG-R 出口补缺口（FG-GAP-224；FGR-DEF-015“材料到位后由机器按原样重建”、FGR-BASE-020 自动动作可追溯）：被摧毁的建筑 / 传送带所在的格子还在烧
+        /// （会烧蚀设施的物质斑块），自动重建不派单、不扣料、不把机器派进火里，写明“等火灭”（规则日志、规则原因、建筑面板、施工队列）；还在烧时的重查不重复写日志；
+        /// 火灭了在下一次定时检查照常派单。负向：不伤设施的物质（水，structDps = 0）盖住的建筑照常立刻派单（按物质数值判，不认物质名）。
+        /// </summary>
+        private static void CheckRebuildWaitsForFire()
+        {
+            CampaignState s = NewWorld(6314, scrap: 2000);
+            ClearRules(s);
+            BuildingRecord f = PlaceNear(s, Furnace, CoreCenter(s), 9f, 20f);
+            BuildingRecord g = f != null ? PlaceNear(s, Furnace, f.Position, 12f, 22f) : null;
+            GridCell? bc = f != null ? BeltCellNear(s, f.Position, 2f, 4f) : null;
+            if (f == null || g == null || !bc.HasValue || Site == null)
+            {
+                Fail("D5b 测试准备：找不到两座精炼炉 / 火旁的一格传送带，或家园没有内核");
+                return;
+            }
+            GridCell belt = bc.Value;
+            BeltNetworkService.TryPlace(s, belt, BeltDir.East, 0);
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, Furnace, out _);
+            StandingRuleService.TryAddTarget(s, r.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            var fc = new Vector2(Mathf.Round(f.Position.x), Mathf.Round(f.Position.y));
+            float rad = Mathf.Min(5f, Vector2.Distance(fc, new Vector2(belt.X, belt.Y)) + 1f);
+            bool spawned = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(f.Position.x, f.Position.y), rad, 1f, 20f)
+                           & Site.Kernel.SpawnPatch(EmgMatterConst.Water, new double2(g.Position.x, g.Position.y), 2.5f, 1f, 20f);
+            Seconds(0.5f);
+            StandingRuleService.BoundsOf(f, out GridCell fmin, out GridCell fmax);
+            // 审查 P2：“在烧 / 火灭”用独立判据（直接查斑块与已知布置，见 HotIn / ColdIn），不借被测的 StructHazardIn。
+            bool burning() => HotIn(fmin, fmax);
+            bool cold() => ColdIn(fmin, fmax) && ColdAt(belt);
+            StandingRuleService.BoundsOf(g, out GridCell gmin, out GridCell gmax);
+            bool waterHazard = !WetIn(gmin, gmax) || !ColdIn(gmin, gmax); // 水盖住那座、附近没有会烧蚀设施的斑块
+            bool fireHazard = HotAt(belt) && burning();
+            bool wetNotHazard = !waterHazard && fireHazard;
+            int scrap0 = s.Scrap;
+            BuildingOps.ApplyDamage(s, f.BuildingId, 10000f);
+            BuildingOps.ApplyDamage(s, g.BuildingId, 10000f);
+            BeltNetworkService.TryDamage(s, belt, BeltNetworkService.MaxHp(0), out _);
+            Seconds(0.5f);
+            PlannedBeltRecord ghost = (s.Grid.PlannedBelts ?? Array.Empty<PlannedBeltRecord>()).FirstOrDefault(p => p.Destroyed && p.Xs[0] == belt.X && p.Ys[0] == belt.Y);
+            int Logs(string key, string entity) => StandingRuleService.LogEntries(s).Count(l => l.Key == key && l.Rule == r.Serial && l.EntityId == entity);
+            string fKey = StandingRuleService.BuildingKey(f.BuildingId);
+            string bKey = "c:" + belt.X.ToString(CultureInfo.InvariantCulture) + "," + belt.Y.ToString(CultureInfo.InvariantCulture);
+            bool BeltQueued() => ghost != null && HomeValleyWorkOrders.FindActiveBuild(s, HomeValleyConstruction.BeltPlanPrefix + ghost.PlanId) != null;
+            string QueueStatus()
+            {
+                var q = new List<HomeValleyConstruction.QueueEntry>();
+                HomeValleyConstruction.CollectQueue(s, q);
+                return ghost == null ? null : q.FirstOrDefault(e => e.DestroyedPlanId == ghost.PlanId).Status;
+            }
+            string trace = StandingRuleService.DescribeBuilding(s, f.BuildingId) ?? string.Empty;
+            string queue = QueueStatus() ?? string.Empty;
+            bool fWaits = f.ConstructionState == BuildingConstructionState.Damaged && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null
+                          && Logs("rules.log.rebuild_fire", fKey) == 1 && Logs("rules.log.rebuild", fKey) == 0 && StandingRuleService.FireWaitRule(s, f.BuildingId) == r.Serial
+                          && trace.Contains("R" + r.Serial) && trace.Contains("火");
+            bool beltWaits = ghost != null && !BeltQueued() && Logs("rules.log.rebuild_belt_fire", bKey) == 1 && Logs("rules.log.rebuild_belt", bKey) == 0 && queue.Contains("等火灭");
+            bool issue = r.IssueKey == StandingRuleService.IssueRebuildFire;
+            WorkOrderRecord go = HomeValleyWorkOrders.FindActiveRepair(s, g.BuildingId);
+            bool wetOrdered = go != null && go.RuleSerial == r.Serial && Logs("rules.log.rebuild", StandingRuleService.BuildingKey(g.BuildingId)) == 1;
+            int gCost = BuildingOps.RebuildCost(g, out _);
+            bool noCharge = s.Scrap == scrap0 - (go != null ? gCost : 0);
+            Expect(spawned && wetNotHazard && fWaits && beltWaits && issue && wetOrdered && noCharge,
+                $"D5b FG-GAP-224 着火的格子等火灭：明火（半径 {rad:0.#}）盖住被摧毁的精炼炉与一格传送带——都不派单、不扣料（废料 {scrap0} → {s.Scrap}，只扣了不在火里那座的 {gCost}）、" +
+                $"规则日志各 1 条“等火灭”（{fWaits}/{beltWaits}），规则原因“{StandingRuleService.IssueText(r)}”（{issue}），建筑面板“{trace}”、施工队列“{queue}”；" +
+                $"负向：水（不伤设施）盖住的那座照常立刻派单（{wetOrdered}；斑块布置：明火盖住精炼炉与传送带 {fireHazard}、水那座不对 {waterHazard}）");
+            // 还在烧时的重查（定时检查与“有改动立即检查”同一路径）：仍不派单、日志不重复。
+            StandingRuleService.RequestEvaluation(s);
+            Seconds(1f);
+            bool stillBurning = burning();
+            bool holds = stillBurning && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null && !BeltQueued()
+                         && Logs("rules.log.rebuild_fire", fKey) == 1 && Logs("rules.log.rebuild_belt_fire", bKey) == 1;
+            // 火灭了：下一次定时检查照常派单（日志写“由规则 Rn 派机器重建”，原因清掉），机器按原样重建。
+            bool out1 = StepUntil(cold, 60);
+            bool dispatched = StepUntil(() => HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) != null && (ghost == null || !ghost.Destroyed), 75);
+            WorkOrderRecord fo = HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId);
+            bool traced = fo != null && fo.RuleSerial == r.Serial && Logs("rules.log.rebuild", fKey) == 1 && Logs("rules.log.rebuild_belt", bKey) == 1
+                          && Logs("rules.log.rebuild_fire", fKey) == 1 && StandingRuleService.FireWaitRule(s, f.BuildingId) == 0 && r.IssueKey != StandingRuleService.IssueRebuildFire;
+            bool rebuilt = dispatched && StepUntil(() => f.ConstructionState == BuildingConstructionState.Operational && BeltNetworkService.HpOf(belt) > 0, 300);
+            Expect(holds && out1 && dispatched && traced && rebuilt,
+                $"D5c FG-GAP-224 火灭后照常重建：还在烧时重查不派单、日志不重复（{holds}）；火灭（{out1}）后下一次定时检查派单（{dispatched}），由 R{r.Serial} 触发、日志可追溯、“等火灭”原因清掉（{traced}，原因“{StandingRuleService.IssueText(r)}”），" +
+                $"机器按原样重建好精炼炉与传送带（{rebuilt}）");
+        }
+
+        /// <summary>
+        /// FG-GAP-224 审查修复：地下传送带被摧毁后的虚影是 [入口, 出口] 两格、两端一起重建（AddDestroyedNodeGhost / RebuildDestroyed）。
+        /// 出口在火里、入口不在 → 同样不派单、不扣料、写“等火灭”（原因写在烧的出口那一格），火灭后照常派单、两端按原样建回（FGR-DEF-015、FGR-BASE-020）。
+        /// 负向：只有两端之间的隧道格在烧（隧道不施工）→ 照常立刻派单（逐格判，不按外接矩形）。
+        /// </summary>
+        private static void CheckUndergroundGhostWaitsForFire()
+        {
+            CampaignState s = NewWorld(6315, scrap: 2000);
+            ClearRules(s);
+            const int span = 4;
+            GridCell? a = FgProductionSelfCheck.FindArea(s, span + 1, 1, 9f, 20f);
+            if (!a.HasValue || Site == null || !BeltNetworkService.TryPlaceUnderground(s, a.Value, BeltDir.East, 0, span).Ok)
+            {
+                Fail("D5d 测试准备：找不到 5×1 空地 / 放不下地下传送带，或家园没有内核");
+                return;
+            }
+            GridCell inC = a.Value, outC = new GridCell(inC.X + span, inC.Y), mid = new GridCell(inC.X + span / 2, inC.Y);
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            bool Hazard(GridCell c) => HotAt(c); // 审查 P2：独立判据（直接查斑块），不借被测的 StructHazardIn
+            string key = "c:" + inC.X.ToString(CultureInfo.InvariantCulture) + "," + inC.Y.ToString(CultureInfo.InvariantCulture);
+            int Logs(string k) => StandingRuleService.LogEntries(s).Count(l => l.Key == k && l.Rule == r.Serial && l.EntityId == key);
+            PlannedBeltRecord Ghost() => HomeValleyConstruction.TryFindPlannedCell(s, outC, out PlannedBeltRecord g, out _) && HomeValleyConstruction.IsUnderground(g) ? g : null;
+            bool Queued(PlannedBeltRecord g) => g != null && HomeValleyWorkOrders.FindActiveBuild(s, HomeValleyConstruction.BeltPlanPrefix + g.PlanId) != null;
+            bool Rebuilt() => BeltNetworkService.Kernel.TryGetUndergroundEnds(inC.X, inC.Y, out _, out _, out int d) && d == span;
+
+            // 正向：火盖住出口、不盖入口 → 不派单、不扣料、写“等火灭”（写出口那一格）；火灭后照常派单、按原样建回。
+            // 先做正向：机器还没进过火（进过火的机器过热后会沿路漏熔融，熔融也算在烧，会盖到入口）。
+            bool spawnOut = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(outC.X, outC.Y), 1.5f, 1f, 20f);
+            Seconds(0.5f);
+            bool exitOnly = spawnOut && Hazard(outC) && ColdAt(inC);
+            string setup = exitOnly ? string.Empty : $"【准备：生成 {spawnOut}、出口在烧 {Hazard(outC)}、入口在烧 {Hazard(inC)}；附近斑块 {PatchesNear(inC, 10)}】";
+            BeltNetworkService.TryDamage(s, inC, 9999, out _);
+            int scrap1 = s.Scrap;
+            Seconds(2f);
+            int scrap2 = s.Scrap;
+            PlannedBeltRecord g2 = Ghost();
+            var q = new List<HomeValleyConstruction.QueueEntry>();
+            HomeValleyConstruction.CollectQueue(s, q);
+            string queue = g2 == null ? string.Empty : q.FirstOrDefault(e => e.DestroyedPlanId == g2.PlanId).Status ?? string.Empty;
+            string issue = StandingRuleService.IssueText(r);
+            string outAt = "(" + outC.X.ToString(CultureInfo.InvariantCulture) + ", " + outC.Y.ToString(CultureInfo.InvariantCulture) + ")";
+            bool waits = g2 != null && g2.Destroyed && g2.Xs.Length == 2 && !Queued(g2) && scrap2 == scrap1
+                         && Logs("rules.log.rebuild_belt_fire") == 1 && Logs("rules.log.rebuild_belt") == 0
+                         && r.IssueKey == StandingRuleService.IssueRebuildFire && issue.Contains(outAt) && queue.Contains("等火灭");
+            bool out2 = StepUntil(() => ColdAt(outC), 60);
+            bool dispatched = StepUntil(() => g2 != null && !g2.Destroyed && Queued(g2), 75);
+            bool traced = dispatched && Logs("rules.log.rebuild_belt") == 1 && Logs("rules.log.rebuild_belt_fire") == 1 && r.IssueKey != StandingRuleService.IssueRebuildFire;
+            bool rebuilt = dispatched && StepUntil(Rebuilt, 300);
+            Expect(exitOnly && waits && out2 && traced && rebuilt,
+                $"D5d FG-GAP-224 地下传送带出口在火里：入口 ({inC.X}, {inC.Y}) 不在烧、出口 ({outC.X}, {outC.Y}) 在烧（{exitOnly}）→ 两端一份的虚影不派单、不扣料（废料 {scrap1} → 2 秒后 {scrap2}）、规则日志 1 条“等火灭”，" +
+                $"原因写出口那一格“{issue}”、施工队列“{queue}”（{waits}）；火灭（{out2}）后下一次定时检查由 R{r.Serial} 派单、原因清掉（{traced}），两端按原样建回（{rebuilt}）" + setup);
+
+            // 负向：火只盖住隧道中间一格（入口 / 出口都不在烧；按外接矩形查会误判成在烧）→ 照常立刻派单。
+            bool fireGone = StepUntil(() => !AnyPatchNear(mid, 8f, EmgMatterConst.Fire), 60); // 同物质斑块软合并半径 6 格：等上一块火没了，新火才不会并进去
+            bool spawnMid = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(mid.X, mid.Y), 0.5f, 1f, 20f);
+            Seconds(0.5f);
+            bool bbox = HotIn(new GridCell(Math.Min(inC.X, outC.X), Math.Min(inC.Y, outC.Y)), new GridCell(Math.Max(inC.X, outC.X), Math.Max(inC.Y, outC.Y))); // 外接矩形里有一格在烧（隧道格）
+            bool midOnly = Rebuilt() && fireGone && spawnMid && Hazard(mid) && ColdAt(inC) && ColdAt(outC) && bbox;
+            string setup2 = midOnly ? string.Empty : $"【准备：上一步已建回 {Rebuilt()}、上一块火没了 {fireGone}、生成 {spawnMid}、隧道格在烧 {Hazard(mid)}、入口 {Hazard(inC)}、出口 {Hazard(outC)}；附近斑块 {PatchesNear(inC, 10)}】";
+            int belt1 = Logs("rules.log.rebuild_belt"), fire1 = Logs("rules.log.rebuild_belt_fire");
+            BeltNetworkService.TryDamage(s, inC, 9999, out _);
+            Seconds(0.5f);
+            PlannedBeltRecord g1 = Ghost();
+            bool midOrdered = g1 != null && g1.Xs.Length == 2 && !g1.Destroyed && Queued(g1) && Logs("rules.log.rebuild_belt") == belt1 + 1 && Logs("rules.log.rebuild_belt_fire") == fire1;
+            bool midRebuilt = midOrdered && StepUntil(Rebuilt, 300);
+            Expect(midOnly && midOrdered && midRebuilt,
+                $"D5e FG-GAP-224 负向（地下传送带隧道格在烧）：火只盖住入口与出口之间的隧道格（{midOnly}；外接矩形会判成在烧 {bbox}）→ 照常立刻派单、不写“等火灭”（逐格判，{midOrdered}），两端按原样建回（{midRebuilt}）" + setup2);
+        }
+
+        /// <summary>真文件存档 → 卸载 → 读档 → 载入家园（与 F1 同一路径）。失败返回 null 并写原因。</summary>
+        private static CampaignState SaveAndReload(out string why) => SaveTo(Slot, out why) ? ReloadFrom(Slot, out why) : null;
+
+        /// <summary>只存档（正式存档入口，整局同步 + 写盘），不卸载。</summary>
+        private static bool SaveTo(int slot, out string why)
+        {
+            WorldSimulation.SyncAllForSave();
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(slot, SaveReason.Manual);
+            why = save.Success ? null : $"存档 {slot} 失败";
+            return save.Success;
+        }
+
+        /// <summary>卸载 → 读档 → 载入家园（与 F1 同一路径），不先存档（读回更早存的那份）。</summary>
+        private static CampaignState ReloadFrom(int slot, out string why)
+        {
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            HomeValleyPowerGrid.ResetForTests();
+            ProductionService.ResetForTests();
+            BuildingOps.ResetForTests();
+            ResearchService.ResetForTests();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(slot);
+            if (!rr.Success)
+            {
+                why = $"读档 {slot} 失败（{rr.Message}）";
+                return null;
+            }
+            CampaignSession.Set(slot, rr.State);
+            HomeValleyController home = WorldSimulation.LoadHome(resume: true);
+            WorldView.Observe(home.SiteId);
+            why = null;
+            return rr.State;
+        }
+
+        private static string QueueStatusOf(CampaignState s, WorkOrderRecord o)
+        {
+            var q = new List<HomeValleyConstruction.QueueEntry>();
+            HomeValleyConstruction.CollectQueue(s, q);
+            return o == null ? string.Empty : q.FirstOrDefault(e => e.Order != null && e.Order.WorkOrderId == o.WorkOrderId).Status ?? string.Empty;
+        }
+
+        private static int RuleLogs(CampaignState s, StandingRuleRecord r, string key, string entity) =>
+            StandingRuleService.LogEntries(s).Count(l => l.Key == key && l.Rule == r.Serial && (entity == null || l.EntityId == entity));
+
+        private static string CellKey(GridCell c) => "c:" + c.X.ToString(CultureInfo.InvariantCulture) + "," + c.Y.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 5 轮（FG-GAP-189，总控更正 2026-11-17；按推荐默认执行（2026-11-17），待用户确认）。规格：FGR-DEF-015“材料到位后由机器按原样重建”、
+        /// FG06 负向“自动重建时材料不足：虚影等待材料，不会重复扣料”、FGR-ECO-070 核心应急产废料、FGR-BASE-020 可追溯。规则：
+        /// (a) 预留只挡逐份取料的传送带虚影——比它早被摧毁、要一次凑齐、按当前进账攒得齐的建筑在等材料时，虚影不取用那部分；比那座更早被摧毁的虚影不受限；
+        /// (b) 整单之间不互相预留：后被摧毁、更便宜的建筑付得起就照常派单（不被饿死）；
+        /// (d) 玩家手动下的单不受预留限制。中途存读档后照样挡住、照样续做；“等材料（预留给 X）”日志的去重随存档（读回更早存的档再触发照样写，审查 r5）。
+        /// </summary>
+        private static void CheckRebuildQueueReserve()
+        {
+            CampaignState s = NewWorld(6317, scrap: 0);
+            ClearRules(s);
+            BuildingRecord f = PlaceNear(s, Furnace, CoreCenter(s), 9f, 20f);
+            int cf = f != null ? BuildingOps.RebuildCost(f, out _) : 0;
+            int cb = HomeGridService.BeltCostPerCell(0);
+            BuildingRecord cheap = null;
+            int cp = 0;
+            foreach (string type in new[] { "power_pole", "barrier_t1" })
+            {
+                if (f == null || cheap != null)
+                {
+                    break;
+                }
+                BuildingRecord c = PlaceNear(s, type, f.Position, 5f, 16f);
+                int cost = c != null ? BuildingOps.RebuildCost(c, out _) : 0;
+                if (c != null && cost > 0 && cost + cb < cf)
+                {
+                    cheap = c;
+                    cp = cost;
+                }
+                else if (c != null)
+                {
+                    Unregister(s, c);
+                }
+            }
+            GridCell? early = f != null ? BeltCellNear(s, f.Position, 4f, 9f) : null;
+            if (early.HasValue)
+            {
+                BeltNetworkService.TryPlace(s, early.Value, BeltDir.East, 0);
+            }
+            GridCell? late = early.HasValue ? BeltCellNear(s, f.Position, 10f, 16f) : null;
+            if (late.HasValue)
+            {
+                BeltNetworkService.TryPlace(s, late.Value, BeltDir.East, 0);
+            }
+            GridCell? manual = late.HasValue ? BeltCellNear(s, f.Position, 17f, 24f) : null;
+            if (f == null || cheap == null || !late.HasValue || !manual.HasValue || cb <= 0 || cf > SoftlockService.CoreScrapTarget)
+            {
+                Fail($"D5f 测试准备：精炼炉 {f != null}（重建 {cf}，要在核心应急攒得到的 {SoftlockService.CoreScrapTarget} 以内）、比它便宜且加一格传送带仍不到它的建筑 {cheap != null}、" +
+                     $"三格传送带 {early.HasValue}/{late.HasValue}/{manual.HasValue}（每格 {cb}）");
+                return;
+            }
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, Furnace, out _);
+            StandingRuleService.TryAddTarget(s, r.Serial, cheap.BuildingTypeId, out _);
+            StandingRuleService.TryAddTarget(s, r.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            int hp0 = BeltNetworkService.MaxHp(0);
+            // 摧毁先后：传送带（早）→ 精炼炉 → 便宜的那座 → 传送带（晚）；仓库 0、没有回收站 → 核心应急开始产废料（这就是进账：精炼炉在它攒得到的范围里）。
+            BeltNetworkService.TryDamage(s, early.Value, hp0, out _);
+            Seconds(0.3f);
+            BuildingOps.ApplyDamage(s, f.BuildingId, 10000f);
+            Seconds(0.3f);
+            BuildingOps.ApplyDamage(s, cheap.BuildingId, 10000f);
+            Seconds(0.3f);
+            BeltNetworkService.TryDamage(s, late.Value, hp0, out _);
+            Seconds(0.3f);
+            bool emergency = StepUntil(() => SoftlockService.StateOf(s).CoreScrapActive, 30);
+            WorkOrderRecord Belt(CampaignState st, GridCell c) =>
+                HomeValleyConstruction.TryFindPlannedCell(st, c, out PlannedBeltRecord p, out _) ? HomeValleyWorkOrders.FindActiveBuild(st, HomeValleyConstruction.BeltPlanPrefix + p.PlanId) : null;
+            WorkOrderRecord lateOrder = Belt(s, late.Value);
+            bool queued = emergency && Belt(s, early.Value) != null && lateOrder != null && lateOrder.RuleSerial == r.Serial && lateOrder.RuleQueueTick > 0
+                          && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null && HomeValleyWorkOrders.FindActiveRepair(s, cheap.BuildingId) == null;
+            const int PreSlot = Slot - 1;
+            bool preSaved = SaveTo(PreSlot, out string preWhy); // D5f3 读回这份“还没给废料、还没写预留日志”的早档
+            // 仓库给到“早传送带 + 便宜那座 + 1”（远不到精炼炉的重建费）：
+            int give = cb + cp + 1;
+            s.Scrap = give;
+            StandingRuleService.RequestEvaluation(s); // 有改动立即检查（与定时检查同一路径）：等料的建筑这一步就重查
+            bool earlyBuilt = StepUntil(() => BeltNetworkService.HpOf(early.Value) == hp0, 120);
+            bool cheapUp = StepUntil(() => cheap.ConstructionState == BuildingConstructionState.Operational, 120);
+            Seconds(3f);
+            string fName = StandingRuleService.ReserveHolderName(s, f.BuildingId);
+            string lateStatus = QueueStatusOf(s, lateOrder);
+            bool fWaits = f.ConstructionState == BuildingConstructionState.Damaged && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null;
+            bool held = earlyBuilt && cheapUp && fWaits && s.Scrap >= 1 && BeltNetworkService.HpOf(late.Value) < 0 && lateOrder.State == WorkOrderState.Waiting
+                        && lateStatus.Contains("预留给") && lateStatus.Contains(fName) && RuleLogs(s, r, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1;
+            Expect(queued && held,
+                $"D5f FG-GAP-189 (a)(b)：摧毁先后 = 传送带（早）→ 精炼炉（重建 {cf}）→ 便宜的那座（{cheap.BuildingTypeId}，{cp}）→ 传送带（晚），都由 R{r.Serial} 排上、核心应急在产废料（{queued}）；" +
+                $"仓库给 {give} 后：早传送带照常取料重建（比精炼炉更早被摧毁的不受预留，{earlyBuilt}），便宜那座虽然后被摧毁、付得起就照常派单建好（整单之间不互相预留、不被饿死，{cheapUp}），" +
+                $"精炼炉仍在等（{fWaits}），晚传送带不取用留给精炼炉的废料（仓库剩 {s.Scrap} ≥ 1、施工队列“{lateStatus}”、“等材料（预留给）”日志 {RuleLogs(s, r, "rules.log.rebuild_reserved", CellKey(late.Value))} 条）（{held}）");
+
+            // (d) 负向：玩家自己放的施工不受预留限制——仓库剩下的废料照常被取走、建成；晚传送带仍挡着。
+            GridOpResult placed = HomeGridService.TryPlaceBeltPath(s, "belt_t1", manual.Value, manual.Value, BeltDir.East);
+            WorkOrderRecord manualOrder = Belt(s, manual.Value);
+            bool manualBuilt = placed.Success && manualOrder != null && manualOrder.RuleQueueTick == 0 && StepUntil(() => BeltNetworkService.HpOf(manual.Value) == hp0, 120);
+            bool lateStill = BeltNetworkService.HpOf(late.Value) < 0 && lateOrder.State == WorkOrderState.Waiting && f.ConstructionState == BuildingConstructionState.Damaged;
+            Expect(manualBuilt && lateStill,
+                $"D5f-d FG-GAP-189 (d) 负向：玩家自己放的一格传送带（{placed.Success}，不带排队位置 {manualOrder?.RuleQueueTick}）照常取用仓库里的废料建成（{manualBuilt}）；同一时刻自动重建的晚传送带仍为精炼炉挡着（{lateStill}）");
+
+            // 中途存读档：读档后照样挡住（排队位置随存档），“等材料（预留给）”日志不因读档再写一条（去重随存档）；补足后精炼炉派单、晚传送带接着建好。
+            string fId = f.BuildingId, lateId = lateOrder.WorkOrderId;
+            long qTick = lateOrder.RuleQueueTick;
+            CampaignState l = SaveAndReload(out string why);
+            if (l == null)
+            {
+                Fail("D5f2 存读档失败：" + why);
+                return;
+            }
+            WorkOrderRecord lo = HomeValleyWorkOrders.Find(l, lateId);
+            StandingRuleRecord lr = StandingRuleService.Find(l, r.Serial);
+            l.Scrap = Math.Max(1, l.Scrap); // 仓库有货：晚传送带会再去问一次预留
+            Seconds(3f);
+            RuleEventRecord fe = l.StandingRules.Pending.FirstOrDefault(e => e != null && e.EntityId == fId);
+            bool stillHeld = lo != null && lr != null && lo.RuleQueueTick == qTick && lo.State == WorkOrderState.Waiting && BeltNetworkService.HpOf(late.Value) < 0
+                             && HomeValleyWorkOrders.FindActiveRepair(l, fId) == null && fe != null && fe.ReserveNoted && RuleLogs(l, lr, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1;
+            l.Scrap += cf + cb;
+            BuildingRecord lf = HomeGridService.FindBuilding(l, fId);
+            bool all = StepUntil(() => lf.ConstructionState == BuildingConstructionState.Operational && BeltNetworkService.HpOf(late.Value) == hp0, 300);
+            Seconds(1f);
+            int ordersF = (l.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(o => o.TargetId == fId && o.Kind == WorkOrderKind.Repair);
+            bool done = all && ordersF == 1 && lo.State == WorkOrderState.Completed && lr.IssueKey.Length == 0;
+            Expect(stillHeld && done,
+                $"D5f2 等材料（预留）途中存读档：读档后晚传送带排队位置原样（{lo?.RuleQueueTick} = {qTick}）、仍挡着、预留日志仍 1 条（去重记在精炼炉的等待记录上 {fe?.ReserveNoted}）（{stillHeld}）；" +
+                $"补足后精炼炉派单（只派 1 次：{ordersF}）、晚传送带接着建好（{all}）、规则原因清掉（{done}）");
+
+            // 读回更早存的那份档（还没写过预留日志）再触发：照样写一条（原来的进程级去重集合会把它吞掉，审查 r5）。
+            CampaignState e0 = preSaved ? ReloadFrom(PreSlot, out preWhy) : null;
+            if (e0 == null)
+            {
+                Fail("D5f3 读回早档失败：" + preWhy);
+                return;
+            }
+            StandingRuleRecord er = StandingRuleService.Find(e0, r.Serial);
+            int before = RuleLogs(e0, er, "rules.log.rebuild_reserved", CellKey(late.Value));
+            e0.Scrap = give;
+            StandingRuleService.RequestEvaluation(e0);
+            bool again = StepUntil(() => RuleLogs(e0, er, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1, 60);
+            Seconds(2f);
+            bool once = again && RuleLogs(e0, er, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1 && BeltNetworkService.HpOf(late.Value) < 0;
+            Expect(before == 0 && once,
+                $"D5f3 读回更早存的档（预留日志 {before} 条）后同样给 {give} 废料：晚传送带照样被精炼炉挡住、照样写 1 条“等材料（预留给）”（{again}），之后不重复（{once}）——日志只取决于存档状态、不取决于这个进程之前跑过什么");
+        }
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 5 轮（FG-GAP-189 规则 (c)，审查 r5“预留与核心应急互相卡死”）：整单所需超过仓库可存上限、或当前进账下攒不齐时不为它预留——
+        /// 后被摧毁的传送带虚影照常逐份取料建回（不卡死），那座的等待原因写明为什么不预留（规则面板 / 建筑面板）。
+        /// </summary>
+        private static void CheckRebuildReserveUnattainable()
+        {
+            // ① 超过仓库上限：拆掉自检世界里的仓库（只剩核心缓存），找一座重建费比上限还高的（按表里的等级数值，不认建筑名）。
+            CampaignState s = NewWorld(6323, scrap: 0);
+            ClearRules(s);
+            foreach (BuildingRecord w in s.BuildingRecords.Where(x => x != null && x.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse).ToArray())
+            {
+                Unregister(s, w);
+            }
+            ItemDef scrapItem = ItemCatalog.Find(ItemCatalog.ScrapId);
+            int cap = HomeInventory.Capacity(s, scrapItem);
+            BuildingRecord big = null;
+            int cbig = 0;
+            foreach (string type in new[] { "drop_station", "override_array", "turret_heavy", "purifier", "sim_lab" })
+            {
+                BuildingRecord c = big == null ? PlaceNear(s, type, CoreCenter(s), 9f, 26f) : null;
+                if (c == null)
+                {
+                    continue;
+                }
+                c.Tier = BuildingOps.MaxTier(type);
+                int cost = BuildingOps.RebuildCost(c, out _);
+                if (cost > cap)
+                {
+                    big = c;
+                    cbig = cost;
+                }
+                else
+                {
+                    Unregister(s, c);
+                }
+            }
+            GridCell? late = big != null ? BeltCellNear(s, big.Position, 6f, 16f) : null;
+            int cb = HomeGridService.BeltCostPerCell(0);
+            if (big == null || !late.HasValue)
+            {
+                Fail($"D5f4 测试准备：仓库上限 {cap}，找不到重建费比它高的建筑 {big != null}，或找不到能铺传送带的一格 {late.HasValue}");
+                return;
+            }
+            BeltNetworkService.TryPlace(s, late.Value, BeltDir.East, 0);
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, big.BuildingTypeId, out _);
+            StandingRuleService.TryAddTarget(s, r.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            int hp0 = BeltNetworkService.MaxHp(0);
+            BuildingOps.ApplyDamage(s, big.BuildingId, 1000000f);
+            Seconds(0.3f);
+            BeltNetworkService.TryDamage(s, late.Value, hp0, out _);
+            bool emergency = StepUntil(() => SoftlockService.StateOf(s).CoreScrapActive, 30);
+            s.Scrap = cb + 1;
+            StandingRuleService.RequestEvaluation(s);
+            bool lateBuilt = StepUntil(() => BeltNetworkService.HpOf(late.Value) == hp0, 120);
+            string capText = cap.ToString(CultureInfo.InvariantCulture);
+            string issue = StandingRuleService.IssueText(r) ?? string.Empty;
+            string panel = StandingRuleService.DescribeBuilding(s, big.BuildingId) ?? string.Empty;
+            bool told = issue.Contains("超过仓库") && issue.Contains(capText) && panel.Contains("超过仓库") && panel.Contains("R" + r.Serial);
+            Expect(emergency && lateBuilt && told && big.ConstructionState == BuildingConstructionState.Damaged,
+                $"D5f4 FG-GAP-189 (c) 超过仓库上限不卡死：{big.BuildingTypeId} T{big.Tier} 重建要 {cbig}、仓库最多存 {cap}（核心应急在产 {emergency}）→ 不为它预留，后被摧毁的传送带照常取料建回（{lateBuilt}）；" +
+                $"规则面板“{issue}”、建筑面板“{panel}”写明原因（{told}）");
+
+            // ② 当前进账攒不齐：仓库一开始就有 5 份废料（核心应急只在库存为 0 时启动）、没有回收站在产 → 没有进账；精炼炉要 40 → 不为它预留，后被摧毁的传送带照常建回。
+            CampaignState t = NewWorld(6324, scrap: 5);
+            ClearRules(t);
+            BuildingRecord f = PlaceNear(t, Furnace, CoreCenter(t), 9f, 20f);
+            GridCell? tl = f != null ? BeltCellNear(t, f.Position, 6f, 14f) : null;
+            if (f == null || !tl.HasValue)
+            {
+                Fail("D5f5 测试准备：找不到精炼炉 / 传送带格");
+                return;
+            }
+            BeltNetworkService.TryPlace(t, tl.Value, BeltDir.East, 0);
+            StandingRuleRecord tr = NewRebuildRule(t);
+            StandingRuleService.TryAddTarget(t, tr.Serial, Furnace, out _);
+            StandingRuleService.TryAddTarget(t, tr.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            int cf = BuildingOps.RebuildCost(f, out _);
+            BuildingOps.ApplyDamage(t, f.BuildingId, 10000f);
+            Seconds(0.3f);
+            BeltNetworkService.TryDamage(t, tl.Value, hp0, out _);
+            bool tBuilt = StepUntil(() => BeltNetworkService.HpOf(tl.Value) == hp0, 120);
+            bool noIncome = !SoftlockService.StateOf(t).CoreScrapActive && !ProductionService.AnyRecyclerWorking(t);
+            string tIssue = StandingRuleService.IssueText(tr) ?? string.Empty;
+            string tPanel = StandingRuleService.DescribeBuilding(t, f.BuildingId) ?? string.Empty;
+            bool tTold = tIssue.Contains("当前进账攒不到") && tPanel.Contains("当前进账攒不到") && f.ConstructionState == BuildingConstructionState.Damaged;
+            Expect(noIncome && tBuilt && tTold,
+                $"D5f5 FG-GAP-189 (c) 当前进账攒不齐不卡死：仓库 5、核心应急没在产、没有回收站在产（{noIncome}），精炼炉要 {cf} → 不为它预留，后被摧毁的传送带照常取料建回（{tBuilt}，仓库剩 {t.Scrap}）；" +
+                $"规则面板“{tIssue}”、建筑面板“{tPanel}”（{tTold}）");
+
+            // ③ 两条自动重建规则：R_a 管精炼炉、R_b 管传送带。精炼炉（R_a）先被摧毁、攒得齐（核心应急在产）→ 后被摧毁的传送带（R_b）被它挡住，
+            // “等材料（预留给 精炼炉）”日志照样写在 R_b 名下（预留方属于另一条规则也要可追溯，FGR-BASE-020）。
+            CampaignState m = NewWorld(6326, scrap: 0);
+            ClearRules(m);
+            BuildingRecord mf = PlaceNear(m, Furnace, CoreCenter(m), 9f, 20f);
+            GridCell? ml = mf != null ? BeltCellNear(m, mf.Position, 6f, 14f) : null;
+            if (mf == null || !ml.HasValue)
+            {
+                Fail("D5f6 测试准备：找不到精炼炉 / 传送带格");
+                return;
+            }
+            BeltNetworkService.TryPlace(m, ml.Value, BeltDir.East, 0);
+            StandingRuleRecord ra = NewRebuildRule(m);
+            StandingRuleService.TryAddTarget(m, ra.Serial, Furnace, out _);
+            StandingRuleRecord rb = NewRebuildRule(m);
+            StandingRuleService.TryAddTarget(m, rb.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            BuildingOps.ApplyDamage(m, mf.BuildingId, 10000f);
+            Seconds(0.3f);
+            BeltNetworkService.TryDamage(m, ml.Value, hp0, out _);
+            bool mEmergency = StepUntil(() => SoftlockService.StateOf(m).CoreScrapActive, 30);
+            m.Scrap = 2;
+            StandingRuleService.RequestEvaluation(m);
+            bool noted = StepUntil(() => RuleLogs(m, rb, "rules.log.rebuild_reserved", CellKey(ml.Value)) == 1, 30);
+            Seconds(1f);
+            bool mHeld = noted && BeltNetworkService.HpOf(ml.Value) < 0 && RuleLogs(m, ra, "rules.log.rebuild_reserved", null) == 0
+                         && mf.ConstructionState == BuildingConstructionState.Damaged && m.Scrap >= 2;
+            Expect(mEmergency && mHeld,
+                $"D5f6 两条规则：精炼炉归 R{ra.Serial}、传送带归 R{rb.Serial}（核心应急在产 {mEmergency}）→ 传送带被精炼炉挡住、“等材料（预留给）”日志写在 R{rb.Serial} 名下 1 条（{noted}），仓库 {m.Scrap} 没被取用（{mHeld}）");
+        }
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 4 轮（DEBT-EMGREXIT-06；FGR-DEF-015、FGR-BASE-020）：自动重建的单派出之后那里才起火（明火斑块，按物质数值 structDps &gt; 0 判）——
+        /// 建筑重建单（机器在路上）：挂起、机器撤出、不再走进火里，预留的废料仍记在这张单名下（不退不扣），建筑面板写“起火了，施工暂停”，规则日志 1 条；
+        /// 火灭后同一张单自动续做，按原样重建好，废料只扣一次。负向：玩家在挂起时手动取消照旧全额退回。
+        /// </summary>
+        private static void CheckFireAfterDispatchBuilding()
+        {
+            CampaignState s = NewWorld(6318, scrap: 2000);
+            ClearRules(s);
+            BuildingRecord f = PlaceNear(s, Furnace, CoreCenter(s), 14f, 22f);
+            BuildingRecord g = f != null ? PlaceNear(s, Furnace, CoreCenter(s), 14f, 22f) : null;
+            if (f == null || g == null || Site == null || Vector2.Distance(f.Position, g.Position) < 9f)
+            {
+                Fail("D5g 测试准备：离核心 14～22 米找不到两座相隔 9 米以上的精炼炉，或家园没有内核");
+                return;
+            }
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, Furnace, out _);
+            Seconds(0.5f);
+            int cost = BuildingOps.RebuildCost(f, out _);
+            BuildingOps.ApplyDamage(s, f.BuildingId, 10000f);
+            WorkOrderRecord o = null;
+            bool enRoute = StepUntil(() => (o = HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId)) != null && o.State == WorkOrderState.Reserved && o.AssignedMachineLogicId > 0, 30);
+            int scrapAfter = s.Scrap;
+            int machine = o?.AssignedMachineLogicId ?? 0;
+            float d0 = machine > 0 && Site.TryGetMachinePosition(machine, out Vector2 m0) ? Vector2.Distance(m0, f.Position) : -1f;
+            const float rad = 2.5f;
+            bool spawned = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(f.Position.x, f.Position.y), rad, 1f, 8f);
+            StandingRuleService.BoundsOf(f, out GridCell fmin, out GridCell fmax);
+            Seconds(1f);
+            bool hot = HotIn(fmin, fmax);
+            string trace = StandingRuleService.DescribeBuilding(s, f.BuildingId) ?? string.Empty;
+            string fKey = StandingRuleService.BuildingKey(f.BuildingId);
+            bool heldNow = HomeValleyWorkOrders.IsFireHeld(o);
+            bool held = enRoute && spawned && hot && d0 > rad + 1f && heldNow && o.AssignedMachineLogicId == 0
+                        && s.Scrap == scrapAfter && scrapAfter == 2000 - cost && trace.Contains("起火") && trace.Contains("R" + r.Serial)
+                        && RuleLogs(s, r, "rules.log.rebuild_fire_hold", fKey) == 1;
+            // 挂起期间机器一次都不进火：每 0.25 秒看一次它离火心多远（火灭前）。
+            float minD = float.MaxValue;
+            for (int i = 0; i < 80 && !ColdIn(fmin, fmax); i++)
+            {
+                Seconds(0.25f);
+                if (Site.TryGetMachinePosition(machine, out Vector2 mp))
+                {
+                    minD = Mathf.Min(minD, Vector2.Distance(mp, f.Position));
+                }
+            }
+            bool stayedOut = minD > rad;
+            bool cold = StepUntil(() => ColdIn(fmin, fmax), 60);
+            bool rebuilt = cold && StepUntil(() => f.ConstructionState == BuildingConstructionState.Operational, 300);
+            int orders = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(x => x.TargetId == f.BuildingId && x.Kind == WorkOrderKind.Repair);
+            bool once = rebuilt && orders == 1 && s.Scrap == 2000 - cost && RuleLogs(s, r, "rules.log.rebuild_fire_resume", fKey) == 1 && RuleLogs(s, r, "rules.log.rebuild", fKey) == 1;
+            Expect(held && stayedOut && once,
+                $"D5g DEBT-EMGREXIT-06 自动重建单派出后那里才起火（建筑）：机器在路上（离火心 {d0:0.#} 米，{enRoute}）时精炼炉上起明火（半径 {rad}，{spawned}/{hot}）→ 单子挂起等火灭、放掉机器（{heldNow}），" +
+                $"预留的废料仍记在单名下（废料 {scrapAfter}，派单扣了 {cost}），建筑面板“{trace}”、规则日志 1 条（{held}）；挂起期间机器离火心最近 {minD:0.#} 米（不进火，{stayedOut}）；" +
+                $"火灭（{cold}）后同一张单续做、按原样重建好（{rebuilt}），只有 1 张单、废料只扣一次（剩 {s.Scrap}）、日志写“火灭了，接着施工”（{once}）");
+
+            // 负向：挂起时玩家手动取消照旧——全额退回废料、单子取消、留下虚影（之后不再自动派这一座以外的行为不在本条）。
+            BuildingOps.ApplyDamage(s, g.BuildingId, 10000f);
+            WorkOrderRecord go = null;
+            bool gRoute = StepUntil(() => (go = HomeValleyWorkOrders.FindActiveRepair(s, g.BuildingId)) != null && go.State == WorkOrderState.Reserved, 30);
+            int scrapG = s.Scrap;
+            Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(g.Position.x, g.Position.y), rad, 1f, 8f);
+            Seconds(1f);
+            bool gHeld = gRoute && HomeValleyWorkOrders.IsFireHeld(go);
+            bool cancelled = BuildingOps.TryCancelRepair(s, g.BuildingId, out string cmsg);
+            int gCost = BuildingOps.RebuildCost(g, out _);
+            bool refunded = cancelled && go.State == WorkOrderState.Cancelled && s.Scrap == scrapG + gCost && g.ConstructionState == BuildingConstructionState.Damaged;
+            Expect(gHeld && refunded,
+                $"D5g2 负向“挂起时玩家手动取消”：第二座派出后起火挂起（{gHeld}），玩家在面板取消（{cmsg}）→ 单子取消、预留的 {gCost} 废料全额退回（{scrapG} → {s.Scrap}）、留下虚影（{refunded}）");
+        }
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 4 轮（DEBT-EMGREXIT-06）：传送带虚影的自动重建单材料已送到、正在逐格施工时那一格起火 → 施工挂起（机器撤出），
+        /// 已送到现场的材料留在原地、仍记在这张单名下，施工队列写“等火灭”；挂起途中存读档后照样挂着；火灭后自动续做，用现场的材料建完、不再从仓库多取。
+        /// </summary>
+        private static void CheckFireAfterDispatchBelt()
+        {
+            CampaignState s = NewWorld(6319, scrap: 2000);
+            ClearRules(s);
+            GridCell? bc = BeltCellNear(s, CoreCenter(s), 10f, 16f);
+            if (!bc.HasValue || Site == null)
+            {
+                Fail("D5h 测试准备：找不到能铺传送带的一格，或家园没有内核");
+                return;
+            }
+            GridCell c = bc.Value;
+            BeltNetworkService.TryPlace(s, c, BeltDir.East, 0);
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, StandingRuleService.BeltTarget, out _);
+            Seconds(0.5f);
+            int hp0 = BeltNetworkService.MaxHp(0);
+            BeltNetworkService.TryDamage(s, c, hp0, out _);
+            Seconds(0.3f);
+            PlannedBeltRecord p = HomeValleyConstruction.TryFindPlannedCell(s, c, out PlannedBeltRecord pp, out _) ? pp : null;
+            WorkOrderRecord o = p != null ? HomeValleyWorkOrders.FindActiveBuild(s, HomeValleyConstruction.BeltPlanPrefix + p.PlanId) : null;
+            bool building = o != null && StepUntil(() => o.State == WorkOrderState.InProgress, 90);
+            int delivered = p?.Delivered ?? 0;
+            int scrap1 = s.Scrap;
+            int mid = o?.AssignedMachineLogicId ?? 0;
+            var cc = new Vector2(c.X, c.Y);
+            float d0 = MachineDist(mid, cc);
+            float rad = Mathf.Max(1.5f, d0 + 1f); // 火盖住机器脚下：机器正站在火里施工（审查 r5）
+            bool spawned = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(c.X, c.Y), rad, 1f, 16f);
+            Seconds(1f);
+            string status = QueueStatusOf(s, o);
+            bool heldNow = HomeValleyWorkOrders.IsFireHeld(o);
+            bool held = building && spawned && HotAt(c) && delivered > 0 && HomeValleyWorkOrders.IsFireHeld(o) && o.AssignedMachineLogicId == 0
+                        && p.Delivered == delivered && s.Scrap == scrap1 && status.Contains("等火灭") && RuleLogs(s, r, "rules.log.rebuild_fire_hold", CellKey(c)) == 1;
+            // 审查 r5：机器撤到火圈外（离火心 > 半径），之后不回火里；离开时身上的明火沾染按物质表 coatSeconds 还会烧完（FG19 沾染规则），烧完以后不再掉血
+            // （火还在烧：之后才存读档，验“挂起途中存读档”）。
+            bool outNow = StepUntil(() => MachineDist(mid, cc) > rad, 6);
+            float minD = float.MaxValue;
+            float hpOut = AfterCoat(mid, cc, ref minD);
+            for (int i = 0; i < 8; i++)
+            {
+                Seconds(0.25f);
+                minD = Mathf.Min(minD, MachineDist(mid, cc) < 0f ? float.MaxValue : MachineDist(mid, cc));
+            }
+            float hpLater = MachineHp(mid);
+            bool evacuated = d0 >= 0f && d0 < rad && outNow && minD > rad && hpOut > 0f && hpLater >= hpOut - 0.01f && HotAt(c) && HomeValleyWorkOrders.IsFireHeld(o);
+            Expect(held && evacuated,
+                $"D5h DEBT-EMGREXIT-06 传送带虚影施工中那一格起火：材料已送到（{delivered}）、逐格施工中（{building}）时起明火、盖住机器脚下（半径 {rad:0.#}，机器离火心 {d0:0.#} 米，{spawned}）→ 施工挂起、放掉机器（{heldNow}），" +
+                $"现场材料原样（{p?.Delivered}）、仓库不变（{scrap1} → {s.Scrap}）、施工队列“{status}”、规则日志 1 条（{held}）；机器撤到火圈外（{outNow}），之后离火心最近 {minD:0.#} 米、" +
+                $"身上的明火沾染（{FireCoatSeconds:0.#} 秒）烧完后血量 {hpOut:0.#} → 2 秒后 {hpLater:0.#}（不回火里、不再掉血，火仍在烧，{evacuated}）");
+
+            string oid = o?.WorkOrderId, planId = p?.PlanId;
+            CampaignState l = SaveAndReload(out string why);
+            if (l == null)
+            {
+                Fail("D5h2 存读档失败：" + why);
+                return;
+            }
+            WorkOrderRecord lo = HomeValleyWorkOrders.Find(l, oid);
+            PlannedBeltRecord lp = HomeValleyConstruction.FindPlan(l, planId);
+            Seconds(1f);
+            bool heldAfter = lo != null && lp != null && HomeValleyWorkOrders.IsFireHeld(lo) && lp.Delivered == delivered && l.Scrap == scrap1 && (HotAt(c) || ColdAt(c));
+            bool cold = StepUntil(() => ColdAt(c), 60);
+            string diag = string.Empty; // 诊断：火灭后再次挂起那一刻附近的斑块与机器温度
+            bool wasHeld = lo != null && HomeValleyWorkOrders.IsFireHeld(lo);
+            bool done = cold && StepUntil(() =>
+            {
+                bool h = HomeValleyWorkOrders.IsFireHeld(lo);
+                if (h && !wasHeld && diag.Length == 0)
+                {
+                    Site.TryGetMachineHeat(mid, out float heat, out bool over);
+                    diag = $"【火灭续做后又挂起：附近斑块 {PatchesNear(c, 8)}；机器离格 {MachineDist(mid, cc):0.#} 米、温度 {heat:0} 过热 {over}】";
+                }
+                wasHeld = h;
+                return BeltNetworkService.HpOf(c) == hp0;
+            }, 120);
+            Seconds(0.5f);
+            // 每次挂起都有一次续做（FGR-BASE-020 每个自动动作可追溯）；火灭后回来的机器若已过热、身下漏熔融金属（FG19 熔穿），现场会再成危险格、再挂起一次，同样成对记日志。
+            int holdsL = RuleLogs(l, StandingRuleService.Find(l, r.Serial), "rules.log.rebuild_fire_hold", CellKey(c));
+            int resumesL = RuleLogs(l, StandingRuleService.Find(l, r.Serial), "rules.log.rebuild_fire_resume", CellKey(c));
+            bool resumed = done && l.Scrap == scrap1 && lo.State == WorkOrderState.Completed && holdsL >= 1 && resumesL == holdsL;
+            Expect(heldAfter && resumed,
+                $"D5h2 等火灭（已派单挂起）途中存读档：读档后仍挂着、现场材料 {lp?.Delivered} 与仓库 {l.Scrap} 原样（{heldAfter}）；火灭（{cold}）后同一张单续做、按原样建回（{done}），" +
+                $"用现场的材料建完、不再从仓库多取（仓库 {scrap1} → {l.Scrap}）、挂起 {holdsL} 次各有一条“火灭了，接着施工”（{resumesL} 条，单子 {lo?.State}，{resumed}）{diag}" +
+                (resumed ? string.Empty : "【规则日志：" + RuleLogTail(l, StandingRuleService.Find(l, r.Serial)) + "】"));
+        }
+
+        /// <summary>诊断：这条规则最近 12 条日志（键 @ 实体）。</summary>
+        private static string RuleLogTail(CampaignState s, StandingRuleRecord r) =>
+            string.Join("；", StandingRuleService.LogEntries(s).Where(l => r != null && l.Rule == r.Serial).Reverse().Take(12).Reverse().Select(l => l.Key.Replace("rules.log.", string.Empty) + "@" + l.EntityId + "@" + l.Tick));
+
+        private static float MachineDist(int machine, Vector2 at) => machine > 0 && Site.TryGetMachinePosition(machine, out Vector2 p) ? Vector2.Distance(p, at) : -1f;
+
+        /// <summary>明火斑块的沾染保留秒（物质表 coatSeconds：离开斑块后身上的火还要烧这么久）。</summary>
+        private static float FireCoatSeconds => GameLogic.Campaign.Emergence.EmgMatterCatalog.Current.Rows[EmgMatterConst.Fire].CoatSeconds;
+
+        /// <summary>机器撤出火圈后等身上的明火沾染烧完（coatSeconds + 0.5 秒），期间记离火心最近的距离；返回那时的血量。</summary>
+        private static float AfterCoat(int machine, Vector2 at, ref float minD)
+        {
+            int n = Mathf.CeilToInt((FireCoatSeconds + 0.5f) / 0.25f);
+            for (int i = 0; i < n; i++)
+            {
+                Seconds(0.25f);
+                float d = MachineDist(machine, at);
+                minD = Mathf.Min(minD, d < 0f ? float.MaxValue : d);
+            }
+            return MachineHp(machine);
+        }
+
+        private static float MachineHp(int machine) =>
+            machine > 0 && Site.TryGetMachineUnit(machine, out int u) && Site.Kernel.TryGetUnit(u, out CombatUnitView v) ? v.Health : -1f;
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 5 轮（DEBT-EMGREXIT-06，审查 r5）：建筑重建单已经在现场施工（机器站在建筑旁）时那里起火、火盖住机器脚下 →
+        /// 单子挂起，机器撤到火圈外（不是原地停下），之后不回火里、不再掉血；施工进度保留；火灭后同一张单续做、按原样重建好，废料只扣一次。
+        /// </summary>
+        private static void CheckFireAfterDispatchOnSite()
+        {
+            CampaignState s = NewWorld(6325, scrap: 2000);
+            ClearRules(s);
+            BuildingRecord f = PlaceNear(s, Furnace, CoreCenter(s), 10f, 20f);
+            if (f == null || Site == null)
+            {
+                Fail("D5g3 测试准备：找不到精炼炉，或家园没有内核");
+                return;
+            }
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, Furnace, out _);
+            Seconds(0.5f);
+            int cost = BuildingOps.RebuildCost(f, out _);
+            BuildingOps.ApplyDamage(s, f.BuildingId, 10000f);
+            WorkOrderRecord o = null;
+            bool working = StepUntil(() => (o = HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId)) != null && o.State == WorkOrderState.InProgress && o.AssignedMachineLogicId > 0, 90);
+            int mid = o?.AssignedMachineLogicId ?? 0;
+            Vector2 mp = mid > 0 && Site.TryGetMachinePosition(mid, out Vector2 p0) ? p0 : f.Position;
+            Vector2 center = (mp + f.Position) * 0.5f;
+            float rad = Vector2.Distance(mp, f.Position) * 0.5f + 2f; // 同时盖住机器脚下与建筑占地
+            bool spawned = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(center.x, center.y), rad, 1f, 18f);
+            float dIn = MachineDist(mid, center);
+            Seconds(1f);
+            StandingRuleService.BoundsOf(f, out GridCell fmin, out GridCell fmax);
+            float progress = o?.Progress ?? 0f;
+            bool held = working && spawned && dIn >= 0f && dIn < rad && HotIn(fmin, fmax) && HomeValleyWorkOrders.IsFireHeld(o) && o.AssignedMachineLogicId == 0 && s.Scrap == 2000 - cost;
+            bool outNow = StepUntil(() => MachineDist(mid, center) > rad, 8);
+            float minD = float.MaxValue;
+            float hpOut = AfterCoat(mid, center, ref minD); // 离开时身上的明火沾染按物质表 coatSeconds 烧完（FG19 沾染规则），之后不再掉血
+            for (int i = 0; i < 8; i++)
+            {
+                Seconds(0.25f);
+                minD = Mathf.Min(minD, MachineDist(mid, center) < 0f ? float.MaxValue : MachineDist(mid, center));
+            }
+            float hpLater = MachineHp(mid);
+            bool stayed = outNow && minD > rad && hpOut > 0f && hpLater >= hpOut - 0.01f && HomeValleyWorkOrders.IsFireHeld(o) && o.Progress >= progress - 0.001f && HotIn(fmin, fmax);
+            bool cold = StepUntil(() => ColdIn(fmin, fmax), 60);
+            string diag = string.Empty; // 火灭续做后若又挂起：记下那一刻现场附近的斑块与机器温度
+            bool wasHeld = HomeValleyWorkOrders.IsFireHeld(o);
+            bool rebuilt = cold && StepUntil(() =>
+            {
+                bool h = HomeValleyWorkOrders.IsFireHeld(o);
+                if (h && !wasHeld && diag.Length == 0)
+                {
+                    Site.TryGetMachineHeat(mid, out float heat, out bool over);
+                    diag = $"【火灭续做后又挂起：现场附近斑块 {PatchesNear(new GridCell(Mathf.RoundToInt(f.Position.x), Mathf.RoundToInt(f.Position.y)), 8)}；机器温度 {heat:0} 过热 {over}】";
+                }
+                wasHeld = h;
+                return f.ConstructionState == BuildingConstructionState.Operational;
+            }, 300);
+            string fKey = StandingRuleService.BuildingKey(f.BuildingId);
+            int orders = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(x => x.TargetId == f.BuildingId && x.Kind == WorkOrderKind.Repair);
+            int holds = RuleLogs(s, r, "rules.log.rebuild_fire_hold", fKey), resumes = RuleLogs(s, r, "rules.log.rebuild_fire_resume", fKey);
+            bool once = rebuilt && orders == 1 && s.Scrap == 2000 - cost && holds >= 1 && resumes == holds; // 每次挂起都有一次续做（FGR-BASE-020），过热漏熔融再挂起同样成对
+            Expect(held && stayed && once,
+                $"D5g3 DEBT-EMGREXIT-06 建筑重建已在现场施工（{working}）时起明火、盖住机器脚下（半径 {rad:0.#}，机器离火心 {dIn:0.#} 米，{spawned}）→ 挂起、放掉机器、预留的废料仍在单名下（{held}）；" +
+                $"机器撤到火圈外（{outNow}），之后离火心最近 {minD:0.#} 米、身上的明火沾染（{FireCoatSeconds:0.#} 秒）烧完后血量 {hpOut:0.#} → 2 秒后 {hpLater:0.#}、施工进度 {progress:0.##} 保留、火仍在烧（{stayed}）；" +
+                $"火灭（{cold}）后同一张单续做、按原样重建好（{rebuilt}），只有 {orders} 张单、废料只扣一次（剩 {s.Scrap}）、挂起 {holds} 次各有一次续做（{resumes}，{once}）{diag}" +
+                (once ? string.Empty : "【规则日志：" + RuleLogTail(s, r) + "】"));
+        }
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 4 轮（审查 P2）：派单前“等火灭”途中存读档——读档后仍在等火灭（不派单、不扣料、日志不重复），火灭后照常派单重建，与不存读档一致。
+        /// 同时验“按单记原因”：同一条规则下一座等材料、一座等火灭；等材料的那座派出后，规则原因换成还在等火灭的那座，不被清掉。
+        /// </summary>
+        private static void CheckFireWaitSaveLoadAndIssues()
+        {
+            CampaignState s = NewWorld(6320, scrap: 0);
+            ClearRules(s);
+            BuildingRecord f = PlaceNear(s, Furnace, CoreCenter(s), 9f, 20f);
+            BuildingRecord g = f != null ? PlaceNear(s, Furnace, f.Position, 12f, 22f) : null;
+            if (f == null || g == null || Site == null)
+            {
+                Fail("D5i 测试准备：找不到两座精炼炉，或家园没有内核");
+                return;
+            }
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, Furnace, out _);
+            Seconds(0.5f);
+            int cost = BuildingOps.RebuildCost(f, out _);
+            bool spawned = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(g.Position.x, g.Position.y), 3f, 1f, 40f);
+            StandingRuleService.BoundsOf(g, out GridCell gmin, out GridCell gmax);
+            Seconds(0.5f);
+            BuildingOps.ApplyDamage(s, f.BuildingId, 10000f); // 先：不在火里，等材料（仓库 0）
+            Seconds(0.3f);
+            BuildingOps.ApplyDamage(s, g.BuildingId, 10000f); // 后：在火里，等火灭
+            Seconds(0.5f);
+            string gKey = StandingRuleService.BuildingKey(g.BuildingId);
+            bool waits = spawned && HotIn(gmin, gmax) && StandingRuleService.FireWaitRule(s, g.BuildingId) == r.Serial && r.IssueKey == "rules.issue.rebuild_wait";
+            s.Scrap = cost;
+            StandingRuleService.RequestEvaluation(s); // 立即检查（B 还在烧）
+            bool fOrdered = StepUntil(() => HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) != null, 75);
+            string gName = StandingRuleService.ReserveHolderName(s, g.BuildingId);
+            string issue = StandingRuleService.IssueText(r) ?? string.Empty;
+            bool kept = fOrdered && HotIn(gmin, gmax) && r.IssueKey == StandingRuleService.IssueRebuildFire && issue.Contains(gName);
+            Expect(waits && kept,
+                $"D5i 按单记原因：同一条规则下精炼炉 A 等材料、B 在火里等火灭（{waits}）；补够 A 的 {cost} 后 A 派出（{fOrdered}），规则原因换成还在等火灭的 B“{issue}”、没被清掉（{kept}）");
+
+            CampaignState l = SaveAndReload(out string why);
+            if (l == null)
+            {
+                Fail("D5i2 存读档失败：" + why);
+                return;
+            }
+            StandingRuleRecord lr = StandingRuleService.Find(l, r.Serial);
+            BuildingRecord lg = HomeGridService.FindBuilding(l, g.BuildingId);
+            int scrapL = l.Scrap;
+            Seconds(2f);
+            bool stillWaits = lr != null && lg != null && HotIn(gmin, gmax) && StandingRuleService.FireWaitRule(l, g.BuildingId) == r.Serial
+                              && HomeValleyWorkOrders.FindActiveRepair(l, g.BuildingId) == null && lr.IssueKey == StandingRuleService.IssueRebuildFire;
+            l.Scrap = scrapL + cost;
+            bool cold = StepUntil(() => ColdIn(gmin, gmax), 60);
+            bool dispatched = cold && StepUntil(() => HomeValleyWorkOrders.FindActiveRepair(l, g.BuildingId) != null, 75);
+            bool rebuilt = dispatched && StepUntil(() => lg.ConstructionState == BuildingConstructionState.Operational, 300);
+            bool once = rebuilt && RuleLogs(l, lr, "rules.log.rebuild_fire", gKey) == 1 && RuleLogs(l, lr, "rules.log.rebuild", gKey) == 1 && lr.IssueKey.Length == 0
+                        && l.Scrap == scrapL;
+            Expect(stillWaits && once,
+                $"D5i2 等火灭（派单前）途中存读档：读档后 B 仍在等火灭、不派单、规则原因仍写它（{stillWaits}）；火灭（{cold}）后照常派单（{dispatched}）、按原样重建好（{rebuilt}），" +
+                $"“等火灭”日志仍只有 1 条、派单日志 1 条、只扣一次 {cost}、原因清掉（{once}）");
+        }
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 4 轮（按单记原因的旧档兼容）：旧档的等待记录没有 IssueArg、规则原因位为空——下一次处理事件（还没到定时重试）时，
+        /// 规则原因按现在的状态补成同一格式（“精炼炉：废料不够：重建要 N，仓库里有 M（够了会自动派单）”），不出现缺参数的占位。
+        /// </summary>
+        private static void CheckLegacyIssueArg()
+        {
+            CampaignState s = NewWorld(6322, scrap: 0);
+            ClearRules(s);
+            BuildingRecord f = PlaceNear(s, Furnace, CoreCenter(s), 9f, 20f);
+            BuildingRecord other = f != null ? PlaceNear(s, "power_pole", f.Position, 5f, 14f) : null;
+            if (f == null || other == null)
+            {
+                Fail("D5j 测试准备：找不到精炼炉 / 电塔");
+                return;
+            }
+            StandingRuleRecord r = NewRebuildRule(s);
+            StandingRuleService.TryAddTarget(s, r.Serial, Furnace, out _); // 范围只有精炼炉：电塔被摧毁只是一条“不归它管”的事件
+            Seconds(0.5f);
+            int cost = BuildingOps.RebuildCost(f, out _);
+            BuildingOps.ApplyDamage(s, f.BuildingId, 10000f);
+            Seconds(0.5f);
+            foreach (RuleEventRecord e in s.StandingRules.Pending)
+            {
+                if (e != null)
+                {
+                    e.IssueArg = null; // 旧档没有这个字段
+                }
+            }
+            r.IssueKey = string.Empty;
+            r.IssueArg = string.Empty;
+            BuildingOps.ApplyDamage(s, other.BuildingId, 10000f); // 下一个模拟步处理这条事件（不是定时重试）
+            Seconds(0.3f);
+            string issue = StandingRuleService.IssueText(r) ?? string.Empty;
+            bool ok = r.IssueKey == "rules.issue.rebuild_wait" && issue.Contains(cost.ToString(CultureInfo.InvariantCulture)) && !issue.Contains("{") && !issue.Contains("⟦")
+                      && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null;
+            Expect(ok, $"D5j 旧档等待记录没有原因参数：下一次处理事件时规则原因补成“{issue}”（含重建费 {cost}、不缺参数）（{ok}）");
+        }
+
+        // ── 独立判据（EMG-R 出口补缺口第 4 轮，审查 P2）：直接查斑块状态与已知布置，不借被测函数 StructHazardIn ──────────────
+
+        /// <summary>本段测试布置的会烧蚀设施的物质（明火 / 熔融 / 酸；进过火的机器过热会漏熔融）。产品按物质数值 structDps 判，这里按已知布置判。</summary>
+        private static bool HotMatter(byte m) => m == EmgMatterConst.Fire || m == EmgMatterConst.Molten || m == EmgMatterConst.Acid;
+
+        /// <summary>这一格的格心在某块明火 / 熔融 / 酸斑块的圆盘里（离边 0.25 格以内不算，避开取整差）。</summary>
+        private static bool HotAt(GridCell c)
+        {
+            for (int i = 0; i < Site.Kernel.PatchSlots; i++)
+            {
+                if (Site.Kernel.TryGetPatch(i, out CombatZone z) && HotMatter(z.Matter) && z.Radius > 0f && math.distance(z.Pos, new double2(c.X, c.Y)) <= z.Radius - 0.25f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>这一格周围（圆盘半径 + 1 格以内）一块明火 / 熔融 / 酸斑块都没有 = 火灭了。</summary>
+        private static bool ColdAt(GridCell c)
+        {
+            for (int i = 0; i < Site.Kernel.PatchSlots; i++)
+            {
+                if (Site.Kernel.TryGetPatch(i, out CombatZone z) && HotMatter(z.Matter) && math.distance(z.Pos, new double2(c.X, c.Y)) <= z.Radius + 1f)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        private static bool HotIn(GridCell min, GridCell max)
+        {
+            for (int x = min.X; x <= max.X; x++)
+            {
+                for (int y = min.Y; y <= max.Y; y++)
+                {
+                    if (HotAt(new GridCell(x, y)))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private static bool ColdIn(GridCell min, GridCell max)
+        {
+            for (int x = min.X; x <= max.X; x++)
+            {
+                for (int y = min.Y; y <= max.Y; y++)
+                {
+                    if (!ColdAt(new GridCell(x, y)))
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        /// <summary>这片格子的格心都在某块水斑块的圆盘里。</summary>
+        private static bool WetIn(GridCell min, GridCell max)
+        {
+            for (int x = min.X; x <= max.X; x++)
+            {
+                for (int y = min.Y; y <= max.Y; y++)
+                {
+                    bool wet = false;
+                    for (int i = 0; i < Site.Kernel.PatchSlots && !wet; i++)
+                    {
+                        wet = Site.Kernel.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Water && math.distance(z.Pos, new double2(x, y)) <= z.Radius;
+                    }
+                    if (!wet)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        private static bool AnyPatchNear(GridCell c, float range, byte matter)
+        {
+            for (int i = 0; i < Site.Kernel.PatchSlots; i++)
+            {
+                if (Site.Kernel.TryGetPatch(i, out CombatZone z) && z.Matter == matter && math.distance(z.Pos, new double2(c.X, c.Y)) <= range)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>诊断：离 <paramref name="c"/> <paramref name="range"/> 格内的活斑块（物质号 @ 中心 r 半径）。</summary>
+        private static string PatchesNear(GridCell c, float range)
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < Site.Kernel.PatchSlots; i++)
+            {
+                if (Site.Kernel.TryGetPatch(i, out CombatZone z) && math.distance(z.Pos, new double2(c.X, c.Y)) <= range)
+                {
+                    sb.Append(z.Matter).Append('@').Append(z.Pos.x.ToString("0.#", CultureInfo.InvariantCulture)).Append(',').Append(z.Pos.y.ToString("0.#", CultureInfo.InvariantCulture))
+                        .Append(" r").Append(z.Radius.ToString("0.##", CultureInfo.InvariantCulture)).Append("; ");
+                }
+            }
+            return sb.Length == 0 ? "无" : sb.ToString();
         }
 
         private static void CheckZoneNegatives()

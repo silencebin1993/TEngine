@@ -249,6 +249,20 @@ namespace BinGames.Sim.Combat
             return best;
         }
 
+        /// <summary>
+        /// EMG-R 出口补缺口（FG-GAP-224，FGR-DEF-015 / FGR-BASE-020）：格网矩形 [min, max]（格坐标 = 世界 x / z 取整，含两端）里此刻有没有正在烧蚀设施的东西——
+        /// 物质斑块的物质行 structDps &gt; 0（按物质数值判，不认物质名），或已反应、带持续伤害的液洼残留（燃烧液洼）。
+        /// 判定与家园对账 PipeLeakService.BurnArea 同一几何（中心取整、格心到中心距离 ≤ 半径）。自动重建派单前查，O(斑块数 + 区域数)，只在派单 / 定时重试时。
+        /// </summary>
+        public bool StructHazardIn(int minX, int minY, int maxX, int maxY) => CombatLogic.EmgStructHazardIn(ref _d, minX, minY, maxX, maxY);
+
+        /// <summary>
+        /// EMG-R 出口补缺口第 5 轮（DEBT-EMGREXIT-06）：<paramref name="pos"/> 站在会烧蚀设施的斑块 / 燃烧液洼里（离圆心 ≤ 半径 + 教义避险余量）时，
+        /// 沿盖住它的那一块的半径方向撤到圈外（半径 + 余量 + 半格；正对圆心时往 +x，确定性），落点又在另一块里就接着撤（最多 8 次）。不在里面返回 false、safe = pos。
+        /// 同一组斑块 / 区域、同一判据（与 <see cref="StructHazardIn"/> 一致）；O(斑块数 + 区域数) × 次数，只在自动重建单因起火挂起时调用。
+        /// </summary>
+        public bool StructHazardEscape(double2 pos, out double2 safe) => CombatLogic.EmgStructHazardEscape(ref _d, pos, out safe);
+
         /// <summary>斑块可靠计数（调试层：生成 / 合并 / 到期 / 软上限并入 · 到期 / 总上限并入 · 到期 / 丢弃 / 顺延 / 残骸崩解成碎屑）。</summary>
         public EmgScalars PatchStats => _d.EmgS[0];
 

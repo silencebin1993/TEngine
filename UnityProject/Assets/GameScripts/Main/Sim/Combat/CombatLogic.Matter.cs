@@ -49,6 +49,77 @@ namespace BinGames.Sim.Combat
 
         private static bool PatchWorld(in CombatZone z) => (z.PFlags & EmgMatterConst.FlagWorld) != 0;
 
+        /// <summary>见 <see cref="CombatKernel.StructHazardIn"/>：斑块（物质 structDps &gt; 0；迁入斑块按区域载荷只认燃烧液洼）与区域（燃烧液洼）里有没有一块盖住矩形里的某一格。</summary>
+        internal static bool EmgStructHazardIn(ref CombatData d, int minX, int minY, int maxX, int maxY)
+        {
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                CombatZone z = d.Patches[i];
+                if (PatchAlive(z) && (IsLegacy(z) ? BurningLeak(z) : MatterOf(ref d, z.Matter).StructDps > 0f) && CoversCell(z, minX, minY, maxX, maxY))
+                {
+                    return true;
+                }
+            }
+            for (int i = 0; i < d.Zones.Length; i++)
+            {
+                CombatZone z = d.Zones[i];
+                if (BurningLeak(z) && CoversCell(z, minX, minY, maxX, maxY))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>见 <see cref="CombatKernel.StructHazardEscape"/>。</summary>
+        internal static bool EmgStructHazardEscape(ref CombatData d, double2 pos, out double2 safe)
+        {
+            float margin = d.Config.EmgAvoidMargin > 0f ? d.Config.EmgAvoidMargin : EmgRuleConst.DefaultAvoidMargin;
+            safe = pos;
+            bool inside = false;
+            for (int iter = 0; iter < 8 && StructHazardAt(ref d, safe, margin, out CombatZone z); iter++)
+            {
+                inside = true;
+                double2 v = safe - z.Pos;
+                double len = math.length(v);
+                safe = z.Pos + (len > 1e-6 ? v / len : new double2(1, 0)) * (z.Radius + margin + 0.5);
+            }
+            return inside;
+        }
+
+        private static bool StructHazardAt(ref CombatData d, double2 p, float margin, out CombatZone hit)
+        {
+            for (int i = 0; i < d.Patches.Length; i++)
+            {
+                CombatZone z = d.Patches[i];
+                if (PatchAlive(z) && (IsLegacy(z) ? BurningLeak(z) : MatterOf(ref d, z.Matter).StructDps > 0f) && z.Radius > 0f && math.distancesq(z.Pos, p) <= (z.Radius + margin) * (z.Radius + margin))
+                {
+                    hit = z;
+                    return true;
+                }
+            }
+            for (int i = 0; i < d.Zones.Length; i++)
+            {
+                CombatZone z = d.Zones[i];
+                if (BurningLeak(z) && z.Radius > 0f && math.distancesq(z.Pos, p) <= (z.Radius + margin) * (z.Radius + margin))
+                {
+                    hit = z;
+                    return true;
+                }
+            }
+            hit = default;
+            return false;
+        }
+
+        private static bool BurningLeak(in CombatZone z) => z.Kind == CombatConst.ZoneKindLeak && z.Phase == CombatConst.LeakPhaseReacted && z.StatusDps > 0f;
+
+        private static bool CoversCell(in CombatZone z, int minX, int minY, int maxX, int maxY)
+        {
+            int cx = (int)math.round((float)z.Pos.x), cy = (int)math.round((float)z.Pos.y);
+            int dx = math.clamp(cx, minX, maxX) - cx, dy = math.clamp(cy, minY, maxY) - cy;
+            return z.Radius > 0f && dx * dx + dy * dy <= z.Radius * z.Radius;
+        }
+
         /// <summary>占世界源保留额的斑块：常驻世界源，或首领灌注（FlagReserved）。</summary>
         private static bool PatchInReserve(in CombatZone z) => (z.PFlags & (EmgMatterConst.FlagWorld | EmgMatterConst.FlagReserved)) != 0;
 
