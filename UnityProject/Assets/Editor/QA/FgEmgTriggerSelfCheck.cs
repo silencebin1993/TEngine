@@ -320,21 +320,27 @@ namespace GameLogic.EditorTools
                 $"切割束炮塔：每段冷却 {tb.Cooldown:0.##} 秒、每段伤害 {tb.Damage:0.##}（与机器同源）、一段 = 一发补给（{tb.AmmoPerShot:0.##}，FGR-DEF-004“每发”；每秒消耗变多交 FG15-BAL-01）；连射器炮塔每发补给 {tg.AmmoPerShot:0.##}、无光束标记");
             var enemies = new List<string>();
             bool enemyOk = true;
-            foreach (string id in new[] { "enemy_echo_hunter", "enemy_listener", "enemy_prism" })
+            // FG11-FAC-01（DEBT-FG9FAC02-04）起两种寂听精英带 assembled：按切割束规则复核——敌方光束精英走战斗地点真实生成路径 CombatSite.EnemyWeapon，
+            // 编出程序（声明轨），但仍是敌人表的即时命中：不带光束标记、冷却 = 表值（不切段）、瞄准时长 = 表值（预警照旧）。差异登记 M10-BASELINE。
+            using (var esite = new CombatSite("emgtrig-enemy-beam", CombatSite.ConfigFromTuning()))
             {
-                if (!EnemyDefs.TryGet(id, out GameConfig.fg.MechEnemy row))
+                foreach (string id in new[] { "enemy_echo_hunter", "enemy_listener", "enemy_prism" })
                 {
-                    enemyOk = false;
-                    enemies.Add($"{id} 缺行");
-                    continue;
+                    if (!EnemyDefs.TryGet(id, out GameConfig.fg.MechEnemy row))
+                    {
+                        enemyOk = false;
+                        enemies.Add($"{id} 缺行");
+                        continue;
+                    }
+                    CombatWeapon ew = esite.EnemyWeapon(new CampaignState(), row);
+                    bool listsBeam = row.Components != null && row.Components.Contains(ComponentCatalog.CompBeamId);
+                    bool assembled = EnemyDefs.HasTag(row, EnemyDefs.TagAssembled);
+                    enemyOk &= listsBeam == (id != "enemy_prism") && assembled && ew.Program >= 0 && ew.Mode == CombatWeaponMode.Instant && ew.BeamHit == 0
+                               && Near(ew.Cooldown, row.WeaponCooldown) && Near(ew.AimSeconds, row.WeaponAim);
+                    enemies.Add($"{id} 组件列有切割束 {listsBeam}、组装标签 {assembled}、程序 {ew.Program}、即时命中 {ew.Mode == CombatWeaponMode.Instant}、光束标记 {ew.BeamHit}、冷却 {ew.Cooldown:0.##}（表 {row.WeaponCooldown:0.##}）、瞄准 {ew.AimSeconds:0.##}（表 {row.WeaponAim:0.##}）");
                 }
-                CombatWeapon ew = EnemySpawnBuilder.WeaponOf(new CampaignState(), row);
-                bool listsBeam = row.Components != null && row.Components.Contains(ComponentCatalog.CompBeamId);
-                bool assembled = EnemyDefs.HasTag(row, EnemyDefs.TagAssembled);
-                enemyOk &= listsBeam == (id != "enemy_prism") && (!listsBeam || !assembled) && ew.BeamHit == 0 && Near(ew.Cooldown, row.WeaponCooldown);
-                enemies.Add($"{id} 组件列有切割束 {listsBeam}、组装标签 {assembled}、光束标记 {ew.BeamHit}、冷却 {ew.Cooldown:0.##}");
             }
-            Expect(enemyOk, "核对敌方带 comp_beam 的两种寂听精英：都没有组装标签，武器是敌人表的即时命中（冷却 = 表值、每发有瞄准线预警），不走组件读法与切段——将来给它们加组装标签时这条会失败，提醒按切割束规则复核——"
+            Expect(enemyOk, "核对敌方带 comp_beam 的两种寂听精英（FG11-FAC-01 起带组装标签，按切割束规则复核）：走真实生成路径编出程序，武器仍是敌人表的即时命中（冷却 = 表值、瞄准 = 表值、不带光束标记、不切段）——"
                    + string.Join("；", enemies));
 
             // ② 持续 1 秒 = 2 枚载荷、40 热（目标积热：靶带一把不开火、不散热、过热线极高的武器，命中注热原样记在它的积热上；没有斑块，伤害只来自切割束）

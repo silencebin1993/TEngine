@@ -1067,6 +1067,20 @@ namespace GameLogic.Campaign.WorldSim
                     ClarityCounterApplied++;
                 }
             }
+            if (!elite && faction == Content.EnemyDefs.FactionOverclock && UnitScratch.Count >= 2)
+            {
+                // FG11-FAC-01（FGR-FAC-004 / FGT-FAC-005）：超频驻军按当天锁定的反制把末尾几台换成对策单位（编成表反制标签，不认敌人 ID）
+                RaidUnitDef extra = Regions.OverclockCounterService.ExtraUnit(Regions.OverclockCounterService.Locked(s ?? CampaignSession.Current));
+                if (extra != null)
+                {
+                    int k = Math.Min(Regions.OverclockCounterService.ExtraUnitCount, UnitScratch.Count / 2);
+                    for (int i = UnitScratch.Count - k; i < UnitScratch.Count; i++)
+                    {
+                        UnitScratch[i] = (extra, false);
+                    }
+                    Regions.OverclockCounterService.NoteApplied();
+                }
+            }
         }
 
         /// <summary>FG10-FAC-01：澄净驻军按反制换上对策单位的次数（自检用）。</summary>

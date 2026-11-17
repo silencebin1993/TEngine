@@ -875,6 +875,11 @@ namespace GameLogic.Progression
                 {
                     Core.GuidanceHooks.Raise("clarity.first_air");
                 }
+                // FG11-FAC-01：第一次遭遇算力光环单位（按读法 aura，不认敌人 ID）→ 引导钩子，解锁“算力光环”机制条目。
+                if (row.Behavior == EnemyDefs.BehaviorAura)
+                {
+                    Core.GuidanceHooks.Raise("overclock.first_aura");
+                }
             }
         }
 

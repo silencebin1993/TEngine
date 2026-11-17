@@ -619,7 +619,9 @@ namespace GameLogic.Campaign.WorldSim
                 Env.SlagHeatService.WorldStep(state, GameClock.Ticks);
                 // FG10-FAC-01（FGR-FAC-004）：澄净反制每个游戏日锁定一次（日切那一步；平时 O(1)）；酸沼——信号所在的机器第一次进入某片时提示（每游戏秒一次）。
                 Regions.ClarityCounterService.WorldStep(state);
+                Regions.OverclockCounterService.WorldStep(state); // FG11-FAC-01（FGR-FAC-004）
                 Env.AcidMarshService.WorldStep(state, GameClock.Ticks);
+                Env.HeatRadiationService.WorldStep(state, GameClock.Ticks); // FG11-FAC-01：第一次进入高温辐射区提示一次
                 // FG10-REG-01：第一次走进有阵营介绍的领地时发一条介绍（每游戏秒一次 O(1)，与观察无关）。
                 Regions.TerritoryIntroService.WorldStep(state, GameClock.Ticks);
                 // FG10-RAID-01：澄净针对净化塔的突袭触发（澄净领地出现 + 家园有净化塔；每游戏秒一次 O(1)，与观察无关）。

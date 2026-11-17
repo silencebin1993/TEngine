@@ -1153,7 +1153,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1230,8 +1230,9 @@ namespace BinGames.Sim.Combat
             bool half = v20 && ClueHalfState(); // EMG4-FUSE-02：段 32 只在有在途线索登记时写
             bool tallyOut = v20 && !hash && !_preTallyForTests; // EMGR-TALLY-01：标量段第 28 字段 TallyFloor + 段 33 计数表（不进哈希；测试可模拟本卡之前的旧档）
             int tallyRows = tallyOut ? TallyRows() : 0;
+            bool oc = format >= 21 && _d.Overclocks.Length > 0; // FG11-FAC-01：段 34 只在有超频记录时写（没有时快照与哈希逐字不变）
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 29 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1486,6 +1487,10 @@ namespace BinGames.Sim.Combat
             if (v20)
             {
                 WriteHijackSegment(w, sw);
+            }
+            if (oc)
+            {
+                WriteOverclockSegment(w, sw);
             }
             if (pits)
             {
@@ -1901,7 +1906,7 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) u.Trait = r.ReadByte(); // EMG3-CHS-01：格式 18 尾部（短段 / ≤ 17 版取 0）
                         byte selfDefense = 0;
                         if (sr.F()) selfDefense = r.ReadByte(); // EMGR-CMD-01：版本 20 内追加（短段取 0）
-                        if (!sr.RecordOk || !UnitEmgValid(prof, u) || (selfDefense & ~(CombatSiegeConst.SelfDefenseOn | CombatSiegeConst.SelfDefenseEngaged)) != 0)
+                        if (!sr.RecordOk || !UnitEmgValid(prof, u) || (selfDefense & ~(CombatSiegeConst.SelfDefenseOn | CombatSiegeConst.SelfDefenseEngaged | CombatSiegeConst.SelfDefenseWarned)) != 0)
                         {
                             return CombatLoadResult.InvalidValue;
                         }
@@ -2141,6 +2146,8 @@ namespace BinGames.Sim.Combat
                     return ParseStage3Segment(r, sr, ref staging);
                 case EmgConst.SegHijack:
                     return ParseHijackSegment(r, sr, ref staging);
+                case EmgConst.SegOverclock:
+                    return ParseOverclockSegment(r, sr, ref staging);
                 case EmgConst.SegPit:
                 case EmgConst.SegPitAcc:
                 case EmgConst.SegPitStats:
@@ -2367,6 +2374,115 @@ namespace BinGames.Sim.Combat
                 }
             }
             return CombatLoadResult.Ok;
+        }
+
+        // ── FG11-FAC-01：段 34 超频运行状态（按登记先后；每条 13 个字段）──
+        private void WriteOverclockSegment(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            sw.Begin(EmgConst.SegOverclock, CombatOverclockConst.Fields, _d.Overclocks.Length);
+            for (int i = 0; i < _d.Overclocks.Length; i++)
+            {
+                CombatOverclock x = _d.Overclocks[i];
+                if (sw.F()) w.Write(x.Unit);
+                if (sw.F()) w.Write(x.State);
+                if (sw.F()) w.Write(x.Mode);
+                if (sw.F()) w.Write(x.Warned);
+                if (sw.F()) w.Write(x.Heat);
+                if (sw.F()) w.Write(x.Lean);
+                if (sw.F()) w.Write(x.Until);
+                if (sw.F()) w.Write(x.ModeAt);
+                if (sw.F()) w.Write(x.Dir.x);
+                if (sw.F()) w.Write(x.Dir.y);
+                if (sw.F()) w.Write(x.At.x);
+                if (sw.F()) w.Write(x.At.y);
+                if (sw.F()) w.Write(x.Profile);
+                sw.EndRecord();
+            }
+            sw.End();
+        }
+
+        private static CombatLoadResult ParseOverclockSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            if (n > 4096)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            var seen = new System.Collections.Generic.HashSet<int>();
+            for (int i = 0; i < n; i++)
+            {
+                sr.Record(i);
+                var x = new CombatOverclock { Profile = -1 };
+                if (sr.F()) x.Unit = r.ReadInt32();
+                if (sr.F()) x.State = r.ReadByte();
+                if (sr.F()) x.Mode = r.ReadByte();
+                if (sr.F()) x.Warned = r.ReadByte();
+                if (sr.F()) x.Heat = r.ReadSingle();
+                if (sr.F()) x.Lean = r.ReadSingle();
+                if (sr.F()) x.Until = r.ReadDouble();
+                if (sr.F()) x.ModeAt = r.ReadDouble();
+                if (sr.F()) x.Dir.x = r.ReadSingle();
+                if (sr.F()) x.Dir.y = r.ReadSingle();
+                if (sr.F()) x.At.x = r.ReadDouble();
+                if (sr.F()) x.At.y = r.ReadDouble();
+                if (sr.F()) x.Profile = r.ReadInt32();
+                if (!sr.RecordOk || x.Unit <= 0 || !seen.Add(x.Unit) || x.State > CombatOverclockConst.StatePendingBurst || x.Mode > CombatOverclockConst.ModeShield || x.Warned > 1
+                    || !(x.Heat >= 0f && x.Heat <= 1f) || !(x.Lean >= 0f) || float.IsInfinity(x.Lean) || double.IsNaN(x.Until) || double.IsInfinity(x.Until)
+                    || double.IsNaN(x.ModeAt) || double.IsInfinity(x.ModeAt) || !Unity.Mathematics.math.isfinite(x.Dir.x) || !Unity.Mathematics.math.isfinite(x.Dir.y)
+                    || double.IsNaN(x.At.x) || double.IsNaN(x.At.y) || double.IsInfinity(x.At.x) || double.IsInfinity(x.At.y)
+                    || x.Profile < -1 || x.Profile >= staging.Profiles.Length || (x.State == CombatOverclockConst.StatePendingBurst && x.Profile < 0))
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                staging.Overclocks.Add(x);
+            }
+            return CombatLoadResult.Ok;
+        }
+
+        /// <summary>FG11-FAC-01：超频记录条数（自检 / 悬停）。</summary>
+        public int OverclockCount => _d.Overclocks.Length;
+
+        /// <summary>FG11-FAC-01：某个单位的超频运行状态（悬停 / 自检 / 表现；没有记录 = false）。</summary>
+        public bool TryGetOverclock(int unitId, out CombatOverclock state)
+        {
+            int k = CombatLogic.OcIndexOf(ref _d, unitId);
+            state = k >= 0 ? _d.Overclocks[k] : default;
+            return k >= 0;
+        }
+
+        /// <summary>FG11-FAC-01（高温辐射：热量上限 -25%、散热 -20%）：写入高温辐射区（x, y, 内半径, 外半径；外圈带 = 圆环）与两个倍率。派生量，不进快照；读档后由热更层重写。</summary>
+        public void SetHeatRadiation(System.Collections.Generic.IReadOnlyList<Unity.Mathematics.float4> shapes, float capMult, float dissMult)
+        {
+            _d.RadZones.Clear();
+            if (shapes != null)
+            {
+                for (int k = 0; k < shapes.Count; k++)
+                {
+                    _d.RadZones.Add(shapes[k]);
+                }
+            }
+            _d.RadCapMult = capMult > 0f ? Unity.Mathematics.math.min(1f, capMult) : 1f;
+            _d.RadDissMult = dissMult > 0f ? Unity.Mathematics.math.min(1f, dissMult) : 1f;
+        }
+
+        public int HeatRadiationZoneCount => _d.RadZones.Length;
+
+        /// <summary>FG11-FAC-01：某单位武器此刻的过热点（高温辐射区内已乘热量上限倍率；自检 / 悬停用）。</summary>
+        public float OverheatAtFor(int unitId)
+        {
+            int i = _d.SlotOf(unitId);
+            if (i < 0 || _d.Weapon[i] < 0 || _d.Weapon[i] >= _d.Weapons.Length)
+            {
+                return 0f;
+            }
+            return CombatLogic.OverheatAtOf(ref _d, i, _d.Weapons[_d.Weapon[i]]);
+        }
+
+        /// <summary>FG11-FAC-01：某单位此刻的散热倍率（高温辐射 × 熔渣热区；自检 / 悬停用）。</summary>
+        public float DissipationFactorFor(int unitId)
+        {
+            int i = _d.SlotOf(unitId);
+            return i < 0 ? 1f : CombatLogic.RadDissFactor(ref _d, i) * CombatLogic.SlagFactor(ref _d, i);
         }
 
         // ── EMG4-HIJ-01：段 27 信号劫持（按劫持先后；每条 11 个字段）──

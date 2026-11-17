@@ -83,6 +83,28 @@ public sealed partial class MechEnemy : Luban.BeanBase
         SplitDps = _buf.ReadFloat();
         CodexLinks = _buf.ReadString();
         Material = _buf.ReadString();
+        OcDashSpeed = _buf.ReadFloat();
+        OcDashHeat = _buf.ReadFloat();
+        OcCool = _buf.ReadFloat();
+        OcShutdown = _buf.ReadFloat();
+        OcVuln = _buf.ReadFloat();
+        OcRampHeat = _buf.ReadFloat();
+        OcRampMax = _buf.ReadFloat();
+        OcAuraRange = _buf.ReadFloat();
+        OcAuraRate = _buf.ReadFloat();
+        OcMeltHp = _buf.ReadFloat();
+        OcMeltFuse = _buf.ReadFloat();
+        OcBurstRadius = _buf.ReadFloat();
+        OcBurstDamage = _buf.ReadFloat();
+        OcDeathBurst = _buf.ReadFloat();
+        OcLeanRate = _buf.ReadFloat();
+        OcLeanMax = _buf.ReadFloat();
+        OcLeanTurn = _buf.ReadFloat();
+        OcModeCycle = _buf.ReadFloat();
+        OcModeWarn = _buf.ReadFloat();
+        OcModeSpeed = _buf.ReadFloat();
+        OcModeRate = _buf.ReadFloat();
+        OcModeShield = _buf.ReadFloat();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -227,7 +249,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string IconId;
     /// <summary>
-    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy/clarity_sprayer/clarity_crawler/clarity_pump/clarity_drone/clarity_swarm/clarity_tank
+    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy/clarity_sprayer/clarity_crawler/clarity_pump/clarity_drone/clarity_swarm/clarity_tank/oc_hound/oc_node/oc_fuser/oc_turret/oc_mirror/oc_runaway
     /// </summary>
     public readonly string Silhouette;
     /// <summary>
@@ -346,6 +368,94 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 材质(fg.TbEntityProfile 的 material.* 行;缺省按阵营:静默复合/铸造钢/澄净陶瓷/超频合金/舰队钢)
     /// </summary>
     public readonly string Material;
+    /// <summary>
+    /// 冲刺—过热—停机:移动时的速度倍率(&gt;1=冲刺);0=不冲刺
+    /// </summary>
+    public readonly float OcDashSpeed;
+    /// <summary>
+    /// 冲刺每秒积热(热量 0~1,满 1 强制停机);0=没有
+    /// </summary>
+    public readonly float OcDashHeat;
+    /// <summary>
+    /// 不冲刺 / 不开火时每秒散热(热量 0~1)
+    /// </summary>
+    public readonly float OcCool;
+    /// <summary>
+    /// 满热后的停机秒数(冲刺)/排气秒数(蓄热连射),&gt;=0.8
+    /// </summary>
+    public readonly float OcShutdown;
+    /// <summary>
+    /// 停机 / 排气期间受到的伤害 +本值(0.5=+50%,弱点窗口)
+    /// </summary>
+    public readonly float OcVuln;
+    /// <summary>
+    /// 蓄热连射:每发积热(热量 0~1);0=没有
+    /// </summary>
+    public readonly float OcRampHeat;
+    /// <summary>
+    /// 蓄热连射:满热时射速倍率
+    /// </summary>
+    public readonly float OcRampMax;
+    /// <summary>
+    /// 光环半径(米;算力节点);0=没有
+    /// </summary>
+    public readonly float OcAuraRange;
+    /// <summary>
+    /// 光环内友军射速 +本值(0.5=+50%,多个不叠加)
+    /// </summary>
+    public readonly float OcAuraRate;
+    /// <summary>
+    /// 熔断:耐久比例低于本值开始熔断(0.3=30%);0=不熔断
+    /// </summary>
+    public readonly float OcMeltHp;
+    /// <summary>
+    /// 熔断引信秒数(预警,&gt;=0.8)
+    /// </summary>
+    public readonly float OcMeltFuse;
+    /// <summary>
+    /// 过热泄爆半径(米;熔断到点 / 死亡泄爆共用)
+    /// </summary>
+    public readonly float OcBurstRadius;
+    /// <summary>
+    /// 过热泄爆伤害(难度倍率另乘;波及半径内所有单位,包括它的友军)
+    /// </summary>
+    public readonly float OcBurstDamage;
+    /// <summary>
+    /// 1=死亡时过热泄爆(超频猎犬);0=不
+    /// </summary>
+    public readonly float OcDeathBurst;
+    /// <summary>
+    /// 前倾加速:直线移动每秒速度 +本值(倍率);0=没有
+    /// </summary>
+    public readonly float OcLeanRate;
+    /// <summary>
+    /// 前倾加速上限倍率
+    /// </summary>
+    public readonly float OcLeanMax;
+    /// <summary>
+    /// 前倾加速:一步转向超过本值(度)就掉回原速
+    /// </summary>
+    public readonly float OcLeanTurn;
+    /// <summary>
+    /// 失控超算体:每种超频状态(极速 / 强攻 / 护盾)持续秒数;0=不循环
+    /// </summary>
+    public readonly float OcModeCycle;
+    /// <summary>
+    /// 换超频状态前的预警秒数(颜色 + 音效,&gt;=0.8)
+    /// </summary>
+    public readonly float OcModeWarn;
+    /// <summary>
+    /// 极速态速度倍率
+    /// </summary>
+    public readonly float OcModeSpeed;
+    /// <summary>
+    /// 强攻态射速倍率
+    /// </summary>
+    public readonly float OcModeRate;
+    /// <summary>
+    /// 护盾态减伤比例(0~1)
+    /// </summary>
+    public readonly float OcModeShield;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -421,6 +531,28 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "splitDps:" + SplitDps + ","
         + "codexLinks:" + CodexLinks + ","
         + "material:" + Material + ","
+        + "ocDashSpeed:" + OcDashSpeed + ","
+        + "ocDashHeat:" + OcDashHeat + ","
+        + "ocCool:" + OcCool + ","
+        + "ocShutdown:" + OcShutdown + ","
+        + "ocVuln:" + OcVuln + ","
+        + "ocRampHeat:" + OcRampHeat + ","
+        + "ocRampMax:" + OcRampMax + ","
+        + "ocAuraRange:" + OcAuraRange + ","
+        + "ocAuraRate:" + OcAuraRate + ","
+        + "ocMeltHp:" + OcMeltHp + ","
+        + "ocMeltFuse:" + OcMeltFuse + ","
+        + "ocBurstRadius:" + OcBurstRadius + ","
+        + "ocBurstDamage:" + OcBurstDamage + ","
+        + "ocDeathBurst:" + OcDeathBurst + ","
+        + "ocLeanRate:" + OcLeanRate + ","
+        + "ocLeanMax:" + OcLeanMax + ","
+        + "ocLeanTurn:" + OcLeanTurn + ","
+        + "ocModeCycle:" + OcModeCycle + ","
+        + "ocModeWarn:" + OcModeWarn + ","
+        + "ocModeSpeed:" + OcModeSpeed + ","
+        + "ocModeRate:" + OcModeRate + ","
+        + "ocModeShield:" + OcModeShield + ","
         + "}";
     }
 }

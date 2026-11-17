@@ -27,6 +27,8 @@ namespace GameLogic.Campaign.Content
         public const string StructFinId = "struct_fin";
         public const string StructStealthCloakId = "struct_stealth_cloak";
         public const string StructArmorSkirtId = "struct_armor_skirt";
+        /// <summary>FG11-FAC-01（承接 FG-GAP-150 超频部分）：全开散热鳍冠（散热鳍的超频变体，冲刺—过热—停机）。</summary>
+        public const string StructFinCrownId = "struct_fin_crown";
 
         // ── FG2-FW-02 新建作战组件（设计案 5.6；每种载体至少一个；名称 / 说明 / 数值来自 fg.TbCombatComponent）──
         public const string CompRamId = "comp_ram";
@@ -366,6 +368,34 @@ namespace GameLogic.Campaign.Content
                 LegacyFacadeId = null,
                 DebtId = "DEBT-EMG4LOOT01-01",
                 Faction = "foundry",
+            },
+            // FG11-FAC-01（FGR-FAC-009，承接 FG-GAP-150 超频部分）：超频阵营标志组件，散热鳍的阵营变体（不新增载体类型）；专属行为来自 fg.TbChannelDecl 声明
+            // （chs.moving condition 幅度 = 冲刺速度倍率、参数 2 = 每秒积热；prop.heat sense 幅度 = 停机秒、参数 2 = 停机受伤 +比例），内核与超频猎犬同一套结算。
+            [StructFinCrownId] = new MechanicalContentDef
+            {
+                Id = StructFinCrownId,
+                Category = MechanicalContentCategory.Structure,
+                DisplayName = "全开散热鳍冠",
+                Description = "超频阵营的散热鳍变体：移动速度 ×1.5，但移动时持续积热，满热强制停机 2.5 秒（停机时受到的伤害 +50%），停下来热量才会退。",
+                Source = MechanicalContentSource.EliteDrop,
+                SourceDetail = "阵营标志组件：精英 / 首领三选一掉落“敌方接口组件”，解析台破解后得到蓝图（GDD §6.5、§9）；也可以在研发树“超频 · 结构模块蓝图”研究得到。",
+                Slot = "结构",
+                ScrapCost = 22,
+                Load = 2,
+                ValuesSummary = "冲刺 ×1.5、每秒积热 0.2、满热停机 2.5 秒、停机受伤 +50%（fg.TbChannelDecl 声明幅度）。",
+                AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
+                IconId = "icon_struct_fin_crown",
+                ModelId = "primitive:capsule",
+                ActionId = "CombatSite.SpawnMachine → CombatSite.FlagBehaviorProfile（声明 → 内核超频参数）",
+                VfxId = "vfx_none_placeholder",
+                SfxId = "",
+                PreviewId = "preview_struct_fin_crown",
+                SaveCompatible = true,
+                LockedHintText = "精英 / 首领掉落的敌方接口组件，送解析台破解后才能写进蓝图量产。",
+                SilhouetteNote = "保留超频外壳与红色发光、占机体约 30%、接缝青蓝信号缝合线（美术规范 03 §9；占位低模，DEBT-FG11FAC01-01）。",
+                LegacyFacadeId = null,
+                DebtId = "DEBT-FG11FAC01-01",
+                Faction = "overclock",
             },
         };
 

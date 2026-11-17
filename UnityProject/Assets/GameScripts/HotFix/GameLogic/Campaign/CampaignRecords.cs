@@ -781,6 +781,16 @@ namespace GameLogic.Campaign
         /// 瞄准剩余秒数（&gt;0 表示已进入"1秒瞄准线"预警阶段，归零时才真正开火，DEMO-CONTENT-LOCK.md
         /// §5"1秒瞄准线"）；其余敌类型恒为 0，不承载意义。</summary>
         public float SecondaryTimer;
+        /// <summary>FG11-FAC-01（FGR-EMG-164，DEBT-EMG4HIJ02-02）：镜像体最近一次复制到的核心固件（空 = 还没复制）。复制前的武器不存：读档后按敌人行重编（CombatSite.EnemyWeapon，确定性）。</summary>
+        public string MirrorCopyFirmware;
+        /// <summary>FG11-FAC-01：那次复制品实际持有的指令条数（截断后）。</summary>
+        public int MirrorCopyHeld;
+        /// <summary>FG11-FAC-01：那次复制发生时的战斗内核时间（秒；复制冷却 overclock.mirror.copy_cooldown 按它算，内核时间随地点快照存档）。</summary>
+        public float MirrorCopyAt;
+        /// <summary>FG11-FAC-01 审查修复：那次复制被截掉的部分（带宽截断条数 / 容量 C(1) 溢出条数 / 触发器子载荷代际已满处数），悬停写原因。</summary>
+        public int MirrorCopyDropped;
+        public int MirrorCopyOverflow;
+        public int MirrorCopyGenFull;
     }
 
     /// <summary>ER5-REGION-01 STORY-EXECUTION-CARDS.md 第2条"货物 Lost/Recovered 写 RegionRecord"

@@ -80,7 +80,7 @@ namespace GameLogic.EditorTools
         public static int RunAttackNav(StringBuilder report) => RunSteps(report,
             "\n[攻击绕障] 右键攻击射程外直线不通才寻路、绕障开火、无法到达 / 受阻给原因、卡住先重寻一次、负向矩阵（EMGR-NAV-01）", "[攻击绕障]",
             CheckAttackAroundWall, CheckAttackUnreachable, CheckAttackOpenGroundHash, CheckStuckRetry, CheckAttackTargetMoves, CheckAttackNegatives,
-            CheckAttackHomeRealPath, CheckAttackHomeMatrix);
+            CheckAttackHomeRealPath, CheckAttackHomeMatrix, CheckRaiderChaseAroundWall);
 
         private static int RunSteps(StringBuilder report, string header, string tag, params Action[] steps)
         {
@@ -2727,6 +2727,60 @@ namespace GameLogic.EditorTools
         }
 
         private static CombatEvent EndOf(Pipe p, int unit) => p.Events.LastOrDefault(e => e.Kind == CombatEventKind.CommandEnded && e.Unit == unit);
+
+        /// <summary>
+        /// FG11-FAC-01（FG-GAP-223）：敌方突袭者追击射程外、直线被 L 形墙挡住的目标——寻路绕到口袋开口、进射程开火（目标掉血），全程不进阻挡格；
+        /// 负向：同一场景关掉寻路（NavEnabled = 0）= 旧行为，贴墙停住、打不到（证明行为来自寻路追击）；目标在开阔地（直线通）不发寻路请求。
+        /// </summary>
+        private static void CheckRaiderChaseAroundWall()
+        {
+            (bool hit, bool clear, int requests, double endDist) Run(bool enclosed, bool open)
+            {
+                // enclosed：目标四周封死（走不到）——寻路失败 / 看门狗放弃，不进阻挡格、打不到（不贴墙穿模）
+                Func<int, int, bool> box = (x, y) => (x == 30 || x == 50) && y <= 18 || (y == 0 || y == 18) && x >= 30 && x <= 50;
+                using NavKernel nav = Synth(2, 1, open ? (x, y) => false : enclosed ? box : LWall);
+                using var p = new Pipe(nav, 0f, true);
+                int w = p.K.AddWeapon(new CombatWeapon { Mode = CombatWeaponMode.Instant, HasOutput = 1, Range = 6f, Damage = 10f, Cooldown = 0.5f, TargetMode = CombatTargetMode.Nearest });
+                int prof = p.K.AddProfile(new CombatBehaviorProfile { Speed = 6f, SenseRange = 80f });
+                int raider = p.K.Spawn(new CombatSpawn
+                {
+                    ExtKey = -1, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.Raider,
+                    Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable | CombatUnitFlags.WeaponEnabled,
+                    Position = new double2(10, 8), Home = new double2(10, 8), Radius = 0.9f, Speed = 6f, Health = 100f, MaxHealth = 100f,
+                    Weapon = w, BehaviorProfile = prof, Priority = 1, ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, -1f),
+                });
+                int target = p.K.Spawn(new CombatSpawn
+                {
+                    ExtKey = -1, Kind = CombatUnitKind.Machine, Faction = CombatFaction.Player, Behavior = CombatBehavior.None,
+                    Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable, Position = new double2(40, 8), Home = new double2(40, 8), Radius = 0.8f,
+                    Speed = 0f, Health = 1000f, MaxHealth = 1000f, Weapon = -1, BehaviorProfile = -1, Priority = 1, ArmorHalfAngleDeg = 90f, ArmorFacing = new float2(0f, -1f),
+                });
+                bool ok = true;
+                for (int step = 0; step < 60 * 30; step++)
+                {
+                    p.Step();
+                    ok &= UnitCellOk(nav, p.K, raider, NavConst.ClassHostile);
+                    if (p.K.TryGetUnit(target, out CombatUnitView tv) && tv.Health < 1000f)
+                    {
+                        break;
+                    }
+                }
+                p.K.TryGetPosition(raider, out double2 rp);
+                bool damaged = p.K.TryGetUnit(target, out CombatUnitView v) && v.Health < 1000f;
+                return (damaged, ok, p.Requests, math.distance(rp, new double2(40, 8)));
+            }
+            var on = Run(false, false);
+            var off = Run(true, false);
+            var open = Run(false, true);
+            // FG11-FAC-01 审查修复：围死时放弃追击后真等半秒再重选——每个“放弃 → 等半秒 → 重选”周期至多 4 次请求（等待中回目标点 1 次、重选后追击 1 次、
+            // 部分路线走到头重要 1 次、看门狗重寻 1 次），30 秒至多 60 个周期（修复前放弃后下一步就重选、每次寻路结果返回就再发一次）
+            int cap = 4 * (int)(30f / 0.5f) + 2;
+            Expect(off.requests <= cap,
+                $"FG-GAP-223 围死目标：放弃追击 0.5 秒后才重选，30 秒寻路请求 {off.requests} 次（上限 {cap}）");
+            Expect(on.hit && on.clear && on.requests > 0 && !off.hit && off.clear && open.hit && open.requests == 0,
+                $"FG-GAP-223 敌方突袭者追击 L 形墙后的目标：寻路绕过去开火（命中 {on.hit}，全程不进阻挡格 {on.clear}，寻路请求 {on.requests}）；" +
+                $"负向：目标被围死 = 打不到、也不穿墙（命中 {off.hit}，全程不进阻挡格 {off.clear}，离目标 {off.endDist:0.#} 米）；开阔地直线通不寻路（请求 {open.requests}，命中 {open.hit}）");
+        }
 
         private static void CheckAttackAroundWall()
         {

@@ -319,6 +319,11 @@ namespace GameLogic.Campaign.Economy
             {
                 return StandingRuleService.KindRow(u.Substring(5)) != null; // FG6-DEF-03：解锁一类常驻规则（自动重建）
             }
+            if (u.StartsWith("comp:", StringComparison.Ordinal))
+            {
+                // FG11-FAC-01（DEBT-FG5RND01-01 阵营分支）：阵营标志组件直接写进蓝图（与解析台破解同一个解锁 UnlockedContentIds）
+                return Content.MechanicalContentFacade.TryGet(u.Substring(5), out Content.MechanicalContentDef def) && !string.IsNullOrEmpty(def.Faction) && def.Faction != "none";
+            }
             return false;
         }
 

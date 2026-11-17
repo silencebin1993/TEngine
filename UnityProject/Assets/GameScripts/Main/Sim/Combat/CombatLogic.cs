@@ -135,6 +135,7 @@ namespace BinGames.Sim.Combat
             StepFoundry(ref d, ref grid, dt);
             // 4c. FG10-FAC-01：澄净专属语法（死亡效果、受寒、喷淋 / 枢轴 / 自爆、喷淋池冲洗、酸沼、分裂液接触）。
             StepClarity(ref d, ref grid, dt);
+            StepOverclock(ref d, dt); // FG11-FAC-01：超频专属语法（停机 / 排气 / 熔断 / 死亡泄爆 / 前倾加速 / 超频状态循环）；空表 O(1)
             StepMagnetized(ref d, dt); // EMG2-PHS-01：磁化单位是弱磁源，弹体转向
             RebuildDeflectActive(ref d, edges: true);
             grid.Dispose();
@@ -489,7 +490,7 @@ namespace BinGames.Sim.Combat
                     // EMGR-TRIG-01（DEBT-EMG1TRIG01-04，FG19A 第 2.1.1 节）：光束武器按自己的切段间隔出手（每段伤害已按段长缩放），不按命令带的机器出手间隔——
                     // 攻击间隔的唯一消费点，所有下达入口（编队 / 远征 / 区域控制器 / 靶场）一并生效，命令期间换了武器也按当前武器
                     int wi = d.Weapon[i];
-                    cmd.AtkCd = (wi >= 0 && wi < d.Weapons.Length && d.Weapons[wi].BeamHit != 0 ? d.Weapons[wi].Cooldown : cmd.AttackCooldown) * cdScale;
+                    cmd.AtkCd = (wi >= 0 && wi < d.Weapons.Length && d.Weapons[wi].BeamHit != 0 ? d.Weapons[wi].Cooldown : cmd.AttackCooldown) * cdScale * OcCooldownFactor(ref d, i);
                     CombatFireResult r = FireAt(ref d, i, t);
                     bool destroyed = r == CombatFireResult.Ok && !d.IsAlive(t);
                     Gameplay(ref d, CombatEventKind.AttackOutcome, i, cmd.Target, 0f, 0f, d.Pos[t], (byte)r, (byte)(destroyed ? 1 : 0));
@@ -779,7 +780,7 @@ namespace BinGames.Sim.Combat
             }
             CombatWeapon wp = d.Weapons[w];
             float rate = (wp.Dissipation + (d.Has(i, CombatUnitFlags.HeatSink) ? wp.HeatSinkBonus * (d.Heat[i] > 0f ? EmgFinWetFactor(ref d, i) : 1f) : 0f)) * (1f + math.max(0f, d.DissipationBonus)); // FG7-ENV-03 寒潮散热加成
-            rate *= SlagFactor(ref d, i); // FG9-FAC-02：熔渣热区内散热 -30%
+            rate *= SlagFactor(ref d, i) * RadDissFactor(ref d, i); // FG9-FAC-02：熔渣热区内散热 -30%；FG11-FAC-01：高温辐射区内散热 -20%
             float h = math.max(0f, d.Heat[i] - rate * dt);
             d.Heat[i] = h;
             if (d.Has(i, CombatUnitFlags.Overheated) && h < wp.RecoverBelow)
@@ -805,7 +806,7 @@ namespace BinGames.Sim.Combat
                 StepAirUnit(ref d, ref grid, i, dt);
                 return;
             }
-            if (ClarityHolds(ref d, i))
+            if (ClarityHolds(ref d, i) || OcHolds(ref d, i)) // FG11-FAC-01：停机 / 排气中不移动、不开火
             {
                 return;
             }
@@ -891,7 +892,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Cycle[i] = EffectiveCooldown(wp);
+            d.Cycle[i] = UnitCooldown(ref d, i, wp);
             UnitAttack(ref d, i, t, wp);
         }
 
@@ -967,7 +968,7 @@ namespace BinGames.Sim.Combat
                     return;
                 }
                 int locked = FindTarget(ref d, ref grid, i, EngageRange(ref d, i, wp), los, wp.TargetMode);
-                d.Cycle[i] = EffectiveCooldown(wp);
+                d.Cycle[i] = UnitCooldown(ref d, i, wp);
                 if (locked >= 0 && InBlindSpot(ref d, i, locked))
                 {
                     locked = -1; // FG9-FAC-02（“高抛曲射”）：目标贴进近距盲区，这一发打不到（瞄准线白亮）
@@ -1183,17 +1184,28 @@ namespace BinGames.Sim.Combat
             }
             CombatWeapon wp = d.Weapons[w];
             CombatBehaviorProfile p = d.Profiles[bp];
-            p.Speed = SlowedSpeed(ref d, i, p.Speed); // FG2-FW-02：减速状态
+            p.Speed = SlowedSpeed(ref d, i, p.Speed); // FG2-FW-02：减速状态（FG11-FAC-01：含冲刺 / 前倾加速 / 极速态 / 停机）
             CombatCommand cmd = d.Cmd[i];
             int t = d.SlotOf(cmd.Target);
             float retarget = d.Secondary[i] - dt;
-            if (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || retarget <= 0f)
+            // FG-GAP-223 审查修复：放弃追击（OcGiveUpChase 记 HasLast = RaiderGaveUp）后真等半秒再重选，不在下一步就选回同一个够不着的目标、再发一次寻路
+            bool giveUpWait = cmd.Target == 0 && cmd.HasLast == RaiderGaveUp && retarget > 0f;
+            if (!giveUpWait && (t < 0 || !d.IsAlive(t) || !d.Has(t, CombatUnitFlags.Targetable) || retarget <= 0f))
             {
+                if (cmd.HasLast == RaiderGaveUp)
+                {
+                    cmd.HasLast = 0;
+                }
                 // FG10-FAC-01（腐蚀蜂群“专门腐蚀建筑”）：带建筑偏好的单位先找感知范围内的己方建筑 / 炮塔，没有再按武器的选目标模式。
                 t = p.StructPref > 0f ? FindStructureTarget(ref d, ref grid, i, p.SenseRange) : -1;
                 if (t < 0)
                 {
                     t = FindTarget(ref d, ref grid, i, p.SenseRange, false, wp.TargetMode);
+                }
+                if (t < 0 && cmd.Target != 0 && d.Config.NavEnabled != 0 && d.NavSt[i] != (byte)CombatNavState.None)
+                {
+                    DropRoute(ref d, i); // FG-GAP-223：丢了目标——追击路线作废，从当前位置重要回目标点的路线
+                    d.NavSt[i] = (byte)CombatNavState.NeedRoute;
                 }
                 cmd.Target = t >= 0 ? d.Id[t] : 0;
                 retarget = 0.5f;
@@ -1217,14 +1229,22 @@ namespace BinGames.Sim.Combat
                 Separate(ref d, ref grid, i, p.Speed, dt);
                 return;
             }
-            if (d.Config.NavEnabled != 0 && (d.NavSt[i] == (byte)CombatNavState.Following || d.NavSt[i] == (byte)CombatNavState.Awaiting))
+            double dist = math.distance(pos, d.Pos[t]);
+            float engage = EngageRange(ref d, i, wp);
+            // FG-GAP-223（FG11-FAC-01，照 EMGR-NAV-01 的攻击分支）：射程外、直线被地形挡住才寻路追击（路线跟目标、受阻看门狗）；直线通照旧直线逼近。
+            if (dist > engage && d.Config.NavEnabled != 0 && AttackNeedsRoute(ref d, i, pos, d.Pos[t], engage))
             {
-                // 追击目标会离开路线：目标丢失后从当前位置重新要路线（在等的结果按序号作废）。
+                RaiderChaseRoute(ref d, i, ref cmd, pos, d.Pos[t], engage, p.Speed, dt);
+                d.Cmd[i] = cmd;
+                Separate(ref d, ref grid, i, p.Speed, dt);
+                return;
+            }
+            if (d.Config.NavEnabled != 0 && d.NavSt[i] != (byte)CombatNavState.None)
+            {
+                // 直线能打 / 能走：丢掉朝目标点或追击的旧路线（在等的结果按序号作废）；目标丢失后从当前位置重新要回目标点的路线。
                 DropRoute(ref d, i);
                 d.NavSt[i] = (byte)CombatNavState.NeedRoute;
             }
-            double dist = math.distance(pos, d.Pos[t]);
-            float engage = EngageRange(ref d, i, wp);
             if (dist > engage)
             {
                 MoveToward(ref d, i, pos, d.Pos[t], p.Speed * dt, engage * 0.9);
@@ -1235,8 +1255,79 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Cycle[i] = EffectiveCooldown(wp);
+            d.Cycle[i] = UnitCooldown(ref d, i, wp);
             UnitAttack(ref d, i, t, wp);
+        }
+
+        /// <summary>
+        /// FG-GAP-223：敌方追击射程外、直线不通的目标——沿寻路路线逼近（终点 = 目标当前格，允许就近路线）；目标移出路线终点 2 格外或走到头仍不通就从当前位置重要；
+        /// 受阻看门狗与移动命令共用（<see cref="NavStuckStrike"/>：先重寻一次，再受阻判“走不过去”→ 放弃这个目标、半秒后重新选）；寻路失败同样放弃这个目标（不贴墙发呆）。
+        /// 路线状态与命令字段（HasLast / Stuck / ProgTimer / LastDist）都在快照里，不新增内核状态。
+        /// </summary>
+        private static void RaiderChaseRoute(ref CombatData d, int i, ref CombatCommand cmd, double2 pos, double2 target, float range, float speed, float dt)
+        {
+            var st = (CombatNavState)d.NavSt[i];
+            bool fresh = st == CombatNavState.None || st == CombatNavState.NeedRoute;
+            if (!fresh && st == CombatNavState.Following && AttackRouteStale(ref d, i, target, range))
+            {
+                fresh = true; // 沿着的是朝目标点的旧路线，或目标已离开路线终点
+            }
+            if (fresh)
+            {
+                cmd.Pos = target;
+                EmitNavRequest(ref d, i, CellOf(target), (byte)NavRequestFlags.AllowPartial);
+                cmd.HasLast = 0;
+                cmd.Stuck = 0;
+                cmd.ProgTimer = d.Config.ProgressInterval;
+                if (d.RouteLen[i] > 0)
+                {
+                    FollowRoute(ref d, i, speed, dt);
+                }
+                return;
+            }
+            if (st == CombatNavState.Awaiting)
+            {
+                if (d.RouteLen[i] > 0)
+                {
+                    FollowRoute(ref d, i, speed, dt);
+                }
+                return;
+            }
+            if (st == CombatNavState.Failed)
+            {
+                OcGiveUpChase(ref d, i, ref cmd); // 寻路失败：放弃这个目标，不贴墙站桩
+                return;
+            }
+            if (d.RouteIdx[i] >= d.RouteLen[i] - 1 && math.distancesq(pos, d.RouteEnd[i]) <= 0.25)
+            {
+                d.NavSt[i] = (byte)CombatNavState.NeedRoute; // 走到头仍在射程外且直线不通：下一步从这里重要
+                return;
+            }
+            FollowRoute(ref d, i, speed, dt);
+            cmd.Pos = target;
+            cmd.ProgTimer -= dt;
+            if (cmd.ProgTimer > 0f)
+            {
+                return;
+            }
+            cmd.ProgTimer = d.Config.ProgressInterval;
+            if (NavStuckStrike(ref d, i, ref cmd, pos))
+            {
+                OcGiveUpChase(ref d, i, ref cmd);
+            }
+        }
+
+        /// <summary>突袭者放弃追击后的等待记号（<see cref="CombatCommand.HasLast"/> 在没有目标时不用作进展记号；快照里已有这个字节，不升 FormatVersion）。</summary>
+        internal const byte RaiderGaveUp = 2;
+
+        private static void OcGiveUpChase(ref CombatData d, int i, ref CombatCommand cmd)
+        {
+            DropRoute(ref d, i);
+            d.NavSt[i] = (byte)CombatNavState.NeedRoute;
+            cmd.Target = 0;
+            cmd.HasLast = RaiderGaveUp;
+            cmd.Stuck = 0;
+            d.Secondary[i] = 0.5f; // 半秒后重新选目标（够不着的同一个目标会被重新选中，再走一遍寻路）
         }
 
         private static void MoveToward(ref CombatData d, int i, double2 pos, double2 target, double stepLen, double stopAt)
@@ -1279,6 +1370,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             EmgShotBegin(ref d, i, t, wp); // EMG1-BUS-01：一次出手（evt.fire；带程序的武器开一条因果链）
+            OcOnFired(ref d, i); // FG11-FAC-01：蓄热连射积热（没有超频记录 O(1)）
             SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露（EMG4-LOOT-01：己方潜伏单位同样；没有行为参数 O(1) 返回）
             if (d.Faction[i] != (byte)CombatFaction.Hostile && wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, i, t, wp.Damage, wp))
             {
@@ -1554,12 +1646,13 @@ namespace BinGames.Sim.Combat
             d.Counters[0] = c;
             RawFired(ref d, a, t);
             EmgShotBegin(ref d, a, t, wp); // EMG1-BUS-01：一次出手（evt.fire；过热事件随后继承这条链）
+            OcOnFired(ref d, a); // FG11-FAC-01：蓄热连射（玩家装蓄热连射枪同一规则）
             AddShotHeat(ref d, a, wp);
             if (wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, a, t, wp.Damage, wp))
             {
                 if (IsCharged(wp))
                 {
-                    d.NextFireAt[a] = d.Scalars[0].Time + EffectiveCooldown(wp);
+                    d.NextFireAt[a] = d.Scalars[0].Time + UnitCooldown(ref d, a, wp);
                 }
                 return CombatFireResult.Ok; // FG9-FAC-01：射弹载体打进偏折场，被反弹回开火者
             }
@@ -1573,7 +1666,7 @@ namespace BinGames.Sim.Combat
             if (IsCharged(wp))
             {
                 // FG2-FW-02：蓄力读法（出手间隔倍率 > 1）记下这一发之后多久才蓄满；直控点击按它拦（FireDirect），编队攻击的冷却本身已乘同一倍率。
-                d.NextFireAt[a] = d.Scalars[0].Time + EffectiveCooldown(wp);
+                d.NextFireAt[a] = d.Scalars[0].Time + UnitCooldown(ref d, a, wp);
             }
 
             if (wp.FieldPort != 0)
@@ -1655,9 +1748,10 @@ namespace BinGames.Sim.Combat
                 return CombatFireResult.TargetDead;
             }
             d.AimReadyAt[a] = 0;
-            d.NextFireAt[a] = now + EffectiveCooldown(wp);
+            d.NextFireAt[a] = now + UnitCooldown(ref d, a, wp);
             ConsumeShotAmmo(ref d, a, wp); // FG6-DEF-01 审查修复：真的开火这一刻扣一发补给（与 AddShotHeat 同一口径）
             EmgShotBegin(ref d, a, t, wp); // EMG1-BUS-01：重炮真的开火这一刻（瞄准阶段不算出手）
+            OcOnFired(ref d, a); // FG11-FAC-01
             // FG1-SIG-03：门控反应（信号带进来的核心固件）发动过一次后就被压住，直到热更层按冷却重新下发武器参数。
             bool overload = wp.Reaction == CombatReaction.MeltOverload && !d.Has(a, CombatUnitFlags.ReactionSpent);
             float heat = d.Heat[a] + ShotHeat(ref d, a, wp) + (overload ? wp.OverloadExtraHeat : 0f); // EMG3-CHS-02：取水不计写水 / 冷却液的那份
@@ -1670,7 +1764,7 @@ namespace BinGames.Sim.Combat
             PushTrace(ref d, a, t, wp, EmgFlightOn(wp)); // FG2-E2E-01（FG-GAP-043）；EMG1-TRIG-01：SpawnFlight 重炮只闪光，弹体自己飞
             // EMG2-REACT-01（FG19B §4.1 A2）：开火这一刻只计开火者代价 cost.heat（OverloadExtraHeat = cost − 被取代的指令表值热量）；
             // 熔穿过载本身是 P03 命中规则（溅出熔融金属 + 目标熔穿），在命中时结算、计数与发动（EmgMeltOverloadHit），开火时不再发反应事件。
-            if (heat >= wp.OverheatAt)
+            if (heat >= OverheatAtOf(ref d, a, wp)) // FG11-FAC-01：高温辐射区内热量上限 -25%
             {
                 d.Set(a, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
@@ -1794,7 +1888,7 @@ namespace BinGames.Sim.Combat
                 RevealSlot(ref d, t); // FG9-FAC-01：潜伏中被范围伤害命中——立即现形，并照常结算伤害
             }
             // FG2-FW-02：易伤状态（冻结等）统一在这里乘上——任何来源的伤害都吃。
-            damage = math.max(0f, damage) * VulnMultiplier(ref d, t);
+            damage = math.max(0f, damage) * VulnMultiplier(ref d, t) * OcDamageFactor(ref d, t); // FG11-FAC-01：停机 / 排气弱点窗口、护盾态
             // FG6-DEF-05：攻城单位打带攻城类别的结构单位（建筑 / 炮塔 / 屏障）乘对建筑倍率，并在被打的那一侧记一次溅射命中（传送带 / 管线 / 施工虚影受波及）。
             byte siegeCat = d.Siege[t].Cat;
             if (siegeCat != 0 && attacker >= 0 && attacker < d.Count && d.Faction[attacker] != d.Faction[t])
@@ -1917,6 +2011,7 @@ namespace BinGames.Sim.Combat
             }
             // FG10-FAC-01：分裂 / 自爆单位的死亡效果（O(1) 记一条，下一个澄净阶段结算）。
             ClarityOnKill(ref d, t, killerId);
+            OcOnKill(ref d, t); // FG11-FAC-01：死亡泄爆（下一个超频阶段结算）/ 熔断中被击毁 = 熔断中止
             EmgOnDeath(ref d, t, killerId, 0); // EMG1-ENT-01：阵亡统一入口——残骸，再 evt.death（阵亡者）、evt.kill（击杀者 / 致死载荷，EMG1-BUS-01）
         }
 

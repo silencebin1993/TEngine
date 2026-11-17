@@ -803,6 +803,7 @@ namespace GameLogic.Campaign.Economy
                 }
             }
             r.NewEntries = fresh.ToArray();
+            ApplyContentUnlocks(state, n);
             Revision++;
             CompletedThisSession++;
             LastCompleted = n.Id;
@@ -864,6 +865,11 @@ namespace GameLogic.Campaign.Economy
             if (target != null && target.StartsWith("rule:", StringComparison.Ordinal) && StandingRuleService.KindRow(target.Substring(5)) is GameConfig.fg.RuleKind rk)
             {
                 return GameText.Format("research.unlock.rule", GameText.Get(rk.NameKey));
+            }
+            // FG11-FAC-01：comp:comp_heat_repeater → 组件 / 结构模块的玩家名（“蓄热连射枪”）
+            if (target != null && target.StartsWith("comp:", StringComparison.Ordinal) && Content.MechanicalContentFacade.TryGet(target.Substring(5), out Content.MechanicalContentDef cd))
+            {
+                return cd.DisplayName;
             }
             return target ?? string.Empty;
         }
@@ -1346,6 +1352,25 @@ namespace GameLogic.Campaign.Economy
                 : GameText.Format(key, pct, list);
         }
 
+        /// <summary>FG11-FAC-01（DEBT-FG5RND01-01 阵营分支）：comp: 解锁 = 把阵营标志组件写进已解锁内容（与解析台破解同一个入口，之后可直接写进蓝图量产）。
+        /// 其它解锁形式按已完成节点即时推算，这一种落在已掌握内容里，所以完成节点的两条路径（正式完成 / 测试夹具）都要调。</summary>
+        private static void ApplyContentUnlocks(CampaignState state, ResearchNodeDef n)
+        {
+            foreach (string u in n.Unlocks)
+            {
+                if (u.StartsWith("comp:", StringComparison.Ordinal))
+                {
+                    string cid = u.Substring(5);
+                    state.UnlockedContentIds ??= Array.Empty<string>();
+                    if (Array.IndexOf(state.UnlockedContentIds, cid) < 0)
+                    {
+                        var ul = new List<string>(state.UnlockedContentIds) { cid };
+                        state.UnlockedContentIds = ul.ToArray();
+                    }
+                }
+            }
+        }
+
         /// <summary>测试夹具：直接把这些节点记为已完成（不发通知、不标“新”）。只给自检 / 冒烟跳过与被测系统无关的研究过程用。</summary>
         public static void CompleteForTests(CampaignState state, params string[] nodeIds)
         {
@@ -1353,9 +1378,10 @@ namespace GameLogic.Campaign.Economy
             var done = new List<string>(state.Research.CompletedNodes);
             foreach (string id in nodeIds)
             {
-                if (ResearchCatalog.TryGet(id, out _) && !done.Contains(id))
+                if (ResearchCatalog.TryGet(id, out ResearchNodeDef nd) && !done.Contains(id))
                 {
                     done.Add(id);
+                    ApplyContentUnlocks(state, nd); // 与正式完成同一份已掌握内容
                 }
             }
             state.Research.CompletedNodes = done.ToArray();

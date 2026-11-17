@@ -441,7 +441,7 @@ namespace BinGames.Sim.Combat
                 {
                     if (d.Cycle[i] <= 0f && HasAmmoFor(ref d, i, wp))
                     {
-                        d.Cycle[i] = EffectiveCooldown(wp);
+                        d.Cycle[i] = UnitCooldown(ref d, i, wp);
                         UnitAttack(ref d, i, t, wp);
                     }
                     return;

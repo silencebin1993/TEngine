@@ -22,6 +22,13 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgRelay> Relays;
         /// <summary>EMG4-HIJ-01（FGR-EMG-163，ADR ⑰）：被信号劫持的敌机（快照段 27；每名玩家 ≤ emg.hijack.max，空表时每步一次长度比较）。</summary>
         public NativeList<EmgHijack> Hijacks;
+        /// <summary>FG11-FAC-01（FGR-FAC-008 超频专属语法）：带超频参数的单位的运行状态（快照段 34；空表时每步一次长度比较）。</summary>
+        public NativeList<CombatOverclock> Overclocks;
+        /// <summary>FG11-FAC-01（DEBT-FG7ENV05-01 / FG8EXP02-03 高温辐射）：高温辐射区（x, y, 内半径, 外半径；派生量不进快照，热更层打开 / 读档时写）。</summary>
+        public NativeList<float4> RadZones;
+        /// <summary>高温辐射区内的热量上限倍率与散热倍率（不在区里 = 1）。</summary>
+        public float RadCapMult;
+        public float RadDissMult;
         /// <summary>EMG4-TER-01（FGR-EMG-152）：熔坑（快照段 28；≤ emg.terrain.pit_max，空表时移动只多一次长度比较）。</summary>
         public NativeList<EmgPit> Pits;
         /// <summary>EMG4-TER-01（FG19B V06 / V07“同一位置累计”）：累计点（x, y, 熔融金属份量, 酸份量；快照段 29，≤ <see cref="EmgPitConst.AccCapacity"/>）。</summary>
@@ -76,6 +83,8 @@ namespace BinGames.Sim.Combat
             MetaRun = new NativeList<EmgMetaRun>(0, Allocator.Persistent);
             Relays = new NativeList<EmgRelay>(0, Allocator.Persistent);
             Hijacks = new NativeList<EmgHijack>(0, Allocator.Persistent);
+            Overclocks = new NativeList<CombatOverclock>(0, Allocator.Persistent);
+            RadZones = new NativeList<float4>(0, Allocator.Persistent);
             Pits = new NativeList<EmgPit>(0, Allocator.Persistent);
             PitAcc = new NativeList<float4>(0, Allocator.Persistent);
             PitStats = new NativeArray<int>(EmgPitConst.StatLen, Allocator.Persistent);
@@ -170,6 +179,8 @@ namespace BinGames.Sim.Combat
             MetaRun.Dispose();
             Relays.Dispose();
             Hijacks.Dispose();
+            Overclocks.Dispose();
+            RadZones.Dispose();
             Pits.Dispose();
             PitAcc.Dispose();
             PitStats.Dispose();
@@ -256,6 +267,7 @@ namespace BinGames.Sim.Combat
             MetaRun.Clear();
             Relays.Clear();
             Hijacks.Clear();
+            Overclocks.Clear();
             Pits.Clear();
             PitAcc.Clear();
             ScorchAcc.Clear();

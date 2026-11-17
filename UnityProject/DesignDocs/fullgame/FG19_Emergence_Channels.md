@@ -978,6 +978,7 @@
 **FGR-EMG-160 敌人用同一套程序**
 - 敌方单位的武器、行为读法与玩家同一套编译器、同一套规则表（现状已共用 `CarrierReadings`，`EnemySpawnBuilder.cs:146`；云端澄净敌人行装配 `fw_acid`、`fw_oilleak`、`fw_nitrogen`）。
   - **EMG3-FW-01 现状更正（2026-11-05）**：上句“同一套编译器”尚未成立——敌方组装武器只共用旧读法表（`EnemySpawnBuilder.WeaponOf` → `CarrierReadings.Build`，不编程序、不走 `LegacySkip`），同一固件在玩家侧走声明轨、在敌方侧仍按旧 `readFields` 结算；敌方接同一套编译器归 EMG4-HIJ-01（DEBT-EMG3FW01-01），完成前 EMG4-CLEAN-01 不得删旧 `readFields`。
+  - **FG11-FAC-01 现状更正（2026-11-17）**：上一句已过时——EMG4-HIJ-01 起敌方组装武器经 `CombatSite.EnemyWeapon` 与玩家同一编译器编程序，EMG4-CLEAN-01 起战斗不再读 `readFields`；敌方武器以 `CombatSite.EnemyWeapon` / `EnemySpawnBuilder.WeaponOf` 现状为准。FG11-FAC-01 起 Demo 与静默带武器的非首领敌人也加了 `assembled`（DEBT-FG9FAC02-04），首领不装配（组件列是固定奖励，待用户复核）。
 - 敌方单位行在 `fg.TbChannelDecl`（`ownerKind = enemy`）声明专属行为的读写端口；不得按单位 ID 写反应特例（FG10-FAC-01 卡片第 4 步补这一句）。
 - 反制原则（`ProjectA_GDD.md:385`）改为“针对你当前正在使用的通道交互”，反制必须预警、可读、可降低（沿用）。
 - **EMG2-BOSS-01 已落地（2026-11-04）**：澄净反制按在用程序的写端口判（`ClarityCounterService.PortGroupOf`）：写 `en.heat` / `mat.fire` 算燃烧，写 `en.elec` / `en.mag` / `fld.*` 算电磁，写 `grm.*` 算引信；一枚固件只归一族（燃烧 → 电磁 → 语法取第一个），分母是在用固件枚数（不按指令数：`fw_spread` 一枚有 9 行 modify，会压过别的程序），阈值键不变。反制锁定日电抗 1，次日在场单位恢复。铸造、寂听的反制仍按固件类别，等各自的回改卡。
@@ -1008,6 +1009,7 @@
 - 镜像体复制玩家在其附近最近一次发动的核心固件，得到“本地版本”（`FG09:246`）。按本文：复制品是 1 代程序，容量 `C(1)`，占镜像体自身的刷写带宽；复制品不能再被复制（代际），复制触发器时其子载荷按容量截断。
 - 第 4 步把这句写进 FG11-FAC-01 卡片的“必须同时交付”。
 - **EMG4-HIJ-02 已落地（2026-11-10）**：编译器 `EmgProgramCompiler.CompileCopy`（根节点代号 1：根容量 C(1)，触发器子载荷从 2 代起、2 代再触发记“代际已满”；混合固件照常展开为 2 条再受容量约束；程序标志 `IsCopy`，来源本身是复制品时拒绝，原因键 `emg.mirror.refuse_copy`）；地点服务 `CombatSite.MirrorCopy`（按镜像体剩余刷写带宽从末尾截断，复制品条数经内核 `FlashSelfCopy` 计入镜像体自己的占用；换复制新固件时旧复制品先让出带宽）。镜像体单位与“最近一次核心固件”的侦测随 FG11-FAC-01（DEBT-EMG4HIJ02-02）。
+- **FG11-FAC-01 已落地（2026-11-17）**：`CombatSite.Mirror.cs`——核心固件发动（玩法事件 ReactionFired 的门控发动 / 声明轨 `OnDeclCoreReaction`，与核心冷却同一时刻）时，敌人行 effectRange 内按读法 mirror 识别的镜像体复制那一枚（同一枚不重复、两次复制至少隔 `overclock.mirror.copy_cooldown` 游戏秒），截断 / 拒绝原因发通知，悬停显示复制品；复制记录随敌人记录存档，复制前武器读档后按敌人行重编（ADR-FAC-006 第 13 条）。
 
 **FGR-EMG-165 夺控、槽位封锁、劫持共用事件与术语**
 - 术语统一（第 4 步改 FG09、FG10、FG11 与卡片）：

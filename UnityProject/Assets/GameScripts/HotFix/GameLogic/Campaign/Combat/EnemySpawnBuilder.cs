@@ -106,7 +106,7 @@ namespace GameLogic.Campaign.Combat
             {
                 spawn.Weapon = site.WeaponIndex(site.EnemyWeapon(state, row)); // EMG4-HIJ-01：组装敌人与玩家同一套编译器（FGR-EMG-160）
             }
-            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row) || EnemyClarityParams.Has(row))
+            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row) || EnemyClarityParams.Has(row) || EnemyOverclockParams.Has(row))
             {
                 var profile = new CombatBehaviorProfile();
                 reading.FillProfile(row, ref profile);
@@ -116,6 +116,7 @@ namespace GameLogic.Campaign.Combat
                 // FG10-FAC-01：喷淋 / 枢轴 / 自爆 / 分裂 / 飞行 / 抗性 / 建筑偏好（伤害类参数乘难度倍率；绝缘涂层按澄净当天的锁定）。
                 EnemyClarityParams.Apply(row, ref profile, DifficultyService.EnemyDamageMul(state),
                     EnemyClarityParams.Insulates(row) && Regions.ClarityCounterService.InsulateToday(state), DifficultyService.EnemyHealthMul(state));
+                EnemyOverclockParams.Apply(row, ref profile, DifficultyService.EnemyDamageMul(state)); // FG11-FAC-01：超频专属语法（冲刺 / 光环 / 熔断 / 蓄热 / 三态）
                 spawn.BehaviorProfile = site.ProfileIndex(profile);
             }
             Vector2 home = e.Position;

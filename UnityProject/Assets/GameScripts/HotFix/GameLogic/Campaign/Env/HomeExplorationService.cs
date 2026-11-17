@@ -1050,6 +1050,8 @@ namespace GameLogic.Campaign.Env
                 : h.Id == SlagHeatService.HazardId && !belt ? SlagHeatService.HoverLine()
                 // FG10-FAC-01：酸沼的效果已经接入（外圈酸沼带与领地里的酸沼同一规则，战斗内核每游戏秒结算）；FG10-REG-01：附防腐涂层状态。
                 : h.Id == AcidMarshService.HazardId ? AcidMarshService.HoverLine() + "\n" + AcidMarshService.CoatingLine(s)
+                // FG11-FAC-01：高温辐射的效果已经接入（外圈辐射带与领地辐射区同一规则，战斗内核逐单位结算热量上限与散热）。
+                : h.Id == HeatRadiationService.HazardId ? HeatRadiationService.HoverLine()
                 : GameText.Get("hazard.hover.pending");
         }
 

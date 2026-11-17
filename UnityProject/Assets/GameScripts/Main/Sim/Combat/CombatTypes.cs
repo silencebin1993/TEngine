@@ -48,7 +48,9 @@ namespace BinGames.Sim.Combat
         /// 20 = EMG4-HIJ-01（FG19 FGR-EMG-163 / 211，ADR-EMG-001 ⑩ ⑰：阶段 4 内核状态段一次铺好）：Emg 段追加段 27 信号劫持（被劫持单位 / 劫持者 / 原阵营 / 原行为 / 到期时刻 / 原攻城职能与队伍 /
         /// 占用的刷写条数 / 原武器），被劫持单位的阵营与行为（Hijacked = 16）照旧在单位段里。熔坑归 EMG4-TER-01（同版本 20 内另开自描述段追加，ADR ⑩“只追加”）；冻结桥依赖的水面未落地，
         /// 挂 FG18-SEA-01（DEBT-EMG4TER01-01），届时同样追加新段，不留空占位。读取仍认 1～19：没有劫持（段不存在 = 空表）。
-        public const int FormatVersion = 20;
+        /// 21 = FG11-FAC-01（FG09 FGR-FAC-008 超频专属语法）：行为参数行尾部追加超频参数 22 个（冲刺 / 停机 / 蓄热连射 / 光环 / 熔断 / 泄爆 / 前倾加速 / 超频状态循环）；
+        /// Emg 段追加段 34 超频运行状态（只在有记录时写）。读取仍认 1～20：参数为 0、没有超频记录。
+        public const int FormatVersion = 21;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -959,6 +961,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMG2-RECL-01（FGR-EMG-115，玩法事件、不丢）：回收修复 / 拆解钳就地拆解了一块残骸（Unit = 拆解者，Other = 被击毁单位 ID，Value = 本次实际修复量（拆解钳不修复 = 0），
         /// Value2 = 残骸质量，Pos = 残骸位置，Code = 1 修复了本机 / 0 只拆解）。统计面板的维修量从这里累加。</summary>
         Salvaged = 51,
+        /// <summary>FG11-FAC-01：超频专属语法的提示（Unit=行为者，Value=预警秒数或半径，Pos=位置，Code 见 <see cref="CombatOverclockConst"/> Cue*，Code2 = 超频状态）。</summary>
+        OverclockCue = 52,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -1241,6 +1245,99 @@ namespace BinGames.Sim.Combat
         public uint ImmuneMask;
         /// <summary>腐蚀蜂群“专门腐蚀建筑”：1 = 感知范围内有己方建筑 / 炮塔时优先打它们。</summary>
         public float StructPref;
+
+        // ── FG11-FAC-01（格式 21，FG09 FGR-FAC-008 超频专属语法；任何读法都可以带，0 = 没有；运行状态在 CombatData.Overclocks）──
+        /// <summary>冲刺—过热—停机：移动时的速度倍率（&gt; 1 = 冲刺）。</summary>
+        public float OcDashSpeed;
+        /// <summary>冲刺每秒积热（热量 0～1，满 1 强制停机）。</summary>
+        public float OcDashHeat;
+        /// <summary>不冲刺 / 不开火时每秒散热（热量 0～1）。</summary>
+        public float OcCool;
+        /// <summary>停机秒数（冲刺满热）/ 排气秒数（蓄热连射满热）。</summary>
+        public float OcShutdown;
+        /// <summary>停机 / 排气期间受到的伤害 +本值（0.5 = +50%）。</summary>
+        public float OcVuln;
+        /// <summary>蓄热连射：每发积热（热量 0～1）。</summary>
+        public float OcRampHeat;
+        /// <summary>蓄热连射：满热时的射速倍率（冷却 ÷ (1 + (倍率 − 1) × 热量)）。</summary>
+        public float OcRampMax;
+        /// <summary>算力节点光环半径（米）。</summary>
+        public float OcAuraRange;
+        /// <summary>光环内友军射速 +本值（0.5 = +50%；多个节点不叠加）。</summary>
+        public float OcAuraRate;
+        /// <summary>熔断：耐久比例低于本值开始熔断（0 = 不熔断）。</summary>
+        public float OcMeltHp;
+        /// <summary>熔断引信秒数（预警，≥ 0.8）。</summary>
+        public float OcMeltFuse;
+        /// <summary>过热泄爆半径（米；熔断到点 / 死亡泄爆共用）。</summary>
+        public float OcBurstRadius;
+        /// <summary>过热泄爆伤害（波及半径内所有单位，包括它的友军，FGR-FAC-003）。</summary>
+        public float OcBurstDamage;
+        /// <summary>1 = 死亡时过热泄爆（超频猎犬）。</summary>
+        public float OcDeathBurst;
+        /// <summary>前倾加速：直线移动每秒速度 +本值（倍率）。</summary>
+        public float OcLeanRate;
+        /// <summary>前倾加速上限倍率；转向超过 <see cref="OcLeanTurn"/> 度归零。</summary>
+        public float OcLeanMax;
+        public float OcLeanTurn;
+        /// <summary>失控超算体：每种超频状态持续秒数（0 = 不循环）；换状态前 <see cref="OcModeWarn"/> 秒预警（≥ 0.8）。</summary>
+        public float OcModeCycle;
+        public float OcModeWarn;
+        /// <summary>极速态速度倍率 / 强攻态射速倍率 / 护盾态减伤比例。</summary>
+        public float OcModeSpeed;
+        public float OcModeRate;
+        public float OcModeShield;
+
+        /// <summary>带任何超频参数（生成 / 换行时登记运行状态）。</summary>
+        public readonly bool HasOverclock =>
+            OcDashHeat > 0f || OcRampHeat > 0f || OcAuraRange > 0f || OcMeltHp > 0f || OcDeathBurst > 0f || OcLeanRate > 0f || OcModeCycle > 0f;
+    }
+
+    /// <summary>
+    /// FG11-FAC-01：一个带超频参数的单位的运行状态（稀疏表，按单位 ID；快照 Emg 段 34）。阵亡后带死亡泄爆的记录留到下一个超频阶段结算再删。
+    /// </summary>
+    public struct CombatOverclock
+    {
+        public int Unit;
+        /// <summary><see cref="CombatOverclockConst"/> StateNormal / Shutdown / Vent / Melting / PendingBurst。</summary>
+        public byte State;
+        /// <summary>失控超算体当前超频状态（0 极速 / 1 强攻 / 2 护盾）。</summary>
+        public byte Mode;
+        /// <summary>1 = 本轮换状态的预警已发。</summary>
+        public byte Warned;
+        public byte Pad;
+        public float Heat;
+        public float Lean;
+        public double Until;
+        public double ModeAt;
+        public float2 Dir;
+        /// <summary>死亡泄爆的位置（PendingBurst）。</summary>
+        public double2 At;
+        /// <summary>死亡泄爆的参数行（PendingBurst；单位已不在）。</summary>
+        public int Profile;
+    }
+
+    public static class CombatOverclockConst
+    {
+        public const byte StateNormal = 0;
+        public const byte StateShutdown = 1;
+        public const byte StateVent = 2;
+        public const byte StateMelting = 3;
+        public const byte StatePendingBurst = 4;
+        public const byte ModeSpeed = 0;
+        public const byte ModeAssault = 1;
+        public const byte ModeShield = 2;
+        public const int Fields = 13;
+        /// <summary>OverclockCue 的代码：1 停机、2 排气、3 熔断预警、4 泄爆、5 换状态预警（Code2 = 下一个状态）、6 已换状态（Code2 = 新状态）、7 恢复。</summary>
+        public const byte CueShutdown = 1;
+        public const byte CueVent = 2;
+        public const byte CueMeltWarn = 3;
+        public const byte CueBurst = 4;
+        public const byte CueModeWarn = 5;
+        public const byte CueMode = 6;
+        public const byte CueRecover = 7;
+        /// <summary>蓄热连射：停火满这么多秒才开始散热（持续射击时热量只升不退，满热排气）。</summary>
+        public const float RampIdleSeconds = 1.5f;
     }
 
     /// <summary>生成一个单位的参数。</summary>

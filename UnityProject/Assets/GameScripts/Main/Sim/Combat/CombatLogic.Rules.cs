@@ -931,7 +931,7 @@ namespace BinGames.Sim.Combat
                 // 环境 / 命中注入的热不把武器积热推过 2 × 过热阈值（开火积热过热即停火自然有界；站在明火里持续吃热不能无界增长）
                 float heat = math.max(d.Heat[u], math.min(d.Heat[u] + q, 2f * wp.OverheatAt));
                 d.Heat[u] = heat;
-                if (heat >= wp.OverheatAt && !d.Has(u, CombatUnitFlags.Overheated))
+                if (heat >= OverheatAtOf(ref d, u, wp) && !d.Has(u, CombatUnitFlags.Overheated)) // FG11-FAC-01：高温辐射
                 {
                     d.Set(u, CombatUnitFlags.Overheated, true);
                     Cue(ref d, CombatEventKind.Overheat, u, 0, heat, d.Pos[u], 0);

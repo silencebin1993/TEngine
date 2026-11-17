@@ -329,6 +329,8 @@ namespace GameLogic.Campaign.Combat
             _departedUnitMachine.Clear();
             _enemyUnit.Clear();
             _unitEnemy.Clear();
+            MarkMirrorsDirty();
+            _mirrorBase.Clear(); // FG11-FAC-01：读档后复制前武器按敌人行重编（MirrorCopy）
             _markerByUnit.Clear();
             _enemyIndex.Clear();
             _enemyIndexArray = null;
@@ -619,6 +621,20 @@ namespace GameLogic.Campaign.Combat
                 p.RevealSeconds = Mathf.Max(0.8f, reveal);
                 any = true;
             }
+            // FG11-FAC-01（承接 FG-GAP-150 超频部分）：结构模块读 chs.moving condition（幅度 = 冲刺速度倍率、参数 2 = 每秒积热）与 prop.heat sense（幅度 = 满热停机秒、参数 2 = 停机受伤 +比例）
+            // = 冲刺—过热—停机（全开散热鳍冠），与超频猎犬同一套内核结算。按端口 × 角色读，不认部件 ID；吸波伪装罩的 chs.moving 是潜伏（幅度 = 静止秒），没有 prop.heat sense，不会误判。
+            if (Emergence.EmgCatalog.PartDeclAmount(structureId, "prop.heat", Emergence.EmgDirs.Read, Emergence.EmgRole.Sense, out float shutdown, out float vuln) && shutdown > 0f
+                && Emergence.EmgCatalog.PartDeclAmount(structureId, "chs.moving", Emergence.EmgDirs.Read, Emergence.EmgRole.Condition, out float dash, out float heatRate) && heatRate > 0f)
+            {
+                p.OcDashSpeed = Mathf.Max(1f, dash);
+                p.OcDashHeat = heatRate;
+                p.OcCool = heatRate * 1.25f;
+                p.OcShutdown = Mathf.Max(0.8f, shutdown);
+                p.OcVuln = Mathf.Max(0f, vuln);
+                p.LurkSeconds = 0f; // chs.moving 在这里表达冲刺，不是潜伏
+                p.RevealSeconds = 0f;
+                any = true;
+            }
             if (!string.IsNullOrEmpty(primaryId) && Content.CarrierReadings.TryGetComponent(primaryId, out GameConfig.fg.CombatComponent comp)
                 && !string.IsNullOrEmpty(comp.BehaviorOf) && comp.BehaviorOf != "none" && Content.EnemyDefs.TryGet(comp.BehaviorOf, out GameConfig.fg.MechEnemy row))
             {
@@ -640,6 +656,11 @@ namespace GameLogic.Campaign.Combat
                     p.SprayStatus = e.SprayStatus;
                     p.SprayStatusSeconds = e.SprayStatusSeconds;
                     any = e.PivotRadius > 0f || any;
+                }
+                if (row.OcRampHeat > 0f)
+                {
+                    EnemyOverclockParams.ApplyRamp(row, ref p); // FG11-FAC-01：蓄热连射枪 ← 过热炮台（每发积热 / 满热射速 / 排气 / 弱点，同一组数）
+                    any = true;
                 }
             }
             return any && Kernel != null ? ProfileIndex(p) : -1;
@@ -748,6 +769,12 @@ namespace GameLogic.Campaign.Combat
 
         /// <summary>EMG2-RULE-01：本进程发出的“路线穿过危险物质”警告条数（自检）。</summary>
         public static long HazardWarningsPosted { get; private set; }
+
+        /// <summary>FG11-FAC-01（FG-GAP-225）：教义自卫因排放会落在自己路上 / 己方建筑上而不开火、发出的警告条数（自检用）。</summary>
+        public static long SelfDefenseHeldWarnings { get; private set; }
+
+        /// <summary>FG11-FAC-01：最近一条“自卫不开火”警告的原因码（1 = 落在自己路上，2 = 落在己方建筑上）。</summary>
+        public static byte LastSelfDefenseHeldCode { get; private set; }
 
         /// <summary>斑块降级（软 / 总上限、丢弃）每次增加时记一行（调试层；O(1) / 步）。</summary>
         private void WatchPatches()
@@ -2154,6 +2181,7 @@ namespace GameLogic.Campaign.Combat
             }
             _enemyUnit[rec.EnemyInstanceId] = unit;
             _unitEnemy[unit] = rec.EnemyInstanceId;
+            MarkMirrorsDirty(); // FG11-FAC-01：镜像体名单
             return unit;
         }
 
@@ -2167,6 +2195,7 @@ namespace GameLogic.Campaign.Combat
             Kernel?.Despawn(unit);
             _enemyUnit.Remove(enemyInstanceId);
             _unitEnemy.Remove(unit);
+            MarkMirrorsDirty();
         }
 
         private int KeyIndex(string key)
@@ -2910,8 +2939,15 @@ namespace GameLogic.Campaign.Combat
                     // EMG2-RULE-01（FGR-EMG-088 / B08）：玩家显式路线穿过危险物质——警告级通知、可定位；路线不改写（内核下令时判一次）
                     string who = EmgChainView.PartyName(this, state, e.Unit);
                     string what = Emergence.EmgMatterCatalog.NameOf(e.Code) ?? GameText.Get("emg.tree.unknown");
-                    Notifications.NotificationCenter.Post("hazard_path", GameText.Format("emg.avoid.warn.body", who, what), new Vector3((float)e.Pos.x, 0f, (float)e.Pos.y));
+                    // FG11-FAC-01（FG-GAP-225）：Code2 = 1 / 2 = 教义自卫没开火——这一发的排放会落在它自己前进的路上 / 己方建筑上
+                    string key = e.Code2 == 1 ? "emg.avoid.selfdefense.path" : e.Code2 == 2 ? "emg.avoid.selfdefense.building" : "emg.avoid.warn.body";
+                    Notifications.NotificationCenter.Post("hazard_path", GameText.Format(key, who, what), new Vector3((float)e.Pos.x, 0f, (float)e.Pos.y));
                     HazardWarningsPosted++;
+                    if (e.Code2 != 0)
+                    {
+                        SelfDefenseHeldWarnings++;
+                        LastSelfDefenseHeldCode = e.Code2;
+                    }
                     return;
                 }
                 case CombatEventKind.WorkBlocked:
@@ -2990,6 +3026,10 @@ namespace GameLogic.Campaign.Combat
                     if (reactionId != null)
                     {
                         NotifyReactionFired(state, e.Unit, reactionId, e.Code2 != 0);
+                        if (e.Code2 != 0)
+                        {
+                            MirrorOnCoreFired(state, e.Unit, reactionId); // FG11-FAC-01（FGR-EMG-164）：核心固件发动 → 附近镜像体复制
+                        }
                         // FG2-FW-04：装配反应（标记跳转 / 熔穿过载）同样进反应日志、伤害归因的次数与首次触发（慢放 / 图鉴 / 弹字）。
                         ReactionFeedback.OnAssemblyReaction(this, state, reactionId, e.Unit, e.Other, new Vector2((float)e.Pos.x, (float)e.Pos.y));
                     }
@@ -3065,6 +3105,10 @@ namespace GameLogic.Campaign.Combat
                     // EMG2-PHS-01（FGR-EMG-101，B07）：相态进入 / 被打断——声音 + 字幕；画面是头顶相态图标（内核图标作业）。
                     EmgPhaseFeedback.OnCue(this, e, at);
                     return;
+                case CombatEventKind.OverclockCue:
+                    // FG11-FAC-01（FGR-FAC-008 ①）：停机 / 排气 / 熔断预警 / 泄爆 / 三态切换预警——声音 + 字幕 + 画面。
+                    OverclockCombatFeedback.OnCue(this, e, at);
+                    return;
                 case CombatEventKind.ClarityCue:
                     // FG10-FAC-01（FGR-FAC-008 ①）：喷嘴蓄压 / 枢轴喷灌蓄压 / 自爆引信 / 投放预警（≥ 0.8 秒）与喷出 / 爆燃 / 冻结 / 分裂 / 冲洗 / 酸沼腐蚀——声音 + 字幕 + 画面。
                     ClarityCombatFeedback.OnCue(this, e, at);
@@ -3133,6 +3177,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
+            MirrorOnCoreFired(state, unit, reactionId); // FG11-FAC-01（FGR-EMG-164）：核心固件发动 → 附近镜像体复制
             // 声明轨上核心固件的指令只可能来自信号带进来的接入口（核心固件放不进机器 / 炮塔电路，FGR-SIG-012），程序又是开火那一刻编进弹体的——
             // 所以这次发动按“开火时门控”结算：在飞弹体等信号离开后才命中也照样记冷却（不给“打完立刻切走”留空子，与旧轨 gatedAtFire 同口径）。
             if (_unitTurret.TryGetValue(unit, out int serial))
@@ -3526,6 +3571,15 @@ namespace GameLogic.Campaign.Combat
         }
 
         /// <summary>熔渣热区（派生量；家园 / 星球内核按规划层的危害区写入）。</summary>
+        /// <summary>FG11-FAC-01：写入高温辐射区（派生量，读档后由 HeatRadiationService 重写）。</summary>
+        public void SetHeatRadiation(IReadOnlyList<float4> shapes, float capMult, float dissMult)
+        {
+            if (!IsDisposed)
+            {
+                Kernel.SetHeatRadiation(shapes, capMult, dissMult);
+            }
+        }
+
         public void SetSlagZones(IReadOnlyList<float3> circles, float mult)
         {
             if (!IsDisposed)
@@ -3715,6 +3769,8 @@ namespace GameLogic.Campaign.Combat
             _departedUnitMachine.Clear();
             _enemyUnit.Clear();
             _unitEnemy.Clear();
+            MarkMirrorsDirty();
+            _mirrorBase.Clear(); // FG11-FAC-01：读档后复制前武器按敌人行重编（MirrorCopy）
             _markerByUnit.Clear();
             _unitLabels.Clear();
             _weaponIndex.Clear();

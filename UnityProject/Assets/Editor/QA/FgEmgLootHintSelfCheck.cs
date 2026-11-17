@@ -525,6 +525,8 @@ namespace GameLogic.EditorTools
             ("comp_jammer", "silent", "combat_component"), ("struct_stealth_cloak", "silent", "structure_module"),
             ("comp_brace_mortar", "foundry", "combat_component"), ("struct_armor_skirt", "foundry", "structure_module"),
             ("comp_spray_arm", "clarity", "combat_component"), ("comp_ring_sprinkler", "clarity", "combat_component"),
+            // FG11-FAC-01（FG-GAP-150 超频部分）：蓄热连射枪 / 全开散热鳍冠同一条路径（专属行为见 FgOverclockFactionSelfCheck E 段）
+            ("comp_heat_repeater", "overclock", "combat_component"), ("struct_fin_crown", "overclock", "structure_module"),
         };
 
         private static string _cloakBp;
@@ -581,7 +583,7 @@ namespace GameLogic.EditorTools
                     bad.Add(f.Id);
                 }
             }
-            Expect(bad.Count == 0, $"E1 6 个标志组件（静默 / 铸造 / 澄净各 2）都是现有载体或结构模块的阵营变体、带阵营键、新档未掌握，专属行为声明过准入；不合格：{string.Join("、", bad)}");
+            Expect(bad.Count == 0, $"E1 8 个标志组件（静默 / 铸造 / 澄净 / 超频各 2）都是现有载体或结构模块的阵营变体、带阵营键、新档未掌握，专属行为声明过准入；不合格：{string.Join("、", bad)}");
 
             // E2 每个：精英三选一掉落 → 解析台破解 → 破解前写不进蓝图、破解后蓝图量产并写阵营标签 → 重复获得只加库存
             List<LootPickDef> fill = LootPickCatalog.Rows.Where(r => r.Id == "pick.any.alloy" || r.Id == "pick.any.electronic").ToList();
@@ -632,7 +634,7 @@ namespace GameLogic.EditorTools
                 }
             }
             LootPickCatalog.ResetForTests();
-            Expect(okCount == Flags.Length, $"E2 6 个标志组件各走一次 掉落 → 破解 → 蓝图量产（写阵营标签）→ 重复只加库存：{string.Join("；", steps)}");
+            Expect(okCount == Flags.Length, $"E2 8 个标志组件各走一次 掉落 → 破解 → 蓝图量产（写阵营标签）→ 重复只加库存：{string.Join("；", steps)}");
 
             // E3 / E4 专属行为生效（真实内核）：吸波伪装罩静止满幅度秒潜伏；装甲裙板正面减伤
             CombatSite site = WorldSimulation.Home.Combat;

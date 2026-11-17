@@ -207,7 +207,7 @@ namespace GameLogic.EditorTools
             EmgCompiled c = EmgCatalog.Current;
             CombatConfig cfg = CombatSite.ConfigFromTuning();
             bool port = c.PortIdByCode.TryGetValue(EmgConst.PortHack, out string pid) && pid == "hij.hack";
-            Expect(c.EffectiveStage == 4 && EmgCatalog.ImplementedStage == 4 && CombatConst.FormatVersion == 20 && port,
+            Expect(c.EffectiveStage == 4 && EmgCatalog.ImplementedStage == 4 && CombatConst.FormatVersion >= 20 && port,
                 $"emg.stage 缺省 4（生效 {c.EffectiveStage}、已实现 {EmgCatalog.ImplementedStage}）；快照格式 {CombatConst.FormatVersion}；内核端口码 {EmgConst.PortHack} = 表 {pid}");
             Expect(Mathf.Approximately(cfg.EmgHijackSeconds, 30f) && Mathf.Approximately(cfg.EmgHijackHpRatio, 0.3f) && cfg.EmgHijackMax == 2 && Mathf.Approximately(cfg.EmgHijackEliteResist, 1f),
                 $"fg.TbHomeTuning emg.hijack.*进内核配置：时长 {cfg.EmgHijackSeconds}s、耐久 {cfg.EmgHijackHpRatio}、上限 {cfg.EmgHijackMax}、精英 / 首领入侵抗性 {cfg.EmgHijackEliteResist}");
@@ -269,6 +269,28 @@ namespace GameLogic.EditorTools
             Expect(rows.Count > 0 && bad.Count == 0 && legacy.Count == 0 && compiled + noFw.Count == rows.Count && compiled > 0,
                 $"全部 {rows.Count} 个 assembled 敌人行逐行：装了固件的 {compiled} 个与玩家同一编译器编出程序并登记进地点程序表、LegacyOwners 为空（旧 readFields 不再结算）；没有固件的 {noFw.Count} 个（{string.Join("、", noFw)}）只有基础读法"
                 + (bad.Count > 0 ? "；未编出：" + string.Join("、", bad) : string.Empty) + (legacy.Count > 0 ? "；回落旧轨：" + string.Join("；", legacy) : string.Empty));
+
+            // FG11-FAC-01 审查修复（DEBT-FG9FAC02-04 全表装配完整性）：带武器的非首领、非结构敌人都带 assembled 且拆得出作战组件；
+            // 豁免只有首领（组件列 = 首领固定奖励、武器由首领状态机驱动）、结构 / 无武器单位，以及澄清派（FG10-FAC-01 由 Clarity 读法驱动，不在本 DEBT 范围）
+            var unassembled = new List<string>();
+            var exempt = new List<string>();
+            foreach (MechEnemy row in EnemyDefs.Rows)
+            {
+                if (row.WeaponDamage <= 0f || EnemyDefs.HasTag(row, EnemyDefs.TagStructure) || row.Tier == EnemyDefs.TierBoss || row.Faction == "clarity")
+                {
+                    if (row.WeaponDamage > 0f)
+                    {
+                        exempt.Add(row.Id);
+                    }
+                    continue;
+                }
+                if (!EnemyDefs.HasTag(row, EnemyDefs.TagAssembled) || !EnemySpawnBuilder.TryAssembly(row, out _, out _))
+                {
+                    unassembled.Add(row.Id);
+                }
+            }
+            Expect(unassembled.Count == 0 && exempt.Count > 0,
+                $"全表装配完整性（DEBT-FG9FAC02-04）：带武器的非首领、非结构、非澄清派敌人全部 assembled 且拆得出作战组件（缺：{(unassembled.Count == 0 ? "无" : string.Join("、", unassembled))}）；豁免 {string.Join("、", exempt)}");
 
             // EMG4-CLEAN-01：原“emg.stage = 0 回滚对照（编不出程序）”改负向：填 0 不再生效
             EmgSource zero = EmgCatalog.FromTables();
@@ -602,7 +624,7 @@ namespace GameLogic.EditorTools
             CombatLoadResult lr = b.Load(snap);
             a.TryGetHijack(View(a, foe).Id, out int ha, out float ra, out int qa);
             b.TryGetHijack(View(b, foe).Id, out int hb, out float rb, out int qb);
-            Expect(lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == 20 && a.StateHash() == b.StateHash() && ha == hb && Mathf.Approximately(ra, rb) && qa == qb && b.HijackCount == 1
+            Expect(lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && a.StateHash() == b.StateHash() && ha == hb && Mathf.Approximately(ra, rb) && qa == qb && b.HijackCount == 1
                    && View(b, foe).Faction == CombatFaction.Player && View(b, foe).Behavior == CombatBehavior.Hijacked,
                 $"劫持中途存读档（格式 {CombatKernel.PeekFormat(snap)}）：StateHash 一致、劫持者 / 剩余 {ra:0.##}s→{rb:0.##}s / 占用条数一致，阵营与行为随单位段恢复");
             var ea = new List<CombatEvent>();

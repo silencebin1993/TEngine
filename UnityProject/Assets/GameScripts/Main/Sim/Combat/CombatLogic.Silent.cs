@@ -417,7 +417,7 @@ namespace BinGames.Sim.Combat
                     return;
                 }
                 int locked = d.SlotOf(cmd.Target);
-                d.Cycle[i] = EffectiveCooldown(wp);
+                d.Cycle[i] = UnitCooldown(ref d, i, wp);
                 if (locked >= 0 && d.IsAlive(locked) && d.Has(locked, CombatUnitFlags.Targetable)
                     && math.distance(pos, d.Pos[locked]) <= EngageRange(ref d, i, wp) + d.Radius[locked] + 0.5f)
                 {
@@ -468,7 +468,7 @@ namespace BinGames.Sim.Combat
                 Cue(ref d, CombatEventKind.Telegraph, i, d.Id[t], 0f, pos, 0);
                 return;
             }
-            d.Cycle[i] = EffectiveCooldown(wp);
+            d.Cycle[i] = UnitCooldown(ref d, i, wp);
             UnitAttack(ref d, i, t, wp);
         }
 

@@ -40,6 +40,8 @@ namespace BinGames.Sim.Combat
         /// <summary>EMGR-CMD-01（FG-GAP-142）：<see cref="CombatSiegeUnit.SelfDefense"/> 的位——热更层写“交给教义自卫”，内核写“此刻射程内有敌人、正按教义自卫交战”（悬停来源）。</summary>
         public const byte SelfDefenseOn = 1;
         public const byte SelfDefenseEngaged = 2;
+        /// <summary>FG11-FAC-01（FG-GAP-225）：本次交战已发过“自卫不开火：排放会落在自己路上 / 己方建筑上”的警告（交战结束清掉）。</summary>
+        public const byte SelfDefenseWarned = 4;
     }
 
     /// <summary>突袭单位的职能（<see cref="CombatSiegeUnit.Role"/>）。0 = 不是攻城单位（Demo 敌人、原型突袭者照旧）。</summary>
@@ -1652,7 +1654,7 @@ namespace BinGames.Sim.Combat
             bool inRange = t >= 0 && EdgeDistance(ref d, i, t) <= range;
             if (inRange && cycle <= 0f)
             {
-                d.Cycle[i] = CombatLogic.EffectiveCooldown(wp);
+                d.Cycle[i] = CombatLogic.UnitCooldown(ref d, i, wp);
                 CombatLogic.UnitAttack(ref d, i, t, wp);
             }
 
@@ -1702,11 +1704,103 @@ namespace BinGames.Sim.Combat
         public static void ClearSelfDefenseEngaged(ref CombatData d, int i)
         {
             CombatSiegeUnit su = d.Siege[i];
-            if ((su.SelfDefense & CombatSiegeConst.SelfDefenseEngaged) != 0)
+            const byte bits = CombatSiegeConst.SelfDefenseEngaged | CombatSiegeConst.SelfDefenseWarned;
+            if ((su.SelfDefense & bits) != 0)
             {
-                su.SelfDefense = (byte)(su.SelfDefense & ~CombatSiegeConst.SelfDefenseEngaged);
+                su.SelfDefense = (byte)(su.SelfDefense & ~bits);
                 d.Siege[i] = su;
             }
+        }
+
+        /// <summary>
+        /// FG11-FAC-01（FG-GAP-225）：教义自卫这一发会不会把对本机有害的出手排放（根节点上读 evt.fire 的 emit 写端 = 沿途排放，见 CombatLogic.EmgTrailEmit）
+        /// 铺在本机前进的路上（返回 1）或己方建筑上（返回 2）；不会返回 0。只按端口 / 角色 / 动词与物质规则判（FGR-EMG-013），段点与 EmgTrailEmit 同一算法。
+        /// 没有程序 / 斑块层没开 / 程序里没有沿途排放时 O(1) 返回；有时 O(节点指令 + 单位)，只在自卫冷却到点的那一步。
+        /// </summary>
+        private static byte SelfDefenseTrailUnsafe(ref CombatData d, int i, in CombatWeapon wp, int target, out byte matter, out float radius, out double2 at)
+        {
+            matter = 0;
+            radius = 0f;
+            at = d.Pos[target];
+            if (wp.Program < 0 || wp.Program >= d.EmgPrograms.Length || !CombatLogic.EmgPatchesOn(ref d))
+            {
+                return 0;
+            }
+            EmgProgram p = d.EmgPrograms[wp.Program];
+            if (p.NodeCount < 1 || p.FirstNode >= d.EmgNodes.Length)
+            {
+                return 0;
+            }
+            EmgNode n = d.EmgNodes[p.FirstNode];
+            int end = math.min(n.FirstInstr + n.InstrCount, d.EmgInstrs.Length);
+            ushort firePort = (ushort)(EmgConst.EventPortBase + (int)EmgEventKind.Fire);
+            int emit = d.Config.EmgVerbEmit;
+            float step = 0f;
+            for (int k = n.FirstInstr; k < end && matter == 0; k++)
+            {
+                EmgInstr x = d.EmgInstrs[k];
+                if ((x.Flags & EmgInstrFlags.RootKernel) == 0 || (x.Flags & EmgInstrFlags.Overflow) != 0 || x.Role <= EmgConst.RoleLastRead || x.Verb != emit)
+                {
+                    continue;
+                }
+                byte m = EmgMatterConst.MatterOfPort(x.Port);
+                float a = (x.Flags & EmgInstrFlags.MagA) != 0 ? x.A * x.Amount : x.A;
+                if (m == 0 || !(a > 0f) || !CombatLogic.EmgPatchHarmful(ref d, new CombatZone { Matter = m, Faction = CombatFaction.Neutral }, i))
+                {
+                    continue;
+                }
+                for (int j = n.FirstInstr; j < end; j++)
+                {
+                    EmgInstr r = d.EmgInstrs[j];
+                    if (r.Ordinal == x.Ordinal && r.Role == EmgConst.RoleTrigger && r.Port == firePort)
+                    {
+                        matter = m;
+                        radius = a;
+                        step = x.Param2 > 0f ? x.Param2 : math.max(1f, 2f * a);
+                        break;
+                    }
+                }
+            }
+            if (matter == 0)
+            {
+                return 0;
+            }
+            double2 pos = d.Pos[i], to = d.Pos[target];
+            double2 dir = math.normalizesafe(to - pos);
+            double2 from = pos + dir * (d.Radius[i] + radius);
+            bool path = math.dot(to - from, dir) > 0.0;
+            int segs = path ? math.clamp((int)math.floor(math.distance(from, to) / step), 1, 4) : 1;
+            CombatCommand c = d.Cmd[i];
+            bool moving = c.Kind == CombatCommandKind.Move || c.Kind == CombatCommandKind.WorkMove;
+            double2 goal = c.Pos;
+            for (int s = 0; s <= segs; s++)
+            {
+                double2 q = s < segs && path ? math.lerp(from, to, (s + 0.5) / segs) : to; // 末项 = 终结点（静止 / 非弹道时整份堆在这里）
+                if (moving && math.dot(q - pos, goal - pos) > 0.0 && SegmentDistance(q, pos, goal) <= radius + d.Radius[i])
+                {
+                    at = q;
+                    return 1;
+                }
+                for (int k = 0; k < d.Count; k++)
+                {
+                    if (k != i && d.IsAlive(k) && d.Faction[k] == (byte)CombatFaction.Player
+                        && (d.Kind[k] == (byte)CombatUnitKind.Structure || d.Kind[k] == (byte)CombatUnitKind.Turret)
+                        && math.distance(q, d.Pos[k]) <= radius + d.Radius[k])
+                    {
+                        at = q;
+                        return 2;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        private static double SegmentDistance(double2 q, double2 a, double2 b)
+        {
+            double2 ab = b - a;
+            double len2 = math.lengthsq(ab);
+            double t = len2 > 1e-12 ? math.clamp(math.dot(q - a, ab) / len2, 0.0, 1.0) : 0.0;
+            return math.distance(q, a + ab * t);
         }
 
         /// <summary>
@@ -1774,7 +1868,25 @@ namespace BinGames.Sim.Combat
                 if (best >= 0)
                 {
                     gs.SelfDefenseEngaged++;
+                    byte unsafeWhy = 0, unsafeMatter = 0;
+                    float unsafeR = 0f;
+                    double2 unsafeAt = default;
                     if (su.HealCd <= 0f)
+                    {
+                        unsafeWhy = SelfDefenseTrailUnsafe(ref d, i, d.Weapons[w], best, out unsafeMatter, out unsafeR, out unsafeAt);
+                    }
+                    if (unsafeWhy != 0)
+                    {
+                        // FG11-FAC-01（FG-GAP-225，FGR-EMG-088“教义自选站位避险”口径；按推荐默认执行，待用户确认）：这一发的出手排放会落在本机前进的路上 / 己方建筑上——
+                        // 教义自卫不开火，同一次交战只发一次可定位警告；玩家显式右键敌人 = 攻击不受影响（不走这里）。
+                        su.HealCd = 0.5f;
+                        if ((su.SelfDefense & CombatSiegeConst.SelfDefenseWarned) == 0)
+                        {
+                            su.SelfDefense |= CombatSiegeConst.SelfDefenseWarned;
+                            CombatLogic.Gameplay(ref d, CombatEventKind.HazardPath, i, d.Id[best], unsafeR, 0f, unsafeAt, unsafeMatter, unsafeWhy);
+                        }
+                    }
+                    else if (su.HealCd <= 0f)
                     {
                         bool gated = CombatLogic.PlayerFireGated(ref d, i);
                         CombatFireResult r = CombatLogic.FireAt(ref d, i, best);
@@ -1784,7 +1896,7 @@ namespace BinGames.Sim.Combat
                         }
                         else if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming || r == CombatFireResult.Launched || r == CombatFireResult.Covered)
                         {
-                            su.HealCd = math.max(0.05f, CombatLogic.EffectiveCooldown(d.Weapons[w]));
+                            su.HealCd = math.max(0.05f, CombatLogic.UnitCooldown(ref d, i, d.Weapons[w])); // FG11-FAC-01：超频冷却倍率（蓄热连射）与编队攻击同一口径
                             gs.SelfDefenseShots++;
                         }
                         else
@@ -1796,7 +1908,7 @@ namespace BinGames.Sim.Combat
                 }
                 else
                 {
-                    su.SelfDefense = (byte)(su.SelfDefense & ~CombatSiegeConst.SelfDefenseEngaged);
+                    su.SelfDefense = (byte)(su.SelfDefense & ~(CombatSiegeConst.SelfDefenseEngaged | CombatSiegeConst.SelfDefenseWarned));
                 }
                 su.HealCd = math.max(su.HealCd, -1f);
                 d.Siege[i] = su;
@@ -1821,7 +1933,7 @@ namespace BinGames.Sim.Combat
                         // EMG1-ENT-01：Covered = 开过火、被残骸 / 掩体挡下，冷却照走（与热更层调用方同一口径）
                         if (r == CombatFireResult.Ok || r == CombatFireResult.StillAiming || r == CombatFireResult.Launched || r == CombatFireResult.Covered)
                         {
-                            su.HealCd = math.max(0.05f, CombatLogic.EffectiveCooldown(wp));
+                            su.HealCd = math.max(0.05f, CombatLogic.UnitCooldown(ref d, i, wp)); // FG11-FAC-01：超频冷却倍率与编队攻击同一口径
                             gs.GuardShots++;
                         }
                         else
@@ -1902,7 +2014,7 @@ namespace BinGames.Sim.Combat
             {
                 if (cycle <= 0f)
                 {
-                    d.Cycle[i] = CombatLogic.EffectiveCooldown(wp);
+                    d.Cycle[i] = CombatLogic.UnitCooldown(ref d, i, wp);
                     CombatLogic.UnitAttack(ref d, i, t, wp);
                 }
                 return;

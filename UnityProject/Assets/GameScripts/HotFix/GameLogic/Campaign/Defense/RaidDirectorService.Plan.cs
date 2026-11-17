@@ -646,6 +646,9 @@ namespace GameLogic.Campaign.Defense
             }
         }
 
+        /// <summary>自检入口：与排定时同一个 <see cref="ChooseCounter"/>。</summary>
+        public static void ChooseCounterForTests(CampaignState s, RaidPlanRecord p) => ChooseCounter(s, p);
+
         private static void ChooseCounter(CampaignState s, RaidPlanRecord p)
         {
             // FG10-FAC-01（FGR-FAC-004“突袭在出发时按当天的状态生成”）：澄净的突袭反制取当天锁定的阵营反制（燃烧 / 引信 / 电磁），映射到 fg.TbRaidCounter 的 clarity.* 行。
@@ -654,6 +657,14 @@ namespace GameLogic.Campaign.Defense
                 RaidCounter cc = Regions.ClarityCounterService.RaidCounterFor(Regions.ClarityCounterService.Locked(s));
                 p.CounterCategory = cc?.Category ?? string.Empty;
                 p.Counter = cc?.Id ?? string.Empty;
+                return;
+            }
+            if (p.Faction == Content.EnemyDefs.FactionOverclock)
+            {
+                // FG11-FAC-01（FGR-FAC-004）：超频同澄净——突袭反制取当天锁定的阵营反制（按在用程序的写端口判），映射到 fg.TbRaidCounter 的 overclock.* 行
+                RaidCounter oc = Regions.OverclockCounterService.RaidCounterFor(Regions.OverclockCounterService.Locked(s));
+                p.CounterCategory = oc?.Category ?? string.Empty;
+                p.Counter = oc?.Id ?? string.Empty;
                 return;
             }
             string cat = TopDefenseCategory(s);

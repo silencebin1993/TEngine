@@ -618,7 +618,7 @@ namespace BinGames.Sim.Combat
             {
                 if (c0 <= 0f && facing)
                 {
-                    d.Cycle[i] = EffectiveCooldown(wp);
+                    d.Cycle[i] = UnitCooldown(ref d, i, wp);
                     UnitAttack(ref d, i, t, wp);
                 }
                 return;

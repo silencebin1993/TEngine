@@ -257,6 +257,19 @@ namespace GameLogic.Campaign.Feedback
                 CaptionKey = "clarity.cue.spray_warn_cryo", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 液氮喷淋预警（FGR-FAC-008）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayCryo, SfxId = "sfx_signal_jam", Tag = "澄净", Caption = "液氮喷出：地面留下液氮池", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.spray_cryo", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮喷淋" });
+            // FG11-FAC-01（FGR-FAC-002 / 008 ①）：超频专属行为的预警与结果（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG11FAC01-01）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockShutdown, SfxId = "sfx_alarm_warning", Tag = "超频", Caption = "冲刺过热：强制停机，这几秒受到的伤害增加", TagKey = "overclock.cue.tag",
+                CaptionKey = "overclock.cue.shutdown", Tone = FeedbackTone.Info, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 冲刺—过热—停机（FGR-FAC-008）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockVent, SfxId = "sfx_alarm_warning", Tag = "超频", Caption = "满热排气：这几秒不能开火、受到的伤害增加", TagKey = "overclock.cue.tag",
+                CaptionKey = "overclock.cue.vent", Tone = FeedbackTone.Info, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 蓄热连射排气窗口" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMeltWarn, SfxId = "sfx_alarm_warning", Shake = 0.2f, Tag = "超频", Caption = "熔断开始：2 秒后大范围爆炸——远离，或者一口气打死它", TagKey = "overclock.cue.tag",
+                CaptionKey = "overclock.cue.melt_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG11-FAC-01 熔断者预警（卡片：预警明显）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockBurst, SfxId = "sfx_enemy_cannon", Shake = 0.35f, Tag = "超频", Caption = "过热泄爆：波及周围所有单位", TagKey = "overclock.cue.tag",
+                CaptionKey = "overclock.cue.burst", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG11-FAC-01 过热泄爆" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockModeWarn, SfxId = "sfx_alarm_warning", Tag = "超频", Caption = "失控超算体即将切换状态", TagKey = "overclock.cue.tag",
+                CaptionKey = "overclock.cue.mode_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 三态切换预警（颜色 + 音效）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMode, SfxId = "sfx_boss_phase", Tag = "超频", Caption = "失控超算体切换状态", TagKey = "overclock.cue.tag",
+                CaptionKey = "overclock.cue.mode", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 三态切换" });
 
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });

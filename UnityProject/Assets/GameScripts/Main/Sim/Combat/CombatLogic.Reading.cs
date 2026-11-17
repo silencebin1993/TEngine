@@ -173,6 +173,9 @@ namespace BinGames.Sim.Combat
         /// （编队攻击命令的冷却在 TickCommand 里乘同一倍率）。</summary>
         internal static float EffectiveCooldown(in CombatWeapon wp) => wp.Cooldown * (wp.Reading.CooldownScale > 0f ? wp.Reading.CooldownScale : 1f);
 
+        /// <summary>FG11-FAC-01：某个单位这一发之后的冷却 = 武器冷却 × 超频冷却倍率（蓄热连射 / 强攻态 / 算力节点光环；没有超频记录 = 1）。</summary>
+        internal static float UnitCooldown(ref CombatData d, int i, in CombatWeapon wp) => EffectiveCooldown(wp) * OcCooldownFactor(ref d, i);
+
         /// <summary>蓄力读法：出手间隔倍率 &gt; 1（少发高伤）。直控点击据此等蓄满。</summary>
         internal static bool IsCharged(in CombatWeapon wp) => wp.Reading.CooldownScale > 1f && wp.Cooldown > 0f;
 
@@ -200,6 +203,10 @@ namespace BinGames.Sim.Combat
             if (IsImmobile(ref d, a))
             {
                 return ImmobileFire(ref d, a); // FG10-FAC-01：冻住时不能开火；EMG2-PHS-01：麻痹同样不能开火（结果码 Stunned）
+            }
+            if (OcHolds(ref d, a))
+            {
+                return CombatFireResult.Overheated; // FG11-FAC-01：冲刺满热停机 / 蓄热连射排气中（弱点窗口）不能开火
             }
             if (IsContactCarrier(wp.Reading)
                 && math.distance(d.Pos[a], d.Pos[t]) > wp.Reading.Area + d.Radius[a] + d.Radius[t])
@@ -321,7 +328,7 @@ namespace BinGames.Sim.Combat
             }
             float heat = d.Heat[a] + shot;
             d.Heat[a] = heat;
-            if (wp.OverheatAt > 0f && heat >= wp.OverheatAt && !d.Has(a, CombatUnitFlags.Overheated))
+            if (wp.OverheatAt > 0f && heat >= OverheatAtOf(ref d, a, wp) && !d.Has(a, CombatUnitFlags.Overheated)) // FG11-FAC-01：高温辐射区热量上限 -25%
             {
                 d.Set(a, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, a, 0, heat, d.Pos[a], 0);
@@ -991,7 +998,7 @@ namespace BinGames.Sim.Combat
         /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
         internal static float SlowedSpeed(ref CombatData d, int i, float speed)
         {
-            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i); // FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
+            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i) * OcSpeedFactor(ref d, i); // FG11-FAC-01：冲刺 / 前倾加速 / 极速态 / 停机 = 0；FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
             if (d.StatusSlow[i] <= 0f || !d.StatusActive(i, d.Scalars[0].Time))
             {
                 return speed;

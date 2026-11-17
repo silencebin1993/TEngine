@@ -216,7 +216,7 @@ namespace BinGames.Sim.Combat
                 }
                 _d.RouteLen[i] = count;
                 _d.RouteIdx[i] = 0;
-                double2 target = _d.Behavior[i] == (byte)CombatBehavior.Raider ? _d.Home[i] : _d.Cmd[i].Pos;
+                double2 target = _d.Behavior[i] == (byte)CombatBehavior.Raider && _d.Cmd[i].Target == 0 ? _d.Home[i] : _d.Cmd[i].Pos; // FG-GAP-223：追击路线的终点是目标
                 int2 tc = CombatLogic.CellOf(target);
                 _d.RouteEnd[i] = tc.x == end.x && tc.y == end.y ? target : new double2(end.x, end.y);
                 _d.NavSt[i] = (byte)CombatNavState.Following;
@@ -468,6 +468,10 @@ namespace BinGames.Sim.Combat
                     cu.TrailT = cp.TrailInterval;
                     _d.Clarity[slot] = cu;
                     CombatLogic.SyncImmuneResist(ref _d, slot); // EMG2-PHS-01（ADR ⑭ #9）：免疫位同时表达为抗性覆盖
+                }
+                if (cp.HasOverclock)
+                {
+                    CombatLogic.OcRegister(ref _d, slot); // FG11-FAC-01：超频运行状态（稀疏表）
                 }
             }
             return id;
@@ -1178,6 +1182,7 @@ namespace BinGames.Sim.Combat
                 return true;
             }
             _d.BProfile[i] = profile;
+            CombatLogic.OcRegister(ref _d, i); // FG11-FAC-01：标志组件装卸 → 超频记录随之登记 / 删除
             CombatSilentUnit sl = _d.Silent[i];
             sl.Still = 0f;
             sl.Reveal = 0f;
@@ -3167,6 +3172,12 @@ namespace BinGames.Sim.Combat
                 staging.SlagZones.Add(_d.SlagZones[i]);
             }
             staging.SlagMult = _d.SlagMult;
+            for (int i = 0; i < _d.RadZones.Length; i++)
+            {
+                staging.RadZones.Add(_d.RadZones[i]); // FG11-FAC-01：高温辐射区是派生量（热更层写），读档沿用当前的
+            }
+            staging.RadCapMult = _d.RadCapMult;
+            staging.RadDissMult = _d.RadDissMult;
             for (int i = 0; i < _d.MeltGround.Length; i++)
             {
                 staging.MeltGround.Add(_d.MeltGround[i]); // EMG4-TER-01：可熔地面圆是派生量（热更层按生成规则写），读档沿用当前的
@@ -4415,11 +4426,45 @@ namespace BinGames.Sim.Combat
                 w.Write(p.ImmuneMask);
                 w.Write(p.StructPref);
             }
+            if (format >= 21)
+            {
+                // FG11-FAC-01（格式 21）：超频专属语法参数。
+                w.Write(p.OcDashSpeed);
+                w.Write(p.OcDashHeat);
+                w.Write(p.OcCool);
+                w.Write(p.OcShutdown);
+                w.Write(p.OcVuln);
+                w.Write(p.OcRampHeat);
+                w.Write(p.OcRampMax);
+                w.Write(p.OcAuraRange);
+                w.Write(p.OcAuraRate);
+                w.Write(p.OcMeltHp);
+                w.Write(p.OcMeltFuse);
+                w.Write(p.OcBurstRadius);
+                w.Write(p.OcBurstDamage);
+                w.Write(p.OcDeathBurst);
+                w.Write(p.OcLeanRate);
+                w.Write(p.OcLeanMax);
+                w.Write(p.OcLeanTurn);
+                w.Write(p.OcModeCycle);
+                w.Write(p.OcModeWarn);
+                w.Write(p.OcModeSpeed);
+                w.Write(p.OcModeRate);
+                w.Write(p.OcModeShield);
+            }
         }
 
         /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
         private static bool ProfileValid(in CombatBehaviorProfile p)
         {
+            // FG11-FAC-01：超频参数不得为负 / 非数（热量与比例字段另有上限）。
+            if (!NonNeg(p.OcDashSpeed) || !NonNeg(p.OcDashHeat) || !NonNeg(p.OcCool) || !NonNeg(p.OcShutdown) || !NonNeg(p.OcVuln) || !NonNeg(p.OcRampHeat)
+                || !NonNeg(p.OcRampMax) || !NonNeg(p.OcAuraRange) || !NonNeg(p.OcAuraRate) || !NonNeg(p.OcMeltHp) || p.OcMeltHp > 1f || !NonNeg(p.OcMeltFuse)
+                || !NonNeg(p.OcBurstRadius) || !NonNeg(p.OcBurstDamage) || !NonNeg(p.OcDeathBurst) || !NonNeg(p.OcLeanRate) || !NonNeg(p.OcLeanMax) || !NonNeg(p.OcLeanTurn)
+                || !NonNeg(p.OcModeCycle) || !NonNeg(p.OcModeWarn) || !NonNeg(p.OcModeSpeed) || !NonNeg(p.OcModeRate) || !NonNeg(p.OcModeShield) || p.OcModeShield > 1f)
+            {
+                return false;
+            }
             if (!NonNeg(p.LurkSeconds) || !NonNeg(p.RevealSeconds) || !NonNeg(p.RevealRange) || !NonNeg(p.DeflectRadius) || !NonNeg(p.DeflectWarn)
                 || !NonNeg(p.DeflectUp) || !NonNeg(p.DeflectGap) || !NonNeg(p.DeflectReflect) || !NonNeg(p.SeverRange) || !NonNeg(p.SeverSeconds)
                 || !NonNeg(p.SeverCooldown))
@@ -4675,6 +4720,31 @@ namespace BinGames.Sim.Combat
                 p.AcidResist = r.ReadSingle();
                 p.ImmuneMask = r.ReadUInt32();
                 p.StructPref = r.ReadSingle();
+            }
+            if (format >= 21)
+            {
+                p.OcDashSpeed = r.ReadSingle();
+                p.OcDashHeat = r.ReadSingle();
+                p.OcCool = r.ReadSingle();
+                p.OcShutdown = r.ReadSingle();
+                p.OcVuln = r.ReadSingle();
+                p.OcRampHeat = r.ReadSingle();
+                p.OcRampMax = r.ReadSingle();
+                p.OcAuraRange = r.ReadSingle();
+                p.OcAuraRate = r.ReadSingle();
+                p.OcMeltHp = r.ReadSingle();
+                p.OcMeltFuse = r.ReadSingle();
+                p.OcBurstRadius = r.ReadSingle();
+                p.OcBurstDamage = r.ReadSingle();
+                p.OcDeathBurst = r.ReadSingle();
+                p.OcLeanRate = r.ReadSingle();
+                p.OcLeanMax = r.ReadSingle();
+                p.OcLeanTurn = r.ReadSingle();
+                p.OcModeCycle = r.ReadSingle();
+                p.OcModeWarn = r.ReadSingle();
+                p.OcModeSpeed = r.ReadSingle();
+                p.OcModeRate = r.ReadSingle();
+                p.OcModeShield = r.ReadSingle();
             }
             return p;
         }

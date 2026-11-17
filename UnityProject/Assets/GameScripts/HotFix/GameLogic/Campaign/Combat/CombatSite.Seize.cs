@@ -19,6 +19,9 @@ namespace GameLogic.Campaign.Combat
         /// <summary>复制品实际持有的指令条数（= 占镜像体自己的刷写带宽）与因带宽不够从末尾截掉的条数。</summary>
         public int Held;
         public int Dropped;
+        /// <summary>FG11-FAC-01 审查修复：编译期就没复制进来的——容量 C(1) 溢出的指令条数（混合固件按展开后计）与触发器子载荷“代际已满”的处数。</summary>
+        public int Overflowed;
+        public int GenFull;
         public int Weapon = -1;
         public Emergence.EmgProgramResult Program;
     }
@@ -201,8 +204,14 @@ namespace GameLogic.Campaign.Combat
         /// 触发器的子载荷按容量截断），占镜像体自己的刷写带宽（剩余带宽不够从末尾截断，截到 0 条 = 只有基础攻击），换上带复制品的武器。
         /// <paramref name="sourceUnitId"/> 自己持有的就是复制品时拒绝（复制品不能再被复制）。O(程序长度)，只在复制发生时调用。
         /// </summary>
-        public MirrorCopyResult MirrorCopy(int mirrorUnitId, string component, IReadOnlyList<string> sourceFirmware, int sourceUnitId = 0)
+        public MirrorCopyResult MirrorCopy(int mirrorUnitId, string component, IReadOnlyList<string> sourceFirmware, int sourceUnitId = 0, CampaignState state = null)
         {
+            if (!IsDisposed && !_mirrorBase.ContainsKey(mirrorUnitId) && state != null && UnitHoldsCopy(mirrorUnitId)
+                && FindEnemyRecord(state, mirrorUnitId) is RegionEnemyRecord mrec && Content.EnemyDefs.TryGet(mrec.EnemyTypeId, out GameConfig.fg.MechEnemy mrow))
+            {
+                // FG11-FAC-01（DEBT-EMG4HIJ02-02）：读档后内存里没有复制前的武器、手上是旧复制品——按敌人行重编（与生成时 EnemySpawnBuilder 同一调用，确定性），旧复制品照样先让出带宽
+                _mirrorBase[mirrorUnitId] = EnemyWeapon(state, mrow);
+            }
             var res = new MirrorCopyResult();
             if (IsDisposed || !Kernel.TryGetUnitWeapon(mirrorUnitId, out CombatWeapon current))
             {
@@ -218,6 +227,11 @@ namespace GameLogic.Campaign.Combat
                 MirrorRefused++;
                 return res;
             }
+            foreach (Emergence.EmgProgramStep st in program.Steps)
+            {
+                res.Overflowed += st.Overflow && !st.Builtin ? 1 : 0;
+            }
+            res.GenFull = program.Notes.FindAll(n => n.Key == Emergence.EmgProgramCompiler.NoteGenFull).Count;
             if (!_mirrorBase.TryGetValue(mirrorUnitId, out CombatWeapon baseWeapon))
             {
                 baseWeapon = current;

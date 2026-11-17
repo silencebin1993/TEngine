@@ -319,6 +319,8 @@ namespace GameLogic.Campaign.Combat
             line = relay == null ? line : line == null ? relay : relay + "\n" + line;
             string enemy = site.EnemyProgramLine(CampaignSession.Current, unit); // EMG4-HIJ-01（FGR-EMG-162）：敌方单位的程序（读写端口）
             line = enemy == null ? line : line == null ? enemy : line + "\n" + enemy;
+            string mirror = site.MirrorHoverLine(CampaignSession.Current, unit); // FG11-FAC-01（FGR-EMG-164）：镜像体手上的复制品程序
+            line = mirror == null ? line : line == null ? mirror : line + "\n" + mirror;
             string unhackable = site.UnhackableHoverLine(unit); // EMG4-FW-01：精英 / 首领入侵抗性 1 → “不可劫持”与原因
             line = unhackable == null ? line : line == null ? unhackable : line + "\n" + unhackable;
             string hijack = site.HijackHoverLine(unit) ?? site.SeizeHoverLine(unit); // EMG4-HIJ-01：劫持剩余时间、由教义触发、不接受编队命令；EMG4-HIJ-02：夺控来源 / 剩余 / 瘫痪 / 反向接入

@@ -171,7 +171,7 @@ namespace BinGames.Sim.Combat
             }
             float heat = d.Heat[b] + shot;
             d.Heat[b] = heat;
-            if (wp.OverheatAt > 0f && heat >= wp.OverheatAt && !d.Has(b, CombatUnitFlags.Overheated))
+            if (wp.OverheatAt > 0f && heat >= OverheatAtOf(ref d, b, wp) && !d.Has(b, CombatUnitFlags.Overheated)) // FG11-FAC-01：高温辐射
             {
                 d.Set(b, CombatUnitFlags.Overheated, true);
                 Cue(ref d, CombatEventKind.Overheat, b, 0, heat, d.Pos[b], 0);

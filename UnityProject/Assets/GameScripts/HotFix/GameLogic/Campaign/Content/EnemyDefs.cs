@@ -46,6 +46,13 @@ namespace GameLogic.Campaign.Content
         public const string BehaviorRingSpray = "ring_spray";
         public const string BehaviorPollute = "pollute";
         public const string BehaviorSwarm = "swarm";
+        /// <summary>FG11-FAC-01（FGR-FAC-008 超频专属语法）：冲刺—过热—停机（超频猎犬）、光环（算力节点）、熔断（熔断者）、蓄热连射（过热炮台）、模仿（镜像体）、三态循环（失控超算体）。</summary>
+        public const string BehaviorDash = "dash";
+        public const string BehaviorAura = "aura";
+        public const string BehaviorMelt = "melt";
+        public const string BehaviorRapid = "rapid";
+        public const string BehaviorMirror = "mirror";
+        public const string BehaviorOcCycle = "oc_cycle";
 
         // ── 标签（fg.TbMechEnemy.tags）──
         public const string TagStructure = "structure";
@@ -82,6 +89,7 @@ namespace GameLogic.Campaign.Content
         public const string FactionSilent = "silent";
         public const string FactionFoundry = "foundry";
         public const string FactionClarity = "clarity";
+        public const string FactionOverclock = "overclock";
 
         // ── 编成条件（fg.TbEnemyEncounter.condition）──
         public const string ConditionBase = "base";

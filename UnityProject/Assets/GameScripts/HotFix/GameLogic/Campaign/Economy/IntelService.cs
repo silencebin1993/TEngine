@@ -97,6 +97,8 @@ namespace GameLogic.Campaign.Economy
                     r.TargetKind ??= string.Empty;
                     r.ClarityCounter ??= string.Empty; // FG10-FAC-01
                     r.ClarityCounterNext ??= string.Empty;
+                    r.OverclockCounter ??= string.Empty; // FG11-FAC-01
+                    r.OverclockCounterNext ??= string.Empty;
                 }
             }
             foreach (IntelProgressRecord p in f.Progress)
@@ -825,6 +827,13 @@ namespace GameLogic.Campaign.Economy
                         r.ClarityCounter = ClarityCounterService.Locked(s);
                         r.ClarityCounterNext = ClarityCounterService.Preview(s);
                     }
+                    // FG11-FAC-01（FGR-FAC-004）：超频领地在地图上显示（第二幕起，或已经揭开过它的危害）时，附上超频当天锁定的对策与下一次日切的预测。
+                    if (OverclockCounterService.Visible(s))
+                    {
+                        r.HasOverclockCounter = true;
+                        r.OverclockCounter = OverclockCounterService.Locked(s);
+                        r.OverclockCounterNext = OverclockCounterService.Preview(s);
+                    }
                     r.ExpiresTick = now + Math.Max(1, validity);
                     break;
                 case "boss":
@@ -1103,6 +1112,10 @@ namespace GameLogic.Campaign.Economy
                     {
                         parts.Add(ClarityCounterService.IntelLine(r.ClarityCounter, r.ClarityCounterNext)); // FG10-FAC-01（FGR-FAC-004）
                     }
+                    if (r.HasOverclockCounter)
+                    {
+                        parts.Add(OverclockCounterService.IntelLine(r.OverclockCounter, r.OverclockCounterNext)); // FG11-FAC-01（FGR-FAC-004）
+                    }
                     return string.Join(GameText.Get("intel.list_sep"), parts);
                 }
                 case IntelCatalog.KindBoss:
@@ -1352,7 +1365,8 @@ namespace GameLogic.Campaign.Economy
                     .Append(string.Join(",", r.Regions)).Append('|').Append(string.Join(",", r.Adaptations)).Append('|').Append(r.Counter).Append('|').Append(r.TargetKind)
                     .Append('|').Append(r.Level).Append('|').Append(r.PlanRevision).Append('|').Append(r.HasSilentCounter).Append(':').Append(r.SilentCounter).Append(':')
                     .Append(r.SilentCounterNext).Append(':').Append(r.HasFoundryCounter).Append(':').Append(r.FoundryCounter).Append(':').Append(r.FoundryCounterNext)
-                    .Append(':').Append(r.HasClarityCounter).Append(':').Append(r.ClarityCounter).Append(':').Append(r.ClarityCounterNext).Append(';');
+                    .Append(':').Append(r.HasClarityCounter).Append(':').Append(r.ClarityCounter).Append(':').Append(r.ClarityCounterNext)
+                    .Append(':').Append(r.HasOverclockCounter).Append(':').Append(r.OverclockCounter).Append(':').Append(r.OverclockCounterNext).Append(';');
             }
             return sb.ToString();
         }

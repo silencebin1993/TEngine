@@ -440,6 +440,88 @@ namespace GameLogic.Campaign.Combat
         public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown" };
     }
 
+    /// <summary>FG11-FAC-01：超频的追击类读法（突袭者内核；专属参数在表尾 oc* 列，由 <see cref="EnemyOverclockParams"/> 填）。</summary>
+    public sealed class OverclockChaseReading : ClarityChaseReading
+    {
+        private readonly string _key;
+        private readonly string[] _cols;
+
+        public OverclockChaseReading(string key, params string[] cols)
+        {
+            _key = key;
+            _cols = cols;
+        }
+
+        public override string Key => _key;
+        public override IReadOnlyList<string> RequiredColumns => _cols;
+    }
+
+    /// <summary>FG11-FAC-01：蓄热连射（过热炮台，驻守开火内核；越打越快、满热排气）。</summary>
+    public sealed class RapidReading : EnemyBehaviorReading
+    {
+        public override string Key => EnemyDefs.BehaviorRapid;
+        public override CombatBehavior Kernel => CombatBehavior.HoldFire;
+        public override bool NeedsProfile => true;
+        public override IReadOnlyList<string> RequiredColumns { get; } = new[] { "weaponRange", "weaponDamage", "weaponCooldown" };
+    }
+
+    /// <summary>
+    /// FG11-FAC-01（FG09 第 7 章、FGR-FAC-008 超频专属语法）：把敌人表 oc* 列翻译成内核行为参数 Oc*。按列是否 &gt; 0 决定，不认识任何敌人 ID（IC-REQ-012、FGR-EMG-160）；
+    /// 区域生成（<see cref="EnemySpawnBuilder"/>）、攻城 / 据点展开（SiegeService.SpawnOne）与玩家的标志组件（CombatSite.FlagBehaviorProfile，蓄热连射枪 ← 过热炮台）共用。
+    /// 泄爆伤害乘调用方给的伤害倍率（难度 / 精英）；预警类秒数至少 0.8（FGR-FAC-008 ①）。
+    /// </summary>
+    public static class EnemyOverclockParams
+    {
+        public static bool Has(MechEnemy row) =>
+            row != null && (row.OcDashHeat > 0f || row.OcRampHeat > 0f || row.OcAuraRange > 0f || row.OcMeltHp > 0f || row.OcDeathBurst > 0f
+                            || row.OcLeanRate > 0f || row.OcModeCycle > 0f);
+
+        public static void Apply(MechEnemy row, ref CombatBehaviorProfile p, float dmgMul)
+        {
+            if (!Has(row))
+            {
+                return;
+            }
+            float dm = Math.Max(0.05f, dmgMul);
+            p.OcDashSpeed = row.OcDashSpeed;
+            p.OcDashHeat = row.OcDashHeat;
+            p.OcCool = row.OcCool;
+            p.OcShutdown = row.OcShutdown > 0f ? Math.Max(0.8f, row.OcShutdown) : 0f;
+            p.OcVuln = row.OcVuln;
+            p.OcRampHeat = row.OcRampHeat;
+            p.OcRampMax = row.OcRampMax;
+            p.OcAuraRange = row.OcAuraRange;
+            p.OcAuraRate = row.OcAuraRate;
+            p.OcMeltHp = row.OcMeltHp;
+            p.OcMeltFuse = row.OcMeltHp > 0f ? Math.Max(0.8f, row.OcMeltFuse) : 0f;
+            p.OcBurstRadius = row.OcBurstRadius;
+            p.OcBurstDamage = row.OcBurstDamage * dm;
+            p.OcDeathBurst = row.OcDeathBurst;
+            p.OcLeanRate = row.OcLeanRate;
+            p.OcLeanMax = row.OcLeanMax;
+            p.OcLeanTurn = row.OcLeanTurn;
+            p.OcModeCycle = row.OcModeCycle;
+            p.OcModeWarn = row.OcModeCycle > 0f ? Math.Max(0.8f, row.OcModeWarn) : 0f;
+            p.OcModeSpeed = row.OcModeSpeed;
+            p.OcModeRate = row.OcModeRate;
+            p.OcModeShield = row.OcModeShield;
+        }
+
+        /// <summary>只取蓄热连射一组（玩家装蓄热连射枪：每发积热 / 满热射速 / 散热 / 排气秒 / 弱点）。</summary>
+        public static void ApplyRamp(MechEnemy row, ref CombatBehaviorProfile p)
+        {
+            if (row == null || row.OcRampHeat <= 0f)
+            {
+                return;
+            }
+            p.OcRampHeat = row.OcRampHeat;
+            p.OcRampMax = row.OcRampMax;
+            p.OcCool = row.OcCool;
+            p.OcShutdown = Math.Max(0.8f, row.OcShutdown);
+            p.OcVuln = row.OcVuln;
+        }
+    }
+
     /// <summary>
     /// FG10-FAC-01：把敌人表里的澄净专属语法参数翻译成内核行为参数（喷淋布区 / 枢轴喷灌 / 自爆与油迹 / 分裂 / 飞行与投放 / 抗性 / 建筑偏好）。
     /// 按读法与列是否 &gt; 0 决定，不认识任何敌人 ID（IC-REQ-012）；区域生成（<see cref="EnemySpawnBuilder"/>）与攻城单位生成（SiegeService.SpawnOne）共用，
@@ -560,7 +642,14 @@ namespace GameLogic.Campaign.Combat
             new StillReading(), new PatrolMarkReading(), new JamFieldReading(), new HoldFireReading(), new TelegraphReading(), new RepairReading(),
             new DeflectReading(), new StalkReading(), new SeverReading(),
             new SalvoReading(), new MinelayReading(), new ReloadReading(), new ChargeReading(),
-            new SprayReading(), new CrawlBurstReading(), new PivotReading(), new PolluteReading(), new SwarmReading(), new RingSprayReading());
+            new SprayReading(), new CrawlBurstReading(), new PivotReading(), new PolluteReading(), new SwarmReading(), new RingSprayReading(),
+            // FG11-FAC-01 超频
+            new OverclockChaseReading(EnemyDefs.BehaviorDash, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown"),
+            new OverclockChaseReading(EnemyDefs.BehaviorAura, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown"),
+            new OverclockChaseReading(EnemyDefs.BehaviorMelt, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds"),
+            new RapidReading(),
+            new OverclockChaseReading(EnemyDefs.BehaviorMirror, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "effectRange"),
+            new OverclockChaseReading(EnemyDefs.BehaviorOcCycle, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds"));
 
         private static Dictionary<string, IEnemyBehaviorReading> Build(params IEnemyBehaviorReading[] readings)
         {

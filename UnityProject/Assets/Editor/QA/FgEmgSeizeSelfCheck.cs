@@ -404,7 +404,7 @@ namespace GameLogic.EditorTools
                 b.TryGetSeize(id, out float rb, out bool db, out float cb, out ushort sb);
                 return Mathf.Approximately(ra, rb) && da == db && Mathf.Approximately(ca, cb) && sa == sb;
             });
-            Expect(lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == 20 && a.StateHash() == b.StateHash() && same && b.SeizeCount == 3 && Seize(b, m3).down && Seize(b, m2).reclaim > 0f,
+            Expect(lr == CombatLoadResult.Ok && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && a.StateHash() == b.StateHash() && same && b.SeizeCount == 3 && Seize(b, m3).down && Seize(b, m2).reclaim > 0f,
                 $"夺控中途存读档（格式 {CombatKernel.PeekFormat(snap)}，段 27 同版本追加字段）：StateHash 一致，剩余 / 瘫痪 / 反向接入进度 / 来源逐台一致");
             var ea = new List<CombatEvent>();
             var eb = new List<CombatEvent>();

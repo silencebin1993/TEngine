@@ -1141,6 +1141,10 @@ namespace GameLogic.Campaign
         public bool HasClarityCounter;
         public string ClarityCounter = string.Empty;
         public string ClarityCounterNext = string.Empty;
+        /// <summary>FG11-FAC-01（FGR-FAC-004）：同上，超频反制（overclock.limiter / fluid / fuse；空串 = 没有）。旧档没有 = false。</summary>
+        public bool HasOverclockCounter;
+        public string OverclockCounter = string.Empty;
+        public string OverclockCounterNext = string.Empty;
     }
 
     /// <summary>FG5-RND-05：一类情报的破译进度（千分之一倍率 × 统一时钟步数；一座监听站一步 = 1000）与累计产出。</summary>
@@ -2846,6 +2850,8 @@ namespace GameLogic.Campaign
             s.Factions.SiteSlagNoticed ??= Array.Empty<string>();
             s.Factions.ClarityCounterId ??= string.Empty; // FG10-FAC-01
             s.Factions.AcidZonesNoticed ??= Array.Empty<string>();
+            s.Factions.RadiationZonesNoticed ??= Array.Empty<string>(); // FG11-FAC-01
+            s.Factions.OverclockCounterId ??= string.Empty;
             s.Factions.TerritoriesIntroduced ??= Array.Empty<string>(); // FG10-REG-01
             s.Grid ??= new GridState();
             s.Grid.Explored ??= Array.Empty<ExploredAreaRecord>();
