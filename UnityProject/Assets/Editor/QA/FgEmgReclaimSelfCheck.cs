@@ -43,7 +43,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/回收修复桥接蔓延")]
+        [MenuItem("QA/自检/回收修复桥接蔓延")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

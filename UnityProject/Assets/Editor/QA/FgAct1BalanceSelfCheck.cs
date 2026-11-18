@@ -62,7 +62,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static int _seq;
 
-        [MenuItem("BinGames/QA/自检/FG 第一幕平衡与节奏机器人")]
+        [MenuItem("QA/自检/FG 第一幕平衡与节奏机器人")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

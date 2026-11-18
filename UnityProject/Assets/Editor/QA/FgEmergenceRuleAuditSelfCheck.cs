@@ -53,7 +53,7 @@ namespace GameLogic.EditorTools
         /// <summary>形似内容 ID、实为别的东西的字面量（BlueprintCircuitBoard 的 CircuitOpResult 错误码），不计入审计。只放经核实的条目。</summary>
         private static readonly string[] NotContentIds = { "\"chassis_required\"", "\"chassis_locked\"" };
 
-        [MenuItem("BinGames/QA/自检/涌现通道表与规则审计")]
+        [MenuItem("QA/自检/涌现通道表与规则审计")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

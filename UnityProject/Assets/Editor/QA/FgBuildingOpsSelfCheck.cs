@@ -62,7 +62,7 @@ namespace GameLogic.EditorTools
         private static int _seq = 5000;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 建筑通用状态、面板与升级")]
+        [MenuItem("QA/自检/FG 建筑通用状态、面板与升级")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

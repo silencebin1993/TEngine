@@ -50,7 +50,7 @@ namespace GameLogic.EditorTools
         /// <summary>FG19A 第 6 节暂定 ID（定稿 = 暂定）与写端口。</summary>
         internal static readonly (string Id, string Write)[] Spec = { ("fw_reboot", "hij.hack"), ("fw_hijackrelay", "grm.inherit"), ("fw_failsafe", "evt.ping") };
 
-        [MenuItem("BinGames/QA/自检/劫持新固件（EMG4-FW-01）")]
+        [MenuItem("QA/自检/劫持新固件（EMG4-FW-01）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

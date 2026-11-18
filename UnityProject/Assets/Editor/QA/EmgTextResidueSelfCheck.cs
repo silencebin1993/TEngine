@@ -49,7 +49,7 @@ namespace GameLogic.EditorTools
         private static int _pass;
         private static string _dir;
 
-        [MenuItem("BinGames/QA/自检/生物残留第 1 层文案")]
+        [MenuItem("QA/自检/生物残留第 1 层文案")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

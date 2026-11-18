@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 namespace BinGames.TerrainVisual
 {
-    [CreateAssetMenu(menuName="地球归还/地形/环境建筑素材")]
+    [CreateAssetMenu(menuName="BinGames/地形/环境建筑素材")]
     public sealed class TerrainDetailKit:ScriptableObject
     {
         public Mesh[] Models=Array.Empty<Mesh>();

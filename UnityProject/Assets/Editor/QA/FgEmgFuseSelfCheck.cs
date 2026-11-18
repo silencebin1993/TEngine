@@ -40,7 +40,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/熔合重做与落点接线（EMG3-FUSE-01 / EMG4-FUSE-02）")]
+        [MenuItem("QA/自检/熔合重做与落点接线（EMG3-FUSE-01 / EMG4-FUSE-02）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -49,7 +49,7 @@ namespace GameLogic.EditorTools
             ("fw_scuttle", 1), ("fw_bouncefuse", 1), ("fw_piercefuse", 1), ("fw_ventarc", 1), ("fw_coolback", 1), ("fw_enterfuse", 2), ("fw_uplinkpulse", 2), ("fw_water", 1),
         };
 
-        [MenuItem("BinGames/QA/自检/事件补洞新固件（EMG1-FW-02）")]
+        [MenuItem("QA/自检/事件补洞新固件（EMG1-FW-02）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

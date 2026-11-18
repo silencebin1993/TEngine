@@ -30,7 +30,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/QA/自检/涌现部件装配约束")]
+        [MenuItem("QA/自检/涌现部件装配约束")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

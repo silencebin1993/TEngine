@@ -63,7 +63,7 @@ namespace GameLogic.EditorTools
         private static readonly List<string> PerfLines = new List<string>();
         private static readonly List<string> GalleryIds = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 黑匣子陈列馆与纪念墙")]
+        [MenuItem("QA/自检/FG 黑匣子陈列馆与纪念墙")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -62,7 +62,7 @@ namespace BinGames.TerrainVisual.Editor
             EditorPrefs.SetString("PCG.TerrainLab.Request."+Application.dataPath,File.ReadAllText(request));
             BuildAndValidate();
         }
-        [MenuItem("地球归还/地形/建立测试场景")]
+        [MenuItem("BinGames/地形/建立测试场景")]
         public static void BuildAndValidate()
         {
             try
@@ -250,7 +250,7 @@ namespace BinGames.TerrainVisual.Editor
         {Vector3 offset=new Vector3(stream.WorldOrigin.x,0,stream.WorldOrigin.y);camera.transform.position=position-offset;camera.transform.LookAt(target-offset);}
         [Serializable] private sealed class PlayStage {public string view,origin;public int seed,chunks,modules,wfcFailures;}
         [Serializable] private sealed class PlayReport {public bool pass;public int errors,chunks,triangles,wfcFailures,seed;public PlayStage[]stages;}
-        [MenuItem("地球归还/地形/生成独立试玩版")]
+        [MenuItem("BinGames/地形/生成独立试玩版")]
         public static void BuildPlayer()
         {
             string root=Path.GetDirectoryName(Application.dataPath);

@@ -56,7 +56,7 @@ namespace GameLogic.EditorTools
         private static int _key = 40_000;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 货舱与自动拾取")]
+        [MenuItem("QA/自检/FG 货舱与自动拾取")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

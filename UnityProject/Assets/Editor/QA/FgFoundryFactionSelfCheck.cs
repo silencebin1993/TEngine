@@ -66,7 +66,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static float _fakeNow;
 
-        [MenuItem("BinGames/QA/自检/FG 铸造扩充与主核心阶段三")]
+        [MenuItem("QA/自检/FG 铸造扩充与主核心阶段三")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

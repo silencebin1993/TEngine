@@ -69,7 +69,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly List<string> Touched = new List<string>(32);
 
-        [MenuItem("BinGames/QA/自检/FG 第一幕流程、解锁节奏与伏笔")]
+        [MenuItem("QA/自检/FG 第一幕流程、解锁节奏与伏笔")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

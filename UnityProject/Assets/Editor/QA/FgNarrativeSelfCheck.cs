@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static GameObject _cutGo;
         private static NarrativeCutscenePlayerUIToolkit _player;
 
-        [MenuItem("BinGames/QA/自检/FG 叙事投放框架与资料库")]
+        [MenuItem("QA/自检/FG 叙事投放框架与资料库")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

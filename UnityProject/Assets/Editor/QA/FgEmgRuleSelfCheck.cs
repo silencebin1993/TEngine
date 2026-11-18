@@ -41,7 +41,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/通道规则与能量传导")]
+        [MenuItem("QA/自检/通道规则与能量传导")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

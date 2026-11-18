@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace BinGames.TerrainVisual
 {
-    [CreateAssetMenu(menuName = "地球归还/地形/地貌配置")]
+    [CreateAssetMenu(menuName = "BinGames/地形/地貌配置")]
     public sealed class TerrainProfile : ScriptableObject
     {
         [Header("地貌（米）")]

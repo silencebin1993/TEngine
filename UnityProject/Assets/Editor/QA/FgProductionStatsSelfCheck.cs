@@ -57,7 +57,7 @@ namespace GameLogic.EditorTools
         private static int _seq = 6000;
         private static double _fakeNow = 1000;
 
-        [MenuItem("BinGames/QA/自检/FG 统计、顶栏与产线规划助手")]
+        [MenuItem("QA/自检/FG 统计、顶栏与产线规划助手")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

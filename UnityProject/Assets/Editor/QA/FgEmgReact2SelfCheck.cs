@@ -34,7 +34,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/其余十一条具名反应")]
+        [MenuItem("QA/自检/其余十一条具名反应")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

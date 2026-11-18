@@ -53,7 +53,7 @@ namespace GameLogic.EditorTools
         private static int _pass;
         private static string _dir;
 
-        [MenuItem("BinGames/QA/自检/场地物长期留存")]
+        [MenuItem("QA/自检/场地物长期留存")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

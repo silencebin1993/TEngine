@@ -331,7 +331,7 @@ namespace BinGames.EditorTools
 
         private static string Shorten(string s) => s.Length <= 24 ? s : s.Substring(0, 24) + "…";
 
-        [MenuItem("Tools/BinGames/UI Toolkit 布局探针（选中 UXML）")]
+        [MenuItem("QA/UI Toolkit 布局探针（选中 UXML）")]
         private static void ProbeSelected()
         {
             string path = AssetDatabase.GetAssetPath(Selection.activeObject);

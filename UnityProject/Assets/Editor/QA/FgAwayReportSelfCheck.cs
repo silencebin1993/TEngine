@@ -55,7 +55,7 @@ namespace GameLogic.EditorTools
         private static int _seq = 9500;
         private static double _fakeNow = 1000;
 
-        [MenuItem("BinGames/QA/自检/FG 离家报告与告警补全")]
+        [MenuItem("QA/自检/FG 离家报告与告警补全")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

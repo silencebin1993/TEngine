@@ -7,7 +7,7 @@ namespace BinGames.EditorTools.FeatureArt
     /// <summary>开关 <see cref="DevUnitGoMirror"/>：Play 时把 Instanced 单位+弹道镜像成可点选 GO。</summary>
     public static class DevUnitGoMirrorMenu
     {
-        const string MenuPath = "BinGames/功能美术/Dev 单位 GO 镜像";
+        const string MenuPath = "QA/调试/Dev 单位 GO 镜像";
 
         [MenuItem(MenuPath, false, 55)]
         static void Toggle()

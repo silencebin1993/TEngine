@@ -61,7 +61,7 @@ namespace GameLogic.EditorTools
         private static readonly List<string> PerfLines = new List<string>();
         private static readonly HashSet<string> SeenStates = new HashSet<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 制造建筑与装配站")]
+        [MenuItem("QA/自检/FG 制造建筑与装配站")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

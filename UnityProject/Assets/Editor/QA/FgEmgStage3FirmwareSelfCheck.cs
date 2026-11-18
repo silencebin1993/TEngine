@@ -57,7 +57,7 @@ namespace GameLogic.EditorTools
             ("fw_anchorwire", "grm.anchor"), // EMG3-FUSE-01：N43 接线进 FGT-EMG-002 / 003 / 006（行为验收在 FgEmgFuseSelfCheck）
         };
 
-        [MenuItem("BinGames/QA/自检/元程序、协同与齐射新固件（EMG3-FW-02）")]
+        [MenuItem("QA/自检/元程序、协同与齐射新固件（EMG3-FW-02）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

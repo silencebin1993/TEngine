@@ -209,6 +209,7 @@ namespace BinGames.EditorTools.FeatureArt
         FeatureArtWorkspace _pageWorkspace;
         FeatureArtDocumentsPage _documentsPage;
         FeatureArtProductionPage _productionPage;
+        FeatureArtHubPage _hubPage;
         FeatureArtWorkspacePage _activeWorkspacePage;
         Dictionary<string, FeatureArtSlot> _slotIndex;
         List<FeatureArtSlot> _indexedSlots;
@@ -244,6 +245,16 @@ namespace BinGames.EditorTools.FeatureArt
         public bool IsWorkspaceDirty => _workspaceDirty;
         public bool IsCatalogDirty => _dirty;
 
+        /// <summary>打开窗口并直接选中左侧某个固定页（如「素材中心」）。</summary>
+        public static void OpenAtPage(string pagePath)
+        {
+            var w = GetWindow<FeatureArtBindingWindow>();
+            w.titleContent = new GUIContent("美术资源与绑定");
+            w.minSize = new Vector2(980, 560);
+            w.Show();
+            EditorApplication.delayCall += () => { if (w != null) w.SelectPage(pagePath); };
+        }
+
         public static void Open()
         {
             var w = GetWindow<FeatureArtBindingWindow>();
@@ -276,6 +287,7 @@ namespace BinGames.EditorTools.FeatureArt
                 _workspacePages.Clear();
                 _documentsPage = null;
                 _productionPage = null;
+                _hubPage = null;
             }
             var currentIds = new HashSet<string>(Workspace.nodes.Select(n => n.id)) { "" };
             foreach (var id in _workspacePages.Keys.ToArray()) if (!currentIds.Contains(id)) _workspacePages.Remove(id);
@@ -295,6 +307,7 @@ namespace BinGames.EditorTools.FeatureArt
             // Odin 可能保留窗口数据，而静态工作区会在程序集重载后重新加载。
             if (Workspace.IncludeCatalog(_data) > 0) _workspaceDirty = true;
 
+            tree.Add("素材中心", _hubPage ??= new FeatureArtHubPage(this));
             tree.Add("使用说明", new GuidePage());
             tree.Add("混元生3D", new FeatureArtHunyuanSettingsPage());
             tree.Add("健康检查", new HealthCheckPage(this));
@@ -303,10 +316,11 @@ namespace BinGames.EditorTools.FeatureArt
             _sourceLibraryPage ??= new FeatureArtSourceLibraryPage(this);
             tree.Add(FeatureArtSourceLibraryPage.MenuPath, _sourceLibraryPage);
             tree.Add("资源树", WorkspacePage(null));
+            var artIds = FeatureArtHub.ShowAllKinds ? null : FeatureArtHub.ArtNodeIds(Workspace);
             foreach (var node in Workspace.nodes)
             {
                 var parent = node;
-                var hidden = false;
+                var hidden = artIds != null && !artIds.Contains(node.id);
                 while (parent != null)
                 {
                     if (parent.archived) { hidden = true; break; }
@@ -724,7 +738,7 @@ namespace BinGames.EditorTools.FeatureArt
             if (nodeId != null) _productionPage?.Select(nodeId);
             SelectPage("出图顺序");
         }
-        void SelectPage(string path) { MenuTree.EnumerateTree(false).FirstOrDefault(i => i.GetFullPath() == path)?.Select(false); Repaint(); }
+        public void SelectPage(string path) { MenuTree.EnumerateTree(false).FirstOrDefault(i => i.GetFullPath() == path)?.Select(false); Repaint(); }
 
         public void RebuildWorkspaceTree()
         {

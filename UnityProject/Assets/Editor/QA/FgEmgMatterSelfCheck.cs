@@ -42,7 +42,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/物质斑块层")]
+        [MenuItem("QA/自检/物质斑块层")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

@@ -13,7 +13,7 @@ namespace BinGames.TerrainVisual.Editor
         private UnityEditor.Editor _profileEditor;
         private int _selected;
         private string _status="";
-        [MenuItem("地球归还/地形素材管理")]
+        [MenuItem("BinGames/地形/地形素材管理")]
         public static void Open(){GetWindow<TerrainArtWindow>("地形素材管理").minSize=new Vector2(460,520);}
         private void OnEnable()
         {

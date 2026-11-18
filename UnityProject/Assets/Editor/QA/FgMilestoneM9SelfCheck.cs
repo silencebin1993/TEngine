@@ -38,7 +38,7 @@ namespace GameLogic.EditorTools
         private const string Qa = "TEngine/UnityProject/Assets/Editor/QA/";
         private const string Bots = "TEngine/UnityProject/Assets/Editor/JourneyBots/";
 
-        [MenuItem("BinGames/QA/自检/M9 出口")]
+        [MenuItem("QA/自检/M9 出口")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

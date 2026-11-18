@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static string _dir;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 前哨站与远程施工")]
+        [MenuItem("QA/自检/FG 前哨站与远程施工")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

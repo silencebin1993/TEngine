@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static int _eliteKey = 20_000;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 三选一与保底")]
+        [MenuItem("QA/自检/FG 三选一与保底")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

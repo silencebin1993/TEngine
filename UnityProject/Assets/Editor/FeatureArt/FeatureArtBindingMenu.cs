@@ -6,13 +6,17 @@ namespace BinGames.EditorTools.FeatureArt
     /// <summary>单独挂菜单，避免 EditorWindow 子类上的 MenuItem 偶发不被 TypeCache 收录。</summary>
     public static class FeatureArtBindingMenu
     {
-        [MenuItem("BinGames/功能美术绑定", false, 52)]
         [MenuItem("BinGames/美术资源与绑定", false, 51)]
-        [MenuItem("Tools/Feature Art Binding", false, 2001)]
         public static void Open()
         {
             FeatureArtBindingWindow.Open();
         }
+
+        [MenuItem("BinGames/美术入库/素材中心（网页）", false, 60)]
+        public static void OpenHubWeb() => FeatureArtHub.OpenWeb();
+
+        [MenuItem("BinGames/美术入库/素材中心（编辑器页）", false, 61)]
+        public static void OpenHubPage() => FeatureArtBindingWindow.OpenAtPage("素材中心");
 
         [MenuItem("BinGames/功能美术/从整包重烘全部游戏 Prefab", false, 53)]
         public static void BakeAllGamePrefabs()

@@ -50,7 +50,7 @@ namespace GameLogic.EditorTools
         private static int _pass;
         private static string _dir;
 
-        [MenuItem("BinGames/QA/自检/涌现程序编译器")]
+        [MenuItem("QA/自检/涌现程序编译器")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

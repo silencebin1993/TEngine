@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static readonly HashSet<string> SeenStates = new HashSet<string>();
         private static int _testPort;
 
-        [MenuItem("BinGames/QA/自检/FG 采集与加工建筑")]
+        [MenuItem("QA/自检/FG 采集与加工建筑")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

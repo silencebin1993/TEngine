@@ -70,7 +70,7 @@ namespace GameLogic.EditorTools
         private static int _seq;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 突袭 HUD、观战、自动暂停、防御总览")]
+        [MenuItem("QA/自检/FG 突袭 HUD、观战、自动暂停、防御总览")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

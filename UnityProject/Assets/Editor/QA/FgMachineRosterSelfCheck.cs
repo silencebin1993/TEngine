@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static double _fakeNow;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 机器名册与岗位")]
+        [MenuItem("QA/自检/FG 机器名册与岗位")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

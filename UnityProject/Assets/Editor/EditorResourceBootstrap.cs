@@ -167,7 +167,7 @@ namespace BinGames.EditorTools
             return ModuleSystem.GetModule<IResourceModule>().LoadAsset(location, assetType);
         }
 
-        [MenuItem("BinGames/资源模块/Edit 模式启动资源模块")]
+        [MenuItem("QA/资源模块/Edit 模式启动资源模块")]
         private static void BeginMenu()
         {
             if (!Begin())
@@ -176,7 +176,7 @@ namespace BinGames.EditorTools
             }
         }
 
-        [MenuItem("BinGames/资源模块/关闭 Edit 模式资源模块")]
+        [MenuItem("QA/资源模块/关闭 Edit 模式资源模块")]
         public static void Shutdown()
         {
             UnhookPump();
@@ -386,7 +386,7 @@ namespace BinGames.EditorTools
         /// </summary>
         public static string EnumProbe { get; private set; } = "-";
 
-        [MenuItem("BinGames/资源模块/诊断：Edit 模式 IEnumerator.ToUniTask 能否完成")]
+        [MenuItem("QA/资源模块/诊断：Edit 模式 IEnumerator.ToUniTask 能否完成")]
         public static void ProbeEnumerator()
         {
             EnumProbe = "started";

@@ -63,7 +63,7 @@ namespace GameLogic.EditorTools
         private static float _fakeNow;
         private static int _radSeed = 42;
 
-        [MenuItem("BinGames/QA/自检/FG 超频单位与精英")]
+        [MenuItem("QA/自检/FG 超频单位与精英")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

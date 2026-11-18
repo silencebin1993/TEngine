@@ -58,7 +58,7 @@ namespace GameLogic.EditorTools
         private static HomeValleyController _home;
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 遗迹与人类遗产")]
+        [MenuItem("QA/自检/FG 遗迹与人类遗产")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

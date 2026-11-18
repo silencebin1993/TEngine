@@ -62,7 +62,7 @@ namespace GameLogic.EditorTools
         private static readonly List<string> PerfLines = new List<string>();
         private static readonly List<string> PostIds = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG 监听站与情报")]
+        [MenuItem("QA/自检/FG 监听站与情报")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

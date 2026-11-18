@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace BinGames.TerrainVisual
 {
-    [CreateAssetMenu(menuName = "地球归还/地形/连接模块库")]
+    [CreateAssetMenu(menuName = "BinGames/地形/连接模块库")]
     public sealed class TerrainModuleLibrary : ScriptableObject
     {
         [Min(1)] public float CellSize=4;

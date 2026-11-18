@@ -153,6 +153,7 @@ namespace BinGames.EditorTools.FeatureArt
         void DrawNode()
         {
             EditorGUILayout.LabelField(_node.title, EditorStyles.boldLabel);
+            if (FeatureArtHub.IsArtKind(_node.kind)) FeatureArtHubPanel.Draw(_node, _window.FindSlot(_node.slotId));
             var imageOnly = _window.IsImageNode(_node);
             if (imageOnly)
             {

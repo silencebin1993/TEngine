@@ -46,7 +46,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/QA/自检/爆炸反应装甲块数")]
+        [MenuItem("QA/自检/爆炸反应装甲块数")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

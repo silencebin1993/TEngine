@@ -35,7 +35,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
 
-        [MenuItem("BinGames/QA/自检/FG 数据驱动与文本键")]
+        [MenuItem("QA/自检/FG 数据驱动与文本键")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();
@@ -48,10 +48,10 @@ namespace GameLogic.EditorTools
             }
         }
 
-        [MenuItem("BinGames/语言/简体中文")]
+        [MenuItem("QA/语言/简体中文")]
         public static void UseChinese() => GameSettings.SetLanguage(GameLanguage.ZhCn);
 
-        [MenuItem("BinGames/语言/English")]
+        [MenuItem("QA/语言/English")]
         public static void UseEnglish() => GameSettings.SetLanguage(GameLanguage.En);
 
         public static int Run(StringBuilder report)

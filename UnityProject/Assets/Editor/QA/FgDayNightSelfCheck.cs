@@ -62,7 +62,7 @@ namespace GameLogic.EditorTools
         private static readonly List<string> EnvTextKeys = new List<string>();
         private const string UiTextSettingsPath = "Assets/GameRes/Raw/UI/Fonts/BattleUITextSettings.asset";
 
-        [MenuItem("BinGames/QA/自检/FG 昼夜与日历")]
+        [MenuItem("QA/自检/FG 昼夜与日历")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

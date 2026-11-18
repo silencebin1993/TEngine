@@ -79,7 +79,7 @@ namespace GameLogic.EditorTools
 
         // ═════════════════════════════════ 入口 ═════════════════════════════════
 
-        [MenuItem("BinGames/QA/自检/组合模糊测试器（EMG1-FUZZ-01）")]
+        [MenuItem("QA/自检/组合模糊测试器（EMG1-FUZZ-01）")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

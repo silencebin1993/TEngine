@@ -19,7 +19,7 @@ namespace GameLogic.EditorTools
     /// </summary>
     public static partial class FgEmgRuleSelfCheck
     {
-        [MenuItem("BinGames/QA/自检/节拍与限频（EMGR-RULE-01）")]
+        [MenuItem("QA/自检/节拍与限频（EMGR-RULE-01）")]
         public static void RunTickFromMenu()
         {
             var report = new StringBuilder();

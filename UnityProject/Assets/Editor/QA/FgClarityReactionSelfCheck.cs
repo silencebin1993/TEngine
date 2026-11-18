@@ -60,7 +60,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/FG 化工反应开放")]
+        [MenuItem("QA/自检/FG 化工反应开放")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

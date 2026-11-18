@@ -45,7 +45,7 @@ namespace GameLogic.EditorTools
         private const string RemovedId = "organ_removed_selfcheck";
         private const string UnlistedId = "organ_unlisted_selfcheck";
 
-        [MenuItem("BinGames/QA/自检/FG 存档 v2")]
+        [MenuItem("QA/自检/FG 存档 v2")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

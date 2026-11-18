@@ -71,7 +71,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/现存文案与实现一致")]
+        [MenuItem("QA/自检/现存文案与实现一致")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

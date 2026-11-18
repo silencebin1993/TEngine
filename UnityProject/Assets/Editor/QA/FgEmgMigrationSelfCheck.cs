@@ -35,7 +35,7 @@ namespace GameLogic.EditorTools
         private static int _fail;
         private static int _pass;
 
-        [MenuItem("BinGames/QA/自检/现有区域迁入斑块")]
+        [MenuItem("QA/自检/现有区域迁入斑块")]
         public static void RunFromMenu()
         {
             var report = new StringBuilder();

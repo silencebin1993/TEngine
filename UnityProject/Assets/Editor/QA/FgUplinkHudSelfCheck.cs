@@ -70,7 +70,7 @@ namespace GameLogic.EditorTools
         private static readonly Reader Keys = new Reader();
         private static readonly List<string> PerfLines = new List<string>();
 
-        [MenuItem("BinGames/QA/自检/FG1-HUD-01 接入 HUD 自检")]
+        [MenuItem("QA/自检/FG1-HUD-01 接入 HUD 自检")]
         public static void RunFromMenu()
         {
             var sb = new StringBuilder();
