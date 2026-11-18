@@ -154,6 +154,8 @@ namespace GameLogic.UI.Kit
         public bool Connected;
         /// <summary>FG8-DROP-01（FGR-EXP-014）：敌方防空覆盖（红色区域，投送舱不能着陆）。</summary>
         public bool AntiAir;
+        /// <summary>FG12-EVT-04：轨道坠落的落点圈（橙色实心圈 + 刻度，预警中）。</summary>
+        public bool Impact;
         /// <summary>FG7-ENV-05（FGR-ENV-060）：领地的危害（fg.TbHazard.id）与图例颜色；外圈危害带画成带刻度的圈（形状 + 颜色，B15）。</summary>
         public string HazardId;
         public Color Tint;
@@ -376,6 +378,7 @@ namespace GameLogic.UI.Kit
                 // FG6-DEF-04（FGR-DEF-024 预警界面：地图上的来袭方向箭头）：已发预警、还没有有效预报的突袭也画一支方向箭头（只画方向，不泄露迷雾里的位置）。
                 CollectWarnings(state, core, view, margin);
                 CollectWormWarnings(state, view, margin); // FG12-EVT-02（FGR-EVT-011“地图上标出震动最集中的区域”）
+                CollectOrbitalWarnings(state, view, margin); // FG12-EVT-04（FGR-EVT-030“地面标出落点圈”，卡片“落点圈在地图和小地图上可见”）
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Outposts) || StrategicMapUIToolkit.PickActive)
             {
@@ -732,6 +735,25 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        private readonly List<EventDirectorInstanceRecord> _orbital = new List<EventDirectorInstanceRecord>(2);
+
+        /// <summary>FG12-EVT-04：预警中的轨道坠落画落点圈（橙色实心圈 + 外缘刻度，形状区分，B15）并标“落点：还剩几秒撞击”。战略地图与小地图共用本模型。O(进行中事件数)。</summary>
+        private void CollectOrbitalWarnings(CampaignState state, in WorldMapView view, double margin)
+        {
+            Campaign.Env.OrbitalDropService.Warned(state, _orbital);
+            float radius = Campaign.Env.OrbitalDropService.Radius;
+            foreach (EventDirectorInstanceRecord r in _orbital)
+            {
+                if (!view.Contains(r.X, r.Y, margin + radius))
+                {
+                    continue;
+                }
+                string label = GameText.Format("ui.map.orbital_drop", Campaign.Env.CalendarService.ShortDuration(Campaign.Env.OrbitalDropService.SecondsLeft(r)), radius);
+                Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = r.X, Y = r.Y, Radius = radius, OuterRadius = radius, Impact = true, Label = label });
+                Add(WorldMapItemKind.RaidWarning, WorldMapLayer.Groups, "orbital:" + r.Serial, r.X, r.Y, label);
+            }
+        }
+
         private static (int, int, int, int) ClampToExplored(HomeGridMap map, in WorldMapView view, double margin)
         {
             long minX = long.MaxValue, minY = long.MaxValue, maxX = long.MinValue, maxY = long.MinValue;
@@ -962,7 +984,7 @@ namespace GameLogic.UI.Kit
             {
                 Vector2 center = view.ToCanvas(c.X, c.Y);
                 float r = (float)(c.Radius / cpp);
-                if (r < 1f)
+                if (r < 1f && !c.Impact)
                 {
                     continue;
                 }
@@ -992,6 +1014,19 @@ namespace GameLogic.UI.Kit
                     p.strokeColor = new Color(0.95f, 0.22f, 0.18f, 0.9f);
                     Circle(p, center, r);
                     Ticks(p, center, r, new Color(0.95f, 0.22f, 0.18f, 0.9f));
+                }
+                else if (c.Impact)
+                {
+                    // FG12-EVT-04：轨道坠落落点圈 = 半透明橙色实心圆 + 橙色粗描边 + 外缘刻度（小地图上半径不足 1 像素时按 2 像素画，保证看得见）。
+                    float ri = Mathf.Max(2f, (float)(c.Radius / cpp));
+                    p.fillColor = new Color(1f, 0.5f, 0.1f, 0.3f);
+                    p.BeginPath();
+                    p.Arc(center, ri, 0f, 360f);
+                    p.Fill();
+                    p.lineWidth = 2f;
+                    p.strokeColor = new Color(1f, 0.55f, 0.12f, 0.95f);
+                    Circle(p, center, ri);
+                    Ticks(p, center, ri, new Color(1f, 0.55f, 0.12f, 0.95f));
                 }
                 else
                 {

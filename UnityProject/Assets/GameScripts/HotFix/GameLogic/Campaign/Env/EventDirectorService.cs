@@ -66,6 +66,9 @@ namespace GameLogic.Campaign.Env
 
         public virtual void OnStart(CampaignState s, EventDirectorInstanceRecord r) { }
 
+        /// <summary>FG12-EVT-04：瞬发事件（开始那一步当场结束，例如轨道坠落）——导演不发“开始（时限）”与成功的“结束”通知，由处理器自己发的一条结果通知代替。</summary>
+        public virtual bool Instant => false;
+
         /// <summary>
         /// 结束（<paramref name="outcome"/> 已定）；reward=fixed 的奖励在这里给。预警阶段被撤回（静默夜 / 剧情突袭后来才排上）也走这里，
         /// outcome = <see cref="EventDirectorService.OutcomePostponed"/>：收回 OnWarn 放出的效果、不给奖励；之后补上时是新的 Serial，重新 Prepare / OnWarn。
@@ -810,13 +813,14 @@ namespace GameLogic.Campaign.Env
             WakeNearbyOutposts(s, def, r);
             if (def != null)
             {
-                string dur = CalendarService.ShortDuration((r.EndTick - tick) / (double)Math.Max(1, GameClock.StepHz));
-                Cue(def.Threat ? FeedbackCueId.WorldEventWarning : FeedbackCueId.WorldEventNotice, r, def,
-                    GameText.Format(def.Threat ? "event_director.notify.start" : "event_director.notify.arrive", Name(def), dur));
-                if (Handlers.TryGetValue(def.Id, out EventDirectorHandler h))
+                Handlers.TryGetValue(def.Id, out EventDirectorHandler h);
+                if (h == null || !h.Instant)
                 {
-                    h.OnStart(s, r);
+                    string dur = CalendarService.ShortDuration((r.EndTick - tick) / (double)Math.Max(1, GameClock.StepHz));
+                    Cue(def.Threat ? FeedbackCueId.WorldEventWarning : FeedbackCueId.WorldEventNotice, r, def,
+                        GameText.Format(def.Threat ? "event_director.notify.start" : "event_director.notify.arrive", Name(def), dur));
                 }
+                h?.OnStart(s, r);
             }
             Revision++;
             GameEvent.Send(ChangedEvent);
@@ -903,12 +907,13 @@ namespace GameLogic.Campaign.Env
             EndCount++;
             if (def != null)
             {
-                Cue(FeedbackCueId.WorldEventNotice, r, def, GameText.Format("event_director.notify.end", Name(def), OutcomeText(outcome),
-                    packetId.Length > 0 ? GameText.Get("event_director.reward.packet") : string.Empty));
-                if (Handlers.TryGetValue(def.Id, out EventDirectorHandler hd))
+                Handlers.TryGetValue(def.Id, out EventDirectorHandler hd);
+                if (hd == null || !hd.Instant || outcome != OutcomeSuccess || packetId.Length > 0)
                 {
-                    hd.OnEnd(s, r, outcome);
+                    Cue(FeedbackCueId.WorldEventNotice, r, def, GameText.Format("event_director.notify.end", Name(def), OutcomeText(outcome),
+                        packetId.Length > 0 ? GameText.Get("event_director.reward.packet") : string.Empty));
                 }
+                hd?.OnEnd(s, r, outcome);
             }
             Revision++;
             GameEvent.Send(ChangedEvent);

@@ -39,6 +39,8 @@ namespace GameLogic.Campaign.Economy
         public const string SourceOutpost = "outpost";
         /// <summary>FG12-EVT-02（FGR-EVT-013）：掘进蠕虫的一节被击毁。</summary>
         public const string SourceWorm = "worm";
+        /// <summary>FG12-EVT-04（FGR-EVT-031）：轨道坠落撞击后的坠落残骸。</summary>
+        public const string SourceOrbital = "orbital";
         public const string AnyFaction = "*";
         public const string IdentityNone = "none";
         public const string IdentityFirmwareSalvage = "firmware:salvage";
@@ -179,7 +181,7 @@ namespace GameLogic.Campaign.Economy
                 problem = "掉落行缺 ID";
                 return null;
             }
-            if (source != SourceMinion && source != SourceElite && source != SourceOutpost && source != SourceWorm)
+            if (source != SourceMinion && source != SourceElite && source != SourceOutpost && source != SourceWorm && source != SourceOrbital)
             {
                 problem = $"掉落行 {id}：来源 {source} 不认识";
                 return null;

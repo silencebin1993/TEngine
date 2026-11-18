@@ -321,6 +321,7 @@ namespace GameLogic.Campaign.Regions
                 GameLogic.View.DefenseViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-02：护盾圈、护盾 / 陷阱放置预览
             GameLogic.View.RepairDroneViews.FrameUpdate(state, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-03：修理光束、维修站覆盖范围、重建区域边框
             GameLogic.View.DropPodViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG8-DROP-01：在飞的投送舱（占位方块 + 落点连线）
+            GameLogic.View.OrbitalDropViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG12-EVT-04：轨道坠落的火光轨迹与落点圈（O(预警中的坠落数)）
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             GameLogic.View.SeizeViews.FrameUpdate(_combat, _root != null ? _root.transform : null); // FG12-EVT-03：被夺控机器的故障特效与红色信号标记（O(夺控数)）
@@ -2946,6 +2947,7 @@ namespace GameLogic.Campaign.Regions
             GameLogic.View.RepairDroneViews.Clear(); // FG6-DEF-03：光束 / 范围圈 / 区域边框随 _root 销毁，这里清登记。
             GameLogic.View.DropPodViews.Clear(); // FG8-DROP-01：在飞的投送舱随 _root 销毁，这里清登记。
             GameLogic.View.SeizeViews.Clear(); // FG12-EVT-03：夺控标记随 _root 销毁，这里清登记。
+            GameLogic.View.OrbitalDropViews.Clear(); // FG12-EVT-04
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;

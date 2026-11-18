@@ -41,6 +41,7 @@ namespace GameLogic.Campaign.Economy
         private const uint SaltIdentity = 0x4C4F4F33u;
         private const uint SaltOutpost = 0x4C4F4F34u;
         private const uint SaltWorm = 0x4C4F4F35u; // FG12-EVT-02
+        private const uint SaltOrbital = 0x4C4F4F36u; // FG12-EVT-04
 
         // ── 自检读点（本进程累计）──
         public static long KillEvents { get; private set; }
@@ -115,6 +116,20 @@ namespace GameLogic.Campaign.Economy
             }
             long serial = ++st.WormLoots;
             Roll(s, st, LootCatalog.SourceWorm, string.Empty, at, serial, SaltWorm, 1f, OriginEvent, regionId);
+        }
+
+        /// <summary>
+        /// FG12-EVT-04（FGR-EVT-031“坠落残骸：人类遗产、稀有材料”）：轨道坠落撞击，按 orbital 行在残骸处掷一次（与野外击毁同一套确定性掷法、落地与搬运单）。
+        /// 序号用事件实例序号（导演每个实例只结束一次 → 只掷一次；不新增存档计数）。
+        /// </summary>
+        public static void OnOrbitalDrop(CampaignState s, Vector2 at, int eventSerial)
+        {
+            LootPacketState st = StateOf(s);
+            if (st == null || eventSerial <= 0)
+            {
+                return;
+            }
+            Roll(s, st, LootCatalog.SourceOrbital, string.Empty, at, eventSerial, SaltOrbital, 1f, OriginEvent, null);
         }
 
         /// <summary>敌方据点被摧毁（驻军全灭，TerritoryControlService 调用）：按 outpost 行掷材料、少量组件、可能的数据核心。</summary>

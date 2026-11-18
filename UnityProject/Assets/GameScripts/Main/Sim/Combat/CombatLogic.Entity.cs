@@ -246,22 +246,8 @@ namespace BinGames.Sim.Combat
             {
                 return false;
             }
+            EmgWreckMakeRoom(ref d);
             EmgScalars es = d.EmgS[0];
-            if (d.Wrecks.Length >= EmgConst.DefaultWreckCapacity)
-            {
-                // 满了：最早的崩解为金属碎屑斑块（EMG2-MAT-01）。列表按生成先后排，下标 0 最早。
-                EmgWreck oldest = d.Wrecks[0];
-                for (int j = 1; j < d.Wrecks.Length; j++)
-                {
-                    d.Wrecks[j - 1] = d.Wrecks[j];
-                }
-                EmgWreck gone = oldest;
-                d.Wrecks.ResizeUninitialized(d.Wrecks.Length - 1);
-                es.WrecksCapped++;
-                d.EmgS[0] = es;
-                EmgWreckToDebris(ref d, gone); // EMG2-MAT-01（DEBT-EMG1ENT01-01）：满容量最早的崩解为金属碎屑斑块（斑块层没开时只计数）
-                es = d.EmgS[0];
-            }
             double now = d.Scalars[0].Time;
             var w = new EmgWreck
             {
@@ -281,6 +267,47 @@ namespace BinGames.Sim.Combat
             d.Wrecks.Add(w);
             EmgChainLog(ref d, EmgChainNode.Wreck, w.Chain, d.EmgCtx.Depth, w.Id, d.Id[t], w.Pos, killer, d.Kind[t]);
             return true;
+        }
+
+        /// <summary>满了（<see cref="EmgConst.DefaultWreckCapacity"/>）时最早的残骸崩解为金属碎屑斑块（EMG2-MAT-01；列表按生成先后排，下标 0 最早；斑块层没开时只计数）。</summary>
+        private static void EmgWreckMakeRoom(ref CombatData d)
+        {
+            if (d.Wrecks.Length < EmgConst.DefaultWreckCapacity)
+            {
+                return;
+            }
+            EmgWreck gone = d.Wrecks[0];
+            for (int j = 1; j < d.Wrecks.Length; j++)
+            {
+                d.Wrecks[j - 1] = d.Wrecks[j];
+            }
+            d.Wrecks.ResizeUninitialized(d.Wrecks.Length - 1);
+            EmgScalars es = d.EmgS[0];
+            es.WrecksCapped++;
+            d.EmgS[0] = es;
+            EmgWreckToDebris(ref d, gone); // EMG2-MAT-01（DEBT-EMG1ENT01-01）
+        }
+
+        /// <summary>
+        /// FG12-EVT-04（FGR-EVT-031 坠落残骸）：不由单位阵亡、直接按位置与属性生成一块残骸（与阵亡残骸同一结构、同一列表、同一容量规则：满了最早的崩解为碎屑）。
+        /// 生成时刻 = 现在；到期按地点（家园 / 前哨长期留存，野外 emg.wreck.seconds）；可拆解回收（NoSalvage = 0）；不属于任何因果链。发稳定 Id 并计入 WrecksBorn。
+        /// </summary>
+        internal static int EmgPlaceWreck(ref CombatData d, double2 pos, float radius, float maxHp, float mass, float temp, byte srcKind)
+        {
+            EmgWreckMakeRoom(ref d);
+            EmgScalars es = d.EmgS[0];
+            double now = d.Scalars[0].Time;
+            var w = new EmgWreck
+            {
+                Pos = pos, Born = now, Until = d.Config.EmgPersist != 0 ? double.MaxValue : now + WreckSecondsOf(ref d), Radius = radius, MaxHp = maxHp, Hp = maxHp,
+                Mass = mass, Temp = temp, SrcKind = srcKind, SrcExtKey = 0, NoSalvage = 0, Chain = 0, Id = es.NextWreckId++,
+            };
+            w.Profile = -1; // 种类默认（fg.TbEntityProfile 的残骸行：导电 / 可燃 / 磁性按材质默认）
+            es.WrecksBorn++;
+            es.HashDirty = 1;
+            d.EmgS[0] = es;
+            d.Wrecks.Add(w);
+            return w.Id;
         }
 
         /// <summary>单位穿过残骸减速（FGR-EMG-113 作用 2）：单位中心在一块有耐久的残骸圆内时速度 × emg.wreck.slow；空中单位不受影响。不改寻路网格。</summary>

@@ -240,6 +240,7 @@ namespace GameLogic.Campaign.WorldSim
             Defense.RaidResultService.ResetSessionState(); // FG6-DEF-08：突袭结算的会话统计与待执行的预警自动存档清零（存档里的结算记录不动）
             Env.VibrationService.ResetSessionState(); // FG12-EVT-02：减震基座索引、爆炸阈值下发对象按新会话重建；存档里的震动值与蠕虫不动
             Env.WormEventService.ResetSessionState();
+            Env.OrbitalDropService.ResetSessionState(); // FG12-EVT-04：会话读数清零（落点与倒计时在事件导演的实例记录里，随存档）
             Defense.SiegeService.ResetSessionState(); // FG6-DEF-05：攻城的运行时缓存（耐久推送、首次钩子、统计）按新会话重建；存档里的剧场与队伍不动
             Logistics.PipeLeakService.ResetSessionState(); // FG6-LOG-10：液洼的运行时索引与统计按新会话重建；存档里的液洼记录不动（第一次有家园战斗地点时与内核对账）
             HomeValleyAlarms.ResetSessionState();
