@@ -78,8 +78,28 @@ namespace GameLogic.Campaign.Combat
                     string key = e.Code == EmgHijackConst.EndReclaimed ? "emg.seize.notify.reclaimed" : e.Code2 != 0 ? "emg.seize.notify.recovered" : "emg.seize.notify.ended";
                     LastSeizeEndText = GameText.Format(key, label);
                     Notifications.NotificationCenter.Post("emg_seize_ended", LastSeizeEndText, at);
+                    Env.SignalGhostService.OnSeizeEnded(logicId, e.Code, e.Code2 != 0); // FG12-EVT-03：信号幽灵的目标被夺回 / 到期 → 事件收尾、给奖励
                     return;
             }
+        }
+
+        /// <summary>
+        /// FG12-EVT-03 修复轮 1：夺控中（含瘫痪）的机器离开本地点（派遣 / 走出室内 / 对账移除）。内核在单位被移除后只会丢掉夺控记录、不发 SeizeEnded，
+        /// 这里先按“解除”归还，并当场走一遍 SeizeEnded 的结算（瘫痪的耐久恢复到 emg.seize.recover_ratio、发归还通知、信号幽灵收尾）；
+        /// 内核排队的那条事件之后排空时单位已不在映射里，被 <see cref="HandleSeizeEvent"/> 忽略，不会结算两次。
+        /// 地点整体卸载不走这里：FlushPendingEvents 的 ExpireAllHijacks 按期满归还并排空。
+        /// </summary>
+        private void ReleaseSeizeBeforeLeave(int unit)
+        {
+            if (IsDisposed || !Kernel.TryGetSeize(unit, out _, out bool downed, out _, out _) || !Kernel.ReleaseSeize(unit) || !Kernel.TryGetUnit(unit, out CombatUnitView v))
+            {
+                return;
+            }
+            HandleSeizeEvent(new CombatEvent
+            {
+                Kind = CombatEventKind.SeizeEnded, Unit = unit, Value2 = v.Health, Pos = v.Position,
+                Code = EmgHijackConst.EndReleased, Code2 = downed ? (byte)1 : (byte)0,
+            });
         }
 
         /// <summary>夺控中的外部血量机器受到致死伤害：记录血量写 0、内核瘫痪（幂等）。不是夺控中的机器返回 false（调用方照常结算伤害 / 阵亡）。</summary>
@@ -105,6 +125,28 @@ namespace GameLogic.Campaign.Combat
                 return EmgSeizeResult.NoUnit;
             }
             return Kernel.Seize(unit, seconds, seizer, (ushort)Math.Max(0, source));
+        }
+
+        /// <summary>FG12-EVT-03 表现（SeizeViews）：本地点夺控记录条数（含瘫痪中的）。</summary>
+        public int SeizedCount => IsDisposed ? 0 : Kernel.SeizeCount;
+
+        /// <summary>FG12-EVT-03 表现：第 <paramref name="i"/> 条夺控记录的机器画面对象（地点没被观察 / 不是机器 → false）。O(1)，只读。</summary>
+        public bool TryGetSeizedView(int i, out Transform view, out bool downed, out float reclaimLeft)
+        {
+            view = null;
+            downed = false;
+            reclaimLeft = 0f;
+            if (IsDisposed || i < 0 || i >= Kernel.SeizeCount)
+            {
+                return false;
+            }
+            int unit = Kernel.SeizedUnitAt(i);
+            if (!Kernel.TryGetSeize(unit, out _, out downed, out reclaimLeft, out _) || !_markerByUnit.TryGetValue(unit, out Regions.HomeValleyMachineMarker m) || m.View == null)
+            {
+                return false;
+            }
+            view = m.View.transform;
+            return true;
         }
 
         public bool TryGetSeizedMachine(int logicId, out float remaining, out bool downed, out float reclaimLeft, out int source)

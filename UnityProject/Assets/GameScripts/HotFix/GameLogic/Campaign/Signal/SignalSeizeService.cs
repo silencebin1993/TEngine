@@ -79,6 +79,14 @@ namespace GameLogic.Campaign.Signal
 
         public static bool IsSeized(int logicId) => SiteOf(logicId)?.TryGetSeizedMachine(logicId, out _, out _, out _, out _) ?? false;
 
+        /// <summary>FG12-EVT-03：夺控中的机器是否已瘫痪、来源码（不是夺控中 → false）。</summary>
+        public static bool TryGetSeize(int logicId, out bool downed, out int source)
+        {
+            downed = false;
+            source = SourceUnknown;
+            return SiteOf(logicId) is { } site && site.TryGetSeizedMachine(logicId, out _, out downed, out _, out source);
+        }
+
         /// <summary>
         /// 反向接入（FG10 FGR-EVT-022）：对被夺控的机器发起接入——覆盖判定由调用方按 FG01 先做（SignalUplinkService.Request 的 ValidateCore）；
         /// 引导 <see cref="ReclaimSeconds"/> 游戏秒后夺回（内核到点结算，暂停不走、倍速按游戏秒、进快照）。瘫痪中 / 已在引导时拒绝并写原因。

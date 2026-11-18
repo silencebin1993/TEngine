@@ -27,6 +27,14 @@ namespace GameLogic.UI.Kit
         private readonly List<int> _poolSerial = new List<int>();
         private readonly List<int> _poolCount = new List<int>();
         private string _lastObserved;
+        private VisualElement _static;
+        private Label _staticLabel;
+        private readonly List<VisualElement> _staticBars = new List<VisualElement>(6);
+
+        /// <summary>FG12-EVT-03 自检读点：信号杂波层是否显示、提示文字。</summary>
+        public bool StaticVisible => _static != null && !_static.ClassListContains("uk-hidden");
+        public string StaticText => _staticLabel?.text ?? string.Empty;
+        public float StaticBarTop(int i) => i >= 0 && i < _staticBars.Count ? _staticBars[i].style.top.value.value : -1f;
 
         /// <summary>自检读点：本帧画出来的弹字条数与文字。</summary>
         public int VisibleCount { get; private set; }
@@ -59,6 +67,13 @@ namespace GameLogic.UI.Kit
             Instance = this;
             _layer = root.Q<VisualElement>("ReactionPopupLayer");
             _layer.pickingMode = PickingMode.Ignore;
+            _static = root.Q<VisualElement>("SignalStaticLayer");
+            _staticLabel = root.Q<Label>("SignalStaticLabel");
+            _staticBars.Clear();
+            for (int i = 0; _static != null && root.Q<VisualElement>("SignalStaticBar" + i) is { } bar; i++)
+            {
+                _staticBars.Add(bar);
+            }
             EnsurePool(ReactionPopups.PoolSize);
         }
 
@@ -81,6 +96,38 @@ namespace GameLogic.UI.Kit
             Tick(Camera.main, ReactionFeedback.RealTime());
         }
 
+        /// <summary>FG12-EVT-03（FGR-EVT-021）：信号幽灵预警中显示全屏杂波，横向噪点带每帧换位置与透明度（真实时间驱动，纯表现；暂停时照样闪，预警计时本身是游戏时间）。</summary>
+        private void TickStatic(bool inWorld, float now)
+        {
+            if (_static == null)
+            {
+                return;
+            }
+            bool on = inWorld && GameLogic.Campaign.Env.SignalGhostService.StaticActive(CampaignSession.Current);
+            if (on != StaticVisible)
+            {
+                _static.EnableInClassList("uk-hidden", !on);
+                if (on && _staticLabel != null)
+                {
+                    _staticLabel.text = GameLogic.Localization.GameText.Get("signal_ghost.static");
+                }
+            }
+            if (!on)
+            {
+                return;
+            }
+            // 设置“降低闪光”（AC-ACC-003）：噪点带固定不动。
+            int frame = GameLogic.Settings.GameSettings.FlashReductionEnabled ? 0 : Time.frameCount;
+            for (int i = 0; i < _staticBars.Count; i++)
+            {
+                uint h = (uint)(frame * 2654435761u) ^ (uint)((i + 1) * 40503u);
+                h ^= h >> 13;
+                h *= 0x5bd1e995u;
+                _staticBars[i].style.top = Length.Percent(h % 97u);
+                _staticBars[i].style.opacity = 0.25f + (h >> 24) / 340f;
+            }
+        }
+
         /// <summary>每帧（自检直接调，给定镜头与真实秒）。</summary>
         public void Tick(Camera camera, float now)
         {
@@ -89,6 +136,7 @@ namespace GameLogic.UI.Kit
                 return;
             }
             bool inWorld = CampaignSession.Current != null && GameRoot.AnyRegionActive;
+            TickStatic(inWorld || InWorldOverrideForTests, now);
             string observed = FeedbackCues.ObservedSiteProvider?.Invoke();
             if (observed != _lastObserved || !inWorld && !InWorldOverrideForTests)
             {

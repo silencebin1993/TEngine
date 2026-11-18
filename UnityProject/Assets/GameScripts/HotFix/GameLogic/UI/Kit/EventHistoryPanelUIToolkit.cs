@@ -187,7 +187,9 @@ namespace GameLogic.UI.Kit
             {
                 EventDirectorHistoryRecord h = hist[i];
                 string when = GameText.Format("env.cal.day", GameClock.DayOf(h.WarnTick / hz)) + " " + GameClock.FormatHhMm(h.WarnTick / hz);
-                string reward = h.PacketId.Length > 0 ? GameText.Get("event_director.reward.packet") : string.Empty;
+                string reward = h.PacketId.Length > 0 ? GameText.Get("event_director.reward.packet")
+                    : h.RewardTech > 0 ? GameText.Format(string.IsNullOrEmpty(h.RewardFragment) ? "event_director.reward.tech_only" : "event_director.reward.fixed", h.RewardTech) // FG12-EVT-03 reward=fixed
+                    : string.Empty;
                 lines.Add((GameText.Format("event_director.history.row", when, EventDirectorService.Name(h.EventId), EventDirectorService.OutcomeText(h.Outcome), reward),
                     null, h.RegionId, new Vector3(h.X, 0f, h.Y)));
             }

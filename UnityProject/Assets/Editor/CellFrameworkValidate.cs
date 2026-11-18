@@ -673,6 +673,7 @@ namespace GameLogic.EditorTools
             // 通知 / 离家报告 / 图鉴首次解锁；暂停与 0.5x～3x、观察一致、真文件存读档；事件历史面板与暂停菜单；性能。
             Seg("FgEventDirectorSelfCheck", FgEventDirectorSelfCheck.Run);
             Seg("FgWormSelfCheck", FgWormSelfCheck.Run); // FG12-EVT-02 震动值与掘进蠕虫
+            Seg("FgSignalGhostSelfCheck", FgSignalGhostSelfCheck.Run); // FG12-EVT-03 信号幽灵（FGT-EVT-004）：剧情首次 / 随机、预警杂波、夺控、反向接入、击倒瘫痪、奖励、负向、倍速 / 观察 / 存读档
             // FG7-ENV-03 天气与顶棚（FG07 FGR-ENV-020 / 021 / 030，FG03 FGR-LOG-028 / 045，FGT-ENV-004）：数据与源数据逐行；按种子排定（持续、频率随幕）；预报（0.5 日预警 / 监听站 T2 破译 3 日）；
             // 顶棚（研究门槛、拖拽全有或全无、机器施工、下面照常建造、拆除返还、取消、隐藏 / 半透明、叠加层、建造模式拖拽）；酸雨 / 沙暴 / 寒潮效果与顶棚覆盖（露天掉耐久、污染加倍、摧毁留虚影、
             // 传送带减速、太阳能、炮塔探测、结冰阻断流动、伴热管、冰霜画面、散热）；负向矩阵（与静默夜叠加等）；暂停与 0.5x～3x、观察一致、真文件存读档；界面与设置；性能。

@@ -711,6 +711,8 @@ namespace GameLogic.Campaign.WorldSim
                 Env.EventDirectorService.WorldStep(state, GameClock.Ticks);
                 // FG12-EVT-02：掘进蠕虫——新倒下的节掉落、钻出地面时建筑受创、死亡 / 潜回地下（O(蠕虫数)；各节就位与地上 / 地下交替在家园内核的一步里）。
                 Env.WormEventService.WorldStep(state);
+                // FG12-EVT-03：信号幽灵第一次的剧情请求（第 2 幕起、还没来过；O(1)，只看存档）。夺控本身在内核、收尾由夺控结束事件驱动。
+                Env.SignalGhostService.WorldStep(state);
                 // FG7-ENV-04：归还面积里程碑与“受污染”解除（每游戏秒 O(1) 比较；净化本身在上面的生产步里按游戏时间推进），只看步序号，与观察无关。
                 Env.PurificationService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。

@@ -753,6 +753,23 @@ namespace GameLogic.Campaign.Economy
             return null;
         }
 
+        /// <summary>
+        /// FG12-EVT-03（FGR-EVT-023“加密片段（剧情，舰队伏笔）”）：直接截获下一个舰队片段（同监听站“act”类情报的收录路径：记为已截获、收进资料库），
+        /// 不产生情报条目、不推进监听站进度。当前幕没有可截获的片段时返回 null（调用方只给技术数据）。
+        /// </summary>
+        public static IntelFragmentDef GrantFleetFragment(CampaignState s)
+        {
+            IntelState f = StateOf(s);
+            IntelFragmentDef frag = f != null ? NextFragment(s) : null;
+            if (frag == null)
+            {
+                return null;
+            }
+            f.FragmentsHeard = new List<string>(f.FragmentsHeard ?? Array.Empty<string>()) { frag.Id }.ToArray();
+            TEngine.GameEvent.Send(Narrative.NarrativeService.FeedEvent, Narrative.NarrativeCatalog.TriggerIntel + frag.Id);
+            return frag;
+        }
+
         // ─────────────────────────────── 产出 ───────────────────────────────
 
         /// <summary>

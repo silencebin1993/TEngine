@@ -72,6 +72,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
                 S("m11_fix", "开局夹具（DEBT-FG11E2E01-01）：第二幕进度——第 2 幕、铸造 / 澄净 / 静默领地平定、防腐涂层已到手（首领战与涂层主线由 FGJ-M9 / FGJ-M10 覆盖）；核心往热寂数据城外圈一座冷却塔一路建成的信号中继（每座过正式放置校验）；" +
                              $"{SquadSize} 台 ERC-003（铸造重炮 + 燃迹）停在辐射带外；信号核 1 号槽装过载（刻印 / 装槽由 FGJ-M5 覆盖），基元仓里另有一枚标记跳转芯片", 20, ApplyFixture, TickFixture),
+                S("ghost1", "第一次信号幽灵（FG12-EVT-03，夹具进第 2 幕后剧情固定发生）：夺控一台己方机器 → 从机器列表接入它（反向接入）3 秒后夺回；不在覆盖里被拒就等 45 秒到时归还", 150, null, FgjM10Journey.TickFirstGhost),
 
                 // ── 1. 热寂数据城：高温辐射与冷却塔（FG-GAP-235） ──
                 S("sel", "左键点一台远征队、Shift 左键加选其余几台", 60, null, FgjM10Journey.TickSelectTeam, retries: 2),

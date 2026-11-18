@@ -71,6 +71,9 @@ namespace GameLogic.Campaign.Env
         /// outcome = <see cref="EventDirectorService.OutcomePostponed"/>：收回 OnWarn 放出的效果、不给奖励；之后补上时是新的 Serial，重新 Prepare / OnWarn。
         /// </summary>
         public virtual void OnEnd(CampaignState s, EventDirectorInstanceRecord r, string outcome) { }
+
+        /// <summary>FG12-EVT-03：结束前改写结果（写历史、发通知之前）。例如信号幽灵：时限到时机器已被击倒（瘫痪）= 已应对，不是超时。默认原样。</summary>
+        public virtual string FinalOutcome(CampaignState s, EventDirectorInstanceRecord r, string outcome) => outcome;
     }
 
     /// <summary>
@@ -509,6 +512,23 @@ namespace GameLogic.Campaign.Env
             return true;
         }
 
+        /// <summary>FG12-EVT-03：reward=fixed 的处理器在 OnEnd 里给完奖励后记进这一条历史（事件历史面板写“获得……”）。没有这条历史 → false。</summary>
+        public static bool SetHistoryReward(CampaignState s, int serial, int tech, string fragmentId)
+        {
+            EventDirectorHistoryRecord[] hist = StateOf(s)?.History ?? Array.Empty<EventDirectorHistoryRecord>();
+            for (int i = hist.Length - 1; i >= 0; i--)
+            {
+                if (hist[i] != null && hist[i].Serial == serial)
+                {
+                    hist[i].RewardTech = Math.Max(0, tech);
+                    hist[i].RewardFragment = fragmentId ?? string.Empty;
+                    Revision++;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>处理器提前结束一个事件（击退 / 失败 / 夺回……）。完成（success）且 reward=packet 时给三选一。</summary>
         public static bool Complete(CampaignState s, int serial, string outcome)
         {
@@ -519,6 +539,23 @@ namespace GameLogic.Campaign.Env
                 return false;
             }
             Finish(s, d, r, string.IsNullOrEmpty(outcome) ? OutcomeSuccess : outcome, GameClock.Ticks);
+            return true;
+        }
+
+        /// <summary>
+        /// FG12-EVT-03 修复轮 1：处理器在开始那一刻发现条件不成立（例如信号幽灵的目标全部失效），把这次撤回成“推迟”——不进历史、
+        /// 发生次数退回、请求留着（剧情请求仍是剧情请求，storyFirst 的第一次不被吃掉），条件满足后补上（新的 Serial）。与预警阶段撤回同一条路径。
+        /// </summary>
+        public static bool Retract(CampaignState s, int serial, string whyKey)
+        {
+            DirectorEventState d = StateOf(s);
+            EventDirectorInstanceRecord r = FindActive(d, serial);
+            EventDirectorDef def = r != null ? Def(r.EventId) : null;
+            if (def == null)
+            {
+                return false;
+            }
+            Postpone(s, d, r, def, whyKey);
             return true;
         }
 
@@ -837,6 +874,10 @@ namespace GameLogic.Campaign.Env
         {
             EventDirectorDef def = Def(r.EventId);
             Remove(d, r);
+            if (Handlers.TryGetValue(r.EventId, out EventDirectorHandler fh))
+            {
+                outcome = fh.FinalOutcome(s, r, outcome) ?? outcome;
+            }
             string packetId = string.Empty;
             if (outcome == OutcomeSuccess && def != null && def.Reward == RewardPacket)
             {

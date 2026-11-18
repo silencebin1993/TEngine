@@ -267,6 +267,7 @@ namespace GameLogic.Campaign.Regions
             {
                 Control.Tick(GameClock.FrameStepSeconds);
             }
+            GameLogic.View.SeizeViews.FrameUpdate(_combat, _root != null ? _root.transform : null); // FG12-EVT-03：被夺控机器的故障特效与红色信号标记（O(夺控数)）
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
             _content?.FrameUpdate(CampaignSession.Current);
         }

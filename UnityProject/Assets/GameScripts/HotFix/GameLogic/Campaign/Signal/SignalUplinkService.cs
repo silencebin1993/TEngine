@@ -681,8 +681,10 @@ namespace GameLogic.Campaign.Signal
                 Reject(UplinkFailure.NoSelection, 0, UplinkSource.Hotkey);
                 return false;
             }
+            // FG12-EVT-03：对被夺控的机器按接入键 = 反向接入（引导几秒后夺回，不进机器）——镜头不切直控（否则镜头飞进一台信号不在里面的机器）。
+            bool reclaim = SignalSeizeService.IsSeized(selectedLogicId);
             UplinkRequestResult r = Request(selectedLogicId, UplinkSource.Hotkey, startCamera: false);
-            return r.Accepted && !r.WaitsForResume;
+            return r.Accepted && !r.WaitsForResume && !reclaim;
         }
 
         /// <summary>玩家取消还没完成的接入（Esc）。</summary>

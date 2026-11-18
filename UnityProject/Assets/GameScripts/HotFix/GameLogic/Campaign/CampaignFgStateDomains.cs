@@ -1974,6 +1974,8 @@ namespace GameLogic.Campaign
         public string RegionId = string.Empty;
         public float X;
         public float Y;
+        /// <summary>FG12-EVT-03：处理器的目标（信号幽灵 = 被夺控机器的 LogicId；0 = 没有）。只加字段：旧档读进来是 0。</summary>
+        public int Target;
     }
 
     /// <summary>FG12-EVT-01：事件历史的一条（时间、结果、奖励、地点）。</summary>
@@ -1990,6 +1992,9 @@ namespace GameLogic.Campaign
         public string Outcome = string.Empty;
         /// <summary>完成时生成的三选一数据包 ID（没有为空）。</summary>
         public string PacketId = string.Empty;
+        /// <summary>FG12-EVT-03：reward=fixed 的处理器给的技术数据与加密片段 ID（没有 = 0 / 空；历史行据此写奖励）。</summary>
+        public int RewardTech;
+        public string RewardFragment = string.Empty;
         public string RegionId = string.Empty;
         public float X;
         public float Y;

@@ -87,6 +87,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
                 S("m10_fix", "开局夹具（DEBT-FG10E2E01-01）：第一幕结束后的进度——第 2 幕、铸造领地平定（主线“熄灭熔炉”完成 → “防腐涂层样品”出现）、核心到沉淀湖的信号中继链、" +
                              $"{SquadSize} 台 ERC-003（连射器 + 燃迹）远征队已开到接车点外", 20, ApplyFixture, TickFixture),
+                S("ghost1", "第一次信号幽灵（FG12-EVT-03，夹具进第 2 幕后剧情固定发生）：夺控一台己方机器 → 从机器列表接入它（反向接入）3 秒后夺回；不在覆盖里被拒就等 45 秒到时归还", 150, null, TickFirstGhost),
 
                 // ── 1. 防腐涂层主线 + FG-GAP-163 区域片段 ──
                 S("ml_open", "按任务日志键（默认 J）打开任务日志：主线“防腐涂层样品”在进行中", 10,
@@ -331,6 +332,31 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
             }
             c.Set("roster", string.Join(",", ids.Select(x => x.ToString(CultureInfo.InvariantCulture))));
+        }
+
+        /// <summary>
+        /// FG12-EVT-03（M10-BASELINE 差异表）：夹具把战役设到第 2 幕，第一次信号幽灵（FGR-EVT-020 剧情固定）随后发生——5 秒预警后夺控一台己方机器 45 秒，按教义攻击同伴。
+        /// 正式应对：机器列表接入被夺控的机器 = 反向接入（FG01 覆盖判定），3 秒后夺回；覆盖外 / 干扰中被拒就等它到时归还。事件收尾（进了事件历史）后才进下一步，后面的战斗步骤不受它干扰。
+        /// FGJ-M11 复用。
+        /// </summary>
+        public static StepOutcome TickFirstGhost(JourneyContext c)
+        {
+            CampaignState s = CampaignSession.Current;
+            EventDirectorInstanceRecord r = SignalGhostService.Active(s);
+            EventDirectorHistoryRecord h = EventDirectorService.History(s).LastOrDefault(x => x.EventId == SignalGhostService.EventId);
+            if (r == null)
+            {
+                return h != null
+                    ? StepOutcome.Done($"第一次信号幽灵已收尾：{EventDirectorService.OutcomeText(h.Outcome)}（剧情 {h.Story}；{c.Get("ghost.how", "没等到夺控")}）")
+                    : c.StepElapsed < 90 ? StepOutcome.Wait : StepOutcome.Fail("进第 2 幕后 90 秒没出现第一次信号幽灵（FGR-EVT-020 剧情固定）");
+            }
+            if (r.State == EventDirectorService.StateActive && r.Target != 0 && SignalSeizeService.IsSeized(r.Target) && c.Get("ghost.how", string.Empty).Length == 0)
+            {
+                UplinkRequestResult res = SignalUplinkService.Request(r.Target, UplinkSource.MachineList, startCamera: false);
+                c.Set("ghost.how", res.Accepted ? $"机器列表反向接入 {FgjM1Journey.Label(r.Target)}，3 秒后夺回" : $"反向接入 {FgjM1Journey.Label(r.Target)} 被拒（{res.Failure}），等它到时归还");
+                c.Log(c.Get("ghost.how"));
+            }
+            return StepOutcome.Wait;
         }
 
         private static string _lastWhy = string.Empty;

@@ -575,6 +575,7 @@ namespace GameLogic.Campaign.Combat
             {
                 ExportMachine(logicId, includePosition: true);
             }
+            ReleaseSeizeBeforeLeave(unit); // FG12-EVT-03 修复轮 1：夺控 / 瘫痪中的机器离开本地点先归还结算，不随离场丢掉记录
             Sync?.Unbind(unit);
             Kernel?.Despawn(unit);
             _machineUnit.Remove(logicId);

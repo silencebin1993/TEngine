@@ -317,6 +317,7 @@ namespace GameLogic.Campaign.Regions
                 Control.Tick(GameClock.FrameStepSeconds); // FG3-LOG-09：失联宽限按模拟步推进（与帧率无关）
             }
             // FG0-ARCH-03：表现对象按内核位置插值（一次 Burst 作业）+ 实例化绘制（常数次调用，与单位数无关）。
+            GameLogic.View.SeizeViews.FrameUpdate(_combat, _root != null ? _root.transform : null); // FG12-EVT-03：被夺控机器的故障特效与红色信号标记（O(夺控数)）
             _combat?.FrameRender(_camera, GameClock.StepAlpha);
             SyncWorldVisuals(state);
         }
