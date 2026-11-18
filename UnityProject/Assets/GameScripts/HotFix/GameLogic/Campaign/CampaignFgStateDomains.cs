@@ -1962,6 +1962,19 @@ namespace GameLogic.Campaign
         public int Finished;
         public int Postponed;
         public int Rejected;
+        /// <summary>FG12-EVT-06 流浪商队（FGR-EVT-051）：本次来访的实例序号（0 = 商队不在）与商品（按（世界种子, 序号）抽的 3～5 件、各自剩余库存）。只加字段：旧档读进来 = 不在。</summary>
+        public int CaravanVisit;
+        public CaravanWareRecord[] CaravanWares = Array.Empty<CaravanWareRecord>();
+        /// <summary>统计：本局在商队买入的件数。</summary>
+        public int CaravanBought;
+    }
+
+    /// <summary>FG12-EVT-06：商队这次来访的一件商品（fg.TbCaravanWare 行 ID 与剩余库存）。唯一写入口 <see cref="Env.CaravanService"/>。</summary>
+    [Serializable]
+    public sealed class CaravanWareRecord
+    {
+        public string WareId = string.Empty;
+        public int Left;
     }
 
     /// <summary>FG12-EVT-01：一种事件的排程。</summary>
@@ -2944,6 +2957,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.Weather), "FG07 天气", s => s.Weather),
             new DomainInfo(nameof(CampaignState.Raids), "FG06 突袭", s => s.Raids),
             new DomainInfo(nameof(CampaignState.DirectorEvents), "FG10 事件导演", s => s.DirectorEvents),
+            new DomainInfo(nameof(CampaignState.Vibration), "FG12-EVT-02 震动值与掘进蠕虫", s => s.Vibration), // FG12-EVT-06 补登记（EVT-02 新增该域时漏登，FgSaveV2SelfCheck 登记表断言发现）
             new DomainInfo(nameof(CampaignState.Quests), "FG08 任务", s => s.Quests),
             new DomainInfo(nameof(CampaignState.StandingRules), "FG04 常驻规则", s => s.StandingRules),
             new DomainInfo(nameof(CampaignState.SignalCore), "FG1-SIG-01（信号核）", s => s.SignalCore),
@@ -3262,6 +3276,7 @@ namespace GameLogic.Campaign
             s.DirectorEvents.Active ??= Array.Empty<EventDirectorInstanceRecord>();
             s.DirectorEvents.History ??= Array.Empty<EventDirectorHistoryRecord>();
             s.DirectorEvents.Seen ??= Array.Empty<string>();
+            s.DirectorEvents.CaravanWares ??= Array.Empty<CaravanWareRecord>(); // FG12-EVT-06：旧档没有 = 商队不在
             s.Vibration ??= new VibrationState(); // FG12-EVT-02：旧档没有 = 空域（家园旧震动值第一次推进时迁入）
             s.Vibration.Sites ??= Array.Empty<VibrationSiteRecord>();
             s.Vibration.Worms ??= Array.Empty<WormRecord>();

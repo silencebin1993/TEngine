@@ -242,6 +242,7 @@ namespace GameLogic.Campaign.WorldSim
             Env.WormEventService.ResetSessionState();
             Env.DecoyTerminalService.ResetSessionState(); // FG12-EVT-05：会话读数清零（识别 / 触发 / 伏击记录随存档）
             Env.OrbitalDropService.ResetSessionState(); // FG12-EVT-04：会话读数清零（落点与倒计时在事件导演的实例记录里，随存档）
+            Env.CaravanService.ResetSessionState(); // FG12-EVT-06：会话读数清零（商品与剩余库存在事件导演域里，随存档）
             Defense.SiegeService.ResetSessionState(); // FG6-DEF-05：攻城的运行时缓存（耐久推送、首次钩子、统计）按新会话重建；存档里的剧场与队伍不动
             Logistics.PipeLeakService.ResetSessionState(); // FG6-LOG-10：液洼的运行时索引与统计按新会话重建；存档里的液洼记录不动（第一次有家园战斗地点时与内核对账）
             HomeValleyAlarms.ResetSessionState();

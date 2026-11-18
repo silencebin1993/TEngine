@@ -911,6 +911,43 @@ namespace GameLogic.Campaign.Env
             GuidanceHooks.Raise(GuidanceHooks.HeritageFirstDelivered);
         }
 
+        /// <summary>
+        /// FG12-EVT-06（FGR-EVT-051“商队卖人类遗产”）：这件遗产现在能不能从商队买——存在、不是剧情需要的、还没被找到（仍在遗迹里或没挑到遗迹点）。
+        /// 已经找到 / 在货舱里 / 留在地上的不卖（每件每个世界只有一件，FG8-EXP-04）。
+        /// </summary>
+        public static bool CanTrade(CampaignState s, string heritageId)
+        {
+            Heritage h = Find(heritageId);
+            if (h == null || h.Story != 0 || HomeExplorationService.StateOf(s) == null)
+            {
+                return false;
+            }
+            HeritageStatus st = StatusOf(s, heritageId);
+            return st == HeritageStatus.Hidden || st == HeritageStatus.Unplaced;
+        }
+
+        /// <summary>
+        /// FG12-EVT-06：从商队买到——与带回入库同一效果（记入保管库、按类别生效、图鉴、通知）；之后那处遗迹里不再有它（<see cref="OnRelicRecovered"/> 见已得到即不放）。
+        /// 不能买（<see cref="CanTrade"/> 为 false）返回 null，否则返回效果文本。
+        /// </summary>
+        public static string ObtainFromTrade(CampaignState s, string heritageId)
+        {
+            if (!CanTrade(s, heritageId))
+            {
+                return null;
+            }
+            HomeExplorationState st = HomeExplorationService.StateOf(s);
+            Heritage h = Find(heritageId);
+            st.HeritageObtained = Append(st.HeritageObtained, h.Id);
+            st.HeritageObtainedTicks = Append(st.HeritageObtainedTicks, GameClock.Ticks);
+            string effect = ApplyEffect(s, st, h);
+            MechanicCodexUnlock(h.Id);
+            Revision++;
+            NotificationCenter.Post(NotifyType, GameText.Format("heritage.notify.delivered", Display(h), effect));
+            GuidanceHooks.Raise(GuidanceHooks.HeritageFirstDelivered);
+            return effect;
+        }
+
         private static string ApplyEffect(CampaignState s, HomeExplorationState st, Heritage h)
         {
             switch (h.Category)

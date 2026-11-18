@@ -924,7 +924,8 @@ namespace GameLogic.Campaign.Economy
             c != null && c.Kind == LootPickCatalog.KindModule ? DuplicateStockItem(s, c.TargetId) : null;
 
         /// <summary>重复部件入库：组件库存 +件数；放不下的部分拆成技术数据（每件 <see cref="LootPickCatalog.DismantleTech"/>），给一条字幕——不静默丢弃。</summary>
-        private static void DeliverDuplicatePart(CampaignState s, string stockItem, string componentId, int amount, string salvageId)
+        /// <remarks>FG12-EVT-06：商队里再买已掌握的部件走同一入口（FGR-EMG-193）。</remarks>
+        internal static void DeliverDuplicatePart(CampaignState s, string stockItem, string componentId, int amount, string salvageId)
         {
             int n = Math.Max(1, amount);
             int stored = ItemCatalog.TryGet(stockItem, out ItemDef item) ? HomeInventory.Add(s, item, n) : 0;

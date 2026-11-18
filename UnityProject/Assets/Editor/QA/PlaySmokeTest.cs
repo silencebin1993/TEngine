@@ -1692,6 +1692,16 @@ namespace GameLogic.EditorTools
             Check(evClicked && evOpen && evClosed && freqStep && freqBack,
                 $"暂停菜单点“事件历史”：事件历史面板打开（{(ehp == null ? "无" : ehp.VisibleRowCount > 0 ? ehp.RowText(0) : ehp.EmptyText)}），点关闭回到暂停菜单；“事件频率”逐档切换并转回原档" +
                 $"（{evClicked}/{evOpen}/{evClosed}/{freqStep}/{freqBack}）");
+            // FG12-EVT-06（FGU-39 商队交易）：暂停菜单“流浪商队”→ 交易面板（开局商队不在：写明何时会来、没有商品行）→ 点关闭回到暂停菜单。
+            bool cvClicked = ClickUitk("[PauseMenuHost]", "PauseCaravan");
+            UI.Kit.CaravanTradePanelUIToolkit cvp = UI.Kit.CaravanTradePanelUIToolkit.Instance;
+            cvp?.Refresh();
+            bool cvOpen = cvp != null && UI.Kit.CaravanTradePanelUIToolkit.IsOpen && cvp.PanelVisible
+                          && (cvp.VisibleRowCount > 0 || cvp.StayText == Localization.GameText.Get("caravan.panel.absent"))
+                          && !Localization.GameText.ContainsMarker(cvp.StayText + cvp.FooterText + (cvp.VisibleRowCount > 0 ? cvp.RowText(0) : string.Empty));
+            bool cvClosed = ClickUitk("[CaravanTradeHost]", "CaravanClose") && !UI.Kit.CaravanTradePanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(cvClicked && cvOpen && cvClosed,
+                $"暂停菜单点“流浪商队”：交易面板打开（{(cvp == null ? "无" : cvp.VisibleRowCount > 0 ? cvp.RowText(0) : cvp.StayText)}），点关闭回到暂停菜单（{cvClicked}/{cvOpen}/{cvClosed}）");
             SmokeDifficultyPanel();
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),

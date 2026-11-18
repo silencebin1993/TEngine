@@ -86,6 +86,8 @@ namespace GameLogic.UI.Kit
             RaidHistoryButton = Bind(root, "PauseRaidHistory", "pause.raid_history", RaidResultPanelUIToolkit.Open);
             // FG12-EVT-01（FG10 第 10 节）：事件历史盖在暂停菜单上面，关掉回到暂停菜单；“事件频率”（FGR-EVT-006）点击在 关闭 / 少 / 标准 / 多 之间切换，立即生效、随存档。
             EventHistoryButton = Bind(root, "PauseEventHistory", "pause.event_history", EventHistoryPanelUIToolkit.Open);
+            // FG12-EVT-06（FGU-39）：流浪商队交易盖在暂停菜单上面，关掉回到暂停菜单；商队不在时面板写明它何时会来。
+            CaravanButton = Bind(root, "PauseCaravan", "pause.caravan", CaravanTradePanelUIToolkit.Open);
             EventFrequencyButton = root.Q<Button>("PauseEventFrequency");
             if (EventFrequencyButton != null)
             {
@@ -163,6 +165,7 @@ namespace GameLogic.UI.Kit
         public Button RosterButton { get; private set; }
         public Button RaidHistoryButton { get; private set; }
         public Button EventHistoryButton { get; private set; }
+        public Button CaravanButton { get; private set; }
         public Button EventFrequencyButton { get; private set; }
 
         /// <summary>FG12-EVT-01：事件频率按钮——下一档（关闭 → 少 → 标准 → 多 → 关闭）。</summary>

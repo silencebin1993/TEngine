@@ -163,6 +163,10 @@ public partial class Tables
     /// </summary>
     public fg.TbBuildUpgrade TbBuildUpgrade {get; }
     /// <summary>
+    /// 商队商品
+    /// </summary>
+    public fg.TbCaravanWare TbCaravanWare {get; }
+    /// <summary>
     /// 载体读法
     /// </summary>
     public fg.TbCarrierReading TbCarrierReading {get; }
@@ -591,6 +595,7 @@ public partial class Tables
         TbBuildMaterial = new fg.TbBuildMaterial(loader("fg_tbbuildmaterial"));
         TbBuildTool = new fg.TbBuildTool(loader("fg_tbbuildtool"));
         TbBuildUpgrade = new fg.TbBuildUpgrade(loader("fg_tbbuildupgrade"));
+        TbCaravanWare = new fg.TbCaravanWare(loader("fg_tbcaravanware"));
         TbCarrierReading = new fg.TbCarrierReading(loader("fg_tbcarrierreading"));
         TbChannelDecl = new fg.TbChannelDecl(loader("fg_tbchanneldecl"));
         TbChannelPort = new fg.TbChannelPort(loader("fg_tbchannelport"));
@@ -731,6 +736,7 @@ public partial class Tables
         TbBuildMaterial.ResolveRef(this);
         TbBuildTool.ResolveRef(this);
         TbBuildUpgrade.ResolveRef(this);
+        TbCaravanWare.ResolveRef(this);
         TbCarrierReading.ResolveRef(this);
         TbChannelDecl.ResolveRef(this);
         TbChannelPort.ResolveRef(this);

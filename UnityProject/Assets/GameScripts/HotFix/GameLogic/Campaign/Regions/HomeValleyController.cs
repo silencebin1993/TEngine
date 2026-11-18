@@ -322,6 +322,7 @@ namespace GameLogic.Campaign.Regions
             GameLogic.View.RepairDroneViews.FrameUpdate(state, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-03：修理光束、维修站覆盖范围、重建区域边框
             GameLogic.View.DropPodViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG8-DROP-01：在飞的投送舱（占位方块 + 落点连线）
             GameLogic.View.OrbitalDropViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG12-EVT-04：轨道坠落的火光轨迹与落点圈（O(预警中的坠落数)）
+            GameLogic.View.CaravanViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG12-EVT-06：停在家园的流浪商队（占位外形；左键点中由 HandleSelectionClick 打开交易）
             }
             // FG0-ARCH-03：机器表现对象按内核位置插值 + 突袭者 / 炮塔 / 弹体实例化绘制（常数次调用，与单位数无关）。
             GameLogic.View.SeizeViews.FrameUpdate(_combat, _root != null ? _root.transform : null); // FG12-EVT-03：被夺控机器的故障特效与红色信号标记（O(夺控数)）
@@ -2332,24 +2333,15 @@ namespace GameLogic.Campaign.Regions
 
             // ER5-CMD-01：框选/武装命令确认点击由 SquadCommands.Tick（本帧更早跑过）先处理；
             // 真发生了框选或确认了武装命令，这次释放就不再落到下面的单点选中分支。
-            if (SquadCommands.ConsumedClickThisFrame)
-            {
-                return;
-            }
-
-            if (!InputRouter.GetMouseButtonUp(0, InputScope.Strategy))
-            {
-                return;
-            }
-
-            if (!InputRouter.TryGetPointer(InputScope.Strategy, out Vector3 pointer))
+            if (!TryReadPrimaryClick(SquadCommands.ConsumedClickThisFrame, out Vector3 pointer))
             {
                 return;
             }
             Ray ray = _camera.ScreenPointToRay(pointer);
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
-                if (TryClickEntrance(ray))
+                // FG12-EVT-06：商队没有碰撞体，射线落在它身上同样走这里。
+                if (GameLogic.View.CaravanViews.TryClick(ray) || TryClickEntrance(ray))
                 {
                     return;
                 }
@@ -2365,6 +2357,11 @@ namespace GameLogic.Campaign.Regions
                 _selected = marker;
                 _selected.SetSelected(true);
                 SquadCommands.SelectSingle(marker.LogicId, additive); // 单点选中同步进战略命令的选择集。
+                return;
+            }
+            // FG12-EVT-06（FGR-EVT-050）：左键点中停在家园的流浪商队 = 打开交易面板；机器优先（停在商队旁的机器照常点选，不会同时开面板），先于入口与建筑。
+            if (GameLogic.View.CaravanViews.TryClick(ray))
+            {
                 return;
             }
             // FG8-GEN-02（FGR-GEN-042）：左键点室内入口（入口标记没有碰撞体，按射线与地面的交点找）= 打开进入面板；机器优先（站在入口上的机器照常点选）。
@@ -2407,6 +2404,15 @@ namespace GameLogic.Campaign.Regions
             {
                 ClearMachineSelection();
             }
+        }
+
+        /// <summary>FG12-EVT-06 审查修复：单点选中的唯一读法——本帧没被框选 / 武装命令确认消费、
+        /// Strategy 域持有输入（直控、过渡、模态面板、文本框焦点时都不持有）、主动作按键映射换算后的物理键抬起、指针不在界面上。
+        /// 商队点中与机器 / 建筑点选共用这一次读取，二者按优先级二选一（不再各读各的原始键）。</summary>
+        public static bool TryReadPrimaryClick(bool consumedByCommands, out Vector3 pointer)
+        {
+            pointer = Vector3.zero;
+            return !consumedByCommands && InputRouter.GetMouseButtonUp(0, InputScope.Strategy) && InputRouter.TryGetPointer(InputScope.Strategy, out pointer);
         }
 
         /// <summary>FG8-GEN-02：射线与 0 高度地面的交点附近（interior.pick_radius 格）有室内入口 → 请求打开入口面板，返回 true。</summary>
@@ -2949,6 +2955,7 @@ namespace GameLogic.Campaign.Regions
             GameLogic.View.DropPodViews.Clear(); // FG8-DROP-01：在飞的投送舱随 _root 销毁，这里清登记。
             GameLogic.View.SeizeViews.Clear(); // FG12-EVT-03：夺控标记随 _root 销毁，这里清登记。
             GameLogic.View.OrbitalDropViews.Clear(); // FG12-EVT-04
+            GameLogic.View.CaravanViews.Clear(); // FG12-EVT-06
             _buildingVisuals.Clear();
             _buildingBadges.Clear();
             _visualsRecordsRef = null;

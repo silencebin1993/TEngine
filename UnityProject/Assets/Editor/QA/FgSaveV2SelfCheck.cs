@@ -154,7 +154,8 @@ namespace GameLogic.EditorTools
             // FG3-LOG-06 新增第 20 个域 Power（电网编号、曲线、储能存量）。
             // FG4-ECO-01 新增第 21 个域 Economy（仓库物资、核心保管库、净速率采样）。
             // FG9-FAC-01 新增第 22 个域 Factions（寂听主脑首领战、噪声发射器、阵营反制每日锁定、室内伏笔地点）。
-            Expect(fields.Length == 22 && fields.Contains("Combat") && fields.Contains("Nav") && fields.Contains("Power") && fields.Contains("Economy") && fields.Contains("Factions")
+            // FG12-EVT-02 新增第 23 个域 Vibration（家园与各区域的震动值、在场的掘进蠕虫；FG12-EVT-06 发现漏登记并补上）。
+            Expect(fields.Length == 23 && fields.Contains("Vibration") && fields.Contains("Combat") && fields.Contains("Nav") && fields.Contains("Power") && fields.Contains("Economy") && fields.Contains("Factions")
                    && fields.SequenceEqual(registered) && CampaignFgStateDomains.All.All(d => !string.IsNullOrEmpty(d.OwnerStory)),
                 $"CampaignState 上 {fields.Length} 个状态域全部登记且写明承接 Story（{string.Join("、", fields)}）");
 
