@@ -712,6 +712,7 @@ namespace BinGames.Sim.Combat
         /// <summary>二次起爆（topo.burst）：圈内斑块升温（定温源除外）、固态斑块累计动能。</summary>
         private static void EmgBurstPatches(ref CombatData d, double2 pos, float radius, float heat, float kinetic)
         {
+            NoteBlast(ref d, pos, radius); // topo.burst 二次起爆 // FG12-EVT-02：大规模爆炸记震动值
             for (int j = 0; j < d.Patches.Length; j++)
             {
                 CombatZone o = d.Patches[j];

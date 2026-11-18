@@ -138,7 +138,6 @@ namespace GameLogic.UI.Kit
         private float _timer;
         private string _nameShownFor;
         private readonly StringBuilder _sb = new StringBuilder(512);
-        private readonly List<ProductionService.Producer> _sources = new List<ProductionService.Producer>(4);
         private readonly List<RecipeDef> _recipeChoices = new List<RecipeDef>(4);
         private readonly List<string> _storeChoices = new List<string>(32);
         private readonly List<BuildingRecord> _links = new List<BuildingRecord>(LinkSlots);
@@ -1110,19 +1109,20 @@ namespace GameLogic.UI.Kit
                     {
                         _sb.Append(GameText.Format("prod.panel.vein", GameText.Get(p.VeinTerrainKey), p.VeinCells, p.VeinOre.Name)).Append('\n');
                     }
-                    _sb.Append(GameText.Format("prod.panel.vibration", p.Def.VibrationPerMinute.ToString("0.#", CultureInfo.InvariantCulture),
-                        ProductionService.Vibration(state).ToString("0.#", CultureInfo.InvariantCulture),
-                        ProductionService.VibrationMax.ToString("0", CultureInfo.InvariantCulture)));
-                    ProductionService.CollectVibrationSources(_sources, Mathf.Max(1, GridContent.TuningInt("eco.prod.sources_shown")));
-                    if (_sources.Count > 0)
+                    // FG12-EVT-02：这座钻所在地点（家园 / 前哨站）的震动值、它此刻的增量（等级、减震基座）与该地点的主要来源。
+                    string vibSite = Campaign.Env.VibrationService.SiteOfDrill(state, p.Building);
+                    _sb.Append(GameText.Format("prod.panel.vibration",
+                        Campaign.Env.VibrationService.DrillRate(state, p.Building, p.Def.VibrationPerMinute).ToString("0.#", CultureInfo.InvariantCulture),
+                        Campaign.Env.VibrationService.Value(state, vibSite).ToString("0.#", CultureInfo.InvariantCulture),
+                        ProductionService.VibrationMax.ToString("0", CultureInfo.InvariantCulture), Campaign.Env.VibrationService.SiteName(state, vibSite)));
+                    if (Campaign.Env.VibrationService.IsDamped(state, p.Building))
                     {
-                        var parts = new List<string>(_sources.Count);
-                        foreach (ProductionService.Producer s in _sources)
-                        {
-                            parts.Add(GameText.Format("prod.panel.vibration_source", BuildingOps.NameOf(s.Building), s.Building.GridX, s.Building.GridY,
-                                s.Def.VibrationPerMinute.ToString("0.#", CultureInfo.InvariantCulture)));
-                        }
-                        _sb.Append('\n').Append(GameText.Format("prod.panel.vibration_sources", string.Join(GameText.Language == GameLanguage.En ? "; " : "；", parts)));
+                        _sb.Append('\n').Append(GameText.Format("prod.panel.damped", Campaign.Env.VibrationService.DamperMult.ToString("0.##", CultureInfo.InvariantCulture)));
+                    }
+                    string vibSources = Campaign.Env.VibrationService.SourcesText(state, vibSite, Mathf.Max(1, GridContent.TuningInt("eco.prod.sources_shown")));
+                    if (vibSources.Length > 0)
+                    {
+                        _sb.Append('\n').Append(GameText.Format("prod.panel.vibration_sources", vibSources));
                     }
                     break;
                 }

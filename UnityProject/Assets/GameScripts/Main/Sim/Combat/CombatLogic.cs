@@ -135,6 +135,10 @@ namespace BinGames.Sim.Combat
             StepFoundry(ref d, ref grid, dt);
             // 4c. FG10-FAC-01：澄净专属语法（死亡效果、受寒、喷淋 / 枢轴 / 自爆、喷淋池冲洗、酸沼、分裂液接触）。
             StepClarity(ref d, ref grid, dt);
+            if (d.Worms.Length > 0)
+            {
+                StepWorms(ref d, dt); // FG12-EVT-02：掘进蠕虫各节就位、地上 / 地下交替（各节的咬在上面敌方步里按 HoldFire 结算）
+            }
             StepOverclock(ref d, dt); // FG11-FAC-01：超频专属语法（停机 / 排气 / 熔断 / 死亡泄爆 / 前倾加速 / 超频状态循环）；空表 O(1)
             StepMagnetized(ref d, dt); // EMG2-PHS-01：磁化单位是弱磁源，弹体转向
             RebuildDeflectActive(ref d, edges: true);

@@ -926,7 +926,7 @@ namespace GameLogic.Campaign.Economy
             _fwStorageKnown = false; // FG4-ECO-03：固件芯片存放的数量 / 容量每个生产步最多数一次（刻录台要用时才数）。
             BurnableThisStep.Clear(); // 同一生产步内，相同固件的解锁检查只做一次；下一步重新读取权限。
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
-            double vibrationRate = 0;
+            Env.VibrationService.BeginProductionStep();
             foreach (Producer p in Ordered)
             {
                 StepOne(state, p, ticks, worldHz);
@@ -935,14 +935,11 @@ namespace GameLogic.Campaign.Economy
                 Regions.HomeValleyAlarms.TrackProducer(state, p);
                 if (p.WorkedThisStep && p.Def.VibrationPerMinute > 0f)
                 {
-                    vibrationRate += p.Def.VibrationPerMinute;
+                    Env.VibrationService.AddDrill(state, p.Building, p.Def.VibrationPerMinute); // FG12-EVT-02：按地点（家园 / 前哨站）、等级与减震基座
                 }
             }
-            // FG10 FGR-EVT-010 接口：工作中的提取钻累积，每分钟自然衰减；0～上限。
-            double minutes = ticks / (60.0 * Math.Max(1, worldHz));
-            double decay = Math.Max(0.0, GridContent.Tuning("eco.vibration.decay_per_minute"));
-            double v = state.Economy.Vibration + (vibrationRate - decay) * minutes;
-            state.Economy.Vibration = Math.Max(0.0, Math.Min(VibrationMax, v));
+            // FG10 FGR-EVT-010（FG12-EVT-02 起按地点）：工作中的提取钻累积，每分钟自然衰减；0～上限。
+            Env.VibrationService.Integrate(state, ticks / (60.0 * Math.Max(1, worldHz)));
             StepCount++;
             LastStepMs = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             if (LastStepMs > MaxStepMs)
@@ -3176,21 +3173,27 @@ namespace GameLogic.Campaign.Economy
 
         // ── 震动（FG10 接口）────────────────────────────────────────────────────
 
-        /// <summary>家园震动值（0～eco.vibration.max）。FG10 的掘进蠕虫读它。</summary>
-        public static double Vibration(CampaignState state) => state?.Economy?.Vibration ?? 0.0;
+        /// <summary>家园震动值（0～eco.vibration.max）。FG12-EVT-02 起各地点分开统计（<see cref="Env.VibrationService"/>），这里是家园那一份。</summary>
+        public static double Vibration(CampaignState state) => state == null ? 0.0 : Env.VibrationService.Value(state, Env.VibrationService.HomeSite);
 
-        /// <summary>主要的震动来源：现在在工作的提取钻，按每分钟增量从大到小（同样大按建筑 ID），最多 <paramref name="max"/> 座。</summary>
-        public static void CollectVibrationSources(List<Producer> into, int max)
+        /// <summary>FG12-EVT-02：某个地点（家园 / 前哨站）的主要震动来源：在工作的提取钻，按此刻每分钟增量（等级、减震基座）从大到小（同样大按建筑 ID），最多 <paramref name="max"/> 座。</summary>
+        public static void CollectVibrationSources(CampaignState state, string siteId, List<Producer> into, int max)
         {
             into.Clear();
+            EnsureIndex(state);
             foreach (Producer p in Ordered)
             {
-                if (p.Def.VibrationPerMinute > 0f && p.State == ProdState.Working)
+                if (p.Def.VibrationPerMinute > 0f && p.State == ProdState.Working && Env.VibrationService.SiteOfDrill(state, p.Building) == siteId)
                 {
                     into.Add(p);
                 }
             }
-            into.Sort((a, b) => a.Def.VibrationPerMinute != b.Def.VibrationPerMinute ? b.Def.VibrationPerMinute.CompareTo(a.Def.VibrationPerMinute) : string.CompareOrdinal(a.Id, b.Id));
+            into.Sort((a, b) =>
+            {
+                double ra = Env.VibrationService.DrillRate(state, a.Building, a.Def.VibrationPerMinute);
+                double rb = Env.VibrationService.DrillRate(state, b.Building, b.Def.VibrationPerMinute);
+                return ra != rb ? rb.CompareTo(ra) : string.CompareOrdinal(a.Id, b.Id);
+            });
             if (into.Count > max)
             {
                 into.RemoveRange(max, into.Count - max);

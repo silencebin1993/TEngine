@@ -195,6 +195,8 @@ namespace GameLogic.Campaign
         /// <summary>FG9-FAC-01：阵营扩充（寂听主脑首领战、电磁噪声发射器、阵营反制的每日锁定、室内伏笔地点）。</summary>
         public FactionState Factions = new FactionState();
         public DirectorEventState DirectorEvents = new DirectorEventState();
+        /// <summary>FG12-EVT-02：震动值按地点统计与掘进蠕虫。</summary>
+        public VibrationState Vibration = new VibrationState();
         public QuestState Quests = new QuestState();
         public StandingRuleState StandingRules = new StandingRuleState();
         public SignalCoreState SignalCore = new SignalCoreState();
@@ -279,6 +281,7 @@ namespace GameLogic.Campaign
                 Weather = new WeatherState(),
                 Raids = new RaidState(),
                 DirectorEvents = new DirectorEventState(),
+                Vibration = new VibrationState(),
                 Quests = new QuestState(),
                 StandingRules = new StandingRuleState(),
                 SignalCore = new SignalCoreState(),

@@ -481,6 +481,7 @@ namespace BinGames.Sim.Combat
         {
             double2 pos = d.Pos[i];
             float radius = math.max(0.5f, p.MineRadius);
+            NoteBlast(ref d, pos, radius); // FG12-EVT-02：大规模爆炸记震动值
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {

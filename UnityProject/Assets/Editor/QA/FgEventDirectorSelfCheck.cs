@@ -641,7 +641,7 @@ namespace GameLogic.EditorTools
                           && warn.DetailText.Contains("掘进蠕虫") && worm.Warned == 1;
             Drive(s, Sec(5), Sec(60));
             EventDirectorInstanceRecord r = EventDirectorService.Active(s).FirstOrDefault();
-            bool started = r != null && r.State == EventDirectorService.StateActive && worm.Started == 1 && r.StartTick - r.WarnTick == Sec(50);
+            bool started = r != null && r.State == EventDirectorService.StateActive && worm.Started == 1 && r.StartTick - r.WarnTick == Sec(30); // FG12-EVT-02：worm 预警 50 → 30 秒（FGR-EVT-011 破土前 30 秒裂纹）
             EventDirectorService.Complete(s, r.Serial, EventDirectorService.OutcomeSuccess);
             AwayReportRecord rep = AwayReportService.Current(s);
             int awayEvents = rep?.Entries.Count(e => e.Section == "event" && e.TypeId == "world_event") ?? 0;
@@ -654,7 +654,7 @@ namespace GameLogic.EditorTools
             string defaultWarn = FeedbackCueCatalog.Get(FeedbackCueId.WorldEventWarning)?.SfxId;
             bool sound = warnSfx == "sfx_beacon_launch" && !raidSilent.Contains(warnSfx) && !raidSilent.Contains(defaultWarn);
             Expect(lockedBefore && warned && started && awayEvents >= 3 && unlocked && sound,
-                "N1 FGR-EVT-003 / 004 + FG-GAP-099：蠕虫请求 → 预警通知（world_event，带地点、写事件名、提示音 sfx_beacon_launch）→ 50 游戏秒后开始 → 结束通知；" +
+                "N1 FGR-EVT-003 / 004 + FG-GAP-099：蠕虫请求 → 预警通知（world_event，带地点、写事件名、提示音 sfx_beacon_launch）→ 30 游戏秒后开始（破土前 30 秒裂纹，FGR-EVT-011）→ 结束通知；" +
                 $"离家期间预警 / 开始 / 结束都记进离家报告“事件”段（{awayEvents} 条）；第一次发生前图鉴条目锁着，发生后解锁（含总条目）；" +
                 $"事件提示音与突袭（mus_raid_warning / 警告级 {NotificationCatalog.Tier(NotifyLevel.Warning)?.SfxId}）、静默夜（{FeedbackCueCatalog.Get(FeedbackCueId.SignalLinkWarning)?.SfxId}）都不同" +
                 $"（{lockedBefore} / {warned} / {started} / {unlocked} / {sound}）");

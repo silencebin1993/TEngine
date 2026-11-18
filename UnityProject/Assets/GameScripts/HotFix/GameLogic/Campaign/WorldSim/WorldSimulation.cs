@@ -238,6 +238,8 @@ namespace GameLogic.Campaign.WorldSim
             Defense.DefenseService.ResetSessionState(); // FG6-DEF-02：防御建筑的运行时缓存（耐久推送、缺流体原因、护盾 / 陷阱清单）按新会话重建
             Defense.RaidDirectorService.ResetSessionState(); // FG6-DEF-04：突袭导演的会话统计清零（存档里的计划与计时不动）
             Defense.RaidResultService.ResetSessionState(); // FG6-DEF-08：突袭结算的会话统计与待执行的预警自动存档清零（存档里的结算记录不动）
+            Env.VibrationService.ResetSessionState(); // FG12-EVT-02：减震基座索引、爆炸阈值下发对象按新会话重建；存档里的震动值与蠕虫不动
+            Env.WormEventService.ResetSessionState();
             Defense.SiegeService.ResetSessionState(); // FG6-DEF-05：攻城的运行时缓存（耐久推送、首次钩子、统计）按新会话重建；存档里的剧场与队伍不动
             Logistics.PipeLeakService.ResetSessionState(); // FG6-LOG-10：液洼的运行时索引与统计按新会话重建；存档里的液洼记录不动（第一次有家园战斗地点时与内核对账）
             HomeValleyAlarms.ResetSessionState();
@@ -704,7 +706,11 @@ namespace GameLogic.Campaign.WorldSim
                 // FG7-ENV-03：天气——排定、预警 / 开始 / 结束（O(1) 比较整数步），酸雨按游戏分钟批量结算，寒潮结冰告警（每游戏秒）；只看步序号，与观察无关。
                 Env.WeatherService.WorldStep(state, GameClock.Ticks);
                 // FG12-EVT-01：事件导演——进行中事件的预警 / 时限按整数步比较（O(进行中数)），每 event.director.check_seconds 评估到期、推迟与互斥（读静默夜与突袭导演的状态，故放在它们之后）；只看步序号，与观察无关。
+                // FG12-EVT-02：震动值——取走本步的大规模爆炸、按地点检查阈值（80 警告 / 100 请求导演），放在导演之前：本步的请求本步评估。只看步序号，与观察无关。
+                Env.VibrationService.WorldStep(state, GameClock.Ticks);
                 Env.EventDirectorService.WorldStep(state, GameClock.Ticks);
+                // FG12-EVT-02：掘进蠕虫——新倒下的节掉落、钻出地面时建筑受创、死亡 / 潜回地下（O(蠕虫数)；各节就位与地上 / 地下交替在家园内核的一步里）。
+                Env.WormEventService.WorldStep(state);
                 // FG7-ENV-04：归还面积里程碑与“受污染”解除（每游戏秒 O(1) 比较；净化本身在上面的生产步里按游戏时间推进），只看步序号，与观察无关。
                 Env.PurificationService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。

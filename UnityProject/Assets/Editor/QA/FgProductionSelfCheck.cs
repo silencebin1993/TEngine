@@ -532,7 +532,7 @@ namespace GameLogic.EditorTools
             {
                 sb.Append("ruin:").Append(c.X).Append(',').Append(c.Y).Append('=').Append(c.Remaining).Append(';');
             }
-            sb.Append("vib:").Append(s.Economy.Vibration.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append("vib:").Append(JsonUtility.ToJson(s.Vibration)); // FG12-EVT-02：各地点震动值与蠕虫（Economy.Vibration 迁移后恒为 0）
             sb.Append("|pipe:").Append(PipeNetworkService.IsRunning ? PipeNetworkService.Kernel.Hash() : 0UL);
             sb.Append("|scrap:").Append(s.Scrap);
             return sb.ToString();
@@ -955,12 +955,12 @@ namespace GameLogic.EditorTools
             Seconds(18f);
             double v18 = ProductionService.Vibration(s);
             var sources = new List<ProductionService.Producer>();
-            ProductionService.CollectVibrationSources(sources, 3);
+            ProductionService.CollectVibrationSources(s, GameLogic.Campaign.Env.VibrationService.HomeSite, sources, 3);
             bool rising = Math.Abs(v18 - (4 * 1.0 - 2.0) * 18.0 / 60.0) < 0.02 && sources.Count == 3 && P(s, drills[0]).VeinOre?.Id == "rare_earth_ore";
             // 输出缓存满了就停工（不再震），之后按每分钟 2 衰减到 0。
             Seconds(60f);
             double v78 = ProductionService.Vibration(s);
-            ProductionService.CollectVibrationSources(sources, 3);
+            ProductionService.CollectVibrationSources(s, GameLogic.Campaign.Env.VibrationService.HomeSite, sources, 3);
             ProductionService.Producer d0 = P(s, drills[0]);
             Seen(d0);
             Expect(rising && v78 == 0.0 && sources.Count == 0 && d0.State == ProdState.OutputBlocked,

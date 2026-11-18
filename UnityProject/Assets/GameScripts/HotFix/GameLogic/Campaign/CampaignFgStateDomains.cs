@@ -2281,6 +2281,8 @@ namespace GameLogic.Campaign
         public long FieldKills;
         /// <summary>FG8-LOOT-01：第几个敌方据点被摧毁（据点掉落的确定性序号）。</summary>
         public long OutpostLoots;
+        /// <summary>FG12-EVT-02：掘进蠕虫倒下的节数（掉落按它确定）。</summary>
+        public long WormLoots;
         /// <summary>FG8-LOOT-01：地上（或正被机器搬着）的敌方加密物品的身份——搬进家园时按它登记（加密固件变成固件库里的未破解芯片，其余进仓库并登记解析身份）。
         /// 条数上限 fg.TbHomeTuning loot.tags_max（超出丢最早的身份，物品本身不丢）。唯一写入口 <see cref="Economy.FieldLootService"/>。</summary>
         public LootGroundTagRecord[] GroundTags = Array.Empty<LootGroundTagRecord>();
@@ -3222,6 +3224,9 @@ namespace GameLogic.Campaign
             s.DirectorEvents.Active ??= Array.Empty<EventDirectorInstanceRecord>();
             s.DirectorEvents.History ??= Array.Empty<EventDirectorHistoryRecord>();
             s.DirectorEvents.Seen ??= Array.Empty<string>();
+            s.Vibration ??= new VibrationState(); // FG12-EVT-02：旧档没有 = 空域（家园旧震动值第一次推进时迁入）
+            s.Vibration.Sites ??= Array.Empty<VibrationSiteRecord>();
+            s.Vibration.Worms ??= Array.Empty<WormRecord>();
             s.Quests ??= new QuestState();
             s.StandingRules ??= new StandingRuleState();
             EnsureRules(s.StandingRules);

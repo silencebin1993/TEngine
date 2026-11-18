@@ -30,6 +30,12 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgHijack> Hijacks;
         /// <summary>FG11-FAC-01（FGR-FAC-008 超频专属语法）：带超频参数的单位的运行状态（快照段 34；空表时每步一次长度比较）。</summary>
         public NativeList<CombatOverclock> Overclocks;
+        /// <summary>FG12-EVT-02：掘进蠕虫（分节链；进快照段 39 与状态哈希）。</summary>
+        public NativeList<CombatWorm> Worms;
+        /// <summary>FG12-EVT-02：本步的大规模爆炸（x, y, 计次, 最大半径）；热更层每个世界步取走，不进快照。</summary>
+        public NativeList<float4> WormBlasts;
+        /// <summary>FG12-EVT-02：半径不小于多少格的爆炸算大规模（热更层按 env.vibration.blast_radius 写；0 = 不记）。派生量，不进快照。</summary>
+        public float BlastMinRadius;
         /// <summary>FG11-FAC-01（DEBT-FG7ENV05-01 / FG8EXP02-03 高温辐射）：高温辐射区（x, y, 内半径, 外半径；派生量不进快照，热更层打开 / 读档时写）。</summary>
         public NativeList<float4> RadZones;
         /// <summary>高温辐射区内的热量上限倍率与散热倍率（不在区里 = 1）。</summary>
@@ -96,6 +102,8 @@ namespace BinGames.Sim.Combat
             Relays = new NativeList<EmgRelay>(0, Allocator.Persistent);
             Hijacks = new NativeList<EmgHijack>(0, Allocator.Persistent);
             Overclocks = new NativeList<CombatOverclock>(0, Allocator.Persistent);
+            Worms = new NativeList<CombatWorm>(0, Allocator.Persistent);
+            WormBlasts = new NativeList<float4>(0, Allocator.Persistent);
             RadZones = new NativeList<float4>(0, Allocator.Persistent);
             CoolZones = new NativeList<float3>(0, Allocator.Persistent);
             Pits = new NativeList<EmgPit>(0, Allocator.Persistent);
@@ -196,6 +204,8 @@ namespace BinGames.Sim.Combat
             Relays.Dispose();
             Hijacks.Dispose();
             Overclocks.Dispose();
+            Worms.Dispose();
+            WormBlasts.Dispose();
             RadZones.Dispose();
             CoolZones.Dispose();
             Pits.Dispose();
@@ -295,6 +305,8 @@ namespace BinGames.Sim.Combat
             Relays.Clear();
             Hijacks.Clear();
             Overclocks.Clear();
+            Worms.Clear();
+            WormBlasts.Clear();
             Pits.Clear();
             PitAcc.Clear();
             ScorchAcc.Clear();

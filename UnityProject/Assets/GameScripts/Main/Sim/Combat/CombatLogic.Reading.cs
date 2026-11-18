@@ -521,6 +521,7 @@ namespace BinGames.Sim.Combat
             // 溅射：命中点周围。
             if (r.BlastRadius > 0f && r.BlastRatio > 0f)
             {
+                NoteBlast(ref d, hitPos, r.BlastRadius); // FG12-EVT-02：大规模爆炸记震动值（溅射 / 过热爆发是爆炸；环扫是近战绕轨，不记）
                 AreaStrike(ref d, a, hitPos, r.BlastRadius, baseDamage * r.BlastRatio, r, from, t);
             }
             // 环扫：攻击者周围。
@@ -611,6 +612,7 @@ namespace BinGames.Sim.Combat
             // 过热爆发：攻击者积热过了阈值，这一发在命中点再爆一圈（含主目标）。
             if (r.HeatBurstAt > 0f && a >= 0 && wp.OverheatAt > 0f && d.Heat[a] >= wp.OverheatAt * r.HeatBurstAt && r.HeatBurstRadius > 0f)
             {
+                NoteBlast(ref d, hitPos, r.HeatBurstRadius); // FG12-EVT-02：大规模爆炸记震动值
                 AreaStrike(ref d, a, hitPos, r.HeatBurstRadius, baseDamage * r.HeatBurstRatio, r, from, -1);
             }
         }

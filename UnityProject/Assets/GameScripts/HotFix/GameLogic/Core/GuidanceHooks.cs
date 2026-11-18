@@ -444,6 +444,9 @@ namespace GameLogic.Core
         /// <summary>FG12-EVT-01：第一次打开事件历史面板。</summary>
         public const string EventDirectorHistoryFirstOpen = "event_director.history_first_open";
 
+        /// <summary>FG12-EVT-02（FGR-EVT-011“第一次到达 50 时弹出说明”）：任何地点的震动值第一次到 50（说明内容在 FG15-UX-04）。</summary>
+        public const string VibrationFirstOmen = "event_director.first_vibration_omen";
+
         /// <summary>FG7-ENV-01（FGR-ENV-003）：第一次入夜（夜里太阳能不发电、画面变暗但 UI 不变、夜间亮度下限设置的引导在 FG15-UX-04）。</summary>
         public const string EnvFirstNight = "env.first_night";
 
@@ -756,6 +759,7 @@ namespace GameLogic.Core
             EventDirectorFirstEvent, EventDirectorHistoryFirstOpen,
             "event_director.first.worm", "event_director.first.signal_ghost", "event_director.first.orbital_drop",
             "event_director.first.decoy_terminal", "event_director.first.caravan",
+            VibrationFirstOmen, // FG12-EVT-02（fgdata_worm.WORM_HOOKS）
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

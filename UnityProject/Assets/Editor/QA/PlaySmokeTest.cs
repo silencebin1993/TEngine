@@ -1482,6 +1482,9 @@ namespace GameLogic.EditorTools
                          && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.EmptyText);
             bool flowTab = ClickUitk("[StatsPanelHost]", "StatsTabFlow") && stats.CurrentTab == UI.Kit.StatsTab.Flow && stats.VisibleRowCount >= 3
                            && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.RowText(1));
+            // FG12-EVT-02（FGR-EVT-010“震动值显示在环境面板”）：物流与能源页的环境段有“震动值（掘进蠕虫）”标题与家园那一行（新局没有来源时是空状态说明）。
+            string vibTitle = Localization.GameText.Get("vibration.stats.title");
+            bool vibRows = flowTab && Enumerable.Range(0, stats.VisibleRowCount).Any(i => stats.RowText(i) == vibTitle);
             // FG5-E2E-01：“研发”页（技术数据收支按来源分项、研究、熔合、情报、黑匣子五段，开局带来的技术数据对得上）。
             bool researchTab = ClickUitk("[StatsPanelHost]", "StatsTabResearch") && stats.CurrentTab == UI.Kit.StatsTab.Research && stats.VisibleRowCount >= 15
                                && !Localization.GameText.ContainsMarker(stats.SectionText + stats.RowText(0) + stats.RowText(1) + stats.RowText(2))
@@ -1519,8 +1522,8 @@ namespace GameLogic.EditorTools
                 stats.ItemSearchField.value = string.Empty;
             }
             bool allBack = ClickUitk("[StatsPanelHost]", "StatsAllItems") && stats != null && !stats.ShowAllItems;
-            Check(statsClicked && prodTab && effTab && bnTab && flowTab && researchTab && planTab && planPinned && barChip && allList && anyChip && allBack,
-                $"FG4-ECO-08：暂停菜单点“统计”默认打开“生产”页（首行“{prodFirst}”），建筑效率 / 瓶颈 / 物流与能源页可切，“研发”页（FG5-E2E-01）写“{researchRow}”，规划助手算出 {stats?.LastPlan?.Rows.Count} 条配方的建筑需求，" +
+            Check(statsClicked && prodTab && effTab && bnTab && flowTab && vibRows && researchTab && planTab && planPinned && barChip && allList && anyChip && allBack,
+                $"FG4-ECO-08：暂停菜单点“统计”默认打开“生产”页（首行“{prodFirst}”），建筑效率 / 瓶颈 / 物流与能源页可切（环境段有震动值，{vibRows}），“研发”页（FG5-E2E-01）写“{researchRow}”，规划助手算出 {stats?.LastPlan?.Rows.Count} 条配方的建筑需求，" +
                 $"“固定到顶栏作为目标”后资源顶栏出现“{planTarget}”这一格；顶栏“+ 固定物品”打开“全部物品”，搜索并固定不能生产的“{anyItem?.Name}”后顶栏出现该格（共 {wbar?.ResourceChipCount} 格）" +
                 $"（{allList}/{anyChip}/{allBack}）");
             bool combatTab = ClickUitk("[StatsPanelHost]", "StatsTabCombat") && stats != null && stats.CurrentTab == UI.Kit.StatsTab.Combat;

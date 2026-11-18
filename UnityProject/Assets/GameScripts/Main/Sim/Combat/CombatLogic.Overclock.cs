@@ -416,6 +416,7 @@ namespace BinGames.Sim.Combat
         private static void OcBurst(ref CombatData d, int self, double2 pos, in CombatBehaviorProfile p)
         {
             float radius = math.max(0.5f, p.OcBurstRadius);
+            NoteBlast(ref d, pos, radius); // FG12-EVT-02：大规模爆炸记震动值
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {

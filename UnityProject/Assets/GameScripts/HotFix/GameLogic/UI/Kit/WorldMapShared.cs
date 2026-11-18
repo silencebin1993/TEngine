@@ -375,6 +375,7 @@ namespace GameLogic.UI.Kit
                 }
                 // FG6-DEF-04（FGR-DEF-024 预警界面：地图上的来袭方向箭头）：已发预警、还没有有效预报的突袭也画一支方向箭头（只画方向，不泄露迷雾里的位置）。
                 CollectWarnings(state, core, view, margin);
+                CollectWormWarnings(state, view, margin); // FG12-EVT-02（FGR-EVT-011“地图上标出震动最集中的区域”）
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Outposts) || StrategicMapUIToolkit.PickActive)
             {
@@ -687,6 +688,46 @@ namespace GameLogic.UI.Kit
                     Add(WorldMapItemKind.RaidWarning, WorldMapLayer.Groups, "warning:" + w.Lead.PlanId, lx, ly,
                         GameText.Format("ui.map.raid_warning", Campaign.Defense.RaidDirectorService.WaveDirectionText(w),
                             Campaign.Defense.RaidDirectorService.Duration(w.ArrivalTick - now)));
+                }
+            }
+        }
+
+        private readonly List<Vector2> _wormRoute = new List<Vector2>(12);
+
+        /// <summary>
+        /// FG12-EVT-02：震动值到 80 的地点在最集中处画一圈并标“蠕虫可能在这里破土”；预警中 / 在地面上的蠕虫画出路线（裂纹 / 它要钻过的地方，首尾相接）。
+        /// O(地点数 + 蠕虫数 × 路线顶点数)，只在地图刷新时。
+        /// </summary>
+        private void CollectWormWarnings(CampaignState state, in WorldMapView view, double margin)
+        {
+            float hot = GridContent.TryGetTuning("env.vibration.hotspot_radius", out float hr) ? hr : 12f;
+            foreach (VibrationSiteRecord r in Campaign.Env.VibrationService.Sites(state))
+            {
+                if (r == null || r.Level < Campaign.Env.VibrationService.LevelWarn || !view.Contains(r.HotX, r.HotY, margin + hot))
+                {
+                    continue;
+                }
+                string label = GameText.Format("ui.map.vibration_warning", Campaign.Env.VibrationService.StateText(state, r, GameLogic.Core.GameClock.Ticks));
+                Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = r.HotX, Y = r.HotY, Radius = hot, OuterRadius = hot, Label = label });
+                Add(WorldMapItemKind.RaidWarning, WorldMapLayer.Groups, "vibration:" + r.SiteId, r.HotX, r.HotY, label);
+            }
+            foreach (WormRecord w in Campaign.Env.WormEventService.Worms(state))
+            {
+                if (w == null || w.State == Campaign.Env.WormEventService.StateLeaving)
+                {
+                    continue;
+                }
+                Campaign.Env.WormEventService.CopyRoute(w, _wormRoute);
+                for (int i = 0; i < _wormRoute.Count; i++)
+                {
+                    Vector2 a = _wormRoute[i];
+                    Vector2 b = _wormRoute[(i + 1) % _wormRoute.Count];
+                    Lines.Add(new WorldMapLine { X0 = a.x, Y0 = a.y, X1 = b.x, Y1 = b.y, Tint = new Color(0.62f, 0.38f, 0.2f, 1f) });
+                }
+                if (view.Contains(w.HotX, w.HotY, margin))
+                {
+                    Add(WorldMapItemKind.RaidWarning, WorldMapLayer.Groups, "worm:" + w.Serial, w.HotX, w.HotY,
+                        GameText.Format("ui.map.worm_route", Campaign.Env.VibrationService.SiteName(state, w.SiteId)));
                 }
             }
         }

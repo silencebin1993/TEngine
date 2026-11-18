@@ -32,6 +32,7 @@ namespace GameLogic.Campaign.Economy
         public const string OriginField = "field";
         public const string OriginOutpost = "outpost";
         public const string OriginRaid = "raid";
+        public const string OriginEvent = "event";
         /// <summary>第一次在野外拿到掉落的引导钩子（内容在 FG15-UX-04；图鉴“物品协议与两种去向”随之解锁）。</summary>
         public const string HookFirstFieldDrop = GuidanceHooks.LootFirstFieldDrop;
 
@@ -39,6 +40,7 @@ namespace GameLogic.Campaign.Economy
         private const uint SaltCount = 0x4C4F4F32u;
         private const uint SaltIdentity = 0x4C4F4F33u;
         private const uint SaltOutpost = 0x4C4F4F34u;
+        private const uint SaltWorm = 0x4C4F4F35u; // FG12-EVT-02
 
         // ── 自检读点（本进程累计）──
         public static long KillEvents { get; private set; }
@@ -101,6 +103,18 @@ namespace GameLogic.Campaign.Economy
                 // FG8-LOOT-02（FGR-LOOT-010 / 020）：精英另生成一个待分拣数据包（不在战斗中弹出；耗时另记在 LootPickService）。
                 LootPickService.OnEliteKilled(s, site, def?.Faction ?? string.Empty, at, killerUnit);
             }
+        }
+
+        /// <summary>FG12-EVT-02（FGR-EVT-013“每一节掉落稀有矿和组件”）：掘进蠕虫的一节倒下，按 worm 行掷（与野外击毁同一套确定性掷法、落地与搬运单）。</summary>
+        public static void OnWormSegment(CampaignState s, Vector2 at, string regionId = null)
+        {
+            LootPacketState st = StateOf(s);
+            if (st == null)
+            {
+                return;
+            }
+            long serial = ++st.WormLoots;
+            Roll(s, st, LootCatalog.SourceWorm, string.Empty, at, serial, SaltWorm, 1f, OriginEvent, regionId);
         }
 
         /// <summary>敌方据点被摧毁（驻军全灭，TerritoryControlService 调用）：按 outpost 行掷材料、少量组件、可能的数据核心。</summary>

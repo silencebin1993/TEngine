@@ -730,6 +730,7 @@ namespace BinGames.Sim.Combat
         {
             double2 pos = d.Pos[i];
             float radius = math.max(0.5f, p.BurstRadius);
+            NoteBlast(ref d, pos, radius); // FG12-EVT-02：大规模爆炸记震动值
             int n = d.Count;
             for (int k = 0; k < n; k++)
             {
@@ -828,6 +829,7 @@ namespace BinGames.Sim.Combat
             }
             // EMG2-REACT-02（FG19B §7 #5 / §12 #5，按推荐默认执行（2026-10-30），待用户确认）：被火击毁不再 ×1.5 爆伤——原地排 15 份高温油，下一节拍由 E01 整片爆燃（附带 8 + 燃烧区）
             float radius = math.max(0.5f, p.BurstRadius * 1.2f);
+            NoteBlast(ref d, e.Pos, radius); // FG12-EVT-02：大规模爆炸记震动值
             EmgRuleSpawn(ref d, EmgMatterConst.Oil, e.Pos, radius, 15f, 300f, 0f, e.Source, 0, 0);
             CombatCounters c = d.Counters[0];
             c.Deflagrations++;

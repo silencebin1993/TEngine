@@ -626,8 +626,8 @@ namespace GameLogic.EditorTools
             Expect(closed && closedState.Contains("分支未开放") && open && later && foundryClosed && codex,
                 $"D10 阵营分支：没破解静默的技术时“{closedState}”、加入被拒；破解第一件静默固件（{fw}）后静默分支开放（图鉴解锁该分支节点），铸造分支仍关；" +
                 $"节点内容在后续版本（“{laterWhy}”）");
-            bool defLater = !ResearchService.TryEnqueue(s, "environment.damper", out string defWhy) && defWhy.Contains("后续版本"); // FG7-ENV-04 净化塔 T2 已开放，改用减震基座（FG12-EVT-02）
-            Expect(defLater, $"D11 内容还没做的节点（环境 · 减震基座）显示在树上，写明后续版本开放，不能加入（“{defWhy}”）");
+            bool defLater = !ResearchService.TryEnqueue(s, "expedition.squad_plus", out string defWhy) && defWhy.Contains("后续版本"); // FG12-EVT-02 减震基座已开放，“后续版本”改用远征 · 编制 +1（opensIn 仍是 FG8-EXP-01）
+            Expect(defLater, $"D11 内容还没做的节点（远征 · 编制 +1）显示在树上，写明后续版本开放，不能加入（“{defWhy}”）");
         }
 
         // ── E 负向 ───────────────────────────────────────────────────────────────
@@ -1058,7 +1058,7 @@ namespace GameLogic.EditorTools
                 panel.ClickNode("energy.pole_t2");
                 panel.ClickNode("industry.lab_t2");
                 panel.ClickNode("industry.lab_t3");
-                panel.ClickNode("environment.damper"); // FG7-ENV-04 净化塔 T2 已开放，“后续版本”改用减震基座（FG12-EVT-02）
+                panel.ClickNode("expedition.squad_plus"); // FG12-EVT-02 减震基座已开放，“后续版本”改用远征 · 编制 +1（opensIn 仍是 FG8-EXP-01）
                 string refusedMsg = panel.MessageText;
                 panel.Refresh();
                 bool rows = panel.QueueRowVisibleCount == 4 && panel.QueueRowText(0).Contains("物流 · 分流与过滤") && panel.QueueTitleText.Contains("4 / 5");

@@ -472,6 +472,7 @@ namespace GameLogic.Campaign.Env
                 into.Add((GameText.Format("stats.env.repollution", d.Repollutions, d.LevelsRaised.ToString("N0", CultureInfo.InvariantCulture), ContaminatedCount(s)),
                     ContaminatedCount(s) > 0 ? "st-row-warn" : null));
             }
+            VibrationService.BuildStatsLines(s, into); // FG12-EVT-02（FGR-EVT-010）：各地点的震动值与主要来源
         }
 
         // ── 归还面积里程碑（FGR-ENV-042）────────────────────────────────────────────
