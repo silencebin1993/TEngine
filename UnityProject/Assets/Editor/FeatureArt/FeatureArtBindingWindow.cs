@@ -245,16 +245,6 @@ namespace BinGames.EditorTools.FeatureArt
         public bool IsWorkspaceDirty => _workspaceDirty;
         public bool IsCatalogDirty => _dirty;
 
-        /// <summary>打开窗口并直接选中左侧某个固定页（如「素材中心」）。</summary>
-        public static void OpenAtPage(string pagePath)
-        {
-            var w = GetWindow<FeatureArtBindingWindow>();
-            w.titleContent = new GUIContent("美术资源与绑定");
-            w.minSize = new Vector2(980, 560);
-            w.Show();
-            EditorApplication.delayCall += () => { if (w != null) w.SelectPage(pagePath); };
-        }
-
         public static void Open()
         {
             var w = GetWindow<FeatureArtBindingWindow>();
@@ -264,7 +254,7 @@ namespace BinGames.EditorTools.FeatureArt
             EditorApplication.delayCall += () =>
             {
                 if (w == null) return;
-                w.MenuTree.EnumerateTree(false).FirstOrDefault(i => i.GetFullPath() == "资源树")?.Select(false);
+                w.MenuTree.EnumerateTree(false).FirstOrDefault(i => i.GetFullPath() == "绑定台")?.Select(false);
             };
         }
 
@@ -307,7 +297,7 @@ namespace BinGames.EditorTools.FeatureArt
             // Odin 可能保留窗口数据，而静态工作区会在程序集重载后重新加载。
             if (Workspace.IncludeCatalog(_data) > 0) _workspaceDirty = true;
 
-            tree.Add("素材中心", _hubPage ??= new FeatureArtHubPage(this));
+            tree.Add("绑定台", _hubPage ??= new FeatureArtHubPage(this));
             tree.Add("使用说明", new GuidePage());
             tree.Add("混元生3D", new FeatureArtHunyuanSettingsPage());
             tree.Add("健康检查", new HealthCheckPage(this));

@@ -15,9 +15,6 @@ namespace BinGames.EditorTools.FeatureArt
         [MenuItem("BinGames/美术入库/素材中心（网页）", false, 60)]
         public static void OpenHubWeb() => FeatureArtHub.OpenWeb();
 
-        [MenuItem("BinGames/美术入库/素材中心（编辑器页）", false, 61)]
-        public static void OpenHubPage() => FeatureArtBindingWindow.OpenAtPage("素材中心");
-
         [MenuItem("BinGames/功能美术/从整包重烘全部游戏 Prefab", false, 53)]
         public static void BakeAllGamePrefabs()
         {
