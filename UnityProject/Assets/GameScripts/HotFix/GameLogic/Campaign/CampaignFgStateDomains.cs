@@ -1902,11 +1902,97 @@ namespace GameLogic.Campaign
         public long InterceptTick = -1;
     }
 
-    /// <summary>事件导演（FG10）。</summary>
+    /// <summary>
+    /// 事件导演（FG10；FG12-EVT-01 起有内容）。唯一写入口 <see cref="Env.EventDirectorService"/>。只加字段、不升域版本：旧档没有 = 第一次推进时补随机数种子、
+    /// 各事件从这一刻起算间隔（不追溯），频率按“标准”。与 FG19 的战斗事件总线（evt.*，内核队列）无关（FGR-EMG-068）。
+    /// </summary>
     [Serializable]
     public sealed class DirectorEventState
     {
         public int DomainVersion = 1;
+        /// <summary>FGR-EVT-005：事件导演独立的随机数流——种子（世界种子派生，进存档）与已抽取的序号。</summary>
+        public bool Seeded;
+        public int RngSeed;
+        public int RngSerial;
+        /// <summary>FGR-EVT-006 设置“事件频率”：0 关闭 / 1 少 / 2 标准 / 3 多（随存档；暂停菜单里改）。</summary>
+        public int Frequency = 2;
+        /// <summary>下一次评估的世界步（-1 = 下一步就评估）。</summary>
+        public long NextCheckTick = -1;
+        /// <summary>最近一次重大威胁开始预警的步（-1 = 没有）；FGR-EVT-002 每 2 个游戏日最多一次。</summary>
+        public long LastMajorTick = -1;
+        public int NextSerial = 1;
+        /// <summary>每种事件的排程（间隔、冷却、待处理的请求、推迟原因）。</summary>
+        public EventDirectorScheduleRecord[] Schedules = Array.Empty<EventDirectorScheduleRecord>();
+        /// <summary>预警中 / 进行中的事件。</summary>
+        public EventDirectorInstanceRecord[] Active = Array.Empty<EventDirectorInstanceRecord>();
+        /// <summary>FGR-EVT-004 事件历史（最近 event.director.history_max 条，最早的在前）。</summary>
+        public EventDirectorHistoryRecord[] History = Array.Empty<EventDirectorHistoryRecord>();
+        /// <summary>本局已经发生过的事件 ID（第一次说明已展示；按发生先后）。</summary>
+        public string[] Seen = Array.Empty<string>();
+        /// <summary>统计：开始 / 结束 / 推迟 / 被拒的请求次数。</summary>
+        public int Started;
+        public int Finished;
+        public int Postponed;
+        public int Rejected;
+    }
+
+    /// <summary>FG12-EVT-01：一种事件的排程。</summary>
+    [Serializable]
+    public sealed class EventDirectorScheduleRecord
+    {
+        public string EventId = string.Empty;
+        /// <summary>随机事件：间隔从这一步算起（上次开始，或第一次进入生效的幕）。</summary>
+        public long AnchorTick = -1;
+        /// <summary>抽到的间隔（1x 频率下的步数；实际到期 = 锚点 + 间隔 ÷ 频率倍率，改频率立即生效）。</summary>
+        public long GapTicks;
+        public long LastStartTick = -1;
+        public long LastEndTick = -1;
+        public int Occurrences;
+        /// <summary>处理器 / 剧情请求了、还没开始（条件触发、剧情节点、地图点位）。</summary>
+        public bool Pending;
+        public bool PendingStory;
+        /// <summary>请求带了地点（<see cref="PendingX"/> / <see cref="PendingY"/>）；没带 = 归还核心。</summary>
+        public bool PendingAt;
+        public float PendingX;
+        public float PendingY;
+        /// <summary>到期却被挡住的原因文本键（空 = 没有被挡）。</summary>
+        public string BlockedKey = string.Empty;
+    }
+
+    /// <summary>FG12-EVT-01：预警中 / 进行中的一个事件。</summary>
+    [Serializable]
+    public sealed class EventDirectorInstanceRecord
+    {
+        public int Serial;
+        public string EventId = string.Empty;
+        /// <summary>1 预警中 / 2 进行中。</summary>
+        public int State;
+        public bool Story;
+        public long WarnTick = -1;
+        public long StartTick = -1;
+        public long EndTick = -1;
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
+    }
+
+    /// <summary>FG12-EVT-01：事件历史的一条（时间、结果、奖励、地点）。</summary>
+    [Serializable]
+    public sealed class EventDirectorHistoryRecord
+    {
+        public int Serial;
+        public string EventId = string.Empty;
+        public bool Story;
+        public long WarnTick = -1;
+        public long StartTick = -1;
+        public long EndTick = -1;
+        /// <summary>success / failed / expired / left_raid / cancelled。</summary>
+        public string Outcome = string.Empty;
+        /// <summary>完成时生成的三选一数据包 ID（没有为空）。</summary>
+        public string PacketId = string.Empty;
+        public string RegionId = string.Empty;
+        public float X;
+        public float Y;
     }
 
     /// <summary>任务（FG08）。FG8-QST-01：任务本身的状态在 <see cref="CampaignState.ObjectiveRecords"/>（与 OBJ-01～10 同一份记录，CampaignObjectiveTracker 唯一写入口）；
@@ -3132,6 +3218,10 @@ namespace GameLogic.Campaign
             s.Nav.SurfaceId ??= string.Empty;
             s.Nav.Payload ??= string.Empty;
             s.DirectorEvents ??= new DirectorEventState();
+            s.DirectorEvents.Schedules ??= Array.Empty<EventDirectorScheduleRecord>(); // FG12-EVT-01：旧档没有 = 空
+            s.DirectorEvents.Active ??= Array.Empty<EventDirectorInstanceRecord>();
+            s.DirectorEvents.History ??= Array.Empty<EventDirectorHistoryRecord>();
+            s.DirectorEvents.Seen ??= Array.Empty<string>();
             s.Quests ??= new QuestState();
             s.StandingRules ??= new StandingRuleState();
             EnsureRules(s.StandingRules);

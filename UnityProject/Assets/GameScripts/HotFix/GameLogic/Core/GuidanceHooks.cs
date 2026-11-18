@@ -438,6 +438,12 @@ namespace GameLogic.Core
         /// <summary>FG6-DEF-09：第一次在游戏中途修改难度（修改记入存档、影响成就的说明）。</summary>
         public const string DifficultyFirstChanged = "difficulty.first_changed";
 
+        /// <summary>FG12-EVT-01（FGR-EVT-004“第一次发生时附一段简短说明”）：本机第一次发生任何随机事件（事件导演；说明内容在 FG15-UX-04）。各事件另有 event_director.first.&lt;事件ID&gt;。</summary>
+        public const string EventDirectorFirstEvent = "event_director.first_event";
+
+        /// <summary>FG12-EVT-01：第一次打开事件历史面板。</summary>
+        public const string EventDirectorHistoryFirstOpen = "event_director.history_first_open";
+
         /// <summary>FG7-ENV-01（FGR-ENV-003）：第一次入夜（夜里太阳能不发电、画面变暗但 UI 不变、夜间亮度下限设置的引导在 FG15-UX-04）。</summary>
         public const string EnvFirstNight = "env.first_night";
 
@@ -746,6 +752,10 @@ namespace GameLogic.Core
             "overclock.first_mode", "overclock.first_mirror", "overclock.first_radiation", "overclock.first_aura",
             // FG11-BOSS-01 余烬主机（fgdata_overclock.OVERCLOCK_HOOKS；槽位封锁沿用 EmgFirstSlotBlock）。
             "ember.first_boss", "ember.first_meltdown",
+            // FG12-EVT-01 事件导演（fgdata_eventdir.EVENTDIR_HOOKS；各事件的第一次由 fg.TbWorldEvent.hook 给出）。
+            EventDirectorFirstEvent, EventDirectorHistoryFirstOpen,
+            "event_director.first.worm", "event_director.first.signal_ghost", "event_director.first.orbital_drop",
+            "event_director.first.decoy_terminal", "event_director.first.caravan",
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

@@ -84,6 +84,22 @@ namespace GameLogic.UI.Kit
             AwayReportButton = Bind(root, "PauseAwayReport", "pause.away_report", AwayReportPanelUIToolkit.Open);
             // FG6-DEF-08（FG06 第 4 节“突袭历史：可以回看结算”）：突袭历史盖在暂停菜单上面，关掉回到暂停菜单。
             RaidHistoryButton = Bind(root, "PauseRaidHistory", "pause.raid_history", RaidResultPanelUIToolkit.Open);
+            // FG12-EVT-01（FG10 第 10 节）：事件历史盖在暂停菜单上面，关掉回到暂停菜单；“事件频率”（FGR-EVT-006）点击在 关闭 / 少 / 标准 / 多 之间切换，立即生效、随存档。
+            EventHistoryButton = Bind(root, "PauseEventHistory", "pause.event_history", EventHistoryPanelUIToolkit.Open);
+            EventFrequencyButton = root.Q<Button>("PauseEventFrequency");
+            if (EventFrequencyButton != null)
+            {
+                EventFrequencyButton.clicked += CycleEventFrequency;
+                UiTooltip.Attach(EventFrequencyButton, () => new TooltipContent
+                {
+                    Title = GameText.Get("codex.event_director.title"),
+                    Body = GameText.Format("pause.event_frequency_tip",
+                        Campaign.Defense.DifficultyService.EventRate(CampaignSession.Current).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                        Campaign.Env.EventDirectorService.FrequencyMul(Campaign.Env.EventDirectorService.Frequency(CampaignSession.Current)).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                        Campaign.Env.EventDirectorService.MajorGapDays.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)),
+                });
+                SyncEventFrequency();
+            }
             // FG6-DEF-09（FGR-DEF-060“游戏中途可以修改”）：难度面板盖在暂停菜单上面，关掉回到暂停菜单；悬停写出当前难度。
             DifficultyButton = Bind(root, "PauseDifficulty", "pause.difficulty", DifficultyPanelUIToolkit.Open);
             if (DifficultyButton != null)
@@ -146,6 +162,30 @@ namespace GameLogic.UI.Kit
         public Button RulesButton { get; private set; }
         public Button RosterButton { get; private set; }
         public Button RaidHistoryButton { get; private set; }
+        public Button EventHistoryButton { get; private set; }
+        public Button EventFrequencyButton { get; private set; }
+
+        /// <summary>FG12-EVT-01：事件频率按钮——下一档（关闭 → 少 → 标准 → 多 → 关闭）。</summary>
+        public void CycleEventFrequency()
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null)
+            {
+                return;
+            }
+            int next = (Campaign.Env.EventDirectorService.Frequency(state) + 1) % (Campaign.Env.EventDirectorService.FrequencyHigh + 1);
+            Campaign.Env.EventDirectorService.SetFrequency(state, next);
+            SyncEventFrequency();
+        }
+
+        public void SyncEventFrequency()
+        {
+            if (EventFrequencyButton != null)
+            {
+                EventFrequencyButton.text = GameText.Format("pause.event_frequency",
+                    Campaign.Env.EventDirectorService.FrequencyName(Campaign.Env.EventDirectorService.Frequency(CampaignSession.Current)));
+            }
+        }
         public Button DifficultyButton { get; private set; }
         public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
@@ -672,6 +712,7 @@ namespace GameLogic.UI.Kit
                 SyncNarrativeText();
                 SyncReactionToggles();
                 SyncAutoPickup();
+                SyncEventFrequency();
             }
             else
             {

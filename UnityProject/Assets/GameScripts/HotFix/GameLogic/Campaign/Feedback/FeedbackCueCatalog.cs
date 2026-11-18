@@ -305,6 +305,13 @@ namespace GameLogic.Campaign.Feedback
             // 按钮本身的按下态就是等价视觉反馈，不出字幕。
             Add(new FeedbackCueDef { Id = FeedbackCueId.UiClick, SfxId = "sfx_ui_click", Channel = AudioType.UISound, Volume = 0.8f, MinIntervalSeconds = 0.04f, CaptionMode = FeedbackCaptionMode.None });
 
+            // FG12-EVT-01（FG10 第 10 节“事件预警有独特的音效，并且与突袭、静默夜的音效区分开”）：默认音效是占位短音（与突袭 sfx_ui_deny / mus_raid_warning、
+            // 静默夜 sfx_alarm_warning 都不同），每个事件按 fg.TbWorldEvent.sfxWarn 覆盖；正式音效随美术 / 音频阶段替换（DEBT-FG12EVT01-01）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.WorldEventWarning, SfxId = "sfx_beacon_launch", Volume = 0.8f, Tag = "事件", Caption = string.Empty, TagKey = "event_director.cue.tag",
+                Tone = FeedbackTone.Warning, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG12-EVT-01 事件预警 / 开始（FGR-EVT-003）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.WorldEventNotice, SfxId = "sfx_analysis_complete", Volume = 0.7f, Tag = "事件", Caption = string.Empty, TagKey = "event_director.cue.tag",
+                Tone = FeedbackTone.Info, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG12-EVT-01 事件到来 / 结束 / 推迟（FGR-EVT-004）" });
+
             // ── 战役目标 ───────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveActivated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "新目标", Caption = string.Empty, Tone = FeedbackTone.Info, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 目标 HUD/日志" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyRescue, SfxId = "sfx_emergency_rescue", Tag = "紧急救援", Caption = "所有工作机都已损失，核心派出紧急救援机", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "AC-ECO-011 紧急救援" });

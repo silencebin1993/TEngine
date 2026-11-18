@@ -487,6 +487,10 @@ public partial class Tables
     /// </summary>
     public fg.TbWeatherAct TbWeatherAct {get; }
     /// <summary>
+    /// 世界事件
+    /// </summary>
+    public fg.TbWorldEvent TbWorldEvent {get; }
+    /// <summary>
     /// 生成器版本
     /// </summary>
     public fg.TbWorldGenVersion TbWorldGenVersion {get; }
@@ -668,6 +672,7 @@ public partial class Tables
         TbUiTuning = new fg.TbUiTuning(loader("fg_tbuituning"));
         TbWeather = new fg.TbWeather(loader("fg_tbweather"));
         TbWeatherAct = new fg.TbWeatherAct(loader("fg_tbweatheract"));
+        TbWorldEvent = new fg.TbWorldEvent(loader("fg_tbworldevent"));
         TbWorldGenVersion = new fg.TbWorldGenVersion(loader("fg_tbworldgenversion"));
         TbWorldPreset = new fg.TbWorldPreset(loader("fg_tbworldpreset"));
         TbWorldSettingAxis = new fg.TbWorldSettingAxis(loader("fg_tbworldsettingaxis"));
@@ -807,6 +812,7 @@ public partial class Tables
         TbUiTuning.ResolveRef(this);
         TbWeather.ResolveRef(this);
         TbWeatherAct.ResolveRef(this);
+        TbWorldEvent.ResolveRef(this);
         TbWorldGenVersion.ResolveRef(this);
         TbWorldPreset.ResolveRef(this);
         TbWorldSettingAxis.ResolveRef(this);

@@ -1670,6 +1670,25 @@ namespace GameLogic.EditorTools
             bool histClosed = ClickUitk("[RaidResultHost]", "RaidResultClose") && !UI.Kit.RaidResultPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(histClicked && histOpen && histClosed,
                 $"暂停菜单点“突袭历史”：突袭历史面板打开（{(rrp == null ? "无" : rrp.VisibleRowCount > 0 ? rrp.SummaryText : rrp.EmptyText)}），点关闭回到暂停菜单（{histClicked}/{histOpen}/{histClosed}）");
+            // FG12-EVT-01（FG10 第 10 节“事件历史面板”；FGR-EVT-006“事件频率”）：暂停菜单“事件历史”→ 事件历史面板（还没有事件时写明空状态）→ 点关闭回到暂停菜单；
+            // “事件频率”按钮点四下转回原档位（每一下都写进本局存档）。
+            bool evClicked = ClickUitk("[PauseMenuHost]", "PauseEventHistory");
+            UI.Kit.EventHistoryPanelUIToolkit ehp = UI.Kit.EventHistoryPanelUIToolkit.Instance;
+            ehp?.Refresh();
+            bool evOpen = ehp != null && UI.Kit.EventHistoryPanelUIToolkit.IsOpen && ehp.PanelVisible
+                          && (ehp.VisibleRowCount > 0 || ehp.EmptyText == Localization.GameText.Get("event_director.history.empty"))
+                          && !Localization.GameText.ContainsMarker(ehp.FooterText + ehp.EmptyText + (ehp.VisibleRowCount > 0 ? ehp.RowText(0) : string.Empty));
+            bool evClosed = ClickUitk("[EventHistoryHost]", "EventHistoryClose") && !UI.Kit.EventHistoryPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            int freq0 = Campaign.Env.EventDirectorService.Frequency(CampaignSession.Current);
+            bool freqStep = ClickUitk("[PauseMenuHost]", "PauseEventFrequency") && Campaign.Env.EventDirectorService.Frequency(CampaignSession.Current) == (freq0 + 1) % 4;
+            for (int i = 0; i < 3; i++)
+            {
+                ClickUitk("[PauseMenuHost]", "PauseEventFrequency");
+            }
+            bool freqBack = Campaign.Env.EventDirectorService.Frequency(CampaignSession.Current) == freq0;
+            Check(evClicked && evOpen && evClosed && freqStep && freqBack,
+                $"暂停菜单点“事件历史”：事件历史面板打开（{(ehp == null ? "无" : ehp.VisibleRowCount > 0 ? ehp.RowText(0) : ehp.EmptyText)}），点关闭回到暂停菜单；“事件频率”逐档切换并转回原档" +
+                $"（{evClicked}/{evOpen}/{evClosed}/{freqStep}/{freqBack}）");
             SmokeDifficultyPanel();
             Check(pm != null && pm.CameraZoomLabelText.Length > 0 && pm.CameraFollowLabelText.Length > 0
                   && !Localization.GameText.ContainsMarker(pm.CameraZoomLabelText + pm.CameraFollowLabelText),

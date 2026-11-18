@@ -184,6 +184,7 @@ namespace GameLogic.Stage
             Campaign.Env.DayNightCycle.Install();
             // FG7-ENV-02：静默夜接上接入判定、常驻规则“静默夜预案”的时间窗与日历来源；世界模拟开始按存档推进。
             Campaign.Env.SilentNightService.Install();
+            Campaign.Env.EventDirectorService.Install(); // FG12-EVT-01 事件导演（各事件的处理器由 FG12-EVT-02～06 登记）
             // FG7-ENV-03：天气接上太阳能的沙暴系数与日历来源；世界模拟开始按存档排定与推进天气、对齐内核派生量。
             Campaign.Env.WeatherService.Install();
             // FG7-ENV-04：净化区接到酸雨结算（净化塔范围内不扣耐久）、归还 50,000 格的信号覆盖倍率接到覆盖网络。

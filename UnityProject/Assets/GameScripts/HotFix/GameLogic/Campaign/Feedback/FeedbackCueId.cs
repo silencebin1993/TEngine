@@ -152,6 +152,12 @@ namespace GameLogic.Campaign.Feedback
         EmberCountdown,
         EmberBlast,
 
+        // ── FG12-EVT-01 事件导演（FG10 FGR-EVT-003 / 004；自动转成 world_event 通知，提示音按事件表 sfxWarn，与突袭 / 静默夜不同）──
+        /// <summary>威胁事件的预警与开始。</summary>
+        WorldEventWarning,
+        /// <summary>正向事件到来、事件结束 / 推迟。</summary>
+        WorldEventNotice,
+
         Max,
     }
 

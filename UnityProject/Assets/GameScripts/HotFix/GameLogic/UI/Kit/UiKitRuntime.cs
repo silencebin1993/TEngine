@@ -50,6 +50,7 @@ namespace GameLogic.UI.Kit
             Create<IntelPanelUIToolkit>("[IntelPanelHost]"); // FG5-RND-05：情报面板（30066，合成台之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<FusionPanelUIToolkit>("[FusionPanelHost]"); // FG5-RND-04：电路合成台 / 配方书（30067，靶场之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<ResearchTreePanelUIToolkit>("[ResearchTreeHost]"); // FG5-RND-01：研发树（30069，暂停菜单之下：从研发树“?”打开的图鉴盖在它上面）。
+            Create<EventHistoryPanelUIToolkit>("[EventHistoryHost]"); // FG12-EVT-01：事件历史（30079，与突袭历史同层，都是暂停菜单的子面板）。
             Create<RaidResultPanelUIToolkit>("[RaidResultHost]"); // FG6-DEF-08：突袭历史与结算（30079，离家报告之上、按键面板之下）。
             Create<AwayReportPanelUIToolkit>("[AwayReportHost]"); // FG4-ECO-09：离家报告（30078，统计 / 反应记录之上、按键面板之下）。
             Create<StatsPanelUIToolkit>("[StatsPanelHost]"); // FG2-FW-04：统计面板（战斗 · 反应伤害归因；FG4-ECO-08 加生产段，30076，暂停菜单之上）。
@@ -91,6 +92,7 @@ namespace GameLogic.UI.Kit
             MechanicCodexPanelUIToolkit.Close();
             FirmwareLibraryPanelUIToolkit.Close();
             ReactionLogPanelUIToolkit.Close();
+            EventHistoryPanelUIToolkit.Close();
             StatsPanelUIToolkit.Close();
             ItemsPanelUIToolkit.Close();
             RulesPanelUIToolkit.Close();
