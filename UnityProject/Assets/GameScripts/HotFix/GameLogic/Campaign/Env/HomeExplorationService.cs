@@ -47,6 +47,8 @@ namespace GameLogic.Campaign.Env
 
         /// <summary>状态变化计数（地图 / 世界标记据此重画）。</summary>
         public static int Revision { get; private set; } = 1;
+        /// <summary>FG12-EVT-05：诱饵终端状态变了（识别 / 触发 / 拆除 / 伏击进度）——地图、悬停、主视图标记按版本号刷新。</summary>
+        public static void Touch() => Revision++;
 
         /// <summary>自检读：发现 / 通知 / 回收 / 危害通知次数，最近一次揭开处理耗时。</summary>
         public static int FoundCount { get; private set; }
@@ -463,6 +465,11 @@ namespace GameLogic.Campaign.Env
                 Template = tpl,
             };
             Rewards(ref info);
+            if (info.Kind == WorldFeatureKind.Terminal && !info.Recovered && DecoyTerminalService.IsIdentified(s, info.Id))
+            {
+                info.Seconds = DecoyTerminalService.DisarmSeconds; // FG12-EVT-05：已识别的诱饵终端 = 安全拆除（工期 / 奖励按拆除）
+                info.TechData = DecoyTerminalService.DisarmTech;
+            }
             return true;
         }
 
@@ -594,6 +601,11 @@ namespace GameLogic.Campaign.Env
             recovered = IsRecovered(s, f.Id);
             if (f.Kind == WorldFeatureKind.Cache || f.Kind == WorldFeatureKind.Terminal)
             {
+                string decoy = f.Kind == WorldFeatureKind.Terminal ? DecoyTerminalService.MapLabel(s, f.Id) : null; // FG12-EVT-05：被看穿 / 触发 / 拆除的诱饵终端
+                if (decoy != null)
+                {
+                    return decoy;
+                }
                 string poi = GameText.Get(f.Kind == WorldFeatureKind.Cache ? "world.poi.cache" : "world.poi.terminal");
                 if (recovered)
                 {
@@ -618,14 +630,22 @@ namespace GameLogic.Campaign.Env
             {
                 return false;
             }
-            title = GameText.Format("relic.hover.title", PoiName(info), info.X, info.Y);
+            title = GameText.Format("relic.hover.title", info.Kind == WorldFeatureKind.Terminal && DecoyTerminalService.Revealed(s, info.Id)
+                ? GameText.Get("event_director.name.decoy_terminal") : PoiName(info), info.X, info.Y);
             var sb = new StringBuilder(160);
             sb.Append(GameText.Format("relic.hover.distance", info.Distance));
             sb.Append('\n');
             if (info.Kind == WorldFeatureKind.Cache || info.Kind == WorldFeatureKind.Terminal)
             {
                 bool cache = info.Kind == WorldFeatureKind.Cache;
-                if (info.Recovered)
+                // FG12-EVT-05（FGR-EVT-040）：诱饵终端——没识别时与普通终端一样可读取，外加破绽；识别 / 触发 / 拆除后写明。
+                string decoy = cache || (info.Order != null && !info.Recovered) ? null
+                    : DecoyTerminalService.HoverLine(s, info.Id, GameText.Format("terminal.hover.available", Num(info.Seconds), info.TechData) + "\n" + GameText.Get("cache.hover.hint"));
+                if (decoy != null)
+                {
+                    sb.Append(decoy);
+                }
+                else if (info.Recovered)
                 {
                     sb.Append(cache ? GameText.Format("cache.hover.opened", info.Scrap) : GameText.Format("terminal.hover.read", info.TechData, LoreFor(info)));
                 }
@@ -728,7 +748,8 @@ namespace GameLogic.Campaign.Env
             {
                 Revision++;
                 string name = PoiName(info);
-                string machineKey = info.Kind == WorldFeatureKind.Cache ? "cache.order.machine" : info.Kind == WorldFeatureKind.Terminal ? "terminal.order.machine" : "relic.order.machine";
+                string machineKey = info.Kind == WorldFeatureKind.Cache ? "cache.order.machine"
+                    : info.Kind == WorldFeatureKind.Terminal ? (DecoyTerminalService.IsIdentified(s, info.Id) ? "decoy_terminal.order.machine" : "terminal.order.machine") : "relic.order.machine";
                 FeedbackCues.Raise(FeedbackCueId.CommandAck, machineLogicId > 0
                     ? GameText.Format(machineKey, MachineNaming.Short(machineLogicId), name)
                     : GameText.Format("relic.order.pool", name));
@@ -834,6 +855,10 @@ namespace GameLogic.Campaign.Env
             {
                 return 0;
             }
+            if (info.Kind == WorldFeatureKind.Terminal && DecoyTerminalService.CompleteWork(s, info.Id, order.AssignedMachineLogicId) is int decoyPaid)
+            {
+                return decoyPaid; // FG12-EVT-05：诱饵终端——已识别 = 安全拆除给少量技术数据；没识别 = 触发陷阱
+            }
             if (info.Kind == WorldFeatureKind.Cache || info.Kind == WorldFeatureKind.Terminal)
             {
                 return CompletePoi(s, st, info);
@@ -921,7 +946,8 @@ namespace GameLogic.Campaign.Env
         public static string WorkLabel(string targetId) =>
             HeritageService.IsInstanceId(targetId) ? GameText.Get("heritage.work.label")
             : targetId != null && targetId.StartsWith(CachePrefix, StringComparison.Ordinal) ? GameText.Get("cache.work.label")
-            : targetId != null && targetId.StartsWith(TerminalPrefix, StringComparison.Ordinal) ? GameText.Get("terminal.work.label")
+            : targetId != null && targetId.StartsWith(TerminalPrefix, StringComparison.Ordinal)
+                ? GameText.Get(DecoyTerminalService.IsIdentified(CampaignSession.Current, targetId) ? "decoy_terminal.work.label" : "terminal.work.label")
             : GameText.Get("relic.work.label");
 
         // ── 区域危害（FGR-ENV-060）──────────────────────────────────────────────

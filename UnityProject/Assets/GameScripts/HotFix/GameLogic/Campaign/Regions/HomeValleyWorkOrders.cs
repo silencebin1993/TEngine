@@ -1412,6 +1412,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            if (order.Kind == WorkOrderKind.Salvage && Env.DecoyTerminalService.OnArrive(state, order))
+            {
+                return; // FG12-EVT-05：到场的是诱饵终端——带标记器的机器扫描识别 / 没带的触发陷阱，工单已作废，不进入读取
+            }
 
             if (!string.IsNullOrEmpty(order.ResourceTransactionId))
             {

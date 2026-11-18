@@ -702,6 +702,8 @@ namespace GameLogic.Campaign.Defense
         public const string OwnerRaid = "raid";
         public const string OwnerTerritory = "territory";
         public const string OwnerBoss = "boss";
+        /// <summary>FG12-EVT-05：事件导演的事件召来的攻城组（诱饵终端的伏击）。</summary>
+        public const string OwnerEvent = "event";
 
         /// <summary>
         /// 内核攻城组（队伍键）的主人：<see cref="OwnerRaid"/> = 突袭行进队伍（交战 / 拦截中）；<see cref="OwnerTerritory"/> = 正在迎战的据点 / 巡逻（FG8-EXP-03）；
@@ -720,7 +722,8 @@ namespace GameLogic.Campaign.Defense
                     return OwnerRaid;
                 }
             }
-            return TerritoryControlService.OwnsKey(state, key) ? OwnerTerritory : Regions.BaptismTowerBoss.OwnsKey(state, key) ? OwnerBoss : null;
+            return TerritoryControlService.OwnsKey(state, key) ? OwnerTerritory : Regions.BaptismTowerBoss.OwnsKey(state, key) ? OwnerBoss
+                : Env.DecoyTerminalService.OwnsKey(state, key) ? OwnerEvent : null;
         }
         // ─────────────────────────────── 撤退、收拢、全歼 ───────────────────────────────
 

@@ -978,7 +978,7 @@ namespace GameLogic.EditorTools
             var feats = new List<WorldFeature>();
             WorldFeatures.Query(ctx, silent.CenterX - silent.Radius, silent.CenterY - silent.Radius, silent.CenterX + silent.Radius, silent.CenterY + silent.Radius, feats);
             WorldFeature cache = feats.First(f => f.Kind == WorldFeatureKind.Cache);
-            WorldFeature term = feats.First(f => f.Kind == WorldFeatureKind.Terminal);
+            WorldFeature term = feats.First(f => f.Kind == WorldFeatureKind.Terminal && !DecoyTerminalService.IsDecoy(s, f)); // FG12-EVT-05：诱饵终端读取会触发陷阱，这里测普通终端
             int notes = HomeExplorationService.PoiNotices;
             bool fogFirst = HomeExplorationService.CheckRecoverable(s, cache.Id, out _) != null && HomeExplorationService.RelicAt(s, new Vector2(cache.X, cache.Y)) == null;
             HomeGridService.RevealArea(s, new Vector2(cache.X, cache.Y), 6f);

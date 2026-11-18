@@ -218,6 +218,18 @@ namespace GameLogic.Campaign.Blueprint
             return !string.IsNullOrEmpty(primaryId);
         }
 
+        /// <summary>FG12-EVT-05（诱饵终端的标记器扫描）：这台机器登记的装配里功能槽装的是什么（没登记 / 不可解析 / 空槽返回 false）。只在机器到达终端时调用，不按帧。</summary>
+        public static bool TryGetUtilityId(CampaignState state, int machineLogicId, out string utilityId)
+        {
+            utilityId = null;
+            if (!_entries.TryGetValue(machineLogicId, out Entry entry))
+            {
+                return false;
+            }
+            utilityId = BlueprintEditorService.Find(state, entry.BlueprintId)?.Versions?.FirstOrDefault(v => v.Version == entry.Version)?.UtilityId;
+            return !string.IsNullOrEmpty(utilityId);
+        }
+
         /// <summary>FG1-SIG-07：当前登记了装配的全部机器（中继模块索引在整表清空后重建时用；只在登记表整体变化时调用）。</summary>
         public static IEnumerable<int> RegisteredMachines => _entries.Keys;
 

@@ -240,6 +240,7 @@ namespace GameLogic.Campaign.WorldSim
             Defense.RaidResultService.ResetSessionState(); // FG6-DEF-08：突袭结算的会话统计与待执行的预警自动存档清零（存档里的结算记录不动）
             Env.VibrationService.ResetSessionState(); // FG12-EVT-02：减震基座索引、爆炸阈值下发对象按新会话重建；存档里的震动值与蠕虫不动
             Env.WormEventService.ResetSessionState();
+            Env.DecoyTerminalService.ResetSessionState(); // FG12-EVT-05：会话读数清零（识别 / 触发 / 伏击记录随存档）
             Env.OrbitalDropService.ResetSessionState(); // FG12-EVT-04：会话读数清零（落点与倒计时在事件导演的实例记录里，随存档）
             Defense.SiegeService.ResetSessionState(); // FG6-DEF-05：攻城的运行时缓存（耐久推送、首次钩子、统计）按新会话重建；存档里的剧场与队伍不动
             Logistics.PipeLeakService.ResetSessionState(); // FG6-LOG-10：液洼的运行时索引与统计按新会话重建；存档里的液洼记录不动（第一次有家园战斗地点时与内核对账）
@@ -714,6 +715,8 @@ namespace GameLogic.Campaign.WorldSim
                 Env.WormEventService.WorldStep(state);
                 // FG12-EVT-03：信号幽灵第一次的剧情请求（第 2 幕起、还没来过；O(1)，只看存档）。夺控本身在内核、收尾由夺控结束事件驱动。
                 Env.SignalGhostService.WorldStep(state);
+                // FG12-EVT-05：诱饵终端的标记器扫描（每游戏秒；O(候选诱饵 × 带标记器的机器)，与单位总数无关），只看步序号与存档。
+                Env.DecoyTerminalService.WorldStep(state, GameClock.Ticks);
                 // FG7-ENV-04：归还面积里程碑与“受污染”解除（每游戏秒 O(1) 比较；净化本身在上面的生产步里按游戏时间推进），只看步序号，与观察无关。
                 Env.PurificationService.WorldStep(state, GameClock.Ticks, GameClock.StepHz);
                 // FG1-SIG-03：核心固件冷却（信号侧，按游戏时间）到期——与观察无关，O(信号核槽位数)。

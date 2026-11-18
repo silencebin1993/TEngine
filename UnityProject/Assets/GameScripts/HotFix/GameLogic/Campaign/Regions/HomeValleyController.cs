@@ -2106,6 +2106,7 @@ namespace GameLogic.Campaign.Regions
             Defense.TurretService.RestoreAfterLoad(state, _combat);
             Defense.DefenseService.RestoreAfterLoad(state, _combat); // FG6-DEF-02：防御结构单位的阵亡事件交给防御服务（单位与护盾随快照恢复）
             Defense.SiegeService.RestoreAfterLoad(state, _combat); // FG6-DEF-05：按存档重设攻城剧场 / 职能表 / 集结点（内核快照不存这些配置），第一步之前
+            Env.DecoyTerminalService.RestoreAfterLoad(state, _combat); // FG12-EVT-05：进行中的诱饵伏击（内核重建、伏击组不在了按剩余台数补回）
             Env.EmNoiseService.RestoreAfterLoad(state, _combat); // FG9-FAC-01：静默领地的噪声发射器（没被摧毁的补上，已摧毁的移除）
             Env.SlagHeatService.RestoreAfterLoad(state, _combat); // FG9-FAC-02：铸造领地的熔渣热区（区内散热 -30%，派生量不进快照）与子母雷上限
             Env.HeatRadiationService.RestoreAfterLoad(state, _combat); // FG11-FAC-01：超频的高温辐射（热量上限 -25%、散热 -20%，派生量不进快照）

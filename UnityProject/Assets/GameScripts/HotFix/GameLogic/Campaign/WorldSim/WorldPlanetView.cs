@@ -40,6 +40,7 @@ namespace GameLogic.Campaign.WorldSim
         private static Material _relicDoneMaterial;
         private static Material _cacheMaterial;
         private static Material _terminalMaterial;
+        private static Material _decoyTellMaterial;
         private static Material _anchorMaterial;
         private static Material _gateMaterial;
         private static Material _protectMaterial;
@@ -303,6 +304,10 @@ namespace GameLogic.Campaign.WorldSim
                     body.transform.localScale = new Vector3(0.9f, 4f, 0.9f);
                     body.GetComponent<Renderer>().sharedMaterial = f.Kind == WorldGen.WorldFeatureKind.Cache ? _cacheMaterial
                         : f.Kind == WorldGen.WorldFeatureKind.Terminal ? _terminalMaterial : _relicMaterial;
+                    if (Env.DecoyTerminalService.IsDecoy(state, f) && !Env.DecoyTerminalService.IsStaleRead(state, f.Id))
+                    {
+                        AddDecoyTell(go.transform, Env.DecoyTerminalService.VariantOf(state, f)); // FGR-EVT-040“细看有破绽”：焦痕 / 半埋的地雷
+                    }
                     Markers[f.Id] = go;
                 }
                 if (!go.activeSelf)
@@ -333,6 +338,23 @@ namespace GameLogic.Campaign.WorldSim
                     RecoveredRelicMarkerCount++;
                 }
                 VisibleRelicMarkerCount++;
+            }
+        }
+
+        /// <summary>FG12-EVT-05 占位外形：诱饵终端脚下的焦痕（扁黑圆盘）或三颗半埋的地雷（压扁的黑球）。只在标记创建时加一次，纯表现。</summary>
+        private static void AddDecoyTell(Transform parent, int variant)
+        {
+            int n = variant == Env.DecoyTerminalService.VariantMines ? 3 : 1;
+            for (int i = 0; i < n; i++)
+            {
+                GameObject t = GameObject.CreatePrimitive(n == 1 ? PrimitiveType.Cylinder : PrimitiveType.Sphere);
+                UnityObjects.Release(t.GetComponent<Collider>());
+                t.name = n == 1 ? "DecoyScorch" : "DecoyMine";
+                t.transform.SetParent(parent, false);
+                float a = i * 2.1f;
+                t.transform.localPosition = n == 1 ? new Vector3(0f, 0.02f, 0f) : new Vector3(Mathf.Cos(a) * 1.6f, 0.05f, Mathf.Sin(a) * 1.6f);
+                t.transform.localScale = n == 1 ? new Vector3(3.2f, 0.02f, 3.2f) : new Vector3(0.5f, 0.2f, 0.5f);
+                t.GetComponent<Renderer>().sharedMaterial = _decoyTellMaterial;
             }
         }
 
@@ -579,6 +601,7 @@ namespace GameLogic.Campaign.WorldSim
             _relicDoneMaterial = new Material(shader) { color = new Color(0.42f, 0.44f, 0.46f) };
             _cacheMaterial = new Material(shader) { color = new Color(0.78f, 0.58f, 0.3f) };
             _terminalMaterial = new Material(shader) { color = new Color(0.5f, 0.8f, 0.85f) };
+            _decoyTellMaterial = new Material(shader) { color = new Color(0.12f, 0.1f, 0.09f) }; // FG12-EVT-05 占位：焦痕 / 半埋地雷（美术阶段替换，DEBT-FG12EVT05-01）
             _anchorMaterial = new Material(shader) { color = new Color(0.55f, 0.55f, 0.58f) };
             _gateMaterial = new Material(shader) { color = new Color(0.16f, 0.14f, 0.22f) };
             _protectMaterial = new Material(shader) { color = new Color(0.95f, 0.85f, 0.4f, 0.35f) };
@@ -656,14 +679,14 @@ namespace GameLogic.Campaign.WorldSim
                 _relicDoneMaterial = null;
             }
             // FG8-GEN-02：缓存 / 终端 / 锚点 / 室内入口的材质成对释放。
-            foreach (Material m in new[] { _cacheMaterial, _terminalMaterial, _anchorMaterial, _gateMaterial, _protectMaterial })
+            foreach (Material m in new[] { _cacheMaterial, _terminalMaterial, _decoyTellMaterial, _anchorMaterial, _gateMaterial, _protectMaterial })
             {
                 if (m != null)
                 {
                     UnityObjects.Release(m);
                 }
             }
-            _cacheMaterial = _terminalMaterial = _anchorMaterial = _gateMaterial = _protectMaterial = null;
+            _cacheMaterial = _terminalMaterial = _decoyTellMaterial = _anchorMaterial = _gateMaterial = _protectMaterial = null;
             VisibleAnchorMarkerCount = 0;
             VisibleRelicMarkerCount = 0;
             RecoveredRelicMarkerCount = 0;

@@ -594,7 +594,7 @@ namespace GameLogic.EditorTools
                 }
                 feats.Clear();
                 WorldFeatures.Query(ctx, pt.CenterX - pt.Radius, pt.CenterY - pt.Radius, pt.CenterX + pt.Radius, pt.CenterY + pt.Radius, feats);
-                term = feats.FirstOrDefault(f => f.Kind == WorldFeatureKind.Terminal);
+                term = feats.FirstOrDefault(f => f.Kind == WorldFeatureKind.Terminal && !DecoyTerminalService.IsDecoy(s, f)); // FG12-EVT-05：诱饵终端不给记录，这里测普通终端
                 termAct = 1;
             }
             bool termOk = false;

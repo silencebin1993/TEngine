@@ -188,6 +188,7 @@ namespace GameLogic.Stage
             Campaign.Env.EventDirectorService.Register(new Campaign.Env.WormEventService.Handler()); // FG12-EVT-02 掘进蠕虫（震动值请求）
             Campaign.Env.EventDirectorService.Register(new Campaign.Env.SignalGhostService.Handler()); // FG12-EVT-03 信号幽灵（第一次剧情请求，之后随机）
             Campaign.Env.EventDirectorService.Register(new Campaign.Env.OrbitalDropService.Handler()); // FG12-EVT-04 轨道坠落（第 2 幕起导演随机安排）
+            Campaign.Env.EventDirectorService.Register(new Campaign.Env.DecoyTerminalService.Handler()); // FG12-EVT-05 诱饵终端（玩家交互触发，trigger=site）
             // FG7-ENV-03：天气接上太阳能的沙暴系数与日历来源；世界模拟开始按存档排定与推进天气、对齐内核派生量。
             Campaign.Env.WeatherService.Install();
             // FG7-ENV-04：净化区接到酸雨结算（净化塔范围内不扣耐久）、归还 50,000 格的信号覆盖倍率接到覆盖网络。

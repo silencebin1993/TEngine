@@ -589,6 +589,7 @@ namespace GameLogic.Campaign.Defense
             {
                 return;
             }
+            Env.DecoyTerminalService.OnGroupLoss(s, (int)Math.Round(e.Value)); // FG12-EVT-05：诱饵伏击组减员（全灭 = 打退伏击）；击毁 / 自毁都算
             RaidResultState st = EnsureState(s);
             if (st == null || st.CoreLost)
             {

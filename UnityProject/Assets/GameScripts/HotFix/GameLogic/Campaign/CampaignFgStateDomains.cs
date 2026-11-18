@@ -511,6 +511,34 @@ namespace GameLogic.Campaign
         public long[] HeritageObtainedTicks = Array.Empty<long>();
         /// <summary>统计：数据档案累计给出的技术数据。</summary>
         public long HeritageTechData;
+        /// <summary>FG12-EVT-05（FGR-EVT-040 / 041）诱饵终端：被标记器扫描识别出的（识别先后）、安全拆除的（完工先后）、被触发的（触发先后；触发即作废，记进 <see cref="PoisDone"/>）。
+        /// 哪些旧终端是诱饵只取决于（世界种子, 终端 ID），不进存档。只加字段：旧档没有 = 都没有。</summary>
+        public string[] DecoysIdentified = Array.Empty<string>();
+        public string[] DecoysDisarmed = Array.Empty<string>();
+        public string[] DecoysSprung = Array.Empty<string>();
+        /// <summary>已触发、还在等事件导演安排伏击的诱饵终端（先进先出；同一时刻只有一场诱饵伏击，后触发的排队）。</summary>
+        public string[] DecoyQueue = Array.Empty<string>();
+        /// <summary>进行中的诱饵伏击（事件导演实例序号 ↔ 终端、内核攻城组键、剩余伏击单位）。</summary>
+        public DecoyAmbushRecord[] DecoyAmbushes = Array.Empty<DecoyAmbushRecord>();
+        /// <summary>统计：安全拆除累计得到的技术数据。</summary>
+        public long DecoyTechData;
+    }
+
+    /// <summary>FG12-EVT-05：一场诱饵伏击（唯一写入口 <see cref="Env.DecoyTerminalService"/>）。</summary>
+    [Serializable]
+    public sealed class DecoyAmbushRecord
+    {
+        public int Serial;
+        public string TerminalId = string.Empty;
+        /// <summary>0 = 伏击（破绽是焦痕）；1 = 雷区（破绽是半埋的地雷：触发时地雷炸响 + 少量伏击单位）。</summary>
+        public int Variant;
+        /// <summary>内核攻城组键（伏击单位“就地交战”，击毁按野外掉落结算）。</summary>
+        public int Key;
+        /// <summary>已经生成过伏击单位（开始那一步）；之后存读档只对账、不再生成。</summary>
+        public bool Spawned;
+        public int Unfolded;
+        /// <summary>还活着的伏击单位（每击毁一台减一；读档时内核没有快照、单位不在了就按这个数补回）。</summary>
+        public int Alive;
     }
 
     /// <summary>
@@ -2990,6 +3018,11 @@ namespace GameLogic.Campaign
             s.Grid.Exploration.HeritageReach ??= Array.Empty<int>();
             s.Grid.Exploration.HeritageReachRejected ??= Array.Empty<string>();
             s.Grid.Exploration.HeritageReachRelic ??= string.Empty;
+            s.Grid.Exploration.DecoysIdentified ??= Array.Empty<string>(); // FG12-EVT-05：旧档没有诱饵终端状态
+            s.Grid.Exploration.DecoysDisarmed ??= Array.Empty<string>();
+            s.Grid.Exploration.DecoysSprung ??= Array.Empty<string>();
+            s.Grid.Exploration.DecoyQueue ??= Array.Empty<string>();
+            s.Grid.Exploration.DecoyAmbushes ??= Array.Empty<DecoyAmbushRecord>();
             s.Grid.Exploration.HeritageObtained ??= Array.Empty<string>();
             s.Grid.Exploration.HeritageObtainedTicks ??= Array.Empty<long>();
             // FG8-EXP-01：旧档没有远征队字段 = 空队（默认名、颜色 0、空名单）。
