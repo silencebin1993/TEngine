@@ -178,6 +178,9 @@ namespace GameLogic.Campaign.WorldGen
             int step = Math.Max(1, half);
             // 堤道一直铺到领地圈外（湖区本身按地貌风格水面偏多，只穿过水环会在湖里断头：FgWorldGenHomeSelfCheck FGT-GEN-004 种子 1 实测）。
             int length = outer + 2 + (a.Territory != null ? a.Territory.Radius : 0);
+            // FG11-E2E-01（FG-GAP-164 实跑补正）：湖区内部实测八成以上是 3 级污染，有涂层的中继也建不进去；堤道上污染压到“有涂层中继可建”的最高级，
+            // 让中继链沿堤道建到平台（只有堤道这一条，其余湖区不变）。
+            int polCap = CausewayPollutionCap;
             for (int d = Math.Max(0, a.FootprintRadius - half); d <= length; d += step)
             {
                 int cx = a.OriginX + (int)((d * fx + 32768) >> 16);
@@ -192,6 +195,7 @@ namespace GameLogic.Campaign.WorldGen
                     Radius = half,
                     HazardWidth = 0,
                     Code = flat,
+                    ValueQ = polCap + 1,
                     BoxMinX = cx - half,
                     BoxMinY = cy - half,
                     BoxMaxX = cx + half,
@@ -199,6 +203,13 @@ namespace GameLogic.Campaign.WorldGen
                 });
             }
         }
+
+        /// <summary>
+        /// v4 堤道上的污染上限（级）：取 v4 定稿时“有防腐涂层的信号中继还能建的最高级”（grid.relay_coated_block_level 3 − 1 = 2）的字面值，
+        /// 不跟运行时调参走——生成结果只随生成器版本变（FGR-GEN-061），调中继阻挡等级不会悄悄改已有 v4 世界。进生成输入清单（<see cref="WorldGenInputs"/> 的 ring 段）；
+        /// FgHeatDataCitySelfCheck A1 断言它仍低于当前阻挡等级（否则堤道上建不了中继）。
+        /// </summary>
+        public const int CausewayPollutionCap = 2;
 
         private static void AddStyle(List<WorldGenZone> zones, PlannedTerritory t, string terrain, float bonus)
         {

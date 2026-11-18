@@ -1353,7 +1353,8 @@ namespace GameLogic.EditorTools
         /// <summary>
         /// EMG-R 出口补缺口第 5 轮（FG-GAP-189，总控更正 2026-11-17；按推荐默认执行（2026-11-17），待用户确认）。规格：FGR-DEF-015“材料到位后由机器按原样重建”、
         /// FG06 负向“自动重建时材料不足：虚影等待材料，不会重复扣料”、FGR-ECO-070 核心应急产废料、FGR-BASE-020 可追溯。规则：
-        /// (a) 预留只挡逐份取料的传送带虚影——比它早被摧毁、要一次凑齐、按当前进账攒得齐的建筑在等材料时，虚影不取用那部分；比那座更早被摧毁的虚影不受限；
+        /// (a) 预留只挡逐份取料的传送带虚影——要一次凑齐、按当前进账攒得齐的建筑在等材料时，虚影不取用那部分，不论虚影比那座早还是晚被摧毁
+        ///     （FG11-E2E-01 FG-GAP-243 总控定方案 A，按推荐默认执行（2026-11-18），待用户确认；原来比那座更早被摧毁的虚影不受限，攒够那一拍谁先拿是竞速）；
         /// (b) 整单之间不互相预留：后被摧毁、更便宜的建筑付得起就照常派单（不被饿死）；
         /// (d) 玩家手动下的单不受预留限制。中途存读档后照样挡住、照样续做；“等材料（预留给 X）”日志的去重随存档（读回更早存的档再触发照样写，审查 r5）。
         /// </summary>
@@ -1420,37 +1421,40 @@ namespace GameLogic.EditorTools
             WorkOrderRecord Belt(CampaignState st, GridCell c) =>
                 HomeValleyConstruction.TryFindPlannedCell(st, c, out PlannedBeltRecord p, out _) ? HomeValleyWorkOrders.FindActiveBuild(st, HomeValleyConstruction.BeltPlanPrefix + p.PlanId) : null;
             WorkOrderRecord lateOrder = Belt(s, late.Value);
-            bool queued = emergency && Belt(s, early.Value) != null && lateOrder != null && lateOrder.RuleSerial == r.Serial && lateOrder.RuleQueueTick > 0
+            WorkOrderRecord earlyOrder = Belt(s, early.Value);
+            bool queued = emergency && earlyOrder != null && earlyOrder.RuleQueueTick > 0 && lateOrder != null && lateOrder.RuleSerial == r.Serial && lateOrder.RuleQueueTick > 0
                           && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null && HomeValleyWorkOrders.FindActiveRepair(s, cheap.BuildingId) == null;
             const int PreSlot = Slot - 1;
             bool preSaved = SaveTo(PreSlot, out string preWhy); // D5f3 读回这份“还没给废料、还没写预留日志”的早档
-            // 仓库给到“早传送带 + 便宜那座 + 1”（远不到精炼炉的重建费）：
+            // 仓库给到“一格传送带 + 便宜那座 + 1”（远不到精炼炉的重建费）：
             int give = cb + cp + 1;
             s.Scrap = give;
             StandingRuleService.RequestEvaluation(s); // 有改动立即检查（与定时检查同一路径）：等料的建筑这一步就重查
-            bool earlyBuilt = StepUntil(() => BeltNetworkService.HpOf(early.Value) == hp0, 120);
             bool cheapUp = StepUntil(() => cheap.ConstructionState == BuildingConstructionState.Operational, 120);
             Seconds(3f);
             string fName = StandingRuleService.ReserveHolderName(s, f.BuildingId);
-            string lateStatus = QueueStatusOf(s, lateOrder);
+            string earlyStatus = QueueStatusOf(s, earlyOrder), lateStatus = QueueStatusOf(s, lateOrder);
             bool fWaits = f.ConstructionState == BuildingConstructionState.Damaged && HomeValleyWorkOrders.FindActiveRepair(s, f.BuildingId) == null;
-            bool held = earlyBuilt && cheapUp && fWaits && s.Scrap >= 1 && BeltNetworkService.HpOf(late.Value) < 0 && lateOrder.State == WorkOrderState.Waiting
-                        && lateStatus.Contains("预留给") && lateStatus.Contains(fName) && RuleLogs(s, r, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1;
+            bool BeltHeld(GridCell c, WorkOrderRecord o) => BeltNetworkService.HpOf(c) < 0 && o.State == WorkOrderState.Waiting;
+            bool earlyHeld = BeltHeld(early.Value, earlyOrder) && earlyStatus.Contains("预留给") && earlyStatus.Contains(fName);
+            bool held = cheapUp && fWaits && earlyHeld && s.Scrap >= cb + 1 && BeltHeld(late.Value, lateOrder)
+                        && lateStatus.Contains("预留给") && lateStatus.Contains(fName) && RuleLogs(s, r, "rules.log.rebuild_reserved", null) == 1;
             Expect(queued && held,
-                $"D5f FG-GAP-189 (a)(b)：摧毁先后 = 传送带（早）→ 精炼炉（重建 {cf}）→ 便宜的那座（{cheap.BuildingTypeId}，{cp}）→ 传送带（晚），都由 R{r.Serial} 排上、核心应急在产废料（{queued}）；" +
-                $"仓库给 {give} 后：早传送带照常取料重建（比精炼炉更早被摧毁的不受预留，{earlyBuilt}），便宜那座虽然后被摧毁、付得起就照常派单建好（整单之间不互相预留、不被饿死，{cheapUp}），" +
-                $"精炼炉仍在等（{fWaits}），晚传送带不取用留给精炼炉的废料（仓库剩 {s.Scrap} ≥ 1、施工队列“{lateStatus}”、“等材料（预留给）”日志 {RuleLogs(s, r, "rules.log.rebuild_reserved", CellKey(late.Value))} 条）（{held}）");
+                $"D5f FG-GAP-243 (a)(b)：摧毁先后 = 传送带（早）→ 精炼炉（重建 {cf}）→ 便宜的那座（{cheap.BuildingTypeId}，{cp}）→ 传送带（晚），都由 R{r.Serial} 排上、核心应急在产废料（{queued}）；" +
+                $"仓库给 {give} 后：便宜那座虽然后被摧毁、付得起就照常派单建好（整单之间不互相预留、不被饿死，{cheapUp}），精炼炉仍在等（{fWaits}）；" +
+                $"比精炼炉更早被摧毁的早传送带也让路（不看摧毁先后，施工队列“{earlyStatus}”，{earlyHeld}），晚传送带同样不取用（施工队列“{lateStatus}”），仓库剩 {s.Scrap} ≥ {cb + 1}、" +
+                $"“等材料（预留给）”日志 {RuleLogs(s, r, "rules.log.rebuild_reserved", null)} 条（同一座只写 1 条）（{held}）");
 
             // (d) 负向：玩家自己放的施工不受预留限制——仓库剩下的废料照常被取走、建成；晚传送带仍挡着。
             GridOpResult placed = HomeGridService.TryPlaceBeltPath(s, "belt_t1", manual.Value, manual.Value, BeltDir.East);
             WorkOrderRecord manualOrder = Belt(s, manual.Value);
             bool manualBuilt = placed.Success && manualOrder != null && manualOrder.RuleQueueTick == 0 && StepUntil(() => BeltNetworkService.HpOf(manual.Value) == hp0, 120);
-            bool lateStill = BeltNetworkService.HpOf(late.Value) < 0 && lateOrder.State == WorkOrderState.Waiting && f.ConstructionState == BuildingConstructionState.Damaged;
+            bool lateStill = BeltHeld(late.Value, lateOrder) && BeltHeld(early.Value, earlyOrder) && f.ConstructionState == BuildingConstructionState.Damaged;
             Expect(manualBuilt && lateStill,
-                $"D5f-d FG-GAP-189 (d) 负向：玩家自己放的一格传送带（{placed.Success}，不带排队位置 {manualOrder?.RuleQueueTick}）照常取用仓库里的废料建成（{manualBuilt}）；同一时刻自动重建的晚传送带仍为精炼炉挡着（{lateStill}）");
+                $"D5f-d FG-GAP-189 (d) 负向：玩家自己放的一格传送带（{placed.Success}，不带排队位置 {manualOrder?.RuleQueueTick}）照常取用仓库里的废料建成（{manualBuilt}）；同一时刻自动重建的早 / 晚两格传送带仍为精炼炉挡着（{lateStill}）");
 
             // 中途存读档：读档后照样挡住（排队位置随存档），“等材料（预留给）”日志不因读档再写一条（去重随存档）；补足后精炼炉派单、晚传送带接着建好。
-            string fId = f.BuildingId, lateId = lateOrder.WorkOrderId;
+            string fId = f.BuildingId, lateId = lateOrder.WorkOrderId, earlyId = earlyOrder.WorkOrderId;
             long qTick = lateOrder.RuleQueueTick;
             CampaignState l = SaveAndReload(out string why);
             if (l == null)
@@ -1458,22 +1462,22 @@ namespace GameLogic.EditorTools
                 Fail("D5f2 存读档失败：" + why);
                 return;
             }
-            WorkOrderRecord lo = HomeValleyWorkOrders.Find(l, lateId);
+            WorkOrderRecord lo = HomeValleyWorkOrders.Find(l, lateId), eo = HomeValleyWorkOrders.Find(l, earlyId);
             StandingRuleRecord lr = StandingRuleService.Find(l, r.Serial);
             l.Scrap = Math.Max(1, l.Scrap); // 仓库有货：晚传送带会再去问一次预留
             Seconds(3f);
             RuleEventRecord fe = l.StandingRules.Pending.FirstOrDefault(e => e != null && e.EntityId == fId);
-            bool stillHeld = lo != null && lr != null && lo.RuleQueueTick == qTick && lo.State == WorkOrderState.Waiting && BeltNetworkService.HpOf(late.Value) < 0
-                             && HomeValleyWorkOrders.FindActiveRepair(l, fId) == null && fe != null && fe.ReserveNoted && RuleLogs(l, lr, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1;
-            l.Scrap += cf + cb;
+            bool stillHeld = lo != null && eo != null && lr != null && lo.RuleQueueTick == qTick && BeltHeld(late.Value, lo) && BeltHeld(early.Value, eo)
+                             && HomeValleyWorkOrders.FindActiveRepair(l, fId) == null && fe != null && fe.ReserveNoted && RuleLogs(l, lr, "rules.log.rebuild_reserved", null) == 1;
+            l.Scrap += cf + 2 * cb;
             BuildingRecord lf = HomeGridService.FindBuilding(l, fId);
-            bool all = StepUntil(() => lf.ConstructionState == BuildingConstructionState.Operational && BeltNetworkService.HpOf(late.Value) == hp0, 300);
+            bool all = StepUntil(() => lf.ConstructionState == BuildingConstructionState.Operational && BeltNetworkService.HpOf(late.Value) == hp0 && BeltNetworkService.HpOf(early.Value) == hp0, 300);
             Seconds(1f);
             int ordersF = (l.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(o => o.TargetId == fId && o.Kind == WorkOrderKind.Repair);
-            bool done = all && ordersF == 1 && lo.State == WorkOrderState.Completed && lr.IssueKey.Length == 0;
+            bool done = all && ordersF == 1 && lo.State == WorkOrderState.Completed && eo.State == WorkOrderState.Completed && lr.IssueKey.Length == 0;
             Expect(stillHeld && done,
-                $"D5f2 等材料（预留）途中存读档：读档后晚传送带排队位置原样（{lo?.RuleQueueTick} = {qTick}）、仍挡着、预留日志仍 1 条（去重记在精炼炉的等待记录上 {fe?.ReserveNoted}）（{stillHeld}）；" +
-                $"补足后精炼炉派单（只派 1 次：{ordersF}）、晚传送带接着建好（{all}）、规则原因清掉（{done}）");
+                $"D5f2 等材料（预留）途中存读档：读档后晚传送带排队位置原样（{lo?.RuleQueueTick} = {qTick}）、早 / 晚两格仍挡着、预留日志仍 1 条（去重记在精炼炉的等待记录上 {fe?.ReserveNoted}）（{stillHeld}）；" +
+                $"补足后精炼炉派单（只派 1 次：{ordersF}）、两格传送带接着建好（{all}）、规则原因清掉（{done}）");
 
             // 读回更早存的那份档（还没写过预留日志）再触发：照样写一条（原来的进程级去重集合会把它吞掉，审查 r5）。
             CampaignState e0 = preSaved ? ReloadFrom(PreSlot, out preWhy) : null;
@@ -1483,14 +1487,14 @@ namespace GameLogic.EditorTools
                 return;
             }
             StandingRuleRecord er = StandingRuleService.Find(e0, r.Serial);
-            int before = RuleLogs(e0, er, "rules.log.rebuild_reserved", CellKey(late.Value));
+            int before = RuleLogs(e0, er, "rules.log.rebuild_reserved", null);
             e0.Scrap = give;
             StandingRuleService.RequestEvaluation(e0);
-            bool again = StepUntil(() => RuleLogs(e0, er, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1, 60);
+            bool again = StepUntil(() => RuleLogs(e0, er, "rules.log.rebuild_reserved", null) == 1, 60);
             Seconds(2f);
-            bool once = again && RuleLogs(e0, er, "rules.log.rebuild_reserved", CellKey(late.Value)) == 1 && BeltNetworkService.HpOf(late.Value) < 0;
+            bool once = again && RuleLogs(e0, er, "rules.log.rebuild_reserved", null) == 1 && BeltNetworkService.HpOf(late.Value) < 0 && BeltNetworkService.HpOf(early.Value) < 0;
             Expect(before == 0 && once,
-                $"D5f3 读回更早存的档（预留日志 {before} 条）后同样给 {give} 废料：晚传送带照样被精炼炉挡住、照样写 1 条“等材料（预留给）”（{again}），之后不重复（{once}）——日志只取决于存档状态、不取决于这个进程之前跑过什么");
+                $"D5f3 读回更早存的档（预留日志 {before} 条）后同样给 {give} 废料：早 / 晚传送带照样被精炼炉挡住、照样写 1 条“等材料（预留给）”（{again}），之后不重复（{once}）——日志只取决于存档状态、不取决于这个进程之前跑过什么");
         }
 
         /// <summary>

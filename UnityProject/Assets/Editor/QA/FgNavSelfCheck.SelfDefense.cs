@@ -798,10 +798,16 @@ namespace GameLogic.EditorTools
             }
             string paused = Digest(CampaignSession.Current);
             GameClock.SetPaused(false);
-            Expect(engaged && bits == (CombatSiegeConst.SelfDefenseOn | CombatSiegeConst.SelfDefenseEngaged) && bitsLoaded == bits && observed == headless
+            // FG11-E2E-01（硬规矩 (9)①）：FG11-FAC-01（FG-GAP-225）起同一次交战里“排放会落在自己路上”的警告位 SelfDefenseWarned 也在这个字节里（ERC003 的燃迹斜前方出手时会置上），
+            // 它是合法的交战状态：只要求“交给教义 + 正在交战”两位都在，且读档逐位一致。
+            const byte sdCore = CombatSiegeConst.SelfDefenseOn | CombatSiegeConst.SelfDefenseEngaged;
+            Expect(engaged && (bits & sdCore) == sdCore && (bits & ~(sdCore | CombatSiegeConst.SelfDefenseWarned)) == 0 && bitsLoaded == bits && observed == headless
                    && bySpeed.All(x => x == headless) && beforePause == paused,
-                $"移动途中自卫交战时存档（标记 {bits} → 读档 {bitsLoaded}）：读档无头跑 {steps} 步、逐帧观察、0.5x / 2x / 3x 跑到同一步结果逐字段一致；暂停 2 秒真实时间不走步、不开火" +
-                (observed == headless ? string.Empty : "\n    无头=" + headless + "\n    观察=" + observed));
+                $"移动途中自卫交战时存档（标记 {bits} → 读档 {bitsLoaded}；含排放避险警告位 {(bits & CombatSiegeConst.SelfDefenseWarned) != 0}）：读档无头跑 {steps} 步、逐帧观察、0.5x / 2x / 3x 跑到同一步结果逐字段一致；暂停 2 秒真实时间不走步、不开火" +
+                (observed == headless ? string.Empty : "\n    无头=" + headless + "\n    观察=" + observed)
+                + (engaged ? string.Empty : "\n    没进入自卫交战")
+                + string.Concat(bySpeed.Select((x, i) => x == headless ? string.Empty : $"\n    倍速 {new[] { 0.5f, 2f, 3f }[i]}x=" + x + "\n    无头=" + headless))
+                + (beforePause == paused ? string.Empty : "\n    暂停前=" + beforePause + "\n    暂停后=" + paused));
         }
 
         private static bool StepUntilSd(Func<bool> done, int maxSteps)

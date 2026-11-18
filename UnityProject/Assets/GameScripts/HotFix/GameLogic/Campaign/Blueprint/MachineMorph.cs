@@ -65,7 +65,7 @@ namespace GameLogic.Campaign.Blueprint
         /// <summary>还没有机身状态的作战组件（FG2-VFX-02 起为空：名表 16 个都有三套状态）。保留这个登记口：以后新加组件时先登记在这里、同时登记 DEBT，
         /// 形变自检要求“组件目录 = 有机身状态的 + 这里登记的”。</summary>
         /// EMG4-LOOT-01 新增的 4 个阵营标志作战组件（敌方载体的阵营变体）还没有三套机身状态：占位美术阶段装上不变形，登记 DEBT-EMG4E2E01-02（美术阶段补）。
-        public static readonly IReadOnlyList<string> PendingMorphComponents = new[] { "comp_jammer", "comp_brace_mortar", "comp_spray_arm", "comp_ring_sprinkler" };
+        public static readonly IReadOnlyList<string> PendingMorphComponents = new[] { "comp_jammer", "comp_brace_mortar", "comp_spray_arm", "comp_ring_sprinkler", "comp_heat_repeater" }; // FG11-E2E-01：FG11-FAC-01 的超频标志组件同登 DEBT-EMG4E2E01-02
 
         /// <summary>
         /// FG2-VFX-02（卡片负向“多类叠加时的遮挡”）：三类同时展开时谁压在谁上面的优先级（大者在上）。

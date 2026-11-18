@@ -91,7 +91,7 @@ namespace BinGames.Sim.WorldGen
         public int Y1;
         /// <summary>矿带 / 保证点的地形码。</summary>
         public int Code;
-        /// <summary>矿带：阈值下降量（16.16）；河流：浅滩周期（格）。</summary>
+        /// <summary>矿带：阈值下降量（16.16）；河流：浅滩周期（格）；平整范围：&gt; 0 时圆盘内污染不超过 ValueQ - 1 级（v4 堤道，FG-GAP-164），0 = 不限。</summary>
         public int ValueQ;
         /// <summary>河流：本段起点之前的累计河长（格，浅滩沿整条河连续）；浅滩宽度写在 <see cref="HazardWidth"/>。</summary>
         public int Extra;
@@ -266,6 +266,7 @@ namespace BinGames.Sim.WorldGen
             int ruinT = oreT;
             int flattenCode = -1;
             int blendF = One; // 过渡带里离平整范围最近的相对位置（0 = 紧挨平整范围，One = 过渡带外缘 / 不在任何过渡带里）
+            int pollCap = 3; // 平整圆盘带污染上限（ValueQ > 0，只有 v4 堤道）时取最小；没有时 3 = 不限，v1～v3 逐位不变
             for (int i = 0; i < zoneCount; i++)
             {
                 WorldGenZone z = zones[i];
@@ -329,6 +330,10 @@ namespace BinGames.Sim.WorldGen
                     if (d2f <= rf * rf)
                     {
                         flattenCode = z.Code;
+                        if (z.ValueQ > 0)
+                        {
+                            pollCap = math.min(pollCap, z.ValueQ - 1); // FG11-E2E-01（FG-GAP-164，v4 堤道）：圆盘内污染不超过 ValueQ - 1 级
+                        }
                     }
                     else if (z.HazardWidth > 0)
                     {
@@ -456,6 +461,7 @@ namespace BinGames.Sim.WorldGen
             {
                 level = math.min(level, p.FlatPollutionCap); // FGR-GEN-031 第 1 级：起始区核心附近污染不超过上限。
             }
+            level = math.min(level, pollCap);
             pollution = (byte)math.clamp(level, 0, 3);
         }
 

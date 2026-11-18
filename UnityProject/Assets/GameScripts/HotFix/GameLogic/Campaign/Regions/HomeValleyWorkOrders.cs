@@ -715,37 +715,28 @@ namespace GameLogic.Campaign.Regions
                 return 0;
             }
             WorkOrderRecord[] old = state.WorkOrders ?? Array.Empty<WorkOrderRecord>();
-            var usedIds = new HashSet<string>(StringComparer.Ordinal);
-            var activeTargets = new HashSet<string>(StringComparer.Ordinal);
-            foreach (WorkOrderRecord o in old)
+            // FG11-E2E-01 修复轮 4（DEBT-EMGRGL01-01 大批归零超 2 倍的根因之一）：已有工单的 ID / 搬运目标改查随数组引用维护的索引（原来每批按全部工单现建两张集合，O(工单总数)）。
+            // 搬运单是否进行中仍在查询时读工单的当前状态（状态会就地改），结论与原先整表现建一致。
+            HaulPoolIndex idx = HaulPoolIndexes.GetValue(state, _ => new HaulPoolIndex());
+            if (!ReferenceEquals(idx.Source, old))
             {
-                if (o == null)
-                {
-                    continue;
-                }
-                if (o.WorkOrderId != null)
-                {
-                    usedIds.Add(o.WorkOrderId);
-                }
-                if (o.Kind == WorkOrderKind.Haul && o.TargetId != null && !IsTerminal(o.State))
-                {
-                    activeTargets.Add(o.TargetId);
-                }
+                idx.Rebuild(old);
             }
+            var batchTargets = new HashSet<string>(StringComparer.Ordinal);
             var fresh = new List<WorkOrderRecord>(groundItemIds.Count);
             foreach (string gid in groundItemIds)
             {
-                if (string.IsNullOrEmpty(gid) || !activeTargets.Add(gid))
+                if (string.IsNullOrEmpty(gid) || idx.HasActiveHaul(gid) || !batchTargets.Add(gid))
                 {
                     continue;
                 }
                 string baseId = gid + ":haul:auto";
                 string id = baseId;
-                for (int n = 2; usedIds.Contains(id); n++)
+                for (int n = 2; idx.Ids.Contains(id); n++)
                 {
                     id = baseId + "~" + n.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 }
-                usedIds.Add(id);
+                idx.Ids.Add(id);
                 WorkOrderRecord order = NewOrder(state, id, WorkOrderKind.Haul, gid, 0, resourceTransactionId: null, duration: 0f);
                 order.SourceId = gid;
                 order.DestinationId = DestinationCore;
@@ -761,6 +752,11 @@ namespace GameLogic.Campaign.Regions
             Array.Copy(old, next, old.Length);
             fresh.CopyTo(next, old.Length);
             state.WorkOrders = next;
+            idx.Source = next; // 就地同步：ID 已在上面记入，补记新单的搬运目标
+            foreach (WorkOrderRecord o in fresh)
+            {
+                idx.AddHaul(o);
+            }
             foreach (WorkOrderRecord o in fresh)
             {
                 Env.SilentNightService.OnBuildOrderCreated(state, o); // 与 Append 同一口径（搬运单不受静默夜暂缓，这里立即返回）
@@ -768,6 +764,66 @@ namespace GameLogic.Campaign.Regions
             MarkAssignmentDirty();
             return fresh.Count;
         }
+
+        /// <summary>FG11-E2E-01 修复轮 4：<see cref="TryCreateHaulPools"/> 用的工单索引（全部工单 ID；搬运单按目标分组）。挂在 state 上（弱表）；
+        /// 工单数组引用变了（外部整体替换 / 追加 / 清理）就整表重建。工单的 ID、种类、目标创建后不改，状态会就地改，所以“进行中”在查询时现读。</summary>
+        private sealed class HaulPoolIndex
+        {
+            public WorkOrderRecord[] Source;
+            public readonly HashSet<string> Ids = new HashSet<string>(StringComparer.Ordinal);
+            private readonly Dictionary<string, List<WorkOrderRecord>> _haulByTarget = new Dictionary<string, List<WorkOrderRecord>>(StringComparer.Ordinal);
+
+            public void Rebuild(WorkOrderRecord[] source)
+            {
+                Source = source;
+                Ids.Clear();
+                _haulByTarget.Clear();
+                foreach (WorkOrderRecord o in source)
+                {
+                    if (o == null)
+                    {
+                        continue;
+                    }
+                    if (o.WorkOrderId != null)
+                    {
+                        Ids.Add(o.WorkOrderId);
+                    }
+                    AddHaul(o);
+                }
+            }
+
+            public void AddHaul(WorkOrderRecord o)
+            {
+                if (o.Kind != WorkOrderKind.Haul || o.TargetId == null)
+                {
+                    return;
+                }
+                if (!_haulByTarget.TryGetValue(o.TargetId, out List<WorkOrderRecord> list))
+                {
+                    _haulByTarget[o.TargetId] = list = new List<WorkOrderRecord>(1);
+                }
+                list.Add(o);
+            }
+
+            public bool HasActiveHaul(string target)
+            {
+                if (!_haulByTarget.TryGetValue(target, out List<WorkOrderRecord> list))
+                {
+                    return false;
+                }
+                foreach (WorkOrderRecord o in list)
+                {
+                    if (!IsTerminal(o.State))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<CampaignState, HaulPoolIndex> HaulPoolIndexes =
+            new System.Runtime.CompilerServices.ConditionalWeakTable<CampaignState, HaulPoolIndex>();
 
         public static WorkOrderOpResult TryCreateHaulPool(CampaignState state, string groundItemId)
         {
@@ -1419,7 +1475,7 @@ namespace GameLogic.Campaign.Regions
             {
                 HomeValleyConstruction.NotifyWaitingMaterials(state, order, need);
             }
-            // FG-GAP-189：仓库里有废料、却预留给更早被摧毁的那座——规则日志写一次“等材料（预留给 X）”（施工队列由 DescribeStatus 写明）。
+            // FG-GAP-189 / 243：仓库里有废料、却预留给在等一次凑齐的那座——规则日志写一次“等材料（预留给 X）”（施工队列由 DescribeStatus 写明）。
             if (order.RuleQueueTick > 0 && HomeValleyConstruction.StockOf(state, CampaignEconomyLedger.ResourceScrap) > 0
                 && Economy.StandingRuleService.ReservedScrapFor(state, order, out string holder) > 0)
             {
@@ -1909,7 +1965,7 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 // 还缺的材料里，按取料顺序找第一种还有预算的（废料优先）：分到了就去取，一种都分不到就等。
-                // FG-GAP-189：自动重建派出的虚影单不取用预留给更早被摧毁、要一次凑齐的那几座的废料（预算先扣掉预留）。
+                // FG-GAP-189：自动重建派出的虚影单不取用预留给在等一次凑齐材料、攒得齐的那几座的废料（不看摧毁先后，FG-GAP-243）（预算先扣掉预留）。
                 string pick = null;
                 HomeValleyConstruction.NeededMaterials(state, o, FetchNeedScratch);
                 int reservedScrap = o.RuleQueueTick > 0 ? Economy.StandingRuleService.ReservedScrapFor(state, o, out _) : 0;
@@ -3621,6 +3677,20 @@ namespace GameLogic.Campaign.Regions
             order.FailureReason = "machine-died";
             order.AssignedMachineLogicId = 0;
             MarkAssignmentDirty();
+            if (order.Kind == WorkOrderKind.Haul && order.IssuerId == "return")
+            {
+                // FG11-E2E-01（FGJ-M6 实跑）：系统返还物（突袭残骸堆、被摧毁落地的东西）没有玩家会重新点——原堆还在就重开一张，机器掉下的那份另开一张
+                // （全新的单与事务，不复活旧事务；与 ReleaseHaulForReassign 同口径）。否则残骸永远躺在地上、回收站没料，重建卡死（FGR-ECO-071 / B11）。
+                if (HomeValleyCargo.FindGroundItem(state, order.SourceId) != null)
+                {
+                    TryCreateHaulPool(state, order.SourceId);
+                }
+                GroundItemRecord redrop = HomeValleyCargo.FindGroundItemBySalvageId(state, order.SourceId + ":redrop:" + order.WorkOrderId);
+                if (redrop != null)
+                {
+                    TryCreateHaulPool(state, redrop.GroundItemId);
+                }
+            }
             // ER8-CONTENT-01 AC-AUD-001 失败：执行机器损失导致工单中止。
             string target = Feedback.FeedbackCues.BuildingLabel(order.TargetId);
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.Failure, dropPosition,

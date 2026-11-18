@@ -395,8 +395,8 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>
-        /// 这张施工单这一趟能取用的库存。EMG-R 出口补缺口第 4 轮（FG-GAP-189，按推荐默认执行 2026-11-17，待用户确认）：自动重建派出的传送带虚影单按摧毁先后排队，
-        /// 废料要先扣掉排在它前面、还在等一次凑齐的建筑重建费（<see cref="Economy.StandingRuleService.ReservedScrapFor"/>）；别的单、别的材料 = 库存本身。
+        /// 这张施工单这一趟能取用的库存。EMG-R 出口补缺口第 4 轮（FG-GAP-189，按推荐默认执行 2026-11-17，待用户确认）：自动重建派出的传送带虚影单
+        /// 废料要先扣掉还在等一次凑齐、攒得齐的建筑重建费（不看摧毁先后，FG-GAP-243）（<see cref="Economy.StandingRuleService.ReservedScrapFor"/>）；别的单、别的材料 = 库存本身。
         /// </summary>
         public static int FetchableStock(CampaignState state, WorkOrderRecord order, string resourceType)
         {
@@ -910,12 +910,9 @@ namespace GameLogic.Campaign.Regions
             {
                 return 0;
             }
-            GroundItemRecord[] old = state.GroundItems ?? Array.Empty<GroundItemRecord>();
+            // FG11-E2E-01 修复轮 4：已有地面物的占用表改由地面物索引就地维护（原来每批按全部地面物重建、每个前缀分配子串，大批归零时每批 O(地面物总数)）；
+            // 本批新占的另记一张小表，两张合起来与原先的整表同一结论。
             var taken = new HashSet<string>(StringComparer.Ordinal);
-            foreach (GroundItemRecord g in old)
-            {
-                AddTakenPrefixes(taken, g?.SalvageInstanceId);
-            }
             var spawned = new List<GroundItemRecord>(drops.Count);
             var haul = new List<string>(drops.Count);
             int dropped = 0;
@@ -927,7 +924,7 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 string baseId = d.DropId;
-                for (int n = 2; taken.Contains(baseId); n++)
+                for (int n = 2; taken.Contains(baseId) || HomeValleyCargo.IsDropIdTaken(state, baseId); n++)
                 {
                     baseId = d.DropId + "#" + n.ToString(CultureInfo.InvariantCulture);
                 }
@@ -2445,7 +2442,7 @@ namespace GameLogic.Campaign.Regions
                 int held = order.RuleQueueTick > 0 && scrapStock > 0 ? Economy.StandingRuleService.ReservedScrapFor(state, order, out holder) : 0;
                 if (held > 0)
                 {
-                    // FG-GAP-189：仓库里有废料，但先留给更早被摧毁、要一次凑齐的那座——写明“等材料（预留给 X）”。
+                    // FG-GAP-189：仓库里有废料，但先留给在等一次凑齐材料、攒得齐的那座（不看摧毁先后，FG-GAP-243）——写明“等材料（预留给 X）”。
                     return GameText.Format("build.status.waiting_reserved", Economy.StandingRuleService.ReserveHolderName(state, holder), MaterialName(CampaignEconomyLedger.ResourceScrap),
                         need.ToString(CultureInfo.InvariantCulture), scrapStock.ToString(CultureInfo.InvariantCulture), Math.Min(held, scrapStock).ToString(CultureInfo.InvariantCulture));
                 }

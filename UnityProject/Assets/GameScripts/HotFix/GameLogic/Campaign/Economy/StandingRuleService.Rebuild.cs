@@ -300,8 +300,9 @@ namespace GameLogic.Campaign.Economy
         }
 
         // ── 预留（EMG-R 出口补缺口第 5 轮，FG-GAP-189；总控更正 2026-11-17，按推荐默认执行（2026-11-17），待用户确认）──────────────
-        // (a) 预留只挡“逐份取料”的传送带 / 管线虚影：有比它更早被摧毁、要一次凑齐废料的建筑在等材料，且那座在当前仓库上限内、按当前进账攒得齐时，
-        //     虚影不得取用那部分（不然逐份取料会一直把废料吃光，整单永远凑不齐）。
+        // (a) 预留只挡“逐份取料”的传送带 / 管线虚影：有要一次凑齐废料的建筑在等材料（不论它比虚影早还是晚被摧毁），且那座在当前仓库上限内、按当前进账攒得齐时，
+        //     虚影不得取用那部分（不然逐份取料会一直把废料吃光，整单永远凑不齐）。FG11-E2E-01 修复轮 3（FG-GAP-243，总控定方案 A；按推荐默认执行（2026-11-18），待用户确认）：
+        //     原来只为“比虚影更早被摧毁”的建筑预留，能不能先建回一座取决于攒够那一拍是谁先拿（FGJ-M6 实测竞速），改为不看摧毁先后。
         // (b) 整单之间不互相预留：建筑按摧毁先后检查，谁的材料现在够谁先派单（TryRebuild）；前面的付不起，后面付得起的照常派。
         // (c) 整单所需超过仓库可存上限、或当前进账下攒不齐（没有在产的回收站，核心应急也到不了那么多）时不为它预留，原因写进它的等待原因（规则面板 / 规则日志 / 建筑面板）。
         // (d) 玩家手动下的单（施工队列点“重建”、自己放的施工、面板里修）不受预留限制：只有自动重建派出、带排队位置（RuleQueueTick）的虚影单才查。
@@ -334,8 +335,8 @@ namespace GameLogic.Campaign.Economy
             o != null && o.RuleSerial > 0 && (o.Kind == WorkOrderKind.Repair || o.Kind == WorkOrderKind.Build) && Find(state, o.RuleSerial)?.Kind == KindRebuild;
 
         /// <summary>
-        /// 自动重建派出的传送带虚影施工单这一刻不得取用的废料（规则 (a)）：被摧毁得比它早（<see cref="RuleEventRecord.Tick"/> &lt; <see cref="WorkOrderRecord.RuleQueueTick"/>）、
-        /// 还在等材料（不是等火灭）、攒得齐（<see cref="ScrapAttainable"/>）的建筑重建费合计；<paramref name="holder"/> = 其中最早那座。
+        /// 自动重建派出的传送带虚影施工单这一刻不得取用的废料（规则 (a)）：还在等材料（不是等火灭）、攒得齐（<see cref="ScrapAttainable"/>）的建筑重建费合计，
+        /// 不看它与虚影谁先被摧毁（FG-GAP-243）；<paramref name="holder"/> = 其中最早被摧毁的那座。
         /// 不是自动重建 / 玩家手动下的单 / 旧存档（RuleQueueTick = 0）= 0（规则 (d)）。O(待处理事件数)，只在取料分配 / 取料 / 面板刷新时。
         /// </summary>
         public static int ReservedScrapFor(CampaignState state, WorkOrderRecord o, out string holder)
@@ -349,7 +350,7 @@ namespace GameLogic.Campaign.Economy
             long best = long.MaxValue;
             foreach (RuleEventRecord e in Domain(state)?.Pending ?? Array.Empty<RuleEventRecord>())
             {
-                if (e == null || e.Kind != EventRebuildRetry || e.FireWait || e.Tick >= o.RuleQueueTick)
+                if (e == null || e.Kind != EventRebuildRetry || e.FireWait)
                 {
                     continue; // 等火灭的不预留：那里可能长期有火（常驻斑块），它派不出去也不该一直占着额度
                 }
@@ -525,7 +526,7 @@ namespace GameLogic.Campaign.Economy
             if (o != null)
             {
                 o.RuleSerial = r.Serial;
-                o.RuleQueueTick = Math.Max(1, tick); // FG-GAP-189：按摧毁先后排队（取料时不取用更早被摧毁、还在等一次凑齐的建筑还差的废料）
+                o.RuleQueueTick = Math.Max(1, tick); // FG-GAP-189 / 243：标记“自动重建派出的虚影单”（取料时不取用在等一次凑齐、攒得齐的建筑还差的废料）
             }
             Fired(state, r, "rules.log.rebuild_belt", cellKey, LabelArg(r.Serial), where);
             GuidanceHooks.Raise(GuidanceHooks.RulesRebuildFirstBelt);

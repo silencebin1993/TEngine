@@ -644,10 +644,7 @@ namespace GameLogic.Campaign.Regions
                 var machines = new List<int>(site.MachineLogicIds);
                 foreach (int id in machines)
                 {
-                    if (site.TryGetMachineUnit(id, out int unit) && site.Kernel.TryGetUnit(unit, out CombatUnitView v) && v.Health > 0f)
-                    {
-                        site.Kernel.Damage(unit, v.MaxHealth * MeltdownMachineFraction, 0);
-                    }
+                    site.TryDamageMachineByMaxFraction(id, MeltdownMachineFraction);
                 }
                 if (s.RegionEnemies != null)
                 {

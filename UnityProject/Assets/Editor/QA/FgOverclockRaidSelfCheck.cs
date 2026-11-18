@@ -563,9 +563,14 @@ namespace GameLogic.EditorTools
             int stray = Site.SpawnSiegeRaider(strayKey, at, at, 0.5f, 2f, 50f, 0f, -1, -1, CombatSiegeRole.Assault, false, 1f);
             string sStray = Site.DamageSourceOf(stray, s);
             Site.DespawnSiegeGroup(strayKey);
+            // FG-GAP-241：同队另一台被打死（槽位未压实）后再查——它留下的效果记 residue:，不冒充“突袭单位还在开火”。
+            int second = GroupUnits(key).FirstOrDefault(u => u != raider);
+            Site.Kernel.Damage(second, 1e6f, mu);
+            bool secondDead = second != 0 && !Site.Kernel.IsAlive(second);
+            string sDead = Site.DamageSourceOf(second, s);
             Expect(sField == "field" && sRaid == $"raid:{key}:enemy_oc_node" && sPlayer.StartsWith("player:", StringComparison.Ordinal) && sGone.StartsWith("gone:", StringComparison.Ordinal)
-                   && sStray == $"hostile:orphan:{strayKey}:unknown",
-                $"G1 伤害来源码：无主 = {sField}；突袭单位 = {sRaid}；己方误伤 = {sPlayer}；已不在内核 = {sGone}；不属于突袭队伍的攻城组 = {sStray}");
+                   && sStray == $"hostile:orphan:{strayKey}:unknown" && secondDead && sDead == $"residue:raid:{key}:enemy_oc_node",
+                $"G1 伤害来源码：无主 = {sField}；突袭单位 = {sRaid}；己方误伤 = {sPlayer}；已不在内核 = {sGone}；不属于突袭队伍的攻城组 = {sStray}；同队已阵亡的一台（{secondDead}）= {sDead}");
 
             RaidResultRecord r = RaidResultService.OpenFor(s, g.GroupId);
             int n0 = r?.Losses.Length ?? 0;

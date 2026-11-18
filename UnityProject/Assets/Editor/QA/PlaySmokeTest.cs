@@ -10982,13 +10982,25 @@ namespace GameLogic.EditorTools
             int raiders = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Enemy);
             int structs = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Structure);
             int turrets = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Player, BinGames.Sim.Combat.CombatUnitKind.Turret);
+            // FG11-REG-01：冷却塔遗址是带 Instanced 的中立结构，走实例化绘制；家园训练靶也是中立结构但不带 Instanced（HomeValleyCombatTargets），不进缓冲。
+            // 与 CombatKernel.PrepareRender 同口径：存活 + Instanced。
+            const BinGames.Sim.Combat.CombatUnitFlags aliveInst = BinGames.Sim.Combat.CombatUnitFlags.Alive | BinGames.Sim.Combat.CombatUnitFlags.Instanced;
+            int neutral = 0, neutralAll = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Neutral);
+            for (int slot = 0; slot < home.Kernel.SlotCount; slot++)
+            {
+                BinGames.Sim.Combat.CombatUnitView nv = home.Kernel.ViewAt(slot);
+                if (nv.Faction == BinGames.Sim.Combat.CombatFaction.Neutral && (nv.Flags & aliveInst) == aliveInst)
+                {
+                    neutral++;
+                }
+            }
             BinGames.Sim.Combat.CombatRenderer r = home.Renderer;
             Write($"  - 突袭原型 8 真实秒：内核 {ticks} 步，弹体峰值 {maxProj} 枚，存活突袭者 {raiders}、炮塔 {turrets}（家园另有具名敌方结构 {structs} 座：噪声发射器等；敌方合计 {hostiles}）；内核单步 {home.LastKernelMs:F3} ms；" +
                   $"真实帧 平均 {avgMs:F1} ms / 最长 {SessionState.GetFloat(K + "RaidMaxFrameMs", 0f):F1} ms（{frames} 帧，-nographics 下只含 CPU）；" +
                   $"实例 {r?.LastUnitInstances} 单位 + {r?.LastProjectileInstances} 弹体，{(r != null && r.GpuAvailable ? "GPU 绘制" : "无图形设备：" + r?.GpuUnavailableReason)}");
-            // 实例化缓冲画的是全部带 Instanced 标志的单位：突袭者 + 炮塔 + 家园的具名敌方结构（噪声发射器也走实例化绘制）。
-            Check(ticks >= 400 && maxProj >= 1500 && raiders >= 150 && turrets >= 60 && r != null && r.LastUnitInstances == hostiles + turrets && r.LastProjectileInstances == home.Kernel.ProjectileCount,
-                $"真实 Play 帧里家园战斗内核跑着 {raiders} 个突袭者、{turrets} 座炮塔、峰值 {maxProj} 枚弹体（≥ 1,500），实例化缓冲与内核一致（{r?.LastUnitInstances} = 敌方 {hostiles} + 炮塔 {turrets}）");
+            // 实例化缓冲画的是全部带 Instanced 标志的单位：突袭者 + 炮塔 + 家园的具名敌方结构（噪声发射器也走实例化绘制）+ 中立结构（FG11-REG-01 冷却塔遗址）。
+            Check(ticks >= 400 && maxProj >= 1500 && raiders >= 150 && turrets >= 60 && r != null && r.LastUnitInstances == hostiles + neutral + turrets && r.LastProjectileInstances == home.Kernel.ProjectileCount,
+                $"真实 Play 帧里家园战斗内核跑着 {raiders} 个突袭者、{turrets} 座炮塔、峰值 {maxProj} 枚弹体（≥ 1,500），实例化缓冲与内核一致（{r?.LastUnitInstances} = 敌方 {hostiles} + 实例化中立结构 {neutral}（存活中立单位共 {neutralAll}）+ 炮塔 {turrets}）");
             CheckNoTextMarkers("家园突袭原型");
             int removed = Campaign.Combat.CombatBench.ClearPrototypeUnits(home);
             int structsAfter = home.Kernel.CountAlive(BinGames.Sim.Combat.CombatFaction.Hostile, BinGames.Sim.Combat.CombatUnitKind.Structure);

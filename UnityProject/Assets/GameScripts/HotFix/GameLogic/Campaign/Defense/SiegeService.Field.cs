@@ -76,8 +76,13 @@ namespace GameLogic.Campaign.Defense
                 }
                 double toTarget = Math.Sqrt((g.TargetX - g.PosX) * (g.TargetX - g.PosX) + (g.TargetY - g.PosY) * (g.TargetY - g.PosY));
                 // 快到目标的不拦截（照常到达展开、用流场攻城）；刚收拢的不马上再拦（僵持到点收拢后要走出这片）。
-                bool moving = g.State == TransitGroupState.Retreating
-                              || (g.State == TransitGroupState.Marching && toTarget > Math.Max(arrival * 2.0, SiegeCatalog.InterceptMinTargetCells));
+                // FG-GAP-241：攻城后撤出的队伍（到达过家园 / 前哨、从集结点原路返回）离集结点不到同一距离时也不拦截——否则它在基地里被附近的己方机器
+                // “拦截”、就地重新展开打进基地（结算后的余波：应急打印的搬运机一台接一台被 raid: 来源打死，FGJ-M6 / M6R）；走出这片以后照常可以追击（FGR-DEF-032）。
+                double minFar = Math.Max(arrival * 2.0, SiegeCatalog.InterceptMinTargetCells);
+                bool leaving = g.State == TransitGroupState.Retreating && g.ArrivedAtTick >= 0
+                               && (g.PosX - g.GatherX) * (g.PosX - g.GatherX) + (g.PosY - g.GatherY) * (g.PosY - g.GatherY) < minFar * minFar;
+                bool moving = (g.State == TransitGroupState.Retreating && !leaving)
+                              || (g.State == TransitGroupState.Marching && toTarget > minFar);
                 if (moving && g.InterceptTick >= 0 && GameClock.Ticks - g.InterceptTick < GameClock.TicksFor(SiegeCatalog.InterceptMaxSeconds))
                 {
                     continue;

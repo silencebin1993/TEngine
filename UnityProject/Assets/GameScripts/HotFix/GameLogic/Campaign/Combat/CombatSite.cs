@@ -3468,6 +3468,17 @@ namespace GameLogic.Campaign.Combat
             return true;
         }
 
+        /// <summary>FG11-E2E-01（桥接边界）：按最大耐久比例伤害本地点一台活着的己方机器（不立即结算事件，调用方批量后 ProcessEvents）。返回 false = 不在内核或已倒下。</summary>
+        public bool TryDamageMachineByMaxFraction(int logicId, float fraction)
+        {
+            if (IsDisposed || !TryGetMachineUnit(logicId, out int unit) || !Kernel.TryGetUnit(unit, out CombatUnitView v) || v.Health <= 0f)
+            {
+                return false;
+            }
+            Kernel.Damage(unit, Mathf.Max(0f, v.MaxHealth * fraction), 0);
+            return true;
+        }
+
         /// <summary>自动交战的目标、射程与间隔（家园训练靶）。</summary>
         public void SetEngage(int targetUnitId, float range, float interval)
         {

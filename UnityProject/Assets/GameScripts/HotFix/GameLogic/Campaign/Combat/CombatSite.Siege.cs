@@ -54,7 +54,8 @@ namespace GameLogic.Campaign.Combat
         /// FG11-RAID-01（FG-GAP-185“给伤害的攻击者记来源”）：内核伤害事件里的攻击者单位 ID（DamageRequest / Killed 的 Other）→ 来源码，记进突袭损失与余波日志：
         /// <c>field</c> = 没有攻击者（场地物 / 斑块 / 泄爆等无主伤害）；<c>gone:&lt;id&gt;</c> = 攻击者已不在内核；<c>raid:&lt;队伍键&gt;:&lt;敌人种类&gt;</c> = 突袭行进队伍的攻城 / 拦截单位；
         /// <c>hostile:&lt;territory|boss|orphan&gt;:&lt;队伍键&gt;:&lt;敌人种类&gt;</c> = 别的流程的攻城组（迎战的据点 / 巡逻、首领召来的波次、无主残留——审查 P2：不混记成 raid）；
-        /// <c>hostile:&lt;敌人种类或单位种类&gt;</c> = 不在任何攻城组的敌方单位（领地常驻敌人等）；<c>player:&lt;单位种类&gt;</c> = 己方误伤（炮塔 / 机器 / 结构）。O(1) + 攻城组归属 O(行进队伍数)。
+        /// <c>hostile:&lt;敌人种类或单位种类&gt;</c> = 不在任何攻城组的敌方单位（领地常驻敌人等）；<c>player:&lt;单位种类&gt;</c> = 己方误伤（炮塔 / 机器 / 结构）；
+        /// 以上（除 field / gone）前加 <c>residue:</c> = 攻击者已阵亡 / 离场，伤害来自它留下的效果（FG-GAP-241）。O(1) + 攻城组归属 O(行进队伍数)。
         /// </summary>
         public string DamageSourceOf(int attackerId, CampaignState state)
         {
@@ -66,6 +67,14 @@ namespace GameLogic.Campaign.Combat
             {
                 return "gone:" + attackerId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
+            // FG-GAP-241：攻击者已阵亡 / 离场、槽位还没压实（TryGetUnit 仍查得到）——伤害来自它留下的在飞弹体 / 状态 / 相态归属（FG11-ATTR-01），
+            // 不是还活着的单位在开火；前缀 residue: 区分（突袭结算只在攻城组存活数为 0 时收尾，结算后的 raid 来源一定是这一种）。
+            string prefix = (v.Flags & CombatUnitFlags.Alive) != 0 ? string.Empty : "residue:";
+            return prefix + LiveSourceOf(attackerId, v, state);
+        }
+
+        private string LiveSourceOf(int attackerId, in CombatUnitView v, CampaignState state)
+        {
             if (v.Faction == CombatFaction.Player)
             {
                 return "player:" + v.Kind;
@@ -360,6 +369,10 @@ namespace GameLogic.Campaign.Combat
         /// <summary>离 <paramref name="at"/> 最近的敌方单位（半径内）。0 = 没有。</summary>
         public int FindNearestHostile(Vector2 at, float radius) =>
             IsDisposed ? 0 : Kernel.FindNearest(new double2(at.x, at.y), radius, CombatFaction.Hostile);
+
+        /// <summary>FG11-E2E-01（FG-GAP-238）：最近的可选中中立单位（冷却塔遗址；攻击键 + 左键的显式攻击目标）。</summary>
+        public int FindNearestNeutral(Vector2 at, float radius) =>
+            IsDisposed ? 0 : Kernel.FindNearest(new double2(at.x, at.y), radius, CombatFaction.Neutral);
 
         public int CountSiegeGroup(int groupKey, int[] perRole = null) => IsDisposed ? 0 : Kernel.CountSiegeGroup(groupKey, perRole);
 

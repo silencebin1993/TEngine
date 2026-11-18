@@ -32,6 +32,9 @@ namespace GameLogic.Campaign.Env
 
         public static float Radius => Mathf.Max(1f, Tuning("cooling.tower.radius", 14f));
 
+        /// <summary>塔身半径（内核结构单位的占地半径，fg.TbHomeTuning cooling.tower.unit_radius）。</summary>
+        public static float UnitRadius => Tuning("cooling.tower.unit_radius", 2.5f);
+
         public static int DestroyedCount { get; private set; }
         public static int Revision { get; private set; } = 1;
 
@@ -178,7 +181,7 @@ namespace GameLogic.Campaign.Env
             }
             int spawned = 0;
             float hp = Tuning("cooling.tower.hp", 400f);
-            float unitRadius = Tuning("cooling.tower.unit_radius", 2.5f);
+            float unitRadius = UnitRadius;
             foreach (Tower tw in Towers(s))
             {
                 string key = KeyOf(tw.Id);

@@ -902,7 +902,9 @@ namespace BinGames.Sim.Combat
                 }
                 hits.Clear();
                 bool air = ChsAirborne(ref d, u); // EMG3-CHS-01：离地（悬浮 / 云端空中）不吃地面层
-                uint mask = PatchesAt(ref d, d.Pos[u], air, ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false);
+                // FG-GAP-238：敌方 / 中立结构单位（冷却塔、巢穴、首领核心）按占地半径接触——明火烧到塔身就算，不必盖住塔心（ADR-REG-002 §2.1“燃迹真明火打空即毁”）
+                double reach = d.Kind[u] == (byte)CombatUnitKind.Structure ? d.Radius[u] : 0.0;
+                uint mask = PatchesAt(ref d, d.Pos[u], air, ref hits, EmgMatterConst.ContactPerUnit, legacyInHits: false, reach: reach);
                 EmgUnitState st = d.EmgUnit[u];
                 uint prev = st.PrevMatterMask & EmgFieldConst.MatterBits;
                 if (mask != prev)
@@ -961,38 +963,46 @@ namespace BinGames.Sim.Combat
         /// 点 <paramref name="p"/> 所在的活斑块（最多 <paramref name="cap"/> 块最近的，按 (距离, 下标) 升序写进 <paramref name="hits"/>）；返回物质掩码（位 = 物质码）。
         /// <paramref name="airborne"/> = 离地实体：地面层斑块不算（FG19B §1.4 第 1 条）。O(本格登记数)。
         /// </summary>
-        internal static uint PatchesAt(ref CombatData d, double2 p, bool airborne, ref NativeList<int2> hits, int cap, bool legacyInHits = true)
+        internal static uint PatchesAt(ref CombatData d, double2 p, bool airborne, ref NativeList<int2> hits, int cap, bool legacyInHits = true, double reach = 0.0)
         {
             // EMG2-MAT-02（ADR ⑤ / ⑭ #13；FG19B §1.4 第 11 条）：酸沼 = 常驻 mat.acid 虚拟世界源——不实体化为斑块、不进 EmgHash、不占槽，按点是否在危害区查询；
             // 只并进物质掩码（evt.enter / leave、PrevMatterMask、规则引擎读），接触伤害仍是 StepAcidMarsh（不另挂沾染，不双算）；离地实体不吃（地面层）。
             uint mask = !airborne && d.AcidShapes.Length > 0 && InAcid(ref d, p) ? 1u << EmgMatterConst.Acid : 0u;
             // FG-EMG-3 性能回收：走斑块专用格链（与 Cells 里的斑块登记同一组，EmgHashAdd），只读引用；结果按 (距离, Id) 插入、掩码按位或，与遍历顺序无关
-            int pcx = EmgHash.CellOf(p.x), pcy = EmgHash.CellOf(p.y);
-            for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(pcx, pcy)] - 1; node >= 0;)
+            // FG-GAP-238（ADR-REG-002 §2.1）：reach > 0 = 有占地的结构单位，斑块圆与占地圆相交即接触，查占地覆盖的格（同一斑块登记在多格，按下标去重）
+            int x0 = EmgHash.CellOf(p.x - reach), x1 = EmgHash.CellOf(p.x + reach);
+            int y0 = EmgHash.CellOf(p.y - reach), y1 = EmgHash.CellOf(p.y + reach);
+            for (int pcy = y0; pcy <= y1; pcy++)
             {
-                int4 cell = d.EmgHash.PatchNodes[node];
-                node = cell.w;
-                int j = cell.z;
-                if (cell.x != pcx || cell.y != pcy || j >= d.Patches.Length)
+                for (int pcx = x0; pcx <= x1; pcx++)
                 {
-                    continue;
+                    for (int node = d.EmgHash.PatchHead[EmgHash.PatchSlot(pcx, pcy)] - 1; node >= 0;)
+                    {
+                        int4 cell = d.EmgHash.PatchNodes[node];
+                        node = cell.w;
+                        int j = cell.z;
+                        if (cell.x != pcx || cell.y != pcy || j >= d.Patches.Length || (reach > 0.0 && ContainsX(hits, j)))
+                        {
+                            continue;
+                        }
+                        ref CombatZone z = ref d.Patches.ElementAt(j);
+                        if (!PatchAlive(z) || (airborne && z.Layer == EmgMatterConst.LayerGround))
+                        {
+                            continue;
+                        }
+                        double dist = math.distance(z.Pos, p);
+                        if (dist > z.Radius + reach)
+                        {
+                            continue;
+                        }
+                        mask |= 1u << z.Matter;
+                        if (!legacyInHits && (z.PFlags & EmgMatterConst.FlagLegacy) != 0)
+                        {
+                            continue; // 迁入斑块只并进掩码、不占接触名额（它们的接触由区域节拍结算，占名额会挤掉真物质斑块的沾染）
+                        }
+                        InsertNearest(ref d, ref hits, new int2(j, (int)math.min(dist * 1000.0, int.MaxValue)), cap);
+                    }
                 }
-                ref CombatZone z = ref d.Patches.ElementAt(j);
-                if (!PatchAlive(z) || (airborne && z.Layer == EmgMatterConst.LayerGround))
-                {
-                    continue;
-                }
-                double dist = math.distance(z.Pos, p);
-                if (dist > z.Radius)
-                {
-                    continue;
-                }
-                mask |= 1u << z.Matter;
-                if (!legacyInHits && (z.PFlags & EmgMatterConst.FlagLegacy) != 0)
-                {
-                    continue; // 迁入斑块只并进掩码、不占接触名额（它们的接触由区域节拍结算，占名额会挤掉真物质斑块的沾染）
-                }
-                InsertNearest(ref d, ref hits, new int2(j, (int)math.min(dist * 1000.0, int.MaxValue)), cap);
             }
             return mask;
         }

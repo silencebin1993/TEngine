@@ -132,7 +132,7 @@ namespace GameLogic.EditorTools
             var ids = CarrierReadings.Components.Where(c => string.IsNullOrEmpty(c.Faction) || c.Faction == "none").Select(c => c.Id).ToList();
             int flags = CarrierReadings.Components.Count(c => !string.IsNullOrEmpty(c.Faction) && c.Faction != "none");
             var roster = MachineMorph.MorphComponents;
-            Expect(ids.Count == 16 && roster.All(ids.Contains) && NewComponents.All(ids.Contains) && flags == 4,
+            Expect(ids.Count == 16 && roster.All(ids.Contains) && NewComponents.All(ids.Contains) && flags == 5, // FG11-E2E-01：EMG4-LOOT-01 的 4 个 + FG11-FAC-01 的 comp_heat_repeater
                 $"fg.TbCombatComponent 名表 16 个（{string.Join("、", ids)}）+ 阵营标志组件 {flags} 行");
             CarrierReadings.TryGetComponent(ComponentCatalog.CompOrbitId, out CombatComponent orbit);
             CarrierReadings.TryGetComponent(ComponentCatalog.CompSentryId, out CombatComponent sentry);

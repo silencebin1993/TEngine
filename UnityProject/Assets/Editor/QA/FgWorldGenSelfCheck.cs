@@ -1089,6 +1089,12 @@ namespace GameLogic.EditorTools
             (42, 3, "earth", 0, 0, 0x48C70F151F70AAB7UL),
             (42, 3, "earth", 3, -2, 0xDD3B8007C1F7214BUL),
             (42, 3, "earth", -4, 4, 0xF73CC064910E6A81UL),
+            // 2026-11-18 FG11-E2E-01：生成器 v4（FG11-REG-01）补旅程种子 1 / 42 的核心区块基准（核心附近与 v3 相同：湖心水环 + 堤道都在家园区外）。
+            (1, 4, "earth", 0, 0, 0x321C6D2380672B29UL),
+            (1, 4, "earth", -1, -1, 0x3FD7FE7335FDF84CUL),
+            (42, 4, "earth", 0, 0, 0x48C70F151F70AAB7UL),
+            (42, 4, "earth", 3, -2, 0xDD3B8007C1F7214BUL),
+            (42, 4, "earth", -4, 4, 0xF73CC064910E6A81UL),
         };
 
         private static readonly (int seed, int version, string surface, int cx, int cy)[] BaselineKeys =
@@ -1103,6 +1109,8 @@ namespace GameLogic.EditorTools
             (42, 2, "earth", -4, 4), (-7, 2, "earth", 2, 2), (1, 2, "relay_hall", 0, 0),
             // FG8-E2E-01：生成器 v3（FG8-GEN-02 阵营领地与锚点平整）上线时没有补旅程种子的基准，从主菜单新建的旅程在“种子”一步就失败；补种子 1 / 42 的核心区块。
             (1, 3, "earth", 0, 0), (1, 3, "earth", -1, -1), (42, 3, "earth", 0, 0), (42, 3, "earth", 3, -2), (42, 3, "earth", -4, 4),
+            // FG11-E2E-01：生成器 v4（FG11-REG-01 湖心水环 + 堤道）上线时同样没补旅程种子的基准，从主菜单新建的旅程在“种子”一步失败；补种子 1 / 42 的核心区块。
+            (1, 4, "earth", 0, 0), (1, 4, "earth", -1, -1), (42, 4, "earth", 0, 0), (42, 4, "earth", 3, -2), (42, 4, "earth", -4, 4),
         };
 
         private static ulong BaselineHash(int seed, int version, string surface, int cx, int cy)

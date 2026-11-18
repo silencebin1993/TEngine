@@ -433,10 +433,10 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>左键点第一台、Shift 左键加选其余存活的远征队成员（真实点击机器露出来的部分）。</summary>
-        private static StepOutcome TickSelectTeam(JourneyContext c) => TickSelectSome(c, int.MaxValue);
+        internal static StepOutcome TickSelectTeam(JourneyContext c) => TickSelectSome(c, int.MaxValue);
 
         /// <summary>只选前 <paramref name="n"/> 台存活的（左键第一台、Shift 左键加选）。</summary>
-        private static StepOutcome TickSelectSome(JourneyContext c, int n)
+        internal static StepOutcome TickSelectSome(JourneyContext c, int n)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             List<int> team = AliveTeam(c).Take(n).ToList();
@@ -868,7 +868,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static string Short(string s) => s == null ? string.Empty : s.Length > 80 ? s.Substring(0, 80) + "…" : s;
 
-        private static StepOutcome TickBackToStrategy(JourneyContext c)
+        internal static StepOutcome TickBackToStrategy(JourneyContext c)
         {
             if (c.StepElapsed < 1.2)
             {
@@ -892,7 +892,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 中继链（DEBT-FG10E2E01-01；建中继与探索由 FGJ-M8 覆盖）：从 <paramref name="from"/> 起，每一座立在上一座覆盖里、尽量往 <paramref name="goal"/> 推；
         /// 每个候选格都过正式放置校验（<see cref="HomeGridService.ValidatePlacement"/>，含污染等级与 FG-GAP-164 的涂层放宽），推不动就停。返回最后一座的位置。
         /// </summary>
-        private static Vector2 RelayChain(JourneyContext c, Vector2 from, float fromRadius, Vector2 goal, string idPrefix, List<string> relays)
+        internal static Vector2 RelayChain(JourneyContext c, Vector2 from, float fromRadius, Vector2 goal, string idPrefix, List<string> relays)
         {
             CampaignState s = St;
             Vector2 last = from;
@@ -970,7 +970,50 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail("还没有防腐涂层——" + why);
             }
-            return gap <= 160f ? StepOutcome.Done(why) : StepOutcome.Fail("湖区中继推不到湖心平台旁——" + why);
+            return gap <= 160f ? StepOutcome.Done(why) : StepOutcome.Fail("湖区中继推不到湖心平台旁——" + why + "；" + LakeSurvey(goal));
+        }
+
+        /// <summary>失败诊断：湖心平台 450 格内（步长 4）各污染等级的可建地面格数，以及离平台最近的“地面可建且污染 &lt; 涂层阻挡线”格。</summary>
+        private static string LakeSurvey(Vector2 goal)
+        {
+            HomeGridMap map = HomeGridService.MapFor(St);
+            if (map == null)
+            {
+                return "无格网";
+            }
+            int block = GridContent.TuningInt("grid.relay_coated_block_level");
+            var perLevel = new int[4];
+            int water = 0;
+            float best = float.MaxValue;
+            GridCell bestCell = default;
+            for (int dx = -450; dx <= 450; dx += 4)
+            {
+                for (int dy = -450; dy <= 450; dy += 4)
+                {
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (d > 450f)
+                    {
+                        continue;
+                    }
+                    var g = new GridCell(Mathf.RoundToInt(goal.x) + dx, Mathf.RoundToInt(goal.y) + dy);
+                    HomeGridMap.Chunk ch = map.ChunkAt(g, out int idx);
+                    var t = GridContent.TerrainByCode(ch.Terrain[idx]);
+                    if (t == null || t.Buildable != 1)
+                    {
+                        water++;
+                        continue;
+                    }
+                    byte p = ch.Pollution[idx];
+                    perLevel[Mathf.Min(3, (int)p)]++;
+                    if (p < block && d < best)
+                    {
+                        best = d;
+                        bestCell = g;
+                    }
+                }
+            }
+            return $"平台 450 格内（步长 4）：不可建地形 {water}、可建地形按污染 0/1/2/3 级 = {perLevel[0]}/{perLevel[1]}/{perLevel[2]}/{perLevel[3]}；" +
+                   $"离平台最近的可建且污染 < {block} 级格 ({bestCell.X},{bestCell.Y}) 距 {(best < float.MaxValue ? best.ToString("0") : "-")} 格";
         }
 
         private static void ApplyOutpostFixture(JourneyContext c)

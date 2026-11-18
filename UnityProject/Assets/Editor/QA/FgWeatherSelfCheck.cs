@@ -1515,6 +1515,7 @@ namespace GameLogic.EditorTools
             StepUntil(() => D(s).AcidMinutes >= minute0 + 70, (int)(HourTicks * 70 / 60) + 300);
             double zeroPhaseS = sw.Elapsed.TotalSeconds;
             double maxZeroBatch = WeatherService.MaxBatchMs;
+            string zeroSplit = WeatherService.SlowBatchSplit; // FG11-E2E-01 探针：大批归零最慢那一分钟的分项（全量里超 2 倍时定位来源用，不改测量）
             int gcZeroBatches = WeatherService.GcBatchCount;
             double gcZeroBatchMs = WeatherService.MaxGcBatchMs;
             int batchesZero = WeatherService.BatchCount - batch1;
@@ -1555,7 +1556,7 @@ namespace GameLogic.EditorTools
                           $"同一刻批量摧毁 500 格 {burst500:F1} ms / 2,000 格 {burst2000:F1} ms（每格 {perCell500 * 1000:F0} / {perCell2000 * 1000:F0} μs，比值 {linear:F2}）；" +
                           $"中途赶上垃圾回收、单列不计入最慢一分钟的：正常酸雨 {gcBatches} 分钟（其中最慢 {gcBatchMs:F2} ms）、大批归零 {gcZeroBatches} 分钟（其中最慢 {gcZeroBatchMs:F2} ms）");
             PerfGate.Expect(poles >= 800 && belts >= 15000, $"P1 天气每步检查 {idleUs:F3} μs / 步（阈值 1 μs；O(1)）、步首派生量对齐 {preUs:F3} μs / 步（阈值 1 μs）、" +
-                                  $"酸雨结算最慢一分钟 {maxBatch:F2} ms（阈值 4 ms；{poles} 座建筑 + {liveBelts:N0} 格传送带；分项 {slowSplit}；开始时一次性预留 {reserve}，不计入每分钟）、大批归零时最慢一分钟 {maxZeroBatch:F2} ms（阈值 {ZeroBatchGateMs} ms，规格 8 ms = 120 帧一帧，DEBT-EMGRGL01-01）、" +
+                                  $"酸雨结算最慢一分钟 {maxBatch:F2} ms（阈值 4 ms；{poles} 座建筑 + {liveBelts:N0} 格传送带；分项 {slowSplit}；开始时一次性预留 {reserve}，不计入每分钟）、大批归零时最慢一分钟 {maxZeroBatch:F2} ms（阈值 {ZeroBatchGateMs} ms，规格 8 ms = 120 帧一帧，DEBT-EMGRGL01-01；分项 {zeroSplit}）、" +
                                   $"批量摧毁每格耗时 2,000 格 / 500 格 = {linear:F2}（阈值 2：线性约 1，平方级约 4）；最慢一分钟不含中途赶上垃圾回收的分钟（单列：正常酸雨 {gcBatches} 分钟、最慢 {gcBatchMs:F2} ms，" +
                                   $"大批归零 {gcZeroBatches} 分钟、最慢 {gcZeroBatchMs:F2} ms；赶上回收的分钟占比 {gcShare:P0}，阈值 25%：批次自己大量分配时几乎每分钟都会赶上回收）；" +
                                   $"摧毁后 {groundNow:N0} 份地面物 / {haulNow:N0} 张返还单在场时世界步平均 {postAvg:F2} ms、p99 {postP99:F2} ms（阈值 {PostStepGateMs} ms，规格 4 ms，DEBT-EMGRGL01-01）",

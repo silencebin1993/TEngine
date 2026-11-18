@@ -90,6 +90,9 @@ namespace GameLogic.Campaign.Regions
         /// 归还谷地/破碎都市不传）表示不裁剪，向后兼容不受影响。</summary>
         public Func<Vector2, Vector2> ClampDestination;
         public Func<Vector2, float, RegionHostileInfo?> FindHostileNear;
+        /// <summary>FG11-E2E-01（FG-GAP-238）：攻击键 + 左键（显式攻击命令）能指向的目标——敌对单位之外再加可摧毁的中立建筑（冷却塔遗址）。
+        /// 右键情境命令仍只认敌人（不会因为点到中立建筑旁的地面就变成攻击）。null = 与 <see cref="FindHostileNear"/> 相同。</summary>
+        public Func<Vector2, float, RegionHostileInfo?> FindAttackableNear;
         public Func<string, RegionHostileInfo?> ResolveHostile;
         /// <summary>右键情境命令的宿主钩子（屏幕坐标）：点中工作目标（建筑 / 残骸 / 地面物品 / 建造位）时由宿主派工并返回 true；
         /// 返回 false（或为 null）时右键按“地面 = 移动”处理。攻击判定在它之前（右键敌人永远是攻击）。</summary>
@@ -660,7 +663,7 @@ namespace GameLogic.Campaign.Regions
             _armedKind = null;
             if (kind == RegionCommandKind.Attack)
             {
-                RegionHostileInfo? hostile = _ctx.FindHostileNear?.Invoke(worldPoint, ClickPickRadius);
+                RegionHostileInfo? hostile = (_ctx.FindAttackableNear ?? _ctx.FindHostileNear)?.Invoke(worldPoint, ClickPickRadius);
                 if (hostile == null || !hostile.Value.Alive)
                 {
                     PushEvent("攻击失败：未指向有效目标。");

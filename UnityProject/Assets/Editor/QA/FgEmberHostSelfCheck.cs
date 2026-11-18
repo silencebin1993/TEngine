@@ -397,13 +397,15 @@ namespace GameLogic.EditorTools
             double cd0 = SignalUplinkService.CooldownRemaining(s, expectFw);
             long cdTick0 = GameClock.Ticks;
             int blockedNotes = NotifyCount("emg_slot_blocked");
+            int blockedCount0 = SignalSeizeService.SlotBlockedCount; // 共用事件计数（FG11-E2E-01：与 FGJ-M11 boss_fight 同一计数）
             int slot = DriveToLockout(site, s);
+            int blockedDelta = SignalSeizeService.SlotBlockedCount - blockedCount0;
             EmgProgramResult during = CompileCore(s);
             bool lockout = EmberHostBoss.PhaseOf(s) == EmberPhase.Lockout && slot == expect && SignalSeizeService.IsBlocked(s, slot)
                            && s.SignalCore.SlotBlocks.Any(b => b.Slot == slot && b.Source == SignalSeizeService.SourceEmber)
                            && SignalCoreService.ActiveContentIds(s)[slot].Length == 0 && SignalCoreService.SlotContentId(s, slot) == expectFw
                            && Math.Abs(core.Health - core.MaxHealth * EmberHostBoss.Phase2HpFraction) < 1e-2f && EmberHostBoss.SpikesAlive(s) == 3
-                           && EmberHostBoss.Spikes.All(sp => site.Combat.TryGetEnemyUnit(sp.Id, out _)) && NotifyCount("emg_slot_blocked") > blockedNotes;
+                           && EmberHostBoss.Spikes.All(sp => site.Combat.TryGetEnemyUnit(sp.Id, out _)) && NotifyCount("emg_slot_blocked") > blockedNotes && blockedDelta == 1;
             // FGR-EMG-031 重排：[分裂, 寻的] + [贯穿, 漏油]：封掉分裂（触发器）→ 下游回到根；封掉寻的 → 根 = 分裂 + 漏油、子节点只剩贯穿。
             string treeDuring = Tree(during);
             bool reorder = before.Signature != during.Signature && during.Steps.All(st => st.FirmwareId != expectFw)
@@ -420,7 +422,7 @@ namespace GameLogic.EditorTools
             bool shielded = Math.Abs(core.Health - hpLock) < 1e-3f;
             Expect(lockout && reorder && preview && hud && shielded,
                 $"C1 FGT-FAC-006 / FGT-EMG-061 阶段二·槽位封锁：耐久停在 {EmberHostBoss.Phase2HpFraction:P0} 门槛 → 封锁第 {slot + 1} 槽（按种子 + 第几次挑战，预期 {expect + 1}；来源余烬主机；固件“{expectFw}”留在槽里、生效列表为空）{lockout}；" +
-                $"程序树按 FGR-EMG-031 重排：{Tree(before)} → {treeDuring}（{reorder}）；预览原因行“{reason}”（{preview}）；首领 HUD 写尖刺 3/3 与被封锁的槽，HUD 状态行“{status}”（{hud}）；本阶段本体不可伤（{shielded}）");
+                $"程序树按 FGR-EMG-031 重排：{Tree(before)} → {treeDuring}（{reorder}）；预览原因行“{reason}”（{preview}）；首领 HUD 写尖刺 3/3 与被封锁的槽，HUD 状态行“{status}”（{hud}）；本阶段本体不可伤（{shielded}）；共用计数 SlotBlockedCount +{blockedDelta}（应 +1）");
 
             // 负向：阶段二本体不可伤 → 散热口照转，但不发预警 / “重创窗口”提示（修复轮 1）。
             int warnL = EmberHostBoss.VentWarns, openL = EmberHostBoss.VentOpens;
@@ -435,15 +437,17 @@ namespace GameLogic.EditorTools
             bool stillBlocked = SignalSeizeService.IsBlocked(s, slot) && EmberHostBoss.PhaseOf(s) == EmberPhase.Lockout && r.SpikesLeft == 1;
             int restoredNotes = NotifyCount("emg_slot_restored");
             int beeps0 = EmberHostBoss.CountdownBeeps; // 含进入阶段三时的第一声
+            int restoredCount0 = SignalSeizeService.SlotRestoredCount;
             KillSpike(site, 2);
+            int restoredDelta = SignalSeizeService.SlotRestoredCount - restoredCount0;
             EmgProgramResult after = CompileCore(s);
             double cd1 = SignalUplinkService.CooldownRemaining(s, expectFw);
             long endTick = r.MeltdownEndTick;
             bool retaken = !SignalSeizeService.IsBlocked(s, slot) && after.Signature == before.Signature && s.SignalCore.CoreCooldowns[0].ReadyTick == cd.ReadyTick
-                           && Math.Abs((cd0 - cd1) - (GameClock.Ticks - cdTick0) / (double)GameClock.StepHz) < 0.05 && cd1 > 0 && NotifyCount("emg_slot_restored") > restoredNotes
+                           && Math.Abs((cd0 - cd1) - (GameClock.Ticks - cdTick0) / (double)GameClock.StepHz) < 0.05 && cd1 > 0 && NotifyCount("emg_slot_restored") > restoredNotes && restoredDelta == 1
                            && EmberHostBoss.PhaseOf(s) == EmberPhase.Meltdown && endTick - GameClock.Ticks > GameClock.TicksFor(59.0);
             Expect(stillBlocked && retaken,
-                $"C2 摧毁尖刺夺回槽位：拆 2 根仍封锁（还剩 {1}，{stillBlocked}）；拆完 3 根 → 立即恢复，程序树与封锁前同签名、冷却 ReadyTick 不变（剩 {cd1:0.#} 秒，不重置）、恢复通知 → {EmberHostBoss.PhaseName(EmberPhase.Meltdown)}（{retaken}）");
+                $"C2 摧毁尖刺夺回槽位：拆 2 根仍封锁（还剩 {1}，{stillBlocked}）；拆完 3 根 → 立即恢复，程序树与封锁前同签名、冷却 ReadyTick 不变（剩 {cd1:0.#} 秒，不重置）、恢复通知、共用计数 SlotRestoredCount +{restoredDelta}（应 +1）→ {EmberHostBoss.PhaseName(EmberPhase.Meltdown)}（{retaken}）");
 
             // 阶段三：HUD 倒计时、警报（开始、30 秒、最后 10 秒每秒）；到时熔毁重创全场（含自己），战斗继续。
             EmberHostHud.Compose(s, out _, out _, out _, out _, out string cdLines);

@@ -631,6 +631,7 @@ namespace GameLogic.Campaign.Grid
             int relayBlock = relay && Env.AcidMarshService.HasCoating(state) ? Math.Max(blockLevel, GridContent.TuningInt("grid.relay_coated_block_level")) : blockLevel;
             bool relayCoatedUsed = false;
             bool relayNeedsCoating = false;
+            int relayTooPolluted = 0; // FG-GAP-239：涂层也压不上的污染等级（> 0 时提示中继模块）
             for (int i = 0; i < r.Cells.Count; i++)
             {
                 GridCell c = r.Cells[i];
@@ -676,6 +677,7 @@ namespace GameLogic.Campaign.Grid
                 else if (p >= blockLevel)
                 {
                     relayNeedsCoating |= relay && relayBlock == blockLevel && p < GridContent.TuningInt("grid.relay_coated_block_level");
+                    relayTooPolluted = relay && p >= GridContent.TuningInt("grid.relay_coated_block_level") ? Math.Max(relayTooPolluted, p) : relayTooPolluted;
                     r.Add(new GridReason(GridBlockReason.Pollution, "grid.reason.pollution", p.ToString()));
                     ok = false;
                 }
@@ -792,6 +794,11 @@ namespace GameLogic.Campaign.Grid
             else if (relayNeedsCoating)
             {
                 r.Notes.Add(Localization.GameText.Format("grid.note.relay_needs_coating", (GridContent.TuningInt("grid.relay_coated_block_level") - 1).ToString()));
+            }
+            if (relayTooPolluted > 0)
+            {
+                // FG11-E2E-01（FG-GAP-239）：热寂数据城内部（距离 +2、领地 +1）与外圈危害带都是 3 级——中继塔进不去，正式出路是外缘有电的 T2 信号塔（500 格）或机器结构槽的信号中继模块
+                r.Notes.Add(Localization.GameText.Format("grid.note.relay_module_hint", relayTooPolluted.ToString(), Signal.SignalCoverageService.TowerT2Radius.ToString("0", System.Globalization.CultureInfo.InvariantCulture)));
             }
             if (exemptLevel > 0)
             {

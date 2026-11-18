@@ -111,12 +111,74 @@ namespace GameLogic.Campaign.Regions
             public readonly Dictionary<string, GroundItemRecord> BySalvage = new Dictionary<string, GroundItemRecord>(StringComparer.Ordinal);
             /// <summary>数组里有重复键（只可能来自外部整体写入）：删除时不能就地同步，下次查找整表重建。</summary>
             public bool HasDup;
+            /// <summary>FG11-E2E-01 修复轮 4（DEBT-EMGRGL01-01 大批归零超 2 倍的根因之一）：<see cref="HomeValleyConstruction.DropForHaulBatch"/> 的 ID 占用表——
+            /// 每份地面物的 SalvageInstanceId 与它在 ':' / '/' 前的每个前缀，带计数。首次用时按数组建一次，之后随 Add / 就地删除增减；
+            /// 原来每批都按全部地面物重建并为每个前缀分配子串（3 万份地面物时每批约 9 万个字符串），托管堆越大越慢。数组整体换掉时随 Rebuild 作废。</summary>
+            private Dictionary<string, int> _taken;
+
+            public Dictionary<string, int> Taken
+            {
+                get
+                {
+                    if (_taken == null)
+                    {
+                        _taken = new Dictionary<string, int>(Source.Length * 3, StringComparer.Ordinal);
+                        foreach (GroundItemRecord g in Source)
+                        {
+                            CountTaken(_taken, g?.SalvageInstanceId, 1);
+                        }
+                    }
+                    return _taken;
+                }
+            }
+
+            /// <summary>与 HomeValleyConstruction.AddTakenPrefixes 同一口径：ID 本身与它在 ':' / '/' 前的每个前缀。</summary>
+            private static void CountTaken(Dictionary<string, int> taken, string sid, int delta)
+            {
+                if (string.IsNullOrEmpty(sid))
+                {
+                    return;
+                }
+                Bump(taken, sid, delta);
+                for (int j = 0; j < sid.Length; j++)
+                {
+                    if (sid[j] == ':' || sid[j] == '/')
+                    {
+                        Bump(taken, sid.Substring(0, j), delta);
+                    }
+                }
+            }
+
+            private static void Bump(Dictionary<string, int> taken, string key, int delta)
+            {
+                int n = (taken.TryGetValue(key, out int c) ? c : 0) + delta;
+                if (n > 0)
+                {
+                    taken[key] = n;
+                }
+                else
+                {
+                    taken.Remove(key);
+                }
+            }
+
+            public void Untake(GroundItemRecord g)
+            {
+                if (_taken != null && g != null)
+                {
+                    CountTaken(_taken, g.SalvageInstanceId, -1);
+                }
+            }
 
             public void Add(GroundItemRecord g)
             {
                 if (g == null)
                 {
                     return;
+                }
+                if (_taken != null)
+                {
+                    CountTaken(_taken, g.SalvageInstanceId, 1);
                 }
                 if (g.GroundItemId != null && !ById.TryAdd(g.GroundItemId, g))
                 {
@@ -133,6 +195,7 @@ namespace GameLogic.Campaign.Regions
                 ById.Clear();
                 BySalvage.Clear();
                 HasDup = false;
+                _taken = null;
                 Source = source;
                 for (int i = 0; i < source.Length; i++)
                 {
@@ -159,6 +222,10 @@ namespace GameLogic.Campaign.Regions
             }
             return idx;
         }
+
+        /// <summary>FG11-E2E-01 修复轮 4：现有地面物里是否已占用这个落地 ID（ID 本身或某份 SalvageInstanceId 在 ':' / '/' 前的前缀），
+        /// 与原先 DropForHaulBatch 每批现建的占用集合同一结论；占用表随索引就地维护，平摊 O(1)。</summary>
+        internal static bool IsDropIdTaken(CampaignState state, string id) => IndexOf(state)?.Taken.ContainsKey(id) == true;
 
         /// <summary>家园能不能存这种资源：物品表里的固体（仓库）与保管库物品（FG4-ECO-01，关闭 DEBT-FG3LOG02-01）；流体、数字资源、实体、表里没有的都不行。
         /// 与 <see cref="CommitHaul"/> 的拒绝条件同源，搬运下令与交付前都先问这里。</summary>
@@ -247,6 +314,7 @@ namespace GameLogic.Campaign.Regions
                 if (idx.ById.TryGetValue(groundItemId, out GroundItemRecord gone))
                 {
                     idx.ById.Remove(groundItemId);
+                    idx.Untake(gone);
                     if (gone.SalvageInstanceId != null)
                     {
                         idx.BySalvage.Remove(gone.SalvageInstanceId);

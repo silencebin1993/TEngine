@@ -2213,6 +2213,7 @@ namespace GameLogic.Campaign.Regions
                 SafePoint = HomeValleyLayout.Core.Position,
                 Obstacles = obstacles,
                 FindHostileNear = FindLowThreatHostileNear,
+                FindAttackableNear = (p, r) => FindLowThreatHostileNear(p, r) ?? FindNeutralStructureNear(p, r),
                 ResolveHostile = ResolveLowThreatHostile,
                 Site = _combat,
                 // FG8-EXP-01（FG13）：连按两次编组键 → 镜头飞到编组中心（战略视角，与远程指挥同一台镜头）。
@@ -2255,6 +2256,20 @@ namespace GameLogic.Campaign.Regions
             // FG8-E2E-01（FGJ-M8 实跑发现：右键星球上的据点驻军 / 精英残部 / 巡逻 / 拦截中的突袭只会变成“移动”）：
             // 右键敌人 = 攻击（FG-GAP-022 RTS 口径）也认家园战斗内核里的敌对单位（一次 AOT 最近点查询）。
             int unit = _combat != null ? _combat.FindNearestHostile(worldPoint, pickRadius) : 0;
+            if (unit > 0 && _combat.TryGetUnitPosition(unit, out Unity.Mathematics.double2 p))
+            {
+                return new RegionHostileInfo(KernelHostilePrefix + unit.ToString(System.Globalization.CultureInfo.InvariantCulture), new Vector2((float)p.x, (float)p.y), true);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// FG11-E2E-01（FG-GAP-238，ADR-REG-002 §2.1）：攻击键 + 左键可以指向的可摧毁中立建筑（冷却塔遗址：中立、可选中的结构单位）。
+        /// 拾取半径加塔身半径（点在塔身上就算点中）；只在显式攻击命令里用，右键情境命令不认。一次 AOT 最近点查询。
+        /// </summary>
+        private RegionHostileInfo? FindNeutralStructureNear(Vector2 worldPoint, float pickRadius)
+        {
+            int unit = _combat != null ? _combat.FindNearestNeutral(worldPoint, pickRadius + Env.CoolingTowerService.UnitRadius) : 0;
             if (unit > 0 && _combat.TryGetUnitPosition(unit, out Unity.Mathematics.double2 p))
             {
                 return new RegionHostileInfo(KernelHostilePrefix + unit.ToString(System.Globalization.CultureInfo.InvariantCulture), new Vector2((float)p.x, (float)p.y), true);

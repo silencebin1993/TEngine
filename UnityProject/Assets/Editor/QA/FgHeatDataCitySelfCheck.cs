@@ -108,6 +108,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPlan);
                 Step(CheckLakeRing);
                 Step(CheckTowers);
+                Step(CheckTowerBurn);
                 Step(CheckRelayCoating);
             }
             finally
@@ -178,11 +179,12 @@ namespace GameLogic.EditorTools
             bool gateRow = gate != null && gate.TerritoryId == EnemyDefs.FactionOverclock && gate.Kind == TerritoryPlanner.KindIndoor && gate.SurfaceId == "data_center" && gate.ReachCheck == 1;
             string[] keys = { "cooling.hud.restored", "cooling.hud.radiation", "cooling.map.label", "cooling.notify.destroyed", "grid.note.relay_coated", "grid.note.relay_needs_coating" };
             string[] missing = keys.Where(k => !GameText.Has(k)).ToArray();
-            bool tuning = CoolingTowerService.Radius > 0f && GridContent.TuningInt("grid.relay_coated_block_level") == 3 && GridContent.TuningInt("grid.pollution_block_level") == 2;
+            bool tuning = CoolingTowerService.Radius > 0f && GridContent.TuningInt("grid.relay_coated_block_level") == 3 && GridContent.TuningInt("grid.pollution_block_level") == 2
+                && TerritoryPlanner.CausewayPollutionCap < GridContent.TuningInt("grid.relay_coated_block_level");
             Expect(template && v4 && sameOrder && ring && gateRow && missing.Length == 0 && tuning,
                 $"A1 超频领地模板（危害区 {tpl?.HazardZones}、支线 {tpl?.SideChance}、遗迹倍率 {tpl?.RelicFactor}、缓存 / 终端、介绍）；生成器当前 v{WorldGenVersions.Current}（v4 锚点集合 as4、模板 tt3，{v4}）；" +
                 $"as4 与 as3 锚点逐个同序、as3 没有水环（{sameOrder}）；只有湖心平台有水环 {plat?.WaterRing} / 堤道半宽 {plat?.CausewayWidth}；数据中心入口在超频领地、通往室内 data_center、开局校验可达（{gateRow}）；" +
-                $"文本齐全（缺 {string.Join(",", missing)}）；冷却塔半径 {CoolingTowerService.Radius}、涂层后中继阻挡等级 {GridContent.TuningInt("grid.relay_coated_block_level")}");
+                $"文本齐全（缺 {string.Join(",", missing)}）；冷却塔半径 {CoolingTowerService.Radius}、涂层后中继阻挡等级 {GridContent.TuningInt("grid.relay_coated_block_level")}、v4 堤道污染上限 {TerritoryPlanner.CausewayPollutionCap}（须低于阻挡等级）");
         }
 
         // ─────────────────────────────── B 规划层（B25 多种子） ───────────────────────────────
@@ -301,11 +303,25 @@ namespace GameLogic.EditorTools
                     v4.Source.Sample(x, y, out byte t4, out _);
                     diffNear += t3 != t4 ? 1 : 0;
                 }
-                bool ok = ringN > 0 && ringWater >= ringN * 0.85f && padOk == padN && escaped && samePlace && diffFar == 0 && diffNear > 0;
+                // FG11-E2E-01（FG-GAP-164）：堤道中线从平台边缘铺到领地圈外，每点可建、污染 ≤ 有涂层中继可建的最高级（湖区内部多为 3 级）；v3 同点超过上限的点数证明上限起了作用。
+                int cap = TerritoryPlanner.CausewayPollutionCap, cwN = 0, cwOk = 0, cwCapped = 0;
+                long cfx = WorldPlan.Cos(a.ForwardDeg + 180), cfy = WorldPlan.Cos(a.ForwardDeg + 90);
+                int cwLen = outer + 2 + (a.Territory != null ? a.Territory.Radius : 0);
+                for (int dd = fp; dd <= cwLen; dd += 6)
+                {
+                    int cx = a.OriginX + (int)((dd * cfx + 32768) >> 16), cy = a.OriginY + (int)((dd * cfy + 32768) >> 16);
+                    v4.Source.Sample(cx, cy, out byte tc, out byte pc);
+                    v3.Source.Sample(cx, cy, out _, out byte pc3);
+                    cwN++;
+                    cwOk += tc == buildable && pc <= cap ? 1 : 0;
+                    cwCapped += pc3 > cap ? 1 : 0;
+                }
+                bool ok = ringN > 0 && ringWater >= ringN * 0.85f && padOk == padN && escaped && samePlace && diffFar == 0 && diffNear > 0 && cwN > 0 && cwOk == cwN;
                 all &= ok;
-                lines.Add($"种子 {seed}：平台 {padOk}/{padN} 格可建、水环 {ringWater}/{ringN} 格是水、堤道走得出去 {escaped}；v3 同位置 {samePlace}、家园附近 400 格 v3/v4 差异 {diffFar}、水环中线 64 点里 {diffNear} 点变了");
+                lines.Add($"种子 {seed}：平台 {padOk}/{padN} 格可建、水环 {ringWater}/{ringN} 格是水、堤道走得出去 {escaped}；v3 同位置 {samePlace}、家园附近 400 格 v3/v4 差异 {diffFar}、水环中线 64 点里 {diffNear} 点变了；" +
+                          $"堤道中线 {cwOk}/{cwN} 点可建且污染 ≤ {cap} 级（v3 同点有 {cwCapped} 点超过）");
             }
-            Expect(all, "B2 生成器 v4（DEBT-FG10BOSS01-02）：湖心平台四周是水、堤道可达；v3 世界按旧版本生成不变（FGT-GEN-006）——" + string.Join("；", lines));
+            Expect(all, "B2 生成器 v4（DEBT-FG10BOSS01-02）：湖心平台四周是水、堤道可达且污染不超过有涂层中继可建的等级（FG-GAP-164）；v3 世界按旧版本生成不变（FGT-GEN-006）——" + string.Join("；", lines));
         }
 
         // ─────────────────────────────── C 冷却塔遗址（星球内核 + HUD + 地图 + 负向） ───────────────────────────────
@@ -397,6 +413,27 @@ namespace GameLogic.EditorTools
                 $"C3 暂停 / 倍速：暂停中打空另一座塔（暂停中已结算 {!pausedNoChange}），恢复并切到 3x 后结算一致、内核塔圈 {home2.Kernel.CoolingZoneCount}（{afterResume}）；效果只按位置判定、没有计时");
         }
 
+        /// <summary>
+        /// C4 FG-GAP-238（ADR-REG-002 §2.1“燃迹真明火打空即毁”）：结构单位按占地半径接触斑块——塔旁 3.5 格、半径 2 的明火（盖不到塔心、压到塔身）会烧塔；
+        /// 负向：同样的明火放在 7 格外（斑块圆与塔身不相交）不烧。走真实内核斑块接触，不直接扣血。
+        /// </summary>
+        private static void CheckTowerBurn()
+        {
+            CampaignState s = NewWorld(42);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            List<CoolingTowerService.Tower> towers = CoolingTowerService.Towers(s).ToList();
+            CoolingTowerService.Tower touch = towers[0], apart = towers[1];
+            float Hp(CoolingTowerService.Tower t) =>
+                home.TryGetEnemyUnit(CoolingTowerService.KeyOf(t.Id), out int u) && home.Kernel.TryGetUnit(u, out CombatUnitView v) ? v.Health : -1f;
+            float hp0 = Hp(touch), hpApart0 = Hp(apart);
+            bool laid = home.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(touch.X + 3.5, touch.Y), 2f, 1f, 4f)
+                        & home.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(apart.X + 7.0, apart.Y), 2f, 1f, 4f);
+            WorldSimulation.StepMany(40);
+            float hp1 = Hp(touch), hpApart1 = Hp(apart);
+            Expect(laid && hp0 > 0f && hp1 < hp0 && Mathf.Approximately(hpApart1, hpApart0),
+                $"C4 冷却塔被明火烧（FG-GAP-238）：塔身半径 2.5；塔旁 3.5 格的明火（半径 2，不盖塔心）{hp0:0.#} → {hp1:0.#}；负向 7 格外的明火 {hpApart0:0.#} → {hpApart1:0.#}（放置 {laid}）");
+        }
+
         // ─────────────────────────────── D 中继涂层（FG-GAP-164）与护送文本（FG-GAP-165） ───────────────────────────────
 
         private static void CheckRelayCoating()
@@ -444,10 +481,14 @@ namespace GameLogic.EditorTools
             SetLevel(3);
             GridPlacementResult level3 = HomeGridService.ValidatePlacement(s, relay, spot.Value, 0, asPlayerPlacement: false, checkCost: false);
             bool l3Blocked = !level3.Ok && level3.Has(GridBlockReason.Pollution);
+            // FG-GAP-239：3 级上被拦时写明正式出路（外缘有电的 T2 信号塔 / 机器结构槽的信号中继模块）；1 级（可建）不写
+            bool l3Hint = level3.Notes.Any(n => n.Contains("信号塔") && n.Contains("信号中继") && n.Contains("500"));
+            SetLevel(1);
+            bool l1NoHint = HomeGridService.ValidatePlacement(s, relay, spot.Value, 0, asPlayerPlacement: false, checkCost: false).Notes.All(n => !n.Contains("信号塔"));
             SetLevel(0);
-            Expect(refused && allowed && otherBlocked && l3Blocked,
+            Expect(refused && allowed && otherBlocked && l3Blocked && l3Hint && l1NoHint,
                 $"D1 FG-GAP-164（第 3 项，按推荐默认执行，待用户确认）：2 级污染上没有防腐涂层时中继被拦并写明涂层（“{string.Join(" ", noCoat.Notes)}”，{refused}）；" +
-                $"拿到涂层后可建（“{string.Join(" ", coated.Notes)}”，{allowed}）；其它建筑照旧被拦 {otherBlocked}；3 级仍不能建 {l3Blocked}");
+                $"拿到涂层后可建（“{string.Join(" ", coated.Notes)}”，{allowed}）；其它建筑照旧被拦 {otherBlocked}；3 级仍不能建 {l3Blocked}，并写明出路（FG-GAP-239）“{string.Join(" ", level3.Notes)}”（{l3Hint}，1 级不写 {l1NoHint}）");
 
             string[] escortKeys = { "quest.notify.escort", "quest.main.anticorrosion.goal", "quest.side.rescue.goal", "quest.side.convoy.goal" };
             string[] wrong = escortKeys.Where(k => !GameText.Has(k) || GameText.Get(k).Contains("前哨站") || !GameText.Get(k).Contains("回家园") && !GameText.Get(k).Contains("开回家园")).ToArray();

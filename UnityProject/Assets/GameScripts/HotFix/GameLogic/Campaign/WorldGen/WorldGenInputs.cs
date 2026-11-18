@@ -107,7 +107,7 @@ namespace GameLogic.Campaign.WorldGen
                     if (a.WaterRing > 0 || a.CausewayWidth > 0)
                     {
                         // FG11-REG-01（v4 起）：水环与堤道只在非 0 时列出——as3 全是 0，v3 的清单与冻结基准逐字相同。
-                        sb.Append(Join("ring", a.Id, a.WaterRing, a.CausewayWidth)).Append(';');
+                        sb.Append(Join("ring", a.Id, a.WaterRing, a.CausewayWidth, TerritoryPlanner.CausewayPollutionCap)).Append(';'); // FG11-E2E-01：堤道污染上限
                     }
                     if (WorldGenContent.HasSet(a.TemplateId))
                     {

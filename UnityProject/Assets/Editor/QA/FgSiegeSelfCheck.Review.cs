@@ -39,6 +39,8 @@ namespace GameLogic.EditorTools
             Step(CheckRetreatBreakout);
             Step(CheckRetreatFallback);
             Step(CheckRetreatIntercept);
+            Step(CheckWithdrawnNotReintercepted);
+            Step(CheckReturnHaulSurvivesMachineDeath);
             Step(CheckPipeConflictDestroy);
             Step(CheckPreviewOrdinaryWall);
         }
@@ -432,6 +434,93 @@ namespace GameLogic.EditorTools
             Expect(retreating && intercepted && stillRetreat && spawned > 0 && regrouped && onward,
                 $"L6 FGR-DEF-032 撤退途中被追击：撤退中的队伍经过己方机器 → 就地展开 {spawned} 台交战（{intercepted}），期间仍记为撤退中（{stillRetreat}）；机器离开后幸存者 {survivors} 台收拢（{regrouped}），" +
                 $"继续往出发据点走（离据点 {d0:F0} → {d1:F0} 格，{onward}）");
+        }
+
+        private static void CheckWithdrawnNotReintercepted()
+        {
+            // L7 FG-GAP-241（FG11-E2E-01）：攻城后撤出的队伍从集结点原路返回，离集结点不到 max(到达半径 × 2, intercept_min_target_cells) 时，
+            // 基地里紧挨着它的己方机器也不拦截（不在基地里就地重新展开、打死应急打印的搬运机）；走出这片以后照常可以追击（FGR-DEF-032，正向对照）。
+            CampaignState s = NewWorld(7047);
+            Vector2 at = OutsidePoint(s, 30f);
+            TransitGroupRecord g = Arrive(s, at, "foundry", new[] { "foundry.strider" }, new[] { 3 });
+            bool unfolded = StepUntil(() => Alive(g) > 0, 10);
+            SiegeService.OrderRetreat(s, Site, g, SiegeService.ReasonLosses, Alive(g), 0);
+            bool left = unfolded && StepUntil(() => g.State == TransitGroupState.Retreating && Alive(g) == 0, 180);
+            var gather = new Vector2(g.GatherX, g.GatherY);
+            var pos = new Vector2((float)g.PosX, (float)g.PosY);
+            int m = left ? SpawnMachine(s, pos) : 0; // 机器就站在刚撤出的队伍身边（基地里）
+            int n0 = SiegeService.InterceptCount;
+            float wait = Mathf.Max(10f, SiegeCatalog.SyncSeconds * 4f + 2f);
+            Seconds(wait);
+            int quietDelta = SiegeService.InterceptCount - n0;
+            bool quiet = m > 0 && !g.Intercepted && Alive(g) == 0 && quietDelta == 0;
+            // 正向对照（测试捷径）：把队伍挪到离集结点 minFar + 12 格处（当作已走出基地），机器跟过去 → 照常被追击、就地展开。
+            float minFar = Mathf.Max((float)WorldTransitSystem.ArrivalRadius * 2f, SiegeCatalog.InterceptMinTargetCells);
+            Vector2 dir = (gather - CoreCenter(s)).normalized;
+            HomeGridService.RevealArea(s, gather + dir * (minFar + 12f), 40f);
+            GridCell fc = SiegeService.NearestPassable(NavService.CellOf(gather.x + dir.x * (minFar + 12f), gather.y + dir.y * (minFar + 12f)), 8);
+            bool chased = false;
+            if (WorldTransitSystem.Find(s, g.GroupId) != null)
+            {
+                g.PosX = fc.X;
+                g.PosY = fc.Y;
+                chased = SpawnMachine(s, new Vector2(fc.X, fc.Y)) > 0 && StepUntil(() => g.Intercepted, 20);
+            }
+            Expect(left && quiet && chased,
+                $"L7 FG-GAP-241 撤出的队伍不在基地里被重新拦截：撤退收尾（{left}），队伍在集结点 ({gather.x:0},{gather.y:0}) 旁 ({pos.x:0},{pos.y:0})、己方机器就在身边（{m > 0}），" +
+                $"{wait:0} 游戏秒里没被拦截、没展开（{quiet}，拦截次数 +{quietDelta}）；离集结点 {minFar + 12f:0} 格外照常被追击（{chased}）");
+        }
+
+        private static void CheckReturnHaulSurvivesMachineDeath()
+        {
+            // L8（FG11-E2E-01，FGJ-M6 实跑）：突袭残骸堆的系统返还搬运单，接单的机器死了——原堆照样有人搬（重开一张新单），不会永远躺在地上让回收站断料（FGR-ECO-071 / B11）。
+            CampaignState s = NewWorld(7048);
+            string wreck = ItemCatalog.ResourceTypeOf(AnalysisCatalog.WreckId); // 与 RaidResultService.AddWreck 同一种物品（FGJ-M6 的 ground:raidwreck:12 / 13）
+            foreach (BuildingRecord b in s.BuildingRecords)
+            {
+                if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse)
+                {
+                    b.ConstructionState = BuildingConstructionState.Operational; // 测试捷径（同 FgRaidResultSelfCheck.NewWorld）：残骸进仓库；新档仓库是损坏的，单子会先进“等仓库空间”、根本派不到机器
+                }
+            }
+            Vector2 at = CoreCenter(s) + new Vector2(7f, 0f);
+            GroundItemRecord pile = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at, wreck, 4, "l8:pile");
+            MachineOpResult spawned = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, at + new Vector2(1f, 0f), 100f, 100f);
+            if (spawned.Success && MachineRegistry.TryGetRecord(spawned.LogicId, out MachineRecord rec) && !string.IsNullOrEmpty(rec.BlueprintId))
+            {
+                MachineLoadoutRegistry.Register(s, spawned.LogicId, rec.BlueprintId, rec.BlueprintVersion); // 同 SpawnMachine：没登记装配就走不动（上一版停在 path-blocked）
+            }
+            WorldSimulation.StepMany(2);
+            HomeValleyWorkOrders.WorkOrderOpResult made = HomeValleyWorkOrders.TryCreateHaulPool(s, pile.GroundItemId);
+            WorkOrderRecord first = s.WorkOrders?.FirstOrDefault(o => o.WorkOrderId == made.WorkOrderId);
+            bool assigned = first != null && StepUntil(() => first.AssignedMachineLogicId > 0, 20);
+            int worker = first?.AssignedMachineLogicId ?? 0;
+            if (assigned)
+            {
+                MachineRegistry.ApplyDamage(worker, 1e6f); // 与 FgCargoSelfCheck F1 同一条阵亡入口
+            }
+            bool killed = assigned && (!MachineRegistry.TryGetRecord(worker, out MachineRecord dead) || !dead.IsAlive);
+            bool failed = killed && StepUntil(() => first.State == WorkOrderState.Failed, 5);
+            GroundItemRecord redrop = HomeValleyCargo.FindGroundItemBySalvageId(s, pile.GroundItemId + ":redrop:" + first?.WorkOrderId);
+            WorkOrderRecord again = HomeValleyCargo.FindGroundItem(s, pile.GroundItemId) != null
+                ? HomeValleyWorkOrders.FindActiveByTarget(s, WorkOrderKind.Haul, pile.GroundItemId)
+                : redrop != null ? HomeValleyWorkOrders.FindActiveByTarget(s, WorkOrderKind.Haul, redrop.GroundItemId) : null;
+            Expect(assigned && killed && failed && first.FailureReason == "machine-died" && again != null && again.WorkOrderId != first.WorkOrderId && again.IssuerId == "return",
+                $"L8 残骸堆搬运单的机器阵亡（接单 {assigned}、机器 #{worker} 阵亡 {killed}）：原单 {first?.State}（{first?.FailureReason}），{(redrop != null ? "掉下的那份" : "原堆")}重开新单 {again?.WorkOrderId ?? "无"}（{again?.State}），由别的机器接着搬");
+
+            // L8b 接手的机器扛着残骸半路阵亡：掉在阵亡处的那份另开一张返还单（玩家没地方重下系统返还单）。
+            int carrier = 0;
+            bool carrying = again != null && StepUntil(() => again.AssignedMachineLogicId > 0 && MachineRegistry.TryGetRecord(carrier = again.AssignedMachineLogicId, out MachineRecord m)
+                                                            && m.Cargo != null && m.Cargo.Length > 0, 40);
+            if (carrying)
+            {
+                MachineRegistry.ApplyDamage(carrier, 1e6f);
+            }
+            bool failed2 = carrying && StepUntil(() => again.State == WorkOrderState.Failed, 5);
+            GroundItemRecord drop2 = again == null ? null : HomeValleyCargo.FindGroundItemBySalvageId(s, again.SourceId + ":redrop:" + again.WorkOrderId);
+            WorkOrderRecord third = drop2 != null ? HomeValleyWorkOrders.FindActiveByTarget(s, WorkOrderKind.Haul, drop2.GroundItemId) : null;
+            Expect(carrying && failed2 && again.FailureReason == "machine-died" && drop2 != null && third != null && third.IssuerId == "return",
+                $"L8b 扛着残骸的机器 #{carrier} 半路阵亡（扛上 {carrying}）：单 {again?.State}（{again?.FailureReason}），掉下的那份 {drop2?.GroundItemId ?? "无"}（{drop2?.Amount}）另开返还单 {third?.WorkOrderId ?? "无"}（{third?.State}）");
         }
 
         // ── K 管线（复审补）──────────────────────────────────────────────────
