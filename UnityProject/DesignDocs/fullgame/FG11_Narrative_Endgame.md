@@ -154,6 +154,7 @@
 **FGR-END-032 之后**
 - 结算后让玩家选择：继续（进入后日谈沙盒，FG12）或返回主菜单。
 - 解锁对应成就（FG15）。
+- **FG13-END-06 已落地（2026-11-19）**：`Campaign/Endgame/EndingService.cs`（唯一写入口）+ 结算面板 `UI/Kit/EndingSettlementPanelUIToolkit.cs`（`EndingSettlement.uxml`）。先遣旗舰被击退（`FlagshipService.DefeatedEvent`）→ 投放资料库条目 `node.ending`（演出，镜头 sky；叙事框架播放：开始前自动存档、可跳过（首次确认）、资料库与结算里可重看）→ 收进资料库那一步写事件账本 `endgame_ending` 并**先自动存档**（`SaveReason.EndingComplete`）→ 打开结算（世界暂停；结算期间任何存档——自动档、暂停菜单“保存并返回主菜单”——一律被拒，`SaveOutcome.SettlementOpen`）。统计只聚合既有数据源：归还面积 = `PurificationService.ReturnedArea`；游戏天数 = 统一时钟游戏日；发现的反应 = 组合图鉴已解锁具名交互数（FG19 口径，跨存档 D-17）；熔合配方 = 本档配方书已发现数；击退的突袭 = 结束原因为被全歼 / 抵达后撤退的突袭累计（`RaidDirectorState.RepelledCount`，旧档按突袭历史补下限）。幸存机器按编号；纪念墙 = 黑匣子陈列馆同一份名单；结语依次为面积与天数、归还十万格专属一句（`PurificationService.EndingLineKey`）、最老的那台（幸存机器里编号最小的；全部阵亡换句）、被接入最多的那台（信号进入次数最多，阵亡换句）、纪念墙人数。继续 → `IsPostgame` = true（存档卡显示后日谈，后日谈玩法由 FG14-SBX-01 接上）、恢复暂停状态、自动存档（`SaveReason.PostgameStart`）；返回主菜单 → 不存档，下次读这份档回到结算重新选择。成就以事件账本 `endgame_ending` 为准，由 FG15-SYS-04 解锁。自检 `FgEndingSelfCheck`。
 
 ---
 

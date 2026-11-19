@@ -1433,6 +1433,10 @@ namespace GameLogic.EditorTools
             bool textSettings = UitkExists("[PauseMenuHost]", "PauseTextSpeed") && UitkExists("[PauseMenuHost]", "PauseSubtitleScale") && UitkExists("[PauseMenuHost]", "PauseTextReset");
             Check(libClicked && libOpen && libRecap && libClosed && textSettings,
                 $"暂停菜单点“资料库”：资料库打开（{lib?.CountText}，有开场演出“苏醒”）{libOpen}、剧情回顾列出它 {libRecap}、点关闭回到暂停菜单 {libClosed}；“文本与字幕”滑条在界面里 {textSettings}");
+            // FG13-END-06（FGU-42）：结局结算面板随世界界面挂好（真 UXML 已从资源包载入、三个按钮在界面里）；新游戏没有结局，结算不打开、不拦存档。
+            bool settleMounted = UitkExists("[EndingSettlementHost]", "EsContinue") && UitkExists("[EndingSettlementHost]", "EsMenu") && UitkExists("[EndingSettlementHost]", "EsReplay");
+            bool settleIdle = !UI.Kit.EndingSettlementPanelUIToolkit.IsOpen && !Campaign.Endgame.EndingService.SettlementOpen && !Campaign.Endgame.EndingService.SettlementDue(st);
+            Check(settleMounted && settleIdle, $"结局结算面板已挂载（继续 / 返回主菜单 / 重看三个按钮）{settleMounted}；新游戏不打开结算、不拦存档 {settleIdle}");
             // FG2-FW-05（FGU-20）：暂停菜单“固件库”→ 固件库盖在暂停菜单上面；此时还没有固件芯片时显示空状态说明；点关闭回到暂停菜单。
             bool fwClicked = ClickUitk("[PauseMenuHost]", "PauseFirmware");
             UI.Kit.FirmwareLibraryPanelUIToolkit fwlib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;

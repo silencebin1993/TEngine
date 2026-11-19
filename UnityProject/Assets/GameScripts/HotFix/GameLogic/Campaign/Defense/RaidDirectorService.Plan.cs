@@ -1247,6 +1247,8 @@ namespace GameLogic.Campaign.Defense
         {
             var keep = new List<RaidPlanRecord>(d.Plans.Length);
             var hist = new List<RaidHistoryRecord>(d.History);
+            // 计数器之前的旧档（RepelledCount = 0、历史里已有击退）：在历史被挤掉旧条目之前补一次下限，之后只累加计数器。
+            d.RepelledCount = Math.Max(d.RepelledCount, RepelledInHistory(d));
             foreach (RaidPlanRecord p in d.Plans)
             {
                 if (p == null)
@@ -1259,6 +1261,7 @@ namespace GameLogic.Campaign.Defense
                     continue;
                 }
                 ReleaseRoute(d, p);
+                d.RepelledCount += IsRepelled(p.EndReason) ? 1 : 0; // FG13-END-06 结算统计
                 hist.Add(new RaidHistoryRecord
                 {
                     PlanId = p.PlanId, Wave = p.Wave, Trigger = p.Trigger, Faction = p.Faction, Level = p.Level, Units = p.UnitTotal,

@@ -276,14 +276,15 @@ namespace GameLogic.EditorTools
             // 资料库里每个剧情节点（node=1，除揭示本身）都要在上面的伏笔清单里（逐条核，不认实现自己的回应表）。
             foreach (NarrativeEntryDef e in NarrativeCatalog.All)
             {
-                if (e.Node && e.Id != RevealService.EntryId
+                if (e.Node && e.Id != RevealService.EntryId && e.Id != EndingService.EntryId // FG13-END-06：结局在揭示之后，不是伏笔
                     && !RevealCallbacks.Any(cb => { string k = cb.Split('|')[0]; return k == e.Id || (k.EndsWith("*", StringComparison.Ordinal) && e.Id.StartsWith(k.TrimEnd('*'), StringComparison.Ordinal)); }))
                 {
                     missing.Add("未列入伏笔清单的剧情节点 " + e.Id);
                 }
             }
-            // 别的剧情节点没有镜头（只有揭示转向天空）。
-            bool onlyReveal = NarrativeCatalog.All.Where(e => e.Camera != CutsceneCamera.ShotNone).Select(e => e.Id).SequenceEqual(new[] { RevealService.EntryId });
+            // 别的剧情节点没有镜头（只有揭示与 FG13-END-06 的结局转向天空）。
+            bool onlyReveal = NarrativeCatalog.All.Where(e => e.Camera != CutsceneCamera.ShotNone).Select(e => e.Id).OrderBy(x => x, StringComparer.Ordinal)
+                .SequenceEqual(new[] { EndingService.EntryId, RevealService.EntryId }.OrderBy(x => x, StringComparer.Ordinal));
             GameConfig.fg.Quest home = QuestCatalog.Get("main.homecoming");
             GameConfig.fg.Quest purge = QuestCatalog.Get("main.purge");
             bool quests = home != null && home.Kind == QuestCatalog.KindEvent && home.Param == RevealService.RevealedEventId && home.Prereq == "main.megastructure" && home.TimeHours <= 0f
@@ -293,7 +294,7 @@ namespace GameLogic.EditorTools
             bool tuning = CutsceneCamera.Seconds > 0f && CutsceneCamera.ElevationDegrees > 0f && CutsceneCamera.ElevationDegrees <= 80f;
             Expect(entry && names && spec && missing.Count == 0 && onlyReveal && quests && notify && music && tuning,
                 $"R0 数据：揭示 node.reveal 是第三幕剧情节点演出、触发 {RevealService.Trigger}、镜头 sky、{d?.Lines.Count ?? 0} 行字幕 {entry}；三个正式名（中 / 英）{names}；规格原句 {spec}；" +
-                $"伏笔接上（{RevealCallbacks.Length} 条，缺 [{string.Join(",", missing)}]）；只有揭示带镜头 {onlyReveal}；主线“返航工程 → 守住家园”两条 event 判定、无时限 {quests}；两种通知类型 {notify}；轨道威胁占位音乐 {music}；镜头调参 {tuning}");
+                $"伏笔接上（{RevealCallbacks.Length} 条，缺 [{string.Join(",", missing)}]）；只有揭示 / 结局带镜头 {onlyReveal}；主线“返航工程 → 守住家园”两条 event 判定、无时限 {quests}；两种通知类型 {notify}；轨道威胁占位音乐 {music}；镜头调参 {tuning}");
         }
 
         // ── R1 正式路径（FGT-END-003）───────────────────────────────────────────────

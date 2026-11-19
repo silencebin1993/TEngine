@@ -445,6 +445,8 @@ namespace GameLogic.Core
         public const string MegaFirstSite = "mega.first_site";
         /// <summary>FG13-END-01：第一次完成一个巨构阶段。</summary>
         public const string MegaFirstStageDone = "mega.first_stage_done";
+        /// <summary>FG13-END-06：第一次打开结局结算。</summary>
+        public const string EndingFirstSettlement = "ending.first_settlement";
 
         /// <summary>FG12-EVT-01：第一次打开事件历史面板。</summary>
         public const string EventDirectorHistoryFirstOpen = "event_director.history_first_open";
@@ -766,6 +768,7 @@ namespace GameLogic.Core
             "event_director.first.decoy_terminal", "event_director.first.caravan",
             VibrationFirstOmen, // FG12-EVT-02（fgdata_worm.WORM_HOOKS）
             MegaFirstSite, MegaFirstStageDone, // FG13-END-01（fgdata_megastructure.MEGA_HOOKS）
+            EndingFirstSettlement, // FG13-END-06（fgdata_ending.ENDING_HOOKS）
             // FG13-FAC-01 白潮（fgdata_fleet.FLEET_HOOKS；图鉴机制条目引用它们）。
             "fleet.first_encounter", "fleet.first_formation_broken", "fleet.first_inert", "fleet.first_strike_mark", "fleet.first_uplink_blocked",
             "fleet.first_pod", "fleet.first_shield_break",

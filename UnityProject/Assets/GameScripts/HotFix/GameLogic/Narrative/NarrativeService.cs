@@ -79,6 +79,7 @@ namespace GameLogic.Narrative
             GameEvent.AddEventListener<string>(Campaign.Regions.ExpeditionMarchService.SiteArrivalRevertedEvent, OnSiteArrivalReverted);
             GameEvent.AddEventListener<string>(Campaign.WorldSim.TerritoryControlService.LeaderDefeatedEvent, OnLeaderDefeated);
             GameEvent.AddEventListener<string>(FeedEvent, OnFeed);
+            Campaign.Endgame.EndingService.EnsureListening(); // FG13-END-06：先遣旗舰被击退 → 结局演出；结局收进资料库 → 结局落盘
             Campaign.Endgame.RevealService.EnsureListening(); // FG13-END-02：揭示收进资料库那一步 → 状态变化 + 演出后自动存档
         }
 
@@ -96,6 +97,7 @@ namespace GameLogic.Narrative
             GameEvent.RemoveEventListener<string>(Campaign.WorldSim.TerritoryControlService.LeaderDefeatedEvent, OnLeaderDefeated);
             GameEvent.RemoveEventListener<string>(FeedEvent, OnFeed);
             Campaign.Endgame.RevealService.StopListeningForTests();
+            Campaign.Endgame.EndingService.StopListeningForTests();
         }
 
         public static bool Listening => _listening;
@@ -171,6 +173,7 @@ namespace GameLogic.Narrative
                 return;
             }
             CampaignFgStateDomains.EnsureAll(s);
+            Campaign.Endgame.EndingService.OnCampaignEntered(s); // FG13-END-06：旗舰已被击退、结局还没投放的旧档补投放
             Campaign.Endgame.RevealService.OnCampaignEntered(s); // FG13-END-02 审查 P2：读档时信标仍待点亮 → 补发一次“信标待点亮”
             // FG13-END-01 复审 P2：巨构蓝图在返航工程上线前就拿到的旧档 → 按事实补投“巨构蓝图”节点（进第三幕）。新档拿蓝图那一步已投过，Trigger 幂等，读档前后不变。
             if (Campaign.Endgame.MegastructureService.HasBlueprint(s))

@@ -425,7 +425,7 @@ namespace GameLogic.Campaign.Defense
             }
             var sb = new StringBuilder(256);
             sb.Append("init=").Append(d.Initialized).Append(";thr=").Append(d.ThresholdFired).Append(";l4=").Append(d.Level4NextTick).Append(";harass=").Append(d.HarassNextTick)
-              .Append(";last=").Append(d.LastArrivalTick).Append(";any=").Append(d.LastAnyArrivalTick).Append(";count=").Append(d.RaidCount).Append(";pg=").Append(d.PostgameCount)
+              .Append(";last=").Append(d.LastArrivalTick).Append(";any=").Append(d.LastAnyArrivalTick).Append(";count=").Append(d.RaidCount).Append(";pg=").Append(d.PostgameCount).Append(";rep=").Append(d.RepelledCount)
               .Append(";next=").Append(d.NextPlanSerial).Append('/').Append(d.NextWaveSerial).Append(";pending=").Append(d.Pending.Length)
               .Append(";oct=").Append(string.Join(",", d.DestroyedByOctant)).Append(";lane=").Append(d.LaneBusyUntilTick).Append(";stories=").Append(string.Join(",", d.StoriesFired))
               .Append(";rx=").Append(d.TriggersReceived).Append('/').Append(d.TriggersSkipped).Append('/').Append(d.TriggersMerged).Append('|');

@@ -32,6 +32,7 @@ namespace GameLogic.UI.Kit
             Create<FirmwareLibraryPanelUIToolkit>("[FirmwareLibraryHost]"); // FG2-FW-05：固件库（30072，暂停菜单之上、图鉴之下）。
             Create<MechanicCodexPanelUIToolkit>("[MechanicCodexHost]"); // FG1-HUD-01：机制图鉴（30075，暂停菜单之上、按键面板之下）。
             Create<NarrativeLibraryPanelUIToolkit>("[NarrativeLibraryHost]"); // FG9-NAR-01：资料库（30084，暂停菜单与货舱之上——从暂停菜单打开，关掉回到暂停菜单；“?”打开的图鉴在它下面，先关资料库再看）。
+            Create<EndingSettlementPanelUIToolkit>("[EndingSettlementHost]"); // FG13-END-06：结局结算与纪念（30185，所有面板之上、演出播放器 30190 之下：结算里“重看结局演出”盖在它上面）。
             Create<NarrativeCutscenePlayerUIToolkit>("[NarrativeCutsceneHost]"); // FG9-NAR-01：演出播放器（30190，所有面板之上、浮层 30200 之下：跳过确认框盖在演出上面）。
             Create<ItemsPanelUIToolkit>("[ItemsPanelHost]");
             Create<RulesPanelUIToolkit>("[RulesPanelHost]"); // FG4-ECO-06：常驻规则（30073，固件库之上、物资与图鉴之下：“?”打开的图鉴盖在它上面）。 // FG4-ECO-01：物资面板（30074，暂停菜单与固件库之上、图鉴之下：点图标打开的图鉴盖在它上面）。

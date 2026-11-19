@@ -24,6 +24,8 @@ namespace GameLogic.Campaign
         PreserveFailed = 5,
         /// <summary>FG6-DEF-08（FGR-DEF-053）：归还核心已被摧毁（战役失败）——不再写盘，保住最近的安全存档供失败页读取。</summary>
         CampaignLost = 6,
+        /// <summary>FG13-END-06（卡片负向“结算时存档”）：结局结算画面开着——结局已在结算前落盘，结算期间任何存档（自动档、保存并返回主菜单）都被拒绝。</summary>
+        SettlementOpen = 7,
     }
 
     [Serializable]

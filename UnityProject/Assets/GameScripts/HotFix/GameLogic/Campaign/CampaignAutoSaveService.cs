@@ -62,6 +62,11 @@ namespace GameLogic.Campaign
                 TEngine.Log.Info($"[CampaignAutoSaveService] 归还核心已被摧毁，拒绝存档（{reason}）。");
                 return new SaveResult(SaveOutcome.CampaignLost, Localization.GameText.Get("save.blocked_core_lost"));
             }
+            if (Endgame.EndingService.BlocksSave(state))
+            {
+                TEngine.Log.Info($"[CampaignAutoSaveService] 结局结算画面开着，拒绝存档（{reason}）。");
+                return new SaveResult(SaveOutcome.SettlementOpen, Localization.GameText.Get("save.blocked_settlement"));
+            }
             WorldSim.WorldSimulation.SyncAllForSave();
             MachineRegistry.ExportToCampaignState(state);
             Endgame.PurgeWaveService.BeforeSave(state); // FG13-END-03：记下这份存档读回后从第几波清洗开始前重试（失败页写明）

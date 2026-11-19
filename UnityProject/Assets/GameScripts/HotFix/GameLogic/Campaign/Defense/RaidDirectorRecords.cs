@@ -35,6 +35,8 @@ namespace GameLogic.Campaign
         public int RaidCount;
         /// <summary>后日谈已经发生的清洗次数（预算 = 基数 × 增长^n）。</summary>
         public int PostgameCount;
+        /// <summary>FG13-END-06（FGR-END-031 结算统计“击退的突袭次数”）：结束原因是被全歼 / 抵达后撤退的突袭累计数（历史只留最近几条，不能用来数总数）。旧档没有 = 0（结算按历史补下限）。</summary>
+        public int RepelledCount;
         /// <summary>8 个方位（从家园核心看，0 东、1 东北……7 东南）各被摧毁了几个据点：从那个方向出发的突袭最短间隔变长（FGR-DEF-023；与 <see cref="RaidPlanRecord.Octant"/> 同一参照）。</summary>
         public int[] DestroyedByOctant = new int[8];
         /// <summary>

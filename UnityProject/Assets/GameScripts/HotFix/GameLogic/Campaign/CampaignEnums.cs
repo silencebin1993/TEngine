@@ -50,6 +50,10 @@ namespace GameLogic.Campaign
         BeachheadLanded = 11,
         /// <summary>FG13-END-05（FGR-END-022“每个阶段开始时自动存档”）：先遣旗舰进入一个新阶段、这一阶段的目标落位之后。</summary>
         FlagshipPhase = 12,
+        /// <summary>FG13-END-06（FG11 FGR-END-031）：结局演出收进资料库、结局写进事件账本之后、打开结算之前（结局落盘；结算期间不再存档）。</summary>
+        EndingComplete = 13,
+        /// <summary>FG13-END-06（FGR-END-032）：结算后选择“继续”、进入后日谈之后（结算已关）。</summary>
+        PostgameStart = 14,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>

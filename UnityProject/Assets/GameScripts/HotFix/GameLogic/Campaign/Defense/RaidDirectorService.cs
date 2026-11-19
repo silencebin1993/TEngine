@@ -49,6 +49,20 @@ namespace GameLogic.Campaign.Defense
         public const string EndMerged = "merged";
         public const string EndCancelled = "cancelled";
 
+        /// <summary>FG13-END-06：这条结束原因算“击退”（被全歼，或抵达后撤退——家园守住了）。</summary>
+        public static bool IsRepelled(string endReason) => endReason == EndDestroyed || endReason == EndWithdrawn;
+
+        /// <summary>FG13-END-06：突袭历史里算“击退”的条数（历史最多 raid.history_max 条；计数器之前的旧档用它补一次下限）。</summary>
+        public static int RepelledInHistory(RaidDirectorState d)
+        {
+            int n = 0;
+            foreach (RaidHistoryRecord h in d?.History ?? System.Array.Empty<RaidHistoryRecord>())
+            {
+                n += h != null && IsRepelled(h.EndReason) ? 1 : 0;
+            }
+            return n;
+        }
+
         private const uint SaltCompose = 0x52414944u; // "RAID"
         private const uint SaltTarget = 0x54415247u;  // "TARG"
 
