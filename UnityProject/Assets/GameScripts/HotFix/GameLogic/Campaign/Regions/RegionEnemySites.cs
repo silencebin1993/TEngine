@@ -59,6 +59,7 @@ namespace GameLogic.Campaign.Regions
         private static Site _fractured;
         private static Site _foundry;
         private static Site _beachhead;
+        private static Site _flagship;
         /// <summary>没有布局的地点共用的通用场地（无锚点、无反制、干扰机自带干扰场）：按区域缓存，信号干扰判定每次查询不再新建对象。</summary>
         private static readonly Dictionary<string, Site> Generic = new Dictionary<string, Site>();
 
@@ -107,6 +108,11 @@ namespace GameLogic.Campaign.Regions
             {
                 // FG13-END-04：白潮滩头的编成锚点 = 手工模板 white_tide_beachhead 的点位（模板局部坐标；播种时由 BeachheadService 落到星球上）。
                 return _beachhead ??= new Site(regionId, Beachhead(), null, anchoredJam: false);
+            }
+            if (regionId == Endgame.FlagshipService.RegionId)
+            {
+                // FG13-END-05：先遣旗舰的 fs_ 点位也在滩头模板 white_tide_beachhead 里（FlagshipService 经 BeachheadService.TryPoint 落位），编成锚点与之同源。
+                return _flagship ??= new Site(regionId, Beachhead(), null, anchoredJam: false);
             }
             if (regionId != null && RelayHallLayout.IsInteriorWithPoints(regionId))
             {

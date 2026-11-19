@@ -371,6 +371,7 @@ namespace GameLogic.EditorTools
             "elite" => MechanicalContentSource.EliteDrop,
             "boss" => MechanicalContentSource.FactionBoss,
             "fusion" => MechanicalContentSource.Fusion, // FG5-RND-04：混合固件（熔合产物）
+            "fleet" => MechanicalContentSource.RegionSalvage, // FG13-FAC-01：白潮残骸里的人类预制固件 = 区域战场掉落
             _ => (MechanicalContentSource)(-1),
         };
 

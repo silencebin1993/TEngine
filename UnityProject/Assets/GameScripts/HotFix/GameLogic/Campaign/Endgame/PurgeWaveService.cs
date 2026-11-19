@@ -140,12 +140,12 @@ namespace GameLogic.Campaign.Endgame
             CombatSite site = CombatSites.Get(HomeValleyLayout.RegionId);
             if (site != null && st.LastStrikeId > 0)
             {
-                for (int i = 0; i < site.Kernel.FleetStrikeCount; i++)
+                for (int i = 0; i < site.FleetStrikeCount; i++)
                 {
-                    BinGames.Sim.Combat.CombatFleetStrike x = site.Kernel.FleetStrikeAt(i);
+                    BinGames.Sim.Combat.CombatFleetStrike x = site.FleetStrikeAt(i);
                     if (x.Id == st.LastStrikeId)
                     {
-                        return Math.Max(0.0, x.At - site.Kernel.Time);
+                        return Math.Max(0.0, x.At - site.KernelTime);
                     }
                 }
             }

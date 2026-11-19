@@ -187,7 +187,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 开局夹具 ────────────────────────────────────────────────────────────────
 
-        private static string SaveBlueprint(JourneyContext c, string key, string name, BlueprintCircuitBoard board)
+        internal static string SaveBlueprint(JourneyContext c, string key, string name, BlueprintCircuitBoard board)
         {
             if (c.Get(key, string.Empty).Length == 0)
             {
@@ -198,7 +198,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return c.Get(key, string.Empty);
         }
 
-        private static int SpawnMachine(CampaignState s, string bpId, Vector2 at, float hp)
+        internal static int SpawnMachine(CampaignState s, string bpId, Vector2 at, float hp)
         {
             MachineOpResult r = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc003ChassisId, bpId, HomeValleyLayout.RegionId, at, hp, hp, "Player", 1);
             if (!r.Success || !MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec))
@@ -329,9 +329,12 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>左键（第一台）/ Shift 左键（其余）点一组机器的模型，直到选择集正好是这组。</summary>
-        private static StepOutcome SelectMachines(JourneyContext c, List<int> ids, string what)
+        internal static StepOutcome SelectMachines(JourneyContext c, List<int> ids, string what, bool keepPaused = false)
         {
-            JourneyCommon.ResumeIfAutoPaused(c);
+            if (!keepPaused)
+            {
+                JourneyCommon.ResumeIfAutoPaused(c); // keepPaused：玩家主动战略暂停中点选（FGJ-M13 根权限阶段），不当成自动暂停去恢复
+            }
             IReadOnlyList<int> sel = Squad?.Selection;
             if (sel != null && ids.Count > 0 && sel.Count == ids.Count && ids.All(sel.Contains) && c.GetInt(FgjM3Common.SK(c, "k")) >= ids.Count)
             {
@@ -527,7 +530,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return warn.Length > 0 && marked && hotAtDrills ? StepOutcome.Done(msg) : c.StepElapsed < 110 ? StepOutcome.Wait : StepOutcome.Fail(msg);
         }
 
-        private static StepOutcome RightClickGround(JourneyContext c, Vector2 at)
+        internal static StepOutcome RightClickGround(JourneyContext c, Vector2 at)
         {
             if (c.GetInt(FgjM3Common.SK(c, "clicked")) == 0)
             {
