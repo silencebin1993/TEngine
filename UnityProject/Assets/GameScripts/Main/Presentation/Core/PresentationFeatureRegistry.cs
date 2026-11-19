@@ -41,11 +41,14 @@ namespace BinGames.Presentation
         public const string HostId = "pl.host";
         /// <summary>宿主自检探针（每帧建 / 移 64 个方块）；只在自检里登记进宿主，默认两套都关。</summary>
         public const string ProbeId = "pl.probe";
+        /// <summary>PL-QA-01 采集标定靶（编辑器里的 PresentationCaptureTarget）：只在采集 / 自检里登记进宿主，默认两套都关。</summary>
+        public const string CaptureId = "pl.capture";
 
         private static readonly PresentationFeature[] Table =
         {
             new PresentationFeature(HostId, "PresentationHost.Enabled", true, false, "-"),
             new PresentationFeature(ProbeId, "PresentationProbeModule", false, false, "-"),
+            new PresentationFeature(CaptureId, "PresentationCaptureTarget", false, false, "-"),
         };
 
         private static readonly Dictionary<string, bool> State = new Dictionary<string, bool>(StringComparer.Ordinal);

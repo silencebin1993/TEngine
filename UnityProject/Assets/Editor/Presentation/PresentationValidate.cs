@@ -46,14 +46,26 @@ namespace GameLogic.EditorTools
             ("ClockManualDeterminism", PresentationClockValidate.ClockManualDeterminism),
             ("RebuildLoad", PresentationClockValidate.RebuildLoad),
             ("RebuildSiteSwitch", PresentationClockValidate.RebuildSiteSwitch),
+            // PL-QA-01 采集管线（Capture/PresentationCaptureValidate.cs）；后四段要显卡，-nographics 下只写“跳过”
+            ("CaptureScenes", PresentationCaptureValidate.CaptureScenes),
+            ("CaptureDevice", PresentationCaptureValidate.CaptureDevice),
+            ("CaptureDeterminism", PresentationCaptureValidate.CaptureDeterminism),
+            ("CaptureInjection", PresentationCaptureValidate.CaptureInjection),
+            ("CaptureGpuPair", PresentationCaptureValidate.CaptureGpuPair),
         };
 
         private static StringBuilder _report;
         private static int _pass;
         private static int _fail;
 
+        /// <summary>非 0 时 RunAll 在有失败时用它作退出码（PL-QA-01：图形设备不是 RTX 4070 = 3“采集无效”）。</summary>
+        internal static int ExitCodeOverride;
+
+        /// <summary>本次是经 <see cref="Run"/> 嵌在 FG 长链里跑（段内据此跳过外部依赖，如 Python）。</summary>
+        internal static bool InFgChain { get; private set; }
+
         /// <summary>会换掉当前场景的段：嵌在 FG 长链里（<see cref="Run"/>）时跳过。</summary>
-        private const string SceneSwappingSegment = "Lab";
+        private static readonly string[] SceneSwappingSegments = { "Lab", "CaptureDeterminism", "CaptureInjection", "CaptureGpuPair" };
 
         [MenuItem("QA/表现泳道/自检全部")]
         public static void RunAll()
@@ -67,7 +79,7 @@ namespace GameLogic.EditorTools
             Debug.Log(report.ToString());
             if (Application.isBatchMode)
             {
-                EditorApplication.Exit(fail == 0 ? 0 : 1);
+                EditorApplication.Exit(fail == 0 ? 0 : ExitCodeOverride != 0 ? ExitCodeOverride : 1);
             }
         }
 
@@ -79,6 +91,8 @@ namespace GameLogic.EditorTools
             _report = report;
             _pass = 0;
             _fail = 0;
+            ExitCodeOverride = 0;
+            InFgChain = !includeSceneSegments;
             Line($"[PL 自检] PresentationValidate {title}");
             if (only != null)
             {
@@ -93,7 +107,7 @@ namespace GameLogic.EditorTools
                 {
                     continue;
                 }
-                if (!includeSceneSegments && name == SceneSwappingSegment)
+                if (!includeSceneSegments && SceneSwappingSegments.Contains(name))
                 {
                     Line($"\n[PL:{name}]\n  - 嵌在 FG 链里跳过（会换掉当前场景）；单独跑 RunAll 覆盖");
                     continue;
