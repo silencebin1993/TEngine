@@ -501,6 +501,8 @@ namespace GameLogic.Stage
             // FG7-ENV-03：天气画面（雨 / 沙 / 雪粒子、沙暴雾）与顶棚（建造视图半透明、可隐藏）。纯表现，每帧 O(1)，顶棚网格只在变化时重建。
             View.WeatherView.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
             View.RoofView.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
+            // PL-INF-01：PL 表现宿主（总开关 pl.host，合主线默认关）。先判 Current：主菜单里 AnyRegionActive 会枚举 SortedDictionary（每次分配）。
+            View.Presentation.PresentationHostBridge.Tick(Campaign.CampaignSession.Current != null && AnyRegionActive);
             // FG6-DEF-08（FGR-DEF-053）：突袭预警请求的自动存档在帧末执行（不在模拟步中间写盘）；核心被摧毁后不再存。
             Campaign.Defense.RaidResultService.FrameUpdate();
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。

@@ -1,0 +1,19 @@
+{
+    "name": "BinGames.PresentationLab",
+    "rootNamespace": "BinGames.PresentationLab",
+    "references": [
+        "GUID:d2acdb4200014459afb935c6d1d963ee",
+        "Unity.Mathematics"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "UNITY_EDITOR"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
