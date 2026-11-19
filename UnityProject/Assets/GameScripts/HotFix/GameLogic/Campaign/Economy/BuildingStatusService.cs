@@ -134,7 +134,9 @@ namespace GameLogic.Campaign.Economy
                 {
                     ProductionService.TryDescribe(state, b, out _); // 还没推进过一步：按建筑状态给出状态（不推进任何东西）。
                 }
-                return new BuildingStatus(FromProd(p.State), "prod." + p.Reason, ProductionService.ReasonText(state, p));
+                // FG13-END-01 复审 P1：返航工地受损暂停（还活着，耐久没满）= 受损，不是“已摧毁”（被摧毁由上面的建造状态先报）。
+                BuildingStatusKind kind = p.Reason == ProdReason.MegaWounded ? BuildingStatusKind.Damaged : FromProd(p.State);
+                return new BuildingStatus(kind, "prod." + p.Reason, ProductionService.ReasonText(state, p));
             }
             string type = b.BuildingTypeId;
             // 用电建筑没吃到电：缺电（未接入 / 按优先级停）。

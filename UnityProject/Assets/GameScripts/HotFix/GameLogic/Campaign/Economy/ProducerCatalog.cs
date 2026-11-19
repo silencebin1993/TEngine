@@ -24,6 +24,10 @@ namespace GameLogic.Campaign.Economy
         /// <summary>FG7-ENV-04 净化塔（FG07 FGR-ENV-041）：冷却液从流体输入口进来，有电时按等级用量持续消耗，期间推进净化（<see cref="Env.PurificationService"/>）。
         /// <see cref="ProducerDef.FluidLpm"/> = T1 每分钟用几升；<see cref="ProducerDef.InBatches"/> = 机内能存几秒满速用量。</summary>
         Purifier = 6,
+        /// <summary>FG13-END-01 返航工地（FG11 FGR-END-001）：物品口收本阶段的固体、流体口收本阶段的流体、有电时累计持续供电，三项各自计入巨构阶段进度
+        /// （<see cref="Endgame.MegastructureService"/>）。<see cref="ProducerDef.InBatches"/> = 固体缓存件数；<see cref="ProducerDef.OutBatches"/> = 流体口存量几秒；
+        /// <see cref="ProducerDef.FluidLpm"/> = 流体抽取速率（升 / 分钟）。</summary>
+        Megastructure = 7,
     }
 
     /// <summary>一个流体端口（fg.TbBuildingFluidPort 一行的运行时视图）。</summary>
@@ -234,6 +238,7 @@ namespace GameLogic.Campaign.Economy
                 case "pump": mode = ProducerMode.Pump; return true;
                 case "generator": mode = ProducerMode.Generator; return true;
                 case "purifier": mode = ProducerMode.Purifier; return true;
+                case "megastructure": mode = ProducerMode.Megastructure; return true;
                 default: mode = ProducerMode.Recipe; return false;
             }
         }
@@ -376,6 +381,12 @@ namespace GameLogic.Campaign.Economy
                         return "净化塔要有冷却液用量与机内存量秒数，不用配方";
                     }
                     break;
+                case ProducerMode.Megastructure:
+                    if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.InBatches < 1 || r.OutBatches < 1)
+                    {
+                        return "返航工地要有流体抽取速率、固体缓存件数与流体存量秒数，不用配方";
+                    }
+                    break;
             }
             if (r.VibrationPerMinute < 0f)
             {
@@ -434,6 +445,10 @@ namespace GameLogic.Campaign.Economy
             if (def.Mode == ProducerMode.Purifier && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
             {
                 return "净化塔要有且只有一个收某种流体（冷却液）的输入口";
+            }
+            if (def.Mode == ProducerMode.Megastructure && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
+            {
+                return "返航工地要有且只有一个收某种流体（冷却液）的输入口";
             }
             return null;
         }

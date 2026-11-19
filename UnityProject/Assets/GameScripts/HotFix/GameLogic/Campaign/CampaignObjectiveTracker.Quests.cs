@@ -968,6 +968,8 @@ namespace GameLogic.Campaign
                 if (CampaignEventLedger.TryGrant(state, BlueprintEventId(q.RewardBlueprint), "QuestBlueprint", state.PlaySeconds, q.Id))
                 {
                     Env.AcidMarshService.InvalidateCoating(); // FG10-REG-01：防腐涂层蓝图到手，下一个游戏秒写进星球战斗内核
+                    // FG13-END-01（FG11 第 3.1 节“巨构蓝图”）：拿到蓝图的剧情节点（巨构蓝图 = 舰队发来蓝图、第三幕开始；没有对应条目的蓝图什么也不做）。
+                    Narrative.NarrativeService.Trigger(state, Endgame.MegastructureService.BlueprintTriggerPrefix + q.RewardBlueprint);
 
                     KeyMaterial k = QuestCatalog.KeyMaterialOf(q.RewardBlueprint);
                     FeedbackCues.Raise(FeedbackCueId.QuestUpdate, GameText.Format("quest.notify.blueprint", k != null ? GameText.Get(k.NameKey) : q.RewardBlueprint));

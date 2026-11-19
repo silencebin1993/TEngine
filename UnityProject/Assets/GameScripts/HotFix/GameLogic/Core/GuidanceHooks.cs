@@ -441,6 +441,11 @@ namespace GameLogic.Core
         /// <summary>FG12-EVT-01（FGR-EVT-004“第一次发生时附一段简短说明”）：本机第一次发生任何随机事件（事件导演；说明内容在 FG15-UX-04）。各事件另有 event_director.first.&lt;事件ID&gt;。</summary>
         public const string EventDirectorFirstEvent = "event_director.first_event";
 
+        /// <summary>FG13-END-01：第一次放下返航工地。</summary>
+        public const string MegaFirstSite = "mega.first_site";
+        /// <summary>FG13-END-01：第一次完成一个巨构阶段。</summary>
+        public const string MegaFirstStageDone = "mega.first_stage_done";
+
         /// <summary>FG12-EVT-01：第一次打开事件历史面板。</summary>
         public const string EventDirectorHistoryFirstOpen = "event_director.history_first_open";
 
@@ -760,6 +765,7 @@ namespace GameLogic.Core
             "event_director.first.worm", "event_director.first.signal_ghost", "event_director.first.orbital_drop",
             "event_director.first.decoy_terminal", "event_director.first.caravan",
             VibrationFirstOmen, // FG12-EVT-02（fgdata_worm.WORM_HOOKS）
+            MegaFirstSite, MegaFirstStageDone, // FG13-END-01（fgdata_megastructure.MEGA_HOOKS）
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

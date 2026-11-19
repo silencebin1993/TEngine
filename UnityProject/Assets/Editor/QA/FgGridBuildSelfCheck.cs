@@ -241,7 +241,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckData()
         {
-            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 44 && GridContent.StartLayout.Count == 17 /* FG12-EVT-02：+ 减震基座（43 → 44）；FG8-DROP-01：+ 投送站（42 → 43）；FG7-ENV-04：+ 净化塔（41 → 42）；FG6-DEF-03：+ 维修无人机站（40 → 41）；FG6-DEF-02：+ 屏障 T1～T3、闸门、护盾、陷阱（34 → 40） */ // FG5-RND-04：+ 电路合成台（29 → 30）；FG5-RND-05：+ 监听站（30 → 31）；FG5-RND-06：+ 黑匣子陈列馆（31 → 32）；FG6-DEF-01：+ 轻型 / 重型炮塔座（32 → 34）
+            Expect(GridContent.LoadError == null && GridContent.Buildings.Count == 45 && GridContent.StartLayout.Count == 17 /* FG13-END-01：+ 返航工地（44 → 45）；FG12-EVT-02：+ 减震基座（43 → 44）；FG8-DROP-01：+ 投送站（42 → 43）；FG7-ENV-04：+ 净化塔（41 → 42）；FG6-DEF-03：+ 维修无人机站（40 → 41）；FG6-DEF-02：+ 屏障 T1～T3、闸门、护盾、陷阱（34 → 40） */ // FG5-RND-04：+ 电路合成台（29 → 30）；FG5-RND-05：+ 监听站（30 → 31）；FG5-RND-06：+ 黑匣子陈列馆（31 → 32）；FG6-DEF-01：+ 轻型 / 重型炮塔座（32 → 34）
                    && GridContent.Terrains.Count == 11 /* EMG4-TER-02：+ 焦土 / 玻化地面 / 冻土 / 熔坑四种战痕地面材质（7 → 11） */, $"五张格网表已加载：建筑格网属性 {GridContent.Buildings.Count}、开局布局 {GridContent.StartLayout.Count}、地形 {GridContent.Terrains.Count}");
             var missing = FgContentTables.Buildings.Where(b => !GridContent.TryGetBuilding(b.TypeId, out _)).Select(b => b.TypeId).ToList();
             Expect(missing.Count == 0, $"fg.TbBuilding 的每座建筑都有占地（缺：{string.Join(",", missing)}）");
@@ -1265,8 +1265,8 @@ namespace GameLogic.EditorTools
                 Object.DestroyImmediate(go);
                 Expect(generatorItem.Contains("60 废料") && generatorItem.Contains("40 秒") && generatorItem.Contains("已有") && inScroll && energyCount == 6, // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2；FG4-ECO-04：+ 燃油发电机、太阳能阵列、储能站
                     $"建造栏条目写明成本、工期与已有数量：“{generatorItem.Replace("\n", " ")}”；条目在可滚动列表里（数量可变，UI Toolkit 红线 5）");
-                Expect(panelOk && placeableBuildings == 37 /* FG12-EVT-02：+ 减震基座（环境分类）；FG8-DROP-01：+ 投送站（物流分类） */ && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
-                    $"建造栏：{placeableBuildings} 种可放置建筑（应 37：FG12-EVT-02 加减震基座（环境分类）、FG8-DROP-01 加投送站（物流分类）、FG7-ENV-04 加净化塔（环境分类）、FG6-DEF-03 加维修无人机站（防御分类）、FG6-DEF-02 加屏障 T1～T3、闸门、护盾发生器、陷阱发射器、FG6-DEF-01 加轻型 / 重型炮塔座（防御分类）、FG5-RND-06 加黑匣子陈列馆（研发分类）、FG5-RND-05 加监听站（情报分类）、FG5-RND-04 加电路合成台、FG3-LOG-06 加两级电塔、FG4-ECO-02 加七座采集 / 加工建筑、FG4-ECO-03 加四座制造建筑、FG4-ECO-04 加三座能源建筑、FG4-ECO-11 加超控阵列、FG5-RND-01 加仿真实验室、FG5-RND-03 加靶场）分在能源 / 终局 / 信号 / 采集 / 加工 / 制造分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
+                Expect(panelOk && placeableBuildings == 38 /* FG13-END-01：+ 返航工地（终局分类，拿到巨构蓝图后解锁）；FG12-EVT-02：+ 减震基座（环境分类）；FG8-DROP-01：+ 投送站（物流分类） */ && relayListed && status.Contains("不能放置") && status.Contains("通道") && beaconItem.Contains("尚未解锁"),
+                    $"建造栏：{placeableBuildings} 种可放置建筑（应 38：FG13-END-01 加返航工地（终局分类）、FG12-EVT-02 加减震基座（环境分类）、FG8-DROP-01 加投送站（物流分类）、FG7-ENV-04 加净化塔（环境分类）、FG6-DEF-03 加维修无人机站（防御分类）、FG6-DEF-02 加屏障 T1～T3、闸门、护盾发生器、陷阱发射器、FG6-DEF-01 加轻型 / 重型炮塔座（防御分类）、FG5-RND-06 加黑匣子陈列馆（研发分类）、FG5-RND-05 加监听站（情报分类）、FG5-RND-04 加电路合成台、FG3-LOG-06 加两级电塔、FG4-ECO-02 加七座采集 / 加工建筑、FG4-ECO-03 加四座制造建筑、FG4-ECO-04 加三座能源建筑、FG4-ECO-11 加超控阵列、FG5-RND-01 加仿真实验室、FG5-RND-03 加靶场）分在能源 / 终局 / 信号 / 采集 / 加工 / 制造分类（信标未解锁时写明条件：“{beaconItem.Replace("\n", " ")}”），状态行“{status.Replace("\n", " ")}”");
 
                 // 布局探针：中英文、UI 缩放极值、四种分辨率（面板默认隐藏，探针会移除隐藏类）。
                 foreach (GameLanguage lang in new[] { GameLanguage.ZhCn, GameLanguage.En })

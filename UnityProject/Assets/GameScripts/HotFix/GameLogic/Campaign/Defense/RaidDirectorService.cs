@@ -335,20 +335,21 @@ namespace GameLogic.Campaign.Defense
         /// <summary>静默夜开始（FG07；静默夜系统 FG7-ENV-02 调用）：每次静默夜必定有一次突袭，不受最短间隔限制。</summary>
         public static bool OnSilentNightStarted(CampaignState s) => EnqueueKind(s, RaidCatalog.TriggerSilentNight, null);
 
-        /// <summary>第三幕巨构一个阶段完工（FG11 / FG13-END-01 调用）：触发一次突袭，不受最短间隔限制。</summary>
-        public static bool OnMegastructureStageCompleted(CampaignState s) => EnqueueKind(s, RaidCatalog.TriggerMegastructure, null);
+        /// <summary>第三幕巨构一个阶段完工（FG11 FGR-END-002；FG13-END-01 由 <see cref="Endgame.MegastructureService"/> 在阶段完工那一步调用）：触发一次更高等级的突袭，
+        /// 不受最短间隔限制、与重叠的普通突袭合并。等级（levelRule = tier_up）= max(<paramref name="minLevel"/>, 当前暴露档位 + 1)，至多 4 级；不给 = 只按档位 + 1。</summary>
+        public static bool OnMegastructureStageCompleted(CampaignState s, int minLevel = -1) => EnqueueKind(s, RaidCatalog.TriggerMegastructure, null, minLevel);
 
         /// <summary>化工阵营针对净化塔（FG09）：由澄净发动。FG10-RAID-01 起由 <see cref="ClarityRaidService.WorldStep"/> 调用（澄净领地出现在地图上、家园有净化塔之后定期一次）。</summary>
         public static bool OnPurificationTowerTargeted(CampaignState s) => EnqueueKind(s, RaidCatalog.TriggerPurification, RaidCatalog.FactionChemical);
 
-        private static bool EnqueueKind(CampaignState s, string kind, string faction)
+        private static bool EnqueueKind(CampaignState s, string kind, string faction, int level = -1)
         {
             if (s?.Raids == null)
             {
                 return false;
             }
             EnsureState(s);
-            Enqueue(s.Raids.Director, kind, -1, faction, null);
+            Enqueue(s.Raids.Director, kind, level, faction, null);
             return true;
         }
 
@@ -557,7 +558,7 @@ namespace GameLogic.Campaign.Defense
             CreatePlan(s, d, def, t, level, faction, tick);
         }
 
-        /// <summary>等级：暴露阈值 / 调用方给出；tier = 当前暴露档位（越过的阈值数，至少 1、至多 3）；骚扰 = 0。</summary>
+        /// <summary>等级：暴露阈值 / 调用方给出；tier = 当前暴露档位（越过的阈值数，至少 1、至多 3）；tier_up = 档位 + 1 且不低于调用方给出的等级（至多 4，巨构阶段 FGR-END-002）；骚扰 = 0。</summary>
         private static int ResolveLevel(CampaignState s, RaidTriggerDef def, RaidTriggerRecord t)
         {
             switch (def.LevelRule)
@@ -565,6 +566,7 @@ namespace GameLogic.Campaign.Defense
                 case "harass":
                     return 0;
                 case "tier":
+                case "tier_up":
                 {
                     int n = 0;
                     for (int i = 0; i < 3; i++)
@@ -574,7 +576,8 @@ namespace GameLogic.Campaign.Defense
                             n++;
                         }
                     }
-                    return Math.Max(1, Math.Min(3, n));
+                    int tier = Math.Max(1, Math.Min(3, n));
+                    return def.LevelRule == "tier" ? tier : Math.Min(4, Math.Max(t.Level, tier + 1));
                 }
                 default:
                     return Math.Max(1, Math.Min(4, t.Level < 1 ? 2 : t.Level));

@@ -124,6 +124,48 @@ namespace GameLogic.Campaign
         /// <summary>FG9-ACT1-01（FG16 第 2 节）：第一幕节奏台账——已经到达的节奏点（第一次到达的那一步；只进不退）。唯一写入口 <c>Act1PacingService</c>。
         /// 旧存档没有 = 第一次载入时按存档里的事实补记（补记的点 Migrated = true，时刻记为补记那一步）。</summary>
         public ActPaceRecord[] Pacing = Array.Empty<ActPaceRecord>();
+        /// <summary>FG13-END-01（FG11 第 10 节“巨构各阶段进度”）：返航工程的进度。存在战役状态里、不在工地建筑上——工地被摧毁 / 拆掉重建后接着当前阶段（FGR-END-002 不倒退）。
+        /// 唯一写入口 <c>GameLogic.Campaign.Endgame.MegastructureService</c>。旧存档没有 = 第一阶段、全部为 0。</summary>
+        public MegastructureState Mega = new MegastructureState();
+    }
+
+    /// <summary>FG13-END-01：返航工程进度（五个巨构阶段，fg.TbMegaStage）。</summary>
+    [Serializable]
+    public sealed class MegastructureState
+    {
+        /// <summary>当前阶段下标（0 = 地基锚定 …；= 阶段数 = 全部完工）。</summary>
+        public int StageIndex;
+        /// <summary>当前阶段已送入的固体（件）、流体（毫升）与已累计的持续供电（统一时钟步数）。完工时清零，进入下一阶段。</summary>
+        public long SolidDelivered;
+        public long FluidDeliveredMl;
+        public long PoweredTicks;
+        /// <summary>已完工的阶段（按完工先后）。</summary>
+        public MegaStageDoneRecord[] Done = Array.Empty<MegaStageDoneRecord>();
+        /// <summary>供给速度统计窗口（mega.rate_window_seconds）：窗口起点（-1 = 还没开始 / 刚暂停过）与窗口内送入的量。</summary>
+        public long WindowStartTick = -1;
+        public long WindowSolid;
+        public long WindowFluidMl;
+        public long WindowPoweredTicks;
+        /// <summary>上一个完整窗口算出的供给速度：固体 千分件 / 游戏分钟、流体 毫升 / 游戏分钟、供电占比（千分比）。<see cref="RateWindows"/> = 0 表示还在统计。</summary>
+        public long SolidMilliPerMinute;
+        public long FluidMlPerMinute;
+        public long PoweredPermille;
+        public int RateWindows;
+        /// <summary>这一段暂停（受损 / 被摧毁）已经通知过；恢复推进后清掉。</summary>
+        public bool PausedNotified;
+        /// <summary>固体 / 流体这一段供给中断已经通知过；恢复送入后清掉。</summary>
+        public bool SolidStarvedNotified;
+        public bool FluidStarvedNotified;
+    }
+
+    /// <summary>FG13-END-01：一个已完工的巨构阶段。</summary>
+    [Serializable]
+    public sealed class MegaStageDoneRecord
+    {
+        public string Id;
+        /// <summary>完工那一步（统一时钟）与游戏日。</summary>
+        public long Tick;
+        public int Day;
     }
 
     /// <summary>FG9-ACT1-01：第一幕节奏台账的一条记录（内容在 fg.TbActPacing）。</summary>
@@ -2987,6 +3029,8 @@ namespace GameLogic.Campaign
             s.Progress.Narrative ??= Array.Empty<NarrativeEntryRecord>(); // FG9-NAR-01：旧存档没有资料库 = 空资料库
             s.Progress.PendingCutscene ??= string.Empty;
             s.Progress.Pacing ??= Array.Empty<ActPaceRecord>(); // FG9-ACT1-01：旧存档没有节奏台账 = 空（载入时按事实补记）
+            s.Progress.Mega ??= new MegastructureState(); // FG13-END-01：旧存档没有返航工程 = 第一阶段、全部为 0
+            s.Progress.Mega.Done ??= Array.Empty<MegaStageDoneRecord>();
             if (s.Progress.NarrativeSerial < 1)
             {
                 s.Progress.NarrativeSerial = 1;

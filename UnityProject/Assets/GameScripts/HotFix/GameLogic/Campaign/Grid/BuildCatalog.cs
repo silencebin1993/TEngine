@@ -103,7 +103,7 @@ namespace GameLogic.Campaign.Grid
         // ── 解锁 ────────────────────────────────────────────────────────────────
 
         /// <summary>解锁规则：always = 开局即可；beacon = 摧毁铸造前哨主核心并带回核心数据后（<see cref="HomeValleyBeacon.IsUnlocked"/>）；
-        /// research:&lt;节点&gt; = 研究完成；pace:&lt;节奏点&gt; = 第一幕节奏台账到达（FG9-ACT1-01）；用“&amp;”连起来的复合规则 = 每段都满足。</summary>
+        /// research:&lt;节点&gt; = 研究完成；pace:&lt;节奏点&gt; = 第一幕节奏台账到达（FG9-ACT1-01）；blueprint:&lt;蓝图&gt; = 拿到这张蓝图（FG13-END-01）；用“&amp;”连起来的复合规则 = 每段都满足。</summary>
         public static bool IsUnlocked(CampaignState state, string rule)
         {
             // FG9-ACT1-01 修复轮：复合规则“research:<节点>&pace:<节奏点>”——每一段都满足才开放（传送带一族：研究完成且第一幕节奏到了，研究再早也绕不过节奏台账）。
@@ -123,6 +123,11 @@ namespace GameLogic.Campaign.Grid
                 case "always": return true;
                 case "beacon": return state != null && HomeValleyBeacon.IsUnlocked(state);
                 default:
+                    // FG13-END-01：blueprint:<蓝图ID> = 拿到这张蓝图后开放（返航工地 = 巨构蓝图；DEBT-FG8QST01-03 的消费方读 HasKeyMaterial）。
+                    if (rule != null && rule.StartsWith(Endgame.MegastructureService.BlueprintTriggerPrefix, StringComparison.Ordinal))
+                    {
+                        return state != null && CampaignObjectiveTracker.HasKeyMaterial(state, QuestCatalog.KeyMaterialOf(rule.Substring(Endgame.MegastructureService.BlueprintTriggerPrefix.Length)));
+                    }
                     // FG9-ACT1-01：pace:<节奏点> = 第一幕节奏台账到达这一点后开放（Act1PacingService；全量自检旧段 / M1～M8 旅程按开放前的规则视为已满足）。
                     if (Act1PacingService.IsPaceRule(rule))
                     {

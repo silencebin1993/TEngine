@@ -169,6 +169,11 @@ namespace GameLogic.Narrative
                 return;
             }
             CampaignFgStateDomains.EnsureAll(s);
+            // FG13-END-01 复审 P2：巨构蓝图在返航工程上线前就拿到的旧档 → 按事实补投“巨构蓝图”节点（进第三幕）。新档拿蓝图那一步已投过，Trigger 幂等，读档前后不变。
+            if (Campaign.Endgame.MegastructureService.HasBlueprint(s))
+            {
+                Trigger(s, Campaign.Endgame.MegastructureService.BlueprintTriggerPrefix + Campaign.Endgame.MegastructureService.BlueprintId);
+            }
             if (Has(s, WakeId) || s.Progress.PendingCutscene == WakeId)
             {
                 return;

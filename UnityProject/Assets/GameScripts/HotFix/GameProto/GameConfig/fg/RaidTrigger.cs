@@ -50,7 +50,7 @@ public sealed partial class RaidTrigger : Luban.BeanBase
     /// </summary>
     public readonly int Exempt;
     /// <summary>
-    /// 等级怎么定:exposure=按越过的阈值;request=调用方给出;tier=按当前暴露档位(至少 1 级);harass=骚扰(raid.level 表 level=0 那一行)
+    /// 等级怎么定:exposure=按越过的阈值;request=调用方给出;tier=按当前暴露档位(至少 1 级);tier_up=比当前暴露档位高一级且不低于调用方给出的等级(巨构阶段,FGR-END-002“更高等级”,至多 4 级);harass=骚扰(raid.level 表 level=0 那一行)
     /// </summary>
     public readonly string LevelRule;
     /// <summary>

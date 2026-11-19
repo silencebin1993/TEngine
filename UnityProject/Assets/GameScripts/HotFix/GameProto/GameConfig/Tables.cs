@@ -291,6 +291,10 @@ public partial class Tables
     /// </summary>
     public fg.TbMechEnemy TbMechEnemy {get; }
     /// <summary>
+    /// 巨构阶段
+    /// </summary>
+    public fg.TbMegaStage TbMegaStage {get; }
+    /// <summary>
     /// 资料库条目
     /// </summary>
     public fg.TbNarrativeEntry TbNarrativeEntry {get; }
@@ -627,6 +631,7 @@ public partial class Tables
         TbLootPick = new fg.TbLootPick(loader("fg_tblootpick"));
         TbMatter = new fg.TbMatter(loader("fg_tbmatter"));
         TbMechEnemy = new fg.TbMechEnemy(loader("fg_tbmechenemy"));
+        TbMegaStage = new fg.TbMegaStage(loader("fg_tbmegastage"));
         TbNarrativeEntry = new fg.TbNarrativeEntry(loader("fg_tbnarrativeentry"));
         TbNarrativeLine = new fg.TbNarrativeLine(loader("fg_tbnarrativeline"));
         TbNotifyTier = new fg.TbNotifyTier(loader("fg_tbnotifytier"));
@@ -768,6 +773,7 @@ public partial class Tables
         TbLootPick.ResolveRef(this);
         TbMatter.ResolveRef(this);
         TbMechEnemy.ResolveRef(this);
+        TbMegaStage.ResolveRef(this);
         TbNarrativeEntry.ResolveRef(this);
         TbNarrativeLine.ResolveRef(this);
         TbNotifyTier.ResolveRef(this);

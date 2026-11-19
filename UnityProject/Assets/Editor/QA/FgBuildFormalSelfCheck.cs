@@ -1610,13 +1610,13 @@ namespace GameLogic.EditorTools
                 hud.SelectCategory("energy");
                 bool energy = hud.ItemCount == 6 && hud.ItemText(0).Contains("60 废料") && hud.ItemText(0).Contains("40 秒") && hud.ItemText(0).Contains("已有"); // FG3-LOG-06：能源页签 = 发电机 2 + 电塔 T1 / T2；FG4-ECO-04：+ 燃油发电机、太阳能阵列、储能站
                 hud.SelectCategory("endgame");
-                bool locked = hud.ItemCount == 1 && hud.ItemText(0).Contains("尚未解锁");
+                bool locked = hud.ItemCount == 2 && hud.ItemText(0).Contains("尚未解锁") && hud.ItemText(1).Contains("尚未解锁"); // FG13-END-01：终局页 = 信标 + 返航工地（都没解锁）
                 // FG6-DEF-01：防御页签有了轻型 / 重型炮塔；空分类改用环境（FG7 才有内容）。
                 hud.SelectCategory("defense");
                 bool defense = hud.ItemCount == 9 && hud.ItemText(0).Contains("轻型炮塔") && hud.ItemText(1).Contains("重型炮塔") && hud.ItemText(2).Contains("屏障 T1"); // FG6-DEF-02：+ 屏障 / 闸门 / 护盾 / 陷阱；FG6-DEF-03：+ 维修无人机站（9 项）
                 hud.SelectCategory("storage"); // FG7-ENV-03：环境页签有了顶棚，空分类改用仓储
                 bool emptyCat = defense && hud.ItemCount == 0 && hud.EmptyText.Contains("暂时没有");
-                Expect(energy && locked && emptyCat, $"分类切换：能源条目写成本、工期、已有数量；终局的信标写“尚未解锁”；空分类说明“{hud.EmptyText}”");
+                Expect(energy && locked && emptyCat, $"分类切换：能源条目写成本、工期、已有数量；终局的信标与返航工地都写“尚未解锁”；空分类说明“{hud.EmptyText}”");
 
                 hud.SetSearch("中继");
                 bool search = hud.ItemCount == 1 && hud.ItemId(0) == "signal_relay" && hud.CaptionText.Contains("搜索");

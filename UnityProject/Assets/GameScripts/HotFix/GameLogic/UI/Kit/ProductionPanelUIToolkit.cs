@@ -985,6 +985,15 @@ namespace GameLogic.UI.Kit
             }
             ProducerRecord r = p.Rec;
             float hz = Mathf.Max(1, GameClock.StepHz);
+            if (p.Def.Mode == ProducerMode.Megastructure)
+            {
+                // FG13-END-01：返航工地的进度条 = 本阶段三项进度的平均（暂停时写原因，进度保留）。
+                float mp = Campaign.Endgame.MegastructureService.StageFraction(ProductionService.IndexedState);
+                ProgressFillPercent = mp * 100f;
+                _progress.text = GameText.Format("mega.panel.progress", Mathf.RoundToInt(mp * 100f), ProductionService.StateText(p));
+                _fill.style.width = Length.Percent(ProgressFillPercent);
+                return;
+            }
             if (p.Def.Mode == ProducerMode.Purifier)
             {
                 // FG7-ENV-04：净化塔的进度条 = 离下一次降级还差多少（只算有电有冷却液的时间；暂停时写原因，进度保留）。
@@ -1170,6 +1179,10 @@ namespace GameLogic.UI.Kit
                     }
                     break;
                 }
+                case ProducerMode.Megastructure:
+                    // FG13-END-01 工地面板（FGR-END-001）：阶段、每种物资的进度与按当前供给速度预计的完成时间、持续供电、暂停原因、已完工阶段。
+                    _sb.Append(Campaign.Endgame.MegastructureService.PanelText(state, p.Building, p.Building.PowerState == BuildingPowerState.Powered));
+                    break;
                 case ProducerMode.Pump:
                 {
                     _sb.Append(p.SourceFluid != null

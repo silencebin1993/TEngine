@@ -677,6 +677,9 @@ namespace GameLogic.EditorTools
             Seg("FgOrbitalDropSelfCheck", FgOrbitalDropSelfCheck.Run); // FG12-EVT-04 轨道坠落（FGT-EVT-005）：多种子落点离核心 ≥ 12 格、60 秒预警（地图 / 小地图 / 主视图）、撞击（建筑 / 单位 / 护盾吸收）、坠落残骸、奖励、关键建筑与自动重建、倍速 / 观察 / 存读档
             Seg("FgCaravanSelfCheck", FgCaravanSelfCheck.Run); // FG12-EVT-06 流浪商队（FGT-EVT-007）：第一幕末起来访、停留 1 游戏日、中立不进内核、3～5 件三类商品刷新、交易（准入 / 遗产唯一 / 重复部件只加库存）、差额说明、突袭将至提前离开、面板 / 倍速 / 观察 / 存读档
             Seg("FgDecoyTerminalSelfCheck", FgDecoyTerminalSelfCheck.Run); // FG12-EVT-05 诱饵终端（FGT-EVT-006）：多种子点位、外观破绽、标记器扫描识别 / 安全拆除、不扫描被伏击 / 雷区、三选一、重复触发 / 超时 / 排队 / 频率关闭、倍速 / 观察 / 存读档 / 内核重建
+            // FG13-END-01 返航工程（FG11 FGR-END-001 / 002，FGT-END-002）：五个巨构阶段、传送带 / 管线送入、持续供电、进度与预计时间、阶段突袭、受损暂停不倒退、被摧毁重建接着做、供给中断、
+            // 巨构蓝图解锁与第三幕、舰队阶段消息、暂停与 0.5x～3x、观察一致、真文件存读档、工地面板、性能。
+            Seg("FgMegastructureSelfCheck", FgMegastructureSelfCheck.Run);
             // FG7-ENV-03 天气与顶棚（FG07 FGR-ENV-020 / 021 / 030，FG03 FGR-LOG-028 / 045，FGT-ENV-004）：数据与源数据逐行；按种子排定（持续、频率随幕）；预报（0.5 日预警 / 监听站 T2 破译 3 日）；
             // 顶棚（研究门槛、拖拽全有或全无、机器施工、下面照常建造、拆除返还、取消、隐藏 / 半透明、叠加层、建造模式拖拽）；酸雨 / 沙暴 / 寒潮效果与顶棚覆盖（露天掉耐久、污染加倍、摧毁留虚影、
             // 传送带减速、太阳能、炮塔探测、结冰阻断流动、伴热管、冰霜画面、散热）；负向矩阵（与静默夜叠加等）；暂停与 0.5x～3x、观察一致、真文件存读档；界面与设置；性能。

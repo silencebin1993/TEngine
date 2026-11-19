@@ -89,6 +89,14 @@ namespace GameLogic.Campaign.Economy
         PurifyDone,
         /// <summary>FG7-ENV-04 净化塔：缺冷却液，净化暂停（卡片负向）。</summary>
         NoCoolant,
+        /// <summary>FG13-END-01 返航工地：本阶段推进中（这一步至少一项在累计）。</summary>
+        MegaWorking,
+        /// <summary>FG13-END-01 返航工地：物资供给中断（这一步三项都没有累计；还缺哪些由 <see cref="Endgame.MegastructureService.ReasonText"/> 现算）。</summary>
+        MegaStarved,
+        /// <summary>FG13-END-01 返航工地：工地受损，暂停推进（<see cref="ProductionService.Producer.ReasonHave"/> / <see cref="ProductionService.Producer.ReasonNeed"/> = 当前 / 最大耐久）。</summary>
+        MegaWounded,
+        /// <summary>FG13-END-01 返航工地：五个阶段全部完工。</summary>
+        MegaDone,
     }
 
     /// <summary>
@@ -301,6 +309,10 @@ namespace GameLogic.Campaign.Economy
                     if (def.Mode == ProducerMode.Purifier)
                     {
                         GuidanceHooks.Raise(GuidanceHooks.EnvFirstPurifier); // FG7-ENV-04：第一次放下净化塔（图鉴“净化塔”随之解锁）
+                    }
+                    else if (def.Mode == ProducerMode.Megastructure)
+                    {
+                        GuidanceHooks.Raise(GuidanceHooks.MegaFirstSite); // FG13-END-01：第一次放下返航工地（图鉴“返航工程”随之解锁）
                     }
                     else if (def.Mode != ProducerMode.Generator)
                     {
@@ -754,6 +766,10 @@ namespace GameLogic.Campaign.Economy
                 // FG7-ENV-04 净化塔：机内冷却液 = inBatches 秒这一级用量。
                 return PurifierBufferMl(p);
             }
+            if (p.Def.Mode == ProducerMode.Megastructure)
+            {
+                return MegaFluidBufferMl(p); // FG13-END-01 返航工地：流体口存量 = outBatches 秒的抽取量
+            }
             if (port.Fluid == null)
             {
                 return 0;
@@ -791,6 +807,10 @@ namespace GameLogic.Campaign.Economy
                 // FG7-ENV-04：冷却液进口按这一级用量 × eco.prod.fluid_intake_factor 取（缓存满了就不再要）。
                 double f = Math.Max(1.0, GridContent.Tuning("eco.prod.fluid_intake_factor"));
                 return Math.Max(1, (int)Math.Ceiling(PurifierLpm(p) * f));
+            }
+            if (p.Def.Mode == ProducerMode.Megastructure)
+            {
+                return Math.Max(1, Mathf.RoundToInt(p.Def.FluidLpm)); // FG13-END-01：返航工地按表里的抽取速率取（存量满了就不再要）
             }
             double best = 0;
             foreach (RecipeDef r in p.Def.Recipes)
@@ -1002,6 +1022,10 @@ namespace GameLogic.Campaign.Economy
                     break;
                 case BuildingConstructionState.Damaged:
                     Set(p, ProdState.Damaged, ProdReason.Damaged);
+                    if (p.Def.Mode == ProducerMode.Megastructure)
+                    {
+                        Endgame.MegastructureService.OnPaused(state, b); // FG13-END-01：工地被摧毁 → 暂停，进度不倒退（重建后接着做）
+                    }
                     return;
                 case BuildingConstructionState.Disabled:
                     Set(p, ProdState.Disabled, ProdReason.Disabled);
@@ -1009,6 +1033,11 @@ namespace GameLogic.Campaign.Economy
                 default:
                     Set(p, ProdState.Building, ProdReason.NotBuilt);
                     return;
+            }
+            if (p.Def.Mode == ProducerMode.Megastructure)
+            {
+                StepMegastructure(state, p, ticks);
+                return;
             }
             if (p.Def.Mode == ProducerMode.Waste)
             {
@@ -1522,6 +1551,77 @@ namespace GameLogic.Campaign.Economy
             Set(p, ProdState.Working, Env.PurificationService.IsDone(state, p) ? ProdReason.PurifyDone : ProdReason.WorkingPurify);
         }
 
+        // ── FG13-END-01：返航工地 ───────────────────────────────────────────────
+
+        /// <summary>流体口机内存量（毫升）= outBatches 秒的抽取量。</summary>
+        public static long MegaFluidBufferMl(Producer p) => Math.Max(1000L, (long)Math.Round(p.Def.FluidLpm * 1000.0 * Math.Max(1, p.Def.OutBatches) / 60.0));
+
+        /// <summary>
+        /// 返航工地（FG11 FGR-END-001 / 002；卡片负向“工地被摧毁”“物资供给中断”）：已建成时每个生产步——
+        /// 受损（耐久低于上限）→ 暂停（三项都不推进，已完成的不倒退）；否则按本阶段还差的量从固体缓存取件、从流体口取流体（取多少记多少，账目守恒），
+        /// 有电（Powered）的步数计入持续供电；交给 <see cref="Endgame.MegastructureService.Accrue"/>。缺电只暂停供电计时，物资照常送入。O(1)。
+        /// </summary>
+        private static void StepMegastructure(CampaignState state, Producer p, int ticks)
+        {
+            Endgame.MegaStageDef st = Endgame.MegastructureService.Current(state);
+            BuildingRecord b = p.Building;
+            if (st == null)
+            {
+                Set(p, ProdState.Idle, ProdReason.MegaDone);
+                return;
+            }
+            if (Endgame.MegastructureService.IsWounded(state, b, out float hp, out float max))
+            {
+                Endgame.MegastructureService.OnPaused(state, b);
+                Set(p, ProdState.Damaged, ProdReason.MegaWounded, null, -1, Mathf.RoundToInt(max), Mathf.RoundToInt(hp));
+                return;
+            }
+            MegastructureState m = Endgame.MegastructureService.StateOf(state);
+            int takeSolid = (int)Math.Min(Count(p.Rec.In, st.Solid.Id), Math.Max(0L, st.SolidAmount - m.SolidDelivered));
+            if (takeSolid > 0)
+            {
+                Add(ref p.Rec.In, st.Solid.Id, -takeSolid);
+                ProductionStats.RecordUnits(state, st.Solid, takeSolid, produced: false); // FG4-ECO-08：送进工地 = 消耗
+            }
+            long takeFluid = 0;
+            long needFluid = st.FluidMl - m.FluidDeliveredMl;
+            if (needFluid > 0 && p.Fluids.Length > 0 && PipeNetworkService.IsRunning)
+            {
+                PipeKernel k = PipeNetworkService.Kernel;
+                int h = p.Rec.FluidHandles[0];
+                long buffer = h >= 0 ? k.ConsumerBuffer(h) : 0;
+                long want = Math.Min(buffer, needFluid);
+                if (want > 0)
+                {
+                    takeFluid = k.TakeConsumerBuffer(h, want);
+                    ProductionStats.RecordFluidMl(state, st.Fluid, takeFluid, produced: false);
+                }
+            }
+            bool powered = Powered(b);
+            long powerNeed = Endgame.MegastructureService.PowerTicksFor(st);
+            long poweredTicks = powered ? Math.Min(ticks, Math.Max(0L, powerNeed - m.PoweredTicks)) : 0;
+            bool progressed = takeSolid > 0 || takeFluid > 0 || poweredTicks > 0;
+            bool powerShort = m.PoweredTicks < powerNeed;
+            Endgame.MegastructureService.Accrue(state, b, takeSolid, takeFluid, poweredTicks, ticks);
+            p.WorkedThisStep = progressed;
+            if (Endgame.MegastructureService.AllDone(state))
+            {
+                Set(p, ProdState.Idle, ProdReason.MegaDone);
+            }
+            else if (progressed)
+            {
+                Set(p, ProdState.Working, ProdReason.MegaWorking);
+            }
+            else if (!powered && powerShort)
+            {
+                Set(p, ProdState.NoPower, b.PowerState == BuildingPowerState.Brownout ? ProdReason.PowerBrownout : ProdReason.PowerUnconnected);
+            }
+            else
+            {
+                Set(p, ProdState.MissingInput, ProdReason.MegaStarved, st.Solid);
+            }
+        }
+
         /// <summary>自检读：累计发过几次“净化暂停”（缺冷却液）。</summary>
         public static int PurifyStallCount { get; private set; }
 
@@ -1901,6 +2001,11 @@ namespace GameLogic.Campaign.Economy
         /// <summary>当前配方的第 <paramref name="index"/> 种固体输入（没有 = null）。</summary>
         public static ItemDef SolidInputAt(Producer p, int index)
         {
+            if (p?.Def != null && p.Def.Mode == ProducerMode.Megastructure)
+            {
+                // FG13-END-01：返航工地的每个物品口都收本工程要的固体（全部完工后什么都不收）。
+                return index >= 0 && !Endgame.MegastructureService.AllDone(_state) ? Endgame.MegastructureService.SolidItem : null;
+            }
             if (p?.Recipe == null || index < 0)
             {
                 return null;
@@ -2219,6 +2324,11 @@ namespace GameLogic.Campaign.Economy
             {
                 return Math.Max(1, p.Def.InBatches);
             }
+            if (p.Def.Mode == ProducerMode.Megastructure)
+            {
+                // FG13-END-01：返航工地只收本工程要的固体（五个阶段同一种），缓存 inBatches 件；全部完工后不再收。
+                return item != null && ReferenceEquals(item, SolidInputAt(p, 0)) ? Math.Max(1, p.Def.InBatches) : 0;
+            }
             if (p.Recipe == null || item == null)
             {
                 return 0;
@@ -2306,6 +2416,10 @@ namespace GameLogic.Campaign.Economy
 
         public static ItemDef SolidInput(Producer p)
         {
+            if (p?.Def != null && p.Def.Mode == ProducerMode.Megastructure)
+            {
+                return SolidInputAt(p, 0);
+            }
             if (p?.Recipe == null)
             {
                 return null;
@@ -2456,7 +2570,7 @@ namespace GameLogic.Campaign.Economy
                 return;
             }
             // 只收一种物品的输入口（配方建筑）内核不记缓存里是哪一种（ItemType = 0）：就是当前配方要的那种固体；回收站（一次一种）内核记着种类。
-            if (kind == 0 && p.Def.Mode == ProducerMode.Recipe)
+            if (kind == 0 && (p.Def.Mode == ProducerMode.Recipe || p.Def.Mode == ProducerMode.Megastructure))
             {
                 ItemDef solid = SolidInputAt(p, Math.Max(0, InPortIndex(p.Building.BuildingTypeId, bind.PortKey)));
                 kind = solid != null ? solid.BeltId : (ushort)0;
@@ -3276,6 +3390,11 @@ namespace GameLogic.Campaign.Economy
                 case ProdReason.WorkingPurify:
                 case ProdReason.PurifyDone:
                     return Env.PurificationService.WorkingText(state, p);
+                case ProdReason.MegaWorking:
+                case ProdReason.MegaStarved:
+                case ProdReason.MegaWounded:
+                case ProdReason.MegaDone:
+                    return Endgame.MegastructureService.ReasonText(state, p);
                 case ProdReason.NoCoolant:
                     // 修复轮 1：冷却液口外那一格被重污染挡住（管线铺不过去）时写明挪到边缘，不再让玩家去接一条铺不了的管线。
                     return GameText.Format("prod.reason.no_coolant", Env.PurificationService.IntakeHint(state, p) ?? FluidPortHint(p, 0) ?? string.Empty);

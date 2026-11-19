@@ -387,7 +387,7 @@ namespace GameLogic.Campaign.Defense
                     continue;
                 }
                 string rule = row.LevelRule ?? string.Empty;
-                if (rule != "exposure" && rule != "request" && rule != "tier" && rule != "harass")
+                if (rule != "exposure" && rule != "request" && rule != "tier" && rule != "tier_up" && rule != "harass")
                 {
                     ProblemList.Add($"fg.TbRaidTrigger {row.Id}：等级规则 {rule} 不认识");
                     continue;
