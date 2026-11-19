@@ -686,6 +686,9 @@ namespace GameLogic.EditorTools
             // 核心被毁 → 失败页写明从第几波重试、读档不重复奖励；轨道打击提前 30 秒标出；暂停与 0.5x～3x、存读档、观察一致、建造者难度、旧档。
             Seg("FgPurgeWaveSelfCheck", FgPurgeWaveSelfCheck.Run);
             Seg("FgBeachheadSelfCheck", FgBeachheadSelfCheck.Run);
+            // FG13-END-05 先遣旗舰（FG11 FGR-END-022、FG19 FGR-EMG-161 / 165，FGT-END-006 / 007、FGT-EMG-061）：三阶段（校准信标轰炸 / 四类护盾节点端口闸门对照矩阵 / 根权限夺取、反向接入、瘫痪、反夺控）、
+            // 核心暴露与击退、每阶段自动存档；负向（只有 1 台机器、全灭重试、核心被毁读档）；暂停与 0.5x～3x、存读档、观察一致、性能。
+            Seg("FgFlagshipSelfCheck", FgFlagshipSelfCheck.Run);
             // FG7-ENV-03 天气与顶棚（FG07 FGR-ENV-020 / 021 / 030，FG03 FGR-LOG-028 / 045，FGT-ENV-004）：数据与源数据逐行；按种子排定（持续、频率随幕）；预报（0.5 日预警 / 监听站 T2 破译 3 日）；
             // 顶棚（研究门槛、拖拽全有或全无、机器施工、下面照常建造、拆除返还、取消、隐藏 / 半透明、叠加层、建造模式拖拽）；酸雨 / 沙暴 / 寒潮效果与顶棚覆盖（露天掉耐久、污染加倍、摧毁留虚影、
             // 传送带减速、太阳能、炮塔探测、结冰阻断流动、伴热管、冰霜画面、散热）；负向矩阵（与静默夜叠加等）；暂停与 0.5x～3x、观察一致、真文件存读档；界面与设置；性能。

@@ -665,7 +665,17 @@ namespace GameLogic.Campaign.Combat
     {
         public static bool Has(MechEnemy row) =>
             row != null && (row.FlFormRange > 0f || row.FlBeamLength > 0f || row.FlStrikeDelay > 0f || row.FlBlockRange > 0f || row.FlShieldHp > 0f
-                            || row.Behavior == EnemyDefs.BehaviorAnchorDrop);
+                            || row.Behavior == EnemyDefs.BehaviorAnchorDrop || GateFamily(row) != CombatFleetConst.GateNone);
+
+        /// <summary>FG13-END-05（FG19 FGR-EMG-161）：表列 flGate → 端口闸门族别（按列，不认 ID）。</summary>
+        public static byte GateFamily(MechEnemy row) => row?.FlGate switch
+        {
+            "em" => CombatFleetConst.GateEm,
+            "fluid" => CombatFleetConst.GateFluid,
+            "fuse" => CombatFleetConst.GateFuse,
+            "limiter" => CombatFleetConst.GateLimiter,
+            _ => CombatFleetConst.GateNone,
+        };
 
         public static void Apply(MechEnemy row, ref CombatBehaviorProfile p, float dmgMul)
         {
@@ -691,6 +701,9 @@ namespace GameLogic.Campaign.Combat
             p.FlShieldRegen = row.FlShieldRegen;
             p.FlShieldDelay = row.FlShieldDelay;
             p.FlShieldElec = row.FlShieldHp > 0f ? Math.Max(1f, row.FlShieldElec) : 0f;
+            byte gate = GateFamily(row);
+            p.FlGateFamily = gate;
+            p.FlGateHp = gate != CombatFleetConst.GateNone ? Math.Max(1f, row.FlGateHp) : 0f;
         }
 
         /// <summary>登陆舱落地投放：投放的单位行与台数（没有 = false）。</summary>

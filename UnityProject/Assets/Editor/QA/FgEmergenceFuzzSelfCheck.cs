@@ -2323,6 +2323,8 @@ namespace GameLogic.EditorTools
             public long Enqueued, Processed, SubSpawned, Injected, SpawnLost;
             public int MaxProcessedPerStep, MaxPending, Rise, MaxRise;
             public long Alloc;
+            /// <summary>FG13-END-05 探针：测量窗口里三地点白潮运行记录数的峰值（满载场景不放白潮，端口闸门路径应全部在 Fleets 为空的第一条比较返回）。</summary>
+            public int MaxFleets;
         }
 
         private static void CheckFullLoad()
@@ -2354,6 +2356,8 @@ namespace GameLogic.EditorTools
                  $"测量 {measure} 步托管分配 {on.Alloc / 1024.0:F1} KB");
             Line($"    · stat 4（节拍锚点 / 元程序运行态与待生成队列满拒绝，DEBT-EMGRTRIG01-01，只报告）：三地点合计 {on.SpawnLost}");
             bool scale = on.MinProjectiles >= 1500 && on.Wrecks >= 400 && on.Machines >= 120 && on.SubSpawned > 0 && on.MaxDrones > 0;
+            Expect(on.MaxFleets == 0 && off.MaxFleets == 0,
+                $"FG13-END-05 探针：满载场景测量窗口白潮运行记录峰值 {on.MaxFleets} / emg.stage = 0 同场景 {off.MaxFleets}（都应为 0：先遣旗舰的端口闸门 FlAbsorb / FlGateTouch / FlGateAcc / 场覆盖判定在 Fleets 为空时第一条比较返回，不给本场景加活）");
             Expect(scale, $"满载规模达标：测量窗口弹体始终 ≥ 1500（{on.MinProjectiles}）、带程序机器 {on.Machines} ≥ 120、残骸 {on.Wrecks} ≥ 400、有子载荷（{on.SubSpawned}）与无人机（{on.MaxDrones}）");
             PerfGate.Expect(true,
                 $"FGR-EMG-200（绝对预算）：三地点战斗内核每世界步 p99 {p99On:F3} ms → 推荐配置 {p99On / rec:F3} ms ≤ 1.5 ms（3x 每世界步，按推荐默认执行，2026-10-28），即 1x ≤ 3.0 ms / 帧；" +
@@ -2479,6 +2483,7 @@ namespace GameLogic.EditorTools
                     st.MaxDrones = Math.Max(st.MaxDrones, sites[0].Kernel.DroneCount + sites[1].Kernel.DroneCount);
                     st.MinDrones = Math.Min(st.MinDrones, sites[0].Kernel.DroneCount);
                     st.MinPatchesAll = Math.Min(st.MinPatchesAll, sites[0].Kernel.PatchCount);
+                    st.MaxFleets = Math.Max(st.MaxFleets, sites[0].Kernel.FleetCount + sites[1].Kernel.FleetCount + sites[2].Kernel.FleetCount);
                     if (i % 60 == 0)
                     {
                         st.MinHostiles = Math.Min(st.MinHostiles, sites[0].Kernel.CountAlive(CombatFaction.Hostile));

@@ -27,10 +27,13 @@ namespace GameLogic.Campaign.Combat
         public static int PodLandCues { get; private set; }
         public static int FormationBrokenCues { get; private set; }
         public static int ShieldBreakCues { get; private set; }
+        public static int GateHitCues { get; private set; }
+        public static int GateBreakCues { get; private set; }
 
         public static void ResetForTests()
         {
             BeamAimCues = BeamCues = RecoverCues = StrikeMarkCues = StrikeCancelCues = StrikeCues = PodWarnCues = PodLandCues = FormationBrokenCues = ShieldBreakCues = 0;
+            GateHitCues = GateBreakCues = 0;
         }
 
         private static string Sec(float v) => Mathf.Max(0f, v).ToString("0.#", CultureInfo.InvariantCulture);
@@ -83,6 +86,14 @@ namespace GameLogic.Campaign.Combat
                     ShieldBreakCues++;
                     FeedbackCues.RaiseAt(FeedbackCueId.FleetShieldBreak, at);
                     GuidanceHooks.Raise("fleet.first_shield_break");
+                    break;
+                case CombatFleetConst.CueGateHit:
+                    GateHitCues++; // FG13-END-05：护盾节点被它怕的端口削减（每 10% 一次）
+                    FeedbackCues.RaiseAt(FeedbackCueId.EnemyHit, at);
+                    break;
+                case CombatFleetConst.CueGateBreak:
+                    GateBreakCues++; // FG13-END-05：护盾节点被破
+                    FeedbackCues.RaiseAt(FeedbackCueId.FleetShieldBreak, at);
                     break;
             }
             Changed?.Invoke(site, e.Unit, e.Code, e.Other);

@@ -133,6 +133,33 @@ namespace GameLogic.Campaign
         /// <summary>FG13-END-04（FG11 FGR-END-021）：白潮滩头（登陆场）进度。唯一写入口 <c>GameLogic.Campaign.Endgame.BeachheadService</c>；滩头单位本身是区域敌人记录（随存档）。
         /// 旧存档没有 = 还没着陆（撑过清洗波次的存档载入后下一步着陆）。</summary>
         public BeachheadState Beachhead = new BeachheadState();
+        /// <summary>FG13-END-05（FG11 FGR-END-022、第 10 节“终战当前段落与阶段”）：先遣旗舰战进度。唯一写入口 <c>GameLogic.Campaign.Endgame.FlagshipService</c>；
+        /// 信标 / 要塞 / 节点 / 中继本身是区域敌人记录（随存档），被夺取的机器在星球内核的夺控表里（快照段 27）。旧存档没有 = 还没开战。</summary>
+        public FlagshipState Flagship = new FlagshipState();
+    }
+
+    /// <summary>FG13-END-05：先遣旗舰战进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
+    [Serializable]
+    public sealed class FlagshipState
+    {
+        /// <summary>当前阶段：0 = 还没开战，1 轨道轰炸、2 登陆要塞、3 根权限压制、4 核心暴露（爆发窗口），5 = 已击退。</summary>
+        public int Phase;
+        /// <summary>开战那一步（-1 = 还没）、当前阶段开始那一步、击退那一步（-1 = 还没）。</summary>
+        public long StartTick = -1;
+        public long PhaseTick = -1;
+        public long DoneTick = -1;
+        /// <summary>阶段一：下一次延时轰炸那一步（-1 = 不再排）与已排的次数（落点散布的确定序号）。</summary>
+        public long NextBombTick = -1;
+        public int BombCount;
+        /// <summary>阶段三：下一次根权限夺取那一步（-1 = 不再夺取）、已尝试的次数、没有可夺目标而空转的次数。</summary>
+        public long NextSeizeTick = -1;
+        public int SeizeCount;
+        public int SeizeIdle;
+        /// <summary>阶段三被根权限夺取过的机器（LogicId；阶段结束 / 重试时统一归还，瘫痪的恢复）。</summary>
+        public int[] Seized = Array.Empty<int>();
+        /// <summary>本阶段开始后竞技场里出现过可用的机器（全灭判定的前提）、全灭重试次数。</summary>
+        public bool ArenaSeen;
+        public int Retries;
     }
 
     /// <summary>FG13-END-04：白潮滩头进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
@@ -3085,6 +3112,8 @@ namespace GameLogic.Campaign
             s.Progress.Mega.Done ??= Array.Empty<MegaStageDoneRecord>();
             s.Progress.Purge ??= new PurgeWaveState(); // FG13-END-03：旧存档没有清洗波次 = 还没开始
             s.Progress.Beachhead ??= new BeachheadState(); // FG13-END-04：旧存档没有滩头 = 还没着陆
+            s.Progress.Flagship ??= new FlagshipState(); // FG13-END-05：旧存档没有先遣旗舰战 = 还没开战
+            s.Progress.Flagship.Seized ??= Array.Empty<int>();
             s.Progress.Purge.ActivePlanId ??= string.Empty;
             if (s.Progress.Purge.LaunchTicks == null || s.Progress.Purge.LaunchTicks.Length != 3)
             {

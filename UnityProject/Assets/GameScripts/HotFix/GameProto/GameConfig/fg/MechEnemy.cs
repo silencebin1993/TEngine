@@ -122,6 +122,8 @@ public sealed partial class MechEnemy : Luban.BeanBase
         FlShieldRegen = _buf.ReadFloat();
         FlShieldDelay = _buf.ReadFloat();
         FlShieldElec = _buf.ReadFloat();
+        FlGate = _buf.ReadString();
+        FlGateHp = _buf.ReadFloat();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -541,6 +543,14 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 护盾:目标带电荷(电磁)时,打在护盾上的伤害倍率(&gt;1=电磁破盾更快)
     /// </summary>
     public readonly float FlShieldElec;
+    /// <summary>
+    /// 端口闸门(护盾节点只怕一族端口):em=en.elec/en.mag/fld.*;fluid=mat.*;fuse=grm.trig 放出的子载荷命中;limiter=en.heat/phs.overheat;none=没有(其余伤害照常扣耐久)
+    /// </summary>
+    public readonly string FlGate;
+    /// <summary>
+    /// 端口闸门值(带闸门时一切伤害不扣耐久,只有该族端口削减它,削到0当场击毁;口径见 flagship.gate.* 调参)
+    /// </summary>
+    public readonly float FlGateHp;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -655,6 +665,8 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "flShieldRegen:" + FlShieldRegen + ","
         + "flShieldDelay:" + FlShieldDelay + ","
         + "flShieldElec:" + FlShieldElec + ","
+        + "flGate:" + FlGate + ","
+        + "flGateHp:" + FlGateHp + ","
         + "}";
     }
 }

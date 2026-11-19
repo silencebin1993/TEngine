@@ -396,6 +396,12 @@ namespace GameLogic.Campaign.Combat
             c.EmgHijackMax = Math.Max(1, (int)Math.Round(Tuning("emg.hijack.max", EmgHijackConst.DefaultMax)));
             c.EmgHijackEliteResist = Tuning("emg.hijack.elite_resist", 1f);
             c.EmgSeizeRecoverRatio = Tuning("emg.seize.recover_ratio", EmgHijackConst.DefaultRecoverRatio); // EMG4-HIJ-02
+            // FG13-END-05（FGR-EMG-161）：护盾节点（端口闸门）的削减口径
+            c.FlGateAccScale = Tuning("flagship.gate.acc_scale", CombatFleetConst.DefaultGateAccScale);
+            c.FlGateFieldRate = Tuning("flagship.gate.field_rate", CombatFleetConst.DefaultGateFieldRate);
+            c.FlGateMatterRate = Tuning("flagship.gate.matter_rate", CombatFleetConst.DefaultGateMatterRate);
+            c.FlGatePhaseRate = Tuning("flagship.gate.phase_rate", CombatFleetConst.DefaultGatePhaseRate);
+            c.FlGateHitScale = Tuning("flagship.gate.hit_scale", CombatFleetConst.DefaultGateHitScale);
             c.EmgFlashRange = Mathf.Max(0.5f, Tuning("emg.flash.range", EmgConst.DefaultFlashRange));
             c.EmgFlashStep = Mathf.Max(0.1f, Tuning("emg.flash.step", EmgConst.DefaultFlashStep));
             // EMG3-META-01（FG19 FGR-EMG-040～042）：元程序的复制间隔、循环周期 / 次数 / 锚点、延后秒数 / 链累计上限、每次结算最多执行次数。

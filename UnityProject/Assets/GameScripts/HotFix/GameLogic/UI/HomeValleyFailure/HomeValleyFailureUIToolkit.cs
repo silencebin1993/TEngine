@@ -203,6 +203,11 @@ namespace GameLogic.UI.HomeValleyFailure
             {
                 _lastSaveLabel.text += "\n" + beach;
             }
+            string flag = Campaign.Endgame.FlagshipService.FailureRetryText(CampaignSession.Current); // FG13-END-05：先遣旗舰战中失败（从阶段开始重试）
+            if (!string.IsNullOrEmpty(flag))
+            {
+                _lastSaveLabel.text += "\n" + flag;
+            }
             return true;
         }
 

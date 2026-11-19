@@ -348,7 +348,9 @@ namespace GameLogic.Campaign.Regions
         }
 
         public override string InvulnerableDetail(RegionEnemyRecord enemy) =>
-            enemy != null && enemy.EnemyInstanceId == BaptismTowerBoss.TowerInstanceId ? BaptismTowerBoss.InvulnerableDetail(CampaignSession.Current) : string.Empty;
+            enemy != null && enemy.EnemyInstanceId == BaptismTowerBoss.TowerInstanceId ? BaptismTowerBoss.InvulnerableDetail(CampaignSession.Current)
+            : enemy != null && Endgame.FlagshipService.IsFlagshipInstance(enemy.EnemyInstanceId) ? Endgame.FlagshipService.InvulnerableDetail(CampaignSession.Current, enemy) // FG13-END-05
+            : string.Empty;
 
         /// <summary>FG10-BOSS-01：洗礼塔泵站（内核耐久）被打空——它的流体停止灌入。</summary>
         public override void OnEnemyKilled(CombatSite site, RegionEnemyRecord enemy)
@@ -360,6 +362,10 @@ namespace GameLogic.Campaign.Regions
             else if (enemy != null && Endgame.BeachheadService.IsBeachheadInstance(enemy.EnemyInstanceId))
             {
                 Endgame.BeachheadService.OnPartKilled(CampaignSession.Current, enemy); // FG13-END-04：白潮滩头（掉落、投送目标通知）
+            }
+            else if (enemy != null && Endgame.FlagshipService.IsFlagshipInstance(enemy.EnemyInstanceId))
+            {
+                Endgame.FlagshipService.OnPartKilled(CampaignSession.Current, enemy); // FG13-END-05：先遣旗舰（掉落、阶段目标通知）
             }
         }
 

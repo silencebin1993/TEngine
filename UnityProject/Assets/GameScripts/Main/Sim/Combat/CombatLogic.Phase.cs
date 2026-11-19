@@ -98,6 +98,7 @@ namespace BinGames.Sim.Combat
             }
             AccPut(ref s, k, after);
             d.EmgUnit[u] = s;
+            FlGateAcc(ref d, u, k, after - before, sourceId); // FG13-END-05（FGR-EMG-161）：电荷 / 磁化 → 电磁节点，积热 → 限制器节点；没有闸门一条比较
             if (!inPhase && sourceId > 0)
             {
                 EmgPhaseSrcPut(ref d, u, k, sourceId); // FG11-ATTR-01 ①：累积阶段的来源（悬停“谁造成的”）；没有来源的增益（脚下物质 / 环境 / 传导）不覆盖
@@ -313,6 +314,7 @@ namespace BinGames.Sim.Combat
             }
             if (matter != 0u && !ChsAirborne(ref d, i))
             {
+                FlGateTouch(ref d, i, CombatFleetConst.GateFluid, FlGateMatterRate(ref d) * dt, 0); // FG13-END-05（FGR-EMG-161）：mat.* 物质斑块覆盖节点 → 流体节点
                 PhaseContact(ref d, i, matter, dt);
             }
             for (int k = 0; k < EmgPhaseConst.Count && d.IsAlive(i); k++)

@@ -48,6 +48,8 @@ namespace GameLogic.Campaign
         RevealComplete = 10,
         /// <summary>FG13-END-04（FGR-END-021）：白潮在滩头着陆、目标落位之后（家园在这一段被攻破时读它重试）。</summary>
         BeachheadLanded = 11,
+        /// <summary>FG13-END-05（FGR-END-022“每个阶段开始时自动存档”）：先遣旗舰进入一个新阶段、这一阶段的目标落位之后。</summary>
+        FlagshipPhase = 12,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>

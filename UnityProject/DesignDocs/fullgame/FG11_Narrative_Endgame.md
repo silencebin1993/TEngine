@@ -134,6 +134,7 @@
   - 摧毁全部 3 座中继后，旗舰核心暴露，进入最后的爆发窗口。
 - 这是**脚本化的首领机制**，只在这场战斗中出现，不属于常态 AI 行为。
 - 每个阶段开始时自动存档；失败后从该阶段开始重试。
+- **FG13-END-05 已落地（2026-11-19）**：`Campaign/Endgame/FlagshipService.cs`（唯一写入口，进度在 `CampaignProgressState.Flagship`）。切断投送后下一步开战；编成 = fg.TbEnemyEncounter 区域 `white_tide_flagship`（base 4 座校准信标 / boss 要塞 + 2 炮位 + 四类护盾节点 / boss_wave 3 座压制中继），点位在滩头模板 `white_tide_beachhead`。阶段一每 `flagship.bomb_interval_seconds` 用内核轨道打击轰炸竞技场里离降落区最近的机器，落点散布 = base + 已毁信标数 × per_beacon；阶段二节点 = 内核端口闸门（FG19 FGR-EMG-161，敌人表列 `flGate` / `flGateHp`，快照格式 26），要塞在节点 / 中继还在时不可伤；阶段三每 20 秒经 `SignalSeizeService.Seize`（来源 = 根权限，直到阶段结束）夺取离存活中继最近的机器，不夺取玩家接入 / 接入过渡中的那台，**也不夺取家园里最后一台可用的机器**（按推荐默认执行（2026-11-19），待用户确认：否则只有 1 台机器时夺取直接变成全灭重试的死循环）；中继全毁 → 夺取的机器归还、核心暴露，摧毁核心写事件账本 `endgame_flagship_defeated`。每阶段开始自动存档（`SaveReason.FlagshipPhase`）；竞技场（`flagship.arena_radius` 米）里出现过可用机器后一台都没了（阵亡、被夺取或离开）= 全灭，从本阶段开始重试（按推荐默认执行（2026-11-19），待用户确认：离开竞技场也算）。自检 `FgFlagshipSelfCheck`。
 
 ---
 

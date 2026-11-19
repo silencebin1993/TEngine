@@ -41,7 +41,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             // Leader = 0：还没做过编队判定（第一次判定不发“打散”提示，落单生成的不算被打散）
-            var r = new CombatFleet { Unit = d.Id[slot], Shield = p.FlShieldHp, Intact = 1, Leader = 0 };
+            var r = new CombatFleet { Unit = d.Id[slot], Shield = p.FlShieldHp, Intact = 1, Leader = 0, Gate = p.FlGateFamily > 0f ? p.FlGateHp : 0f };
             if (p.FlPodWarn > 0f)
             {
                 float warn = math.max(0.8f, p.FlPodWarn);
@@ -101,7 +101,20 @@ namespace BinGames.Sim.Combat
                 return damage;
             }
             int k = FlIndexOf(ref d, d.Id[t]);
-            if (k < 0 || !OcProfile(ref d, t, out CombatBehaviorProfile p) || !(p.FlShieldHp > 0f))
+            if (k < 0 || !OcProfile(ref d, t, out CombatBehaviorProfile p))
+            {
+                return damage;
+            }
+            if (p.FlGateFamily > 0f)
+            {
+                // FG13-END-05（FGR-EMG-161）：护盾节点对其余端口没有读取——任何伤害都不扣耐久；只有引信族认“grm.trig 放出的子载荷（1 代及以上）命中”，按这一下的伤害削减闸门
+                if ((byte)p.FlGateFamily == CombatFleetConst.GateFuse && FlTriggeredHit(ref d))
+                {
+                    FlGateCut(ref d, k, damage * Rate(d.Config.FlGateHitScale, CombatFleetConst.DefaultGateHitScale), d.EmgCtx.OwnerId);
+                }
+                return 0f;
+            }
+            if (!(p.FlShieldHp > 0f))
             {
                 return damage;
             }
@@ -126,6 +139,93 @@ namespace BinGames.Sim.Combat
             d.Fleets[k] = r;
             return damage;
         }
+
+        // ─────────────────────────────── FG13-END-05 端口闸门（FG19 FGR-EMG-161）───────────────────────────────
+
+        private static float Rate(float v, float fallback) => v > 0f ? v : fallback;
+
+        internal static bool FlGateOf(ref CombatData d, int i, out byte family, out float max)
+        {
+            family = CombatFleetConst.GateNone;
+            max = 0f;
+            if (!OcProfile(ref d, i, out CombatBehaviorProfile p) || !(p.FlGateFamily > 0f))
+            {
+                return false;
+            }
+            family = (byte)p.FlGateFamily;
+            max = p.FlGateHp;
+            return true;
+        }
+
+        /// <summary>当前结算的伤害出自触发器放出的子载荷：载荷上下文有程序、它所在的程序节点有父节点（由 grm.trig 展开），代数 ≥ 1。</summary>
+        private static bool FlTriggeredHit(ref CombatData d)
+        {
+            EmgCtx c = d.EmgCtx;
+            if (c.Prog < 0 || c.Prog >= d.EmgPrograms.Length || c.Depth < 1)
+            {
+                return false;
+            }
+            EmgProgram pg = d.EmgPrograms[c.Prog];
+            int n = pg.FirstNode + c.Node;
+            return c.Node < pg.NodeCount && n >= 0 && n < d.EmgNodes.Length && d.EmgNodes[n].Parent >= 0;
+        }
+
+        private static void FlGateCut(ref CombatData d, int k, float amount, int by)
+        {
+            CombatFleet r = d.Fleets[k];
+            if (!(amount > 0f) || !(r.Gate > 0f))
+            {
+                return;
+            }
+            float before = r.Gate;
+            r.Gate = math.max(0f, r.Gate - amount);
+            if (by > 0)
+            {
+                r.GateBy = by;
+            }
+            d.Fleets[k] = r;
+            int i = d.SlotOf(r.Unit);
+            // 提示只在跨过每 10% 时发一次（场 / 物质 / 过热是每步持续削减，不逐步刷提示）
+            if (i >= 0 && r.Gate > 0f && FlGateOf(ref d, i, out _, out float max) && max > 0f && (int)(before * 10f / max) != (int)(r.Gate * 10f / max))
+            {
+                Cue(ref d, CombatEventKind.FleetCue, i, 0, r.Gate / max, d.Pos[i], CombatFleetConst.CueGateHit);
+            }
+        }
+
+        /// <summary>
+        /// 端口作用在单位 <paramref name="u"/> 身上：它是这一族的护盾节点时削减闸门（到 0 由白潮每步当场击毁）。<paramref name="family"/> 由调用点按端口定：
+        /// 电荷 / 磁化累积量与敌对场覆盖 = 电磁，站在物质里 = 流体，积热累积量与过热相态 = 限制器。没有白潮记录时一条比较返回。
+        /// </summary>
+        internal static void FlGateTouch(ref CombatData d, int u, byte family, float amount, int sourceId)
+        {
+            if (d.Fleets.Length == 0 || !(amount > 0f) || u < 0 || u >= d.Count || !OcProfile(ref d, u, out CombatBehaviorProfile p) || (byte)p.FlGateFamily != family)
+            {
+                return;
+            }
+            int k = FlIndexOf(ref d, d.Id[u]);
+            if (k >= 0)
+            {
+                FlGateCut(ref d, k, amount, sourceId);
+            }
+        }
+
+        /// <summary>累积量增加的削减口径：电荷 / 磁化 → 电磁，积热 → 限制器。</summary>
+        internal static void FlGateAcc(ref CombatData d, int u, int k, float gain, int sourceId)
+        {
+            if (d.Fleets.Length == 0)
+            {
+                return;
+            }
+            byte fam = k == EmgPhaseConst.Charge || k == EmgPhaseConst.Magnetize ? CombatFleetConst.GateEm : k == EmgPhaseConst.Overheat ? CombatFleetConst.GateLimiter : CombatFleetConst.GateNone;
+            if (fam != CombatFleetConst.GateNone)
+            {
+                FlGateTouch(ref d, u, fam, gain * Rate(d.Config.FlGateAccScale, CombatFleetConst.DefaultGateAccScale), sourceId);
+            }
+        }
+
+        internal static float FlGateFieldRate(ref CombatData d) => Rate(d.Config.FlGateFieldRate, CombatFleetConst.DefaultGateFieldRate);
+
+        internal static float FlGateMatterRate(ref CombatData d) => Rate(d.Config.FlGateMatterRate, CombatFleetConst.DefaultGateMatterRate);
 
         private static bool FlCharged(ref CombatData d, int i) => i >= 0 && i < d.EmgUnit.Length && d.EmgUnit[i].AccA.z > 1e-4f;
 
@@ -320,7 +420,7 @@ namespace BinGames.Sim.Combat
                 return;
             }
             double now = d.Scalars[0].Time;
-            // 单位：阵亡 / 移除的删记录；登陆舱落地；信标排打击；护盾回充；编队判定
+            // 单位：阵亡 / 移除的删记录；登陆舱落地；信标排打击；护盾回充；编队判定；FG13-END-05 端口闸门（过热相态持续削减限制器、削到 0 当场击毁）
             for (int k = d.Fleets.Length - 1; k >= 0; k--)
             {
                 if (k >= d.Fleets.Length)
@@ -360,6 +460,22 @@ namespace BinGames.Sim.Combat
                     FlFormation(ref d, i, ref r, p);
                 }
                 d.Fleets[k] = r;
+                if (p.FlGateFamily > 0f)
+                {
+                    if ((byte)p.FlGateFamily == CombatFleetConst.GateLimiter && InPhase(ref d, i, EmgPhaseConst.Overheat))
+                    {
+                        FlGateCut(ref d, k, Rate(d.Config.FlGatePhaseRate, CombatFleetConst.DefaultGatePhaseRate) * dt, 0); // phs.overheat：处在过热相态
+                    }
+                    if (!(d.Fleets[k].Gate > 0f))
+                    {
+                        Cue(ref d, CombatEventKind.FleetCue, i, 0, 0f, d.Pos[i], CombatFleetConst.CueGateBreak);
+                        Kill(ref d, i, d.Fleets[k].GateBy);
+                        if (k < d.Fleets.Length && d.Fleets[k].Unit == r.Unit)
+                        {
+                            d.Fleets.RemoveAt(k);
+                        }
+                    }
+                }
             }
             // 轨道打击：信标在倒计时内阵亡 → 取消；到点 → 打击
             for (int s = d.FleetStrikes.Length - 1; s >= 0; s--)

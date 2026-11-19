@@ -57,7 +57,9 @@ namespace BinGames.Sim.Combat
         /// 读取仍认 1～23：没有蠕虫（段不存在 = 空表）。
         /// 25 = FG13-FAC-01（FG09 第 8 章白潮专属语法）：行为参数行尾部追加白潮参数 17 个（编队 / 灭活光束 / 轨道打击 / 屏蔽 / 登陆舱 / 护盾）；
         /// Emg 段追加段 40 白潮单位运行状态、段 41 轨道打击、段 42 灭活焦土（都只在非空时写）。读取仍认 1～24：参数为 0、三张表为空。
-        public const int FormatVersion = 25;
+        /// 26 = FG13-END-05（FG11 FGR-END-022 阶段二、FG19 FGR-EMG-161）：行为参数行尾部追加端口闸门 2 个（护盾节点只被一族端口破坏：族别、闸门值）；
+        /// Emg 段 40 白潮运行状态每条追加 2 格（闸门剩余、最后一个削减它的来源）。读取仍认 1～25：没有闸门。
+        public const int FormatVersion = 26;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -1332,9 +1334,16 @@ namespace BinGames.Sim.Combat
         public float FlShieldDelay;
         public float FlShieldElec;
 
+        // ── FG13-END-05（格式 26，FG19 FGR-EMG-161“护盾节点只怕一族端口”）──
+        /// <summary>端口闸门族别（<see cref="CombatFleetConst"/> GateEm / GateFluid / GateFuse / GateLimiter；0 = 没有）：带闸门的单位挨的一切伤害都不扣耐久，
+        /// 只有这一族端口作用在它身上时削减闸门值，削到 0 当场击毁。</summary>
+        public float FlGateFamily;
+        /// <summary>端口闸门值（削减量的口径见 <see cref="CombatConfig.FlGateAccScale"/> 等）。</summary>
+        public float FlGateHp;
+
         /// <summary>带任何白潮参数（生成 / 换行时登记运行状态）。</summary>
         public readonly bool HasFleet =>
-            FlFormRange > 0f || FlBeamLength > 0f || FlStrikeDelay > 0f || FlBlockRange > 0f || FlPodWarn > 0f || FlShieldHp > 0f;
+            FlFormRange > 0f || FlBeamLength > 0f || FlStrikeDelay > 0f || FlBlockRange > 0f || FlPodWarn > 0f || FlShieldHp > 0f || FlGateFamily > 0f;
     }
 
     /// <summary>FG13-FAC-01：一个带白潮参数的单位的运行状态（稀疏表，按单位 ID；快照 Emg 段 40）。单位阵亡 / 移除后下一次白潮阶段删记录。</summary>
@@ -1356,6 +1365,9 @@ namespace BinGames.Sim.Combat
         /// <summary>护盾剩余值与开始回充的时刻。</summary>
         public float Shield;
         public double ShieldAt;
+        /// <summary>FG13-END-05（格式 26）：端口闸门剩余值（没有闸门 = 0）与最后一个削减它的来源单位 Id（击毁归属；0 = 不明）。</summary>
+        public float Gate;
+        public int GateBy;
     }
 
     /// <summary>FG13-FAC-01：一次轨道打击（快照 Emg 段 41）。Beacon != 0 时信标在倒计时内阵亡 = 取消；Beacon = 0 是热更层直接排的打击（FG13-END-03 清洗波次复用）。</summary>
@@ -1384,7 +1396,12 @@ namespace BinGames.Sim.Combat
     {
         public const byte StateNormal = 0;
         public const byte StatePodFalling = 1;
-        public const int Fields = 10;
+        public const int Fields = 12;
+        /// <summary>格式 25 的段 40 字段数（没有闸门两格）。</summary>
+        public const int FieldsV25 = 10;
+        /// <summary>FG13-END-05（FG19 FGR-EMG-161）端口闸门族别：电磁 = en.elec / en.mag / fld.*；流体 = mat.*；引信 = grm.trig 放出的子载荷（1 代及以上）命中；限制器 = en.heat / phs.overheat。</summary>
+        public const byte GateNone = 0, GateEm = 1, GateFluid = 2, GateFuse = 3, GateLimiter = 4;
+        public const float DefaultGateAccScale = 100f, DefaultGateFieldRate = 20f, DefaultGateMatterRate = 20f, DefaultGatePhaseRate = 25f, DefaultGateHitScale = 1f;
         public const int StrikeFields = 9;
         public const int MarkFields = 6;
         /// <summary>一个地点最多同时有多少格灭活焦土（满了先挤掉正在恢复的最早一格，没有就挤掉最早一格）。</summary>
@@ -1393,7 +1410,7 @@ namespace BinGames.Sim.Combat
         public const int StrikeMax = 64;
         /// <summary>FleetCue 的代码。</summary>
         public const byte CueBeamAim = 1, CueBeam = 2, CueInertRecover = 3, CueStrikeMark = 4, CueStrikeCancel = 5, CueStrike = 6, CuePodWarn = 7, CuePodLand = 8,
-            CueFormationBroken = 9, CueShieldBreak = 10;
+            CueFormationBroken = 9, CueShieldBreak = 10, CueGateHit = 11, CueGateBreak = 12;
         /// <summary>FleetEvent 的代码。</summary>
         public const byte EvtStrike = 1, EvtPodLanded = 2;
     }
@@ -1621,6 +1638,13 @@ namespace BinGames.Sim.Combat
         public float EmgHijackEliteResist;
         /// <summary>EMG4-HIJ-02（fg.TbHomeTuning emg.seize.recover_ratio）：夺控结束时瘫痪的机器恢复到的耐久比例。≤ 0 取 <see cref="EmgHijackConst.DefaultRecoverRatio"/>。</summary>
         public float EmgSeizeRecoverRatio;
+        /// <summary>FG13-END-05（fg.TbHomeTuning flagship.gate.*）：端口闸门的削减口径——累积量（电荷 / 磁化 / 积热）每增加 1 削减多少、
+        /// 敌对场覆盖 / 站在物质里 / 处在过热相态每秒削减多少、引信子载荷命中按伤害 × 多少削减。≤ 0 取 <see cref="CombatFleetConst"/> 缺省。</summary>
+        public float FlGateAccScale;
+        public float FlGateFieldRate;
+        public float FlGateMatterRate;
+        public float FlGatePhaseRate;
+        public float FlGateHitScale;
         /// <summary>EMG1-ENT-01：1 = 实体层开（热更层在 emg.stage ≥ 1 时置位）——机器 / 敌人 / 炮塔阵亡生成残骸，残骸挡弹、减速、可被推动，破片、撞击与位移事件，
         /// 外部血量单位记最后攻击者。0 = 旧行为逐字不变（emg.stage = 0 的正式流程不生成残骸）。</summary>
         public byte EmgEntity;

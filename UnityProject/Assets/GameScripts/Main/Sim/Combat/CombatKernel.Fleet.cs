@@ -52,6 +52,21 @@ namespace BinGames.Sim.Combat
             return ok;
         }
 
+        /// <summary>FG13-END-05（FG19 FGR-EMG-161）：单位的端口闸门（护盾节点）——族别、剩余与总值。没有闸门 / 不存在返回 false。</summary>
+        public bool TryGetGate(int unitId, out byte family, out float gate, out float max)
+        {
+            family = CombatFleetConst.GateNone;
+            gate = max = 0f;
+            int k = CombatLogic.FlIndexOf(ref _d, unitId);
+            int i = _d.SlotOf(unitId);
+            if (k < 0 || i < 0 || !CombatLogic.FlGateOf(ref _d, i, out family, out max))
+            {
+                return false;
+            }
+            gate = _d.Fleets[k].Gate;
+            return true;
+        }
+
         public int FleetStrikeCount => _d.FleetStrikes.Length;
 
         public CombatFleetStrike FleetStrikeAt(int i) => i >= 0 && i < _d.FleetStrikes.Length ? _d.FleetStrikes[i] : default;
@@ -159,11 +174,11 @@ namespace BinGames.Sim.Combat
 
         // ── 快照段 40～42（格式 25）──
 
-        private void WriteFleetSegments(BinaryWriter w, EmgSegmentWriter sw)
+        private void WriteFleetSegments(BinaryWriter w, EmgSegmentWriter sw, int format)
         {
             if (_d.Fleets.Length > 0)
             {
-                sw.Begin(EmgConst.SegFleet, CombatFleetConst.Fields, _d.Fleets.Length);
+                sw.Begin(EmgConst.SegFleet, format >= 26 ? CombatFleetConst.Fields : CombatFleetConst.FieldsV25, _d.Fleets.Length);
                 for (int i = 0; i < _d.Fleets.Length; i++)
                 {
                     CombatFleet x = _d.Fleets[i];
@@ -177,6 +192,8 @@ namespace BinGames.Sim.Combat
                     if (sw.F()) w.Write(x.Until);
                     if (sw.F()) w.Write(x.Shield);
                     if (sw.F()) w.Write(x.ShieldAt);
+                    if (sw.F()) w.Write(x.Gate);
+                    if (sw.F()) w.Write(x.GateBy);
                     sw.EndRecord();
                 }
                 sw.End();
@@ -242,7 +259,9 @@ namespace BinGames.Sim.Combat
                 if (sr.F()) x.Until = r.ReadDouble();
                 if (sr.F()) x.Shield = r.ReadSingle();
                 if (sr.F()) x.ShieldAt = r.ReadDouble();
-                if (!sr.RecordOk || x.Unit <= 0 || !seen.Add(x.Unit) || x.State > CombatFleetConst.StatePodFalling || x.Intact > 1 || x.Leader < 0 || x.AimTarget < 0
+                if (sr.F()) x.Gate = r.ReadSingle();
+                if (sr.F()) x.GateBy = r.ReadInt32();
+                if (!sr.RecordOk || !Finite(x.Gate) || x.Gate < 0f || x.GateBy < 0 || x.Unit <= 0 || !seen.Add(x.Unit) || x.State > CombatFleetConst.StatePodFalling || x.Intact > 1 || x.Leader < 0 || x.AimTarget < 0
                     || !Finite(x.Until) || !Finite(x.ShieldAt) || !Finite(x.Shield) || x.Shield < 0f)
                 {
                     return CombatLoadResult.InvalidValue;

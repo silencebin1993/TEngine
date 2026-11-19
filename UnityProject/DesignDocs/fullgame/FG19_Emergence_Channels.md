@@ -994,6 +994,7 @@
   | 引信 | `grm.trig` 放出的子载荷（1 代及以上）命中 | 用触发器把子弹药打到节点上 |
   | 限制器 | `en.heat`、`phs.overheat` | 持续加热到节点积热满 |
   - 节点对其余端口无读取（受伤不扣节点护盾）。第 4 步 FG11 FGR-END-022 与 FG13-END-05 卡片直接引用本表，不再“开工时定”。
+  - **FG13-END-05 已落地（2026-11-19）**：内核“端口闸门”（`CombatBehaviorProfile.FlGateFamily / FlGateHp`，白潮运行状态 `CombatFleet.Gate / GateBy`，快照格式 26；敌人表列 `flGate` = em / fluid / fuse / limiter / none，按列不认 ID）。带闸门的单位挨的一切伤害都不扣耐久（`FlAbsorb` 返回 0）；电磁 = 电荷 / 磁化累积量增加（`EmgAddAcc` 出口）与敌对场覆盖（场步，每步只算一次）；流体 = 站在物质斑块里（接触节拍，`mat.*` 位）；引信 = 载荷上下文代数 ≥ 1 且程序节点由触发器展开的命中，按伤害 × `flagship.gate.hit_scale`；限制器 = 积热累积量增加与处在过热相态（每秒 `flagship.gate.phase_rate`）。削减口径 `flagship.gate.*`（fg.TbHomeTuning），削到 0 当场击毁（击杀归最后一个削减它的来源）。对照矩阵见 `FgFlagshipSelfCheck` C2。
 
 **FGR-EMG-162 回收敌方固件**
 - 沿用掉落、反破解、核心裸跑（`ProjectA_GDD.md:180-183`、`:367-369`；FG08 FGR-LOOT-001）。新增：图鉴与击杀悬停显示敌方单位的程序（读写端口），让玩家知道“这台敌机带的固件能和我的什么交互”。

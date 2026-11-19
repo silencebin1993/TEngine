@@ -416,7 +416,7 @@ namespace BinGames.Sim.Combat
                 int movable = -1;
                 // EMGR-FIELD-01（FGR-EMG-060 第 14、15 行）：本步所在场的端口位（与受力同一次几何判定），与上一步的场位做差发 evt.enter / leave；不读这两个事件时只多一次位或
                 uint fprev = d.EmgUnit.ElementAt(u).PrevMatterMask & EmgFieldConst.FieldBits, fnow = 0u;
-                bool cut = false;
+                bool cut = false, gateFielded = false;
                 ulong candidates = n > 0 ? d.EmgHash.FieldMaskOnSegment(pos, pos, d.Radius[u]) : 0ul;
                 while (candidates != 0ul)
                 {
@@ -434,6 +434,11 @@ namespace BinGames.Sim.Combat
                     }
                     fnow |= EmgFieldConst.FieldBit(f.Port);
                     CombatFaction ff = (CombatFaction)f.Faction;
+                    if (d.Fleets.Length > 0 && ff != uf && !gateFielded)
+                    {
+                        gateFielded = true; // FG13-END-05（FGR-EMG-161）：fld.* 敌对场作用于节点 → 电磁节点（同一步多个场只算一次）
+                        FlGateTouch(ref d, u, CombatFleetConst.GateEm, FlGateFieldRate(ref d) * dt, f.Owner);
+                    }
                     if (f.Port == EmgFieldConst.PortDeflect)
                     {
                         // EMG2-REACT-02（F01 湮灭）：低完整度单位在敌对偏折场里被压溃起爆；敌我同一条（FGR-EMG-160）

@@ -4501,6 +4501,11 @@ namespace BinGames.Sim.Combat
                 w.Write(p.FlShieldDelay);
                 w.Write(p.FlShieldElec);
             }
+            if (format >= 26)
+            {
+                w.Write(p.FlGateFamily); // FG13-END-05：端口闸门
+                w.Write(p.FlGateHp);
+            }
         }
 
         /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
@@ -4510,7 +4515,8 @@ namespace BinGames.Sim.Combat
             if (!NonNeg(p.FlFormRange) || !NonNeg(p.FlFormMin) || !NonNeg(p.FlFormBroken) || p.FlFormBroken > 1f || !NonNeg(p.FlBeamWarn) || !NonNeg(p.FlBeamLength)
                 || !NonNeg(p.FlBeamRecover) || !NonNeg(p.FlBeamStagger) || !NonNeg(p.FlStrikeDelay) || !NonNeg(p.FlStrikeRadius) || !NonNeg(p.FlStrikeDamage)
                 || !NonNeg(p.FlStrikeBuilding) || p.FlStrikeBuilding > 1f || !NonNeg(p.FlStrikeRange) || !NonNeg(p.FlBlockRange) || !NonNeg(p.FlPodWarn)
-                || !NonNeg(p.FlShieldHp) || !NonNeg(p.FlShieldRegen) || !NonNeg(p.FlShieldDelay) || !NonNeg(p.FlShieldElec))
+                || !NonNeg(p.FlShieldHp) || !NonNeg(p.FlShieldRegen) || !NonNeg(p.FlShieldDelay) || !NonNeg(p.FlShieldElec)
+                || !NonNeg(p.FlGateFamily) || p.FlGateFamily > CombatFleetConst.GateLimiter || !NonNeg(p.FlGateHp))
             {
                 return false;
             }
@@ -4827,6 +4833,11 @@ namespace BinGames.Sim.Combat
                 p.FlShieldRegen = r.ReadSingle();
                 p.FlShieldDelay = r.ReadSingle();
                 p.FlShieldElec = r.ReadSingle();
+            }
+            if (format >= 26)
+            {
+                p.FlGateFamily = r.ReadSingle(); // FG13-END-05；≤ 25 版 = 0（没有端口闸门）
+                p.FlGateHp = r.ReadSingle();
             }
             return p;
         }

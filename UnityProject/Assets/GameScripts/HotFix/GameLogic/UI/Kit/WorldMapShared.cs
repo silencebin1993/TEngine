@@ -782,6 +782,19 @@ namespace GameLogic.UI.Kit
                 }
                 Add(WorldMapItemKind.Anchor, WorldMapLayer.Territory, "beachhead:" + enc.Id, r.Position.x, r.Position.y, GameText.Get(pr.NameKey));
             }
+            // FG13-END-05：先遣旗舰战进行中，标出还立着的旗舰单位（校准信标 / 要塞 / 炮位 / 护盾节点 / 压制中继，名字取敌人表）。
+            if (Campaign.Endgame.FlagshipService.Active(state))
+            {
+                foreach (GameConfig.fg.EnemyEncounter enc in Campaign.Endgame.FlagshipService.AllEncounters())
+                {
+                    RegionEnemyRecord r = Campaign.Endgame.FlagshipService.Find(state, enc.Id);
+                    if (r == null || !r.IsAlive || !view.Contains(r.Position.x, r.Position.y, margin) || !Campaign.Content.EnemyDefs.TryGet(enc.EnemyTypeId, out GameConfig.fg.MechEnemy row))
+                    {
+                        continue;
+                    }
+                    Add(WorldMapItemKind.Anchor, WorldMapLayer.Territory, "flagship:" + enc.Id, r.Position.x, r.Position.y, GameText.Get(row.NameKey));
+                }
+            }
         }
 
         private readonly List<EventDirectorInstanceRecord> _orbital = new List<EventDirectorInstanceRecord>(2);

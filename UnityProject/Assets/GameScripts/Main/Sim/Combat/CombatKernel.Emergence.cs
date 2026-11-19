@@ -1514,7 +1514,7 @@ namespace BinGames.Sim.Combat
             }
             if (fleetSegs > 0)
             {
-                WriteFleetSegments(w, sw); // FG13-FAC-01
+                WriteFleetSegments(w, sw, format); // FG13-FAC-01；FG13-END-05：格式 26 起段 40 每条 12 格
             }
             if (attrSegs > 0)
             {
