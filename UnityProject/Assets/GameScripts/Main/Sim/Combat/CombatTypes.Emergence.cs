@@ -145,6 +145,10 @@ namespace BinGames.Sim.Combat
         public const int SegChainOwn = 38;
         /// <summary>FG12-EVT-02（格式 24）：掘进蠕虫（只在有蠕虫时写）。</summary>
         public const int SegWorm = 39;
+        /// <summary>FG13-FAC-01（格式 25）：段 40 白潮单位运行状态、段 41 轨道打击、段 42 灭活焦土（都只在非空时写；读不含这些段的快照 = 空表）。</summary>
+        public const int SegFleet = 40;
+        public const int SegFleetStrike = 41;
+        public const int SegFleetMark = 42;
         /// <summary>EMGR-FUSE-01（DEBT-EMG4FUSE02-01）：每条配方的在途登记格数（2 的幂，按链号哈希开放寻址）与探测窗口；旧布局每配方 8 格；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
         /// shortcut: 16 格探测窗口全满时挤掉窗口里链号最小（最早）的登记并计数 EmgScalars.ClueHalfEvicted（少计不多计；DEBT-EMGRFUSE01-01 交 FG15-SYS-02 按实测再定）。</summary>
         public const int ClueHalfBits = 7, ClueHalfRing = 1 << ClueHalfBits, ClueHalfWindow = 16, ClueHalfLegacyRing = 8, ClueSidePorts = 1400;

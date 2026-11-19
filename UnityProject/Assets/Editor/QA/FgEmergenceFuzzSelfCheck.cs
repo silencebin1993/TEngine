@@ -259,6 +259,12 @@ namespace GameLogic.EditorTools
                     {
                         continue;
                     }
+                    // FG13-FAC-01：白潮中立预制固件（protocol neutral、source fleet）不进模糊池——同 EMG4-LOOT-01 阵营标志组件的口径，固定集与满载基线保持可比；
+                    // 三条的触发 → 写端行为在 FgFleetFactionSelfCheck H 段逐条断言（DEBT-FG13FAC01-02 记模糊覆盖，承接 FG15-SYS-02 重定满载基线时并入）
+                    if (row.Protocol == "neutral" && row.Source == "fleet")
+                    {
+                        continue;
+                    }
                     bool mixed = FirmwareKinds.IsMixedRow(row);
                     if (mixed || FirmwareKinds.HasMachineImplementation(row.Id))
                     {
@@ -269,7 +275,8 @@ namespace GameLogic.EditorTools
                 p.Comps.AddRange(CarrierReadings.Components.Where(c => c.Slot == "main" && c.Faction == "none").Select(c => c.Id));
                 foreach (GameConfig.fg.MechEnemy e in EnemyDefs.Rows)
                 {
-                    if (e == null || EnemyDefs.IsBoss(e) || EnemyDefs.IsStructure(e) || !(e.MaxHp > 0f) || string.IsNullOrEmpty(e.Faction))
+                    // FG13-FAC-01：白潮（fleet）没有领地、不出现在模糊场景的地点驻军里（只随终局清洗波次 / 滩头出场），不进阵营池——固定集与满载基线保持可比；白潮单位的行为在 FgFleetFactionSelfCheck
+                    if (e == null || EnemyDefs.IsBoss(e) || EnemyDefs.IsStructure(e) || !(e.MaxHp > 0f) || string.IsNullOrEmpty(e.Faction) || e.Faction == EnemyDefs.FactionFleet)
                     {
                         continue;
                     }

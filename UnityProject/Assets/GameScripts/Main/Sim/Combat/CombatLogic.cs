@@ -140,6 +140,7 @@ namespace BinGames.Sim.Combat
                 StepWorms(ref d, dt); // FG12-EVT-02：掘进蠕虫各节就位、地上 / 地下交替（各节的咬在上面敌方步里按 HoldFire 结算）
             }
             StepOverclock(ref d, dt); // FG11-FAC-01：超频专属语法（停机 / 排气 / 熔断 / 死亡泄爆 / 前倾加速 / 超频状态循环）；空表 O(1)
+            StepFleet(ref d, dt); // FG13-FAC-01：白潮专属语法（编队 / 护盾回充 / 登陆舱落地 / 轨道打击倒计时 / 灭活焦土恢复）；三张表都空 O(1)
             StepMagnetized(ref d, dt); // EMG2-PHS-01：磁化单位是弱磁源，弹体转向
             RebuildDeflectActive(ref d, edges: true);
             grid.Dispose();
@@ -1369,12 +1370,18 @@ namespace BinGames.Sim.Combat
                 return;
             }
             // FG2-FW-02：与编队攻击 / 直控同一道开火门槛（格斗 / 力场的触及、过热迟滞）与同一份积热——驻守开火的炮塔也不例外。
+            // FG13-FAC-01（FGR-FAC-008 ① 灭活光束预瞄线 ≥ 0.8 秒）：带光束参数的单位第一次瞄上这个目标只拉预瞄线，到点后的下一次出手才放光束；没有白潮记录 O(1)
+            if (d.Fleets.Length > 0 && FlHoldBeam(ref d, i, t))
+            {
+                return;
+            }
             if (PreFireGate(ref d, i, t, wp) != CombatFireResult.Ok)
             {
                 return;
             }
             EmgShotBegin(ref d, i, t, wp); // EMG1-BUS-01：一次出手（evt.fire；带程序的武器开一条因果链）
             OcOnFired(ref d, i); // FG11-FAC-01：蓄热连射积热（没有超频记录 O(1)）
+            FlOnFired(ref d, i, t); // FG13-FAC-01：灭活光束扫过的格变成灭活焦土（没有白潮记录 O(1)）
             SilentNoteFired(ref d, i); // FG9-FAC-01：开火即暴露（EMG4-LOOT-01：己方潜伏单位同样；没有行为参数 O(1) 返回）
             if (d.Faction[i] != (byte)CombatFaction.Hostile && wp.Mode != CombatWeaponMode.Projectile && !EmgFlightOn(wp) && TryReflectInstant(ref d, i, t, wp.Damage, wp))
             {
@@ -1893,6 +1900,7 @@ namespace BinGames.Sim.Combat
             }
             // FG2-FW-02：易伤状态（冻结等）统一在这里乘上——任何来源的伤害都吃。
             damage = math.max(0f, damage) * VulnMultiplier(ref d, t) * OcDamageFactor(ref d, t); // FG11-FAC-01：停机 / 排气弱点窗口、护盾态
+            damage = FlAbsorb(ref d, t, damage); // FG13-FAC-01：护卫护盾先吸收（带电荷时 × 电磁倍率、不回充）；没有白潮记录 O(1)
             // FG6-DEF-05：攻城单位打带攻城类别的结构单位（建筑 / 炮塔 / 屏障）乘对建筑倍率，并在被打的那一侧记一次溅射命中（传送带 / 管线 / 施工虚影受波及）。
             byte siegeCat = d.Siege[t].Cat;
             if (siegeCat != 0 && attacker >= 0 && attacker < d.Count && d.Faction[attacker] != d.Faction[t])

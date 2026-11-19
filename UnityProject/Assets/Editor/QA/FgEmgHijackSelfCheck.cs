@@ -245,10 +245,11 @@ namespace GameLogic.EditorTools
                     CombatWeapon w = site.EnemyWeapon(null, row, out EmgProgramResult sp);
                     if (fw.Count == 0)
                     {
-                        noFw.Add(row.Id); // 只有作战组件、没有固件（如维修束装填机）：没有可编的指令，武器就是基础读法
-                        if (!pr.IsEmpty || w.Program >= 0)
+                        noFw.Add(row.Id); // 只有作战组件、没有固件（如维修束装填机）：武器 = 这个组件本身的编译结果（多数组件没有可编的指令 = 基础读法）
+                        // FG13-FAC-01：净化步行机的光束组件 comp_beam 自带指令（与玩家装同一组件同一结果）——判“与组件编译结果一致”，不再要求一律为空
+                        if (pr.IsEmpty != (w.Program < 0))
                         {
-                            bad.Add(row.Id + "（无固件却有程序）");
+                            bad.Add(row.Id + "（无固件，程序与组件自身编译结果不一致）");
                         }
                         continue;
                     }

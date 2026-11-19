@@ -156,6 +156,10 @@ namespace GameLogic.UI.Kit
         public bool AntiAir;
         /// <summary>FG12-EVT-04：轨道坠落的落点圈（橙色实心圈 + 刻度，预警中）。</summary>
         public bool Impact;
+        /// <summary>FG13-FAC-01：白潮屏蔽塔的拒绝接入范围（紫色虚线双圈 + 内缘刻度，B15）。</summary>
+        public bool UplinkBlock;
+        /// <summary>FG13-FAC-01：灭活焦土格（灰色实心小方块）。</summary>
+        public bool Inert;
         /// <summary>FG7-ENV-05（FGR-ENV-060）：领地的危害（fg.TbHazard.id）与图例颜色；外圈危害带画成带刻度的圈（形状 + 颜色，B15）。</summary>
         public string HazardId;
         public Color Tint;
@@ -379,6 +383,7 @@ namespace GameLogic.UI.Kit
                 CollectWarnings(state, core, view, margin);
                 CollectWormWarnings(state, view, margin); // FG12-EVT-02（FGR-EVT-011“地图上标出震动最集中的区域”）
                 CollectOrbitalWarnings(state, view, margin); // FG12-EVT-04（FGR-EVT-030“地面标出落点圈”，卡片“落点圈在地图和小地图上可见”）
+                CollectFleet(view, margin); // FG13-FAC-01：屏蔽塔范围 / 轨道打击标记圈 / 登陆舱落点 / 灭活焦土
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Outposts) || StrategicMapUIToolkit.PickActive)
             {
@@ -754,6 +759,58 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        /// <summary>
+        /// FG13-FAC-01（FG09 第 8 章“地图上标出范围”）：各运行中地点的屏蔽塔拒绝接入范围、轨道打击标记圈（复用落点圈画法 + 剩余秒数）、下落中的登陆舱落点、灭活焦土格。
+        /// 只读内核稀疏表（O(白潮表长 + 打击数 + 焦土格 ≤ 256)），战略地图与小地图共用本模型。
+        /// </summary>
+        private void CollectFleet(in WorldMapView view, double margin)
+        {
+            foreach (Campaign.Combat.CombatSite site in Campaign.Combat.CombatSites.All)
+            {
+                BinGames.Sim.Combat.CombatKernel k = site?.Kernel;
+                // 只画长期留存地点（家园，世界坐标）；其余地点内核是地点局部坐标，画上去会错位
+                if (k == null || site.IsDisposed || !k.PersistSite || k.FleetCount + k.FleetStrikeCount + k.FleetMarkCount == 0)
+                {
+                    continue;
+                }
+                for (int n = 0; k.UplinkBlockerAt(n, out int unit, out Unity.Mathematics.double2 pos, out float range); n++)
+                {
+                    if (view.Contains(pos.x, pos.y, margin + range))
+                    {
+                        string label = GameText.Format("ui.map.fleet.block", range.ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+                        Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = pos.x, Y = pos.y, Radius = range, OuterRadius = range, UplinkBlock = true, Label = label });
+                    }
+                }
+                for (int i = 0; i < k.FleetStrikeCount; i++)
+                {
+                    BinGames.Sim.Combat.CombatFleetStrike x = k.FleetStrikeAt(i);
+                    if (view.Contains(x.Center.x, x.Center.y, margin + x.Radius))
+                    {
+                        string label = GameText.Format("ui.map.fleet.strike", Math.Max(0.0, x.At - k.Time).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+                        Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = x.Center.x, Y = x.Center.y, Radius = x.Radius, OuterRadius = x.Radius, Impact = true, Label = label });
+                    }
+                }
+                for (int i = 0; i < k.FleetCount; i++)
+                {
+                    if (!k.TryGetFleetAt(i, out BinGames.Sim.Combat.CombatFleet f) || f.State != BinGames.Sim.Combat.CombatFleetConst.StatePodFalling
+                        || !k.TryGetUnit(f.Unit, out BinGames.Sim.Combat.CombatUnitView v) || !view.Contains(v.Position.x, v.Position.y, margin + 2.0))
+                    {
+                        continue;
+                    }
+                    string label = GameText.Format("ui.map.fleet.pod", Math.Max(0.0, f.Until - k.Time).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+                    Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = v.Position.x, Y = v.Position.y, Radius = 2f, OuterRadius = 2f, Impact = true, Label = label });
+                }
+                for (int i = 0; i < k.FleetMarkCount; i++)
+                {
+                    BinGames.Sim.Combat.CombatFleetMark m = k.FleetMarkAt(i);
+                    if (view.Contains(m.Cell.x, m.Cell.y, margin + 1.0)) // 格 (X, Y) 的中心在世界 (X, Y)（GridMath）
+                    {
+                        Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = m.Cell.x, Y = m.Cell.y, Radius = 0.5f, OuterRadius = 0.5f, Inert = true });
+                    }
+                }
+            }
+        }
+
         private static (int, int, int, int) ClampToExplored(HomeGridMap map, in WorldMapView view, double margin)
         {
             long minX = long.MaxValue, minY = long.MaxValue, maxX = long.MinValue, maxY = long.MinValue;
@@ -984,7 +1041,7 @@ namespace GameLogic.UI.Kit
             {
                 Vector2 center = view.ToCanvas(c.X, c.Y);
                 float r = (float)(c.Radius / cpp);
-                if (r < 1f && !c.Impact)
+                if (r < 1f && !c.Impact && !c.Inert)
                 {
                     continue;
                 }
@@ -1014,6 +1071,32 @@ namespace GameLogic.UI.Kit
                     p.strokeColor = new Color(0.95f, 0.22f, 0.18f, 0.9f);
                     Circle(p, center, r);
                     Ticks(p, center, r, new Color(0.95f, 0.22f, 0.18f, 0.9f));
+                }
+                else if (c.UplinkBlock)
+                {
+                    // FG13-FAC-01：屏蔽塔范围 = 半透明紫色实心圆 + 双圈描边 + 外缘刻度（形状区分，不只靠颜色，B15）。
+                    p.fillColor = new Color(0.62f, 0.4f, 0.95f, 0.14f);
+                    p.BeginPath();
+                    p.Arc(center, r, 0f, 360f);
+                    p.Fill();
+                    p.lineWidth = 2f;
+                    p.strokeColor = new Color(0.66f, 0.45f, 1f, 0.9f);
+                    Circle(p, center, r);
+                    Circle(p, center, Mathf.Max(1f, r - 3f));
+                    Ticks(p, center, r, new Color(0.66f, 0.45f, 1f, 0.9f));
+                }
+                else if (c.Inert)
+                {
+                    // FG13-FAC-01：灭活焦土格 = 灰色实心方块（小地图上至少 2 像素）。
+                    float h = Mathf.Max(1f, r);
+                    p.fillColor = new Color(0.55f, 0.58f, 0.62f, 0.7f);
+                    p.BeginPath();
+                    p.MoveTo(center + new Vector2(-h, -h));
+                    p.LineTo(center + new Vector2(h, -h));
+                    p.LineTo(center + new Vector2(h, h));
+                    p.LineTo(center + new Vector2(-h, h));
+                    p.ClosePath();
+                    p.Fill();
                 }
                 else if (c.Impact)
                 {

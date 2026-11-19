@@ -53,6 +53,11 @@ namespace GameLogic.Campaign.Content
         public const string BehaviorRapid = "rapid";
         public const string BehaviorMirror = "mirror";
         public const string BehaviorOcCycle = "oc_cycle";
+        /// <summary>FG13-FAC-01（FGR-FAC-008 白潮专属语法）：编队飞行（清洗 / 护卫无人机）、灭活光束（净化步行机）、轨道打击标记（信标）、轨道锚点空降（登陆舱）。</summary>
+        public const string BehaviorFormation = "formation";
+        public const string BehaviorInertBeam = "inert_beam";
+        public const string BehaviorOrbitalMark = "orbital_mark";
+        public const string BehaviorAnchorDrop = "anchor_drop";
 
         // ── 标签（fg.TbMechEnemy.tags）──
         public const string TagStructure = "structure";
@@ -90,6 +95,7 @@ namespace GameLogic.Campaign.Content
         public const string FactionFoundry = "foundry";
         public const string FactionClarity = "clarity";
         public const string FactionOverclock = "overclock";
+        public const string FactionFleet = "fleet";
 
         // ── 编成条件（fg.TbEnemyEncounter.condition）──
         public const string ConditionBase = "base";

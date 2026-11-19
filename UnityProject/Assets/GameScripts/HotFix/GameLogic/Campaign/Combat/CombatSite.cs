@@ -2852,6 +2852,9 @@ namespace GameLogic.Campaign.Combat
                         Emergence.GroundMarkService.Apply(state, Grid.HomeGridService.MapFor(state), e.Code, e.Pos, e.Value);
                     }
                     return;
+                case CombatEventKind.FleetEvent:
+                    HandleFleetEvent(state, e); // FG13-FAC-01：轨道打击伤建筑 / 登陆舱落地投放（CombatSite.Fleet），O(1) / O(投放台数)
+                    return;
                 case CombatEventKind.Seized:
                 case CombatEventKind.SeizeEnded:
                 case CombatEventKind.SeizeDowned:
@@ -3131,6 +3134,10 @@ namespace GameLogic.Campaign.Combat
                 case CombatEventKind.OverclockCue:
                     // FG11-FAC-01（FGR-FAC-008 ①）：停机 / 排气 / 熔断预警 / 泄爆 / 三态切换预警——声音 + 字幕 + 画面。
                     OverclockCombatFeedback.OnCue(this, e, at);
+                    return;
+                case CombatEventKind.FleetCue:
+                    // FG13-FAC-01（FGR-FAC-008 ①）：光束预瞄 / 打击标记与倒计时 / 取消 / 落下 / 登陆舱预警 / 编队打散 / 护盾被打掉——声音 + 字幕 + 画面。
+                    FleetCombatFeedback.OnCue(this, e, at);
                     return;
                 case CombatEventKind.ClarityCue:
                     // FG10-FAC-01（FGR-FAC-008 ①）：喷嘴蓄压 / 枢轴喷灌蓄压 / 自爆引信 / 投放预警（≥ 0.8 秒）与喷出 / 爆燃 / 冻结 / 分裂 / 冲洗 / 酸沼腐蚀——声音 + 字幕 + 画面。

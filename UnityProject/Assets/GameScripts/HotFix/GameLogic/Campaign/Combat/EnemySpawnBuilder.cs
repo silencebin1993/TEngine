@@ -106,7 +106,7 @@ namespace GameLogic.Campaign.Combat
             {
                 spawn.Weapon = site.WeaponIndex(site.EnemyWeapon(state, row)); // EMG4-HIJ-01：组装敌人与玩家同一套编译器（FGR-EMG-160）
             }
-            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row) || EnemyClarityParams.Has(row) || EnemyOverclockParams.Has(row))
+            if (reading.NeedsProfile || EnemySilentParams.HasLurk(row) || EnemyFoundryParams.Has(row) || EnemyClarityParams.Has(row) || EnemyOverclockParams.Has(row) || EnemyFleetParams.Has(row))
             {
                 var profile = new CombatBehaviorProfile();
                 reading.FillProfile(row, ref profile);
@@ -117,6 +117,7 @@ namespace GameLogic.Campaign.Combat
                 EnemyClarityParams.Apply(row, ref profile, DifficultyService.EnemyDamageMul(state),
                     EnemyClarityParams.Insulates(row) && Regions.ClarityCounterService.InsulateToday(state), DifficultyService.EnemyHealthMul(state));
                 EnemyOverclockParams.Apply(row, ref profile, DifficultyService.EnemyDamageMul(state)); // FG11-FAC-01：超频专属语法（冲刺 / 光环 / 熔断 / 蓄热 / 三态）
+                EnemyFleetParams.Apply(row, ref profile, DifficultyService.EnemyDamageMul(state)); // FG13-FAC-01：白潮专属语法（编队 / 灭活光束 / 轨道打击 / 屏蔽 / 空降 / 护盾）
                 spawn.BehaviorProfile = site.ProfileIndex(profile);
             }
             Vector2 home = e.Position;

@@ -638,6 +638,76 @@ namespace GameLogic.Campaign.Combat
         public static float PoolChillFrac => Grid.GridContent.TryGetTuning("clarity.pool.chill_tick_frac", out float v) && v > 0f ? v : 0.5f;
     }
 
+    /// <summary>FG13-FAC-01：不移动、不开火的白潮设施读法（轨道打击信标 / 登陆舱）；行为全在 Fl* 行为参数（<see cref="EnemyFleetParams"/>）。</summary>
+    public sealed class FleetFixtureReading : EnemyBehaviorReading
+    {
+        private readonly string _key;
+        private readonly string[] _cols;
+
+        public FleetFixtureReading(string key, params string[] cols)
+        {
+            _key = key;
+            _cols = cols;
+        }
+
+        public override string Key => _key;
+        public override CombatBehavior Kernel => CombatBehavior.None;
+        public override bool NeedsProfile => true;
+        public override IReadOnlyList<string> RequiredColumns => _cols;
+    }
+
+    /// <summary>
+    /// FG13-FAC-01（FG09 第 8 章、FGR-FAC-008 白潮专属语法）：把敌人表 fl* 列翻译成内核行为参数 Fl*。按列是否 &gt; 0 决定，不认识任何敌人 ID（IC-REQ-012、FGR-EMG-160）；
+    /// 区域生成（<see cref="EnemySpawnBuilder"/>）与攻城 / 据点展开（SiegeService.SpawnOne）共用。打击伤害乘调用方给的伤害倍率（难度 / 精英）；
+    /// 预瞄线 / 打击倒计时 / 登陆舱下落至少 0.8 秒（FGR-FAC-008 ①）；信标挑打击区的范围 = 感知距离；预瞄线与落点预警取 warnSeconds。
+    /// </summary>
+    public static class EnemyFleetParams
+    {
+        public static bool Has(MechEnemy row) =>
+            row != null && (row.FlFormRange > 0f || row.FlBeamLength > 0f || row.FlStrikeDelay > 0f || row.FlBlockRange > 0f || row.FlShieldHp > 0f
+                            || row.Behavior == EnemyDefs.BehaviorAnchorDrop);
+
+        public static void Apply(MechEnemy row, ref CombatBehaviorProfile p, float dmgMul)
+        {
+            if (!Has(row))
+            {
+                return;
+            }
+            p.FlFormRange = row.FlFormRange;
+            p.FlFormMin = row.FlFormRange > 0f ? Math.Max(2f, row.FlFormMin) : 0f;
+            p.FlFormBroken = row.FlFormRange > 0f ? Math.Clamp(row.FlFormBroken, 0.05f, 1f) : 0f;
+            p.FlBeamLength = row.FlBeamLength;
+            p.FlBeamWarn = row.FlBeamLength > 0f ? Math.Max(0.8f, row.WarnSeconds) : 0f;
+            p.FlBeamRecover = row.FlBeamRecover;
+            p.FlBeamStagger = row.FlBeamStagger;
+            p.FlStrikeDelay = row.FlStrikeDelay > 0f ? Math.Max(0.8f, row.FlStrikeDelay) : 0f;
+            p.FlStrikeRadius = row.FlStrikeRadius;
+            p.FlStrikeDamage = row.FlStrikeDamage * Math.Max(0.05f, dmgMul);
+            p.FlStrikeBuilding = row.FlStrikeBuilding;
+            p.FlStrikeRange = row.FlStrikeDelay > 0f ? row.SenseRange : 0f;
+            p.FlBlockRange = row.FlBlockRange;
+            p.FlPodWarn = row.Behavior == EnemyDefs.BehaviorAnchorDrop ? Math.Max(0.8f, row.WarnSeconds) : 0f;
+            p.FlShieldHp = row.FlShieldHp;
+            p.FlShieldRegen = row.FlShieldRegen;
+            p.FlShieldDelay = row.FlShieldDelay;
+            p.FlShieldElec = row.FlShieldHp > 0f ? Math.Max(1f, row.FlShieldElec) : 0f;
+        }
+
+        /// <summary>登陆舱落地投放：投放的单位行与台数（没有 = false）。</summary>
+        public static bool Cargo(MechEnemy pod, out MechEnemy cargo, out int count)
+        {
+            cargo = null;
+            count = 0;
+            if (pod == null || pod.Behavior != EnemyDefs.BehaviorAnchorDrop || string.IsNullOrEmpty(pod.FlPodCargo) || pod.FlPodCargo == EnemyDefs.None
+                || !EnemyDefs.TryGet(pod.FlPodCargo, out cargo))
+            {
+                return false;
+            }
+            count = Math.Max(0, (int)Math.Round(pod.FlPodCount));
+            return count > 0;
+        }
+    }
+
     /// <summary>读法注册表（键 = fg.TbMechEnemy.behavior）。</summary>
     public static class EnemyBehaviorReadings
     {
@@ -652,7 +722,12 @@ namespace GameLogic.Campaign.Combat
             new OverclockChaseReading(EnemyDefs.BehaviorMelt, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds"),
             new RapidReading(),
             new OverclockChaseReading(EnemyDefs.BehaviorMirror, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "effectRange"),
-            new OverclockChaseReading(EnemyDefs.BehaviorOcCycle, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds"));
+            new OverclockChaseReading(EnemyDefs.BehaviorOcCycle, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds"),
+            // FG13-FAC-01 白潮
+            new OverclockChaseReading(EnemyDefs.BehaviorFormation, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown"),
+            new OverclockChaseReading(EnemyDefs.BehaviorInertBeam, "speed", "senseRange", "weaponRange", "weaponDamage", "weaponCooldown", "warnSeconds"),
+            new FleetFixtureReading(EnemyDefs.BehaviorOrbitalMark, "senseRange", "warnSeconds"),
+            new FleetFixtureReading(EnemyDefs.BehaviorAnchorDrop, "warnSeconds"));
 
         private static Dictionary<string, IEnemyBehaviorReading> Build(params IEnemyBehaviorReading[] readings)
         {

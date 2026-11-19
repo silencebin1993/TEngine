@@ -158,6 +158,18 @@ namespace GameLogic.Campaign.Feedback
         /// <summary>正向事件到来、事件结束 / 推迟。</summary>
         WorldEventNotice,
 
+        // ── FG13-FAC-01 白潮专属语法（FGR-FAC-002 / 008 ①：预警 ≥ 0.8 秒）──
+        FleetBeamAim,
+        FleetBeam,
+        FleetInertRecover,
+        FleetStrikeMark,
+        FleetStrikeCancel,
+        FleetStrike,
+        FleetPodWarn,
+        FleetPodLand,
+        FleetFormationBroken,
+        FleetShieldBreak,
+
         Max,
     }
 

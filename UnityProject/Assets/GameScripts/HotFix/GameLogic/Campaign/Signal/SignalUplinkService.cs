@@ -56,6 +56,8 @@ namespace GameLogic.Campaign.Signal
         JumpCooldown,
         /// <summary>FG1-SIG-07（FGR-SIG-051）：按“跳回上一台机器”时还没有上一台。</summary>
         NoPrevious,
+        /// <summary>FG13-FAC-01（FG09 第 8 章屏蔽塔）：目标在白潮屏蔽塔的范围里（按表列 flBlockRange，不认 ID）；只拦新的接入，已接入的机器不被踢出。</summary>
+        Shielded,
     }
 
     /// <summary>发起接入的入口（反馈与统计用）。</summary>
@@ -527,8 +529,19 @@ namespace GameLogic.Campaign.Signal
             {
                 return UplinkFailure.InDelivery;
             }
+            // FG13-FAC-01（FG09 第 8 章，ADR-FAC-008 ③）：屏蔽塔范围内拒绝接入——挂在接入判定的唯一入口（发起接入与死亡回弹同一套），O(屏蔽塔数)。
+            CombatSite site = CombatSites.Get(rec.RegionId);
+            if (site != null && site.AnyUplinkBlockAt(position, out float range))
+            {
+                LastShieldRange = range;
+                Core.GuidanceHooks.Raise("fleet.first_uplink_blocked"); // 钩子自己只认第一次
+                return UplinkFailure.Shielded;
+            }
             return control.IsJammedAt(position) ? UplinkFailure.Jammed : UplinkFailure.None;
         }
+
+        /// <summary>FG13-FAC-01：最近一次因屏蔽塔拒绝接入时那座塔的范围（米；原因文本用）。</summary>
+        public static float LastShieldRange { get; private set; }
 
         /// <summary>
         /// 目标的表现对象。过渡中复核的正是发起时校验通过的那台：用记下的对象 O(1) 核对它仍有效、仍在同一地点（阵亡、进装配站、
@@ -1157,6 +1170,8 @@ namespace GameLogic.Campaign.Signal
                         Math.Ceiling(JumpCooldownRemaining(CampaignSession.Current)).ToString("0", CultureInfo.InvariantCulture),
                         FarDistanceCells.ToString("0", CultureInfo.InvariantCulture));
                 case UplinkFailure.NoPrevious: return GameText.Get("signal.uplink.reason.no_previous");
+                case UplinkFailure.Shielded:
+                    return GameText.Format("signal.uplink.reason.shielded", label, LastShieldRange.ToString("0", CultureInfo.InvariantCulture));
                 default: return GameText.Get("signal.uplink.reason.not_found");
             }
         }

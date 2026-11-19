@@ -262,11 +262,16 @@ namespace GameLogic.Campaign.Economy
                 var all = new List<string>();
                 foreach (GameConfig.fg.FirmwareKind r in FirmwareKinds.Rows)
                 {
-                    if (r == null || r.Protocol != "enemy" || r.Source != "salvage" || !FirmwareKinds.IsFirmware(r.Id) || !FirmwareKinds.IsObtainable(r.Id))
+                    // FG13-FAC-01（FG09 第 8 章“掉落：中立协议预制固件”）：白潮单位掉 protocol = neutral、source = fleet 的预制固件，只进白潮阵营的池，不进“所有阵营”池。
+                    bool fleet = r != null && r.Protocol == "neutral" && r.Source == "fleet";
+                    if (r == null || (!fleet && (r.Protocol != "enemy" || r.Source != "salvage")) || !FirmwareKinds.IsFirmware(r.Id) || !FirmwareKinds.IsObtainable(r.Id))
                     {
                         continue;
                     }
-                    all.Add(r.Id);
+                    if (!fleet)
+                    {
+                        all.Add(r.Id);
+                    }
                     string f = r.Faction ?? string.Empty;
                     if (!FirmwareByFaction.TryGetValue(f, out List<string> l))
                     {

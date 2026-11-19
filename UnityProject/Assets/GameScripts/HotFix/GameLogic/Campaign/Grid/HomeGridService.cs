@@ -740,6 +740,12 @@ namespace GameLogic.Campaign.Grid
                     r.Add(GridReason.Of(GridBlockReason.MeltPit));
                     ok = false;
                 }
+                // FG13-FAC-01（FG09 第 8 章）：灭活焦土上的空格不能建造（内核段 42 的焦土格，与熔坑同一条逐格校验；已有建筑占着的格放行）。
+                if (!ownCell && Combat.CombatSite.InertHomeCell(c.X, c.Y))
+                {
+                    r.Add(GridReason.Of(GridBlockReason.InertGround));
+                    ok = false;
+                }
                 // FG8-GEN-02（卡片负向“室内入口被己方建筑堵住 → 入口保护范围内禁止建造，并说明原因”）：与上面同一套逐格校验，不另写判定。
                 for (int k = 0; k < EntranceGuards.Count; k++)
                 {
@@ -907,6 +913,11 @@ namespace GameLogic.Campaign.Grid
             if (Emergence.SitePersistService.PitAtCell(cell.X, cell.Y))
             {
                 r.Add(GridReason.Of(GridBlockReason.MeltPit));
+                ok = false;
+            }
+            if (Combat.CombatSite.InertHomeCell(cell.X, cell.Y))
+            {
+                r.Add(GridReason.Of(GridBlockReason.InertGround)); // FG13-FAC-01：灭活焦土也不能铺传送带
                 ok = false;
             }
             r.CellOk.Add(ok);

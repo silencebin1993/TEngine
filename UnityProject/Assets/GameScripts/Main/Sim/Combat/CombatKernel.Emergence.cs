@@ -1153,7 +1153,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || _d.MarshElecShape.Length > 0 || _d.Worms.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || _d.MarshElecShape.Length > 0 || _d.Worms.Length > 0 || _d.Fleets.Length > 0 || _d.FleetStrikes.Length > 0 || _d.FleetMarks.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1233,10 +1233,11 @@ namespace BinGames.Sim.Combat
             bool oc = format >= 21 && _d.Overclocks.Length > 0; // FG11-FAC-01：段 34 只在有超频记录时写（没有时快照与哈希逐字不变）
             bool marshElec = format >= 22 && _d.MarshElecShape.Length > 0; // FG11-REACT-01：段 35 只在酸沼电解过时写
             bool worms = format >= 24 && _d.Worms.Length > 0; // FG12-EVT-02：段 39 只在有蠕虫时写（没有时快照与哈希逐字不变）
+            int fleetSegs = format >= 25 ? (_d.Fleets.Length > 0 ? 1 : 0) + (_d.FleetStrikes.Length > 0 ? 1 : 0) + (_d.FleetMarks.Length > 0 ? 1 : 0) : 0; // FG13-FAC-01：段 40～42 只在非空时写
             bool v23 = format >= 23; // FG11-ATTR-01：归属 8 格（斑块 / 残骸 / 顺延段尾追加 4 个）+ 段 36～38 归因
             int attrSegs = AttrSegmentCount(format, hash, out int attrUnitRows, out int attrChainRows);
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + (worms ? 1 : 0) + attrSegs + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + (worms ? 1 : 0) + fleetSegs + attrSegs + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 29 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1510,6 +1511,10 @@ namespace BinGames.Sim.Combat
             if (worms)
             {
                 WriteWormSegment(w, sw);
+            }
+            if (fleetSegs > 0)
+            {
+                WriteFleetSegments(w, sw); // FG13-FAC-01
             }
             if (attrSegs > 0)
             {
@@ -2187,6 +2192,12 @@ namespace BinGames.Sim.Combat
                     return ParseMarshElecSegment(r, sr, ref staging);
                 case EmgConst.SegWorm:
                     return ParseWormSegment(r, sr, ref staging); // FG12-EVT-02
+                case EmgConst.SegFleet:
+                    return ParseFleetSegment(r, sr, ref staging); // FG13-FAC-01
+                case EmgConst.SegFleetStrike:
+                    return ParseFleetStrikeSegment(r, sr, ref staging);
+                case EmgConst.SegFleetMark:
+                    return ParseFleetMarkSegment(r, sr, ref staging);
                 case EmgConst.SegUnitSrc:
                 case EmgConst.SegCoatAttr:
                 case EmgConst.SegChainOwn:

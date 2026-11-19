@@ -483,6 +483,7 @@ namespace GameLogic.Campaign.Defense
                     EnemyClarityParams.Apply(row, ref bp, dmgScale, ins, hpScale); // 分裂液耐久与本体同吃难度 / 精英耐久倍率
                 }
                 EnemyOverclockParams.Apply(row, ref bp, dmgScale); // FG11-FAC-01：超频专属语法（与区域同一份翻译；泄爆伤害乘难度与精英倍率）
+                EnemyFleetParams.Apply(row, ref bp, dmgScale); // FG13-FAC-01：白潮专属语法（与区域同一份翻译；打击伤害乘难度与精英倍率）
             }
             int profile = site.ProfileIndex(bp);
             int unit = site.SpawnSiegeRaider(key, at, target, u.Radius, u.Speed, u.Hp * hpScale, u.FrontalReduction, weapon, profile, role, elite, u.StructureMult,

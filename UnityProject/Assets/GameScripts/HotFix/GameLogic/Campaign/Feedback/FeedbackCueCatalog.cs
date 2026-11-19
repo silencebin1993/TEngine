@@ -279,6 +279,27 @@ namespace GameLogic.Campaign.Feedback
                 CaptionKey = "boss.ember.cue.countdown", Tone = FeedbackTone.Danger, CaptionSeconds = 1f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 倒计时音效（卡片必须同时交付）" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EmberBlast, SfxId = "sfx_enemy_cannon", Shake = 0.6f, Tag = "首领", Caption = "熔毁：全场重创", TagKey = "boss.ember.cue.tag",
                 CaptionKey = "boss.ember.cue.blast", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 熔毁" });
+            // FG13-FAC-01（FGR-FAC-002 / 008 ①）：白潮专属行为的预警与结果（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG13FAC01-01）。
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetBeamAim, SfxId = "sfx_alarm_warning", Tag = "白潮", Caption = "净化步行机预瞄：灭活光束即将扫过这条线", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.beam_aim", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 灭活光束预瞄线（≥ 0.8 秒）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetBeam, SfxId = "sfx_enemy_fire_heavy", Tag = "白潮", Caption = "灭活光束：扫过的地面暂时不能建造", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.beam", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 灭活光束" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetInertRecover, SfxId = "sfx_signal_jam", Tag = "白潮", Caption = "灭活焦土开始恢复", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.inert_recover", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 2f, RequirementNote = "FG13-FAC-01 灭活焦土逐格恢复" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrikeMark, SfxId = "sfx_alarm_warning", Tag = "白潮", Caption = "轨道打击标记：摧毁信标或撤出标记圈，落下倒计时（秒）", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.strike_mark", Tone = FeedbackTone.Danger, CaptionSeconds = 3f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 轨道打击标记（倒计时）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrikeCancel, SfxId = "sfx_boss_phase", Tag = "白潮", Caption = "信标被毁：轨道打击取消", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.strike_cancel", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG13-FAC-01 轨道打击取消（负向）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrike, SfxId = "sfx_enemy_cannon", Shake = 0.5f, Tag = "白潮", Caption = "轨道打击落下", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.strike", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG13-FAC-01 轨道打击" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetPodWarn, SfxId = "sfx_alarm_warning", Tag = "白潮", Caption = "登陆舱落点预警：落地倒计时（秒）", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.pod_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 登陆舱落点预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetPodLand, SfxId = "sfx_boss_phase", Shake = 0.3f, Tag = "白潮", Caption = "登陆舱落地：投放一波单位", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.pod_land", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 登陆舱落地投放" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetFormationBroken, SfxId = "sfx_signal_jam", Tag = "白潮", Caption = "白潮编队被打散：落单的无人机效率下降", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.formation_broken", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG13-FAC-01 编队打散" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetShieldBreak, SfxId = "sfx_enemy_cannon", Tag = "白潮", Caption = "护卫护盾被打掉", TagKey = "fleet.cue.tag",
+                CaptionKey = "fleet.cue.shield_break", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 护卫护盾" });
 
             // ── 家园与通用 ─────────────────────────────────────────────────
             Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });

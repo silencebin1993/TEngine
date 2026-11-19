@@ -105,6 +105,23 @@ public sealed partial class MechEnemy : Luban.BeanBase
         OcModeSpeed = _buf.ReadFloat();
         OcModeRate = _buf.ReadFloat();
         OcModeShield = _buf.ReadFloat();
+        FlFormRange = _buf.ReadFloat();
+        FlFormMin = _buf.ReadFloat();
+        FlFormBroken = _buf.ReadFloat();
+        FlBeamLength = _buf.ReadFloat();
+        FlBeamRecover = _buf.ReadFloat();
+        FlBeamStagger = _buf.ReadFloat();
+        FlStrikeDelay = _buf.ReadFloat();
+        FlStrikeRadius = _buf.ReadFloat();
+        FlStrikeDamage = _buf.ReadFloat();
+        FlStrikeBuilding = _buf.ReadFloat();
+        FlBlockRange = _buf.ReadFloat();
+        FlPodCargo = _buf.ReadString();
+        FlPodCount = _buf.ReadFloat();
+        FlShieldHp = _buf.ReadFloat();
+        FlShieldRegen = _buf.ReadFloat();
+        FlShieldDelay = _buf.ReadFloat();
+        FlShieldElec = _buf.ReadFloat();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -249,7 +266,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// </summary>
     public readonly string IconId;
     /// <summary>
-    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy/clarity_sprayer/clarity_crawler/clarity_pump/clarity_drone/clarity_swarm/clarity_tank/oc_hound/oc_node/oc_fuser/oc_turret/oc_mirror/oc_runaway
+    /// 占位剪影(PlaceholderSilhouette):silent_orb/silent_ring/foundry_strider/foundry_shield/foundry_cross/foundry_block/foundry_node/foundry_reactor/silent_node/silent_prism/silent_hunter/silent_decoy/silent_listener/silent_mind/silent_relay/foundry_airburst/foundry_aa/foundry_minelayer/foundry_loader/foundry_siege_heavy/clarity_sprayer/clarity_crawler/clarity_pump/clarity_drone/clarity_swarm/clarity_tank/oc_hound/oc_node/oc_fuser/oc_turret/oc_mirror/oc_runaway/fleet_drone/fleet_walker/fleet_beacon/fleet_tower/fleet_pod/fleet_escort
     /// </summary>
     public readonly string Silhouette;
     /// <summary>
@@ -456,6 +473,74 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 护盾态减伤比例(0~1)
     /// </summary>
     public readonly float OcModeShield;
+    /// <summary>
+    /// 编队飞行:多少米内的同读法友军算同一编队;0=不编队
+    /// </summary>
+    public readonly float FlFormRange;
+    /// <summary>
+    /// 编队飞行:编队完整至少几台(含自己,整数&gt;=2);少于此数=编队被打散
+    /// </summary>
+    public readonly float FlFormMin;
+    /// <summary>
+    /// 编队被打散后的单体效率(0~1:射速与速度都乘它)
+    /// </summary>
+    public readonly float FlFormBroken;
+    /// <summary>
+    /// 灭活光束:光束扫过的长度(米,从本体朝目标);0=没有光束
+    /// </summary>
+    public readonly float FlBeamLength;
+    /// <summary>
+    /// 灭活焦土:发出光束的单位被击毁(或不在了)后,一格焦土多少游戏秒恢复
+    /// </summary>
+    public readonly float FlBeamRecover;
+    /// <summary>
+    /// 灭活焦土:同一来源的焦土逐格恢复的间隔(游戏秒,越早灼的越先恢复)
+    /// </summary>
+    public readonly float FlBeamStagger;
+    /// <summary>
+    /// 轨道打击:标记区域后倒计时(游戏秒,&gt;=0.8;倒计时内信标被毁=打击取消);0=不呼叫打击
+    /// </summary>
+    public readonly float FlStrikeDelay;
+    /// <summary>
+    /// 轨道打击:打击区半径(米)
+    /// </summary>
+    public readonly float FlStrikeRadius;
+    /// <summary>
+    /// 轨道打击:区内每个单位受到的伤害(难度倍率另乘;敌我同一规则)
+    /// </summary>
+    public readonly float FlStrikeDamage;
+    /// <summary>
+    /// 轨道打击:区内每座建筑受到最大耐久的这个比例(家园 / 前哨)
+    /// </summary>
+    public readonly float FlStrikeBuilding;
+    /// <summary>
+    /// 屏蔽塔:多少米内不能接入(evt.uplink 不成立,原因文本可见);0=不屏蔽
+    /// </summary>
+    public readonly float FlBlockRange;
+    /// <summary>
+    /// 登陆舱:落地后投放的敌人类型(fg.TbMechEnemy.id);none=不投放
+    /// </summary>
+    public readonly string FlPodCargo;
+    /// <summary>
+    /// 登陆舱:投放几台(整数1~8)
+    /// </summary>
+    public readonly float FlPodCount;
+    /// <summary>
+    /// 护盾:护盾值(先于耐久吸收伤害);0=没有护盾
+    /// </summary>
+    public readonly float FlShieldHp;
+    /// <summary>
+    /// 护盾:每秒回充(停止受击 flShieldDelay 秒后开始;带电荷时不回充)
+    /// </summary>
+    public readonly float FlShieldRegen;
+    /// <summary>
+    /// 护盾:最后一次受击后多少秒开始回充
+    /// </summary>
+    public readonly float FlShieldDelay;
+    /// <summary>
+    /// 护盾:目标带电荷(电磁)时,打在护盾上的伤害倍率(&gt;1=电磁破盾更快)
+    /// </summary>
+    public readonly float FlShieldElec;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -553,6 +638,23 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "ocModeSpeed:" + OcModeSpeed + ","
         + "ocModeRate:" + OcModeRate + ","
         + "ocModeShield:" + OcModeShield + ","
+        + "flFormRange:" + FlFormRange + ","
+        + "flFormMin:" + FlFormMin + ","
+        + "flFormBroken:" + FlFormBroken + ","
+        + "flBeamLength:" + FlBeamLength + ","
+        + "flBeamRecover:" + FlBeamRecover + ","
+        + "flBeamStagger:" + FlBeamStagger + ","
+        + "flStrikeDelay:" + FlStrikeDelay + ","
+        + "flStrikeRadius:" + FlStrikeRadius + ","
+        + "flStrikeDamage:" + FlStrikeDamage + ","
+        + "flStrikeBuilding:" + FlStrikeBuilding + ","
+        + "flBlockRange:" + FlBlockRange + ","
+        + "flPodCargo:" + FlPodCargo + ","
+        + "flPodCount:" + FlPodCount + ","
+        + "flShieldHp:" + FlShieldHp + ","
+        + "flShieldRegen:" + FlShieldRegen + ","
+        + "flShieldDelay:" + FlShieldDelay + ","
+        + "flShieldElec:" + FlShieldElec + ","
         + "}";
     }
 }

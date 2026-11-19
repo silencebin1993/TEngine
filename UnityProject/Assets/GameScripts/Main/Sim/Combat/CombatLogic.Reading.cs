@@ -174,7 +174,7 @@ namespace BinGames.Sim.Combat
         internal static float EffectiveCooldown(in CombatWeapon wp) => wp.Cooldown * (wp.Reading.CooldownScale > 0f ? wp.Reading.CooldownScale : 1f);
 
         /// <summary>FG11-FAC-01：某个单位这一发之后的冷却 = 武器冷却 × 超频冷却倍率（蓄热连射 / 强攻态 / 算力节点光环；没有超频记录 = 1）。</summary>
-        internal static float UnitCooldown(ref CombatData d, int i, in CombatWeapon wp) => EffectiveCooldown(wp) * OcCooldownFactor(ref d, i);
+        internal static float UnitCooldown(ref CombatData d, int i, in CombatWeapon wp) => EffectiveCooldown(wp) * OcCooldownFactor(ref d, i) * FlCooldownFactor(ref d, i); // FG13-FAC-01：编队打散后射速下降
 
         /// <summary>蓄力读法：出手间隔倍率 &gt; 1（少发高伤）。直控点击据此等蓄满。</summary>
         internal static bool IsCharged(in CombatWeapon wp) => wp.Reading.CooldownScale > 1f && wp.Cooldown > 0f;
@@ -1003,7 +1003,7 @@ namespace BinGames.Sim.Combat
         /// <summary>减速后的移动速度（状态到期后恢复）。</summary>
         internal static float SlowedSpeed(ref CombatData d, int i, float speed)
         {
-            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i) * OcSpeedFactor(ref d, i); // FG11-FAC-01：冲刺 / 前倾加速 / 极速态 / 停机 = 0；FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
+            speed *= ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i) * OcSpeedFactor(ref d, i) * FlSpeedFactor(ref d, i); // FG13-FAC-01：编队打散后速度下降 // FG11-FAC-01：冲刺 / 前倾加速 / 极速态 / 停机 = 0；FG10-FAC-01：受寒（液氮）减速、冻结 = 0；EMG1-ENT-01：穿过残骸减速
             if (d.StatusSlow[i] <= 0f || !d.StatusActive(i, d.Scalars[0].Time))
             {
                 return speed;

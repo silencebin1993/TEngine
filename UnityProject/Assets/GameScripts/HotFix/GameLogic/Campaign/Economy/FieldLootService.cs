@@ -49,6 +49,8 @@ namespace GameLogic.Campaign.Economy
         public static double TotalMs { get; private set; }
         public static int ChipsGranted { get; private set; }
         public static int TagsDelivered { get; private set; }
+        /// <summary>自检读：最近一次固件送回家园的提示文字。</summary>
+        public static string LastGrantText { get; private set; }
 
         private static readonly List<LootDropDef> RowScratch = new List<LootDropDef>(16);
 
@@ -272,7 +274,8 @@ namespace GameLogic.Campaign.Economy
             GuidanceHooks.Raise(HookFirstFieldDrop);
             // 稀有掉落给一条带位置的反馈（材料不刷屏）：写明协议去向“需要解析”。
             Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Pickup, at,
-                GameText.Format("loot.drop.enemy_item", item.Name, ItemProtocol.DestinationShort(ItemDestination.NeedsAnalysis)));
+                GameText.Format("loot.drop.enemy_item", item.Name, ItemProtocol.DestinationShort(
+                    FirmwareKinds.IsFirmware(target) ? ItemProtocol.DestinationOfFirmware(s, target) : ItemDestination.NeedsAnalysis))); // FG13-FAC-01：白潮的中立预制固件写“可直接使用”
         }
 
         /// <summary>FG8-LOOT-02：三选一分拣得到、又落在地上的敌方物品（丢弃 / 携带机器阵亡）登记身份——之后与野外掉落同一条搬运交付路径。</summary>
@@ -446,7 +449,11 @@ namespace GameLogic.Campaign.Economy
             GuidanceHooks.Raise(GuidanceHooks.SignalFirstEncryptedFirmware); // FG13 引导表“第一次拿到加密固件 → 解析台、裸跑”（内容在 FG15-UX-04）
             HomeValleyAnalysis.NoteEnemyItemSeen(s);
             string name = FirmwareKinds.DisplayName(firmwareId) ?? firmwareId;
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, GameText.Format(pending ? "loot.drop.firmware_pending" : "loot.drop.firmware_granted", name));
+            // FG13-FAC-01：中立预制固件（白潮掉落）不需要解析，提示写“可直接使用”
+            bool raw = FirmwareKinds.IsRaw(s, firmwareId);
+            LastGrantText = GameText.Format(raw ? (pending ? "loot.drop.firmware_pending" : "loot.drop.firmware_granted")
+                : (pending ? "loot.drop.firmware_direct_pending" : "loot.drop.firmware_direct"), name);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, LastGrantText);
             return true;
         }
 

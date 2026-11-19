@@ -880,6 +880,11 @@ namespace GameLogic.Progression
                 {
                     Core.GuidanceHooks.Raise("overclock.first_aura");
                 }
+                // FG13-FAC-01（DEBT-FG9UX01-02）：第一次遭遇白潮单位（按阵营列，不认敌人 ID）→ 引导钩子。
+                if (row.Faction == EnemyDefs.FactionFleet)
+                {
+                    Core.GuidanceHooks.Raise("fleet.first_encounter");
+                }
             }
         }
 

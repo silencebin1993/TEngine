@@ -55,7 +55,9 @@ namespace BinGames.Sim.Combat
         /// Emg 段追加段 36 每单位来源（状态位来源 + 相态来源）、段 37 斑块沾染来源、段 38 持久链归属（都只在非空时写）。读取仍认 1～22：归属后 4 格为空、没有来源记录（悬停“来源不明”）。
         /// 24 = FG12-EVT-02（FG10 FGR-EVT-012）：Emg 段追加段 39 掘进蠕虫（分节链：阶段、计时、速度、节距、弧长、存活掩码、耐久、破土次数、路线、各节单位；只在有蠕虫时写）。
         /// 读取仍认 1～23：没有蠕虫（段不存在 = 空表）。
-        public const int FormatVersion = 24;
+        /// 25 = FG13-FAC-01（FG09 第 8 章白潮专属语法）：行为参数行尾部追加白潮参数 17 个（编队 / 灭活光束 / 轨道打击 / 屏蔽 / 登陆舱 / 护盾）；
+        /// Emg 段追加段 40 白潮单位运行状态、段 41 轨道打击、段 42 灭活焦土（都只在非空时写）。读取仍认 1～24：参数为 0、三张表为空。
+        public const int FormatVersion = 25;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;
@@ -968,6 +970,11 @@ namespace BinGames.Sim.Combat
         Salvaged = 51,
         /// <summary>FG11-FAC-01：超频专属语法的提示（Unit=行为者，Value=预警秒数或半径，Pos=位置，Code 见 <see cref="CombatOverclockConst"/> Cue*，Code2 = 超频状态）。</summary>
         OverclockCue = 52,
+        /// <summary>FG13-FAC-01：白潮专属语法的提示（可丢；Unit=行为者，Other=目标 / 打击 Id，Value=预警秒数 / 半径，Pos=位置，Code 见 <see cref="CombatFleetConst"/> Cue*）。</summary>
+        FleetCue = 53,
+        /// <summary>FG13-FAC-01：白潮玩法事件（不丢）。Code = <see cref="CombatFleetConst"/>.EvtStrike（Other = 打击 Id，Value = 半径，Value2 = 建筑受损比例，Pos = 圆心）
+        /// 或 EvtPodLanded（Unit = 登陆舱，Other = 所属攻城队伍的键，Pos = 落点）。</summary>
+        FleetEvent = 54,
     }
 
     /// <summary>一次开火尝试的结果（编队攻击、直控点击都走 <see cref="CombatKernel.FireAt"/>；热更层映射成 Demo 同一套原因文本）。</summary>
@@ -1298,6 +1305,97 @@ namespace BinGames.Sim.Combat
         /// <summary>带任何超频参数（生成 / 换行时登记运行状态）。</summary>
         public readonly bool HasOverclock =>
             OcDashHeat > 0f || OcRampHeat > 0f || OcAuraRange > 0f || OcMeltHp > 0f || OcDeathBurst > 0f || OcLeanRate > 0f || OcModeCycle > 0f;
+
+        // ── FG13-FAC-01（格式 25，FG09 FGR-FAC-008 白潮专属语法；任何读法都可以带，0 = 没有；运行状态在 CombatData.Fleets / FleetStrikes / FleetMarks）──
+        /// <summary>编队飞行：多少米内的同类编队单位算同一编队；完整至少 <see cref="FlFormMin"/> 台（含自己）；打散后射速与速度 × <see cref="FlFormBroken"/>。</summary>
+        public float FlFormRange;
+        public float FlFormMin;
+        public float FlFormBroken;
+        /// <summary>灭活光束：预瞄线秒数（≥ 0.8）、光束长度（米）；焦土在来源被毁后 <see cref="FlBeamRecover"/> + 序号 × <see cref="FlBeamStagger"/> 秒恢复。</summary>
+        public float FlBeamWarn;
+        public float FlBeamLength;
+        public float FlBeamRecover;
+        public float FlBeamStagger;
+        /// <summary>轨道打击：倒计时（秒）、半径（米）、单位伤害、建筑受损比例、挑打击区的范围（米）。</summary>
+        public float FlStrikeDelay;
+        public float FlStrikeRadius;
+        public float FlStrikeDamage;
+        public float FlStrikeBuilding;
+        public float FlStrikeRange;
+        /// <summary>屏蔽塔：多少米内不能接入（热更层接入判定经 <see cref="CombatKernel.AnyUplinkBlockAt"/> 读）。</summary>
+        public float FlBlockRange;
+        /// <summary>登陆舱：落点预警 / 下落秒数（下落中不可被攻击、不可选中）。</summary>
+        public float FlPodWarn;
+        /// <summary>护盾：护盾值、每秒回充、停止受击后多少秒开始回充、带电荷时打在护盾上的伤害倍率。</summary>
+        public float FlShieldHp;
+        public float FlShieldRegen;
+        public float FlShieldDelay;
+        public float FlShieldElec;
+
+        /// <summary>带任何白潮参数（生成 / 换行时登记运行状态）。</summary>
+        public readonly bool HasFleet =>
+            FlFormRange > 0f || FlBeamLength > 0f || FlStrikeDelay > 0f || FlBlockRange > 0f || FlPodWarn > 0f || FlShieldHp > 0f;
+    }
+
+    /// <summary>FG13-FAC-01：一个带白潮参数的单位的运行状态（稀疏表，按单位 ID；快照 Emg 段 40）。单位阵亡 / 移除后下一次白潮阶段删记录。</summary>
+    public struct CombatFleet
+    {
+        public int Unit;
+        /// <summary><see cref="CombatFleetConst"/> StateNormal / StatePodFalling。</summary>
+        public byte State;
+        /// <summary>编队：1 = 完整（编队数 ≥ 下限）。</summary>
+        public byte Intact;
+        public byte Pad0;
+        public byte Pad1;
+        /// <summary>编队长机（同一编队里单位号最小的那台）。</summary>
+        public int Leader;
+        /// <summary>灭活光束：正在预瞄的目标单位号（0 = 没有）。</summary>
+        public int AimTarget;
+        /// <summary>预瞄到点 / 登陆舱落地时刻。</summary>
+        public double Until;
+        /// <summary>护盾剩余值与开始回充的时刻。</summary>
+        public float Shield;
+        public double ShieldAt;
+    }
+
+    /// <summary>FG13-FAC-01：一次轨道打击（快照 Emg 段 41）。Beacon != 0 时信标在倒计时内阵亡 = 取消；Beacon = 0 是热更层直接排的打击（FG13-END-03 清洗波次复用）。</summary>
+    public struct CombatFleetStrike
+    {
+        public int Id;
+        public int Beacon;
+        public double2 Center;
+        public float Radius;
+        public float Damage;
+        public float Building;
+        public double At;
+    }
+
+    /// <summary>FG13-FAC-01：一格灭活焦土（快照 Emg 段 42）。Cell = 格坐标（世界坐标四舍五入，与 GridMath.FromWorld 同一口径）；RecoverAt = 0 表示来源还在、不恢复。</summary>
+    public struct CombatFleetMark
+    {
+        public int2 Cell;
+        public int Source;
+        public float Recover;
+        public float Stagger;
+        public double RecoverAt;
+    }
+
+    public static class CombatFleetConst
+    {
+        public const byte StateNormal = 0;
+        public const byte StatePodFalling = 1;
+        public const int Fields = 10;
+        public const int StrikeFields = 9;
+        public const int MarkFields = 6;
+        /// <summary>一个地点最多同时有多少格灭活焦土（满了先挤掉正在恢复的最早一格，没有就挤掉最早一格）。</summary>
+        public const int MarkMax = 256;
+        /// <summary>一个地点最多同时排多少次轨道打击。</summary>
+        public const int StrikeMax = 64;
+        /// <summary>FleetCue 的代码。</summary>
+        public const byte CueBeamAim = 1, CueBeam = 2, CueInertRecover = 3, CueStrikeMark = 4, CueStrikeCancel = 5, CueStrike = 6, CuePodWarn = 7, CuePodLand = 8,
+            CueFormationBroken = 9, CueShieldBreak = 10;
+        /// <summary>FleetEvent 的代码。</summary>
+        public const byte EvtStrike = 1, EvtPodLanded = 2;
     }
 
     /// <summary>

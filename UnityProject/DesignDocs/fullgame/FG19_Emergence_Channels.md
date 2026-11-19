@@ -981,6 +981,7 @@
   - **EMG3-FW-01 现状更正（2026-11-05）**：上句“同一套编译器”尚未成立——敌方组装武器只共用旧读法表（`EnemySpawnBuilder.WeaponOf` → `CarrierReadings.Build`，不编程序、不走 `LegacySkip`），同一固件在玩家侧走声明轨、在敌方侧仍按旧 `readFields` 结算；敌方接同一套编译器归 EMG4-HIJ-01（DEBT-EMG3FW01-01），完成前 EMG4-CLEAN-01 不得删旧 `readFields`。
   - **FG11-FAC-01 现状更正（2026-11-17）**：上一句已过时——EMG4-HIJ-01 起敌方组装武器经 `CombatSite.EnemyWeapon` 与玩家同一编译器编程序，EMG4-CLEAN-01 起战斗不再读 `readFields`；敌方武器以 `CombatSite.EnemyWeapon` / `EnemySpawnBuilder.WeaponOf` 现状为准。FG11-FAC-01 起 Demo 与静默带武器的非首领敌人也加了 `assembled`（DEBT-FG9FAC02-04），首领不装配（组件列是固定奖励，待用户复核）。
 - 敌方单位行在 `fg.TbChannelDecl`（`ownerKind = enemy`）声明专属行为的读写端口；不得按单位 ID 写反应特例（FG10-FAC-01 卡片第 4 步补这一句）。
+  - **FG13-FAC-01（2026-11-19）**：白潮 5 类单位写了敌方声明行（登陆舱写 `chs.ground` 不写 `ent.unit`：实体族要五载体行）；屏蔽塔按 FG09“通用”不写声明行，拒绝接入挂在接入判定唯一入口。白潮专属语法只看敌人表 fl* 参数列（ADR-FAC-008）。
 - 反制原则（`ProjectA_GDD.md:385`）改为“针对你当前正在使用的通道交互”，反制必须预警、可读、可降低（沿用）。
 - **EMG2-BOSS-01 已落地（2026-11-04）**：澄净反制按在用程序的写端口判（`ClarityCounterService.PortGroupOf`）：写 `en.heat` / `mat.fire` 算燃烧，写 `en.elec` / `en.mag` / `fld.*` 算电磁，写 `grm.*` 算引信；一枚固件只归一族（燃烧 → 电磁 → 语法取第一个），分母是在用固件枚数（不按指令数：`fw_spread` 一枚有 9 行 modify，会压过别的程序），阈值键不变。反制锁定日电抗 1，次日在场单位恢复。铸造、寂听的反制仍按固件类别，等各自的回改卡。
 

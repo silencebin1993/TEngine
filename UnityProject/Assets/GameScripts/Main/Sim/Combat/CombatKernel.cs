@@ -473,6 +473,10 @@ namespace BinGames.Sim.Combat
                 {
                     CombatLogic.OcRegister(ref _d, slot); // FG11-FAC-01：超频运行状态（稀疏表）
                 }
+                if (cp.HasFleet)
+                {
+                    CombatLogic.FlRegister(ref _d, slot); // FG13-FAC-01：白潮运行状态（稀疏表；登陆舱从这一刻开始下落）
+                }
             }
             return id;
         }
@@ -1197,6 +1201,7 @@ namespace BinGames.Sim.Combat
             }
             _d.BProfile[i] = profile;
             CombatLogic.OcRegister(ref _d, i); // FG11-FAC-01：标志组件装卸 → 超频记录随之登记 / 删除
+            CombatLogic.FlRegister(ref _d, i); // FG13-FAC-01：同上（白潮参数）
             CombatSilentUnit sl = _d.Silent[i];
             sl.Still = 0f;
             sl.Reveal = 0f;
@@ -4474,11 +4479,41 @@ namespace BinGames.Sim.Combat
             {
                 w.Write(p.OcBurstHeat); // FG11-REACT-01：泄爆注热
             }
+            if (format >= 25)
+            {
+                // FG13-FAC-01（格式 25）：白潮专属语法参数。
+                w.Write(p.FlFormRange);
+                w.Write(p.FlFormMin);
+                w.Write(p.FlFormBroken);
+                w.Write(p.FlBeamWarn);
+                w.Write(p.FlBeamLength);
+                w.Write(p.FlBeamRecover);
+                w.Write(p.FlBeamStagger);
+                w.Write(p.FlStrikeDelay);
+                w.Write(p.FlStrikeRadius);
+                w.Write(p.FlStrikeDamage);
+                w.Write(p.FlStrikeBuilding);
+                w.Write(p.FlStrikeRange);
+                w.Write(p.FlBlockRange);
+                w.Write(p.FlPodWarn);
+                w.Write(p.FlShieldHp);
+                w.Write(p.FlShieldRegen);
+                w.Write(p.FlShieldDelay);
+                w.Write(p.FlShieldElec);
+            }
         }
 
         /// <summary>FG9-FAC-01：读回的静默参数不得为负 / 非数（偏折场有半径时三段计时必须为正，否则状态机会原地打转）。</summary>
         private static bool ProfileValid(in CombatBehaviorProfile p)
         {
+            // FG13-FAC-01：白潮参数不得为负 / 非数（比例字段另有上限）。
+            if (!NonNeg(p.FlFormRange) || !NonNeg(p.FlFormMin) || !NonNeg(p.FlFormBroken) || p.FlFormBroken > 1f || !NonNeg(p.FlBeamWarn) || !NonNeg(p.FlBeamLength)
+                || !NonNeg(p.FlBeamRecover) || !NonNeg(p.FlBeamStagger) || !NonNeg(p.FlStrikeDelay) || !NonNeg(p.FlStrikeRadius) || !NonNeg(p.FlStrikeDamage)
+                || !NonNeg(p.FlStrikeBuilding) || p.FlStrikeBuilding > 1f || !NonNeg(p.FlStrikeRange) || !NonNeg(p.FlBlockRange) || !NonNeg(p.FlPodWarn)
+                || !NonNeg(p.FlShieldHp) || !NonNeg(p.FlShieldRegen) || !NonNeg(p.FlShieldDelay) || !NonNeg(p.FlShieldElec))
+            {
+                return false;
+            }
             // FG11-FAC-01：超频参数不得为负 / 非数（热量与比例字段另有上限）。
             if (!NonNeg(p.OcDashSpeed) || !NonNeg(p.OcDashHeat) || !NonNeg(p.OcCool) || !NonNeg(p.OcShutdown) || !NonNeg(p.OcVuln) || !NonNeg(p.OcRampHeat)
                 || !NonNeg(p.OcRampMax) || !NonNeg(p.OcAuraRange) || !NonNeg(p.OcAuraRate) || !NonNeg(p.OcMeltHp) || p.OcMeltHp > 1f || !NonNeg(p.OcMeltFuse)
@@ -4771,6 +4806,27 @@ namespace BinGames.Sim.Combat
             if (format >= 22)
             {
                 p.OcBurstHeat = r.ReadSingle(); // FG11-REACT-01；≤ 21 版 = 0（不注热）
+            }
+            if (format >= 25)
+            {
+                p.FlFormRange = r.ReadSingle(); // FG13-FAC-01；≤ 24 版 = 0（没有白潮参数）
+                p.FlFormMin = r.ReadSingle();
+                p.FlFormBroken = r.ReadSingle();
+                p.FlBeamWarn = r.ReadSingle();
+                p.FlBeamLength = r.ReadSingle();
+                p.FlBeamRecover = r.ReadSingle();
+                p.FlBeamStagger = r.ReadSingle();
+                p.FlStrikeDelay = r.ReadSingle();
+                p.FlStrikeRadius = r.ReadSingle();
+                p.FlStrikeDamage = r.ReadSingle();
+                p.FlStrikeBuilding = r.ReadSingle();
+                p.FlStrikeRange = r.ReadSingle();
+                p.FlBlockRange = r.ReadSingle();
+                p.FlPodWarn = r.ReadSingle();
+                p.FlShieldHp = r.ReadSingle();
+                p.FlShieldRegen = r.ReadSingle();
+                p.FlShieldDelay = r.ReadSingle();
+                p.FlShieldElec = r.ReadSingle();
             }
             return p;
         }

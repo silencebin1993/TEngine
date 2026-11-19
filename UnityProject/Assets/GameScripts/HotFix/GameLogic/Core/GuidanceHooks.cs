@@ -766,6 +766,9 @@ namespace GameLogic.Core
             "event_director.first.decoy_terminal", "event_director.first.caravan",
             VibrationFirstOmen, // FG12-EVT-02（fgdata_worm.WORM_HOOKS）
             MegaFirstSite, MegaFirstStageDone, // FG13-END-01（fgdata_megastructure.MEGA_HOOKS）
+            // FG13-FAC-01 白潮（fgdata_fleet.FLEET_HOOKS；图鉴机制条目引用它们）。
+            "fleet.first_encounter", "fleet.first_formation_broken", "fleet.first_inert", "fleet.first_strike_mark", "fleet.first_uplink_blocked",
+            "fleet.first_pod", "fleet.first_shield_break",
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

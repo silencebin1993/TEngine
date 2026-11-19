@@ -54,7 +54,7 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>己方机器的移动速度（只吃受寒；状态标签的减速对己方机器的口径不在本卡改）。</summary>
-        internal static float ChillSpeed(ref CombatData d, int i, float speed) => speed * ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i) * OcSpeedFactor(ref d, i); // FG11-FAC-01：冲刺 / 停机 // EMG1-ENT-01：穿过残骸减速；EMG2-RECL-01：导线拦索
+        internal static float ChillSpeed(ref CombatData d, int i, float speed) => speed * ChillFactor(ref d, i) * EmgWreckSlow(ref d, i) * EmgWireSlow(ref d, i) * OcSpeedFactor(ref d, i) * FlSpeedFactor(ref d, i); // FG13-FAC-01：编队打散 // FG11-FAC-01：冲刺 / 停机 // EMG1-ENT-01：穿过残骸减速；EMG2-RECL-01：导线拦索
 
         /// <summary>这个单位的武器能不能打空中目标：格斗 / 力场 / 布区只打同层（FG18 FGR-AIR-010）；射弹、无人机能打；没有武器（只用来感知 / 后撤）算能看见。</summary>
         internal static bool CanHitAir(ref CombatData d, int i)
@@ -1055,6 +1055,14 @@ namespace BinGames.Sim.Combat
             CombatWeapon wp = d.Weapons[w];
             float sense = p.SenseRange > 0f ? p.SenseRange : wp.Range;
             int t = FindTarget(ref d, ref grid, i, sense, false, wp.TargetMode);
+            if (d.Fleets.Length > 0)
+            {
+                // FG13-FAC-01（FG09 第 8 章“完整编队一起转向、集火”）：完整编队里的空中单位跟随长机的目标；选中的目标记进命令，供编队里的僚机读
+                t = FlFollowTarget(ref d, i, t);
+                CombatCommand fc = d.Cmd[i];
+                fc.Target = t >= 0 ? d.Id[t] : 0;
+                d.Cmd[i] = fc;
+            }
             float c0 = d.Cycle[i] - dt;
             d.Cycle[i] = c0;
             if (t < 0)

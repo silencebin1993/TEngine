@@ -32,6 +32,10 @@ namespace BinGames.Sim.Combat
         public NativeList<CombatOverclock> Overclocks;
         /// <summary>FG12-EVT-02：掘进蠕虫（分节链；进快照段 39 与状态哈希）。</summary>
         public NativeList<CombatWorm> Worms;
+        /// <summary>FG13-FAC-01：白潮单位运行状态 / 轨道打击 / 灭活焦土（快照段 40～42）。</summary>
+        public NativeList<CombatFleet> Fleets;
+        public NativeList<CombatFleetStrike> FleetStrikes;
+        public NativeList<CombatFleetMark> FleetMarks;
         /// <summary>FG12-EVT-02：本步的大规模爆炸（x, y, 计次, 最大半径）；热更层每个世界步取走，不进快照。</summary>
         public NativeList<float4> WormBlasts;
         /// <summary>FG12-EVT-02：半径不小于多少格的爆炸算大规模（热更层按 env.vibration.blast_radius 写；0 = 不记）。派生量，不进快照。</summary>
@@ -103,6 +107,9 @@ namespace BinGames.Sim.Combat
             Hijacks = new NativeList<EmgHijack>(0, Allocator.Persistent);
             Overclocks = new NativeList<CombatOverclock>(0, Allocator.Persistent);
             Worms = new NativeList<CombatWorm>(0, Allocator.Persistent);
+            Fleets = new NativeList<CombatFleet>(0, Allocator.Persistent);
+            FleetStrikes = new NativeList<CombatFleetStrike>(0, Allocator.Persistent);
+            FleetMarks = new NativeList<CombatFleetMark>(0, Allocator.Persistent);
             WormBlasts = new NativeList<float4>(0, Allocator.Persistent);
             RadZones = new NativeList<float4>(0, Allocator.Persistent);
             CoolZones = new NativeList<float3>(0, Allocator.Persistent);
@@ -205,6 +212,9 @@ namespace BinGames.Sim.Combat
             Hijacks.Dispose();
             Overclocks.Dispose();
             Worms.Dispose();
+            Fleets.Dispose();
+            FleetStrikes.Dispose();
+            FleetMarks.Dispose();
             WormBlasts.Dispose();
             RadZones.Dispose();
             CoolZones.Dispose();
@@ -306,6 +316,9 @@ namespace BinGames.Sim.Combat
             Hijacks.Clear();
             Overclocks.Clear();
             Worms.Clear();
+            Fleets.Clear();
+            FleetStrikes.Clear();
+            FleetMarks.Clear();
             WormBlasts.Clear();
             Pits.Clear();
             PitAcc.Clear();

@@ -770,6 +770,7 @@ namespace GameLogic.EditorTools
             // 攻城单位专属参数与绝缘涂层、反制每日锁定（FGT-FAC-005）与情报行；反馈与图鉴；性能。
             Seg("FgClarityFactionSelfCheck", FgClarityFactionSelfCheck.Run);
             Seg("FgOverclockFactionSelfCheck", FgOverclockFactionSelfCheck.Run); // FG11-FAC-01
+            Seg("FgFleetFactionSelfCheck", FgFleetFactionSelfCheck.Run); // FG13-FAC-01：白潮舰队单位（编队 / 灭活光束 / 轨道打击 / 屏蔽塔 / 登陆舱 / 护盾、预制固件、快照段 40～42）
             Seg("FgHeatDataCitySelfCheck", FgHeatDataCitySelfCheck.Run); // FG11-REG-01
             Seg("FgOverclockReactionSelfCheck", FgOverclockReactionSelfCheck.Run); // FG11-REACT-01 超频反应开放：酸沼电解限速、超频内容下四条有源、图鉴 / 悬停、核心冷却按装配
             // FG10-REG-01 沉淀湖领地：模板与湖心平台锚点、防腐涂层（DEBT-FG8QST01-03）、没有涂层进酸沼先拒绝并说明（软门槛）、样品车接车点在带外、第一次进入的阵营介绍。

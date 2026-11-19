@@ -88,6 +88,9 @@ namespace GameLogic.Campaign.Grid
         // ── EMG4-TER-01（只追加）──
         /// <summary>FGR-EMG-152：熔坑上的空格不能建造（先用“清除场地物”填平；已有建筑不受影响）。</summary>
         MeltPit,
+        // ── FG13-FAC-01（只追加）──
+        /// <summary>FG09 第 8 章：灭活焦土（白潮净化步行机的灭活光束扫过）暂时不能建造；来源被毁后逐格恢复。已有建筑不受影响。</summary>
+        InertGround,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -162,6 +165,7 @@ namespace GameLogic.Campaign.Grid
                 // FG8-EXP-04（FG-GAP-127）：带参数（遗迹点坐标）的由 HomeGridService.ValidatePlacement 构造，这里给无参数时的稳定文本。
                 case GridBlockReason.RelicSite: return new GridReason(code, "grid.reason.relic_site_plain");
                 case GridBlockReason.MeltPit: return new GridReason(code, "grid.reason.melt_pit");
+                case GridBlockReason.InertGround: return new GridReason(code, "grid.reason.inert_ground");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }
