@@ -19,7 +19,7 @@ namespace BinGames.Presentation
         {
             Origin = origin;
             Revision++;
-            PresentationHost.Rebuild(RebuildReason.OriginShift);
+            PresentationHost.RequestRebuild(RebuildReason.OriginShift); // PL-INF-07：与读档 / 切地点同帧合并，下一次 Tick 统一重建
         }
 
         public static Vector3 ToRender(double3 world)

@@ -40,6 +40,12 @@ namespace GameLogic.EditorTools
             ("Lab", Lab),
             ("SimHashOnOff", SimHashOnOff),
             ("FeaturesDoc", FeaturesDoc),
+            // PL-INF-07 表现时钟与重建协议（PresentationClockValidate.cs）
+            ("ClockPause", PresentationClockValidate.ClockPause),
+            ("ClockSpeed", PresentationClockValidate.ClockSpeed),
+            ("ClockManualDeterminism", PresentationClockValidate.ClockManualDeterminism),
+            ("RebuildLoad", PresentationClockValidate.RebuildLoad),
+            ("RebuildSiteSwitch", PresentationClockValidate.RebuildSiteSwitch),
         };
 
         private static StringBuilder _report;
@@ -487,7 +493,7 @@ namespace GameLogic.EditorTools
 
         // ── Materials：唯一 Shader.Find 入口、缓存、实例化 ──
 
-        private static readonly string[] PlSourceDirs =
+        internal static readonly string[] PlSourceDirs =
         {
             "Assets/GameScripts/Main/Presentation",
             "Assets/GameScripts/HotFix/GameLogic/View/Presentation",

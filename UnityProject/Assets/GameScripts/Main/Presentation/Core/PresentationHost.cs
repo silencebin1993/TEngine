@@ -24,6 +24,7 @@ namespace BinGames.Presentation
         private static int _seenRevision = -1;
         private static bool _hostOn;
         private static GameObject _root;
+        private static int _pendingRebuild; // PL-INF-07：待重建原因位掩码（1 << RebuildReason），下一次 Tick 开头一次性处理
 
         /// <summary>总开关（对账后读缓存，零查表；开关刚变、还没对账时直接查登记表）。</summary>
         public static bool Enabled => _seenRevision == PresentationFeatureRegistry.Revision ? _hostOn : PresentationFeatureRegistry.IsOn(PresentationFeatureRegistry.HostId);
@@ -164,9 +165,35 @@ namespace BinGames.Presentation
             }
             if (!_hostOn)
             {
+                _pendingRebuild = 0; // 总开关关着时模块都已停用，重新开启走 OnEnable，不补发重建
                 return;
             }
             FrameCount++;
+            if (_pendingRebuild != 0)
+            {
+                int mask = _pendingRebuild;
+                _pendingRebuild = 0;
+                if ((mask & (1 << (int)RebuildReason.Reload)) != 0)
+                {
+                    Rebuild(RebuildReason.Reload);
+                }
+                else if ((mask & (1 << (int)RebuildReason.SiteSwitch)) != 0)
+                {
+                    Rebuild(RebuildReason.SiteSwitch);
+                }
+                else
+                {
+                    // OriginShift 与 Settings 互不包含：同帧都有就各调一次
+                    if ((mask & (1 << (int)RebuildReason.OriginShift)) != 0)
+                    {
+                        Rebuild(RebuildReason.OriginShift);
+                    }
+                    if ((mask & (1 << (int)RebuildReason.Settings)) != 0)
+                    {
+                        Rebuild(RebuildReason.Settings);
+                    }
+                }
+            }
             for (int i = 0; i < Modules.Count; i++)
             {
                 if (!Active[i])
@@ -184,6 +211,13 @@ namespace BinGames.Presentation
             }
         }
 
+        /// <summary>
+        /// PL-INF-07：登记一个重建原因，下一次 <see cref="Tick"/> 在驱动模块之前统一处理——每种原因同帧最多一次；有 Reload / SiteSwitch 时只调一次
+        /// （Reload 优先，视为全部重算），否则 OriginShift、Settings 各调一次（见 <see cref="RebuildReason"/>）。读档 / 切地点由 PresentationHostBridge 检测后调，原点平移由 PresentationSpace.SetOrigin 调。
+        /// </summary>
+        public static void RequestRebuild(RebuildReason reason) => _pendingRebuild |= 1 << (int)reason;
+
+        /// <summary>立即对全部启用中的模块调 Rebuild（不合并；正常路径用 <see cref="RequestRebuild"/>）。</summary>
         public static void Rebuild(RebuildReason reason)
         {
             for (int i = 0; i < Modules.Count; i++)

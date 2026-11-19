@@ -25,6 +25,12 @@ namespace GameLogic.View.Presentation
 
         private static bool _registered;
 
+        // PL-INF-07 重建检测（只读、O(1)、零分配）：上一帧看到的战役引用 / 观察地点 / 切换计数 / 是否在世界里
+        private static CampaignState _seenSession;
+        private static string _seenSiteId;
+        private static int _seenSwitchCount;
+        private static bool _seenInWorld;
+
         public static IReadOnlyList<IPresentationModule> GameModules => GameModulesTable;
 
         public static void Tick(bool inWorld)
@@ -50,12 +56,17 @@ namespace GameLogic.View.Presentation
             {
                 return;
             }
-            PresentationHost.Tick(BuildFrame(Time.unscaledDeltaTime, GameClock.FrameScaledDt, inWorld));
+            PresentationHost.Tick(LiveFrame(Time.unscaledDeltaTime, inWorld));
         }
+
+        /// <summary>PL-INF-07 Live 时钟：GameDt = GameClock.FrameScaledDt（暂停 0、含倍速与慢放），RealDt 由调用方给（正式路径 Time.unscaledDeltaTime）。会先做重建检测。</summary>
+        public static PresentationFrame LiveFrame(float realDt, bool inWorld) => BuildFrame(realDt, GameClock.FrameScaledDt, inWorld);
 
         /// <summary>
         /// 手动推进世界（WorldSimulation.StepMany 等，不经 GameClock 帧推进）后调。<paramref name="gameDt"/> 为本次推进的游戏秒，
         /// 例如 StepMany(n) 后传 <c>GameClock.StepSeconds * n</c>；省略（&lt; 0）时取 GameClock.FrameScaledDt——它只在 GameClock 的帧推进里赋值，StepMany 之后恒为 0。
+        /// 世界内采集要逐字节可复现：先 GameClock.ResetSession()，每帧 StepMany(n) 后 TickManual(dt, dt)。StepMany 推进 Ticks（GameSeconds / SmoothGameSeconds 照走），
+        /// 但不动 GameClock 的累计量，所以 StepAlpha / Paused / Speed / SlowMotion 取的是活的 GameClock 状态——不 ResetSession 时两次采集的 StepAlpha 可能不同。
         /// </summary>
         public static void TickManual(float realDt, float gameDt = -1f)
         {
@@ -64,8 +75,37 @@ namespace GameLogic.View.Presentation
                 CampaignSession.Current != null && WorldSimulation.AnyLoaded));
         }
 
-        public static PresentationFrame BuildFrame(float realDt, float gameDt, bool inWorld) =>
-            new PresentationFrame(realDt, gameDt, GameClock.GameSeconds, GameClock.Ticks, GameClock.StepAlpha, GameClock.Paused,
-                inWorld, WorldView.ObservedSiteId, WorldView.Camera);
+        /// <summary>拼一帧；同时做 PL-INF-07 重建检测（结果登记进宿主，宿主下一次 Tick 开头合并处理）。</summary>
+        public static PresentationFrame BuildFrame(float realDt, float gameDt, bool inWorld)
+        {
+            DetectRebuild(inWorld);
+            return new PresentationFrame(realDt, gameDt, GameClock.GameSeconds, GameClock.Ticks, GameClock.StepAlpha, GameClock.Paused,
+                inWorld, WorldView.ObservedSiteId, WorldView.Camera, GameClock.EffectiveSpeed, GameClock.SlowMotionFactor,
+                (GameClock.Ticks + (double)GameClock.StepAlpha) / GameClock.StepHz); // 同 BeltNetworkService 的 AnimationTime 写法
+        }
+
+        /// <summary>
+        /// PL-INF-07：CampaignSession.Current 换引用（读档 / 新开局 / 回主菜单，含 null ↔ 非 null）或 InWorld 由 true 变 false（退出战役清场）→ Reload；
+        /// 观察地点变了（ObserveSwitchCount 变化，或 ObservedSiteId 变化——全灭回家园不计数也要算）→ SiteSwitch。同帧多因由宿主合并成一次。
+        /// shortcut: 主线没有读档事件（FG15-SYS-01 建读档入口后），只能按引用比较；若改成原地覆盖同一个 CampaignState 对象，这里要改订阅事件。
+        /// </summary>
+        private static void DetectRebuild(bool inWorld)
+        {
+            CampaignState session = CampaignSession.Current;
+            if (!ReferenceEquals(session, _seenSession) || (_seenInWorld && !inWorld))
+            {
+                _seenSession = session;
+                PresentationHost.RequestRebuild(RebuildReason.Reload);
+            }
+            _seenInWorld = inWorld;
+            string site = WorldView.ObservedSiteId;
+            int switches = WorldView.ObserveSwitchCount;
+            if (switches != _seenSwitchCount || !string.Equals(site, _seenSiteId))
+            {
+                _seenSwitchCount = switches;
+                _seenSiteId = site;
+                PresentationHost.RequestRebuild(RebuildReason.SiteSwitch);
+            }
+        }
     }
 }
