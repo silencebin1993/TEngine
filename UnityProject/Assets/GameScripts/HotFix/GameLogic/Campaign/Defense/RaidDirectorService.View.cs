@@ -129,7 +129,7 @@ namespace GameLogic.Campaign.Defense
         }
 
         public static string OriginText(RaidPlanRecord p) =>
-            p?.OriginKind == OriginOutpost ? GameText.Get("raid.origin.outpost") : GameText.Get("raid.origin.fog");
+            p?.OriginKind == OriginOutpost ? GameText.Get("raid.origin.outpost") : p?.OriginKind == OriginOrbit ? GameText.Get("raid.origin.orbit") : GameText.Get("raid.origin.fog");
 
         /// <summary>编成文字：“步行机 ×4、护甲机 ×2（精英 1）”。</summary>
         public static string CompositionText(RaidPlanRecord p)

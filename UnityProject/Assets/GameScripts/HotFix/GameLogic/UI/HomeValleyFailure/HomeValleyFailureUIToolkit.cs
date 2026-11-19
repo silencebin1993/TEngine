@@ -192,6 +192,12 @@ namespace GameLogic.UI.HomeValleyFailure
             // 槽位号与主菜单一致从 1 开始；时间、阶段、时长都是玩家文字。
             _lastSaveLabel.text = GameText.Format("failure.lastsave", CampaignSlotText.SlotNumber(slot), CampaignSlotText.SavedAt(meta.WrittenAtUtc),
                 CampaignSlotText.PhaseName(meta.CampaignPhase), CampaignSlotText.PlayTime(meta.PlaySeconds));
+            // FG13-END-03（卡片“失败界面写明从哪一波重试”）：清洗波次中失败 → 写明读档后从第几波开始前重试（核心被毁后不再写盘，记录就是槽位里那一份的）。
+            string purge = Campaign.Endgame.PurgeWaveService.FailureRetryText(CampaignSession.Current);
+            if (!string.IsNullOrEmpty(purge))
+            {
+                _lastSaveLabel.text += "\n" + purge;
+            }
             return true;
         }
 

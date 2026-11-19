@@ -70,6 +70,15 @@ namespace GameLogic.Campaign.Defense
                 p.PostgameIndex = d.PostgameCount++;
             }
             SelectTarget(s, p);
+            if (def.Id == RaidCatalog.TriggerPurge)
+            {
+                // FG13-END-03（FGR-END-020“守住家园”）：清洗波次只打家园。
+                GridCell core = HomeGridService.CorePivot(s);
+                p.TargetKind = TargetHome;
+                p.TargetId = TargetHome;
+                p.TargetX = core.X;
+                p.TargetY = core.Y;
+            }
             if (def.Id == RaidCatalog.TriggerPurification)
             {
                 SelectPurifierTarget(s, p); // FG10-RAID-01 复核 #4：“针对净化塔”打净化塔最多的那一处
@@ -337,6 +346,14 @@ namespace GameLogic.Campaign.Defense
         /// <summary>出发地（FGR-DEF-023 / FGR-GEN-034）：所选阵营离目标最近的活跃（没被摧毁的）据点；没有合适的 → 迷雾外。</summary>
         private static void SelectOrigin(CampaignState s, RaidDirectorState d, RaidPlanRecord p)
         {
+            if (p.Trigger == RaidCatalog.TriggerPurge)
+            {
+                OrbitOrigin(s, p);
+                GridCell c0 = HomeGridService.CorePivot(s);
+                p.Octant = Economy.IntelService.Octant(p.OriginX - c0.X, p.OriginY - c0.Y);
+                p.IntervalMul = 1f;
+                return;
+            }
             OutpostRecord best = null;
             double bestD = double.MaxValue;
             double max = RaidCatalog.OriginMaxDistance;
@@ -377,6 +394,37 @@ namespace GameLogic.Campaign.Defense
             p.Octant = Economy.IntelService.Octant(p.OriginX - core.X, p.OriginY - core.Y);
             int destroyed = d.DestroyedByOctant != null && p.Octant >= 0 && p.Octant < d.DestroyedByOctant.Length ? d.DestroyedByOctant[p.Octant] : 0;
             p.IntervalMul = 1f + RaidCatalog.DestroyedOutpostIntervalBonus * destroyed;
+        }
+
+        /// <summary>
+        /// FG13-END-03：清洗波次从轨道登陆——登陆点在目标外 purge.drop_cells 格，方向按（世界种子, 计划序号）取（B25 不写死坐标）；
+        /// 那一点敌方走不通时沿 16 个方向依次试、再往近处收（最近不少于一半距离），都不行就用第一个方向（行进按“到达（受阻）”结算）。
+        /// </summary>
+        private static void OrbitOrigin(CampaignState s, RaidPlanRecord p)
+        {
+            p.OriginKind = OriginOrbit;
+            p.OriginId = p.Faction;
+            double dist = Math.Max(16.0, Grid.GridContent.TryGetTuning("purge.drop_cells", out float v) ? v : 56f);
+            double a0 = Hash01(s, p.Serial, 1, SaltTarget) * Math.PI * 2.0;
+            bool nav = NavReady(s);
+            for (int ring = 0; ring < 3; ring++)
+            {
+                double r = dist * (1.0 - ring * 0.25);
+                for (int k = 0; k < 16; k++)
+                {
+                    double a = a0 + k * Math.PI / 8.0;
+                    int x = p.TargetX + (int)Math.Round(Math.Cos(a) * r);
+                    int y = p.TargetY + (int)Math.Round(Math.Sin(a) * r);
+                    if (!nav || NavService.PassableNow(x, y, NavConst.ClassHostile))
+                    {
+                        p.OriginX = x;
+                        p.OriginY = y;
+                        return;
+                    }
+                }
+            }
+            p.OriginX = p.TargetX + (int)Math.Round(Math.Cos(a0) * dist);
+            p.OriginY = p.TargetY + (int)Math.Round(Math.Sin(a0) * dist);
         }
 
         /// <summary>
@@ -532,6 +580,40 @@ namespace GameLogic.Campaign.Defense
                 counts[cheapest] = 1;
                 total = 1;
                 remaining = 0;
+            }
+            if (p.Trigger == RaidCatalog.TriggerPurge)
+            {
+                // FG13-END-03（FGR-END-020“无人舰群分批登陆”）：清洗波次每波至少一个登陆舱（编成表标签 pod，不认 ID）；没抽到就把一台最便宜的换成它（总数不变）。
+                int pod = -1;
+                bool has = false;
+                for (int i = 0; i < n; i++)
+                {
+                    if (UnitScratch[i].HasTag(RaidCatalog.TagPod))
+                    {
+                        pod = pod < 0 ? i : pod;
+                        has |= counts[i] > 0;
+                    }
+                }
+                if (pod >= 0 && !has)
+                {
+                    int swap = -1;
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (counts[i] - elites[i] > 0 && (swap < 0 || UnitScratch[i].Points < UnitScratch[swap].Points))
+                        {
+                            swap = i;
+                        }
+                    }
+                    if (swap >= 0)
+                    {
+                        counts[swap]--;
+                    }
+                    else
+                    {
+                        total++;
+                    }
+                    counts[pod]++;
+                }
             }
             if (total >= cap)
             {

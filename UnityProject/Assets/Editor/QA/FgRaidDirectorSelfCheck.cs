@@ -471,7 +471,7 @@ namespace GameLogic.EditorTools
             bool init = Math.Abs(RaidCatalog.MinIntervalDays - 1f) < 1e-4 && Math.Abs(RaidCatalog.MinWarningHours - 1.5f) < 1e-4 && Math.Abs(RaidCatalog.IntelLeadDays - 1f) < 1e-4
                         && Math.Abs(RaidCatalog.TimeLimitHours - 1f) < 1e-4 && RaidCatalog.LevelBudget(1) == 100 && RaidCatalog.LevelBudget(2) == 250 && RaidCatalog.LevelBudget(3) == 500
                         && RaidCatalog.LevelBudget(4) == 900 && Math.Abs(RaidCatalog.ActCoef(1) - 1f) < 1e-4 && Math.Abs(RaidCatalog.ActCoef(2) - 1.6f) < 1e-4
-                        && Math.Abs(RaidCatalog.ActCoef(3) - 2.4f) < 1e-4 && RaidCatalog.MaxUnits == 200 && RaidCatalog.Triggers.Count == 6
+                        && Math.Abs(RaidCatalog.ActCoef(3) - 2.4f) < 1e-4 && RaidCatalog.MaxUnits == 200 && RaidCatalog.Triggers.Count == 7
                         && RaidCatalog.StoryOnly("Builder") && !RaidCatalog.StoryOnly("Standard") && Math.Abs(RaidCatalog.DifficultyFrequency("Harsh") - 1.3f) < 1e-4
                         && Math.Abs(RaidCatalog.DifficultyWarning("Harsh") - 0.8f) < 1e-4 && Math.Abs(RaidCatalog.DifficultyScale("Builder") - 0.5f) < 1e-4
                         && Math.Abs(RaidDirectorService.MinWarningTicks(new CampaignState { DifficultyId = "Standard" }) - GameClock.TicksFor(75)) <= 1;

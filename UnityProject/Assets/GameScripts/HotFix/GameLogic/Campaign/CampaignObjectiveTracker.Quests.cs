@@ -1310,6 +1310,11 @@ namespace GameLogic.Campaign
                     return GameText.Format("quest.prog.destroy", TerritoryControlService.OutpostName(o), o.Tier.ToString(CultureInfo.InvariantCulture));
                 }
                 case QuestCatalog.KindEvent:
+                    // FG13-END-03：守住家园写明撑过了几波清洗。
+                    if (q.Param == Endgame.PurgeWaveService.ClearedEventId && Endgame.PurgeWaveService.QuestProgressText(state) is string purge)
+                    {
+                        return purge;
+                    }
                     // FG13-END-02：返航工程写明当前阶段 / 待点亮；其余终局节点写目标说明。
                     if (q.Param == Endgame.RevealService.RevealedEventId && !Endgame.MegastructureService.AllDone(state))
                     {

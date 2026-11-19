@@ -682,6 +682,9 @@ namespace GameLogic.EditorTools
             Seg("FgMegastructureSelfCheck", FgMegastructureSelfCheck.Run);
             // FG13-END-02 揭示（FG11 FGR-END-010，FGT-END-003）：信标点火 → 点亮信标二次确认 → 揭示演出（镜头转向天空、三个正式名、伏笔接上）→ 轨道威胁 HUD / 任务更新 / 音乐切换 → 演出前后各自动存档；跳过、重看、演出中退出、负向、倍速、观察一致。
             Seg("FgRevealSelfCheck", FgMegastructureSelfCheck.RunReveal);
+            // FG13-END-03 清洗波次（FG11 FGR-END-020，FGT-END-004）：揭示后 2 个游戏日内 3 波白潮登陆舱突袭（攻城队伍里的舱投放同一队伍）、每波预警时自动存档、撑过 3 波写事件账本；
+            // 核心被毁 → 失败页写明从第几波重试、读档不重复奖励；轨道打击提前 30 秒标出；暂停与 0.5x～3x、存读档、观察一致、建造者难度、旧档。
+            Seg("FgPurgeWaveSelfCheck", FgPurgeWaveSelfCheck.Run);
             // FG7-ENV-03 天气与顶棚（FG07 FGR-ENV-020 / 021 / 030，FG03 FGR-LOG-028 / 045，FGT-ENV-004）：数据与源数据逐行；按种子排定（持续、频率随幕）；预报（0.5 日预警 / 监听站 T2 破译 3 日）；
             // 顶棚（研究门槛、拖拽全有或全无、机器施工、下面照常建造、拆除返还、取消、隐藏 / 半透明、叠加层、建造模式拖拽）；酸雨 / 沙暴 / 寒潮效果与顶棚覆盖（露天掉耐久、污染加倍、摧毁留虚影、
             // 传送带减速、太阳能、炮塔探测、结冰阻断流动、伴热管、冰霜画面、散热）；负向矩阵（与静默夜叠加等）；暂停与 0.5x～3x、观察一致、真文件存读档；界面与设置；性能。

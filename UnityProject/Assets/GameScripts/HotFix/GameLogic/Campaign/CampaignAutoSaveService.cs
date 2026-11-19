@@ -64,6 +64,7 @@ namespace GameLogic.Campaign
             }
             WorldSim.WorldSimulation.SyncAllForSave();
             MachineRegistry.ExportToCampaignState(state);
+            Endgame.PurgeWaveService.BeforeSave(state); // FG13-END-03：记下这份存档读回后从第几波清洗开始前重试（失败页写明）
             return CampaignSaveService.Save(slotIndex, state, reason);
         }
     }

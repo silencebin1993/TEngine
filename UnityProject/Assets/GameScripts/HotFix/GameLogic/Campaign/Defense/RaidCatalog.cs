@@ -65,6 +65,10 @@ namespace GameLogic.Campaign.Defense
         public const string TriggerMegastructure = "megastructure";
         public const string TriggerPurification = "purification";
         public const string TriggerHarass = "harass";
+        /// <summary>FG13-END-03（FG11 FGR-END-020）：清洗波次（白潮登陆舱投送；<see cref="Endgame.PurgeWaveService"/> 发动）。</summary>
+        public const string TriggerPurge = "purge";
+        /// <summary>FG13-END-03：编成表标签 pod = 登陆舱（清洗波次每波至少一个，<see cref="RaidDirectorService.Compose"/> 按标签保底）。</summary>
+        public const string TagPod = "pod";
         public const string StoryRuleFoundryCore = "foundry_core";
         /// <summary>FG9-FAC-01：寂听主脑被击败（静默领地平定、静默报复突袭）。</summary>
         public const string StoryRuleSilentMind = "silent_mind";

@@ -27,8 +27,11 @@ namespace GameLogic.Campaign.Defense
                 return 0;
             }
             int absorbed = p.AbsorbedIds?.Length ?? 0;
-            return p.Trigger != RaidCatalog.TriggerStory ? 1 + absorbed : absorbed;
+            return !KeptWhenStoryOnly(p.Trigger) ? 1 + absorbed : absorbed;
         }
+
+        /// <summary>“只有剧情突袭”（建造者）下照样来的触发：剧情突袭与清洗波次（FG13-END-03：终局主线）。HandleTrigger 与中途改难度同一口径。</summary>
+        public static bool KeptWhenStoryOnly(string trigger) => trigger == RaidCatalog.TriggerStory || trigger == RaidCatalog.TriggerPurge;
 
         /// <summary>改成“只有剧情突袭”时一共会取消几波还没预警的非剧情突袭（不改状态）。</summary>
         public static int StoryOnlyCancelCount(CampaignState s)
@@ -62,9 +65,9 @@ namespace GameLogic.Campaign.Defense
                 {
                     continue;
                 }
-                if (storyOnly && p.Trigger != RaidCatalog.TriggerStory)
+                if (storyOnly && !KeptWhenStoryOnly(p.Trigger))
                 {
-                    // 与 HandleTrigger 同一口径：建造者只有剧情突袭（静默夜 / 巨构虽不受最短间隔限制，也不是剧情）。
+                    // 与 HandleTrigger 同一口径：建造者只有剧情突袭（静默夜 / 巨构虽不受最短间隔限制，也不是剧情；清洗波次照来）。
                     cancelled += StoryOnlyCancelCount(p);
                     p.State = StateCancelled;
                     p.EndReason = EndCancelled;

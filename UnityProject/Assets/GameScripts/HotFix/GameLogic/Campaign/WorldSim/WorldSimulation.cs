@@ -613,6 +613,8 @@ namespace GameLogic.Campaign.WorldSim
                 WorldOutpostSystem.Step(state, GameClock.Ticks);
                 // FG6-DEF-04：突袭导演（触发 → 排定 → 预警 → 出发 → 跟踪），在队伍与据点之后：本步派出的队伍下一步起行进。只看步序号，与观察无关，O(计划数)。
                 Defense.RaidDirectorService.WorldStep(state, GameClock.Ticks);
+                // FG13-END-03：清洗波次（揭示后 3 波交给突袭导演、周期性轨道打击；只看步序号，与观察无关，每步 O(1)）。
+                Endgame.PurgeWaveService.WorldStep(state, GameClock.Ticks);
                 // FG8-EXP-03：领地控制（控制度、首领 → 平定、收复、阵营增援重建、精英残部、骚扰），每 territory.control.sync_seconds 一次 O(领地数)；只看步序号，与观察无关。
                 TerritoryControlService.WorldStep(state, GameClock.Ticks);
                 // FG9-FAC-01（FGR-FAC-004）：静默反制每个游戏日锁定一次（日切那一步；平时 O(1)）。

@@ -127,6 +127,40 @@ namespace GameLogic.Campaign
         /// <summary>FG13-END-01（FG11 第 10 节“巨构各阶段进度”）：返航工程的进度。存在战役状态里、不在工地建筑上——工地被摧毁 / 拆掉重建后接着当前阶段（FGR-END-002 不倒退）。
         /// 唯一写入口 <c>GameLogic.Campaign.Endgame.MegastructureService</c>。旧存档没有 = 第一阶段、全部为 0。</summary>
         public MegastructureState Mega = new MegastructureState();
+        /// <summary>FG13-END-03（FG11 FGR-END-020）：清洗波次进度（揭示之后 2 个游戏日内 3 波、周期性轨道打击）。唯一写入口 <c>GameLogic.Campaign.Endgame.PurgeWaveService</c>。
+        /// 旧存档没有 = 还没开始（揭示过的存档载入后下一步开始）。</summary>
+        public PurgeWaveState Purge = new PurgeWaveState();
+    }
+
+    /// <summary>FG13-END-03：清洗波次进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
+    [Serializable]
+    public sealed class PurgeWaveState
+    {
+        /// <summary>开始（揭示状态落定后第一步）的那一步；-1 = 还没开始。</summary>
+        public long StartTick = -1;
+        /// <summary>已交给突袭导演的波数（0～3）与已打完（全歼 / 撤退）的波数。</summary>
+        public int Launched;
+        public int Cleared;
+        /// <summary>进行中这一波的计划编号（导演建好计划后填；空 = 还没建好 / 没有进行中的波次）与发动那一步。</summary>
+        public string ActivePlanId = string.Empty;
+        public long LaunchTick = -1;
+        /// <summary>上一波打完的那一步（-1 = 还没有）；下一波至少隔 purge.wave_gap_seconds。</summary>
+        public long LastClearTick = -1;
+        /// <summary>这一波被导演取消 / 没建出计划时，最早重新发动的那一步（-1 = 没有）；不计入打完。</summary>
+        public long RetryTick = -1;
+        /// <summary>各波发动 / 打完的那一步（按波序；没到 = -1）。</summary>
+        public long[] LaunchTicks = { -1, -1, -1 };
+        public long[] ClearTicks = { -1, -1, -1 };
+        /// <summary>撑过全部波次的那一步（-1 = 还没有）。</summary>
+        public long DoneTick = -1;
+        /// <summary>下一次轨道打击排定的那一步（-1 = 不再排）、已排的次数与最近一次的内核打击编号 / 落点。</summary>
+        public long NextStrikeTick = -1;
+        public int StrikeCount;
+        public int LastStrikeId;
+        public float LastStrikeX;
+        public float LastStrikeY;
+        /// <summary>最近一次写盘时“读档后从第几波开始前重试”（核心被摧毁后不再写盘，失败页按它写明）；0 = 写盘时清洗还没开始 / 已撑过。</summary>
+        public int SavedRetryWave;
     }
 
     /// <summary>FG13-END-01：返航工程进度（五个巨构阶段，fg.TbMegaStage）。</summary>
@@ -3031,6 +3065,16 @@ namespace GameLogic.Campaign
             s.Progress.Pacing ??= Array.Empty<ActPaceRecord>(); // FG9-ACT1-01：旧存档没有节奏台账 = 空（载入时按事实补记）
             s.Progress.Mega ??= new MegastructureState(); // FG13-END-01：旧存档没有返航工程 = 第一阶段、全部为 0
             s.Progress.Mega.Done ??= Array.Empty<MegaStageDoneRecord>();
+            s.Progress.Purge ??= new PurgeWaveState(); // FG13-END-03：旧存档没有清洗波次 = 还没开始
+            s.Progress.Purge.ActivePlanId ??= string.Empty;
+            if (s.Progress.Purge.LaunchTicks == null || s.Progress.Purge.LaunchTicks.Length != 3)
+            {
+                s.Progress.Purge.LaunchTicks = new long[] { -1, -1, -1 };
+            }
+            if (s.Progress.Purge.ClearTicks == null || s.Progress.Purge.ClearTicks.Length != 3)
+            {
+                s.Progress.Purge.ClearTicks = new long[] { -1, -1, -1 };
+            }
             if (s.Progress.NarrativeSerial < 1)
             {
                 s.Progress.NarrativeSerial = 1;

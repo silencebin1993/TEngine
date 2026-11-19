@@ -164,7 +164,8 @@ namespace GameLogic.UI.Kit
                 UiTooltip.Attach(_orbitalThreat, () => new TooltipContent
                 {
                     Title = GameText.Get("mega.hud.orbital_threat_tip_title"),
-                    Body = GameText.Get("mega.hud.orbital_threat_tip"),
+                    Body = GameText.Get("mega.hud.orbital_threat_tip") + "\n\n" + GameText.Format("purge.hud.tip", Campaign.Endgame.PurgeWaveService.WaveCount,
+                        Mathf.RoundToInt(Campaign.Endgame.PurgeWaveService.StrikeWarnSeconds)),
                 });
             }
             _resRow = root.Q<VisualElement>("WorldResourceRow");
@@ -684,7 +685,9 @@ namespace GameLogic.UI.Kit
                 bool orbital = Campaign.Endgame.RevealService.OrbitalThreatActive(state);
                 if (orbital)
                 {
-                    _orbitalThreat.text = GameText.Get("mega.hud.orbital_threat");
+                    // FG13-END-03：清洗波次的进度与倒计时、下一次轨道打击接在“轨道威胁”后面（没开始 = 只有轨道威胁）。
+                    string purge = Campaign.Endgame.PurgeWaveService.HudText(state, GameClock.Ticks);
+                    _orbitalThreat.text = string.IsNullOrEmpty(purge) ? GameText.Get("mega.hud.orbital_threat") : GameText.Get("mega.hud.orbital_threat") + " · " + purge;
                 }
                 SetVisible(_orbitalThreat, orbital);
             }

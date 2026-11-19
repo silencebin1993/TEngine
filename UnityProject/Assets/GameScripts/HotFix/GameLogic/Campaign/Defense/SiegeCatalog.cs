@@ -411,7 +411,9 @@ namespace GameLogic.Campaign.Defense
                 float range = e == null ? 0f : Pick(row.Range, e.WeaponRange);
                 float damage = e == null ? 0f : Pick(row.Damage, e.WeaponDamage);
                 float cooldown = e == null ? 0f : Pick(row.Cooldown, e.WeaponCooldown);
-                if (row == null || e == null || speed <= 0f || range <= 0f || damage <= 0f || cooldown <= 0f || row.ProjectileSpeed <= 0f)
+                // FG13-END-03：固定结构（敌人表标签 structure，例如登陆舱）可以不移动、没有武器（攻城时原地不动、不开火），与生成器 fgdata_siege.validate 同口径。
+                bool structure = e != null && Content.EnemyDefs.HasTag(e, "structure");
+                if (row == null || e == null || (!structure && (speed <= 0f || range <= 0f || damage <= 0f || cooldown <= 0f)) || row.ProjectileSpeed <= 0f)
                 {
                     ProblemList.Add($"fg.TbSiegeUnit {row?.EnemyTypeId}：敌人不在 fg.TbMechEnemy 或合并后的参数 ≤ 0");
                     continue;

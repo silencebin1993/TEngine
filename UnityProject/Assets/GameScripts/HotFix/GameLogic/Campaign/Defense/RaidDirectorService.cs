@@ -37,6 +37,8 @@ namespace GameLogic.Campaign.Defense
 
         public const string OriginOutpost = "outpost";
         public const string OriginFog = "fog";
+        /// <summary>FG13-END-03：清洗波次从轨道登陆（登陆点在家园外，见 OrbitOrigin）。</summary>
+        public const string OriginOrbit = "orbit";
         public const string TargetHome = "home";
         public const string TargetOutpost = "outpost";
 
@@ -332,6 +334,21 @@ namespace GameLogic.Campaign.Defense
             return true;
         }
 
+        /// <summary>
+        /// FG13-END-03（FG11 FGR-END-020）：清洗波次的一波（<see cref="Endgame.PurgeWaveService"/> 调用）：触发 purge，阵营 = <paramref name="faction"/>（白潮），等级 = <paramref name="level"/>；
+        /// <paramref name="waveId"/> 记进计划的 StoryId（清洗服务据此认出自己的那一波）。不受最短间隔限制、建造者难度照样来；目标固定是家园、登陆点在核心外 purge.drop_cells 格（见 <see cref="SelectOrigin"/>）。
+        /// </summary>
+        public static bool RequestPurgeWave(CampaignState s, string faction, int level, string waveId)
+        {
+            if (s?.Raids == null)
+            {
+                return false;
+            }
+            EnsureState(s);
+            Enqueue(s.Raids.Director, RaidCatalog.TriggerPurge, Math.Max(1, Math.Min(4, level)), faction, waveId);
+            return true;
+        }
+
         /// <summary>静默夜开始（FG07；静默夜系统 FG7-ENV-02 调用）：每次静默夜必定有一次突袭，不受最短间隔限制。</summary>
         public static bool OnSilentNightStarted(CampaignState s) => EnqueueKind(s, RaidCatalog.TriggerSilentNight, null);
 
@@ -529,9 +546,9 @@ namespace GameLogic.Campaign.Defense
                 Log.Warning($"[RaidDirector] 不认识的触发 {t.Kind}，跳过。");
                 return;
             }
-            if (DifficultyService.StoryOnly(s) && t.Kind != RaidCatalog.TriggerStory)
+            if (DifficultyService.StoryOnly(s) && !KeptWhenStoryOnly(t.Kind))
             {
-                // FG16 第 3 节：建造者难度只有剧情突袭。
+                // FG16 第 3 节：建造者难度只有剧情突袭（FG13-END-03：清洗波次是终局主线，同剧情突袭一样照来）。
                 d.TriggersSkipped++;
                 return;
             }
