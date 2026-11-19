@@ -123,6 +123,8 @@ namespace GameLogic.EditorTools
                 Step(CheckTimingMatrix);
                 Step(CheckObservedEqualsUnobserved);
                 Step(CheckSaveLoadWarned);
+                Step(CheckSaveLoadAfterImpact);
+                Step(CheckImpactHomeUnloaded);
                 Step(CheckPerformance);
                 foreach (string p in PerfLines)
                 {
@@ -865,6 +867,100 @@ namespace GameLogic.EditorTools
                    && continuous.Contains("|wreck:"),
                 $"S1 负向“事件进行中存档”——预警中（还剩 30 秒）：真文件存档 → 读档后落点、倒计时与地图落点圈一致（读回 {loaded == before}，圈 {mapAfter}），" +
                 $"继续跑到撞击后与不存档逐字段一致（{after == continuous}" + (after == continuous ? string.Empty : $"，首个差异 …{continuous.Substring(Math.Max(0, diffAt - 40), Math.Min(100, continuous.Length - Math.Max(0, diffAt - 40)))}") + "）");
+        }
+
+        /// <summary>S2（FG12-EVT-04 修复轮 1 审查 P2，承接 FG12-E2E-01）：撞击完成后真文件存档再读档，坠落残骸（位置 / 耐久 / 质量）仍在内核里。</summary>
+        private static void CheckSaveLoadAfterImpact()
+        {
+            CampaignState s = World(5502, true);
+            Vector2? spot = LandingSpot(s, 16f, 30f);
+            if (!spot.HasValue)
+            {
+                Fail("S2 测试准备：找不到合适的落点");
+                return;
+            }
+            Vector2 at = spot.Value;
+            FgProductionSelfCheck.ParkMachinesAwayFrom(Site, at, 20f);
+            if (ToWarned(s, at) == null || !StepUntil(() => OrbitalDropService.Impacts > 0, 70))
+            {
+                Fail("S2 没能走到撞击");
+                return;
+            }
+            WorldSimulation.StepMany(4);
+            bool had = TryWreck(OrbitalDropService.LastWreckId, out EmgWreck w0);
+            string before = Snap(s);
+            WorldSimulation.SyncAllForSave();
+            int slot = CampaignSession.ActiveSlotIndex;
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(slot, SaveReason.Manual);
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            HomeValleyPowerGrid.ResetForTests();
+            ProductionService.ResetForTests();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(slot);
+            if (!rr.Success)
+            {
+                Fail("S2 读档失败：" + rr.Message);
+                return;
+            }
+            CampaignSession.Set(slot, rr.State);
+            WorldSimulation.LoadHome(resume: true);
+            EmgWreck w1 = default;
+            bool found = false;
+            CombatSite site = Site;
+            for (int i = 0; site != null && i < site.Kernel.WreckCount && !found; i++)
+            {
+                found = site.Kernel.TryGetWreck(i, out w1) && math.distance(w1.Pos, new double2(at.x, at.y)) < 1e-3 && Mathf.Approximately(w1.Radius, w0.Radius);
+            }
+            string loaded = Snap(rr.State);
+            bool same = found && Mathf.Approximately(w1.Hp, w0.Hp) && Mathf.Approximately(w1.Mass, w0.Mass) && w1.NoSalvage == w0.NoSalvage && site.Kernel.PickWreck(new double2(at.x, at.y), 0.2f) >= 0;
+            Expect(had && save.Success && same && loaded == before && Loot(rr.State).Count >= 3,
+                $"S2 撞击后存档 → 读档：坠落残骸仍在落点（{found}；耐久 {w0.Hp:F0} → {w1.Hp:F0}、质量 {w0.Mass} → {w1.Mass}、可拆解 {w1.NoSalvage == 0}、空间哈希可点选），" +
+                $"导演历史、建筑、残骸处材料逐字段一致（{loaded == before}，材料 {Loot(rr.State).Count} 堆）");
+        }
+
+        /// <summary>S3（FG12-EVT-04 修复轮 1 审查 P2，承接 FG12-E2E-01）：预警中家园被卸载（没有星球战斗内核）时到点撞击——不崩溃，圈内建筑照常受创、
+        /// 残骸处材料照常掉落、事件以 success 结束；没有内核就不生成内核残骸、不波及单位。</summary>
+        private static void CheckImpactHomeUnloaded()
+        {
+            CampaignState s = World(5503, false);
+            Vector2? spot = LandingSpot(s, 16f, 30f);
+            if (!spot.HasValue)
+            {
+                Fail("S3 测试准备：找不到合适的落点");
+                return;
+            }
+            Vector2 at = spot.Value;
+            BuildingRecord inside = Register(s, KeyType, FreeNear(s, KeyType, at, 0f, 1f).Value);
+            float inMax = BuildingOps.MaxDurability(KeyType);
+            if (ToWarned(s, at) == null)
+            {
+                Fail("S3 没能开始预警");
+                return;
+            }
+            WorldSimulation.UnloadAll(); // 家园卸载、战役状态与时钟留着：世界步只跑状态层（导演、震动、天气……）
+            bool unloaded = WorldSimulation.Home == null && ReferenceEquals(CampaignSession.Current, s);
+            Exception thrown = null;
+            bool hit = false;
+            try
+            {
+                hit = StepUntil(() => OrbitalDropService.Impacts > 0, 70);
+                WorldSimulation.StepMany(4);
+            }
+            catch (Exception e)
+            {
+                thrown = e;
+            }
+            float frac = GridContent.TryGetTuning("event.orbital_drop.building_damage_frac", out float bf) ? bf : 0.8f;
+            BuildingRecord b = HomeGridService.FindBuilding(s, inside.BuildingId);
+            float loss = b == null ? inMax : inMax - b.Health;
+            EventDirectorHistoryRecord h = LastHistory(s);
+            List<GroundItemRecord> loot = Loot(s);
+            Expect(unloaded && thrown == null && hit && Math.Abs(loss - frac * inMax) < 1f && OrbitalDropService.LastBuildingsHit >= 1
+                   && OrbitalDropService.LastWreckId == 0 && OrbitalDropService.LastUnitsHit == 0
+                   && h != null && h.Outcome == EventDirectorService.OutcomeSuccess && loot.Count >= 3 && loot.All(g => Vector2.Distance(g.Position, at) < 4f),
+                $"S3 家园未载入时撞击（卸载 {unloaded}）：不抛异常（{thrown?.GetType().Name ?? "无"}）、圈内建筑照常受创（{loss:F0} = {inMax:F0} × {frac}）、" +
+                $"不生成内核残骸（{OrbitalDropService.LastWreckId}）、不波及单位（{OrbitalDropService.LastUnitsHit}）、历史 {h?.Outcome}、残骸处材料 {loot.Count} 堆" +
+                (thrown == null ? string.Empty : "；异常：" + thrown.Message));
         }
 
         // ── P 性能 ─────────────────────────────────────────────────────────────

@@ -352,9 +352,20 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (r.State == EventDirectorService.StateActive && r.Target != 0 && SignalSeizeService.IsSeized(r.Target) && c.Get("ghost.how", string.Empty).Length == 0)
             {
-                UplinkRequestResult res = SignalUplinkService.Request(r.Target, UplinkSource.MachineList, startCamera: false);
-                c.Set("ghost.how", res.Accepted ? $"机器列表反向接入 {FgjM1Journey.Label(r.Target)}，3 秒后夺回" : $"反向接入 {FgjM1Journey.Label(r.Target)} 被拒（{res.Failure}），等它到时归还");
-                c.Log(c.Get("ghost.how"));
+                // 正式输入（FgMilestoneM10SelfCheck A2：旅程不直调业务方法）：命令栏机器列表点被夺控的那台 = 反向接入（RegionCommandBarUIToolkit → 机器列表入口，覆盖判定沿用 FG01，不拉镜头）。
+                // 列表不在可见区时 ClickMachineList 先滚一下、下一帧再点；点 3 次都点不到就如实记下，等它到时归还（结果看事件历史）。
+                int tries = c.GetInt("ghost.tries") + 1;
+                c.SetInt("ghost.tries", tries);
+                FgjM1Journey.ClickMachineList(c, r.Target);
+                string fail = c.Get("uiFail", string.Empty);
+                c.Set("uiFail", string.Empty);
+                if (fail.Length == 0 || tries >= 3)
+                {
+                    c.Set("ghost.how", fail.Length == 0
+                        ? $"命令栏机器列表点 {Label(r.Target)} 发起反向接入（反馈“{SignalUplinkService.LastFeedbackText}”）"
+                        : $"机器列表点 {Label(r.Target)} 失败（{fail}），等它到时归还");
+                    c.Log(c.Get("ghost.how"));
+                }
             }
             return StepOutcome.Wait;
         }
