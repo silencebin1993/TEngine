@@ -42,7 +42,7 @@ namespace GameLogic.EditorTools
     /// N 负向（受损暂停不倒退、被摧毁暂停 + 重建接着做、物资供给中断、缺电、电网供不上 500、完工后不再收料）；T 暂停与 0.5x～3x；O 观察一致；S 真文件存读档；U 工地面板；P 性能。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>（段名 FgMegastructureSelfCheck）；单段：bash tools/unity-validate.sh FgMegastructureSelfCheck。
     /// </summary>
-    public static class FgMegastructureSelfCheck
+    public static partial class FgMegastructureSelfCheck
     {
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const string UiKitFolder = "Assets/GameRes/Raw/UI/UiKit/";
@@ -67,13 +67,18 @@ namespace GameLogic.EditorTools
             }
         }
 
-        public static int Run(StringBuilder report)
+        public static int Run(StringBuilder report) =>
+            RunCore(report, "返航工程", "\n[返航工程] 五个巨构阶段、传送带 / 管线送入、持续供电、进度与预计时间、阶段突袭、受损暂停不倒退、舰队消息、倍速 / 观察 / 存读档、工地面板（FG13-END-01，FGT-END-002）",
+                new Action[] { CheckData, CheckUnlock, CheckStageOne, CheckAllStages, CheckWounded, CheckDestroyedAndRebuilt, CheckSupplyCut, CheckPower, CheckTimingMatrix, CheckObserved, CheckSaveLoad, CheckUi, CheckPerformance });
+
+        /// <summary>同一套环境准备与收尾（FG13-END-02 揭示段 <see cref="RunReveal"/> 共用）。</summary>
+        private static int RunCore(StringBuilder report, string tag, string title, Action[] steps)
         {
             _report = report;
             _fail = 0;
             _pass = 0;
             PerfLines.Clear();
-            Line("\n[返航工程] 五个巨构阶段、传送带 / 管线送入、持续供电、进度与预计时间、阶段突袭、受损暂停不倒退、舰队消息、倍速 / 观察 / 存读档、工地面板（FG13-END-01，FGT-END-002）");
+            Line(title);
             if (Application.isPlaying)
             {
                 Line("  - Play 模式下跳过（会改写存档目录与世界）");
@@ -109,19 +114,10 @@ namespace GameLogic.EditorTools
                 Line($"  · 环境：Unity {Application.unityVersion}，batchmode={Application.isBatchMode}，处理器 {SystemInfo.processorType}（{SystemInfo.processorCount} 线程）；" +
                      "工地推进在热更层（Editor 下 Mono JIT，真机 HybridCLR 解释执行），每个生产步 O(1)；真机另测（FG15-SYS-02）");
 
-                Step(CheckData);
-                Step(CheckUnlock);
-                Step(CheckStageOne);
-                Step(CheckAllStages);
-                Step(CheckWounded);
-                Step(CheckDestroyedAndRebuilt);
-                Step(CheckSupplyCut);
-                Step(CheckPower);
-                Step(CheckTimingMatrix);
-                Step(CheckObserved);
-                Step(CheckSaveLoad);
-                Step(CheckUi);
-                Step(CheckPerformance);
+                foreach (Action step in steps)
+                {
+                    Step(step);
+                }
                 foreach (string p in PerfLines)
                 {
                     Line("  · 性能：" + p);
@@ -189,7 +185,7 @@ namespace GameLogic.EditorTools
                     // 临时目录清理失败不影响结论。
                 }
             }
-            Line($"  · [返航工程] 断言通过 {_pass}，失败 {_fail}");
+            Line($"  · [{tag}] 断言通过 {_pass}，失败 {_fail}");
             return _fail;
         }
 

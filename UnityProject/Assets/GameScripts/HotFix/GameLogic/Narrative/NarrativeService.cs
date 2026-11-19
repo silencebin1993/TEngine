@@ -79,6 +79,7 @@ namespace GameLogic.Narrative
             GameEvent.AddEventListener<string>(Campaign.Regions.ExpeditionMarchService.SiteArrivalRevertedEvent, OnSiteArrivalReverted);
             GameEvent.AddEventListener<string>(Campaign.WorldSim.TerritoryControlService.LeaderDefeatedEvent, OnLeaderDefeated);
             GameEvent.AddEventListener<string>(FeedEvent, OnFeed);
+            Campaign.Endgame.RevealService.EnsureListening(); // FG13-END-02：揭示收进资料库那一步 → 状态变化 + 演出后自动存档
         }
 
         /// <summary>自检收尾：取消订阅（让后面的自检段不受叙事投放影响；正式流程从不取消）。</summary>
@@ -94,6 +95,7 @@ namespace GameLogic.Narrative
             GameEvent.RemoveEventListener<string>(Campaign.Regions.ExpeditionMarchService.SiteArrivalRevertedEvent, OnSiteArrivalReverted);
             GameEvent.RemoveEventListener<string>(Campaign.WorldSim.TerritoryControlService.LeaderDefeatedEvent, OnLeaderDefeated);
             GameEvent.RemoveEventListener<string>(FeedEvent, OnFeed);
+            Campaign.Endgame.RevealService.StopListeningForTests();
         }
 
         public static bool Listening => _listening;
@@ -169,6 +171,7 @@ namespace GameLogic.Narrative
                 return;
             }
             CampaignFgStateDomains.EnsureAll(s);
+            Campaign.Endgame.RevealService.OnCampaignEntered(s); // FG13-END-02 审查 P2：读档时信标仍待点亮 → 补发一次“信标待点亮”
             // FG13-END-01 复审 P2：巨构蓝图在返航工程上线前就拿到的旧档 → 按事实补投“巨构蓝图”节点（进第三幕）。新档拿蓝图那一步已投过，Trigger 幂等，读档前后不变。
             if (Campaign.Endgame.MegastructureService.HasBlueprint(s))
             {
@@ -306,6 +309,7 @@ namespace GameLogic.Narrative
             _playingState = s;
             _pausedBefore = IsWorldPaused != null && IsWorldPaused();
             SetWorldPaused?.Invoke(true);
+            CutsceneCamera.Begin(def.Camera); // FG13-END-02：游戏内镜头（首次播放与重看同一套）
             CutsceneBeginCount++;
             Revision++;
             GuidanceHooks.Raise(GuidanceHooks.NarrativeFirstCutscene);
@@ -328,6 +332,7 @@ namespace GameLogic.Narrative
             CampaignState s = _playingState;
             _playing = null;
             _playingState = null;
+            CutsceneCamera.End();
             if (skipped)
             {
                 SkipCount++;
@@ -361,6 +366,7 @@ namespace GameLogic.Narrative
             }
             _playing = null;
             _playingState = null;
+            CutsceneCamera.ResetSession(); // 审查 P2：换战役 / 世界卸载时镜头立即复原，不把抬起的程度带进下一个世界
             Revision++;
             if (!_pausedBefore)
             {

@@ -130,6 +130,9 @@ namespace GameLogic.UI.Kit
         /// <summary>FG8-DROP-01：投送站 → 投送站面板（FGU-46）。</summary>
         private Button _drop;
         public Button DropButton => _drop;
+        /// <summary>FG13-END-02：返航工地 → 点亮信标（第一次确认；第二次在信标确认面板）。</summary>
+        private Button _reveal;
+        public Button RevealButton => _reveal;
         private Button _diagnose;
         private Button _clear;
         private Label _message;
@@ -344,6 +347,7 @@ namespace GameLogic.UI.Kit
             _intel = root.Q<Button>("PrIntel");
             _blackBox = root.Q<Button>("PrBlackBox");
             _vault = root.Q<Button>("PrVault");
+            _reveal = root.Q<Button>("PrReveal");
             _drop = root.Q<Button>("PrDrop");
             _diagnose = root.Q<Button>("PrDiagnose");
             _clear = root.Q<Button>("BpClear");
@@ -361,6 +365,7 @@ namespace GameLogic.UI.Kit
             _intel.clicked += OpenIntel;
             _blackBox.clicked += OpenBlackBox;
             _vault.clicked += OpenVault;
+            _reveal.clicked += OpenReveal;
             _drop.clicked += OpenDrop;
             _diagnose.clicked += OpenDiagnosis;
             _clear.clicked += () => ClearBuffers();
@@ -531,6 +536,7 @@ namespace GameLogic.UI.Kit
             _blackBox.EnableInClassList("bn-hidden", !BlackBoxService.IsGallery(b));
             _vault.EnableInClassList("bn-hidden", b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore);
             _drop.EnableInClassList("bn-hidden", !Campaign.Regions.DropPodService.IsStation(b));
+            _reveal.EnableInClassList("bn-hidden", !Campaign.Endgame.MegastructureService.IsSite(b.BuildingTypeId) || !Campaign.Endgame.RevealService.AwaitingConfirm(state));
             _clear.SetEnabled(BuildingOps.BufferedCount(state, b) > 0);
         }
 
@@ -547,6 +553,7 @@ namespace GameLogic.UI.Kit
             _blackBox.text = GameText.Get("blackbox.panel.open");
             _vault.text = GameText.Get("heritage.panel.open");
             _drop.text = GameText.Get("drop.panel.open");
+            _reveal.text = GameText.Get("mega.reveal.button");
             _diagnose.text = GameText.Get("prod.panel.diagnose");
             _clear.text = GameText.Get("bp.clear");
             _hint.text = GameText.Get("prod.panel.hint");
@@ -1505,6 +1512,18 @@ namespace GameLogic.UI.Kit
             }
             SetOpen(false);
             DropStationPanelUIToolkit.Open(id);
+        }
+
+        /// <summary>FG13-END-02（FGR-END-010）：返航工地信标点火后 → 打开信标确认面板（点亮信标的第二次确认）。</summary>
+        public void OpenReveal()
+        {
+            BuildingRecord b = HomeGridService.FindBuilding(CampaignSession.Current, BuildingId);
+            if (b == null || !Campaign.Endgame.MegastructureService.IsSite(b.BuildingTypeId))
+            {
+                return; // 只有返航工地才有“点亮信标…”
+            }
+            SetOpen(false);
+            GameLogic.UI.Beacon.BeaconLaunchPanelUIToolkit.OpenReveal();
         }
 
         /// <summary>FG8-EXP-04：归还核心 → 打开核心保管库（收集页；展柜在同一面板）。</summary>

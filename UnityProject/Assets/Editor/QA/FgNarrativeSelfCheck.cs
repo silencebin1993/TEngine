@@ -304,6 +304,13 @@ namespace GameLogic.EditorTools
 
         // ── D1 数据 ───────────────────────────────────────────────────────────────
 
+        /// <summary>与 python repr(float) 同一写法（整数值写成“2.0”；FG13-END-02 揭示字幕起有整数秒的停留）。</summary>
+        private static string PyFloat(float v)
+        {
+            string r = v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            return r.IndexOfAny(new[] { '.', 'E', 'e' }) < 0 ? r + ".0" : r;
+        }
+
         private static void CheckData()
         {
             GameConfig.Tables t = ConfigSystem.Instance.Tables;
@@ -311,9 +318,9 @@ namespace GameLogic.EditorTools
             (int code, string output) = F.RunPython(root,
                 "-c \"import sys;sys.path.insert(0,'tools/cell_tables');import fgdata_narrative as p;print('\\n'.join(p.dump_lines()))\"");
             var src = output.Replace("\r", string.Empty).Split('\n').Where(l => l.StartsWith("NE\t", StringComparison.Ordinal) || l.StartsWith("NL\t", StringComparison.Ordinal)).ToList();
-            var rt = t.TbNarrativeEntry.DataList.Select(e => string.Join("\t", "NE", e.Id, e.Source, e.Act, e.Node, e.Trigger, e.TitleKey, e.BodyKey, e.SetAct, e.SortOrder))
+            var rt = t.TbNarrativeEntry.DataList.Select(e => string.Join("\t", "NE", e.Id, e.Source, e.Act, e.Node, e.Trigger, e.TitleKey, e.BodyKey, e.SetAct, e.SortOrder, e.Camera))
                 .Concat(t.TbNarrativeLine.DataList.Select(l => string.Join("\t", "NL", l.Id, l.EntryId, l.Order, l.TextKey,
-                    l.HoldSeconds.ToString("R", System.Globalization.CultureInfo.InvariantCulture)))).ToList();
+                    PyFloat(l.HoldSeconds)))).ToList();
             bool table = code == 0 && src.Count == rt.Count && src.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(rt.OrderBy(x => x, StringComparer.Ordinal));
             IReadOnlyList<NarrativeEntryDef> all = NarrativeCatalog.All;
             bool sources = NarrativeCatalog.Sources.All(src0 => all.Any(d => d.Source == src0));

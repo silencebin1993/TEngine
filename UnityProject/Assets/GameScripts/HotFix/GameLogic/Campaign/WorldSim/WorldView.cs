@@ -84,7 +84,7 @@ namespace GameLogic.Campaign.WorldSim
                 return new GridCell(0, 0);
             }
             Vector3 p = camera.transform.position;
-            Vector3 forward = camera.transform.forward;
+            Vector3 forward = Narrative.CutsceneCamera.BaseForward(camera); // 演出镜头抬向天空时按抬起前的视线算（审查 P2）
             if (Mathf.Abs(forward.y) > 0.001f)
             {
                 p -= forward * (p.y / forward.y);

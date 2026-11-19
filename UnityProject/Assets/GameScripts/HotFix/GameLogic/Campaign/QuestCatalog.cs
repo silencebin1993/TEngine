@@ -27,6 +27,8 @@ namespace GameLogic.Campaign
         public const string KindHold = "hold";
         public const string KindEscort = "escort";
         public const string KindDestroy = "destroy_outpost";
+        /// <summary>FG13-END-02：事件账本里有这条一次性事件（参数 = 事件 ID；终局节点：endgame_revealed 揭示、endgame_purge_cleared 撑过清洗波次）。</summary>
+        public const string KindEvent = "event";
 
         public const string AnchorNone = "none";
         public const string AnchorCore = "core";

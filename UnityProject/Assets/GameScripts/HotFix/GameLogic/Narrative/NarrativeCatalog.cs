@@ -21,6 +21,8 @@ namespace GameLogic.Narrative
         /// <summary>收到后战役推进到第几幕（0 = 不改）。</summary>
         public int SetAct;
         public int SortOrder;
+        /// <summary>FG13-END-02：演出镜头（<see cref="CutsceneCamera.ShotNone"/> / <see cref="CutsceneCamera.ShotSky"/>）。</summary>
+        public string Camera = CutsceneCamera.ShotNone;
         /// <summary>演出的逐行字幕（按序号；非演出为空）。</summary>
         public readonly List<NarrativeLineDef> Lines = new List<NarrativeLineDef>();
 
@@ -51,6 +53,8 @@ namespace GameLogic.Narrative
         public const string TriggerNewGame = "new_game";
         public const string TriggerSite = "site:";
         public const string TriggerLeader = "leader:";
+        /// <summary>FG13-END-02 修复轮：第一次进入某片领地（远征队伍 / 镜头焦点进入，与图鉴“进入领地”同一时机）。</summary>
+        public const string TriggerTerritory = "territory:";
         public const string TriggerMemo = "memo:";
         public const string TriggerTerminal = "terminal:";
         public const string TriggerIntel = "intel:";
@@ -148,9 +152,10 @@ namespace GameLogic.Narrative
                     continue;
                 }
                 if (Array.IndexOf(Sources, row.Source) < 0 || row.Act < 0 || row.Act > 3 || row.SetAct < 0 || row.SetAct > 3
-                    || string.IsNullOrEmpty(row.Trigger) || string.IsNullOrEmpty(row.TitleKey) || string.IsNullOrEmpty(row.BodyKey))
+                    || string.IsNullOrEmpty(row.Trigger) || string.IsNullOrEmpty(row.TitleKey) || string.IsNullOrEmpty(row.BodyKey)
+                    || (row.Camera != CutsceneCamera.ShotNone && (row.Camera != CutsceneCamera.ShotSky || row.Source != SourceCutscene)))
                 {
-                    ProblemList.Add($"fg.TbNarrativeEntry {row.Id}：投放方式 / 幕 / 触发 / 文本键不合法，已跳过");
+                    ProblemList.Add($"fg.TbNarrativeEntry {row.Id}：投放方式 / 幕 / 触发 / 文本键 / 演出镜头不合法，已跳过");
                     continue;
                 }
                 if (ByTrigger.ContainsKey(row.Trigger))
@@ -161,7 +166,7 @@ namespace GameLogic.Narrative
                 var def = new NarrativeEntryDef
                 {
                     Id = row.Id, Source = row.Source, Act = row.Act, Node = row.Node != 0, Trigger = row.Trigger,
-                    TitleKey = row.TitleKey, BodyKey = row.BodyKey, SetAct = row.SetAct, SortOrder = row.SortOrder,
+                    TitleKey = row.TitleKey, BodyKey = row.BodyKey, SetAct = row.SetAct, SortOrder = row.SortOrder, Camera = row.Camera,
                 };
                 ById[def.Id] = def;
                 ByTrigger[def.Trigger] = def;

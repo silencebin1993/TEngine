@@ -37,6 +37,9 @@ namespace GameLogic.UI.Kit
         private Button _phase;
         private Label _calExtra;
         private Label _silentBanner;
+        /// <summary>FG13-END-02（FGR-END-010“HUD 出现‘轨道威胁’指示”）：揭示之后常驻。</summary>
+        private Label _orbitalThreat;
+        public string OrbitalThreatText => _orbitalThreat != null && !_orbitalThreat.ClassListContains("uk-hidden") ? _orbitalThreat.text : string.Empty;
         private Label _focusTitle;
         // FG8-EXP-02（FGR-EXP-011 / 012）：远征行军条——队伍色块、名字 · 状态 · 预计到达时间、远程命令、跟随 / 前往、停下与被拒的原因。
         private VisualElement _marchRow;
@@ -155,6 +158,15 @@ namespace GameLogic.UI.Kit
                     Body = GameText.Get("env.silent.banner_tip"),
                 });
             }
+            _orbitalThreat = root.Q<Label>("WorldOrbitalThreat");
+            if (_orbitalThreat != null)
+            {
+                UiTooltip.Attach(_orbitalThreat, () => new TooltipContent
+                {
+                    Title = GameText.Get("mega.hud.orbital_threat_tip_title"),
+                    Body = GameText.Get("mega.hud.orbital_threat_tip"),
+                });
+            }
             _resRow = root.Q<VisualElement>("WorldResourceRow");
             BindMarch(root);
             if (_phase != null)
@@ -264,7 +276,8 @@ namespace GameLogic.UI.Kit
             _keyBuilder.Clear();
             _keyBuilder.Append(GameText.Language).Append('|').Append(GameClock.MinuteOfDay(GameClock.GameSeconds)).Append('|')
                 .Append(GameClock.DayOf(GameClock.GameSeconds)).Append('|').Append(GameClock.Revision).Append('|')
-                .Append(WorldView.ObservedSiteId).Append('|').Append(WorldView.LastFocusTargetId).Append('|').Append(Campaign.Env.SilentNightService.Revision).Append('|').Append(Campaign.Env.WeatherService.Revision);
+                .Append(WorldView.ObservedSiteId).Append('|').Append(WorldView.LastFocusTargetId).Append('|').Append(Campaign.Env.SilentNightService.Revision).Append('|').Append(Campaign.Env.WeatherService.Revision)
+                .Append('|').Append(Campaign.Endgame.RevealService.Revision).Append('|').Append(state.EventLedger?.Length ?? 0);
             for (int i = 0; i < targets.Count; i++)
             {
                 _keyBuilder.Append('|').Append(targets[i].Id).Append(':').Append(targets[i].Label);
@@ -665,6 +678,15 @@ namespace GameLogic.UI.Kit
                     _silentBanner.text = GameText.Format("env.silent.banner", Campaign.Env.CalendarService.ShortDuration(Campaign.Env.SilentNightService.RemainingSeconds(state)));
                 }
                 SetVisible(_silentBanner, silentNow);
+            }
+            if (_orbitalThreat != null)
+            {
+                bool orbital = Campaign.Endgame.RevealService.OrbitalThreatActive(state);
+                if (orbital)
+                {
+                    _orbitalThreat.text = GameText.Get("mega.hud.orbital_threat");
+                }
+                SetVisible(_orbitalThreat, orbital);
             }
             if (_calExtra == null)
             {

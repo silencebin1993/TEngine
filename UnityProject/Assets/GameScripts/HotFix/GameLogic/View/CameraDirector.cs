@@ -117,6 +117,9 @@ namespace GameLogic.View
 
         /// <summary>上一帧叠加在相机上的震屏偏移，下一帧开头先撤掉。</summary>
         private Vector3 _appliedShake;
+        /// <summary>FG13-END-02：演出镜头（<see cref="Narrative.CutsceneCamera"/>）叠上去之前的旋转；<see cref="_tilted"/> = 本帧叠过。</summary>
+        private Quaternion _baseRotation;
+        private bool _tilted;
 
         public ViewMode Mode => _mode;
         public bool InTransition => _mode == ViewMode.Transition;
@@ -170,6 +173,7 @@ namespace GameLogic.View
             _camera = camera;
             _anchorProvider = anchorProvider;
             _appliedShake = Vector3.zero; // 新绑定的相机上没有本类叠过的偏移。
+            _tilted = false;
             _followOffset = followOffset;
             _perspectiveDistance = 0f;
             if (_camera != null && !_camera.orthographic)
@@ -216,6 +220,7 @@ namespace GameLogic.View
             {
                 _camera.transform.position -= _appliedShake;
             }
+            RestoreTilt();
             _appliedShake = Vector3.zero;
             _camera = null;
             _anchorProvider = null;
@@ -285,6 +290,7 @@ namespace GameLogic.View
             // （直控跟随从当前位置做平滑，偏移不撤掉会被当成起点吃进去，越积越歪）。
             _camera.transform.position -= _appliedShake;
             _appliedShake = Vector3.zero;
+            RestoreTilt();
 
             // 钳制单帧步长。一次卡顿、一个断点、或加载后的第一帧都可能给出很大的 dt，
             // 不钳的话整段过渡会被**一帧吃完**——玩家看到的是镜头闪现，而不是移动过去。
@@ -312,6 +318,24 @@ namespace GameLogic.View
             // FG2-FW-04（FGR-FW-043）：反应首次触发的镜头轻推，与震屏同一套“撤掉上一帧、叠上本帧”的偏移（设置关闭时恒为零）。
             _appliedShake += CameraNudge.Sample(dt, _camera.orthographicSize, _camera.transform);
             _camera.transform.position += _appliedShake;
+            // FG13-END-02（FGR-END-010“镜头转向天空”）：演出镜头只叠旋转，下一帧先撤掉（不累积、不改位置与缩放）。
+            float tilt = Narrative.CutsceneCamera.Advance(dt);
+            if (tilt > 0f)
+            {
+                _baseRotation = _camera.transform.rotation;
+                Narrative.CutsceneCamera.NoteTilt(_camera, _baseRotation);
+                _camera.transform.rotation = Narrative.CutsceneCamera.Apply(_baseRotation, tilt);
+                _tilted = true;
+            }
+        }
+
+        private void RestoreTilt()
+        {
+            if (_tilted && _camera != null)
+            {
+                _camera.transform.rotation = _baseRotation;
+            }
+            _tilted = false;
         }
 
         /// <summary>把输入所有权按当前状态发布出去。这是"过渡期间冻结冲突输入"的落点。</summary>

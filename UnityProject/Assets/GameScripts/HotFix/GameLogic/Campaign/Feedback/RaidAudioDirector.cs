@@ -25,10 +25,13 @@ namespace GameLogic.Campaign.Feedback
         public const int PhaseRaid = 2;
         /// <summary>FG10-BOSS-01：首领战进行中（FGR-FAC-006“首领战有专属音乐”）。优先级：突袭 &gt; 首领战 &gt; 预警。</summary>
         public const int PhaseBoss = 3;
+        /// <summary>FG13-END-02（FGR-END-010“音乐切换”）：揭示之后的轨道威胁（白潮在轨道上）。优先级最低：突袭 &gt; 首领战 &gt; 预警 &gt; 轨道威胁 &gt; 平静。</summary>
+        public const int PhaseOrbital = 4;
 
         public const string MusicWarning = "mus_raid_warning";
         public const string MusicRaid = "mus_raid_battle";
         public const string MusicBoss = "mus_boss_clarity"; // 占位（DEBT-FG10BOSS01-01，FG-M15 替换同名文件）
+        public const string MusicOrbital = "mus_orbital_threat"; // 占位（DEBT-FG13END02-01，FG-M15 替换同名文件）
         public const string StingWarning = "sfx_alarm_warning";
         public const string StingRaid = "sfx_boss_phase";
         public const string StingEnd = "sfx_objective_complete";
@@ -59,6 +62,9 @@ namespace GameLogic.Campaign.Feedback
             _warningHeard = false;
         }
 
+        /// <summary>有突袭 / 首领战类的音乐层（平静与轨道威胁都不算）。</summary>
+        public static bool ThreatPhaseActive => Phase != PhaseCalm && Phase != PhaseOrbital;
+
         /// <summary>这一刻家园的突袭阶段（只读）。</summary>
         public static int Evaluate(CampaignState s) => Evaluate(s, out _);
 
@@ -87,7 +93,7 @@ namespace GameLogic.Campaign.Feedback
             {
                 return PhaseBoss;
             }
-            return warning ? PhaseWarning : PhaseCalm;
+            return warning ? PhaseWarning : Endgame.RevealService.OrbitalThreatActive(s) ? PhaseOrbital : PhaseCalm;
         }
 
         /// <summary>每帧（GameRoot.OnUpdate；真实时间）。<paramref name="force"/> = 立即判定（自检）。</summary>
@@ -133,7 +139,7 @@ namespace GameLogic.Campaign.Feedback
             switch (to)
             {
                 case PhaseWarning:
-                    if (from == PhaseCalm || (from == PhaseBoss && !warningHeard))
+                    if (from == PhaseCalm || from == PhaseOrbital || (from == PhaseBoss && !warningHeard))
                     {
                         Sting(StingWarning);
                     }
@@ -149,6 +155,13 @@ namespace GameLogic.Campaign.Feedback
                         Sting(StingEnd); // 首领战中家园突袭结束：结束提示音照响，音乐回到首领战
                     }
                     PlayMusic(MusicBoss); // 开战与阶段转换的提示音由 BaptismTowerBoss 的 BossPhase 反馈负责，这里不另响
+                    break;
+                case PhaseOrbital:
+                    if (from == PhaseRaid)
+                    {
+                        Sting(StingEnd); // 揭示后家园突袭结束：结束提示音照响，音乐回到轨道威胁层
+                    }
+                    PlayMusic(MusicOrbital);
                     break;
                 default:
                     if (from == PhaseRaid)

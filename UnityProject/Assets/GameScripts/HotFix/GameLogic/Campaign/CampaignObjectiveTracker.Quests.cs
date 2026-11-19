@@ -606,6 +606,9 @@ namespace GameLogic.Campaign
                     case QuestCatalog.KindOwnOutpost when q.Category == QuestCatalog.CatGuide:
                         done = OwnOutpostNear(state, null);
                         break;
+                    case QuestCatalog.KindEvent:
+                        done = CampaignEventLedger.Contains(state, q.Param);
+                        break;
                     default:
                         continue;
                 }
@@ -1306,6 +1309,15 @@ namespace GameLogic.Campaign
                     }
                     return GameText.Format("quest.prog.destroy", TerritoryControlService.OutpostName(o), o.Tier.ToString(CultureInfo.InvariantCulture));
                 }
+                case QuestCatalog.KindEvent:
+                    // FG13-END-02：返航工程写明当前阶段 / 待点亮；其余终局节点写目标说明。
+                    if (q.Param == Endgame.RevealService.RevealedEventId && !Endgame.MegastructureService.AllDone(state))
+                    {
+                        Endgame.MegaStageDef st = Endgame.MegastructureService.Current(state);
+                        return st == null ? QuestCatalog.Goal(q) : GameText.Format("quest.prog.mega_stage", st.Order, Endgame.MegastructureService.StageCount, st.Name);
+                    }
+                    return q.Param == Endgame.RevealService.RevealedEventId && !Endgame.RevealService.Revealed(state)
+                        ? GameText.Get("quest.prog.mega_light") : QuestCatalog.Goal(q);
                 case QuestCatalog.KindOwnOutpost:
                     return q.Category == QuestCatalog.CatGuide ? QuestCatalog.Goal(q)
                         : GameText.Format("quest.prog.outpost", Mathf.RoundToInt(OutpostRadius).ToString(CultureInfo.InvariantCulture));

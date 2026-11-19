@@ -892,6 +892,8 @@ namespace GameLogic.Progression
             }
             UnlockAndNotify(RegionEntryId(territoryId));
             UnlockAndNotify(FactionEntryId(territoryId));
+            // FG13-END-02 修复轮（FGR-NAR-010“净化即救赎：进入沉淀湖”）：同一时机投放叙事触发（叙事没在听 / 没有对应条目 → 无事；幂等）。
+            TEngine.GameEvent.Send(Narrative.NarrativeService.FeedEvent, Narrative.NarrativeCatalog.TriggerTerritory + territoryId);
         }
 
         /// <summary>一段天气开始（家园天气前线）：解锁该天气的事件条目。</summary>

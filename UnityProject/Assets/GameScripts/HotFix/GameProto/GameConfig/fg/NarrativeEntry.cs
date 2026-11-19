@@ -28,6 +28,7 @@ public sealed partial class NarrativeEntry : Luban.BeanBase
         BodyKey = _buf.ReadString();
         SetAct = _buf.ReadInt();
         SortOrder = _buf.ReadInt();
+        Camera = _buf.ReadString();
     }
 
     public static NarrativeEntry DeserializeNarrativeEntry(ByteBuf _buf)
@@ -71,6 +72,10 @@ public sealed partial class NarrativeEntry : Luban.BeanBase
     /// 同一时刻收到多条时的先后
     /// </summary>
     public readonly int SortOrder;
+    /// <summary>
+    /// 演出镜头:none=不动/sky=播放期间镜头转向天空,结束后复原(只用于 source=cutscene)
+    /// </summary>
+    public readonly string Camera;
    
     public const int __ID__ = 1671586829;
     public override int GetTypeId() => __ID__;
@@ -91,6 +96,7 @@ public sealed partial class NarrativeEntry : Luban.BeanBase
         + "bodyKey:" + BodyKey + ","
         + "setAct:" + SetAct + ","
         + "sortOrder:" + SortOrder + ","
+        + "camera:" + Camera + ","
         + "}";
     }
 }

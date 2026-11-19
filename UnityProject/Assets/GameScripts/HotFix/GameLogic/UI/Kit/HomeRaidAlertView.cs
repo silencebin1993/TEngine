@@ -163,7 +163,7 @@ namespace GameLogic.UI.Kit
             {
                 HomeRaidAlertService.Poll(s);
             }
-            bool phaseActive = RaidAudioDirector.Phase != RaidAudioDirector.PhaseCalm;
+            bool phaseActive = RaidAudioDirector.ThreatPhaseActive; // FG13-END-02：轨道威胁层不算突袭阶段
             HomeRaidAlert a = default;
             bool show = allowed && HomeRaidAlertService.Evaluate(s, now, out a) && a.Show;
             SetVisible(_panel, show);

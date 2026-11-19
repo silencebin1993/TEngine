@@ -68,7 +68,7 @@ public sealed partial class Quest : Luban.BeanBase
     /// </summary>
     public readonly string GoalKey;
     /// <summary>
-    /// 判定:leader_defeated=领地首领被击败/build_type=建成某类建筑/build_belt=放下传送带/silent_night=撑过静默夜/own_outpost=有前哨站/reach=机器到达地点/hold=机器在地点停留累计秒数/escort=护送货运车回家园(FG11-REG-01/FG-GAP-165:仓库不能新建,文本只写回家园)/destroy_outpost=摧毁地点附近的领地据点
+    /// 判定:leader_defeated=领地首领被击败/build_type=建成某类建筑/build_belt=放下传送带/silent_night=撑过静默夜/own_outpost=有前哨站/reach=机器到达地点/hold=机器在地点停留累计秒数/escort=护送货运车回家园(FG11-REG-01/FG-GAP-165:仓库不能新建,文本只写回家园)/destroy_outpost=摧毁地点附近的领地据点/event=事件账本里有这条一次性事件(FG13-END-02:终局节点;参数=事件ID,见 QUEST_EVENT_IDS)
     /// </summary>
     public readonly string Kind;
     /// <summary>
