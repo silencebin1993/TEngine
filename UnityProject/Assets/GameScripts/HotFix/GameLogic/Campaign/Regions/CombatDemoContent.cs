@@ -357,6 +357,10 @@ namespace GameLogic.Campaign.Regions
             {
                 BaptismTowerBoss.OnPartKilled(CampaignSession.Current, enemy);
             }
+            else if (enemy != null && Endgame.BeachheadService.IsBeachheadInstance(enemy.EnemyInstanceId))
+            {
+                Endgame.BeachheadService.OnPartKilled(CampaignSession.Current, enemy); // FG13-END-04：白潮滩头（掉落、投送目标通知）
+            }
         }
 
         /// <summary>FG0-ARCH-06：工作地点无法到达——工单转为等待（带原因，30 秒后重试），并发一条可定位的“无法到达”通知。</summary>

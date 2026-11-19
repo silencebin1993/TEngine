@@ -130,6 +130,24 @@ namespace GameLogic.Campaign
         /// <summary>FG13-END-03（FG11 FGR-END-020）：清洗波次进度（揭示之后 2 个游戏日内 3 波、周期性轨道打击）。唯一写入口 <c>GameLogic.Campaign.Endgame.PurgeWaveService</c>。
         /// 旧存档没有 = 还没开始（揭示过的存档载入后下一步开始）。</summary>
         public PurgeWaveState Purge = new PurgeWaveState();
+        /// <summary>FG13-END-04（FG11 FGR-END-021）：白潮滩头（登陆场）进度。唯一写入口 <c>GameLogic.Campaign.Endgame.BeachheadService</c>；滩头单位本身是区域敌人记录（随存档）。
+        /// 旧存档没有 = 还没着陆（撑过清洗波次的存档载入后下一步着陆）。</summary>
+        public BeachheadState Beachhead = new BeachheadState();
+    }
+
+    /// <summary>FG13-END-04：白潮滩头进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
+    [Serializable]
+    public sealed class BeachheadState
+    {
+        /// <summary>着陆（撑过清洗波次后第一步）的那一步；-1 = 还没着陆。</summary>
+        public long LandedTick = -1;
+        /// <summary>3 个轨道锚点与登陆信标全部摧毁（切断投送）的那一步；-1 = 还没有。</summary>
+        public long DoneTick = -1;
+        /// <summary>下一次投送登陆舱的那一步（-1 = 不再投送）、已投送的舱数（也是下一个舱的序号）。</summary>
+        public long NextDropTick = -1;
+        public int DropCount;
+        /// <summary>因滩头上投送来的单位已达上限而跳过的次数（玩家可见原因 / 自检读）。</summary>
+        public int DropsSkipped;
     }
 
     /// <summary>FG13-END-03：清洗波次进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
@@ -3066,6 +3084,7 @@ namespace GameLogic.Campaign
             s.Progress.Mega ??= new MegastructureState(); // FG13-END-01：旧存档没有返航工程 = 第一阶段、全部为 0
             s.Progress.Mega.Done ??= Array.Empty<MegaStageDoneRecord>();
             s.Progress.Purge ??= new PurgeWaveState(); // FG13-END-03：旧存档没有清洗波次 = 还没开始
+            s.Progress.Beachhead ??= new BeachheadState(); // FG13-END-04：旧存档没有滩头 = 还没着陆
             s.Progress.Purge.ActivePlanId ??= string.Empty;
             if (s.Progress.Purge.LaunchTicks == null || s.Progress.Purge.LaunchTicks.Length != 3)
             {

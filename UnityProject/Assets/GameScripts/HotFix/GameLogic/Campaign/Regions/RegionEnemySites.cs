@@ -58,6 +58,7 @@ namespace GameLogic.Campaign.Regions
         private static readonly Dictionary<string, InteriorSite> Interiors = new Dictionary<string, InteriorSite>();
         private static Site _fractured;
         private static Site _foundry;
+        private static Site _beachhead;
         /// <summary>没有布局的地点共用的通用场地（无锚点、无反制、干扰机自带干扰场）：按区域缓存，信号干扰判定每次查询不再新建对象。</summary>
         private static readonly Dictionary<string, Site> Generic = new Dictionary<string, Site>();
 
@@ -82,6 +83,14 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        private static IEnumerable<(string, Vector2)> Beachhead()
+        {
+            foreach (GameConfig.fg.AnchorTemplatePoint p in WorldGen.WorldGenContent.TemplatePoints(Endgame.BeachheadService.TemplateId))
+            {
+                yield return (p.PointId, new Vector2(p.LocalX, p.LocalY));
+            }
+        }
+
         /// <summary>按区域取场地信息（O(1)，布局锚点首次用到时建一次表）。</summary>
         public static IEnemySiteContext For(string regionId)
         {
@@ -93,6 +102,11 @@ namespace GameLogic.Campaign.Regions
             if (regionId == FoundryOutpostLayout.RegionId)
             {
                 return _foundry ??= new Site(regionId, Foundry(), FoundryOutpostRegion.Find, anchoredJam: false);
+            }
+            if (regionId == Endgame.BeachheadService.RegionId)
+            {
+                // FG13-END-04：白潮滩头的编成锚点 = 手工模板 white_tide_beachhead 的点位（模板局部坐标；播种时由 BeachheadService 落到星球上）。
+                return _beachhead ??= new Site(regionId, Beachhead(), null, anchoredJam: false);
             }
             if (regionId != null && RelayHallLayout.IsInteriorWithPoints(regionId))
             {

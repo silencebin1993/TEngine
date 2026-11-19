@@ -73,6 +73,10 @@ namespace GameLogic.Campaign.Combat
 
         public bool CancelOrbitalStrike(int strikeId) => !IsDisposed && Kernel.CancelOrbitalStrike(strikeId);
 
+        /// <summary>FG13-END-04：在格 (x, y) 写一格灭活焦土，来源 = 具名敌人 <paramref name="sourceEnemyId"/> 的内核单位（它活着焦土就不恢复）。</summary>
+        public bool AddInertMark(int x, int y, string sourceEnemyId, float recover, float stagger) =>
+            !IsDisposed && TryGetEnemyUnit(sourceEnemyId, out int unit) && Kernel.AddInertMark(new int2(x, y), unit, recover, stagger);
+
         private void HandleFleetEvent(CampaignState state, in CombatEvent e)
         {
             var at = new Vector2((float)e.Pos.x, (float)e.Pos.y);

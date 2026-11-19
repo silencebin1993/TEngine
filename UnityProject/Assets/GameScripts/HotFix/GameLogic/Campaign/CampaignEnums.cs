@@ -46,6 +46,8 @@ namespace GameLogic.Campaign
         CutsceneEnter = 9,
         /// <summary>FG13-END-02（FG11 FGR-END-010“演出前后各自动存档一次”）：揭示演出结束、状态变化（轨道威胁 / 任务 / 音乐）落定之后。演出前的那一次是 <see cref="CutsceneEnter"/>。</summary>
         RevealComplete = 10,
+        /// <summary>FG13-END-04（FGR-END-021）：白潮在滩头着陆、目标落位之后（家园在这一段被攻破时读它重试）。</summary>
+        BeachheadLanded = 11,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>

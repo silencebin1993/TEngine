@@ -1315,6 +1315,11 @@ namespace GameLogic.Campaign
                     {
                         return purge;
                     }
+                    // FG13-END-04：切断投送写明已摧毁几个投送目标。
+                    if (q.Param == Endgame.BeachheadService.ClearedEventId && Endgame.BeachheadService.QuestProgressText(state) is string beach)
+                    {
+                        return beach;
+                    }
                     // FG13-END-02：返航工程写明当前阶段 / 待点亮；其余终局节点写目标说明。
                     if (q.Param == Endgame.RevealService.RevealedEventId && !Endgame.MegastructureService.AllDone(state))
                     {

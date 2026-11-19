@@ -71,6 +71,18 @@ namespace BinGames.Sim.Combat
             return CombatLogic.FlScheduleStrike(ref _d, center, radius, damage, delay, building, beaconUnitId);
         }
 
+        /// <summary>FG13-END-04：直接写一格灭活焦土（白潮滩头着陆时登陆信标周围的焦土）：来源单位活着就不恢复，来源不在了按 <paramref name="recover"/> + 序次 × <paramref name="stagger"/> 恢复。
+        /// 与灭活光束同一张表（快照段 42，格式不变）。来源不存在 / 参数不合法返回 false。</summary>
+        public bool AddInertMark(int2 cell, int sourceUnitId, float recover, float stagger)
+        {
+            if (_d.SlotOf(sourceUnitId) < 0 || !(recover >= 0f) || !(stagger >= 0f) || float.IsInfinity(recover) || float.IsInfinity(stagger))
+            {
+                return false;
+            }
+            CombatLogic.FlAddMark(ref _d, cell, sourceUnitId, recover, stagger);
+            return true;
+        }
+
         /// <summary>取消一次还没落下的轨道打击（发取消提示）。没有这次打击返回 false。</summary>
         public bool CancelOrbitalStrike(int strikeId)
         {

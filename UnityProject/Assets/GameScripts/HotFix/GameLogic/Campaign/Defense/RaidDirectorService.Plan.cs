@@ -69,6 +69,12 @@ namespace GameLogic.Campaign.Defense
             {
                 p.PostgameIndex = d.PostgameCount++;
             }
+            int cap = Endgame.BeachheadService.HarassLevelCap(s);
+            if (cap > 0 && p.Level > cap)
+            {
+                // FG13-END-04（FGR-END-021“登陆场期间家园只会遭受 1 级骚扰”）：滩头着陆到切断投送之间，每个计划的等级不超过上限。
+                p.Level = cap;
+            }
             SelectTarget(s, p);
             if (def.Id == RaidCatalog.TriggerPurge)
             {
@@ -94,6 +100,37 @@ namespace GameLogic.Campaign.Defense
             d.Plans = list.ToArray();
             GuidanceHooks.Raise(GuidanceHooks.RaidFirstPlanned);
             Touch();
+        }
+
+        /// <summary>
+        /// FG13-END-04（FGR-END-021）：登陆场开始时，还没预警的计划等级高于 <paramref name="cap"/> 的一律降到上限并重新编成（预报作废、重新破译）；已经预警的照原样来（玩家已经看到了）。
+        /// 返回降级的计划数。O(计划数)，只在滩头着陆那一步调用。
+        /// </summary>
+        public static int CapPendingLevels(CampaignState s, int cap)
+        {
+            RaidDirectorState d = StateOf(s);
+            if (d?.Plans == null || cap <= 0)
+            {
+                return 0;
+            }
+            int n = 0;
+            foreach (RaidPlanRecord p in d.Plans)
+            {
+                if (p == null || p.State >= StateWarned || p.Level <= cap)
+                {
+                    continue;
+                }
+                p.Level = cap;
+                p.Budget = ComputeBudget(s, d, p);
+                Compose(s, p);
+                PlanChanged(s, p);
+                n++;
+            }
+            if (n > 0)
+            {
+                Touch();
+            }
+            return n;
         }
 
         /// <summary>普通触发并进还没出发的普通计划：记下触发；还没预警时等级取高者并重新编成（第一次突袭保持 1 级）。</summary>
@@ -122,6 +159,11 @@ namespace GameLogic.Campaign.Defense
                     p.ArrivalTick = -1;
                     PlanChanged(s, p);
                 }
+            }
+            int cap = Endgame.BeachheadService.HarassLevelCap(s);
+            if (cap > 0 && level > cap)
+            {
+                level = cap; // FG13-END-04：登陆场期间并入的触发也不抬过上限
             }
             if (p.State < StateWarned && !p.FirstRaid && level > p.Level)
             {

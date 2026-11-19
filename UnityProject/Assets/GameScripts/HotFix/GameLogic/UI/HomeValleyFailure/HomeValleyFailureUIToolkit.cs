@@ -198,6 +198,11 @@ namespace GameLogic.UI.HomeValleyFailure
             {
                 _lastSaveLabel.text += "\n" + purge;
             }
+            string beach = Campaign.Endgame.BeachheadService.FailureRetryText(CampaignSession.Current); // FG13-END-04：登陆场中失败
+            if (!string.IsNullOrEmpty(beach))
+            {
+                _lastSaveLabel.text += "\n" + beach;
+            }
             return true;
         }
 

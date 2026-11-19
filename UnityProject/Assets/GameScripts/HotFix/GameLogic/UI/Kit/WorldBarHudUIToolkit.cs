@@ -686,7 +686,9 @@ namespace GameLogic.UI.Kit
                 if (orbital)
                 {
                     // FG13-END-03：清洗波次的进度与倒计时、下一次轨道打击接在“轨道威胁”后面（没开始 = 只有轨道威胁）。
-                    string purge = Campaign.Endgame.PurgeWaveService.HudText(state, GameClock.Ticks);
+                    // FG13-END-04：滩头着陆后换成登陆场进度（轨道锚点 / 登陆信标 / 家园骚扰上限）。
+                    string purge = Campaign.Endgame.BeachheadService.Landed(state) ? Campaign.Endgame.BeachheadService.HudText(state)
+                        : Campaign.Endgame.PurgeWaveService.HudText(state, GameClock.Ticks);
                     _orbitalThreat.text = string.IsNullOrEmpty(purge) ? GameText.Get("mega.hud.orbital_threat") : GameText.Get("mega.hud.orbital_threat") + " · " + purge;
                 }
                 SetVisible(_orbitalThreat, orbital);

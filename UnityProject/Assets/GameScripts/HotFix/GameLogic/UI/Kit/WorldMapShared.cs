@@ -312,6 +312,7 @@ namespace GameLogic.UI.Kit
                         string name = GameText.Format("anchor.hover.title", GameText.Get(a.Row.NameKey), GameText.Get(a.KindKey));
                         Add(WorldMapItemKind.Anchor, WorldMapLayer.Territory, "anchor:" + a.Id, at.x, at.y, moved ? GameText.Format("ui.map.anchor.moved", name) : name);
                     }
+                    CollectBeachhead(state, plan, view, margin);
                 }
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Signal))
@@ -737,6 +738,49 @@ namespace GameLogic.UI.Kit
                     Add(WorldMapItemKind.RaidWarning, WorldMapLayer.Groups, "worm:" + w.Serial, w.HotX, w.HotY,
                         GameText.Format("ui.map.worm_route", Campaign.Env.VibrationService.SiteName(state, w.SiteId)));
                 }
+            }
+        }
+
+        /// <summary>
+        /// FG13-END-04（卡片“锚点目标在地图上标出”；FGR-GEN-041 揭示前没有任何提示）：滩头着陆后画出白潮滩头范围圈、旗舰降落区，
+        /// 并把还立着的投送目标（3 个轨道锚点、登陆信标）与滩头入口标成锚点图标；被摧毁的目标不再标出。屏蔽塔范围由 <see cref="CollectFleet"/> 画。O(手工点位 + 编成行)。
+        /// </summary>
+        private void CollectBeachhead(CampaignState state, WorldPlan plan, in WorldMapView view, double margin)
+        {
+            if (!Campaign.Endgame.BeachheadService.Landed(state))
+            {
+                return;
+            }
+            PlannedTerritory t = plan.Find("white_tide");
+            if (t != null)
+            {
+                string label = GameText.Get("beachhead.map.label");
+                Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Territory, X = t.CenterX, Y = t.CenterY, Radius = t.Radius, OuterRadius = t.OuterRadius, Label = label });
+                if (view.Contains(t.CenterX, t.CenterY, margin))
+                {
+                    Add(WorldMapItemKind.Territory, WorldMapLayer.Territory, "territory:" + t.Id, t.CenterX, t.CenterY, label);
+                }
+            }
+            if (Campaign.Endgame.BeachheadService.TryPoint(state, Campaign.Endgame.BeachheadService.ZonePoint, out Vector2 zone)
+                && Campaign.Endgame.BeachheadService.TryPointRow(state, Campaign.Endgame.BeachheadService.ZonePoint, out GameConfig.fg.AnchorTemplatePoint zr))
+            {
+                Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Territory, X = zone.x, Y = zone.y, Radius = zr.Radius, OuterRadius = zr.Radius, Label = GameText.Get(zr.NameKey) });
+            }
+            if (Campaign.Endgame.BeachheadService.TryPoint(state, Campaign.Endgame.BeachheadService.EntryPoint, out Vector2 entry)
+                && Campaign.Endgame.BeachheadService.TryPointRow(state, Campaign.Endgame.BeachheadService.EntryPoint, out GameConfig.fg.AnchorTemplatePoint er)
+                && view.Contains(entry.x, entry.y, margin))
+            {
+                Add(WorldMapItemKind.Anchor, WorldMapLayer.Territory, "beachhead:" + er.PointId, entry.x, entry.y, GameText.Get(er.NameKey));
+            }
+            foreach (GameConfig.fg.EnemyEncounter enc in Campaign.Endgame.BeachheadService.Encounters())
+            {
+                RegionEnemyRecord r = Campaign.Endgame.BeachheadService.IsTargetRow(enc) ? Campaign.Endgame.BeachheadService.Find(state, enc.Id) : null;
+                if (r == null || !r.IsAlive || !view.Contains(r.Position.x, r.Position.y, margin)
+                    || !Campaign.Endgame.BeachheadService.TryPointRow(state, enc.AnchorId, out GameConfig.fg.AnchorTemplatePoint pr))
+                {
+                    continue;
+                }
+                Add(WorldMapItemKind.Anchor, WorldMapLayer.Territory, "beachhead:" + enc.Id, r.Position.x, r.Position.y, GameText.Get(pr.NameKey));
             }
         }
 
