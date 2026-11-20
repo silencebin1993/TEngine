@@ -88,6 +88,8 @@ namespace GameLogic.UI.Kit
             EventHistoryButton = Bind(root, "PauseEventHistory", "pause.event_history", EventHistoryPanelUIToolkit.Open);
             // FG14-SBX-01（FGR-SBX-003 / FG12 第 3 节）：坚守记录（统计 + 清洗历史）盖在暂停菜单上面，关掉回到暂停菜单；只在后日谈里显示。
             PostgameButton = Bind(root, "PausePostgame", "pause.postgame", PostgamePanelUIToolkit.Open);
+            // FG14-SBX-02（FG12 第 3 节“沙盒的设置在开局后可以部分修改”）：沙盒设置盖在暂停菜单上面，关掉回到暂停菜单；只在沙盒档里显示。
+            SandboxButton = Bind(root, "PauseSandbox", "pause.sandbox", SandboxPanelUIToolkit.Open);
             // FG12-EVT-06（FGU-39）：流浪商队交易盖在暂停菜单上面，关掉回到暂停菜单；商队不在时面板写明它何时会来。
             CaravanButton = Bind(root, "PauseCaravan", "pause.caravan", CaravanTradePanelUIToolkit.Open);
             EventFrequencyButton = root.Q<Button>("PauseEventFrequency");
@@ -168,6 +170,7 @@ namespace GameLogic.UI.Kit
         public Button RaidHistoryButton { get; private set; }
         public Button EventHistoryButton { get; private set; }
         public Button PostgameButton { get; private set; }
+        public Button SandboxButton { get; private set; }
         public Button CaravanButton { get; private set; }
         public Button EventFrequencyButton { get; private set; }
 
@@ -180,7 +183,14 @@ namespace GameLogic.UI.Kit
                 return;
             }
             int next = (Campaign.Env.EventDirectorService.Frequency(state) + 1) % (Campaign.Env.EventDirectorService.FrequencyHigh + 1);
-            Campaign.Env.EventDirectorService.SetFrequency(state, next);
+            if (Campaign.SandboxService.IsSandbox(state))
+            {
+                Campaign.SandboxService.TryChange(state, Campaign.SandboxService.Events, next); // FG14-SBX-02：沙盒里改事件频率同样记进沙盒修改记录
+            }
+            else
+            {
+                Campaign.Env.EventDirectorService.SetFrequency(state, next);
+            }
             SyncEventFrequency();
         }
 
@@ -720,6 +730,7 @@ namespace GameLogic.UI.Kit
                 SyncAutoPickup();
                 SyncEventFrequency();
                 PostgameButton?.EnableInClassList("uk-hidden", !Campaign.Endgame.PostgameService.Started(CampaignSession.Current));
+                SandboxButton?.EnableInClassList("uk-hidden", !Campaign.SandboxService.IsSandbox(CampaignSession.Current));
             }
             else
             {
@@ -743,6 +754,11 @@ namespace GameLogic.UI.Kit
             if (_worldSettings != null)
             {
                 _worldSettings.text = Campaign.WorldGen.WorldGenService.DescribeSettings(state);
+                if (Campaign.SandboxService.IsSandbox(state))
+                {
+                    // FG14-SBX-02（FGR-SBX-011“暂停菜单上清楚标出沙盒及其设置”）
+                    _worldSettings.text += "\n" + GameText.Format("save.card.sandbox_settings", Campaign.SandboxService.Describe(Campaign.SandboxService.Code(state)));
+                }
             }
         }
 

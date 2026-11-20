@@ -104,7 +104,9 @@ namespace GameLogic.Campaign
             }
             if (meta.IsSandbox)
             {
-                parts.Add(GameText.Get("save.card.sandbox"));
+                // FG14-SBX-02（FGR-SBX-011“存档卡片上清楚标出沙盒及其设置”）：沙盒 + 非标准的设置项。
+                parts.Add(string.IsNullOrEmpty(meta.SandboxCode) ? GameText.Get("save.card.sandbox")
+                    : GameText.Format("save.card.sandbox_settings", SandboxService.Describe(meta.SandboxCode)));
             }
             return string.Join("｜", parts);
         }

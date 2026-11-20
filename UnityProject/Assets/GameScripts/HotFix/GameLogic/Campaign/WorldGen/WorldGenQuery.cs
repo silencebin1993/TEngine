@@ -31,7 +31,10 @@ namespace GameLogic.Campaign.WorldGen
         {
             WorldGenVersion row = WorldGenContent.Version(version);
             WorldPlan plan = WorldPlan.Compute(seed, row, settings, core.X, core.Y);
-            StartZoneGuarantee.Resolve(plan, row, settings, core, chunkSize);
+            if (settings == null || !settings.NoStartGuarantee)
+            {
+                StartZoneGuarantee.Resolve(plan, row, settings, core, chunkSize); // FG14-SBX-02：沙盒“关闭保证”不放资源保证点、不出保证报告
+            }
             var source = new WorldTerrainSource(seed, version, settings, WorldGenContent.Surface(WorldGenContent.EarthSurfaceId), core, chunkSize, plan);
             return new WorldGenContext
             {

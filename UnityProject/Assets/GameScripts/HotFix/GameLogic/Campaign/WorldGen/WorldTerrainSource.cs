@@ -118,7 +118,7 @@ namespace GameLogic.Campaign.WorldGen
                 Rects = StartProtection(v, preset.LegacyRelaxed, core);
                 Zones = plan?.Zones ?? Array.Empty<WorldGenZone>();
             }
-            SourceKey = string.Concat(Id, "|", surface.Id, "|", worldSeed.ToString(), "|v", version.ToString(), "|", preset.Id, "|", core.ToString());
+            SourceKey = string.Concat(Id, "|", surface.Id, "|", worldSeed.ToString(), "|v", version.ToString(), "|", preset.Id, preset.NoStartGuarantee ? "|nsg" : string.Empty, "|", core.ToString());
         }
 
         /// <summary>浮点表值 → 16.16 定点（round(x × 65536)，同一个 float 永远得到同一个整数）。</summary>

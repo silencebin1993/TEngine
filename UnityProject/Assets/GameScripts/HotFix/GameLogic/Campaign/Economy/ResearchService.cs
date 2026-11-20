@@ -1373,6 +1373,32 @@ namespace GameLogic.Campaign.Economy
             }
         }
 
+        /// <summary>界面刷新用：研究点被别的入口（沙盒的关键材料换取）扣走后 +1。</summary>
+        public static void Touch() => Revision++;
+
+        /// <summary>
+        /// FG14-SBX-02（FGR-SBX-011“研发：全部解锁”）：沙盒开局把所有内容已就绪（没有 opensIn）的研究节点记为完成，解锁效果与正式完成同一份
+        /// （<see cref="ApplyContentUnlocks"/>）。关键材料门槛照样在施工时生效（关键材料另在研发树里用研究点换取）。返回新记完成的节点数。
+        /// </summary>
+        public static int CompleteAllReady(CampaignState state)
+        {
+            CampaignFgStateDomains.EnsureAll(state);
+            var done = new List<string>(state.Research.CompletedNodes);
+            int n = 0;
+            foreach (ResearchNodeDef nd in ResearchCatalog.Nodes)
+            {
+                if (nd != null && nd.IsReady && !done.Contains(nd.Id))
+                {
+                    done.Add(nd.Id);
+                    ApplyContentUnlocks(state, nd);
+                    n++;
+                }
+            }
+            state.Research.CompletedNodes = done.ToArray();
+            Revision++;
+            return n;
+        }
+
         /// <summary>测试夹具：直接把这些节点记为已完成（不发通知、不标“新”）。只给自检 / 冒烟跳过与被测系统无关的研究过程用。</summary>
         public static void CompleteForTests(CampaignState state, params string[] nodeIds)
         {

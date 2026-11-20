@@ -202,6 +202,10 @@ namespace GameLogic.Campaign
                 {
                     continue;
                 }
+                if (q.Category == QuestCatalog.CatMain && SandboxService.StoryOff(state))
+                {
+                    continue; // FG14-SBX-02：沙盒没有剧情——主线任务不出现（关键材料改在研发树里用研究点换取）
+                }
                 if (!Unlocked(state, q))
                 {
                     continue;
@@ -233,7 +237,7 @@ namespace GameLogic.Campaign
                     {
                         return false;
                     }
-                    int act = Math.Max(1, state.Progress?.Act ?? 1);
+                    int act = SandboxService.EffectiveAct(state); // 与领地显示同一口径（ADR-SBX-002 第 8 条）
                     return t.Act <= act || Env.HomeExplorationService.TerritoryVisible(state, t);
                 default:
                     return false;

@@ -37,6 +37,7 @@ namespace GameLogic.Campaign.Endgame
         public const string DenyPending = "pending";
         public const string DenyBusy = "busy";
         public const string DenyNoSite = "no_site";
+        public const string DenySandbox = "sandbox";
 
         /// <summary>演出后的自动存档（默认 = 正式自动存档入口；自检可替换）。</summary>
         public static Func<SaveResult> AfterSaveHandler = () => CampaignAutoSaveService.SaveAuto(SaveReason.RevealComplete, toast: false);
@@ -109,7 +110,11 @@ namespace GameLogic.Campaign.Endgame
         public static bool CanConfirm(CampaignState s, out string reason)
         {
             reason = null;
-            if (Revealed(s) || NarrativeService.Has(s, EntryId))
+            if (SandboxService.StoryOff(s))
+            {
+                reason = DenySandbox; // FG14-SBX-02：沙盒没有剧情——巨构可以建完，但不点亮信标、不揭示、不进终局
+            }
+            else if (Revealed(s) || NarrativeService.Has(s, EntryId))
             {
                 reason = DenyDone;
             }

@@ -61,7 +61,7 @@ namespace GameLogic.Campaign.Env
         /// </summary>
         public static void WorldStep(CampaignState s)
         {
-            if (!EventDirectorService.Installed || s?.Progress == null || s.Progress.Act < 2 || !EventDirectorService.HasHandler(EventId))
+            if (!EventDirectorService.Installed || s?.Progress == null || SandboxService.EffectiveAct(s) < 2 || !EventDirectorService.HasHandler(EventId))
             {
                 return;
             }

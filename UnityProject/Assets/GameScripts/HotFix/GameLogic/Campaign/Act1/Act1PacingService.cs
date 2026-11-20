@@ -358,7 +358,7 @@ namespace GameLogic.Campaign
                 case CondLeader:
                     return TerritoryControlService.Find(s, arg)?.LeaderDefeated ?? false;
                 case CondAct:
-                    return int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out int act) && (s.Progress?.Act ?? 1) >= act;
+                    return int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out int act) && SandboxService.EffectiveAct(s) >= act;
                 case CondSilentNights:
                     return int.TryParse(arg, NumberStyles.Integer, CultureInfo.InvariantCulture, out int nights) && (s.Weather?.SilentNight?.Count ?? 0) >= nights;
                 case CondResearch:

@@ -276,8 +276,8 @@ namespace GameLogic.Campaign.Defense
                 }
             }
             long now = GameClock.Ticks;
-            d.Level4NextTick = exposure > Threshold(2) ? now + DayTicks(RaidCatalog.Level4PeriodDays / DifficultyService.Frequency(s)) : -1;
-            d.HarassNextTick = Math.Max(now, GraceEndTick) + DayTicks(RaidCatalog.HarassMinIntervalDays / DifficultyService.Frequency(s));
+            d.Level4NextTick = exposure > Threshold(2) ? now + DayTicks(RaidCatalog.Level4PeriodDays / DifficultyService.RaidFrequency(s)) : -1;
+            d.HarassNextTick = Math.Max(now, GraceEndTick) + DayTicks(RaidCatalog.HarassMinIntervalDays / DifficultyService.RaidFrequency(s));
             var fired = new List<string>(d.StoriesFired);
             foreach (GameConfig.fg.RaidStory st in RaidCatalog.Stories)
             {
@@ -323,7 +323,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (d.Level4NextTick < 0)
                 {
-                    d.Level4NextTick = GameClock.Ticks + DayTicks(RaidCatalog.Level4PeriodDays / DifficultyService.Frequency(s));
+                    d.Level4NextTick = GameClock.Ticks + DayTicks(RaidCatalog.Level4PeriodDays / DifficultyService.RaidFrequency(s));
                 }
             }
             else
@@ -501,7 +501,7 @@ namespace GameLogic.Campaign.Defense
                     Enqueue(d, RaidCatalog.TriggerStory, Math.Max(1, st.Level), st.Faction, st.Id);
                 }
             }
-            float freq = DifficultyService.Frequency(s);
+            float freq = DifficultyService.RaidFrequency(s);
             // 暴露超过 90：周期性 4 级。
             if (d.Level4NextTick >= 0 && tick >= d.Level4NextTick)
             {
@@ -559,6 +559,13 @@ namespace GameLogic.Campaign.Defense
             {
                 d.TriggersSkipped++;
                 Log.Warning($"[RaidDirector] 不认识的触发 {t.Kind}，跳过。");
+                return;
+            }
+            if (SandboxService.RaidsDisabled(s))
+            {
+                // FG14-SBX-02（FG12 第 4 节“沙盒关闭突袭：不会有任何突袭”）：一切触发都丢掉（静默夜、剧情报复、净化塔、暴露、骚扰……）。
+                d.TriggersSkipped++;
+                SandboxService.NoteSuppressedRaid();
                 return;
             }
             if (DifficultyService.StoryOnly(s) && !KeptWhenStoryOnly(t.Kind))

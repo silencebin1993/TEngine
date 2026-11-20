@@ -34,6 +34,7 @@ namespace GameLogic.UI.Kit
         private static bool _pendingOpen;
         private static Action<int, WorldSettings, DifficultyChoice> _pendingStart;
         private static Action _pendingBack;
+        private static Action<int, WorldSettings, DifficultyChoice, SandboxSetup, bool> _pendingSandboxStart;
 
         private VisualElement _root;
         private Label _title;
@@ -64,6 +65,17 @@ namespace GameLogic.UI.Kit
         private readonly List<List<Button>> _levelButtons = new List<List<Button>>();
         private readonly List<Label> _axisLabels = new List<Label>();
 
+        // FG14-SBX-02（FGR-SBX-010 / 011）：沙盒模式——同一面板多出沙盒设置段与“起始区：关闭保证”。
+        private Action<int, WorldSettings, DifficultyChoice, SandboxSetup, bool> _onSandboxStart;
+        private VisualElement _sandboxBox;
+        private Label _sandboxTitle;
+        private VisualElement _sandboxRows;
+        private Label _sandboxNote;
+        private SandboxSetup _sandbox = SandboxSetup.Defaults();
+        private bool _noGuarantee;
+        private Button _startOff;
+        private readonly List<List<Button>> _sandboxButtons = new List<List<Button>>();
+
         protected override string UxmlLocation => "NewGamePanel";
         protected override int SortingOrder => Order;
 
@@ -87,6 +99,19 @@ namespace GameLogic.UI.Kit
         public int AxisRowCount => _levelButtons.Count;
         /// <summary>FG6-DEF-09：难度选择（预设按钮 / 自定义滑条 / 公开说明）。</summary>
         public DifficultyPickerView Difficulty => _difficulty;
+        /// <summary>FG14-SBX-02：当前是不是沙盒模式；沙盒某项某档的按钮；“起始区：关闭保证”按钮与当前是否选中；开局前的成就规则说明。</summary>
+        public bool IsSandboxMode => _onSandboxStart != null;
+        public Button SandboxOption(string id, int option)
+        {
+            int i = Array.FindIndex(SandboxService.Defs, d => d.Id == id);
+            return i >= 0 && i < _sandboxButtons.Count && option >= 0 && option < _sandboxButtons[i].Count ? _sandboxButtons[i][option] : null;
+        }
+        public Button StartOffButton => _startOff;
+        public bool NoStartGuarantee => _noGuarantee;
+        public bool SandboxSectionVisible => _sandboxBox != null && !_sandboxBox.ClassListContains("uk-hidden");
+        public string SandboxNoteText => _sandboxNote?.text ?? string.Empty;
+        public string StoryNoteText => _storyNote?.text ?? string.Empty;
+        public string TitleText => _title?.text ?? string.Empty;
 
         private void Awake()
         {
@@ -117,10 +142,29 @@ namespace GameLogic.UI.Kit
             {
                 _pendingOpen = true;
                 _pendingStart = onStart;
+                _pendingSandboxStart = null;
                 _pendingBack = onBack;
                 return;
             }
             Instance._onStart = onStart;
+            Instance._onBack = onBack;
+            Instance._onSandboxStart = null;
+            Instance.SetOpen(true);
+        }
+
+        /// <summary>FG14-SBX-02（FGR-SBX-010）：主菜单“沙盒模式”——同一面板加沙盒设置；“开始”交回（种子, 世界设置, 难度, 沙盒设置, 起始区关闭保证）。</summary>
+        public static void OpenSandbox(Action<int, WorldSettings, DifficultyChoice, SandboxSetup, bool> onStart, Action onBack)
+        {
+            if (Instance == null || Instance._root == null)
+            {
+                _pendingOpen = true;
+                _pendingStart = null;
+                _pendingSandboxStart = onStart;
+                _pendingBack = onBack;
+                return;
+            }
+            Instance._onStart = null;
+            Instance._onSandboxStart = onStart;
             Instance._onBack = onBack;
             Instance.SetOpen(true);
         }
@@ -138,6 +182,7 @@ namespace GameLogic.UI.Kit
             {
                 _pendingOpen = false;
                 _onStart = _pendingStart;
+                _onSandboxStart = _pendingSandboxStart;
                 _onBack = _pendingBack;
                 SetOpen(true);
             }
@@ -165,6 +210,10 @@ namespace GameLogic.UI.Kit
             _back = root.Q<Button>("NewGameBack");
             _start = root.Q<Button>("NewGameStart");
             _difficultyTitle = root.Q<Label>("NewGameDifficultyTitle");
+            _sandboxBox = root.Q<VisualElement>("NewGameSandbox");
+            _sandboxTitle = root.Q<Label>("NewGameSandboxTitle");
+            _sandboxRows = root.Q<VisualElement>("NewGameSandboxRows");
+            _sandboxNote = root.Q<Label>("NewGameSandboxNote");
             _difficulty.Bind(root, "NewGameDiff");
             _random.clicked += RandomSeed;
             _copy.clicked += CopyCode;
@@ -203,8 +252,11 @@ namespace GameLogic.UI.Kit
             _importedLegacy = null;
             _levels = WorldSettings.DefaultLevels(WorldGenContent.Version(_version));
             _feedback.text = string.Empty;
+            _sandbox = SandboxSetup.Defaults();
+            _noGuarantee = false;
             BuildTexts();
             BuildAxes();
+            BuildSandbox();
             _difficulty.BuildPresets();
             _difficulty.Set(DifficultyService.Preset(DifficultyService.Standard)); // FG6-DEF-09：默认标准难度
             _seed.SetValueWithoutNotify(CampaignRandomService.GenerateSeed().ToString(CultureInfo.InvariantCulture));
@@ -213,11 +265,11 @@ namespace GameLogic.UI.Kit
 
         private void BuildTexts()
         {
-            _title.text = GameText.Get("ui.newgame.title");
+            _title.text = GameText.Get(IsSandboxMode ? "sandbox.newgame.title" : "ui.newgame.title");
             _seedTitle.text = GameText.Get("ui.newgame.seed");
             _random.text = GameText.Get("ui.newgame.random_seed");
             _settingsTitle.text = GameText.Get("ui.newgame.settings");
-            _storyNote.text = GameText.Get("ui.newgame.story_note");
+            _storyNote.text = GameText.Get(IsSandboxMode ? "sandbox.newgame.start_note" : "ui.newgame.story_note");
             if (_difficultyTitle != null)
             {
                 _difficultyTitle.text = GameText.Get("ui.newgame.difficulty");
@@ -236,6 +288,7 @@ namespace GameLogic.UI.Kit
             _axes.Clear();
             _levelButtons.Clear();
             _axisLabels.Clear();
+            _startOff = null;
             WorldGenVersion v = WorldGenContent.Version(_version);
             if (!WorldGenContent.HasSet(v.SettingSet))
             {
@@ -260,6 +313,14 @@ namespace GameLogic.UI.Kit
                     row.Add(b);
                     buttons.Add(b);
                 }
+                if (IsSandboxMode && WorldSettings.Axes[a] == WorldSettings.AxisStart)
+                {
+                    // FG14-SBX-02（FGR-SBX-011“起始区：标准 / 宽松 / 关闭保证（仅沙盒可关）”）：只有沙盒有第三个按钮；不进分享短码。
+                    _startOff = new Button(SelectNoGuarantee) { name = "NewGameLevel_start_off" };
+                    _startOff.AddToClassList("mw-btn");
+                    _startOff.AddToClassList("wg-level");
+                    row.Add(_startOff);
+                }
                 _levelButtons.Add(buttons);
                 _axes.Add(row);
             }
@@ -274,12 +335,95 @@ namespace GameLogic.UI.Kit
                 List<Button> row = _levelButtons[a];
                 for (int l = 0; l < row.Count; l++)
                 {
-                    bool selected = _levels != null && _levels[a] == l;
+                    bool selected = _levels != null && _levels[a] == l && !(_noGuarantee && WorldSettings.Axes[a] == WorldSettings.AxisStart);
                     string name = WorldSettings.LevelName(v, a, l);
                     row[l].text = selected ? "▸ " + name : name;
                     row[l].EnableInClassList("wg-level-selected", selected);
                 }
             }
+            if (_startOff != null)
+            {
+                string off = GameText.Get("sandbox.opt.start_off");
+                _startOff.text = _noGuarantee ? "▸ " + off : off;
+                _startOff.EnableInClassList("wg-level-selected", _noGuarantee);
+            }
+        }
+
+        /// <summary>FG14-SBX-02：沙盒“起始区：关闭保证”（按钮与自检同一入口；选标准 / 宽松会取消它）。</summary>
+        public void SelectNoGuarantee()
+        {
+            if (!IsSandboxMode)
+            {
+                return;
+            }
+            _noGuarantee = true;
+            RefreshLevelButtons();
+        }
+
+        /// <summary>FG14-SBX-02：沙盒设置段（每项一排按钮，当前档“▸”）；剧情模式整段隐藏。</summary>
+        private void BuildSandbox()
+        {
+            if (_sandboxBox == null)
+            {
+                return;
+            }
+            _sandboxBox.EnableInClassList("uk-hidden", !IsSandboxMode);
+            _sandboxRows.Clear();
+            _sandboxButtons.Clear();
+            if (!IsSandboxMode)
+            {
+                return;
+            }
+            _sandboxTitle.text = GameText.Get("sandbox.newgame.settings");
+            _sandboxNote.text = GameText.Get("sandbox.newgame.note");
+            foreach (SandboxService.Def def in SandboxService.Defs)
+            {
+                var row = new VisualElement();
+                row.AddToClassList("wg-axis-row");
+                var label = new Label(GameText.Get(def.NameKey));
+                label.AddToClassList("wg-axis-label");
+                row.Add(label);
+                var buttons = new List<Button>();
+                for (int o = 0; o < def.Options; o++)
+                {
+                    string id = def.Id;
+                    int option = o;
+                    var b = new Button(() => SelectSandbox(id, option)) { name = "NewGameSandbox_" + def.Id + "_" + o };
+                    b.AddToClassList("mw-btn");
+                    b.AddToClassList("wg-level");
+                    row.Add(b);
+                    buttons.Add(b);
+                }
+                _sandboxButtons.Add(buttons);
+                _sandboxRows.Add(row);
+            }
+            RefreshSandbox();
+        }
+
+        private void RefreshSandbox()
+        {
+            for (int i = 0; i < _sandboxButtons.Count; i++)
+            {
+                SandboxService.Def def = SandboxService.Defs[i];
+                int cur = _sandbox.Get(def.Id);
+                for (int o = 0; o < _sandboxButtons[i].Count; o++)
+                {
+                    string name = GameText.Get(def.OptionKey(o));
+                    _sandboxButtons[i][o].text = o == cur ? "▸ " + name : name;
+                    _sandboxButtons[i][o].EnableInClassList("wg-level-selected", o == cur);
+                }
+            }
+        }
+
+        /// <summary>FG14-SBX-02：选沙盒某项某档（按钮与自检同一入口）。</summary>
+        public void SelectSandbox(string id, int option)
+        {
+            if (!IsSandboxMode || !SandboxService.TryGetDef(id, out SandboxService.Def def) || option < 0 || option >= def.Options)
+            {
+                return;
+            }
+            _sandbox.Set(id, option);
+            RefreshSandbox();
         }
 
         /// <summary>选某分项的某档（按钮与自检同一入口）。导入的旧版本（没有分项）短码被改设置时回到当前版本。</summary>
@@ -297,6 +441,10 @@ namespace GameLogic.UI.Kit
                 return;
             }
             _levels[axis] = level;
+            if (WorldSettings.Axes[axis] == WorldSettings.AxisStart)
+            {
+                _noGuarantee = false; // FG14-SBX-02：选标准 / 宽松 = 不再关闭保证
+            }
             RefreshLevelButtons();
             OnInputChanged();
         }
@@ -430,9 +578,18 @@ namespace GameLogic.UI.Kit
             WorldSettings settings = CurrentSettings();
             DifficultyChoice difficulty = _difficulty.Choice;
             Action<int, WorldSettings, DifficultyChoice> start = _onStart;
+            Action<int, WorldSettings, DifficultyChoice, SandboxSetup, bool> sandboxStart = _onSandboxStart;
+            SandboxSetup sandbox = _sandbox;
+            bool noGuarantee = _noGuarantee;
             _onStart = null;
+            _onSandboxStart = null;
             _onBack = null;
             SetOpen(false);
+            if (sandboxStart != null)
+            {
+                sandboxStart(seed, settings, difficulty, sandbox, noGuarantee);
+                return;
+            }
             start?.Invoke(seed, settings, difficulty);
         }
 
@@ -441,6 +598,7 @@ namespace GameLogic.UI.Kit
         {
             Action back = _onBack;
             _onStart = null;
+            _onSandboxStart = null;
             _onBack = null;
             SetOpen(false);
             back?.Invoke();

@@ -190,6 +190,15 @@ namespace GameLogic.EditorTools
             return s;
         }
 
+        /// <summary>性能测量窗前整堆回收一次，返回回收耗时（ms）。只隔离前面各段留下的垃圾，不影响被测路径。</summary>
+        private static double IsolateGc()
+        {
+            var sw = Stopwatch.StartNew();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            return sw.Elapsed.TotalMilliseconds;
+        }
+
         private static HomeGridMap FreshMap(CampaignState s, string surface = WorldGenContent.EarthSurfaceId) =>
             new HomeGridMap(GridContent.TuningInt("grid.chunk_size"), WorldGenService.CreateSource(s, surface), surface);
 
@@ -840,11 +849,25 @@ namespace GameLogic.EditorTools
                 streamer.DrainForTests(new GridCell(0, 0));
                 streamer.ResetMetrics();
                 int syncBefore = map.SyncGeneratedCount;
+                // 夹具隔离（同 FgBeltFormalSelfCheck / FgDataPipelineSelfCheck）：工程开了增量 GC（gcIncremental: 1），batchmode 自检一次调用里
+                // 没有帧间切片，前面各段的垃圾开启的回收周期会在分配时一步步推进，偶尔一步（实测约 3 / 22 ms）落进测量窗。测量窗本身只分配约 2.5 MB，
+                // 先整堆回收一次把进行中的周期收完、计数清零，窗内就不会再推进回收。阈值与口径不动。
+                double isolateGcMs = IsolateGc();
+                int[] gcBefore = { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
+                int worstFrame = -1;
+                int worstFrameGc = 0;
+                double worstMs = -1;
                 for (int f = 0; f < 240; f++)
                 {
                     var focus = new GridCell(f * 24, (f * 24) / 3);
                     streamer.Tick(focus);
                     frameMs.Add(streamer.LastTickMs);
+                    if (streamer.LastTickMs > worstMs)
+                    {
+                        worstMs = streamer.LastTickMs;
+                        worstFrame = f;
+                        worstFrameGc = GC.CollectionCount(0) - gcBefore[0];
+                    }
                     pendingSeen = Math.Max(pendingSeen, streamer.PendingAround(focus, 2));
                     System.Threading.Thread.Sleep(4);
                 }
@@ -856,6 +879,9 @@ namespace GameLogic.EditorTools
                     System.Threading.Thread.Sleep(2);
                     settle++;
                 }
+                string gcPan = $"GC 次数增量 gen0/1/2 = {GC.CollectionCount(0) - gcBefore[0]}/{GC.CollectionCount(1) - gcBefore[1]}/{GC.CollectionCount(2) - gcBefore[2]}";
+                Line($"    · 探针（定位卡顿用，不是断言）：平移窗口 {gcPan}；最慢一帧是第 {worstFrame} 帧 {worstMs:F3} ms（到这一帧为止 gen0 增量 {worstFrameGc}）；托管堆 {GC.GetTotalMemory(false) / 1048576.0:F1} MB；" +
+                     $"测量前整堆回收一次用时 {isolateGcMs:F1} ms");
                 frameMs.Sort();
                 double p95 = frameMs[(int)(frameMs.Count * 0.95)];
                 double max = frameMs[frameMs.Count - 1];
@@ -873,16 +899,27 @@ namespace GameLogic.EditorTools
                 // 远距离飞跃：一帧从 (5760,1920) 跳到 (600000,-450000)。
                 var flight = new GridCell(600000, -450000);
                 streamer.ResetMetrics();
+                double isolateFlightGcMs = IsolateGc();
+                int[] gcFlight = { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
                 streamer.Tick(flight);
                 double flightTick = streamer.LastTickMs;
                 int pendingAfterJump = streamer.PendingAround(flight, 2);
                 int ticks = 0;
+                int worstTick = -1;
+                double worstTickMs = -1;
                 while (streamer.PendingAround(flight, 2) > 0 && ticks < 400)
                 {
                     System.Threading.Thread.Sleep(2);
                     streamer.Tick(flight);
+                    if (streamer.LastTickMs > worstTickMs)
+                    {
+                        worstTickMs = streamer.LastTickMs;
+                        worstTick = ticks;
+                    }
                     ticks++;
                 }
+                Line($"    · 探针（定位卡顿用，不是断言）：飞跃补齐窗口 GC 次数增量 gen0/1/2 = {GC.CollectionCount(0) - gcFlight[0]}/{GC.CollectionCount(1) - gcFlight[1]}/{GC.CollectionCount(2) - gcFlight[2]}；" +
+                     $"最慢一帧是补齐第 {worstTick} 帧 {worstTickMs:F3} ms；测量前整堆回收一次用时 {isolateFlightGcMs:F1} ms");
                 ExpectPerf(pendingAfterJump > 0 && streamer.PendingAround(flight, 2) == 0,
                     $"远距离飞跃（一帧跳 60 万格）：跳的那一帧主线程 {flightTick:F3} ms，落点 {pendingAfterJump} 个区块先显示“生成中”，{ticks} 帧后全部补齐（期间每帧最大 {streamer.MaxTickMs:F3} ms）",
                     PerfGate.Le(flightTick, 8.0, "跳的那一帧 ms"), PerfGate.Le(streamer.MaxTickMs, 8.0, "补齐期间每帧最大 ms"));

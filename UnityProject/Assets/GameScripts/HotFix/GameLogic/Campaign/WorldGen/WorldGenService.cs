@@ -85,7 +85,7 @@ namespace GameLogic.Campaign.WorldGen
             WorldGenState w = state.World;
             if (WorldSettings.TryResolve(w.GeneratorVersion < 1 ? 1 : w.GeneratorVersion, w.WorldSettingsId, out WorldSettings s, out string error))
             {
-                return s;
+                return w.NoStartGuarantee ? s.WithoutStartGuarantee() : s; // FG14-SBX-02：沙盒“起始区：关闭保证”
             }
             Log.Warning($"[WorldGenService] {error}，改用 default（这份战役还没有生成过地形）。");
             w.WorldSettingsId = WorldGenContent.DefaultPresetId;

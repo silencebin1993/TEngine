@@ -52,6 +52,7 @@ namespace GameLogic.UI.Kit
             Create<FusionPanelUIToolkit>("[FusionPanelHost]"); // FG5-RND-04：电路合成台 / 配方书（30067，靶场之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<ResearchTreePanelUIToolkit>("[ResearchTreeHost]"); // FG5-RND-01：研发树（30069，暂停菜单之下：从研发树“?”打开的图鉴盖在它上面）。
             Create<PostgamePanelUIToolkit>("[PostgameHost]"); // FG14-SBX-01：坚守记录 / 后日谈说明（30079，暂停菜单的子面板；进入后日谈时自动打开说明）。
+            Create<SandboxPanelUIToolkit>("[SandboxHost]"); // FG14-SBX-02：沙盒设置 / 修改记录 / 关键材料换取（30079，暂停菜单与研发树的子面板）。
             Create<EventHistoryPanelUIToolkit>("[EventHistoryHost]"); // FG12-EVT-01：事件历史（30079，与突袭历史同层，都是暂停菜单的子面板）。
             Create<CaravanTradePanelUIToolkit>("[CaravanTradeHost]"); // FG12-EVT-06：流浪商队交易（30079，与事件历史同层；也可从商队通知 / 主视图点商队打开）。
             Create<RaidResultPanelUIToolkit>("[RaidResultHost]"); // FG6-DEF-08：突袭历史与结算（30079，离家报告之上、按键面板之下）。

@@ -144,6 +144,8 @@ namespace GameLogic.Campaign
         /// <summary>FG14-SBX-01（FGR-SBX-003“这些数据显示在主菜单的存档卡片上”）：后日谈坚守天数与达到的最高清洗等级（不是后日谈 = 0）。</summary>
         public int PostgameDays;
         public int PostgameTopLevel;
+        /// <summary>FG14-SBX-02：沙盒设置代码（<see cref="SandboxService.Code"/>；剧情档为空），存档卡显示“沙盒”及其设置。</summary>
+        public string SandboxCode;
         /// <summary>缩略图文件路径。尚未实现截图（DEBT-FG0SAVE01-01 → FG15-SYS-01），恒为 null。</summary>
         public string ThumbnailPath;
         /// <summary>备份文件本身的状态（Empty = 没有备份）。</summary>
@@ -190,6 +192,8 @@ namespace GameLogic.Campaign
         /// <summary>FG14-SBX-01（FGR-SBX-003“这些数据显示在主菜单的存档卡片上”）：后日谈坚守天数与达到的最高清洗等级（不是后日谈 = 0）。</summary>
         public int PostgameDays;
         public int PostgameTopLevel;
+        /// <summary>FG14-SBX-02：沙盒设置代码（<see cref="SandboxService.Code"/>；剧情档为空），存档卡显示“沙盒”及其设置。</summary>
+        public string SandboxCode;
     }
 
     /// <summary>FG0-SAVE-01 自检专用：在存档流程的指定位置模拟"进程被强制结束"。</summary>
@@ -572,6 +576,7 @@ namespace GameLogic.Campaign
             IsSandbox = s.Progress?.IsSandbox ?? false,
             PostgameDays = Endgame.PostgameService.HoldDays(s, GameLogic.Core.GameClock.Ticks),
             PostgameTopLevel = s.Progress?.Postgame?.HighestLevel ?? 0,
+            SandboxCode = SandboxService.Code(s),
         };
 
         private static readonly Regex SchemaHeaderRegex = new Regex("\"SchemaVersion\"\\s*:\\s*(\\d+)", RegexOptions.CultureInvariant);
@@ -817,6 +822,7 @@ namespace GameLogic.Campaign
             meta.IsSandbox = card.IsSandbox;
             meta.PostgameDays = card.PostgameDays;
             meta.PostgameTopLevel = card.PostgameTopLevel;
+            meta.SandboxCode = card.SandboxCode;
             meta.ThumbnailPath = null;
             return meta;
         }

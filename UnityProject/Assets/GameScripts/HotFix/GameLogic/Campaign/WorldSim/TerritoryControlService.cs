@@ -297,7 +297,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 return;
             }
-            int act = Math.Max(1, s.Progress?.Act ?? 1);
+            int act = SandboxService.TerritoryAct(s); // FG14-SBX-02：与领地显示同一口径
             bool title = false;
             foreach (TerritoryControlRecord r in st.Records)
             {

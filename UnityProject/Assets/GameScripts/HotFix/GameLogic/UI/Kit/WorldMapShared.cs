@@ -240,7 +240,7 @@ namespace GameLogic.UI.Kit
             if (WorldMapFilters.IsOn(WorldMapLayer.Territory))
             {
                 WorldPlan plan = WorldGenService.PlanFor(state);
-                int act = Math.Max(1, state.Progress?.Act ?? 1);
+                int act = Campaign.SandboxService.TerritoryAct(state); // FG14-SBX-02：与领地显示同一口径
                 if (plan != null)
                 {
                     foreach (PlannedTerritory t in plan.Territories)

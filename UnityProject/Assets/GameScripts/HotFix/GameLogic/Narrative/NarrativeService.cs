@@ -194,6 +194,9 @@ namespace GameLogic.Narrative
 
         // ── 投放 ───────────────────────────────────────────────────────────
 
+        /// <summary>FG14-SBX-02：沙盒里被拦下的投放次数（自检读）。</summary>
+        public static int BlockedInSandbox { get; private set; }
+
         /// <summary>按触发串投放（没有对应条目 / 已经收过 → false）。</summary>
         public static bool Trigger(CampaignState s, string trigger)
         {
@@ -209,6 +212,12 @@ namespace GameLogic.Narrative
         {
             if (s?.Progress == null || def == null || Has(s, def.Id))
             {
+                return false;
+            }
+            if (Campaign.SandboxService.StoryOff(s))
+            {
+                // FG14-SBX-02（FG12 第 4 节“在沙盒里走到剧情节点的位置：没有剧情节点，不会触发演出”）：沙盒不投放任何叙事条目（不进资料库、不演出、不推幕）。
+                BlockedInSandbox++;
                 return false;
             }
             CampaignFgStateDomains.EnsureAll(s);

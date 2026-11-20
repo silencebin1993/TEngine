@@ -989,7 +989,7 @@ namespace GameLogic.Campaign.Env
             {
                 return false;
             }
-            int act = Math.Max(1, s?.Progress?.Act ?? 1);
+            int act = SandboxService.TerritoryAct(s); // FG14-SBX-02：沙盒“区域：全部开放”= 所有阵营领地都显示
             if (t.Act <= act)
             {
                 return true;

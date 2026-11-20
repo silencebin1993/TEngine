@@ -176,7 +176,7 @@ namespace GameLogic.Campaign.Env
         /// <summary>当前幕的频率行（超过表里最大一幕按最大一幕；表缺失用内置初值）。</summary>
         public static void ActRow(CampaignState s, out float badChance, out double clearMin, out double clearMax, out int wa, out int ws, out int wc)
         {
-            int act = Math.Max(1, s?.Progress?.Act ?? 1);
+            int act = SandboxService.EffectiveAct(s);
             WeatherAct best = null;
             try
             {
@@ -443,6 +443,22 @@ namespace GameLogic.Campaign.Env
                 return;
             }
             WeatherFrontState d = StateOf(state);
+            if (!SandboxService.WeatherOn(state))
+            {
+                // FG14-SBX-02（FGR-SBX-011“天气：关”）：进行中的天气立即结束、排好的全部撤掉；排定视野停在“现在”，改回“开”时从那一刻起重新排（确定性，按种子与序号）。
+                WeatherFrontRecord now = d.ActiveSerial != 0 ? ActiveFront(state) : null;
+                if (d.ActiveSerial != 0)
+                {
+                    End(state, d, now);
+                }
+                if (d.Fronts.Length > 0)
+                {
+                    d.Fronts = Array.Empty<WeatherFrontRecord>();
+                    Revision++;
+                }
+                d.PlannedUntilTick = ticks;
+                return;
+            }
             int hz = Math.Max(1, GameClock.StepHz);
             bool second = ticks % hz == 0;
             if (second || d.PlannedUntilTick < 0 || _warnLeadTicks < 0)

@@ -590,7 +590,7 @@ namespace GameLogic.Campaign.Economy
                     why = wantWhy ? Covered(wl) : null;
                     return false;
                 case "act":
-                    if ((s.Progress?.Act ?? 1) < k.ConditionArg)
+                    if (SandboxService.EffectiveAct(s) < k.ConditionArg)
                     {
                         why = wantWhy ? GameText.Format("intel.kind_state.need_act", k.ConditionArg) : null;
                         return false;
@@ -741,7 +741,7 @@ namespace GameLogic.Campaign.Economy
         /// <summary>当前幕能截获、还没截获的第一个舰队片段。</summary>
         public static IntelFragmentDef NextFragment(CampaignState s)
         {
-            int act = s?.Progress?.Act ?? 1;
+            int act = SandboxService.EffectiveAct(s);
             string[] heard = StateOf(s)?.FragmentsHeard ?? Array.Empty<string>();
             foreach (IntelFragmentDef d in IntelCatalog.Fragments)
             {

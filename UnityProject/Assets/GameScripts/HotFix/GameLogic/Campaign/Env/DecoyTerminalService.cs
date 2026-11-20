@@ -488,7 +488,7 @@ namespace GameLogic.Campaign.Env
         {
             WorldFeature f = Terminal(s, a.TerminalId);
             string faction = f?.TerritoryId ?? string.Empty;
-            int act = Math.Max(1, s.Progress?.Act ?? 1);
+            int act = SandboxService.EffectiveAct(s);
             var defs = new List<RaidUnitDef>(4);
             RaidUnitDef any = null;
             foreach (RaidUnitDef u in RaidCatalog.Units)

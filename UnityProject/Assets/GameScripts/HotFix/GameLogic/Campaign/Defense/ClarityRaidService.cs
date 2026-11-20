@@ -100,7 +100,7 @@ namespace GameLogic.Campaign.Defense
                 return;
             }
             FactionState f = s.Factions;
-            if (!ClarityVisible(s) || StandingPurifiers(s) == 0 || DifficultyService.StoryOnly(s))
+            if (!ClarityVisible(s) || StandingPurifiers(s) == 0 || DifficultyService.StoryOnly(s) || SandboxService.RaidsDisabled(s))
             {
                 return; // 条件不满足时不排（满足那一刻起再算首次延迟）；建造者难度只有剧情突袭
             }
@@ -124,7 +124,7 @@ namespace GameLogic.Campaign.Defense
                 f.ClarityRaidTriggers++;
                 Triggered++;
             }
-            f.ClarityRaidNextTick = tick + RaidDirectorService.DayTicks(PeriodDays / Math.Max(0.05f, DifficultyService.Frequency(s)));
+            f.ClarityRaidNextTick = tick + RaidDirectorService.DayTicks(PeriodDays / Math.Max(0.05f, DifficultyService.RaidFrequency(s)));
         }
 
         // ─────────────────────────────── 投放目标 ───────────────────────────────
