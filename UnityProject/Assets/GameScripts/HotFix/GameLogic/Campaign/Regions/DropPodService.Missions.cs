@@ -45,6 +45,8 @@ namespace GameLogic.Campaign.Regions
         public int Leftover;
         /// <summary>回收：附近地上的货物件数（多出来的舱装它）。</summary>
         public int GroundCargo;
+        /// <summary>FG15-UX-01（DEBT-FG8EXP05-04）：回收时有远征队还在星球上行军（去程 / 返程）——舱到之前队伍可能已经走远，预览里提醒先下“待命”（不替玩家停下，FGR-BASE-020）。</summary>
+        public bool MarchWarning;
     }
 
     public static partial class DropPodService
@@ -192,6 +194,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return Reject(p, "fuel", GameText.Format("drop.reason.fuel", Liters(p.FuelMl), Liters(p.FuelHaveMl)));
             }
+            p.MarchWarning = ExpeditionMarchService.IsMarching(s);
             p.Ok = true;
             p.Code = null;
             return p;

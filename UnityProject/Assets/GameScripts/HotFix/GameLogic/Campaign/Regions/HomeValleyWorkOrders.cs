@@ -2307,7 +2307,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return WorkOrderOpResult.Fail("machine-out-of-region");
             }
-            if (HomeValleyConstruction.FindBuildingFast(state, targetId) == null)
+            if (HomeValleyConstruction.FindBuildingFast(state, targetId) == null && !(kind == WorkOrderKind.Garrison && MachineRoster.TryPatrolSpot(targetId, out _)))
             {
                 return WorkOrderOpResult.Fail("building-not-found");
             }
@@ -2981,7 +2981,11 @@ namespace GameLogic.Campaign.Regions
                 case WorkOrderKind.Deliver:
                 case WorkOrderKind.MachineRepair:
                 case WorkOrderKind.Garrison:
-                    // FG4-ECO-06：补给对象 / 维修台 / 驻防点（建筑；驻防点没了按归还核心）。
+                    // FG4-ECO-06：补给对象 / 维修台 / 驻防点（建筑；驻防点没了按归还核心）。FG15-UX-01：巡逻路线上地图点的地点（格坐标）。
+                    if (order.Kind == WorkOrderKind.Garrison && MachineRoster.TryPatrolSpot(order.TargetId, out Vector2 spot))
+                    {
+                        return spot;
+                    }
                     BuildingRecord ruleTarget = HomeValleyConstruction.FindBuildingFast(state, order.TargetId);
                     return ruleTarget?.Position ?? HomeValleyLayout.Core.Position;
                 default:

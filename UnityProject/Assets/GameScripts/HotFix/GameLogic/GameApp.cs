@@ -49,6 +49,9 @@ public partial class GameApp
 
         // 开发与发行标准都是最低 120 帧：冷启动就关垂直同步并应用目标帧率（默认 120），不等进入玩法后的设置面板。
         GameLogic.Settings.FramePacing.ApplyStored();
+        // FG15-UX-01：画质子项（阴影 / 后处理接收口）与玩家确认过的分辨率、窗口模式在冷启动时套用。
+        GameLogic.Settings.GameSettings.ApplyQuality();
+        GameLogic.Settings.DisplayModeService.ApplyStored();
 
         // 正式界面默认不叠放开发 FPS 窗口，避免遮住资源 HUD。
         if (Debugger.Instance != null) Debugger.Instance.enabled = false;

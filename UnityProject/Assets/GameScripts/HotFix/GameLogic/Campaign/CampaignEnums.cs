@@ -54,6 +54,8 @@ namespace GameLogic.Campaign
         EndingComplete = 13,
         /// <summary>FG13-END-06（FGR-END-032）：结算后选择“继续”、进入后日谈之后（结算已关）。</summary>
         PostgameStart = 14,
+        /// <summary>FG15-UX-01（FGR-SYS-020 游戏性“自动存档间隔”）：按设置的间隔（真实时间、世界运行时累计）定时自动存档。</summary>
+        Interval = 15,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>

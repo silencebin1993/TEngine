@@ -622,6 +622,8 @@ namespace GameLogic.EditorTools
                     case 40: StepMenuSettings(inStep); break;
                     case 41: StepMenuAllKeyBindings(inStep); break;
                     case 42: StepMenuAllKeyBindingsClosed(inStep); break;
+                    case 9043: StepMenuAllSettings(inStep); break; // FG15-UX-01
+                    case 9044: StepMenuAllSettingsClosed(inStep); break;
                 }
             }
             catch (Exception e)
@@ -831,6 +833,48 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "KeysSub", 0);
             Check(!KeyBindingsPanelUIToolkit.IsOpen, "按 Esc 关闭按键面板");
+            Next(9043, "按键面板已关，接着看“全部设置…”");
+        }
+
+        // ── FG15-UX-01：主菜单的“全部设置…”（与游戏内暂停菜单“设置…”同一个 UI Toolkit 面板）──
+        private static void StepMenuAllSettings(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            Button all = FindActiveButton("m_btn_AllSettings");
+            string label = all != null ? all.GetComponentInChildren<UnityEngine.UI.Text>(true)?.text : null;
+            Check(all != null && label == Localization.GameText.Get("settings.open_all"), $"设置页有“{label}”按钮");
+            if (all == null)
+            {
+                Finish("设置页没有“全部设置…”按钮");
+                return;
+            }
+            all.onClick.Invoke();
+            Next(9044, "点“全部设置…”");
+        }
+
+        private static void StepMenuAllSettingsClosed(double inStep)
+        {
+            if (inStep < 1)
+            {
+                return;
+            }
+            if (SessionState.GetInt(K + "SettingsSub", 0) == 0)
+            {
+                SettingsPanelUIToolkit panel = SettingsPanelUIToolkit.Instance;
+                VisualElement window = panel != null && panel.Root != null ? panel.Root.Q<VisualElement>("SettingsRoot") : null;
+                Check(SettingsPanelUIToolkit.IsOpen && panel.Rows.Count > 0 && window != null && window.resolvedStyle.display == DisplayStyle.Flex && window.worldBound.width > 400f,
+                    $"主菜单打开 UI Toolkit 设置面板：画面分类 {panel?.Rows.Count} 行（窗口宽 {window?.worldBound.width:F0}）");
+                CheckNoTextMarkers("主菜单设置面板");
+                PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+                SessionState.SetInt(K + "SettingsSub", 1);
+                SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);
+                return;
+            }
+            SessionState.SetInt(K + "SettingsSub", 0);
+            Check(!SettingsPanelUIToolkit.IsOpen, "按 Esc 关闭设置面板");
             Button back = FindActiveButton("m_btn_SettingsBack");
             back?.onClick.Invoke();
             Next(1, "从设置页返回主菜单");
@@ -1151,6 +1195,8 @@ namespace GameLogic.EditorTools
             Check(off && homeHidden && on && map.Model.Items.Any(i => i.Kind == WorldMapItemKind.Home), "点“己方”筛选按钮：归还核心图标隐藏，再点恢复");
             // FG8-EXP-01 修复轮（卡片结果“从战略地图编成远征队”）：标题栏入口节点存在（点击会收起地图并打开派遣准备面板，此处只查接线节点，不点）。
             Check(UitkExists("[StrategicMapHost]", "MapComposeExpedition"), "战略地图标题栏有“编成远征队”按钮（FG8-EXP-01 修复轮入口）");
+            // FG15-UX-01（DEBT-FG8EXP01-10）：Shift + 拖动框选机器的框选框节点在（框选 → 编成由 FgExpeditionChecklistSelfCheck D19e 断言）。
+            Check(UitkExists("[StrategicMapHost]", "MapSelectBox"), "战略地图有机器框选框节点（FG15-UX-01）");
             // 己方建筑群与前哨（FGR-GEN-080）：核心以外的每个建筑群，在视野里就有图标（核心那一群由核心图标代表）。
             var clusters = WorldMapOwnClusters.For(CampaignSession.Current);
             int ownInView = clusters.Count(c => !c.ContainsCore && map.View.Contains(c.X, c.Y, map.View.HalfWidth * 0.1));
@@ -1642,6 +1688,9 @@ namespace GameLogic.EditorTools
             bool roleBack = rop != null && UI.Kit.RosterPanelUIToolkit.PickForTests(roleField, laborAt)
                             && Campaign.MachineRegistry.TryGetRecord(firstId, out Campaign.MachineRecord r1) && r1.Role == Campaign.MachineRole.Labor;
             bool detailOpen = ClickUitk("[RosterPanelHost]", "RoDetail") && rop != null && rop.ShowingDetail && rop.DetailInfoText.Contains("接入记录");
+            // FG15-UX-01：机器详情里有“在地图上点巡逻点”（DEBT-FG6DEF06-04）与“避开危险物质”开关（DEBT-EMG2RULE01-04）。
+            Check(detailOpen && UitkExists("[RosterPanelHost]", "RosterDetailPatrolMap") && UitkExists("[RosterPanelHost]", "RosterDetailHazard"),
+                "名册机器详情有“在地图上点巡逻点”按钮与“避开危险物质”开关（FG15-UX-01）");
             int detailId = rop?.DetailLogicId ?? 0;
             if (rop != null)
             {

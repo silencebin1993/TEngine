@@ -632,6 +632,17 @@ namespace GameLogic.EditorTools
                 $"C2 发射：机器离开地面进舱（家园内核里没有它的单位）、货物出库 25 个、燃油一次扣清往返（{DropPodService.Liters(fuel0)} → {DropPodService.Liters(DropPodService.FuelMl(r))} 升）、3 舱按同一到达步起飞，站里剩 1 舱；" +
                        $"舱里的机器拒绝接入、写明“{uplinkText}”（DEBT-FG1SIG03-02）");
 
+            // DEBT-FG8DROP01-03（FG15-UX-01）：名册里在舱里的机器是“投送途中”，不是“在外”；能按它单独筛选；位置列写舱的去向与剩余时间；按状态排序排在“在外”之后、阵亡之前。
+            MachineRoster.Status rs = MachineRoster.StatusOf(s, M(a));
+            string place = MachineRoster.PlaceText(s, M(a));
+            bool transitOnly = MachineRoster.Query(s, null, null, MachineRoster.StatusFilter.InTransit, MachineRoster.SortKey.Number, false).Select(x => x.LogicId).SequenceEqual(new[] { a });
+            bool notAway = MachineRoster.Query(s, null, null, MachineRoster.StatusFilter.Away, MachineRoster.SortKey.Number, false).All(x => x.LogicId != a);
+            bool rank = MachineRoster.StatusRank(MachineRoster.Status.Away) < MachineRoster.StatusRank(MachineRoster.Status.InTransit)
+                        && MachineRoster.StatusRank(MachineRoster.Status.InTransit) < MachineRoster.StatusRank(MachineRoster.Status.Dead);
+            Expect(rs == MachineRoster.Status.InTransit && MachineRoster.StatusName(rs) == "投送途中" && place.Contains("投送中") && place.Contains("还要")
+                   && transitOnly && notAway && rank && MachineRoster.AllStatusFilters.Contains(MachineRoster.StatusFilter.InTransit),
+                $"C2b 名册：舱里的机器状态“{MachineRoster.StatusName(rs)}”、位置“{place}”；“投送途中”筛选只列它（{transitOnly}）、“在外”不列它（{notAway}）；按状态排序在“在外”之后、阵亡之前（{rank}）");
+
             StepTo(arrive - 1);
             bool notYet = M(a).RegionId == DropPodService.InPodRegionId;
             StepTo(arrive + 2);

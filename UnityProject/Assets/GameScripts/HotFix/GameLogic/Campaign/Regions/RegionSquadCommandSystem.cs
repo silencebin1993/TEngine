@@ -160,6 +160,10 @@ namespace GameLogic.Campaign.Regions
         private float _acidConfirmUntil = -1f;
         private string _acidConfirmKey; // 被拒的那条命令（种类 + 酸沼区）：确认窗口内只有“同样的命令”算强行进入。
         private readonly List<int> _outScratch = new List<int>(8);
+        private readonly List<int> _lastStarted = new List<int>(8);
+
+        /// <summary>最近一次 Move / Attack / Guard / Retreat 派发里真正接到命令的机器（酸沼软门槛拒绝、覆盖外、受控的不在内）。下一次派发前有效。</summary>
+        public IReadOnlyList<int> LastStartedIds => _lastStarted;
         private readonly List<Vector2> _coverageRouteScratch = new List<Vector2>(2);
         public IReadOnlyList<string> RecentEvents => _recentEvents;
         public RegionCommandKind? ArmedKind => _armedKind;
@@ -485,6 +489,29 @@ namespace GameLogic.Campaign.Regions
             PushEvent($"编组 {slot} 已调用（{_selection.Count} 台在场）。");
         }
 
+        /// <summary>
+        /// DEBT-FG8EXP02-06（“远征队 = 编组”）：把刚出发的远征队存进第一个空着的数字编组（1～9），之后按编组键（默认 Alt+数字）就能选中整队、连按两下镜头飞过去。
+        /// 不覆盖玩家已经存的编组；全部占满时不存，命令栏写明。返回存进的编组号（0 = 没存）。
+        /// </summary>
+        public int SaveExpeditionGroup(IReadOnlyList<int> ids, int teamNumber)
+        {
+            if (ids == null || ids.Count == 0)
+            {
+                return 0;
+            }
+            for (int slot = 1; slot <= 9; slot++)
+            {
+                if (!_groups.TryGetValue(slot, out List<int> g) || g == null || g.Count == 0)
+                {
+                    _groups[slot] = new List<int>(ids);
+                    PushEvent(GameText.Format("exp.group.saved", teamNumber, slot));
+                    return slot;
+                }
+            }
+            PushEvent(GameText.Format("exp.group.full", teamNumber));
+            return 0;
+        }
+
         public int GroupSize(int slot) => _groups.TryGetValue(slot, out List<int> members) ? members.Count : 0;
 
         /// <summary>FG8-EXP-01：连按两次同一编组键的判定（纯函数，供自检直接测）。
@@ -731,6 +758,7 @@ namespace GameLogic.Campaign.Regions
         /// 暂停中下达的标为“待执行”，恢复后的第一步开始执行（Demo 的“暂停下达即排队、恢复时按下令那一刻的名单执行”）。</summary>
         private void Issue(RegionCommandKind kind, Vector2 targetPosition, string hostileId, bool paused)
         {
+            _lastStarted.Clear();
             if (_selection.Count == 0)
             {
                 return;
@@ -787,6 +815,7 @@ namespace GameLogic.Campaign.Regions
             int started = 0;
             int targetUnit = friendlyTarget != 0 ? friendlyTarget : kind == RegionCommandKind.Attack && _ctx.HostileUnit != null ? _ctx.HostileUnit(hostileId) : 0;
             _outScratch.Clear();
+            _lastStarted.Clear();
             for (int i = 0; i < targets.Count; i++)
             {
                 int logicId = targets[i];
@@ -815,6 +844,9 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 started++;
+                _lastStarted.Add(logicId);
+                InteriorApproachService.Drop(logicId); // DEBT-FG8GEN02-10：新命令 = 这台退出“走过去并进入”
+                ExpeditionMarchService.OnPlayerUnitCommand(CampaignSession.Current, logicId); // DEBT-FG8EXP02-09：单独调走的行军成员不算截断
                 if (firstStarted == 0)
                 {
                     firstStarted = logicId;
@@ -996,6 +1028,7 @@ namespace GameLogic.Campaign.Regions
                 HomeValleyMachineMarker marker = FindMarker(logicId);
                 _ctx.Site.ClearCommand(marker.UnitId);
             }
+            InteriorApproachService.Drop(logicId); // 派工 / 接管 = 玩家改了这台的命令
         }
 
         /// <summary>FG0-ARCH-03：内核报告的编队命令事件 → 编队事件文本与反馈（文本与 Demo 逐条一致）。</summary>

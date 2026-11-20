@@ -142,6 +142,10 @@ namespace GameLogic.Campaign.Regions
             if (p.Recall && p.Ok)
             {
                 sb.Append('\n').Append(GameText.Format("drop.preview.recall", p.Machines.Count, p.GroundCargo));
+                if (p.MarchWarning)
+                {
+                    sb.Append('\n').Append(GameText.Format("drop.preview.march_warning", InputDisplay.ForAction(GameActionId.ExpeditionHold)));
+                }
                 if (p.Leftover > 0)
                 {
                     sb.Append('\n').Append(GameText.Format("drop.preview.leftover", p.Leftover));

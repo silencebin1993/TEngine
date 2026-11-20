@@ -1303,6 +1303,16 @@ namespace GameLogic.EditorTools
                     prod.OpenTurret();
                     Expect(onTurret && hiddenElsewhere && TurretPanelUIToolkit.BuildingId == t2.BuildingId && TurretPanelUIToolkit.IsOpen,
                         $"G6 炮塔的建筑面板有“炮塔…”按钮（别的建筑没有），点它打开这座炮塔的面板（{onTurret} / {hiddenElsewhere}）");
+
+                    // DEBT-FG6DEF01-06（FG15-UX-01）：专属打开键 Alt+M（OpenBuildingDefensePanel）——建筑面板开着时对炮塔打开炮塔面板；对仓库无效、不开面板（负向）。
+                    TurretPanelUIToolkit.Close();
+                    ProductionPanelUIToolkit.Open(s.BuildingRecords.First(b => b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse).BuildingId);
+                    bool refused = !prod.OpenDefenseOrTurret() && !TurretPanelUIToolkit.IsOpen && ProductionPanelUIToolkit.IsOpen;
+                    ProductionPanelUIToolkit.Open(t2.BuildingId);
+                    bool keyOpened = prod.OpenDefenseOrTurret() && TurretPanelUIToolkit.IsOpen && TurretPanelUIToolkit.BuildingId == t2.BuildingId && !ProductionPanelUIToolkit.IsOpen;
+                    string pump = System.IO.File.ReadAllText("Assets/GameScripts/HotFix/GameLogic/UI/Kit/UiKitInputPump.cs");
+                    Expect(refused && keyOpened && pump.Contains("ConsumeContextAction(GameActionId.OpenBuildingDefensePanel)"),
+                        $"G6b 专属打开键 Alt+M：建筑面板开着时对炮塔打开这座炮塔的面板（{keyOpened}）；对仓库不开、给拒绝提示（{refused}）");
                 }
                 finally
                 {

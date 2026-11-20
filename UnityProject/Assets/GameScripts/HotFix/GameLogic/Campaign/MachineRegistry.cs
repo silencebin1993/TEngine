@@ -876,6 +876,7 @@ namespace GameLogic.Campaign
                 // FG7-ENV-05：机器探索沿路采样的上一个检查点（读档后接着从同一点补探索）。旧档缺字段 = 没有检查点。
                 ExploreLast = src.ExploreLast,
                 ExploreHasLast = src.ExploreHasLast,
+                NoHazardAvoid = src.NoHazardAvoid, // FG15-UX-01：玩家关掉的“避开危险物质”（旧档缺字段 = false = 开）。
                 IsAlive = src.IsAlive,
                 IsInFactory = src.IsInFactory,
                 IsDeployed = src.IsDeployed,

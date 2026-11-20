@@ -154,6 +154,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPatrol);
                 Step(CheckPatrolPointsDestroyed);
                 Step(CheckPatrolPointUnreachable);
+                Step(CheckPatrolMapSpots);
                 Step(CheckSpectateTiming);
                 Step(CheckBackgroundEqualsObserved);
                 Step(CheckPerformance);
@@ -1581,6 +1582,79 @@ namespace GameLogic.EditorTools
             Expect(skipped && orders1 >= 1 && orders2 == orders1 && keepsPatrolling && once && saved && kept,
                 $"J5 负向“巡逻点到不了”：跳过它（{skipped}），重试期内去那一点的单 {orders1} → {orders2} 不增长、接着在别的点巡逻（换点 {SiegeService.PatrolAdvances - adv0} 次）；" +
                 $"重试又失败后“到不了”通知共 {notes} 条（巡逻专用 {skipNotes} 条，不附驻防恢复提示：“{Short(last)}”）；存读档后跳过表还在（{kept}，{fail}）");
+        }
+
+        /// <summary>
+        /// J6 FG15-UX-01（DEBT-FG6DEF06-04，FGR-DEF-043“按玩家画的巡逻路线巡逻”）：在地图上点任意可通行地点当巡逻点——名册详情按钮进点选、左键点地面加点（可连点）、
+        /// 机器沿地形真的走到这个地点并守点、路线预览画出驻防点 → 地点（闭合）；负向：非驻防机器进不了点选、点在不可通行处被拒、下拉框塞地点 ID 被拒；存读档后地点还在路线里。
+        /// </summary>
+        private static void CheckPatrolMapSpots()
+        {
+            CampaignState s = NewWorld(6374);
+            List<MachineRecord> ms = MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && MachineRoster.IsHome(m)).ToList();
+            HomeValleyController home = GameRoot.HomeValley;
+            if (ms.Count == 0 || home == null)
+            {
+                Fail("J6 准备：家园里没有机器 / 家园没载入");
+                return;
+            }
+            foreach (MachineRecord other in ms)
+            {
+                MachineRoster.TrySetRole(s, other.LogicId, MachineRole.Idle, out _);
+            }
+            int id = ms[0].LogicId;
+            bool idleRejected = !home.BeginPatrolPick(id, out string idleMsg) && home.PatrolPickMachine == 0;
+            MachineRoster.TrySetRole(s, id, MachineRole.Garrison, out _);
+            StepUntil(() => HomeValleyWorkOrders.FindActiveOrderForMachine(s, id) is WorkOrderRecord o0 && o0.Kind == WorkOrderKind.Garrison && o0.State == WorkOrderState.InProgress, 150);
+            Vector2 core = CoreCenter(s);
+            GridCell sc = SiegeService.NearestPassable(new GridCell(Mathf.RoundToInt(core.x + 16f), Mathf.RoundToInt(core.y + 6f)), 6);
+            Vector2 spot = new Vector2(sc.X, sc.Y);
+            bool begun = home.BeginPatrolPick(id, out string beginMsg) && home.PatrolPickMachine == id;
+            bool added = home.PatrolPickAt(spot, out string addMsg);
+            MachineRegistry.TryGetRecord(id, out MachineRecord rec);
+            string spotId = rec.PatrolPoints?.LastOrDefault();
+            bool isSpot = MachineRoster.TryPatrolSpot(spotId, out Vector2 parsed) && (parsed - spot).sqrMagnitude < 0.01f && MachineRoster.PatrolText(s, rec).Contains(GameText.Format("roster.patrol.spot", sc.X, sc.Y));
+            // 负向：点在不可通行处（一块 7×7 悬崖的中心，2 格内没有可通行格）被拒，不加点；下拉框路径塞地点 ID 被拒。
+            int n0 = rec.PatrolPoints.Length;
+            GridCell? cliffAt = FgNavSelfCheck.FindOpenArea(s, 4, 20, 40);
+            bool blocked = false;
+            string blockMsg = "找不到空地放悬崖";
+            if (cliffAt.HasValue)
+            {
+                FgNavSelfCheck.CliffRing(s, cliffAt.Value, 0, thickness: 4);
+                WorldSimulation.StepMany(3); // 改地形只标记寻路脏块，下一个世界步才同步进寻路内核
+                blocked = !home.PatrolPickAt(new Vector2(cliffAt.Value.X, cliffAt.Value.Y), out blockMsg) && rec.PatrolPoints.Length == n0;
+            }
+            bool dropdownRejects = !MachineRoster.TryAddPatrolPoint(s, id, MachineRoster.PatrolSpotPrefix + "1:1", out _) && rec.PatrolPoints.Length == n0;
+            // 路线预览：驻防点 + 1 个地点 = 2 点闭合折线。
+            var rig = new GameObject("__fgraid_patrol_route") { hideFlags = HideFlags.HideAndDontSave };
+            bool preview;
+            try
+            {
+                DefenseViews.FrameUpdate(s, Site, rig.transform, null);
+                DefenseViews.PatrolRoute(s, id);
+                preview = DefenseViews.RouteShown && DefenseViews.RoutePoints == 2;
+                DefenseViews.PatrolRoute(s, 0);
+                preview &= !DefenseViews.RouteShown;
+            }
+            finally
+            {
+                DefenseViews.Clear();
+                UnityEngine.Object.DestroyImmediate(rig);
+            }
+            home.EndPatrolPick();
+            bool ended = home.PatrolPickMachine == 0;
+            // 行为：机器沿地形走到地点并在那里守点（驻防单目标 = 地点 ID）。
+            CombatSite site = Site;
+            bool reached = StepUntil(() => site.TryGetMachinePosition(id, out Vector2 p) && Vector2.Distance(p, spot) <= 4f
+                && HomeValleyWorkOrders.FindActiveOrderForMachine(s, id) is WorkOrderRecord o && o.TargetId == spotId, 150);
+            bool saved = SaveSlot();
+            CampaignState l = RestoreSlot(out string fail);
+            bool kept = l != null && MachineRegistry.TryGetRecord(id, out MachineRecord lr) && lr.PatrolPoints != null && lr.PatrolPoints.Contains(spotId);
+            Expect(idleRejected && begun && added && isSpot && blocked && dropdownRejects && preview && ended && reached && saved && kept,
+                $"J6 地图上点巡逻点：非驻防机器进不了点选（{idleRejected}：“{Short(idleMsg)}”）；名册按钮进点选 {begun}（“{Short(beginMsg)}”），左键点地面加地点 {added}（{spotId}，“{Short(addMsg)}”，路线文字带地点 {isSpot}）；" +
+                $"负向：点在悬崖中心被拒 {blocked}（“{Short(blockMsg)}”）、下拉框塞地点 ID 被拒 {dropdownRejects}；路线预览 2 点、取消选中后隐藏 {preview}；结束点选 {ended}；" +
+                $"机器沿地形走到地点守点 {reached}；存读档后地点还在 {kept}（{fail}）");
         }
 
         /// <summary>J4 / J5 的准备：其余机器闲置，第一台设驻防并加两个巡逻点（<paramref name="second"/> 给出时第二个点用它）。返回机器 ID（0 = 准备失败）。</summary>

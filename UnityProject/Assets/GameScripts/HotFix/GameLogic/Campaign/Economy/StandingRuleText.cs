@@ -47,6 +47,10 @@ namespace GameLogic.Campaign.Economy
             {
                 return GameText.Get("rules.none");
             }
+            if (MachineRoster.TryPatrolSpot(buildingId, out _))
+            {
+                return MachineRoster.PatrolPointLabel(state, buildingId); // FG15-UX-01：巡逻路线上地图点的地点
+            }
             BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
             if (b != null)
             {

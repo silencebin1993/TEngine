@@ -506,6 +506,10 @@ namespace GameLogic.Stage
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
+            // FG15-UX-01：失焦暂停 / 静音（FG00 B09）、显示设置 15 秒确认倒数（真实时间）、自动存档间隔（真实时间，世界运行且未暂停时累计）。
+            Settings.FocusPolicy.Tick(Application.isFocused);
+            Settings.DisplayModeService.Tick();
+            Campaign.IntervalAutoSave.Tick(Time.unscaledDeltaTime, AnyRegionActive && Campaign.CampaignSession.Current != null, IsWorldPaused);
             // FG6-DEF-06：预警 / 突袭的音乐层与提示音（只在阶段变化时调音频模块；离开世界时回到平静）。
             Campaign.Feedback.RaidAudioDirector.Tick(Campaign.CampaignSession.Current, AnyRegionActive, Time.unscaledDeltaTime);
             // FG0-UX-01：通知中心——弹出条过期、跟随战役切换重新绑定历史（主菜单里也要跑：回菜单时清空）。

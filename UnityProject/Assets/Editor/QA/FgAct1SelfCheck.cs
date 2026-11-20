@@ -650,6 +650,47 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(GameClock.StepHz * 3);
             bool picked = !s.GroundItems.Contains(scrap) || scrap.Amount < before;
             Expect(picked, $"C6 远征地点里普通战利品走近自动拾取（与星球同一规则）：驻军掉落的废料被队员装进货舱 {picked}");
+
+            // C6b FG15-UX-01（DEBT-FG9ACT101-03）：Demo 关键物走近自动拾取；远处的不捡；丢弃的那件队员还在旁边时不被捡回，“装载”交互仍可手动装回。
+            Vector2 at = scrap.Position + new Vector2(1f, 0f);
+            Place(city.Combat, m, at);
+            LootPacketState lp = LootPickService.StateOf(s);
+            lp.Held = lp.Held.Where(h => h.Machine != m).ToArray(); // 夹具：C6 捡的废料可能装满了战斗底盘的 4 格，先清空（放不下时不捡由 FgCargoSelfCheck C5 覆盖）
+            // 夹具：C5 打掉的驻军掉落与 C6 没捡完的废料还在脚边，同一步里地面物先于关键物把货舱装满（放不下时的行为由 FgCargoSelfCheck C5 覆盖），先清掉 20 格内的地面物。
+            s.GroundItems = s.GroundItems.Where(gi => gi.RegionId != City || (gi.Position - at).sqrMagnitude > 400f).ToArray();
+            int free0 = CargoService.Free(s, Rec(m));
+            RegionQuestItemRecord QuestOnGround(string sid, Vector2 p)
+            {
+                var q = new RegionQuestItemRecord
+                {
+                    SalvageInstanceId = sid, RegionId = City, ContentId = FracturedCityLayout.MarkerModuleContentId,
+                    State = RegionQuestItemState.OnGround, Position = p,
+                };
+                s.RegionQuestItems = (s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>()).Append(q).ToArray();
+                return q;
+            }
+            RegionQuestItemRecord near = QuestOnGround("fgact1:auto_near", at + new Vector2(1f, 0f));
+            RegionQuestItemRecord far = QuestOnGround("fgact1:auto_far", at + new Vector2(40f, 0f));
+            int picked0 = lp.CargoAutoPicked;
+            int carriedSteps = 0;
+            for (int i = 0; i < GameClock.StepHz * 3; i++)
+            {
+                WorldSimulation.StepMany(1);
+                carriedSteps += near.State == RegionQuestItemState.Carried ? 1 : 0;
+            }
+            int pickedN = lp.CargoAutoPicked - picked0;
+            bool nearPicked = near.State == RegionQuestItemState.Carried && near.CarrierLogicId == m;
+            MachineRecord mr0 = Rec(m);
+            string diag = $"自动拾取计数 +{pickedN}、货舱空余（之后）{CargoService.Free(s, Rec(m))}、关键物占格 {LootPickCatalog.SpaceOf(near.ContentId, 1)}、携带态步数 {carriedSteps}、Members 来源 {CargoService.TeamOut(s)}、会话同一份 {ReferenceEquals(CampaignSession.Current, s)}、在数组里 {Array.IndexOf(CampaignSession.Current.RegionQuestItems, near) >= 0}、在队 {ExpeditionMarchService.IsTeamMember(s, m)}、" +
+                          $"队员 {LootPickService.RegionOfMachine(mr0)}@{LootPickService.PositionOfMachine(mr0)} 物品 {near.RegionId}@{near.Position}";
+            bool farStays = far.State == RegionQuestItemState.OnGround;
+            bool dropped = CargoService.TryDiscard(s, CargoService.QuestPrefix + near.SalvageInstanceId, out string dropMsg);
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            bool notRepicked = dropped && near.State == RegionQuestItemState.OnGround;
+            bool manual = notRepicked && city.TryCollectNearestQuestItem(near.SalvageInstanceId).Success && near.State == RegionQuestItemState.Carried;
+            s.RegionQuestItems = s.RegionQuestItems.Where(q => q != near && q != far).ToArray();
+            Expect(nearPicked && farStays && notRepicked && manual,
+                $"C6b 远征地点里 Demo 关键物（标记器模块）走近自动拾取 {nearPicked}（货舱空余 {free0} 格；{diag}）；40 格外的不捡 {farStays}；丢弃（{dropMsg}）后队员还在旁边不被捡回 {notRepicked}；“装载”交互仍可手动装回 {manual}");
         }
 
         private static void CheckGarrisonRebuildAndSave()

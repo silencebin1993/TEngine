@@ -105,6 +105,7 @@ namespace GameLogic.EditorTools
                 Step(CheckListAndMap);
                 Step(CheckTerminology);
                 Step(CheckLayout);
+                Step(CheckTopZones);
                 Step(CheckWorldPointerPassthrough);
                 Step(CheckSaveLoad);
                 Step(CheckPerformance);
@@ -304,10 +305,10 @@ namespace GameLogic.EditorTools
             Expect(t1 && t2 && t3 && t4 && t5 && t6 && t7 && full > 0f && strong > med && med > 0f && zmin < 1f && zmax > 1f && fmin < 1f && fmax > 1f,
                 $"调参入表：链路满格 {full} 格、强 ≥{strong}% / 中 ≥{med}%；接入镜头距离 {zmin}～{zmax}、跟随 {fmin}～{fmax}（默认 1 在范围内）");
             InputActionDef follow = InputActionCatalog.All.FirstOrDefault(d => d.Action == GameActionId.FollowSelection);
-            var skills = InputActionCatalog.All.Where(d => d.Action >= GameActionId.DirectSkillSlot0 && d.Action <= GameActionId.DirectSkillSlot4).ToList();
-            Expect(follow != null && follow.Status == InputActionStatus.Wired && skills.Count == 5
-                   && skills.All(d => d.Status == InputActionStatus.Reserved && d.Owner == "FG15-UX-01"),
-                "动作表：“跟随选中对象”改为已接入；“接入技能 1～5”仍是尚未开放、承接改为 FG15-UX-01（FG-GAP-046）");
+            bool skillsGone = !System.Enum.GetNames(typeof(GameActionId)).Any(n => n.StartsWith("DirectSkillSlot", System.StringComparison.Ordinal))
+                              && InputActionCatalog.All.All(d => (int)d.Action < 4 || (int)d.Action > 8);
+            Expect(follow != null && follow.Status == InputActionStatus.Wired && skillsGone,
+                "动作表：“跟随选中对象”改为已接入；“接入技能 1～5”按 FG-GAP-046 删除（0.2 规格没有按键发动的接入技能，FG15-UX-01）");
         }
 
         // ── B. 接入 HUD 正式链路 ─────────────────────────────────────────────────
@@ -1109,6 +1110,111 @@ namespace GameLogic.EditorTools
         }
 
         // ── M. 布局探针 ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// DEBT-FG1HUD01-04（FG15-UX-01 承接）：HUD 顶部分区的同屏布局探针——接入 HUD（左下）、信号 HUD 条（左上）、世界时间条（右上，日历已并进时间行）与首领 HUD（顶部居中：铸造前哨核心 / 寂听主脑）
+        /// 挂进同一块面板，四种分辨率 × UI 缩放 100% / 150%，两两不重叠、都在屏幕里。世界时间条按真实内容填（第 N 日 + 昼夜 + 8 格资源顶栏），不是超长压力文本（压力文本由各自的单面板探针管）。
+        /// </summary>
+        private static void CheckTopZones()
+        {
+            Line("  · M2. HUD 顶部分区同屏探针：接入 HUD / 信号条 / 世界时间条 / 首领 HUD 两两不重叠（DEBT-FG1HUD01-04）");
+            const string ui = "Assets/GameRes/Raw/UI/";
+            VisualTreeAsset signal = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(ui + "UiKit/SignalCorePanel.uxml");
+            VisualTreeAsset bar = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(ui + "UiKit/WorldBar.uxml");
+            VisualTreeAsset core = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(ui + "CoreBoss/CoreBossHud.uxml");
+            VisualTreeAsset silent = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(ui + "SilentMind/SilentMindHud.uxml");
+            PanelSettings source = AssetDatabase.LoadAssetAtPath<PanelSettings>(UiToolkitLayoutProbe.DefaultPanelSettingsPath);
+            if (signal == null || bar == null || core == null || silent == null || source == null)
+            {
+                Fail("M2 前提：UXML / PanelSettings 加载失败");
+                return;
+            }
+            var problems = new List<string>();
+            int checkedCases = 0;
+            foreach (Vector2Int res in new[] { new Vector2Int(1280, 720), new Vector2Int(1920, 1080), new Vector2Int(2560, 1440), new Vector2Int(3840, 2160) })
+            {
+                foreach (float scale in new[] { 1f, 1.5f })
+                {
+                    foreach (VisualTreeAsset boss in new[] { core, silent })
+                    {
+                        PanelSettings settings = Object.Instantiate(source);
+                        settings.hideFlags = HideFlags.HideAndDontSave;
+                        settings.scale = scale;
+                        var rt = new RenderTexture(res.x, res.y, 0) { hideFlags = HideFlags.HideAndDontSave };
+                        settings.targetTexture = rt;
+                        var go = new GameObject("__HudTopZoneProbe") { hideFlags = HideFlags.HideAndDontSave };
+                        try
+                        {
+                            var doc = go.AddComponent<UIDocument>();
+                            doc.panelSettings = settings;
+                            doc.visualTreeAsset = signal;
+                            VisualElement root = doc.rootVisualElement;
+                            foreach (VisualTreeAsset extra in new[] { bar, boss })
+                            {
+                                var layer = new VisualElement { pickingMode = PickingMode.Ignore };
+                                layer.style.position = Position.Absolute;
+                                layer.style.left = 0; layer.style.top = 0; layer.style.right = 0; layer.style.bottom = 0;
+                                extra.CloneTree(layer);
+                                root.Add(layer);
+                            }
+                            foreach (string n in new[] { "SignalHudBar", "UplinkHud", "WorldBar", "WorldTimeRow", "WorldCalendarRow" })
+                            {
+                                root.Q<VisualElement>(n)?.RemoveFromClassList("uk-hidden");
+                            }
+                            root.Q<VisualElement>("CoreBossHudRoot")?.AddToClassList("boss-root-visible");
+                            root.Q<VisualElement>("SilentMindHudRoot")?.AddToClassList("silent-boss-root-visible");
+                            foreach (Label pl in root.Query<Label>("PhaseLabel").ToList()) { pl.text = "阶段二 · 散热口开启 12 秒"; }
+                            root.Q<Label>("SignalLocation").text = "家园 · 归还核心覆盖内";
+                            root.Q<Label>("UplinkHudTitle").text = "接入：铁锤 · 编号 #12（重炮 · 履带）";
+                            root.Q<Label>("WorldDayTime").text = "第 12 日 08:30";
+                            root.Q<Label>("WorldStatus").text = "运行中";
+                            root.Q<Button>("WorldDayPhase").text = "☀ 白天 · 4时后入夜";
+                            VisualElement resRow = root.Q<VisualElement>("WorldResourceRow");
+                            for (int k = 0; k < 8; k++)
+                            {
+                                resRow.Add(new Label("结构材 120 ▲") { name = "ProbeRes" + k });
+                            }
+                            UiToolkitLayoutProbe.ForceLayout(root);
+                            Rect screen = root.panel.visualTree.worldBound;
+                            VisualElement bossRoot = root.Q<VisualElement>(boss == core ? "CoreBossHudRoot" : "SilentMindHudRoot");
+                            var zones = new (string name, Rect r)[]
+                            {
+                                ("信号条", root.Q<VisualElement>("SignalHudBar").worldBound),
+                                ("接入 HUD", root.Q<VisualElement>("UplinkHud").worldBound),
+                                ("世界时间条", root.Q<VisualElement>("WorldBar").worldBound),
+                                (boss == core ? "核心首领 HUD" : "寂听主脑 HUD", bossRoot.worldBound),
+                            };
+                            string tag = $"[{res.x}x{res.y} ×{scale:0.#}]";
+                            for (int a = 0; a < zones.Length; a++)
+                            {
+                                Rect ra = zones[a].r;
+                                if (ra.width <= 0f || ra.height <= 0f || ra.xMin < screen.xMin - 0.5f || ra.yMin < screen.yMin - 0.5f || ra.xMax > screen.xMax + 0.5f || ra.yMax > screen.yMax + 0.5f)
+                                {
+                                    problems.Add($"{tag} {zones[a].name} 塌陷或出屏 {ra}");
+                                }
+                                for (int b = a + 1; b < zones.Length; b++)
+                                {
+                                    Rect rb = zones[b].r;
+                                    if (ra.Overlaps(rb) && Mathf.Min(ra.xMax, rb.xMax) - Mathf.Max(ra.xMin, rb.xMin) > 0.5f && Mathf.Min(ra.yMax, rb.yMax) - Mathf.Max(ra.yMin, rb.yMin) > 0.5f)
+                                    {
+                                        problems.Add($"{tag} {zones[a].name} {ra} 与 {zones[b].name} {rb} 重叠");
+                                    }
+                                }
+                            }
+                            checkedCases++;
+                        }
+                        finally
+                        {
+                            Object.DestroyImmediate(go);
+                            Object.DestroyImmediate(rt);
+                            Object.DestroyImmediate(settings);
+                        }
+                    }
+                }
+            }
+            Expect(problems.Count == 0 && checkedCases == 16,
+                $"M2 同屏 {checkedCases} 种组合（4 分辨率 × 2 缩放 × 2 首领）：接入 HUD 左下、信号条左上、世界时间条右上、首领 HUD 顶部居中，两两不重叠、不出屏" + (problems.Count == 0 ? string.Empty : "——" + string.Join("；", problems.Take(6))));
+        }
 
         private static void CheckLayout()
         {

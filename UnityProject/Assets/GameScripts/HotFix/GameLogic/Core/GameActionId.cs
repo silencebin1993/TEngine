@@ -15,15 +15,8 @@
         MoveLeft = 2,
         MoveRight = 3,
 
-        /// <summary>Direct 直控技能槽 0——冲刺。默认键从 Space 挪到 LeftShift，见
-        /// <see cref="InputBindingSet.GetHardcodedDefault"/> 注释：运行时靠 Direct/Strategy 域互斥，
-        /// 冲刺（Direct）与暂停（Strategy，<see cref="TogglePause"/>）共用 Space 并不会真的抢键，
-        /// 但会让重绑面板的"全局唯一键"冲突提示自相矛盾，因此默认键分开。</summary>
-        DirectSkillSlot0 = 4,
-        DirectSkillSlot1 = 5,
-        DirectSkillSlot2 = 6,
-        DirectSkillSlot3 = 7,
-        DirectSkillSlot4 = 8,
+        // 4～8：原“接入技能 1～5”（DirectSkillSlot0～4）。0.2 规格里没有按键发动的接入技能（核心固件由具名反应发动，FG13 第 5 节快捷键表也没有），
+        // FG15-UX-01 按 FG-GAP-046 删除（不再占用 LeftShift / Q / Z / R / F）；编号不复用，旧设置里这几条在读入时按“未知动作”丢弃。
 
         /// <summary>E：世界交互（Direct 域 = FG 的“接入”上下文）。</summary>
         Interact = 9,
@@ -166,5 +159,24 @@
         OpenLore = 129,
         /// <summary>EMG1-CHAIN-01（FG19 FGR-EMG-181）：开 / 关光标附近的因果链叠加（最近 N 条链的连线与文字；战略与接入上下文，战略暂停中可用；临时默认 Ctrl+T，正式键位 FG15-UX-01）。</summary>
         CausalChain = 130,
+        // ── FG15-UX-01（快捷键全集，FG00 B02“键盘和鼠标都能完成”；FG13 第 5 节原表没有这些行，补全项，待用户复核）──
+        /// <summary>DEBT-FG2FW04-01：打开 / 关闭反应记录（全部上下文，默认 Alt+X）。</summary>
+        OpenReactionLog = 131,
+        /// <summary>DEBT-FG6DEF08-03：打开 / 关闭突袭历史（全部上下文，默认 Alt+Y）。</summary>
+        OpenRaidHistory = 132,
+        /// <summary>DEBT-FG6DEF01-06：炮塔面板开着时循环切换目标模式（界面上下文，默认 Ctrl+M）。</summary>
+        TurretCycleMode = 133,
+        /// <summary>DEBT-FG6DEF02-08：防御面板开着时在“一条线 / 一片区域”铺设方式之间切换（界面上下文，默认 Ctrl+L）。</summary>
+        DefenseTogglePattern = 134,
+        /// <summary>DEBT-FG8EXP02-06：跟随远征队 / 停止跟随（战略上下文，默认 Ctrl+E）。</summary>
+        FollowExpedition = 135,
+        /// <summary>DEBT-FG8EXP02-06：远征队前进（战略上下文，默认 Ctrl+R）。</summary>
+        ExpeditionAdvance = 136,
+        /// <summary>DEBT-FG8EXP02-06：远征队待命（战略上下文，默认 Ctrl+G）。</summary>
+        ExpeditionHold = 137,
+        /// <summary>DEBT-FG8EXP02-06：远征队返回（战略上下文，默认 Ctrl+J）。</summary>
+        ExpeditionReturn = 138,
+        /// <summary>DEBT-FG6DEF01-06 / 02-08：建筑面板开着时打开这座建筑的炮塔面板 / 防御面板（界面上下文，默认 Alt+M）。</summary>
+        OpenBuildingDefensePanel = 139,
     }
 }

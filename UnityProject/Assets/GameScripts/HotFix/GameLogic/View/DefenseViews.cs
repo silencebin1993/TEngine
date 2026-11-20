@@ -177,6 +177,85 @@ namespace GameLogic.View
             _preview.enabled = true;
         }
 
+        // ── FG15-UX-01（DEBT-FG6DEF06-04）：巡逻路线预览 ─────────────────────────────
+
+        private static LineRenderer _route;
+        private static int _routeKey;
+        private static readonly List<Vector2> RoutePts = new List<Vector2>(8);
+
+        /// <summary>自检读：路线预览是否显示、点数（驻防点 + 巡逻点，闭合回驻防点）。</summary>
+        public static bool RouteShown => _route != null && _route.enabled;
+        public static int RoutePoints => RouteShown ? _route.positionCount : 0;
+
+        /// <summary>
+        /// 选中的驻防机器（或正在给它点巡逻点）时，在地面上画它的巡逻路线：驻防点 → 巡逻点… → 回驻防点（闭合折线，不可用的点照样画出、按顺序）。
+        /// <paramref name="logicId"/> = 0 或没有巡逻点 → 隐藏。只在路线变了时重画（O(巡逻点数) ≤ 上限 6），平时每帧一次比较。纯表现，不改模拟数据。
+        /// </summary>
+        public static void PatrolRoute(CampaignState state, int logicId)
+        {
+            MachineRecord m = null;
+            bool show = _root != null && state != null && logicId > 0 && MachineRegistry.TryGetRecord(logicId, out m) && m != null && m.IsAlive
+                        && m.Role == MachineRole.Garrison && m.PatrolPoints != null && m.PatrolPoints.Length > 0;
+            if (!show)
+            {
+                if (_route != null)
+                {
+                    _route.enabled = false;
+                }
+                _routeKey = 0;
+                return;
+            }
+            var hc = new HashCode(); // 逐个元素组合，不每帧拼字符串（无 GC）
+            hc.Add(logicId);
+            hc.Add(MachineRoster.Revision);
+            hc.Add(m.RolePointId);
+            foreach (string p in m.PatrolPoints)
+            {
+                hc.Add(p);
+            }
+            int key = hc.ToHashCode();
+            if (_route == null)
+            {
+                var go = new GameObject("PatrolRoutePreview");
+                go.transform.SetParent(_root, false);
+                _route = go.AddComponent<LineRenderer>();
+                _route.useWorldSpace = true;
+                _route.loop = true;
+                _route.numCapVertices = 2;
+                _route.widthMultiplier = 0.2f;
+                _route.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                _route.receiveShadows = false;
+                _route.sharedMaterial = ViewMaterials.Get("Sprites/Default", new Color(0.4f, 0.9f, 1f, 0.85f));
+                _routeKey = 0;
+            }
+            if (key != _routeKey)
+            {
+                _routeKey = key;
+                RoutePts.Clear();
+                if (MachineRoster.PatrolTarget(state, m, 0, out Vector2 home, out _) == 0)
+                {
+                    RoutePts.Add(home); // 第 0 点 = 驻防点（没设 = 归还核心）
+                }
+                foreach (string id in m.PatrolPoints)
+                {
+                    if (MachineRoster.TryPatrolSpot(id, out Vector2 spot))
+                    {
+                        RoutePts.Add(spot);
+                    }
+                    else if (HomeGridService.FindBuilding(state, id) is BuildingRecord b)
+                    {
+                        RoutePts.Add(b.Position);
+                    }
+                }
+                _route.positionCount = RoutePts.Count;
+                for (int i = 0; i < RoutePts.Count; i++)
+                {
+                    _route.SetPosition(i, new Vector3(RoutePts[i].x, RingHeight + 0.05f, RoutePts[i].y));
+                }
+            }
+            _route.enabled = true;
+        }
+
         private static LineRenderer Ring(int index)
         {
             while (Rings.Count <= index)
@@ -224,6 +303,12 @@ namespace GameLogic.View
                 UnityObjects.Release(_preview.gameObject);
             }
             _preview = null;
+            if (_route != null)
+            {
+                UnityObjects.Release(_route.gameObject);
+            }
+            _route = null;
+            _routeKey = 0;
             _root = null;
             _structValid = false;
             _previewKey = 0;

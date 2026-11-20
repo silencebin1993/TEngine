@@ -789,6 +789,9 @@ namespace GameLogic.Core
         public static string LastRaised { get; private set; }
         public static int RaisedCount { get; private set; }
 
+        /// <summary>FG15-UX-01：引导开关关着时被拦下的次数（自检）。</summary>
+        public static int SuppressedCount { get; private set; }
+
         /// <summary>FG1-HUD-01：每一次触发（不只第一次）都会调用——机制图鉴按“首次接触”解锁条目（FGR-UX-051），
         /// 图鉴文件被删除 / 换机器时，玩家下一次接触同一机制还能重新解锁，不依赖“钩子只广播一次”。</summary>
         public static int TouchCount { get; private set; }
@@ -806,6 +809,11 @@ namespace GameLogic.Core
             if (GameSettings.HasSeenGuidanceHook(hookId))
             {
                 return false;
+            }
+            if (!GameSettings.GuidanceEnabled)
+            {
+                SuppressedCount++;
+                return false; // FG15-UX-01（FGR-SYS-020“引导开关”）：关着时不广播、也不记“已看过”，重新打开后第一次接触照样触发；图鉴解锁照常（上面已做）。
             }
             GameSettings.MarkGuidanceHookSeen(hookId);
             LastRaised = hookId;

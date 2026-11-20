@@ -249,6 +249,9 @@ namespace GameLogic.UI.Kit
 
         // ─────────────────────────────── 操作（按钮 / 下拉，自检直接调）───────────────────────────────
 
+        /// <summary>FG15-UX-01（DEBT-FG6DEF02-08）：铺设方式快捷键——一条线 ↔ 一片区域（走与按钮同一个入口；不是陷阱时由服务给出原因）。</summary>
+        public void TogglePattern() => ClickPattern(_trapRo.Pattern == DefenseCatalog.PatternLine ? DefenseCatalog.PatternArea : DefenseCatalog.PatternLine);
+
         public void ClickPattern(int pattern) => Show(DefenseService.TrySetTrapPattern(CampaignSession.Current, BuildingId, pattern));
 
         /// <summary>固件下拉选第 <paramref name="index"/> 项（与玩家点选同一回调：选中即生效）。</summary>

@@ -109,21 +109,27 @@ namespace GameLogic.Campaign.Regions
                 return list;
             }
             Vector2 e = TerritoryAnchorChecks.EntryOf(s, a);
-            float r = Mathf.Max(1f, a.EntryRadius);
             foreach (MachineRecord m in MachineRegistry.AllRecords)
             {
-                if (m == null || !m.IsAlive || m.IsInFactory || m.RegionId != HomeValleyLayout.RegionId)
-                {
-                    continue;
-                }
-                Vector2 p = MachineRegistry.TryGetLivePosition(m.LogicId, out Vector2 live) ? live : m.WorldPosition;
-                if ((p - e).sqrMagnitude <= r * r)
+                if (IsNearEntrance(a, e, m))
                 {
                     list.Add(m.LogicId);
                 }
             }
             list.Sort();
             return list;
+        }
+
+        /// <summary>单台判定（与 <see cref="MachinesNearEntrance"/> 同一口径）；<paramref name="entry"/> = TerritoryAnchorChecks.EntryOf(s, a)。右键入口意图每步只看意图里那几台，O(意图台数)。</summary>
+        public static bool IsNearEntrance(PlannedAnchor a, Vector2 entry, MachineRecord m)
+        {
+            if (a == null || m == null || !m.IsAlive || m.IsInFactory || m.RegionId != HomeValleyLayout.RegionId)
+            {
+                return false;
+            }
+            float r = Mathf.Max(1f, a.EntryRadius);
+            Vector2 p = MachineRegistry.TryGetLivePosition(m.LogicId, out Vector2 live) ? live : m.WorldPosition;
+            return (p - entry).sqrMagnitude <= r * r;
         }
 
         /// <summary>室内出口旁 interior.exit_radius 格内的存活机器（按编号）。</summary>
@@ -233,11 +239,20 @@ namespace GameLogic.Campaign.Regions
 
         // ── 进入 / 离开 ─────────────────────────────────────────────────────────
 
-        /// <summary>从入口 <paramref name="anchorId"/> 进入（入口面板“进入”）。成功返回 true；失败时 <paramref name="reason"/> 是给玩家看的原因（拒绝音由调用方发）。</summary>
-        public static bool TryEnter(CampaignState s, string anchorId, out string reason)
+        /// <summary>从入口 <paramref name="anchorId"/> 进入（入口面板“进入”）。成功返回 true；失败时 <paramref name="reason"/> 是给玩家看的原因（拒绝音由调用方发）。
+        /// <paramref name="only"/>（DEBT-FG8GEN02-10 右键“走过去并进入”）：只带这几台（与入口旁可进的取交集），入口旁的其他机器不跟进；null = 入口旁全部可进的（面板“进入（N 台）”）。</summary>
+        public static bool TryEnter(CampaignState s, string anchorId, out string reason, ICollection<int> only = null)
         {
             PlannedAnchor a = WorldGenService.PlanFor(s)?.FindAnchor(anchorId);
             reason = CheckEnter(s, a, out List<int> ready);
+            if (reason == null && only != null)
+            {
+                ready.RemoveAll(id => !only.Contains(id));
+                if (ready.Count == 0)
+                {
+                    reason = GameText.Format("interior.reason.none_near", a.EntryRadius);
+                }
+            }
             if (reason != null)
             {
                 LastReason = reason;

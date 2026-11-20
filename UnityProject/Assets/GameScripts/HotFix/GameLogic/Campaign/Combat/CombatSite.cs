@@ -94,6 +94,8 @@ namespace GameLogic.Campaign.Combat
     {
         public string SiteId { get; }
 
+        private static float DamageNumberHeight => GameLogic.Core.UiTuningValues.TryGet("reaction.popup_height", out float h) ? h : 1.6f;
+
         /// <summary>本地点的内核。**只给桥接层（Campaign/Combat/）与 Editor 自检 / 性能探针用**：热更层玩法代码一律经本类的门面方法碰内核
         /// （FG14 §5 硬约束 3），“战斗内核”自检的扫描段断言 Campaign/Combat/ 以外的热更代码没有直接访问它。</summary>
         public CombatKernel Kernel { get; private set; }
@@ -565,6 +567,7 @@ namespace GameLogic.Campaign.Combat
             _machineUnit[rec.LogicId] = unit;
             _unitMachine[unit] = rec.LogicId;
             ApplyChassisTrait(unit, rec.ChassisId);
+            Kernel.SetHazardAvoid(unit, !rec.NoHazardAvoid); // DEBT-EMG2RULE01-04：名册教义开关随机器进任何地点（读档复挂同样按记录）
             var marker = new HomeValleyMachineMarker(rec.LogicId, rec.ChassisId, this, unit);
             _markerByUnit[unit] = marker;
             return marker;
@@ -2713,6 +2716,25 @@ namespace GameLogic.Campaign.Combat
         private RegionEnemyRecord[] _enemyIndexArray;
         private readonly Dictionary<string, int> _enemyIndex = new Dictionary<string, int>();
 
+        /// <summary>FG15-UX-01（FG-GAP-141）：右键攻击血量在内核里的敌对单位（驻军 / 精英残部 / 巡逻：不在具名敌人表 _unitEnemy 里、没有 Demo 敌人记录）时，
+        /// 命令栏的命中 / 击毁行按内核单位的“阵营 + 种类”取名（如“敌对 · 敌方单位”），不再留空（“#6 命中 。”）；内核里已查不到（已移除）时退回“敌对单位”。
+        /// 只对攻击结果与攻击命令的结束事件取名（其它命令结束没有目标，仍为 null）。O(1)（Kernel.TryGetUnit）。</summary>
+        public static string KernelHostileName(in CombatEvent e, CombatKernel kernel = null)
+        {
+            if (e.Kind != CombatEventKind.AttackOutcome && e.Code2 != (byte)CombatCommandKind.Attack)
+            {
+                return null;
+            }
+            if (kernel == null || !kernel.TryGetUnit(e.Other, out CombatUnitView v))
+            {
+                return GameText.Get("squad.target.hostile_unit");
+            }
+            string faction = GameText.Get(v.Faction == CombatFaction.Player ? "squad.faction.player" : v.Faction == CombatFaction.Neutral ? "squad.faction.neutral" : "squad.faction.hostile");
+            string kind = GameText.Get(v.Kind == CombatUnitKind.Machine ? "squad.unitkind.machine" : v.Kind == CombatUnitKind.Turret ? "squad.unitkind.turret"
+                : v.Kind == CombatUnitKind.Structure ? "squad.unitkind.structure" : "squad.unitkind.enemy");
+            return GameText.Format("squad.target.kernel_unit", faction, kind);
+        }
+
         /// <summary>内核单位 → 敌人记录。每条事件 O(1)（FG0-ARCH-03：热更层开销与敌人数无关，只在记录数组变化后重建一次索引）。</summary>
         private RegionEnemyRecord FindEnemyRecord(CampaignState state, int unitId)
         {
@@ -2827,6 +2849,11 @@ namespace GameLogic.Campaign.Combat
                 }
                 case CombatEventKind.Damaged:
                 {
+                    // FG15-UX-01（FGR-SYS-020“伤害数字”）：只给镜头正在看的地点飘字（设置关着时 Push 直接拒收），O(条数上限)。
+                    if (GameLogic.Settings.GameSettings.DamageNumbersEnabled && FeedbackCues.IsInObservedSite(SiteId))
+                    {
+                        DamageNumbers.Push(e.Unit, e.Value, new Vector3((float)e.Pos.x, DamageNumberHeight, (float)e.Pos.y), ReactionFeedback.RealTime());
+                    }
                     RegionEnemyRecord rec = FindEnemyRecord(state, e.Unit);
                     if (rec == null)
                     {
@@ -2952,7 +2979,7 @@ namespace GameLogic.Campaign.Combat
                     if (_unitMachine.TryGetValue(e.Unit, out int logicId))
                     {
                         string hostile = e.Kind == CombatEventKind.AttackOutcome || e.Kind == CombatEventKind.CommandEnded
-                            ? (_unitEnemy.TryGetValue(e.Other, out string h) ? h : null)
+                            ? (_unitEnemy.TryGetValue(e.Other, out string h) ? h : KernelHostileName(e, Kernel))
                             : null;
                         Squad?.OnKernelEvent(e, logicId, hostile, this);
                     }

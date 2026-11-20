@@ -178,8 +178,17 @@ namespace GameLogic.Campaign
         public static bool IsHome(MachineRecord m) => m != null && m.RegionId == HomeValleyLayout.RegionId && !Regions.ExpeditionMarchService.IsMarchMember(m.LogicId);
 
         /// <summary>FG8-EXP-02（FGR-EXP-012“远征队状态在机器名册上可见”）：名册的“在哪里”——家园 / 远征队（五态之一）/ 外出。</summary>
+        /// <summary>按状态排序的先后：投送途中排在离家之后、阵亡之前（枚举值只追加，不改旧值）。</summary>
+        public static int StatusRank(Status st) => st == Status.InTransit ? (int)Status.Away * 2 + 1 : (int)st * 2;
+
         public static string PlaceText(CampaignState s, MachineRecord m)
         {
+            // DEBT-FG8DROP01-03：在舱里写舱的去向与剩余时间（与投送站面板“投送舱”一节同一行文本）。
+            DropPodRecord pod = m != null && m.IsAlive ? Regions.DropPodService.PodCarrying(s, m.LogicId) : null;
+            if (pod != null)
+            {
+                return Regions.DropPodService.PodLine(s, pod, GameClock.Ticks);
+            }
             if (IsHome(m))
             {
                 // FG8-OUT-01：人在某个己方前哨站里时写前哨站的名字（前哨劳动常驻的那个，或路过的任一个）。
@@ -525,9 +534,56 @@ namespace GameLogic.Campaign
 
         public static int PatrolMaxPoints => Math.Max(1, (int)Math.Round(Grid.GridContent.TryGetTuning("roster.patrol_max_points", out float v) ? v : 6f));
 
-        /// <summary>巡逻点要是家园里建成的建筑（不是规划虚影 / 搬迁虚影 / 已摧毁的废墟）。</summary>
+        /// <summary>FG15-UX-01（DEBT-FG6DEF06-04）：地图上点的巡逻点（任意可通行的地面格，例如空地上的隘口）。ID = 前缀 + 格坐标，存在 <see cref="MachineRecord.PatrolPoints"/> 里与建筑 ID 并列（只加一种 ID 形式，不加字段）。</summary>
+        public const string PatrolSpotPrefix = "patrol_spot:";
+
+        public static string PatrolSpotId(Grid.GridCell c) => PatrolSpotPrefix + c.X.ToString(CultureInfo.InvariantCulture) + ":" + c.Y.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>是不是地图巡逻点；是则给出它的位置（格中心）。</summary>
+        public static bool TryPatrolSpot(string id, out Vector2 position)
+        {
+            position = default;
+            if (id == null || !id.StartsWith(PatrolSpotPrefix, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            string[] xy = id.Substring(PatrolSpotPrefix.Length).Split(':');
+            if (xy.Length != 2 || !int.TryParse(xy[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int x)
+                || !int.TryParse(xy[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int y))
+            {
+                return false;
+            }
+            position = new Vector2(x, y);
+            return true;
+        }
+
+        /// <summary>巡逻点的名字：建筑写建筑名，地图点写“地点（x, y）”。</summary>
+        public static string PatrolPointLabel(CampaignState s, string id) =>
+            TryPatrolSpot(id, out Vector2 p) ? GameText.Format("roster.patrol.spot", (int)p.x, (int)p.y) : StandingRuleService.BuildingLabel(s, id);
+
+        /// <summary>
+        /// FG15-UX-01（DEBT-FG6DEF06-04）：在地图上点一个位置当巡逻点，加到路线末尾。点在不可通行的格上时吸附到 2 格内最近的可通行格，2 格内都不可通行 → 拒绝并写明。
+        /// 其余规则与 <see cref="TryAddPatrolPoint"/> 相同（只限驻防机器、≤ 上限、不与末尾重复、静默夜不可用）。
+        /// </summary>
+        public static bool TryAddPatrolSpot(CampaignState s, int logicId, Vector2 at, out string message)
+        {
+            var raw = new Grid.GridCell(Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y));
+            Grid.GridCell c = Defense.SiegeService.NearestPassable(raw, 2);
+            if (!Nav.NavService.PassableNow(c.X, c.Y, BinGames.Sim.Nav.NavConst.ClassHostile))
+            {
+                message = GameText.Get("roster.err.patrol_spot_blocked");
+                return false;
+            }
+            return AppendPatrolPoint(s, logicId, PatrolSpotId(c), out message);
+        }
+
+        /// <summary>巡逻点要是家园里建成的建筑（不是规划虚影 / 搬迁虚影 / 已摧毁的废墟），或地图上点的地点（到不了由“到不了先跳过”处理）。</summary>
         private static bool PatrolPointUsable(CampaignState s, string buildingId)
         {
+            if (TryPatrolSpot(buildingId, out _))
+            {
+                return true;
+            }
             BuildingRecord b = string.IsNullOrEmpty(buildingId) ? null : Grid.HomeGridService.FindBuilding(s, buildingId);
             return b != null && b.RegionId == HomeValleyLayout.RegionId && !Grid.HomeGridService.IsRelocationGhost(b) && !HomeValleyController.IsPlannedGhost(b)
                    && b.ConstructionState != BuildingConstructionState.Damaged;
@@ -637,7 +693,10 @@ namespace GameLogic.Campaign
         /// 给驻防机器的巡逻路线末尾加一个巡逻点（可逆：可以清空重设，不弹确认，B04）。路线 = 驻防点 → 巡逻点… → 回驻防点循环；
         /// 敌人进入守点半径（siege.guard_radius_cells，以当前去的点为中心）就地交战，打完接着巡逻（内核守点交战，FG6-DEF-05）。
         /// </summary>
-        public static bool TryAddPatrolPoint(CampaignState s, int logicId, string buildingId, out string message)
+        public static bool TryAddPatrolPoint(CampaignState s, int logicId, string buildingId, out string message) =>
+            AppendPatrolPoint(s, logicId, TryPatrolSpot(buildingId, out _) ? null : buildingId, out message);
+
+        private static bool AppendPatrolPoint(CampaignState s, int logicId, string buildingId, out string message)
         {
             if (Env.SilentNightService.GarrisonLocked(s, out message)) // FG7-ENV-02：静默夜期间不可用（FGR-ENV-011，写明原因）
             {
@@ -666,7 +725,7 @@ namespace GameLogic.Campaign
             }
             if (cur.Length > 0 && cur[cur.Length - 1] == buildingId)
             {
-                message = GameText.Format("roster.err.patrol_dup", StandingRuleService.BuildingLabel(s, buildingId));
+                message = GameText.Format("roster.err.patrol_dup", PatrolPointLabel(s, buildingId));
                 return false;
             }
             var next = new string[cur.Length + 1];
@@ -676,7 +735,27 @@ namespace GameLogic.Campaign
             ResetPatrolSkips(m);
             Revision++;
             GuidanceHooks.Raise(GuidanceHooks.RosterFirstPatrol);
-            message = GameText.Format("roster.ok.patrol_add", MachineNaming.Short(m), StandingRuleService.BuildingLabel(s, buildingId), next.Length);
+            message = GameText.Format("roster.ok.patrol_add", MachineNaming.Short(m), PatrolPointLabel(s, buildingId), next.Length);
+            return true;
+        }
+
+        /// <summary>
+        /// DEBT-EMG2RULE01-04（FGR-EMG-088）：战斗教义“避开危险物质”开关。存进机器记录，并立刻写进机器此刻所在的战斗地点内核（不在任何地点的机器在下次进地点时生效）。
+        /// 阵亡 / 不存在的机器拒绝并写原因。玩家显式命令不受影响（内核只对自主行为避险）。
+        /// </summary>
+        public static bool TrySetHazardAvoid(int logicId, bool on, out string message)
+        {
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || !m.IsAlive)
+            {
+                message = GameText.Get("roster.err.unknown");
+                return false;
+            }
+            m.NoHazardAvoid = !on;
+            foreach (Combat.CombatSite site in Combat.CombatSites.All)
+            {
+                site.SetMachineHazardAvoid(logicId, on);
+            }
+            message = GameText.Get(on ? "roster.hazard.on_done" : "roster.hazard.off_done");
             return true;
         }
 
@@ -774,6 +853,12 @@ namespace GameLogic.Campaign
                 {
                     continue; // 被拆 / 被毁 / 到不了先跳过
                 }
+                if (TryPatrolSpot(id, out Vector2 spot))
+                {
+                    position = spot;
+                    buildingId = id;
+                    return i;
+                }
                 BuildingRecord t = Grid.HomeGridService.FindBuilding(s, id);
                 if (t == null)
                 {
@@ -809,7 +894,7 @@ namespace GameLogic.Campaign
             var parts = new List<string>(m.PatrolPoints.Length + 1) { GarrisonPointLabel(s, m) };
             foreach (string p in m.PatrolPoints)
             {
-                parts.Add(StandingRuleService.BuildingLabel(s, p));
+                parts.Add(PatrolPointLabel(s, p));
             }
             return GameText.Format("roster.patrol.route", string.Join(GameText.Get("roster.patrol.sep"), parts));
         }
@@ -1108,6 +1193,8 @@ namespace GameLogic.Campaign
             InFactory = 3,
             Away = 4,
             Dead = 5,
+            /// <summary>DEBT-FG8DROP01-03：在投送舱里（去程 / 返程 / 刚落回站里还没卸下）。</summary>
+            InTransit = 6,
         }
 
         public enum StatusFilter
@@ -1118,6 +1205,7 @@ namespace GameLogic.Campaign
             Waiting = 3,
             Away = 4,
             Dead = 5,
+            InTransit = 6,
         }
 
         public enum SortKey
@@ -1132,13 +1220,17 @@ namespace GameLogic.Campaign
         }
 
         public static readonly SortKey[] AllSortKeys = { SortKey.Number, SortKey.Name, SortKey.Role, SortKey.Chassis, SortKey.Status, SortKey.Injury, SortKey.Experience };
-        public static readonly StatusFilter[] AllStatusFilters = { StatusFilter.All, StatusFilter.Active, StatusFilter.Working, StatusFilter.Waiting, StatusFilter.Away, StatusFilter.Dead };
+        public static readonly StatusFilter[] AllStatusFilters = { StatusFilter.All, StatusFilter.Active, StatusFilter.Working, StatusFilter.Waiting, StatusFilter.Away, StatusFilter.InTransit, StatusFilter.Dead };
 
         public static Status StatusOf(CampaignState s, MachineRecord m)
         {
             if (!m.IsAlive)
             {
                 return Status.Dead;
+            }
+            if (Regions.DropPodService.IsInPod(s, m.LogicId))
+            {
+                return Status.InTransit; // DEBT-FG8DROP01-03：在舱里的不写“离家”
             }
             if (!IsHome(m))
             {
@@ -1164,6 +1256,7 @@ namespace GameLogic.Campaign
                 case Status.Uplinked: return GameText.Get("roster.status.uplinked");
                 case Status.InFactory: return GameText.Get("roster.status.in_factory");
                 case Status.Away: return GameText.Get("roster.status.away");
+                case Status.InTransit: return GameText.Get("roster.status.in_transit");
                 default: return GameText.Get("roster.status.dead");
             }
         }
@@ -1177,6 +1270,7 @@ namespace GameLogic.Campaign
                 case StatusFilter.Working: return GameText.Get("roster.status.working");
                 case StatusFilter.Waiting: return GameText.Get("roster.status.waiting");
                 case StatusFilter.Away: return GameText.Get("roster.status.away");
+                case StatusFilter.InTransit: return GameText.Get("roster.status.in_transit");
                 default: return GameText.Get("roster.status.dead");
             }
         }
@@ -1204,6 +1298,7 @@ namespace GameLogic.Campaign
                 case StatusFilter.Working: return st == Status.Working || st == Status.Uplinked;
                 case StatusFilter.Waiting: return st == Status.Waiting;
                 case StatusFilter.Away: return st == Status.Away;
+                case StatusFilter.InTransit: return st == Status.InTransit;
                 default: return st == Status.Dead;
             }
         }
@@ -1280,7 +1375,7 @@ namespace GameLogic.Campaign
                     primary = (a, b) => string.CompareOrdinal(a.ChassisId ?? string.Empty, b.ChassisId ?? string.Empty);
                     break;
                 case SortKey.Status:
-                    primary = (a, b) => states[a.LogicId].CompareTo(states[b.LogicId]);
+                    primary = (a, b) => StatusRank(states[a.LogicId]).CompareTo(StatusRank(states[b.LogicId]));
                     break;
                 case SortKey.Injury:
                     primary = (a, b) => InjuryPercent(a).CompareTo(InjuryPercent(b));

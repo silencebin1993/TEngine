@@ -59,6 +59,7 @@ namespace GameLogic.UI.Kit
             Create<AwayReportPanelUIToolkit>("[AwayReportHost]"); // FG4-ECO-09：离家报告（30078，统计 / 反应记录之上、按键面板之下）。
             Create<StatsPanelUIToolkit>("[StatsPanelHost]"); // FG2-FW-04：统计面板（战斗 · 反应伤害归因；FG4-ECO-08 加生产段，30076，暂停菜单之上）。
             Create<ReactionLogPanelUIToolkit>("[ReactionLogHost]"); // FG2-FW-04：反应记录（日志 / 伤害归因 / 反应图鉴，30077，暂停菜单之上）。
+            Create<SettingsPanelUIToolkit>("[SettingsHost]"); // FG15-UX-01：设置全集（30079，暂停菜单之上、按键面板 30080 / 难度面板 30081 之下：从设置打开的这两个盖在它上面）。
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
             Create<DifficultyPanelUIToolkit>("[DifficultyHost]"); // FG6-DEF-09：难度与突袭强度（30081，暂停菜单与按键面板之上、新游戏设置之下）。
             Create<NewGamePanelUIToolkit>("[NewGameHost]"); // FG3-GEN-01：新游戏设置（30082，主菜单“新建”选好存档槽后打开）。

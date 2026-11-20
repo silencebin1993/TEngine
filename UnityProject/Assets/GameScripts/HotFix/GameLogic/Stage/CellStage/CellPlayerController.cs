@@ -290,7 +290,7 @@ namespace GameLogic.Stage.CellStage
 
             int slots = Mathf.Min(_abilities.SlotCount, SlotCountCap);
 
-            if (slots > 0 && InputRouter.ConsumeAction(GameActionId.DirectSkillSlot0, InputScope.Direct))
+            if (slots > 0 && InputRouter.Owns(InputScope.Direct) && InputRouter.RawKeyDown(KeyCode.LeftShift) /* 旧细胞阶段（0.2 无入口，DEBT-FG0UX01-09 允许名单）；接入技能动作已删（FG-GAP-046） */)
             {
                 TryCastSlot(0, autoAim: false);
             }

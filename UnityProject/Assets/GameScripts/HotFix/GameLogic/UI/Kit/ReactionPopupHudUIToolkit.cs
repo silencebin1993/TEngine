@@ -144,6 +144,7 @@ namespace GameLogic.UI.Kit
                 {
                     ReactionPopups.Clear(); // “同一屏幕”：换观察地点 / 离开世界，旧地点的弹字不带过来。
                 }
+                DamageNumbers.Clear(); // FG15-UX-01：伤害数字同理。
                 _lastObserved = observed;
             }
             ReactionPopups.Tick(now);
@@ -183,6 +184,74 @@ namespace GameLogic.UI.Kit
                 _poolSerial[i] = 0;
             }
             VisibleCount = shown;
+            TickDamageNumbers(camera, now);
+        }
+
+        // ── FG15-UX-01（FGR-SYS-020“伤害数字”）：与弹字同一层、独立标签池（外观 .rp-damage）──
+        private readonly List<Label> _damagePool = new List<Label>();
+        private readonly List<int> _damageSerial = new List<int>();
+        private readonly List<float> _damageAmount = new List<float>();
+
+        /// <summary>自检：这一帧画出了几条伤害数字。</summary>
+        public int DamageVisibleCount { get; private set; }
+
+        private void TickDamageNumbers(Camera camera, float now)
+        {
+            DamageNumbers.Tick(now);
+            IReadOnlyList<DamageNumbers.Entry> active = DamageNumbers.Active;
+            while (_damagePool.Count < active.Count)
+            {
+                var l = new Label { pickingMode = PickingMode.Ignore };
+                l.AddToClassList("rp-damage");
+                l.AddToClassList("uk-hidden");
+                _layer.Add(l);
+                _damagePool.Add(l);
+                _damageSerial.Add(0);
+                _damageAmount.Add(0f);
+            }
+            int shown = 0;
+            float life = DamageNumbers.LifeSeconds;
+            for (int i = 0; i < active.Count; i++)
+            {
+                DamageNumbers.Entry d = active[i];
+                float age = Mathf.Max(0f, now - d.Born);
+                float alpha = Mathf.Clamp01(1f - Mathf.Max(0f, now - d.LastBump - life * 0.5f) / Mathf.Max(0.01f, life * 0.5f));
+                Vector2 panelPos = default;
+                if (camera != null && _layer.panel != null)
+                {
+                    Vector3 screen = camera.WorldToScreenPoint(d.Position + Vector3.up * Mathf.Min(1f, age * 0.8f));
+                    if (screen.z <= 0f)
+                    {
+                        continue;
+                    }
+                    panelPos = RuntimePanelUtils.ScreenToPanel(_layer.panel, new Vector2(screen.x, Screen.height - screen.y));
+                }
+                else if (!(camera == null && InWorldOverrideForTests))
+                {
+                    continue;
+                }
+                Label l = _damagePool[shown];
+                if (_damageSerial[shown] != d.Serial || !Mathf.Approximately(_damageAmount[shown], d.Amount))
+                {
+                    l.text = d.Text;
+                    _damageSerial[shown] = d.Serial;
+                    _damageAmount[shown] = d.Amount;
+                }
+                l.style.left = panelPos.x;
+                l.style.top = panelPos.y;
+                l.style.opacity = alpha;
+                l.RemoveFromClassList("uk-hidden");
+                shown++;
+            }
+            for (int i = shown; i < _damagePool.Count; i++)
+            {
+                if (!_damagePool[i].ClassListContains("uk-hidden"))
+                {
+                    _damagePool[i].AddToClassList("uk-hidden");
+                }
+                _damageSerial[i] = 0;
+            }
+            DamageVisibleCount = shown;
         }
 
         /// <summary>自检：编辑模式下没有载入的地点时不清空。</summary>

@@ -292,7 +292,7 @@ namespace GameLogic.Campaign.Regions
             // FG6-DEF-01（FGR-DEF-005）：信号在炮塔里时，左键 = 亲自瞄准开火（不做框选 / 点选 / 下令）。
             bool turretAim = Defense.TurretUplink.HandleInput(_camera, state,
                 buildModeOwnsPointer || _cameraDirector == null || _cameraDirector.Mode != ViewMode.Strategy);
-            SquadCommands.PointerSuppressed = buildModeOwnsPointer || turretAim;
+            SquadCommands.PointerSuppressed = buildModeOwnsPointer || turretAim || PatrolPickMachine != 0; // FG15-UX-01：点巡逻点时鼠标归它
             SquadCommands.TickInput(paused);
             if (!buildModeOwnsPointer && !turretAim)
             {
@@ -319,6 +319,7 @@ namespace GameLogic.Campaign.Regions
             {
                 GameLogic.View.TurretViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode);
                 GameLogic.View.DefenseViews.FrameUpdate(state, _combat, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-02：护盾圈、护盾 / 陷阱放置预览
+                GameLogic.View.DefenseViews.PatrolRoute(state, PatrolPickMachine != 0 ? PatrolPickMachine : _selected?.LogicId ?? 0); // FG15-UX-01：巡逻路线预览
             GameLogic.View.RepairDroneViews.FrameUpdate(state, _root != null ? _root.transform : null, BuildMode); // FG6-DEF-03：修理光束、维修站覆盖范围、重建区域边框
             GameLogic.View.DropPodViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG8-DROP-01：在飞的投送舱（占位方块 + 落点连线）
             GameLogic.View.OrbitalDropViews.FrameUpdate(state, _root != null ? _root.transform : null); // FG12-EVT-04：轨道坠落的火光轨迹与落点圈（O(预警中的坠落数)）
@@ -367,7 +368,15 @@ namespace GameLogic.Campaign.Regions
             HomeValleySoftlockGuard.Tick(state, dt, BeginAutoAssignedMovement);
             // FG3-LOG-01（FGR-LOG-013）：机器走进迷雾就把周围记为已探索——每步轮流查一台（O(1)），与观察无关。
             Grid.MachineExploration.Step(state, _machineMarkers, GameClock.Ticks);
+            // DEBT-FG8GEN02-10：右键入口“走过去并进入”——整步提交之后再查（进入会载入室内、做进入前存档，不能在地点遍历里做）。
+            if (InteriorApproachService.HasIntent(state))
+            {
+                WorldSimulation.RunAfterStep(_approachStep ??= () => InteriorApproachService.Step(CampaignSession.Current,
+                    id => SquadCommands.TryGetActiveCommandKind(id, out _), _possessed != null ? _possessed.LogicId : 0));
+            }
         }
+
+        private System.Action _approachStep;
 
         /// <summary>FG-GAP-015：新占地落定时，站在上面的家园机器挪到最近的空格（O(机器数)，只在放置 / 旋转 / 搬迁这类玩家操作时发生）。</summary>
         private void OnFootprintClaimed(CampaignState state, List<Grid.GridCell> cells)
@@ -2319,6 +2328,10 @@ namespace GameLogic.Campaign.Regions
             {
                 return;
             }
+            if (PatrolPickMachine != 0 && HandlePatrolPick())
+            {
+                return;
+            }
 
             if (_selected != null && SquadCommands.Selection.Count == 0 && !SquadCommands.ConsumedSecondaryThisFrame
                 && InputRouter.GetMouseButtonDown(1, InputScope.Strategy)
@@ -2498,8 +2511,121 @@ namespace GameLogic.Campaign.Regions
             HomeValleyMachineMarker worker = _selected != null && SquadCommands.Selection.Contains(_selected.LogicId)
                 ? _selected
                 : (SquadCommands.Selection.Count > 0 ? FindMarker(SquadCommands.Selection[0]) : null);
-            return worker != null && TryContextWork(worker, pointer);
+            return worker != null && (TryContextWork(worker, pointer) || (_camera != null && TryContextEntrance(_camera.ScreenPointToRay(pointer))));
         }
+
+        /// <summary>
+        /// DEBT-FG8GEN02-10：右键点中已探索的室内入口 = 选中的机器走到入口旁（普通移动命令）并登记“到了就进”的意图（进存档；下别的命令即取消）。
+        /// 只带选中的机器进去（入口旁别的机器不跟进）。点不中入口返回 false，右键照常按移动处理。
+        /// </summary>
+        private bool TryContextEntrance(Ray ray)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (state == null || SquadCommands.Selection.Count == 0 || Mathf.Abs(ray.direction.y) < 1e-4f)
+            {
+                return false;
+            }
+            float t = -ray.origin.y / ray.direction.y;
+            if (t <= 0f)
+            {
+                return false;
+            }
+            Vector3 g = ray.origin + ray.direction * t;
+            WorldGen.PlannedAnchor a = InteriorSiteService.EntranceAt(state, new Vector2(g.x, g.z));
+            if (a == null || !HomeGridService.MapFor(state).IsExploredNoLoad(new GridCell(Mathf.RoundToInt(g.x), Mathf.RoundToInt(g.z))))
+            {
+                return false; // 迷雾里的入口不响应（与左键同一判定）
+            }
+            SquadCommands.IssueMoveTo(WorldGen.TerritoryAnchorChecks.EntryOf(state, a), GameClock.Paused);
+            // 只登记真正接到移动命令的机器（酸沼软门槛第一次拒绝、覆盖外的不算）；一台都没接到时拒绝原因已由命令出口给出，不登记、不说“前往”。
+            var ids = new List<int>(SquadCommands.LastStartedIds);
+            if (ids.Count == 0)
+            {
+                return true;
+            }
+            InteriorApproachService.Begin(state, a.Id, ids);
+            Interact.NotifySubtitle(Localization.GameText.Format("interior.approach.begin", ids.Count, InteriorSiteService.SurfaceName(a.SurfaceId)));
+            return true;
+        }
+
+        // ── FG15-UX-01（DEBT-FG6DEF06-04）：在地图上点巡逻点 ─────────────────────────────
+
+        /// <summary>正在给哪台驻防机器点巡逻点（0 = 没在点）。点的期间鼠标归它（不框选、不下令），路线预览跟着画。纯界面状态，不进存档（路线本身在机器记录里）。</summary>
+        public int PatrolPickMachine { get; private set; }
+
+        /// <summary>名册详情“在地图上点巡逻点”：只限家园里活着的驻防机器。再点一次 = 结束。</summary>
+        public bool BeginPatrolPick(int logicId, out string message)
+        {
+            if (PatrolPickMachine == logicId && logicId != 0)
+            {
+                EndPatrolPick();
+                message = Localization.GameText.Get("roster.patrol.pick_end");
+                return true;
+            }
+            if (!MachineRegistry.TryGetRecord(logicId, out MachineRecord m) || m == null || !m.IsAlive || m.Role != MachineRole.Garrison || m.RegionId != HomeValleyLayout.RegionId)
+            {
+                message = Localization.GameText.Get("roster.err.patrol_not_garrison");
+                return false;
+            }
+            PatrolPickMachine = logicId;
+            UI.Kit.UiEscapeStack.Push(this, EndPatrolPick);
+            message = Localization.GameText.Format("roster.patrol.pick_begin", MachineNaming.Short(m));
+            Interact.NotifySubtitle(message);
+            return true;
+        }
+
+        public void EndPatrolPick()
+        {
+            if (PatrolPickMachine == 0)
+            {
+                return;
+            }
+            PatrolPickMachine = 0;
+            UI.Kit.UiEscapeStack.Remove(this);
+            Interact.NotifySubtitle(Localization.GameText.Get("roster.patrol.pick_end"));
+        }
+
+        /// <summary>点巡逻点期间的鼠标：左键点地面 = 加一个巡逻点（可连点，到上限自动结束）；右键 = 结束。机器没了 / 不再驻防 → 自动结束。返回 true = 本帧鼠标已被占用。</summary>
+        private bool HandlePatrolPick()
+        {
+            if (!MachineRegistry.TryGetRecord(PatrolPickMachine, out MachineRecord m) || m == null || !m.IsAlive || m.Role != MachineRole.Garrison || m.RegionId != HomeValleyLayout.RegionId)
+            {
+                EndPatrolPick();
+                return false;
+            }
+            if (InputRouter.GetMouseButtonDown(1, InputScope.Strategy))
+            {
+                EndPatrolPick();
+                return true;
+            }
+            if (TryReadPrimaryClick(false, out Vector3 pointer) && TryPointerGround(pointer, out Vector3 g))
+            {
+                PatrolPickAt(new Vector2(g.x, g.z), out _);
+            }
+            return true;
+        }
+
+        /// <summary>给正在点的机器在 <paramref name="ground"/> 加一个地图巡逻点（与左键同一条路径，自检也从这里进）。</summary>
+        public bool PatrolPickAt(Vector2 ground, out string message)
+        {
+            CampaignState state = CampaignSession.Current;
+            if (PatrolPickMachine == 0 || state == null)
+            {
+                message = Localization.GameText.Get("roster.err.patrol_not_garrison");
+                return false;
+            }
+            int id = PatrolPickMachine;
+            bool ok = MachineRoster.TryAddPatrolSpot(state, id, ground, out message);
+            Interact.NotifySubtitle(message);
+            if (ok && MachineRegistry.TryGetRecord(id, out MachineRecord m) && (m.PatrolPoints?.Length ?? 0) >= MachineRoster.PatrolMaxPoints)
+            {
+                EndPatrolPick(); // 满了：结束点选（再加会被拒）
+            }
+            return ok;
+        }
+
+        /// <summary>DEBT-FG8GEN02-10：自检入口——与右键同一条路径（射线 = 镜头到地面点的连线）。</summary>
+        public bool ContextEntranceForTests(Ray ray) => TryContextEntrance(ray);
 
         /// <summary>右键点中工作目标 → 派工并返回 true：核心＝充电、受损建筑＝修复、还没建成的虚影＝把它的施工单交给这台机器（FG3-LOG-02）、
         /// 建造位＝建造、残骸＝拆解、地面物品＝搬运。
@@ -2951,6 +3077,8 @@ namespace GameLogic.Campaign.Regions
             _combat?.ClearViews();
             GameLogic.View.TurretViews.Clear(); // FG6-DEF-01：炮塔头随 _root 销毁，这里清登记、释放射程圈。
             GameLogic.View.DefenseViews.Clear(); // FG6-DEF-02：护盾圈与预览线随 _root 销毁，这里清登记。
+            PatrolPickMachine = 0; // FG15-UX-01：离开家园 / 卸载时结束点巡逻点
+            UI.Kit.UiEscapeStack.Remove(this);
             GameLogic.View.RepairDroneViews.Clear(); // FG6-DEF-03：光束 / 范围圈 / 区域边框随 _root 销毁，这里清登记。
             GameLogic.View.DropPodViews.Clear(); // FG8-DROP-01：在飞的投送舱随 _root 销毁，这里清登记。
             GameLogic.View.SeizeViews.Clear(); // FG12-EVT-03：夺控标记随 _root 销毁，这里清登记。

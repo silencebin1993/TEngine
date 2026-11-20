@@ -865,6 +865,28 @@ namespace GameLogic.EditorTools
                 Expect(mapOpensPanel && keepsSelection,
                     $"D19b 战略地图“编成远征队”（真点按钮）：面板关着 → 地图收起、派遣准备面板打开、按常规预选（{mapOpensPanel}）；面板已开着 → 勾选不动（{keepsSelection}）");
 
+                // E2. FG15-UX-01（DEBT-FG8EXP01-10）：地图上 Shift + 拖动框选机器 → 编成 → 面板带入框选名单。
+                //     负向：框里只有空地 → 0 台并写原因；已在远征中的 d（不在家园）即使旧位置在框里也不选；编成后地图选择清空。
+                hv.SetExpeditionPrepPanelOpen(false);
+                prep.Tick(0f);
+                StrategicMapUIToolkit.Open();
+                int none = map.BoxSelectMachines(map.CanvasOf(new Vector2(60f, 60f)), map.CanvasOf(new Vector2(66f, 66f)));
+                bool emptyHonest = none == 0 && map.MapSelection.Count == 0 && map.FeedbackText == GameText.Get("ui.map.select_none");
+                int got = map.BoxSelectMachines(map.CanvasOf(new Vector2(3f, -6f)), map.CanvasOf(new Vector2(11f, -2f)));
+                bool boxed = got == 3 && map.MapSelection.SequenceEqual(new[] { a, b, c }.OrderBy(x => x)) && !map.MapSelection.Contains(d)
+                             && mapCompose.text == GameText.Format("exp.compose.button_selected", 3) && map.FeedbackText == GameText.Format("ui.map.select_machines", 3)
+                             && !string.IsNullOrEmpty(mapCompose.tooltip);
+                bool boxClicked = Click(mapCompose);
+                prep.Tick(0f);
+                prep.RefreshNowForTests();
+                bool boxApplied = boxClicked && !StrategicMapUIToolkit.IsOpen && hv.IsExpeditionPrepPanelOpen
+                                  && prep.SelectedIdsForTests.OrderBy(x => x).SequenceEqual(new[] { a, b, c }.OrderBy(x => x)) && map.MapSelection.Count == 0;
+                hv.SetExpeditionPrepPanelOpen(false);
+                prep.Tick(0f);
+                Expect(emptyHonest && boxed && boxApplied,
+                    $"D19e 战略地图框选机器编队（DEBT-FG8EXP01-10）：框空地 0 台并写原因（{emptyHonest}：“{map.FeedbackText}”）；框住家园 3 台、远征中的不选、按钮写已选台数 {boxed}（{string.Join(",", map.MapSelection)}）；" +
+                    $"点编成 → 面板带入这 3 台、地图选择清空 {boxApplied}（选中 {string.Join(",", prep.SelectedIdsForTests)}）");
+
                 // F. 现在根本不能派遣（目的地都没开放；远征队在外走同一分支）时从名册发来名单：整单不带入、当前勾选不动，
                 //    给一条写明真实原因的字幕，不把能派的机器写成“抢修中”。
                 hv.SetExpeditionPrepPanelOpen(true);

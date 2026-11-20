@@ -359,11 +359,6 @@ namespace GameLogic.Core
                 case GameActionId.MoveBack: return KeyCode.S;
                 case GameActionId.MoveLeft: return KeyCode.A;
                 case GameActionId.MoveRight: return KeyCode.D;
-                case GameActionId.DirectSkillSlot0: return KeyCode.LeftShift;
-                case GameActionId.DirectSkillSlot1: return KeyCode.Q;
-                case GameActionId.DirectSkillSlot2: return KeyCode.E;
-                case GameActionId.DirectSkillSlot3: return KeyCode.R;
-                case GameActionId.DirectSkillSlot4: return KeyCode.F;
                 case GameActionId.Interact: return KeyCode.E;
                 case GameActionId.CycleControlTarget: return KeyCode.Tab;
                 case GameActionId.ToggleCameraView: return KeyCode.M;

@@ -174,6 +174,20 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>FG15-UX-01（FG-GAP-182，FG00 B10）：玩家亲手直控开火没打出去（射程外 / 视线被挡 / 被残骸挡下 / 过热）时，原因走 HUD 字幕条（拒绝提示音 + 文字），
+        /// 不再只写进日志；AI 自己开火失败不打扰玩家。原因文本就是 CombatSite.FireReason 的文本键结果。</summary>
+        public static int PlayerFireFailureHints { get; private set; }
+
+        private static void NotifyPlayerFireFailure(bool isAiSource, string why)
+        {
+            if (isAiSource || string.IsNullOrEmpty(why))
+            {
+                return;
+            }
+            PlayerFireFailureHints++;
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Denied, Localization.GameText.Format("combat.fire.failed_hint", why));
+        }
+
         private static void PushEvent(HitResult result)
         {
             _recentEvents.Add(result);
@@ -395,6 +409,7 @@ namespace GameLogic.Campaign.Regions
                     // EMG1-ENT-01：开了火、被残骸挡下（目标没掉血）——记一条带原因的未命中，不说“弹体在飞”。
                     var covered = HitResult.Fail(why, isAiSource, attackerLogicId);
                     PushEvent(covered);
+                    NotifyPlayerFireFailure(isAiSource, why);
                     return covered;
                 }
                 if (fired)
@@ -406,6 +421,7 @@ namespace GameLogic.Campaign.Regions
                 }
                 var miss = HitResult.Fail(string.IsNullOrEmpty(why) ? res.ToString() : why, isAiSource, attackerLogicId);
                 PushEvent(miss);
+                NotifyPlayerFireFailure(isAiSource, miss.FailureReason);
                 return miss;
             }
 

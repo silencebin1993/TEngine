@@ -81,6 +81,47 @@ namespace GameLogic.Settings
 
         /// <summary>FG0-UX-01（FG00 B14）：已经触发过的引导钩子（每个钩子对每个玩家只触发一次）。</summary>
         public string[] SeenGuidanceHooks;
+
+        // ── FG15-UX-01（FGR-SYS-020 设置全集）：新增项，旧设置 JSON 没有这些字段时按这里的初值补齐 ──
+        /// <summary>画面：分辨率（0 = 没设过，沿用启动时的分辨率）。只在玩家点“保留”后写入（FGR-SYS-021 15 秒回退）。</summary>
+        public int ResolutionWidth;
+        public int ResolutionHeight;
+        /// <summary>画面：窗口模式（-1 = 没设过；其余为 <see cref="FullScreenMode"/> 的整数值）。</summary>
+        public int WindowMode = -1;
+        /// <summary>画面：垂直同步（默认关：开发标准最低 120 帧，开着会锁在显示器刷新率）。</summary>
+        public bool VSyncEnabled;
+        /// <summary>画面：亮度倍率（乘在昼夜调光上；范围 fg.TbUiTuning settings.brightness_min / max）。</summary>
+        public float Brightness = 1f;
+        /// <summary>画面：画质预设（0 低 / 1 中 / 2 高 / 3 自定义）；改了下面任一子项即变为自定义。</summary>
+        public int QualityPreset = 2;
+        /// <summary>画面：阴影（0 关 / 1 硬阴影 / 2 全部）。</summary>
+        public int ShadowQuality = 2;
+        /// <summary>画面：特效密度（反馈特效生成比例；范围 settings.effects_density_min～1）。</summary>
+        public float EffectsDensity = 1f;
+        /// <summary>画面：后处理开关。Built-in 管线下没有后处理栈，值经 <see cref="GameSettings.PostProcessSink"/> 交给渲染侧（FG15-PL-01 URP 合流后接上）。</summary>
+        public bool PostProcessEnabled = true;
+        /// <summary>音频：环境音量（混音分类“环境”；没有单独分类时乘在音效上播放环境声）。</summary>
+        public float AmbientVolume = 1f;
+        /// <summary>音频：窗口失焦时静音。</summary>
+        public bool MuteOnFocusLoss;
+        /// <summary>游戏性（FG00 B09 / FG-GAP-017）：窗口失焦时暂停世界（默认继续运行，同 Demo 的 runInBackground）。</summary>
+        public bool PauseOnFocusLoss;
+        /// <summary>控制：缩放速度倍率（乘在镜头缩放量上）。</summary>
+        public float ZoomSpeedMultiplier = 1f;
+        /// <summary>控制：反转滚轮（滚轮缩放方向反过来）。</summary>
+        public bool InvertScroll;
+        /// <summary>控制：接入时的鼠标灵敏度（接入镜头朝光标方向前探的力度倍率）。</summary>
+        public float UplinkMouseSensitivity = 1f;
+        /// <summary>控制（FGR-UX-060“所有按住操作可以改为切换”）：按住类的界面动作（固定悬停提示）改为按一下切换。镜头平移 / 机器移动不受影响。</summary>
+        public bool HoldActionsToggle;
+        /// <summary>游戏性：自动存档间隔（分钟，真实时间、世界运行时累计；0 = 关闭）。</summary>
+        public int AutoSaveMinutes = 10;
+        /// <summary>游戏性：引导开关（关掉后引导钩子不再触发；内容在 FG15-UX-04）。</summary>
+        public bool GuidanceEnabled = true;
+        /// <summary>游戏性（FGR-EMG-181）：因果链叠加显示开关。</summary>
+        public bool CausalChainOverlayEnabled = true;
+        /// <summary>游戏性：伤害数字（被观察地点里机器 / 敌人受伤时在头上飘数字；默认关）。</summary>
+        public bool DamageNumbersEnabled;
     }
 
     /// <summary>一条“某类通知触发时是否自动暂停”的玩家设置。</summary>
@@ -636,6 +677,215 @@ namespace GameLogic.Settings
             _keyBindings = InputBindingSet.CreateDefault();
             Save();
         }
+
+        // ── FG15-UX-01（FGR-SYS-020）新增设置项 ──
+        private static float Tune(string id, float fallback)
+        {
+            return UiTuningValues.TryGet(id, out float v) && v > 0f ? v : fallback;
+        }
+
+        public static int ResolutionWidth => Data.ResolutionWidth;
+        public static int ResolutionHeight => Data.ResolutionHeight;
+        public static int WindowMode => Data.WindowMode;
+
+        /// <summary>只由 <see cref="DisplayModeService"/> 在玩家确认“保留”后调用（未确认的修改不落盘，崩溃 / 退出后仍是旧设置）。</summary>
+        public static void SetDisplayMode(int width, int height, int windowMode)
+        {
+            Data.ResolutionWidth = Math.Max(0, width);
+            Data.ResolutionHeight = Math.Max(0, height);
+            Data.WindowMode = windowMode;
+            Save();
+        }
+
+        public static bool VSyncEnabled => Data.VSyncEnabled;
+
+        public static void SetVSyncEnabled(bool enabled)
+        {
+            Data.VSyncEnabled = enabled;
+            Save();
+            FramePacing.ApplyStored();
+        }
+
+        public static float BrightnessMin => Tune("settings.brightness_min", 0.5f);
+        public static float BrightnessMax => Tune("settings.brightness_max", 1.5f);
+        public static float Brightness => Mathf.Clamp(Data.Brightness > 0f ? Data.Brightness : 1f, BrightnessMin, BrightnessMax);
+
+        public static void SetBrightness(float value)
+        {
+            Data.Brightness = Mathf.Clamp(value, BrightnessMin, BrightnessMax);
+            Save();
+        }
+
+        public const int QualityLow = 0, QualityMedium = 1, QualityHigh = 2, QualityCustom = 3;
+        public static int QualityPreset => Mathf.Clamp(Data.QualityPreset, QualityLow, QualityCustom);
+        public static int ShadowQuality => Mathf.Clamp(Data.ShadowQuality, 0, 2);
+        public static float EffectsDensityMin => Tune("settings.effects_density_min", 0.25f);
+        public static float EffectsDensity => Mathf.Clamp(Data.EffectsDensity, EffectsDensityMin, 1f);
+        public static bool PostProcessEnabled => Data.PostProcessEnabled;
+
+        /// <summary>后处理开关的渲染侧接收口：Built-in 管线下没有后处理栈，默认什么都不做；FG15-PL-01（URP 合流）把它接到 Volume 上（DEBT-FG15UX01-01）。</summary>
+        public static Action<bool> PostProcessSink;
+
+        /// <summary>画质预设：低 / 中 / 高 一次改三个子项；选“自定义”不动子项。</summary>
+        public static void SetQualityPreset(int preset)
+        {
+            preset = Mathf.Clamp(preset, QualityLow, QualityCustom);
+            Data.QualityPreset = preset;
+            if (preset != QualityCustom)
+            {
+                Data.ShadowQuality = preset == QualityLow ? 0 : preset == QualityMedium ? 1 : 2;
+                Data.EffectsDensity = preset == QualityLow ? EffectsDensityMin : preset == QualityMedium ? 0.6f : 1f;
+                Data.PostProcessEnabled = preset != QualityLow;
+            }
+            Save();
+            ApplyQuality();
+        }
+
+        public static void SetShadowQuality(int value)
+        {
+            Data.ShadowQuality = Mathf.Clamp(value, 0, 2);
+            Data.QualityPreset = QualityCustom;
+            Save();
+            ApplyQuality();
+        }
+
+        public static void SetEffectsDensity(float value)
+        {
+            Data.EffectsDensity = Mathf.Clamp(value, EffectsDensityMin, 1f);
+            Data.QualityPreset = QualityCustom;
+            Save();
+        }
+
+        public static void SetPostProcessEnabled(bool enabled)
+        {
+            Data.PostProcessEnabled = enabled;
+            Data.QualityPreset = QualityCustom;
+            Save();
+            ApplyQuality();
+        }
+
+        /// <summary>把画质子项推给引擎（启动时与每次修改时）：阴影 → QualitySettings.shadows；后处理 → <see cref="PostProcessSink"/>；特效密度由 FeedbackVfxPresenter 每次生成时读。</summary>
+        public static void ApplyQuality()
+        {
+            QualitySettings.shadows = ShadowQuality == 0 ? UnityEngine.ShadowQuality.Disable
+                : ShadowQuality == 1 ? UnityEngine.ShadowQuality.HardOnly : UnityEngine.ShadowQuality.All;
+            PostProcessSink?.Invoke(PostProcessEnabled);
+        }
+
+        public static float AmbientVolume => Data.AmbientVolume;
+
+        public static void SetAmbientVolume(float value)
+        {
+            Data.AmbientVolume = Mathf.Clamp01(value);
+            Save();
+        }
+
+        public static bool MuteOnFocusLoss => Data.MuteOnFocusLoss;
+
+        public static void SetMuteOnFocusLoss(bool enabled)
+        {
+            Data.MuteOnFocusLoss = enabled;
+            Save();
+        }
+
+        public static bool PauseOnFocusLoss => Data.PauseOnFocusLoss;
+
+        public static void SetPauseOnFocusLoss(bool enabled)
+        {
+            Data.PauseOnFocusLoss = enabled;
+            Save();
+        }
+
+        public static float ZoomSpeedMultiplier => Mathf.Clamp(Data.ZoomSpeedMultiplier > 0f ? Data.ZoomSpeedMultiplier : 1f, 0.25f, 2.5f);
+
+        public static void SetZoomSpeedMultiplier(float value)
+        {
+            Data.ZoomSpeedMultiplier = Mathf.Clamp(value, 0.25f, 2.5f);
+            Save();
+        }
+
+        public static bool InvertScroll => Data.InvertScroll;
+
+        public static void SetInvertScroll(bool enabled)
+        {
+            Data.InvertScroll = enabled;
+            Save();
+        }
+
+        public static float UplinkMouseSensitivity => Mathf.Clamp(Data.UplinkMouseSensitivity, 0f, 2f);
+
+        public static void SetUplinkMouseSensitivity(float value)
+        {
+            Data.UplinkMouseSensitivity = Mathf.Clamp(value, 0f, 2f);
+            Save();
+        }
+
+        public static bool HoldActionsToggle => Data.HoldActionsToggle;
+
+        public static void SetHoldActionsToggle(bool enabled)
+        {
+            Data.HoldActionsToggle = enabled;
+            Save();
+        }
+
+        /// <summary>自动存档间隔可选值（分钟；0 = 关闭）。</summary>
+        public static readonly int[] AutoSaveChoices = { 0, 5, 10, 15, 30 };
+        public static int AutoSaveMinutes => Array.IndexOf(AutoSaveChoices, Data.AutoSaveMinutes) >= 0 ? Data.AutoSaveMinutes : 10;
+
+        public static void SetAutoSaveMinutes(int minutes)
+        {
+            Data.AutoSaveMinutes = Array.IndexOf(AutoSaveChoices, minutes) >= 0 ? minutes : 10;
+            Save();
+        }
+
+        public static bool GuidanceEnabled => Data.GuidanceEnabled;
+
+        public static void SetGuidanceEnabled(bool enabled)
+        {
+            Data.GuidanceEnabled = enabled;
+            Save();
+        }
+
+        public static bool CausalChainOverlayEnabled => Data.CausalChainOverlayEnabled;
+
+        public static void SetCausalChainOverlayEnabled(bool enabled)
+        {
+            Data.CausalChainOverlayEnabled = enabled;
+            Save();
+        }
+
+        public static bool DamageNumbersEnabled => Data.DamageNumbersEnabled;
+
+        public static void SetDamageNumbersEnabled(bool enabled)
+        {
+            Data.DamageNumbersEnabled = enabled;
+            if (!enabled)
+            {
+                GameLogic.Campaign.Feedback.DamageNumbers.Clear();
+            }
+            Save();
+        }
+
+        /// <summary>FG15-UX-01（FGR-SYS-021“每个分类都有恢复默认”）：把一组字段恢复成 <see cref="GameSettingsData"/> 的初值（用一份新建的默认对象逐字段拷回）。
+        /// 字段名写错会在自检里失败（SettingsCatalog 每个分类的恢复默认都有行为断言）。</summary>
+        public static void ResetFields(params string[] fieldNames)
+        {
+            var defaults = new GameSettingsData();
+            Type t = typeof(GameSettingsData);
+            foreach (string name in fieldNames)
+            {
+                System.Reflection.FieldInfo f = t.GetField(name);
+                if (f == null)
+                {
+                    Log.Error($"[GameSettings] 恢复默认：没有字段 {name}");
+                    continue;
+                }
+                f.SetValue(Data, f.GetValue(defaults));
+            }
+            Save();
+            ApplyQuality();
+            FramePacing.ApplyStored();
+        }
     }
 
     /// <summary>目标帧率（本机偏好）。开发标准是最低 120 帧，默认即 120；必须同时关掉垂直同步，
@@ -656,9 +906,15 @@ namespace GameLogic.Settings
             Apply(fps);
         }
 
+        /// <summary>帧率上限可选值（-1 = 不限）。</summary>
+        public static readonly int[] Choices = { 30, 60, 120, 144, 165, 240, -1 };
+
+        public static void ResetToDefault() => Set(DefaultFps);
+
+        /// <summary>FG15-UX-01：垂直同步改由设置决定（默认关）；开着时 targetFrameRate 被引擎忽略，帧率锁在刷新率。</summary>
         private static void Apply(int fps)
         {
-            QualitySettings.vSyncCount = 0;
+            QualitySettings.vSyncCount = GameSettings.VSyncEnabled ? 1 : 0;
             Application.targetFrameRate = fps;
         }
     }

@@ -60,6 +60,8 @@ namespace GameLogic.UI.Kit
             _feedback = root.Q<Label>("PauseFeedback");
             root.Q<Label>("PauseMenuTitle").text = GameText.Get("ui.pause.title");
             Bind(root, "PauseResume", "ui.pause.resume", () => SetOpen(false));
+            // FG15-UX-01（FGR-SYS-020）：设置全集（与主菜单“全部设置…”同一个面板），盖在暂停菜单上面，关掉回到暂停菜单。
+            SettingsButton = Bind(root, "PauseSettings", "ui.pause.settings", SettingsPanelUIToolkit.Open);
             Bind(root, "PauseKeyBindings", "ui.pause.keybinds", KeyBindingsPanelUIToolkit.Open);
             Bind(root, "PauseNotifications", "ui.pause.notifications", () =>
             {
@@ -203,6 +205,7 @@ namespace GameLogic.UI.Kit
             }
         }
         public Button DifficultyButton { get; private set; }
+        public Button SettingsButton { get; private set; }
         public Button FirmwareButton { get; private set; }
         public Slider CameraZoomSlider => _cameraZoom;
         public Slider CameraFollowSlider => _cameraFollow;

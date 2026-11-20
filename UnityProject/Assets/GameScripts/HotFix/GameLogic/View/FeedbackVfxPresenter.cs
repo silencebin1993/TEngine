@@ -165,7 +165,7 @@ namespace GameLogic.View
                 {
                     continue;
                 }
-                if (TryGetSpec(_incoming[i].Cue, reduced, out VfxSpec spec))
+                if (TryGetSpec(_incoming[i].Cue, reduced, out VfxSpec spec) && EffectsDensityGate.Admit(GameSettings.EffectsDensity))
                 {
                     Spawn(_incoming[i], spec, now);
                 }
@@ -277,6 +277,35 @@ namespace GameLogic.View
                 to = from + (to - from) * 0.7f;
             }
             return new VfxSpec(sprite, color, from, to, duration, height, flat);
+        }
+    }
+
+    /// <summary>FG15-UX-01（FGR-SYS-020 画面“特效密度”）：按比例放行反馈特效（累加器，确定性：密度 0.5 = 每两个放一个；1 = 全放）。
+    /// 只影响画面上生成几个特效，不影响声音、字幕、通知与任何玩法结果。</summary>
+    public static class EffectsDensityGate
+    {
+        private static float _acc;
+        public static int Admitted { get; private set; }
+        public static int Skipped { get; private set; }
+
+        public static bool Admit(float density)
+        {
+            _acc += Mathf.Clamp01(density);
+            if (_acc + 1e-4f >= 1f)
+            {
+                _acc -= 1f;
+                Admitted++;
+                return true;
+            }
+            Skipped++;
+            return false;
+        }
+
+        public static void ResetForTests()
+        {
+            _acc = 0f;
+            Admitted = 0;
+            Skipped = 0;
         }
     }
 }

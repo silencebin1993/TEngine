@@ -185,6 +185,7 @@ namespace GameLogic.EditorTools
                 Step(CheckInterior);
                 Step(CheckInteriorSpeedAndSave);
                 Step(CheckInteriorRollbackAndDataCenter);
+                Step(CheckInteriorApproach);
                 Step(CheckBannerAndCue);
                 Step(CheckChecklistHazard);
                 Step(CheckSiteCoverageRoot);
@@ -1163,6 +1164,101 @@ namespace GameLogic.EditorTools
                 (reentered ? string.Empty : "——再次进入被拒：" + reWhy));
             SignalCoverageService.OverrideForTests = null;
             SignalCoverageService.Invalidate();
+        }
+
+        /// <summary>
+        /// DEBT-FG8GEN02-10（FG15-UX-01 承接）：选中机器后右键室内入口 = 走过去并进入。H12 正向：只带选中的两台进去（入口旁另一台不跟进）、意图进存档、读档后接着走并进入；
+        /// H13 负向：途中对其中一台下别的移动命令 = 它退出意图、另一台照样进；全部改命令 = 意图作废、没人进去；迷雾里的入口右键不响应。
+        /// </summary>
+        private static void CheckInteriorApproach()
+        {
+            Ray RayAt(Vector2 p) => new Ray(new Vector3(p.x, 40f, p.y), Vector3.down);
+            bool StepUntil(System.Func<bool> done, int seconds)
+            {
+                for (int i = 0; i < seconds * 4 && !done(); i++)
+                {
+                    WorldSimulation.StepMany(GameClock.StepHz / 4);
+                }
+                return done();
+            }
+
+            CampaignState s = NewWorld(42);
+            PlannedAnchor gate = InteriorSiteService.EntranceFor(s, "relay_hall");
+            Vector2 e = TerritoryAnchorChecks.EntryOf(s, gate);
+            Vector2 back = -InteriorSiteService.OutwardOf(s, gate);
+            // 负向：入口还在迷雾里 → 右键不响应（不泄露情报）。
+            HomeValleyController home = WorldSimulation.Home;
+            int fogProbe = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, Vector2.zero, e + back * (gate.EntryRadius + 8f));
+            WorldSimulation.StepMany(2);
+            home.SquadCommands.SelectSingle(fogProbe, false);
+            bool fogIgnored = !home.ContextEntranceForTests(RayAt(e)) && !InteriorApproachService.HasIntent(s);
+
+            HomeGridService.RevealArea(s, e, 40f);
+            SignalCoverageService.OverrideForTests = (site, pos) => new SignalCoverageSample(true, true, 50f, pos, 80f, SignalCoverageSourceKind.RelayTower);
+            int a = fogProbe;
+            int b = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, Vector2.zero, e + back * (gate.EntryRadius + 10f) + new Vector2(2f, 0f));
+            int c = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, Vector2.zero, e + new Vector2(1f, -1f)); // 入口旁、没选中
+            WorldSimulation.StepMany(2);
+            home.SquadCommands.SelectSingle(a, false);
+            home.SquadCommands.SelectSingle(b, true);
+            bool issued = home.ContextEntranceForTests(RayAt(e));
+            bool intent = InteriorApproachService.HasIntent(s) && s.World.ApproachEnterAnchorId == gate.Id && s.World.ApproachEnterIds.Length == 2;
+            bool movingNow = home.SquadCommands.TryGetActiveCommandKind(a, out RegionCommandKind ka) && ka == RegionCommandKind.Move;
+            WorldSimulation.StepMany(GameClock.StepHz);
+            SaveResult sv = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            CampaignState r = Reload(Slot);
+            bool persisted = r != null && InteriorApproachService.HasIntent(r) && r.World.ApproachEnterIds.Length == 2;
+            bool entered = r != null && StepUntil(() => Rec(a)?.RegionId == "relay_hall" && Rec(b)?.RegionId == "relay_hall", 90);
+            bool onlySelected = Rec(c)?.RegionId == HomeValleyLayout.RegionId && !InteriorApproachService.HasIntent(r);
+            Expect(fogIgnored && issued && intent && movingNow && sv.Success && persisted && entered && onlySelected,
+                $"H12 右键室内入口 = 走过去并进入：迷雾里不响应（{fogIgnored}）；右键已探索入口 → 两台接到移动命令（{movingNow}）、意图登记（{intent}）；途中存读档意图还在（{persisted}）；" +
+                $"读档后接着走、到了只带选中的两台进去（{entered}），入口旁没选中的那台留在家园（{onlySelected}）——{InteriorApproachService.LastOutcome}");
+
+            // H13 负向：途中改命令 = 退出意图。
+            CampaignState s2 = NewWorld(42);
+            HomeGridService.RevealArea(s2, e, 40f);
+            HomeValleyController home2 = WorldSimulation.Home;
+            int d = Spawn(s2, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, Vector2.zero, e + back * (gate.EntryRadius + 8f));
+            int f = Spawn(s2, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, Vector2.zero, e + back * (gate.EntryRadius + 10f) + new Vector2(2f, 0f));
+            WorldSimulation.StepMany(2);
+            home2.SquadCommands.SelectSingle(d, false);
+            home2.SquadCommands.SelectSingle(f, true);
+            home2.ContextEntranceForTests(RayAt(e));
+            WorldSimulation.StepMany(GameClock.StepHz / 2);
+            home2.SquadCommands.SelectSingle(f, false);
+            home2.SquadCommands.IssueMoveTo(e + back * (gate.EntryRadius + 20f), paused: false); // 把 f 调走
+            bool dropped = s2.World.ApproachEnterIds.Length == 1 && s2.World.ApproachEnterIds[0] == d;
+            bool dIn = StepUntil(() => Rec(d)?.RegionId == "relay_hall", 90);
+            bool fStayed = Rec(f)?.RegionId == HomeValleyLayout.RegionId;
+
+            CampaignState s3 = NewWorld(42);
+            HomeGridService.RevealArea(s3, e, 40f);
+            HomeValleyController home3 = WorldSimulation.Home;
+            int g = Spawn(s3, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, Vector2.zero, e + back * (gate.EntryRadius + 8f));
+            WorldSimulation.StepMany(2);
+            home3.SquadCommands.SelectSingle(g, false);
+            home3.ContextEntranceForTests(RayAt(e));
+            home3.SquadCommands.IssueGuardHere(paused: false);
+            bool voided = !InteriorApproachService.HasIntent(s3);
+            WorldSimulation.StepMany(GameClock.StepHz * 20);
+            bool nobody = Rec(g)?.RegionId == HomeValleyLayout.RegionId && WorldSimulation.Interior("relay_hall") == null;
+
+            // 负向：选中的机器一台都收不到命令（在信号覆盖外）→ 不登记意图、不说“前往”，只有命令出口的拒绝原因。
+            CampaignState s4 = NewWorld(42);
+            HomeGridService.RevealArea(s4, e, 40f);
+            HomeValleyController home4 = WorldSimulation.Home;
+            int o = Spawn(s4, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, Vector2.zero, e + back * (gate.EntryRadius + 8f));
+            WorldSimulation.StepMany(2);
+            SignalCoverageService.OverrideForTests = (site, pos) => new SignalCoverageSample(false, true, -10f, pos, 1f, SignalCoverageSourceKind.RelayTower);
+            SignalCoverageService.Invalidate();
+            home4.SquadCommands.SelectSingle(o, false);
+            bool consumed = home4.ContextEntranceForTests(RayAt(e));
+            bool noIntent = consumed && !InteriorApproachService.HasIntent(s4) && home4.SquadCommands.LastStartedIds.Count == 0;
+            Expect(noIntent, $"H13 负向：选中的机器全在覆盖外、没接到移动命令 → 右键入口不登记“走过去并进入”、不发“前往”（{noIntent}）");
+            SignalCoverageService.OverrideForTests = null;
+            SignalCoverageService.Invalidate();
+            Expect(dropped && dIn && fStayed && voided && nobody,
+                $"H13 负向：途中把其中一台调走 → 它退出意图（{dropped}），另一台照样进去（{dIn}），调走的留在家园（{fStayed}）；唯一一台改成待命 → 意图作废（{voided}）、20 秒后没人进去（{nobody}）");
         }
 
         /// <summary>H 续：暂停与 0.5x～3x 倍速矩阵、室内中途存读档接着跑（读档时室内一起恢复、镜头放回）。</summary>

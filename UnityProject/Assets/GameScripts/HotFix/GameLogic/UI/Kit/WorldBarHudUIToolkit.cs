@@ -82,6 +82,20 @@ namespace GameLogic.UI.Kit
         public Button MarchHoldButton => _marchHold;
         public Button MarchReturnButton => _marchReturn;
         public Button MarchFollowButton => _marchFollow;
+
+        /// <summary>FG15-UX-01（DEBT-FG8EXP02-06）：远征命令快捷键——与行军条按钮同一入口（没有在外的远征队时由行军服务给出原因）。</summary>
+        public static void ShortcutMarch(ExpeditionMarchService.Command command) => Instance?.IssueMarch(command);
+
+        /// <summary>FG15-UX-01：跟随远征队快捷键（同行军条“跟随”按钮）。</summary>
+        public static void ShortcutFollow()
+        {
+            if (Instance == null || CampaignSession.Current == null)
+            {
+                return;
+            }
+            WorldView.ToggleFollowExpedition();
+            Instance.RefreshMarch(CampaignSession.Current);
+        }
         public Button PauseButton => _pause;
         public Button LaborButton => _labor;
         /// <summary>FG7-ENV-01：日历行（昼夜阶段 + 倒计时；点开日历面板）与静默夜 / 天气摘要。</summary>

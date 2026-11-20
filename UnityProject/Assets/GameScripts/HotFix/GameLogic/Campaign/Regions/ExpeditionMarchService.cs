@@ -729,6 +729,8 @@ namespace GameLogic.Campaign.Regions
                 ChooseReturnGoal(s, m);
             }
             m.Command = (int)cmd;
+            m.DetachedIds = Array.Empty<int>(); // 整队命令：被单独调走的成员重新听整队命令
+            m.DetachCued = false;
             m.Halted = HaltNone;
             m.ArrivalFailReason = string.Empty; // 玩家重新下了令：之后再没进去照常提示
             m.HaltAutoRetried = false;
@@ -835,6 +837,8 @@ namespace GameLogic.Campaign.Regions
             }
             ExpeditionMarchState m = s.Grid.ExpeditionTeam.March ??= new ExpeditionMarchState();
             m.TeamNumber = number;
+            m.DetachedIds = Array.Empty<int>();
+            m.DetachCued = false;
             m.Phase = PhaseOutbound;
             m.SiteId = siteId;
             m.Members = ids.ToArray();
@@ -855,10 +859,52 @@ namespace GameLogic.Campaign.Regions
             m.VisitedSite = false; // FG8-EXP-05：这一趟还没进过地点
             m.HasReturnGoal = false;
             m.OrdersPending = !IssueOrders(s, m);
+            // DEBT-FG8EXP02-06（“远征队 = 编组”）：出发的队伍存进第一个空着的数字编组（不覆盖玩家已经存的编组；满了就不存，命令栏写明）。
+            WorldSim.WorldSimulation.Home?.SquadCommands.SaveExpeditionGroup(ids, number);
             BeginFaultInjectionForTests?.Invoke();
             BeginCount++;
             Log.Info($"[ExpeditionMarchService] 远征队出发行军：{ids.Count} 台 → {siteId}，速度 {m.Speed:0.0} 格/秒（最慢的那台），锚点路线 {ExpeditionSiteAnchors.RouteLength(s, siteId):0} 格{(m.OrdersPending ? "（有成员还没进家园内核，下一步补下命令）" : string.Empty)}。");
             return true;
+        }
+
+        /// <summary>
+        /// DEBT-FG8EXP02-09：玩家对一台行军成员单独下了命令（移动 / 攻击 / 待命 / 撤退，<see cref="RegionSquadCommandSystem"/> 的命令出口调用）——
+        /// 它在星球上行军（去程 / 返程）时记为“被单独调走”，不再算进截断判定；整队命令时清空。不在行军里的机器不受影响。O(队伍数 + 成员数)。
+        /// </summary>
+        public static void OnPlayerUnitCommand(CampaignState s, int logicId)
+        {
+            ExpeditionMarchState m = TeamOf(s, logicId);
+            if (m == null || (m.Phase != PhaseOutbound && m.Phase != PhaseReturning) || Array.IndexOf(m.DetachedIds ?? Array.Empty<int>(), logicId) >= 0)
+            {
+                return;
+            }
+            var list = new List<int>(m.DetachedIds ?? Array.Empty<int>()) { logicId };
+            m.DetachedIds = list.ToArray();
+        }
+
+        public static bool IsDetached(CampaignState s, int logicId)
+        {
+            ExpeditionMarchState m = TeamOf(s, logicId);
+            return m?.DetachedIds != null && Array.IndexOf(m.DetachedIds, logicId) >= 0;
+        }
+
+        private static int StrayDetached(CampaignState s, ExpeditionMarchState m, CombatSite home, IReadOnlyList<int> members, bool hasGoal, Vector2 goal, float r)
+        {
+            if (m.DetachedIds == null || m.DetachedIds.Length == 0)
+            {
+                return 0;
+            }
+            int n = 0;
+            for (int i = 0; i < members.Count; i++)
+            {
+                int id = members[i];
+                bool near = hasGoal && home.TryGetMachinePosition(id, out Vector2 p) && (p - goal).sqrMagnitude <= r * r;
+                if (!near && Array.IndexOf(m.DetachedIds, id) >= 0)
+                {
+                    n++;
+                }
+            }
+            return n;
         }
 
         /// <summary>这个目的地已有远征队在去 / 在里面（返程中的不算：地点已经让出来了）。</summary>
@@ -1061,6 +1107,7 @@ namespace GameLogic.Campaign.Regions
             {
                 m.Halted = HaltNone;
                 m.OrdersPending = true;
+                m.DetachedIds = Array.Empty<int>(); // 自动重试按最后的整队命令：全队重新听整队命令
                 m.HaltAutoRetried = true;
                 HaltRetryCount++;
             }
@@ -1137,7 +1184,15 @@ namespace GameLogic.Campaign.Regions
             }
             // 截断：在执行“前进 / 返回”、没人还有命令在跑、又没全部走到 → 路线被截断（寻路只到最近可达点 / 被挡），原地停下等新命令。
             // 复审修复：成员正被自卫教义占用（交战中 / 打完走回驻防点）时命令为空是正常的，不算截断。
-            if ((advancing || returning) && !m.OrdersPending && !doctrineBusy && idle == alive && near < alive && m.Halted == HaltNone)
+            // DEBT-FG8EXP02-09：被玩家单独调走、还没到目的地的成员不算截断（是玩家调走的，不是路走不通）；只剩它们没到时提示一次“等它们归队”。
+            // 玩家此刻下不了整队命令（覆盖外 / 静默夜）时不排除：照旧判截断、走 FG-GAP-136 的按最后命令自动重试，免得队伍干等一台叫不回来的机器（不软锁）。
+            int strayDetached = CanCommand(s, out _) ? StrayDetached(s, m, home, members, hasGoal, goal, r) : 0;
+            if ((advancing || returning) && !m.OrdersPending && !doctrineBusy && idle == alive && near < alive && near + strayDetached == alive && !m.DetachCued)
+            {
+                m.DetachCued = true;
+                Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.ExpeditionMarchHalted, center, GameText.Format("exp.cue.waiting_detached", strayDetached));
+            }
+            if ((advancing || returning) && !m.OrdersPending && !doctrineBusy && idle == alive && near + strayDetached < alive && m.Halted == HaltNone)
             {
                 bool repeat = m.HaltAutoRetried; // 自动重试后仍被截断：只记日志、不重复提示
                 m.Halted = HaltRouteTruncated;

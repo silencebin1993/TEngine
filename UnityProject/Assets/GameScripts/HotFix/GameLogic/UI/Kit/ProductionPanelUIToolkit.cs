@@ -1561,6 +1561,38 @@ namespace GameLogic.UI.Kit
             DefensePanelUIToolkit.Open(id);
         }
 
+        /// <summary>
+        /// DEBT-FG6DEF01-06 / 02-08（FG15-UX-01）：建筑面板开着时的专属打开键（默认 Alt+M）——炮塔 → 炮塔面板；护盾 / 陷阱 / 屏障 → 防御面板（与面板上的按钮同一入口）。
+        /// 别的建筑没有这两块面板：不动，发拒绝提示写明原因。返回是否打开了。
+        /// </summary>
+        public bool OpenDefenseOrTurret()
+        {
+            string type = null;
+            if (CampaignSession.Current?.BuildingRecords != null)
+            {
+                foreach (BuildingRecord r in CampaignSession.Current.BuildingRecords)
+                {
+                    if (r != null && r.BuildingId == BuildingId)
+                    {
+                        type = r.BuildingTypeId;
+                        break;
+                    }
+                }
+            }
+            if (type != null && Campaign.Defense.TurretCatalog.IsTurretType(type))
+            {
+                OpenTurret();
+                return true;
+            }
+            if (type != null && Campaign.Defense.DefenseCatalog.KindOf(type) != Campaign.Defense.DefenseKind.None)
+            {
+                OpenDefense();
+                return true;
+            }
+            Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, GameText.Get("building.panel.no_defense_panel"));
+            return false;
+        }
+
         /// <summary>FG6-DEF-01：炮塔 → 打开炮塔面板（蓝图、目标模式、补给、接入）。</summary>
         public void OpenTurret()
         {

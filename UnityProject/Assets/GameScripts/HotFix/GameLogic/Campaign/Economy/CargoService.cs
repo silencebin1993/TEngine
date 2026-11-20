@@ -1078,7 +1078,7 @@ namespace GameLogic.Campaign.Economy
                 return false;
             }
             bool changed = false;
-            // 地上的货（家园所在星球上的地面物；远征地点里的沿用 Demo 的“装载”交互，不在这里自动捡）。
+            // 地上的货（家园所在星球、室内场地与远征地点里的地面物）。
             GroundItemRecord[] ground = s.GroundItems ?? Array.Empty<GroundItemRecord>();
             List<string> removed = null;
             foreach (GroundItemRecord g in ground)
@@ -1168,10 +1168,12 @@ namespace GameLogic.Campaign.Economy
                 s.GroundItems = keep.ToArray();
                 CancelHauls(s, removed);
             }
-            // 地上的黑匣子 / 关键物（始终拾取，占 1 格；家园星球上的——远征地点里的沿用“装载”交互）。FG8-EXP-05：所有区域关键物都按 KeyItemRetention 始终拾取。
+            // 地上的黑匣子 / 关键物（始终拾取，占 1 格）。FG8-EXP-05：所有区域关键物都按 KeyItemRetention 始终拾取。
+            // FG15-UX-01（DEBT-FG9ACT101-03 / DEBT-FG8LOOT03-05）：远征地点（破碎都市 / 铸造前哨）里的 Demo 关键物与黑匣子也走近自动拾取；“装载”交互保留作手动兜底（例如刚丢弃的那件）。
             foreach (RegionQuestItemRecord q in s.RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
             {
-                if (q == null || !KeyItemRetention.NeverExpires(KeyItemRetention.OfQuestItem(q)) || q.State != RegionQuestItemState.OnGround || q.RegionId != HomeValleyLayout.RegionId
+                if (q == null || !KeyItemRetention.NeverExpires(KeyItemRetention.OfQuestItem(q)) || q.State != RegionQuestItemState.OnGround
+                    || (q.RegionId != HomeValleyLayout.RegionId && !IsExpeditionSite(q.RegionId))
                     || IsDiscarded(st, q.SalvageInstanceId) || !NearAnyMember(q.RegionId, q.Position))
                 {
                     continue;

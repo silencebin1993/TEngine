@@ -1032,8 +1032,11 @@ namespace GameLogic.EditorTools
                 });
                 string barProbe = UiToolkitLayoutProbe.Probe(UiKitFolder + "WorldBar.uxml", "WorldBar", stressFill: true, prepare: rr =>
                     rr.panel.visualTree.Q<VisualElement>("WorldBar")?.RemoveFromClassList("uk-hidden"));
-                Expect(probe.Contains("PASS") && !probe.Contains("FAIL") && barProbe.Contains("PASS") && !barProbe.Contains("FAIL"),
-                    "U1 日历面板与世界时间条（含日历行）布局探针：" + (probe.Contains("FAIL") ? probe : probe.Split('\n')[0]) + " / " + (barProbe.Contains("FAIL") ? barProbe : barProbe.Split('\n')[0]));
+                // FG15-UX-01（FG-GAP-118）：日历并进时间行——世界栏少一整行，资源顶栏不再被往下推（少盖画面上沿一条）。
+                VisualElement calRow = root.Q<VisualElement>("WorldCalendarRow");
+                bool calInline = calRow != null && calRow.parent?.name == "WorldTimeRow" && calRow.ClassListContains("wb-cal-inline");
+                Expect(probe.Contains("PASS") && !probe.Contains("FAIL") && barProbe.Contains("PASS") && !barProbe.Contains("FAIL") && calInline,
+                    "U1 （FG-GAP-118 日历已并进时间行：" + calInline + "）日历面板与世界时间条（含日历行）布局探针：" + (probe.Contains("FAIL") ? probe : probe.Split('\n')[0]) + " / " + (barProbe.Contains("FAIL") ? barProbe : barProbe.Split('\n')[0]));
             }
             finally
             {

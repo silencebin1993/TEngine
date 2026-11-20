@@ -275,6 +275,47 @@ namespace GameLogic.UI.Kit
             {
                 AwayReportPanelUIToolkit.Toggle();
             }
+            // FG15-UX-01（DEBT-FG2FW04-01 / DEBT-FG6DEF08-03）：反应记录（Alt+X）、突袭历史（Alt+Y），全部上下文，开着再按一次关闭；更高层的面板盖在上面时不起作用。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenReactionLog) && CampaignSession.Current != null
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(ReactionLogPanelUIToolkit.Order))
+            {
+                if (ReactionLogPanelUIToolkit.IsOpen) { ReactionLogPanelUIToolkit.Close(); } else { ReactionLogPanelUIToolkit.Open(); }
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenRaidHistory) && CampaignSession.Current != null
+                && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(RaidResultPanelUIToolkit.Order))
+            {
+                if (RaidResultPanelUIToolkit.IsOpen) { RaidResultPanelUIToolkit.Close(); } else { RaidResultPanelUIToolkit.Open(); }
+            }
+            // FG15-UX-01（DEBT-FG6DEF01-06 / 02-08）：炮塔面板开着时 Ctrl+M 循环目标模式；防御面板开着时 Ctrl+L 切换铺设方式（走与按钮同一个入口，结果 / 拒绝原因照常显示在面板反馈行）。
+            if (InputRouter.ConsumeContextAction(GameActionId.TurretCycleMode) && TurretPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(TurretPanelUIToolkit.Order))
+            {
+                TurretPanelUIToolkit.Instance?.CycleMode();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenBuildingDefensePanel) && ProductionPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(ProductionPanelUIToolkit.Order))
+            {
+                ProductionPanelUIToolkit.Instance?.OpenDefenseOrTurret(); // 建筑面板 → 该建筑的炮塔 / 防御面板（专属打开键）
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.DefenseTogglePattern) && DefensePanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(DefensePanelUIToolkit.Order))
+            {
+                DefensePanelUIToolkit.Instance?.TogglePattern();
+            }
+            // FG15-UX-01（DEBT-FG8EXP02-06）：远征队跟随 / 前进 / 待命 / 返回（战略上下文），与世界栏行军条按钮同一入口（不在外时给出原因，不静默）。
+            if (InputRouter.ConsumeContextAction(GameActionId.FollowExpedition))
+            {
+                WorldBarHudUIToolkit.ShortcutFollow();
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.ExpeditionAdvance))
+            {
+                WorldBarHudUIToolkit.ShortcutMarch(Campaign.Regions.ExpeditionMarchService.Command.Advance);
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.ExpeditionHold))
+            {
+                WorldBarHudUIToolkit.ShortcutMarch(Campaign.Regions.ExpeditionMarchService.Command.Hold);
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.ExpeditionReturn))
+            {
+                WorldBarHudUIToolkit.ShortcutMarch(Campaign.Regions.ExpeditionMarchService.Command.Return);
+            }
             // FG6-DEF-06：防御总览键（默认 Alt+E，全部上下文）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同统计键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenDefense)
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(DefenseOverviewPanelUIToolkit.Order))

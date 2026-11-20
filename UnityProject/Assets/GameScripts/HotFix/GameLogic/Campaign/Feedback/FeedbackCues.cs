@@ -412,7 +412,8 @@ namespace GameLogic.Campaign.Feedback
         {
             // 同时比较“当时是否在 Play”：关闭域重载进 Play 时静态字段会从编辑器态带过来，
             // 编辑器里（自检）记下的版本号不代表音频模块真的被设置过。
-            if (_appliedSettingsRevision != GameSettings.Revision || _appliedWhilePlaying != Application.isPlaying)
+            if (_appliedSettingsRevision != GameSettings.Revision || _appliedWhilePlaying != Application.isPlaying
+                || _appliedFocusRevision != FocusPolicy.Revision)
             {
                 ApplyAudioSettings();
             }
@@ -447,7 +448,9 @@ namespace GameLogic.Campaign.Feedback
             float music = GameSettings.MusicVolume;
             float sfx = GameSettings.SfxVolume;
             float ui = GameSettings.UiVolume;
+            ComputeVolumes(out master, out float ambient);
             _appliedSettingsRevision = GameSettings.Revision;
+            _appliedFocusRevision = FocusPolicy.Revision;
             _appliedWhilePlaying = Application.isPlaying;
             if (!Application.isPlaying)
             {
@@ -462,6 +465,16 @@ namespace GameLogic.Campaign.Feedback
             audio.MusicVolume = music;
             audio.SoundVolume = sfx;
             audio.UISoundVolume = ui;
+            audio.VoiceVolume = ambient; // FG15-UX-01：“环境”音量走音频模块的第四个分类（AudioType.Voice），环境类时刻在这个分类上播放。
+        }
+
+        private static int _appliedFocusRevision = -1;
+
+        /// <summary>FG15-UX-01：实际推给音频模块的总音量与环境音量（失焦且设置了“失焦时静音”时总音量为 0，玩家的音量设置不变）。纯函数，自检直接断言。</summary>
+        public static void ComputeVolumes(out float master, out float ambient)
+        {
+            master = FocusPolicy.AudioMuted ? 0f : GameSettings.MasterVolume;
+            ambient = GameSettings.AmbientVolume;
         }
 
         /// <summary>自检用：当前已推给音频模块的设置版本号是否追上了设置层。</summary>

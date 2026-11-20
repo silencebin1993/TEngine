@@ -51,6 +51,9 @@ namespace GameLogic.Campaign
         public AnchorCheckRecord[] AnchorChecks = Array.Empty<AnchorCheckRecord>();
         /// <summary>FG8-GEN-02：存档时镜头正看着的室内场地（表面 ID；不在室内为空串）。只决定读档后镜头放在哪里，不影响模拟。</summary>
         public string InteriorFocusId = string.Empty;
+        /// <summary>DEBT-FG8GEN02-10：右键室内入口“走过去并进入”的意图——入口锚点 ID 与还在意图里的机器（空 = 没有）。唯一写入口 <c>Regions.InteriorApproachService</c>。只加字段，旧档 = 没有。</summary>
+        public string ApproachEnterAnchorId = string.Empty;
+        public int[] ApproachEnterIds = Array.Empty<int>();
     }
 
     /// <summary>FG8-GEN-02：一个手工锚点的可达性校验结果。</summary>
@@ -609,6 +612,11 @@ namespace GameLogic.Campaign
     {
         /// <summary>FG11-REG-01（FG-GAP-016）：第几支远征队（1 起，出发时取当时在外队伍里没用过的最小编号；旧档 0 = 第 1 支）。有多支同时在外时界面写“远征队 N”。</summary>
         public int TeamNumber;
+        /// <summary>DEBT-FG8EXP02-09（FG15-UX-01，“远征队 = 编组”口径）：行军途中被玩家单独下令调走的成员（单台命令优先于整队命令，FGR-BASE-020）。
+        /// 这些成员不算“路线被截断”；队伍在目的地等它们，玩家再下整队命令（前进 / 待命 / 返回）时清空、全队重新听整队命令。只加字段，旧档 = 空。</summary>
+        public int[] DetachedIds = Array.Empty<int>();
+        /// <summary>“等被调走的成员归队”的提示这一趟已经发过（整队命令时清零）。</summary>
+        public bool DetachCued;
         /// <summary>0 = 没有远征在外；1 = 去程（星球上，往目的地锚点走）；2 = 在远征地点里（地点已载入）；3 = 返程（星球上，往家园走）；4 = 已返回（记录保留到下一次出发，显示“已返回”）。</summary>
         public int Phase;
         /// <summary>目的地地点（<see cref="Regions.FracturedCityLayout.RegionId"/> / <see cref="Regions.FoundryOutpostLayout.RegionId"/>）。</summary>

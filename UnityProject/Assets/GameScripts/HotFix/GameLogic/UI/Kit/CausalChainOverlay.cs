@@ -21,6 +21,8 @@ namespace GameLogic.UI.Kit
         public static int Revision { get; private set; }
         /// <summary>本进程读环次数（自检：关着时不读、打开时按间隔读）。</summary>
         public static int Reads { get; private set; }
+        /// <summary>FG15-UX-01：设置关着时按了几次因果链键（自检）。</summary>
+        public static int DisabledPresses { get; private set; }
         public static System.Func<float> Clock = () => Time.realtimeSinceStartup;
 
         private static readonly List<EmgChainLine> Lines = new List<EmgChainLine>(8);
@@ -48,6 +50,20 @@ namespace GameLogic.UI.Kit
         /// <summary>每帧（被观察的地点渲染时，<see cref="CombatSite.FrameRender"/>）：读键开 / 关；打开时按间隔重读环并摆到光标附近。</summary>
         public static void Tick(CombatSite site, Camera camera)
         {
+            if (!Settings.GameSettings.CausalChainOverlayEnabled)
+            {
+                // FG15-UX-01（FGR-SYS-020“因果链叠加显示”开关）：关着时叠加不显示、不读环；按键给一句“已在设置里关闭”，不静默。
+                if (IsOpen)
+                {
+                    Toggle(_site);
+                }
+                if (InputRouter.ConsumeAction(GameActionId.CausalChain, InputRouter.Scope))
+                {
+                    DisabledPresses++;
+                    Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Denied, GameLogic.Localization.GameText.Get("settings.gameplay.causal_chain_off"));
+                }
+                return;
+            }
             if (site == null || site.IsDisposed)
             {
                 return;

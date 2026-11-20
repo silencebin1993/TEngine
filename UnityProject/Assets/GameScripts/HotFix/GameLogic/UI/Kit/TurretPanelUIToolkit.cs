@@ -252,6 +252,30 @@ namespace GameLogic.UI.Kit
 
         // ─────────────────────────────── 操作（按钮 / 下拉，自检直接调）───────────────────────────────
 
+        /// <summary>FG15-UX-01（DEBT-FG6DEF01-06）：目标模式快捷键——切到当前模式的下一个（按表的排序循环），走与按钮同一个入口。</summary>
+        public void CycleMode()
+        {
+            int count = 0;
+            int current = -1;
+            int curCode = TurretService.TryGetReadout(CampaignSession.Current, BuildingId, out TurretReadout cur) ? cur.TargetMode : -1;
+            for (int i = 0; i < _modeCodes.Length; i++)
+            {
+                if (_modeCodes[i] < 0)
+                {
+                    continue;
+                }
+                count++;
+                if (_modeCodes[i] == curCode)
+                {
+                    current = i;
+                }
+            }
+            if (count > 0)
+            {
+                ClickMode((current + 1) % count);
+            }
+        }
+
         public void ClickMode(int slot)
         {
             if (slot < 0 || slot >= _modeCodes.Length)

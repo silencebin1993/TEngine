@@ -100,6 +100,13 @@ namespace GameLogic.UI.Kit
         private int _pointerButton;
         private Vector2 _pointerStart;
         private bool _dragging;
+        // FG15-UX-01（DEBT-FG8EXP01-10）：Shift + 左键拖动 = 框选家园里的机器，“编成远征队”带入派遣准备面板。
+        private bool _boxSelecting;
+        private VisualElement _selectBox;
+        private readonly List<int> _mapSelection = new List<int>(16);
+
+        /// <summary>地图上框选中的机器（LogicId 升序；关地图 / 编成后清空）。</summary>
+        public IReadOnlyList<int> MapSelection => _mapSelection;
         private double _dragCenterX;
         private double _dragCenterY;
 
@@ -369,7 +376,9 @@ namespace GameLogic.UI.Kit
             _texture ??= new WorldMapTexture(Mathf.Max(64, (int)GridContent.Tuning("map.texture_size")));
             _close.clicked += () => SetOpen(false);
             _composeExpedition = root.Q<Button>("MapComposeExpedition");
+            _selectBox = root.Q<VisualElement>("MapSelectBox");
             _composeExpedition.clicked += ComposeExpedition;
+            _composeExpedition.tooltip = GameText.Get("ui.map.select_hint"); // 告诉玩家地图上能框选机器
             _outposts = root.Q<Button>("MapOutposts");
             if (_outposts != null)
             {
@@ -415,7 +424,53 @@ namespace GameLogic.UI.Kit
             // 返工第 2 轮：先收起地图（整页）再打开派遣准备面板（同名册入口，派遣准备面板收到请求时当即入 Esc 栈）。
             SetOpen(false);
             hv.SetExpeditionPrepPanelOpen(true);
-            ExpeditionTeamService.RequestCompose(null);
+            // FG15-UX-01（DEBT-FG8EXP01-10）：地图上框选了机器 → 带入这份名单（面板照常先过滤、写明被略过的）；没框选 = 按常规预选。
+            ExpeditionTeamService.RequestCompose(_mapSelection.Count > 0 ? new List<int>(_mapSelection) : null);
+            _mapSelection.Clear();
+        }
+
+        /// <summary>
+        /// FG15-UX-01（DEBT-FG8EXP01-10）：框选画布上 <paramref name="a"/>～<paramref name="b"/> 矩形里的家园机器（存活、在家园所在星球表面、不在工厂里），替换当前地图选择。
+        /// 返回选中台数；一台都没框到时写明原因。指针与自检同一入口。O(机器数)，只在松开鼠标时跑一次。
+        /// </summary>
+        public int BoxSelectMachines(Vector2 a, Vector2 b)
+        {
+            _mapSelection.Clear();
+            Vector2 c0 = _view.ToCell(a);
+            Vector2 c1 = _view.ToCell(b);
+            float minX = Mathf.Min(c0.x, c1.x), maxX = Mathf.Max(c0.x, c1.x), minY = Mathf.Min(c0.y, c1.y), maxY = Mathf.Max(c0.y, c1.y);
+            foreach (MachineRecord m in MachineRegistry.AllRecords)
+            {
+                if (m == null || !m.IsAlive || m.IsInFactory || !MachineRoster.IsHome(m))
+                {
+                    continue;
+                }
+                Vector2 p = MachineRegistry.TryGetLivePosition(m.LogicId, out Vector2 live) ? live : m.WorldPosition;
+                if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY)
+                {
+                    _mapSelection.Add(m.LogicId);
+                }
+            }
+            _mapSelection.Sort();
+            _feedback.text = _mapSelection.Count > 0
+                ? GameText.Format("ui.map.select_machines", _mapSelection.Count)
+                : GameText.Get("ui.map.select_none");
+            Campaign.Feedback.FeedbackCues.Raise(_mapSelection.Count > 0 ? Campaign.Feedback.FeedbackCueId.CommandAck : Campaign.Feedback.FeedbackCueId.Denied);
+            RefreshTexts(); // 按钮写已选台数
+            return _mapSelection.Count;
+        }
+
+        private void ShowSelectBox(Vector2 a, Vector2 b)
+        {
+            if (_selectBox == null)
+            {
+                return;
+            }
+            _selectBox.RemoveFromClassList("uk-hidden");
+            _selectBox.style.left = Mathf.Min(a.x, b.x); // 数据驱动：拖动矩形
+            _selectBox.style.top = Mathf.Min(a.y, b.y);
+            _selectBox.style.width = Mathf.Abs(a.x - b.x);
+            _selectBox.style.height = Mathf.Abs(a.y - b.y);
         }
 
         public void SetOpen(bool open)
@@ -436,6 +491,7 @@ namespace GameLogic.UI.Kit
                 GuidanceHooks.Raise(GuidanceHooks.StrategicMapFirstOpen);
                 InputRouter.PushModal(this);
                 UiEscapeStack.Push(this, () => SetOpen(false));
+                _mapSelection.Clear(); // FG15-UX-01：每次打开重新框选（不跨次残留）
                 _selectedMarker = null;
                 _selectedRelic = null;
                 _feedback.text = string.Empty;
@@ -568,7 +624,8 @@ namespace GameLogic.UI.Kit
                 // 派遣准备面板只在家园可开：不在家园时按钮置灰，并在按钮文字上写明原因（B06“不能做要给原因”）。
                 HomeValleyController hv = GameRoot.HomeValley;
                 bool atHome = hv != null && hv.IsActive;
-                _composeExpedition.text = GameText.Get(atHome ? "exp.compose.button" : "exp.compose.button_home_only");
+                _composeExpedition.text = !atHome ? GameText.Get("exp.compose.button_home_only")
+                    : _mapSelection.Count > 0 ? GameText.Format("exp.compose.button_selected", _mapSelection.Count) : GameText.Get("exp.compose.button");
                 _composeExpedition.SetEnabled(atHome);
             }
             for (int i = 0; i < _filters.Length; i++)
@@ -730,6 +787,7 @@ namespace GameLogic.UI.Kit
             _pointerButton = evt.button;
             _pointerStart = evt.localPosition;
             _dragging = false;
+            _boxSelecting = evt.button == 0 && evt.shiftKey && !PickActive;
             _dragCenterX = _view.CenterX;
             _dragCenterY = _view.CenterY;
             _canvas.CapturePointer(evt.pointerId);
@@ -745,6 +803,11 @@ namespace GameLogic.UI.Kit
             }
             if (_pointerButton != 0)
             {
+                return;
+            }
+            if (_boxSelecting)
+            {
+                ShowSelectBox(_pointerStart, evt.localPosition);
                 return;
             }
             Vector2 d = (Vector2)evt.localPosition - _pointerStart;
@@ -769,6 +832,14 @@ namespace GameLogic.UI.Kit
             if (_canvas.HasPointerCapture(evt.pointerId))
             {
                 _canvas.ReleasePointer(evt.pointerId);
+            }
+            if (_boxSelecting)
+            {
+                _boxSelecting = false;
+                _selectBox?.AddToClassList("uk-hidden");
+                BoxSelectMachines(_pointerStart, evt.localPosition);
+                evt.StopPropagation();
+                return;
             }
             if (_dragging)
             {

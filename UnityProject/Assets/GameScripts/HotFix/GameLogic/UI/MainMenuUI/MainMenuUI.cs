@@ -89,6 +89,8 @@ namespace GameLogic
         /// <summary>FG0-UX-01：设置页上“全部按键设置…”按钮（运行时从“恢复默认”按钮复制一个，放在它后面，由同一个布局组排版）。
         /// 打开 UI Toolkit 的完整按键面板（全部动作、按上下文分页、搜索、冲突确认）。</summary>
         private Button _btnAllKeyBindings;
+        /// <summary>FG15-UX-01：设置页上“全部设置…”（运行时复制，同“全部按键…”的做法）。</summary>
+        private Button _btnAllSettings;
 
         private Transform _tfSlotList;
         private Text[] _slotInfoTexts;
@@ -126,6 +128,9 @@ namespace GameLogic
             _btnResetAllDefaults.onClick.AddListener(OnResetAllDefaultsClicked);
             _btnAllKeyBindings = CreateAllKeyBindingsButton(_btnResetAllDefaults);
             _btnAllKeyBindings?.onClick.AddListener(OnAllKeyBindingsClicked);
+            // FG15-UX-01（FGR-SYS-020；“主菜单与游戏内设置保持一致”）：“全部设置…”打开与游戏内暂停菜单“设置…”同一个 UI Toolkit 面板（同一份 SettingsCatalog）。
+            _btnAllSettings = CreateCopiedButton(_btnResetAllDefaults, "m_btn_AllSettings", "settings.open_all", 2);
+            _btnAllSettings?.onClick.AddListener(OnAllSettingsClicked);
 
             // ER2-INPUT-01 附带修复：ScrollRect 补了真正的 Viewport（RectMask2D）后，Content
             // (m_tf_SettingsColumns) 多套了一层 "Viewport" 节点，这里的路径常量必须跟着改，
@@ -271,6 +276,32 @@ namespace GameLogic
                 label.text = Localization.GameText.Get("ui.keybind.open_all");
             }
             return button;
+        }
+
+        /// <summary>FG15-UX-01：复制模板按钮放到它后面第 <paramref name="offset"/> 个位置（同一个布局组排版，文字走文本键）。</summary>
+        private static Button CreateCopiedButton(Button template, string name, string textKey, int offset)
+        {
+            if (template == null)
+            {
+                return null;
+            }
+            GameObject copy = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent, false);
+            copy.name = name;
+            copy.transform.SetSiblingIndex(template.transform.GetSiblingIndex() + offset);
+            Button button = copy.GetComponent<Button>();
+            button.onClick = new Button.ButtonClickedEvent();
+            Text label = copy.GetComponentInChildren<Text>(true);
+            if (label != null)
+            {
+                label.text = Localization.GameText.Get(textKey);
+            }
+            return button;
+        }
+
+        private void OnAllSettingsClicked()
+        {
+            CancelRebindState();
+            UI.Kit.SettingsPanelUIToolkit.Open();
         }
 
         /// <summary>ER8（DEBT-ER2BOOT01-04 音效部分）：主菜单与设置页此前按任何按钮都没有声音。UI Toolkit 面板的
@@ -851,9 +882,17 @@ namespace GameLogic
         }
 
         /// <summary>UIWindow 每帧回调；只有重绑监听/冲突确认中才做事，其余帧 O(1) 早退。</summary>
+        /// <summary>FG15-UX-01：设置页上次同步到的设置版本号——在共享设置面板（“全部设置…”）或别处改了设置，回到这页时控件跟着变（两处一致）。</summary>
+        private int _seenSettingsRevision = -1;
+
         protected override void OnUpdate()
         {
             FitViewsToCanvas(force: false);
+            if (_tfSettings != null && _tfSettings.gameObject.activeInHierarchy && _seenSettingsRevision != GameSettings.Revision && _rebindListening == null)
+            {
+                _seenSettingsRevision = GameSettings.Revision;
+                RefreshSettingsView();
+            }
             if (_rebindListening == null)
             {
                 return;

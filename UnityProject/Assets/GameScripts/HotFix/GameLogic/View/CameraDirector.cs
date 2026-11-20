@@ -522,6 +522,13 @@ namespace GameLogic.View
                 return;
             }
 
+            // FG15-UX-01（FGR-SYS-020 控制“接入时的鼠标灵敏度”）：光标离开屏幕中央死区后，镜头朝光标方向前探（看得到瞄准方向更远处）；
+            // 力度 = 设置倍率，0 = 关。光标在中央死区里（点自己身边的目标）时镜头不动。
+            if (InputRouter.TryGetPointer(InputScope.Direct, out Vector3 pointer) && Screen.width > 0 && Screen.height > 0)
+            {
+                anchor += UplinkLookAhead(new Vector2(pointer.x / Screen.width * 2f - 1f, pointer.y / Screen.height * 2f - 1f),
+                    _camera.orthographicSize, GameSettings.UplinkMouseSensitivity);
+            }
             Vector3 want = CameraPositionFor(anchor);
             // 暂停时不做平滑推进——dt 照常流逝会让镜头在"冻结的世界"里继续爬。
             // FG1-HUD-01：跟随力度 = 原平滑系数 × 设置“接入时跟随力度”；视野向“基准 × 接入时镜头距离”靠拢（设置改了立即生效，同一套平滑）。
@@ -529,6 +536,21 @@ namespace GameLogic.View
             _camera.transform.position = paused ? want : Vector3.Lerp(_camera.transform.position, want, k);
             ApplyViewSize(Mathf.Lerp(_camera.orthographicSize, DirectTargetSize, k));
             _directOrthographicSize = _camera.orthographicSize;
+        }
+
+        /// <summary>FG15-UX-01：接入镜头前探量（世界 xz 偏移）。<paramref name="pointerNorm"/> = 光标在屏幕上的位置（-1～1）；
+        /// 死区（半径 0.6）内为 0，到屏幕边缘线性增到 正交半高 × 0.25 × 灵敏度。纯函数，自检直接断言。</summary>
+        public static float2 UplinkLookAhead(Vector2 pointerNorm, float orthoSize, float sensitivity)
+        {
+            const float deadZone = 0.6f;
+            const float maxLead = 0.25f;
+            float len = Mathf.Min(1f, pointerNorm.magnitude);
+            if (sensitivity <= 0f || len <= deadZone)
+            {
+                return float2.zero;
+            }
+            Vector2 dir = pointerNorm.normalized * ((len - deadZone) / (1f - deadZone) * orthoSize * maxLead * sensitivity);
+            return new float2(dir.x, dir.y);
         }
 
         /// <summary>FG1-HUD-01：接入视野的目标正交半高 = 基准 × 设置“接入时镜头距离”（钳在 4 与战略缩放上限之间）。</summary>

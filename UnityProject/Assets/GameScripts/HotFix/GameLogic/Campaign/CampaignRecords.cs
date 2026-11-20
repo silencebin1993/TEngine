@@ -110,6 +110,9 @@ namespace GameLogic.Campaign
         public string CurrentWorkOrderId;
         public CargoEntry[] Cargo;
         public string DoctrineId;
+        /// <summary>DEBT-EMG2RULE01-04（FGR-EMG-088）：玩家在名册详情里关掉了“避开危险物质”教义（缺省 false = 开，旧档读回 = 开）。
+        /// 唯一写入口 <see cref="MachineRoster.TrySetHazardAvoid"/>；机器进任何战斗地点时由 CombatSite.AttachMachine 写进内核。只加字段、不升存档版本。</summary>
+        public bool NoHazardAvoid;
         public WorkPriorities WorkPriorities;
         public string[] ExperienceFlags;
         public int KillCount;

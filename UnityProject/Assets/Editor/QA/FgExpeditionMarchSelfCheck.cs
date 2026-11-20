@@ -102,7 +102,7 @@ namespace GameLogic.EditorTools
         public static int Run(StringBuilder report) => RunSteps(report,
             "\n[远征行军] 锚点（种子 / 可达）、出发事务与回滚、真实行军到达、观察 / 倍速 / 暂停一致、存读档接着走、覆盖内外命令与接入、途中静默夜 / 家园遇袭、地形绕行与截断、到达失败回滚、界面（FG8-EXP-02）",
             CheckData, CheckAnchors, CheckDeparture, CheckDepartureRollback, CheckMarchToArrival, CheckObservationAndSpeed, CheckSaveLoadContinue,
-            CheckCoverageCommands, CheckSilentNight, CheckHomeRaid, CheckObstacleAndTruncation, CheckArrivalFailure,
+            CheckCoverageCommands, CheckDetachedMember, CheckSilentNight, CheckHomeRaid, CheckObstacleAndTruncation, CheckArrivalFailure,
             CheckEncountersAndHazard, CheckSelfDefense, CheckUi, CheckLegacySave);
 
         /// <summary>EMGR-NAV-01（FG-GAP-136）新段：种子 42 第一次远征整队走到、不判截断；自动重试后仍被截断时给一次可定位提示。
@@ -842,6 +842,71 @@ namespace GameLogic.EditorTools
                            && FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchReturned) > 0;
             Expect(settled,
                 $"M8 走回家园 = 已返回（FGR-EXP-012）：离家报告按“返回”结算、远征不在外、机器回到家园（名册算在家）、速度恢复、返回提示（{settled}）");
+        }
+
+        // ── M8b “远征队 = 编组”（FG15-UX-01：DEBT-FG8EXP02-06 余项 / DEBT-FG8EXP02-09）──────────────────────
+
+        private static void CheckDetachedMember()
+        {
+            CampaignState s = NewWorld(5106);
+            int a = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(4f, -6f));
+            int b = Spawn(s, HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, new Vector2(6f, -6f));
+            WorldSimulation.StepMany(3);
+            ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(new[] { a, b }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            if (!dep.Success)
+            {
+                Fail($"M8b 前提：出发失败（{dep.Outcome}）");
+                return;
+            }
+            CampaignState now = CampaignSession.Current;
+            // 测试夹具：全程在覆盖内（单独下令与再点“前进”都要求在覆盖内；覆盖外改走自动重试，由 M11b / FgExpeditionNavRetrySelfCheck 覆盖）。
+            SignalCoverageService.OverrideForTests = (site, pos) => new SignalCoverageSample(true, true, 50f, pos, 80f, SignalCoverageSourceKind.RelayTower);
+            try
+            {
+            RegionSquadCommandSystem squad = WorldSimulation.Home.SquadCommands;
+            // 出发的队伍存进第一个空编组；按编组键（与 Alt+1 同一入口 RecallGroup）选中整队。
+            bool grouped = squad.GroupSize(1) == 2;
+            squad.ClearSelection();
+            squad.RecallGroup(1);
+            bool recalled = squad.Selection.Count == 2 && squad.Selection.Contains(a) && squad.Selection.Contains(b);
+            Expect(grouped && recalled, $"M8b 远征队 = 编组：出发的两台存进编组 1（{grouped}），按编组键选中整队（{recalled}）");
+
+            ExpeditionSiteAnchors.TryGet(now, FracturedCityLayout.RegionId, out Vector2 anchor);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            WorldSimulation.StepMany(30);
+            // 覆盖内把 a 单独调走（往回走一段）：记为“被单独调走”，b 照常走到目的地；全队停下时不判“路线被截断”，提示一次“等它们归队”。
+            squad.SelectSingle(a, false);
+            Vector2 pa = home.TryGetMachinePosition(a, out Vector2 p0) ? p0 : Vector2.zero;
+            squad.IssueMoveTo(pa + (pa - anchor).normalized * 8f, paused: false);
+            bool detached = ExpeditionMarchService.IsDetached(now, a) && !ExpeditionMarchService.IsDetached(now, b);
+            int halts = ExpeditionMarchService.HaltCueCount;
+            bool bThere = StepUntil(() => DistanceToGoal(home, b, anchor) < ExpeditionMarchService.GoalRadius(ExpeditionMarchService.PhaseOutbound, 2)
+                                         && ExpeditionMarchService.Current(CampaignSession.Current).DetachCued, 20000);
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            ExpeditionMarchState m = ExpeditionMarchService.Current(now);
+            bool noFalseTruncation = m.Halted == ExpeditionMarchService.HaltNone && ExpeditionMarchService.HaltCueCount == halts && m.Phase == ExpeditionMarchService.PhaseOutbound;
+            // 存读档往返（新存档字段 DetachedIds / DetachCued）：读档后 a 仍是“被单独调走”，再走几秒也不判截断、不重复提示归队。
+            SaveResult detSave = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            RestoreSave(Slot);
+            now = CampaignSession.Current;
+            int halts2 = ExpeditionMarchService.HaltCueCount;
+            WorldSimulation.StepMany(GameClock.StepHz * 3);
+            ExpeditionMarchState ml = ExpeditionMarchService.Current(now);
+            bool detachSaved = detSave.Success && ml != null && ExpeditionMarchService.IsDetached(now, a) && !ExpeditionMarchService.IsDetached(now, b) && ml.DetachCued
+                               && ml.Halted == ExpeditionMarchService.HaltNone && ExpeditionMarchService.HaltCueCount == halts2;
+            Expect(detachSaved, $"M8b 存读档：被单独调走的名单与“已提示归队”随存档恢复，读档后仍不判截断（{detachSaved}，停下状态 {ml?.Halted}）");
+            // 再点“前进”（整队命令）：a 重新听整队命令，全队到齐进入地点。
+            bool adv = ExpeditionMarchService.IssueCommand(now, ExpeditionMarchService.Command.Advance, out _) && !ExpeditionMarchService.IsDetached(now, a);
+            bool arrived = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Phase == ExpeditionMarchService.PhaseAtSite, 20000);
+            Expect(detached && bThere && noFalseTruncation && adv && arrived,
+                $"M8b 单独调走一台不误报截断（DEBT-FG8EXP02-09）：a 记为被单独调走（{detached}）；b 走到目的地、提示“等它们归队”（{bThere}）；没有“路线被截断”（{noFalseTruncation}，停下状态 {m.Halted}）；" +
+                $"再点“前进”全队重新听整队命令（{adv}）、到齐进入地点（{arrived}）");
+            }
+            finally
+            {
+                SignalCoverageService.OverrideForTests = null;
+                SignalCoverageService.Invalidate();
+            }
         }
 
         // ── M9 途中静默夜 ────────────────────────────────────────────────────────

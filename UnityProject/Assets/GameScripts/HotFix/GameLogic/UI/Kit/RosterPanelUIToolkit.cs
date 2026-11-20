@@ -57,7 +57,13 @@ namespace GameLogic.UI.Kit
         private Label _patrolLabel;
         private DropdownField _patrolAdd;
         private Button _patrolClear;
+        private Button _patrolMap; // FG15-UX-01：在地图上点巡逻点
         private Label _patrolNote;
+        private Toggle _hazard; // DEBT-EMG2RULE01-04：战斗教义“避开危险物质”
+        private Label _hazardNote;
+
+        /// <summary>自检：名册详情里的“避开危险物质”开关（与玩家点同一个控件）。</summary>
+        public Toggle HazardToggle => _hazard;
         private readonly List<string> _patrolIds = new List<string>();
         private bool _patrolSuppress;
         public bool PatrolRowVisible => _patrolRow != null && !_patrolRow.ClassListContains("uk-hidden");
@@ -311,13 +317,26 @@ namespace GameLogic.UI.Kit
             _patrolLabel = root.Q<Label>("RosterDetailPatrolLabel");
             _patrolAdd = root.Q<DropdownField>("RosterDetailPatrolAdd");
             _patrolClear = root.Q<Button>("RosterDetailPatrolClear");
+            _patrolMap = root.Q<Button>("RosterDetailPatrolMap");
             _patrolNote = root.Q<Label>("RosterDetailPatrolNote");
             if (_patrolAdd != null)
             {
                 _patrolAdd.RegisterValueChangedCallback(evt => OnPatrolPicked(evt.newValue));
                 _patrolClear.clicked += ClearPatrol;
+                if (_patrolMap != null) _patrolMap.clicked += PickPatrolOnMap;
             }
             _detailInfo = root.Q<Label>("RosterDetailInfo");
+            _hazard = root.Q<Toggle>("RosterDetailHazard");
+            _hazardNote = root.Q<Label>("RosterDetailHazardNote");
+            _hazard?.RegisterValueChangedCallback(evt =>
+            {
+                if (DetailLogicId == 0 || evt.newValue == evt.previousValue)
+                {
+                    return;
+                }
+                bool ok = MachineRoster.TrySetHazardAvoid(DetailLogicId, evt.newValue, out string message);
+                SayDetail(ok, message);
+            });
 
             _close.clicked += () => SetOpen(false);
             _sortDir.clicked += ToggleSortDirection;
@@ -713,7 +732,7 @@ namespace GameLogic.UI.Kit
                 MachineRole effective = MachineRoster.EffectiveRole(state, m);
                 VisualElement box = row.Q<VisualElement>("RoRow");
                 box.EnableInClassList("ro-row-dead", !m.IsAlive);
-                box.EnableInClassList("ro-row-away", st == MachineRoster.Status.Away);
+                box.EnableInClassList("ro-row-away", st == MachineRoster.Status.Away || st == MachineRoster.Status.InTransit);
                 Toggle select = row.Q<Toggle>("RoSelect");
                 select.SetEnabled(m.IsAlive);
                 select.SetValueWithoutNotify(_selected.Contains(m.LogicId));
@@ -729,7 +748,7 @@ namespace GameLogic.UI.Kit
                 row.Q<Label>("RoInfo").text = GameText.Format("roster.row.injury", MachineRoster.InjuryPercent(m)) + sep
                     + GameText.Format("roster.row.exp", m.ExperienceFlags?.Length ?? 0, m.JobsCompleted, m.KillCount) + sep
                     + GameText.Format("roster.row.where", where)
-                    + (st == MachineRoster.Status.Away ? sep + GameText.Get("roster.row.role_locked") : string.Empty);
+                    + (st == MachineRoster.Status.Away || st == MachineRoster.Status.InTransit ? sep + GameText.Get("roster.row.role_locked") : string.Empty);
                 FillRowRole(row.Q<DropdownField>("RoRole"), _rowRoleChoices[i], m, effective);
                 Button detail = row.Q<Button>("RoDetail");
                 detail.text = GameText.Get("roster.row.detail");
@@ -840,6 +859,13 @@ namespace GameLogic.UI.Kit
                 {
                     FillPatrol(state, m);
                 }
+            }
+            if (_hazard != null)
+            {
+                _hazard.text = GameText.Get("roster.hazard.label");
+                _hazard.SetValueWithoutNotify(!m.NoHazardAvoid);
+                _hazard.SetEnabled(m.IsAlive);
+                _hazardNote.text = GameText.Get("roster.hazard.note");
             }
             _detailInfo.text = DetailText(state, m);
         }
@@ -1080,6 +1106,11 @@ namespace GameLogic.UI.Kit
                 _patrolLabel.text = GameText.Get("roster.detail.patrol_label");
                 _patrolClear.text = GameText.Get("roster.detail.patrol_clear");
                 _patrolClear.SetEnabled(m.PatrolPoints != null && m.PatrolPoints.Length > 0);
+                if (_patrolMap != null)
+                {
+                    _patrolMap.text = GameText.Get("roster.patrol.pick_btn");
+                    _patrolMap.SetEnabled(GameRoot.HomeValley != null && GameRoot.HomeValley.IsActive);
+                }
                 _patrolNote.text = MachineRoster.PatrolText(state, m);
                 var labels = new List<string> { GameText.Get("roster.detail.patrol_add") };
                 _patrolIds.Clear();
@@ -1124,6 +1155,25 @@ namespace GameLogic.UI.Kit
             if (_patrolAdd != null && index > 0 && index < _patrolAdd.choices.Count)
             {
                 _patrolAdd.index = index;
+            }
+        }
+
+        public Button PatrolMapButton => _patrolMap;
+
+        /// <summary>FG15-UX-01（DEBT-FG6DEF06-04）：“在地图上点巡逻点”——收起名册，镜头下的地面左键点一下加一个巡逻点（可连点），右键 / Esc 结束；路线预览画在地上。</summary>
+        public void PickPatrolOnMap()
+        {
+            HomeValleyController home = GameRoot.HomeValley;
+            if (DetailLogicId == 0 || home == null || !home.IsActive)
+            {
+                SayDetail(false, GameText.Get("roster.err.patrol_not_garrison"));
+                return;
+            }
+            bool ok = home.BeginPatrolPick(DetailLogicId, out string message);
+            SayDetail(ok, message);
+            if (ok && home.PatrolPickMachine != 0)
+            {
+                SetOpen(false); // 名册挡着地面：收起来点地图
             }
         }
 

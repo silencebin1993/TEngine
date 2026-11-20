@@ -110,6 +110,21 @@ namespace GameLogic.UI.Kit
 
         public static void OpenCenter() => Instance?.SetCenterOpen(true);
 
+        /// <summary>FG15-UX-01：设置 → 游戏性“通知自动暂停规则”：打开通知中心并直接进入按类型自动暂停的设置区。</summary>
+        public static void OpenAutoPauseSettings()
+        {
+            if (Instance == null)
+            {
+                return;
+            }
+            Instance.SetCenterOpen(true);
+            Instance._settingsOpen = true;
+            Instance.RenderCenter();
+        }
+
+        /// <summary>自检读点：自动暂停设置区正显示。</summary>
+        public bool AutoPauseSettingsVisible => CenterOpen && _settings != null && !_settings.ClassListContains("uk-hidden");
+
         public static void CloseCenter()
         {
             if (CenterOpen)
@@ -125,6 +140,7 @@ namespace GameLogic.UI.Kit
 
         public void BindView(VisualElement root)
         {
+            Instance = this;
             _column = root.Q<VisualElement>("ToastColumn");
             _toastList = root.Q<VisualElement>("ToastList");
             _entryButton = root.Q<Button>("NotifyCenterButton");

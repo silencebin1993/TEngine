@@ -461,7 +461,43 @@ namespace GameLogic.Core
         /// <summary>不看所有权的按住读取（固定悬停提示这类纯界面动作用）。文本框有焦点时一律 false。</summary>
         public static bool IsActionHeld(GameActionId action)
         {
-            return !KeyboardSuppressed && RawKeyHeld(Settings.GameSettings.KeyBindings.GetChord(action).Key);
+            if (KeyboardSuppressed)
+            {
+                return false;
+            }
+            KeyCode key = Settings.GameSettings.KeyBindings.GetChord(action).Key;
+            if (!Settings.GameSettings.HoldActionsToggle || !IsToggleableHold(action))
+            {
+                return RawKeyHeld(key);
+            }
+            // FG15-UX-01（FGR-UX-060“所有按住操作可以改为切换”）：切换模式下按一下 = 开、再按一下 = 关；同一帧多次读取只翻一次。
+            if (_holdLatchFrame.TryGetValue(action, out int f) && f == Time.frameCount)
+            {
+                return _holdLatch.Contains(action);
+            }
+            _holdLatchFrame[action] = Time.frameCount;
+            if (RawKeyDown(key) && !_holdLatch.Remove(action))
+            {
+                _holdLatch.Add(action);
+            }
+            return _holdLatch.Contains(action);
+        }
+
+        private static readonly HashSet<GameActionId> _holdLatch = new HashSet<GameActionId>();
+        private static readonly Dictionary<GameActionId, int> _holdLatchFrame = new Dictionary<GameActionId, int>();
+
+        /// <summary>能改成切换的按住类动作：表里 kind=hold、且不是镜头 / 移动（平移按住才走，改成切换会停不下来）。</summary>
+        public static bool IsToggleableHold(GameActionId action) =>
+            InputActionCatalog.TryGet(action, out InputActionDef def) && def.Kind == InputActionKind.Hold && def.CategoryKey != "input.category.camera";
+
+        /// <summary>自检 / 切换设置时清掉切换锁存（<paramref name="framesOnly"/> = 只当作进入下一帧，编辑器里 frameCount 不走）。</summary>
+        public static void ClearHoldLatches(bool framesOnly = false)
+        {
+            if (!framesOnly)
+            {
+                _holdLatch.Clear();
+            }
+            _holdLatchFrame.Clear();
         }
 
         /// <summary>FG0-UX-01：缩放量（正 = 拉近）。缩放动作绑在滚轮上时按滚动量给；绑在键盘键上时每按一次给 ±1 步。
@@ -472,7 +508,8 @@ namespace GameLogic.Core
             {
                 return 0f;
             }
-            return ZoomContribution(GameActionId.ZoomIn, 1f) + ZoomContribution(GameActionId.ZoomOut, -1f);
+            // FG15-UX-01（FGR-SYS-020 控制：缩放速度、反转滚轮）：倍率乘在合成后的缩放量上；反转只翻滚轮（键盘缩放键方向不变）。
+            return (ZoomContribution(GameActionId.ZoomIn, 1f) + ZoomContribution(GameActionId.ZoomOut, -1f)) * Settings.GameSettings.ZoomSpeedMultiplier;
         }
 
         private static float ZoomContribution(GameActionId action, float sign)
@@ -488,7 +525,7 @@ namespace GameLogic.Core
                 {
                     return 0f;
                 }
-                float scroll = Reader.MouseScrollDelta;
+                float scroll = Reader.MouseScrollDelta * (Settings.GameSettings.InvertScroll ? -1f : 1f);
                 float along = chord.Key == VirtualKeys.WheelUp ? Mathf.Max(0f, scroll) : Mathf.Max(0f, -scroll);
                 return sign * along;
             }

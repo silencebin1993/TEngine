@@ -86,7 +86,7 @@ namespace GameLogic.View
                 return false;
             }
             float floor = GameSettings.NightBrightnessFloor;
-            float b = BrightnessFor(daylight, floor) * SilentFactor(silent);
+            float b = BrightnessFor(daylight, floor) * SilentFactor(silent) * GameSettings.Brightness; // FG15-UX-01：设置“亮度”乘在昼夜调光上
             Color tint = Color.Lerp(NightTint, Color.white, Mathf.Clamp01(daylight));
             float eps = Math.Max(0.0005f, Tuning("env.light.apply_epsilon", 0.003f));
             bool settingsChanged = _lastSettingsRevision != GameSettings.Revision;
