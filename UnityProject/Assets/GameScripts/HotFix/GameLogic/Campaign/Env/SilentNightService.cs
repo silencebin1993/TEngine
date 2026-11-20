@@ -341,6 +341,20 @@ namespace GameLogic.Campaign.Env
             {
                 ScheduleFirst(state, d, ticks);
             }
+            if (!SandboxService.SilentNightOn(state))
+            {
+                // FG14-SBX-02（FGR-SBX-011“静默夜：关”）：进行中的立即结束；之后按原节拍往后排（不预警、不开始，也不记“被跳过”），改回“开”时从下一次照常来。
+                if (d.Active)
+                {
+                    End(state, d, false); // 提前关掉不算熬过一夜：不刷风暴残骸（否则开着等它开始再关就能白拿奖励）。
+                }
+                for (int guard = 0; guard < 64 && ticks >= d.WarnTick; guard++)
+                {
+                    Plan(d, d.NextDay + IntervalDays(state));
+                    Revision++;
+                }
+                return;
+            }
             if (d.Active)
             {
                 if (ticks >= d.EndTick)
@@ -467,14 +481,19 @@ namespace GameLogic.Campaign.Env
             GameEvent.Send(ChangedEvent, true);
         }
 
-        private static void End(CampaignState state, SilentNightState d)
+        private static void End(CampaignState state, SilentNightState d, bool debris = true)
         {
             d.Active = false;
             EndCount++;
             d.HeldOrderIds = Array.Empty<string>(); // 暂缓的施工单下一次工单推进时回到待分配池，自动开工。
             HomeValleyWorkOrders.MarkAssignmentDirty();
             HomeValleyConstruction.Touch();
-            List<(string Item, int Amount)> found = SpawnDebris(state, d, out Vector2? firstAt);
+            Vector2? firstAt = null;
+            List<(string Item, int Amount)> found = debris ? SpawnDebris(state, d, out firstAt) : new List<(string Item, int Amount)>();
+            if (!debris)
+            {
+                d.LastDebrisIds = Array.Empty<string>();
+            }
             d.LastSummary = BuildSummary(state, d, found);
             NotificationCenter.Post("silent_night_end", d.LastSummary,
                 firstAt.HasValue ? new Vector3(firstAt.Value.x, 0f, firstAt.Value.y) : CoreAt(state));

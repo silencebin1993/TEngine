@@ -104,6 +104,15 @@ namespace GameLogic.EditorTools
                        && allKeysLabel != null && allKeysLabel.text == Localization.GameText.Get("ui.keybind.open_all")
                        && allKeys.transform.parent == ((Button)typeof(MainMenuUI).GetField("_btnResetAllDefaults", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(window)).transform.parent,
                     $"设置页有“全部按键…”按钮（文本键、与“恢复默认”同一布局组、已接点击）：{(allKeysLabel != null ? allKeysLabel.text : "无")}");
+                // FG14-SBX-02（FGR-SBX-010）：根菜单有“沙盒模式”（复制“新建”、排在它后面、文本键、已接点击）。
+                var sandbox = (Button)typeof(MainMenuUI).GetField("_btnSandbox", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window);
+                var btnNew = (Button)typeof(MainMenuUI).GetField("_btnNew", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(window);
+                Text sandboxLabel = sandbox != null ? sandbox.GetComponentInChildren<Text>(true) : null;
+                Expect(sandbox != null && btnNew != null && sandbox.transform.parent == btnNew.transform.parent
+                       && sandbox.transform.GetSiblingIndex() == btnNew.transform.GetSiblingIndex() + 1 && CountRuntimeListeners(sandbox) > 0
+                       && sandboxLabel != null && sandboxLabel.text == Localization.GameText.Get("sandbox.menu.button"),
+                    $"根菜单有“沙盒模式”按钮（在“新建”后面、文本键、已接点击）：{(sandboxLabel != null ? sandboxLabel.text : "无")}");
+                CheckSandboxModeNotSticky(window);
                 Expect(errors.Count == 0, "初始化过程零报错" + (errors.Count == 0 ? string.Empty : "——" + string.Join("；", errors)));
                 CheckSlotText();
             }
@@ -117,6 +126,74 @@ namespace GameLogic.EditorTools
                 UnityEngine.Object.DestroyImmediate(instance);
             }
             return _fail;
+        }
+
+        /// <summary>
+        /// FG14-SBX-02 修复（审查 P1）：沙盒标志不得残留——点过“沙盒模式”再取消 / 返回后，从“读取”页空槽 / 坏档新建打开的必须是剧情档设置面板。
+        /// 走真 UXML 绑定的新游戏面板，经主菜单私有入口（覆盖确认、读取页空槽）驱动，读面板 IsSandboxMode。
+        /// </summary>
+        private static void CheckSandboxModeNotSticky(MainMenuUI window)
+        {
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            Type viewType = typeof(MainMenuUI).GetNestedType("MenuView", BindingFlags.NonPublic);
+            MethodInfo confirm = typeof(MainMenuUI).GetMethod("ConfirmNewInSlot", Flags);
+            MethodInfo yes = typeof(MainMenuUI).GetMethod("OnConfirmYesClicked", Flags);
+            MethodInfo no = typeof(MainMenuUI).GetMethod("OnConfirmNoClicked", Flags);
+            MethodInfo start = typeof(MainMenuUI).GetMethod("StartNewCampaign", Flags);
+            MethodInfo slotAction = typeof(MainMenuUI).GetMethod("OnSlotActionClicked", Flags);
+            var uxml = AssetDatabase.LoadAssetAtPath<UnityEngine.UIElements.VisualTreeAsset>("Assets/GameRes/Raw/UI/UiKit/NewGamePanel.uxml");
+            if (viewType == null || confirm == null || yes == null || no == null || start == null || slotAction == null || uxml == null)
+            {
+                Fail("沙盒标志负向断言：主菜单入口方法或新游戏面板 UXML 找不到");
+                return;
+            }
+            object root = Enum.Parse(viewType, "Root");
+            object slotList = Enum.Parse(viewType, "SlotList");
+            var meta = new Campaign.CampaignSlotMetadata { SlotIndex = 0 };
+            var go = new GameObject("__MainMenuSandboxFlag") { hideFlags = HideFlags.HideAndDontSave };
+            try
+            {
+                UI.Kit.NewGamePanelUIToolkit panel = go.AddComponent<UI.Kit.NewGamePanelUIToolkit>();
+                panel.BindView(uxml.CloneTree());
+                // 沙盒 → 三槽全满的覆盖确认 → 取消 → 读取页坏档新建 → 确认：剧情档。
+                confirm.Invoke(window, new object[] { meta, root, true });
+                no.Invoke(window, null);
+                confirm.Invoke(window, new object[] { meta, slotList, false });
+                yes.Invoke(window, null);
+                bool afterCancel = UI.Kit.NewGamePanelUIToolkit.IsOpen && !panel.IsSandboxMode;
+                UI.Kit.NewGamePanelUIToolkit.Close();
+                // 沙盒覆盖确认 → 确认：沙盒档（正向对照）。
+                confirm.Invoke(window, new object[] { meta, root, true });
+                yes.Invoke(window, null);
+                bool sandboxConfirm = UI.Kit.NewGamePanelUIToolkit.IsOpen && panel.IsSandboxMode;
+                UI.Kit.NewGamePanelUIToolkit.Close();
+                // 沙盒面板打开过 → 返回 → 读取页空槽新建：剧情档（只读槽位元数据，空槽不写文件）。
+                start.Invoke(window, new object[] { 0, true });
+                UI.Kit.NewGamePanelUIToolkit.Close();
+                int empty = -1;
+                for (int i = 0; i < Campaign.CampaignSaveService.SlotCount && empty < 0; i++)
+                {
+                    if (Campaign.CampaignSaveService.GetSlotMetadata(i).State == Campaign.CampaignSlotState.Empty)
+                    {
+                        empty = i;
+                    }
+                }
+                bool emptySlot = true;
+                if (empty >= 0)
+                {
+                    slotAction.Invoke(window, new object[] { empty });
+                    emptySlot = UI.Kit.NewGamePanelUIToolkit.IsOpen && !panel.IsSandboxMode;
+                    UI.Kit.NewGamePanelUIToolkit.Close();
+                }
+                Expect(afterCancel && sandboxConfirm && emptySlot,
+                    $"沙盒标志不残留：沙盒确认取消后坏档新建 = 剧情档 {afterCancel}，沙盒确认 = 沙盒档 {sandboxConfirm}，"
+                    + (empty >= 0 ? $"沙盒返回后读取页空槽 {empty + 1} 新建 = 剧情档 {emptySlot}" : "（无空槽，空槽分支未走）"));
+            }
+            finally
+            {
+                UI.Kit.NewGamePanelUIToolkit.Close();
+                UnityEngine.Object.DestroyImmediate(go);
+            }
         }
 
         /// <summary>UnityEvent 的运行时监听数（AddListener 加的，不含预制体里序列化的）。</summary>

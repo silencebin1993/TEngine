@@ -161,10 +161,17 @@ namespace GameLogic.Campaign.Defense
         public static bool StoryOnly(CampaignState s) => (Row(s)?.StoryOnly ?? 0) == 1;
 
         /// <summary>突袭敌人的耐久倍率（展开成战斗单位时乘到生命上）。</summary>
-        public static float EnemyHealthMul(CampaignState s) => Math.Max(0.05f, Row(s)?.EnemyHp ?? 1f);
+        /// FG14-SBX-02：沙盒“敌方强度”再乘 <see cref="SandboxService.EnemyMul"/>（剧情档 = 1）。
+        public static float EnemyHealthMul(CampaignState s) => Math.Max(0.05f, Row(s)?.EnemyHp ?? 1f) * SandboxService.EnemyMul(s);
 
         /// <summary>突袭敌人的伤害倍率（展开时乘到武器伤害上）。</summary>
-        public static float EnemyDamageMul(CampaignState s) => Math.Max(0.05f, Row(s)?.EnemyDamage ?? 1f);
+        public static float EnemyDamageMul(CampaignState s) => Math.Max(0.05f, Row(s)?.EnemyDamage ?? 1f) * SandboxService.EnemyMul(s);
+
+        /// <summary>FG14-SBX-02：突袭导演实际用的频率 = 难度频率 × 沙盒“突袭”档倍率（剧情档 = 难度频率）。</summary>
+        public static float RaidFrequency(CampaignState s) => Frequency(s) * SandboxService.RaidMul(s);
+
+        /// <summary>FG14-SBX-02：突袭导演实际用的规模 = 难度规模 × 沙盒“突袭”档倍率（剧情档 = 难度规模）。</summary>
+        public static float RaidScale(CampaignState s) => Scale(s) * SandboxService.RaidMul(s);
 
         /// <summary>静默夜间隔（游戏日；静默夜系统 FG7-ENV-02 读取）。</summary>
         public static int SilentNightDays(CampaignState s) => Math.Max(1, Row(s)?.SilentNightDays ?? 5);
@@ -258,8 +265,8 @@ namespace GameLogic.Campaign.Defense
                 return DifficultyChangeResult.Unchanged;
             }
             RaidDifficultyState d = s.Raids.Difficulty;
-            float oldFrequency = Frequency(s);
-            float oldScale = Scale(s);
+            float oldFrequency = RaidFrequency(s);
+            float oldScale = RaidScale(s);
             s.DifficultyId = to.Id;
             if (IsCustomId(to.Id))
             {

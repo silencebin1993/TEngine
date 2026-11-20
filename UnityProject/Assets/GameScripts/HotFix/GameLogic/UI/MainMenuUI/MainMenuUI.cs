@@ -39,6 +39,10 @@ namespace GameLogic
 
         private Transform _tfRoot;
         private Button _btnNew;
+        /// <summary>FG14-SBX-02（FGR-SBX-010）：主菜单“沙盒模式”（复制“新建”按钮，排在它后面）。</summary>
+        private Button _btnSandbox;
+        /// <summary>待确认的覆盖新建是不是沙盒：只由 <see cref="ConfirmNewInSlot"/> 写入、确认 / 取消都清掉（“读取”页的空槽 / 坏档新建一律是剧情档）。</summary>
+        private bool _pendingSandbox;
         private Button _btnContinue;
         private Text _textContinueReason;
         private Button _btnLoad;
@@ -108,6 +112,8 @@ namespace GameLogic
             _btnSettings = FindChildComponent<Button>("m_tf_Root/m_btn_Settings");
             _btnQuit = FindChildComponent<Button>("m_tf_Root/m_btn_Quit");
             _btnNew.onClick.AddListener(OnNewClicked);
+            _btnSandbox = CreateSandboxButton(_btnNew);
+            _btnSandbox?.onClick.AddListener(OnSandboxClicked);
             _btnContinue.onClick.AddListener(OnContinueClicked);
             _btnLoad.onClick.AddListener(OnLoadClicked);
             _btnSettings.onClick.AddListener(OnSettingsClicked);
@@ -225,6 +231,26 @@ namespace GameLogic
             SetView(MenuView.Root);
         }
 
+        /// <summary>FG14-SBX-02：在“新建”后面复制出“沙盒模式”（同属根菜单的布局组，排版由布局组负责；文字走文本键）。MainMenuSelfCheck 断言它存在、可点。</summary>
+        private static Button CreateSandboxButton(Button template)
+        {
+            if (template == null)
+            {
+                return null;
+            }
+            GameObject copy = UnityEngine.Object.Instantiate(template.gameObject, template.transform.parent, false);
+            copy.name = "m_btn_Sandbox";
+            copy.transform.SetSiblingIndex(template.transform.GetSiblingIndex() + 1);
+            Button button = copy.GetComponent<Button>();
+            button.onClick = new Button.ButtonClickedEvent();
+            Text label = copy.GetComponentInChildren<Text>(true);
+            if (label != null)
+            {
+                label.text = Localization.GameText.Get("sandbox.menu.button");
+            }
+            return button;
+        }
+
         /// <summary>FG0-UX-01：在“恢复默认”按钮后面复制出“全部按键设置…”。两者同属设置页的布局组，排版由布局组负责，
         /// 不写坐标；文字走文本键。预制体没有这个节点（GameRes 子仓的预制体只能在编辑器里安全改，
         /// 这里复制既有按钮避免手改 YAML），MainMenuSelfCheck 断言它存在、可点、能打开面板。</summary>
@@ -306,7 +332,7 @@ namespace GameLogic
                 EnsureSurface(canvasRoot, "MenuBackdrop", page, Color.clear, 0, true);
             }
 
-            ConfigureView(_tfRoot as RectTransform, new Vector2(560f, 560f), surface, edge, 34);
+            ConfigureView(_tfRoot as RectTransform, new Vector2(560f, 620f), surface, edge, 34); // FG14-SBX-02：多一个“沙盒模式”按钮（46 + 间距 12）
             ConfigureView(_tfSlotList as RectTransform, new Vector2(1120f, 720f), surface, edge, 34);
             ConfigureView(_tfConfirmOverwrite as RectTransform, new Vector2(620f, 460f), raised, new Color(warning.r, warning.g, warning.b, 0.76f), 30);
             ConfigureView(_tfSettings as RectTransform, new Vector2(1320f, 790f), surface, edge, 30);
@@ -388,6 +414,10 @@ namespace GameLogic
         {
             StyleButton(_btnNew, accent, new Color(0.72f, 1f, 0.90f, 1f), new Color(0.02f, 0.10f, 0.10f, 1f), 58, true);
             StyleButton(_btnContinue, new Color(0.08f, 0.25f, 0.28f, 1f), accent, text, 46, false);
+            if (_btnSandbox != null)
+            {
+                StyleButton(_btnSandbox, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
+            }
             StyleButton(_btnLoad, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
             StyleButton(_btnSettings, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
             StyleButton(_btnQuit, new Color(0.15f, 0.075f, 0.09f, 1f), danger, new Color(1f, 0.80f, 0.80f, 1f), 40, false);
@@ -904,10 +934,21 @@ namespace GameLogic
 
         private void OnNewClicked()
         {
+            BeginNewInFreeSlot(false);
+        }
+
+        /// <summary>FG14-SBX-02（FGR-SBX-010“主菜单新增沙盒模式：从一张新地图开始，没有剧情”）：与“新建”同一套选槽 / 覆盖确认，设置面板多出沙盒设置。</summary>
+        private void OnSandboxClicked()
+        {
+            BeginNewInFreeSlot(true);
+        }
+
+        private void BeginNewInFreeSlot(bool sandbox)
+        {
             int emptySlot = FindFirstEmptySlot();
             if (emptySlot >= 0)
             {
-                StartNewCampaign(emptySlot);
+                StartNewCampaign(emptySlot, sandbox);
                 return;
             }
 
@@ -917,14 +958,15 @@ namespace GameLogic
             // 都没有时才覆盖槽位 1 的可读战役（多槽选择 UI 属于 FG15-SYS-01，DEBT-FG0SAVE01-02）。
             CampaignSlotMetadata[] metas = CampaignSaveService.GetAllSlotMetadata();
             CampaignSlotMetadata target = metas.FirstOrDefault(CampaignSlotText.StartsNewInSlot) ?? metas[0];
-            ConfirmNewInSlot(target, MenuView.Root);
+            ConfirmNewInSlot(target, MenuView.Root, sandbox);
         }
 
         /// <summary>在已有文件的槽位新建战役前先确认（B04）：可读存档显示摘要；Demo / 读不出的存档写明原文件会另存为
         /// *.keep-* 保留（永不自动删除存档）。</summary>
-        private void ConfirmNewInSlot(CampaignSlotMetadata meta, MenuView returnView)
+        private void ConfirmNewInSlot(CampaignSlotMetadata meta, MenuView returnView, bool sandbox)
         {
             _pendingOverwriteSlot = meta.SlotIndex;
+            _pendingSandbox = sandbox;
             _confirmReturnView = returnView;
             _textConfirmInfo.text = CampaignSlotText.OverwriteConfirm(meta);
             SetView(MenuView.ConfirmOverwrite);
@@ -975,7 +1017,7 @@ namespace GameLogic
             switch (meta.State)
             {
                 case CampaignSlotState.Empty:
-                    StartNewCampaign(slotIndex);
+                    StartNewCampaign(slotIndex, false);
                     break;
                 case CampaignSlotState.Ready:
                     LoadIntoSession(slotIndex);
@@ -993,12 +1035,12 @@ namespace GameLogic
                     else
                     {
                         // 读不了、备份也不可用：新建于此槽（先确认，原文件另存保留）。
-                        ConfirmNewInSlot(meta, MenuView.SlotList);
+                        ConfirmNewInSlot(meta, MenuView.SlotList, false);
                     }
                     break;
                 case CampaignSlotState.DemoSave:
                     // Demo 存档不迁移（FGR-ARC-008）：不能读取，但可以在此槽新建（先确认，Demo 文件另存保留）。
-                    ConfirmNewInSlot(meta, MenuView.SlotList);
+                    ConfirmNewInSlot(meta, MenuView.SlotList, false);
                     break;
             }
         }
@@ -1006,10 +1048,12 @@ namespace GameLogic
         private void OnConfirmYesClicked()
         {
             int slot = _pendingOverwriteSlot;
+            bool sandbox = _pendingSandbox;
             _pendingOverwriteSlot = -1;
+            _pendingSandbox = false;
             if (slot >= 0)
             {
-                StartNewCampaign(slot);
+                StartNewCampaign(slot, sandbox);
             }
             else
             {
@@ -1021,6 +1065,7 @@ namespace GameLogic
         {
             // 取消不改文件：这里全程没有调用过 CampaignSaveService.Save。
             _pendingOverwriteSlot = -1;
+            _pendingSandbox = false;
             SetView(_confirmReturnView);
         }
 
@@ -1043,9 +1088,16 @@ namespace GameLogic
         /// FG3-GEN-01（FGR-GEN-001、070、071）：选好存档槽后先打开新游戏设置（种子、随机种子、世界设置、分享短码），
         /// 玩家点“开始”才创建战役；“返回” / Esc 回到主菜单，不写任何文件。
         /// </summary>
-        private void StartNewCampaign(int slotIndex)
+        private void StartNewCampaign(int slotIndex, bool sandbox)
         {
             SetView(MenuView.NewGameSetup);
+            if (sandbox)
+            {
+                UI.Kit.NewGamePanelUIToolkit.OpenSandbox(
+                    (seed, settings, difficulty, sandbox, noGuarantee) => CreateNewCampaign(slotIndex, seed, settings, difficulty, sandbox, noGuarantee),
+                    () => SetView(MenuView.Root));
+                return;
+            }
             UI.Kit.NewGamePanelUIToolkit.Open(
                 (seed, settings, difficulty) => CreateNewCampaign(slotIndex, seed, settings, difficulty),
                 () => SetView(MenuView.Root));
@@ -1054,7 +1106,12 @@ namespace GameLogic
         /// <summary>
         /// 新建战役的存档状态（主菜单“开始”的建档部分；不保存、不进场景）。自检直接调用它覆盖“选严酷 / 自定义开局 → 写进存档”这条真实路径（FG6-DEF-09 复审 P2）。
         /// </summary>
-        public static CampaignState BuildNewCampaignState(string campaignId, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty)
+        public static CampaignState BuildNewCampaignState(string campaignId, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty) =>
+            BuildNewCampaignState(campaignId, seed, settings, difficulty, null, false);
+
+        /// <summary>FG14-SBX-02：<paramref name="sandbox"/> 不为 null = 沙盒新档（沙盒设置、起始区关闭保证在难度 / 世界 / 研究开局之后写入）。</summary>
+        public static CampaignState BuildNewCampaignState(string campaignId, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty,
+            SandboxSetup sandbox, bool noStartGuarantee)
         {
             // ER1-SAVE-02：种子由新游戏设置给出（默认一颗 CSPRNG 一次性种子，DEBT-ER1SAVE01-05）；
             // 之后全部确定性消费统一走 CampaignRandomService.CreateRng(state)。
@@ -1066,13 +1123,18 @@ namespace GameLogic
             Campaign.WorldGen.WorldGenService.ApplyNewGameWorld(state, seed, settings);
             // FG5-E2E-01（DEBT-FG5RND01-08）：新档开局带来的技术数据（过渡初值，够研究研发树开放前开局就能建造的内容；ADR-QA-022）。
             Campaign.Economy.ResearchService.ApplyNewGameStart(state);
+            if (sandbox != null)
+            {
+                SandboxService.ApplyNewGame(state, sandbox, noStartGuarantee);
+            }
             return state;
         }
 
-        private void CreateNewCampaign(int slotIndex, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty)
+        private void CreateNewCampaign(int slotIndex, int seed, Campaign.WorldGen.WorldSettings settings, Campaign.Defense.DifficultyChoice difficulty,
+            SandboxSetup sandbox = null, bool noStartGuarantee = false)
         {
             string campaignId = Guid.NewGuid().ToString("N");
-            CampaignState state = BuildNewCampaignState(campaignId, seed, settings, difficulty);
+            CampaignState state = BuildNewCampaignState(campaignId, seed, settings, difficulty, sandbox, noStartGuarantee);
 
             SaveResult result = CampaignSaveService.Save(slotIndex, state, SaveReason.NewCampaign);
             if (!result.Success)

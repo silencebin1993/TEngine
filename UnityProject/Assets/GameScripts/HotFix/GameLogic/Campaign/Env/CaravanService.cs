@@ -89,7 +89,7 @@ namespace GameLogic.Campaign.Env
         public static int WaresMin => Mathf.Max(1, Mathf.RoundToInt(T("event.caravan.wares_min", 3f)));
         public static int WaresMax => Mathf.Max(WaresMin, Mathf.RoundToInt(T("event.caravan.wares_max", 5f)));
 
-        public static bool Act1Ended(CampaignState s) => s?.Progress != null && (s.Progress.Act >= 2 || Act1PacingService.IsReached(s, Act1EndPace));
+        public static bool Act1Ended(CampaignState s) => s?.Progress != null && (SandboxService.EffectiveAct(s) >= 2 || Act1PacingService.IsReached(s, Act1EndPace));
 
         // ── 表 ─────────────────────────────────────────────────────────────────
 
@@ -287,7 +287,7 @@ namespace GameLogic.Campaign.Env
         /// <summary>这件商品现在能不能上架 / 买（与库存无关）：幕够了、内容存在、固件过准入、遗产还没得到、部件第一次买或能进组件库存。</summary>
         public static bool Available(CampaignState s, CaravanWare w)
         {
-            if (w == null || s == null || Math.Max(1, s.Progress?.Act ?? 1) < w.ActMin)
+            if (w == null || s == null || SandboxService.EffectiveAct(s) < w.ActMin)
             {
                 return false;
             }

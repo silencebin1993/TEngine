@@ -31,6 +31,9 @@ namespace GameLogic.Campaign
         public ChunkDiffRecord[] ChunkDiffs = Array.Empty<ChunkDiffRecord>();
         /// <summary>FG3-GEN-01：家园区的侦察巢已经登记成据点（新战役一次，幂等；之后据点状态在 RaidState 里）。</summary>
         public bool HomeOutpostsSeeded;
+        /// <summary>FG14-SBX-02（FG12 FGR-SBX-011“起始区：关闭保证（仅沙盒可关）”）：true = 不做起始区第 2～4 级资源保证（第 1 级平地与开局建筑的平地照常保留）。
+        /// 只有沙盒开局能写 true；随世界固定（参与地形生成，开局后不能改）。旧存档没有 = false。</summary>
+        public bool NoStartGuarantee;
         /// <summary>FG3-GEN-01（FG17 第 4、6 节）：玩家在战略地图上加的标记与备注。唯一写入口 <c>WorldGen.WorldMapMarkers</c>。</summary>
         public MapMarkerRecord[] MapMarkers = Array.Empty<MapMarkerRecord>();
         public int NextMapMarkerSerial = 1;
@@ -139,6 +142,51 @@ namespace GameLogic.Campaign
         /// <summary>FG14-SBX-01（FG12 FGR-SBX-002 / 003 / 005、第 5 节存档）：后日谈的周期清洗计时与等级、坚守统计、清洗历史、坚守结束。
         /// 唯一写入口 <c>GameLogic.Campaign.Endgame.PostgameService</c>。旧存档没有 = 还没进入后日谈（是后日谈的旧档载入后下一步从那一刻起算）。</summary>
         public PostgameState Postgame = new PostgameState();
+        /// <summary>FG14-SBX-02（FG12 FGR-SBX-010～011、第 3 节、第 5 节存档）：自定义沙盒的设置与开局后的修改记录（<see cref="IsSandbox"/> = true 时有效）。
+        /// 唯一写入口 <c>GameLogic.Campaign.SandboxService</c>。旧存档没有 = 全部标准档、没有修改记录（剧情档不读它）。</summary>
+        public SandboxState Sandbox = new SandboxState();
+    }
+
+    /// <summary>
+    /// FG14-SBX-02：沙盒设置。每一项存“选项序号”（与 FG12 FGR-SBX-011 表里的选项顺序一致，见 <c>SandboxService.Defs</c>）。
+    /// 事件频率不在这里：唯一真相是事件导演的 <see cref="DirectorEventState.Frequency"/>（沙盒开局写入、开局后改也写那里）。
+    /// 种子与五项世界设置在 <see cref="WorldGenState"/>（随世界固定）；“起始区：关闭保证”是 <see cref="WorldGenState.NoStartGuarantee"/>。
+    /// </summary>
+    [Serializable]
+    public sealed class SandboxState
+    {
+        public int DomainVersion = 1;
+        /// <summary>突袭：0 关闭 / 1 低 / 2 标准 / 3 高。</summary>
+        public int Raids = 2;
+        /// <summary>静默夜：0 开 / 1 关。</summary>
+        public int SilentNight;
+        /// <summary>天气：0 开 / 1 关。</summary>
+        public int Weather;
+        /// <summary>起始资源：0 标准 / 1 丰富（只在开局生效）。</summary>
+        public int StartResources;
+        /// <summary>研发：0 正常 / 1 全部解锁（只在开局生效）。</summary>
+        public int Research;
+        /// <summary>区域：0 按进度解锁 / 1 全部开放。</summary>
+        public int Regions;
+        /// <summary>敌方强度：0 低 / 1 标准 / 2 高。</summary>
+        public int EnemyStrength = 1;
+        /// <summary>开局后的修改记录（最早的在前，最多 sandbox.history_max 条）。</summary>
+        public SandboxChangeRecord[] Changes = Array.Empty<SandboxChangeRecord>();
+        /// <summary>修改总次数（不受裁剪影响）与用研究点换取关键材料的次数。</summary>
+        public int ChangeCount;
+        public int ExchangeCount;
+    }
+
+    /// <summary>FG14-SBX-02：开局后改一项沙盒设置的记录（FG12 第 3 节“修改会记录在存档里”）。</summary>
+    [Serializable]
+    public sealed class SandboxChangeRecord
+    {
+        public long Tick;
+        public int Day;
+        /// <summary>设置 ID（raids / silent_night / weather / events）。</summary>
+        public string Setting = string.Empty;
+        public int From;
+        public int To;
     }
 
     /// <summary>FG14-SBX-01：后日谈进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
@@ -3174,6 +3222,8 @@ namespace GameLogic.Campaign
             s.Progress.Purge ??= new PurgeWaveState(); // FG13-END-03：旧存档没有清洗波次 = 还没开始
             s.Progress.Postgame ??= new PostgameState(); // FG14-SBX-01：旧存档没有后日谈状态 = 还没起算（是后日谈的旧档下一步起算）
             s.Progress.Postgame.History ??= Array.Empty<PostgamePurgeRecord>();
+            s.Progress.Sandbox ??= new SandboxState(); // FG14-SBX-02：旧存档没有沙盒设置 = 全部标准档
+            s.Progress.Sandbox.Changes ??= Array.Empty<SandboxChangeRecord>();
             s.Progress.Beachhead ??= new BeachheadState(); // FG13-END-04：旧存档没有滩头 = 还没着陆
             s.Progress.Flagship ??= new FlagshipState(); // FG13-END-05：旧存档没有先遣旗舰战 = 还没开战
             s.Progress.Flagship.Seized ??= Array.Empty<int>();

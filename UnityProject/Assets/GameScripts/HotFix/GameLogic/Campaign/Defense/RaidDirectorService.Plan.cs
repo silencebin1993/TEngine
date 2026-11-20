@@ -203,7 +203,7 @@ namespace GameLogic.Campaign.Defense
             {
                 return null;
             }
-            int act = Math.Max(1, s.Progress?.Act ?? 1);
+            int act = SandboxService.EffectiveAct(s); // FG14-SBX-02：沙盒按区域设置 / 探索进度开放后几幕阵营
             WorldPlan plan = WorldGenService.PlanFor(s);
             foreach ((string faction, float _) in CampaignExposureLedger.FactionContributions(s))
             {
@@ -251,7 +251,7 @@ namespace GameLogic.Campaign.Defense
             {
                 return own.Id;
             }
-            int act = Math.Max(1, s.Progress?.Act ?? 1);
+            int act = SandboxService.EffectiveAct(s);
             PlannedTerritory best = null;
             double bestEdge = double.MaxValue;
             foreach (PlannedTerritory t in plan.Territories)
@@ -524,7 +524,7 @@ namespace GameLogic.Campaign.Defense
         /// <summary>预算（FG16 第 5 节）：等级基础值 × 幕系数 × 难度规模 × 间隔系数（第一次突袭再 × raid.first_raid_scale）；后日谈 = 基数 × 增长^n × 难度规模。</summary>
         public static int ComputeBudget(CampaignState s, RaidDirectorState d, RaidPlanRecord p)
         {
-            double scale = DifficultyService.Scale(s);
+            double scale = DifficultyService.RaidScale(s);
             double b;
             if (p.PostgameIndex >= 0)
             {
@@ -532,7 +532,7 @@ namespace GameLogic.Campaign.Defense
             }
             else
             {
-                int act = Math.Max(1, s.Progress?.Act ?? 1);
+                int act = SandboxService.EffectiveAct(s);
                 b = RaidCatalog.LevelBudget(p.Level) * RaidCatalog.ActCoef(act) * scale * IntervalCoef(d, p.CreatedTick);
                 // FG9-BAL-01（BAL-REC-003）：玩家遇到的第一波突袭都“规模很小”——还没有任何突袭抵达过时，静默夜突袭同样乘 raid.first_raid_scale
                 // （节奏机器人实测：第一次静默夜的 1 级突袭 8 台在 2:20 直接拆掉只有 1 座炮塔的核心）。
@@ -1063,7 +1063,7 @@ namespace GameLogic.Campaign.Defense
                 long earliest = GraceEndTick;
                 if (p.IntervalBaseTick >= 0)
                 {
-                    double gap = DayTicks(RaidCatalog.MinIntervalDays) * p.IntervalMul / DifficultyService.Frequency(s);
+                    double gap = DayTicks(RaidCatalog.MinIntervalDays) * p.IntervalMul / DifficultyService.RaidFrequency(s);
                     earliest = Math.Max(earliest, p.IntervalBaseTick + (long)Math.Round(gap));
                 }
                 if (arrive < earliest)

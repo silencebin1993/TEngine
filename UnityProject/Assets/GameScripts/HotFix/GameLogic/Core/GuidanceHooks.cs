@@ -449,6 +449,8 @@ namespace GameLogic.Core
         public const string EndingFirstSettlement = "ending.first_settlement";
         /// <summary>FG14-SBX-01：第一次进入后日谈（结局后选择“继续”）。</summary>
         public const string PostgameFirstStart = "postgame.first_start";
+        /// <summary>FG14-SBX-02：第一次开沙盒局（主菜单“沙盒模式”的“开始”）。</summary>
+        public const string SandboxFirstStart = "sandbox.first_start";
 
         /// <summary>FG12-EVT-01：第一次打开事件历史面板。</summary>
         public const string EventDirectorHistoryFirstOpen = "event_director.history_first_open";
@@ -772,6 +774,7 @@ namespace GameLogic.Core
             MegaFirstSite, MegaFirstStageDone, // FG13-END-01（fgdata_megastructure.MEGA_HOOKS）
             EndingFirstSettlement, // FG13-END-06（fgdata_ending.ENDING_HOOKS）
             PostgameFirstStart, // FG14-SBX-01（fgdata_postgame.POSTGAME_HOOKS）
+            SandboxFirstStart, // FG14-SBX-02（fgdata_sandbox.SANDBOX_HOOKS）
             // FG13-FAC-01 白潮（fgdata_fleet.FLEET_HOOKS；图鉴机制条目引用它们）。
             "fleet.first_encounter", "fleet.first_formation_broken", "fleet.first_inert", "fleet.first_strike_mark", "fleet.first_uplink_blocked",
             "fleet.first_pod", "fleet.first_shield_break",

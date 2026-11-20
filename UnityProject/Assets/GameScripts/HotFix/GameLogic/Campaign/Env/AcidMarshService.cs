@@ -79,7 +79,8 @@ namespace GameLogic.Campaign.Env
             if (!ReferenceEquals(_coatingFor, s))
             {
                 _coatingFor = s;
-                _coating = CampaignObjectiveTracker.HasKeyMaterial(s, QuestCatalog.KeyMaterialOf(CoatingBlueprintId));
+                // FG14-SBX-02：沙盒“区域：全部开放”= 地理软门槛（酸沼带）视为已解决
+                _coating = SandboxService.AllRegionsOpen(s) || CampaignObjectiveTracker.HasKeyMaterial(s, QuestCatalog.KeyMaterialOf(CoatingBlueprintId));
             }
             return _coating;
         }

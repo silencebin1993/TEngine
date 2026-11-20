@@ -481,7 +481,7 @@ namespace GameLogic.Campaign.Env
 
         private static bool ActOk(CampaignState s, EventDirectorDef def)
         {
-            int act = Math.Max(1, s?.Progress?.Act ?? 1);
+            int act = SandboxService.EffectiveAct(s); // FG14-SBX-02：沙盒有效幕
             return act >= def.ActMin && act <= def.ActMax;
         }
 

@@ -297,6 +297,11 @@ namespace GameLogic.UI.Kit
             _title = root.Q<Label>("ResearchTitle");
             _summary = root.Q<Label>("ResearchSummary");
             _close = root.Q<Button>("ResearchClose");
+            _sandboxExchange = root.Q<Button>("ResearchSandboxExchange");
+            if (_sandboxExchange != null)
+            {
+                _sandboxExchange.clicked += SandboxPanelUIToolkit.Open; // FG14-SBX-02
+            }
             _searchCount = root.Q<Label>("ResearchSearchCount");
             _zoomOut = root.Q<Button>("ResearchZoomOut");
             _zoomIn = root.Q<Button>("ResearchZoomIn");
@@ -676,6 +681,10 @@ namespace GameLogic.UI.Kit
 
         // ── 刷新 ─────────────────────────────────────────────────────────────
 
+        /// <summary>FG14-SBX-02：研发树“关键材料换取”（只在沙盒档里显示）。</summary>
+        public Button SandboxExchangeButton => _sandboxExchange;
+        private Button _sandboxExchange;
+
         public void Refresh()
         {
             if (_root == null)
@@ -683,6 +692,12 @@ namespace GameLogic.UI.Kit
                 return;
             }
             CampaignState state = CampaignSession.Current;
+            if (_sandboxExchange != null)
+            {
+                bool sandbox = SandboxService.IsSandbox(state);
+                _sandboxExchange.EnableInClassList("uk-hidden", !sandbox);
+                _sandboxExchange.text = sandbox ? GameText.Get("sandbox.research.exchange") : string.Empty;
+            }
             double now = Clock();
             var h = new HashCode();
             h.Add(ResearchService.Revision);

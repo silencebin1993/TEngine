@@ -72,6 +72,18 @@ namespace GameLogic.Campaign.WorldGen
         /// <summary>v1 的“宽松起始区”（保护矩形 ×1.5 的快照变体）。v2 不用它。</summary>
         public bool LegacyRelaxed { get; private set; }
 
+        /// <summary>FG14-SBX-02（FGR-SBX-011“起始区：关闭保证（仅沙盒可关）”）：true = 不做起始区第 2～4 级资源保证。不进设置 ID 与分享短码
+        /// （它不是 FGR-GEN-070 的世界设置项，存档记在 <see cref="WorldGenState.NoStartGuarantee"/>）；只由 <see cref="WithoutStartGuarantee"/> 产生。</summary>
+        public bool NoStartGuarantee { get; private set; }
+
+        /// <summary>同一组设置、关掉起始区资源保证的副本（沙盒“关闭保证”；<see cref="WorldGenService.SettingsFor"/> 按存档标记取）。</summary>
+        public WorldSettings WithoutStartGuarantee()
+        {
+            var c = (WorldSettings)MemberwiseClone();
+            c.NoStartGuarantee = true;
+            return c;
+        }
+
         /// <summary>v1 预设行（只给 v1 用；显示名）。</summary>
         public WorldPreset Preset { get; private set; }
 

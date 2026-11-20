@@ -54,21 +54,22 @@ namespace GameLogic.Campaign.Defense
             }
             EnsureState(s);
             bool storyOnly = DifficultyService.StoryOnly(s);
-            float newScale = DifficultyService.Scale(s);
+            bool raidsOff = SandboxService.RaidsDisabled(s); // FG14-SBX-02：沙盒关闭突袭 = 一切还没出发的计划（含已预警的）都取消
+            float newScale = DifficultyService.RaidScale(s);
             double ratio = oldScale > 0f ? newScale / (double)oldScale : 1.0;
             int cancelled = 0;
             bool anyPlanCancelled = false;
             List<RaidPlanRecord> postgameCancelled = null;
             foreach (RaidPlanRecord p in d.Plans)
             {
-                if (p == null || p.State >= StateWarned)
+                if (p == null || p.State > StateWarned || (p.State == StateWarned && !raidsOff))
                 {
                     continue;
                 }
-                if (storyOnly && !KeptWhenStoryOnly(p.Trigger))
+                if (raidsOff || (storyOnly && !KeptWhenStoryOnly(p.Trigger)))
                 {
                     // 与 HandleTrigger 同一口径：建造者只有剧情突袭（静默夜 / 巨构虽不受最短间隔限制，也不是剧情；清洗波次照来）。
-                    cancelled += StoryOnlyCancelCount(p);
+                    cancelled += raidsOff ? 1 + (p.AbsorbedIds?.Length ?? 0) : StoryOnlyCancelCount(p);
                     p.State = StateCancelled;
                     p.EndReason = EndCancelled;
                     // 这一波（连同它吸收的普通计划）不会来：第一次突袭的名额 / 骚扰的“第一次突袭之后”都按没有来过算。
@@ -117,7 +118,7 @@ namespace GameLogic.Campaign.Defense
             {
                 RecomputeArrivalAnchors(d);
             }
-            float newFrequency = DifficultyService.Frequency(s);
+            float newFrequency = DifficultyService.RaidFrequency(s);
             if (oldFrequency > 0f && Math.Abs(newFrequency - oldFrequency) > 1e-5f)
             {
                 long now = GameClock.Ticks;

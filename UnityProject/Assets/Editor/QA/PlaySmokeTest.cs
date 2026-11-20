@@ -854,6 +854,9 @@ namespace GameLogic.EditorTools
             {
                 return; // 等主菜单稳定一下。
             }
+            // FG14-SBX-02（FGR-SBX-010）：主菜单有“沙盒模式”（与“新建”同一套选槽；冒烟走剧情“新建”，沙盒路径由 FgSandboxSelfCheck 覆盖）。
+            Button sandboxBtn = FindActiveButton("m_btn_Sandbox");
+            Check(sandboxBtn != null && sandboxBtn.interactable, $"主菜单有“沙盒模式”按钮 {sandboxBtn != null}");
             button.onClick.Invoke();
             Next(2, $"主菜单出现（{inStep:F0} 秒），点“新建”");
         }
@@ -1442,6 +1445,12 @@ namespace GameLogic.EditorTools
             UnityEngine.UIElements.Button pgEntry = PauseMenuUIToolkit.Instance?.PostgameButton;
             bool pgIdle = pgEntry != null && pgEntry.ClassListContains("uk-hidden") && !Campaign.Endgame.PostgameService.Started(st) && !UI.Kit.PostgamePanelUIToolkit.IsOpen;
             Check(pgMounted && pgIdle, $"坚守记录面板已挂载 {pgMounted}；新游戏暂停菜单不显示“坚守记录”、不起算坚守 {pgIdle}");
+            // FG14-SBX-02：沙盒设置面板随世界界面挂好（真 UXML 从资源包载入）；剧情档暂停菜单不显示“沙盒设置”、面板打不开。
+            bool sbMounted = UitkExists("[SandboxHost]", "SandboxClose") && UitkExists("[SandboxHost]", "SandboxRows") && UitkExists("[SandboxHost]", "SandboxExchangeList");
+            UnityEngine.UIElements.Button sbEntry = PauseMenuUIToolkit.Instance?.SandboxButton;
+            UI.Kit.SandboxPanelUIToolkit.Open();
+            bool sbIdle = sbEntry != null && sbEntry.ClassListContains("uk-hidden") && !Campaign.SandboxService.IsSandbox(st) && !UI.Kit.SandboxPanelUIToolkit.IsOpen;
+            Check(sbMounted && sbIdle, $"沙盒设置面板已挂载 {sbMounted}；剧情档暂停菜单不显示“沙盒设置”、面板打不开 {sbIdle}");
             // FG2-FW-05（FGU-20）：暂停菜单“固件库”→ 固件库盖在暂停菜单上面；此时还没有固件芯片时显示空状态说明；点关闭回到暂停菜单。
             bool fwClicked = ClickUitk("[PauseMenuHost]", "PauseFirmware");
             UI.Kit.FirmwareLibraryPanelUIToolkit fwlib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;
