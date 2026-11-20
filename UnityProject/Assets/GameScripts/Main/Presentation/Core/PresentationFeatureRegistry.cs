@@ -43,12 +43,15 @@ namespace BinGames.Presentation
         public const string ProbeId = "pl.probe";
         /// <summary>PL-QA-01 采集标定靶（编辑器里的 PresentationCaptureTarget）：只在采集 / 自检里登记进宿主，默认两套都关。</summary>
         public const string CaptureId = "pl.capture";
+        /// <summary>PL-RP-01 渲染管线试验垫片（编辑器里的 RpTrialShim：URP 试验影子里把 Standard / 地形 surface shader 换成 URP 能画的）：只在试验采集 / 自检里登记，默认两套都关。</summary>
+        public const string RpTrialId = "pl.rptrial";
 
         private static readonly PresentationFeature[] Table =
         {
             new PresentationFeature(HostId, "PresentationHost.Enabled", true, false, "-"),
             new PresentationFeature(ProbeId, "PresentationProbeModule", false, false, "-"),
             new PresentationFeature(CaptureId, "PresentationCaptureTarget", false, false, "-"),
+            new PresentationFeature(RpTrialId, "RpTrialShim", false, false, "-"),
         };
 
         private static readonly Dictionary<string, bool> State = new Dictionary<string, bool>(StringComparer.Ordinal);

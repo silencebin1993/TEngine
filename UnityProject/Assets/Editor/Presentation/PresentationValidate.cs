@@ -52,6 +52,9 @@ namespace GameLogic.EditorTools
             ("CaptureDeterminism", PresentationCaptureValidate.CaptureDeterminism),
             ("CaptureInjection", PresentationCaptureValidate.CaptureInjection),
             ("CaptureGpuPair", PresentationCaptureValidate.CaptureGpuPair),
+            // PL-RP-01 渲染管线试验（RenderPipelineTrial/RpTrialValidate.cs）：PL 影子 2（Built-in）与 URP 试验影子里都能跑
+            ("RpTrialIsolation", RpTrialValidate.RpTrialIsolation),
+            ("RpTrialShim", RpTrialValidate.ShimSegment),
         };
 
         private static StringBuilder _report;

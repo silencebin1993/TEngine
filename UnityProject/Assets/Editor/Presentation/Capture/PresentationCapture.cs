@@ -525,9 +525,13 @@ namespace GameLogic.EditorTools
             }
         }
 
+        /// <summary>每次手动 <c>cam.Render()</c> 之前调用（PL-RP-01 第 2 轮：编辑模式下 Update 里排的 <c>Graphics.RenderMesh*</c> 到不了手动渲染，要紧挨着 Render 再提交一次）。</summary>
+        public static Action<Camera> BeforeRender;
+
         private static void Render(Camera cam, RenderTexture rt)
         {
             cam.targetTexture = rt;
+            BeforeRender?.Invoke(cam);
             cam.Render();
             cam.targetTexture = null;
         }
@@ -738,6 +742,7 @@ namespace GameLogic.EditorTools
                         Step(c, CaptureInject.None, ref gs);
                         sw.Restart();
                         cam.targetTexture = rt;
+                        BeforeRender?.Invoke(cam);
                         cam.Render();
                         RenderTexture prev = RenderTexture.active;
                         RenderTexture.active = rt;
