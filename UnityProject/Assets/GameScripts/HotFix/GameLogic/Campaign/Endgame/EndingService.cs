@@ -351,6 +351,7 @@ namespace GameLogic.Campaign.Endgame
             CloseSettlement();
             s.Progress.IsPostgame = true;
             Log.Info("[EndingService] 结算后选择继续：进入后日谈");
+            PostgameService.OnStarted(s); // FG14-SBX-01：起算坚守、排第一次周期清洗、发后日谈说明（写进下面这份自动存档）
             GameEvent.Send(PostgameStartedEvent);
             PostgameSaveHandler?.Invoke();
             return true;

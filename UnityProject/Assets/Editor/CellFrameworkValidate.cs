@@ -690,6 +690,9 @@ namespace GameLogic.EditorTools
             // 核心暴露与击退、每阶段自动存档；负向（只有 1 台机器、全灭重试、核心被毁读档）；暂停与 0.5x～3x、存读档、观察一致、性能。
             Seg("FgFlagshipSelfCheck", FgFlagshipSelfCheck.Run);
             Seg("FgEndingSelfCheck", FgMegastructureSelfCheck.RunEnding); // FG13-END-06：结局演出、结算与纪念、继续 / 返回、结算期间不存档（FGT-END-008）
+            // FG14-SBX-01 后日谈与周期清洗（FG12 FGR-SBX-001～005，FGT-SBX-001～003）：结算“继续”→ 每 7 个游戏日一次清洗、预算 1200 × 1.15ⁿ、同时存在 ≤ 200 / 精英化 / 单位强度、坚守统计与存档卡、
+            // 坚守记录面板与说明、普通突袭不占序号、没建出计划同序号重发、暂停与 0.5x～3x、存读档、观察一致、坚守结束总结页与读档、轨道坠落更频繁与最后一组遗产。
+            Seg("FgPostgameSelfCheck", FgPostgameSelfCheck.Run);
             // FG7-ENV-03 天气与顶棚（FG07 FGR-ENV-020 / 021 / 030，FG03 FGR-LOG-028 / 045，FGT-ENV-004）：数据与源数据逐行；按种子排定（持续、频率随幕）；预报（0.5 日预警 / 监听站 T2 破译 3 日）；
             // 顶棚（研究门槛、拖拽全有或全无、机器施工、下面照常建造、拆除返还、取消、隐藏 / 半透明、叠加层、建造模式拖拽）；酸雨 / 沙暴 / 寒潮效果与顶棚覆盖（露天掉耐久、污染加倍、摧毁留虚影、
             // 传送带减速、太阳能、炮塔探测、结冰阻断流动、伴热管、冰霜画面、散热）；负向矩阵（与静默夜叠加等）；暂停与 0.5x～3x、观察一致、真文件存读档；界面与设置；性能。
@@ -814,6 +817,9 @@ namespace GameLogic.EditorTools
             // FG12-E2E-01：M12 出口——FGJ-M12 登记覆盖里程碑原文与 FG12-EVT-03 / 04 承接段、反向接入用共用夺控事件计数、旅程源码只走输入通道、夹具只在登记处；
             // IC-REQ-022 六类反向（R5 = FGT-EVT-009 六个事件存读档）、“事件没有预警或不可应对”与承接项映射到起真实系统的断言；缺口清零；FG-M12 试玩包；“必须完成”六项映射。
             Seg("FgMilestoneM12SelfCheck", FgMilestoneM12SelfCheck.Run);
+            // FG13-E2E-01：M13 出口——FGJ-M13 登记覆盖里程碑原文（五个巨构阶段 → 揭示 → 三波清洗 → 滩头 → 先遣旗舰反向接入 → 结局 → 继续）、反向接入用共用夺控事件计数、旅程源码只走输入通道、夹具只在登记处；
+            // IC-REQ-022 六类反向、里程碑风险“根权限夺取玩家所在的机器”与 FGT-END-001～008 映射到起真实系统的断言；缺口清零；FG-M13 试玩包；“必须完成”七项映射；固件获取途径与图标回归守护。
+            Seg("FgMilestoneM13SelfCheck", FgMilestoneM13SelfCheck.Run);
             // EMG1-DATA-01：涌现通道端口注册表 / 声明表 / 端口 × 载体 / 子形态 / 底盘特性——源 = 表、真实表编译成内核整数数组、FGR-EMG-010 推导逐行一致（FGT-EMG-003 端口表部分）、
             // 负向矩阵（码跨段 / 复用、(owner, seq) 重复、未注册端口、非 owner 列内容 ID、整条切轨、表重载不残留、emg.stage 钳位，FGT-EMG-001）、源码内容 ID 审计与回归（FGT-EMG-004）。
             Seg("FgEmergenceRuleAuditSelfCheck", FgEmergenceRuleAuditSelfCheck.Run);

@@ -824,9 +824,9 @@ namespace GameLogic.UI.Kit
         {
             foreach (Campaign.Combat.CombatSite site in Campaign.Combat.CombatSites.All)
             {
-                BinGames.Sim.Combat.CombatKernel k = site?.Kernel;
+                Campaign.Combat.CombatSite k = site; // 经桥接层读白潮稀疏表（FG14 §5 硬约束 3）
                 // 只画长期留存地点（家园，世界坐标）；其余地点内核是地点局部坐标，画上去会错位
-                if (k == null || site.IsDisposed || !k.PersistSite || k.FleetCount + k.FleetStrikeCount + k.FleetMarkCount == 0)
+                if (k == null || !k.PersistSite || k.FleetCount + k.FleetStrikeCount + k.FleetMarkCount == 0)
                 {
                     continue;
                 }
@@ -843,18 +843,18 @@ namespace GameLogic.UI.Kit
                     BinGames.Sim.Combat.CombatFleetStrike x = k.FleetStrikeAt(i);
                     if (view.Contains(x.Center.x, x.Center.y, margin + x.Radius))
                     {
-                        string label = GameText.Format("ui.map.fleet.strike", Math.Max(0.0, x.At - k.Time).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+                        string label = GameText.Format("ui.map.fleet.strike", Math.Max(0.0, x.At - k.KernelTime).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
                         Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = x.Center.x, Y = x.Center.y, Radius = x.Radius, OuterRadius = x.Radius, Impact = true, Label = label });
                     }
                 }
                 for (int i = 0; i < k.FleetCount; i++)
                 {
                     if (!k.TryGetFleetAt(i, out BinGames.Sim.Combat.CombatFleet f) || f.State != BinGames.Sim.Combat.CombatFleetConst.StatePodFalling
-                        || !k.TryGetUnit(f.Unit, out BinGames.Sim.Combat.CombatUnitView v) || !view.Contains(v.Position.x, v.Position.y, margin + 2.0))
+                        || !k.TryGetUnitView(f.Unit, out BinGames.Sim.Combat.CombatUnitView v) || !view.Contains(v.Position.x, v.Position.y, margin + 2.0))
                     {
                         continue;
                     }
-                    string label = GameText.Format("ui.map.fleet.pod", Math.Max(0.0, f.Until - k.Time).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
+                    string label = GameText.Format("ui.map.fleet.pod", Math.Max(0.0, f.Until - k.KernelTime).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture));
                     Circles.Add(new WorldMapCircle { Layer = WorldMapLayer.Groups, X = v.Position.x, Y = v.Position.y, Radius = 2f, OuterRadius = 2f, Impact = true, Label = label });
                 }
                 for (int i = 0; i < k.FleetMarkCount; i++)

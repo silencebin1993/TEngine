@@ -99,7 +99,8 @@ namespace GameLogic.Campaign
             }
             if (meta.IsPostgame)
             {
-                parts.Add(GameText.Get("save.card.postgame"));
+                // FG14-SBX-01（FGR-SBX-003）：后日谈存档卡显示坚守天数与最高清洗等级。
+                parts.Add(GameText.Format("save.card.postgame_stats", meta.PostgameDays, meta.PostgameTopLevel));
             }
             if (meta.IsSandbox)
             {

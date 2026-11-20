@@ -643,7 +643,16 @@ namespace GameLogic.Campaign.Defense
             Credit(s, site, r, e.Other, elite);
             // FG8-LOOT-01（DEBT-FG2VFX02-04）：拆解钳击毁时残骸多回收。
             AddWreck(s, st, r, at, FieldLootService.ApplyClaw(elite ? WreckPerElite : WreckPerUnit, FieldLootService.ClawMultiplier(s, site, e.Other)));
-            RollDrops(s, st, r, at, elite, def?.Faction ?? g.Faction);
+            string faction = def?.Faction ?? g.Faction;
+            RollDrops(s, st, r, at, elite, faction);
+            if (faction == Content.EnemyDefs.FactionFleet && Endgame.PostgameService.Active(s))
+            {
+                // FG14-SBX-01（FGR-SBX-002）：后日谈清洗的白潮残骸回收出稀有材料（落在残骸处、开搬运单），记进本次结算的缴获
+                foreach (ItemAmountRecord a in FieldLootService.OnPurgeKill(s, at, ((long)r.Serial << 20) + r.Killed))
+                {
+                    AddAmount(ref r.Loot, a.ItemId, a.Amount);
+                }
+            }
             Revision++;
             Stat(t0);
         }
@@ -1021,6 +1030,7 @@ namespace GameLogic.Campaign.Defense
                 Close(s, r, OutcomeCoreLost, site, notify: false);
             }
             ReactionAttribution.EndRaid(s);
+            Endgame.PostgameService.OnCoreDestroyed(s); // FG14-SBX-01：后日谈坚守在同一步结束（结算已关，统计含这一波）
             PendingAutosaveWave = 0; // 失败之后不再存
             Hook(GuidanceHooks.RaidFirstCoreLost);
             Revision++;

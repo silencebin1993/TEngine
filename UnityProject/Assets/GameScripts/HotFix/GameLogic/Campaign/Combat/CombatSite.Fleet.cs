@@ -33,6 +33,18 @@ namespace GameLogic.Campaign.Combat
             StrikeBuildingHits = 0;
         }
 
+        // FG13-E2E-01（FG14 §5 硬约束 3）：白潮稀疏表 / 护盾闸门 / 单位视图 / 内核时钟的只读门面——Campaign/Combat 以外（战略地图、旗舰与清洗波次服务）经这里读，不直接碰内核。
+        public double KernelTime => Kernel.Time;
+        public int FleetCount => Kernel.FleetCount;
+        public int FleetStrikeCount => Kernel.FleetStrikeCount;
+        public int FleetMarkCount => Kernel.FleetMarkCount;
+        public CombatFleetStrike FleetStrikeAt(int i) => Kernel.FleetStrikeAt(i);
+        public CombatFleetMark FleetMarkAt(int i) => Kernel.FleetMarkAt(i);
+        public bool TryGetFleetAt(int i, out CombatFleet state) => Kernel.TryGetFleetAt(i, out state);
+        public bool UplinkBlockerAt(int n, out int unitId, out double2 pos, out float range) => Kernel.UplinkBlockerAt(n, out unitId, out pos, out range);
+        public bool TryGetGate(int unitId, out byte family, out float gate, out float max) => Kernel.TryGetGate(unitId, out family, out gate, out max);
+        public bool TryGetUnitView(int unitId, out CombatUnitView view) => Kernel.TryGetUnit(unitId, out view);
+
         private static long CellKey(int x, int y) => ((long)x << 32) ^ (uint)y;
 
         /// <summary>格 (x, y) 是不是灭活焦土（恢复到点前都算）。灭活焦土只存在内核快照段 42，不写家园格网地形、与燃烧战痕 reaction_scorch 无关（ADR-FAC-008 ①）。</summary>
@@ -139,18 +151,20 @@ namespace GameLogic.Campaign.Combat
                     return;
                 }
                 Vector2 target = at;
+                float str = 1f;
                 foreach (TransitGroupRecord g in SiegeService.SiegingGroups(state))
                 {
                     if (SiegeService.KeyOf(g) == groupKey)
                     {
                         target = new Vector2((float)g.TargetX, (float)g.TargetY);
+                        str = SiegeService.StrengthOf(state, g); // FG14-SBX-01：舱里投放的单位与这一波同强度
                         break;
                     }
                 }
                 for (int k = 0; k < count; k++)
                 {
                     if (SiegeService.SpawnOne(this, groupKey, RingAt(at, ring, k, count), target, def, false,
-                            DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state)) > 0)
+                            DifficultyService.EnemyHealthMul(state) * str, DifficultyService.EnemyDamageMul(state) * str) > 0)
                     {
                         PodCargoSpawned++;
                     }

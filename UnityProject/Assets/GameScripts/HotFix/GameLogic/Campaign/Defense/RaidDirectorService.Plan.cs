@@ -65,9 +65,12 @@ namespace GameLogic.Campaign.Defense
                 }
                 d.RaidCount++;
             }
-            if (s.Progress?.IsPostgame == true)
+            if (s.Progress?.IsPostgame == true && def.Id == RaidCatalog.TriggerPurge)
             {
-                p.PostgameIndex = d.PostgameCount++;
+                // FG14-SBX-01（FG16 第 5 节“第 n 次清洗的预算 = 1200 × 1.15ⁿ”）：只有后日谈的清洗波次按清洗序号算预算；普通突袭照常规曲线。
+                // 序号由 PostgameService 指定（取消后重发沿用同一个 n，不跳档）；没指定（旧档队列里的触发）按计数接着排。
+                p.PostgameIndex = t.PostgameIndex >= 0 ? t.PostgameIndex : d.PostgameCount;
+                d.PostgameCount = Math.Max(d.PostgameCount, p.PostgameIndex + 1);
             }
             int cap = Endgame.BeachheadService.HarassLevelCap(s);
             if (cap > 0 && p.Level > cap)
@@ -539,7 +542,9 @@ namespace GameLogic.Campaign.Defense
                     b *= RaidCatalog.FirstRaidScale;
                 }
             }
-            return Math.Max(1, (int)Math.Round(b));
+            // 后日谈预算按 1.15^n 无上限增长，约第 104 级超过 int：封顶在 int.MaxValue（不封顶时 double → int 越界的结果因平台而异，确定性会被破坏）。
+            // shortcut: 封顶后单位强度（预算 ÷ 已花点数）随之停涨，那时强度已是数十万倍；要真正无上限得把计划预算改成 double 存档字段
+            return Math.Max(1, (int)Math.Round(Math.Min(b, int.MaxValue)));
         }
 
         /// <summary>BAL-REC-003：还没有任何突袭真正到达过家园 / 前哨（<see cref="RaidDirectorState.ArrivedWaveCount"/> = 0）时的静默夜突袭也按第一次突袭缩小。</summary>
@@ -584,25 +589,42 @@ namespace GameLogic.Campaign.Defense
             }
             var counts = new int[n];
             var elites = new int[n];
+            // FG14-SBX-01（FG16 第 5 节“单位数量有上限（不超过 FG15 的 200 个敌人）”）：一台占几个名额 = 1 + 落地投放的台数（登陆舱的 flPodCargo × flPodCount 也是同时存在的敌人）。
+            var slots = new int[n];
+            int minSlot = int.MaxValue;
+            for (int i = 0; i < n; i++)
+            {
+                slots[i] = 1;
+                if (Content.EnemyDefs.TryGet(UnitScratch[i].EnemyTypeId, out MechEnemy me) && Combat.EnemyFleetParams.Cargo(me, out _, out int cargo))
+                {
+                    slots[i] += Math.Max(0, cargo);
+                }
+                minSlot = Math.Min(minSlot, slots[i]);
+            }
             int remaining = Math.Max(0, p.Budget);
             int total = 0;
+            int occ = 0;
             int cap = RaidCatalog.MaxUnits;
             int draw = 0;
-            while (total < cap && remaining >= UnitScratch[cheapest].Points)
+            while (occ + minSlot <= cap && remaining >= UnitScratch[cheapest].Points)
             {
                 double sum = 0;
                 for (int i = 0; i < n; i++)
                 {
-                    if (UnitScratch[i].Points <= remaining)
+                    if (UnitScratch[i].Points <= remaining && occ + slots[i] <= cap)
                     {
                         sum += WeightScratch[i];
                     }
+                }
+                if (sum <= 0)
+                {
+                    break; // 买得起的都放不下了（只剩占名额多的登陆舱）
                 }
                 double r = Hash01(s, p.Serial, draw++, SaltCompose) * sum;
                 int pick = -1;
                 for (int i = 0; i < n; i++)
                 {
-                    if (UnitScratch[i].Points > remaining)
+                    if (UnitScratch[i].Points > remaining || occ + slots[i] > cap)
                     {
                         continue;
                     }
@@ -616,11 +638,13 @@ namespace GameLogic.Campaign.Defense
                 counts[pick]++;
                 remaining -= UnitScratch[pick].Points;
                 total++;
+                occ += slots[pick];
             }
             if (total == 0)
             {
                 counts[cheapest] = 1;
                 total = 1;
+                occ = slots[cheapest];
                 remaining = 0;
             }
             if (p.Trigger == RaidCatalog.TriggerPurge)
@@ -649,15 +673,38 @@ namespace GameLogic.Campaign.Defense
                     if (swap >= 0)
                     {
                         counts[swap]--;
+                        occ -= slots[swap];
                     }
                     else
                     {
                         total++;
                     }
                     counts[pod]++;
+                    occ += slots[pod];
+                    // FG14-SBX-01：换进来的舱多占的名额超过上限 → 去掉最便宜的非舱单位（总数照样不超过上限）。
+                    while (occ > cap)
+                    {
+                        int drop = -1;
+                        for (int i = 0; i < n; i++)
+                        {
+                            if (i != pod && counts[i] > 0 && (drop < 0 || UnitScratch[i].Points < UnitScratch[drop].Points))
+                            {
+                                drop = i;
+                            }
+                        }
+                        if (drop < 0)
+                        {
+                            break;
+                        }
+                        counts[drop]--;
+                        total--;
+                        occ -= slots[drop];
+                        remaining += UnitScratch[drop].Points;
+                    }
                 }
             }
-            if (total >= cap)
+            p.Strength = 1f;
+            if (occ + minSlot > cap)
             {
                 bool changed = true;
                 while (changed && remaining > 0)
@@ -673,6 +720,18 @@ namespace GameLogic.Campaign.Defense
                             changed = true;
                         }
                     }
+                }
+                bool allElite = true;
+                for (int i = 0; i < n; i++)
+                {
+                    allElite &= counts[i] == elites[i];
+                }
+                if (p.PostgameIndex >= 0 && allElite && remaining > 0)
+                {
+                    // FG14-SBX-01（FG12 第 4 节“通过精英化和单位强度体现难度，而不是无限堆数量”）：名额满、全部精英后，剩下的预算按比例抬高耐久与伤害
+                    // （强度 = 预算 ÷ 已花点数，等级没有上限所以强度也没有上限）。攻城投放时乘到难度倍率上（SiegeService.StrengthOf）。
+                    int spent = Math.Max(1, p.Budget - remaining);
+                    p.Strength = (float)(p.Budget / (double)spent);
                 }
             }
             var ids = new List<string>(n);
@@ -691,6 +750,7 @@ namespace GameLogic.Campaign.Defense
             p.UnitCounts = cs.ToArray();
             p.EliteCounts = es.ToArray();
             p.UnitTotal = total;
+            p.Occupancy = occ; // FG14-SBX-01：同时存在的敌人（含登陆舱落地投放的）
             LastComposeMs = (Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency;
             if (LastComposeMs > MaxComposeMs)
             {
@@ -1093,8 +1153,8 @@ namespace GameLogic.Campaign.Defense
         private static void Fold(CampaignState s, RaidDirectorState d, RaidPlanRecord keeper, RaidPlanRecord absorbed)
         {
             bool announced = absorbed.State == StateWarned;
-            keeper.Budget += absorbed.Budget;
-            keeper.AbsorbedBudget += absorbed.Budget; // FG6-DEF-09：改成建造者时剧情一方去掉这部分；其他难度修改按比例一起缩放
+            keeper.Budget = (int)Math.Min(int.MaxValue, (long)keeper.Budget + absorbed.Budget); // 高等级清洗预算接近 int 上限，合并不能溢出
+            keeper.AbsorbedBudget = (int)Math.Min(int.MaxValue, (long)keeper.AbsorbedBudget + absorbed.Budget); // FG6-DEF-09：改成建造者时剧情一方去掉这部分；其他难度修改按比例一起缩放
             var ids = new List<string>(keeper.AbsorbedIds ?? Array.Empty<string>()) { absorbed.PlanId };
             keeper.AbsorbedIds = ids.ToArray();
             var trig = new List<string>(keeper.Triggers);

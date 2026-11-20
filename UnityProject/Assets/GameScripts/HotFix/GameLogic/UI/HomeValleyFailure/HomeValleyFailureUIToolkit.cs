@@ -26,6 +26,7 @@ namespace GameLogic.UI.HomeValleyFailure
         private Label _title;
         private Label _subtitle;
         private Label _causeLabel;
+        private Label _postgameLabel;
         private Label _lastSaveLabel;
         private Button _loadButton;
         private Button _backToMenuButton;
@@ -36,6 +37,10 @@ namespace GameLogic.UI.HomeValleyFailure
         // ── 自检 / 冒烟读点 ──
         public bool Shown => _root != null && _root.style.display.value == DisplayStyle.Flex;
         public string CauseText => _causeLabel?.text ?? string.Empty;
+        public string TitleText => _title?.text ?? string.Empty;
+        public string SubtitleText => _subtitle?.text ?? string.Empty;
+        /// <summary>FG14-SBX-01：“坚守结束”统计段（不在后日谈 = 空）。</summary>
+        public string PostgameStatsText => _postgameLabel != null && !_postgameLabel.ClassListContains("hvf-hidden") ? _postgameLabel.text : string.Empty;
         public string LastSaveText => _lastSaveLabel?.text ?? string.Empty;
         public Button LoadButton => _loadButton;
         public Button MenuButton => _backToMenuButton;
@@ -85,6 +90,7 @@ namespace GameLogic.UI.HomeValleyFailure
             _title = _root.Q<Label>("Title");
             _subtitle = _root.Q<Label>("Subtitle");
             _causeLabel = _root.Q<Label>("CauseLabel");
+            _postgameLabel = _root.Q<Label>("PostgameStatsLabel");
             _lastSaveLabel = _root.Q<Label>("LastSaveLabel");
             _loadButton = _root.Q<Button>("LoadAutosaveButton");
             _backToMenuButton = _root.Q<Button>("BackToMenuButton");
@@ -149,8 +155,15 @@ namespace GameLogic.UI.HomeValleyFailure
         private void RefreshTexts()
         {
             CampaignState state = CampaignSession.Current;
-            _title.text = GameText.Get("failure.title");
-            _subtitle.text = GameText.Get("failure.subtitle");
+            // FG14-SBX-01（FGR-SBX-005“核心被毁时，显示‘坚守结束’总结页：坚守天数、最高等级、各项统计；之后可以读取自动存档继续”）。
+            bool postgame = Campaign.Endgame.PostgameService.Started(state);
+            _title.text = GameText.Get(postgame ? "postgame.end.title" : "failure.title");
+            _subtitle.text = postgame ? GameText.Format("postgame.end.subtitle", Campaign.Endgame.PostgameService.HoldDays(state, GameClock.Ticks)) : GameText.Get("failure.subtitle");
+            if (_postgameLabel != null)
+            {
+                _postgameLabel.EnableInClassList("hvf-hidden", !postgame);
+                _postgameLabel.text = postgame ? Campaign.Endgame.PostgameService.EndStatsText(state, GameClock.Ticks) : string.Empty;
+            }
             _backToMenuButton.text = GameText.Get("failure.menu");
             RaidResultRecord by = RaidResultService.CoreLostBy(state);
             RaidResultState rs = RaidResultService.StateOf(state);

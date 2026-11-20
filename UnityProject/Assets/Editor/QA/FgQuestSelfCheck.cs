@@ -221,7 +221,7 @@ namespace GameLogic.EditorTools
                     q.Prereq, Py(q.TimeHours), Py(q.WarnHours), q.TimerFrom, q.RewardItem, q.RewardAmount, q.RewardBlueprint, q.Restartable, q.Weight, q.SortOrder))
                 .Concat(tables.TbKeyMaterial.DataList.Select(k => string.Join("\t", "KEY", k.Id, k.Kind, k.NameKey, k.QuestId, k.SourceKey, k.UsageKey, k.Act, k.SortOrder)))
                 .ToList();
-            bool table = code == 0 && src.Count == rt.Count && src.Count == 28 && /* FG13-END-02：+2 条终局主线（返航工程、守住家园）；FG13-END-04：+切断投送 */ src.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(rt.OrderBy(x => x, StringComparer.Ordinal));
+            bool table = code == 0 && src.Count == rt.Count && src.Count == 29 && /* FG13-END-02：+2 条终局主线（返航工程、守住家园）；FG13-END-04：+切断投送；FG13-END-05：+击退先遣旗舰 */ src.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(rt.OrderBy(x => x, StringComparer.Ordinal));
             Expect(table, $"A0 源数据 fgdata_quest.py 与运行时两张表（任务 {tables.TbQuest.DataList.Count} / 关键材料 {tables.TbKeyMaterial.DataList.Count}）逐字段一致" +
                           (table ? string.Empty : $"（源 {src.Count} 行 / 运行时 {rt.Count} 行，python 退出码 {code}）"));
 
@@ -232,7 +232,7 @@ namespace GameLogic.EditorTools
             var sideKinds = new HashSet<string>(rows.Where(q => q.Category == QuestCatalog.CatSide).Select(q => q.Kind));
             bool kinds = new[] { QuestCatalog.KindReach, QuestCatalog.KindEscort, QuestCatalog.KindDestroy, QuestCatalog.KindHold, QuestCatalog.KindOwnOutpost }.All(sideKinds.Contains);
             bool mainRules = rows.Where(q => q.Category == QuestCatalog.CatMain).All(q => q.Restartable == 1) && rows.Where(q => q.Category != QuestCatalog.CatMain).All(q => q.Restartable == 0);
-            Expect(QuestCatalog.LoadError == null && main == 9 /* FG13-END-02：+返航工程、守住家园；FG13-END-04：+切断投送 */ && side == 7 && guide == 6 && kinds && mainRules,
+            Expect(QuestCatalog.LoadError == null && main == 10 /* FG13-END-02：+返航工程、守住家园；FG13-END-04：+切断投送；FG13-END-05：+击退先遣旗舰 */ && side == 7 && guide == 6 && kinds && mainRules,
                 $"A1 fg.TbQuest：主线 {main}、支线 {side}（{string.Join("/", sideKinds)}，FGR-QST-001 的救援 / 摧毁监听节点 / 护送 / 夺回数据 / 清剿精英 / 调查 / 建立前哨）、家园指引 {guide}；主线全部可以重新开始、其余不能");
 
             IReadOnlyList<KeyMaterial> keys = QuestCatalog.KeyMaterials;

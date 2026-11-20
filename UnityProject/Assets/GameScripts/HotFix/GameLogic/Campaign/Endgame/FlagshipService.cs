@@ -160,7 +160,7 @@ namespace GameLogic.Campaign.Endgame
             family = CombatFleetConst.GateNone;
             gate = max = 0f;
             CombatSite site = Site();
-            return site != null && !site.IsDisposed && site.TryGetEnemyUnit(id, out int unit) && site.Kernel.TryGetGate(unit, out family, out gate, out max);
+            return site != null && !site.IsDisposed && site.TryGetEnemyUnit(id, out int unit) && site.TryGetGate(unit, out family, out gate, out max);
         }
 
         public static string WeaknessText(byte family) => GameText.Get(family switch
@@ -239,7 +239,7 @@ namespace GameLogic.Campaign.Endgame
             CombatSite site = Site();
             foreach (EnemyEncounter enc in Encounters(EnemyDefs.ConditionBoss))
             {
-                if (IsCoreRow(enc) && site != null && site.TryGetEnemyUnit(enc.Id, out int unit) && site.Kernel.TryGetUnit(unit, out CombatUnitView v) && v.MaxHealth > 0f)
+                if (IsCoreRow(enc) && site != null && site.TryGetEnemyUnit(enc.Id, out int unit) && site.TryGetUnitView(unit, out CombatUnitView v) && v.MaxHealth > 0f)
                 {
                     return Mathf.CeilToInt(100f * v.Health / v.MaxHealth);
                 }

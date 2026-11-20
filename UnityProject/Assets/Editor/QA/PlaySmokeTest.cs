@@ -1437,6 +1437,11 @@ namespace GameLogic.EditorTools
             bool settleMounted = UitkExists("[EndingSettlementHost]", "EsContinue") && UitkExists("[EndingSettlementHost]", "EsMenu") && UitkExists("[EndingSettlementHost]", "EsReplay");
             bool settleIdle = !UI.Kit.EndingSettlementPanelUIToolkit.IsOpen && !Campaign.Endgame.EndingService.SettlementOpen && !Campaign.Endgame.EndingService.SettlementDue(st);
             Check(settleMounted && settleIdle, $"结局结算面板已挂载（继续 / 返回主菜单 / 重看三个按钮）{settleMounted}；新游戏不打开结算、不拦存档 {settleIdle}");
+            // FG14-SBX-01（FG12 第 3 节）：坚守记录 / 后日谈说明面板随世界界面挂好（真 UXML 已从资源包载入）；新游戏不在后日谈，暂停菜单的“坚守记录”入口隐藏、不起算坚守。
+            bool pgMounted = UitkExists("[PostgameHost]", "PostgameClose") && UitkExists("[PostgameHost]", "PostgameOk") && UitkExists("[PostgameHost]", "PostgameList");
+            UnityEngine.UIElements.Button pgEntry = PauseMenuUIToolkit.Instance?.PostgameButton;
+            bool pgIdle = pgEntry != null && pgEntry.ClassListContains("uk-hidden") && !Campaign.Endgame.PostgameService.Started(st) && !UI.Kit.PostgamePanelUIToolkit.IsOpen;
+            Check(pgMounted && pgIdle, $"坚守记录面板已挂载 {pgMounted}；新游戏暂停菜单不显示“坚守记录”、不起算坚守 {pgIdle}");
             // FG2-FW-05（FGU-20）：暂停菜单“固件库”→ 固件库盖在暂停菜单上面；此时还没有固件芯片时显示空状态说明；点关闭回到暂停菜单。
             bool fwClicked = ClickUitk("[PauseMenuHost]", "PauseFirmware");
             UI.Kit.FirmwareLibraryPanelUIToolkit fwlib = UI.Kit.FirmwareLibraryPanelUIToolkit.Instance;

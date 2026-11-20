@@ -214,7 +214,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>按种子地形在核心周围找一块能放 12×12 工地、西口 / 南口外各两格传送带、东口外两格管线的地方（不写死坐标，B25）。</summary>
-        private static GridCell? FindSitePivot(CampaignState s)
+        internal static GridCell? FindSitePivot(CampaignState s, Func<GridCell, bool> extra = null)
         {
             GridCell core = HomeGridService.CorePivot(s);
             for (int r = 12; r <= 48; r++)
@@ -228,7 +228,7 @@ namespace GameLogic.EditorTools
                             continue;
                         }
                         var p = new GridCell(core.X + dx, core.Y + dy);
-                        if (!HomeGridService.ValidatePlacement(s, Site, p, 0, asPlayerPlacement: false, checkCost: false).Ok)
+                        if (!HomeGridService.ValidatePlacement(s, Site, p, 0, asPlayerPlacement: false, checkCost: false).Ok || extra != null && !extra(p))
                         {
                             continue;
                         }
@@ -257,18 +257,24 @@ namespace GameLogic.EditorTools
             {
                 return null;
             }
-            var rig = new Rig { Pivot = p.Value, FeedCell = F.At(p.Value, 8, 0) };
-            rig.Site = F.Built(s, Site, key, p.Value);
-            rig.Site.Health = BuildingOps.MaxDurability(Site); // 正式施工完工时耐久回满（HomeValleyWorkOrders）；夹具 F.Built 记 100
-            F.Belts(s, F.At(p.Value, -7, 0), BeltDir.East, 2);
-            F.Belts(s, F.At(p.Value, 0, -7), BeltDir.North, 2);
-            PipeNetworkService.TryPlace(s, F.At(p.Value, 7, 0), PipePieceKind.Pipe, 0, 0);
+            BuildingRecord site = F.Built(s, Site, key, p.Value);
+            site.Health = BuildingOps.MaxDurability(Site); // 正式施工完工时耐久回满（HomeValleyWorkOrders）；夹具 F.Built 记 100
+            return Supply(s, site, p.Value, partsEach, liters, powered);
+        }
+
+        /// <summary>给已建成的工地 <paramref name="site"/>（中心格 <paramref name="p"/>）铺供给：西口 / 南口外传送带 + 测试源、东口外管线 + 测试供冷却液点（FGJ-M13 夹具也用它）。</summary>
+        internal static Rig Supply(CampaignState s, BuildingRecord site, GridCell p, int partsEach, long liters, bool powered = true)
+        {
+            var rig = new Rig { Pivot = p, FeedCell = F.At(p, 8, 0), Site = site };
+            F.Belts(s, F.At(p, -7, 0), BeltDir.East, 2);
+            F.Belts(s, F.At(p, 0, -7), BeltDir.North, 2);
+            PipeNetworkService.TryPlace(s, F.At(p, 7, 0), PipePieceKind.Pipe, 0, 0);
             PipeNetworkService.TryPlace(s, rig.FeedCell, PipePieceKind.Pipe, 0, 0);
             F.Resync(s);
             if (partsEach > 0)
             {
-                rig.SourceW = F.TestSource(s, F.At(p.Value, -7, 0), "megastructure_part", partsEach);
-                rig.SourceS = F.TestSource(s, F.At(p.Value, 0, -7), "megastructure_part", partsEach);
+                rig.SourceW = F.TestSource(s, F.At(p, -7, 0), "megastructure_part", partsEach);
+                rig.SourceS = F.TestSource(s, F.At(p, 0, -7), "megastructure_part", partsEach);
             }
             if (liters > 0)
             {
@@ -279,7 +285,7 @@ namespace GameLogic.EditorTools
             return rig;
         }
 
-        private static void SetPower(BuildingRecord b, bool on) => b.PowerState = on ? BuildingPowerState.Powered : BuildingPowerState.Unpowered;
+        internal static void SetPower(BuildingRecord b, bool on) => b.PowerState = on ? BuildingPowerState.Powered : BuildingPowerState.Unpowered;
 
         private static void StopSources(Rig r)
         {
@@ -336,7 +342,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>正式的任务完成入口（CampaignObjectiveTracker.CompleteQuest，私有；反射调用）：主线“巨构蓝图”完成 → 发蓝图（事件账本）→ 资料库 → 第三幕。</summary>
-        private static void CompleteMegaQuest(CampaignState s)
+        internal static void CompleteMegaQuest(CampaignState s)
         {
             GameConfig.fg.Quest q = QuestCatalog.Get("main.megastructure");
             var r = new ObjectiveRecord { ObjectiveId = "main.megastructure", DefId = "main.megastructure", State = ObjectiveState.Active };

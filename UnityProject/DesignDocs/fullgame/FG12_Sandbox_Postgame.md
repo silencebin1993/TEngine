@@ -38,6 +38,8 @@
 **FGR-SBX-005 失败**
 - 核心被毁时，显示"坚守结束"总结页：坚守天数、最高等级、各项统计；之后可以读取自动存档继续。
 
+- **FG14-SBX-01 已落地（2026-11-20）**：`Campaign/Endgame/PostgameService.cs`（唯一写入口，状态 `CampaignProgressState.Postgame`）。结算“继续”起算坚守并打开说明面板（`UI/Kit/PostgamePanelUIToolkit.cs`，`PostgamePanel.uxml`；暂停菜单“坚守记录”可看统计与清洗历史）；每 7 个游戏日（`postgame.purge_period_days`）交给突袭导演一次清洗（触发 purge、白潮、突袭等级 4、第 n 次预算 1200 × 1.15ⁿ，只有周期清洗占序号）；同时存在的敌人含登陆舱投放 ≤ 200，超出预算先换精英，全部精英后按“预算 ÷ 已花点数”抬高耐久与伤害（单位强度，**按推荐默认执行（2026-11-20），待用户确认**：FG12 第 4 节“单位强度”的解读）；坚守统计（天数、来过 / 撑过的最高等级、最佳单次防守、累计）进存档、显示在存档卡；核心被毁 → 失败页换成“坚守结束”总结，读档继续。轨道坠落 × 2（`postgame.orbital_drop_rate`），残骸 50% 带来遗产：先是幕 = 4 的后日谈专属 3 件（返航钥匙、轨道观测档案、主舰队议事记录），之后是还没找到的普通遗产。专属成就由 FG15-SYS-04 读统计（DEBT-FG14SBX01-03）。自检 `FgPostgameSelfCheck`，GPU 探针 `FgPostgamePerfProbe`。
+
 ### 2.2 自定义沙盒新档
 
 **FGR-SBX-010 入口**

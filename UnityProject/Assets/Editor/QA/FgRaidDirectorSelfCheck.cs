@@ -405,7 +405,8 @@ namespace GameLogic.EditorTools
             int total = p.UnitCounts.Sum();
             int pts = PointsOf(p);
             bool ownFaction = p.UnitIds.All(id => RaidCatalog.TryGetUnit(id, out RaidUnitDef u) && u.Faction == p.Faction && u.MinLevel <= Math.Max(0, p.Level));
-            bool exhausted = total >= RaidCatalog.MaxUnits || p.Budget - pts < cheapest || total == 1;
+            // FG14-SBX-01：名额按同时存在的敌人算（登陆舱投放的也占名额，RaidPlanRecord.Occupancy）。
+            bool exhausted = total >= RaidCatalog.MaxUnits || p.Occupancy >= RaidCatalog.MaxUnits || p.Budget - pts < cheapest || total == 1;
             why = $"预算 {p.Budget}、用掉 {pts}、最便宜 {cheapest}、{total} 台（{string.Join("、", p.UnitIds.Select((id, i) => id + "×" + p.UnitCounts[i] + (p.EliteCounts[i] > 0 ? "（精英 " + p.EliteCounts[i] + "）" : string.Empty)))}）";
             return p.UnitTotal == total && total >= 1 && ownFaction && (pts <= p.Budget || total == 1) && exhausted;
         }
@@ -756,14 +757,15 @@ namespace GameLogic.EditorTools
             Expect(Math.Abs(c0 - 1) < 1e-9 && Math.Abs(c3 - 1.2) < 1e-6 && Math.Abs(c20 - 1.5) < 1e-6, $"C2 间隔系数：隔 1 天 ×{c0:F2}、3 天 ×{c3:F2}、20 天 ×{c20:F2}（每多 1 天 +0.1，封顶 +0.5）");
 
             // C3：单位数上限 200——超出的预算把普通单位换成精英（后日谈大预算）。
+            // FG14-SBX-01：后日谈预算只给周期清洗（触发 purge，序号由后日谈服务指定）；普通 / 剧情突袭照常规曲线。
             s.Progress.IsPostgame = true;
-            RaidDirectorService.RequestStoryRaid(s, "silent", 4);
+            RaidDirectorService.RequestPurgeWave(s, EnemyDefs.FactionFleet, 4, "probe.postgame.0", 0);
             WorldSimulation.StepMany(2);
             RaidPlanRecord pg = LatestPlan(s);
             int elites = pg.EliteCounts.Sum();
             bool cap = pg.PostgameIndex == 0 && pg.Budget == (int)Math.Round(RaidCatalog.PostgameBase) && pg.UnitTotal <= RaidCatalog.MaxUnits && CompositionValid(pg, out string w3);
             CompositionValid(pg, out w3);
-            RaidDirectorService.RequestStoryRaid(s, "silent", 4);
+            RaidDirectorService.RequestPurgeWave(s, EnemyDefs.FactionFleet, 4, "probe.postgame.1", 1);
             WorldSimulation.StepMany(2);
             RaidPlanRecord pg2 = LatestPlan(s);
             bool growth = pg2.PostgameIndex == 1 && pg2.Budget == (int)Math.Round(RaidCatalog.PostgameBase * RaidCatalog.PostgameGrowth);
@@ -771,9 +773,9 @@ namespace GameLogic.EditorTools
             // 人为放大预算验证“到上限换精英”（同一套编成函数）：
             pg.Budget = 20000;
             RaidDirectorService.Compose(s, pg);
-            bool elite = pg.UnitTotal == RaidCatalog.MaxUnits && pg.EliteCounts.Sum() > 0 && PointsOf(pg) <= pg.Budget;
+            bool elite = pg.Occupancy == RaidCatalog.MaxUnits && pg.UnitTotal <= RaidCatalog.MaxUnits && pg.EliteCounts.Sum() > 0 && PointsOf(pg) <= pg.Budget;
             Expect(cap && growth && elite, $"C3 后日谈预算 1200 × 1.15ⁿ（第 0 次 {RaidCatalog.PostgameBase:F0}、第 1 次 {pg2.Budget}）；编成 {w3}；" +
-                                           $"预算远超时单位数停在上限 {pg.UnitTotal}、多出的预算换成精英 {pg.EliteCounts.Sum()} 台（FG16 第 5 节）");
+                                           $"预算远超时同时存在的敌人停在上限 {pg.Occupancy}（编成 {pg.UnitTotal} 台，含登陆舱投放）、多出的预算换成精英 {pg.EliteCounts.Sum()} 台（FG16 第 5 节）");
 
             // C4：确定性——同一世界种子、同一计划序号 → 同一编成；不同序号一般不同。
             var copy = new RaidPlanRecord { Serial = a.Serial, Faction = a.Faction, Level = a.Level, Budget = a.Budget, Counter = a.Counter };

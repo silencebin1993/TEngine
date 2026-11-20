@@ -141,6 +141,9 @@ namespace GameLogic.Campaign
         public int GeneratorVersion;
         public bool IsPostgame;
         public bool IsSandbox;
+        /// <summary>FG14-SBX-01（FGR-SBX-003“这些数据显示在主菜单的存档卡片上”）：后日谈坚守天数与达到的最高清洗等级（不是后日谈 = 0）。</summary>
+        public int PostgameDays;
+        public int PostgameTopLevel;
         /// <summary>缩略图文件路径。尚未实现截图（DEBT-FG0SAVE01-01 → FG15-SYS-01），恒为 null。</summary>
         public string ThumbnailPath;
         /// <summary>备份文件本身的状态（Empty = 没有备份）。</summary>
@@ -184,6 +187,9 @@ namespace GameLogic.Campaign
         public int GeneratorVersion;
         public bool IsPostgame;
         public bool IsSandbox;
+        /// <summary>FG14-SBX-01（FGR-SBX-003“这些数据显示在主菜单的存档卡片上”）：后日谈坚守天数与达到的最高清洗等级（不是后日谈 = 0）。</summary>
+        public int PostgameDays;
+        public int PostgameTopLevel;
     }
 
     /// <summary>FG0-SAVE-01 自检专用：在存档流程的指定位置模拟"进程被强制结束"。</summary>
@@ -564,6 +570,8 @@ namespace GameLogic.Campaign
             GeneratorVersion = s.World?.GeneratorVersion ?? 0,
             IsPostgame = s.Progress?.IsPostgame ?? false,
             IsSandbox = s.Progress?.IsSandbox ?? false,
+            PostgameDays = Endgame.PostgameService.HoldDays(s, GameLogic.Core.GameClock.Ticks),
+            PostgameTopLevel = s.Progress?.Postgame?.HighestLevel ?? 0,
         };
 
         private static readonly Regex SchemaHeaderRegex = new Regex("\"SchemaVersion\"\\s*:\\s*(\\d+)", RegexOptions.CultureInvariant);
@@ -807,6 +815,8 @@ namespace GameLogic.Campaign
             meta.GeneratorVersion = card.GeneratorVersion;
             meta.IsPostgame = card.IsPostgame;
             meta.IsSandbox = card.IsSandbox;
+            meta.PostgameDays = card.PostgameDays;
+            meta.PostgameTopLevel = card.PostgameTopLevel;
             meta.ThumbnailPath = null;
             return meta;
         }

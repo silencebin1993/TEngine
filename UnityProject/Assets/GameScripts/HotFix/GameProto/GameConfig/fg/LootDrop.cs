@@ -41,7 +41,7 @@ public sealed partial class LootDrop : Luban.BeanBase
     /// </summary>
     public readonly string Id;
     /// <summary>
-    /// 来源:minion野外普通敌人/elite野外精英/outpost敌方据点被摧毁/worm掘进蠕虫的一节被击毁/orbital轨道坠落撞击后的坠落残骸
+    /// 来源:minion野外普通敌人/elite野外精英/outpost敌方据点被摧毁/worm掘进蠕虫的一节被击毁/orbital轨道坠落撞击后的坠落残骸/purge后日谈清洗中在家园被击毁的白潮单位
     /// </summary>
     public readonly string Source;
     /// <summary>

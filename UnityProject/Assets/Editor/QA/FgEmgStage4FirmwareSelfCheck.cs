@@ -114,10 +114,13 @@ namespace GameLogic.EditorTools
             var rows = FirmwareKinds.Rows.Where(r => r != null && !FirmwareKinds.IsMixedRow(r)).Select(r => r.Id).ToList();
             var addon = FirmwareKinds.AddonRows.Select(r => r.Id).ToList();
             int before = 8 + FgEmgStage3FirmwareSelfCheck.Spec.Length;
-            Expect(addon.Count == before + Spec.Length && addon.Skip(before).SequenceEqual(Spec.Select(s => s.Id)) && rows.Skip(44 + before).SequenceEqual(Spec.Select(s => s.Id))
+            // FG13-FAC-01 的 3 条白潮预制固件（fw_pf_*）随后追加在表尾，本段只核阶段 4 这 3 行的位置与其后只接 FG13 的追加行。
+            string[] fleetTail = { "fw_pf_quench", "fw_pf_shockguard", "fw_pf_repulse" };
+            Expect(addon.Count == before + Spec.Length + fleetTail.Length && addon.Skip(before).Take(Spec.Length).SequenceEqual(Spec.Select(s => s.Id))
+                   && addon.Skip(before + Spec.Length).SequenceEqual(fleetTail) && rows.Skip(44 + before).Take(Spec.Length).SequenceEqual(Spec.Select(s => s.Id))
                    && FirmwareKinds.BaseRows.Count == 44 && addon.Take(8).Concat(FgEmgStage3FirmwareSelfCheck.Spec.Select(s => s.Id)).SequenceEqual(addon.Take(before))
                    && Spec.All(s => FirmwareCatalog.All.ContainsKey(s.Id) && FirmwareCatalog.IsAddon(s.Id)),
-                $"新固件 3 条按 FG19A 顺序追加在表尾第 {45 + before}～{44 + before + Spec.Length} 行（{string.Join("、", addon.Skip(before))}）；名表 44 条、阶段 1 / 3 的 {before} 条不动；都进固件目录");
+                $"新固件 3 条按 FG19A 顺序追加在表尾第 {45 + before}～{44 + before + Spec.Length} 行（{string.Join("、", addon.Skip(before).Take(Spec.Length))}，其后 FG13-FAC-01 追加 {string.Join("、", addon.Skip(before + Spec.Length))}）；名表 44 条、阶段 1 / 3 的 {before} 条不动；都进固件目录");
             EmgSource src = EmgCatalog.FromTables();
             var ports = src.Ports.ToDictionary(p => p.Id, p => p, StringComparer.Ordinal);
             var bad = new List<string>();

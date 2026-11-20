@@ -219,7 +219,7 @@ namespace GameLogic.EditorTools
                    && FirmwareKinds.FactionOf(FirmwareCatalog.FwOverloadId) == "reclaim"
                    && own.SequenceEqual(new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwOverloadId, FirmwareCatalog.FwSplitId, FirmwareCatalog.FwTrailId })
                    && FirmwareKinds.Rows.All(r => new[] { "own", "neutral", "enemy" }.Contains(r.Protocol)
-                                                  && new[] { "reclaim", "relic", "silent", "foundry", "clarity", "overclock" }.Contains(r.Faction)
+                                                  && new[] { "reclaim", "relic", "silent", "foundry", "clarity", "overclock", "fleet" }.Contains(r.Faction)
                                                   && GameText.Has("faction." + r.Faction)),
                 $"敌方加密协议的固件 {enemy.Count} 条（含静默协议数据盒 → 标记跳转、铸造技术缓存 → 装甲击穿），己方 = 寻的 / 过载 / 分裂 / 拖尾，其余中立；阵营键都已登记且有名称");
             Expect(Mathf.Approximately(RawFirmwareService.ExposurePerFire, 2f) && Mathf.Approximately(RawFirmwareService.HeatMultiplier, 1.5f)

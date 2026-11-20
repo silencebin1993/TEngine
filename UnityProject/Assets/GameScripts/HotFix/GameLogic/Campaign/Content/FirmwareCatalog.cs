@@ -250,6 +250,7 @@ namespace GameLogic.Campaign.Content
                 case "elite": return MechanicalContentSource.EliteDrop;
                 case "boss": return MechanicalContentSource.FactionBoss;
                 case "fusion": return MechanicalContentSource.Fusion; // FG5-RND-04：混合固件
+                case "fleet": return MechanicalContentSource.RegionSalvage; // FG13-FAC-01：白潮残骸里的人类预制固件 = 区域战场掉落（FieldLootService.PickIdentity）
                 default:
                     Log.Error($"[FirmwareCatalog] 未知的获取途径 {source}（check_luban R24 应已拦下），按区域掉落处理。");
                     return MechanicalContentSource.RegionSalvage;
