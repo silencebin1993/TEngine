@@ -2577,8 +2577,8 @@ namespace GameLogic.EditorTools
             {
                 k.SpawnField(EmgFieldConst.PortCorona, (f % 8 - 4) * 9.0, (f / 8 - 4) * 9.0, 3f, 3f, 0, CombatFaction.Player);
             }
-            CombatKernel h = sites[1].Kernel;
-            for (int n = 128 - h.PatchCount; n > 0; n--)
+            CombatKernel h = sites.Length > 1 ? sites[1].Kernel : null; // FG14-SBX-01：后日谈 GPU 探针只装一个地点（没有家园那一份）
+            for (int n = h != null ? 128 - h.PatchCount : 0; n > 0; n--)
             {
                 int cell = seq++ % 144;
                 h.SpawnPatch(mats[seq % mats.Length], new double2((cell % 12 - 6) * 3.0, (cell / 12 - 6) * 3.0), 1f, 1f, 8f);
@@ -2721,6 +2721,58 @@ namespace GameLogic.EditorTools
                 AddEventHosts(site.Kernel, progs[i], ids[i], hosts);
             }
             return ids;
+        }
+
+        /// <summary>
+        /// FG14-SBX-01（卡片负向“高等级清洗不超出性能预算（含涌现满载）”，FGT-SBX-002 / FGR-EMG-202、203）：把 H 段“加满”的涌现负载装到外部给的一个战斗地点上，
+        /// 供 <see cref="FgPostgamePerfProbe"/> 与第 31 级清洗叠在同一场景里量帧时间。装的东西与 H 段远征地点逐项相同：120 台带程序机器（72 台无人机舱各挂 8 架）、
+        /// 残骸 256、斑块按种类补到软上限（世界源 96 + 928 = 1024）、活跃场 64、事件每步 512 条（宿主模板注入，走真实总线）。
+        /// </summary>
+        internal sealed class AttachedLoad
+        {
+            internal CombatSite[] Sites;
+            internal List<EmgEvent>[] Hosts;
+            internal List<int> Machines;
+            internal int Wrecks, Seq, Cursor, Step;
+            internal long Injected;
+        }
+
+        /// <summary>装上满载（调用方先放好敌人与炮塔）；用完调 <see cref="DetachFullLoad"/> 还原开关与目录。</summary>
+        internal static AttachedLoad AttachFullLoad(CombatSite site)
+        {
+            ConfigSystem.Instance.Load();
+            FgContentTables.Reload();
+            FirmwareKinds.ResetForTests();
+            FirmwareCatalog.Invalidate();
+            CarrierReadings.Reload();
+            EmgCatalog.ResetForTests();
+            UseStage(EmgCatalog.ImplementedStage);
+            _maxLoad = MaxAll;
+            _maxWorldDone = false;
+            var l = new AttachedLoad { Sites = new[] { site }, Hosts = new[] { new List<EmgEvent>() } };
+            l.Machines = SpawnLoadMachines(site, 120, 18f, l.Hosts[0]);
+            l.Wrecks = AddWrecks(site, 256, 26f);
+            TopUpStage2Load(l.Sites, ref l.Seq);
+            return l;
+        }
+
+        /// <summary>两个内核步之间（热更层注入的时机，与 H 段同节奏）：每秒换攻击目标、补斑块 / 场；每步注入事件。</summary>
+        internal static void BetweenSteps(AttachedLoad l)
+        {
+            if (l.Step % 60 == 0)
+            {
+                OrderAttacks(l.Sites[0], l.Machines, l.Step);
+                TopUpStage2Load(l.Sites, ref l.Seq);
+            }
+            l.Injected += InjectLoad(l.Sites, l.Hosts, l.Step, ref l.Cursor);
+            l.Step++;
+        }
+
+        internal static void DetachFullLoad()
+        {
+            _maxLoad = 0;
+            _maxWorldDone = false;
+            EmgCatalog.ResetForTests();
         }
 
         private static int AddWrecks(CombatSite site, int count, float radius)

@@ -92,6 +92,8 @@ namespace GameLogic.Campaign
         /// <summary>剧情突袭 ID（fg.TbRaidStory.id）；其它触发为空。</summary>
         public string StoryId = string.Empty;
         public long Tick;
+        /// <summary>FG14-SBX-01：后日谈周期清洗的序号 n（预算 1200 × 1.15ⁿ，由 PostgameService 指定；被取消重发时沿用同一个 n）；-1 = 不是后日谈清洗。</summary>
+        public int PostgameIndex = -1;
     }
 
     /// <summary>
@@ -179,8 +181,12 @@ namespace GameLogic.Campaign
         public string EndReason = string.Empty;
         /// <summary>出发前出发地变了（据点被毁）：改道次数。</summary>
         public int Reroutes;
-        /// <summary>后日谈第几次清洗（-1 = 不是后日谈的突袭）。</summary>
+        /// <summary>后日谈第几次清洗（0 起；-1 = 不是后日谈的周期清洗）。FG14-SBX-01 起只有后日谈里的清洗波次（触发 purge）才有，普通突袭照常规曲线。</summary>
         public int PostgameIndex = -1;
+        /// <summary>FG14-SBX-01（FG12 第 4 节“通过精英化和单位强度体现难度”）：单位数到上限、全部换成精英后，剩余预算按比例抬高的耐久 / 伤害倍率（预算 ÷ 已花点数）；1 = 不加强。</summary>
+        public float Strength = 1f;
+        /// <summary>FG14-SBX-01：这一波落地后同时存在的敌人数（每台 1 + 登陆舱投放的台数；≤ raid.max_units）。</summary>
+        public int Occupancy;
         /// <summary>排定时用的“上一波普通突袭抵达步”（改道重新排定时沿用它，不把自己算成上一波）。</summary>
         public long IntervalBaseTick = -1;
         /// <summary>

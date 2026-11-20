@@ -819,7 +819,8 @@ namespace GameLogic.EditorTools
             int pg0 = d.PostgameCount;
             Raise(s, CampaignExposureLedger.FactionFoundry, 31f);
             RaidPlanRecord p = Plans(s).FirstOrDefault(x => !x.Exempt);
-            bool planned = postgame && p != null && p.PostgameIndex == pg0 && d.PostgameCount == pg0 + 1
+            // FG14-SBX-01（FG16 第 5 节“第 n 次清洗”）：后日谈里的普通突袭不占清洗序号（只有周期清洗按 1200 × 1.15ⁿ 算），取消后清洗计数也不变。
+            bool planned = postgame && p != null && p.PostgameIndex == -1 && d.PostgameCount == pg0
                            && RunUntil(() => p.State >= RaidDirectorService.StateScheduled, 200) && p.State == RaidDirectorService.StateScheduled && p.IntervalBaseTick == destroyedArrival;
             DifficultyService.Change(s, P("Builder"), out DifficultyChangeRecord r);
             bool anchors = planned && r != null && r.CancelledRaids == 1 && p.State == RaidDirectorService.StateCancelled
@@ -831,7 +832,7 @@ namespace GameLogic.EditorTools
             }
             Expect(anchors && refunded,
                 $"E14 取消后重算最短间隔的参照：途中被全歼的上一波普通突袭（历史只有排定的抵达步 {destroyedArrival}）仍算参照（重算后 {d.LastArrivalTick} / {d.LastAnyArrivalTick}），不让下一波提前；" +
-                $"E15 取消的后日谈计划归还清洗序号（{pg0} → {pg0 + 1} → {d.PostgameCount}），下一次清洗不多算一档");
+                $"E15 后日谈里的普通突袭不占清洗序号、取消后清洗计数不变（{pg0} → {d.PostgameCount}），下一次清洗不多算也不少算一档");
         }
 
         // ── F 存读档 ─────────────────────────────────────────────────────────────

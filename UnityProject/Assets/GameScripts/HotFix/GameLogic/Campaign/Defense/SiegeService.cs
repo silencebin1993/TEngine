@@ -258,7 +258,8 @@ namespace GameLogic.Campaign.Defense
             ExtendTheater(state, site, new GridCell(gather.X, gather.Y), NavService.CellOf(g.TargetX, g.TargetY));
             BuildUnitList(g);
             // FG6-DEF-09（FG16 第 3 节“敌人耐久和伤害”）：按当前难度的突袭敌人倍率生成（建造者 ×0.8 / 标准 ×1 / 严酷 ×1.2；难度说明里公开写出）。
-            int n = SpawnUnits(site, key, gather, target, g.Faction, DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state), InsulateOf(state, g));
+            float str = StrengthOf(state, g); // FG14-SBX-01：后日谈高等级清洗的单位强度
+            int n = SpawnUnits(site, key, gather, target, g.Faction, DifficultyService.EnemyHealthMul(state) * str, DifficultyService.EnemyDamageMul(state) * str, InsulateOf(state, g));
             g.Engaged = true;
             // FG10-RAID-01 复核 #1：ExtendTheater 写职能表时这支队伍还没 Engaged；展开当步就按“澄净在场”重写（不等对账，读档与不读档一致）。
             ApplyRoles(state, site, false);
@@ -331,6 +332,16 @@ namespace GameLogic.Campaign.Defense
             {
                 UnitScratch.Add((fallback, false));
             }
+        }
+
+        /// <summary>
+        /// FG14-SBX-01（FG12 第 4 节“清洗等级非常高：通过精英化和单位强度体现难度”）：队伍所属计划的单位强度（名额满、全部精英后剩余预算换成的耐久 / 伤害倍率，
+        /// <see cref="RaidPlanRecord.Strength"/>）；没有计划 / 不是后日谈清洗 = 1。攻城投放、野外遭遇、登陆舱落地投放都乘它。
+        /// </summary>
+        public static float StrengthOf(CampaignState state, TransitGroupRecord g)
+        {
+            RaidPlanRecord p = g != null && !string.IsNullOrEmpty(g.PlanId) ? RaidDirectorService.FindPlan(state, g.PlanId) : null;
+            return p != null && p.Strength > 1f ? p.Strength : 1f;
         }
 
         /// <summary>

@@ -243,6 +243,7 @@ namespace GameLogic.Campaign.Env
                 }
             }
             EventDirectorService.SetHistoryReward(s, r.Serial, 0, frag?.Id);
+            Endgame.PostgameService.OnOrbitalDrop(s, at, r.Serial); // FG14-SBX-01（FGR-SBX-004）：后日谈的坠落残骸常带来人类遗产
             Rewards++;
         }
 

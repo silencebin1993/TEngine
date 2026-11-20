@@ -352,14 +352,14 @@ namespace GameLogic.Campaign.Defense
         /// FG13-END-03（FG11 FGR-END-020）：清洗波次的一波（<see cref="Endgame.PurgeWaveService"/> 调用）：触发 purge，阵营 = <paramref name="faction"/>（白潮），等级 = <paramref name="level"/>；
         /// <paramref name="waveId"/> 记进计划的 StoryId（清洗服务据此认出自己的那一波）。不受最短间隔限制、建造者难度照样来；目标固定是家园、登陆点在核心外 purge.drop_cells 格（见 <see cref="SelectOrigin"/>）。
         /// </summary>
-        public static bool RequestPurgeWave(CampaignState s, string faction, int level, string waveId)
+        public static bool RequestPurgeWave(CampaignState s, string faction, int level, string waveId, int postgameIndex = -1)
         {
             if (s?.Raids == null)
             {
                 return false;
             }
             EnsureState(s);
-            Enqueue(s.Raids.Director, RaidCatalog.TriggerPurge, Math.Max(1, Math.Min(4, level)), faction, waveId);
+            Enqueue(s.Raids.Director, RaidCatalog.TriggerPurge, Math.Max(1, Math.Min(4, level)), faction, waveId, postgameIndex);
             return true;
         }
 
@@ -384,7 +384,7 @@ namespace GameLogic.Campaign.Defense
             return true;
         }
 
-        private static void Enqueue(RaidDirectorState d, string kind, int level, string faction, string storyId)
+        private static void Enqueue(RaidDirectorState d, string kind, int level, string faction, string storyId, int postgameIndex = -1)
         {
             var list = new List<RaidTriggerRecord>(d.Pending.Length + 1);
             list.AddRange(d.Pending);
@@ -395,6 +395,7 @@ namespace GameLogic.Campaign.Defense
                 Faction = faction ?? string.Empty,
                 StoryId = storyId ?? string.Empty,
                 Tick = GameClock.Ticks,
+                PostgameIndex = postgameIndex,
             });
             d.Pending = list.ToArray();
             d.TriggersReceived++;

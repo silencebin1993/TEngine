@@ -86,6 +86,8 @@ namespace GameLogic.UI.Kit
             RaidHistoryButton = Bind(root, "PauseRaidHistory", "pause.raid_history", RaidResultPanelUIToolkit.Open);
             // FG12-EVT-01（FG10 第 10 节）：事件历史盖在暂停菜单上面，关掉回到暂停菜单；“事件频率”（FGR-EVT-006）点击在 关闭 / 少 / 标准 / 多 之间切换，立即生效、随存档。
             EventHistoryButton = Bind(root, "PauseEventHistory", "pause.event_history", EventHistoryPanelUIToolkit.Open);
+            // FG14-SBX-01（FGR-SBX-003 / FG12 第 3 节）：坚守记录（统计 + 清洗历史）盖在暂停菜单上面，关掉回到暂停菜单；只在后日谈里显示。
+            PostgameButton = Bind(root, "PausePostgame", "pause.postgame", PostgamePanelUIToolkit.Open);
             // FG12-EVT-06（FGU-39）：流浪商队交易盖在暂停菜单上面，关掉回到暂停菜单；商队不在时面板写明它何时会来。
             CaravanButton = Bind(root, "PauseCaravan", "pause.caravan", CaravanTradePanelUIToolkit.Open);
             EventFrequencyButton = root.Q<Button>("PauseEventFrequency");
@@ -165,6 +167,7 @@ namespace GameLogic.UI.Kit
         public Button RosterButton { get; private set; }
         public Button RaidHistoryButton { get; private set; }
         public Button EventHistoryButton { get; private set; }
+        public Button PostgameButton { get; private set; }
         public Button CaravanButton { get; private set; }
         public Button EventFrequencyButton { get; private set; }
 
@@ -716,6 +719,7 @@ namespace GameLogic.UI.Kit
                 SyncReactionToggles();
                 SyncAutoPickup();
                 SyncEventFrequency();
+                PostgameButton?.EnableInClassList("uk-hidden", !Campaign.Endgame.PostgameService.Started(CampaignSession.Current));
             }
             else
             {

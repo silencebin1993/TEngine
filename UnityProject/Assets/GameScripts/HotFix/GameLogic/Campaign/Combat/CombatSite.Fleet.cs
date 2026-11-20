@@ -151,18 +151,20 @@ namespace GameLogic.Campaign.Combat
                     return;
                 }
                 Vector2 target = at;
+                float str = 1f;
                 foreach (TransitGroupRecord g in SiegeService.SiegingGroups(state))
                 {
                     if (SiegeService.KeyOf(g) == groupKey)
                     {
                         target = new Vector2((float)g.TargetX, (float)g.TargetY);
+                        str = SiegeService.StrengthOf(state, g); // FG14-SBX-01：舱里投放的单位与这一波同强度
                         break;
                     }
                 }
                 for (int k = 0; k < count; k++)
                 {
                     if (SiegeService.SpawnOne(this, groupKey, RingAt(at, ring, k, count), target, def, false,
-                            DifficultyService.EnemyHealthMul(state), DifficultyService.EnemyDamageMul(state)) > 0)
+                            DifficultyService.EnemyHealthMul(state) * str, DifficultyService.EnemyDamageMul(state) * str) > 0)
                     {
                         PodCargoSpawned++;
                     }

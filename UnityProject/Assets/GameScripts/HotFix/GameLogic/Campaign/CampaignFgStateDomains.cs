@@ -136,6 +136,67 @@ namespace GameLogic.Campaign
         /// <summary>FG13-END-05（FG11 FGR-END-022、第 10 节“终战当前段落与阶段”）：先遣旗舰战进度。唯一写入口 <c>GameLogic.Campaign.Endgame.FlagshipService</c>；
         /// 信标 / 要塞 / 节点 / 中继本身是区域敌人记录（随存档），被夺取的机器在星球内核的夺控表里（快照段 27）。旧存档没有 = 还没开战。</summary>
         public FlagshipState Flagship = new FlagshipState();
+        /// <summary>FG14-SBX-01（FG12 FGR-SBX-002 / 003 / 005、第 5 节存档）：后日谈的周期清洗计时与等级、坚守统计、清洗历史、坚守结束。
+        /// 唯一写入口 <c>GameLogic.Campaign.Endgame.PostgameService</c>。旧存档没有 = 还没进入后日谈（是后日谈的旧档载入后下一步从那一刻起算）。</summary>
+        public PostgameState Postgame = new PostgameState();
+    }
+
+    /// <summary>FG14-SBX-01：后日谈进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
+    [Serializable]
+    public sealed class PostgameState
+    {
+        /// <summary>进入后日谈的那一步（-1 = 还没）；坚守天数从这里算。</summary>
+        public long StartTick = -1;
+        /// <summary>下一次周期清洗交给突袭导演的那一步（-1 = 还没排）。</summary>
+        public long NextPurgeTick = -1;
+        /// <summary>这一次被取消 / 没建出计划后的重发时刻（-1 = 不在等重发）；重发不改 <see cref="NextPurgeTick"/> 的节拍。</summary>
+        public long RetryTick = -1;
+        /// <summary>已交给导演的清洗次数（= 下一次的清洗序号 n，等级 = n + 1）与撑过的次数。</summary>
+        public int Launched;
+        public int Cleared;
+        /// <summary>进行中那一次的序号（-1 = 没有）、计划编号（导演建好计划后填）与发动那一步。</summary>
+        public int ActiveIndex = -1;
+        public string ActivePlanId = string.Empty;
+        public long ActiveTick = -1;
+        /// <summary>达到的最高清洗等级（来过的最高）与撑过的最高等级。</summary>
+        public int HighestLevel;
+        public int HighestCleared;
+        /// <summary>最佳单次防守（撑过的清洗里击毁最多的那一次；并列取损失少的）：等级、击毁、其中精英、损失；BestLevel = 0 = 还没有。</summary>
+        public int BestLevel;
+        public int BestKilled;
+        public int BestElite;
+        public int BestLosses;
+        /// <summary>累计（全部清洗）击毁、其中精英、损失。</summary>
+        public int TotalKilled;
+        public int TotalElite;
+        public int TotalLosses;
+        /// <summary>坚守结束（核心被毁）那一步（-1 = 还在坚守）。</summary>
+        public long EndTick = -1;
+        /// <summary>清洗历史（最近 postgame.history_max 条，最早的在前；统计不受裁剪影响）。</summary>
+        public PostgamePurgeRecord[] History = Array.Empty<PostgamePurgeRecord>();
+    }
+
+    /// <summary>FG14-SBX-01：一次后日谈清洗的记录（清洗历史一行）。</summary>
+    [Serializable]
+    public sealed class PostgamePurgeRecord
+    {
+        /// <summary>清洗序号 n（0 起），等级 = n + 1。</summary>
+        public int Index;
+        public int Level;
+        public string PlanId = string.Empty;
+        public long LaunchTick = -1;
+        public long EndTick = -1;
+        /// <summary>open / repelled / core_lost（文本键 postgame.outcome.*）。</summary>
+        public string Outcome = "open";
+        public int Budget;
+        /// <summary>同时存在的敌人（含登陆舱投放）、其中精英台数、单位强度倍率。</summary>
+        public int Units;
+        public int Elites;
+        public float Strength = 1f;
+        /// <summary>结算读数（突袭结算记录同一份）：击毁、其中精英、损失。</summary>
+        public int Killed;
+        public int EliteKilled;
+        public int Losses;
     }
 
     /// <summary>FG13-END-05：先遣旗舰战进度。时刻都是统一时钟步数（暂停不走、倍速同比）。</summary>
@@ -3111,6 +3172,8 @@ namespace GameLogic.Campaign
             s.Progress.Mega ??= new MegastructureState(); // FG13-END-01：旧存档没有返航工程 = 第一阶段、全部为 0
             s.Progress.Mega.Done ??= Array.Empty<MegaStageDoneRecord>();
             s.Progress.Purge ??= new PurgeWaveState(); // FG13-END-03：旧存档没有清洗波次 = 还没开始
+            s.Progress.Postgame ??= new PostgameState(); // FG14-SBX-01：旧存档没有后日谈状态 = 还没起算（是后日谈的旧档下一步起算）
+            s.Progress.Postgame.History ??= Array.Empty<PostgamePurgeRecord>();
             s.Progress.Beachhead ??= new BeachheadState(); // FG13-END-04：旧存档没有滩头 = 还没着陆
             s.Progress.Flagship ??= new FlagshipState(); // FG13-END-05：旧存档没有先遣旗舰战 = 还没开战
             s.Progress.Flagship.Seized ??= Array.Empty<int>();

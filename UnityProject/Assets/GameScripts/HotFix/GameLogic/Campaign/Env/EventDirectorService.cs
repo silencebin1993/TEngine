@@ -378,7 +378,7 @@ namespace GameLogic.Campaign.Env
         public static long DueTick(CampaignState s, string eventId)
         {
             EventDirectorScheduleRecord rec = Schedule(s, eventId);
-            double rate = Rate(s);
+            double rate = Rate(s) * Endgame.PostgameService.EventRateMul(s, eventId);
             if (rec == null || rec.AnchorTick < 0 || rate <= 0)
             {
                 return long.MaxValue;
@@ -662,7 +662,9 @@ namespace GameLogic.Campaign.Env
                 }
                 // “关闭”档：之前挂起 / 推迟的请求只留剧情与点位的（FGR-EVT-006），其余留着、改回档位后再补。
                 bool pendingOn = rec.Pending && (d.Frequency != FrequencyOff || rec.PendingStory || def.Trigger == TriggerSite);
-                bool due = pendingOn || (randomOn && rate > 0 && tick >= rec.AnchorTick + (long)Math.Ceiling(rec.GapTicks / rate));
+                // FG14-SBX-01（FGR-SBX-004“轨道坠落更频繁”）：后日谈里轨道坠落的随机间隔再 ÷ postgame.orbital_drop_rate（与 DueTick 同一口径）。
+                double defRate = rate * Endgame.PostgameService.EventRateMul(s, def.Id);
+                bool due = pendingOn || (randomOn && defRate > 0 && tick >= rec.AnchorTick + (long)Math.Ceiling(rec.GapTicks / defRate));
                 if (!due)
                 {
                     SetBlocked(rec, string.Empty);

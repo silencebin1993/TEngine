@@ -100,8 +100,8 @@ namespace GameLogic.Campaign.Defense
                 if (Math.Abs(ratio - 1.0) > 1e-6)
                 {
                     // 规模变了：按比例缩放（不从零重算——排定后间隔系数会变回 1、并波吸收的预算也会丢）。只改频率 / 预警时预算与编成不动，预报照常有效。
-                    p.Budget = Math.Max(1, (int)Math.Round(p.Budget * ratio));
-                    p.AbsorbedBudget = Math.Min(p.Budget, Math.Max(0, (int)Math.Round(p.AbsorbedBudget * ratio)));
+                    p.Budget = Math.Max(1, (int)Math.Round(Math.Min(p.Budget * ratio, int.MaxValue))); // 高等级清洗预算接近 int 上限：放大时封顶，不越界
+                    p.AbsorbedBudget = Math.Min(p.Budget, Math.Max(0, (int)Math.Round(Math.Min(p.AbsorbedBudget * ratio, int.MaxValue))));
                 }
                 if (stripped || p.Budget != before)
                 {

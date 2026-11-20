@@ -45,6 +45,9 @@ namespace GameLogic.EditorTools
     /// </summary>
     public static class FgHeritageSelfCheck
     {
+        /// <summary>FG14-SBX-01：放进遗迹点的遗产（后日谈专属的最后一组不放置，只由后日谈的轨道坠落带来）。</summary>
+        private static List<Heritage> Placeable => HeritageService.All.Where(h => !HeritageService.PostgameOnly(h)).ToList();
+
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const string UiKitFolder = "Assets/GameRes/Raw/UI/UiKit/";
         private const int Slot = 7;
@@ -408,7 +411,8 @@ namespace GameLogic.EditorTools
             var relicFw = FirmwareKinds.Rows.Where(r => r.Source == "relic").Select(r => r.Id).OrderBy(x => x, StringComparer.Ordinal).ToList();
             var fwRows = all.Where(h => h.Category == HeritageService.CatFirmware).Select(h => h.UnlockId).OrderBy(x => x, StringComparer.Ordinal).ToList();
             bool fw = relicFw.Count > 0 && relicFw.SequenceEqual(fwRows);
-            bool acts = all.All(h => h.Act >= 1 && h.Act <= 3 && h.MinDistance < h.MaxDistance) && Enumerable.Range(1, 3).All(a => all.Any(h => h.Act == a))
+            // FG14-SBX-01（FG12 FGR-SBX-004“开放最后一组人类遗产（只能在后日谈获得）”）：幕 = 4 的是后日谈专属组，不进三幕距离分布（由 FgPostgameSelfCheck I2 覆盖）。
+            bool acts = all.All(h => h.Act >= 1 && h.Act <= HeritageService.PostgameAct && h.MinDistance < h.MaxDistance) && Enumerable.Range(1, 3).All(a => all.Any(h => h.Act == a))
                         && all.Where(h => h.Act == 2).Min(h => h.MinDistance) >= all.Where(h => h.Act == 1).Max(h => h.MinDistance);
             bool notify = t.TbNotifyType.GetOrDefault(HeritageService.NotifyType)?.AwaySection == "research";
             bool hooks = new[] { GuidanceHooks.HeritageFirstFound, GuidanceHooks.HeritageFirstLeftBehind, GuidanceHooks.HeritageFirstDelivered, GuidanceHooks.HeritageVaultFirstOpen }
@@ -456,7 +460,7 @@ namespace GameLogic.EditorTools
                 HomeExplorationState st = HomeExplorationService.StateOf(s);
                 var bad = new List<string>();
                 var used = new HashSet<string>(StringComparer.Ordinal);
-                foreach (Heritage h in HeritageService.All)
+                foreach (Heritage h in Placeable)
                 {
                     string relic = HeritageService.RelicOf(s, h.Id);
                     if (relic == null || !HomeExplorationService.TryGetRelic(s, relic, out HomeExplorationService.RelicInfo info) || info.Kind != WorldFeatureKind.Relic)
@@ -496,7 +500,7 @@ namespace GameLogic.EditorTools
                 HomeExplorationService.RecoverableRelics(again);
                 HeritageService.EnsurePlaced(again);
                 bool same = Placement(again) == first;
-                bool ok = bad.Count == 0 && same && st.HeritageIds.Length == HeritageService.All.Count && !string.IsNullOrEmpty(st.HeritageWorld);
+                bool ok = bad.Count == 0 && same && st.HeritageIds.Length == Placeable.Count && !string.IsNullOrEmpty(st.HeritageWorld);
                 allOk &= ok;
                 placements.Add(first);
                 lines.Add($"种子 {seed}：{(ok ? "通过" : "失败")}" + (bad.Count > 0 ? "（" + string.Join("；", bad.Take(4)) + "）" : string.Empty) + (same ? string.Empty : "（两次结果不同）"));
@@ -522,7 +526,7 @@ namespace GameLogic.EditorTools
             CampaignFgStateDomains.EnsureAll(legacy);
             HeritageService.EnsurePlaced(legacy);
             string moved = HeritageService.RelicOf(legacy, HeritageService.All[0].Id);
-            bool oldOk = taken != null && moved != null && moved != taken && lst.HeritageIds.Length == HeritageService.All.Count
+            bool oldOk = taken != null && moved != null && moved != taken && lst.HeritageIds.Length == Placeable.Count
                          && HeritageService.All.All(h => HeritageService.RelicOf(legacy, h.Id) != taken);
             Expect(oldOk, $"P1 旧档（没有遗产字段、{taken} 已经回收过）：读回空字段不报错，挑选时跳过已回收的遗迹点，{HeritageService.All[0].Id} 改放到 {moved}");
         }
@@ -755,7 +759,7 @@ namespace GameLogic.EditorTools
             // 无效 / 迷雾目标：不存在的实例、已入库的遗产不能下取回单；迷雾里的遗迹照旧拒绝。
             HomeValleyWorkOrders.WorkOrderOpResult none = HomeExplorationService.OrderRecovery(s, HeritageService.InstanceIdOf("no_such"), 0);
             HomeValleyWorkOrders.WorkOrderOpResult obtained = HomeExplorationService.OrderRecovery(s, q.SalvageInstanceId, 0);
-            string far = HeritageService.RelicOf(s, HeritageService.All.Last().Id);
+            string far = HeritageService.RelicOf(s, Placeable.Last().Id);
             HomeValleyWorkOrders.WorkOrderOpResult fog = HomeExplorationService.OrderRecovery(s, far, 0);
             bool rejects = !none.Success && !obtained.Success && !fog.Success
                            && HomeValleyWorkOrders.DescribeCommandFailure(fog.FailureReason) == GameText.Get("relic.reason.fog")

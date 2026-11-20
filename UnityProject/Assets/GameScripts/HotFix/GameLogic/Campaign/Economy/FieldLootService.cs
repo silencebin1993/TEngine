@@ -42,6 +42,7 @@ namespace GameLogic.Campaign.Economy
         private const uint SaltOutpost = 0x4C4F4F34u;
         private const uint SaltWorm = 0x4C4F4F35u; // FG12-EVT-02
         private const uint SaltOrbital = 0x4C4F4F36u; // FG12-EVT-04
+        private const uint SaltPurge = 0x4C4F4F37u; // FG14-SBX-01
 
         // ── 自检读点（本进程累计）──
         public static long KillEvents { get; private set; }
@@ -53,6 +54,8 @@ namespace GameLogic.Campaign.Economy
         public static string LastGrantText { get; private set; }
 
         private static readonly List<LootDropDef> RowScratch = new List<LootDropDef>(16);
+        /// <summary>非空时 <see cref="Roll"/> 把落地的材料（物品, 件数）记进来（<see cref="OnPurgeKill"/> 给突袭结算记“缴获”用）。</summary>
+        private static List<ItemAmountRecord> _capture;
 
         public static void ResetSessionState()
         {
@@ -121,6 +124,30 @@ namespace GameLogic.Campaign.Economy
         }
 
         /// <summary>
+        /// FG14-SBX-01（FG12 FGR-SBX-002“舰队残骸可以回收，得到人类预制固件和稀有材料”）：后日谈清洗里一台白潮单位在家园攻城中被击毁（<see cref="Defense.RaidResultService"/> 调用）：
+        /// 按 purge 行掷稀有材料，落在残骸处、开搬运单（与野外掉落同一套确定性掷法）；返回落地的（物品, 件数），由突袭结算记进“缴获”。残骸 / 预制固件仍走突袭结算。
+        /// </summary>
+        public static List<ItemAmountRecord> OnPurgeKill(CampaignState s, Vector2 at, long serial)
+        {
+            var got = new List<ItemAmountRecord>(2);
+            LootPacketState st = StateOf(s);
+            if (st == null)
+            {
+                return got;
+            }
+            _capture = got;
+            try
+            {
+                Roll(s, st, LootCatalog.SourcePurge, Content.EnemyDefs.FactionFleet, at, serial, SaltPurge, 1f, OriginRaid, null);
+            }
+            finally
+            {
+                _capture = null;
+            }
+            return got;
+        }
+
+        /// <summary>
         /// FG12-EVT-04（FGR-EVT-031“坠落残骸：人类遗产、稀有材料”）：轨道坠落撞击，按 orbital 行在残骸处掷一次（与野外击毁同一套确定性掷法、落地与搬运单）。
         /// 序号用事件实例序号（导演每个实例只结束一次 → 只掷一次；不新增存档计数）。
         /// </summary>
@@ -174,6 +201,7 @@ namespace GameLogic.Campaign.Economy
                 if (row.Identity == LootCatalog.IdentityNone)
                 {
                     SpawnMaterial(s, st, row.Item, n, at, sid, SalvagePrefix + source + ":", region);
+                    _capture?.Add(new ItemAmountRecord { ItemId = row.Item.Id, Amount = n });
                     continue;
                 }
                 for (int i = 0; i < n; i++)

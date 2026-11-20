@@ -201,7 +201,7 @@ namespace GameLogic.Campaign.Env
                 st.HeritageReach = Array.Empty<int>();
                 st.HeritageReachRejected = Array.Empty<string>();
             }
-            if (st.HeritageIds.Length >= Rows.Count && AllPlacedListed(st))
+            if (AllPlacedListed(st))
             {
                 _placedState = st;
                 _placedIds = st.HeritageIds;
@@ -215,9 +215,9 @@ namespace GameLogic.Campaign.Env
             var relics = new List<string>(st.HeritageRelics);
             foreach (Heritage h in Rows)
             {
-                if (ids.Contains(h.Id))
+                if (ids.Contains(h.Id) || PostgameOnly(h))
                 {
-                    continue;
+                    continue; // FG14-SBX-01：后日谈专属的最后一组不放进遗迹点（只由后日谈的轨道坠落带来）
                 }
                 string relic = Pick(s, ctx, h, used, ref queries);
                 if (relic == null)
@@ -244,7 +244,7 @@ namespace GameLogic.Campaign.Env
         {
             foreach (Heritage h in Rows)
             {
-                if (Array.IndexOf(st.HeritageIds, h.Id) < 0)
+                if (!PostgameOnly(h) && Array.IndexOf(st.HeritageIds, h.Id) < 0)
                 {
                     return false;
                 }
@@ -915,12 +915,72 @@ namespace GameLogic.Campaign.Env
         /// FG12-EVT-06（FGR-EVT-051“商队卖人类遗产”）：这件遗产现在能不能从商队买——存在、不是剧情需要的、还没被找到（仍在遗迹里或没挑到遗迹点）。
         /// 已经找到 / 在货舱里 / 留在地上的不卖（每件每个世界只有一件，FG8-EXP-04）。
         /// </summary>
+        /// <summary>FG14-SBX-01（FG12 FGR-SBX-004“开放最后一组人类遗产（只能在后日谈获得）”）：表里幕 = 4 的遗产只在后日谈出现。</summary>
+        public const int PostgameAct = 4;
+
+        public static bool PostgameOnly(Heritage h) => h != null && h.Act >= PostgameAct;
+
+        /// <summary>
+        /// FG14-SBX-01（FGR-SBX-004“轨道坠落更容易带来人类遗产”）：后日谈里这次坠落带来哪一件——先是后日谈专属的最后一组（按表顺序），
+        /// 都有了之后是还没找到、不是剧情需要的普通遗产（与商队同一口径；它所在的遗迹之后就空了）。都没有 = null。
+        /// </summary>
+        public static Heritage NextOrbitalLegacy(CampaignState s)
+        {
+            EnsureLoaded();
+            if (HomeExplorationService.StateOf(s) == null)
+            {
+                return null;
+            }
+            foreach (Heritage h in Rows)
+            {
+                if (PostgameOnly(h) && !IsObtained(s, h.Id) && FindItem(s, h.Id) == null)
+                {
+                    return h;
+                }
+            }
+            foreach (Heritage h in Rows)
+            {
+                if (!PostgameOnly(h) && CanTrade(s, h.Id) && FindItem(s, h.Id) == null)
+                {
+                    return h;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// FG14-SBX-01：轨道坠落残骸处落下一件遗产（地上的区域关键物，与“货舱装不下留在原地”同一种：右键那里派机器去取，带回核心 / 仓库附近即入库）。
+        /// 返回落下的那件（没有可落的 = null）。
+        /// </summary>
+        public static Heritage DropFromOrbit(CampaignState s, Vector2 at)
+        {
+            Heritage h = NextOrbitalLegacy(s);
+            if (h == null)
+            {
+                return null;
+            }
+            var q = new RegionQuestItemRecord
+            {
+                SalvageInstanceId = InstanceIdOf(h.Id),
+                RegionId = HomeValleyLayout.RegionId,
+                ContentId = ContentId,
+                State = RegionQuestItemState.OnGround,
+                CarrierLogicId = 0,
+                Position = at,
+            };
+            s.RegionQuestItems = Append(s.RegionQuestItems, q);
+            Revision++;
+            GuidanceHooks.Raise(GuidanceHooks.HeritageFirstFound);
+            NotificationCenter.Post(NotifyType, GameText.Format("heritage.notify.orbital", Display(h), Mathf.RoundToInt(at.x), Mathf.RoundToInt(at.y)), new Vector3(at.x, 0f, at.y));
+            return h;
+        }
+
         public static bool CanTrade(CampaignState s, string heritageId)
         {
             Heritage h = Find(heritageId);
-            if (h == null || h.Story != 0 || HomeExplorationService.StateOf(s) == null)
+            if (h == null || h.Story != 0 || PostgameOnly(h) || HomeExplorationService.StateOf(s) == null)
             {
-                return false;
+                return false; // FG14-SBX-01：后日谈专属遗产商队不卖
             }
             HeritageStatus st = StatusOf(s, heritageId);
             return st == HeritageStatus.Hidden || st == HeritageStatus.Unplaced;
@@ -1185,7 +1245,8 @@ namespace GameLogic.Campaign.Env
                     RegionQuestItemRecord gq = FindItem(s, h.Id);
                     return GameText.Format("heritage.state.ground", Display(h), Mathf.RoundToInt(gq?.Position.x ?? 0f), Mathf.RoundToInt(gq?.Position.y ?? 0f));
                 default:
-                    return GameText.Format("heritage.state.unknown", CategoryName(h.Category), h.Act);
+                    return PostgameOnly(h) ? GameText.Format("heritage.state.unknown_postgame", CategoryName(h.Category))
+                        : GameText.Format("heritage.state.unknown", CategoryName(h.Category), h.Act);
             }
         }
 
@@ -1200,7 +1261,8 @@ namespace GameLogic.Campaign.Env
             HeritageStatus st = StatusOf(s, h.Id);
             if (st == HeritageStatus.Hidden || st == HeritageStatus.Unplaced)
             {
-                return GameText.Format("heritage.vault.detail_locked", h.Act, h.MinDistance, h.MaxDistance);
+                return PostgameOnly(h) ? GameText.Get("heritage.vault.detail_locked_postgame")
+                    : GameText.Format("heritage.vault.detail_locked", h.Act, h.MinDistance, h.MaxDistance);
             }
             var sb = new StringBuilder(256);
             sb.Append(Display(h)).Append('\n');
@@ -1224,7 +1286,8 @@ namespace GameLogic.Campaign.Env
         public static string CodexHint(string heritageId)
         {
             Heritage h = Find(heritageId);
-            return h == null ? string.Empty : GameText.Format("codex.heritage.locked_hint", CategoryName(h.Category), h.Act);
+            return h == null ? string.Empty : PostgameOnly(h) ? GameText.Format("codex.heritage.locked_hint_postgame", CategoryName(h.Category))
+                : GameText.Format("codex.heritage.locked_hint", CategoryName(h.Category), h.Act);
         }
 
         public static long ObtainedTick(CampaignState s, string heritageId)
