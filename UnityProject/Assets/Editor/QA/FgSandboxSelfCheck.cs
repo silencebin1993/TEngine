@@ -714,6 +714,18 @@ namespace GameLogic.EditorTools
                 $"H1 存读档：沙盒标记、设置、修改记录、事件频率、关闭保证读回 = 存档时（{sigL == sig0}），再走 20 秒与不读档一致（{sigA == sigB}）；存档卡“{card}”（{cardOk}）"
                 + (sigL != sig0 ? $"\n存档时：{sig0}\n读回：{sigL}" : string.Empty) + (sigA != sigB ? $"\n不读档：{sigA}\n读档后：{sigB}" : string.Empty));
 
+            // 负向（IC-REQ-022 R5）：沙盒存档损坏（主档被截断）→ 正式读档编排失败、不给出半个战役，原文件逐字节不变，正在进行的沙盒不受影响。
+            string main = CampaignSaveService.SlotPath(Slot);
+            string good = File.ReadAllText(main);
+            File.WriteAllText(main, good.Substring(0, good.Length / 2));
+            byte[] torn = File.ReadAllBytes(main);
+            RestoreResult bad = CampaignRestoreOrchestrator.Restore(Slot);
+            bool kept = File.ReadAllBytes(main).SequenceEqual(torn);
+            File.WriteAllText(main, good); // 还原，后面各节照常用这个槽位
+            Expect(!bad.Success && bad.State == null && bad.FailedStep == RestoreStep.VersionAndChecksum && bad.LoadOutcome == LoadOutcome.Corrupt
+                   && bad.Reason == SaveFailureReason.Truncated && kept && ReferenceEquals(CampaignSession.Current, l) && l.Progress.IsSandbox,
+                $"H1 负向：沙盒存档损坏（主档截断）→ 读档失败（{bad.LoadOutcome} / {bad.Reason}，停在 {bad.FailedStep}）、不给出半个战役，原文件逐字节不变（{kept}），正在进行的沙盒不受影响");
+
             // 旧档（没有沙盒域）读入 = 全部标准档、没有记录；剧情档的存档卡不显示沙盒。
             var old = CampaignState.CreateNew("fgsandbox-old", "Standard", 1);
             old.Progress.Sandbox = null;

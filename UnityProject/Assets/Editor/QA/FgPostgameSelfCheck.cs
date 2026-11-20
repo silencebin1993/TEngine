@@ -534,6 +534,18 @@ namespace GameLogic.EditorTools
             Expect(r.Success && st.ActiveIndex == 0 && GameClock.Ticks == t1 && sigL == sig0 && sigA == sigB && PostgameService.Started(l),
                 $"F1 存读档：后日谈标记、清洗计时与等级、进行中的那一次、坚守统计与历史读回 = 存档时（{sigL == sig0}），再走 20 秒与不读档逐项一致（{sigA == sigB}）"
                 + (sigA != sigB ? $"\n不读档：{sigA}\n读档后：{sigB}" : string.Empty) + (sigL != sig0 ? $"\n存档时：{sig0}\n读回：{sigL}" : string.Empty));
+
+            // 负向（IC-REQ-022 R5）：后日谈存档损坏（主档被截断）→ 正式读档编排失败、不给出半个战役，原文件逐字节不变，正在进行的后日谈不受影响。
+            string main = CampaignSaveService.SlotPath(Slot);
+            string good = File.ReadAllText(main);
+            File.WriteAllText(main, good.Substring(0, good.Length / 2));
+            byte[] torn = File.ReadAllBytes(main);
+            RestoreResult bad = CampaignRestoreOrchestrator.Restore(Slot);
+            bool kept = File.ReadAllBytes(main).SequenceEqual(torn);
+            File.WriteAllText(main, good); // 还原，后面各节照常用这个槽位
+            Expect(!bad.Success && bad.State == null && bad.FailedStep == RestoreStep.VersionAndChecksum && bad.LoadOutcome == LoadOutcome.Corrupt
+                   && bad.Reason == SaveFailureReason.Truncated && kept && ReferenceEquals(CampaignSession.Current, l) && PostgameService.Started(l),
+                $"F1 负向：后日谈存档损坏（主档截断）→ 读档失败（{bad.LoadOutcome} / {bad.Reason}，停在 {bad.FailedStep}）、不给出半个战役，原文件逐字节不变（{kept}），正在进行的后日谈不受影响");
         }
 
         // ─────────────────────────────── G 观察一致 ───────────────────────────────

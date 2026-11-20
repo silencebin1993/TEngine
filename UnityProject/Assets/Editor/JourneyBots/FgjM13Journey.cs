@@ -555,7 +555,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private const float PostGap = 3f;
 
         /// <summary>按来袭方向排 6 行 × 6 列驻防点：行沿来袭方向（核心外 PostNear 格起、每行 PostGap 格），列垂直于来袭方向；按种子地形取最近可通行格并去重（B25）。</summary>
-        private static List<Vector2> SpreadPosts(Vector2 from, int count)
+        internal static List<Vector2> SpreadPosts(Vector2 from, int count)
         {
             Vector2 core = CorePos;
             Vector2 dir = (from - core).sqrMagnitude > 1f ? (from - core).normalized : Vector2.right;
@@ -614,9 +614,10 @@ namespace GameLogic.EditorTools.JourneyBots
         }
 
         /// <summary>逐台：左键点选这一台（选择集只剩它）→ 右键它的驻防点；全部下令后等八成到位（或来犯者已到）。</summary>
-        private static StepOutcome TickSpread(JourneyContext c, int w)
+        /// <param name="watch">每帧的共同检查（null = M13 清洗波次的 <see cref="PurgeWatch"/>；FGJ-M14 后日谈周期清洗传自己的）。</param>
+        internal static StepOutcome TickSpread(JourneyContext c, int w, Func<JourneyContext, StepOutcome?> watch = null)
         {
-            StepOutcome? bad = PurgeWatch(c);
+            StepOutcome? bad = (watch ?? PurgeWatch)(c);
             if (bad.HasValue)
             {
                 return bad.Value;
@@ -1091,7 +1092,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return c.StepElapsed < 100 ? StepOutcome.Wait : StepOutcome.Fail($"节点击毁后没有进入阶段三（阶段 {FlagshipService.PhaseOf(s)}）");
         }
 
-        private static void SetV(JourneyContext c, string key, Vector2 v) => c.Set(key, F(v.x, "0.##") + "," + F(v.y, "0.##"));
+        internal static void SetV(JourneyContext c, string key, Vector2 v) => c.Set(key, F(v.x, "0.##") + "," + F(v.y, "0.##"));
 
         private static StepOutcome TickSeized(JourneyContext c)
         {
@@ -1190,7 +1191,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return st.Days >= 1 && st.RaidsRepelled >= 1 && blocked && survivors > 0 ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
         }
 
-        private static StepOutcome TickContinue(JourneyContext c)
+        internal static StepOutcome TickContinue(JourneyContext c)
         {
             CampaignState s = St;
             if (s.Progress.IsPostgame && !EndingSettlementPanelUIToolkit.IsOpen)

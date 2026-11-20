@@ -116,8 +116,13 @@ namespace GameLogic.EditorTools
                 int projs = site.Renderer?.LastProjectileInstances ?? 0;
                 report.AppendLine($"  · {Frames} 帧（{Width}×{Height}，每帧 1 个内核步 + 事件 + 实例化提交 + 渲染 + 等 GPU）：帧时间 平均 {avg:F2} ms / p95 {p95:F2} ms / 最大 {max:F2} ms " +
                                   $"≈ {1000.0 / avg:F0} 帧/秒；其中内核步 + 事件平均 {simMs.Average():F3} ms；画面上 {units} 个单位、{projs} 枚弹体（测量期间弹体最少 {minProj}）");
-                Expect(site.Renderer != null && site.Renderer.GpuAvailable && site.Renderer.LastDrawCalls == 2,
-                    $"实例化绘制可用：每帧 {site.Renderer?.LastDrawCalls} 次绘制调用画完全部单位与弹体（{site.Renderer?.GpuUnavailableReason ?? "GPU 可用"}）");
+                // FG-GAP-252（FG14-E2E-01）：渲染器按批次各提交一次实例化绘制（场地效果 / 单位 / 弹体 / 状态与攻城职能图标，CombatRenderer.Draw，至多 4 次），
+                // 原断言写死 2 次是加图标 / 效果批次之前的口径；实例化的判据是“每个非空批次正好一次、与单位 / 弹体数量无关”。
+                int fx = site.Renderer?.LastEffectInstances ?? 0;
+                int icons = site.Renderer?.LastIconInstances ?? 0;
+                int batches = (units > 0 ? 1 : 0) + (projs > 0 ? 1 : 0) + (fx > 0 ? 1 : 0) + (icons > 0 ? 1 : 0);
+                Expect(site.Renderer != null && site.Renderer.GpuAvailable && units > 0 && projs > 0 && site.Renderer.LastDrawCalls == batches && batches <= 4,
+                    $"实例化绘制可用：每帧 {site.Renderer?.LastDrawCalls} 次绘制调用 = 非空批次 {batches} 个（单位 {units}、弹体 {projs}、场地效果 {fx}、图标 {icons}），画完全部单位与弹体（{site.Renderer?.GpuUnavailableReason ?? "GPU 可用"}）");
                 Expect(minProj >= 1500 && units >= 250, $"规模：弹体始终 ≥ 1,500（最少 {minProj}），单位 {units}");
                 // FG-TOOL-01：只测一次；超线不到 2 倍记性能警告（不计失败），超 2 倍才失败。
                 PerfGate.Expect(true, $"p95 帧时间 {p95:F2} ms ≤ 16.7 ms（≥ 60 帧/秒；本机配置高于推荐配置，换算见 ADR）", new[] { PerfGate.Le(p95, 1000.0 / 60.0, "p95 帧时间 ms") }, Expect, l => report.AppendLine(l));

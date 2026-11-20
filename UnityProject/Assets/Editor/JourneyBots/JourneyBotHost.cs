@@ -40,6 +40,7 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjM12Journey.Id, FgjM12Journey.Build }, // FG12-E2E-01：M12 出口旅程（信号幽灵反向接入 → 震动 80 警告 → 蠕虫分节击毁 → 轨道坠落撤圈回收 → 标记器识别诱饵终端 → 商队交易）
             { FgjM13Journey.Id, FgjM13Journey.Build }, // FG13-E2E-01：M13 出口旅程（返航工地第五阶段完工 → 点亮信标揭示 → 守住三波清洗 → 摧毁白潮滩头 → 击败先遣旗舰（阶段三反向接入夺回）→ 结局结算 → 继续）
             { FgjM11Journey.Id, FgjM11Journey.Build }, // FG11-E2E-01：M11 出口旅程（热寂数据城辐射与冷却塔 → 镜像体换固件 → 余烬主机槽位封锁夺回 → 超控阵列 T3 → 超频突袭）
+            { FgjM14Journey.Id, FgjM14Journey.Build }, // FG14-E2E-01：M14 出口旅程（通关存档读档 → 结算“继续”进入后日谈 → 撑过两次周期清洗 → 坚守记录 → 自定义种子、关闭突袭的沙盒，确认没有突袭）
             { FgjEmg4Journey.Id, FgjEmg4Journey.Build }, // EMG4-E2E-01：FG-EMG 阶段 4 出口旅程（重启注入劫持 → 原生程序作战 → 期满自毁 → 熔坑出现并由工作单填平 → 三选一新交互提示 → 重复作战组件只加库存）
         };
 

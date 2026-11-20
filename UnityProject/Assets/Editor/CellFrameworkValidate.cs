@@ -821,6 +821,9 @@ namespace GameLogic.EditorTools
             // FG13-E2E-01：M13 出口——FGJ-M13 登记覆盖里程碑原文（五个巨构阶段 → 揭示 → 三波清洗 → 滩头 → 先遣旗舰反向接入 → 结局 → 继续）、反向接入用共用夺控事件计数、旅程源码只走输入通道、夹具只在登记处；
             // IC-REQ-022 六类反向、里程碑风险“根权限夺取玩家所在的机器”与 FGT-END-001～008 映射到起真实系统的断言；缺口清零；FG-M13 试玩包；“必须完成”七项映射；固件获取途径与图标回归守护。
             Seg("FgMilestoneM13SelfCheck", FgMilestoneM13SelfCheck.Run);
+            // FG14-E2E-01：M14 出口——FGJ-M14 登记覆盖里程碑原文（通关存档继续 → 撑过两次周期清洗 → 自定义种子、关闭突袭的沙盒没有突袭）与顺序、旅程源码只走输入通道、夹具只在登记处；
+            // IC-REQ-022 六类反向与 FG12 第 4 节负向矩阵、里程碑风险“高等级清洗超出性能预算”、FGT-SBX-001～005 映射到起真实系统的断言；缺口清零；FG-M14 试玩包；“必须完成”映射。
+            Seg("FgMilestoneM14SelfCheck", FgMilestoneM14SelfCheck.Run);
             // EMG1-DATA-01：涌现通道端口注册表 / 声明表 / 端口 × 载体 / 子形态 / 底盘特性——源 = 表、真实表编译成内核整数数组、FGR-EMG-010 推导逐行一致（FGT-EMG-003 端口表部分）、
             // 负向矩阵（码跨段 / 复用、(owner, seq) 重复、未注册端口、非 owner 列内容 ID、整条切轨、表重载不残留、emg.stage 钳位，FGT-EMG-001）、源码内容 ID 审计与回归（FGT-EMG-004）。
             Seg("FgEmergenceRuleAuditSelfCheck", FgEmergenceRuleAuditSelfCheck.Run);
