@@ -222,12 +222,13 @@ namespace GameLogic.Campaign.Regions
             if (_relief)
             {
                 // 不透明、受光照：起伏靠明暗读出来（颜色之外的形状信息，B15）。
-                Shader standard = Shader.Find("Standard");
+                Shader standard = BinGames.Presentation.PresentationMaterials.FindShader(BinGames.Presentation.PresentationMaterialUse.Lit); // PL-RP-02：随管线
                 _material = new Material(standard != null ? standard : Shader.Find("Sprites/Default")) { color = Color.white, name = "TerrainRelief" };
                 if (_material.HasProperty("_Glossiness"))
                 {
                     _material.SetFloat("_Glossiness", 0.08f);
                 }
+                if (_material.HasProperty("_Smoothness")) _material.SetFloat("_Smoothness", 0.08f); // PL-RP-02：URP Lit 没有 _Glossiness，读 _Smoothness
             }
             else
             {
@@ -796,6 +797,7 @@ namespace GameLogic.Campaign.Regions
             }
             _mpb.Clear();
             _mpb.SetTexture("_MainTex", tex);
+            _mpb.SetTexture("_BaseMap", tex); // PL-RP-02：URP Lit 读 _BaseMap
             t.Renderer.SetPropertyBlock(_mpb);
             t.Shown = tex;
         }

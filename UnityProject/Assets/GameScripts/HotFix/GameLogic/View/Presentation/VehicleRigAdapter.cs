@@ -64,7 +64,7 @@ namespace GameLogic.View.Presentation
                 CombatSite.MachineWeaponRefreshed += OnWeaponRefreshed;
             }
             Transform silhouette = view.transform.Find(PlaceholderSilhouette.PartsName);
-            VehicleRigSystem.Register(marker.LogicId, view, marker.Site?.Kernel, marker.UnitId, ArchetypeOf(marker.ChassisId),
+            PresentationCombatBridge.RegisterVehicleRig(marker.Site, marker.LogicId, view, marker.UnitId, ArchetypeOf(marker.ChassisId),
                 silhouette, MorphRigOf(marker.LogicId, view));
         }
 

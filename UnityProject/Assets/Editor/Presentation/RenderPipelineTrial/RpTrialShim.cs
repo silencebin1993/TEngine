@@ -42,7 +42,7 @@ namespace GameLogic.EditorTools
 
         public void OnEnable()
         {
-            if (PresentationMaterials.IsBuiltIn)
+            if (PresentationMaterials.IsBuiltIn || !RpTrialSetup.InTrialShadow) // PL-RP-02：工程正式切 URP 后垫片退役，只在试验影子里还换 shader（否则会把漏改的 Standard 材质遮住）
             {
                 return;
             }

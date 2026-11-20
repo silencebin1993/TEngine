@@ -71,7 +71,7 @@ namespace GameLogic.EditorTools
             UniversalAdditionalCameraData cam = camera.GetUniversalAdditionalCameraData();
             cam.renderPostProcessing = v != "none";
             cam.antialiasing = AntialiasingMode.None;
-            var data = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RpTrialSetup.RendererPath);
+            var data = AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RpTrialSetup.InTrialShadow ? RpTrialSetup.RendererPath : UrpValidate.RendererPath); // PL-RP-02：正式工程用正式 Renderer
             ScriptableRendererFeature ssao = Ssao(data);
             if (v == "ssao" && ssao == null)
             {
@@ -430,7 +430,7 @@ namespace GameLogic.EditorTools
             return r;
         }
 
-        private static SceneMeasure MeasureScene(string scene, string post, int warmup = 30, int frames = 120)
+        public static SceneMeasure MeasureScene(string scene, string post, int warmup = 30, int frames = 120) // PL-RP-02 UrpPerf 复用
         {
             var m = new SceneMeasure { scene = scene, post = post };
             var c = new PresentationCaptureContext { FeatureOn = true };
