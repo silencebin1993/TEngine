@@ -25,6 +25,7 @@ namespace BinGames.Presentation
         private static bool _hostOn;
         private static GameObject _root;
         private static int _pendingRebuild; // PL-INF-07：待重建原因位掩码（1 << RebuildReason），下一次 Tick 开头一次性处理
+        private static bool _exitHooked;
 
         /// <summary>总开关（对账后读缓存，零查表；开关刚变、还没对账时直接查登记表）。</summary>
         public static bool Enabled => _seenRevision == PresentationFeatureRegistry.Revision ? _hostOn : PresentationFeatureRegistry.IsOn(PresentationFeatureRegistry.HostId);
@@ -103,11 +104,35 @@ namespace BinGames.Presentation
             {
                 throw new ArgumentException($"PL 模块 {module.GetType().Name} 的 Id \"{module.Id}\" 没在 PresentationFeatureRegistry.Table 登记（同时要在 FEATURES.md 加同名行）");
             }
+            HookExit();
             Modules.Add(module);
             Active.Add(false);
             Faulted.Add(false);
             _seenRevision = -1;
             Reconcile();
+        }
+
+        // PL-VEH-02 修复轮 1：退出 Play / 退出游戏 / 编辑器重载域前停用全部模块，让 OnDisable 成对释放原生内存（否则每次退出 Play 报 Persistent 泄漏）。
+        // 编辑器里另挂：退出 Play（ExitingPlayMode）、Play 中直接退出编辑器（EditorApplication.Exit 不发 Application.quitting，实测会报泄漏）、编辑模式下重编译前。
+        private static void HookExit()
+        {
+            if (_exitHooked)
+            {
+                return;
+            }
+            _exitHooked = true;
+            Application.quitting += UnregisterAll;
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.quitting += UnregisterAll;
+            UnityEditor.EditorApplication.playModeStateChanged += s =>
+            {
+                if (s == UnityEditor.PlayModeStateChange.ExitingPlayMode)
+                {
+                    UnregisterAll();
+                }
+            };
+            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += UnregisterAll;
+#endif
         }
 
         public static void Unregister(IPresentationModule module)

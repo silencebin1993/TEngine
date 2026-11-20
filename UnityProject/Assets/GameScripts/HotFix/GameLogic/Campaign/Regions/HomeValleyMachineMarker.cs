@@ -139,6 +139,7 @@ namespace GameLogic.Campaign.Regions
             }
             GameLogic.View.SignalLinkView.OnViewAttached(this); // FG1-SIG-04：安全模式头顶图标。
             GameLogic.View.MachineMorphView.OnViewAttached(this); // FG1-VFX-01：机身形变（按当前编译结果直接到位）。
+            GameLogic.View.Presentation.PresentationHooks.OnMachineViewAttached(this); // PL-VEH-02 接缝（SEAMS S-04）：主线也会装订阅，只登记引用、零写入（SEAMS S-04）。
         }
 
         public void DetachView()
@@ -156,6 +157,7 @@ namespace GameLogic.Campaign.Regions
             }
             GameLogic.View.SignalLinkView.OnViewDetached(LogicId, old);
             GameLogic.View.MachineMorphView.OnViewDetached(LogicId, old);
+            GameLogic.View.Presentation.PresentationHooks.OnMachineViewDetached(LogicId, old); // PL-VEH-02 接缝（SEAMS S-04）：主线也会装订阅，只登记引用、零写入（SEAMS S-04）。
         }
     }
 }

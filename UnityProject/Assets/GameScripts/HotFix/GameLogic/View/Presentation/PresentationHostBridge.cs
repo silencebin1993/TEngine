@@ -21,6 +21,7 @@ namespace GameLogic.View.Presentation
         /// </summary>
         private static readonly IPresentationModule[] GameModulesTable =
         {
+            new VehicleRigModule(), // PL-VEH-02
         };
 
         private static bool _registered;
@@ -38,6 +39,7 @@ namespace GameLogic.View.Presentation
             if (!_registered)
             {
                 _registered = true;
+                VehicleRigAdapter.Install(); // PL-VEH-02：接 PresentationHooks 的机器表现挂上 / 摘下（只存引用；功能关时不写变换）
                 foreach (IPresentationModule m in GameModulesTable)
                 {
                     try

@@ -45,6 +45,8 @@ namespace BinGames.Presentation
         public const string CaptureId = "pl.capture";
         /// <summary>PL-RP-01 渲染管线试验垫片（编辑器里的 RpTrialShim：URP 试验影子里把 Standard / 地形 surface shader 换成 URP 能画的）：只在试验采集 / 自检里登记，默认两套都关。</summary>
         public const string RpTrialId = "pl.rptrial";
+        /// <summary>PL-VEH-02 机器表现 Rig（VehicleRigModule：掉头先转车身、起步抬头、急停前倾、转弯侧倾、悬浮浮动）：正式游戏登记，PL 分支开、合主线关。</summary>
+        public const string VehRigId = "pl.vehrig";
 
         private static readonly PresentationFeature[] Table =
         {
@@ -52,6 +54,7 @@ namespace BinGames.Presentation
             new PresentationFeature(ProbeId, "PresentationProbeModule", false, false, "-"),
             new PresentationFeature(CaptureId, "PresentationCaptureTarget", false, false, "-"),
             new PresentationFeature(RpTrialId, "RpTrialShim", false, false, "-"),
+            new PresentationFeature(VehRigId, "VehicleRigModule", true, false, "VehicleRig"),
         };
 
         private static readonly Dictionary<string, bool> State = new Dictionary<string, bool>(StringComparer.Ordinal);

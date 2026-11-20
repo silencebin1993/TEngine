@@ -55,6 +55,8 @@ namespace GameLogic.EditorTools
             // PL-RP-01 渲染管线试验（RenderPipelineTrial/RpTrialValidate.cs）：PL 影子 2（Built-in）与 URP 试验影子里都能跑
             ("RpTrialIsolation", RpTrialValidate.RpTrialIsolation),
             ("RpTrialShim", RpTrialValidate.ShimSegment),
+            // PL-VEH-02 机器表现 Rig（Vehicle/VehicleRigValidate.cs）
+            ("VehRig", VehicleRigValidate.VehRig),
         };
 
         private static StringBuilder _report;
