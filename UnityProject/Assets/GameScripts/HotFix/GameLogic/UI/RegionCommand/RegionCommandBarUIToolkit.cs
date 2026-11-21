@@ -676,7 +676,8 @@ namespace GameLogic.UI.RegionCommand
             if (candidate != null)
             {
                 string verb = candidate.HoldSeconds > 0.0001f ? "按住" : "按";
-                _interactPromptLabel.text = $"{verb} {keyLabel} {candidate.ActionVerb}";
+                // FG15-UX-02（FGT-UX-008）：鼠标中键与交互键等价，提示里一并写出。
+                _interactPromptLabel.text = $"{verb} {keyLabel} / {InputDisplay.Key(InputRouter.InteractMouseKey)} {candidate.ActionVerb}";
             }
             else if (interact.LastFailure != RegionInteractFailure.None && interact.LastFailure != RegionInteractFailure.NoControlledUnit)
             {

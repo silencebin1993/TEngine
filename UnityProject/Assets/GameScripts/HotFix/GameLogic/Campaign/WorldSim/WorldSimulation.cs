@@ -69,7 +69,7 @@ namespace GameLogic.Campaign.WorldSim
                 site = new InteriorSiteController(surfaceId);
                 Interiors[surfaceId] = site;
             }
-            site.Enter(logicIds, resume);
+            RunAsSite(site.SiteId, () => site.Enter(logicIds, resume)); // FG15-UX-02（FG-GAP-117）：载入 / 读档对账时发出的通知记到这个地点，不取镜头所在处
             BindLivePositions();
             return site;
         }
@@ -278,6 +278,10 @@ namespace GameLogic.Campaign.WorldSim
             // FG0-ARCH-06：星球表面的寻路内核先于家园建好（家园的战斗内核打开时绑定它的通行镜像；读档时恢复排队的请求与待采纳的结果）。
             NavService.Bind(state);
             Home = new HomeValleyController();
+            string prevSite = CurrentSiteId;
+            CurrentSiteId = HomeValleyLayout.RegionId; // FG15-UX-02（FG-GAP-117）：开局搭场景 / 读档对账（装配站停机等）的通知显式记到家园
+            try
+            {
             Home.Enter(resume);
             // FG6-DEF-04 修复（DEBT-FG3GEN01-05 的出发地前提）：新战役 / 旧档第一次进家园时把家园区侦察巢登记成据点（幂等，按种子）。
             // 原来只在 InitializeNewGrid 里登记，但寻路服务先建格网（NavService.Bind → MapFor）走了旧档迁移分支、把布局版本写掉了，
@@ -297,6 +301,11 @@ namespace GameLogic.Campaign.WorldSim
                 Economy.ProductionService.OnLoad(state);
                 RefreshActivity(state);
             }
+            }
+            finally
+            {
+                CurrentSiteId = prevSite;
+            }
             return Home;
         }
 
@@ -314,7 +323,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             EnsureSession(state);
             FracturedCity = new FracturedCityController();
-            FracturedCity.Enter(expeditionLogicIds, resume);
+            RunAsSite(FracturedCity.SiteId, () => FracturedCity.Enter(expeditionLogicIds, resume)); // FG15-UX-02（FG-GAP-117）
             BindLivePositions();
             return FracturedCity;
         }
@@ -332,7 +341,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             EnsureSession(state);
             FoundryOutpost = new FoundryOutpostController();
-            FoundryOutpost.Enter(expeditionLogicIds, resume);
+            RunAsSite(FoundryOutpost.SiteId, () => FoundryOutpost.Enter(expeditionLogicIds, resume)); // FG15-UX-02（FG-GAP-117）
             BindLivePositions();
             return FoundryOutpost;
         }
@@ -747,19 +756,29 @@ namespace GameLogic.Campaign.WorldSim
             GameClock.CommitStep(state);
             StepsExecuted++;
 
-            // FG8-QST-01：到达 / 停留 / 护送 / 时限类任务每 quest.check_seconds 判定一次——只看步序号（与存档 / 读档 / 观察无关），没有任务状态时 O(1)。
-            CampaignObjectiveTracker.WorldStep(state, GameClock.Ticks);
-            _objectiveTimer -= dt;
-            if (_objectiveTimer <= 0)
+            // FG15-UX-02（FG-GAP-117）：步末的目标判定 / 重算发出的通知（“修复归还谷地供电”等）显式记到星球表面（家园所在表面），
+            // 与镜头在哪无关（观察与否一致，FGR-BASE-021）。GameRoot.ActiveRegionId 的“镜头所在处”回退只留给界面操作。
+            CurrentSiteId = HomeValleyLayout.RegionId;
+            try
             {
-                _objectiveTimer += Math.Max(0.05, GameClock.TuningOr("clock.objective_recompute_seconds", 0.5f));
-                CampaignObjectiveTracker.Recompute(state);
+                // FG8-QST-01：到达 / 停留 / 护送 / 时限类任务每 quest.check_seconds 判定一次——只看步序号（与存档 / 读档 / 观察无关），没有任务状态时 O(1)。
+                CampaignObjectiveTracker.WorldStep(state, GameClock.Ticks);
+                _objectiveTimer -= dt;
+                if (_objectiveTimer <= 0)
+                {
+                    _objectiveTimer += Math.Max(0.05, GameClock.TuningOr("clock.objective_recompute_seconds", 0.5f));
+                    CampaignObjectiveTracker.Recompute(state);
+                }
+                _activityTimer -= dt;
+                if (_activityTimer <= 0)
+                {
+                    _activityTimer += Math.Max(0.1, GameClock.TuningOr("sim.activity_refresh_seconds", 1f));
+                    RefreshActivity(state);
+                }
             }
-            _activityTimer -= dt;
-            if (_activityTimer <= 0)
+            finally
             {
-                _activityTimer += Math.Max(0.1, GameClock.TuningOr("sim.activity_refresh_seconds", 1f));
-                RefreshActivity(state);
+                CurrentSiteId = null;
             }
             _inStep = false;
             StepWatch.Stop();

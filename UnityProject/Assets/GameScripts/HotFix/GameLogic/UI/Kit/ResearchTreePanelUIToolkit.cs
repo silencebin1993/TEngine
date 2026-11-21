@@ -400,7 +400,30 @@ namespace GameLogic.UI.Kit
                 SetOpen(false);
                 return;
             }
+            KeyboardViewInput(Time.unscaledDeltaTime);
             Refresh();
+        }
+
+        /// <summary>FG15-UX-02（DEBT-FG5RND01-06）：方向键平移、+/- 缩放（可重绑；文本框有焦点时不响应）。自检直接调。</summary>
+        public void KeyboardViewInput(float dt)
+        {
+            Vector2 dir = Vector2.zero;
+            if (InputRouter.IsActionHeld(GameActionId.PanelPanLeft)) dir.x += 1f;
+            if (InputRouter.IsActionHeld(GameActionId.PanelPanRight)) dir.x -= 1f;
+            if (InputRouter.IsActionHeld(GameActionId.PanelPanUp)) dir.y += 1f;
+            if (InputRouter.IsActionHeld(GameActionId.PanelPanDown)) dir.y -= 1f;
+            if (dir != Vector2.zero)
+            {
+                PanBy(dir * Mathf.Max(0f, GridContent.Tuning("research.tree.key_pan_speed")) * Mathf.Max(0f, dt)); // 按右 = 往右看 = 画布左移
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.PanelZoomIn))
+            {
+                ZoomBy(1, ViewportCenter());
+            }
+            if (InputRouter.ConsumeContextAction(GameActionId.PanelZoomOut))
+            {
+                ZoomBy(-1, ViewportCenter());
+            }
         }
 
         // ── 视图操作（玩家输入与自检共用）──────────────────────────────────────

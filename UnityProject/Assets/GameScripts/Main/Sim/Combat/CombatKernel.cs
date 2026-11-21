@@ -4996,7 +4996,8 @@ namespace BinGames.Sim.Combat
                     B = new float4(pit.Radius, 1f, CombatConst.EffectPitColor, CombatConst.EffectKindZone + (float)CombatZoneLook.Web),
                 });
             }
-            // EMG2-FLD-01（FGR-EMG-112）：活跃场——“冲击环”外观（外扩环 = 场在起作用），颜色按场端口区分（形状同为环、颜色为辅；推斥环随时间扩到全半径），外圈 = 剩余存续。占位外观，美术阶段替换。
+            // EMG2-FLD-01（FGR-EMG-112）：活跃场——“冲击环”外观（外扩环 = 场在起作用），颜色按场端口区分（推斥环随时间扩到全半径），外圈 = 剩余存续。占位外观，美术阶段替换。
+            // 场的种类靠场心的字形图标区分（FG15-UX-02，CombatStatusIconJob，按 fg.TbChannelPort fld.* 的形状），颜色为辅。
             for (int f = 0; f < D.Fields.Length; f++)
             {
                 EmgField fd = D.Fields[f];
@@ -5241,6 +5242,48 @@ namespace BinGames.Sim.Combat
                         B = new float4(Size, v.x, v.y, 30f + math.max(1, stacks)),
                     });
                     shown++;
+                }
+            }
+            // FG15-UX-02（FGT-UX-007 / B15）：场与带状态的区域在中心叠一个字形图标，色盲 / 全色盲模式下不靠颜色也分得开
+            // （6 种场的环外观相同、区域的波纹只按放置方式分，原先只靠颜色区分）。区域 = 它第一个有外观的状态位（与区域颜色同源），场 = 场端口的字形。
+            float zoneSize = Size * 1.4f;
+            for (int z = 0; z < D.Zones.Length; z++)
+            {
+                CombatZone zn = D.Zones[z];
+                uint zb = zn.StatusMask;
+                while (zb != 0u)
+                {
+                    int b = math.tzcnt(zb);
+                    zb &= zb - 1u;
+                    if (b < 32 && b < Visuals.Length && Visuals[b].x >= 0f)
+                    {
+                        double2 zp = zn.Pos - Origin;
+                        Icons.Add(new CombatInstance
+                        {
+                            A = new float4((float)zp.x, (float)zp.y, (float)zp.x, (float)zp.y),
+                            B = new float4(zoneSize, Visuals[b].x, Visuals[b].y, 30f),
+                        });
+                        break;
+                    }
+                }
+            }
+            if (Visuals.Length >= CombatRenderer.FieldVisualBase + CombatRenderer.FieldVisualCount)
+            {
+                for (int f = 0; f < D.Fields.Length; f++)
+                {
+                    EmgField fd = D.Fields[f];
+                    int k = fd.Port - EmgFieldConst.PortPull;
+                    if (k < 0 || k >= CombatRenderer.FieldVisualCount || Visuals[CombatRenderer.FieldVisualBase + k].x < 0f)
+                    {
+                        continue;
+                    }
+                    float2 v = Visuals[CombatRenderer.FieldVisualBase + k];
+                    double2 fp = fd.Pos - Origin;
+                    Icons.Add(new CombatInstance
+                    {
+                        A = new float4((float)fp.x, (float)fp.y, (float)fp.x, (float)fp.y),
+                        B = new float4(zoneSize, v.x, v.y, 30f),
+                    });
                 }
             }
         }

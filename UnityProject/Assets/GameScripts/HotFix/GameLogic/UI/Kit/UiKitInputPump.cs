@@ -342,6 +342,12 @@ namespace GameLogic.UI.Kit
                 bool flew = Campaign.CampaignObjectiveTracker.FocusNextTracked(CampaignSession.Current, out string questMsg);
                 Campaign.Feedback.FeedbackCues.Raise(flew ? Campaign.Feedback.FeedbackCueId.CommandAck : Campaign.Feedback.FeedbackCueId.QuestUpdate, questMsg);
             }
+            // FG15-UX-02（DEBT-FG6DEF09-05）：难度面板专属快捷键（默认 Ctrl+K，可重绑；与暂停菜单“难度”同一入口）。更高层面板盖着时不起作用。
+            if (InputRouter.ConsumeContextAction(GameActionId.OpenDifficulty) && CampaignSession.Current != null
+                && !DifficultyPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(DifficultyPanelUIToolkit.Order))
+            {
+                DifficultyPanelUIToolkit.Open();
+            }
             // FG7-ENV-01（FGR-ENV-002 / FGU-26）：日历键（默认 Alt+L，全部上下文，可重绑）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同统计键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenCalendar)
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(CalendarPanelUIToolkit.Order))

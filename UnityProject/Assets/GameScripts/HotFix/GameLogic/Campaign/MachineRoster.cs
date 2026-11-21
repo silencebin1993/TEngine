@@ -197,7 +197,11 @@ namespace GameLogic.Campaign
             }
             if (m != null && m.IsAlive && Regions.ExpeditionMarchService.IsTeamMember(s, m.LogicId))
             {
-                return GameText.Format("exp.roster.place", GameText.Get(Regions.ExpeditionMarchService.StatusTextKey(Regions.ExpeditionMarchService.StatusOf(Regions.ExpeditionMarchService.TeamOf(s, m.LogicId)))));
+                // FG15-UX-02（DEBT-FG8EXP01-01）：名册里也写是哪一队（队名 + 队伍颜色的名字；颜色同时以文字给出，色盲也分得清）。
+                ExpeditionMarchState team = Regions.ExpeditionMarchService.TeamOf(s, m.LogicId);
+                return GameText.Format("exp.roster.place_team", Regions.ExpeditionMarchService.TeamLabel(s, team),
+                    Regions.ExpeditionTeamService.ColorName(Regions.ExpeditionTeamService.ColorIndexOf(s)),
+                    GameText.Get(Regions.ExpeditionMarchService.StatusTextKey(Regions.ExpeditionMarchService.StatusOf(team))));
             }
             return GameText.Get("roster.place.away");
         }

@@ -170,6 +170,10 @@ namespace GameLogic.Campaign.Feedback
         FleetFormationBroken,
         FleetShieldBreak,
 
+        // ── FG15-UX-02（DEBT-EMG2MAT01-07）：物质斑块的音效钩子（占位音，音频阶段同名覆盖 wav） ──
+        MatterSpawn,
+        MatterEnter,
+
         Max,
     }
 

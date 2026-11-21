@@ -105,6 +105,27 @@ namespace GameLogic.Campaign.Economy
             return true;
         }
 
+        /// <summary>FG15-UX-02（DEBT-FG4ECO08-04）：调整顶栏固定物品的先后（delta = -1 前移一位、+1 后移一位；到头了就不动）。顺序随存档保存。</summary>
+        public static bool TryMove(CampaignState state, string itemId, int delta)
+        {
+            if (state == null || delta == 0)
+            {
+                return false;
+            }
+            ProductionStatsState st = ProductionStats.Ensure(state);
+            int i = Array.FindIndex(st.Pins, p => p != null && p.ItemId == itemId);
+            int j = i + Math.Sign(delta);
+            if (i < 0 || j < 0 || j >= st.Pins.Length)
+            {
+                return false;
+            }
+            PinnedItemRecord[] next = (PinnedItemRecord[])st.Pins.Clone();
+            (next[i], next[j]) = (next[j], next[i]);
+            st.Pins = next;
+            Revision++;
+            return true;
+        }
+
         /// <summary>切换（顶栏与面板的“固定 / 取消固定”按钮）。</summary>
         public static bool Toggle(CampaignState state, string itemId, out string message) =>
             IsPinned(state, itemId) ? TryUnpin(state, itemId, out message) : TryPin(state, itemId, null, out message);

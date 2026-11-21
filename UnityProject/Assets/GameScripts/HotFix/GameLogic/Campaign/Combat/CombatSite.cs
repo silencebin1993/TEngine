@@ -714,6 +714,31 @@ namespace GameLogic.Campaign.Combat
 
         private long _emgDepthCutSeen, _emgFanoutCutSeen, _emgLostSeen;
         private bool _emgMatterHookRaised;
+        private int _matterBornSeen = -1;
+        private int _matterEntersSeen = -1;
+
+        /// <summary>FG15-UX-02（DEBT-EMG2MAT01-07）：斑块生成 / 单位踏进斑块的音效钩子。只比较内核两个计数的增量（O(1)）；
+        /// 只在镜头所在地点出声（后台地点照常结算、不出声）。计数变小（读档 / 重建内核）时以新值为起点。</summary>
+        private void RaiseMatterCues(bool observed)
+        {
+            EmgScalars s = Kernel.PatchStats;
+            if (_matterBornSeen >= 0 && s.PatchesBorn > _matterBornSeen && observed)
+            {
+                FeedbackCues.Raise(FeedbackCueId.MatterSpawn);
+            }
+            if (_matterEntersSeen >= 0 && s.MatterEnters > _matterEntersSeen && observed)
+            {
+                FeedbackCues.Raise(FeedbackCueId.MatterEnter);
+            }
+            _matterBornSeen = s.PatchesBorn;
+            _matterEntersSeen = s.MatterEnters;
+        }
+
+        /// <summary>自检用：按给定的“是否被观察”跑一次斑块音效钩子（正式路径在 ProcessEvents 里按 WorldView.IsObserved 调）。</summary>
+        public void DebugRaiseMatterCues(bool observed) => RaiseMatterCues(observed);
+
+        /// <summary>自检用：斑块音效钩子的已见计数。</summary>
+        public (int Born, int Enters) DebugMatterCueSeen => (_matterBornSeen, _matterEntersSeen);
         private bool _emgRelayHookRaised;
 
         /// <summary>调试层：链深截断、扇出截断第一次出现时各记一行（之后计数照常累加、可随时读 <see cref="EmgBusDebugLine"/>）；队列满仍无处合并（丢失）每次出现都报警。O(1) / 步。</summary>
@@ -2592,6 +2617,7 @@ namespace GameLogic.Campaign.Combat
                 _emgMatterHookRaised = true;
                 GuidanceHooks.Raise(GuidanceHooks.EmgFirstMatter);
             }
+            RaiseMatterCues(GameLogic.Campaign.WorldSim.WorldView.IsObserved(SiteId));
             if (_processing)
             {
                 _drainAgain = true;
@@ -3751,6 +3777,8 @@ namespace GameLogic.Campaign.Combat
                 Renderer.SetStatusVisuals(NamedReactionCatalog.BuildStatusVisuals());
                 // EMG2-PHS-01（FGR-EMG-101 / B15）：头顶相态 / 累积量图标的形状 / 颜色来自 fg.TbPhaseRule。
                 Renderer.SetPhaseVisuals(EmgPhaseFeedback.BuildVisuals());
+                // FG15-UX-02（FGT-UX-007）：场心字形来自 fg.TbChannelPort fld.*（区域中心字形取状态标签的形状，内核按区域状态位挑）。
+                Renderer.SetFieldVisuals(NamedReactionCatalog.BuildFieldVisuals());
                 // FG6-DEF-05（FGR-DEF-030）：头顶职能图标的形状 / 颜色来自 fg.TbSiegeRole（攻城服务写入）。
                 Renderer.SetSiegeVisuals(SiegeRoleVisuals);
             }
@@ -3818,6 +3846,7 @@ namespace GameLogic.Campaign.Combat
                 return false;
             }
             CombatLoadResult r = Kernel.Load(bytes);
+            _matterBornSeen = _matterEntersSeen = -1; // 读档后内核计数换了基线：下一次以读进来的值为起点，不拿旧计数比
             if (r != CombatLoadResult.Ok)
             {
                 reasonKey = r switch

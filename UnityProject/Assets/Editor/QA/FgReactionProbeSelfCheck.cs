@@ -720,7 +720,7 @@ namespace GameLogic.EditorTools
             foreach (StatusTag row in StatusTagCatalog.Rows.Where(r => r.Kind == "status" && r.AliasOf == "none"))
             {
                 float2 v = visuals[row.Bit];
-                if (v.x < 0f || NamedReactionCatalog.Shapes[(int)v.x] != row.Shape || !NamedReactionCatalog.TryParseColor(row.Color, out uint rgb) || (uint)v.y != rgb)
+                if (v.x < 0f || NamedReactionCatalog.GlyphOf((int)v.x) != row.Shape || !NamedReactionCatalog.TryParseColor(row.Color, out uint rgb) || (uint)v.y != rgb)
                 {
                     badVisual.Add(row.Id);
                 }
@@ -729,7 +729,7 @@ namespace GameLogic.EditorTools
                     badVisual.Add(row.Id + "（形状 + 颜色与别的标签重复）");
                 }
             }
-            Expect(badVisual.Count == 0 && seen.Count == 26, $"26 个主状态标签都有头顶图标：形状 = 表的字形、颜色 = 表的颜色，形状 + 颜色两两不同{Detail(badVisual)}");
+            Expect(badVisual.Count == 0 && seen.Count == 30, $"30 个主状态标签（FG15-UX-02 加沾染位 26～29 四行）都有头顶图标：形状 = 表的字形、颜色 = 表的颜色，形状 + 颜色两两不同{Detail(badVisual)}");
 
             CombatWeapon plain = WeaponFor(ComponentCatalog.CompGunId);
             // EMG2-REACT-01：本段只测标签图标 / 悬停，内核只登记标签表与状态位效果；相态图标与悬停里的累积量行（着火度等）由 FgEmgPhaseSelfCheck 守

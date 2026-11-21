@@ -214,7 +214,7 @@ namespace GameLogic.Campaign.Regions
             {
                 PrimaryCandidate = null;
                 _activeCandidateId = null;
-                Progress01 = 0f;
+                CancelHold();
                 LastFailure = RegionInteractFailure.NoControlledUnit;
                 LastFailureText = null;
                 return;
@@ -230,11 +230,11 @@ namespace GameLogic.Campaign.Regions
             {
                 PrimaryCandidate = null;
                 _activeCandidateId = null;
-                Progress01 = 0f;
+                CancelHold();
                 LastFailure = gate;
                 LastFailureText = null;
                 if (gate == RegionInteractFailure.MachineLostControl
-                    && InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct))
+                    && InteractPressed())
                 {
                     RaiseRejection(gate, "受控机失联，暂时无法交互。");
                 }
@@ -250,7 +250,7 @@ namespace GameLogic.Campaign.Regions
 
             if (best == null || best.Id != _activeCandidateId)
             {
-                Progress01 = 0f;
+                CancelHold();
             }
             _activeCandidateId = best?.Id;
             PrimaryCandidate = best;
@@ -265,12 +265,12 @@ namespace GameLogic.Campaign.Regions
             RegionInteractResult check = best.Validate != null ? best.Validate() : RegionInteractResult.Ok();
             if (!check.Success)
             {
-                Progress01 = 0f;
+                CancelHold();
                 LastFailure = check.Failure;
                 LastFailureText = check.PlayerText;
                 // 校验失败时提示条早已显示原因；玩家仍按下 E 的那一帧才是“被拒绝”，出拒绝音与字幕
                 // （AC-AUD-001 拒绝/仓满）。不按键只是在看提示，不出声。
-                if (InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct))
+                if (InteractPressed())
                 {
                     RaiseRejection(check.Failure, check.PlayerText);
                 }
@@ -279,21 +279,23 @@ namespace GameLogic.Campaign.Regions
             LastFailure = RegionInteractFailure.None;
             LastFailureText = null;
 
-            bool held = InputRouter.GetActionKey(GameActionId.Interact, InputScope.Direct);
             if (best.HoldSeconds <= 0.0001f)
             {
-                if (InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct))
+                if (InteractPressed())
                 {
                     CompleteInteraction(best);
                 }
                 return;
             }
 
+            // FG15-UX-02：“按住改切换”时按一下 E 开始、再按一下取消；完成后松开锁存，下一个目标不会自动开始。
+            bool held = InputRouter.GetActionKey(GameActionId.Interact, InputScope.Direct);
             if (held)
             {
                 Progress01 = Mathf.Clamp01(Progress01 + dt / best.HoldSeconds);
                 if (Progress01 >= 1f)
                 {
+                    InputRouter.ReleaseHoldLatch(GameActionId.Interact);
                     CompleteInteraction(best);
                 }
             }
@@ -302,6 +304,18 @@ namespace GameLogic.Campaign.Regions
                 // "按住"语义：松手即作废，不留半程进度——离开 3 米/松开 E 走的是同一条清零路径。
                 Progress01 = 0f;
             }
+        }
+
+        /// <summary>这一帧按下了交互：E（可重绑）或鼠标中键（FG15-UX-02 FGT-UX-008 只用鼠标；不短路，两条都消费）。</summary>
+        private static bool InteractPressed() =>
+            InputRouter.ConsumeAction(GameActionId.Interact, InputScope.Direct) | InputRouter.GetMouseButtonDown(2, InputScope.Direct);
+
+        /// <summary>进度作废（换目标 / 目标没了 / 校验或门禁失败 / 失去受控机）。FG15-UX-02：“按住改切换”的锁存一并松开，
+        /// 免得走到下一个长按目标时没按键就自动开始并完成（FG 纪律第 4 条：只执行玩家显式的操作）。</summary>
+        private void CancelHold()
+        {
+            Progress01 = 0f;
+            InputRouter.ReleaseHoldLatch(GameActionId.Interact);
         }
 
         private void CompleteInteraction(RegionInteractCandidate candidate)

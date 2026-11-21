@@ -82,8 +82,8 @@ namespace BinGames.Sim.Combat
             _projectiles = new NativeList<CombatInstance>(256, Allocator.Persistent);
             _effects = new NativeList<CombatInstance>(32, Allocator.Persistent);
             _icons = new NativeList<CombatInstance>(32, Allocator.Persistent);
-            _statusVisuals = new NativeArray<float2>(PhaseVisualBase + EmgPhaseConst.Count, Allocator.Persistent); // 32 个状态位 + EMG2-PHS-01 的 7 个相态
-            for (int b = 0; b < 32; b++)
+            _statusVisuals = new NativeArray<float2>(FieldVisualBase + FieldVisualCount, Allocator.Persistent); // 32 个状态位 + EMG2-PHS-01 的 7 个相态 + FG15-UX-02 的 6 种场
+            for (int b = 0; b < _statusVisuals.Length; b++)
             {
                 _statusVisuals[b] = new float2(-1f, 0f);
             }
@@ -119,6 +119,28 @@ namespace BinGames.Sim.Combat
 
         /// <summary>EMG2-PHS-01：相态图标在视觉表里的起点（状态位 0～31 之后）。</summary>
         public const int PhaseVisualBase = 32;
+
+        /// <summary>FG15-UX-02（FGT-UX-007）：6 种场（端口 701～706 依次）的场心图标在视觉表里的起点（相态之后）。</summary>
+        public const int FieldVisualBase = PhaseVisualBase + EmgPhaseConst.Count;
+
+        public const int FieldVisualCount = EmgFieldConst.PortCorona - EmgFieldConst.PortPull + 1;
+
+        /// <summary>FG15-UX-02（FGT-UX-007、B15）：场心图标（x = 形状码，&lt;0 = 不画；y = 打包颜色），下标 = 场端口 − 701。热更层按 fg.TbChannelPort fld.* 写入一次。
+        /// 区域（布区 / 驻留 / 拖尾 / 陷阱）中心另叠它第一个有外观的状态位的字形，所以色盲模式下场与带状态的区域都能靠形状分开。</summary>
+        public void SetFieldVisuals(float2[] visuals)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            for (int k = 0; k < FieldVisualCount; k++)
+            {
+                float2 v = visuals != null && k < visuals.Length ? visuals[k] : new float2(-1f, 0f);
+                _statusVisuals[FieldVisualBase + k] = v;
+                _hasStatusVisuals |= v.x >= 0f;
+            }
+            _preparedRevision = int.MinValue;
+        }
 
         /// <summary>EMG2-PHS-01（FGR-EMG-101、B05 / B15）：7 个累积量 / 相态的头顶图标（x = 形状序号，&lt;0 = 不画；y = 打包颜色）。热更层按 fg.TbPhaseRule 写入一次。</summary>
         public void SetPhaseVisuals(float2[] visuals)

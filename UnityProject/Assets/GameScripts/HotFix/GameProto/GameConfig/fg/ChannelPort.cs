@@ -80,11 +80,11 @@ public sealed partial class ChannelPort : Luban.BeanBase
     /// </summary>
     public readonly string DescKey;
     /// <summary>
-    /// 图标形状(族)
+    /// 图标形状(族;fld.* 场端口各自一个,战场场心叠这个字形,FG15-UX-02)
     /// </summary>
     public readonly string Shape;
     /// <summary>
-    /// 图标颜色 #RRGGBB(族,颜色为辅)
+    /// 图标颜色 #RRGGBB(族;fld.* 各自一个,颜色为辅)
     /// </summary>
     public readonly string Color;
     /// <summary>

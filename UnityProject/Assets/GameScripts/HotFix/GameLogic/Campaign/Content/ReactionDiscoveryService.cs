@@ -105,9 +105,9 @@ namespace GameLogic.Campaign.Content
         public static int ExtremeRewarded { get; private set; }
 
         /// <summary>一次根出手结算多少次交互记“极限”（emg.codex.extreme_count；内核 CombatConfig.EmgExtremeCount 同一个值）。</summary>
-        public static int ExtremeCount => Math.Max(1, (int)Math.Round(Feedback.ReactionPopups.Tuning("emg.codex.extreme_count", BinGames.Sim.Combat.EmgConst.DefaultExtremeCount)));
+        public static int ExtremeCount => Math.Max(1, (int)Math.Round(CombatSite.Tuning("emg.codex.extreme_count", BinGames.Sim.Combat.EmgConst.DefaultExtremeCount)));
 
-        public static int ExtremeReward => Math.Max(0, (int)Math.Round(Feedback.ReactionPopups.Tuning("emg.codex.extreme_reward", 20f)));
+        public static int ExtremeReward => Math.Max(0, (int)Math.Round(CombatSite.Tuning("emg.codex.extreme_reward", 20f)));
 
         /// <summary>
         /// FGR-EMG-194（FG19 第 14 节 #14 按推荐默认执行）：内核报来一次根出手达到链深 3 或结算 ≥ emg.codex.extreme_count 次交互，落在具名交互 <paramref name="reactionId"/> 上——

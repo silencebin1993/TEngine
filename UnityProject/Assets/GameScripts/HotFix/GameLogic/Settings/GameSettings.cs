@@ -122,6 +122,25 @@ namespace GameLogic.Settings
         public bool CausalChainOverlayEnabled = true;
         /// <summary>游戏性：伤害数字（被观察地点里机器 / 敌人受伤时在头上飘数字；默认关）。</summary>
         public bool DamageNumbersEnabled;
+
+        // ── FG15-UX-02（FGR-UX-060 可访问性全集）：旧设置 JSON 没有这些字段时按这里的初值补齐 ──
+        /// <summary>色盲模式（<see cref="ColorblindMode"/> 的整数值）；-1 = 没设过：按旧布尔 <see cref="ColorblindSafeIconsEnabled"/> 迁移（开 = 红绿）。</summary>
+        public int ColorblindMode = -1;
+        /// <summary>高对比度：界面面板不透明深底 + 亮边框 + 纯白文字。</summary>
+        public bool HighContrastEnabled;
+        /// <summary>文字大小倍率（与 UI 缩放独立；范围 fg.TbUiTuning ui.text_scale_min / max）。</summary>
+        public float TextScale = 1f;
+        /// <summary>键盘指针（小键盘移动虚拟指针、5 = 左键、0 = 右键；只用键盘也能悬停 / 点选 / 拉框）。</summary>
+        public bool KeyboardPointerEnabled;
+    }
+
+    /// <summary>FG15-UX-02（FGR-UX-060）：色盲模式。红绿 = 红色盲 / 绿色盲（最常见），蓝黄 = 蓝色盲，全色盲 = 只看明暗。</summary>
+    public enum ColorblindMode
+    {
+        Off = 0,
+        RedGreen = 1,
+        BlueYellow = 2,
+        Achromat = 3,
     }
 
     /// <summary>一条“某类通知触发时是否自动暂停”的玩家设置。</summary>
@@ -187,7 +206,15 @@ namespace GameLogic.Settings
         public static float SfxVolume => Data.SfxVolume;
         public static float UiVolume => Data.UiVolume;
         public static bool SubtitlesEnabled => Data.SubtitlesEnabled;
-        public static bool ColorblindSafeIconsEnabled => Data.ColorblindSafeIconsEnabled;
+        public static bool ColorblindSafeIconsEnabled => ColorblindMode != ColorblindMode.Off;
+        /// <summary>FG15-UX-02：当前色盲模式（没设过时由旧布尔迁移：开 = 红绿）。</summary>
+        public static ColorblindMode ColorblindMode => Data.ColorblindMode >= 0
+            ? (ColorblindMode)Mathf.Clamp(Data.ColorblindMode, 0, 3)
+            : Data.ColorblindSafeIconsEnabled ? ColorblindMode.RedGreen : ColorblindMode.Off;
+        public static bool HighContrastEnabled => Data.HighContrastEnabled;
+        public static float TextScaleMin => UiTuningValues.Get("ui.text_scale_min");
+        public static float TextScaleMax => UiTuningValues.Get("ui.text_scale_max");
+        public static float TextScale => Mathf.Clamp(Data.TextScale > 0f ? Data.TextScale : 1f, TextScaleMin, TextScaleMax);
         public static float NotificationToastScale => Data.NotificationToastScale;
 
         /// <summary>FG0-UX-01：读旧设置时的按键迁移结果（只在本次进程读盘时有值）。通知中心取走一次后清空，
@@ -621,9 +648,51 @@ namespace GameLogic.Settings
             Save();
         }
 
+        /// <summary>旧入口（主菜单 uGUI 开关）：开 = 保留当前模式（没开过时用红绿），关 = 关闭色盲模式。</summary>
         public static void SetColorblindSafeIconsEnabled(bool enabled)
         {
-            Data.ColorblindSafeIconsEnabled = enabled;
+            SetColorblindMode(enabled ? (ColorblindMode != ColorblindMode.Off ? ColorblindMode : ColorblindMode.RedGreen) : ColorblindMode.Off);
+        }
+
+        /// <summary>FG15-UX-02：设色盲模式；旧布尔一并写（降级到旧版本读同一份设置时仍是“开 / 关”）。</summary>
+        public static void SetColorblindMode(ColorblindMode mode)
+        {
+            Data.ColorblindMode = (int)mode;
+            Data.ColorblindSafeIconsEnabled = mode != ColorblindMode.Off;
+            Save();
+        }
+
+        public static bool KeyboardPointerEnabled => Data.KeyboardPointerEnabled;
+
+        public static void SetKeyboardPointerEnabled(bool enabled)
+        {
+            Data.KeyboardPointerEnabled = enabled;
+            Save();
+        }
+
+        public static void SetHighContrastEnabled(bool enabled)
+        {
+            Data.HighContrastEnabled = enabled;
+            Save();
+        }
+
+        public static void SetTextScale(float value)
+        {
+            Data.TextScale = Mathf.Clamp(value, TextScaleMin, TextScaleMax);
+            Save();
+        }
+
+        /// <summary>FG15-UX-02（FGR-UX-060“闪光减弱、震屏、慢放、镜头推动统称减少动态效果”）：四项全在“少动”一侧时为开。</summary>
+        public static bool ReduceMotion => Data.FlashReductionEnabled && !Data.ScreenShakeEnabled && !Data.ReactionSlowMotionEnabled && !Data.ReactionCameraNudgeEnabled;
+
+        /// <summary>一次切换四项：开 = 闪光减弱、关震屏、关慢放、关镜头推动；关 = 四项回到默认。四项仍可单独再改。</summary>
+        public static void SetReduceMotion(bool enabled)
+        {
+            var d = new GameSettingsData();
+            Data.FlashReductionEnabled = enabled || d.FlashReductionEnabled;
+            Data.ScreenShakeEnabled = !enabled && d.ScreenShakeEnabled;
+            Data.ReactionSlowMotionEnabled = !enabled && d.ReactionSlowMotionEnabled;
+            Data.ReactionCameraNudgeEnabled = !enabled && d.ReactionCameraNudgeEnabled;
             Save();
         }
 

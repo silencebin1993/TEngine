@@ -383,7 +383,27 @@ namespace GameLogic.Settings
                 GameSettings.SubtitleScaleMin, GameSettings.SubtitleScaleMax, Percent));
             l.Add(Toggle("access.flash", SettingsCategory.Accessibility, "settings.access.flash", () => GameSettings.FlashReductionEnabled, GameSettings.SetFlashReductionEnabled));
             l.Add(Toggle("access.shake", SettingsCategory.Accessibility, "settings.access.shake", () => GameSettings.ScreenShakeEnabled, GameSettings.SetScreenShakeEnabled));
-            l.Add(Toggle("access.colorblind_icons", SettingsCategory.Accessibility, "settings.access.colorblind_icons", () => GameSettings.ColorblindSafeIconsEnabled, GameSettings.SetColorblindSafeIconsEnabled));
+            // FG15-UX-02（FGR-UX-060 其余项）：文字大小（与 UI 缩放独立）、色盲模式三种、高对比度、减少动态效果总开关。
+            l.Add(Slider("access.text_scale", SettingsCategory.Accessibility, "settings.access.text_scale", () => GameSettings.TextScale, GameSettings.SetTextScale,
+                GameSettings.TextScaleMin, GameSettings.TextScaleMax, Percent));
+            l.Add(new SettingItem
+            {
+                Id = "access.colorblind_mode", Category = SettingsCategory.Accessibility, Kind = SettingKind.Choice, NameKey = "settings.access.colorblind_mode",
+                Choices = () => Names("settings.access.cvd_off", "settings.access.cvd_redgreen", "settings.access.cvd_blueyellow", "settings.access.cvd_achromat"),
+                GetIndex = () => (int)GameSettings.ColorblindMode,
+                SetIndex = i => GameSettings.SetColorblindMode((ColorblindMode)Mathf.Clamp(i, 0, 3)),
+            });
+            l.Add(Toggle("access.kb_pointer", SettingsCategory.Accessibility, "settings.access.kb_pointer", () => GameSettings.KeyboardPointerEnabled, GameSettings.SetKeyboardPointerEnabled));
+            l.Add(Toggle("access.high_contrast", SettingsCategory.Accessibility, "settings.access.high_contrast", () => GameSettings.HighContrastEnabled, GameSettings.SetHighContrastEnabled));
+            l.Add(Toggle("access.reduce_motion", SettingsCategory.Accessibility, "settings.access.reduce_motion", () => GameSettings.ReduceMotion, v =>
+            {
+                GameSettings.SetReduceMotion(v);
+                if (v)
+                {
+                    Core.GameClock.CancelSlowMotion();
+                    Campaign.Feedback.CameraNudge.Reset();
+                }
+            }));
             return l;
         }
 
@@ -444,7 +464,9 @@ namespace GameLogic.Settings
                     break;
                 case SettingsCategory.Accessibility:
                     GameSettings.ResetFields("UiScale", "NotificationToastScale", "SubtitlesEnabled", "NarrativeTextSpeed", "SubtitleScale",
-                        "FlashReductionEnabled", "ScreenShakeEnabled", "ColorblindSafeIconsEnabled");
+                        "FlashReductionEnabled", "ScreenShakeEnabled", "ColorblindSafeIconsEnabled", "ColorblindMode", "HighContrastEnabled", "TextScale", "KeyboardPointerEnabled",
+                        // FG15-UX-02：“减少动态效果”总开关还管慢放 / 镜头推动（两项也在游戏性分类），可访问性恢复默认要连它们一起复位，总开关才一致。
+                        "ReactionSlowMotionEnabled", "ReactionCameraNudgeEnabled");
                     break;
             }
         }

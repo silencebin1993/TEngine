@@ -515,6 +515,7 @@ namespace GameLogic.Stage
             // FG0-UX-01：通知中心——弹出条过期、跟随战役切换重新绑定历史（主菜单里也要跑：回菜单时清空）。
             GameLogic.Notifications.NotificationCenter.Tick();
             Settings.UiScaleApplier.Tick();
+            Settings.AccessibilityApplier.Tick(); // FG15-UX-02：文字大小 / 高对比度 / 色盲模式
             UI.Common.ContentIcons.Tick();
 
             // 阶段自然结束（死亡或通关）时收摊并回主菜单。

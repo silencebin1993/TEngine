@@ -42,7 +42,7 @@ namespace GameLogic.Core
 
         /// <summary>硬件输入后端。默认真读 <see cref="UnityEngine.Input"/>；
         /// <see cref="DebugSetReader"/> 供测试注入按帧回放实现（`DEBT-M4R02-INPUT-SIM-01`）。</summary>
-        public static IInputReader Reader { get; private set; } = UnityInputReader.Instance;
+        public static IInputReader Reader { get; private set; } = KeyboardPointerReader.Default;
 
         /// <summary>
         /// 输入是否被"抢焦点"的东西占着。两个来源**故意分开存**：
@@ -73,6 +73,10 @@ namespace GameLogic.Core
 
         public static void SetScope(InputScope scope)
         {
+            if (scope != Scope)
+            {
+                _holdLatch.Clear(); // 切换锁存只属于当前作用域：换到直控 / 战略后不带着上一处的平移。
+            }
             Scope = scope;
         }
 
@@ -251,7 +255,9 @@ namespace GameLogic.Core
             UiCapturedPointers.Clear();
             _frame = -1;
             ConsumedKeys.Clear();
-            Reader = UnityInputReader.Instance;
+            Reader = KeyboardPointerReader.Default;
+            _holdLatch.Clear();
+            _holdLatchFrame.Clear();
         }
 
         /// <summary>测试注入硬件输入后端（`DEBT-M4R02-INPUT-SIM-01`）。传 null 恢复生产实现。
@@ -259,7 +265,7 @@ namespace GameLogic.Core
         /// 模拟帧边界，Editor 测试之间 <see cref="Time.frameCount"/> 往往不会真的变化。</summary>
         public static void DebugSetReader(IInputReader reader)
         {
-            Reader = reader ?? UnityInputReader.Instance;
+            Reader = reader ?? KeyboardPointerReader.Default;
         }
 
         /// <summary>测试模拟"进入下一帧"：清空同帧按键消费记录，不影响 Scope/模态/暂停状态。
@@ -455,7 +461,40 @@ namespace GameLogic.Core
         /// <summary>按逻辑动作读取持续按住状态（按住类动作不比较修饰）。</summary>
         public static bool GetActionKey(GameActionId action, InputScope scope)
         {
-            return Owns(scope) && ActionInActiveContext(action) && RawKeyHeld(Settings.GameSettings.KeyBindings.GetChord(action).Key);
+            if (!Owns(scope) || !ActionInActiveContext(action))
+            {
+                return false;
+            }
+            KeyCode key = Settings.GameSettings.KeyBindings.GetChord(action).Key;
+            // FG15-UX-02（FGT-UX-008 只用鼠标完成主流程）：交互另认鼠标中键（中键不参与重绑；指针在界面上时归界面）。
+            KeyCode alt = action == GameActionId.Interact && !IsUiPointerBlocked() ? InteractMouseKey : KeyCode.None;
+            // FG15-UX-02（FGR-UX-060“所有按住操作可以改为切换”，DEBT-FG0UX01-06）：镜头平移、直控移动、长按交互都走这里。
+            return Settings.GameSettings.HoldActionsToggle ? Latched(action, key, alt) : RawKeyHeld(key) || RawKeyHeld(alt);
+        }
+
+        /// <summary>FG15-UX-02（FGT-UX-008）：直控交互的鼠标键（中键，与 E 等价：点一下 / 按住，“按住改切换”同样适用）。</summary>
+        public const KeyCode InteractMouseKey = KeyCode.Mouse2;
+
+        /// <summary>FG15-UX-02（FGT-UX-008）：直控只用鼠标也能走——按住功能键（默认右键）朝指针下的地面走，到离指针
+        /// access.direct_mouse_stop 米内停；“按住改切换”开着时点一下开始、再点一下停。返回归一化的平面方向（x, z），不走时为零。</summary>
+        public static Vector2 DirectMouseMove(Camera camera, Vector3 machine)
+        {
+            int physical = PhysicalButton(1);
+            if (camera == null || physical < 0 || !Owns(InputScope.Direct) || IsUiPointerBlocked())
+            {
+                return Vector2.zero;
+            }
+            KeyCode key = KeyCode.Mouse0 + physical;
+            bool held = Settings.GameSettings.HoldActionsToggle ? Latched(GameActionId.SecondaryAction, key) : RawKeyHeld(key);
+            Ray ray = camera.ScreenPointToRay(Reader.MousePosition);
+            if (!held || !new Plane(Vector3.up, Vector3.zero).Raycast(ray, out float enter))
+            {
+                return Vector2.zero;
+            }
+            Vector3 p = ray.GetPoint(enter);
+            var d = new Vector2(p.x - machine.x, p.z - machine.z);
+            float stop = UiTuningValues.Get("access.direct_mouse_stop");
+            return d.sqrMagnitude > stop * stop ? d.normalized : Vector2.zero;
         }
 
         /// <summary>不看所有权的按住读取（固定悬停提示这类纯界面动作用）。文本框有焦点时一律 false。</summary>
@@ -470,25 +509,57 @@ namespace GameLogic.Core
             {
                 return RawKeyHeld(key);
             }
-            // FG15-UX-01（FGR-UX-060“所有按住操作可以改为切换”）：切换模式下按一下 = 开、再按一下 = 关；同一帧多次读取只翻一次。
+            return Latched(action, key);
+        }
+
+        /// <summary>FG15-UX-01 / 02：切换模式下按一下 = 开、再按一下 = 关；同一帧多次读取只翻一次。
+        /// 方向类（镜头平移 / 直控移动）打开一个方向时关掉它的反方向，按反方向键 = 换向而不是“两个都开着不动”。</summary>
+        private static bool Latched(GameActionId action, KeyCode key, KeyCode alt = KeyCode.None)
+        {
             if (_holdLatchFrame.TryGetValue(action, out int f) && f == Time.frameCount)
             {
                 return _holdLatch.Contains(action);
             }
             _holdLatchFrame[action] = Time.frameCount;
-            if (RawKeyDown(key) && !_holdLatch.Remove(action))
+            if ((RawKeyDown(key) || RawKeyDown(alt)) && !_holdLatch.Remove(action))
             {
                 _holdLatch.Add(action);
+                int dir = Direction(action);
+                if (dir != 0)
+                {
+                    // 战略视角同时读 Move* 与 StrategyPan*：反方向跨组也互斥（锁住 W 再按 ↓ = 换向，而不是两个都锁着不动）。
+                    _holdLatch.RemoveWhere(o => Direction(o) == -dir);
+                }
             }
             return _holdLatch.Contains(action);
         }
 
+        /// <summary>方向类动作的方向码：±1 = 上 / 下，±2 = 右 / 左（直控移动、战略平移、面板平移三组共用）；其余 0。</summary>
+        private static int Direction(GameActionId a)
+        {
+            switch (a)
+            {
+                case GameActionId.MoveForward: case GameActionId.StrategyPanUp: case GameActionId.PanelPanUp: return 1;
+                case GameActionId.MoveBack: case GameActionId.StrategyPanDown: case GameActionId.PanelPanDown: return -1;
+                case GameActionId.MoveRight: case GameActionId.StrategyPanRight: case GameActionId.PanelPanRight: return 2;
+                case GameActionId.MoveLeft: case GameActionId.StrategyPanLeft: case GameActionId.PanelPanLeft: return -2;
+                default: return 0;
+            }
+        }
+
+        /// <summary>FG15-UX-02：切换模式下一次“按住”动作做完（例如长按交互完成）就松开锁存，免得下一个目标自动开始。</summary>
+        public static void ReleaseHoldLatch(GameActionId action) => _holdLatch.Remove(action);
+
+        /// <summary>自检用：某动作当前是否处于“切换锁存 = 按住中”。</summary>
+        public static bool IsHoldLatched(GameActionId action) => _holdLatch.Contains(action);
+
         private static readonly HashSet<GameActionId> _holdLatch = new HashSet<GameActionId>();
         private static readonly Dictionary<GameActionId, int> _holdLatchFrame = new Dictionary<GameActionId, int>();
 
-        /// <summary>能改成切换的按住类动作：表里 kind=hold、且不是镜头 / 移动（平移按住才走，改成切换会停不下来）。</summary>
+        /// <summary>能改成切换的按住类动作：表里 kind=hold 的全部动作（FG15-UX-02 起含镜头平移 / 直控移动：再按一次或按反方向即停，
+        /// 切场景 / 换作用域时 <see cref="ClearHoldLatches"/> 清掉，不会一直平移停不下来）。</summary>
         public static bool IsToggleableHold(GameActionId action) =>
-            InputActionCatalog.TryGet(action, out InputActionDef def) && def.Kind == InputActionKind.Hold && def.CategoryKey != "input.category.camera";
+            InputActionCatalog.TryGet(action, out InputActionDef def) && def.Kind == InputActionKind.Hold;
 
         /// <summary>自检 / 切换设置时清掉切换锁存（<paramref name="framesOnly"/> = 只当作进入下一帧，编辑器里 frameCount 不走）。</summary>
         public static void ClearHoldLatches(bool framesOnly = false)

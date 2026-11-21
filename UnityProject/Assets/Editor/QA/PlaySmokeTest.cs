@@ -868,6 +868,19 @@ namespace GameLogic.EditorTools
                 Check(SettingsPanelUIToolkit.IsOpen && panel.Rows.Count > 0 && window != null && window.resolvedStyle.display == DisplayStyle.Flex && window.worldBound.width > 400f,
                     $"主菜单打开 UI Toolkit 设置面板：画面分类 {panel?.Rows.Count} 行（窗口宽 {window?.worldBound.width:F0}）");
                 CheckNoTextMarkers("主菜单设置面板");
+                // FG15-UX-02：真实 Play 里高对比度 / 色盲模式挂到共享面板根上，关掉后摘掉（AccessibilityApplier 每帧由 GameRoot 调）。
+                bool hcBefore = GameSettings.HighContrastEnabled;
+                ColorblindMode cvdBefore = GameSettings.ColorblindMode;
+                GameSettings.SetHighContrastEnabled(true);
+                GameSettings.SetColorblindMode(ColorblindMode.Achromat);
+                AccessibilityApplier.Tick();
+                VisualElement tree = panel?.Root?.panel?.visualTree;
+                bool applied = tree != null && tree.ClassListContains(AccessibilityApplier.HighContrastClass) && tree.ClassListContains("uk-cvd-achromat");
+                GameSettings.SetHighContrastEnabled(hcBefore);
+                GameSettings.SetColorblindMode(cvdBefore);
+                AccessibilityApplier.Tick();
+                bool removed = tree != null && tree.ClassListContains(AccessibilityApplier.HighContrastClass) == hcBefore && !tree.ClassListContains("uk-cvd-achromat") == (cvdBefore != ColorblindMode.Achromat);
+                Check(applied && removed, $"可访问性：高对比度 / 全色盲在真实面板根上生效、还原后摘掉（{applied}/{removed}）");
                 PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
                 SessionState.SetInt(K + "SettingsSub", 1);
                 SessionState.SetFloat(K + "StepStart", (float)EditorApplication.timeSinceStartup);

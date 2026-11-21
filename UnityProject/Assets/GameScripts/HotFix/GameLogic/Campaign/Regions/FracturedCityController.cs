@@ -621,6 +621,13 @@ namespace GameLogic.Campaign.Regions
             if (InputRouter.GetActionKey(GameActionId.MoveRight, InputScope.Direct)) { x += 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveBack, InputScope.Direct)) { z -= 1f; }
             if (InputRouter.GetActionKey(GameActionId.MoveForward, InputScope.Direct)) { z += 1f; }
+            if (x == 0f && z == 0f)
+            {
+                // FG15-UX-02（FGT-UX-008 只用鼠标完成主流程）：按住右键朝指针下的地面走（键盘方向优先）。
+                Vector2 mouseMove = InputRouter.DirectMouseMove(_camera, _possessed.Position3);
+                x = mouseMove.x;
+                z = mouseMove.y;
+            }
             if (x != 0f || z != 0f)
             {
                 _lastFacing = new Vector2(x, z).normalized; // ER5-INT-01：E 候选"指向"排序读这个。

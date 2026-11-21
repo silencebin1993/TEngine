@@ -44,6 +44,9 @@ Shader "BinGames/CombatInstanced"
 
             StructuredBuffer<CombatInstance> _Instances;
             float _Kind;
+            // FG15-UX-02（FGR-UX-060 色盲模式）：全局色觉重映射（GameLogic.Settings.ColorVision 写入）；_BgCvdOn = 0 时不动颜色。
+            float _BgCvdOn;
+            float4x4 _BgCvdMatrix;
             float _Alpha;
             float _Height;
             // FG2-VFX-02 修复轮：区域 / 无人机动画用游戏时钟（战略暂停时静止、倍速时同步加快），由 CombatRenderer 每帧传入内核时间。
@@ -188,10 +191,15 @@ Shader "BinGames/CombatInstanced"
                 return o;
             }
 
+            float3 cvdRemap(float3 c)
+            {
+                return _BgCvdOn > 0.5 ? saturate(mul((float3x3)_BgCvdMatrix, c)) : c;
+            }
+
             float3 unpackRgb(float v)
             {
                 uint packed = (uint)round(v);
-                return float3((packed >> 16) & 255, (packed >> 8) & 255, packed & 255) / 255.0;
+                return cvdRemap(float3((packed >> 16) & 255, (packed >> 8) & 255, packed & 255) / 255.0);
             }
 
             float hash21(float2 p)
@@ -361,7 +369,7 @@ Shader "BinGames/CombatInstanced"
                 {
                     float2 q2 = (i.uv - 0.5) * 2.0;
                     uint packed = (uint)round(i.data.z);
-                    float3 tint = float3((packed >> 16) & 255, (packed >> 8) & 255, packed & 255) / 255.0;
+                    float3 tint = cvdRemap(float3((packed >> 16) & 255, (packed >> 8) & 255, packed & 255) / 255.0);
                     int stacks = (int)round(i.data.w - 30.0);
                     // 底部叠层小点（1～3 个）。
                     for (int s = 0; s < 3; s++)
@@ -372,7 +380,17 @@ Shader "BinGames/CombatInstanced"
                             if (length(q2 - dotC) < 0.11) return fixed4(1, 1, 1, 1);
                         }
                     }
-                    float sd = shapeSd(float2(q2.x, q2.y + 0.1) * 1.12, (int)round(i.data.y));
+                    // FG15-UX-02（FGT-UX-007）：形状码 = 字形 + 32 × 角标（1 中心圆点、2 横杠）；字形中心是实心就挖空角标，空心就补上角标。
+                    int code = (int)round(i.data.y);
+                    int glyph = code % 32;
+                    int mark = code / 32;
+                    float2 sp = float2(q2.x, q2.y + 0.1) * 1.12;
+                    float sd = shapeSd(sp, glyph);
+                    if (mark > 0)
+                    {
+                        float msd = mark == 1 ? length(sp) - 0.26 : max(abs(sp.y) - 0.12, abs(sp.x) - 0.58);
+                        sd = shapeSd(float2(0, 0), glyph) < 0.0 ? max(sd, -msd) : min(sd, msd);
+                    }
                     if (sd < 0.0) return fixed4(tint, 1);
                     if (sd < 0.1) return fixed4(0.06, 0.06, 0.07, 1);
                     // 深色圆角底板，保证在任何地面颜色上都看得清。
@@ -384,7 +402,7 @@ Shader "BinGames/CombatInstanced"
                 float faction = i.data.z;
                 float3 friendCol = float3(0.25, 0.85, 0.95);
                 float3 foeCol = float3(0.98, 0.45, 0.18);
-                float3 col = faction < 0.5 ? friendCol : foeCol;
+                float3 col = cvdRemap(faction < 0.5 ? friendCol : foeCol);
                 if (_Kind > 0.5 && abs(i.data.w - 10.0) < 0.5)
                 {
                     // FG2-E2E-01（FG-GAP-043）：引信弹迹——琥珀白亮线，按剩余比例变细变暗。

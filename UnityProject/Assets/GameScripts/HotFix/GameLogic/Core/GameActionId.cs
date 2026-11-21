@@ -178,5 +178,23 @@
         ExpeditionReturn = 138,
         /// <summary>DEBT-FG6DEF01-06 / 02-08：建筑面板开着时打开这座建筑的炮塔面板 / 防御面板（界面上下文，默认 Alt+M）。</summary>
         OpenBuildingDefensePanel = 139,
+        /// <summary>FG15-UX-02：键盘指针上 / 下 / 左 / 右移（设置“键盘指针”开着时生效，默认小键盘 8 / 2 / 4 / 6）。</summary>
+        PointerUp = 140,
+        PointerDown = 141,
+        PointerLeft = 142,
+        PointerRight = 143,
+        /// <summary>FG15-UX-02：键盘指针左键（按住 = 拖动 / 拉框，默认小键盘 5）。</summary>
+        PointerClick = 144,
+        /// <summary>FG15-UX-02：键盘指针右键（命令 / 取消，默认小键盘 0）。</summary>
+        PointerRightClick = 145,
+        /// <summary>FG15-UX-02（DEBT-FG5RND01-06）：可平移面板（研发树）里的方向键平移与 +/- 缩放（界面上下文）。</summary>
+        PanelPanUp = 146,
+        PanelPanDown = 147,
+        PanelPanLeft = 148,
+        PanelPanRight = 149,
+        PanelZoomIn = 150,
+        PanelZoomOut = 151,
+        /// <summary>FG15-UX-02（DEBT-FG6DEF09-05）：打开难度面板（默认 Ctrl+K）。</summary>
+        OpenDifficulty = 152,
     }
 }

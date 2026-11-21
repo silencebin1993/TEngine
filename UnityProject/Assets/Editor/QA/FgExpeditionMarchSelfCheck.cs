@@ -531,7 +531,7 @@ namespace GameLogic.EditorTools
             WorldSimulation.StepMany(2);
             bool away = ExpeditionMarchService.IsAway(now) && SignalCoreService.ExpeditionUnderway && !SignalCoreService.CanEdit(now, out _);
             bool roster = MachineRoster.EffectiveRole(now, Rec(a)) == MachineRole.OnExpedition && !MachineRoster.IsHome(Rec(a)) && MachineRoster.IsHome(Rec(c))
-                          && MachineRoster.PlaceText(now, Rec(a)) == GameText.Format("exp.roster.place", GameText.Get("exp.state.marching"));
+                          && MachineRoster.PlaceText(now, Rec(a)) == RosterTeamPlace(now, a, "exp.state.marching");
             bool noWork = HomeValleyWorkOrders.TakenByPlayer != null && HomeValleyWorkOrders.TakenByPlayer(a) && HomeValleyWorkOrders.TakenByPlayer(b) && !HomeValleyWorkOrders.TakenByPlayer(c);
             bool counted = FracturedCityRegion.Find(now).ExpeditionCount == countBefore + 1;
             bool report = now.Stats?.AwayReports != null && now.Stats.AwayReports.HasOpen && now.Stats.AwayReports.Open.RegionId == FracturedCityLayout.RegionId;
@@ -1658,7 +1658,7 @@ namespace GameLogic.EditorTools
                     $"M13 战略地图（FG08 第 7 节）：远征队图标用队伍颜色、标签“{icon.Label}”；剩余路线 {routeLines} 段用队伍颜色；目的地锚点标出（{goal}）");
 
                 // 名册 + 关注点条。
-                bool rosterTxt = MachineRoster.PlaceText(now, Rec(a)) == GameText.Format("exp.roster.place", GameText.Get("exp.state.marching"));
+                bool rosterTxt = MachineRoster.PlaceText(now, Rec(a)) == RosterTeamPlace(now, a, "exp.state.marching");
                 bool focusItem = WorldView.FocusTargets(now).Any(t => t.Id == WorldView.ExpeditionFocusId && t.Label.StartsWith("测试队", StringComparison.Ordinal));
                 // 进地点后：跟随按钮变“前往远征地点”，点了镜头切过去。
                 ExpeditionMarchService.ArriveNowForTests(now, observeSite: false);
@@ -1667,7 +1667,7 @@ namespace GameLogic.EditorTools
                 bool gone = Click(hud.MarchFollowButton) && WorldView.ObservedSiteId == FracturedCityLayout.RegionId;
                 bool siteText = hud.MarchStatusText.Contains(GameText.Get("world.site." + FracturedCityLayout.RegionId + ".name"));
                 Expect(rosterTxt && focusItem && gotoText && gone && siteText,
-                    $"M13 名册写“{GameText.Format("exp.roster.place", GameText.Get("exp.state.marching"))}”（{rosterTxt}）、关注点条有远征队（{focusItem}）；进地点后行军条“{hud.MarchStatusText}”、按钮变“前往远征地点”并能切过去（{gotoText && gone}）");
+                    $"M13 名册写“{RosterTeamPlace(now, a, "exp.state.marching")}”（{rosterTxt}）、关注点条有远征队（{focusItem}）；进地点后行军条“{hud.MarchStatusText}”、按钮变“前往远征地点”并能切过去（{gotoText && gone}）");
 
                 string probe = UiToolkitLayoutProbe.Probe(UiKitFolder + "WorldBar.uxml", "WorldBar", stressFill: true, prepare: rr =>
                 {
@@ -1866,6 +1866,11 @@ namespace GameLogic.EditorTools
             }
             return r.Success ? r.LogicId : 0;
         }
+
+        /// <summary>FG15-UX-02（DEBT-FG8EXP01-01）：名册里远征队成员的去向文本 = 队名（队伍颜色名）· 状态。</summary>
+        private static string RosterTeamPlace(CampaignState s, int logicId, string statusKey) =>
+            GameText.Format("exp.roster.place_team", ExpeditionMarchService.TeamLabel(s, ExpeditionMarchService.TeamOf(s, logicId)),
+                ExpeditionTeamService.ColorName(ExpeditionTeamService.ColorIndexOf(s)), GameText.Get(statusKey));
 
         private static MachineRecord Rec(int id) => MachineRegistry.TryGetRecord(id, out MachineRecord m) ? m : null;
 

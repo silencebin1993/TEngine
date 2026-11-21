@@ -45,7 +45,7 @@ namespace BinGames.EditorTools
         /// </summary>
         public static string Probe(string uxmlPath, string panelRootName = null, bool stressFill = true,
             string panelSettingsPath = DefaultPanelSettingsPath, System.Action<VisualElement> prepare = null,
-            float uiScale = 1f, Vector2Int[] resolutions = null)
+            float uiScale = 1f, Vector2Int[] resolutions = null, System.Action<VisualElement, Vector2Int> afterLayout = null)
         {
             var vta = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(uxmlPath);
             var sourceSettings = AssetDatabase.LoadAssetAtPath<PanelSettings>(panelSettingsPath);
@@ -58,14 +58,15 @@ namespace BinGames.EditorTools
             int totalProblems = LintFolder(uxmlPath, sb);
             foreach (Vector2Int res in resolutions ?? DefaultResolutions)
             {
-                totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb, prepare, uiScale);
+                totalProblems += ProbeAt(vta, sourceSettings, panelRootName, stressFill, res, sb, prepare, uiScale, afterLayout);
             }
             sb.Insert(0, totalProblems == 0 ? "PASS 无布局问题\n" : $"FAIL 共 {totalProblems} 处问题\n");
             return sb.ToString();
         }
 
         private static int ProbeAt(VisualTreeAsset vta, PanelSettings sourceSettings, string panelRootName, bool stressFill,
-            Vector2Int resolution, StringBuilder sb, System.Action<VisualElement> prepare = null, float uiScale = 1f)
+            Vector2Int resolution, StringBuilder sb, System.Action<VisualElement> prepare = null, float uiScale = 1f,
+            System.Action<VisualElement, Vector2Int> afterLayout = null)
         {
             // 克隆 PanelSettings 并挂一张目标尺寸的 RenderTexture：面板按这个尺寸 + 原缩放规则算参考坐标，
             // 等价于在该分辨率的屏幕上布局，不需要真的改 Game 视图分辨率。
@@ -97,6 +98,7 @@ namespace BinGames.EditorTools
                 // 数据绑定或关闭回调可能重新收起目标；布局验收始终检查目标的展开状态。
                 RevealHidden(target);
                 ForceLayout(treeRoot);
+                afterLayout?.Invoke(target, resolution); // FG15-UX-02：调用方在布局完成后读实测数值（字号、控件尺寸、样式）。
 
                 Rect panelRect = treeRoot.panel.visualTree.worldBound;
                 Rect rootRect = target.worldBound;

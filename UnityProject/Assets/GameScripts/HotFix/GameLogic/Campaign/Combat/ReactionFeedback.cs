@@ -278,7 +278,7 @@ namespace GameLogic.Campaign.Combat
             // 物质按节拍持续扣血：同一组合每 emg.friendly.notify_seconds 游戏秒最多一条（破片一次一条，不节流）
             if (hit.z != EmgFriendlyCode.Fragment)
             {
-                long gap = (long)(ReactionPopups.Tuning("emg.friendly.notify_seconds", 1f) * GameClock.StepHz);
+                long gap = (long)(CombatSite.Tuning("emg.friendly.notify_seconds", 1f) * GameClock.StepHz);
                 (int, int, int) key = (hit.x, hit.y, hit.z);
                 if (cur.FriendlyAt.TryGetValue(key, out long at) && GameClock.Ticks >= at && GameClock.Ticks - at < gap)
                 {

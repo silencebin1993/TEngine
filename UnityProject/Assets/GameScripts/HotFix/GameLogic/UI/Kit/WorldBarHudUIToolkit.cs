@@ -789,9 +789,11 @@ namespace GameLogic.UI.Kit
                                   ProductionStats.WindowName(ResourcePins.RateWindow))
                               + (v.FluidLiters >= 0 ? "\n" + GameText.Format("topbar.fluid_stock_tip", v.Item.Name, v.FluidLiters.ToString("N0", CultureInfo.InvariantCulture), v.FluidNetworks) : string.Empty)
                               + (v.HasTarget ? "\n" + GameText.Format(v.Reached ? "topbar.target_ok_tip" : "topbar.target_miss_tip", ProductionStats.Rate(v.Item, v.Target)) : string.Empty)
-                              + "\n" + GameText.Format("topbar.pin_hint", InputDisplay.ForAction(GameActionId.OpenStats));
+                              + "\n" + GameText.Format("topbar.pin_hint", InputDisplay.ForAction(GameActionId.OpenStats))
+                              + "\n" + GameText.Get("topbar.pin_move_hint");
                 Chip(n++, text, v.Item.Name, body, "wb-res-pin", v.HasTarget ? (v.Reached ? "wb-res-reached" : "wb-res-missed") : null,
-                    () => StatsPanelUIToolkit.OpenTab(StatsTab.Production, id), () => ResourcePins.TryUnpin(CampaignSession.Current, id, out _));
+                    () => StatsPanelUIToolkit.OpenTab(StatsTab.Production, id), () => ResourcePins.TryUnpin(CampaignSession.Current, id, out _),
+                    () => ResourcePins.TryMove(CampaignSession.Current, id, -1));
             }
             if (ResourcePins.Pins(state).Count < ResourcePins.MaxPins)
             {
@@ -855,7 +857,9 @@ namespace GameLogic.UI.Kit
             ResourceChipCount = n;
         }
 
-        private void Chip(int i, string text, string title, string body, string cls, string stateCls, Action left, Action right)
+        private readonly List<Action> _resMiddle = new List<Action>();
+
+        private void Chip(int i, string text, string title, string body, string cls, string stateCls, Action left, Action right, Action middle = null)
         {
             while (_resChips.Count <= i)
             {
@@ -870,11 +874,16 @@ namespace GameLogic.UI.Kit
                     {
                         _resRight[index]?.Invoke();
                     }
+                    else if (evt.button == 2)
+                    {
+                        _resMiddle[index]?.Invoke(); // FG15-UX-02（DEBT-FG4ECO08-04）：中键 = 前移一位
+                    }
                 });
                 UiTooltip.Attach(b, () => new TooltipContent { Title = _resTipTitle[index], Body = _resTipBody[index] });
                 _resChips.Add(b);
                 _resLeft.Add(null);
                 _resRight.Add(null);
+                _resMiddle.Add(null);
                 _resTipTitle.Add(string.Empty);
                 _resTipBody.Add(string.Empty);
                 _resRow.Add(b);
@@ -888,6 +897,7 @@ namespace GameLogic.UI.Kit
             c.EnableInClassList("wb-res-missed", stateCls == "wb-res-missed");
             _resLeft[i] = left;
             _resRight[i] = right;
+            _resMiddle[i] = middle;
             _resTipTitle[i] = title ?? string.Empty;
             _resTipBody[i] = body ?? string.Empty;
         }

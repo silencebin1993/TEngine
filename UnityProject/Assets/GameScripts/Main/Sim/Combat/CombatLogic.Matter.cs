@@ -928,6 +928,12 @@ namespace BinGames.Sim.Combat
         private static void EmgMatterEdges(ref CombatData d, int u, uint mask, uint prev, NativeList<int2> hits)
         {
             uint entered = mask & ~prev, left = prev & ~mask;
+            if (entered != 0u)
+            {
+                EmgScalars es = d.EmgS[0];
+                es.MatterEnters++;
+                d.EmgS[0] = es;
+            }
             while (entered != 0u)
             {
                 int b = math.tzcnt(entered);

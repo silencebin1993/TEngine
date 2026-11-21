@@ -96,6 +96,10 @@ namespace GameLogic.Core
             {
                 return GameText.Format("input.key.digit", ((int)(key - KeyCode.Alpha0)).ToString());
             }
+            if (key >= KeyCode.Keypad0 && key <= KeyCode.Keypad9)
+            {
+                return GameText.Format("input.key.keypad", ((int)(key - KeyCode.Keypad0)).ToString()); // FG15-UX-02 键盘指针
+            }
             switch (key)
             {
                 case KeyCode.None: return GameText.Get("input.key.none");

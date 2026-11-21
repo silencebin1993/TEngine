@@ -186,7 +186,7 @@ namespace GameLogic.EditorTools
             var enumMembers = ((GameActionId[])Enum.GetValues(typeof(GameActionId))).Distinct().ToList();
             var missing = enumMembers.Where(a => !InputActionCatalog.TryGet(a, out _)).ToList();
             var extra = InputActionCatalog.All.Where(d => !enumMembers.Contains(d.Action)).ToList();
-            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 125, // FG15-UX-01 新增“建筑：打开炮塔 / 防御面板”（DEBT-FG6DEF01-06 / 02-08，124 → 125）；FG15-UX-01 删除“接入技能 1～5”（FG-GAP-046，−5）、新增反应记录 / 突袭历史 / 炮塔目标模式 / 陷阱铺设方式 / 远征跟随与前进 / 待命 / 返回（+8）（121 → 124）；EMG1-CHAIN-01 新增“因果链”（120 → 121）；FG9-UX-01 新增“资料库”（119 → 120）；FG8-QST-01 新增“镜头飞到追踪的任务”（118 → 119）；FG8-OUT-01 新增“前哨站总览”（117 → 118）；FG7-ENV-03 新增“隐藏 / 显示顶棚”“叠加层：顶棚覆盖”（115 → 117）；FG7-ENV-01 新增“日历”（114 → 115）；FG6-DEF-06 审查修复新增“观战”“跟随战斗”（112 → 114）；FG6-DEF-06 新增“防御总览”（111 → 112）；FG5-RND-04 新增“配方书”（110 → 111）；FG4-ECO-09 新增“离家报告”（109 → 110）；FG4-ECO-08 新增“统计”（108 → 109）；FG4-ECO-06 新增“常驻规则”（107 → 108）；FG4-ECO-01 新增“物资面板”（106 → 107）；FG3-LOG-08 新增“叠加层选择器”“为什么不工作”与 8 种叠加层直达（96 → 106）；FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
+            Expect(missing.Count == 0 && extra.Count == 0 && InputActionCatalog.All.Count == enumMembers.Count && enumMembers.Count == 138, // FG15-UX-02 新增键盘指针 6 个、研发树面板内平移 / 缩放 6 个、难度面板 1 个（125 → 138）； FG15-UX-01 新增“建筑：打开炮塔 / 防御面板”（DEBT-FG6DEF01-06 / 02-08，124 → 125）；FG15-UX-01 删除“接入技能 1～5”（FG-GAP-046，−5）、新增反应记录 / 突袭历史 / 炮塔目标模式 / 陷阱铺设方式 / 远征跟随与前进 / 待命 / 返回（+8）（121 → 124）；EMG1-CHAIN-01 新增“因果链”（120 → 121）；FG9-UX-01 新增“资料库”（119 → 120）；FG8-QST-01 新增“镜头飞到追踪的任务”（118 → 119）；FG8-OUT-01 新增“前哨站总览”（117 → 118）；FG7-ENV-03 新增“隐藏 / 显示顶棚”“叠加层：顶棚覆盖”（115 → 117）；FG7-ENV-01 新增“日历”（114 → 115）；FG6-DEF-06 审查修复新增“观战”“跟随战斗”（112 → 114）；FG6-DEF-06 新增“防御总览”（111 → 112）；FG5-RND-04 新增“配方书”（110 → 111）；FG4-ECO-09 新增“离家报告”（109 → 110）；FG4-ECO-08 新增“统计”（108 → 109）；FG4-ECO-06 新增“常驻规则”（107 → 108）；FG4-ECO-01 新增“物资面板”（106 → 107）；FG3-LOG-08 新增“叠加层选择器”“为什么不工作”与 8 种叠加层直达（96 → 106）；FG3-LOG-07 新增“复制设置”“粘贴设置”（94 → 96）；FG3-LOG-06 新增“电网面板”（93 → 94）；FG0-ARCH-01 新增“切换关注点”（85 → 86）；FG1-SIG-01 新增“信号核”（86 → 87）；FG1-SIG-06 新增“暴露面板”（87 → 88）；FG3-LOG-01 新增“格线开关”“搬迁”（88 → 90）；FG3-LOG-02 新增“施工队列”“优先建造这一片”（90 → 92）；FG3-LOG-03 新增“清带”（92 → 93）
                 $"GameActionId 的 {enumMembers.Count} 个成员与表里 {InputActionCatalog.All.Count} 行一一对应（缺：{string.Join(",", missing)}；多：{string.Join(",", extra.Select(d => d.Action))}）");
 
             InputBindingSet defaults = InputBindingSet.CreateDefault();
@@ -643,7 +643,7 @@ namespace GameLogic.EditorTools
             // 允许名单：旧细胞阶段（0.2 主菜单不可达，承接 FG14 迁移时整体下线）、开发调试键、输入层自身、改键采集。
             string[] allow =
             {
-                "Core/InputRouter.cs", "Core/UnityInputReader.cs", "Core/InputDisplay.cs", "Core/IInputReader.cs",
+                "Core/InputRouter.cs", "Core/UnityInputReader.cs", "Core/KeyboardPointerReader.cs", "Core/InputDisplay.cs", "Core/IInputReader.cs",
                 "Battle/SimStressTest.cs", "Battle/StressTestToggle.cs", "Battle/Feedback/WhiteboxAiHandoffOverlay.cs",
                 "Command/SquadCommandSystem.cs", "Stage/CellStage/CellPlayerController.cs",
                 "UI/Battle/", "UI/BattleHudToolkit/", "UI/BattleCarrierUIToolkit/", "UI/BattleGerminationUIToolkit/",

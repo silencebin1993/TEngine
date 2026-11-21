@@ -223,10 +223,64 @@ namespace GameLogic.Campaign.Content
             return v;
         }
 
+        /// <summary>FG15-UX-02（FGT-UX-007 / B15）：6 种场的场心图标（下标 = 场端口 − 701；fg.TbChannelPort fld.* 的 shape / color），没有或认不出 x = -1。</summary>
+        public static float2[] BuildFieldVisuals()
+        {
+            var v = new float2[CombatRenderer.FieldVisualCount];
+            for (int k = 0; k < v.Length; k++)
+            {
+                v[k] = new float2(-1f, 0f);
+            }
+            var rows = ConfigSystem.Instance.Tables?.TbChannelPort?.DataList;
+            if (rows == null)
+            {
+                return v;
+            }
+            foreach (ChannelPort r in rows)
+            {
+                int k = r.Code - EmgFieldConst.PortPull;
+                if (r.Family != "field" || k < 0 || k >= v.Length)
+                {
+                    continue;
+                }
+                int shape = ShapeIndex(r.Shape);
+                if (shape < 0 || !TryParseColor(r.Color, out uint rgb))
+                {
+                    Log.Error($"[NamedReactionCatalog] 场端口 {r.Id} 的图标形状 {r.Shape} / 颜色 {r.Color} 无法识别，场心不显示它。");
+                    continue;
+                }
+                v[k] = new float2(shape, rgb);
+            }
+            return v;
+        }
+
         /// <summary>头顶图标支持的形状字形（顺序 = 着色器里的形状序号）。</summary>
         public static readonly string[] Shapes = { "▲", "●", "◆", "◇", "★", "▼", "■", "☆", "◎", "○", "※", "△", "□", "▽" };
 
-        public static int ShapeIndex(string glyph) => string.IsNullOrEmpty(glyph) ? -1 : Array.IndexOf(Shapes, glyph);
+        /// <summary>FG15-UX-02（FGT-UX-007）：字形后的角标（下标 = 角标号；0 = 无）。着色器形状码 = 字形序号 + <see cref="MarkStride"/> × 角标号。</summary>
+        public static readonly string[] Marks = { string.Empty, "•", "—" };
+
+        public const int MarkStride = 32;
+
+        /// <summary>字形（可带一个角标）→ 着色器形状码；认不出返回 -1。</summary>
+        public static int ShapeIndex(string glyph)
+        {
+            if (string.IsNullOrEmpty(glyph) || glyph.Length > 2)
+            {
+                return -1;
+            }
+            int baseIdx = Array.IndexOf(Shapes, glyph.Substring(0, 1));
+            int mark = glyph.Length == 2 ? Array.IndexOf(Marks, glyph.Substring(1, 1)) : 0;
+            return baseIdx < 0 || mark < 0 ? -1 : baseIdx + MarkStride * mark;
+        }
+
+        /// <summary>形状码 → 字形（含角标）；越界返回空串。</summary>
+        public static string GlyphOf(int code)
+        {
+            int b = code % MarkStride;
+            int m = code / MarkStride;
+            return code < 0 || b >= Shapes.Length || m >= Marks.Length ? string.Empty : Shapes[b] + Marks[m];
+        }
 
         public static bool TryParseColor(string hex, out uint rgb)
         {

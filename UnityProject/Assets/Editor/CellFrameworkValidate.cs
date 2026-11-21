@@ -867,6 +867,9 @@ namespace GameLogic.EditorTools
             // FG15-UX-01：设置全集与重绑（FGT-SYS-005 / FGT-UX-003）——FGR-SYS-020 每项真的生效、显示设置 15 秒确认 / 还原 / 超时 / 失败（暂停与倍速无关）、
             // 每类恢复默认、本机持久化、设置面板、主菜单与游戏内一致、重绑冲突与动态动作清单、失焦暂停 / 静音、自动存档间隔、难度类随存档。
             Seg("FgSettingsSelfCheck", FgSettingsSelfCheck.Run);
+            // FG15-UX-02：可访问性全集（FGR-UX-060；FGT-UX-007 / 008）——设置项与迁移 / 持久化 / 恢复默认 / 减少动态效果、状态 / 沾染 / 相态 / 纹样形状两两可分、
+            // 色觉重映射与着色器全局、高对比度与色盲语义色（探针实测样式）、文字大小、负向 UI 150% × 1280×720（越界 + 最小可点尺寸）、按住改切换、键盘指针、只用鼠标的主流程入口、登记册承接项。
+            Seg("FgAccessibilitySelfCheck", FgAccessibilitySelfCheck.Run);
             // EMG1-FIX-01：现存文案与实现一致（FGT-EMG-005 五条固件“描述—行为”触发 / 不触发对照、FGT-EMG-011 定时触发）——分裂三枚、延时引信飞行中空爆与提前命中不空爆、
             // 壁撞只在撞障碍时冲击、追射真补一发、磁聚过渡文案；文本与声明同源、图鉴 / 详情 / 三选一同步、旧存档预览说明、暂停与倍速、存读档。
             Seg("FgEmgTextBehaviorSelfCheck", FgEmgTextBehaviorSelfCheck.Run);

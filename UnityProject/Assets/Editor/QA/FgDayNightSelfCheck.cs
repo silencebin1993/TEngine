@@ -267,9 +267,13 @@ namespace GameLogic.EditorTools
                 QueueIds = Array.Empty<string>(),
             };
             s.BuildingRecords = (s.BuildingRecords ?? Array.Empty<BuildingRecord>()).Append(r).ToArray();
-            HomeGridService.MapFor(s);
-            HomeValleyPowerGrid.Recompute(s);
-            FgProductionSelfCheck.Resync(s);
+            // FG15-UX-02（FG-GAP-117）：开局搭场景（放家园建筑 → 电网 / 生产对账）发出的通知显式记到家园，与镜头看不看家园无关。
+            WorldSimulation.RunAsSite(HomeValleyLayout.RegionId, () =>
+            {
+                HomeGridService.MapFor(s);
+                HomeValleyPowerGrid.Recompute(s);
+                FgProductionSelfCheck.Resync(s);
+            });
             return r;
         }
 
@@ -683,9 +687,9 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>开局时随机生成的编号（Guid，32 位十六进制：旧细胞阶段的芯片编号等）、通知的真实时间戳（*Utc）与游戏计时无关；模拟步之外发出的通知（开局搭场景、步末的目标重算）按镜头所在地点记地点（观察 / 不观察时不同，FG-GAP-117），比较前抹掉。</summary>
-        private static string Masked(string json) => System.Text.RegularExpressions.Regex.Replace(
-            System.Text.RegularExpressions.Regex.Replace(System.Text.RegularExpressions.Regex.Replace(json, "[0-9a-f]{32}", "#"), "\"[A-Za-z]*Utc\":\"[^\"]*\"", "\"Utc\":\"#\""),
-            "\"HasLocation\":(true|false),\"RegionId\":\"[^\"]*\"", "\"HasLocation\":$1,\"RegionId\":\"#\"");
+        // FG15-UX-02（FG-GAP-117 关闭）：步外通知已由发出方显式记地点，通知的 RegionId 不再抹掉——观察与否必须完全一致。
+        private static string Masked(string json) =>
+            System.Text.RegularExpressions.Regex.Replace(System.Text.RegularExpressions.Regex.Replace(json, "[0-9a-f]{32}", "#"), "\"[A-Za-z]*Utc\":\"[^\"]*\"", "\"Utc\":\"#\"");
 
         private static string FirstDiff(string a, string b)
         {

@@ -583,7 +583,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return;
             }
-            long gap = Math.Max(1L, (long)(Feedback.ReactionPopups.Tuning("emg.friendly.notify_seconds", 1f) * GameClock.StepHz));
+            long gap = Math.Max(1L, (long)(CombatSite.Tuning("emg.friendly.notify_seconds", 1f) * GameClock.StepHz));
             long now = GameClock.Ticks;
             if (StructFriendlyAt.TryGetValue(h.Key, out long at) && now >= at && now - at < gap)
             {

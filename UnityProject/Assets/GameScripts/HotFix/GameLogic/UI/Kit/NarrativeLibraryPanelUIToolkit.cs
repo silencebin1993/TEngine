@@ -187,6 +187,7 @@ namespace GameLogic.UI.Kit
             _detailTitle = root.Q<Label>("NlDetailTitle");
             _detailMeta = root.Q<Label>("NlDetailMeta");
             _detailBody = root.Q<Label>("NlDetailBody");
+            _detailBody?.AddToClassList(Settings.AccessibilityApplier.TextScaleSkipClass); // FG15-UX-02：字号由本面板每帧写（字幕大小 × 文字大小）
             _replay = root.Q<Button>("NlReplay");
             _markAll = root.Q<Button>("NlMarkAll");
             _footer = root.Q<Label>("NlFooter");
@@ -447,7 +448,7 @@ namespace GameLogic.UI.Kit
 
         private void RenderDetail(CampaignState s)
         {
-            float px = UiTuningValues.Get("narrative.library_font_px") * GameSettings.SubtitleScale;
+            float px = UiTuningValues.Get("narrative.library_font_px") * GameSettings.SubtitleScale * GameSettings.TextScale;
             _detailBody.style.fontSize = px;
             NarrativeEntryRecord rec = _selected != null ? NarrativeService.Find(s, _selected) : null;
             NarrativeEntryDef def = rec != null ? NarrativeCatalog.Find(rec.Id) : null;

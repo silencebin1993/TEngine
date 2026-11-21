@@ -291,11 +291,12 @@ namespace GameLogic.EditorTools
             InputRouter.ClearHoldLatches(framesOnly: true);
             bool t3 = !InputRouter.IsActionHeld(GameActionId.PinTooltip);
             reader.Down.Clear();
-            bool panNotToggle = !InputRouter.IsToggleableHold(GameActionId.MoveForward) && InputRouter.IsToggleableHold(GameActionId.PinTooltip);
+            // FG15-UX-02（FGR-UX-060“所有按住操作可以改为切换”，DEBT-FG0UX01-06）：镜头平移 / 直控移动也可切换（原 FG15-UX-01 排除，规格要求“所有”）。
+            bool panNotToggle = InputRouter.IsToggleableHold(GameActionId.MoveForward) && InputRouter.IsToggleableHold(GameActionId.PinTooltip);
             GameSettings.SetHoldActionsToggle(false);
             InputRouter.ClearHoldLatches();
             Expect(holdHeld && holdReleased && t1 && sameFrame && t2 && t3 && panNotToggle,
-                $"“按住改为切换”：关 = 按住才固定提示；开 = 按一下固定、松手仍固定、再按一下解除（同帧多次读取只翻一次）；镜头平移不受影响（{holdHeld}/{holdReleased}/{t1}/{t2}/{t3}/{panNotToggle}）");
+                $"“按住改为切换”：关 = 按住才固定提示；开 = 按一下固定、松手仍固定、再按一下解除（同帧多次读取只翻一次）；镜头平移同样可切换（{holdHeld}/{holdReleased}/{t1}/{t2}/{t3}/{panNotToggle}）");
             InputRouter.DebugSetReader(null);
             InputRouter.Reset();
 
@@ -757,11 +758,24 @@ namespace GameLogic.EditorTools
                 var map = new (string Field, string Id)[]
                 {
                     ("_toggleEdgePan", "controls.edge_pan"), ("_toggleScreenShake", "access.shake"), ("_toggleFlashReduction", "access.flash"),
-                    ("_toggleSubtitles", "access.subtitles"), ("_toggleColorblindIcons", "access.colorblind_icons"),
+                    ("_toggleSubtitles", "access.subtitles"),
                     ("_sliderUiScale", "access.ui_scale"), ("_sliderCameraSpeed", "controls.camera_speed"), ("_sliderMasterVolume", "audio.master"),
                     ("_sliderMusicVolume", "audio.music"), ("_sliderSfxVolume", "audio.sfx"), ("_sliderUiVolume", "audio.ui"),
                 };
                 MethodInfo refresh = typeof(MainMenuUI).GetMethod("RefreshSettingsView", BindingFlags.Instance | BindingFlags.NonPublic);
+                // FG15-UX-02：主菜单旧开关“色盲安全图标”对应三档色盲模式（开 = 保留当前模式 / 没开过时红绿，关 = 关闭）。
+                {
+                    var cvd = (UnityEngine.UI.Toggle)typeof(MainMenuUI).GetField("_toggleColorblindIcons", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(window);
+                    GameSettings.SetColorblindMode(ColorblindMode.BlueYellow);
+                    refresh.Invoke(window, null);
+                    bool shownOn = cvd.isOn;
+                    cvd.isOn = false;
+                    bool off = GameSettings.ColorblindMode == ColorblindMode.Off;
+                    cvd.isOn = true;
+                    bool rg = GameSettings.ColorblindMode == ColorblindMode.RedGreen;
+                    GameSettings.SetColorblindMode(ColorblindMode.Off);
+                    Expect(shownOn && off && rg, $"主菜单“色盲安全图标”开关与色盲模式同一份设置（蓝黄 → 显示开 {shownOn}；关 → 关闭 {off}；开 → 红绿 {rg}）");
+                }
                 var mismatch = new List<string>();
                 foreach ((string field, string id) in map)
                 {

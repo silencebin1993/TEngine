@@ -99,6 +99,13 @@ namespace GameLogic.UI.PrimitiveCraft
         {
             _entryToggleButton = _root.Q<Button>("EntryToggleButton");
             _panel = _root.Q<VisualElement>("CraftPanelRoot");
+            // FG15-UX-02（FG-GAP-102）：Demo 的数值合成台改名“聚焦镜工坊”，与正式版的“电路合成台”（熔合）区分开；同一个名字只指一件东西。
+            _entryToggleButton.text = Localization.GameText.Get("craft.lens.entry");
+            Label title = _root.Q<Label>("Title");
+            if (title != null)
+            {
+                title.text = Localization.GameText.Get("craft.lens.title");
+            }
 
             _bagCapacityLabel = _root.Q<Label>("BagCapacityLabel");
             _upgradeMaterialADropdown = _root.Q<DropdownField>("UpgradeMaterialADropdown");

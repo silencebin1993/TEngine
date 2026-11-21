@@ -86,6 +86,7 @@ namespace GameLogic.UI.Kit
             _tag = root.Q<Label>("NcTag");
             _title = root.Q<Label>("NcTitle");
             _line = root.Q<Label>("NcLine");
+            _line?.AddToClassList(Settings.AccessibilityApplier.TextScaleSkipClass); // FG15-UX-02：字号由本面板每帧写（字幕大小 × 文字大小）
             _hint = root.Q<Label>("NcHint");
             _progress = root.Q<Label>("NcProgress");
             _next = root.Q<Button>("NcNext");
@@ -274,7 +275,7 @@ namespace GameLogic.UI.Kit
             }
             float speed = GameSettings.NarrativeTextSpeed;
             bool instant = GameSettings.NarrativeTextInstant;
-            _line.style.fontSize = UiTuningValues.Get("narrative.subtitle_font_px") * GameSettings.SubtitleScale;
+            _line.style.fontSize = UiTuningValues.Get("narrative.subtitle_font_px") * GameSettings.SubtitleScale * GameSettings.TextScale;
             _line.text = _cutscene.VisibleText(speed, instant);
             _title.text = NarrativeService.TitleOf(_cutscene.Def);
             _tag.text = GameText.Get("narrative.cutscene.replay_tag");
