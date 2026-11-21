@@ -67,11 +67,11 @@ TEngine 基于 HybridCLR + YooAsset + UniTask + Luban 构建。
 
 若任务涉及 ProjectA 玩法、AI、模拟、UI 或验收，在写代码前还必须：
 
-1. 从 `DesignDocs/README.md` 找到任务对应的《地球归还》ERD、内容锁定表、基元规格与 Story 施工卡；
-2. FG Story 先在 `production/design/full-game/FG-STORY-CARDS.md` 找到本卡片和点名的 FGxx 需求 ID，并过 FG00 基线清单；只有 Demo 回归任务才查 `production/design/earth-reclamation/REQUIREMENT-TO-PLAYABLE-TRACE.md`、`AI-EXECUTION-PROTOCOL.md`、`DEMO-ACCEPTANCE.md`；
+1. 从 `DesignDocs/README.md` 定位权威入口：产品 = `ProjectA_GDD.md`（0.2），阶段 = `ProjectA_FullGame_Milestones.md`，逐项需求 = `DesignDocs/fullgame/` 的 `FGxx` 需求 ID，完整性基线 = `DesignDocs/fullgame/FG00_Completeness_Addendum.md` 与 `DesignDocs/detailed/00_Implementation_Completeness_Contract.md`；
+2. FG Story 用 `python tools/fg_card.py <StoryID>` 只读本卡片（勿整本通读 `FG-STORY-CARDS.md`），核对点名的 `FGxx` 需求 ID 并过 FG00 基线；Demo 0.1（`earth-reclamation/`）已冻结，只在 Demo 回归时查；
 3. 任务卡补齐正常旅程、负向矩阵、正式入口 E2E 和需求覆盖矩阵；
 4. 不把里程碑标题、示例、占位、深层直调或“非目标”当作省略正常玩家功能的依据；
-5. 历史 M1–M4 的返工与复验只作考古；现行功能按 ER Story 施工，不把历史 Done 视为新产品完成。
+5. 历史 Demo / M1–M4 的返工与复验只作考古；现行功能按 0.2 FG Story 施工，不把历史 Done 视为新产品完成。
 
 **当 references 规范与代码实际 API 冲突时**：
 1. 使用 Grep 搜索实际方法签名验证（例：`Grep "ForceUnloadUnusedAssets"` 确认参数名）
