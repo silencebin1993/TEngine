@@ -362,6 +362,12 @@ namespace GameLogic.Campaign.Blueprint
             // 不必等玩家回到家园下一帧或下一次远征触发才反映。
             CampaignObjectiveTracker.Recompute(state);
 
+            // FG15-SYS-01（FGR-SYS-002 Demo 时机“蓝图保存”）：保存的是当前战役的蓝图时自动存档一次（游戏中后台写盘）。
+            if (CampaignAutoSaveService.InGame && ReferenceEquals(state, CampaignSession.Current))
+            {
+                CampaignAutoSaveService.SaveAuto(SaveReason.BlueprintSaved);
+            }
+
             return BlueprintSaveResult.Ok(record.BlueprintId, nextVersion, reactionId, needsCharge ? techCost : 0, researchPending);
         }
     }

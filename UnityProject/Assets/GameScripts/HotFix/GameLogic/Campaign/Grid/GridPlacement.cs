@@ -91,6 +91,9 @@ namespace GameLogic.Campaign.Grid
         // ── FG13-FAC-01（只追加）──
         /// <summary>FG09 第 8 章：灭活焦土（白潮净化步行机的灭活光束扫过）暂时不能建造；来源被毁后逐格恢复。已有建筑不受影响。</summary>
         InertGround,
+        // ── FG15-SYS-01（只追加）──
+        /// <summary>DEBT-EMG2PERSIST01-01：残骸 / 固态斑块上的空格不能建造（先用“清除场地物”清掉；已有建筑不受影响）。</summary>
+        PersistItem,
     }
 
     /// <summary>一条原因：原因码 + 文本键 + 参数（参数本身若是文本键，显示时按当前语言解析）。</summary>
@@ -166,6 +169,7 @@ namespace GameLogic.Campaign.Grid
                 case GridBlockReason.RelicSite: return new GridReason(code, "grid.reason.relic_site_plain");
                 case GridBlockReason.MeltPit: return new GridReason(code, "grid.reason.melt_pit");
                 case GridBlockReason.InertGround: return new GridReason(code, "grid.reason.inert_ground");
+                case GridBlockReason.PersistItem: return new GridReason(code, "grid.reason.persist_item");
                 default: return new GridReason(code, "grid.reason.unknown_type");
             }
         }

@@ -174,8 +174,37 @@ namespace GameLogic.Campaign.Combat
         private readonly Dictionary<int, int> _unitMachine = new Dictionary<int, int>();
         /// <summary>EMGR-GL-01（DEBT-EMG2DISC01-04 前半）：已从本地点注销（撤离 / 阵亡后清理 / 派遣）的单位 → 机器，只给交互伤害归因用（<see cref="TryGetCreditMachine"/>）。
         /// 内核单位 ID 单调递增、同一内核里不复用；换内核（Dispose / 读档 TryRestore）时清空——读档后仍能分到归 FG15-SYS-01。
-        /// shortcut: 同一内核里只增不减，条目数 = 本地点累计注销的机器单位数（每次撤离 / 阵亡一条，几十到几百量级）；若出现长驻地点反复进出上万次再按场次清理。</summary>
+        /// FG15-SYS-01（DEBT-EMG2DISC01-04 后半）：随地点快照进存档（<see cref="CombatSiteRecord.DepartedUnits"/>），读档后仍能分到；
+        /// 存档时与表涨到上次清理后的 2 倍（至少 64 条）时，删掉已不在任何在途归属里的单位（<see cref="CombatKernel.CollectAttributedUnits"/>）——条目数 = 还挂在在途归属里的已注销单位数。</summary>
         private readonly Dictionary<int, int> _departedUnitMachine = new Dictionary<int, int>();
+        private readonly HashSet<int> _attributedScratch = new HashSet<int>();
+        private readonly List<int> _departedScratch = new List<int>();
+        private int _departedPruneAt = 64;
+
+        /// <summary>自检读点：“已注销单位 → 机器”表的条目数。</summary>
+        public int DepartedCreditCount => _departedUnitMachine.Count;
+
+        /// <summary>删掉已不在任何在途归属里的已注销单位（存档时、表变大时；O(内核归属表 + 本表)）。</summary>
+        public void PruneDepartedCredits()
+        {
+            if (_departedUnitMachine.Count > 0 && !IsDisposed)
+            {
+                Kernel.CollectAttributedUnits(_attributedScratch);
+                _departedScratch.Clear();
+                foreach (int unit in _departedUnitMachine.Keys)
+                {
+                    if (!_attributedScratch.Contains(unit))
+                    {
+                        _departedScratch.Add(unit);
+                    }
+                }
+                foreach (int unit in _departedScratch)
+                {
+                    _departedUnitMachine.Remove(unit);
+                }
+            }
+            _departedPruneAt = Math.Max(64, _departedUnitMachine.Count * 2);
+        }
         private readonly Dictionary<string, int> _enemyUnit = new Dictionary<string, int>(StringComparer.Ordinal);
         private readonly Dictionary<int, string> _unitEnemy = new Dictionary<int, string>();
         private readonly List<string> _keys = new List<string>();
@@ -591,6 +620,10 @@ namespace GameLogic.Campaign.Combat
             _selfDefenseLogged.Remove(logicId); // EMGR-CMD-01：机器离开本地点不留残记
             _unitMachine.Remove(unit);
             _departedUnitMachine[unit] = logicId; // EMGR-GL-01：它留下的斑块之后造成的伤害仍分给它
+            if (_departedUnitMachine.Count >= _departedPruneAt)
+            {
+                PruneDepartedCredits(); // FG15-SYS-01：长驻地点反复进出时表不无限长
+            }
             _markerByUnit.Remove(unit);
             _machineWeapons.Remove(logicId);
         }
@@ -3813,8 +3846,18 @@ namespace GameLogic.Campaign.Combat
                 return null;
             }
             byte[] bytes = Kernel.Serialize();
+            PruneDepartedCredits();
+            var departed = new List<int>(_departedUnitMachine.Keys);
+            departed.Sort();
+            var departedMachines = new int[departed.Count];
+            for (int i = 0; i < departed.Count; i++)
+            {
+                departedMachines[i] = _departedUnitMachine[departed[i]];
+            }
             return new CombatSiteRecord
             {
+                DepartedUnits = departed.ToArray(),
+                DepartedMachines = departedMachines,
                 SiteId = SiteId,
                 FormatVersion = CombatConst.FormatVersion,
                 KernelSteps = Kernel.Steps,
@@ -3845,6 +3888,7 @@ namespace GameLogic.Campaign.Combat
                 reasonKey = "combat.load.reason.bad_payload";
                 return false;
             }
+            int loadedFormat = CombatKernel.PeekFormat(bytes);
             CombatLoadResult r = Kernel.Load(bytes);
             _matterBornSeen = _matterEntersSeen = -1; // 读档后内核计数换了基线：下一次以读进来的值为起点，不拿旧计数比
             if (r != CombatLoadResult.Ok)
@@ -3879,6 +3923,12 @@ namespace GameLogic.Campaign.Combat
             _selfDefenseLogged.Clear(); // EMGR-CMD-01
             _unitMachine.Clear();
             _departedUnitMachine.Clear();
+            int departedRows = Math.Min(rec.DepartedUnits?.Length ?? 0, rec.DepartedMachines?.Length ?? 0);
+            for (int i = 0; i < departedRows; i++)
+            {
+                _departedUnitMachine[rec.DepartedUnits[i]] = rec.DepartedMachines[i]; // FG15-SYS-01：读档后已撤离机器仍能分到
+            }
+            _departedPruneAt = Math.Max(64, departedRows * 2);
             _enemyUnit.Clear();
             _unitEnemy.Clear();
             MarkMirrorsDirty();
@@ -3953,10 +4003,53 @@ namespace GameLogic.Campaign.Combat
             {
                 Kernel.Despawn(id);
             }
+            if (loadedFormat > 0 && loadedFormat < CombatConst.FormatVersion)
+            {
+                RefreshLegacyEnemyProfiles(state);
+            }
             // FG2-FW-04：读档后内核的累计值换了一份（纪元 +1）→ 当场重取反馈基线：读档前后的差不算新触发，读档后的第一步照常结算。
             ReactionFeedback.Prime(Kernel, FeedCursor);
             return true;
         }
+
+        /// <summary>
+        /// FG15-SYS-01（DEBT-FG9FAC02-06，B10）：读进来的是旧格式快照（写快照时还没有之后加的行为参数族：铸造 14、澄净 15、超频 21、白潮 25……，那些参数读成 0）——
+        /// 已存在的敌人按敌人表（同一个出生入口 <see cref="EnemySpawnBuilder.TryBuild"/>）重算行为参数，与快照里的不同才换行（运行状态不清）。
+        /// 当前格式的快照不走这里（新档读档逐位一致）。O(本地点敌人数)，只在读档时一次。
+        /// </summary>
+        private void RefreshLegacyEnemyProfiles(CampaignState state)
+        {
+            if (state?.RegionEnemies == null || _unitEnemy.Count == 0)
+            {
+                return;
+            }
+            var byId = new Dictionary<string, RegionEnemyRecord>(StringComparer.Ordinal);
+            foreach (RegionEnemyRecord e in state.RegionEnemies)
+            {
+                if (e != null && !string.IsNullOrEmpty(e.EnemyInstanceId))
+                {
+                    byId[e.EnemyInstanceId] = e;
+                }
+            }
+            var units = new List<KeyValuePair<int, string>>(_unitEnemy);
+            units.Sort((a, b) => a.Key.CompareTo(b.Key)); // 确定性：按单位 ID
+            foreach (KeyValuePair<int, string> ue in units)
+            {
+                if (!byId.TryGetValue(ue.Value, out RegionEnemyRecord rec)
+                    || !EnemySpawnBuilder.TryBuild(this, state, rec, RegionEnemySites.For(rec.RegionId), out CombatSpawn fresh) || fresh.BehaviorProfile < 0)
+                {
+                    continue;
+                }
+                if (!Kernel.TryGetProfileOf(ue.Key, out CombatBehaviorProfile old) || CombatKernel.ProfileKey(old) != CombatKernel.ProfileKey(Kernel.TryGetProfile(fresh.BehaviorProfile, out CombatBehaviorProfile np) ? np : default))
+                {
+                    Kernel.RefreshBehaviorProfile(ue.Key, fresh.BehaviorProfile);
+                    LegacyProfilesRefreshed++;
+                }
+            }
+        }
+
+        /// <summary>自检读点：读旧格式快照时按敌人表刷新了行为参数的敌人数（本进程累计）。</summary>
+        public static int LegacyProfilesRefreshed { get; private set; }
 
         /// <summary>内核里有、但记录说“已不在本地点 / 不存在”的机器（读档对账用）。</summary>
         public List<int> MachinesNotIn(Func<int, bool> belongsHere)

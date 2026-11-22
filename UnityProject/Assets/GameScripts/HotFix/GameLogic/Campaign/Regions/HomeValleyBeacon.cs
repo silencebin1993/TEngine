@@ -103,6 +103,11 @@ namespace GameLogic.Campaign.Regions
 
             state.BeaconLaunchStartedAtPlaySeconds = state.PlaySeconds;
             Log.Info("[HomeValleyBeacon] 信标启动确认：进入10秒不可取消演出。");
+            // FG15-SYS-01（FGR-SYS-002 Demo 时机“启动信标”）：确认启动后自动存档一次（读回 = 演出接着播完；游戏中后台写盘）。
+            if (CampaignAutoSaveService.InGame && ReferenceEquals(state, CampaignSession.Current))
+            {
+                CampaignAutoSaveService.SaveAuto(SaveReason.BeaconLaunchEnter);
+            }
             // ER8-CONTENT-01 AC-AUD-001 信标：音色取 BuildingCatalog 信标的 SfxId。
             Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.BeaconLaunch,
                 Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeBeacon), GameText.Get("home.beacon.launches_in_10_s"), Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeBeacon));

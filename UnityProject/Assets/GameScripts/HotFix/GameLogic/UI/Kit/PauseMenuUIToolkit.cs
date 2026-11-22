@@ -122,6 +122,8 @@ namespace GameLogic.UI.Kit
                         : GameText.Get("ui.difficulty.no_campaign"),
                 });
             }
+            Bind(root, "PauseQuickSave", "ui.pause.quick_save", () => Campaign.CampaignAutoSaveService.QuickSave());
+            Bind(root, "PauseQuickLoad", "ui.pause.quick_load", QuickLoadFromMenu);
             Bind(root, "PauseSaveQuit", "ui.pause.save_and_quit", AskSaveAndQuit);
             BindCamera(root);
             BindDisplay(root);
@@ -806,6 +808,22 @@ namespace GameLogic.UI.Kit
             {
                 _feedback.text = GameText.Format("ui.pause.share_copied", code);
             }
+        }
+
+        /// <summary>FG15-SYS-01：暂停菜单“快速读档”——没有快速存档时在菜单里说明；有就关菜单、收起世界并读回快速存档。</summary>
+        private void QuickLoadFromMenu()
+        {
+            if (!Campaign.CampaignAutoSaveService.HasQuickSave())
+            {
+                if (_feedback != null)
+                {
+                    _feedback.text = GameText.Get("save.quick.none");
+                }
+                return;
+            }
+            _wasPausedBeforeOpen = true; // 马上收起世界，不要在关闭时再去改一个即将销毁的世界的暂停状态。
+            SetOpen(false);
+            GameRoot.QuickLoad();
         }
 
         private void AskSaveAndQuit()

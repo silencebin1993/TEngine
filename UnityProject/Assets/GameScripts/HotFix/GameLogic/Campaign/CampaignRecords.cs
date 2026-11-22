@@ -1089,9 +1089,15 @@ namespace GameLogic.Campaign
 
         public static bool HasActiveCampaign => Current != null && ActiveSlotIndex >= 0;
 
+        /// <summary>FG15-SYS-01：读的是某份副本（轮换自动存档 / 快速存档）时，活动槽位是它所属的战役槽（之后的存档写回战役槽），
+        /// 并先把战役槽里更新的那份主档另存保留（<see cref="CampaignSaveService.PreserveHomeBeforeBranch"/>，永不自动删除）。</summary>
         public static void Set(int slotIndex, CampaignState state)
         {
-            ActiveSlotIndex = slotIndex;
+            if (CampaignSaveService.IsCopy(slotIndex))
+            {
+                CampaignSaveService.PreserveHomeBeforeBranch(slotIndex);
+            }
+            ActiveSlotIndex = CampaignSaveService.HomeOf(slotIndex);
             Current = state;
         }
 

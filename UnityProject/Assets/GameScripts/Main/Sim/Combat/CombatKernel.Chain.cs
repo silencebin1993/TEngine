@@ -164,6 +164,58 @@ namespace BinGames.Sim.Combat
         /// <summary>FG11-ATTR-01 ④：一条链的归属与最近规则键（同 <see cref="EmgChainOwners"/>，另给键；自检用）。</summary>
         public EmgOwners EmgChainOwnersKey(int chain, out int key) => CombatLogic.EmgChainAttr(ref _d, chain, out key);
 
+        /// <summary>
+        /// FG15-SYS-01（DEBT-EMG2DISC01-04 后半）：此刻还可能产生交互伤害归因的全部单位 ID（在飞弹体的出手者、区域 / 斑块 / 残骸 / 沾染位 / 持久链归属 / 待生成产物的归属、因果链环里的源单位与第二单位）。
+        /// 热更层据此清理“已注销单位 → 机器”表：不在这里的单位之后不会再被分到伤害。O(弹体 + 区域 + 斑块 + 残骸 + 沾染 + 链表 + 环长)，只在存档与表变大时调，不按帧。
+        /// </summary>
+        public void CollectAttributedUnits(System.Collections.Generic.HashSet<int> into)
+        {
+            into.Clear();
+            for (int i = 0; i < _d.Projectiles.Length; i++)
+            {
+                into.Add(_d.Projectiles[i].Owner);
+            }
+            for (int i = 0; i < _d.Zones.Length; i++)
+            {
+                AddOwners(into, _d.Zones[i].Owners);
+            }
+            for (int i = 0; i < _d.Patches.Length; i++)
+            {
+                AddOwners(into, _d.Patches[i].Owners);
+            }
+            for (int i = 0; i < _d.Wrecks.Length; i++)
+            {
+                AddOwners(into, _d.Wrecks[i].Owners);
+                into.Add(_d.Wrecks[i].Killer);
+            }
+            for (int i = 0; i < _d.CoatAttr.Length; i++)
+            {
+                AddOwners(into, _d.CoatAttr[i].Owners);
+            }
+            for (int i = 0; i < _d.EmgChainOwns.Length; i++)
+            {
+                AddOwners(into, _d.EmgChainOwns[i].Owners);
+            }
+            for (int i = 0; i < _d.EmgPending.Length; i++)
+            {
+                AddOwners(into, _d.EmgPending[i].Owners);
+            }
+            for (int i = 0; i < _d.EmgRing.Length; i++)
+            {
+                into.Add(_d.EmgRing[i].SrcUnit);
+                into.Add(_d.EmgRing[i].Other);
+            }
+            into.Remove(0);
+        }
+
+        private static void AddOwners(System.Collections.Generic.HashSet<int> into, in EmgOwners o)
+        {
+            for (int q = 0; q < EmgOwners.Cap && o[q] != 0; q++)
+            {
+                into.Add(o[q]);
+            }
+        }
+
         /// <summary>FG11-ATTR-01（自检）：按内核同一规则往归属里加一个单位（满 8 格先挤非己方机器）。</summary>
         public EmgOwners EmgOwnersAddForTests(EmgOwners o, int id)
         {

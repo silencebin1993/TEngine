@@ -853,8 +853,10 @@ namespace GameLogic.EditorTools
             var reader = new FakeReader();
             InputRouter.DebugSetReader(reader);
             InputRouter.SetScope(InputScope.Strategy);
-            // FG0-ARCH-04 起建造菜单（B）已接入玩法；FG3-LOG-01 起快捷栏（F1～F10）、FG3-LOG-07 起吸管（Q）、FG4-ECO-07 起机器名册（N）、FG5-RND-01 起研发树（K）也已接入——
-            // 改用仍未开放的快速存档键（Ctrl+F5，FG15-SYS-01 承接；FG5-RND-05 起情报键 Y 已接入）验证“尚未开放”提示。
+            // FG15-SYS-01 起表里已没有预留动作（快速存档 / 读档是最后两个，已接入）：临时把快速存档标回“预留”，验证“尚未开放”提示机制本身（之后还原）。
+            InputActionCatalog.TryGet(GameActionId.QuickSave, out InputActionDef reservedProbe);
+            InputActionStatus reservedWas = reservedProbe.Status;
+            reservedProbe.Status = InputActionStatus.Reserved;
             reader.Hold(KeyCode.LeftControl);
             reader.Press(GameSettings.KeyBindings.GetKey(GameActionId.QuickSave));
             UiKitInputPump.ProcessWorldKeys();
@@ -862,6 +864,8 @@ namespace GameLogic.EditorTools
             InputActionCatalog.TryGet(GameActionId.QuickSave, out InputActionDef hotbar1);
             NotificationEntry locked = NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
             string lockedText = locked?.Text;
+            bool hotbarReserved = hotbar1.Status == InputActionStatus.Reserved;
+            reservedProbe.Status = reservedWas;
             bool notInHistory = NotificationCenter.History.All(e => e.Type.Id != "feature_locked");
             _clock += 10f;
             reader.Press(KeyCode.Alpha3);
@@ -874,7 +878,7 @@ namespace GameLogic.EditorTools
             float speedAfter4 = StrategyClock.SpeedMultiplier;
             StrategyClock.Reset();
             // FG0-ARCH-01 起 3x 档已接入统一时钟（DEBT-FG0UX01-03 关闭）：按 4 → 3x，不再提示“尚未开放”。
-            Expect(locked != null && hotbar1.Status == InputActionStatus.Reserved && lockedText.Contains(GameText.Get(hotbar1.NameKey)) && notInHistory
+            Expect(locked != null && hotbarReserved && lockedText.Contains(GameText.Get(hotbar1.NameKey)) && notInHistory
                    && Mathf.Approximately(speed2, 2f) && Mathf.Approximately(speedAfter4, 3f)
                    && !NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked" && e.Text.Contains(GameText.Get("input.action.speed_triple.name"))),
                 $"按快速存档键 Ctrl+F5（后续开放）→ 弹出“{lockedText}”（只弹出、不进历史）；按 3 → 2x；按 4 → 3x（FG0-ARCH-01 统一时钟），不再提示尚未开放");
@@ -1397,6 +1401,24 @@ namespace GameLogic.EditorTools
                     root.panel.visualTree.Q<Button>("PauseGallery").RemoveFromClassList("uk-hidden");
                     Object.DestroyImmediate(go);
                 }),
+                // FG15-SYS-01：存档管理窗口（含删除确认框）与云冲突窗口各压一遍。
+                ("SavePanel.uxml", "SaveWindow", root =>
+                {
+                    var go = new GameObject("__probe_save") { hideFlags = HideFlags.HideAndDontSave };
+                    go.AddComponent<SavePanelUIToolkit>().BindView(root.panel.visualTree);
+                    Object.DestroyImmediate(go);
+                    root.parent?.RemoveFromClassList("uk-hidden");
+                    root.panel.visualTree.Q<VisualElement>("SaveConfirm").RemoveFromClassList("uk-hidden");
+                }),
+                ("SavePanel.uxml", "SaveWindow", root =>
+                {
+                    var go = new GameObject("__probe_save_conflict") { hideFlags = HideFlags.HideAndDontSave };
+                    go.AddComponent<SavePanelUIToolkit>().BindView(root.panel.visualTree);
+                    Object.DestroyImmediate(go);
+                    root.parent?.RemoveFromClassList("uk-hidden");
+                    root.panel.visualTree.Q<VisualElement>("SaveManage").AddToClassList("uk-hidden");
+                    root.panel.visualTree.Q<VisualElement>("SaveConflict").RemoveFromClassList("uk-hidden");
+                }),
                 ("UiKitGallery.uxml", "GalleryRoot", root =>
                 {
                     var go = new GameObject("__probe_gallery") { hideFlags = HideFlags.HideAndDontSave };
@@ -1460,7 +1482,7 @@ namespace GameLogic.EditorTools
             // FG5-RND-04 新增 FusionPanel.uxml（电路合成台 / 配方书）、FusionQueueRow.uxml（队列行模板）与 FusionClueRow.uxml（线索行模板），共 44 份。
             // FG5-RND-05 新增 IntelPanel.uxml（情报面板）与 IntelRow.uxml（情报行模板）；FG5-RND-06 新增 BlackBoxPanel.uxml（黑匣子陈列馆 / 纪念墙）与 BlackBoxRow.uxml（行模板），共 48 份。
             // FG6-DEF-01 新增 TurretPanel.uxml（炮塔面板），共 49 份。
-            Expect(uxmlCount == 75 && hard.Count == 0, /* FG15-UX-04：+ GuidanceCard.uxml（引导卡片）与 GuidanceHelpPanel.uxml（引导与帮助），共 75 份；FG15-UX-01：+ SettingsPanel.uxml（设置全集），共 73 份；FG14-SBX-02：+ SandboxPanel.uxml（沙盒设置 / 关键材料换取），FG14-SBX-01：+ PostgamePanel.uxml（后日谈），共 72 份；FG13-END-06：+ EndingSettlement.uxml（结局结算），共 70 份；FG12-EVT-06：+ CaravanTradePanel.uxml（商队交易面板，69 份）；FG12-EVT-01：+ EventHistoryPanel.uxml（事件历史，计数由 FG12-EVT-03 补到 68）；FG9-NAR-01：+ NarrativeLibraryPanel.uxml（资料库）与 NarrativeCutscene.uxml（演出播放器）；FG8-EXP-04：+ HeritageVaultPanel.uxml（核心保管库：展柜 / 收集进度）；FG8-LOOT-03：+ CargoPanel.uxml（货舱面板）与 CargoRow.uxml（货舱行模板）；FG8-LOOT-02：+ LootPickPanel.uxml（三选一分拣面板）与 LootPickRow.uxml（候选卡模板）；FG8-OUT-01：+ OutpostOverviewPanel.uxml（前哨站总览）；FG8-DROP-01：+ DropStationPanel.uxml（投送站面板）与 DropStationRow.uxml（机器行模板）；FG8-GEN-02：+ WorldPlacesHud.uxml（领地名称提示 / 室内入口面板 / 进出过渡）；FG6-DEF-02：+ DefensePanel.uxml；FG6-DEF-04：+ RaidWarningHud.uxml（突袭预警条）；FG6-DEF-06：+ DefenseOverviewPanel.uxml（防御总览）；FG6-DEF-08：+ RaidResultPanel.uxml（突袭历史与结算）；FG6-DEF-09：+ DifficultyPanel.uxml（难度面板）；FG7-ENV-01：+ CalendarPanel.uxml（日历）与 CalendarDayRow.uxml（日历每日行模板） */ $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
+            Expect(uxmlCount == 76 && hard.Count == 0, /* FG15-SYS-01：+ SavePanel.uxml（存档管理 / 云存档冲突），共 76 份；FG15-UX-04：+ GuidanceCard.uxml（引导卡片）与 GuidanceHelpPanel.uxml（引导与帮助），共 75 份；FG15-UX-01：+ SettingsPanel.uxml（设置全集），共 73 份；FG14-SBX-02：+ SandboxPanel.uxml（沙盒设置 / 关键材料换取），FG14-SBX-01：+ PostgamePanel.uxml（后日谈），共 72 份；FG13-END-06：+ EndingSettlement.uxml（结局结算），共 70 份；FG12-EVT-06：+ CaravanTradePanel.uxml（商队交易面板，69 份）；FG12-EVT-01：+ EventHistoryPanel.uxml（事件历史，计数由 FG12-EVT-03 补到 68）；FG9-NAR-01：+ NarrativeLibraryPanel.uxml（资料库）与 NarrativeCutscene.uxml（演出播放器）；FG8-EXP-04：+ HeritageVaultPanel.uxml（核心保管库：展柜 / 收集进度）；FG8-LOOT-03：+ CargoPanel.uxml（货舱面板）与 CargoRow.uxml（货舱行模板）；FG8-LOOT-02：+ LootPickPanel.uxml（三选一分拣面板）与 LootPickRow.uxml（候选卡模板）；FG8-OUT-01：+ OutpostOverviewPanel.uxml（前哨站总览）；FG8-DROP-01：+ DropStationPanel.uxml（投送站面板）与 DropStationRow.uxml（机器行模板）；FG8-GEN-02：+ WorldPlacesHud.uxml（领地名称提示 / 室内入口面板 / 进出过渡）；FG6-DEF-02：+ DefensePanel.uxml；FG6-DEF-04：+ RaidWarningHud.uxml（突袭预警条）；FG6-DEF-06：+ DefenseOverviewPanel.uxml（防御总览）；FG6-DEF-08：+ RaidResultPanel.uxml（突袭历史与结算）；FG6-DEF-09：+ DifficultyPanel.uxml（难度面板）；FG7-ENV-01：+ CalendarPanel.uxml（日历）与 CalendarDayRow.uxml（日历每日行模板） */ $"{uxmlCount} 份新 UXML 没有写死的界面文字（全部由代码按文本键填写）{(hard.Count == 0 ? string.Empty : "——" + string.Join("，", hard))}");
 
             string[] codeDirs =
             {
@@ -1897,11 +1919,15 @@ namespace GameLogic.EditorTools
                                     && Mathf.Approximately(StrategyClock.SpeedMultiplier, 1f) && !NotificationHudUIToolkit.CenterOpen;
                 name?.Blur();
                 bool released = !InputRouter.KeyboardSuppressed;
-                // FG2-FW-05 起图鉴键、FG5-RND-01 起研发树键、FG5-RND-05 起情报键已接通，对照改用仍未开放的快速存档键（Ctrl+F5）
+                // 对照：FG15-SYS-01 起没有预留动作了，临时把快速存档标回“预留”（不会真的存档），失焦后按下应弹“尚未开放”。
+                InputActionCatalog.TryGet(GameActionId.QuickSave, out InputActionDef controlProbe);
+                InputActionStatus controlWas = controlProbe.Status;
+                controlProbe.Status = InputActionStatus.Reserved;
                 reader.Hold(KeyCode.LeftControl);
                 reader.Press(GameSettings.KeyBindings.GetKey(GameActionId.QuickSave));
                 UiKitInputPump.ProcessWorldKeys();
                 Frame(reader);
+                controlProbe.Status = controlWas;
                 bool controlFires = NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked");
                 string focusedName = (board.panel?.focusController?.focusedElement as VisualElement)?.name ?? "null";
                 Line($"    · 探针：命名框 {(name != null ? "找到" : "缺失")}，聚焦元素 {focusedName}，让位={suppressed}，无触发={nothingFired}，失焦后恢复={released}，对照触发={controlFires}");

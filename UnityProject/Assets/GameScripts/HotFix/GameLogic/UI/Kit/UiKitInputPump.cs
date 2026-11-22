@@ -173,6 +173,8 @@ namespace GameLogic.UI.Kit
             }
         }
 
+        private static bool IsWired(GameActionId action) => InputActionCatalog.TryGet(action, out InputActionDef d) && d.Status == InputActionStatus.Wired;
+
         /// <summary>
         /// FG3-LOG-08（FGR-LOG-080 / 082；FGU-12；卡片“叠加层的快捷键”）：叠加层与“为什么不工作”的键（战略与建造上下文，全部可重绑）。
         /// - 叠加层切换（默认 O，FG13 第 5 节）：开着就关，关着就重开最近用过的那一种（从没用过是“信号覆盖”，与 FG1-SIG-07 一致；家园以外最近那一种画不出来时开关信号覆盖）；
@@ -262,6 +264,16 @@ namespace GameLogic.UI.Kit
                 && !MechanicCodexPanelUIToolkit.IsOpen && !UiKitPanelHost.AnyModalAbove(IntelPanelUIToolkit.Order))
             {
                 IntelPanelUIToolkit.Toggle();
+            }
+            // FG15-SYS-01（FGR-SYS-001）：快速存档 / 快速读档（默认 Ctrl+F5 / Ctrl+F9，战略 / 建造 / 接入上下文，可重绑）。
+            // 表里仍标“预留”时（自检注入）不消费，交给下面的“尚未开放”提示。
+            if (IsWired(GameActionId.QuickSave) && InputRouter.ConsumeContextAction(GameActionId.QuickSave))
+            {
+                Campaign.CampaignAutoSaveService.QuickSave();
+            }
+            if (IsWired(GameActionId.QuickLoad) && InputRouter.ConsumeContextAction(GameActionId.QuickLoad))
+            {
+                GameLogic.Stage.GameRoot.QuickLoad();
             }
             // FG4-ECO-08：统计键（默认 Alt+T，全部上下文）：开着再按一次关闭；更高层的面板盖在上面时不起作用（同物资键）。
             if (InputRouter.ConsumeContextAction(GameActionId.OpenStats)

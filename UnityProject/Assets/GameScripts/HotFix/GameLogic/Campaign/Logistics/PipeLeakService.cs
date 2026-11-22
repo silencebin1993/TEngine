@@ -240,6 +240,47 @@ namespace GameLogic.Campaign.Logistics
 
         public static PipeLeakRecord[] Records(CampaignState state) => state?.Pipes?.Leaks ?? Array.Empty<PipeLeakRecord>();
 
+        /// <summary>FG15-SYS-01（P19，自检读点）：已取走、还没对账的斑块蚀设施累计条数。</summary>
+        public static int AreaHitsPending => AreaHits.Count;
+
+        /// <summary>FG15-SYS-01（DEBT-EMG2MAT02-06 / P19，FG00 B10）：存档前把还没对账的斑块蚀设施累计写进存档（按键升序，同一状态同一字节）。WorldSimulation.SyncAllForSave 调。</summary>
+        public static void WriteTo(CampaignState state)
+        {
+            if (state?.Pipes == null)
+            {
+                return;
+            }
+            AreaKeys.Clear();
+            AreaKeys.AddRange(AreaHits.Keys);
+            AreaKeys.Sort();
+            var rows = new PipeAreaHitRecord[AreaKeys.Count];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                EmgStructHit h = AreaHits[AreaKeys[i]];
+                rows[i] = new PipeAreaHitRecord { Key = h.Key, X = h.Pos.x, Y = h.Pos.y, Radius = h.Radius, Damage = h.Damage, Matter = h.Matter, Flags = h.Flags, By = h.By };
+            }
+            state.Pipes.AreaHits = rows;
+        }
+
+        /// <summary>FG15-SYS-01（P19）：接入会话时取回存档里的在途累计（下一次对账照常结算），取回后清空存档里这一列——只取一次，同一会话再接入不重复结算。</summary>
+        public static void RestoreAreaHits(CampaignState state)
+        {
+            AreaHits.Clear();
+            PipeAreaHitRecord[] rows = state?.Pipes?.AreaHits;
+            if (rows == null)
+            {
+                return;
+            }
+            foreach (PipeAreaHitRecord r in rows)
+            {
+                if (r != null && r.Damage > 0f && float.IsFinite(r.Damage) && double.IsFinite(r.X) && double.IsFinite(r.Y) && r.Radius >= 0f)
+                {
+                    AreaHits[r.Key] = new EmgStructHit { Key = r.Key, Pos = new double2(r.X, r.Y), Radius = r.Radius, Damage = r.Damage, Matter = (byte)r.Matter, Flags = (byte)r.Flags, By = r.By };
+                }
+            }
+            state.Pipes.AreaHits = Array.Empty<PipeAreaHitRecord>();
+        }
+
         public static int Count(CampaignState state) => Records(state).Length;
 
         /// <summary>这一格的液洼（破口所在格；没有 = null）。O(1)。</summary>

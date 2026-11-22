@@ -209,6 +209,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             ResetSessionState();
             GameClock.Bind(state);
+            Logistics.PipeLeakService.RestoreAreaHits(state); // FG15-SYS-01（P19）：读档前已取走、还没对账的斑块蚀设施伤害接着结算
             SessionResetCount++;
         }
 
@@ -398,6 +399,7 @@ namespace GameLogic.Campaign.WorldSim
             // FG0-ARCH-02：传送带内核快照（按网络分块）写进 BeltItemState。
             BeltNetworkService.WriteTo(BeltNetworkService.BoundState);
             PipeNetworkService.WriteTo(PipeNetworkService.BoundState);
+            Logistics.PipeLeakService.WriteTo(CampaignSession.Current); // FG15-SYS-01（P19）：在途的斑块蚀设施累计进存档
             // FG3-LOG-06：电网曲线、电网编号锚点与储能存量写进 PowerGridState（拓扑本身读档后按建筑记录重算）。
             HomeValleyPowerGrid.WriteTo(HomeValleyPowerGrid.BoundState);
             // FG6-DEF-01：炮塔在内核里的耐久写回炮塔座建筑（热量 / 补给 / 朝向随内核快照，流体随管线快照）。

@@ -1153,7 +1153,7 @@ namespace BinGames.Sim.Combat
             EmgScalars ec = _d.EmgS[0];
             if (_d.EmgPrograms.Length > 0 || _d.EmgBusPending > 0 || _d.Wrecks.Length > 0 || ec.WrecksBorn > 0 || EmgHasCounts()
                 || ec.PatchLive > 0 || ec.PatchesBorn > 0 || _d.Fields.Length > 0 || _d.Wires.Length > 0 || _d.CoatFx.Length > 0
-                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || _d.MarshElecShape.Length > 0 || _d.Worms.Length > 0 || _d.Fleets.Length > 0 || _d.FleetStrikes.Length > 0 || _d.FleetMarks.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
+                || _d.TraitRun.Length > 0 || _d.MetaRun.Length > 0 || ec.BeatCount != 0 || _d.Relays.Length > 0 || _d.Hijacks.Length > 0 || _d.Overclocks.Length > 0 || _d.MarshElecShape.Length > 0 || _d.Worms.Length > 0 || _d.Fleets.Length > 0 || _d.FleetStrikes.Length > 0 || _d.FleetMarks.Length > 0 || _d.EmgStructPending.Length > 0 || _d.EmgStructOut.Length > 0 || PitState() || ClueHalfState()) // EMG2-MAT-01：有过斑块 / 场才进哈希（没有物质时金标准逐字不变）
             {
                 return true;
             }
@@ -1233,11 +1233,12 @@ namespace BinGames.Sim.Combat
             bool oc = format >= 21 && _d.Overclocks.Length > 0; // FG11-FAC-01：段 34 只在有超频记录时写（没有时快照与哈希逐字不变）
             bool marshElec = format >= 22 && _d.MarshElecShape.Length > 0; // FG11-REACT-01：段 35 只在酸沼电解过时写
             bool worms = format >= 24 && _d.Worms.Length > 0; // FG12-EVT-02：段 39 只在有蠕虫时写（没有时快照与哈希逐字不变）
+            bool structPend = format >= 26 && _d.EmgStructPending.Length + _d.EmgStructOut.Length > 0; // FG15-SYS-01（P19）：段 43 只在有已发布未取走 / 待发布的斑块蚀设施条目时写
             int fleetSegs = format >= 25 ? (_d.Fleets.Length > 0 ? 1 : 0) + (_d.FleetStrikes.Length > 0 ? 1 : 0) + (_d.FleetMarks.Length > 0 ? 1 : 0) : 0; // FG13-FAC-01：段 40～42 只在非空时写
             bool v23 = format >= 23; // FG11-ATTR-01：归属 8 格（斑块 / 残骸 / 顺延段尾追加 4 个）+ 段 36～38 归因
             int attrSegs = AttrSegmentCount(format, hash, out int attrUnitRows, out int attrChainRows);
             bool pits = v20 && PitState(); // EMG4-TER-01：熔坑三段（EMG4-TER-02 + 段 31 焦土累计点 = 四段）只在有地形状态时写（没有时快照与哈希逐字不变）
-            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + (worms ? 1 : 0) + fleetSegs + attrSegs + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
+            w.Write(16 + (v17 ? 5 : 0) + (v18 ? 5 : 0) + (v20 ? 1 : 0) + (pits ? (_omitScorchSegForTests ? 3 : 4) : 0) + (half ? 1 : 0) + (tallyRows > 0 ? 1 : 0) + (oc ? 1 : 0) + (marshElec ? 1 : 0) + (worms ? 1 : 0) + (structPend ? 1 : 0) + fleetSegs + attrSegs + (extraBytes > 0 ? 1 : 0)); // EMG3-FUSE-01：格式 18 起 + 段 26（线索去重）// EMG3-SQD-01：格式 18 内 + 段 25（信号中继） // EMG2-RECL-01：格式 17 内 + 段 20（导线）；EMG2-REACT-02：+ 段 21（沾染行计时）
             EmgScalars es = _d.EmgS[0];
             sw.Begin(EmgConst.SegScalars, v17 ? (tallyOut ? 29 : 27) : 12, 1);
             if (sw.F()) w.Write(es.NextProjId);
@@ -1507,6 +1508,10 @@ namespace BinGames.Sim.Combat
             if (marshElec)
             {
                 WriteMarshElecSegment(w, sw);
+            }
+            if (structPend)
+            {
+                WriteStructPendingSegment(w, sw);
             }
             if (worms)
             {
@@ -2202,6 +2207,8 @@ namespace BinGames.Sim.Combat
                 case EmgConst.SegCoatAttr:
                 case EmgConst.SegChainOwn:
                     return ParseAttrSegment(r, sr, ref staging); // FG11-ATTR-01
+                case EmgConst.SegStructPending:
+                    return ParseStructPendingSegment(r, sr, ref staging); // FG15-SYS-01（P19）
                 case EmgConst.SegPit:
                 case EmgConst.SegPitAcc:
                 case EmgConst.SegPitStats:
@@ -2535,6 +2542,69 @@ namespace BinGames.Sim.Combat
                 staging.MarshElecAt.Add(at);
             }
             return CombatLoadResult.Ok;
+        }
+
+        // ── FG15-SYS-01（DEBT-EMG2MAT02-06 / P19）：段 43 斑块蚀设施待发布条目 ──
+        private void WriteStructPendingSegment(BinaryWriter w, EmgSegmentWriter sw)
+        {
+            // 先写已发布、还没被热更层取走的（没有消费者的地点会一直攒到上限），再写待发布的；第 9 个字段 = 1 已发布 / 0 待发布（两张表都进快照，读档后发布节奏与连续跑一致）
+            int outN = _d.EmgStructOut.Length;
+            sw.Begin(EmgConst.SegStructPending, 9, outN + _d.EmgStructPending.Length);
+            for (int i = 0; i < outN + _d.EmgStructPending.Length; i++)
+            {
+                EmgStructHit h = i < outN ? _d.EmgStructOut[i] : _d.EmgStructPending[i - outN];
+                if (sw.F()) w.Write(h.Pos.x);
+                if (sw.F()) w.Write(h.Pos.y);
+                if (sw.F()) w.Write(h.Radius);
+                if (sw.F()) w.Write(h.Damage);
+                if (sw.F()) w.Write(h.Key);
+                if (sw.F()) w.Write(h.Matter);
+                if (sw.F()) w.Write(h.Flags);
+                if (sw.F()) w.Write(h.By);
+                if (sw.F()) w.Write((byte)(i < outN ? 1 : 0));
+                sw.EndRecord();
+            }
+            sw.End();
+        }
+
+        private static CombatLoadResult ParseStructPendingSegment(BinaryReader r, EmgSegmentReader sr, ref CombatData staging)
+        {
+            int n = sr.Count;
+            if (n > EmgMatterConst.StructHitsPendingCap + EmgMatterConst.StructHitsOutCap)
+            {
+                return CombatLoadResult.InvalidValue;
+            }
+            staging.EmgStructPending.Clear();
+            staging.EmgStructOut.Clear();
+            for (int i = 0; i < n; i++)
+            {
+                sr.Record(i);
+                var h = new EmgStructHit();
+                if (sr.F()) h.Pos.x = r.ReadDouble();
+                if (sr.F()) h.Pos.y = r.ReadDouble();
+                if (sr.F()) h.Radius = r.ReadSingle();
+                if (sr.F()) h.Damage = r.ReadSingle();
+                if (sr.F()) h.Key = r.ReadInt32();
+                if (sr.F()) h.Matter = r.ReadByte();
+                if (sr.F()) h.Flags = r.ReadByte();
+                if (sr.F()) h.By = r.ReadInt32();
+                byte published = 0;
+                if (sr.F()) published = r.ReadByte();
+                if (!sr.RecordOk || !Unity.Mathematics.math.all(Unity.Mathematics.math.isfinite(h.Pos)) || !float.IsFinite(h.Radius) || h.Radius < 0f || !float.IsFinite(h.Damage) || h.Damage < 0f)
+                {
+                    return CombatLoadResult.InvalidValue;
+                }
+                if (published != 0)
+                {
+                    staging.EmgStructOut.Add(h);
+                }
+                else
+                {
+                    staging.EmgStructPending.Add(h);
+                }
+            }
+            return staging.EmgStructOut.Length <= EmgMatterConst.StructHitsOutCap && staging.EmgStructPending.Length <= EmgMatterConst.StructHitsPendingCap
+                ? CombatLoadResult.Ok : CombatLoadResult.InvalidValue;
         }
 
         /// <summary>FG11-REACT-01：某块酸沼（形状）上次电解的时刻；没登记过返回 false（自检 / 悬停）。</summary>

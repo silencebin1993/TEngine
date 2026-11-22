@@ -706,6 +706,15 @@ namespace GameLogic.EditorTools
             Check(demo.Contains("Demo（0.1）") && demo.Contains("请新建战役") && demoAction != null && demoAction.interactable && demoLabel == "新建于此槽",
                 $"Demo 存档卡明确提示不迁移，按钮“{demoLabel}”（先确认，原文件另存保留）");
             Check(broken.Contains("文件不完整") && broken.Contains("可以读取上一版备份"), "坏档卡显示原因与可读取的备份");
+            // FG15-SYS-01：每张卡左侧缩略图位、右侧“管理 / 复制种子 / 复制分享短码”，列表下方分页行（按钮行为由 FgSaveRobustSelfCheck J / MainMenuSelfCheck 断言）。
+            Button manage2 = FindActiveButton("m_btn_Slot2Manage");
+            Button[] shown = Object.FindObjectsByType<Button>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            Button seed1 = shown.FirstOrDefault(b => b.name == "m_btn_Slot1CopySeed");
+            Button code1 = shown.FirstOrDefault(b => b.name == "m_btn_Slot1CopyCode");
+            string page = FindText("m_text_Page")?.text ?? string.Empty;
+            Check(manage2 != null && seed1 != null && code1 != null && !seed1.interactable && !code1.interactable
+                  && GameObject.Find("m_tf_Slot0Thumb") != null && page.Contains("页"),
+                $"存档卡有缩略图位与“管理 / 复制种子 / 复制分享短码”（Demo 卡没有 0.2 种子、复制灰掉），坏档卡的“管理”可点（可删除 / 清理），分页“{page}”");
             CheckNoTextMarkers("存档列表");
             if (demoAction == null || !demoAction.interactable)
             {
@@ -1426,9 +1435,10 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(!NotificationHudUIToolkit.CenterOpen, "再按一次关闭通知中心");
-            // FG2-FW-05 起图鉴键、FG5-RND-01 起研发树键、FG5-RND-05 起情报键已接通，“尚未开放”提示改用快速存档键 Ctrl+F5（FG15-SYS-01 承接）。
+            // FG15-SYS-01：快速存档键（Ctrl+F5）已接入——真实按键路径快速存档（写战役槽 + 快速存档，游戏中后台写盘）。
+            SessionState.SetInt(K + "QuickBefore", CampaignSaveService.BackgroundCommits);
             PressChord(GameSettings.KeyBindings.GetChord(GameActionId.QuickSave));
-            Next(32, "按快速存档键 Ctrl+F5（FG15-SYS-01 承接，尚未开放）");
+            Next(32, "按快速存档键 Ctrl+F5（FG15-SYS-01：快速存档）");
         }
 
         private static void StepReservedKeyHint(double inStep)
@@ -1437,11 +1447,14 @@ namespace GameLogic.EditorTools
             {
                 return;
             }
-            var toast = Notifications.NotificationCenter.Toasts.FirstOrDefault(e => e.Type.Id == "feature_locked");
-            string shown = string.Join("／", (NotificationHudUIToolkit.Instance?.Root?.Q<VisualElement>("ToastList")?.Query<Label>().ToList()
-                ?? new System.Collections.Generic.List<Label>()).Where(l => l.resolvedStyle.display == DisplayStyle.Flex && !string.IsNullOrEmpty(l.text)).Select(l => l.text));
-            Check(toast != null && shown.Contains(Localization.GameText.Get("input.action.quick_save.name")),
-                $"按尚未开放的键给出提示，不静默：弹出条“{shown}”");
+            CampaignSaveService.WaitForPendingWrites();
+            CampaignSaveService.PumpBackgroundResults();
+            int home = CampaignSession.ActiveSlotIndex;
+            CampaignSlotMetadata quick = CampaignSaveService.GetSlotMetadata(CampaignSaveService.QuickSlot(home));
+            bool locked = Notifications.NotificationCenter.Toasts.Any(e => e.Type.Id == "feature_locked");
+            Check(quick.State == CampaignSlotState.Ready && quick.Kind == SaveSlotKind.Quick && CampaignAutoSaveService.HasQuickSave() && !locked
+                  && CampaignSaveService.BackgroundCommits > SessionState.GetInt(K + "QuickBefore", 0) && CampaignSaveService.LastBackgroundResult.Success,
+                $"FG15-SYS-01：按快速存档键 → 后台写盘成功、槽位 {home + 1} 有可读的快速存档（{CampaignSlotText.SlotTitle(quick.SlotIndex)}，带缩略图 {quick.ThumbnailJpg != null}），不再提示“尚未开放”");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(33, "按 Esc（没有打开的面板 → 暂停菜单）");
         }
@@ -3080,8 +3093,10 @@ namespace GameLogic.EditorTools
             }
             SessionState.SetInt(K + "TypeSub", 0);
             Check(!GameRoot.IsWorldPaused, "在命名框里按 Space（暂停键）不会暂停世界");
+            CampaignSaveService.WaitForPendingWrites();
+            SessionState.SetString(K + "QuickStamp", CampaignSaveService.GetSlotMetadata(CampaignSaveService.QuickSlot(CampaignSession.ActiveSlotIndex)).WrittenAtUtc ?? string.Empty);
             PressChord(GameSettings.KeyBindings.GetChord(GameActionId.QuickSave));
-            Next(62, "在命名框里按快速存档键 Ctrl+F5（尚未开放的动作）");
+            Next(62, "在命名框里按快速存档键 Ctrl+F5（打字中不触发）");
         }
 
         private static void StepTypingReserved(double inStep)
@@ -3091,8 +3106,11 @@ namespace GameLogic.EditorTools
                 return;
             }
             int before = SessionState.GetInt(K + "NotifyBefore", 0);
-            Check(Notifications.NotificationCenter.History.Count == before && Notifications.NotificationCenter.Toasts.All(e => e.Type.Id != "feature_locked"),
-                "在命名框里按尚未开放的键不弹“后续版本开放”，也不产生任何通知");
+            CampaignSaveService.WaitForPendingWrites();
+            string quickStamp = CampaignSaveService.GetSlotMetadata(CampaignSaveService.QuickSlot(CampaignSession.ActiveSlotIndex)).WrittenAtUtc ?? string.Empty;
+            Check(Notifications.NotificationCenter.History.Count == before && Notifications.NotificationCenter.Toasts.All(e => e.Type.Id != "feature_locked")
+                  && quickStamp == SessionState.GetString(K + "QuickStamp", "?"),
+                "在命名框里按快速存档键不快速存档（快速存档时间不变），也不产生任何通知");
             CircuitNameField()?.Blur();
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(63, "命名框失焦后按 Esc");

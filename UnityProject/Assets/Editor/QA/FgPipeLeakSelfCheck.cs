@@ -618,6 +618,22 @@ namespace GameLogic.EditorTools
             Expect(CombatKernel.PeekFormat(cur) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 12 && same && oldOk && bad != null && rc != CombatLoadResult.Ok,
                 $"K4 内核快照格式 12：液洼与已反应的燃烧区（阶段 / 标签）往返、状态哈希一致（{same}）；写格式 11 时略过液洼、旧格式照常读（{oldOk}，由热更层按记录重新登记）；" +
                 $"液洼外部编号被改坏 → 整份拒绝（{rc}）");
+
+            // FG15-SYS-01（DEBT-EMG2MAT02-06 / P19）：段 43 斑块蚀设施待发布条目随快照往返；没有条目时快照逐字不变（不升格式）。
+            using CombatKernel kp = NewKernel();
+            KRun(kp, 0.2f, ref time);
+            byte[] noPending = kp.Serialize();
+            kp.AddStructHitForTests(new EmgStructHit { Key = 7, Pos = new double2(3.5, -2), Radius = 1.5f, Damage = 2.25f, Matter = 3, Flags = 0, By = 11 });
+            kp.AddStructHitForTests(new EmgStructHit { Key = 9, Pos = new double2(1, 1), Radius = 1f, Damage = 0.5f, Matter = 2, By = 0 });
+            ulong hp = kp.StateHash();
+            byte[] withPending = kp.Serialize();
+            using var kq = new CombatKernel(kp.Config, 64);
+            bool back = kq.Load(withPending) == CombatLoadResult.Ok && kq.StructHitsPending == 2 && kq.StructHitPendingAt(0).Key == 7 && kq.StructHitPendingAt(0).Damage == 2.25f
+                        && kq.StructHitPendingAt(0).Pos.x == 3.5 && kq.StructHitPendingAt(0).By == 11 && kq.StructHitPendingAt(1).Key == 9 && kq.StateHash() == hp;
+            using var kr = new CombatKernel(kp.Config, 64);
+            bool oldEmpty = kr.Load(noPending) == CombatLoadResult.Ok && kr.StructHitsPending == 0;
+            Expect(back && oldEmpty && CombatKernel.PeekFormat(withPending) == CombatConst.FormatVersion && withPending.Length > noPending.Length,
+                $"K5 P19 段 43：斑块蚀设施的待发布条目随内核快照往返、状态哈希一致（{back}）；没有该段的快照读成空表（{oldEmpty}），格式仍为 {CombatKernel.PeekFormat(withPending)}");
         }
 
         /// <summary>在快照里找到液洼区域的 Owner 字段（-3，紧跟着阵营字节 2 = 中立）改成 +3。</summary>
@@ -1207,6 +1223,47 @@ namespace GameLogic.EditorTools
             Expect(noOwnerQuiet && us1.UnitId != 0 && BuildingOps.Durability(pole) < p1 && posted >= 1 && posted <= 6 && ff != null && ff.Level == NotifyLevel.Warning && ff.Latest.HasLocation
                    && ffText.Contains(EmgMatterCatalog.NameOf(EmgMatterConst.Acid)) && !GameText.ContainsMarker(ffText),
                 $"K2 FG-GAP-194：无归属斑块烧设施不发友伤（{noOwnerQuiet}）；炮塔 #{us1.UnitId} 留下的酸烧电塔 4 秒 → 友伤通知 {posted} 条（每 1 游戏秒最多一条），警告级可定位“{ffText}”");
+            CheckPatchStructuresSaveLoad();
+        }
+
+        /// <summary>K3（FG15-SYS-01，DEBT-EMG2MAT02-06 / P19，FG00 B10）：两次对账之间存读档，斑块蚀设施的在途伤害不丢——读档后接着跑与不存档连续跑，设施耐久逐位一致。</summary>
+        private static void CheckPatchStructuresSaveLoad()
+        {
+            CampaignState s = NewWorld(7432);
+            GridCell? area = F.FindArea(s, 3, 3);
+            GridOpResult pp = area.HasValue ? HomeGridService.TryPlace(s, "power_pole", F.At(area.Value, 1, 1), 0) : default;
+            BuildingRecord pole = pp.Success ? HomeGridService.FindBuilding(s, pp.BuildingId) : null;
+            if (pole == null)
+            {
+                Fail($"K3 测试准备：放不下电塔（{pp.Success}）");
+                return;
+            }
+            pole.ConstructionState = BuildingConstructionState.Operational; // 测试捷径：直接建成
+            pole.Health = BuildingOps.MaxDurability(pole.BuildingTypeId);
+            HomeValleyPowerGrid.Recompute(s);
+            WorldSimulation.StepMany(2);
+            float p0 = BuildingOps.Durability(pole);
+            Site.Kernel.SpawnPatch(EmgMatterConst.Acid, new double2(pole.Position.x, pole.Position.y), 1.5f, 1f, 30f);
+            for (int i = 0; i < 240 && PipeLeakService.AreaHitsPending == 0; i++)
+            {
+                WorldSimulation.StepMany(1); // 停在“已取走、还没对账”的那一步
+            }
+            int pendingAtSave = PipeLeakService.AreaHitsPending;
+            WorldSimulation.SyncAllForSave();
+            int savedRows = s.Pipes.AreaHits?.Length ?? 0;
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            F.Seconds(3f);
+            float continuous = BuildingOps.Durability(pole);
+            CampaignState l = RestoreSlot(out string fail);
+            BuildingRecord poleL = l != null ? HomeGridService.FindBuilding(l, pole.BuildingId) : null;
+            if (poleL != null)
+            {
+                F.Seconds(3f);
+            }
+            float loaded = poleL != null ? BuildingOps.Durability(poleL) : -1f;
+            Expect(save.Success && pendingAtSave > 0 && savedRows == pendingAtSave && continuous < p0 && continuous > 0f && loaded == continuous,
+                $"K3 P19 两次对账之间存档（在途累计 {pendingAtSave} 条、进存档 {savedRows} 条）：读档后接着跑 3 秒电塔耐久 {loaded}，与不存档连续跑 {continuous} 逐位一致（起点 {p0}）" +
+                (l == null ? "；读档失败：" + fail : string.Empty));
         }
 
         private static void CheckObservedEqualsUnobserved()

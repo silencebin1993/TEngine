@@ -926,8 +926,8 @@ namespace GameLogic.EditorTools
             CampaignSaveService.Save(slot, s, SaveReason.Manual);
             CampaignSlotMetadata meta = CampaignSaveService.GetSlotMetadata(slot);
             Expect(meta.State == CampaignSlotState.Ready && meta.Act == 2 && meta.Day == 12 && meta.WorldSeed == 424242 && meta.IsPostgame && meta.IsSandbox
-                   && meta.DifficultyId == "Standard" && meta.ProductVersion == "0.2" && meta.ThumbnailPath == null,
-                "元数据带幕 / 第几日 / 种子 / 后日谈 / 沙盒 / 难度 / 游戏版本（缩略图待 FG15-SYS-01）");
+                   && meta.DifficultyId == "Standard" && meta.ProductVersion == "0.2" && meta.ThumbnailJpg == null && meta.HeaderOnly,
+                "元数据带幕 / 第几日 / 种子 / 后日谈 / 沙盒 / 难度 / 游戏版本（直接调 Save 的自检档不带缩略图；列表只读头部——缩略图与真实时长见 FgSaveRobustSelfCheck）");
             string zh = CampaignSlotText.CardText(meta);
             GameSettings.SetLanguage(GameLanguage.En);
             string en = CampaignSlotText.CardText(meta);

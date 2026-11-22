@@ -554,6 +554,122 @@ namespace GameLogic.EditorTools
             {
                 Fail("E3b 未登记的单位不应查到机器");
             }
+            CheckDepartedCreditAfterLoad();
+            CheckFirstStepAfterLoad();
+        }
+
+        private static long RuleTotal(CombatKernel k)
+        {
+            long n = 0;
+            for (int i = 0; i < EmgConst.RuleSlots; i++)
+            {
+                n += k.EmgRuleCountAt(i);
+            }
+            return n;
+        }
+
+        /// <summary>
+        /// E3d（FG15-SYS-01，DEBT-EMG1CHAIN01-03）：读档后的第一步就有新的规则计数时，这一步照常进反馈 / 归因，不被吞成基线
+        /// （读档成功即当场重取基线，CombatSite.TryRestore 末尾 ReactionFeedback.Prime；对照 FgEmgChainSelfCheck F 把读档放在没有结算的步）。
+        /// </summary>
+        private static void CheckFirstStepAfterLoad()
+        {
+            NewState(9617);
+            CombatSiteRecord rec = null;
+            long expect = 0;
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                Unit(k, CombatFaction.Hostile, new double2(3, 0));
+                Ignite(k, 0, 0, 0, 30f);
+                // 找一步“下一步会有新计数”的存档点：先存，再在原地点走一步看计数涨没涨（内核确定性：读档后的同一步结果相同）
+                for (int i = 0; i < 600 && expect == 0; i++)
+                {
+                    CombatSiteRecord snap = site.Snapshot();
+                    long before = RuleTotal(k);
+                    StepSite(site, 1);
+                    if (i > 3 && RuleTotal(k) > before)
+                    {
+                        rec = snap;
+                        expect = RuleTotal(k) - before;
+                    }
+                }
+            }
+            if (rec == null)
+            {
+                Fail("E3d 测试准备：600 步内没有出现规则计数");
+                return;
+            }
+            CampaignState s = NewState(9618);
+            using var back = NewSite();
+            bool ok = back.TryRestore(s, rec, out string why);
+            long seen0 = ReactionFeedback.EmgRuleSeen, c0 = RuleTotal(back.Kernel);
+            StepSite(back, 1);
+            long got = RuleTotal(back.Kernel) - c0, seen = ReactionFeedback.EmgRuleSeen - seen0;
+            ReactionSessionRecord sess = ReactionAttribution.Current(s, SiteId, create: false);
+            Expect(ok && got == expect && got > 0 && seen == got && sess != null && sess.InteractionCount >= got,
+                $"E3d 读档后第一步内核新增规则计数 {got}（与原地点同一步 {expect} 相同）：反馈照常处理 {seen} 次、交互计数 {sess?.InteractionCount}，没有被吞成基线（{why ?? "读档成功"}）");
+        }
+
+        /// <summary>E3c（FG15-SYS-01，DEBT-EMG2DISC01-04 后半）：读档后已撤离机器仍能分到；撤离 N 次后表只留还挂在在途归属里的单位。</summary>
+        private static void CheckDepartedCreditAfterLoad()
+        {
+            double cred(ReactionSessionRecord r, int logic) => r?.Credits?.FirstOrDefault(c => c.LogicId == logic)?.Damage ?? 0;
+            CampaignState s = NewState(9614);
+            CombatSiteRecord rec;
+            int a, b;
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                a = Unit(k, CombatFaction.Player, new double2(40, 0));
+                b = Unit(k, CombatFaction.Player, new double2(40, 10));
+                BindMachineFull(site, a, 301);
+                BindMachineFull(site, b, 302);
+                Unit(k, CombatFaction.Hostile, new double2(3, 0));
+                StepSite(site, 1);
+                k.SpawnPatch(EmgMatterConst.Oil, new double2(3, 0), 2f, 5f, 0f, a, false, 0);
+                site.RemoveMachine(301, export: false);
+                // 撤离 20 台什么也没留下的机器：存档时清掉，只留 A（它的油还在地上）
+                for (int i = 0; i < 20; i++)
+                {
+                    int idle = Unit(k, CombatFaction.Player, new double2(60 + i, 30));
+                    BindMachineFull(site, idle, 400 + i);
+                    site.RemoveMachine(400 + i, export: false);
+                }
+                int before = site.DepartedCreditCount;
+                rec = site.Snapshot();
+                Expect(before == 21 && site.DepartedCreditCount == 1 && rec.DepartedUnits.Length == 1 && rec.DepartedUnits[0] == a && rec.DepartedMachines[0] == 301,
+                    $"E3c 撤离 21 次（其中 20 台没留下任何在途产物）：存档前表 {before} 条 → 存档时清理后 {site.DepartedCreditCount} 条 = 还挂在在途归属里的已撤离单位（A 的油），进存档 {rec.DepartedUnits.Length} 行");
+            }
+            CampaignState s2 = NewState(9615);
+            using (var back = NewSite())
+            {
+                bool ok = back.TryRestore(s2, rec, out string why);
+                BindMachineFull(back, b, 302);
+                bool mapped = back.TryGetCreditMachine(a, out int la) && la == 301 && !back.IsPlayerUnit(a);
+                back.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(0, 0), 2f, 1f, 8f, b, false, 7);
+                StepSite(back, 300);
+                ReactionSessionRecord sess = ReactionAttribution.Current(s2, SiteId, create: false);
+                Expect(ok && mapped && cred(sess, 301) > 0 && cred(sess, 302) > 0,
+                    $"E3c 读档后：读档前已撤离的 A 仍查得到机器 {la}（{why ?? "读档成功"}），B 点着 A 的油后 A 分到 {cred(sess, 301):0.0}、B {cred(sess, 302):0.0}");
+                // 读档后再撤离 20 台空闲机器：表涨到清理线时自动清理，不无限长
+                for (int i = 0; i < 70; i++)
+                {
+                    int idle = Unit(back.Kernel, CombatFaction.Player, new double2(60 + i % 20, 40 + i / 20));
+                    BindMachineFull(back, idle, 500 + i);
+                    back.RemoveMachine(500 + i, export: false);
+                }
+                Expect(back.DepartedCreditCount < 64 && back.TryGetCreditMachine(a, out _),
+                    $"E3c 读档后再撤离 70 台空闲机器：表涨到 64 条时自动清理，现在 {back.DepartedCreditCount} 条（A 仍在）");
+            }
+            // 旧档（没有这两列）：读入为空、不报错
+            rec.DepartedUnits = null;
+            rec.DepartedMachines = null;
+            using (var old = NewSite())
+            {
+                bool okOld = old.TryRestore(NewState(9616), rec, out _);
+                Expect(okOld && old.DepartedCreditCount == 0 && !old.TryGetCreditMachine(a, out _), "E3c 旧档没有已撤离映射：读入为空、不报错（只少读档前已撤离机器的逐机分配）");
+            }
         }
 
         private static void CheckAttribution()

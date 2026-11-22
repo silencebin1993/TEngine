@@ -208,6 +208,36 @@ namespace BinGames.Sim.Combat
         /// <summary>“同一位置”累计点数（自检读点）。</summary>
         public int PitAccCount => _d.PitAcc.Length;
 
+        /// <summary>
+        /// FG15-SYS-01（DEBT-EMG2PERSIST01-01，FGR-EMG-154 长期留存物与放置规则一起收口）：点 (x, y) 落在一件残骸（还有血）或固态斑块里。
+        /// 家园建造校验逐格调（只在放置预览 / 下单时，不按帧）；O(残骸数 + 斑块槽数)，两表都空时一次比较。
+        /// </summary>
+        public bool PersistCovers(double x, double y)
+        {
+            if (_d.Wrecks.Length == 0 && _d.Patches.Length == 0)
+            {
+                return false;
+            }
+            var p = new double2(x, y);
+            for (int i = 0; i < _d.Wrecks.Length; i++)
+            {
+                EmgWreck w = _d.Wrecks[i];
+                if (w.Hp > 0f && math.distance(p, w.Pos) < w.Radius)
+                {
+                    return true;
+                }
+            }
+            for (int i = 0; i < _d.Patches.Length; i++)
+            {
+                CombatZone z = _d.Patches[i];
+                if (z.Matter != 0 && CombatLogic.MatterOf(ref _d, z.Matter).Solid != 0 && math.distance(p, z.Pos) < z.Radius)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>某格中心（x, y）是否落在熔坑里（家园建造校验：空格不能建造）。</summary>
         public bool PitCovers(double x, double y)
         {

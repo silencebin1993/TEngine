@@ -431,6 +431,44 @@ namespace GameLogic.Campaign.Env
             GameEvent.Send(ChangedEvent, false);
         }
 
+        /// <summary>FG15-SYS-01：静默夜已开始、帧末还没写的那次自动存档。</summary>
+        public static bool PendingStartSave { get; private set; }
+        /// <summary>发起这次存档请求的战役（帧末只给它写）。</summary>
+        private static CampaignState _pendingStartSaveFor;
+        public static int StartSaves { get; private set; }
+        public static int StartSaveDeferrals { get; private set; }
+
+        /// <summary>
+        /// 帧末（GameRoot 每帧在世界推进之后调用；自检直接调）：写静默夜开始时的自动存档。攻城 / 靶场测试进行中推迟（同突袭预警存档，<see cref="Defense.RaidResultService.AutosaveDeferReason"/>），
+        /// 核心已被摧毁时由存档入口拒绝（不覆盖安全档）。返回是否写了。
+        /// </summary>
+        public static bool FrameUpdate()
+        {
+            if (!PendingStartSave || !CampaignSession.HasActiveCampaign)
+            {
+                return false;
+            }
+            if (!ReferenceEquals(_pendingStartSaveFor, CampaignSession.Current))
+            {
+                // 推迟期间换了战役（保存并返回主菜单、读了别的档）：这次请求属于原来那个战役，作废，不给新战役多写一份
+                PendingStartSave = false;
+                _pendingStartSaveFor = null;
+                return false;
+            }
+            if (Defense.RaidResultService.AutosaveDeferReason(CampaignSession.Current) != null)
+            {
+                StartSaveDeferrals++;
+                return false;
+            }
+            PendingStartSave = false;
+            SaveResult r = CampaignAutoSaveService.SaveAuto(SaveReason.SilentNightStart);
+            if (r.Success)
+            {
+                StartSaves++;
+            }
+            return r.Success;
+        }
+
         private static void Start(CampaignState state, SilentNightState d)
         {
             if (!d.Warned)
@@ -476,6 +514,11 @@ namespace GameLogic.Campaign.Env
                 detail += GameText.Get("env.silent.end.join") + GameText.Format("env.silent.expedition_safe", safe.Count.ToString(CultureInfo.InvariantCulture));
             }
             NotificationCenter.Post("silent_night", detail, CoreAt(state));
+            if (ReferenceEquals(state, CampaignSession.Current))
+            {
+                PendingStartSave = true; // FG15-SYS-01（FGR-SYS-002“静默夜开始时”自动存档）：模拟步里不写盘，帧末写
+                _pendingStartSaveFor = state;
+            }
             GuidanceHooks.Raise(GuidanceHooks.EnvFirstSilentNight);
             HomeValleyWorkOrders.MarkAssignmentDirty();
             GameEvent.Send(ChangedEvent, true);

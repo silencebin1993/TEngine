@@ -551,7 +551,7 @@ namespace GameLogic.EditorTools
             GameSettings.SetZoomSpeedMultiplier(2f);
             GameSettings.SetInvertScroll(true);
             GameSettings.SetUplinkMouseSensitivity(0.3f);
-            GameSettings.SetAutoSaveMinutes(30);
+            GameSettings.SetAutoSaveMinutes(20);
             GameSettings.SetDamageNumbersEnabled(true);
             GameSettings.SetCausalChainOverlayEnabled(false);
             GameSettings.SetUiScale(1.4f);

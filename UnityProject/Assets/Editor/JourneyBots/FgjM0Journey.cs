@@ -983,6 +983,7 @@ namespace GameLogic.EditorTools.JourneyBots
             failure = null;
             WorldSimulation.UnloadAll();
             GameClock.ResetSession();
+            CampaignSaveService.WaitForPendingWrites(); // FG15-SYS-01：后台写盘落完再复制
             File.Copy(CampaignSaveService.SlotPath(slot), CampaignSaveService.SlotPath(ReplaySlot), true);
             string bak = CampaignSaveService.BakPath(ReplaySlot);
             if (File.Exists(bak))

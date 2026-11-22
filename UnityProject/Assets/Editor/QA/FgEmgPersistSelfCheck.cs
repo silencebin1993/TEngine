@@ -925,6 +925,33 @@ namespace GameLogic.EditorTools
                 $"K8 B06 工单目标写“{wreckName}”“{gelName}”，不露内部 ID");
             int burner = AddWreckOf(HomeKernel, new double2(u0.Value.X + 2, u0.Value.Y + 6), EmgEntityProfiles.ForEnemy("material.composite", false), 200f);
             Expect(EmgChainView.WreckContent(homeSite, u, HomeKernel.WreckIndexOf(burner)).Body.Contains("正在燃烧"), "K9 悬停写明残骸正在燃烧");
+
+            // FG15-SYS-01（DEBT-EMG2PERSIST01-01）：残骸 / 固态斑块上不能放建筑、不能铺传送带 / 管线；清掉之后同一格放行。
+            CampaignState v = NewWorld(21104, scrap: 50);
+            GridCell? v0 = Open(v);
+            if (v0 == null)
+            {
+                Fail("K10 找不到空地");
+                return;
+            }
+            CombatKernel vk = HomeKernel;
+            var spot = new GridCell(v0.Value.X + 3, v0.Value.Y + 3);
+            bool freeBefore = !HomeGridService.ValidatePlacement(v, HomeValleyLayout.BuildingTypeWarehouse, spot, 0).Has(GridBlockReason.PersistItem);
+            int pw = AddWreck(vk, new double2(spot.X, spot.Y));
+            GridPlacementResult onWreck = HomeGridService.ValidatePlacement(v, HomeValleyLayout.BuildingTypeWarehouse, spot, 0);
+            string wreckWhy = onWreck.Reasons.Where(r => r.Code == GridBlockReason.PersistItem).Select(r => r.Describe()).FirstOrDefault() ?? string.Empty;
+            GridPlacementResult beltOnWreck = HomeGridService.ValidateBeltCell(v, spot);
+            GridPlacementResult pipeOnWreck = HomeGridService.ValidatePipeCell(v, spot, BinGames.Sim.Logistics.PipePieceKind.Pipe);
+            vk.ClearPersist(EmgPersistItem.KindWreck, pw);
+            bool freeAfterClear = !HomeGridService.ValidatePlacement(v, HomeValleyLayout.BuildingTypeWarehouse, spot, 0).Has(GridBlockReason.PersistItem);
+            Expect(freeBefore && !onWreck.Ok && wreckWhy.Contains("残骸") && wreckWhy.Contains("清除场地物") && beltOnWreck.Has(GridBlockReason.PersistItem)
+                   && pipeOnWreck.Has(GridBlockReason.PersistItem) && freeAfterClear,
+                $"K10 负向：残骸上不能放建筑（“{wreckWhy}”）、不能铺传送带 / 管线；清掉之后同一格放行");
+            vk.SpawnPatch(EmgMatterConst.Cured, new double2(spot.X, spot.Y), 1.5f);
+            WorldSimulation.StepMany(2);
+            bool gelBlocks = HomeGridService.ValidatePlacement(v, HomeValleyLayout.BuildingTypeWarehouse, spot, 0).Has(GridBlockReason.PersistItem);
+            bool farFree = !HomeGridService.ValidateBeltCell(v, new GridCell(spot.X + 20, spot.Y + 20)).Has(GridBlockReason.PersistItem);
+            Expect(gelBlocks && farFree, "K11 固化胶块（固态斑块）上同样不能建造；远处没有留存物的格不受影响");
         }
 
         // ── L 堵路警告 ───────────────────────────────────────────────────

@@ -26,6 +26,8 @@ namespace GameLogic.Campaign
         public string DifficultyId = "Standard";
         public int RandomSeed;
         public float PlaySeconds;
+        /// <summary>FG15-SYS-01（FG-GAP-019）：按真实时间累计的游玩时长（世界运行且未暂停时累计，不受倍速影响；<see cref="PlaySeconds"/> 是游戏时间）。旧档缺省 0 = 未记录。</summary>
+        public double RealPlaySeconds;
         public string CurrentRegionId;
         public CampaignPhase CampaignPhase = CampaignPhase.Landing;
 
@@ -303,12 +305,33 @@ namespace GameLogic.Campaign
         /// <summary>STORY-EXECUTION-CARDS.md #ER1-SAVE-01："序列化前对稳定 ID 排序"——
         /// Dictionary 迭代/未排序列表不得影响结算（ERD-SAV-004 确定性的前置条件）。
         /// <see cref="CampaignSaveService.Save"/> 落盘前必调用，不依赖调用方记得排序。</summary>
+        /// <summary>
+        /// FG15-SYS-01（FGT-SYS-003 自动存档主线程阻塞）：按字符串键升序（序数比较）。数组已经有序（上一次存档排过、之后多是末尾追加）时原样返回、不再整份重排；
+        /// 否则稳定排序——结果与原来的 <c>OrderBy(key, StringComparer.Ordinal).ToArray()</c> 逐项相同（空元素同样抛错）。
+        /// </summary>
+        private static T[] SortedOrdinal<T>(T[] items, Func<T, string> key)
+        {
+            if (items == null || items.Length == 0)
+            {
+                return items ?? Array.Empty<T>();
+            }
+            string prev = key(items[0]);
+            for (int i = 1; i < items.Length; i++)
+            {
+                string cur = key(items[i]);
+                if (string.CompareOrdinal(prev, cur) > 0)
+                {
+                    return items.OrderBy(key, StringComparer.Ordinal).ToArray();
+                }
+                prev = cur;
+            }
+            return items;
+        }
+
         public void NormalizeForSave()
         {
-            CompletedObjectiveIds = (CompletedObjectiveIds ?? Array.Empty<string>())
-                .OrderBy(id => id, StringComparer.Ordinal).ToArray();
-            UnlockedContentIds = (UnlockedContentIds ?? Array.Empty<string>())
-                .OrderBy(id => id, StringComparer.Ordinal).ToArray();
+            CompletedObjectiveIds = SortedOrdinal(CompletedObjectiveIds, id => id);
+            UnlockedContentIds = SortedOrdinal(UnlockedContentIds, id => id);
             OpenReactionBatches = (OpenReactionBatches ?? Array.Empty<string>())
                 .Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
             ReactionFirstTriggers = (ReactionFirstTriggers ?? Array.Empty<ReactionFirstTriggerRecord>())
@@ -319,40 +342,24 @@ namespace GameLogic.Campaign
                 .Where(r => r != null && !string.IsNullOrEmpty(r.EntryId))
                 .GroupBy(r => r.EntryId, StringComparer.Ordinal).Select(g => g.OrderBy(r => r.Tick).First())
                 .OrderBy(r => r.EntryId, StringComparer.Ordinal).ToArray();
-            BuildingRecords = (BuildingRecords ?? Array.Empty<BuildingRecord>())
-                .OrderBy(r => r.BuildingId, StringComparer.Ordinal).ToArray();
+            BuildingRecords = SortedOrdinal(BuildingRecords, r => r.BuildingId);
             MachineRecords = (MachineRecords ?? Array.Empty<MachineRecord>())
                 .OrderBy(r => r.LogicId).ToArray();
-            BlueprintRecords = (BlueprintRecords ?? Array.Empty<BlueprintRecord>())
-                .OrderBy(r => r.BlueprintId, StringComparer.Ordinal).ToArray();
-            WorkOrders = (WorkOrders ?? Array.Empty<WorkOrderRecord>())
-                .OrderBy(r => r.WorkOrderId, StringComparer.Ordinal).ToArray();
-            FactoryQueues = (FactoryQueues ?? Array.Empty<FactoryQueueItemRecord>())
-                .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
-            RegionRecords = (RegionRecords ?? Array.Empty<RegionRecord>())
-                .OrderBy(r => r.RegionId, StringComparer.Ordinal).ToArray();
-            EventLedger = (EventLedger ?? Array.Empty<EventLedgerEntry>())
-                .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
-            ResourceTransactions = (ResourceTransactions ?? Array.Empty<ResourceTransactionRecord>())
-                .OrderBy(r => r.TransactionId, StringComparer.Ordinal).ToArray();
-            GroundItems = (GroundItems ?? Array.Empty<GroundItemRecord>())
-                .OrderBy(r => r.GroundItemId, StringComparer.Ordinal).ToArray();
-            ObjectiveRecords = (ObjectiveRecords ?? Array.Empty<ObjectiveRecord>())
-                .OrderBy(r => r.ObjectiveId, StringComparer.Ordinal).ToArray();
-            PrimitiveChips = (PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>())
-                .OrderBy(r => r.PartId, StringComparer.Ordinal).ToArray();
-            CraftQueues = (CraftQueues ?? Array.Empty<CraftQueueItemRecord>())
-                .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
-            CombatTargets = (CombatTargets ?? Array.Empty<CombatTargetRecord>())
-                .OrderBy(r => r.TargetId, StringComparer.Ordinal).ToArray();
-            RegionEnemies = (RegionEnemies ?? Array.Empty<RegionEnemyRecord>())
-                .OrderBy(r => r.EnemyInstanceId, StringComparer.Ordinal).ToArray();
-            RegionQuestItems = (RegionQuestItems ?? Array.Empty<RegionQuestItemRecord>())
-                .OrderBy(r => r.SalvageInstanceId, StringComparer.Ordinal).ToArray();
-            AnalysisQueues = (AnalysisQueues ?? Array.Empty<AnalysisQueueItemRecord>())
-                .OrderBy(r => r.QueueItemId, StringComparer.Ordinal).ToArray();
-            SignalExposureEvents = (SignalExposureEvents ?? Array.Empty<SignalExposureEventRecord>())
-                .OrderBy(r => r.EventId, StringComparer.Ordinal).ToArray();
+            BlueprintRecords = SortedOrdinal(BlueprintRecords, r => r.BlueprintId);
+            WorkOrders = SortedOrdinal(WorkOrders, r => r.WorkOrderId);
+            FactoryQueues = SortedOrdinal(FactoryQueues, r => r.QueueItemId);
+            RegionRecords = SortedOrdinal(RegionRecords, r => r.RegionId);
+            EventLedger = SortedOrdinal(EventLedger, r => r.EventId);
+            ResourceTransactions = SortedOrdinal(ResourceTransactions, r => r.TransactionId);
+            GroundItems = SortedOrdinal(GroundItems, r => r.GroundItemId);
+            ObjectiveRecords = SortedOrdinal(ObjectiveRecords, r => r.ObjectiveId);
+            PrimitiveChips = SortedOrdinal(PrimitiveChips, r => r.PartId);
+            CraftQueues = SortedOrdinal(CraftQueues, r => r.QueueItemId);
+            CombatTargets = SortedOrdinal(CombatTargets, r => r.TargetId);
+            RegionEnemies = SortedOrdinal(RegionEnemies, r => r.EnemyInstanceId);
+            RegionQuestItems = SortedOrdinal(RegionQuestItems, r => r.SalvageInstanceId);
+            AnalysisQueues = SortedOrdinal(AnalysisQueues, r => r.QueueItemId);
+            SignalExposureEvents = SortedOrdinal(SignalExposureEvents, r => r.EventId);
             SignalExposureTotals = (SignalExposureTotals ?? Array.Empty<SignalExposureTotalRecord>())
                 .OrderBy(r => r.Kind, StringComparer.Ordinal).ThenBy(r => r.Faction, StringComparer.Ordinal).ToArray();
 

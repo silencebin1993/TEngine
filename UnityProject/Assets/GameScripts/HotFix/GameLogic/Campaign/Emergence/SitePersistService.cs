@@ -77,6 +77,13 @@ namespace GameLogic.Campaign.Emergence
             return site != null && site.PersistSite && site.PitCovers(x, y);
         }
 
+        /// <summary>FG15-SYS-01（DEBT-EMG2PERSIST01-01）：家园格 (x, y) 的中心落在残骸 / 固态斑块里（建造校验逐格调）。</summary>
+        public static bool PersistAtCell(int x, int y)
+        {
+            CombatSite site = Home;
+            return site != null && site.PersistSite && site.PersistCovers(x, y);
+        }
+
         public static bool IsClearTarget(string targetId) => targetId != null && targetId.StartsWith(TargetPrefix, StringComparison.Ordinal);
 
         public static string TargetOf(byte kind, int id) =>

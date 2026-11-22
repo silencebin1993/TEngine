@@ -73,7 +73,57 @@ namespace GameLogic.Campaign
 
         // ── FG0-SAVE-01：存档卡新字段与失败原因（全部走文本键 save.* / difficulty.*）──────────────
 
-        public static string SlotTitle(int slotIndex) => GameText.Format("save.slot.title", SlotNumber(slotIndex));
+        /// <summary>“槽位 N”；副本是“槽位 N · 自动存档 k / 快速存档”（FG15-SYS-01）。</summary>
+        public static string SlotTitle(int slotIndex)
+        {
+            string home = GameText.Format("save.slot.title", SlotNumber(CampaignSaveService.HomeOf(slotIndex)));
+            switch (CampaignSaveService.KindOf(slotIndex))
+            {
+                case SaveSlotKind.Auto:
+                    return GameText.Format("save.slot.copy_title", home, GameText.Format("save.kind.auto", CampaignSaveService.AutoNumber(slotIndex)));
+                case SaveSlotKind.Quick:
+                    return GameText.Format("save.slot.copy_title", home, GameText.Get("save.kind.quick"));
+                default:
+                    return home;
+            }
+        }
+
+        /// <summary>FG15-SYS-01（FG-GAP-019）：真实游玩时长（不受倍速影响、不含暂停）；旧档没有记录时明说“未记录”，不显示成 0。</summary>
+        public static string RealTime(CampaignSlotMetadata meta) =>
+            meta.RealPlaySeconds > 0 ? GameText.Format("save.card.real_time", PlayTime((float)meta.RealPlaySeconds)) : GameText.Get("save.card.real_time_unknown");
+
+        /// <summary>FG15-SYS-01（DEBT-FG3GEN01-02）：存档卡“复制种子”的文字。</summary>
+        public static string SeedText(CampaignSlotMetadata meta) => meta.WorldSeed.ToString(CultureInfo.InvariantCulture);
+
+        /// <summary>FG15-SYS-01（DEBT-FG3GEN01-02）：存档卡“复制分享短码”（种子 + 世界设置 + 生成器版本，与暂停菜单同一编码）；旧版本原型地形没有短码 = null。</summary>
+        public static string ShareCode(CampaignSlotMetadata meta)
+        {
+            if (meta == null || meta.State != CampaignSlotState.Ready || meta.GeneratorVersion < 1 || string.IsNullOrEmpty(meta.WorldSettingsId))
+            {
+                return null;
+            }
+            try
+            {
+                return WorldGen.WorldSettings.EncodeShareCode(meta.WorldSeed, WorldGen.WorldSettings.Resolve(meta.GeneratorVersion, meta.WorldSettingsId));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>写剪贴板（自检替换成记录）。</summary>
+        public static Action<string> ClipboardHandler = text => UnityEngine.GUIUtility.systemCopyBuffer = text;
+
+        public static bool Copy(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+            ClipboardHandler?.Invoke(text);
+            return true;
+        }
 
         /// <summary>"槽位 N：正文"（冒号随语言变化）。</summary>
         private static string Line(CampaignSlotMetadata meta, string body) => GameText.Format("save.slot.line", SlotTitle(meta.SlotIndex), body);
@@ -91,6 +141,7 @@ namespace GameLogic.Campaign
                 parts.Add(GameText.Format("save.card.day", meta.Day));
             }
             parts.Add(DifficultyName(meta.DifficultyId));
+            parts.Add(RealTime(meta)); // FG15-SYS-01（FG-GAP-019）：真实时长与第二行的游戏时长分开显示
             parts.Add(GameText.Format("save.card.seed", meta.WorldSeed.ToString(CultureInfo.InvariantCulture)));
             if (!string.IsNullOrEmpty(meta.WorldSettingsId))
             {
@@ -206,5 +257,16 @@ namespace GameLogic.Campaign
                 : ReasonText(meta.FailureReason, meta.SchemaVersion);
             return $"{GameText.Format("save.confirm.kept_head", title)}\n{what}\n\n{GameText.Format("save.confirm.kept_tail", keepName)}";
         }
+    }
+    /// <summary>FG15-SYS-01（FGR-SYS-006）：云存档冲突对话框的文字——两边各显示存档时间与游戏进度（幕、第几日、游戏时长）。</summary>
+    public static class CloudConflictText
+    {
+        public static string Side(CloudSaveSide s) => s != null && s.Readable
+            ? GameText.Format("save.cloud.side", CampaignSlotText.SavedAt(s.WrittenAtUtc), Math.Max(1, s.Act), s.Day, CampaignSlotText.PlayTime(s.PlaySeconds))
+            : GameText.Format("save.cloud.unreadable", CampaignSlotText.SavedAt(s?.WrittenAtUtc));
+
+        public static string Body(CloudSaveConflict c) =>
+            GameText.Format("save.cloud.body", CampaignSlotText.SlotTitle(c.Slot)) + "\n" + GameText.Format("save.cloud.local", Side(c.Local)) + "\n"
+            + GameText.Format("save.cloud.remote", Side(c.Cloud));
     }
 }

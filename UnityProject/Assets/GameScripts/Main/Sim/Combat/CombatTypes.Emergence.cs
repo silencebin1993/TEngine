@@ -149,6 +149,9 @@ namespace BinGames.Sim.Combat
         public const int SegFleet = 40;
         public const int SegFleetStrike = 41;
         public const int SegFleetMark = 42;
+        /// <summary>FG15-SYS-01（DEBT-EMG2MAT02-06 / perf-cut-audit P19；格式 26 内追加的自描述段，不升 FormatVersion，FGR-EMG-211）：段 43 斑块蚀设施的待发布条目
+        /// （已发布未取走的 <see cref="CombatData.EmgStructOut"/> 在前、待发布的 <see cref="CombatData.EmgStructPending"/> 在后；每条 9 个字段：位置 x / y、半径、伤害、键、物质、标记、归属单位、是否已发布）。只在非空时写；读不含这段的快照 = 空表（没有时快照与哈希逐字不变）。</summary>
+        public const int SegStructPending = 43;
         /// <summary>EMGR-FUSE-01（DEBT-EMG4FUSE02-01）：每条配方的在途登记格数（2 的幂，按链号哈希开放寻址）与探测窗口；旧布局每配方 8 格；线索侧位表按端口码下标的长度（端口码 &lt; 本值）。
         /// shortcut: 16 格探测窗口全满时挤掉窗口里链号最小（最早）的登记并计数 EmgScalars.ClueHalfEvicted（少计不多计；DEBT-EMGRFUSE01-01 交 FG15-SYS-02 按实测再定）。</summary>
         public const int ClueHalfBits = 7, ClueHalfRing = 1 << ClueHalfBits, ClueHalfWindow = 16, ClueHalfLegacyRing = 8, ClueSidePorts = 1400;

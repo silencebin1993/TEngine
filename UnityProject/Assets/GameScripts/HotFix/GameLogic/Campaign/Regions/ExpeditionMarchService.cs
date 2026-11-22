@@ -1645,6 +1645,8 @@ namespace GameLogic.Campaign.Regions
             }
             WorldSimulation.UnloadAll();
             // 把到达前档的副本放回槽位（地点载入时的自动存档已经覆盖了槽位），再按读档流程读回。
+            // FG15-SYS-01：游戏中的自动存档在后台写盘，先等排队的写完，免得放回去的基线又被一份到达后的快照盖掉。
+            CampaignSaveService.WaitForPendingWrites();
             if (!TryCopy(baseline, CampaignSaveService.SlotPath(slot)))
             {
                 Log.Error("[ExpeditionMarchService] 到达回滚：到达前档的副本不在，改读槽位里现有的档。");

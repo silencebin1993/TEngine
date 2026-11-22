@@ -224,7 +224,7 @@ namespace GameLogic.Campaign.Combat
         /// <summary>
         /// 内核合并好的一条交互伤害：进这一场的交互伤害；有规则键的按键记到对应行（具名 = 反应 ID，通道规则 = 稳定键文本）；按归属里的机器平分（FG11-ATTR-01 起最多 8 台，敌方与炮塔不分）。
         /// EMGR-GL-01：单位已注销（撤离 / 阵亡）的机器照样分到（<see cref="CombatSite.TryGetCreditMachine"/>），按 LogicId 去重——同一台机器换单位 ID 回来只算一份。
-        /// shortcut: 读档后换了内核，注销前的单位 → 机器表不在了，读档前铺下的斑块之后的伤害分不到；要算全需归属里直接存 LogicId，归 FG15-SYS-01（DEBT-EMG2DISC01-04 后半）。
+        /// FG15-SYS-01（DEBT-EMG2DISC01-04 后半）：“已注销单位 → 机器”表随地点快照进存档，读档后读档前铺下的斑块照样分给原机器。
         /// </summary>
         public static void AddInteractionDamage(CampaignState state, CombatSite site, in EmgAttrRow row)
         {

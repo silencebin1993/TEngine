@@ -540,6 +540,7 @@ namespace GameLogic.EditorTools.JourneyBots
             string tmpSaves = Path.Combine(tmp, SavesDir);
             if (!string.IsNullOrEmpty(journeySaves) && Directory.Exists(journeySaves))
             {
+                CampaignSaveService.WaitForPendingWrites(); // FG15-SYS-01：游戏中的自动存档在后台写盘，存断点前先等它落完
                 CopyTree(journeySaves, tmpSaves);
             }
             Directory.CreateDirectory(tmpSaves);

@@ -1636,6 +1636,11 @@ namespace GameLogic.EditorTools
             }
             foreach (KeyValuePair<FeedbackCueId, int> kv in CueCounts())
             {
+                // FG15-UX-02（DEBT-EMG2MAT01-07）：斑块生成 / 踏进斑块只在镜头所在地点出声（后台照常结算、不出声），是表现不是结果（FGR-BASE-021 比的是结算结果），不参与“观察不改变结果”的逐字段比较。
+                if (kv.Key == FeedbackCueId.MatterSpawn || kv.Key == FeedbackCueId.MatterEnter)
+                {
+                    continue;
+                }
                 result["·cue." + kv.Key] = (kv.Value - cueBase[kv.Key]).ToString(CultureInfo.InvariantCulture);
             }
             foreach (IGrouping<string, NotificationEntry> g in NotificationCenter.History.GroupBy(e => e.Type.Id))

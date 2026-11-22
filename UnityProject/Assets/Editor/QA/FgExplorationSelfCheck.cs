@@ -997,6 +997,185 @@ namespace GameLogic.EditorTools
                    $"|circles={s.Grid.Explored.Length}|trail={trail}";
         }
 
+        /// <summary>
+        /// S1b（FG15-SYS-01，DEBT-FG7ENV05-05）：机器赶路途中（工作单已派给机器、还没到场）真文件存读档——读档后到场时刻、回收结果与一直跑逐步一致。
+        /// 走的是通用工作单的派单 → 赶路 → 到场路径（拆解 / 搬运同一条）。
+        /// </summary>
+        private static void CheckSaveLoadEnRoute()
+        {
+            CampaignState s = NewWorld(8873);
+            RepairTower(s);
+            Boundary();
+            HomeGridMap map = HomeGridService.MapFor(s);
+            GridCell core = HomeGridService.CorePivot(s);
+            WorldFeature far = Relics(s, 320).Where(r => HomeExplorationService.IsFound(s, r.Id) && map.IsExploredNoLoad(new GridCell(r.X, r.Y)))
+                .OrderByDescending(r => Math.Abs(r.X - core.X) + Math.Abs(r.Y - core.Y)).FirstOrDefault();
+            if (far == null)
+            {
+                Fail("S1b 信号塔覆盖内找不到遗迹点");
+                return;
+            }
+            string relicId = far.Id;
+            HomeExplorationService.OrderRecovery(s, relicId, 0);
+            StepUntil(() => HomeExplorationService.ActiveOrder(s, relicId) is WorkOrderRecord w && w.AssignedMachineLogicId != 0, 120L * Hz);
+            WorldSimulation.StepMany((int)(2L * Hz)); // 派单后赶路 2 游戏秒（还没到场）
+            WorkOrderRecord atSave = HomeExplorationService.ActiveOrder(s, relicId);
+            bool enRoute = atSave != null && atSave.AssignedMachineLogicId != 0 && atSave.State != WorkOrderState.InProgress && atSave.Progress <= 0f;
+            string before = Snap(s, relicId);
+            WorldSimulation.SyncAllForSave();
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            long saveTick = GameClock.Ticks;
+            long Arrive(CampaignState st)
+            {
+                StepUntil(() => HomeExplorationService.ActiveOrder(st, relicId) is WorkOrderRecord w && w.State == WorkOrderState.InProgress
+                                || HomeExplorationService.IsRecovered(st, relicId), 600L * Hz);
+                return GameClock.Ticks;
+            }
+            long arriveContinuous = Arrive(s);
+            long until = saveTick + 200L * Hz;
+            WorldSimulation.StepMany((int)(until - GameClock.Ticks));
+            string continuous = Snap(s, relicId);
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            ResetServices();
+            ProductionService.ResetForTests();
+            WeatherService.Install();
+            PurificationService.Install();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(Slot);
+            if (!rr.Success)
+            {
+                Fail("S1b 读档失败：" + rr.Message);
+                return;
+            }
+            CampaignState l = rr.State;
+            CampaignSession.Set(Slot, l);
+            _home = WorldSimulation.LoadHome(resume: true);
+            WorldView.Observe(_home.SiteId);
+            string loaded = Snap(l, relicId);
+            long arriveLoaded = Arrive(l);
+            WorldSimulation.StepMany((int)(until - GameClock.Ticks));
+            string after = Snap(l, relicId);
+            Expect(save.Success && enRoute && loaded == before && arriveLoaded == arriveContinuous && after == continuous && continuous.Contains("order=Completed"),
+                $"S1b 赶路途中真文件存读档（派单后赶路 2 秒、还没到场）：读回一致 {loaded == before}；到场时刻 读档后第 {arriveLoaded} 步 / 一直跑第 {arriveContinuous} 步（相差 {arriveLoaded - arriveContinuous}）；" +
+                $"接着跑 200 秒逐项一致 {after == continuous}" + (after == continuous ? string.Empty : "\n    一直跑 " + continuous + "\n    读档后 " + after));
+        }
+
+        /// <summary>
+        /// S1c（FG15-SYS-01 修复第 1 轮，DEBT-FG7ENV05-05 原文“先用不含遗迹回收的普通工单（拆解 / 搬运）复现”）：远处一堆矿开搬运单，
+        /// 机器领单赶路途中真文件存读档——读档后拾取时刻、之后 200 秒的工单 / 地上物品状态与一直跑逐步一致。
+        /// </summary>
+        private static void CheckSaveLoadEnRouteHaul()
+        {
+            CampaignState s = NewWorld(8875);
+            RepairTower(s);
+            Boundary();
+            HomeGridMap map = HomeGridService.MapFor(s);
+            GridCell core = HomeGridService.CorePivot(s);
+            WorldFeature far = Relics(s, 320).Where(r => map.IsExploredNoLoad(new GridCell(r.X, r.Y)))
+                .OrderByDescending(r => Math.Abs(r.X - core.X) + Math.Abs(r.Y - core.Y)).FirstOrDefault();
+            if (far == null)
+            {
+                Fail("S1c 信号塔覆盖内找不到远处的已探明格");
+                return;
+            }
+            // 搬运要有仓库收货（与 FgCargoSelfCheck 同一做法：已有仓库补成完工满耐久，没有就在核心附近建一座）。
+            BuildingRecord wh = s.BuildingRecords.FirstOrDefault(b => b != null && BuildingOps.IsWarehouse(b) && !HomeGridService.IsRelocationGhost(b));
+            if (wh != null)
+            {
+                wh.ConstructionState = BuildingConstructionState.Operational;
+                wh.Health = BuildingOps.MaxDurability(wh.BuildingTypeId);
+            }
+            else if (FgProductionSelfCheck.FindFree(s, HomeValleyLayout.BuildingTypeWarehouse, 6f, 30f) is GridCell whCell)
+            {
+                FgProductionSelfCheck.Built(s, HomeValleyLayout.BuildingTypeWarehouse, "explore_wh", whCell);
+            }
+            Vector2 at = GridMath.FootprintCenter(new GridCell(far.X + 2, far.Y), 1, 1, 0);
+            GroundItemRecord pile = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at, ItemCatalog.ResourceTypeOf("metal_ore"), 20, "fgexplore:haul-enroute");
+            string gid = pile?.GroundItemId;
+            var opened = HomeValleyWorkOrders.TryCreateHaulPool(s, gid);
+            WorkOrderRecord Haul(CampaignState st) => st.WorkOrders?.FirstOrDefault(o => o != null && o.Kind == WorkOrderKind.Haul && o.SourceId == gid);
+            string Snap2(CampaignState st)
+            {
+                WorkOrderRecord o = Haul(st);
+                return $"order={o?.State}/{o?.AssignedMachineLogicId}/{(o?.Progress ?? 0f).ToString("F3", CultureInfo.InvariantCulture)} ground={HomeValleyCargo.FindGroundItem(st, gid) != null}";
+            }
+            if (!StepUntil(() => Haul(s) is WorkOrderRecord w && w.AssignedMachineLogicId != 0, 120L * Hz))
+            {
+                Fail($"S1c 搬运单 120 秒内没有机器领（开单 {opened.Success}，{Snap2(s)}）");
+                return;
+            }
+            WorldSimulation.StepMany((int)(2L * Hz)); // 领单后赶路 2 游戏秒（还没到）
+            WorkOrderRecord atSave = Haul(s);
+            bool enRoute = opened.Success && atSave != null && atSave.AssignedMachineLogicId != 0 && HomeValleyCargo.FindGroundItem(s, gid) != null;
+            string before = Snap2(s);
+            int worker = atSave?.AssignedMachineLogicId ?? 0;
+            string Mine(CampaignState st) => string.Join("; ", (st.WorkOrders ?? Array.Empty<WorkOrderRecord>())
+                .Where(o => o != null && o.AssignedMachineLogicId == worker && HomeValleyWorkOrders.IsActive(o)).Select(o => $"{o.Kind}:{o.State}:{o.SourceId}:{o.Progress:F2}"));
+            string mineAtSave = Mine(s);
+            WorldSimulation.SyncAllForSave();
+            SaveResult save = CampaignAutoSaveService.SaveWithExport(Slot, SaveReason.Manual);
+            long saveTick = GameClock.Ticks;
+            var trace = new List<string>();
+            long Arrive(CampaignState st)
+            {
+                long next = GameClock.Ticks;
+                string lastState = null;
+                StepUntil(() =>
+                {
+                    WorkOrderRecord ho = Haul(st);
+                    string cur = ho == null ? "none" : ho.State + "/" + ho.AssignedMachineLogicId + "/" + (ho.FailureReason ?? "");
+                    if (cur != lastState)
+                    {
+                        trace.Add("[" + GameClock.Ticks + " " + cur + "]");
+                        lastState = cur;
+                    }
+                    if (GameClock.Ticks >= next)
+                    {
+                        Vector2? p = WorldSimulation.LivePosition(worker);
+                        trace.Add($"{GameClock.Ticks}:{(p.HasValue ? $"{p.Value.x:F1},{p.Value.y:F1}" : "-")}:{WeatherService.ActiveKind(st) ?? "clear"}");
+                        next += 30L * Hz;
+                    }
+                    return HomeValleyCargo.FindGroundItem(st, gid) == null || Haul(st)?.State == WorkOrderState.InProgress;
+                }, 600L * Hz);
+                return GameClock.Ticks;
+            }
+            long arriveContinuous = Arrive(s);
+            string traceContinuous = string.Join(" ", trace);
+            trace.Clear();
+            long until = saveTick + 200L * Hz;
+            WorldSimulation.StepMany((int)(until - GameClock.Ticks));
+            string continuous = Snap2(s);
+            WorldSimulation.UnloadAll();
+            GameClock.ResetSession();
+            ResetServices();
+            ProductionService.ResetForTests();
+            WeatherService.Install();
+            PurificationService.Install();
+            RestoreResult rr = CampaignRestoreOrchestrator.Restore(Slot);
+            if (!rr.Success)
+            {
+                Fail("S1c 读档失败：" + rr.Message);
+                return;
+            }
+            CampaignState l = rr.State;
+            CampaignSession.Set(Slot, l);
+            _home = WorldSimulation.LoadHome(resume: true);
+            WorldView.Observe(_home.SiteId);
+            string loaded = Snap2(l);
+            string mineLoaded = Mine(l);
+            long arriveLoaded = Arrive(l);
+            WorldSimulation.StepMany((int)(until - GameClock.Ticks));
+            string after = Snap2(l);
+            bool same = save.Success && enRoute && loaded == before && arriveLoaded == arriveContinuous && arriveContinuous < until && after == continuous && continuous.Contains("ground=False");
+            int falseBlocked = (traceContinuous.Length - traceContinuous.Replace("path-blocked", string.Empty).Length) / "path-blocked".Length;
+            Expect(same && falseBlocked == 0,
+                $"S1c 普通搬运单赶路途中真文件存读档（领单后赶路 2 秒、还没到矿堆）：读回一致 {loaded == before}（{before}）；拾取时刻 读档后第 {arriveLoaded} 步 / 一直跑第 {arriveContinuous} 步（相差 {arriveLoaded - arriveContinuous}）；" +
+                $"接着跑到 200 秒逐项一致 {after == continuous}（{continuous}）；一直跑途中误判“路径受阻” {falseBlocked} 次（绕路时剩余路线比等路线时的直线距离长，看门狗换度量要重新起算）" +
+                (same && falseBlocked == 0 ? string.Empty
+                    : $"\n    读档后 {after}\n    存档时机器 {worker} 的单：{mineAtSave}\n    读档后：{mineLoaded}（存档在第 {saveTick} 步，Hz {Hz}，矿堆 {at.x:F1},{at.y:F1}）"
+                      + $"\n    一直跑轨迹 {traceContinuous}\n    读档后轨迹 {string.Join(" ", trace)}"));
+        }
+
         private static void CheckSaveLoad()
         {
             CampaignState s = NewWorld(8871);
@@ -1060,6 +1239,9 @@ namespace GameLogic.EditorTools
                 $"S1 回收进行中真文件存读档（发现 / 回收过的遗迹点、揭开过的危害、回收单进度、机器探索检查点、已探索圆）：读回与存前逐项一致 {loaded == before}，" +
                 $"接着跑与一直跑一致 {after == continuous}（两次读档相同）\n    存前 {before}" + (loaded == before ? string.Empty : "\n    读回 " + loaded) +
                 (after == continuous ? string.Empty : "\n    一直跑 " + continuous + "\n    读档后 " + after));
+
+            CheckSaveLoadEnRoute();
+            CheckSaveLoadEnRouteHaul();
 
             // 旧档（没有探索域）读回来：空域，第一次揭开新区域前按已探索区域静默补登，不补发通知。
             HomeExplorationState old = JsonUtility.FromJson<HomeExplorationState>("{}");

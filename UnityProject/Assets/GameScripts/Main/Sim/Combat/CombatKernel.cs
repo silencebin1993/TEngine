@@ -789,6 +789,10 @@ namespace BinGames.Sim.Combat
         /// <summary>待发布（还没进已发布表）的设施受击条目数（自检：没有消费者时不丢、按键合并）。</summary>
         public int StructHitsPending => _d.EmgStructPending.Length;
 
+        /// <summary>FG15-SYS-01（P19，自检）：往斑块蚀设施待发布表里塞一条 / 读第 i 条（验证段 43 往返）。</summary>
+        public void AddStructHitForTests(EmgStructHit h) => _d.EmgStructPending.Add(h);
+        public EmgStructHit StructHitPendingAt(int i) => _d.EmgStructPending[i];
+
         /// <summary>FG10-FAC-01（灭活无人机“飞向净化塔”）：投放目标（x, y, 半径）。派生量，不进快照；热更层按净化塔定期写入。
         /// FG10-RAID-01：<paramref name="siegeOnly"/> = 只有攻城中的单位读它（家园内核）。</summary>
         public void SetPolluteTargets(IReadOnlyList<float3> targets, bool siegeOnly = false)
@@ -1216,6 +1220,27 @@ namespace BinGames.Sim.Combat
             c.PivotT = 0f;
             _d.Clarity[i] = c;
             Touch();
+            return true;
+        }
+
+        /// <summary>
+        /// FG15-SYS-01（DEBT-FG9FAC02-06）：读旧格式快照后按敌人表换上新的行为参数行——只换参数（旧格式没有的新参数族从 0 变成表里的值），
+        /// 不清潜伏 / 架设 / 喷灌臂等运行状态（与 <see cref="SetBehaviorProfile"/> 的“装配变化”不同）；超频 / 白潮记录照新参数登记。
+        /// </summary>
+        public bool RefreshBehaviorProfile(int id, int profile)
+        {
+            int i = _d.SlotOf(id);
+            if (i < 0 || profile < -1 || profile >= _d.Profiles.Length)
+            {
+                return false;
+            }
+            if (_d.BProfile[i] != profile)
+            {
+                _d.BProfile[i] = profile;
+                CombatLogic.OcRegister(ref _d, i);
+                CombatLogic.FlRegister(ref _d, i);
+                Touch();
+            }
             return true;
         }
 

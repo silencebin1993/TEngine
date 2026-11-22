@@ -56,6 +56,10 @@ namespace GameLogic.Campaign
         PostgameStart = 14,
         /// <summary>FG15-UX-01（FGR-SYS-020 游戏性“自动存档间隔”）：按设置的间隔（真实时间、世界运行时累计）定时自动存档。</summary>
         Interval = 15,
+        /// <summary>FG15-SYS-01（FGR-SYS-001）：快速存档（暂停菜单按钮 / 快捷键）：写战役槽并另存一份快速存档。</summary>
+        QuickSave = 16,
+        /// <summary>FG15-SYS-01（FGR-SYS-002“静默夜开始时”）：静默夜开始后的第一个帧末（攻城 / 靶场测试进行中时推迟）。</summary>
+        SilentNightStart = 17,
     }
 
     /// <summary>ERD-DAT-004 BuildingRecord.constructionState 封闭枚举。</summary>

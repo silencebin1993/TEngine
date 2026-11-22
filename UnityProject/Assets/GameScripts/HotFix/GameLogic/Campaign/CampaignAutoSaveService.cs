@@ -8,9 +8,9 @@ namespace GameLogic.Campaign
     ///   - HomeEntryComplete          → 已接入（ER2-SCENE-01，HomeValleyController.Enter）
     ///   - ExpeditionDepartConfirm    → ER5-EXP-01（准备与区域切换事务）
     ///   - ExpeditionResolutionComplete → ER5-RETURN-01（撤离、全灭与回城结算）
-    ///   - BlueprintSaved            → ER4-BLP-01（蓝图记录与编辑器）
-    ///   - BossEngageEnter           → ER7-CORE-01（供能节点与主核心状态机）
-    ///   - BeaconLaunchEnter         → ER7-BEACON-01（导航信标和胜利）
+    ///   - BlueprintSaved            → 已接入（FG15-SYS-01，BlueprintEditorService.TrySave 成功后）
+    ///   - BossEngageEnter           → 已接入（FoundryOutpostController / BaptismTowerBoss / InteriorSiteService）
+    ///   - BeaconLaunchEnter         → 已接入（FG15-SYS-01，HomeValleyBeacon.TryStartLaunch 成功后）
     ///
     /// 调用约定：业务系统在确认自己已到达"稳定事务边界"（ERD-SAV-002："自动档不得在资源事务半提交或
     /// 区域切换中间写入"）之后，直接调用 <see cref="SaveAuto"/>，不做自动扫描/定时轮询。</summary>
@@ -30,7 +30,9 @@ namespace GameLogic.Campaign
                 return new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("campaign.autosave.no_active_campaign_autosave"));
             }
 
-            SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason);
+            // FG15-SYS-01（FGR-SYS-001/002）：每次自动存档都顺带写一份轮换自动存档（本槽 3 份轮换）；游戏中主线程只拍快照、写盘放后台（不卡顿），
+            // 只有出发 / 到达的回滚基线同步写（见 InBackground）。
+            SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason, SaveCopyKind.Auto, InBackground(reason));
             if (result.Success && toast)
             {
                 // ER8-CONTENT-01：本作只有自动存档（SaveReason.Manual 仍是预留），每次写盘成功给一条轻提示，
@@ -47,7 +49,53 @@ namespace GameLogic.Campaign
         /// FG0-ARCH-01 修复：家园在派遣 / 远征期间不再 Exit，机器实时位置只在表现对象上——
         /// 所以这里对**每一次**存档（自动档与手动档同一条路径）先把全部已载入地点的实时状态写回记录，
         /// 再导出，调用方不必再自己记得同步（旧的 <c>GameRoot.SyncActiveRegionForSave</c> 预同步变成幂等冗余）。</summary>
-        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason)
+        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason) => SaveWithExport(slotIndex, reason, SaveCopyKind.None, false);
+
+        /// <summary>自检专用：编辑模式下也走后台写入（正式游戏里 = Play 中，非事务边界的自动存档与快速存档都走后台）。</summary>
+        public static bool ForceBackgroundForTests { get; set; }
+
+        /// <summary>正式游戏里（Play）或自检打开 <see cref="ForceBackgroundForTests"/> 时为 true。玩家操作触发的自动存档（蓝图保存、启动信标）只在这时写：
+        /// 编辑模式的自检直调服务时不写盘、不导出机器记录。</summary>
+        public static bool InGame => ForceBackgroundForTests || UnityEngine.Application.isPlaying;
+
+        /// <summary>FGR-SYS-002“主线程阻塞 ≤ 100 毫秒，其余在后台完成”：游戏中的自动存档都在后台写盘。
+        /// 同步写的只有：新建战役、手动存档（主菜单 / 自检），以及出发 / 到达的回滚基线（ExpeditionDepartConfirm：调用方存完当场复制基线文件、失败就中止出发，
+        /// 必须写好才能往下走；主线程耗时登记 DEBT-FG15SYS01-05 交 FG15-SYS-02）。编辑模式的自检默认同步（没有每帧取结果的循环），<see cref="ForceBackgroundForTests"/> 打开后台路径。</summary>
+        public static bool InBackground(SaveReason reason)
+        {
+            switch (reason)
+            {
+                case SaveReason.NewCampaign:
+                case SaveReason.Manual:
+                case SaveReason.ExpeditionDepartConfirm:
+                    return false;
+            }
+            return InGame;
+        }
+
+        /// <summary>
+        /// FG15-SYS-01（FGR-SYS-001“快速存档 1 个”）：写当前战役槽（最新进度）并另存一份快速存档；游戏中走后台写盘。暂停菜单“快速存档”与快捷键共用。
+        /// </summary>
+        /// <summary>最近一次导出存档在主线程上“同步各系统 + 截缩略图”的耗时（性能证据读）。</summary>
+        public static string LastExportBreakdown { get; private set; }
+
+        public static SaveResult QuickSave()
+        {
+            if (!CampaignSession.HasActiveCampaign)
+            {
+                return new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("campaign.autosave.no_active_campaign_save"));
+            }
+            SaveResult r = SaveWithExport(CampaignSession.ActiveSlotIndex, SaveReason.QuickSave, SaveCopyKind.Quick, InBackground(SaveReason.QuickSave));
+            Feedback.FeedbackCues.Raise(r.Success ? Feedback.FeedbackCueId.SaveComplete : Feedback.FeedbackCueId.Failure,
+                r.Success ? GameText.Get("save.quick.done") : GameText.Format("save.quick.failed", r.Message ?? r.Outcome.ToString()));
+            return r;
+        }
+
+        /// <summary>FG15-SYS-01：有没有可读的快速存档（快速读档键 / 暂停菜单按钮据此可用）。</summary>
+        public static bool HasQuickSave() =>
+            CampaignSession.HasActiveCampaign && CampaignSaveService.GetSlotMetadata(CampaignSaveService.QuickSlot(CampaignSession.ActiveSlotIndex)).State == CampaignSlotState.Ready;
+
+        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason, SaveCopyKind copy, bool background)
         {
             CampaignState state = CampaignSession.Current;
             if (state == null)
@@ -68,10 +116,16 @@ namespace GameLogic.Campaign
                 TEngine.Log.Info($"[CampaignAutoSaveService] 结局结算画面开着，拒绝存档（{reason}）。");
                 return new SaveResult(SaveOutcome.SettlementOpen, Localization.GameText.Get("save.blocked_settlement"));
             }
+            var esw = System.Diagnostics.Stopwatch.StartNew();
             WorldSim.WorldSimulation.SyncAllForSave();
             MachineRegistry.ExportToCampaignState(state);
             Endgame.PurgeWaveService.BeforeSave(state); // FG13-END-03：记下这份存档读回后从第几波清洗开始前重试（失败页写明）
-            return CampaignSaveService.Save(slotIndex, state, reason);
+            double syncMs = esw.Elapsed.TotalMilliseconds;
+            SaveThumbnail.Shot thumb = SaveThumbnail.Capture(); // FG15-SYS-01：主线程只截 320×180 的像素，编码在写盘线程
+            LastExportBreakdown = $"sync+export {syncMs:F1} / thumbnail capture {esw.Elapsed.TotalMilliseconds - syncMs:F1} ms"; // 只给性能证据读
+            return background
+                ? CampaignSaveService.SaveInBackground(slotIndex, state, reason, thumb, copy)
+                : CampaignSaveService.Save(slotIndex, state, reason, thumb, copy);
         }
     }
 }

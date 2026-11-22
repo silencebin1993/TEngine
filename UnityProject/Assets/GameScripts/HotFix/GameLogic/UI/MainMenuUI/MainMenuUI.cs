@@ -211,10 +211,12 @@ namespace GameLogic
                 FindChildComponent<Text>("m_tf_SlotList/m_tf_Slot2/m_btn_Slot2Action/m_text_Slot2ActionLabel"),
             };
             _btnBack = FindChildComponent<Button>("m_tf_SlotList/m_btn_Back");
-            _slotActionButtons[0].onClick.AddListener(() => OnSlotActionClicked(0));
-            _slotActionButtons[1].onClick.AddListener(() => OnSlotActionClicked(1));
-            _slotActionButtons[2].onClick.AddListener(() => OnSlotActionClicked(2));
+            // FG15-SYS-01（FGR-SYS-001“手动存档槽不限数量（列表分页）”）：三张卡显示当前页的三个槽位，按钮点的是这一页上的槽位号。
+            _slotActionButtons[0].onClick.AddListener(() => OnSlotActionClicked(PageSlotAt(0)));
+            _slotActionButtons[1].onClick.AddListener(() => OnSlotActionClicked(PageSlotAt(1)));
+            _slotActionButtons[2].onClick.AddListener(() => OnSlotActionClicked(PageSlotAt(2)));
             _btnBack.onClick.AddListener(OnBackClicked);
+            BuildPagingAndManage();
 
             _tfConfirmOverwrite = FindChild("m_tf_ConfirmOverwrite");
             _textConfirmInfo = FindChildComponent<Text>("m_tf_ConfirmOverwrite/m_text_ConfirmInfo");
@@ -313,6 +315,7 @@ namespace GameLogic
             ApplyStaticTexts();
             AttachClickSounds();
             SetView(MenuView.Root);
+            SyncCloudSaves(); // FG15-SYS-01：每次打开主菜单对账一次（冲突窗口关掉不选 = 两份原样留着，下次打开主菜单再问）
         }
 
         /// <summary>FG14-SBX-02：在“新建”后面复制出“沙盒模式”（同属根菜单的布局组，排版由布局组负责；文字走文本键）。MainMenuSelfCheck 断言它存在、可点。</summary>
@@ -568,6 +571,19 @@ namespace GameLogic
                 actionLayout.flexibleWidth = 0;
                 actionLayout.preferredWidth = 180;
                 actionLayout.minWidth = 160;
+                if (_slotManageButtons != null)
+                {
+                    // FG15-SYS-01：右侧一列小按钮（管理 / 复制种子 / 复制分享短码），与操作按钮同一配色、矮一号。
+                    foreach (Button tool in new[] { _slotManageButtons[i], _slotCopySeedButtons[i], _slotCopyCodeButtons[i] })
+                    {
+                        StyleButton(tool, new Color(0.07f, 0.24f, 0.25f, 1f), accent, text, 34, false);
+                        Text toolLabel = tool.GetComponentInChildren<Text>(true);
+                        if (toolLabel != null)
+                        {
+                            toolLabel.fontSize = 14;
+                        }
+                    }
+                }
             }
         }
 
@@ -1031,17 +1047,265 @@ namespace GameLogic
             _textContinueReason.text = canContinue ? string.Empty : CampaignSlotText.ContinueUnavailable(CampaignSaveService.AnyDemoSave(metas));
         }
 
+        // ── FG15-SYS-01：存档列表分页 + 每张卡的“管理”（UI Toolkit 存档管理窗口）──────────────
+
+        private int _slotPage;
+        private int[] _pageSlots = { 0, 1, 2 };
+        private Button _btnPagePrev;
+        private Button _btnPageNext;
+        private Text _textPage;
+        private Button[] _slotManageButtons;
+        private Text[] _slotManageLabels;
+        /// <summary>FGR-SYS-007 / DEBT-FG0SAVE01-01：每张存档卡左侧的缩略图（贴图随刷新成对释放）。</summary>
+        private RawImage[] _slotThumbs;
+        private Texture2D[] _slotThumbTex;
+        /// <summary>DEBT-FG3GEN01-02：每张存档卡的“复制种子 / 复制分享短码”。</summary>
+        private Button[] _slotCopySeedButtons;
+        private Button[] _slotCopyCodeButtons;
+
+        private int PageSlotAt(int card) => card < _pageSlots.Length ? _pageSlots[card] : -1;
+
+        /// <summary>当前页的槽位号（自检读）。</summary>
+        internal int[] PageSlots => _pageSlots;
+
+        /// <summary>“上一页 / 第 x / y 页 / 下一页”一行放在“返回”上面；每张卡左侧加缩略图，右侧加一列“管理 / 复制种子 / 复制分享短码”（复制现有按钮，布局交给布局组；文字走文本键）。</summary>
+        private void BuildPagingAndManage()
+        {
+            Transform list = _btnBack.transform.parent;
+            var row = new GameObject("m_tf_PageRow", typeof(RectTransform), typeof(HorizontalLayoutGroup), typeof(LayoutElement));
+            row.transform.SetParent(list, false);
+            row.transform.SetSiblingIndex(_btnBack.transform.GetSiblingIndex());
+            var h = row.GetComponent<HorizontalLayoutGroup>();
+            h.childControlWidth = true;
+            h.childControlHeight = true;
+            h.childForceExpandWidth = true;
+            h.childForceExpandHeight = false; // 布局组强制撑满行高会无视按钮的 preferredHeight
+            h.spacing = 12f;
+            row.GetComponent<LayoutElement>().preferredHeight = 46f;
+            _btnPagePrev = CloneButton(_btnBack, row.transform, "m_btn_PagePrev", () => ChangePage(-1));
+            GameObject label = UnityEngine.Object.Instantiate(_slotActionLabels[0].gameObject, row.transform, false);
+            label.name = "m_text_Page";
+            _textPage = label.GetComponent<Text>();
+            _textPage.text = string.Empty;
+            _textPage.alignment = TextAnchor.MiddleCenter;
+            _btnPageNext = CloneButton(_btnBack, row.transform, "m_btn_PageNext", () => ChangePage(1));
+            int n = _slotActionButtons.Length;
+            _slotManageButtons = new Button[n];
+            _slotManageLabels = new Text[n];
+            _slotThumbs = new RawImage[n];
+            _slotThumbTex = new Texture2D[n];
+            _slotCopySeedButtons = new Button[n];
+            _slotCopyCodeButtons = new Button[n];
+            for (int i = 0; i < n; i++)
+            {
+                int card = i;
+                Transform cardRow = _slotActionButtons[i].transform.parent;
+                _slotThumbs[i] = BuildThumb(cardRow, i);
+                var tools = new GameObject($"m_tf_Slot{i}Tools", typeof(RectTransform), typeof(VerticalLayoutGroup), typeof(LayoutElement));
+                tools.transform.SetParent(cardRow, false);
+                var v = tools.GetComponent<VerticalLayoutGroup>();
+                v.childControlWidth = true;
+                v.childControlHeight = true;
+                v.childForceExpandWidth = true;
+                v.childForceExpandHeight = false;
+                v.childAlignment = TextAnchor.MiddleCenter;
+                v.spacing = 4f;
+                LayoutElement toolsLayout = tools.GetComponent<LayoutElement>();
+                toolsLayout.preferredWidth = 150f;
+                toolsLayout.minWidth = 130f;
+                toolsLayout.flexibleWidth = 0f;
+                _slotManageButtons[i] = CloneButton(_slotActionButtons[i], tools.transform, $"m_btn_Slot{i}Manage", () => OnManageClicked(PageSlotAt(card)));
+                _slotManageLabels[i] = _slotManageButtons[i].GetComponentInChildren<Text>(true);
+                _slotCopySeedButtons[i] = CloneButton(_slotActionButtons[i], tools.transform, $"m_btn_Slot{i}CopySeed", () => CopyFromCard(PageSlotAt(card), false));
+                _slotCopyCodeButtons[i] = CloneButton(_slotActionButtons[i], tools.transform, $"m_btn_Slot{i}CopyCode", () => CopyFromCard(PageSlotAt(card), true));
+            }
+        }
+
+        /// <summary>卡片最左侧 160×90 的缩略图（与存档缩略图同比例）：外框交给布局组，里面的图固定尺寸居中，行高变化也不变形。</summary>
+        private static RawImage BuildThumb(Transform cardRow, int i)
+        {
+            var box = new GameObject($"m_tf_Slot{i}Thumb", typeof(RectTransform), typeof(LayoutElement));
+            box.transform.SetParent(cardRow, false);
+            box.transform.SetSiblingIndex(0);
+            var size = new Vector2(SaveThumbnail.Width / 2f, SaveThumbnail.Height / 2f);
+            LayoutElement layout = box.GetComponent<LayoutElement>();
+            layout.preferredWidth = layout.minWidth = size.x;
+            layout.preferredHeight = layout.minHeight = size.y;
+            layout.flexibleWidth = 0f;
+            layout.flexibleHeight = 0f;
+            var img = new GameObject($"m_raw_Slot{i}Thumb", typeof(RectTransform), typeof(RawImage));
+            img.transform.SetParent(box.transform, false);
+            var rt = (RectTransform)img.transform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = size;
+            RawImage raw = img.GetComponent<RawImage>();
+            raw.raycastTarget = false;
+            raw.enabled = false;
+            return raw;
+        }
+
+        /// <summary>存档卡上的复制：种子 / 分享短码进剪贴板，页码那一格显示“已复制”（下次刷新列表时换回页码）。</summary>
+        private void CopyFromCard(int slotIndex, bool shareCode)
+        {
+            if (slotIndex < 0)
+            {
+                return;
+            }
+            CampaignSlotMetadata meta = CampaignSaveService.GetSlotMetadata(slotIndex);
+            string text = shareCode ? CampaignSlotText.ShareCode(meta) : CampaignSlotText.SeedText(meta);
+            if (meta.State == CampaignSlotState.Ready && CampaignSlotText.Copy(text) && _textPage != null)
+            {
+                _textPage.text = GameText.Format("save.manage.copied", text);
+            }
+        }
+
+        private void SetCardThumb(int card, byte[] jpg)
+        {
+            if (_slotThumbTex[card] != null)
+            {
+                ReleaseTexture(_slotThumbTex[card]);
+                _slotThumbTex[card] = null;
+            }
+            if (jpg != null)
+            {
+                var tex = new Texture2D(2, 2, TextureFormat.RGB24, false);
+                if (tex.LoadImage(jpg))
+                {
+                    _slotThumbTex[card] = tex;
+                }
+                else
+                {
+                    ReleaseTexture(tex);
+                }
+            }
+            _slotThumbs[card].texture = _slotThumbTex[card];
+            _slotThumbs[card].enabled = _slotThumbTex[card] != null;
+        }
+
+        private static void ReleaseTexture(Texture2D tex)
+        {
+            if (Application.isPlaying)
+            {
+                UnityEngine.Object.Destroy(tex);
+            }
+            else
+            {
+                UnityEngine.Object.DestroyImmediate(tex);
+            }
+        }
+
+        protected override void OnDestroy()
+        {
+            if (_slotThumbTex != null)
+            {
+                for (int i = 0; i < _slotThumbTex.Length; i++)
+                {
+                    if (_slotThumbTex[i] != null)
+                    {
+                        ReleaseTexture(_slotThumbTex[i]);
+                        _slotThumbTex[i] = null;
+                    }
+                }
+            }
+            base.OnDestroy();
+        }
+
+        private static Button CloneButton(Button template, Transform parent, string name, UnityEngine.Events.UnityAction onClick)
+        {
+            GameObject copy = UnityEngine.Object.Instantiate(template.gameObject, parent, false);
+            copy.name = name;
+            Button button = copy.GetComponent<Button>();
+            button.onClick = new Button.ButtonClickedEvent();
+            button.onClick.AddListener(onClick);
+            Text t = copy.GetComponentInChildren<Text>(true);
+            if (t != null)
+            {
+                t.text = string.Empty; // 文字由刷新按文本键写（不进静态文字表）
+            }
+            return button;
+        }
+
+        private void ChangePage(int delta)
+        {
+            _slotPage += delta;
+            RefreshSlotList();
+        }
+
+        private void OnManageClicked(int slotIndex)
+        {
+            if (slotIndex < 0)
+            {
+                return;
+            }
+            UI.Kit.SavePanelUIToolkit.OpenManage(slotIndex, LoadIntoSession, () =>
+            {
+                RefreshSlotList();
+                RefreshRootView();
+            });
+        }
+
+        /// <summary>打开主菜单时与云端对账（FGR-SYS-006）：有冲突就弹出冲突窗口，选完再刷新列表。没有云存档提供者时什么也不做。</summary>
+        private void SyncCloudSaves()
+        {
+            if (!CloudSaveService.Available)
+            {
+                return;
+            }
+            CloudSyncReport report = CloudSaveService.Sync();
+            if (report.Conflicts > 0)
+            {
+                UI.Kit.SavePanelUIToolkit.OpenConflicts(() =>
+                {
+                    RefreshRootView();
+                    RefreshSlotList();
+                });
+            }
+        }
+
         private void RefreshSlotList()
         {
-            for (int i = 0; i < CampaignSaveService.SlotCount; i++)
+            int[] listed = CampaignSaveService.ListedManualSlots();
+            int pages = CampaignSaveService.PageCount(listed);
+            _slotPage = Math.Max(0, Math.Min(_slotPage, pages - 1));
+            _pageSlots = CampaignSaveService.PageSlots(listed, _slotPage);
+            for (int i = 0; i < _slotActionButtons.Length; i++)
             {
-                CampaignSlotMetadata meta = CampaignSaveService.GetSlotMetadata(i);
-                RefreshSlotCard(i, meta);
+                bool shown = i < _pageSlots.Length;
+                _slotInfoTexts[i].transform.parent.gameObject.SetActive(shown);
+                if (shown)
+                {
+                    RefreshSlotCard(_pageSlots[i], CampaignSaveService.GetSlotMetadata(_pageSlots[i]));
+                }
+            }
+            if (_textPage != null)
+            {
+                _textPage.text = GameText.Format("save.page", _slotPage + 1, pages);
+                _btnPagePrev.interactable = _slotPage > 0;
+                _btnPageNext.interactable = _slotPage < pages - 1;
+                _btnPagePrev.GetComponentInChildren<Text>(true).text = GameText.Get("save.page.prev");
+                _btnPageNext.GetComponentInChildren<Text>(true).text = GameText.Get("save.page.next");
             }
         }
 
         private void RefreshSlotCard(int slotIndex, CampaignSlotMetadata meta)
         {
+            int card = Array.IndexOf(_pageSlots, slotIndex);
+            if (card < 0)
+            {
+                return; // 不在当前页
+            }
+            if (_slotManageButtons != null)
+            {
+                _slotManageLabels[card].text = GameText.Get("save.manage.open");
+                _slotManageButtons[card].interactable = meta.State != CampaignSlotState.Empty || CampaignSaveService.PreservedFiles(slotIndex).Length > 0;
+                bool ready = meta.State == CampaignSlotState.Ready;
+                SetCardThumb(card, ready ? meta.ThumbnailJpg : null);
+                _slotCopySeedButtons[card].interactable = ready;
+                _slotCopySeedButtons[card].GetComponentInChildren<Text>(true).text = GameText.Get("save.manage.copy_seed");
+                _slotCopyCodeButtons[card].interactable = ready && CampaignSlotText.ShareCode(meta) != null;
+                _slotCopyCodeButtons[card].GetComponentInChildren<Text>(true).text = GameText.Get("save.manage.copy_code");
+            }
+            slotIndex = card; // 下面按卡片位置写文字
             // ERD-UI-001 + FG0-SAVE-01（FGR-SYS-007 / FGR-SYS-003）：存档卡显示幕、难度、种子、阶段、时长、区域、
             // 保存时间；坏档显示稳定原因与备份状态；Demo 存档明确提示不迁移。文字全部经 CampaignSlotText（文本键）。
             _slotInfoTexts[slotIndex].text = CampaignSlotText.CardText(meta);
@@ -1064,7 +1328,8 @@ namespace GameLogic
 
         private void BeginNewInFreeSlot(bool sandbox)
         {
-            int emptySlot = FindFirstEmptySlot();
+            // FG15-SYS-01：手动槽不限——总有一个磁盘上没有任何同族文件的空槽，“新建”直接用它，不再出现“三槽都满时覆盖”。
+            int emptySlot = CampaignSaveService.NextFreeSlot();
             if (emptySlot >= 0)
             {
                 StartNewCampaign(emptySlot, sandbox);

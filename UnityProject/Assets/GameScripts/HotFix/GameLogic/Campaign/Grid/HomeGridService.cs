@@ -740,6 +740,12 @@ namespace GameLogic.Campaign.Grid
                     r.Add(GridReason.Of(GridBlockReason.MeltPit));
                     ok = false;
                 }
+                // FG15-SYS-01（DEBT-EMG2PERSIST01-01）：残骸 / 固态斑块上的空格同样不能建造（与熔坑同一条逐格校验，已有建筑占着的格放行）。
+                if (!ownCell && Emergence.SitePersistService.PersistAtCell(c.X, c.Y))
+                {
+                    r.Add(GridReason.Of(GridBlockReason.PersistItem));
+                    ok = false;
+                }
                 // FG13-FAC-01（FG09 第 8 章）：灭活焦土上的空格不能建造（内核段 42 的焦土格，与熔坑同一条逐格校验；已有建筑占着的格放行）。
                 if (!ownCell && Combat.CombatSite.InertHomeCell(c.X, c.Y))
                 {
@@ -913,6 +919,11 @@ namespace GameLogic.Campaign.Grid
             if (Emergence.SitePersistService.PitAtCell(cell.X, cell.Y))
             {
                 r.Add(GridReason.Of(GridBlockReason.MeltPit));
+                ok = false;
+            }
+            if (Emergence.SitePersistService.PersistAtCell(cell.X, cell.Y))
+            {
+                r.Add(GridReason.Of(GridBlockReason.PersistItem)); // FG15-SYS-01（DEBT-EMG2PERSIST01-01）：残骸 / 固态斑块格也不能铺传送带 / 管线
                 ok = false;
             }
             if (Combat.CombatSite.InertHomeCell(cell.X, cell.Y))

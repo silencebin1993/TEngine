@@ -2855,8 +2855,8 @@ namespace GameLogic.Campaign.Regions
         /// 一次 5 秒窗口，不是正确性问题，只是"停滞计时器归零"，见类注释"死亡/受控没有真实触发源"
         /// 同一段讨论。按 WorkOrderId 建索引；订单离开 Reserved（到达/取消/死亡/PathBlocked 触发）时
         /// 由 <see cref="Tick"/> 顶部统一清理，不会无界增长（上限＝当前赶路中的机器数，个位数）。</summary>
-        private static readonly Dictionary<string, (float lastDistance, float stallSeconds)> PathWatch =
-            new Dictionary<string, (float, float)>(4);
+        private static readonly Dictionary<string, (float lastDistance, float stallSeconds, bool alongRoute)> PathWatch =
+            new Dictionary<string, (float, float, bool)>(4);
 
         /// <summary>ERD-WRK-003 第二条看门狗：赶路阶段连续 <see cref="HomeValleyLayout.PathStallSeconds"/>
         /// 秒净位移不推进即判定 PathBlocked。停滞计时存在 <see cref="PathWatch"/>（瞬态），不占用
@@ -2885,15 +2885,17 @@ namespace GameLogic.Campaign.Regions
                 distance = along.Value;
             }
 
-            if (!PathWatch.TryGetValue(order.WorkOrderId, out (float lastDistance, float stallSeconds) watch))
+            // FG15-SYS-01（DEBT-FG7ENV05-05）：度量换了（等路线时是直线距离，拿到路线后是剩余路线长度，绕路时更长）就重新起算——
+            // 否则拿较长的路线长度去比等路线时的直线基线，机器在走也判“路径受阻”，退回等待 30 秒再派，长路程每 35 秒只走 5 秒；读档后看门狗清零又一路走完，存读档前后不一致。
+            if (!PathWatch.TryGetValue(order.WorkOrderId, out (float lastDistance, float stallSeconds, bool alongRoute) watch) || watch.alongRoute != along.HasValue)
             {
-                PathWatch[order.WorkOrderId] = (distance, 0f);
+                PathWatch[order.WorkOrderId] = (distance, 0f, along.HasValue);
                 return;
             }
 
             if (distance < watch.lastDistance - HomeValleyLayout.PathStallEpsilon)
             {
-                PathWatch[order.WorkOrderId] = (distance, 0f);
+                PathWatch[order.WorkOrderId] = (distance, 0f, along.HasValue);
                 return;
             }
 
@@ -2930,7 +2932,7 @@ namespace GameLogic.Campaign.Regions
             }
             else
             {
-                PathWatch[order.WorkOrderId] = (watch.lastDistance, stallSeconds);
+                PathWatch[order.WorkOrderId] = (watch.lastDistance, stallSeconds, watch.alongRoute);
             }
         }
 

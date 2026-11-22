@@ -430,9 +430,25 @@ namespace GameLogic.Stage
         /// 走与主菜单“读取”同一条恢复编排（<see cref="CampaignRestoreOrchestrator.Restore"/>）读回本局的存档槽，再按存档所在区域恢复世界。
         /// 读档失败时回到主菜单（存档列表里能看到原因、能改读备份）。返回 <see cref="RestoreResult"/>（失败原因供失败页提示）。
         /// </summary>
-        public static RestoreResult ReloadActiveSlot()
+        public static RestoreResult ReloadActiveSlot() => ReloadFrom(CampaignSession.ActiveSlotIndex);
+
+        /// <summary>
+        /// FG15-SYS-01（FGR-SYS-001）：快速读档——读回本战役槽的快速存档（没有可读的快速存档时只提示，不动世界）。走与失败页同一条收摊 + 恢复编排。
+        /// </summary>
+        public static RestoreResult QuickLoad()
         {
-            int slot = CampaignSession.ActiveSlotIndex;
+            int home = CampaignSession.ActiveSlotIndex;
+            if (home < 0 || !Campaign.CampaignAutoSaveService.HasQuickSave())
+            {
+                Campaign.Feedback.FeedbackCues.Raise(Campaign.Feedback.FeedbackCueId.Failure, GameLogic.Localization.GameText.Get("save.quick.none"));
+                return new RestoreResult(RestoreOutcome.Fail, RestoreStep.VersionAndChecksum, GameLogic.Localization.GameText.Get("save.quick.none"), null, false, null);
+            }
+            return ReloadFrom(Campaign.CampaignSaveService.QuickSlot(home));
+        }
+
+        /// <summary>收起世界并从 <paramref name="slot"/>（战役槽或它的副本）恢复；副本读回后活动槽位是所属战役槽（<see cref="CampaignSession.Set"/>）。</summary>
+        public static RestoreResult ReloadFrom(int slot)
+        {
             UI.Kit.UiKitRuntime.CloseWorldUi();
             WorldSimulation.UnloadAll();
             _director?.EndCurrent();
@@ -503,6 +519,10 @@ namespace GameLogic.Stage
             View.RoofView.Tick(AnyRegionActive && Campaign.CampaignSession.Current != null);
             // FG6-DEF-08（FGR-DEF-053）：突袭预警请求的自动存档在帧末执行（不在模拟步中间写盘）；核心被摧毁后不再存。
             Campaign.Defense.RaidResultService.FrameUpdate();
+            // FG15-SYS-01（FGR-SYS-002）：静默夜开始时的自动存档同样在帧末；后台写盘的结果（失败提示）每帧取一次；真实游玩时长按真实时间累计。
+            Campaign.Env.SilentNightService.FrameUpdate();
+            Campaign.CampaignSaveService.PumpBackgroundResults();
+            Campaign.CampaignSaveService.TickRealPlay(Time.unscaledDeltaTime, AnyRegionActive && Campaign.CampaignSession.Current != null, IsWorldPaused);
             // ER8-CONTENT-01：音量设置同步、音效预加载、字幕条过期；UI 缩放设置作用到界面。
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();

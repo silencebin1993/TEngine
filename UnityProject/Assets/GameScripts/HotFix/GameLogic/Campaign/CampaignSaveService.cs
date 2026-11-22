@@ -6,6 +6,8 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Diagnostics;
 using UnityEngine;
 using GameLogic.Localization;
 
@@ -147,8 +149,16 @@ namespace GameLogic.Campaign
         public int PostgameTopLevel;
         /// <summary>FG14-SBX-02：沙盒设置代码（<see cref="SandboxService.Code"/>；剧情档为空），存档卡显示“沙盒”及其设置。</summary>
         public string SandboxCode;
-        /// <summary>缩略图文件路径。尚未实现截图（DEBT-FG0SAVE01-01 → FG15-SYS-01），恒为 null。</summary>
-        public string ThumbnailPath;
+        /// <summary>FG15-SYS-01（DEBT-FG0SAVE01-01）：存档时截的缩略图（JPG 字节，嵌在存档头部；直接调 <see cref="CampaignSaveService.Save"/> 的自检档没有 = null）。</summary>
+        public byte[] ThumbnailJpg;
+        /// <summary>FG15-SYS-01（FG-GAP-019）：真实游玩时长（秒；0 = 旧档未记录）。<see cref="PlaySeconds"/> 是游戏时间。</summary>
+        public double RealPlaySeconds;
+        /// <summary>FG15-SYS-01（FGR-SYS-001）：这一份是战役槽本身（手动 / 最新）、轮换自动存档的第几份（1～3），还是快速存档。</summary>
+        public SaveSlotKind Kind;
+        /// <summary>所属战役槽（手动槽本身 = <see cref="SlotIndex"/>）。</summary>
+        public int HomeSlot;
+        /// <summary>列表只读了头部（卡片与长度校验通过，正文校验和留到读档）。false = 本次整份校验过。</summary>
+        public bool HeaderOnly;
         /// <summary>备份文件本身的状态（Empty = 没有备份）。</summary>
         public CampaignSlotState BackupState;
         public SaveFailureReason BackupReason;
@@ -170,7 +180,13 @@ namespace GameLogic.Campaign
         public string Checksum;
         public string WrittenAtUtc;
         public string ProductVersion;
+        /// <summary>FG15-SYS-01（DEBT-FG0SAVE01-08）：卡片 + 缩略图的校验和与正文长度——列表只读到正文之前的头部，用它们确认卡片完好、文件没被截断；
+        /// 正文的完整校验（<see cref="Checksum"/>）留到读档。旧文件没有这两项 → 列表照旧整份校验。字段顺序 = 文件里的顺序，正文必须最后。</summary>
+        public string CardChecksum;
+        public long PayloadLength;
         public string CardJson;
+        /// <summary>FG15-SYS-01（FGR-SYS-007 / DEBT-FG0SAVE01-01）：存档时的缩略图（JPG，Base64；没有 = 空）。</summary>
+        public string ThumbnailJpg;
         public string PayloadJson;
     }
 
@@ -195,6 +211,29 @@ namespace GameLogic.Campaign
         public int PostgameTopLevel;
         /// <summary>FG14-SBX-02：沙盒设置代码（<see cref="SandboxService.Code"/>；剧情档为空），存档卡显示“沙盒”及其设置。</summary>
         public string SandboxCode;
+        /// <summary>FG15-SYS-01（FG-GAP-019）：真实游玩时长（秒）；旧卡缺省 0 = 未记录。</summary>
+        public double RealPlaySeconds;
+    }
+
+    /// <summary>FG15-SYS-01（FGR-SYS-001）：一份存档文件属于哪一类。</summary>
+    public enum SaveSlotKind
+    {
+        /// <summary>战役槽（手动存档、数量不限）：每次存档都写它，读“继续”读的就是它。</summary>
+        Manual = 0,
+        /// <summary>该战役槽的 3 份轮换自动存档之一（写满后覆盖其中最旧的一份，只覆盖本槽自己的旧代）。</summary>
+        Auto = 1,
+        /// <summary>该战役槽的快速存档（1 份）。</summary>
+        Quick = 2,
+    }
+
+    /// <summary>FG15-SYS-01：一次存档顺带写哪种副本。</summary>
+    public enum SaveCopyKind
+    {
+        None = 0,
+        /// <summary>轮换自动存档（3 份轮换）。</summary>
+        Auto = 1,
+        /// <summary>快速存档（1 份）。</summary>
+        Quick = 2,
     }
 
     /// <summary>FG0-SAVE-01 自检专用：在存档流程的指定位置模拟"进程被强制结束"。</summary>
@@ -233,8 +272,33 @@ namespace GameLogic.Campaign
         public const int CurrentContentVersion = 2;
         public const string ProductVersion = "0.2";
 
-        /// <summary>Demo 骨架先给 3 个固定槽位；手动槽不限、自动存档轮换、快速存档属于 FG15-SYS-01（DEBT-FG0SAVE01-02）。</summary>
+        /// <summary>FG15-SYS-01（FGR-SYS-001）：手动槽（战役槽）不限数量，主菜单每页显示这么多张卡（列表分页）。槽位号 0、1、2 始终列出（空槽可新建）。</summary>
         public const int SlotCount = 3;
+        public const int PageSize = SlotCount;
+
+        /// <summary>FG15-SYS-01：每个战役槽的轮换自动存档份数（FGR-SYS-001“自动存档 3 个轮换”）。</summary>
+        public const int AutoRotationCount = 3;
+
+        /// <summary>副本（轮换自动存档 / 快速存档）的槽位号从这里起：<c>CopyBase + 战役槽 × 4 + k</c>（k = 0～2 自动存档，3 = 快速存档）。手动槽号小于它。</summary>
+        public const int CopyBase = 1000000;
+
+        public static bool IsCopy(int slotIndex) => slotIndex >= CopyBase;
+
+        /// <summary>副本所属的战役槽（手动槽本身原样返回）。</summary>
+        public static int HomeOf(int slotIndex) => slotIndex >= CopyBase ? (slotIndex - CopyBase) / 4 : slotIndex;
+
+        /// <summary>战役槽 <paramref name="home"/> 的第 k 份副本（0～2 轮换自动存档，3 快速存档）。</summary>
+        public static int CopySlot(int home, int k) => CopyBase + home * 4 + k;
+
+        public static int AutoSlot(int home, int k) => CopySlot(home, k);
+
+        public static int QuickSlot(int home) => CopySlot(home, AutoRotationCount);
+
+        public static SaveSlotKind KindOf(int slotIndex) =>
+            slotIndex < CopyBase ? SaveSlotKind.Manual : (slotIndex - CopyBase) % 4 < AutoRotationCount ? SaveSlotKind.Auto : SaveSlotKind.Quick;
+
+        /// <summary>轮换自动存档的序号（1～3；不是自动存档 = 0）。</summary>
+        public static int AutoNumber(int slotIndex) => KindOf(slotIndex) == SaveSlotKind.Auto ? (slotIndex - CopyBase) % 4 + 1 : 0;
 
         /// <summary>自检专用：把存档目录临时改到别处（用完置回 null）。负向旅程要制造损坏存档，绝不能碰玩家真实槽位。</summary>
         public static string SaveDirectoryOverrideForTests { get; set; }
@@ -245,18 +309,36 @@ namespace GameLogic.Campaign
         /// <summary>当前生效的存档格式版本（正式 = <see cref="CurrentSchemaVersion"/>；自检可换成假想的未来版本链）。</summary>
         public static int EffectiveSchemaVersion => CampaignSaveMigrations.Active.TargetVersion;
 
-        public static string SaveDirectory => SaveDirectoryOverrideForTests ?? Path.Combine(Application.persistentDataPath, "Campaigns");
+        private static string _persistentDir;
 
-        public static string SlotPath(int slotIndex) =>
-            Path.Combine(SaveDirectory, $"campaign_slot{slotIndex}.json");
+        /// <summary>存档目录（玩家配置目录下的 Campaigns，FGR-SYS-001）。第一次在主线程取值后缓存（后台写入线程只用准备阶段算好的路径）。</summary>
+        public static string SaveDirectory => SaveDirectoryOverrideForTests ?? (_persistentDir ??= Path.Combine(Application.persistentDataPath, "Campaigns"));
+
+        public static string SlotPath(int slotIndex) => SlotPathIn(SaveDirectory, slotIndex);
+
+        /// <summary>手动槽 <c>campaign_slotN.json</c>；副本 <c>campaign_slotN.autoK.json</c>（K = 1～3）/ <c>campaign_slotN.quick.json</c>。</summary>
+        public static string SlotPathIn(string dir, int slotIndex) => Path.Combine(dir, FileNameOf(slotIndex));
+
+        public static string FileNameOf(int slotIndex)
+        {
+            if (slotIndex < CopyBase)
+            {
+                return $"campaign_slot{slotIndex}.json";
+            }
+            int home = HomeOf(slotIndex);
+            int k = (slotIndex - CopyBase) % 4;
+            return k < AutoRotationCount ? $"campaign_slot{home}.auto{k + 1}.json" : $"campaign_slot{home}.quick.json";
+        }
 
         public static string TempPath(int slotIndex) => SlotPath(slotIndex) + ".tmp";
         public static string BakPath(int slotIndex) => SlotPath(slotIndex) + ".bak";
 
-        /// <summary>被保留的旧文件：<c>campaign_slotN.json.keep-&lt;标签&gt;-&lt;UTC 时间&gt;</c>。</summary>
-        public static string KeepPath(int slotIndex, string tag)
+        /// <summary>被保留的旧文件：<c>campaign_slotN.json.keep-&lt;标签&gt;-&lt;UTC 时间&gt;</c>（副本的保留文件也记在所属战役槽名下）。</summary>
+        public static string KeepPath(int slotIndex, string tag) => KeepPathIn(SaveDirectory, slotIndex, tag);
+
+        private static string KeepPathIn(string dir, int slotIndex, string tag)
         {
-            string basePath = SlotPath(slotIndex) + $".keep-{tag}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture)}";
+            string basePath = SlotPathIn(dir, HomeOf(slotIndex)) + $".keep-{tag}-{DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture)}";
             string path = basePath;
             for (int n = 2; File.Exists(path); n++)
             {
@@ -274,7 +356,7 @@ namespace GameLogic.Campaign
                 {
                     return Array.Empty<string>();
                 }
-                string prefix = Path.GetFileName(SlotPath(slotIndex)) + ".keep-";
+                string prefix = Path.GetFileName(SlotPath(HomeOf(slotIndex))) + ".keep-";
                 return Directory.GetFiles(SaveDirectory, prefix + "*").OrderBy(p => p, StringComparer.Ordinal).ToArray();
             }
             catch
@@ -283,15 +365,324 @@ namespace GameLogic.Campaign
             }
         }
 
+        private static readonly Regex SlotFileRegex = new Regex(@"^campaign_slot(\d+)\.", RegexOptions.CultureInvariant);
+
+        /// <summary>FG15-SYS-01：磁盘上出现过的全部战役槽号（主档、备份、副本、保留文件任一存在即算），升序。只列目录、不读文件。</summary>
+        public static int[] ExistingManualSlots()
+        {
+            WaitForPendingWrites();
+            var set = new SortedSet<int>();
+            try
+            {
+                if (Directory.Exists(SaveDirectory))
+                {
+                    foreach (string f in Directory.GetFiles(SaveDirectory, "campaign_slot*"))
+                    {
+                        Match m = SlotFileRegex.Match(Path.GetFileName(f));
+                        if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n >= 0 && n < CopyBase)
+                        {
+                            set.Add(n);
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 列存档目录失败：{e.Message}");
+            }
+            return set.ToArray();
+        }
+
+        /// <summary>新建战役用的空槽：磁盘上没有任何同族文件的最小槽号（手动槽不限，不再出现“三槽都满”）。</summary>
+        public static int NextFreeSlot()
+        {
+            int[] used = ExistingManualSlots();
+            int n = 0;
+            foreach (int u in used)
+            {
+                if (u != n)
+                {
+                    break;
+                }
+                n++;
+            }
+            return n;
+        }
+
+        /// <summary>主菜单分页列出的战役槽：0～2 始终在，加磁盘上的全部槽，末尾补一个空槽（总能新建）。</summary>
+        public static int[] ListedManualSlots()
+        {
+            var set = new SortedSet<int>(ExistingManualSlots());
+            for (int i = 0; i < SlotCount; i++)
+            {
+                set.Add(i);
+            }
+            set.Add(NextFreeSlot());
+            return set.ToArray();
+        }
+
+        public static int PageCount(int[] listed) => Math.Max(1, (listed.Length + PageSize - 1) / PageSize);
+
+        /// <summary>第 <paramref name="page"/> 页（从 0 开始，越界夹到首尾）的槽号，最多 <see cref="PageSize"/> 个。</summary>
+        public static int[] PageSlots(int[] listed, int page)
+        {
+            int p = Math.Max(0, Math.Min(page, PageCount(listed) - 1));
+            return listed.Skip(p * PageSize).Take(PageSize).ToArray();
+        }
+
+        /// <summary>战役槽的副本（3 份轮换自动存档 + 快速存档）元数据，只读头部。</summary>
+        public static CampaignSlotMetadata[] CopyMetadata(int home)
+        {
+            var list = new CampaignSlotMetadata[AutoRotationCount + 1];
+            for (int k = 0; k <= AutoRotationCount; k++)
+            {
+                list[k] = GetSlotMetadata(CopySlot(home, k));
+            }
+            return list;
+        }
+
+        // ── FG15-SYS-01（FG-GAP-013）：玩家亲手做的存档管理（永不自动删除；删除只由这里、且 UI 先二次确认）────────
+
+        /// <summary>删除一个战役槽：主档、备份、临时文件、轮换自动存档、快速存档；保留文件（keep-*）不动（另有“清理保留文件”）。返回删掉的文件数。</summary>
+        public static int DeleteSlot(int slotIndex)
+        {
+            WaitForPendingWrites();
+            int home = HomeOf(slotIndex);
+            var files = new List<string> { SlotPath(home), BakPath(home), TempPath(home) };
+            for (int k = 0; k <= AutoRotationCount; k++)
+            {
+                files.Add(SlotPath(CopySlot(home, k)));
+                files.Add(SlotPath(CopySlot(home, k)) + ".tmp");
+            }
+            int n = 0;
+            foreach (string f in files)
+            {
+                try
+                {
+                    if (File.Exists(f))
+                    {
+                        File.Delete(f);
+                        n++;
+                    }
+                }
+                catch (Exception e)
+                {
+                    TEngine.Log.Warning($"[CampaignSaveService] 删除 {Path.GetFileName(f)} 失败：{e.Message}");
+                }
+                ForgetStamps(f);
+            }
+            TEngine.Log.Info($"[CampaignSaveService] 玩家删除了槽位 {home}（{n} 个文件；保留文件未动）。");
+            return n;
+        }
+
+        /// <summary>删除一份副本（某份轮换自动存档或快速存档）。</summary>
+        public static bool DeleteCopy(int copySlot)
+        {
+            WaitForPendingWrites();
+            if (!IsCopy(copySlot))
+            {
+                return false;
+            }
+            string path = SlotPath(copySlot);
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    return false;
+                }
+                File.Delete(path);
+                ForgetStamps(path);
+                return true;
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 删除 {Path.GetFileName(path)} 失败：{e.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>清理一个战役槽的保留文件（keep-*）。返回删掉的个数。</summary>
+        public static int DeletePreservedFiles(int slotIndex)
+        {
+            int n = 0;
+            foreach (string f in PreservedFiles(slotIndex))
+            {
+                try
+                {
+                    File.Delete(f);
+                    n++;
+                }
+                catch (Exception e)
+                {
+                    TEngine.Log.Warning($"[CampaignSaveService] 删除保留文件 {Path.GetFileName(f)} 失败：{e.Message}");
+                }
+            }
+            return n;
+        }
+
+        /// <summary>“打开存档目录”的实际动作（自检替换成记录路径）。</summary>
+        public static Action<string> OpenDirectoryHandler = dir => Application.OpenURL("file:///" + dir.Replace('\\', '/'));
+
+        public static string OpenSaveDirectory()
+        {
+            string dir = SaveDirectory;
+            try
+            {
+                Directory.CreateDirectory(dir);
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 存档目录不可用：{e.Message}");
+            }
+            OpenDirectoryHandler?.Invoke(dir);
+            return dir;
+        }
+
+        /// <summary>
+        /// FG15-SYS-01：从副本（某份自动存档 / 快速存档）读回的战役要接着写回它的战役槽——第一次存档前，把战役槽里更新的那份主档另存为
+        /// keep-superseded（永不自动删除：读了旧的自动存档，后来的进度也不会被两次轮换挤掉）。主档与副本是同一份时不另存。由 <see cref="CampaignSession.Set"/> 调用。
+        /// </summary>
+        public static string PreserveHomeBeforeBranch(int copySlot)
+        {
+            if (!IsCopy(copySlot))
+            {
+                return null;
+            }
+            WaitForPendingWrites();
+            int home = HomeOf(copySlot);
+            string main = SlotPath(home);
+            try
+            {
+                if (!File.Exists(main))
+                {
+                    return null;
+                }
+                FileProbe m = Probe(main, headerOnly: true);
+                FileProbe c = Probe(SlotPath(copySlot), headerOnly: true);
+                if (m.Envelope != null && c.Envelope != null && m.Envelope.Checksum == c.Envelope.Checksum)
+                {
+                    return null;
+                }
+                string keep = KeepPath(home, "superseded");
+                File.Copy(main, keep, overwrite: false);
+                return keep;
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 读副本前另存战役槽 {home} 主档失败：{e.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>FG15-SYS-01（FG-GAP-019）：真实游玩时长——世界运行且未暂停时按真实时间累计（倍速不影响）。由 GameRoot.OnUpdate 调用，O(1)。</summary>
+        public static void TickRealPlay(float realDt, bool worldRunning, bool paused)
+        {
+            CampaignState s = CampaignSession.Current;
+            if (s == null || !worldRunning || paused || !(realDt > 0f))
+            {
+                return;
+            }
+            s.RealPlaySeconds += Math.Min(realDt, 1f); // 单帧卡顿（加载、断点）最多记 1 秒
+        }
+
         // ── 写 ───────────────────────────────────────────────────────────
 
-        /// <summary>整份覆盖写入（不是追加）。落盘前调用 <see cref="CampaignState.NormalizeForSave"/>
-        /// 保证稳定 ID 排序。永不抛出（自检注入的模拟崩溃除外）；失败原因见返回值。</summary>
-        public static SaveResult Save(int slotIndex, CampaignState state, SaveReason reason)
+        /// <summary>整份覆盖写入（不是追加），同步完成。落盘前调用 <see cref="CampaignState.NormalizeForSave"/>
+        /// 保证稳定 ID 排序。永不抛出（自检注入的模拟崩溃除外）；失败原因见返回值。排在前面的后台写入先落盘（同一文件不并发写）。</summary>
+        public static SaveResult Save(int slotIndex, CampaignState state, SaveReason reason) =>
+            Save(slotIndex, state, reason, null, SaveCopyKind.None);
+
+        /// <summary>FG15-SYS-01：同步存档，可带缩略图与“顺带写一份轮换自动存档 / 快速存档”。</summary>
+        public static SaveResult Save(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy)
         {
+            var sw = Stopwatch.StartNew();
+            WaitForPendingWrites();
+            double waitMs = sw.Elapsed.TotalMilliseconds;
+            if (!TryPrepare(slotIndex, state, reason, thumb, copy, out PreparedSave p, out SaveResult fail))
+            {
+                return fail;
+            }
+            double prepMs = sw.Elapsed.TotalMilliseconds - waitMs;
+            SaveResult r = Commit(p);
+            LastSyncSaveBreakdown = $"wait {waitMs:F1} / prepare {prepMs:F1} ({LastPrepareBreakdown}) / commit {sw.Elapsed.TotalMilliseconds - waitMs - prepMs:F1} ms ({LastCommitBreakdown})"; // 只给自检与性能证据读
+            return r;
+        }
+
+        /// <summary>最近一次同步存档 / 落盘各段耗时（性能证据读）。</summary>
+        public static string LastSyncSaveBreakdown { get; private set; }
+        public static string LastCommitBreakdown { get; private set; }
+        /// <summary>最近一次读档里“探测 + 整份校验”的耗时（性能证据读）。</summary>
+        public static double LastLoadProbeMs { get; private set; }
+
+        /// <summary>
+        /// FG15-SYS-01（FGR-SYS-002“主线程阻塞 ≤ 100 毫秒，其余在后台完成”）：主线程只做快照（区块差异、稳定排序、JSON 序列化），
+        /// 校验和、缩略图编码、写临时文件、另存保留、原子替换、轮换副本都在后台线程完成。返回值只反映主线程那一段（被拒 / 序列化失败）；
+        /// 写盘结果在 <see cref="PumpBackgroundResults"/>（每帧）里发失败提示。同一槽位排队中、还没开始写的旧请求被新快照取代（新快照含旧的全部进度）；
+        /// 读档、列表、恢复备份、删除、同步写入都会先等后台写完（读写互斥）。
+        /// </summary>
+        public static SaveResult SaveInBackground(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy)
+        {
+            var sw = Stopwatch.StartNew();
+            if (!TryPrepare(slotIndex, state, reason, thumb, copy, out PreparedSave p, out SaveResult fail))
+            {
+                return fail;
+            }
+            Enqueue(p);
+            LastPrepareMs = sw.Elapsed.TotalMilliseconds;
+            return new SaveResult(SaveOutcome.Success, null);
+        }
+
+        /// <summary>最近一次存档主线程快照各段耗时（FGT-SYS-003 自检与性能证据读）。</summary>
+        public static string LastPrepareBreakdown { get; private set; }
+
+        /// <summary>最近一次后台存档在主线程上花的毫秒数（FGT-SYS-003 自检读）。</summary>
+        public static double LastPrepareMs { get; private set; }
+
+        /// <summary>最近一次后台写盘的结果（主线程 <see cref="PumpBackgroundResults"/> 取走后写入）。</summary>
+        public static SaveResult LastBackgroundResult { get; private set; } = SaveResult.Ok;
+        public static double LastBackgroundCommitMs { get; private set; }
+        public static int LastBackgroundThreadId { get; private set; }
+        public static int BackgroundCommits { get; private set; }
+        public static int BackgroundFailures { get; private set; }
+        /// <summary>排队时被同一槽位更新的快照取代的请求数（自检读）。</summary>
+        public static int CoalescedWrites { get; private set; }
+
+        /// <summary>自检专用：后台写入开始前先停这么多毫秒（制造“写入进行中”的窗口，验证排队与读档互斥）。</summary>
+        public static int BackgroundDelayMsForTests { get; set; }
+
+        private sealed class PreparedSave
+        {
+            public int Slot;
+            public SaveReason Reason;
+            public int Schema;
+            public string Dir;
+            public string CampaignId;
+            public string PayloadJson;
+            public string CardJson;
+            public SaveThumbnail.Shot Thumb;
+            public SaveCopyKind Copy;
+            public SaveCrashPoint Crash;
+            public SaveResult Result;
+            public double CommitMs;
+            public int ThreadId;
+        }
+
+        private static bool _quitHooked;
+
+        private static bool TryPrepare(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy,
+            out PreparedSave prepared, out SaveResult fail)
+        {
+            prepared = null;
+            fail = default;
             if (state == null)
             {
-                return new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("save.svc.campaignstate_is_empty_nothing"));
+                fail = new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("save.svc.campaignstate_is_empty_nothing"));
+                return false;
+            }
+            if (!_quitHooked)
+            {
+                _quitHooked = true;
+                Application.quitting += WaitForPendingWrites; // 退出游戏前把后台写入落完（不丢最后一次存档）
             }
 
             int schema = EffectiveSchemaVersion;
@@ -299,14 +690,13 @@ namespace GameLogic.Campaign
             state.SchemaVersion = schema;
             state.ContentVersion = CurrentContentVersion;
             // FG0-ARCH-05（FGR-GEN-060）：把各表面被修改过的区块写进区块差异（只存修改；未修改的读档时按种子重新生成）。
+            var phase = Stopwatch.StartNew();
             WorldGen.WorldGenService.CaptureDiffs(state);
+            double diffMs = phase.Elapsed.TotalMilliseconds;
             state.NormalizeForSave();
+            double sortMs = phase.Elapsed.TotalMilliseconds - diffMs;
 
             string dir = SaveDirectory;
-            string mainPath = SlotPath(slotIndex);
-            string tempPath = TempPath(slotIndex);
-            string bakPath = BakPath(slotIndex);
-
             try
             {
                 Directory.CreateDirectory(dir);
@@ -314,47 +704,84 @@ namespace GameLogic.Campaign
             catch (Exception e)
             {
                 TEngine.Log.Warning($"[CampaignSaveService] 存档目录不可写，槽位 {slotIndex} 未保存：{e.Message}");
-                return new SaveResult(SaveOutcome.DirectoryNotWritable, e.Message);
+                fail = new SaveResult(SaveOutcome.DirectoryNotWritable, e.Message);
+                return false;
             }
 
             string payloadJson;
             string cardJson;
             try
             {
+                double t0 = phase.Elapsed.TotalMilliseconds;
                 payloadJson = JsonUtility.ToJson(state);
+                double t1 = phase.Elapsed.TotalMilliseconds;
                 cardJson = JsonUtility.ToJson(BuildCard(state));
+                LastPrepareBreakdown = $"diffs {diffMs:F1} / sort {sortMs:F1} / payload json {t1 - t0:F1} / card {phase.Elapsed.TotalMilliseconds - t1:F1} ms"; // 只给自检与性能证据读
             }
             catch (Exception e)
             {
                 TEngine.Log.Warning($"[CampaignSaveService] CampaignState 序列化失败，槽位 {slotIndex} 未保存：{e.Message}");
+                fail = new SaveResult(SaveOutcome.TempWriteFailed, e.Message);
+                return false;
+            }
+            prepared = new PreparedSave
+            {
+                Slot = slotIndex,
+                Reason = reason,
+                Schema = schema,
+                Dir = dir,
+                CampaignId = state.CampaignId,
+                PayloadJson = payloadJson,
+                CardJson = cardJson,
+                Thumb = thumb,
+                Copy = IsCopy(slotIndex) ? SaveCopyKind.None : copy,
+                Crash = CrashPointForTests,
+            };
+            return true;
+        }
+
+        /// <summary>落盘（任意线程；只用 System.IO 与按 <see cref="PreparedSave.Dir"/> 算的路径，不碰 Unity 主线程 API）。</summary>
+        private static SaveResult Commit(PreparedSave p)
+        {
+            int slotIndex = p.Slot;
+            int schema = p.Schema;
+            string mainPath = SlotPathIn(p.Dir, slotIndex);
+            string tempPath = mainPath + ".tmp";
+            string bakPath = mainPath + ".bak";
+
+            var cw = Stopwatch.StartNew();
+            double thumbMs = 0;
+            byte[] bytes;
+            try
+            {
+                string thumb = p.Thumb?.EncodeBase64();
+                thumbMs = cw.Elapsed.TotalMilliseconds;
+                var envelope = new CampaignSaveEnvelope
+                {
+                    SchemaVersion = schema,
+                    ContentVersion = CurrentContentVersion,
+                    Checksum = ComputeChecksum(p.PayloadJson, p.CardJson),
+                    WrittenAtUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                    ProductVersion = ProductVersion,
+                    CardChecksum = ComputeChecksum(p.CardJson, thumb),
+                    PayloadLength = p.PayloadJson.Length,
+                    CardJson = p.CardJson,
+                    ThumbnailJpg = thumb,
+                    PayloadJson = p.PayloadJson,
+                };
+                bytes = new UTF8Encoding(false).GetBytes(JsonUtility.ToJson(envelope));
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 存档封装失败，槽位 {slotIndex} 未保存：{e.Message}");
                 return new SaveResult(SaveOutcome.TempWriteFailed, e.Message);
             }
 
-            var envelope = new CampaignSaveEnvelope
-            {
-                SchemaVersion = schema,
-                ContentVersion = CurrentContentVersion,
-                Checksum = ComputeChecksum(payloadJson, cardJson),
-                WrittenAtUtc = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-                ProductVersion = ProductVersion,
-                CardJson = cardJson,
-                PayloadJson = payloadJson,
-            };
-            byte[] bytes = new UTF8Encoding(false).GetBytes(JsonUtility.ToJson(envelope));
-
             try
             {
-                using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None,
-                           4096, FileOptions.WriteThrough))
+                if (!SaveFileCommit.WriteTemp(tempPath, bytes, p.Crash == SaveCrashPoint.MidTempWrite))
                 {
-                    if (CrashPointForTests == SaveCrashPoint.MidTempWrite)
-                    {
-                        fs.Write(bytes, 0, bytes.Length / 2);
-                        fs.Flush(true);
-                        throw new SimulatedSaveCrashException(SaveCrashPoint.MidTempWrite);
-                    }
-                    fs.Write(bytes, 0, bytes.Length);
-                    fs.Flush(true);
+                    throw new SimulatedSaveCrashException(SaveCrashPoint.MidTempWrite);
                 }
             }
             catch (Exception e) when (!(e is SimulatedSaveCrashException))
@@ -364,19 +791,21 @@ namespace GameLogic.Campaign
                 return new SaveResult(SaveOutcome.TempWriteFailed, e.Message);
             }
 
-            if (CrashPointForTests == SaveCrashPoint.AfterTempWritten)
+            if (p.Crash == SaveCrashPoint.AfterTempWritten)
             {
                 throw new SimulatedSaveCrashException(SaveCrashPoint.AfterTempWritten);
             }
+            double tempMs = cw.Elapsed.TotalMilliseconds;
 
             // 永不自动删除存档（FGR-SYS-003）。File.Replace 会把旧主档转存为 bak、同时覆盖掉原来的 bak，所以写入前
             // 先把"会被覆盖、又不是本战役上一版"的文件另存：
             // - 新建战役（玩家已在确认框里同意占用此槽）：旧主档复制保留，旧备份整体挪成 keep-bak（主档存不存在都一样——
-            //   主档丢失、只剩备份的槽位同样如此），替换时不再生成 bak：新战役从干净的槽位开始，bak 只会是本战役的上一版。
+            //   主档丢失、只剩备份的槽位同样如此），替换时不再生成 bak：新战役从干净的槽位开始，bak 只会是本战役的上一版；
+            //   FG15-SYS-01：这个槽位旧战役的轮换自动存档 / 快速存档也挪成 keep-auto / keep-quick（新战役的轮换不会覆盖别的战役的档）。
             // - 常规存档（自动存档等）：旧主档不是当前格式（Demo / 其他版本 / 头部读不出）→ 先另存一份；
             //   旧主档是当前格式但内容已坏（被外部改坏 / 截断）→ 整体挪成 keep-corrupt，完好的 bak 原样留着不被挤掉；
             //   现有 bak 不属于本战役（不含本战役 ID）→ 先另存为 keep-bak。
-            bool newCampaign = reason == SaveReason.NewCampaign;
+            bool newCampaign = p.Reason == SaveReason.NewCampaign;
             string preserved = null;
             try
             {
@@ -384,12 +813,23 @@ namespace GameLogic.Campaign
                 {
                     if (File.Exists(mainPath))
                     {
-                        preserved = KeepPath(slotIndex, PreserveTagFor(mainPath, schema) ?? "replaced");
+                        preserved = KeepPathIn(p.Dir, slotIndex, PreserveTagFor(mainPath, schema) ?? "replaced");
                         File.Copy(mainPath, preserved, overwrite: false);
                     }
                     if (File.Exists(bakPath))
                     {
-                        File.Move(bakPath, KeepPath(slotIndex, "bak"));
+                        File.Move(bakPath, KeepPathIn(p.Dir, slotIndex, "bak"));
+                    }
+                    if (!IsCopy(slotIndex))
+                    {
+                        for (int k = 0; k <= AutoRotationCount; k++)
+                        {
+                            string copyPath = SlotPathIn(p.Dir, CopySlot(slotIndex, k));
+                            if (File.Exists(copyPath))
+                            {
+                                File.Move(copyPath, KeepPathIn(p.Dir, slotIndex, k < AutoRotationCount ? "auto" : "quick"));
+                            }
+                        }
                     }
                 }
                 else
@@ -399,18 +839,18 @@ namespace GameLogic.Campaign
                         string tag = PreserveTagFor(mainPath, schema);
                         if (tag != null)
                         {
-                            preserved = KeepPath(slotIndex, tag);
+                            preserved = KeepPathIn(p.Dir, slotIndex, tag);
                             File.Copy(mainPath, preserved, overwrite: false);
                         }
                         else if (File.Exists(bakPath) && !IsKnownGoodMain(mainPath) && Probe(mainPath).Kind != CampaignSlotState.Ready)
                         {
-                            preserved = KeepPath(slotIndex, "corrupt");
+                            preserved = KeepPathIn(p.Dir, slotIndex, "corrupt");
                             File.Move(mainPath, preserved);
                         }
                     }
-                    if (File.Exists(mainPath) && File.Exists(bakPath) && !BakBelongsTo(bakPath, state.CampaignId))
+                    if (File.Exists(mainPath) && File.Exists(bakPath) && !BakBelongsTo(bakPath, p.CampaignId))
                     {
-                        File.Copy(bakPath, KeepPath(slotIndex, "bak"), overwrite: false);
+                        File.Copy(bakPath, KeepPathIn(p.Dir, slotIndex, "bak"), overwrite: false);
                     }
                 }
             }
@@ -423,15 +863,8 @@ namespace GameLogic.Campaign
 
             try
             {
-                if (File.Exists(mainPath))
-                {
-                    // 单次系统调用：temp 覆盖主档；常规存档时旧主档原子转存为 bak，新建战役时旧主档已另存、不生成 bak。
-                    File.Replace(tempPath, mainPath, newCampaign ? null : bakPath, ignoreMetadataErrors: true);
-                }
-                else
-                {
-                    File.Move(tempPath, mainPath);
-                }
+                // 单次系统调用：temp 覆盖主档；常规存档时旧主档原子转存为 bak，新建战役时旧主档已另存、不生成 bak。
+                SaveFileCommit.Replace(tempPath, mainPath, newCampaign ? null : bakPath);
             }
             catch (Exception e)
             {
@@ -440,8 +873,168 @@ namespace GameLogic.Campaign
                 return new SaveResult(SaveOutcome.ReplaceFailed, e.Message, preserved);
             }
 
+            double replaceMs = cw.Elapsed.TotalMilliseconds;
             MarkKnownGoodMain(mainPath);
+            if (p.Copy != SaveCopyKind.None)
+            {
+                WriteCopy(p, bytes);
+            }
+            LastCommitBreakdown = $"thumb {thumbMs:F1} / envelope+write temp {tempMs - thumbMs:F1} / preserve+replace {replaceMs - tempMs:F1} / copy {cw.Elapsed.TotalMilliseconds - replaceMs:F1}";
             return new SaveResult(SaveOutcome.Success, null, preserved);
+        }
+
+        /// <summary>
+        /// FG15-SYS-01（FGR-SYS-001）：顺带写一份轮换自动存档（3 份里缺的那份，都在时覆盖本槽自己最旧的一份）或快速存档（1 份）。
+        /// 只覆盖本槽自己的旧代：要写的位置上是别的战役的档（不含本战役 ID）→ 先挪成 keep 文件。写副本失败不影响主档（已落盘），只记日志。
+        /// </summary>
+        private static void WriteCopy(PreparedSave p, byte[] bytes)
+        {
+            int home = p.Slot;
+            int target = p.Copy == SaveCopyKind.Quick ? QuickSlot(home) : OldestAutoSlot(p.Dir, home);
+            string path = SlotPathIn(p.Dir, target);
+            try
+            {
+                if (File.Exists(path) && !BakBelongsTo(path, p.CampaignId))
+                {
+                    File.Move(path, KeepPathIn(p.Dir, home, p.Copy == SaveCopyKind.Quick ? "quick" : "auto"));
+                }
+                SaveFileCommit.WriteAtomic(path, bytes, keepBackup: false);
+                LastCopySlot = target;
+            }
+            catch (Exception e)
+            {
+                TEngine.Log.Warning($"[CampaignSaveService] 槽位 {home} 的副本（{p.Copy}）写入失败（主档已保存）：{e.Message}");
+                TryDeleteQuiet(path + ".tmp");
+            }
+        }
+
+        /// <summary>最近一次写的副本槽位号（自检读）。</summary>
+        public static int LastCopySlot { get; private set; } = -1;
+
+        /// <summary>3 份轮换自动存档里该写的那份：先补缺，都在时取存档时间（头部）最早的一份。</summary>
+        private static int OldestAutoSlot(string dir, int home)
+        {
+            int best = -1;
+            DateTime bestTime = DateTime.MaxValue;
+            for (int k = 0; k < AutoRotationCount; k++)
+            {
+                int slot = CopySlot(home, k);
+                string path = SlotPathIn(dir, slot);
+                if (!File.Exists(path))
+                {
+                    return slot;
+                }
+                FileProbe head = Probe(path, headerOnly: true);
+                DateTime t = head.Kind == CampaignSlotState.Ready && DateTime.TryParse(head.WrittenAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out DateTime w)
+                    ? w : DateTime.MinValue; // 读不出的那份最先被轮换掉（它本来就读不了）
+                if (t < bestTime)
+                {
+                    bestTime = t;
+                    best = slot;
+                }
+            }
+            return best;
+        }
+
+        // ── 后台写入队列（单工作线程，按入队顺序）──────────────────────────
+
+        private static readonly object QueueLock = new object();
+        private static readonly List<PreparedSave> WriteQueue = new List<PreparedSave>();
+        private static readonly System.Collections.Concurrent.ConcurrentQueue<PreparedSave> Finished = new System.Collections.Concurrent.ConcurrentQueue<PreparedSave>();
+        private static readonly ManualResetEventSlim WritesIdle = new ManualResetEventSlim(true);
+        private static bool _workerRunning;
+
+        /// <summary>还没写完的后台存档数（排队 + 正在写）。</summary>
+        public static int PendingWrites
+        {
+            get
+            {
+                lock (QueueLock)
+                {
+                    return WriteQueue.Count + (_workerRunning ? 1 : 0);
+                }
+            }
+        }
+
+        private static void Enqueue(PreparedSave p)
+        {
+            lock (QueueLock)
+            {
+                int i = WriteQueue.FindIndex(q => q.Slot == p.Slot && q.Copy == p.Copy && q.Reason != SaveReason.NewCampaign);
+                if (i >= 0)
+                {
+                    // 旧的那份删掉、新快照排到队尾：不同副本类型交错排队时（自动 1、快速、自动 2），战役槽主档最后停在最新的一份
+                    WriteQueue.RemoveAt(i);
+                    CoalescedWrites++;
+                }
+                WriteQueue.Add(p);
+                WritesIdle.Reset();
+                if (!_workerRunning)
+                {
+                    _workerRunning = true;
+                    ThreadPool.QueueUserWorkItem(_ => WriteWorker());
+                }
+            }
+        }
+
+        private static void WriteWorker()
+        {
+            while (true)
+            {
+                PreparedSave p;
+                lock (QueueLock)
+                {
+                    if (WriteQueue.Count == 0)
+                    {
+                        _workerRunning = false;
+                        WritesIdle.Set();
+                        return;
+                    }
+                    p = WriteQueue[0];
+                    WriteQueue.RemoveAt(0);
+                }
+                if (BackgroundDelayMsForTests > 0)
+                {
+                    Thread.Sleep(BackgroundDelayMsForTests);
+                }
+                var sw = Stopwatch.StartNew();
+                try
+                {
+                    p.Result = Commit(p);
+                }
+                catch (Exception e)
+                {
+                    p.Result = new SaveResult(SaveOutcome.TempWriteFailed, e.Message);
+                }
+                p.CommitMs = sw.Elapsed.TotalMilliseconds;
+                p.ThreadId = Thread.CurrentThread.ManagedThreadId;
+                Finished.Enqueue(p);
+            }
+        }
+
+        /// <summary>等后台存档全部落盘（读档、列表、恢复备份、删除、同步写入、退出游戏前调用）。</summary>
+        public static void WaitForPendingWrites()
+        {
+            WritesIdle.Wait();
+        }
+
+        /// <summary>主线程每帧取走后台写盘结果：失败发一条提示（含原因），成功只计数。由 GameRoot.OnUpdate 调用。O(本帧完成数)。</summary>
+        public static void PumpBackgroundResults()
+        {
+            while (Finished.TryDequeue(out PreparedSave p))
+            {
+                LastBackgroundResult = p.Result;
+                LastBackgroundCommitMs = p.CommitMs;
+                LastBackgroundThreadId = p.ThreadId;
+                if (p.Result.Success)
+                {
+                    BackgroundCommits++;
+                    continue;
+                }
+                BackgroundFailures++;
+                TEngine.Log.Warning($"[CampaignSaveService] 后台存档写盘失败（槽位 {p.Slot}，{p.Reason}）：{p.Result.Outcome} {p.Result.Message}");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, GameText.Format("save.background_failed", p.Result.Message ?? p.Result.Outcome.ToString()));
+            }
         }
 
         // ── 文件戳：本进程写出 / 完整读过的主档，与读档失败记录 ──────────────────
@@ -486,53 +1079,87 @@ namespace GameLogic.Campaign
             }
         }
 
+        /// <summary>FG15-SYS-01：文件戳在后台写入线程与主线程都会读写，统一加这把锁。</summary>
+        private static readonly object StampLock = new object();
+
         private static void MarkKnownGoodMain(string mainPath)
         {
-            LoadFailures.Remove(mainPath);
-            if (TryStamp(mainPath, out FileStamp stamp))
+            bool ok = TryStamp(mainPath, out FileStamp stamp);
+            lock (StampLock)
             {
-                KnownGoodMains[mainPath] = stamp;
-            }
-            else
-            {
-                KnownGoodMains.Remove(mainPath);
+                LoadFailures.Remove(mainPath);
+                if (ok)
+                {
+                    KnownGoodMains[mainPath] = stamp;
+                }
+                else
+                {
+                    KnownGoodMains.Remove(mainPath);
+                }
             }
         }
 
-        private static bool IsKnownGoodMain(string mainPath) =>
-            KnownGoodMains.TryGetValue(mainPath, out FileStamp known) && TryStamp(mainPath, out FileStamp now)
-            && known.Length == now.Length && known.WriteUtc == now.WriteUtc;
+        private static bool IsKnownGoodMain(string mainPath)
+        {
+            FileStamp known;
+            lock (StampLock)
+            {
+                if (!KnownGoodMains.TryGetValue(mainPath, out known))
+                {
+                    return false;
+                }
+            }
+            return TryStamp(mainPath, out FileStamp now) && known.Length == now.Length && known.WriteUtc == now.WriteUtc;
+        }
+
+        /// <summary>文件被删除 / 被外部替换后，丢掉它的文件戳与读档失败记录。</summary>
+        private static void ForgetStamps(string path)
+        {
+            lock (StampLock)
+            {
+                KnownGoodMains.Remove(path);
+                LoadFailures.Remove(path);
+            }
+        }
 
         /// <summary>记录"主档头部可读、读档却失败"（升级器失败、正文坏、恢复编排的结构校验失败）。之后这个槽位在列表里显示为
         /// 损坏并完整校验备份，不再参与"继续"，存档卡按钮走"读取备份"而不是反复读同一份坏档。</summary>
         public static void RecordLoadFailure(int slotIndex, SaveFailureReason reason, int schemaVersion)
         {
             string mainPath = SlotPath(slotIndex);
-            KnownGoodMains.Remove(mainPath);
-            if (!TryStamp(mainPath, out FileStamp stamp))
+            bool ok = TryStamp(mainPath, out FileStamp stamp);
+            lock (StampLock)
             {
-                LoadFailures.Remove(mainPath);
-                return;
+                KnownGoodMains.Remove(mainPath);
+                if (!ok)
+                {
+                    LoadFailures.Remove(mainPath);
+                    return;
+                }
+                LoadFailures[mainPath] = new LoadFailureRecord
+                {
+                    Stamp = stamp,
+                    Reason = reason == SaveFailureReason.None ? SaveFailureReason.Payload : reason,
+                    SchemaVersion = schemaVersion,
+                };
             }
-            LoadFailures[mainPath] = new LoadFailureRecord
-            {
-                Stamp = stamp,
-                Reason = reason == SaveFailureReason.None ? SaveFailureReason.Payload : reason,
-                SchemaVersion = schemaVersion,
-            };
         }
 
         private static LoadFailureRecord FindLoadFailure(string mainPath)
         {
-            if (!LoadFailures.TryGetValue(mainPath, out LoadFailureRecord rec))
+            LoadFailureRecord rec;
+            lock (StampLock)
             {
-                return null;
+                if (!LoadFailures.TryGetValue(mainPath, out rec))
+                {
+                    return null;
+                }
             }
             if (TryStamp(mainPath, out FileStamp now) && now.Length == rec.Stamp.Length && now.WriteUtc == rec.Stamp.WriteUtc)
             {
                 return rec;
             }
-            LoadFailures.Remove(mainPath); // 文件已变，旧失败记录作废
+            ForgetStamps(mainPath); // 文件已变，旧失败记录作废（已知完好戳此前已被 RecordLoadFailure 去掉）
             return null;
         }
 
@@ -578,6 +1205,7 @@ namespace GameLogic.Campaign
             PostgameDays = Endgame.PostgameService.HoldDays(s, GameLogic.Core.GameClock.Ticks),
             PostgameTopLevel = s.Progress?.Postgame?.HighestLevel ?? 0,
             SandboxCode = SandboxService.Code(s),
+            RealPlaySeconds = s.RealPlaySeconds,
         };
 
         private static readonly Regex SchemaHeaderRegex = new Regex("\"SchemaVersion\"\\s*:\\s*(\\d+)", RegexOptions.CultureInvariant);
@@ -618,8 +1246,11 @@ namespace GameLogic.Campaign
         /// 不偷偷新建战役、不吞掉错误、不改动磁盘上的任何文件。</summary>
         public static LoadResult Load(int slotIndex)
         {
+            WaitForPendingWrites(); // FG15-SYS-01：读写互斥——后台还在写这个槽时先等它落盘，读到的总是完整的最新一份
             string mainPath = SlotPath(slotIndex);
+            var lw = Stopwatch.StartNew();
             FileProbe probe = Probe(mainPath);
+            LastLoadProbeMs = lw.Elapsed.TotalMilliseconds;
             SaveMigrationChain chain = CampaignSaveMigrations.Active;
 
             switch (probe.Kind)
@@ -638,6 +1269,8 @@ namespace GameLogic.Campaign
                     return new LoadResult(LoadOutcome.Incompatible, null, probe.Message, probe.Reason, probe.SchemaVersion,
                         probe.Reason == SaveFailureReason.MigrationMissing ? probe.MissingFrom : 0);
                 case CampaignSlotState.Corrupt:
+                    // FG15-SYS-01：列表只读头部，正文校验和在这里才第一次算——登记读档失败，列表与“继续”随即把它当损坏存档（提供读取备份）。
+                    RecordLoadFailure(slotIndex, probe.Reason, probe.SchemaVersion);
                     return new LoadResult(LoadOutcome.Corrupt, null, probe.Message, probe.Reason, probe.SchemaVersion);
             }
 
@@ -743,7 +1376,10 @@ namespace GameLogic.Campaign
             }
             else
             {
-                LoadFailures.Remove(mainPath);
+                lock (StampLock)
+                {
+                    LoadFailures.Remove(mainPath);
+                }
             }
             return new LoadResult(LoadOutcome.Success, state, null, SaveFailureReason.None, envelope.SchemaVersion, 0, notices);
         }
@@ -751,9 +1387,12 @@ namespace GameLogic.Campaign
         /// <summary>查询单个槽位的存档卡元数据，供主菜单渲染。永不抛出。不执行升级与对账（只读头部与卡片）。</summary>
         public static CampaignSlotMetadata GetSlotMetadata(int slotIndex)
         {
-            var meta = new CampaignSlotMetadata { SlotIndex = slotIndex };
+            WaitForPendingWrites();
+            var meta = new CampaignSlotMetadata { SlotIndex = slotIndex, Kind = KindOf(slotIndex), HomeSlot = HomeOf(slotIndex) };
             string mainPath = SlotPath(slotIndex);
-            FileProbe main = Probe(mainPath);
+            // FG15-SYS-01（DEBT-FG0SAVE01-08）：列表只读正文之前的头部（卡片校验和 + 长度与结尾检查），正文的完整校验留到读档；旧格式文件照旧整份校验。
+            FileProbe main = Probe(mainPath, headerOnly: true);
+            meta.HeaderOnly = main.HeaderOnly;
             meta.State = main.Kind;
             meta.FailureReason = main.Reason;
             meta.ErrorMessage = main.Message;
@@ -824,19 +1463,28 @@ namespace GameLogic.Campaign
             meta.PostgameDays = card.PostgameDays;
             meta.PostgameTopLevel = card.PostgameTopLevel;
             meta.SandboxCode = card.SandboxCode;
-            meta.ThumbnailPath = null;
+            meta.RealPlaySeconds = card.RealPlaySeconds;
+            meta.ThumbnailJpg = DecodeThumbnail(main.Envelope.ThumbnailJpg);
             return meta;
         }
 
-        public static CampaignSlotMetadata[] GetAllSlotMetadata()
-        {
-            var result = new CampaignSlotMetadata[SlotCount];
-            for (int i = 0; i < SlotCount; i++)
-            {
-                result[i] = GetSlotMetadata(i);
-            }
+        /// <summary>FG15-SYS-01：全部战役槽（0～2 + 磁盘上出现过的槽号 + 末尾一个空槽）的元数据，只读头部。“继续”在其中取最新的可读档。</summary>
+        public static CampaignSlotMetadata[] GetAllSlotMetadata() => ListedManualSlots().Select(GetSlotMetadata).ToArray();
 
-            return result;
+        private static byte[] DecodeThumbnail(string base64)
+        {
+            if (string.IsNullOrEmpty(base64))
+            {
+                return null;
+            }
+            try
+            {
+                return Convert.FromBase64String(base64);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>"继续"只指向最后一个安全可读档：在全部 Ready 槽位里取 WrittenAtUtc 最新的一个。
@@ -883,6 +1531,7 @@ namespace GameLogic.Campaign
 
         public static bool RestoreFromBak(int slotIndex, out string preservedPath)
         {
+            WaitForPendingWrites();
             preservedPath = null;
             string bakPath = BakPath(slotIndex);
             FileProbe bak = Probe(bakPath);
@@ -893,8 +1542,7 @@ namespace GameLogic.Campaign
             }
 
             string mainPath = SlotPath(slotIndex);
-            LoadFailures.Remove(mainPath);
-            KnownGoodMains.Remove(mainPath);
+            ForgetStamps(mainPath);
             try
             {
                 if (File.Exists(mainPath))
@@ -924,6 +1572,151 @@ namespace GameLogic.Campaign
             public string WrittenAtUtc;
             public CampaignSaveEnvelope Envelope;
             public CampaignSaveCard Card;
+            public bool HeaderOnly;
+        }
+
+        private const string PayloadMarker = ",\"PayloadJson\":\"";
+        /// <summary>头部（卡片 + 缩略图）最多读这么多字节；超过当作旧格式整份校验。</summary>
+        private const int HeaderReadLimit = 1 << 20;
+
+        private static FileProbe Probe(string path, bool headerOnly)
+        {
+            if (headerOnly)
+            {
+                FileProbe head = ProbeHeader(path);
+                if (head != null)
+                {
+                    return head;
+                }
+            }
+            return Probe(path);
+        }
+
+        /// <summary>
+        /// FG15-SYS-01（DEBT-FG0SAVE01-08）：只读正文之前的头部分类。卡片 + 缩略图按 <see cref="CampaignSaveEnvelope.CardChecksum"/> 校验；
+        /// 文件长度不足“头部 + 正文长度”或结尾不是完整的 JSON 收尾 → 截断。正文校验和留到读档（读档失败会登记，列表随即显示损坏）。
+        /// 返回 null = 这份文件没有新头部（旧格式 / Demo / 读不出），调用方改走整份校验。
+        /// </summary>
+        private static FileProbe ProbeHeader(string path)
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+            byte[] marker = Encoding.ASCII.GetBytes(PayloadMarker);
+            string head;
+            long rest;
+            bool tailOk = false;
+            try
+            {
+                using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    long length = fs.Length;
+                    var acc = new MemoryStream();
+                    var buf = new byte[16384];
+                    int found = -1;
+                    while (found < 0 && acc.Length < HeaderReadLimit)
+                    {
+                        int n = fs.Read(buf, 0, buf.Length);
+                        if (n <= 0)
+                        {
+                            break;
+                        }
+                        int from = (int)Math.Max(0, acc.Length - marker.Length);
+                        acc.Write(buf, 0, n);
+                        found = IndexOf(acc.GetBuffer(), (int)acc.Length, marker, from);
+                    }
+                    if (found < 0)
+                    {
+                        return null;
+                    }
+                    head = Encoding.UTF8.GetString(acc.GetBuffer(), 0, found) + "}";
+                    if (length >= 2)
+                    {
+                        fs.Seek(-2, SeekOrigin.End);
+                        int a = fs.ReadByte();
+                        int b = fs.ReadByte();
+                        tailOk = a == 0x22 && b == 0x7D; // 正文字符串的收尾引号 + 信封的右花括号
+                    }
+                    rest = length - (found + marker.Length); // 正文（转义后）+ 收尾占用的字节
+                }
+            }
+            catch
+            {
+                return null;
+            }
+            CampaignSaveEnvelope env;
+            try
+            {
+                env = JsonUtility.FromJson<CampaignSaveEnvelope>(head);
+            }
+            catch
+            {
+                return null;
+            }
+            if (env == null || string.IsNullOrEmpty(env.CardChecksum) || env.SchemaVersion <= CampaignSaveMigrations.LastDemoSchemaVersion)
+            {
+                return null; // 旧格式 / Demo / 异常版本号：按整份路径给出原来的稳定原因
+            }
+            var p = new FileProbe { HeaderOnly = true, SchemaVersion = env.SchemaVersion, WrittenAtUtc = env.WrittenAtUtc };
+            SaveMigrationChain chain = CampaignSaveMigrations.Active;
+            if (env.SchemaVersion > chain.TargetVersion)
+            {
+                p.Kind = CampaignSlotState.Incompatible;
+                p.Reason = SaveFailureReason.Newer;
+                p.Message = GameText.Format("save.svc.save_schemaversion_0_is", env.SchemaVersion, chain.TargetVersion);
+                return p;
+            }
+            if (!tailOk || rest < env.PayloadLength + 2)
+            {
+                return Bad(p, SaveFailureReason.Truncated, GameText.Get("save.svc.the_save_header_is"));
+            }
+            if (!string.Equals(ComputeChecksum(env.CardJson, env.ThumbnailJpg), env.CardChecksum, StringComparison.OrdinalIgnoreCase))
+            {
+                return Bad(p, SaveFailureReason.Checksum, GameText.Get("save.svc.checksum_mismatch_the_save"));
+            }
+            if (!chain.CanUpgradeFrom(env.SchemaVersion, out int missingFrom))
+            {
+                p.Kind = CampaignSlotState.Incompatible;
+                p.Reason = SaveFailureReason.MigrationMissing;
+                p.MissingFrom = missingFrom;
+                p.Message = GameText.Format("save.svc.no_upgrader_v_0", missingFrom, missingFrom + 1, env.SchemaVersion);
+                return p;
+            }
+            CampaignSaveCard card;
+            try
+            {
+                card = string.IsNullOrEmpty(env.CardJson) ? null : JsonUtility.FromJson<CampaignSaveCard>(env.CardJson);
+            }
+            catch
+            {
+                card = null;
+            }
+            if (card == null)
+            {
+                return Bad(p, SaveFailureReason.Payload, GameText.Get("save.svc.the_save_card_header"));
+            }
+            p.Kind = CampaignSlotState.Ready;
+            p.Envelope = env;
+            p.Card = card;
+            return p;
+        }
+
+        private static int IndexOf(byte[] data, int count, byte[] pattern, int from)
+        {
+            for (int i = from; i <= count - pattern.Length; i++)
+            {
+                int j = 0;
+                while (j < pattern.Length && data[i + j] == pattern[j])
+                {
+                    j++;
+                }
+                if (j == pattern.Length)
+                {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         /// <summary>读头部并分类（不反序列化正文）：Empty / Ready（含可逐级升级的旧正式版）/ DemoSave / Incompatible / Corrupt。</summary>

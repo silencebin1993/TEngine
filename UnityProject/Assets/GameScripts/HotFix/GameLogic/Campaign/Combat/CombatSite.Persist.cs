@@ -21,6 +21,9 @@ namespace GameLogic.Campaign.Combat
         /// <summary>EMG4-TER-01：格中心 (x, y) 落在熔坑里（家园建造校验；O(熔坑数 ≤ 8)，没有熔坑时一次比较）。</summary>
         public bool PitCovers(int x, int y) => !IsDisposed && Kernel.PitCount > 0 && Kernel.PitCovers(x, y);
 
+        /// <summary>FG15-SYS-01（DEBT-EMG2PERSIST01-01）：格中心 (x, y) 落在残骸 / 固态斑块里（家园建造校验逐格调，不按帧）。</summary>
+        public bool PersistCovers(int x, int y) => !IsDisposed && Kernel.PersistCovers(x, y);
+
         /// <summary>EMG4-TER-01：本地点熔坑数 / 第 i 个熔坑（悬停、自检）。</summary>
         public int PitCount => IsDisposed ? 0 : Kernel.PitCount;
         public EmgPit PitAt(int i) => IsDisposed ? default : Kernel.PitAt(i);

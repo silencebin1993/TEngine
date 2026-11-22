@@ -922,7 +922,7 @@ namespace GameLogic.Settings
         }
 
         /// <summary>自动存档间隔可选值（分钟；0 = 关闭）。</summary>
-        public static readonly int[] AutoSaveChoices = { 0, 5, 10, 15, 30 };
+        public static readonly int[] AutoSaveChoices = { 0, 5, 10, 20 }; // FG15-SYS-01：按 FGR-SYS-002“可选 5、10、20 分钟或关闭”（FG15-UX-01 原为 5/10/15/30；旧设置里的 15 / 30 读回按默认 10）
         public static int AutoSaveMinutes => Array.IndexOf(AutoSaveChoices, Data.AutoSaveMinutes) >= 0 ? Data.AutoSaveMinutes : 10;
 
         public static void SetAutoSaveMinutes(int minutes)

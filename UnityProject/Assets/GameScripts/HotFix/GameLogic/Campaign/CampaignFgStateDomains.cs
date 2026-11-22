@@ -1025,6 +1025,12 @@ namespace GameLogic.Campaign
         public string Payload;
         /// <summary>内核单位外部键表：敌人实例 ID（单位的 ExtKey 是这张表的下标；机器的 ExtKey 直接是 LogicId）。</summary>
         public string[] Keys = Array.Empty<string>();
+        /// <summary>
+        /// FG15-SYS-01（DEBT-EMG2DISC01-04 后半）：已从本地点注销、但还挂在在途归属里的单位 → 机器 LogicId（两列同长、按单位 ID 升序）。
+        /// 读档后它们铺下的斑块之后造成的伤害仍分给原机器。旧档没有这两列 = 空（只少读档前已撤离机器的逐机分配，不报错）。
+        /// </summary>
+        public int[] DepartedUnits = Array.Empty<int>();
+        public int[] DepartedMachines = Array.Empty<int>();
     }
 
     /// <summary>
@@ -1087,6 +1093,23 @@ namespace GameLogic.Campaign
         /// 液洼在战斗内核里的区域随家园地点快照进存档（格式 12），读档后按这里的记录对账。</summary>
         public PipeLeakRecord[] Leaks = Array.Empty<PipeLeakRecord>();
         public int NextLeakSerial = 1;
+        /// <summary>FG15-SYS-01（DEBT-EMG2MAT02-06 / P19，FG00 B10）：热更层已从内核取走、还没到下一次对账的“斑块蚀设施”累计伤害（按键升序；唯一写入口 <see cref="Logistics.PipeLeakService.WriteTo"/>）。
+        /// 读档接入会话时取回并清空这一列（只取一次，不重复结算）。只加字段：旧档没有 = 没有在途伤害。</summary>
+        public PipeAreaHitRecord[] AreaHits = Array.Empty<PipeAreaHitRecord>();
+    }
+
+    /// <summary>FG15-SYS-01（P19）：一条在途的斑块蚀设施累计（与内核 EmgStructHit 同字段）。</summary>
+    [Serializable]
+    public sealed class PipeAreaHitRecord
+    {
+        public int Key;
+        public double X;
+        public double Y;
+        public float Radius;
+        public float Damage;
+        public int Matter;
+        public int Flags;
+        public int By;
     }
 
     /// <summary>FG6-LOG-10（FGR-LOG-046）：一摊管线泄漏的液洼（一格管线最多一摊）。时间都按游戏步序号记（与观察、倍速无关）。</summary>

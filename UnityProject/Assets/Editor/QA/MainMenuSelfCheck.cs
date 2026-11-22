@@ -119,6 +119,7 @@ namespace GameLogic.EditorTools
                 CheckLanguageSwitch(window, instance);
                 Expect(errors.Count == 0, "初始化过程零报错" + (errors.Count == 0 ? string.Empty : "——" + string.Join("；", errors)));
                 CheckSlotText();
+                CheckSaveCards(window);
             }
             catch (Exception e)
             {
@@ -246,6 +247,102 @@ namespace GameLogic.EditorTools
             Invoke(window, "OnUpdate", "OnUpdate（切回中文）");
             Expect(newLabel.text == Localization.GameText.Get("mainmenu.prefab.new", Localization.GameLanguage.ZhCn) && cjk.IsMatch(newLabel.text),
                 $"切回中文后主菜单恢复中文（“新建”=“{newLabel.text}”）");
+        }
+
+        /// <summary>
+        /// FG15-SYS-01（FGR-SYS-001 分页、FGR-SYS-007 缩略图、DEBT-FG3GEN01-02 复制种子 / 短码、FG-GAP-013 管理入口）：主菜单存档卡从真实初始化后的窗口驱动——
+        /// 临时存档目录里放 4 个战役槽（第 1 个带缩略图），按私有刷新入口刷新，按钮走 onClick（与玩家点击同一回调）。
+        /// </summary>
+        private static void CheckSaveCards(MainMenuUI window)
+        {
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            T Field<T>(string name) where T : class => typeof(MainMenuUI).GetField(name, Flags)?.GetValue(window) as T;
+            int[] Pages() => Field<int[]>("_pageSlots");
+            string dirBefore = Campaign.CampaignSaveService.SaveDirectoryOverrideForTests;
+            Action<string> clipBefore = Campaign.CampaignSlotText.ClipboardHandler;
+            string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "bingames-mainmenu-cards-" + Guid.NewGuid().ToString("N"));
+            MethodInfo refresh = typeof(MainMenuUI).GetMethod("RefreshSlotList", Flags);
+            try
+            {
+                Campaign.CampaignSaveService.SaveDirectoryOverrideForTests = dir;
+                Campaign.CampaignState s = MainMenuUI.BuildNewCampaignState("mainmenu-cards", 20261123,
+                    Campaign.WorldGen.WorldSettings.Resolve(Campaign.WorldGen.WorldGenVersions.Current, Campaign.WorldGen.WorldGenContent.DefaultPresetId),
+                    Campaign.Defense.DifficultyService.Preset("Standard"));
+                bool saved = Campaign.CampaignSaveService.Save(0, s, Campaign.SaveReason.Manual, Campaign.SaveThumbnail.Placeholder(s), Campaign.SaveCopyKind.None).Success;
+                for (int i = 1; i < 4; i++)
+                {
+                    saved &= Campaign.CampaignSaveService.Save(i, Campaign.CampaignState.CreateNew("mainmenu-cards-" + i, "Standard", 50 + i), Campaign.SaveReason.NewCampaign).Success;
+                }
+                refresh.Invoke(window, null);
+                var thumbs = Field<RawImage[]>("_slotThumbs");
+                var seedButtons = Field<Button[]>("_slotCopySeedButtons");
+                var codeButtons = Field<Button[]>("_slotCopyCodeButtons");
+                var manage = Field<Button[]>("_slotManageButtons");
+                var prev = Field<Button>("_btnPagePrev");
+                var next = Field<Button>("_btnPageNext");
+                var page = Field<Text>("_textPage");
+                int[] pageSlots = Pages();
+                Transform card0 = thumbs?[0].transform.parent.parent;
+                var infos = Field<Text[]>("_slotInfoTexts");
+                bool layout = thumbs != null && infos != null && thumbs[0].transform.parent.GetSiblingIndex() < infos[0].transform.GetSiblingIndex() && card0 != null && card0.name == "m_tf_Slot0"
+                              && manage[0].transform.parent == seedButtons[0].transform.parent && seedButtons[0].transform.parent == codeButtons[0].transform.parent
+                              && seedButtons[0].transform.parent.parent == card0;
+                bool thumbShown = thumbs != null && thumbs[0].enabled && thumbs[0].texture != null && thumbs[0].texture.width == Campaign.SaveThumbnail.Width
+                                  && !thumbs[1].enabled && thumbs[1].texture == null;
+                bool paging = page != null && page.text == Localization.GameText.Format("save.page", 1, 2) && !prev.interactable && next.interactable
+                              && pageSlots.Length == 3 && pageSlots[0] == 0;
+                Expect(saved && layout && thumbShown && paging,
+                    $"FG15-SYS-01 主菜单存档卡（存 {saved} / 布局 {layout} / 缩略图 {thumbShown} / 分页 {paging}）：左侧缩略图（槽 0 带 {thumbs?[0].texture?.width}×{thumbs?[0].texture?.height}、没有缩略图的槽不显示），右侧一列“管理 / 复制种子 / 复制分享短码”；4 个战役槽 + 空槽分页“{page?.text}”，上一页灰、下一页可点");
+
+                next.onClick.Invoke();
+                int[] second = Pages();
+                string secondText = page.text;
+                prev.onClick.Invoke();
+                Expect(second.Length == 2 && second[0] == 3 && second[1] == 4 && secondText == Localization.GameText.Format("save.page", 2, 2) && Pages()[0] == 0,
+                    $"FG15-SYS-01 主菜单分页：下一页 → 槽 [{string.Join(",", second)}]（“{secondText}”），上一页回到第 1 页");
+
+                string copied = null;
+                Campaign.CampaignSlotText.ClipboardHandler = t => copied = t;
+                seedButtons[0].onClick.Invoke();
+                string seedCopied = copied;
+                string seedFeedback = page.text;
+                codeButtons[0].onClick.Invoke();
+                string code = Campaign.CampaignSlotText.ShareCode(Campaign.CampaignSaveService.GetSlotMetadata(0));
+                Expect(seedCopied == "20261123" && seedFeedback.Contains("20261123") && code != null && copied == code && seedButtons[0].interactable && codeButtons[0].interactable
+                       && seedButtons[0].GetComponentInChildren<Text>(true).text == Localization.GameText.Get("save.manage.copy_seed"),
+                    $"FG15-SYS-01 存档卡一键复制：种子“{seedCopied}”（页码格提示“{seedFeedback}”）、分享短码“{copied}”");
+
+                manage[0].onClick.Invoke();
+                FieldInfo pendingField = typeof(UI.Kit.SavePanelUIToolkit).GetField("_pendingManage", BindingFlags.Static | BindingFlags.NonPublic);
+                object pending = pendingField?.GetValue(null);
+                object home = pending?.GetType().GetField("Item1")?.GetValue(pending);
+                UI.Kit.SavePanelUIToolkit.Close();
+                Expect(home is int h && h == 0 && manage[0].interactable && manage[0].GetComponentInChildren<Text>(true).text == Localization.GameText.Get("save.manage.open"),
+                    $"FG15-SYS-01 存档卡“管理”：点了打开槽 {home} 的存档管理窗口（窗口还没挂上时先记下，挂上即打开）");
+
+                Campaign.CampaignSaveService.SaveDirectoryOverrideForTests = dir + "-empty";
+                refresh.Invoke(window, null);
+                Expect(Array.TrueForAll(thumbs, t => t.texture == null && !t.enabled) && !seedButtons[0].interactable && !codeButtons[0].interactable,
+                    "FG15-SYS-01 存档卡缩略图贴图成对释放：换成空目录刷新后不留贴图，复制按钮灰掉");
+            }
+            catch (Exception e)
+            {
+                Fail($"主菜单存档卡自检抛异常：{e}");
+            }
+            finally
+            {
+                Campaign.CampaignSlotText.ClipboardHandler = clipBefore;
+                Campaign.CampaignSaveService.SaveDirectoryOverrideForTests = dirBefore;
+                UI.Kit.SavePanelUIToolkit.Close();
+                try
+                {
+                    System.IO.Directory.Delete(dir, true);
+                }
+                catch
+                {
+                    // 临时目录清理失败不影响结论。
+                }
+            }
         }
 
         private static int CountRuntimeListeners(Button button)

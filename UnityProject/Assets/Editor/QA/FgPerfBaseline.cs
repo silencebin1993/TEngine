@@ -433,6 +433,7 @@ namespace GameLogic.EditorTools
             }
             long bytes = new FileInfo(CampaignSaveService.SlotPath(Slot)).Length;
             Add(cur, "save_ms", "写性能测试存档（整局同步 + 序列化 + 写盘）", "ms", sw.Elapsed.TotalMilliseconds, true, 20);
+            Line($"  · 写存档探针（只报告，FG15-SYS-01）：{CampaignAutoSaveService.LastExportBreakdown}；{CampaignSaveService.LastSyncSaveBreakdown}");
             // FG7-E2E-01 修复轮 1：分项诊断会再做一整次同步 / 导出 / JSON / 写盘，产生大量托管垃圾，夹在 save_ms 与 load_ms 之间会抬高读档测量——
             // 只在显式要求诊断时跑（BINGAMES_PERF_DIAG=1 bash tools/unity-perf-baseline.sh），跑完先回收再继续正式测量。
             if (Env("BINGAMES_PERF_DIAG") == "1")
@@ -703,7 +704,7 @@ namespace GameLogic.EditorTools
             CampaignSession.Set(RunSlot, r.State);
             HomeValleyController home = WorldSimulation.LoadHome(resume: true);
             sw.Stop();
-            Line($"  · 读档分项（只报告）：恢复存档 {restoreOnlyMs:F1} ms、载入家园 {sw.Elapsed.TotalMilliseconds - restoreOnlyMs:F1} ms；已探索圆 {r.State?.Grid?.Explored?.Length ?? 0} 个");
+            Line($"  · 读档分项（只报告）：恢复存档 {restoreOnlyMs:F1} ms（其中探测 + 整份校验 {CampaignSaveService.LastLoadProbeMs:F1} ms）、载入家园 {sw.Elapsed.TotalMilliseconds - restoreOnlyMs:F1} ms；已探索圆 {r.State?.Grid?.Explored?.Length ?? 0} 个");
             if (home == null || !home.IsLoaded || home.Combat == null || !BeltNetworkService.IsRunning)
             {
                 Fail("读性能测试存档后家园 / 战斗内核 / 传送带内核没有载入");

@@ -798,6 +798,51 @@ namespace GameLogic.EditorTools
             Expect(lr == CombatLoadResult.Ok && h0 == h1 && cont && CombatKernel.PeekFormat(snap) == CombatConst.FormatVersion && CombatConst.FormatVersion >= 14
                    && k.CountMines() == b.CountMines() && fa.Deploy == fb.Deploy,
                 $"B8 内核快照（格式 {CombatConst.FormatVersion}）：齐射 / 架设 / 冲锋 / 子母雷（{k.CountMines()} 颗）的状态与参数随快照往返，状态哈希一致（{h0 == h1}），读回后接着跑 4 秒逐位相同（{cont}）（{lr}）");
+            CheckLegacyProfileRefresh();
+        }
+
+        /// <summary>
+        /// B8b（FG15-SYS-01，DEBT-FG9FAC02-06）：格式 13 快照（还没有铸造参数）经正式读档入口 CombatSite.TryRestore 读入——已存在的敌人按敌人表刷新行为参数：
+        /// 步进炮照样先架炮驻锄再开火、对空炮带着对空拦截参数；直接读内核（不刷新）对照组的参数是 0；当前格式的快照读档不刷新（逐位一致）。
+        /// </summary>
+        private static void CheckLegacyProfileRefresh()
+        {
+            CampaignState s = NewWorldState(1);
+            CombatSite site = OpenBench(s);
+            _t = 0;
+            BenchEnemy(site, s, "enemy_strider", "b_strider13", new Vector2(0f, 0f));
+            BenchEnemy(site, s, "enemy_aa_gun", "b_aa13", new Vector2(-30f, 30f));
+            int st = UnitOf(site, "b_strider13"), aa = UnitOf(site, "b_aa13");
+            site.Kernel.TryGetProfileOf(st, out CombatBehaviorProfile want);
+            site.Kernel.TryGetProfileOf(aa, out CombatBehaviorProfile wantAa);
+            CombatSiteRecord rec = site.Snapshot();
+            CombatSiteRecord rec13 = site.Snapshot();
+            rec13.Payload = Convert.ToBase64String(site.Kernel.SerializeFormatForTests(13));
+            rec13.FormatVersion = 13;
+            using (var raw = new CombatKernel(site.Kernel.Config, 64))
+            {
+                raw.Load(Convert.FromBase64String(rec13.Payload));
+                raw.TryGetProfileOf(st, out CombatBehaviorProfile stale);
+                Expect(want.DeploySeconds > 0f && stale.DeploySeconds == 0f, $"B8b 对照：格式 13 快照里步进炮的架炮驻锄参数是 0（写快照时还没有铸造参数；表里 {want.DeploySeconds} 秒）");
+            }
+            int refreshed0 = CombatSite.LegacyProfilesRefreshed;
+            CombatSite back = OpenBench(s);
+            bool ok = back.TryRestore(s, rec13, out string why);
+            back.Kernel.TryGetProfileOf(st, out CombatBehaviorProfile got);
+            back.Kernel.TryGetProfileOf(aa, out CombatBehaviorProfile gotAa);
+            bool same = CombatKernel.ProfileKey(got) == CombatKernel.ProfileKey(want) && CombatKernel.ProfileKey(gotAa) == CombatKernel.ProfileKey(wantAa);
+            int refreshed = CombatSite.LegacyProfilesRefreshed - refreshed0;
+            _t = back.Kernel.Time;
+            int p = Player(back, new Vector2(10f, 0f), Gun(0.01f), 9999f);
+            MechEnemy row = Row("enemy_strider");
+            double first = FirstHitAfter(back, p, 8f);
+            bool deployed = Fu(back, st).Deploy == 2;
+            Expect(ok && same && refreshed >= 1 && deployed && first >= row.DeploySeconds + row.WeaponAim - 0.05,
+                $"B8b 格式 13 快照读档后按敌人表刷新行为参数（刷新 {refreshed} 个，{why ?? "读档成功"}）：步进炮、对空炮参数与新生成的相同（{same}）；步进炮先架炮驻锄再开火——第一次掉血在 {first:0.00} 秒（已架设 {deployed}）");
+            int refreshed1 = CombatSite.LegacyProfilesRefreshed;
+            CombatSite cur = OpenBench(s);
+            bool okCur = cur.TryRestore(s, rec, out _);
+            Expect(okCur && CombatSite.LegacyProfilesRefreshed == refreshed1, "B8b 当前格式的快照读档不刷新行为参数（新档逐位一致）");
             CombatSites.Close(Bench, s, dropRecord: true);
         }
 
