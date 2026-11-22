@@ -225,7 +225,7 @@ namespace GameLogic.Campaign.Grid
             {
                 if (i > 0)
                 {
-                    sb.Append(GameText.Language == GameLanguage.En ? "; " : "；");
+                    sb.Append(GameText.Language == GameLanguage.En ? "; " : GameText.Get("logistics.load.reason.separator"));
                 }
                 sb.Append(Reasons[i].Describe());
             }

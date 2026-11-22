@@ -6,6 +6,7 @@ using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.WorldGen;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -351,7 +352,7 @@ namespace GameLogic.Campaign.Regions
                 }
                 if (placed == null)
                 {
-                    c.Problem += $"驻军据点 {gi + 1}：{tries} 次试探与逐格扫描都没有合适的落点（窗口里可走且与入口连通的格太少）；";
+                    c.Problem += $"驻军据点 {gi + 1}：{tries} 次试探与逐格扫描都没有合适的落点（窗口里可走且与入口连通的格太少）；"; // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 c.Garrisons.Add(placed);

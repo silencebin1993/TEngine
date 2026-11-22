@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign
 {
@@ -3183,29 +3184,29 @@ namespace GameLogic.Campaign
 
         public static readonly IReadOnlyList<DomainInfo> All = new[]
         {
-            new DomainInfo(nameof(CampaignState.World), "FG0-ARCH-05（世界生成与区块流式加载）", s => s.World),
-            new DomainInfo(nameof(CampaignState.Progress), "FG11 叙事 / FG12 沙盒", s => s.Progress),
-            new DomainInfo(nameof(CampaignState.Clock), "FG0-ARCH-01（统一时钟）", s => s.Clock),
-            new DomainInfo(nameof(CampaignState.Grid), "FG0-ARCH-04（格网建造）", s => s.Grid),
-            new DomainInfo(nameof(CampaignState.Belts), "FG0-ARCH-02（传送带内核）", s => s.Belts),
-            new DomainInfo(nameof(CampaignState.Combat), "FG0-ARCH-03（战斗内核）", s => s.Combat),
-            new DomainInfo(nameof(CampaignState.Pipes), "FG03 管线与流体", s => s.Pipes),
-            new DomainInfo(nameof(CampaignState.Power), "FG3-LOG-06 电力子网与电塔", s => s.Power),
-            new DomainInfo(nameof(CampaignState.Research), "FG05 研究", s => s.Research),
-            new DomainInfo(nameof(CampaignState.Weather), "FG07 天气", s => s.Weather),
-            new DomainInfo(nameof(CampaignState.Raids), "FG06 突袭", s => s.Raids),
-            new DomainInfo(nameof(CampaignState.DirectorEvents), "FG10 事件导演", s => s.DirectorEvents),
-            new DomainInfo(nameof(CampaignState.Vibration), "FG12-EVT-02 震动值与掘进蠕虫", s => s.Vibration), // FG12-EVT-06 补登记（EVT-02 新增该域时漏登，FgSaveV2SelfCheck 登记表断言发现）
-            new DomainInfo(nameof(CampaignState.Quests), "FG08 任务", s => s.Quests),
-            new DomainInfo(nameof(CampaignState.StandingRules), "FG04 常驻规则", s => s.StandingRules),
-            new DomainInfo(nameof(CampaignState.SignalCore), "FG1-SIG-01（信号核）", s => s.SignalCore),
-            new DomainInfo(nameof(CampaignState.LootPackets), "FG08 掉落数据包", s => s.LootPackets),
-            new DomainInfo(nameof(CampaignState.Stats), "FG15 / FG16 统计", s => s.Stats),
+            new DomainInfo(nameof(CampaignState.World), "FG0-ARCH-05（世界生成与区块流式加载）", s => s.World), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Progress), "FG11 叙事 / FG12 沙盒", s => s.Progress), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Clock), "FG0-ARCH-01（统一时钟）", s => s.Clock), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Grid), "FG0-ARCH-04（格网建造）", s => s.Grid), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Belts), "FG0-ARCH-02（传送带内核）", s => s.Belts), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Combat), "FG0-ARCH-03（战斗内核）", s => s.Combat), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Pipes), "FG03 管线与流体", s => s.Pipes), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Power), "FG3-LOG-06 电力子网与电塔", s => s.Power), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Research), "FG05 研究", s => s.Research), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Weather), "FG07 天气", s => s.Weather), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Raids), "FG06 突袭", s => s.Raids), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.DirectorEvents), "FG10 事件导演", s => s.DirectorEvents), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Vibration), "FG12-EVT-02 震动值与掘进蠕虫", s => s.Vibration), // FG12-EVT-06 补登记（EVT-02 新增该域时漏登，FgSaveV2SelfCheck 登记表断言发现） // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Quests), "FG08 任务", s => s.Quests), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.StandingRules), "FG04 常驻规则", s => s.StandingRules), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.SignalCore), "FG1-SIG-01（信号核）", s => s.SignalCore), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.LootPackets), "FG08 掉落数据包", s => s.LootPackets), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Stats), "FG15 / FG16 统计", s => s.Stats), // loc-ignore: 开发者自检 / 诊断文本
             new DomainInfo(nameof(CampaignState.SaveHistory), "FG0-SAVE-01", s => s.SaveHistory),
-            new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications),
-            new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav),
-            new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01 / 02（物品、流体与配方：仓库物资、核心保管库、净速率采样；生产建筑、废墟储量、家园震动）", s => s.Economy),
-            new DomainInfo(nameof(CampaignState.Factions), "FG9-FAC-01 起（阵营扩充：寂听主脑首领战、电磁噪声发射器、阵营反制每日锁定、室内伏笔地点）", s => s.Factions),
+            new DomainInfo(nameof(CampaignState.Notifications), "FG0-UX-01（通知中心历史）", s => s.Notifications), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01 / 02（物品、流体与配方：仓库物资、核心保管库、净速率采样；生产建筑、废墟储量、家园震动）", s => s.Economy), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Factions), "FG9-FAC-01 起（阵营扩充：寂听主脑首领战、电磁噪声发射器、阵营反制每日锁定、室内伏笔地点）", s => s.Factions), // loc-ignore: 开发者自检 / 诊断文本
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>

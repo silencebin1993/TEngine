@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -20,20 +21,40 @@ namespace GameLogic.Campaign.Content
         public const string SignalTowerId = "building_signal_tower";
         public const string BeaconId = "building_beacon";
 
-        private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
+        private static Dictionary<string, MechanicalContentDef> _defs;
+        private static GameLanguage _defsLanguage;
+        private static int _defsTextRevision = -1;
+
+        /// <summary>FG15-UX-03：按当前语言缓存的条目（切语言 / 重载文本表后下一次读取重建）。</summary>
+        private static Dictionary<string, MechanicalContentDef> Defs
+        {
+            get
+            {
+                if (_defs == null || _defsLanguage != GameText.Language || _defsTextRevision != GameText.Revision)
+                {
+                    _defs = DemoDefs();
+                    _defsLanguage = GameText.Language;
+                    _defsTextRevision = GameText.Revision;
+                }
+                return _defs;
+            }
+        }
+
+        /// <summary>FG15-UX-03：Demo 条目的文案走文本键，每次按当前语言重建（静态初始化时文本表可能还没载入）。</summary>
+        private static Dictionary<string, MechanicalContentDef> DemoDefs() => new Dictionary<string, MechanicalContentDef>
         {
             [CoreId] = new MechanicalContentDef
             {
                 Id = CoreId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "归还核心",
-                Description = "战役唯一不可摧毁前提建筑；核心被毁进入失败界面。",
+                DisplayName = GameText.Get("building.core.name"),
+                Description = GameText.Get("building.demo.the_campaign_s_one"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "开局已存在，Operational，不可修复材料前置、不可关停（DEMO-CONTENT-LOCK.md §2.1/§2.2）。",
                 Slot = "建筑",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "HP500，基础电力20，应急缓存180/180废料，基础带宽3（DEMO-CONTENT-LOCK.md §2.1）。",
+                ValuesSummary = GameText.Get("building.demo.hp_500_base_power"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_core",
                 ModelId = "primitive:cube",
@@ -42,7 +63,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_build_complete",
                 PreviewId = "preview_building_core",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在，无需解锁。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分（红/黄/橙/绿/灰），类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = null,
@@ -51,14 +72,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = GeneratorId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "发电机",
-                Description = "供电建筑；Operational 后提供额外电力容量，可建造第二座。",
+                DisplayName = GameText.Get("building.generator.name"),
+                Description = GameText.Get("building.demo.power_building_once_operational"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "开局 Damaged，修复30废料/20秒；可另建第二座（60废料/40秒），两者是同一内容的两个实例（DEMO-CONTENT-LOCK.md §2.1/§2.2）。",
                 Slot = "建筑",
                 ScrapCost = 30,
                 Load = 0,
-                ValuesSummary = "修复后额外电力80/座；ER3-WRK-01 已支持同时存在两座（generator + generator_2）（DEMO-CONTENT-LOCK.md §2.1/§2.2）。",
+                ValuesSummary = GameText.Get("building.demo.80_power_each_once"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_generator",
                 ModelId = "primitive:cube",
@@ -67,7 +88,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_power_up",
                 PreviewId = "preview_building_generator",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在（Damaged），修复后 Operational。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start_2"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分，类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = null,
@@ -76,14 +97,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = WarehouseId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "仓库",
-                Description = "扩充核心应急缓存之外的存储容量，可接收远征卸货。",
+                DisplayName = GameText.Get("building.warehouse.name"),
+                Description = GameText.Get("building.demo.adds_storage_beyond_the"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "开局 Damaged，修复10废料/10秒（DEMO-CONTENT-LOCK.md §2.1）。",
                 Slot = "建筑",
                 ScrapCost = 10,
                 Load = 0,
-                ValuesSummary = "Operational 后容量300，可接收远征卸货（DEMO-CONTENT-LOCK.md §2.1）。",
+                ValuesSummary = GameText.Get("building.demo.capacity_300_once_operational"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_warehouse",
                 ModelId = "primitive:cube",
@@ -92,7 +113,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_build_complete",
                 PreviewId = "preview_building_warehouse",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在（Damaged），修复后 Operational。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start_2"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分，类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = null,
@@ -101,14 +122,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = AssemblyStationId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "装配站",
-                Description = "生产与改造机器的建筑；本 Story 只交付内容目录，正式生产队列见 ER4-FAC-01。",
+                DisplayName = GameText.Get("building.assembly_station.name"),
+                Description = GameText.Get("building.demo.produces_and_refits_machines"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "建筑已存在；有足额电力即 Operational，无额外修复材料前置（DEMO-CONTENT-LOCK.md §2.1）。",
                 Slot = "建筑",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "Operational 电力需求25，默认优先级2（DEMO-CONTENT-LOCK.md §2.2）。",
+                ValuesSummary = GameText.Get("building.demo.operational_power_demand_25"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_assembly",
                 ModelId = "primitive:cube",
@@ -117,7 +138,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_production_complete",
                 PreviewId = "preview_building_assembly",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在，有电即 Operational。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start_3"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分，类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-02",
@@ -126,14 +147,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = AnalysisBenchId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "解析台",
-                Description = "解析带回的静默/铸造技术模块，解锁新内容；通电后也解锁维修悬浮生产。",
+                DisplayName = GameText.Get("building.analysis_bench.name"),
+                Description = GameText.Get("building.demo.analyzes_recovered_silent_or"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "建筑已存在；有足额电力即 Operational，无额外修复材料前置（DEMO-CONTENT-LOCK.md §2.1）。",
                 Slot = "建筑",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "Operational 电力需求15，默认优先级2（DEMO-CONTENT-LOCK.md §2.2）。",
+                ValuesSummary = GameText.Get("building.demo.operational_power_demand_15"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_analysis",
                 ModelId = "primitive:cube",
@@ -142,7 +163,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_analysis_complete",
                 PreviewId = "preview_building_analysis",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在，有电即 Operational。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start_3"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分，类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-17",
@@ -151,14 +172,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = RepairBayId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "维修台",
-                Description = "维修悬浮专业机可修机器的建筑基点；不是开局修建筑的前置。",
+                DisplayName = GameText.Get("building.repair_bay.name"),
+                Description = GameText.Get("building.demo.base_for_hover_repair"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "建筑已存在；有足额电力即 Operational，无额外修复材料前置（DEMO-CONTENT-LOCK.md §2.1）。",
                 Slot = "建筑",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "Operational 电力需求15，默认优先级3（DEMO-CONTENT-LOCK.md §2.2）。",
+                ValuesSummary = GameText.Get("building.demo.operational_power_demand_15_2"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_repair",
                 ModelId = "primitive:cube",
@@ -167,7 +188,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_build_complete",
                 PreviewId = "preview_building_repairbay",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在，有电即 Operational。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start_3"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分，类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = null,
@@ -176,14 +197,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = SignalTowerId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "信号塔",
-                Description = "扩大带宽，Operational 后开放破碎都市远征。",
+                DisplayName = GameText.Get("building.signal_tower.name"),
+                Description = GameText.Get("building.demo.expands_bandwidth_once_operation"),
                 Source = MechanicalContentSource.AlwaysBuiltHomeValley,
                 SourceDetail = "开局 Damaged，修复40废料/15秒（DEMO-CONTENT-LOCK.md §2.1）。",
                 Slot = "建筑",
                 ScrapCost = 40,
                 Load = 0,
-                ValuesSummary = "额外带宽5，开放破碎都市（DEMO-CONTENT-LOCK.md §2.1）。",
+                ValuesSummary = GameText.Get("building.demo.5_bandwidth_opens_fractured"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_building_signal_tower",
                 ModelId = "primitive:cube",
@@ -192,7 +213,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_signal_restore",
                 PreviewId = "preview_building_signal_tower",
                 SaveCompatible = true,
-                LockedHintText = "开局已存在（Damaged），修复后 Operational。",
+                LockedHintText = GameText.Get("building.demo.present_from_the_start_2"),
                 SilhouetteNote = "已用真实 ColorForBuilding 状态色区分，类型剪影待美术。",
                 LegacyFacadeId = null,
                 DebtId = null,
@@ -201,14 +222,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = BeaconId,
                 Category = MechanicalContentCategory.Building,
-                DisplayName = "导航信标",
-                Description = "战役终局建筑：Powered 后玩家用 E 确认启动，触发结算演出。",
+                DisplayName = GameText.Get("building.beacon.name"),
+                Description = GameText.Get("building.demo.the_campaign_s_final"),
                 Source = MechanicalContentSource.UnlockedLateBuilding,
                 SourceDetail = "解锁前不存在（DEMO-CONTENT-LOCK.md §2.2）；空间预留位已在 HomeValleyLayout.BeaconSlot 落定，真正建造由 ER7-BEACON-01 接手。",
                 Slot = "建筑",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "Operational 电力需求30，默认优先级1（DEMO-CONTENT-LOCK.md §2.2）；OBJ-10 完成后 10 秒演出与一次性结算。",
+                ValuesSummary = GameText.Get("building.demo.operational_power_demand_30"),
                 AiPermission = MechanicalContentAiPermission.PlayerOnly,
                 IconId = "icon_building_beacon",
                 ModelId = "primitive:cylinder",
@@ -217,16 +238,16 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_beacon_launch",
                 PreviewId = "preview_building_beacon",
                 SaveCompatible = true,
-                LockedHintText = "需完成 OBJ-09（摧毁主核心并回收数据）后才能建造。",
+                LockedHintText = GameText.Get("building.demo.can_only_be_built"),
                 SilhouetteNote = "高耸信标塔剪影，全新内容，无 legacy 参照。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-18",
             },
         };
 
-        public static IReadOnlyDictionary<string, MechanicalContentDef> All => _defs;
+        public static IReadOnlyDictionary<string, MechanicalContentDef> All => Defs;
 
-        public static bool TryGet(string id, out MechanicalContentDef def) => _defs.TryGetValue(id, out def);
+        public static bool TryGet(string id, out MechanicalContentDef def) => Defs.TryGetValue(id, out def);
 
         /// <summary>把 <see cref="BuildingRecord.BuildingTypeId"/> 实际取值（generator/generator_2/
         /// signal_tower 等 <see cref="HomeValleyLayout"/> 字符串常量）翻译成本类的建筑内容 ID。

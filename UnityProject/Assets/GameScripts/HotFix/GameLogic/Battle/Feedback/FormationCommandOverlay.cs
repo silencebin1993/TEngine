@@ -111,7 +111,7 @@ namespace GameLogic.Battle.Feedback
                     GUI.Label(new Rect(12f + PendingIndent, y, RowWidth - ButtonWidth - PendingIndent, RowHeight),
                         $"  #{i + 1} {entry.Command.Kind} [{entry.State}]", _labelStyle);
                     GUI.color = previous;
-                    if (GUI.Button(new Rect(12f + PendingIndent + RowWidth - ButtonWidth, y, ButtonWidth, RowHeight), "取消"))
+                    if (GUI.Button(new Rect(12f + PendingIndent + RowWidth - ButtonWidth, y, ButtonWidth, RowHeight), GameLogic.Localization.GameText.Get("formation.queue.cancel")))
                     {
                         cancelTargetFormation = formation;
                         cancelTargetIndex = i;
@@ -121,7 +121,7 @@ namespace GameLogic.Battle.Feedback
 
                 if (pending.Count > 0)
                 {
-                    if (GUI.Button(new Rect(12f + PendingIndent, y, RowWidth - PendingIndent, RowHeight), "清空队列"))
+                    if (GUI.Button(new Rect(12f + PendingIndent, y, RowWidth - PendingIndent, RowHeight), GameLogic.Localization.GameText.Get("formation.queue.clear")))
                     {
                         clearTargetFormation = formation;
                     }

@@ -219,7 +219,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbFusionRecipe / fg.TbFusionMerge 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbFusionRecipe / fg.TbFusionMerge 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (merge != null)
             {
@@ -235,7 +235,7 @@ namespace GameLogic.Campaign.Economy
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbFusionRecipe 不存在（改 tools/cell_tables/fgdata_fusion.py 后重新生成）");
+                    ProblemList.Add("fg.TbFusionRecipe 不存在（改 tools/cell_tables/fgdata_fusion.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[FusionCatalog] " + ProblemList[0]);
                 return;
@@ -244,36 +244,36 @@ namespace GameLogic.Campaign.Economy
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || ById.ContainsKey(row.Id))
                 {
-                    ProblemList.Add("fg.TbFusionRecipe：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbFusionRecipe：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (string.IsNullOrEmpty(row.ParentA) || string.IsNullOrEmpty(row.ParentB) || row.ParentA == row.ParentB
                     || !FirmwareKinds.IsFirmware(row.ParentA) || !FirmwareKinds.IsFirmware(row.ParentB)
                     || FirmwareKinds.IsMixed(row.ParentA) || FirmwareKinds.IsMixed(row.ParentB))
                 {
-                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：父固件必须是两条不同的正式固件（混合固件不能再熔合）");
+                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：父固件必须是两条不同的正式固件（混合固件不能再熔合）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!FirmwareKinds.TryGetParents(row.MixId, out string ma, out string mb)
                     || !((ma == row.ParentA && mb == row.ParentB) || (ma == row.ParentB && mb == row.ParentA)))
                 {
-                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：产物 {row.MixId} 在固件表里不是这两条父固件的混合固件");
+                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：产物 {row.MixId} 在固件表里不是这两条父固件的混合固件"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (Array.IndexOf(Families, row.Family) < 0)
                 {
-                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：类别 {row.Family} 不认识");
+                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：类别 {row.Family} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string key = PairKey(row.ParentA, row.ParentB);
                 if (ByPair.ContainsKey(key) || ByMix.ContainsKey(row.MixId))
                 {
-                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：父固件对或产物重复");
+                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：父固件对或产物重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!NamedReactionCatalog.TryGet(row.Reaction, out _))
                 {
-                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：反应 {row.Reaction} 不在 fg.TbReaction");
+                    ProblemList.Add($"fg.TbFusionRecipe {row.Id}：反应 {row.Reaction} 不在 fg.TbReaction"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 var def = new FusionRecipeDef
                 {

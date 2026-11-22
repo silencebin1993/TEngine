@@ -1,4 +1,5 @@
 using BinGames.Sim;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Battle
 {
@@ -16,38 +17,38 @@ namespace GameLogic.UI.Battle
             switch (result)
             {
                 case ControlRequestResult.Success:
-                    return new FourPartFeedback($"已切换至 #{current.Value}", "控制中",
-                        $"信号范围内还有 {candidateCount} 个候选", "Tab 循环切换下一个");
+                    return new FourPartFeedback(GameText.Format("control.feedback.switched_to_0", current.Value), GameText.Get("control.feedback.in_control"),
+                        GameText.Format("control.feedback.0_more_candidates_in", candidateCount), GameText.Get("control.feedback.tab_cycles_to_the"));
                 case ControlRequestResult.AlreadyControlled:
-                    return new FourPartFeedback("目标已是当前控制对象", "控制未变",
-                        "本次请求没有产生任何效果", "选择场上另一名友军作为目标");
+                    return new FourPartFeedback(GameText.Get("control.feedback.already_controlling_that_target"), GameText.Get("control.feedback.control_unchanged"),
+                        GameText.Get("control.feedback.this_request_had_no"), GameText.Get("control.feedback.choose_another_ally_on"));
                 case ControlRequestResult.SimulationNotRunning:
-                    return new FourPartFeedback("战斗模拟尚未运行", "无法切换",
-                        "本次请求被忽略", "等待关卡加载完成后重试");
+                    return new FourPartFeedback(GameText.Get("control.feedback.combat_simulation_is_not"), GameText.Get("control.feedback.cannot_switch"),
+                        GameText.Get("control.feedback.this_request_was_ignored"), GameText.Get("control.feedback.wait_for_the_level"));
                 case ControlRequestResult.InvalidTarget:
-                    return new FourPartFeedback("目标实体无效", "切换失败",
-                        "控制权保持原状", "重新用 Tab/点选选择一个有效目标");
+                    return new FourPartFeedback(GameText.Get("control.feedback.invalid_target"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.pick_a_valid_target"));
                 case ControlRequestResult.TargetNotFound:
-                    return new FourPartFeedback("目标已不在场上", "切换失败",
-                        "控制权保持原状", "选择当前存活的友军");
+                    return new FourPartFeedback(GameText.Get("control.feedback.the_target_is_no"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.pick_an_ally_that"));
                 case ControlRequestResult.TargetDead:
-                    return new FourPartFeedback("目标已死亡", "切换失败",
-                        "控制权保持原状", "选择其它存活友军");
+                    return new FourPartFeedback(GameText.Get("control.feedback.the_target_is_destroyed"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.pick_another_living_ally"));
                 case ControlRequestResult.TargetNotFriendly:
-                    return new FourPartFeedback("目标不是友军", "切换失败",
-                        "控制权保持原状", "只能选择友军阵营的单位");
+                    return new FourPartFeedback(GameText.Get("control.feedback.the_target_is_not"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.only_allied_units_can"));
                 case ControlRequestResult.OutOfSignalRange:
-                    return new FourPartFeedback("目标超出信号范围", "切换失败",
-                        "控制权保持原状", "靠近目标，或等待信号范围内出现新候选");
+                    return new FourPartFeedback(GameText.Get("control.feedback.the_target_is_out"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.move_closer_or_wait"));
                 case ControlRequestResult.CooldownActive:
-                    return new FourPartFeedback("切换冷却中", "暂时不可切换",
-                        "控制权保持原状", "稍候片刻后再次尝试切换");
+                    return new FourPartFeedback(GameText.Get("control.feedback.switching_is_on_cooldown"), GameText.Get("control.feedback.cannot_switch_yet"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.wait_a_moment_and"));
                 case ControlRequestResult.CurrentUnitUnavailable:
-                    return new FourPartFeedback("当前控制目标不可用", "切换失败",
-                        "控制权保持原状", "重新选择一个存活的友军");
+                    return new FourPartFeedback(GameText.Get("control.feedback.the_current_control_target"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.pick_a_living_ally"));
                 default:
-                    return new FourPartFeedback("范围内没有可切换友军", "切换失败",
-                        "控制权保持原状", "靠近友军，或等待新的候选出现");
+                    return new FourPartFeedback(GameText.Get("control.feedback.no_ally_in_range"), GameText.Get("control.feedback.switch_failed"),
+                        GameText.Get("control.feedback.control_unchanged_2"), GameText.Get("control.feedback.move_closer_to_an"));
             }
         }
 
@@ -58,34 +59,34 @@ namespace GameLogic.UI.Battle
             {
                 case ControlChangeReason.ControlledDeath:
                     return current.IsValid
-                        ? new FourPartFeedback("受控身体死亡", "意识已回弹",
-                            $"已自动接管 #{current.Value}", "继续操作新身体，或按 Tab 换人")
-                        : new FourPartFeedback("受控身体死亡", "意识无处可去",
-                            "暂时没有可接管的友军", "等待新的友军出现后再接管");
+                        ? new FourPartFeedback(GameText.Get("control.feedback.controlled_unit_destroyed"), GameText.Get("control.feedback.signal_returned"),
+                            GameText.Format("control.feedback.took_over_0_automatically", current.Value), GameText.Get("control.feedback.keep_going_with_the"))
+                        : new FourPartFeedback(GameText.Get("control.feedback.controlled_unit_destroyed"), GameText.Get("control.feedback.signal_has_nowhere_to"),
+                            GameText.Get("control.feedback.no_ally_available_to"), GameText.Get("control.feedback.wait_for_a_new"));
                 case ControlChangeReason.ControlledRemoved:
                     return current.IsValid
-                        ? new FourPartFeedback("受控载体消失", "已转移控制",
-                            $"已自动接管 #{current.Value}", "继续操作新身体，或按 Tab 换人")
-                        : new FourPartFeedback("受控载体消失", "失去载体",
-                            "暂时没有可接管的友军", "等待新的友军出现后再接管");
+                        ? new FourPartFeedback(GameText.Get("control.feedback.controlled_unit_vanished"), GameText.Get("control.feedback.control_transferred"),
+                            GameText.Format("control.feedback.took_over_0_automatically", current.Value), GameText.Get("control.feedback.keep_going_with_the"))
+                        : new FourPartFeedback(GameText.Get("control.feedback.controlled_unit_vanished"), GameText.Get("control.feedback.unit_lost"),
+                            GameText.Get("control.feedback.no_ally_available_to"), GameText.Get("control.feedback.wait_for_a_new"));
                 case ControlChangeReason.Restored:
                     return current.IsValid
-                        ? new FourPartFeedback("读档/重进场景后恢复", "意识已恢复",
-                            $"已接管 #{current.Value}", "继续操作，无需额外动作")
-                        : new FourPartFeedback("读档/重进场景后恢复", "恢复失败",
-                            "暂时没有可接管的友军", "接管任意一具友军身体");
+                        ? new FourPartFeedback(GameText.Get("control.feedback.restored_after_load_re"), GameText.Get("control.feedback.signal_restored"),
+                            GameText.Format("control.feedback.took_over_0", current.Value), GameText.Get("control.feedback.keep_going_nothing_else"))
+                        : new FourPartFeedback(GameText.Get("control.feedback.restored_after_load_re"), GameText.Get("control.feedback.restore_failed"),
+                            GameText.Get("control.feedback.no_ally_available_to"), GameText.Get("control.feedback.take_over_any_allied"));
                 case ControlChangeReason.Released:
                     // M1-06 既有缺口：此前这条落进 default，被显示成"控制目标丢失"——
                     // 但这是玩家主动放下意识进战略视角，身体还好好站在场上，不是异常，
                     // 见 ControlChangeReason.Released 本身的类型注释。
-                    return new FourPartFeedback("主动放下意识", "无受控实体（正常）",
-                        "可在战略视角指挥全军", "接管任意一具友军身体重新直控");
+                    return new FourPartFeedback(GameText.Get("control.feedback.released_control"), GameText.Get("control.feedback.no_controlled_unit_normal"),
+                        GameText.Get("control.feedback.you_can_command_all"), GameText.Get("control.feedback.take_over_any_allied_2"));
                 default:
                     return current.IsValid
-                        ? new FourPartFeedback("Tab 切换", "控制中",
-                            $"当前控制 #{current.Value}", "继续操作，或按 Tab 换人")
-                        : new FourPartFeedback("无控制权变更来源信息", "无受控实体",
-                            "暂时没有可接管的友军", "接管任意一具友军身体");
+                        ? new FourPartFeedback(GameText.Get("control.feedback.tab_to_switch"), GameText.Get("control.feedback.in_control"),
+                            GameText.Format("control.feedback.controlling_0", current.Value), GameText.Get("control.feedback.keep_going_or_press"))
+                        : new FourPartFeedback(GameText.Get("control.feedback.no_source_for_the"), GameText.Get("control.feedback.no_controlled_unit"),
+                            GameText.Get("control.feedback.no_ally_available_to"), GameText.Get("control.feedback.take_over_any_allied"));
             }
         }
 
@@ -95,16 +96,16 @@ namespace GameLogic.UI.Battle
             switch (availability)
             {
                 case ControlAvailability.Suspended:
-                    return new FourPartFeedback("信号重连中", "宽限期等待恢复",
-                        "受控身体暂时解析不到，稍后会自动恢复或回弹", "原地等待，不需要手动操作");
+                    return new FourPartFeedback(GameText.Get("control.feedback.signal_reconnecting"), GameText.Get("control.feedback.waiting_out_the_grace"),
+                        GameText.Get("control.feedback.the_controlled_unit_cannot"), GameText.Get("control.feedback.stay_put_no_action"));
                 case ControlAvailability.Released:
                     // 同 ForChange(Released,...) 的既有 bug：此前与 None 共用"控制目标丢失"，
                     // 而这是玩家进战略视角后的**常态**，几乎每局都会频繁经过这个分支。
-                    return new FourPartFeedback("处于战略视角", "无受控实体（正常）",
-                        "可指挥全军但不能直接操作单个身体", "接管任意一具友军身体切回直控");
+                    return new FourPartFeedback(GameText.Get("control.feedback.in_strategic_view"), GameText.Get("control.feedback.no_controlled_unit_normal"),
+                        GameText.Get("control.feedback.you_can_command_all_2"), GameText.Get("control.feedback.take_over_any_allied_3"));
                 default:
-                    return new FourPartFeedback("没有可用的受控身体", "无受控实体",
-                        "无法直控操作，仅能用战略视角指挥", "等待新的友军出现后再接管");
+                    return new FourPartFeedback(GameText.Get("control.feedback.no_controllable_unit_available"), GameText.Get("control.feedback.no_controlled_unit"),
+                        GameText.Get("control.feedback.direct_control_unavailable_comma"), GameText.Get("control.feedback.wait_for_a_new"));
             }
         }
     }

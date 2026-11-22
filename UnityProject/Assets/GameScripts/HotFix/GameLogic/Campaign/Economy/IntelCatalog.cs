@@ -257,13 +257,13 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbIntelKind / fg.TbBuildingStack / fg.TbIntelBoss / fg.TbIntelFragment 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbIntelKind / fg.TbBuildingStack / fg.TbIntelBoss / fg.TbIntelFragment 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (kinds == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbIntelKind 不存在（改 tools/cell_tables/fgdata_intel.py 后重新生成）");
+                    ProblemList.Add("fg.TbIntelKind 不存在（改 tools/cell_tables/fgdata_intel.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[IntelCatalog] " + ProblemList[0]);
                 return;
@@ -272,7 +272,7 @@ namespace GameLogic.Campaign.Economy
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || KindById.ContainsKey(row.Id))
                 {
-                    ProblemList.Add("fg.TbIntelKind：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbIntelKind：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string cond = row.Condition ?? string.Empty;
@@ -281,17 +281,17 @@ namespace GameLogic.Campaign.Economy
                 int arg = 0;
                 if (colon >= 0 && !int.TryParse(cond.Substring(colon + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out arg))
                 {
-                    ProblemList.Add($"fg.TbIntelKind {row.Id}：条件 {cond} 的数字不合法");
+                    ProblemList.Add($"fg.TbIntelKind {row.Id}：条件 {cond} 的数字不合法"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (head != "raid" && head != "expedition" && head != "boss" && head != "tier" && head != "act")
                 {
-                    ProblemList.Add($"fg.TbIntelKind {row.Id}：条件 {cond} 不认识");
+                    ProblemList.Add($"fg.TbIntelKind {row.Id}：条件 {cond} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (row.DecipherSeconds <= 0f)
                 {
-                    ProblemList.Add($"fg.TbIntelKind {row.Id}：破译时间要 > 0");
+                    ProblemList.Add($"fg.TbIntelKind {row.Id}：破译时间要 > 0"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var def = new IntelKindDef
@@ -311,7 +311,7 @@ namespace GameLogic.Campaign.Economy
                 {
                     if (row == null || string.IsNullOrEmpty(row.TypeId) || row.Nth < 1)
                     {
-                        ProblemList.Add("fg.TbBuildingStack：建筑类型为空或第几座 < 1");
+                        ProblemList.Add("fg.TbBuildingStack：建筑类型为空或第几座 < 1"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     if (!tmp.TryGetValue(row.TypeId, out SortedDictionary<int, float> d))
@@ -328,7 +328,7 @@ namespace GameLogic.Campaign.Economy
                     {
                         if (e.Key != i + 1)
                         {
-                            ProblemList.Add($"fg.TbBuildingStack {kv.Key}：第几座必须从 1 连续编号");
+                            ProblemList.Add($"fg.TbBuildingStack {kv.Key}：第几座必须从 1 连续编号"); // loc-ignore: 开发者自检 / 诊断文本
                         }
                         arr[i++] = e.Value;
                     }
@@ -345,7 +345,7 @@ namespace GameLogic.Campaign.Economy
                     }
                     if (row.Rule != BossRuleFoundryCore && row.Rule != BossRuleSilentMind && row.Rule != BossRuleBaptismTower && row.Rule != BossRuleEmberHost)
                     {
-                        ProblemList.Add($"fg.TbIntelBoss {row.Id}：规则 {row.Rule} 代码里没有");
+                        ProblemList.Add($"fg.TbIntelBoss {row.Id}：规则 {row.Rule} 代码里没有"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     BossList.Add(new IntelBossDef

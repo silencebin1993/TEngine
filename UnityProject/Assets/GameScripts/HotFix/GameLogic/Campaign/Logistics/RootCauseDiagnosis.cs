@@ -1316,7 +1316,7 @@ namespace GameLogic.Campaign.Logistics
                 var at = new Vector2(a.x, a.y);
                 var r = new DiagReport { Subject = DiagSubject.PipeNetwork, SubjectId = "pipe-net:" + a.x + "," + a.y, Name = label, Position = at };
                 DiagChain c = NewChain(DiagCategory.Input);
-                Step(c, DiagCode.PipeNetwork, GameText.Format("diag.step.pipe_net", label, PipeNetworkService.DescribeState(n).Replace("\n", "；")), at, null);
+                Step(c, DiagCode.PipeNetwork, GameText.Format("diag.step.pipe_net", label, PipeNetworkService.DescribeState(n).Replace("\n", GameText.Get("logistics.load.reason.separator"))), at, null);
                 if ((i & PipeNetIssue.NoSource) != 0)
                 {
                     Step(c, DiagCode.PipeNoSource, GameText.Get("diag.step.pipe_no_source"), at, null);

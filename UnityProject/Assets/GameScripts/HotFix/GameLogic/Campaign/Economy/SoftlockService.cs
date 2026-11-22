@@ -569,7 +569,7 @@ namespace GameLogic.Campaign.Economy
                     changed = true;
                 }
                 w.Enclosed = enclosed[i];
-                string blockText = blockers[i].Count > 0 ? string.Join(GameText.Language == GameLanguage.En ? ", " : "、", blockers[i]) : GameText.Get("softlock.reach.terrain");
+                string blockText = blockers[i].Count > 0 ? string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), blockers[i]) : GameText.Get("softlock.reach.terrain");
                 if (w.Blockers != blockText)
                 {
                     w.Blockers = blockText;

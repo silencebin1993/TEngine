@@ -138,6 +138,7 @@ namespace GameLogic.UI.Expedition
         public void BindView(VisualElement root, VisualTreeAsset rowTemplate)
         {
             _root = root;
+            UiText.Localize(root); // FG15-UX-03：UXML 的 tooltip="@键"（悬停提示）
             _rowTemplate = rowTemplate;
             Instance = this;
             _panel = _root.Q<VisualElement>("ExpeditionPrepPanelRoot");
@@ -233,6 +234,7 @@ namespace GameLogic.UI.Expedition
             while (_rowPool.Count < count)
             {
                 TemplateContainer row = _rowTemplate.CloneTree();
+                UiText.LocalizeRow(row);
                 row.style.display = DisplayStyle.None;
                 _list.Add(row);
                 // 不是每次 Refresh 都 RegisterCallback——否则每 0.2 秒堆叠一份新回调，同一次勾选会触发 N 次 Add/Remove。
@@ -556,8 +558,8 @@ namespace GameLogic.UI.Expedition
             _exposureRow.style.display = state != null ? DisplayStyle.Flex : DisplayStyle.None;
             if (state != null)
             {
-                _exposureLabel.text = $"信号暴露 {state.SignalExposure:F0}/100｜带宽 {state.SignalBandwidth:F0}" +
-                    (state.SignalTowerBroadcastOff ? "（广播已关闭，−3带宽）" : string.Empty);
+                _exposureLabel.text = GameText.Format("expedition.prep.signal_exposure_0_f0", state.SignalExposure, state.SignalBandwidth) +
+                    (state.SignalTowerBroadcastOff ? GameText.Get("expedition.prep.broadcast_off_3_bandwidth") : string.Empty);
                 _towerBroadcastOffToggle.SetValueWithoutNotify(state.SignalTowerBroadcastOff);
             }
             if (!snapshot.RegionReachable)
@@ -572,10 +574,10 @@ namespace GameLogic.UI.Expedition
             string targetName = DestinationName(snapshot.Target);
             string objectiveLine = string.IsNullOrEmpty(snapshot.ObjectivePreviewText)
                 ? string.Empty
-                : "\n目标：" + snapshot.ObjectivePreviewText;
+                : GameText.Get("expedition.prep.target") + snapshot.ObjectivePreviewText;
             // ER6-LOOP-01 起在情报文案末尾附目标进度；ER8 收尾（DEBT-ER6LOOP01-01）常驻目标条/任务日志
             // 落地后，这一行与它们同源（当前目标标题 + 完成数），不再显示原始阶段枚举名与 OBJ 编号。
-            _intelLabel.text = $"目标：{targetName}（第 {snapshot.ExpeditionCount + 1} 次出击）｜警戒 {snapshot.EnemyAlertLevel:F0}/100" +
+            _intelLabel.text = GameText.Format("expedition.prep.target_0_sortie_1", targetName, snapshot.ExpeditionCount + 1, snapshot.EnemyAlertLevel) +
                 objectiveLine + $"\n{snapshot.EnemyIntelText}\n{DescribeObjectiveProgress(state)}";
 
             // ER6-ADAPT-01：反制情报。None 时四段合一显示（“无反制 / 安全默认”）；有反制时这里只写反制名与来源，
@@ -643,12 +645,12 @@ namespace GameLogic.UI.Expedition
                 // ER8-CONTENT-01：m.ChassisId 是机型编号（erc_001），此前直接查底盘表必然查不到、回退成把 erc_001
                 // 原样显示给玩家——先归到底盘类别再取展示名；系统占位机（救援机等）显示“机器”。行首图标＝底盘。
                 string chassisLabel = MechanicalContentFacade.ResolveChassisLabel(m.ChassisId);
-                row.Q<Label>("Chassis").text = string.IsNullOrEmpty(chassisLabel) || chassisLabel == m.ChassisId ? "机器" : chassisLabel;
+                row.Q<Label>("Chassis").text = string.IsNullOrEmpty(chassisLabel) || chassisLabel == m.ChassisId ? GameText.Get("reaction.log.machine") : chassisLabel;
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId);
                 row.Q<Label>("Health").text = $"HP{m.Health:F0}/{m.MaxHealth:F0}";
-                row.Q<Label>("Cargo").text = $"货{m.CargoSlots}";
-                row.Q<Label>("Bandwidth").text = $"带宽{m.BandwidthCost:F0}";
-                row.Q<Label>("Weapon").text = m.HasWeapon ? "武" : "—";
+                row.Q<Label>("Cargo").text = GameText.Format("expedition.prep.cargo_0", m.CargoSlots);
+                row.Q<Label>("Bandwidth").text = GameText.Format("expedition.prep.bw_0_f0", m.BandwidthCost);
+                row.Q<Label>("Weapon").text = m.HasWeapon ? GameText.Get("expedition.prep.arm") : "—";
                 // FG4-ECO-07：状态后附岗位（远征预备的机器一眼看出来）。
                 bool hasRec = MachineRegistry.TryGetRecord(m.LogicId, out MachineRecord roleRec) && roleRec != null;
                 string status = DescribeStatus(m);
@@ -708,9 +710,9 @@ namespace GameLogic.UI.Expedition
             if (interruptVisible)
             {
                 _interruptSection.AddToClassList("exp-interrupt-section-visible");
-                string names = string.Join("、", _pendingInterruptLogicIds
+                string names = string.Join(GameText.Get("signal.core.summary_sep"), _pendingInterruptLogicIds
                     .Select(id => MachineNaming.Short(id)));
-                _interruptLabel.text = $"{_pendingInterruptLogicIds.Length} 台机器正在工作（{names}），出征将中断当前任务并按规则交还/保留货物。确认出发？";
+                _interruptLabel.text = GameText.Format("expedition.prep.0_machines_are_working", _pendingInterruptLogicIds.Length, names);
             }
 
             _departButton.SetEnabled(!interruptVisible && !checklist.Blocked);
@@ -727,32 +729,32 @@ namespace GameLogic.UI.Expedition
             int completed = CampaignObjectiveCatalog.All.Count(d => CampaignObjectiveTracker.IsCompleted(state, d.Id));
             string currentId = CampaignObjectiveTracker.CurrentObjectiveId(state);
             string current = currentId != null
-                ? "当前目标：" + CampaignObjectiveCatalog.TitleOf(currentId)
-                : completed == total ? "全部目标完成" : "当前目标：无";
-            return $"{current}｜已完成 {completed}/{total}（按 {Core.InputDisplay.ForAction(Core.GameActionId.ToggleMissionLog)} 看任务日志）";
+                ? GameText.Get("expedition.prep.current_objective") + CampaignObjectiveCatalog.TitleOf(currentId)
+                : completed == total ? GameText.Get("expedition.prep.all_objectives_complete") : GameText.Get("expedition.prep.current_objective_none");
+            return GameText.Format("expedition.prep.0_done_1_2", current, completed, total, Core.InputDisplay.ForAction(Core.GameActionId.ToggleMissionLog));
         }
 
         private static string DescribeStatus(ExpeditionDepartureService.MachineIntel m)
         {
             if (m.Eligible)
             {
-                return m.BusyKind.HasValue ? "工作中（可中断）" : "空闲";
+                return m.BusyKind.HasValue ? GameText.Get("expedition.prep.working_can_interrupt") : GameText.Get("machine.status.idle");
             }
             if (!string.IsNullOrEmpty(m.IneligibleReason) && m.IneligibleReason.StartsWith("already-deployed"))
             {
-                return "已在远征中";
+                return GameText.Get("expedition.prep.already_on_an_expedition");
             }
             if (m.IneligibleReason == "in-factory")
             {
-                return "厂内待驶出";
+                return GameText.Get("expedition.prep.waiting_to_leave_the");
             }
             if (!string.IsNullOrEmpty(m.IneligibleReason) && m.IneligibleReason.StartsWith("busy-uninterruptible"))
             {
-                return "核心抢修中（不可中断）";
+                return GameText.Get("expedition.prep.repairing_the_core_cannot");
             }
             if (m.IneligibleReason == "dead")
             {
-                return "阵亡";
+                return GameText.Get("roster.status.dead");
             }
             return m.IneligibleReason ?? string.Empty;
         }

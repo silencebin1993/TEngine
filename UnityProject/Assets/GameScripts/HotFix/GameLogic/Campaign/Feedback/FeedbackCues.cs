@@ -3,6 +3,7 @@ using GameLogic.Campaign.Content;
 using GameLogic.Settings;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 using AudioType = TEngine.AudioType;
 
 namespace GameLogic.Campaign.Feedback
@@ -266,7 +267,7 @@ namespace GameLogic.Campaign.Feedback
             // 核心数据盒不进解析表（Boss 掉落、带回即启用信标配方），单独给名字，不回退成笼统的“关键物”。
             if (contentId == Regions.FoundryOutpostLayout.CoreDataContentId)
             {
-                return "核心数据";
+                return GameText.Get("feedback.cues.core_data");
             }
             if (contentId == Economy.BlackBoxService.ContentId)
             {
@@ -276,7 +277,7 @@ namespace GameLogic.Campaign.Feedback
                    && Regions.HomeValleyAnalysis.YieldTable.TryGetValue(contentId, out Regions.HomeValleyAnalysis.YieldInfo info)
                    && !string.IsNullOrEmpty(info.DisplayName)
                 ? info.DisplayName
-                : "关键物";
+                : GameText.Get("feedback.cues.key_item");
         }
 
         /// <summary>内容展示名（字幕用）；找不到返回空串，绝不回退成内部 ID。</summary>
@@ -356,14 +357,14 @@ namespace GameLogic.Campaign.Feedback
             {
                 return caption ?? string.Empty;
             }
-            return string.IsNullOrEmpty(caption) ? detail : caption + "：" + detail;
+            return string.IsNullOrEmpty(caption) ? detail : caption + GameText.Get("emg.enemy.program.sep") + detail;
         }
 
         private static void PushCaption(FeedbackCueDef def, string text, float now)
         {
             string tag = def.ResolvedTag;
             string key = tag + "|" + text;
-            LastCaptionText = string.IsNullOrEmpty(text) ? "【" + tag + "】" : "【" + tag + "】" + text;
+            LastCaptionText = string.IsNullOrEmpty(text) ? GameText.Get("feedback.caption.text") + tag + GameText.Get("feedback.caption.text_2") : GameText.Get("feedback.caption.text") + tag + GameText.Get("feedback.caption.text_2") + text;
 
             for (int i = 0; i < Captions.Count; i++)
             {

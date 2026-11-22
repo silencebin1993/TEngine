@@ -1117,7 +1117,7 @@ namespace GameLogic.EditorTools
             NotificationEntry note = NotificationCenter.History.LastOrDefault(n => n.Type?.Id == "research_done");
             bool notified = NotifyCount("research_done") == done0 + 1 && note != null && note.Text.Contains("分流与过滤") && note.Text.Contains("分流器")
                             && note.Members.Count > 0 && note.Members[note.Members.Count - 1].HasLocation;
-            bool away = rep != null && rep.Entries.Any(e => e.Section == "research" && e.TypeId == "research_done" && e.Detail.Contains("分流与过滤"));
+            bool away = rep != null && rep.Entries.Any(e => e.Section == "research" && e.TypeId == "research_done" && GameLogic.Localization.LocalizedDetail.Render(e.Detail).Contains("分流与过滤"));
             AwayReportService.End(s, 1, notify: false);
             Expect(notified && away && GameSettings.HasSeenGuidanceHook(GuidanceHooks.ResearchFirstCompleted) && GameSettings.HasSeenGuidanceHook(GuidanceHooks.ResearchFirstQueued)
                    && GameSettings.HasSeenGuidanceHook(GuidanceHooks.ResearchLabFirstBuilt),

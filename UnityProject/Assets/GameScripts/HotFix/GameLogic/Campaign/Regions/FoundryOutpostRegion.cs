@@ -253,11 +253,11 @@ namespace GameLogic.Campaign.Regions
             RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
             if (enemy == null)
             {
-                return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
+                return ActionResult.Fail(GameText.Format("foundry.region.enemy_0_does_not", enemyInstanceId));
             }
             if (!enemy.IsAlive)
             {
-                return ActionResult.Fail("目标已阵亡。");
+                return ActionResult.Fail(GameText.Get("foundry.region.the_target_is_already"));
             }
 
             // ER7-CORE-01：节点/主核心是"护盾/阶段"语义，全部委托 FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口）。
@@ -410,21 +410,21 @@ namespace GameLogic.Campaign.Regions
         {
             if (state == null)
             {
-                return ActionResult.Fail("没有活动的铸造前哨会话。");
+                return ActionResult.Fail(GameText.Get("foundry.region.no_active_foundry_outpost"));
             }
             RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
             if (enemy == null && !CombatSite.IsSeizedHostileId(enemyInstanceId)) // EMG4-HIJ-02：被夺控的机器没有敌人记录，目标由战斗地点解析
             {
-                return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
+                return ActionResult.Fail(GameText.Format("foundry.region.enemy_0_does_not", enemyInstanceId));
             }
             if (enemy != null && !enemy.IsAlive)
             {
-                return ActionResult.Fail("目标已阵亡。");
+                return ActionResult.Fail(GameText.Get("foundry.region.the_target_is_already"));
             }
             CombatSite site = CombatSites.Get(RegionId);
             if (site == null)
             {
-                return ActionResult.Fail("铸造前哨外围没有载入，不能结算攻击。");
+                return ActionResult.Fail(GameText.Get("foundry.region.the_foundry_outpost_outskirts"));
             }
             // EMG1-ENT-01：被残骸挡下（开了火、冷却照走）按失败返回，让直控 / 指令显示“被掩体挡下”的原因。
             return site.TryFireAtEnemy(attackerLogicId, enemyInstanceId, out BinGames.Sim.Combat.CombatFireResult fireResult, out string reason)
@@ -533,16 +533,16 @@ namespace GameLogic.Campaign.Regions
             bool known = crateId == FoundryOutpostLayout.Crate1Id || crateId == FoundryOutpostLayout.Crate2Id || crateId == FoundryOutpostLayout.Crate3Id;
             if (!known)
             {
-                return ActionResult.Fail($"未知箱子 {crateId}。");
+                return ActionResult.Fail(GameText.Format("foundry.region.unknown_crate_0", crateId));
             }
             RegionRecord region = Find(state);
             if (region == null)
             {
-                return ActionResult.Fail("铸造前哨尚未初始化。");
+                return ActionResult.Fail(GameText.Get("foundry.region.the_foundry_outpost_is"));
             }
             if (region.LootedContainerIds != null && region.LootedContainerIds.Contains(crateId))
             {
-                return ActionResult.Fail("该箱子已打开过。");
+                return ActionResult.Fail(GameText.Get("foundry.region.this_crate_has_already"));
             }
             MarkLooted(state, crateId);
             HomeValleyCargo.SpawnGroundItem(state, RegionId, position,
@@ -565,16 +565,16 @@ namespace GameLogic.Campaign.Regions
             };
             if (contentId == null)
             {
-                return ActionResult.Fail($"未知技术缓存 {cacheId}。");
+                return ActionResult.Fail(GameText.Format("foundry.region.unknown_tech_cache_0", cacheId));
             }
             RegionRecord region = Find(state);
             if (region == null)
             {
-                return ActionResult.Fail("铸造前哨尚未初始化。");
+                return ActionResult.Fail(GameText.Get("foundry.region.the_foundry_outpost_is"));
             }
             if (region.LootedContainerIds != null && region.LootedContainerIds.Contains(cacheId))
             {
-                return ActionResult.Fail("该技术缓存已领取过。");
+                return ActionResult.Fail(GameText.Get("foundry.region.this_tech_cache_has"));
             }
             MarkLooted(state, cacheId);
             SpawnQuestItemOnGround(state, contentId, position);
@@ -628,18 +628,18 @@ namespace GameLogic.Campaign.Regions
             RegionQuestItemRecord item = FindQuestItem(state, salvageInstanceId);
             if (item == null || item.State != RegionQuestItemState.OnGround)
             {
-                return ActionResult.Fail("地面上没有该物品。");
+                return ActionResult.Fail(GameText.Get("foundry.region.that_item_is_not"));
             }
             if (!MachineRegistry.TryGetRecord(carrierLogicId, out MachineRecord machine) || !machine.IsAlive ||
                 machine.RegionId != RegionId)
             {
-                return ActionResult.Fail("携带机器不存在/已阵亡/不在本区域。");
+                return ActionResult.Fail(GameText.Get("foundry.region.the_carrying_machine_is"));
             }
             item.State = RegionQuestItemState.Carried;
             item.CarrierLogicId = carrierLogicId;
             item.Position = default;
             Log.Info($"[FoundryOutpostRegion] {item.ContentId} 已装入机器 {carrierLogicId} 货舱。");
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, $"{Feedback.FeedbackCues.QuestItemName(item.ContentId)} → {Feedback.FeedbackCues.MachineLabel(carrierLogicId)} 货舱");
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, GameText.Format("foundry.region.0_1_cargo_hold", Feedback.FeedbackCues.QuestItemName(item.ContentId), Feedback.FeedbackCues.MachineLabel(carrierLogicId)));
             // FG8-LOOT-03：关键物 / 黑匣子从地上装进货舱——通知货舱面板、顶栏和地面外观重建（数组引用没变，靠修订号）。
             Economy.LootPickService.Touch();
             Economy.BlackBoxService.Touch();
@@ -908,12 +908,12 @@ namespace GameLogic.Campaign.Regions
             int batteryCount = allEnemies.Count(e => EnemyDefs.Encounters(RegionId, EnemyDefs.ConditionBattery).Any(b => b.Id == e.EnemyInstanceId));
             if (region != null && region.State != RegionState.Locked && batteryCount != batteryExpected && batteryCount != 0)
             {
-                violations.Add($"铸造前哨对空阵地敌人实例数应为 {batteryExpected}，实际 {batteryCount}。");
+                violations.Add($"铸造前哨对空阵地敌人实例数应为 {batteryExpected}，实际 {batteryCount}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (outskirtsCount != expectedOutskirtsCount)
             {
-                violations.Add($"铸造前哨外围（不含核心分区）敌人实例数应为 {expectedOutskirtsCount}（基线4" +
-                    $"{(hasAdaptiveSlot ? "+1 反制增援" : "")}{(hasCoreReinforcement ? "+1 核心入口增援" : "")}），实际 {outskirtsCount}。");
+                violations.Add($"铸造前哨外围（不含核心分区）敌人实例数应为 {expectedOutskirtsCount}（基线4" + // loc-ignore: 开发者自检 / 诊断文本
+                    $"{(hasAdaptiveSlot ? "+1 反制增援" : "")}{(hasCoreReinforcement ? "+1 核心入口增援" : "")}），实际 {outskirtsCount}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // ── 核心分区：未初始化恒为0；已初始化必为两节点+主核心3条，Transition后可能再+1维修机 ──
@@ -923,17 +923,17 @@ namespace GameLogic.Campaign.Regions
                 e.EnemyInstanceId == FoundryOutpostLayout.MainCoreId || e.EnemyInstanceId == FoundryOutpostLayout.CoreRepairBotSummonId);
             if (!coreInitialized && coreCount != 0)
             {
-                violations.Add($"核心分区尚未初始化（CoreState=Locked）但已存在 {coreCount} 条核心实例，数据不一致。");
+                violations.Add($"核心分区尚未初始化（CoreState=Locked）但已存在 {coreCount} 条核心实例，数据不一致。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (coreInitialized && coreCount != 3 && coreCount != 4)
             {
-                violations.Add($"核心分区已初始化，敌人实例数应为3（两节点+主核心）或4（Transition后+1维修机），实际 {coreCount}。");
+                violations.Add($"核心分区已初始化，敌人实例数应为3（两节点+主核心）或4（Transition后+1维修机），实际 {coreCount}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             var dupCheck = allEnemies.GroupBy(e => e.EnemyInstanceId).Where(g => g.Count() > 1).ToList();
             if (dupCheck != null && dupCheck.Count > 0)
             {
-                violations.Add($"存在重复的 EnemyInstanceId：{string.Join(",", dupCheck.Select(g => g.Key))}");
+                violations.Add($"存在重复的 EnemyInstanceId：{string.Join(",", dupCheck.Select(g => g.Key))}"); // loc-ignore: 开发者自检 / 诊断文本
             }
             return violations;
         }

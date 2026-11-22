@@ -101,6 +101,7 @@ namespace GameLogic.UI.WorkOrder
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[WorkOrderPanelUIToolkit] rootVisualElement 等待超时，工作单面板未初始化。");
@@ -196,7 +197,7 @@ namespace GameLogic.UI.WorkOrder
             RefreshPriorityRows();
             RefreshMachineDetail();
             if (_details != null)
-                _details.text = $"工作单 {_liveOrdersCache.Count} · 警报 {_alertsCache.Count} · {(_detailsOpen ? "收起详情" : "展开详情")}";
+                _details.text = GameText.Format("workorder.panel.work_orders_0_alerts", _liveOrdersCache.Count, _alertsCache.Count, (_detailsOpen ? GameLogic.Localization.GameText.Get("workorder.details.collapse") : GameLogic.Localization.GameText.Get("workorder.details.expand")));
         }
 
         /// <summary>ER4-MCH-01：选中机器时展示编号/底盘/装配/HP/电池/状态/经历/统计——与
@@ -454,16 +455,16 @@ namespace GameLogic.UI.WorkOrder
         {
             switch (kind)
             {
-                case WorkOrderKind.Haul: return "搬运";
-                case WorkOrderKind.Build: return "建造";
-                case WorkOrderKind.Repair: return "维修";
-                case WorkOrderKind.Salvage: return "拆解";
-                case WorkOrderKind.Recharge: return "充电";
+                case WorkOrderKind.Haul: return GameText.Get("workorder.panel.haul");
+                case WorkOrderKind.Build: return GameText.Get("input.category.build");
+                case WorkOrderKind.Repair: return GameText.Get("alarm.kind.repair");
+                case WorkOrderKind.Salvage: return GameText.Get("alarm.kind.salvage");
+                case WorkOrderKind.Recharge: return GameText.Get("workorder.panel.recharge");
                 case WorkOrderKind.Deliver:
                 case WorkOrderKind.MachineRepair:
                 case WorkOrderKind.Garrison:
                     return GameLogic.Campaign.Economy.StandingRuleService.KindTextOf(kind);
-                default: return "工作";
+                default: return GameText.Get("alarm.kind.other");
             }
         }
 
@@ -471,14 +472,14 @@ namespace GameLogic.UI.WorkOrder
         {
             switch (state)
             {
-                case WorkOrderState.Proposed: return "待确认";
-                case WorkOrderState.Ready: return "待分配";
-                case WorkOrderState.Reserved: return "已预留";
-                case WorkOrderState.InProgress: return "进行中";
-                case WorkOrderState.Waiting: return "等待中";
-                case WorkOrderState.Completed: return "已完成";
-                case WorkOrderState.Cancelled: return "已取消";
-                case WorkOrderState.Failed: return "失败";
+                case WorkOrderState.Proposed: return GameText.Get("workorder.panel.awaiting_confirmation");
+                case WorkOrderState.Ready: return GameText.Get("workorder.panel.awaiting_assignment");
+                case WorkOrderState.Reserved: return GameText.Get("workorder.panel.reserved");
+                case WorkOrderState.InProgress: return GameText.Get("workorder.panel.in_progress");
+                case WorkOrderState.Waiting: return GameText.Get("workorder.panel.waiting");
+                case WorkOrderState.Completed: return GameText.Get("analysis.state.completed");
+                case WorkOrderState.Cancelled: return GameText.Get("analysis.state.cancelled");
+                case WorkOrderState.Failed: return GameText.Get("workorder.panel.failed");
                 default: return string.Empty;
             }
         }
@@ -521,7 +522,7 @@ namespace GameLogic.UI.WorkOrder
             }
             if (reason == HomeValleyConstruction.ReturnWaitReason || reason.StartsWith("storage-full", System.StringComparison.Ordinal))
             {
-                return "仓库已满，腾出仓位后自动继续";
+                return GameText.Get("workorder.panel.storage_full_resumes_automatical");
             }
             if (Campaign.Regions.HomeValleyWorkOrders.IsUnreachableReason(reason))
             {
@@ -531,13 +532,13 @@ namespace GameLogic.UI.WorkOrder
             }
             switch (reason)
             {
-                case "machine-died": return "执行机器损失，资源已退还";
-                case "machine-not-found": return "执行机器已不在场";
-                case "target-destroyed": return "目标已不存在";
-                case "source-vanished": return "物资已不在原处";
-                case "cargo-lost": return "货物已丢失";
-                case "path-blocked": return "路径受阻，正在等待通行";
-                default: return "暂时受阻";
+                case "machine-died": return GameText.Get("workorder.panel.the_assigned_machine_was");
+                case "machine-not-found": return GameText.Get("workorder.panel.the_assigned_machine_is");
+                case "target-destroyed": return GameText.Get("quest.fail.target_gone");
+                case "source-vanished": return GameText.Get("workorder.panel.the_supplies_are_no");
+                case "cargo-lost": return GameText.Get("workorder.panel.the_cargo_was_lost");
+                case "path-blocked": return GameText.Get("workorder.panel.path_blocked_waiting_to");
+                default: return GameText.Get("workorder.panel.temporarily_blocked");
             }
         }
 
@@ -560,10 +561,10 @@ namespace GameLogic.UI.WorkOrder
         {
             switch (kind)
             {
-                case WorkOrderKind.Haul: return "地面物资";
-                case WorkOrderKind.Salvage: return "残骸";
-                case WorkOrderKind.Recharge: return "充电";
-                default: return "建筑";
+                case WorkOrderKind.Haul: return GameText.Get("workorder.panel.ground_supplies");
+                case WorkOrderKind.Salvage: return GameText.Get("grid.obstacle.wreckage");
+                case WorkOrderKind.Recharge: return GameText.Get("workorder.panel.recharge");
+                default: return GameText.Get("raid.result.kind.building");
             }
         }
 

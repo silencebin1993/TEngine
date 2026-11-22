@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameLogic.Campaign.Content;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -380,14 +381,16 @@ namespace GameLogic.Campaign.Regions
         public readonly struct ProduceBlueprintDefault
         {
             public readonly string ChassisId;
-            public readonly string DisplayName;
+            /// <summary>FG15-UX-03（审查 P2）：存文本键，读取时按当前语言取（静态表初始化时取文本会冻结语言）。</summary>
+            public readonly string NameKey;
+            public string DisplayName => GameText.Get(NameKey);
             public readonly int ScrapCost;
             public readonly float Seconds;
 
-            public ProduceBlueprintDefault(string chassisId, string displayName, int scrapCost, float seconds)
+            public ProduceBlueprintDefault(string chassisId, string nameKey, int scrapCost, float seconds)
             {
                 ChassisId = chassisId;
-                DisplayName = displayName;
+                NameKey = nameKey;
                 ScrapCost = scrapCost;
                 Seconds = seconds;
             }
@@ -396,9 +399,9 @@ namespace GameLogic.Campaign.Regions
         public static readonly IReadOnlyDictionary<string, ProduceBlueprintDefault> FactoryProduceDefaults =
             new Dictionary<string, ProduceBlueprintDefault>
             {
-                [BlueprintErc003Id] = new ProduceBlueprintDefault(Erc003ChassisId, "战斗履带 ERC-003", 60, 30f),
-                [BlueprintHaulerId] = new ProduceBlueprintDefault(Erc002ChassisId, "搬运机", 35, 20f),
-                [BlueprintHoverId] = new ProduceBlueprintDefault(ChassisCatalog.ChassisHoverId, "维修机", 55, 25f),
+                [BlueprintErc003Id] = new ProduceBlueprintDefault(Erc003ChassisId, "home.layout.combat_tracks_erc_003", 60, 30f),
+                [BlueprintHaulerId] = new ProduceBlueprintDefault(Erc002ChassisId, "home.layout.hauler", 35, 20f),
+                [BlueprintHoverId] = new ProduceBlueprintDefault(ChassisCatalog.ChassisHoverId, "home.layout.repair_unit", 55, 25f),
             };
 
         /// <summary>全部空间锚点（含机器出生点、残骸、信标预留位），供不重叠/可达性校验遍历。</summary>
@@ -450,7 +453,7 @@ namespace GameLogic.Campaign.Regions
                     if (dist < minGap)
                     {
                         violations.Add(
-                            $"锚点 {anchors[i].Id} 与 {anchors[j].Id} 净空重叠：距离 {dist:F2} < 所需 {minGap:F2}");
+                            $"锚点 {anchors[i].Id} 与 {anchors[j].Id} 净空重叠：距离 {dist:F2} < 所需 {minGap:F2}"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
 
@@ -460,13 +463,13 @@ namespace GameLogic.Campaign.Regions
                     Mathf.Abs(a.Position.y) + a.ClearanceRadius <= CameraBoundsHalfExtentZ;
                 if (!insideBounds)
                 {
-                    violations.Add($"锚点 {a.Id} 超出相机边界（半宽 {CameraBoundsHalfExtentX}/{CameraBoundsHalfExtentZ}）");
+                    violations.Add($"锚点 {a.Id} 超出相机边界（半宽 {CameraBoundsHalfExtentX}/{CameraBoundsHalfExtentZ}）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
 
             if (CameraBoundsHalfExtentX <= 0f || CameraBoundsHalfExtentZ <= 0f)
             {
-                violations.Add("相机边界半宽/半高必须为正数（相机无锚点）");
+                violations.Add("相机边界半宽/半高必须为正数（相机无锚点）"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             return violations;

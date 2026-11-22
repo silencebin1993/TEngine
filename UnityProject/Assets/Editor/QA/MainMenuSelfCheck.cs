@@ -52,6 +52,9 @@ namespace GameLogic.EditorTools
                 return _fail;
             }
 
+            ConfigSystem.Instance.Load(); // FG15-UX-03：静态文字按文本表认键，先确保文本表已加载
+            Localization.GameText.Reload();
+            Localization.GameLanguage languageBefore = Settings.GameSettings.Language;
             GameObject instance = UnityEngine.Object.Instantiate(prefab);
             instance.hideFlags = HideFlags.HideAndDontSave;
             var errors = new List<string>();
@@ -113,6 +116,7 @@ namespace GameLogic.EditorTools
                        && sandboxLabel != null && sandboxLabel.text == Localization.GameText.Get("sandbox.menu.button"),
                     $"根菜单有“沙盒模式”按钮（在“新建”后面、文本键、已接点击）：{(sandboxLabel != null ? sandboxLabel.text : "无")}");
                 CheckSandboxModeNotSticky(window);
+                CheckLanguageSwitch(window, instance);
                 Expect(errors.Count == 0, "初始化过程零报错" + (errors.Count == 0 ? string.Empty : "——" + string.Join("；", errors)));
                 CheckSlotText();
             }
@@ -123,6 +127,7 @@ namespace GameLogic.EditorTools
             finally
             {
                 Application.logMessageReceived -= OnLog;
+                Settings.GameSettings.SetLanguage(languageBefore);
                 UnityEngine.Object.DestroyImmediate(instance);
             }
             return _fail;
@@ -197,6 +202,52 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>UnityEvent 的运行时监听数（AddListener 加的，不含预制体里序列化的）。</summary>
+        /// <summary>
+        /// FG15-UX-03 修复轮（审查 P1：主菜单 uGUI 预制体文字写死中文）：设置里切英文后，主菜单下一帧（OnUpdate）全部静态文字变英文、无中文残留；
+        /// 切回中文后恢复中文。代码按存档 / 键位现写的动态文字（存档卡片、继续原因、覆盖说明、重绑按钮上的键名）不在此列。
+        /// </summary>
+        private static void CheckLanguageSwitch(MainMenuUI window, GameObject instance)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            var dynamic = new HashSet<Text>();
+            foreach (string f in new[] { "_slotInfoTexts", "_slotActionLabels" })
+            {
+                foreach (Text t in (Text[])typeof(MainMenuUI).GetField(f, flags).GetValue(window))
+                {
+                    dynamic.Add(t);
+                }
+            }
+            dynamic.UnionWith(((Dictionary<GameActionId, Text>)typeof(MainMenuUI).GetField("_rebindLabels", flags).GetValue(window)).Values);
+            dynamic.Add((Text)typeof(MainMenuUI).GetField("_textContinueReason", flags).GetValue(window));
+            dynamic.Add((Text)typeof(MainMenuUI).GetField("_textConfirmInfo", flags).GetValue(window));
+            var cjk = new System.Text.RegularExpressions.Regex("[㐀-鿿！-｠　-〿]");
+            var tracked = (System.Collections.ICollection)typeof(MainMenuUI).GetField("_staticTexts", flags).GetValue(window);
+
+            Settings.GameSettings.SetLanguage(Localization.GameLanguage.En);
+            Invoke(window, "OnUpdate", "OnUpdate（切英文后的下一帧）");
+            var left = new List<string>();
+            int checkedCount = 0;
+            foreach (Text t in instance.GetComponentsInChildren<Text>(true))
+            {
+                if (dynamic.Contains(t) || string.IsNullOrEmpty(t.text))
+                {
+                    continue;
+                }
+                checkedCount++;
+                if (cjk.IsMatch(t.text))
+                {
+                    left.Add(t.name + "“" + t.text + "”");
+                }
+            }
+            Text newLabel = ((Button)typeof(MainMenuUI).GetField("_btnNew", flags).GetValue(window)).GetComponentInChildren<Text>(true);
+            Expect(tracked.Count >= 25 && left.Count == 0 && newLabel.text == Localization.GameText.Get("mainmenu.prefab.new", Localization.GameLanguage.En),
+                $"切英文后主菜单 {checkedCount} 个静态文字无中文（登记 {tracked.Count} 个；“新建”=“{newLabel.text}”）" + (left.Count == 0 ? string.Empty : "——残留：" + string.Join("、", left)));
+            Settings.GameSettings.SetLanguage(Localization.GameLanguage.ZhCn);
+            Invoke(window, "OnUpdate", "OnUpdate（切回中文）");
+            Expect(newLabel.text == Localization.GameText.Get("mainmenu.prefab.new", Localization.GameLanguage.ZhCn) && cjk.IsMatch(newLabel.text),
+                $"切回中文后主菜单恢复中文（“新建”=“{newLabel.text}”）");
+        }
+
         private static int CountRuntimeListeners(Button button)
         {
             object calls = typeof(UnityEngine.Events.UnityEventBase).GetField("m_Calls", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(button.onClick);

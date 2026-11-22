@@ -1,4 +1,5 @@
 using GameLogic.Campaign;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Common
 {
@@ -25,27 +26,27 @@ namespace GameLogic.UI.Common
             }
             if (code.StartsWith("spawn-failed", System.StringComparison.Ordinal))
             {
-                return "出厂失败，材料已退还";
+                return GameText.Get("queue.release_failed_materials_refunde");
             }
             string shortfall = Campaign.CampaignEconomyLedger.DescribeShortfall(code);
             if (shortfall != null)
             {
-                return shortfall + "，补足后自动开工";
+                return shortfall + GameText.Get("queue.starts_automatically_once_restoc");
             }
             switch (code)
             {
-                case "assembly-station-unpowered": return "装配站断电，恢复供电后继续（进度保留）";
-                case "assembly-station-destroyed": return "装配站被毁";
-                case "analysis-bench-unpowered": return "解析台断电，恢复供电后继续（进度保留）";
-                case "analysis-bench-destroyed": return "解析台被毁";
-                case "target-lost": return "目标机器已不在场";
-                case "target-left-home-valley": return "目标机器已离开归还谷地";
-                case "unknown-blueprint": return "蓝图无效";
-                case "quest-item-missing": return "待解析的模块已不在仓库";
-                case "exit-blocked": return "装配站出口被占用，清空后自动出厂";
-                case "blueprint-version-missing": return "蓝图版本已不存在";
-                case "material-missing": return "缺少材料芯片";
-                default: return "暂时受阻";
+                case "assembly-station-unpowered": return GameText.Get("queue.assembly_station_unpowered_resum");
+                case "assembly-station-destroyed": return GameText.Get("queue.assembly_station_destroyed");
+                case "analysis-bench-unpowered": return GameText.Get("queue.analysis_bench_unpowered_resumes");
+                case "analysis-bench-destroyed": return GameText.Get("queue.analysis_bench_destroyed");
+                case "target-lost": return GameText.Get("queue.the_target_machine_is");
+                case "target-left-home-valley": return GameText.Get("queue.the_target_machine_has");
+                case "unknown-blueprint": return GameText.Get("queue.invalid_blueprint");
+                case "quest-item-missing": return GameText.Get("queue.the_module_to_analyze");
+                case "exit-blocked": return GameText.Get("queue.assembly_station_exit_blocked");
+                case "blueprint-version-missing": return GameText.Get("queue.the_blueprint_version_no");
+                case "material-missing": return GameText.Get("queue.missing_material_chips");
+                default: return GameText.Get("queue.temporarily_blocked");
             }
         }
 
@@ -53,15 +54,15 @@ namespace GameLogic.UI.Common
         {
             switch (state)
             {
-                case FactoryQueueState.Queued: return "排队中";
-                case FactoryQueueState.WaitingResources: return "缺材料";
-                case FactoryQueueState.WaitingPower: return "缺电力";
-                case FactoryQueueState.WaitingTarget: return "等待目标";
-                case FactoryQueueState.Running: return "进行中";
-                case FactoryQueueState.OutputBlocked: return "出口堵塞";
-                case FactoryQueueState.Completed: return "已完成";
-                case FactoryQueueState.Cancelled: return "已取消";
-                case FactoryQueueState.Failed: return "失败";
+                case FactoryQueueState.Queued: return GameText.Get("analysis.state.queued");
+                case FactoryQueueState.WaitingResources: return GameText.Get("asm.state.waiting_materials");
+                case FactoryQueueState.WaitingPower: return GameText.Get("queue.no_power");
+                case FactoryQueueState.WaitingTarget: return GameText.Get("queue.waiting_for_target");
+                case FactoryQueueState.Running: return GameText.Get("queue.in_progress");
+                case FactoryQueueState.OutputBlocked: return GameText.Get("queue.exit_blocked");
+                case FactoryQueueState.Completed: return GameText.Get("analysis.state.completed");
+                case FactoryQueueState.Cancelled: return GameText.Get("analysis.state.cancelled");
+                case FactoryQueueState.Failed: return GameText.Get("queue.failed");
                 default: return string.Empty;
             }
         }

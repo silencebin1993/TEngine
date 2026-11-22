@@ -335,7 +335,7 @@ namespace GameLogic.Campaign.Endgame
                 }
                 if (tick - st.ActiveTick > 2L * Math.Max(1, GameClock.StepHz))
                 {
-                    Retry(st, tick, "没有建出突袭计划");
+                    Retry(st, tick, GameText.Get("postgame.no_raid_plan_was"));
                 }
                 return;
             }
@@ -347,7 +347,7 @@ namespace GameLogic.Campaign.Endgame
             }
             if (plan != null ? Cancelled(plan) : CancelledInHistory(s, st.ActivePlanId))
             {
-                Retry(st, tick, "突袭计划被取消");
+                Retry(st, tick, GameText.Get("postgame.the_raid_plan_was"));
                 return;
             }
             if (plan != null && plan.State < RaidDirectorService.StateEnded)

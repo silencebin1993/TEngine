@@ -83,6 +83,8 @@ namespace BinGames.EditorTools
                 doc.panelSettings = settings;
                 doc.visualTreeAsset = vta;
                 VisualElement treeRoot = doc.rootVisualElement;
+                // FG15-UX-03：与正式面板同一步——拿到根节点先把 UXML 里的 @文本键换成当前语言（否则量的是键名的宽度）。
+                GameLogic.Localization.UiText.LocalizeRow(treeRoot);
                 VisualElement target = string.IsNullOrEmpty(panelRootName) ? treeRoot : treeRoot.Q<VisualElement>(panelRootName);
                 if (target == null)
                 {

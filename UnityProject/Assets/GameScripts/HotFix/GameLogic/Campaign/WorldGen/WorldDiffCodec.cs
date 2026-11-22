@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.WorldGen
 {
@@ -69,7 +70,7 @@ namespace GameLogic.Campaign.WorldGen
             error = null;
             if (string.IsNullOrEmpty(payload) || !payload.StartsWith(Prefix, StringComparison.Ordinal))
             {
-                error = "区块差异编码前缀不是 d1:";
+                error = "区块差异编码前缀不是 d1:"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             byte[] bytes;
@@ -79,23 +80,23 @@ namespace GameLogic.Campaign.WorldGen
             }
             catch (FormatException)
             {
-                error = "区块差异不是合法的 Base64";
+                error = "区块差异不是合法的 Base64"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             if (bytes.Length < 3)
             {
-                error = "区块差异太短";
+                error = "区块差异太短"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             if (bytes[0] != expectedChunkSize)
             {
-                error = $"区块差异的区块边长 {bytes[0]} 与当前 {expectedChunkSize} 不符";
+                error = $"区块差异的区块边长 {bytes[0]} 与当前 {expectedChunkSize} 不符"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             int count = bytes[1] | (bytes[2] << 8);
             if (bytes.Length != 3 + count * EntryBytes)
             {
-                error = $"区块差异长度 {bytes.Length} 与条数 {count} 不符";
+                error = $"区块差异长度 {bytes.Length} 与条数 {count} 不符"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             int cellsPerChunk = expectedChunkSize * expectedChunkSize;
@@ -110,22 +111,22 @@ namespace GameLogic.Campaign.WorldGen
                 o += EntryBytes;
                 if (index >= cellsPerChunk)
                 {
-                    error = $"区块差异第 {i} 条格子序号 {index} 越界";
+                    error = $"区块差异第 {i} 条格子序号 {index} 越界"; // loc-ignore: 开发者自检 / 诊断文本
                     return false;
                 }
                 if (mask == 0 || (mask & ~(ChunkCellDiff.TerrainBit | ChunkCellDiff.PollutionBit)) != 0)
                 {
-                    error = $"区块差异第 {i} 条层掩码 {mask} 非法";
+                    error = $"区块差异第 {i} 条层掩码 {mask} 非法"; // loc-ignore: 开发者自检 / 诊断文本
                     return false;
                 }
                 if (pollution > 3)
                 {
-                    error = $"区块差异第 {i} 条污染等级 {pollution} 超出 0～3";
+                    error = $"区块差异第 {i} 条污染等级 {pollution} 超出 0～3"; // loc-ignore: 开发者自检 / 诊断文本
                     return false;
                 }
                 if (!seen.Add(index))
                 {
-                    error = $"区块差异第 {i} 条格子 {index} 重复";
+                    error = $"区块差异第 {i} 条格子 {index} 重复"; // loc-ignore: 开发者自检 / 诊断文本
                     return false;
                 }
                 into?.Add(new ChunkCellDiff((ushort)index, mask, terrain, pollution));

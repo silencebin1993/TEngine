@@ -440,8 +440,8 @@ namespace GameLogic.EditorTools
             RepolluteResult again = PurificationService.Repollute(s, center, r, 1);
             AwayEntryRecord entry = rep?.Entries.LastOrDefault(e => e != null && e.TypeId == "pollution_raised");
             AwayReportService.End(s, AwayReportService.OutcomeOther, notify: false);
-            Expect(again.CellsRaised > 0 && entry != null && entry.Section == "weather" && entry.Detail.Contains("重新净化") && entry.HasLocation,
-                $"D2b 再污染记进离家报告：再污染 {again.CellsRaised} 格；“天气与环境”段有这条通知（{entry?.Section ?? "无"}，可定位 {entry?.HasLocation}），带重新净化路径（“{Short(entry?.Detail ?? string.Empty)}”）");
+            Expect(again.CellsRaised > 0 && entry != null && entry.Section == "weather" && GameLogic.Localization.LocalizedDetail.Render(entry.Detail).Contains("重新净化") && entry.HasLocation,
+                $"D2b 再污染记进离家报告：再污染 {again.CellsRaised} 格；“天气与环境”段有这条通知（{entry?.Section ?? "无"}，可定位 {entry?.HasLocation}），带重新净化路径（“{Short(GameLogic.Localization.LocalizedDetail.Render(entry?.Detail))}”）");
             var farCell = new GridCell(center.X + 400, center.Y + 400);
             map.SetPollution(farCell, 0);
             string farClean = PurificationService.RepurifyPath(s, farCell);
@@ -952,9 +952,9 @@ namespace GameLogic.EditorTools
             AwayReportRecord rep = AwayReportService.Current(s);
             AwayEntryRecord entry = rep?.Entries.LastOrDefault(e => e != null && e.TypeId == "pollution_raised");
             bool stillAway = ExpeditionMarchService.AwaySiteId(s) != null && AwayReportService.IsOpen(s);
-            Expect(landed && map.GetPollution(center) > 0 && stillAway && entry != null && entry.Detail.Contains("重新净化") && entry.HasLocation,
+            Expect(landed && map.GetPollution(center) > 0 && stillAway && entry != null && GameLogic.Localization.LocalizedDetail.Render(entry.Detail).Contains("重新净化") && entry.HasLocation,
                 $"W3 FG-GAP-161 ②：远征在外（离家报告开着 {stillAway}）时澄净无人机真实投放落地（{landed}），塔心 0 → {map.GetPollution(center)} 级；" +
-                $"离家报告里有这条再污染（{entry?.Section ?? "无"}，可定位 {entry?.HasLocation}），带重新净化路径（“{Short(entry?.Detail ?? string.Empty)}”）");
+                $"离家报告里有这条再污染（{entry?.Section ?? "无"}，可定位 {entry?.HasLocation}），带重新净化路径（“{Short(GameLogic.Localization.LocalizedDetail.Render(entry?.Detail))}”）");
         }
 
         // ─────────────────────────────── 工具 ───────────────────────────────

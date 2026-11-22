@@ -585,12 +585,12 @@ namespace GameLogic.Campaign.Content
                 _readings = _readingsOverride ?? ConfigSystem.Instance.Tables?.TbCarrierReading;
                 if (_components == null || _readings == null)
                 {
-                    _loadError = "配置表 fg.TbCombatComponent / fg.TbCarrierReading 不存在";
+                    _loadError = "配置表 fg.TbCombatComponent / fg.TbCarrierReading 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             catch (Exception ex)
             {
-                _loadError = $"配置表读取失败：{ex.Message}";
+                _loadError = $"配置表读取失败：{ex.Message}"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_loadError != null)
             {

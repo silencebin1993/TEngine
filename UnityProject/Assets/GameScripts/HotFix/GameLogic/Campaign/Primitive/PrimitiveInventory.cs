@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Primitive
 {
@@ -232,16 +233,16 @@ namespace GameLogic.Campaign.Primitive
         {
             if (state == null)
             {
-                return CircuitOpResult.Fail("no-campaign", "没有活动战役。");
+                return CircuitOpResult.Fail("no-campaign", GameText.Get("prim.inv.no_active_campaign"));
             }
             if (string.IsNullOrEmpty(salvageInstanceId))
             {
-                return CircuitOpResult.Fail("invalid-salvage-id", "缺少解析来源实例 ID。");
+                return CircuitOpResult.Fail("invalid-salvage-id", GameText.Get("prim.inv.missing_the_analysis_source"));
             }
             if (!IsPrimitiveChipSource(contentId))
             {
                 return CircuitOpResult.Fail("not-chip-source",
-                    $"'{contentId}' 不是可转化为基元芯片的内容（主线组件/固件不会被误转成芯片）。");
+                    GameText.Format("prim.inv.0_cannot_become_a", contentId));
             }
 
             state.PrimitiveChips ??= Array.Empty<PrimitiveChipRecord>();
@@ -272,17 +273,17 @@ namespace GameLogic.Campaign.Primitive
         {
             if (state == null)
             {
-                return CircuitOpResult.Fail("no-campaign", "没有活动战役。");
+                return CircuitOpResult.Fail("no-campaign", GameText.Get("prim.inv.no_active_campaign"));
             }
             bool unlocked = contentId == DefaultChipContentId
                 || (state.UnlockedContentIds?.Contains(contentId) ?? false);
             if (!unlocked)
             {
-                return CircuitOpResult.Fail("not-unlocked", $"'{contentId}' 尚未解锁，不能补印。");
+                return CircuitOpResult.Fail("not-unlocked", GameText.Format("prim.inv.0_is_locked_cannot", contentId));
             }
             if (IsFull(state))
             {
-                return CircuitOpResult.Fail("bag-full", "基元仓已满，无法补印新芯片（请先腾格或领取待领取实例）。");
+                return CircuitOpResult.Fail("bag-full", GameText.Get("prim.inv.primitive_storage_is_full"));
             }
 
             BuildingRecord station = state.BuildingRecords?.FirstOrDefault(b =>
@@ -292,7 +293,7 @@ namespace GameLogic.Campaign.Primitive
                 && station.PowerState == BuildingPowerState.Powered;
             if (!stationReady)
             {
-                return CircuitOpResult.Fail("no-power", "装配站未供电或未完工，无法补印。");
+                return CircuitOpResult.Fail("no-power", GameText.Get("prim.inv.the_assembly_station_is"));
             }
 
             string txId = "primitive-print:" + Guid.NewGuid().ToString("N");
@@ -306,7 +307,7 @@ namespace GameLogic.Campaign.Primitive
             if (!reserve.Success)
             {
                 CampaignEconomyLedger.Fail(state, txId, reserve.FailureReason);
-                return CircuitOpResult.Fail("insufficient-scrap", "废料不足，无法补印。");
+                return CircuitOpResult.Fail("insufficient-scrap", GameText.Get("prim.inv.not_enough_scrap_to"));
             }
             CampaignEconomyLedger.Commit(state, txId);
 
@@ -331,17 +332,17 @@ namespace GameLogic.Campaign.Primitive
             PrimitiveChipRecord record = Find(state, partId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+                return CircuitOpResult.Fail("part-not-found", GameText.Format("prim.inv.instance_0_not_found", partId));
             }
             if (record.State != PrimitiveChipState.Pending)
             {
-                return CircuitOpResult.Fail("not-pending", "该实例不在待领取队列中。");
+                return CircuitOpResult.Fail("not-pending", GameText.Get("prim.inv.this_instance_is_not"));
             }
             // Pending 实例结构上不可能被合成台预留（预留只发生在 Bag 态实例上，见
             // TryReserveForCraft），此处不需要额外校验 ReservedByTransactionId。
             if (IsFull(state))
             {
-                return CircuitOpResult.Fail("bag-full", "基元仓已满，无法领取，请先腾格。");
+                return CircuitOpResult.Fail("bag-full", GameText.Get("prim.inv.primitive_storage_is_full_2"));
             }
             record.State = PrimitiveChipState.Bag;
             Revision++;
@@ -359,22 +360,22 @@ namespace GameLogic.Campaign.Primitive
         {
             if (state == null || board == null)
             {
-                return CircuitOpResult.Fail("no-context", "没有活动战役或电路草稿。");
+                return CircuitOpResult.Fail("no-context", GameText.Get("prim.inv.no_active_campaign_or"));
             }
             PrimitiveChipRecord record = Find(state, partId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+                return CircuitOpResult.Fail("part-not-found", GameText.Format("prim.inv.instance_0_not_found", partId));
             }
             if (record.State != PrimitiveChipState.Bag)
             {
-                return CircuitOpResult.Fail("not-in-bag", "该实例不在仓中（可能已装在别处或待领取）。");
+                return CircuitOpResult.Fail("not-in-bag", GameText.Get("prim.inv.this_instance_is_not_2"));
             }
             if (!string.IsNullOrEmpty(record.ReservedByTransactionId))
             {
                 // ER4-PRIM-04：该实例已被合成台预留为材料，装/卸/领取三条既有通道必须统一拒绝
                 // （PRIMITIVE-FULL-DEMO-SPEC.md §4.2"未被其他事务预留……UI 显示已预留/不可装拆"）。
-                return CircuitOpResult.Fail("reserved-for-craft", "该实例已被合成台预留为材料，暂不可装卸。");
+                return CircuitOpResult.Fail("reserved-for-craft", GameText.Get("prim.inv.this_instance_is_reserved"));
             }
 
             CircuitOpResult placed = board.TryPlaceChip(slot, record.CardDefId);
@@ -401,13 +402,13 @@ namespace GameLogic.Campaign.Primitive
         {
             if (state == null || board == null)
             {
-                return CircuitOpResult.Fail("no-context", "没有活动战役或电路草稿。");
+                return CircuitOpResult.Fail("no-context", GameText.Get("prim.inv.no_active_campaign_or"));
             }
             string partId = (slot >= 0 && slot < board.SlotPartIds.Length) ? board.SlotPartIds[slot] : null;
 
             if (!string.IsNullOrEmpty(partId) && IsFull(state))
             {
-                return CircuitOpResult.Fail("bag-full", "基元仓已满，无法卸回，请先腾格（该实例保留在原槽）。");
+                return CircuitOpResult.Fail("bag-full", GameText.Get("prim.inv.primitive_storage_is_full_3"));
             }
 
             CircuitOpResult removed = board.TryRemoveChip(slot);
@@ -474,15 +475,15 @@ namespace GameLogic.Campaign.Primitive
             PrimitiveChipRecord record = Find(state, partId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+                return CircuitOpResult.Fail("part-not-found", GameText.Format("prim.inv.instance_0_not_found", partId));
             }
             if (record.State != PrimitiveChipState.Bag)
             {
-                return CircuitOpResult.Fail("not-in-bag", "该实例不在仓中（可能已装在别处或待领取）。");
+                return CircuitOpResult.Fail("not-in-bag", GameText.Get("prim.inv.this_instance_is_not_2"));
             }
             if (!string.IsNullOrEmpty(record.ReservedByTransactionId))
             {
-                return CircuitOpResult.Fail("reserved-for-craft", "该实例已被合成台预留为材料，暂不可装卸。");
+                return CircuitOpResult.Fail("reserved-for-craft", GameText.Get("prim.inv.this_instance_is_reserved"));
             }
             record.State = PrimitiveChipState.SignalCore;
             Revision++;
@@ -498,17 +499,17 @@ namespace GameLogic.Campaign.Primitive
             PrimitiveChipRecord record = Find(state, partId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+                return CircuitOpResult.Fail("part-not-found", GameText.Format("prim.inv.instance_0_not_found", partId));
             }
             if (record.State != PrimitiveChipState.SignalCore)
             {
-                return CircuitOpResult.Fail("not-in-signal-core", "该实例不在信号核里。");
+                return CircuitOpResult.Fail("not-in-signal-core", GameText.Get("prim.inv.this_instance_is_not_3"));
             }
             if (IsFull(state))
             {
                 if (!pendingIfFull)
                 {
-                    return CircuitOpResult.Fail("bag-full", "基元仓已满，无法卸回，请先腾格（该实例保留在信号核里）。");
+                    return CircuitOpResult.Fail("bag-full", GameText.Get("prim.inv.primitive_storage_is_full_4"));
                 }
                 record.State = PrimitiveChipState.Pending;
                 Revision++;
@@ -529,23 +530,23 @@ namespace GameLogic.Campaign.Primitive
             partId = null;
             if (state == null)
             {
-                return CircuitOpResult.Fail("no-campaign", "没有活动战役。");
+                return CircuitOpResult.Fail("no-campaign", GameText.Get("prim.inv.no_active_campaign"));
             }
             if (!isFirmware)
             {
-                return CircuitOpResult.Fail("not-firmware", $"'{firmwareId}' 不是固件。");
+                return CircuitOpResult.Fail("not-firmware", GameText.Format("prim.inv.0_is_not_firmware", firmwareId));
             }
             if (!unlocked)
             {
-                return CircuitOpResult.Fail("not-unlocked", $"'{firmwareId}' 尚未解锁，不能刻印。");
+                return CircuitOpResult.Fail("not-unlocked", GameText.Format("prim.inv.0_is_locked_cannot_2", firmwareId));
             }
             if (IsFull(state))
             {
-                return CircuitOpResult.Fail("bag-full", "基元仓已满，无法刻印。");
+                return CircuitOpResult.Fail("bag-full", GameText.Get("prim.inv.primitive_storage_is_full_5"));
             }
             if (!AssemblyStationReady(state))
             {
-                return CircuitOpResult.Fail("no-power", "装配站未供电或未完工，无法刻印。");
+                return CircuitOpResult.Fail("no-power", GameText.Get("prim.inv.the_assembly_station_is_2"));
             }
             string txId = "firmware-print:" + Guid.NewGuid().ToString("N");
             CampaignEconomyLedger.LedgerResult propose = CampaignEconomyLedger.ProposeConsume(
@@ -558,7 +559,7 @@ namespace GameLogic.Campaign.Primitive
             if (!reserve.Success)
             {
                 CampaignEconomyLedger.Fail(state, txId, reserve.FailureReason);
-                return CircuitOpResult.Fail("insufficient-scrap", "废料不足，无法刻印。");
+                return CircuitOpResult.Fail("insufficient-scrap", GameText.Get("prim.inv.not_enough_scrap_to_2"));
             }
             CampaignEconomyLedger.Commit(state, txId);
 
@@ -689,15 +690,15 @@ namespace GameLogic.Campaign.Primitive
             PrimitiveChipRecord record = Find(state, partId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'。");
+                return CircuitOpResult.Fail("part-not-found", GameText.Format("prim.inv.instance_0_not_found", partId));
             }
             if (record.State != PrimitiveChipState.Bag)
             {
-                return CircuitOpResult.Fail("not-in-bag", "材料必须在仓中（如在草稿槽，请先卸回仓）。");
+                return CircuitOpResult.Fail("not-in-bag", GameText.Get("prim.inv.the_material_must_be"));
             }
             if (!string.IsNullOrEmpty(record.ReservedByTransactionId) && record.ReservedByTransactionId != transactionId)
             {
-                return CircuitOpResult.Fail("already-reserved", "该实例已被另一个合成/拆解事务预留。");
+                return CircuitOpResult.Fail("already-reserved", GameText.Get("prim.inv.this_instance_is_reserved_2"));
             }
             record.ReservedByTransactionId = transactionId;
             Revision++;
@@ -724,11 +725,11 @@ namespace GameLogic.Campaign.Primitive
             PrimitiveChipRecord record = Find(state, partId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("part-not-found", $"找不到实例 '{partId}'（合成材料在提交前消失）。");
+                return CircuitOpResult.Fail("part-not-found", GameText.Format("prim.inv.instance_0_not_found_2", partId));
             }
             if (record.State != PrimitiveChipState.Bag || record.ReservedByTransactionId != transactionId)
             {
-                return CircuitOpResult.Fail("material-mismatch", $"实例 '{partId}' 状态与预留不一致，无法消耗。");
+                return CircuitOpResult.Fail("material-mismatch", GameText.Format("prim.inv.instance_0_does_not", partId));
             }
             state.PrimitiveChips = state.PrimitiveChips.Where(p => p.PartId != partId).ToArray();
             Revision++;

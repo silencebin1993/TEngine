@@ -763,12 +763,12 @@ namespace GameLogic.Campaign.Combat
         {
             if (IsDisposed)
             {
-                return $"[EmgWreck] {SiteId} 已卸载";
+                return $"[EmgWreck] {SiteId} 已卸载"; // loc-ignore: 开发者自检 / 诊断文本
             }
             var (born, aged, capped, destroyed) = Kernel.WreckCounts;
             EmgBusStats s = Kernel.EmgBusStats;
-            return $"[EmgWreck] {SiteId} 残骸 {Kernel.WreckCount}/{EmgConst.DefaultWreckCapacity} · 生成 {born} · 到期崩解 {aged} · 满容量崩解 {capped} · 被打掉 {destroyed} · "
-                   + $"挡弹 {s.WreckAbsorbs + s.CoverAbsorbed} · 反弹 {s.WreckBounces} · 破片 {s.FragSpawned}（池满未放 {s.FragLost}）· 撞击 {s.Impacts} · 位移 {s.Pushes}";
+            return $"[EmgWreck] {SiteId} 残骸 {Kernel.WreckCount}/{EmgConst.DefaultWreckCapacity} · 生成 {born} · 到期崩解 {aged} · 满容量崩解 {capped} · 被打掉 {destroyed} · " // loc-ignore: 开发者自检 / 诊断文本
+                   + $"挡弹 {s.WreckAbsorbs + s.CoverAbsorbed} · 反弹 {s.WreckBounces} · 破片 {s.FragSpawned}（池满未放 {s.FragLost}）· 撞击 {s.Impacts} · 位移 {s.Pushes}"; // loc-ignore: 开发者自检 / 诊断文本
         }
 
         private int _wreckCappedSeen, _wreckAgedSeen;
@@ -792,12 +792,12 @@ namespace GameLogic.Campaign.Combat
         {
             if (IsDisposed)
             {
-                return $"[EmgPatch] {SiteId} 已卸载";
+                return $"[EmgPatch] {SiteId} 已卸载"; // loc-ignore: 开发者自检 / 诊断文本
             }
             EmgScalars s = Kernel.PatchStats;
-            return $"[EmgPatch] {SiteId} 斑块 {Kernel.PatchCount}/{Kernel.Config.EmgPatchCapacity}（世界源保留 {Kernel.Config.EmgPatchReserve}）· 生成 {s.PatchesBorn} · 合并 {s.PatchesMerged} · 到期 {s.PatchesExpired} · "
-                   + $"软上限并入 {s.PatchSoftMerged} / 提前到期 {s.PatchSoftExpired} · 总上限并入 {s.PatchCapMerged} / 提前到期 {s.PatchCapExpired} · 丢弃 {s.PatchDropped} · 顺延 {s.PatchDeferred} · 残骸成碎屑 {s.WrecksToDebris} · "
-                   + $"区域 {Kernel.ZoneCount - Kernel.LegacyPatchCount}/{Kernel.Config.ZoneCapacity}（迁入斑块 {Kernel.LegacyPatchCount}）· 读法被拒 {Kernel.Counters.ReadingRefused} · 斑块满落区域 {s.LegacyKeptZone} · 喷淋池 / 油迹被拒 {s.PoolRefused} · 线索登记挤掉 {s.ClueHalfEvicted} · 极限计数冲突丢弃 {s.TallyEvicted}"; // EMGR-MAT-01：拒绝可见；EMGR-FUSE-01：线索窗口满可见；EMGR-TALLY-01：极限计数冲突可见
+            return $"[EmgPatch] {SiteId} 斑块 {Kernel.PatchCount}/{Kernel.Config.EmgPatchCapacity}（世界源保留 {Kernel.Config.EmgPatchReserve}）· 生成 {s.PatchesBorn} · 合并 {s.PatchesMerged} · 到期 {s.PatchesExpired} · " // loc-ignore: 开发者自检 / 诊断文本
+                   + $"软上限并入 {s.PatchSoftMerged} / 提前到期 {s.PatchSoftExpired} · 总上限并入 {s.PatchCapMerged} / 提前到期 {s.PatchCapExpired} · 丢弃 {s.PatchDropped} · 顺延 {s.PatchDeferred} · 残骸成碎屑 {s.WrecksToDebris} · " // loc-ignore: 开发者自检 / 诊断文本
+                   + $"区域 {Kernel.ZoneCount - Kernel.LegacyPatchCount}/{Kernel.Config.ZoneCapacity}（迁入斑块 {Kernel.LegacyPatchCount}）· 读法被拒 {Kernel.Counters.ReadingRefused} · 斑块满落区域 {s.LegacyKeptZone} · 喷淋池 / 油迹被拒 {s.PoolRefused} · 线索登记挤掉 {s.ClueHalfEvicted} · 极限计数冲突丢弃 {s.TallyEvicted}"; // EMGR-MAT-01：拒绝可见；EMGR-FUSE-01：线索窗口满可见；EMGR-TALLY-01：极限计数冲突可见 // loc-ignore: 开发者自检 / 诊断文本
         }
 
         private int _patchDegradeSeen;
@@ -835,10 +835,10 @@ namespace GameLogic.Campaign.Combat
         {
             if (IsDisposed)
             {
-                return $"[EmgField] {SiteId} 已卸载";
+                return $"[EmgField] {SiteId} 已卸载"; // loc-ignore: 开发者自检 / 诊断文本
             }
             EmgScalars s = Kernel.EmgScalars;
-            return $"[EmgField] {SiteId} 活跃场 {Kernel.FieldCount}/{EmgMatterConst.FieldCapacity} · 生成 {s.FieldsBorn} · 到期 {s.FieldsExpired} · 满额未生效 {s.FieldsCapped} · 推动 {s.FieldPushes}";
+            return $"[EmgField] {SiteId} 活跃场 {Kernel.FieldCount}/{EmgMatterConst.FieldCapacity} · 生成 {s.FieldsBorn} · 到期 {s.FieldsExpired} · 满额未生效 {s.FieldsCapped} · 推动 {s.FieldPushes}"; // loc-ignore: 开发者自检 / 诊断文本
         }
 
         private int _fieldCappedSeen;
@@ -899,8 +899,8 @@ namespace GameLogic.Campaign.Combat
         public string EmgBusDebugLine()
         {
             EmgBusStats s = EmgBusStats;
-            return $"[EmgBus] {SiteId} 待处理 {(IsDisposed ? 0 : Kernel.EmgBusPending)} · 入队 {s.Enqueued} · 处理 {s.Processed} · 顺延步 {s.StepsDeferred} · 合并 {s.Merged} · "
-                   + $"链深截断 {s.DepthCut}（链 {s.LastDepthCutChain}）· 扇出截断 {s.FanoutCut}（链 {s.LastFanoutCutChain}）· 每宿主截断 {s.PerHostCut} · 近炸求值 {s.ProxEvals} · 丢失 {s.Lost}";
+            return $"[EmgBus] {SiteId} 待处理 {(IsDisposed ? 0 : Kernel.EmgBusPending)} · 入队 {s.Enqueued} · 处理 {s.Processed} · 顺延步 {s.StepsDeferred} · 合并 {s.Merged} · " // loc-ignore: 开发者自检 / 诊断文本
+                   + $"链深截断 {s.DepthCut}（链 {s.LastDepthCutChain}）· 扇出截断 {s.FanoutCut}（链 {s.LastFanoutCutChain}）· 每宿主截断 {s.PerHostCut} · 近炸求值 {s.ProxEvals} · 丢失 {s.Lost}"; // loc-ignore: 开发者自检 / 诊断文本
         }
 
         /// <summary>FG1-SIG-05：这台机器此刻的武器热量与是否过热（内核实时状态）。过热是机体状态——谁在开都一样，
@@ -1721,13 +1721,13 @@ namespace GameLogic.Campaign.Combat
         {
             if (flight == "no")
             {
-                return speed == 0f ? null : "不实体化的组件弹速必须为 0";
+                return speed == 0f ? null : "不实体化的组件弹速必须为 0"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (flight != "yes")
             {
-                return $"flight = {flight ?? "空"}，只能是 yes / no";
+                return $"flight = {flight ?? "空"}，只能是 yes / no"; // loc-ignore: 开发者自检 / 诊断文本
             }
-            return speed > 0f && radius > 0f && lifeScale > 0f ? null : $"允许实体化但缺值（弹速 {speed}、半径 {radius}、寿命系数 {lifeScale}）";
+            return speed > 0f && radius > 0f && lifeScale > 0f ? null : $"允许实体化但缺值（弹速 {speed}、半径 {radius}、寿命系数 {lifeScale}）"; // loc-ignore: 开发者自检 / 诊断文本
         }
 
         private readonly bool _emgEntity;
@@ -3222,7 +3222,7 @@ namespace GameLogic.Campaign.Combat
                     return;
                 }
                 case CombatEventKind.MarkJump:
-                    FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, $"跳转 {(int)e.Value} 个目标",
+                    FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, GameText.Format("combat.site.jumped_to_0_targets", (int)e.Value),
                         FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
                     return;
                 case CombatEventKind.EnemyFired:
@@ -3283,7 +3283,7 @@ namespace GameLogic.Campaign.Combat
             }
             if (reactionId == MechanicalReactionCatalog.ReactionMarkJumpId)
             {
-                FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, $"跳转 {count} 个目标", FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
+                FeedbackCues.RaiseAt(FeedbackCueId.ReactionMarkJump, at, GameText.Format("combat.site.jumped_to_0_targets", count), FeedbackCues.ContentSfx(MechanicalReactionCatalog.ReactionMarkJumpId));
             }
             else if (reactionId == MechanicalReactionCatalog.ReactionMeltOverloadId)
             {

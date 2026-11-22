@@ -193,13 +193,13 @@ namespace GameLogic.Campaign.Defense
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取配置表失败：" + e.Message);
+                ProblemList.Add("读取配置表失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (tables?.TbTurretProfile == null || tables.TbTurretFluid == null || tables.TbTurretTargetMode == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbTurretProfile / fg.TbTurretFluid / fg.TbTurretTargetMode 不存在（改 tools/cell_tables/fgdata_defense.py 后重新生成）");
+                    ProblemList.Add("fg.TbTurretProfile / fg.TbTurretFluid / fg.TbTurretTargetMode 不存在（改 tools/cell_tables/fgdata_defense.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[TurretCatalog] " + ProblemList[0]);
                 return;
@@ -208,12 +208,12 @@ namespace GameLogic.Campaign.Defense
             {
                 if (row == null || string.IsNullOrEmpty(row.ComponentId) || Profiles.ContainsKey(row.ComponentId))
                 {
-                    ProblemList.Add("fg.TbTurretProfile：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbTurretProfile：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if ((row.Size != SizeLight && row.Size != SizeHeavy) || !(row.Range > 0f) || row.TurnRate < 0f || row.ProjectileSpeed < 0f || row.ProjectileRadius < 0f)
                 {
-                    ProblemList.Add($"fg.TbTurretProfile {row.ComponentId}：占地 / 射程 / 转速 / 弹速不合法，跳过");
+                    ProblemList.Add($"fg.TbTurretProfile {row.ComponentId}：占地 / 射程 / 转速 / 弹速不合法，跳过"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 Profiles[row.ComponentId] = new TurretProfileDef
@@ -231,7 +231,7 @@ namespace GameLogic.Campaign.Defense
                 int fluid = row != null ? PipeNetworkService.FluidId(row.Fluid) : 0;
                 if (row == null || string.IsNullOrEmpty(row.FirmwareId) || fluid <= 0 || !(row.LitersPerShot > 0f))
                 {
-                    ProblemList.Add($"fg.TbTurretFluid {row?.FirmwareId}：流体不认识或每发消耗不 > 0，跳过");
+                    ProblemList.Add($"fg.TbTurretFluid {row?.FirmwareId}：流体不认识或每发消耗不 > 0，跳过"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!FluidByFirmware.TryGetValue(row.FirmwareId, out List<TurretFluidNeed> l))
@@ -244,7 +244,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (row == null || row.Code < 0 || row.Code > 4 || ModeByCode.ContainsKey(row.Code))
                 {
-                    ProblemList.Add($"fg.TbTurretTargetMode {row?.Id}：code 不在 0～4 或重复，跳过");
+                    ProblemList.Add($"fg.TbTurretTargetMode {row?.Id}：code 不在 0～4 或重复，跳过"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var d = new TurretModeDef { Id = row.Id, Code = row.Code, NameKey = row.NameKey, DescKey = row.DescKey, SortOrder = row.SortOrder };
@@ -254,7 +254,7 @@ namespace GameLogic.Campaign.Defense
             ModeList.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
             if (ModeByCode.Count != 5)
             {
-                ProblemList.Add($"fg.TbTurretTargetMode 只有 {ModeByCode.Count} 种目标模式（FGR-DEF-003 要五种）");
+                ProblemList.Add($"fg.TbTurretTargetMode 只有 {ModeByCode.Count} 种目标模式（FGR-DEF-003 要五种）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             foreach (string p in ProblemList)
             {

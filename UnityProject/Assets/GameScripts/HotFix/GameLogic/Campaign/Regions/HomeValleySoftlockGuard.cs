@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -255,7 +256,7 @@ namespace GameLogic.Campaign.Regions
             string targetLabel = target != null ? Feedback.FeedbackCues.BuildingLabel(target.BuildingId) : string.Empty;
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.EmergencyRescue,
                 MachineRegistry.TryGetLivePosition(result.LogicId, out Vector2 rescueAt) ? rescueAt : HomeValleyLayout.Core.Position,
-                !string.IsNullOrEmpty(targetLabel) ? $"{rescueLabel} 前去修复{targetLabel}（免费）" : $"{rescueLabel} 在核心旁待命");
+                !string.IsNullOrEmpty(targetLabel) ? GameText.Format("home.softlock.0_heading_to_repair", rescueLabel, targetLabel) : GameText.Format("home.softlock.0_standing_by_at", rescueLabel));
 
             Log.Info($"[HomeValleySoftlockGuard] 家园经济卡死，核心生成紧急搬运机 LogicId={result.LogicId}" +
                 (target != null ? $"，已下令修复 {target.BuildingTypeId}。" : "，当前没有 Damaged 建筑可修。"));

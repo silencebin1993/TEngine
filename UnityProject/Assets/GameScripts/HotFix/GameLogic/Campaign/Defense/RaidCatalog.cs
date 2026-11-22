@@ -372,13 +372,13 @@ namespace GameLogic.Campaign.Defense
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbRaid* 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbRaid* 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (triggers == null || levels == null || units == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbRaidTrigger / fg.TbRaidLevel / fg.TbRaidUnit 不存在（改 tools/cell_tables/fgdata_raid.py 后重新生成）");
+                    ProblemList.Add("fg.TbRaidTrigger / fg.TbRaidLevel / fg.TbRaidUnit 不存在（改 tools/cell_tables/fgdata_raid.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[RaidCatalog] " + ProblemList[0]);
                 return;
@@ -387,13 +387,13 @@ namespace GameLogic.Campaign.Defense
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || TriggerById.ContainsKey(row.Id))
                 {
-                    ProblemList.Add("fg.TbRaidTrigger：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbRaidTrigger：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string rule = row.LevelRule ?? string.Empty;
                 if (rule != "exposure" && rule != "request" && rule != "tier" && rule != "tier_up" && rule != "harass")
                 {
-                    ProblemList.Add($"fg.TbRaidTrigger {row.Id}：等级规则 {rule} 不认识");
+                    ProblemList.Add($"fg.TbRaidTrigger {row.Id}：等级规则 {rule} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var def = new RaidTriggerDef
@@ -409,7 +409,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (row == null || row.Budget <= 0 || LevelByLevel.ContainsKey(row.Level))
                 {
-                    ProblemList.Add("fg.TbRaidLevel：预算 ≤ 0 或等级重复");
+                    ProblemList.Add("fg.TbRaidLevel：预算 ≤ 0 或等级重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 LevelByLevel[row.Level] = row;
@@ -421,7 +421,7 @@ namespace GameLogic.Campaign.Defense
                     if (row == null || string.IsNullOrEmpty(row.Id) || row.Scale <= 0f || row.Frequency <= 0f || row.Warning <= 0f
                         || row.EnemyHp <= 0f || row.EnemyDamage <= 0f || row.EventRate <= 0f || row.SilentNightDays < 1 || DifficultyById.ContainsKey(row.Id))
                     {
-                        ProblemList.Add("fg.TbRaidDifficulty：空 / 重复 ID、倍率 ≤ 0 或静默夜间隔 < 1 日（" + (row?.Id ?? "空行") + "）");
+                        ProblemList.Add("fg.TbRaidDifficulty：空 / 重复 ID、倍率 ≤ 0 或静默夜间隔 < 1 日（" + (row?.Id ?? "空行") + "）"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     DifficultyById[row.Id] = row;
@@ -430,20 +430,20 @@ namespace GameLogic.Campaign.Defense
                 DifficultyList.Sort((a, b) => a.SortOrder != b.SortOrder ? a.SortOrder.CompareTo(b.SortOrder) : string.CompareOrdinal(a.Id, b.Id));
                 if (!DifficultyById.ContainsKey("Standard"))
                 {
-                    ProblemList.Add("fg.TbRaidDifficulty：缺“标准”（Standard）行——存档里认不出的难度按它处理");
+                    ProblemList.Add("fg.TbRaidDifficulty：缺“标准”（Standard）行——存档里认不出的难度按它处理"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             foreach (RaidUnit row in units.DataList)
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || UnitById.ContainsKey(row.Id) || row.Points <= 0 || row.ElitePoints <= row.Points || row.Weight <= 0f)
                 {
-                    ProblemList.Add("fg.TbRaidUnit：空 / 重复 ID、点数 ≤ 0、精英点数不大于普通、或权重 ≤ 0");
+                    ProblemList.Add("fg.TbRaidUnit：空 / 重复 ID、点数 ≤ 0、精英点数不大于普通、或权重 ≤ 0"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string role = row.Role ?? string.Empty;
                 if (role != "assault" && role != "sabotage" && role != "siege")
                 {
-                    ProblemList.Add($"fg.TbRaidUnit {row.Id}：职能 {role} 不认识");
+                    ProblemList.Add($"fg.TbRaidUnit {row.Id}：职能 {role} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string tags = row.Tags ?? string.Empty;
@@ -462,7 +462,7 @@ namespace GameLogic.Campaign.Defense
                 {
                     if (row == null || string.IsNullOrEmpty(row.Id) || row.Boost <= 1f)
                     {
-                        ProblemList.Add("fg.TbRaidCounter：空 ID 或倍率 ≤ 1");
+                        ProblemList.Add("fg.TbRaidCounter：空 ID 或倍率 ≤ 1"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     CounterList.Add(row);
@@ -474,7 +474,7 @@ namespace GameLogic.Campaign.Defense
                 {
                     if (row == null || string.IsNullOrEmpty(row.Id) || (row.Rule != StoryRuleFoundryCore && row.Rule != StoryRuleSilentMind) || row.Level < 1)
                     {
-                        ProblemList.Add($"fg.TbRaidStory {row?.Id}：规则不认识或等级 < 1");
+                        ProblemList.Add($"fg.TbRaidStory {row?.Id}：规则不认识或等级 < 1"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     StoryList.Add(row);

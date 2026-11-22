@@ -30,7 +30,7 @@ namespace GameLogic.UI.Objective
 
         /// <summary>一行清单的完整显示文字。</summary>
         public string ItemText(int index) =>
-            string.IsNullOrEmpty(ItemStatus[index]) ? ItemLabels[index] : ItemLabels[index] + "：" + ItemStatus[index];
+            string.IsNullOrEmpty(ItemStatus[index]) ? ItemLabels[index] : ItemLabels[index] + GameText.Get("emg.enemy.program.sep") + ItemStatus[index];
     }
 
     /// <summary>FG8-QST-01（FGU-36）：追踪栏要显示的内容（纯数据，<see cref="ObjectiveHudUIToolkit.ComposeTracker"/> 填写，自检直接断言）。</summary>
@@ -120,6 +120,7 @@ namespace GameLogic.UI.Objective
         /// <summary>绑定界面元素（运行时由 Start 调用；自检挂上 UXML 后直接调用）。</summary>
         public void BindView(VisualElement root)
         {
+            UiText.Localize(root); // FG15-UX-03：UXML 的 tooltip="@键"（悬停提示）
             _panel = root.Q<VisualElement>("ObjectiveHudRoot");
             _title = root.Q<Label>("ObjectiveTitle");
             _region = root.Q<Label>("ObjectiveRegion");
@@ -330,7 +331,7 @@ namespace GameLogic.UI.Objective
                 if (CampaignObjectiveTracker.IsCompleted(state, CampaignObjectiveTracker.Obj10))
                 {
                     view.Visible = true;
-                    view.Title = "全部目标完成：返航信标已启动";
+                    view.Title = GameText.Get("objective.hud.all_objectives_complete_homeward");
                 }
                 return;
             }
@@ -355,7 +356,7 @@ namespace GameLogic.UI.Objective
             }
 
             int index = Array.IndexOf(CampaignObjectiveCatalog.All, def);
-            view.Title = $"目标 {index + 1}/{CampaignObjectiveCatalog.All.Length}：{def.Title}";
+            view.Title = GameText.Format("objective.hud.objective_0_1_2", index + 1, CampaignObjectiveCatalog.All.Length, def.Title);
             string where = CampaignObjectiveCatalog.RegionDisplayName(def.RegionId);
             string here = GameLogic.Campaign.WorldSim.WorldView.ObservedSiteId ?? state.CurrentRegionId; // FG0-ARCH-01：镜头所在的地点。
             if (here == def.RegionId && def.RegionNote != null)
@@ -363,12 +364,12 @@ namespace GameLogic.UI.Objective
                 view.Note = def.RegionNote(state) ?? string.Empty;
             }
             view.Region = !string.IsNullOrEmpty(here) && here != def.RegionId
-                ? $"地点：{where}（你现在在{CampaignObjectiveCatalog.RegionDisplayName(here)}）｜进度 {done}/{def.Items.Length}"
-                : $"地点：{where}｜进度 {done}/{def.Items.Length}";
+                ? GameText.Format("objective.hud.location_0_you_are", where, CampaignObjectiveCatalog.RegionDisplayName(here), done, def.Items.Length)
+                : GameText.Format("objective.hud.location_0_progress_1", where, done, def.Items.Length);
         }
 
         public static string HintText() =>
-            $"按 {InputDisplay.ForAction(GameActionId.ToggleMissionLog)} 查看任务日志与战役地图";
+            GameText.Format("objective.hud.press_0_for_the", InputDisplay.ForAction(GameActionId.ToggleMissionLog));
 
         private void OnDestroy()
         {

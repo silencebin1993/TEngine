@@ -4,6 +4,7 @@ using System.Linq;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Economy;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -173,31 +174,31 @@ namespace GameLogic.Campaign.Regions
         {
             if (string.IsNullOrEmpty(reason))
             {
-                return "暂时无法排队";
+                return GameText.Get("home.factory.cannot_queue_right_now");
             }
             if (reason.StartsWith("blueprint-locked:", StringComparison.Ordinal))
             {
                 return reason.EndsWith(HomeValleyLayout.BlueprintHoverId, StringComparison.Ordinal)
-                    ? "悬浮机蓝图未解锁：先让解析台通电运转"
-                    : "这张蓝图还没有解锁";
+                    ? GameText.Get("home.factory.hover_blueprint_locked_power")
+                    : GameText.Get("home.factory.this_blueprint_is_not");
             }
-            if (reason.StartsWith("no-production-profile", StringComparison.Ordinal)) return "这张蓝图不能在装配站生产";
-            if (reason.StartsWith("no-active-version", StringComparison.Ordinal)) return "这张蓝图还没有保存过可用版本";
-            if (reason.StartsWith("not-found:", StringComparison.Ordinal)) return "这一项已经不在队列里";
-            if (reason.StartsWith("cannot-cancel-from:", StringComparison.Ordinal)) return "这一项已经完成或出厂，不能取消";
+            if (reason.StartsWith("no-production-profile", StringComparison.Ordinal)) return GameText.Get("home.factory.this_blueprint_cannot_be");
+            if (reason.StartsWith("no-active-version", StringComparison.Ordinal)) return GameText.Get("home.factory.this_blueprint_has_no");
+            if (reason.StartsWith("not-found:", StringComparison.Ordinal)) return GameText.Get("home.factory.this_item_is_no");
+            if (reason.StartsWith("cannot-cancel-from:", StringComparison.Ordinal)) return GameText.Get("home.factory.this_item_is_already");
             switch (reason)
             {
                 case ReasonMaterials: return GameLogic.Localization.GameText.Get("asm.state.waiting_materials");
                 case ReasonRoute: return GameLogic.Localization.GameText.Get("asm.state.waiting_materials");
-                case "target-not-alive": return "这台机器已阵亡";
-                case "target-not-in-home-valley": return "这台机器不在归还谷地（远征中）";
-                case "target-occupying-factory-exit": return "这台机器正停在装配站出口，先让它驶离";
+                case "target-not-alive": return GameText.Get("home.factory.this_machine_is_destroyed");
+                case "target-not-in-home-valley": return GameText.Get("home.factory.this_machine_is_not");
+                case "target-occupying-factory-exit": return GameText.Get("home.factory.this_machine_is_parked");
                 case "target-directly-controlled": return GameLogic.Localization.GameText.Get("factory.reason.uplinked"); // FG1-HUD-01（FG-GAP-011）
-                case "target-busy-with-work-order": return "这台机器正在执行工单，先取消或等它完成";
-                case "target-already-queued-for-retrofit": return "这台机器已经在改造队列里";
-                case "blueprint-version-not-found": return "所选蓝图版本已不存在";
-                case "chassis-mismatch": return "蓝图底盘与这台机器不一致";
-                default: return "暂时无法排队";
+                case "target-busy-with-work-order": return GameText.Get("home.factory.this_machine_is_on");
+                case "target-already-queued-for-retrofit": return GameText.Get("home.factory.this_machine_is_already");
+                case "blueprint-version-not-found": return GameText.Get("home.factory.the_selected_blueprint_version");
+                case "chassis-mismatch": return GameText.Get("home.factory.the_blueprint_chassis_does");
+                default: return GameText.Get("home.factory.cannot_queue_right_now");
             }
         }
 
@@ -785,7 +786,7 @@ namespace GameLogic.Campaign.Regions
                 CancelLedger(state, item);
                 AssemblyMaterials.Refund(state, item, "target-lost");
                 Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
-                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), "改造失败：目标机器已不在场，已退还材料");
+                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), GameText.Get("home.factory.refit_failed_the_target"));
                 return;
             }
 
@@ -819,7 +820,7 @@ namespace GameLogic.Campaign.Regions
             // ER8-CONTENT-01 AC-AUD-001 生产：改造完工与新机出厂同属“生产”类反馈。
             Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.ProductionComplete,
                 Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation),
-                $"{Feedback.FeedbackCues.MachineLabel(machine.LogicId)} 改造完成，已换装 v{item.BlueprintVersion}",
+                GameText.Format("home.factory.0_refit_complete_now", Feedback.FeedbackCues.MachineLabel(machine.LogicId), item.BlueprintVersion),
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAssemblyStation));
 
             // ER6-LOOP-01：回厂改造完工是 OBJ-06"ERC-003 正式回厂改造完成"子条件的唯一真实写入口。
@@ -879,7 +880,7 @@ namespace GameLogic.Campaign.Regions
                 CancelLedger(state, item);
                 AssemblyMaterials.Refund(state, item, "spawn-failed");
                 Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.Failure,
-                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), "生产失败，已退还材料");
+                    Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation), GameText.Get("home.factory.production_failed_materials_refu"));
                 return;
             }
 
@@ -921,7 +922,7 @@ namespace GameLogic.Campaign.Regions
             // BuildingCatalog.SfxId。
             Feedback.FeedbackCues.RaiseLocatedIfKnown(Feedback.FeedbackCueId.ProductionComplete,
                 Feedback.FeedbackCues.BuildingPositionOfType(state, HomeValleyLayout.BuildingTypeAssemblyStation),
-                $"{Feedback.FeedbackCues.MachineLabel(spawn.LogicId)} {MechanicalContentFacade.ResolveChassisLabel(def.ChassisId)} 已出厂",
+                GameText.Format("home.factory.0_1_released", Feedback.FeedbackCues.MachineLabel(spawn.LogicId), MechanicalContentFacade.ResolveChassisLabel(def.ChassisId)),
                 Feedback.FeedbackCues.BuildingTypeSfx(HomeValleyLayout.BuildingTypeAssemblyStation));
         }
     }

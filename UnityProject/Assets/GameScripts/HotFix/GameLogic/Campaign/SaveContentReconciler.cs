@@ -584,7 +584,7 @@ namespace GameLogic.Campaign
             _table = table;
             _isLiveOverride = isLivePrimitive;
             _isLiveBuildingOverride = isLiveBuilding;
-            _loadError = loadError ?? (table == null ? "测试注入：已移除内容表为空" : null);
+            _loadError = loadError ?? (table == null ? "测试注入：已移除内容表为空" : null); // loc-ignore: 开发者自检 / 诊断文本
         }
 
         public static void ResetForTests()
@@ -609,12 +609,12 @@ namespace GameLogic.Campaign
                 _table = ConfigSystem.Instance.Tables?.TbRemovedContent;
                 if (_table == null)
                 {
-                    _loadError = "配置表 fg.TbRemovedContent 不存在";
+                    _loadError = "配置表 fg.TbRemovedContent 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             catch (Exception ex)
             {
-                _loadError = $"配置表读取失败：{ex.Message}";
+                _loadError = $"配置表读取失败：{ex.Message}"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_loadError != null)
             {

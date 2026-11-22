@@ -12,6 +12,7 @@ using GameLogic.View;
 using TEngine;
 using Unity.Mathematics;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -548,7 +549,7 @@ namespace GameLogic.Campaign.Regions
             };
             if (!TryFindNearbyMachine(position, out _))
             {
-                return FoundryOutpostRegion.ActionResult.Fail("没有机器在箱子交互范围内。");
+                return FoundryOutpostRegion.ActionResult.Fail(GameText.Get("foundry.ctl.no_machine_is_in"));
             }
             return FoundryOutpostRegion.TryOpenCrate(CampaignSession.Current, crateId);
         }
@@ -564,7 +565,7 @@ namespace GameLogic.Campaign.Regions
             };
             if (!TryFindNearbyMachine(position, out _))
             {
-                return FoundryOutpostRegion.ActionResult.Fail("没有机器在技术缓存交互范围内。");
+                return FoundryOutpostRegion.ActionResult.Fail(GameText.Get("foundry.ctl.no_machine_is_in_2"));
             }
             return FoundryOutpostRegion.TryOpenTechCache(CampaignSession.Current, cacheId);
         }
@@ -575,11 +576,11 @@ namespace GameLogic.Campaign.Regions
             RegionQuestItemRecord item = FoundryOutpostRegion.FindQuestItem(state, salvageInstanceId);
             if (item == null || item.State != RegionQuestItemState.OnGround)
             {
-                return FoundryOutpostRegion.ActionResult.Fail("地面上没有该物品。");
+                return FoundryOutpostRegion.ActionResult.Fail(GameText.Get("foundry.ctl.that_item_is_not"));
             }
             if (!TryFindNearbyMachine(item.Position, out int logicId))
             {
-                return FoundryOutpostRegion.ActionResult.Fail("没有机器在拾取范围内。");
+                return FoundryOutpostRegion.ActionResult.Fail(GameText.Get("foundry.ctl.no_machine_is_in_3"));
             }
             return FoundryOutpostRegion.TryCollectQuestItem(state, salvageInstanceId, logicId);
         }
@@ -860,9 +861,9 @@ namespace GameLogic.Campaign.Regions
             AddCrateCandidate(list, region, FoundryOutpostLayout.Crate1Id, FoundryOutpostLayout.Crate1.Position);
             AddCrateCandidate(list, region, FoundryOutpostLayout.Crate2Id, FoundryOutpostLayout.Crate2.Position);
             AddCrateCandidate(list, region, FoundryOutpostLayout.Crate3Id, FoundryOutpostLayout.Crate3.Position);
-            AddTechCacheCandidate(list, region, FoundryOutpostLayout.ArmorCacheId, FoundryOutpostLayout.ArmorCache.Position, "重甲");
-            AddTechCacheCandidate(list, region, FoundryOutpostLayout.HeatSinkCacheId, FoundryOutpostLayout.HeatSinkCache.Position, "散热鳍");
-            AddTechCacheCandidate(list, region, FoundryOutpostLayout.ArmorPierceCacheId, FoundryOutpostLayout.ArmorPierceCache.Position, "装甲击穿");
+            AddTechCacheCandidate(list, region, FoundryOutpostLayout.ArmorCacheId, FoundryOutpostLayout.ArmorCache.Position, GameText.Get("foundry.ctl.heavy_armor"));
+            AddTechCacheCandidate(list, region, FoundryOutpostLayout.HeatSinkCacheId, FoundryOutpostLayout.HeatSinkCache.Position, GameText.Get("foundry.ctl.cooling_fins"));
+            AddTechCacheCandidate(list, region, FoundryOutpostLayout.ArmorPierceCacheId, FoundryOutpostLayout.ArmorPierceCache.Position, GameText.Get("foundry.ctl.armor_piercing"));
 
             if (state.RegionQuestItems != null)
             {
@@ -881,15 +882,15 @@ namespace GameLogic.Campaign.Regions
                         Position = item.Position,
                         HoldSeconds = 0.5f,
                         Priority = isKeyItem ? 25 : 18,
-                        ActionVerb = "装载",
+                        ActionVerb = GameText.Get("foundry.ctl.load"),
                         Validate = () =>
                         {
                             RegionQuestItemRecord q = FoundryOutpostRegion.FindQuestItem(CampaignSession.Current, salvageInstanceId);
                             return q == null || q.State != RegionQuestItemState.OnGround
-                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面上没有该物品。")
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("foundry.ctl.that_item_is_not"))
                                 : RegionInteractResult.Ok();
                         },
-                        Complete = () => ToInteractResult(TryCollectNearestQuestItem(salvageInstanceId), "物品已装入货舱。"),
+                        Complete = () => ToInteractResult(TryCollectNearestQuestItem(salvageInstanceId), GameText.Get("foundry.ctl.item_loaded_into_the")),
                     });
                 }
             }
@@ -911,12 +912,12 @@ namespace GameLogic.Campaign.Regions
                         Position = pos,
                         HoldSeconds = 0.5f,
                         Priority = 10,
-                        ActionVerb = "装载",
+                        ActionVerb = GameText.Get("foundry.ctl.load"),
                         Validate = () =>
                         {
                             GroundItemRecord g = HomeValleyCargo.FindGroundItem(CampaignSession.Current, groundItemId);
                             return g == null
-                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。")
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("foundry.ctl.the_ground_item_no"))
                                 : RegionInteractResult.Ok();
                         },
                         Complete = () => CompleteLootLoad(groundItemId),
@@ -936,12 +937,12 @@ namespace GameLogic.Campaign.Regions
                     Position = FoundryOutpostLayout.EntryEvac.Position,
                     HoldSeconds = 1f,
                     Priority = -10,
-                    ActionVerb = "查看撤离清单",
+                    ActionVerb = GameText.Get("foundry.ctl.view_evacuation_list"),
                     Validate = () => RegionInteractResult.Ok(),
                     Complete = () =>
                     {
                         SetEvacPanelOpen(true);
-                        return RegionInteractResult.Ok("撤离清单已打开。");
+                        return RegionInteractResult.Ok(GameText.Get("foundry.ctl.evacuation_list_opened"));
                     },
                 });
             }
@@ -956,7 +957,7 @@ namespace GameLogic.Campaign.Regions
                 Position = FoundryOutpostLayout.CoreGate.Position,
                 HoldSeconds = 0.5f,
                 Priority = 5,
-                ActionVerb = "查看",
+                ActionVerb = GameText.Get("foundry.ctl.view"),
                 Validate = () =>
                 {
                     FoundryOutpostRegion.ActionResult gate = FoundryOutpostRegion.CanEnterCoreZone(CampaignSession.Current);
@@ -968,7 +969,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     FoundryOutpostRegion.ActionResult gate = FoundryOutpostRegion.CanEnterCoreZone(CampaignSession.Current);
                     return gate.Success
-                        ? RegionInteractResult.Ok("核心分区封锁门已开启，正式核心战由后续内容衔接。")
+                        ? RegionInteractResult.Ok(GameText.Get("foundry.ctl.the_core_zone_blast"))
                         : RegionInteractResult.Fail(RegionInteractFailure.GateLocked, gate.FailureReason);
                 },
             });
@@ -990,16 +991,16 @@ namespace GameLogic.Campaign.Regions
                 Position = position,
                 HoldSeconds = 1f,
                 Priority = 12,
-                ActionVerb = "打开",
+                ActionVerb = GameText.Get("ui.notify.open"),
                 Validate = () =>
                 {
                     RegionRecord r = FoundryOutpostRegion.Find(CampaignSession.Current);
                     return r?.LootedContainerIds != null && r.LootedContainerIds.Contains(crateId)
-                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "该箱子已打开过。")
+                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("foundry.ctl.this_crate_has_already"))
                         : RegionInteractResult.Ok();
                 },
                 Complete = () => ToInteractResult(TryInteractCrate(crateId),
-                    $"箱子已打开：{FoundryOutpostLayout.CrateScrapAmount} 废料已落地。"),
+                    GameText.Format("foundry.ctl.crate_opened_0_scrap", FoundryOutpostLayout.CrateScrapAmount)),
             });
         }
 
@@ -1017,15 +1018,15 @@ namespace GameLogic.Campaign.Regions
                 Position = position,
                 HoldSeconds = 1.5f,
                 Priority = 14,
-                ActionVerb = "领取",
+                ActionVerb = GameText.Get("foundry.ctl.collect"),
                 Validate = () =>
                 {
                     RegionRecord r = FoundryOutpostRegion.Find(CampaignSession.Current);
                     return r?.LootedContainerIds != null && r.LootedContainerIds.Contains(cacheId)
-                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "该技术缓存已领取过。")
+                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("foundry.ctl.this_tech_cache_has"))
                         : RegionInteractResult.Ok();
                 },
-                Complete = () => ToInteractResult(TryInteractTechCache(cacheId), $"{displayName}技术缓存已领取。"),
+                Complete = () => ToInteractResult(TryInteractTechCache(cacheId), GameText.Format("foundry.ctl.0_tech_cache_collected", displayName)),
             });
         }
 
@@ -1034,12 +1035,12 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有活动的铸造前哨会话。");
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, GameText.Get("foundry.ctl.no_active_foundry_outpost"));
             }
             HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, groundItemId);
             if (ticket == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。");
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("foundry.ctl.the_ground_item_no"));
             }
             HomeValleyCargo.StoreResult store = HomeValleyCargo.CommitHaul(state, ticket);
             if (!store.Success)
@@ -1047,9 +1048,9 @@ namespace GameLogic.Campaign.Regions
                 RegionInteractFailure failure = store.FailureReason != null && store.FailureReason.StartsWith("storage-full")
                     ? RegionInteractFailure.CargoFull
                     : RegionInteractFailure.TargetGone;
-                return RegionInteractResult.Fail(failure, "装载失败：" + store.FailureReason);
+                return RegionInteractResult.Fail(failure, GameText.Get("foundry.ctl.load_failed") + store.FailureReason);
             }
-            return RegionInteractResult.Ok("装载完成。");
+            return RegionInteractResult.Ok(GameText.Get("foundry.ctl.loaded"));
         }
 
         private static RegionInteractResult ToInteractResult(FoundryOutpostRegion.ActionResult result, string successText)

@@ -542,7 +542,7 @@ namespace GameLogic.Campaign.Content
                 Slot = row.Role,
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = trait == null ? hp : hp + "；" + trait,
+                ValuesSummary = trait == null ? hp : hp + GameText.Get("logistics.load.reason.separator") + trait,
                 AiPermission = MechanicalContentAiPermission.EnemyAiOnly,
                 IconId = row.IconId,
                 ModelId = "silhouette:" + row.Silhouette,

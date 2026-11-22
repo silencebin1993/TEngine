@@ -4,6 +4,7 @@ using GameLogic.Campaign.Feedback;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Feedback
 {
@@ -117,7 +118,7 @@ namespace GameLogic.UI.Feedback
                 int tone = (int)caption.Tone;
                 row.AddToClassList(ToneClasses[tone >= 0 && tone < ToneClasses.Length ? tone : 0]);
 
-                _tags[i].text = "【" + caption.Tag + "】";
+                _tags[i].text = GameText.Get("feedback.caption.text") + caption.Tag + GameText.Get("feedback.caption.text_2");
                 _texts[i].text = caption.Text ?? string.Empty;
                 _counts[i].text = caption.Count > 1 ? "×" + caption.Count : string.Empty;
             }

@@ -469,7 +469,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _groups[slot] = new List<int>(_selection);
-            PushEvent($"编组 {slot} 已保存（{_selection.Count} 台）。");
+            PushEvent(GameText.Format("region.squad.group_0_saved_1", slot, _selection.Count));
         }
 
         public void RecallGroup(int slot)
@@ -486,7 +486,7 @@ namespace GameLogic.Campaign.Regions
                     AddToSelection(id);
                 }
             }
-            PushEvent($"编组 {slot} 已调用（{_selection.Count} 台在场）。");
+            PushEvent(GameText.Format("region.squad.group_0_recalled_1", slot, _selection.Count));
         }
 
         /// <summary>
@@ -672,7 +672,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _armedKind = kind;
-            PushEvent(kind == RegionCommandKind.Move ? "移动待命：点击地图目标位置。" : "攻击待命：点击一个敌方目标。");
+            PushEvent(kind == RegionCommandKind.Move ? GameText.Get("region.squad.move_armed_click_a") : GameText.Get("region.squad.attack_armed_click_an"));
         }
 
         public void CancelArm()
@@ -680,7 +680,7 @@ namespace GameLogic.Campaign.Regions
             if (_armedKind.HasValue)
             {
                 _armedKind = null;
-                PushEvent("已取消待命命令。");
+                PushEvent(GameText.Get("region.squad.armed_command_cancelled"));
             }
         }
 
@@ -693,8 +693,8 @@ namespace GameLogic.Campaign.Regions
                 RegionHostileInfo? hostile = (_ctx.FindAttackableNear ?? _ctx.FindHostileNear)?.Invoke(worldPoint, ClickPickRadius);
                 if (hostile == null || !hostile.Value.Alive)
                 {
-                    PushEvent("攻击失败：未指向有效目标。");
-                    FeedbackCues.Raise(FeedbackCueId.Denied, "攻击失败：未指向有效目标。");
+                    PushEvent(GameText.Get("region.squad.attack_failed_no_valid"));
+                    FeedbackCues.Raise(FeedbackCueId.Denied, GameText.Get("region.squad.attack_failed_no_valid"));
                     return;
                 }
                 IssueAttack(hostile.Value.HostileId, IsCallerPaused());
@@ -746,8 +746,8 @@ namespace GameLogic.Campaign.Regions
             RegionHostileInfo? hostile = _ctx?.ResolveHostile?.Invoke(hostileId);
             if (hostile == null || !hostile.Value.Alive)
             {
-                PushEvent("攻击失败：未指向有效目标。");
-                FeedbackCues.Raise(FeedbackCueId.Denied, "攻击失败：未指向有效目标。");
+                PushEvent(GameText.Get("region.squad.attack_failed_no_valid"));
+                FeedbackCues.Raise(FeedbackCueId.Denied, GameText.Get("region.squad.attack_failed_no_valid"));
                 return;
             }
             _armedKind = null;
@@ -781,7 +781,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     _pendingIssues++;
                 }
-                PushEvent($"{KindLabel(kind)} 已排队（{started} 台，等待恢复）。");
+                PushEvent(GameText.Format("region.squad.0_queued_1_machines", KindLabel(kind), started));
                 FeedbackCues.Raise(FeedbackCueId.CommandAck);
             }
         }
@@ -857,7 +857,7 @@ namespace GameLogic.Campaign.Regions
             // 它排在拒绝原因后面，命令栏最新一行只剩“已下达（0 台）”，玩家看不到为什么没动（B06）。
             if (!pending && (started > 0 || _outScratch.Count == 0))
             {
-                PushEvent($"{label ?? KindLabel(kind)} 已下达（{started} 台）。");
+                PushEvent(GameText.Format("region.squad.0_issued_1_machines", label ?? KindLabel(kind), started));
                 if (firstStarted != 0)
                 {
                     // 命令确认音按第一台接令机器的底盘区分（ChassisCatalog.SfxId 的消费点）；选择框与路径线是它的等价视觉反馈，不出字幕。
@@ -1433,10 +1433,10 @@ namespace GameLogic.Campaign.Regions
         {
             switch (kind)
             {
-                case RegionCommandKind.Move: return "移动";
-                case RegionCommandKind.Attack: return "攻击";
-                case RegionCommandKind.Guard: return "守备";
-                default: return "撤退";
+                case RegionCommandKind.Move: return GameText.Get("region.squad.move");
+                case RegionCommandKind.Attack: return GameText.Get("region.squad.attack");
+                case RegionCommandKind.Guard: return GameText.Get("region.squad.guard");
+                default: return GameText.Get("region.squad.retreat");
             }
         }
 

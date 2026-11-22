@@ -84,7 +84,7 @@ namespace GameLogic.Campaign.Defense
 
         /// <summary>“放下后这些建筑机器到不了”的警告（没有时 null）。</summary>
         public string CutsOffWarning() =>
-            CutsOff.Count == 0 ? null : GameText.Format("nav.build.unreachable_warning", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", CutsOff));
+            CutsOff.Count == 0 ? null : GameText.Format("nav.build.unreachable_warning", string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), CutsOff));
     }
 
     public static partial class DefenseService

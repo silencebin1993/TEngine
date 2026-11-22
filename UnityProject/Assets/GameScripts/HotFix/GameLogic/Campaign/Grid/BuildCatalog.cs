@@ -186,17 +186,34 @@ namespace GameLogic.Campaign.Grid
             }
         }
 
-        /// <summary>搜索：名字或用途（说明文本，当前语言）包含关键字即命中，不区分大小写。</summary>
+        /// <summary>搜索：名字或用途包含关键字即命中，不区分大小写。FG15-UX-03（DEBT-FG3LOG01-06）：中英两种语言的名字与用途都检索
+        /// （中文界面搜英文名、英文界面搜中文名都能找到）。</summary>
         public static bool Matches(BuildEntry e, string query)
         {
             if (e == null || string.IsNullOrEmpty(query))
             {
                 return false;
             }
-            string name = e.Name ?? string.Empty;
-            string desc = GameText.Get(e.DescKey) ?? string.Empty;
-            return name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0 || desc.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+            string nameKey = e.IsTool ? e.Tool?.NameKey
+                : GameLogic.Campaign.Content.FgContentTables.TryGetBuilding(e.Id, out GameConfig.fg.Building row) ? row.NameKey : null;
+            if (Hit(e.Name, query) || Hit(GameText.Get(e.DescKey), query))
+            {
+                return true;
+            }
+            foreach (GameLanguage lang in SearchLanguages)
+            {
+                if ((nameKey != null && GameText.TryGet(nameKey, lang, out string n) && Hit(n, query))
+                    || (e.DescKey != null && GameText.TryGet(e.DescKey, lang, out string d) && Hit(d, query)))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
+
+        private static readonly GameLanguage[] SearchLanguages = { GameLanguage.ZhCn, GameLanguage.En };
+
+        private static bool Hit(string text, string query) => !string.IsNullOrEmpty(text) && text.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
 
         // ── 快捷栏 ──────────────────────────────────────────────────────────────
 

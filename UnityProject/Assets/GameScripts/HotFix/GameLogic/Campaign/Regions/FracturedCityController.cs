@@ -12,6 +12,7 @@ using GameLogic.View;
 using TEngine;
 using Unity.Mathematics;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -495,7 +496,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (!TryFindNearbyMachine(FracturedCityLayout.ListeningNode.Position, out _))
             {
-                return FracturedCityRegion.ActionResult.Fail("没有机器在监听节点交互范围内。");
+                return FracturedCityRegion.ActionResult.Fail(GameText.Get("city.ctl.no_machine_is_in"));
             }
             return FracturedCityRegion.TryDestroyListeningNode(CampaignSession.Current);
         }
@@ -504,7 +505,7 @@ namespace GameLogic.Campaign.Regions
         {
             if (!TryFindNearbyMachine(FracturedCityLayout.Terminal.Position, out _))
             {
-                return FracturedCityRegion.ActionResult.Fail("没有机器在终端交互范围内。");
+                return FracturedCityRegion.ActionResult.Fail(GameText.Get("city.ctl.no_machine_is_in_2"));
             }
             return FracturedCityRegion.TryReadTerminal(CampaignSession.Current);
         }
@@ -516,7 +517,7 @@ namespace GameLogic.Campaign.Regions
                 : FracturedCityLayout.Crate3;
             if (!TryFindNearbyMachine(anchor.Position, out _))
             {
-                return FracturedCityRegion.ActionResult.Fail("没有机器在箱子交互范围内。");
+                return FracturedCityRegion.ActionResult.Fail(GameText.Get("city.ctl.no_machine_is_in_3"));
             }
             return FracturedCityRegion.TryOpenCrate(CampaignSession.Current, crateId);
         }
@@ -528,11 +529,11 @@ namespace GameLogic.Campaign.Regions
             RegionQuestItemRecord item = FracturedCityRegion.FindQuestItem(state, salvageInstanceId);
             if (item == null || item.State != RegionQuestItemState.OnGround)
             {
-                return FracturedCityRegion.ActionResult.Fail("地面上没有该关键物。");
+                return FracturedCityRegion.ActionResult.Fail(GameText.Get("city.ctl.that_key_item_is"));
             }
             if (!TryFindNearbyMachine(item.Position, out int carrierLogicId))
             {
-                return FracturedCityRegion.ActionResult.Fail("没有机器在关键物交互范围内。");
+                return FracturedCityRegion.ActionResult.Fail(GameText.Get("city.ctl.no_machine_is_in_4"));
             }
             return FracturedCityRegion.TryCollectQuestItem(state, salvageInstanceId, carrierLogicId);
         }
@@ -842,15 +843,15 @@ namespace GameLogic.Campaign.Regions
                     // 这个唯一解法，等于把自己的干扰机制锁死成无解。
                     HoldSeconds = 1.5f,
                     Priority = 20,
-                    ActionVerb = "拆解",
+                    ActionVerb = GameText.Get("alarm.kind.salvage"),
                     Validate = () =>
                     {
                         RegionRecord r = FracturedCityRegion.Find(CampaignSession.Current);
                         return r?.DestroyedNodeIds != null && r.DestroyedNodeIds.Contains(FracturedCityLayout.ListeningNodeId)
-                            ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "监听节点已被摧毁。")
+                            ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("city.ctl.the_listening_node_is"))
                             : RegionInteractResult.Ok();
                     },
-                    Complete = () => ToInteractResult(TryInteractListeningNode(), "监听节点已摧毁：干扰区消失，标记器模块已掉落。"),
+                    Complete = () => ToInteractResult(TryInteractListeningNode(), GameText.Get("city.ctl.listening_node_destroyed_the")),
                 });
             }
 
@@ -866,15 +867,15 @@ namespace GameLogic.Campaign.Regions
                     // 同上一条注释理由，按住时长必须留在2秒宽限之内。
                     HoldSeconds = 1.5f,
                     Priority = 15,
-                    ActionVerb = "读取",
+                    ActionVerb = GameText.Get("city.ctl.read"),
                     Validate = () =>
                     {
                         RegionRecord r = FracturedCityRegion.Find(CampaignSession.Current);
                         return r?.LootedContainerIds != null && r.LootedContainerIds.Contains(FracturedCityLayout.TerminalId)
-                            ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "终端已读取过。")
+                            ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("city.ctl.the_terminal_has_already"))
                             : RegionInteractResult.Ok();
                     },
-                    Complete = () => ToInteractResult(TryInteractTerminal(), "协议终端已读取：协议数据盒已产出。"),
+                    Complete = () => ToInteractResult(TryInteractTerminal(), GameText.Get("city.ctl.protocol_terminal_read_a")),
                 });
             }
 
@@ -898,15 +899,15 @@ namespace GameLogic.Campaign.Regions
                         Position = item.Position,
                         HoldSeconds = 0.5f,
                         Priority = 25, // 关键物优先于普通废料装载。
-                        ActionVerb = "装载",
+                        ActionVerb = GameText.Get("city.ctl.load"),
                         Validate = () =>
                         {
                             RegionQuestItemRecord q = FracturedCityRegion.FindQuestItem(CampaignSession.Current, salvageInstanceId);
                             return q == null || q.State != RegionQuestItemState.OnGround
-                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面上没有该关键物。")
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("city.ctl.that_key_item_is"))
                                 : RegionInteractResult.Ok();
                         },
-                        Complete = () => ToInteractResult(TryCollectNearestQuestItem(salvageInstanceId), "关键物已装入货舱。"),
+                        Complete = () => ToInteractResult(TryCollectNearestQuestItem(salvageInstanceId), GameText.Get("city.ctl.key_item_loaded_into")),
                     });
                 }
             }
@@ -928,12 +929,12 @@ namespace GameLogic.Campaign.Regions
                         Position = pos,
                         HoldSeconds = 0.5f,
                         Priority = 10,
-                        ActionVerb = "装载",
+                        ActionVerb = GameText.Get("city.ctl.load"),
                         Validate = () =>
                         {
                             GroundItemRecord g = HomeValleyCargo.FindGroundItem(CampaignSession.Current, groundItemId);
                             return g == null
-                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。")
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("city.ctl.the_ground_item_no"))
                                 : RegionInteractResult.Ok();
                         },
                         Complete = () => CompleteLootLoad(groundItemId),
@@ -954,12 +955,12 @@ namespace GameLogic.Campaign.Regions
                     Position = FracturedCityLayout.EntryEvac.Position,
                     HoldSeconds = 1f,
                     Priority = -10,
-                    ActionVerb = "查看撤离清单",
+                    ActionVerb = GameText.Get("city.ctl.view_evacuation_list"),
                     Validate = () => RegionInteractResult.Ok(),
                     Complete = () =>
                     {
                         SetEvacPanelOpen(true);
-                        return RegionInteractResult.Ok("撤离清单已打开。");
+                        return RegionInteractResult.Ok(GameText.Get("city.ctl.evacuation_list_opened"));
                     },
                 });
             }
@@ -981,16 +982,16 @@ namespace GameLogic.Campaign.Regions
                 Position = position,
                 HoldSeconds = 1f,
                 Priority = 12,
-                ActionVerb = "打开",
+                ActionVerb = GameText.Get("ui.notify.open"),
                 Validate = () =>
                 {
                     RegionRecord r = FracturedCityRegion.Find(CampaignSession.Current);
                     return r?.LootedContainerIds != null && r.LootedContainerIds.Contains(crateId)
-                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "该箱子已打开过。")
+                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("city.ctl.this_crate_has_already"))
                         : RegionInteractResult.Ok();
                 },
                 Complete = () => ToInteractResult(TryInteractCrate(crateId),
-                    $"箱子已打开：{FracturedCityLayout.CrateScrapAmount} 废料已落地。"),
+                    GameText.Format("city.ctl.crate_opened_0_scrap", FracturedCityLayout.CrateScrapAmount)),
             });
         }
 
@@ -1001,12 +1002,12 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有活动的破碎都市会话。");
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, GameText.Get("city.ctl.no_active_fractured_city"));
             }
             HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, groundItemId);
             if (ticket == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。");
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("city.ctl.the_ground_item_no"));
             }
             HomeValleyCargo.StoreResult store = HomeValleyCargo.CommitHaul(state, ticket);
             if (!store.Success)
@@ -1014,9 +1015,9 @@ namespace GameLogic.Campaign.Regions
                 RegionInteractFailure failure = store.FailureReason != null && store.FailureReason.StartsWith("storage-full")
                     ? RegionInteractFailure.CargoFull
                     : RegionInteractFailure.TargetGone;
-                return RegionInteractResult.Fail(failure, "装载失败：" + store.FailureReason);
+                return RegionInteractResult.Fail(failure, GameText.Get("city.ctl.load_failed") + store.FailureReason);
             }
-            return RegionInteractResult.Ok("装载完成。");
+            return RegionInteractResult.Ok(GameText.Get("city.ctl.loaded"));
         }
 
         private static RegionInteractResult ToInteractResult(FracturedCityRegion.ActionResult result, string successText)

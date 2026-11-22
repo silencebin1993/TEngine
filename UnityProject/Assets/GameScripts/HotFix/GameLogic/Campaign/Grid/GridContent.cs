@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameConfig.fg;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Grid
 {
@@ -295,12 +296,12 @@ namespace GameLogic.Campaign.Grid
                 if (_grid == null || _ports == null || _layout == null || _terrain == null || _tuning == null || _categories == null || _tools == null
                     || _upgrades == null)
                 {
-                    _loadError = "配置表 fg.TbBuildingGrid / TbBuildingPort / TbStartLayout / TbGridTerrain / TbHomeTuning / TbBuildCategory / TbBuildTool / TbBuildUpgrade 不存在";
+                    _loadError = "配置表 fg.TbBuildingGrid / TbBuildingPort / TbStartLayout / TbGridTerrain / TbHomeTuning / TbBuildCategory / TbBuildTool / TbBuildUpgrade 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             catch (Exception ex)
             {
-                _loadError = $"配置表读取失败：{ex.Message}";
+                _loadError = $"配置表读取失败：{ex.Message}"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_loadError != null)
             {

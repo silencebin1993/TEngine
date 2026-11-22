@@ -118,7 +118,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception e)
             {
-                _problems.Add("读取 fg.TbBuildMaterial 失败：" + e.Message);
+                _problems.Add("读取 fg.TbBuildMaterial 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
                 Log.Error("[BuildMaterials] 读取 fg.TbBuildMaterial 失败：" + e.Message);
             }
             if (table == null)
@@ -129,17 +129,17 @@ namespace GameLogic.Campaign.Economy
             {
                 if (!ItemCatalog.TryGet(row.ItemId, out ItemDef item))
                 {
-                    _problems.Add($"{row.Id}：物品 {row.ItemId} 不在物品表里");
+                    _problems.Add($"{row.Id}：物品 {row.ItemId} 不在物品表里"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!HomeInventory.IsStorable(item) || item.Id == ItemCatalog.ScrapId)
                 {
-                    _problems.Add($"{row.Id}：物品 {row.ItemId} 家园存不了或是废料（废料走 buildScrap / diffScrap）");
+                    _problems.Add($"{row.Id}：物品 {row.ItemId} 家园存不了或是废料（废料走 buildScrap / diffScrap）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (row.Amount < 1)
                 {
-                    _problems.Add($"{row.Id}：件数 {row.Amount} 至少 1");
+                    _problems.Add($"{row.Id}：件数 {row.Amount} 至少 1"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string key = Key(row.TypeId, row.Tier);

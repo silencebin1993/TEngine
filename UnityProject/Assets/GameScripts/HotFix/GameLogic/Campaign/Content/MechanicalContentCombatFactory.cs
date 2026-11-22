@@ -3,6 +3,7 @@ using ComposeEngine;
 using ComposeEngine.Builtin.Catalog;
 using ComposeEngine.Builtin.Modules;
 using ComposeEngine.Core;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -28,7 +29,7 @@ namespace GameLogic.Campaign.Content
         /// 精确的射程/伤害/冷却/瞄准线数值需要 Luban 参数化 + CarrierCompiler 正式接线才有意义，
         /// 登记 DEBT-ER4CONTENT01-05（承接 ER4-PRIM-05/ER4-FAC-01）。</summary>
         public static IModule CreateCannonAttack() =>
-            new CompositeModule("comp_cannon_attack", "铸造重炮攻击",
+            new CompositeModule("comp_cannon_attack", GameText.Get("combat.factory.foundry_heavy_cannon_attack"),
                 new BallisticsModule(speed: 0.6f),
                 new Actuator(shape: "Heavy", pattern: AttackPattern.Projectile));
 
@@ -36,7 +37,7 @@ namespace GameLogic.Campaign.Content
         /// Actuator(Aura)——真正的"标记主目标及6米内至多两个敌人、持续6秒"需要独立的目标选择/计时
         /// 状态机，不是一次性 Packet 变换能表达的，登记 DEBT-ER4CONTENT01-06（承接 ER6-REACT-01）。</summary>
         public static IModule CreateMarkerAttack() =>
-            new CompositeModule("func_marker_attack", "静默标记器标记",
+            new CompositeModule("func_marker_attack", GameText.Get("combat.factory.silent_marker_mark"),
                 new TagAttach("Marked"),
                 new AuraModule(6f),
                 new Actuator(shape: "Field", pattern: AttackPattern.Aura));
@@ -47,7 +48,7 @@ namespace GameLogic.Campaign.Content
         /// 与"每跳60%衰减"这个自定义衰减率，两者都需要新的宿主侧结算逻辑，登记 DEBT-ER4CONTENT01-06
         /// （承接 ER6-REACT-01，与静默标记器共用同一条 DEBT——两者是同一个反应的两半）。</summary>
         public static IModule CreateMarkJumpAttack() =>
-            new CompositeModule("fw_marktag_attack", "标记跳转固件",
+            new CompositeModule("fw_marktag_attack", GameText.Get("analysis.quest_name.protocol_databox"),
                 new ChainModule(2),
                 new TagAttach("Marked"),
                 new Actuator(shape: "Arc", pattern: AttackPattern.Chain));

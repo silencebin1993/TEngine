@@ -86,6 +86,7 @@ namespace GameLogic.UI.HomeValleyFailure
         public void BindView(VisualElement root)
         {
             _root = root;
+            UiText.Localize(root); // FG15-UX-03：UXML 的 tooltip="@键"（悬停提示）
             _root.style.display = DisplayStyle.None;
             _title = _root.Q<Label>("Title");
             _subtitle = _root.Q<Label>("Subtitle");

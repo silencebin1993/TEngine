@@ -328,7 +328,7 @@ namespace GameLogic.Campaign.Economy
         {
             _overridden = true;
             _data = data ?? new Data();
-            _loadError = data == null ? "测试注入：物品表为空" : null;
+            _loadError = data == null ? "测试注入：物品表为空" : null; // loc-ignore: 开发者自检 / 诊断文本
             Revision++;
         }
 
@@ -349,7 +349,7 @@ namespace GameLogic.Campaign.Economy
                 GameConfig.Tables t = ConfigSystem.Instance.Tables;
                 if (t?.TbEcoItem == null || t.TbRecipe == null || t.TbRecipeIo == null || t.TbFluid == null)
                 {
-                    _loadError = "配置表 fg.TbEcoItem / fg.TbRecipe / fg.TbRecipeIo / fg.TbFluid 不存在";
+                    _loadError = "配置表 fg.TbEcoItem / fg.TbRecipe / fg.TbRecipeIo / fg.TbFluid 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else
                 {
@@ -382,7 +382,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception ex)
             {
-                _loadError = "配置表读取失败：" + ex.Message;
+                _loadError = "配置表读取失败：" + ex.Message; // loc-ignore: 开发者自检 / 诊断文本
             }
             _data = Build(items, recipes, ios, fluids, BeltScrapId());
             if (_loadError != null)
@@ -420,33 +420,33 @@ namespace GameLogic.Campaign.Economy
             {
                 if (string.IsNullOrEmpty(r.Id))
                 {
-                    d.Problems.Add("物品行缺 ID");
+                    d.Problems.Add("物品行缺 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (d.ById.ContainsKey(r.Id))
                 {
-                    d.Problems.Add($"物品 {r.Id} 重复");
+                    d.Problems.Add($"物品 {r.Id} 重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!TryParseForm(r.Form, out ItemForm form))
                 {
-                    d.Problems.Add($"物品 {r.Id}：形态 {r.Form} 不认识");
+                    d.Problems.Add($"物品 {r.Id}：形态 {r.Form} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!TryParseProtocol(r.Protocol, out ItemProtocolKind protocol))
                 {
                     // FG8-LOOT-01：每件物品都必须有协议（FGR-LOOT-001）；缺了 / 拼错的整行拒绝，不让一件敌方物品被当成“可直接使用”。
-                    d.Problems.Add($"物品 {r.Id}：协议 {r.Protocol ?? "(空)"} 不认识（own / neutral / enemy）");
+                    d.Problems.Add($"物品 {r.Id}：协议 {r.Protocol ?? "(空)"} 不认识（own / neutral / enemy）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (r.BeltId < 0 || r.BeltId > 999 || (r.BeltId != 0) != (form == ItemForm.Solid))
                 {
-                    d.Problems.Add($"物品 {r.Id}：只有固体上传送带（beltId {r.BeltId}，形态 {r.Form}）");
+                    d.Problems.Add($"物品 {r.Id}：只有固体上传送带（beltId {r.BeltId}，形态 {r.Form}）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (r.BeltId != 0 && d.ByBelt.ContainsKey((ushort)r.BeltId))
                 {
-                    d.Problems.Add($"物品 {r.Id}：传送带编号 {r.BeltId} 重复");
+                    d.Problems.Add($"物品 {r.Id}：传送带编号 {r.BeltId} 重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 bool fluidOk = form == ItemForm.Fluid
@@ -454,7 +454,7 @@ namespace GameLogic.Campaign.Economy
                     : r.FluidId == 0;
                 if (!fluidOk)
                 {
-                    d.Problems.Add($"物品 {r.Id}：流体编号 {r.FluidId} 与 fg.TbFluid 对不上");
+                    d.Problems.Add($"物品 {r.Id}：流体编号 {r.FluidId} 与 fg.TbFluid 对不上"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var def = new ItemDef
@@ -498,13 +498,13 @@ namespace GameLogic.Campaign.Economy
                 {
                     if (!d.ByFluid.ContainsKey(f.Key))
                     {
-                        d.Problems.Add($"fg.TbFluid 的 {f.Value} 在物品表里没有流体行");
+                        d.Problems.Add($"fg.TbFluid 的 {f.Value} 在物品表里没有流体行"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
             }
             if (!d.ById.TryGetValue(ScrapId, out ItemDef scrap) || scrap.BeltId != scrapBeltId)
             {
-                d.Problems.Add($"废料的传送带编号必须等于 logistics.item.scrap_id（{scrapBeltId}）");
+                d.Problems.Add($"废料的传送带编号必须等于 logistics.item.scrap_id（{scrapBeltId}）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             d.Items.Sort((a, b) => a.SortOrder != b.SortOrder ? a.SortOrder.CompareTo(b.SortOrder) : string.CompareOrdinal(a.Id, b.Id));
 
@@ -514,7 +514,7 @@ namespace GameLogic.Campaign.Economy
             {
                 if (!ioIds.Add(io.Id))
                 {
-                    d.Problems.Add($"配方行 {io.Id} 重复");
+                    d.Problems.Add($"配方行 {io.Id} 重复"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (io.Recipe == null)
                 {
@@ -530,17 +530,17 @@ namespace GameLogic.Campaign.Economy
             {
                 if (string.IsNullOrEmpty(r.Id) || d.RecipeById.ContainsKey(r.Id))
                 {
-                    d.Problems.Add($"配方 {r.Id ?? "(空)"}：ID 为空或重复");
+                    d.Problems.Add($"配方 {r.Id ?? "(空)"}：ID 为空或重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var problems = new List<string>();
                 if (!(r.Seconds > 0f))
                 {
-                    problems.Add("时间必须 > 0");
+                    problems.Add("时间必须 > 0"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (r.Kind != "fixed" && r.Kind != "component_table" && r.Kind != "blueprint" && r.Kind != "firmware")
                 {
-                    problems.Add($"类型 {r.Kind} 不认识");
+                    problems.Add($"类型 {r.Kind} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 var lines = new List<RecipeLine>();
                 bool hasIn = false;
@@ -552,22 +552,22 @@ namespace GameLogic.Campaign.Economy
                     {
                         if (!d.ById.TryGetValue(io.Item ?? string.Empty, out ItemDef item))
                         {
-                            problems.Add($"{RoleText(io.Role)}的物品 {io.Item} 不在物品表");
+                            problems.Add($"{RoleText(io.Role)}的物品 {io.Item} 不在物品表"); // loc-ignore: 开发者自检 / 诊断文本
                             continue;
                         }
                         if (io.Amount <= 0)
                         {
-                            problems.Add($"{item.Id} 的数量必须 > 0");
+                            problems.Add($"{item.Id} 的数量必须 > 0"); // loc-ignore: 开发者自检 / 诊断文本
                             continue;
                         }
                         if (!TryParseRole(io.Role, out RecipeRole role))
                         {
-                            problems.Add($"{item.Id} 的角色 {io.Role} 不认识");
+                            problems.Add($"{item.Id} 的角色 {io.Role} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                             continue;
                         }
                         if (item.Form == ItemForm.Digital || item.Form == ItemForm.Vault)
                         {
-                            problems.Add($"{item.Id} 是数字资源 / 保管库物品，不进产线");
+                            problems.Add($"{item.Id} 是数字资源 / 保管库物品，不进产线"); // loc-ignore: 开发者自检 / 诊断文本
                             continue;
                         }
                         hasIn |= role == RecipeRole.In;
@@ -577,14 +577,14 @@ namespace GameLogic.Campaign.Economy
                 }
                 if (!hasIn || !hasOut)
                 {
-                    problems.Add("至少要有一个输入和一个产出");
+                    problems.Add("至少要有一个输入和一个产出"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (problems.Count > 0)
                 {
                     d.RejectedRecipes.Add(r.Id);
                     foreach (string p in problems)
                     {
-                        d.Problems.Add($"配方 {r.Id}：{p}");
+                        d.Problems.Add($"配方 {r.Id}：{p}"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     continue;
                 }
@@ -622,7 +622,7 @@ namespace GameLogic.Campaign.Economy
             return d;
         }
 
-        private static string RoleText(string role) => role == "in" ? "输入" : role == "byproduct" ? "副产品" : "产出";
+        private static string RoleText(string role) => role == "in" ? GameText.Get("grid.port.in") : role == "byproduct" ? GameText.Get("item.catalog.byproduct") : GameText.Get("item.catalog.output");
 
         public static bool TryParseForm(string text, out ItemForm form)
         {

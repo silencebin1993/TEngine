@@ -148,13 +148,13 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbRangeTarget 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbRangeTarget 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (table == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbRangeTarget 不存在（改 tools/cell_tables/fgdata_range.py 后重新生成）");
+                    ProblemList.Add("fg.TbRangeTarget 不存在（改 tools/cell_tables/fgdata_range.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[TestRangeCatalog] " + ProblemList[0]);
                 return;
@@ -163,18 +163,18 @@ namespace GameLogic.Campaign.Economy
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || ById.ContainsKey(row.Id))
                 {
-                    ProblemList.Add("fg.TbRangeTarget：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbRangeTarget：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 RangeTargetArchetype? arch = ParseArchetype(row.Archetype);
                 if (arch == null)
                 {
-                    ProblemList.Add($"fg.TbRangeTarget {row.Id}：原型 {row.Archetype} 不认识");
+                    ProblemList.Add($"fg.TbRangeTarget {row.Id}：原型 {row.Archetype} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (row.Hp <= 0f || row.Radius <= 0f || row.Count < 1 || row.Armor < 0f || row.Armor > 0.9f)
                 {
-                    ProblemList.Add($"fg.TbRangeTarget {row.Id}：生命 / 半径 > 0、数量 >= 1、减伤 0～0.9");
+                    ProblemList.Add($"fg.TbRangeTarget {row.Id}：生命 / 半径 > 0、数量 >= 1、减伤 0～0.9"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var unlock = new List<string>();
@@ -190,7 +190,7 @@ namespace GameLogic.Campaign.Economy
                     }
                     if (unlock.Count == 0)
                     {
-                        ProblemList.Add($"fg.TbRangeTarget {row.Id}：解锁条件为空（一开始就有的写 always）");
+                        ProblemList.Add($"fg.TbRangeTarget {row.Id}：解锁条件为空（一开始就有的写 always）"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                 }
@@ -206,7 +206,7 @@ namespace GameLogic.Campaign.Economy
             List.Sort((a, b) => a.SortOrder != b.SortOrder ? a.SortOrder.CompareTo(b.SortOrder) : string.CompareOrdinal(a.Id, b.Id));
             if (!List.Exists(t => t.AlwaysUnlocked))
             {
-                ProblemList.Add("fg.TbRangeTarget：至少一种靶子要一开始就有（B11）");
+                ProblemList.Add("fg.TbRangeTarget：至少一种靶子要一开始就有（B11）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (ProblemList.Count > 0)
             {

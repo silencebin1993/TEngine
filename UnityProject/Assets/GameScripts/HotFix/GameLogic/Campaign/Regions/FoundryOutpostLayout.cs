@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using GameLogic.Campaign.Content;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -327,7 +328,7 @@ namespace GameLogic.Campaign.Regions
                     if (dist < minGap)
                     {
                         violations.Add(
-                            $"锚点 {anchors[i].Id} 与 {anchors[j].Id} 净空重叠：距离 {dist:F2} < 所需 {minGap:F2}");
+                            $"锚点 {anchors[i].Id} 与 {anchors[j].Id} 净空重叠：距离 {dist:F2} < 所需 {minGap:F2}"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
 
@@ -337,7 +338,7 @@ namespace GameLogic.Campaign.Regions
                     Mathf.Abs(a.Position.y) + a.ClearanceRadius <= CameraBoundsHalfExtentZ;
                 if (!insideBounds)
                 {
-                    violations.Add($"锚点 {a.Id} 超出相机边界（半宽 {CameraBoundsHalfExtentX}/{CameraBoundsHalfExtentZ}）");
+                    violations.Add($"锚点 {a.Id} 超出相机边界（半宽 {CameraBoundsHalfExtentX}/{CameraBoundsHalfExtentZ}）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
 
@@ -347,12 +348,12 @@ namespace GameLogic.Campaign.Regions
             const float minSafeSpawnDistance = 10f;
             if (entryToLeft < minSafeSpawnDistance || entryToRight < minSafeSpawnDistance || entryToStrider < minSafeSpawnDistance)
             {
-                violations.Add("出生点 EntryEvac 距敌方锚点过近，可能与敌射线重叠（\"不能在出生点无预告秒杀玩家\"）。");
+                violations.Add("出生点 EntryEvac 距敌方锚点过近，可能与敌射线重叠（\"不能在出生点无预告秒杀玩家\"）。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             if (CameraBoundsHalfExtentX <= 0f || CameraBoundsHalfExtentZ <= 0f)
             {
-                violations.Add("相机边界半宽/半高必须为正数（相机无锚点）。");
+                violations.Add("相机边界半宽/半高必须为正数（相机无锚点）。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             return violations;

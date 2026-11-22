@@ -112,7 +112,7 @@ namespace GameLogic.Campaign.Economy
                     names.Add(l.Item.Name);
                 }
             }
-            return string.Join(GameText.Language == GameLanguage.En ? ", " : "、", names);
+            return string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), names);
         }
 
         /// <summary>

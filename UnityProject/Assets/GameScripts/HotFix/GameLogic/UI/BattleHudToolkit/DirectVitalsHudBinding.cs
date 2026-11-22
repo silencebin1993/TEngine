@@ -1,6 +1,7 @@
 using GameLogic.Control;
 using GameLogic.Core;
 using UnityEngine.UIElements;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Battle
 {
@@ -46,24 +47,24 @@ namespace GameLogic.UI.Battle
         {
             if (!vitals.Valid)
             {
-                return "电量 --";
+                return GameText.Get("hud.vitals.charge");
             }
 
             // 「过载债」是累积量，「已过载」是状态——两个词分开，玩家才读得出
             // "债还在涨" 和 "已经按不动了" 是两回事。
             string strain = vitals.Overloaded
-                ? $"过载债 {vitals.Strain:F0}/{vitals.StrainThreshold:F0} 已过载"
-                : $"过载债 {vitals.Strain:F0}/{vitals.StrainThreshold:F0}";
+                ? GameText.Format("hud.vitals.overload_debt_0_f0", vitals.Strain, vitals.StrainThreshold)
+                : GameText.Format("hud.vitals.overload_debt_0_f0_2", vitals.Strain, vitals.StrainThreshold);
 
-            return $"电量 {vitals.Metabolism:F0}/{vitals.MetabolismMax:F0}　{strain}" +
-                   $"　主 {FormatCooldown(vitals.PrimaryCooldown)}" +
-                   $"　功 {FormatCooldown(vitals.UtilityCooldown)}";
+            return GameText.Format("hud.vitals.charge_0_f0_1", vitals.Metabolism, vitals.MetabolismMax, strain) +
+                   GameText.Format("hud.vitals.main_0", FormatCooldown(vitals.PrimaryCooldown)) +
+                   GameText.Format("hud.vitals.util_0", FormatCooldown(vitals.UtilityCooldown));
         }
 
         /// <summary>冷却文案。就绪时写"就绪"而不是 0.0s——玩家要的是能不能按，不是一个恒零的数字。</summary>
         public static string FormatCooldown(float secondsLeft)
         {
-            return secondsLeft > 0.05f ? $"{secondsLeft:F1}s" : "就绪";
+            return secondsLeft > 0.05f ? $"{secondsLeft:F1}s" : GameText.Get("hud.vitals.ready");
         }
 
         /// <summary>

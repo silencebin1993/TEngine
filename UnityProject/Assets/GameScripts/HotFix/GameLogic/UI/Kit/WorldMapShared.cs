@@ -499,7 +499,7 @@ namespace GameLogic.UI.Kit
                         continue;
                     }
                     string name = GameText.Format("ui.map.marker_default", m.Serial);
-                    Add(WorldMapItemKind.Marker, WorldMapLayer.Markers, m.MarkerId, m.CellX, m.CellY, string.IsNullOrEmpty(m.Note) ? name : name + "：" + m.Note);
+                    Add(WorldMapItemKind.Marker, WorldMapLayer.Markers, m.MarkerId, m.CellX, m.CellY, string.IsNullOrEmpty(m.Note) ? name : name + GameText.Get("emg.enemy.program.sep") + m.Note);
                 }
             }
             if (WorldMapFilters.IsOn(WorldMapLayer.Markers))

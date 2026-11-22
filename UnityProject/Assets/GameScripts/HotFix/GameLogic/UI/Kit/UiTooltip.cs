@@ -111,6 +111,9 @@ namespace GameLogic.UI.Kit
             Bindings[target] = new Binding { Provider = provider };
         }
 
+        /// <summary>FG15-UX-03：这个元素是否已挂提示（UiText 自动挂 UXML 提示前先看，代码挂的更具体，不覆盖）。</summary>
+        public static bool IsAttached(VisualElement target) => target != null && Bindings.ContainsKey(target);
+
         /// <summary>自检读点：当前挂着提示的元素数（按数量动态建行的面板重建前要 <see cref="Detach"/> 旧行，否则这里只增不减）。</summary>
         public static int BindingCount => Bindings.Count;
 

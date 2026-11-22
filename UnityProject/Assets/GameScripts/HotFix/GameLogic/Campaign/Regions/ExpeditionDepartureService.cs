@@ -7,6 +7,7 @@ using GameLogic.Core;
 using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -386,8 +387,8 @@ namespace GameLogic.Campaign.Regions
             }
             bool reinforcement = CampaignExposureLedger.HasReachedCoreReinforcement(state);
             string reinforcementText = reinforcement
-                ? "信号暴露已突破90：下一次进攻核心分区时，入口会额外增援一台铸造护甲机布防" +
-                  "（出发前预告，不是本次适应，届时在核心战入口实装）。"
+                ? GameText.Get("expedition.depart.signal_exposure_passed_90") +
+                  GameText.Get("expedition.depart.a_warning_before_departure")
                 : null;
             return (adaptationId, info.DisplayName, info.SourceText, info.HazardText, info.CounterHintText,
                 reinforcement, reinforcementText);
@@ -444,7 +445,7 @@ namespace GameLogic.Campaign.Regions
                 return new PrepSnapshot(true, null, machines, HomeValleySignal.BandwidthCapacity(state),
                     MinRecommendedCargoSlots(target, foundry), foundryIntel, foundry?.EnemyAlertLevel ?? 0f,
                     foundry?.ExpeditionCount ?? 0, target,
-                    "外围侦察，重炮回收后撤离；主核心区暂不可进入。",
+                    GameText.Get("expedition.depart.scout_the_outskirts_recover"),
                     adapt.id, adapt.name, adapt.source, adapt.hazard, adapt.counter,
                     adapt.reinforcement, adapt.reinforcementText);
             }
@@ -462,12 +463,12 @@ namespace GameLogic.Campaign.Regions
             AdaptationCatalog.AdaptationInfo noneInfo = AdaptationCatalog.Describe(AdaptationCatalog.None);
             bool reinforcementForecast = CampaignExposureLedger.HasReachedCoreReinforcement(state);
             string reinforcementForecastText = reinforcementForecast
-                ? "信号暴露已突破90：下一次进攻核心分区时，入口会额外增援一台铸造护甲机布防（出发前预告，届时在核心战入口实装）。"
+                ? GameText.Get("expedition.depart.signal_exposure_passed_90_2")
                 : null;
 
             return new PrepSnapshot(true, null, machines, HomeValleySignal.BandwidthCapacity(state),
                 MinRecommendedCargoSlots(target, region), intel, region.EnemyAlertLevel, region.ExpeditionCount,
-                target, "破碎都市：侦察带回静默技术并撤离。",
+                target, GameText.Get("expedition.depart.fractured_city_scout_bring"),
                 AdaptationCatalog.None, noneInfo.DisplayName, noneInfo.SourceText, noneInfo.HazardText,
                 noneInfo.CounterHintText, reinforcementForecast, reinforcementForecastText);
         }
@@ -750,7 +751,7 @@ namespace GameLogic.Campaign.Regions
                     throw new InvalidOperationException("march-begin-failed:" + marchFailure);
                 }
                 RegionRecord regionAfter = target == ExpeditionTarget.FoundryOutpost ? FoundryOutpostRegion.Find(state) : FracturedCityRegion.Find(state);
-                string targetLabel = target == ExpeditionTarget.FoundryOutpost ? "铸造前哨外围" : "破碎都市";
+                string targetLabel = target == ExpeditionTarget.FoundryOutpost ? GameText.Get("combat.site.foundry_outpost") : GameText.Get("world.site.silent_ruins.name");
 
                 // ── 出发事务提交才增加 expeditionCount（与 FG8-EXP-01 同一时刻：中途被召回也算一次出击）──────────
                 if (regionAfter != null)
@@ -782,7 +783,7 @@ namespace GameLogic.Campaign.Regions
 
                 InputRouter.SetModalUi(false);
                 // ER8-CONTENT-01：出发事务提交成功的唯一出口。
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionDepart, $"{selectedLogicIds.Count} 台机器");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.ExpeditionDepart, GameText.Format("camera.follow.group", selectedLogicIds.Count));
                 // 第一次派遣的引导钩子（内容在 FG15-UX-04）：出发这一刻（行军前原先在载入地点时发）。
                 GuidanceHooks.Raise(GuidanceHooks.WorldFirstDispatch);
                 return new DepartureResult(DepartureOutcome.Success, null, null);

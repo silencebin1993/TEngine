@@ -9,6 +9,7 @@ using GameLogic.Campaign.Signal;
 using GameLogic.MetabolicSlice.ContentCatalog;
 using GameLogic.MetabolicSlice.Graph;
 using GameLogic.MetabolicSlice.Grid;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Blueprint
 {
@@ -40,7 +41,7 @@ namespace GameLogic.Campaign.Blueprint
         public readonly List<BlueprintCircuitPathPreview> Paths = new List<BlueprintCircuitPathPreview>();
 
         /// <summary>命中的具名反应展示名，或找不到时的中性说明（永不为 null/空，永不显示"缺反应"错误）。</summary>
-        public string ReactionHint = "无具名反应（通用预览已生成）。";
+        public string ReactionHint = GameText.Get("circuit.compile.no_named_reaction_generic");
 
         /// <summary>ER6-REACT-01：<see cref="Emergence.EmgRuleCatalog.AssemblyReactionId"/> 的原始结果
         /// （<see cref="Content.MechanicalReactionCatalog.ReactionMarkJumpId"/> 等），供战斗结算代码
@@ -201,7 +202,7 @@ namespace GameLogic.Campaign.Blueprint
             if (string.IsNullOrEmpty(board.SlotContentIds[BlueprintCircuitLayout.SinkSlot]))
             {
                 preview.HasCombatOutput = false;
-                preview.NoteText = "该底盘当前主组件无可攻击输出（如搬运/维修类底盘），通用预览不适用于战斗数值。";
+                preview.NoteText = GameText.Get("circuit.compile.this_chassis_s_main");
                 return preview;
             }
 
@@ -209,7 +210,7 @@ namespace GameLogic.Campaign.Blueprint
             preview.PathCount = compiled.Count;
             if (compiled.Count == 0)
             {
-                preview.NoteText = "当前无合法源→汇路径，无法生成预览（保存前必须先修好电路）。";
+                preview.NoteText = GameText.Get("circuit.compile.no_valid_source_sink");
                 return preview;
             }
 
@@ -334,9 +335,9 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (reactionId != null && MechanicalReactionCatalog.TryGet(reactionId, out MechanicalContentDef def))
             {
-                return $"触发具名反应：{def.DisplayName}。";
+                return GameText.Format("circuit.compile.triggers_named_reaction_0", def.DisplayName);
             }
-            return "无具名反应（通用预览已生成，效果按普通正交组合结算）。";
+            return GameText.Get("circuit.compile.no_named_reaction_generic_2");
         }
     }
 }

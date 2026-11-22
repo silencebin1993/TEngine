@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using GameLogic.Campaign.Blueprint;
 using GameLogic.Campaign.Content;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -175,20 +176,20 @@ namespace GameLogic.Campaign.Regions
         {
             switch (risk)
             {
-                case ExpeditionRisk.Low: return "低";
-                case ExpeditionRisk.Medium: return "中";
-                default: return "高";
+                case ExpeditionRisk.Low: return GameText.Get("settings.display.quality_low");
+                case ExpeditionRisk.Medium: return GameText.Get("settings.display.quality_medium");
+                default: return GameText.Get("settings.display.quality_high");
             }
         }
 
         /// <summary>面板一行文字（数字全部真实计算，可读出口径）。</summary>
         public static string Describe(Result r)
         {
-            string rounds = float.IsInfinity(r.RoundsToClear) ? "无法清场（没有武器）" : $"约 {Mathf.CeilToInt(r.RoundsToClear)} 轮清场";
+            string rounds = float.IsInfinity(r.RoundsToClear) ? GameText.Get("expedition.forecast.cannot_clear_no_weapons") : GameText.Format("expedition.forecast.about_0_rounds_to", Mathf.CeilToInt(r.RoundsToClear));
             string enemy = r.EnemyCount > 0
-                ? $"敌方 {r.EnemyCount} 个·耐久 {r.EnemyHealth:F0}{(r.EnemyEstimated ? "（按编制估算）" : string.Empty)}"
-                : "未发现存活敌人";
-            return $"预估：火力 {r.FirepowerPerRound:F0}/轮｜维修 {r.RepairUnits} 台｜我方耐久 {r.TeamHealth:F0}｜{enemy}｜{rounds}｜风险 {RiskText(r.Risk)}";
+                ? GameText.Format("expedition.forecast.0_enemies_durability_1", r.EnemyCount, r.EnemyHealth, (r.EnemyEstimated ? GameText.Get("expedition.forecast.estimated_from_roster") : string.Empty))
+                : GameText.Get("expedition.forecast.no_living_enemies_found");
+            return GameText.Format("expedition.forecast.forecast_firepower_0_f0", r.FirepowerPerRound, r.RepairUnits, r.TeamHealth, enemy, rounds, RiskText(r.Risk));
         }
 
         private static string RegionIdFor(ExpeditionDepartureService.ExpeditionTarget target)

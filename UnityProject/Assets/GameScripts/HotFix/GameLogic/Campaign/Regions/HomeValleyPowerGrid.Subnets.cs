@@ -964,7 +964,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         names.Add(SubnetName(k.Subnet(s).Serial));
                     }
-                    string sep = GameText.Language == GameLanguage.En ? ", " : "、";
+                    string sep = GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep");
                     r.Notes.Add(nets.Count == 1 ? GameText.Format("power.preview.joins", names[0]) : GameText.Format("power.preview.links", string.Join(sep, names)));
                 }
                 k.CountCoverable(cx, cy, radius, out int covered, out int nowUnconnected);

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameLogic.Campaign.Grid;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Economy
 {
@@ -173,7 +174,7 @@ namespace GameLogic.Campaign.Economy
         {
             _overridden = true;
             _data = data ?? new Data();
-            _loadError = data == null ? "测试注入：生产建筑表为空" : null;
+            _loadError = data == null ? "测试注入：生产建筑表为空" : null; // loc-ignore: 开发者自检 / 诊断文本
             Revision++;
         }
 
@@ -192,7 +193,7 @@ namespace GameLogic.Campaign.Economy
                 GameConfig.Tables t = ConfigSystem.Instance.Tables;
                 if (t?.TbProducer == null || t.TbBuildingFluidPort == null)
                 {
-                    _loadError = "配置表 fg.TbProducer / fg.TbBuildingFluidPort 不存在";
+                    _loadError = "配置表 fg.TbProducer / fg.TbBuildingFluidPort 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else
                 {
@@ -213,7 +214,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception ex)
             {
-                _loadError = "配置表读取失败：" + ex.Message;
+                _loadError = "配置表读取失败：" + ex.Message; // loc-ignore: 开发者自检 / 诊断文本
             }
             _data = Build(rows, ports);
             if (_loadError != null)
@@ -252,7 +253,7 @@ namespace GameLogic.Campaign.Economy
             {
                 if (string.IsNullOrEmpty(p.TypeId))
                 {
-                    d.Problems.Add($"流体口 {p.Id} 缺建筑");
+                    d.Problems.Add($"流体口 {p.Id} 缺建筑"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!portsByType.TryGetValue(p.TypeId, out List<FluidPortRow> l))
@@ -265,7 +266,7 @@ namespace GameLogic.Campaign.Economy
             {
                 if (string.IsNullOrEmpty(r.TypeId) || d.ByType.ContainsKey(r.TypeId))
                 {
-                    d.Problems.Add($"生产建筑 {r.TypeId} 缺 ID 或重复");
+                    d.Problems.Add($"生产建筑 {r.TypeId} 缺 ID 或重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 string why = Check(r, out ProducerDef def);
@@ -286,7 +287,7 @@ namespace GameLogic.Campaign.Economy
                 }
                 if (why != null)
                 {
-                    d.Problems.Add($"生产建筑 {r.TypeId}：{why}");
+                    d.Problems.Add($"生产建筑 {r.TypeId}：{why}"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 d.All.Add(def);
@@ -301,11 +302,11 @@ namespace GameLogic.Campaign.Economy
             def = null;
             if (!TryParseMode(r.Mode, out ProducerMode mode))
             {
-                return $"工作方式 {r.Mode} 不认识";
+                return $"工作方式 {r.Mode} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!GridContent.TryGetBuilding(r.TypeId, out _))
             {
-                return "不在建筑格网表里";
+                return "不在建筑格网表里"; // loc-ignore: 开发者自检 / 诊断文本
             }
             def = new ProducerDef
             {
@@ -328,11 +329,11 @@ namespace GameLogic.Campaign.Economy
                     string rid = id.Trim();
                     if (!ItemCatalog.TryGetRecipe(rid, out RecipeDef rec))
                     {
-                        return $"配方 {rid} 不在配方表（或被配方表拒绝）";
+                        return $"配方 {rid} 不在配方表（或被配方表拒绝）"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     if (rec.Building != r.TypeId)
                     {
-                        return $"配方 {rid} 属于 {rec.Building}，不是它";
+                        return $"配方 {rid} 属于 {rec.Building}，不是它"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     def.Recipes.Add(rec);
                 }
@@ -342,55 +343,55 @@ namespace GameLogic.Campaign.Economy
                 case ProducerMode.Recipe:
                     if (def.Recipes.Count == 0 || r.InBatches < 1 || r.OutBatches < 1)
                     {
-                        return "配方建筑至少一条配方、输入 / 输出缓存至少 1 批";
+                        return "配方建筑至少一条配方、输入 / 输出缓存至少 1 批"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Drill:
                     if (def.Recipes.Count > 0 || r.CycleSeconds <= 0f || r.CycleAmount < 1 || r.OutBatches < 1)
                     {
-                        return "提取钻要有周期、产量与输出缓存，不用配方";
+                        return "提取钻要有周期、产量与输出缓存，不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Recycler:
                     if (def.Recipes.Count > 0 || r.CycleSeconds <= 0f || r.CycleAmount < 1 || r.ItemSeconds <= 0f || r.InBatches < 1 || r.OutBatches < 1)
                     {
-                        return "回收站要有拆废墟周期 / 产量、分解时间与缓存，不用配方";
+                        return "回收站要有拆废墟周期 / 产量、分解时间与缓存，不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Waste:
                     if (def.Recipes.Count > 0 || r.FluidLpm <= 0f)
                     {
-                        return "废液池要有销毁速率，不用配方";
+                        return "废液池要有销毁速率，不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Pump:
                     if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.OutBatches < 1)
                     {
-                        return "流体泵要有抽取速率与出口存量（秒），不用配方";
+                        return "流体泵要有抽取速率与出口存量（秒），不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Generator:
                     if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.InBatches < 1)
                     {
-                        return "燃油发电机要有满负荷烧油速率与机内存油秒数，不用配方";
+                        return "燃油发电机要有满负荷烧油速率与机内存油秒数，不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Purifier:
                     if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.InBatches < 1)
                     {
-                        return "净化塔要有冷却液用量与机内存量秒数，不用配方";
+                        return "净化塔要有冷却液用量与机内存量秒数，不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
                 case ProducerMode.Megastructure:
                     if (def.Recipes.Count > 0 || r.FluidLpm <= 0f || r.InBatches < 1 || r.OutBatches < 1)
                     {
-                        return "返航工地要有流体抽取速率、固体缓存件数与流体存量秒数，不用配方";
+                        return "返航工地要有流体抽取速率、固体缓存件数与流体存量秒数，不用配方"; // loc-ignore: 开发者自检 / 诊断文本
                     }
                     break;
             }
             if (r.VibrationPerMinute < 0f)
             {
-                return "震动不能为负";
+                return "震动不能为负"; // loc-ignore: 开发者自检 / 诊断文本
             }
             return null;
         }
@@ -399,12 +400,12 @@ namespace GameLogic.Campaign.Economy
         {
             if (!GridMath.TryParseDir(p.Dir, out GridDir dir))
             {
-                return $"流体口 {p.Id} 方向 {p.Dir} 不认识";
+                return $"流体口 {p.Id} 方向 {p.Dir} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
             }
             bool output = p.Kind == "out";
             if (!output && p.Kind != "in")
             {
-                return $"流体口 {p.Id} kind {p.Kind} 不认识";
+                return $"流体口 {p.Id} kind {p.Kind} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
             }
             ItemDef fluid = null;
             bool fromSource = false;
@@ -412,20 +413,20 @@ namespace GameLogic.Campaign.Economy
             {
                 if (output)
                 {
-                    return $"流体口 {p.Id}：any 只能用于输入";
+                    return $"流体口 {p.Id}：any 只能用于输入"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             else if (p.Fluid == "source")
             {
                 if (!output || def.Mode != ProducerMode.Pump)
                 {
-                    return $"流体口 {p.Id}：source 只能用于流体泵的输出口";
+                    return $"流体口 {p.Id}：source 只能用于流体泵的输出口"; // loc-ignore: 开发者自检 / 诊断文本
                 }
                 fromSource = true;
             }
             else if (!ItemCatalog.TryGet(p.Fluid, out fluid) || fluid.Form != ItemForm.Fluid || fluid.FluidId <= 0)
             {
-                return $"流体口 {p.Id}：{p.Fluid} 不是物品表里的流体";
+                return $"流体口 {p.Id}：{p.Fluid} 不是物品表里的流体"; // loc-ignore: 开发者自检 / 诊断文本
             }
             def.FluidPorts.Add(new FluidPortDef { Id = p.Id, LocalX = p.LocalX, LocalY = p.LocalY, Dir = dir, IsOutput = output, Fluid = fluid, FromSource = fromSource });
             return null;
@@ -436,19 +437,19 @@ namespace GameLogic.Campaign.Economy
         {
             if (def.Mode == ProducerMode.Pump && (def.FluidPorts.Count != 1 || !def.FluidPorts[0].FromSource))
             {
-                return "流体泵要有且只有一个 fluid = source 的输出口";
+                return "流体泵要有且只有一个 fluid = source 的输出口"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (def.Mode == ProducerMode.Generator && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
             {
-                return "燃油发电机要有且只有一个收某种流体（燃油）的输入口";
+                return "燃油发电机要有且只有一个收某种流体（燃油）的输入口"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (def.Mode == ProducerMode.Purifier && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
             {
-                return "净化塔要有且只有一个收某种流体（冷却液）的输入口";
+                return "净化塔要有且只有一个收某种流体（冷却液）的输入口"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (def.Mode == ProducerMode.Megastructure && (def.FluidPorts.Count != 1 || def.FluidPorts[0].IsOutput || def.FluidPorts[0].Fluid == null))
             {
-                return "返航工地要有且只有一个收某种流体（冷却液）的输入口";
+                return "返航工地要有且只有一个收某种流体（冷却液）的输入口"; // loc-ignore: 开发者自检 / 诊断文本
             }
             return null;
         }

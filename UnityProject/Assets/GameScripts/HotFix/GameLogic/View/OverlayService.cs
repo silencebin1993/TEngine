@@ -523,7 +523,7 @@ namespace GameLogic.View
                 {
                     World = new Vector3(a.x, 0.8f, a.y),
                     Text = GameText.Format("overlay.label.fluid", name, RootCauseDiagnosis.FormatNumber(n.SupplyLpm), RootCauseDiagnosis.FormatNumber(n.DemandLpm),
-                        PipeNetworkService.DescribeState(n).Replace("\n", "；")),
+                        PipeNetworkService.DescribeState(n).Replace("\n", GameLogic.Localization.GameText.Get("common.clause_sep"))),
                     Tone = (byte)(bad ? 1 : 0),
                 });
             }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BinGames.Sim.Combat;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Emergence
 {
@@ -49,7 +50,7 @@ namespace GameLogic.Campaign.Emergence
             var c = new Compiled();
             if (rows == null || rows.Count != EmgPhaseConst.Count)
             {
-                c.Problems.Add($"fg.TbPhaseRule 应为 {EmgPhaseConst.Count} 行，实际 {rows?.Count ?? 0}");
+                c.Problems.Add($"fg.TbPhaseRule 应为 {EmgPhaseConst.Count} 行，实际 {rows?.Count ?? 0}"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             for (int k = 0; k < rows.Count; k++)
@@ -59,7 +60,7 @@ namespace GameLogic.Campaign.Emergence
                 int mode = Array.IndexOf(ExitModes, r?.ExitMode);
                 if (r == null || r.Acc != AccPorts[k] || r.Phase != PhasePorts[k] || res < 0 || mode < 0)
                 {
-                    c.Problems.Add($"fg.TbPhaseRule 第 {k + 1} 行应为 {AccPorts[k]} → {PhasePorts[k]}，抗性列 / 退出方式要在封闭清单（{r?.Id}）");
+                    c.Problems.Add($"fg.TbPhaseRule 第 {k + 1} 行应为 {AccPorts[k]} → {PhasePorts[k]}，抗性列 / 退出方式要在封闭清单（{r?.Id}）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 c.Ids.Add(r.Id);

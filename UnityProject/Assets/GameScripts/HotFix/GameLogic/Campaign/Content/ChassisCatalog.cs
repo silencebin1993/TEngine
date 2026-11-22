@@ -20,20 +20,21 @@ namespace GameLogic.Campaign.Content
         /// FG6-DEF-01 起炮塔开放（放置 / 施工 / 目标模式 / 补给 = <see cref="Defense.TurretService"/>），固定底盘进基础蓝图库（来源 BaseBlueprint，不再要解锁记录）。</summary>
         public const string ChassisFixedId = "chassis_fixed";
 
-        private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
+        /// <summary>FG15-UX-03：Demo 条目的文案走文本键，每次按当前语言重建（静态初始化时文本表可能还没载入）。</summary>
+        private static Dictionary<string, MechanicalContentDef> DemoDefs() => new Dictionary<string, MechanicalContentDef>
         {
             [ChassisWheelId] = new MechanicalContentDef
             {
                 Id = ChassisWheelId,
                 Category = MechanicalContentCategory.Chassis,
-                DisplayName = "搬运轮式",
-                Description = "轮式底盘，速度快、货位多，适合搬运与建造类工作单。",
+                DisplayName = GameText.Get("chassis.demo.hauler_wheels"),
+                Description = GameText.Get("chassis.demo.wheeled_chassis_fast_with"),
                 Source = MechanicalContentSource.BaseBlueprint,
                 SourceDetail = "基础蓝图库；ERC-001/ERC-002 开局即以本底盘登记（DEMO-CONTENT-LOCK.md §2.1）。",
                 Slot = "底盘",
                 ScrapCost = 15,
                 Load = 4, // 容量（负载上限）
-                ValuesSummary = "HP100，带宽1，基础携带2货位（ERC-001 另带货舱结构达4货位）；可搬运/建造/拆解/建筑基础维修/编队/接入。",
+                ValuesSummary = GameText.Get("chassis.demo.hp_100_bandwidth_1"),
                 AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                 IconId = "icon_chassis_wheel",
                 ModelId = "primitive:capsule",
@@ -42,7 +43,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_move_wheel",
                 PreviewId = "preview_chassis_wheel",
                 SaveCompatible = true,
-                LockedHintText = "已在基础蓝图库中，无需解锁。",
+                LockedHintText = GameText.Get("chassis.demo.already_in_the_base"),
                 SilhouetteNote = "轮式：矮宽剪影，四角有轮廓凸起（占位阶段与其它底盘共用胶囊体，无法靠轮廓区分，登记 DEBT）。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-14",
@@ -51,14 +52,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = ChassisTrackId,
                 Category = MechanicalContentCategory.Chassis,
-                DisplayName = "战斗履带",
-                Description = "履带底盘，HP 与负载最高，是默认战斗机型 ERC-003 的底盘。",
+                DisplayName = GameText.Get("chassis.demo.combat_tracks"),
+                Description = GameText.Get("chassis.demo.tracked_chassis_with_the"),
                 Source = MechanicalContentSource.BaseBlueprint,
                 SourceDetail = "基础蓝图库；由装配站生产（DEMO-CONTENT-LOCK.md 第53行），归还谷地本身不出生这台机器。",
                 Slot = "底盘",
                 ScrapCost = 20,
                 Load = 7,
-                ValuesSummary = "HP140，带宽2，基础携带1货位；默认 ERC-003 初装连射器、冲刺器、寻的、拖尾。",
+                ValuesSummary = GameText.Get("chassis.demo.hp_140_bandwidth_2"),
                 AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                 IconId = "icon_chassis_track",
                 ModelId = "primitive:capsule",
@@ -67,7 +68,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_move_track",
                 PreviewId = "preview_chassis_track",
                 SaveCompatible = true,
-                LockedHintText = "已在基础蓝图库中，无需解锁；需装配站产出才能实际获得一台。",
+                LockedHintText = GameText.Get("chassis.demo.already_in_the_base_2"),
                 SilhouetteNote = "履带：更高更重的剪影（占位阶段几何体与轮式相同，登记 DEBT）。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-02",
@@ -76,14 +77,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = ChassisHoverId,
                 Category = MechanicalContentCategory.Chassis,
-                DisplayName = "维修悬浮",
-                Description = "悬浮底盘，初装维修束，专精战场/建筑维修工作。",
+                DisplayName = GameText.Get("chassis.demo.hover_repair"),
+                Description = GameText.Get("chassis.demo.hover_chassis_with_a"),
                 Source = MechanicalContentSource.BaseBlueprint,
                 SourceDetail = "基础蓝图库；解析台（AnalysisBench）转为 Operational 后可在装配站生产（DEMO-CONTENT-LOCK.md §3）。",
                 Slot = "底盘",
                 ScrapCost = 30,
                 Load = 6,
-                ValuesSummary = "HP80，带宽1，基础携带1货位；初装维修束+两个空固件槽；可修机器，不能替代修复建筑的基础工作权限校验。",
+                ValuesSummary = GameText.Get("chassis.demo.hp_80_bandwidth_1"),
                 AiPermission = MechanicalContentAiPermission.PlayerAndAllyAi,
                 IconId = "icon_chassis_hover",
                 ModelId = "primitive:capsule",
@@ -92,7 +93,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_move_hover",
                 PreviewId = "preview_chassis_hover",
                 SaveCompatible = true,
-                LockedHintText = "需先修复归还谷地解析台（AnalysisBench）通电，才能在装配站生产。",
+                LockedHintText = GameText.Get("chassis.demo.repair_and_power_the"),
                 SilhouetteNote = "悬浮：离地间隙+外倾裙板剪影（占位阶段几何体与其它底盘相同，登记 DEBT）。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-02",
@@ -142,7 +143,7 @@ namespace GameLogic.Campaign.Content
             {
                 return;
             }
-            var merged = new Dictionary<string, MechanicalContentDef>(_defs, StringComparer.Ordinal)
+            var merged = new Dictionary<string, MechanicalContentDef>(DemoDefs(), StringComparer.Ordinal)
             {
                 [ChassisFixedId] = new MechanicalContentDef
                 {

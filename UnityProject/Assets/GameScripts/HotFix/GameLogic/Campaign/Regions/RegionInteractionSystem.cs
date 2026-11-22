@@ -4,6 +4,7 @@ using GameLogic.Campaign.Feedback;
 using GameLogic.Core;
 using GameLogic.Settings;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -236,7 +237,7 @@ namespace GameLogic.Campaign.Regions
                 if (gate == RegionInteractFailure.MachineLostControl
                     && InteractPressed())
                 {
-                    RaiseRejection(gate, "受控机失联，暂时无法交互。");
+                    RaiseRejection(gate, GameText.Get("region.interact.the_controlled_machine_lost"));
                 }
                 return;
             }
@@ -322,13 +323,13 @@ namespace GameLogic.Campaign.Regions
         {
             RegionInteractResult result = candidate.Complete != null
                 ? candidate.Complete()
-                : RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "没有可执行的动作。");
+                : RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("region.interact.no_available_action"));
 
             if (result.Success)
             {
                 LastFailure = RegionInteractFailure.None;
                 LastFailureText = null;
-                NotifySubtitle(result.PlayerText ?? (candidate.ActionVerb + "完成。"));
+                NotifySubtitle(result.PlayerText ?? (candidate.ActionVerb + GameText.Get("region.interact.done")));
             }
             else
             {

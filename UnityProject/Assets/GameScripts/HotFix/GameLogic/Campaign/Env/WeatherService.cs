@@ -880,8 +880,8 @@ namespace GameLogic.Campaign.Env
                 MaxBatchMs = ms;
                 double f = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                 long t4 = System.Diagnostics.Stopwatch.GetTimestamp();
-                SlowBatchSplit = $"第 {BatchCount} 批：对齐去重表 {(te - t0) * f:F2} / 建筑 {(t1 - te) * f:F2} / 内核交回 {(t2 - t1) * f:F2} / 扣耐久 {(t3 - t2) * f:F2} / 其余 {(t4 - t3) * f:F2} ms，" +
-                                 $"受损表 {d.HitBelts?.Length ?? 0} 格，托管堆 {System.GC.GetTotalMemory(false) >> 20} MB";
+                SlowBatchSplit = $"第 {BatchCount} 批：对齐去重表 {(te - t0) * f:F2} / 建筑 {(t1 - te) * f:F2} / 内核交回 {(t2 - t1) * f:F2} / 扣耐久 {(t3 - t2) * f:F2} / 其余 {(t4 - t3) * f:F2} ms，" + // loc-ignore: 开发者自检 / 诊断文本
+                                 $"受损表 {d.HitBelts?.Length ?? 0} 格，托管堆 {System.GC.GetTotalMemory(false) >> 20} MB"; // loc-ignore: 开发者自检 / 诊断文本
             }
         }
 

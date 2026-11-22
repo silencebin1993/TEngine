@@ -310,7 +310,7 @@ namespace GameLogic.Campaign.Defense
             }
             if (!v.IntelKnown)
             {
-                return head + "\n" + GameText.Get("raid.warning.comp_unknown");
+                return head + "\n" + CompUnknownText(s);
             }
             return head + "\n" + GameText.Format("raid.warning.faction", FactionText(p), RaidCatalog.LevelName(p.Level), v.Units) + " · "
                    + TraitText(p) + " · " + CompositionText(p) + " · " + CounterText(p);
@@ -324,6 +324,17 @@ namespace GameLogic.Campaign.Defense
         {
             string key = RaidCatalog.TraitKey(p?.Faction);
             return key != null && GameText.Has(key) ? GameText.Format("raid.warning.trait", GameText.Get(key)) : string.Empty;
+        }
+
+        /// <summary>FG15-UX-03（FG-GAP-240）：编成还不知道时的那句话按监听站状态分三种——没有监听站 → 提示去建；
+        /// 有但一座都没在工作（停电 / 损坏）→ 提示恢复工作；有在工作的 → “正在破译”。这一波破译完成后整行改显编成（IntelKnown）。</summary>
+        public static string CompUnknownText(CampaignState s)
+        {
+            if (IntelService.WorkingCount(s) > 0)
+            {
+                return GameText.Get("raid.warning.comp_decoding");
+            }
+            return IntelService.PostsOf(s).Count > 0 ? GameText.Get("raid.warning.comp_post_idle") : GameText.Get("raid.warning.comp_unknown");
         }
 
         /// <summary>预警条一行的悬停说明（触发、目标、出发地、预计抵达、编成 / 反制）。</summary>
@@ -340,7 +351,7 @@ namespace GameLogic.Campaign.Defense
                 trig.Append(RaidCatalog.TriggerName(t));
             }
             string arrive = GameClock.FormatDayTime(Math.Max(0, v.ArrivalTick) / (double)Math.Max(1, GameClock.StepHz));
-            string comp = v.IntelKnown ? CompositionText(p) : GameText.Get("raid.warning.comp_unknown");
+            string comp = v.IntelKnown ? CompositionText(p) : CompUnknownText(s);
             string counter = v.IntelKnown ? CounterText(p) : string.Empty;
             string trait = v.IntelKnown ? TraitText(p) : string.Empty;
             // 文本表里不放换行：逐行一个键，这里按行拼接；没有情报时不写“针对”一行。

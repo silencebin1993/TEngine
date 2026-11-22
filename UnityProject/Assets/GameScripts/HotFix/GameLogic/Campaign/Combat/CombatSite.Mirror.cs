@@ -152,7 +152,7 @@ namespace GameLogic.Campaign.Combat
             {
                 parts.Add(GameText.Format("overclock.mirror.truncated", dropped.ToString(CultureInfo.InvariantCulture)));
             }
-            return parts.Count > 0 ? string.Join("；", parts) : null;
+            return parts.Count > 0 ? string.Join(GameText.Get("logistics.load.reason.separator"), parts) : null;
         }
 
         /// <summary>悬停（FGR-EMG-162 同一面板）：镜像体手上的复制品“镜像复制品：X（N 条）”/“还没有复制到你的核心固件”。不是镜像体返回 null。O(1)。</summary>
@@ -174,7 +174,7 @@ namespace GameLogic.Campaign.Combat
             string line = GameText.Format("overclock.mirror.hover", FirmwareKinds.DisplayName(rec.MirrorCopyFirmware) ?? rec.MirrorCopyFirmware,
                 rec.MirrorCopyHeld.ToString(CultureInfo.InvariantCulture));
             string cut = MirrorCutText(rec.MirrorCopyDropped, rec.MirrorCopyOverflow, rec.MirrorCopyGenFull);
-            return cut != null ? line + "；" + cut : line;
+            return cut != null ? line + GameText.Get("logistics.load.reason.separator") + cut : line;
         }
     }
 }

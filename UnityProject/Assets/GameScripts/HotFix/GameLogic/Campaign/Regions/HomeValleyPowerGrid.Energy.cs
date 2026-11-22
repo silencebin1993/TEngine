@@ -635,7 +635,7 @@ namespace GameLogic.Campaign.Regions
                     parts.Add(GameText.Format("power.hover.source_item", SourceClassName(c), Num(v)));
                 }
             }
-            return parts.Count == 0 ? string.Empty : GameText.Format("power.hover.sources", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", parts));
+            return parts.Count == 0 ? string.Empty : GameText.Format("power.hover.sources", string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), parts));
         }
 
         /// <summary>发电建筑的读数行（太阳能写光照，燃油写负载 / 没油）。不是这两类时返回 null。</summary>

@@ -84,6 +84,7 @@ namespace GameLogic.UI.RegionCommand
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[RegionCommandBarUIToolkit] rootVisualElement 等待超时，战略命令条未初始化。");
@@ -285,12 +286,12 @@ namespace GameLogic.UI.RegionCommand
                 return;
             }
 
-            _selectionLabel.text = cmd.Selection.Count == 0 ? "未选中机器" : $"已选 {cmd.Selection.Count} 台";
+            _selectionLabel.text = cmd.Selection.Count == 0 ? GameText.Get("region.cmd.no_machine_selected") : GameText.Format("region.cmd.0_selected", cmd.Selection.Count);
 
             string status = cmd.ArmedKind.HasValue
-                ? (cmd.ArmedKind.Value == RegionCommandKind.Move ? "移动待命：点击地图目标位置" : "攻击待命：点击一个敌方目标")
+                ? (cmd.ArmedKind.Value == RegionCommandKind.Move ? GameText.Get("region.cmd.move_armed_click_a") : GameText.Get("region.cmd.attack_armed_click_an"))
                 : ActivePaused() && cmd.QueuedCommandCount > 0
-                    ? $"战略暂停中，已排队 {cmd.QueuedCommandCount} 条命令"
+                    ? GameText.Format("region.cmd.strategic_pause_0_commands", cmd.QueuedCommandCount)
                     : string.Empty;
             _statusLabel.text = status;
 
@@ -675,7 +676,7 @@ namespace GameLogic.UI.RegionCommand
             string keyLabel = RegionInteractionSystem.InteractKeyLabel;
             if (candidate != null)
             {
-                string verb = candidate.HoldSeconds > 0.0001f ? "按住" : "按";
+                string verb = candidate.HoldSeconds > 0.0001f ? GameText.Get("region.cmd.hold") : GameText.Get("region.cmd.press");
                 // FG15-UX-02（FGT-UX-008）：鼠标中键与交互键等价，提示里一并写出。
                 _interactPromptLabel.text = $"{verb} {keyLabel} / {InputDisplay.Key(InputRouter.InteractMouseKey)} {candidate.ActionVerb}";
             }
@@ -705,12 +706,12 @@ namespace GameLogic.UI.RegionCommand
         {
             switch (failure)
             {
-                case RegionInteractFailure.OutOfRange: return "距离过远，无法交互。";
-                case RegionInteractFailure.Occluded: return "视线被遮挡，无法交互。";
-                case RegionInteractFailure.CargoFull: return detail ?? "货舱/仓储已满。";
-                case RegionInteractFailure.MachineLostControl: return "信号中断，机器暂时失控。";
+                case RegionInteractFailure.OutOfRange: return GameText.Get("region.cmd.too_far_away_to");
+                case RegionInteractFailure.Occluded: return GameText.Get("region.cmd.line_of_sight_blocked");
+                case RegionInteractFailure.CargoFull: return detail ?? GameText.Get("region.cmd.cargo_hold_or_storage");
+                case RegionInteractFailure.MachineLostControl: return GameText.Get("region.cmd.signal_lost_the_machine");
                 case RegionInteractFailure.ModalBlocked: return string.Empty; // 模态打开时不必再提示世界交互。
-                case RegionInteractFailure.TargetGone: return detail ?? "目标已不可用。";
+                case RegionInteractFailure.TargetGone: return detail ?? GameText.Get("region.cmd.the_target_is_no");
                 default: return string.Empty;
             }
         }

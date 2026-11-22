@@ -494,7 +494,7 @@ namespace GameLogic.Campaign.Economy
                     parts.Add(GameText.Format("research.reason.key_missing", need.Item.Name + " ×" + need.Amount, BuildMaterials.SourceOf(need.Item)));
                 }
             }
-            return parts == null ? null : string.Join("；", parts);
+            return parts == null ? null : string.Join(GameText.Get("logistics.load.reason.separator"), parts);
         }
 
         public static bool KeysPresent(CampaignState state, ResearchNodeDef n) => KeyShortfall(state, n) == null;

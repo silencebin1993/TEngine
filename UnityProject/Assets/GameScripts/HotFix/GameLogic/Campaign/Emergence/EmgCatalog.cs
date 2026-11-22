@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using GameConfig.fg;
 using GameLogic.Campaign.Grid;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Emergence
 {
@@ -678,12 +679,12 @@ namespace GameLogic.Campaign.Emergence
             }
             if (readFamilies.Count == 0)
             {
-                reason = "没有感知读端（恒真事件作触发不计）";
+                reason = GameText.Get("emg.catalog.no_sensing_read_port");
                 return false;
             }
             if (writeFamilies.Count == 0)
             {
-                reason = "没有非纯数值写端（只改数字的不准入）";
+                reason = GameText.Get("emg.catalog.no_non_numeric_write");
                 return false;
             }
             foreach (EmgFamily r in readFamilies)
@@ -692,12 +693,12 @@ namespace GameLogic.Campaign.Emergence
                 {
                     if (r != w)
                     {
-                        reason = "准入";
+                        reason = GameText.Get("emg.catalog.admitted");
                         return true;
                     }
                 }
             }
-            reason = "感知读端与写端在同一个通道族（至少接 2 个通道）";
+            reason = GameText.Get("emg.catalog.sensing_read_and_write");
             return false;
         }
 
@@ -707,12 +708,12 @@ namespace GameLogic.Campaign.Emergence
         {
             if (!Admit(parentA, ports, out reason))
             {
-                reason = "第一条父固件：" + reason;
+                reason = GameText.Get("emg.catalog.first_parent_firmware") + reason;
                 return false;
             }
             if (!Admit(parentB, ports, out reason))
             {
-                reason = "第二条父固件：" + reason;
+                reason = GameText.Get("emg.catalog.second_parent_firmware") + reason;
                 return false;
             }
             return true;
@@ -798,7 +799,7 @@ namespace GameLogic.Campaign.Emergence
             List<string> bad = c.Problems;
             if (src == null || src.Ports.Count == 0)
             {
-                bad.Add("fg.TbChannelPort 为空或不存在（改 tools/cell_tables/fgdata_emg.py 后重新生成）");
+                bad.Add("fg.TbChannelPort 为空或不存在（改 tools/cell_tables/fgdata_emg.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             var portById = new Dictionary<string, EmgSource.Port>(StringComparer.Ordinal);
@@ -811,7 +812,7 @@ namespace GameLogic.Campaign.Emergence
                     continue;
                 }
                 int before = bad.Count;
-                CheckContentIds(bad, "端口", p.Id, ("family", p.Family), ("dirs", p.Dirs), ("unit", p.Unit), ("nameKey", p.NameKey), ("descKey", p.DescKey), ("shape", p.Shape), ("color", p.Color));
+                CheckContentIds(bad, "端口", p.Id, ("family", p.Family), ("dirs", p.Dirs), ("unit", p.Unit), ("nameKey", p.NameKey), ("descKey", p.DescKey), ("shape", p.Shape), ("color", p.Color)); // loc-ignore: 开发者自检 / 诊断文本
                 if (bad.Count != before)
                 {
                     continue;
@@ -819,29 +820,29 @@ namespace GameLogic.Campaign.Emergence
                 EmgFamily fam = ParseFamily(p.Family);
                 if (p.Id == null || !PortIdPattern.IsMatch(p.Id) || fam == EmgFamily.None || FamilyOf(p.Id) != fam)
                 {
-                    bad.Add($"端口 {p.Id} 的 ID 格式或族 {p.Family} 不对");
+                    bad.Add($"端口 {p.Id} 的 ID 格式或族 {p.Family} 不对"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (portById.ContainsKey(p.Id))
                 {
-                    bad.Add($"端口 {p.Id} 重复");
+                    bad.Add($"端口 {p.Id} 重复"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 int seg = SegmentBase(fam);
                 if (p.Code < seg || p.Code >= seg + 100)
                 {
-                    bad.Add($"端口 {p.Id} 码 {p.Code} 不在 {fam} 段 {seg}～{seg + 99}（跨段）");
+                    bad.Add($"端口 {p.Id} 码 {p.Code} 不在 {fam} 段 {seg}～{seg + 99}（跨段）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (codeOwner.TryGetValue(p.Code, out string other))
                 {
-                    bad.Add($"端口 {p.Id} 码 {p.Code} 与 {other} 复用（端口码永不复用）");
+                    bad.Add($"端口 {p.Id} 码 {p.Code} 与 {other} 复用（端口码永不复用）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 (EmgDirs dirs, bool perceive, bool impl, int stage, bool numeric) = DerivePort(p.Id, fam);
                 if (ParseDirs(p.Dirs) != dirs || (p.Perceive == 1) != perceive || (p.CarrierImpl == 1) != impl || p.Stage != stage || (p.NumericOnly == 1) != numeric)
                 {
-                    bad.Add($"端口 {p.Id} 的 dirs/perceive/carrierImpl/stage/numericOnly 与 FGR-EMG-010 推导（{dirs}/{perceive}/{impl}/{stage}/{numeric}）不一致");
+                    bad.Add($"端口 {p.Id} 的 dirs/perceive/carrierImpl/stage/numericOnly 与 FGR-EMG-010 推导（{dirs}/{perceive}/{impl}/{stage}/{numeric}）不一致"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 codeOwner[p.Code] = p.Id;
@@ -870,28 +871,28 @@ namespace GameLogic.Campaign.Emergence
                 {
                     continue;
                 }
-                string where = $"声明 ({d.Owner}, {d.Seq})";
+                string where = $"声明 ({d.Owner}, {d.Seq})"; // loc-ignore: 开发者自检 / 诊断文本
                 int before = bad.Count;
                 CheckContentIds(bad, where, null, ("ownerKind", d.OwnerKind), ("dir", d.Dir), ("port", d.Port), ("role", d.Role), ("carriers", d.Carriers), ("textKey", d.TextKey));
                 if (string.IsNullOrEmpty(d.Owner) || !OwnerMatchesKind(d.Owner, d.OwnerKind))
                 {
-                    bad.Add($"{where} owner 与种类 {d.OwnerKind} 不符");
+                    bad.Add($"{where} owner 与种类 {d.OwnerKind} 不符"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else if (!(d.OwnerKind == "chassis"
                         ? src.ChassisExists(d.Owner) || src.Traits.Exists(t => t != null && t.Reserved == 1 && t.Chassis == d.Owner)
                         : src.OwnerExists(d.Owner, d.OwnerKind)))
                 {
-                    bad.Add($"{where} owner 不存在（外键断：{d.OwnerKind} 目录里没有 {d.Owner}）");
+                    bad.Add($"{where} owner 不存在（外键断：{d.OwnerKind} 目录里没有 {d.Owner}）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (d.Seq < 1 || !seen.Add((d.Owner, d.Seq)))
                 {
-                    bad.Add($"{where} 序号 < 1 或 (owner, seq) 重复");
+                    bad.Add($"{where} 序号 < 1 或 (owner, seq) 重复"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 EmgDirs dir = ParseDirs(d.Dir);
                 EmgRole role = ParseRole(d.Role);
                 if (d.Port == null || !portById.TryGetValue(d.Port, out EmgSource.Port p))
                 {
-                    bad.Add($"{where} 引用未注册端口 {d.Port}");
+                    bad.Add($"{where} 引用未注册端口 {d.Port}"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else
                 {
@@ -899,38 +900,38 @@ namespace GameLogic.Campaign.Emergence
                     EmgDirs pd = ParseDirs(p.Dirs);
                     if ((dir != EmgDirs.Read && dir != EmgDirs.Write) || (pd & dir) == 0)
                     {
-                        bad.Add($"{where} 方向 {d.Dir} 与端口 {d.Port} 的方向 {p.Dirs} 不符");
+                        bad.Add($"{where} 方向 {d.Dir} 与端口 {d.Port} 的方向 {p.Dirs} 不符"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     if ((dir == EmgDirs.Read ? !IsReadRole(role) : !IsWriteRole(role)) || (role == EmgRole.Trigger && fam != EmgFamily.Event)
                         || (role == EmgRole.Scope && d.Port != "sqd.relay")
                         || (d.Port == "sqd.relay" && (role != EmgRole.Scope || d.OwnerKind != "structure")) // EMG3-SQD-01（FGR-EMG-132）：sqd.relay 只由结构模块的 scope 声明提供，固件不能自写
                         || (dir == EmgDirs.Read && role != EmgRole.Condition && Array.IndexOf(ConditionOnlyPorts, d.Port) >= 0))
                     {
-                        bad.Add($"{where} 角色 {d.Role} 不能用在 {d.Dir} {d.Port}");
+                        bad.Add($"{where} 角色 {d.Role} 不能用在 {d.Dir} {d.Port}"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     if (d.StageGate < 1 || d.StageGate > 4)
                     {
-                        bad.Add($"{where} stageGate={d.StageGate} 必须是 1～4");
+                        bad.Add($"{where} stageGate={d.StageGate} 必须是 1～4"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     else if (d.StageGate < RequiredStage(p.Stage, fam, dir))
                     {
-                        bad.Add($"{where} stageGate={d.StageGate} 早于端口 {d.Port} 的可用阶段 {p.Stage}");
+                        bad.Add($"{where} stageGate={d.StageGate} 早于端口 {d.Port} 的可用阶段 {p.Stage}"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
                 byte carriers = ParseCarriers(d.Carriers);
                 if (carriers == 0)
                 {
-                    bad.Add($"{where} 适用载体 {d.Carriers} 不合法");
+                    bad.Add($"{where} 适用载体 {d.Carriers} 不合法"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (!(d.Amount >= 0f) || !(d.Param2 >= 0f) || !(d.Heat >= 0f))
                 {
-                    bad.Add($"{where} amount / param2 / heat 必须 >= 0");
+                    bad.Add($"{where} amount / param2 / heat 必须 >= 0"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (d.Owner != null)
                 {
                     if (gate.TryGetValue(d.Owner, out int g) && g != d.StageGate)
                     {
-                        bad.Add($"{d.Owner} 的声明 stageGate 不一致（{g} 与 {d.StageGate}，FGR-EMG-019 整条切轨）");
+                        bad.Add($"{d.Owner} 的声明 stageGate 不一致（{g} 与 {d.StageGate}，FGR-EMG-019 整条切轨）"); // loc-ignore: 开发者自检 / 诊断文本
                         badOwners.Add(d.Owner);
                     }
                     gate[d.Owner] = d.StageGate;
@@ -964,7 +965,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 if (kv.Value == "firmware" && !badOwners.Contains(kv.Key) && !Admit(DeclsOf(src, kv.Key), portById, out string why))
                 {
-                    bad.Add($"固件 {kv.Key} 未通过准入（FGR-EMG-014）：{why}");
+                    bad.Add($"固件 {kv.Key} 未通过准入（FGR-EMG-014）：{why}"); // loc-ignore: 开发者自检 / 诊断文本
                     badOwners.Add(kv.Key);
                 }
             }
@@ -1020,17 +1021,17 @@ namespace GameLogic.Campaign.Emergence
                     continue;
                 }
                 int before = bad.Count;
-                CheckContentIds(bad, "端口 × 载体 " + r.Id, null, ("port", r.Port), ("carrier", r.Carrier), ("verb", r.Verb), ("mag", r.Mag), ("textKey", r.TextKey));
+                CheckContentIds(bad, "端口 × 载体 " + r.Id, null, ("port", r.Port), ("carrier", r.Carrier), ("verb", r.Verb), ("mag", r.Mag), ("textKey", r.TextKey)); // loc-ignore: 开发者自检 / 诊断文本
                 int car = CarrierIndex(r.Carrier);
                 int verb = VerbCode(r.Verb);
                 int mag = Array.IndexOf(new[] { "none", "a", "b", "c" }, r.Mag);
                 if (r.Port == null || !portById.TryGetValue(r.Port, out EmgSource.Port p) || (ParseDirs(p.Dirs) & EmgDirs.Write) == 0)
                 {
-                    bad.Add($"端口 × 载体 {r.Id} 的端口 {r.Port} 未注册或不可写");
+                    bad.Add($"端口 × 载体 {r.Id} 的端口 {r.Port} 未注册或不可写"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (car < 0 || verb <= 0 || mag < 0 || !(r.A >= 0f) || !(r.B >= 0f) || !(r.C >= 0f))
                 {
-                    bad.Add($"端口 × 载体 {r.Id}：载体 {r.Carrier} / 动词 {r.Verb} / 幅度目标 {r.Mag} / 参数不合法");
+                    bad.Add($"端口 × 载体 {r.Id}：载体 {r.Carrier} / 动词 {r.Verb} / 幅度目标 {r.Mag} / 参数不合法"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (bad.Count != before)
                 {
@@ -1038,7 +1039,7 @@ namespace GameLogic.Campaign.Emergence
                 }
                 if (firstPair.Add((r.Port, car)) && (string.IsNullOrEmpty(r.TextKey) || r.TextKey == "none"))
                 {
-                    bad.Add($"端口 × 载体 {r.Port}.{r.Carrier} 是这对的第一行，必须有短语文本键");
+                    bad.Add($"端口 × 载体 {r.Port}.{r.Carrier} 是这对的第一行，必须有短语文本键"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 have.Add((r.Port, car));
                 pcs.Add(new EmgPortCarrierRow { Port = (ushort)portById[r.Port].Code, Carrier = (byte)car, Verb = (byte)verb, A = r.A, B = r.B, C = r.C, Mag = (byte)mag });
@@ -1054,7 +1055,7 @@ namespace GameLogic.Campaign.Emergence
                 {
                     if (!have.Contains((port, i)))
                     {
-                        bad.Add($"写端口 {port}（carrierImpl）在载体 {Carriers[i]} 上没有 fg.TbPortCarrier 行（FGR-EMG-015 零死对）");
+                        bad.Add($"写端口 {port}（carrierImpl）在载体 {Carriers[i]} 上没有 fg.TbPortCarrier 行（FGR-EMG-015 零死对）"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
             }
@@ -1086,7 +1087,7 @@ namespace GameLogic.Campaign.Emergence
                     || !(s.Speed >= 0f) || !(s.Kinetic >= 0f) || !(s.Life >= 0f) || !(s.LifeRatio >= 0f) || !(s.Radius >= 0f) || !(s.RadiusRatio >= 0f)
                     || (s.Life > 0f) == (s.LifeRatio > 0f) || (s.Radius > 0f) == (s.RadiusRatio > 0f))
                 {
-                    bad.Add($"子形态 {s?.Id}：载体重复 / 码不在 1～5 或重复 / 寿命与半径必须二选一");
+                    bad.Add($"子形态 {s?.Id}：载体重复 / 码不在 1～5 或重复 / 寿命与半径必须二选一"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 subs.Add(new EmgSubFormRow
@@ -1099,7 +1100,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 if (!subCar.Contains(i))
                 {
-                    bad.Add($"子形态缺载体 {Carriers[i]}（FGR-EMG-035：5 行）");
+                    bad.Add($"子形态缺载体 {Carriers[i]}（FGR-EMG-035：5 行）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             c.SubForms = subs.ToArray();
@@ -1114,28 +1115,28 @@ namespace GameLogic.Campaign.Emergence
                     continue;
                 }
                 int before = bad.Count;
-                CheckContentIds(bad, "底盘特性 " + t.Id, null, ("id", t.Id), ("kind", t.Kind), ("appliesTo", t.AppliesTo), ("statePorts", t.StatePorts),
+                CheckContentIds(bad, "底盘特性 " + t.Id, null, ("id", t.Id), ("kind", t.Kind), ("appliesTo", t.AppliesTo), ("statePorts", t.StatePorts), // loc-ignore: 开发者自检 / 诊断文本
                     ("paramKeys", t.ParamKeys), ("nameKey", t.NameKey), ("descKey", t.DescKey));
                 EmgTraitKind kind = TryParseName(t.Kind, false, out EmgTraitKind k) ? k : EmgTraitKind.None;
                 if (kind == EmgTraitKind.None || !kinds.Add(kind))
                 {
-                    bad.Add($"底盘特性 {t.Id} 机制 {t.Kind} 不合法或重复");
+                    bad.Add($"底盘特性 {t.Id} 机制 {t.Kind} 不合法或重复"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (t.Reserved != 1 && !src.ChassisExists(t.Chassis))
                 {
-                    bad.Add($"底盘特性 {t.Id} 的底盘 {t.Chassis} 不存在（预留底盘要标 reserved = 1）");
+                    bad.Add($"底盘特性 {t.Id} 的底盘 {t.Chassis} 不存在（预留底盘要标 reserved = 1）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 string[] sp = (t.StatePorts ?? string.Empty).Split(';');
                 if (sp.Length > 2)
                 {
-                    bad.Add($"底盘特性 {t.Id} 的状态端口超过 2 个（内核行只有 2 个槽位）");
+                    bad.Add($"底盘特性 {t.Id} 的状态端口超过 2 个（内核行只有 2 个槽位）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 var spCodes = new List<ushort>();
                 foreach (string port in sp)
                 {
                     if (!portById.TryGetValue(port, out EmgSource.Port p) || FamilyOf(port) != EmgFamily.Chassis)
                     {
-                        bad.Add($"底盘特性 {t.Id} 的状态端口 {port} 不是已注册的 chs.* 端口");
+                        bad.Add($"底盘特性 {t.Id} 的状态端口 {port} 不是已注册的 chs.* 端口"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     else
                     {
@@ -1146,14 +1147,14 @@ namespace GameLogic.Campaign.Emergence
                 string[] keys = string.IsNullOrEmpty(t.ParamKeys) || t.ParamKeys == "none" ? Array.Empty<string>() : t.ParamKeys.Split(';');
                 if (keys.Length > 4)
                 {
-                    bad.Add($"底盘特性 {t.Id} 参数键超过 4 个");
+                    bad.Add($"底盘特性 {t.Id} 参数键超过 4 个"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 for (int i = 0; i < keys.Length && i < 4; i++)
                 {
                     (bool ok, float v) = src.Tuning(keys[i]);
                     if (!ok)
                     {
-                        bad.Add($"底盘特性 {t.Id} 参数键 {keys[i]} 不在 fg.TbHomeTuning");
+                        bad.Add($"底盘特性 {t.Id} 参数键 {keys[i]} 不在 fg.TbHomeTuning"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     param[i] = v;
                 }
@@ -1175,7 +1176,7 @@ namespace GameLogic.Campaign.Emergence
             (bool has, float raw) = src.Tuning(StageKey);
             if (!has)
             {
-                bad.Add("fg.TbHomeTuning 缺少 emg.stage（FG19 第 18 节）");
+                bad.Add("fg.TbHomeTuning 缺少 emg.stage（FG19 第 18 节）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             c.RawStage = raw;
             // EMG4-CLEAN-01（FGR-EMG-019 阶段 4 结束口径）：双轨清理后 emg.stage 只保留 4——表里填低值不再生效（旧轨分支已删，没有可回退的执行者）；行仍必须存在（缺行照报）
@@ -1244,13 +1245,13 @@ namespace GameLogic.Campaign.Emergence
         {
             if (IsContentId(id))
             {
-                bad.Add($"{where} 的 id 是内容 ID {id}（FGR-EMG-013）");
+                bad.Add($"{where} 的 id 是内容 ID {id}（FGR-EMG-013）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             foreach ((string col, string value) in cols)
             {
                 if (IsContentId(value))
                 {
-                    bad.Add($"{where} 的非 owner 列 {col} 出现内容 ID {value}（FGR-EMG-011 / 013）");
+                    bad.Add($"{where} 的非 owner 列 {col} 出现内容 ID {value}（FGR-EMG-011 / 013）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
         }

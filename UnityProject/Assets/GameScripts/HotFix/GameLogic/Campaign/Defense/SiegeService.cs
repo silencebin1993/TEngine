@@ -390,7 +390,7 @@ namespace GameLogic.Campaign.Defense
                         }
                         else
                         {
-                            LastProblem = "攻城单位生成失败（战斗内核已满？）：" + (def?.EnemyTypeId ?? "(无编成)");
+                            LastProblem = "攻城单位生成失败（战斗内核已满？）：" + (def?.EnemyTypeId ?? "(无编成)"); // loc-ignore: 开发者自检 / 诊断文本
                         }
                     }
                 }
@@ -420,7 +420,7 @@ namespace GameLogic.Campaign.Defense
                     Hp = s.RaiderHp, Speed = s.RaiderSpeed, Radius = s.RaiderRadius, Range = s.RaiderRange, Damage = s.RaiderDamage, Cooldown = s.RaiderCooldown,
                     ProjectileSpeed = s.RaiderProjectileSpeed, ProjectileRadius = s.RaiderProjectileRadius, StructureMult = 1f,
                 };
-                LastProblem = "fg.TbSiegeUnit 缺 " + (def?.EnemyTypeId ?? "(无编成)");
+                LastProblem = "fg.TbSiegeUnit 缺 " + (def?.EnemyTypeId ?? "(无编成)"); // loc-ignore: 开发者自检 / 诊断文本
             }
             int weapon = site.WeaponIndex(new CombatWeapon
             {

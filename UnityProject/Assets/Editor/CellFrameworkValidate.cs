@@ -870,6 +870,9 @@ namespace GameLogic.EditorTools
             // FG15-UX-02：可访问性全集（FGR-UX-060；FGT-UX-007 / 008）——设置项与迁移 / 持久化 / 恢复默认 / 减少动态效果、状态 / 沾染 / 相态 / 纹样形状两两可分、
             // 色觉重映射与着色器全局、高对比度与色盲语义色（探针实测样式）、文字大小、负向 UI 150% × 1280×720（越界 + 最小可点尺寸）、按住改切换、键盘指针、只用鼠标的主流程入口、登记册承接项。
             Seg("FgAccessibilitySelfCheck", FgAccessibilitySelfCheck.Run);
+            // FG15-UX-03：本地化与 Demo 文案迁移（FGR-SYS-090 / FGR-ARC-006；FGT-UX-002 / FGT-SYS-009 / FGT-EMG-072）——文本表中英齐全与长度预算、禁用词、UiText @键与切语言重写、
+            // 13 个 UXML 英文无中文残留与布局探针、通知细节键 + 参数存读档、启动期双语表、设置页语言、稀有度术语、突袭预警三态、双语检索、字体覆盖。
+            Seg("FgLocalizationSelfCheck", BinGames.EditorTools.FgLocalizationSelfCheck.Run);
             // EMG1-FIX-01：现存文案与实现一致（FGT-EMG-005 五条固件“描述—行为”触发 / 不触发对照、FGT-EMG-011 定时触发）——分裂三枚、延时引信飞行中空爆与提前命中不空爆、
             // 壁撞只在撞障碍时冲击、追射真补一发、磁聚过渡文案；文本与声明同源、图鉴 / 详情 / 三选一同步、旧存档预览说明、暂停与倍速、存读档。
             Seg("FgEmgTextBehaviorSelfCheck", FgEmgTextBehaviorSelfCheck.Run);

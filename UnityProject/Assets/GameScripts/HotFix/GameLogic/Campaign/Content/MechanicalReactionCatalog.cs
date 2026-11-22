@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -17,20 +18,40 @@ namespace GameLogic.Campaign.Content
         public const string ReactionMarkJumpId = "reaction_marktag";
         public const string ReactionMeltOverloadId = "reaction_meltoverload";
 
-        private static readonly Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>
+        private static Dictionary<string, MechanicalContentDef> _defs;
+        private static GameLanguage _defsLanguage;
+        private static int _defsTextRevision = -1;
+
+        /// <summary>FG15-UX-03：按当前语言缓存的条目（切语言 / 重载文本表后下一次读取重建）。</summary>
+        private static Dictionary<string, MechanicalContentDef> Defs
+        {
+            get
+            {
+                if (_defs == null || _defsLanguage != GameText.Language || _defsTextRevision != GameText.Revision)
+                {
+                    _defs = DemoDefs();
+                    _defsLanguage = GameText.Language;
+                    _defsTextRevision = GameText.Revision;
+                }
+                return _defs;
+            }
+        }
+
+        /// <summary>FG15-UX-03：Demo 条目的文案走文本键，每次按当前语言重建（静态初始化时文本表可能还没载入）。</summary>
+        private static Dictionary<string, MechanicalContentDef> DemoDefs() => new Dictionary<string, MechanicalContentDef>
         {
             [ReactionMarkJumpId] = new MechanicalContentDef
             {
                 Id = ReactionMarkJumpId,
                 Category = MechanicalContentCategory.Reaction,
-                DisplayName = "标记跳转",
-                Description = "信号核带上标记跳转（核心固件，插进接入口）：命中后连锁只跳向已被标记的邻近敌人（任何标记来源都算），最多 2 跳。AI 驾驶时不会触发。",
+                DisplayName = GameText.Get("firmware.fw_marktag.name"),
+                Description = GameText.Get("reaction.demo.with_mark_jump_on"),
                 Source = MechanicalContentSource.Composite,
                 SourceDetail = "非独立拾取；由标记跳转固件的“只跳已标记”连锁产生（FG19 FGR-EMG-084，EMG2-REACT-01 端口化），没有规则行。",
                 Slot = "反应",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "标记跳转固件必须与标记器和连射器/切割束同装；干扰清标记、分散站位可反制（DEMO-CONTENT-LOCK.md §2.4）。",
+                ValuesSummary = GameText.Get("reaction.demo.mark_jump_firmware_must"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_reaction_marktag",
                 ModelId = "n/a",
@@ -39,7 +60,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_reaction_markjump",
                 PreviewId = "preview_reaction_marktag",
                 SaveCompatible = true,
-                LockedHintText = "需先解锁静默标记器与标记跳转固件。",
+                LockedHintText = GameText.Get("reaction.demo.unlock_the_silent_marker"),
                 SilhouetteNote = "不适用（无独立单位，是组合判定结果）。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-11",
@@ -48,14 +69,14 @@ namespace GameLogic.Campaign.Content
             {
                 Id = ReactionMeltOverloadId,
                 Category = MechanicalContentCategory.Reaction,
-                DisplayName = "熔穿过载",
-                Description = "重型射弹带着足够的注热命中时触发（如接入铸造重炮机、信号核带上过载）：命中点溅出熔融金属，目标进入熔穿；开火热量代价提高。",
+                DisplayName = GameText.Get("reaction.demo.melt_through_overload"),
+                Description = GameText.Get("reaction.demo.triggers_when_a_heavy"),
                 Source = MechanicalContentSource.Composite,
                 SourceDetail = "非独立拾取；通道规则 P03：同一次命中注热 ≥ 45 且动能 ≥ 40（FG19B §4.1 A2，EMG2-REACT-01 端口化）。",
                 Slot = "反应",
                 ScrapCost = 0,
                 Load = 0,
-                ValuesSummary = "熔融金属 4 份（1000 度）+ 目标熔穿；开火者代价 25 取代过载表值 15，重炮每发 65；旧“额外穿甲 +30%”退役（FG19B P03）。",
+                ValuesSummary = GameText.Get("reaction.demo.4_units_of_molten"),
                 AiPermission = MechanicalContentAiPermission.NotApplicable,
                 IconId = "icon_reaction_meltoverload",
                 ModelId = "n/a",
@@ -64,16 +85,16 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_reaction_melt",
                 PreviewId = "preview_reaction_meltoverload",
                 SaveCompatible = true,
-                LockedHintText = "需先解锁铸造重炮与过载固件。",
+                LockedHintText = GameText.Get("reaction.demo.unlock_the_foundry_heavy"),
                 SilhouetteNote = "不适用（无独立单位，是组合判定结果）。",
                 LegacyFacadeId = null,
                 DebtId = "DEBT-ER4CONTENT01-12",
             },
         };
 
-        public static IReadOnlyDictionary<string, MechanicalContentDef> All => _defs;
+        public static IReadOnlyDictionary<string, MechanicalContentDef> All => Defs;
 
-        public static bool TryGet(string id, out MechanicalContentDef def) => _defs.TryGetValue(id, out def);
+        public static bool TryGet(string id, out MechanicalContentDef def) => Defs.TryGetValue(id, out def);
 
         // EMG2-REACT-01（FG19 FGR-EMG-021，ADR ⑪）：DetectMarkJump / DetectMeltOverload 两个“组件 + 固件”ID 配对判定已删除、豁免撤销——
         // 熔穿过载 = 通道规则 P03（重型射弹的单次动能 × 同一次命中注入的热），标记跳转 = 固件“以 evt.marked 为条件写 grm.mod.chain”的只跳已标记连锁；

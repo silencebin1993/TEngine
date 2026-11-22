@@ -87,17 +87,17 @@ namespace GameLogic.Campaign.Feedback
         /// “有声音 + 有常显字幕”。键是验收原文里的类别词。</summary>
         public static readonly KeyValuePair<string, FeedbackCueId[]>[] AcAud001Categories =
         {
-            new KeyValuePair<string, FeedbackCueId[]>("接管", new[] { FeedbackCueId.Takeover }),
-            new KeyValuePair<string, FeedbackCueId[]>("拒绝", new[] { FeedbackCueId.Denied }),
-            new KeyValuePair<string, FeedbackCueId[]>("断电", new[] { FeedbackCueId.PowerLost }),
-            new KeyValuePair<string, FeedbackCueId[]>("失联", new[] { FeedbackCueId.SignalLost }),
-            new KeyValuePair<string, FeedbackCueId[]>("仓满", new[] { FeedbackCueId.StorageFull }),
-            new KeyValuePair<string, FeedbackCueId[]>("生产", new[] { FeedbackCueId.ProductionComplete }),
-            new KeyValuePair<string, FeedbackCueId[]>("失败", new[] { FeedbackCueId.Failure, FeedbackCueId.ExpeditionWiped, FeedbackCueId.CoreDestroyed }),
-            new KeyValuePair<string, FeedbackCueId[]>("解析", new[] { FeedbackCueId.AnalysisComplete }),
-            new KeyValuePair<string, FeedbackCueId[]>("反应", new[] { FeedbackCueId.ReactionMarkJump, FeedbackCueId.ReactionMeltOverload, FeedbackCueId.TagReaction }),
-            new KeyValuePair<string, FeedbackCueId[]>("Boss 阶段", new[] { FeedbackCueId.BossPhase, FeedbackCueId.BossLockoutWarning, FeedbackCueId.BossLockoutActive, FeedbackCueId.BossDestroyed }),
-            new KeyValuePair<string, FeedbackCueId[]>("信标", new[] { FeedbackCueId.BeaconLaunch, FeedbackCueId.Victory }),
+            new KeyValuePair<string, FeedbackCueId[]>("接管", new[] { FeedbackCueId.Takeover }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("拒绝", new[] { FeedbackCueId.Denied }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("断电", new[] { FeedbackCueId.PowerLost }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("失联", new[] { FeedbackCueId.SignalLost }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("仓满", new[] { FeedbackCueId.StorageFull }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("生产", new[] { FeedbackCueId.ProductionComplete }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("失败", new[] { FeedbackCueId.Failure, FeedbackCueId.ExpeditionWiped, FeedbackCueId.CoreDestroyed }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("解析", new[] { FeedbackCueId.AnalysisComplete }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("反应", new[] { FeedbackCueId.ReactionMarkJump, FeedbackCueId.ReactionMeltOverload, FeedbackCueId.TagReaction }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("Boss 阶段", new[] { FeedbackCueId.BossPhase, FeedbackCueId.BossLockoutWarning, FeedbackCueId.BossLockoutActive, FeedbackCueId.BossDestroyed }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
+            new KeyValuePair<string, FeedbackCueId[]>("信标", new[] { FeedbackCueId.BeaconLaunch, FeedbackCueId.Victory }), // loc-ignore: AC-AUD-001 验收原文类别词，只供 FeedbackCueSelfCheck 对表
         };
 
         private static FeedbackCueDef[] BuildDefs()
@@ -110,12 +110,10 @@ namespace GameLogic.Campaign.Feedback
             }
 
             // FG8-EXP-02：行军提示（标签 exp.cue.tag，正文 exp.cue.<名>；字面值只在文本表没载入时兜底）。
-            FeedbackCueDef MarchCue(FeedbackCueId id, string sfx, string cue, string caption, FeedbackTone tone, float seconds) => new FeedbackCueDef
+            FeedbackCueDef MarchCue(FeedbackCueId id, string sfx, string cue, FeedbackTone tone, float seconds) => new FeedbackCueDef
             {
                 Id = id,
                 SfxId = sfx,
-                Tag = "出征",
-                Caption = caption,
                 TagKey = "exp.cue.tag",
                 CaptionKey = "exp.cue." + cue,
                 Tone = tone,
@@ -125,192 +123,187 @@ namespace GameLogic.Campaign.Feedback
 
             // ── AC-AUD-001 十一类 ─────────────────────────────────────────────
             // FG1-HUD-01（FG-GAP-011 / FG-GAP-044）：0.2 的玩家动作叫“接入”——接入提交的音效 + 字幕（形变随之出声）；标签 / 正文走文本键。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Takeover, SfxId = "sfx_takeover", Tag = "接入", Caption = "已接入", TagKey = "feedback.tag.uplink", CaptionKey = "feedback.caption.uplink", Tone = FeedbackTone.Good, CaptionSeconds = 3f, MinIntervalSeconds = 0.3f, RequirementNote = "AC-AUD-001 接管（0.2 = 接入）；FG-GAP-044" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Denied, SfxId = "sfx_ui_deny", Channel = AudioType.UISound, MinIntervalSeconds = 0.25f, Tag = "拒绝", Caption = string.Empty, Tone = FeedbackTone.Warning, RequirementNote = "AC-AUD-001 拒绝" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.PowerLost, SfxId = "sfx_power_down", Tag = "断电", Caption = "电力不足", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 断电" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.PowerRestored, SfxId = "sfx_power_up", Tag = "供电", Caption = "供电恢复", Tone = FeedbackTone.Good, CaptionSeconds = 3f, RequirementNote = "AC-AUD-001 断电（恢复）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLost, SfxId = "sfx_signal_jam", Tag = "失联", Caption = "信号中断", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 失联" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SignalRestored, SfxId = "sfx_signal_restore", Tag = "信号", Caption = "信号恢复", Tone = FeedbackTone.Good, CaptionSeconds = 3f, RequirementNote = "AC-AUD-001 失联（恢复）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.StorageFull, SfxId = "sfx_storage_full", Tag = "仓满", Caption = "仓库已满", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, MinIntervalSeconds = 1.5f, RequirementNote = "AC-AUD-001 仓满" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ProductionComplete, SfxId = "sfx_production_complete", Tag = "生产", Caption = "生产完成", Tone = FeedbackTone.Good, RequirementNote = "AC-AUD-001 生产" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Failure, SfxId = "sfx_failure", Tag = "失败", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 失败" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionWiped, SfxId = "sfx_failure", Tag = "失败", Caption = "远征队已全部失去行动能力", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（远征全灭）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.CoreDestroyed, Shake = 0.8f, SfxId = "sfx_core_destroyed", Tag = "失败", Caption = "归还核心被摧毁", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（核心被毁）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.AnalysisComplete, SfxId = "sfx_analysis_complete", Tag = "解析", Caption = "解析完成", Tone = FeedbackTone.Good, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 解析" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ReactionMarkJump, SfxId = "sfx_reaction_markjump", MinIntervalSeconds = 0.15f, Tag = "反应", Caption = "标记跳转", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "AC-AUD-001 反应" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ReactionMeltOverload, SfxId = "sfx_reaction_melt", MinIntervalSeconds = 0.15f, Tag = "反应", Caption = "熔穿过载", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "AC-AUD-001 反应" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossPhase, Shake = 0.45f, SfxId = "sfx_boss_phase", Tag = "首领", Caption = "主核心阶段变化", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutWarning, SfxId = "sfx_alarm_warning", Tag = "警报", Caption = "核心分区即将封锁，2 秒后无法退回外围", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01 可听预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutActive, Shake = 0.5f, SfxId = "sfx_lockout_engaged", Tag = "警报", Caption = "核心分区已封锁，无法退回外围", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BossDestroyed, Shake = 0.8f, SfxId = "sfx_core_destroyed", Tag = "首领", Caption = "主核心已摧毁", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 Boss 阶段" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BeaconLaunch, Shake = 0.35f, SfxId = "sfx_beacon_launch", Tag = "信标", Caption = "导航信标启动", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Victory, SfxId = "sfx_victory", Tag = "信标", Caption = "信标发射完成", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Takeover, SfxId = "sfx_takeover", TagKey = "feedback.tag.uplink", CaptionKey = "feedback.caption.uplink", Tone = FeedbackTone.Good, CaptionSeconds = 3f, MinIntervalSeconds = 0.3f, RequirementNote = "AC-AUD-001 接管（0.2 = 接入）；FG-GAP-044" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Denied, SfxId = "sfx_ui_deny", Channel = AudioType.UISound, MinIntervalSeconds = 0.25f, TagKey = "feedback.cue.denied.tag", Caption = string.Empty, Tone = FeedbackTone.Warning, RequirementNote = "AC-AUD-001 拒绝" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.PowerLost, SfxId = "sfx_power_down", TagKey = "feedback.cue.power_lost.tag", CaptionKey = "feedback.cue.power_lost.caption", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 断电" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.PowerRestored, SfxId = "sfx_power_up", TagKey = "feedback.cue.power_restored.tag", CaptionKey = "feedback.cue.power_restored.caption", Tone = FeedbackTone.Good, CaptionSeconds = 3f, RequirementNote = "AC-AUD-001 断电（恢复）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLost, SfxId = "sfx_signal_jam", TagKey = "feedback.cue.signal_lost.tag", CaptionKey = "feedback.cue.signal_lost.caption", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 失联" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SignalRestored, SfxId = "sfx_signal_restore", TagKey = "feedback.cue.signal_restored.tag", CaptionKey = "feedback.cue.signal_restored.caption", Tone = FeedbackTone.Good, CaptionSeconds = 3f, RequirementNote = "AC-AUD-001 失联（恢复）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.StorageFull, SfxId = "sfx_storage_full", TagKey = "feedback.cue.storage_full.tag", CaptionKey = "feedback.cue.storage_full.caption", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, MinIntervalSeconds = 1.5f, RequirementNote = "AC-AUD-001 仓满" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ProductionComplete, SfxId = "sfx_production_complete", TagKey = "feedback.cue.production_complete.tag", CaptionKey = "feedback.cue.production_complete.caption", Tone = FeedbackTone.Good, RequirementNote = "AC-AUD-001 生产" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Failure, SfxId = "sfx_failure", TagKey = "feedback.cue.failure.tag", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 失败" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionWiped, SfxId = "sfx_failure", TagKey = "feedback.cue.expedition_wiped.tag", CaptionKey = "feedback.cue.expedition_wiped.caption", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（远征全灭）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.CoreDestroyed, Shake = 0.8f, SfxId = "sfx_core_destroyed", TagKey = "feedback.cue.core_destroyed.tag", CaptionKey = "feedback.cue.core_destroyed.caption", Tone = FeedbackTone.Danger, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 失败（核心被毁）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.AnalysisComplete, SfxId = "sfx_analysis_complete", TagKey = "feedback.cue.analysis_complete.tag", CaptionKey = "feedback.cue.analysis_complete.caption", Tone = FeedbackTone.Good, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 解析" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ReactionMarkJump, SfxId = "sfx_reaction_markjump", MinIntervalSeconds = 0.15f, TagKey = "feedback.cue.reaction_mark_jump.tag", CaptionKey = "feedback.cue.reaction_mark_jump.caption", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "AC-AUD-001 反应" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ReactionMeltOverload, SfxId = "sfx_reaction_melt", MinIntervalSeconds = 0.15f, TagKey = "feedback.cue.reaction_melt_overload.tag", CaptionKey = "feedback.cue.reaction_melt_overload.caption", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "AC-AUD-001 反应" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossPhase, Shake = 0.45f, SfxId = "sfx_boss_phase", TagKey = "feedback.cue.boss_phase.tag", CaptionKey = "feedback.cue.boss_phase.caption", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutWarning, SfxId = "sfx_alarm_warning", TagKey = "feedback.cue.boss_lockout_warning.tag", CaptionKey = "feedback.cue.boss_lockout_warning.caption", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01 可听预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossLockoutActive, Shake = 0.5f, SfxId = "sfx_lockout_engaged", TagKey = "feedback.cue.boss_lockout_active.tag", CaptionKey = "feedback.cue.boss_lockout_active.caption", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, RequirementNote = "AC-AUD-001 Boss 阶段；DEBT-ER7CORE01-01" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BossDestroyed, Shake = 0.8f, SfxId = "sfx_core_destroyed", TagKey = "feedback.cue.boss_destroyed.tag", CaptionKey = "feedback.cue.boss_destroyed.caption", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 Boss 阶段" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BeaconLaunch, Shake = 0.35f, SfxId = "sfx_beacon_launch", TagKey = "feedback.cue.beacon_launch.tag", CaptionKey = "feedback.cue.beacon_launch.caption", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Victory, SfxId = "sfx_victory", TagKey = "feedback.cue.victory.tag", CaptionKey = "feedback.cue.victory.caption", Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-AUD-001 信标" });
 
             // ── 战斗与远征 ─────────────────────────────────────────────────
             // 开火/命中本身有弹体与伤害数字等价视觉，不出字幕；对“看不见也该知道”的声音（遭到攻击、
             // 装甲削减、蓄力、击毁）出字幕，并且只在“字幕”开启时出。
             Add(new FeedbackCueDef { Id = FeedbackCueId.WeaponFire, SfxId = "sfx_weapon_fire", Volume = 0.7f, MinIntervalSeconds = 0.08f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ComponentCatalog.SfxId 消费点" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.CannonCharge, SfxId = "sfx_cannon_charge", Volume = 0.8f, MinIntervalSeconds = 0.2f, Tag = "重炮", Caption = "蓄力", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2f, RequirementNote = "ER6-REACT-02 瞄准阶段" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.CannonCharge, SfxId = "sfx_cannon_charge", Volume = 0.8f, MinIntervalSeconds = 0.2f, TagKey = "feedback.cue.cannon_charge.tag", CaptionKey = "feedback.cue.cannon_charge.caption", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2f, RequirementNote = "ER6-REACT-02 瞄准阶段" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.CannonFire, Shake = 0.25f, SfxId = "sfx_cannon_fire", MinIntervalSeconds = 0.1f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ComponentCatalog comp_cannon" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyHit, SfxId = "sfx_hit", Volume = 0.6f, MinIntervalSeconds = 0.06f, CaptionMode = FeedbackCaptionMode.None });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ArmorHit, SfxId = "sfx_hit_armor", Volume = 0.7f, MinIntervalSeconds = 0.1f, Tag = "命中", Caption = "装甲正面，伤害被削减", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyDestroyed, Shake = 0.15f, SfxId = "sfx_enemy_destroyed", MinIntervalSeconds = 0.12f, Tag = "击毁", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2.5f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ArmorHit, SfxId = "sfx_hit_armor", Volume = 0.7f, MinIntervalSeconds = 0.1f, TagKey = "feedback.cue.armor_hit.tag", CaptionKey = "feedback.cue.armor_hit.caption", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyDestroyed, Shake = 0.15f, SfxId = "sfx_enemy_destroyed", MinIntervalSeconds = 0.12f, TagKey = "feedback.cue.enemy_destroyed.tag", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, CaptionSeconds = 2.5f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.EnemyAttack, SfxId = "sfx_enemy_fire", Volume = 0.7f, MinIntervalSeconds = 0.15f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "敌人表 sfxId（fg.TbMechEnemy）消费点；字幕由紧随其后的“受损”给出，避免一次攻击两条字幕" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDamaged, SfxId = "sfx_machine_damaged", Volume = 0.8f, MinIntervalSeconds = 0.4f, Tag = "受损", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Warning, CaptionSeconds = 2f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDestroyed, Shake = 0.3f, SfxId = "sfx_machine_destroyed", Tag = "损失", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.WeaponOverheat, SfxId = "sfx_weapon_overheat", MinIntervalSeconds = 0.5f, Tag = "过热", Caption = "重炮过热停火", Tone = FeedbackTone.Warning, CaptionSeconds = 3f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Pickup, SfxId = "sfx_pickup", Tag = "装载", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 3f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionDepart, SfxId = "sfx_expedition_depart", Tag = "出征", Caption = "远征队出发", Tone = FeedbackTone.Info, CaptionSeconds = 4f });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.Evacuate, SfxId = "sfx_evacuate", Tag = "撤离", Caption = "远征队已返回归还谷地", Tone = FeedbackTone.Good, CaptionSeconds = 4f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDamaged, SfxId = "sfx_machine_damaged", Volume = 0.8f, MinIntervalSeconds = 0.4f, TagKey = "feedback.cue.machine_damaged.tag", Caption = string.Empty, CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Warning, CaptionSeconds = 2f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.MachineDestroyed, Shake = 0.3f, SfxId = "sfx_machine_destroyed", TagKey = "feedback.cue.machine_destroyed.tag", Caption = string.Empty, Tone = FeedbackTone.Danger, CaptionSeconds = 5f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.WeaponOverheat, SfxId = "sfx_weapon_overheat", MinIntervalSeconds = 0.5f, TagKey = "feedback.cue.weapon_overheat.tag", CaptionKey = "feedback.cue.weapon_overheat.caption", Tone = FeedbackTone.Warning, CaptionSeconds = 3f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Pickup, SfxId = "sfx_pickup", TagKey = "feedback.cue.pickup.tag", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 3f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ExpeditionDepart, SfxId = "sfx_expedition_depart", TagKey = "feedback.cue.expedition_depart.tag", CaptionKey = "feedback.cue.expedition_depart.caption", Tone = FeedbackTone.Info, CaptionSeconds = 4f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.Evacuate, SfxId = "sfx_evacuate", TagKey = "feedback.cue.evacuate.tag", CaptionKey = "feedback.cue.evacuate.caption", Tone = FeedbackTone.Good, CaptionSeconds = 4f });
             // FG8-EXP-02（FGR-EXP-010 / 011 / 012、FG08 §7）：行军提示。标签 / 正文走文本键（exp.cue.*，fgdata_expedition.py）；字面值只在文本表没载入时兜底。
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchOutOfCoverage, "sfx_alarm_warning", "out_of_coverage", "远征队走出信号覆盖：只执行最后的命令", FeedbackTone.Warning, 5f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchBackInCoverage, "sfx_command_ack", "back_in_coverage", "远征队回到信号覆盖：可以下新命令", FeedbackTone.Info, 4f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchEdge, "sfx_alarm_warning", "edge", "远征队快要走出信号覆盖", FeedbackTone.Warning, 5f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchHalted, "sfx_alarm_warning", "halted", "远征队的路线被截断，原地待命", FeedbackTone.Warning, 6f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchArrivalFailed, "sfx_failure", "arrival_failed", "远征队没能进入目的地，在集结点待命", FeedbackTone.Danger, 6f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchReturned, "sfx_evacuate", "returned", "远征队回到家园", FeedbackTone.Good, 4f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchArrived, "sfx_expedition_depart", "arrived", "远征队到达目的地", FeedbackTone.Info, 5f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchEncounter, "sfx_alarm_warning", "encounter", "行军途中发现敌人", FeedbackTone.Warning, 6f));
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchHazard, "sfx_alarm_warning", "hazard", "远征队进入危害带", FeedbackTone.Warning, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchOutOfCoverage, "sfx_alarm_warning", "out_of_coverage", FeedbackTone.Warning, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchBackInCoverage, "sfx_command_ack", "back_in_coverage", FeedbackTone.Info, 4f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchEdge, "sfx_alarm_warning", "edge", FeedbackTone.Warning, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchHalted, "sfx_alarm_warning", "halted", FeedbackTone.Warning, 6f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchArrivalFailed, "sfx_failure", "arrival_failed", FeedbackTone.Danger, 6f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchReturned, "sfx_evacuate", "returned", FeedbackTone.Good, 4f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchArrived, "sfx_expedition_depart", "arrived", FeedbackTone.Info, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchEncounter, "sfx_alarm_warning", "encounter", FeedbackTone.Warning, 6f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchHazard, "sfx_alarm_warning", "hazard", FeedbackTone.Warning, 5f));
             // FG8-GEN-02（FG08 第 7 节 / FG17 第 4 节）：远征队进入敌方领地（正文 = 领地名 + 介绍）。
-            Add(MarchCue(FeedbackCueId.ExpeditionMarchTerritory, "sfx_objective_new", "territory", "远征队进入敌方领地", FeedbackTone.Info, 5f));
+            Add(MarchCue(FeedbackCueId.ExpeditionMarchTerritory, "sfx_objective_new", "territory", FeedbackTone.Info, 5f));
             // FG8-GEN-02（FGR-GEN-042）：进出室内场地（画面另有过渡遮罩与面板文字，B07 三通道）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorEnter, SfxId = "sfx_expedition_depart", Tag = "室内", Caption = "进入室内场地", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.enter",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorEnter, SfxId = "sfx_expedition_depart", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.enter",
                 Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-GEN-02 室内进出（FGR-GEN-042）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorExit, SfxId = "sfx_evacuate", Tag = "室内", Caption = "回到地表", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.exit",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.InteriorExit, SfxId = "sfx_evacuate", TagKey = "interior.cue.tag", CaptionKey = "interior.cue.exit",
                 Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-GEN-02 室内进出（FGR-GEN-042）" });
 
             // FG9-FAC-01（FGR-FAC-002 / 008 ①）：静默专属行为与寂听主脑的预警（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG9FAC01-04）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentReveal, SfxId = "sfx_signal_jam", Tag = "静默", Caption = "静默单位现形：展桅预警", TagKey = "silent.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentReveal, SfxId = "sfx_signal_jam", TagKey = "silent.cue.tag",
                 CaptionKey = "silent.cue.reveal", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.8f, RequirementNote = "FG9-FAC-01 静默潜伏现形（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentDeflect, SfxId = "sfx_alarm_warning", Tag = "静默", Caption = "偏折场展开预警", TagKey = "silent.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentDeflect, SfxId = "sfx_alarm_warning", TagKey = "silent.cue.tag",
                 CaptionKey = "silent.cue.deflect", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG9-FAC-01 偏折场（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentReflect, SfxId = "sfx_hit_armor", Tag = "静默", Caption = "射弹被偏折场反弹", TagKey = "silent.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentReflect, SfxId = "sfx_hit_armor", TagKey = "silent.cue.tag",
                 CaptionKey = "silent.cue.reflect", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-01 偏折反弹" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSever, SfxId = "sfx_signal_jam", Tag = "静默", Caption = "断链束照射：信号被强制断开", TagKey = "silent.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSever, SfxId = "sfx_signal_jam", TagKey = "silent.cue.tag",
                 CaptionKey = "silent.cue.sever", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-01 寂听者断链束" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentRelayJump, SfxId = "sfx_objective_new", Tag = "首领", Caption = "中继节点亮起：主脑即将转移", TagKey = "boss.silent.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentRelayJump, SfxId = "sfx_objective_new", TagKey = "boss.silent.cue.tag",
                 CaptionKey = "boss.silent.cue.jump", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-01 中继跳转预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSilenceWarn, SfxId = "sfx_alarm_warning", Shake = 0.2f, Tag = "首领", Caption = "全频静默即将开始",
-                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSilenceWarn, SfxId = "sfx_alarm_warning", Shake = 0.2f, TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-01 阶段三情报预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSilence, SfxId = "sfx_signal_jam", Shake = 0.45f, Tag = "首领", Caption = "全频静默：全场断链",
-                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SilentSilence, SfxId = "sfx_signal_jam", Shake = 0.45f, TagKey = "boss.silent.cue.tag", CaptionKey = "boss.silent.cue.silence", Tone = FeedbackTone.Danger, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-01 阶段三全频静默" });
 
             // FG9-FAC-02（FGR-FAC-002 / 008 ①）：铸造专属行为与主核心阶段三的预警（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG9FAC02-01）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundrySalvoWarn, SfxId = "sfx_alarm_warning", Tag = "铸造", Caption = "装填完成灯亮起：齐射即将开火", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundrySalvoWarn, SfxId = "sfx_alarm_warning", TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.salvo_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG9-FAC-02 齐射弹幕预警（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryIntercept, SfxId = "sfx_hit_armor", Tag = "铸造", Caption = "对空拦截：无人机 / 弹体被击落", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryIntercept, SfxId = "sfx_hit_armor", TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.intercept", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-02 对空高炮 / 对空形态拦截" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryAirburst, SfxId = "sfx_enemy_cannon", Shake = 0.15f, Tag = "铸造", Caption = "空爆弹在头顶炸开", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryAirburst, SfxId = "sfx_enemy_cannon", Shake = 0.15f, TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.airburst", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG9-FAC-02 空爆炮台" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryMineArmed, SfxId = "sfx_alarm_warning", Tag = "铸造", Caption = "踩到子母雷：引信已触发", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryMineArmed, SfxId = "sfx_alarm_warning", TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.mine_armed", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG9-FAC-02 子母雷引信预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryMineBlast, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "铸造", Caption = "子母雷爆炸", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryMineBlast, SfxId = "sfx_enemy_cannon", Shake = 0.2f, TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.mine_blast", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG9-FAC-02 子母雷" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryCharge, SfxId = "sfx_alarm_warning", Shake = 0.15f, Tag = "铸造", Caption = "攻城重甲蓄力：冲锋即将开始", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryCharge, SfxId = "sfx_alarm_warning", Shake = 0.15f, TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.charge", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG9-FAC-02 正面推进冲锋蓄力" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryDeploy, SfxId = "sfx_objective_new", Tag = "铸造", Caption = "步进炮放下驻锄：即将开火", TagKey = "foundry.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryDeploy, SfxId = "sfx_objective_new", TagKey = "foundry.cue.tag",
                 CaptionKey = "foundry.cue.deploy", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG9-FAC-02 架炮驻锄" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossAntiAir, SfxId = "sfx_alarm_warning", Shake = 0.4f, Tag = "首领", Caption = "主核心炮口转向天空",
-                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.antiair", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossAntiAir, SfxId = "sfx_alarm_warning", Shake = 0.4f, TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.antiair", Tone = FeedbackTone.Warning, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-02 主核心阶段三·对空形态（剧情时刻）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossBerserk, SfxId = "sfx_alarm_warning", Shake = 0.35f, Tag = "首领", Caption = "主核心狂暴",
-                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.berserk", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossBerserk, SfxId = "sfx_alarm_warning", Shake = 0.35f, TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.berserk", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-02 主核心狂暴" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossArenaReset, SfxId = "sfx_objective_new", Tag = "首领", Caption = "主核心复位：耐久恢复",
-                TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.arena_reset", Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FoundryBossArenaReset, SfxId = "sfx_objective_new", TagKey = "boss.silent.cue.tag", CaptionKey = "boss.foundry.cue.arena_reset", Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f,
                 RequirementNote = "FG9-FAC-02 场地边界（FGR-FAC-006）" });
 
             // FG10-FAC-01（FGR-FAC-002 / 008 ①）：澄净专属行为的预警与结果（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG10FAC01-01）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayWarn, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "喷嘴蓄压：前方扇区即将被喷淋", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayWarn, SfxId = "sfx_alarm_warning", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.spray_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 喷淋布区预警（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySpray, SfxId = "sfx_signal_jam", Tag = "澄净", Caption = "酸雾喷出：地面留下酸液池", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySpray, SfxId = "sfx_signal_jam", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.spray", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 喷淋布区" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityPivotWarn, SfxId = "sfx_alarm_warning", Shake = 0.15f, Tag = "澄净", Caption = "喷淋臂蓄压：臂前方的扇区即将被扫过", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityPivotWarn, SfxId = "sfx_alarm_warning", Shake = 0.15f, TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.pivot_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 枢轴喷灌预警（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityBurstWarn, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "油污爬行者引信燃烧：离开爆炸圈", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityBurstWarn, SfxId = "sfx_alarm_warning", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.burst_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 自爆引信预警（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityBurst, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "澄净", Caption = "油污爬行者自爆", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityBurst, SfxId = "sfx_enemy_cannon", Shake = 0.2f, TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.burst", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 自爆" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityDeflagrate, SfxId = "sfx_enemy_cannon", Shake = 0.3f, Tag = "澄净", Caption = "油污爬行者被火击毁：爆燃波及双方", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityDeflagrate, SfxId = "sfx_enemy_cannon", Shake = 0.3f, TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.deflagrate", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG10-FAC-01 被火击毁的爆燃（可以反过来利用）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySlickIgnite, SfxId = "sfx_enemy_cannon", Shake = 0.2f, Tag = "澄净", Caption = "油迹被点燃：整片爆燃", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySlickIgnite, SfxId = "sfx_enemy_cannon", Shake = 0.2f, TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.slick_ignite", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 油迹（燃迹组合）" });
             // EMG2-PHS-01（FGR-EMG-101，B07 三通道：头顶相态图标 + 声音 + 字幕；字幕细节 = “单位：相态名”）
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmgPhaseEnter, SfxId = "sfx_power_down", Tag = "相态", Caption = "进入相态", TagKey = "emg.phase.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmgPhaseEnter, SfxId = "sfx_power_down", TagKey = "emg.phase.cue.tag",
                 CaptionKey = "emg.phase.cue.caption", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.4f, RequirementNote = "EMG2-PHS-01 相变累积量与单位相态" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmgPhaseBroken, SfxId = "sfx_enemy_cannon", Tag = "相态", Caption = "相态被打断", TagKey = "emg.phase.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmgPhaseBroken, SfxId = "sfx_enemy_cannon", TagKey = "emg.phase.cue.tag",
                 CaptionKey = "emg.phase.cue.broken", Tone = FeedbackTone.Info, CaptionSeconds = 2f, MinIntervalSeconds = 0.4f, RequirementNote = "EMG2-PHS-01 碎裂 / 热震 / 熄灭" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityFreeze, SfxId = "sfx_power_down", Tag = "澄净", Caption = "机器被冻结：解冻前不能移动、不能开火", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityFreeze, SfxId = "sfx_power_down", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.freeze", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮“先减速再冻结”" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySplit, SfxId = "sfx_enemy_cannon", Shake = 0.25f, Tag = "澄净", Caption = "沉淀巨罐破裂：分裂出会爬行的腐蚀液", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySplit, SfxId = "sfx_enemy_cannon", Shake = 0.25f, TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.split", Tone = FeedbackTone.Warning, CaptionSeconds = 3f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 精英分裂" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityDroneWarn, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "灭活无人机悬停投放：击落它就能阻止", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityDroneWarn, SfxId = "sfx_alarm_warning", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.drone_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 投放预警（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityPoolWashed, SfxId = "sfx_objective_new", Tag = "澄净", Caption = "喷淋池被冲洗：很快消失", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityPoolWashed, SfxId = "sfx_objective_new", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.pool_washed", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 冷却液冲洗 / 燃烧蒸干" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityAcid, SfxId = "sfx_hit_armor", Volume = 0.6f, Tag = "澄净", Caption = "酸沼腐蚀中：每秒损失耐久", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClarityAcid, SfxId = "sfx_hit_armor", Volume = 0.6f, TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.acid", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 3f, RequirementNote = "FG10-FAC-01 酸沼（DEBT-FG8EXP02-03）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayWarnCryo, SfxId = "sfx_alarm_warning", Tag = "澄净", Caption = "液氮喷嘴蓄压：前方扇区即将被冻住", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayWarnCryo, SfxId = "sfx_alarm_warning", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.spray_warn_cryo", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG10-FAC-01 液氮喷淋预警（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayCryo, SfxId = "sfx_signal_jam", Tag = "澄净", Caption = "液氮喷出：地面留下液氮池", TagKey = "clarity.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ClaritySprayCryo, SfxId = "sfx_signal_jam", TagKey = "clarity.cue.tag",
                 CaptionKey = "clarity.cue.spray_cryo", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG10-FAC-01 液氮喷淋" });
             // FG11-FAC-01（FGR-FAC-002 / 008 ①）：超频专属行为的预警与结果（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG11FAC01-01）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockShutdown, SfxId = "sfx_alarm_warning", Tag = "超频", Caption = "冲刺过热：强制停机，这几秒受到的伤害增加", TagKey = "overclock.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockShutdown, SfxId = "sfx_alarm_warning", TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.shutdown", Tone = FeedbackTone.Info, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 冲刺—过热—停机（FGR-FAC-008）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockVent, SfxId = "sfx_alarm_warning", Tag = "超频", Caption = "满热排气：这几秒不能开火、受到的伤害增加", TagKey = "overclock.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockVent, SfxId = "sfx_alarm_warning", TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.vent", Tone = FeedbackTone.Info, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 蓄热连射排气窗口" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMeltWarn, SfxId = "sfx_alarm_warning", Shake = 0.2f, Tag = "超频", Caption = "熔断开始：2 秒后大范围爆炸——远离，或者一口气打死它", TagKey = "overclock.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMeltWarn, SfxId = "sfx_alarm_warning", Shake = 0.2f, TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.melt_warn", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG11-FAC-01 熔断者预警（卡片：预警明显）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockBurst, SfxId = "sfx_enemy_cannon", Shake = 0.35f, Tag = "超频", Caption = "过热泄爆：波及周围所有单位", TagKey = "overclock.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockBurst, SfxId = "sfx_enemy_cannon", Shake = 0.35f, TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.burst", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG11-FAC-01 过热泄爆" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockModeWarn, SfxId = "sfx_alarm_warning", Tag = "超频", Caption = "失控超算体即将切换状态", TagKey = "overclock.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockModeWarn, SfxId = "sfx_alarm_warning", TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.mode_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 三态切换预警（颜色 + 音效）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMode, SfxId = "sfx_boss_phase", Tag = "超频", Caption = "失控超算体切换状态", TagKey = "overclock.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.OverclockMode, SfxId = "sfx_boss_phase", TagKey = "overclock.cue.tag",
                 CaptionKey = "overclock.cue.mode", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG11-FAC-01 三态切换" });
             // FG11-BOSS-01 余烬主机：音效借用现有短音（占位，DEBT-FG11BOSS01-01 美术 / 音频阶段替换）。倒计时警报不限流到 1 秒以下（每秒一次）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberVentWarn, SfxId = "sfx_alarm_warning", Tag = "首领", Caption = "散热口即将张开", TagKey = "boss.ember.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberVentWarn, SfxId = "sfx_alarm_warning", TagKey = "boss.ember.cue.tag",
                 CaptionKey = "boss.ember.cue.vent_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 1.5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 散热口预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberVent, SfxId = "sfx_boss_phase", Tag = "首领", Caption = "散热口张开：重创窗口", TagKey = "boss.ember.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberVent, SfxId = "sfx_boss_phase", TagKey = "boss.ember.cue.tag",
                 CaptionKey = "boss.ember.cue.vent", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 散热口张开（弱点窗口）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberCountdown, SfxId = "sfx_alarm_warning", Tag = "首领", Caption = "熔毁倒计时", TagKey = "boss.ember.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberCountdown, SfxId = "sfx_alarm_warning", TagKey = "boss.ember.cue.tag",
                 CaptionKey = "boss.ember.cue.countdown", Tone = FeedbackTone.Danger, CaptionSeconds = 1f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 倒计时音效（卡片必须同时交付）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberBlast, SfxId = "sfx_enemy_cannon", Shake = 0.6f, Tag = "首领", Caption = "熔毁：全场重创", TagKey = "boss.ember.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmberBlast, SfxId = "sfx_enemy_cannon", Shake = 0.6f, TagKey = "boss.ember.cue.tag",
                 CaptionKey = "boss.ember.cue.blast", Tone = FeedbackTone.Danger, CaptionSeconds = 4f, MinIntervalSeconds = 0.5f, RequirementNote = "FG11-BOSS-01 熔毁" });
             // FG13-FAC-01（FGR-FAC-002 / 008 ①）：白潮专属行为的预警与结果（占位沿用系统音效，美术 / 音频阶段替换，DEBT-FG13FAC01-01）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetBeamAim, SfxId = "sfx_alarm_warning", Tag = "白潮", Caption = "净化步行机预瞄：灭活光束即将扫过这条线", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetBeamAim, SfxId = "sfx_alarm_warning", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.beam_aim", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 灭活光束预瞄线（≥ 0.8 秒）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetBeam, SfxId = "sfx_enemy_fire_heavy", Tag = "白潮", Caption = "灭活光束：扫过的地面暂时不能建造", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetBeam, SfxId = "sfx_enemy_fire_heavy", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.beam", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 灭活光束" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetInertRecover, SfxId = "sfx_signal_jam", Tag = "白潮", Caption = "灭活焦土开始恢复", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetInertRecover, SfxId = "sfx_signal_jam", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.inert_recover", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 2f, RequirementNote = "FG13-FAC-01 灭活焦土逐格恢复" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrikeMark, SfxId = "sfx_alarm_warning", Tag = "白潮", Caption = "轨道打击标记：摧毁信标或撤出标记圈，落下倒计时（秒）", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrikeMark, SfxId = "sfx_alarm_warning", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.strike_mark", Tone = FeedbackTone.Danger, CaptionSeconds = 3f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 轨道打击标记（倒计时）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrikeCancel, SfxId = "sfx_boss_phase", Tag = "白潮", Caption = "信标被毁：轨道打击取消", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrikeCancel, SfxId = "sfx_boss_phase", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.strike_cancel", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 0.3f, RequirementNote = "FG13-FAC-01 轨道打击取消（负向）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrike, SfxId = "sfx_enemy_cannon", Shake = 0.5f, Tag = "白潮", Caption = "轨道打击落下", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetStrike, SfxId = "sfx_enemy_cannon", Shake = 0.5f, TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.strike", Tone = FeedbackTone.Danger, CaptionSeconds = 2.5f, MinIntervalSeconds = 0.3f, RequirementNote = "FG13-FAC-01 轨道打击" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetPodWarn, SfxId = "sfx_alarm_warning", Tag = "白潮", Caption = "登陆舱落点预警：落地倒计时（秒）", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetPodWarn, SfxId = "sfx_alarm_warning", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.pod_warn", Tone = FeedbackTone.Warning, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 登陆舱落点预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetPodLand, SfxId = "sfx_boss_phase", Shake = 0.3f, Tag = "白潮", Caption = "登陆舱落地：投放一波单位", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetPodLand, SfxId = "sfx_boss_phase", Shake = 0.3f, TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.pod_land", Tone = FeedbackTone.Danger, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 登陆舱落地投放" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetFormationBroken, SfxId = "sfx_signal_jam", Tag = "白潮", Caption = "白潮编队被打散：落单的无人机效率下降", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetFormationBroken, SfxId = "sfx_signal_jam", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.formation_broken", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 1f, RequirementNote = "FG13-FAC-01 编队打散" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetShieldBreak, SfxId = "sfx_enemy_cannon", Tag = "白潮", Caption = "护卫护盾被打掉", TagKey = "fleet.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.FleetShieldBreak, SfxId = "sfx_enemy_cannon", TagKey = "fleet.cue.tag",
                 CaptionKey = "fleet.cue.shield_break", Tone = FeedbackTone.Good, CaptionSeconds = 2f, MinIntervalSeconds = 0.5f, RequirementNote = "FG13-FAC-01 护卫护盾" });
 
             // ── 家园与通用 ─────────────────────────────────────────────────
-            Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", Tag = "建造", Caption = "完工", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.BuildComplete, SfxId = "sfx_build_complete", TagKey = "feedback.cue.build_complete.tag", CaptionKey = "feedback.cue.build_complete.caption", Tone = FeedbackTone.Good, RequirementNote = "BuildingCatalog.SfxId 消费点" });
             // FG0-SAVE-01：读档后的内容迁移通知（正文由 SaveContentReconciler.Render 走文本键生成），停留更久。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SaveContentMigrated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "存档", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 10f, MinIntervalSeconds = 0f, RequirementNote = "FGR-SYS-004 读档后通知" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SaveContentMigrated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, TagKey = "feedback.cue.save_content_migrated.tag", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 10f, MinIntervalSeconds = 0f, RequirementNote = "FGR-SYS-004 读档后通知" });
             // FG1-HUD-01（FG-GAP-044）：信号离开机器（玩家按接入 / 退出键离开、切到别的机器时由接入提交音覆盖）。音效沿用信号类的“恢复”短音降音量，
             // 与断链（SignalLost）的警报区分；同类最小间隔 0.3 秒（1 秒内连按 10 次不刷屏）。字幕只在“字幕”开启时出（状态行已有“已离开 …”）。
             // FG2-FW-03：具名标签反应（短路、热震……）触发时报出机械名（detail = 名字）；音效借用标记跳转的，正式音效与聚合弹字归 FG2-FW-04。
             // FG2-FW-04：反应名另有打在目标头上的弹字（ReactionPopups，聚合 + 每秒上限，可在设置里关）；这里的声音 + 常显字幕（AC-AUD-001“反应”类的非声音反馈，
             // 弹字关掉时仍在）改为每步每条反应一次（“短路 ×12”），同类 0.3 秒限流。音效仍借用标记跳转的（正式音效随 FG2-VFX-02 美术替换，DEBT-FG2FW04-02）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.TagReaction, SfxId = "sfx_reaction_markjump", Volume = 0.7f, MinIntervalSeconds = 0.3f, Tag = "反应", Caption = string.Empty, TagKey = "feedback.tag.reaction", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG2-FW-03 具名反应命名（FGR-FW-041）；FG2-FW-04 聚合（FGR-FW-043）" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.TagReaction, SfxId = "sfx_reaction_markjump", Volume = 0.7f, MinIntervalSeconds = 0.3f, Caption = string.Empty, TagKey = "feedback.tag.reaction", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG2-FW-03 具名反应命名（FGR-FW-041）；FG2-FW-04 聚合（FGR-FW-043）" });
             // FG2-FW-04（承接 DEBT-FG2FW02-02 读法音效）：读法生成区域 / 回波 / 无人机时出声（每步聚合一次、同类 0.25 秒限流）；画面上有区域圆片 / 无人机与弹字，不出字幕。
             // 音效借用已有的短音（区域 = 熔穿、回波 = 命中、无人机 = 命令确认），正式音效随 FG2-VFX-02（DEBT-FG2FW04-02）。
             Add(new FeedbackCueDef { Id = FeedbackCueId.ReadingZone, SfxId = "sfx_reaction_melt", Volume = 0.45f, MinIntervalSeconds = 0.25f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "FG2-FW-04 读法音效（区域）" });
@@ -318,36 +311,36 @@ namespace GameLogic.Campaign.Feedback
             Add(new FeedbackCueDef { Id = FeedbackCueId.ReadingDrone, SfxId = "sfx_command_ack", Volume = 0.45f, MinIntervalSeconds = 0.25f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "FG2-FW-04 读法音效（无人机）" });
             // FG2-VFX-02：尖刺外装反伤（每步聚合一次、同类 0.25 秒限流；音效借用命中短音，正式音效随 DEBT-FG2FW04-02）。
             Add(new FeedbackCueDef { Id = FeedbackCueId.ReadingThorns, SfxId = "sfx_hit", Volume = 0.4f, MinIntervalSeconds = 0.25f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "FG2-VFX-02 反伤音效（尖刺外装）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyPrint, SfxId = "sfx_emergency_rescue", Tag = "核心应急", Caption = "归还核心", TagKey = "feedback.tag.emergency_print", CaptionKey = "feedback.caption.emergency_print", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "FG4-ECO-10 FGR-ECO-070 应急打印" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.UplinkLeave, SfxId = "sfx_uplink_leave", Volume = 0.6f, MinIntervalSeconds = 0.3f, Tag = "离开", Caption = "信号离开机器", TagKey = "feedback.tag.uplink_leave", CaptionKey = "feedback.caption.uplink_leave", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG-GAP-044 接入 / 离开音效钩子" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyPrint, SfxId = "sfx_emergency_rescue", TagKey = "feedback.tag.emergency_print", CaptionKey = "feedback.caption.emergency_print", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "FG4-ECO-10 FGR-ECO-070 应急打印" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.UplinkLeave, SfxId = "sfx_uplink_leave", Volume = 0.6f, MinIntervalSeconds = 0.3f, TagKey = "feedback.tag.uplink_leave", CaptionKey = "feedback.caption.uplink_leave", CaptionMode = FeedbackCaptionMode.SubtitlesOnly, Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, RequirementNote = "FG-GAP-044 接入 / 离开音效钩子" });
             // FG15-UX-02（DEBT-EMG2MAT01-07）：被观察地点里生成物质斑块 / 单位踏进斑块（只发声；画面上已有斑块纹样与悬停读数）。限流防刷屏。
             Add(new FeedbackCueDef { Id = FeedbackCueId.MatterSpawn, SfxId = "sfx_matter_spawn", Volume = 0.45f, MinIntervalSeconds = 0.6f, CaptionMode = FeedbackCaptionMode.None, Tone = FeedbackTone.Info, RequirementNote = "DEBT-EMG2MAT01-07 斑块生成音效钩子" });
             Add(new FeedbackCueDef { Id = FeedbackCueId.MatterEnter, SfxId = "sfx_matter_enter", Volume = 0.4f, MinIntervalSeconds = 0.8f, CaptionMode = FeedbackCaptionMode.None, Tone = FeedbackTone.Info, RequirementNote = "DEBT-EMG2MAT01-07 进入斑块音效钩子" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLinkWarning, SfxId = "sfx_alarm_warning", Volume = 0.7f, Tag = "信号", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 1f, RequirementNote = "FG1-SIG-04 覆盖边缘 / 静默夜预警" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.SaveComplete, SfxId = "sfx_save_ok", Channel = AudioType.UISound, Tag = "存档", Caption = "已保存", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SignalLinkWarning, SfxId = "sfx_alarm_warning", Volume = 0.7f, TagKey = "feedback.cue.signal_link_warning.tag", Caption = string.Empty, Tone = FeedbackTone.Warning, CaptionSeconds = 4f, MinIntervalSeconds = 1f, RequirementNote = "FG1-SIG-04 覆盖边缘 / 静默夜预警" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.SaveComplete, SfxId = "sfx_save_ok", Channel = AudioType.UISound, TagKey = "feedback.cue.save_complete.tag", CaptionKey = "feedback.cue.save_complete.caption", Tone = FeedbackTone.Info, CaptionSeconds = 2.5f, MinIntervalSeconds = 1f });
             Add(new FeedbackCueDef { Id = FeedbackCueId.CommandAck, SfxId = "sfx_command_ack", Channel = AudioType.UISound, Volume = 0.7f, MinIntervalSeconds = 0.15f, CaptionMode = FeedbackCaptionMode.None, RequirementNote = "ChassisCatalog.SfxId 消费点（命令确认音按底盘区分）" });
             // 按钮本身的按下态就是等价视觉反馈，不出字幕。
             Add(new FeedbackCueDef { Id = FeedbackCueId.UiClick, SfxId = "sfx_ui_click", Channel = AudioType.UISound, Volume = 0.8f, MinIntervalSeconds = 0.04f, CaptionMode = FeedbackCaptionMode.None });
 
             // FG12-EVT-01（FG10 第 10 节“事件预警有独特的音效，并且与突袭、静默夜的音效区分开”）：默认音效是占位短音（与突袭 sfx_ui_deny / mus_raid_warning、
             // 静默夜 sfx_alarm_warning 都不同），每个事件按 fg.TbWorldEvent.sfxWarn 覆盖；正式音效随美术 / 音频阶段替换（DEBT-FG12EVT01-01）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.WorldEventWarning, Channel = AudioType.Voice, SfxId = "sfx_beacon_launch", Volume = 0.8f, Tag = "事件", Caption = string.Empty, TagKey = "event_director.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.WorldEventWarning, Channel = AudioType.Voice, SfxId = "sfx_beacon_launch", Volume = 0.8f, Caption = string.Empty, TagKey = "event_director.cue.tag",
                 Tone = FeedbackTone.Warning, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG12-EVT-01 事件预警 / 开始（FGR-EVT-003）" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.WorldEventNotice, Channel = AudioType.Voice, SfxId = "sfx_analysis_complete", Volume = 0.7f, Tag = "事件", Caption = string.Empty, TagKey = "event_director.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.WorldEventNotice, Channel = AudioType.Voice, SfxId = "sfx_analysis_complete", Volume = 0.7f, Caption = string.Empty, TagKey = "event_director.cue.tag",
                 Tone = FeedbackTone.Info, CaptionSeconds = 5f, MinIntervalSeconds = 0.5f, RequirementNote = "FG12-EVT-01 事件到来 / 结束 / 推迟（FGR-EVT-004）" });
 
             // ── 战役目标 ───────────────────────────────────────────────────
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveActivated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "新目标", Caption = string.Empty, Tone = FeedbackTone.Info, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 目标 HUD/日志" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyRescue, SfxId = "sfx_emergency_rescue", Tag = "紧急救援", Caption = "所有工作机都已损失，核心派出紧急救援机", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "AC-ECO-011 紧急救援" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveComplete, SfxId = "sfx_objective_complete", Tag = "目标完成", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 完成事件" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveActivated, SfxId = "sfx_objective_new", Channel = AudioType.UISound, TagKey = "feedback.cue.objective_activated.tag", Caption = string.Empty, Tone = FeedbackTone.Info, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 目标 HUD/日志" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.EmergencyRescue, SfxId = "sfx_emergency_rescue", TagKey = "feedback.cue.emergency_rescue.tag", CaptionKey = "feedback.cue.emergency_rescue.caption", Tone = FeedbackTone.Warning, CaptionSeconds = 8f, RequirementNote = "AC-ECO-011 紧急救援" });
+            Add(new FeedbackCueDef { Id = FeedbackCueId.ObjectiveComplete, SfxId = "sfx_objective_complete", TagKey = "feedback.cue.objective_complete.tag", Caption = string.Empty, Tone = FeedbackTone.Good, CaptionSeconds = 6f, RequirementNote = "AC-CAM-001 完成事件" });
             // FG8-QST-01（FGR-QST-001～004，FG08 第 7 节“任务更新时发通知”）：任务的四种时刻（声音借用目标 / 警报的短音，正式音效随美术阶段替换，DEBT-FG8QST01-05）。
-            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestNew, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestNew, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Caption = string.Empty, TagKey = "quest.cue.tag",
                 Tone = FeedbackTone.Info, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-QST-01 新任务 / 发现支线" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestComplete, SfxId = "sfx_objective_complete", Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestComplete, SfxId = "sfx_objective_complete", Caption = string.Empty, TagKey = "quest.cue.tag",
                 Tone = FeedbackTone.Good, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-QST-01 任务完成" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestUpdate, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Volume = 0.6f, Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestUpdate, SfxId = "sfx_objective_new", Channel = AudioType.UISound, Volume = 0.6f, Caption = string.Empty, TagKey = "quest.cue.tag",
                 Tone = FeedbackTone.Info, CaptionSeconds = 4f, MinIntervalSeconds = 0.3f, RequirementNote = "FG8-QST-01 任务进展" });
-            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestAlert, SfxId = "sfx_alarm_warning", Volume = 0.7f, Tag = "任务", Caption = string.Empty, TagKey = "quest.cue.tag",
+            Add(new FeedbackCueDef { Id = FeedbackCueId.QuestAlert, SfxId = "sfx_alarm_warning", Volume = 0.7f, Caption = string.Empty, TagKey = "quest.cue.tag",
                 Tone = FeedbackTone.Warning, CaptionSeconds = 6f, MinIntervalSeconds = 0.5f, RequirementNote = "FG8-QST-01 任务警告 / 失败（FGR-QST-004）" });
 
             return defs;

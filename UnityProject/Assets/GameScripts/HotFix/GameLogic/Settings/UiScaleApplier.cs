@@ -125,6 +125,7 @@ namespace GameLogic.Settings
                 return;
             }
             _appliedRevision = -1;
+            GameLogic.Localization.UiFontFallback.Ensure(_panelSettings.textSettings); // FG15-UX-03：系统后备字体（FGR-SYS-090）
 
             if (!_quitHooked)
             {

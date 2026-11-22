@@ -79,18 +79,18 @@ namespace GameLogic.Campaign.Content
         private static readonly Dictionary<string, (string ActionId, string VfxId, string SilhouetteNote, string DebtId)> DemoDebug =
             new Dictionary<string, (string, string, string, string)>(StringComparer.Ordinal)
             {
-                [FwHomingId] = ("SandboxAssembler.Compose(geneIds:[\"gene_taxis\"]) — 真实 Engine.Fire 链路，HomingModule", "vfx_none_placeholder",
-                    "无独立几何体，随弹道表现（HomingModule 数值 0.85，非精确 30° 角上限）。", "DEBT-ER4CONTENT01-03"),
-                [FwSplitId] = ("SandboxAssembler.Compose(geneIds:[\"gene_split\"]) — 真实 Engine.Fire 链路，SplitModule", "vfx_none_placeholder",
-                    "无独立几何体，随命中特效表现。", "DEBT-ER4CONTENT01-03"),
-                [FwTrailId] = ("SandboxAssembler.Compose(geneIds:[\"gene_slime\"]) — 真实 Engine.Fire 链路，TrailModule", "vfx_trail_placeholder",
-                    "路径拖影表现（含减速副作用）。", "DEBT-ER4CONTENT01-03"),
-                [FwOverloadId] = ("CombatSite.MachineWeaponFrom（熔穿过载）+ gene_heatshock 等价实现（接入口插入）", "vfx_overload_placeholder",
-                    "过热红光表现。", "DEBT-ER4CONTENT01-09"),
-                [FwMarkTagId] = ("CombatLogic.MarkJump（内核标记跳转，接入口插入）", "vfx_chain_placeholder",
-                    "跳跃弧线表现（全新内容，无旧基因参照）。", "DEBT-ER4CONTENT01-06"),
-                [FwArmorPierceId] = ("CarrierReadings.Build（原生读法字段 armor）→ CombatLogic.StrikeDamage 从正面装甲减伤里扣掉（FG2-FW-02，DEBT-FG1SIG06-03 关闭）", "vfx_none_placeholder",
-                    "无独立几何体（全新内容，无旧基因参照）。", null),
+                [FwHomingId] = ("SandboxAssembler.Compose(geneIds:[\"gene_taxis\"]) — 真实 Engine.Fire 链路，HomingModule", "vfx_none_placeholder", // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                    "无独立几何体，随弹道表现（HomingModule 数值 0.85，非精确 30° 角上限）。", "DEBT-ER4CONTENT01-03"), // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                [FwSplitId] = ("SandboxAssembler.Compose(geneIds:[\"gene_split\"]) — 真实 Engine.Fire 链路，SplitModule", "vfx_none_placeholder", // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                    "无独立几何体，随命中特效表现。", "DEBT-ER4CONTENT01-03"), // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                [FwTrailId] = ("SandboxAssembler.Compose(geneIds:[\"gene_slime\"]) — 真实 Engine.Fire 链路，TrailModule", "vfx_trail_placeholder", // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                    "路径拖影表现（含减速副作用）。", "DEBT-ER4CONTENT01-03"), // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                [FwOverloadId] = ("CombatSite.MachineWeaponFrom（熔穿过载）+ gene_heatshock 等价实现（接入口插入）", "vfx_overload_placeholder", // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                    "过热红光表现。", "DEBT-ER4CONTENT01-09"), // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                [FwMarkTagId] = ("CombatLogic.MarkJump（内核标记跳转，接入口插入）", "vfx_chain_placeholder", // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                    "跳跃弧线表现（全新内容，无旧基因参照）。", "DEBT-ER4CONTENT01-06"), // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                [FwArmorPierceId] = ("CarrierReadings.Build（原生读法字段 armor）→ CombatLogic.StrikeDamage 从正面装甲减伤里扣掉（FG2-FW-02，DEBT-FG1SIG06-03 关闭）", "vfx_none_placeholder", // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
+                    "无独立几何体（全新内容，无旧基因参照）。", null), // loc-ignore: 开发元数据（ActionId / SilhouetteNote 元组）
             };
 
         private static Dictionary<string, MechanicalContentDef> _defs = new Dictionary<string, MechanicalContentDef>(StringComparer.Ordinal);
@@ -203,14 +203,14 @@ namespace GameLogic.Campaign.Content
                 IconId = row.Icon,
                 ModelId = "primitive:capsule",
                 ActionId = demo.ActionId ?? (hasLegacy
-                    ? $"CarrierReadings.Build（读法字段 {row.ReadFields}，载体 × 字段查 fg.TbCarrierReading）→ 战斗内核 CombatLogic；伤害另经 GeneCatalog.GetModule(\"{row.LegacyId}\") 编译"
-                    : $"CarrierReadings.Build（原生读法字段 {row.ReadFields}）→ 战斗内核 CombatLogic"),
+                    ? $"CarrierReadings.Build（读法字段 {row.ReadFields}，载体 × 字段查 fg.TbCarrierReading）→ 战斗内核 CombatLogic；伤害另经 GeneCatalog.GetModule(\"{row.LegacyId}\") 编译" // loc-ignore: 开发元数据 ActionId
+                    : $"CarrierReadings.Build（原生读法字段 {row.ReadFields}）→ 战斗内核 CombatLogic"), // loc-ignore: 开发元数据 ActionId
                 VfxId = demo.VfxId ?? "vfx_none_placeholder",
                 SfxId = string.Empty, // 固件本身不发声，声音由所属武器或反应发出（FeedbackCueSelfCheck 约定）
                 PreviewId = "preview_" + row.Id,
                 SaveCompatible = true,
                 LockedHintText = acquire,
-                SilhouetteNote = demo.SilhouetteNote ?? $"机身形变：{row.Morph}（类别 {row.Category}，FGR-FW-020）；引信类只改弹体特效。",
+                SilhouetteNote = demo.SilhouetteNote ?? $"机身形变：{row.Morph}（类别 {row.Category}，FGR-FW-020）；引信类只改弹体特效。", // loc-ignore: 开发元数据 SilhouetteNote
                 LegacyFacadeId = hasLegacy ? row.LegacyId : null,
                 DebtId = demo.DebtId,
             };

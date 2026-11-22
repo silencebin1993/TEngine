@@ -124,11 +124,18 @@ namespace GameLogic.EditorTools
                 string text = System.IO.File.ReadAllText(UiRoot + uxml);
                 foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text, @"\btext=""([^""]*)"""))
                 {
-                    string value = m.Groups[1].Value;
+                    string raw = m.Groups[1].Value;
                     scanned++;
-                    if (FeedbackCueSelfCheck.ForbiddenWords.IsMatch(value) || FeedbackCueSelfCheck.InternalIdPattern.IsMatch(value))
+                    // FG15-UX-03：UXML 文字改成 @文本键后，核的是键在中英两种语言下的文本（缺键的 ⟦key⟧ 会被内部 ID 规则判出）。
+                    string[] values = GameLogic.Localization.UiText.IsKey(raw)
+                        ? new[] { GameLogic.Localization.GameText.Get(raw.Substring(1), GameLogic.Localization.GameLanguage.ZhCn), GameLogic.Localization.GameText.Get(raw.Substring(1), GameLogic.Localization.GameLanguage.En) }
+                        : new[] { raw };
+                    foreach (string value in values)
                     {
-                        hits.Add($"{uxml}“{value}”");
+                        if (FeedbackCueSelfCheck.ForbiddenWords.IsMatch(value) || FeedbackCueSelfCheck.InternalIdPattern.IsMatch(value))
+                        {
+                            hits.Add($"{uxml}“{value}”");
+                        }
                     }
                 }
             }

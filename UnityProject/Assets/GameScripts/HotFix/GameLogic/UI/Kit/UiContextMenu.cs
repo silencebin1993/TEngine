@@ -45,6 +45,7 @@ namespace GameLogic.UI.Kit
         {
             _scrim = root.Q<VisualElement>("MenuScrim");
             _menu = root.Q<VisualElement>("ContextMenu");
+            _menu?.RegisterCallback<GeometryChangedEvent>(OnMenuGeometry);
             _scrim?.RegisterCallback<PointerDownEvent>(OnScrimDown);
             Render(Vector2.zero);
         }
@@ -52,6 +53,7 @@ namespace GameLogic.UI.Kit
         public static void UnbindView()
         {
             _scrim?.UnregisterCallback<PointerDownEvent>(OnScrimDown);
+            _menu?.UnregisterCallback<GeometryChangedEvent>(OnMenuGeometry);
             _scrim = _menu = null;
         }
 
@@ -162,6 +164,34 @@ namespace GameLogic.UI.Kit
             float y = Mathf.Min(at.y, bounds.yMax - 40f * Items.Count - 8f);
             _menu.style.left = Mathf.Max(0f, x - bounds.xMin);
             _menu.style.top = Mathf.Max(0f, y - bounds.yMin);
+            _at = at;
+        }
+
+        private static Vector2 _at;
+
+        private static void OnMenuGeometry(GeometryChangedEvent evt) => Reclamp();
+
+        /// <summary>FG15-UX-03（DEBT-FG0UX01-13 探针发现）：上面按估计尺寸钳位，英文长项 / 带不可用原因的两行项会比估计宽高，
+        /// 布局出来后按实际尺寸再钳一次，保证菜单整个留在面板里（布局变化时自动调用，自检布局后直接调）。</summary>
+        public static void Reclamp()
+        {
+            if (_menu == null || !IsOpen || _menu.parent == null)
+            {
+                return;
+            }
+            Rect bounds = _menu.parent.worldBound;
+            float w = _menu.resolvedStyle.width, h = _menu.resolvedStyle.height;
+            if (float.IsNaN(w) || float.IsNaN(h) || float.IsNaN(bounds.width))
+            {
+                return;
+            }
+            float left = Mathf.Clamp(_at.x - bounds.xMin, 0f, Mathf.Max(0f, bounds.width - w));
+            float top = Mathf.Clamp(_at.y - bounds.yMin, 0f, Mathf.Max(0f, bounds.height - h));
+            if (Mathf.Abs(_menu.resolvedStyle.left - left) > 0.5f || Mathf.Abs(_menu.resolvedStyle.top - top) > 0.5f)
+            {
+                _menu.style.left = left;
+                _menu.style.top = top;
+            }
         }
 
         public static void ResetForTests()

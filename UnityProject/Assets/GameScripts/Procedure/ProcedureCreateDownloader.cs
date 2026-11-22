@@ -33,7 +33,7 @@ namespace Procedure
 
             Log.Info("创建补丁下载器");
 
-            LauncherMgr.ShowUI<LoadUpdateUI>($"创建补丁下载器...");
+            LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Get("launch.downloader.creating"));
 
             CreateDownloader().Forget();
         }

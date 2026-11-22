@@ -12,6 +12,7 @@ using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.UI.Kit;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Factory
 {
@@ -89,6 +90,7 @@ namespace GameLogic.UI.Factory
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[FactoryPanelUIToolkit] rootVisualElement 等待超时，装配站面板未初始化。");
@@ -200,7 +202,7 @@ namespace GameLogic.UI.Factory
         }
 
         /// <summary>维修机未解锁时按钮是灰的，此前界面不说为什么——在生产提示行写明解锁条件（不改按钮尺寸）。</summary>
-        public const string HoverLockedHint = "维修机：先让解析台通电运转后解锁";
+        public static string HoverLockedHint => GameLogic.Localization.GameText.Get("factory.hover.repair_locked");
 
         private void RefreshProduceButtons(CampaignState state)
         {
@@ -284,7 +286,7 @@ namespace GameLogic.UI.Factory
                 return;
             }
             HomeValleyFactory.FactoryOpResult r = HomeValleyFactory.TryEnqueueProduce(state, blueprintId);
-            _produceHint.text = r.Success ? string.Empty : "生产失败：" + HomeValleyFactory.DescribeFailure(r.FailureReason);
+            _produceHint.text = r.Success ? string.Empty : GameText.Get("factory.panel.production_failed") + HomeValleyFactory.DescribeFailure(r.FailureReason);
         }
 
         private void RefreshQueueList(CampaignState state)
@@ -319,7 +321,7 @@ namespace GameLogic.UI.Factory
 
                 FactoryQueueItemRecord item = _liveCache[i];
                 row.style.display = DisplayStyle.Flex;
-                string kindTag = item.Kind == FactoryQueueKind.Retrofit ? "[改造]" : "[生产]";
+                string kindTag = item.Kind == FactoryQueueKind.Retrofit ? GameText.Get("factory.panel.refit") : GameText.Get("factory.panel.produce");
                 row.Q<Label>("Blueprint").text = kindTag + ResolveBlueprintDisplayName(item.BlueprintId);
                 // ER8-CONTENT-01：行首图标＝产出（或被改造）机器的底盘；状态与原因此前直接显示英文枚举与原因码。
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), ResolveRowChassisId(item));
@@ -356,13 +358,13 @@ namespace GameLogic.UI.Factory
                 : HomeValleyFactory.Find(state, _selectedQueueItemId);
             if (item == null)
             {
-                _detailText.text = "未选中队列项";
+                _detailText.text = GameText.Get("factory.panel.no_queue_item_selected");
                 _cancelButton.SetEnabled(false);
                 return;
             }
 
             string reasonLine = string.IsNullOrEmpty(item.BlockedReason) ? string.Empty
-                : $"\n原因：{HomeValleyFactory.DescribeWait(item) ?? QueueText.Reason(item.BlockedReason)}";
+                : GameText.Format("factory.panel.reason_0", HomeValleyFactory.DescribeWait(item) ?? QueueText.Reason(item.BlockedReason));
             // FG4-ECO-03：这一项的材料（已取 / 代付的废料），缺什么写在原因里。
             string materialLine = !item.MaterialMode ? string.Empty
                 : item.MaterialsTaken
@@ -370,10 +372,10 @@ namespace GameLogic.UI.Factory
                     : "\n" + GameLogic.Localization.GameText.Format("asm.panel.materials_of", ResolveBlueprintDisplayName(item.BlueprintId),
                         AssemblyMaterials.DescribeMaterials(state, item.Materials));
             string targetLine = item.Kind == FactoryQueueKind.Retrofit
-                ? MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord tgt) ? $"\n目标：{MachineNaming.Short(tgt)}" : "\n目标：（已不存在）"
+                ? MachineRegistry.TryGetRecord(item.TargetMachineLogicId, out MachineRecord tgt) ? GameText.Format("factory.panel.target_0", MachineNaming.Short(tgt)) : GameText.Get("factory.panel.target_gone")
                 : string.Empty;
-            _detailText.text = $"{(item.Kind == FactoryQueueKind.Retrofit ? "改造" : "生产")}：{ResolveBlueprintDisplayName(item.BlueprintId)} v{item.BlueprintVersion}" +
-                $"{targetLine}\n状态：{QueueText.FactoryState(item.State)}\n进度：{item.Progress:F0}/{item.Duration:F0}秒{reasonLine}{materialLine}";
+            _detailText.text = GameText.Format("factory.panel.0_1_v_2", (item.Kind == FactoryQueueKind.Retrofit ? GameLogic.Localization.GameText.Get("factory.kind.retrofit") : GameLogic.Localization.GameText.Get("factory.kind.produce")), ResolveBlueprintDisplayName(item.BlueprintId), item.BlueprintVersion) +
+                GameText.Format("factory.panel.0_status_1_progress", targetLine, QueueText.FactoryState(item.State), item.Progress, item.Duration, reasonLine, materialLine);
             _cancelButton.SetEnabled(item.State == FactoryQueueState.Queued || item.State == FactoryQueueState.WaitingResources
                 || item.State == FactoryQueueState.WaitingPower || item.State == FactoryQueueState.WaitingTarget
                 || item.State == FactoryQueueState.Running);
@@ -413,7 +415,7 @@ namespace GameLogic.UI.Factory
                         && !(GameRoot.HomeValley?.IsMachineDirectControlled(m.LogicId) ?? false))
                     .OrderBy(m => m.LogicId))
                 {
-                    choices.Add($"{MachineNaming.Short(m)} {ResolveChassisDisplayName(m.ChassisId)}（当前 v{m.BlueprintVersion}）");
+                    choices.Add(GameText.Format("factory.panel.0_1_current_v", MachineNaming.Short(m), ResolveChassisDisplayName(m.ChassisId), m.BlueprintVersion));
                     _retrofitTargetLogicIdsByIndex.Add(m.LogicId);
                 }
             }
@@ -450,8 +452,8 @@ namespace GameLogic.UI.Factory
                     BlueprintRecord bp = BlueprintEditorService.Find(state, m.BlueprintId);
                     foreach (BlueprintVersionRecord v in (bp?.Versions ?? System.Array.Empty<BlueprintVersionRecord>()).OrderBy(v => v.Version))
                     {
-                        string cur = v.Version == m.BlueprintVersion ? "（当前）" : string.Empty;
-                        choices.Add($"v{v.Version}{cur}｜{v.ScrapCost}废料");
+                        string cur = v.Version == m.BlueprintVersion ? GameText.Get("factory.panel.current") : string.Empty;
+                        choices.Add(GameText.Format("factory.panel.v_0_1_2", v.Version, cur, v.ScrapCost));
                         _retrofitVersionNumbersByIndex.Add(v.Version);
                     }
                 }
@@ -534,13 +536,13 @@ namespace GameLogic.UI.Factory
             bool directlyControlled = GameRoot.HomeValley?.IsMachineDirectControlled(logicId) ?? false;
             HomeValleyFactory.FactoryOpResult r = HomeValleyFactory.TryEnqueueRetrofit(
                 state, logicId, m.BlueprintId, versionNumber, directlyControlled);
-            _retrofitHintLabel.text = r.Success ? string.Empty : "改造排队失败：" + HomeValleyFactory.DescribeFailure(r.FailureReason);
+            _retrofitHintLabel.text = r.Success ? string.Empty : GameText.Get("factory.panel.refit_queueing_failed") + HomeValleyFactory.DescribeFailure(r.FailureReason);
         }
 
         private void RefreshExitStatus(CampaignState state)
         {
             bool blocked = state != null && HomeValleyFactory.IsExitBlocked(state);
-            _exitStatusLabel.text = blocked ? "出口：被完工机器占用，需驶离厂区" : "出口：畅通";
+            _exitStatusLabel.text = blocked ? GameText.Get("factory.panel.exit_blocked_by_a") : GameText.Get("factory.panel.exit_clear");
             _exitStatusLabel.EnableInClassList("fac-exit-blocked", blocked);
         }
 

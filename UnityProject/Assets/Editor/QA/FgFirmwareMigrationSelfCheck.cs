@@ -285,7 +285,7 @@ namespace GameLogic.EditorTools
                    && counts.TryGetValue("fluid", out int c2) && c2 == 9 && counts.TryGetValue("em", out int d) && d == 8
                    && coreIds.SequenceEqual(new[] { "fw_amplify", "fw_capacitor", "fw_execute", "fw_marktag", "fw_overload", "fw_swarm" })
                    && FirmwareKinds.BaseRows.Where(r => r.Kind == "core").All(r => r.Category == "limiter" && r.Rarity == "epic"),
-                "类别条数 引信 17 / 限制器 10 / 流体 9 / 电磁 8；核心 6 条（过载、电容蓄力、标记跳转、集群协议、反应增幅、处决），全在限制器类、精良（FGR-FW-003）");
+                "类别条数 引信 17 / 限制器 10 / 流体 9 / 电磁 8；核心 6 条（过载、电容蓄力、标记跳转、集群协议、反应增幅、处决），全在限制器类、稀有度 epic（显示“稀有”，FG15-UX-03 FG-GAP-134；FGR-FW-003）");
         }
 
         // ── C. 目录由表生成 ──────────────────────────────────────────────────────

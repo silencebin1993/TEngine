@@ -552,7 +552,7 @@ namespace GameLogic.Campaign.Economy
 
         public static AwayLine EntryLine(AwayEntryRecord e)
         {
-            string detail = string.IsNullOrEmpty(e.Detail) ? string.Empty : GameText.Has(e.Detail) ? GameText.Get(e.Detail) : e.Detail;
+            string detail = LocalizedDetail.Render(e.Detail); // FG15-UX-03：编码 / 文本键 / 旧成句都按当前语言显示
             string body = NotificationCatalog.TryGetType(e.TypeId, out NotifyTypeDef def)
                 ? string.IsNullOrEmpty(detail) ? GameText.Get(def.NameKey) : GameText.Format(def.SingleKey, detail)
                 : detail;

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameConfig.fg;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -132,7 +133,7 @@ namespace GameLogic.Campaign.Content
             _buildings = buildings;
             _enemies = enemies;
             _encounters = encounters ?? RealEncounters();
-            _loadError = loadError ?? (buildings == null || enemies == null ? "测试注入：内容表为空" : null);
+            _loadError = loadError ?? (buildings == null || enemies == null ? "测试注入：内容表为空" : null); // loc-ignore: 开发者自检 / 诊断文本
             Revision++;
         }
 
@@ -177,12 +178,12 @@ namespace GameLogic.Campaign.Content
                 _encounters = tables?.TbEnemyEncounter;
                 if (_buildings == null || _enemies == null)
                 {
-                    _loadError = "配置表 fg.TbBuilding / fg.TbMechEnemy 不存在";
+                    _loadError = "配置表 fg.TbBuilding / fg.TbMechEnemy 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             catch (Exception ex)
             {
-                _loadError = $"配置表读取失败：{ex.Message}";
+                _loadError = $"配置表读取失败：{ex.Message}"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_loadError != null)
             {

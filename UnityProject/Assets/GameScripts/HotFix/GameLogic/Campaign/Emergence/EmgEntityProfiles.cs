@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameConfig.fg;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Emergence
 {
@@ -89,7 +90,7 @@ namespace GameLogic.Campaign.Emergence
             var c = new Compiled();
             if (src == null || src.Count == 0)
             {
-                c.Problems.Add("fg.TbEntityProfile 为空或不存在（改 tools/cell_tables/fgdata_emg.py 后重新生成）");
+                c.Problems.Add("fg.TbEntityProfile 为空或不存在（改 tools/cell_tables/fgdata_emg.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             var byId = new Dictionary<string, EntityProfile>(StringComparer.Ordinal);
@@ -104,7 +105,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 if (!byId.ContainsKey(m))
                 {
-                    c.Problems.Add($"fg.TbEntityProfile 缺材质行 {m}");
+                    c.Problems.Add($"fg.TbEntityProfile 缺材质行 {m}"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             if (c.Problems.Count > 0)
@@ -115,7 +116,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 if (!byId.TryGetValue(slot, out EntityProfile r) || !TryRow(c, byId, r, r.Material, out EmgProfileRow row))
                 {
-                    c.Problems.Add($"fg.TbEntityProfile 缺种类默认行或行不合法 {slot}");
+                    c.Problems.Add($"fg.TbEntityProfile 缺种类默认行或行不合法 {slot}"); // loc-ignore: 开发者自检 / 诊断文本
                     return c;
                 }
                 c.Rows.Add(row);
@@ -169,7 +170,7 @@ namespace GameLogic.Campaign.Emergence
             row = default;
             if (!byId.TryGetValue(materialId ?? string.Empty, out EntityProfile m) || m.Kind != "material")
             {
-                c.Problems.Add($"实体档案 {r.Id} 的材质 {materialId} 不认识");
+                c.Problems.Add($"实体档案 {r.Id} 的材质 {materialId} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             float Pick(float own, float mat) => own >= 0f ? own : mat;
@@ -185,7 +186,7 @@ namespace GameLogic.Campaign.Emergence
                       && In01(row.ResistElec) && In01(row.ResistCorrode) && In01(row.ResistMag) && In01(row.ResistHack);
             if (!ok)
             {
-                c.Problems.Add($"实体档案 {r.Id} 数值越界（导电 / 可燃 / 磁性 / 抗性须在 0～1，质量 ≥ 0）");
+                c.Problems.Add($"实体档案 {r.Id} 数值越界（导电 / 可燃 / 磁性 / 抗性须在 0～1，质量 ≥ 0）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             return ok;
         }

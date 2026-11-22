@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Content
 {
@@ -17,53 +18,35 @@ namespace GameLogic.Campaign.Content
         public const string Flanker = "adaptation_flanker";
         public const string JammerSupport = "adaptation_jammer_support";
 
+        /// <summary>FG15-UX-03：文案存文本键（adaptation.&lt;id&gt;.name / source / hazard / counter），读取时按当前语言取。</summary>
         public readonly struct AdaptationInfo
         {
             public readonly string Id;
-            public readonly string DisplayName;
+            private readonly string _nameKey, _sourceKey, _hazardKey, _counterKey;
+            public string DisplayName => GameText.Get(_nameKey);
             /// <summary>信息来源——验收卡第2条点名字段，解释玩家为什么会看到这条情报。</summary>
-            public readonly string SourceText;
+            public string SourceText => GameText.Get(_sourceKey);
             /// <summary>具体危险——这次适应在战斗中会造成什么真实变化。</summary>
-            public readonly string HazardText;
+            public string HazardText => GameText.Get(_hazardKey);
             /// <summary>玩家可用应对建议——不是纯警告，给出可执行的对策。</summary>
-            public readonly string CounterHintText;
+            public string CounterHintText => GameText.Get(_counterKey);
 
-            public AdaptationInfo(string id, string displayName, string sourceText, string hazardText, string counterHintText)
+            public AdaptationInfo(string id, string nameKey, string sourceKey, string hazardKey, string counterKey)
             {
                 Id = id;
-                DisplayName = displayName;
-                SourceText = sourceText;
-                HazardText = hazardText;
-                CounterHintText = counterHintText;
+                _nameKey = nameKey;
+                _sourceKey = sourceKey;
+                _hazardKey = hazardKey;
+                _counterKey = counterKey;
             }
         }
 
         private static readonly Dictionary<string, AdaptationInfo> Infos = new Dictionary<string, AdaptationInfo>
         {
-            [None] = new AdaptationInfo(
-                None,
-                "无反制（None）",
-                "上次远征信号暴露未突破60阈值，敌方尚未截获足够情报。",
-                "安全默认：敌方沿用既有编制，本次不会有针对性调整。",
-                "无需特别应对，按常规装配出击即可。"),
-            [HeatResistant] = new AdaptationInfo(
-                HeatResistant,
-                "耐热适应",
-                "上次远征信号暴露突破60阈值：铸造分部截获我方熔穿过载战术情报。",
-                "护甲机正面加装耐热衬层，熔穿过载额外穿甲的收益被完全抵消（伤害回落到未过载时的正面减伤基线，基础重炮伤害不受影响）。",
-                "改走侧后攻击角度绕开正面装甲，或换标记跳转/常规连射打法，不要单靠过载穿甲强攻正面。"),
-            [Flanker] = new AdaptationInfo(
-                Flanker,
-                "侧袭编队",
-                "上次远征信号暴露突破60阈值：截获我方分散点杀战术情报。",
-                "入场后额外一组敌人从侧翼伏击布防，专打脱离编队、孤立站位的机器。",
-                "进场后保持编队集中推进，先侦察侧翼动向再考虑分兵。"),
-            [JammerSupport] = new AdaptationInfo(
-                JammerSupport,
-                "干扰支援",
-                "上次远征信号暴露突破60阈值：我方装配未见明显专精反应，铸造前哨调来通用压制力量。",
-                "额外一台干扰机进驻支援位置，发现目标即主动开火，整体战场火力密度上升。",
-                "优先集中火力清掉支援干扰机，或保持距离用远程装配逐个击破。"),
+            [None] = new AdaptationInfo(None, "adaptation.none.name", "adaptation.none.source", "adaptation.none.hazard", "adaptation.none.counter"),
+            [HeatResistant] = new AdaptationInfo(HeatResistant, "adaptation.heat_resistant.name", "adaptation.heat_resistant.source", "adaptation.heat_resistant.hazard", "adaptation.heat_resistant.counter"),
+            [Flanker] = new AdaptationInfo(Flanker, "adaptation.flanker.name", "adaptation.flanker.source", "adaptation.flanker.hazard", "adaptation.flanker.counter"),
+            [JammerSupport] = new AdaptationInfo(JammerSupport, "adaptation.jammer_support.name", "adaptation.jammer_support.source", "adaptation.jammer_support.hazard", "adaptation.jammer_support.counter"),
         };
 
         /// <summary>唯一读取入口——<paramref name="adaptationId"/> 为空/null（区域记录尚未出征锁定过、

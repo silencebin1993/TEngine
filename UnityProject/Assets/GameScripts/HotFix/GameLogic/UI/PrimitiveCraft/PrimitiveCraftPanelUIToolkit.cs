@@ -11,6 +11,7 @@ using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.UI.Kit;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.PrimitiveCraft
 {
@@ -82,6 +83,7 @@ namespace GameLogic.UI.PrimitiveCraft
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[PrimitiveCraftPanelUIToolkit] rootVisualElement 等待超时，合成台面板未初始化。");
@@ -189,7 +191,7 @@ namespace GameLogic.UI.PrimitiveCraft
         private void RunCraftOp(System.Func<string> op)
         {
             string failureReason = op();
-            _craftResultLabel.text = string.IsNullOrEmpty(failureReason) ? string.Empty : $"操作失败[{failureReason}]。";
+            _craftResultLabel.text = string.IsNullOrEmpty(failureReason) ? string.Empty : GameText.Format("primcraft.action_failed_0", failureReason);
             RefreshAll();
         }
 
@@ -257,7 +259,7 @@ namespace GameLogic.UI.PrimitiveCraft
             CampaignState state = CampaignSession.Current;
 
             int bagCount = PrimitiveInventory.BagCount(state);
-            _bagCapacityLabel.text = $"仓 {bagCount}/{PrimitiveInventory.CapacityOf(state)}";
+            _bagCapacityLabel.text = GameText.Format("circuit.panel.storage_0_1", bagCount, PrimitiveInventory.CapacityOf(state));
 
             // 升级材料下拉：只列 CardDefId==DefaultChipContentId（聚焦镜）且未被预留的仓内实例——
             // TryEnqueueUpgrade 本身也会校验内容/预留，这里预先过滤是"合法目标"UI 要求的具体落点。
@@ -272,8 +274,8 @@ namespace GameLogic.UI.PrimitiveCraft
                 upgradeChoices.Add(ShortLabel(item));
                 _upgradeChoicePartIds.Add(item.PartId);
             }
-            DropdownChoices.Apply(_upgradeMaterialADropdown, upgradeChoices, "仓内没有可用的聚焦镜");
-            DropdownChoices.Apply(_upgradeMaterialBDropdown, new List<string>(upgradeChoices), "仓内没有可用的聚焦镜");
+            DropdownChoices.Apply(_upgradeMaterialADropdown, upgradeChoices, GameText.Get("primcraft.no_focusing_lens_available"));
+            DropdownChoices.Apply(_upgradeMaterialBDropdown, new List<string>(upgradeChoices), GameText.Get("primcraft.no_focusing_lens_available"));
             // 两个材料默认不同：同一实例填两次必然被 TryEnqueueUpgrade 拒绝，默认值应当是一组能直接排入的合法组合。
             if (upgradeChoices.Count >= 2 && _upgradeMaterialBDropdown.index == _upgradeMaterialADropdown.index)
             {
@@ -294,7 +296,7 @@ namespace GameLogic.UI.PrimitiveCraft
                 disassembleChoices.Add(ShortLabel(item));
                 _disassembleChoicePartIds.Add(item.PartId);
             }
-            DropdownChoices.Apply(_disassembleMaterialDropdown, disassembleChoices, "仓内没有可拆解的芯片");
+            DropdownChoices.Apply(_disassembleMaterialDropdown, disassembleChoices, GameText.Get("primcraft.no_chip_in_storage"));
             _enqueueDisassembleButton.SetEnabled(disassembleChoices.Count > 0);
 
             // 队列展示 + 可取消项下拉。
@@ -309,7 +311,7 @@ namespace GameLogic.UI.PrimitiveCraft
                 }
                 row.style.display = DisplayStyle.Flex;
                 CraftQueueItemRecord q = queues[i];
-                row.Q<Label>("Kind").text = q.Kind == CraftQueueKind.Upgrade ? "升级" : "拆解";
+                row.Q<Label>("Kind").text = q.Kind == CraftQueueKind.Upgrade ? GameText.Get("primcraft.upgrade") : GameText.Get("primcraft.dismantle");
                 // ER8-CONTENT-01：行首图标＝升级产物 / 被拆解的芯片；原因列此前直接显示原因码。
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), q.Kind == CraftQueueKind.Upgrade
                     ? PrimitiveCraftStation.UpgradeOutputContentId
@@ -328,10 +330,10 @@ namespace GameLogic.UI.PrimitiveCraft
                 {
                     continue;
                 }
-                cancelChoices.Add($"{(q.Kind == CraftQueueKind.Upgrade ? "升级" : "拆解")} · {DescribeState(q.State)} #{DropdownChoices.ShortId(q.QueueItemId)}");
+                cancelChoices.Add($"{(q.Kind == CraftQueueKind.Upgrade ? GameText.Get("primcraft.upgrade") : GameText.Get("primcraft.dismantle"))} · {DescribeState(q.State)} #{DropdownChoices.ShortId(q.QueueItemId)}");
                 _cancelChoiceQueueIds.Add(q.QueueItemId);
             }
-            DropdownChoices.Apply(_cancelQueueDropdown, cancelChoices, "没有可取消的任务");
+            DropdownChoices.Apply(_cancelQueueDropdown, cancelChoices, GameText.Get("primcraft.no_task_to_cancel"));
             _cancelQueueButton.SetEnabled(cancelChoices.Count > 0);
 
             // 待领取产物下拉（全局 Pending 池，与电路板面板共享同一份数据源）。
@@ -342,16 +344,16 @@ namespace GameLogic.UI.PrimitiveCraft
                 pendingChoices.Add(ShortLabel(item));
                 _pendingChoicePartIds.Add(item.PartId);
             }
-            DropdownChoices.Apply(_pendingOutputDropdown, pendingChoices, "没有待领取的产物");
+            DropdownChoices.Apply(_pendingOutputDropdown, pendingChoices, GameText.Get("primcraft.no_output_waiting_for"));
             _claimOutputButton.SetEnabled(pendingChoices.Count > 0);
         }
 
         private static string ShortLabel(PrimitiveChipRecord item)
         {
-            string source = string.IsNullOrEmpty(item.SourceSalvageId) ? "补印/合成" : "解析";
-            string reserved = string.IsNullOrEmpty(item.ReservedByTransactionId) ? string.Empty : " · 已预留";
+            string source = string.IsNullOrEmpty(item.SourceSalvageId) ? GameText.Get("primcraft.reprint_combine") : GameText.Get("circuit.panel.analysis");
+            string reserved = string.IsNullOrEmpty(item.ReservedByTransactionId) ? string.Empty : GameText.Get("primcraft.reserved");
             // FG1-SIG-06（FGR-SIG-060）：未破解的敌方固件带“▲未破解”标记。
-            return $"{BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId)}{Campaign.Signal.FirmwareKinds.RawTagSuffix(CampaignSession.Current, item.CardDefId)}（{source} #{DropdownChoices.ShortId(item.PartId)}{reserved}）";
+            return GameText.Format("primcraft.0_1_2_3", BlueprintCircuitChipCatalog.DisplayNameFor(item.CardDefId), Campaign.Signal.FirmwareKinds.RawTagSuffix(CampaignSession.Current, item.CardDefId), source, DropdownChoices.ShortId(item.PartId), reserved);
         }
 
         private static string MaterialChipContentId(CampaignState state, CraftQueueItemRecord q)
@@ -375,15 +377,15 @@ namespace GameLogic.UI.PrimitiveCraft
         {
             switch (state)
             {
-                case CraftQueueState.Queued: return "排队中";
-                case CraftQueueState.WaitingResources: return "缺材料";
-                case CraftQueueState.WaitingPower: return "缺电力";
-                case CraftQueueState.Running: return "进行中";
-                case CraftQueueState.Committing: return "结算中";
-                case CraftQueueState.OutputWaiting: return "待领取";
-                case CraftQueueState.Completed: return "已完成";
-                case CraftQueueState.Cancelled: return "已取消";
-                case CraftQueueState.Failed: return "失败";
+                case CraftQueueState.Queued: return GameText.Get("analysis.state.queued");
+                case CraftQueueState.WaitingResources: return GameText.Get("asm.state.waiting_materials");
+                case CraftQueueState.WaitingPower: return GameText.Get("primcraft.no_power");
+                case CraftQueueState.Running: return GameText.Get("primcraft.in_progress");
+                case CraftQueueState.Committing: return GameText.Get("primcraft.finishing");
+                case CraftQueueState.OutputWaiting: return GameText.Get("primcraft.awaiting_pickup");
+                case CraftQueueState.Completed: return GameText.Get("analysis.state.completed");
+                case CraftQueueState.Cancelled: return GameText.Get("analysis.state.cancelled");
+                case CraftQueueState.Failed: return GameText.Get("primcraft.failed");
                 default: return state.ToString();
             }
         }

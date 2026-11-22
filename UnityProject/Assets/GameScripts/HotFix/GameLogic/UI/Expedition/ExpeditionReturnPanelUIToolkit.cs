@@ -10,6 +10,7 @@ using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.UI.Kit;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Expedition
 {
@@ -73,6 +74,7 @@ namespace GameLogic.UI.Expedition
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[ExpeditionReturnPanelUIToolkit] rootVisualElement 等待超时，撤离确认面板未初始化。");
@@ -164,9 +166,9 @@ namespace GameLogic.UI.Expedition
             int aliveCount = snapshot.Roster.Count(m => m.IsAlive);
             int deadCount = snapshot.Roster.Length - aliveCount;
 
-            string keyTechText = string.Join("；", snapshot.KeyTech.Select(k =>
-                $"{Campaign.Feedback.FeedbackCues.QuestItemName(k.ContentId)}：{k.StatusText}"));
-            _keyTechLabel.text = "关键技术：" + keyTechText;
+            string keyTechText = string.Join(GameText.Get("logistics.load.reason.separator"), snapshot.KeyTech.Select(k =>
+                GameText.Format("save.slot.line", Campaign.Feedback.FeedbackCues.QuestItemName(k.ContentId), k.StatusText)));
+            _keyTechLabel.text = GameText.Get("expedition.return.key_tech") + keyTechText;
 
             // ER6-REGION-01（DEMO-CONTENT-LOCK.md §4.2第4条）："允许不打Boss就撤离，且结算文本称为
             // 成功侦察而非失败逃跑"——铸造前哨外围撤离不管重炮是否带回都不该读作"未完成/失败"；只有
@@ -179,14 +181,14 @@ namespace GameLogic.UI.Expedition
             else if (isFoundry)
             {
                 _objectiveLabel.text = snapshot.IsWipe
-                    ? "任务目标：侦察未能完成（外围全灭，可再次侦察，一次性废料/缓存已领取部分不会重刷）"
+                    ? GameText.Get("expedition.return.objective_scouting_failed_the")
                     : snapshot.ObjectivesComplete
-                        ? "任务目标：侦察成功——重炮已归档为货物。核心区仍封锁；回城解析，完成第二次编译后再进攻。"
-                        : "任务目标：侦察成功（重炮未带回，可再次侦察补回；核心区仍封锁）";
+                        ? GameText.Get("expedition.return.objective_scouting_succeeded_the")
+                        : GameText.Get("expedition.return.objective_scouting_succeeded_hea");
             }
             else
             {
-                _objectiveLabel.text = snapshot.ObjectivesComplete ? "任务目标：已完成" : "任务目标：尚未完成（撤离后保持\"待补回收\"）";
+                _objectiveLabel.text = snapshot.ObjectivesComplete ? GameText.Get("expedition.return.objective_complete") : GameText.Get("expedition.return.objective_not_complete_stays");
             }
             // FG2-FW-04（FGR-FW-043）：本次远征的反应伤害占比（伤害归因的这一场）。
             if (_reactionShareLabel != null)
@@ -221,7 +223,7 @@ namespace GameLogic.UI.Expedition
                 // ER8-CONTENT-01：m.ChassisId 是机型编号（erc_001），此前直接查底盘表必然查不到、回退成把 erc_001
                 // 原样显示给玩家——先归到底盘类别再取展示名；系统占位机（救援机等）显示“机器”。行首图标＝底盘。
                 string chassisLabel = MechanicalContentFacade.ResolveChassisLabel(m.ChassisId);
-                row.Q<Label>("Chassis").text = string.IsNullOrEmpty(chassisLabel) || chassisLabel == m.ChassisId ? "机器" : chassisLabel;
+                row.Q<Label>("Chassis").text = string.IsNullOrEmpty(chassisLabel) || chassisLabel == m.ChassisId ? GameText.Get("reaction.log.machine") : chassisLabel;
                 ContentIcons.Apply(row.Q<VisualElement>("Icon"), m.ChassisId);
                 row.Q<Label>("Health").text = m.IsAlive ? $"HP{m.Health:F0}/{m.MaxHealth:F0}" : "—";
                 // FG1-HUD-01（FGR-SIG-082 机器经历在结算中可见）：状态后接“与信号同行 N 次，累计 H:MM:SS”。
@@ -251,16 +253,16 @@ namespace GameLogic.UI.Expedition
             if (snapshot.IsWipe)
             {
                 return snapshot.BossDestroyed
-                    ? "任务目标：主核心已摧毁，但远征队全灭，核心数据没能带回"
-                    : "任务目标：核心进攻失败（远征队全灭）——主核心与供能节点恢复原状，整备后再次进攻";
+                    ? GameText.Get("expedition.return.objective_the_main_core")
+                    : GameText.Get("expedition.return.objective_core_assault_failed");
             }
             if (!snapshot.BossDestroyed)
             {
-                return "任务目标：主核心未摧毁——现在撤离，本次核心进攻作废，下次重新开始";
+                return GameText.Get("expedition.return.objective_main_core_not");
             }
             return dataAboard
-                ? "任务目标：主核心已摧毁，核心数据已装车——撤离后回家建造并启动返航信标"
-                : "任务目标：主核心已摧毁，但核心数据还没装车——先装车再撤离";
+                ? GameText.Get("expedition.return.objective_main_core_destroyed")
+                : GameText.Get("expedition.return.objective_main_core_destroyed_2");
         }
 
         private void OnConfirmClicked()
@@ -282,7 +284,22 @@ namespace GameLogic.UI.Expedition
             GameRoot.FoundryOutpost?.SetEvacPanelOpen(false);
         }
 
+        /// <summary>FG15-UX-03（DEBT-FG0UX01-04）：放弃远征不可撤销（队员与未带回的战利品留在原地），先过通用确认框（UiConfirmDialog，
+        /// 与拆除 / 覆盖存档同一套），确认后才提交。</summary>
         private void OnAbandonClicked()
+        {
+            var req = new ConfirmRequest
+            {
+                Title = GameText.Get("exp.return.abandon_confirm.title"),
+                Irreversible = true,
+                ConfirmText = GameText.Get("exp.return.abandon_confirm.ok"),
+                OnConfirm = CommitAbandon,
+            };
+            req.Consequences.Add(GameText.Get("exp.return.abandon_confirm.body"));
+            UiConfirmDialog.Show(req);
+        }
+
+        private void CommitAbandon()
         {
             ExpeditionReturnService.ReturnResult result = ExpeditionReturnService.TryConfirmAbandon();
             if (!result.Success)

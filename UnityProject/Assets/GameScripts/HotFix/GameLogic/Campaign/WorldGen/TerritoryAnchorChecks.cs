@@ -7,6 +7,7 @@ using GameLogic.Campaign.Regions;
 using TEngine;
 using Unity.Mathematics;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.WorldGen
 {
@@ -169,7 +170,7 @@ namespace GameLogic.Campaign.WorldGen
                     {
                         NavService.CancelBackground();
                     }
-                    r.Note = $"第 {r.Attempts} 次寻路没交回结果";
+                    r.Note = $"第 {r.Attempts} 次寻路没交回结果"; // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 Evaluate(s, a, r, res, PointScratch);
@@ -250,7 +251,7 @@ namespace GameLogic.Campaign.WorldGen
                     r.X = end.x;
                     r.Y = end.y;
                     r.RouteLength = length;
-                    r.Note = $"规划入口 ({a.EntryX},{a.EntryY}) 走不到，挪到平整范围里最近的可达点 ({end.x},{end.y})";
+                    r.Note = $"规划入口 ({a.EntryX},{a.EntryY}) 走不到，挪到平整范围里最近的可达点 ({end.x},{end.y})"; // loc-ignore: 开发者自检 / 诊断文本
                     Log.Warning($"[TerritoryAnchorChecks] {a.Id}：{r.Note}");
                     return;
                 }
@@ -260,8 +261,8 @@ namespace GameLogic.Campaign.WorldGen
             r.Y = a.EntryY;
             r.RouteLength = length;
             r.Note = any
-                ? $"从核心出发最远只能走到 ({end.x},{end.y})，离入口还有 {Mathf.Sqrt((end.x - a.EntryX) * (float)(end.x - a.EntryX) + (end.y - a.EntryY) * (float)(end.y - a.EntryY)):0} 格"
-                : $"寻路失败 {res.Status}/{res.Reason}";
+                ? $"从核心出发最远只能走到 ({end.x},{end.y})，离入口还有 {Mathf.Sqrt((end.x - a.EntryX) * (float)(end.x - a.EntryX) + (end.y - a.EntryY) * (float)(end.y - a.EntryY)):0} 格" // loc-ignore: 开发者自检 / 诊断文本
+                : $"寻路失败 {res.Status}/{res.Reason}"; // loc-ignore: 开发者自检 / 诊断文本
             // 同一结论只报一次错（玩家反复点入口重新校验、结论没变时不刷日志）。
             if (prevState != StateFailed || prevNote != r.Note)
             {

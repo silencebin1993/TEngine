@@ -179,13 +179,13 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbAnalysisKind / fg.TbAnalysisLore 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbAnalysisKind / fg.TbAnalysisLore 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (kinds == null || lore == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbAnalysisKind / fg.TbAnalysisLore 不存在（改 tools/cell_tables/fgdata_analysis.py 后重新生成）");
+                    ProblemList.Add("fg.TbAnalysisKind / fg.TbAnalysisLore 不存在（改 tools/cell_tables/fgdata_analysis.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[AnalysisCatalog] " + ProblemList[0]);
                 return;
@@ -198,12 +198,12 @@ namespace GameLogic.Campaign.Economy
                 }
                 if (!ItemCatalog.TryGet(row.Id, out ItemDef item) || item.Form != ItemForm.Solid || item.BeltId <= 0 || item.BeltId >= 64)
                 {
-                    ProblemList.Add($"fg.TbAnalysisKind {row.Id}：不是物品表里能上传送带的固体（编号 1～63）");
+                    ProblemList.Add($"fg.TbAnalysisKind {row.Id}：不是物品表里能上传送带的固体（编号 1～63）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (row.Seconds <= 0f || row.TechFirst < 0 || row.TechRepeat < 0)
                 {
-                    ProblemList.Add($"fg.TbAnalysisKind {row.Id}：时间要 > 0、技术数据 >= 0");
+                    ProblemList.Add($"fg.TbAnalysisKind {row.Id}：时间要 > 0、技术数据 >= 0"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var def = new AnalysisKindDef
@@ -220,22 +220,22 @@ namespace GameLogic.Campaign.Economy
             {
                 if (!Kinds.ContainsKey(need))
                 {
-                    ProblemList.Add($"fg.TbAnalysisKind 缺 {need}");
+                    ProblemList.Add($"fg.TbAnalysisKind 缺 {need}"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             if (Kinds.TryGetValue(EncryptedFirmwareId, out AnalysisKindDef fw) && fw.Consumed)
             {
-                ProblemList.Add("FGR-RND-021：加密固件解析后不消耗（consumed = 0）");
+                ProblemList.Add("FGR-RND-021：加密固件解析后不消耗（consumed = 0）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (Kinds.TryGetValue(WreckId, out AnalysisKindDef wk) && wk.Queued)
             {
-                ProblemList.Add("FGR-RND-024：残骸在队列空闲时处理（queued = 0）");
+                ProblemList.Add("FGR-RND-024：残骸在队列空闲时处理（queued = 0）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             foreach (AnalysisLore row in lore.DataList)
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || LoreById.ContainsKey(row.Id))
                 {
-                    ProblemList.Add("fg.TbAnalysisLore：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbAnalysisLore：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var def = new AnalysisLoreDef { Id = row.Id, TitleKey = row.TitleKey, BodyKey = row.BodyKey, SortOrder = row.SortOrder };

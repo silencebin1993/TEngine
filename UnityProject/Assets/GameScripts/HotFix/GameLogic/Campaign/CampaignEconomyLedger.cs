@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign
 {
@@ -55,8 +56,8 @@ namespace GameLogic.Campaign
             {
                 return null;
             }
-            string name = resourceType == "Scrap" ? "废料" : resourceType == "TechData" ? "技术数据" : "资源";
-            return $"{name}不足：需要 {need:0}，现有 {have:0}";
+            string name = resourceType == "Scrap" ? GameText.Get("build.material.scrap") : resourceType == "TechData" ? GameText.Get("item.tech_data.name") : GameText.Get("build.material.other");
+            return GameText.Format("economy.ledger.not_enough_0_need", name, need, have);
         }
 
         public const string ResourceScrap = "Scrap";
@@ -68,12 +69,12 @@ namespace GameLogic.Campaign
         {
             switch (resourceType)
             {
-                case ResourceScrap: return "废料";
-                case ResourceTechData: return "技术数据";
-                case ResourcePower: return "电力";
+                case ResourceScrap: return GameText.Get("build.material.scrap");
+                case ResourceTechData: return GameText.Get("item.tech_data.name");
+                case ResourcePower: return GameText.Get("tooltip.power.title");
                 default:
                     // FG4-ECO-01：物品表里的物品显示表里的名字（不把内部键直接显示给玩家）。
-                    return Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) ? def.Name : "资源";
+                    return Economy.ItemCatalog.TryGetByResource(resourceType, out Economy.ItemDef def) ? def.Name : GameText.Get("build.material.other");
             }
         }
 
@@ -82,12 +83,12 @@ namespace GameLogic.Campaign
         {
             switch (state)
             {
-                case ResourceTransactionState.Proposed: return "待确认";
-                case ResourceTransactionState.Reserved: return "已预留";
-                case ResourceTransactionState.Running: return "进行中";
-                case ResourceTransactionState.Committed: return "已结算";
-                case ResourceTransactionState.Cancelled: return "已取消";
-                case ResourceTransactionState.Failed: return "失败";
+                case ResourceTransactionState.Proposed: return GameText.Get("economy.ledger.pending");
+                case ResourceTransactionState.Reserved: return GameText.Get("workorder.panel.reserved");
+                case ResourceTransactionState.Running: return GameText.Get("queue.in_progress");
+                case ResourceTransactionState.Committed: return GameText.Get("economy.ledger.settled");
+                case ResourceTransactionState.Cancelled: return GameText.Get("analysis.state.cancelled");
+                case ResourceTransactionState.Failed: return GameText.Get("queue.failed");
                 default: return string.Empty;
             }
         }

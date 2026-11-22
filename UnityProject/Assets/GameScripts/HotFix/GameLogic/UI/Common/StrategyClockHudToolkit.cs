@@ -4,6 +4,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Common
 {
@@ -88,7 +89,7 @@ namespace GameLogic.UI.Common
                 _bar.Add(btn);
             }
 
-            _pauseButton = new Button(() => GameRoot.ToggleWorldPause()) { text = "暂停" };
+            _pauseButton = new Button(() => GameRoot.ToggleWorldPause()) { text = GameText.Get("ui.world.pause") };
             _pauseButton.style.marginLeft = 10;
             _bar.Add(_pauseButton);
 
@@ -118,8 +119,8 @@ namespace GameLogic.UI.Common
             }
 
             bool paused = GameRoot.IsWorldPaused;
-            _pauseButton.text = paused ? "继续" : "暂停";
-            _statusLabel.text = paused ? "已暂停" : FormatSpeed(StrategyClock.SpeedMultiplier);
+            _pauseButton.text = paused ? GameText.Get("ui.world.resume") : GameText.Get("ui.world.pause");
+            _statusLabel.text = paused ? GameText.Get("ui.world.status_paused") : FormatSpeed(StrategyClock.SpeedMultiplier);
         }
 
         private static string FormatSpeed(float speed)

@@ -195,13 +195,13 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception e)
             {
-                _problems.Add("读取 fg.TbResearchBranch / fg.TbResearchNode 失败：" + e.Message);
+                _problems.Add("读取 fg.TbResearchBranch / fg.TbResearchNode 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (branches == null || nodes == null)
             {
                 if (_problems.Count == 0)
                 {
-                    _problems.Add("fg.TbResearchBranch / fg.TbResearchNode 不存在（改 tools/cell_tables/fgdata_research.py 后重新生成）");
+                    _problems.Add("fg.TbResearchBranch / fg.TbResearchNode 不存在（改 tools/cell_tables/fgdata_research.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[ResearchCatalog] " + _problems[0]);
                 return;
@@ -229,12 +229,12 @@ namespace GameLogic.Campaign.Economy
             {
                 if (!BranchById.TryGetValue(row.Branch, out ResearchBranchDef br))
                 {
-                    _problems.Add($"{row.Id}：分支 {row.Branch} 不存在");
+                    _problems.Add($"{row.Id}：分支 {row.Branch} 不存在"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (row.Cost < 1)
                 {
-                    _problems.Add($"{row.Id}：研究点 {row.Cost} 至少 1");
+                    _problems.Add($"{row.Id}：研究点 {row.Cost} 至少 1"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var n = new ResearchNodeDef
@@ -262,7 +262,7 @@ namespace GameLogic.Campaign.Economy
                     int amount = colon > 0 && int.TryParse(k.Substring(colon + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int a) ? a : 1;
                     if (!ItemCatalog.TryGet(itemId, out ItemDef item) || item.Form != ItemForm.Vault || amount < 1)
                     {
-                        _problems.Add($"{row.Id}：关键材料 {k} 不是核心保管库物品或件数非法");
+                        _problems.Add($"{row.Id}：关键材料 {k} 不是核心保管库物品或件数非法"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     n.KeyItems.Add(new BuildMaterialNeed(item, amount));
@@ -277,23 +277,23 @@ namespace GameLogic.Campaign.Economy
                 {
                     if (!ById.TryGetValue(p, out ResearchNodeDef pre))
                     {
-                        _problems.Add($"{n.Id}：前置 {p} 不存在");
+                        _problems.Add($"{n.Id}：前置 {p} 不存在"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     else if (pre.Col >= n.Col)
                     {
-                        _problems.Add($"{n.Id}：前置 {p} 必须在更左的列（否则可能成环）");
+                        _problems.Add($"{n.Id}：前置 {p} 必须在更左的列（否则可能成环）"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
                 foreach (string u in n.Unlocks)
                 {
                     if (!TargetExists(u))
                     {
-                        _problems.Add($"{n.Id}：解锁目标 {u} 不存在");
+                        _problems.Add($"{n.Id}：解锁目标 {u} 不存在"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     if (GateByTarget.TryGetValue(u, out ResearchNodeDef other))
                     {
-                        _problems.Add($"{u} 同时被 {other.Id} 和 {n.Id} 解锁");
+                        _problems.Add($"{u} 同时被 {other.Id} 和 {n.Id} 解锁"); // loc-ignore: 开发者自检 / 诊断文本
                         continue;
                     }
                     GateByTarget[u] = n;

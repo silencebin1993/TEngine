@@ -13,7 +13,10 @@ namespace GameLogic.Notifications
     /// <summary>聚合通知里的一条成员。</summary>
     public sealed class NotificationMember
     {
-        public string Detail = string.Empty;
+        /// <summary>FG15-UX-03（DEBT-FG0UX01-11）：存档里的细节（“键 + 参数”编码，或旧存档的成句 / 文本键）。</summary>
+        public string DetailCode = string.Empty;
+        /// <summary>细节的玩家可见文字（按当前语言重组）。读细节一律走这里，存盘 / 拷贝进离家报告用 <see cref="DetailCode"/>。</summary>
+        public string Detail => LocalizedDetail.Render(DetailCode);
         public bool HasLocation;
         public string RegionId = string.Empty;
         public Vector3 Location;
@@ -22,7 +25,7 @@ namespace GameLogic.Notifications
         public double GameSeconds;
 
         /// <summary>细节的玩家可见文字：细节本身是文本键时按当前语言解析。</summary>
-        public string DetailText => string.IsNullOrEmpty(Detail) ? string.Empty : GameText.Has(Detail) ? GameText.Get(Detail) : Detail;
+        public string DetailText => Detail;
     }
 
     /// <summary>一条（可能聚合过的）通知。运行时对象，同时持有它在存档里的记录（写穿）。</summary>
@@ -200,6 +203,7 @@ namespace GameLogic.Notifications
         private static NotificationEntry PostInternal(string typeId, string detail, Vector3? location, string sourceKey,
             string sourceArg, bool fromCue)
         {
+            detail = LocalizedDetail.Capture(detail); // FG15-UX-03：成句换回“键 + 参数”再入历史与存档
             if (!NotificationCatalog.TryGetType(typeId, out NotifyTypeDef def))
             {
                 TEngine.Log.Warning($"[NotificationCenter] 未登记的通知类型 {typeId ?? "null"}，已忽略（在 fg.TbNotifyType 登记后再发）");
@@ -209,7 +213,7 @@ namespace GameLogic.Notifications
             float now = Clock();
             var member = new NotificationMember
             {
-                Detail = detail ?? string.Empty,
+                DetailCode = detail ?? string.Empty,
                 HasLocation = location.HasValue,
                 Location = location ?? Vector3.zero,
                 RegionId = RegionProvider?.Invoke() ?? string.Empty,
@@ -549,7 +553,7 @@ namespace GameLogic.Notifications
                     {
                         entry.Members.Add(new NotificationMember
                         {
-                            Detail = m.Detail ?? string.Empty,
+                            DetailCode = m.Detail ?? string.Empty,
                             HasLocation = m.HasLocation,
                             RegionId = m.RegionId ?? string.Empty,
                             Location = new Vector3(m.X, m.Y, m.Z),
@@ -622,12 +626,13 @@ namespace GameLogic.Notifications
         /// <summary>读档变更只进历史、不弹出条（读档时已有字幕逐条弹出，这里不重复打扰）。</summary>
         private static void PostHistoryOnly(string typeId, string detail, string createdAtUtc)
         {
+            detail = LocalizedDetail.Capture(detail);
             if (!NotificationCatalog.TryGetType(typeId, out NotifyTypeDef def))
             {
                 return;
             }
             var entry = new NotificationEntry { Type = def, Level = def.Tier, Id = NextId() };
-            entry.Members.Add(new NotificationMember { Detail = detail ?? string.Empty, CreatedAtUtc = createdAtUtc ?? string.Empty });
+            entry.Members.Add(new NotificationMember { DetailCode = detail ?? string.Empty, CreatedAtUtc = createdAtUtc ?? string.Empty });
             HistoryList.Add(entry);
             TrimHistory();
             WriteThrough(entry);
@@ -695,7 +700,7 @@ namespace GameLogic.Notifications
                 NotificationMember m = entry.Members[i];
                 members[i] = new NotificationMemberRecord
                 {
-                    Detail = m.Detail,
+                    Detail = m.DetailCode,
                     HasLocation = m.HasLocation,
                     RegionId = m.RegionId,
                     X = m.Location.x,

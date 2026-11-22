@@ -6,6 +6,7 @@ using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Signal;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Economy
 {
@@ -216,7 +217,7 @@ namespace GameLogic.Campaign.Economy
                 GameConfig.Tables t = ConfigSystem.Instance.Tables;
                 if (t?.TbLootPick == null)
                 {
-                    _problems.Add("配置表 fg.TbLootPick 不存在");
+                    _problems.Add("配置表 fg.TbLootPick 不存在"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else
                 {
@@ -229,7 +230,7 @@ namespace GameLogic.Campaign.Economy
                         if (def != null && !keys.Add(def.Pool + "#" + def.Key))
                         {
                             def = null;
-                            problem = $"候选行 {r.Id}：同一个候选池里重复的候选";
+                            problem = $"候选行 {r.Id}：同一个候选池里重复的候选"; // loc-ignore: 开发者自检 / 诊断文本
                         }
                         if (def == null)
                         {
@@ -242,7 +243,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception ex)
             {
-                _problems.Add("配置表 fg.TbLootPick 读取失败：" + ex.Message);
+                _problems.Add("配置表 fg.TbLootPick 读取失败：" + ex.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             _builtItemRevision = ItemCatalog.Revision;
             if (_problems.Count > 0)
@@ -259,27 +260,27 @@ namespace GameLogic.Campaign.Economy
             problem = null;
             if (string.IsNullOrEmpty(id))
             {
-                problem = "候选行缺 ID";
+                problem = "候选行缺 ID"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (pool != PoolAny && pool != "silent" && pool != "foundry" && pool != "clarity" && pool != "overclock")
             {
-                problem = $"候选行 {id}：候选池 {pool} 不认识";
+                problem = $"候选行 {id}：候选池 {pool} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (Array.IndexOf(Tiers, tier) < 0)
             {
-                problem = $"候选行 {id}：稀有度 {tier} 不认识";
+                problem = $"候选行 {id}：稀有度 {tier} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (!ItemCatalog.TryGet(itemId, out ItemDef item) || item.Form != ItemForm.Solid)
             {
-                problem = $"候选行 {id}：物品 {itemId} 不在物品表或不是固体";
+                problem = $"候选行 {id}：物品 {itemId} 不在物品表或不是固体"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (min < 1 || max < min || weight < 1)
             {
-                problem = $"候选行 {id}：件数 {min}～{max} / 权重 {weight} 不合法";
+                problem = $"候选行 {id}：件数 {min}～{max} / 权重 {weight} 不合法"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             bool enemy = item.Protocol == ItemProtocolKind.Enemy;
@@ -288,7 +289,7 @@ namespace GameLogic.Campaign.Economy
                 case KindItem:
                     if (enemy || (target ?? TargetNone) != TargetNone)
                     {
-                        problem = $"候选行 {id}：普通物品候选不能是敌方加密物品、不带身份";
+                        problem = $"候选行 {id}：普通物品候选不能是敌方加密物品、不带身份"; // loc-ignore: 开发者自检 / 诊断文本
                         return null;
                     }
                     break;
@@ -296,31 +297,31 @@ namespace GameLogic.Campaign.Economy
                 case KindCracked:
                     if (itemId != AnalysisCatalog.EncryptedFirmwareId || !FirmwareKinds.IsFirmware(target))
                     {
-                        problem = $"候选行 {id}：固件候选的物品必须是加密固件、身份是固件表里的固件（{target}）";
+                        problem = $"候选行 {id}：固件候选的物品必须是加密固件、身份是固件表里的固件（{target}）"; // loc-ignore: 开发者自检 / 诊断文本
                         return null;
                     }
                     break;
                 case KindModule:
                     if (itemId != AnalysisCatalog.UnparsedModuleId || !MechanicalContentFacade.TryGet(target, out _) || FirmwareKinds.IsFirmware(target))
                     {
-                        problem = $"候选行 {id}：未解析模块候选的身份必须是能装配的组件 / 模块（{target}）";
+                        problem = $"候选行 {id}：未解析模块候选的身份必须是能装配的组件 / 模块（{target}）"; // loc-ignore: 开发者自检 / 诊断文本
                         return null;
                     }
                     break;
                 case KindCore:
                     if (itemId != AnalysisCatalog.DataCoreId || target != TargetLore)
                     {
-                        problem = $"候选行 {id}：数据核心候选的身份写 lore";
+                        problem = $"候选行 {id}：数据核心候选的身份写 lore"; // loc-ignore: 开发者自检 / 诊断文本
                         return null;
                     }
                     break;
                 default:
-                    problem = $"候选行 {id}：种类 {kind} 不认识";
+                    problem = $"候选行 {id}：种类 {kind} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
                     return null;
             }
             if (kind != KindItem && (min != 1 || max != 1))
             {
-                problem = $"候选行 {id}：带身份的候选一次 1 件";
+                problem = $"候选行 {id}：带身份的候选一次 1 件"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             return new LootPickDef

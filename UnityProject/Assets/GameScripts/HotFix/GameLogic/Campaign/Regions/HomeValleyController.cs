@@ -15,6 +15,7 @@ using GameLogic.View;
 using TEngine;
 using Unity.Mathematics;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -970,12 +971,12 @@ namespace GameLogic.Campaign.Regions
                         Position = pos,
                         HoldSeconds = 0.5f,
                         Priority = 10,
-                        ActionVerb = "装载",
+                        ActionVerb = GameText.Get("home.ctl.load"),
                         Validate = () =>
                         {
                             GroundItemRecord g = HomeValleyCargo.FindGroundItem(CampaignSession.Current, groundItemId);
                             return g == null
-                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。")
+                                ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("home.ctl.the_ground_item_no"))
                                 : RegionInteractResult.Ok();
                         },
                         Complete = () => CompleteLootLoad(groundItemId),
@@ -997,13 +998,13 @@ namespace GameLogic.Campaign.Regions
                     Position = HomeValleyBeacon.FindBuilding(state)?.Position ?? HomeValleyLayout.BeaconSlot.Position,
                     HoldSeconds = 1.5f,
                     Priority = -10,
-                    ActionVerb = "启动信标",
+                    ActionVerb = GameText.Get("home.ctl.launch_beacon"),
                     Validate = () =>
                     {
                         CampaignState s = CampaignSession.Current;
                         if (HomeValleyBeacon.IsLaunched(s) || HomeValleyBeacon.IsLaunching(s))
                         {
-                            return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "信标已启动。");
+                            return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("home.ctl.beacon_launched"));
                         }
                         return RegionInteractResult.Ok();
                     },
@@ -1032,13 +1033,13 @@ namespace GameLogic.Campaign.Regions
                 Position = position,
                 HoldSeconds = 0f, // 点击即启动/加入——真正耗时由 HomeValleyWorkOrders 的 Duration 状态机负责。
                 Priority = 20,
-                ActionVerb = "拆解",
+                ActionVerb = GameText.Get("alarm.kind.salvage"),
                 Validate = () =>
                 {
                     CampaignState s = CampaignSession.Current;
                     RegionRecord r = s?.RegionRecords?.FirstOrDefault(x => x.RegionId == HomeValleyLayout.RegionId);
                     return r?.DestroyedNodeIds != null && r.DestroyedNodeIds.Contains(nodeId)
-                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "残骸已被拆解。")
+                        ? RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("home.ctl.wreckage_salvaged"))
                         : RegionInteractResult.Ok();
                 },
                 Complete = () => CompleteWreckageSalvageInteract(nodeId),
@@ -1053,16 +1054,16 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state == null || _possessed == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有受控机器。");
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, GameText.Get("home.ctl.no_controlled_machine"));
             }
             HomeValleyWorkOrders.WorkOrderOpResult result = HomeValleyWorkOrders.TryCreateSalvage(state, nodeId, _possessed.LogicId);
             if (!result.Success)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "拆解无法开始：" + result.FailureReason);
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("home.ctl.salvage_cannot_start") + result.FailureReason);
             }
             HomeValleyWorkOrders.OnArrivedAtWork(state, result.WorkOrderId);
             HomeValleyWorkOrders.MarkAssignmentDirty();
-            return RegionInteractResult.Ok("拆解已开始。");
+            return RegionInteractResult.Ok(GameText.Get("home.ctl.salvage_started"));
         }
 
         /// <summary>E 触发的战利品装载——通用地面物两阶段搬运票据一次性走完（同
@@ -1072,12 +1073,12 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, "没有活动的归还谷地会话。");
+                return RegionInteractResult.Fail(RegionInteractFailure.NoControlledUnit, GameText.Get("home.ctl.no_active_reclamation_valley"));
             }
             HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, groundItemId);
             if (ticket == null)
             {
-                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, "地面物已不存在。");
+                return RegionInteractResult.Fail(RegionInteractFailure.TargetGone, GameText.Get("home.ctl.the_ground_item_no"));
             }
             HomeValleyCargo.StoreResult store = HomeValleyCargo.CommitHaul(state, ticket);
             if (!store.Success)
@@ -1085,9 +1086,9 @@ namespace GameLogic.Campaign.Regions
                 RegionInteractFailure failure = store.FailureReason != null && store.FailureReason.StartsWith("storage-full")
                     ? RegionInteractFailure.CargoFull
                     : RegionInteractFailure.TargetGone;
-                return RegionInteractResult.Fail(failure, "装载失败：" + store.FailureReason);
+                return RegionInteractResult.Fail(failure, GameText.Get("home.ctl.load_failed") + store.FailureReason);
             }
-            return RegionInteractResult.Ok("装载完成。");
+            return RegionInteractResult.Ok(GameText.Get("home.ctl.loaded"));
         }
 
         /// <summary>ER5-INT-01"离开3米时停止并恢复原物状态"——直控拆解没有独立的距离守卫（既有
@@ -1113,7 +1114,7 @@ namespace GameLogic.Campaign.Regions
             }
             Vector2 currentPos = new Vector2(p.x, p.z);
             HomeValleyWorkOrders.CancelOrder(state, order.WorkOrderId, currentPos);
-            Interact.NotifySubtitle("已离开交互范围，拆解已取消并恢复原状。");
+            Interact.NotifySubtitle(GameText.Get("home.ctl.left_interaction_range_salvage"));
             Log.Info($"[HomeValleyController] 直控拆解 {order.WorkOrderId} 因离开交互范围（>{RegionInteractionSystem.InteractRange}米）被取消。");
         }
 
@@ -1383,14 +1384,14 @@ namespace GameLogic.Campaign.Regions
             CampaignState state = CampaignSession.Current;
             if (state == null || !IsLoaded)
             {
-                return HomeValleyCargo.StoreResult.Fail("没有活动的归还谷地会话。");
+                return HomeValleyCargo.StoreResult.Fail(GameText.Get("home.ctl.no_active_reclamation_valley"));
             }
 
             string salvageInstanceId = nodeId + ":salvage-drop";
             GroundItemRecord item = HomeValleyCargo.FindGroundItemBySalvageId(state, salvageInstanceId);
             if (item == null)
             {
-                return HomeValleyCargo.StoreResult.Fail("地面上没有待收集的残骸拆解物。");
+                return HomeValleyCargo.StoreResult.Fail(GameText.Get("home.ctl.no_salvaged_wreckage_on"));
             }
 
             HomeValleyCargo.HaulTicket ticket = HomeValleyCargo.TryReserveHaul(state, item.GroundItemId);
@@ -2698,13 +2699,13 @@ namespace GameLogic.Campaign.Regions
             {
                 string siteId = clicked.BuildingId;
                 CommandWork(moving, destination, siteId,
-                    () => HomeValleyWorkOrders.TryAssignConstruction(state, siteId, moving.LogicId), "施工 " + siteId);
+                    () => HomeValleyWorkOrders.TryAssignConstruction(state, siteId, moving.LogicId), GameText.Get("home.ctl.constructing") + siteId);
                 return true;
             }
             if (buildingTypeId == HomeValleyLayout.BuildingTypeCore)
             {
                 CommandWork(moving, destination, "recharge:" + moving.LogicId,
-                    () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId), "充电");
+                    () => HomeValleyWorkOrders.TryCreateRecharge(state, moving.LogicId), GameText.Get("alarm.kind.recharge"));
                 return true;
             }
             if (repairable && clicked != null && !(destroyed && HomeValleyLayout.RepairProfile.ContainsKey(clicked.BuildingTypeId)))
@@ -2712,13 +2713,13 @@ namespace GameLogic.Campaign.Regions
                 // 受损的维修（维修件）/ 没有 Demo 修复造价的重建（新建或表里的重建造价）：与面板“维修 / 重建”同一张单，指定这台机器去做。
                 string targetId = clicked.BuildingId;
                 CommandWork(moving, destination, targetId,
-                    () => HomeValleyWorkOrders.TryAssignRepair(state, targetId, moving.LogicId), "修复 " + targetId);
+                    () => HomeValleyWorkOrders.TryAssignRepair(state, targetId, moving.LogicId), GameText.Get("home.ctl.repairing") + targetId);
                 return true;
             }
             if (repairable)
             {
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + buildingTypeId,
-                    () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId), "修复 " + buildingTypeId);
+                    () => HomeValleyWorkOrders.TryCreateRepair(state, buildingTypeId, moving.LogicId), GameText.Get("home.ctl.repairing") + buildingTypeId);
                 return true;
             }
             if (buildSiteId != null)
@@ -2726,13 +2727,13 @@ namespace GameLogic.Campaign.Regions
                 // FG0-ARCH-04：建造位是开局布局里的“建议位置”，放置经格网校验（HomeValleyWorkOrders.TryCreateBuild → HomeGridService.TryPlace）。
                 GridContent.TryGetLayout(buildSiteId, out GameConfig.fg.StartLayout siteRow);
                 CommandWork(moving, destination, HomeValleyLayout.RegionId + ":" + (siteRow != null ? siteRow.TypeId : buildSiteId),
-                    () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId), "建造 " + buildSiteId);
+                    () => HomeValleyWorkOrders.TryCreateBuild(state, buildSiteId, moving.LogicId), GameText.Get("home.ctl.building") + buildSiteId);
                 return true;
             }
             if (wreckageNodeId != null)
             {
                 CommandWork(moving, destination, wreckageNodeId,
-                    () => HomeValleyWorkOrders.TryCreateSalvage(state, wreckageNodeId, moving.LogicId), "拆解 " + wreckageNodeId);
+                    () => HomeValleyWorkOrders.TryCreateSalvage(state, wreckageNodeId, moving.LogicId), GameText.Get("home.ctl.salvaging") + wreckageNodeId);
                 return true;
             }
             CommandHaul(moving, destination, groundItemId, state);
@@ -2821,7 +2822,7 @@ namespace GameLogic.Campaign.Regions
             }
             Vector2 at = Env.HomeExplorationService.PositionOf(state, relicId);
             CommandWork(moving, new Vector3(at.x, 0f, at.y), relicId,
-                () => Env.HomeExplorationService.OrderRecovery(state, relicId, moving.LogicId), (Env.HeritageService.IsInstanceId(relicId) ? "取回遗产 " : "回收遗迹 ") + relicId);
+                () => Env.HomeExplorationService.OrderRecovery(state, relicId, moving.LogicId), (Env.HeritageService.IsInstanceId(relicId) ? GameText.Get("home.ctl.retrieving_heritage") : GameText.Get("home.ctl.recovering_relic")) + relicId);
             return true;
         }
 
@@ -3112,7 +3113,7 @@ namespace GameLogic.Campaign.Regions
             int buildingCount = CountRegionBuildings(state);
             if (buildingCount != 7)
             {
-                violations.Add($"归还谷地建筑记录数应为 7，实际 {buildingCount}（疑似重复播种）。");
+                violations.Add($"归还谷地建筑记录数应为 7，实际 {buildingCount}（疑似重复播种）。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             int erc001 = MachineRegistry.AllRecords.Count(r =>
@@ -3121,11 +3122,11 @@ namespace GameLogic.Campaign.Regions
                 r.RegionId == HomeValleyLayout.RegionId && r.ChassisId == HomeValleyLayout.Erc002ChassisId);
             if (erc001 != 1)
             {
-                violations.Add($"ERC-001 机器记录数应为 1，实际 {erc001}。");
+                violations.Add($"ERC-001 机器记录数应为 1，实际 {erc001}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (erc002 != 1)
             {
-                violations.Add($"ERC-002 机器记录数应为 1，实际 {erc002}。");
+                violations.Add($"ERC-002 机器记录数应为 1，实际 {erc002}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             return violations;

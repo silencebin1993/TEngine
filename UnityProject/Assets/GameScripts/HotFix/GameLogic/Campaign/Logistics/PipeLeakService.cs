@@ -120,11 +120,11 @@ namespace GameLogic.Campaign.Logistics
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbFluidLeak 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbFluidLeak 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (table == null)
             {
-                ProblemList.Add("fg.TbFluidLeak 不存在（改 tools/cell_tables/fgdata_leak.py 后重新生成）");
+                ProblemList.Add("fg.TbFluidLeak 不存在（改 tools/cell_tables/fgdata_leak.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 return;
             }
             foreach (FluidLeak row in table.DataList)
@@ -135,7 +135,7 @@ namespace GameLogic.Campaign.Logistics
                 }
                 if (NamedReactionCatalog.BitOf(row.Tag) == 0u)
                 {
-                    ProblemList.Add($"fg.TbFluidLeak 流体 {row.Fluid} 的标签 {row.Tag} 在 fg.TbStatusTag 里没有内核位，这种液洼不会挂标签");
+                    ProblemList.Add($"fg.TbFluidLeak 流体 {row.Fluid} 的标签 {row.Tag} 在 fg.TbStatusTag 里没有内核位，这种液洼不会挂标签"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 FluidRows[row.Fluid] = row;
             }

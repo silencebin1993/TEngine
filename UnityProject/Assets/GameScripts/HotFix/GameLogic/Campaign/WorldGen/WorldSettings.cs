@@ -113,7 +113,7 @@ namespace GameLogic.Campaign.WorldGen
             error = null;
             if (!WorldGenContent.TryGetVersion(version, out WorldGenVersion v))
             {
-                error = $"生成器版本表缺少 v{version}";
+                error = $"生成器版本表缺少 v{version}"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             if (!WorldGenContent.HasSet(v.SettingSet))
@@ -123,12 +123,12 @@ namespace GameLogic.Campaign.WorldGen
                     settings = FromPreset(p, version);
                     return true;
                 }
-                error = $"生成器 v{version} 的世界设置集合里没有 {id ?? "null"}";
+                error = $"生成器 v{version} 的世界设置集合里没有 {id ?? "null"}"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             if (!TryParseLevels(v, id, out int[] levels))
             {
-                error = $"生成器 v{version} 不认识的分项设置代码 {id ?? "null"}";
+                error = $"生成器 v{version} 不认识的分项设置代码 {id ?? "null"}"; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             settings = FromLevels(v, levels);

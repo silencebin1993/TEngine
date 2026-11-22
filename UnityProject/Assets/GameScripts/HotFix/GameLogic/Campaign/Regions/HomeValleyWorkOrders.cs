@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -208,17 +209,17 @@ namespace GameLogic.Campaign.Regions
         {
             if (string.IsNullOrEmpty(reason))
             {
-                return "无法执行这项命令";
+                return GameText.Get("home.wo.cannot_carry_out_this");
             }
             string shortfall = CampaignEconomyLedger.DescribeShortfall(reason);
             if (shortfall != null)
             {
-                return shortfall + "（拆解残骸、把废料搬进仓库后再试）";
+                return shortfall + GameText.Get("home.wo.salvage_wreckage_and_haul");
             }
             if (reason.StartsWith("machine-not-capable:", StringComparison.Ordinal))
             {
                 string kind = reason.Substring(reason.LastIndexOf(':') + 1);
-                return $"这台机器不能{KindVerb(kind)}，换一台搬运机试试";
+                return GameText.Format("home.wo.this_machine_cannot_0", KindVerb(kind));
             }
             if (reason.StartsWith(GridFailurePrefix, StringComparison.Ordinal)) return reason.Substring(GridFailurePrefix.Length);
             // FG4-E2E-01（DEBT-FG4ECO11-06）：带当前战役状态描述——关键材料正被搬回时写“机器正在搬回”，与施工队列 / 悬停同一口径。
@@ -227,30 +228,30 @@ namespace GameLogic.Campaign.Regions
             {
                 return Localization.GameText.Format("build.return.cannot_store", HomeValleyConstruction.MaterialName(reason.Substring(UnsupportedResourcePrefix.Length)));
             }
-            if (reason.StartsWith("order-already-active", StringComparison.Ordinal)) return "这项工作已经有机器在做";
+            if (reason.StartsWith("order-already-active", StringComparison.Ordinal)) return GameText.Get("home.wo.a_machine_is_already");
             if (reason == Env.SilentNightService.HoldReason) return Env.SilentNightService.HoldText(CampaignSession.Current);
-            if (reason.StartsWith("not-damaged", StringComparison.Ordinal)) return "这座建筑没有损坏，不需要修复";
-            if (reason.StartsWith("no-repair-profile", StringComparison.Ordinal)) return "这座建筑不能修复";
-            if (reason.StartsWith("no-build-profile", StringComparison.Ordinal)) return "这里不能建造";
-            if (reason.StartsWith("not-operational", StringComparison.Ordinal)) return "只有运转中的建筑才能拆除";
+            if (reason.StartsWith("not-damaged", StringComparison.Ordinal)) return GameText.Get("home.wo.this_building_is_not");
+            if (reason.StartsWith("no-repair-profile", StringComparison.Ordinal)) return GameText.Get("home.wo.this_building_cannot_be");
+            if (reason.StartsWith("no-build-profile", StringComparison.Ordinal)) return GameText.Get("home.wo.cannot_build_here");
+            if (reason.StartsWith("not-operational", StringComparison.Ordinal)) return GameText.Get("home.wo.only_operational_buildings_can");
             if (reason.StartsWith("building-not-found", StringComparison.Ordinal)
                 || reason.StartsWith("ground-item-not-found", StringComparison.Ordinal)
                 || reason.StartsWith("not-a-wreckage-node", StringComparison.Ordinal)
                 || reason == "region-not-found")
             {
-                return "目标已不存在";
+                return GameText.Get("quest.fail.target_gone");
             }
             switch (reason)
             {
-                case "machine-not-found-or-dead": return "这台机器已不在场";
-                case "machine-out-of-region": return "这台机器不在归还谷地";
-                case "already-built": return "这里已经建好了";
-                case "already-salvaged": return "这处残骸已经拆完";
-                case "battery-already-full": return "电量已满，不需要充电";
-                case "cannot-demolish-core": return "归还核心不能拆除";
+                case "machine-not-found-or-dead": return GameText.Get("home.wo.this_machine_is_no");
+                case "machine-out-of-region": return GameText.Get("home.wo.this_machine_is_not");
+                case "already-built": return GameText.Get("home.wo.already_built_here");
+                case "already-salvaged": return GameText.Get("home.wo.this_wreckage_is_already");
+                case "battery-already-full": return GameText.Get("home.wo.fully_charged_no_recharge");
+                case "cannot-demolish-core": return GameText.Get("home.wo.the_reclamation_core_cannot");
                 case "not-rebuildable": return Localization.GameText.Get("grid.reason.not_rebuildable");
-                case "not-rescue-machine": return "只有紧急救援机能做紧急修复";
-                default: return "无法执行这项命令";
+                case "not-rescue-machine": return GameText.Get("home.wo.only_the_emergency_rescue");
+                default: return GameText.Get("home.wo.cannot_carry_out_this");
             }
         }
 
@@ -258,13 +259,13 @@ namespace GameLogic.Campaign.Regions
         {
             switch (kind)
             {
-                case nameof(WorkOrderKind.Haul): return "搬运";
-                case nameof(WorkOrderKind.Build): return "建造";
-                case nameof(WorkOrderKind.Repair): return "修复";
-                case nameof(WorkOrderKind.Salvage): return "拆解";
-                case nameof(WorkOrderKind.Recharge): return "给别的建筑充电";
+                case nameof(WorkOrderKind.Haul): return GameText.Get("home.wo.haul");
+                case nameof(WorkOrderKind.Build): return GameText.Get("home.wo.build");
+                case nameof(WorkOrderKind.Repair): return GameText.Get("home.wo.repair");
+                case nameof(WorkOrderKind.Salvage): return GameText.Get("home.wo.salvage");
+                case nameof(WorkOrderKind.Recharge): return GameText.Get("home.wo.recharge_other_buildings");
                 case nameof(WorkOrderKind.Deliver): return Localization.GameText.Get("work.kind.deliver");
-                default: return "做这项工作";
+                default: return GameText.Get("home.wo.do_this_job");
             }
         }
 
@@ -3202,7 +3203,7 @@ namespace GameLogic.Campaign.Regions
                 }
                 RefundReservedItems(state, order, ResolveWorkPosition(state, order)); // FG4-ECO-05：维修件全额退回。
                 MarkAssignmentDirty();
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, "修复工单失败：目标建筑已不存在，废料已退还");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, GameText.Get("home.wo.repair_order_failed_the"));
                 return;
             }
 
@@ -3268,7 +3269,7 @@ namespace GameLogic.Campaign.Regions
             MarkAssignmentDirty();
             // ER8-CONTENT-01：完工音按建筑区分（BuildingCatalog.SfxId 的消费点）。
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, building.Position,
-                Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已修复",
+                Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + GameText.Get("home.wo.repaired"),
                 Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
         }
 
@@ -3318,7 +3319,7 @@ namespace GameLogic.Campaign.Regions
             MachineRegistry.RecordJobCompleted(order.AssignedMachineLogicId); // ER4-MCH-01：统计与经历唯一写入口。
             MarkAssignmentDirty();
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.BuildComplete, building.Position,
-                Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + "已建成",
+                Feedback.FeedbackCues.BuildingLabel(building.BuildingId) + GameText.Get("home.wo.built"),
                 Feedback.FeedbackCues.BuildingTypeSfx(building.BuildingTypeId));
         }
 
@@ -3702,7 +3703,7 @@ namespace GameLogic.Campaign.Regions
             // ER8-CONTENT-01 AC-AUD-001 失败：执行机器损失导致工单中止。
             string target = Feedback.FeedbackCues.BuildingLabel(order.TargetId);
             Feedback.FeedbackCues.RaiseLocated(Feedback.FeedbackCueId.Failure, dropPosition,
-                (string.IsNullOrEmpty(target) ? "工单" : target + " 工单") + "中止：执行机器损失，资源已退还");
+                (string.IsNullOrEmpty(target) ? GameText.Get("home.wo.work_order") : target + GameText.Get("home.wo.work_order_2")) + GameText.Get("home.wo.aborted_the_assigned_machine"));
         }
 
         private static void ReleaseResourcesAndCargo(CampaignState state, WorkOrderRecord order, Vector2 dropPosition, bool refund)

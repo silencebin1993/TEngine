@@ -254,6 +254,7 @@ namespace GameLogic.Campaign.Signal
 
         private static int RarityRank(string rarity) => rarity switch
         {
+            // FG15-UX-03（FG-GAP-134）：排序不变；显示名改为 rare = 精良、epic = 稀有，与三选一 FGR-LOOT-021“普通 < 精良 < 稀有”一致。
             "epic" => 3,
             "rare" => 2,
             "common" => 1,
@@ -367,7 +368,7 @@ namespace GameLogic.Campaign.Signal
             {
                 if (sb.Length > 0)
                 {
-                    sb.Append(GameText.Language == GameLanguage.ZhCn ? "、" : ", ");
+                    sb.Append(GameText.Language == GameLanguage.ZhCn ? GameText.Get("signal.core.summary_sep") : ", ");
                 }
                 sb.Append(loc);
                 if (counts[loc] > 1)
@@ -606,7 +607,7 @@ namespace GameLogic.Campaign.Signal
             return sb.ToString().TrimEnd();
         }
 
-        public static string Sep => GameText.Language == GameLanguage.ZhCn ? "、" : ", ";
+        public static string Sep => GameText.Get("common.list_sep");
 
         public static string OriginText(string origin) => GameText.Get(origin switch
         {

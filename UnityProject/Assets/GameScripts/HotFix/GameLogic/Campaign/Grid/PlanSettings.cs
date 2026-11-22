@@ -265,23 +265,23 @@ namespace GameLogic.Campaign.Grid
                     string turret = Defense.TurretService.DescribeSettings(CampaignSession.Current, s1, s2);
                     if (turret != null)
                     {
-                        return line + (GameText.Language == GameLanguage.En ? ", " : "，") + turret;
+                        return line + (GameText.Language == GameLanguage.En ? ", " : GameText.Get("circuit.panel.text")) + turret;
                     }
                     // FG6-DEF-02：陷阱设置（固件 + 铺设方式）。
                     string trap = Defense.DefenseService.DescribeSettings(s1, s2);
                     if (trap != null)
                     {
-                        return line + (GameText.Language == GameLanguage.En ? ", " : "，") + trap;
+                        return line + (GameText.Language == GameLanguage.En ? ", " : GameText.Get("circuit.panel.text")) + trap;
                     }
                     string rid = RecipeIdOf(s1);
                     if (rid != null && Economy.ItemCatalog.TryGetRecipe(rid, out Economy.RecipeDef rd))
                     {
-                        line += (GameText.Language == GameLanguage.En ? ", " : "，") + GameText.Format("plan.settings.recipe", rd.Name);
+                        line += (GameText.Language == GameLanguage.En ? ", " : GameText.Get("circuit.panel.text")) + GameText.Format("plan.settings.recipe", rd.Name);
                     }
                     string fw = FirmwareIdOf(s2);
                     if (fw != null)
                     {
-                        line += (GameText.Language == GameLanguage.En ? ", " : "，") + GameText.Format("plan.settings.burn", Signal.FirmwareKinds.DisplayName(fw) ?? fw);
+                        line += (GameText.Language == GameLanguage.En ? ", " : GameText.Get("circuit.panel.text")) + GameText.Format("plan.settings.burn", Signal.FirmwareKinds.DisplayName(fw) ?? fw);
                     }
                     return line;
                 }

@@ -8,6 +8,7 @@ using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
 using GameLogic.UI.Kit;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Victory
 {
@@ -64,6 +65,7 @@ namespace GameLogic.UI.Victory
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[VictoryPageUIToolkit] rootVisualElement 等待超时，胜利页未初始化。");
@@ -161,9 +163,9 @@ namespace GameLogic.UI.Victory
             }
 
             _crossFactionLabel.text = snapshot.CrossFactionBlueprintIds.Length > 0
-                ? "使用过的跨派系蓝图：" + string.Join("、", snapshot.CrossFactionBlueprintIds)
-                : "使用过的跨派系蓝图：无";
-            _regionLabel.text = $"破碎都市：{snapshot.SilentRuinsState}｜铸造前哨：{snapshot.FoundryOutpostState}";
+                ? GameText.Get("victory.cross_faction_blueprints_used") + string.Join(GameText.Get("signal.core.summary_sep"), snapshot.CrossFactionBlueprintIds)
+                : GameText.Get("victory.cross_faction_blueprints_used_2");
+            _regionLabel.text = GameText.Format("victory.fractured_city_0_foundry", snapshot.SilentRuinsState, snapshot.FoundryOutpostState);
         }
 
         private void OnDestroy()

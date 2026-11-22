@@ -269,11 +269,11 @@ namespace GameLogic.Campaign
         /// </summary>
         public static string FactionKeyOfTag(string tag) => tag switch
         {
-            FirmwareKinds.FactionReclaim or "归还" => FirmwareKinds.FactionReclaim,
-            FactionSilent or "静默" => FactionSilent,
-            FactionFoundry or "铸造" => FactionFoundry,
-            FactionClarity or "澄净" => FactionClarity,
-            FactionOverclock or "超频" => FactionOverclock,
+            FirmwareKinds.FactionReclaim or "归还" => FirmwareKinds.FactionReclaim, // loc-ignore: 旧存档里的中文派系标签，只做兼容比对
+            FactionSilent or "静默" => FactionSilent, // loc-ignore: 旧存档里的中文派系标签，只做兼容比对
+            FactionFoundry or "铸造" => FactionFoundry, // loc-ignore: 旧存档里的中文派系标签，只做兼容比对
+            FactionClarity or "澄净" => FactionClarity, // loc-ignore: 旧存档里的中文派系标签，只做兼容比对
+            FactionOverclock or "超频" => FactionOverclock, // loc-ignore: 旧存档里的中文派系标签，只做兼容比对
             _ => FactionNone,
         };
 

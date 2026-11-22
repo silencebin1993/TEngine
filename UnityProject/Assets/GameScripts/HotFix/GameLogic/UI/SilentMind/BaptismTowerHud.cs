@@ -48,7 +48,7 @@ namespace GameLogic.UI.SilentMind
                     fluids.Add(StatusTagCatalog.NameOf(tag) ?? tag);
                 }
             }
-            sb.AppendLine(GameText.Format("boss.clarity.hud.pumps", fluids.Count.ToString(), BaptismTowerBoss.PumpCount.ToString(), string.Join("、", fluids)));
+            sb.AppendLine(GameText.Format("boss.clarity.hud.pumps", fluids.Count.ToString(), BaptismTowerBoss.PumpCount.ToString(), string.Join(GameText.Get("signal.core.summary_sep"), fluids)));
             long now = GameClock.Ticks;
             float hz = Mathf.Max(1, GameClock.StepHz);
             sb.AppendLine(GameText.Format("boss.clarity.hud.next_fill", Mathf.Max(0f, (r.NextFillTick - now) / hz).ToString("F0"), r.Active.Length.ToString()));

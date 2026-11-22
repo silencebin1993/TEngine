@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BinGames.Sim.Combat;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Emergence
 {
@@ -54,7 +55,7 @@ namespace GameLogic.Campaign.Emergence
             var c = new Compiled();
             if (rows == null || rows.Count != EmgFieldConst.RuleCount)
             {
-                c.Problems.Add($"fg.TbFieldCarrierRule 应为 {EmgFieldConst.RuleCount} 行，实际 {rows?.Count ?? 0}");
+                c.Problems.Add($"fg.TbFieldCarrierRule 应为 {EmgFieldConst.RuleCount} 行，实际 {rows?.Count ?? 0}"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             for (int k = 0; k < rows.Count; k++)
@@ -65,7 +66,7 @@ namespace GameLogic.Campaign.Emergence
                 int impl = Array.IndexOf(Impls, r?.Impl);
                 if (r == null || r.Id != Order[k] || fac < 0 || alt < 0 || impl < 0 || !(r.Amount >= 0f) || !(r.Param >= 0f))
                 {
-                    c.Problems.Add($"fg.TbFieldCarrierRule 第 {k + 1} 行应为 {Order[k]}，阵营 / 执行者要在封闭清单、幅度非负（{r?.Id}）");
+                    c.Problems.Add($"fg.TbFieldCarrierRule 第 {k + 1} 行应为 {Order[k]}，阵营 / 执行者要在封闭清单、幅度非负（{r?.Id}）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 c.Ids.Add(r.Id);

@@ -287,13 +287,13 @@ namespace GameLogic.Campaign.Defense
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取配置表失败：" + e.Message);
+                ProblemList.Add("读取配置表失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (tables?.TbShieldState == null || tables.TbTrapProfile == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbShieldState / fg.TbTrapProfile 不存在（改 tools/cell_tables/fgdata_structures.py 后重新生成）");
+                    ProblemList.Add("fg.TbShieldState / fg.TbTrapProfile 不存在（改 tools/cell_tables/fgdata_structures.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[DefenseCatalog] " + ProblemList[0]);
                 return;
@@ -302,7 +302,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (row == null || string.IsNullOrEmpty(row.Id) || States.ContainsKey(row.Id))
                 {
-                    ProblemList.Add("fg.TbShieldState：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbShieldState：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var d = new ShieldStateDef
@@ -330,7 +330,7 @@ namespace GameLogic.Campaign.Defense
                 {
                     if (_initial != null)
                     {
-                        ProblemList.Add("fg.TbShieldState：不止一个初始状态，取第一个");
+                        ProblemList.Add("fg.TbShieldState：不止一个初始状态，取第一个"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     else
                     {
@@ -345,34 +345,34 @@ namespace GameLogic.Campaign.Defense
                 {
                     if (t != "none" && !States.ContainsKey(t))
                     {
-                        ProblemList.Add($"fg.TbShieldState {d.Id}：跳转目标 {t} 不存在");
+                        ProblemList.Add($"fg.TbShieldState {d.Id}：跳转目标 {t} 不存在"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
                 if (d.Seconds > 0f && d.Next == "none")
                 {
-                    ProblemList.Add($"fg.TbShieldState {d.Id}：有持续时间却没有 next");
+                    ProblemList.Add($"fg.TbShieldState {d.Id}：有持续时间却没有 next"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (d.Absorbs && d.OnDepleted == "none")
                 {
-                    ProblemList.Add($"fg.TbShieldState {d.Id}：吸收状态没有耗尽去向");
+                    ProblemList.Add($"fg.TbShieldState {d.Id}：吸收状态没有耗尽去向"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             if (_initial == null && StateList.Count > 0)
             {
-                ProblemList.Add("fg.TbShieldState：没有初始状态，取第一行");
+                ProblemList.Add("fg.TbShieldState：没有初始状态，取第一行"); // loc-ignore: 开发者自检 / 诊断文本
                 _initial = StateList[0];
             }
             foreach (TrapProfile row in tables.TbTrapProfile.DataList)
             {
                 if (row == null || string.IsNullOrEmpty(row.FirmwareId) || Traps.ContainsKey(row.FirmwareId))
                 {
-                    ProblemList.Add("fg.TbTrapProfile：空 ID 或重复 ID");
+                    ProblemList.Add("fg.TbTrapProfile：空 ID 或重复 ID"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 int fluid = row.Fluid == "none" ? 0 : PipeNetworkService.FluidId(row.Fluid);
                 if (row.Fluid != "none" && fluid <= 0)
                 {
-                    ProblemList.Add($"fg.TbTrapProfile {row.FirmwareId}：流体 {row.Fluid} 不认识，跳过");
+                    ProblemList.Add($"fg.TbTrapProfile {row.FirmwareId}：流体 {row.Fluid} 不认识，跳过"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 var d = new TrapProfileDef

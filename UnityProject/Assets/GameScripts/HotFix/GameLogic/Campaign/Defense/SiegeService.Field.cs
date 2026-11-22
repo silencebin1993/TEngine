@@ -154,7 +154,7 @@ namespace GameLogic.Campaign.Defense
                         }
                         else
                         {
-                            LastProblem = "拦截展开生成失败（战斗内核已满？）：" + (def?.EnemyTypeId ?? "(无编成)");
+                            LastProblem = "拦截展开生成失败（战斗内核已满？）：" + (def?.EnemyTypeId ?? "(无编成)"); // loc-ignore: 开发者自检 / 诊断文本
                         }
                     }
                 }

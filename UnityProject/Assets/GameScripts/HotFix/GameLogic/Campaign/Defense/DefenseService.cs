@@ -583,7 +583,7 @@ namespace GameLogic.Campaign.Defense
                 return null;
             }
             return GameText.Format("defense.feedback.firmware", string.Empty, FirmwareKinds.DisplayName(fw) ?? fw, d.FieldName).TrimStart('：', ':', ' ')
-                   + (GameText.Language == GameLanguage.En ? ", " : "，") + DefenseCatalog.PatternShortName(s2 - 1);
+                   + (GameText.Language == GameLanguage.En ? ", " : GameText.Get("circuit.panel.text")) + DefenseCatalog.PatternShortName(s2 - 1);
         }
 
         // ─────────────────────────────── 耗电（FGR-DEF-012“耗电随承受的伤害上升”）───────────────────────────────

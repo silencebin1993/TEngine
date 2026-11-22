@@ -118,6 +118,8 @@
 | InheritPattern | 协同 | Marked | 标记 |
 | Physical | 动能 | Shield | 护盾 |
 | Displace | 位移 | Catalyst | 增幅 |
+| Frost | 霜冻 | Slag | 熔渣 |
+| Debris | 碎屑 | Obscured | 遮蔽 |
 
 未列出的标签（Earth、Poison、SugarFilm、Capillary、Haste、Drifting 等）已由 FG-M2 的迁移 Story（FG2-FW-01）补齐名称并写入本表（第 7 行起），旧引擎里同义的两种写法（Burning / Fire 等）并到同一个新名。运行时以 Luban 表 fg.TbStatusTag 为准（名称文本键 + 头顶图标的形状与颜色，形状为主、颜色为辅），自检 FgFirmwareMigrationSelfCheck 核对本表与表逐条一致。
 

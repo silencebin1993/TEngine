@@ -194,13 +194,13 @@ namespace GameLogic.Campaign.Regions
                 // 不会误报）；同一次重算里多栋楼一起停机合并成一条。
                 if (newlyLost != null)
                 {
-                    Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerLost, string.Join("、", newlyLost) + " 停机",
-                        newlyLost.Select(n => n + " 停机").ToList(), lostAt);
+                    Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerLost, string.Join(GameText.Get("signal.core.summary_sep"), newlyLost) + GameText.Get("home.power.offline"),
+                        newlyLost.Select(n => n + GameText.Get("home.power.offline")).ToList(), lostAt);
                     GuidanceHooks.Raise(GuidanceHooks.PowerFirstBrownout);
                 }
                 if (newlyRestored != null)
                 {
-                    Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerRestored, string.Join("、", newlyRestored),
+                    Feedback.FeedbackCues.RaiseLocatedGroup(Feedback.FeedbackCueId.PowerRestored, string.Join(GameText.Get("signal.core.summary_sep"), newlyRestored),
                         newlyRestored, restoredAt);
                 }
                 if (newlyCut != null)
@@ -324,7 +324,7 @@ namespace GameLogic.Campaign.Regions
             }
             NotificationCenter.Post("power_split",
                 GameText.Format("power.notify.split", SubnetName(split.OldSerial), split.Parts,
-                    string.Join(GameText.Language == GameLanguage.En ? ", " : "、", parts)), at);
+                    string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), parts)), at);
             GuidanceHooks.Raise(GuidanceHooks.PowerFirstSplit);
             LastSplitNotices++;
         }

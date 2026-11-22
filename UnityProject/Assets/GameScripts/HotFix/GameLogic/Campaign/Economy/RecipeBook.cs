@@ -166,7 +166,7 @@ namespace GameLogic.Campaign.Economy
                         : GameText.Format("codex.recipe.entry", l.Item.Name, l.Amount.ToString(CultureInfo.InvariantCulture)));
                 }
             }
-            return string.Join(GameText.Language == GameLanguage.En ? ", " : "、", parts);
+            return string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), parts);
         }
 
         public static string FormText(ItemDef item)

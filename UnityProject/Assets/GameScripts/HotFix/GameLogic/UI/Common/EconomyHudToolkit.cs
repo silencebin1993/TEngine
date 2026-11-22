@@ -6,6 +6,7 @@ using GameLogic.Stage;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.Common
 {
@@ -102,7 +103,7 @@ namespace GameLogic.UI.Common
             _panel.style.display = DisplayStyle.None; // 默认隐藏，Update() 按当前是否在归还谷地决定。
             _root.Add(_panel);
 
-            _detailsButton = new Button(() => SetDetailsOpen(!_detailsOpen)) { text = "资源账本 · 展开详情" };
+            _detailsButton = new Button(() => SetDetailsOpen(!_detailsOpen)) { text = GameText.Get("hud.economy.resource_ledger_show_details") };
             _detailsButton.style.color = Color.white;
             _detailsButton.style.backgroundColor = new Color(0.11f, 0.18f, 0.22f, 0.9f);
             _detailsButton.style.fontSize = 14;
@@ -113,7 +114,7 @@ namespace GameLogic.UI.Common
             _details.style.display = DisplayStyle.None;
             _panel.Add(_details);
 
-            _titleLabel = new Label("废料账本");
+            _titleLabel = new Label(GameText.Get("hud.economy.scrap_ledger"));
             _titleLabel.style.color = Color.white;
             _titleLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
             _details.Add(_titleLabel);
@@ -177,7 +178,7 @@ namespace GameLogic.UI.Common
             if (_details == null || open == _detailsOpen) return;
             _detailsOpen = open;
             _details.style.display = open ? DisplayStyle.Flex : DisplayStyle.None;
-            _detailsButton.text = open ? "资源账本 · 收起详情" : "资源账本 · 展开详情";
+            _detailsButton.text = open ? GameText.Get("hud.economy.resource_ledger_hide_details") : GameText.Get("hud.economy.resource_ledger_show_details");
             if (open) Kit.UiEscapeStack.Push(this, () => SetDetailsOpen(false));
             else Kit.UiEscapeStack.Remove(this);
         }
@@ -206,10 +207,10 @@ namespace GameLogic.UI.Common
             CampaignEconomyLedger.ResourceSummary summary =
                 CampaignEconomyLedger.GetSummary(state, CampaignEconomyLedger.ResourceScrap, RecentCount);
 
-            _availableLabel.text = $"可用：{summary.Available:0}";
+            _availableLabel.text = GameText.Format("hud.economy.available_0_0", summary.Available);
             _reservedLabel.text = summary.OpenReserved > 0f
-                ? $"预留中：{summary.OpenReserved:0}"
-                : "预留中：0";
+                ? GameText.Format("hud.economy.reserved_0_0", summary.OpenReserved)
+                : GameText.Get("hud.economy.reserved_0");
 
             for (int i = 0; i < RecentCount; i++)
             {
@@ -239,8 +240,8 @@ namespace GameLogic.UI.Common
                 _powerDrawnLanguage = Localization.GameText.Language;
                 PowerHudRebuilds++;
                 _powerLabel.text = power.Shortfall > 0f
-                    ? $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}（差额{power.Shortfall:0}）"
-                    : $"电力：供给{power.TotalSupply:0}/需求{power.TotalDemand:0}";
+                    ? GameText.Format("hud.economy.power_supply_0_0", power.TotalSupply, power.TotalDemand, power.Shortfall)
+                    : GameText.Format("hud.economy.power_supply_0_0_2", power.TotalSupply, power.TotalDemand);
 
                 // FG3-LOG-06：多个电网 / 有建筑没接入电网时补一行（文本键，点读数打开电网面板）。
                 if (power.SubnetCount > 1 || power.UnconnectedBuildingIds.Length > 0)
@@ -253,7 +254,7 @@ namespace GameLogic.UI.Common
                 {
                     // ER8-CONTENT-01 AC-THEME-001：此前直接拼接 BuildingId（“home_valley:signal_tower”），
                     // 把内部 ID 显示给了玩家；改为内容目录展示名。
-                    _brownoutLabel.text = "断电：" + string.Join("、",
+                    _brownoutLabel.text = GameText.Get("hud.economy.unpowered") + string.Join(GameText.Get("signal.core.summary_sep"),
                         System.Array.ConvertAll(power.BrownoutBuildingIds, MechanicalContentFacade.ResolveWorkOrderTargetLabel));
                     _brownoutLabel.style.display = DisplayStyle.Flex;
                 }
@@ -264,19 +265,19 @@ namespace GameLogic.UI.Common
             }
 
             float bandwidth = HomeValleySignal.BandwidthCapacity(state);
-            string bandwidthSource = HomeValleySignal.TowerContributing(state) ? "基础3+塔5" : "基础3（塔未通电）";
+            string bandwidthSource = HomeValleySignal.TowerContributing(state) ? GameText.Get("hud.economy.base_3_tower_5") : GameText.Get("hud.economy.base_3_tower_unpowered");
             RegionRecord silentRuins = HomeValleySignal.Find(state);
-            string unlockNote = silentRuins != null && silentRuins.State != RegionState.Locked ? "｜破碎都市已解锁" : string.Empty;
-            _signalLabel.text = $"信号带宽：{bandwidth:0}（{bandwidthSource}）{unlockNote}";
+            string unlockNote = silentRuins != null && silentRuins.State != RegionState.Locked ? GameText.Get("hud.economy.fractured_city_unlocked") : string.Empty;
+            _signalLabel.text = GameText.Format("hud.economy.signal_bandwidth_0_0", bandwidth, bandwidthSource, unlockNote);
 
             int capacity = HomeValleyCargo.GetStorageCapacity(state, CampaignEconomyLedger.ResourceScrap);
             int used = HomeValleyCargo.GetStorageUsed(state, CampaignEconomyLedger.ResourceScrap);
-            _storageLabel.text = $"仓储：{used}/{capacity}";
+            _storageLabel.text = GameText.Format("hud.economy.storage_0_1", used, capacity);
 
             int groundCount = state.GroundItems?.Length ?? 0;
             if (groundCount > 0)
             {
-                _groundItemsLabel.text = $"地面待收集：{groundCount} 处";
+                _groundItemsLabel.text = GameText.Format("hud.economy.awaiting_pickup_0_spots", groundCount);
                 _groundItemsLabel.style.display = DisplayStyle.Flex;
             }
             else
@@ -293,7 +294,7 @@ namespace GameLogic.UI.Common
             // 直接漏给了玩家。改为资源展示名 + 数量 + 中文状态。
             float delta = -entry.Requested;
             string sign = delta >= 0f ? "+" : "";
-            return $"{CampaignEconomyLedger.ResourceDisplayName(entry.ResourceType)} {sign}{delta:0}（{CampaignEconomyLedger.StateDisplayName(entry.State)}）";
+            return GameText.Format("hud.economy.0_1_2_0", CampaignEconomyLedger.ResourceDisplayName(entry.ResourceType), sign, delta, CampaignEconomyLedger.StateDisplayName(entry.State));
         }
 
         private void OnDestroy()

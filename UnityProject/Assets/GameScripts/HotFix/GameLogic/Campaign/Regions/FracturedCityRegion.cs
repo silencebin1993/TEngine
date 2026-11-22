@@ -6,6 +6,7 @@ using GameLogic.Campaign.Combat;
 using GameLogic.Campaign.Content;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -126,11 +127,11 @@ namespace GameLogic.Campaign.Regions
             RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
             if (enemy == null)
             {
-                return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
+                return ActionResult.Fail(GameText.Format("city.region.enemy_0_does_not", enemyInstanceId));
             }
             if (!enemy.IsAlive)
             {
-                return ActionResult.Fail("目标已阵亡。");
+                return ActionResult.Fail(GameText.Get("city.region.the_target_is_already"));
             }
 
             // ER7-CORE-01：Boss 节点/主核心是"护盾/阶段"语义，委托 FoundryOutpostCoreBoss.ApplyDamage（唯一伤害/阶段转换判定入口）。
@@ -326,23 +327,23 @@ namespace GameLogic.Campaign.Regions
         {
             if (state == null)
             {
-                return ActionResult.Fail("没有活动的破碎都市会话。");
+                return ActionResult.Fail(GameText.Get("city.region.no_active_fractured_city"));
             }
             RegionEnemyRecord enemy = FindEnemy(state, enemyInstanceId);
             if (enemy == null && !CombatSite.IsSeizedHostileId(enemyInstanceId)) // EMG4-HIJ-02：被夺控的机器没有敌人记录，目标由战斗地点解析
             {
-                return ActionResult.Fail($"敌人 {enemyInstanceId} 不存在。");
+                return ActionResult.Fail(GameText.Format("city.region.enemy_0_does_not", enemyInstanceId));
             }
             if (enemy != null && !enemy.IsAlive)
             {
-                return ActionResult.Fail("目标已阵亡。");
+                return ActionResult.Fail(GameText.Get("city.region.the_target_is_already"));
             }
             // FG0-ARCH-03：开火规则（普通武器即时命中、标记、标记跳转；铸造重炮两段式、热量、熔穿过载）全部在战斗内核，
             // 与编队攻击命令同一段代码（CombatLogic.FireAt）。装配只在变化时解析一次，不在每次开火时重新编译。
             CombatSite site = CombatSites.Get(RegionId);
             if (site == null)
             {
-                return ActionResult.Fail("破碎都市没有载入，不能结算攻击。");
+                return ActionResult.Fail(GameText.Get("city.region.fractured_city_is_not"));
             }
             // EMG1-ENT-01：被残骸挡下（开了火、冷却照走）按失败返回，让直控 / 指令显示“被掩体挡下”的原因。
             return site.TryFireAtEnemy(attackerLogicId, enemyInstanceId, out BinGames.Sim.Combat.CombatFireResult fireResult, out string reason)
@@ -476,11 +477,11 @@ namespace GameLogic.Campaign.Regions
             RegionRecord region = Find(state);
             if (region == null)
             {
-                return ActionResult.Fail("破碎都市尚未初始化。");
+                return ActionResult.Fail(GameText.Get("city.region.fractured_city_is_not_2"));
             }
             if (region.DestroyedNodeIds != null && region.DestroyedNodeIds.Contains(FracturedCityLayout.ListeningNodeId))
             {
-                return ActionResult.Fail("监听节点已被摧毁。");
+                return ActionResult.Fail(GameText.Get("city.region.the_listening_node_is"));
             }
 
             MarkDestroyed(state, FracturedCityLayout.ListeningNodeId);
@@ -498,11 +499,11 @@ namespace GameLogic.Campaign.Regions
             RegionRecord region = Find(state);
             if (region == null)
             {
-                return ActionResult.Fail("破碎都市尚未初始化。");
+                return ActionResult.Fail(GameText.Get("city.region.fractured_city_is_not_2"));
             }
             if (region.LootedContainerIds != null && region.LootedContainerIds.Contains(FracturedCityLayout.TerminalId))
             {
-                return ActionResult.Fail("终端已读取过。");
+                return ActionResult.Fail(GameText.Get("city.region.the_terminal_has_already"));
             }
             MarkLooted(state, FracturedCityLayout.TerminalId);
             SpawnQuestItemOnGround(state, FracturedCityLayout.ProtocolDataboxContentId, FracturedCityLayout.Terminal.Position);
@@ -521,7 +522,7 @@ namespace GameLogic.Campaign.Regions
                 crateId == FracturedCityLayout.Crate3Id;
             if (!known)
             {
-                return ActionResult.Fail($"未知箱子 {crateId}。");
+                return ActionResult.Fail(GameText.Format("city.region.unknown_crate_0", crateId));
             }
             Vector2 position = crateId == FracturedCityLayout.Crate1Id ? FracturedCityLayout.Crate1.Position
                 : crateId == FracturedCityLayout.Crate2Id ? FracturedCityLayout.Crate2.Position
@@ -529,11 +530,11 @@ namespace GameLogic.Campaign.Regions
             RegionRecord region = Find(state);
             if (region == null)
             {
-                return ActionResult.Fail("破碎都市尚未初始化。");
+                return ActionResult.Fail(GameText.Get("city.region.fractured_city_is_not_2"));
             }
             if (region.LootedContainerIds != null && region.LootedContainerIds.Contains(crateId))
             {
-                return ActionResult.Fail("该箱子已打开过。");
+                return ActionResult.Fail(GameText.Get("city.region.this_crate_has_already"));
             }
             MarkLooted(state, crateId);
             HomeValleyCargo.SpawnGroundItem(state, RegionId, position,
@@ -592,18 +593,18 @@ namespace GameLogic.Campaign.Regions
             RegionQuestItemRecord item = FindQuestItem(state, salvageInstanceId);
             if (item == null || item.State != RegionQuestItemState.OnGround)
             {
-                return ActionResult.Fail("地面上没有该关键物。");
+                return ActionResult.Fail(GameText.Get("city.region.that_key_item_is"));
             }
             if (!MachineRegistry.TryGetRecord(carrierLogicId, out MachineRecord machine) || !machine.IsAlive ||
                 machine.RegionId != RegionId)
             {
-                return ActionResult.Fail("携带机器不存在/已阵亡/不在本区域。");
+                return ActionResult.Fail(GameText.Get("city.region.the_carrying_machine_is"));
             }
             item.State = RegionQuestItemState.Carried;
             item.CarrierLogicId = carrierLogicId;
             item.Position = default;
             Log.Info($"[FracturedCityRegion] {item.ContentId} 已装入机器 {carrierLogicId} 货舱。");
-            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, $"{Feedback.FeedbackCues.QuestItemName(item.ContentId)} → {Feedback.FeedbackCues.MachineLabel(carrierLogicId)} 货舱");
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Pickup, GameText.Format("city.region.0_1_cargo_hold", Feedback.FeedbackCues.QuestItemName(item.ContentId), Feedback.FeedbackCues.MachineLabel(carrierLogicId)));
             // FG8-LOOT-03：关键物 / 黑匣子从地上装进货舱——通知货舱面板、顶栏和地面外观重建（数组引用没变，靠修订号）。
             Economy.LootPickService.Touch();
             Economy.BlackBoxService.Touch();
@@ -751,12 +752,12 @@ namespace GameLogic.Campaign.Regions
             int enemyCount = state?.RegionEnemies?.Count(e => e.RegionId == RegionId && !SiteGarrisonService.IsGarrisonInstance(e.EnemyInstanceId)) ?? 0;
             if (enemyCount != 3)
             {
-                violations.Add($"破碎都市敌人实例数应为 3（2 侦察 + 1 干扰），实际 {enemyCount}。");
+                violations.Add($"破碎都市敌人实例数应为 3（2 侦察 + 1 干扰），实际 {enemyCount}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             var dupCheck = state?.RegionEnemies?.GroupBy(e => e.EnemyInstanceId).Where(g => g.Count() > 1).ToList();
             if (dupCheck != null && dupCheck.Count > 0)
             {
-                violations.Add($"存在重复的 EnemyInstanceId：{string.Join(",", dupCheck.Select(g => g.Key))}");
+                violations.Add($"存在重复的 EnemyInstanceId：{string.Join(",", dupCheck.Select(g => g.Key))}"); // loc-ignore: 开发者自检 / 诊断文本
             }
             return violations;
         }

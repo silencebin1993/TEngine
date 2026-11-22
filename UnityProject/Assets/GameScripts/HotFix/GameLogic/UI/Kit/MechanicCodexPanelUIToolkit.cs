@@ -299,7 +299,7 @@ namespace GameLogic.UI.Kit
             }
             string error = MechanicCodex.LoadError;
             _error.EnableInClassList("uk-hidden", error == null);
-            _error.text = error == null ? string.Empty : GameText.Get("codex.panel.error") + "（" + error + "）";
+            _error.text = error == null ? string.Empty : GameText.Get("codex.panel.error") + GameText.Get("codex.panel.text") + error + GameText.Get("codex.panel.text_2");
             _count.text = GameText.Format("codex.panel.list_title", MechanicCodex.UnlockedCountIn(_tab), MechanicCodex.CountIn(_tab));
 
             MechanicCodex.EntriesIn(_tab, _searchText, _scratch, state);

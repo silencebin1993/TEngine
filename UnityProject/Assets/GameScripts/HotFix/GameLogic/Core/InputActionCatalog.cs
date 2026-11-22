@@ -213,7 +213,7 @@ namespace GameLogic.Core
             if ((contexts & InputContext.Build) != 0) parts.Add(GameText.Get("input.context.build"));
             if ((contexts & InputContext.Uplink) != 0) parts.Add(GameText.Get("input.context.uplink"));
             if ((contexts & InputContext.Interface) != 0) parts.Add(GameText.Get("input.context.interface"));
-            return string.Join("、", parts);
+            return string.Join(GameText.Get("common.list_sep"), parts);
         }
 
         private static void EnsureLoaded()

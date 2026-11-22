@@ -325,25 +325,25 @@ namespace GameLogic.Campaign.WorldGen
             if (w.GeneratorVersion > WorldGenVersions.Current)
             {
                 reason = SaveFailureReason.Newer;
-                message = $"存档的世界生成器是 v{w.GeneratorVersion}，本版本游戏只能生成到 v{WorldGenVersions.Current}，请更新游戏。";
+                message = GameText.Format("worldgen.this_save_s_world", w.GeneratorVersion, WorldGenVersions.Current);
                 return false;
             }
             if (w.GeneratorVersion < 0)
             {
                 reason = SaveFailureReason.Payload;
-                message = $"存档的世界生成器版本 {w.GeneratorVersion} 非法。";
+                message = GameText.Format("worldgen.this_save_s_world_2", w.GeneratorVersion);
                 return false;
             }
             if (w.GeneratorVersion >= 1 && !WorldGenContent.TryGetVersion(w.GeneratorVersion, out _))
             {
                 reason = SaveFailureReason.Payload;
-                message = $"生成器版本表缺少 v{w.GeneratorVersion}，无法重建这份存档的地形。";
+                message = GameText.Format("worldgen.the_generator_version_table", w.GeneratorVersion);
                 return false;
             }
             if (UsesWorldGen(state) && !WorldSettings.TryResolve(w.GeneratorVersion, w.WorldSettingsId, out _, out _))
             {
                 reason = SaveFailureReason.Payload;
-                message = $"存档的世界设置 {w.WorldSettingsId ?? "null"} 在生成器 v{w.GeneratorVersion} 的世界设置集合里不存在，无法重建地形。";
+                message = GameText.Format("worldgen.world_setting_0_does", w.WorldSettingsId ?? "null", w.GeneratorVersion);
                 return false;
             }
             int size = GridContent.TuningInt("grid.chunk_size");
@@ -357,13 +357,13 @@ namespace GameLogic.Campaign.WorldGen
                 if (!WorldDiffCodec.TryDecode(r.DiffPayload, size, null, out string error))
                 {
                     reason = SaveFailureReason.Payload;
-                    message = $"表面 {r.SurfaceId} 区块 ({r.ChunkX},{r.ChunkY}) 的差异损坏：{error}";
+                    message = $"表面 {r.SurfaceId} 区块 ({r.ChunkX},{r.ChunkY}) 的差异损坏：{error}"; // loc-ignore: 开发者自检 / 诊断文本
                     return false;
                 }
                 if (!seen.Add(string.Concat(r.SurfaceId, "|", r.ChunkX.ToString(CultureInfo.InvariantCulture), "|", r.ChunkY.ToString(CultureInfo.InvariantCulture))))
                 {
                     reason = SaveFailureReason.Payload;
-                    message = $"表面 {r.SurfaceId} 区块 ({r.ChunkX},{r.ChunkY}) 的差异重复。";
+                    message = $"表面 {r.SurfaceId} 区块 ({r.ChunkX},{r.ChunkY}) 的差异重复。"; // loc-ignore: 开发者自检 / 诊断文本
                     return false;
                 }
             }

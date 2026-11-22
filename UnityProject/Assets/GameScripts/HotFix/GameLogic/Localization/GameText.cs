@@ -93,6 +93,13 @@ namespace GameLogic.Localization
         public static bool ContainsMarker(string text) =>
             !string.IsNullOrEmpty(text) && text.IndexOf(MarkerOpen, StringComparison.Ordinal) >= 0;
 
+        /// <summary>全部文本键（自检扫描、反查用）；表没加载上时为空。</summary>
+        public static IEnumerable<string> AllKeys()
+        {
+            EnsureLoaded();
+            return _map?.Keys ?? (IEnumerable<string>)Array.Empty<string>();
+        }
+
         public static bool Has(string key)
         {
             EnsureLoaded();
@@ -132,7 +139,9 @@ namespace GameLogic.Localization
             }
             try
             {
-                return string.Format(pattern, args ?? Array.Empty<object>());
+                string result = string.Format(pattern, args ?? Array.Empty<object>());
+                LocalizedDetail.Remember(result, key, args); // FG15-UX-03：通知历史等落盘文字按“键 + 参数”存
+                return result;
             }
             catch (FormatException ex)
             {
@@ -167,7 +176,7 @@ namespace GameLogic.Localization
             _overridden = true;
             _loaded = true;
             _map = table?.DataMap;
-            _loadError = table == null ? (loadError ?? "测试注入：文本表为空") : loadError;
+            _loadError = table == null ? (loadError ?? "测试注入：文本表为空") : loadError; // loc-ignore: 测试注入的加载失败原因
             _missing.Clear();
         }
 

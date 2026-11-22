@@ -303,7 +303,7 @@ namespace GameLogic.Campaign.Regions
                           + (plan.Extras.Any ? "\n" + plan.Extras.Describe(state) : string.Empty); // FG4-ECO-11
             if (notPlaced > 0)
             {
-                string why = plan.BadCount > 0 ? plan.DescribeFirstBad() : (r.FirstFailureName + "：" + (r.FirstFailure?.Describe() ?? string.Empty));
+                string why = plan.BadCount > 0 ? plan.DescribeFirstBad() : (r.FirstFailureName + GameText.Get("emg.enemy.program.sep") + (r.FirstFailure?.Describe() ?? string.Empty));
                 text += "\n" + GameText.Format("plan.paste.some_bad", notPlaced, why);
             }
             LastResult = new GridOpResult(GridOpResult.Kind.Pasted, null);

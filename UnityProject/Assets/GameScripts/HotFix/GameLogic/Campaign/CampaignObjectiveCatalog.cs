@@ -14,17 +14,16 @@ namespace GameLogic.Campaign
     /// （UI-10：关键物“在地面/已装车/已带回”，null＝没有可补充的现状）。</summary>
     public sealed class ObjectiveItemDef
     {
-        private readonly string _label;
-        /// <summary>FG1-SIG-05：新文案走文本键（清单在静态初始化时建好，文本在读取时才解析，不锁死语言也不依赖表的加载时机）。</summary>
-        private readonly string _labelKey;
+        /// <summary>FG1-SIG-05 / FG15-UX-03：文字在读取时才解析（清单在静态初始化时建好，不锁死语言也不依赖表的加载时机）。</summary>
+        private readonly Func<string> _label;
         public readonly Func<CampaignState, bool> IsDone;
         public readonly Func<CampaignState, Vector2?> HomeLocation;
         public readonly Func<CampaignState, string> Status;
 
-        public string Label => _labelKey != null ? GameText.Get(_labelKey) : _label;
+        public string Label => _label();
 
-        public ObjectiveItemDef(string label, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null,
-            Func<CampaignState, string> status = null)
+        private ObjectiveItemDef(Func<string> label, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation,
+            Func<CampaignState, string> status)
         {
             _label = label;
             IsDone = isDone;
@@ -32,17 +31,15 @@ namespace GameLogic.Campaign
             Status = status;
         }
 
-        private ObjectiveItemDef(string label, string labelKey, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation,
-            Func<CampaignState, string> status)
-            : this(label, isDone, homeLocation, status)
-        {
-            _labelKey = labelKey;
-        }
-
         /// <summary>文案用文本键（fg.TbLocText）的清单项。</summary>
         public static ObjectiveItemDef Keyed(string labelKey, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null,
             Func<CampaignState, string> status = null) =>
-            new ObjectiveItemDef(null, labelKey, isDone, homeLocation, status);
+            new ObjectiveItemDef(() => GameText.Get(labelKey), isDone, homeLocation, status);
+
+        /// <summary>带参数的文案（参数里的物品名等同样现取）。</summary>
+        public static ObjectiveItemDef Lazy(Func<string> label, Func<CampaignState, bool> isDone, Func<CampaignState, Vector2?> homeLocation = null,
+            Func<CampaignState, string> status = null) =>
+            new ObjectiveItemDef(label, isDone, homeLocation, status);
     }
 
     /// <summary>OBJ-01～10 的一行定义（DEMO-CONTENT-LOCK.md §4.4）。<see cref="RegionNote"/>：人在该目标区域时
@@ -50,7 +47,9 @@ namespace GameLogic.Campaign
     public sealed class ObjectiveDef
     {
         public string Id;
-        public string Title;
+        /// <summary>标题文本键；<see cref="Title"/> 按当前语言现取（FG15-UX-03：游戏中切语言即时生效）。</summary>
+        public string TitleKey;
+        public string Title => GameText.Get(TitleKey);
         public string RegionId;
         public ObjectiveItemDef[] Items;
         public Func<CampaignState, string> RegionNote;
@@ -186,23 +185,23 @@ namespace GameLogic.Campaign
             if (item == null)
             {
                 // 还没出现过：写明怎么获得（此前标记器/数据盒只写“尚未发现”，玩家不知道去哪找）。
-                return contentId == FracturedCityLayout.MarkerModuleContentId ? "摧毁监听节点后掉落"
-                    : contentId == FracturedCityLayout.ProtocolDataboxContentId ? "读取协议终端后获得"
-                    : contentId == FoundryOutpostLayout.CannonModuleContentId ? "击破步进炮后掉落"
-                    : contentId == FoundryOutpostLayout.CoreDataContentId ? "摧毁主核心后掉落"
-                    : "尚未发现";
+                return contentId == FracturedCityLayout.MarkerModuleContentId ? GameText.Get("objective.drops_when_a_listening")
+                    : contentId == FracturedCityLayout.ProtocolDataboxContentId ? GameText.Get("objective.obtained_by_reading_the")
+                    : contentId == FoundryOutpostLayout.CannonModuleContentId ? GameText.Get("objective.drops_when_a_strider")
+                    : contentId == FoundryOutpostLayout.CoreDataContentId ? GameText.Get("objective.drops_when_the_main")
+                    : GameText.Get("objective.not_found_yet");
             }
             switch (item.State)
             {
                 case RegionQuestItemState.Recovered:
-                    return "已带回";
+                    return GameText.Get("objective.brought_back");
                 case RegionQuestItemState.Carried:
                     string carrier = Feedback.FeedbackCues.MachineLabel(item.CarrierLogicId);
-                    return string.IsNullOrEmpty(carrier) ? "已装车，撤离后才算带回" : $"已装上 {carrier}，撤离后才算带回";
+                    return string.IsNullOrEmpty(carrier) ? GameText.Get("objective.loaded_counts_as_brought") : GameText.Format("objective.loaded_on_0_counts", carrier);
                 case RegionQuestItemState.Lost:
-                    return "已丢失，下次进入由恢复柜补发";
+                    return GameText.Get("objective.lost_the_recovery_locker");
                 default:
-                    return "在地面，还没装车";
+                    return GameText.Get("objective.on_the_ground_not");
             }
         }
 
@@ -213,8 +212,8 @@ namespace GameLogic.Campaign
             int opened = crateIds.Count(id => region?.LootedContainerIds != null && region.LootedContainerIds.Contains(id));
             int piles = state?.GroundItems?.Count(g => g != null && g.RegionId == regionId) ?? 0;
             return piles > 0
-                ? $"可选：废料箱已开 {opened}/{crateIds.Length}，地面还有 {piles} 堆没装车"
-                : $"可选：废料箱已开 {opened}/{crateIds.Length}";
+                ? GameText.Format("objective.optional_scrap_crates_opened", opened, crateIds.Length, piles)
+                : GameText.Format("objective.optional_scrap_crates_opened_2", opened, crateIds.Length);
         }
 
         private static readonly string[] RuinsCrates = { FracturedCityLayout.Crate1Id, FracturedCityLayout.Crate2Id, FracturedCityLayout.Crate3Id };
@@ -225,11 +224,11 @@ namespace GameLogic.Campaign
             RegionRecord foundry = FoundryOutpostRegion.Find(s);
             if (foundry == null || !FoundryOutpostCoreBoss.IsInitialized(foundry))
             {
-                return "进入核心分区后出现";
+                return GameText.Get("objective.appears_after_entering_the");
             }
             int destroyed = new[] { FoundryOutpostLayout.CoreNode1Id, FoundryOutpostLayout.CoreNode2Id }
                 .Count(id => FoundryOutpostRegion.FindEnemy(s, id) is RegionEnemyRecord node && !node.IsAlive);
-            return $"已摧毁 {destroyed}/2";
+            return GameText.Format("objective.destroyed_0_2", destroyed);
         }
 
         /// <summary>玩家可见的区域名。</summary>
@@ -237,17 +236,17 @@ namespace GameLogic.Campaign
         {
             if (regionId == HomeValleyLayout.RegionId)
             {
-                return "归还谷地";
+                return GameText.Get("world.site.home_valley.name");
             }
             if (regionId == FracturedCityLayout.RegionId)
             {
-                return "破碎都市";
+                return GameText.Get("world.site.silent_ruins.name");
             }
             if (regionId == FoundryOutpostLayout.RegionId)
             {
-                return "铸造前哨外围";
+                return GameText.Get("combat.site.foundry_outpost");
             }
-            return "未知区域";
+            return GameText.Get("objective.unknown_area");
         }
 
         // ── 结构性读取的小工具 ────────────────────────────────────────
@@ -313,7 +312,7 @@ namespace GameLogic.Campaign
         private static string Quest(string contentId, string fallback)
         {
             string name = Feedback.FeedbackCues.QuestItemName(contentId);
-            return string.IsNullOrEmpty(name) || name == "关键物" ? fallback : name;
+            return string.IsNullOrEmpty(name) || name == GameText.Get("feedback.cues.key_item") ? fallback : name;
         }
 
         private static ObjectiveDef[] Build()
@@ -321,85 +320,86 @@ namespace GameLogic.Campaign
             string home = HomeValleyLayout.RegionId;
             string ruins = FracturedCityLayout.RegionId;
             string foundry = FoundryOutpostLayout.RegionId;
-            string marker = Quest(FracturedCityLayout.MarkerModuleContentId, "静默标记模块");
-            string databox = Quest(FracturedCityLayout.ProtocolDataboxContentId, "协议数据盒");
-            string cannon = Quest(FoundryOutpostLayout.CannonModuleContentId, "铸造重炮模块");
+            // 物品名也现取：读取时按当前语言解析。
+            Func<string> marker = () => Quest(FracturedCityLayout.MarkerModuleContentId, GameText.Get("objective.silent_marker_module"));
+            Func<string> databox = () => Quest(FracturedCityLayout.ProtocolDataboxContentId, GameText.Get("objective.protocol_data_box"));
+            Func<string> cannon = () => Quest(FoundryOutpostLayout.CannonModuleContentId, GameText.Get("analysis.quest_name.cannon_module"));
 
             return new[]
             {
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj01, Title = "修复归还谷地供电", RegionId = home,
-                    Items = new[] { new ObjectiveItemDef("修复发电机", s => Operational(s, HomeValleyLayout.BuildingTypeGenerator),
+                    Id = CampaignObjectiveTracker.Obj01, TitleKey = "objective.restore_power_in_reclamation", RegionId = home,
+                    Items = new[] { ObjectiveItemDef.Keyed("objective.repair_the_generator", s => Operational(s, HomeValleyLayout.BuildingTypeGenerator),
                         At(HomeValleyLayout.BuildingTypeGenerator)) },
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj02, Title = "恢复仓库与装配站", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj02, TitleKey = "objective.restore_the_warehouse_and", RegionId = home,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("修复仓库", s => Operational(s, HomeValleyLayout.BuildingTypeWarehouse),
+                        ObjectiveItemDef.Keyed("objective.repair_the_warehouse", s => Operational(s, HomeValleyLayout.BuildingTypeWarehouse),
                             At(HomeValleyLayout.BuildingTypeWarehouse)),
-                        new ObjectiveItemDef("装配站通电运转", s => OperationalAndPowered(s, HomeValleyLayout.BuildingTypeAssemblyStation),
+                        ObjectiveItemDef.Keyed("objective.power_up_the_assembly", s => OperationalAndPowered(s, HomeValleyLayout.BuildingTypeAssemblyStation),
                             At(HomeValleyLayout.BuildingTypeAssemblyStation)),
                     },
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj03, Title = "建造第一台战斗机并接入", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj03, TitleKey = "objective.build_your_first_combat", RegionId = home,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("在装配站生产战斗履带机", HasErc003, At(HomeValleyLayout.BuildingTypeAssemblyStation)),
-                        new ObjectiveItemDef("直接操控机器命中低威胁残骸靶", s => EventGranted(s, DirectHitEventId), CombatTargetPosition),
+                        ObjectiveItemDef.Keyed("objective.produce_a_combat_tracks", HasErc003, At(HomeValleyLayout.BuildingTypeAssemblyStation)),
+                        ObjectiveItemDef.Keyed("objective.control_a_machine_directly", s => EventGranted(s, DirectHitEventId), CombatTargetPosition),
                     },
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj04, Title = "修复信号塔，准备远征", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj04, TitleKey = "objective.repair_the_signal_tower", RegionId = home,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("修复信号塔", s => Operational(s, HomeValleyLayout.BuildingTypeSignalTower),
+                        ObjectiveItemDef.Keyed("objective.repair_the_signal_tower_2", s => Operational(s, HomeValleyLayout.BuildingTypeSignalTower),
                             At(HomeValleyLayout.BuildingTypeSignalTower)),
-                        new ObjectiveItemDef($"至少 {ExpeditionDepartureService.MinRosterSize} 台机器可以出征",
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.at_least_0_machines", ExpeditionDepartureService.MinRosterSize),
                             s => ReadyForExpedition(s) >= ExpeditionDepartureService.MinRosterSize,
                             At(HomeValleyLayout.BuildingTypeAssemblyStation)),
                     },
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj05, Title = "破碎都市：带回静默技术", RegionId = ruins,
+                    Id = CampaignObjectiveTracker.Obj05, TitleKey = "objective.fractured_city_bring_back", RegionId = ruins,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("从信号塔出发前往破碎都市", s => Departures(s, ruins) > 0),
-                        new ObjectiveItemDef($"带着{marker}撤离回家", s => QuestRecovered(s, FracturedCityLayout.MarkerModuleContentId),
+                        ObjectiveItemDef.Keyed("objective.depart_from_the_signal", s => Departures(s, ruins) > 0),
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.evacuate_home_with_0", marker()), s => QuestRecovered(s, FracturedCityLayout.MarkerModuleContentId),
                             status: QuestStatus(FracturedCityLayout.MarkerModuleContentId)),
-                        new ObjectiveItemDef($"带着{databox}撤离回家", s => QuestRecovered(s, FracturedCityLayout.ProtocolDataboxContentId),
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.evacuate_home_with_0", databox()), s => QuestRecovered(s, FracturedCityLayout.ProtocolDataboxContentId),
                             status: QuestStatus(FracturedCityLayout.ProtocolDataboxContentId)),
                     },
                     RegionNote = s => CrateNote(s, ruins, RuinsCrates),
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj06, Title = "解析并实装标记跳转", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj06, TitleKey = "objective.analyze_and_install_mark", RegionId = home,
                     Items = new[]
                     {
-                        new ObjectiveItemDef($"在解析台解析{marker}", s => Unlocked(s, ComponentCatalog.FuncMarkerId),
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.analyze_0_at_the", marker()), s => Unlocked(s, ComponentCatalog.FuncMarkerId),
                             At(HomeValleyLayout.BuildingTypeAnalysisBench)),
-                        new ObjectiveItemDef($"在解析台解析{databox}", s => Unlocked(s, FirmwareCatalog.FwMarkTagId),
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.analyze_0_at_the", databox()), s => Unlocked(s, FirmwareCatalog.FwMarkTagId),
                             At(HomeValleyLayout.BuildingTypeAnalysisBench)),
                         // FG1-SIG-05：标记跳转是核心固件，只在接入时插进接入口——“标记跳转蓝图” = 接入时能打出标记跳转的蓝图。
                         ObjectiveItemDef.Keyed("objective.obj06.save_markjump",
                             s => BlueprintEditorService.IsReactionCharged(s, MechanicalReactionCatalog.ReactionMarkJumpId)),
-                        new ObjectiveItemDef("战斗履带机回装配站改造", Erc003Retrofitted, At(HomeValleyLayout.BuildingTypeAssemblyStation)),
+                        ObjectiveItemDef.Keyed("objective.refit_the_combat_tracks", Erc003Retrofitted, At(HomeValleyLayout.BuildingTypeAssemblyStation)),
                     },
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj07, Title = "铸造外围：带回重炮", RegionId = foundry,
+                    Id = CampaignObjectiveTracker.Obj07, TitleKey = "objective.foundry_outskirts_bring_back", RegionId = foundry,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("出发前往铸造前哨外围", s => Departures(s, foundry) > 0),
-                        new ObjectiveItemDef($"带着{cannon}撤离回家",
+                        ObjectiveItemDef.Keyed("objective.depart_for_the_foundry", s => Departures(s, foundry) > 0),
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.evacuate_home_with_0", cannon()),
                             s => FoundryOutpostRegion.Find(s)?.State == RegionState.Cleared,
                             status: QuestStatus(FoundryOutpostLayout.CannonModuleContentId)),
                     },
@@ -407,10 +407,10 @@ namespace GameLogic.Campaign
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj08, Title = "解析并实装熔穿过载", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj08, TitleKey = "objective.analyze_and_install_melt", RegionId = home,
                     Items = new[]
                     {
-                        new ObjectiveItemDef($"在解析台解析{cannon}", s => FoundryOutpostRegion.ComputeCoreGateLights(s).CannonAnalyzed,
+                        ObjectiveItemDef.Lazy(() => GameText.Format("objective.analyze_0_at_the", cannon()), s => FoundryOutpostRegion.ComputeCoreGateLights(s).CannonAnalyzed,
                             At(HomeValleyLayout.BuildingTypeAnalysisBench)),
                         // FG1-SIG-05：过载是核心固件——保存 / 实装按“接入时能打出熔穿过载”判定（与核心门三灯同一判定）。
                         ObjectiveItemDef.Keyed("objective.obj08.save_overload", s => FoundryOutpostRegion.ComputeCoreGateLights(s).OverloadBlueprintSaved),
@@ -420,23 +420,23 @@ namespace GameLogic.Campaign
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj09, Title = "摧毁主核心并回收数据", RegionId = foundry,
+                    Id = CampaignObjectiveTracker.Obj09, TitleKey = "objective.destroy_the_main_core", RegionId = foundry,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("摧毁两个供能节点", s => BossState(s) >= CoreBossState.Phase1, status: NodeStatus),
-                        new ObjectiveItemDef("摧毁铸造前哨主核心", s => BossState(s) == CoreBossState.Destroyed),
-                        new ObjectiveItemDef("带着核心数据撤离回家", s => QuestRecovered(s, FoundryOutpostLayout.CoreDataContentId),
+                        ObjectiveItemDef.Keyed("objective.destroy_both_power_nodes", s => BossState(s) >= CoreBossState.Phase1, status: NodeStatus),
+                        ObjectiveItemDef.Keyed("objective.destroy_the_foundry_outpost", s => BossState(s) == CoreBossState.Destroyed),
+                        ObjectiveItemDef.Keyed("objective.evacuate_home_with_the", s => QuestRecovered(s, FoundryOutpostLayout.CoreDataContentId),
                             status: QuestStatus(FoundryOutpostLayout.CoreDataContentId)),
                     },
                 },
                 new ObjectiveDef
                 {
-                    Id = CampaignObjectiveTracker.Obj10, Title = "建造并启动返航信标", RegionId = home,
+                    Id = CampaignObjectiveTracker.Obj10, TitleKey = "objective.build_and_launch_the", RegionId = home,
                     Items = new[]
                     {
-                        new ObjectiveItemDef("建成导航信标", s => Operational(s, HomeValleyLayout.BuildingTypeBeacon), BeaconPosition),
-                        new ObjectiveItemDef("让导航信标通电", s => OperationalAndPowered(s, HomeValleyLayout.BuildingTypeBeacon), BeaconPosition),
-                        new ObjectiveItemDef("对信标按交互键确认启动", s => EventGranted(s, CampaignObjectiveTracker.BeaconLaunchEventId), BeaconPosition),
+                        ObjectiveItemDef.Keyed("objective.build_the_navigation_beacon", s => Operational(s, HomeValleyLayout.BuildingTypeBeacon), BeaconPosition),
+                        ObjectiveItemDef.Keyed("objective.power_the_navigation_beacon", s => OperationalAndPowered(s, HomeValleyLayout.BuildingTypeBeacon), BeaconPosition),
+                        ObjectiveItemDef.Keyed("objective.press_interact_at_the", s => EventGranted(s, CampaignObjectiveTracker.BeaconLaunchEventId), BeaconPosition),
                     },
                 },
             };

@@ -771,7 +771,7 @@ namespace GameLogic.Campaign.Economy
                         : string.Empty,
                     Section = def.AwaySection,
                     TypeId = def.Id,
-                    Detail = member.Detail ?? string.Empty,
+                    Detail = member.DetailCode ?? string.Empty, // 存编码，显示时 AwayReportView.EntryLine 按当前语言重组
                     Tick = GameClock.Ticks,
                     HasLocation = member.HasLocation,
                     RegionId = member.RegionId ?? string.Empty,

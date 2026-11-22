@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign
 {
@@ -125,12 +126,12 @@ namespace GameLogic.Campaign
             if (fromVersion < MinVersion || fromVersion > TargetVersion)
             {
                 return new SaveMigrationRun(SaveMigrationOutcome.OutOfRange, null, fromVersion,
-                    $"存档版本 {fromVersion} 不在升级链 {MinVersion}→{TargetVersion} 内", null);
+                    $"存档版本 {fromVersion} 不在升级链 {MinVersion}→{TargetVersion} 内", null); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!CanUpgradeFrom(fromVersion, out int missing))
             {
                 return new SaveMigrationRun(SaveMigrationOutcome.Missing, null, missing,
-                    $"缺少升级器 v{missing}→v{missing + 1}", null);
+                    $"缺少升级器 v{missing}→v{missing + 1}", null); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             string json = payloadJson;
@@ -145,12 +146,12 @@ namespace GameLogic.Campaign
                 catch (Exception e)
                 {
                     return new SaveMigrationRun(SaveMigrationOutcome.Failed, null, v,
-                        $"升级器 v{v}→v{v + 1}（{step.Description}）失败：{e.Message}", applied.ToArray());
+                        $"升级器 v{v}→v{v + 1}（{step.Description}）失败：{e.Message}", applied.ToArray()); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 if (string.IsNullOrWhiteSpace(json))
                 {
                     return new SaveMigrationRun(SaveMigrationOutcome.Failed, null, v,
-                        $"升级器 v{v}→v{v + 1}（{step.Description}）返回空正文", applied.ToArray());
+                        $"升级器 v{v}→v{v + 1}（{step.Description}）返回空正文", applied.ToArray()); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 applied.Add(v);
             }

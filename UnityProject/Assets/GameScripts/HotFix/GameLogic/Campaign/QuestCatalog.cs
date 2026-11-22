@@ -123,7 +123,7 @@ namespace GameLogic.Campaign
                 Tables t = ConfigSystem.Instance.Tables;
                 if (t?.TbQuest == null)
                 {
-                    LoadError = "fg.TbQuest 没有加载";
+                    LoadError = "fg.TbQuest 没有加载"; // loc-ignore: 开发者自检 / 诊断文本
                     return;
                 }
                 foreach (Quest q in t.TbQuest.DataList)
@@ -155,7 +155,7 @@ namespace GameLogic.Campaign
             }
             catch (Exception e)
             {
-                LoadError = "fg.TbQuest 读不到：" + e.Message;
+                LoadError = "fg.TbQuest 读不到：" + e.Message; // loc-ignore: 开发者自检 / 诊断文本
                 _rows.Clear();
                 _sideRows.Clear();
                 _byId.Clear();

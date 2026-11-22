@@ -2010,7 +2010,7 @@ namespace GameLogic.Stage.CellStage
                     p.x + _cameraFollowOffset.x, _cameraFollowOffset.y, p.y + _cameraFollowOffset.z);
             }
 
-            string mode = _cameraVerifyMode ? "调试态（透视）" : "默认态（俯视）";
+            string mode = _cameraVerifyMode ? "调试态（透视）" : "默认态（俯视）"; // loc-ignore: 细胞原型相机验证调试读数（FG-GAP-268）
             TEngine.Log.Info($"[GM] 相机切换 → {mode}");
         }
 

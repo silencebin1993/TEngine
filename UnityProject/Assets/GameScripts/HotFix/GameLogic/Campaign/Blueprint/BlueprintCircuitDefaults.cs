@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GameLogic.Campaign.Content;
 using GameLogic.Campaign.Regions;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Blueprint
 {
@@ -30,7 +31,9 @@ namespace GameLogic.Campaign.Blueprint
             public string UtilityId;
             public string StructureId;
             public string[] Firmware = Array.Empty<string>();
-            public string DisplayName;
+            /// <summary>FG15-UX-03（审查 P2）：存文本键，读取时按当前语言取（静态表初始化时取文本会把语言冻结在首次访问那一刻）。</summary>
+            public string NameKey;
+            public string DisplayName => GameText.Get(NameKey);
         }
 
         private static readonly IReadOnlyDictionary<string, DefaultLoadout> Loadouts =
@@ -40,13 +43,13 @@ namespace GameLogic.Campaign.Blueprint
                 {
                     ChassisId = HomeValleyLayout.Erc001ChassisId,
                     StructureId = ComponentCatalog.StructCargoId,
-                    DisplayName = "搬运轮式 ERC-001",
+                    NameKey = "circuit.defaults.hauler_wheels_erc_001",
                 },
                 [HomeValleyLayout.BlueprintHaulerId] = new DefaultLoadout
                 {
                     ChassisId = HomeValleyLayout.Erc002ChassisId,
                     PrimaryId = ComponentCatalog.CompBeamId,
-                    DisplayName = "搬运机",
+                    NameKey = "home.layout.hauler",
                 },
                 [HomeValleyLayout.BlueprintErc003Id] = new DefaultLoadout
                 {
@@ -54,13 +57,13 @@ namespace GameLogic.Campaign.Blueprint
                     PrimaryId = ComponentCatalog.CompGunId,
                     UtilityId = ComponentCatalog.FuncDashId,
                     Firmware = new[] { FirmwareCatalog.FwHomingId, FirmwareCatalog.FwTrailId },
-                    DisplayName = "战斗履带 ERC-003",
+                    NameKey = "home.layout.combat_tracks_erc_003",
                 },
                 [HomeValleyLayout.BlueprintHoverId] = new DefaultLoadout
                 {
                     ChassisId = ChassisCatalog.ChassisHoverId,
                     PrimaryId = ComponentCatalog.CompRepairBeamId,
-                    DisplayName = "维修机",
+                    NameKey = "home.layout.repair_unit",
                 },
             };
 

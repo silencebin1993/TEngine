@@ -647,7 +647,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         // FG4-ECO-05（FG-GAP-094）：精炼塔 / 调配站等流体口里的燃油、酸液、冷却液随拆除排空，先写明。
                         req.Consequences.Add(GameText.Format("ui.build.confirm_fluid_line", Economy.BuildingOps.NameOf(target),
-                            string.Join(GameText.Language == GameLanguage.En ? ", " : "、", held)));
+                            string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), held)));
                     }
                     UiConfirmDialog.Show(req);
                     PendingConfirmBuildingId = id;
@@ -1235,7 +1235,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (plan.CriticalNames.Count > 0)
             {
-                req.Lines.Add(GameText.Format("ui.build.batch_confirm_critical", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", plan.CriticalNames)));
+                req.Lines.Add(GameText.Format("ui.build.batch_confirm_critical", string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), plan.CriticalNames)));
             }
             if (plan.BuildingFluidMl > 0)
             {
@@ -1613,7 +1613,7 @@ namespace GameLogic.Campaign.Regions
                 // 只在格子 / 朝向 / 建筑记录变化时算一次（Burst 泛洪，家园范围内毫秒级以下）。
                 if (Nav.NavService.PlacementCutsOff(state, typeId, HoverCell, GhostRotation, _cutOffScratch) > 0)
                 {
-                    Preview.Warnings.Add(GameText.Format("nav.build.unreachable_warning", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", _cutOffScratch)));
+                    Preview.Warnings.Add(GameText.Format("nav.build.unreachable_warning", string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), _cutOffScratch)));
                 }
                 // FG3-LOG-06（FGR-LOG-003“超出电力覆盖（只警告，不阻止）”；FG03 第 4 节“放置时预览电力覆盖”）：会接入哪个电网 / 超出覆盖的警告；电塔写会连起哪些电网、覆盖多少座建筑。
                 HomeValleyPowerGrid.AppendPlacementNotes(state, Preview);
@@ -1929,7 +1929,7 @@ namespace GameLogic.Campaign.Regions
             {
                 parts.Add(GameText.Format("grid.port.entry", GameText.Get(p.IsOutput ? "grid.port.out" : "grid.port.in"), GameText.Get(GridMath.DirTextKey(p.Dir))));
             }
-            return GameText.Format("ui.build.ports", string.Join(GameText.Language == GameLanguage.En ? ", " : "、", parts));
+            return GameText.Format("ui.build.ports", string.Join(GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep"), parts));
         }
 
         // ── 表现（占位几何，成对创建 / 销毁）────────────────────────────────────────

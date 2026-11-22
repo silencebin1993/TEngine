@@ -119,12 +119,12 @@ namespace GameLogic.Campaign.Content
                 _table = ConfigSystem.Instance.Tables?.TbStatusTag;
                 if (_table == null)
                 {
-                    _loadError = "配置表 fg.TbStatusTag 不存在";
+                    _loadError = "配置表 fg.TbStatusTag 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             catch (Exception ex)
             {
-                _loadError = $"配置表读取失败：{ex.Message}";
+                _loadError = $"配置表读取失败：{ex.Message}"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_loadError != null)
             {

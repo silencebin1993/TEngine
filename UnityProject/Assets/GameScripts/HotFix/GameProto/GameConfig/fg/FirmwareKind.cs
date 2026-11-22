@@ -92,7 +92,7 @@ public sealed partial class FirmwareKind : Luban.BeanBase
     /// </summary>
     public readonly string DescKey;
     /// <summary>
-    /// 稀有度:common=普通,rare=稀有,epic=精良(文本键 firmware.rarity.&lt;值&gt;)
+    /// 稀有度:common=普通,rare=精良,epic=稀有(文本键 firmware.rarity.&lt;值&gt;;FG15-UX-03 FG-GAP-134)
     /// </summary>
     public readonly string Rarity;
     /// <summary>

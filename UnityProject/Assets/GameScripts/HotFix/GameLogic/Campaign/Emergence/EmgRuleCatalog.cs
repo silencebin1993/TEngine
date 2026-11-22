@@ -191,12 +191,12 @@ namespace GameLogic.Campaign.Emergence
             capacity = Math.Min(Math.Max(1, capacity), EmgRuleConst.Capacity);
             if (rows == null)
             {
-                c.Problems.Add("fg.TbChannelRule 没有数据");
+                c.Problems.Add("fg.TbChannelRule 没有数据"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             if (rows.Count > capacity)
             {
-                c.Problems.Add($"fg.TbChannelRule {rows.Count} 行超过容量 emg.rule.capacity = {capacity}，整表拒绝");
+                c.Problems.Add($"fg.TbChannelRule {rows.Count} 行超过容量 emg.rule.capacity = {capacity}，整表拒绝"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             EmgCompiled ports = EmgCatalog.Current;
@@ -212,29 +212,29 @@ namespace GameLogic.Campaign.Emergence
                 int main = string.IsNullOrEmpty(r.MainKind) ? 0 : "STBP".IndexOf(r.MainKind, StringComparison.Ordinal) + 1; // 空串的 IndexOf 恒为 0，不能当 S
                 if (pair <= 0 || op < 0 || main <= 0 || (op != EmgRuleConst.OpDeferred && cond <= 0))
                 {
-                    c.Problems.Add($"{r.Id}：pairKind / op / cond / mainKind 不认识（{r.PairKind} / {r.Op} / {r.Cond} / {r.MainKind}）");
+                    c.Problems.Add($"{r.Id}：pairKind / op / cond / mainKind 不认识（{r.PairKind} / {r.Op} / {r.Cond} / {r.MainKind}）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (Array.IndexOf(ClosedNonMatterProducts, r.Product) < 0 && (r.Product == null || !r.Product.StartsWith("mat.", StringComparison.Ordinal)))
                 {
-                    c.Problems.Add($"{r.Id}：产物 {r.Product} 不在封闭清单（FG19B §2.9）");
+                    c.Problems.Add($"{r.Id}：产物 {r.Product} 不在封闭清单（FG19B §2.9）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!TryCode(ports, r.A, out ushort a) || !TryCode(ports, r.B, out ushort b))
                 {
-                    c.Problems.Add($"{r.Id}：端口 {r.A} / {r.B} 未登记");
+                    c.Problems.Add($"{r.Id}：端口 {r.A} / {r.B} 未登记"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 byte product = ProductMatter(r.Product);
                 byte by = r.ByProduct == "none" ? (byte)0 : EmgMatterConst.MatterOfPort(PortCode(ports, r.ByProduct));
                 if (op != EmgRuleConst.OpDeferred && op != EmgRuleConst.OpMeltPit && op != EmgRuleConst.OpScorch && (main == EmgRuleConst.MainS || main == EmgRuleConst.MainT) && product == 0)
                 {
-                    c.Problems.Add($"{r.Id}：S / T 类结算方式 {r.Op} 的产物 {r.Product} 不是物质");
+                    c.Problems.Add($"{r.Id}：S / T 类结算方式 {r.Op} 的产物 {r.Product} 不是物质"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (r.Side == "side.mult" && r.SideValue > 1.25f + 1e-4f)
                 {
-                    c.Problems.Add($"{r.Id}：附带倍率 {r.SideValue} 超过 1.25（FGR-EMG-085）");
+                    c.Problems.Add($"{r.Id}：附带倍率 {r.SideValue} 超过 1.25（FGR-EMG-085）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 int key = NamedReactionCatalog.StableKey(r.Named != "none" ? r.Named : r.Id);

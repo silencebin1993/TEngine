@@ -440,7 +440,7 @@ namespace GameLogic.Stage
             GameClock.ResetSession();
             RestoreResult result = slot >= 0
                 ? CampaignRestoreOrchestrator.Restore(slot)
-                : new RestoreResult(RestoreOutcome.Fail, RestoreStep.VersionAndChecksum, "没有活动存档槽", null, false, null);
+                : new RestoreResult(RestoreOutcome.Fail, RestoreStep.VersionAndChecksum, GameLogic.Localization.GameText.Get("save.restore.no_active_slot"), null, false, null);
             if (!result.Success)
             {
                 Log.Warning($"[GameRoot] 失败页读取自动存档失败：槽位 {slot}，{result.FailedStep}：{result.Message}");

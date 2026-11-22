@@ -172,7 +172,7 @@ namespace GameLogic.EditorTools
                     {
                         problems.Add($"{id} 无声音");
                     }
-                    if (def.CaptionMode != FeedbackCaptionMode.Always || string.IsNullOrEmpty(def.Tag))
+                    if (def.CaptionMode != FeedbackCaptionMode.Always || string.IsNullOrEmpty(def.ResolvedTag))
                     {
                         problems.Add($"{id} 缺常显字幕（非声音反馈不能被字幕开关关掉）");
                     }
@@ -188,7 +188,7 @@ namespace GameLogic.EditorTools
             var bad = new List<string>();
             foreach (FeedbackCueDef def in FeedbackCueCatalog.All)
             {
-                foreach (string text in new[] { def.Tag, def.Caption })
+                foreach (string text in new[] { def.ResolvedTag, def.ResolvedCaption })
                 {
                     if (string.IsNullOrEmpty(text))
                     {

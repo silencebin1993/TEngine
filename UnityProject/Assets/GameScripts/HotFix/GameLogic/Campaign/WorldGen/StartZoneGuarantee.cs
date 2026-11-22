@@ -5,6 +5,7 @@ using System.Text;
 using BinGames.Sim.WorldGen;
 using GameConfig.fg;
 using GameLogic.Campaign.Grid;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.WorldGen
 {
@@ -197,7 +198,7 @@ namespace GameLogic.Campaign.WorldGen
                     }
                     else
                     {
-                        report.Failures.Add($"{g.Item}：{g.Radius} 格内找不到能放半径 {g.StampRadius} 保证点的位置（开局布局占满？需要调表）");
+                        report.Failures.Add($"{g.Item}：{g.Radius} 格内找不到能放半径 {g.StampRadius} 保证点的位置（开局布局占满？需要调表）"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
                 if (!placed)
@@ -228,7 +229,7 @@ namespace GameLogic.Campaign.WorldGen
                 item.TotalCells = results[i].TotalCells;
                 if (!item.Satisfied)
                 {
-                    report.Failures.Add($"{item.Item}：局部重生成后仍不满足（最大连通区 {item.BestCells} 格）");
+                    report.Failures.Add($"{item.Item}：局部重生成后仍不满足（最大连通区 {item.BestCells} 格）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             report.CliffsInFlat = stats[0];
@@ -236,7 +237,7 @@ namespace GameLogic.Campaign.WorldGen
             report.SampledCells = stats[2];
             if (!report.FlatOk)
             {
-                report.Failures.Add($"第 1 级：{report.FlatRadius} 格内有 {report.CliffsInFlat} 格悬崖、最高污染 {report.MaxPollutionInFlat}（上限 {report.FlatPollutionCap}）");
+                report.Failures.Add($"第 1 级：{report.FlatRadius} 格内有 {report.CliffsInFlat} 格悬崖、最高污染 {report.MaxPollutionInFlat}（上限 {report.FlatPollutionCap}）"); // loc-ignore: 开发者自检 / 诊断文本
             }
             sw.Stop();
             report.AnalyzeMs = sw.Elapsed.TotalMilliseconds;

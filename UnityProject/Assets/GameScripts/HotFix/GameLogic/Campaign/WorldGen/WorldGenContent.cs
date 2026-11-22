@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using GameConfig.fg;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.WorldGen
 {
@@ -448,12 +449,12 @@ namespace GameLogic.Campaign.WorldGen
                 if (_versions == null || _presets == null || _surfaces == null || _territories == null
                     || _startClear == null || _guarantees == null || _axes == null || _templates == null || _anchors == null || _templatePoints == null)
                 {
-                    _loadError = "配置表 fg.TbWorldGenVersion / TbWorldPreset / TbSurface / TbTerritory / TbWorldStartClear / TbWorldStartGuarantee / TbWorldSettingAxis / TbTerritoryTemplate / TbAnchorSite / TbAnchorTemplatePoint 不存在";
+                    _loadError = "配置表 fg.TbWorldGenVersion / TbWorldPreset / TbSurface / TbTerritory / TbWorldStartClear / TbWorldStartGuarantee / TbWorldSettingAxis / TbTerritoryTemplate / TbAnchorSite / TbAnchorTemplatePoint 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             catch (Exception ex)
             {
-                _loadError = $"配置表读取失败：{ex.Message}";
+                _loadError = $"配置表读取失败：{ex.Message}"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_loadError != null)
             {

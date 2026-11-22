@@ -132,7 +132,7 @@ namespace GameLogic.Campaign.WorldSim
             }
             catch (Exception e)
             {
-                LastProblem = "fg.TbTerritoryControl 读不到：" + e.Message;
+                LastProblem = "fg.TbTerritoryControl 读不到：" + e.Message; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
         }
@@ -759,7 +759,7 @@ namespace GameLogic.Campaign.WorldSim
             TransitGroupRecord g2 = WorldTransitSystem.DispatchHarass(s, origin, r.TerritoryId, HarassUnits, target.X, target.Y, out string failure);
             if (g2 == null)
             {
-                LastProblem = "骚扰派兵失败：" + failure;
+                LastProblem = "骚扰派兵失败：" + failure; // loc-ignore: 开发者自检 / 诊断文本
                 return;
             }
             FillComposition(s, g2, row?.GarrisonUnits, g2.UnitCount, r.TerritoryId);
@@ -996,7 +996,7 @@ namespace GameLogic.Campaign.WorldSim
                     return key;
                 }
             }
-            LastProblem = "迎战队伍键区间已满（" + KeyCount + " 个同时在用）";
+            LastProblem = "迎战队伍键区间已满（" + KeyCount + " 个同时在用）"; // loc-ignore: 开发者自检 / 诊断文本
             return KeyBase;
         }
 
@@ -1118,7 +1118,7 @@ namespace GameLogic.Campaign.WorldSim
                         }
                         else
                         {
-                            LastProblem = "迎战展开生成失败（战斗内核已满？）：" + (def?.EnemyTypeId ?? "(无编成)");
+                            LastProblem = "迎战展开生成失败（战斗内核已满？）：" + (def?.EnemyTypeId ?? "(无编成)"); // loc-ignore: 开发者自检 / 诊断文本
                         }
                     }
                 }

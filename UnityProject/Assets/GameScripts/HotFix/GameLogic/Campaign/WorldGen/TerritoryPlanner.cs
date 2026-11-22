@@ -4,6 +4,7 @@ using System.Text;
 using BinGames.Sim.WorldGen;
 using GameConfig.fg;
 using GameLogic.Campaign.Grid;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.WorldGen
 {
@@ -246,7 +247,7 @@ namespace GameLogic.Campaign.WorldGen
                 PlannedTerritory t = plan.Find(row.TerritoryId);
                 if (t == null)
                 {
-                    plan.Failures.Add($"锚点 {row.Id}：领地 {row.TerritoryId} 不在规划层里（表配置错误）");
+                    plan.Failures.Add($"锚点 {row.Id}：领地 {row.TerritoryId} 不在规划层里（表配置错误）"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 PlannedAnchor placed = null;
@@ -298,7 +299,7 @@ namespace GameLogic.Campaign.WorldGen
                     {
                         placed = Make(plan, row, t, i, start, dmin, maxAttempts);
                         placed.Fallback = true;
-                        plan.Failures.Add($"锚点 {row.Id}：试探与逐度扫描都找不到满足约束的位置（{lastWhy}），已放在 ({placed.OriginX},{placed.OriginY})（约束冲突，需要调表）");
+                        plan.Failures.Add($"锚点 {row.Id}：试探与逐度扫描都找不到满足约束的位置（{lastWhy}），已放在 ({placed.OriginX},{placed.OriginY})（约束冲突，需要调表）"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
                 plan.Anchors.Add(placed);
@@ -386,23 +387,23 @@ namespace GameLogic.Campaign.WorldGen
             PlannedTerritory t = c.Territory;
             if (!Inside(t, c.OriginX, c.OriginY, 0))
             {
-                return "原点不在领地里";
+                return "原点不在领地里"; // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!Inside(t, c.EntryX, c.EntryY, 0))
             {
-                return "入口不在领地里";
+                return "入口不在领地里"; // loc-ignore: 开发者自检 / 诊断文本
             }
             // FG8-GEN-02 修复轮：入口离领地边界至少一个平整半径——走向入口的队伍要先进领地（顶部领地名称提示、行军“进入领地”提醒）再到入口；
             // 入口贴着边界时，远征队在到达半径（expedition.march.arrive_radius）外就进了地点，一路都没进过领地（冒烟 StepMarchArrived 实测）。
             if (!Inside(t, c.EntryX, c.EntryY, c.FootprintRadius))
             {
-                return "入口离领地边界不足一个平整半径";
+                return "入口离领地边界不足一个平整半径"; // loc-ignore: 开发者自检 / 诊断文本
             }
             long cdx = c.OriginX - plan.CoreX;
             long cdy = c.OriginY - plan.CoreY;
             if (WorldGenMath.Isqrt(cdx * cdx + cdy * cdy) - c.OuterRadius <= plan.HomeZoneRadius)
             {
-                return "进入家园区";
+                return "进入家园区"; // loc-ignore: 开发者自检 / 诊断文本
             }
             foreach (PlannedAnchor o in plan.Anchors)
             {
@@ -411,7 +412,7 @@ namespace GameLogic.Campaign.WorldGen
                 long need = (long)c.FootprintRadius + o.FootprintRadius + Math.Max(c.Row.MinGap, o.Row.MinGap);
                 if (dx * dx + dy * dy < need * need)
                 {
-                    return $"与锚点 {o.Id} 的平整范围太近";
+                    return $"与锚点 {o.Id} 的平整范围太近"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             return null;

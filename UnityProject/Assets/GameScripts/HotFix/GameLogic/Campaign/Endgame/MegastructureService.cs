@@ -105,11 +105,11 @@ namespace GameLogic.Campaign.Endgame
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbMegaStage 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbMegaStage 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (t == null)
             {
-                ProblemList.Add("fg.TbMegaStage 不存在（改 tools/cell_tables/fgdata_megastructure.py 后重新生成）");
+                ProblemList.Add("fg.TbMegaStage 不存在（改 tools/cell_tables/fgdata_megastructure.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 return;
             }
             var rows = new List<MegaStage>(t.DataList);
@@ -120,12 +120,12 @@ namespace GameLogic.Campaign.Endgame
                     || !ItemCatalog.TryGet(r.FluidItem, out ItemDef fluid) || fluid.Form != ItemForm.Fluid
                     || r.SolidAmount < 1 || r.FluidLiters < 1 || r.PowerHours <= 0f)
                 {
-                    ProblemList.Add($"fg.TbMegaStage {r?.Id}：物品 / 数量 / 供电时长不合法，已跳过");
+                    ProblemList.Add($"fg.TbMegaStage {r?.Id}：物品 / 数量 / 供电时长不合法，已跳过"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (StageList.Count > 0 && !ReferenceEquals(StageList[0].Solid, solid))
                 {
-                    ProblemList.Add($"fg.TbMegaStage {r.Id}：五个阶段的固体必须是同一种（物品口登记时就定下收什么），已跳过");
+                    ProblemList.Add($"fg.TbMegaStage {r.Id}：五个阶段的固体必须是同一种（物品口登记时就定下收什么），已跳过"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 StageList.Add(new MegaStageDef
@@ -136,7 +136,7 @@ namespace GameLogic.Campaign.Endgame
             }
             if (StageList.Count == 0)
             {
-                ProblemList.Add("fg.TbMegaStage 没有可用的阶段");
+                ProblemList.Add("fg.TbMegaStage 没有可用的阶段"); // loc-ignore: 开发者自检 / 诊断文本
             }
         }
 

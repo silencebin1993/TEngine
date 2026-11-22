@@ -339,7 +339,7 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (!BlueprintCircuitChipCatalog.IsValidSourceContent(contentId))
             {
-                return CircuitOpResult.Fail("unknown_source", $"'{contentId}' 不是合法的能源内容。");
+                return CircuitOpResult.Fail("unknown_source", GameText.Format("circuit.op.0_is_not_a", contentId));
             }
             CaptureUndo();
             SlotContentIds[BlueprintCircuitLayout.SourceSlot] = contentId;
@@ -358,16 +358,16 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (string.IsNullOrEmpty(chassisId))
             {
-                return CircuitOpResult.Fail("chassis_required", "底盘不能为空。");
+                return CircuitOpResult.Fail("chassis_required", GameText.Get("circuit.op.the_chassis_cannot_be"));
             }
             string archetype = ChassisCatalog.ResolveArchetype(chassisId) ?? chassisId;
             if (!ChassisCatalog.TryGet(archetype, out MechanicalContentDef def))
             {
-                return CircuitOpResult.Fail("unknown_chassis", $"'{chassisId}' 不是已知底盘。");
+                return CircuitOpResult.Fail("unknown_chassis", GameText.Format("circuit.op.0_is_not_a_2", chassisId));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, archetype))
             {
-                return CircuitOpResult.Fail("chassis_locked", $"底盘“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+                return CircuitOpResult.Fail("chassis_locked", GameText.Format("circuit.op.chassis_0_is_locked", def.DisplayName, def.LockedHintText));
             }
             // FG2-FW-02（FGR-FW-012）：换成固定底盘（炮塔）前，已装的不兼容组件要先卸下（不偷偷替玩家拆），给出原因。
             string blocked = IncompatibleComponentNames(chassisId);
@@ -386,7 +386,7 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (string.IsNullOrEmpty(primaryId))
             {
-                return CircuitOpResult.Fail("primary_required", "主组件不能为空。");
+                return CircuitOpResult.Fail("primary_required", GameText.Get("circuit.op.the_main_component_cannot"));
             }
             if (IsPartDuplicate(primaryId, 0))
             {
@@ -395,11 +395,11 @@ namespace GameLogic.Campaign.Blueprint
             if (!ComponentCatalog.TryGet(primaryId, out MechanicalContentDef def)
                 || def.Category != MechanicalContentCategory.MainComponent)
             {
-                return CircuitOpResult.Fail("wrong_slot", $"'{primaryId}' 不是合法的主组件（错槽）。");
+                return CircuitOpResult.Fail("wrong_slot", GameText.Format("circuit.op.0_is_not_a_3", primaryId));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, primaryId))
             {
-                return CircuitOpResult.Fail("primary_locked", $"主组件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+                return CircuitOpResult.Fail("primary_locked", GameText.Format("circuit.op.main_component_0_is", def.DisplayName, def.LockedHintText));
             }
             if (!CarrierReadings.CanMount(ChassisId, primaryId, out string turretReason, out _))
             {
@@ -429,11 +429,11 @@ namespace GameLogic.Campaign.Blueprint
             if (!ComponentCatalog.TryGet(utilityId, out MechanicalContentDef def)
                 || def.Category != MechanicalContentCategory.FunctionComponent)
             {
-                return CircuitOpResult.Fail("wrong_slot", $"'{utilityId}' 不是合法的功能组件（错槽）。");
+                return CircuitOpResult.Fail("wrong_slot", GameText.Format("circuit.op.0_is_not_a_4", utilityId));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, utilityId))
             {
-                return CircuitOpResult.Fail("utility_locked", $"功能组件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+                return CircuitOpResult.Fail("utility_locked", GameText.Format("circuit.op.utility_component_0_is", def.DisplayName, def.LockedHintText));
             }
             if (!CarrierReadings.CanMount(ChassisId, utilityId, out string turretReason, out _))
             {
@@ -462,11 +462,11 @@ namespace GameLogic.Campaign.Blueprint
             if (!ComponentCatalog.TryGet(structureId, out MechanicalContentDef def)
                 || def.Category != MechanicalContentCategory.Structure)
             {
-                return CircuitOpResult.Fail("wrong_slot", $"'{structureId}' 不是合法的结构（错槽）。");
+                return CircuitOpResult.Fail("wrong_slot", GameText.Format("circuit.op.0_is_not_a_5", structureId));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, structureId))
             {
-                return CircuitOpResult.Fail("structure_locked", $"结构“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+                return CircuitOpResult.Fail("structure_locked", GameText.Format("circuit.op.structure_0_is_locked", def.DisplayName, def.LockedHintText));
             }
             CaptureUndo();
             StructureId = structureId;
@@ -480,11 +480,11 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (BlueprintCircuitLayout.IsFixedSlot(slot))
             {
-                return CircuitOpResult.Fail("fixed_slot", "0 号源槽/8 号汇槽不可直接装卸，由外层装配或 TrySetSource 决定。");
+                return CircuitOpResult.Fail("fixed_slot", GameText.Get("circuit.op.source_slot_0_and"));
             }
             if (slot < 0 || slot >= BlueprintCircuitLayout.SlotCount)
             {
-                return CircuitOpResult.Fail("slot_out_of_range", $"槽位 {slot} 越界。");
+                return CircuitOpResult.Fail("slot_out_of_range", GameText.Format("circuit.op.slot_0_is_out", slot));
             }
             // FG1-SIG-02（FGR-SIG-020）：接入口必须是空格——先取消接入口才能在这一格装芯片。
             if (HasUplink && slot == UplinkSlot)
@@ -510,7 +510,7 @@ namespace GameLogic.Campaign.Blueprint
             if (!BlueprintCircuitChipCatalog.IsValidChipContent(contentId, slotType))
             {
                 return CircuitOpResult.Fail("illegal_chip",
-                    $"'{contentId}' 不能装入 {slot} 号槽（类型 {slotType}）——未解锁、非法内容或槽型不匹配。");
+                    GameText.Format("circuit.op.0_cannot_go_in", contentId, slot, slotType));
             }
             // ER4-PRIM-03 execute_code 实测发现的真实缺陷：本方法此前对已占用槽位无条件覆盖写
             // SlotContentIds[slot]，不做"槽位已空"校验。ER4-PRIM-02 自身校验从未测过这个场景（当时
@@ -520,7 +520,7 @@ namespace GameLogic.Campaign.Blueprint
             // 装新内容，与 UI 上"装/卸是两个显式动作"的既有设计一致，不是回归而是补齐一直缺失的校验。
             if (!string.IsNullOrEmpty(SlotContentIds[slot]))
             {
-                return CircuitOpResult.Fail("slot_occupied", $"{slot} 号槽已装有内容，请先卸下再装入新内容。");
+                return CircuitOpResult.Fail("slot_occupied", GameText.Format("circuit.op.slot_0_is_already", slot));
             }
             CaptureUndo();
             SlotContentIds[slot] = contentId;
@@ -536,15 +536,15 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (BlueprintCircuitLayout.IsFixedSlot(slot))
             {
-                return CircuitOpResult.Fail("fixed_slot", "0 号源槽/8 号汇槽不可移除。");
+                return CircuitOpResult.Fail("fixed_slot", GameText.Get("circuit.op.source_slot_0_and_2"));
             }
             if (slot < 0 || slot >= BlueprintCircuitLayout.SlotCount)
             {
-                return CircuitOpResult.Fail("slot_out_of_range", $"槽位 {slot} 越界。");
+                return CircuitOpResult.Fail("slot_out_of_range", GameText.Format("circuit.op.slot_0_is_out", slot));
             }
             if (string.IsNullOrEmpty(SlotContentIds[slot]))
             {
-                return CircuitOpResult.Fail("slot_already_empty", $"{slot} 号槽已经是空的。");
+                return CircuitOpResult.Fail("slot_already_empty", GameText.Format("circuit.op.slot_0_is_already_2", slot));
             }
             CaptureUndo();
             SlotContentIds[slot] = null;
@@ -575,7 +575,7 @@ namespace GameLogic.Campaign.Blueprint
             var kept = _edges.Where(e => !(e.From == from && e.To == to)).ToList();
             if (kept.Count == before)
             {
-                return CircuitOpResult.Fail("edge_not_found", $"不存在 {from}→{to} 这条边。");
+                return CircuitOpResult.Fail("edge_not_found", GameText.Format("circuit.op.there_is_no_wire", from, to));
             }
             CaptureUndo();
             _edges.Clear();
@@ -586,15 +586,15 @@ namespace GameLogic.Campaign.Blueprint
 
         private static string DescribeEdgeRejection(int from, int to, SlotGrid grid)
         {
-            if (from == to) return "不能连接槽位到自己。";
+            if (from == to) return GameText.Get("circuit.op.a_slot_cannot_be");
             if (from < 0 || from >= BlueprintCircuitLayout.SlotCount || to < 0 || to >= BlueprintCircuitLayout.SlotCount)
-                return "槽位越界。";
-            if (!SlotGrid.IsAdjacent(from, to)) return $"{from} 号与 {to} 号槽不是四邻，不能连接。";
+                return GameText.Get("circuit.op.slot_out_of_range");
+            if (!SlotGrid.IsAdjacent(from, to)) return GameText.Format("circuit.op.slots_0_and_1", from, to);
             foreach (DirectedEdge e in grid.Edges)
             {
-                if (e.From == from && e.To == to) return $"{from}→{to} 这条边已存在，不能重复添加。";
+                if (e.From == from && e.To == to) return GameText.Format("circuit.op.wire_0_1_already", from, to);
             }
-            return "已达到边数软帽（非空槽数×2），请先移除一条边或装更多芯片。";
+            return GameText.Get("circuit.op.wire_limit_reached_2");
         }
 
         // ── 接入口（FG1-SIG-02，FGR-SIG-020）───────────────────────────────────────
@@ -700,7 +700,7 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (index != 0 && index != 1)
             {
-                return CircuitOpResult.Fail("firmware_index_out_of_range", "固件槽只有 0/1 两个。");
+                return CircuitOpResult.Fail("firmware_index_out_of_range", GameText.Get("circuit.op.there_are_only_firmware"));
             }
             if (string.IsNullOrEmpty(firmwareId))
             {
@@ -729,11 +729,11 @@ namespace GameLogic.Campaign.Blueprint
             }
             if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef def))
             {
-                return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件。");
+                return CircuitOpResult.Fail("firmware_unknown", GameText.Format("circuit.op.0_is_not_a_6", firmwareId));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
             {
-                return CircuitOpResult.Fail("firmware_locked", $"固件“{def.DisplayName}”尚未解锁：{def.LockedHintText}");
+                return CircuitOpResult.Fail("firmware_locked", GameText.Format("circuit.op.firmware_0_is_locked", def.DisplayName, def.LockedHintText));
             }
             CaptureUndo();
             FirmwareSlots[index] = firmwareId;
@@ -745,7 +745,7 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (index != 0 && index != 1)
             {
-                return CircuitOpResult.Fail("firmware_index_out_of_range", "固件槽只有 0/1 两个。");
+                return CircuitOpResult.Fail("firmware_index_out_of_range", GameText.Get("circuit.op.there_are_only_firmware"));
             }
             CaptureUndo();
             FirmwareSlots[index] = null;
@@ -864,7 +864,7 @@ namespace GameLogic.Campaign.Blueprint
 
             if (HasCycle(out int[] cycleSlots))
             {
-                result.Add(CircuitIssueCode.HasCycle, "电路存在环，不能保存。", cycleSlots);
+                result.Add(CircuitIssueCode.HasCycle, GameText.Get("circuit.op.the_circuit_has_a"), cycleSlots);
             }
 
             for (int slot = 1; slot < BlueprintCircuitLayout.SlotCount - 1; slot++)
@@ -874,7 +874,7 @@ namespace GameLogic.Campaign.Blueprint
                 bool touched = _edges.Any(e => e.From == slot || e.To == slot);
                 if (!touched)
                 {
-                    result.Add(CircuitIssueCode.IsolatedChip, $"{slot} 号槽装了芯片但未连接任何导线（未通电）。", slot);
+                    result.Add(CircuitIssueCode.IsolatedChip, GameText.Format("circuit.op.slot_0_has_a", slot), slot);
                 }
             }
 
@@ -886,12 +886,12 @@ namespace GameLogic.Campaign.Blueprint
                 result.PathCount = paths.Count;
                 if (paths.Count == 0)
                 {
-                    result.Add(CircuitIssueCode.NoValidPath, "没有从源到汇的合法路径，无法保存。");
+                    result.Add(CircuitIssueCode.NoValidPath, GameText.Get("circuit.op.no_valid_path_from"));
                 }
                 else if (paths.Count > BlueprintCircuitLayout.MaxPaths)
                 {
                     result.Add(CircuitIssueCode.TooManyPaths,
-                        $"有效路径 {paths.Count} 条，超过上限 {BlueprintCircuitLayout.MaxPaths} 条。");
+                        GameText.Format("circuit.op.0_valid_paths_exceed", paths.Count, BlueprintCircuitLayout.MaxPaths));
                 }
             }
 
@@ -906,11 +906,11 @@ namespace GameLogic.Campaign.Blueprint
             }
             if (!string.IsNullOrEmpty(FirmwareSlots[0]) && !FirmwareCatalog.TryGet(FirmwareSlots[0], out _))
             {
-                result.Add(CircuitIssueCode.FirmwareUnknown, $"固件槽0 内容 '{FirmwareSlots[0]}' 未知。");
+                result.Add(CircuitIssueCode.FirmwareUnknown, GameText.Format("circuit.op.firmware_slot_0_content", FirmwareSlots[0]));
             }
             if (!string.IsNullOrEmpty(FirmwareSlots[1]) && !FirmwareCatalog.TryGet(FirmwareSlots[1], out _))
             {
-                result.Add(CircuitIssueCode.FirmwareUnknown, $"固件槽1 内容 '{FirmwareSlots[1]}' 未知。");
+                result.Add(CircuitIssueCode.FirmwareUnknown, GameText.Format("circuit.op.firmware_slot_1_content", FirmwareSlots[1]));
             }
 
             // FG1-SIG-01（FGR-SIG-012）：保存校验兜底——草稿里残留的核心固件（例如种类表改了之后的旧草稿）不能保存进机器电路。
@@ -939,7 +939,7 @@ namespace GameLogic.Campaign.Blueprint
 
             if (TryComputeLoad(out int totalLoad, out int? capacity) && capacity.HasValue && totalLoad > capacity.Value)
             {
-                result.Add(CircuitIssueCode.LoadExceeded, $"负载 {totalLoad} 超过底盘容量 {capacity.Value}。");
+                result.Add(CircuitIssueCode.LoadExceeded, GameText.Format("circuit.op.load_0_exceeds_chassis", totalLoad, capacity.Value));
             }
 
             // FG2-FW-02（FGR-FW-012）：保存校验兜底——固定底盘（炮塔）上的不兼容组件（旧草稿、换表后）不能保存，原因与装配入口一致。

@@ -761,7 +761,7 @@ namespace GameLogic.Campaign.Defense
             string res = ItemCatalog.ResourceTypeOf(AnalysisCatalog.WreckId);
             if (string.IsNullOrEmpty(res))
             {
-                LastProblem = "物品表里没有敌方残骸（enemy_wreck），残骸没有落地";
+                LastProblem = "物品表里没有敌方残骸（enemy_wreck），残骸没有落地"; // loc-ignore: 开发者自检 / 诊断文本
                 return;
             }
             float m2 = WreckMergeCells * WreckMergeCells;
@@ -1122,7 +1122,7 @@ namespace GameLogic.Campaign.Defense
             SaveResult res = CampaignAutoSaveService.SaveAuto(SaveReason.RaidWarning, toast: false);
             if (!res.Success)
             {
-                LastProblem = "突袭预警自动存档失败：" + res.Message;
+                LastProblem = "突袭预警自动存档失败：" + res.Message; // loc-ignore: 开发者自检 / 诊断文本
                 return false;
             }
             AutosaveCount++;
@@ -1307,7 +1307,7 @@ namespace GameLogic.Campaign.Defense
                         StandingRuleService.UnloadSeconds, 0);
                     if (!res.Success)
                     {
-                        LastProblem = "残骸送货单开不出来：" + res.FailureReason;
+                        LastProblem = "残骸送货单开不出来：" + res.FailureReason; // loc-ignore: 开发者自检 / 诊断文本
                         return made;
                     }
                     WorkOrderRecord o = HomeValleyWorkOrders.Find(s, res.WorkOrderId);

@@ -15,6 +15,7 @@ using GameLogic.Stage.CellStage;
 using GameLogic.Stats;
 using GameLogic.UI.Battle;
 using GameLogic.UI.Common;
+using GameLogic.Localization;
 
 namespace GameLogic
 {
@@ -157,6 +158,7 @@ namespace GameLogic
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Debug.LogError("[BattleHudToolkit] rootVisualElement 等待超时，HUD 未初始化。");
@@ -318,7 +320,7 @@ namespace GameLogic
 
                 int rm = (int)(tl.RunElapsed / 60f);
                 int rs = (int)(tl.RunElapsed % 60f);
-                _runTimer.text = $"本局 {rm:00}:{rs:00}";
+                _runTimer.text = GameText.Format("hud.legacy.run_0_00_1", rm, rs);
             }
 
             float maxHp = st.Get(StatId.MaxHealth);
@@ -326,8 +328,8 @@ namespace GameLogic
             bool hasControlled = cell.Sim != null &&
                 cell.Sim.TryGetControlledPresentation(out controlled);
             float hp = hasControlled ? controlled.Health : 0f;
-            _hpText.text = hasControlled ? $"生命 {hp:F0}/{maxHp:F0}" : "生命 --（无控制目标）";
-            _volumeText.text = $"体积 {st.Get(StatId.Volume):F2}";
+            _hpText.text = hasControlled ? GameText.Format("hud.legacy.hp_0_f0_1", hp, maxHp) : GameText.Get("hud.legacy.hp_no_controlled_unit");
+            _volumeText.text = GameText.Format("hud.legacy.size_0_f2", st.Get(StatId.Volume));
 
             float hpPct = maxHp > 0f ? Mathf.Clamp01(hp / maxHp) : 0f;
             _hpFill.style.width = new Length(hpPct * 100f, LengthUnit.Percent);
@@ -337,8 +339,8 @@ namespace GameLogic
             _vitalBlock.AddToClassList(hpPct >= 0.66f ? "hp-full" : hpPct >= 0.33f ? "hp-mid" : "hp-crit");
 
             ProgressionModule prog = cell.Progression;
-            _levelText.text = $"等级 {prog.Level}";
-            _evoText.text = $"进化能 {cell.Wallet.EvoEnergy:F0}/{prog.CurrentThreshold:F0}";
+            _levelText.text = GameText.Format("hud.legacy.level_0", prog.Level);
+            _evoText.text = GameText.Format("hud.legacy.evolution_0_f0_1", cell.Wallet.EvoEnergy, prog.CurrentThreshold);
             _evoBar.value = prog.Progress * 100f;
             _evoBlock.RemoveFromClassList("evo-full");
             if (prog.Progress >= 1f)
@@ -346,16 +348,16 @@ namespace GameLogic
                 _evoBlock.AddToClassList("evo-full");
             }
 
-            _nutrientChip.text = $"营养质 {cell.Wallet.Nutrient:F0}";
-            _mutagenChip.text = $"突变质 {cell.Wallet.Mutagen:F0}";
+            _nutrientChip.text = GameText.Format("hud.legacy.nutrients_0_f0", cell.Wallet.Nutrient);
+            _mutagenChip.text = GameText.Format("hud.legacy.mutagen_0_f0", cell.Wallet.Mutagen);
 
             RefreshPollution(cell, st);
 
             // ⑥-28（IC-REQ-013/FS-REQ-072）：状态行只放得下 CompactLabel（原因短句），
             // 完整"原因→状态→后果→可恢复方法"四段落到 tooltip——悬浮即可看到，不占状态行空间。
             FourPartFeedback controlFeedback = hasControlled
-                ? new FourPartFeedback($"控制 #{controlled.EntityId.Value} · Tab 切换", "控制中",
-                    "可继续直控操作", "按 Tab 循环切换控制目标")
+                ? new FourPartFeedback(GameText.Format("hud.legacy.controlling_0_tab_to", controlled.EntityId.Value), GameText.Get("hud.legacy.in_control"),
+                    GameText.Get("hud.legacy.you_can_keep_controlling"), GameText.Get("hud.legacy.press_tab_to_cycle"))
                 : ControlFeedback.ForAvailability(cell.Sim != null ? cell.Sim.Availability : ControlAvailability.None);
             CellPlayerController player = cell.PlayerController;
             if (player != null && player.ControlSwitchFeedbackRemaining > 0f)
@@ -365,10 +367,10 @@ namespace GameLogic
                         player.LastControlCandidateCount, controlled.EntityId)
                     : ControlFeedback.ForChange(player.LastControlChangeReason, player.LastControlChangeUnitId);
             }
-            _metaStats.text = $"卡牌 {cell.Deck.TotalCards}　连吃 {cell.Devour.Combo}　{controlFeedback.CompactLabel}";
+            _metaStats.text = GameText.Format("hud.legacy.cards_0_streak_1", cell.Deck.TotalCards, cell.Devour.Combo, controlFeedback.CompactLabel);
             _metaStats.tooltip = controlFeedback.ToString();
             _threatBlock.text =
-                $"敌人 {cell.Director.LiveHostiles}　压力 {cell.Director.CurrentPressure:F0}/{cell.Director.Budget:F0}";
+                GameText.Format("hud.legacy.enemies_0_pressure_1", cell.Director.LiveHostiles, cell.Director.CurrentPressure, cell.Director.Budget);
 
             RefreshEcoEvent(cell);
             RefreshDirectVitals(cell);
@@ -502,6 +504,7 @@ namespace GameLogic
                     foreach (string tag in bridge.ArenaTags)
                     {
                         TemplateContainer clone = _tagChipTemplate.CloneTree();
+                        GameLogic.Localization.UiText.LocalizeRow(clone);
                         Label label = clone.Q<Label>("TagChip");
                         if (label != null)
                         {
@@ -516,7 +519,7 @@ namespace GameLogic
                 }
                 if (_mechanismCount != null)
                 {
-                    _mechanismCount.text = $"轨迹 ×{bridge.PendingMotionCount}";
+                    _mechanismCount.text = GameText.Format("hud.legacy.trail_0", bridge.PendingMotionCount);
                 }
             }
 
@@ -530,7 +533,7 @@ namespace GameLogic
                 if (_digestLog != null)
                 {
                     IReadOnlyList<string> log = digestion.RecentLog;
-                    _digestLog.text = log.Count > 0 ? log[log.Count - 1] : "（尚未捕食）";
+                    _digestLog.text = log.Count > 0 ? log[log.Count - 1] : GameText.Get("hud.legacy.nothing_consumed_yet");
                 }
             }
 
@@ -538,7 +541,7 @@ namespace GameLogic
             {
                 _chainText.text = MetabolicSlicePanel.Instance != null
                     ? MetabolicSlicePanel.Instance.BuildChainSummary()
-                    : "无输出链";
+                    : GameText.Get("hud.legacy.no_output_chain");
             }
         }
 
@@ -560,7 +563,7 @@ namespace GameLogic
 
             bool nearCap = cap > 0f && pollution >= 0.85f * cap;
             _pollutionBlock.AddToClassList(nearCap ? "poll-nearcap" : "poll-mid");
-            _pollutionText.text = $"污染度 {pollution:F0}/{cap:F0}";
+            _pollutionText.text = GameText.Format("hud.legacy.pollution_0_f0_1", pollution, cap);
             _pollutionBar.value = cap > 0f ? pollution / cap * 100f : 0f;
         }
 
@@ -571,8 +574,8 @@ namespace GameLogic
             _ecoEventBlock.RemoveFromClassList("eco-idle");
             _ecoEventBlock.AddToClassList(active ? "eco-active" : "eco-idle");
             _ecoEventText.text = active
-                ? $"生态事件：{cell.Events.Active.Name}"
-                : $"下次事件 {cell.Events.NextEventCountdown:F0}s";
+                ? GameText.Format("hud.legacy.eco_event_0", cell.Events.Active.Name)
+                : GameText.Format("hud.legacy.next_event_0_f0", cell.Events.NextEventCountdown);
         }
 
         /// <summary>
@@ -674,7 +677,7 @@ namespace GameLogic
                 return;
             }
 
-            var sb = new System.Text.StringBuilder("规则：");
+            var sb = new System.Text.StringBuilder(GameText.Get("hud.legacy.rules"));
             bool first = true;
             foreach (RuleFlag flag in rules.Active)
             {
@@ -707,7 +710,7 @@ namespace GameLogic
                 return;
             }
 
-            _pendingReactionText = "反应：" + ReactionFeedbackCatalog.GetLabel(s.ReactionName);
+            _pendingReactionText = GameText.Get("hud.legacy.reactions") + ReactionFeedbackCatalog.GetLabel(s.ReactionName);
             _reactionExpireTime = Time.unscaledTime + ReactionFeedbackHoldSeconds;
             _reactionTextDirty = true;
         }
@@ -753,7 +756,7 @@ namespace GameLogic
                 }
                 if (_skillState[i] != null)
                 {
-                    _skillState[i].text = rt.Ready ? "就绪" : $"{rt.CooldownLeft:F1}s";
+                    _skillState[i].text = rt.Ready ? GameText.Get("hud.legacy.ready") : $"{rt.CooldownLeft:F1}s";
                 }
                 if (_skillCharge[i] != null)
                 {

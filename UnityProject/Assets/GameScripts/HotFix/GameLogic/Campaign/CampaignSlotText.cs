@@ -16,17 +16,17 @@ namespace GameLogic.Campaign
         {
             switch (phase)
             {
-                case CampaignPhase.Landing: return "着陆整备";
-                case CampaignPhase.Rooted: return "家园站稳";
-                case CampaignPhase.FirstExpedition: return "首次远征";
-                case CampaignPhase.CrossCompiled: return "第一次编译完成";
-                case CampaignPhase.FoundryScouting: return "铸造外围侦察";
-                case CampaignPhase.SecondCrossCompiled: return "第二次编译完成";
-                case CampaignPhase.CoreAssault: return "核心进攻";
-                case CampaignPhase.BeaconReady: return "信标就绪";
-                case CampaignPhase.Completed: return "已通关";
-                case CampaignPhase.Failed: return "家园失守";
-                default: return "未知阶段";
+                case CampaignPhase.Landing: return GameText.Get("save.slot_text.landing_prep");
+                case CampaignPhase.Rooted: return GameText.Get("save.slot_text.home_secured");
+                case CampaignPhase.FirstExpedition: return GameText.Get("save.slot_text.first_expedition");
+                case CampaignPhase.CrossCompiled: return GameText.Get("save.slot_text.first_compile_done");
+                case CampaignPhase.FoundryScouting: return GameText.Get("save.slot_text.foundry_outskirts_scouting");
+                case CampaignPhase.SecondCrossCompiled: return GameText.Get("save.slot_text.second_compile_done");
+                case CampaignPhase.CoreAssault: return GameText.Get("save.slot_text.core_assault");
+                case CampaignPhase.BeaconReady: return GameText.Get("save.slot_text.beacon_ready");
+                case CampaignPhase.Completed: return GameText.Get("save.slot_text.completed");
+                case CampaignPhase.Failed: return GameText.Get("save.slot_text.home_lost");
+                default: return GameText.Get("save.slot_text.unknown_stage");
             }
         }
 
@@ -36,7 +36,7 @@ namespace GameLogic.Campaign
             int total = Math.Max(0, (int)Math.Floor(seconds));
             int hours = total / 3600;
             int minutes = total % 3600 / 60;
-            return hours > 0 ? $"{hours} 小时 {minutes:00} 分" : $"{minutes} 分 {total % 60:00} 秒";
+            return hours > 0 ? GameText.Format("save.slot_text.0_h_1_00", hours, minutes) : GameText.Format("save.slot_text.0_min_1_00", minutes, total % 60);
         }
 
         /// <summary>存档写入时间（UTC 往返格式）→ 本地时间“2026-09-25 13:20”；解析不了写“时间未知”。</summary>
@@ -47,27 +47,27 @@ namespace GameLogic.Campaign
             {
                 return utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
             }
-            return "时间未知";
+            return GameText.Get("save.slot_text.time_unknown");
         }
 
         public static string RegionName(string regionId) =>
-            string.IsNullOrEmpty(regionId) ? "尚未进入任何区域" : CampaignObjectiveCatalog.RegionDisplayName(regionId);
+            string.IsNullOrEmpty(regionId) ? GameText.Get("save.slot_text.no_area_entered_yet") : CampaignObjectiveCatalog.RegionDisplayName(regionId);
 
         /// <summary>一张存档卡的两行摘要：阶段｜游戏时长｜最后区域，保存时间｜内容版本。</summary>
         public static string Summary(CampaignSlotMetadata meta) =>
-            $"{PhaseName(meta.CampaignPhase)}｜游戏时长 {PlayTime(meta.PlaySeconds)}｜{RegionName(meta.LastRegionId)}\n" +
-            $"保存于 {SavedAt(meta.WrittenAtUtc)}｜内容版本 {meta.ContentVersion}";
+            GameText.Format("save.slot_text.0_play_time_1", PhaseName(meta.CampaignPhase), PlayTime(meta.PlaySeconds), RegionName(meta.LastRegionId)) +
+            GameText.Format("save.slot_text.saved_0_content_version", SavedAt(meta.WrittenAtUtc), meta.ContentVersion);
 
         public static string StateName(CampaignSlotState state)
         {
             switch (state)
             {
-                case CampaignSlotState.Empty: return "空槽";
-                case CampaignSlotState.Ready: return "可读取";
-                case CampaignSlotState.Corrupt: return "存档损坏";
-                case CampaignSlotState.Incompatible: return "版本比游戏新";
-                case CampaignSlotState.DemoSave: return "Demo 存档";
-                default: return "未知";
+                case CampaignSlotState.Empty: return GameText.Get("save.slot.empty");
+                case CampaignSlotState.Ready: return GameText.Get("save.slot_text.loadable");
+                case CampaignSlotState.Corrupt: return GameText.Get("save.slot_text.save_damaged");
+                case CampaignSlotState.Incompatible: return GameText.Get("save.slot_text.newer_than_the_game");
+                case CampaignSlotState.DemoSave: return GameText.Get("save.slot_text.demo_save");
+                default: return GameText.Get("circuit.panel.unknown");
             }
         }
 
@@ -108,7 +108,7 @@ namespace GameLogic.Campaign
                 parts.Add(string.IsNullOrEmpty(meta.SandboxCode) ? GameText.Get("save.card.sandbox")
                     : GameText.Format("save.card.sandbox_settings", SandboxService.Describe(meta.SandboxCode)));
             }
-            return string.Join("｜", parts);
+            return string.Join(GameText.Get("expedition.intel.sep"), parts);
         }
 
         /// <summary>稳定原因码 → 玩家文字（FGR-SYS-003"提示原因"）。</summary>

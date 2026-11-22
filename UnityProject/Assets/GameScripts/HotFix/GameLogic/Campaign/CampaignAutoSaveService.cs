@@ -1,3 +1,4 @@
+using GameLogic.Localization;
 namespace GameLogic.Campaign
 {
     /// <summary>ER1-SAVE-01：ERD-SAV-002 六类自动存档点的统一服务入口。
@@ -26,7 +27,7 @@ namespace GameLogic.Campaign
             if (!CampaignSession.HasActiveCampaign)
             {
                 TEngine.Log.Warning($"[CampaignAutoSaveService] SaveAuto({reason}) 调用时没有活动战役，已跳过。");
-                return new SaveResult(SaveOutcome.NoActiveCampaign, "没有活动战役，跳过自动存档。");
+                return new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("campaign.autosave.no_active_campaign_autosave"));
             }
 
             SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason);
@@ -34,7 +35,7 @@ namespace GameLogic.Campaign
             {
                 // ER8-CONTENT-01：本作只有自动存档（SaveReason.Manual 仍是预留），每次写盘成功给一条轻提示，
                 // 玩家据此知道“现在退出不会丢进度”。
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.SaveComplete, "自动存档");
+                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.SaveComplete, GameText.Get("campaign.autosave.autosave"));
             }
             return result;
         }
@@ -51,7 +52,7 @@ namespace GameLogic.Campaign
             CampaignState state = CampaignSession.Current;
             if (state == null)
             {
-                return new SaveResult(SaveOutcome.NoActiveCampaign, "没有活动战役，跳过存档。");
+                return new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("campaign.autosave.no_active_campaign_save"));
             }
             // FG6-DEF-08 复修（P2 必败档）：核心的内核耐久已到下限、只是还没轮到攻城对账判定（≤ siege.sync_seconds）时同样拒绝——
             // 否则这份档读回后第一次对账即判失败，失败页的“读取最近自动存档”会读到一份必败档。

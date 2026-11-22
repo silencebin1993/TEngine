@@ -107,6 +107,7 @@ namespace GameLogic.UI.Beacon
                 Log.Error("[BeaconLaunchPanelUIToolkit] rootVisualElement 等待超时，信标启动面板未初始化。");
                 return;
             }
+            GameLogic.Localization.UiText.Localize(_document.rootVisualElement); // FG15-UX-03：UXML 的 @文本键
             BindView(_document.rootVisualElement);
         }
 
@@ -195,21 +196,21 @@ namespace GameLogic.UI.Beacon
 
             if (launched)
             {
-                _statusLabel.text = "信标已启动。战役即将结算——可关闭本面板。";
+                _statusLabel.text = GameText.Get("beacon.panel.beacon_launched_the_campaign");
             }
             else if (launching)
             {
                 float remaining = HomeValleyBeacon.RemainingCutsceneSeconds(state);
-                _statusLabel.text = $"演出进行中，剩余 {remaining:F0} 秒（不可取消）。";
+                _statusLabel.text = GameText.Format("beacon.panel.launch_sequence_in_progress", remaining);
             }
             else if (!HomeValleyBeacon.IsOperationalAndPowered(state))
             {
-                _statusLabel.text = "信标尚未通电或未完工，暂时无法启动——先解决供电缺口（关停/降级部分建筑，" +
-                    "或建造第二座发电机）。";
+                _statusLabel.text = GameText.Get("beacon.panel.the_beacon_is_not") +
+                    GameText.Get("beacon.panel.or_build_a_second");
             }
             else
             {
-                _statusLabel.text = "确认启动导航信标？启动后将进入10秒不可取消的返航演出，随即结算本次战役。";
+                _statusLabel.text = GameText.Get("beacon.panel.launch_the_navigation_beacon");
             }
 
             bool showConfirm = !launched && !launching && HomeValleyBeacon.IsOperationalAndPowered(state);
@@ -238,11 +239,11 @@ namespace GameLogic.UI.Beacon
         {
             switch (reason)
             {
-                case "already-launched": return "信标已经启动过。";
-                case "already-launching": return "信标正在发射演出中。";
-                case "not-unlocked": return "信标尚未解锁：需要先摧毁主核心并带回核心数据。";
-                case "not-operational-or-powered": return "信标未完工或未通电，先解决供电缺口。";
-                default: return "信标暂时无法启动。";
+                case "already-launched": return GameText.Get("beacon.panel.the_beacon_has_already");
+                case "already-launching": return GameText.Get("beacon.panel.the_beacon_launch_sequence");
+                case "not-unlocked": return GameText.Get("beacon.panel.the_beacon_is_locked");
+                case "not-operational-or-powered": return GameText.Get("beacon.panel.the_beacon_is_unfinished");
+                default: return GameText.Get("beacon.panel.the_beacon_cannot_be");
             }
         }
 

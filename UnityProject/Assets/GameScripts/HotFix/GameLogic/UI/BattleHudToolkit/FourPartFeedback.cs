@@ -1,3 +1,4 @@
+using GameLogic.Localization;
 namespace GameLogic.UI.Battle
 {
     /// <summary>
@@ -30,6 +31,6 @@ namespace GameLogic.UI.Battle
 
         /// <summary>完整四段文案，供 tooltip / 调试日志使用。</summary>
         public override string ToString() =>
-            $"{Reason}\n状态：{State}\n后果：{Consequence}\n可恢复方法：{Recovery}";
+            GameText.Format("ui.four_part.0_status_1_consequence", Reason, State, Consequence, Recovery);
     }
 }

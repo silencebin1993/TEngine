@@ -4,6 +4,7 @@ using System.Text;
 using BinGames.Sim.WorldGen;
 using GameConfig.fg;
 using GameLogic.Campaign.Grid;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.WorldGen
 {
@@ -355,7 +356,7 @@ namespace GameLogic.Campaign.WorldGen
                     {
                         placed = Make(row, hazard, start, hi, coreX, coreY, maxAttempts);
                         placed.Fallback = true;
-                        plan.Failures.Add($"{row.Id}：{maxAttempts} 次试探与逐度扫描都找不到满足约束的位置，已放在 {start}° / {hi} 格（约束冲突，需要调表）");
+                        plan.Failures.Add($"{row.Id}：{maxAttempts} 次试探与逐度扫描都找不到满足约束的位置，已放在 {start}° / {hi} 格（约束冲突，需要调表）"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                     else
                     {
@@ -579,20 +580,20 @@ namespace GameLogic.Campaign.WorldGen
             int centerDist = WorldGenMath.Isqrt(cdx * cdx + cdy * cdy);
             if (centerDist - c.OuterRadius <= HomeZoneRadius)
             {
-                return "进入家园区";
+                return "进入家园区"; // loc-ignore: 开发者自检 / 诊断文本
             }
             foreach (PlannedTerritory t in Territories)
             {
                 if (c.IsFaction && t.IsFaction && AngleBetween(c.AngleDeg, t.AngleDeg) < MinAngleDeg)
                 {
-                    return $"与{t.Id}方向夹角不足";
+                    return $"与{t.Id}方向夹角不足"; // loc-ignore: 开发者自检 / 诊断文本
                 }
                 long dx = c.CenterX - t.CenterX;
                 long dy = c.CenterY - t.CenterY;
                 long need = (long)c.OuterRadius + t.OuterRadius;
                 if (dx * dx + dy * dy < need * need)
                 {
-                    return $"与{t.Id}重叠";
+                    return $"与{t.Id}重叠"; // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             return null;

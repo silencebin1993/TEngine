@@ -591,7 +591,7 @@ namespace GameLogic.Campaign.Env
             }
         }
 
-        private static string Sep => GameText.Language == GameLanguage.En ? "; " : "；";
+        private static string Sep => GameText.Get("common.clause_sep");
 
         /// <summary>某个地点的主要震动来源（提取钻，按此刻每分钟增量从大到小，最多 <paramref name="max"/> 座）。</summary>
         public static string SourcesText(CampaignState s, string siteId, int max)

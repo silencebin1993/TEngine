@@ -70,6 +70,7 @@ namespace GameLogic.UI.CoreBoss
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Log.Error("[CoreBossHudUIToolkit] rootVisualElement 等待超时，Boss HUD 未初始化。");

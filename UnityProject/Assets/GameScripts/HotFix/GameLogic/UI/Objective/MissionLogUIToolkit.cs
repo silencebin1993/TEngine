@@ -145,6 +145,7 @@ namespace GameLogic.UI.Objective
         public void BindView(VisualElement root)
         {
             Instance = this;
+            UiText.Localize(root); // FG15-UX-03：UXML 的 tooltip="@键"（悬停提示）
             _window = root.Q<VisualElement>("MissionLogRoot");
             _title = root.Q<Label>("MissionLogTitle");
             _status = root.Q<Label>("MissionLogStatus");
@@ -170,6 +171,11 @@ namespace GameLogic.UI.Objective
             _message = root.Q<Label>("QuestMessage");
             _accept = BindButton(root, "QuestBtnAccept", OnAccept);
             _track = BindButton(root, "QuestBtnTrack", OnTrack);
+            if (_track != null)
+            {
+                // FG15-UX-03：追踪不了时显示原因（_track.tooltip 由 Refresh 写），否则显示按钮说明。
+                UiTooltip.Attach(_track, () => new TooltipContent { Title = _track.text, Body = string.IsNullOrEmpty(_track.tooltip) ? GameText.Get("uxml.mission_log.quest_btn_track.tip") : _track.tooltip });
+            }
             _fly = BindButton(root, "QuestBtnFly", OnFly);
             _claim = BindButton(root, "QuestBtnClaim", OnClaim);
             _restart = BindButton(root, "QuestBtnRestart", OnRestart);
@@ -809,17 +815,17 @@ namespace GameLogic.UI.Objective
             {
                 case ObjectiveState.Completed:
                     ObjectiveRecord record = state?.ObjectiveRecords?.FirstOrDefault(r => r != null && r.ObjectiveId == def.Id);
-                    stateText = "已完成 " + FormatClock(record?.CompletedAtPlaySeconds ?? 0f);
+                    stateText = GameText.Get("mission.log.done") + FormatClock(record?.CompletedAtPlaySeconds ?? 0f);
                     break;
                 case ObjectiveState.Active:
-                    stateText = "进行中";
+                    stateText = GameText.Get("mission.log.in_progress");
                     break;
                 default:
-                    stateText = "未解锁";
+                    stateText = GameText.Get("mission.log.locked");
                     break;
             }
             bool locked = objState == ObjectiveState.Locked;
-            title = locked ? $"{index + 1}. ？？？" : $"{index + 1}. {def.Title}";
+            title = locked ? GameText.Format("mission.log.0", index + 1) : $"{index + 1}. {def.Title}";
             region = locked ? string.Empty : CampaignObjectiveCatalog.RegionDisplayName(def.RegionId);
         }
 
@@ -833,7 +839,7 @@ namespace GameLogic.UI.Objective
                     completed++;
                 }
             }
-            return $"已完成 {completed}/{CampaignObjectiveCatalog.All.Length}｜战役时间 {FormatClock(state?.PlaySeconds ?? 0f)}";
+            return GameText.Format("mission.log.done_0_1_campaign", completed, CampaignObjectiveCatalog.All.Length, FormatClock(state?.PlaySeconds ?? 0f));
         }
 
         /// <summary>战役地图的一行（UI-09）：区域名（当前所在加 ◆）、状态、当前目标是否在这里、未解锁时的
@@ -846,21 +852,21 @@ namespace GameLogic.UI.Objective
             ObjectiveDef current = CampaignObjectiveCatalog.Get(CampaignObjectiveTracker.CurrentObjectiveId(state));
             if (current != null && current.RegionId == regionId)
             {
-                parts.Add("当前目标在这里：" + current.Title);
+                parts.Add(GameText.Get("mission.log.current_objective_is_here") + current.Title);
             }
             if (here)
             {
-                parts.Add("你现在在这里（◆）");
+                parts.Add(GameText.Get("mission.log.you_are_here"));
             }
 
             if (regionId == HomeValleyLayout.RegionId)
             {
-                stateText = "家园";
+                stateText = GameText.Get("ui.world.focus.home");
                 if (!here)
                 {
-                    parts.Add("远征队的出发与撤离地");
+                    parts.Add(GameText.Get("mission.log.where_the_expedition_departs"));
                 }
-                detail = string.Join("｜", parts);
+                detail = string.Join(GameText.Get("expedition.intel.sep"), parts);
                 return;
             }
 
@@ -876,24 +882,24 @@ namespace GameLogic.UI.Objective
             {
                 // UI-09：破碎都市需信号塔，铸造外围需完成目标 6。
                 parts.Add(regionId == FracturedCityLayout.RegionId
-                    ? "解锁条件：修复归还谷地的信号塔"
-                    : $"解锁条件：完成目标 6「{CampaignObjectiveCatalog.TitleOf(CampaignObjectiveTracker.Obj06)}」");
+                    ? GameText.Get("mission.log.unlock_repair_the_signal")
+                    : GameText.Format("mission.log.unlock_complete_objective_6", CampaignObjectiveCatalog.TitleOf(CampaignObjectiveTracker.Obj06)));
             }
             else
             {
                 int departures = record?.ExpeditionCount ?? 0;
-                parts.Add(departures > 0 ? $"已出征 {departures} 次" : "尚未出征");
+                parts.Add(departures > 0 ? GameText.Format("mission.log.sorties_0", departures) : GameText.Get("mission.log.no_sorties_yet"));
             }
             string recovered = RecoveredItems(state, regionId);
             if (!string.IsNullOrEmpty(recovered))
             {
-                parts.Add("已带回：" + recovered);
+                parts.Add(GameText.Get("mission.log.brought_back") + recovered);
             }
             if (bossInitialized)
             {
-                parts.Add("主核心：" + FoundryOutpostCoreBoss.DisplayPhaseText(record));
+                parts.Add(GameText.Get("mission.log.main_core") + FoundryOutpostCoreBoss.DisplayPhaseText(record));
             }
-            detail = string.Join("｜", parts);
+            detail = string.Join(GameText.Get("expedition.intel.sep"), parts);
         }
 
         /// <summary>UI-14：三灯分别写明缺什么，完成的打勾（形状 + 文字，不只靠颜色）。FG1-SIG-05：灯 2 / 3 改为“接入就绪”（过载是核心固件，
@@ -903,8 +909,8 @@ namespace GameLogic.UI.Objective
             FoundryOutpostRegion.CoreGateLights lights = FoundryOutpostRegion.ComputeCoreGateLights(state);
             string Lamp(bool on, string key) => GameText.Format(on ? "foundry.gate.log.done" : "foundry.gate.log.todo", GameText.Get(key));
             return GameText.Get("foundry.gate.log.title") +
-                   Lamp(lights.CannonAnalyzed, "foundry.gate.lamp.cannon") + "｜" +
-                   Lamp(lights.OverloadBlueprintSaved, "foundry.gate.lamp.overload_saved") + "｜" +
+                   Lamp(lights.CannonAnalyzed, "foundry.gate.lamp.cannon") + GameText.Get("expedition.intel.sep") +
+                   Lamp(lights.OverloadBlueprintSaved, "foundry.gate.lamp.overload_saved") + GameText.Get("expedition.intel.sep") +
                    Lamp(lights.MachineEquipped, "foundry.gate.lamp.machine_ready") +
                    GameText.Get(lights.AllReady ? "foundry.gate.log.all_ready" : "foundry.gate.log.need_all");
         }
@@ -916,17 +922,17 @@ namespace GameLogic.UI.Objective
             switch (state)
             {
                 case RegionState.Available:
-                    return here ? "远征中" : "可出征";
+                    return here ? GameText.Get("roster.role.on_expedition") : GameText.Get("mission.log.ready_to_deploy");
                 case RegionState.Active:
-                    return here ? "远征中" : "未肃清，可再出征";
+                    return here ? GameText.Get("roster.role.on_expedition") : GameText.Get("mission.log.not_cleared_can_deploy");
                 case RegionState.Cleared:
                     if (regionId != FoundryOutpostLayout.RegionId)
                     {
-                        return "已肃清";
+                        return GameText.Get("mission.log.cleared");
                     }
-                    return bossDestroyed ? "主核心已摧毁" : here ? "核心进攻中" : "外围已肃清";
+                    return bossDestroyed ? GameText.Get("mission.log.main_core_destroyed") : here ? GameText.Get("mission.log.core_assault_in_progress") : GameText.Get("mission.log.outskirts_cleared");
                 default:
-                    return "未解锁";
+                    return GameText.Get("mission.log.locked");
             }
         }
 
@@ -941,7 +947,7 @@ namespace GameLogic.UI.Objective
                             && !Campaign.Economy.BlackBoxService.IsBlackBox(q)) // FG5-RND-06：黑匣子不是区域任务物（在陈列馆面板里看）
                 .Select(q => Campaign.Feedback.FeedbackCues.QuestItemName(q.ContentId))
                 .Distinct();
-            return string.Join("、", names);
+            return string.Join(GameText.Get("signal.core.summary_sep"), names);
         }
 
         private static string FormatClock(float seconds)

@@ -332,7 +332,7 @@ namespace GameLogic.Settings
             l.Add(new SettingItem
             {
                 Id = "gameplay.language", Category = SettingsCategory.Gameplay, Kind = SettingKind.Choice, NameKey = "settings.gameplay.language",
-                Choices = () => new List<string> { "简体中文", "English" },
+                Choices = () => new List<string> { "简体中文", "English" }, // loc-ignore: 语言自称（autonym），两种界面语言下都按本语言书写
                 GetIndex = () => (int)GameSettings.Language,
                 SetIndex = i => GameSettings.SetLanguage(i == 1 ? GameLanguage.En : GameLanguage.ZhCn),
             });

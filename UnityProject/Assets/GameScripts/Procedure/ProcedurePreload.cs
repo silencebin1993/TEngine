@@ -44,7 +44,7 @@ namespace Procedure
 
             _loadedFlag.Clear();
 
-            LauncherMgr.ShowUI<LoadUpdateUI>(Utility.Text.Format(LoadText.Instance.Label_Load_Load_Progress, 0));
+            LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Format("launch.preload.progress_0", 0));
 
             GameEvent.Send("UILoadUpdate.RefreshVersion");
 
@@ -73,7 +73,7 @@ namespace Procedure
 
             if (_loadedFlag.Count != 0)
             {
-                LauncherMgr.ShowUI<LoadUpdateUI>(Utility.Text.Format(LoadText.Instance.Label_Load_Load_Progress, (float)loadCount / totalCount * 100));
+                LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Format("launch.preload.progress_0", (float)loadCount / totalCount * 100));
             }
             else
             {
@@ -83,11 +83,11 @@ namespace Procedure
 
                 if (Math.Abs(_progress - 1f) < 0.001f)
                 {
-                    LauncherMgr.ShowUI<LoadUpdateUI>(LoadText.Instance.Label_Load_Load_Complete);
+                    LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Get("launch.preload.done"));
                 }
                 else
                 {
-                    LauncherMgr.ShowUI<LoadUpdateUI>(Utility.Text.Format(LoadText.Instance.Label_Load_Load_Progress, progressStr));
+                    LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Format("launch.preload.progress_0", progressStr));
                 }
             }
 

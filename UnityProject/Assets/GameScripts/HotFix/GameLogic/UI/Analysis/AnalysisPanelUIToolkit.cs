@@ -106,6 +106,7 @@ namespace GameLogic.UI.Analysis
         private void Bind(VisualElement root, VisualTreeAsset rowTemplate)
         {
             _root = root;
+            UiText.Localize(root); // FG15-UX-03：UXML 的 tooltip="@键"（悬停提示）
             _panel = _root.Q<VisualElement>("AnalysisPanelRoot");
             _title = _root.Q<Label>("Title");
             _statusLabel = _root.Q<Label>("StatusLabel");
@@ -139,6 +140,7 @@ namespace GameLogic.UI.Analysis
             for (int i = 0; i < MaxQueueRows; i++)
             {
                 TemplateContainer row = rowTemplate.CloneTree();
+                UiText.LocalizeRow(row);
                 row.style.display = DisplayStyle.None;
                 int slot = i;
                 Button rowCancel = row.Q<Button>("RowCancel");

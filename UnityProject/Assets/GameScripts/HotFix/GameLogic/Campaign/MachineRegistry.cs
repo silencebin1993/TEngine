@@ -5,6 +5,7 @@ using BinGames.Sim;
 using GameLogic.Battle;
 using GameLogic.Core;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign
 {
@@ -253,11 +254,11 @@ namespace GameLogic.Campaign
         {
             if (string.IsNullOrEmpty(chassisId))
             {
-                return MachineOpResult.Fail(MachineRegistryError.MissingChassis, "ChassisId 为空，拒绝登记新机器。");
+                return MachineOpResult.Fail(MachineRegistryError.MissingChassis, "ChassisId 为空，拒绝登记新机器。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (string.IsNullOrEmpty(blueprintId))
             {
-                return MachineOpResult.Fail(MachineRegistryError.MissingBlueprint, "BlueprintId 为空，拒绝登记新机器。");
+                return MachineOpResult.Fail(MachineRegistryError.MissingBlueprint, "BlueprintId 为空，拒绝登记新机器。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             int logicId = AllocateLogicId();
@@ -293,7 +294,7 @@ namespace GameLogic.Campaign
 
             _records[logicId] = record;
             RosterRevision++;
-            return MachineOpResult.Ok(logicId, $"已登记机器 LogicId={logicId} DisplayNumber={displayNumber}");
+            return MachineOpResult.Ok(logicId, $"已登记机器 LogicId={logicId} DisplayNumber={displayNumber}"); // loc-ignore: 开发者自检 / 诊断文本
         }
 
         /// <summary>细胞阶段这类"Spawn 只是入队，实体要下一次 Step 才存在"的入口用这个：
@@ -369,27 +370,27 @@ namespace GameLogic.Campaign
         {
             if (!_records.TryGetValue(logicId, out MachineRecord record))
             {
-                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId);
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!record.IsAlive)
             {
                 return MachineOpResult.Fail(MachineRegistryError.TargetNotAlive,
-                    $"LogicId {logicId} 已阵亡，拒绝把新实体套到旧机器身份上。", logicId);
+                    $"LogicId {logicId} 已阵亡，拒绝把新实体套到旧机器身份上。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!entity.IsValid)
             {
-                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, "空实体，拒绝绑定。", logicId);
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, "空实体，拒绝绑定。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!string.IsNullOrEmpty(record.RegionId) && !string.IsNullOrEmpty(_activeRegionId) &&
                 record.RegionId != _activeRegionId)
             {
                 return MachineOpResult.Fail(MachineRegistryError.RegionNotLoaded,
-                    $"LogicId {logicId} 属于区域 {record.RegionId}，当前会话区域是 {_activeRegionId}，拒绝绑定。", logicId);
+                    $"LogicId {logicId} 属于区域 {record.RegionId}，当前会话区域是 {_activeRegionId}，拒绝绑定。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (_entityToLogic.TryGetValue(entity.Value, out int existingLogic) && existingLogic != logicId)
             {
                 return MachineOpResult.Fail(MachineRegistryError.EntityAlreadyBound,
-                    $"实体已绑定到 LogicId {existingLogic}，拒绝把 LogicId {logicId} 重复绑定到同一实体。", logicId);
+                    $"实体已绑定到 LogicId {existingLogic}，拒绝把 LogicId {logicId} 重复绑定到同一实体。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // 旧映射（若有）先清掉，防止同一 LogicId 换绑新实体时留下悬挂的反向条目。
@@ -539,7 +540,7 @@ namespace GameLogic.Campaign
             if (!TryGetLogicId(entity, out int logicId))
             {
                 // 该实体从未登记过 LogicId（例如敌人、非机器单位）——不是本注册表的机器，安全忽略。
-                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, "实体未登记 LogicId，忽略。");
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, "实体未登记 LogicId，忽略。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             return MarkDeadByLogicId(logicId);
         }
@@ -552,11 +553,11 @@ namespace GameLogic.Campaign
         {
             if (!_records.TryGetValue(logicId, out MachineRecord record))
             {
-                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId);
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!record.IsAlive)
             {
-                return MachineOpResult.Ok(logicId, "已经是阵亡状态，忽略重复标记。");
+                return MachineOpResult.Ok(logicId, "已经是阵亡状态，忽略重复标记。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // FG0-UX-01（FGR-UX-020 定位）：阵亡那一刻的实时位置（区域机器标记 / 内核实体），取不到才用记录里的上次同步值。
@@ -614,11 +615,11 @@ namespace GameLogic.Campaign
         {
             if (!_records.TryGetValue(logicId, out MachineRecord record))
             {
-                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId);
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!record.IsAlive)
             {
-                return MachineOpResult.Ok(logicId, "目标已阵亡，忽略重复伤害。");
+                return MachineOpResult.Ok(logicId, "目标已阵亡，忽略重复伤害。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             float healthBefore = record.Health;
@@ -634,7 +635,7 @@ namespace GameLogic.Campaign
             Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.MachineDamaged,
                 GameLogic.Localization.GameText.Format("machine.feedback.damaged", MachineNaming.Short(record), record.Health.ToString("F0", System.Globalization.CultureInfo.InvariantCulture),
                     record.MaxHealth.ToString("F0", System.Globalization.CultureInfo.InvariantCulture)));
-            return MachineOpResult.Ok(logicId, $"机器 {logicId} 受到 {damage:F1} 点伤害，剩余 {record.Health:F1}/{record.MaxHealth:F0}。");
+            return MachineOpResult.Ok(logicId, $"机器 {logicId} 受到 {damage:F1} 点伤害，剩余 {record.Health:F1}/{record.MaxHealth:F0}。"); // loc-ignore: 开发者自检 / 诊断文本
         }
 
         /// <summary>EMG2-RECL-01（ADR-EMG-001 ⑦ 第 4 条）：机器受到修复（内核 HealRequest，如回收修复拆残骸）的唯一写入口——血量加到最大耐久为止，返回实际修复量。
@@ -718,7 +719,7 @@ namespace GameLogic.Campaign
         {
             if (!_records.TryGetValue(logicId, out MachineRecord record))
             {
-                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId);
+                return MachineOpResult.Fail(MachineRegistryError.UnknownLogicId, $"LogicId {logicId} 未登记。", logicId); // loc-ignore: 开发者自检 / 诊断文本
             }
             record.TimesControlled++;
             return MachineOpResult.Ok(logicId);
@@ -785,7 +786,7 @@ namespace GameLogic.Campaign
             ResetForNewCampaign();
             if (state?.MachineRecords == null || state.MachineRecords.Length == 0)
             {
-                return MachineOpResult.Ok(0, "无机器记录。");
+                return MachineOpResult.Ok(0, "无机器记录。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             int rejected = 0;
@@ -818,8 +819,8 @@ namespace GameLogic.Campaign
 
             return rejected > 0
                 ? MachineOpResult.Fail(MachineRegistryError.CorruptRecord,
-                    $"{rejected} 条机器记录因缺字段/重复 LogicId 被拒绝加载，其余 {_records.Count} 条正常。")
-                : MachineOpResult.Ok(0, $"{_records.Count} 条机器记录正常加载。");
+                    $"{rejected} 条机器记录因缺字段/重复 LogicId 被拒绝加载，其余 {_records.Count} 条正常。") // loc-ignore: 开发者自检 / 诊断文本
+                : MachineOpResult.Ok(0, $"{_records.Count} 条机器记录正常加载。"); // loc-ignore: 开发者自检 / 诊断文本
         }
 
         private static MachineRecord CloneRecord(MachineRecord src)

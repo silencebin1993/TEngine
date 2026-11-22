@@ -384,7 +384,7 @@ namespace GameLogic.Campaign.Defense
             RaidDifficultyState d = StateOf(s);
             if (d == null)
             {
-                return "(无难度域)";
+                return "(无难度域)"; // loc-ignore: 开发者自检 / 诊断文本
             }
             var sb = new System.Text.StringBuilder(128);
             sb.Append(s.DifficultyId).Append('|').Append(d.StartDifficultyId).Append('|').Append(Num(d.CustomFrequency)).Append(',').Append(Num(d.CustomScale)).Append(',')

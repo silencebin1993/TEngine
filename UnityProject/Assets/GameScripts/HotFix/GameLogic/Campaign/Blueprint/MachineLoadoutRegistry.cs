@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Blueprint
 {
@@ -74,11 +75,11 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (machineLogicId <= 0)
             {
-                return CircuitOpResult.Fail("invalid_machine_id", $"非法 LogicId {machineLogicId}，拒绝登记。");
+                return CircuitOpResult.Fail("invalid_machine_id", $"非法 LogicId {machineLogicId}，拒绝登记。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (string.IsNullOrEmpty(blueprintId))
             {
-                return CircuitOpResult.Fail("blueprint_id_required", "BlueprintId 为空，拒绝登记。");
+                return CircuitOpResult.Fail("blueprint_id_required", "BlueprintId 为空，拒绝登记。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             BlueprintRecord record = BlueprintEditorService.Find(state, blueprintId);
@@ -86,7 +87,7 @@ namespace GameLogic.Campaign.Blueprint
             if (versionRecord == null)
             {
                 return CircuitOpResult.Fail("blueprint_version_not_found",
-                    $"'{blueprintId}' 第 {version} 版不存在或不可解析，拒绝登记。");
+                    $"'{blueprintId}' 第 {version} 版不存在或不可解析，拒绝登记。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             _entries[machineLogicId] = new Entry { BlueprintId = blueprintId, Version = version };
@@ -140,7 +141,7 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (!_entries.TryGetValue(machineLogicId, out Entry entry))
             {
-                return MachineCombatResolution.Fail($"机器 {machineLogicId} 未在装配登记表中，拒绝生成默认强力替身。");
+                return MachineCombatResolution.Fail($"机器 {machineLogicId} 未在装配登记表中，拒绝生成默认强力替身。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             BlueprintRecord record = BlueprintEditorService.Find(state, entry.BlueprintId);
@@ -148,7 +149,7 @@ namespace GameLogic.Campaign.Blueprint
             if (versionRecord == null)
             {
                 return MachineCombatResolution.Fail(
-                    $"'{entry.BlueprintId}' 第 {entry.Version} 版已不可解析，拒绝生成默认强力替身。");
+                    $"'{entry.BlueprintId}' 第 {entry.Version} 版已不可解析，拒绝生成默认强力替身。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             BlueprintCircuitBoard board = BlueprintCircuitBoard.FromVersion(versionRecord);

@@ -8,6 +8,7 @@ using GameLogic.Campaign.WorldGen;
 using TEngine;
 using Unity.Mathematics;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -207,7 +208,7 @@ namespace GameLogic.Campaign.Regions
                     if (!got)
                     {
                         // 后台通道这次没交回结果（不是“走不到”）：不算一次试探、不会因此记成失败，下次刷新再试（审查 P2：失败状态进存档后不再重试）。
-                        r.Note = $"第 {r.Attempt + 1} 次试探 ({r.CandidateX},{r.CandidateY})：寻路结果还没交回，下次再试";
+                        r.Note = $"第 {r.Attempt + 1} 次试探 ({r.CandidateX},{r.CandidateY})：寻路结果还没交回，下次再试"; // loc-ignore: 开发者自检 / 诊断文本
                         if (NavService.BackgroundActive && NavService.BackgroundOwnerTag == NavService.OwnerExpedition)
                         {
                             NavService.CancelBackground(); // 不占着后台通道（突袭导演按时要用）
@@ -242,7 +243,7 @@ namespace GameLogic.Campaign.Regions
             bool any = got && (res.Status == NavStatus.Ok || res.Status == NavStatus.Partial) && points.Count > 0;
             if (!any)
             {
-                r.Note = $"第 {r.Attempt + 1} 次试探 ({r.CandidateX},{r.CandidateY})：寻路失败 {res.Status}/{res.Reason}";
+                r.Note = $"第 {r.Attempt + 1} 次试探 ({r.CandidateX},{r.CandidateY})：寻路失败 {res.Status}/{res.Reason}"; // loc-ignore: 开发者自检 / 诊断文本
                 NextAttempt(r);
                 return;
             }
@@ -264,7 +265,7 @@ namespace GameLogic.Campaign.Regions
             if (gap <= 0f)
             {
                 Resolve(r, end.x, end.y, xs, ys, length, moved, fallback: false,
-                    res.Status == NavStatus.Ok ? null : $"候选 ({r.CandidateX},{r.CandidateY}) 走不到，挪到领地内最近可达点 ({end.x},{end.y})");
+                    res.Status == NavStatus.Ok ? null : $"候选 ({r.CandidateX},{r.CandidateY}) 走不到，挪到领地内最近可达点 ({end.x},{end.y})"); // loc-ignore: 开发者自检 / 诊断文本
                 return;
             }
             if (!r.HasBest || gap < r.BestGap)
@@ -277,7 +278,7 @@ namespace GameLogic.Campaign.Regions
                 r.BestRouteY = ys;
                 r.BestRouteLength = length;
             }
-            r.Note = $"第 {r.Attempt + 1} 次试探 ({r.CandidateX},{r.CandidateY})：最近可达点 ({end.x},{end.y}) 在领地外 {gap:0} 格";
+            r.Note = $"第 {r.Attempt + 1} 次试探 ({r.CandidateX},{r.CandidateY})：最近可达点 ({end.x},{end.y}) 在领地外 {gap:0} 格"; // loc-ignore: 开发者自检 / 诊断文本
             NextAttempt(r);
         }
 
@@ -291,7 +292,7 @@ namespace GameLogic.Campaign.Regions
             if (r.HasBest)
             {
                 Resolve(r, r.BestX, r.BestY, r.BestRouteX, r.BestRouteY, r.BestRouteLength, moved: true, fallback: true,
-                    $"{MaxAttempts} 次试探都没有领地内的可达点，取离领地最近的可达点 ({r.BestX},{r.BestY})，距领地 {r.BestGap:0} 格（FGR-GEN-090 需要调表）");
+                    $"{MaxAttempts} 次试探都没有领地内的可达点，取离领地最近的可达点 ({r.BestX},{r.BestY})，距领地 {r.BestGap:0} 格（FGR-GEN-090 需要调表）"); // loc-ignore: 开发者自检 / 诊断文本
                 Log.Warning($"[ExpeditionSiteAnchors] {r.SiteId}：{r.Note}");
                 return;
             }

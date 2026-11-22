@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using GameLogic.Campaign.Grid;
 using GameLogic.Campaign.Signal;
 using TEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Economy
 {
@@ -141,7 +142,7 @@ namespace GameLogic.Campaign.Economy
                 GameConfig.Tables t = ConfigSystem.Instance.Tables;
                 if (t?.TbLootDrop == null)
                 {
-                    _problems.Add("配置表 fg.TbLootDrop 不存在");
+                    _problems.Add("配置表 fg.TbLootDrop 不存在"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else
                 {
@@ -163,7 +164,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception ex)
             {
-                _problems.Add("配置表 fg.TbLootDrop 读取失败：" + ex.Message);
+                _problems.Add("配置表 fg.TbLootDrop 读取失败：" + ex.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             _builtItemRevision = ItemCatalog.Revision;
             if (_problems.Count > 0)
@@ -180,36 +181,36 @@ namespace GameLogic.Campaign.Economy
             problem = null;
             if (string.IsNullOrEmpty(id))
             {
-                problem = "掉落行缺 ID";
+                problem = "掉落行缺 ID"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (source != SourceMinion && source != SourceElite && source != SourceOutpost && source != SourceWorm && source != SourceOrbital && source != SourcePurge)
             {
-                problem = $"掉落行 {id}：来源 {source} 不认识";
+                problem = $"掉落行 {id}：来源 {source} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (!ItemCatalog.TryGet(itemId, out ItemDef item) || item.Form != ItemForm.Solid)
             {
-                problem = $"掉落行 {id}：物品 {itemId} 不在物品表或不是固体（只有固体会掉在地上）";
+                problem = $"掉落行 {id}：物品 {itemId} 不在物品表或不是固体（只有固体会掉在地上）"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if (!(chance > 0f && chance <= 1f) || min < 1 || max < min)
             {
-                problem = $"掉落行 {id}：概率 {chance} / 件数 {min}～{max} 不合法";
+                problem = $"掉落行 {id}：概率 {chance} / 件数 {min}～{max} 不合法"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             bool enemy = item.Protocol == ItemProtocolKind.Enemy;
             bool known = identity == IdentityNone || identity == IdentityFirmwareSalvage || identity == IdentityModule || identity == IdentityLore;
             if (!known || enemy != (identity != IdentityNone))
             {
-                problem = $"掉落行 {id}：身份 {identity} 与物品 {itemId} 的协议不配（敌方加密物品必须带身份，其余不带）";
+                problem = $"掉落行 {id}：身份 {identity} 与物品 {itemId} 的协议不配（敌方加密物品必须带身份，其余不带）"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             if ((identity == IdentityFirmwareSalvage && itemId != AnalysisCatalog.EncryptedFirmwareId)
                 || (identity == IdentityLore && itemId != AnalysisCatalog.DataCoreId)
                 || (identity == IdentityModule && itemId != AnalysisCatalog.UnparsedModuleId))
             {
-                problem = $"掉落行 {id}：身份 {identity} 不适用于 {itemId}";
+                problem = $"掉落行 {id}：身份 {identity} 不适用于 {itemId}"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
             string[] ids = Array.Empty<string>();
@@ -218,14 +219,14 @@ namespace GameLogic.Campaign.Economy
                 ids = (pool ?? string.Empty).Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
                 if (ids.Length == 0)
                 {
-                    problem = $"掉落行 {id}：模块身份没有组件池";
+                    problem = $"掉落行 {id}：模块身份没有组件池"; // loc-ignore: 开发者自检 / 诊断文本
                     return null;
                 }
                 foreach (string c in ids)
                 {
                     if (!Content.MechanicalContentFacade.TryGet(c, out _) || FirmwareKinds.IsFirmware(c))
                     {
-                        problem = $"掉落行 {id}：组件池里的 {c} 不是能装配的组件 / 模块";
+                        problem = $"掉落行 {id}：组件池里的 {c} 不是能装配的组件 / 模块"; // loc-ignore: 开发者自检 / 诊断文本
                         return null;
                     }
                 }

@@ -78,7 +78,7 @@ namespace GameLogic.Campaign.Logistics
             }
             sorted.Sort((a, b) => a.Key.CompareTo(b.Key));
             var sb = new StringBuilder();
-            string sep = GameText.Language == GameLanguage.En ? ", " : "、";
+            string sep = GameText.Language == GameLanguage.En ? ", " : GameText.Get("signal.core.summary_sep");
             for (int i = 0; i < sorted.Count; i++)
             {
                 if (i > 0)

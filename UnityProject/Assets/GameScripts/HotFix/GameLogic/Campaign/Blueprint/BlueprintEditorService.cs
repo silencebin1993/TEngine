@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using GameLogic.Campaign.Content;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Blueprint
 {
@@ -82,7 +83,7 @@ namespace GameLogic.Campaign.Blueprint
             var record = new BlueprintRecord
             {
                 BlueprintId = GenerateBlueprintId(),
-                DisplayName = string.IsNullOrEmpty(displayName) ? "新蓝图" : displayName,
+                DisplayName = string.IsNullOrEmpty(displayName) ? GameText.Get("circuit.panel.new_blueprint") : displayName,
                 ActiveVersion = 0,
                 Archived = false,
                 Versions = Array.Empty<BlueprintVersionRecord>(),
@@ -104,7 +105,7 @@ namespace GameLogic.Campaign.Blueprint
             BlueprintRecord source = Find(state, sourceBlueprintId);
             BlueprintCircuitBoard board = BlueprintCircuitBoard.FromVersion(sourceVersion);
             BlueprintRecord record = CreateNew(state,
-                string.IsNullOrEmpty(newDisplayName) ? $"{source?.DisplayName ?? sourceBlueprintId} 副本" : newDisplayName);
+                string.IsNullOrEmpty(newDisplayName) ? GameText.Format("blueprint.edit.0_copy", source?.DisplayName ?? sourceBlueprintId) : newDisplayName);
             BlueprintVersionRecord newVersion = board.ToVersion(1, state.PlaySeconds);
             record.Versions = new[] { newVersion };
             record.ActiveVersion = 1;
@@ -120,7 +121,7 @@ namespace GameLogic.Campaign.Blueprint
             BlueprintRecord record = Find(state, blueprintId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("blueprint_not_found", $"找不到蓝图 '{blueprintId}'。");
+                return CircuitOpResult.Fail("blueprint_not_found", GameText.Format("blueprint.edit.blueprint_0_not_found", blueprintId));
             }
             record.Archived = true;
             return CircuitOpResult.Ok();
@@ -131,7 +132,7 @@ namespace GameLogic.Campaign.Blueprint
             BlueprintRecord record = Find(state, blueprintId);
             if (record == null)
             {
-                return CircuitOpResult.Fail("blueprint_not_found", $"找不到蓝图 '{blueprintId}'。");
+                return CircuitOpResult.Fail("blueprint_not_found", GameText.Format("blueprint.edit.blueprint_0_not_found", blueprintId));
             }
             record.Archived = false;
             return CircuitOpResult.Ok();
@@ -175,16 +176,16 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (string.IsNullOrEmpty(board.ChassisId))
             {
-                return CircuitOpResult.Fail("chassis_required", "尚未选择底盘。");
+                return CircuitOpResult.Fail("chassis_required", GameText.Get("blueprint.edit.no_chassis_selected_yet"));
             }
             string chassisArchetype = ChassisCatalog.ResolveArchetype(board.ChassisId) ?? board.ChassisId;
             if (!ChassisCatalog.TryGet(chassisArchetype, out MechanicalContentDef chassisDef))
             {
-                return CircuitOpResult.Fail("unknown_chassis", $"'{board.ChassisId}' 不是已知底盘。");
+                return CircuitOpResult.Fail("unknown_chassis", GameText.Format("circuit.op.0_is_not_a_2", board.ChassisId));
             }
             if (!MechanicalContentUnlock.IsUnlocked(state, chassisArchetype))
             {
-                return CircuitOpResult.Fail("chassis_locked", $"底盘“{chassisDef.DisplayName}”尚未解锁。");
+                return CircuitOpResult.Fail("chassis_locked", GameText.Format("blueprint.edit.chassis_0_is_locked", chassisDef.DisplayName));
             }
 
             // PRIMITIVE-FULL-DEMO-SPEC.md/BlueprintCircuitDefaults.cs 既有先例：ERC-001（搬运轮式）
@@ -196,11 +197,11 @@ namespace GameLogic.Campaign.Blueprint
                 if (!ComponentCatalog.TryGet(board.PrimaryId, out MechanicalContentDef primaryDef)
                     || primaryDef.Category != MechanicalContentCategory.MainComponent)
                 {
-                    return CircuitOpResult.Fail("wrong_slot", $"'{board.PrimaryId}' 不是合法的主组件（错槽）。");
+                    return CircuitOpResult.Fail("wrong_slot", GameText.Format("circuit.op.0_is_not_a_3", board.PrimaryId));
                 }
                 if (!MechanicalContentUnlock.IsUnlocked(state, board.PrimaryId))
                 {
-                    return CircuitOpResult.Fail("primary_locked", $"主组件“{primaryDef.DisplayName}”尚未解锁。");
+                    return CircuitOpResult.Fail("primary_locked", GameText.Format("blueprint.edit.main_component_0_is", primaryDef.DisplayName));
                 }
             }
 
@@ -209,11 +210,11 @@ namespace GameLogic.Campaign.Blueprint
                 if (!ComponentCatalog.TryGet(board.UtilityId, out MechanicalContentDef utilityDef)
                     || utilityDef.Category != MechanicalContentCategory.FunctionComponent)
                 {
-                    return CircuitOpResult.Fail("wrong_slot", $"'{board.UtilityId}' 不是合法的功能组件（错槽）。");
+                    return CircuitOpResult.Fail("wrong_slot", GameText.Format("circuit.op.0_is_not_a_4", board.UtilityId));
                 }
                 if (!MechanicalContentUnlock.IsUnlocked(state, board.UtilityId))
                 {
-                    return CircuitOpResult.Fail("utility_locked", $"功能组件“{utilityDef.DisplayName}”尚未解锁。");
+                    return CircuitOpResult.Fail("utility_locked", GameText.Format("blueprint.edit.utility_component_0_is", utilityDef.DisplayName));
                 }
             }
 
@@ -222,11 +223,11 @@ namespace GameLogic.Campaign.Blueprint
                 if (!ComponentCatalog.TryGet(board.StructureId, out MechanicalContentDef structureDef)
                     || structureDef.Category != MechanicalContentCategory.Structure)
                 {
-                    return CircuitOpResult.Fail("wrong_slot", $"'{board.StructureId}' 不是合法的结构（错槽）。");
+                    return CircuitOpResult.Fail("wrong_slot", GameText.Format("circuit.op.0_is_not_a_5", board.StructureId));
                 }
                 if (!MechanicalContentUnlock.IsUnlocked(state, board.StructureId))
                 {
-                    return CircuitOpResult.Fail("structure_locked", $"结构“{structureDef.DisplayName}”尚未解锁。");
+                    return CircuitOpResult.Fail("structure_locked", GameText.Format("blueprint.edit.structure_0_is_locked", structureDef.DisplayName));
                 }
             }
 
@@ -238,7 +239,7 @@ namespace GameLogic.Campaign.Blueprint
                 }
                 if (!FirmwareCatalog.TryGet(firmwareId, out MechanicalContentDef fwDef))
                 {
-                    return CircuitOpResult.Fail("firmware_unknown", $"'{firmwareId}' 不是已知固件。");
+                    return CircuitOpResult.Fail("firmware_unknown", GameText.Format("circuit.op.0_is_not_a_6", firmwareId));
                 }
                 // FG1-SIG-06（FGR-SIG-060）：未破解的敌方固件给专门原因（只能由信号裸跑 / 送解析台破解），不当普通“尚未解锁”。
                 if (Signal.FirmwareKinds.IsRaw(state, firmwareId))
@@ -248,7 +249,7 @@ namespace GameLogic.Campaign.Blueprint
                 }
                 if (!MechanicalContentUnlock.IsUnlocked(state, firmwareId))
                 {
-                    return CircuitOpResult.Fail("firmware_locked", $"固件“{fwDef.DisplayName}”尚未解锁。");
+                    return CircuitOpResult.Fail("firmware_locked", GameText.Format("blueprint.edit.firmware_0_is_locked", fwDef.DisplayName));
                 }
             }
 
@@ -266,7 +267,7 @@ namespace GameLogic.Campaign.Blueprint
         {
             if (state == null || board == null)
             {
-                return BlueprintSaveResult.Fail("没有进行中的战役。");
+                return BlueprintSaveResult.Fail(GameText.Get("blueprint.edit.no_campaign_in_progress"));
             }
 
             // ER8-CONTENT-01 AC-THEME-001：FailureReason 会原样显示在蓝图编辑器与字幕条上，
@@ -281,7 +282,7 @@ namespace GameLogic.Campaign.Blueprint
             CircuitValidationResult validation = board.Validate();
             if (!validation.IsValid)
             {
-                string reason = string.Join("；", validation.Issues.Select(i => i.Message));
+                string reason = string.Join(GameText.Get("logistics.load.reason.separator"), validation.Issues.Select(i => i.Message));
                 return BlueprintSaveResult.Fail(reason);
             }
 
@@ -303,7 +304,7 @@ namespace GameLogic.Campaign.Blueprint
                 if (!propose.Success)
                 {
                     TEngine.Log.Warning($"[BlueprintEditorService] 反应技术数据登记失败：{propose.FailureReason}");
-                    return BlueprintSaveResult.Fail("技术数据登记失败，请重试。");
+                    return BlueprintSaveResult.Fail(GameText.Get("blueprint.edit.tech_data_registration_failed"));
                 }
                 CampaignEconomyLedger.LedgerResult reserve = CampaignEconomyLedger.Reserve(state, chargeTxId);
                 if (!reserve.Success)
@@ -324,7 +325,7 @@ namespace GameLogic.Campaign.Blueprint
                 record = new BlueprintRecord
                 {
                     BlueprintId = newId,
-                    DisplayName = string.IsNullOrEmpty(displayName) ? "新蓝图" : displayName,
+                    DisplayName = string.IsNullOrEmpty(displayName) ? GameText.Get("circuit.panel.new_blueprint") : displayName,
                     ActiveVersion = 0,
                     Archived = false,
                     Versions = Array.Empty<BlueprintVersionRecord>(),

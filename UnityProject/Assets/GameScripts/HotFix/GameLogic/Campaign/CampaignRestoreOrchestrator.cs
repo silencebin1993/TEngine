@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign
 {
@@ -121,14 +122,14 @@ namespace GameLogic.Campaign
             }
             catch (Exception e)
             {
-                return Fail(RestoreStep.VersionAndChecksum, $"读档抛出未捕获异常：{e.Message}", slotIndex);
+                return Fail(RestoreStep.VersionAndChecksum, $"读档抛出未捕获异常：{e.Message}", slotIndex); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             if (!loadResult.Success)
             {
                 bool backup = CampaignSaveService.GetSlotMetadata(slotIndex).HasBackup;
                 return new RestoreResult(RestoreOutcome.Fail, RestoreStep.VersionAndChecksum,
-                    $"存档头部/校验和/版本检查未通过（{loadResult.Outcome}）：{loadResult.Message}", null, backup,
+                    $"存档头部/校验和/版本检查未通过（{loadResult.Outcome}）：{loadResult.Message}", null, backup, // loc-ignore: 开发者自检 / 诊断文本
                     Array.Empty<string>(), loadResult.Outcome, loadResult.Reason,
                     loadResult.MigrationFailedFromVersion > 0 ? loadResult.MigrationFailedFromVersion : loadResult.FileSchemaVersion);
             }
@@ -137,7 +138,7 @@ namespace GameLogic.Campaign
             CampaignState state = loadResult.State;
             if (state == null)
             {
-                return Fail(RestoreStep.DomainRecords, "读档成功但 CampaignState 为空。", slotIndex);
+                return Fail(RestoreStep.DomainRecords, "读档成功但 CampaignState 为空。", slotIndex); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // ── 3. ContentAndBlueprints ───────────────────────
@@ -152,7 +153,7 @@ namespace GameLogic.Campaign
             }
             if (state.BlueprintRecords == null || state.BlueprintRecords.Length == 0)
             {
-                warnings.Add("[ContentAndBlueprints] 无消费方：ER4-BLP-01 前 BlueprintRecords 恒为空数组。");
+                warnings.Add("[ContentAndBlueprints] 无消费方：ER4-BLP-01 前 BlueprintRecords 恒为空数组。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // ── 4. BuildingsAndQueues ─────────────────────────
@@ -169,7 +170,7 @@ namespace GameLogic.Campaign
             }
             if (state.FactoryQueues == null || state.FactoryQueues.Length == 0)
             {
-                warnings.Add("[BuildingsAndQueues] 无消费方：ER4-FAC-01 前 FactoryQueues 恒为空数组。");
+                warnings.Add("[BuildingsAndQueues] 无消费方：ER4-FAC-01 前 FactoryQueues 恒为空数组。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // ── 5. MachineRecords（唯一真正有生产数据的恢复步骤）──
@@ -187,7 +188,7 @@ namespace GameLogic.Campaign
             catch (Exception e)
             {
                 return Fail(RestoreStep.MachineRecords,
-                    $"MachineRegistry 恢复抛出未捕获异常：{e.Message}", slotIndex, state);
+                    $"MachineRegistry 恢复抛出未捕获异常：{e.Message}", slotIndex, state); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (!machineResult.Success)
             {
@@ -223,11 +224,11 @@ namespace GameLogic.Campaign
             {
                 return Fail(RestoreStep.RegionSimWorld, e.Message, slotIndex, state);
             }
-            warnings.Add("[RegionSimWorld] no-op：ER2-SCENE-01/ER5-REGION-01 前无正式区域 SimWorld 可创建。");
+            warnings.Add("[RegionSimWorld] no-op：ER2-SCENE-01/ER5-REGION-01 前无正式区域 SimWorld 可创建。"); // loc-ignore: 开发者自检 / 诊断文本
 
             // ── 7. SpawnAndLoadoutRegistration ────────────────
-            warnings.Add("[SpawnAndLoadoutRegistration] no-op：主菜单阶段不创建 SimWorld 实体，" +
-                "正式 Spawn 由玩家进入具体区域时驱动（例如 CellStageFlow.SetupSim）。");
+            warnings.Add("[SpawnAndLoadoutRegistration] no-op：主菜单阶段不创建 SimWorld 实体，" + // loc-ignore: 开发者自检 / 诊断文本
+                "正式 Spawn 由玩家进入具体区域时驱动（例如 CellStageFlow.SetupSim）。"); // loc-ignore: 开发者自检 / 诊断文本
 
             // ── 8. ControlRestore ──────────────────────────────
             try
@@ -250,7 +251,7 @@ namespace GameLogic.Campaign
             }
             if (state.ObjectiveRecords == null || state.ObjectiveRecords.Length == 0)
             {
-                warnings.Add("[ObjectiveAndHud] 无消费方：Objective/HUD 系统未接入前恒为空数组。");
+                warnings.Add("[ObjectiveAndHud] 无消费方：Objective/HUD 系统未接入前恒为空数组。"); // loc-ignore: 开发者自检 / 诊断文本
             }
 
             // 主档刚通过完整读档：这里只需要知道备份文件在不在，不必再整份读一遍（大存档省几百毫秒）。

@@ -41,7 +41,7 @@ namespace Procedure
 
             Log.Info("开始下载更新文件！");
 
-            LauncherMgr.ShowUI<LoadUpdateUI>("开始下载更新文件...");
+            LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Get("launch.download.start"));
 
             BeginDownload().Forget();
         }
@@ -76,10 +76,10 @@ namespace Procedure
             float progressPercentage = _resourceModule.Downloader.Progress * 100;
             string speed = Utility.File.GetLengthString((int)CurrentSpeed);
 
-            string line1 = Utility.Text.Format("正在更新，已更新 {0}/{1} ({2:F2}%)", downloadUpdateData.CurrentDownloadCount,
+            string line1 = LaunchText.Format("launch.download.progress_0_1_2", downloadUpdateData.CurrentDownloadCount,
                 downloadUpdateData.TotalDownloadCount, progressPercentage);
-            string line2 = Utility.Text.Format("已更新大小 {0}MB/{1}MB", currentSizeMb, totalSizeMb);
-            string line3 = Utility.Text.Format("当前网速 {0}/s，剩余时间 {1}", speed,
+            string line2 = LaunchText.Format("launch.download.size_0_1", currentSizeMb, totalSizeMb);
+            string line3 = LaunchText.Format("launch.download.speed_0_1", speed,
                 GetRemainingTime(downloadUpdateData.TotalDownloadBytes, downloadUpdateData.CurrentDownloadBytes,
                     CurrentSpeed));
 

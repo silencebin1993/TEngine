@@ -124,7 +124,7 @@ namespace GameLogic.Campaign.Economy
                 GameConfig.Tables t = ConfigSystem.Instance.Tables;
                 if (t?.TbAssemblyMaterial == null)
                 {
-                    loadError = "配置表 fg.TbAssemblyMaterial 不存在";
+                    loadError = "配置表 fg.TbAssemblyMaterial 不存在"; // loc-ignore: 开发者自检 / 诊断文本
                 }
                 else
                 {
@@ -136,7 +136,7 @@ namespace GameLogic.Campaign.Economy
             }
             catch (Exception ex)
             {
-                loadError = "配置表读取失败：" + ex.Message;
+                loadError = "配置表读取失败：" + ex.Message; // loc-ignore: 开发者自检 / 诊断文本
             }
             _data = Build(rows);
             if (loadError != null)
@@ -159,17 +159,17 @@ namespace GameLogic.Campaign.Economy
                 if (string.IsNullOrEmpty(r.Part) || !(r.Part == PartBase || r.Part == PartPrimary || r.Part == PartUtility || r.Part == PartStructure
                                                      || r.Part.StartsWith(ChassisPrefix, StringComparison.Ordinal)))
                 {
-                    d.Problems.Add($"机器材料 {r.Id}：部位 {r.Part} 不认识");
+                    d.Problems.Add($"机器材料 {r.Id}：部位 {r.Part} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!ItemCatalog.TryGet(r.Item, out ItemDef item) || item.Form != ItemForm.Solid || item.BeltId == 0)
                 {
-                    d.Problems.Add($"机器材料 {r.Id}：{r.Item} 不是能上传送带的固体");
+                    d.Problems.Add($"机器材料 {r.Id}：{r.Item} 不是能上传送带的固体"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (r.Amount < 1)
                 {
-                    d.Problems.Add($"机器材料 {r.Id}：数量至少 1");
+                    d.Problems.Add($"机器材料 {r.Id}：数量至少 1"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 if (!d.ByPart.TryGetValue(r.Part, out List<(ItemDef, int)> list))
@@ -187,7 +187,7 @@ namespace GameLogic.Campaign.Economy
                 }
                 else
                 {
-                    d.Problems.Add($"机器材料 {r.Id}：{r.Item} 的传送带编号 {item.BeltId} 超出收货集合（1～63）");
+                    d.Problems.Add($"机器材料 {r.Id}：{r.Item} 的传送带编号 {item.BeltId} 超出收货集合（1～63）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             d.Items.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
@@ -553,7 +553,7 @@ namespace GameLogic.Campaign.Economy
             return string.Join(Sep, parts);
         }
 
-        public static string Sep => GameText.Language == GameLanguage.En ? ", " : "、";
+        public static string Sep => GameText.Get("common.list_sep");
 
         // ── 取料（HomeValleyFactory 队首开工时调用）───────────────────────────────────
 

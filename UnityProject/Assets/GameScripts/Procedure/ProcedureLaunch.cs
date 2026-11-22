@@ -29,6 +29,9 @@ namespace Procedure
 
             // 语言配置：设置当前使用的语言，如果不设置，则默认使用操作系统语言
             InitLanguageSettings();
+            Launcher.LoadTipsUI.ConfirmText = LaunchText.Get("launch.button.confirm"); // FG15-UX-03：启动提示框按钮跟设置语言
+            Launcher.LoadTipsUI.CancelText = LaunchText.Get("launch.button.cancel");
+            Launcher.LoadTipsUI.UpdateText = LaunchText.Get("launch.button.update");
 
             // 声音配置：根据用户配置数据，设置即将使用的声音选项
             InitSoundSettings();

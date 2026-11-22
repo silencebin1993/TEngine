@@ -68,7 +68,7 @@ namespace GameLogic.Core
             _overridden = true;
             _loaded = true;
             Values.Clear();
-            _loadError = values == null ? "测试注入：界面调参表为空" : null;
+            _loadError = values == null ? "测试注入：界面调参表为空" : null; // loc-ignore: 测试注入的加载失败原因
             if (values != null)
             {
                 foreach (KeyValuePair<string, float> kv in values)

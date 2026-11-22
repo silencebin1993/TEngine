@@ -6,6 +6,7 @@ using UnityEngine.UI;
 using GameLogic.Campaign;
 using GameLogic.Core;
 using GameLogic.Settings;
+using GameLogic.Localization;
 using Log = TEngine.Log;
 
 namespace GameLogic
@@ -58,14 +59,14 @@ namespace GameLogic
         private readonly Dictionary<GameActionId, Text> _rebindLabels = new Dictionary<GameActionId, Text>();
         private static readonly (GameActionId Action, string RowLabel)[] RebindRows =
         {
-            (GameActionId.Interact, "世界交互"),
-            (GameActionId.CycleControlTarget, "循环切换机器"), // FG1-HUD-01（FG-GAP-011）：行名运行时取动作表文本键，这里只是代码里的注记名
-            (GameActionId.ToggleCameraView, "接入 / 退出接入"),
-            (GameActionId.TogglePause, "暂停/继续"),
-            (GameActionId.Cancel, "取消/返回"),
-            (GameActionId.ToggleMissionLog, "任务日志与地图"),
+            (GameActionId.Interact, GameText.Get("mainmenu.world_interact")),
+            (GameActionId.CycleControlTarget, GameText.Get("input.action.cycle_control_target.name")), // FG1-HUD-01（FG-GAP-011）：行名运行时取动作表文本键，这里只是代码里的注记名
+            (GameActionId.ToggleCameraView, GameText.Get("mainmenu.link_unlink")),
+            (GameActionId.TogglePause, GameText.Get("mainmenu.pause_resume")),
+            (GameActionId.Cancel, GameText.Get("mainmenu.cancel_back")),
+            (GameActionId.ToggleMissionLog, GameText.Get("mainmenu.mission_log_map")),
             // FG0-UX-01：原“冲刺”行（DirectSkillSlot0）在 0.2 是尚未开放的“接入技能 1”，换成已接入玩法的“通知中心”。
-            (GameActionId.ToggleNotificationCenter, "通知中心"),
+            (GameActionId.ToggleNotificationCenter, GameText.Get("input.action.toggle_notification_center.name")),
         };
 
         private Toggle _toggleEdgePan;
@@ -156,6 +157,7 @@ namespace GameLogic
                     if (!rowText.transform.IsChildOf(btn.transform) && InputActionCatalog.TryGet(action, out InputActionDef rowDef))
                     {
                         rowText.text = rowDef.DisplayName;
+                        _staticTexts.Add((rowText, rowDef.NameKey));
                     }
                 }
                 GameActionId captured = action; // 闭包捕获，避免 foreach 变量复用坑。
@@ -220,6 +222,79 @@ namespace GameLogic
             _btnConfirmNo = FindChildComponent<Button>("m_tf_ConfirmOverwrite/m_btn_ConfirmNo");
             _btnConfirmYes.onClick.AddListener(OnConfirmYesClicked);
             _btnConfirmNo.onClick.AddListener(OnConfirmNoClicked);
+            TrackStaticTexts();
+        }
+
+        /// <summary>FG15-UX-03：随语言重设的静态文字（预制体写死的按钮 / 标签 / 分组标题、复制出来的按钮、重绑行名、页眉）→ 文本键。</summary>
+        private readonly List<(Text Label, string Key)> _staticTexts = new List<(Text, string)>();
+        private GameLanguage _staticTextsLanguage = (GameLanguage)(-1);
+
+        /// <summary>
+        /// 预制体里的中文原文按 <c>mainmenu.prefab.*</c> 键的简体中文文本认出对应键（键表在 fgdata_l10n.py；loc_scan 扫预制体，新增中文文字必须补键）。
+        /// 代码会改写的动态文字（存档卡片、继续原因、覆盖说明、重绑按钮上的键名）不登记。
+        /// </summary>
+        private void TrackStaticTexts()
+        {
+            var byZh = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string k in GameText.AllKeys())
+            {
+                if (k.StartsWith("mainmenu.prefab.", StringComparison.Ordinal) && GameText.TryGet(k, GameLanguage.ZhCn, out string zh) && !byZh.ContainsKey(zh))
+                {
+                    byZh[zh] = k;
+                }
+            }
+            var dynamic = new HashSet<Text>(_slotInfoTexts.Concat(_slotActionLabels).Concat(_rebindLabels.Values)) { _textContinueReason, _textConfirmInfo };
+            foreach (Text t in _tfRoot.parent.GetComponentsInChildren<Text>(true))
+            {
+                if (!dynamic.Contains(t) && byZh.TryGetValue(t.text ?? string.Empty, out string key))
+                {
+                    _staticTexts.Add((t, key));
+                }
+            }
+            TrackLabel(_btnSandbox, "sandbox.menu.button");
+            TrackLabel(_btnAllKeyBindings, "ui.keybind.open_all");
+            TrackLabel(_btnAllSettings, "settings.open_all");
+        }
+
+        private void TrackLabel(Button button, string key)
+        {
+            Text label = button != null ? button.GetComponentInChildren<Text>(true) : null;
+            if (label != null)
+            {
+                _staticTexts.Add((label, key));
+            }
+        }
+
+        private void TrackHeader(Transform view, string name, string titleKey, string subtitleKey)
+        {
+            Transform header = view != null ? view.Find(name) : null;
+            Text title = header != null ? header.Find("Title")?.GetComponent<Text>() : null;
+            Text subtitle = header != null ? header.Find("Subtitle")?.GetComponent<Text>() : null;
+            if (title != null)
+            {
+                _staticTexts.Add((title, titleKey));
+            }
+            if (subtitle != null && subtitleKey != null)
+            {
+                _staticTexts.Add((subtitle, subtitleKey));
+            }
+        }
+
+        /// <summary>语言变了就重设全部静态文字（O(静态文字数)，只在切换那一帧）。MainMenuSelfCheck 断言切英文后主菜单无中文。</summary>
+        private void ApplyStaticTexts()
+        {
+            if (_staticTextsLanguage == GameText.Language)
+            {
+                return;
+            }
+            _staticTextsLanguage = GameText.Language;
+            foreach ((Text label, string key) in _staticTexts)
+            {
+                if (label != null)
+                {
+                    label.text = GameText.Get(key);
+                }
+            }
         }
 
         #endregion
@@ -232,6 +307,10 @@ namespace GameLogic
         protected override void OnCreate()
         {
             ApplyVisualSystem();
+            TrackHeader(_tfRoot, "VisualMenuHeader", "mainmenu.earth_reclamation", null);
+            TrackHeader(_tfSlotList, "VisualSlotHeader", "mainmenu.campaign_files", "mainmenu.pick_a_file_to");
+            TrackHeader(_tfConfirmOverwrite, "VisualConfirmHeader", "mainmenu.confirm_overwrite", "mainmenu.this_cannot_be_undone");
+            ApplyStaticTexts();
             AttachClickSounds();
             SetView(MenuView.Root);
         }
@@ -370,9 +449,9 @@ namespace GameLogic
             FitViewsToCanvas(force: true);
 
             Font menuFont = _textContinueReason.font;
-            EnsureViewHeader(_tfRoot, "VisualMenuHeader", "地球归还", "EARTH RECLAMATION  ·  CAMPAIGN COMMAND", menuFont, accent);
-            EnsureViewHeader(_tfSlotList, "VisualSlotHeader", "战役档案", "选择一个档案继续，或在空槽创建新战役", menuFont, accent);
-            EnsureViewHeader(_tfConfirmOverwrite, "VisualConfirmHeader", "覆盖确认", "这项操作不可撤销", menuFont, warning);
+            EnsureViewHeader(_tfRoot, "VisualMenuHeader", GameText.Get("mainmenu.earth_reclamation"), "EARTH RECLAMATION  ·  CAMPAIGN COMMAND", menuFont, accent);
+            EnsureViewHeader(_tfSlotList, "VisualSlotHeader", GameText.Get("mainmenu.campaign_files"), GameText.Get("mainmenu.pick_a_file_to"), menuFont, accent);
+            EnsureViewHeader(_tfConfirmOverwrite, "VisualConfirmHeader", GameText.Get("mainmenu.confirm_overwrite"), GameText.Get("mainmenu.this_cannot_be_undone"), menuFont, warning);
 
             ConfigureMainActions(accent, text, muted, warning, danger);
             ConfigureSaveCards(text, muted, accent, warning);
@@ -888,6 +967,7 @@ namespace GameLogic
         protected override void OnUpdate()
         {
             FitViewsToCanvas(force: false);
+            ApplyStaticTexts();
             if (_tfSettings != null && _tfSettings.gameObject.activeInHierarchy && _seenSettingsRevision != GameSettings.Revision && _rebindListening == null)
             {
                 _seenSettingsRevision = GameSettings.Revision;

@@ -5,6 +5,7 @@ using GameLogic.Campaign.WorldSim;
 using GameLogic.Campaign.WorldGen;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -317,7 +318,7 @@ namespace GameLogic.Campaign.Regions
                 names.Add(EnemyDefs.TryGet(t, out GameConfig.fg.MechEnemy row) ? Localization.GameText.Get(row.NameKey) : t);
             }
             string tiers = tierMin == tierMax ? tierMin.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                : tierMin.ToString(System.Globalization.CultureInfo.InvariantCulture) + "～" + tierMax.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                : tierMin.ToString(System.Globalization.CultureInfo.InvariantCulture) + GameText.Get("site.garrison.text") + tierMax.ToString(System.Globalization.CultureInfo.InvariantCulture);
             return Localization.GameText.Format("expedition.intel.garrison", standing, tiers, units, string.Join(Localization.GameText.Get("expedition.intel.sep"), names));
         }
 

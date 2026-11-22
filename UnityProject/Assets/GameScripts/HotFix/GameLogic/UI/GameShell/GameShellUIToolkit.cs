@@ -7,6 +7,7 @@ using GameLogic.UI.Common;
 using TEngine;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GameLogic.Localization;
 
 namespace GameLogic.UI.GameShell
 {
@@ -60,6 +61,7 @@ namespace GameLogic.UI.GameShell
             }
 
             _root = _document.rootVisualElement;
+            GameLogic.Localization.UiText.Localize(_root); // FG15-UX-03：UXML 的 @文本键
             if (_root == null)
             {
                 Debug.LogError("[GameShellUIToolkit] rootVisualElement 等待超时，运行中枢未初始化。");
@@ -148,18 +150,18 @@ namespace GameLogic.UI.GameShell
             {
                 // 当前没有跨进程续局存档；不要把“继续”伪装成可用功能。
                 _resumeRunButton.SetEnabled(false);
-                _resumeRunButton.text = "继续当前局（暂无可继续进度）";
+                _resumeRunButton.text = GameText.Get("shell.continue_current_run_nothing");
             }
 
             if (running)
             {
                 if (_runStateLabel != null)
                 {
-                    _runStateLabel.text = cell.Paused ? "归还阶段 · 已暂停" : "归还阶段 · 进行中";
+                    _runStateLabel.text = cell.Paused ? GameText.Get("shell.reclamation_paused") : GameText.Get("shell.reclamation_running");
                 }
                 if (_walletLabel != null && cell.Wallet != null)
                 {
-                    _walletLabel.text = $"营养质 {cell.Wallet.Nutrient:F0} · 突变质 {cell.Wallet.Mutagen:F0} · 进化能 {cell.Wallet.EvoEnergy:F0}";
+                    _walletLabel.text = GameText.Format("shell.nutrients_0_f0_mutagen", cell.Wallet.Nutrient, cell.Wallet.Mutagen, cell.Wallet.EvoEnergy);
                 }
                 return;
             }
@@ -168,10 +170,10 @@ namespace GameLogic.UI.GameShell
             {
                 StageOutcome outcome = GameRoot.Director?.LastOutcome;
                 _lastOutcomeLabel.text = outcome == null || outcome.StageId == StageId.None
-                    ? "尚未开始一局。"
+                    ? GameText.Get("shell.no_run_started_yet")
                     : (outcome.Victory
-                        ? $"上局完成：等级 {outcome.Level} · 用时 {outcome.DurationSeconds:F0} 秒"
-                        : $"上局结束：{outcome.DeathCause ?? "未记录原因"} · 等级 {outcome.Level}");
+                        ? GameText.Format("shell.last_run_complete_level", outcome.Level, outcome.DurationSeconds)
+                        : GameText.Format("shell.last_run_ended_0", outcome.DeathCause ?? GameLogic.Localization.GameText.Get("shell.death_cause_unrecorded"), outcome.Level));
             }
         }
 
@@ -270,13 +272,13 @@ namespace GameLogic.UI.GameShell
         {
             Screen.fullScreen = fullscreen;
             PlayerPrefs.SetInt(FullscreenPreferenceKey, fullscreen ? 1 : 0);
-            ShowSettingsFeedback(fullscreen ? "已切换为全屏。" : "已切换为窗口模式。");
+            ShowSettingsFeedback(fullscreen ? GameText.Get("shell.switched_to_fullscreen") : GameText.Get("shell.switched_to_windowed_mode"));
         }
 
         private void SetTargetFrameRate(int fps)
         {
             GameLogic.Settings.FramePacing.Set(fps);
-            ShowSettingsFeedback($"目标帧率已设为 {fps} FPS。");
+            ShowSettingsFeedback(GameText.Format("shell.target_frame_rate_set", fps));
         }
 
         private void ShowSettingsFeedback(string message)

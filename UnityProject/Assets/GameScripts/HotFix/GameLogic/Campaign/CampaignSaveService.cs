@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign
 {
@@ -210,7 +211,7 @@ namespace GameLogic.Campaign
     /// 只在自检注入 <see cref="CampaignSaveService.CrashPointForTests"/> 时抛出。</summary>
     public sealed class SimulatedSaveCrashException : Exception
     {
-        public SimulatedSaveCrashException(SaveCrashPoint point) : base($"模拟进程在 {point} 处被强制结束") { }
+        public SimulatedSaveCrashException(SaveCrashPoint point) : base(GameText.Format("save.svc.the_simulation_process_was", point)) { }
     }
 
     /// <summary>
@@ -290,7 +291,7 @@ namespace GameLogic.Campaign
         {
             if (state == null)
             {
-                return new SaveResult(SaveOutcome.NoActiveCampaign, "CampaignState 为空，未写入。");
+                return new SaveResult(SaveOutcome.NoActiveCampaign, GameText.Get("save.svc.campaignstate_is_empty_nothing"));
             }
 
             int schema = EffectiveSchemaVersion;
@@ -627,10 +628,10 @@ namespace GameLogic.Campaign
                     if (File.Exists(BakPath(slotIndex)))
                     {
                         bool bakReady = Probe(BakPath(slotIndex)).Kind == CampaignSlotState.Ready;
-                        return new LoadResult(LoadOutcome.Corrupt, null, bakReady ? "主存档不存在，但备份可用。" : "主存档不存在，备份也无法读取。",
+                        return new LoadResult(LoadOutcome.Corrupt, null, bakReady ? GameText.Get("save.svc.the_main_save_is") : GameText.Get("save.svc.the_main_save_is_2"),
                             SaveFailureReason.MainMissing);
                     }
-                    return new LoadResult(LoadOutcome.Empty, null, "存档不存在。");
+                    return new LoadResult(LoadOutcome.Empty, null, GameText.Get("save.svc.the_save_does_not"));
                 case CampaignSlotState.DemoSave:
                     return new LoadResult(LoadOutcome.DemoSave, null, probe.Message, SaveFailureReason.DemoSave, probe.SchemaVersion);
                 case CampaignSlotState.Incompatible:
@@ -667,13 +668,13 @@ namespace GameLogic.Campaign
             catch (Exception e)
             {
                 RecordLoadFailure(slotIndex, SaveFailureReason.Payload, envelope.SchemaVersion);
-                return new LoadResult(LoadOutcome.Corrupt, null, $"正文解析失败：{e.Message}", SaveFailureReason.Payload, envelope.SchemaVersion);
+                return new LoadResult(LoadOutcome.Corrupt, null, GameText.Format("save.svc.could_not_parse_the", e.Message), SaveFailureReason.Payload, envelope.SchemaVersion);
             }
 
             if (state == null)
             {
                 RecordLoadFailure(slotIndex, SaveFailureReason.Payload, envelope.SchemaVersion);
-                return new LoadResult(LoadOutcome.Corrupt, null, "正文反序列化为 null。", SaveFailureReason.Payload, envelope.SchemaVersion);
+                return new LoadResult(LoadOutcome.Corrupt, null, GameText.Get("save.svc.the_save_content_deserialized"), SaveFailureReason.Payload, envelope.SchemaVersion);
             }
 
             CampaignFgStateDomains.EnsureAll(state);
@@ -767,7 +768,7 @@ namespace GameLogic.Campaign
                 meta.State = failed.Reason == SaveFailureReason.MigrationMissing ? CampaignSlotState.Incompatible : CampaignSlotState.Corrupt;
                 meta.FailureReason = failed.Reason;
                 meta.SchemaVersion = failed.SchemaVersion;
-                meta.ErrorMessage = "读档失败：" + failed.Reason;
+                meta.ErrorMessage = GameText.Get("save.svc.load_failed") + failed.Reason;
             }
 
             // 备份只在主档不可用时完整校验（此时卡片要显示"能否读取备份"）；主档可读时只看备份文件在不在，
@@ -797,7 +798,7 @@ namespace GameLogic.Campaign
                 // 版本更新 → "主存档丢失 + 备份也无法使用（原因）"。在这里新建要先确认，旧备份另存为 keep-bak 保留。
                 meta.State = CampaignSlotState.Corrupt;
                 meta.FailureReason = SaveFailureReason.MainMissing;
-                meta.ErrorMessage = meta.HasBackup ? "主存档不存在，但备份可用。" : "主存档不存在，备份也无法读取。";
+                meta.ErrorMessage = meta.HasBackup ? GameText.Get("save.svc.the_main_save_is") : GameText.Get("save.svc.the_main_save_is_2");
                 return meta;
             }
             if (meta.State != CampaignSlotState.Ready)
@@ -932,7 +933,7 @@ namespace GameLogic.Campaign
             if (!File.Exists(path))
             {
                 p.Kind = CampaignSlotState.Empty;
-                p.Message = "存档不存在。";
+                p.Message = GameText.Get("save.svc.the_save_does_not");
                 return p;
             }
 
@@ -943,12 +944,12 @@ namespace GameLogic.Campaign
             }
             catch (Exception e)
             {
-                return Bad(p, SaveFailureReason.ReadFailed, $"读取失败：{e.Message}");
+                return Bad(p, SaveFailureReason.ReadFailed, GameText.Format("save.svc.read_failed_0", e.Message));
             }
 
             if (string.IsNullOrWhiteSpace(fileJson))
             {
-                return Bad(p, SaveFailureReason.EmptyFile, "存档为空文件。");
+                return Bad(p, SaveFailureReason.EmptyFile, GameText.Get("save.svc.the_save_file_is"));
             }
 
             CampaignSaveEnvelope env;
@@ -958,26 +959,26 @@ namespace GameLogic.Campaign
             }
             catch (Exception e)
             {
-                return Bad(p, SaveFailureReason.Truncated, $"JSON 截断或损坏：{e.Message}");
+                return Bad(p, SaveFailureReason.Truncated, GameText.Format("save.svc.the_json_is_truncated", e.Message));
             }
 
             if (env == null || string.IsNullOrEmpty(env.PayloadJson))
             {
-                return Bad(p, SaveFailureReason.Truncated, "存档头部缺失或 payload 为空。");
+                return Bad(p, SaveFailureReason.Truncated, GameText.Get("save.svc.the_save_header_is"));
             }
 
             p.SchemaVersion = env.SchemaVersion;
             p.WrittenAtUtc = env.WrittenAtUtc;
             if (env.SchemaVersion < 1)
             {
-                return Bad(p, SaveFailureReason.Payload, $"存档格式版本 {env.SchemaVersion} 无效。");
+                return Bad(p, SaveFailureReason.Payload, GameText.Format("save.svc.save_format_version_0", env.SchemaVersion));
             }
 
             if (env.SchemaVersion <= CampaignSaveMigrations.LastDemoSchemaVersion)
             {
                 p.Kind = CampaignSlotState.DemoSave;
                 p.Reason = SaveFailureReason.DemoSave;
-                p.Message = $"Demo（0.1）存档（格式 v{env.SchemaVersion}），正式版不迁移，文件已保留。";
+                p.Message = GameText.Format("save.svc.demo_0_1_save", env.SchemaVersion);
                 return p;
             }
 
@@ -986,14 +987,14 @@ namespace GameLogic.Campaign
             {
                 p.Kind = CampaignSlotState.Incompatible;
                 p.Reason = SaveFailureReason.Newer;
-                p.Message = $"存档 schemaVersion={env.SchemaVersion} 比当前客户端 {chain.TargetVersion} 更新，拒绝读取，文件已保留。";
+                p.Message = GameText.Format("save.svc.save_schemaversion_0_is", env.SchemaVersion, chain.TargetVersion);
                 return p;
             }
 
             string checksum = ComputeChecksum(env.PayloadJson, env.CardJson);
             if (!string.Equals(checksum, env.Checksum, StringComparison.OrdinalIgnoreCase))
             {
-                return Bad(p, SaveFailureReason.Checksum, "校验和不匹配，存档可能已损坏。");
+                return Bad(p, SaveFailureReason.Checksum, GameText.Get("save.svc.checksum_mismatch_the_save"));
             }
 
             if (!chain.CanUpgradeFrom(env.SchemaVersion, out int missingFrom))
@@ -1001,7 +1002,7 @@ namespace GameLogic.Campaign
                 p.Kind = CampaignSlotState.Incompatible;
                 p.Reason = SaveFailureReason.MigrationMissing;
                 p.MissingFrom = missingFrom;
-                p.Message = $"缺少升级器 v{missingFrom}→v{missingFrom + 1}，无法读取 v{env.SchemaVersion} 存档。";
+                p.Message = GameText.Format("save.svc.no_upgrader_v_0", missingFrom, missingFrom + 1, env.SchemaVersion);
                 return p;
             }
 
@@ -1016,7 +1017,7 @@ namespace GameLogic.Campaign
             }
             if (card == null)
             {
-                return Bad(p, SaveFailureReason.Payload, "存档卡片头缺失或无法解析。");
+                return Bad(p, SaveFailureReason.Payload, GameText.Get("save.svc.the_save_card_header"));
             }
 
             p.Kind = CampaignSlotState.Ready;

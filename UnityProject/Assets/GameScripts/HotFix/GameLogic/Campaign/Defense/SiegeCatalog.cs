@@ -359,13 +359,13 @@ namespace GameLogic.Campaign.Defense
             }
             catch (Exception e)
             {
-                ProblemList.Add("读取 fg.TbSiege* 失败：" + e.Message);
+                ProblemList.Add("读取 fg.TbSiege* 失败：" + e.Message); // loc-ignore: 开发者自检 / 诊断文本
             }
             if (roles == null || targets == null || cats == null || units == null || enemies == null)
             {
                 if (ProblemList.Count == 0)
                 {
-                    ProblemList.Add("fg.TbSiegeRole / TbSiegeTarget / TbSiegeCategory / TbSiegeUnit 不存在（改 tools/cell_tables/fgdata_siege.py 后重新生成）");
+                    ProblemList.Add("fg.TbSiegeRole / TbSiegeTarget / TbSiegeCategory / TbSiegeUnit 不存在（改 tools/cell_tables/fgdata_siege.py 后重新生成）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 Log.Error("[SiegeCatalog] " + ProblemList[0]);
                 return;
@@ -374,7 +374,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (row == null || Array.IndexOf(RoleNames, row.Role) < 0)
                 {
-                    ProblemList.Add($"fg.TbSiegeRole {row?.Role}：职能不认识");
+                    ProblemList.Add($"fg.TbSiegeRole {row?.Role}：职能不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 RoleRows.Add(row);
@@ -385,7 +385,7 @@ namespace GameLogic.Campaign.Defense
                 int c = row == null ? -1 : Array.IndexOf(CategoryNames, row.Category);
                 if (r < 0 || r >= CombatSiegeConst.RoleRetreat || c < 0 || !(row.BiasMeters >= 0f))
                 {
-                    ProblemList.Add($"fg.TbSiegeTarget {row?.Id}：职能 / 类别不认识或偏好 < 0");
+                    ProblemList.Add($"fg.TbSiegeTarget {row?.Id}：职能 / 类别不认识或偏好 < 0"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 Masks[r] |= 1 << c;
@@ -396,7 +396,7 @@ namespace GameLogic.Campaign.Defense
                 int c = row == null ? -1 : Array.IndexOf(CategoryNames, row.Category);
                 if (c < 0 || string.IsNullOrEmpty(row.TypeId))
                 {
-                    ProblemList.Add($"fg.TbSiegeCategory {row?.TypeId}：类别不认识");
+                    ProblemList.Add($"fg.TbSiegeCategory {row?.TypeId}：类别不认识"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 CategoryByType[row.TypeId] = (byte)(1 << c);
@@ -415,7 +415,7 @@ namespace GameLogic.Campaign.Defense
                 bool structure = e != null && Content.EnemyDefs.HasTag(e, "structure");
                 if (row == null || e == null || (!structure && (speed <= 0f || range <= 0f || damage <= 0f || cooldown <= 0f)) || row.ProjectileSpeed <= 0f)
                 {
-                    ProblemList.Add($"fg.TbSiegeUnit {row?.EnemyTypeId}：敌人不在 fg.TbMechEnemy 或合并后的参数 ≤ 0");
+                    ProblemList.Add($"fg.TbSiegeUnit {row?.EnemyTypeId}：敌人不在 fg.TbMechEnemy 或合并后的参数 ≤ 0"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 UnitByEnemy[row.EnemyTypeId] = new SiegeUnitDef
@@ -440,7 +440,7 @@ namespace GameLogic.Campaign.Defense
             {
                 if (!UnitByEnemy.ContainsKey(u.EnemyTypeId))
                 {
-                    ProblemList.Add($"fg.TbRaidUnit {u.Id}：敌人 {u.EnemyTypeId} 在 fg.TbSiegeUnit 里没有攻城参数（展开时按原型参数）");
+                    ProblemList.Add($"fg.TbRaidUnit {u.Id}：敌人 {u.EnemyTypeId} 在 fg.TbSiegeUnit 里没有攻城参数（展开时按原型参数）"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             if (ProblemList.Count > 0)

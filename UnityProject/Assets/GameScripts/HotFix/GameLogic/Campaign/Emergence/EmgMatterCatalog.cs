@@ -48,14 +48,14 @@ namespace GameLogic.Campaign.Emergence
             var c = new Compiled();
             if (rows == null || rows.Count != EmgMatterConst.Count)
             {
-                c.Problems.Add($"fg.TbMatter 应为 {EmgMatterConst.Count} 行（实际 {rows?.Count ?? 0}）");
+                c.Problems.Add($"fg.TbMatter 应为 {EmgMatterConst.Count} 行（实际 {rows?.Count ?? 0}）"); // loc-ignore: 开发者自检 / 诊断文本
                 return c;
             }
             foreach (GameConfig.fg.Matter r in rows)
             {
                 if (r == null || r.Code < 1 || r.Code > EmgMatterConst.Count || EmgMatterConst.MatterOfPort(EmgMatterConst.PortBase + r.Code) == 0)
                 {
-                    c.Problems.Add($"fg.TbMatter 物质码 {r?.Code} 越界");
+                    c.Problems.Add($"fg.TbMatter 物质码 {r?.Code} 越界"); // loc-ignore: 开发者自检 / 诊断文本
                     continue;
                 }
                 int decay = Array.IndexOf(DecayModes, r.DecayMode);
@@ -66,12 +66,12 @@ namespace GameLogic.Campaign.Emergence
                     emit = EmgMatterConst.MatterOfPort(ei);
                     if (emit == 0)
                     {
-                        c.Problems.Add($"{r.Id} emit={r.Emit} 不是物质端口");
+                        c.Problems.Add($"{r.Id} emit={r.Emit} 不是物质端口"); // loc-ignore: 开发者自检 / 诊断文本
                     }
                 }
                 if (decay < 0)
                 {
-                    c.Problems.Add($"{r.Id} decayMode={r.DecayMode} 不认识");
+                    c.Problems.Add($"{r.Id} decayMode={r.DecayMode} 不认识"); // loc-ignore: 开发者自检 / 诊断文本
                 }
                 c.Rows[r.Code] = new EmgMatter
                 {
@@ -89,7 +89,7 @@ namespace GameLogic.Campaign.Emergence
             {
                 if (!c.Rows[m].Valid)
                 {
-                    c.Problems.Add($"fg.TbMatter 缺物质码 {m}");
+                    c.Problems.Add($"fg.TbMatter 缺物质码 {m}"); // loc-ignore: 开发者自检 / 诊断文本
                 }
             }
             return c;

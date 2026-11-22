@@ -645,6 +645,7 @@ namespace GameLogic.Settings
         public static void SetLanguage(GameLogic.Localization.GameLanguage language)
         {
             Data.Language = GameLogic.Localization.GameLanguageCodes.ToCode(language);
+            GameLogic.Localization.UiText.RefreshAll(); // FG15-UX-03：已打开界面里的 UXML 静态文本按新语言重写
             Save();
         }
 

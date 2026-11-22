@@ -818,7 +818,7 @@ namespace GameLogic.UI.Kit
                            && HomeValleyPowerGrid.TryDescribeBuilding(state, b, out string power) ? power : string.Empty;
         }
 
-        private static string UiSep => GameText.Language == GameLanguage.En ? ", " : "、";
+        private static string UiSep => GameText.Get("common.list_sep");
 
         private void RefreshStats(ProductionService.Producer p)
         {
@@ -978,7 +978,7 @@ namespace GameLogic.UI.Kit
         {
             string outs = RecipeBook.Describe(r, RecipeRole.Out);
             string by = RecipeBook.Describe(r, RecipeRole.Byproduct);
-            return string.IsNullOrEmpty(by) ? outs : outs + (GameText.Language == GameLanguage.En ? ", " : "、") + by;
+            return string.IsNullOrEmpty(by) ? outs : outs + (GameText.Language == GameLanguage.En ? ", " : GameText.Get("prod.panel.text")) + by;
         }
 
         private void RefreshProgress(ProductionService.Producer p)

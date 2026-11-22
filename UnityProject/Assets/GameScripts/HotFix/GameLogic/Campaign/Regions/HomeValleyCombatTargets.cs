@@ -5,6 +5,7 @@ using GameLogic.Campaign;
 using GameLogic.Campaign.Blueprint;
 using TEngine;
 using UnityEngine;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Regions
 {
@@ -90,11 +91,11 @@ namespace GameLogic.Campaign.Regions
             {
                 if (!Success)
                 {
-                    return $"未命中：{FailureReason}";
+                    return GameText.Format("home.combat.missed_0", FailureReason);
                 }
-                string source = IsAiSource ? $"AI(机器{AttackerLogicId})" : $"接入(机器{AttackerLogicId})";
-                return $"{source} 命中，伤害 {DamageApplied:F1}，剩余 {RemainingHealth:F1}/{MaxHealthValue:F0}，" +
-                    $"{ReactionHint}，签名 {CompileSignature}";
+                string source = IsAiSource ? GameText.Format("home.combat.ai_machine_0", MachineNaming.Short(AttackerLogicId)) : GameText.Format("home.combat.linked_machine_0", MachineNaming.Short(AttackerLogicId));
+                return GameText.Format("home.combat.0_hit_for_1", source, DamageApplied, RemainingHealth, MaxHealthValue) +
+                    GameText.Format("home.combat.0_signature_1", ReactionHint, CompileSignature);
             }
         }
 
@@ -352,16 +353,16 @@ namespace GameLogic.Campaign.Regions
         {
             if (state == null)
             {
-                return HitResult.Fail("没有活动的归还谷地会话。", isAiSource, attackerLogicId);
+                return HitResult.Fail(GameText.Get("home.combat.no_active_reclamation_valley"), isAiSource, attackerLogicId);
             }
             CombatTargetRecord target = Find(state, targetId);
             if (target == null)
             {
-                return HitResult.Fail($"目标 {targetId} 不存在。", isAiSource, attackerLogicId);
+                return HitResult.Fail(GameText.Format("home.combat.target_0_does_not", targetId), isAiSource, attackerLogicId);
             }
             if (target.Health <= 0f)
             {
-                return HitResult.Fail("目标当前处于再生冷却中（HP=0），暂不可命中。", isAiSource, attackerLogicId);
+                return HitResult.Fail(GameText.Get("home.combat.the_target_is_regenerating"), isAiSource, attackerLogicId);
             }
             _attempts[attackerLogicId] = AttemptCount(attackerLogicId) + 1;
 
@@ -377,7 +378,7 @@ namespace GameLogic.Campaign.Regions
             }
             if (!resolution.Preview.HasCombatOutput)
             {
-                var fail = HitResult.Fail("当前装配没有可攻击的主武器出口（8号汇槽为空）。", isAiSource, attackerLogicId);
+                var fail = HitResult.Fail(GameText.Get("home.combat.the_current_loadout_has"), isAiSource, attackerLogicId);
                 PushEvent(fail);
                 return fail;
             }
@@ -452,7 +453,7 @@ namespace GameLogic.Campaign.Regions
             int count = state?.CombatTargets?.Count(t => t.TargetId == LowThreatTargetId) ?? 0;
             if (count != 1)
             {
-                violations.Add($"低威胁残骸靶记录数应为 1，实际 {count}。");
+                violations.Add($"低威胁残骸靶记录数应为 1，实际 {count}。"); // loc-ignore: 开发者自检 / 诊断文本
             }
             return violations;
         }

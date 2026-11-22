@@ -943,7 +943,7 @@ namespace GameLogic.UI.SignalCore
         /// <summary>FG1-SIG-06：未破解固件的悬停说明（裸跑代价与破解后的变化，数值读调参表）；已破解 / 己方固件为空。</summary>
         public static string RawTip(CampaignState s, string contentId) =>
             FirmwareKinds.IsRaw(s, contentId)
-                ? "\n" + GameText.Get("signal.core.raw_tip_title") + "：" + GameText.Format("signal.core.raw_tip",
+                ? "\n" + GameText.Get("signal.core.raw_tip_title") + GameText.Get("emg.enemy.program.sep") + GameText.Format("signal.core.raw_tip",
                     RawFirmwareService.ExposurePerFire.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
                     RawFirmwareService.HeatMultiplier.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
                     GameText.Get(FirmwareKinds.AfterCrackKey(contentId))) // 破解后能装到哪里按种类说（核心 / 无机器实现 / 可装机器），不给假承诺

@@ -32,9 +32,10 @@ namespace Launcher
 
         #endregion
 
-        private const string m_cancelText = "Cancel";
-        private const string m_confirmText = "Confirm";
-        private const string m_updateText = "Update";
+        // FG15-UX-03：按钮文字由 ProcedureLaunch 按设置语言注入（LaunchText；Launcher 程序集引用不到 Procedure）。
+        public static string CancelText = "Cancel";
+        public static string ConfirmText = "OK";
+        public static string UpdateText = "Update";
 
         public Action OnConfirmClick { get; set; }
         public Action OnUpdateClick { get; set; }
@@ -43,9 +44,9 @@ namespace Launcher
         public override void OnInit(object data)
         {
             base.OnInit(data);
-            m_textCancel.text = m_cancelText;
-            m_textUpdate.text = m_updateText;
-            m_textConfirm.text = m_confirmText;
+            m_textCancel.text = CancelText;
+            m_textUpdate.text = UpdateText;
+            m_textConfirm.text = ConfirmText;
 
             m_btnUpdate.gameObject.SetActive(false);
             m_btnCancel.gameObject.SetActive(false);

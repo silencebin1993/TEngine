@@ -76,10 +76,10 @@ namespace Procedure
                     Log.Error($"{initializationOperation.Error}");
 
                     // 打开启动UI。
-                    LauncherMgr.ShowUI<LoadUpdateUI>($"资源初始化失败！");
+                    LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Get("launch.init.failed"));
 
                     LauncherMgr.ShowMessageBox(
-                        $"资源初始化失败！点击确认重试 \n \n <color=#FF0000>原因{initializationOperation.Error}</color>",
+                        LaunchText.Format("launch.init.failed_retry_0", initializationOperation.Error),
                         () => { Retry(procedureOwner); }, UnityEngine.Application.Quit);
                 }
             }
@@ -97,14 +97,14 @@ namespace Procedure
             Log.Error($"{message}");
 
             // 打开启动UI。
-            LauncherMgr.ShowUI<LoadUpdateUI>($"资源初始化失败！");
+            LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Get("launch.init.failed"));
 
             if (message.Contains("PackageManifest_DefaultPackage.version Error : HTTP/1.1 404 Not Found"))
             {
-                message = "请检查StreamingAssets/package/DefaultPackage/PackageManifest_DefaultPackage.version是否存在";
+                message = LaunchText.Get("launch.init.check_manifest");
             }
 
-            LauncherMgr.ShowMessageBox($"资源初始化失败！点击确认重试 \n \n <color=#FF0000>原因{message}</color>",
+            LauncherMgr.ShowMessageBox(LaunchText.Format("launch.init.failed_retry_0", message),
                 () => { Retry(procedureOwner); },
                 Application.Quit);
         }
@@ -112,7 +112,7 @@ namespace Procedure
         private void Retry(ProcedureOwner procedureOwner)
         {
             // 打开启动UI。
-            LauncherMgr.ShowUI<LoadUpdateUI>($"重新初始化资源中...");
+            LauncherMgr.ShowUI<LoadUpdateUI>(LaunchText.Get("launch.init.retrying"));
 
             InitPackage(procedureOwner).Forget();
         }

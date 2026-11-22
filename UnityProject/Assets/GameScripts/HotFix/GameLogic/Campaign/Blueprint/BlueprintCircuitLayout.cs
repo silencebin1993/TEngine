@@ -1,4 +1,5 @@
 using GameLogic.MetabolicSlice.Grid;
+using GameLogic.Localization;
 
 namespace GameLogic.Campaign.Blueprint
 {
@@ -67,18 +68,18 @@ namespace GameLogic.Campaign.Blueprint
         /// 的真实数值逐条对应，改被动实现时要同步改这两行文案。</summary>
         public static string SlotTypeDisplayName(SlotType slotType) => slotType switch
         {
-            SlotType.Cytoplasm => "通用节点",
-            SlotType.Membrane => "减振节点",
-            SlotType.Lattice => "高导节点",
+            SlotType.Cytoplasm => GameText.Get("circuit.layout.generic_node"),
+            SlotType.Membrane => GameText.Get("circuit.layout.damping_node"),
+            SlotType.Lattice => GameText.Get("circuit.layout.high_conductance_node"),
             _ => slotType.ToString(),
         };
 
         public static string SlotPassiveDisplay(SlotType slotType) => slotType switch
         {
-            SlotType.Cytoplasm => "被动：微产热",
-            SlotType.Membrane => "被动：绝缘缓冲（能量×0.95）",
-            SlotType.Lattice => "被动：高导低损（能量×1.05）",
-            _ => "被动：无",
+            SlotType.Cytoplasm => GameText.Get("circuit.layout.passive_slight_heat"),
+            SlotType.Membrane => GameText.Get("circuit.layout.passive_insulating_buffer_energy"),
+            SlotType.Lattice => GameText.Get("circuit.layout.passive_high_conductance_low"),
+            _ => GameText.Get("circuit.layout.passive_none"),
         };
     }
 }
