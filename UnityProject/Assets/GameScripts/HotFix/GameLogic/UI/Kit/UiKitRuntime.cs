@@ -51,6 +51,8 @@ namespace GameLogic.UI.Kit
             Create<IntelPanelUIToolkit>("[IntelPanelHost]"); // FG5-RND-05：情报面板（30066，合成台之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<FusionPanelUIToolkit>("[FusionPanelHost]"); // FG5-RND-04：电路合成台 / 配方书（30067，靶场之下、暂停菜单之下：“?”打开的图鉴盖在它上面）。
             Create<ResearchTreePanelUIToolkit>("[ResearchTreeHost]"); // FG5-RND-01：研发树（30069，暂停菜单之下：从研发树“?”打开的图鉴盖在它上面）。
+            Create<GuidanceHelpPanelUIToolkit>("[GuidanceHelpHost]"); // FG15-UX-04：引导与帮助（30085，暂停菜单与设置之上；引导卡片盖在它上面）。
+            Create<GuidanceCardHudUIToolkit>("[GuidanceCardHost]"); // FG15-UX-04：引导卡片（30195，所有面板与结算 / 演出之上、浮层之下；非阻塞，一次一条、其余排队）。
             Create<PostgamePanelUIToolkit>("[PostgameHost]"); // FG14-SBX-01：坚守记录 / 后日谈说明（30079，暂停菜单的子面板；进入后日谈时自动打开说明）。
             Create<SandboxPanelUIToolkit>("[SandboxHost]"); // FG14-SBX-02：沙盒设置 / 修改记录 / 关键材料换取（30079，暂停菜单与研发树的子面板）。
             Create<EventHistoryPanelUIToolkit>("[EventHistoryHost]"); // FG12-EVT-01：事件历史（30079，与突袭历史同层，都是暂停菜单的子面板）。
@@ -95,6 +97,8 @@ namespace GameLogic.UI.Kit
             UiConfirmDialog.DiscardAll();
             KeyBindingsPanelUIToolkit.Close();
             MechanicCodexPanelUIToolkit.Close();
+            GuidanceHelpPanelUIToolkit.Close(); // FG15-UX-04
+            GameLogic.Core.GuidanceQueue.SkipAll(); // FG15-UX-04：离开世界清掉排队与当前卡（都已记为看过，可在“引导与帮助”重看），不带到主菜单 / 下一局。
             FirmwareLibraryPanelUIToolkit.Close();
             ReactionLogPanelUIToolkit.Close();
             EventHistoryPanelUIToolkit.Close();

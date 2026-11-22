@@ -355,6 +355,29 @@ namespace GameLogic.Settings
             Save();
         }
 
+        /// <summary>FG15-UX-04：已看过的引导钩子（按看到的先后）。</summary>
+        public static System.Collections.Generic.IReadOnlyList<string> SeenGuidanceHooks => Data.SeenGuidanceHooks ?? Array.Empty<string>();
+
+        /// <summary>FG15-UX-04（“引导与帮助”的“重新显示全部引导”）：清空已看记录，之后每个系统第一次遇到时重新提示。</summary>
+        public static void ResetSeenGuidanceHooks()
+        {
+            Data.SeenGuidanceHooks = Array.Empty<string>();
+            Save();
+        }
+
+        /// <summary>FG15-UX-04 自检：把一条已看记录精确还原（不动其他条）。</summary>
+        public static void ForgetGuidanceHookForTests(string hookId)
+        {
+            if (!HasSeenGuidanceHook(hookId))
+            {
+                return;
+            }
+            var list = new System.Collections.Generic.List<string>(Data.SeenGuidanceHooks);
+            list.Remove(hookId);
+            Data.SeenGuidanceHooks = list.ToArray();
+            Save();
+        }
+
         public static void SetNotifyAutoPause(string typeId, bool enabled)
         {
             if (string.IsNullOrEmpty(typeId))

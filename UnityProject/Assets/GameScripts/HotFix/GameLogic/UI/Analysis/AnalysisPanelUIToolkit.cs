@@ -98,6 +98,7 @@ namespace GameLogic.UI.Analysis
                 return;
             }
             Bind(_document.rootVisualElement, _rowTemplate);
+            GameLogic.UI.Kit.UiPanelHelp.Attach("AnalysisPanel", _document.rootVisualElement); // FG15-UX-04（FGR-UX-042）
         }
 
         /// <summary>自检：把真 UXML（AnalysisPanel.uxml 与行模板）接到这个组件上，走与运行时同一份绑定代码。</summary>

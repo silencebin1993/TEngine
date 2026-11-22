@@ -134,6 +134,7 @@ namespace GameLogic.UI.Objective
                 return;
             }
             BindView(root);
+            GameLogic.UI.Kit.UiPanelHelp.Attach("MissionLog", root); // FG15-UX-04（FGR-UX-042）
             // 拖动、点击置顶、窗口下方世界输入拦截统一走 UiWindowFocus（UI 红线第 9 条）。
             UiWindowFocus.Attach(_document, _window, root.Q<VisualElement>("MissionLogHeader"), "mission-log");
         }

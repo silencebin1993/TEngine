@@ -132,6 +132,7 @@ namespace GameLogic.UI.Expedition
                 return;
             }
             BindView(_document.rootVisualElement, _rowTemplate);
+            GameLogic.UI.Kit.UiPanelHelp.Attach("ExpeditionPrepPanel", _document.rootVisualElement); // FG15-UX-04（FGR-UX-042）
         }
 
         /// <summary>绑定视觉树（正式启动由 <see cref="Start"/> 调；编辑模式自检挂真 UXML 后直接调）。</summary>

@@ -91,6 +91,7 @@ namespace GameLogic.UI.PrimitiveCraft
             }
 
             BindElements();
+            GameLogic.UI.Kit.UiPanelHelp.Attach("PrimitiveCraftPanel", _root); // FG15-UX-04（FGR-UX-042）
             _root.pickingMode = PickingMode.Ignore;
             UiEscapeStack.RegisterPage(this, _panel);
             WireEvents();

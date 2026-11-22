@@ -97,6 +97,7 @@ namespace GameLogic.UI.Factory
                 return;
             }
 
+            GameLogic.UI.Kit.UiPanelHelp.Attach("FactoryPanel", _root); // FG15-UX-04（FGR-UX-042）
             _panel = _root.Q<VisualElement>("FactoryPanelRoot");
             _produceSection = _root.Q<VisualElement>("ProduceSection");
             _retrofitSection = _root.Q<VisualElement>("RetrofitSection");

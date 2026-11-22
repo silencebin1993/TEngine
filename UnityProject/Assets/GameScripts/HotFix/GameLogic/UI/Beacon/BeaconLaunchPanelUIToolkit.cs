@@ -109,6 +109,7 @@ namespace GameLogic.UI.Beacon
             }
             GameLogic.Localization.UiText.Localize(_document.rootVisualElement); // FG15-UX-03：UXML 的 @文本键
             BindView(_document.rootVisualElement);
+            GameLogic.UI.Kit.UiPanelHelp.Attach("BeaconLaunchPanel", _document.rootVisualElement); // FG15-UX-04（FGR-UX-042）
         }
 
         /// <summary>绑定面板元素（正式流程在 Start 里；自检挂真 UXML 直接调）。Demo 模式的文字取 UXML 原文，切回时还原。</summary>

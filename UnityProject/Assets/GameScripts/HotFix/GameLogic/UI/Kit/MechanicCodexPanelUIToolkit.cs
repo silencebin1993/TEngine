@@ -220,6 +220,15 @@ namespace GameLogic.UI.Kit
             }
             IsOpen = open;
             _root.EnableInClassList("uk-hidden", !open);
+            if (Document != null)
+            {
+                // FG15-UX-04（FGR-UX-042）：从层级高于图鉴的面板（离家报告、突袭历史、难度……）点“?”时，图鉴临时盖到那个面板之上，关掉后回到原层级。
+                Document.sortingOrder = open ? TargetOrder : Order;
+            }
+            if (!open)
+            {
+                _aboveLayer = 0;
+            }
             if (open)
             {
                 InputRouter.PushModal(this);
@@ -233,6 +242,25 @@ namespace GameLogic.UI.Kit
                 UiEscapeStack.Remove(this);
             }
         }
+
+        private static int _aboveLayer;
+
+        /// <summary>FG15-UX-04：下一次打开（或已经开着时立即）盖在层级 <paramref name="layer"/> 的面板之上。</summary>
+        public static void RequestAbove(int layer)
+        {
+            // 已经开着时只抬不降：图鉴已被抬到高层面板之上时，再从低层入口跳转不能把它沉回那个面板下面。
+            _aboveLayer = IsOpen ? System.Math.Max(_aboveLayer, layer) : layer;
+            if (IsOpen && Instance != null && Instance.Document != null)
+            {
+                Instance.Document.sortingOrder = TargetOrder;
+            }
+        }
+
+        /// <summary>打开时要用的层级：发起面板高于图鉴时取它的上一层，否则图鉴自己的层级。</summary>
+        public static int TargetOrder => _aboveLayer >= Order ? _aboveLayer + 1 : Order;
+
+        /// <summary>自检读点：当前实际层级。</summary>
+        public int CurrentSortingOrder => Document != null ? (int)Document.sortingOrder : Order;
 
         public void SelectTab(string tab)
         {

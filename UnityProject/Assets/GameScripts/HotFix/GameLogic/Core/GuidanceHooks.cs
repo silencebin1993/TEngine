@@ -6,9 +6,9 @@ namespace GameLogic.Core
 {
     /// <summary>
     /// FG0-UX-01（FG00 B14）：引导钩子。新系统第一次出现时发出一个钩子事件（“首次打开通知中心”……）；
-    /// 引导内容本身统一在 FG15-UX-04 实现（用户决定：教学最后再做），届时订阅 <see cref="FirstRaised"/> 并按
-    /// <see cref="Known"/> 核对“没有遗漏的钩子”。
-    /// 每个钩子对每个玩家只触发一次（记在本机设置 <see cref="GameSettings"/> 里，跨战役），重看由 FG15-UX-04 提供。
+    /// 引导内容在 FG15-UX-04 实现：<see cref="GuidanceQueue"/> 订阅 <see cref="FirstRaised"/>，按文本键 guide.&lt;钩子&gt;.* 排队展示；
+    /// <see cref="Known"/> 是“钩子 ↔ 引导内容”对照表的全集（FgGuidanceSelfCheck A 段：每个都有卡片或 none 理由，源码里 Raise 的都已登记）。
+    /// 每个钩子对每个玩家只触发一次（记在本机设置 <see cref="GameSettings"/> 里，跨战役），重看走暂停菜单“引导与帮助”（不经过本类）。
     /// </summary>
     public static class GuidanceHooks
     {
@@ -778,6 +778,12 @@ namespace GameLogic.Core
             // FG13-FAC-01 白潮（fgdata_fleet.FLEET_HOOKS；图鉴机制条目引用它们）。
             "fleet.first_encounter", "fleet.first_formation_broken", "fleet.first_inert", "fleet.first_strike_mark", "fleet.first_uplink_blocked",
             "fleet.first_pod", "fleet.first_shield_break",
+            // FG15-UX-04 核对“没有遗漏的钩子”时补登：铸造厂 / 静默阵营的战斗反馈与首领钩子（FoundryCombatFeedback、FoundryOutpostCoreBoss、SlagHeatService、
+            // SilentCombatFeedback、SilentMindBoss、EmNoiseService 早已在 Raise，但没登记进本表）。
+            "foundry.first_salvo", "foundry.first_mine", "foundry.first_charge", "foundry.first_deploy", "foundry.first_slag",
+            "foundry.first_antiair", "foundry.first_berserk",
+            "silent.first_stealth", "silent.first_deflect", "silent.first_sever", "silent.first_noise", "silent.first_emitter_destroyed",
+            "silent.first_silence", "silent.first_boss",
         };
 
         /// <summary>某钩子第一次触发时回调（参数为钩子 ID）。</summary>

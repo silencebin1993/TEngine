@@ -579,8 +579,9 @@ namespace GameLogic.EditorTools
                         }
                         break;
                     case "T":
-                        if (!GameText.TryGet(f[1], GameLanguage.ZhCn, out string zh) || zh != f[2]
-                            || !GameText.TryGet(f[1], GameLanguage.En, out string en) || en != f[3])
+                        // fgdata.py --dump 把文本里的换行转义成 \n（一行一条），这里还原后比对。
+                        if (!GameText.TryGet(f[1], GameLanguage.ZhCn, out string zh) || zh != f[2].Replace("\\n", "\n")
+                            || !GameText.TryGet(f[1], GameLanguage.En, out string en) || en != f[3].Replace("\\n", "\n"))
                         {
                             diffs.Add($"文本 {f[1]} 与源数据不一致");
                         }

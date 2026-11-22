@@ -195,6 +195,7 @@ namespace GameLogic.UI.CircuitBoard
             UiTextFocusProbe.Register(_root);
             BindElements();
             WireEvents();
+            GameLogic.UI.Kit.UiPanelHelp.Attach("CircuitBoardPanel", _root); // FG15-UX-04（FGR-UX-042）
             SetPanelOpen(false);
         }
 

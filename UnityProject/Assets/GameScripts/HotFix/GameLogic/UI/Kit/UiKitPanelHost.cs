@@ -75,6 +75,7 @@ namespace GameLogic.UI.Kit
             UiTextFocusProbe.Register(Root);
             UiEscapeStack.RegisterPage(this, Root);
             OnReady(Root);
+            UiPanelHelp.Attach(UxmlLocation, Root, SortingOrder); // FG15-UX-04（FGR-UX-042）：标题栏右上角统一的“?”
         }
 
         /// <summary>UXML 已实例化。子类在这里 Q 节点、注册事件。</summary>

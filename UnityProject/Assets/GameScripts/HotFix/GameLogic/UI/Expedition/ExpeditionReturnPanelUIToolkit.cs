@@ -81,6 +81,7 @@ namespace GameLogic.UI.Expedition
                 return;
             }
 
+            GameLogic.UI.Kit.UiPanelHelp.Attach("ExpeditionReturnPanel", _root); // FG15-UX-04（FGR-UX-042）
             _panel = _root.Q<VisualElement>("ExpeditionReturnPanelRoot");
             _wipeBanner = _root.Q<Label>("WipeBanner");
             _keyTechLabel = _root.Q<Label>("KeyTechLabel");

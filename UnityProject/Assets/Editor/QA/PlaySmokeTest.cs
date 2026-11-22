@@ -1482,6 +1482,28 @@ namespace GameLogic.EditorTools
             bool codexClosed = ClickUitk("[MechanicCodexHost]", "CodexClose") && !UI.Kit.MechanicCodexPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
             Check(codexClicked && codexOpen && codexClosed,
                 $"暂停菜单点“图鉴”：机制图鉴打开（{codex?.ItemCount} 条，当前“{codexTitle}”），点关闭回到暂停菜单");
+            // FG15-UX-04（FGR-UX-040～042）：引导卡片与“引导与帮助”随世界界面挂好；暂停菜单“引导与帮助”打开（看过的引导列表、总开关），重看一条 → 引导卡片显示它（标“重看”），
+            // 点“知道了”收起、点关闭回到暂停菜单；电网面板标题栏有统一补上的“?”。
+            bool guideMounted = UitkExists("[GuidanceCardHost]", "GuideOk") && UitkExists("[GuidanceHelpHost]", "GuideHelpToggle") && UitkExists("[PowerPanelHost]", "PowerPanelHelpAuto");
+            Core.GuidanceQueue.SkipAll(); // 收起开局时排队的首次引导，下面只看重看那一条
+            bool guideClicked = ClickUitk("[PauseMenuHost]", "PauseGuidance");
+            UI.Kit.GuidanceHelpPanelUIToolkit gh = UI.Kit.GuidanceHelpPanelUIToolkit.Instance;
+            bool guideOpen = gh != null && UI.Kit.GuidanceHelpPanelUIToolkit.IsOpen && gh.PanelVisible && gh.VisibleRowCount >= 1 && !Localization.GameText.ContainsMarker(gh.CountText);
+            string replayHook = gh != null && gh.VisibleRowCount > 0 ? gh.RowHook(0) : null;
+            bool replayed = gh != null && gh.VisibleRowCount > 0 && InvokeClickable(gh.Row(0));
+            UI.Kit.GuidanceCardHudUIToolkit gc = UI.Kit.GuidanceCardHudUIToolkit.Instance;
+            gc?.Refresh();
+            bool cardShown = replayed && gc != null && gc.CardVisible && Core.GuidanceQueue.Current == replayHook && Core.GuidanceQueue.CurrentIsReplay
+                             && !Localization.GameText.ContainsMarker(gc.TitleText + gc.BodyText);
+            string cardTitle = gc?.TitleText ?? string.Empty;
+            while (Core.GuidanceQueue.Current != null && ClickUitk("[GuidanceCardHost]", "GuideOk"))
+            {
+            }
+            gc?.Refresh();
+            bool cardGone = gc != null && !gc.CardVisible;
+            bool guideClosed = ClickUitk("[GuidanceHelpHost]", "GuideHelpClose") && !UI.Kit.GuidanceHelpPanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen;
+            Check(guideMounted && guideClicked && guideOpen && cardShown && cardGone && guideClosed,
+                $"暂停菜单点“引导与帮助”：挂好 {guideMounted}、打开（{gh?.CountText}）{guideOpen}、重看“{cardTitle}”卡片显示 {cardShown}、“知道了”收起 {cardGone}、关闭回到暂停菜单 {guideClosed}");
             // FG9-NAR-01（FGU-38、FGR-NAR-003）：暂停菜单“资料库”→ 资料库盖在暂停菜单上面，有开场演出“苏醒”（可重看）；剧情回顾页列出它；点关闭回到暂停菜单。
             // 暂停菜单“文本与字幕”两个滑条在界面里。
             bool libClicked = ClickUitk("[PauseMenuHost]", "PauseLibrary");

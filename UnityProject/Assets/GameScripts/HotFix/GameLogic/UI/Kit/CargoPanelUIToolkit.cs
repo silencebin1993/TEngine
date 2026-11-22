@@ -199,7 +199,7 @@ namespace GameLogic.UI.Kit
             _autoOpen = root.Q<Button>("CargoAutoOpen");
             _footer = root.Q<Label>("CargoFooter");
             _close.clicked += () => SetOpen(false);
-            _help.clicked += () => MechanicCodex.Open("codex.expedition.cargo");
+            _help.clicked += () => UiPanelHelp.Open("codex.expedition.cargo", Order); // 货舱 30083 高于图鉴 30075：图鉴临时盖到货舱之上
             _prev.clicked += () => StepTarget(-1);
             _next.clicked += () => StepTarget(1);
             _pause.clicked += PauseForTransfer;

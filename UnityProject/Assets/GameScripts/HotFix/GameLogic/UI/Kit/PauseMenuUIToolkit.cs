@@ -69,6 +69,8 @@ namespace GameLogic.UI.Kit
             });
             // FG1-HUD-01（FGU-05）：图鉴入口——机制图鉴盖在暂停菜单上面，关掉回到暂停菜单。
             _codexButton = Bind(root, "PauseCodex", "pause.codex", () => GameLogic.Progression.MechanicCodex.Open(null, unlock: false));
+            // FG15-UX-04（FGR-UX-040 / 041）：引导与帮助（总开关、重看看过的引导、重新显示全部引导）盖在暂停菜单上面，关掉回到暂停菜单。
+            GuidanceButton = Bind(root, "PauseGuidance", "pause.guidance", GuidanceHelpPanelUIToolkit.Open);
             // FG9-NAR-01（FGU-38）：资料库盖在暂停菜单上面，关掉回到暂停菜单；按钮文字带未读条数（打开菜单时刷新）。
             LibraryButton = Bind(root, "PauseLibrary", "pause.library", NarrativeLibraryPanelUIToolkit.OpenFromMenu);
             // FG2-FW-05（FGU-20）：固件库入口——盖在暂停菜单上面，关掉回到暂停菜单。
@@ -362,6 +364,8 @@ namespace GameLogic.UI.Kit
         private Slider _subtitleScale;
         private Label _subtitleScaleLabel;
 
+        /// <summary>FG15-UX-04：暂停菜单“引导与帮助”。</summary>
+        public Button GuidanceButton { get; private set; }
         public Button LibraryButton { get; private set; }
         public Slider TextSpeedSlider => _textSpeed;
         public Slider SubtitleScaleSlider => _subtitleScale;
