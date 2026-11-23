@@ -136,7 +136,7 @@ namespace GameLogic.Campaign.Regions
                         continue;
                     }
                     GameObject tile = Tile(n++);
-                    tile.transform.position = new Vector3(p.Xs[i], 0.06f, p.Ys[i]);
+                    tile.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(p.Xs[i], 0.06f, p.Ys[i]));
                     tile.transform.rotation = Quaternion.Euler(0f, p.Dirs[i] * 90f, 0f);
                     // FG3-LOG-03：被摧毁的虚影更窄更短（“断条”），红色调；普通规划是淡蓝长条。
                     // FG3-LOG-04：分流器 / 合流器的虚影是方块，地下传送带两端是横着的短条（形状区分，不只靠颜色；占位 B22）。
@@ -153,7 +153,7 @@ namespace GameLogic.Campaign.Regions
                         : new Vector3(0.55f, 0.08f, 0.9f);
                     if (p.Upgrade)
                     {
-                        tile.transform.position = new Vector3(p.Xs[i], 0.3f, p.Ys[i]);
+                        tile.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(p.Xs[i], 0.3f, p.Ys[i]));
                     }
                     tile.GetComponent<Renderer>().sharedMaterial = p.Upgrade ? UpgradeMaterial() : p.Destroyed ? _destroyedMaterial : p.PipePiece > 0 ? PipeGhostMaterial() : _beltMaterial;
                     if (p.Destroyed)
@@ -221,7 +221,7 @@ namespace GameLogic.Campaign.Regions
             if (allowed && state != null && camera != null && !InputRouter.IsUiPointerBlocked())
             {
                 Vector3 screen = InputRouter.Reader.MousePosition;
-                Ray ray = camera.ScreenPointToRay(screen);
+                Ray ray = BinGames.Sim.ViewOrigin.WorldRay(camera, screen);
                 if (Mathf.Abs(ray.direction.y) > 1e-4f)
                 {
                     float t = -ray.origin.y / ray.direction.y;

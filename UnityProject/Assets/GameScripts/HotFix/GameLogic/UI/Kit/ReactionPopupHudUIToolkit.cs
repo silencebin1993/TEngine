@@ -219,7 +219,7 @@ namespace GameLogic.UI.Kit
                 Vector2 panelPos = default;
                 if (camera != null && _layer.panel != null)
                 {
-                    Vector3 screen = camera.WorldToScreenPoint(d.Position + Vector3.up * Mathf.Min(1f, age * 0.8f));
+                    Vector3 screen = camera.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(d.Position + Vector3.up * Mathf.Min(1f, age * 0.8f)));
                     if (screen.z <= 0f)
                     {
                         continue;
@@ -269,7 +269,7 @@ namespace GameLogic.UI.Kit
                 return camera == null && InWorldOverrideForTests; // 自检没有镜头时只数条数。
             }
             Vector3 world = p.Position + Vector3.up * Mathf.Min(1.2f, age * 0.6f);
-            Vector3 screen = camera.WorldToScreenPoint(world);
+            Vector3 screen = camera.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(world));
             if (screen.z <= 0f)
             {
                 return false;

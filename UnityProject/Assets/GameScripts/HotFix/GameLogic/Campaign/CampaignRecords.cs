@@ -624,6 +624,17 @@ namespace GameLogic.Campaign
         public int ReservedItemAmount;
         /// <summary>FG4-ECO-06（FGR-ECO-031 可追溯）：派出 / 改动这张工单的常驻规则编号（3 = “由规则 R3 触发”；0 = 不是规则派的）。</summary>
         public int RuleSerial;
+        // FG15-SYS-02（DEBT-EMGRGL01-01）：等空间返还单的判定缓存（运行时；非公开字段 JsonUtility 不写，存档字节不变）。
+        // 上次判“仍要等”时的地面物数组 / 战利品身份表数组引用（两者都只整体替换，引用不变 = 这件地面物还在、身份不变）与那件物品的数量、种类槽位。
+        internal GroundItemRecord[] WaitGround;
+        internal LootGroundTagRecord[] WaitTags;
+        internal string WaitSource;
+        internal int WaitAmount;
+        internal GroundItemRecord WaitItem;
+        internal string WaitType;
+        internal string WaitSalvage;
+        internal int WaitTypeSlot;
+        internal bool WaitNoStorage;
         /// <summary>EMG-R 出口补缺口第 4 轮（FG-GAP-189）：自动重建派出的传送带虚影施工单 = 那份虚影被摧毁的那一步（GameClock.Ticks）；
         /// &gt; 0 = 自动重建虚影单，不取用在等一次凑齐、攒得齐的建筑重建单还差的废料（FG-GAP-243 起不看摧毁先后）。旧存档 / 不是自动重建 = 0（不受预留限制）。</summary>
         public long RuleQueueTick;

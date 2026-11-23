@@ -59,7 +59,9 @@ namespace BinGames.Sim.Combat
         /// Emg 段追加段 40 白潮单位运行状态、段 41 轨道打击、段 42 灭活焦土（都只在非空时写）。读取仍认 1～24：参数为 0、三张表为空。
         /// 26 = FG13-END-05（FG11 FGR-END-022 阶段二、FG19 FGR-EMG-161）：行为参数行尾部追加端口闸门 2 个（护盾节点只被一族端口破坏：族别、闸门值）；
         /// Emg 段 40 白潮运行状态每条追加 2 格（闸门剩余、最后一个削减它的来源）。读取仍认 1～25：没有闸门。
-        public const int FormatVersion = 26;
+        /// 27 = FG15-SYS-02（DEBT-EMGRTALLY01-01）：Emg 段 33 计数表在直映射行之后追加溢出表行（被新链挤出格的旧链，按链号升序）与一行“溢出丢弃下限”（x = −链号）。
+        /// 读取仍认 1～26：溢出表为空、下限 0。
+        public const int FormatVersion = 27;
 
         /// <summary>FG6-DEF-02：一个地点最多登记几座护盾（存储与逐弹体判定的上限；超出的不登记并由热更层写原因）。</summary>
         public const int MaxShields = 64;

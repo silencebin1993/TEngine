@@ -53,20 +53,20 @@ namespace GameLogic.View
                 var ground = new Vector3(r.X, 0.06f, r.Y);
                 GameObject disk = Disk(used);
                 float pulse = calm ? 1f : 1f + 0.06f * Mathf.Sin(Time.unscaledTime * Mathf.Lerp(3f, 14f, k));
-                disk.transform.position = ground;
+                disk.transform.position = BinGames.Sim.ViewOrigin.ToView(ground);
                 disk.transform.localScale = new Vector3(radius * 2f * pulse, 0.02f, radius * 2f * pulse);
                 disk.SetActive(true);
                 // 火球从高空（落点的西北上方）沿直线落下，越接近撞击越快（进度平方）。
                 var sky = new Vector3(r.X - SkyOffset, SkyHeight, r.Y + SkyOffset * 0.5f);
                 Vector3 ball = Vector3.Lerp(sky, ground, k * k);
                 GameObject b = Ball(used);
-                b.transform.position = ball;
+                b.transform.position = BinGames.Sim.ViewOrigin.ToView(ball);
                 b.transform.localScale = Vector3.one * Mathf.Lerp(1.4f, 2.6f, k);
                 b.SetActive(true);
                 LineRenderer lr = Trail(used);
                 lr.positionCount = 2;
-                lr.SetPosition(0, Vector3.Lerp(sky, ball, 0.55f));
-                lr.SetPosition(1, ball);
+                lr.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(Vector3.Lerp(sky, ball, 0.55f)));
+                lr.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(ball));
                 lr.enabled = true;
                 used++;
             }

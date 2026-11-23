@@ -32,6 +32,7 @@ Shader "BinGames/PipeInstanced"
             };
 
             StructuredBuffer<PipeInstance> _Instances;
+            float4 _BgViewOrigin; // FG15-SYS-02：浮动画面原点（BinGames.Sim.ViewOrigin 设全局）
             float4 _Palette[32];
             float _Glyphs[32];
             float _CellSize;
@@ -56,6 +57,7 @@ Shader "BinGames/PipeInstanced"
                 float2 local = v.vertex.xy;
                 float3 wp = float3(it.a.x + local.x * _CellSize, _Height, it.a.y + local.y * _CellSize);
                 v2f o;
+                wp.xz -= _BgViewOrigin.xz;
                 o.pos = mul(UNITY_MATRIX_VP, float4(wp, 1.0));
                 o.p = local;
                 o.a = it.a;

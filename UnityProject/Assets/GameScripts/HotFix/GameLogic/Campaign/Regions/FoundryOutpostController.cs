@@ -709,7 +709,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            Ray ray = _camera.ScreenPointToRay(screenPointer);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(_camera, screenPointer);
             var groundPlane = new Plane(Vector3.up, Vector3.zero);
             if (!groundPlane.Raycast(ray, out float enter))
             {
@@ -1193,6 +1193,7 @@ namespace GameLogic.Campaign.Regions
         private void BuildVisuals(CampaignState state)
         {
             _root = new GameObject("[FoundryOutpostRoot]");
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero); // FG15-SYS-02：根物体放在世界原点的画面位置（子物体用世界坐标作局部坐标）
             _enemyBadges.Clear();
             SiteGenVisuals.Build(_root.transform, state, _siteGen); // FG9-ACT1-01：生成内容的占位表现（DEBT-FG9ACT101-01）
 
@@ -1229,7 +1230,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(shape);
             go.name = (isMarkerRing ? "Marker_" : "Poi_") + anchor.Id;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(anchor.Position.x, height, anchor.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(anchor.Position.x, height, anchor.Position.y));
             go.transform.localScale = isMarkerRing
                 ? new Vector3(anchor.ClearanceRadius * 2f, 0.1f, anchor.ClearanceRadius * 2f)
                 : new Vector3(1.2f, height * 2f, 1.2f);
@@ -1281,7 +1282,7 @@ namespace GameLogic.Campaign.Regions
                 GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 go.name = "Enemy_" + enemy.EnemyInstanceId;
                 go.transform.SetParent(_root.transform, false);
-                go.transform.position = new Vector3(at.x, 1f, at.y);
+                go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
                 if (_combat != null && _combat.TryGetEnemyUnit(enemy.EnemyInstanceId, out int enemyUnit))
                 {
                     _combat.BindView(enemyUnit, go.transform, 1f); // 位置每帧由内核插值写入（FrameRender）。
@@ -1333,7 +1334,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId + "_" + machine.LogicId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(at.x, 1f, at.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.75f, 0.8f, 0.9f); // 与另两区域机器配色区分（偏冷灰蓝）。
             renderer.sharedMaterial = ViewMaterials.Standard(baseColor);

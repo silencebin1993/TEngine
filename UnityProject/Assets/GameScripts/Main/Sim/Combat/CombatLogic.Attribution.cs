@@ -130,16 +130,39 @@ namespace BinGames.Sim.Combat
             ulong stacks = d.StatusStacks[k];
             float best = 0f;
             int bestRow = -1;
-            for (int i = 0; i < d.CoatAttr.Length; i++)
+            if (d.CoatIndexOff != 0)
             {
-                EmgCoatAttr a = d.CoatAttr[i];
-                if (a.Unit != unitId || (status & (1u << a.Bit)) == 0u)
+                // 自检对照组：原实现（按表顺序扫整张表，严格大于才换）
+                for (int i = 0; i < d.CoatAttr.Length; i++)
+                {
+                    EmgCoatAttr a = d.CoatAttr[i];
+                    if (a.Unit != unitId || (status & (1u << a.Bit)) == 0u)
+                    {
+                        continue;
+                    }
+                    CombatStatusFx fx0 = d.StatusFx[a.Bit];
+                    float dps0 = fx0.Effect == CombatStatusFx.Dot ? fx0.Amount * math.max(1, (int)((stacks >> (a.Bit * 2)) & 3UL)) : 0f;
+                    if (dps0 > best)
+                    {
+                        best = dps0;
+                        bestRow = i;
+                    }
+                }
+            }
+            // FG15-SYS-02（DEBT-FG11ATTR01-02）：按身上的位查索引（O(位数)），不再扫整张表；最大 dps、并列取表里靠前的行 = 原来按表顺序“严格大于才换”的结果
+            uint bits = d.CoatIndexOff != 0 ? 0u : status;
+            while (bits != 0u)
+            {
+                int b = math.tzcnt(bits);
+                bits &= bits - 1u;
+                int i = EmgCoatAttrOf(ref d, unitId, b);
+                if (i < 0)
                 {
                     continue;
                 }
-                CombatStatusFx fx = d.StatusFx[a.Bit];
-                float dps = fx.Effect == CombatStatusFx.Dot ? fx.Amount * math.max(1, (int)((stacks >> (a.Bit * 2)) & 3UL)) : 0f;
-                if (dps > best)
+                CombatStatusFx fx = d.StatusFx[b];
+                float dps = fx.Effect == CombatStatusFx.Dot ? fx.Amount * math.max(1, (int)((stacks >> (b * 2)) & 3UL)) : 0f;
+                if (dps > best || (dps == best && dps > 0f && i < bestRow))
                 {
                     best = dps;
                     bestRow = i;
@@ -154,17 +177,42 @@ namespace BinGames.Sim.Combat
             d.EmgAttr.Share = math.min(1f, best / d.StatusDps[k]);
         }
 
-        /// <summary>沾染来源表里（单位 Id, 位）的下标；没有返回 −1。</summary>
+        /// <summary>沾染来源表里（单位 Id, 位）的下标；没有返回 −1。FG15-SYS-02：查索引 O(1)（索引失效时先整表重建一次）。</summary>
         private static int EmgCoatAttrOf(ref CombatData d, int unitId, int bit)
         {
+            if (d.CoatAttr.Length == 0)
+            {
+                return -1;
+            }
+            if (d.CoatIndexOff != 0)
+            {
+                for (int i = 0; i < d.CoatAttr.Length; i++)
+                {
+                    if (d.CoatAttr[i].Unit == unitId && d.CoatAttr[i].Bit == bit)
+                    {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+            if (d.CoatIndexValid[0] == 0)
+            {
+                EmgCoatIndexRebuild(ref d);
+            }
+            return d.CoatIndex.TryGetValue(CoatKey(unitId, bit), out int at) ? at : -1;
+        }
+
+        private static long CoatKey(int unitId, int bit) => ((long)unitId << 5) | (long)(bit & 31);
+
+        /// <summary>按当前表整表重建索引（O(表长)；只在清表 / 读档 / 保序删行之后的第一次查询发生）。</summary>
+        internal static void EmgCoatIndexRebuild(ref CombatData d)
+        {
+            d.CoatIndex.Clear();
             for (int i = 0; i < d.CoatAttr.Length; i++)
             {
-                if (d.CoatAttr[i].Unit == unitId && d.CoatAttr[i].Bit == bit)
-                {
-                    return i;
-                }
+                d.CoatIndex[CoatKey(d.CoatAttr[i].Unit, d.CoatAttr[i].Bit)] = i;
             }
-            return -1;
+            d.CoatIndexValid[0] = 1;
         }
 
         /// <summary>
@@ -194,17 +242,30 @@ namespace BinGames.Sim.Combat
                     else
                     {
                         d.CoatAttr.Add(row);
+                        if (d.CoatIndexValid[0] != 0)
+                        {
+                            d.CoatIndex[CoatKey(unitId, b)] = d.CoatAttr.Length - 1;
+                        }
                     }
                 }
                 else if (at >= 0)
                 {
+                    int last = d.CoatAttr.Length - 1;
+                    if (d.CoatIndexValid[0] != 0)
+                    {
+                        if (at != last)
+                        {
+                            d.CoatIndex[CoatKey(d.CoatAttr[last].Unit, d.CoatAttr[last].Bit)] = at; // 末行搬到被删的位置
+                        }
+                        d.CoatIndex.Remove(CoatKey(unitId, b));
+                    }
                     d.CoatAttr.RemoveAtSwapBack(at);
                 }
             }
         }
 
         /// <summary>
-        /// 一个沾染位此刻的全部来源（③ 单位层反应用）：斑块挂上的取那块斑块的归属（多台车共有的斑块全部算），否则取挂它的单位（<see cref="CombatData.StatusBitSource"/>）。
+        /// 一个沾染位此刻的全部来源（③ 单位层反应用）：斑块挂上的取那块斑块的归属（多台车共有的斑块全部算），否则取挂它的单位（<see cref="CombatData.BitSrc"/>）。
         /// 都是持久数据（进快照），读档前后一致。
         /// </summary>
         private static void EmgCoatSourcesAdd(ref CombatData d, int u, int bit, ref EmgOwners o)
@@ -223,7 +284,7 @@ namespace BinGames.Sim.Combat
                 }
                 return;
             }
-            EmgOwnersAdd(ref d, ref o, d.StatusBitSource[u * CombatConst.StatusBitStride + bit]);
+            EmgOwnersAdd(ref d, ref o, d.BitSrc(u, bit));
         }
 
         /// <summary>每步：删掉单位已不在场 / 阵亡、或那一位已不在身上（到期、被消耗、被清除）的沾染来源行。O(沾染来源表)，表空时一次比较。</summary>
@@ -236,19 +297,20 @@ namespace BinGames.Sim.Combat
                 if (u < 0 || !d.IsAlive(u) || (d.Status[u] & (1u << a.Bit)) == 0u)
                 {
                     d.CoatAttr.RemoveAt(i); // 保序删除：下标顺序进快照与哈希，连续跑与读档后一致
+                    d.CoatIndexValid[0] = 0; // FG15-SYS-02：保序删行后下标整体前移，索引下次查询时重建
                 }
             }
         }
 
-        /// <summary>FG11-ATTR-01 ③：挂上沾染位的来源单位（布局同 StatusBitUntil：单位 × 32 位）；位到期 / 被清时归 0。</summary>
+        /// <summary>FG11-ATTR-01 ③：挂上沾染位的来源单位（稀疏表，见 <see cref="CombatData.BitSrc"/>）；位到期 / 被清时归 0。</summary>
         internal static void EmgBitSourceClear(ref CombatData d, int k, uint bits)
         {
-            int baseIdx = k * CombatConst.StatusBitStride;
+            bits &= d.StatusSrcMask[k];
             while (bits != 0u)
             {
                 int b = math.tzcnt(bits);
                 bits &= bits - 1u;
-                d.StatusBitSource[baseIdx + b] = 0;
+                d.SetBitSrc(k, b, 0);
             }
         }
 
@@ -496,6 +558,10 @@ namespace BinGames.Sim.Combat
         /// </summary>
         private static void EmgChainOwnNote(ref CombatData d, int chain, EmgChainNode kind, int key, int owner)
         {
+            if ((CombatAblation.Attribution.Data & 4) != 0)
+            {
+                return; // FG15-SYS-02 消融对照（缺省不走）
+            }
             if (chain <= 0 || !d.EmgChainOwns.IsCreated)
             {
                 return;

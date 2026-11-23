@@ -1335,12 +1335,11 @@ namespace GameLogic.EditorTools
 
         // ── P1 性能 ───────────────────────────────────────────────────────────────
 
-        /// <summary>EMGR-GL-01：摧毁后上万张返还单在场时的世界步门槛。规格 FGR-SYS-042 是热更层 ≤ 4 ms 且与数量无关；等空间的返还单仍逐步轮询（O(单数)），
-        /// 按 2026-11-16 第一次全规模实测（3 万张单 45.28 ms）上调；同一代码之后两次 45.60 / 46.10 ms（会波动，超线不到 2 倍只记警告），登记 DEBT-EMGRGL01-01 交 FG15-SYS-02，那时改回 4 ms。</summary>
-        private const double PostStepGateMs = 46.0;
-        /// <summary>大批归零时最慢一分钟的门槛：原 8 ms（120 帧一帧）；全规模（3 万件、累计上万份地面物 / 返还单）第一次实测 30.10 ms（之后两次 30.89 / 34.80 ms，会波动），来源是每批落地 / 开单按现有地面物与工单总数建去重表（每批 O(总数)），
-        /// 上调到实测值并登记 DEBT-EMGRGL01-01 交 FG15-SYS-02，那时改回 8 ms。</summary>
-        private const double ZeroBatchGateMs = 31.0;
+        /// <summary>EMGR-GL-01：摧毁后上万张返还单在场时的世界步门槛（规格 FGR-SYS-042：热更层 ≤ 4 ms、与数量无关）。
+        /// FG15-SYS-02（DEBT-EMGRGL01-01）：等空间的返还单改为判定输入没变就不重查后，3 万张单世界步平均 45.7 → 1.00 ms，门槛回到规格值。</summary>
+        private const double PostStepGateMs = 4.0;
+        /// <summary>大批归零时最慢一分钟的门槛：规格 8 ms（120 帧一帧）。FG15-SYS-02 后全规模单段 7.21 ms（分项扣耐久 6.18 ms）。</summary>
+        private const double ZeroBatchGateMs = 8.0;
 
         private static void CheckPerformance()
         {
@@ -1465,6 +1464,10 @@ namespace GameLogic.EditorTools
             Progress($"批量摧毁 500 格 {burst500:F1} ms / 2000 格 {burst2000:F1} ms");
 
             // 正常酸雨（61 分钟）：内核逐格判定，热更层只处理交回的格。
+            // FG15-SYS-02 修复轮 2（测量前提，阈值 4 / 8 ms 与计时范围都不变）：每分钟结算前、计时之外整堆回收一次。batchmode 没有帧循环，增量回收的标记工作不在帧间做，
+            // 全记在分配上：一轮回收进行中的那几分钟里，批量摧毁整体替换地面物 / 工单等大数组的分配变慢好几倍（诊断：慢分钟都挨着回收那一分钟，分项“落地开单”1.88 → 13.42 ms，
+            // _fg15sys02/fix2-seg2.log），而回收计数只在回收完成的那一分钟才变，原来的“赶上回收单列”漏掉它们。游戏里这份回收工作在帧末时间片里做；游戏内的真实开销由 DEBT-FG15SYS02-02 在程序包上实测。
+            WeatherService.BeforeBatchForTests = () => GC.Collect();
             WeatherService.ResetBatchStats();
             int batch0 = WeatherService.BatchCount;
             WeatherService.ScheduleForTests(s, WeatherService.AcidRain, 1.0, 6 * GameClock.HourSeconds);
@@ -1509,6 +1512,8 @@ namespace GameLogic.EditorTools
             int merged0 = BeltNetworkService.BatchNotifyCount;
             int sweeps0 = WeatherService.BeltSweepCount;
             WeatherService.ResetBatchStats();
+            WeatherService.TraceBatchesForTests = true;
+            BeltNetworkService.TraceDestroyForTests = true;
             int batch1 = WeatherService.BatchCount;
             long minute0 = D(s).AcidMinutes;
             sw.Restart();
@@ -1516,6 +1521,19 @@ namespace GameLogic.EditorTools
             double zeroPhaseS = sw.Elapsed.TotalSeconds;
             double maxZeroBatch = WeatherService.MaxBatchMs;
             string zeroSplit = WeatherService.SlowBatchSplit; // FG11-E2E-01 探针：大批归零最慢那一分钟的分项（全量里超 2 倍时定位来源用，不改测量）
+            WeatherService.TraceBatchesForTests = false;
+            WeatherService.BeforeBatchForTests = null;
+            BeltNetworkService.TraceDestroyForTests = false;
+            {
+                // FG15-SYS-02 修复轮 2 探针（只报告）：最慢 3 分钟离最近一次赶上回收的分钟有几批、中位数——看慢分钟是不是挨着回收（增量回收标记摊在分配上、回收计数还没变）
+                var tr = WeatherService.BatchTrace;
+                var gcAt = tr.Where(t => t.Gc).Select(t => t.Batch).ToList();
+                var plain = tr.Where(t => !t.Gc).OrderByDescending(t => t.Ms).ToList();
+                double med = plain.Count == 0 ? 0 : plain.OrderBy(t => t.Ms).ElementAt(plain.Count / 2).Ms;
+                string top = string.Join("、", plain.Take(3).Concat(plain.Skip(plain.Count / 2).Take(1)).Select(t => $"第 {t.Batch} 批 {t.Ms:F2} ms（离回收 {(gcAt.Count == 0 ? "—" : gcAt.Min(g => Math.Abs(g - t.Batch)).ToString())} 批；{t.Split}）"));
+                Line($"  · 读数（只报告）：大批归零逐批 ms {string.Join(" ", tr.Select(t => t.Ms.ToString("F1") + (t.Gc ? "g" : string.Empty)))}"); // loc-ignore: 开发者自检 / 诊断文本
+                Line($"  · 读数（只报告）：大批归零 {tr.Count} 批，回收分钟 {string.Join(",", gcAt)}，不含回收的中位数 {med:F2} ms；最慢 {top}；托管堆 {GC.GetTotalMemory(false) >> 20} MB"); // loc-ignore: 开发者自检 / 诊断文本
+            }
             int gcZeroBatches = WeatherService.GcBatchCount;
             double gcZeroBatchMs = WeatherService.MaxGcBatchMs;
             int batchesZero = WeatherService.BatchCount - batch1;
@@ -1582,6 +1600,9 @@ namespace GameLogic.EditorTools
                 UiConfirmDialog.DiscardAll();
                 GameClock.SetPaused(false);
                 GameClock.SetSpeed(1f);
+                WeatherService.BeforeBatchForTests = null; // 修复轮 2：P1 中途抛异常也不把测量前提带给后面的段
+                WeatherService.TraceBatchesForTests = false;
+                BeltNetworkService.TraceDestroyForTests = false;
             }
         }
 

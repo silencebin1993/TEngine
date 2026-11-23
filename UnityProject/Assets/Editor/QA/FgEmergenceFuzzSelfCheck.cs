@@ -246,6 +246,10 @@ namespace GameLogic.EditorTools
             public readonly List<string> Firmware = new List<string>();
             public readonly List<string> Comps = new List<string>();
             public readonly List<string> Factions = new List<string>();
+            /// <summary>FG15-SYS-02（DEBT-FG13FAC01-02）：白潮中立预制固件（固定集末尾的定向用例用）。</summary>
+            public readonly List<string> FleetFirmware = new List<string>();
+            /// <summary>白潮阵营（有白潮单位时 = EnemyDefs.FactionFleet）。</summary>
+            public string FleetFaction;
             public readonly Dictionary<string, List<GameConfig.fg.MechEnemy>> EnemiesByFaction = new Dictionary<string, List<GameConfig.fg.MechEnemy>>(StringComparer.Ordinal);
             public EmgSource Src;
             public string PierceProvider;
@@ -259,10 +263,11 @@ namespace GameLogic.EditorTools
                     {
                         continue;
                     }
-                    // FG13-FAC-01：白潮中立预制固件（protocol neutral、source fleet）不进模糊池——同 EMG4-LOOT-01 阵营标志组件的口径，固定集与满载基线保持可比；
-                    // 三条的触发 → 写端行为在 FgFleetFactionSelfCheck H 段逐条断言（DEBT-FG13FAC01-02 记模糊覆盖，承接 FG15-SYS-02 重定满载基线时并入）
+                    // FG15-SYS-02（DEBT-FG13FAC01-02）：白潮中立预制固件（protocol neutral、source fleet）并入模糊池——单列在 FleetFirmware，固定集在随机填充之后
+                    // 追加它们的定向用例（敌方 = 白潮单位），零死指令 / 规则可达照常判；随机抽取仍从原来的池里抽，已有用例与满载场景不换批（与上一次可比，FGR-EMG-223）。
                     if (row.Protocol == "neutral" && row.Source == "fleet")
                     {
+                        p.FleetFirmware.Add(row.Id);
                         continue;
                     }
                     bool mixed = FirmwareKinds.IsMixedRow(row);
@@ -275,9 +280,19 @@ namespace GameLogic.EditorTools
                 p.Comps.AddRange(CarrierReadings.Components.Where(c => c.Slot == "main" && c.Faction == "none").Select(c => c.Id));
                 foreach (GameConfig.fg.MechEnemy e in EnemyDefs.Rows)
                 {
-                    // FG13-FAC-01：白潮（fleet）没有领地、不出现在模糊场景的地点驻军里（只随终局清洗波次 / 滩头出场），不进阵营池——固定集与满载基线保持可比；白潮单位的行为在 FgFleetFactionSelfCheck
-                    if (e == null || EnemyDefs.IsBoss(e) || EnemyDefs.IsStructure(e) || !(e.MaxHp > 0f) || string.IsNullOrEmpty(e.Faction) || e.Faction == EnemyDefs.FactionFleet)
+                    // FG15-SYS-02（DEBT-FG13FAC01-02）：白潮（fleet）单位并入阵营池（EnemiesByFaction 收它，固定集追加的白潮用例用它当敌方）；轮转用的 Factions 不收，已有用例不换批
+                    if (e == null || EnemyDefs.IsBoss(e) || EnemyDefs.IsStructure(e) || !(e.MaxHp > 0f) || string.IsNullOrEmpty(e.Faction))
                     {
+                        continue;
+                    }
+                    if (e.Faction == EnemyDefs.FactionFleet)
+                    {
+                        if (!p.EnemiesByFaction.TryGetValue(e.Faction, out List<GameConfig.fg.MechEnemy> fleet))
+                        {
+                            p.EnemiesByFaction[e.Faction] = fleet = new List<GameConfig.fg.MechEnemy>();
+                            p.FleetFaction = e.Faction;
+                        }
+                        fleet.Add(e);
                         continue;
                     }
                     if (!p.EnemiesByFaction.TryGetValue(e.Faction, out List<GameConfig.fg.MechEnemy> list))
@@ -416,7 +431,52 @@ namespace GameLogic.EditorTools
             {
                 list.Add(RandomCase(rnd, list.Count, pools, CaseSeconds, list.Count));
             }
+            AddFleetCases(list, pools, seed);
             return list;
+        }
+
+        /// <summary>
+        /// FG15-SYS-02（DEBT-FG13FAC01-02）：白潮中立预制固件每条 × 每个能编译的载体一例（首位 / 末位交替），敌方 = 白潮单位（有的话）；另加 3 例白潮敌方 + 随机程序（3 个地点模板各一）。
+        /// 追加在随机填充之后、用独立随机数，已有用例逐例不变。
+        /// </summary>
+        private static void AddFleetCases(List<FuzzCase> list, Pools pools, int seed)
+        {
+            var rnd = new System.Random(seed ^ 0x5F1EE7);
+            string faction = pools.FleetFaction ?? pools.Factions[0];
+            int k = 0;
+            foreach (string fw in pools.FleetFirmware)
+            {
+                foreach ((FirmwareCarrier carrier, string comp) in FgReadingMatrixSelfCheck.AddonCarriers)
+                {
+                    if (EmgProgramCompiler.Compile(Array.Empty<string>(), new[] { fw }, carrier).Steps.All(st => st.Decls.Count == 0))
+                    {
+                        continue;
+                    }
+                    bool first = k++ % 2 == 0;
+                    string filler = FgReadingMatrixSelfCheck.AddonFiller;
+                    var c = new FuzzCase
+                    {
+                        Index = list.Count, Comp = comp, Carrier = carrier, Chassis = ChassisCatalog.ChassisWheelId, Site = SiteTemplates[list.Count % 3],
+                        Faction = faction, Enemies = 3 + list.Count % 10, EnemySeed = rnd.Next(), Uplinked = true,
+                        Tag = $"白潮定向 {fw} {(first ? "首位" : "末位")}",
+                    };
+                    c.Uplink = first ? new[] { fw, filler } : new[] { filler, fw };
+                    EnsureConditions(c, pools);
+                    list.Add(c);
+                }
+            }
+            if (pools.FleetFaction == null)
+            {
+                return;
+            }
+            for (int i = 0; i < 3; i++)
+            {
+                FuzzCase c = RandomCase(rnd, list.Count, pools, CaseSeconds, list.Count);
+                c.Faction = pools.FleetFaction;
+                c.Site = SiteTemplates[i];
+                c.Tag = "白潮敌方 随机程序";
+                list.Add(c);
+            }
         }
 
         /// <summary>随机用例（FGR-EMG-220）：程序 0～4 条（全部可获得固件含混合固件，随机顺序、随机有无接入）、13 个主作战组件之一 + 可选功能组件、4 种底盘、地点模板、按阵营 3～12 个敌人。
@@ -1688,6 +1748,14 @@ namespace GameLogic.EditorTools
                    && pools.Firmware.Count >= 44 && pools.PierceProvider != null,
                 $"抽取池：固件 {pools.Firmware.Count} 条（可获得且有机器实现，含混合固件 {pools.Firmware.Count(FirmwareKinds.IsMixed)} 条；阶段 1 生效的 N09～N13、N16 共 {addonInPool} 条在池里；阶段 2 端口已接通的 N14 在、fld.push 随 EMG2-FLD-01 接通后 N15 也在），" +
                 $"主作战组件 {pools.Comps.Count} 个，阵营 {pools.Factions.Count} 个（{string.Join("、", pools.Factions)}），穿透条件提供者按端口查到 {pools.PierceProvider}");
+            // FG15-SYS-02（DEBT-FG13FAC01-02）：白潮中立预制固件 3 条与白潮单位并入（固定集末尾的定向用例覆盖它们，零死指令 / 规则可达在 B 段照常判）
+            List<FuzzCase> fixedSet = FixedCases(pools, FixedSeed, FixedCount);
+            int fleetFwCovered = pools.FleetFirmware.Count(fw => fixedSet.Any(c => c.Program.Contains(fw)));
+            bool fleetEnemies = pools.FleetFaction != null && pools.EnemiesByFaction.TryGetValue(pools.FleetFaction, out List<GameConfig.fg.MechEnemy> fl) && fl.Count > 0
+                                && fixedSet.Count(c => c.Faction == pools.FleetFaction) >= 3;
+            Expect(pools.FleetFirmware.Count == 3 && fleetFwCovered == 3 && fleetEnemies,
+                $"白潮并入模糊池：中立预制固件 {pools.FleetFirmware.Count} 条（{string.Join("、", pools.FleetFirmware)}），固定集里有定向用例的 {fleetFwCovered} 条；" +
+                $"白潮单位 {(pools.FleetFaction != null && pools.EnemiesByFaction.TryGetValue(pools.FleetFaction, out List<GameConfig.fg.MechEnemy> f2) ? f2.Count : 0)} 种，白潮敌方用例 {fixedSet.Count(c => c.Faction == pools.FleetFaction)} 例");
             // FG-GAP-177：反弹 / 穿透引信在声明 carriers 不含的载体上——不编译 + 预览写“本载体不适用” + 读法如实写明
             var na = new List<string>();
             var bad = new List<string>();
@@ -1739,8 +1807,9 @@ namespace GameLogic.EditorTools
                     dirBad.Add($"{fw}（载体 {mine.Select(c => c.Carrier).Distinct().Count()}/{carriers.Count}，首末 {firstLast}）");
                 }
             }
-            Expect(cases.Count == FixedCount && dirBad.Count == 0,
-                $"固定集 {cases.Count} 例：N09～N13、N16 定向 {directed.Count} 例——6 条各在声明适用的每个载体上至少 1 例、首位 / 末位各至少 1 例（关闭 DEBT-EMG1FW02-01）{Detail(dirBad)}");
+            int fleetCases = cases.Count(c => c.Tag != null && c.Tag.StartsWith("白潮", StringComparison.Ordinal)); // FG15-SYS-02：白潮用例追加在 500 例之后
+            Expect(cases.Count - fleetCases == FixedCount && fleetCases > 0 && dirBad.Count == 0,
+                $"固定集 {cases.Count} 例（原 {FixedCount} 例 + 白潮追加 {fleetCases} 例）：N09～N13、N16 定向 {directed.Count} 例——6 条各在声明适用的每个载体上至少 1 例、首位 / 末位各至少 1 例（关闭 DEBT-EMG1FW02-01）{Detail(dirBad)}");
             Expect(pools.Comps.All(cp => cases.Any(c => c.Comp == cp)) && ChassisIds.All(ch => cases.Any(c => c.Chassis == ch)) && SiteTemplates.All(s => cases.Any(c => c.Site == s))
                    && cases.Select(c => c.Faction).Distinct().Count() >= Math.Min(3, pools.Factions.Count) && cases.Any(c => c.Uplinked) && cases.Any(c => !c.Uplinked)
                    && Enumerable.Range(0, 5).All(n => cases.Any(c => c.Program.Length == n)) && cases.Any(c => c.Func != null) && cases.Min(c => c.Enemies) == 3 && cases.Max(c => c.Enemies) == 12
@@ -2325,6 +2394,18 @@ namespace GameLogic.EditorTools
             public long Alloc;
             /// <summary>FG13-END-05 探针：测量窗口里三地点白潮运行记录数的峰值（满载场景不放白潮，端口闸门路径应全部在 Fleets 为空的第一条比较返回）。</summary>
             public int MaxFleets;
+            /// <summary>FG15-SYS-02（DEBT-EMGRTRIG01-01 / EMGRFUSE01-01 / EMGRTALLY01-01，按 FG15 规模实测定上限）：单地点运行态表（节拍锚点 + 元程序循环 / 延后）峰值、
+            /// 整段（预热 + 测量）三地点合计的线索登记挤掉 / 图鉴计数冲突丢弃次数。</summary>
+            public int MaxMetaRun;
+            public long ClueEvicted, TallyEvicted;
+        }
+
+        /// <summary>FG15-SYS-02：几张定长表在满载下的实测占用（上限保留的依据；任何一项挤掉 / 丢弃 / 拒绝不为 0 就说明上限不够，判失败）。</summary>
+        private static void ExpectCapacityProbe(string scene, LoadStats st)
+        {
+            Expect(st.MaxMetaRun < EmgConst.PendingCapacity && st.ClueEvicted == 0 && st.TallyEvicted == 0 && st.SpawnLost == 0,
+                $"FG15-SYS-02 容量探针（{scene}）：节拍锚点 + 元程序运行态单地点峰值 {st.MaxMetaRun} / 上限 {EmgConst.PendingCapacity}；线索登记挤掉 {st.ClueEvicted} 次（每配方 {EmgConst.ClueHalfRing} 格、窗口 {EmgConst.ClueHalfWindow}）；" +
+                $"图鉴计数冲突丢弃 {st.TallyEvicted} 次（{EmgConst.ChainTally} 格）；待生成队列满丢弃 {st.SpawnLost} 次（{EmgConst.PendingCapacity}）——都为 0 = FG15 满载规模下上限够用（计数在调试层照常可见）");
         }
 
         private static void CheckFullLoad()
@@ -2353,9 +2434,10 @@ namespace GameLogic.EditorTools
                  $"单步处理峰值 {on.MaxProcessedPerStep}、队列峰值 {on.MaxPending}、最长连续只增 {on.MaxRise} 步；无人机峰值未到规格 512（承接 FG15-SYS-02）");
             Line($"    · 三地点内核之和每世界步：阶段 1 平均 {avgOn:F3} / p99 {p99On:F3} ms（远征 {on.SiteMs[0] / measure:F3}、家园 {on.SiteMs[1] / measure:F3}、前哨 {on.SiteMs[2] / measure:F3}）；" +
                  $"同场景 emg.stage = 0（程序为空、没有事件负载）平均 {avgOff:F3} / p99 {p99Off:F3} ms；涌现新增 = 两次独立运行的平均之差 {addAvg:F3} ms（p99 之差 {addP99:F3} ms 只作参考：两次运行逐步不配对，差值没有分位意义）；" +
-                 $"测量 {measure} 步托管分配 {on.Alloc / 1024.0:F1} KB");
+                 $"测量 {measure} 步托管堆增量 {(on.Alloc < 0 ? "（中途赶上回收，不计）" : (on.Alloc / 1024.0).ToString("F1") + " KB")}（进程级，含别的线程，只报告）");
             Line($"    · stat 4（节拍锚点 / 元程序运行态与待生成队列满拒绝，DEBT-EMGRTRIG01-01，只报告）：三地点合计 {on.SpawnLost}");
             bool scale = on.MinProjectiles >= 1500 && on.Wrecks >= 400 && on.Machines >= 120 && on.SubSpawned > 0 && on.MaxDrones > 0;
+            ExpectCapacityProbe("满载", on);
             Expect(on.MaxFleets == 0 && off.MaxFleets == 0,
                 $"FG13-END-05 探针：满载场景测量窗口白潮运行记录峰值 {on.MaxFleets} / emg.stage = 0 同场景 {off.MaxFleets}（都应为 0：先遣旗舰的端口闸门 FlAbsorb / FlGateTouch / FlGateAcc / 场覆盖判定在 Fleets 为空时第一条比较返回，不给本场景加活）");
             Expect(scale, $"满载规模达标：测量窗口弹体始终 ≥ 1500（{on.MinProjectiles}）、带程序机器 {on.Machines} ≥ 120、残骸 {on.Wrecks} ≥ 400、有子载荷（{on.SubSpawned}）与无人机（{on.MaxDrones}）");
@@ -2403,6 +2485,8 @@ namespace GameLogic.EditorTools
             CombatBench.Spec expedition = spec;
             expedition.RaiderHp *= _maxLoad != 0 ? 4.5f : 3f; // EMG4-FUZZ-01：加满（烟雾 / 蒸汽挪外环后不再遮蔽，火力更密，测量窗口里会打掉 1 个）再 ×1.5，只改耐久不改数量； 远征多了 120 台机器一起打：突袭者耐久 ×3，让“200 敌人 + ≥1,500 弹体”在测量窗口里持续同时存在（与 combat.perf.hp_scale 同一用意）
             var sites = new[] { new CombatSite("fuzz_load_expedition", Config()), new CombatSite("fuzz_load_home", Config()), new CombatSite("fuzz_load_outpost", Config()) };
+            // FG15-SYS-02（DEBT-EMG2MAT01-05，FGR-EMG-202）：与正式流程同一份逐地点分摊函数（家园 → 远征 → 前哨常态；前哨常态按 ADR ⑬ 表的小额度给）
+            CombatSite.ApplyEmgWorldBudgets(new[] { sites[1], sites[0], sites[2] }, new[] { CombatSite.EmgRoleHome, CombatSite.EmgRoleExpedition, CombatSite.EmgRoleMinor });
             var machines = new List<int>[sites.Length];
             try
             {
@@ -2444,7 +2528,8 @@ namespace GameLogic.EditorTools
                 }
                 long enq0 = sites[0].Kernel.EmgBusStats.Enqueued, proc0 = Processed(sites), sub0 = sites[0].Kernel.EmgBusStats.SubSpawned + sites[1].Kernel.EmgBusStats.SubSpawned;
                 int prev = 0;
-                long alloc0 = GC.GetAllocatedBytesForCurrentThread();
+                long alloc0 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong(); // FG15-SYS-02（DEBT-FGTOOL01-02）：按线程计数在 Unity Mono 恒为 0；改读进程级已用堆（含别的线程、赶上回收会变小，只报告）
+                int allocGc0 = GC.CollectionCount(0);
                 for (int i = 0; i < measure; i++)
                 {
                     if (i % 60 == 0)
@@ -2484,6 +2569,7 @@ namespace GameLogic.EditorTools
                     st.MinDrones = Math.Min(st.MinDrones, sites[0].Kernel.DroneCount);
                     st.MinPatchesAll = Math.Min(st.MinPatchesAll, sites[0].Kernel.PatchCount);
                     st.MaxFleets = Math.Max(st.MaxFleets, sites[0].Kernel.FleetCount + sites[1].Kernel.FleetCount + sites[2].Kernel.FleetCount);
+                    st.MaxMetaRun = Math.Max(st.MaxMetaRun, Math.Max(sites[0].Kernel.MetaRunCount, Math.Max(sites[1].Kernel.MetaRunCount, sites[2].Kernel.MetaRunCount)));
                     if (i % 60 == 0)
                     {
                         st.MinHostiles = Math.Min(st.MinHostiles, sites[0].Kernel.CountAlive(CombatFaction.Hostile));
@@ -2500,11 +2586,13 @@ namespace GameLogic.EditorTools
                     st.MaxRise = Math.Max(st.MaxRise, st.Rise);
                     prev = pending;
                 }
-                st.Alloc = GC.GetAllocatedBytesForCurrentThread() - alloc0;
+                st.Alloc = GC.CollectionCount(0) != allocGc0 ? -1 : UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() - alloc0;
                 st.Enqueued = sites[0].Kernel.EmgBusStats.Enqueued - enq0;
                 st.Processed = Processed(sites) - proc0;
                 st.SubSpawned = sites[0].Kernel.EmgBusStats.SubSpawned + sites[1].Kernel.EmgBusStats.SubSpawned - sub0;
                 st.SpawnLost = sites.Sum(s => s.Kernel.EmgBusStats.SpawnLost); // 整段（预热 + 测量）三地点合计
+                st.ClueEvicted = sites.Sum(s => (long)s.Kernel.PatchStats.ClueHalfEvicted);
+                st.TallyEvicted = sites.Sum(s => (long)s.Kernel.PatchStats.TallyEvicted);
             }
             finally
             {

@@ -170,7 +170,7 @@ namespace GameLogic.View
                     _preview.positionCount = Centers.Count;
                     for (int i = 0; i < Centers.Count; i++)
                     {
-                        _preview.SetPosition(i, new Vector3(Centers[i].x, RingHeight, Centers[i].y));
+                        _preview.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(Centers[i].x, RingHeight, Centers[i].y)));
                     }
                 }
             }
@@ -250,7 +250,7 @@ namespace GameLogic.View
                 _route.positionCount = RoutePts.Count;
                 for (int i = 0; i < RoutePts.Count; i++)
                 {
-                    _route.SetPosition(i, new Vector3(RoutePts[i].x, RingHeight + 0.05f, RoutePts[i].y));
+                    _route.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(RoutePts[i].x, RingHeight + 0.05f, RoutePts[i].y)));
                 }
             }
             _route.enabled = true;
@@ -283,7 +283,7 @@ namespace GameLogic.View
             for (int i = 0; i < n; i++)
             {
                 float a = i * Mathf.PI * 2f / n;
-                lr.SetPosition(i, new Vector3(c.x + Mathf.Cos(a) * radius, RingHeight, c.y + Mathf.Sin(a) * radius));
+                lr.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(c.x + Mathf.Cos(a) * radius, RingHeight, c.y + Mathf.Sin(a) * radius)));
             }
         }
 

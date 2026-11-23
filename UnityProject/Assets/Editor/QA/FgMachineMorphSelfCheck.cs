@@ -965,6 +965,7 @@ namespace GameLogic.EditorTools
             double refreshMs;
             double animMs;
             long alloc;
+            string allocWindows = string.Empty;
             int animating;
             try
             {
@@ -978,14 +979,17 @@ namespace GameLogic.EditorTools
                 animating = MachineMorphView.AnimatingCount;
                 MachineMorphView.TransitionSecondsOverrideForTests = 1000f; // 让过渡持续，量稳态每帧开销
                 MachineMorphView.FrameTick(0.001f);
-                long before = GC.GetAllocatedBytesForCurrentThread();
-                var sw3 = Stopwatch.StartNew();
-                for (int i = 0; i < 200; i++)
+                // FG15-SYS-02（DEBT-FGTOOL01-02）：GC.GetAllocatedBytesForCurrentThread 在 Unity Mono 恒为 0；改成 4 个 50 帧窗口的进程级堆增量取最小（仍要求 0 字节）
+                var sw3 = new Stopwatch();
+                alloc = PerfGate.MinWindowAlloc(() =>
                 {
-                    MachineMorphView.FrameTick(0.001f);
-                }
-                sw3.Stop();
-                alloc = GC.GetAllocatedBytesForCurrentThread() - before;
+                    sw3.Start();
+                    for (int i = 0; i < 50; i++)
+                    {
+                        MachineMorphView.FrameTick(0.001f);
+                    }
+                    sw3.Stop();
+                }, 4, out allocWindows);
                 animMs = sw3.Elapsed.TotalMilliseconds / 200;
             }
             finally
@@ -998,7 +1002,7 @@ namespace GameLogic.EditorTools
                 $"{count} 台机器：共享网格 {meshes} 份、材质 {mats} 份（与机器数无关；上限 43 / 4）");
             ExpectPerf(true, $"没有过渡时每帧 {idleUs:0.000} 微秒（直接返回）", PerfGate.Lt(idleUs, 5.0, "空闲每帧 µs"));
             ExpectPerf(animating == count / 2 && alloc == 0,
-                $"{animating} 台同时过渡（最坏情况）：每帧 {animMs:0.000} 毫秒、分配 {alloc} 字节", PerfGate.Lt(animMs, 2.0, "同时过渡每帧 ms"));
+                $"{animating} 台同时过渡（最坏情况）：每帧 {animMs:0.000} 毫秒、分配 {alloc} 字节（4 个 50 帧窗口取最小，进程级堆增量：{allocWindows}）", PerfGate.Lt(animMs, 2.0, "同时过渡每帧 ms"));
             ExpectPerf(true, $"每台机器重算 + 切换目标 {refreshMs:0.000} 毫秒（含桥接层重编译；只在接入 / 离开 / 装配变更时发生）", PerfGate.Lt(refreshMs, 1.0, "单台重算 ms"));
             PerfLines.Add($"形变：{count} 台机器，空闲每帧 {idleUs:0.000} μs；{animating} 台同时过渡每帧 {animMs:0.000} ms、零分配；单台重算 {refreshMs:0.000} ms；共享网格 {meshes} / 材质 {mats}" +
                           "（Editor batchmode、Mono JIT；渲染侧同一部件共用网格 + 材质、开 GPU Instancing，由引擎合批；批次数需在带图形设备的 Play 下复核，见证据截图工具）");

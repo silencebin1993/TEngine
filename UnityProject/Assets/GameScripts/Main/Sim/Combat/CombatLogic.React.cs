@@ -835,7 +835,7 @@ namespace BinGames.Sim.Combat
                 double2 away = d.Pos[v] - center;
                 double len = math.length(away);
                 double2 dir = len > 1e-6 ? away / len : new double2(1, 0);
-                d.Pos[v] = center + dir * (radius + d.Radius[v] + 0.05);
+                d.Pos[v] = center + dir * (radius + d.Radius[v] + 0.05); d.PosEpoch++;
             }
             EmgScalars es = d.EmgS[0];
             es.BlockPushed += inside.Length;

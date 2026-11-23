@@ -1471,6 +1471,21 @@ namespace GameLogic.EditorTools
                     {
                         CombatAblation.TrailSegments.Data = 0;
                     }
+                    // FG15-SYS-02（DEBT-FG11ATTR01-02）：交互伤害归因（FG11-ATTR-01）的增量逐项消融——只去掉归因登记，结算不变
+                    foreach ((int bit, string name) in new[] { (1, "状态位来源"), (2, "沾染来源表登记"), (4, "持久链归属登记"), (7, "三项归因全部") })
+                    {
+                        try
+                        {
+                            CombatAblation.Attribution.Data = bit;
+                            LoadStats t = MeasureLoad(EmgCatalog.ImplementedStage, warm, measure);
+                            var o = t.SumMs.OrderBy(v => v).ToList();
+                            ablation.Add($"去掉{name}：平均 {t.SumMs.Average():F3} / p99 {o[Math.Min(o.Count - 1, (int)(o.Count * 0.99))]:F3} ms");
+                        }
+                        finally
+                        {
+                            CombatAblation.Attribution.Data = 0;
+                        }
+                    }
                 }
             }
             finally
@@ -1485,6 +1500,7 @@ namespace GameLogic.EditorTools
             }
             const double rec = 0.6;
             double p99On = P(on.SumMs, 0.99), avgOn = on.SumMs.Average(), avgOff = off.SumMs.Average(), p99Off = P(off.SumMs, 0.99);
+            ExpectCapacityProbe("加满", on);
             double addAvg = Math.Max(0, avgOn - avgOff);
             double injPerStep = on.Injected / (double)measure, procPerStep = on.Processed / (double)measure;
             Line($"    · 规模：远征斑块最少 {on.MinPatchesAll}（每秒补回前两次补之间最少 {on.MinPatches}）、活跃场最少 {on.MinFields}、家园斑块峰值 {on.MaxHomePatches}；无人机远征最少 {on.MinDrones}、两地点峰值 {on.MaxDrones}；" +

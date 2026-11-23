@@ -1270,7 +1270,7 @@ namespace GameLogic.UI.Kit
                 {
                     return false;
                 }
-                Vector3 hit = ray.GetPoint(enter);
+                Vector3 hit = BinGames.Sim.ViewOrigin.ToWorld(ray.GetPoint(enter)); // FG15-SYS-02：画面坐标 → 世界坐标
                 into[i] = new Vector2(hit.x, hit.z);
             }
             return true;

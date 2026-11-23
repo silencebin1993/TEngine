@@ -1229,7 +1229,8 @@ namespace BinGames.Sim.Combat
             // EMG1-FLASH-01：+ 段 14（刷写变体表）；EMG1-CHAIN-01：+ 段 15 / 16（可靠计数）；EMG2-MAT-01（格式 17）：+ 段 17～19（斑块 / 活跃场 / 档案稳定键）
             bool half = v20 && ClueHalfState(); // EMG4-FUSE-02：段 32 只在有在途线索登记时写
             bool tallyOut = v20 && !hash && !_preTallyForTests; // EMGR-TALLY-01：标量段第 28 字段 TallyFloor + 段 33 计数表（不进哈希；测试可模拟本卡之前的旧档）
-            int tallyRows = tallyOut ? TallyRows() : 0;
+            bool tallyOver = tallyOut && format >= 27; // FG15-SYS-02：段 33 追加溢出表行与丢弃下限行
+            int tallyRows = tallyOut ? TallyRows() + (tallyOver ? _d.EmgTallyOver.Count() + (_d.EmgTallyDropMax[0] > 0 ? 1 : 0) : 0) : 0;
             bool oc = format >= 21 && _d.Overclocks.Length > 0; // FG11-FAC-01：段 34 只在有超频记录时写（没有时快照与哈希逐字不变）
             bool marshElec = format >= 22 && _d.MarshElecShape.Length > 0; // FG11-REACT-01：段 35 只在酸沼电解过时写
             bool worms = format >= 24 && _d.Worms.Length > 0; // FG12-EVT-02：段 39 只在有蠕虫时写（没有时快照与哈希逐字不变）
@@ -1576,6 +1577,29 @@ namespace BinGames.Sim.Combat
                     if (sw.F()) w.Write(t.z);
                     if (sw.F()) w.Write(t.w);
                     sw.EndRecord();
+                }
+                if (tallyOver)
+                {
+                    var keys = _d.EmgTallyOver.GetKeyArray(Unity.Collections.Allocator.Temp);
+                    keys.Sort(); // 按链号升序写（哈希表遍历顺序不稳定，快照逐字确定）
+                    for (int i = 0; i < keys.Length; i++)
+                    {
+                        Unity.Mathematics.int4 t = _d.EmgTallyOver[keys[i]];
+                        if (sw.F()) w.Write(t.x);
+                        if (sw.F()) w.Write(t.y);
+                        if (sw.F()) w.Write(t.z);
+                        if (sw.F()) w.Write(t.w);
+                        sw.EndRecord();
+                    }
+                    keys.Dispose();
+                    if (_d.EmgTallyDropMax[0] > 0)
+                    {
+                        if (sw.F()) w.Write(-_d.EmgTallyDropMax[0]);
+                        if (sw.F()) w.Write(0);
+                        if (sw.F()) w.Write(0);
+                        if (sw.F()) w.Write(0);
+                        sw.EndRecord();
+                    }
                 }
                 sw.End();
             }
@@ -2216,7 +2240,7 @@ namespace BinGames.Sim.Combat
                     return ParsePitSegment(r, sr, ref staging);
                 case EmgConst.SegChainTally: // EMGR-TALLY-01：按链号落回同一格；同一格两行 / 坏值整份拒绝
                 {
-                    if (n > EmgConst.ChainTally)
+                    if (n > EmgConst.ChainTally + EmgConst.ChainTallyOverflow + 1)
                     {
                         return CombatLoadResult.InvalidValue;
                     }
@@ -2228,10 +2252,27 @@ namespace BinGames.Sim.Combat
                         if (sr.F()) t.y = r.ReadInt32();
                         if (sr.F()) t.z = r.ReadInt32();
                         if (sr.F()) t.w = r.ReadInt32();
+                        if (sr.RecordOk && t.x < 0 && t.x != int.MinValue && t.y == 0 && t.z == 0 && t.w == 0 && staging.EmgTallyDropMax[0] == 0)
+                        {
+                            staging.EmgTallyDropMax[0] = -t.x; // FG15-SYS-02（格式 27）：溢出表丢弃下限
+                            continue;
+                        }
                         int at = t.x & (EmgConst.ChainTally - 1);
-                        if (!sr.RecordOk || t.x <= 0 || t.y < 0 || t.z < 0 || t.z > (EmgConst.TallyExtremeBit | 0xFF) || staging.EmgChainTally[at].x != 0)
+                        if (!sr.RecordOk || t.x <= 0 || t.y < 0 || t.z < 0 || t.z > (EmgConst.TallyExtremeBit | 0xFF))
                         {
                             return CombatLoadResult.InvalidValue;
+                        }
+                        Unity.Mathematics.int4 cur = staging.EmgChainTally[at];
+                        if (cur.x != 0)
+                        {
+                            // FG15-SYS-02（格式 27）：同一格的第二行 = 溢出表行——链号大的占格、小的进溢出表；同一链号两行、溢出表重复或超容量整份拒绝
+                            Unity.Mathematics.int4 older = cur.x > t.x ? t : cur;
+                            if (cur.x == t.x || staging.EmgTallyOver.ContainsKey(older.x) || staging.EmgTallyOver.Count() >= EmgConst.ChainTallyOverflow)
+                            {
+                                return CombatLoadResult.InvalidValue;
+                            }
+                            staging.EmgTallyOver[older.x] = older;
+                            t = cur.x > t.x ? cur : t;
                         }
                         staging.EmgChainTally[at] = t;
                     }

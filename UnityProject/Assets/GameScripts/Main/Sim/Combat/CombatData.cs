@@ -209,8 +209,11 @@ namespace BinGames.Sim.Combat
         /// <summary>FG2-FW-04（DEBT-FG2FW03-02，格式 5）：每个状态位自己的到期时间（每单位 <see cref="CombatConst.StatusBitStride"/> 格，槽位 i 的位 b 在 i × 32 + b）。
         /// <see cref="StatusUntil"/> 仍是这些时间里最晚的一个（“这个单位还有没有标签”的快速判断）；先挂的标签先到期，到期只清那一位并按剩下的位重算效果。</summary>
         public NativeList<double> StatusBitUntil;
-        /// <summary>FG11-ATTR-01 ③（DEBT-EMG2DISC01-02）：每个状态位最后由哪个单位挂上（单位 Id；布局同 <see cref="StatusBitUntil"/>，不进 EmgUnitState）。位到期 / 被清 / 被消耗时归 0；进快照段 36。</summary>
-        public NativeList<int> StatusBitSource;
+        /// <summary>FG11-ATTR-01 ③（DEBT-EMG2DISC01-02）：每个状态位最后由哪个单位挂上（单位 Id；不进 EmgUnitState）。位到期 / 被清 / 被消耗时归 0；进快照段 36。
+        /// FG15-SYS-02（DEBT-FG11ATTR01-01）：稀疏存——每单位一个 32 位“这一位有来源”掩码，来源 Id 放 <see cref="StatusSrc"/>（键 = 槽位 × 32 + 位，即原逐位布局的下标）；
+        /// 每单位固定 4 B（原 32 格 128 B），只给有来源的位占一行。读写只走 <see cref="BitSrc"/> / <see cref="SetBitSrc"/>（掩码位 ⇔ 有行 ⇔ 来源非 0）。</summary>
+        public NativeList<uint> StatusSrcMask;
+        public NativeParallelHashMap<int, int> StatusSrc;
         /// <summary>FG2-FW-04 修复（格式 6）：区域减速位（<see cref="CombatConst.StatusBitZoneSlow"/>）自己的减速值。<see cref="StatusSlow"/> 是所有来源取大后的结果；
         /// 减速标签逐位到期后按剩下的位重算时，区域减速从这里取起点，不再沿用混合最大值（否则已到期的减速标签的数值会残留到区域减速位到期）。</summary>
         public NativeList<float> StatusZoneSlow;
@@ -375,6 +378,11 @@ namespace BinGames.Sim.Combat
         public int EmgExtremePublished;
         /// <summary>EMG4-CODEX-01：按链号直接映射的计数表（下标 = 链号 &amp; (ChainTally − 1)；x = 链号，y = 规则结算次数，z = 最大链深 | 已记极限位 0x100，w = 最近一条规则的稳定键）。EMGR-TALLY-01：进快照段 33（只写非零行），不进哈希。</summary>
         public NativeArray<int4> EmgChainTally;
+        /// <summary>FG15-SYS-02（DEBT-EMGRTALLY01-01）：被更新的链挤出直映射格、还有计数 / 封印的旧链（链号 → 计数行，容量 <see cref="EmgConst.ChainTallyOverflow"/>）；
+        /// 格被新链占着的旧链也在这里新开一行。满了丢掉链号较小的一半并把丢掉的最大链号记进 <see cref="EmgTallyDropMax"/>（这些链再来才算丢弃计数）。进快照段 33（格式 27）。</summary>
+        public NativeParallelHashMap<int, int4> EmgTallyOver;
+        /// <summary>[0] = 溢出表丢弃下限。原生容器：内核一步在 CombatStepJob 的副本上跑，值字段的修改带不回主线程（同 CoatIndexValid）。</summary>
+        public NativeArray<int> EmgTallyDropMax;
         // ── EMG2-DISC-01（FGR-EMG-182 / 184）：交互伤害记账（全部不进快照、不进状态哈希；热更层每步读一次已合并的结果，读档后从空开始）──
         /// <summary>本步的交互伤害（按“规则键 + 归属”合并；脏列表同一交出口径）。</summary>
         public NativeList<EmgAttrRow> EmgAttrRows;
@@ -429,7 +437,8 @@ namespace BinGames.Sim.Combat
                 StatusSource = new NativeList<int>(capacity, Allocator.Persistent),
                 StatusStacks = new NativeList<ulong>(capacity, Allocator.Persistent),
                 StatusBitUntil = new NativeList<double>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
-                StatusBitSource = new NativeList<int>(capacity * CombatConst.StatusBitStride, Allocator.Persistent),
+                StatusSrcMask = new NativeList<uint>(capacity, Allocator.Persistent),
+                StatusSrc = new NativeParallelHashMap<int, int>(64, Allocator.Persistent),
                 StatusZoneSlow = new NativeList<float>(capacity, Allocator.Persistent),
                 Ammo = new NativeList<float>(capacity, Allocator.Persistent),
                 Siege = new NativeList<CombatSiegeUnit>(capacity, Allocator.Persistent),
@@ -535,7 +544,8 @@ namespace BinGames.Sim.Combat
             StatusSource.Dispose();
             StatusStacks.Dispose();
             StatusBitUntil.Dispose();
-            StatusBitSource.Dispose();
+            StatusSrcMask.Dispose();
+            StatusSrc.Dispose();
             StatusZoneSlow.Dispose();
             Ammo.Dispose();
             Siege.Dispose();
@@ -658,8 +668,8 @@ namespace BinGames.Sim.Combat
             for (int b = 0; b < CombatConst.StatusBitStride; b++)
             {
                 StatusBitUntil.Add(0);
-                StatusBitSource.Add(0);
             }
+            StatusSrcMask.Add(0u);
             StatusZoneSlow.Add(0f);
             Ammo.Add(math.max(0f, s.Ammo));
             Siege.Add(s.Siege);
@@ -684,6 +694,67 @@ namespace BinGames.Sim.Combat
             return slot;
         }
 
+        /// <summary>FG15-SYS-02（DEBT-FG11ATTR01-01）：槽位 <paramref name="slot"/> 状态位 <paramref name="bit"/> 的来源单位 Id（0 = 没有）。O(1)。</summary>
+        public int BitSrc(int slot, int bit) =>
+            (StatusSrcMask[slot] & (1u << bit)) != 0u && StatusSrc.TryGetValue(slot * CombatConst.StatusBitStride + bit, out int v) ? v : 0;
+
+        /// <summary>写一位的来源（0 = 清掉：删行、清掩码位）。</summary>
+        public void SetBitSrc(int slot, int bit, int source)
+        {
+            uint m = 1u << bit;
+            int key = slot * CombatConst.StatusBitStride + bit;
+            if (source != 0)
+            {
+                StatusSrc[key] = source;
+                StatusSrcMask[slot] |= m;
+            }
+            else if ((StatusSrcMask[slot] & m) != 0u)
+            {
+                StatusSrc.Remove(key);
+                StatusSrcMask[slot] &= ~m;
+            }
+        }
+
+        /// <summary>清掉一个槽位全部状态位来源。</summary>
+        public void ClearBitSrc(int slot)
+        {
+            uint bits = StatusSrcMask[slot];
+            while (bits != 0u)
+            {
+                int b = math.tzcnt(bits);
+                bits &= bits - 1u;
+                StatusSrc.Remove(slot * CombatConst.StatusBitStride + b);
+            }
+            StatusSrcMask[slot] = 0u;
+        }
+
+        /// <summary>压实搬槽位：先清掉目标槽位残留的行（被移除单位留下的），再把来源行改挂到新槽位，原槽位清空（之后被覆盖 / 截掉都不会误删）。</summary>
+        private void MoveBitSrc(int from, int to)
+        {
+            ClearBitSrc(to);
+            uint bits = StatusSrcMask[from];
+            while (bits != 0u)
+            {
+                int b = math.tzcnt(bits);
+                bits &= bits - 1u;
+                int k0 = from * CombatConst.StatusBitStride + b;
+                StatusSrc.TryGetValue(k0, out int v);
+                StatusSrc.Remove(k0);
+                StatusSrc[to * CombatConst.StatusBitStride + b] = v;
+            }
+            StatusSrcMask[to] = StatusSrcMask[from];
+            StatusSrcMask[from] = 0u;
+        }
+
+        /// <summary>截断前：删掉被截掉槽位（被移除、没被覆盖的单位）的来源行。</summary>
+        private void DropBitSrcFrom(int length)
+        {
+            for (int i = length; i < StatusSrcMask.Length; i++)
+            {
+                ClearBitSrc(i);
+            }
+        }
+
         /// <summary>把槽位 <paramref name="from"/> 的全部字段搬到 <paramref name="to"/>（压实用，to &lt; from）。</summary>
         public void MoveSlot(int from, int to)
         {
@@ -695,6 +766,7 @@ namespace BinGames.Sim.Combat
             Priority[to] = Priority[from];
             Flags[to] = Flags[from];
             Pos[to] = Pos[from];
+            PosEpoch++; // FG15-SYS-02：区域网格按它判断单位挪没挪
             Prev[to] = Prev[from];
             Home[to] = Home[from];
             Radius[to] = Radius[from];
@@ -721,8 +793,8 @@ namespace BinGames.Sim.Combat
             for (int b = 0; b < CombatConst.StatusBitStride; b++)
             {
                 StatusBitUntil[to * CombatConst.StatusBitStride + b] = StatusBitUntil[from * CombatConst.StatusBitStride + b];
-                StatusBitSource[to * CombatConst.StatusBitStride + b] = StatusBitSource[from * CombatConst.StatusBitStride + b];
             }
+            MoveBitSrc(from, to);
             StatusZoneSlow[to] = StatusZoneSlow[from];
             Ammo[to] = Ammo[from];
             Siege[to] = Siege[from];
@@ -775,7 +847,8 @@ namespace BinGames.Sim.Combat
             StatusSource.ResizeUninitialized(length);
             StatusStacks.ResizeUninitialized(length);
             StatusBitUntil.ResizeUninitialized(length * CombatConst.StatusBitStride);
-            StatusBitSource.ResizeUninitialized(length * CombatConst.StatusBitStride);
+            DropBitSrcFrom(length);
+            StatusSrcMask.ResizeUninitialized(length);
             StatusZoneSlow.ResizeUninitialized(length);
             Ammo.ResizeUninitialized(length);
             Siege.ResizeUninitialized(length);

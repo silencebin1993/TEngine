@@ -812,7 +812,7 @@ namespace GameLogic.Command
             }
 
             var plane = new Plane(Vector3.up, Vector3.zero);
-            Ray ray = _camera.ScreenPointToRay(screenPosition);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(_camera, screenPosition);
             if (!plane.Raycast(ray, out float enter))
             {
                 return false;

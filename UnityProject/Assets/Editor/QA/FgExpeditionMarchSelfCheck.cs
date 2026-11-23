@@ -101,7 +101,7 @@ namespace GameLogic.EditorTools
 
         public static int Run(StringBuilder report) => RunSteps(report,
             "\n[远征行军] 锚点（种子 / 可达）、出发事务与回滚、真实行军到达、观察 / 倍速 / 暂停一致、存读档接着走、覆盖内外命令与接入、途中静默夜 / 家园遇袭、地形绕行与截断、到达失败回滚、界面（FG8-EXP-02）",
-            CheckData, CheckAnchors, CheckDeparture, CheckDepartureRollback, CheckMarchToArrival, CheckObservationAndSpeed, CheckSaveLoadContinue,
+            CheckData, CheckAnchors, CheckDeparture, CheckDepartureRollback, CheckDepartureBaselineWriteFailure, CheckMarchToArrival, CheckObservationAndSpeed, CheckSaveLoadContinue,
             CheckCoverageCommands, CheckDetachedMember, CheckSilentNight, CheckHomeRaid, CheckObstacleAndTruncation, CheckArrivalFailure,
             CheckEncountersAndHazard, CheckSelfDefense, CheckUi, CheckLegacySave);
 
@@ -573,6 +573,60 @@ namespace GameLogic.EditorTools
             Expect(rolled && clean && ExpeditionChecklistService.DescribeHard(dep.Reasons[0]) == GameText.Get("exp.check.hard.transaction_failed"),
                 $"M4 出发事务里行军开到一半出错（{dep.Outcome}）：整体回滚到出发前档——没有行军、出击次数不变、离家报告没开、机器还在家园且速度正常、机器数不变（{clean}）；玩家看到“{GameText.Get("exp.check.hard.transaction_failed")}”");
         }
+
+        // ── M4b 出发前回滚基线后台写盘失败（FG15-SYS-02 / DEBT-FG15SYS01-05）────────────────
+
+        /// <summary>
+        /// 游戏中出发前档也走后台写盘（主线程只拍快照）；写盘失败时在主线程写盘完成回调里中止出发——按同步写时的结果：
+        /// 从内存快照读回出发前的世界（没有行军、出击次数不变、离家报告没开、机器在家园且速度正常），玩家看到“已取消出发”。
+        /// 故障注入：存档写临时文件中途失败（SaveCrashPoint.MidTempWrite，出发前 / 出发后两份都失败）。
+        /// </summary>
+        private static void CheckDepartureBaselineWriteFailure()
+        {
+            CampaignState s = NewWorld(5104);
+            int a = Spawn(s, HomeValleyLayout.Erc003ChassisId, HomeValleyLayout.BlueprintErc003Id, new Vector2(4f, -6f));
+            WorldSimulation.StepMany(3);
+            int before = FracturedCityRegion.Find(s).ExpeditionCount;
+            int machines = MachineRegistry.AllRecords.Count();
+            int aborted = ExpeditionDepartureService.AbortedAfterBaselineWriteFailure;
+            int failCues = FeedbackCues.CountOf(FeedbackCueId.Failure);
+            ExpeditionDepartureService.DepartureResult dep;
+            bool departed;
+            CampaignAutoSaveService.ForceBackgroundForTests = true;
+            try
+            {
+                CampaignSaveService.CrashPointForTests = SaveCrashPoint.MidTempWrite;
+                try
+                {
+                    dep = ExpeditionDepartureService.TryDepart(new[] { a }, true);
+                }
+                finally
+                {
+                    CampaignSaveService.CrashPointForTests = SaveCrashPoint.None;
+                }
+                departed = dep.Success && ExpeditionMarchService.IsAway(CampaignSession.Current);
+                CampaignSaveService.WaitForPendingWrites();
+                CampaignSaveService.PumpBackgroundResults(); // 正式游戏里 GameRoot.OnUpdate 每帧调
+                CampaignSaveService.WaitForPendingWrites();
+                CampaignSaveService.PumpBackgroundResults();
+            }
+            finally
+            {
+                CampaignAutoSaveService.ForceBackgroundForTests = false;
+            }
+            CampaignState now = CampaignSession.Current;
+            ExpeditionMarchState m = ExpeditionMarchService.Current(now);
+            CombatSite home = CombatSites.Get(HomeValleyLayout.RegionId);
+            bool clean = !ReferenceEquals(now, s) && m.Phase == ExpeditionMarchService.PhaseNone && !ExpeditionMarchService.IsAway(now)
+                         && FracturedCityRegion.Find(now).ExpeditionCount == before && !now.Stats.AwayReports.HasOpen
+                         && Rec(a)?.RegionId == HomeValleyLayout.RegionId && MachineRegistry.AllRecords.Count() == machines
+                         && home != null && WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded && Mathf.Approximately(home.UnitSpeed(Unit(home, a)), HomeValleyMachineMarker.MoveSpeed);
+            bool told = ExpeditionDepartureService.AbortedAfterBaselineWriteFailure == aborted + 1 && FeedbackCues.CountOf(FeedbackCueId.Failure) >= failCues + 2;
+            Expect(departed && clean && told,
+                $"M4b 出发前档后台写盘失败（主线程只拍快照、当场出发 {departed}）：写盘完成回调里中止出发——从内存快照读回出发前的世界，没有行军、出击次数不变、离家报告没开、机器在家园且速度正常、机器数不变（{clean}）；" +
+                $"中止计数 +{ExpeditionDepartureService.AbortedAfterBaselineWriteFailure - aborted}，提示写盘失败 + “{GameText.Get("exp.check.hard.autosave_failed")}”（{told}）");
+        }
+
 
         // ── M5 真实行军到达 ──────────────────────────────────────────────────────
 
@@ -1418,6 +1472,41 @@ namespace GameLogic.EditorTools
                           && WorldSimulation.ActiveExpedition == null && WorldSimulation.Home != null && WorldSimulation.Home.IsLoaded
                           && Rec(a).RegionId == HomeValleyLayout.RegionId && MachineRegistry.AllRecords.Count() == machines;
             string rolledText = $"战役状态换成读回的那份 {!ReferenceEquals(restored, now)}、回滚计数 {ExpeditionMarchService.ArrivalRollbackCount - rollbacks}、阶段 {m2?.Phase}、停下 {m2?.Halted}（{m2?.ArrivalFailReason}）、命令 {m2?.Command}、地点 {WorldSimulation.ActiveExpedition?.SiteId ?? "无"}、机器在 {Rec(a)?.RegionId}、机器数 {MachineRegistry.AllRecords.Count()}/{machines}";
+            // （c）FG15-SYS-02（DEBT-FG15SYS01-05）：游戏中到达前档也走后台写盘。下一次自动重试时写盘失败（故障注入：写临时文件中途失败）——
+            // 到达照常在这一步完成（主线程只拍快照），写盘完成回调里中止到达：从内存快照读回到达前的世界，队伍在集结点照“前进”等候（原因“存档没成功”）。
+            int abortedArrivals = ExpeditionMarchService.AbortedAfterBaselineWriteFailure;
+            bool reachedSite;
+            CampaignAutoSaveService.ForceBackgroundForTests = true;
+            try
+            {
+                CampaignSaveService.CrashPointForTests = SaveCrashPoint.MidTempWrite;
+                try
+                {
+                    reachedSite = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Phase == ExpeditionMarchService.PhaseAtSite, retrySteps + 240, chunk: 1);
+                }
+                finally
+                {
+                    CampaignSaveService.CrashPointForTests = SaveCrashPoint.None;
+                }
+                CampaignSaveService.WaitForPendingWrites();
+                CampaignSaveService.PumpBackgroundResults();
+                CampaignSaveService.WaitForPendingWrites();
+                CampaignSaveService.PumpBackgroundResults();
+            }
+            finally
+            {
+                CampaignAutoSaveService.ForceBackgroundForTests = false;
+            }
+            CampaignState back = CampaignSession.Current;
+            ExpeditionMarchState m3 = ExpeditionMarchService.Current(back);
+            bool abortedArrival = reachedSite && ExpeditionMarchService.AbortedAfterBaselineWriteFailure == abortedArrivals + 1
+                                  && m3.Phase == ExpeditionMarchService.PhaseOutbound && m3.Halted == ExpeditionMarchService.HaltArrivalFailed && m3.ArrivalFailReason == "autosave-failed"
+                                  && m3.Command == (int)ExpeditionMarchService.Command.Advance && WorldSimulation.ActiveExpedition == null
+                                  && Rec(a).RegionId == HomeValleyLayout.RegionId && MachineRegistry.AllRecords.Count() == machines
+                                  && !File.Exists(CampaignSaveService.SlotPath(CampaignSession.ActiveSlotIndex) + ".prearrival");
+            Expect(abortedArrival,
+                $"M12c 到达前档后台写盘失败（已进入地点 {reachedSite}）：写盘完成回调里中止到达——读回到达前的世界，阶段 {m3?.Phase}、停下 {m3?.Halted}（{m3?.ArrivalFailReason}）、命令 {m3?.Command}、地点 {WorldSimulation.ActiveExpedition?.SiteId ?? "无"}、机器在 {Rec(a)?.RegionId}，到达前基线副本已删（{abortedArrival}）");
+
             // 再下一次自动重试（没有故障）：进入地点。全程没有玩家命令、没有快进。
             int arrivals = ExpeditionMarchService.ArriveCount;
             bool retry = StepUntil(() => ExpeditionMarchService.Current(CampaignSession.Current).Phase == ExpeditionMarchService.PhaseAtSite, retrySteps + 240, chunk: 1)

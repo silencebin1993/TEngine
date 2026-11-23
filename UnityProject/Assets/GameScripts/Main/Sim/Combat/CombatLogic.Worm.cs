@@ -168,7 +168,7 @@ namespace BinGames.Sim.Combat
                     }
                     int slot = d.SlotOf(w.Segs[k]);
                     double2 p = WormPoint(w, w.S - k * (double)w.Spacing);
-                    d.Pos[slot] = p;
+                    d.Pos[slot] = p; d.PosEpoch++;
                     d.Set(slot, CombatUnitFlags.Targetable, up);
                     d.Set(slot, CombatUnitFlags.Invulnerable, !up);
                     d.Set(slot, CombatUnitFlags.Stealthed, !up);

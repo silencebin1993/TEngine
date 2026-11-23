@@ -528,7 +528,7 @@ namespace BinGames.Sim.Combat
                     double2 proposed = pos + math.normalize(away) * (speed * dt);
                     if (p.Leash <= 0f || math.distance(proposed, d.Home[i]) <= p.Leash)
                     {
-                        d.Pos[i] = MoveCollide(ref d, i, pos, proposed);
+                        d.Pos[i] = MoveCollide(ref d, i, pos, proposed); d.PosEpoch++;
                     }
                 }
                 return;
@@ -576,7 +576,7 @@ namespace BinGames.Sim.Combat
                     double2 next = pos + (double2)(f.ChargeDir * (p.ChargeSpeed * dt));
                     double2 moved = MoveCollide(ref d, i, pos, next);
                     bool blocked = math.distancesq(moved, pos) < 1e-6;
-                    d.Pos[i] = moved;
+                    d.Pos[i] = moved; d.PosEpoch++;
                     RamOverlaps(ref d, i, in p, in wp, ref f);
                     f.ChargeT -= dt;
                     if (f.ChargeT <= 0f || blocked)
@@ -638,7 +638,7 @@ namespace BinGames.Sim.Combat
             if (cos > 0.5f)
             {
                 double step = SlowedSpeed(ref d, i, p.Speed) * dt;
-                d.Pos[i] = MoveCollide(ref d, i, pos, pos + (double2)(dirF * (float)math.min(step, dist - reach * 0.9)));
+                d.Pos[i] = MoveCollide(ref d, i, pos, pos + (double2)(dirF * (float)math.min(step, dist - reach * 0.9))); d.PosEpoch++;
             }
         }
 
@@ -676,7 +676,7 @@ namespace BinGames.Sim.Combat
                     double2 from = d.Pos[k];
                     double2 want = from + (double2)(f.ChargeDir * p.ChargeKnock);
                     // EMG3-CHS-01（DEBT-EMG1ENT01-06）：实体层开着时冲撞击退走统一位移入口（发 evt.push、撞墙 / 撞单位发 evt.impact）；emg.stage = 0 逐字同旧
-                    d.Pos[k] = EmgEntOn(ref d) ? EmgDisplaceUnit(ref d, k, from, want, i, EmgConst.PushCauseKnock) : MoveCollide(ref d, k, from, want);
+                    d.Pos[k] = EmgEntOn(ref d) ? EmgDisplaceUnit(ref d, k, from, want, i, EmgConst.PushCauseKnock) : MoveCollide(ref d, k, from, want); d.PosEpoch++;
                 }
                 Cue2(ref d, i, d.Id[k], dmg, d.Pos[k], 9, 0);
             }
@@ -831,7 +831,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Pos[i] = before;
+            d.Pos[i] = before; d.PosEpoch++;
             if (!PlayerWantsToMove(ref d, i))
             {
                 return;

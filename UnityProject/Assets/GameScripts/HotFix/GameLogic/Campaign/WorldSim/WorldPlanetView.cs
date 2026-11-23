@@ -76,7 +76,7 @@ namespace GameLogic.Campaign.WorldSim
         {
             if (Markers.TryGetValue(groupId, out GameObject go) && go != null)
             {
-                position = go.transform.position;
+                position = BinGames.Sim.ViewOrigin.ToWorld(go.transform.position);
                 return true;
             }
             position = default;
@@ -158,7 +158,7 @@ namespace GameLogic.Campaign.WorldSim
                 {
                     go.SetActive(true);
                 }
-                go.transform.position = new Vector3((float)g.PosX, 0f, (float)g.PosY);
+                go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3((float)g.PosX, 0f, (float)g.PosY));
                 // 菱形与立柱一起变色（到达态整个标记换色）；只对镜头附近的少数标记做，列表复用不分配。
                 Material want = g.State == TransitGroupState.Arrived ? _arrivedMaterial : _raidMaterial;
                 go.GetComponentsInChildren(RendererScratch);
@@ -314,7 +314,7 @@ namespace GameLogic.Campaign.WorldSim
                 {
                     go.SetActive(true);
                 }
-                go.transform.position = new Vector3(f.X, 0f, f.Y);
+                go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(f.X, 0f, f.Y));
                 // FG7-ENV-05：回收过的遗迹点换成矮一截的灰色方尖碑（形状 + 颜色两种区分，B15）。
                 bool done = Env.HomeExplorationService.IsRecovered(state, f.Id);
                 Transform obelisk = go.transform.childCount > 0 ? go.transform.GetChild(0) : null;
@@ -418,7 +418,7 @@ namespace GameLogic.Campaign.WorldSim
         {
             var go = new GameObject("AnchorMarker_" + a.Id);
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = Vector3.zero;
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero);
             foreach (WorldGen.PlannedAnchorPoint p in a.Points)
             {
                 GameObject part = GameObject.CreatePrimitive(p.Kind == "entry" ? PrimitiveType.Cylinder : PrimitiveType.Cube);
@@ -428,7 +428,7 @@ namespace GameLogic.Campaign.WorldSim
                 Vector2 at = p.Kind == "entry" ? entry : new Vector2(p.X, p.Y);
                 float size = Mathf.Max(1f, p.Radius * 1.4f);
                 float h = p.Kind == "gate" ? 4f : p.Kind == "core" ? 3f : p.Kind == "entry" ? 0.05f : 1.4f;
-                part.transform.position = new Vector3(at.x, h * 0.5f, at.y);
+                part.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, h * 0.5f, at.y));
                 part.transform.localScale = p.Kind == "entry" ? new Vector3(size * 2f, 0.05f, size * 2f) : new Vector3(size, h, size);
                 part.GetComponent<Renderer>().sharedMaterial = a.IsIndoorEntrance && p.Kind == "entry" ? _gateMaterial : _anchorMaterial;
             }
@@ -445,7 +445,7 @@ namespace GameLogic.Campaign.WorldSim
                         UnityObjects.Release(barrel.GetComponent<Collider>());
                         barrel.name = "AaBarrel_" + g.Id;
                         barrel.transform.SetParent(go.transform, false);
-                        barrel.transform.position = new Vector3(gx + k * 0.6f, 3f, gy);
+                        barrel.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(gx + k * 0.6f, 3f, gy));
                         barrel.transform.localScale = new Vector3(0.4f, 3f, 0.4f);
                         barrel.GetComponent<Renderer>().sharedMaterial = _anchorMaterial;
                     }
@@ -463,7 +463,7 @@ namespace GameLogic.Campaign.WorldSim
                     post.name = "GatePost";
                     post.transform.SetParent(go.transform, false);
                     Vector2 pp = entry + side * (2.2f * k);
-                    post.transform.position = new Vector3(pp.x, 2f, pp.y);
+                    post.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(pp.x, 2f, pp.y));
                     post.transform.localScale = new Vector3(0.8f, 4f, 0.8f);
                     post.GetComponent<Renderer>().sharedMaterial = _gateMaterial;
                 }
@@ -473,7 +473,7 @@ namespace GameLogic.Campaign.WorldSim
                     UnityObjects.Release(ring.GetComponent<Collider>());
                     ring.name = "ProtectRing";
                     ring.transform.SetParent(go.transform, false);
-                    ring.transform.position = new Vector3(entry.x, 0.02f, entry.y);
+                    ring.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(entry.x, 0.02f, entry.y));
                     ring.transform.localScale = new Vector3(a.ProtectRadius * 2f, 0.01f, a.ProtectRadius * 2f);
                     ring.GetComponent<Renderer>().sharedMaterial = _protectMaterial;
                 }
@@ -520,9 +520,9 @@ namespace GameLogic.Campaign.WorldSim
             }
             // FG8-EXP-03（DEBT-FG8GEN02-07）：巡逻标记按最快 outpost.patrol_view_catchup 格/秒追上逻辑位置——据点刚醒来、路线交回后巡逻跳到折返位置时，
             // 画面上是快速滑过去而不是瞬移；相差超过 outpost.patrol_view_snap（读档 / 镜头跳到别处）才直接放过去。只改表现，不改模拟。
-            Vector3 shown = go.transform.position;
+            Vector3 shown = BinGames.Sim.ViewOrigin.ToWorld(go.transform.position);
             Vector2 placed = isPatrol && wasActive ? SmoothPatrol(new Vector2(shown.x, shown.z), new Vector2(x, y), View.CameraDirector.RealDeltaTime()) : new Vector2(x, y);
-            go.transform.position = new Vector3(placed.x, 0f, placed.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(placed.x, 0f, placed.y));
             VisibleOutpostMarkerCount++;
         }
 
@@ -584,6 +584,7 @@ namespace GameLogic.Campaign.WorldSim
                 return;
             }
             _root = new GameObject("[PlanetView]");
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero); // FG15-SYS-02：根物体放在世界原点的画面位置（子物体用世界坐标作局部坐标）
             if (Application.isPlaying)
             {
                 Object.DontDestroyOnLoad(_root);

@@ -593,7 +593,7 @@ namespace BinGames.Sim.Combat
                 double2 from = d.Pos[u];
                 double2 want = from + (double2)(x.DashDir * (speed * dt));
                 double2 got = EmgDisplaceUnit(ref d, u, from, want, u, EmgTraitConst.PushCauseDash, speed);
-                d.Pos[u] = got;
+                d.Pos[u] = got; d.PosEpoch++;
                 x.DashT = math.max(0f, x.DashT - dt);
                 if (math.distancesq(got, want) > 1e-6)
                 {

@@ -479,7 +479,7 @@ namespace GameLogic.View
                     continue;
                 }
                 WorldBadge badge = BadgeAt(badges++);
-                badge.transform.position = new Vector3(r.Position.x, 4.6f, r.Position.y);
+                badge.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(r.Position.x, 4.6f, r.Position.y));
                 badge.SetIcon(IconFor(p));
                 badge.SetVisible(true);
             }
@@ -549,16 +549,16 @@ namespace GameLogic.View
                 if (points < 2)
                 {
                     r.positionCount = 2;
-                    r.SetPosition(0, new Vector3((float)g.PosX, 0.35f, (float)g.PosY));
-                    r.SetPosition(1, new Vector3((float)g.TargetX, 0.35f, (float)g.TargetY));
+                    r.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3((float)g.PosX, 0.35f, (float)g.PosY)));
+                    r.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3((float)g.TargetX, 0.35f, (float)g.TargetY)));
                 }
                 else
                 {
                     r.positionCount = points;
-                    r.SetPosition(0, new Vector3((float)g.PosX, 0.35f, (float)g.PosY));
+                    r.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3((float)g.PosX, 0.35f, (float)g.PosY)));
                     for (int i = start; i < g.RouteX.Length; i++)
                     {
-                        r.SetPosition(1 + i - start, new Vector3(g.RouteX[i], 0.35f, g.RouteY[i]));
+                        r.SetPosition(1 + i - start, BinGames.Sim.ViewOrigin.ToView(new Vector3(g.RouteX[i], 0.35f, g.RouteY[i])));
                     }
                 }
                 r.enabled = true;
@@ -587,10 +587,10 @@ namespace GameLogic.View
                 LineRenderer r = LineAt(lines++);
                 Style(r, new Color(1f, 0.42f, 0.2f, 0.75f), 0.6f, false);
                 r.positionCount = 1 + p.RouteX.Length;
-                r.SetPosition(0, new Vector3(p.OriginX, 0.33f, p.OriginY));
+                r.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(p.OriginX, 0.33f, p.OriginY)));
                 for (int i = 0; i < p.RouteX.Length; i++)
                 {
-                    r.SetPosition(1 + i, new Vector3(p.RouteX[i], 0.33f, p.RouteY[i]));
+                    r.SetPosition(1 + i, BinGames.Sim.ViewOrigin.ToView(new Vector3(p.RouteX[i], 0.33f, p.RouteY[i])));
                 }
                 r.enabled = true;
                 Candidates.Add(new OverlayLabel
@@ -615,8 +615,8 @@ namespace GameLogic.View
                 LineRenderer r = LineAt(lines++);
                 Style(r, new Color(0.95f, 0.6f, 0.15f, 0.8f), 0.4f, false);
                 r.positionCount = 2;
-                r.SetPosition(0, new Vector3(p.x, 0.3f, p.y));
-                r.SetPosition(1, new Vector3(corePos.x, 0.3f, corePos.y));
+                r.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(p.x, 0.3f, p.y)));
+                r.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(corePos.x, 0.3f, corePos.y)));
                 r.enabled = true;
                 Candidates.Add(new OverlayLabel
                 {
@@ -686,7 +686,7 @@ namespace GameLogic.View
                     r.positionCount = n;
                     for (int i = 0; i < n; i++)
                     {
-                        r.SetPosition(i, new Vector3(SiegePath[i].x, 0.4f, SiegePath[i].y));
+                        r.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(SiegePath[i].x, 0.4f, SiegePath[i].y)));
                     }
                     r.enabled = true;
                     SiegeRouteLines++;
@@ -710,10 +710,10 @@ namespace GameLogic.View
                 LineRenderer r = LineAt(lines++);
                 Style(r, new Color(1f, 0.15f, 0.1f, 1f), 0.5f, true);
                 float pad = 0.75f;
-                Square[0] = new Vector3(lo.X - pad, 0.45f, lo.Y - pad);
-                Square[1] = new Vector3(hi.X + pad, 0.45f, lo.Y - pad);
-                Square[2] = new Vector3(hi.X + pad, 0.45f, hi.Y + pad);
-                Square[3] = new Vector3(lo.X - pad, 0.45f, hi.Y + pad);
+                Square[0] = BinGames.Sim.ViewOrigin.ToView(new Vector3(lo.X - pad, 0.45f, lo.Y - pad));
+                Square[1] = BinGames.Sim.ViewOrigin.ToView(new Vector3(hi.X + pad, 0.45f, lo.Y - pad));
+                Square[2] = BinGames.Sim.ViewOrigin.ToView(new Vector3(hi.X + pad, 0.45f, hi.Y + pad));
+                Square[3] = BinGames.Sim.ViewOrigin.ToView(new Vector3(lo.X - pad, 0.45f, hi.Y + pad));
                 r.positionCount = 4;
                 r.SetPositions(Square);
                 r.enabled = true;
@@ -764,10 +764,10 @@ namespace GameLogic.View
                 LineRenderer r = LineAt(markers++);
                 Style(r, color, width, true);
                 float h = 1.6f;
-                Square[0] = new Vector3(e.Position.x - h, 0.25f, e.Position.y - h);
-                Square[1] = new Vector3(e.Position.x + h, 0.25f, e.Position.y - h);
-                Square[2] = new Vector3(e.Position.x + h, 0.25f, e.Position.y + h);
-                Square[3] = new Vector3(e.Position.x - h, 0.25f, e.Position.y + h);
+                Square[0] = BinGames.Sim.ViewOrigin.ToView(new Vector3(e.Position.x - h, 0.25f, e.Position.y - h));
+                Square[1] = BinGames.Sim.ViewOrigin.ToView(new Vector3(e.Position.x + h, 0.25f, e.Position.y - h));
+                Square[2] = BinGames.Sim.ViewOrigin.ToView(new Vector3(e.Position.x + h, 0.25f, e.Position.y + h));
+                Square[3] = BinGames.Sim.ViewOrigin.ToView(new Vector3(e.Position.x - h, 0.25f, e.Position.y + h));
                 r.positionCount = 4;
                 r.SetPositions(Square);
                 r.enabled = true;
@@ -946,7 +946,7 @@ namespace GameLogic.View
             for (int i = 0; i < CircleSegments; i++)
             {
                 float a = i * Mathf.PI * 2f / CircleSegments;
-                Circle[i] = new Vector3(cx + Mathf.Cos(a) * radius, 0.3f, cy + Mathf.Sin(a) * radius);
+                Circle[i] = BinGames.Sim.ViewOrigin.ToView(new Vector3(cx + Mathf.Cos(a) * radius, 0.3f, cy + Mathf.Sin(a) * radius));
             }
             r.positionCount = CircleSegments;
             r.SetPositions(Circle);
@@ -1021,7 +1021,7 @@ namespace GameLogic.View
             {
                 return Vector2.zero;
             }
-            Vector3 o = cam.transform.position;
+            Vector3 o = BinGames.Sim.ViewOrigin.ToWorld(cam.transform.position);
             Vector3 d = cam.transform.forward;
             if (Mathf.Abs(d.y) > 1e-4f)
             {

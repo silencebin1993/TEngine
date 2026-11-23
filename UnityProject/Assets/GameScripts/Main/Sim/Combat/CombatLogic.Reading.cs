@@ -557,7 +557,7 @@ namespace BinGames.Sim.Combat
                 {
                     double2 dir = math.normalize(d.Pos[t] - d.Pos[a]);
                     double step = math.min(r.Lunge, gap);
-                    d.Pos[a] = MoveCollide(ref d, a, d.Pos[a], d.Pos[a] + dir * step);
+                    d.Pos[a] = MoveCollide(ref d, a, d.Pos[a], d.Pos[a] + dir * step); d.PosEpoch++;
                 }
             }
             // 区域（驻留 / 拖尾）。
@@ -782,7 +782,7 @@ namespace BinGames.Sim.Combat
             }
             double2 from = d.Pos[k];
             // EMG1-ENT-01（FGR-EMG-112）：实体层开时位移途中撞障碍 / 残骸 / 单位就停在撞点并按速度结算撞击，位移够远发 evt.push；关时逐字是原来的格网碰撞。
-            d.Pos[k] = EmgEntOn(ref d) ? EmgDisplaceUnit(ref d, k, from, from + dir * step, pusher, cause) : MoveCollide(ref d, k, from, from + dir * step);
+            d.Pos[k] = EmgEntOn(ref d) ? EmgDisplaceUnit(ref d, k, from, from + dir * step, pusher, cause) : MoveCollide(ref d, k, from, from + dir * step); d.PosEpoch++;
         }
 
         internal static bool CanDisplace(ref CombatData d, int k)
@@ -851,9 +851,11 @@ namespace BinGames.Sim.Combat
                 touched &= touched - 1u;
                 int idx = baseIdx + b;
                 d.StatusBitUntil[idx] = (before & (1u << b)) != 0u ? math.max(d.StatusBitUntil[idx], until) : until;
-                d.StatusBitSource[idx] = source >= 0 && source < d.Count ? d.Id[source] : 0; // FG11-ATTR-01 ③：这一位最后由谁挂上（单位层反应的“沾染来源”）
+                if ((CombatAblation.Attribution.Data & 1) == 0)
+                    d.SetBitSrc(k, b, source >= 0 && source < d.Count ? d.Id[source] : 0); // FG11-ATTR-01 ③：这一位最后由谁挂上（单位层反应的“沾染来源”）
             }
-            EmgCoatAttrNote(ref d, k, mask); // FG11-ATTR-01 ②：斑块挂上的位登记斑块归因，别的来源挂上的删旧行
+            if ((CombatAblation.Attribution.Data & 2) == 0)
+                EmgCoatAttrNote(ref d, k, mask); // FG11-ATTR-01 ②：斑块挂上的位登记斑块归因，别的来源挂上的删旧行
             int cap = StackCapOf(ref d);
             ulong stacks = d.StatusStacks[k];
             uint dotMask = DotMaskOf(ref d);
@@ -1222,12 +1224,13 @@ namespace BinGames.Sim.Combat
             d.ReadingFeedOwner[kind] = ownerSlot >= 0 && ownerSlot < d.Count ? d.Id[ownerSlot] : 0;
         }
 
-        /// <summary>区域推进：到期移除；按节拍对区域内的敌对阵营单位造成伤害并挂状态（区域的“减速”只要站在里面就挂上）。O(区域 × 单位)。</summary>
+        /// <summary>区域推进：到期移除；按节拍对区域内的敌对阵营单位造成伤害并挂状态（区域的“减速”只要站在里面就挂上）。区域多时走单位网格：O(单位 + 节拍区域 × 覆盖格内单位)（FG15-SYS-02）。</summary>
         private static void StepZones(ref CombatData d, float dt)
         {
             double now = d.Scalars[0].Time;
             int m = d.Zones.Length;
             int write = 0;
+            ZoneGridBegin(ref d);
             for (int z = 0; z < m; z++)
             {
                 CombatZone zone = d.Zones[z];
@@ -1265,6 +1268,7 @@ namespace BinGames.Sim.Combat
             }
             d.Zones.ResizeUninitialized(write);
             StepLegacyPatches(ref d, dt, now); // EMG2-MAT-02：迁入斑块按同一段区域节拍结算
+            ZoneGridEnd(ref d);
         }
 
         /// <summary>
@@ -1303,7 +1307,10 @@ namespace BinGames.Sim.Combat
                     EmgModsOf(ref d, zone.EmgProgRef - 1, zone.EmgNode, out zm, 0UL, owner);
                 }
                 int n = d.Count;
-                for (int k = 0; k < n; k++)
+                // FG15-SYS-02（DEBT-FG2FW02-06）：区域多时只走外接框覆盖格里的单位（升序、结果逐字一致，见 CombatLogic.ZoneGrid）
+                int epoch = d.PosEpoch, ci = 0;
+                bool grid = ZoneCandidates(ref d, zone.Pos, zone.Radius, n), gridMine = grid;
+                for (int k = grid ? ZoneFirstUnit(ref d, n) : 0; k < n; k = grid ? ZoneNextUnit(ref d, ref grid, ref ci, k, n, epoch) : k + 1)
                 {
                     if (pool ? d.Faction[k] == (byte)CombatFaction.Neutral
                         : neutral
@@ -1360,6 +1367,10 @@ namespace BinGames.Sim.Combat
                     // 两者都没有（减速网之类）= 0，只靠倍率的反应不结算（见 ApplyStatus）。
                     float reactionHit = tickDamage > 0f ? tickDamage : math.max(0f, zone.StatusDps) * zone.TickInterval;
                     ApplyStatus(ref d, k, mask, zone.StatusSeconds, zone.StatusDps, zone.StatusSlow, zone.StatusVuln, owner, reactionHit);
+                }
+                if (gridMine)
+                {
+                    d.ZoneGridBusy = 0;
                 }
                 zone.EmgTrigUsed = zoneCtx.TrigUsed;
                 // EMG2-MAT-02（ADR ⑤ / FGR-EMG-087）：燃烧的液洼残留按液洼号报一条“燃烧格”给热更层（PipeLeakService.Burn 只读这份聚合列表，不遍历区域 / 斑块）

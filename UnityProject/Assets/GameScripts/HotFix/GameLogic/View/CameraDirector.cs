@@ -205,7 +205,7 @@ namespace GameLogic.View
             {
                 _strategyOrthographicSize = math.clamp(_camera.orthographicSize, MinOrthographicSize, MaxOrthographicSize);
                 ClampStrategyFocus();
-                _camera.transform.position = StrategyCameraPosition();
+                _camera.transform.position = BinGames.Sim.ViewOrigin.ToView(StrategyCameraPosition());
                 ApplyViewSize(_strategyOrthographicSize);
             }
             InputRouter.SetScope(_mode == ViewMode.Strategy ? InputScope.Strategy : InputScope.Direct);
@@ -249,7 +249,7 @@ namespace GameLogic.View
             ClampStrategyFocus();
             if (_camera != null && _mode == ViewMode.Strategy)
             {
-                _camera.transform.position = StrategyCameraPosition();
+                _camera.transform.position = BinGames.Sim.ViewOrigin.ToView(StrategyCameraPosition());
                 ApplyViewSize(_strategyOrthographicSize);
             }
         }
@@ -312,6 +312,9 @@ namespace GameLogic.View
                     TickDirect(dt, paused);
                     break;
             }
+            // FG15-SYS-02（DEBT-FG0ARCH01-02）：浮动画面原点跟着镜头注视点走——离原点超过 camera.rebase_cells 才重设（整体平移根物体，O(根物体数)）。
+            Vector3 lookAt = BinGames.Sim.ViewOrigin.ToWorld(_camera.transform.position) - _followOffset;
+            BinGames.Sim.ViewOrigin.Follow(lookAt.x, lookAt.z, Tune("camera.rebase_cells", 4096f));
 
             // 最后统一叠加本帧震屏偏移（设置关闭时恒为零）。
             _appliedShake = ScreenShake.Sample(dt, _camera.orthographicSize, _camera.transform);
@@ -400,7 +403,7 @@ namespace GameLogic.View
             }
 
             // 从当前镜头继承注视点，避免"拉远的瞬间画面跳到别处"；指定了目标焦点时直接过渡到目标。
-            Vector3 pos = _camera.transform.position;
+            Vector3 pos = BinGames.Sim.ViewOrigin.ToWorld(_camera.transform.position);
             _strategyFocus = focus ?? new float2(pos.x - _followOffset.x, pos.z - _followOffset.z);
             _directOrthographicSize = _camera.orthographicSize;
             ClampStrategyFocus();
@@ -467,7 +470,7 @@ namespace GameLogic.View
             _mode = ViewMode.Transition;
             _transitionDuration = duration;
             _transitionRemaining = duration;
-            _transitionFrom = _camera.transform.position;
+            _transitionFrom = BinGames.Sim.ViewOrigin.ToWorld(_camera.transform.position); // FG15-SYS-02：过渡端点存世界坐标，写镜头时再减原点
             _transitionTo = targetPosition;
             _transitionFromSize = _camera.orthographicSize;
             _transitionToSize = targetSize;
@@ -491,7 +494,7 @@ namespace GameLogic.View
                 _transitionTo = CameraPositionFor(anchor);
             }
 
-            _camera.transform.position = Vector3.Lerp(_transitionFrom, _transitionTo, eased);
+            _camera.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.Lerp(_transitionFrom, _transitionTo, eased));
             ApplyViewSize(Mathf.Lerp(_transitionFromSize, _transitionToSize, eased));
 
             if (_transitionRemaining > 0f)
@@ -533,7 +536,7 @@ namespace GameLogic.View
             // 暂停时不做平滑推进——dt 照常流逝会让镜头在"冻结的世界"里继续爬。
             // FG1-HUD-01：跟随力度 = 原平滑系数 × 设置“接入时跟随力度”；视野向“基准 × 接入时镜头距离”靠拢（设置改了立即生效，同一套平滑）。
             float k = paused ? 1f : 1f - math.exp(-DirectFollowLambda * GameSettings.UplinkFollowStrength * dt);
-            _camera.transform.position = paused ? want : Vector3.Lerp(_camera.transform.position, want, k);
+            _camera.transform.position = BinGames.Sim.ViewOrigin.ToView(paused ? want : Vector3.Lerp(BinGames.Sim.ViewOrigin.ToWorld(_camera.transform.position), want, k));
             ApplyViewSize(Mathf.Lerp(_camera.orthographicSize, DirectTargetSize, k));
             _directOrthographicSize = _camera.orthographicSize;
         }
@@ -561,7 +564,7 @@ namespace GameLogic.View
 
         private void RequestStrategyFromLostTarget()
         {
-            Vector3 pos = _camera.transform.position;
+            Vector3 pos = BinGames.Sim.ViewOrigin.ToWorld(_camera.transform.position);
             _strategyFocus = new float2(pos.x - _followOffset.x, pos.z - _followOffset.z);
             ClampStrategyFocus();
             BeginTransition(ViewMode.Strategy, StrategyCameraPosition(), _strategyOrthographicSize);
@@ -662,7 +665,7 @@ namespace GameLogic.View
                 }
             }
 
-            _camera.transform.position = StrategyCameraPosition();
+            _camera.transform.position = BinGames.Sim.ViewOrigin.ToView(StrategyCameraPosition());
             ApplyViewSize(_strategyOrthographicSize);
         }
 
@@ -720,6 +723,7 @@ namespace GameLogic.View
             return CameraPositionFor(_strategyFocus);
         }
 
+        /// <summary>镜头的世界坐标位置（写 Transform 前用 ViewOrigin.ToView 减原点）。</summary>
         private Vector3 CameraPositionFor(float2 focus)
         {
             return new Vector3(focus.x + _followOffset.x, _followOffset.y, focus.y + _followOffset.z);

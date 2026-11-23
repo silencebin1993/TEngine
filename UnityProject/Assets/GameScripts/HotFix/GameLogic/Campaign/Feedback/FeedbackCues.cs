@@ -586,7 +586,7 @@ namespace GameLogic.Campaign.Feedback
                 return 1f;
             }
             Transform t = cam.transform;
-            Vector3 origin = t.position;
+            Vector3 origin = BinGames.Sim.ViewOrigin.ToWorld(t.position); // FG15-SYS-02：镜头画面坐标 → 世界坐标，再与世界坐标的提示点比距离
             Vector3 forward = t.forward;
             Vector3 focus = origin;
             if (forward.y < -0.01f)

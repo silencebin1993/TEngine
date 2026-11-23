@@ -658,7 +658,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            Ray ray = _camera.ScreenPointToRay(screenPointer);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(_camera, screenPointer);
             var groundPlane = new Plane(Vector3.up, Vector3.zero);
             if (!groundPlane.Raycast(ray, out float enter))
             {
@@ -1113,6 +1113,7 @@ namespace GameLogic.Campaign.Regions
         private void BuildVisuals(CampaignState state)
         {
             _root = new GameObject("[FracturedCityRoot]");
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero); // FG15-SYS-02：根物体放在世界原点的画面位置（子物体用世界坐标作局部坐标）
             _enemyBadges.Clear();
             SiteGenVisuals.Build(_root.transform, state, _siteGen); // FG9-ACT1-01：生成内容的占位表现（DEBT-FG9ACT101-01）
 
@@ -1143,7 +1144,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(shape);
             go.name = (isMarkerRing ? "Marker_" : "Poi_") + anchor.Id;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(anchor.Position.x, height, anchor.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(anchor.Position.x, height, anchor.Position.y));
             go.transform.localScale = isMarkerRing
                 ? new Vector3(anchor.ClearanceRadius * 2f, 0.1f, anchor.ClearanceRadius * 2f)
                 : new Vector3(1.2f, height * 2f, 1.2f);
@@ -1169,7 +1170,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             go.name = "Poi_" + FracturedCityLayout.ListeningNodeId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(FracturedCityLayout.ListeningNode.Position.x, 1f, FracturedCityLayout.ListeningNode.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(FracturedCityLayout.ListeningNode.Position.x, 1f, FracturedCityLayout.ListeningNode.Position.y));
             go.transform.localScale = new Vector3(1.5f, 1.5f, 1.5f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.sharedMaterial = ViewMaterials.Standard(destroyed ? new Color(0.3f, 0.3f, 0.3f) : new Color(0.8f, 0.2f, 0.6f));
@@ -1178,7 +1179,7 @@ namespace GameLogic.Campaign.Regions
             GameObject field = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             field.name = "JamField";
             field.transform.SetParent(_root.transform, false);
-            field.transform.position = new Vector3(FracturedCityLayout.ListeningNode.Position.x, 0.02f, FracturedCityLayout.ListeningNode.Position.y);
+            field.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(FracturedCityLayout.ListeningNode.Position.x, 0.02f, FracturedCityLayout.ListeningNode.Position.y));
             field.transform.localScale = new Vector3(FracturedCityLayout.JammerRadius * 2f, 0.02f, FracturedCityLayout.JammerRadius * 2f);
             GameLogic.View.UnityObjects.Release(field.GetComponent<Collider>());
             Renderer fieldRenderer = field.GetComponent<Renderer>();
@@ -1202,7 +1203,7 @@ namespace GameLogic.Campaign.Regions
                 GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
                 go.name = "Enemy_" + enemy.EnemyInstanceId;
                 go.transform.SetParent(_root.transform, false);
-                go.transform.position = new Vector3(at.x, 1f, at.y);
+                go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
                 _enemyViews[enemy.EnemyInstanceId] = go;
                 if (_combat != null && _combat.TryGetEnemyUnit(enemy.EnemyInstanceId, out int enemyUnit))
                 {
@@ -1229,7 +1230,7 @@ namespace GameLogic.Campaign.Regions
                     GameObject pulse = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
                     pulse.name = "ScanPulse_" + enemy.EnemyInstanceId;
                     pulse.transform.SetParent(_root.transform, false);
-                    pulse.transform.position = new Vector3(enemy.Position.x, 0.03f, enemy.Position.y);
+                    pulse.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(enemy.Position.x, 0.03f, enemy.Position.y));
                     pulse.transform.localScale = new Vector3(scanRow.SenseRange * 2f, 0.02f, scanRow.SenseRange * 2f);
                     GameLogic.View.UnityObjects.Release(pulse.GetComponent<Collider>());
                     Renderer pulseRenderer = pulse.GetComponent<Renderer>();
@@ -1266,7 +1267,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId + "_" + machine.LogicId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(at.x, 1f, at.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.7f, 0.85f, 0.75f); // 与归还谷地机器配色区分（略带绿，"出征中"）。
             renderer.sharedMaterial = ViewMaterials.Standard(baseColor);
@@ -1387,7 +1388,7 @@ namespace GameLogic.Campaign.Regions
                         // 脉冲显示期间跟随侦察机（O(显示中的脉冲)；位置真相在内核）。
                         if (pulse != null && _combat != null && _combat.TryGetEnemyPosition(kv.Key, out Vector2 pulseAt))
                         {
-                            pulse.position = new Vector3(pulseAt.x, 0.03f, pulseAt.y);
+                            pulse.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(pulseAt.x, 0.03f, pulseAt.y));
                         }
                         continue;
                     }

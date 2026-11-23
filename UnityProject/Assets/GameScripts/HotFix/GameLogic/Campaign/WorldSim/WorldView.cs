@@ -83,7 +83,7 @@ namespace GameLogic.Campaign.WorldSim
             {
                 return new GridCell(0, 0);
             }
-            Vector3 p = camera.transform.position;
+            Vector3 p = BinGames.Sim.ViewOrigin.ToWorld(camera.transform.position);
             Vector3 forward = Narrative.CutsceneCamera.BaseForward(camera); // 演出镜头抬向天空时按抬起前的视线算（审查 P2）
             if (Mathf.Abs(forward.y) > 0.001f)
             {
@@ -602,7 +602,7 @@ namespace GameLogic.Campaign.WorldSim
         }
 
         /// <summary>星球表面的镜头可平移范围：已探索区域（外接矩形）+ camera.explored_margin_cells，并包含行进中的队伍、归还核心与最近一次飞去的位置。
-        /// 不启用浮动原点，所以同时钳在 camera.precision_safe_cells 以内（DEBT-FG0ARCH01-02）。</summary>
+        /// 镜头可达范围钳在 world.coord_limit 以内（FG15-SYS-02 接浮动画面原点 BinGames.Sim.ViewOrigin 后，远处画面不丢精度；DEBT-FG0ARCH01-02）。</summary>
         public static (Vector2 Min, Vector2 Max) PlanetBounds(CampaignState state) => PlanetBoundsCore(state, includePin: true);
 
         private static (Vector2 Min, Vector2 Max) PlanetBoundsCore(CampaignState state, bool includePin)
@@ -641,7 +641,7 @@ namespace GameLogic.Campaign.WorldSim
                 maxY = Mathf.Max(maxY, pin.y);
             }
             float margin = GameClock.TuningOr("camera.explored_margin_cells", 24f);
-            float safe = GameClock.TuningOr("camera.precision_safe_cells", 16384f);
+            float safe = Mathf.Max(1f, GridContent.TuningInt("world.coord_limit"));
             return (new Vector2(Mathf.Max(-safe, minX - margin), Mathf.Max(-safe, minY - margin)),
                 new Vector2(Mathf.Min(safe, maxX + margin), Mathf.Min(safe, maxY + margin)));
         }
@@ -685,6 +685,7 @@ namespace GameLogic.Campaign.WorldSim
             _planetFlyPin = null;
             _planetFlyPinReached = false;
             WorldPlanetView.Shutdown();
+            BinGames.Sim.ViewOrigin.Reset(); // FG15-SYS-02：会话结束，画面原点回 0
             GameClock.SetDirectLocked(false);
         }
     }

@@ -134,6 +134,7 @@ namespace GameLogic.EditorTools
                 Step(CheckObservedEqualsUnobserved);
                 Step(CheckFormalInputAndQueuePanel);
                 Step(CheckReviewRegressions);
+                Step(CheckReturnWaitEventDriven); // FG15-SYS-02（DEBT-EMGRGL01-01）
                 Step(CheckPerformance);
                 foreach (string p in PerfLines)
                 {
@@ -1151,6 +1152,89 @@ namespace GameLogic.EditorTools
                 MachineRegistry.TrySetWorkPriority(m.LogicId, WorkOrderKind.Build, 0);
             }
             return machines.FirstOrDefault();
+        }
+
+        /// <summary>
+        /// FG15-SYS-02（DEBT-EMGRGL01-01）：等空间的返还搬运单改成“判定输入没变就不重查”。同一场景（仓满时落地 24 份、数量 10～30 的返还物 → 腾出 35 空位 →
+        /// 玩家亲手搬走一份 → 清空仓库）快路径开 / 关各跑 12 秒，逐步比全部返还单的状态 / 原因 / 机器与库存、地面物数：必须逐字相同；快路径确实接管了等待中的单；缓存不进存档。
+        /// </summary>
+        private static void CheckReturnWaitEventDriven()
+        {
+            string Run(bool off, out long hits, out bool held, out string victimEnd, out bool done, out string json, out bool partialMoved)
+            {
+                HomeValleyWorkOrders.ReturnWaitFastOffForTests = off;
+                try
+                {
+                    CampaignState s = NewWorld(5911);
+                    int cap = HomeValleyCargo.GetStorageCapacity(s, CampaignEconomyLedger.ResourceScrap);
+                    s.Scrap = cap;
+                    Vector2 at = GridMath.FootprintCenter(GenSpot(s), 1, 1, 0);
+                    for (int i = 0; i < 24; i++)
+                    {
+                        HomeValleyConstruction.DropForHaul(s, at + new Vector2(i % 6, i / 6), CampaignEconomyLedger.ResourceScrap, 10 + 5 * (i % 5), "rwtest:" + i);
+                    }
+                    WorkOrderRecord[] Returns() => s.WorkOrders.Where(o => o.Kind == WorkOrderKind.Haul && o.IssuerId == "return").ToArray();
+                    var sig = new StringBuilder();
+                    long h0 = HomeValleyWorkOrders.ReturnWaitFastHits;
+                    held = false;
+                    partialMoved = false;
+                    WorkOrderRecord victim = null, partial = null;
+                    for (int step = 0; step < GameClock.StepHz * 90; step++)
+                    {
+                        if (step == GameClock.StepHz * 5 / 2)
+                        {
+                            // 修复轮 2（审查 P1）：地面物被原地部分拾取（CargoService.AutoPickup 的 g.Amount -= take，数组引用不变）、腾出 5 空位：这份降到 4 → 放得下
+                            s.Scrap = cap - 5;
+                            partial = Returns().First(o => o != victim && o.State == WorkOrderState.Waiting);
+                            HomeValleyCargo.FindGroundItem(s, partial.SourceId).Amount = 4;
+                        }
+                        if (step == GameClock.StepHz * 3 - 1)
+                        {
+                            partialMoved = partial != null && !(partial.State == WorkOrderState.Waiting && partial.FailureReason == HomeValleyConstruction.ReturnWaitReason);
+                        }
+                        if (step == GameClock.StepHz * 2)
+                        {
+                            held = Returns().Length == 24 && Returns().All(o => o.State == WorkOrderState.Waiting && o.FailureReason == HomeValleyConstruction.ReturnWaitReason && o.AssignedMachineLogicId == 0);
+                            victim = Returns()[7];
+                            HomeValleyCargo.TryReserveHaul(s, victim.SourceId); // 玩家亲手搬走（地面物移除）：下一步取消
+                        }
+                        if (step == GameClock.StepHz * 3)
+                        {
+                            s.Scrap = cap - 35; // 腾出 35：等待中的全部转待分配，搬进去以后空间变少、其余回到等待
+                        }
+                        if (step == GameClock.StepHz * 8)
+                        {
+                            s.Scrap = 0; // 仓库清空：剩下的全部有空间
+                        }
+                        WorldSimulation.StepMany(1);
+                        sig.Append(s.Scrap).Append('|').Append(s.GroundItems?.Length ?? 0).Append(':');
+                        foreach (WorkOrderRecord o in Returns())
+                        {
+                            sig.Append((int)o.State).Append(o.FailureReason).Append(o.AssignedMachineLogicId > 0 ? '+' : '-').Append(',');
+                        }
+                        sig.Append(';');
+                    }
+                    hits = HomeValleyWorkOrders.ReturnWaitFastHits - h0;
+                    victimEnd = victim == null ? "无" : victim.State + "/" + victim.FailureReason;
+                    // 24 份合计 480 > 核心缓存容量：清仓后搬到再次装满为止，其余回到等空间（或扛到门口仓满等待），不卡在待分配 / 已预留
+                    done = Returns().Count(o => o.State == WorkOrderState.Completed) >= 8 && s.Scrap > cap - 10
+                           && Returns().All(o => o == victim || o.State == WorkOrderState.Completed || o.State == WorkOrderState.Waiting);
+                    victimEnd += "；终态 " + string.Join(" ", Returns().GroupBy(o => o.State + "/" + o.FailureReason).Select(g => g.Key + "×" + g.Count()));
+                    json = JsonUtility.ToJson(Returns()[0]);
+                    return sig.ToString();
+                }
+                finally
+                {
+                    HomeValleyWorkOrders.ReturnWaitFastOffForTests = false;
+                }
+            }
+            string fast = Run(false, out long hitsOn, out bool heldOn, out string victimOn, out bool doneOn, out string json, out bool partialOn);
+            string slow = Run(true, out long hitsOff, out bool heldOff, out string victimOff, out bool doneOff, out _, out bool partialOff);
+            bool cancelOn = victimOn.StartsWith(WorkOrderState.Cancelled + "/source-vanished", StringComparison.Ordinal), cancelOff = victimOff == victimOn;
+            int diffAt = fast == slow ? -1 : fast.Zip(slow, (x, y) => x == y).TakeWhile(e => e).Count();
+            Expect(fast == slow && hitsOn > 24 * GameClock.StepHz && hitsOff == 0 && heldOn && heldOff && cancelOn && cancelOff && doneOn && !json.Contains("Wait") && partialOn && partialOff,
+                $"等空间的返还单事件驱动（DEBT-EMGRGL01-01）：24 张仓满等待 → 搬走一份地面物 → 腾出 5 空位并把一份原地部分拾取到 4（开 {partialOn} / 关 {partialOff} 都离开等空间）→ 腾出 35 空位 → 清空仓库，快路径开 / 关 90 秒逐步比较返还单状态、库存与地面物" +
+                $"{(diffAt < 0 ? "逐字相同" : "第 " + diffAt + " 个字符起不同")}；快路径跳过重查 {hitsOn} 次（关时 {hitsOff}）；仓满时全部等待 {heldOn}、地面物被搬走的单 {victimOn}（关时 {victimOff}）、清仓后搬到装满、其余回到等空间 {doneOn}；缓存不进存档 {!json.Contains("Wait")}");
         }
 
         private static void CheckReviewRegressions()

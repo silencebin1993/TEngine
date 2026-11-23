@@ -1808,12 +1808,18 @@ namespace GameLogic.Campaign.Regions
 
             if (state.WorkOrders != null && state.WorkOrders.Length > 0)
             {
+                _spaceEpoch++;
                 foreach (WorkOrderRecord order in state.WorkOrders)
                 {
                     if (IsTerminal(order.State))
                     {
                         continue;
                     }
+                    if (ReturnWaitStill(state, order))
+                    {
+                        continue; // FG15-SYS-02（DEBT-EMGRGL01-01）：等空间的返还单，判定输入都没变 → 结论仍是“等”，不再逐张重查
+                    }
+                    _spaceEpoch++; // 其余工单的处理可能改仓储 / 地面物：排在它后面的返还单重新取空间
                     if (order.Kind == WorkOrderKind.Build && order.ResourceTransactionId != null)
                     {
                         HomeValleyConstruction.MigrateLegacyBuildOrder(state, order); // FG3-LOG-02：旧存档“放置即预留”的施工单，只迁移一次。
@@ -1839,6 +1845,7 @@ namespace GameLogic.Campaign.Regions
                         {
                             order.State = WorkOrderState.Waiting;
                             order.FailureReason = HomeValleyConstruction.ReturnWaitReason;
+                            NoteReturnWait(state, order);
                             continue;
                         }
                     }
@@ -2035,6 +2042,111 @@ namespace GameLogic.Campaign.Regions
             return item != null && HomeValleyCargo.CanStore(item.ResourceType)
                    && (HomeValleyCargo.GetAvailableSpace(state, item.ResourceType) >= item.Amount
                        || Economy.FieldLootService.NeedsNoStorage(state, item.SalvageInstanceId)); // FG8-LOOT-03：加密固件不占仓库
+        }
+
+        // ── FG15-SYS-02（DEBT-EMGRGL01-01）：等空间返还单的事件驱动判定 ─────────────────────
+        // 原来每步对每张等空间的返还单重查一遍（找地面物 ×2、能否存、可用空间、是否不占仓库：约 1.2 μs / 张，3 万张 36 ms / 步）。
+        // 结论只取决于：这件地面物在不在（地面物数组只整体替换，引用不变 = 还在）、它的种类与数量（记录会被原地改：部分拾取 g.Amount -= take、同地合堆 pile.Amount += n，所以另记记录本身逐项比）、这种物品此刻的可用空间与能否存、
+        // 它是不是不占仓库的加密固件（战利品身份表同样只整体替换）。判“仍要等”时记下这几样（NoteReturnWait）；之后每步只比两个数组引用，
+        // 可用空间按种类取一次（同一步里、两张单之间只要处理过别的工单就重新取，GetAvailableSpace 的全部输入都覆盖到），结论与逐张重查逐字相同。
+
+        /// <summary>同一步里可用空间的有效期号：每步开始、每处理一张别的工单 +1。</summary>
+        private static int _spaceEpoch = 1;
+        private static readonly Dictionary<string, int> WaitTypeSlots = new Dictionary<string, int>(StringComparer.Ordinal);
+        private static string[] _waitTypes = new string[8];
+        private static int[] _waitSpace = new int[8];
+        private static bool[] _waitCanStore = new bool[8];
+        private static int[] _waitSpaceEpoch = new int[8];
+
+        /// <summary>自检：本进程里走快路径（不重查）的次数。</summary>
+        public static long ReturnWaitFastHits;
+        /// <summary>自检对照组：true = 关掉快路径，每步逐张重查（原实现），用来逐步比工单状态证明逐字等价。</summary>
+        public static bool ReturnWaitFastOffForTests;
+
+        private static int WaitTypeSlot(string type)
+        {
+            type ??= string.Empty;
+            if (!WaitTypeSlots.TryGetValue(type, out int slot))
+            {
+                slot = WaitTypeSlots.Count;
+                WaitTypeSlots[type] = slot;
+                if (slot >= _waitTypes.Length)
+                {
+                    int n = _waitTypes.Length * 2;
+                    Array.Resize(ref _waitTypes, n);
+                    Array.Resize(ref _waitSpace, n);
+                    Array.Resize(ref _waitCanStore, n);
+                    Array.Resize(ref _waitSpaceEpoch, n);
+                }
+                _waitTypes[slot] = type;
+            }
+            return slot;
+        }
+
+        /// <summary>判“仍要等空间”之后记下判定输入（地面物在、种类、数量、是否不占仓库）。</summary>
+        private static void NoteReturnWait(CampaignState state, WorkOrderRecord order)
+        {
+            GroundItemRecord item = HomeValleyCargo.FindGroundItem(state, order.SourceId);
+            if (item == null)
+            {
+                ForgetReturnWait(order);
+                return;
+            }
+            order.WaitGround = state.GroundItems;
+            order.WaitItem = item;
+            order.WaitType = item.ResourceType;
+            order.WaitSalvage = item.SalvageInstanceId;
+            order.WaitTags = Economy.FieldLootService.StateOf(state)?.GroundTags;
+            order.WaitSource = order.SourceId;
+            order.WaitAmount = item.Amount;
+            order.WaitTypeSlot = WaitTypeSlot(item.ResourceType);
+            order.WaitNoStorage = Economy.FieldLootService.NeedsNoStorage(state, item.SalvageInstanceId);
+        }
+
+        /// <summary>这张等空间的返还单判定输入都没变、结论仍是“等”：true（跳过，不重查）。任何一项变了返回 false，走原来的逐项判定。</summary>
+        private static bool ReturnWaitStill(CampaignState state, WorkOrderRecord order)
+        {
+            if (order.WaitGround == null)
+            {
+                return false;
+            }
+            GroundItemRecord item = order.WaitItem;
+            if (ReturnWaitFastOffForTests || !ReferenceEquals(order.WaitGround, state.GroundItems) || order.State != WorkOrderState.Waiting
+                || order.Kind != WorkOrderKind.Haul || order.AssignedMachineLogicId != 0 || !ReferenceEquals(order.WaitSource, order.SourceId)
+                || order.FailureReason != HomeValleyConstruction.ReturnWaitReason
+                || !ReferenceEquals(order.WaitTags, Economy.FieldLootService.StateOf(state)?.GroundTags)
+                || item.Amount != order.WaitAmount || !ReferenceEquals(item.ResourceType, order.WaitType) || !ReferenceEquals(item.SalvageInstanceId, order.WaitSalvage)
+                || !string.Equals(item.GroundItemId, order.SourceId, StringComparison.Ordinal))
+            {
+                ForgetReturnWait(order); // 离开等待 / 输入变了：放掉对旧数组与记录的引用，原判定仍要等时会重新记
+                return false;
+            }
+            int slot = order.WaitTypeSlot;
+            if (_waitSpaceEpoch[slot] != _spaceEpoch)
+            {
+                string type = _waitTypes[slot];
+                _waitCanStore[slot] = HomeValleyCargo.CanStore(type);
+                _waitSpace[slot] = HomeValleyCargo.GetAvailableSpace(state, type);
+                _waitSpaceEpoch[slot] = _spaceEpoch;
+            }
+            bool hasSpace = _waitCanStore[slot] && (_waitSpace[slot] >= order.WaitAmount || order.WaitNoStorage);
+            if (hasSpace)
+            {
+                ForgetReturnWait(order);
+                return false; // 有空间了：走原判定（转待分配）
+            }
+            ReturnWaitFastHits++;
+            return true;
+        }
+
+        private static void ForgetReturnWait(WorkOrderRecord order)
+        {
+            order.WaitGround = null;
+            order.WaitItem = null;
+            order.WaitTags = null;
+            order.WaitSource = null;
+            order.WaitType = null;
+            order.WaitSalvage = null;
         }
 
         // ── ER3-WRK-02：确定性自动分配 ───────────────────────────────────────────
@@ -3094,6 +3206,10 @@ namespace GameLogic.Campaign.Regions
                     order.State = WorkOrderState.Ready;
                     order.FailureReason = null;
                     MarkAssignmentDirty();
+                }
+                else
+                {
+                    NoteReturnWait(state, order);
                 }
                 return;
             }

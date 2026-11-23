@@ -1677,17 +1677,18 @@ namespace GameLogic.EditorTools
             s.PrimitiveChips = (s.PrimitiveChips ?? Array.Empty<PrimitiveChipRecord>()).Concat(fill).ToArray();
             var samples = new List<double>(400);
             ProductionService.Step(s, 3, GameClock.StepHz);
-            GC.Collect();
-            long alloc0 = GC.GetAllocatedBytesForCurrentThread();
+            // FG15-SYS-02（DEBT-FGTOOL01-02）：三处分配原来用 GC.GetAllocatedBytesForCurrentThread（Unity Mono 恒为 0，断言形同虚设）；改成每段切 4 个窗口、进程级堆增量取最小（PerfGate.MinWindowAlloc），阈值按步数折算（每步口径不变）
             var sw = new Stopwatch();
-            for (int i = 0; i < 400; i++)
+            long alloc = PerfGate.MinWindowAlloc(() =>
             {
-                sw.Restart();
-                ProductionService.Step(s, 3, GameClock.StepHz);
-                sw.Stop();
-                samples.Add(sw.Elapsed.TotalMilliseconds);
-            }
-            long alloc = GC.GetAllocatedBytesForCurrentThread() - alloc0;
+                for (int i = 0; i < 100; i++)
+                {
+                    sw.Restart();
+                    ProductionService.Step(s, 3, GameClock.StepHz);
+                    sw.Stop();
+                    samples.Add(sw.Elapsed.TotalMilliseconds);
+                }
+            }, 4, out string allocW);
             samples.Sort();
             double p95 = samples[(int)(samples.Count * 0.95)];
             double max = samples[samples.Count - 1];
@@ -1695,26 +1696,30 @@ namespace GameLogic.EditorTools
             AssemblyMaterials.SetScrapSubstitute(s, false);
             HomeValleyFactory.TryEnqueueProduce(s, HomeValleyLayout.BlueprintErc003Id);
             HomeValleyFactory.Tick(s, 1f / 60f);
-            GC.Collect();
-            long qa0 = GC.GetAllocatedBytesForCurrentThread();
-            var qsw = Stopwatch.StartNew();
-            for (int i = 0; i < 600; i++)
+            var qsw = new Stopwatch();
+            long qalloc = PerfGate.MinWindowAlloc(() =>
             {
-                HomeValleyFactory.Tick(s, 1f / 60f);
-            }
-            qsw.Stop();
-            long qalloc = GC.GetAllocatedBytesForCurrentThread() - qa0;
+                qsw.Start();
+                for (int i = 0; i < 150; i++)
+                {
+                    HomeValleyFactory.Tick(s, 1f / 60f);
+                }
+                qsw.Stop();
+            }, 4, out string qallocW);
             double perTick = qsw.Elapsed.TotalMilliseconds / 600.0;
             // 审查 P2：产线运转时仓库每步都有别的货进出（库存版本每步都变）——等料的队首只看自己要的材料，不应因此每步重新取料。
             ItemDef oreDef = ItemCatalog.Find("metal_ore");
             HomeInventory.Add(s, "metal_ore", 1);
             HomeValleyFactory.Tick(s, 1f / 60f);
             int rev0 = HomeInventory.Revision;
-            GC.Collect();
-            long qb0 = GC.GetAllocatedBytesForCurrentThread();
-            var qsw2 = Stopwatch.StartNew();
-            for (int i = 0; i < 600; i++)
+            var qsw2 = new Stopwatch();
+            int qbStep = 0;
+            long qballoc = PerfGate.MinWindowAlloc(() =>
             {
+            qsw2.Start();
+            for (int w = 0; w < 150; w++, qbStep++)
+            {
+                int i = qbStep;
                 if ((i & 1) == 0)
                 {
                     HomeInventory.Add(s, "metal_ore", 1);
@@ -1727,16 +1732,16 @@ namespace GameLogic.EditorTools
                 HomeValleyFactory.Tick(s, 1f / 60f);
             }
             qsw2.Stop();
-            long qballoc = GC.GetAllocatedBytesForCurrentThread() - qb0;
+            }, 4, out string qballocW);
             double perTickBusy = qsw2.Elapsed.TotalMilliseconds / 600.0;
             int revSteps = HomeInventory.Revision - rev0;
-            PerfLines.Add($"800 座制造建筑（四种各 200，刻录台存放满每步重试）每生产步（20 Hz，Editor batchmode）P95 {p95:F3} ms、最大 {max:F3} ms；400 步托管分配 {alloc} 字节；" +
-                          $"装配站缺料等待每模拟步 {perTick * 1000:F1} 微秒、600 步分配 {qalloc} 字节；仓库每步有别的货进出（库存版本变了 {revSteps} 次）时每模拟步 {perTickBusy * 1000:F1} 微秒（含进出货本身）、600 步分配 {qballoc} 字节");
+            PerfLines.Add($"800 座制造建筑（四种各 200，刻录台存放满每步重试）每生产步（20 Hz，Editor batchmode）P95 {p95:F3} ms、最大 {max:F3} ms；每 100 步托管分配（4 窗口取最小）{alloc} 字节（{allocW}）；" +
+                          $"装配站缺料等待每模拟步 {perTick * 1000:F1} 微秒、每 150 步分配 {qalloc} 字节（{qallocW}）；仓库每步有别的货进出（库存版本变了 {revSteps} 次）时每模拟步 {perTickBusy * 1000:F1} 微秒（含进出货本身）、每 150 步分配 {qballoc} 字节（{qballocW}）");
             // 阈值同 FG4-ECO-02：每生产步 ≤ 0.5 ms（Editor；真机热更层解释执行按 ×5 折算 ≤ 2.5 ms）；装配站等待每步 ≤ 0.05 ms、不分配（指纹没变直接跳过）。
-            ExpectPerf(ProductionService.ProducerCount >= 800 && alloc < 64 * 1024 && qalloc < 8 * 1024 && qballoc < 8 * 1024 && revSteps >= 600,
-                $"P1 性能：{ProductionService.ProducerCount} 座生产建筑每生产步 P95 {p95:F3} ms（阈值 0.5 ms）、最大 {max:F3} ms，400 步分配 {alloc} 字节（阈值 64 KB）；" +
-                $"装配站缺料等待每模拟步 {perTick * 1000:F1} 微秒（阈值 50 微秒）、600 步分配 {qalloc} 字节（阈值 8 KB）；" +
-                $"仓库每步进出别的货时 {perTickBusy * 1000:F1} 微秒（阈值 50 微秒）、分配 {qballoc} 字节（阈值 8 KB）",
+            ExpectPerf(ProductionService.ProducerCount >= 800 && alloc < 16 * 1024 && qalloc < 2 * 1024 && qballoc < 2 * 1024 && revSteps >= 600,
+                $"P1 性能：{ProductionService.ProducerCount} 座生产建筑每生产步 P95 {p95:F3} ms（阈值 0.5 ms）、最大 {max:F3} ms，每 100 步分配 {alloc} 字节（阈值 16 KB = 原 64 KB / 400 步）；" +
+                $"装配站缺料等待每模拟步 {perTick * 1000:F1} 微秒（阈值 50 微秒）、每 150 步分配 {qalloc} 字节（阈值 2 KB = 原 8 KB / 600 步）；" +
+                $"仓库每步进出别的货时 {perTickBusy * 1000:F1} 微秒（阈值 50 微秒）、每 150 步分配 {qballoc} 字节（阈值 2 KB）",
                 PerfGate.Le(p95, 0.5, "每生产步 P95 ms"), PerfGate.Le(perTick, 0.05, "装配站等待每步 ms"), PerfGate.Le(perTickBusy, 0.05, "装配站等待（仓库进出货）每步 ms"));
         }
 

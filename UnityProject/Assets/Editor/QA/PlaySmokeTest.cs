@@ -95,6 +95,7 @@ namespace GameLogic.EditorTools
             SessionState.SetBool(K + "VfxChecked", false);
             SessionState.SetBool(K + "LinkHover", false);
             SessionState.SetInt(K + "FoListPhase", 0);
+            SessionState.SetBool(K + "FarFlySent", false); // FG15-SYS-02：飞到远处再回来的步骤每次重跑都重新发起
             // FG6-DEF-07：远征中家园遇袭的步骤（417～419）是否走过；同一编辑器会话里重跑时必须复位，否则会被静默跳过。
             SessionState.EraseInt(K + "AwayAlertDone");
             SessionState.EraseInt(K + "AwaySub");
@@ -624,6 +625,8 @@ namespace GameLogic.EditorTools
                     case 42: StepMenuAllKeyBindingsClosed(inStep); break;
                     case 9043: StepMenuAllSettings(inStep); break; // FG15-UX-01
                     case 9044: StepMenuAllSettingsClosed(inStep); break;
+                    case 9060: StepFarFlyOut(inStep); break; // FG15-SYS-02：浮动画面原点，飞到远处再回来
+                    case 9061: StepFarFlyBack(inStep); break;
                 }
             }
             catch (Exception e)
@@ -1409,6 +1412,48 @@ namespace GameLogic.EditorTools
             }
             GridCell core = Campaign.Grid.HomeGridService.CorePivot(CampaignSession.Current);
             Write($"  - 回到归还核心：镜头焦点 {CameraFocus()}（核心 {core}）");
+            Next(9060, "镜头飞到核心外 100,000 格（浮动画面原点）");
+        }
+
+        // FG15-SYS-02（DEBT-FG0ARCH01-02）：真实 Play 里镜头飞到 100,000 格外再飞回来——原点重设、根物体整体平移、远处画面与取格不丢精度，全程不报错。
+        private static void StepFarFlyOut(double inStep)
+        {
+            GridCell core = Campaign.Grid.HomeGridService.CorePivot(CampaignSession.Current);
+            var far = new Vector2(core.X + 100000f, core.Y + 17f);
+            if (!SessionState.GetBool(K + "FarFlySent", false))
+            {
+                SessionState.SetBool(K + "FarFlySent", true);
+                SessionState.SetInt(K + "FarRebase0", BinGames.Sim.ViewOrigin.RebaseCount);
+                Check(WorldView.FlyTo(WorldView.ObservedSiteId, far), "镜头飞向核心外 100,000 格");
+                return;
+            }
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            Camera cam = WorldView.Camera;
+            Unity.Mathematics.double2 o = BinGames.Sim.ViewOrigin.Cells;
+            Vector3 camView = cam != null ? cam.transform.position : Vector3.zero;
+            Check(Vector2.Distance(CameraFocus(), far) < 1f && BinGames.Sim.ViewOrigin.RebaseCount > SessionState.GetInt(K + "FarRebase0", 0)
+                  && Mathf.Abs((float)o.x - far.x) <= 4096f && Mathf.Abs(camView.x) < 4300f && Mathf.Abs(camView.z) < 4300f,
+                $"飞到 100,000 格外：镜头焦点 {CameraFocus()}，画面原点重设到 ({o.x}, {o.y})，镜头画面坐标 ({camView.x:F0}, {camView.z:F0}) 留在原点附近");
+            Check(WorldView.FlyTo(WorldView.ObservedSiteId, new Vector2(core.X, core.Y)), "镜头飞回归还核心");
+            Next(9061, "镜头飞回归还核心");
+        }
+
+        private static void StepFarFlyBack(double inStep)
+        {
+            if (inStep < 1.5)
+            {
+                return;
+            }
+            GridCell core = Campaign.Grid.HomeGridService.CorePivot(CampaignSession.Current);
+            Unity.Mathematics.double2 o = BinGames.Sim.ViewOrigin.Cells;
+            GameObject root = GameObject.Find("[HomeValley]");
+            Vector3 rootWant = BinGames.Sim.ViewOrigin.ToView(Vector3.zero);
+            Check(Vector2.Distance(CameraFocus(), new Vector2(core.X, core.Y)) < 1f && Mathf.Abs((float)o.x - core.X) <= 4096f
+                  && root != null && (root.transform.position - rootWant).magnitude < 0.01f,
+                $"飞回核心：镜头焦点 {CameraFocus()}，画面原点 ({o.x}, {o.y})，家园根物体对齐世界原点的画面位置 {rootWant}");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.ToggleNotificationCenter));
             Next(30, "按通知中心键");
         }

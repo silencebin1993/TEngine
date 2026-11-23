@@ -79,7 +79,7 @@ namespace GameLogic.Battle.Feedback
 
             _root.SetActive(true);
             float2 p = controlled.Position;
-            _root.transform.position = new Vector3(p.x, 0f, p.y);
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(p.x, 0f, p.y));
 
             var slots = GameLogic.UI.Battle.MetabolicSlicePanel.Instance?.Structural;
             if (slots != null && slots.Version != _lastVersion)

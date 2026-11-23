@@ -104,6 +104,22 @@ namespace BinGames.Sim.Combat
             Touch();
         }
 
+        /// <summary>FG15-SYS-02（DEBT-EMG2MAT01-05，FGR-EMG-202）：热更层在地点载入 / 卸载时按世界级总上限下发本地点的斑块容量（1～1024，世界源保留额随之不超过容量）与每步总线额度（≥ 1）。
+        /// 已在场的斑块不删：超出新容量的部分按原规则（合并 → 最早同层提前到期）在后续生成时消化。</summary>
+        public void SetEmgBudget(int patchCapacity, int reserveWorld, int busPerStep)
+        {
+            _d.Config.EmgPatchCapacity = math.clamp(patchCapacity, 1, EmgMatterConst.DefaultCapacity);
+            _d.Config.EmgPatchReserve = math.clamp(reserveWorld, 0, _d.Config.EmgPatchCapacity);
+            _d.Config.EmgBusPerStep = math.max(1, busPerStep);
+        }
+
+        /// <summary>FG15-SYS-02 自检对照组：true = 区域节拍退回逐单位扫描（原实现），与网格版逐步比状态哈希。</summary>
+        public bool ZoneGridOffForTests
+        {
+            get => _d.ZoneGridOff != 0;
+            set => _d.ZoneGridOff = value ? (byte)1 : (byte)0;
+        }
+
         public bool SpawnReadingZoneForTests(CombatFaction faction, double2 pos, float radius, float seconds, float dps, uint statusMask)
         {
             bool ok = CombatLogic.SpawnReadingZoneForTests(ref _d, faction, pos, radius, seconds, dps, statusMask);

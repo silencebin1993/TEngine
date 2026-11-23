@@ -55,9 +55,10 @@ namespace GameLogic.View
             float yaw = dir.sqrMagnitude > 1e-6f ? Mathf.Atan2(dir.x, dir.y) * Mathf.Rad2Deg : 0f;
             var rot = Quaternion.Euler(0f, yaw, 0f);
             var pos = new Vector3(p.x, 0f, p.y);
-            _body.transform.SetPositionAndRotation(pos + Vector3.up * 0.8f, rot);
-            _cab.transform.SetPositionAndRotation(pos + rot * new Vector3(0f, 0.6f, 1.7f), rot);
-            _flag.transform.SetPositionAndRotation(pos + rot * new Vector3(0f, 2.3f, -0.8f), rot);
+            Vector3 view = BinGames.Sim.ViewOrigin.ToView(pos); // FG15-SYS-02：画面坐标 = 世界坐标 − 浮动原点（Position 仍存世界坐标，点选按世界射线算）
+            _body.transform.SetPositionAndRotation(view + Vector3.up * 0.8f, rot);
+            _cab.transform.SetPositionAndRotation(view + rot * new Vector3(0f, 0.6f, 1.7f), rot);
+            _flag.transform.SetPositionAndRotation(view + rot * new Vector3(0f, 2.3f, -0.8f), rot);
             SetActive(true);
             Position = pos;
         }

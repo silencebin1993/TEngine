@@ -1159,7 +1159,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Pos[i] = pos + to / len * math.min(stepLen, len - stopAt);
+            d.Pos[i] = pos + to / len * math.min(stepLen, len - stopAt); d.PosEpoch++;
             float4 a = d.Armor[i];
             float2 f = (float2)(to / len);
             d.Armor[i] = new float4(a.x, a.y, f.x, f.y);

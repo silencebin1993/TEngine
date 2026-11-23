@@ -51,7 +51,7 @@ namespace GameLogic.EditorTools
     /// K 性能：单步耗时（家园 + 远征 + 突袭）、热更层每帧开销与行进队伍数量无关。
     /// 已并入 <c>CellFrameworkValidate.RunAll</c>。
     /// </summary>
-    public static class FgWorldSimSelfCheck
+    public static partial class FgWorldSimSelfCheck
     {
         private const string SettingsPrefsKey = "BinGames.GameSettings.v1";
         private const int Slot = 0;
@@ -132,6 +132,7 @@ namespace GameLogic.EditorTools
                 Step(CheckAttributionAndLocate);
                 Step(CheckSeedIndependence);
                 Step(CheckActivity);
+                Step(CheckFloatingOrigin); // FG15-SYS-02：浮动画面原点（DEBT-FG0ARCH01-02）
                 Step(CheckInput);
                 Step(CheckWorldBar);
                 Step(CheckPerformance);
@@ -221,7 +222,7 @@ namespace GameLogic.EditorTools
             {
                 "clock.sim_step_hz", "clock.max_steps_per_frame", "clock.max_frame_seconds", "clock.day_seconds", "clock.start_hour",
                 "clock.objective_recompute_seconds", "sim.activity_refresh_seconds", "camera.fly_seconds", "camera.explored_margin_cells",
-                "camera.precision_safe_cells", "transit.raid_speed_cells_per_second", "transit.arrival_radius_cells",
+                "camera.rebase_cells", "transit.raid_speed_cells_per_second", "transit.arrival_radius_cells",
                 "camera.zoom_min_ortho", "camera.zoom_max_ortho", "camera.zoom_step",
             };
             var missing = tunings.Where(t => !GridContent.TryGetTuning(t, out _)).ToList();
@@ -722,6 +723,14 @@ namespace GameLogic.EditorTools
 
             // 读档后再存再读：不产生重复实体（第二次进入不复制）。
             WorldSimulation.StepMany(60);
+            // FG15-SYS-02（DEBT-EMG2MAT01-05，FGR-EMG-202）：读档载入家园 + 远征地点后，世界步按 ADR ⑬ 分摊表给两处内核下发斑块容量 / 总线额度
+            BinGames.Sim.Combat.CombatConfig hc = WorldSimulation.Home.Combat.Kernel.Config, fc = WorldSimulation.FracturedCity.Combat.Kernel.Config;
+            int reb = WorldSimulation.EmgBudgetRebalances;
+            WorldSimulation.StepMany(5);
+            Expect(hc.EmgPatchCapacity == Mathf.RoundToInt(GameLogic.Campaign.Combat.CombatSite.Tuning("emg.patch.site_home", 0f)) && hc.EmgBusPerStep == Mathf.RoundToInt(GameLogic.Campaign.Combat.CombatSite.Tuning("emg.bus.site_home", 0f))
+                   && fc.EmgPatchCapacity == Mathf.RoundToInt(GameLogic.Campaign.Combat.CombatSite.Tuning("emg.patch.capacity", 0f)) && fc.EmgBusPerStep == Mathf.RoundToInt(GameLogic.Campaign.Combat.CombatSite.Tuning("emg.bus.per_step", 0f))
+                   && hc.EmgPatchCapacity + fc.EmgPatchCapacity <= Mathf.RoundToInt(GameLogic.Campaign.Combat.CombatSite.Tuning("emg.patch.world_capacity", 0f)) && WorldSimulation.EmgBudgetRebalances == reb,
+                $"FGR-EMG-202 逐地点分摊（正式世界步）：家园斑块 {hc.EmgPatchCapacity} / 总线 {hc.EmgBusPerStep}、破碎都市 {fc.EmgPatchCapacity} / {fc.EmgBusPerStep}（世界级 2048 / 768 以内）；地点没变时不重分（{WorldSimulation.EmgBudgetRebalances - reb} 次）");
             WorldSimulation.SyncAllForSave();
             int aliveBeforeSecond = MachineRegistry.AllRecords.Count(m => m != null && m.IsAlive);
             int buildingsBeforeSecond = CampaignSession.Current.BuildingRecords.Length;

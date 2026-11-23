@@ -611,8 +611,27 @@ namespace GameLogic.Campaign
         /// <summary>最近一次同步存档 / 落盘各段耗时（性能证据读）。</summary>
         public static string LastSyncSaveBreakdown { get; private set; }
         public static string LastCommitBreakdown { get; private set; }
+        private const int ChecksumChunkChars = 16384;
+
+        private static void HashUtf8(ref BinGames.Sim.BurstSha256.State sha, Encoder enc, string s, char[] chars, byte[] bytes, bool flushAtEnd)
+        {
+            int at = 0;
+            do
+            {
+                int n = Math.Min(chars.Length, s.Length - at);
+                s.CopyTo(at, chars, 0, n);
+                at += n;
+                int len = enc.GetBytes(chars, 0, n, bytes, 0, flushAtEnd && at >= s.Length);
+                BinGames.Sim.BurstSha256.Update(ref sha, bytes, 0, len);
+            }
+            while (at < s.Length);
+        }
+
         /// <summary>最近一次读档里“探测 + 整份校验”的耗时（性能证据读）。</summary>
         public static double LastLoadProbeMs { get; private set; }
+
+        /// <summary>FG15-SYS-02：最近一次整份探测里校验和那一段的耗时（性能证据分项）。</summary>
+        public static double LastLoadChecksumMs { get; private set; }
 
         /// <summary>
         /// FG15-SYS-01（FGR-SYS-002“主线程阻塞 ≤ 100 毫秒，其余在后台完成”）：主线程只做快照（区块差异、稳定排序、JSON 序列化），
@@ -620,13 +639,21 @@ namespace GameLogic.Campaign
         /// 写盘结果在 <see cref="PumpBackgroundResults"/>（每帧）里发失败提示。同一槽位排队中、还没开始写的旧请求被新快照取代（新快照含旧的全部进度）；
         /// 读档、列表、恢复备份、删除、同步写入都会先等后台写完（读写互斥）。
         /// </summary>
-        public static SaveResult SaveInBackground(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy)
+        public static SaveResult SaveInBackground(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy) =>
+            SaveInBackground(slotIndex, state, reason, thumb, copy, null, null);
+
+        /// <summary>FG15-SYS-02（DEBT-FG15SYS01-05）：出发 / 到达回滚基线也走后台——主线程只拍快照；<paramref name="copyAfterTo"/> 在写盘线程里紧接着复制基线，
+        /// <paramref name="onWritten"/> 在主线程收到写盘结果（失败带内存快照）。</summary>
+        public static SaveResult SaveInBackground(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy,
+            string copyAfterTo, Action<SaveResult, SaveSnapshot> onWritten)
         {
             var sw = Stopwatch.StartNew();
-            if (!TryPrepare(slotIndex, state, reason, thumb, copy, out PreparedSave p, out SaveResult fail))
+            if (!TryPrepare(slotIndex, state, reason, thumb, copy, out PreparedSave p, out SaveResult fail, background: true))
             {
                 return fail;
             }
+            p.CopyAfterTo = copyAfterTo;
+            p.OnWritten = onWritten;
             Enqueue(p);
             LastPrepareMs = sw.Elapsed.TotalMilliseconds;
             return new SaveResult(SaveOutcome.Success, null);
@@ -658,6 +685,8 @@ namespace GameLogic.Campaign
             public string Dir;
             public string CampaignId;
             public string PayloadJson;
+            /// <summary>后台存档：正文整串在写盘线程里才拼（<see cref="CampaignPayloadJson.SerializeDeferred"/>），拼好写回 <see cref="PayloadJson"/>。</summary>
+            public Func<string> PayloadLater;
             public string CardJson;
             public SaveThumbnail.Shot Thumb;
             public SaveCopyKind Copy;
@@ -665,12 +694,26 @@ namespace GameLogic.Campaign
             public SaveResult Result;
             public double CommitMs;
             public int ThreadId;
+            /// <summary>FG15-SYS-02（DEBT-FG15SYS01-05）：写盘完成后主线程回调（<see cref="PumpBackgroundResults"/> 里调；失败时带内存快照，调用方据此中止出发 / 到达）。</summary>
+            public Action<SaveResult, SaveSnapshot> OnWritten;
+            /// <summary>写盘成功后在写盘线程里紧接着把主档复制到这里（到达前回滚基线；排在下一份写入之前）。</summary>
+            public string CopyAfterTo;
+            /// <summary>不是存档：排在已排队的写入之后删除这个文件（回滚基线用完）。</summary>
+            public string DeletePath;
+        }
+
+        /// <summary>FG15-SYS-02：后台写盘失败时交给回调的内存快照（与写进文件的正文逐字相同），<see cref="CampaignRestoreOrchestrator.RestoreSnapshot"/> 读回。</summary>
+        public sealed class SaveSnapshot
+        {
+            internal int Schema;
+            internal string PayloadJson;
+            internal string CardJson;
         }
 
         private static bool _quitHooked;
 
         private static bool TryPrepare(int slotIndex, CampaignState state, SaveReason reason, SaveThumbnail.Shot thumb, SaveCopyKind copy,
-            out PreparedSave prepared, out SaveResult fail)
+            out PreparedSave prepared, out SaveResult fail, bool background = false)
         {
             prepared = null;
             fail = default;
@@ -691,6 +734,7 @@ namespace GameLogic.Campaign
             state.ContentVersion = CurrentContentVersion;
             // FG0-ARCH-05（FGR-GEN-060）：把各表面被修改过的区块写进区块差异（只存修改；未修改的读档时按种子重新生成）。
             var phase = Stopwatch.StartNew();
+            int gc0 = GC.CollectionCount(0);
             WorldGen.WorldGenService.CaptureDiffs(state);
             double diffMs = phase.Elapsed.TotalMilliseconds;
             state.NormalizeForSave();
@@ -709,14 +753,17 @@ namespace GameLogic.Campaign
             }
 
             string payloadJson;
+            Func<string> payloadLater;
             string cardJson;
             try
             {
                 double t0 = phase.Elapsed.TotalMilliseconds;
-                payloadJson = JsonUtility.ToJson(state);
+                // FG15-SYS-02（DEBT-FG15SYS01-01）：按域并行，与整份序列化逐字节相同；后台存档把拼整串留给写盘线程（修复轮：主线程窗口少分配一份正文）
+                payloadLater = CampaignPayloadJson.SerializeDeferred(state, canVerify: !background);
+                payloadJson = background ? null : payloadLater();
                 double t1 = phase.Elapsed.TotalMilliseconds;
                 cardJson = JsonUtility.ToJson(BuildCard(state));
-                LastPrepareBreakdown = $"diffs {diffMs:F1} / sort {sortMs:F1} / payload json {t1 - t0:F1} / card {phase.Elapsed.TotalMilliseconds - t1:F1} ms"; // 只给自检与性能证据读
+                LastPrepareBreakdown = $"diffs {diffMs:F1} / sort {sortMs:F1} / payload json {t1 - t0:F1} / card {phase.Elapsed.TotalMilliseconds - t1:F1} ms / gc {GC.CollectionCount(0) - gc0} (heap {GC.GetTotalMemory(false) >> 20} MB)"; // 只给自检与性能证据读
             }
             catch (Exception e)
             {
@@ -732,6 +779,7 @@ namespace GameLogic.Campaign
                 Dir = dir,
                 CampaignId = state.CampaignId,
                 PayloadJson = payloadJson,
+                PayloadLater = payloadLater,
                 CardJson = cardJson,
                 Thumb = thumb,
                 Copy = IsCopy(slotIndex) ? SaveCopyKind.None : copy,
@@ -960,7 +1008,9 @@ namespace GameLogic.Campaign
         {
             lock (QueueLock)
             {
-                int i = WriteQueue.FindIndex(q => q.Slot == p.Slot && q.Copy == p.Copy && q.Reason != SaveReason.NewCampaign);
+                // 回滚基线（出发 / 到达）不被后来的快照取代：它必须落盘（中止时读回、到达前基线要复制）；文件操作不合并。
+                int i = p.DeletePath != null ? -1 : WriteQueue.FindIndex(q => q.Slot == p.Slot && q.Copy == p.Copy && q.Reason != SaveReason.NewCampaign
+                                                                          && q.Reason != SaveReason.ExpeditionDepartConfirm && q.DeletePath == null);
                 if (i >= 0)
                 {
                     // 旧的那份删掉、新快照排到队尾：不同副本类型交错排队时（自动 1、快速、自动 2），战役槽主档最后停在最新的一份
@@ -997,10 +1047,20 @@ namespace GameLogic.Campaign
                 {
                     Thread.Sleep(BackgroundDelayMsForTests);
                 }
+                if (p.DeletePath != null)
+                {
+                    TryDeleteQuiet(p.DeletePath);
+                    continue;
+                }
                 var sw = Stopwatch.StartNew();
                 try
                 {
+                    p.PayloadJson ??= p.PayloadLater(); // 先拼好：写盘失败时主线程回调的内存快照也要这一份
                     p.Result = Commit(p);
+                    if (p.Result.Success && p.CopyAfterTo != null)
+                    {
+                        File.Copy(SlotPathIn(p.Dir, p.Slot), p.CopyAfterTo, true);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -1018,6 +1078,21 @@ namespace GameLogic.Campaign
             WritesIdle.Wait();
         }
 
+        /// <summary>FG15-SYS-02：排在已排队的写入之后删除文件（到达前回滚基线用完；没有排队的写入就当场删）。</summary>
+        public static void DeleteAfterPendingWrites(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return;
+            }
+            if (PendingWrites == 0)
+            {
+                TryDeleteQuiet(path);
+                return;
+            }
+            Enqueue(new PreparedSave { Slot = int.MinValue, DeletePath = path });
+        }
+
         /// <summary>主线程每帧取走后台写盘结果：失败发一条提示（含原因），成功只计数。由 GameRoot.OnUpdate 调用。O(本帧完成数)。</summary>
         public static void PumpBackgroundResults()
         {
@@ -1029,11 +1104,25 @@ namespace GameLogic.Campaign
                 if (p.Result.Success)
                 {
                     BackgroundCommits++;
+                }
+                else
+                {
+                    BackgroundFailures++;
+                    TEngine.Log.Warning($"[CampaignSaveService] 后台存档写盘失败（槽位 {p.Slot}，{p.Reason}）：{p.Result.Outcome} {p.Result.Message}");
+                    Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, GameText.Format("save.background_failed", p.Result.Message ?? p.Result.Outcome.ToString()));
+                }
+                if (p.OnWritten == null)
+                {
                     continue;
                 }
-                BackgroundFailures++;
-                TEngine.Log.Warning($"[CampaignSaveService] 后台存档写盘失败（槽位 {p.Slot}，{p.Reason}）：{p.Result.Outcome} {p.Result.Message}");
-                Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, GameText.Format("save.background_failed", p.Result.Message ?? p.Result.Outcome.ToString()));
+                try
+                {
+                    p.OnWritten(p.Result, p.Result.Success ? null : new SaveSnapshot { Schema = p.Schema, PayloadJson = p.PayloadJson, CardJson = p.CardJson });
+                }
+                catch (Exception e)
+                {
+                    TEngine.Log.Error($"[CampaignSaveService] 写盘完成回调异常（槽位 {p.Slot}，{p.Reason}）：{e}");
+                }
             }
         }
 
@@ -1251,7 +1340,6 @@ namespace GameLogic.Campaign
             var lw = Stopwatch.StartNew();
             FileProbe probe = Probe(mainPath);
             LastLoadProbeMs = lw.Elapsed.TotalMilliseconds;
-            SaveMigrationChain chain = CampaignSaveMigrations.Active;
 
             switch (probe.Kind)
             {
@@ -1274,7 +1362,29 @@ namespace GameLogic.Campaign
                     return new LoadResult(LoadOutcome.Corrupt, null, probe.Message, probe.Reason, probe.SchemaVersion);
             }
 
-            CampaignSaveEnvelope envelope = probe.Envelope;
+            LoadResult loaded = LoadEnvelope(slotIndex, probe.Envelope, fromFile: true);
+            if (loaded.Success)
+            {
+                CampaignPayloadJson.VerifyOnce(loaded.State); // 本进程第一次读档时比对并行正文序列化（读档本来就阻塞），之后的后台存档才用并行版
+            }
+            return loaded;
+        }
+
+        /// <summary>FG15-SYS-02（DEBT-FG15SYS01-05）：从内存里的回滚基线快照读回（后台写盘失败时中止出发 / 到达用），之后与读档走同一段流程；
+        /// 不登记读档失败、不标记主档（槽位文件可能不是这份快照）。</summary>
+        internal static LoadResult LoadSnapshot(int slotIndex, SaveSnapshot snap)
+        {
+            if (snap == null || string.IsNullOrEmpty(snap.PayloadJson))
+            {
+                return new LoadResult(LoadOutcome.Empty, null, GameText.Get("save.svc.the_save_does_not"));
+            }
+            return LoadEnvelope(slotIndex, new CampaignSaveEnvelope { SchemaVersion = snap.Schema, ContentVersion = CurrentContentVersion, PayloadJson = snap.PayloadJson, CardJson = snap.CardJson }, fromFile: false);
+        }
+
+        private static LoadResult LoadEnvelope(int slotIndex, CampaignSaveEnvelope envelope, bool fromFile)
+        {
+            string mainPath = SlotPath(slotIndex);
+            SaveMigrationChain chain = CampaignSaveMigrations.Active;
             string payload = envelope.PayloadJson;
             if (envelope.SchemaVersion < chain.TargetVersion)
             {
@@ -1283,7 +1393,7 @@ namespace GameLogic.Campaign
                 {
                     bool missing = run.Outcome == SaveMigrationOutcome.Missing || run.Outcome == SaveMigrationOutcome.OutOfRange;
                     TEngine.Log.Warning($"[CampaignSaveService] 槽位 {slotIndex} 升级失败：{run.Message}（原文件未改动）");
-                    RecordLoadFailure(slotIndex, missing ? SaveFailureReason.MigrationMissing : SaveFailureReason.MigrationFailed, envelope.SchemaVersion);
+                    if (fromFile) RecordLoadFailure(slotIndex, missing ? SaveFailureReason.MigrationMissing : SaveFailureReason.MigrationFailed, envelope.SchemaVersion);
                     return new LoadResult(missing ? LoadOutcome.Incompatible : LoadOutcome.Corrupt, null, run.Message,
                         missing ? SaveFailureReason.MigrationMissing : SaveFailureReason.MigrationFailed,
                         envelope.SchemaVersion, run.FailedFromVersion);
@@ -1300,13 +1410,13 @@ namespace GameLogic.Campaign
             }
             catch (Exception e)
             {
-                RecordLoadFailure(slotIndex, SaveFailureReason.Payload, envelope.SchemaVersion);
+                if (fromFile) RecordLoadFailure(slotIndex, SaveFailureReason.Payload, envelope.SchemaVersion);
                 return new LoadResult(LoadOutcome.Corrupt, null, GameText.Format("save.svc.could_not_parse_the", e.Message), SaveFailureReason.Payload, envelope.SchemaVersion);
             }
 
             if (state == null)
             {
-                RecordLoadFailure(slotIndex, SaveFailureReason.Payload, envelope.SchemaVersion);
+                if (fromFile) RecordLoadFailure(slotIndex, SaveFailureReason.Payload, envelope.SchemaVersion);
                 return new LoadResult(LoadOutcome.Corrupt, null, GameText.Get("save.svc.the_save_content_deserialized"), SaveFailureReason.Payload, envelope.SchemaVersion);
             }
 
@@ -1319,7 +1429,7 @@ namespace GameLogic.Campaign
             if (!WorldGen.WorldGenService.ValidateForLoad(state, out SaveFailureReason worldReason, out string worldMessage))
             {
                 TEngine.Log.Warning($"[CampaignSaveService] 槽位 {slotIndex} 世界数据无法恢复：{worldMessage}（原文件未改动）");
-                RecordLoadFailure(slotIndex, worldReason, envelope.SchemaVersion);
+                if (fromFile) RecordLoadFailure(slotIndex, worldReason, envelope.SchemaVersion);
                 return new LoadResult(worldReason == SaveFailureReason.Newer ? LoadOutcome.Incompatible : LoadOutcome.Corrupt, null, worldMessage,
                     worldReason, envelope.SchemaVersion);
             }
@@ -1370,7 +1480,11 @@ namespace GameLogic.Campaign
             {
                 TEngine.Log.Error($"[CampaignSaveService] 槽位 {slotIndex} 暴露规则迁移 / 加密固件补发异常，原样保留：{e}");
             }
-            if (envelope.SchemaVersion == chain.TargetVersion)
+            if (!fromFile)
+            {
+                // 内存快照：不碰主档的读档记录
+            }
+            else if (envelope.SchemaVersion == chain.TargetVersion)
             {
                 MarkKnownGoodMain(mainPath); // 完整校验过的当前格式主档：之后的常规存档不必再整份校验它
             }
@@ -1784,7 +1898,9 @@ namespace GameLogic.Campaign
                 return p;
             }
 
+            var cw = Stopwatch.StartNew();
             string checksum = ComputeChecksum(env.PayloadJson, env.CardJson);
+            LastLoadChecksumMs = cw.Elapsed.TotalMilliseconds;
             if (!string.Equals(checksum, env.Checksum, StringComparison.OrdinalIgnoreCase))
             {
                 return Bad(p, SaveFailureReason.Checksum, GameText.Get("save.svc.checksum_mismatch_the_save"));
@@ -1842,11 +1958,23 @@ namespace GameLogic.Campaign
             }
         }
 
-        /// <summary>校验和 = SHA256(正文 + \0 + 卡片)。自检构造"真实格式"的测试存档时也用它。</summary>
+        /// <summary>校验和 = SHA256(UTF-8(正文 + \0 + 卡片))。自检构造"真实格式"的测试存档时也用它。
+        /// FG15-SYS-02（DEBT-FG15SYS01-04）：按 16K 字符分块编码、逐块喂 Burst 版 SHA-256（BinGames.Sim.BurstSha256，任意线程可用；托管 SHA256 在 Editor 只有约 37 MB/s），
+        /// 不再拼接整份正文再整份转字节（2.3 MB 存档省掉约 7 MB 临时分配）；
+        /// 字节序列与原写法逐字节相同（UTF-8 编码器跨块保留代理对状态），校验和不变——FgSaveRobustSelfCheck K 段对照原写法断言。</summary>
         public static string ComputeChecksum(string payload, string cardJson)
         {
-            using SHA256 sha = SHA256.Create();
-            byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes((payload ?? string.Empty) + "\0" + (cardJson ?? string.Empty)));
+            var sha = new BinGames.Sim.BurstSha256.State();
+            BinGames.Sim.BurstSha256.Init(ref sha);
+            Encoder enc = Encoding.UTF8.GetEncoder();
+            var chars = new char[ChecksumChunkChars];
+            var bytes = new byte[Encoding.UTF8.GetMaxByteCount(ChecksumChunkChars)];
+            HashUtf8(ref sha, enc, payload ?? string.Empty, chars, bytes, false);
+            chars[0] = '\0';
+            int nul = enc.GetBytes(chars, 0, 1, bytes, 0, false);
+            BinGames.Sim.BurstSha256.Update(ref sha, bytes, 0, nul);
+            HashUtf8(ref sha, enc, cardJson ?? string.Empty, chars, bytes, true);
+            byte[] hash = BinGames.Sim.BurstSha256.Final(ref sha);
             var sb = new StringBuilder(hash.Length * 2);
             foreach (byte b in hash)
             {

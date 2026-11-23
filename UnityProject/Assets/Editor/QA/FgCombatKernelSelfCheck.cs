@@ -2172,9 +2172,13 @@ namespace GameLogic.EditorTools
                 int minEnemies = int.MaxValue;
                 int minTurrets = int.MaxValue;
                 int maxEvents = 0;
-                long allocBefore = GC.GetAllocatedBytesForCurrentThread();
-                for (int i = 0; i < 600; i++)
+                // FG15-SYS-02（DEBT-FGTOOL01-02）：原来用 GC.GetAllocatedBytesForCurrentThread（Unity Mono 恒为 0，断言形同虚设）；改成 4 个 150 步窗口的进程级堆增量取最小，阈值按步数折算（64 KB / 600 步 = 16 KB / 150 步）
+                int iStep = 0;
+                long alloc = PerfGate.MinWindowAlloc(() =>
                 {
+                for (int w = 0; w < 150; w++, iStep++)
+                {
+                    int i = iStep;
                     site.Step(Dt, t);
                     t += Dt;
                     stepMs.Add(site.LastKernelMs);
@@ -2190,7 +2194,7 @@ namespace GameLogic.EditorTools
                         minTurrets = Math.Min(minTurrets, site.Kernel.CountAlive(CombatFaction.Player, CombatUnitKind.Turret));
                     }
                 }
-                long alloc = GC.GetAllocatedBytesForCurrentThread() - allocBefore;
+                }, 4, out string allocWindows);
                 stepMs.Sort();
                 double avg = stepMs.Average();
                 double p95 = stepMs[(int)(stepMs.Count * 0.95)];
@@ -2207,14 +2211,14 @@ namespace GameLogic.EditorTools
                 int instancedAlive = site.Kernel.CountAlive(CombatFaction.Hostile) + site.Kernel.CountAlive(CombatFaction.Player, CombatUnitKind.Turret);
                 PerfLines.Add($"性能场景（{enemies} 突袭者 + {turretCount} 炮塔）：测量 600 步里弹体同时存在 {minProj}～{maxProj} 枚（平均 {projSum / 600}），敌人最少 {minEnemies}、炮塔最少 {minTurrets}；" +
                               $"内核单步 平均 {avg:F3} ms / p95 {p95:F3} ms / 最大 {max:F3} ms（预算 {budget} ms）；热更层事件处理平均 {avgEvents:F4} ms/步、每步至多 {maxEvents} 条；" +
-                              $"600 步托管分配 {alloc} 字节；渲染缓冲重填 {prepMs:F3} ms（单位 {drawnUnits}、弹体 {drawnProj}）");
+                              $"600 步托管分配（4 个 150 步窗口取最小）{alloc} 字节（各窗口 {allocWindows}）；渲染缓冲重填 {prepMs:F3} ms（单位 {drawnUnits}、弹体 {drawnProj}）");
                 Expect(minProj >= minProjectiles && minEnemies >= enemies * 0.9 && minTurrets >= turretCount * 0.9,
                     $"规模达标：测量窗口内弹体始终 ≥ {minProjectiles}（最少 {minProj}），敌人 ≥ {enemies * 0.9:F0}（{minEnemies}）、炮塔 ≥ {turretCount * 0.9:F0}（{minTurrets}）同时在场");
                 ExpectPerf(true,
                     $"内核单步平均 {avg:F3} ms、p95 {p95:F3} ms ≤ {budget} ms（Editor Burst，本机 {SystemInfo.processorType}；推荐配置 i5-10400 的换算见 ADR）",
                     PerfGate.Le(avg, budget, "内核单步平均 ms"), PerfGate.Le(p95, budget, "内核单步 p95 ms"));
-                Expect(maxEvents <= site.MaxEventsPerStep + site.Kernel.Config.MaxCueEventsPerStep && alloc < 64 * 1024,
-                    $"热更层每步事件数有上限（至多 {maxEvents} 条 ≤ 玩法 {site.MaxEventsPerStep} + 提示 {site.Kernel.Config.MaxCueEventsPerStep}），600 步托管分配 {alloc / 1024.0:F1} KB（稳态接近 0）");
+                Expect(maxEvents <= site.MaxEventsPerStep + site.Kernel.Config.MaxCueEventsPerStep && alloc < 16 * 1024,
+                    $"热更层每步事件数有上限（至多 {maxEvents} 条 ≤ 玩法 {site.MaxEventsPerStep} + 提示 {site.Kernel.Config.MaxCueEventsPerStep}），150 步托管分配（4 个窗口取最小，进程级堆增量）{alloc / 1024.0:F1} KB（阈值 16 KB = 原 64 KB / 600 步；稳态接近 0）");
                 Expect(drawnUnits == instancedAlive && drawnProj == site.Kernel.ProjectileCount,
                     $"实例化渲染缓冲 = 内核状态：单位 {drawnUnits} = 存活 {instancedAlive}，弹体 {drawnProj} = {site.Kernel.ProjectileCount}");
             }

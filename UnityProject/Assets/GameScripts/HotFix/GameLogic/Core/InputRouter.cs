@@ -486,7 +486,7 @@ namespace GameLogic.Core
             }
             KeyCode key = KeyCode.Mouse0 + physical;
             bool held = Settings.GameSettings.HoldActionsToggle ? Latched(GameActionId.SecondaryAction, key) : RawKeyHeld(key);
-            Ray ray = camera.ScreenPointToRay(Reader.MousePosition);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(camera, Reader.MousePosition);
             if (!held || !new Plane(Vector3.up, Vector3.zero).Raycast(ray, out float enter))
             {
                 return Vector2.zero;

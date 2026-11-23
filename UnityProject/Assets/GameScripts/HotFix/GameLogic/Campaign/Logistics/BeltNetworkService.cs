@@ -980,8 +980,13 @@ namespace GameLogic.Campaign.Logistics
         /// 传送带从内核移除，原位置留保留朝向、等级、节点设置的虚影，排给常驻规则），但：存档受损表只压缩一次、传送带虚影数组只追加一次、地面物与搬运单各追加一次、
         /// 常驻规则事件只追加一次、通知合并成一条（只有一格时照旧发逐格那条）。O(本批格数 + 受损表 + 地面物 + 工单)，不再随格数平方增长。
         /// </summary>
+        /// <summary>FG15-SYS-02 修复轮 2 探针（只在自检打开时记，不改行为）：最近一次整批摧毁各段耗时。</summary>
+        public static bool TraceDestroyForTests;
+        public static string LastDestroySplit { get; private set; } = string.Empty;
+
         private static void DestroyCells(CampaignState state, List<GridCell> cells, List<BeltCellInfo> infos, List<GridCell> destroyed)
         {
+            long p0 = TraceDestroyForTests ? System.Diagnostics.Stopwatch.GetTimestamp() : 0, p1 = p0, p2 = p0, p3 = p0, p4 = p0, p5 = p0;
             HomeGridMap map = HomeGridService.MapFor(state);
             var clear = new HashSet<GridCell>();
             var drops = new List<Regions.HomeValleyConstruction.HaulDrop>();
@@ -1009,6 +1014,7 @@ namespace GameLogic.Campaign.Logistics
                 isNodes[i] = kinds[i] != BeltNodeKind.Belt && _kernel.TryGetNodeInfo(cells[i].X, cells[i].Y, out nodes[i]);
                 unders[i] = _kernel.TryGetUndergroundEnds(cells[i].X, cells[i].Y, out ents[i], out exis[i], out _);
             }
+            p1 = TraceDestroyForTests ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
             for (int i = 0; i < m; i++)
             {
                 GridCell cell = cells[i];
@@ -1073,6 +1079,7 @@ namespace GameLogic.Campaign.Logistics
             {
                 return;
             }
+            p2 = TraceDestroyForTests ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
             // 耐久记录：这批格（地下传送带两端）一起删，存档受损表压缩一次。
             foreach (GridCell c in clear)
             {
@@ -1095,10 +1102,19 @@ namespace GameLogic.Campaign.Logistics
                 b.Damage = keep.ToArray();
                 _damageRecsRef = b.Damage;
             }
+            p3 = TraceDestroyForTests ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
             Regions.HomeValleyConstruction.DropForHaulBatch(state, drops);
+            p4 = TraceDestroyForTests ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
             Regions.HomeValleyConstruction.AddDestroyedBeltGhosts(state, ghostCells, ghostDirs, ghostTiers, ghostIds);
+            p5 = TraceDestroyForTests ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
             // FG6-DEF-03（FGR-DEF-015）：排给常驻规则（开着的自动重建规则覆盖这些格时，下一个模拟步按原设置派施工单；没有玩家开的规则就只留虚影）。
             Economy.StandingRuleService.OnBeltGhosts(state, ghostIds);
+            if (TraceDestroyForTests)
+            {
+                double f = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                long p6 = System.Diagnostics.Stopwatch.GetTimestamp();
+                LastDestroySplit = $"摧毁 {done} 格：读格 {(p1 - p0) * f:F2} / 拆格 {(p2 - p1) * f:F2} / 受损表 {(p3 - p2) * f:F2} / 落地开单 {(p4 - p3) * f:F2} / 虚影 {(p5 - p4) * f:F2} / 规则 {(p6 - p5) * f:F2}"; // loc-ignore: 开发者自检 / 诊断文本
+            }
             LastDestroyedItems = done == 1 ? lastItems : totalItems;
             DestroyedCount += done;
             GuidanceHooks.Raise(GuidanceHooks.LogisticsFirstDestroyed);

@@ -1536,7 +1536,7 @@ namespace GameLogic.Campaign.Regions
 
         private static bool TryPointerCell(Camera camera, Vector3 screen, out GridCell cell)
         {
-            Ray ray = camera.ScreenPointToRay(screen);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(camera, screen);
             cell = default;
             if (Mathf.Abs(ray.direction.y) < 1e-4f)
             {
@@ -1941,6 +1941,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             _root = new GameObject("[BuildMode]");
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero); // FG15-SYS-02：根物体放在世界原点的画面位置（子物体用世界坐标作局部坐标）
             Shader unlit = Shader.Find("Sprites/Default");
             _okMaterial = new Material(unlit) { color = new Color(0.25f, 0.85f, 0.35f, 0.55f) };
             _badMaterial = new Material(unlit) { color = new Color(0.95f, 0.2f, 0.15f, 0.6f) };
@@ -2044,7 +2045,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         bar.localScale = new Vector3(1.4f, 0.15f, 0.3f);
                     }
-                    _cross.transform.position = new Vector3(shown.Cells[0].X, 0.6f, shown.Cells[0].Y);
+                    _cross.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(shown.Cells[0].X, 0.6f, shown.Cells[0].Y));
                 }
             }
             else if (BeltPlan != null)
@@ -2080,7 +2081,7 @@ namespace GameLogic.Campaign.Regions
                     {
                         bar.localScale = new Vector3(1.4f, 0.15f, 0.3f);
                     }
-                    _cross.transform.position = new Vector3(bad.X, 0.6f, bad.Y);
+                    _cross.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(bad.X, 0.6f, bad.Y));
                 }
             }
             else if (WallPlan != null)
@@ -2142,7 +2143,7 @@ namespace GameLogic.Campaign.Regions
                             bar.localScale = new Vector3(len, 0.15f, 0.35f);
                         }
                     }
-                    _cross.transform.position = new Vector3(c.x, 0.6f, c.y);
+                    _cross.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(c.x, 0.6f, c.y));
                 }
                 HomeGridService.PortsFor(Preview.TypeId, Preview.Pivot, Preview.Rotation, _ports);
                 foreach (PortPlacement p in _ports)
@@ -2222,7 +2223,7 @@ namespace GameLogic.Campaign.Regions
             }
             GameObject e = _boxEdges[i];
             e.SetActive(true);
-            e.transform.position = center;
+            e.transform.position = BinGames.Sim.ViewOrigin.ToView(center);
             e.transform.localScale = scale;
         }
 
@@ -2236,7 +2237,7 @@ namespace GameLogic.Campaign.Regions
             }
             GameObject go = _tiles[index];
             go.SetActive(true);
-            go.transform.position = new Vector3(cell.X, height, cell.Y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(cell.X, height, cell.Y));
             go.transform.localScale = new Vector3(0.9f, 0.08f, 0.9f); // FG3-LOG-04：地下段的小方块会改尺寸，池化复用时先复原。
             Renderer r = go.GetComponent<Renderer>();
             if (r.sharedMaterial != material)
@@ -2263,7 +2264,7 @@ namespace GameLogic.Campaign.Regions
             Vector3 origin = new Vector3(port.Cell.X + d.x * 0.5f, 2.4f, port.Cell.Y + d.y * 0.5f);
             Vector3 dir = new Vector3(d.x, 0f, d.y) * (port.IsOutput ? 1f : -1f);
             Vector3 start = port.IsOutput ? origin : origin - dir * length;
-            go.transform.position = start;
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(start);
             go.transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
             Transform shaft = go.transform.Find("Shaft");
             Transform head = go.transform.Find("Head");

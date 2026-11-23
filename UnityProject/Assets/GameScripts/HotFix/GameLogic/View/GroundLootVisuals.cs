@@ -124,13 +124,13 @@ namespace GameLogic.View
             _live.Add(id);
             if (_views.TryGetValue(id, out Transform t) && t != null)
             {
-                t.position = at;
+                t.position = BinGames.Sim.ViewOrigin.ToView(at);
                 return false;
             }
             GameObject go = GameObject.CreatePrimitive(shape);
             go.name = id;
             go.transform.SetParent(root, false);
-            go.transform.position = at;
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(at);
             go.transform.localScale = scale;
             go.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(color);
             UnityObjects.Release(go.GetComponent<Collider>());

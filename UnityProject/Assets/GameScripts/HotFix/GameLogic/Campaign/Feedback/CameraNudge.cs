@@ -52,7 +52,7 @@ namespace GameLogic.Campaign.Feedback
                 _active = false;
                 return Vector3.zero;
             }
-            Vector3 dir = OffsetDirection(camera.position, camera.forward, _target);
+            Vector3 dir = OffsetDirection(BinGames.Sim.ViewOrigin.ToWorld(camera.position), camera.forward, _target);
             float envelope = Mathf.Sin(Mathf.PI * Mathf.Clamp01(_elapsed / _duration));
             return dir * (orthographicSize * _fraction * envelope);
         }

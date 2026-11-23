@@ -494,11 +494,18 @@ namespace GameLogic.EditorTools
 
         private static int NeedOf(CombatKernel k) => k.Config.EmgExtremeCount > 0 ? k.Config.EmgExtremeCount : EmgConst.DefaultExtremeCount;
 
-        private static void TallyRules(CombatKernel k, int chain, int src, int key, int n, byte depth = 0)
+        private static void TallyRules(CombatKernel k, int chain, int src, int key, int n, byte depth = 0, bool jobCopy = false)
         {
             for (int i = 0; i < n; i++)
             {
-                k.EmgChainLogForTests(EmgChainNode.Rule, chain, src, 0, 0, key, depth);
+                if (jobCopy)
+                {
+                    k.EmgChainLogOnJobCopyForTests(EmgChainNode.Rule, chain, src, key, depth);
+                }
+                else
+                {
+                    k.EmgChainLogForTests(EmgChainNode.Rule, chain, src, 0, 0, key, depth);
+                }
             }
         }
 
@@ -592,8 +599,41 @@ namespace GameLogic.EditorTools
                 $"T2 D7 敌方链被新链挤格（链 {enemy} 与 {mine} 同格）：敌方旧链在新链之后回来结算 {need + 2} 次、链深 3 → 不记、不发技术数据；"
                 + $"新链的计数没被旧链清掉，再 1 次即到门槛记极限（+{s.TechData - tech0}）");
             string line = site.EmgPatchDebugLine();
-            Expect(dropped == need + 2 && line.Contains("极限计数冲突丢弃 " + k.PatchStats.TallyEvicted),
-                $"T3 冲突丢弃计数可见：旧链这 {need + 2} 次结算没计、TallyEvicted +{dropped}，调试层一行写着（…{line.Substring(Math.Max(0, line.Length - 24))}）");
+            bool parked = k.TryGetTallyOverForTests(enemy, out int4 ov) && (ov.z & EmgConst.TallyExtremeBit) != 0;
+            Expect(dropped == 0 && parked && line.Contains("极限计数冲突丢弃 " + k.PatchStats.TallyEvicted),
+                $"T3 FG15-SYS-02（DEBT-EMGRTALLY01-01）被挤格的旧链带着封印进溢出表（{parked}）：旧链这 {need + 2} 次结算不再丢弃（+{dropped}），仍按封印不记；丢弃计数照样在调试层一行（…{line.Substring(Math.Max(0, line.Length - 24))}）");
+        }
+
+        /// <summary>FG15-SYS-02（DEBT-EMGRTALLY01-01）T7b 负向：溢出表满（8192 行）时丢掉链号较小的一半、记下丢弃下限；被丢的旧链再来按丢弃计数、不误发；
+        /// 溢出表与下限随快照段 33（格式 27）往返逐位一致，旧格式 26 不写这两部分。</summary>
+        private static void CheckTallyOverflowFull(int need, int key)
+        {
+            using CombatKernel k = TallyKernel(out int me, out _);
+            int total = EmgConst.ChainTally + EmgConst.ChainTallyOverflow + 1, first = 0, lastOld = 0;
+            for (int i = 0; i < total; i++)
+            {
+                int c = k.EmgIssueChainForTests();
+                first = i == 0 ? c : first;
+                lastOld = i == EmgConst.ChainTallyOverflow ? c : lastOld;
+                k.EmgChainLogOnJobCopyForTests(EmgChainNode.Shot, c, me); // 修复轮 2：像内核一步那样写在 CombatData 副本上——丢弃下限是值字段时带不回主线程（审查 P1）
+                TallyRules(k, c, me, key, 1, 0, true);
+            }
+            int over = k.EmgTallyOverCount, dropMax = k.EmgTallyDropMaxForTests;
+            byte[] snap = k.Serialize(), v26 = k.SerializeFormatForTests(26);
+            using var kr = new CombatKernel(k.Config, 64);
+            bool round = kr.Load(snap) == CombatLoadResult.Ok && kr.EmgTallyOverCount == over && kr.EmgTallyDropMaxForTests == dropMax
+                         && kr.EmgChainTallyForTests().SequenceEqual(k.EmgChainTallyForTests()) && kr.Serialize().SequenceEqual(snap);
+            using var k26 = new CombatKernel(k.Config, 64);
+            bool old = k26.Load(v26) == CombatLoadResult.Ok && k26.EmgTallyOverCount == 0 && k26.EmgTallyDropMaxForTests == 0;
+            int ev0 = k.PatchStats.TallyEvicted;
+            TallyRules(k, first, me, key, need + 2, 3, true); // 最早那条：已随溢出表满被丢掉
+            int dropped = k.PatchStats.TallyEvicted - ev0;
+            KStep(k);
+            int rows = k.EmgExtremeRows;
+            bool kept = k.TryGetTallyOverForTests(lastOld, out int4 row) && row.y == 1;
+            Expect(over > 0 && over <= EmgConst.ChainTallyOverflow && dropMax >= first && dropMax < lastOld && kept && dropped == need + 2 && rows == 0 && round && old,
+                $"T7b 负向 溢出表满（{total} 条链各结算 1 次）：溢出表 {over} 行（容量 {EmgConst.ChainTallyOverflow}），丢弃下限 {dropMax}（较新的旧链 {lastOld} 仍在，{kept}）；"
+                + $"被丢的最早一条再结算 {need + 2} 次按丢弃计数（+{dropped}）、误发 {rows} 条（填表与再结算都写在内核步同样的 CombatData 副本上，下限带回主线程）；快照往返（溢出表 + 下限，格式 27）逐位一致 {round}，格式 26 不写这两部分 {old}");
         }
 
         private static void CheckTallySnapshot()
@@ -720,10 +760,11 @@ namespace GameLogic.EditorTools
             TallyRules(k, chains[last], me, key, 1);
             KStep(k);
             int rowsNew = k.EmgExtremeRows;
-            Expect(fullRows == EmgConst.ChainTally && fullRound && SlotOfChain(chains[last]) == SlotOfChain(chains[0]) && dropped == need && rowsOld == 0 && rowsNew == 1
-                   && segBytes == 14 + 16 * EmgConst.ChainTally,
-                $"T7 负向 计数表满（{fullRows} 行，每内核 {full.Length * 16 / 1024} KB，原 256 格 4 KB）：整表存读档逐位一致，快照段 33 = {segBytes} B（14 B 段头 + 4096 × 16 B）；"
-                + $"第 4097 条链挤掉第 1 条，第 1 条再结算 {need} 次没计（丢弃 +{dropped}，误发 {rowsOld} 条），新链照常记极限（{rowsNew} 条）");
+            Expect(fullRows == EmgConst.ChainTally && fullRound && SlotOfChain(chains[last]) == SlotOfChain(chains[0]) && dropped == 0 && rowsOld == 1 && rowsNew == 1
+                   && segBytes == 14 + 16 * EmgConst.ChainTally && k.EmgTallyOverCount == 1,
+                $"T7 负向 计数表满（{fullRows} 行，每内核 {full.Length * 16 / 1024} KB）：整表存读档逐位一致，快照段 33 = {segBytes} B（14 B 段头 + 4096 × 16 B）；"
+                + $"第 4097 条链挤掉第 1 条，第 1 条进溢出表（{k.EmgTallyOverCount} 行）、再结算 {need} 次照常计到门槛记极限（{rowsOld} 条，丢弃 +{dropped}；FG15-SYS-02 之前这里会丢），新链照常记极限（{rowsNew} 条）");
+            CheckTallyOverflowFull(need, key);
 
             // 链号回绕：c、c + 4096、c + 8192 落同一格——更大的链号占格，更小的来者丢弃计数、不清掉大链号的计数
             using CombatKernel w = TallyKernel(out int wm, out _);
@@ -746,8 +787,9 @@ namespace GameLogic.EditorTools
             TallyRules(w, c2, wm, key, 1);
             KStep(w);
             int r8b = w.EmgExtremeRows;
-            Expect(c1 > 0 && c2 > 0 && SlotOfChain(c1) == SlotOfChain(c0) && SlotOfChain(c2) == SlotOfChain(c0) && dr == 2 * need && slot.x == c2 && slot.y == need - 1 && r8a == 0 && r8b == 1,
-                $"T8 负向 链号回绕（{c0} / {c1} / {c2} 同格）：{c2} 占格后 {c1}、{c0} 各结算 {need} 次都丢弃（+{dr}）、不清 {c2} 的计数（{slot.y} 次），{c2} 再 1 次即记（{r8b} 条），误发 {r8a} 条");
+            Expect(c1 > 0 && c2 > 0 && SlotOfChain(c1) == SlotOfChain(c0) && SlotOfChain(c2) == SlotOfChain(c0) && dr == 0 && slot.x == c2 && slot.y == need - 1 && r8a == 2 && r8b == 1,
+                $"T8 负向 链号回绕（{c0} / {c1} / {c2} 同格）：{c2} 占格后 {c0}（带着 3 次进溢出表）与从没登记过的 {c1}（溢出表新开一行）各结算 {need} 次都照常记极限（{r8a} 条，丢弃 +{dr}），"
+                + $"不清 {c2} 的计数（{slot.y} 次），{c2} 再 1 次即记（{r8b} 条）");
 
             // 同一步同一条链多次结算：只记一次、封印后不再累计
             int s9 = w.EmgIssueChainForTests();

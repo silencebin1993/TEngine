@@ -72,8 +72,8 @@ namespace GameLogic.View
                 lr.widthMultiplier = 0.12f;
                 lr.sharedMaterial = ViewMaterials.Get("Sprites/Default", new Color(0.4f, 1f, 0.55f, 0.85f));
                 lr.positionCount = 2;
-                lr.SetPosition(0, new Vector3(pos.x, 1.2f, pos.y));
-                lr.SetPosition(1, new Vector3(target.x, Height, target.y));
+                lr.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(pos.x, 1.2f, pos.y)));
+                lr.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(target.x, Height, target.y)));
                 lr.enabled = true;
             }
             for (int i = used; i < Beams.Count; i++)
@@ -113,10 +113,10 @@ namespace GameLogic.View
                     lr.sharedMaterial = ViewMaterials.Get("Sprites/Default", z.Enabled ? new Color(0.35f, 0.9f, 0.45f, 0.85f) : new Color(0.6f, 0.6f, 0.62f, 0.6f));
                     lr.positionCount = 4;
                     float x0 = z.X0 - 0.5f, x1 = z.X1 + 0.5f, y0 = z.Y0 - 0.5f, y1 = z.Y1 + 0.5f;
-                    lr.SetPosition(0, new Vector3(x0, Height, y0));
-                    lr.SetPosition(1, new Vector3(x1, Height, y0));
-                    lr.SetPosition(2, new Vector3(x1, Height, y1));
-                    lr.SetPosition(3, new Vector3(x0, Height, y1));
+                    lr.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(x0, Height, y0)));
+                    lr.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(x1, Height, y0)));
+                    lr.SetPosition(2, BinGames.Sim.ViewOrigin.ToView(new Vector3(x1, Height, y1)));
+                    lr.SetPosition(3, BinGames.Sim.ViewOrigin.ToView(new Vector3(x0, Height, y1)));
                     lr.enabled = true;
                     on += z.Enabled ? 1 : 0;
                 }
@@ -173,7 +173,7 @@ namespace GameLogic.View
                 for (int i = 0; i < n; i++)
                 {
                     float a = i * Mathf.PI * 2f / n;
-                    _range.SetPosition(i, new Vector3(center.x + Mathf.Cos(a) * radius, Height, center.y + Mathf.Sin(a) * radius));
+                    _range.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(center.x + Mathf.Cos(a) * radius, Height, center.y + Mathf.Sin(a) * radius)));
                 }
             }
             _range.enabled = true;

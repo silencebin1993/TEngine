@@ -247,7 +247,7 @@ namespace BinGames.Sim.Combat
                 {
                     continue;
                 }
-                d.Pos[i] = ClampInto(d.Pos[i], lo, hi, d.Radius[i]);
+                d.Pos[i] = ClampInto(d.Pos[i], lo, hi, d.Radius[i]); d.PosEpoch++;
             }
             for (int k = 0; k < d.Drones.Length; k++)
             {
@@ -326,7 +326,7 @@ namespace BinGames.Sim.Combat
                     CombatScalars s = d.Scalars[0];
                     p.y = math.clamp(p.y, s.DirectMinY, s.DirectMaxY);
                     // FG0-ARCH-06：星球格网上直控也不能穿过悬崖、水和建筑（贴着边滑动）。
-                    d.Pos[i] = MoveCollide(ref d, i, p0, p);
+                    d.Pos[i] = MoveCollide(ref d, i, p0, p); d.PosEpoch++;
                 }
                 return;
             }
@@ -443,7 +443,7 @@ namespace BinGames.Sim.Combat
                 double2 to = cmd.Pos - pos;
                 if (math.lengthsq(to) <= (double)cmd.Arrive * cmd.Arrive)
                 {
-                    d.Pos[i] = cmd.Pos;
+                    d.Pos[i] = cmd.Pos; d.PosEpoch++;
                     reason = CombatEndReason.Arrived;
                     return true;
                 }
@@ -452,7 +452,7 @@ namespace BinGames.Sim.Combat
                 {
                     stepW = to;
                 }
-                d.Pos[i] = pos + stepW;
+                d.Pos[i] = pos + stepW; d.PosEpoch++;
                 return false;
             }
 
@@ -711,7 +711,7 @@ namespace BinGames.Sim.Combat
             {
                 step = toTarget;
             }
-            d.Pos[i] = MoveCollide(ref d, i, pos, pos + step);
+            d.Pos[i] = MoveCollide(ref d, i, pos, pos + step); d.PosEpoch++;
             return blocked;
         }
 
@@ -1029,7 +1029,7 @@ namespace BinGames.Sim.Combat
                     double2 proposed = pos + math.normalize(away) * (SlowedSpeed(ref d, i, p.Speed) * dt);
                     if (math.distance(proposed, spawn) <= p.Leash)
                     {
-                        d.Pos[i] = proposed;
+                        d.Pos[i] = proposed; d.PosEpoch++;
                     }
                 }
             }
@@ -1042,7 +1042,7 @@ namespace BinGames.Sim.Combat
                 if (math.lengthsq(to) > 0.01)
                 {
                     double len = math.length(to);
-                    d.Pos[i] = pos + to / len * math.min(SlowedSpeed(ref d, i, p.Speed) * dt, len);
+                    d.Pos[i] = pos + to / len * math.min(SlowedSpeed(ref d, i, p.Speed) * dt, len); d.PosEpoch++;
                 }
             }
 
@@ -1119,7 +1119,7 @@ namespace BinGames.Sim.Combat
                     double2 proposed = pos + math.normalize(away) * (p.Speed * dt);
                     if (math.distance(proposed, d.Home[i]) <= p.Leash)
                     {
-                        d.Pos[i] = proposed;
+                        d.Pos[i] = proposed; d.PosEpoch++;
                     }
                 }
                 return;
@@ -1155,7 +1155,7 @@ namespace BinGames.Sim.Combat
                     if (math.lengthsq(to) > 0.0001)
                     {
                         double len = math.length(to);
-                        d.Pos[i] = pos + to / len * math.min(p.Speed * dt, len);
+                        d.Pos[i] = pos + to / len * math.min(p.Speed * dt, len); d.PosEpoch++;
                     }
                 }
                 return;
@@ -1343,7 +1343,7 @@ namespace BinGames.Sim.Combat
             {
                 return;
             }
-            d.Pos[i] = MoveCollide(ref d, i, pos, pos + to / len * math.min(stepLen, len - stopAt));
+            d.Pos[i] = MoveCollide(ref d, i, pos, pos + to / len * math.min(stepLen, len - stopAt)); d.PosEpoch++;
         }
 
         /// <summary>单位主动攻击（驻守开火 / 瞄准线 / 突袭者 / 炮塔）：弹体武器生成弹体，其余即时命中。</summary>
@@ -2855,7 +2855,7 @@ namespace BinGames.Sim.Combat
             }
             d.RouteIdx[i] = idx;
             double2 moved = MoveCollide(ref d, i, p0, p);
-            d.Pos[i] = moved;
+            d.Pos[i] = moved; d.PosEpoch++;
             // EMGR-NAV-01 ③（FG-GAP-136，种子 42 实测）：被分离推开 / 贴边滑动离开规划的直线段后，从实际位置直奔下一个路点会穿过不可走格，
             // 动作正好顺着格边时贴边滑动也滑不动 → 原地站桩。被挡（走出的不到应走的一半）且本机格直线到不了当前路点时，把 RouteIdx 退回上一个能直线到达的路点。
             if (idx > 0 && idx < len && d.Config.NavEnabled != 0 && math.distancesq(p0, moved) < 0.25 * math.distancesq(p0, p))
@@ -2917,7 +2917,7 @@ namespace BinGames.Sim.Combat
                     }
                     if (cmd.Kind == CombatCommandKind.WorkMove)
                     {
-                        d.Pos[i] = cmd.Pos;
+                        d.Pos[i] = cmd.Pos; d.PosEpoch++;
                     }
                     reason = CombatEndReason.Arrived;
                     return true;
@@ -2950,7 +2950,7 @@ namespace BinGames.Sim.Combat
                 }
                 if (cmd.Kind == CombatCommandKind.WorkMove)
                 {
-                    d.Pos[i] = end;
+                    d.Pos[i] = end; d.PosEpoch++;
                 }
                 reason = CombatEndReason.Arrived;
                 return true;
@@ -3112,7 +3112,7 @@ namespace BinGames.Sim.Combat
                 push *= maxStep / len;
             }
             double2 from = d.Pos[i];
-            d.Pos[i] = MoveCollide(ref d, i, from, from + push);
+            d.Pos[i] = MoveCollide(ref d, i, from, from + push); d.PosEpoch++;
         }
 
         /// <summary>路线池里作废的路点过半时按槽位顺序整理（确定性）。</summary>

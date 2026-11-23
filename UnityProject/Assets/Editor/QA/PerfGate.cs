@@ -27,6 +27,37 @@ namespace GameLogic.EditorTools
         /// <summary>超过阈值的这个倍数才算失败。</summary>
         public const double FailFactor = 2.0;
 
+        /// <summary>
+        /// DEBT-FGTOOL01-02：主线程上一段代码的托管分配（字节，分配断言用，不是计时）。Unity 编辑器的 Boehm GC 没有按线程计数（GC.GetAllocatedBytesForCurrentThread 恒为 0，
+        /// 原来用它的断言形同虚设），只能读进程级已用堆，同进程别的线程的分配会混进来（只会偏大）。所以把被测代码切成 <paramref name="windows"/> 个短窗口连着测、取最小：
+        /// 被测代码真分配时每个窗口都看得见；别的线程的分配是一阵一阵的，短窗口里总有干净的。窗口里赶上回收（已用堆会变小）的作废不算。
+        /// 返回最小窗口的读数（一个有效窗口都没有 = long.MaxValue，断言必失败）；<paramref name="all"/> = 各窗口读数（作废的写“回收”）。阈值按每窗口的调用量折算，口径不变。
+        /// </summary>
+        public static long MinWindowAlloc(Action window, int windows, out string all)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            long best = long.MaxValue;
+            var list = new List<string>(windows);
+            for (int w = 0; w < windows; w++)
+            {
+                int g0 = GC.CollectionCount(0);
+                long before = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+                window();
+                long delta = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() - before;
+                if (GC.CollectionCount(0) != g0)
+                {
+                    list.Add("回收");
+                    continue;
+                }
+                best = Math.Min(best, delta);
+                list.Add(delta.ToString(CultureInfo.InvariantCulture));
+            }
+            all = string.Join(" / ", list);
+            return best;
+        }
+
         /// <summary>警告行前缀（unity-validate.sh 按 “⚠ 性能警告” 计数；不含 ✓ / ✗，不会被当成通过或失败）。</summary>
         public const string WarnTag = "⚠ 性能警告";
 

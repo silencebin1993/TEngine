@@ -119,7 +119,7 @@ namespace GameLogic.View
                 for (int k = 0; k < Segments; k++)
                 {
                     float a = k * Mathf.PI * 2f / Segments;
-                    Points[k] = new Vector3(s.Center.x + Mathf.Cos(a) * s.Radius, Height, s.Center.y + Mathf.Sin(a) * s.Radius);
+                    Points[k] = BinGames.Sim.ViewOrigin.ToView(new Vector3(s.Center.x + Mathf.Cos(a) * s.Radius, Height, s.Center.y + Mathf.Sin(a) * s.Radius));
                 }
                 ring.positionCount = Segments;
                 ring.SetPositions(Points);
@@ -128,7 +128,7 @@ namespace GameLogic.View
                 {
                     cut++;
                     WorldBadge badge = BadgeAt(cutBadges++);
-                    badge.transform.position = new Vector3(s.Center.x, 2.6f, s.Center.y);
+                    badge.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(s.Center.x, 2.6f, s.Center.y));
                     badge.SetIcon(SignalLinkService.SafeModeIconId);
                     badge.SetVisible(true);
                 }

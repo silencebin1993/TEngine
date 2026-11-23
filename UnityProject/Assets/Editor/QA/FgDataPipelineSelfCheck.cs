@@ -400,34 +400,30 @@ namespace GameLogic.EditorTools
             // 100 万次命中若每次分配哪怕一个最小对象（≥16 B），堆增量至少 16 MB；容差 2 MB = 平均每次 < 2 B，只有零分配才过得去。
             // DEBT-FGTOOL01-02（FG7-ENV-05 复现后按该条的承接方向先做“多窗口取最小”）：同进程其它线程的分配会混进计量窗口（只会让读数偏大）；
             // 连测最多 3 个窗口、取最小的那个——GameText.Get 若真的每次分配，3 个窗口都会 ≥ 16 MB，取最小不会放过；条件（< 2 MB）不变。
+            // FG15-SYS-02（DEBT-FGTOOL01-02 关闭）：3 个 100 万次的长窗口仍会 3 个都被别的线程的分配弄脏（33.9 / 25.5 / 10.9 MB），改成 25 个 4 万次的短窗口取最小
+            // （PerfGate.MinWindowAlloc）；条件仍是平均每次 < 2 B（每窗口 80 KB），真每次分配时每个窗口都 ≥ 640 KB。
             int len = 0;
-            long hitAlloc = long.MaxValue;
-            var windows = new List<long>(3);
+            const int windowCount = 25;
+            int per = n / windowCount;
             var sw = new Stopwatch();
-            for (int w = 0; w < 3 && hitAlloc >= 2 * 1024 * 1024; w++)
+            long hitAlloc = PerfGate.MinWindowAlloc(() =>
             {
-                GC.Collect();
-                GC.WaitForPendingFinalizers(); // 修复（FG13-END-01）：等终结器线程跑完再计量，它在别的线程上的分配会混进窗口（DEBT-FGTOOL01-02）
-                GC.Collect();
-                long before = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
-                sw.Restart();
-                for (int i = 0; i < n; i++)
+                sw.Start();
+                for (int i = 0; i < per; i++)
                 {
                     len += GameText.Get(keys[i % keys.Length]).Length;
                 }
                 sw.Stop();
-                long delta = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong() - before;
-                windows.Add(delta);
-                hitAlloc = Math.Min(hitAlloc, delta);
-            }
-            double nsPerGet = sw.Elapsed.TotalMilliseconds * 1e6 / n;
+            }, windowCount, out string windows);
+            long hitLimit = (long)per * 2;
+            double nsPerGet = sw.Elapsed.TotalMilliseconds * 1e6 / ((long)per * windowCount);
 
             // 对照：同样的计量方式下，留住 20 万个新拼的串（约 8 MB）必须超过同一容差——证明计量能看见这个量级。
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
             long ctlBefore = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
-            var keep = new string[200000];
+            var keep = new string[per];
             for (int i = 0; i < keep.Length; i++)
             {
                 keep[i] = keys[i % keys.Length] + i;
@@ -449,9 +445,9 @@ namespace GameLogic.EditorTools
             GameText.Reload();
             FgContentTables.Reload();
 
-            Line($"  · 实测（Editor batchmode）：GameText.Get 命中 {nsPerGet:F0} ns/次、{n} 次堆增量 {hitAlloc} B（对照 20 万个串 +{ctlAlloc} B）；" +
+            Line($"  · 实测（Editor batchmode）：GameText.Get 命中 {nsPerGet:F0} ns/次、每窗口 {per} 次堆增量最小 {hitAlloc} B（对照 {per} 个串 +{ctlAlloc} B）；" +
                  $"PowerProfile 读取 {profile.Elapsed.TotalMilliseconds * 1e6 / n:F0} ns/次；全部 Luban 表重载 {load.Elapsed.TotalMilliseconds:F1} ms（校验和 {len + sum}）");
-            Expect(ctlAlloc > 2 * 1024 * 1024 && hitAlloc < 2 * 1024 * 1024, $"GameText.Get 命中路径不分配（{n} 次堆增量 {hitAlloc} B（各窗口 {string.Join(" / ", windows)} B，取最小），容差 2 MB 即平均每次 < 2 B；对照留住 20 万个串 +{ctlAlloc} B 证明计量有效）");
+            Expect(ctlAlloc > hitLimit && hitAlloc < hitLimit, $"GameText.Get 命中路径不分配（{windowCount} 个窗口各 {per} 次，堆增量最小 {hitAlloc} B（各窗口 {windows} B），容差 {hitLimit} B 即平均每次 < 2 B；对照留住 {per} 个串 +{ctlAlloc} B 证明计量看得见这个量级）");
             ExpectPerf(true, $"GameText.Get 命中 {nsPerGet:F0} ns/次 < 2 µs（每帧上百个标签也可忽略）", PerfGate.Lt(nsPerGet, 2000, "GameText.Get ns/次"));
         }
 

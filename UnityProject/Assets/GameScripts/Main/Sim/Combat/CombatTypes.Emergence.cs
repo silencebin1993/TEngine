@@ -178,6 +178,8 @@ namespace BinGames.Sim.Combat
         /// EMGR-TALLY-01（DEBT-EMG4CODEX01-01）：同格已是更新的链时较早那条链停计（不清新链的计数与封印位，不会误发），计 <see cref="EmgScalars.TallyEvicted"/>；计数表进快照段 <see cref="SegChainTally"/>（B10）。
         /// shortcut: 4096 格直映射、冲突保新链——同时在途超过 4096 条链时较早的链可能少记一次极限（不误发）；要精确得按链号开放寻址并在链结束时回收（DEBT-EMGRTALLY01-01，承接 FG15-SYS-02）。</summary>
         public const int ChainTally = 4096;
+        /// <summary>FG15-SYS-02（DEBT-EMGRTALLY01-01）：被挤出格的旧链溢出表容量（满了丢链号较小的一半；涌现满载 / 加满实测见 FgEmergenceFuzzSelfCheck 容量探针）。</summary>
+        public const int ChainTallyOverflow = 8192;
         /// <summary>FG11-ATTR-01 ④：持久链归属表长（2 的幂，直映射；512 条链 ≥ 因果链环 256 条记录能覆盖的链数，环里还在的链一定在表里；每条 40 B，共 20 KB / 地点）。</summary>
         public const int ChainOwnSlots = 512;
         public const int DefaultExtremeCount = 12;

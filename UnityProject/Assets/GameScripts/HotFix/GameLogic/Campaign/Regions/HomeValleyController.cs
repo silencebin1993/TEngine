@@ -679,7 +679,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
 
-            Ray ray = _camera.ScreenPointToRay(screenPointer);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(_camera, screenPointer);
             var groundPlane = new Plane(Vector3.up, Vector3.zero);
             if (!groundPlane.Raycast(ray, out float enter))
             {
@@ -1411,7 +1411,7 @@ namespace GameLogic.Campaign.Regions
                 _objectiveMarker.SetVisible(false);
                 return;
             }
-            _objectiveMarker.transform.position = new Vector3(where.x, ObjectiveMarkerHeight, where.y);
+            _objectiveMarker.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(where.x, ObjectiveMarkerHeight, where.y));
             _objectiveMarker.SetIcon(ContentIcons.ObjectiveMarker);
             _objectiveMarker.SetVisible(true);
         }
@@ -1495,7 +1495,7 @@ namespace GameLogic.Campaign.Regions
             {
                 height = 0.15f;
             }
-            t.position = new Vector3(building.Position.x, height * 0.5f, building.Position.y);
+            t.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(building.Position.x, height * 0.5f, building.Position.y));
             t.rotation = Quaternion.Euler(0f, GridMath.NormalizeRotation(building.Rotation), 0f);
             t.localScale = new Vector3(Mathf.Max(0.5f, size.x - 0.2f), height, Mathf.Max(0.5f, size.y - 0.2f));
         }
@@ -1505,6 +1505,7 @@ namespace GameLogic.Campaign.Regions
         private void BuildVisuals(CampaignState state)
         {
             _root = new GameObject("[HomeValley]");
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero); // FG15-SYS-02：根物体放在世界原点的画面位置（子物体用世界坐标作局部坐标）
             _buildingBadges.Clear();
             _buildingVisuals.Clear();
             _visualsRecordsRef = null;
@@ -1950,7 +1951,7 @@ namespace GameLogic.Campaign.Regions
             go.name = "Wreckage_" + wreckage.Id;
             go.transform.SetParent(_root.transform, false);
             RememberNamed(go);
-            go.transform.position = new Vector3(wreckage.Position.x, 0.5f, wreckage.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(wreckage.Position.x, 0.5f, wreckage.Position.y));
             go.transform.localScale = new Vector3(2.5f, 0.5f, 2.5f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.45f, 0.35f, 0.25f));
@@ -1964,7 +1965,7 @@ namespace GameLogic.Campaign.Regions
             go.name = "BuildSite_" + site.Id;
             go.transform.SetParent(_root.transform, false);
             RememberNamed(go);
-            go.transform.position = new Vector3(site.Position.x, 0.1f, site.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(site.Position.x, 0.1f, site.Position.y));
             Vector2Int size = GridContent.TryGetBuilding(typeId, out GameConfig.fg.BuildingGrid g) ? new Vector2Int(g.FootprintW, g.FootprintH) : new Vector2Int(3, 3);
             go.transform.localScale = new Vector3(size.x, 0.2f, size.y);
             Renderer renderer = go.GetComponent<Renderer>();
@@ -1979,7 +1980,7 @@ namespace GameLogic.Campaign.Regions
             go.name = "GroundItem_" + item.GroundItemId;
             go.transform.SetParent(_root.transform, false);
             _groundVisuals[item.GroundItemId] = go.transform;
-            go.transform.position = new Vector3(item.Position.x, 0.35f, item.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(item.Position.x, 0.35f, item.Position.y));
             go.transform.localScale = new Vector3(0.9f, 0.7f, 0.9f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.85f, 0.75f, 0.35f));
@@ -1998,7 +1999,7 @@ namespace GameLogic.Campaign.Regions
             go.transform.SetParent(_root.transform, false);
             RememberNamed(go);
             Vector2 pos = HomeValleyLayout.LowThreatTargetPosition;
-            go.transform.position = new Vector3(pos.x, 0.6f, pos.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(pos.x, 0.6f, pos.y));
             go.transform.localScale = new Vector3(1.6f, 0.6f, 1.6f);
             Renderer renderer = go.GetComponent<Renderer>();
             renderer.sharedMaterial = ViewMaterials.Standard(new Color(0.8f, 0.2f, 0.2f));
@@ -2031,8 +2032,8 @@ namespace GameLogic.Campaign.Regions
             go.name = "BeaconSlot_Reserved";
             go.transform.SetParent(_root.transform, false);
             RememberNamed(go);
-            go.transform.position = new Vector3(HomeValleyLayout.BeaconSlot.Position.x, 0.05f,
-                HomeValleyLayout.BeaconSlot.Position.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(HomeValleyLayout.BeaconSlot.Position.x, 0.05f,
+                HomeValleyLayout.BeaconSlot.Position.y));
             go.transform.localScale = new Vector3(HomeValleyLayout.BeaconSlot.ClearanceRadius * 2f, 0.1f,
                 HomeValleyLayout.BeaconSlot.ClearanceRadius * 2f);
             GameLogic.View.UnityObjects.Release(go.GetComponent<Collider>());
@@ -2071,7 +2072,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(at.x, 1f, at.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
             go.transform.localScale = new Vector3(1f, 1f, 1f);
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.7f, 0.75f, 0.8f);
@@ -2362,7 +2363,7 @@ namespace GameLogic.Campaign.Regions
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
                 // FG12-EVT-06：商队没有碰撞体，射线落在它身上同样走这里。
-                if (GameLogic.View.CaravanViews.TryClick(ray) || TryClickEntrance(ray))
+                if (GameLogic.View.CaravanViews.TryClick(BinGames.Sim.ViewOrigin.ToWorld(ray)) || TryClickEntrance(BinGames.Sim.ViewOrigin.ToWorld(ray)))
                 {
                     return;
                 }
@@ -2381,12 +2382,12 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             // FG12-EVT-06（FGR-EVT-050）：左键点中停在家园的流浪商队 = 打开交易面板；机器优先（停在商队旁的机器照常点选，不会同时开面板），先于入口与建筑。
-            if (GameLogic.View.CaravanViews.TryClick(ray))
+            if (GameLogic.View.CaravanViews.TryClick(BinGames.Sim.ViewOrigin.ToWorld(ray)))
             {
                 return;
             }
             // FG8-GEN-02（FGR-GEN-042）：左键点室内入口（入口标记没有碰撞体，按射线与地面的交点找）= 打开进入面板；机器优先（站在入口上的机器照常点选）。
-            if (TryClickEntrance(ray))
+            if (TryClickEntrance(BinGames.Sim.ViewOrigin.ToWorld(ray)))
             {
                 return;
             }
@@ -2483,7 +2484,7 @@ namespace GameLogic.Campaign.Regions
             Ray ray = _camera.ScreenPointToRay(pointer);
             if (Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
-                world = hit.point;
+                world = BinGames.Sim.ViewOrigin.ToWorld(hit.point);
                 return true;
             }
             var plane = new Plane(Vector3.up, Vector3.zero);
@@ -2519,7 +2520,7 @@ namespace GameLogic.Campaign.Regions
             HomeValleyMachineMarker worker = _selected != null && SquadCommands.Selection.Contains(_selected.LogicId)
                 ? _selected
                 : (SquadCommands.Selection.Count > 0 ? FindMarker(SquadCommands.Selection[0]) : null);
-            return worker != null && (TryContextWork(worker, pointer) || (_camera != null && TryContextEntrance(_camera.ScreenPointToRay(pointer))));
+            return worker != null && (TryContextWork(worker, pointer) || (_camera != null && TryContextEntrance(BinGames.Sim.ViewOrigin.WorldRay(_camera, pointer))));
         }
 
         /// <summary>
@@ -2650,9 +2651,9 @@ namespace GameLogic.Campaign.Regions
             if (!Physics.Raycast(ray, out RaycastHit hit, 500f))
             {
                 // FG7-ENV-05（FGR-ENV-051）：遗迹点标记没有碰撞体、远处地面也可能没有——按 0 高度平面取点，点中已探索的遗迹点 = 派这台机器回收。
-                return TryContextRelic(moving, state, ray);
+                return TryContextRelic(moving, state, BinGames.Sim.ViewOrigin.ToWorld(ray));
             }
-            Vector3 destination = hit.point;
+            Vector3 destination = BinGames.Sim.ViewOrigin.ToWorld(hit.point); // FG15-SYS-02：物理命中点是画面坐标，加回原点
 
             // FG0-ARCH-04：点中的是哪一座（本地键 → 建筑 ID → 记录），而不是“这一类的第一座”。
             string buildingTypeIdHit = BuildingTypeIdFromHit(hit);
@@ -2675,7 +2676,7 @@ namespace GameLogic.Campaign.Regions
             if (!isWork)
             {
                 // FG7-ENV-05：没点中建筑 / 残骸 / 地面物时，再看点中的是不是可回收的遗迹点（按射线打到的地面点找，与悬停同一个点）。
-                return clicked == null && buildingTypeIdHit == null && TryContextRelicAt(moving, state, new Vector2(hit.point.x, hit.point.z));
+                return clicked == null && buildingTypeIdHit == null && TryContextRelicAt(moving, state, new Vector2(BinGames.Sim.ViewOrigin.ToWorld(hit.point).x, BinGames.Sim.ViewOrigin.ToWorld(hit.point).z));
             }
 
             // FG1-SIG-07（FGR-SIG-053）：覆盖外的机器收不到派工（也是远程命令），继续执行最后的命令；点中的是工作目标所以不再按“移动”处理。

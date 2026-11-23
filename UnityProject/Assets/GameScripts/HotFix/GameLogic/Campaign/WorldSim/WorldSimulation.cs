@@ -217,6 +217,7 @@ namespace GameLogic.Campaign.WorldSim
         /// 否则上一次载入残留的计时会让同一存档读两次跑出不同结果。</summary>
         public static void ResetSessionState()
         {
+            BinGames.Sim.ViewOrigin.Reset(); // FG15-SYS-02：新战役 / 读档前画面原点回 0（DEBT-FG0ARCH01-02）
             HomeValleyWorkOrders.ResetSessionState();
             Economy.HomeInventory.ResetSessionState(); // FG4-ECO-01：物资索引按新战役重建
             Economy.ItemFlowStats.ResetSessionState();
@@ -573,6 +574,50 @@ namespace GameLogic.Campaign.WorldSim
             AfterStepRunning.Clear();
         }
 
+        private static readonly List<Combat.CombatSite> BudgetSites = new List<Combat.CombatSite>(4);
+        private static readonly List<Combat.CombatSite> BudgetScratch = new List<Combat.CombatSite>(4);
+        private static readonly List<int> BudgetRoles = new List<int>(4);
+
+        /// <summary>FG15-SYS-02（DEBT-EMG2MAT01-05，FGR-EMG-202 / ADR-EMG-001 ⑬）：已载入地点的战斗内核变了（载入 / 卸载 / 重建）才按世界级总上限重分各地点的斑块容量与总线额度。
+        /// 每步只比 ≤ 地点数个引用（不分配），与观察无关；扣减顺序 = 推进顺序：家园 → 破碎都市 → 铸造前哨（两处都是远征目的地，按远征地点给）→ 室内场地（按表面 ID）。</summary>
+        internal static void RebalanceEmgBudgets()
+        {
+            BudgetScratch.Clear();
+            BudgetRoles.Clear();
+            AddBudget(Home != null && Home.IsLoaded ? Home.Combat : null, Combat.CombatSite.EmgRoleHome);
+            AddBudget(FracturedCity != null && FracturedCity.IsLoaded ? FracturedCity.Combat : null, Combat.CombatSite.EmgRoleExpedition);
+            AddBudget(FoundryOutpost != null && FoundryOutpost.IsLoaded ? FoundryOutpost.Combat : null, Combat.CombatSite.EmgRoleExpedition);
+            foreach (InteriorSiteController c in Interiors.Values)
+            {
+                AddBudget(c != null && c.IsLoaded ? c.Combat : null, Combat.CombatSite.EmgRoleMinor);
+            }
+            bool same = BudgetScratch.Count == BudgetSites.Count;
+            for (int i = 0; same && i < BudgetScratch.Count; i++)
+            {
+                same = ReferenceEquals(BudgetScratch[i], BudgetSites[i]);
+            }
+            if (same)
+            {
+                return;
+            }
+            BudgetSites.Clear();
+            BudgetSites.AddRange(BudgetScratch);
+            Combat.CombatSite.ApplyEmgWorldBudgets(BudgetScratch, BudgetRoles);
+            EmgBudgetRebalances++;
+        }
+
+        /// <summary>重分次数（自检读：只在地点变化时发生）。</summary>
+        public static int EmgBudgetRebalances { get; private set; }
+
+        private static void AddBudget(Combat.CombatSite site, int role)
+        {
+            if (site != null && !site.IsDisposed) // 只经 CombatSite 判（桥接边界：Campaign/Combat 以外不直接碰战斗内核）
+            {
+                BudgetScratch.Add(site);
+                BudgetRoles.Add(role);
+            }
+        }
+
         /// <summary>一个固定模拟步：全部已载入地点 + 行进中的队伍，按固定顺序推进 dt = 1 / clock.sim_step_hz 游戏秒。</summary>
         private static void StepOnce(CampaignState state)
         {
@@ -590,6 +635,7 @@ namespace GameLogic.Campaign.WorldSim
                 Signal.SignalCoverageService.BeginStep(state);
                 // FG7-ENV-03：天气对传送带 / 管线 / 战斗内核的派生量（沙暴减速、寒潮结冰门槛与散热加成）与顶棚覆盖，在内核步进之前按存档对齐（O(1)；读档后第一步就一致）。
                 Env.WeatherService.PreStep(state);
+                RebalanceEmgBudgets();
                 if (Home != null && Home.IsLoaded)
                 {
                     CurrentSiteId = Home.SiteId;

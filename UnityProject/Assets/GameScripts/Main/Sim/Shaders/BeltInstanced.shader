@@ -50,6 +50,7 @@ Shader "BinGames/BeltInstanced"
             float _Height;
             float _GameTime; // FG3-LOG-03：游戏秒（BeltRenderer.AnimationTime）
             float _Overlay;  // FG3-LOG-08：叠加层画法
+            float4 _BgViewOrigin; // FG15-SYS-02：浮动画面原点（BinGames.Sim.ViewOrigin 设全局；实例数据是世界坐标，这里减去原点）
             float4 _ItemPalette[64]; // FG4-ECO-01：物品编号 0～63 的颜色（a = 1 表示物品表里有这一种；没有的仍按编号着色）
 
             struct appdata
@@ -82,6 +83,7 @@ Shader "BinGames/BeltInstanced"
                     wp = float3(p.x, _Height + 0.03, p.y);
                 }
                 v2f o;
+                wp.xz -= _BgViewOrigin.xz;
                 o.pos = mul(UNITY_MATRIX_VP, float4(wp, 1.0));
                 o.uv = local + 0.5;
                 o.data = it.b;

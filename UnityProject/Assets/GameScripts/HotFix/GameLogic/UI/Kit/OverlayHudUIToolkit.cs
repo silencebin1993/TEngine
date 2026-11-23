@@ -283,7 +283,7 @@ namespace GameLogic.UI.Kit
                 }
                 if (camera != null && _labelLayer.panel != null)
                 {
-                    Vector3 screen = camera.WorldToScreenPoint(o.World);
+                    Vector3 screen = camera.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(o.World));
                     if (screen.z <= 0f)
                     {
                         l.AddToClassList("uk-hidden");

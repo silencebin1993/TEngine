@@ -82,6 +82,8 @@ namespace GameLogic.EditorTools
                 Run("H", CheckTimers);
                 Run("I", CheckDemoMoments);
                 Run("J", CheckPanels);
+                Run("K", CheckChecksumChunked); // FG15-SYS-02（DEBT-FG15SYS01-04）
+                Run("K2", CheckPayloadParallel); // FG15-SYS-02（DEBT-FG15SYS01-01）
             }
             catch (Exception e)
             {
@@ -142,6 +144,122 @@ namespace GameLogic.EditorTools
         }
 
         // ── A. 断电式：外部进程写到一半被强制结束（FGT-SYS-001）──────────────────────
+
+        // ── K2. 存档正文按域并行序列化（FG15-SYS-02 / DEBT-FG15SYS01-01）────────────────────
+
+        private static void CheckPayloadParallel()
+        {
+            Line("  · K2. 存档正文按域并行序列化（DEBT-FG15SYS01-01）：与整份序列化逐字节相同（存档字节不变）；第一次在同步存档 / 读档里比对，比对过才在后台存档里用");
+            CampaignState edge = Small("fgrobust-pj-edge", 9);
+            edge.EventLedger = Enumerable.Range(0, CampaignPayloadJson.MinArrayElements).Select(i => new EventLedgerEntry
+            {
+                EventId = $"e{i}", Category = "edge", Payload = "a\"b\\c{}[]:,中\n\t" + i,
+            }).ToArray();
+            edge.GroundItems = Enumerable.Range(0, CampaignPayloadJson.ChunkElements + 1).Select(i => new GroundItemRecord
+            {
+                GroundItemId = $"g\"{i}\\", RegionId = "home_valley", Position = new Vector2(i * 0.37f, -i), ResourceType = "Scrap", Amount = i,
+            }).ToArray();
+            edge.ResourceTransactions = Enumerable.Range(0, CampaignPayloadJson.MinArrayElements - 1).Select(i => new ResourceTransactionRecord
+            {
+                TransactionId = $"tx{i}", OwnerId = "edge", ResourceType = "Scrap", Requested = 1, Consumed = 1, State = ResourceTransactionState.Committed,
+            }).ToArray();
+            var cases = new List<(string Name, CampaignState State)>
+            {
+                ("压力档（区块差异 4000、资源事务 4 万、地面物 1 万、事件 2 万）", Big("fgrobust-pj", 300, 4000)),
+                ("小档", Small("fgrobust-pj-small", 7)),
+                ("新战役", CampaignState.CreateNew("fgrobust-pj-new", "Standard", 4242)),
+                ("边界（数组恰好 256 / 2049 / 255 个元素，字符串含引号、反斜杠、括号、中文、换行）", edge),
+            };
+            var bad = new List<string>();
+            int parts = 0;
+            foreach ((string name, CampaignState st) in cases)
+            {
+                string serialBefore = JsonUtility.ToJson(st);
+                string par = CampaignPayloadJson.SerializeParallelForTests(st);
+                parts = Math.Max(parts, CampaignPayloadJson.LastParts);
+                string serialAfter = JsonUtility.ToJson(st);
+                if (par == null || !string.Equals(par, serialBefore, StringComparison.Ordinal) || !string.Equals(serialAfter, serialBefore, StringComparison.Ordinal))
+                {
+                    int at = 0;
+                    while (par != null && at < Math.Min(par.Length, serialBefore.Length) && par[at] == serialBefore[at])
+                    {
+                        at++;
+                    }
+                    bad.Add($"{name}：长度 {par?.Length ?? -1} / {serialBefore.Length}，第 {at} 个字符起不同；序列化后状态不变 {serialAfter == serialBefore}");
+                }
+            }
+            Expect(bad.Count == 0 && parts > 0,
+                $"K2 并行正文与整份 JsonUtility.ToJson 逐字节相同、序列化后状态不变：{cases.Count - bad.Count}/{cases.Count} 例（最多 {parts} 段并行）{(bad.Count > 0 ? "；不同：" + string.Join("；", bad) : string.Empty)}");
+
+            // 比对门：没比对过时后台存档用整份序列化；同步存档（可以多花一次整份序列化）比对一致后才用并行版。
+            CampaignState big = cases[0].State;
+            CampaignPayloadJson.ResetForTests();
+            CampaignPayloadJson.Serialize(big, canVerify: false);
+            bool serialFirst = CampaignPayloadJson.LastParts == 0 && CampaignPayloadJson.Verified == 0;
+            CampaignPayloadJson.Serialize(big, canVerify: true);
+            bool verified = CampaignPayloadJson.Verified == 1;
+            var sw = Stopwatch.StartNew();
+            string fast = CampaignPayloadJson.Serialize(big, canVerify: false);
+            double parMs = sw.Elapsed.TotalMilliseconds;
+            bool usesParallel = CampaignPayloadJson.LastParts > 0;
+            sw.Restart();
+            string whole = JsonUtility.ToJson(big);
+            double serMs = sw.Elapsed.TotalMilliseconds;
+            Expect(serialFirst && verified && usesParallel && fast == whole,
+                $"K2 比对门：没比对过时后台存档走整份序列化（{serialFirst}），同步存档里比对一致（{verified}）之后后台存档走并行版（{CampaignPayloadJson.LastParts} 段，{usesParallel}）且输出相同");
+            Line($"  · 读数（只报告）：压力档正文序列化 并行 {parMs:F1} ms / 整份 {serMs:F1} ms（{Environment.ProcessorCount} 个逻辑核）");
+        }
+
+        /// <summary>K（FG15-SYS-02，DEBT-FG15SYS01-04）：分块校验和与原写法 SHA256(UTF-8(正文 + \0 + 卡片)) 逐字节一致——空 / null / 跨块边界的代理对 / 落单代理 / 2.4M 字符正文；
+        /// 另报托管堆增量参考行（原写法一次拼接 + 一次整份转字节）。</summary>
+        private static void CheckChecksumChunked()
+        {
+            string Reference(string payload, string card)
+            {
+                using var sha = System.Security.Cryptography.SHA256.Create();
+                byte[] h = sha.ComputeHash(Encoding.UTF8.GetBytes((payload ?? string.Empty) + "\0" + (card ?? string.Empty)));
+                var sb = new StringBuilder(h.Length * 2);
+                foreach (byte b in h)
+                {
+                    sb.Append(b.ToString("x2"));
+                }
+                return sb.ToString();
+            }
+            var big = new StringBuilder();
+            var rnd = new System.Random(7);
+            while (big.Length < 2_400_000)
+            {
+                big.Append("{\"k\":").Append(rnd.Next()).Append(",\"t\":\"归还核心\uD83D\uDE80\"},");
+            }
+            string edge = new string('a', 16383) + "\uD83D\uDE80" + new string('b', 16384); // 代理对正好跨在 16K 字符的块边界上
+            var cases = new (string P, string C)[]
+            {
+                (null, null), (string.Empty, string.Empty), ("{}", "{\"slot\":1}"), (edge, edge), ("x\uD83D", "\uDE80y"), ("\uD800", null), (big.ToString(), "{\"card\":\"卡片\"}"),
+            };
+            var bad = new List<string>();
+            foreach ((string p, string c) in cases)
+            {
+                string a = CampaignSaveService.ComputeChecksum(p, c);
+                string r = Reference(p, c);
+                if (a != r)
+                {
+                    bad.Add($"长度 {p?.Length ?? -1}/{c?.Length ?? -1}：{a} ≠ {r}");
+                }
+            }
+            string payload = big.ToString();
+            // 分配只作参考行（Mono 下 GC.GetAllocatedBytesForCurrentThread 恒为 0；用托管堆已用量的差，先整堆回收一次）
+            GC.Collect();
+            long g0 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+            CampaignSaveService.ComputeChecksum(payload, "{}");
+            long g1 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+            GC.Collect();
+            long g1b = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+            Reference(payload, "{}");
+            long g2 = UnityEngine.Profiling.Profiler.GetMonoUsedSizeLong();
+            Expect(bad.Count == 0,
+                $"K 分块校验和与原写法逐字节一致（{cases.Length} 例：空 / null / 跨块代理对 / 落单代理 / {payload.Length / 1000000.0:0.0}M 字符正文{(bad.Count > 0 ? "；不一致：" + string.Join("；", bad) : string.Empty)}）；" +
+                $"参考：托管堆增量 {(g1 - g0) / 1024.0:0} KB，原写法 {(g2 - g1b) / 1024.0:0} KB");
+        }
 
         private static void CheckPowerCut()
         {
@@ -259,10 +377,14 @@ namespace GameLogic.EditorTools
             const int slot = 0;
             CampaignState big = Big("fgrobust-bg", 300, 4000);
             CampaignSession.Set(slot, big);
+            CampaignPayloadJson.VerifyOnce(big); // 正式游戏里进入战役前必经新建（同步存档）或读档，二者都比对过并行正文序列化（FG15-SYS-02）
             CampaignAutoSaveService.ForceBackgroundForTests = true;
             SaveThumbnail.Shot shot = null;
             SaveThumbnail.CaptureHandler = () => shot = SaveThumbnail.Placeholder(CampaignSession.Current);
             int mainThread = Thread.CurrentThread.ManagedThreadId;
+            // 测量前先整堆回收：batchmode 没有帧循环，增量 GC（gcIncremental = 1）不会在帧间回收前面步骤（比对、读档、上一份后台写盘）的垃圾，
+            // 这笔欠账会整块落进下一个计时窗口（FG15-SYS-02 修复轮实测：1.6～1.9 GB 的 Editor 堆一次全量回收 45～160 ms）；窗口里存档自己触发的回收照算（见快照分项 gc 次数）
+            GC.Collect();
             var sw = Stopwatch.StartNew();
             SaveResult r = CampaignAutoSaveService.SaveAuto(SaveReason.Interval, toast: false);
             double block = sw.Elapsed.TotalMilliseconds;
@@ -279,16 +401,71 @@ namespace GameLogic.EditorTools
                 $"缩略图在线程 {shot?.EncodeThreadId} 编码；读回一致、带缩略图、写了第 1 份轮换自动存档",
                 PerfGate.Le(block, 100, "自动存档主线程阻塞 ms"));
 
-            // FGR-SYS-002“主线程阻塞 ≤ 100 毫秒，其余在后台完成”：游戏中只有出发 / 到达的回滚基线同步写（调用方当场复制基线文件、失败就中止出发）。
+            // FGR-SYS-002“主线程阻塞 ≤ 100 毫秒，其余在后台完成”：游戏中同步写的只剩新建战役与手动存档；
+            // FG15-SYS-02（DEBT-FG15SYS01-05）起出发 / 到达的回滚基线也在后台写（主线程只拍快照、写盘线程紧接着复制基线、失败在主线程回调里中止）。
             SaveReason[] syncReasons = Enum.GetValues(typeof(SaveReason)).Cast<SaveReason>().Where(x => !CampaignAutoSaveService.InBackground(x)).OrderBy(x => x).ToArray();
-            Expect(syncReasons.SequenceEqual(new[] { SaveReason.NewCampaign, SaveReason.Manual, SaveReason.ExpeditionDepartConfirm }.OrderBy(x => x)),
-                $"B 游戏中同步写的只剩 [{string.Join("、", syncReasons)}]（新建战役、手动存档、出发 / 到达回滚基线）；进入家园、远征结算、蓝图保存、首领战、启动信标、结局、后日谈、定时、预警、揭示、终战、静默夜、快速存档都在后台写盘");
+            Expect(syncReasons.SequenceEqual(new[] { SaveReason.NewCampaign, SaveReason.Manual }.OrderBy(x => x)),
+                $"B 游戏中同步写的只剩 [{string.Join("、", syncReasons)}]（新建战役、手动存档）；出发 / 到达回滚基线、进入家园、远征结算、蓝图保存、首领战、启动信标、结局、后日谈、定时、预警、揭示、终战、静默夜、快速存档都在后台写盘");
+            string baseline = CampaignSaveService.SlotPath(slot) + ".fgrobust-baseline";
+            if (File.Exists(baseline)) File.Delete(baseline);
+            GC.Collect(); // 同上：前面读档与上一份 15 MB 后台写盘的垃圾不算进下面的计时窗口（要在占住写盘线程之前回收，否则 300 ms 的排队窗口会被回收耗掉）
+            CampaignSaveService.BackgroundDelayMsForTests = 300;
+            CampaignSaveService.SaveInBackground(slot, Small("fgrobust-bg", 299), SaveReason.Interval, null, SaveCopyKind.None); // 先占住写盘线程，后面两份都在排队
+            int coalescedBase = CampaignSaveService.CoalescedWrites;
+            SaveResult heldResult = default;
+            CampaignSaveService.SaveSnapshot heldSnap = null;
+            int callbacks = 0;
             var swSync = Stopwatch.StartNew();
-            SaveResult depart = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm, toast: false);
+            SaveResult depart = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm, false, baseline, (res, snap) => { callbacks++; heldResult = res; heldSnap = snap; });
             double syncBlock = swSync.Elapsed.TotalMilliseconds;
-            Expect(depart.Success && CampaignSaveService.PendingWrites == 0 && CampaignSaveService.Load(slot).State?.LastSaveReason == SaveReason.ExpeditionDepartConfirm,
-                "B 出发 / 到达回滚基线同步写：返回时文件已落盘（调用方紧接着复制基线）");
-            Line($"  ⚠ 性能提示（DEBT-FG15SYS01-05，交 FG15-SYS-02，不作本卡门槛）：同一压力档出发前回滚基线同步存档主线程 {syncBlock:F1} ms（{CampaignSaveService.LastSyncSaveBreakdown}）");
+            string baseBreak = $"{CampaignAutoSaveService.LastExportBreakdown}；快照 {CampaignSaveService.LastPrepareMs:F1} ms：{CampaignSaveService.LastPrepareBreakdown}";
+            bool queuedNotOnDisk = CampaignSaveService.PendingWrites >= 2 && !File.Exists(baseline);
+            CampaignSaveService.SaveInBackground(slot, Small("fgrobust-bg", 301), SaveReason.Interval, null, SaveCopyKind.Auto); // 同槽位、同副本类型的更新快照
+            bool notCoalesced = CampaignSaveService.CoalescedWrites == coalescedBase;
+            CampaignSaveService.WaitForPendingWrites();
+            CampaignSaveService.BackgroundDelayMsForTests = 0;
+            CampaignSaveService.PumpBackgroundResults();
+            CampaignState baseState = LoadState(baseline);
+            LoadResult latestBase = CampaignSaveService.Load(slot);
+            ExpectPerf(depart.Success && queuedNotOnDisk && notCoalesced && callbacks == 1 && heldResult.Success && heldSnap == null
+                       && baseState != null && baseState.Scrap == 300 && baseState.LastSaveReason == SaveReason.ExpeditionDepartConfirm && latestBase.Success && latestBase.State.Scrap == 301,
+                $"B 出发 / 到达回滚基线后台写（DEBT-FG15SYS01-05）：同一压力档主线程 {syncBlock:F1} ms（FG15-SYS-01 同步写 629 ms、本卡前 240.7 ms；{baseBreak}）；" +
+                $"返回时还在排队、没落盘（{queuedNotOnDisk}）；排队中不被同槽位更新的快照取代（{notCoalesced}）；写盘线程紧接着复制基线——基线是这一份（废料 {baseState?.Scrap}），槽位最后是更新的一份（{latestBase.State?.Scrap}）；主线程回调一次、成功不带快照",
+                PerfGate.Le(syncBlock, 100, "回滚基线存档主线程阻塞 ms"));
+
+            // 负向：写盘失败 → 回调带内存快照，读回 = 写进去的那份（中止出发 / 到达读它）；槽位里原来的档不被破坏；基线不复制。
+            if (File.Exists(baseline)) File.Delete(baseline);
+            callbacks = 0;
+            CampaignSaveService.CrashPointForTests = SaveCrashPoint.MidTempWrite;
+            SaveResult failing;
+            try
+            {
+                failing = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm, false, baseline, (res, snap) => { callbacks++; heldResult = res; heldSnap = snap; });
+            }
+            finally
+            {
+                CampaignSaveService.CrashPointForTests = SaveCrashPoint.None;
+            }
+            CampaignSaveService.WaitForPendingWrites();
+            CampaignSaveService.PumpBackgroundResults();
+            RestoreResult fromSnap = CampaignRestoreOrchestrator.RestoreSnapshot(slot, heldSnap);
+            LoadResult intact = CampaignSaveService.Load(slot);
+            Expect(failing.Success && callbacks == 1 && !heldResult.Success && heldSnap != null && fromSnap.Success && fromSnap.State.Scrap == 300
+                   && fromSnap.State.CampaignId == big.CampaignId && fromSnap.State.LastSaveReason == SaveReason.ExpeditionDepartConfirm
+                   && intact.Success && intact.State.Scrap == 301 && !File.Exists(baseline),
+                $"B 负向：回滚基线写盘失败（{heldResult.Outcome}）→ 主线程回调带内存快照，读回 = 写进去的那份（废料 {fromSnap.State?.Scrap}、战役 {fromSnap.State?.CampaignId}）；槽位原档完好（{intact.State?.Scrap}）、没复制基线");
+
+            // 用完的基线排在写入之后删：写入还在排队时不删，写完才删。
+            File.WriteAllText(baseline, "x");
+            CampaignSaveService.BackgroundDelayMsForTests = 200;
+            CampaignSaveService.SaveInBackground(slot, Small("fgrobust-bg", 302), SaveReason.Interval, null, SaveCopyKind.None);
+            CampaignSaveService.DeleteAfterPendingWrites(baseline);
+            bool stillThere = File.Exists(baseline);
+            CampaignSaveService.WaitForPendingWrites();
+            CampaignSaveService.BackgroundDelayMsForTests = 0;
+            CampaignSaveService.PumpBackgroundResults();
+            Expect(stillThere && !File.Exists(baseline), $"B 用完的回滚基线排在已排队的写入之后删（写入排队时还在 {stillThere}，写完后已删 {!File.Exists(baseline)}）");
+            CampaignSession.Set(slot, big);
 
             // 写入进行中又触发存档：排队；还没开始写的被更新的快照取代；读档等写完，读到最新一份。
             CampaignSaveService.BackgroundDelayMsForTests = 400;

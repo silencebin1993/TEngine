@@ -712,7 +712,10 @@ namespace GameLogic.Campaign.Regions
                 InterruptWorkForDeparture(state, validation.BusyInterruptibleLogicIds);
 
                 // ── 自动安全存档＝出发前档（回滚基线）───────────────────────────────
-                SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
+                // FG15-SYS-02（DEBT-FG15SYS01-05）：游戏中走后台写盘（主线程只拍快照）；写盘失败在主线程回调里从内存快照中止出发（OnBaselineWritten）。
+                string campaignId = state?.CampaignId;
+                SaveResult saveResult = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm, true, null,
+                    (r, snap) => OnBaselineWritten(activeSlot, campaignId, state, r, snap));
                 if (!saveResult.Success)
                 {
                     Log.Warning($"[ExpeditionDepartureService] 出发前自动存档未成功（{saveResult.Outcome} " +
@@ -821,14 +824,47 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
 
-            CampaignSession.Set(slotIndex, restore.State);
-            GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(restore.State); // FG2-FW-05：与读档一致，补解锁图鉴
-            GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(restore.State); // FG8-EXP-04
-            GameLogic.Narrative.NarrativeService.OnCampaignEntered(restore.State); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
-            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(restore.State); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
-            GameRoot.ReenterHomeValley(); // FG8-EXP-02：回滚只发生在运行中的世界里，重进家园不做主菜单启动（与 ResumeHomeValley 同一段）
+            EnterRestored(slotIndex, restore.State);
             Log.Info("[ExpeditionDepartureService] 已回滚到出发前档并重新进入归还谷地，未复制任何机器/货物/奖励。");
             return true;
+        }
+
+        /// <summary>FG15-SYS-02：出发前回滚基线后台写盘失败后中止的出发次数（自检读）。</summary>
+        public static int AbortedAfterBaselineWriteFailure { get; private set; }
+
+        /// <summary>
+        /// FG15-SYS-02（DEBT-FG15SYS01-05，“写盘完成回调里判失败，失败照旧中止出发”）：出发前档在后台写盘失败——没有可回滚的基线，
+        /// 按同步写时的结果处理：从内存快照（与写进文件的正文逐字相同）读回出发前的世界，提示“已取消出发”。还是这一局、这个槽位才处理（玩家已回主菜单 / 换档则不动）。
+        /// </summary>
+        private static void OnBaselineWritten(int slotIndex, string campaignId, CampaignState departed, SaveResult result, CampaignSaveService.SaveSnapshot snapshot)
+        {
+            CampaignState cur = CampaignSession.Current;
+            // 修复轮 2（审查 P2）：还得是出发时那一份会话状态——玩家在回调前读了同一局同一槽位的档（会话换成读回的新对象）时不再用出发前快照覆盖
+            if (result.Success || cur == null || !ReferenceEquals(cur, departed) || CampaignSession.ActiveSlotIndex != slotIndex || cur.CampaignId != campaignId)
+            {
+                return;
+            }
+            AbortedAfterBaselineWriteFailure++;
+            Log.Warning($"[ExpeditionDepartureService] 出发前档后台写盘失败（{result.Outcome} {result.Message}），中止出发：从内存快照读回出发前的世界。");
+            WorldSim.WorldSimulation.UnloadAll();
+            RestoreResult restore = CampaignRestoreOrchestrator.RestoreSnapshot(slotIndex, snapshot);
+            if (!restore.Success)
+            {
+                Log.Error($"[ExpeditionDepartureService] 中止出发失败：内存快照读回未成功（{restore.FailedStep} {restore.Message}）。建议从主菜单重新读档。");
+                return;
+            }
+            EnterRestored(slotIndex, restore.State);
+            Feedback.FeedbackCues.Raise(Feedback.FeedbackCueId.Failure, GameText.Get("exp.check.hard.autosave_failed"));
+        }
+
+        private static void EnterRestored(int slotIndex, CampaignState restored)
+        {
+            CampaignSession.Set(slotIndex, restored);
+            GameLogic.Campaign.Signal.FirmwareLibrary.OnCampaignEntered(restored); // FG2-FW-05：与读档一致，补解锁图鉴
+            GameLogic.Campaign.Env.HeritageService.OnCampaignEntered(restored); // FG8-EXP-04
+            GameLogic.Narrative.NarrativeService.OnCampaignEntered(restored); // FG9-NAR-01：新游戏触发开场演出、待播演出接着播（已玩过的存档不补播）
+            GameLogic.Campaign.Act1PacingService.OnCampaignEntered(restored); // FG9-ACT1-01：第一幕节奏台账（新游戏记 0:00；旧档按事实补记）
+            GameRoot.ReenterHomeValley(); // FG8-EXP-02：回滚只发生在运行中的世界里，重进家园不做主菜单启动（与 ResumeHomeValley 同一段）
         }
     }
 }

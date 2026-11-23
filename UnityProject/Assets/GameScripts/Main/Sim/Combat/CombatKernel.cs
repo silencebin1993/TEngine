@@ -3151,6 +3151,22 @@ namespace BinGames.Sim.Combat
         }
 
         /// <summary>从快照恢复。失败时内核保持原样不变（先完整解析到临时结构，全部通过才替换）。</summary>
+        /// <summary>
+        /// FG15-SYS-02（L14 发现）：待压实计数不进快照，读档后原来从 0 计，压实（槽位顺序）晚于连续运行，之后逐单位结算顺序不同、结果分叉。
+        /// 快照里留着的“阵亡即移除”单位正好是上次压实以来计过的那些（压实全部移走、主动移除当场压实），按它们重数一次即与连续运行一致。
+        /// </summary>
+        private static void RecountTombstones(ref CombatData d)
+        {
+            int n = 0;
+            for (int i = 0; i < d.Count; i++)
+            {
+                n += d.Id[i] > 0 && !d.IsAlive(i) && d.Has(i, CombatUnitFlags.RemoveOnDeath) ? 1 : 0;
+            }
+            CombatScalars s = d.Scalars[0];
+            s.Tombstones = n;
+            d.Scalars[0] = s;
+        }
+
         public CombatLoadResult Load(byte[] data)
         {
             if (data == null || data.Length == 0)
@@ -3285,6 +3301,7 @@ namespace BinGames.Sim.Combat
             CombatLogic.MigrateClarityPhase(ref staging); // EMG2-PHS-01（ADR ⑭ #5 #9、⑩ 15 → 17）：云端受寒 / 冻结 / 免疫窗 → 寒量与冻结相态；免疫位 → 抗性覆盖
             RemapProfiles(ref staging, _d.EmgProfileKeys);
             MergeOrphanCounts(ref staging); // EMG2-REACT-01：旧档里撤下反应的计数按键并进涌现可靠计数（在规则计数段读完之后，不占它的槽）
+            RecountTombstones(ref staging);
             _d.Dispose();
             _d = staging;
             SyncInstrActivation(); // EMG1-FUZZ-01：激活计数不进快照，读档后从 0 计

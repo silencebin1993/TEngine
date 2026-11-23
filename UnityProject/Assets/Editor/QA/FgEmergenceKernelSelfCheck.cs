@@ -178,6 +178,12 @@ namespace GameLogic.EditorTools
             Expect(unit <= 92 + 16 && (long)unit * 4096 <= 512 * 1024 && wreck <= 152 && wreck * EmgConst.DefaultWreckCapacity <= 38 * 1024,
                 $"每单位涌现段 {unit} 字节（阶段 2 全量；ADR ⑬ 约 92 字节 / 单位，容差 16；4096 单位 {unit * 4096 / 1024.0:F0} KB ≤ 512 KB）；残骸 {wreck} 字节 × {EmgConst.DefaultWreckCapacity} = {wreck * EmgConst.DefaultWreckCapacity / 1024.0:F1} KB ≤ 38 KB");
 
+            // FG15-SYS-02（DEBT-FG11ATTR01-01）：交互伤害归因的每单位固定占用（FG11-ATTR-01 时 156 B：状态位来源 32 格 + 相态来源 7 格）——状态位来源改稀疏表 + 32 位掩码；
+            // 实际容器长度按单位数的核对在 FgEmgDiscoverySelfCheck L14。
+            int attr = CombatKernel.AttrFixedBytesPerUnit;
+            Expect(attr <= 32 && (long)attr * 4096 <= 128 * 1024,
+                $"每单位归因固定占用 {attr} 字节（状态位来源掩码 4 + 相态来源 7 × 4，原 156；状态位来源只给有来源的位占稀疏表一行）；4096 单位 {attr * 4096 / 1024.0:F0} KB");
+
             EmgCompiled c = EmgCatalog.Current;
             var bad = new List<string>();
             for (int code = 1; code <= EmgConst.EventKinds; code++)

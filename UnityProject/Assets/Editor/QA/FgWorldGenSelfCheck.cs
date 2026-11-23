@@ -106,6 +106,7 @@ namespace GameLogic.EditorTools
                 Step(CheckOverlayAndHud);
                 Step(CheckPauseMenu);
                 Step(CheckActivityAndLeaks);
+                Step(CheckFeatureGolden); // FG15-SYS-02（DEBT-FG7ENV05-08）
             }
             catch (Exception e)
             {
@@ -2086,6 +2087,115 @@ namespace GameLogic.EditorTools
 
         private static string Tail(string output) =>
             string.Join(" / ", output.Replace("\r", string.Empty).Split('\n').Where(l => l.Length > 0).Reverse().Take(2).Reverse());
+
+        /// <summary>
+        /// FG15-SYS-02（DEBT-FG7ENV05-08）：点位落点对旧算法逐值对照。FG7-ENV-05 把落点判定改成“先查落点一格（矩形查询批量预取、Burst 整批采样），不可走才整批采样螺旋”；
+        /// 旧算法是螺旋里每一格各自在主线程单独采样（WorldGenKernel.SampleCell → 托管 WorldGenMath.Sample）、取第一个可走的格。这里对 2 个生成器版本 × 6 个种子，
+        /// 家园区内每个分布格的遗迹点 / 侦察巢候选按旧算法重算落点（2 版本 × 6 种子），与正式查询（WorldFeatures.Query）给出的点位逐个比 X / Y / 是否挪位 / 有无。
+        /// </summary>
+        private static void CheckFeatureGolden()
+        {
+            const System.Reflection.BindingFlags Priv = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+            System.Reflection.MethodInfo relicM = typeof(WorldFeatures).GetMethod("RelicCandidate", Priv);
+            System.Reflection.MethodInfo nestM = typeof(WorldFeatures).GetMethod("NestCandidate", Priv);
+            System.Reflection.MethodInfo noPostM = typeof(WorldFeatures).GetMethod("NoOutpostRadius", Priv);
+            int compared = 0, shiftedN = 0, mism = 0, contexts = 0;
+            string first = null;
+            foreach (int version in new[] { 3, 4 })
+            {
+                foreach (int seed in new[] { 42, 7395, 90001, 123, 2026, 31337 })
+                {
+                    WorldGenContext ctx = WorldGenContext.Build(seed, version, WorldSettings.Resolve(version, WorldGenContent.DefaultPresetId), new GridCell(0, 0), 32);
+                    if (ctx?.Row == null || !WorldFeatures.Enabled(ctx.Row))
+                    {
+                        continue;
+                    }
+                    contexts++;
+                    int c = ctx.Row.PoiCellSize, rad = ctx.Row.HomeZoneRadius;
+                    var got = new List<WorldFeature>();
+                    WorldFeatures.Query(ctx, -rad, -rad, rad, rad, got);
+                    var byId = new Dictionary<string, WorldFeature>();
+                    foreach (WorldFeature f in got)
+                    {
+                        byId[f.Id] = f;
+                    }
+                    WorldTerrainSource src = ctx.Source;
+                    byte cliff = src.Params.CodeCliff, water = src.Params.CodeWater;
+                    int shiftR = Math.Max(0, ctx.Row.PoiShiftRadius);
+                    int noPost = (int)noPostM.Invoke(null, new object[] { ctx });
+                    bool OldWalkable(ref int x, ref int y, out bool shifted)
+                    {
+                        var cells = new List<(int X, int Y)> { (x, y) };
+                        for (int ring = 1; ring <= shiftR; ring++)
+                        {
+                            for (int dx = -ring; dx <= ring; dx++)
+                            {
+                                cells.Add((x + dx, y - ring));
+                                cells.Add((x + dx, y + ring));
+                            }
+                            for (int dy = -ring + 1; dy <= ring - 1; dy++)
+                            {
+                                cells.Add((x - ring, y + dy));
+                                cells.Add((x + ring, y + dy));
+                            }
+                        }
+                        for (int i = 0; i < cells.Count; i++)
+                        {
+                            WorldGenKernel.SampleCell(in src.Params, cells[i].X, cells[i].Y, src.Rects, src.Zones, out byte terrain, out _);
+                            if (terrain != cliff && terrain != water)
+                            {
+                                shifted = i > 0;
+                                x = cells[i].X;
+                                y = cells[i].Y;
+                                return true;
+                            }
+                        }
+                        shifted = false;
+                        return false;
+                    }
+                    int m0 = (int)Math.Floor(-rad / (double)c), m1 = (int)Math.Floor(rad / (double)c);
+                    for (int my = m0; my <= m1; my++)
+                    {
+                        for (int mx = m0; mx <= m1; mx++)
+                        {
+                            foreach ((System.Reflection.MethodInfo m, string prefix) in new[] { (relicM, "relic"), (nestM, "nest") })
+                            {
+                                object[] args = { ctx, mx, my, 0, 0 };
+                                if (!(bool)m.Invoke(null, args))
+                                {
+                                    continue;
+                                }
+                                int x = (int)args[3], y = (int)args[4];
+                                bool ok = OldWalkable(ref x, ref y, out bool shifted);
+                                if (ok && prefix == "nest")
+                                {
+                                    long ddx = x - ctx.Core.X, ddy = y - ctx.Core.Y;
+                                    int d = (int)Math.Floor(Math.Sqrt(ddx * ddx + ddy * ddy));
+                                    ok = d > noPost && d <= rad;
+                                }
+                                bool inRect = x >= -rad && x <= rad && y >= -rad && y <= rad;
+                                byId.TryGetValue(prefix + ":" + mx + ":" + my, out WorldFeature f);
+                                if (ok && !inRect)
+                                {
+                                    continue; // 挪位后落到查询矩形外：正式查询按矩形过滤，不比
+                                }
+                                compared++;
+                                shiftedN += ok && shifted ? 1 : 0;
+                                bool same = ok ? f != null && f.X == x && f.Y == y && f.Shifted == shifted : f == null;
+                                if (!same)
+                                {
+                                    mism++;
+                                    first ??= $"v{version} 种子 {seed} {prefix}:{mx}:{my} 旧 {(ok ? $"({x},{y}) 挪位 {shifted}" : "无")} / 新 {(f != null ? $"({f.X},{f.Y}) 挪位 {f.Shifted}" : "无")}";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Line($"    读数：点位落点对旧算法逐值对照 {contexts} 个世界，比较 {compared} 个候选（其中挪位 {shiftedN}），不一致 {mism}");
+            Expect(contexts >= 4 && compared >= 100 && shiftedN >= 1 && mism == 0,
+                $"点位落点（遗迹点 / 侦察巢）对旧算法逐值相同（DEBT-FG7ENV05-08）：{contexts} 个世界 {compared} 个候选、挪位 {shiftedN} 个，不一致 {mism}{(first != null ? "；首个：" + first : string.Empty)}");
+        }
 
         private static void Expect(bool condition, string message)
         {

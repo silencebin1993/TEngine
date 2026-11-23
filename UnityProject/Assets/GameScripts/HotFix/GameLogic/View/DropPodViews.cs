@@ -47,12 +47,12 @@ namespace GameLogic.View
             {
                 float h = left <= DropPodService.LandingSeconds ? Mathf.Lerp(0.6f, CruiseHeight, (float)(left / Math.Max(0.01f, DropPodService.LandingSeconds))) : CruiseHeight;
                 GameObject pod = Pod(used);
-                pod.transform.position = new Vector3(pos.x, h, pos.y);
+                pod.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(pos.x, h, pos.y));
                 pod.SetActive(true);
                 LineRenderer lr = Trail(used);
                 lr.positionCount = 2;
-                lr.SetPosition(0, new Vector3(pos.x, 0.15f, pos.y));
-                lr.SetPosition(1, new Vector3(to.x, 0.15f, to.y));
+                lr.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(pos.x, 0.15f, pos.y)));
+                lr.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(to.x, 0.15f, to.y)));
                 lr.enabled = true;
                 used++;
             }

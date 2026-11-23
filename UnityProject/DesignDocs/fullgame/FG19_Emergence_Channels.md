@@ -1490,6 +1490,7 @@
 | `emg.fuse.anchor_max` | 4（接线每次结算最多接的落点数，独立接线与熔合内置接线共用，FG19A 申请 B3） | `emg.fuse.anchor_heat` | 1（接线每个落点的热量） |
 | `emg.part.prop_sum_cap` | 1.0（不同部件同写一个 `prop.*` 的合计上限 +100%） | `emg.stage` | 0（运行时总开关：已生效的 FG-EMG 阶段 0～4；与声明 `stageGate` 共同决定走新轨还是旧 `readFields`，回滚时调低，ADR-EMG-001 ⑮） |
 | `emg.patch.world_capacity` | 2048（全世界斑块总上限；热更层在地点载入 / 卸载时按已载入地点数重分各地点 `emg.patch.capacity`，FGR-EMG-202、ADR-EMG-001 ⑬） | `emg.bus.world_per_step` | 768（每世界步全部地点总线处理条数之和；同法重分各地点 `emg.bus.per_step`，FGR-EMG-202、ADR-EMG-001 ⑬） |
+| `emg.patch.site_home` / `emg.patch.site_minor` | 512 / 256（家园 / 室内场地的斑块容量；远征地点 = `emg.patch.capacity`；地点载入 / 卸载时按世界级总上限扣减后者，ADR-EMG-001 ⑬ 分摊表，FG15-SYS-02 落地） | `emg.bus.site_home` / `emg.bus.site_minor` | 128 / 64（家园 / 室内场地每步总线条数；远征地点 = `emg.bus.per_step`；同上） |
 | `emg.friendly.notify_seconds` | 1（同一受伤者 + 留下者 + 来源的友伤通知最短间隔，游戏秒，EMG2-DISC-01） | | |
 | `emg.era.blocks` | 12（爆炸反应装甲每台总块数，左右侧裙各 6；2～16 的偶数，FGR-EMG-233，2026-10-26 用户批准） | `emg.era.refill_seconds` | 3 秒（每补回 1 块的间隔，FGR-EMG-233） |
 | `emg.persist.clear_seconds` | 6 秒（清除工作单到现场后的工时，EMG2-PERSIST-01） | `emg.persist.clear_scrap` | 2（开单预留废料，完工才消耗） |

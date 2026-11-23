@@ -22,7 +22,11 @@ namespace GameLogic.Campaign
         /// <summary>在当前 <see cref="CampaignSession"/> 的活动槽位上执行一次自动存档。
         /// 没有活动战役时直接返回 <see cref="SaveOutcome.NoActiveCampaign"/>，不抛异常、不新建战役。</summary>
         /// <param name="toast">false = 调用方自己发更具体的提示（FG6-DEF-08 突袭预警自动存档），不再发通用的“自动存档”轻提示，免得一次存档两条提示。</param>
-        public static SaveResult SaveAuto(SaveReason reason, bool toast = true)
+        public static SaveResult SaveAuto(SaveReason reason, bool toast = true) => SaveAuto(reason, toast, null, null);
+
+        /// <summary>FG15-SYS-02（DEBT-FG15SYS01-05）：出发 / 到达回滚基线。游戏中走后台写盘：<paramref name="copyAfterTo"/> 在写盘线程里紧接着复制基线，
+        /// <paramref name="onWritten"/> 在主线程收到写盘结果（失败带内存快照，调用方据此中止出发 / 到达）；同步写（编辑模式自检）时两者都不用——返回值就是结果，调用方当场复制、判失败。</summary>
+        public static SaveResult SaveAuto(SaveReason reason, bool toast, string copyAfterTo, System.Action<SaveResult, CampaignSaveService.SaveSnapshot> onWritten)
         {
             if (!CampaignSession.HasActiveCampaign)
             {
@@ -32,7 +36,7 @@ namespace GameLogic.Campaign
 
             // FG15-SYS-01（FGR-SYS-001/002）：每次自动存档都顺带写一份轮换自动存档（本槽 3 份轮换）；游戏中主线程只拍快照、写盘放后台（不卡顿），
             // 只有出发 / 到达的回滚基线同步写（见 InBackground）。
-            SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason, SaveCopyKind.Auto, InBackground(reason));
+            SaveResult result = SaveWithExport(CampaignSession.ActiveSlotIndex, reason, SaveCopyKind.Auto, InBackground(reason), copyAfterTo, onWritten);
             if (result.Success && toast)
             {
                 // ER8-CONTENT-01：本作只有自动存档（SaveReason.Manual 仍是预留），每次写盘成功给一条轻提示，
@@ -59,15 +63,14 @@ namespace GameLogic.Campaign
         public static bool InGame => ForceBackgroundForTests || UnityEngine.Application.isPlaying;
 
         /// <summary>FGR-SYS-002“主线程阻塞 ≤ 100 毫秒，其余在后台完成”：游戏中的自动存档都在后台写盘。
-        /// 同步写的只有：新建战役、手动存档（主菜单 / 自检），以及出发 / 到达的回滚基线（ExpeditionDepartConfirm：调用方存完当场复制基线文件、失败就中止出发，
-        /// 必须写好才能往下走；主线程耗时登记 DEBT-FG15SYS01-05 交 FG15-SYS-02）。编辑模式的自检默认同步（没有每帧取结果的循环），<see cref="ForceBackgroundForTests"/> 打开后台路径。</summary>
+        /// 同步写的只有：新建战役、手动存档（主菜单 / 自检）。出发 / 到达的回滚基线（ExpeditionDepartConfirm）FG15-SYS-02 起也走后台（DEBT-FG15SYS01-05）：
+        /// 主线程只拍快照，到达前基线在写盘线程里紧接着复制，写盘失败在主线程回调里从内存快照中止出发 / 到达；排队中不被后来的快照取代。编辑模式的自检默认同步（没有每帧取结果的循环），<see cref="ForceBackgroundForTests"/> 打开后台路径。</summary>
         public static bool InBackground(SaveReason reason)
         {
             switch (reason)
             {
                 case SaveReason.NewCampaign:
                 case SaveReason.Manual:
-                case SaveReason.ExpeditionDepartConfirm:
                     return false;
             }
             return InGame;
@@ -95,7 +98,11 @@ namespace GameLogic.Campaign
         public static bool HasQuickSave() =>
             CampaignSession.HasActiveCampaign && CampaignSaveService.GetSlotMetadata(CampaignSaveService.QuickSlot(CampaignSession.ActiveSlotIndex)).State == CampaignSlotState.Ready;
 
-        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason, SaveCopyKind copy, bool background)
+        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason, SaveCopyKind copy, bool background) =>
+            SaveWithExport(slotIndex, reason, copy, background, null, null);
+
+        public static SaveResult SaveWithExport(int slotIndex, SaveReason reason, SaveCopyKind copy, bool background,
+            string copyAfterTo, System.Action<SaveResult, CampaignSaveService.SaveSnapshot> onWritten)
         {
             CampaignState state = CampaignSession.Current;
             if (state == null)
@@ -124,7 +131,7 @@ namespace GameLogic.Campaign
             SaveThumbnail.Shot thumb = SaveThumbnail.Capture(); // FG15-SYS-01：主线程只截 320×180 的像素，编码在写盘线程
             LastExportBreakdown = $"sync+export {syncMs:F1} / thumbnail capture {esw.Elapsed.TotalMilliseconds - syncMs:F1} ms"; // 只给性能证据读
             return background
-                ? CampaignSaveService.SaveInBackground(slotIndex, state, reason, thumb, copy)
+                ? CampaignSaveService.SaveInBackground(slotIndex, state, reason, thumb, copy, copyAfterTo, onWritten)
                 : CampaignSaveService.Save(slotIndex, state, reason, thumb, copy);
         }
     }

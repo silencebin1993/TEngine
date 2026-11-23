@@ -110,7 +110,12 @@ namespace GameLogic.Campaign
     /// </summary>
     public static class CampaignRestoreOrchestrator
     {
-        public static RestoreResult Restore(int slotIndex)
+        public static RestoreResult Restore(int slotIndex) => Restore(slotIndex, null);
+
+        /// <summary>FG15-SYS-02（DEBT-FG15SYS01-05）：从后台写盘失败时交回的内存快照读回（中止出发 / 到达），之后与 <see cref="Restore(int)"/> 同一流程。</summary>
+        public static RestoreResult RestoreSnapshot(int slotIndex, CampaignSaveService.SaveSnapshot snapshot) => Restore(slotIndex, snapshot ?? new CampaignSaveService.SaveSnapshot());
+
+        private static RestoreResult Restore(int slotIndex, CampaignSaveService.SaveSnapshot snapshot)
         {
             var warnings = new List<string>();
 
@@ -118,7 +123,7 @@ namespace GameLogic.Campaign
             LoadResult loadResult;
             try
             {
-                loadResult = CampaignSaveService.Load(slotIndex);
+                loadResult = snapshot != null ? CampaignSaveService.LoadSnapshot(slotIndex, snapshot) : CampaignSaveService.Load(slotIndex);
             }
             catch (Exception e)
             {

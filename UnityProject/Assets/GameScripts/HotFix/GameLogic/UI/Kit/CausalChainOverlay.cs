@@ -236,7 +236,7 @@ namespace GameLogic.UI.Kit
                     _screenBreaks.Add(_screenPts.Count);
                     foreach (Vector2 g in line.Points)
                     {
-                        Vector3 s = camera.WorldToScreenPoint(new Vector3(g.x, 0.2f, g.y));
+                        Vector3 s = camera.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(g.x, 0.2f, g.y)));
                         if (s.z > 0f)
                         {
                             _screenPts.Add(RuntimePanelUtils.ScreenToPanel(_panel.panel, new Vector2(s.x, Screen.height - s.y)));

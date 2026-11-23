@@ -144,7 +144,7 @@ namespace GameLogic.View
                 for (int i = 0; i < n; i++)
                 {
                     float a = i * Mathf.PI * 2f / n;
-                    _ring.SetPosition(i, new Vector3(center.x + Mathf.Cos(a) * radius, RingHeight, center.y + Mathf.Sin(a) * radius));
+                    _ring.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(center.x + Mathf.Cos(a) * radius, RingHeight, center.y + Mathf.Sin(a) * radius)));
                 }
             }
             _ring.enabled = true;
@@ -217,7 +217,7 @@ namespace GameLogic.View
                             site.UnbindView(h.Unit);
                         }
                         // 先摆到当前位置 / 朝向（本帧画面同步之前不在原点闪一下），之后每帧由画面同步写入。
-                        h.Root.position = new Vector3(us.Position.x, HeadHeight, us.Position.y);
+                        h.Root.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(us.Position.x, HeadHeight, us.Position.y));
                         if (us.Facing.sqrMagnitude > 1e-6f)
                         {
                             h.Root.rotation = Quaternion.LookRotation(new Vector3(us.Facing.x, 0f, us.Facing.y), Vector3.up);

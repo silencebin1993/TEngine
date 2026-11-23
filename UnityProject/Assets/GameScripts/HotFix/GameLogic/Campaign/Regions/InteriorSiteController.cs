@@ -626,6 +626,7 @@ namespace GameLogic.Campaign.Regions
         private void BuildVisuals(CampaignState state)
         {
             _root = new GameObject("[InteriorRoot_" + SiteId + "]");
+            _root.transform.position = BinGames.Sim.ViewOrigin.ToView(Vector3.zero); // FG15-SYS-02：根物体放在世界原点的画面位置（子物体用世界坐标作局部坐标）
             Color floor = new Color(0.16f, 0.17f, 0.2f);
             Color wall = new Color(0.32f, 0.34f, 0.38f);
             Color pillar = new Color(0.42f, 0.44f, 0.5f);
@@ -644,7 +645,7 @@ namespace GameLogic.Campaign.Regions
             GameObject ring = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             ring.name = "InteriorExitMarker";
             ring.transform.SetParent(_root.transform, false);
-            ring.transform.position = new Vector3(ExitPoint.x, 0.03f, ExitPoint.y);
+            ring.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(ExitPoint.x, 0.03f, ExitPoint.y));
             ring.transform.localScale = new Vector3(6f, 0.03f, 6f);
             UnityObjects.Release(ring.GetComponent<Collider>());
             ring.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(new Color(0.3f, 0.75f, 0.95f, 0.6f));
@@ -669,7 +670,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Cube);
             go.name = name;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = at;
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(at);
             go.transform.localScale = size;
             if (!collider)
             {
@@ -688,7 +689,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Machine_" + machine.ChassisId + "_" + machine.LogicId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(at.x, 1f, at.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = new Color(0.72f, 0.82f, 0.9f);
             renderer.sharedMaterial = ViewMaterials.Standard(baseColor);

@@ -265,7 +265,7 @@ namespace GameLogic.View
                 for (int i = 0; i < RingSegments; i++)
                 {
                     float a = i * Mathf.PI * 2f / RingSegments;
-                    _ring.SetPosition(i, new Vector3(_ringCenter.x + Mathf.Cos(a) * _ringRadius, RingHeight, _ringCenter.y + Mathf.Sin(a) * _ringRadius));
+                    _ring.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(_ringCenter.x + Mathf.Cos(a) * _ringRadius, RingHeight, _ringCenter.y + Mathf.Sin(a) * _ringRadius)));
                 }
             }
             _ring.enabled = true;

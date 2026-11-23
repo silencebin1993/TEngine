@@ -227,7 +227,7 @@ namespace GameLogic.Campaign.Regions
                     GameObject wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
                     wall.name = "Poi_" + p.Id;
                     wall.transform.SetParent(_root.transform, false);
-                    wall.transform.position = new Vector3(at.x, 1.5f, at.y);
+                    wall.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1.5f, at.y));
                     wall.transform.localScale = new Vector3(0.3f, 3f, 5f);
                     UnityObjects.Release(wall.GetComponent<Collider>());
                     wall.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(new Color(0.85f, 0.85f, 0.7f));
@@ -377,7 +377,7 @@ namespace GameLogic.Campaign.Regions
             GameObject go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
             go.name = "Enemy_" + e.EnemyInstanceId;
             go.transform.SetParent(_root.transform, false);
-            go.transform.position = new Vector3(at.x, 1f, at.y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 1f, at.y));
             Renderer renderer = go.GetComponent<Renderer>();
             Color baseColor = EnemyDefs.TryGet(e.EnemyTypeId, out MechEnemy row) ? EnemyDefs.ViewColor(row) : Color.magenta;
             renderer.sharedMaterial = ViewMaterials.Standard(baseColor);
@@ -416,7 +416,7 @@ namespace GameLogic.Campaign.Regions
             ring.SetActive(armed && sl.Deflect != 0);
             if (_combat.TryGetEnemyPosition(e.EnemyInstanceId, out Vector2 at))
             {
-                ring.transform.position = new Vector3(at.x, 0.05f, at.y);
+                ring.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(at.x, 0.05f, at.y));
             }
             float rad = Mathf.Min(p.DeflectRadius, 60f);
             ring.transform.localScale = new Vector3(rad * 2f, sl.Deflect == 2 ? 0.04f : 0.02f, rad * 2f);
@@ -450,8 +450,8 @@ namespace GameLogic.Campaign.Regions
             if (_combat.TryGetEnemyPosition(e.EnemyInstanceId, out Vector2 from) && _combat.TryGetUnitPosition(s2.SeverTarget, out double2 to))
             {
                 beam.enabled = true;
-                beam.SetPosition(0, new Vector3(from.x, 1.4f, from.y));
-                beam.SetPosition(1, new Vector3((float)to.x, 1f, (float)to.y));
+                beam.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(from.x, 1.4f, from.y)));
+                beam.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3((float)to.x, 1f, (float)to.y)));
             }
         }
     }

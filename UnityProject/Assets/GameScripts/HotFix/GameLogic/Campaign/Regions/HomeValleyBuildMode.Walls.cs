@@ -97,7 +97,7 @@ namespace GameLogic.Campaign.Regions
                     lr.positionCount = line.Count;
                     for (int i = 0; i < line.Count; i++)
                     {
-                        lr.SetPosition(i, new Vector3(line[i].X, 0.45f, line[i].Y));
+                        lr.SetPosition(i, BinGames.Sim.ViewOrigin.ToView(new Vector3(line[i].X, 0.45f, line[i].Y)));
                     }
                     // 堵死 = 品红（另有状态栏文字“会把敌人的来路完全堵死”）；改道 = 橙色。颜色之外有文字，色盲安全（B15）。
                     Color c = route.Sealed ? new Color(0.95f, 0.2f, 0.85f, 0.95f) : new Color(1f, 0.55f, 0.1f, 0.95f);
@@ -165,7 +165,7 @@ namespace GameLogic.Campaign.Regions
                 {
                     bar.localScale = new Vector3(1.4f, 0.15f, 0.3f);
                 }
-                _cross.transform.position = new Vector3(bad.X, 0.6f, bad.Y);
+                _cross.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(bad.X, 0.6f, bad.Y));
             }
             return tile;
         }

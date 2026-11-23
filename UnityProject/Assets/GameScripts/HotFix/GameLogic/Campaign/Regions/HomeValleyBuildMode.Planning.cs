@@ -387,7 +387,7 @@ namespace GameLogic.Campaign.Regions
             }
             GameObject go = _marks[index];
             go.SetActive(true);
-            go.transform.position = new Vector3(cell.X, 0.7f, cell.Y);
+            go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(cell.X, 0.7f, cell.Y));
         }
 
         // ── 升级 ────────────────────────────────────────────────────────────────

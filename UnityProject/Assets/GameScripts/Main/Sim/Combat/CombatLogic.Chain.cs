@@ -1,3 +1,4 @@
+using Unity.Collections;
 using Unity.Mathematics;
 
 namespace BinGames.Sim.Combat
@@ -52,17 +53,34 @@ namespace BinGames.Sim.Combat
             }
             int at = chain & (EmgConst.ChainTally - 1);
             int4 t = d.EmgChainTally[at];
+            bool over = false;
             if (t.x != chain)
             {
                 if (t.x > chain)
                 {
-                    // EMGR-TALLY-01：同格已是更新的链——较早这条链停计，不清新链的计数与封印位（不会因此误发），丢弃次数可见（DEBT-EMGRTALLY01-01）
-                    EmgScalars es = d.EmgS[0];
-                    es.TallyEvicted++;
-                    d.EmgS[0] = es;
-                    return;
+                    // FG15-SYS-02（DEBT-EMGRTALLY01-01）：同格已是更新的链——较早这条链走溢出表（被挤出时带着计数 / 封印进去的，或从没登记过的新开一行），不清新链的计数
+                    if (!d.EmgTallyOver.TryGetValue(chain, out t))
+                    {
+                        if (chain <= d.EmgTallyDropMax[0])
+                        {
+                            // 溢出表满时丢掉过的旧链（封印位可能随之丢了）：停计、不误发，丢弃次数可见
+                            EmgScalars es = d.EmgS[0];
+                            es.TallyEvicted++;
+                            d.EmgS[0] = es;
+                            return;
+                        }
+                        t = new int4(chain, 0, 0, 0);
+                    }
+                    over = true;
                 }
-                t = new int4(chain, 0, 0, 0);
+                else
+                {
+                    if (t.x != 0 && (t.y != 0 || t.z != 0 || t.w != 0))
+                    {
+                        EmgTallyPark(ref d, t); // 被新链挤出的旧链带着计数 / 封印进溢出表（全 0 的行丢了也一样：再来时从 0 新开）
+                    }
+                    t = new int4(chain, 0, 0, 0);
+                }
             }
             if ((t.z & EmgConst.TallyExtremeBit) != 0)
             {
@@ -75,7 +93,7 @@ namespace BinGames.Sim.Combat
                 if (s >= 0 && d.Faction[s] != (byte)CombatFaction.Player)
                 {
                     t.z |= EmgConst.TallyExtremeBit;
-                    d.EmgChainTally[at] = t;
+                    EmgTallyPut(ref d, at, t, over);
                     return;
                 }
             }
@@ -94,7 +112,52 @@ namespace BinGames.Sim.Combat
                 t.z |= EmgConst.TallyExtremeBit;
                 d.EmgExtreme.Add(t.w);
             }
-            d.EmgChainTally[at] = t;
+            EmgTallyPut(ref d, at, t, over);
+        }
+
+        private static void EmgTallyPut(ref CombatData d, int at, int4 t, bool over)
+        {
+            if (!over)
+            {
+                d.EmgChainTally[at] = t;
+                return;
+            }
+            if (!d.EmgTallyOver.ContainsKey(t.x) && d.EmgTallyOver.Count() >= EmgConst.ChainTallyOverflow)
+            {
+                EmgTallyPrune(ref d);
+            }
+            d.EmgTallyOver[t.x] = t;
+        }
+
+        private static void EmgTallyPark(ref CombatData d, int4 t)
+        {
+            if (d.EmgTallyOver.Count() >= EmgConst.ChainTallyOverflow)
+            {
+                EmgTallyPrune(ref d);
+            }
+            d.EmgTallyOver[t.x] = t;
+        }
+
+        /// <summary>溢出表满：丢掉链号较小的一半（O(表长)，摊到每次进表 O(1)），丢掉的最大链号记下（这些链再来按丢弃计数、不误发）。</summary>
+        private static void EmgTallyPrune(ref CombatData d)
+        {
+            var keys = d.EmgTallyOver.GetKeyArray(Allocator.Temp);
+            int lo = int.MaxValue, hi = int.MinValue;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                lo = math.min(lo, keys[i]);
+                hi = math.max(hi, keys[i]);
+            }
+            int cut = lo + (int)(((long)hi - lo) / 2);
+            for (int i = 0; i < keys.Length; i++)
+            {
+                if (keys[i] <= cut)
+                {
+                    d.EmgTallyOver.Remove(keys[i]);
+                    d.EmgTallyDropMax[0] = math.max(d.EmgTallyDropMax[0], keys[i]);
+                }
+            }
+            keys.Dispose();
         }
 
         /// <summary>出手者槽位 → 单位 ID（−1 / 越界 = 0）。</summary>

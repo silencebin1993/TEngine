@@ -532,7 +532,7 @@ namespace GameLogic.Campaign.Combat
         {
             ground = Vector2.zero;
             var plane = new Plane(Vector3.up, Vector3.zero);
-            Ray ray = camera.ScreenPointToRay(screen);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(camera, screen);
             if (!plane.Raycast(ray, out float enter))
             {
                 return false;

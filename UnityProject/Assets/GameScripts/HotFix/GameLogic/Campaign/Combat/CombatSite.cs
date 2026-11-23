@@ -510,6 +510,32 @@ namespace GameLogic.Campaign.Combat
             return c;
         }
 
+        /// <summary>FG15-SYS-02（DEBT-EMG2MAT01-05，FGR-EMG-202 / ADR-EMG-001 ⑬）：地点在世界级分摊里的角色。</summary>
+        public const int EmgRoleHome = 0, EmgRoleExpedition = 1, EmgRoleMinor = 2;
+
+        /// <summary>
+        /// 按 ADR-EMG-001 ⑬ 分摊表给已载入地点下发斑块容量与每步总线额度：家园 emg.patch.site_home / emg.bus.site_home，远征地点 emg.patch.capacity / emg.bus.per_step，
+        /// 室内场地 emg.patch.site_minor / emg.bus.site_minor；合计超过世界级总上限（emg.patch.world_capacity / emg.bus.world_per_step）时按 <paramref name="sites"/> 的顺序
+        /// （家园 → 远征地点 → 室内，调用方排好）扣减后者，最少各留 1。只在地点载入 / 卸载时调（O(地点数)），各地点额度未用完不转让（确定性）。
+        /// </summary>
+        public static void ApplyEmgWorldBudgets(IReadOnlyList<CombatSite> sites, IReadOnlyList<int> roles)
+        {
+            int patchLeft = Math.Max(0, (int)Math.Round(Tuning("emg.patch.world_capacity", 2048f)));
+            int busLeft = Math.Max(0, (int)Math.Round(Tuning("emg.bus.world_per_step", 768f)));
+            int reserve = (int)Math.Round(Tuning("emg.patch.reserve_world", EmgMatterConst.DefaultReserveWorld));
+            for (int i = 0; i < sites.Count; i++)
+            {
+                int role = roles[i];
+                int wantPatch = (int)Math.Round(role == EmgRoleHome ? Tuning("emg.patch.site_home", 512f) : role == EmgRoleExpedition ? Tuning("emg.patch.capacity", EmgMatterConst.DefaultCapacity) : Tuning("emg.patch.site_minor", 256f));
+                int wantBus = (int)Math.Round(role == EmgRoleHome ? Tuning("emg.bus.site_home", 128f) : role == EmgRoleExpedition ? Tuning("emg.bus.per_step", EmgConst.DefaultBusPerStep) : Tuning("emg.bus.site_minor", 64f));
+                int patch = Math.Max(1, Math.Min(wantPatch, patchLeft));
+                int bus = Math.Max(1, Math.Min(wantBus, busLeft));
+                patchLeft = Math.Max(0, patchLeft - patch);
+                busLeft = Math.Max(0, busLeft - bus);
+                sites[i].Kernel.SetEmgBudget(patch, reserve, bus);
+            }
+        }
+
         public static float Tuning(string id, float fallback)
         {
             if (GridContent.TryGetTuning(id, out float v))
@@ -3801,7 +3827,7 @@ namespace GameLogic.Campaign.Combat
             {
                 return;
             }
-            Sync?.Apply(Kernel, alpha, double2.zero);
+            Sync?.Apply(Kernel, alpha, BinGames.Sim.ViewOrigin.Cells); // FG15-SYS-02：浮动画面原点
             if (Renderer == null)
             {
                 Renderer = new CombatRenderer();
@@ -3815,7 +3841,7 @@ namespace GameLogic.Campaign.Combat
                 // FG6-DEF-05（FGR-DEF-030）：头顶职能图标的形状 / 颜色来自 fg.TbSiegeRole（攻城服务写入）。
                 Renderer.SetSiegeVisuals(SiegeRoleVisuals);
             }
-            Renderer.Draw(Kernel, camera, alpha, double2.zero, _unitHeight);
+            Renderer.Draw(Kernel, camera, alpha, BinGames.Sim.ViewOrigin.Cells, _unitHeight); // FG15-SYS-02：浮动画面原点
             if (!_statusTagHookRaised && Renderer.LastIconInstances > 0)
             {
                 _statusTagHookRaised = true;

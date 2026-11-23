@@ -280,7 +280,7 @@ namespace GameLogic.EditorTools
             return s;
         }
 
-        private static BuildingRecord PlaceStation(CampaignState s, Vector2 center, float from, float to, int pods, float fuelLiters)
+        internal static BuildingRecord PlaceStation(CampaignState s, Vector2 center, float from, float to, int pods, float fuelLiters)
         {
             BuildingRecord st = PlaceNear(s, Station, center, from, to);
             if (st == null)
@@ -361,7 +361,7 @@ namespace GameLogic.EditorTools
             return null;
         }
 
-        private static Vector2 CoreCenter(CampaignState s)
+        internal static Vector2 CoreCenter(CampaignState s)
         {
             HomeGridService.TryGetCoreBounds(s, out GridCell a, out GridCell b);
             return new Vector2((a.X + b.X) * 0.5f, (a.Y + b.Y) * 0.5f);
@@ -399,7 +399,7 @@ namespace GameLogic.EditorTools
         private static Vector2 Beside(CampaignState s, BuildingRecord st, int i) => DropPodService.GroundSpot(s, st.Position, i, 5f);
 
         /// <summary>离 <paramref name="from"/> [minD, maxD] 格、能降落的落点（先揭开那一片，再按着陆条件查；按种子地形找，B25）。</summary>
-        private static Vector2? FindTarget(CampaignState s, Vector2 from, float minD, float maxD, int skip = 0)
+        internal static Vector2? FindTarget(CampaignState s, Vector2 from, float minD, float maxD, int skip = 0)
         {
             int found = 0;
             for (float d = minD; d <= maxD; d += 15f)

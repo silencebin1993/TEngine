@@ -32,6 +32,12 @@ namespace BinGames.Sim.Combat
         public NativeArray<int> PatchHead;
         public NativeList<int4> PatchNodes;
         internal const int PatchHeadSlots = 2048;
+        /// <summary>FG15-SYS-02（DEBT-FG2FW02-06）：区域节拍用的单位格链（与本哈希同一 4 米格；x, y = 格，z = 单位槽位，w = 下一节点；头表存“节点号 + 1”）。
+        /// 每次 StepZones 按需重建，不进快照；<see cref="UnitCand"/> = 一块区域的候选单位（升序）。</summary>
+        public NativeArray<int> UnitHead;
+        public NativeList<int4> UnitNodes;
+        public NativeList<int> UnitCand;
+        internal const int UnitHeadSlots = 1024;
         private const int WreckHeadSlots = 1024;
         private const int WreckFineWords = 256;
         private const int FieldMaskSlots = 1024;
@@ -47,6 +53,9 @@ namespace BinGames.Sim.Combat
             FieldMasks = new NativeArray<ulong>(FieldMaskSlots, Allocator.Persistent),
             PatchHead = new NativeArray<int>(PatchHeadSlots, Allocator.Persistent),
             PatchNodes = new NativeList<int4>(64, Allocator.Persistent),
+            UnitHead = new NativeArray<int>(UnitHeadSlots, Allocator.Persistent),
+            UnitNodes = new NativeList<int4>(64, Allocator.Persistent),
+            UnitCand = new NativeList<int>(64, Allocator.Persistent),
         };
 
         public void Dispose()
@@ -60,11 +69,32 @@ namespace BinGames.Sim.Combat
             FieldMasks.Dispose();
             PatchHead.Dispose();
             PatchNodes.Dispose();
+            UnitHead.Dispose();
+            UnitNodes.Dispose();
+            UnitCand.Dispose();
         }
 
         internal static int CellOf(double v) => (int)math.floor(v / Cell);
 
         internal static long Key(int cx, int cy) => ((long)cx << 32) ^ (uint)cy;
+
+        internal static int UnitSlot(int cx, int cy) => (int)(((uint)cx * 73856093u ^ (uint)cy * 19349663u) & (UnitHeadSlots - 1u));
+
+        internal void ClearUnitCells()
+        {
+            UnitNodes.Clear();
+            for (int i = 0; i < UnitHeadSlots; i++)
+            {
+                UnitHead[i] = 0;
+            }
+        }
+
+        internal void AddUnitCell(int cx, int cy, int unit)
+        {
+            int slot = UnitSlot(cx, cy);
+            UnitNodes.Add(new int4(cx, cy, unit, UnitHead[slot] - 1));
+            UnitHead[slot] = UnitNodes.Length;
+        }
 
         internal static int WreckSlot(int cx, int cy) => (int)(((uint)cx * 73856093u ^ (uint)cy * 19349663u) & (WreckHeadSlots - 1u));
 

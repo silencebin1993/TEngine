@@ -510,7 +510,7 @@ namespace BinGames.Sim.Combat
                     continue;
                 }
                 double2 want = pos + v * dt;
-                d.Pos[u] = ent ? EmgDisplaceUnit(ref d, u, pos, want, d.SlotOf(pusher), cause, (float)sp) : MoveCollide(ref d, u, pos, want);
+                d.Pos[u] = ent ? EmgDisplaceUnit(ref d, u, pos, want, d.SlotOf(pusher), cause, (float)sp) : MoveCollide(ref d, u, pos, want); d.PosEpoch++;
                 pushes++;
             }
             for (int w = 0; w < d.Wrecks.Length; w++)

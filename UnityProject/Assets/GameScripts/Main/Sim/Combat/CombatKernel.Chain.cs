@@ -270,9 +270,23 @@ namespace BinGames.Sim.Combat
         /// <summary>测试（EMGR-TALLY-01）：“极限”计数表整表副本（存读档前后逐位比较）。</summary>
         public int4[] EmgChainTallyForTests() => _d.EmgChainTally.ToArray();
 
+        /// <summary>FG15-SYS-02（DEBT-EMGRTALLY01-01）：计数溢出表（被新链挤出格的旧链）行数、某条链在溢出表里的行、溢出丢弃下限（自检）。</summary>
+        public int EmgTallyOverCount => _d.EmgTallyOver.Count();
+
+        public bool TryGetTallyOverForTests(int chain, out int4 row) => _d.EmgTallyOver.TryGetValue(chain, out row);
+
+        public int EmgTallyDropMaxForTests => _d.EmgTallyDropMax[0];
+
         /// <summary>测试 / 调试：直接写一条环记录（与内核写入同一函数）。</summary>
         public void EmgChainLogForTests(EmgChainNode kind, int chain, int srcUnit, int other = 0, int parent = 0, int key = 0, byte depth = 0, bool codex = true) =>
             CombatLogic.EmgChainLog(ref _d, kind, chain, depth, key, srcUnit, double2.zero, other, 0, parent, codex);
+
+        /// <summary>测试用（FG15-SYS-02）：同 <see cref="EmgChainLogForTests"/>，但像内核一步那样写在 CombatData 的值副本上（CombatStepJob { D = _d }）——值字段的修改带不回主线程，只有原生容器里的带得回。</summary>
+        public void EmgChainLogOnJobCopyForTests(EmgChainNode kind, int chain, int srcUnit, int key = 0, byte depth = 0)
+        {
+            CombatData copy = _d;
+            CombatLogic.EmgChainLog(ref copy, kind, chain, depth, key, srcUnit, double2.zero);
+        }
 
         // ─────────────────────────────── 悬停拾取（FGR-EMG-181；逐实体扫描在内核，热更层只拼一件的文字）───────────────────────────────
 

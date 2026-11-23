@@ -50,7 +50,7 @@ namespace GameLogic.EditorTools
     {
         public const string SceneId = "FG-PERF-LATE";
         /// <summary>场景搭法的版本：改了场景内容（数量、布局、种子）就 +1，旧基线只报告不判定。</summary>
-        public const int SceneVersion = 4; // v4（FG7-ENV-03）：静默夜 + 沙暴同时进行
+        public const int SceneVersion = 5; // v4（FG7-ENV-03）：静默夜 + 沙暴同时进行；v5（FG15-SYS-02，FG-GAP-139）：另有行军中的远征队与在飞的投送舱
         public const int Seed = 42;
         public const double RegressionLimit = 0.10;
 
@@ -704,7 +704,7 @@ namespace GameLogic.EditorTools
             CampaignSession.Set(RunSlot, r.State);
             HomeValleyController home = WorldSimulation.LoadHome(resume: true);
             sw.Stop();
-            Line($"  · 读档分项（只报告）：恢复存档 {restoreOnlyMs:F1} ms（其中探测 + 整份校验 {CampaignSaveService.LastLoadProbeMs:F1} ms）、载入家园 {sw.Elapsed.TotalMilliseconds - restoreOnlyMs:F1} ms；已探索圆 {r.State?.Grid?.Explored?.Length ?? 0} 个");
+            Line($"  · 读档分项（只报告）：恢复存档 {restoreOnlyMs:F1} ms（其中探测 + 整份校验 {CampaignSaveService.LastLoadProbeMs:F1} ms，校验和 {CampaignSaveService.LastLoadChecksumMs:F1} ms）、载入家园 {sw.Elapsed.TotalMilliseconds - restoreOnlyMs:F1} ms；已探索圆 {r.State?.Grid?.Explored?.Length ?? 0} 个");
             if (home == null || !home.IsLoaded || home.Combat == null || !BeltNetworkService.IsRunning)
             {
                 Fail("读性能测试存档后家园 / 战斗内核 / 传送带内核没有载入");
@@ -735,6 +735,10 @@ namespace GameLogic.EditorTools
             {
                 Add(cur, "chunk_load_ms", "区块同步生成（每块）", "ms", sw.Elapsed.TotalMilliseconds / generated, true, 0.2);
             }
+
+            // 场景 v5（FG15-SYS-02，FG-GAP-139）：正式版后期会同时有远征、投送与家园防御——静默夜开始前（静默夜里不能发射）走正式入口派一支远征队出发行军、
+            // 建一座投送站发射一批投送舱（落点 1500～2600 格，单程 30 秒以上：整个稳态测量期间都在飞 / 返航）；行军路线 300 格以上、3.5 格/秒，测量期间走不到集结点。
+            SetupSceneV5(s);
 
             // 场景 v4（FG7-ENV-02 / 03，承接 DEBT-FG0QA01-03；FGR-SYS-043“后期大基地 + 最大规模突袭 + 沙暴 + 静默夜同时发生”）：
             // 测试捷径只排日程——静默夜与沙暴都排到眼前、持续一个游戏小时以上，预警 / 开始 / 效果（断链、传送带减速、太阳能、炮塔探测、画面不计）走正式推进；
@@ -898,7 +902,11 @@ namespace GameLogic.EditorTools
                  $"{(dirtyWindows > 0 ? $"（{allocWindows} 个窗口里 {dirtyWindows} 个发生过 GC，不计入）" : string.Empty)}；托管堆 {monoMb:F0} MB");
             Line($"  · 预算参照（FGR-SYS-042，推荐配置 60 帧、1x 一帧一步；Editor 数字不等于真机，不判定）：热更层 {hotfixPerStep:F2} / 4 ms{Over(hotfixPerStep, 4)}；" +
                  $"内核（物流 + 战斗）{combatPerStep + beltPerStep + pipePerStep:F2} / 6 ms{Over(combatPerStep + beltPerStep + pipePerStep, 6)}；每帧托管分配 {allocPerStep:F0} B（目标接近 0）");
-            Line("  · 场景里还没有的（不判定，见 DEBT-FG0QA01-*）：远征队（FG8-EXP-02，行进队伍目前只有突袭）；GPU 帧时间（-nographics）。v4 起静默夜与沙暴同时进行（FG7-ENV-03）");
+            int podsFlyingEnd = DropPodService.Pods(s).Count(x => x.State == DropPodService.StateOutbound || x.State == DropPodService.StateReturning);
+            bool marchingEnd = ExpeditionMarchService.IsAway(s) && ExpeditionMarchService.Current(s).Phase == ExpeditionMarchService.PhaseOutbound;
+            Expect(marchingEnd && podsFlyingEnd > 0,
+                $"场景 v5：稳态测量结束时远征队仍在行军（{marchingEnd}）、投送舱仍在飞 / 返航 {podsFlyingEnd} 个——测量全程覆盖远征 + 投送 + 家园防御");
+            Line("  · 场景里还没有的（不判定）：GPU 帧时间（-nographics，渲染侧待 FG15-PL-01 URP 基线 / FG15-ACC-05）。v4 起静默夜与沙暴同时进行（FG7-ENV-03），v5 起另有行军中的远征队与在飞投送舱（FG-GAP-139）");
 
             Expect(buildings >= BuildingTarget && machines >= MachineTarget && beltCells >= BeltCellTarget && pipeCells >= PipeCellTarget && turrets >= TurretTarget
                    && chunks >= ChunkTarget && transit >= TransitTarget,
@@ -907,7 +915,79 @@ namespace GameLogic.EditorTools
                 $"战斗在持续：测量开始时敌人 {enemies}（开打后会有伤亡，≥ {EnemyTarget * 3 / 4}），测量期间弹体峰值 {peakProj:N0}（≥ {ProjectileTarget:N0}）");
             Expect(allocValid,
                 $"托管分配读数有效：{allocWindows} 个 {windowSteps} 步的窗口里 {allocWindows - dirtyWindows} 个没有发生 GC（至少一半；否则分配多到频繁触发 GC，堆增量读数偏低不能拿去比基线）");
+            MeasureNegativeCombo(s, home);
             return true;
+        }
+
+        private static void SetupSceneV5(CampaignState s)
+        {
+            int[] home = MachineRegistry.AllRecords.Where(r => r != null && r.IsAlive && r.RegionId == HomeValleyLayout.RegionId).Select(r => r.LogicId).OrderBy(x => x).ToArray();
+            if (home.Length < 2)
+            {
+                Fail($"场景 v5 前提：家园里活着的机器只有 {home.Length} 台（要 2 台：2 台远征、1 台随投送舱）");
+                return;
+            }
+            // 前提（与 FgExpeditionMarchSelfCheck 夹具同一做法）：目的地区域开放、锚点已解析
+            RegionRecord ruins = FracturedCityRegion.Find(s);
+            if (ruins != null && ruins.State == RegionState.Locked)
+            {
+                ruins.State = RegionState.Available;
+            }
+            ExpeditionSiteAnchors.EnsureResolved(s);
+            ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(new[] { home[0], home[1] }, true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
+            CampaignState now = CampaignSession.Current;
+            GameLogic.Campaign.Economy.ResearchService.CompleteForTests(now, "expedition.drop_station");
+            BuildingRecord st = FgDropPodSelfCheck.PlaceStation(now, FgDropPodSelfCheck.CoreCenter(now), 10f, 60f, 6, 1000f);
+            Vector2? target = st != null ? (FgDropPodSelfCheck.FindTarget(now, st.Position, 2000f, 2600f) ?? FgDropPodSelfCheck.FindTarget(now, st.Position, 1500f, 2000f)) : null; // 单程 30～48 秒：整个稳态测量（约 2,000 步 = 33 秒）都在飞
+            GameLogic.Campaign.Economy.HomeInventory.Add(now, GameLogic.Campaign.Economy.ItemCatalog.Find("structural"), 100, clampToSpace: false);
+            DropPreview pv = null;
+            bool launched = target.HasValue && DropPodService.TryLaunch(now, st.BuildingId, target.Value, Array.Empty<int>(), "structural", 60, out pv); // 只装货（随舱机器要先走到站旁 12 格内，不是本场景要量的）
+            WorldSimulation.StepMany(2);
+            int flying = DropPodService.Pods(now).Count(x => x.State == DropPodService.StateOutbound);
+            ExpeditionMarchState m = ExpeditionMarchService.Current(now);
+            Expect(dep.Success && m.Phase == ExpeditionMarchService.PhaseOutbound && launched && flying >= 2,
+                $"场景 v5：远征队 2 台出发行军（{dep.Outcome}{(dep.Reasons != null && dep.Reasons.Length > 0 ? "：" + string.Join("，", dep.Reasons) : string.Empty)}，阶段 {m?.Phase}，路线 {ExpeditionSiteAnchors.RouteLength(now, FracturedCityLayout.RegionId):0} 格）、投送站发射 {flying} 个投送舱（{(launched ? "已发射" : "没发射：" + (st == null ? "投送站没建成" : pv?.Code + " " + pv?.Reason))}，落点距离 {(target.HasValue && st != null ? Vector2.Distance(st.Position, target.Value) : -1):0} 格，只装 60 个结构材 = 3 舱；站容量 4 舱）");
+        }
+
+        /// <summary>
+        /// FG15-SYS-02 卡片负向（FGR-SYS-043 + FGR-EMG-203）：后期大基地 + 最大突袭 + 沙暴 + 静默夜（上面 v4 局面）同时再把涌现满载（120 台带程序机器、残骸 256、斑块 1024、
+        /// 活跃场 64、无人机满额、事件每步 512 条，与 FgEmergenceFuzzSelfCheck H 段 / FgPostgamePerfProbe B 同一份 AttachFullLoad）叠到家园内核上，走正式世界步 600 步。
+        /// 只报告、不进基线文件（叠加负载不是 FG-PERF-LATE 的固定局面）；判定：不抛异常、四项同时成立、内核每步都推进；帧耗按 120 帧（8.33 ms）与 60 帧（16.7 ms）两种口径并列，超线记警告。
+        /// </summary>
+        private static void MeasureNegativeCombo(CampaignState s, HomeValleyController home)
+        {
+            CombatKernel ck = home.Combat.Kernel;
+            var steps = new List<double>(600);
+            long kernel0 = ck.Steps;
+            FgEmergenceFuzzSelfCheck.AttachedLoad load = FgEmergenceFuzzSelfCheck.AttachFullLoad(home.Combat);
+            try
+            {
+                var sw = new Stopwatch();
+                for (int i = 0; i < 600; i++)
+                {
+                    sw.Restart();
+                    FgEmergenceFuzzSelfCheck.BetweenSteps(load); // 热更层在两步之间做的注入 / 补斑块，算进这一步
+                    WorldSimulation.StepMany(1);
+                    sw.Stop();
+                    steps.Add(sw.Elapsed.TotalMilliseconds);
+                }
+                bool four = GameLogic.Campaign.Env.SilentNightService.IsActive(s) && GameLogic.Campaign.Env.WeatherService.IsSandstormNow(s)
+                            && ck.CountAlive(CombatFaction.Hostile, CombatUnitKind.Enemy) > 0 && (s.Raids?.InTransit?.Count() ?? 0) + ck.CountAlive(CombatFaction.Hostile, CombatUnitKind.Enemy) > 0;
+                steps.Sort();
+                double avg = steps.Average(), p95 = steps[(int)(steps.Count * 0.95)], max = steps[steps.Count - 1];
+                long advanced = ck.Steps - kernel0;
+                Line($"  · 负向组合（v4 局面 + 涌现满载叠到家园内核，600 个世界步）：世界步平均 {avg:F3} / p95 {p95:F3} / 最慢 {max:F2} ms；家园斑块 {ck.PatchCount}、残骸 {load.Wrecks}、带程序机器 {load.Machines.Count}、" +
+                     $"每步注入事件 {load.Injected / 600.0:F1}；60 帧口径（FGR-SYS-042，16.7 ms）p95 {(p95 <= 1000.0 / 60.0 ? "达标" : "超线")}");
+                // 残骸按地点容量 256（EmgConst.DefaultWreckCapacity）：家园里突袭打出来的残骸已占一部分，补满到容量即满载
+                Expect(four && advanced >= 600 && load.Machines.Count >= 120 && ck.WreckCount >= EmgConst.DefaultWreckCapacity,
+                    $"负向组合同时成立并持续推进：静默夜 + 沙暴 + 突袭在场（{four}）+ 涌现满载（机器 {load.Machines.Count}、残骸补 {load.Wrecks} 个到 {ck.WreckCount} / {EmgConst.DefaultWreckCapacity}）；600 个世界步家园内核推进 {advanced} 步、不抛异常");
+                ExpectPerf(true, $"负向组合（后期大基地 + 最大突袭 + 沙暴 + 静默夜 + 涌现满载）世界步 p95 {p95:F2} ms ≤ 8.33 ms（120 帧，1x 一帧一步；Editor batchmode，60 帧口径 16.7 ms 并列见上一行）",
+                    PerfGate.Le(p95, 1000.0 / 120.0, "负向组合世界步 p95 ms"));
+            }
+            finally
+            {
+                FgEmergenceFuzzSelfCheck.DetachFullLoad();
+            }
         }
 
         /// <summary>

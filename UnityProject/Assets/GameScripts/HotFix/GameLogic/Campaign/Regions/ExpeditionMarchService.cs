@@ -1519,10 +1519,18 @@ namespace GameLogic.Campaign.Regions
                 FailArrival(s, m, "site-unavailable");
                 return;
             }
-            SaveResult pre = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
             // 回滚基线另存一份：地点载入（Enter）里会再自动存一次档，覆盖同一个槽位——回滚要读的是到达前的那份，不是载入后的。
+            // FG15-SYS-02（DEBT-FG15SYS01-05）：游戏中走后台写盘——基线在写盘线程里紧接着复制（排在载入后那份之前），写盘失败在主线程回调里从内存快照中止到达。
             string baseline = BaselinePath(slot);
-            bool haveBaseline = pre.Success && TryCopy(CampaignSaveService.SlotPath(slot), baseline);
+            bool background = CampaignAutoSaveService.InBackground(SaveReason.ExpeditionDepartConfirm);
+            string campaignId = s.CampaignId;
+            Action<SaveResult, CampaignSaveService.SaveSnapshot> onWritten = null;
+            if (background)
+            {
+                onWritten = (r, snap) => OnBaselineWritten(slot, campaignId, siteId, r, snap);
+            }
+            SaveResult pre = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm, true, background ? baseline : null, onWritten);
+            bool haveBaseline = pre.Success && (background || TryCopy(CampaignSaveService.SlotPath(slot), baseline));
             if (!pre.Success || !haveBaseline)
             {
                 Log.Warning($"[ExpeditionMarchService] 到达前存档未成功（{pre.Outcome} {pre.Message}，基线副本 {haveBaseline}）：不载入远征地点，队伍在集结点待命。");
@@ -1576,8 +1584,29 @@ namespace GameLogic.Campaign.Regions
             }
             finally
             {
-                TryDelete(baseline);
+                CampaignSaveService.DeleteAfterPendingWrites(baseline); // 后台复制完再删（同步写时当场删）
             }
+        }
+
+        /// <summary>FG15-SYS-02：到达前回滚基线后台写盘失败后中止的到达次数（自检读）。</summary>
+        public static int AbortedAfterBaselineWriteFailure { get; private set; }
+
+        /// <summary>
+        /// FG15-SYS-02（DEBT-FG15SYS01-05）：到达前档在后台写盘 / 复制基线失败——按同步写时的结果处理（不载入地点、队伍在集结点待命、到点重试）：
+        /// 远征队已经进了这个地点才处理，从内存快照读回到达前的世界并记“到达失败：存档没成功”。玩家已回主菜单 / 换档、或到达事务已经回滚则不动。
+        /// </summary>
+        private static void OnBaselineWritten(int slot, string campaignId, string siteId, SaveResult result, CampaignSaveService.SaveSnapshot snapshot)
+        {
+            CampaignState cur = CampaignSession.Current;
+            ExpeditionMarchState now = cur != null ? Current(cur) : null;
+            if (result.Success || cur == null || CampaignSession.ActiveSlotIndex != slot || cur.CampaignId != campaignId
+                || now == null || now.Phase != PhaseAtSite || now.SiteId != siteId)
+            {
+                return;
+            }
+            AbortedAfterBaselineWriteFailure++;
+            Log.Warning($"[ExpeditionMarchService] 到达前档后台写盘失败（{result.Outcome} {result.Message}），中止到达：从内存快照读回到达前的世界。");
+            RollbackArrival(slot, null, snapshot, "autosave-failed");
         }
 
         private static string BaselinePath(int slot) => slot >= 0 ? CampaignSaveService.SlotPath(slot) + ".prearrival" : null;
@@ -1635,7 +1664,9 @@ namespace GameLogic.Campaign.Regions
             Log.Warning($"[ExpeditionMarchService] 远征队没能进入 {m.SiteId}（{code}）：在集结点等候，第 {m.ArrivalRetryTick} 步按“前进”自动重试{(repeat ? "（同一原因，不重复提示）" : string.Empty)}。");
         }
 
-        private static void RollbackArrival(int slot, string baseline)
+        private static void RollbackArrival(int slot, string baseline) => RollbackArrival(slot, baseline, null, "transaction-failed");
+
+        private static void RollbackArrival(int slot, string baseline, CampaignSaveService.SaveSnapshot snapshot, string reason)
         {
             ArrivalRollbackCount++;
             if (slot < 0)
@@ -1647,11 +1678,11 @@ namespace GameLogic.Campaign.Regions
             // 把到达前档的副本放回槽位（地点载入时的自动存档已经覆盖了槽位），再按读档流程读回。
             // FG15-SYS-01：游戏中的自动存档在后台写盘，先等排队的写完，免得放回去的基线又被一份到达后的快照盖掉。
             CampaignSaveService.WaitForPendingWrites();
-            if (!TryCopy(baseline, CampaignSaveService.SlotPath(slot)))
+            if (snapshot == null && !TryCopy(baseline, CampaignSaveService.SlotPath(slot)))
             {
                 Log.Error("[ExpeditionMarchService] 到达回滚：到达前档的副本不在，改读槽位里现有的档。");
             }
-            RestoreResult restore = CampaignRestoreOrchestrator.Restore(slot);
+            RestoreResult restore = snapshot != null ? CampaignRestoreOrchestrator.RestoreSnapshot(slot, snapshot) : CampaignRestoreOrchestrator.Restore(slot);
             if (!restore.Success)
             {
                 Log.Error($"[ExpeditionMarchService] 到达回滚失败：从到达前档重新读取未成功（{restore.FailedStep} {restore.Message}）。建议从主菜单重新读档。");
@@ -1667,7 +1698,7 @@ namespace GameLogic.Campaign.Regions
             ExpeditionMarchState m = Current(restore.State);
             if (m != null && m.Phase == PhaseOutbound)
             {
-                FailArrival(restore.State, m, "transaction-failed");
+                FailArrival(restore.State, m, reason);
                 SaveResult after = CampaignAutoSaveService.SaveAuto(SaveReason.ExpeditionDepartConfirm);
                 if (!after.Success)
                 {

@@ -15,13 +15,10 @@ namespace BinGames.Sim.Combat
 
         private bool UnitSrcAny(int i)
         {
-            int b0 = i * CombatConst.StatusBitStride, p0 = i * EmgPhaseConst.Count;
-            for (int b = 0; b < CombatConst.StatusBitStride; b++)
+            int p0 = i * EmgPhaseConst.Count;
+            if (_d.StatusSrcMask[i] != 0u)
             {
-                if (_d.StatusBitSource[b0 + b] != 0)
-                {
-                    return true;
-                }
+                return true;
             }
             for (int k = 0; k < EmgPhaseConst.Count; k++)
             {
@@ -84,7 +81,7 @@ namespace BinGames.Sim.Combat
                     if (sw.F()) w.Write(_d.Id[i]);
                     for (int b = 0; b < CombatConst.StatusBitStride; b++)
                     {
-                        if (sw.F()) w.Write(_d.StatusBitSource[i * CombatConst.StatusBitStride + b]);
+                        if (sw.F()) w.Write(_d.BitSrc(i, b));
                     }
                     for (int k = 0; k < EmgPhaseConst.Count; k++)
                     {
@@ -176,7 +173,7 @@ namespace BinGames.Sim.Combat
                             ok &= v >= 0;
                             if (slot >= 0)
                             {
-                                staging.StatusBitSource[slot * CombatConst.StatusBitStride + b] = v;
+                                staging.SetBitSrc(slot, b, v);
                             }
                         }
                         for (int k = 0; k < EmgPhaseConst.Count; k++)
@@ -256,13 +253,46 @@ namespace BinGames.Sim.Combat
         public int StatusBitSourceOf(int unitId, int bit)
         {
             int i = _d.SlotOf(unitId);
-            return i >= 0 && bit >= 0 && bit < CombatConst.StatusBitStride && (_d.Status[i] & (1u << bit)) != 0u ? _d.StatusBitSource[i * CombatConst.StatusBitStride + bit] : 0;
+            return i >= 0 && bit >= 0 && bit < CombatConst.StatusBitStride && (_d.Status[i] & (1u << bit)) != 0u ? _d.BitSrc(i, bit) : 0;
+        }
+
+        /// <summary>FG15-SYS-02（DEBT-FG11ATTR01-01）：每单位归因固定占用（状态位来源掩码 + 相态来源），字节。</summary>
+        public static int AttrFixedBytesPerUnit => sizeof(uint) + EmgPhaseConst.Count * sizeof(int);
+
+        /// <summary>FG15-SYS-02（DEBT-FG11ATTR01-01，自检）：状态位来源稀疏表与掩码一致（每个掩码位都有非 0 行、行数 = 掩码位数，即没有被移除单位留下的残行）；
+        /// <paramref name="rows"/> = 行数，<paramref name="fixedBytesPerUnit"/> = 按实际容器长度算的每单位固定字节。</summary>
+        public bool BitSrcConsistentForTests(out int rows, out int fixedBytesPerUnit)
+        {
+            rows = _d.StatusSrc.Count();
+            int bits = 0;
+            bool ok = _d.StatusSrcMask.Length == _d.Count;
+            for (int i = 0; i < _d.Count && ok; i++)
+            {
+                uint m = _d.StatusSrcMask[i];
+                for (int b = 0; b < CombatConst.StatusBitStride; b++)
+                {
+                    if ((m & (1u << b)) != 0u)
+                    {
+                        bits++;
+                        ok &= _d.StatusSrc.TryGetValue(i * CombatConst.StatusBitStride + b, out int v) && v != 0;
+                    }
+                }
+            }
+            fixedBytesPerUnit = _d.Count > 0 ? (_d.StatusSrcMask.Length * sizeof(uint) + _d.EmgPhaseSrc.Length * sizeof(int)) / _d.Count : 0;
+            return ok && rows == bits;
         }
 
         /// <summary>FG11-ATTR-01 ②：沾染来源表行数与第 i 行（自检）。</summary>
         public int CoatAttrCount => _d.CoatAttr.Length;
 
         public EmgCoatAttr CoatAttrAt(int i) => _d.CoatAttr[i];
+
+        /// <summary>FG15-SYS-02 自检对照组：true = 沾染来源表退回逐行扫描（原实现），与索引版逐步比状态哈希。</summary>
+        public bool CoatIndexOffForTests
+        {
+            get => _d.CoatIndexOff != 0;
+            set => _d.CoatIndexOff = value ? (byte)1 : (byte)0;
+        }
 
         /// <summary>FG11-ATTR-01 ④：持久链归属表里这条链的行（没有返回 false；自检）。</summary>
         public bool TryGetChainOwn(int chain, out EmgChainOwn row)
@@ -279,9 +309,11 @@ namespace BinGames.Sim.Combat
         public void EmgScrambleAttrForTests()
         {
             _d.CoatAttr.Clear();
-            for (int i = 0; i < _d.StatusBitSource.Length; i++)
+            _d.CoatIndexValid[0] = 0;
+            _d.StatusSrc.Clear();
+            for (int i = 0; i < _d.StatusSrcMask.Length; i++)
             {
-                _d.StatusBitSource[i] = 0;
+                _d.StatusSrcMask[i] = 0u;
             }
             for (int i = 0; i < _d.EmgPhaseSrc.Length; i++)
             {

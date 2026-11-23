@@ -320,5 +320,12 @@ namespace BinGames.Sim.Combat
         }
 
         public static readonly Unity.Burst.SharedStatic<int> TrailSegments = Unity.Burst.SharedStatic<int>.GetOrCreate<TrailKey>();
+
+        private struct AttrKey
+        {
+        }
+
+        /// <summary>FG15-SYS-02（DEBT-FG11ATTR01-02 逐项消融）：位 1 = 不记状态位来源，位 2 = 不登记沾染来源表，位 4 = 不登记持久链归属。只改归因统计、不改结算；缺省 0。</summary>
+        public static readonly Unity.Burst.SharedStatic<int> Attribution = Unity.Burst.SharedStatic<int>.GetOrCreate<AttrKey>();
     }
 }

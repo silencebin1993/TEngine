@@ -1148,7 +1148,7 @@ namespace GameLogic.Campaign.Regions
                     _selectionRings[id] = ring;
                 }
                 Vector2 p = marker.Position;
-                ring.transform.position = new Vector3(p.x, 0.03f, p.y);
+                ring.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(p.x, 0.03f, p.y));
             }
         }
 
@@ -1242,17 +1242,17 @@ namespace GameLogic.Campaign.Regions
             line.positionCount = failed ? 0 : _routeScratch.Count > 0 ? _routeScratch.Count + 1 : 2;
             if (line.positionCount > 0)
             {
-                line.SetPosition(0, new Vector3(from.x, RouteHeight, from.z));
+                line.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(from.x, RouteHeight, from.z)));
                 if (_routeScratch.Count == 0)
                 {
-                    line.SetPosition(1, new Vector3(target.x, RouteHeight, target.y));
+                    line.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(target.x, RouteHeight, target.y)));
                 }
                 else
                 {
                     for (int k = 0; k < _routeScratch.Count; k++)
                     {
                         var point = _routeScratch[k];
-                        line.SetPosition(k + 1, new Vector3((float)point.x, RouteHeight, (float)point.y));
+                        line.SetPosition(k + 1, BinGames.Sim.ViewOrigin.ToView(new Vector3((float)point.x, RouteHeight, (float)point.y)));
                     }
                 }
             }
@@ -1267,7 +1267,7 @@ namespace GameLogic.Campaign.Regions
                 _routeEnds[id] = end;
             }
             end.GetComponent<Renderer>().sharedMaterial = ViewMaterials.Standard(color);
-            end.transform.position = new Vector3(target.x, 0.04f, target.y);
+            end.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(target.x, 0.04f, target.y));
         }
 
         private void ReleaseRoute(int id)
@@ -1359,10 +1359,10 @@ namespace GameLogic.Campaign.Regions
             _dragBoxGo.transform.SetPositionAndRotation(new Vector3((loX + hiX) * 0.5f, 0.07f, (loY + hiY) * 0.5f), Quaternion.Euler(90f, 0f, 0f));
             _dragBoxGo.transform.localScale = new Vector3(Mathf.Max(hiX - loX, 0.01f), Mathf.Max(hiY - loY, 0.01f), 1f);
             const float y = 0.08f;
-            _dragBoxOutline.SetPosition(0, new Vector3(loX, y, loY));
-            _dragBoxOutline.SetPosition(1, new Vector3(hiX, y, loY));
-            _dragBoxOutline.SetPosition(2, new Vector3(hiX, y, hiY));
-            _dragBoxOutline.SetPosition(3, new Vector3(loX, y, hiY));
+            _dragBoxOutline.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(loX, y, loY)));
+            _dragBoxOutline.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(hiX, y, loY)));
+            _dragBoxOutline.SetPosition(2, BinGames.Sim.ViewOrigin.ToView(new Vector3(hiX, y, hiY)));
+            _dragBoxOutline.SetPosition(3, BinGames.Sim.ViewOrigin.ToView(new Vector3(loX, y, hiY)));
         }
 
         /// <summary>自检用：框选指示当前是否可见。</summary>
@@ -1419,7 +1419,7 @@ namespace GameLogic.Campaign.Regions
                 return false;
             }
             var plane = new Plane(Vector3.up, Vector3.zero);
-            Ray ray = _ctx.Camera.ScreenPointToRay(screenPosition);
+            Ray ray = BinGames.Sim.ViewOrigin.WorldRay(_ctx.Camera, screenPosition);
             if (!plane.Raycast(ray, out float enter))
             {
                 return false;

@@ -16,6 +16,26 @@ namespace BinGames.Sim.Combat
         public NativeList<EmgCoatFx> CoatFx;
         /// <summary>FG11-ATTR-01 ②：斑块挂上的沾染位的归因（稀疏表，见 <see cref="EmgCoatAttr"/>；进快照段 37）。</summary>
         public NativeList<EmgCoatAttr> CoatAttr;
+        /// <summary>FG15-SYS-02（DEBT-FG11ATTR01-02）：沾染来源表的索引（(单位 Id &lt;&lt; 5) | 位 → 行下标）。派生数据，不进快照、不进哈希；
+        /// <see cref="CoatIndexValid"/> = 0（清表、读档、保序删行之后）时下一次查询整表重建，其余增删就地维护——查询由 O(表长) 变 O(1)，结果逐字不变。</summary>
+        public NativeParallelHashMap<long, int> CoatIndex;
+        /// <summary>[0] = 1：索引与表一致。放在原生容器里而不是值字段——内核一步在 CombatStepJob 的 CombatData 副本上跑，值字段的修改带不回主线程（索引会过期）。</summary>
+        public NativeArray<byte> CoatIndexValid;
+        /// <summary>自检对照组：1 = 沾染来源表退回逐行扫描（FG11-ATTR-01 原实现），用来逐步比状态哈希证明索引版逐字等价。</summary>
+        public byte CoatIndexOff;
+        /// <summary>FG15-SYS-02（DEBT-FG2FW02-06）：单位位置写入计数（StepZones 建表到查表之间可能执行的 Pos 写入都 +1——区域效果、反应、底盘、场、熔炉、蠕虫等；攻城位移 CombatSiege 与蠕虫出土 CombatKernel.Worm 不在 StepZones 里执行，没有 +1；
+        /// 新增在区域节拍里挪单位的写点必须 +1。每次 StepZones 开始都重建，只在一步之内比较，不进快照 / 哈希）。
+        /// 区域节拍的单位格链（<see cref="EmgHash.UnitHead"/>）按它判断建表后有没有单位被挪动——挪动了就退回逐个扫描或重建，结果与逐单位扫描逐字一致。</summary>
+        public int PosEpoch;
+        public int ZoneGridEpoch;
+        public int ZoneGridN;
+        public int ZoneScans;
+        public int ZoneGridBuilds;
+        public float ZoneGridMaxR;
+        public byte ZoneGridOn;
+        public byte ZoneGridBusy;
+        /// <summary>自检对照组：1 = 区域节拍退回逐单位扫描（原实现）。</summary>
+        public byte ZoneGridOff;
         /// <summary>FG11-ATTR-01 ① / ④：每单位每相态（含累积阶段）的来源单位 Id（单位 × <see cref="EmgPhaseConst.Count"/>，不进 EmgUnitState；进快照段 36）。</summary>
         public NativeList<int> EmgPhaseSrc;
         /// <summary>FG11-ATTR-01 ④：持久链归属（直映射 <see cref="EmgConst.ChainOwnSlots"/> 格；进快照段 38）。</summary>
@@ -99,6 +119,8 @@ namespace BinGames.Sim.Combat
             Wires = new NativeList<EmgWire>(4, Allocator.Persistent);
             CoatFx = new NativeList<EmgCoatFx>(4, Allocator.Persistent);
             CoatAttr = new NativeList<EmgCoatAttr>(4, Allocator.Persistent);
+            CoatIndex = new NativeParallelHashMap<long, int>(64, Allocator.Persistent);
+            CoatIndexValid = new NativeArray<byte>(1, Allocator.Persistent);
             EmgPhaseSrc = new NativeList<int>(capacity * EmgPhaseConst.Count, Allocator.Persistent);
             EmgChainOwns = new NativeArray<EmgChainOwn>(EmgConst.ChainOwnSlots, Allocator.Persistent);
             TraitRun = new NativeList<EmgTraitRun>(4, Allocator.Persistent);
@@ -194,6 +216,8 @@ namespace BinGames.Sim.Combat
             EmgFriendly = new NativeList<int3>(8, Allocator.Persistent);
             EmgExtreme = new NativeList<int>(4, Allocator.Persistent);
             EmgChainTally = new NativeArray<int4>(EmgConst.ChainTally, Allocator.Persistent);
+            EmgTallyOver = new NativeParallelHashMap<int, int4>(EmgConst.ChainTallyOverflow, Allocator.Persistent);
+            EmgTallyDropMax = new NativeArray<int>(1, Allocator.Persistent);
             EmgAttrRows = new NativeList<EmgAttrRow>(8, Allocator.Persistent);
         }
 
@@ -204,6 +228,8 @@ namespace BinGames.Sim.Combat
             Wires.Dispose();
             CoatFx.Dispose();
             CoatAttr.Dispose();
+            CoatIndex.Dispose();
+            CoatIndexValid.Dispose();
             EmgPhaseSrc.Dispose();
             EmgChainOwns.Dispose();
             TraitRun.Dispose();
@@ -270,6 +296,8 @@ namespace BinGames.Sim.Combat
             EmgFriendly.Dispose();
             EmgExtreme.Dispose();
             EmgChainTally.Dispose();
+            EmgTallyOver.Dispose();
+            EmgTallyDropMax.Dispose();
             EmgAttrRows.Dispose();
         }
 
@@ -310,6 +338,7 @@ namespace BinGames.Sim.Combat
             Wires.Clear();
             CoatFx.Clear();
             CoatAttr.Clear();
+            CoatIndexValid[0] = 0;
             TraitRun.Clear();
             MetaRun.Clear();
             Relays.Clear();
@@ -371,6 +400,8 @@ namespace BinGames.Sim.Combat
             {
                 EmgChainTally[i] = int4.zero;
             }
+            EmgTallyOver.Clear();
+            EmgTallyDropMax[0] = 0;
             for (int i = 0; i < EmgChainOwns.Length; i++)
             {
                 EmgChainOwns[i] = default;

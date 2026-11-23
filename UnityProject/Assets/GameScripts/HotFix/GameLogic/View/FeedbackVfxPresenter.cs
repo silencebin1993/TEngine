@@ -224,7 +224,7 @@ namespace GameLogic.View
             slot.Material.color = spec.Color;
             slot.Renderer.enabled = true;
             Transform t = slot.Go.transform;
-            t.position = new Vector3(moment.Position.x, moment.Position.y + spec.Height, moment.Position.z);
+            t.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(moment.Position.x, moment.Position.y + spec.Height, moment.Position.z));
             t.localScale = Vector3.one * (spec.FromSize / slot.SpriteWidth);
             Camera cam = Camera.main;
             t.rotation = spec.Flat ? Quaternion.Euler(90f, 0f, 0f) : cam != null ? cam.transform.rotation : Quaternion.identity;

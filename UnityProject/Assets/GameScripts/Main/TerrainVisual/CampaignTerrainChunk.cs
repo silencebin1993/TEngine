@@ -109,7 +109,7 @@ namespace BinGames.TerrainVisual
             renderer.shadowCastingMode = water ? ShadowCastingMode.Off : ShadowCastingMode.On;
             var properties = new MaterialPropertyBlock();
             properties.SetFloat("_CampaignMode", 1);
-            properties.SetVector("_TerrainWorldOrigin", Vector4.zero);
+            // FG15-SYS-02：_TerrainWorldOrigin 不再逐渲染器写 0，改由浮动画面原点 BinGames.Sim.ViewOrigin 设全局（纹理按世界坐标取样，重设原点时不跳）。
             renderer.SetPropertyBlock(properties);
         }
 

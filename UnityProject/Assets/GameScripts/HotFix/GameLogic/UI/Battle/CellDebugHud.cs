@@ -436,7 +436,7 @@ namespace GameLogic.UI.Battle
             }
 
             Unity.Mathematics.float2 point = bodyPosition + part.AimOffset;
-            Vector3 screen = cam.WorldToScreenPoint(new Vector3(point.x, 0.4f, point.y));
+            Vector3 screen = cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(point.x, 0.4f, point.y)));
             if (screen.z <= 0f)
             {
                 return;

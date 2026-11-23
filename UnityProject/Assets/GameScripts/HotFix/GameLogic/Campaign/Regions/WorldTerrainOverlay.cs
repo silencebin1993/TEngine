@@ -288,7 +288,7 @@ namespace GameLogic.Campaign.Regions
                 _localGridFocus = focus;
                 Revision++;
             }
-            _localGridGo.transform.position = new Vector3(focus.X, _height, focus.Y);
+            _localGridGo.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(focus.X, _height, focus.Y));
         }
 
         /// <summary>占位用的平面网格（区块边长 × 区块边长，原点在区块左下角格的左下角，与起伏网格同一坐标系）。</summary>
@@ -716,7 +716,7 @@ namespace GameLogic.Campaign.Regions
             if (_relief)
             {
                 // 起伏网格的原点 = 区块左下角格的左下角（格心在整数坐标，格角在 ±0.5）。
-                t.Go.transform.position = new Vector3(cx * _chunkSize - 0.5f, _height, cy * _chunkSize - 0.5f);
+                t.Go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(cx * _chunkSize - 0.5f, _height, cy * _chunkSize - 0.5f));
                 t.Go.transform.localScale = Vector3.one;
                 t.Filter.sharedMesh = FlatMesh(_chunkSize);
                 t.ReliefBuilt = false;
@@ -725,7 +725,7 @@ namespace GameLogic.Campaign.Regions
             else
             {
                 float half = (_chunkSize - 1) * 0.5f;
-                t.Go.transform.position = new Vector3(cx * _chunkSize + half, _height, cy * _chunkSize + half);
+                t.Go.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(cx * _chunkSize + half, _height, cy * _chunkSize + half));
                 t.Go.transform.localScale = new Vector3(_chunkSize, _chunkSize, 1f);
             }
             SetTexture(t, _placeholder);

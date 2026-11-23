@@ -129,7 +129,7 @@ namespace GameLogic.View
                     for (int n = 0; n < Segments; n++)
                     {
                         float a = n * Mathf.PI * 2f / Segments;
-                        Points[n] = new Vector3(c.x + Mathf.Cos(a) * e.NodeRadius, Height, c.y + Mathf.Sin(a) * e.NodeRadius);
+                        Points[n] = BinGames.Sim.ViewOrigin.ToView(new Vector3(c.x + Mathf.Cos(a) * e.NodeRadius, Height, c.y + Mathf.Sin(a) * e.NodeRadius));
                     }
                     ring.positionCount = Segments;
                     ring.SetPositions(Points);
@@ -143,15 +143,15 @@ namespace GameLogic.View
                         link.widthMultiplier = 0.25f;
                         link.loop = false;
                         link.positionCount = 2;
-                        link.SetPosition(0, new Vector3(c.x, Height + 0.02f, c.y));
-                        link.SetPosition(1, new Vector3(pc.x, Height + 0.02f, pc.y));
+                        link.SetPosition(0, BinGames.Sim.ViewOrigin.ToView(new Vector3(c.x, Height + 0.02f, c.y)));
+                        link.SetPosition(1, BinGames.Sim.ViewOrigin.ToView(new Vector3(pc.x, Height + 0.02f, pc.y)));
                         link.enabled = true;
                     }
                 }
                 else if (s < 0 && e.NodeRadius <= 0f && (e.DemandOn || e.SupplyOn) && HomeValleyPowerGrid.RecordAt(i) != null)
                 {
                     WorldBadge badge = BadgeAt(badges++);
-                    badge.transform.position = new Vector3(c.x, 4.2f, c.y);
+                    badge.transform.position = BinGames.Sim.ViewOrigin.ToView(new Vector3(c.x, 4.2f, c.y));
                     badge.SetIcon(ContentIcons.StateUnpowered);
                     badge.SetVisible(true);
                 }
@@ -214,7 +214,7 @@ namespace GameLogic.View
             for (int n = 0; n < Segments; n++)
             {
                 float a = n * Mathf.PI * 2f / Segments;
-                Points[n] = new Vector3(cx + Mathf.Cos(a) * radius, Height + 0.04f, cy + Mathf.Sin(a) * radius);
+                Points[n] = BinGames.Sim.ViewOrigin.ToView(new Vector3(cx + Mathf.Cos(a) * radius, Height + 0.04f, cy + Mathf.Sin(a) * radius));
             }
             _preview.positionCount = Segments;
             _preview.SetPositions(Points);

@@ -99,6 +99,8 @@ namespace GameLogic.EditorTools
                 Step(CheckAttrUnitLayer);
                 Step(CheckAttrPersist);
                 Step(CheckAttrNoGameplay);
+                Step(CheckCoatIndexEquivalent); // FG15-SYS-02（DEBT-FG11ATTR01-02）
+                Step(CheckAttrSparse); // FG15-SYS-02（DEBT-FG11ATTR01-01）
                 Step(CheckAttrSpeed);
                 Step(CheckAttrHome);
                 Step(CheckFriendly);
@@ -1323,6 +1325,167 @@ namespace GameLogic.EditorTools
             }
             Expect(diffAt < 0 && attrRows > 0 && deaths > 0,
                 $"L10 只改统计不改玩法：同一场景每步抹掉全部归因数据，15 秒逐步比血量 / 存活 / 位置 / 状态位 / 相态完全一致（{(diffAt < 0 ? "一致" : "第 " + diffAt + " 步分叉")}；期间交互伤害 {attrRows:0.0}、阵亡 {deaths} 个）");
+        }
+
+        /// <summary>
+        /// L13（FG15-SYS-02，DEBT-FG11ATTR01-02）：沾染来源表改按（单位, 位）索引查询后行为逐字等价——大面积沾染（40 个敌人站进油 / 明火 / 酸斑块，表上百行，
+        /// 不停有行增删、阵亡删行），同一场景两份：一份走索引、一份退回逐行扫描（原实现），15 秒逐步比整份状态哈希（含沾染来源表的行与顺序）与交互伤害行，必须完全一致。
+        /// </summary>
+        private static void CheckCoatIndexEquivalent()
+        {
+            NewState(9640);
+            using var s1 = NewSite();
+            using var s2 = NewSite();
+            s2.Kernel.CoatIndexOffForTests = true;
+            foreach (CombatSite site in new[] { s1, s2 })
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+                int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+                var foes = new List<int>();
+                for (int i = 0; i < 40; i++)
+                {
+                    foes.Add(Unit(k, CombatFaction.Hostile, new double2(2.5 * (i % 10), 2.5 * (i / 10)), hp: 60f + 7f * (i % 9)));
+                }
+                StepSite(site, 1);
+                for (int i = 0; i < 10; i++)
+                {
+                    k.SpawnPatch(EmgMatterConst.Oil, new double2(2.5 * i, 1.25), 2f, 6f, 0f, i % 2 == 0 ? a : b);
+                    k.SpawnPatch(EmgMatterConst.Acid, new double2(2.5 * i, 6.25), 2f, 6f, 0f, i % 3 == 0 ? a : b);
+                }
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(5, 1.25), 2f, 1f, 40f, a, false, 9);
+                k.SpawnPatch(EmgMatterConst.Fire, new double2(17.5, 6.25), 2f, 1f, 40f, b, false, 9);
+                for (int i = 0; i < foes.Count; i += 3)
+                {
+                    k.ApplyStatus(foes[i], NamedReactionCatalog.BitOf("Fire"), 3f, 0f, 0f, 0f, i % 2 == 0 ? a : b);
+                }
+            }
+            int diffAt = -1;
+            int maxRows = 0;
+            double attrRows = 0;
+            for (int i = 0; i < 60 * 15 && diffAt < 0; i++)
+            {
+                StepSite(s1, 1);
+                StepSite(s2, 1);
+                maxRows = Math.Max(maxRows, s1.Kernel.CoatAttrCount);
+                double r1 = RowsSum(s1.Kernel);
+                attrRows += r1;
+                if (s1.Kernel.StateHash() != s2.Kernel.StateHash() || s1.Kernel.CoatAttrCount != s2.Kernel.CoatAttrCount || Math.Abs(r1 - RowsSum(s2.Kernel)) > 1e-9)
+                {
+                    diffAt = i;
+                }
+            }
+            Expect(diffAt < 0 && maxRows >= 20 && attrRows > 0,
+                $"L13 沾染来源表按索引查询与逐行扫描逐字等价：大面积沾染（表最多 {maxRows} 行）15 秒逐步比状态哈希 / 表行数 / 交互伤害行（{(diffAt < 0 ? "一致" : "第 " + diffAt + " 步不同")}，交互伤害合计 {attrRows:0.0}）");
+        }
+
+        /// <summary>
+        /// L14（FG15-SYS-02，DEBT-FG11ATTR01-01）：状态位来源由“每单位 32 格”改成稀疏表 + 每单位 32 位掩码。大面积挂状态 + 阵亡移除 / 主动移除触发压实（槽位搬移）
+        /// 12 秒逐步跑：每一步全部单位 × 32 位的来源与掩码 / 稀疏表一致、没有残留行；中途存读档后两份逐步比状态哈希；每单位固定占用 ≤ 32 字节（原 156）。
+        /// 指纹（状态哈希逐步混合）只作读数：改前 / 改后同一场景各跑一次比对（证据记两次读数），证明快照与哈希逐字不变。
+        /// </summary>
+        private static void CheckAttrSparse()
+        {
+            NewState(9642);
+            using var site = NewSite();
+            using var twin = NewSite();
+            CombatKernel k = site.Kernel;
+            uint fire = NamedReactionCatalog.BitOf("Fire");
+            int a = Unit(k, CombatFaction.Player, new double2(60, 0));
+            int b = Unit(k, CombatFaction.Player, new double2(60, 10));
+            var foes = new List<int>();
+            for (int i = 0; i < 96; i++)
+            {
+                float hp = 30f + 9f * (i % 11);
+                var p = new double2(2.5 * (i % 12), 2.5 * (i / 12));
+                foes.Add(k.Spawn(new CombatSpawn
+                {
+                    ExtKey = -2, Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.None,
+                    Flags = Live | (i % 4 != 0 ? CombatUnitFlags.RemoveOnDeath : 0), Position = p, Home = p, Radius = 0.5f, Speed = 0f, Health = hp, MaxHealth = hp,
+                    Weapon = -1, BehaviorProfile = -1, Priority = 1, ArmorHalfAngleDeg = 90f, ArmorFraction = 0f, ArmorFacing = new float2(0f, -1f),
+                }));
+            }
+            k.Step(Dt, k.Time + Dt); // 只跑内核一步（地点包装层的节拍计时不进快照，新地点读档后相位不同）
+            for (int i = 0; i < 12; i++)
+            {
+                k.SpawnPatch(EmgMatterConst.Oil, new double2(2.5 * i, 1.25), 2f, 6f, 0f, i % 2 == 0 ? a : b);
+                k.SpawnPatch(EmgMatterConst.Acid, new double2(2.5 * i, 8.75), 2f, 6f, 0f, i % 3 == 0 ? a : b);
+            }
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(5, 1.25), 2f, 1f, 40f, a, false, 9);
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(17.5, 8.75), 2f, 1f, 40f, b, false, 9);
+            void Ops(CombatKernel q, int step)
+            {
+                if (step % 90 == 0)
+                {
+                    for (int i = step / 90 % 3; i < foes.Count; i += 3)
+                    {
+                        q.ApplyStatus(foes[i], fire, 2f + i % 5, 15f, 0f, 0f, i % 2 == 0 ? a : b);
+                    }
+                }
+                if (step == 200)
+                {
+                    q.Despawn(foes[1]);
+                    q.Despawn(foes[6]);
+                    q.Despawn(foes[11]);
+                }
+            }
+            string Dump(CombatKernel q)
+            {
+                var sb = new StringBuilder();
+                foreach (int id in foes.Concat(new[] { a, b }))
+                {
+                    if (!q.TryGetUnit(id, out _))
+                    {
+                        continue;
+                    }
+                    sb.Append(id).Append(':');
+                    for (int bit = 0; bit < 32; bit++)
+                    {
+                        sb.Append(q.StatusBitSourceOf(id, bit)).Append(',');
+                    }
+                }
+                return sb.ToString();
+            }
+            ulong fp = 14695981039346656037UL;
+            int maxSrc = 0, alive0 = foes.Count(id => k.TryGetUnit(id, out _)), diffAt = -1;
+            bool round = false, sparseOk = true;
+            int maxRows = 0, fixedBytes = 0;
+            for (int step = 0; step < 60 * 12; step++)
+            {
+                Ops(k, step);
+                k.Step(Dt, k.Time + Dt); // 只跑内核一步（地点包装层的节拍计时不进快照，新地点读档后相位不同）
+                if (step > 360)
+                {
+                    Ops(twin.Kernel, step);
+                    twin.Kernel.Step(Dt, twin.Kernel.Time + Dt);
+                    if (diffAt < 0 && (twin.Kernel.StateHash() != k.StateHash() || Dump(twin.Kernel) != Dump(k)))
+                    {
+                        diffAt = step;
+                    }
+                }
+                fp = (fp ^ k.StateHash()) * 1099511628211UL;
+                int src = 0;
+                foreach (int id in foes)
+                {
+                    for (int bit = 0; bit < 32; bit++)
+                    {
+                        src += k.StatusBitSourceOf(id, bit) != 0 ? 1 : 0;
+                    }
+                }
+                maxSrc = Math.Max(maxSrc, src);
+                sparseOk &= k.BitSrcConsistentForTests(out int rows, out fixedBytes) && rows >= src && (step <= 360 || twin.Kernel.BitSrcConsistentForTests(out _, out _));
+                maxRows = Math.Max(maxRows, rows);
+                if (step == 360)
+                {
+                    CombatLoadResult r = twin.Kernel.Load(k.Serialize());
+                    round = r == CombatLoadResult.Ok && twin.Kernel.StateHash() == k.StateHash() && Dump(twin.Kernel) == Dump(k);
+                }
+            }
+            int alive = foes.Count(id => k.TryGetUnit(id, out _));
+            Line($"    读数：L14 场景状态哈希指纹 {fp:X16}（改前 / 改后各跑一次比对）；来源格最多 {maxSrc}，敌方 {alive0} → {alive}");
+            Expect(round && diffAt < 0 && maxSrc >= 24 && alive < alive0 - 16 && sparseOk && fixedBytes == CombatKernel.AttrFixedBytesPerUnit && fixedBytes <= 32,
+                $"L14 状态位来源稀疏表：96 个敌方大面积挂火 / 沾染，阵亡移除与主动移除压实槽位（{alive0} → {alive}），来源格最多 {maxSrc}（表最多 {maxRows} 行）；每一步掩码与稀疏表一致、无残行 {sparseOk}；" +
+                $"每单位固定 {fixedBytes} 字节（原 156）；第 6 秒存读档逐字一致 {round}，之后两份逐步比状态哈希与全部来源（{(diffAt < 0 ? "一致" : "第 " + diffAt + " 步不同")}）；读档后待压实计数按快照重数（压实时刻与连续运行相同）");
         }
 
         /// <summary>L11 暂停与 0.5x～3x：离开明火后的残留燃烧按游戏秒计入（暂停不记不掉血、各倍速相同）。</summary>

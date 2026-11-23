@@ -310,7 +310,7 @@ namespace GameLogic.Campaign.Defense
                     Say(GameText.Get("turret.fire.paused"));
                     return true;
                 }
-                Ray ray = camera.ScreenPointToRay(screen);
+                Ray ray = BinGames.Sim.ViewOrigin.WorldRay(camera, screen);
                 if (new Plane(Vector3.up, Vector3.zero).Raycast(ray, out float enter))
                 {
                     Vector3 p = ray.GetPoint(enter);

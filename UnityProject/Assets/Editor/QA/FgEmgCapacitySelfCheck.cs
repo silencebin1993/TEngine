@@ -66,6 +66,8 @@ namespace GameLogic.EditorTools
                 EmgMatterCatalog.Reload();
                 Step(CheckStructures);
                 Step(CheckZones);
+                Step(CheckZoneGrid);
+                Step(CheckWorldBudgets);
                 Step(CheckPools);
                 Step(CheckSaveLoad);
                 Step(CheckSpeed);
@@ -300,6 +302,192 @@ namespace GameLogic.EditorTools
                 EmgScalars s = k.PatchStats;
                 Expect(k.LegacyPatchCount == 16 && k.ZoneCount - k.LegacyPatchCount == 4 && ok == 20 && s.LegacyKeptZone == 14 && k.Counters.ReadingRefused == 10,
                     $"B3 负向：斑块层满（16）+ 区域满（4）同时发生：迁入 {k.LegacyPatchCount}、退回区域 {k.ZoneCount - k.LegacyPatchCount}、生成 {ok}/30；两边计数都可见：斑块满落区域 {s.LegacyKeptZone}（应 14）、ReadingRefused {k.Counters.ReadingRefused}（应 10）");
+            }
+        }
+
+        // ── B'. 区域节拍走单位网格（FG15-SYS-02，DEBT-FG2FW02-06 / DEBT-EMGRMAT01-01）──────────────
+
+        private static int Mover(CombatKernel k, double2 at, CombatFaction f, float hp) => k.Spawn(new CombatSpawn
+        {
+            ExtKey = -1,
+            Kind = CombatUnitKind.Enemy,
+            Faction = f,
+            Behavior = CombatBehavior.Scout, // 出生点附近摆动巡逻：每步都在动，网格每步重建
+            Flags = Live,
+            Position = at,
+            Home = at,
+            Radius = 0.4f + (at.x > 0 ? 0.3f : 0f),
+            Speed = 3f,
+            Health = hp,
+            MaxHealth = hp,
+            Weapon = -1,
+            BehaviorProfile = -1,
+            Priority = 1,
+        });
+
+        /// <summary>1000 个单位（玩家 / 敌方各半，约 1/5 血少会阵亡压实）散在 160 × 160 米；<paramref name="zones"/> 块区域（7 成玩家、3 成敌方；伤害 + 减速 / 酸 / 无标签轮换），
+        /// <paramref name="staggerSteps"/> > 0 时分这么多步铺下去（节拍错开，接近实战），0 = 同一步铺完（全部同一步结算，最坏情况）。</summary>
+        private static CombatKernel GridScene(int zones, int staggerSteps, bool gridOff, uint acid, bool moving = true)
+        {
+            CombatKernel k = NewKernel();
+            k.ZoneGridOffForTests = gridOff;
+            var rng = new Unity.Mathematics.Random(20261123u);
+            for (int i = 0; i < 1000; i++)
+            {
+                var at = new double2(rng.NextFloat(-80f, 80f), rng.NextFloat(-80f, 80f));
+                CombatFaction f = (i & 1) == 0 ? CombatFaction.Player : CombatFaction.Hostile;
+                float hp = i % 5 == 0 ? 5f : 1e6f;
+                if (moving)
+                {
+                    Mover(k, at, f, hp);
+                }
+                else
+                {
+                    Unit(k, at, f, CombatUnitKind.Enemy, hp);
+                }
+            }
+            int per = staggerSteps > 0 ? (zones + staggerSteps - 1) / staggerSteps : zones;
+            for (int z = 0; z < zones; z++)
+            {
+                if (staggerSteps > 0 && z > 0 && z % per == 0)
+                {
+                    k.Step(Dt, k.Time + Dt);
+                }
+                var at = new double2(rng.NextFloat(-80f, 80f), rng.NextFloat(-80f, 80f));
+                uint mask = (z % 3) switch { 0 => CombatConst.StatusBitZoneSlow, 1 => acid, _ => 0u };
+                k.SpawnReadingZoneForTests(z % 10 < 7 ? CombatFaction.Player : CombatFaction.Hostile, at, rng.NextFloat(1f, 4f), 60f, 2f, mask);
+            }
+            return k;
+        }
+
+        private static double HpSum(CombatKernel k)
+        {
+            double s = 0;
+            for (int i = 0; i < k.SlotCount; i++)
+            {
+                s += k.ViewAt(i).Health;
+            }
+            return s;
+        }
+
+        private static void CheckZoneGrid()
+        {
+            Line("  · B'. 区域节拍走单位网格（DEBT-FG2FW02-06）：与逐单位扫描逐步比状态哈希；1000 块区域 + 1000 单位单步在预算内；上限 2048 按实测保留（DEBT-EMGRMAT01-01）");
+            uint acid = Bit("Acid");
+            // ① 逐字等价：同一场景网格版 / 逐单位扫描版（原实现）逐步比状态哈希，10 秒（单位每步移动、有阵亡压实、区域节拍错开）
+            int diff = 0, firstDiff = -1, steps = 600;
+            double hp0, hp1;
+            using (CombatKernel a = GridScene(1000, 10, false, acid))
+            using (CombatKernel b = GridScene(1000, 10, true, acid))
+            {
+                hp0 = HpSum(a);
+                bool same0 = a.StateHash() == b.StateHash();
+                for (int s = 0; s < steps; s++)
+                {
+                    a.Step(Dt, a.Time + Dt);
+                    b.Step(Dt, b.Time + Dt);
+                    if (a.StateHash() != b.StateHash())
+                    {
+                        diff++;
+                        firstDiff = firstDiff < 0 ? s : firstDiff;
+                    }
+                }
+                hp1 = HpSum(a);
+                int units = a.SlotCount, alive = 0;
+                for (int i = 0; i < units; i++)
+                {
+                    alive += (a.ViewAt(i).Flags & CombatUnitFlags.Alive) != 0 ? 1 : 0;
+                }
+                Expect(same0 && diff == 0 && hp1 < hp0 - 1000.0 && alive < 1000,
+                    $"B4 网格版与逐单位扫描逐步状态哈希一致：{steps} 步不一致 {diff} 步（首个 {firstDiff}）；区域确实在结算（总血量 {hp0:F0} → {hp1:F0}），有阵亡（存活 {alive}，槽位 {units}/1000）");
+            }
+            // ② 帧耗：1000 / 2048 块区域同一步铺下（全部同一步节拍 = 最坏情况）+ 1000 单位，测 0.5 秒（30 步，含 1 次全体节拍）的每步平均与最慢一步
+            const double rec = 0.6; // ADR-ARC-003 / ADR-EMG-001 ⑬：开发机数字 ÷ 0.6 = 推荐配置
+            foreach (int zones in new[] { 1000, 2048 })
+            {
+                double avgOn = 0, maxOn = 0, avgOff = 0, maxOff = 0;
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    using (CombatKernel k = GridScene(zones, 0, pass == 1, acid, moving: false))
+                    {
+                        k.Step(Dt, k.Time + Dt); // 预热（Burst 编译、首步分配）
+                        var sw = new Stopwatch();
+                        double sum = 0, max = 0;
+                        for (int s = 0; s < 30; s++)
+                        {
+                            sw.Restart();
+                            k.Step(Dt, k.Time + Dt);
+                            double ms = sw.Elapsed.TotalMilliseconds;
+                            sum += ms;
+                            max = Math.Max(max, ms);
+                        }
+                        if (pass == 0)
+                        {
+                            avgOn = sum / 30;
+                            maxOn = max;
+                        }
+                        else
+                        {
+                            avgOff = sum / 30;
+                            maxOff = max;
+                        }
+                    }
+                }
+                Line($"    · 读数（{zones} 块区域 + 1000 单位，全部同一步节拍）：网格版每步平均 {avgOn:F3} ms / 最慢一步 {maxOn:F3} ms；逐单位扫描（原实现）平均 {avgOff:F3} ms / 最慢 {maxOff:F3} ms");
+                if (zones == 1000)
+                {
+                    PerfGate.Expect(true, $"FGR-EMG-200 区域网格：1000 块区域 + 1000 单位最慢一步（全部同一步节拍）推荐配置 {maxOn / rec:F3} ms ≤ 3.0 ms（1x 一帧），每步平均 {avgOn / rec:F3} ms ≤ 1.5 ms",
+                        new[] { PerfGate.Le(maxOn / rec, 3.0, "1000 区域 + 1000 单位最慢一步（推荐配置 ms）"), PerfGate.Le(avgOn / rec, 1.5, "1000 区域 + 1000 单位每步平均（推荐配置 ms）") }, Expect, Line);
+                }
+            }
+        }
+
+        // ── B". 世界级总上限逐地点分摊（FG15-SYS-02，DEBT-EMG2MAT01-05，FGR-EMG-202 / ADR-EMG-001 ⑬）──────────────
+
+        private static void CheckWorldBudgets()
+        {
+            Line("  · B\". 世界级斑块 / 总线总上限按地点分摊：家园 → 远征 → 室内的固定顺序扣减后者，最少留 1；满了的地点照旧合并 / 提前到期、总线顺延（计数可见）");
+            int T(string key) => Mathf.RoundToInt(CombatSite.Tuning(key, 0f));
+            var made = new List<CombatSite>();
+            try
+            {
+                for (int i = 0; i < 6; i++)
+                {
+                    made.Add(new CombatSite("budget_" + i, CombatSite.ConfigFromTuning()));
+                }
+                int[] roles = { CombatSite.EmgRoleHome, CombatSite.EmgRoleExpedition, CombatSite.EmgRoleExpedition, CombatSite.EmgRoleMinor, CombatSite.EmgRoleMinor, CombatSite.EmgRoleMinor };
+                CombatSite.ApplyEmgWorldBudgets(made.GetRange(0, 2), new[] { roles[0], roles[1] });
+                CombatConfig h = made[0].Kernel.Config, e = made[1].Kernel.Config;
+                Expect(T("emg.patch.world_capacity") == 2048 && T("emg.bus.world_per_step") == 768 && h.EmgPatchCapacity == T("emg.patch.site_home") && h.EmgBusPerStep == T("emg.bus.site_home")
+                       && e.EmgPatchCapacity == T("emg.patch.capacity") && e.EmgBusPerStep == T("emg.bus.per_step") && h.EmgPatchReserve == T("emg.patch.reserve_world"),
+                    $"B5 家园 + 远征：家园斑块 {h.EmgPatchCapacity} / 总线 {h.EmgBusPerStep}（表 site_home），远征 {e.EmgPatchCapacity} / {e.EmgBusPerStep}（表 capacity / per_step），世界源保留 {h.EmgPatchReserve}");
+                CombatSite.ApplyEmgWorldBudgets(made, roles);
+                int[] p = made.Select(m => m.Kernel.Config.EmgPatchCapacity).ToArray(), b = made.Select(m => m.Kernel.Config.EmgBusPerStep).ToArray();
+                // 512 + 1024 + 1024 已超 2048：第二个远征地点只剩 512，之后的室内各留 1；总线 128 + 512 + 128（剩余）+ 1 + 1 + 1
+                Expect(p[0] == 512 && p[1] == 1024 && p[2] == 512 && p[3] == 1 && p[4] == 1 && p[5] == 1 && b[0] == 128 && b[1] == 512 && b[2] == 128 && b[3] == 1 && b[4] == 1 && b[5] == 1
+                       && made[3].Kernel.Config.EmgPatchReserve == 1,
+                    $"B6 负向 六处同时载入超世界级上限：斑块 {string.Join("/", p)}、总线 {string.Join("/", b)}（按家园 → 远征 → 室内扣减后者，最少 1；世界源保留随容量收到 {made[3].Kernel.Config.EmgPatchReserve}）");
+                uint acid = Bit("Acid");
+                CombatKernel k = made[3].Kernel;
+                int ok = 0;
+                for (int i = 0; i < 5; i++)
+                {
+                    ok += k.SpawnReadingZoneForTests(CombatFaction.Player, new double2(i * 6, 0), 1f, 30f, 1f, acid) ? 1 : 0; // 映射成酸的读法区域 = 迁入斑块（与 B1 同一路径）
+                }
+                StepN(k, 2);
+                int legacy = k.LegacyPatchCount;
+                Expect(ok == 5 && legacy <= 1,
+                    $"B7 负向 容量 1 的地点照常运行：5 块迁入酸驻留都生成（{ok}），斑块层只留 {legacy} 块（≤ 容量 1，其余按原规则落回区域 / 提前到期，计数见 B3），不崩");
+                CombatSite.ApplyEmgWorldBudgets(made.GetRange(0, 3), new[] { roles[0], roles[1], CombatSite.EmgRoleMinor });
+                Expect(made[2].Kernel.Config.EmgPatchCapacity == 256 && made[2].Kernel.Config.EmgBusPerStep == 64,
+                    $"B8 卸载后重分（家园 + 远征 + 一处室内）：室内恢复 {made[2].Kernel.Config.EmgPatchCapacity} / {made[2].Kernel.Config.EmgBusPerStep}（不是只减不加）");
+            }
+            finally
+            {
+                foreach (CombatSite m in made)
+                {
+                    m.Dispose();
+                }
             }
         }
 

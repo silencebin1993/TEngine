@@ -84,9 +84,16 @@ namespace GameLogic.Campaign.Env
         public static double LastReserveMs { get; private set; }
         public static bool LastReserveGc { get; private set; }
 
+        /// <summary>FG15-SYS-02 修复轮 2 探针：每批耗时与是否赶上回收（只在自检打开时记，定位“最慢一分钟”离回收多远，不改测量）。</summary>
+        public static bool TraceBatchesForTests;
+        /// <summary>自检：每分钟酸雨结算开始前、计时之外调一次（FgWeatherSelfCheck 用它在每批前整堆回收一次，见该处注释）。正式流程为 null。</summary>
+        public static Action BeforeBatchForTests;
+        public static readonly List<(int Batch, double Ms, bool Gc, string Split)> BatchTrace = new List<(int Batch, double Ms, bool Gc, string Split)>();
+
         /// <summary>自检：清零“最慢一次 / 最多一次”的统计（分段量性能）。</summary>
         public static void ResetBatchStats()
         {
+            BatchTrace.Clear();
             SlowBatchSplit = string.Empty;
             LastBatchMs = MaxBatchMs = MaxGcBatchMs = 0;
             MaxBeltCandidates = MaxBeltsDestroyed = GcBatchCount = 0;
@@ -755,6 +762,7 @@ namespace GameLogic.Campaign.Env
 
         private static void AcidBatch(CampaignState state, WeatherFrontState d, long k)
         {
+            BeforeBatchForTests?.Invoke();
             long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
             int gc0 = System.GC.CollectionCount(0);
             BatchCount++;
@@ -870,6 +878,11 @@ namespace GameLogic.Campaign.Env
             }
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
             LastBatchMs = ms;
+            if (TraceBatchesForTests)
+            {
+                double tf = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                BatchTrace.Add((BatchCount, ms, System.GC.CollectionCount(0) != gc0, $"建筑 {(t1 - te) * tf:F2}（{buildings} 座）/ 交回 {(t2 - t1) * tf:F2} / 扣耐久 {(t3 - t2) * tf:F2}（本批摧毁 {BatchDestroyed.Count} 格；最近一次整批摧毁 {BeltNetworkService.LastDestroySplit}）")); // loc-ignore: 开发者自检 / 诊断文本
+            }
             if (System.GC.CollectionCount(0) != gc0)
             {
                 GcBatchCount++;
