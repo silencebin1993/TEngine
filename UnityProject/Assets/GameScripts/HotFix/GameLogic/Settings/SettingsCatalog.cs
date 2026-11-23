@@ -329,6 +329,18 @@ namespace GameLogic.Settings
             });
             l.Add(Toggle("gameplay.causal_chain", SettingsCategory.Gameplay, "settings.gameplay.causal_chain", () => GameSettings.CausalChainOverlayEnabled, GameSettings.SetCausalChainOverlayEnabled));
             l.Add(Toggle("gameplay.damage_numbers", SettingsCategory.Gameplay, "settings.gameplay.damage_numbers", () => GameSettings.DamageNumbersEnabled, GameSettings.SetDamageNumbersEnabled));
+            // FG15-SYS-03：本地试玩统计（FG-GAP-047，FGR-SYS-100：需同意、只存本机、可导出）与反馈包（FGR-SYS-061，也可按反馈包键）。
+            l.Add(Toggle("gameplay.local_stats", SettingsCategory.Gameplay, "settings.gameplay.local_stats", () => GameSettings.LocalStatsConsent, GameSettings.SetLocalStatsConsent));
+            l.Add(new SettingItem
+            {
+                Id = "gameplay.export_stats", Category = SettingsCategory.Gameplay, Kind = SettingKind.Action, NameKey = "settings.gameplay.export_stats",
+                Invoke = ExportLocalStats,
+            });
+            l.Add(new SettingItem
+            {
+                Id = "gameplay.feedback_pack", Category = SettingsCategory.Gameplay, Kind = SettingKind.Action, NameKey = "settings.gameplay.feedback_pack",
+                Invoke = () => Diagnostics.FeedbackPack.Request(Diagnostics.FeedbackPack.Trigger.Settings),
+            });
             l.Add(new SettingItem
             {
                 Id = "gameplay.language", Category = SettingsCategory.Gameplay, Kind = SettingKind.Choice, NameKey = "settings.gameplay.language",
@@ -424,6 +436,29 @@ namespace GameLogic.Settings
             }
         }
 
+        /// <summary>FG15-SYS-03（FGR-SYS-100“导出为本地文件”）：最近一次导出的结果文字（自检读）。</summary>
+        public static string LastExportText { get; private set; }
+
+        private static void ExportLocalStats()
+        {
+            string path = Diagnostics.LocalPlayStats.Export(out string error);
+            LastExportText = path != null ? GameText.Format("diag.stats.exported_0", path)
+                : error == "no_data" ? GameText.Get(GameSettings.LocalStatsConsent ? "diag.stats.no_data" : "diag.stats.no_consent")
+                : GameText.Format("diag.stats.export_failed_0", error);
+            var req = new UI.Kit.ConfirmRequest
+            {
+                Title = GameText.Get("diag.stats.export_title"),
+                ConfirmText = GameText.Get(path != null ? "diag.pack.open_folder" : "diag.pack.close"),
+                CancelText = GameText.Get("diag.pack.close"),
+            };
+            req.Lines.Add(LastExportText);
+            if (path != null)
+            {
+                req.OnConfirm = () => Diagnostics.FeedbackPack.OpenFolderHandler?.Invoke(System.IO.Path.GetDirectoryName(path));
+            }
+            UI.Kit.UiConfirmDialog.Show(req);
+        }
+
         private static SettingItem Toggle(string id, SettingsCategory c, string nameKey, Func<bool> get, Action<bool> set) =>
             new SettingItem { Id = id, Category = c, Kind = SettingKind.Toggle, NameKey = nameKey, GetBool = get, SetBool = set };
 
@@ -455,7 +490,7 @@ namespace GameLogic.Settings
                     break;
                 case SettingsCategory.Gameplay:
                     GameSettings.ResetFields("PauseOnFocusLoss", "AutoSaveMinutes", "AwayReportAutoOpen", "GuidanceEnabled", "HomeGuideQuestsEnabled",
-                        "ReactionPopupsEnabled", "ReactionSlowMotionEnabled", "ReactionCameraNudgeEnabled", "CausalChainOverlayEnabled", "DamageNumbersEnabled");
+                        "ReactionPopupsEnabled", "ReactionSlowMotionEnabled", "ReactionCameraNudgeEnabled", "CausalChainOverlayEnabled", "DamageNumbersEnabled", "LocalStatsConsent");
                     GameSettings.ResetNotifyAutoPause();
                     Campaign.Feedback.DamageNumbers.Clear();
                     break;

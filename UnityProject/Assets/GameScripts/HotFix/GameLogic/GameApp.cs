@@ -43,6 +43,16 @@ public partial class GameApp
 
     private static void StartGameLogic()
     {
+        // FG15-SYS-03（FGR-SYS-060 / 062）：最先装崩溃记录与日志轮换，后面任何一步出错都有记录。
+        GameLogic.Diagnostics.CrashReporter.Install();
+        // FG-GAP-012：配置表损坏 / 缺失时不带着坏表进主菜单，只弹“文件损坏，请校验完整性”（可安全退出）。
+        string configError = GameLogic.Diagnostics.ConfigIntegrity.Probe();
+        if (configError != null)
+        {
+            GameLogic.Diagnostics.ConfigIntegrity.ShowCorruptScreen(configError);
+            return;
+        }
+
         // 正式游戏框架启动。注册所有阶段与更新驱动。
         // 详见 DesignDocs/Game_Framework_Design.md §8。
         GameLogic.Stage.GameRoot.Startup();

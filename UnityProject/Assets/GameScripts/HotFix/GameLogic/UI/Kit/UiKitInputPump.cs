@@ -49,6 +49,15 @@ namespace GameLogic.UI.Kit
                 }
             }
 
+            // FG15-SYS-03（FGR-SYS-061）：反馈包键（默认 Ctrl+F8，可重绑）在任何界面、暂停、任意倍速下都能按，主菜单也能按。
+            if (InputRouter.ConsumeGlobalAction(GameActionId.CreateFeedbackPack, allowDuringModal: true))
+            {
+                Diagnostics.FeedbackPack.Request(Diagnostics.FeedbackPack.Trigger.Hotkey);
+            }
+            Diagnostics.FeedbackPack.Pump();
+            Diagnostics.CrashReporter.Tick();
+            Diagnostics.LocalPlayStats.Tick(Time.unscaledDeltaTime);
+
             if (inWorld)
             {
                 ProcessWorldKeys();

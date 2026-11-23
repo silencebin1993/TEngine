@@ -316,6 +316,8 @@ namespace GameLogic
             AttachClickSounds();
             SetView(MenuView.Root);
             SyncCloudSaves(); // FG15-SYS-01：每次打开主菜单对账一次（冲突窗口关掉不选 = 两份原样留着，下次打开主菜单再问）
+            Diagnostics.LocalPlayStats.EndSession(); // FG-GAP-047：回到主菜单 = 这一局的本地统计写盘
+            Diagnostics.CrashReporter.OfferFeedbackPackAfterCrash(); // FG15-SYS-03（FGR-SYS-060）：上次没有正常退出就问一次是否生成反馈包
         }
 
         /// <summary>FG14-SBX-02：在“新建”后面复制出“沙盒模式”（同属根菜单的布局组，排版由布局组负责；文字走文本键）。MainMenuSelfCheck 断言它存在、可点。</summary>

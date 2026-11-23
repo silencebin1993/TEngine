@@ -25,4 +25,6 @@
     设计），不是绕过——本文件独立于 HybridCLRGenerate 目录，不会被下次 GenerateAll 覆写。
   -->
   <assembly fullname="UnityEngine.UIElementsModule" preserve="all" />
+  <!-- FG15-SYS-03：反馈包用 System.IO.Compression.ZipArchive（只被热更层引用，HybridCLR 生成的 link.xml 不一定重生成过，显式保留）。 -->
+  <assembly fullname="System.IO.Compression" preserve="all" />
 </linker>

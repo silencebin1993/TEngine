@@ -33,8 +33,22 @@ public class ConfigSystem
         }
     }
 
+    /// <summary>FG15-SYS-03（FG-GAP-012）：最近一次读的表文件名。整套表读失败时用它告诉玩家是哪一个文件坏了。</summary>
+    public string LastRequestedFile { get; private set; }
+
     private IResourceModule _resourceModule;
     private bool _resourceModuleResolved;
+    private readonly Func<string, byte[]> _sourceForTests;
+
+    public ConfigSystem()
+    {
+    }
+
+    /// <summary>FG15-SYS-03 自检：用给定的字节来源读整套表（构造缺失 / 截断的表文件，走与正式启动同一条读表路径）。</summary>
+    public ConfigSystem(Func<string, byte[]> sourceForTests)
+    {
+        _sourceForTests = sourceForTests;
+    }
 
     /// <summary>
     /// 加载配置。
@@ -51,8 +65,9 @@ public class ConfigSystem
     /// <param name="file">不含扩展名的表文件名，如 fp_tbglobal</param>
     private ByteBuf LoadByteBuf(string file)
     {
-        byte[] bytes = TryLoadFromResourceModule(file);
-        if (bytes == null)
+        LastRequestedFile = file;
+        byte[] bytes = _sourceForTests != null ? _sourceForTests(file) : TryLoadFromResourceModule(file);
+        if (bytes == null && _sourceForTests == null)
         {
             bytes = TryLoadFromAssetRaw(file);
         }

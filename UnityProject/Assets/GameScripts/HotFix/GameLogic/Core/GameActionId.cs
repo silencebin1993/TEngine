@@ -196,5 +196,7 @@
         PanelZoomOut = 151,
         /// <summary>FG15-UX-02（DEBT-FG6DEF09-05）：打开难度面板（默认 Ctrl+K）。</summary>
         OpenDifficulty = 152,
+        /// <summary>FG15-SYS-03（FGR-SYS-061）：生成反馈包（全部上下文，默认 Ctrl+F8：F8 本身是快捷栏 8，同快速存档 Ctrl+F5 的取舍）。</summary>
+        CreateFeedbackPack = 153,
     }
 }

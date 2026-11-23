@@ -625,6 +625,9 @@ namespace GameLogic.EditorTools
                     case 42: StepMenuAllKeyBindingsClosed(inStep); break;
                     case 9043: StepMenuAllSettings(inStep); break; // FG15-UX-01
                     case 9044: StepMenuAllSettingsClosed(inStep); break;
+                    case 9070: StepFeedbackPackDone(inStep); break; // FG15-SYS-03：真实按键路径生成反馈包
+                    case 9071: StepCorruptDialogShown(inStep); break; // FG15-SYS-03（FG-GAP-012）：坏表提示在真实浮层里渲染、Esc 打开日志
+                    case 9072: StepCorruptDialogEsc(inStep); break; // FG15-SYS-03（FG-GAP-012）：点“退出游戏”走退出动作
                     case 9060: StepFarFlyOut(inStep); break; // FG15-SYS-02：浮动画面原点，飞到远处再回来
                     case 9061: StepFarFlyBack(inStep); break;
                 }
@@ -1500,6 +1503,81 @@ namespace GameLogic.EditorTools
             Check(quick.State == CampaignSlotState.Ready && quick.Kind == SaveSlotKind.Quick && CampaignAutoSaveService.HasQuickSave() && !locked
                   && CampaignSaveService.BackgroundCommits > SessionState.GetInt(K + "QuickBefore", 0) && CampaignSaveService.LastBackgroundResult.Success,
                 $"FG15-SYS-01：按快速存档键 → 后台写盘成功、槽位 {home + 1} 有可读的快速存档（{CampaignSlotText.SlotTitle(quick.SlotIndex)}，带缩略图 {quick.ThumbnailJpg != null}），不再提示“尚未开放”");
+            // FG15-SYS-03（FGR-SYS-061）：反馈包键（默认 Ctrl+F8）真实按键路径 → 后台打包，下一步核结果。
+            SessionState.SetInt(K + "PackBefore", Diagnostics.FeedbackPack.CompletedCount);
+            PressChord(GameSettings.KeyBindings.GetChord(GameActionId.CreateFeedbackPack));
+            Next(9070, "按反馈包键 Ctrl+F8（FG15-SYS-03：反馈包，只存本地）");
+        }
+
+        private static void StepFeedbackPackDone(double inStep)
+        {
+            bool done = Diagnostics.FeedbackPack.CompletedCount > SessionState.GetInt(K + "PackBefore", 0);
+            if (inStep < 1 || (!done && inStep < 15))
+            {
+                return;
+            }
+            Diagnostics.FeedbackPack.Result r = Diagnostics.FeedbackPack.LastResult;
+            var entries = new System.Collections.Generic.List<string>();
+            if (r != null && r.Ok && System.IO.File.Exists(r.Path))
+            {
+                using (var z = new System.IO.Compression.ZipArchive(System.IO.File.OpenRead(r.Path), System.IO.Compression.ZipArchiveMode.Read))
+                {
+                    entries.AddRange(z.Entries.Select(e => e.FullName));
+                }
+            }
+            bool local = r?.Path != null && System.IO.Path.GetFullPath(r.Path).StartsWith(System.IO.Path.GetFullPath(Diagnostics.FeedbackPack.PackDir), StringComparison.OrdinalIgnoreCase);
+            Check(done && r != null && r.Ok && local && entries.Contains("README.txt") && entries.Contains("system.txt") && entries.Any(e => e.StartsWith("logs/run-"))
+                  && entries.Any(e => e.StartsWith("saves/")) && !Diagnostics.FeedbackPack.Busy && Diagnostics.CrashReporter.Installed,
+                $"FG15-SYS-03：按反馈包键 → 后台打出本地 zip（{entries.Count} 个文件：{string.Join(", ", entries.Take(8))}），游戏照常运行");
+            // FG-GAP-012：坏表提示的同一个确认请求在真实浮层里渲染（冷启动坏表只挂浮层的那条路径交 FG15-ACC-04 真窗口实测，DEBT-FG15SYS03-04）。
+            // 不调 ShowCorruptScreen：它会 LogError，冒烟把所有报错当失败；退出 / 打开文件夹换成计数，下一步核完还原。
+            _corruptQuits = 0;
+            _corruptOpened = 0;
+            _origCorruptQuit = Diagnostics.ConfigIntegrity.QuitHandler;
+            _origOpenFolder = Diagnostics.FeedbackPack.OpenFolderHandler;
+            Diagnostics.ConfigIntegrity.QuitHandler = () => _corruptQuits++;
+            Diagnostics.FeedbackPack.OpenFolderHandler = _ => _corruptOpened++;
+            UiConfirmDialog.Show(Diagnostics.ConfigIntegrity.BuildRequest("fg_tbloctext.bytes — smoke probe"));
+            Next(9071, "弹出“文件损坏，请校验完整性”（FG-GAP-012，确认请求与冷启动坏表时相同）");
+        }
+
+        private static Action _origCorruptQuit;
+        private static Action<string> _origOpenFolder;
+        private static int _corruptQuits;
+        private static int _corruptOpened;
+
+        private static string OverlayLabel(string name)
+        {
+            GameObject host = GameObject.Find("[UiKitOverlayHost]");
+            UIDocument doc = host != null ? host.GetComponent<UIDocument>() : null;
+            return doc?.rootVisualElement?.Q<Label>(name)?.text;
+        }
+
+        private static void StepCorruptDialogShown(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            string title = OverlayLabel("ConfirmTitle");
+            Check(UiConfirmDialog.IsOpen && title == Diagnostics.ConfigIntegrity.BuildRequest("x").Title && UitkExists("[UiKitOverlayHost]", "ConfirmOk"),
+                $"FG-GAP-012：坏表提示在真实浮层里渲染（标题“{title}”，有“退出游戏 / 打开日志文件夹”两个按钮）");
+            CheckNoTextMarkers("坏表提示");
+            PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
+            Next(9072, "按 Esc（坏表提示：打开日志文件夹，提示留着）");
+        }
+
+        private static void StepCorruptDialogEsc(double inStep)
+        {
+            if (inStep < 0.3)
+            {
+                return;
+            }
+            bool reshown = UiConfirmDialog.IsOpen && OverlayLabel("ConfirmTitle") == Diagnostics.ConfigIntegrity.BuildRequest("x").Title;
+            bool quit = ClickUitk("[UiKitOverlayHost]", "ConfirmOk") && _corruptQuits == 1 && !UiConfirmDialog.IsOpen;
+            Diagnostics.ConfigIntegrity.QuitHandler = _origCorruptQuit;
+            Diagnostics.FeedbackPack.OpenFolderHandler = _origOpenFolder;
+            Check(_corruptOpened == 1 && reshown && quit, $"FG-GAP-012：Esc 打开日志文件夹（{_corruptOpened} 次）且提示留着；点“退出游戏”执行退出动作（{_corruptQuits} 次）");
             PressKey(GameSettings.KeyBindings.GetKey(GameActionId.Cancel));
             Next(33, "按 Esc（没有打开的面板 → 暂停菜单）");
         }

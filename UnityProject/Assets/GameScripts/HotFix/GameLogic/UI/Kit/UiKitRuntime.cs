@@ -148,10 +148,32 @@ namespace GameLogic.UI.Kit
             UiEscapeStack.Clear();
         }
 
+        /// <summary>FG15-SYS-03（FG-GAP-012）：配置表损坏时只挂最上层浮层（确认框），不挂会读表的 HUD / 面板。之后不能再 <see cref="Mount"/>（进程会退出）。返回新宿主（已经挂过 = null）。</summary>
+        public static GameObject MountOverlayOnly()
+        {
+            if (_mounted || UiKitOverlayUIToolkit.Instance != null)
+            {
+                return null;
+            }
+            _mounted = true;
+            return Create<UiKitOverlayUIToolkit>("[UiKitOverlayHost]");
+        }
+
+        /// <summary>自检专用（编辑模式走 <see cref="MountOverlayOnly"/> 真实路径前后）：改写“已挂载”标记，返回原值。</summary>
+        public static bool SetMountedForTests(bool mounted)
+        {
+            bool was = _mounted;
+            _mounted = mounted;
+            return was;
+        }
+
         private static GameObject Create<T>(string name) where T : Component
         {
             var go = new GameObject(name);
-            Object.DontDestroyOnLoad(go);
+            if (Application.isPlaying)
+            {
+                Object.DontDestroyOnLoad(go); // 编辑模式（自检）下不能调，否则抛异常
+            }
             go.AddComponent<T>();
             return go;
         }

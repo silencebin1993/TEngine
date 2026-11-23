@@ -405,6 +405,7 @@ namespace GameLogic.EditorTools
             Seg("FgDataPipelineSelfCheck", FgDataPipelineSelfCheck.Run);
             // FG0-SAVE-01：存档 v2 骨架——版本升级链、Demo 存档提示、写入中途强制结束与备份恢复、已移除内容转废料、存档卡新字段。
             Seg("FgSaveV2SelfCheck", FgSaveV2SelfCheck.Run);
+            Seg("FgCrashFeedbackSelfCheck", BinGames.EditorTools.FgCrashFeedbackSelfCheck.Run); // FG15-SYS-03：日志轮换、崩溃认定与记录、隐私脱敏、反馈包（内容 / 只存本地 / 磁盘不足）、下次启动询问、本地统计（FG-GAP-047）、配置表损坏提示（FG-GAP-012）
             Seg("FgSaveRobustSelfCheck", FgSaveRobustSelfCheck.Run); // FG15-SYS-01：断电式写档、后台写盘、手动槽不限 / 轮换 / 快速存档、列表只读头部、存档卡、云存档冲突、FG-EMG 存档域、存档时机
             // FG0-UX-01：UI 基础件（12 类）与输入上下文——动作登记表、上下文与组合键、重绑冲突、旧设置迁移、通知中心、
             // 浮层基础件、面板与布局探针（四种分辨率 × 缩放极值 × 中英文）、文本键、性能。

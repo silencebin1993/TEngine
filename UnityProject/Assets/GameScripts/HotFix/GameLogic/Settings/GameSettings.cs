@@ -122,6 +122,8 @@ namespace GameLogic.Settings
         public bool CausalChainOverlayEnabled = true;
         /// <summary>游戏性：伤害数字（被观察地点里机器 / 敌人受伤时在头上飘数字；默认关）。</summary>
         public bool DamageNumbersEnabled;
+        /// <summary>FG15-SYS-03（FG-GAP-047，FGR-SYS-100）：同意记录本地试玩统计（只存本机、不联网；默认不同意 = 不记录、不写文件）。</summary>
+        public bool LocalStatsConsent;
 
         // ── FG15-UX-02（FGR-UX-060 可访问性全集）：旧设置 JSON 没有这些字段时按这里的初值补齐 ──
         /// <summary>色盲模式（<see cref="ColorblindMode"/> 的整数值）；-1 = 没设过：按旧布尔 <see cref="ColorblindSafeIconsEnabled"/> 迁移（开 = 红绿）。</summary>
@@ -163,7 +165,7 @@ namespace GameLogic.Settings
     /// </summary>
     public static class GameSettings
     {
-        private const string PrefsKey = "BinGames.GameSettings.v1";
+        internal const string PrefsKey = "BinGames.GameSettings.v1";
 
         private static GameSettingsData _data;
         private static InputBindingSet _keyBindings;
@@ -948,6 +950,14 @@ namespace GameLogic.Settings
         }
 
         public static bool DamageNumbersEnabled => Data.DamageNumbersEnabled;
+
+        public static bool LocalStatsConsent => Data.LocalStatsConsent;
+
+        public static void SetLocalStatsConsent(bool consent)
+        {
+            Data.LocalStatsConsent = consent;
+            Save();
+        }
 
         public static void SetDamageNumbersEnabled(bool enabled)
         {

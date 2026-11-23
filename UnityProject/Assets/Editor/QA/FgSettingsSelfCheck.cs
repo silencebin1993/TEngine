@@ -152,6 +152,8 @@ namespace GameLogic.EditorTools
             "gameplay.reaction_log",
             // FGR-SYS-020 游戏性“自动暂停规则”（FGR-UX-021 按通知类型）
             "gameplay.auto_pause_rules",
+            // FG15-SYS-03：本地试玩统计（FG-GAP-047，FGR-SYS-100）与反馈包（FGR-SYS-061）
+            "gameplay.local_stats", "gameplay.export_stats", "gameplay.feedback_pack",
         };
 
         private static void CheckCatalog()
