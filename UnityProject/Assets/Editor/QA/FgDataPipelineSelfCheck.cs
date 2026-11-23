@@ -221,7 +221,7 @@ namespace GameLogic.EditorTools
         private static void CheckEnemyEndToEnd()
         {
             Expect(Mathf.Approximately(FoundryOutpostLayout.ArmorBotMaxHealth, 160f) && Mathf.Approximately(FoundryOutpostLayout.MainCoreMaxHealth, 600f)
-                && Mathf.Approximately(FracturedCityLayout.ScoutMaxHealth, 70f), "敌人生命读表：护甲机 160、主核心 600、侦察机 70");
+                && Mathf.Approximately(FracturedCityLayout.ScoutMaxHealth, 70f), "敌人生命读表：护甲机 160、主核心 600（FG15-BAL-01 BAL-REC-025）、侦察机 70");
             Expect(Mathf.Approximately(100f * (1f - FoundryOutpostLayout.ArmorBotFrontalReductionPct), 60f),
                 "护甲机正面减伤读表 0.4：100 → 60（FG9-DATA-01：这里只核对数据管线读到的表值；正面减伤 / 侧后不减的真实命中结算由 FgCombatKernelSelfCheck 的内核护甲命中断言验证）");
 

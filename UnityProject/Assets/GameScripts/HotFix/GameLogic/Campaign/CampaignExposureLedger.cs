@@ -318,6 +318,9 @@ namespace GameLogic.Campaign
             return HighPowerCapPerHour * Mathf.Clamp01(t);
         }
 
+        /// <summary>FG15-BAL-01（FG-GAP-151）：计入“高功率生产”的用电 = 总用电 − 防御建筑用电（FG16 第 9 节只说“生产”）。</summary>
+        public static float ProductionPowerDemand(CampaignState state) => state == null ? 0f : Math.Max(0f, state.PowerDemand - state.DefensePowerDemand);
+
         /// <summary>
         /// 高功率生产（FGR-SIG-070，FG16“按总功率换算，每游戏小时最多 +3”）：家园模拟步（整个世界同时运行，与观察无关）按游戏时间累计，
         /// 每满 exposure.high_power.settle_seconds 游戏秒（= 1 游戏小时）记一笔。暂停不走、倍速只改变每帧步数，结果与倍速无关。O(1)。
@@ -329,7 +332,7 @@ namespace GameLogic.Campaign
                 return;
             }
             float hour = (float)Math.Max(1.0, GameClock.DaySeconds / 24.0);
-            float demand = state.PowerDemand;
+            float demand = ProductionPowerDemand(state);
             state.HighPowerAccrued += HighPowerRatePerHour(demand) * dt / hour;
             state.HighPowerPeakDemand = Math.Max(state.HighPowerPeakDemand, demand);
             // 窗口计时存整数步（FG1-E2E-01，DEBT-FG1SIG07-05）：float / double 累加一个游戏小时会差出一步，存成浮点读回还会差 1 ulp；

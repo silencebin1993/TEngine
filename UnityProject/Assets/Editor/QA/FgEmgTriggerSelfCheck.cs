@@ -295,7 +295,7 @@ namespace GameLogic.EditorTools
 
         /// <summary>
         /// A2（EMGR-TRIG-01，DEBT-EMG1TRIG01-04；FG19A 第 2.1.1 节“每 0.5 秒一段作为一枚载荷”、FG19A:348 每段 20 热、FG19:471 光束按 emg.trig.beam_interval 切段）：
-        /// ① 武器：冷却 = beam_interval、每段伤害 / 自身积热 × 0.5/1.2（秒伤不变）、一次出手折算伤害不变；补给炮塔一段 = 一发补给（不缩，FG-GAP-230）；敌方光束精英不带光束标记、节拍仍按敌人表。
+        /// ① 武器：冷却 = beam_interval、每段伤害 / 自身积热 × 0.5/1.2（秒伤不变）、一次出手折算伤害不变；补给炮塔一段扣段份额的补给（FG15-BAL-01，FG-GAP-230）；敌方光束精英不带光束标记、节拍仍按敌人表。
         /// ② 编队攻击命令（下令传机器出手间隔 1.2）持续 1 秒 = 2 枚载荷、注热 40；③ 目标中途死亡 / 换目标、接入后手动开火同一间隔；
         /// ④ 0.5x～3x 只改步数、暂停不出手；⑤ 过载切割束 4 秒内点燃 10 份油；单台（不过载）10 份油的实测升温曲线记录给 FG-GAP-222。
         /// </summary>
@@ -316,8 +316,19 @@ namespace GameLogic.EditorTools
             var prof = new GameLogic.Campaign.Defense.TurretProfileDef { Range = 30f, TurnRate = 720f, ProjectileSpeed = 30f, ProjectileRadius = 0.3f };
             CombatWeapon tb = GameLogic.Campaign.Defense.TurretService.BuildWeapon(bare, prof, 1f, 0, true, false, false);
             CombatWeapon tg = GameLogic.Campaign.Defense.TurretService.BuildWeapon(GunPreview(), prof, 1f, 0, true, false, false);
-            Expect(Near(tb.Cooldown, seg) && tb.BeamHit == 1 && Near(tb.Damage, wb.Damage, 1e-3f) && Near(tb.AmmoPerShot, 1f) && Near(tg.AmmoPerShot, 1f) && tg.BeamHit == 0,
-                $"切割束炮塔：每段冷却 {tb.Cooldown:0.##} 秒、每段伤害 {tb.Damage:0.##}（与机器同源）、一段 = 一发补给（{tb.AmmoPerShot:0.##}，FGR-DEF-004“每发”；每秒消耗变多交 FG15-BAL-01）；连射器炮塔每发补给 {tg.AmmoPerShot:0.##}、无光束标记");
+            // FG15-BAL-01（FG-GAP-230，M10-BASELINE 差异表）：补给炮塔一段只扣一发的段份额（原“一段 = 一发”每秒消耗 2.4 倍）；预览的每发伤害与热量同一口径（都按每段，与内核同源）。
+            Expect(Near(tb.Cooldown, seg) && tb.BeamHit == 1 && Near(tb.Damage, wb.Damage, 1e-3f) && Near(tb.AmmoPerShot, share) && Near(tg.AmmoPerShot, 1f) && tg.BeamHit == 0,
+                $"切割束炮塔：每段冷却 {tb.Cooldown:0.##} 秒、每段伤害 {tb.Damage:0.##}（与机器同源）、每段补给 {tb.AmmoPerShot:0.###}（= 段份额 {share:0.###}，每秒补给消耗 {tb.AmmoPerShot / seg:0.##} 与切段前一发 / {CombatSite.MachineAttackInterval:0.#} 秒相同）；连射器炮塔每发补给 {tg.AmmoPerShot:0.##}、无光束标记");
+            BlueprintCircuitBoard dualBoard = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompBeamId, null, null, Array.Empty<string>());
+            dualBoard.TrySetUplink(2);
+            UplinkDualPreview dual = UplinkCompiler.CompileDual(dualBoard, new[] { FirmwareCatalog.FwOverloadId });
+            string heatLine = string.Join("｜", dual.UplinkedLines.Select(l => l.Text).Where(t => t.Contains("热量") || t.Contains("每段") || t.Contains("伤害")));
+            BlueprintCircuitBoard gunBoard = BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, new[] { FirmwareCatalog.FwOverloadId });
+            BlueprintCircuitPreview gunOver = BlueprintCircuitCompiler.CompilePreview(gunBoard);
+            Expect(Near(CombatSite.MachineHitHeat(over), wo.HeatPerShot, 1e-3f) && Near(CombatSite.MachineHitDamage(over), wo.Damage * (wo.Reading.DamageScale > 0f ? wo.Reading.DamageScale : 1f), 1e-3f)
+                   && Near(CombatSite.MachineHitHeat(gunOver), gunOver.HeatBudget) && heatLine.Contains("每段"),
+                $"FG-GAP-230 预览伤害与热量同一口径：过载切割束预览每段热量 {CombatSite.MachineHitHeat(over):0.##} = 内核每段积热 {wo.HeatPerShot:0.##}、每段伤害 {CombatSite.MachineHitDamage(over):0.##} = 内核；" +
+                $"连射器按整发（热量预算 {gunOver.HeatBudget:0.#}）；接入预览“{heatLine}”");
             var enemies = new List<string>();
             bool enemyOk = true;
             // FG11-FAC-01（DEBT-FG9FAC02-04）起两种寂听精英带 assembled：按切割束规则复核——敌方光束精英走战斗地点真实生成路径 CombatSite.EnemyWeapon，

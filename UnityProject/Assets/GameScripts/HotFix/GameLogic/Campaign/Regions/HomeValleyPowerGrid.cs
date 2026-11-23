@@ -126,6 +126,7 @@ namespace GameLogic.Campaign.Regions
             List<UnityEngine.Vector2> cutAt = null;
             bool signalTowerPowered = false;
             float totalDemand = 0f;
+            float defenseDemand = 0f;
             int poles = 0;
 
             for (int i = 0; i < _entityCount; i++)
@@ -145,6 +146,10 @@ namespace GameLogic.Campaign.Regions
                     continue;
                 }
                 totalDemand += e.Demand;
+                if (Defense.SiegeCatalog.CategoryOf(building.BuildingTypeId) == BinGames.Sim.Combat.CombatSiegeConst.CatDefense)
+                {
+                    defenseDemand += e.Demand; // FG-GAP-151：防御建筑不算“高功率生产”
+                }
                 order.Add(building.BuildingId);
                 BuildingPowerState before = building.PowerState;
                 PowerUse use = kernel.UseOf(i);
@@ -233,6 +238,7 @@ namespace GameLogic.Campaign.Regions
             }
             state.PowerCapacity = totalSupply;
             state.PowerDemand = totalDemand;
+            state.DefensePowerDemand = defenseDemand;
             // ER6-EXPOSE-01："家园关闭信号塔主动广播……带宽减少3"——玩家主动开关（与本方法自己算出的
             // signalTowerPowered 供电状态完全独立的另一维度），带宽唯一真相仍在本方法集中计算，
             // CampaignExposureLedger 本身不碰这个字段。

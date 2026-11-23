@@ -133,6 +133,7 @@ namespace GameLogic.EditorTools
                 Step(CheckBreachJourney);
                 Step(CheckRetreatLosses);
                 Step(CheckRetreatTime);
+                Step(CheckPurgeRetreatTime); // FG15-BAL-01（FG-GAP-254）
                 Step(CheckAnnihilation);
                 Step(CheckHijackedLastMember);
                 Step(CheckFormalJourney);
@@ -1055,6 +1056,39 @@ namespace GameLogic.EditorTools
             bool gone = StepUntil(() => WorldTransitSystem.Find(s, g.GroupId)?.State == TransitGroupState.Retreating, 120) && g.UnitCount == g.ExitedCount && g.ExitedCount > 0;
             Expect(before && ordered && gone,
                 $"E2 FGR-DEF-032 时间上限：到达后 1 个游戏小时（{limit / (double)GameClock.StepHz:F0} 秒模拟时间）内一直攻城（{before}），到点撤退（{g.SiegeRetreatReason}），走回集结点后并回行进队伍原路返回（{g.State}）");
+        }
+
+        /// <summary>E2b（FG15-BAL-01，FG-GAP-254，按推荐默认执行，待用户确认）：清洗波次（计划触发 purge）不按普通 1 小时撤退，按 raid.purge.time_limit_hours；到点同样按时限撤退。</summary>
+        private static void CheckPurgeRetreatTime()
+        {
+            CampaignState s = NewWorld(7012);
+            List<BuildingRecord> ring = Ring(s, 4, B3, out GridCell rmin, out GridCell rmax, out _);
+            Vector2 at = OutsidePoint(s, Math.Max(rmax.X - rmin.X, rmax.Y - rmin.Y) * 0.5f + 12f);
+            TransitGroupRecord g = Arrive(s, at, "silent", new[] { "silent.scout" }, new[] { 3 });
+            var plan = new RaidPlanRecord { PlanId = "plan-purge-test", Serial = 992, State = RaidDirectorService.StateDeparted, GroupId = g.GroupId, Faction = "silent", Level = 1,
+                ArrivedTick = g.ArrivedAtTick, Trigger = RaidCatalog.TriggerPurge };
+            RaidDirectorState d = RaidDirectorService.StateOf(s);
+            d.Plans = d.Plans.Append(plan).ToArray();
+            g.PlanId = plan.PlanId;
+            long limit = WorldTransitSystem.TimeLimitTicks;
+            long purge = WorldTransitSystem.TimeLimitTicksFor(s, g, limit);
+            bool longer = purge > limit && Mathf.Approximately(RaidCatalog.PurgeTimeLimitHours, GridContent.Tuning("raid.purge.time_limit_hours"));
+            bool Left() => g.SiegeRetreat || g.State == TransitGroupState.Retreating; // 攻城中按时限撤（SiegeService）或未交战时按时限原路返回（WorldTransitSystem），两处同一时限
+            bool stays = StepUntil(() => GameClock.Ticks - g.ArrivedAtTick >= limit + 5 * GameClock.StepHz || Left(), (int)(limit / GameClock.StepHz) + 10) && !Left();
+            // 突袭 HUD / 离家提示的“最晚 X 后撤退”与撤退判定同源：清洗波次过了普通 1 小时仍剩约 5 小时；同一支队伍换成普通触发则按 1 小时。
+            bool hudPurge = RaidHudService.TryWaveFight(s, 0, out RaidWaveFight fp) && fp.LimitTick == g.ArrivedAtTick + purge;
+            double hudLeftHours = (fp.LimitTick - GameClock.Ticks) / (double)GameClock.StepHz / (GameClock.DaySeconds / 24.0);
+            string trig = plan.Trigger;
+            plan.Trigger = string.Empty;
+            bool hudNormal = RaidHudService.TryWaveFight(s, 0, out RaidWaveFight fn) && fn.LimitTick == g.ArrivedAtTick + limit;
+            plan.Trigger = trig;
+            Expect(hudPurge && hudNormal && hudLeftHours > RaidCatalog.PurgeTimeLimitHours - RaidCatalog.TimeLimitHours - 0.25,
+                $"E2c FG-GAP-254 突袭 HUD 剩余时间：清洗波次到达 {(GameClock.Ticks - g.ArrivedAtTick) / (double)GameClock.StepHz:F0} 秒后 HUD 仍剩 {hudLeftHours:F2} 游戏小时（应 > 清洗时限 − 普通时限 − 0.25；{hudPurge}）；普通触发按普通时限（{hudNormal}）");
+            GameClock.SkipForTests(s, g.ArrivedAtTick + purge - GameClock.Ticks); // 测试捷径：时钟直接拨到清洗时限（等于读一个更晚的存档；开局时钟太小，不能把到达时刻往负数挪）
+            bool ordered = StepUntil(Left, 10) && (!g.SiegeRetreat || g.SiegeRetreatReason == SiegeService.ReasonTime);
+            int aliveNow = Site.CountSiegeGroup(Key(g));
+            Expect(longer && stays && ordered,
+                $"E2b FG-GAP-254 清洗波次时限：普通 {limit / (double)GameClock.StepHz:F0} 秒、清洗 {purge / (double)GameClock.StepHz:F0} 秒（{RaidCatalog.PurgeTimeLimitHours} 游戏小时）；过了普通时限 5 秒仍在攻城（{stays}），到清洗时限按时限撤退（{g.SiegeRetreatReason} / {g.State}、攻城中 {SiegeService.IsSieging(g)}；在场 {aliveNow} 台、计划 {WorldTransitSystem.TimeLimitTicksFor(s, g, limit) / (double)GameClock.StepHz:F0} 秒、已到达 {(GameClock.Ticks - g.ArrivedAtTick) / (double)GameClock.StepHz:F0} 秒）");
         }
 
         private static void CheckAnnihilation()

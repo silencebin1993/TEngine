@@ -146,6 +146,9 @@ namespace GameLogic.Campaign
         public float HighPowerAccrued;
         /// <summary>FG1-SIG-06：本结算窗口里的最高用电需求（来源名里显示“用电 N”）。</summary>
         public float HighPowerPeakDemand;
+        /// <summary>FG15-BAL-01（FG-GAP-151 / 111）：总用电里防御建筑（攻城类别 defense：炮塔、屏障、闸门、护盾、陷阱、维修无人机站）那部分。
+        /// FG16“高功率生产”只按生产用电换算暴露，防御不计；电网重算时写，进存档（读档后第一步与连续运行同一值）。</summary>
+        public float DefensePowerDemand;
 
         /// <summary>ER6-EXPOSE-01：家园信号塔"主动关闭广播"玩家开关（与断电/未修复的
         /// <see cref="BuildingConstructionState"/>/<see cref="BuildingPowerState"/> 是完全独立的另一维度——

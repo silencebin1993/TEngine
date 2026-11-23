@@ -842,7 +842,26 @@ namespace GameLogic.UI.Kit
                 ReactionCount(b) - ReactionCount(a));
             Row(sb, "range.compare.coverage", TopCoverage(a), TopCoverage(b), null);
             Row(sb, "range.compare.ended", TestRangeService.EndReasonText(a.EndReason), TestRangeService.EndReasonText(b.EndReason), null);
+            string hint = CoreHint(a, b);
+            if (hint != null)
+            {
+                sb.AppendLine(hint);
+            }
             return sb.ToString().TrimEnd('\n', '\r');
+        }
+
+        /// <summary>FG15-BAL-01（DEBT-FG5E2E01-07）：一次接入、一次没接入，而接入那次热量峰值没到过热线一半 → 提示核心固件可能还没触发（不改触发线）。</summary>
+        public static string CoreHint(RangeResultRecord a, RangeResultRecord b)
+        {
+            if (a == null || b == null || a.Uplinked == b.Uplinked)
+            {
+                return null;
+            }
+            RangeResultRecord up = a.Uplinked ? a : b;
+            float line = FracturedCityLayout.WeaponHeatOverheatThreshold;
+            return line > 0f && up.PeakHeat < line * 0.5f
+                ? GameText.Format("range.compare.core_hint", TestRangeService.Num(up.PeakHeat), TestRangeService.Num(line))
+                : null;
         }
 
         private static void Row(StringBuilder sb, string labelKey, string a, string b, float? delta)

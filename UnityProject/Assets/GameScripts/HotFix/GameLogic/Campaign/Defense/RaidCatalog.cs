@@ -309,6 +309,9 @@ namespace GameLogic.Campaign.Defense
         public static int TargetOutpostMinBuildings => Math.Max(1, (int)Math.Round(T("raid.target_outpost_min_buildings", 3f)));
         public static float TargetProximityCells => Math.Max(1f, T("raid.target_proximity_cells", 400f));
         public static float TimeLimitHours => Math.Max(0f, T("raid.time_limit_hours", 1f));
+
+        /// <summary>FG15-BAL-01（FG-GAP-254）：清洗波次（触发 purge）到达后的时间上限（游戏小时；FGR-DEF-032 的 1 小时让清洗只围一会儿就走，击毁 0）。</summary>
+        public static float PurgeTimeLimitHours => Math.Max(TimeLimitHours, T("raid.purge.time_limit_hours", 6f));
         public static int HistoryMax => Math.Max(4, (int)Math.Round(T("raid.history_max", 32f)));
         public static int WarningRowsMax => Math.Max(1, (int)Math.Round(T("raid.warning_rows_max", 6f)));
 

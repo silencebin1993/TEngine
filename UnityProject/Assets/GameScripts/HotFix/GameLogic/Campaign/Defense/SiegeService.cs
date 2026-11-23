@@ -753,7 +753,8 @@ namespace GameLogic.Campaign.Defense
                 int lost = Math.Max(0, g.UnfoldedCount - alive - g.ExitedCount);
                 if (!g.SiegeRetreat && alive > 0)
                 {
-                    if (limit > 0 && g.ArrivedAtTick >= 0 && GameClock.Ticks - g.ArrivedAtTick >= limit)
+                    if (limit > 0 && g.ArrivedAtTick >= 0 && GameClock.Ticks - g.ArrivedAtTick >= limit
+                        && GameClock.Ticks - g.ArrivedAtTick >= WorldTransitSystem.TimeLimitTicksFor(state, g, limit)) // FG15-BAL-01（FG-GAP-254）：清洗波次按自己的时限
                     {
                         OrderRetreat(state, site, g, ReasonTime, alive, lost);
                     }

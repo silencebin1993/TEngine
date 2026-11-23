@@ -159,7 +159,8 @@ namespace GameLogic.Campaign.Economy
             {
                 cap += Tuning("loot.cargo.cap.module", 6f);
             }
-            return Math.Max(0, (int)Math.Round(cap));
+            // FG15-BAL-01（DEBT-FG5RND01-01）：研发“货舱扩容 I / II”各 +25%（ResearchService 效果合计，O(1) 缓存）。
+            return Math.Max(0, ResearchService.ScaleCapacity(s, "cargo", (int)Math.Round(cap)));
         }
 
         // ── 表 ──

@@ -389,7 +389,8 @@ namespace GameLogic.Campaign.Defense
             w.TargetMode = (CombatTargetMode)Mathf.Clamp(mode, 0, 4);
             w.Range = prof.Range * Mathf.Max(0.1f, rangeMul);
             w.TurnRate = prof.TurnRate;
-            w.AmmoPerShot = needsSupply ? 1f : 0f;
+            // FG15-BAL-01（FG-GAP-230）：切段光束一段只扣一发的段份额（每秒补给消耗与切段前相同，FGR-DEF-004“每发”按一次完整出手计）。
+            w.AmmoPerShot = needsSupply ? (CombatSite.IsBeamPreview(p) ? CombatSite.BeamSegmentShare : 1f) : 0f;
             if (p.HasCannonPrimary)
             {
                 w.HasOutput = 1;

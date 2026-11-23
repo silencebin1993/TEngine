@@ -281,6 +281,16 @@ namespace GameLogic.Campaign.WorldSim
         /// <summary>到达后的时间上限（步；FGR-DEF-032 初值 1 个游戏小时）。</summary>
         public static long TimeLimitTicks => GameClock.TicksFor(Defense.RaidCatalog.TimeLimitHours * GameClock.DaySeconds / 24.0);
 
+        /// <summary>FG15-BAL-01（FG-GAP-254，按推荐默认执行，待用户确认）：这支队伍的到达时间上限——清洗波次（FG13 三波与后日谈周期清洗，触发 purge）
+        /// 按 raid.purge.time_limit_hours（初值 6 游戏小时），其余按 raid.time_limit_hours。O(突袭计划数)，只在检查撤退时调用。</summary>
+        public static long TimeLimitTicksFor(CampaignState state, TransitGroupRecord g, long normal)
+        {
+            RaidPlanRecord plan = g == null || string.IsNullOrEmpty(g.PlanId) ? null : Defense.RaidDirectorService.FindPlan(state, g.PlanId);
+            return plan != null && plan.Trigger == Defense.RaidCatalog.TriggerPurge
+                ? GameClock.TicksFor(Defense.RaidCatalog.PurgeTimeLimitHours * GameClock.DaySeconds / 24.0)
+                : normal;
+        }
+
         private static void StepGroups(CampaignState state, TransitGroupRecord[] groups, double arrival, bool nav, float dt)
         {
             long limit = TimeLimitTicks;
@@ -294,7 +304,7 @@ namespace GameLogic.Campaign.WorldSim
                 if (g.State == TransitGroupState.Arrived)
                 {
                     // FG6-DEF-04（FGR-DEF-032 时间上限）：攻城行为（FG6-DEF-05）接管之前，到达的聚合体在外围停留到时间上限后沿原路撤回出发地。
-                    if (!g.Engaged && limit > 0 && g.ArrivedAtTick >= 0 && GameClock.Ticks - g.ArrivedAtTick >= limit)
+                    if (!g.Engaged && limit > 0 && g.ArrivedAtTick >= 0 && GameClock.Ticks - g.ArrivedAtTick >= limit && GameClock.Ticks - g.ArrivedAtTick >= TimeLimitTicksFor(state, g, limit))
                     {
                         BeginRetreat(state, g);
                     }

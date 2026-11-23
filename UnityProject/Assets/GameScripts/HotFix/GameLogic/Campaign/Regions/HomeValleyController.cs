@@ -1294,8 +1294,8 @@ namespace GameLogic.Campaign.Regions
                     blueprintId: blueprintId,
                     regionId: HomeValleyLayout.RegionId,
                     position: spawn.Position,
-                    health: 100f,
-                    maxHealth: 100f,
+                    health: HomeValleyFactory.ShippedHealth, // FG15-BAL-01：开局机与装配站出厂同一耐久（factory.machine_health）
+                    maxHealth: HomeValleyFactory.ShippedHealth,
                     blueprintVersion: version?.Version ?? 1,
                     loadoutSignature: version?.CompileSignature);
 

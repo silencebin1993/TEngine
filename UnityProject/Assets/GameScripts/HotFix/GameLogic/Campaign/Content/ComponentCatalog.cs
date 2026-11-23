@@ -463,20 +463,41 @@ namespace GameLogic.Campaign.Content
             _buildCount++;
         }
 
+        /// <summary>FG15-BAL-01：fg.TbCombatComponent source = unique 的独特组件（不属阵营、不进基础库）。</summary>
+        public const string SourceUnique = "unique";
+
+        /// <summary>FG15-BAL-01（DEBT-FG8EXP04-01）：带回遗产 <paramref name="heritageId"/> 时解锁的独特组件（表 unlockedBy 列；只在入库那一刻调用，O(组件行)）。</summary>
+        public static IEnumerable<string> UnlockedByHeritage(string heritageId)
+        {
+            if (string.IsNullOrEmpty(heritageId))
+            {
+                yield break;
+            }
+            foreach (GameConfig.fg.CombatComponent c in CarrierReadings.Components)
+            {
+                if (c != null && c.Source == SourceUnique && c.UnlockedBy == heritageId)
+                {
+                    yield return c.Id;
+                }
+            }
+        }
+
         private static MechanicalContentDef Build(GameConfig.fg.CombatComponent row)
         {
             string carrier = CarrierReadings.TryParseCarrier(row.Carrier, out Signal.FirmwareCarrier c) ? CarrierReadings.CarrierName(c) : row.Carrier;
             string subtype = CarrierReadings.SubtypeName(row.Id) ?? carrier;
             bool main = row.Slot == "main";
             bool enemy = row.Source == "enemy"; // EMG4-LOOT-01：阵营标志组件（敌方接口组件，精英 / 首领掉落 → 解析台破解后才能写进蓝图）
+            bool unique = row.Source == SourceUnique; // FG15-BAL-01：独特组件（蠕虫钻头 / 旧时代蓝图），写进 UnlockedContentIds 之前锁定，锁定提示写获取途径
+            string sourceText = unique ? GameText.Get("component." + row.Id + ".source") : GameText.Get(enemy ? "component.source.enemy" : "component.source.base");
             return new MechanicalContentDef
             {
                 Id = row.Id,
                 Category = main ? MechanicalContentCategory.MainComponent : MechanicalContentCategory.FunctionComponent,
                 DisplayName = GameText.Get(row.NameKey),
                 Description = GameText.Get(row.DescKey),
-                Source = enemy ? MechanicalContentSource.EliteDrop : MechanicalContentSource.BaseBlueprint,
-                SourceDetail = GameText.Get(enemy ? "component.source.enemy" : "component.source.base"),
+                Source = enemy || unique ? MechanicalContentSource.EliteDrop : MechanicalContentSource.BaseBlueprint,
+                SourceDetail = sourceText,
                 Faction = enemy && row.Faction != "none" ? row.Faction : null,
                 Slot = main ? "主组件" : "功能组件", // 槽位识别串（与 Demo 条目同一取值，代码按它分组；界面显示走载体名） // loc-ignore: 开发者自检 / 诊断文本
                 ScrapCost = Math.Max(0, row.Scrap),
@@ -491,7 +512,7 @@ namespace GameLogic.Campaign.Content
                 SfxId = "sfx_weapon_fire",
                 PreviewId = "preview_" + row.Id,
                 SaveCompatible = true,
-                LockedHintText = GameText.Get(enemy ? "component.source.enemy" : "component.source.base"),
+                LockedHintText = sourceText,
                 SilhouetteNote = $"载体 {row.Carrier}；三套机身状态由 FG2-VFX-02 交付（MachineMorphLibrary，占位低模 → DEBT-FG2VFX02-01）。",
                 LegacyFacadeId = row.LegacyOrgan == "none" ? null : row.LegacyOrgan,
                 DebtId = "DEBT-FG2VFX02-01",

@@ -1014,7 +1014,12 @@ namespace GameLogic.Campaign.Env
             {
                 case CatBlueprint:
                     Unlock(s, h.UnlockId);
-                    return GameText.Get("heritage.effect.blueprint");
+                    // FG15-BAL-01（DEBT-FG8EXP04-01）：这份旧时代蓝图描述的独特组件一并解锁（蓝图编辑器可选）
+                    foreach (string comp in Content.ComponentCatalog.UnlockedByHeritage(h.Id))
+                    {
+                        Unlock(s, comp);
+                    }
+                    return BlueprintEffect(h);
                 case CatFirmware:
                     Unlock(s, h.UnlockId);
                     PrimitiveInventory.GrantHeritageFirmware(s, InstanceIdOf(h.Id), h.UnlockId);
@@ -1037,6 +1042,17 @@ namespace GameLogic.Campaign.Env
                 default:
                     return GameText.Get("heritage.effect.memento");
             }
+        }
+
+        /// <summary>旧时代蓝图的效果行：“蓝图编辑器里可以装配‘组件名’了”（组件名取解锁的独特组件）。</summary>
+        public static string BlueprintEffect(Heritage h)
+        {
+            var names = new List<string>(2);
+            foreach (string comp in Content.ComponentCatalog.UnlockedByHeritage(h?.Id))
+            {
+                names.Add(Content.MechanicalContentFacade.TryGet(comp, out Content.MechanicalContentDef d) ? d.DisplayName : comp);
+            }
+            return GameText.Format("heritage.effect.blueprint", string.Join(GameText.Get("signal.core.summary_sep"), names));
         }
 
         private static void Unlock(CampaignState s, string contentId)
@@ -1066,6 +1082,11 @@ namespace GameLogic.Campaign.Env
             foreach (string id in HomeExplorationService.StateOf(s)?.HeritageObtained ?? Array.Empty<string>())
             {
                 MechanicCodexUnlock(id);
+                // 复审 P2（旧档迁移）：本卡之前带回的旧时代蓝图补解锁它描述的独特组件（与入库时 ApplyEffect 同一份；Unlock 幂等）。
+                foreach (string comp in Content.ComponentCatalog.UnlockedByHeritage(id))
+                {
+                    Unlock(s, comp);
+                }
             }
             Revision++;
         }
@@ -1270,7 +1291,7 @@ namespace GameLogic.Campaign.Env
             sb.Append(GameText.Get(h.DescKey));
             if (st == HeritageStatus.Obtained && h.Category == CatBlueprint)
             {
-                sb.Append('\n').Append(GameText.Get("heritage.effect.blueprint"));
+                sb.Append('\n').Append(BlueprintEffect(h));
             }
             return sb.ToString();
         }

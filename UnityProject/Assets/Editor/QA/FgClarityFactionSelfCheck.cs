@@ -229,6 +229,49 @@ namespace GameLogic.EditorTools
 
         private static MechEnemy Row(string id) => EnemyDefs.TryGet(id, out MechEnemy r) ? r : null;
 
+        /// <summary>
+        /// DEBT-EMG2BOSS01-02（ADR ⑭ #12）：地点在“绝缘涂层”那天存快照后关闭 → 次日换对策（日切的恢复扫不到关着的地点）→ 重开读回：电抗恢复。
+        /// 负向：同一天关了又开、对策还是绝缘涂层 → 电抗仍是 1；重开本身不触发当天对策锁定（LockCount 不变）。
+        /// </summary>
+        private static void CheckInsulateClosedSite(CampaignState s, RaidUnitDef sprayer)
+        {
+            const string away = "bal01-insulate-away";
+            int day0 = s.Clock.Day;
+            string id0 = s.Factions.ClarityCounterId;
+            int lockDay0 = s.Factions.ClarityCounterDay;
+            s.Factions.ClarityCounterId = EnemyDefs.ConditionCounterInsulate;
+            s.Factions.ClarityCounterDay = day0;
+            CombatSites.Close(away, s, dropRecord: true);
+            CombatSite site = CombatSites.Open(away, s, false, new BenchRules(), out _);
+            int u = SiegeService.SpawnOne(site, 990202, new Vector2(4f, 4f), Vector2.zero, sprayer, false, insulate: true);
+            float on = site.EffectiveResist(u, CombatSite.ResistElec);
+
+            // 负向：同一天关闭 → 重开，对策仍是绝缘涂层
+            CombatSites.WriteTo(s);
+            CombatSites.Close(away, s, dropRecord: false);
+            int locks0 = ClarityCounterService.LockCount;
+            site = CombatSites.Open(away, s, true, new BenchRules(), out bool restoredSame);
+            float sameDay = site.EffectiveResist(u, CombatSite.ResistElec);
+            bool noLock = ClarityCounterService.LockCount == locks0;
+
+            // 正向：关闭 → 次日换对策（WorldStep 日切）→ 重开
+            CombatSites.WriteTo(s);
+            CombatSites.Close(away, s, dropRecord: false);
+            s.Clock.Day = day0 + 1;
+            ClarityCounterService.WorldStep(s);
+            string next = s.Factions.ClarityCounterId;
+            site = CombatSites.Open(away, s, true, new BenchRules(), out bool restoredNext);
+            float nextDay = site.EffectiveResist(u, CombatSite.ResistElec);
+
+            CombatSites.Close(away, s, dropRecord: true);
+            s.Clock.Day = day0;
+            s.Factions.ClarityCounterId = id0;
+            s.Factions.ClarityCounterDay = lockDay0;
+            Expect(u > 0 && Mathf.Approximately(on, 1f) && restoredSame && Mathf.Approximately(sameDay, 1f) && noLock
+                   && restoredNext && next != EnemyDefs.ConditionCounterInsulate && nextDay < 1f,
+                $"C3c DEBT-EMG2BOSS01-02 关闭 → 次日 → 重开：锁定日电抗 {on}；同日重开仍 {sameDay}（读回 {restoredSame}、未触发锁定 {noLock}）；次日对策“{next}”后重开读回（{restoredNext}）电抗 {nextDay} < 1");
+        }
+
         private static void CheckData()
         {
             var bad = new List<string>();
@@ -1187,6 +1230,7 @@ namespace GameLogic.EditorTools
             s.Clock.Day -= 1;
             Expect(Mathf.Approximately(elecOn, 1f) && elecPlain < 1f && elecNext < 1f,
                 $"C3b 绝缘涂层：锁定日电抗 {elecOn}（平时 {elecPlain}），次日换对策后恢复 {elecNext}");
+            CheckInsulateClosedSite(s, sprayer);
             // 审查修复的回归（参数表去重键）：同一地点、同一种单位，精英 / 普通的专属伤害不能并成一行；分裂液耐久吃精英耐久倍率。
             RaidCatalog.TryGetUnit("clarity.ln2_pump", out RaidUnitDef pump);
             int pn = SiegeService.SpawnOne(home, 990201, new Vector2(20f, 10f), Vector2.zero, pump, false);

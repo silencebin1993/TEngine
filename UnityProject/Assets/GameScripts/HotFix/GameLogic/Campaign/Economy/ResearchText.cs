@@ -75,6 +75,10 @@ namespace GameLogic.Campaign.Economy
             double capPct = ResearchService.EfficiencyCap * 100.0;
             switch (n.EffectKind)
             {
+                case ResearchCatalog.EffectSpeed when n.EffectTarget == "march":
+                    // FG15-BAL-01：远征行军加速（ExpeditionMarchService.MarchSpeed）
+                    lines.Add(new ResearchUnlockLine(GameText.Format("research.detail.effect_march", Pct(n.EffectValue), Pct(ResearchService.EffectTotal(state, n.EffectKind, n.EffectTarget)))));
+                    break;
                 case ResearchCatalog.EffectSpeed:
                     lines.Add(new ResearchUnlockLine(GameText.Format("research.detail.effect_speed", GameText.Get("research.category." + n.EffectTarget),
                         Pct(n.EffectValue), SpeedTargets(n.EffectTarget), Pct(ResearchService.EffectTotal(state, n.EffectKind, n.EffectTarget)), ResearchService.Num(capPct))));
@@ -84,7 +88,7 @@ namespace GameLogic.Campaign.Economy
                         Pct(ResearchService.EffectTotal(state, n.EffectKind, n.EffectTarget)), ResearchService.Num(capPct))));
                     break;
                 case ResearchCatalog.EffectCapacity:
-                    lines.Add(new ResearchUnlockLine(GameText.Format(n.EffectTarget == "warehouse" ? "research.detail.effect_capacity_warehouse" : "research.detail.effect_capacity_storage",
+                    lines.Add(new ResearchUnlockLine(GameText.Format(n.EffectTarget == "warehouse" ? "research.detail.effect_capacity_warehouse" : n.EffectTarget == "cargo" ? "research.detail.effect_capacity_cargo" : "research.detail.effect_capacity_storage",
                         Pct(n.EffectValue), Pct(ResearchService.EffectTotal(state, n.EffectKind, n.EffectTarget)))));
                     break;
             }

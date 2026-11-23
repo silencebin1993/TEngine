@@ -291,8 +291,14 @@ namespace GameLogic.Campaign.Blueprint
                 : GameText.Get("circuit.uplink.line.no_output"));
             // FG2-FW-02（B13）：显示内核实际每发伤害（与 CombatSite.MachineWeaponFrom 同源），不是旧器官的编译伤害。
             lines.Add(GameText.Format("circuit.uplink.line.damage", F1(Combat.CombatSite.MachineHitDamage(p))));
+            if (Combat.CombatSite.IsBeamPreview(p))
+            {
+                // FG15-BAL-01（FG-GAP-230）：切割束写明“每段”与出手间隔、秒伤，伤害 / 热量 / 补给同一口径。
+                lines.Add(GameText.Format("circuit.uplink.line.beam_cadence", Combat.CombatSite.BeamInterval.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                    F1(Combat.CombatSite.MachineHitDamage(p) / Combat.CombatSite.BeamInterval)));
+            }
             // FG4-ECO-04（DEBT-FG2FW01-02 范围变更：战斗中不扣电池）：双态预览只比热量，不再显示“每发耗电”（PowerCost 只留在数据层）。
-            lines.Add(GameText.Format("circuit.uplink.line.heat", F1(p.HeatBudget)));
+            lines.Add(GameText.Format("circuit.uplink.line.heat", F1(Combat.CombatSite.MachineHitHeat(p)))); // FG15-BAL-01（FG-GAP-230）：与每发伤害同一口径
             lines.Add(p.ReactionId != null
                 ? GameText.Format("circuit.uplink.line.reaction", ReactionName(p.ReactionId))
                 : GameText.Get("circuit.uplink.line.reaction_none"));
@@ -348,9 +354,10 @@ namespace GameLogic.Campaign.Blueprint
                     : new UplinkDiffLine(UplinkDiffKind.ReactionChanged, GameText.Format("circuit.uplink.diff.reaction_changed",
                         ReactionName(a.ReactionId), u.ReactionId != null ? ReactionName(u.ReactionId) : GameText.Get("circuit.uplink.none_word"))));
             }
-            if (Math.Abs(u.HeatBudget - a.HeatBudget) > 0.0001f)
+            float aHeat = Combat.CombatSite.MachineHitHeat(a), uHeat = Combat.CombatSite.MachineHitHeat(u);
+            if (Math.Abs(uHeat - aHeat) > 0.0001f)
             {
-                dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.HeatChanged, GameText.Format("circuit.uplink.diff.heat", F1(a.HeatBudget), F1(u.HeatBudget))));
+                dual.Diff.Add(new UplinkDiffLine(UplinkDiffKind.HeatChanged, GameText.Format("circuit.uplink.diff.heat", F1(aHeat), F1(uHeat))));
             }
             // FG4-ECO-04（DEBT-FG2FW01-02 范围变更）：耗电不再是代价，差异里不列“耗电 a → b”。
             float aHit = Combat.CombatSite.MachineHitDamage(a), uHit = Combat.CombatSite.MachineHitDamage(u);

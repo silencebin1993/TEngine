@@ -117,6 +117,7 @@ namespace GameLogic.EditorTools
                 Step(CheckSaveLoad);
                 Step(CheckSpeedAndObservation);
                 Step(CheckSeedSet);
+                Step(CheckUnitBias); // FG15-BAL-01（FG-GAP-147）
                 foreach (string p in PerfLines)
                 {
                     Line("  · " + p);
@@ -461,13 +462,15 @@ namespace GameLogic.EditorTools
             long kills = st.FieldKills - kills0;
             List<GroundItemRecord> loot = (s.GroundItems ?? Array.Empty<GroundItemRecord>())
                 .Where(g => g.SalvageInstanceId != null && g.SalvageInstanceId.StartsWith(FieldLootService.SalvagePrefix, StringComparison.Ordinal)).ToList();
-            int scrap = Sum(loot, ItemCatalog.ScrapId);
+            // FG15-BAL-01（FG-GAP-147）：单位级倾向的另掷（bias.*）单独数，普通掉落的“每台 2～4 废料”只数普通掉落行
+            int scrap = Sum(loot.Where(g => !g.SalvageInstanceId.StartsWith(FieldLootService.SalvagePrefix + LootCatalog.SourceBiasPrefix, StringComparison.Ordinal)).ToList(), ItemCatalog.ScrapId);
+            int biasScrap = Sum(loot, ItemCatalog.ScrapId) - scrap;
             int wreck = Sum(loot, AnalysisCatalog.WreckId);
             bool near = loot.All(g => Vector2.Distance(g.Position, at) < 40f);
             bool haul = loot.All(g => s.WorkOrders.Any(w => w.Kind == WorkOrderKind.Haul && w.TargetId == g.GroundItemId));
             Expect(m > 0 && engaged && destroyed && kills == garrison && FieldLootService.KillEvents - events0 == garrison && wreck == garrison
                    && scrap >= 2 * garrison && scrap <= 4 * garrison && near && haul && GameSettings.HasSeenGuidanceHook(GuidanceHooks.LootFirstFieldDrop),
-                $"E1 FGR-LOOT-010 杂兵普通掉落 + FG-GAP-109 野外残骸：静默据点驻军 {garrison} 台在野外被歼 → 野外击毁 {kills} 次，残骸 {wreck} 件（每台 1）、废料 {scrap}（每台 2～4），" +
+                $"E1 FGR-LOOT-010 杂兵普通掉落 + FG-GAP-109 野外残骸：静默据点驻军 {garrison} 台在野外被歼 → 野外击毁 {kills} 次，残骸 {wreck} 件（每台 1）、废料 {scrap}（每台 2～4；单位倾向另掉 {biasScrap}），" +
                 $"掉在交战处（{loot.Count} 堆，合并近处同种材料）并全部开搬运单；第一次野外掉落的引导钩子");
             List<GroundItemRecord> outpostLoot = loot.Where(g => g.SalvageInstanceId.StartsWith(FieldLootService.SalvagePrefix + LootCatalog.SourceOutpost, StringComparison.Ordinal)).ToList();
             Expect(st.OutpostLoots >= 1 && Sum(outpostLoot, "metal_ore") >= 3 && Sum(outpostLoot, "metal_ore") <= 6,
@@ -903,6 +906,67 @@ namespace GameLogic.EditorTools
                 WorldSimulation.StepMany(6);
             }
             return done();
+        }
+
+        // ── K 单位级掉落倾向（FG15-BAL-01，FG-GAP-147 / DEBT-FG10FAC01-03，FG09 掉落倾向列）──────────────────
+
+        private static void CheckUnitBias()
+        {
+            // 表：FG09 四个阵营各抽几种单位，倾向与 fg.TbLootDrop 的 bias.<倾向> 行对得上
+            var expect = new (string Id, string Faction, string Bias)[]
+            {
+                ("enemy_scout", "silent", "material"), ("enemy_prism", "silent", "firmware"), ("enemy_echo_hunter", "silent", "rare_firmware"), ("enemy_listen_node", "silent", "data_core"),
+                ("enemy_strider", "foundry", "component"), ("enemy_armorbot", "foundry", "structure"), ("enemy_repairbot", "foundry", "repair"), ("enemy_loader", "foundry", "part"),
+                ("enemy_sprayer", "clarity", "firmware"), ("enemy_oil_crawler", "clarity", "material"), ("enemy_deact_drone", "clarity", "data_core"),
+                ("enemy_oc_hound", "overclock", "firmware"), ("enemy_oc_node", "overclock", "data_core"), ("enemy_oc_turret", "overclock", "component"), ("enemy_oc_mirror", "overclock", "rare_firmware"),
+            };
+            var rows = new List<LootDropDef>();
+            var badData = new List<string>();
+            foreach (var e in expect)
+            {
+                rows.Clear();
+                LootCatalog.RowsFor(LootCatalog.SourceBiasPrefix + e.Bias, e.Faction, rows);
+                if (EnemyDefs.LootBiasOf(e.Id) != e.Bias || rows.Count == 0)
+                {
+                    badData.Add($"{e.Id}={EnemyDefs.LootBiasOf(e.Id) ?? "none"}/{rows.Count} 行");
+                }
+            }
+            bool noneOk = EnemyDefs.LootBiasOf("enemy_purge_drone") == null && EnemyDefs.LootBiasOf("enemy_core_boss") == null && EnemyDefs.LootBiasOf("enemy_not_exist") == null;
+            Expect(badData.Count == 0 && noneOk && LootCatalog.Problems.Count == 0,
+                $"K1 FG09 掉落倾向入表：{expect.Length} 种单位的 lootBias 与 bias.<倾向> 掉落行一一对得上（不对 {badData.Count}：{string.Join("、", badData)}）；白潮 / 首领 / 未知敌人没有倾向（{noneOk}）；掉落表载入问题 {LootCatalog.Problems.Count}");
+
+            // 行为：同一个世界里各击毁 120 台，按掉落来源前缀数地上的东西
+            CampaignState s = NewWorld(147);
+            GridCell c = HomeGridService.CorePivot(s);
+            var at = new Vector2(c.X + 8, c.Y + 8);
+            int Kill(string id, string faction, int n)
+            {
+                var def = new RaidUnitDef { Id = id, EnemyTypeId = id, Faction = faction };
+                for (int i = 0; i < n; i++)
+                {
+                    FieldLootService.OnFieldKill(s, WorldSimulation.Home?.Combat, def, false, at, 0);
+                }
+                return n;
+            }
+            int Mat(string bias) => (s.GroundItems ?? Array.Empty<GroundItemRecord>())
+                .Where(g => g.SalvageInstanceId != null && g.SalvageInstanceId.StartsWith(FieldLootService.SalvagePrefix + LootCatalog.SourceBiasPrefix + bias + ":", StringComparison.Ordinal)).Sum(g => g.Amount);
+            LootGroundTagRecord[] Tags(string bias) => (FieldLootService.StateOf(s).GroundTags ?? Array.Empty<LootGroundTagRecord>())
+                .Where(t => t.SalvageId.StartsWith(FieldLootService.SalvagePrefix + LootCatalog.SourceBiasPrefix + bias + ":", StringComparison.Ordinal)).ToArray();
+            Kill("enemy_purge_drone", EnemyDefs.FactionFleet, 120);
+            int noBias = (s.GroundItems ?? Array.Empty<GroundItemRecord>()).Count(g => g.SalvageInstanceId != null && g.SalvageInstanceId.StartsWith(FieldLootService.SalvagePrefix + LootCatalog.SourceBiasPrefix, StringComparison.Ordinal))
+                         + (FieldLootService.StateOf(s).GroundTags ?? Array.Empty<LootGroundTagRecord>()).Count(t => t.SalvageId.StartsWith(FieldLootService.SalvagePrefix + LootCatalog.SourceBiasPrefix, StringComparison.Ordinal));
+            Kill("enemy_sprayer", "clarity", 120);
+            int matAfterSprayer = Mat("material");
+            LootGroundTagRecord[] fw = Tags("firmware");
+            Kill("enemy_oil_crawler", "clarity", 120);
+            int mat = Mat("material");
+            Kill("enemy_deact_drone", "clarity", 120);
+            LootGroundTagRecord[] cores = Tags("data_core");
+            IReadOnlyList<string> clarityPool = LootCatalog.EnemyFirmwareOf("clarity");
+            bool fwFromPool = fw.Length > 0 && fw.All(t => t.ItemId == AnalysisCatalog.EncryptedFirmwareId && clarityPool.Contains(t.TargetId));
+            Expect(noBias == 0 && fwFromPool && matAfterSprayer == 0 && mat > 0 && cores.Length > 0 && cores.All(t => t.ItemId == AnalysisCatalog.DataCoreId),
+                $"K2 行为（各 120 台野外击毁）：没有倾向的白潮无人机不出倾向掉落（{noBias}）；喷洒车（流体类固件）另掉加密固件 {fw.Length} 件、全部出自澄净的敌方固件池（{fwFromPool}），不另掉材料（{matAfterSprayer}）；" +
+                $"油污爬行者（材料）另掉材料 {mat} 件；灭活无人机（数据核心）另掉数据核心 {cores.Length} 件");
         }
 
         private static CampaignState NewWorld(int seed, bool observe = true, int version = 3)

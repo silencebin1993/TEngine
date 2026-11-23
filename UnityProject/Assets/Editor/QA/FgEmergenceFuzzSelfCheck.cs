@@ -277,7 +277,8 @@ namespace GameLogic.EditorTools
                     }
                 }
                 // EMG4-LOOT-01：阵营标志组件（faction ≠ none，同载体的阵营变体）不进模糊池，固定集与满载基线保持可比；它们的交战覆盖见 DEBT-EMG4LOOT01-02
-                p.Comps.AddRange(CarrierReadings.Components.Where(c => c.Slot == "main" && c.Faction == "none").Select(c => c.Id));
+                // FG15-BAL-01：独特组件与阵营标志组件一样不进固定集（固定集与上一次结果可比，FGR-EMG-223），行为由 FgWorm / FgHeritage 覆盖
+                p.Comps.AddRange(CarrierReadings.Components.Where(c => c.Slot == "main" && c.Faction == "none" && c.Source != ComponentCatalog.SourceUnique).Select(c => c.Id));
                 foreach (GameConfig.fg.MechEnemy e in EnemyDefs.Rows)
                 {
                     // FG15-SYS-02（DEBT-FG13FAC01-02）：白潮（fleet）单位并入阵营池（EnemiesByFaction 收它，固定集追加的白潮用例用它当敌方）；轮转用的 Factions 不收，已有用例不换批

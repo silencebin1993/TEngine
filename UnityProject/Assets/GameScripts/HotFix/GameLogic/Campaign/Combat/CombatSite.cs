@@ -2080,7 +2080,7 @@ namespace GameLogic.Campaign.Combat
         public static float BeamInterval => Mathf.Max(0.05f, Tuning("emg.trig.beam_interval", 0.5f));
 
         /// <summary>光束每段占一次机器出手的份额（段长 ÷ 机器出手间隔，0.5 / 1.2）：每段伤害、自身积热按它缩放，秒伤与每秒自身积热不变。
-        /// 补给炮塔不按它缩：一段 = 一发补给（FGR-DEF-004“每发”），每秒补给消耗约 2.4 倍，交 FG15-BAL-01（FG-GAP-230）。</summary>
+        /// FG15-BAL-01（FG-GAP-230）：补给炮塔的每段补给也按它缩（一段 = 一发的 0.42 份，每秒补给消耗与切段前相同，TurretService.BuildWeapon）。</summary>
         public static float BeamSegmentShare => BeamInterval / Mathf.Max(0.05f, MachineAttackInterval);
 
         /// <summary>FG2-FW-02（B13）：这套装配每发实际打出的基础伤害（与 <see cref="MachineWeaponFrom(BlueprintCircuitPreview)"/> 同源：新作战组件用表里的伤害、
@@ -2097,6 +2097,13 @@ namespace GameLogic.Campaign.Combat
             float scale = w.Reading.DamageScale > 0f ? w.Reading.DamageScale : 1f;
             return Mathf.Max(0f, w.Damage) * scale;
         }
+
+        /// <summary>FG15-BAL-01（FG-GAP-230）：这套装配是不是切段的光束（一次出手 = 一段，每 <see cref="BeamInterval"/> 秒一段）。</summary>
+        public static bool IsBeamPreview(BlueprintCircuitPreview p) => p != null && !p.HasCannonPrimary && Emergence.EmgRuleCatalog.IsBeam(p.PrimaryId);
+
+        /// <summary>FG15-BAL-01（FG-GAP-230，B13）：每次出手的积热，与 <see cref="MachineHitDamage(BlueprintCircuitPreview)"/> 同一口径——光束按段（热量预算 × 段份额，
+        /// 与内核 <see cref="MachineWeaponFrom(BlueprintCircuitPreview)"/> 的 HeatPerShot 缩放同源），其余 = 热量预算。电路板、接入预览、双态差异都写它。</summary>
+        public static float MachineHitHeat(BlueprintCircuitPreview p) => p == null ? 0f : IsBeamPreview(p) ? p.HeatBudget * BeamSegmentShare : p.HeatBudget;
 
         /// <summary>EMGR-TRIG-01：一次机器出手（<see cref="MachineAttackInterval"/>）折算的伤害——光束按段长缩过的每段伤害折回（÷ <see cref="BeamSegmentShare"/>），
         /// 其余武器 = <see cref="MachineHitDamage(BlueprintCircuitPreview)"/>。远征火力预测这类“按出手次数合计”的口径用它，不因切段把切割束算小。</summary>

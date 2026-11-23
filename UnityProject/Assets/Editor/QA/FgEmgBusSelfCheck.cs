@@ -1164,7 +1164,9 @@ namespace GameLogic.EditorTools
                 perStep.Add($"{speed}x:{k.EmgBusStats.Processed - before}/{k.Steps - steps0}");
             }
             GameClock.SetSpeed(1f);
-            Expect(pausedPending == 2000 && string.Join(",", perStep) == "0.5x:512/1,1x:512/1,3x:512/1",
+            // FG15-SYS-02 起家园按 ADR-EMG-001 ⑬ 分摊每步条数（emg.bus.site_home，128），不再是单地点的 emg.bus.per_step 512（FG15-BAL-01 复审修复轮 2 跟改旧断言）
+            int homeBus = Mathf.RoundToInt(GameLogic.Campaign.Grid.GridContent.Tuning("emg.bus.site_home"));
+            Expect(pausedPending == 2000 && string.Join(",", perStep) == $"0.5x:{homeBus}/1,1x:{homeBus}/1,3x:{homeBus}/1",
                 $"真实地点：暂停 60 帧队列原样 {pausedPending} 条；0.5x / 1x / 3x 各走 1 步，处理 {string.Join("，", perStep)}（处理条数 / 步数，只看步数、与倍速无关）；这几步内核耗时 {string.Join(" / ", maxMs.Select(x => x.ToString("0.###")))} 毫秒");
 
             // 真实接入路径（第 1 轮审查修复）：SignalUplinkService.Request → SetUplink 先通知两台机器重编译程序（NotifyChanged → RefreshMachineWeapon），再广播。

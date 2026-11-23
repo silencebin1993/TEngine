@@ -1200,6 +1200,20 @@ namespace GameLogic.Campaign.Regions
             WorkOrderRecord existing = FindActiveByTarget(state, WorkOrderKind.Haul, groundItemId);
             if (existing != null)
             {
+                if (IsReturnDangerHold(existing))
+                {
+                    // 复审 P2：先校验玩家点的机器，不合格就原样保留暂停与阵亡计数（失败的点击不清掉“连续阵亡就暂停”的保护）。
+                    MachineCheck holdCheck = CheckMachine(machineLogicId, existing.Kind);
+                    if (!holdCheck.Ok)
+                    {
+                        return WorkOrderOpResult.Fail(holdCheck.FailureReason);
+                    }
+                    // FG15-BAL-01（FG-GAP-244）：玩家亲手点搬运 = 明确要搬：解除暂停 / 暂缓、阵亡计数清零，按玩家命令派这台机器。
+                    WaitingWatch.Remove(existing.WorkOrderId);
+                    existing.State = WorkOrderState.Ready;
+                    existing.FailureReason = null;
+                    existing.ReturnDeaths = 0;
+                }
                 if (existing.State != WorkOrderState.Ready)
                 {
                     return WorkOrderOpResult.Fail($"order-already-active:{existing.State}");
@@ -1568,6 +1582,13 @@ namespace GameLogic.Campaign.Regions
             return true;
         }
 
+        /// <summary>FG15-BAL-01（FG-GAP-233）：这台机器此刻在熔穿相态里（家园没载入 = false）。</summary>
+        public static bool InMeltdown(int machine)
+        {
+            Combat.CombatSite site = WorldSim.WorldSimulation.Home != null && WorldSim.WorldSimulation.Home.IsLoaded ? WorldSim.WorldSimulation.Home.Combat : null;
+            return site != null && site.TryGetMachineUnit(machine, out int unit) && site.Kernel.InPhase(unit, BinGames.Sim.Combat.EmgPhaseConst.Overheat);
+        }
+
         private static void ResumeFromFire(CampaignState state, WorkOrderRecord o)
         {
             o.State = WorkOrderState.Ready;
@@ -1846,6 +1867,11 @@ namespace GameLogic.Campaign.Regions
                             order.State = WorkOrderState.Waiting;
                             order.FailureReason = HomeValleyConstruction.ReturnWaitReason;
                             NoteReturnWait(state, order);
+                            continue;
+                        }
+                        if (order.Kind == WorkOrderKind.Haul && order.IssuerId == "return" && ReturnHaulInDanger(state, order))
+                        {
+                            DeferReturnHaul(order); // FG15-BAL-01（FG-GAP-244）：突袭进行中 / 返还物在危险斑块里，不派机器去送死
                             continue;
                         }
                     }
@@ -2744,6 +2770,12 @@ namespace GameLogic.Campaign.Regions
                 {
                     continue;
                 }
+                // FG15-BAL-01（FG-GAP-233 改写）：熔穿中的机器每隔几秒在脚下漏熔融金属（物质不认敌我），派去施工会把现场漏成会烧蚀设施的危险格、冷下来的熔渣还挡住施工
+                // （FgRepairDroneSelfCheck D5h2）。退出熔穿前不接自动派工（下一轮评估自动恢复）；玩家直接下的命令不受影响。读内核相态位，O(1)。
+                if (InMeltdown(machine.LogicId))
+                {
+                    continue;
+                }
                 (idleMachines ??= new List<MachineRecord>()).Add(machine);
             }
             if (idleMachines == null)
@@ -3149,8 +3181,86 @@ namespace GameLogic.Campaign.Regions
             }
         }
 
+        /// <summary>FG15-BAL-01（FG-GAP-244）：返还搬运单因危险挂着（暂停 / 暂缓）。</summary>
+        public static bool IsReturnDangerHold(WorkOrderRecord o) =>
+            o != null && o.Kind == WorkOrderKind.Haul && o.IssuerId == "return" && o.State == WorkOrderState.Waiting
+            && (o.FailureReason == HomeValleyConstruction.ReturnPausedReason || o.FailureReason == HomeValleyConstruction.ReturnDeferReason);
+
+        /// <summary>FG15-BAL-01（FG-GAP-244）：系统返还物现在去搬是否危险——家园突袭进行中，或那堆东西在还在烧蚀的斑块 / 燃烧液洼里（开关入 Luban）。O(行进中队伍数)。</summary>
+        public static bool ReturnHaulInDanger(CampaignState state, WorkOrderRecord order)
+        {
+            if (Grid.GridContent.TryGetTuning("wo.return.defer_raid", out float raid) && raid > 0f && Economy.StandingRuleService.RaidActive(state))
+            {
+                return true;
+            }
+            if (Grid.GridContent.TryGetTuning("wo.return.defer_hazard", out float hz) && hz > 0f)
+            {
+                GroundItemRecord g = HomeValleyCargo.FindGroundItem(state, order.SourceId);
+                return g != null && HomeValleySoftlockGuard.InHazard(g.Position);
+            }
+            return false;
+        }
+
+        private static void DeferReturnHaul(WorkOrderRecord order)
+        {
+            order.State = WorkOrderState.Waiting;
+            order.FailureReason = HomeValleyConstruction.ReturnDeferReason;
+            order.AssignedMachineLogicId = 0;
+        }
+
+        private static void ReopenReturnHaul(CampaignState state, WorkOrderOpResult opened, int deaths)
+        {
+            WorkOrderRecord o = opened.Success ? Find(state, opened.WorkOrderId) : null;
+            if (o == null || o.Kind != WorkOrderKind.Haul || o.State != WorkOrderState.Ready || o.AssignedMachineLogicId != 0)
+            {
+                return;
+            }
+            o.ReturnDeaths = Math.Max(o.ReturnDeaths, deaths);
+            int limit = Math.Max(1, (int)Math.Round(Grid.GridContent.TryGetTuning("wo.return.pause_deaths", out float n) ? n : 3f));
+            if (o.ReturnDeaths >= limit)
+            {
+                o.State = WorkOrderState.Waiting;
+                o.FailureReason = HomeValleyConstruction.ReturnPausedReason;
+            }
+            else if (ReturnHaulInDanger(state, o))
+            {
+                DeferReturnHaul(o);
+            }
+        }
+
+        /// <summary>暂停的单只等玩家手动搬运（地面物没了就取消）；暂缓的单每 wo.return.recheck_seconds 重查一次，危险解除回待分配池。</summary>
+        private static void TickReturnDanger(CampaignState state, WorkOrderRecord order, float dt)
+        {
+            float every = Grid.GridContent.TryGetTuning("wo.return.recheck_seconds", out float r) && r > 0f ? r : 2f;
+            float waited = (WaitingWatch.TryGetValue(order.WorkOrderId, out float w) ? w : 0f) + dt;
+            if (waited < every)
+            {
+                WaitingWatch[order.WorkOrderId] = waited;
+                return;
+            }
+            WaitingWatch.Remove(order.WorkOrderId);
+            if (HomeValleyCargo.FindGroundItem(state, order.SourceId) == null)
+            {
+                order.State = WorkOrderState.Cancelled;
+                order.FailureReason = "source-vanished";
+                MarkAssignmentDirty();
+                return;
+            }
+            if (order.FailureReason == HomeValleyConstruction.ReturnDeferReason && !ReturnHaulInDanger(state, order))
+            {
+                order.State = WorkOrderState.Ready;
+                order.FailureReason = null;
+                MarkAssignmentDirty();
+            }
+        }
+
         private static void TickWaiting(CampaignState state, WorkOrderRecord order, float dt)
         {
+            if (order.Kind == WorkOrderKind.Haul && (order.FailureReason == HomeValleyConstruction.ReturnPausedReason || order.FailureReason == HomeValleyConstruction.ReturnDeferReason))
+            {
+                TickReturnDanger(state, order, dt);
+                return;
+            }
             // FG7-ENV-02：静默夜暂缓的施工单——静默夜结束（暂缓名单清空）就回到待分配池，自动开工（FG07 第 5 节“结束后自动开工”）。
             if (order.FailureReason == Env.SilentNightService.HoldReason)
             {
@@ -3808,14 +3918,16 @@ namespace GameLogic.Campaign.Regions
             {
                 // FG11-E2E-01（FGJ-M6 实跑）：系统返还物（突袭残骸堆、被摧毁落地的东西）没有玩家会重新点——原堆还在就重开一张，机器掉下的那份另开一张
                 // （全新的单与事务，不复活旧事务；与 ReleaseHaulForReassign 同口径）。否则残骸永远躺在地上、回收站没料，重建卡死（FGR-ECO-071 / B11）。
+                // FG15-BAL-01（FG-GAP-244）：阵亡次数带到新单上；连续达到 wo.return.pause_deaths 就暂停（等玩家手动点搬运），没到上限但那里仍危险就暂缓派单。
+                int deaths = order.ReturnDeaths + 1;
                 if (HomeValleyCargo.FindGroundItem(state, order.SourceId) != null)
                 {
-                    TryCreateHaulPool(state, order.SourceId);
+                    ReopenReturnHaul(state, TryCreateHaulPool(state, order.SourceId), deaths);
                 }
                 GroundItemRecord redrop = HomeValleyCargo.FindGroundItemBySalvageId(state, order.SourceId + ":redrop:" + order.WorkOrderId);
                 if (redrop != null)
                 {
-                    TryCreateHaulPool(state, redrop.GroundItemId);
+                    ReopenReturnHaul(state, TryCreateHaulPool(state, redrop.GroundItemId), deaths);
                 }
             }
             // ER8-CONTENT-01 AC-AUD-001 失败：执行机器损失导致工单中止。

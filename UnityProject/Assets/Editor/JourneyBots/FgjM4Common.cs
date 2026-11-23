@@ -396,7 +396,7 @@ namespace GameLogic.EditorTools.JourneyBots
             return avoid;
         }
 
-        private static void Reserve(FactoryPlan plan, string type, GridCell pivot, int rot)
+        internal static void Reserve(FactoryPlan plan, string type, GridCell pivot, int rot)
         {
             foreach (GridCell c in Footprint(type, pivot, rot))
             {
@@ -728,8 +728,8 @@ namespace GameLogic.EditorTools.JourneyBots
             return best;
         }
 
-        /// <summary>回收站：压在废墟上的 4×4（脚下废墟格越多越好，至少 8 格），输出口铺到 <paramref name="sinkName"/>。</summary>
-        internal static Route PlanRecycler(CampaignState s, FactoryPlan plan, string sinkName, out Placed rec, out string why)
+        /// <summary>回收站：压在废墟上的 4×4（脚下废墟格越多越好，至少 8 格），输出口铺到 <paramref name="sinkName"/>。<paramref name="radius"/> = 在核心多少格内找（FGJ-M4 用 30；FG15-BAL-01 节奏机器人第二座用 64 = FG16 第 2.1 节“第一幕所需的资源都在核心半径 64 格内”）。</summary>
+        internal static Route PlanRecycler(CampaignState s, FactoryPlan plan, string sinkName, out Placed rec, out string why, int radius = 30, Func<GridCell, bool> accept = null)
         {
             rec = null;
             why = null;
@@ -741,9 +741,9 @@ namespace GameLogic.EditorTools.JourneyBots
                 ? (FgjM3Common.PortBeltCell(HomeValleyLayout.BuildingTypeWarehouse, false, out GridCell w, out int wf, out _) ? (w, Opp(wf)) : default)
                 : (FgjM3Common.PortBeltCell(HomeValleyLayout.BuildingTypeCore, false, out GridCell c0, out int cf, out _) ? (c0, Opp(cf)) : default);
             var cands = new List<(int score, GridCell p)>();
-            for (int dy = -30; dy <= 30; dy++)
+            for (int dy = -radius; dy <= radius; dy++)
             {
-                for (int dx = -30; dx <= 30; dx++)
+                for (int dx = -radius; dx <= radius; dx++)
                 {
                     var p = Add(core, dx, dy);
                     int ruins = Footprint(Recycler, p, 0).Count(c => IsTerrain(s, c, ruin));
@@ -755,7 +755,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             foreach (var cnd in cands.OrderByDescending(x => x.score).Take(40))
             {
-                if (!Placeable(s, Recycler, cnd.p, 0, avoid) || !PortOutside(Recycler, cnd.p, 0, Recycler + ".out0", out GridCell outCell, out _) || avoid.Contains(Key(outCell)))
+                if ((accept != null && !accept(cnd.p)) || !Placeable(s, Recycler, cnd.p, 0, avoid) || !PortOutside(Recycler, cnd.p, 0, Recycler + ".out0", out GridCell outCell, out _) || avoid.Contains(Key(outCell)))
                 {
                     continue;
                 }
@@ -784,7 +784,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 }
                 return route;
             }
-            why = $"核心 30 格内找不到能放回收站、压着至少 8 格废墟、并能铺带到{sinkName}的位置（候选 {cands.Count} 个）";
+            why = $"核心 {radius} 格内找不到能放回收站、压着至少 8 格废墟、并能铺带到{sinkName}的位置（候选 {cands.Count} 个）";
             return null;
         }
 
@@ -792,7 +792,7 @@ namespace GameLogic.EditorTools.JourneyBots
         /// 电力：不在已有节点（归还核心 26 格 / 已有电塔）覆盖里的建筑，从最近的节点朝它串 T2 电塔（覆盖 16 格，节点间距不超过两者半径中较大的一个），
         /// 电塔落在能放、不压路线与建筑的格子上。返回要放的电塔格（按放置顺序）。
         /// </summary>
-        internal static List<GridCell> PlanPoles(CampaignState s, FactoryPlan plan, IEnumerable<Placed> needPower, out string why)
+        internal static List<GridCell> PlanPoles(CampaignState s, FactoryPlan plan, IEnumerable<Placed> needPower, out string why, string poleType = PoleT2)
         {
             why = null;
             var nodes = new List<(GridCell c, float r)> { (HomeGridService.CorePivot(s), HomeValleyPowerGrid.CoverRadiusOf(HomeValleyLayout.BuildingTypeCore)) };
@@ -803,7 +803,7 @@ namespace GameLogic.EditorTools.JourneyBots
                     nodes.Add((new GridCell(b.GridX, b.GridY), HomeValleyPowerGrid.CoverRadiusOf(b.BuildingTypeId)));
                 }
             }
-            float poleR = HomeValleyPowerGrid.CoverRadiusOf(PoleT2);
+            float poleR = HomeValleyPowerGrid.CoverRadiusOf(poleType);
             HashSet<long> avoid = BaseAvoid(s);
             avoid.UnionWith(plan.Used);
             var poles = new List<GridCell>();
@@ -830,7 +830,7 @@ namespace GameLogic.EditorTools.JourneyBots
                                 continue;
                             }
                             float d = NearestDist(b.Type, b.Pivot, b.Rot, q);
-                            if (d < pickD && Placeable(s, PoleT2, q, 0, null))
+                            if (d < pickD && Placeable(s, poleType, q, 0, null))
                             {
                                 pickD = d;
                                 pick = q;
@@ -839,7 +839,7 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                     if (pickD == float.MaxValue)
                     {
-                        why = $"{b.Label} {Cell(b.Pivot)} 接不上电：{Cell(near.c)} 附近没有能放 T2 电塔的格子";
+                        why = $"{b.Label} {Cell(b.Pivot)} 接不上电：{Cell(near.c)} 附近没有能放{(poleType == PoleT2 ? " T2 " : " T1 ")}电塔的格子";
                         return null;
                     }
                     poles.Add(pick);

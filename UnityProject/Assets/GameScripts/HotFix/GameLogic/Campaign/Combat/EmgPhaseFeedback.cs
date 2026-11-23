@@ -26,11 +26,13 @@ namespace GameLogic.Campaign.Combat
         public static int ExitCues { get; private set; }
         public static int BrokenCues { get; private set; }
         public static int ArcCues { get; private set; }
+        /// <summary>FG-GAP-251：己方单位进入熔穿时发出的“熔融金属回灌”提示条数（自检）。</summary>
+        public static int OwnMeltdownNotices { get; private set; }
         public static int LastPhase { get; private set; } = -1;
 
         public static void ResetForTests()
         {
-            EnterCues = ExitCues = BrokenCues = ArcCues = 0;
+            EnterCues = ExitCues = BrokenCues = ArcCues = OwnMeltdownNotices = 0;
             LastPhase = -1;
         }
 
@@ -56,6 +58,12 @@ namespace GameLogic.Campaign.Combat
                 if (k != EmgPhaseConst.Chill) // 冻结进入由内核同一步的 ClarityCue/7（ClarityFreeze“机器被冻结…”+ 音效）出声音和字幕，这里不再出第二条
                 {
                     FeedbackCues.RaiseAt(FeedbackCueId.EmgPhaseEnter, at, GameText.Format("emg.phase.cue.enter", who, PhaseName(k)));
+                }
+                if (k == EmgPhaseConst.Overheat && site != null && site.Kernel != null && site.Kernel.TryGetUnit(e.Unit, out CombatUnitView pv) && pv.Faction == CombatFaction.Player)
+                {
+                    // FG15-BAL-01（FG-GAP-251）：熔穿漏的熔融金属不认敌我（FG19，规则不改），挤在一起的己方机器会互相回灌热量至全灭——进入那一刻写明原因与应对（警告级、可定位）。
+                    OwnMeltdownNotices++;
+                    Notifications.NotificationCenter.Post("friendly_fire", GameText.Format("emg.phase.meltdown_own", EmgChainView.PartyName(site, CampaignSession.Current, e.Unit)), new Vector3(at.x, 0f, at.y));
                 }
                 GuidanceHooks.Raise(GuidanceHooks.EmgFirstPhase);
                 return;

@@ -41,6 +41,7 @@ namespace GameLogic.EditorTools
             Step(CheckRetreatIntercept);
             Step(CheckWithdrawnNotReintercepted);
             Step(CheckReturnHaulSurvivesMachineDeath);
+            Step(CheckReturnHaulBackoff); // FG15-BAL-01（FG-GAP-244）
             Step(CheckPipeConflictDestroy);
             Step(CheckPreviewOrdinaryWall);
         }
@@ -521,6 +522,138 @@ namespace GameLogic.EditorTools
             WorkOrderRecord third = drop2 != null ? HomeValleyWorkOrders.FindActiveByTarget(s, WorkOrderKind.Haul, drop2.GroundItemId) : null;
             Expect(carrying && failed2 && again.FailureReason == "machine-died" && drop2 != null && third != null && third.IssuerId == "return",
                 $"L8b 扛着残骸的机器 #{carrier} 半路阵亡（扛上 {carrying}）：单 {again?.State}（{again?.FailureReason}），掉下的那份 {drop2?.GroundItemId ?? "无"}（{drop2?.Amount}）另开返还单 {third?.WorkOrderId ?? "无"}（{third?.State}）");
+        }
+
+        /// <summary>
+        /// L8c～L8g（FG15-BAL-01，FG-GAP-244）：系统返还搬运单的退避——同一堆连续阵亡达 wo.return.pause_deaths 次暂停重开（工单面板写明）、玩家手动点搬运恢复并清零、
+        /// 暂停状态与阵亡计数存读档一致；突袭进行中暂缓派单（不派机器），突袭结束后按 wo.return.recheck_seconds 自动回待分配池；负向：开关关掉（defer_raid = 0）突袭中照常派。
+        /// </summary>
+        private static void CheckReturnHaulBackoff()
+        {
+            CampaignState s = NewWorld(7049);
+            string wreck = ItemCatalog.ResourceTypeOf(AnalysisCatalog.WreckId);
+            foreach (BuildingRecord b in s.BuildingRecords)
+            {
+                if (b != null && b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse)
+                {
+                    b.ConstructionState = BuildingConstructionState.Operational; // 同 L8 测试捷径
+                }
+            }
+            Vector2 at = CoreCenter(s) + new Vector2(7f, 0f);
+            int Spawn()
+            {
+                MachineOpResult r = MachineRegistry.SpawnMachine(HomeValleyLayout.Erc001ChassisId, HomeValleyLayout.BlueprintErc001Id, HomeValleyLayout.RegionId, at + new Vector2(1f, 0f), 100f, 100f);
+                if (r.Success && MachineRegistry.TryGetRecord(r.LogicId, out MachineRecord rec) && !string.IsNullOrEmpty(rec.BlueprintId))
+                {
+                    MachineLoadoutRegistry.Register(s, r.LogicId, rec.BlueprintId, rec.BlueprintVersion);
+                }
+                return r.Success ? r.LogicId : 0;
+            }
+            int limit = (int)Math.Round(GridContent.Tuning("wo.return.pause_deaths"));
+            GroundItemRecord pile = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at, wreck, 4, "l8c:pile");
+            Spawn();
+            WorldSimulation.StepMany(2);
+            WorkOrderRecord Active() => s.WorkOrders?.LastOrDefault(o => o.Kind == WorkOrderKind.Haul && o.IssuerId == "return" && HomeValleyWorkOrders.IsActive(o)
+                                                                       && HomeValleyCargo.FindGroundItem(s, o.SourceId) != null);
+            HomeValleyWorkOrders.TryCreateHaulPool(s, pile.GroundItemId);
+            var deathsSeen = new List<int>();
+            WorkOrderRecord cur = Active();
+            for (int i = 0; i < limit && cur != null; i++)
+            {
+                WorkOrderRecord order = cur;
+                if (!StepUntil(() => order.AssignedMachineLogicId > 0 || order.State == WorkOrderState.Waiting, 40) || order.AssignedMachineLogicId <= 0)
+                {
+                    Spawn(); // 上一台阵亡后没有空闲机器：补一台（相当于核心应急打印）
+                    StepUntil(() => order.AssignedMachineLogicId > 0, 40);
+                }
+                int worker = order.AssignedMachineLogicId;
+                if (worker <= 0)
+                {
+                    break;
+                }
+                MachineRegistry.ApplyDamage(worker, 1e6f);
+                StepUntil(() => order.State == WorkOrderState.Failed, 5);
+                cur = Active();
+                deathsSeen.Add(cur?.ReturnDeaths ?? -1);
+                if (i < limit - 1 && cur != null && cur.State == WorkOrderState.Waiting)
+                {
+                    break;
+                }
+            }
+            bool paused = cur != null && cur.State == WorkOrderState.Waiting && cur.FailureReason == HomeValleyConstruction.ReturnPausedReason && cur.ReturnDeaths == limit
+                          && HomeValleyWorkOrders.IsReturnDangerHold(cur);
+            string text = cur == null ? null : GameLogic.UI.WorkOrder.WorkOrderPanelUIToolkit.ReasonText(cur.FailureReason);
+            int idle = Spawn();
+            Seconds(6f);
+            bool stays = paused && cur.State == WorkOrderState.Waiting && cur.AssignedMachineLogicId == 0;
+            Expect(paused && stays && text != null && text.Contains(limit.ToString()) && deathsSeen.Count == limit,
+                $"L8c 同一堆返还物连续阵亡 {limit} 次后暂停重开（阵亡计数依次 [{string.Join(",", deathsSeen)}]）：新单 {cur?.State}（{cur?.FailureReason}、计数 {cur?.ReturnDeaths}），" +
+                $"有空闲机器 #{idle} 也不派（6 游戏秒后仍等待 {stays}）；工单面板写“{text}”");
+
+            // L8d 存读档：暂停状态与阵亡计数随存档保留。
+            CampaignState back = JsonUtility.FromJson<CampaignState>(JsonUtility.ToJson(s));
+            WorkOrderRecord copy = back?.WorkOrders?.FirstOrDefault(o => o.WorkOrderId == cur?.WorkOrderId);
+            Expect(copy != null && copy.ReturnDeaths == limit && copy.State == WorkOrderState.Waiting && copy.FailureReason == HomeValleyConstruction.ReturnPausedReason,
+                $"L8d 存读档：暂停的返还单读回 {copy?.State}（{copy?.FailureReason}）、阵亡计数 {copy?.ReturnDeaths}（应为 {limit}）");
+
+            // L8e0（复审 P2）负向：手动点搬运时点的机器不合格（不存在）→ 拒绝，暂停与阵亡计数原样保留。
+            HomeValleyWorkOrders.WorkOrderOpResult bad = cur == null ? default : HomeValleyWorkOrders.TryCreateHaul(s, cur.SourceId, 987654);
+            Expect(cur != null && !bad.Success && cur.State == WorkOrderState.Waiting && cur.ReturnDeaths == limit && cur.FailureReason == HomeValleyConstruction.ReturnPausedReason,
+                $"L8e0 负向：手动搬运点了不存在的机器被拒（{bad.FailureReason}），返还单仍暂停 {cur?.State} / {cur?.FailureReason}、阵亡计数 {cur?.ReturnDeaths}（应为 {limit}）");
+
+            // L8e 玩家手动点搬运：恢复并清零，指派给玩家点的机器。
+            HomeValleyWorkOrders.WorkOrderOpResult manual = cur == null ? default : HomeValleyWorkOrders.TryCreateHaul(s, cur.SourceId, idle);
+            Expect(manual.Success && cur.ReturnDeaths == 0 && cur.AssignedMachineLogicId == idle && cur.State != WorkOrderState.Waiting,
+                $"L8e 玩家手动点搬运恢复：结果 {manual.Success}（{manual.FailureReason}），单 {cur?.State}、机器 #{cur?.AssignedMachineLogicId}（应为 #{idle}）、阵亡计数清零 {cur?.ReturnDeaths}");
+
+            // L8f 突袭进行中暂缓派单，突袭结束后自动回待分配池并派出。
+            Func<CampaignState, bool> oldProvider = StandingRuleService.RaidActiveProvider;
+            bool raid = true;
+            try
+            {
+                StandingRuleService.RaidActiveProvider = _ => raid;
+                GroundItemRecord pile2 = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at + new Vector2(0f, 3f), wreck, 2, "l8f:pile");
+                Spawn();
+                HomeValleyWorkOrders.WorkOrderOpResult made2 = HomeValleyWorkOrders.TryCreateHaulPool(s, pile2.GroundItemId);
+                WorkOrderRecord o2 = s.WorkOrders.FirstOrDefault(o => o.WorkOrderId == made2.WorkOrderId);
+                Seconds(4f);
+                bool deferred = o2 != null && o2.State == WorkOrderState.Waiting && o2.FailureReason == HomeValleyConstruction.ReturnDeferReason && o2.AssignedMachineLogicId == 0;
+                string dtext = o2 == null ? null : GameLogic.UI.WorkOrder.WorkOrderPanelUIToolkit.ReasonText(o2.FailureReason);
+                raid = false;
+                bool resumed = deferred && StepUntil(() => o2.AssignedMachineLogicId > 0, 10);
+                Expect(deferred && resumed && !string.IsNullOrEmpty(dtext) && dtext != GameLogic.Localization.GameText.Get("workorder.panel.temporarily_blocked"),
+                    $"L8f 突袭进行中新开的返还单暂缓派单（4 游戏秒后 {o2?.State} / {o2?.FailureReason}、机器 #{o2?.AssignedMachineLogicId}，面板“{dtext}”）；突袭结束后自动派出 {resumed}");
+
+                // L8g 负向：没有突袭、返还物不在危险里时照常派单（暂缓只在危险时发生，不是一律不派）。
+                raid = false;
+                GroundItemRecord pile3 = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, at + new Vector2(0f, -3f), wreck, 2, "l8g:pile");
+                Spawn();
+                HomeValleyWorkOrders.WorkOrderOpResult made3 = HomeValleyWorkOrders.TryCreateHaulPool(s, pile3.GroundItemId);
+                WorkOrderRecord o3 = s.WorkOrders.FirstOrDefault(o => o.WorkOrderId == made3.WorkOrderId);
+                bool everDeferred = false;
+                bool sent = o3 != null && StepUntil(() => (everDeferred |= o3.FailureReason == HomeValleyConstruction.ReturnDeferReason) || o3.AssignedMachineLogicId > 0, 10) && !everDeferred;
+                Expect(sent, $"L8g 负向：没有突袭、不在危险斑块里的返还单不暂缓、照常派单 {sent}（{o3?.State}，曾暂缓 {everDeferred}）");
+
+                // L8h（复审 P2）：返还物落在还在烧的斑块里时暂缓派单（不派机器）；斑块熄灭后经 wo.return.recheck_seconds 自动回待分配池并派出。
+                Vector2 hot = at + new Vector2(0f, 6f);
+                GroundItemRecord pile4 = HomeValleyCargo.SpawnGroundItem(s, HomeValleyLayout.RegionId, hot, wreck, 2, "l8h:pile");
+                bool burning = Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new double2(hot.x, hot.y), 3f, 1f, 6f);
+                WorldSimulation.StepMany(1);
+                bool inHazard = HomeValleySoftlockGuard.InHazard(hot);
+                Spawn();
+                HomeValleyWorkOrders.WorkOrderOpResult made4 = HomeValleyWorkOrders.TryCreateHaulPool(s, pile4.GroundItemId);
+                WorkOrderRecord o4 = s.WorkOrders.FirstOrDefault(o => o.WorkOrderId == made4.WorkOrderId);
+                Seconds(3f);
+                bool held = o4 != null && o4.State == WorkOrderState.Waiting && o4.FailureReason == HomeValleyConstruction.ReturnDeferReason && o4.AssignedMachineLogicId == 0;
+                bool cooled = StepUntil(() => !HomeValleySoftlockGuard.InHazard(hot), 30);
+                bool resent = held && cooled && StepUntil(() => o4.AssignedMachineLogicId > 0, 10);
+                Expect(burning && inHazard && held && resent,
+                    $"L8h 返还物在燃烧斑块里（铺斑块 {burning}、在危险里 {inHazard}）：3 游戏秒后返还单 {o4?.State} / {o4?.FailureReason}、机器 #{o4?.AssignedMachineLogicId}（暂缓 {held}）；斑块熄灭 {cooled} 后自动派出 {resent}");
+            }
+            finally
+            {
+                StandingRuleService.RaidActiveProvider = oldProvider;
+            }
         }
 
         // ── K 管线（复审补）──────────────────────────────────────────────────

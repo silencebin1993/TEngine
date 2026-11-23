@@ -338,7 +338,7 @@ namespace GameLogic.UI.Kit
             UiTooltip.Attach(_relocate, () => new TooltipContent { Title = GameText.Get("input.action.relocate_mode.name"), Body = GameText.Format("ui.build.hint_relocate", InputDisplay.ForAction(GameActionId.Rotate)), Shortcut = GameActionId.RelocateMode });
             UiTooltip.Attach(_gridToggle, () => new TooltipContent { Title = GameText.Get("input.action.toggle_grid_lines.name"), Shortcut = GameActionId.ToggleGridLines });
             UiTooltip.Attach(_prioritize, () => new TooltipContent { Title = GameText.Get("input.action.prioritize_area.name"), Body = GameText.Get("ui.build.prioritize_mode"), Shortcut = GameActionId.PrioritizeArea });
-            UiTooltip.Attach(_clearSite, () => new TooltipContent { Title = GameText.Get("emg.persist.tool_title"), Body = GameText.Get("emg.persist.tool_desc") });
+            UiTooltip.Attach(_clearSite, () => new TooltipContent { Title = GameText.Get("emg.persist.tool_title"), Body = GameText.Get("emg.persist.tool_desc"), Shortcut = GameActionId.ClearSiteMode });
             UiTooltip.Attach(_clearBelt, () => new TooltipContent { Title = GameText.Get("input.action.clear_belt_mode.name"), Body = GameText.Get("ui.build.clear_mode"),
                 Shortcut = GameActionId.ClearBeltMode, CodexEntryId = "codex.logistics.belt" });
             UiTooltip.Attach(_power, () => new TooltipContent { Title = GameText.Get("input.action.open_power_grid.name"), Body = GameText.Get("power.overlay.legend"),

@@ -1408,6 +1408,10 @@ namespace GameLogic.UI.CircuitBoard
                 // FG2-FW-02（B13）：写内核实际每发伤害（与 CombatSite.MachineWeaponFrom 同源）；旧器官的编译伤害不再对玩家显示。
                 _previewSummaryLabel.text = Localization.GameText.Format("circuit.preview.summary", _lastPreview.PathCount,
                     Campaign.Combat.CombatSite.MachineHitDamage(_lastPreview).ToString("F1", System.Globalization.CultureInfo.InvariantCulture))
+                    + (Campaign.Combat.CombatSite.IsBeamPreview(_lastPreview)
+                        ? "\n" + Localization.GameText.Format("circuit.uplink.line.beam_cadence", Campaign.Combat.CombatSite.BeamInterval.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                            (Campaign.Combat.CombatSite.MachineHitDamage(_lastPreview) / Campaign.Combat.CombatSite.BeamInterval).ToString("F1", System.Globalization.CultureInfo.InvariantCulture))
+                        : string.Empty) // FG15-BAL-01（FG-GAP-230）
                     + "\n" + _lastPreview.ReactionHint;
             }
             // EMG1-PRG-01（ADR-EMG-001 ⑩、T9）：已保存的这一版是在旧内容版本下编译的——提示重新保存（保存即按当前内容重编）。
@@ -1450,6 +1454,10 @@ namespace GameLogic.UI.CircuitBoard
             _board.TryComputeLoadPreview(out int load, out int? capacity);
             int bandwidth = _board.ComputeBandwidthCost();
             float heat = _board.ComputeHeatBudget();
+            if (Campaign.Emergence.EmgRuleCatalog.IsBeam(_board.PrimaryId))
+            {
+                heat *= Campaign.Combat.CombatSite.BeamSegmentShare; // FG15-BAL-01（FG-GAP-230）：切割束按每段写，与每发伤害、内核每段积热同一口径
+            }
             string[] factions = _board.ComputeFactionTags();
             // FG1-SIG-05：反应按“你接入时能打出”判定（核心固件触发，AI 不用）。
             string reactionId = UplinkReactionReadiness.ReadyReactionId(state, _board);

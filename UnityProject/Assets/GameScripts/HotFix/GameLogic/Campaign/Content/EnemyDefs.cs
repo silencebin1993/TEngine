@@ -192,6 +192,10 @@ namespace GameLogic.Campaign.Content
             return tags;
         }
 
+        /// <summary>FG15-BAL-01（FG-GAP-147）：单位级掉落倾向（敌人表 lootBias）；none / 未知敌人 = null（不另掷）。</summary>
+        public static string LootBiasOf(string enemyTypeId) =>
+            TryGet(enemyTypeId, out MechEnemy row) && !string.IsNullOrEmpty(row.LootBias) && row.LootBias != None ? row.LootBias : null;
+
         /// <summary>掉落倾向：野外击毁掷普通掉落时用的来源（fg.TbLootDrop.source）。表里查不到 → <paramref name="fallback"/>；写 none → null（不掷）。</summary>
         public static string LootSourceOf(string enemyTypeId, string fallback)
         {

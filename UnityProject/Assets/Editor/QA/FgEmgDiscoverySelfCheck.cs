@@ -104,6 +104,7 @@ namespace GameLogic.EditorTools
                 Step(CheckAttrSpeed);
                 Step(CheckAttrHome);
                 Step(CheckFriendly);
+                Step(CheckOwnMeltdownHint); // FG15-BAL-01（FG-GAP-251）
                 Step(CheckObservation);
                 Step(CheckSaveRoundTrip);
                 Step(CheckDeterminismAfterLoad);
@@ -1547,6 +1548,39 @@ namespace GameLogic.EditorTools
         }
 
         // ── G 友伤（FGT-EMG-038、FGR-EMG-184）──────────────────────────────────
+
+        /// <summary>G1m FG-GAP-251：己方机器积热满进入熔穿 → 警告级可定位通知写明“熔融金属不认敌我、挤在一起会互相回灌”与应对；敌方单位熔穿不发（负向）。规则本身不改（挤在旁边的己方机器照样吃热）。</summary>
+        private static void CheckOwnMeltdownHint()
+        {
+            NewState(9611);
+            int n0 = EmgPhaseFeedback.OwnMeltdownNotices;
+            using (var site = NewSite())
+            {
+                CombatKernel k = site.Kernel;
+                int a = Unit(k, CombatFaction.Player, new double2(0, 0));
+                int b = Unit(k, CombatFaction.Player, new double2(0.3, 0));
+                int foe = Unit(k, CombatFaction.Hostile, new double2(40, 40));
+                site.SetUnitLabel(a, "reaction.log.machine_n", "A");
+                site.SetUnitLabel(b, "reaction.log.machine_n", "B");
+                StepSite(site, 1);
+                k.InjectUnitHeat(foe, 400f);
+                StepSite(site, 2);
+                int afterFoe = EmgPhaseFeedback.OwnMeltdownNotices - n0;
+                k.InjectUnitHeat(a, 400f);
+                StepSite(site, 2);
+                bool melt = k.InPhase(a, EmgPhaseConst.Overheat) && k.InPhase(foe, EmgPhaseConst.Overheat);
+                int afterOwn = EmgPhaseFeedback.OwnMeltdownNotices - n0;
+                string want = GameText.Format("emg.phase.meltdown_own", EmgChainView.PartyName(site, CampaignSession.Current, a));
+                NotificationEntry n = Notes("friendly_fire").LastOrDefault();
+                string text = n?.Latest?.DetailText ?? string.Empty;
+                // 规则不改：B 挤在 A 漏的熔融金属里照样积热（物质不认敌我）
+                float heatB0 = k.TryGetUnitEmg(b, out _, out EmgUnitState sb0) ? BinGames.Sim.Combat.CombatLogic.AccOf(sb0, EmgPhaseConst.Overheat) : -1f;
+                StepSite(site, 60);
+                float heatB1 = k.TryGetUnitEmg(b, out _, out EmgUnitState sb1) ? BinGames.Sim.Combat.CombatLogic.AccOf(sb1, EmgPhaseConst.Overheat) : -1f;
+                Expect(melt && afterFoe == 0 && afterOwn == 1 && text == want && n.Level == NotifyLevel.Warning && n.HasAnyLocation && heatB1 > heatB0,
+                    $"G1m FG-GAP-251 己方机器熔穿：发 {afterOwn} 条警告级可定位提示（“{text}”）；敌方单位熔穿不发（{afterFoe} 条）；规则不改——挤在旁边的己方机器照样被熔融金属加热（B 积热 {heatB0:0.###} → {heatB1:0.###}）");
+            }
+        }
 
         private static void CheckFriendly()
         {

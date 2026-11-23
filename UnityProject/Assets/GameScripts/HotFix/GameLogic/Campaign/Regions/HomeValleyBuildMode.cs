@@ -1434,6 +1434,10 @@ namespace GameLogic.Campaign.Regions
             {
                 SetClearMode(!ClearBeltActive);
             }
+            if (InputRouter.ConsumeAction(GameActionId.ClearSiteMode, InputScope.Strategy))
+            {
+                SetClearSiteMode(!ClearSiteActive); // FG15-BAL-01（DEBT-EMG2PERSIST01-02）：与建造栏“清除场地”按钮同一入口
+            }
             if (InputRouter.ConsumeAction(GameActionId.ConstructionQueue, InputScope.Strategy))
             {
                 ConstructionQueuePanelUIToolkit.Toggle();

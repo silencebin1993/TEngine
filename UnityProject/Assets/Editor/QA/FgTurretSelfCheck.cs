@@ -462,7 +462,7 @@ namespace GameLogic.EditorTools
             string[] rtf = t.TbTurretFluid.DataList.Select(r => string.Join("\t", "TF", r.FirmwareId, r.Fluid, Fl(r.LitersPerShot))).ToArray();
             string[] rtm = t.TbTurretTargetMode.DataList.Select(r => string.Join("\t", "TM", r.Id, r.Code.ToString(CultureInfo.InvariantCulture), r.NameKey, r.DescKey,
                 r.SortOrder.ToString(CultureInfo.InvariantCulture))).ToArray();
-            Expect(code == 0 && tp.Length == 18 /* EMG4-LOOT-01：+4 个作战类阵营标志组件；FG11-FAC-01：+ 蓄热连射枪 */ && tp.SequenceEqual(rtp) && tf.Length == 12 && tf.SequenceEqual(rtf) /* EMG1-FW-02：+冷却回流、水箱外排；FG13-FAC-01：+灭火协议 fw_pf_quench（排水） */ && tm.Length == 5 && tm.SequenceEqual(rtm)
+            Expect(code == 0 && tp.Length == 22 /* EMG4-LOOT-01：+4 个作战类阵营标志组件；FG11-FAC-01：+ 蓄热连射枪；FG15-BAL-01：+4 个独特组件（BAL-REC-019） */ && tp.SequenceEqual(rtp) && tf.Length == 12 && tf.SequenceEqual(rtf) /* EMG1-FW-02：+冷却回流、水箱外排；FG13-FAC-01：+灭火协议 fw_pf_quench（排水） */ && tm.Length == 5 && tm.SequenceEqual(rtm)
                    && TurretCatalog.Problems.Count == 0,
                 $"A1 三张新表 fg.TbTurretProfile（{tp.Length} 行）/ fg.TbTurretFluid（{tf.Length} 行）/ fg.TbTurretTargetMode（{tm.Length} 行）与源数据 fgdata_defense 逐字段一致；目录无问题（{string.Join("；", TurretCatalog.Problems)}）"
                 + (code == 0 ? string.Empty : "：" + FgProductionSelfCheck.Tail(output)));
@@ -484,7 +484,7 @@ namespace GameLogic.EditorTools
                             && ResearchCatalog.TryGet("defense.turret_t3", out ResearchNodeDef t3) && t3.IsReady && t3.Unlocks.Contains("tier:turret_heavy.t3")
                             && ResearchService.MigratedNodes().All(n => !n.Id.StartsWith("defense.turret", StringComparison.Ordinal))
                             && ResearchService.LegacyOpenNodes().All(n => !n.Id.StartsWith("defense.turret", StringComparison.Ordinal))
-                            && ResearchCatalog.TryGet("expedition.squad_plus", out ResearchNodeDef later) && !later.IsReady; // FG12-EVT-02 减震基座已开放，“后续版本”改用远征 · 编制 +1（opensIn 仍是 FG8-EXP-01）
+                            && ResearchCatalog.Nodes.All(n => n.IsReady); // FG15-BAL-01：研发树已全部开放（见 FgResearchSelfCheck D11）
             Expect(modes && buildings && research && CombatConst.FormatVersion >= 9,
                 $"A2 五种目标模式（code 与内核 CombatTargetMode 一一对应，按 FGR-DEF-003 列举排序）；轻型 2×2 / 重型 3×3 炮塔座（防御页签、耗电 8 / 15、耐久 150 / 260、T1～T3 射程 ×1 / 1.15 / 1.3、减伤 0 / 20% / 35%）；" +
                 $"研发 defense.turret_t2 / t3 已就绪并解锁炮塔座等级（旧档迁移与开局技术数据换算不计；“后续版本”的对照改用远征 · 编制 +1）；战斗内核快照格式 {CombatConst.FormatVersion}（{modes}/{buildings}/{research}）");

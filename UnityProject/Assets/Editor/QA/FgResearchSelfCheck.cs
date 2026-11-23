@@ -413,7 +413,7 @@ namespace GameLogic.EditorTools
                 "research.panel.search", "research.panel.footer", "research.panel.queue_empty", "research.status.no_lab", "research.status.paused_no_tech", "research.state.available",
                 "research.state.locked", "research.state.later", "research.reason.queue_full", "research.reason.prereq", "research.reason.key_missing", "research.reason.closed",
                 "research.detail.unlock_building", "research.detail.effect_speed", "research.build.new", "codex.research.tree.body", "research.branch.closed",
-                "research.node.logistics.splitter", "research.node.silent.turret.desc", "research.hint.energy.storage", "codex.tab.research",
+                "research.node.logistics.splitter", "research.node.silent.module.desc", "research.hint.energy.storage", "codex.tab.research",
             };
             bool zh = textKeys.All(k => GameText.Has(k) && !GameText.ContainsMarker(GameText.Get(k)));
             bool nodeTexts = ResearchCatalog.Nodes.All(n => GameText.Has(n.NameKey) && GameText.Has(n.DescKey) && (n.Unlocks.Length == 0 || GameText.Has("research.hint." + n.Id)));
@@ -619,15 +619,35 @@ namespace GameLogic.EditorTools
             string fw = FirmwareKinds.Rows.Select(r => r.Id).FirstOrDefault(id => FirmwareKinds.IsEnemyProtocol(id) && FirmwareKinds.FactionOf(id) == "silent");
             s.UnlockedContentIds = (s.UnlockedContentIds ?? Array.Empty<string>()).Append(fw).ToArray();
             bool open = fw != null && ResearchService.BranchOpen(s, silent);
-            bool later = !ResearchService.TryEnqueue(s, "silent.component", out string laterWhy) && laterWhy.Contains("后续版本")
-                         && ResearchService.StateOf(s, N("silent.component")) == ResearchNodeState.Later;
+            // FG15-BAL-01（DEBT-FG5RND01-01 收口）：阵营节点都有内容（标志组件），分支开放后就能加入队列（原“后续版本”对照已无数据）。
+            bool later = ResearchService.TryEnqueue(s, "silent.component", out string laterWhy) && ResearchService.StateOf(s, N("silent.component")) != ResearchNodeState.Later
+                         && N("silent.component").Unlocks.Contains("comp:comp_jammer");
+            laterWhy = later ? "可加入，解锁干扰发射器" : laterWhy;
+            ResearchService.TryDequeue(s, "silent.component", out _);
             bool foundryClosed = !ResearchService.BranchOpen(s, ResearchCatalog.Branches.First(b => b.Faction == "foundry"));
-            bool codex = MechanicCodex.IsUnlocked(MechanicCodex.ResearchEntryId("silent.turret")) && !MechanicCodex.IsUnlocked(MechanicCodex.ResearchEntryId("foundry.turret"));
+            bool codex = MechanicCodex.IsUnlocked(MechanicCodex.ResearchEntryId("silent.module")) && !MechanicCodex.IsUnlocked(MechanicCodex.ResearchEntryId("foundry.module"));
             Expect(closed && closedState.Contains("分支未开放") && open && later && foundryClosed && codex,
                 $"D10 阵营分支：没破解静默的技术时“{closedState}”、加入被拒；破解第一件静默固件（{fw}）后静默分支开放（图鉴解锁该分支节点），铸造分支仍关；" +
                 $"节点内容在后续版本（“{laterWhy}”）");
-            bool defLater = !ResearchService.TryEnqueue(s, "expedition.squad_plus", out string defWhy) && defWhy.Contains("后续版本"); // FG12-EVT-02 减震基座已开放，“后续版本”改用远征 · 编制 +1（opensIn 仍是 FG8-EXP-01）
-            Expect(defLater, $"D11 内容还没做的节点（远征 · 编制 +1）显示在树上，写明后续版本开放，不能加入（“{defWhy}”）");
+            // D11（FG15-BAL-01，DEBT-FG5RND01-01 / DEBT-FG11FAC01-03 收口）：研发树上不再有“后续版本开放”的节点；新开放的远征节点效果真实生效。
+            List<string> laterNodes = ResearchCatalog.Nodes.Where(n => !n.IsReady).Select(n => n.Id).ToList();
+            var wheel = new MachineRecord { ChassisId = ChassisCatalog.ChassisWheelId };
+            int cap0 = LootPickCatalog.CapacityOf(s, wheel);
+            // 复审 P2：行军速度本身（不是只看效果合计）——同一台机器研究前后按调用方的状态算。
+            GameLogic.Campaign.MachineOpResult walker = GameLogic.Campaign.MachineRegistry.SpawnMachine(GameLogic.Campaign.Regions.HomeValleyLayout.Erc003ChassisId,
+                GameLogic.Campaign.Regions.HomeValleyLayout.BlueprintErc003Id, GameLogic.Campaign.Regions.HomeValleyLayout.RegionId, Vector2.zero, 100f, 100f);
+            int[] walkers = walker.Success ? new[] { walker.LogicId } : Array.Empty<int>();
+            float speed0 = GameLogic.Campaign.Regions.ExpeditionMarchService.MarchSpeed(s, walkers);
+            ResearchService.CompleteForTests(s, "expedition.cargo_1", "expedition.cargo_2", "expedition.march_speed");
+            float speed1 = GameLogic.Campaign.Regions.ExpeditionMarchService.MarchSpeed(s, walkers);
+            int cap2 = LootPickCatalog.CapacityOf(s, wheel);
+            double march = ResearchService.EffectTotal(s, ResearchCatalog.EffectSpeed, "march");
+            string marchLine = string.Join("；", ResearchText.UnlockLines(s, N("expedition.march_speed")).Select(l => l.Text));
+            bool factionsHaveContent = ResearchCatalog.Nodes.Where(n => n.Branch.IsFaction).All(n => n.Unlocks.Any(u => u.StartsWith("comp:", StringComparison.Ordinal)));
+            Expect(laterNodes.Count == 0 && cap0 > 0 && cap2 == (int)Math.Round(cap0 * 1.5) && Math.Abs(march - 0.15) < 1e-6 && marchLine.Contains("15") && factionsHaveContent
+                   && speed0 > 0f && Mathf.Abs(speed1 - speed0 * 1.15f) < 1e-3f,
+                $"D11 研发树没有“后续版本开放”的节点（剩 {laterNodes.Count} 个：{string.Join(",", laterNodes)}）；阵营节点都解锁标志组件 {factionsHaveContent}；" +
+                $"货舱扩容 I + II 后机器货舱 {cap0} → {cap2}（应 ×1.5）；行军加速合计 +{march:P0}（“{marchLine}”），行军速度 {speed0:0.###} → {speed1:0.###}（应 ×1.15）");
         }
 
         // ── E 负向 ───────────────────────────────────────────────────────────────
@@ -1058,7 +1078,7 @@ namespace GameLogic.EditorTools
                 panel.ClickNode("energy.pole_t2");
                 panel.ClickNode("industry.lab_t2");
                 panel.ClickNode("industry.lab_t3");
-                panel.ClickNode("expedition.squad_plus"); // FG12-EVT-02 减震基座已开放，“后续版本”改用远征 · 编制 +1（opensIn 仍是 FG8-EXP-01）
+                panel.ClickNode("foundry.component"); // FG15-BAL-01：研发树已没有“后续版本”节点，不能加入的对照改用未开放的铸造分支
                 string refusedMsg = panel.MessageText;
                 panel.Refresh();
                 bool rows = panel.QueueRowVisibleCount == 4 && panel.QueueRowText(0).Contains("物流 · 分流与过滤") && panel.QueueTitleText.Contains("4 / 5");
@@ -1069,7 +1089,7 @@ namespace GameLogic.EditorTools
                 bool upBtn = Click(panel.QueueRowButton(1, 0)) && panel.QueueRowNode(0) == "logistics.splitter";
                 SendPointer<PointerDownEvent>(panel.NodeButton("energy.pole_t2"), Vector2.zero, EventType.MouseDown, 1);
                 bool rightRemoved = ResearchService.QueueIndex(s, "energy.pole_t2") < 0 && panel.MessageText.Contains("保留");
-                Expect(add1 && refusedMsg.Contains("后续版本") && rows && badDrop && goodDrop && upBtn && rightRemoved,
+                Expect(add1 && refusedMsg.Contains("铸造") && rows && badDrop && goodDrop && upBtn && rightRemoved,
                     $"J6 左键加入队列（不能加的写原因“{refusedMsg}”）；队列行“{panel.QueueRowText(0)}”；拖动排序：挪到前置前面被拒、合法的生效；上移按钮；右键移出写明进度保留");
 
                 // 研究推进后节点状态与进度条刷新；状态行。

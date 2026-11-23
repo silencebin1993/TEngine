@@ -129,11 +129,13 @@ namespace GameLogic.EditorTools
         {
             Line("  · A. 设计案 5.6 名表 16 个作战组件全部在表里；新 5 个的载体与投送参数、目录条目（中英文名 / 说明）、电路装配编译、固定底盘兼容；说明里的数与表同源");
             // EMG4-LOOT-01（FGR-FAC-009）：表里另有阵营标志组件行（faction ≠ none，现有载体的阵营变体，不在设计案 5.6 名表里）——名表断言只数非标志组件行（硬规矩 (9)①，M10-BASELINE 差异表）
-            var ids = CarrierReadings.Components.Where(c => string.IsNullOrEmpty(c.Faction) || c.Faction == "none").Select(c => c.Id).ToList();
+            // FG15-BAL-01：独特组件（source = unique：蠕虫钻头、三件旧时代组件）也不在名表里，另数
+            var ids = CarrierReadings.Components.Where(c => (string.IsNullOrEmpty(c.Faction) || c.Faction == "none") && c.Source != ComponentCatalog.SourceUnique).Select(c => c.Id).ToList();
+            int uniques = CarrierReadings.Components.Count(c => c.Source == ComponentCatalog.SourceUnique);
             int flags = CarrierReadings.Components.Count(c => !string.IsNullOrEmpty(c.Faction) && c.Faction != "none");
             var roster = MachineMorph.MorphComponents;
-            Expect(ids.Count == 16 && roster.All(ids.Contains) && NewComponents.All(ids.Contains) && flags == 5, // FG11-E2E-01：EMG4-LOOT-01 的 4 个 + FG11-FAC-01 的 comp_heat_repeater
-                $"fg.TbCombatComponent 名表 16 个（{string.Join("、", ids)}）+ 阵营标志组件 {flags} 行");
+            Expect(ids.Count == 16 && roster.All(ids.Contains) && NewComponents.All(ids.Contains) && flags == 5 && uniques == 4, // FG11-E2E-01：EMG4-LOOT-01 的 4 个 + FG11-FAC-01 的 comp_heat_repeater；FG15-BAL-01 独特组件 4 个
+                $"fg.TbCombatComponent 名表 16 个（{string.Join("、", ids)}）+ 阵营标志组件 {flags} 行 + 独特组件 {uniques} 行");
             CarrierReadings.TryGetComponent(ComponentCatalog.CompOrbitId, out CombatComponent orbit);
             CarrierReadings.TryGetComponent(ComponentCatalog.CompSentryId, out CombatComponent sentry);
             CarrierReadings.TryGetComponent(ComponentCatalog.CompPulserId, out CombatComponent pulser);

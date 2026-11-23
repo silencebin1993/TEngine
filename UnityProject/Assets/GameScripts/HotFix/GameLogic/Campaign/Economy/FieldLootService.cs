@@ -43,6 +43,7 @@ namespace GameLogic.Campaign.Economy
         private const uint SaltWorm = 0x4C4F4F35u; // FG12-EVT-02
         private const uint SaltOrbital = 0x4C4F4F36u; // FG12-EVT-04
         private const uint SaltPurge = 0x4C4F4F37u; // FG14-SBX-01
+        private const uint SaltBias = 0x4C4F4F38u; // FG15-BAL-01 单位级掉落倾向
 
         // ── 自检读点（本进程累计）──
         public static long KillEvents { get; private set; }
@@ -99,6 +100,12 @@ namespace GameLogic.Campaign.Economy
             if (source != null)
             {
                 Roll(s, st, source, def?.Faction ?? string.Empty, at, serial, 0u, mult, OriginField);
+            }
+            // FG15-BAL-01（FG-GAP-147，FG09 掉落倾向列）：单位级倾向（敌人表 lootBias）另掷一次 bias.<倾向> 行；精英同样带倾向。与普通掉落同一序号、不同盐，确定性不变。
+            string bias = Content.EnemyDefs.LootBiasOf(def?.EnemyTypeId);
+            if (bias != null)
+            {
+                Roll(s, st, LootCatalog.SourceBiasPrefix + bias, def?.Faction ?? string.Empty, at, serial, SaltBias, mult, OriginField);
             }
             KillEvents++;
             double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;

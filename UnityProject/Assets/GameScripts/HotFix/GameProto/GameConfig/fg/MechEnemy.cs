@@ -124,6 +124,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
         FlShieldElec = _buf.ReadFloat();
         FlGate = _buf.ReadString();
         FlGateHp = _buf.ReadFloat();
+        LootBias = _buf.ReadString();
     }
 
     public static MechEnemy DeserializeMechEnemy(ByteBuf _buf)
@@ -551,6 +552,10 @@ public sealed partial class MechEnemy : Luban.BeanBase
     /// 端口闸门值(带闸门时一切伤害不扣耐久,只有该族端口削减它,削到0当场击毁;口径见 flagship.gate.* 调参)
     /// </summary>
     public readonly float FlGateHp;
+    /// <summary>
+    /// 单位级掉落倾向(FG09 掉落倾向列;FG15-BAL-01 FG-GAP-147):none/material/firmware/rare_firmware/data_core/component/structure/repair/part;野外击毁时另掷 fg.TbLootDrop 来源 bias.&lt;倾向&gt;
+    /// </summary>
+    public readonly string LootBias;
    
     public const int __ID__ = -1662319490;
     public override int GetTypeId() => __ID__;
@@ -667,6 +672,7 @@ public sealed partial class MechEnemy : Luban.BeanBase
         + "flShieldElec:" + FlShieldElec + ","
         + "flGate:" + FlGate + ","
         + "flGateHp:" + FlGateHp + ","
+        + "lootBias:" + LootBias + ","
         + "}";
     }
 }

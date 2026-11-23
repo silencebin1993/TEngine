@@ -127,6 +127,7 @@ namespace GameLogic.EditorTools
                 Step(CheckKernelSave);
                 Step(CheckSiteScope);
                 Step(CheckOrders);
+                Step(CheckClearSiteHotkey); // FG15-BAL-01（DEBT-EMG2PERSIST01-02）
                 Step(CheckBlockWarning);
                 Step(CheckBlockThick);
                 Step(CheckNavMirror);
@@ -819,6 +820,26 @@ namespace GameLogic.EditorTools
         }
 
         // ── K 清除工作单（走建造模式真实入口）──────────────────────────────────────
+
+        /// <summary>FG15-BAL-01（DEBT-EMG2PERSIST01-02）：清除场地有快捷键——动作登记表里有它（建造上下文、默认 Ctrl+J、可重绑），按键与建造栏按钮同一入口（HomeValleyBuildMode 快捷键段）。</summary>
+        private static void CheckClearSiteHotkey()
+        {
+            InputActionDef def = InputActionCatalog.All.FirstOrDefault(a => a.Action == GameActionId.ClearSiteMode);
+            string shown = InputDisplay.ForAction(GameActionId.ClearSiteMode);
+            HomeValleyBuildMode mode = HomeValleyBuildMode.Current;
+            bool toggles = false;
+            if (mode != null)
+            {
+                mode.Open();
+                bool before = mode.ClearSiteActive;
+                mode.SetClearSiteMode(!before);
+                toggles = mode.ClearSiteActive != before;
+                mode.SetClearSiteMode(false);
+                mode.Close();
+            }
+            Expect(def != null && shown.Contains("J") && shown.Contains("Ctrl") && GameSettings.KeyBindings.GetKey(GameActionId.ClearSiteMode) != KeyCode.None && toggles,
+                $"Q2 清除场地快捷键：动作登记表有“{def?.DisplayName}”、默认 {shown}（建造上下文，可重绑），开关同一入口 {toggles}");
+        }
 
         private static GridCell Clear(CampaignState s, GridCell at)
         {

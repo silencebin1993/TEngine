@@ -534,7 +534,7 @@ namespace GameLogic.EditorTools
                            && DefenseCatalog.ShieldStates.Where(x => x.Absorbs).All(x => DefenseCatalog.TryGetState(x.OnDepleted, out _));
             bool research = new[] { "defense.barrier", "defense.shield", "defense.trap" }.All(id => ResearchCatalog.TryGet(id, out ResearchNodeDef n) && n.IsReady)
                             && ResearchCatalog.TryGet("defense.barrier", out ResearchNodeDef nb) && nb.Unlocks.Contains("build:barrier_t1") && nb.Unlocks.Contains("build:gate")
-                            && ResearchCatalog.TryGet("expedition.squad_plus", out ResearchNodeDef rd) && !rd.IsReady // FG12-EVT-02 减震基座已开放，“后续版本”改用远征 · 编制 +1（opensIn 仍是 FG8-EXP-01）
+                            && ResearchCatalog.Nodes.All(n => n.IsReady) // FG15-BAL-01：研发树已全部开放（原“后续版本”对照节点已删 / 落内容，见 FgResearchSelfCheck D11）
                             && ResearchService.MigratedNodes().All(n => !n.Id.StartsWith("defense.", StringComparison.Ordinal));
             Expect(sizes && tiers && power && machine && research && CombatConst.FormatVersion >= 10, // FG6-DEF-05 起内核快照升到格式 11（攻城属性）；格式 10 往返在 I3 单独测
                 $"A2 屏障 T1 / T2 / T3、闸门、陷阱 1×1、护盾 2×2（防御页签）；屏障耐久 {d1}/{d2}/{d3} 递增、升级路线 T1→T2→T3；屏障 / 闸门不用电、护盾 / 陷阱用电；" +

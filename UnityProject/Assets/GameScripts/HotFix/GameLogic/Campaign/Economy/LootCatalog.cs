@@ -44,6 +44,8 @@ namespace GameLogic.Campaign.Economy
         public const string SourceOrbital = "orbital";
         /// <summary>FG14-SBX-01（FGR-SBX-002）：后日谈清洗里在家园被击毁的白潮单位（残骸回收出稀有材料）。</summary>
         public const string SourcePurge = "purge";
+        /// <summary>FG15-BAL-01（FG-GAP-147）：单位级掉落倾向的来源前缀——bias.&lt;敌人表 lootBias&gt;，野外击毁时在普通掉落之外再掷一次。</summary>
+        public const string SourceBiasPrefix = "bias.";
         public const string AnyFaction = "*";
         public const string IdentityNone = "none";
         public const string IdentityFirmwareSalvage = "firmware:salvage";
@@ -184,7 +186,8 @@ namespace GameLogic.Campaign.Economy
                 problem = "掉落行缺 ID"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;
             }
-            if (source != SourceMinion && source != SourceElite && source != SourceOutpost && source != SourceWorm && source != SourceOrbital && source != SourcePurge)
+            if (source != SourceMinion && source != SourceElite && source != SourceOutpost && source != SourceWorm && source != SourceOrbital && source != SourcePurge
+                && !(source.StartsWith(SourceBiasPrefix, StringComparison.Ordinal) && source.Length > SourceBiasPrefix.Length))
             {
                 problem = $"掉落行 {id}：来源 {source} 不认识"; // loc-ignore: 开发者自检 / 诊断文本
                 return null;

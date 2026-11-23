@@ -602,6 +602,11 @@ namespace GameLogic.EditorTools
                 string relic = HeritageService.RelicOf(s, h.Id);
                 long tech0 = s.TechData;
                 int chips0 = s.PrimitiveChips?.Length ?? 0;
+                // FG15-BAL-01（DEBT-FG8EXP04-01）：旧时代蓝图描述的独特组件——带回前蓝图编辑器选不了、锁定提示写获取途径（蓝图名）
+                string[] uniq = Campaign.Content.ComponentCatalog.UnlockedByHeritage(h.Id).ToArray();
+                Campaign.Blueprint.CircuitOpResult[] lockedTry = uniq.Select(c => Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, "comp_gun", null, null, Array.Empty<string>()).TrySetPrimary(s, c)).ToArray();
+                bool lockedBefore = lockedTry.All(r => !r.Success && (r.Message ?? string.Empty).Contains(GameText.Get(h.NameKey)))
+                                    && uniq.All(c => !Campaign.Content.MechanicalContentUnlock.IsUnlocked(s, c));
                 // 回收完工的同一入口（机器在核心旁：装进货舱后下一次入库检查就入库）。
                 Heritage got = HeritageService.OnRelicRecovered(s, relic, Mathf.RoundToInt(m.Position3.x), Mathf.RoundToInt(m.Position3.z), "test", m.LogicId);
                 bool done = StepUntil(() => HeritageService.IsObtained(s, h.Id), 10L * Hz);
@@ -610,8 +615,17 @@ namespace GameLogic.EditorTools
                 switch (cat)
                 {
                     case HeritageService.CatBlueprint:
-                        ok = s.UnlockedContentIds.Contains(h.UnlockId);
-                        what = "蓝图登记（解锁记录 " + h.UnlockId + "）";
+                        bool selectable = uniq.Length == 1 && uniq.All(c => Campaign.Content.MechanicalContentUnlock.IsUnlocked(s, c)
+                            && Campaign.Blueprint.BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, "comp_gun", null, null, Array.Empty<string>()).TrySetPrimary(s, c).Success);
+                        string effect = HeritageService.BlueprintEffect(h);
+                        ok = s.UnlockedContentIds.Contains(h.UnlockId) && lockedBefore && selectable && uniq.All(c => Campaign.Content.MechanicalContentFacade.TryGet(c, out Campaign.Content.MechanicalContentDef cd) && effect.Contains(cd.DisplayName));
+                        // 复审 P2 旧档迁移：本卡之前已带回这份蓝图的存档没有独特组件解锁记录 → 进入战役（读档）时补解锁。
+                        s.UnlockedContentIds = s.UnlockedContentIds.Where(x => !uniq.Contains(x)).ToArray();
+                        bool oldLocked = uniq.All(c => !Campaign.Content.MechanicalContentUnlock.IsUnlocked(s, c));
+                        HeritageService.OnCampaignEntered(s);
+                        bool migrated = oldLocked && uniq.All(c => Campaign.Content.MechanicalContentUnlock.IsUnlocked(s, c));
+                        ok &= migrated;
+                        what = $"蓝图登记（解锁记录 {h.UnlockId}）；独特组件 {string.Join(",", uniq)} 带回前蓝图编辑器拒绝（“{(lockedTry.Length > 0 ? lockedTry[0].Message : string.Empty)}”）{lockedBefore}、带回后可装 {selectable}；效果行“{effect}”；旧档读回补解锁 {migrated}";
                         break;
                     case HeritageService.CatFirmware:
                         PrimitiveChipRecord chip = s.PrimitiveChips.LastOrDefault(p => p.CardDefId == h.UnlockId);

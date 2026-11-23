@@ -198,5 +198,7 @@
         OpenDifficulty = 152,
         /// <summary>FG15-SYS-03（FGR-SYS-061）：生成反馈包（全部上下文，默认 Ctrl+F8：F8 本身是快捷栏 8，同快速存档 Ctrl+F5 的取舍）。</summary>
         CreateFeedbackPack = 153,
+        /// <summary>FG15-BAL-01（DEBT-EMG2PERSIST01-02）：建造模式“清除场地”工具开关（默认 Ctrl+J，挨着清带 J；只在建造上下文）。</summary>
+        ClearSiteMode = 154,
     }
 }

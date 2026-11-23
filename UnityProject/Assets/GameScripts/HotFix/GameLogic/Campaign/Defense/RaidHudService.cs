@@ -117,7 +117,7 @@ namespace GameLogic.Campaign.Defense
                 }
                 if (!g.SiegeRetreat && g.State == TransitGroupState.Arrived && limit > 0 && g.ArrivedAtTick >= 0)
                 {
-                    long t = g.ArrivedAtTick + limit;
+                    long t = g.ArrivedAtTick + WorldTransitSystem.TimeLimitTicksFor(s, g, limit); // FG-GAP-254：清洗波次按清洗时限显示（与撤退判定同源）
                     f.LimitTick = f.LimitTick < 0 ? t : Math.Min(f.LimitTick, t);
                 }
             }

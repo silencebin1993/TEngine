@@ -515,6 +515,16 @@ namespace GameLogic.EditorTools
             bool killed = h != null && h.Outcome == EventDirectorService.OutcomeSuccess && !string.IsNullOrEmpty(h.PacketId) && LootPickService.StateOf(s).Packets.Length > packets0
                           && OnlyWorm(s) == null && site.WormCount == 0 && V(s).Kills == 1 && V(s).SegmentsKilled == cw.SegCount && EventTexts().Any(t => t.Contains("被击杀"));
             Expect(killed, $"C6 击杀：累计伤害够了其余节一起倒下（共掉落 {V(s).SegmentsKilled} / {cw.SegCount} 节），事件历史 success、给三选一数据包（{h?.PacketId}），链与记录移除");
+            // FG15-BAL-01（DEBT-FG12EVT02-01，FGR-EVT-013“只能从蠕虫获得的格斗类钻头组件”）：蠕虫的节段掉未解析模块，身份固定是掘进钻头；别的来源的模块池里没有它。
+            var drillTags = (LootPickService.StateOf(s).GroundTags ?? Array.Empty<LootGroundTagRecord>())
+                .Where(t => t != null && t.SalvageId != null && t.SalvageId.StartsWith("fieldloot:worm:", StringComparison.Ordinal) && t.TargetId == "comp_worm_drill").ToList();
+            var moduleRows = LootCatalog.Rows.Where(r => r.Identity == LootCatalog.IdentityModule).ToList();
+            bool onlyWorm = moduleRows.Where(r => r.Pool.Contains("comp_worm_drill")).All(r => r.Source == "worm") && moduleRows.Any(r => r.Source == "worm" && r.Pool.Contains("comp_worm_drill"));
+            bool drillKnown = ComponentCatalog.TryGet("comp_worm_drill", out MechanicalContentDef drillDef);
+            bool lockedUntilDecoded = drillKnown && !MechanicalContentUnlock.IsUnlocked(s, "comp_worm_drill")
+                                      && drillDef.Category == MechanicalContentCategory.MainComponent && !string.IsNullOrEmpty(drillDef.LockedHintText) && drillDef.LockedHintText != GameText.Get("component.source.enemy");
+            Expect(drillTags.Count > 0 && onlyWorm && lockedUntilDecoded,
+                $"C6b 掘进钻头：这条蠕虫 {cw.SegCount} 节共掉 {drillTags.Count} 件身份为掘进钻头的未解析模块（地上，搬回解析台破解后写进蓝图）；模块池里只有蠕虫来源有它（{onlyWorm}）；破解前锁定，锁定提示写获取途径（“{(drillKnown ? drillDef.LockedHintText : string.Empty)}”）");
         }
 
         private static void CheckTimeout()

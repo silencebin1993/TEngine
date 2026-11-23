@@ -62,6 +62,7 @@ public sealed partial class CombatComponent : Luban.BeanBase
         Faction = _buf.ReadString();
         FixedOnly = _buf.ReadInt();
         BehaviorOf = _buf.ReadString();
+        UnlockedBy = _buf.ReadString();
     }
 
     public static CombatComponent DeserializeCombatComponent(ByteBuf _buf)
@@ -241,6 +242,10 @@ public sealed partial class CombatComponent : Luban.BeanBase
     /// 阵营标志组件的内核专属行为参数取自哪一行敌人(fg.TbMechEnemy 外键,阵营须一致;只读架炮驻锄 / 高抛盲区 / 枢轴喷灌三组);none=没有
     /// </summary>
     public readonly string BehaviorOf;
+    /// <summary>
+    /// 独特组件(source=unique)由哪件遗产解锁(fg.TbHeritage 外键:带回这份旧时代蓝图时解锁);none=不是 / 别的途径(掘进钻头:蠕虫掉落的未解析模块破解)
+    /// </summary>
+    public readonly string UnlockedBy;
    
     public const int __ID__ = -2113875684;
     public override int GetTypeId() => __ID__;
@@ -295,6 +300,7 @@ public sealed partial class CombatComponent : Luban.BeanBase
         + "faction:" + Faction + ","
         + "fixedOnly:" + FixedOnly + ","
         + "behaviorOf:" + BehaviorOf + ","
+        + "unlockedBy:" + UnlockedBy + ","
         + "}";
     }
 }

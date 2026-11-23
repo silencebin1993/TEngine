@@ -132,7 +132,10 @@ namespace GameLogic.Campaign.Regions
         }
 
         /// <summary>一组机器的行军速度 = 其中存活的最慢那台；没有存活的返回 0。</summary>
-        public static float MarchSpeed(IReadOnlyList<int> logicIds)
+        public static float MarchSpeed(IReadOnlyList<int> logicIds) => MarchSpeed(CampaignSession.Current, logicIds);
+
+        /// <summary>复审 P2：研发加成读调用方的战役状态（不是 CampaignSession.Current）。</summary>
+        public static float MarchSpeed(CampaignState state, IReadOnlyList<int> logicIds)
         {
             float speed = float.MaxValue;
             if (logicIds != null)
@@ -145,7 +148,8 @@ namespace GameLogic.Campaign.Regions
                     }
                 }
             }
-            return speed == float.MaxValue ? 0f : speed;
+            // FG15-BAL-01（DEBT-FG5RND01-01）：研发“行军加速”（speed / march 效果合计，O(1) 缓存）。
+            return speed == float.MaxValue ? 0f : speed * (float)(1.0 + Economy.ResearchService.EffectTotal(state, Economy.ResearchCatalog.EffectSpeed, "march"));
         }
 
         /// <summary>全部存活成员走到锚点这么近就算到达（格）。</summary>
@@ -842,7 +846,7 @@ namespace GameLogic.Campaign.Regions
             m.Phase = PhaseOutbound;
             m.SiteId = siteId;
             m.Members = ids.ToArray();
-            m.Speed = MarchSpeed(ids);
+            m.Speed = MarchSpeed(s, ids);
             m.Command = (int)Command.Advance;
             m.DepartTick = GameClock.Ticks;
             m.PhaseTick = GameClock.Ticks;
@@ -1156,7 +1160,7 @@ namespace GameLogic.Campaign.Regions
                 return;
             }
             // 每游戏秒：速度对账（行军速度 = 存活成员里最慢的那台：最慢的阵亡后队伍提速；刚出厂 / 读档后的单位以行军速度走）、覆盖、交战、遇敌 / 危害、截断。
-            float speed = MarchSpeed(members);
+            float speed = MarchSpeed(s, members);
             if (speed > 0f && Math.Abs(speed - m.Speed) > 0.001f)
             {
                 Log.Info($"[ExpeditionMarchService] 远征队行军速度 {m.Speed:0.0} → {speed:0.0} 格/秒（按存活成员里最慢的那台）。");
@@ -1916,7 +1920,7 @@ namespace GameLogic.Campaign.Regions
             m.Command = (int)Command.Return;
             m.Halted = HaltNone;
             m.ArrivalFailReason = string.Empty;
-            m.Speed = MarchSpeed(ids);
+            m.Speed = MarchSpeed(s, ids);
             m.InCoverage = true;
             m.EdgeWarned = false;
             m.Engaged = false;

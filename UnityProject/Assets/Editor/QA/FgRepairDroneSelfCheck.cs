@@ -1760,6 +1760,7 @@ namespace GameLogic.EditorTools
             bool cold = StepUntil(() => ColdAt(c), 60);
             string diag = string.Empty; // 诊断：火灭后再次挂起那一刻附近的斑块与机器温度
             bool wasHeld = lo != null && HomeValleyWorkOrders.IsFireHeld(lo);
+            int lastAssigned = lo?.AssignedMachineLogicId ?? 0, meltAssigned = 0; // FG-GAP-233 改写：续做派出的那一刻机器不在熔穿里
             bool done = cold && StepUntil(() =>
             {
                 bool h = HomeValleyWorkOrders.IsFireHeld(lo);
@@ -1769,17 +1770,24 @@ namespace GameLogic.EditorTools
                     diag = $"【火灭续做后又挂起：附近斑块 {PatchesNear(c, 8)}；机器离格 {MachineDist(mid, cc):0.#} 米、温度 {heat:0} 过热 {over}】";
                 }
                 wasHeld = h;
+                int a = lo.AssignedMachineLogicId;
+                if (a > 0 && a != lastAssigned && HomeValleyWorkOrders.InMeltdown(a))
+                {
+                    meltAssigned++;
+                }
+                lastAssigned = a;
                 return BeltNetworkService.HpOf(c) == hp0;
             }, 120);
             Seconds(0.5f);
-            // 每次挂起都有一次续做（FGR-BASE-020 每个自动动作可追溯）；火灭后回来的机器若已过热、身下漏熔融金属（FG19 熔穿），现场会再成危险格、再挂起一次，同样成对记日志。
+            // 每次挂起都有一次续做（FGR-BASE-020 每个自动动作可追溯）。FG15-BAL-01（FG-GAP-233 改写）：熔穿中的机器不接自动派工，等它冷却再派，
+            // 不再出现“回来的机器身下漏熔融金属 → 现场再成危险格 → 再挂起、冷成熔渣挡住这一格（FG15-SYS-01 起熔渣挡传送带）”——只挂起 1 次。
             int holdsL = RuleLogs(l, StandingRuleService.Find(l, r.Serial), "rules.log.rebuild_fire_hold", CellKey(c));
             int resumesL = RuleLogs(l, StandingRuleService.Find(l, r.Serial), "rules.log.rebuild_fire_resume", CellKey(c));
-            bool resumed = done && l.Scrap == scrap1 && lo.State == WorkOrderState.Completed && holdsL >= 1 && resumesL == holdsL;
+            bool resumed = done && l.Scrap == scrap1 && lo.State == WorkOrderState.Completed && holdsL == 1 && resumesL == holdsL && meltAssigned == 0;
             Expect(heldAfter && resumed,
                 $"D5h2 等火灭（已派单挂起）途中存读档：读档后仍挂着、现场材料 {lp?.Delivered} 与仓库 {l.Scrap} 原样（{heldAfter}）；火灭（{cold}）后同一张单续做、按原样建回（{done}），" +
-                $"用现场的材料建完、不再从仓库多取（仓库 {scrap1} → {l.Scrap}）、挂起 {holdsL} 次各有一条“火灭了，接着施工”（{resumesL} 条，单子 {lo?.State}，{resumed}）{diag}" +
-                (resumed ? string.Empty : "【规则日志：" + RuleLogTail(l, StandingRuleService.Find(l, r.Serial)) + "】"));
+                $"用现场的材料建完、不再从仓库多取（仓库 {scrap1} → {l.Scrap}）、挂起 {holdsL} 次各有一条“火灭了，接着施工”（{resumesL} 条，单子 {lo?.State}）、派给熔穿中机器 {meltAssigned} 次（{resumed}）{diag}" +
+                (resumed ? string.Empty : "【规则日志：" + RuleLogTail(l, StandingRuleService.Find(l, r.Serial)) + $"；传送带耐久 {BeltNetworkService.HpOf(c)} / {hp0}；现场斑块 {PatchesNear(c, 8)}】"));
         }
 
         /// <summary>诊断：这条规则最近 12 条日志（键 @ 实体）。</summary>
@@ -1865,7 +1873,7 @@ namespace GameLogic.EditorTools
             string fKey = StandingRuleService.BuildingKey(f.BuildingId);
             int orders = (s.WorkOrders ?? Array.Empty<WorkOrderRecord>()).Count(x => x.TargetId == f.BuildingId && x.Kind == WorkOrderKind.Repair);
             int holds = RuleLogs(s, r, "rules.log.rebuild_fire_hold", fKey), resumes = RuleLogs(s, r, "rules.log.rebuild_fire_resume", fKey);
-            bool once = rebuilt && orders == 1 && s.Scrap == 2000 - cost && holds >= 1 && resumes == holds; // 每次挂起都有一次续做（FGR-BASE-020），过热漏熔融再挂起同样成对
+            bool once = rebuilt && orders == 1 && s.Scrap == 2000 - cost && holds == 1 && resumes == holds; // 每次挂起都有一次续做（FGR-BASE-020）；FG15-BAL-01（FG-GAP-233 改写）熔穿中的机器不接自动派工，不再因漏熔融二次挂起
             Expect(held && stayed && once,
                 $"D5g3 DEBT-EMGREXIT-06 建筑重建已在现场施工（{working}）时起明火、盖住机器脚下（半径 {rad:0.#}，机器离火心 {dIn:0.#} 米，{spawned}）→ 挂起、放掉机器、预留的废料仍在单名下（{held}）；" +
                 $"机器撤到火圈外（{outNow}），之后离火心最近 {minD:0.#} 米、身上的明火沾染（{FireCoatSeconds:0.#} 秒）烧完后血量 {hpOut:0.#} → 2 秒后 {hpLater:0.#}、施工进度 {progress:0.##} 保留、火仍在烧（{stayed}）；" +

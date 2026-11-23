@@ -50,6 +50,10 @@ namespace GameLogic.Campaign.Regions
 
         /// <summary>返还物搬运单等仓库腾出空间时的原因码（机器没有被占用）。</summary>
         public const string ReturnWaitReason = "return-waiting-space";
+        /// <summary>FG15-BAL-01（FG-GAP-244）：同一堆返还物连续阵亡达上限，暂停重开（只有玩家手动点搬运才恢复）。</summary>
+        public const string ReturnPausedReason = "return-paused-danger";
+        /// <summary>FG15-BAL-01（FG-GAP-244）：突袭进行中或返还物在危险斑块里，暂缓派单（危险解除后自动回待分配池）。</summary>
+        public const string ReturnDeferReason = "return-deferred-danger";
 
         public static int CarryPerTrip => Math.Max(1, GridContent.TuningInt("build.carry_per_trip"));
 

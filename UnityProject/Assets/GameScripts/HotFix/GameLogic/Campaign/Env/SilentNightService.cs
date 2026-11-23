@@ -247,7 +247,7 @@ namespace GameLogic.Campaign.Env
         {
             double fallback = ExpeditionEstimateHours * GameClock.HourSeconds;
             float route = s != null && !string.IsNullOrEmpty(siteId) ? Regions.ExpeditionSiteAnchors.RouteLength(s, siteId) : -1f;
-            float speed = Regions.ExpeditionMarchService.MarchSpeed(roster);
+            float speed = Regions.ExpeditionMarchService.MarchSpeed(s, roster);
             if (route < 0f || speed <= 0f)
             {
                 return fallback;

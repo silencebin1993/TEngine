@@ -524,6 +524,16 @@ namespace GameLogic.UI.WorkOrder
             {
                 return GameText.Get("workorder.panel.storage_full_resumes_automatical");
             }
+            if (reason == HomeValleyConstruction.ReturnPausedReason)
+            {
+                // FG15-BAL-01（FG-GAP-244）：连续阵亡达上限的返还搬运单（暂停到玩家手动点搬运）。
+                return GameText.Format("workorder.panel.return_paused",
+                    (int)System.Math.Round(Campaign.Grid.GridContent.TryGetTuning("wo.return.pause_deaths", out float n) ? n : 3f));
+            }
+            if (reason == HomeValleyConstruction.ReturnDeferReason)
+            {
+                return GameText.Get("workorder.panel.return_deferred");
+            }
             if (Campaign.Regions.HomeValleyWorkOrders.IsUnreachableReason(reason))
             {
                 // FG0-ARCH-06：目标无法到达（带原因；30 秒后重试）。

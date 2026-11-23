@@ -638,6 +638,9 @@ namespace GameLogic.Campaign
         /// <summary>EMG-R 出口补缺口第 4 轮（FG-GAP-189）：自动重建派出的传送带虚影施工单 = 那份虚影被摧毁的那一步（GameClock.Ticks）；
         /// &gt; 0 = 自动重建虚影单，不取用在等一次凑齐、攒得齐的建筑重建单还差的废料（FG-GAP-243 起不看摧毁先后）。旧存档 / 不是自动重建 = 0（不受预留限制）。</summary>
         public long RuleQueueTick;
+        /// <summary>FG15-BAL-01（FG-GAP-244）：系统返还搬运单（IssuerId = "return"）这一堆已经连续把几台去搬的机器搬死（阵亡重开时 +1 带到新单上；
+        /// 达到 wo.return.pause_deaths 就暂停重开、等玩家手动点搬运；玩家手动搬运清零）。旧存档 / 其它工单 = 0。</summary>
+        public int ReturnDeaths;
     }
 
     /// <summary>ERD-FAC-001 工厂队列项。</summary>

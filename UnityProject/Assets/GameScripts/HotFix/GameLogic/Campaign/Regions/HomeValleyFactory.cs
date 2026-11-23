@@ -45,6 +45,9 @@ namespace GameLogic.Campaign.Regions
     /// 断电、出口独占、FIFO、改造的目标核验都沿用原来的状态与转移。</summary>
     public static class HomeValleyFactory
     {
+        /// <summary>FG15-BAL-01（FGT-BAL-001 / 复审 P1）：装配站出厂机器的耐久（fg.TbHomeTuning factory.machine_health，初值 100；原为写死的 100）。节奏机器人与出厂同一来源。</summary>
+        public static float ShippedHealth => Math.Max(1f, GameLogic.Core.GameClock.TuningOr("factory.machine_health", 100f));
+
         public readonly struct FactoryOpResult
         {
             public readonly bool Success;
@@ -869,8 +872,8 @@ namespace GameLogic.Campaign.Regions
                 regionId: HomeValleyLayout.RegionId,
                 // FG3-LOG-01（DEBT-FG0ARCH04-03）：出口随装配站旋转 / 搬迁——出厂位置与端口箭头、放置障碍同一个来源。
                 position: Grid.HomeGridService.ExitPosition(state, "assembly_exit"),
-                health: 100f,
-                maxHealth: 100f,
+                health: ShippedHealth,
+                maxHealth: ShippedHealth,
                 blueprintVersion: item.BlueprintVersion,
                 loadoutSignature: loadoutSignature);
             if (!spawn.Success)

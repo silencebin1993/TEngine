@@ -78,6 +78,10 @@ namespace GameLogic.Campaign.Combat
             if (resume && rec != null)
             {
                 restored = site.TryRestore(state, rec, out string reasonKey);
+                if (restored)
+                {
+                    ClearStaleInsulate(state, site);
+                }
                 if (!restored)
                 {
                     string siteName = SiteName(siteId);
@@ -91,6 +95,19 @@ namespace GameLogic.Campaign.Combat
                 RemoveRecord(state, siteId);
             }
             return site;
+        }
+
+        /// <summary>
+        /// DEBT-EMG2BOSS01-02（ADR ⑭ #12）：快照存于“绝缘涂层”那天、地点关着时日切的恢复扫（ClarityCounterService.Lock）扫不到它；
+        /// 读回后若当前锁定的对策不是绝缘涂层就补摘电击类免疫位。只读 FactionState，不调 ClarityCounterService.Locked（会提前锁定当天对策）。
+        /// shortcut: 快照存于更早一段绝缘期、中间换过对策、今天又锁回绝缘时不摘；要精确就给快照记存档日。
+        /// </summary>
+        private static void ClearStaleInsulate(CampaignState state, CombatSite site)
+        {
+            if ((state?.Factions?.ClarityCounterId ?? string.Empty) != Content.EnemyDefs.ConditionCounterInsulate)
+            {
+                site.Kernel.ClearImmuneBits(EnemyClarityParams.InsulateMask());
+            }
         }
 
         /// <summary>关闭（卸载）一个地点的内核：释放原生容器。<paramref name="dropRecord"/> 时同时删掉存档里这个地点的快照（远征结束）。</summary>

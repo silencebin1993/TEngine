@@ -1091,6 +1091,16 @@ namespace GameLogic.EditorTools
             Expect(pair && b.Serial > a.Serial && cmp.Contains("每秒伤害") && cmp.Contains(TestRangeService.Num(a.Dps)) && cmp.Contains(TestRangeService.Num(b.Dps))
                    && pick.Success && b2.Serial == a.Serial && a2.Serial != a.Serial && GameSettings.HasSeenGuidanceHook(GuidanceHooks.RangeFirstCompare),
                 $"I3 两次测试并排对比：默认最近两条，逐项写“A ｜ B（差值）”；可以手选（选了同一条时另一栏自动换开）\n{cmp}");
+            // FG15-BAL-01（DEBT-FG5E2E01-07）：一次接入、一次不接入，接入那次热量峰值没到过热线一半 → 对比栏提示核心固件可能还没触发；热量够了 / 两次都没接入不提示（负向）
+            float heatLine = FracturedCityLayout.WeaponHeatOverheatThreshold;
+            var plain = new RangeResultRecord { Uplinked = false, PeakHeat = heatLine * 0.2f };
+            var coldUp = new RangeResultRecord { Uplinked = true, PeakHeat = heatLine * 0.3f };
+            var hotUp = new RangeResultRecord { Uplinked = true, PeakHeat = heatLine * 0.8f };
+            string hintCold = TestRangePanelUIToolkit.CompareLines(plain, coldUp);
+            string want = GameText.Format("range.compare.core_hint", TestRangeService.Num(coldUp.PeakHeat), TestRangeService.Num(heatLine));
+            Expect(hintCold.Contains(want) && !TestRangePanelUIToolkit.CompareLines(plain, hotUp).Contains(want.Substring(0, 6))
+                   && TestRangePanelUIToolkit.CoreHint(plain, plain) == null && TestRangePanelUIToolkit.CoreHint(plain, hotUp) == null,
+                $"I3b DEBT-FG5E2E01-07 接入 / 不接入对比：接入那次热量 {coldUp.PeakHeat:0.#} < 过热线 {heatLine:0.#} 的一半时提示“{want}”；热量过半、两次都没接入不提示");
         }
 
         /// <summary>I4 FG-GAP-061：反应打出致命一击的那一步，日志目标仍写“投影靶·…”（名字不在阵亡事件里清掉）。
