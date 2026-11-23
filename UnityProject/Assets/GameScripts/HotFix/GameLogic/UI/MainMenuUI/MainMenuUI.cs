@@ -42,6 +42,7 @@ namespace GameLogic
         private Button _btnNew;
         /// <summary>FG14-SBX-02（FGR-SBX-010）：主菜单“沙盒模式”（复制“新建”按钮，排在它后面）。</summary>
         private Button _btnSandbox;
+        private Button _btnAchievements;
         /// <summary>待确认的覆盖新建是不是沙盒：只由 <see cref="ConfirmNewInSlot"/> 写入、确认 / 取消都清掉（“读取”页的空槽 / 坏档新建一律是剧情档）。</summary>
         private bool _pendingSandbox;
         private Button _btnContinue;
@@ -120,6 +121,9 @@ namespace GameLogic
             _btnContinue.onClick.AddListener(OnContinueClicked);
             _btnLoad.onClick.AddListener(OnLoadClicked);
             _btnSettings.onClick.AddListener(OnSettingsClicked);
+            // FG15-SYS-04（FGR-SYS-081）：“设置”后面复制出“成就”（同一布局组排版，文字走文本键）。PlaySmokeTest 主菜单一步断言它存在、可点、能打开面板（暂停菜单入口由 FgAchievementSelfCheck K3 断言）。
+            _btnAchievements = CreateCopiedButton(_btnSettings, "m_btn_Achievements", "achievement.menu.button", 1);
+            _btnAchievements?.onClick.AddListener(UI.Kit.AchievementPanelUIToolkit.Open);
             _btnQuit.onClick.AddListener(OnQuitClicked);
 
             _tfSettings = FindChild("m_tf_Settings");
@@ -254,6 +258,7 @@ namespace GameLogic
                 }
             }
             TrackLabel(_btnSandbox, "sandbox.menu.button");
+            TrackLabel(_btnAchievements, "achievement.menu.button");
             TrackLabel(_btnAllKeyBindings, "ui.keybind.open_all");
             TrackLabel(_btnAllSettings, "settings.open_all");
         }
@@ -315,6 +320,7 @@ namespace GameLogic
             ApplyStaticTexts();
             AttachClickSounds();
             SetView(MenuView.Root);
+            Campaign.Platform.AchievementService.SyncPending(); // FG15-SYS-04：离线时解锁的成就在联网后补推（打开主菜单时试一次，平时每 10 秒）
             SyncCloudSaves(); // FG15-SYS-01：每次打开主菜单对账一次（冲突窗口关掉不选 = 两份原样留着，下次打开主菜单再问）
             Diagnostics.LocalPlayStats.EndSession(); // FG-GAP-047：回到主菜单 = 这一局的本地统计写盘
             Diagnostics.CrashReporter.OfferFeedbackPackAfterCrash(); // FG15-SYS-03（FGR-SYS-060）：上次没有正常退出就问一次是否生成反馈包
@@ -535,6 +541,10 @@ namespace GameLogic
             }
             StyleButton(_btnLoad, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
             StyleButton(_btnSettings, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
+            if (_btnAchievements != null)
+            {
+                StyleButton(_btnAchievements, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 46, false);
+            }
             StyleButton(_btnQuit, new Color(0.15f, 0.075f, 0.09f, 1f), danger, new Color(1f, 0.80f, 0.80f, 1f), 40, false);
             StyleButton(_btnBack, new Color(0.06f, 0.16f, 0.20f, 1f), new Color(0.22f, 0.54f, 0.58f, 1f), text, 42, false);
             StyleButton(_btnConfirmYes, new Color(0.40f, 0.14f, 0.12f, 1f), danger, new Color(1f, 0.85f, 0.84f, 1f), 48, true);

@@ -78,6 +78,8 @@ namespace GameLogic.UI.Kit
         public static readonly IReadOnlyCollection<string> Exempt = new HashSet<string>
         {
             "MechanicCodexPanel", // 图鉴本身
+            "AchievementPanel", // 成就：每一条都写明名称、条件与进度，没有对应的机制条目（FG15-SYS-04）
+            "SavePanel", // 存档管理 / 云存档冲突：主菜单上的系统对话框，每个按钮自带说明，没有对应的机制条目（FG15-SYS-01 漏登，FG15-SYS-04 补）
             "GuidanceHelpPanel", // 引导与帮助本身就是帮助入口
             "GuidanceCard", // 引导卡片自带“在图鉴中查看”
             "PauseMenu", // 菜单：自带“图鉴”“引导与帮助”入口

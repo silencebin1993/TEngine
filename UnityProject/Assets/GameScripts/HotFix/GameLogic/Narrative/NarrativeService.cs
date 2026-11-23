@@ -264,6 +264,7 @@ namespace GameLogic.Narrative
             {
                 p.Act = def.SetAct;
                 GameEvent.Send(ActChangedEvent, p.Act);
+                Campaign.Platform.AchievementService.OnActChanged(s, p.Act); // FG15-SYS-04：幕推进当场判（完成第 N 幕、第一幕无损定结论）
                 Log.Info($"[NarrativeService] 剧情节点 {def.Id}：战役进入第 {p.Act} 幕");
             }
             GuidanceHooks.Raise(GuidanceHooks.NarrativeFirstEntry);

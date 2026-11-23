@@ -407,6 +407,7 @@ namespace GameLogic.Campaign.Defense
             Ends++;
             Revision++;
             Hook(GuidanceHooks.RaidFirstResult);
+            Platform.AchievementService.OnRaidClosed(s, outcome); // FG15-SYS-04：远征期间家园击退突袭
             if (notify)
             {
                 NotificationCenter.Post("raid_result", r.Repollutions > 0

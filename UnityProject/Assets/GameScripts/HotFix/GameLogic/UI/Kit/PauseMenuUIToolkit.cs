@@ -92,6 +92,8 @@ namespace GameLogic.UI.Kit
             EventHistoryButton = Bind(root, "PauseEventHistory", "pause.event_history", EventHistoryPanelUIToolkit.Open);
             // FG14-SBX-01（FGR-SBX-003 / FG12 第 3 节）：坚守记录（统计 + 清洗历史）盖在暂停菜单上面，关掉回到暂停菜单；只在后日谈里显示。
             PostgameButton = Bind(root, "PausePostgame", "pause.postgame", PostgamePanelUIToolkit.Open);
+            // FG15-SYS-04（FGR-SYS-081）：成就盖在暂停菜单上面，关掉回到暂停菜单（沙盒档里同样能看，剧情类写“沙盒存档不计入”）。
+            AchievementsButton = Bind(root, "PauseAchievements", "pause.achievements", AchievementPanelUIToolkit.Open);
             // FG14-SBX-02（FG12 第 3 节“沙盒的设置在开局后可以部分修改”）：沙盒设置盖在暂停菜单上面，关掉回到暂停菜单；只在沙盒档里显示。
             SandboxButton = Bind(root, "PauseSandbox", "pause.sandbox", SandboxPanelUIToolkit.Open);
             // FG12-EVT-06（FGU-39）：流浪商队交易盖在暂停菜单上面，关掉回到暂停菜单；商队不在时面板写明它何时会来。
@@ -176,6 +178,7 @@ namespace GameLogic.UI.Kit
         public Button RaidHistoryButton { get; private set; }
         public Button EventHistoryButton { get; private set; }
         public Button PostgameButton { get; private set; }
+        public Button AchievementsButton { get; private set; }
         public Button SandboxButton { get; private set; }
         public Button CaravanButton { get; private set; }
         public Button EventFrequencyButton { get; private set; }

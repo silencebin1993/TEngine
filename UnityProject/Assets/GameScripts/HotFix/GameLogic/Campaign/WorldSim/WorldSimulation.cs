@@ -678,6 +678,8 @@ namespace GameLogic.Campaign.WorldSim
                 Endgame.FlagshipService.WorldStep(state, GameClock.Ticks);
                 // FG14-SBX-01：后日谈（每 7 个游戏日一次周期清洗交给突袭导演、坚守统计、核心被毁 = 坚守结束；只看步序号，与观察无关，每步 O(1)、每游戏秒 O(计划 + 结算记录)）。
                 Endgame.PostgameService.WorldStep(state, GameClock.Ticks);
+                // FG15-SYS-04：成就（每游戏分钟判一次、换战役 / 标脏后的第一步判一次；平时 O(1)，与观察无关）。
+                Platform.AchievementService.WorldStep(state, GameClock.Ticks);
                 // FG8-EXP-03：领地控制（控制度、首领 → 平定、收复、阵营增援重建、精英残部、骚扰），每 territory.control.sync_seconds 一次 O(领地数)；只看步序号，与观察无关。
                 TerritoryControlService.WorldStep(state, GameClock.Ticks);
                 // FG9-FAC-01（FGR-FAC-004）：静默反制每个游戏日锁定一次（日切那一步；平时 O(1)）。

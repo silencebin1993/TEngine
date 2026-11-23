@@ -75,6 +75,10 @@ namespace GameLogic.Campaign.Combat
                     {
                         rec.Health = Mathf.Min(rec.MaxHealth > 0f ? rec.MaxHealth : e.Value2, e.Value2);
                     }
+                    if (e.Code == EmgHijackConst.EndReclaimed)
+                    {
+                        Platform.AchievementService.OnReverseHijack(CampaignSession.Current); // FG15-SYS-04：反向接入成功
+                    }
                     string key = e.Code == EmgHijackConst.EndReclaimed ? "emg.seize.notify.reclaimed" : e.Code2 != 0 ? "emg.seize.notify.recovered" : "emg.seize.notify.ended";
                     LastSeizeEndText = GameText.Format(key, label);
                     Notifications.NotificationCenter.Post("emg_seize_ended", LastSeizeEndText, at);

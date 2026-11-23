@@ -65,6 +65,7 @@ namespace GameLogic.UI.Kit
             Create<KeyBindingsPanelUIToolkit>("[KeyBindingsHost]");
             Create<DifficultyPanelUIToolkit>("[DifficultyHost]"); // FG6-DEF-09：难度与突袭强度（30081，暂停菜单与按键面板之上、新游戏设置之下）。
             Create<NewGamePanelUIToolkit>("[NewGameHost]"); // FG3-GEN-01：新游戏设置（30082，主菜单“新建”选好存档槽后打开）。
+            Create<AchievementPanelUIToolkit>("[AchievementHost]"); // FG15-SYS-04：成就（30087，主菜单“成就”与暂停菜单“成就”打开）。
             Create<SavePanelUIToolkit>("[SaveHost]"); // FG15-SYS-01：存档管理 / 云存档冲突（30086，主菜单存档卡“管理”与打开主菜单时的云存档对账）。
             Create<StrategicMapUIToolkit>("[StrategicMapHost]"); // FG3-GEN-01：战略地图（30050，HUD 之上、暂停菜单之下）。
             Create<WorldPlacesHudUIToolkit>("[WorldPlacesHost]"); // FG8-GEN-02：领地名称提示、室内进出过渡、室内入口 / 出口面板（30052，战略地图之上、暂停菜单之下）。

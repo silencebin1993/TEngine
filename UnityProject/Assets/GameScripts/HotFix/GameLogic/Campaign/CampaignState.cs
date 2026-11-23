@@ -211,6 +211,8 @@ namespace GameLogic.Campaign
         public NavState Nav = new NavState();
         /// <summary>FG4-ECO-01：家园物资（废料以外的固体、核心保管库、净速率采样）。唯一写入口是 <c>Economy.HomeInventory</c> / <c>Economy.ItemFlowStats</c>。</summary>
         public EconomyState Economy = new EconomyState();
+        /// <summary>FG15-SYS-04：成就系统本战役里的少量计数与判定（第一幕阵亡、反向接入、远征期间击退突袭、产线无人介入等）。唯一写入口 <c>Platform.AchievementService</c>。旧档没有 = 新对象，第一次判定时按存档事实补齐。</summary>
+        public AchievementCampaignState Achievements = new AchievementCampaignState();
 
         /// <summary>新建战役：ERD-ECO-001 的 Demo 初始废料基线（180）已在设计文档给出数值，
         /// 直接采用；其余经济/工作/建筑/区域集合按 Done 定义留空，等待 ER3/ER4/ER5 写入真实数据。</summary>

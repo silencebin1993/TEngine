@@ -696,6 +696,7 @@ namespace GameLogic.EditorTools
             // 坚守记录面板与说明、普通突袭不占序号、没建出计划同序号重发、暂停与 0.5x～3x、存读档、观察一致、坚守结束总结页与读档、轨道坠落更频繁与最后一组遗产。
             Seg("FgPostgameSelfCheck", FgPostgameSelfCheck.Run);
             Seg("FgSandboxSelfCheck", FgSandboxSelfCheck.Run); // FG14-SBX-02 自定义沙盒
+            Seg("FgAchievementSelfCheck", FgAchievementSelfCheck.Run); // FG15-SYS-04 Steam 集成与成就
             // FG15-UX-04 引导与教学全集（FG13 FGR-UX-040～042，FGT-UX-005）：钩子 ↔ 引导内容对照表（Known 全集、源码扫描、FGR-UX-040 清单、FG19 B01）、首次一次、演习式多步、
             // 排队不叠加、跳过 / 关闭后重新打开 / 重看不改已看、不阻塞、暂停与 0.5x～3x、存读档、引导与帮助面板、每个面板的“?”。
             Seg("FgGuidanceSelfCheck", FgGuidanceSelfCheck.Run);

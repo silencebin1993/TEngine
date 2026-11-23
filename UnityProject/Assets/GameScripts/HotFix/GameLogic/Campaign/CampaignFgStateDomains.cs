@@ -3230,6 +3230,7 @@ namespace GameLogic.Campaign
             new DomainInfo(nameof(CampaignState.Nav), "FG0-ARCH-06（层级寻路：排队请求与待采纳结果）", s => s.Nav), // loc-ignore: 开发者自检 / 诊断文本
             new DomainInfo(nameof(CampaignState.Economy), "FG4-ECO-01 / 02（物品、流体与配方：仓库物资、核心保管库、净速率采样；生产建筑、废墟储量、家园震动）", s => s.Economy), // loc-ignore: 开发者自检 / 诊断文本
             new DomainInfo(nameof(CampaignState.Factions), "FG9-FAC-01 起（阵营扩充：寂听主脑首领战、电磁噪声发射器、阵营反制每日锁定、室内伏笔地点）", s => s.Factions), // loc-ignore: 开发者自检 / 诊断文本
+            new DomainInfo(nameof(CampaignState.Achievements), "FG15-SYS-04（成就：第一幕阵亡、反向接入、远征期间击退突袭、产线无人介入等本战役计数）", s => s.Achievements), // loc-ignore: 开发者自检 / 诊断文本
         };
 
         /// <summary>把缺失（null）的域补成空域。读档后与存档前都会调用；已有数据的域原样保留。</summary>
@@ -3411,6 +3412,8 @@ namespace GameLogic.Campaign
             {
                 Economy.ResearchService.MigrateFromV1(s); // FG5-RND-01：旧档迁移（研发树开放前就能建造的内容记为已研究）
             }
+            s.Achievements ??= new AchievementCampaignState(); // FG15-SYS-04：旧档没有 = 新对象，第一次判定时按存档事实补齐
+            s.Achievements.Hooks ??= Array.Empty<string>();
             s.Economy ??= new EconomyState();
             s.Economy.Items ??= Array.Empty<ItemStackRecord>();
             s.Economy.Vault ??= Array.Empty<ItemStackRecord>();

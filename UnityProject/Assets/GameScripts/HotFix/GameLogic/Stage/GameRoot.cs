@@ -195,6 +195,8 @@ namespace GameLogic.Stage
             // FG7-ENV-04：净化区接到酸雨结算（净化塔范围内不扣耐久）、归还 50,000 格的信号覆盖倍率接到覆盖网络。
             Campaign.Env.PurificationService.Install();
             UI.Kit.UiKitRuntime.Mount();
+            // FG15-SYS-04（FGR-SYS-080）：发行平台（Steam 成就 / 富状态 / 覆盖层 / 云存档）；没有 Steam = 离线，成就在本机解锁、联网后补推。
+            Campaign.Platform.PlatformServices.Init();
 
             Log.Info("[GameRoot] 启动完成。已注册阶段：Cell");
         }
@@ -527,7 +529,9 @@ namespace GameLogic.Stage
             // 主菜单里也要跑（设置面板在那里）。
             Campaign.Feedback.FeedbackCues.Tick();
             // FG15-UX-01：失焦暂停 / 静音（FG00 B09）、显示设置 15 秒确认倒数（真实时间）、自动存档间隔（真实时间，世界运行且未暂停时累计）。
-            Settings.FocusPolicy.Tick(Application.isFocused);
+            // FG15-SYS-04：Steam 覆盖层打开时按失焦处理（失焦暂停 / 静音同一套设置）。
+            Settings.FocusPolicy.Tick(Application.isFocused && !Campaign.Platform.PlatformServices.OverlayActive);
+            Campaign.Platform.PlatformServices.Tick(Time.unscaledDeltaTime, Campaign.CampaignSession.Current, AnyRegionActive);
             Settings.DisplayModeService.Tick();
             Campaign.IntervalAutoSave.Tick(Time.unscaledDeltaTime, AnyRegionActive && Campaign.CampaignSession.Current != null, IsWorldPaused);
             // FG6-DEF-06：预警 / 突袭的音乐层与提示音（只在阶段变化时调音频模块；离开世界时回到平静）。

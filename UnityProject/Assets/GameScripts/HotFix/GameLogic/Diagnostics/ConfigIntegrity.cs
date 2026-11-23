@@ -15,13 +15,13 @@ namespace GameLogic.Diagnostics
     {
         public static readonly Dictionary<string, (string Zh, string En)> Text = new Dictionary<string, (string Zh, string En)>
         {
-            ["title"] = ("文件损坏，请校验完整性", "Game files are damaged. Please verify integrity"),
-            ["body"] = ("游戏的配置数据读取失败，无法正常进入游戏。", "The game's configuration data failed to load, so the game cannot start normally."),
-            ["fix"] = ("在 Steam 库里右键本游戏 → 属性 → 已安装文件 → 验证游戏文件的完整性；仍不行请重新安装。",
+            ["title"] = ("文件损坏，请校验完整性", "Game files are damaged. Please verify integrity"), // loc-ignore: 配置损坏时文本表本身可能读不出，用内置双语表（FG15-SYS-03）
+            ["body"] = ("游戏的配置数据读取失败，无法正常进入游戏。", "The game's configuration data failed to load, so the game cannot start normally."), // loc-ignore: 配置损坏时文本表本身可能读不出，用内置双语表（FG15-SYS-03）
+            ["fix"] = ("在 Steam 库里右键本游戏 → 属性 → 已安装文件 → 验证游戏文件的完整性；仍不行请重新安装。", // loc-ignore: 配置损坏时文本表本身可能读不出，用内置双语表（FG15-SYS-03）
                 "In your Steam library, right-click the game → Properties → Installed Files → Verify integrity of game files. If that fails, reinstall."),
-            ["detail_0"] = ("详情：{0}", "Details: {0}"),
-            ["quit"] = ("退出游戏", "Quit game"),
-            ["logs"] = ("打开日志文件夹", "Open log folder"),
+            ["detail_0"] = ("详情：{0}", "Details: {0}"), // loc-ignore: 配置损坏时文本表本身可能读不出，用内置双语表（FG15-SYS-03）
+            ["quit"] = ("退出游戏", "Quit game"), // loc-ignore: 配置损坏时文本表本身可能读不出，用内置双语表（FG15-SYS-03）
+            ["logs"] = ("打开日志文件夹", "Open log folder"), // loc-ignore: 配置损坏时文本表本身可能读不出，用内置双语表（FG15-SYS-03）
         };
 
         /// <summary>“退出游戏”的实际动作（自检替换成记录）。</summary>

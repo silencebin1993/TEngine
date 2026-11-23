@@ -929,6 +929,16 @@ namespace GameLogic.EditorTools
             // FG14-SBX-02（FGR-SBX-010）：主菜单有“沙盒模式”（与“新建”同一套选槽；冒烟走剧情“新建”，沙盒路径由 FgSandboxSelfCheck 覆盖）。
             Button sandboxBtn = FindActiveButton("m_btn_Sandbox");
             Check(sandboxBtn != null && sandboxBtn.interactable, $"主菜单有“沙盒模式”按钮 {sandboxBtn != null}");
+            // FG15-SYS-04（FGR-SYS-081）：主菜单“成就”打开成就面板（全部成就按分类列出、离线说明），关掉后照常“新建”。
+            Button achievementsBtn = FindActiveButton("m_btn_Achievements");
+            Check(achievementsBtn != null && achievementsBtn.interactable, $"主菜单有“成就”按钮 {achievementsBtn != null}");
+            if (achievementsBtn != null)
+            {
+                achievementsBtn.onClick.Invoke();
+                int rows = AchievementPanelUIToolkit.Instance != null ? AchievementPanelUIToolkit.Instance.RowCount : 0;
+                Check(AchievementPanelUIToolkit.IsOpen && rows >= 25, $"点“成就”打开成就面板（{AchievementPanelUIToolkit.IsOpen}，{rows} 条）");
+                AchievementPanelUIToolkit.Close();
+            }
             button.onClick.Invoke();
             Next(2, $"主菜单出现（{inStep:F0} 秒），点“新建”");
         }

@@ -91,6 +91,10 @@ public partial class Tables
     /// </summary>
     public cell.TbStructuralTriggerHookParams TbStructuralTriggerHookParams {get; }
     /// <summary>
+    /// 成就
+    /// </summary>
+    public fg.TbAchievement TbAchievement {get; }
+    /// <summary>
     /// 第一幕节奏
     /// </summary>
     public fg.TbActPacing TbActPacing {get; }
@@ -581,6 +585,7 @@ public partial class Tables
         TbStatusEffect = new cell.TbStatusEffect(loader("cell_tbstatuseffect"));
         TbStructuralEffectParams = new cell.TbStructuralEffectParams(loader("cell_tbstructuraleffectparams"));
         TbStructuralTriggerHookParams = new cell.TbStructuralTriggerHookParams(loader("cell_tbstructuraltriggerhookparams"));
+        TbAchievement = new fg.TbAchievement(loader("fg_tbachievement"));
         TbActPacing = new fg.TbActPacing(loader("fg_tbactpacing"));
         TbAnalysisKind = new fg.TbAnalysisKind(loader("fg_tbanalysiskind"));
         TbAnalysisLore = new fg.TbAnalysisLore(loader("fg_tbanalysislore"));
@@ -723,6 +728,7 @@ public partial class Tables
         TbStatusEffect.ResolveRef(this);
         TbStructuralEffectParams.ResolveRef(this);
         TbStructuralTriggerHookParams.ResolveRef(this);
+        TbAchievement.ResolveRef(this);
         TbActPacing.ResolveRef(this);
         TbAnalysisKind.ResolveRef(this);
         TbAnalysisLore.ResolveRef(this);
