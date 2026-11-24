@@ -25,6 +25,12 @@ namespace BinGames.Presentation
     {
         private static readonly Dictionary<(PresentationMaterialUse, Color), Material> Cache = new Dictionary<(PresentationMaterialUse, Color), Material>();
 
+        /// <summary>FindShader 找不到时的退路：在 GraphicsSettings 的 Always Included 里，Player 一定在。</summary>
+        public const string FallbackShader = "BinGames/SimInstancedUnlit";
+
+        /// <summary>PL-RP-02：引用 URP Lit 的 Resources 材质，只为把 URP Lit 带进 Player 构建（运行时 Shader.Find 找得到）；不在运行时加载。</summary>
+        public const string UrpLitKeepResource = "PL_UrpLitKeep";
+
         public static bool IsBuiltIn => GraphicsSettings.currentRenderPipeline == null;
 
         public static int Count => Cache.Count;
@@ -32,12 +38,29 @@ namespace BinGames.Presentation
         /// <summary>用途 → shader 名（换管线 / 接正式 shader 只改这里）。</summary>
         public static string ShaderName(PresentationMaterialUse use)
         {
-            if (IsBuiltIn)
+            // Unlit / Glow / Transparent 两套管线都共用主线已有的实例化无光照 shader（Alpha 混合、无 LightMode → URP 当 SRPDefaultUnlit 画）；正式 shader 来了再分。
+            if (use != PresentationMaterialUse.Lit)
             {
-                // Unlit / Glow / Transparent 暂共用主线已有的实例化无光照 shader（Alpha 混合）；正式 shader 来了再分。
-                return use == PresentationMaterialUse.Lit ? "Standard" : "BinGames/SimInstancedUnlit";
+                return "BinGames/SimInstancedUnlit";
             }
-            return use == PresentationMaterialUse.Lit ? "Universal Render Pipeline/Lit" : "Universal Render Pipeline/Unlit";
+            return IsBuiltIn ? "Standard" : "Universal Render Pipeline/Lit"; // PL-RP-02：URP Lit 的 [MainColor] 是 _BaseColor，material.color 照常可用
+        }
+
+        /// <summary>
+        /// 按用途找 shader（找不到记错误并退回 <see cref="FallbackShader"/>）。PL-RP-02 起 FG 里原写死 <c>Shader.Find("Standard")</c> 的建材质处都改调这里，
+        /// 换管线只改 <see cref="ShaderName"/> 一处；颜色仍用 <c>material.color</c>（Standard 的 _Color / URP Lit 的 _BaseColor 都是 MainColor）。
+        /// </summary>
+        public static Shader FindShader(PresentationMaterialUse use)
+        {
+            string name = ShaderName(use);
+            Shader shader = Shader.Find(name);
+            if (shader == null)
+            {
+                // 退到 GraphicsSettings 常驻包含的实例化无光照 shader（两套管线都能画），不退回同名 Lit（Player 里被剥离时同样找不到）
+                Debug.LogError($"[PresentationMaterials] 找不到 shader {name}（用途 {use}），退回 {FallbackShader}");
+                shader = Shader.Find(FallbackShader);
+            }
+            return shader;
         }
 
         public static Material Get(PresentationMaterialUse use, Color color)
@@ -46,14 +69,7 @@ namespace BinGames.Presentation
             {
                 return existing;
             }
-            string name = ShaderName(use);
-            Shader shader = Shader.Find(name);
-            if (shader == null)
-            {
-                Debug.LogError($"[PresentationMaterials] 找不到 shader {name}（用途 {use}），退回 Standard");
-                shader = Shader.Find("Standard");
-            }
-            var material = new Material(shader)
+            var material = new Material(FindShader(use))
             {
                 color = color,
                 name = $"PL {use} {color}",
