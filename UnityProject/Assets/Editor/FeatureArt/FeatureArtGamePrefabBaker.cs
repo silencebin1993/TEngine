@@ -11,13 +11,14 @@ namespace BinGames.EditorTools.FeatureArt
     /// <summary>
     /// 混元整包母带（FBX/OBJ）→ 游戏可用 Prefab。
     /// Prefab：单 MeshFilter + MeshRenderer，材质为可换的 <c>{canonical}_runtime.mat</c>
-    /// （Unity Built-in Standard + 整包贴图 + GPU Instancing）。禁止改成 SimBioGlass。
+    /// （当前管线的 Lit：URP 下 URP Lit、Built-in 下 Standard，见 PresentationMaterials；+ 整包贴图 + GPU Instancing）。禁止改成 SimBioGlass。
     /// 母带 FBX/OBJ 仍留在整包；catalog.location 绑 Prefab（文件名去扩展名仍 = canonical）。
     /// </summary>
     public static class FeatureArtGamePrefabBaker
     {
         public const string RuntimeMatSuffix = "_runtime";
-        const string DefaultRuntimeShader = "Standard";
+        // FG15-PL-01（MERGE-PLAN §5.3）：跟着当前管线取 Lit，切 URP 后新烘焙的材质不再是会画成品红的 Standard
+        static string DefaultRuntimeShader => BinGames.Presentation.PresentationMaterials.ShaderName(BinGames.Presentation.PresentationMaterialUse.Lit);
         const string RawPrefix = "Assets/GameRes/Raw/";
 
         /// <summary>story-018：改 internal 供 <see cref="FeatureArtPackageIngest"/> 判定选中目录是否为合法整包根的直接子文件夹。</summary>

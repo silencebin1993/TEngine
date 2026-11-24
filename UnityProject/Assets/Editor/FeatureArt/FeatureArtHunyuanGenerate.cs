@@ -1144,12 +1144,12 @@ namespace BinGames.EditorTools.FeatureArt
             var prefix = name + "_";
             foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelAssetPath))
             {
-                if (!(a is Material mat) || !mat.HasProperty("_MainTex"))
+                if (!(a is Material mat) || AlbedoOf(mat) == null)
                 {
                     continue;
                 }
 
-                var tex = mat.GetTexture("_MainTex");
+                var tex = AlbedoOf(mat);
                 if (tex != null && tex.name != null &&
                     tex.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
@@ -1166,12 +1166,12 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var mr in go.GetComponentsInChildren<MeshRenderer>(true))
             {
                 var mat = mr.sharedMaterial;
-                if (mat == null || !mat.HasProperty("_MainTex"))
+                if (mat == null || AlbedoOf(mat) == null)
                 {
                     continue;
                 }
 
-                var tex = mat.GetTexture("_MainTex");
+                var tex = AlbedoOf(mat);
                 if (tex != null && tex.name != null &&
                     tex.name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 {
@@ -1236,7 +1236,8 @@ namespace BinGames.EditorTools.FeatureArt
             var mat = AssetDatabase.LoadAssetAtPath<Material>(matPath);
             if (mat == null)
             {
-                var shader = Shader.Find("Standard");
+                // FG15-PL-01（MERGE-PLAN §5.3）：当前管线的 Lit（URP 下 URP Lit），不再写死会画成品红的 Standard
+                var shader = Shader.Find(BinGames.Presentation.PresentationMaterials.ShaderName(BinGames.Presentation.PresentationMaterialUse.Lit));
                 if (shader == null)
                 {
                     return null;
@@ -1288,9 +1289,21 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 mat.SetTexture("_MetallicGlossMap", metallic);
                 mat.EnableKeyword("_METALLICGLOSSMAP");
+                mat.EnableKeyword("_METALLICSPECGLOSSMAP"); // URP Lit 的同义开关
             }
 
             mat.enableInstancing = true;
+        }
+
+        /// <summary>材质的反照率贴图：URP Lit 读 _BaseMap（它保留的隐藏 _MainTex 不画），Built-in Standard 读 _MainTex。</summary>
+        static Texture AlbedoOf(Material mat)
+        {
+            if (mat.HasProperty("_BaseMap") && mat.GetTexture("_BaseMap") != null)
+            {
+                return mat.GetTexture("_BaseMap");
+            }
+
+            return mat.HasProperty("_MainTex") ? mat.GetTexture("_MainTex") : null;
         }
 
         /// <summary>把整包 {canonical}_* 贴图画到 Standard 材质上（绑定 Prefab 用）。不清贴图。
@@ -1313,6 +1326,7 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             mat.DisableKeyword("_METALLICGLOSSMAP");
+            mat.DisableKeyword("_METALLICSPECGLOSSMAP");
             if (mat.HasProperty("_Metallic"))
             {
                 mat.SetFloat("_Metallic", 0f);
@@ -1321,6 +1335,11 @@ namespace BinGames.EditorTools.FeatureArt
             if (mat.HasProperty("_Glossiness"))
             {
                 mat.SetFloat("_Glossiness", 0.35f);
+            }
+
+            if (mat.HasProperty("_Smoothness"))
+            {
+                mat.SetFloat("_Smoothness", 0.35f); // URP Lit 读 _Smoothness
             }
         }
 
@@ -1824,7 +1843,7 @@ namespace BinGames.EditorTools.FeatureArt
             var hasAlbedo = false;
             foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelAssetPath))
             {
-                if (a is Material mat && mat.HasProperty("_MainTex") && mat.GetTexture("_MainTex") != null)
+                if (a is Material mat && AlbedoOf(mat) != null)
                 {
                     hasAlbedo = true;
                     break;
