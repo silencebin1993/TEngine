@@ -51,7 +51,7 @@ namespace GameLogic.View
         public static readonly Color EmGlow = new Color(0.25f, 0.92f, 1f, 1f);           // 线圈青蓝光环
 
         private const string GlowShader = "BinGames/SimInstancedUnlit";
-        private const string SolidShader = "Standard";
+        private static string SolidShader => BinGames.Presentation.PresentationMaterials.ShaderName(BinGames.Presentation.PresentationMaterialUse.Lit); // PL-RP-02：随管线（Built-in = Standard / URP = URP Lit）
 
         private static readonly Dictionary<(string Comp, MorphMask Cat, PartRole Role), Mesh> Meshes = new Dictionary<(string, MorphMask, PartRole), Mesh>();
         private static readonly HashSet<(string, MorphMask, PartRole)> Empty = new HashSet<(string, MorphMask, PartRole)>();
@@ -179,8 +179,8 @@ namespace GameLogic.View
             Shader shader = Shader.Find(shaderName);
             if (shader == null)
             {
-                Log.Error($"[MachineMorphLibrary] 找不到着色器 {shaderName}，形变部件改用 Standard。");
-                shader = Shader.Find(SolidShader);
+                Log.Error($"[MachineMorphLibrary] 找不到着色器 {shaderName}，形变部件改用 {SolidShader}。");
+                shader = BinGames.Presentation.PresentationMaterials.FindShader(BinGames.Presentation.PresentationMaterialUse.Lit); // PL-RP-02：Lit 也缺时 FindShader 再退到常驻包含的 shader
             }
             var m = new Material(shader)
             {
