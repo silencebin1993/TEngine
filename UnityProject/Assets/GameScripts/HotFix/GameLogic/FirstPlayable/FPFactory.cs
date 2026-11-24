@@ -53,7 +53,7 @@ namespace GameLogic.FirstPlayable
                 {
                     return _shader;
                 }
-                _shader = Shader.Find("Standard") ?? Shader.Find("Legacy Shaders/Diffuse")
+                _shader = BinGames.Presentation.PresentationMaterials.FindShader(BinGames.Presentation.PresentationMaterialUse.Lit) ?? Shader.Find("Legacy Shaders/Diffuse") // PL-RP-02：随管线
                     ?? Shader.Find("Unlit/Color");
                 return _shader;
             }
@@ -71,6 +71,7 @@ namespace GameLogic.FirstPlayable
             {
                 m.SetFloat("_Glossiness", 0.1f);
             }
+            if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.1f); // PL-RP-02：URP Lit 没有 _Glossiness，读 _Smoothness
             MatCache[key] = m;
             Created.Add(m);
             return m;
