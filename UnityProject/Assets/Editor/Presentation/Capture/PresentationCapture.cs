@@ -270,7 +270,7 @@ namespace GameLogic.EditorTools
                 device = SystemInfo.graphicsDeviceName,
                 deviceType = SystemInfo.graphicsDeviceType.ToString(),
                 unity = Application.unityVersion,
-                pipeline = GraphicsSettings.currentRenderPipeline == null ? "builtin" : GraphicsSettings.currentRenderPipeline.GetType().Name,
+                pipeline = GraphicsSettings.currentRenderPipeline == null ? "builtin" : GraphicsSettings.currentRenderPipeline.GetType().Name == "UniversalRenderPipelineAsset" ? "urp" : GraphicsSettings.currentRenderPipeline.GetType().Name, // PL-RP-02：基线目录 urp-linear
                 colorSpace = QualitySettings.activeColorSpace.ToString().ToLowerInvariant(),
                 machine = Environment.MachineName,
                 startedUtc = DateTime.UtcNow.ToString("o"),

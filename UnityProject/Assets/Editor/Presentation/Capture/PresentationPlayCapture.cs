@@ -117,6 +117,12 @@ namespace GameLogic.EditorTools
         /// <summary>第 1 帧把 PanelSettings 指到 RT，第 3 帧起读回（UI Toolkit 在播放循环里重绘进 RT），合成后还原。</summary>
         private static StepOutcome TickShot(JourneyContext c)
         {
+            // PL-RP-02：进家园先等 5 秒再拍——PCG 地面异步载入、建筑按状态刷色、HUD 补面板都在这几秒里，不等的话两条管线拍到的时刻不同，对比无效。
+            // shortcut: 固定秒数，没有“载入完毕”信号；换成 TerrainStream / 家园视觉的就绪标志后去掉
+            if (c.StepElapsed < 5.0)
+            {
+                return StepOutcome.Wait;
+            }
             int phase = c.GetInt("phase");
             c.SetInt("phase", phase + 1);
             if (phase == 0)
@@ -179,8 +185,14 @@ namespace GameLogic.EditorTools
                 });
                 PresentationCapture.WriteRun(run, outDir);
                 string names = string.Join(", ", panels.Select(p => p.name));
+                // PL-RP-02（DEBT-RP02-PLAYBLUE 取证）：建筑施工状态直方图 + 场景里 ViewMaterial 的实际颜色直方图（建筑色由状态决定，与管线无关）
+                var records = GameLogic.Campaign.CampaignSession.Current?.BuildingRecords;
+                string states = records == null ? "无战役" : string.Join(" ", records.GroupBy(b => b.ConstructionState).Select(g => $"{g.Key}×{g.Count()}"));
+                string mats = string.Join(" ", Object.FindObjectsByType<Renderer>(FindObjectsSortMode.None).Select(r => r.sharedMaterial)
+                    .Where(m => m != null && m.name.StartsWith("ViewMaterial")).GroupBy(m => (Color32)m.color).Select(g => $"({g.Key.r},{g.Key.g},{g.Key.b})×{g.Count()}"));
+                Debug.Log($"[PL 采集] 家园建筑状态：{states}；ViewMaterial 颜色：{mats}");
                 return ratio >= MinHudRatio
-                    ? StepOutcome.Done($"含 HUD 的图 {outDir}/PlayHomeMenu_on.png：UI Toolkit 面板 {panels.Length} 个（{names}），HUD 非空像素 {ratio:P2} ≥ {MinHudRatio:P0}")
+                    ? StepOutcome.Done($"含 HUD 的图 {outDir}/PlayHomeMenu_on.png：UI Toolkit 面板 {panels.Length} 个（{names}），HUD 非空像素 {ratio:P2} ≥ {MinHudRatio:P0}；建筑状态 {states}；ViewMaterial 颜色 {mats}")
                     : StepOutcome.Fail($"HUD 非空像素 {ratio:P2} < {MinHudRatio:P0}（面板 {names}）");
             }
             finally

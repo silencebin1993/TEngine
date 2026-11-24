@@ -52,11 +52,15 @@ namespace GameLogic.EditorTools
             ("CaptureDeterminism", PresentationCaptureValidate.CaptureDeterminism),
             ("CaptureInjection", PresentationCaptureValidate.CaptureInjection),
             ("CaptureGpuPair", PresentationCaptureValidate.CaptureGpuPair),
-            // PL-RP-01 渲染管线试验（RenderPipelineTrial/RpTrialValidate.cs）：PL 影子 2（Built-in）与 URP 试验影子里都能跑
-            ("RpTrialIsolation", RpTrialValidate.RpTrialIsolation),
-            ("RpTrialShim", RpTrialValidate.ShimSegment),
+            // PL-RP-01 的 RpTrialIsolation / RpTrialShim 两段随 PL-RP-02 正式切 URP 退役（断言的是“工作树仍是 Built-in / Gamma”）；方法留在 RpTrialValidate.cs，试验影子删掉时一起删
             // PL-VEH-02 机器表现 Rig（Vehicle/VehicleRigValidate.cs）
             ("VehRig", VehicleRigValidate.VehRig),
+            // PL-RP-02 URP 迁移（RenderPipeline/UrpValidate.cs）；后两段要显卡，-nographics 下只写“跳过”
+            ("UrpSwitch", UrpValidate.UrpSwitch),
+            ("UrpShaderPass", UrpValidate.UrpShaderPass),
+            ("UrpNoMagenta", UrpValidate.UrpNoMagenta),
+            ("UrpPerf", UrpValidate.UrpPerf),
+            ("UrpGlOverlay", UrpValidate.UrpGlOverlay),
         };
 
         private static StringBuilder _report;
@@ -559,7 +563,17 @@ namespace GameLogic.EditorTools
             }
             else
             {
-                Line($"  - 跳过：当前不是 Built-in 管线，URP 的 shader 映射未实测（{shaders}）");
+                // PL-RP-02：URP 分支实测（INF-01 重验）
+                Material lit = PresentationMaterials.Get(PresentationMaterialUse.Lit, color);
+                Expect(PresentationMaterials.ShaderName(PresentationMaterialUse.Lit) == "Universal Render Pipeline/Lit" &&
+                       PresentationMaterials.ShaderName(PresentationMaterialUse.Unlit) == "BinGames/SimInstancedUnlit" &&
+                       PresentationMaterials.ShaderName(PresentationMaterialUse.Glow) == "BinGames/SimInstancedUnlit" &&
+                       PresentationMaterials.ShaderName(PresentationMaterialUse.Transparent) == "BinGames/SimInstancedUnlit",
+                    "URP 下 Lit → Universal Render Pipeline/Lit，Unlit / Glow / Transparent → BinGames/SimInstancedUnlit（与 Built-in 同一个，Alpha 混合）");
+                Expect(lit.GetColor("_BaseColor") == color, $"URP Lit 材质 material.color 写进 _BaseColor（{lit.GetColor("_BaseColor")}）");
+                Expect(Enum.GetValues(typeof(PresentationMaterialUse)).Cast<PresentationMaterialUse>().All(u => RpTrialShim.UrpVerdict(PresentationMaterials.Get(u, color).shader) == "ok"),
+                    "全部用途的 shader 在 URP 下有可用颜色 pass（不出品红）");
+                Expect(PresentationMaterials.Get(PresentationMaterialUse.Transparent, color).renderQueue >= 3000, "Transparent 用途进透明队列（≥ 3000）");
             }
         }
 
