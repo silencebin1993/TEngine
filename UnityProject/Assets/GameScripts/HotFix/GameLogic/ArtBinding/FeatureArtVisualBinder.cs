@@ -182,7 +182,8 @@ namespace GameLogic.ArtBinding
             }
 
             string name = shader.name;
-            return name == "Standard"
+            return (name == "Standard" && BinGames.Presentation.PresentationMaterials.IsBuiltIn) // PL-RP-02：URP 下 Standard 画成品红，转换前退回占位材质
+                || name == "Universal Render Pipeline/Lit" // PL-RP-02：URP 下转换后的 _runtime.mat
                 || name == "BinGames/SimBioGlass"
                 || name == "BinGames/SimInstancedUnlit";
         }
