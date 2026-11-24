@@ -593,7 +593,7 @@ namespace GameLogic.Campaign.WorldSim
             _terrainRoot.transform.SetParent(_root.transform, false);
             _terrain = new WorldTerrainOverlay(_terrainRoot.transform, alpha: 0.4f, height: -0.05f, terrainView: true);
             if (Application.isPlaying) LoadPcgProfileAsync(++_pcgLoadEpoch).Forget();
-            Shader shader = Shader.Find("Standard");
+            Shader shader = BinGames.Presentation.PresentationMaterials.FindShader(BinGames.Presentation.PresentationMaterialUse.Lit); // PL-RP-02：随管线
             _raidMaterial = new Material(shader) { color = new Color(0.85f, 0.18f, 0.12f) };
             _arrivedMaterial = new Material(shader) { color = new Color(1f, 0.55f, 0.1f) };
             _outpostMaterial = new Material(shader) { color = new Color(0.45f, 0.12f, 0.35f) };
