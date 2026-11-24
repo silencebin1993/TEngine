@@ -920,6 +920,7 @@ namespace GameLogic.EditorTools
             Seg("FgEmgCodexTallySelfCheck", FgEmgCodexSelfCheck.RunTally); // EMGR-TALLY-01：极限计数表 4096 格、冲突保新链与丢弃计数、快照段 33、旧档下限（DEBT-EMG4CODEX01-01、DEBT-EMGRTALLY01-01 / 02）
             Seg("FgEmgLootHintSelfCheck", FgEmgLootHintSelfCheck.Run); // EMG4-LOOT-01：三选一新交互提示、部件通道源与重复部件（FGT-EMG-062 三选一 N 与重复部件部分；FG-GAP-150 标志组件 E 段）
             Seg("FgEmgEpicExitSelfCheck", FgEmgEpicExitSelfCheck.Run); // EMG4-E2E-02：FG-EMG Epic 收尾门禁、四阶段反向场景合集（IC-REQ-022；排在各涌现段之后，同进程时核它们本轮结果）
+            Seg(FgReqCoverageSelfCheck.SegmentName, FgReqCoverageSelfCheck.Run); // FG15-QA-02：FGR 需求覆盖矩阵（IC-REQ-020）、登记册清零口径、本卡登记与负向矩阵（只读文档与登记册）
             // FG15-QA-01 反向旅程全集：回归包清单门禁（tools/reverse_pack.txt）、IC-REQ-022 覆盖矩阵（FG-M0～M14、FG-EMG 1～4、EMG-R × 六类）与本轮运行期交叉核对、
             // 旧断言新口径（不按旧表下标读反应计数、不断言倍率）、一键回归时对照 M10-BASELINE 写回归报告、负向矩阵。必须排在全部段之后（核它们本轮的结果）。
             Seg(FgReversePackSelfCheck.SegmentName, FgReversePackSelfCheck.Run);

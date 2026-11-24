@@ -3266,6 +3266,21 @@ namespace GameLogic.Campaign.Combat
                     return;
                 case CombatEventKind.ClarityCue:
                     // FG10-FAC-01（FGR-FAC-008 ①）：喷嘴蓄压 / 枢轴喷灌蓄压 / 自爆引信 / 投放预警（≥ 0.8 秒）与喷出 / 爆燃 / 冻结 / 分裂 / 冲洗 / 酸沼腐蚀——声音 + 字幕 + 画面。
+                    if (state?.Stats != null && (e.Code == ClarityCombatFeedback.CodeFreeze || e.Code == ClarityCombatFeedback.CodeAcid)
+                        && Kernel.TryGetUnit(e.Unit, out CombatUnitView fx) && fx.Faction == CombatFaction.Player)
+                    {
+                        // FG-GAP-162：己方单位被冻结 / 酸沼腐蚀进统计面板（内核计数 Freezes / AcidTicks 不分阵营；冻结提示两边都发，这里只记己方）。O(1)。
+                        // shortcut: 提示事件每步有上限（满了记 CuesDropped），极端混战一步内超上限时会少记；要逐次精确就在内核按阵营计数（升 FormatVersion）。
+                        if (e.Code == ClarityCombatFeedback.CodeFreeze)
+                        {
+                            state.Stats.PlayerFrozen++;
+                        }
+                        else
+                        {
+                            state.Stats.PlayerAcidTicks++;
+                            state.Stats.PlayerAcidDamage += Math.Max(0f, e.Value);
+                        }
+                    }
                     ClarityCombatFeedback.OnCue(this, e, at);
                     return;
                 case CombatEventKind.Repolluted:

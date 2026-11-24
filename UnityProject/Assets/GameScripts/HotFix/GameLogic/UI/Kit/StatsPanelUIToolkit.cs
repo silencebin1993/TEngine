@@ -575,7 +575,9 @@ namespace GameLogic.UI.Kit
                 return;
             }
             CampaignState state = CampaignSession.Current;
-            int key = HashCode.Combine(HashCode.Combine(ReactionAttribution.Revision, ReactionFeedback.Revision, (int)CurrentFilter, (int)GameText.Language, GameSettings.Revision),
+            StatsState st = state?.Stats;
+            int key = HashCode.Combine(HashCode.Combine(ReactionAttribution.Revision, ReactionFeedback.Revision, (int)CurrentFilter, (int)GameText.Language, GameSettings.Revision,
+                    st?.ReclaimSalvages ?? 0, st?.PlayerFrozen ?? 0, st?.PlayerAcidTicks ?? 0), // 战斗页不定时重读：统计累计变了也要重建
                 HashCode.Combine((int)CurrentTab, CurrentWindow, SelectedItemId, PlannerTargetId, PlannerRate, ResourcePins.Revision, _messageText),
                 HashCode.Combine(state != null ? state.GetHashCode() : 0, ShowAllItems, ItemSearch, HomeInventory.Revision));
             double now = Clock();
@@ -639,6 +641,12 @@ namespace GameLogic.UI.Kit
             _message.EnableInClassList("st-message-error", hasMsg && _messageError);
         }
 
+        /// <summary>FG-GAP-162（FG15-QA-02）：战斗页“敌方状态效果”一行（己方单位被冻结次数、酸沼腐蚀次数与累计掉的耐久）；都为 0 时不显示（返回 null）。</summary>
+        public static string EnemyEffectLine(StatsState st) =>
+            st == null || (st.PlayerFrozen == 0 && st.PlayerAcidTicks == 0)
+                ? null
+                : GameText.Format("stats.enemy_effect.line", st.PlayerFrozen, st.PlayerAcidTicks, ProductionStats.UiNumber((float)st.PlayerAcidDamage));
+
         private string BuildCombat(CampaignState state)
         {
             _section.text = GameText.Get("stats.panel.section_combat");
@@ -654,6 +662,11 @@ namespace GameLogic.UI.Kit
             {
                 // EMG2-RECL-01（B19）：回收修复累计维修量
                 lines.Add((GameText.Format("stats.reclaim.line", state.Stats.ReclaimSalvages, ProductionStats.UiNumber((float)state.Stats.ReclaimRepaired)), "rl-row"));
+            }
+            string fx = EnemyEffectLine(state?.Stats);
+            if (fx != null)
+            {
+                lines.Add((fx, "rl-row"));
             }
             int sessions = ReactionAttributionView.AppendTotals(state, CurrentFilter, lines);
             if (sessions > 0)

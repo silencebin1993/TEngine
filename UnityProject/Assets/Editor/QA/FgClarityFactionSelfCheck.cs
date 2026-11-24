@@ -134,6 +134,7 @@ namespace GameLogic.EditorTools
                 Step(CheckPivotCoverage);
                 Step(CheckSplitInAcid);
                 Step(CheckAcidMarshKernel);
+                Step(CheckEnemyEffectStats);
                 Step(CheckPoolWash);
                 Step(CheckAir);
                 Step(CheckSwarm);
@@ -884,6 +885,90 @@ namespace GameLogic.EditorTools
             RunFor(site, row.SplitLife + 1f);
             Expect(site.CountPuddles() == 0, $"B6b 分裂液 {row.SplitLife} 秒后蒸发（剩 {site.CountPuddles()} 滩）");
             CombatSites.Close(Bench, s, dropRecord: true);
+        }
+
+        /// <summary>FG-GAP-162（FG15-QA-02，FG00 B19）：统计面板“战斗”页的敌方状态效果统计——己方单位被冻结 / 酸沼腐蚀次数与掉的耐久进 StatsState，
+        /// 敌方单位被冻不算（内核计数不分阵营）；JSON 存读档保留，旧档没有字段 = 0；都为 0 时面板不显示这一行。</summary>
+        private static void CheckEnemyEffectStats()
+        {
+            CampaignState s = NewWorldState(1);
+            CombatSite site = OpenBench(s);
+            _t = 0;
+            string before = GameLogic.UI.Kit.StatsPanelUIToolkit.EnemyEffectLine(s.Stats);
+            site.SetAcidMarsh(new List<float4> { new float4(0f, 0f, 0f, 12f) }, 0.02f, 0.5f);
+            int soaked = Player(site, new Vector2(0f, 0f), Gun(0.01f), 1000f);
+            int iced = Player(site, new Vector2(30f, 0f), Gun(0.01f), 1000f);
+            int foe = site.Kernel.Spawn(new CombatSpawn
+            {
+                Kind = CombatUnitKind.Enemy, Faction = CombatFaction.Hostile, Behavior = CombatBehavior.None,
+                Flags = CombatUnitFlags.Alive | CombatUnitFlags.Targetable, Position = new double2(0, -60), Home = new double2(0, -60),
+                Radius = 0.6f, Speed = 0f, Health = 1000f, MaxHealth = 1000f, Weapon = site.WeaponIndex(Gun(0.01f)), BehaviorProfile = -1, ArmorHalfAngleDeg = 90f,
+                ArmorFacing = new float2(0f, 1f),
+            });
+            long freezes0 = site.Kernel.Counters.Freezes;
+            site.ChillUnit(iced, 1f);
+            site.ChillUnit(foe, 1f);
+            RunFor(site, 3f);
+            float lost = 1000f - View(site, soaked).Health;
+            long kernelFreezes = site.Kernel.Counters.Freezes - freezes0;
+            StatsState st = s.Stats;
+            string line = GameLogic.UI.Kit.StatsPanelUIToolkit.EnemyEffectLine(st);
+            StatsState back = JsonUtility.FromJson<StatsState>(JsonUtility.ToJson(st));
+            StatsState old = JsonUtility.FromJson<StatsState>("{}");
+            // 玩家看到的路径：暂停菜单“统计”按钮打开的同一个面板，点“战斗”页签，真实重建（BuildCombat）的行里有这一行
+            GameObject sgo = null;
+            string rows;
+            try
+            {
+                UnityEngine.UIElements.VisualElement statsRoot = MountStatsPanel(out sgo);
+                GameLogic.UI.Kit.StatsPanelUIToolkit.InWorldOverrideForTests = true;
+                var sp = sgo.AddComponent<GameLogic.UI.Kit.StatsPanelUIToolkit>();
+                sp.BindView(statsRoot);
+                GameLogic.UI.Kit.StatsPanelUIToolkit.Open();
+                ClickUi(sp.TabButton(GameLogic.UI.Kit.StatsTab.Combat));
+                rows = string.Join("\n", Enumerable.Range(0, sp.VisibleRowCount).Select(sp.RowText));
+                ClickUi(sp.CloseButton);
+            }
+            finally
+            {
+                GameLogic.UI.Kit.StatsPanelUIToolkit.InWorldOverrideForTests = false;
+                if (sgo != null)
+                {
+                    UnityEngine.Object.DestroyImmediate(sgo);
+                }
+            }
+            Expect(before == null && st.PlayerFrozen == 1 && kernelFreezes >= 2 && st.PlayerAcidTicks >= 2 && lost > 30f && Math.Abs(st.PlayerAcidDamage - lost) < 1.0
+                   && line != null && !line.Contains("stats.enemy_effect") && rows.Contains(line) && !GameText.ContainsMarker(rows)
+                   && back.PlayerFrozen == st.PlayerFrozen && back.PlayerAcidTicks == st.PlayerAcidTicks && Math.Abs(back.PlayerAcidDamage - st.PlayerAcidDamage) < 1e-6
+                   && old.PlayerFrozen == 0 && old.PlayerAcidTicks == 0 && old.PlayerAcidDamage == 0,
+                $"B7b 敌方状态效果统计（FG-GAP-162）：己方被冻结 {st.PlayerFrozen} 次（内核冻结 {kernelFreezes} 次含敌方 1 次，不计）、酸沼腐蚀 {st.PlayerAcidTicks} 次共 {st.PlayerAcidDamage:0.#}（机器实际掉 {lost:0.#}）；" +
+                $"统计面板战斗页里有一行“{line}”（之前全 0 不显示：{before == null}）；存读档 {back.PlayerFrozen} / {back.PlayerAcidTicks} / {back.PlayerAcidDamage:0.#}，旧档 = 0");
+            CombatSites.Close(Bench, s, dropRecord: true);
+        }
+
+        private static UnityEngine.UIElements.VisualElement MountStatsPanel(out GameObject go)
+        {
+            var vta = AssetDatabase.LoadAssetAtPath<UnityEngine.UIElements.VisualTreeAsset>("Assets/GameRes/Raw/UI/UiKit/StatsPanel.uxml");
+            var settings = UnityEngine.Object.Instantiate(AssetDatabase.LoadAssetAtPath<UnityEngine.UIElements.PanelSettings>(BinGames.EditorTools.UiToolkitLayoutProbe.DefaultPanelSettingsPath));
+            settings.hideFlags = HideFlags.HideAndDontSave;
+            settings.targetTexture = new RenderTexture(1920, 1080, 0) { hideFlags = HideFlags.HideAndDontSave };
+            go = new GameObject("__FgClarityStatsPanel") { hideFlags = HideFlags.HideAndDontSave };
+            var doc = go.AddComponent<UnityEngine.UIElements.UIDocument>();
+            doc.panelSettings = settings;
+            doc.visualTreeAsset = vta;
+            BinGames.EditorTools.UiToolkitLayoutProbe.ForceLayout(doc.rootVisualElement);
+            return doc.rootVisualElement;
+        }
+
+        private static void ClickUi(UnityEngine.UIElements.Button b)
+        {
+            System.Reflection.MethodInfo invoke = typeof(UnityEngine.UIElements.Clickable).GetMethod("Invoke",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public, null, new[] { typeof(UnityEngine.UIElements.EventBase) }, null);
+            using (UnityEngine.UIElements.ClickEvent evt = UnityEngine.UIElements.ClickEvent.GetPooled())
+            {
+                evt.target = b;
+                invoke?.Invoke(b.clickable, new object[] { evt });
+            }
         }
 
         private static void CheckAcidMarshKernel()
